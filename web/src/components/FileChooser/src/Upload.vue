@@ -2,6 +2,7 @@
   <n-modal
     v-model:show="showFileModal"
     :show-icon="false"
+    :mask-closable="false"
     preset="dialog"
     :style="{
       width: width,
@@ -41,7 +42,7 @@
   import { NModal, UploadFileInfo, useMessage } from 'naive-ui';
   import componentSetting from '@/settings/componentSetting';
   import { ResultEnum } from '@/enums/httpEnum';
-  import { Attachment, FileType, getFileType, UploadTag } from '@/components/FileChooser/src/model';
+  import { Attachment, FileType, getFileType } from '@/components/FileChooser/src/model';
 
   export interface Props {
     width?: string;
@@ -75,7 +76,7 @@
 
   //上传结束
   function finish({ event: Event }) {
-    const res = eval('(' + Event.target.response + ')');
+    const res = JSON.parse(Event.target.response);
     const infoField = componentSetting.upload.apiSetting.infoField;
     const { code } = res;
     const msg = res.msg || res.message || '上传失败';
