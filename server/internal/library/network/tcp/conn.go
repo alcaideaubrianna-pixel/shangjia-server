@@ -48,10 +48,6 @@ type Conn struct {
 
 var idCounter int64
 
-var pkgOption = gtcp.PkgOption{
-	MaxDataSize: 0x7FFFFFFF,
-}
-
 func NewConn(conn *gtcp.Conn, logger *glog.Logger, msgParser *MsgParser) *Conn {
 	tcpConn := new(Conn)
 	tcpConn.CID = atomic.AddInt64(&idCounter, 1)

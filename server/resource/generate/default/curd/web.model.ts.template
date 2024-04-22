@@ -1,20 +1,14 @@
-import { h, ref } from 'vue';
-import { NAvatar, NImage, NTag, NSwitch, NRate } from 'naive-ui';
-import { cloneDeep } from 'lodash-es';
-import { FormSchema } from '@/components/Form';
-import { Dicts } from '@/api/dict/dict';
-@{ if eq .options.Step.HasSwitch true }import { Switch } from '@{.importWebApi}';@{end}
-import { isArray, isNullObject } from '@/utils/is';
-import { getFileExt } from '@/utils/urlUtils';
-import { defRangeShortcuts, defShortcuts, formatToDate } from '@/utils/dateUtil';
-import { validate } from '@/utils/validateUtil';
-import { getOptionLabel, getOptionTag, Option, Options, errorImg } from '@/utils/hotgo';
-@{ if eq .options.Step.HasSwitch true }
-import { usePermission } from '@/hooks/web/usePermission';
-const { hasPermission } = usePermission();
-const $message = window['$message'];
-@{end}
-@{.state}
+@{.import}
+
+export class State {@{range .stateItems}
+  public @{.Name} = @{.DefaultValue}; // @{.Dc}@{end}
+
+  constructor(state?: Partial<State>) {
+    if (state) {
+      Object.assign(this, state);
+    }
+  }
+}
 
 export function newState(state: State | Record<string, any> | null): State {
   if (state !== null) {
@@ -26,10 +20,47 @@ export function newState(state: State | Record<string, any> | null): State {
   return new State();
 }
 
-@{.dictOptions.interface}
-@{.dictOptions.const}
-@{.rules}
-@{.formSchema}
+// 表单验证规则
+@{ if eq .options.Step.HasRules true }@{.rules}@{end}
+
+// 表格搜索表单
+@{ if eq .options.Step.HasSearchForm true }@{.formSchema}@{end}
+
+// 表格列
 @{.columns}
-@{.dictOptions.load}
+
+@{ if eq .dictOptions.Has true }
+// 字典数据选项
+export const options = ref({
+@{range .options.DictOps.Types}  @{.}: [] as Option[],
+@{end}});
+
+// 加载字典数据选项
+export function loadOptions() {
+  Dicts({
+    types: @{ToTSArray .options.DictOps.Types},
+  }).then((res) => {
+    options.value = res;
+    for (const item of schemas.value) {
+      switch (item.field) {@{range .options.DictOps.Schemas}
+        case '@{.Field}':
+          item.componentProps.options = options.value.@{.Type};
+          break;@{end}
+      }
+    }
+  });
+}
+@{end}
+
+@{ if eq .options.Step.IsTreeTable true }
+// 关系树选项
+export const treeOption = ref([]);
+
+// 加载关系树选项
+export function loadTreeOption() {
+  TreeOption().then((res) => {
+    treeOption.value = res;
+  });
+}
+@{end}
 

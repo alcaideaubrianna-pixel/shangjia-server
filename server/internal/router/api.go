@@ -11,7 +11,6 @@ import (
 	"hotgo/internal/consts"
 	"hotgo/internal/controller/api/member"
 	"hotgo/internal/controller/api/pay"
-	"hotgo/internal/controller/api/user"
 	"hotgo/internal/service"
 	"hotgo/utility/simple"
 )
@@ -20,7 +19,6 @@ import (
 func Api(ctx context.Context, group *ghttp.RouterGroup) {
 	group.Group(simple.RouterPrefix(ctx, consts.AppApi), func(group *ghttp.RouterGroup) {
 		group.Bind(
-			user.Hello,
 			pay.Notify, // 支付异步通知
 		)
 		group.Middleware(service.Middleware().ApiAuth)

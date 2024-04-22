@@ -96,6 +96,35 @@ func GetRoleKey(ctx context.Context) string {
 	return user.RoleKey
 }
 
+// GetDeptType 获取用户部门类型
+func GetDeptType(ctx context.Context) string {
+	user := GetUser(ctx)
+	if user == nil {
+		return ""
+	}
+	return user.DeptType
+}
+
+// IsCompanyDept 是否为公司部门
+func IsCompanyDept(ctx context.Context) bool {
+	return GetDeptType(ctx) == consts.DeptTypeCompany
+}
+
+// IsTenantDept 是否为租户部门
+func IsTenantDept(ctx context.Context) bool {
+	return GetDeptType(ctx) == consts.DeptTypeTenant
+}
+
+// IsMerchantDept 是否为商户部门
+func IsMerchantDept(ctx context.Context) bool {
+	return GetDeptType(ctx) == consts.DeptTypeMerchant
+}
+
+// IsUserDept 是否为普通用户部门
+func IsUserDept(ctx context.Context) bool {
+	return GetDeptType(ctx) == consts.DeptTypeUser
+}
+
 // GetModule 获取应用模块
 func GetModule(ctx context.Context) string {
 	c := Get(ctx)

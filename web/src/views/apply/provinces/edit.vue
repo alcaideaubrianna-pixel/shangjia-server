@@ -79,7 +79,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { onMounted, ref, computed, watch } from 'vue';
+  import { ref, computed, watch } from 'vue';
   import { options, State, newState } from './model';
   import { Edit, MaxSort, CheckProvincesUniqueId } from '@/api/apply/provinces';
   import { FormItemRule, useMessage } from 'naive-ui';
@@ -140,8 +140,10 @@
 
   const message = useMessage();
   const formRef = ref<any>({});
-  const dialogWidth = ref('75%');
   const formBtnLoading = ref(false);
+  const dialogWidth = computed(() => {
+    return adaModalWidth();
+  });
 
   function confirmForm(e) {
     e.preventDefault();
@@ -182,10 +184,6 @@
     const res = await CheckProvincesUniqueId({ oldId: params.value.oldId, newId: newId });
     return res.unique;
   }
-
-  onMounted(async () => {
-    adaModalWidth(dialogWidth);
-  });
 </script>
 
 <style lang="less"></style>

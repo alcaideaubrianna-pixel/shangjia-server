@@ -22,7 +22,7 @@ export default ({ command, mode }: ConfigEnv): UserConfig => {
   const root = process.cwd();
   const env = loadEnv(mode, root);
   const viteEnv = wrapperEnv(env);
-  const { VITE_PUBLIC_PATH, VITE_DROP_CONSOLE, VITE_PORT, VITE_PROXY } = viteEnv;
+  const { VITE_PUBLIC_PATH, VITE_PORT, VITE_PROXY } = viteEnv;
   const isBuild = command === 'build';
   return {
     base: VITE_PUBLIC_PATH,
@@ -76,15 +76,8 @@ export default ({ command, mode }: ConfigEnv): UserConfig => {
       target: 'es2015',
       cssTarget: 'chrome80',
       outDir: OUTPUT_DIR,
-      minify: 'terser',
-      terserOptions: {
-        compress: {
-          keep_infinity: true,
-          drop_console: VITE_DROP_CONSOLE,
-        },
-      },
-      brotliSize: false,
-      chunkSizeWarningLimit: 3000,
+      reportCompressedSize: false,
+      chunkSizeWarningLimit: 2000,
     },
   };
 };

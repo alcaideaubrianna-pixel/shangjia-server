@@ -22,7 +22,7 @@ func (l *gCurd) webEditTplData(ctx context.Context, in *CurdPreviewInput) (data 
 
 func (l *gCurd) generateWebEditFormItem(ctx context.Context, in *CurdPreviewInput) string {
 	buffer := bytes.NewBuffer(nil)
-	for k, field := range in.masterFields {
+	for _, field := range in.masterFields {
 		if !field.IsEdit {
 			continue
 		}
@@ -35,6 +35,10 @@ func (l *gCurd) generateWebEditFormItem(ctx context.Context, in *CurdPreviewInpu
 			defaultComponent = fmt.Sprintf("<n-form-item label=\"%s\" path=\"%s\">\n          <n-input placeholder=\"请输入%s\" v-model:value=\"formValue.%s\" />\n          </n-form-item>", field.Dc, field.TsName, field.Dc, field.TsName)
 			component        string
 		)
+
+		if in.options.Step.IsTreeTable && IsPidName(field.Name) {
+			field.FormMode = FormModePidTreeSelect
+		}
 
 		switch field.FormMode {
 		case FormModeInput:
@@ -98,16 +102,45 @@ func (l *gCurd) generateWebEditFormItem(ctx context.Context, in *CurdPreviewInpu
 
 		case FormModeCitySelector:
 			component = fmt.Sprintf("<n-form-item label=\"%s\" path=\"%s\">\n            <CitySelector v-model:value=\"formValue.%s\" />\n          </n-form-item>", field.Dc, field.TsName, field.TsName)
-
+		case FormModePidTreeSelect:
+			component = fmt.Sprintf(`<n-form-item label="%v" path="pid">
+              <n-tree-select
+                :options="treeOption"
+                v-model:value="formValue.pid"
+                key-field="%v"
+                label-field="%v"
+                clearable
+                filterable
+                default-expand-all
+                show-path
+              />
+            </n-form-item>`, field.Dc, in.pk.TsName, in.options.Tree.TitleField.TsName)
+		case FormModeTreeSelect:
+			component = fmt.Sprintf(`<n-form-item label="%v" path="%v">
+              <n-tree-select
+                placeholder="请选择%v"
+                v-model:value="formValue.%v"
+                :options="[{ label: 'AA', key: 1, children: [{ label: 'BB', key: 2 }] }]"
+                clearable
+                filterable
+                default-expand-all
+              />
+            </n-form-item>`, field.Dc, field.TsName, field.Dc, field.TsName)
+		case FormModeCascader:
+			component = fmt.Sprintf(`<n-form-item label="%v" path="%v">
+              <n-cascader
+                placeholder="请选择%v"
+                v-model:value="formValue.%v"
+                :options="[{ label: 'AA', value: 1, children: [{ label: 'BB', value: 2 }] }]"
+                clearable
+                filterable
+              />
+            </n-form-item>`, field.Dc, field.TsName, field.Dc, field.TsName)
 		default:
 			component = defaultComponent
 		}
 
-		if len(in.masterFields) == k {
-			buffer.WriteString("          " + component)
-		} else {
-			buffer.WriteString("          " + component + "\n\n")
-		}
+		buffer.WriteString(fmt.Sprintf("<n-gi span=\"%v\">%v</n-gi>\n\n", field.FormGridSpan, component))
 	}
 	return buffer.String()
 }
@@ -119,23 +152,25 @@ func (l *gCurd) generateWebEditScript(ctx context.Context, in *CurdPreviewInput)
 		setupBuffer  = bytes.NewBuffer(nil)
 	)
 
+	importBuffer.WriteString("  import { ref, computed } from 'vue';\n")
+
+	// 导入api
+	var importApiMethod = []string{"Edit", "View"}
 	if in.options.Step.HasMaxSort {
-		importBuffer.WriteString("  import { ref } from 'vue';\n")
-		if in.Config.Application.Crud.Templates[in.In.GenTemplate].IsAddon {
-			importBuffer.WriteString("  import { Edit, MaxSort, View } from '@/api/addons/" + in.In.AddonName + "/" + gstr.LcFirst(in.In.VarName) + "';\n")
-		} else {
-			importBuffer.WriteString("  import { Edit, MaxSort, View } from '@/api/" + gstr.LcFirst(in.In.VarName) + "';\n")
-		}
-		setupBuffer.WriteString("  function openModal(state: State) {\n    adaModalWidth(dialogWidth);\n    showModal.value = true;\n    loading.value = true;\n\n    // 新增\n    if (!state || state.id < 1) {\n      formValue.value = newState(state);\n      MaxSort()\n        .then((res) => {\n          formValue.value.sort = res.sort;\n        })\n        .finally(() => {\n          loading.value = false;\n        });\n      return;\n    }\n\n    // 编辑\n    View({ id: state.id })\n      .then((res) => {\n        formValue.value = res;\n      })\n      .finally(() => {\n        loading.value = false;\n      });\n  }")
-	} else {
-		importBuffer.WriteString("  import { ref } from 'vue';\n")
-		if in.Config.Application.Crud.Templates[in.In.GenTemplate].IsAddon {
-			importBuffer.WriteString("  import { Edit, View } from '@/api/addons/" + in.In.AddonName + "/" + gstr.LcFirst(in.In.VarName) + "';\n")
-		} else {
-			importBuffer.WriteString("  import { Edit, View } from '@/api/" + gstr.LcFirst(in.In.VarName) + "';\n")
-		}
-		setupBuffer.WriteString("  function openModal(state: State) {\n    adaModalWidth(dialogWidth);\n    showModal.value = true;\n    loading.value = true;\n\n    // 新增\n    if (!state || state.id < 1) {\n      formValue.value = newState(state);\n      return;\n    }\n\n    // 编辑\n    View({ id: state.id })\n      .then((res) => {\n        formValue.value = res;\n      })\n      .finally(() => {\n        loading.value = false;\n      });\n  }")
+		importApiMethod = append(importApiMethod, "MaxSort")
 	}
+	importBuffer.WriteString("  import " + ImportWebMethod(importApiMethod) + " from '" + in.options.ImportWebApi + "';\n")
+
+	// 导入model
+	var importModelMethod = []string{"options", "State", "newState"}
+	if in.options.Step.IsTreeTable {
+		importModelMethod = append(importModelMethod, []string{"treeOption", "loadTreeOption"}...)
+	}
+
+	if in.options.Step.HasRules {
+		importModelMethod = append(importModelMethod, "rules")
+	}
+	importBuffer.WriteString("  import " + ImportWebMethod(importModelMethod) + " from './model';\n")
 
 	for _, field := range in.masterFields {
 		if !field.IsEdit {

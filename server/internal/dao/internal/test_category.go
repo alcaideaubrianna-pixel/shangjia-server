@@ -22,6 +22,7 @@ type TestCategoryDao struct {
 type TestCategoryColumns struct {
 	Id          string // 分类ID
 	Name        string // 分类名称
+	ShortName   string // 简称
 	Description string // 描述
 	Sort        string // 排序
 	Remark      string // 备注
@@ -35,6 +36,7 @@ type TestCategoryColumns struct {
 var testCategoryColumns = TestCategoryColumns{
 	Id:          "id",
 	Name:        "name",
+	ShortName:   "short_name",
 	Description: "description",
 	Sort:        "sort",
 	Remark:      "remark",

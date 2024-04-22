@@ -11,7 +11,6 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/gres"
-	"github.com/gogf/gf/v2/os/gview"
 	"hotgo/internal/model/input/form"
 	"sort"
 	"sync"
@@ -27,16 +26,15 @@ type Option struct {
 
 // Skeleton 模块骨架
 type Skeleton struct {
-	Label       string      `json:"label"`       // 标识
-	Name        string      `json:"name"`        // 名称
-	Group       int         `json:"group"`       // 分组
-	Logo        string      `json:"logo"`        // logo
-	Brief       string      `json:"brief"`       // 简介
-	Description string      `json:"description"` // 详细描述
-	Author      string      `json:"author"`      // 作者
-	Version     string      `json:"version"`     // 版本号
-	RootPath    string      `json:"rootPath"`    // 根路径
-	View        *gview.View `json:"view"`        // 模板引擎
+	Label       string `json:"label"`       // 标识
+	Name        string `json:"name"`        // 名称
+	Group       int    `json:"group"`       // 分组
+	Logo        string `json:"logo"`        // logo
+	Brief       string `json:"brief"`       // 简介
+	Description string `json:"description"` // 详细描述
+	Author      string `json:"author"`      // 作者
+	Version     string `json:"version"`     // 版本号
+	RootPath    string `json:"rootPath"`    // 根路径
 }
 
 func (s *Skeleton) GetModule() Module {
@@ -99,7 +97,6 @@ func RegisterModule(m Module) Module {
 	}
 
 	sk.RootPath = GetModulePath(name)
-	sk.View = NewView(m.Ctx(), name)
 	modules[name] = m
 	return m
 }
@@ -137,40 +134,6 @@ func GetModuleRealPath(name string) string {
 		panic("no path is found. please confirm that the path " + GetModulePath(name) + " exists?")
 	}
 	return path
-}
-
-// NewView 初始化一个插件的模板引擎
-func NewView(ctx context.Context, name string) *gview.View {
-	basePath := GetResourcePath(ctx)
-	if basePath == "" {
-		return nil
-	}
-
-	view := gview.New()
-	path := ViewPath(name, basePath)
-
-	if !gfile.IsDir(gfile.RealPath(path)) {
-		g.Log().Warningf(ctx, "NewView template path does not exist:%v,default use of main module template.", path)
-		return nil
-	}
-
-	if err := view.SetPath(path); err != nil {
-		g.Log().Warningf(ctx, "NewView SetPath err:%+v", err)
-		return nil
-	}
-
-	// 默认和主模块使用一致的变量分隔符号
-	delimiters := g.Cfg().MustGet(ctx, "viewer.delimiters", []string{"@{", "}"}).Strings()
-	if len(delimiters) != 2 {
-		g.Log().Warning(ctx, "NewView delimiters config error")
-		return nil
-	}
-	view.SetDelimiters(delimiters[0], delimiters[1])
-
-	// 更多配置
-	// view.SetI18n()
-	// ...
-	return view
 }
 
 // AddStaticPath 设置插件静态目录映射

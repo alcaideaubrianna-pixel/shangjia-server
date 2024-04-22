@@ -140,7 +140,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { onMounted, ref } from 'vue';
+  import { computed, ref } from 'vue';
   import { useMessage } from 'naive-ui';
   import { useRouter, useRoute } from 'vue-router';
   import { useSendCode } from '@/hooks/common';
@@ -157,7 +157,6 @@
 
   const { sendLabel, isCounting, loading: sendLoading, activateSend } = useSendCode();
   const userStore = useUserStore();
-  const dialogWidth = ref('75%');
   const rules = {
     basicName: {
       required: true,
@@ -174,6 +173,9 @@
   const formValue = ref({
     oldPassword: '',
     newPassword: '',
+  });
+  const dialogWidth = computed(() => {
+    return adaModalWidth(580);
   });
 
   function formSubmit() {
@@ -212,9 +214,9 @@
   function openUpdatePassForm() {
     message.error('未开放');
     return;
-    showModal.value = true;
-    formValue.value.newPassword = '';
-    formValue.value.oldPassword = '';
+    // showModal.value = true;
+    // formValue.value.newPassword = '';
+    // formValue.value.oldPassword = '';
   }
 
   const formMobileBtnLoading = ref(false);
@@ -250,9 +252,9 @@
   function openUpdateMobileForm() {
     message.error('未开放');
     return;
-    showMobileModal.value = true;
-    formMobileValue.value.mobile = '';
-    formMobileValue.value.code = '';
+    // showMobileModal.value = true;
+    // formMobileValue.value.mobile = '';
+    // formMobileValue.value.code = '';
   }
 
   const formEmailBtnLoading = ref(false);
@@ -298,8 +300,4 @@
   function sendEmailCode() {
     activateSend(SendBindEmail());
   }
-
-  onMounted(async () => {
-    adaModalWidth(dialogWidth, 580);
-  });
 </script>

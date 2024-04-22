@@ -28,7 +28,7 @@ func (in *MenuEditInp) Filter(ctx context.Context) (err error) {
 		return
 	}
 	if in.Name == "" {
-		err = gerror.New("路由名称不能为空")
+		err = gerror.New("路由别名不能为空")
 		return
 	}
 	return

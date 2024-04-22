@@ -156,7 +156,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { onMounted, ref } from 'vue';
+  import { computed, ref } from 'vue';
   import { useMessage } from 'naive-ui';
   import { useRouter, useRoute } from 'vue-router';
   import { useSendCode } from '@/hooks/common';
@@ -173,7 +173,6 @@
 
   const { sendLabel, isCounting, loading: sendLoading, activateSend } = useSendCode();
   const userStore = useUserStore();
-  const dialogWidth = ref('75%');
   const rules = {
     basicName: {
       required: true,
@@ -190,6 +189,9 @@
   const formValue = ref({
     oldPassword: '',
     newPassword: '',
+  });
+  const dialogWidth = computed(() => {
+    return adaModalWidth(580);
   });
 
   function formSubmit() {
@@ -310,8 +312,4 @@
   function sendEmailCode() {
     activateSend(SendBindEmail());
   }
-
-  onMounted(async () => {
-    adaModalWidth(dialogWidth, 580);
-  });
 </script>

@@ -46,27 +46,27 @@ export const columns = [
   //   title: '上级角色',
   //   key: 'pid',
   // },
-  {
-    title: '默认角色',
-    key: 'isDefault',
-    render(row) {
-      return h(
-        NTag,
-        {
-          type: row.id == 1 ? 'success' : 'error',
-        },
-        {
-          default: () => (row.id == 1 ? '是' : '否'),
-        }
-      );
-    },
-    width: 80,
-  },
-  {
-    title: '排序',
-    key: 'sort',
-    width: 100,
-  },
+  // {
+  //   title: '默认角色',
+  //   key: 'isDefault',
+  //   render(row) {
+  //     return h(
+  //       NTag,
+  //       {
+  //         type: row.id == 1 ? 'success' : 'error',
+  //       },
+  //       {
+  //         default: () => (row.id == 1 ? '是' : '否'),
+  //       }
+  //     );
+  //   },
+  //   width: 80,
+  // },
+  // {
+  //   title: '排序',
+  //   key: 'sort',
+  //   width: 100,
+  // },
   {
     title: '备注',
     key: 'remark',

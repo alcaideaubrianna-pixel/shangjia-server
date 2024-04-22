@@ -8,7 +8,6 @@ package admin
 import (
 	"context"
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/text/gstr"
 	"hotgo/api/admin/monitor"
@@ -103,12 +102,10 @@ func (c *cMonitor) UserOnlineList(ctx context.Context, req *monitor.UserOnlineLi
 		return clients[i].FirstTime < clients[j].FirstTime
 	})
 
-	isDemo := g.Cfg().MustGet(ctx, "hotgo.isDemo", false).Bool()
 	_, perPage, offset := form.CalPage(req.Page, req.PerPage)
-
 	for k, v := range clients {
 		if k >= offset && i <= perPage {
-			if isDemo {
+			if simple.IsDemo(ctx) {
 				v.IP = consts.DemoTips
 			}
 			res.List = append(res.List, v)

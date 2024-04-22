@@ -40,7 +40,10 @@
 
           <template #suffix>
             <n-space>
-              <n-button type="primary" @click="preview">预览代码</n-button>
+              <n-button type="default" @click="handleBack">返回列表</n-button>
+              <n-button type="primary" :loading="formBtnPreviewLoading" @click="preview"
+                >预览代码</n-button
+              >
               <n-button type="success" :loading="formBtnLoading" @click="submitBuild"
                 >提交生成</n-button
               >
@@ -87,7 +90,7 @@
   import EditMasterCell from './components/EditMasterCell.vue';
   import EditSlaveCell from './components/EditSlaveCell.vue';
   import { Selects, View, Preview, Build, Edit } from '@/api/develop/code';
-  import { selectListObj, newState } from '@/views/develop/code/components/model';
+  import { selectListObj, newState, formatColumns } from '@/views/develop/code/components/model';
   import PreviewTab from '@/views/develop/code/components/PreviewTab.vue';
   import { isJsonString } from '@/utils/is';
 
@@ -108,6 +111,7 @@
   const slavePanels = ref<any>([]);
   const showModal = ref(false);
   const formBtnLoading = ref(false);
+  const formBtnPreviewLoading = ref(false);
   const previewModel = ref<any>();
   const dialog = useDialog();
   const notification = useNotification();
@@ -123,15 +127,27 @@
 
   async function getGenInfo() {
     let tmp = await View({ id: genId });
+    // 导入主表数据
+    tmp.masterColumns = formatColumns(tmp.masterColumns);
+
+    // 导入生成选项
     if (isJsonString(tmp.options)) {
       tmp.options = JSON.parse(tmp.options);
     }
 
-    if (tmp.masterColumns === undefined || tmp.masterColumns.length === 0) {
-      tmp.masterColumns = [];
+    // 预设流程
+    if (!tmp.options.presetStep) {
+      tmp.options.presetStep = {
+        formGridCols: 1,
+      };
     }
-    if (isJsonString(tmp.masterColumns)) {
-      tmp.masterColumns = JSON.parse(tmp.masterColumns);
+
+    // 树表
+    if (!tmp.options.tree) {
+      tmp.options.tree = {
+        titleColumn: null,
+        styleType: 1,
+      };
     }
 
     genInfo.value = tmp;
@@ -146,12 +162,12 @@
         handleClose('主表字段');
       }
 
-      if (newVal.options.join !== undefined) {
+      if (newVal && newVal.options && newVal.options.join !== undefined) {
         slavePanels.value = [];
-        for (let i = 0; i <= newVal.options.join.length; i++) {
-          if (newVal.options.join[i]?.alias !== undefined && newVal.options.join[i]?.alias !== '') {
+        for (let i = 0; i < newVal.options.join.length; i++) {
+          if (newVal.options.join[i]?.alias) {
             handleSlaveAdd(
-              '关联表[ ' + newVal.options.join[i]?.alias + ' ]',
+              '关联表[ ' + newVal.options.join[i].alias + ' ]',
               newVal.options.join[i]
             );
           }
@@ -195,14 +211,21 @@
     selectList.value = await Selects({});
   };
 
-  async function preview() {
-    previewModel.value = await Preview(genInfo.value);
-    showModal.value = true;
+  function preview() {
+    formBtnPreviewLoading.value = true;
+    Preview(genInfo.value)
+      .then((res) => {
+        previewModel.value = res;
+        showModal.value = true;
+      })
+      .finally(() => {
+        formBtnPreviewLoading.value = false;
+      });
   }
 
   function submitBuild() {
-    dialog.warning({
-      title: '警告',
+    dialog.info({
+      title: '提示',
       content: '你确定要提交生成吗？',
       positiveText: '确定',
       negativeText: '取消',
@@ -216,15 +239,12 @@
             formBtnLoading.value = false;
           });
       },
-      onNegativeClick: () => {
-        // message.error('取消');
-      },
     });
   }
 
   function submitSave() {
-    dialog.warning({
-      title: '警告',
+    dialog.info({
+      title: '提示',
       content: '你确定要保存生成配置吗？',
       positiveText: '确定',
       negativeText: '取消',
@@ -233,18 +253,15 @@
           message.success('操作成功');
         });
       },
-      onNegativeClick: () => {
-        // message.error('取消');
-      },
     });
   }
 
   function buildSuccessNotify() {
-    let count = 6;
+    let count = 10;
     const n = notification.success({
       title: '生成提交成功',
       content: `如果你使用的热编译，页面将在 ${count} 秒后自动刷新即可生效。否则请手动重启服务后刷新页面！`,
-      duration: 6000,
+      duration: 10000,
       closable: false,
       onAfterEnter: () => {
         const minusCount = () => {
@@ -258,6 +275,18 @@
       },
       onAfterLeave: () => {
         location.reload();
+      },
+    });
+  }
+
+  function handleBack() {
+    dialog.info({
+      title: '提示',
+      content: '你确定要返回生成列表？系统不会主动保存更改',
+      positiveText: '确定',
+      negativeText: '取消',
+      onPositiveClick: () => {
+        router.push({ name: 'develop_code' });
       },
     });
   }

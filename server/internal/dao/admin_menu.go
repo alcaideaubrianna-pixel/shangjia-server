@@ -18,7 +18,7 @@ type adminMenuDao struct {
 }
 
 var (
-	// AdminMenu is globally common accessible object for table hg_admin_menu operations.
+	// AdminMenu is globally public accessible object for table hg_admin_menu operations.
 	AdminMenu = adminMenuDao{
 		internal.NewAdminMenuDao(),
 	}

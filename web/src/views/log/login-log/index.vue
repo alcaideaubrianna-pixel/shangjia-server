@@ -24,7 +24,7 @@
         ref="actionRef"
         :actionColumn="actionColumn"
         @update:checked-row-keys="onCheckedRow"
-        :scroll-x="1280"
+        :scroll-x="scrollX"
         :resizeHeightOffset="-20000"
       >
         <template #tableTitle>
@@ -61,16 +61,17 @@
   </div>
 </template>
 
-<script lang="ts" setup name="login_log_index">
-  import { h, reactive, ref } from 'vue';
+<script lang="ts" setup>
+  import { computed, h, onMounted, reactive, ref } from 'vue';
   import { useDialog, useMessage } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, useForm } from '@/components/Form/index';
   import { usePermission } from '@/hooks/web/usePermission';
   import { List, Export, Delete } from '@/api/loginLog';
-  import { columns, schemas } from './model';
+  import { columns, schemas, loadOptions } from './model';
   import { ExportOutlined, DeleteOutlined } from '@vicons/antd';
   import { useRouter } from 'vue-router';
+  import { adaTableScrollX } from '@/utils/hotgo';
 
   const { hasPermission } = usePermission();
   const router = useRouter();
@@ -94,6 +95,9 @@
             label: '查看详情',
             onClick: handleView.bind(null, record),
             auth: ['/loginLog/view'],
+            ifShow: () => {
+              return record.sysLogId > 0;
+            },
           },
           {
             label: '删除',
@@ -103,6 +107,10 @@
         ],
       });
     },
+  });
+
+  const scrollX = computed(() => {
+    return adaTableScrollX(columns, actionColumn.width);
   });
 
   const [register, {}] = useForm({
@@ -140,9 +148,6 @@
           reloadTable();
         });
       },
-      onNegativeClick: () => {
-        // message.error('取消');
-      },
     });
   }
 
@@ -158,9 +163,6 @@
           reloadTable();
         });
       },
-      onNegativeClick: () => {
-        // message.error('取消');
-      },
     });
   }
 
@@ -168,6 +170,10 @@
     message.loading('正在导出列表...', { duration: 1200 });
     Export(searchFormRef.value?.formModel);
   }
+
+  onMounted(() => {
+    loadOptions();
+  });
 </script>
 
 <style lang="less" scoped></style>

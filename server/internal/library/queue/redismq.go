@@ -66,7 +66,6 @@ func (r *RedisMq) SendByteMsg(topic string, body []byte) (mqMsg MqMsg, err error
 			return
 		}
 	}
-
 	return
 }
 
@@ -119,7 +118,6 @@ func (r *RedisMq) SendDelayMsg(topic string, body string, delaySecond int64) (mq
 		_, _ = conn.Expire(ctx, timePiece, r.timeout+delaySecond)
 		_, _ = conn.Expire(ctx, key, r.timeout)
 	}
-
 	return
 }
 

@@ -2,6 +2,8 @@ import { ComponentType } from './index';
 import type { CSSProperties } from 'vue';
 import type { GridProps, GridItemProps } from 'naive-ui/lib/grid';
 import type { ButtonProps } from 'naive-ui/lib/button';
+import {PermissionsEnum} from "@/enums/permissionsEnum";
+import { ActionItem } from '@/components/Table';
 
 export interface FormSchema {
   field: string;
@@ -16,6 +18,8 @@ export interface FormSchema {
   giProps?: GridItemProps;
   isFull?: boolean;
   suffix?: string;
+  auth?: PermissionsEnum | PermissionsEnum[] | string | string[];
+  ifShow?: boolean | ((action: ActionItem) => boolean);
 }
 
 export interface FormProps {

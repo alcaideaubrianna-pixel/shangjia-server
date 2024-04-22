@@ -73,3 +73,12 @@ export function Export(params) {
   jumpExport('/@{.apiPrefix}/export', params);
 }
 @{end}
+@{ if eq .options.Step.IsTreeTable true }
+// 获取@{.tableComment}关系树选项
+export function TreeOption() {
+  return http.request({
+    url: '/@{.apiPrefix}/treeOption',
+    method: 'GET',
+  });
+}
+@{end}

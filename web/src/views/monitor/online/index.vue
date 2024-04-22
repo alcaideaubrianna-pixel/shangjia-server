@@ -16,20 +16,22 @@
         :row-key="(row) => row.id"
         ref="actionRef"
         :actionColumn="actionColumn"
-        :scroll-x="1280"
+        :scroll-x="scrollX"
+        :resizeHeightOffset="-10000"
       />
     </n-card>
   </div>
 </template>
 
 <script lang="ts" setup>
-  import { h, reactive, ref } from 'vue';
+  import { computed, h, reactive, ref } from 'vue';
   import { useDialog, useMessage } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, FormSchema, useForm } from '@/components/Form/index';
   import { OnlineList, Offline } from '@/api/monitor/monitor';
   import { columns } from './columns';
   import { defRangeShortcuts } from '@/utils/dateUtil';
+  import { adaTableScrollX } from '@/utils/hotgo';
 
   const schemas: FormSchema[] = [
     {
@@ -107,6 +109,10 @@
     },
   });
 
+  const scrollX = computed(() => {
+    return adaTableScrollX(columns, actionColumn.width);
+  });
+
   const [register, {}] = useForm({
     gridProps: { cols: '1 s:1 m:2 l:3 xl:4 2xl:4' },
     labelWidth: 80,
@@ -124,9 +130,6 @@
           message.success('操作成功');
           reloadTable();
         });
-      },
-      onNegativeClick: () => {
-        // message.error('取消');
       },
     });
   }

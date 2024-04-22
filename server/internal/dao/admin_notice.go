@@ -18,7 +18,7 @@ type adminNoticeDao struct {
 }
 
 var (
-	// AdminNotice is globally common accessible object for table hg_admin_notice operations.
+	// AdminNotice is globally public accessible object for table hg_admin_notice operations.
 	AdminNotice = adminNoticeDao{
 		internal.NewAdminNoticeDao(),
 	}

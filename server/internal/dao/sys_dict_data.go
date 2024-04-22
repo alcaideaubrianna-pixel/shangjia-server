@@ -18,7 +18,7 @@ type sysDictDataDao struct {
 }
 
 var (
-	// SysDictData is globally common accessible object for table hg_sys_dict_data operations.
+	// SysDictData is globally public accessible object for table hg_sys_dict_data operations.
 	SysDictData = sysDictDataDao{
 		internal.NewSysDictDataDao(),
 	}

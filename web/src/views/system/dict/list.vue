@@ -97,7 +97,7 @@
 
 <script lang="ts" setup>
   import { h, reactive, ref, watch, onMounted } from 'vue';
-  import { TreeSelectOption, useMessage, useDialog, NTag, SelectRenderTag } from 'naive-ui';
+  import { useMessage, useDialog, NTag, SelectRenderTag } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, FormSchema, useForm } from '@/components/Form/index';
   import { getDataList, getDictSelect, EditData, DeleteData } from '@/api/dict/dict';
@@ -106,9 +106,10 @@
   import { statusOptions } from '@/enums/optionsiEnum';
   import { TypeSelect } from '@/api/sys/config';
   import { Option } from '@/utils/hotgo';
-  import { findTreeDataById } from '@/utils';
+  import { findTreeNode } from '@/utils';
   import { cloneDeep } from 'lodash-es';
-  const options = ref<Option>();
+  import { defRangeShortcuts } from '@/utils/dateUtil';
+
   interface Props {
     checkedId?: number;
   }
@@ -132,15 +133,28 @@
     {
       field: 'label',
       component: 'NInput',
-      label: '标签',
+      label: '字典标签',
       componentProps: {
-        placeholder: '请输入标签名称',
+        placeholder: '请输入字典标签',
         onInput: (e: any) => {
           console.log(e);
           params.value.label = e;
         },
       },
-      rules: [{ message: '请输入字典标签名称', trigger: ['blur'] }],
+      rules: [{ message: '请输入字典标签', trigger: ['blur'] }],
+    },
+    {
+      field: 'value',
+      component: 'NInput',
+      label: '字典键值',
+      componentProps: {
+        placeholder: '请输入字典键值',
+        onInput: (e: any) => {
+          console.log(e);
+          params.value.value = e;
+        },
+      },
+      rules: [{ message: '请输入字典键值', trigger: ['blur'] }],
     },
   ];
 
@@ -194,17 +208,19 @@
   const showModal = ref(false);
   const formBtnLoading = ref(false);
   const formParams = ref<any>({ typeId: 0 });
+  const options = ref<Option>();
   const params = ref({
     pageSize: 10,
     typeId: props.checkedId,
     label: '',
+    value: '',
   });
 
   const actionColumn = reactive({
-    width: 220,
+    width: 120,
     title: '操作',
     key: 'action',
-    // fixed: 'right',
+    fixed: 'right',
     render(record) {
       return h(TableAction as any, {
         style: 'button',
@@ -223,7 +239,7 @@
   });
 
   const [register, {}] = useForm({
-    gridProps: { cols: '1 s:1 m:1 l:2 xl:2 2xl:2' },
+    gridProps: { cols: '1 s:1 m:2 l:3 xl:4 2xl:4' },
     labelWidth: 80,
     schemas,
   });
@@ -286,9 +302,6 @@
           reloadTable();
         });
       },
-      onNegativeClick: () => {
-        // message.error('取消');
-      },
     });
   }
 
@@ -322,7 +335,7 @@
   }
 
   function handleUpdateTypeIdValue(value) {
-    const row = findTreeDataById(typeList.value, value);
+    const row = findTreeNode(typeList.value, value, 'id');
     if (!row) {
       message.error('未找到该节点数据');
       return;

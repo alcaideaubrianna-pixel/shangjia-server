@@ -1,6 +1,8 @@
 module hotgo
 
-go 1.19
+go 1.21
+
+toolchain go1.22.1
 
 require (
 	github.com/Shopify/sarama v1.34.1
@@ -9,20 +11,20 @@ require (
 	github.com/alibabacloud-go/tea v1.1.20
 	github.com/alibabacloud-go/tea-utils/v2 v2.0.1
 	github.com/aliyun/aliyun-oss-go-sdk v2.2.6+incompatible
-	github.com/apache/rocketmq-client-go/v2 v2.1.0
+	github.com/apache/rocketmq-client-go/v2 v2.1.2
 	github.com/casbin/casbin/v2 v2.55.0
 	github.com/forgoer/openssl v1.4.0
 	github.com/go-pay/gopay v1.5.91
-	github.com/gogf/gf/contrib/drivers/mysql/v2 v2.6.4
-	github.com/gogf/gf/contrib/nosql/redis/v2 v2.6.4
-	github.com/gogf/gf/contrib/trace/jaeger/v2 v2.6.4
-	github.com/gogf/gf/v2 v2.6.4
+	github.com/gogf/gf/contrib/drivers/mysql/v2 v2.7.0
+	github.com/gogf/gf/contrib/nosql/redis/v2 v2.7.0
+	github.com/gogf/gf/contrib/trace/jaeger/v2 v2.7.0
+	github.com/gogf/gf/v2 v2.7.0
 	github.com/gogf/selfupdate v0.0.0-20231215043001-5c48c528462f
 	github.com/golang-jwt/jwt/v5 v5.0.0
 	github.com/gorilla/websocket v1.5.1
 	github.com/kayon/iploc v0.0.0-20200312105652-bda3e968a794
 	github.com/minio/minio-go/v7 v7.0.63
-	github.com/mojocn/base64Captcha v1.3.5
+	github.com/mojocn/base64Captcha v1.3.6
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/qiniu/go-sdk/v7 v7.14.0
 	github.com/shirou/gopsutil/v3 v3.23.3
@@ -32,14 +34,16 @@ require (
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.45
 	github.com/ufilesdk-dev/ufile-gosdk v1.0.3
 	github.com/xuri/excelize/v2 v2.6.0
-	go.opentelemetry.io/otel v1.24.0
+	go.opentelemetry.io/otel v1.25.0
 	golang.org/x/mod v0.9.0
+	golang.org/x/net v0.24.0
 	golang.org/x/tools v0.7.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
 	aead.dev/minisign v0.2.0 // indirect
+	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/BurntSushi/toml v1.3.2 // indirect
 	github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible // indirect
 	github.com/alibabacloud-go/alibabacloud-gateway-spi v0.0.4 // indirect
@@ -50,7 +54,7 @@ require (
 	github.com/alibabacloud-go/tea-xml v1.1.2 // indirect
 	github.com/aliyun/credentials-go v1.1.2 // indirect
 	github.com/bradfitz/gomemcache v0.0.0-20220106215444-fb4bf637b56d // indirect
-	github.com/cespare/xxhash/v2 v2.2.0 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/clbanning/mxj v1.8.4 // indirect
 	github.com/clbanning/mxj/v2 v2.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -67,7 +71,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-redis/redis/v8 v8.11.5 // indirect
-	github.com/go-sql-driver/mysql v1.7.1 // indirect
+	github.com/go-sql-driver/mysql v1.8.1 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
@@ -98,6 +102,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
 	github.com/mozillazg/go-httpheader v0.2.1 // indirect
+	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pierrec/lz4/v4 v4.1.18 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
@@ -120,17 +125,17 @@ require (
 	github.com/xuri/nfp v0.0.0-20220409054826-5e722a1d9e22 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	go.opentelemetry.io/otel/exporters/jaeger v1.17.0 // indirect
-	go.opentelemetry.io/otel/metric v1.24.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.24.0 // indirect
-	go.opentelemetry.io/otel/trace v1.24.0 // indirect
+	go.opentelemetry.io/otel/metric v1.25.0 // indirect
+	go.opentelemetry.io/otel/sdk v1.25.0 // indirect
+	go.opentelemetry.io/otel/trace v1.25.0 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
-	golang.org/x/crypto v0.21.0 // indirect
-	golang.org/x/image v0.1.0 // indirect
-	golang.org/x/net v0.22.0 // indirect
+	golang.org/x/crypto v0.22.0 // indirect
+	golang.org/x/image v0.13.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect
-	golang.org/x/sys v0.18.0 // indirect
+	golang.org/x/sys v0.19.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
+	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
 	stathat.com/c/consistent v1.0.0 // indirect
 )

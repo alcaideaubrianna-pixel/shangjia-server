@@ -172,10 +172,9 @@
 
       const isMixMenuNoneSub = computed(() => {
         const mixMenu = settingStore.menuSetting.mixMenu;
-        const currentRoute = useRoute();
         const navMode = unref(getNavMode);
         if (unref(navMode) != 'horizontal-mix') return true;
-        return !(unref(navMode) === 'horizontal-mix' && mixMenu && currentRoute.meta.isRoot);
+        return !(unref(navMode) === 'horizontal-mix' && mixMenu && route.meta.isRoot);
       });
 
       //动态组装样式 菜单缩进

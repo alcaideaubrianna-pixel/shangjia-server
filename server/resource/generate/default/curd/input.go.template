@@ -18,6 +18,8 @@ import (
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/form"
 	"hotgo/utility/validate"
+	@{ if eq .options.Step.HasHookMemberSummary true }"hotgo/internal/library/hgorm/hook"@{end}
+	@{ if eq .options.Step.IsTreeTable true }"hotgo/utility/tree"@{end}
 )
 @{ if eq .options.Step.HasEdit true }
 // @{.varName}UpdateFields 修改@{.tableComment}字段过滤
@@ -65,7 +67,7 @@ func (in *@{.varName}ViewInp) Filter(ctx context.Context) (err error) {
 }
 
 type @{.varName}ViewModel struct {
-	entity.@{.daoName}
+@{.viewModelColumns}
 }@{end}
 
 // @{.varName}ListInp 获取@{.tableComment}列表
@@ -139,3 +141,27 @@ func (in *@{.varName}SwitchInp) Filter(ctx context.Context) (err error) {
 
 type @{.varName}SwitchModel struct{}
 @{end}
+
+@{ if eq .options.Step.IsTreeTable true }
+// @{.varName}TreeOption 关系树选项
+type @{.varName}TreeOption struct {
+@{.treeOptionFields}
+	Children []tree.Node `json:"children"  dc:"子节点"`
+}
+
+// ID 获取节点ID
+func (t *@{.varName}TreeOption) ID() int64 {
+	return t.@{.pk.GoName}
+}
+
+// PID 获取父级节点ID
+func (t *@{.varName}TreeOption) PID() int64 {
+	return t.Pid
+}
+
+// SetChildren 设置子节点数据
+func (t *@{.varName}TreeOption) SetChildren(children []tree.Node) {
+	t.Children = children
+}
+@{end}
+

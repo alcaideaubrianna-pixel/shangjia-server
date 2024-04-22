@@ -8,8 +8,8 @@ package location
 import (
 	"context"
 	"fmt"
-	"github.com/gogf/gf/v2/container/gmap"
 	"github.com/gogf/gf/v2/encoding/gcharset"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/text/gstr"
@@ -52,14 +52,12 @@ type WhoisRegionData struct {
 	Err        string `json:"err"`
 }
 
-var cacheMap *gmap.Map
-
-func init() {
-	cacheMap = gmap.New(true)
-}
+var (
+	defaultRetry int64 = 3 // 默认重试次数
+)
 
 // WhoisLocation 通过Whois接口查询IP归属地
-func WhoisLocation(ctx context.Context, ip string) (*IpLocationData, error) {
+func WhoisLocation(ctx context.Context, ip string, retry ...int64) (*IpLocationData, error) {
 	response, err := g.Client().Timeout(10*time.Second).Get(ctx, whoisApi+ip)
 	if err != nil {
 		return nil, err
@@ -72,8 +70,22 @@ func WhoisLocation(ctx context.Context, ip string) (*IpLocationData, error) {
 		return nil, err
 	}
 
+	// 利用重试机制缓解高并发情况下限流的影响
+	// 毕竟这是一个免费的接口，如果你对IP归属地定位要求毕竟高，可以考虑换个付费接口
+	if response.StatusCode != 200 {
+		retryCount := defaultRetry
+		if len(retry) > 0 {
+			retryCount = retry[0]
+		}
+		if retryCount > 0 {
+			retryCount--
+			return WhoisLocation(ctx, ip, retryCount)
+		}
+	}
+
 	var who *WhoisRegionData
-	if err = gconv.Struct([]byte(str), &who); err != nil {
+	if err = gconv.Scan([]byte(str), &who); err != nil {
+		err = gerror.Newf("WhoisLocation Scan err:%v, str:%v", err, str)
 		return nil, err
 	}
 	return &IpLocationData{
@@ -109,17 +121,6 @@ func Cz88Find(ctx context.Context, ip string) (*IpLocationData, error) {
 	}, nil
 }
 
-// IsJurisByIpTitle 判断地区名称是否为直辖市
-func IsJurisByIpTitle(title string) bool {
-	lists := []string{"北京市", "天津市", "重庆市", "上海市"}
-	for i := 0; i < len(lists); i++ {
-		if gstr.Contains(lists[i], title) {
-			return true
-		}
-	}
-	return false
-}
-
 // GetLocation 获取IP归属地信息
 func GetLocation(ctx context.Context, ip string) (data *IpLocationData, err error) {
 	if !validate.IsIp(ip) {
@@ -130,18 +131,18 @@ func GetLocation(ctx context.Context, ip string) (data *IpLocationData, err erro
 		return // nil, fmt.Errorf("must be a public ip:%v", ip)
 	}
 
-	if cacheMap.Contains(ip) {
-		value := cacheMap.Get(ip)
-		data1, ok := value.(*IpLocationData)
-		if !ok {
-			cacheMap.Remove(ip)
-			err = fmt.Errorf("data assertion failed in the cache ip:%v", ip)
-			return
-		}
-		return data1, nil
+	if cache.Contains(ip) {
+		return cache.GetIpCache(ip)
 	}
 
-	mode := g.Cfg().MustGet(ctx, "hotgo.ipMethod", "cz88").String()
+	cache.Lock()
+	defer cache.Unlock()
+
+	if cache.Contains(ip) {
+		return cache.GetIpCache(ip)
+	}
+
+	mode := g.Cfg().MustGet(ctx, "system.ipMethod", "cz88").String()
 	switch mode {
 	case "whois":
 		data, err = WhoisLocation(ctx, ip)
@@ -150,10 +151,7 @@ func GetLocation(ctx context.Context, ip string) (data *IpLocationData, err erro
 	}
 
 	if err == nil && data != nil {
-		if cacheMap.Size() > 20000 {
-			cacheMap.Clear()
-		}
-		cacheMap.Set(ip, data)
+		cache.SetIpCache(ip, data)
 	}
 	return
 }

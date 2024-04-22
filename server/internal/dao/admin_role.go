@@ -18,7 +18,7 @@ type adminRoleDao struct {
 }
 
 var (
-	// AdminRole is globally common accessible object for table hg_admin_role operations.
+	// AdminRole is globally public accessible object for table hg_admin_role operations.
 	AdminRole = adminRoleDao{
 		internal.NewAdminRoleDao(),
 	}

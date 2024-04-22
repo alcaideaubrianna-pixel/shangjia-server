@@ -3,7 +3,6 @@
 // @Copyright  Copyright (c) 2023 HotGo CLI
 // @Author  Ms <133814250@qq.com>
 // @License  https://github.com/bufanyun/hotgo/blob/master/LICENSE
-//
 package handler
 
 // handler.
@@ -13,8 +12,9 @@ import (
 
 // Option 预处理选项
 type Option struct {
-	FilterAuth bool // 过滤权限
-	ForceCache bool // 强制缓存
+	FilterAuth   bool // 过滤权限
+	ForceCache   bool // 强制缓存
+	FilterTenant bool // 过滤多租户权限
 }
 
 // DefaultOption 默认预处理选项
@@ -34,6 +34,9 @@ func Model(m *gdb.Model, opt ...*Option) *gdb.Model {
 	}
 	if option.ForceCache {
 		m = m.Handler(ForceCache)
+	}
+	if option.FilterTenant {
+		m = m.Handler(FilterTenant)
 	}
 	return m
 }

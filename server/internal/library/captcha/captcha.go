@@ -48,7 +48,7 @@ func Generate(ctx context.Context) (id string, base64 string) {
 	}
 
 	c := base64Captcha.NewCaptcha(driver.ConvertFonts(), base64Captcha.DefaultMemStore)
-	id, base64, err := c.Generate()
+	id, base64, _, err := c.Generate()
 	if err != nil {
 		g.Log().Errorf(ctx, "captcha.Generate err:%+v", err)
 	}

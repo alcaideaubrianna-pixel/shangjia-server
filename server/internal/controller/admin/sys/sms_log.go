@@ -23,12 +23,6 @@ func (c *cSmsLog) Delete(ctx context.Context, req *smslog.DeleteReq) (res *smslo
 	return
 }
 
-// Edit 更新
-func (c *cSmsLog) Edit(ctx context.Context, req *smslog.EditReq) (res *smslog.EditRes, err error) {
-	err = service.SysSmsLog().Edit(ctx, &req.SmsLogEditInp)
-	return
-}
-
 // View 获取指定信息
 func (c *cSmsLog) View(ctx context.Context, req *smslog.ViewReq) (res *smslog.ViewRes, err error) {
 	data, err := service.SysSmsLog().View(ctx, &req.SmsLogViewInp)
@@ -51,11 +45,5 @@ func (c *cSmsLog) List(ctx context.Context, req *smslog.ListReq) (res *smslog.Li
 	res = new(smslog.ListRes)
 	res.List = list
 	res.PageRes.Pack(req, totalCount)
-	return
-}
-
-// Status 更新状态
-func (c *cSmsLog) Status(ctx context.Context, req *smslog.StatusReq) (res *smslog.StatusRes, err error) {
-	err = service.SysSmsLog().Status(ctx, &req.SmsLogStatusInp)
 	return
 }

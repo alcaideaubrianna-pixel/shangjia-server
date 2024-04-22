@@ -12,14 +12,14 @@ import (
 
 // UploadFileReq 上传文件
 type UploadFileReq struct {
-	g.Meta `path:"/upload/file" tags:"上传" method:"post" summary:"上传附件"`
+	g.Meta `path:"/upload/file" tags:"附件" method:"post" summary:"上传附件"`
 }
 
 type UploadFileRes *sysin.AttachmentListModel
 
 // CheckMultipartReq 检查文件分片
 type CheckMultipartReq struct {
-	g.Meta `path:"/upload/checkMultipart" tags:"上传" method:"post" summary:"检查文件分片"`
+	g.Meta `path:"/upload/checkMultipart" tags:"附件" method:"post" summary:"检查文件分片"`
 	sysin.CheckMultipartInp
 }
 
@@ -29,7 +29,7 @@ type CheckMultipartRes struct {
 
 // UploadPartReq 分片上传
 type UploadPartReq struct {
-	g.Meta `path:"/upload/uploadPart" tags:"上传" method:"post" summary:"分片上传"`
+	g.Meta `path:"/upload/uploadPart" tags:"附件" method:"post" summary:"分片上传"`
 	sysin.UploadPartInp
 }
 

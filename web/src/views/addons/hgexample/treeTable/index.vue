@@ -130,7 +130,6 @@
     SearchOutlined,
     DeleteOutlined,
   } from '@vicons/antd';
-  import { getTreeItem } from '@/utils';
   import List from './list.vue';
   import { Delete, Select } from '@/api/addons/hgexample/treeTable';
   import Edit from './edit.vue';
@@ -158,9 +157,9 @@
     showModal.value = true;
   }
 
-  function selectedTree(keys) {
+  function selectedTree(keys, opts) {
     if (keys.length) {
-      const treeItem = getTreeItem(unref(treeData), keys[0]);
+      const treeItem = opts[0];
       treeItemKey.value = keys;
       treeItemTitle.value = treeItem.label;
       formParams.value = newState(treeItem);

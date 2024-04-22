@@ -11,6 +11,7 @@ import (
 	"hotgo/internal/model"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/sysin"
+	"hotgo/utility/tree"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/database/gredis"
@@ -148,23 +149,21 @@ type (
 		Select(ctx context.Context, in *sysin.CronGroupSelectInp) (res *sysin.CronGroupSelectModel, err error)
 	}
 	ISysCurdDemo interface {
-		// Model 生成演示ORM模型
+		// Model CURD列表ORM模型
 		Model(ctx context.Context, option ...*handler.Option) *gdb.Model
-		// List 获取生成演示列表
+		// List 获取CURD列表列表
 		List(ctx context.Context, in *sysin.CurdDemoListInp) (list []*sysin.CurdDemoListModel, totalCount int, err error)
-		// Export 导出生成演示
+		// Export 导出CURD列表
 		Export(ctx context.Context, in *sysin.CurdDemoListInp) (err error)
-		// Edit 修改/新增生成演示
+		// Edit 修改/新增CURD列表
 		Edit(ctx context.Context, in *sysin.CurdDemoEditInp) (err error)
-		// Delete 删除生成演示
+		// Delete 删除CURD列表
 		Delete(ctx context.Context, in *sysin.CurdDemoDeleteInp) (err error)
-		// MaxSort 获取生成演示最大排序
+		// MaxSort 获取CURD列表最大排序
 		MaxSort(ctx context.Context, in *sysin.CurdDemoMaxSortInp) (res *sysin.CurdDemoMaxSortModel, err error)
-		// View 获取生成演示指定信息
+		// View 获取CURD列表指定信息
 		View(ctx context.Context, in *sysin.CurdDemoViewInp) (res *sysin.CurdDemoViewModel, err error)
-		// Status 更新生成演示状态
-		Status(ctx context.Context, in *sysin.CurdDemoStatusInp) (err error)
-		// Switch 更新生成演示开关
+		// Switch 更新CURD列表开关
 		Switch(ctx context.Context, in *sysin.CurdDemoSwitchInp) (err error)
 	}
 	ISysDictData interface {
@@ -212,8 +211,8 @@ type (
 		GetTemplate(ctx context.Context, template string, config *model.EmailConfig) (val string, err error)
 		// AllowSend 是否允许发送
 		AllowSend(ctx context.Context, models *entity.SysEmsLog, config *model.EmailConfig) (err error)
-		// NowDayCount 当天发送次数
-		NowDayCount(ctx context.Context, event, email string) (count int, err error)
+		// NowDayIpSendCount 当天IP累计发送次数
+		NowDayIpSendCount(ctx context.Context, event string) (count int, err error)
 		// VerifyCode 效验验证码
 		VerifyCode(ctx context.Context, in *sysin.VerifyEmsCodeInp) (err error)
 	}
@@ -275,6 +274,38 @@ type (
 		// RealWrite 真实写入
 		RealWrite(ctx context.Context, models entity.SysLoginLog) (err error)
 	}
+	ISysNormalTreeDemo interface {
+		// Model 普通树表ORM模型
+		Model(ctx context.Context, option ...*handler.Option) *gdb.Model
+		// List 获取普通树表列表
+		List(ctx context.Context, in *sysin.NormalTreeDemoListInp) (list []*sysin.NormalTreeDemoListModel, totalCount int, err error)
+		// Edit 修改/新增普通树表
+		Edit(ctx context.Context, in *sysin.NormalTreeDemoEditInp) (err error)
+		// Delete 删除普通树表
+		Delete(ctx context.Context, in *sysin.NormalTreeDemoDeleteInp) (err error)
+		// MaxSort 获取普通树表最大排序
+		MaxSort(ctx context.Context, in *sysin.NormalTreeDemoMaxSortInp) (res *sysin.NormalTreeDemoMaxSortModel, err error)
+		// View 获取普通树表指定信息
+		View(ctx context.Context, in *sysin.NormalTreeDemoViewInp) (res *sysin.NormalTreeDemoViewModel, err error)
+		// TreeOption 获取普通树表关系树选项
+		TreeOption(ctx context.Context) (nodes []tree.Node, err error)
+	}
+	ISysOptionTreeDemo interface {
+		// Model 选项树表ORM模型
+		Model(ctx context.Context, option ...*handler.Option) *gdb.Model
+		// List 获取选项树表列表
+		List(ctx context.Context, in *sysin.OptionTreeDemoListInp) (list []*sysin.OptionTreeDemoListModel, totalCount int, err error)
+		// Edit 修改/新增选项树表
+		Edit(ctx context.Context, in *sysin.OptionTreeDemoEditInp) (err error)
+		// Delete 删除选项树表
+		Delete(ctx context.Context, in *sysin.OptionTreeDemoDeleteInp) (err error)
+		// MaxSort 获取选项树表最大排序
+		MaxSort(ctx context.Context, in *sysin.OptionTreeDemoMaxSortInp) (res *sysin.OptionTreeDemoMaxSortModel, err error)
+		// View 获取选项树表指定信息
+		View(ctx context.Context, in *sysin.OptionTreeDemoViewInp) (res *sysin.OptionTreeDemoViewModel, err error)
+		// TreeOption 获取选项树表关系树选项
+		TreeOption(ctx context.Context) (nodes []tree.Node, err error)
+	}
 	ISysProvinces interface {
 		// Tree 关系树选项列表
 		Tree(ctx context.Context) (list []*sysin.ProvincesTree, err error)
@@ -332,10 +363,6 @@ type (
 	ISysSmsLog interface {
 		// Delete 删除
 		Delete(ctx context.Context, in *sysin.SmsLogDeleteInp) (err error)
-		// Edit 修改/新增
-		Edit(ctx context.Context, in *sysin.SmsLogEditInp) (err error)
-		// Status 更新短信状态
-		Status(ctx context.Context, in *sysin.SmsLogStatusInp) (err error)
 		// View 获取指定字典类型信息
 		View(ctx context.Context, in *sysin.SmsLogViewInp) (res *sysin.SmsLogViewModel, err error)
 		// List 获取列表
@@ -346,32 +373,53 @@ type (
 		GetTemplate(ctx context.Context, template string, config *model.SmsConfig) (val string, err error)
 		// AllowSend 是否允许发送
 		AllowSend(ctx context.Context, models *entity.SysSmsLog, config *model.SmsConfig) (err error)
-		// NowDayCount 当天发送次数
-		NowDayCount(ctx context.Context, event, mobile string) (count int, err error)
+		// NowDayIpSendCount 当天IP累计发送次数
+		NowDayIpSendCount(ctx context.Context, event string) (count int, err error)
 		// VerifyCode 效验验证码
 		VerifyCode(ctx context.Context, in *sysin.VerifyCodeInp) (err error)
+	}
+	ISysTestCategory interface {
+		// Model 测试分类ORM模型
+		Model(ctx context.Context, option ...*handler.Option) *gdb.Model
+		// List 获取测试分类列表
+		List(ctx context.Context, in *sysin.TestCategoryListInp) (list []*sysin.TestCategoryListModel, totalCount int, err error)
+		// Edit 修改/新增测试分类
+		Edit(ctx context.Context, in *sysin.TestCategoryEditInp) (err error)
+		// Delete 删除测试分类
+		Delete(ctx context.Context, in *sysin.TestCategoryDeleteInp) (err error)
+		// MaxSort 获取测试分类最大排序
+		MaxSort(ctx context.Context, in *sysin.TestCategoryMaxSortInp) (res *sysin.TestCategoryMaxSortModel, err error)
+		// View 获取测试分类指定信息
+		View(ctx context.Context, in *sysin.TestCategoryViewInp) (res *sysin.TestCategoryViewModel, err error)
+		// Status 更新测试分类状态
+		Status(ctx context.Context, in *sysin.TestCategoryStatusInp) (err error)
+		// Option 获取测试分类选项
+		Option(ctx context.Context) (opts []*model.Option, err error)
 	}
 )
 
 var (
-	localSysAddons       ISysAddons
-	localSysAddonsConfig ISysAddonsConfig
-	localSysAttachment   ISysAttachment
-	localSysBlacklist    ISysBlacklist
-	localSysConfig       ISysConfig
-	localSysCron         ISysCron
-	localSysCronGroup    ISysCronGroup
-	localSysCurdDemo     ISysCurdDemo
-	localSysDictData     ISysDictData
-	localSysDictType     ISysDictType
-	localSysEmsLog       ISysEmsLog
-	localSysGenCodes     ISysGenCodes
-	localSysLog          ISysLog
-	localSysLoginLog     ISysLoginLog
-	localSysProvinces    ISysProvinces
-	localSysServeLicense ISysServeLicense
-	localSysServeLog     ISysServeLog
-	localSysSmsLog       ISysSmsLog
+	localSysAddons         ISysAddons
+	localSysAddonsConfig   ISysAddonsConfig
+	localSysAttachment     ISysAttachment
+	localSysBlacklist      ISysBlacklist
+	localSysConfig         ISysConfig
+	localSysCron           ISysCron
+	localSysCronGroup      ISysCronGroup
+	localSysCurdDemo       ISysCurdDemo
+	localSysDictData       ISysDictData
+	localSysDictType       ISysDictType
+	localSysEmsLog         ISysEmsLog
+	localSysGenCodes       ISysGenCodes
+	localSysLog            ISysLog
+	localSysLoginLog       ISysLoginLog
+	localSysNormalTreeDemo ISysNormalTreeDemo
+	localSysOptionTreeDemo ISysOptionTreeDemo
+	localSysProvinces      ISysProvinces
+	localSysServeLicense   ISysServeLicense
+	localSysServeLog       ISysServeLog
+	localSysSmsLog         ISysSmsLog
+	localSysTestCategory   ISysTestCategory
 )
 
 func SysAddons() ISysAddons {
@@ -528,6 +576,28 @@ func RegisterSysLoginLog(i ISysLoginLog) {
 	localSysLoginLog = i
 }
 
+func SysNormalTreeDemo() ISysNormalTreeDemo {
+	if localSysNormalTreeDemo == nil {
+		panic("implement not found for interface ISysNormalTreeDemo, forgot register?")
+	}
+	return localSysNormalTreeDemo
+}
+
+func RegisterSysNormalTreeDemo(i ISysNormalTreeDemo) {
+	localSysNormalTreeDemo = i
+}
+
+func SysOptionTreeDemo() ISysOptionTreeDemo {
+	if localSysOptionTreeDemo == nil {
+		panic("implement not found for interface ISysOptionTreeDemo, forgot register?")
+	}
+	return localSysOptionTreeDemo
+}
+
+func RegisterSysOptionTreeDemo(i ISysOptionTreeDemo) {
+	localSysOptionTreeDemo = i
+}
+
 func SysProvinces() ISysProvinces {
 	if localSysProvinces == nil {
 		panic("implement not found for interface ISysProvinces, forgot register?")
@@ -570,4 +640,15 @@ func SysSmsLog() ISysSmsLog {
 
 func RegisterSysSmsLog(i ISysSmsLog) {
 	localSysSmsLog = i
+}
+
+func SysTestCategory() ISysTestCategory {
+	if localSysTestCategory == nil {
+		panic("implement not found for interface ISysTestCategory, forgot register?")
+	}
+	return localSysTestCategory
+}
+
+func RegisterSysTestCategory(i ISysTestCategory) {
+	localSysTestCategory = i
 }

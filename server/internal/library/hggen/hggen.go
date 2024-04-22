@@ -6,7 +6,9 @@
 package hggen
 
 import (
+	"github.com/gogf/gf/v2/os/gfile"
 	_ "hotgo/internal/library/hggen/internal/cmd/gendao"
+	"hotgo/internal/library/hggen/internal/utility/utils"
 	_ "unsafe"
 
 	"context"
@@ -31,13 +33,37 @@ func doGenDaoForArray(ctx context.Context, index int, in gendao.CGenDaoInput)
 
 // Dao 生成数据库实体
 func Dao(ctx context.Context) (err error) {
+
+	// 在执行gf gen dao时，先将生成文件放在临时路径，生成完成后再拷贝到项目
+	// 目的是希望减少触发gf热编译的几率，防止热编译运行时代码生成流程未结束被自动重启打断
+	// gf gen dao 的执行时长主要取决于需要生成数据库表的数量，表越多速度越慢
+	tempPathPrefix := views.GetTempGeneratePath(ctx) + "/dao"
+
 	for _, v := range daoConfig {
 		inp := defaultGenDaoInput
-		err = gconv.Scan(v, &inp)
-		if err != nil {
+		if err = gconv.Scan(v, &inp); err != nil {
 			return
 		}
+		oldPath := inp.Path
+		inp.ImportPrefix = utils.GetImportPath(inp.Path)
+		inp.Path = tempPathPrefix + "/" + inp.Path
+
+		if err = gfile.Remove(inp.Path); err != nil {
+			err = gerror.Newf("清理临时生成目录失败:%v", err)
+			return err
+		}
+
+		if err = gfile.Mkdir(inp.Path); err != nil {
+			err = gerror.Newf("创建临时生成目录失败:%v", err)
+			return err
+		}
+
 		doGenDaoForArray(ctx, -1, inp)
+
+		if err = gfile.CopyDir(inp.Path, gfile.Pwd()+"/"+oldPath); err != nil {
+			err = gerror.Newf("拷贝生成文件失败:%v", err)
+			return err
+		}
 	}
 	return
 }
@@ -129,8 +155,16 @@ func TableSelects(ctx context.Context, in *sysin.GenCodesSelectsInp) (res *sysin
 			Label: v,
 		})
 	}
+	for _, v := range views.TableAligns {
+		res.TableAlign = append(res.TableAlign, &form.Select{
+			Value: v,
+			Name:  views.TableAlignMap[v],
+			Label: views.TableAlignMap[v],
+		})
+	}
 
 	res.Addons = addons.ModuleSelect()
+	res.TreeStyleType = consts.GenCodesTreeStyleTypeOptions
 	return
 }
 
@@ -196,15 +230,12 @@ func Preview(ctx context.Context, in *sysin.GenCodesPreviewInp) (res *sysin.GenC
 	}
 
 	switch in.GenType {
-	case consts.GenCodesTypeCurd:
+	case consts.GenCodesTypeCurd, consts.GenCodesTypeTree:
 		return views.Curd.DoPreview(ctx, &views.CurdPreviewInput{
 			In:        in,
 			DaoConfig: GetDaoConfig(in.DbName),
 			Config:    genConfig,
 		})
-	case consts.GenCodesTypeTree:
-		err = gerror.Newf("生成类型开发中！")
-		return
 	case consts.GenCodesTypeQueue:
 		err = gerror.Newf("生成类型开发中！")
 		return
@@ -222,7 +253,7 @@ func Build(ctx context.Context, in *sysin.GenCodesBuildInp) (err error) {
 	}
 
 	switch in.GenType {
-	case consts.GenCodesTypeCurd:
+	case consts.GenCodesTypeCurd, consts.GenCodesTypeTree:
 		pin := &sysin.GenCodesPreviewInp{SysGenCodes: in.SysGenCodes}
 		return views.Curd.DoBuild(ctx, &views.CurdBuildInput{
 			PreviewIn: &views.CurdPreviewInput{
@@ -233,25 +264,17 @@ func Build(ctx context.Context, in *sysin.GenCodesBuildInp) (err error) {
 			BeforeEvent: views.CurdBuildEvent{"runDao": Dao},
 			AfterEvent: views.CurdBuildEvent{"runService": func(ctx context.Context) (err error) {
 				cfg := GetServiceConfig()
-				if err = ServiceWithCfg(ctx, cfg); err != nil {
-					return
-				}
 
-				// 插件模块，同时运行模块下的gen service
+				// 插件模块，切换到插件下运行gen service
 				if genConfig.Application.Crud.Templates[pin.GenTemplate].IsAddon {
 					// 依然使用配置中的参数，只是将生成路径指向插件模块路径
 					cfg.SrcFolder = "addons/" + pin.AddonName + "/logic"
 					cfg.DstFolder = "addons/" + pin.AddonName + "/service"
-					if err = ServiceWithCfg(ctx, cfg); err != nil {
-						return
-					}
 				}
+				err = ServiceWithCfg(ctx, cfg)
 				return
 			}},
 		})
-	case consts.GenCodesTypeTree:
-		err = gerror.Newf("生成类型开发中！")
-		return
 	case consts.GenCodesTypeQueue:
 		err = gerror.Newf("生成类型开发中！")
 		return

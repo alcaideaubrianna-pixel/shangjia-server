@@ -1,42 +1,44 @@
 import { h, ref } from 'vue';
-import { NAvatar, NImage, NTag, NSwitch, NRate } from 'naive-ui';
+import { NImage, NAvatar, NSwitch, NTag } from 'naive-ui';
 import { cloneDeep } from 'lodash-es';
 import { FormSchema } from '@/components/Form';
 import { Dicts } from '@/api/dict/dict';
-import { Switch } from '@/api/curdDemo';
-import { isArray, isNullObject } from '@/utils/is';
+import { isNullObject } from '@/utils/is';
 import { getFileExt } from '@/utils/urlUtils';
-import { defRangeShortcuts, defShortcuts, formatToDate } from '@/utils/dateUtil';
-import { validate } from '@/utils/validateUtil';
-import { getOptionLabel, getOptionTag, Option, Options, errorImg } from '@/utils/hotgo';
-
+import { defRangeShortcuts } from '@/utils/dateUtil';
+import { Option, errorImg, getOptionLabel, getOptionTag } from '@/utils/hotgo';
+import { renderPopoverMemberSumma, MemberSumma } from '@/utils';
+import { Switch } from '@/api/curdDemo';
 import { usePermission } from '@/hooks/web/usePermission';
 const { hasPermission } = usePermission();
 const $message = window['$message'];
 
 export class State {
   public id = 0; // ID
-  public categoryId = 0; // 分类ID
   public title = ''; // 标题
   public description = ''; // 描述
   public content = ''; // 内容
   public image = ''; // 单图
   public attachfile = ''; // 附件
-  public cityId = 0; // 所在城市
-  public switch = 2; // 显示开关
+  public cityId = null; // 所在城市
   public sort = 0; // 排序
+  public switch = 2; // 显示开关
   public status = 1; // 状态
   public createdBy = 0; // 创建者
-  public updatedBy = 0; // 更新者
+  public createdBySumma?: null | MemberSumma = null; // 创建者摘要信息
   public createdAt = ''; // 创建时间
+  public updatedBy = 0; // 更新者
+  public updatedBySumma?: null | MemberSumma = null; // 更新者摘要信息
   public updatedAt = ''; // 修改时间
   public deletedAt = ''; // 删除时间
+  public categoryId = null; // 测试分类
 
   constructor(state?: Partial<State>) {
     if (state) {
       Object.assign(this, state);
     }
-  }}
+  }
+}
 
 export function newState(state: State | Record<string, any> | null): State {
   if (state !== null) {
@@ -48,21 +50,8 @@ export function newState(state: State | Record<string, any> | null): State {
   return new State();
 }
 
-export interface IOptions extends Options {
-  sys_normal_disable: Option[]; 
-};
-
-export const options = ref<IOptions>({
-  sys_normal_disable: [],
-});
-
+// 表单验证规则
 export const rules = {
-  categoryId: {
-    required: true,
-    trigger: ['blur', 'input'],
-    type: 'number',
-    message: '请输入分类ID',
-  },
   title: {
     required: true,
     trigger: ['blur', 'input'],
@@ -87,15 +76,44 @@ export const rules = {
     type: 'number',
     message: '请输入排序',
   },
+  categoryId: {
+    required: true,
+    trigger: ['blur', 'input'],
+    type: 'number',
+    message: '请输入测试分类',
+  },
 };
 
+// 表格搜索表单
 export const schemas = ref<FormSchema[]>([
   {
     field: 'id',
-    component: 'NInputNumber',
+    component: 'NInput',
     label: 'ID',
     componentProps: {
       placeholder: '请输入ID',
+      onUpdateValue: (e: any) => {
+        console.log(e);
+      },
+    },
+  },
+  {
+    field: 'title',
+    component: 'NInput',
+    label: '标题',
+    componentProps: {
+      placeholder: '请输入标题',
+      onUpdateValue: (e: any) => {
+        console.log(e);
+      },
+    },
+  },
+  {
+    field: 'description',
+    component: 'NInput',
+    label: '描述',
+    componentProps: {
+      placeholder: '请输入描述',
       onUpdateValue: (e: any) => {
         console.log(e);
       },
@@ -115,6 +133,17 @@ export const schemas = ref<FormSchema[]>([
     },
   },
   {
+    field: 'createdBy',
+    component: 'NInput',
+    label: '创建者',
+    componentProps: {
+      placeholder: '请输入ID|用户名|姓名|手机号',
+      onUpdateValue: (e: any) => {
+        console.log(e);
+      },
+    },
+  },
+  {
     field: 'createdAt',
     component: 'NDatePicker',
     label: '创建时间',
@@ -128,11 +157,24 @@ export const schemas = ref<FormSchema[]>([
     },
   },
   {
+    field: 'categoryId',
+    component: 'NSelect',
+    label: '测试分类',
+    defaultValue: null,
+    componentProps: {
+      placeholder: '请选择测试分类',
+      options: [],
+      onUpdateValue: (e: any) => {
+        console.log(e);
+      },
+    },
+  },
+  {
     field: 'testCategoryName',
     component: 'NInput',
-    label: '分类名称',
+    label: '关联分类',
     componentProps: {
-      placeholder: '请输入分类名称',
+      placeholder: '请输入关联分类',
       onUpdateValue: (e: any) => {
         console.log(e);
       },
@@ -140,31 +182,37 @@ export const schemas = ref<FormSchema[]>([
   },
 ]);
 
+// 表格列
 export const columns = [
   {
     title: 'ID',
     key: 'id',
-  },
-  {
-    title: '分类ID',
-    key: 'categoryId',
+    align: 'left',
+    width: 50,
   },
   {
     title: '标题',
     key: 'title',
+    align: 'left',
+    width: 150,
   },
   {
     title: '描述',
     key: 'description',
+    align: 'left',
+    width: 300,
   },
   {
     title: '单图',
     key: 'image',
+    align: 'left',
+    width: 100,
     render(row) {
       return h(NImage, {
         width: 32,
         height: 32,
         src: row.image,
+        fallbackSrc: errorImg,
         onError: errorImg,
         style: {
           width: '32px',
@@ -178,6 +226,8 @@ export const columns = [
   {
     title: '附件',
     key: 'attachfile',
+    align: 'left',
+    width: 100,
     render(row) {
       if (row.attachfile === '') {
         return ``;
@@ -194,13 +244,16 @@ export const columns = [
     },
   },
   {
-    title: '所在城市',
-    key: 'cityId',
+    title: '排序',
+    key: 'sort',
+    align: 'left',
+    width: 100,
   },
   {
     title: '显示开关',
     key: 'switch',
-    width: 100,
+    align: 'left',
+    width: 150,
     render(row) {
       return h(NSwitch, {
         value: row.switch === 1,
@@ -218,12 +271,10 @@ export const columns = [
     },
   },
   {
-    title: '排序',
-    key: 'sort',
-  },
-  {
     title: '状态',
     key: 'status',
+    align: 'left',
+    width: 100,
     render(row) {
       if (isNullObject(row.status)) {
         return ``;
@@ -246,38 +297,86 @@ export const columns = [
   {
     title: '创建者',
     key: 'createdBy',
-  },
-  {
-    title: '更新者',
-    key: 'updatedBy',
+    align: 'left',
+    width: 150,
+    render(row) {
+      return renderPopoverMemberSumma(row.createdBySumma);
+    },
   },
   {
     title: '创建时间',
     key: 'createdAt',
+    align: 'left',
+    width: 180,
+  },
+  {
+    title: '更新者',
+    key: 'updatedBy',
+    align: 'left',
+    width: 150,
+    render(row) {
+      return renderPopoverMemberSumma(row.updatedBySumma);
+    },
   },
   {
     title: '修改时间',
     key: 'updatedAt',
+    align: 'left',
+    width: 180,
   },
   {
-    title: '分类名称',
+    title: '测试分类',
+    key: 'categoryId',
+    align: 'left',
+    width: 100,
+    render(row) {
+      if (isNullObject(row.categoryId)) {
+        return ``;
+      }
+      return h(
+        NTag,
+        {
+          style: {
+            marginRight: '6px',
+          },
+          type: getOptionTag(options.value.testCategoryOption, row.categoryId),
+          bordered: false,
+        },
+        {
+          default: () => getOptionLabel(options.value.testCategoryOption, row.categoryId),
+        }
+      );
+    },
+  },
+  {
+    title: '关联分类',
     key: 'testCategoryName',
+    align: 'left',
+    width: 100,
   },
 ];
 
-async function loadOptions() {
-  options.value = await Dicts({
-    types: [
-      'sys_normal_disable',
-   ],
-  });
-  for (const item of schemas.value) {
-    switch (item.field) {
-      case 'status':
-        item.componentProps.options = options.value.sys_normal_disable;
-        break;
-     }
-  }
-}
+// 字典数据选项
+export const options = ref({
+  sys_normal_disable: [] as Option[],
+  testCategoryOption: [] as Option[],
+});
 
-await loadOptions();
+// 加载字典数据选项
+export function loadOptions() {
+  Dicts({
+    types: ['sys_normal_disable', 'testCategoryOption'],
+  }).then((res) => {
+    options.value = res;
+    for (const item of schemas.value) {
+      switch (item.field) {
+        case 'status':
+          item.componentProps.options = options.value.sys_normal_disable;
+          break;
+        case 'categoryId':
+          item.componentProps.options = options.value.testCategoryOption;
+          break;
+      }
+    }
+  });
+}

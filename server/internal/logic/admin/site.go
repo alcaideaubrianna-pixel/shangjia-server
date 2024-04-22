@@ -82,11 +82,6 @@ func (s *sAdminSite) Register(ctx context.Context, in *adminin.RegisterInp) (err
 		return
 	}
 
-	if len(config.PostIds) == 0 {
-		err = gerror.New("管理员未配置默认岗位")
-		return
-	}
-
 	// 验证唯一性
 	err = service.AdminMember().VerifyUnique(ctx, &adminin.VerifyUniqueInp{
 		Where: g.Map{
@@ -225,39 +220,18 @@ func (s *sAdminSite) MobileLogin(ctx context.Context, in *adminin.MobileLoginInp
 
 // handleLogin .
 func (s *sAdminSite) handleLogin(ctx context.Context, mb *entity.AdminMember) (res *adminin.LoginModel, err error) {
-	var ro *entity.AdminRole
-	if err = dao.AdminRole.Ctx(ctx).Fields("id,key,status").Where("id", mb.RoleId).Scan(&ro); err != nil {
-		err = gerror.Wrap(err, consts.ErrorORM)
-		return
-	}
-
-	if ro == nil {
-		err = gerror.New("角色不存在")
-		return
-	}
-
-	if ro.Status != consts.StatusEnabled {
-		err = gerror.New("角色已被禁用")
-		return
-	}
-
-	var dept *entity.AdminDept
-	if err = dao.AdminDept.Ctx(ctx).Fields("id,status").Where("id", mb.DeptId).Scan(&dept); err != nil || dept == nil {
-		err = gerror.Wrap(err, "获取部门信息失败，请稍后重试！")
-		return
-	}
-
-	if dept.Status != consts.StatusEnabled {
-		err = gerror.New("部门已被禁用，如有疑问请联系管理员")
-		return
+	role, dept, err := s.getLoginRoleAndDept(ctx, mb.RoleId, mb.DeptId)
+	if err != nil {
+		return nil, err
 	}
 
 	user := &model.Identity{
 		Id:       mb.Id,
 		Pid:      mb.Pid,
-		DeptId:   mb.DeptId,
-		RoleId:   ro.Id,
-		RoleKey:  ro.Key,
+		DeptId:   dept.Id,
+		DeptType: dept.Type,
+		RoleId:   role.Id,
+		RoleKey:  role.Key,
 		Username: mb.Username,
 		RealName: mb.RealName,
 		Avatar:   mb.Avatar,
@@ -281,10 +255,48 @@ func (s *sAdminSite) handleLogin(ctx context.Context, mb *entity.AdminMember) (r
 	return
 }
 
+// getLoginRoleAndDept 获取登录的角色和部门信息
+func (s *sAdminSite) getLoginRoleAndDept(ctx context.Context, roleId, deptId int64) (role *entity.AdminRole, dept *entity.AdminDept, err error) {
+	if err = dao.AdminRole.Ctx(ctx).Fields("id,key,status").WherePri(roleId).Scan(&role); err != nil {
+		err = gerror.Wrap(err, consts.ErrorORM)
+		return
+	}
+
+	if role == nil {
+		err = gerror.New("角色不存在或已被删除")
+		return
+	}
+
+	if role.Status != consts.StatusEnabled {
+		err = gerror.New("角色已被禁用，如有疑问请联系管理员")
+		return
+	}
+
+	if err = dao.AdminDept.Ctx(ctx).Fields("id,type,status").WherePri(deptId).Scan(&dept); err != nil {
+		err = gerror.Wrap(err, "获取部门信息失败，请稍后重试！")
+		return
+	}
+
+	if dept == nil {
+		err = gerror.New("部门不存在或已被删除")
+		return
+	}
+
+	if dept.Status != consts.StatusEnabled {
+		err = gerror.New("部门已被禁用，如有疑问请联系管理员")
+		return
+	}
+	return
+}
+
 // BindUserContext 绑定用户上下文
 func (s *sAdminSite) BindUserContext(ctx context.Context, claims *model.Identity) (err error) {
+	//// 如果不想每次访问都重新加载用户信息，可以放开注释。但在本次登录未失效前，用户信息不会刷新
+	//contexts.SetUser(ctx, claims)
+	//return
+
 	var mb *entity.AdminMember
-	if err = dao.AdminMember.Ctx(ctx).Where("id", claims.Id).Scan(&mb); err != nil {
+	if err = dao.AdminMember.Ctx(ctx).WherePri(claims.Id).Scan(&mb); err != nil {
 		err = gerror.Wrap(err, "获取用户信息失败，请稍后重试！")
 		return
 	}
@@ -299,32 +311,16 @@ func (s *sAdminSite) BindUserContext(ctx context.Context, claims *model.Identity
 		return
 	}
 
-	var role *entity.AdminRole
-	if err = dao.AdminRole.Ctx(ctx).Fields("id,key,status").Where("id", mb.RoleId).Scan(&role); err != nil || role == nil {
-		err = gerror.Wrap(err, "获取角色信息失败，请稍后重试！")
-		return
-	}
-
-	if role.Status != consts.StatusEnabled {
-		err = gerror.New("角色已被禁用，如有疑问请联系管理员")
-		return
-	}
-
-	var dept *entity.AdminDept
-	if err = dao.AdminDept.Ctx(ctx).Fields("id,status").Where("id", mb.DeptId).Scan(&dept); err != nil || dept == nil {
-		err = gerror.Wrap(err, "获取部门信息失败，请稍后重试！")
-		return
-	}
-
-	if dept.Status != consts.StatusEnabled {
-		err = gerror.New("部门已被禁用，如有疑问请联系管理员")
-		return
+	role, dept, err := s.getLoginRoleAndDept(ctx, mb.RoleId, mb.DeptId)
+	if err != nil {
+		return err
 	}
 
 	user := &model.Identity{
 		Id:       mb.Id,
 		Pid:      mb.Pid,
-		DeptId:   mb.DeptId,
+		DeptId:   dept.Id,
+		DeptType: dept.Type,
 		RoleId:   mb.RoleId,
 		RoleKey:  role.Key,
 		Username: mb.Username,

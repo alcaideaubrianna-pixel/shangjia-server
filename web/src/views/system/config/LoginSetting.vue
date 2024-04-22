@@ -68,7 +68,7 @@
           />
         </n-form-item>
 
-        <n-form-item label="默认注册岗位" path="loginPostIds">
+        <n-form-item label="默认注册岗位（非必选）" path="loginPostIds">
           <n-select v-model:value="formValue.loginPostIds" multiple :options="options.post" />
         </n-form-item>
 
@@ -182,22 +182,17 @@
 
   function load() {
     show.value = true;
-    new Promise((_resolve, _reject) => {
-      getConfig({ group: group.value })
-        .then((res) => {
-          show.value = false;
-          formValue.value = res.list;
-        })
-        .catch((error) => {
-          show.value = false;
-          message.error(error.toString());
-        });
-    });
+    getConfig({ group: group.value })
+      .then((res) => {
+        formValue.value = res.list;
+      })
+      .finally(() => {
+        show.value = false;
+      });
   }
 
   onMounted(async () => {
-    show.value = true;
-    await loadOptions();
     load();
+    await loadOptions();
   });
 </script>

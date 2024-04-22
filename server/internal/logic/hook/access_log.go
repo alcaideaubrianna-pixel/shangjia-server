@@ -10,14 +10,19 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/text/gstr"
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/service"
 	"hotgo/utility/simple"
+	"strings"
 )
+
+// 忽略的请求方式
+var ignoredRequestMethods = []string{"HEAD", "PRI"}
 
 // accessLog 访问日志
 func (s *sHook) accessLog(r *ghttp.Request) {
-	if r.IsFileRequest() {
+	if s.isIgnoredRequest(r) {
 		return
 	}
 
@@ -36,4 +41,16 @@ func (s *sHook) accessLog(r *ghttp.Request) {
 			g.Log().Infof(ctx, "hook accessLog err:%+v", err)
 		}
 	})
+}
+
+// isIgnoredRequest 是否忽略请求
+func (s *sHook) isIgnoredRequest(r *ghttp.Request) bool {
+	if r.IsFileRequest() {
+		return true
+	}
+
+	if gstr.InArray(ignoredRequestMethods, strings.ToUpper(r.Method)) {
+		return true
+	}
+	return false
 }

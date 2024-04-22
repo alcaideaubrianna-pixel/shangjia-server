@@ -126,12 +126,14 @@
 
   const emit = defineEmits(['update:value']);
   const fileUploadRef = ref();
-  const dialogWidth = ref('85%');
   const dialog = useDialog();
   const showModal = ref(false);
   const chooserRef = ref();
   const previewRef = ref();
   const fileList = ref<string[]>([]);
+  const dialogWidth = computed(() => {
+    return adaModalWidth(1080);
+  });
 
   const getCSSProperties = computed(() => {
     return {
@@ -246,7 +248,6 @@
   );
 
   onMounted(async () => {
-    adaModalWidth(dialogWidth, 1080);
     loadImage();
   });
 </script>

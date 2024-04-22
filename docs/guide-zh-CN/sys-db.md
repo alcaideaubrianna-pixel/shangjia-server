@@ -6,8 +6,7 @@
 - 特殊字段默认表单组件
 - 特殊字段默认表单验证器
 - SQL默认查询方式
-- 其他默认选项
-- 常见问题
+- 其他
 
 ### 字段类型
 
@@ -85,7 +84,7 @@
 
 
 
-### 其他默认选项
+### 其他
 
 #### 默认字典选项
 
@@ -94,8 +93,8 @@
 #### 默认属性
 
 - 默认必填，当数据库字段存在非空`IS_NULLABLE`属性时，默认勾选必填验证
-- 默认唯一，当数据库字段属性存在`UNI`时，默认勾选唯一值验证
-- 默认主键，当数据库字段属性存在`PRI`时，默认为主键，不允许编辑
+- 默认唯一，当数据库字段索引存在`UNI`时，默认勾选唯一值验证
+- 默认主键，当数据库字段索引存在`PRI`时，默认为主键，不允许编辑
 - 默认排序，当数据库字段存在`sort`时，默认开启排序，添加表单自动获取最大排序增量值并填充表单
 - 默认列名，默认使用字段注释作为表格的列名。当数据库字段未设置注释时，默认使用字段名称作为列名
 
@@ -106,10 +105,45 @@
 - 软删除，表存在字段`deleted_at`时，使用表的Orm模型查询条件将会自动加入[ `deleted_at` IS NULL ]，删除时只更新删除时间而不会真的删除数据
 - 树表：不论更新插入，都会根据表中字段`pid`(上级ID)自动维护`level`(树等级)和`tree`(关系树)
 
+
+#### 操作人字段维护
+
+- 生成列表中存在并且勾选展示字段`created_by`(创建者)、`updated_by`(修改者)、`deleted_by`(删除者)时，会自动到表`hg_admin_member`中获取操作人的基本信息摘要，并渲染到列表中，效果如下：
+
+![](images/sys-db-by.png)
+
+- 生成列表中存在并且勾选查询字段`created_by`(创建者)、`updated_by`(修改者)、`deleted_by`(删除者)时，会强制将查询表单改为关键词查询，从`hg_admin_member`查询操作人。效果如下：
+  
+![](images/sys-db-by2.png)
+
+- 查询代码片段，参考路径：[server/internal/logic/admin/member.go](../../server/internal/logic/admin/member.go)
+```go
+
+// 查询创建者
+if in.CreatedBy != "" {
+  ids, err := service.AdminMember().GetIdsByKeyword(ctx, in.CreatedBy)
+  if err != nil {
+    return nil, 0, err
+  }
+  mod = mod.WhereIn(dao.SysGenCurdDemo.Columns().CreatedBy, ids)
+}
+
+// GetIdsByKeyword 根据关键词查找符合条件的用户ID
+func (s *sAdminMember) GetIdsByKeyword(ctx context.Context, ks string) (res []int64, err error) {
+  ks = gstr.Trim(ks)
+  if len(ks) == 0 {
+    return
+  }
+  array, err := dao.AdminMember.Ctx(ctx).Fields("id").
+    Where("`id` = ? or `real_name` = ? or `username` = ? or `mobile` = ?", ks, ks, ks, ks).
+    Array()
+  if err != nil {
+    err = gerror.Wrap(err, "根据关键词获取用户ID失败，请稍后重试！")
+  }
+  res = gvar.New(array).Int64s()
+  return
+}
+```
+
+
 > 这里只列举了较为常用的默认规则，其他更多默认规则请参考：[server/internal/library/hggen/views/column_default.go](../../server/internal/library/hggen/views/column_default.go)
-
-#### 常见问题
-
-#### 1、生成表格字段如何排序？
-
-表格字端排序默认使用的是数据库物理字段的排序位置，所以如果你对字段的位置顺序有要求，请在生成前调整数据库物理字段位置

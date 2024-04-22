@@ -1,6 +1,6 @@
 import { http, jumpExport } from '@/utils/http/axios';
 
-// 获取生成演示列表
+// 获取CURD列表列表
 export function List(params) {
   return http.request({
     url: '/curdDemo/list',
@@ -9,7 +9,7 @@ export function List(params) {
   });
 }
 
-// 删除/批量删除生成演示
+// 删除/批量删除CURD列表
 export function Delete(params) {
   return http.request({
     url: '/curdDemo/delete',
@@ -18,8 +18,7 @@ export function Delete(params) {
   });
 }
 
-
-// 添加/编辑生成演示
+// 添加/编辑CURD列表
 export function Edit(params) {
   return http.request({
     url: '/curdDemo/edit',
@@ -28,18 +27,7 @@ export function Edit(params) {
   });
 }
 
-
-// 修改生成演示状态
-export function Status(params) {
-  return http.request({
-    url: '/curdDemo/status',
-    method: 'POST',
-    params,
-  });
-}
-
-
-// 操作生成演示开关
+// 操作CURD列表开关
 export function Switch(params) {
   return http.request({
     url: '/curdDemo/switch',
@@ -48,8 +36,7 @@ export function Switch(params) {
   });
 }
 
-
-// 获取生成演示指定详情
+// 获取CURD列表指定详情
 export function View(params) {
   return http.request({
     url: '/curdDemo/view',
@@ -58,8 +45,7 @@ export function View(params) {
   });
 }
 
-
-// 获取生成演示最大排序
+// 获取CURD列表最大排序
 export function MaxSort() {
   return http.request({
     url: '/curdDemo/maxSort',
@@ -67,8 +53,7 @@ export function MaxSort() {
   });
 }
 
-
-// 导出生成演示
+// 导出CURD列表
 export function Export(params) {
   jumpExport('/curdDemo/export', params);
 }

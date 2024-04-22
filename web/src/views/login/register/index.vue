@@ -140,7 +140,7 @@
 
 <script lang="ts" setup>
   import '../components/style.less';
-  import { ref, onMounted } from 'vue';
+  import { ref, onMounted, computed } from 'vue';
   import { useRouter } from 'vue-router';
   import { useMessage } from 'naive-ui';
   import { ResultEnum } from '@/enums/httpEnum';
@@ -165,6 +165,7 @@
     password: string;
   }
 
+  const emit = defineEmits(['updateActiveModule']);
   const formRef = ref();
   const router = useRouter();
   const message = useMessage();
@@ -176,8 +177,9 @@
   const { sendLabel, isCounting, loading: sendLoading, activateSend } = useSendCode();
   const agreement = ref(false);
   const inviteCodeDisabled = ref(false);
-  const dialogWidth = ref('85%');
-  const emit = defineEmits(['updateActiveModule']);
+  const dialogWidth = computed(() => {
+    return adaModalWidth();
+  });
 
   const formInline = ref<FormState>({
     username: '',
@@ -243,8 +245,6 @@
       inviteCodeDisabled.value = true;
       formInline.value.inviteCode = inviteCode;
     }
-
-    adaModalWidth(dialogWidth);
   });
 
   function updateActiveModule(key: string) {

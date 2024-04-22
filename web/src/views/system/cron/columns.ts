@@ -12,18 +12,22 @@ export const columns = [
   {
     title: 'ID',
     key: 'id',
+    width: 80,
   },
   {
     title: '任务标题',
     key: 'title',
+    width: 150,
   },
   {
     title: '任务分组',
     key: 'groupName',
+    width: 100,
   },
   {
     title: '执行方法',
     key: 'name',
+    width: 100,
   },
   // {
   //   title: '执行参数',
@@ -50,10 +54,12 @@ export const columns = [
         }
       );
     },
+    width: 100,
   },
   {
     title: '表达式',
     key: 'pattern',
+    width: 150,
   },
   // {
   //   title: '执行次数',
@@ -77,9 +83,11 @@ export const columns = [
         }
       );
     },
+    width: 100,
   },
   {
     title: '创建时间',
     key: 'createdAt',
+    width: 180,
   },
 ];

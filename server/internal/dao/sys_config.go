@@ -18,7 +18,7 @@ type sysConfigDao struct {
 }
 
 var (
-	// SysConfig is globally common accessible object for table hg_sys_config operations.
+	// SysConfig is globally public accessible object for table hg_sys_config operations.
 	SysConfig = sysConfigDao{
 		internal.NewSysConfigDao(),
 	}

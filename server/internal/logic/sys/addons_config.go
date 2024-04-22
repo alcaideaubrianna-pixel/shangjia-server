@@ -17,6 +17,7 @@ import (
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
+	"hotgo/utility/simple"
 )
 
 var AddonsMaskDemoField []string
@@ -55,7 +56,6 @@ func (s *sSysAddonsConfig) GetConfigByGroup(ctx context.Context, in *sysin.GetAd
 		return nil, err
 	}
 
-	isDemo := g.Cfg().MustGet(ctx, "hotgo.isDemo", false)
 	if len(models) > 0 {
 		res = new(sysin.GetAddonsConfigModel)
 		res.List = make(g.Map, len(models))
@@ -65,7 +65,7 @@ func (s *sSysAddonsConfig) GetConfigByGroup(ctx context.Context, in *sysin.GetAd
 				return nil, err
 			}
 			res.List[v.Key] = val
-			if isDemo.Bool() && gstr.InArray(AddonsMaskDemoField, v.Key) {
+			if simple.IsDemo(ctx) && gstr.InArray(AddonsMaskDemoField, v.Key) {
 				res.List[v.Key] = consts.DemoTips
 				res.List[v.Key] = consts.DemoTips
 			}

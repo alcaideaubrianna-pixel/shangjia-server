@@ -26,7 +26,7 @@
         ref="actionRef"
         :actionColumn="actionColumn"
         @update:checked-row-keys="onCheckedRow"
-        :scroll-x="1090"
+        :scroll-x="scrollX"
         :resizeHeightOffset="-10000"
       >
         <template #tableTitle>
@@ -54,7 +54,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { h, reactive, ref, watch } from 'vue';
+  import { h, reactive, ref, watch, computed } from 'vue';
   import { useMessage, useDialog } from 'naive-ui';
   import { BasicColumn, BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, FormSchema, useForm } from '@/components/Form/index';
@@ -62,6 +62,8 @@
   import { PlusOutlined } from '@vicons/antd';
   import { getProvincesChildrenList, Delete } from '@/api/apply/provinces';
   import Edit from './edit.vue';
+  import { adaTableScrollX } from '@/utils/hotgo';
+
   const emit = defineEmits(['reloadTable']);
 
   interface Props {
@@ -111,10 +113,10 @@
   ];
 
   const actionColumn = reactive<BasicColumn>({
-    width: 220,
+    width: 150,
     title: '操作',
     key: 'action',
-    // fixed: 'right',
+    fixed: 'right',
     render(record) {
       return h(TableAction as any, {
         style: 'button',
@@ -130,6 +132,10 @@
         ],
       });
     },
+  });
+
+  const scrollX = computed(() => {
+    return adaTableScrollX(listColumns, actionColumn.width);
   });
 
   const [register, {}] = useForm({

@@ -8,6 +8,7 @@ package admin
 import (
 	"context"
 	"fmt"
+	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/crypto/gmd5"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/database/gredis"
@@ -719,6 +720,7 @@ func (s *sAdminMember) LoginMemberInfo(ctx context.Context) (res *adminin.LoginM
 	res.Mobile = gstr.HideStr(res.Mobile, 40, `*`)
 	res.Email = gstr.HideStr(res.Email, 40, `*`)
 	res.OpenId, _ = service.CommonWechat().GetOpenId(ctx)
+	res.DeptType = contexts.GetDeptType(ctx)
 	return
 }
 
@@ -769,6 +771,22 @@ func (s *sAdminMember) Select(ctx context.Context, in *adminin.MemberSelectInp) 
 	if err != nil {
 		err = gerror.Wrap(err, "获取可选用户选项失败，请稍后重试！")
 	}
+	return
+}
+
+// GetIdsByKeyword 根据关键词查找符合条件的用户ID
+func (s *sAdminMember) GetIdsByKeyword(ctx context.Context, ks string) (res []int64, err error) {
+	ks = gstr.Trim(ks)
+	if len(ks) == 0 {
+		return
+	}
+	array, err := dao.AdminMember.Ctx(ctx).Fields("id").
+		Where("`id` = ? or `real_name` = ? or `username` = ? or `mobile` = ?", ks, ks, ks, ks).
+		Array()
+	if err != nil {
+		err = gerror.Wrap(err, "根据关键词获取用户ID失败，请稍后重试！")
+	}
+	res = gvar.New(array).Int64s()
 	return
 }
 

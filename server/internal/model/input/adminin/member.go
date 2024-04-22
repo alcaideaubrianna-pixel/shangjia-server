@@ -90,6 +90,7 @@ type LoginMemberInfoModel struct {
 	DeptName    string      `json:"deptName"           dc:"所属部门"`
 	RoleName    string      `json:"roleName"           dc:"所属角色"`
 	Permissions []string    `json:"permissions"        dc:"角色信息"`
+	DeptType    string      `json:"deptType"           dc:"部门类型"`
 	DeptId      int64       `json:"-"                  dc:"部门ID"`
 	RoleId      int64       `json:"-"                  dc:"角色ID"`
 	Username    string      `json:"username"           dc:"用户名"`
@@ -115,7 +116,7 @@ type LoginMemberInfoModel struct {
 type MemberEditInp struct {
 	Id           int64       `json:"id"                                            dc:"管理员ID"`
 	RoleId       int64       `json:"roleId"    v:"required#角色不能为空"            dc:"角色ID"`
-	PostIds      []int64     `json:"postIds"   v:"required#岗位不能为空"            dc:"岗位ID"`
+	PostIds      []int64     `json:"postIds"                                       dc:"岗位ID"`
 	DeptId       int64       `json:"deptId"    v:"required#部门不能为空"            dc:"部门ID"`
 	Username     string      `json:"username"   v:"required#账号不能为空"           dc:"帐号"`
 	PasswordHash string      `json:"passwordHash"                                  dc:"密码hash"`
@@ -149,7 +150,7 @@ func (in *MemberEditInp) Filter(ctx context.Context) (err error) {
 	if in.Password != "" {
 		if err := g.Validator().
 			Rules("length:6,16").
-			Messages("#新密码不能为空#新密码需在6~16之间").
+			Messages("新密码不能为空#新密码需在6~16之间").
 			Data(in.Password).Run(ctx); err != nil {
 			return err.Current()
 		}

@@ -12,7 +12,7 @@ import (
 
 // TestReq 测试
 type TestReq struct {
-	g.Meta `path:"/index/test" method:"get" summary:"功能案例" tags:"测试首页"`
+	g.Meta `path:"/index/test" method:"get" tags:"功能案例" summary:"测试首页"`
 	sysin.IndexTestInp
 }
 

@@ -18,7 +18,7 @@ type adminMemberPostDao struct {
 }
 
 var (
-	// AdminMemberPost is globally common accessible object for table hg_admin_member_post operations.
+	// AdminMemberPost is globally public accessible object for table hg_admin_member_post operations.
 	AdminMemberPost = adminMemberPostDao{
 		internal.NewAdminMemberPostDao(),
 	}

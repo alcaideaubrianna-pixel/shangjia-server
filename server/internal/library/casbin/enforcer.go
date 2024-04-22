@@ -8,8 +8,11 @@ package casbin
 import (
 	"context"
 	"github.com/casbin/casbin/v2"
+	"github.com/casbin/casbin/v2/model"
 	_ "github.com/gogf/gf/contrib/drivers/mysql/v2"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gfile"
+	"github.com/gogf/gf/v2/os/gres"
 	"hotgo/internal/consts"
 	"net/http"
 	"strings"
@@ -37,12 +40,29 @@ func InitEnforcer(ctx context.Context) {
 		return
 	}
 
-	Enforcer, err = casbin.NewEnforcer("./manifest/config/casbin.conf", a)
-	if err != nil {
-		g.Log().Panicf(ctx, "casbin.NewEnforcer err . %v", err)
-		return
+	path := "manifest/config/casbin.conf"
+
+	// 优先从本地加载casbin.conf，如果不存在就从资源文件中找
+	modelContent := gfile.GetContents(path)
+	if len(modelContent) == 0 {
+		if !gres.IsEmpty() && gres.Contains(path) {
+			modelContent = string(gres.GetContent(path))
+		}
 	}
 
+	if len(modelContent) == 0 {
+		g.Log().Panicf(ctx, "casbin model file does not exist：%v", path)
+	}
+
+	m, err := model.NewModelFromString(modelContent)
+	if err != nil {
+		g.Log().Panicf(ctx, "casbin NewModelFromString err：%v", err)
+	}
+
+	Enforcer, err = casbin.NewEnforcer(m, a)
+	if err != nil {
+		g.Log().Panicf(ctx, "casbin NewEnforcer err：%v", err)
+	}
 	loadPermissions(ctx)
 }
 

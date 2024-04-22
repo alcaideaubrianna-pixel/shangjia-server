@@ -1,106 +1,122 @@
 <template>
   <div>
-    <n-card
-      :bordered="false"
-      class="proCard mt-4"
-      size="small"
-      :segmented="{ content: true }"
-      :title="data.id ? '日志详情 ID：' + data.id : '日志详情'"
-    >
-      <n-descriptions label-placement="left" class="py-2">
-        <n-descriptions-item label="请求方式">{{ data.method }}</n-descriptions-item>
-        <n-descriptions-item>
-          <template #label>请求地址</template>
-          {{ data.url }}
-        </n-descriptions-item>
-        <n-descriptions-item label="请求耗时">{{ data.takeUpTime }} ms</n-descriptions-item>
-        <n-descriptions-item label="访问IP">{{ data.ip }}</n-descriptions-item>
-        <n-descriptions-item label="IP归属地">{{ data.cityLabel }}</n-descriptions-item>
-        <n-descriptions-item label="链路ID">{{ data.reqId }}</n-descriptions-item>
-        <n-descriptions-item label="响应时间">{{
-          timestampToTime(data.timestamp)
-        }}</n-descriptions-item>
+    <n-spin :show="loading" description="请稍候...">
+      <n-card
+        :bordered="false"
+        class="proCard mt-4"
+        size="small"
+        :segmented="{ content: true }"
+        :title="data.id ? '日志详情 ID：' + data.id : '日志详情'"
+      >
+        <n-descriptions label-placement="left" class="py-2">
+          <n-descriptions-item label="请求方式">{{ data.method }}</n-descriptions-item>
+          <n-descriptions-item>
+            <template #label>请求地址</template>
+            {{ data.url }}
+          </n-descriptions-item>
+          <n-descriptions-item label="请求耗时">{{ data.takeUpTime }} ms</n-descriptions-item>
+          <n-descriptions-item label="访问IP">{{ data.ip }}</n-descriptions-item>
+          <n-descriptions-item label="IP归属地">{{ data.cityLabel }}</n-descriptions-item>
+          <n-descriptions-item label="链路ID">{{ data.reqId }}</n-descriptions-item>
+          <n-descriptions-item label="响应时间">{{
+            timestampToTime(data.timestamp)
+          }}</n-descriptions-item>
 
-        <n-descriptions-item label="创建时间">{{ data.createdAt }}</n-descriptions-item>
-      </n-descriptions>
-    </n-card>
-    <n-card
-      :bordered="false"
-      class="proCard mt-4"
-      size="small"
-      :segmented="{ content: true }"
-      title="访问代理"
-    >
-      {{ data.userAgent }}
-    </n-card>
-    <n-card
-      :bordered="false"
-      class="proCard mt-4"
-      size="small"
-      :segmented="{ content: true }"
-      title="报错信息"
-    >
-      <n-descriptions label-placement="left" class="py-2">
-        <n-descriptions-item label="错误状态码"> {{ data.errorCode }} </n-descriptions-item>
-        <n-descriptions-item label="错误提示">
-          <n-tag type="error"> {{ data.errorMsg }} </n-tag>
-        </n-descriptions-item>
-      </n-descriptions>
-    </n-card>
+          <n-descriptions-item label="创建时间">{{ data.createdAt }}</n-descriptions-item>
+        </n-descriptions>
+      </n-card>
+      <n-card
+        :bordered="false"
+        class="proCard mt-4"
+        size="small"
+        :segmented="{ content: true }"
+        title="访问代理"
+      >
+        {{ data.userAgent }}
+      </n-card>
+      <n-card
+        :bordered="false"
+        class="proCard mt-4"
+        size="small"
+        :segmented="{ content: true }"
+        title="报错信息"
+      >
+        <n-descriptions label-placement="left" class="py-2">
+          <n-descriptions-item label="错误状态码"> {{ data.errorCode }} </n-descriptions-item>
+          <n-descriptions-item label="错误提示">
+            <n-tag type="error"> {{ data.errorMsg }} </n-tag>
+          </n-descriptions-item>
+        </n-descriptions>
+      </n-card>
 
-    <n-card
-      :bordered="false"
-      class="proCard mt-4"
-      size="small"
-      :segmented="{ content: true }"
-      title="堆栈打印"
-    >
-      <JsonViewer
-        :value="data.errorData"
-        :expand-depth="5"
-        copyable
-        boxed
-        sort
-        class="json-width"
-      />
-    </n-card>
+      <n-card
+        :bordered="false"
+        class="proCard mt-4"
+        size="small"
+        :segmented="{ content: true }"
+        title="堆栈打印"
+      >
+        <JsonViewer
+          :value="data.errorData"
+          :expand-depth="5"
+          copyable
+          boxed
+          sort
+          class="json-width"
+        />
+      </n-card>
 
-    <n-card
-      :bordered="false"
-      class="proCard mt-4"
-      size="small"
-      :segmented="{ content: true }"
-      title="Header请求头"
-    >
-      <JsonViewer
-        :value="data.headerData"
-        :expand-depth="5"
-        copyable
-        boxed
-        sort
-        class="json-width"
-      />
-    </n-card>
+      <n-card
+        :bordered="false"
+        class="proCard mt-4"
+        size="small"
+        :segmented="{ content: true }"
+        title="Header请求头"
+      >
+        <JsonViewer
+          :value="data.headerData"
+          :expand-depth="5"
+          copyable
+          boxed
+          sort
+          class="json-width"
+        />
+      </n-card>
 
-    <n-card
-      :bordered="false"
-      class="proCard mt-4"
-      size="small"
-      :segmented="{ content: true }"
-      title="GET参数"
-    >
-      <JsonViewer :value="data.getData" :expand-depth="5" copyable boxed sort class="json-width" />
-    </n-card>
+      <n-card
+        :bordered="false"
+        class="proCard mt-4"
+        size="small"
+        :segmented="{ content: true }"
+        title="GET参数"
+      >
+        <JsonViewer
+          :value="data.getData"
+          :expand-depth="5"
+          copyable
+          boxed
+          sort
+          class="json-width"
+        />
+      </n-card>
 
-    <n-card
-      :bordered="false"
-      class="proCard mt-4"
-      size="small"
-      :segmented="{ content: true }"
-      title="POST参数"
-    >
-      <JsonViewer :value="data.postData" :expand-depth="5" copyable boxed sort class="json-width" />
-    </n-card>
+      <n-card
+        :bordered="false"
+        class="proCard mt-4"
+        size="small"
+        :segmented="{ content: true }"
+        title="POST参数"
+      >
+        <JsonViewer
+          :value="data.postData"
+          :expand-depth="5"
+          copyable
+          boxed
+          sort
+          class="json-width"
+        />
+      </n-card>
+    </n-spin>
   </div>
 </template>
 
@@ -116,20 +132,27 @@
   const message = useMessage();
   const router = useRouter();
   const logId = Number(router.currentRoute.value.params.id);
+  const loading = ref(false);
 
-  onMounted(async () => {
+  onMounted(() => {
     if (logId === undefined || logId < 1) {
       message.error('ID不正确，请检查！');
       return;
     }
-
-    await getInfo();
+    getInfo();
   });
 
   const data = ref({});
 
-  const getInfo = async () => {
-    data.value = await View({ id: logId });
+  const getInfo = () => {
+    loading.value = true;
+    View({ id: logId })
+      .then((res) => {
+        data.value = res;
+      })
+      .finally(() => {
+        loading.value = false;
+      });
   };
 </script>
 

@@ -18,7 +18,7 @@ type sysDictTypeDao struct {
 }
 
 var (
-	// SysDictType is globally common accessible object for table hg_sys_dict_type operations.
+	// SysDictType is globally public accessible object for table hg_sys_dict_type operations.
 	SysDictType = sysDictTypeDao{
 		internal.NewSysDictTypeDao(),
 	}

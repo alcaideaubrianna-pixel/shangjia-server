@@ -67,9 +67,7 @@ func RegisterFunc(key, label string, fun FuncDict, cache ...bool) {
 func SaveFunc(key, label string, fun FuncDict, cache ...bool) {
 	fLock.Lock()
 	defer fLock.Unlock()
-	if _, ok := funcOptions[key]; ok {
-		delete(funcOptions, key)
-	}
+	delete(funcOptions, key)
 	RegisterFunc(key, label, fun, cache...)
 }
 

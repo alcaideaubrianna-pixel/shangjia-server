@@ -27,7 +27,7 @@
         :actionColumn="actionColumn"
         :checked-row-keys="checkedIds"
         @update:checked-row-keys="onCheckedRow"
-        :scroll-x="1280"
+        :scroll-x="scrollX"
         :resizeHeightOffset="-10000"
         size="small"
       >
@@ -100,7 +100,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { h, reactive, ref } from 'vue';
+  import { computed, h, reactive, ref } from 'vue';
   import { useDialog, useMessage } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, useForm } from '@/components/Form/index';
@@ -111,6 +111,7 @@
   import { useRouter } from 'vue-router';
   import { JsonViewer } from 'vue3-json-viewer';
   import 'vue3-json-viewer/dist/index.css';
+  import { adaTableScrollX } from '@/utils/hotgo';
 
   const { hasPermission } = usePermission();
   const router = useRouter();
@@ -123,7 +124,7 @@
   const showModal = ref(false);
 
   const actionColumn = reactive({
-    width: 150,
+    width: 220,
     title: '操作',
     key: 'action',
     fixed: 'right',
@@ -150,6 +151,10 @@
         ],
       });
     },
+  });
+
+  const scrollX = computed(() => {
+    return adaTableScrollX(columns, actionColumn.width);
   });
 
   const [register, {}] = useForm({

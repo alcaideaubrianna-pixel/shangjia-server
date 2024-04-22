@@ -19,7 +19,8 @@
         :row-key="(row) => row.id"
         ref="actionRef"
         :actionColumn="actionColumn"
-        :scroll-x="1280"
+        :scroll-x="scrollX"
+        :resizeHeightOffset="-10000"
       >
         <template #tableTitle>
           <n-button type="primary" @click="addTable" class="min-left-space">
@@ -56,7 +57,6 @@
         </n-alert>
         <n-form
           :model="formParams"
-          :rules="rules"
           ref="formRef"
           label-placement="left"
           :label-width="100"
@@ -150,7 +150,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { h, reactive, ref } from 'vue';
+  import { computed, h, reactive, ref } from 'vue';
   import { useMessage } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, FormSchema, useForm } from '@/components/Form/index';
@@ -162,6 +162,7 @@
   import { useRouter } from 'vue-router';
   import { getUserInfo } from '@/api/system/user';
   import { getCashConfig } from '@/api/sys/config';
+  import { adaTableScrollX } from '@/utils/hotgo';
 
   interface Props {
     type?: string;
@@ -170,16 +171,14 @@
   const props = withDefaults(defineProps<Props>(), {
     type: '',
   });
-  const router = useRouter();
 
+  const router = useRouter();
   const params = ref<any>({
     pageSize: 10,
     title: '',
     content: '',
     status: null,
   });
-
-  const rules = {};
 
   const estimated = ref(
     '本次提现预计将在 ' +
@@ -276,6 +275,10 @@
     },
   });
 
+  const scrollX = computed(() => {
+    return adaTableScrollX(columns, actionColumn.width);
+  });
+
   function setCash() {
     router.push({
       name: 'home_account',
@@ -334,9 +337,6 @@
               reloadTable();
               formParams.value = ref(resetFormParams);
             });
-          })
-          .catch((_e: Error) => {
-            // message.error(e.message ?? '操作失败');
           });
       } else {
         message.error('请填写完整信息');
@@ -366,9 +366,6 @@
               reloadTable();
               PaymentRef.value = ref(resetPaymentParams);
             });
-          })
-          .catch((_e: Error) => {
-            // message.error(e.message ?? '操作失败');
           });
       } else {
         message.error('请填写完整信息');

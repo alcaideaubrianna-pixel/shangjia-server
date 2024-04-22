@@ -7,7 +7,7 @@
     >
       <div class="logo" v-if="navMode === 'horizontal'">
         <img src="~@/assets/images/logo.png" alt="" />
-        <h2 v-show="!collapsed" class="title">HotGo</h2>
+        <h2 v-show="!collapsed" class="title">{{ projectName }}</h2>
       </div>
       <AsideMenu
         @update:collapsed="updateMenu"
@@ -135,7 +135,7 @@
       </div>
       <!-- 个人中心 -->
       <div class="layout-header-trigger layout-header-trigger-min">
-        <n-dropdown trigger="hover" @select="avatarSelect" :options="avatarOptions">
+        <n-dropdown trigger="click" @select="avatarSelect" :options="avatarOptions" show-arrow>
           <div class="avatar">
             <n-avatar v-if="userStore.avatar" round :size="30" :src="userStore.avatar" />
             <n-avatar v-else round :size="30">{{ userStore.realName }}</n-avatar>
@@ -187,6 +187,7 @@
     useNotification,
     NotificationReactive,
     NButton,
+    NText,
   } from 'naive-ui';
   import { TABS_ROUTES } from '@/store/mutation-types';
   import { useUserStore } from '@/store/modules/user';
@@ -233,6 +234,7 @@
 
       // const { username, avatar } = userStore?.info || {};
       const drawerSetting = ref();
+      const projectName = import.meta.env.VITE_GLOB_APP_TITLE;
 
       const state = reactive({
         // username: username || '',
@@ -373,7 +375,36 @@
           },
         },
       ];
+
+      function renderCustomHeader() {
+        return h(
+          'div',
+          {
+            style: 'display: flex; align-items: center; padding: 8px 12px;',
+          },
+          [
+            h('div', null, [
+              h('div', null, [
+                h(NText, { depth: 2 }, { default: () => userStore?.info?.username }),
+              ]),
+              h('div', { style: 'font-size: 12px;' }, [
+                h(NText, { depth: 3 }, { default: () => userStore?.info?.roleName }),
+              ]),
+            ]),
+          ]
+        );
+      }
+
       const avatarOptions = [
+        {
+          key: 'header',
+          type: 'render',
+          render: renderCustomHeader,
+        },
+        {
+          type: 'divider',
+          key: 'd1',
+        },
         {
           label: '个人设置',
           key: 1,
@@ -507,6 +538,7 @@
         getIsMobile,
         userStore,
         updateMenu,
+        projectName,
       };
     },
   });
@@ -537,6 +569,7 @@
         overflow: hidden;
         white-space: nowrap;
         padding-left: 10px;
+        min-width: 200px;
 
         img {
           width: auto;
@@ -546,6 +579,7 @@
 
         .title {
           margin-bottom: 0;
+          min-width: 132px;
         }
       }
 

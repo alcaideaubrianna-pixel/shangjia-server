@@ -61,7 +61,7 @@ func (s *sSysLog) Export(ctx context.Context, in *sysin.LogListInp) (err error) 
 
 	var (
 		titleList  = []string{"ID", "应用", "提交类型", "模块", "提交url", "ip地址", "报错code", "报错信息", "对外id", "请求耗时", "创建时间", "用户", "访问地"}
-		fileName   = "访问日志导出-" + gctx.CtxId(ctx) + ".xlsx"
+		fileName   = "访问日志导出-" + gctx.CtxId(ctx)
 		sheetName  = simple.AppName(ctx)
 		exportList []exportImage
 		row        exportImage
@@ -168,7 +168,6 @@ func (s *sSysLog) AnalysisLog(ctx context.Context) entity.SysLog {
 	}
 
 	// 请求头
-
 	if reqHeadersBytes, _ := gjson.New(request.Header).MarshalJSON(); len(reqHeadersBytes) > 0 {
 		headerData = gjson.New(reqHeadersBytes)
 	}
@@ -216,7 +215,7 @@ func (s *sSysLog) AnalysisLog(ctx context.Context) entity.SysLog {
 		MemberId:   memberId,
 		Method:     request.Method,
 		Module:     module,
-		Url:        request.RequestURI,
+		Url:        request.URL.Path,
 		GetData:    getData,
 		PostData:   postData,
 		HeaderData: headerData,
@@ -246,7 +245,7 @@ func (s *sSysLog) View(ctx context.Context, in *sysin.LogViewInp) (res *sysin.Lo
 		return
 	}
 
-	if g.Cfg().MustGet(ctx, "hotgo.isDemo", false).Bool() {
+	if simple.IsDemo(ctx) {
 		res.HeaderData = gjson.New(`{
 		   "none": [
 		       "` + consts.DemoTips + `"
@@ -315,7 +314,6 @@ func (s *sSysLog) List(ctx context.Context, in *sysin.LogListInp) (list []*sysin
 		return
 	}
 
-	isDemo := g.Cfg().MustGet(ctx, "hotgo.isDemo", false).Bool()
 	for i := 0; i < len(list); i++ {
 		// 管理员
 		if list[i].AppId == consts.AppAdmin {
@@ -339,7 +337,7 @@ func (s *sSysLog) List(ctx context.Context, in *sysin.LogListInp) (list []*sysin
 			list[i].Url = gstr.StrTillEx(list[i].Url, "?")
 		}
 
-		if isDemo {
+		if simple.IsDemo(ctx) {
 			list[i].HeaderData = gjson.New(`{
 			   "none": [
 			       "` + consts.DemoTips + `"

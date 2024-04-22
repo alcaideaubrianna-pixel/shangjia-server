@@ -19,7 +19,8 @@
         :row-key="(row) => row.id"
         ref="actionRef"
         :actionColumn="actionColumn"
-        :scroll-x="1280"
+        :scroll-x="scrollX"
+        :resizeHeightOffset="-10000"
       >
         <template #tableTitle>
           <n-button type="info" @click="openGroupModal">
@@ -46,7 +47,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { h, reactive, ref } from 'vue';
+  import { computed, h, reactive, ref } from 'vue';
   import { useDialog, useMessage } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, FormSchema, useForm } from '@/components/Form/index';
@@ -57,6 +58,7 @@
   import Edit from '@/views/monitor/netconn/modal/edit.vue';
   import { newState, options, State } from '@/views/monitor/netconn/modal/model';
   import { defRangeShortcuts } from '@/utils/dateUtil';
+  import { adaTableScrollX } from '@/utils/hotgo';
 
   const message = useMessage();
   const dialog = useDialog();
@@ -66,7 +68,7 @@
   const formParams = ref({});
 
   const actionColumn = reactive({
-    width: 150,
+    width: 180,
     title: '操作',
     key: 'action',
     fixed: 'right',
@@ -87,6 +89,10 @@
         ],
       });
     },
+  });
+
+  const scrollX = computed(() => {
+    return adaTableScrollX(columns, actionColumn.width);
   });
 
   const schemas: FormSchema[] = [
@@ -171,9 +177,6 @@
           message.success('操作成功');
           reloadTable();
         });
-      },
-      onNegativeClick: () => {
-        // message.error('取消');
       },
     });
   }

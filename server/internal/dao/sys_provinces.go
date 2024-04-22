@@ -18,7 +18,7 @@ type sysProvincesDao struct {
 }
 
 var (
-	// SysProvinces is globally common accessible object for table hg_sys_provinces operations.
+	// SysProvinces is globally public accessible object for table hg_sys_provinces operations.
 	SysProvinces = sysProvincesDao{
 		internal.NewSysProvincesDao(),
 	}

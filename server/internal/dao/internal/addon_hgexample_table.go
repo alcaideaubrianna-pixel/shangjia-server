@@ -21,6 +21,9 @@ type AddonHgexampleTableDao struct {
 // AddonHgexampleTableColumns defines and stores column names for table hg_addon_hgexample_table.
 type AddonHgexampleTableColumns struct {
 	Id          string // ID
+	Pid         string // 上级ID
+	Level       string // 树等级
+	Tree        string // 关系树
 	CategoryId  string // 分类ID
 	Flag        string // 标签
 	Title       string // 标题
@@ -47,9 +50,6 @@ type AddonHgexampleTableColumns struct {
 	Hobby       string // 爱好
 	Channel     string // 渠道
 	CityId      string // 所在城市
-	Pid         string // 上级ID
-	Level       string // 树等级
-	Tree        string // 关系树
 	Remark      string // 备注
 	Status      string // 状态
 	CreatedBy   string // 创建者
@@ -62,6 +62,9 @@ type AddonHgexampleTableColumns struct {
 // addonHgexampleTableColumns holds the columns for table hg_addon_hgexample_table.
 var addonHgexampleTableColumns = AddonHgexampleTableColumns{
 	Id:          "id",
+	Pid:         "pid",
+	Level:       "level",
+	Tree:        "tree",
 	CategoryId:  "category_id",
 	Flag:        "flag",
 	Title:       "title",
@@ -88,9 +91,6 @@ var addonHgexampleTableColumns = AddonHgexampleTableColumns{
 	Hobby:       "hobby",
 	Channel:     "channel",
 	CityId:      "city_id",
-	Pid:         "pid",
-	Level:       "level",
-	Tree:        "tree",
 	Remark:      "remark",
 	Status:      "status",
 	CreatedBy:   "created_by",

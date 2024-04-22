@@ -41,6 +41,7 @@
 
       <n-modal
         v-model:show="showModal"
+        :mask-closable="false"
         :show-icon="false"
         preset="dialog"
         title="创建新插件"
@@ -127,12 +128,12 @@
 </template>
 
 <script lang="ts" setup>
-  import { h, reactive, ref } from 'vue';
+  import { computed, h, reactive, ref } from 'vue';
   import { NIcon, useMessage, useDialog, useNotification } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, useForm } from '@/components/Form/index';
   import { List, Build, UnInstall, Install, Upgrade } from '@/api/develop/addons';
-  import { PlusOutlined, QuestionCircleOutlined } from '@vicons/antd';
+  import { PlusOutlined } from '@vicons/antd';
   import { newState, schemas, columns, options } from './model';
   import { adaModalWidth } from '@/utils/hotgo';
 
@@ -144,15 +145,17 @@
   const formRef: any = ref(null);
   const actionRef = ref();
   const formParams = ref<any>();
-  const dialogWidth = ref('50%');
   const checkedIds = ref([]);
   const searchFormRef = ref<any>();
+  const dialogWidth = computed(() => {
+    return adaModalWidth();
+  });
 
   const actionColumn = reactive({
     width: 220,
     title: '操作',
     key: 'action',
-    // fixed: 'right',
+    fixed: 'right',
     render(record) {
       return h(TableAction as any, {
         style: 'button',
@@ -196,7 +199,6 @@
   }
 
   const loadDataTable = async (res) => {
-    adaModalWidth(dialogWidth);
     return await List({ ...res, ...searchFormRef.value?.formModel });
   };
 

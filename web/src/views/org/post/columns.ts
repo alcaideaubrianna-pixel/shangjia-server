@@ -5,12 +5,12 @@ export const columns = [
   {
     title: 'ID',
     key: 'id',
-    width: 80,
+    width: 100,
   },
   {
     title: '岗位',
     key: 'name',
-    width: 100,
+    width: 200,
     render(row) {
       return h(
         NTag,
@@ -48,17 +48,14 @@ export const columns = [
       );
     },
   },
-  // {
-  //   title: '排序',
-  //   key: 'sort',
-  //   width: 100,
-  // },
+  {
+    title: '备注',
+    key: 'sort',
+    width: 150,
+  },
   {
     title: '创建时间',
     key: 'createdAt',
-    width: 150,
-    render: (rows, _) => {
-      return rows.createdAt;
-    },
+    width: 180,
   },
 ];

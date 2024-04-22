@@ -45,7 +45,7 @@ func Build(ctx context.Context, option *BuildOption) (err error) {
 	)
 
 	if resourcePath == "" {
-		err = gerror.New("请先设置一个有效的插件资源路径，配置名称:'hotgo.addonsResourcePath'")
+		err = gerror.New("请先设置一个有效的插件资源路径，配置名称:'system.addonsResourcePath'")
 		return
 	}
 

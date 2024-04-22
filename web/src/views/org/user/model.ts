@@ -2,11 +2,10 @@ import { cloneDeep } from 'lodash-es';
 import { ref } from 'vue';
 import { getDeptOption } from '@/api/org/dept';
 import { getRoleOption } from '@/api/system/role';
-import { getPostOption } from '@/api/org/post';
 import { FormSchema, useForm } from '@/components/Form';
 import { statusOptions } from '@/enums/optionsiEnum';
 import { defRangeShortcuts } from '@/utils/dateUtil';
-import {Dicts} from "@/api/dict/dict";
+import { Dicts } from '@/api/dict/dict';
 
 // 增加余额/积分.
 
@@ -199,6 +198,8 @@ export const options = ref<any>({
   roleTabs: [{ id: -1, name: '全部' }],
   dept: [],
   post: [],
+  sys_user_sex: [],
+  sys_normal_disable: [],
 });
 
 export async function loadOptions() {
@@ -215,9 +216,11 @@ export async function loadOptions() {
   }
 
   const tmpOptions = await Dicts({
-    types: ['adminPostOption'],
+    types: ['adminPostOption', 'sys_user_sex', 'sys_normal_disable'],
   });
-  options.value.post =tmpOptions?.adminPostOption;
+  options.value.post = tmpOptions?.adminPostOption;
+  options.value.sys_user_sex = tmpOptions?.sys_user_sex;
+  options.value.sys_normal_disable = tmpOptions?.sys_normal_disable;
 }
 
 function treeDataToCompressed(source) {

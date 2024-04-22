@@ -47,6 +47,20 @@ type (
 		// View 获取指定信息
 		View(ctx context.Context, in *sysin.TableViewInp) (res *sysin.TableViewModel, err error)
 	}
+	ISysTenantOrder interface {
+		// Model 多租户功能演示ORM模型
+		Model(ctx context.Context, option ...*handler.Option) *gdb.Model
+		// List 获取多租户功能演示列表
+		List(ctx context.Context, in *sysin.TenantOrderListInp) (list []*sysin.TenantOrderListModel, totalCount int, err error)
+		// Export 导出多租户功能演示
+		Export(ctx context.Context, in *sysin.TenantOrderListInp) (err error)
+		// Edit 修改/新增多租户功能演示
+		Edit(ctx context.Context, in *sysin.TenantOrderEditInp) (err error)
+		// Delete 删除多租户功能演示
+		Delete(ctx context.Context, in *sysin.TenantOrderDeleteInp) (err error)
+		// View 获取多租户功能演示指定信息
+		View(ctx context.Context, in *sysin.TenantOrderViewInp) (res *sysin.TenantOrderViewModel, err error)
+	}
 	ISysTreeTable interface {
 		// Model Orm模型
 		Model(ctx context.Context, option ...*handler.Option) *gdb.Model
@@ -62,10 +76,11 @@ type (
 )
 
 var (
-	localSysConfig    ISysConfig
-	localSysIndex     ISysIndex
-	localSysTable     ISysTable
-	localSysTreeTable ISysTreeTable
+	localSysConfig      ISysConfig
+	localSysIndex       ISysIndex
+	localSysTable       ISysTable
+	localSysTenantOrder ISysTenantOrder
+	localSysTreeTable   ISysTreeTable
 )
 
 func SysConfig() ISysConfig {
@@ -99,6 +114,17 @@ func SysTable() ISysTable {
 
 func RegisterSysTable(i ISysTable) {
 	localSysTable = i
+}
+
+func SysTenantOrder() ISysTenantOrder {
+	if localSysTenantOrder == nil {
+		panic("implement not found for interface ISysTenantOrder, forgot register?")
+	}
+	return localSysTenantOrder
+}
+
+func RegisterSysTenantOrder(i ISysTenantOrder) {
+	localSysTenantOrder = i
 }
 
 func SysTreeTable() ISysTreeTable {

@@ -1,55 +1,90 @@
 <template>
   <div>
-    <n-spin :show="loading" description="请稍候...">
-      <n-modal
-        v-model:show="showModal"
-        :mask-closable="false"
-        :show-icon="false"
-        preset="dialog"
-        transform-origin="center"
-        :title="formValue.@{.pk.TsName} > 0 ? '编辑 #' + formValue.@{.pk.TsName} : '添加'"
-        :style="{
-          width: dialogWidth,
-        }"
-      >
-        <n-scrollbar style="max-height: 87vh" class="pr-5">
+    <n-modal
+      v-model:show="showModal"
+      :mask-closable="false"
+      :show-icon="false"
+      preset="dialog"
+      transform-origin="center"
+      :title="formValue.@{.pk.TsName} > 0 ? '编辑@{.tableComment} #' + formValue.@{.pk.TsName} : '添加@{.tableComment}'"
+      :style="{
+        width: dialogWidth,
+      }"
+    >
+      <n-scrollbar style="max-height: 87vh" class="pr-5">
+        <n-spin :show="loading" description="请稍候...">
           <n-form
-            :model="formValue"
-            :rules="rules"
             ref="formRef"
+            :model="formValue"
+            @{ if eq .options.Step.HasRules true }:rules="rules"@{end}
             :label-placement="settingStore.isMobile ? 'top' : 'left'"
             :label-width="100"
             class="py-4"
           >
-  @{.formItem}
+           <n-grid cols="1 s:1 m:@{.options.PresetStep.FormGridCols} l:@{.options.PresetStep.FormGridCols} xl:@{.options.PresetStep.FormGridCols} 2xl:@{.options.PresetStep.FormGridCols}" responsive="screen">
+            @{.formItem}
+            </n-grid>
           </n-form>
-        </n-scrollbar>
-        <template #action>
-          <n-space>
-            <n-button @click="closeForm">取消</n-button>
-            <n-button type="info" :loading="formBtnLoading" @click="confirmForm">确定</n-button>
-          </n-space>
-        </template>
-      </n-modal>
-    </n-spin>
+        </n-spin>
+      </n-scrollbar>
+      <template #action>
+        <n-space>
+          <n-button @click="closeForm"> 取消 </n-button>
+          <n-button type="info" :loading="formBtnLoading" @click="confirmForm"> 确定 </n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
 <script lang="ts" setup>
-@{.script.import}  import { rules, options, State, newState } from './model';
-  import { useProjectSettingStore } from '@/store/modules/projectSetting';
+@{.script.import}  import { useProjectSettingStore } from '@/store/modules/projectSetting';
   import { useMessage } from 'naive-ui';
   import { adaModalWidth } from '@/utils/hotgo';
 
   const emit = defineEmits(['reloadTable']);
   const message = useMessage();
   const settingStore = useProjectSettingStore();
-  const dialogWidth = ref('75%');
   const loading = ref(false);
   const showModal = ref(false);
   const formValue = ref<State>(newState(null));
   const formRef = ref<any>({});
   const formBtnLoading = ref(false);
+  const dialogWidth = computed(() => {
+    return adaModalWidth(840);
+  });
+
+  function openModal(state: State) {
+    showModal.value = true;
+    @{ if eq .options.Step.IsTreeTable true }
+    // 加载关系树选项
+    loadTreeOption();
+    @{end}
+    // 新增
+    if (!state || state.@{.pk.TsName} < 1) {
+      formValue.value = newState(state);
+      @{ if eq .options.Step.HasMaxSort true }
+      loading.value = true;
+      MaxSort()
+        .then((res) => {
+          formValue.value.sort = res.sort;
+        })
+        .finally(() => {
+          loading.value = false;
+        });@{end}
+      return;
+    }
+
+    // 编辑
+    loading.value = true;
+    View({ @{.pk.TsName}: state.@{.pk.TsName} })
+      .then((res) => {
+        formValue.value = res;
+      })
+      .finally(() => {
+        loading.value = false;
+      });
+  }
 
   function confirmForm(e) {
     e.preventDefault();
@@ -59,7 +94,7 @@
         Edit(formValue.value).then((_res) => {
           message.success('操作成功');
           setTimeout(() => {
-            showModal.value = false;
+            closeForm();
             emit('reloadTable');
           });
         });
@@ -75,11 +110,10 @@
     loading.value = false;
   }
 
-@{.script.setup}
-
   defineExpose({
     openModal,
   });
 </script>
 
 <style lang="less"></style>
+

@@ -27,7 +27,7 @@
         :actionColumn="actionColumn"
         :checked-row-keys="checkedIds"
         @update:checked-row-keys="onCheckedRow"
-        :scroll-x="1090"
+        :scroll-x="scrollX"
         :resizeHeightOffset="-10000"
         size="small"
         @update:sorter="handleUpdateSorter"
@@ -75,7 +75,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { h, reactive, ref } from 'vue';
+  import { computed, h, reactive, ref } from 'vue';
   import { useDialog, useMessage } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, useForm } from '@/components/Form/index';
@@ -84,7 +84,7 @@
   import { State, columns, schemas, options, newState } from './model';
   import { DeleteOutlined, PlusOutlined, ExportOutlined } from '@vicons/antd';
   import { useRouter } from 'vue-router';
-  import { getOptionLabel } from '@/utils/hotgo';
+  import { adaTableScrollX, getOptionLabel } from '@/utils/hotgo';
   import Edit from './edit.vue';
 
   const router = useRouter();
@@ -102,7 +102,7 @@
     width: 300,
     title: '操作',
     key: 'action',
-    // fixed: 'right',
+    fixed: 'right',
     render(record) {
       return h(TableAction as any, {
         style: 'button',
@@ -159,6 +159,10 @@
         },
       });
     },
+  });
+
+  const scrollX = computed(() => {
+    return adaTableScrollX(columns, actionColumn.width);
   });
 
   const [register, {}] = useForm({

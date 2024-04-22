@@ -14,6 +14,7 @@ type TestCategory struct {
 	g.Meta      `orm:"table:hg_test_category, do:true"`
 	Id          interface{} // 分类ID
 	Name        interface{} // 分类名称
+	ShortName   interface{} // 简称
 	Description interface{} // 描述
 	Sort        interface{} // 排序
 	Remark      interface{} // 备注

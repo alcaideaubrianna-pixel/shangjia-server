@@ -18,7 +18,6 @@ import (
 	"github.com/gogf/gf/v2/util/gconv"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
-	"hotgo/internal/library/hgorm"
 	"hotgo/internal/library/hgorm/handler"
 	"hotgo/internal/library/hgorm/hook"
 	"hotgo/internal/library/location"
@@ -63,8 +62,8 @@ func (s *sSysLoginLog) List(ctx context.Context, in *sysin.LoginLogListInp) (lis
 	}
 
 	// 查询IP地址
-	if in.SysLogIp != "" {
-		mod = mod.Where("sysLog."+dao.SysLog.Columns().Ip, in.SysLogIp)
+	if in.LoginIp != "" {
+		mod = mod.Where(dao.SysLoginLog.Columns().LoginIp, in.LoginIp)
 	}
 
 	// 用户名
@@ -72,34 +71,23 @@ func (s *sSysLoginLog) List(ctx context.Context, in *sysin.LoginLogListInp) (lis
 		mod = mod.Where(dao.SysLoginLog.Columns().Username, in.Username)
 	}
 
-	// 关联表sysLog
-	mod = mod.LeftJoin(hgorm.GenJoinOnRelation(
-		dao.SysLoginLog.Table(), dao.SysLoginLog.Columns().ReqId, // 主表表名,关联条件
-		dao.SysLog.Table(), "sysLog", dao.SysLog.Columns().ReqId, // 关联表表名,别名,关联条件
-	)...)
-
 	totalCount, err = mod.Clone().Count(1)
 	if err != nil || totalCount == 0 {
 		return
 	}
 
-	// 关联表select
-	fields, err := hgorm.GenJoinSelect(ctx, sysin.LoginLogListModel{}, &dao.SysLoginLog, []*hgorm.Join{
-		{Dao: &dao.SysLog, Alias: "sysLog"},
-	})
-
-	if err != nil {
-		return
-	}
-
-	if err = mod.Fields(fields).Hook(hook.CityLabel).Handler(handler.FilterAuth).Page(in.Page, in.PerPage).OrderDesc(dao.SysLoginLog.Columns().Id).Scan(&list); err != nil {
+	if err = mod.Fields(sysin.LoginLogListModel{}).Hook(hook.CityLabel).Handler(handler.FilterAuth).Page(in.Page, in.PerPage).OrderDesc(dao.SysLoginLog.Columns().Id).Scan(&list); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return list, totalCount, err
 	}
 
 	for _, v := range list {
-		v.Os = useragent.GetOs(v.SysLogUserAgent)
-		v.Browser = useragent.GetBrowser(v.SysLogUserAgent)
+		v.Os = useragent.GetOs(v.UserAgent)
+		v.Browser = useragent.GetBrowser(v.UserAgent)
+		v.SysLogId, err = dao.SysLog.Ctx(ctx).Fields("id").Where("req_id", v.ReqId).Value()
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 	return
 }
@@ -118,7 +106,7 @@ func (s *sSysLoginLog) Export(ctx context.Context, in *sysin.LoginLogListInp) (e
 	}
 
 	var (
-		fileName  = "导出登录日志-" + gctx.CtxId(ctx) + ".xlsx"
+		fileName  = "导出登录日志-" + gctx.CtxId(ctx)
 		sheetName = fmt.Sprintf("索引条件共%v行,共%v页,当前导出是第%v页,本页共%v行", totalCount, form.CalPageCount(totalCount, in.PerPage), in.Page, len(list))
 		exports   []sysin.LoginLogExportModel
 	)
@@ -148,12 +136,32 @@ func (s *sSysLoginLog) Push(ctx context.Context, in *sysin.LoginLogPushInp) {
 	if in.Response == nil {
 		in.Response = new(adminin.LoginModel)
 	}
+
+	r := ghttp.RequestFromCtx(ctx)
+	if r == nil {
+		g.Log().Warningf(ctx, "ctx not http request")
+		return
+	}
+
+	clientIp := location.GetClientIp(r)
+	ipData, err := location.GetLocation(ctx, clientIp)
+	if err != nil {
+		g.Log().Debugf(ctx, "location.GetLocation clientIp:%v, err:%+v", clientIp, err)
+	}
+
+	if ipData == nil {
+		ipData = new(location.IpLocationData)
+	}
+
 	var models entity.SysLoginLog
 	models.ReqId = gctx.CtxId(ctx)
 	models.MemberId = in.Response.Id
 	models.Username = in.Response.Username
 	models.LoginAt = gtime.Now()
-	models.LoginIp = location.GetClientIp(ghttp.RequestFromCtx(ctx))
+	models.LoginIp = clientIp
+	models.UserAgent = r.UserAgent()
+	models.ProvinceId = ipData.ProvinceCode
+	models.CityId = ipData.CityCode
 	models.Status = consts.StatusEnabled
 
 	if in.Err != nil {
@@ -166,8 +174,8 @@ func (s *sSysLoginLog) Push(ctx context.Context, in *sysin.LoginLogPushInp) {
 		models.Response = gjson.New(in.Response)
 	}
 
-	if err := queue.Push(consts.QueueLoginLogTopic, models); err != nil {
-		g.Log().Warningf(ctx, "push err:%+v, models:%+v", err, models)
+	if err = queue.Push(consts.QueueLoginLogTopic, models); err != nil {
+		g.Log().Warningf(ctx, "push LoginLog err:%+v, models:%v", err, gjson.New(models).String())
 	}
 }
 

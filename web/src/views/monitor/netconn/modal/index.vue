@@ -22,9 +22,8 @@
         :actionColumn="actionColumn"
         :checked-row-keys="checkedIds"
         @update:checked-row-keys="onCheckedRow"
-        :scroll-x="1090"
+        :scroll-x="scrollX"
         :resizeHeightOffset="-10000"
-        size="small"
       >
         <template #tableTitle>
           <n-button
@@ -118,7 +117,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { h, onMounted, reactive, ref } from 'vue';
+  import { computed, h, reactive, ref } from 'vue';
   import { useDialog, useMessage, NTag } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, useForm } from '@/components/Form/index';
@@ -126,7 +125,7 @@
   import { Delete, Export, List, Status, AssignRouter } from '@/api/serveLicense';
   import { columns, newState, options, schemas, State } from './model';
   import { DeleteOutlined, ExportOutlined, PlusOutlined } from '@vicons/antd';
-  import { adaModalWidth, getOptionLabel } from '@/utils/hotgo';
+  import { adaModalWidth, adaTableScrollX, getOptionLabel } from '@/utils/hotgo';
   import Edit from './edit.vue';
 
   const { hasPermission } = usePermission();
@@ -139,9 +138,11 @@
   const showModal = ref(false);
   const formParams = ref<State>();
   const showRoutesModal = ref(false);
-  const dialogWidth = ref('75%');
   const formBtnLoading = ref(false);
   const formRef = ref<any>({});
+  const dialogWidth = computed(() => {
+    return adaModalWidth();
+  });
 
   const actionColumn = reactive({
     width: 300,
@@ -186,6 +187,10 @@
         ],
       });
     },
+  });
+
+  const scrollX = computed(() => {
+    return adaTableScrollX(columns, actionColumn.width);
   });
 
   const [register, {}] = useForm({
@@ -233,9 +238,6 @@
           reloadTable();
         });
       },
-      onNegativeClick: () => {
-        // message.error('取消');
-      },
     });
   }
 
@@ -252,9 +254,6 @@
           message.success('删除成功');
           reloadTable();
         });
-      },
-      onNegativeClick: () => {
-        // message.error('取消');
       },
     });
   }
@@ -341,10 +340,6 @@
       }
     );
   }
-
-  onMounted(async () => {
-    adaModalWidth(dialogWidth);
-  });
 </script>
 
 <style lang="less" scoped></style>

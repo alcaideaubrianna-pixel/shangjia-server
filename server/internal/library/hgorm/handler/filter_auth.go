@@ -13,6 +13,7 @@ import (
 	"hotgo/internal/consts"
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/model/entity"
+	"hotgo/utility/convert"
 	"hotgo/utility/tree"
 )
 
@@ -22,7 +23,7 @@ func FilterAuth(m *gdb.Model) *gdb.Model {
 	var (
 		needAuth    bool
 		filterField string
-		fields      = escapeFieldsToSlice(m.GetFieldsStr())
+		fields      = convert.EscapeFieldsToSlice(m.GetFieldsStr())
 	)
 
 	// 优先级：created_by > member_id
@@ -97,11 +98,6 @@ func FilterAuthWithField(filterField string) func(m *gdb.Model) *gdb.Model {
 		}
 		return m
 	}
-}
-
-// escapeFieldsToSlice 将转义过的字段转换为字段集切片
-func escapeFieldsToSlice(s string) []string {
-	return gstr.Explode(",", gstr.Replace(gstr.Replace(s, "`,`", ","), "`", ""))
 }
 
 // GetDeptAndSub 获取指定部门的所有下级，含本部门

@@ -14,6 +14,7 @@ import (
 
 func init() {
 	dict.RegisterEnums("payType", "支付方式", PayTypeOptions)
+	dict.RegisterEnums("payStatus", "支付状态", PayStatusOptions)
 }
 
 const (
@@ -71,6 +72,12 @@ const (
 	PayStatusWait = 1 // 待支付
 	PayStatusOk   = 2 // 已支付
 )
+
+// PayStatusOptions 支付状态选项
+var PayStatusOptions = []*model.Option{
+	dict.GenDefaultOption(PayStatusWait, "待支付"),
+	dict.GenSuccessOption(PayStatusOk, "已支付"),
+}
 
 // 退款状态
 

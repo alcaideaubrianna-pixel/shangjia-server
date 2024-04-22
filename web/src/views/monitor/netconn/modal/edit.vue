@@ -97,7 +97,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { onMounted, ref, computed, watch } from 'vue';
+  import { ref, computed, watch } from 'vue';
   import { Edit, View } from '@/api/serveLicense';
   import DatePicker from '@/components/DatePicker/datePicker.vue';
   import { rules, options, State, newState } from './model';
@@ -131,8 +131,10 @@
   const params = ref<State>(props.formParams);
   const message = useMessage();
   const formRef = ref<any>({});
-  const dialogWidth = ref('75%');
   const formBtnLoading = ref(false);
+  const dialogWidth = computed(() => {
+    return adaModalWidth();
+  });
 
   function confirmForm(e) {
     e.preventDefault();
@@ -152,10 +154,6 @@
       formBtnLoading.value = false;
     });
   }
-
-  onMounted(async () => {
-    adaModalWidth(dialogWidth);
-  });
 
   function closeForm() {
     isShowModal.value = false;

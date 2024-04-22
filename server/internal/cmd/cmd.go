@@ -36,6 +36,8 @@ var (
 		---------------------------------------------------------------------------------
 		工具
 		>> 释放casbin权限，用于清理无效的权限设置  [go run main.go tools -m=casbin -a1=refresh]
+		>> 打印所有打包的资源文件列表  [go run main.go tools -m=gres -a1=dump]
+		>> 打印指定打包的资源文件内容  [go run main.go tools -m=gres -a1=content -a2=resource/template/home/index.html]
 		---------------------------------------------------------------------------------
 		升级更新
 		>> 修复菜单关系树  [go run main.go up -m=fix -a1=menuTree]

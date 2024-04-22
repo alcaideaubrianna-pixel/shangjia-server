@@ -9,7 +9,12 @@ import (
 	"context"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gfile"
+	"github.com/gogf/gf/v2/os/gres"
+	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/gconv"
+	"hotgo/internal/library/addons"
+	"hotgo/internal/library/contexts"
 	"hotgo/internal/model"
 	"hotgo/internal/service"
 	"hotgo/utility/charset"
@@ -77,6 +82,24 @@ func (s *sView) RenderTpl(ctx context.Context, tpl string, data ...model.View) {
 	// 内置对象
 	viewData["BuildIn"] = &viewBuildIn{httpRequest: request}
 
+	// 插件模板，兼容从资源文件中读取
+	if addonName := contexts.GetAddonName(ctx); len(addonName) > 0 {
+		basePath := addons.GetResourcePath(ctx)
+		if len(basePath) > 0 && !gstr.Contains(tpl, basePath) {
+			path := addons.ViewPath(addonName, basePath)
+			tpl = path + "/" + tpl
+		}
+
+		content := ""
+		if !gres.IsEmpty() {
+			content = string(gres.GetContent(tpl))
+		} else {
+			content = gfile.GetContents(tpl)
+		}
+		_ = request.Response.WriteTplContent(content, viewData)
+		return
+	}
+
 	// 渲染模板
 	_ = request.Response.WriteTpl(tpl, viewData)
 }
@@ -95,7 +118,7 @@ func (s *sView) Error(ctx context.Context, err error) {
 	)
 
 	// 是否输出错误堆栈到页面
-	if g.Cfg().MustGet(ctx, "hotgo.debug", true).Bool() {
+	if simple.Debug(ctx) {
 		stack = charset.SerializeStack(err)
 	}
 

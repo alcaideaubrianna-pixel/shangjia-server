@@ -84,12 +84,14 @@ func (s *sSysDictData) List(ctx context.Context, in *sysin.DictDataListInp) (lis
 		mod = mod.Where("type", in.Type)
 	}
 
-	// 访问路径
+	if in.Value != "" {
+		mod = mod.Where("value", in.Value)
+	}
+
 	if in.Label != "" {
 		mod = mod.WhereLike("label", "%"+in.Label+"%")
 	}
 
-	// 请求方式
 	if in.Status > 0 {
 		mod = mod.Where("status", in.Status)
 	}

@@ -1,12 +1,10 @@
-# 应用名称
-appName: "hotgo"
-
-
-# hotgo配置
-hotgo:
+# hotgo系统配置
+system:
+  # 应用名称
+  appName: "hotgo"
   # debug开关，开启后接口出现错误时会向前端输出堆栈信息，可选：false|true，默认为true
   debug: true
-  # gf运行模式，可选：not-set|develop|testing|staging|product
+  # gf运行模式，可选：not-set|develop|testing|staging|product。product模式下后台【开发工具】菜单自动隐藏
   mode: "develop"
   # IP归属地解析方法，可选：cz88|whois，默认为whois
   ipMethod: "whois"
@@ -66,6 +64,7 @@ server:
     <<: *defaultLogger
 
 
+# tcp服务
 tcp:
   # 服务器
   server:
@@ -171,7 +170,7 @@ router:
     exceptLogin: [ ]
 
 
-#缓存
+# 缓存驱动
 cache:
   adapter: "file"                    # 缓存驱动方式，支持：memory|redis|file，不填默认memory
   fileDir: "./storage/cache"         # 文件缓存路径，adapter=file时必填
@@ -187,25 +186,28 @@ token:
   multiLogin: true                       # 是否允许多端登录， false|true 默认为true
 
 
-#消息队列
+# 消息队列
 queue:
   switch: true                                        # 队列开关，可选：true|false，默认为true
   driver: "disk"                                      # 队列驱动，可选：disk|redis|rocketmq|kafka，默认为disk
-  retry: 2                                            # 重试次数，仅rocketmq支持
   groupName: "hotgo"                                  # mq群组名称
-  #磁盘队列
+  # 磁盘队列
   disk:
     path: "./storage/diskqueue"                       # 数据存放路径
     batchSize: 100                                    # 每100条消息同步一次，batchSize和batchTime满足其一就会同步一次
     batchTime: 1                                      # 每1秒消息同步一次
     segmentSize: 10485760                             # 每个topic分片数据文件最大字节，默认10M
     segmentLimit: 3000                                # 每个topic最大分片数据文件数量，超出部分将会丢弃
-  #redis，默认使用全局redis运行队列
+  # redis，默认使用全局redis运行队列
   redis:
     timeout: 0                                        # 队列超时时间以秒为单位，0表示永不超时。如果队列在设定的超时时间内没有被消费，则会被销毁
   rocketmq:
-    address: "127.0.0.1:9876"                         # broker地址+端口
-    logLevel: "all"                                   # 系统日志级别，可选：all|close|debug|info|warn|error|fatal
+    nameSrvAdders: ["127.0.0.1:9876"]                  # nameSrvAdder+端口，支持多个
+    accessKey: ""                                      # 选填。如果开启了acl控制就必填
+    secretKey: ""                                      # 选填。如果开启了acl控制就必填
+    brokerAddr: "127.0.0.1:10911"                      # brokerAddr+端口，选填。用于消费者订阅主题前会检查主题是否存在，不存在会自动创建。你也可以在rocketmq控制台手动创建主题
+    retry: 0                                           # 重试次数
+    logLevel: "info"                                   # rocketmq日志输出级别，可选：all|close|debug|info|warn|error|fatal
   kafka:
     address: "127.0.0.1:9092"                         # kafka地址+端口
     version: "2.0.0.0"                                # kafka专属配置，默认2.0.0.0
@@ -248,7 +250,7 @@ hggen:
   delimiters: [ "@{", "}" ]                                             # 模板引擎变量分隔符号
   # 生成应用模型，所有生成模板允许自定义，可以参考default模板进行改造
   application:
-    # CRUD模板
+    # CRUD和关系树列表模板
     crud:
       templates:
         # 默认的主包模板
@@ -278,12 +280,6 @@ hggen:
           sqlPath: "./storage/data/generate/addons"                     # 生成sql语句路径
           webApiPath: "../web/src/api/addons/{$name}"                   # webApi生成路径
           webViewsPath: "../web/src/views/addons/{$name}"               # web页面生成路径
-
-    # 关系树列表模板
-    tree:
-      templates:
-        - group: "default"
-          templatePath: "./resource/generate/default/tree"
 
     # 消息队列模板
     queue:

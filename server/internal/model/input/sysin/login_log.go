@@ -7,6 +7,8 @@ package sysin
 
 import (
 	"context"
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/os/gtime"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/adminin"
@@ -34,29 +36,16 @@ type LoginLogListInp struct {
 	form.PageReq
 	Username string        `json:"username"  dc:"用户名"`
 	Status   int           `json:"status"    dc:"状态"`
-	LoginAt  []*gtime.Time `json:"loginAt" dc:"登录时间"`
-	SysLogIp string        `json:"sysLogIp"  dc:"IP地址"`
+	LoginAt  []*gtime.Time `json:"loginAt"   dc:"登录时间"`
+	LoginIp  string        `json:"loginIp"   dc:"登录IP"`
 }
 
 type LoginLogListModel struct {
-	Id               int64       `json:"id"               dc:"日志ID"`
-	ReqId            string      `json:"reqId"            dc:"请求ID"`
-	MemberId         int64       `json:"memberId"         dc:"用户ID"`
-	Username         string      `json:"username"         dc:"用户名"`
-	LoginAt          *gtime.Time `json:"loginAt"          dc:"登录时间"`
-	ErrMsg           string      `json:"errMsg"           dc:"错误提示"`
-	Status           int         `json:"status"           dc:"状态"`
-	CreatedAt        *gtime.Time `json:"createdAt"        dc:"创建时间"`
-	UpdatedAt        *gtime.Time `json:"updatedAt"        dc:"修改时间"`
-	SysLogId         int64       `json:"sysLogId"         dc:"日志ID"`
-	SysLogIp         string      `json:"sysLogIp"         dc:"IP地址"`
-	SysLogProvinceId int64       `json:"sysLogProvinceId" dc:"省编码"`
-	SysLogCityId     int64       `json:"sysLogCityId"     dc:"市编码"`
-	SysLogErrorCode  int         `json:"sysLogErrorCode"  dc:"报错code"`
-	SysLogUserAgent  string      `json:"sysLogUserAgent"  dc:"UA信息"`
-	CityLabel        string      `json:"cityLabel"        dc:"城市标签"`
-	Os               string      `json:"os"               dc:"系统信息"`
-	Browser          string      `json:"browser"          dc:"浏览器信息"`
+	entity.SysLoginLog
+	Os        string    `json:"os"`
+	Browser   string    `json:"browser"`
+	CityLabel string    `json:"cityLabel"`
+	SysLogId  gdb.Value `json:"sysLogId"`
 }
 
 func (in *LoginLogListInp) Filter(ctx context.Context) (err error) {
@@ -65,20 +54,22 @@ func (in *LoginLogListInp) Filter(ctx context.Context) (err error) {
 
 // LoginLogExportModel 导出登录日志
 type LoginLogExportModel struct {
-	Id               int64       `json:"id"               dc:"日志ID"`
-	ReqId            string      `json:"reqId"            dc:"请求ID"`
-	MemberId         int64       `json:"memberId"         dc:"用户ID"`
-	Username         string      `json:"username"         dc:"用户名"`
-	LoginAt          int64       `json:"loginAt"          dc:"登录时间"`
-	ErrMsg           string      `json:"errMsg"           dc:"错误提示"`
-	Status           int         `json:"status"           dc:"状态"`
-	CreatedAt        *gtime.Time `json:"createdAt"        dc:"创建时间"`
-	UpdatedAt        *gtime.Time `json:"updatedAt"        dc:"修改时间"`
-	SysLogIp         string      `json:"sysLogIp"         dc:"IP地址"`
-	SysLogProvinceId int64       `json:"sysLogProvinceId" dc:"省编码"`
-	SysLogCityId     int64       `json:"sysLogCityId"     dc:"市编码"`
-	SysLogErrorCode  int         `json:"sysLogErrorCode"  dc:"报错code"`
-	SysLogUserAgent  string      `json:"sysLogUserAgent"  dc:"UA信息"`
+	Id         int64       `json:"id"         orm:"id"          description:"日志ID"`
+	ReqId      string      `json:"reqId"      orm:"req_id"      description:"请求ID"`
+	MemberId   int64       `json:"memberId"   orm:"member_id"   description:"用户ID"`
+	Username   string      `json:"username"   orm:"username"    description:"用户名"`
+	Response   *gjson.Json `json:"response"   orm:"response"    description:"响应数据"`
+	LoginAt    *gtime.Time `json:"loginAt"    orm:"login_at"    description:"登录时间"`
+	LoginIp    string      `json:"loginIp"    orm:"login_ip"    description:"登录IP"`
+	ProvinceId int64       `json:"provinceId" orm:"province_id" description:"省编码"`
+	CityId     int64       `json:"cityId"     orm:"city_id"     description:"市编码"`
+	UserAgent  string      `json:"userAgent"  orm:"user_agent"  description:"UA信息"`
+	ErrMsg     string      `json:"errMsg"     orm:"err_msg"     description:"错误提示"`
+	Status     int         `json:"status"     orm:"status"      description:"状态"`
+	CreatedAt  *gtime.Time `json:"createdAt"  orm:"created_at"  description:"创建时间"`
+	UpdatedAt  *gtime.Time `json:"updatedAt"  orm:"updated_at"  description:"修改时间"`
+	Os         string      `json:"os"`
+	Browser    string      `json:"browser"`
 }
 
 // LoginLogPushInp 解推送登录日志

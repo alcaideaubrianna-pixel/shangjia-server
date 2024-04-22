@@ -59,6 +59,13 @@
               v-bind="getComponentProps(schema)"
             />
           </template>
+          <template v-else-if="schema.component === 'NCascader'">
+            <n-cascader
+              :class="{ isFull: schema.isFull !== false && getProps.isFull }"
+              v-model:value="formModel[schema.field]"
+              v-bind="getComponentProps(schema)"
+            />
+          </template>
           <!--动态渲染表单组件-->
           <component
             v-else
@@ -127,7 +134,16 @@
 </template>
 
 <script lang="ts">
-  import { defineComponent, reactive, ref, computed, unref, onMounted, watch } from 'vue';
+  import {
+    defineComponent,
+    reactive,
+    ref,
+    computed,
+    unref,
+    onMounted,
+    watch,
+    defineExpose,
+  } from 'vue';
   import { createPlaceholderMessage } from './helper';
   import { useFormEvents } from './hooks/useFormEvents';
   import { useFormValues } from './hooks/useFormValues';
@@ -139,8 +155,10 @@
   import type { GridProps } from 'naive-ui/lib/grid';
   import type { FormSchema, FormProps, FormActionType } from './types/form';
 
-  import { isArray } from '@/utils/is';
+  import {isArray, isBoolean, isFunction} from '@/utils/is';
   import { deepMerge } from '@/utils';
+  import { usePermission } from '@/hooks/web/usePermission';
+  import {ActionItem} from "@/components/Table";
 
   export default defineComponent({
     name: 'BasicForm',
@@ -158,6 +176,7 @@
       const gridCollapsed = ref(true);
       const loadingSub = ref(false);
       const isUpdateDefaultRef = ref(false);
+      const { hasPermission } = usePermission();
 
       const getSubmitBtnOptions = computed(() => {
         return Object.assign(
@@ -222,7 +241,12 @@
       );
 
       const getSchema = computed((): FormSchema[] => {
-        const schemas: FormSchema[] = unref(schemaRef) || (unref(getProps).schemas as any);
+        const rawSchemas: FormSchema[] = unref(schemaRef) || (unref(getProps).schemas as any);
+
+        const schemas = rawSchemas.filter((schema) => {
+          return hasPermission(schema.auth as string[]) && isIfShow(schema);
+        });
+
         for (const schema of schemas) {
           const { defaultValue } = schema;
           // handle date type
@@ -239,6 +263,20 @@
         getSchema,
         formModel,
       });
+
+      function isIfShow(action: ActionItem): boolean {
+        const ifShow = action.ifShow;
+
+        let isIfShow = true;
+
+        if (isBoolean(ifShow)) {
+          isIfShow = ifShow;
+        }
+        if (isFunction(ifShow)) {
+          isIfShow = ifShow(action);
+        }
+        return isIfShow;
+      }
 
       const { handleSubmit, validate, resetFields, getFieldsValue, clearValidate, setFieldsValue } =
         useFormEvents({
@@ -314,6 +352,7 @@
         isInline,
         getComponentProps,
         unfoldToggle,
+        setFieldsValue,
       };
     },
   });

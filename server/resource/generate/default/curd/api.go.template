@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"@{.importInput}"
 	"hotgo/internal/model/input/form"
+	@{ if eq .options.Step.IsTreeTable true }"hotgo/utility/tree"@{end}
 )
 
 // ListReq 查询@{.tableComment}列表
@@ -89,4 +90,12 @@ type SwitchReq struct {
 }
 
 type SwitchRes struct{}
+@{end}
+@{ if eq .options.Step.IsTreeTable true }
+// TreeOptionReq 获取@{.tableComment}关系树选项
+type TreeOptionReq struct {
+	g.Meta `path:"/@{.varName | LcFirst}/treeOption" method:"get" tags:"@{.tableComment}" summary:"获取@{.tableComment}关系树选项"`
+}
+
+type TreeOptionRes []tree.Node
 @{end}

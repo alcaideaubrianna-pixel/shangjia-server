@@ -11,7 +11,7 @@ import (
 	"context"
 	"@{.importApi}"
 	"hotgo/internal/model/input/form"
-	"hotgo/internal/model/input/@{.templateGroup}in"
+	"@{.importInput}"
 	"@{.importService}"
 	"hotgo/utility/validate"
 )
@@ -96,6 +96,14 @@ func (c *c@{.varName}) Status(ctx context.Context, req *@{.varName | ToLower}.St
 // Switch 更新@{.tableComment}开关状态
 func (c *c@{.varName}) Switch(ctx context.Context, req *@{.varName | ToLower}.SwitchReq) (res *@{.varName | ToLower}.SwitchRes, err error) {
     err = service.@{.servFunName}().Switch(ctx, &req.@{.varName}SwitchInp)
+	return
+}
+@{end}
+@{ if eq .options.Step.IsTreeTable true }
+// TreeOption 获取@{.tableComment}关系树选项
+func (c *c@{.varName}) TreeOption(ctx context.Context, req *@{.varName | ToLower}.TreeOptionReq) (res *@{.varName | ToLower}.TreeOptionRes, err error) {
+    data, err := service.@{.servFunName}().TreeOption(ctx)
+    res = (*@{.varName | ToLower}.TreeOptionRes)(&data)
 	return
 }
 @{end}

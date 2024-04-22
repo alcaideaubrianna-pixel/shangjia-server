@@ -28,6 +28,7 @@ const (
 	InputTypeEditInpValidator = 4 // 添加&编辑验证器
 	InputTypeUpdateFields     = 5 // 编辑修改过滤字段
 	InputTypeInsertFields     = 6 // 编辑新增过滤字段
+	InputTypeTreeOptionFields = 7 // 关系树查询字段
 	EditInpValidatorGenerally = "if err := g.Validator().Rules(\"%s\").Data(in.%s).Messages(\"%s\").Run(ctx); err != nil {\n\t\treturn err.Current()\n\t}\n"
 )
 
@@ -39,7 +40,50 @@ func (l *gCurd) inputTplData(ctx context.Context, in *CurdPreviewInput) (data g.
 	data["editInpValidator"] = l.generateInputListColumns(ctx, in, InputTypeEditInpValidator)
 	data["updateFieldsColumns"] = l.generateInputListColumns(ctx, in, InputTypeUpdateFields)
 	data["insertFieldsColumns"] = l.generateInputListColumns(ctx, in, InputTypeInsertFields)
+	data["viewModelColumns"] = l.generateInputViewColumns(ctx, in)
+	if in.options.Step.IsTreeTable {
+		data["treeOptionFields"] = l.generateInputListColumns(ctx, in, InputTypeTreeOptionFields)
+	}
 	return
+}
+
+func (l *gCurd) generateInputViewColumns(ctx context.Context, in *CurdPreviewInput) string {
+	buffer := bytes.NewBuffer(nil)
+
+	index := 0
+	array := make([][]string, 1000)
+	// 主表
+	for _, field := range in.masterFields {
+		// 查询用户摘要
+		if field.IsList && in.options.Step.HasHookMemberSummary && IsMemberSummaryField(field.Name) {
+			tagKey := "`"
+			descriptionTag := gstr.Replace(formatComment(field.Dc)+"摘要信息", `"`, `\"`)
+			result := []string{"    #" + field.GoName + "Summa"}
+			result = append(result, " #*hook.MemberSumma")
+			result = append(result, " #"+fmt.Sprintf(tagKey+`json:"%s"`, field.TsName+"Summa"))
+			result = append(result, " #"+fmt.Sprintf(`dc:"%s"`+tagKey, descriptionTag))
+			array[index] = result
+			index++
+		}
+	}
+
+	tw := tablewriter.NewWriter(buffer)
+	tw.SetBorder(false)
+	tw.SetRowLine(false)
+	tw.SetAutoWrapText(false)
+	tw.SetColumnSeparator("")
+	tw.AppendBulk(array)
+	tw.Render()
+	stContent := buffer.String()
+	// Let's do this hack of table writer for indent!
+	stContent = gstr.Replace(stContent, "  #", "")
+	stContent = gstr.Replace(stContent, "` ", "`")
+	stContent = gstr.Replace(stContent, "``", "")
+	stContent = removeEndWrap(stContent)
+
+	buffer.Reset()
+	buffer.WriteString(stContent)
+	return "\tentity." + in.In.DaoName + "\n" + buffer.String()
 }
 
 func (l *gCurd) generateInputListColumns(ctx context.Context, in *CurdPreviewInput, inputType int) string {
@@ -48,12 +92,27 @@ func (l *gCurd) generateInputListColumns(ctx context.Context, in *CurdPreviewInp
 	array := make([][]string, 1000)
 	// 主表
 	for _, field := range in.masterFields {
-		row := l.generateStructFieldDefinition(field, inputType)
+		row := l.generateStructFieldDefinition(in, field, inputType, true)
 		if row == nil {
 			continue
 		}
 		array[index] = row
 		index++
+
+		switch inputType {
+		case InputTypeListModel:
+			// 查询用户摘要
+			if field.IsList && in.options.Step.HasHookMemberSummary && IsMemberSummaryField(field.Name) {
+				tagKey := "`"
+				descriptionTag := gstr.Replace(formatComment(field.Dc)+"摘要信息", `"`, `\"`)
+				result := []string{"    #" + field.GoName + "Summa"}
+				result = append(result, " #*hook.MemberSumma")
+				result = append(result, " #"+fmt.Sprintf(tagKey+`json:"%s"`, field.TsName+"Summa"))
+				result = append(result, " #"+fmt.Sprintf(`dc:"%s"`+tagKey, descriptionTag))
+				array[index] = result
+				index++
+			}
+		}
 	}
 
 	// 关联表
@@ -63,7 +122,7 @@ func (l *gCurd) generateInputListColumns(ctx context.Context, in *CurdPreviewInp
 				continue
 			}
 			for _, field := range v.Columns {
-				row := l.generateStructFieldDefinition(field, inputType)
+				row := l.generateStructFieldDefinition(in, field, inputType, false)
 				if row != nil {
 					array[index] = row
 					index++
@@ -92,43 +151,62 @@ func (l *gCurd) generateInputListColumns(ctx context.Context, in *CurdPreviewInp
 }
 
 // generateStructFieldForModel generates and returns the attribute definition for specified field.
-func (l *gCurd) generateStructFieldDefinition(field *sysin.GenCodesColumnListModel, inputType int) []string {
+func (l *gCurd) generateStructFieldDefinition(in *CurdPreviewInput, field *sysin.GenCodesColumnListModel, inputType int, isMaster bool) []string {
 	var (
 		tagKey         = "`"
 		result         = []string{"    #" + field.GoName}
 		descriptionTag = gstr.Replace(formatComment(field.Dc), `"`, `\"`)
 	)
 
+	addResult := func() []string {
+		result = append(result, " #"+field.GoType)
+		result = append(result, " #"+fmt.Sprintf(tagKey+`json:"%s"`, field.TsName))
+		result = append(result, " #"+fmt.Sprintf(`dc:"%s"`+tagKey, descriptionTag))
+		return result
+	}
+
+	isQuery := false
+
 	switch inputType {
 	case InputTypeListInp:
-		if !field.IsQuery {
+		if in.options.Step.IsTreeTable && IsPidName(field.Name) {
+			isQuery = true
+			field.QueryWhere = WhereModeEq
+		}
+		if !field.IsQuery && !isQuery {
 			return nil
 		}
 
 		if field.QueryWhere == WhereModeBetween {
 			result = append(result, " #[]"+field.GoType)
 		} else {
-			result = append(result, " #"+field.GoType)
+			// 查询用户摘要时，固定接收字符串类型
+			if field.IsQuery && in.options.Step.HasQueryMemberSummary && IsMemberSummaryField(field.Name) {
+				result = append(result, " #string")
+			} else {
+				result = append(result, " #"+field.GoType)
+			}
 		}
 		result = append(result, " #"+fmt.Sprintf(tagKey+`json:"%s"`, field.TsName))
 		result = append(result, " #"+fmt.Sprintf(`dc:"%s"`+tagKey, descriptionTag))
 
 	case InputTypeListModel:
-		if !field.IsList {
+		// 主表的主键
+		if IsIndexPK(field.Index) && isMaster {
+			addResult()
+			// 树表的pid字段
+		} else if in.options.Step.IsTreeTable && IsPidName(field.Name) {
+			addResult()
+		} else if field.IsList {
+			addResult()
+		} else {
 			return nil
 		}
-
-		result = append(result, " #"+field.GoType)
-		result = append(result, " #"+fmt.Sprintf(tagKey+`json:"%s"`, field.TsName))
-		result = append(result, " #"+fmt.Sprintf(`dc:"%s"`+tagKey, descriptionTag))
 	case InputTypeExportModel:
 		if !field.IsExport {
 			return nil
 		}
-
-		result = append(result, " #"+field.GoType)
-		result = append(result, " #"+fmt.Sprintf(tagKey+`json:"%s"`, field.TsName))
-		result = append(result, " #"+fmt.Sprintf(`dc:"%s"`+tagKey, descriptionTag))
+		addResult()
 	case InputTypeEditInpValidator:
 		if !field.IsEdit {
 			return nil
@@ -150,18 +228,23 @@ func (l *gCurd) generateStructFieldDefinition(field *sysin.GenCodesColumnListMod
 		if !field.IsEdit && field.GoName != "UpdatedBy" {
 			return nil
 		}
-
-		result = append(result, " #"+field.GoType)
-		result = append(result, " #"+fmt.Sprintf(tagKey+`json:"%s"`, field.TsName))
-		result = append(result, " #"+fmt.Sprintf(`dc:"%s"`+tagKey, descriptionTag))
+		addResult()
 	case InputTypeInsertFields:
 		if !field.IsEdit && field.GoName != "CreatedBy" {
 			return nil
 		}
-
-		result = append(result, " #"+field.GoType)
-		result = append(result, " #"+fmt.Sprintf(tagKey+`json:"%s"`, field.TsName))
-		result = append(result, " #"+fmt.Sprintf(`dc:"%s"`+tagKey, descriptionTag))
+		addResult()
+	case InputTypeTreeOptionFields:
+		if IsIndexPK(field.Index) {
+			return addResult()
+		}
+		if IsPidName(field.Name) {
+			return addResult()
+		}
+		if in.options.Tree.TitleColumn == field.Name {
+			return addResult()
+		}
+		return nil
 	default:
 		panic("inputType is invalid")
 	}

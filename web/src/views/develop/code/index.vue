@@ -20,6 +20,7 @@
         :actionColumn="actionColumn"
         @update:checked-row-keys="onCheckedRow"
         :scroll-x="1090"
+        :resizeHeightOffset="-10000"
       >
         <template #tableTitle>
           <n-button type="primary" @click="addTable">
@@ -30,8 +31,7 @@
             </template>
             立即生成
           </n-button>
-          &nbsp;
-          <n-button type="error" @click="batchDelete" :disabled="batchDeleteDisabled">
+          <n-button type="error" @click="batchDelete" :disabled="batchDeleteDisabled" class="min-left-space">
             <template #icon>
               <n-icon>
                 <DeleteOutlined />
@@ -44,6 +44,7 @@
 
       <n-modal
         v-model:show="showModal"
+        :mask-closable="false"
         :show-icon="false"
         preset="dialog"
         title="立即生成"
@@ -302,10 +303,10 @@
   };
 
   const actionColumn = reactive({
-    width: 220,
+    width: 180,
     title: '操作',
     key: 'action',
-    // fixed: 'right',
+    fixed: 'right',
     render(record) {
       return h(TableAction as any, {
         style: 'button',

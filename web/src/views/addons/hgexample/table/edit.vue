@@ -150,7 +150,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { onMounted, ref, computed, watch } from 'vue';
+  import { ref, computed, watch } from 'vue';
   import { rules, options, State, newState } from './model';
   import { Edit, MaxSort } from '@/api/addons/hgexample/table';
   import { useMessage } from 'naive-ui';
@@ -190,8 +190,10 @@
 
   const message = useMessage();
   const formRef = ref<any>({});
-  const dialogWidth = ref('75%');
   const formBtnLoading = ref(false);
+  const dialogWidth = computed(() => {
+    return adaModalWidth();
+  });
 
   function confirmForm(e) {
     e.preventDefault();
@@ -230,10 +232,6 @@
       }
     }
   );
-
-  onMounted(async () => {
-    adaModalWidth(dialogWidth);
-  });
 </script>
 
 <style lang="less"></style>

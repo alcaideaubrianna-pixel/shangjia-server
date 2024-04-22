@@ -3,13 +3,15 @@
 目录
 
 - 使用条件
-- 生成配置
-- 一个生成增删改查列表例子
-- 多数据库生成配置
+- 模板配置
+- CLI配置
+- 生成CRUD表格
+- 生成树形表格
+- 多数据库使用
 - 自定义生成模板
 - 内置gf-cli
 - 指定gf-cli版本
-- 指定数据库驱动类型
+- 指定数据库驱动
 
 
 > 在HotGo中可以通过后台开发工具快速的一键生成CRUD，自动生成Api、控制器、业务逻辑、Web页面、表单组件、菜单权限等。
@@ -17,33 +19,23 @@
 
 ### 使用条件
 
-- hotgo 版本号 >= 2.2.10
+- hotgo 版本号 >= 2.13.1
 - 使用前必须先看 [数据库](sys-db.md)
-
-#### 增删改查列表
-
-- 表自增长字段为 `id`
-
-#### 关系树列表
-
-- 表自增长字段为 `id`
 
 
 ### 生成模板配置
 
-- 注意：线上环境务必将`allowedIPs`参数设为空，考虑到项目安全问题请勿线上生成使用！
-
-- 默认配置路径：server/manifest/config/config.yaml
-
+- 配置路径：server/manifest/config/config.yaml
 ```yaml
+# 生成代码
 hggen:
-  allowedIPs: ["127.0.0.1", "*"]                                      # 白名单，*代表所有，只有允许的IP后台才能使用生成代码功能
-  selectDbs: [ "default" ]                                            # 可选生成表的数据库配置名称，支持多库
-  disableTables : ["hg_sys_gen_codes","hg_admin_role_casbin"]         # 禁用的表，禁用以后将不会在选择表中看到
-  delimiters: ["@{", "}"]                                             # 模板引擎变量分隔符号
+  allowedIPs: [ "127.0.0.1", "*" ]                                      # 白名单，*代表所有，只有允许的IP后台才能使用生成代码功能
+  selectDbs: [ "default" ]                                              # 可选生成表的数据库配置名称，支持多库
+  disableTables: [ "hg_sys_gen_codes","hg_admin_role_casbin" ]          # 禁用的表，禁用以后将不会在选择表中看到
+  delimiters: [ "@{", "}" ]                                             # 模板引擎变量分隔符号
   # 生成应用模型，所有生成模板允许自定义，可以参考default模板进行改造
   application:
-    # CRUD模板
+    # CRUD和关系树列表模板
     crud:
       templates:
         # 默认的主包模板
@@ -51,34 +43,28 @@ hggen:
           isAddon: false                                                # 是否为插件模板 false｜true
           masterPackage: "sys"                                          # 主包名称，需和controllerPath、logicPath、inputPath保持关联
           templatePath: "./resource/generate/default/curd"              # 模板路径
-          apiPath: "./api/admin"                                        # gfApi生成路径
+          apiPath: "./api/admin"                                        # goApi生成路径
           controllerPath: "./internal/controller/admin/sys"             # 控制器生成路径
-          logicPath : "./internal/logic/sys"                            # 主要业务生成路径
+          logicPath: "./internal/logic/sys"                             # 主要业务生成路径
           inputPath: "./internal/model/input/sysin"                     # 表单过滤器生成路径
-          routerPath : "./internal/router/genrouter"                    # 生成路由表路径
-          sqlPath : "./storage/data/generate"                           # 生成sql语句路径
+          routerPath: "./internal/router/genrouter"                     # 生成路由表路径
+          sqlPath: "./storage/data/generate"                            # 生成sql语句路径
           webApiPath: "../web/src/api"                                  # webApi生成路径
-          webViewsPath : "../web/src/views"                             # web页面生成路径
+          webViewsPath: "../web/src/views"                              # web页面生成路径
 
-        # 默认的插件包模板
+        # 默认的插件包模板，{$name}会自动替换成实际的插件名称
         - group: "addon"                                                # 分组名称
           isAddon: true                                                 # 是否为插件模板 false｜true
           masterPackage: "sys"                                          # 主包名称，需和controllerPath、logicPath、inputPath保持关联
           templatePath: "./resource/generate/default/curd"              # 模板路径
-          apiPath: "./addons/{$name}/api/admin"                         # gfApi生成路径
+          apiPath: "./addons/{$name}/api/admin"                         # goApi生成路径
           controllerPath: "./addons/{$name}/controller/admin/sys"       # 控制器生成路径
-          logicPath : "./addons/{$name}/logic/sys"                      # 主要业务生成路径
+          logicPath: "./addons/{$name}/logic/sys"                       # 主要业务生成路径
           inputPath: "./addons/{$name}/model/input/sysin"               # 表单过滤器生成路径
-          routerPath : "./addons/{$name}/router/genrouter"              # 生成路由表路径
-          sqlPath : "./storage/data/generate/addons"                    # 生成sql语句路径
+          routerPath: "./addons/{$name}/router/genrouter"               # 生成路由表路径
+          sqlPath: "./storage/data/generate/addons"                     # 生成sql语句路径
           webApiPath: "../web/src/api/addons/{$name}"                   # webApi生成路径
-          webViewsPath : "../web/src/views/addons/{$name}"              # web页面生成路径
-
-    # 关系树列表模板
-    tree:
-      templates:
-        - group: "default"
-          templatePath: "./resource/generate/default/tree"
+          webViewsPath: "../web/src/views/addons/{$name}"               # web页面生成路径
 
     # 消息队列模板
     queue:
@@ -91,14 +77,19 @@ hggen:
       templates:
         - group: "default"
           templatePath: "./resource/generate/default/cron"
+
+  # 生成插件模块，通过后台创建新插件时使用的模板，允许自定义，可以参考default模板进行改造
+  addon:
+    srcPath: "./resource/generate/default/addon"                    # 生成模板路径
+    webApiPath: "../web/src/api/addons/{$name}"                     # webApi生成路径
+    webViewsPath: "../web/src/views/addons/{$name}"                 # web页面生成路径
 ```
 
-### 生成dao、service配置
-
+### 生成CLI配置
 
 - hotgo在生成dao、service配置时，默认了和gf官方一致的配置方式和代码生成规则。所以无论你是通过hotgo亦或gf命令生成，最终代码格式完全一致，遵循一致的代码规范。
 
-- 默认配置路径：server/hack/config.yaml
+- 配置路径：[server/hack/config.yaml](../../server/hack/config.yaml)
 
 ```yaml
 gfcli:
@@ -134,14 +125,14 @@ gfcli:
       clear: true
 ```
 
-### 一个生成增删改查列表例子
+### 生成CRUD表格
 
 - 推荐使用热编译方式启动HotGo，这样生成完成页面自动刷新即可看到新生成内容，无需手动重启
 - 服务端热编译启动：`gf run main.go`, web前端启动：`yarn dev`
 
 1、创建数据表
 
-1.1 创建测试表格表`hg_test_table`：
+1.1 创建测试表格表`hg_test_table`
 ```mysql
 CREATE TABLE `hg_test_table` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
@@ -221,7 +212,7 @@ INSERT INTO `hg_test_table` (`id`, `category_id`, `title`, `description`, `conte
 
 - 如果你使用的热编译，那么页面会在生成成功后立即刷新，刷新完成你即可在后台菜单栏中看到`测试表格`菜单。如果不是使用热编译启动，请手动重启服务后刷新。
 
-#### 注意：热编译环境下，web端往往会快于服务端重启并加载完成，此时访问新生成的菜单页面可能会存在某接口请求超时或404问题，这是服务端正在重启导致的，属于正常现象，一般稍等几秒再试即可。
+-  注意：热编译环境下，web端往往会快于服务端重启并加载完成，此时访问新生成的菜单页面可能会存在某接口请求超时或404问题，这是服务端正在重启导致的，属于正常现象，一般稍等几秒再试即可。
 
 - 接下来让我们看看生成的表格页面，效果如下：
 
@@ -263,19 +254,20 @@ INSERT INTO `hg_test_table` (`id`, `category_id`, `title`, `description`, `conte
    
 - 至此生成增删改查列表示例结束！
 
+### 生成树形表格
 
+待写。
 
-## 多数据库生成配置
+### 多数据库使用
 
-#### 假设我们要增加一个库名为`hotgo2`、分组为`default2`的数据库，并要为其生成代码
+- 假设我们要增加一个库名为`hotgo2`、分组为`default2`的数据库，并要为其生成代码
 
-1. 配置`server/hack/config.yaml`,如下：
+1. 配置[server/hack/config.yaml](../../server/hack/config.yaml) 如下：
 ```yaml
   gen:
     dao:
       - link: "mysql:hotgo:hg123456.@tcp(127.0.0.1:3306)/hotgo?loc=Local&parseTime=true"
         group: "default"                                                # 分组 使用hotgo代码生成功能时必须填
-        #        tables:          ""                                    # 指定当前数据库中需要执行代码生成的数据表。如果为空，表示数据库的所有表都会生成。
         tablesEx:        "hg_sys_addons_install"                        # 指定当前数据库中需要排除代码生成的数据表。
         removePrefix: "hg_"
         descriptionTag: true
@@ -285,8 +277,7 @@ INSERT INTO `hg_test_table` (`id`, `category_id`, `title`, `description`, `conte
         clear: false
       - link: "mysql:hotgo2:hg123456.@tcp(127.0.0.1:3306)/hotgo2?loc=Local&parseTime=true"
         group: "default2"                                                # 分组 使用hotgo代码生成功能时必须填
-        #        tables:          ""                                    # 指定当前数据库中需要执行代码生成的数据表。如果为空，表示数据库的所有表都会生成。
-        tablesEx:        "hg_sys_addons_install"                        # 指定当前数据库中需要排除代码生成的数据表。
+        tablesEx:        "hg_sys_addons_install"                         # 指定当前数据库中需要排除代码生成的数据表。
         removePrefix: ""
         descriptionTag: true
         noModelComment: true
@@ -296,7 +287,6 @@ INSERT INTO `hg_test_table` (`id`, `category_id`, `title`, `description`, `conte
 ```
 
 2. 配置`server/manifest/config/config.yaml`,
-
 
 `database`配置如下：
 ```yaml
@@ -318,21 +308,21 @@ database:
 ```yaml
 hggen:
   allowedIPs: ["127.0.0.1", "*"]                                      # 白名单，*代表所有，只有允许的IP后台才能使用生成代码功能
-  selectDbs: [ "default", "default2" ]                                            # 可选生成表的数据库配置名称，支持多库
+  selectDbs: [ "default", "default2" ]                                # 可选生成表的数据库配置名称，支持多库
   disableTables : ["hg_sys_gen_codes","hg_admin_role_casbin"]         # 禁用的表，禁用以后将不会在选择表中看到
   delimiters: ["@{", "}"]                                             # 模板引擎变量分隔符号
 ```
 
 3. 登录HotGo后台 -> 开发工具 -> 代码生成 -> 找到立即生成按钮并打开，就会发现`数据库`选项增加了一个`default2`，后续生成步骤和生成例子完全一样
 
-
 > 注意：上述的配置中所有的`default2`名称必须保持一致
+
 
 ### 自定义生成模板
 
-> 系统内置了两组CURD生成模板，请参考[生成配置]。default：是默认的生成到主模块下；addon：是默认生成到指定的插件下
+> 系统内置了两组CURD生成模板，请参考[生成模板配置](sys-code.md#生成模板配置)。default：是默认的生成到主模块下；addon：是默认生成到指定的插件下
 
-- 如果你在实际的开发过程中默认模板需要调整的地方较多时，HotGo允许你新建新的模板分组来满足你的需求。新的模板可根据现有模板基础拷贝一份出来做改造，默认模板目录：[server/resource/generate/default](../../server/resource/generate/default)
+- HotGo允许你新建新的模板分组来满足你的需求，模板可根据现有模板基础拷贝一份出来做改造，默认模板目录：[server/resource/generate/default](../../server/resource/generate/default)
 
 
 
@@ -358,7 +348,7 @@ hggen:
 
 
 
-### 指定数据库驱动类型
+### 指定数据库驱动
 
 > HotGo默认使用mysql驱动，如果你想用其他数据库驱动打开下方文件中注释即可
 

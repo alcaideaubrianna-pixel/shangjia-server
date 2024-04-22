@@ -3,8 +3,12 @@
 // @Copyright  Copyright (c) 2023 HotGo CLI
 // @Author  Ms <133814250@qq.com>
 // @License  https://github.com/bufanyun/hotgo/blob/master/LICENSE
-//
 package consts
+
+import (
+	"hotgo/internal/library/dict"
+	"hotgo/internal/model"
+)
 
 // 生成代码类型
 const (
@@ -16,7 +20,7 @@ const (
 
 var GenCodesTypeNameMap = map[int]string{
 	GenCodesTypeCurd:  "增删改查列表",
-	GenCodesTypeTree:  "关系树列表(未实现)",
+	GenCodesTypeTree:  "关系树列表",
 	GenCodesTypeQueue: "队列消费者(未实现)",
 	GenCodesTypeCron:  "定时任务(未实现)",
 }
@@ -79,3 +83,14 @@ const (
 	GenCodesIndexPK  = "PRI" // 主键索引
 	GenCodesIndexUNI = "UNI" // 唯一索引
 )
+
+const (
+	GenCodesTreeStyleTypeNormal = 1 // 普通树表格
+	GenCodesTreeStyleTypeOption = 2 // 选项式树表
+)
+
+// GenCodesTreeStyleTypeOptions 树表样式选项
+var GenCodesTreeStyleTypeOptions = []*model.Option{
+	dict.GenSuccessOption(GenCodesTreeStyleTypeNormal, "普通树表格"),
+	dict.GenInfoOption(GenCodesTreeStyleTypeOption, "选项式树表"),
+}

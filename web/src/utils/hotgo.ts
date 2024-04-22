@@ -1,7 +1,8 @@
-import { Ref, UnwrapRef } from '@vue/reactivity';
 import onerrorImg from '@/assets/images/onerror.png';
-import { NTag, SelectRenderTag } from 'naive-ui';
-import { h } from 'vue';
+import { usePermission } from '@/hooks/web/usePermission';
+import { ActionItem } from '@/components/Table';
+import { isBoolean, isFunction } from '@/utils/is';
+import { PermissionsEnum } from '@/enums/permissionsEnum';
 
 export interface Option {
   label: string;
@@ -44,15 +45,50 @@ export function getOptionTag(options: Option[], value) {
 }
 
 // 自适应模板宽度
-export function adaModalWidth(dialogWidth: Ref<UnwrapRef<string>>, def = 840) {
+export function adaModalWidth(def = 840) {
   const val = document.body.clientWidth;
-
   if (val <= def) {
-    dialogWidth.value = '100%';
+    return '100%';
   } else {
-    dialogWidth.value = def + 'px';
+    return def + 'px';
   }
-  return dialogWidth.value;
+}
+
+interface TableColumn {
+  width?: number | string;
+  auth?: PermissionsEnum | PermissionsEnum[] | string | string[];
+  ifShow?: boolean | ((action: ActionItem) => boolean);
+}
+
+// 自适应表格组件横向滑动可见宽度
+export function adaTableScrollX(columns: TableColumn[] = [], actionWidth: number) {
+  const { hasPermission } = usePermission();
+
+  let x = 50; // 勾选列宽度
+  columns = columns.filter((column) => {
+    return hasPermission(column.auth as string[]) && isIfShow(column);
+  });
+  for (const column of columns) {
+    if (column.width && Number(column.width) >= 1) {
+      x += Number(column.width);
+    } else {
+      x += 100; // 默认列宽度
+    }
+  }
+  x += actionWidth;
+  return x;
+}
+
+export function isIfShow(action: ActionItem): boolean {
+  let isIfShow = true;
+  const ifShow = action.ifShow;
+  if (isBoolean(ifShow)) {
+    isIfShow = ifShow;
+  }
+  if (isFunction(ifShow)) {
+    isIfShow = ifShow(action);
+  }
+  return isIfShow;
 }
 
 // 图片加载失败显示自定义默认图片(缺省图)
@@ -60,16 +96,6 @@ export function errorImg(e: any): void {
   e.target.src = onerrorImg;
   e.target.onerror = null;
 }
-
-export const renderTag: SelectRenderTag = ({ option }) => {
-  return h(
-    NTag,
-    {
-      type: option.listClass as 'success' | 'warning' | 'error' | 'info' | 'primary' | 'default',
-    },
-    { default: () => option.label }
-  );
-};
 
 export function timeFix() {
   const time = new Date();
@@ -97,4 +123,33 @@ export function rdmLightRgbColor(): string {
     }
   }
   return color;
+}
+
+// 将列表数据转为树形数据
+export function convertListToTree(list: any[], idField = 'id', pidField = 'pid') {
+  const min = list.reduce((prev, current) => (prev[pidField] < current[pidField] ? prev : current));
+
+  const map = list.reduce((acc, item) => {
+    acc[item[idField]] = { ...item, children: [] };
+    return acc;
+  }, {});
+
+  list.forEach((item) => {
+    if (item[pidField] !== min[pidField]) {
+      map[item[pidField]].children.push(map[item[idField]]);
+    }
+  });
+  return list.filter((item) => item[pidField] === min[pidField]).map((item) => map[item[idField]]);
+}
+
+// 从树选项中获取所有key
+export function getTreeKeys(data: any[], idField = 'id') {
+  const keys = [];
+  data.map((item) => {
+    keys.push(item[idField]);
+    if (item.children && item.children.length) {
+      keys.push(...getTreeKeys(item.children));
+    }
+  });
+  return keys;
 }

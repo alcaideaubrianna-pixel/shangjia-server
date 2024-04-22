@@ -60,6 +60,54 @@
               </n-form-item>
             </n-col>
 
+            <!-- 树表-->
+            <template v-if="formValue.genType == 11">
+              <n-col :span="6" style="min-width: 200px">
+                <n-form-item path="title">
+                  <template #label>
+                    <div class="flex flex-row items-end"
+                      >树名称字段
+                      <n-tooltip trigger="hover">
+                        <template #trigger>
+                          <n-button strong text>
+                            <template #icon>
+                              <n-icon size="15" color="#2d8cf0">
+                                <QuestionCircleOutlined />
+                              </n-icon>
+                            </template>
+                          </n-button>
+                        </template>
+                        树节点的显示名称字段名， 如：`title`
+                      </n-tooltip>
+                    </div>
+                  </template>
+                  <n-select
+                    filterable
+                    tag
+                    :loading="columnsLoading"
+                    placeholder="请选择"
+                    :options="columnsOption"
+                    v-model:value="formValue.options.tree.titleColumn"
+                  />
+                </n-form-item>
+              </n-col>
+
+              <n-col :span="6" style="min-width: 200px">
+                <n-form-item label="树表格样式" path="styleType">
+                  <n-radio-group v-model:value="formValue.options.tree.styleType" name="styleType">
+                    <n-radio
+                      v-for="status in selectList.treeStyleType"
+                      :value="status.value"
+                      :label="status.label"
+                      >{{ status.label }}</n-radio
+                    >
+                  </n-radio-group>
+                </n-form-item>
+              </n-col>
+            </template>
+
+            <!-- 树表-->
+
             <n-col :span="18">
               <n-form-item
                 label="表格头部按钮组"
@@ -97,15 +145,6 @@
                     <n-checkbox value="del" label="删除" />
                     <n-checkbox value="view" label="详情页" />
                     <n-checkbox value="check" label="开启勾选列" />
-                    <n-checkbox value="switch" label="操作开关" />
-                    <n-popover trigger="hover">
-                      <template #trigger>
-                        <n-icon size="15" class="tips-help-icon" color="#2d8cf0">
-                          <QuestionCircleOutlined />
-                        </n-icon>
-                      </template>
-                      <span>表单组件中存在`开关`类型才会生效</span>
-                    </n-popover>
                     <n-checkbox value="notFilterAuth" label="不过滤权限" />
                     <n-popover trigger="hover">
                       <template #trigger>
@@ -122,7 +161,7 @@
 
             <n-col :span="24">
               <n-form-item
-                label="自动化操作"
+                label="高级设置"
                 path="autoOps"
                 v-show="formValue.genType >= 10 && formValue.genType < 20"
               >
@@ -136,7 +175,7 @@
                           <QuestionCircleOutlined />
                         </n-icon>
                       </template>
-                      <span>如果你选择的表已经生成过dao相关代码，可以忽略</span>
+                      <span>如果你选择的表已经生成过dao相关代码，取消勾选可减少生成时间</span>
                     </n-popover>
                     <n-checkbox value="runService" label="生成后运行 [gf gen service]" />
                     <n-popover trigger="hover">
@@ -146,6 +185,19 @@
                         </n-icon>
                       </template>
                       <span>如果是插件模块，勾选后也会自动在对应插件下运行service相关代码生成</span>
+                    </n-popover>
+                    <n-checkbox
+                      value="genFuncDict"
+                      label="生成字典选项"
+                      @click="handleCheckboxGenFuncDict"
+                    />
+                    <n-popover trigger="hover">
+                      <template #trigger>
+                        <n-icon size="15" class="tips-help-icon" color="#2d8cf0">
+                          <QuestionCircleOutlined />
+                        </n-icon>
+                      </template>
+                      <span>将表数据生成为数据选项，并注册到内置的方法字典</span>
                     </n-popover>
                     <n-checkbox value="forcedCover" label="强制覆盖" />
                     <n-popover trigger="hover">
@@ -166,7 +218,13 @@
               style="min-width: 200px"
               v-show="formValue.options?.autoOps?.includes('genMenuPermissions')"
             >
-              <n-form-item label="上级菜单" path="pid">
+              <n-form-item path="pid">
+                <template #label>
+                  <span>上级菜单</span>
+                  <n-button class="ml-2" text type="primary" strong @click="handleAddMenu"
+                    >菜单管理</n-button
+                  >
+                </template>
                 <n-tree-select
                   :options="optionMenuTree"
                   :value="formValue.options.menu.pid"
@@ -224,16 +282,16 @@
         <template #header-extra>
           <n-space>
             <n-button
-              type="warning"
+              type="primary"
               @click="addJoin"
-              :disabled="formValue.options?.join?.length >= 3"
+              :disabled="formValue.options?.join?.length >= 20"
               >新增关联表</n-button
             >
           </n-space>
         </template>
 
         <n-form ref="formRef" :model="formValue">
-          <n-alert :show-icon="false">关联表数量建议在三个以下</n-alert>
+          <n-alert type="warning" :show-icon="false" v-if="formValue.options?.join?.length > 3">关联表数量建议在三个以下</n-alert>
           <div class="mt-4"></div>
           <n-row :gutter="6" v-for="(join, index) in formValue.options.join" :key="index">
             <n-col :span="6" style="min-width: 200px">
@@ -315,12 +373,19 @@
         </n-form>
       </n-card>
     </n-spin>
+
+    <MenuModal ref="menuModalRef" @reloadTable="loadMenuTreeOption" />
+    <SetFuncDict
+      ref="setFuncDictRef"
+      @update="handleUpdateFuncDict"
+      :columnsOption="columnsOption"
+    />
   </div>
 </template>
 
 <script lang="ts" setup>
   import { onMounted, ref, computed, watch } from 'vue';
-  import { FormInst } from 'naive-ui';
+  import { FormInst, useDialog, useMessage } from 'naive-ui';
   import { newState, selectListObj } from './model';
   import { TableSelect, ColumnSelect } from '@/api/develop/code';
   import { getRandomString } from '@/utils/charset';
@@ -329,7 +394,11 @@
   import { getMenuList } from '@/api/system/menu';
   import { cloneDeep } from 'lodash-es';
   import { isLetterBegin } from '@/utils/is';
+  import MenuModal from '@/views/permission/menu/menuModal.vue';
+  import SetFuncDict from './SetFuncDict.vue';
 
+  const message = useMessage();
+  const dialog = useDialog();
   const timer = ref();
   const formRef = ref<FormInst | null>(null);
   const bodyShow = ref(true);
@@ -340,6 +409,8 @@
   const columnsOption = ref<any>([]); // 主表字段选项
   const linkTablesOption = ref<any>([]); // 关联表选项
   const linkColumnsOption = ref<any>([]); // 关联表字段选项
+  const menuModalRef = ref();
+  const setFuncDictRef = ref();
 
   const optionMenuTree = ref([
     {
@@ -514,6 +585,20 @@
 
   function handleUpdateMenuPid(value: string | number | Array<string | number> | null) {
     formValue.value.options.menu.pid = value;
+  }
+
+  function handleAddMenu() {
+    menuModalRef.value.openModal();
+  }
+
+  function handleCheckboxGenFuncDict() {
+    if (formValue.value.options.autoOps.includes('genFuncDict')) {
+      setFuncDictRef.value.openModal(formValue.value.options.funcDict);
+    }
+  }
+
+  function handleUpdateFuncDict(value) {
+    formValue.value.options.funcDict = value;
   }
 </script>
 
