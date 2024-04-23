@@ -111,7 +111,11 @@ func (s *sSysLog) AutoLog(ctx context.Context) error {
 		}()
 
 		config, err := service.SysConfig().GetLoadLog(ctx)
-		if err != nil || !config.Switch {
+		if err != nil {
+			return
+		}
+
+		if config == nil || !config.Switch {
 			return
 		}
 
