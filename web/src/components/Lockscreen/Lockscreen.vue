@@ -94,6 +94,7 @@
   import { useLockscreenStore } from '@/store/modules/lockscreen';
   import { useUserStore } from '@/store/modules/user';
   import { aesEcb } from '@/utils/encrypt';
+  import { TABS_ROUTES } from '@/store/mutation-types';
 
   export default defineComponent({
     name: 'Lockscreen',
@@ -149,6 +150,7 @@
         if (code === ResultEnum.SUCCESS) {
           onLockLogin(false);
           useLockscreen.setLock(false);
+          window.location.reload();
         } else {
           state.errorMsg = message;
           state.isLoginError = true;
@@ -160,11 +162,18 @@
       const goLogin = () => {
         onLockLogin(false);
         useLockscreen.setLock(false);
-        router.replace({
-          path: '/login',
-          query: {
-            redirect: route.fullPath,
-          },
+
+        userStore.logout().then(() => {
+          // 移除标签页
+          localStorage.removeItem(TABS_ROUTES);
+          router
+            .replace({
+              name: 'Login',
+              query: {
+                redirect: route.fullPath,
+              },
+            })
+            .finally(() => location.reload());
         });
       };
 

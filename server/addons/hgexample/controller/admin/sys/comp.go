@@ -20,10 +20,10 @@ type cComp struct{}
 // ImportExcel 导入Excel
 func (c *cComp) ImportExcel(ctx context.Context, req *comp.ImportExcelReq) (res *comp.ImportExcelRes, err error) {
 	file, err := req.File.Open()
-	defer file.Close()
 	if err != nil {
 		return
 	}
+	defer file.Close()
 
 	excel, err := excelize.OpenReader(file)
 	if err != nil {

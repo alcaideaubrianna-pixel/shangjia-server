@@ -54,7 +54,7 @@ export const columns = [
   {
     title: '登录地址',
     key: 'addr',
-    width: 120,
+    width: 150,
   },
   {
     title(_column) {

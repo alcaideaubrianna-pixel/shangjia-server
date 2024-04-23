@@ -3,12 +3,12 @@
 // @Copyright  Copyright (c) 2023 HotGo CLI
 // @Author  Ms <133814250@qq.com>
 // @License  https://github.com/bufanyun/hotgo/blob/master/LICENSE
-//
 package views
 
 import (
 	"github.com/gogf/gf/v2/text/gstr"
 	"hotgo/internal/model/input/sysin"
+	"hotgo/utility/validate"
 )
 
 // 字段映射关系
@@ -109,6 +109,8 @@ const (
 	FormModeCheckbox       = "Checkbox"       // 复选按钮
 	FormModeSelect         = "Select"         // 单选下拉框
 	FormModeSelectMultiple = "SelectMultiple" // 多选下拉框
+	FormModeTreeSelect     = "TreeSelect"     // 树型选择
+	FormModeCascader       = "Cascader"       // 级联选择
 	FormModeUploadImage    = "UploadImage"    // 单图上传
 	FormModeUploadImages   = "UploadImages"   // 多图上传
 	FormModeUploadFile     = "UploadFile"     // 单文件上传
@@ -116,12 +118,13 @@ const (
 	FormModeSwitch         = "Switch"         // 开关
 	FormModeRate           = "Rate"           // 评分
 	FormModeCitySelector   = "CitySelector"   // 省市区选择
+	FormModePidTreeSelect  = "PidTreeSelect"  // 树型上级选择，树表生成专用
 )
 
 var FormModes = []string{
 	FormModeInput, FormModeInputNumber, FormModeInputTextarea, FormModeInputEditor, FormModeInputDynamic,
 	FormModeDate, FormModeDateRange, FormModeTime, FormModeTimeRange,
-	FormModeRadio, FormModeCheckbox, FormModeSelect, FormModeSelectMultiple,
+	FormModeRadio, FormModeCheckbox, FormModeSelect, FormModeSelectMultiple, FormModeTreeSelect, FormModeCascader,
 	FormModeUploadImage, FormModeUploadImages, FormModeUploadFile, FormModeUploadFiles,
 	FormModeSwitch,
 	FormModeRate,
@@ -142,6 +145,8 @@ var FormModeMap = map[string]string{
 	FormModeCheckbox:       "复选按钮",
 	FormModeSelect:         "单选下拉框",
 	FormModeSelectMultiple: "多选下拉框",
+	FormModeTreeSelect:     "树型选择",
+	FormModeCascader:       "级联选择",
 	FormModeUploadImage:    "单图上传",
 	FormModeUploadImages:   "多图上传",
 	FormModeUploadFile:     "单文件上传",
@@ -190,20 +195,20 @@ var FormRoleMap = map[string]string{
 
 // 查询条件
 const (
-	WhereModeEq           = "="                            // =
-	WhereModeNeq          = "!="                           // !=
-	WhereModeGt           = ">"                            // >
-	WhereModeGte          = ">="                           // >=
-	WhereModeLt           = "<"                            // <
-	WhereModeLte          = "<="                           // <=
-	WhereModeIn           = "IN"                           // IN (...)
-	WhereModeNotIn        = "NOT IN"                       // NOT IN (...)
-	WhereModeBetween      = "BETWEEN"                      // BETWEEN
-	WhereModeNotBetween   = "NOT BETWEEN"                  // NOT BETWEEN
-	WhereModeLike         = "LIKE"                         // LIKE
-	WhereModeLikeAll      = "LIKE %...%"                   // LIKE %...%
-	WhereModeNotLike      = "NOT LIKE"                     // NOT LIKE
-	WhereModeJsonContains = "JSON_CONTAINS(json_doc, val)" // JSON_CONTAINS(json_doc, val[, path]) // 判断是否包含某个json值
+	WhereModeEq           = "="                       // =
+	WhereModeNeq          = "!="                      // !=
+	WhereModeGt           = ">"                       // >
+	WhereModeGte          = ">="                      // >=
+	WhereModeLt           = "<"                       // <
+	WhereModeLte          = "<="                      // <=
+	WhereModeIn           = "IN"                      // IN (...)
+	WhereModeNotIn        = "NOT IN"                  // NOT IN (...)
+	WhereModeBetween      = "BETWEEN"                 // BETWEEN
+	WhereModeNotBetween   = "NOT BETWEEN"             // NOT BETWEEN
+	WhereModeLike         = "LIKE"                    // LIKE
+	WhereModeLikeAll      = "LIKE %...%"              // LIKE %...%
+	WhereModeNotLike      = "NOT LIKE"                // NOT LIKE
+	WhereModeJsonContains = "JSON_CONTAINS(doc, val)" // JSON_CONTAINS(json_doc, val[, path]) // 判断是否包含某个json值
 )
 
 var WhereModes = []string{WhereModeEq,
@@ -212,6 +217,21 @@ var WhereModes = []string{WhereModeEq,
 	WhereModeBetween, WhereModeNotBetween,
 	WhereModeLike, WhereModeLikeAll, WhereModeNotLike,
 	WhereModeJsonContains,
+}
+
+// 表格列的排序方式
+const (
+	TableAlignLeft   = "left"
+	TableAlignRight  = "right"
+	TableAlignCenter = "center"
+)
+
+var TableAligns = []string{TableAlignLeft, TableAlignRight, TableAlignCenter}
+
+var TableAlignMap = map[string]string{
+	TableAlignLeft:   "居左",
+	TableAlignRight:  "居右",
+	TableAlignCenter: "居中",
 }
 
 // IsNumberType 是否是数字类型
@@ -225,8 +245,17 @@ func IsNumberType(goType string) bool {
 	return false
 }
 
-func HasColumn(masterFields []*sysin.GenCodesColumnListModel, column string) bool {
-	for _, field := range masterFields {
+// IsSelectFormMode 是否是选择器组件
+func IsSelectFormMode(formMode string) bool {
+	switch formMode {
+	case FormModeRadio, FormModeCheckbox, FormModeSelect, FormModeSelectMultiple, FormModeCitySelector, FormModeTreeSelect, FormModeCascader:
+		return true
+	}
+	return false
+}
+
+func HasColumn(fields []*sysin.GenCodesColumnListModel, column string) bool {
+	for _, field := range fields {
 		if field.GoName == column {
 			return true
 		}
@@ -234,29 +263,77 @@ func HasColumn(masterFields []*sysin.GenCodesColumnListModel, column string) boo
 	return false
 }
 
-func HasColumnWithFormMode(masterFields []*sysin.GenCodesColumnListModel, column string) bool {
-	for _, field := range masterFields {
-		if field.FormMode == column {
+func HasColumnWithFormMode(fields []*sysin.GenCodesColumnListModel, formMode string) bool {
+	for _, field := range fields {
+		if field.FormMode == formMode {
 			return true
 		}
 	}
 	return false
 }
 
-func HasMaxSort(masterFields []*sysin.GenCodesColumnListModel) bool {
-	return HasColumn(masterFields, "Sort")
+func HasMaxSort(fields []*sysin.GenCodesColumnListModel) bool {
+	return HasColumn(fields, "Sort")
 }
 
-func HasStatus(headOps []string, masterFields []*sysin.GenCodesColumnListModel) bool {
+func HasStatus(headOps []string, fields []*sysin.GenCodesColumnListModel) bool {
 	if !gstr.InArray(headOps, "status") {
 		return false
 	}
-	return HasColumn(masterFields, "Status")
+	return HasColumn(fields, "Status")
 }
 
-func HasSwitch(headOps []string, masterFields []*sysin.GenCodesColumnListModel) bool {
-	if !gstr.InArray(headOps, "switch") {
-		return false
+func HasSwitch(fields []*sysin.GenCodesColumnListModel) bool {
+	return HasColumnWithFormMode(fields, FormModeSwitch)
+}
+
+func HasHookMemberSummary(fields []*sysin.GenCodesColumnListModel) bool {
+	for _, field := range fields {
+		if IsMemberSummaryField(field.Name) {
+			if field.IsList {
+				return true
+			}
+		}
 	}
-	return HasColumnWithFormMode(masterFields, "Switch")
+	return false
+}
+
+func HasQueryMemberSummary(fields []*sysin.GenCodesColumnListModel) bool {
+	for _, field := range fields {
+		if IsMemberSummaryField(field.Name) {
+			if field.IsQuery {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func IsMemberSummaryField(name string) bool {
+	switch name {
+	case "created_by", "updated_by", "deleted_by":
+		return true
+	}
+	return false
+}
+
+// ReviseFields 校正字段值，兼容版本升级前的老数据格式
+func ReviseFields(fields []*sysin.GenCodesColumnListModel) []*sysin.GenCodesColumnListModel {
+	for _, field := range fields {
+		if !validate.InSlice(TableAligns, field.Align) {
+			field.Align = TableAlignLeft
+		}
+
+		if field.Width < 1 {
+			field.Width = -1
+		}
+		if field.Width > 2000 {
+			field.Width = 2000
+		}
+
+		if field.FormGridSpan < 1 {
+			field.FormGridSpan = 1
+		}
+	}
+	return fields
 }

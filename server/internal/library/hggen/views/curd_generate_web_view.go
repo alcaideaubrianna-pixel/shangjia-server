@@ -44,25 +44,25 @@ func (l *gCurd) generateWebViewItem(ctx context.Context, in *CurdPreviewInput) s
 			component = defaultComponent
 
 		case FormModeRadio, FormModeSelect:
-			component = fmt.Sprintf("<n-descriptions-item label=\"%s\">\n          <n-tag\n            :type=\"getOptionTag(options.%s, formValue?.%s)\"\n            size=\"small\"\n            class=\"min-left-space\"\n            >{{ getOptionLabel(options.%s, formValue?.%s) }}</n-tag\n          >\n        </n-descriptions-item>", field.Dc, in.options.dictMap[field.TsName], field.TsName, in.options.dictMap[field.TsName], field.TsName)
+			component = fmt.Sprintf("<n-descriptions-item label=\"%s\">\n          <n-tag :type=\"getOptionTag(options.%s, formValue?.%s)\" size=\"small\" class=\"min-left-space\">{{ getOptionLabel(options.%s, formValue?.%s) }}</n-tag>\n        </n-descriptions-item>", field.Dc, in.options.dictMap[field.TsName], field.TsName, in.options.dictMap[field.TsName], field.TsName)
 
 		case FormModeCheckbox, FormModeSelectMultiple:
-			component = fmt.Sprintf("<n-descriptions-item label=\"%s\">\n          <template v-for=\"(item, key) in formValue?.%s\" :key=\"key\">\n            <n-tag\n              :type=\"getOptionTag(options.%s, item)\"\n              size=\"small\"\n              class=\"min-left-space\"\n              >{{ getOptionLabel(options.%s, item) }}</n-tag\n            >\n          </template>\n        </n-descriptions-item>", field.Dc, field.TsName, in.options.dictMap[field.TsName], in.options.dictMap[field.TsName])
+			component = fmt.Sprintf("<n-descriptions-item label=\"%s\">\n          <template v-for=\"(item, key) in formValue?.%s\" :key=\"key\">\n            <n-tag :type=\"getOptionTag(options.%s, item)\" size=\"small\" class=\"min-left-space\">{{ getOptionLabel(options.%s, item) }}</n-tag>\n          </template>\n        </n-descriptions-item>", field.Dc, field.TsName, in.options.dictMap[field.TsName], in.options.dictMap[field.TsName])
 
 		case FormModeUploadImage:
-			component = fmt.Sprintf("<n-descriptions-item>\n          <template #label>%s</template>\n          <n-image style=\"margin-left: 10px; height: 100px; width: 100px\" :src=\"formValue.%s\"\n        /></n-descriptions-item>", field.Dc, field.TsName)
+			component = fmt.Sprintf("<n-descriptions-item>\n          <template #label>%s</template>\n          <n-image style=\"margin-left: 10px; height: 100px; width: 100px\" :src=\"formValue.%s\"/></n-descriptions-item>", field.Dc, field.TsName)
 
 		case FormModeUploadImages:
 			component = fmt.Sprintf("<n-descriptions-item>\n          <template #label>%s</template>\n          <n-image-group>\n            <n-space>\n              <span v-for=\"(item, key) in formValue?.%s\" :key=\"key\">\n                <n-image style=\"margin-left: 10px; height: 100px; width: 100px\" :src=\"item\" />\n              </span>\n            </n-space>\n          </n-image-group>\n        </n-descriptions-item>", field.Dc, field.TsName)
 
 		case FormModeUploadFile:
-			component = fmt.Sprintf("<n-descriptions-item>\n          <template #label>%s</template>\n          <div\n            class=\"upload-card\"\n            v-show=\"formValue.%s !== ''\"\n            @click=\"download(formValue.%s)\"\n          >\n            <div class=\"upload-card-item\" style=\"height: 100px; width: 100px\">\n              <div class=\"upload-card-item-info\">\n                <div class=\"img-box\">\n                  <n-avatar :style=\"fileAvatarCSS\">{{ getFileExt(formValue.%s) }}</n-avatar>\n                </div>\n              </div>\n            </div>\n          </div>\n        </n-descriptions-item>", field.Dc, field.TsName, field.TsName, field.TsName)
+			component = fmt.Sprintf("<n-descriptions-item>\n          <template #label>%s</template>\n          <div class=\"upload-card\"  v-show=\"formValue.%s !== ''\" @click=\"download(formValue.%s)\">\n            <div class=\"upload-card-item\" style=\"height: 100px; width: 100px\">\n              <div class=\"upload-card-item-info\">\n                <div class=\"img-box\">\n                  <n-avatar :style=\"fileAvatarCSS\">{{ getFileExt(formValue.%s) }}</n-avatar>\n                </div>\n              </div>\n            </div>\n          </div>\n        </n-descriptions-item>", field.Dc, field.TsName, field.TsName, field.TsName)
 
 		case FormModeUploadFiles:
 			component = fmt.Sprintf("<n-descriptions-item>\n          <template #label>%s</template>\n          <div class=\"upload-card\">\n            <n-space style=\"gap: 0px 0px\">\n              <div\n                class=\"upload-card-item\"\n                style=\"height: 100px; width: 100px\"\n                v-for=\"(item, key) in formValue.%s\"\n                :key=\"key\"\n              >\n                <div class=\"upload-card-item-info\">\n                  <div class=\"img-box\">\n                    <n-avatar :style=\"fileAvatarCSS\" @click=\"download(item)\">{{\n                      getFileExt(item)\n                    }}</n-avatar>\n                  </div>\n                </div>\n              </div>\n            </n-space>\n          </div>\n        </n-descriptions-item>", field.Dc, field.TsName)
 
 		case FormModeSwitch:
-			component = fmt.Sprintf("<n-descriptions-item label=\"%s\">\n          <n-switch v-model:value=\"formValue.%s\" :unchecked-value=\"2\" :checked-value=\"1\" :disabled=\"true\"\n        /></n-descriptions-item>", field.Dc, field.TsName)
+			component = fmt.Sprintf("<n-descriptions-item label=\"%s\">\n          <n-switch v-model:value=\"formValue.%s\" :unchecked-value=\"2\" :checked-value=\"1\" :disabled=\"true\"/></n-descriptions-item>", field.Dc, field.TsName)
 
 		case FormModeRate:
 			component = fmt.Sprintf("<n-descriptions-item label=\"%s\"\n          ><n-rate readonly :default-value=\"formValue.%s\"\n        /></n-descriptions-item>", field.Dc, field.TsName)

@@ -52,9 +52,9 @@
     {
       field: 'member_id',
       component: 'NInput',
-      label: '操作人员',
+      label: '操作人',
       componentProps: {
-        placeholder: '请输入操作人员ID',
+        placeholder: '请输入操作人ID',
         onInput: (e: any) => {
           console.log(e);
         },

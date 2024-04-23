@@ -195,7 +195,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { h, onMounted, reactive, ref } from 'vue';
+  import { computed, h, onMounted, reactive, ref } from 'vue';
   import { useDialog, useMessage } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, FormSchema, useForm } from '@/components/Form/index';
@@ -218,12 +218,12 @@
     renderLabel,
     renderMultipleSelectTag,
   } from '@/enums/systemMessageEnum';
-  import { adaModalWidth, getOptionLabel, renderTag } from '@/utils/hotgo';
+  import { adaModalWidth, getOptionLabel } from '@/utils/hotgo';
+  import { renderTag } from '@/utils';
   import Editor from '@/components/Editor/editor.vue';
   import { cloneDeep } from 'lodash-es';
   import { GetMemberOption } from '@/api/org/user';
   import { usePermission } from '@/hooks/web/usePermission';
-  const { hasPermission } = usePermission();
 
   const rules = {
     title: {
@@ -286,6 +286,7 @@
     },
   ];
 
+  const { hasPermission } = usePermission();
   const message = useMessage();
   const actionRef = ref();
   const dialog = useDialog();
@@ -295,8 +296,10 @@
   const formRef = ref<any>({});
   const batchDeleteDisabled = ref(true);
   const checkedIds = ref([]);
-  const dialogWidth = ref('75%');
   const options = ref<personOption[]>();
+  const dialogWidth = computed(() => {
+    return adaModalWidth();
+  });
 
   const resetFormParams = {
     id: 0,
@@ -312,7 +315,7 @@
   let formParams = ref<any>(cloneDeep(resetFormParams));
 
   const actionColumn = reactive({
-    width: 180,
+    width: 200,
     title: '操作',
     key: 'action',
     fixed: 'right',
@@ -440,9 +443,6 @@
           reloadTable();
         });
       },
-      onNegativeClick: () => {
-        // message.error('取消');
-      },
     });
   }
 
@@ -457,9 +457,6 @@
           message.success('操作成功');
           reloadTable();
         });
-      },
-      onNegativeClick: () => {
-        // message.error('取消');
       },
     });
   }
@@ -486,7 +483,6 @@
   }
 
   onMounted(async () => {
-    adaModalWidth(dialogWidth);
     await getMemberOption();
   });
 </script>

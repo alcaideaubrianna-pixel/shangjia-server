@@ -9,6 +9,7 @@ import (
 	"context"
 	"hotgo/api/servmsg"
 	"hotgo/internal/library/network/tcp"
+	"hotgo/internal/model/input/servmsgin"
 )
 
 type (
@@ -19,6 +20,8 @@ type (
 		Start(ctx context.Context)
 		// Stop 停止服务
 		Stop(ctx context.Context)
+		// Summary 获取授权信息
+		Summary() *servmsgin.AuthSummaryModel
 		// OnResponseAuthSummary 响应授权信息
 		OnResponseAuthSummary(ctx context.Context, req *servmsg.AuthSummaryRes)
 		// OnResponseExampleHello 一个tcp请求例子

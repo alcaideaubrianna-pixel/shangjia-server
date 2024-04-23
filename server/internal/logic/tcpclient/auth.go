@@ -108,3 +108,11 @@ func (s *sAuthClient) onLoginEvent() {
 func (s *sAuthClient) onCloseEvent() {
 	g.Log().Debug(gctx.New(), "AuthClient closed.")
 }
+
+// Summary 获取授权信息
+func (s *sAuthClient) Summary() *servmsgin.AuthSummaryModel {
+	if s.summary == nil {
+		s.summary = new(servmsgin.AuthSummaryModel)
+	}
+	return s.summary
+}

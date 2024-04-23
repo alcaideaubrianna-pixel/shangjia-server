@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"hotgo/internal/model/input/adminin"
 	"hotgo/internal/model/input/form"
+	"hotgo/utility/tree"
 )
 
 // ListReq 查询列表
@@ -55,17 +56,9 @@ type MaxSortRes struct {
 	*adminin.DeptMaxSortModel
 }
 
-// StatusReq 更新部门状态
-type StatusReq struct {
-	g.Meta `path:"/dept/status" method:"post" tags:"部门" summary:"更新部门状态"`
-	adminin.DeptStatusInp
-}
-
-type StatusRes struct{}
-
-// OptionReq 获取部门选项树
+// OptionReq 获取当前登录用户可选的部门选项
 type OptionReq struct {
-	g.Meta `path:"/dept/option" method:"get" tags:"部门" summary:"获取部门选项树"`
+	g.Meta `path:"/dept/option" method:"get" tags:"部门" summary:"获取当前登录用户可选的部门选项"`
 	adminin.DeptOptionInp
 }
 
@@ -73,3 +66,10 @@ type OptionRes struct {
 	*adminin.DeptOptionModel
 	form.PageRes
 }
+
+// TreeOptionReq 获取部门关系树选项
+type TreeOptionReq struct {
+	g.Meta `path:"/dept/treeOption" method:"get" tags:"部门" summary:"获取部门关系树选项"`
+}
+
+type TreeOptionRes []tree.Node

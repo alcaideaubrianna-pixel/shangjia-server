@@ -87,6 +87,7 @@
     getMultiTabsSetting,
   } = useProjectSetting();
 
+  const route = useRoute();
   const settingStore = useProjectSettingStore();
 
   const navMode = getNavMode;
@@ -105,11 +106,12 @@
     return fixed ? 'absolute' : 'static';
   });
 
+
   const isMixMenuNoneSub = computed(() => {
     const mixMenu = settingStore.menuSetting.mixMenu;
-    const currentRoute = useRoute();
+    // const currentRoute = useRoute();
     if (unref(navMode) != 'horizontal-mix') return true;
-    if (unref(navMode) === 'horizontal-mix' && mixMenu && currentRoute.meta.isRoot) {
+    if (unref(navMode) === 'horizontal-mix' && mixMenu && route.meta.isRoot) {
       return false;
     }
     return true;

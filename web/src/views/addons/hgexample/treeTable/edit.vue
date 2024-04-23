@@ -200,8 +200,10 @@
 
   const message = useMessage();
   const formRef = ref<any>({});
-  const dialogWidth = ref('75%');
   const formBtnLoading = ref(false);
+  const dialogWidth = computed(() => {
+    return adaModalWidth();
+  });
 
   function confirmForm(e) {
     e.preventDefault();
@@ -240,10 +242,6 @@
       }
     }
   );
-
-  onMounted(async () => {
-    adaModalWidth(dialogWidth);
-  });
 </script>
 
 <style lang="less"></style>

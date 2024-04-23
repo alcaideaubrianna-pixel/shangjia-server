@@ -1,4 +1,5 @@
 import { cloneDeep } from 'lodash-es';
+import { isJsonString } from '@/utils/is';
 
 export const genFileObj = {
   meth: 1,
@@ -24,13 +25,24 @@ export const genInfoObj = {
   varName: '',
   options: {
     headOps: ['add', 'batchDel', 'export'],
-    columnOps: ['edit', 'del', 'view', 'status', 'switch', 'check'],
+    columnOps: ['edit', 'del', 'view', 'status', 'check'],
     autoOps: ['genMenuPermissions', 'runDao', 'runService'],
     join: [],
     menu: {
       pid: 0,
       icon: 'MenuOutlined',
       sort: 0,
+    },
+    tree: {
+      titleColumn: null,
+      styleType: 1,
+    },
+    funcDict: {
+      valueColumn: null,
+      labelColumn: null,
+    },
+    presetStep: {
+      formGridCols: 1,
     },
   },
   dbName: '',
@@ -54,6 +66,8 @@ export const selectListObj = {
   dictMode: [],
   whereMode: [],
   buildMeth: [],
+  tableAlign: [],
+  treeStyleType: [],
 };
 
 export function newState(state) {
@@ -61,4 +75,68 @@ export function newState(state) {
     return cloneDeep(state);
   }
   return cloneDeep(genInfoObj);
+}
+
+export const formGridColsOptions = [
+  {
+    value: 1,
+    label: '一行一列',
+  },
+  {
+    value: 2,
+    label: '一行两列',
+  },
+  {
+    value: 3,
+    label: '一行三列',
+  },
+  {
+    value: 4,
+    label: '一行四列',
+  },
+];
+
+export const formGridSpanOptions = [
+  {
+    value: 1,
+    label: '占一列位置',
+  },
+  {
+    value: 2,
+    label: '占两列位置',
+  },
+  {
+    value: 3,
+    label: '占三列位置',
+  },
+  {
+    value: 4,
+    label: '占四列位置',
+  },
+];
+
+// 格式化列字段
+export function formatColumns(columns: any) {
+  if (columns === undefined || columns.length === 0) {
+    columns = [];
+  }
+
+  if (isJsonString(columns)) {
+    columns = JSON.parse(columns);
+  }
+
+  if (columns.length > 0) {
+    for (let i = 0; i < columns.length; i++) {
+      if (!columns[i].formGridSpan) {
+        columns[i].formGridSpan = 1;
+      }
+      if (!columns[i].align) {
+        columns[i].align = 'left';
+      }
+      if (!columns[i].width || columns[i].width < 1) {
+        columns[i].width = null;
+      }
+    }
+  }
+  return columns;
 }

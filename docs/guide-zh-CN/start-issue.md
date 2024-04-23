@@ -45,6 +45,13 @@
 详细请参考 - [系统安装](start-installation.md)
 
 
+#### 3、cannot find "hack/config.yaml" in following paths:
+> 报错信息：get cli configuration file:hack/config.yaml, err:cannot find "hack/config.yaml" in following paths:
+
+系统运行目录下配置hack/config.yaml文件。如果是生产环境运行，并且不需要开发工具相关功能，可以将`manifest/config/config.yaml`配置文件中的`system.mode`值改为`product`，这样启动时不会加载开发工具相关功能
+
+
+
 ### 四、前端相关
 
 #### 1、Error: connect ECONNREFUSED ::1:8000

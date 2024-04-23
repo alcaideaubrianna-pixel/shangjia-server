@@ -13,12 +13,12 @@ import (
 	"hotgo/internal/library/hgrds/lock"
 	"hotgo/internal/library/hgrds/pubsub"
 	"hotgo/internal/service"
+	"hotgo/utility/simple"
 )
 
 // SubscribeClusterSync 订阅集群同步，可以用来集中同步数据、状态等
 func SubscribeClusterSync(ctx context.Context) {
-	isCluster := g.Cfg().MustGet(ctx, "hotgo.isCluster").Bool()
-	if !isCluster {
+	if !simple.IsCluster(ctx) {
 		return
 	}
 
@@ -35,8 +35,7 @@ func SubscribeClusterSync(ctx context.Context) {
 
 // PublishClusterSync 推送集群同步消息，如果没有开启集群部署，则不进行推送
 func PublishClusterSync(ctx context.Context, channel string, message interface{}) {
-	isCluster := g.Cfg().MustGet(ctx, "hotgo.isCluster").Bool()
-	if !isCluster {
+	if !simple.IsCluster(ctx) {
 		return
 	}
 

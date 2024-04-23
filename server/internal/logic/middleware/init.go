@@ -23,6 +23,7 @@ import (
 	"hotgo/internal/library/token"
 	"hotgo/internal/model"
 	"hotgo/internal/service"
+	"hotgo/utility/simple"
 	"hotgo/utility/validate"
 	"net/http"
 	"strings"
@@ -110,8 +111,7 @@ func (s *sMiddleware) CORS(r *ghttp.Request) {
 
 // DemoLimit 演示系统操作限制
 func (s *sMiddleware) DemoLimit(r *ghttp.Request) {
-	isDemo := g.Cfg().MustGet(r.Context(), "hotgo.isDemo", false)
-	if !isDemo.Bool() {
+	if !simple.IsDemo(r.Context()) {
 		r.Middleware.Next()
 		return
 	}
@@ -155,10 +155,6 @@ func (s *sMiddleware) Addon(r *ghttp.Request) {
 	if sk == nil {
 		g.Log().Warningf(ctx, "addon skeleton = nil, name:%v", ss[0])
 		return
-	}
-
-	if sk.View != nil {
-		r.SetView(sk.View)
 	}
 
 	contexts.SetAddonName(ctx, sk.Name)

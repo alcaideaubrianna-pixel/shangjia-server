@@ -18,11 +18,13 @@ import {
   mobileLogin,
 } from '@/api/system/user';
 import { isWechatBrowser } from '@/utils/is';
+import { DeptTypeEnum } from '@/enums/deptEnum';
 const Storage = createStorage({ storage: localStorage });
 
 export interface UserInfoState {
   id: number;
   deptName: string;
+  deptType: string;
   roleName: string;
   cityLabel: string;
   permissions: string[];
@@ -55,7 +57,7 @@ export interface ConfigState {
   domain: string;
   version: string;
   wsAddr: string;
-  mode:string;
+  mode: string;
 }
 
 export interface LoginConfigState {
@@ -113,6 +115,18 @@ export const useUserStore = defineStore({
     },
     getLoginConfig(): LoginConfigState | null {
       return this.loginConfig;
+    },
+    isCompanyDept(): boolean {
+      return this.info?.deptType == DeptTypeEnum.Company;
+    },
+    isTenantDept(): boolean {
+      return this.info?.deptType == DeptTypeEnum.Tenant;
+    },
+    isMerchantDept(): boolean {
+      return this.info?.deptType == DeptTypeEnum.Merchant;
+    },
+    isUserDept(): boolean {
+      return this.info?.deptType == DeptTypeEnum.User;
     },
   },
   actions: {

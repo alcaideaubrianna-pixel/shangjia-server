@@ -317,7 +317,7 @@ func (s *sAdminOrder) Export(ctx context.Context, in *adminin.OrderListInp) (err
 	}
 
 	var (
-		fileName  = "导出充值订单-" + gctx.CtxId(ctx) + ".xlsx"
+		fileName  = "导出充值订单-" + gctx.CtxId(ctx)
 		sheetName = fmt.Sprintf("索引条件共%v行,共%v页,当前导出是第%v页,本页共%v行", totalCount, form.CalPageCount(totalCount, in.PerPage), in.Page, len(list))
 		exports   []adminin.OrderExportModel
 	)

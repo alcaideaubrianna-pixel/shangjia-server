@@ -154,7 +154,7 @@ func InitTrace(ctx context.Context) {
 
 // SetGFMode 设置gf运行模式
 func SetGFMode(ctx context.Context) {
-	mode := g.Cfg().MustGet(ctx, "hotgo.mode").String()
+	mode := g.Cfg().MustGet(ctx, "system.mode").String()
 	if len(mode) == 0 {
 		mode = gmode.NOT_SET
 	}

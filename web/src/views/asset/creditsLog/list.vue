@@ -19,7 +19,7 @@
         :request="loadDataTable"
         :row-key="(row) => row.id"
         ref="actionRef"
-        :scroll-x="1280"
+        :scroll-x="scrollX"
         :resizeHeightOffset="-10000"
         size="small"
       >
@@ -44,7 +44,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { ref } from 'vue';
+  import { computed, ref } from 'vue';
   import { useMessage } from 'naive-ui';
   import { BasicTable } from '@/components/Table';
   import { BasicForm, useForm } from '@/components/Form/index';
@@ -52,6 +52,7 @@
   import { List, Export } from '@/api/creditsLog';
   import { columns, schemas } from './model';
   import { ExportOutlined } from '@vicons/antd';
+  import { adaTableScrollX } from '@/utils/hotgo';
 
   interface Props {
     type?: string;
@@ -59,6 +60,10 @@
 
   const props = withDefaults(defineProps<Props>(), {
     type: '',
+  });
+
+  const scrollX = computed(() => {
+    return adaTableScrollX(columns, 0);
   });
 
   const { hasPermission } = usePermission();

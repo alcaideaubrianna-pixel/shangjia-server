@@ -71,11 +71,11 @@ type DictDataDeleteModel struct{}
 // DictDataListInp 获取列表
 type DictDataListInp struct {
 	form.PageReq
-
 	form.StatusReq
 	TypeID int64  `json:"typeId" v:"required#字典类型ID不能为空" dc:"字典类型ID"`
-	Type   string `json:"type"`
-	Label  string `json:"label"`
+	Type   string `json:"type"      dc:"字典类型"`
+	Label  string `json:"label"     dc:"字典标签"`
+	Value  string `json:"value"     dc:"字典键值"`
 }
 
 type DictDataListModel struct {

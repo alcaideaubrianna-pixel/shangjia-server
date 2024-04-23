@@ -18,7 +18,7 @@ import (
 type MqProducer interface {
 	SendMsg(topic string, body string) (mqMsg MqMsg, err error)
 	SendByteMsg(topic string, body []byte) (mqMsg MqMsg, err error)
-	SendDelayMsg(topic string, body string, delaySecond int64) (mqMsg MqMsg, err error)
+	SendDelayMsg(topic string, body string, delay int64) (mqMsg MqMsg, err error)
 }
 
 type MqConsumer interface {
@@ -34,7 +34,6 @@ const (
 type Config struct {
 	Switch    bool   `json:"switch"`
 	Driver    string `json:"driver"`
-	Retry     int    `json:"retry"`
 	GroupName string `json:"groupName"`
 	Redis     RedisConf
 	Rocketmq  RocketmqConf
@@ -45,9 +44,14 @@ type Config struct {
 type RedisConf struct {
 	Timeout int64 `json:"timeout"`
 }
+
 type RocketmqConf struct {
-	Address  []string `json:"address"`
-	LogLevel string   `json:"logLevel"`
+	NameSrvAdders []string `json:"nameSrvAdders"`
+	AccessKey     string   `json:"accessKey"`
+	SecretKey     string   `json:"secretKey"`
+	BrokerAddr    string   `json:"brokerAddr"`
+	Retry         int      `json:"retry"`
+	LogLevel      string   `json:"logLevel"`
 }
 
 type KafkaConf struct {
@@ -106,11 +110,11 @@ func NewProducer(groupName string) (mqClient MqProducer, err error) {
 
 	switch config.Driver {
 	case "rocketmq":
-		if len(config.Rocketmq.Address) == 0 {
-			err = gerror.New("queue rocketmq address is not support")
+		if len(config.Rocketmq.NameSrvAdders) == 0 {
+			err = gerror.New("queue.rocketmq.nameSrvAdders is empty.")
 			return
 		}
-		mqClient, err = RegisterRocketProducer(config.Rocketmq.Address, groupName, config.Retry)
+		mqClient, err = RegisterRocketProducer()
 	case "kafka":
 		if len(config.Kafka.Address) == 0 {
 			err = gerror.New("queue kafka address is not support")
@@ -142,7 +146,6 @@ func NewProducer(groupName string) (mqClient MqProducer, err error) {
 	mutex.Lock()
 	defer mutex.Unlock()
 	mqProducerInstanceMap[groupName] = mqClient
-
 	return
 }
 
@@ -155,11 +158,11 @@ func NewConsumer(groupName string) (mqClient MqConsumer, err error) {
 
 	switch config.Driver {
 	case "rocketmq":
-		if len(config.Rocketmq.Address) == 0 {
-			err = gerror.New("queue.rocketmq.address is empty.")
+		if len(config.Rocketmq.NameSrvAdders) == 0 {
+			err = gerror.New("queue.rocketmq.nameSrvAdders is empty.")
 			return
 		}
-		mqClient, err = RegisterRocketConsumer(config.Rocketmq.Address, groupName)
+		mqClient, err = RegisterRocketConsumer()
 	case "kafka":
 		if len(config.Kafka.Address) == 0 {
 			err = gerror.New("queue kafka address is not support")
@@ -176,7 +179,7 @@ func NewConsumer(groupName string) (mqClient MqConsumer, err error) {
 			return item, nil
 		}
 
-		clientId := "HOTGO-Consumer-" + groupName
+		clientId := "hotgo-consumer-" + groupName
 		if config.Kafka.RandClient {
 			clientId += "-" + randTag
 		}

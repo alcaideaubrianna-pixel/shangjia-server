@@ -3,7 +3,7 @@
 // @Copyright  Copyright (c) 2024 HotGo CLI
 // @Author  Ms <133814250@qq.com>
 // @License  https://github.com/bufanyun/hotgo/blob/master/LICENSE
-// @AutoGenerate Version 2.12.10
+// @AutoGenerate Version 2.13.1
 package sys
 
 import (
@@ -13,6 +13,7 @@ import (
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/library/hgorm"
 	"hotgo/internal/library/hgorm/handler"
+	"hotgo/internal/library/hgorm/hook"
 	"hotgo/internal/model/input/form"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
@@ -37,18 +38,35 @@ func init() {
 	service.RegisterSysCurdDemo(NewSysCurdDemo())
 }
 
-// Model 生成演示ORM模型
+// Model CURD列表ORM模型
 func (s *sSysCurdDemo) Model(ctx context.Context, option ...*handler.Option) *gdb.Model {
 	return handler.Model(dao.SysGenCurdDemo.Ctx(ctx), option...)
 }
 
-// List 获取生成演示列表
+// List 获取CURD列表列表
 func (s *sSysCurdDemo) List(ctx context.Context, in *sysin.CurdDemoListInp) (list []*sysin.CurdDemoListModel, totalCount int, err error) {
 	mod := s.Model(ctx)
+
+	// 字段过滤
+	mod = mod.FieldsPrefix(dao.SysGenCurdDemo.Table(), sysin.CurdDemoListModel{})
+	mod = mod.Fields(hgorm.JoinFields(ctx, sysin.CurdDemoListModel{}, &dao.TestCategory, "testCategory"))
+
+	// 关联表字段
+	mod = mod.LeftJoinOnFields(dao.TestCategory.Table(), dao.SysGenCurdDemo.Columns().CategoryId, "=", dao.TestCategory.Columns().Id)
 
 	// 查询ID
 	if in.Id > 0 {
 		mod = mod.Where(dao.SysGenCurdDemo.Columns().Id, in.Id)
+	}
+
+	// 查询标题
+	if in.Title != "" {
+		mod = mod.WhereLike(dao.SysGenCurdDemo.Columns().Title, "%"+in.Title+"%")
+	}
+
+	// 查询描述
+	if in.Description != "" {
+		mod = mod.WhereLike(dao.SysGenCurdDemo.Columns().Description, "%"+in.Description+"%")
 	}
 
 	// 查询状态
@@ -56,50 +74,48 @@ func (s *sSysCurdDemo) List(ctx context.Context, in *sysin.CurdDemoListInp) (lis
 		mod = mod.Where(dao.SysGenCurdDemo.Columns().Status, in.Status)
 	}
 
+	// 查询创建者
+	if in.CreatedBy != "" {
+		ids, err := service.AdminMember().GetIdsByKeyword(ctx, in.CreatedBy)
+		if err != nil {
+			return nil, 0, err
+		}
+		mod = mod.WhereIn(dao.SysGenCurdDemo.Columns().CreatedBy, ids)
+	}
+
 	// 查询创建时间
 	if len(in.CreatedAt) == 2 {
 		mod = mod.WhereBetween(dao.SysGenCurdDemo.Columns().CreatedAt, in.CreatedAt[0], in.CreatedAt[1])
 	}
 
-	// 查询分类名称
+	// 查询测试分类
+	if in.CategoryId > 0 {
+		mod = mod.Where(dao.SysGenCurdDemo.Columns().CategoryId, in.CategoryId)
+	}
+
+	// 查询关联分类
 	if in.TestCategoryName != "" {
-		mod = mod.WhereLike(dao.TestCategory.Columns().Name, in.TestCategoryName)
+		mod = mod.WherePrefix(dao.TestCategory.Table(), dao.TestCategory.Columns().Name, in.TestCategoryName)
 	}
 
-	// 关联表testCategory
-	mod = mod.LeftJoin(hgorm.GenJoinOnRelation(
-		dao.SysGenCurdDemo.Table(), dao.SysGenCurdDemo.Columns().CategoryId, // 主表表名,关联字段
-		dao.TestCategory.Table(), "testCategory", dao.TestCategory.Columns().Id, // 关联表表名,别名,关联字段
-	)...)
+	// 分页
+	mod = mod.Page(in.Page, in.PerPage)
 
-	totalCount, err = mod.Clone().Count()
-	if err != nil {
-		err = gerror.Wrap(err, "获取生成演示数据行失败，请稍后重试！")
-		return
-	}
+	// 排序
+	mod = mod.OrderAsc(dao.SysGenCurdDemo.Table() + "." + dao.SysGenCurdDemo.Columns().Sort).OrderDesc(dao.SysGenCurdDemo.Table() + "." + dao.SysGenCurdDemo.Columns().Id)
 
-	if totalCount == 0 {
-		return
-	}
+	// 操作人摘要信息
+	mod = mod.Hook(hook.MemberSummary)
 
-	// 关联表select
-	fields, err := hgorm.GenJoinSelect(ctx, sysin.CurdDemoListModel{}, &dao.SysGenCurdDemo, []*hgorm.Join{
-		{Dao: &dao.TestCategory, Alias: "testCategory"},
-	})
-
-	if err != nil {
-		err = gerror.Wrap(err, "获取生成演示关联字段失败，请稍后重试！")
-		return
-	}
-
-	if err = mod.Fields(fields).Page(in.Page, in.PerPage).OrderAsc(dao.SysGenCurdDemo.Columns().Sort).OrderDesc(dao.SysGenCurdDemo.Columns().Id).Scan(&list); err != nil {
-		err = gerror.Wrap(err, "获取生成演示列表失败，请稍后重试！")
+	// 查询数据
+	if err = mod.ScanAndCount(&list, &totalCount, false); err != nil {
+		err = gerror.Wrap(err, "获取CURD列表列表失败，请稍后重试！")
 		return
 	}
 	return
 }
 
-// Export 导出生成演示
+// Export 导出CURD列表
 func (s *sSysCurdDemo) Export(ctx context.Context, in *sysin.CurdDemoListInp) (err error) {
 	list, totalCount, err := s.List(ctx, in)
 	if err != nil {
@@ -113,7 +129,7 @@ func (s *sSysCurdDemo) Export(ctx context.Context, in *sysin.CurdDemoListInp) (e
 	}
 
 	var (
-		fileName  = "导出生成演示-" + gctx.CtxId(ctx) + ".xlsx"
+		fileName  = "导出CURD列表-" + gctx.CtxId(ctx)
 		sheetName = fmt.Sprintf("索引条件共%v行,共%v页,当前导出是第%v页,本页共%v行", totalCount, form.CalPageCount(totalCount, in.PerPage), in.Page, len(list))
 		exports   []sysin.CurdDemoExportModel
 	)
@@ -126,42 +142,46 @@ func (s *sSysCurdDemo) Export(ctx context.Context, in *sysin.CurdDemoListInp) (e
 	return
 }
 
-// Edit 修改/新增生成演示
+// Edit 修改/新增CURD列表
 func (s *sSysCurdDemo) Edit(ctx context.Context, in *sysin.CurdDemoEditInp) (err error) {
-	// 修改
-	if in.Id > 0 {
-		in.UpdatedBy = contexts.GetUserId(ctx)
-		if _, err = s.Model(ctx).
-			Fields(sysin.CurdDemoUpdateFields{}).
-			WherePri(in.Id).Data(in).Update(); err != nil {
-			err = gerror.Wrap(err, "修改生成演示失败，请稍后重试！")
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (err error) {
+
+		// 修改
+		if in.Id > 0 {
+			in.UpdatedBy = contexts.GetUserId(ctx)
+			if _, err = s.Model(ctx).
+				Fields(sysin.CurdDemoUpdateFields{}).
+				WherePri(in.Id).Data(in).Update(); err != nil {
+				err = gerror.Wrap(err, "修改CURD列表失败，请稍后重试！")
+			}
+			return
+		}
+
+		// 新增
+		in.CreatedBy = contexts.GetUserId(ctx)
+		if _, err = s.Model(ctx, &handler.Option{FilterAuth: false}).
+			Fields(sysin.CurdDemoInsertFields{}).
+			Data(in).Insert(); err != nil {
+			err = gerror.Wrap(err, "新增CURD列表失败，请稍后重试！")
 		}
 		return
-	}
-
-	// 新增
-	in.CreatedBy = contexts.GetUserId(ctx)
-	if _, err = s.Model(ctx, &handler.Option{FilterAuth: false}).
-		Fields(sysin.CurdDemoInsertFields{}).
-		Data(in).Insert(); err != nil {
-		err = gerror.Wrap(err, "新增生成演示失败，请稍后重试！")
-	}
-	return
+	})
 }
 
-// Delete 删除生成演示
+// Delete 删除CURD列表
 func (s *sSysCurdDemo) Delete(ctx context.Context, in *sysin.CurdDemoDeleteInp) (err error) {
+
 	if _, err = s.Model(ctx).WherePri(in.Id).Delete(); err != nil {
-		err = gerror.Wrap(err, "删除生成演示失败，请稍后重试！")
+		err = gerror.Wrap(err, "删除CURD列表失败，请稍后重试！")
 		return
 	}
 	return
 }
 
-// MaxSort 获取生成演示最大排序
+// MaxSort 获取CURD列表最大排序
 func (s *sSysCurdDemo) MaxSort(ctx context.Context, in *sysin.CurdDemoMaxSortInp) (res *sysin.CurdDemoMaxSortModel, err error) {
 	if err = dao.SysGenCurdDemo.Ctx(ctx).Fields(dao.SysGenCurdDemo.Columns().Sort).OrderDesc(dao.SysGenCurdDemo.Columns().Sort).Scan(&res); err != nil {
-		err = gerror.Wrap(err, "获取生成演示最大排序，请稍后重试！")
+		err = gerror.Wrap(err, "获取CURD列表最大排序，请稍后重试！")
 		return
 	}
 
@@ -173,32 +193,19 @@ func (s *sSysCurdDemo) MaxSort(ctx context.Context, in *sysin.CurdDemoMaxSortInp
 	return
 }
 
-// View 获取生成演示指定信息
+// View 获取CURD列表指定信息
 func (s *sSysCurdDemo) View(ctx context.Context, in *sysin.CurdDemoViewInp) (res *sysin.CurdDemoViewModel, err error) {
-	if err = s.Model(ctx).WherePri(in.Id).Scan(&res); err != nil {
-		err = gerror.Wrap(err, "获取生成演示信息，请稍后重试！")
+	if err = s.Model(ctx).WherePri(in.Id).Hook(hook.MemberSummary).Scan(&res); err != nil {
+		err = gerror.Wrap(err, "获取CURD列表信息，请稍后重试！")
 		return
 	}
 	return
 }
 
-// Status 更新生成演示状态
-func (s *sSysCurdDemo) Status(ctx context.Context, in *sysin.CurdDemoStatusInp) (err error) {
-	if _, err = s.Model(ctx).WherePri(in.Id).Data(g.Map{
-		dao.SysGenCurdDemo.Columns().Status:    in.Status,
-		dao.SysGenCurdDemo.Columns().UpdatedBy: contexts.GetUserId(ctx),
-	}).Update(); err != nil {
-		err = gerror.Wrap(err, "更新生成演示状态失败，请稍后重试！")
-		return
-	}
-	return
-}
-
-// Switch 更新生成演示开关
+// Switch 更新CURD列表开关
 func (s *sSysCurdDemo) Switch(ctx context.Context, in *sysin.CurdDemoSwitchInp) (err error) {
 	var fields = []string{
 		dao.SysGenCurdDemo.Columns().Switch,
-
 		// ...
 	}
 
@@ -211,7 +218,7 @@ func (s *sSysCurdDemo) Switch(ctx context.Context, in *sysin.CurdDemoSwitchInp) 
 		in.Key:                                 in.Value,
 		dao.SysGenCurdDemo.Columns().UpdatedBy: contexts.GetUserId(ctx),
 	}).Update(); err != nil {
-		err = gerror.Wrap(err, "更新生成演示开关失败，请稍后重试！")
+		err = gerror.Wrap(err, "更新CURD列表开关失败，请稍后重试！")
 		return
 	}
 	return

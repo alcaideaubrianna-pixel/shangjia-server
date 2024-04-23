@@ -21,6 +21,7 @@
         ref="actionRef"
         :actionColumn="actionColumn"
         @update:checked-row-keys="onCheckedRow"
+        :resizeHeightOffset="-10000"
         :scroll-x="1090"
       >
         <template #tableTitle>
@@ -96,16 +97,17 @@
   </div>
 </template>
 
-<script lang="ts" setup name="org_post">
+<script lang="ts" setup>
   import { h, reactive, ref } from 'vue';
   import { useDialog, useMessage } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, FormSchema, useForm } from '@/components/Form/index';
-  import { Delete, Edit, getPostList, Status } from '@/api/org/post';
+  import { Delete, Edit, getPostList } from '@/api/org/post';
   import { columns } from './columns';
   import { DeleteOutlined, PlusOutlined } from '@vicons/antd';
-  import { statusActions, statusOptions } from '@/enums/optionsiEnum';
-  import { defRangeShortcuts } from "@/utils/dateUtil";
+  import { statusOptions } from '@/enums/optionsiEnum';
+  import { defRangeShortcuts } from '@/utils/dateUtil';
+  import { cloneDeep } from 'lodash-es';
 
   const params = ref<any>({
     pageSize: 10,
@@ -179,25 +181,18 @@
 
   const resetFormParams = {
     id: 0,
-    pid: 0,
-    name: '',
     code: '',
-    type: '',
-    leader: '',
-    phone: '',
-    email: '',
-    sort: 0,
+    name: '',
+    remark: '',
+    sort: null,
     status: 1,
-    created_at: '',
-    updated_at: '',
   };
-  let formParams = ref<any>(resetFormParams);
-
+  const formParams = ref<any>(resetFormParams);
   const actionColumn = reactive({
-    width: 220,
+    width: 150,
     title: '操作',
     key: 'action',
-    // fixed: 'right',
+    fixed: 'right',
     render(record) {
       return h(TableAction as any, {
         style: 'button',
@@ -211,10 +206,6 @@
             onClick: handleDelete.bind(null, record),
           },
         ],
-        dropDownActions: statusActions,
-        select: (key) => {
-          updateStatus(record.id, key);
-        },
       });
     },
   });
@@ -227,7 +218,7 @@
 
   function addTable() {
     showModal.value = true;
-    formParams.value = resetFormParams;
+    formParams.value = cloneDeep(resetFormParams);
   }
 
   const loadDataTable = async (res) => {
@@ -237,7 +228,6 @@
   function onCheckedRow(rowKeys) {
     console.log(rowKeys);
     batchDeleteDisabled.value = rowKeys.length <= 0;
-
     checkedIds.value = rowKeys;
   }
 
@@ -282,9 +272,6 @@
           reloadTable();
         });
       },
-      onNegativeClick: () => {
-        // message.error('取消');
-      },
     });
   }
 
@@ -300,9 +287,6 @@
           reloadTable();
         });
       },
-      onNegativeClick: () => {
-        // message.error('取消');
-      },
     });
   }
 
@@ -315,15 +299,6 @@
   function handleReset(values: Recordable) {
     params.value = values;
     reloadTable();
-  }
-
-  function updateStatus(id, status) {
-    Status({ id: id, status: status }).then((_res) => {
-      message.success('操作成功');
-      setTimeout(() => {
-        reloadTable();
-      });
-    });
   }
 </script>
 

@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/gogf/gf/v2/frame/g"
 	"hash/fnv"
 	"hotgo/internal/model"
 	"strconv"
@@ -40,8 +41,27 @@ func GetOptionsById(ctx context.Context, id int64) (opts []*model.Option, err er
 	}
 
 	for _, v := range GetAllFunc() {
+		g.Log().Warningf(ctx, "GetAllFunc GetOptionsById v:%v, %v", v.Id, v.Key)
 		if v.Id == id {
 			return LoadFuncOptions(ctx, v)
+		}
+	}
+
+	err = NotExistKeyError
+	return
+}
+
+// GetTypeById 通过类型ID获取内置选项类型
+func GetTypeById(ctx context.Context, id int64) (typ string, err error) {
+	for _, v := range GetAllEnums() {
+		if v.Id == id {
+			return v.Key, nil
+		}
+	}
+
+	for _, v := range GetAllFunc() {
+		if v.Id == id {
+			return v.Key, nil
 		}
 	}
 

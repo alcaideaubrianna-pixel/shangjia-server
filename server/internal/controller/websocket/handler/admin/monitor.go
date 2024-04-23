@@ -21,6 +21,7 @@ import (
 	"hotgo/internal/websocket"
 	"hotgo/utility/file"
 	"hotgo/utility/format"
+	"hotgo/utility/simple"
 	"os"
 	"runtime"
 	"time"
@@ -76,8 +77,7 @@ func (c *cMonitor) RunInfo(client *websocket.Client, req *websocket.WRequest) {
 		"goSize":    file.DirSize(pwd),
 	}
 
-	isDemo := g.Cfg().MustGet(client.Context(), "hotgo.isDemo", false).Bool()
-	if isDemo {
+	if simple.IsDemo(client.Context()) {
 		data["rootPath"] = consts.DemoTips
 		data["pwd"] = consts.DemoTips
 		data["intranet_ip"] = consts.DemoTips

@@ -22,3 +22,10 @@ const (
 	DefaultPageSize = 1  // 默认列表分页加载页码
 	MaxSortIncr     = 10 // 最大排序值增量
 )
+
+// TenantField 租户字段
+const (
+	TenantId   = "tenant_id"   // 租户ID
+	MerchantId = "merchant_id" // 商户ID
+	UserId     = "user_id"     // 用户ID
+)

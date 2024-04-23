@@ -13,7 +13,7 @@ import (
 
 // ListReq 查询列表
 type ListReq struct {
-	g.Meta `path:"/smsLog/list" method:"get" tags:"短信记录" summary:"获取短信记录列表"`
+	g.Meta `path:"/smsLog/list" method:"get" tags:"短信" summary:"获取短信记录列表"`
 	sysin.SmsLogListInp
 }
 
@@ -24,7 +24,7 @@ type ListRes struct {
 
 // ViewReq 获取指定信息
 type ViewReq struct {
-	g.Meta `path:"/smsLog/view" method:"get" tags:"短信记录" summary:"获取指定信息"`
+	g.Meta `path:"/smsLog/view" method:"get" tags:"短信" summary:"获取指定短信信息"`
 	sysin.SmsLogViewInp
 }
 
@@ -32,26 +32,10 @@ type ViewRes struct {
 	*sysin.SmsLogViewModel
 }
 
-// EditReq 修改/新增数据
-type EditReq struct {
-	g.Meta `path:"/smsLog/edit" method:"post" tags:"短信记录" summary:"修改/新增短信记录"`
-	sysin.SmsLogEditInp
-}
-
-type EditRes struct{}
-
 // DeleteReq 删除
 type DeleteReq struct {
-	g.Meta `path:"/smsLog/delete" method:"post" tags:"短信记录" summary:"删除短信记录"`
+	g.Meta `path:"/smsLog/delete" method:"post" tags:"短信" summary:"删除短信记录"`
 	sysin.SmsLogDeleteInp
 }
 
 type DeleteRes struct{}
-
-// StatusReq 更新状态
-type StatusReq struct {
-	g.Meta `path:"/smsLog/status" method:"post" tags:"短信记录" summary:"更新短信记录状态"`
-	sysin.SmsLogStatusInp
-}
-
-type StatusRes struct{}

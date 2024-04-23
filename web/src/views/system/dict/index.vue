@@ -126,7 +126,6 @@
     SearchOutlined,
     DeleteOutlined,
   } from '@vicons/antd';
-  import { getTreeItem } from '@/utils';
   import CreateDrawer from './CreateDrawer.vue';
   import List from './list.vue';
   import { DeleteDict, getDictTree } from '@/api/dict/dict';
@@ -143,16 +142,7 @@
   const checkedId = ref(0);
   const pattern = ref('');
   const drawerTitle = ref('');
-  const optionTreeData = ref([
-    {
-      id: 0,
-      key: 0,
-      label: '根目录',
-      pid: 0,
-      title: '根目录',
-      type: 1,
-    },
-  ]);
+  const optionTreeData = ref([]);
   const defaultValueRef = () => ({
     id: 0,
     pid: 0,
@@ -177,10 +167,9 @@
     openDrawer(formParams);
   }
 
-  function selectedTree(keys) {
+  function selectedTree(keys, opts) {
     if (keys.length) {
-      const treeItem = getTreeItem(unref(treeData), keys[0]);
-      // console.log('选择treeItem:' + JSON.stringify(treeItem));
+      const treeItem = opts[0];
       treeItemKey.value = keys;
       treeItemTitle.value = treeItem.label;
       Object.assign(formParams, treeItem);
@@ -200,15 +189,10 @@
       positiveText: '确定',
       negativeText: '取消',
       onPositiveClick: () => {
-        DeleteDict({ ...formParams })
-          .then(async (_res) => {
-            message.success('操作成功');
-            // handleReset();
-            await loadData();
-          })
-          .catch((_e: Error) => {
-            // message.error(e.message ?? '操作失败');
-          });
+        DeleteDict({ ...formParams }).then(async (_res) => {
+          message.success('操作成功');
+          await loadData();
+        });
       },
       onNegativeClick: () => {
         message.error('已取消');

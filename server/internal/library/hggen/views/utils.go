@@ -7,6 +7,7 @@ package views
 
 import (
 	"context"
+	"fmt"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -14,11 +15,18 @@ import (
 	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/gconv"
+	"golang.org/x/tools/imports"
 	"hotgo/internal/consts"
+	"hotgo/internal/library/hggen/views/gohtml"
 	"hotgo/internal/model"
 	"hotgo/internal/model/input/sysin"
+	"hotgo/utility/convert"
+	"hotgo/utility/simple"
+	"hotgo/utility/validate"
 	"os"
+	"regexp"
 	"strings"
+	"unicode"
 )
 
 // parseServFunName 解析业务服务名称
@@ -28,19 +36,6 @@ func (l *gCurd) parseServFunName(templateGroup, varName string) string {
 		return varName
 	}
 	return templateGroup + varName
-}
-
-// getPkField 获取主键
-func (l *gCurd) getPkField(in *CurdPreviewInput) *sysin.GenCodesColumnListModel {
-	if len(in.masterFields) == 0 {
-		panic("getPkField masterFields uninitialized.")
-	}
-	for _, field := range in.masterFields {
-		if IsIndexPK(field.Index) {
-			return field
-		}
-	}
-	return nil
 }
 
 // hasEffectiveJoin 存在有效的关联表
@@ -219,4 +214,108 @@ func ParseDBConfigNodeLink(node *gdb.ConfigNode) *gdb.ConfigNode {
 		node.Protocol = defaultProtocol
 	}
 	return node
+}
+
+// ImportWebMethod 导入前端方法
+func ImportWebMethod(vs []string) string {
+	vs = convert.UniqueSlice(vs)
+	str := "{ " + strings.Join(vs, ", ") + " }"
+	str = strings.TrimSuffix(str, ", ")
+	return str
+}
+
+// CheckTreeTableFields 检查树表字段
+func CheckTreeTableFields(columns []*sysin.GenCodesColumnListModel) (err error) {
+	var fields = []string{"pid", "level", "tree"}
+	for _, v := range columns {
+		if validate.InSlice(fields, v.Name) {
+			fields = convert.RemoveSlice(fields, v.Name)
+		}
+	}
+
+	if len(fields) > 0 {
+		err = gerror.Newf("树表必须包含[%v]字段", strings.Join(fields, "、"))
+		return err
+	}
+	return
+}
+
+// CheckIllegalName 检查命名是否合理
+func CheckIllegalName(errPrefix string, names ...string) (err error) {
+	for _, name := range names {
+		name = strings.ToLower(name)
+		match, _ := regexp.MatchString("^[a-z_][a-z0-9_]*$", name)
+		if !match {
+			err = gerror.Newf("%v存在格式不正确，必须全部小写且由字母、数字和下划线组成:%v", errPrefix, name)
+			return
+		}
+		if strings.HasSuffix(name, "test") {
+			err = gerror.Newf("%v当中不能以`test`结尾:%v", errPrefix, name)
+			return
+		}
+		if StartsWithDigit(name) {
+			err = gerror.Newf("%v当中不能以阿拉伯数字开头:%v", errPrefix, name)
+			return
+		}
+	}
+	return
+}
+
+func StartsWithDigit(s string) bool {
+	r := []rune(s)
+	if len(r) > 0 {
+		return unicode.IsDigit(r[0])
+	}
+	return false
+}
+
+// IsPidName 是否是树表的pid字段
+func IsPidName(name string) bool {
+	return name == "pid"
+}
+
+func ToTSArray(vs []string) string {
+	formattedStrings := make([]string, len(vs))
+	for i, str := range vs {
+		formattedStrings[i] = fmt.Sprintf("'%s'", str)
+	}
+	return fmt.Sprintf("[%s]", strings.Join(formattedStrings, ", "))
+}
+
+func FormatGo(ctx context.Context, name, code string) (string, error) {
+	path := GetTempGeneratePath(ctx) + "/" + name
+	if err := gfile.PutContents(path, code); err != nil {
+		return "", err
+	}
+	res, err := imports.Process(path, []byte(code), nil)
+	if err != nil {
+		err = gerror.Newf(`FormatGo error format "%s" go files: %v`, path, err)
+		return "", err
+	}
+	return string(res), nil
+}
+
+func FormatVue(code string) string {
+	endTag := `</template>`
+	vueLen := gstr.PosR(code, endTag)
+	vueCode := code[:vueLen+len(endTag)]
+	tsCode := code[vueLen+len(endTag):]
+	vueCode = gohtml.Format(vueCode)
+	tsCode = FormatTs(tsCode)
+	return vueCode + tsCode
+}
+
+func FormatTs(code string) string {
+	code = replaceEmptyLinesWithSpace(code)
+	return code + "\n"
+}
+
+func replaceEmptyLinesWithSpace(input string) string {
+	re := regexp.MustCompile(`\n\s*\n`)
+	result := re.ReplaceAllString(input, "\n\n")
+	return result
+}
+
+func GetTempGeneratePath(ctx context.Context) string {
+	return gfile.Abs(gfile.Temp() + "/hotgo-generate/" + simple.AppName(ctx))
 }

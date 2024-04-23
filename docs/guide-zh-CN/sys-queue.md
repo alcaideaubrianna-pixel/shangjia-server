@@ -14,33 +14,33 @@
 - 配置文件：server/manifest/config/config.yaml
 
 ```yaml
-#消息队列
+# 消息队列
 queue:
   switch: true                                        # 队列开关，可选：true|false，默认为true
-  driver: "disk"                                      # 队列驱动，可选：redis|rocketmq|kafka，默认为disk
-  retry: 2                                            # 重试次数，仅rocketmq|redis支持
+  driver: "disk"                                      # 队列驱动，可选：disk|redis|rocketmq|kafka，默认为disk
   groupName: "hotgo"                                  # mq群组名称
-  #磁盘队列
+  # 磁盘队列
   disk:
     path: "./storage/diskqueue"                       # 数据存放路径
     batchSize: 100                                    # 每100条消息同步一次，batchSize和batchTime满足其一就会同步一次
     batchTime: 1                                      # 每1秒消息同步一次
     segmentSize: 10485760                             # 每个topic分片数据文件最大字节，默认10M
     segmentLimit: 3000                                # 每个topic最大分片数据文件数量，超出部分将会丢弃
+  # redis，默认使用全局redis运行队列
   redis:
-    address: "127.0.0.1:6379"                         # redis服务地址，默认为127.0.0.1:6379
-    db: 2                                             # 指定redis库
-    pass: ""                                          # redis密码
-    timeout: 0                                        # 队列超时时间(s) ，0为永不超时，当队列一直没有被消费到达超时时间则队列会被销毁
+    timeout: 0                                        # 队列超时时间以秒为单位，0表示永不超时。如果队列在设定的超时时间内没有被消费，则会被销毁
   rocketmq:
-    address: "127.0.0.1:9876"                         # brocker地址+端口
-    logLevel: "all"                                   # 系统日志级别，可选：all|close|debug|info|warn|error|fatal
+    nameSrvAdders: ["127.0.0.1:9876"]                  # nameSrvAdder+端口，支持多个
+    accessKey: ""                                      # 选填。如果开启了acl控制就必填
+    secretKey: ""                                      # 选填。如果开启了acl控制就必填
+    brokerAddr: "127.0.0.1:10911"                      # brokerAddr+端口，选填。用于消费者订阅主题前会检查主题是否存在，不存在会自动创建。你也可以在rocketmq控制台手动创建主题
+    retry: 0                                           # 重试次数
+    logLevel: "info"                                   # 系统日志级别，可选：all|close|debug|info|warn|error|fatal
   kafka:
     address: "127.0.0.1:9092"                         # kafka地址+端口
     version: "2.0.0.0"                                # kafka专属配置，默认2.0.0.0
     randClient: true                                  # 开启随机生成clientID，可以实现启动多实例同时一起消费相同topic，加速消费能力的特性，默认为true
     multiConsumer: true                               # 是否支持创建多个消费者
-
 ```
 
 ### 实现接口
@@ -123,7 +123,7 @@ func test()  {
 
 ```
 
-延迟队列，目前只有redis驱动支持:
+延迟队列，目前只有redis、rocketmq驱动支持:
 
 ```go
 package main
@@ -140,8 +140,17 @@ func test()  {
 		//...
     }
 	
-	// 延迟10秒
+	// redis 延迟10秒
 	if err := queue.SendDelayMsg(consts.QueueLogTopic, data, 10); err != nil {
+		fmt.Printf("queue.Push err:%+v", err)
+	}
+
+	// rocketmq 延迟5秒
+	// 注意rocketmq这里传入的是延迟级别，而不是秒
+	// 消息的延时级别level一共有18级，分别为：
+	// 1s 5s 10s 30s 1m 2m 3m 4m 5m 6m 7m 8m 9m 10m 20m 30m 1h 2h
+	// 参考：https://github.com/apache/rocketmq-client-go/blob/0e19ee654819bda396a08d950c883f9008b8222b/primitive/message.go#L174
+	if err := queue.SendDelayMsg(consts.QueueLogTopic, data, 2); err != nil {
 		fmt.Printf("queue.Push err:%+v", err)
 	}
 }
@@ -178,10 +187,10 @@ type MqMsg struct {
 	Body      []byte    `json:"body"`
 }
 
-
 type MqProducer interface {
 	SendMsg(topic string, body string) (mqMsg MqMsg, err error)
 	SendByteMsg(topic string, body []byte) (mqMsg MqMsg, err error)
+	SendDelayMsg(topic string, body string, delay int64) (mqMsg MqMsg, err error)
 }
 
 type MqConsumer interface {

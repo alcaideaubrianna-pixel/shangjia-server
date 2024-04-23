@@ -8,8 +8,8 @@
 ### 环境要求
 
 - node版本 >= v16.0.0
-- golang版本 >= v1.19
-- goframe版本 >=v2.6.4
+- golang版本 >= v1.21
+- goframe版本 >=v2.7.0
 - mysql版本 >=5.7
 
 > 必须先看[环境搭建文档](start-environment.md)，如果安装遇到问题务必先查看[常见问题文档](start-issue.md)
@@ -28,16 +28,35 @@ git clone https://github.com/bufanyun/hotgo.git && cd hotgo
 1、服务端：
 - 项目数据库文件 `storage/data/hotgo.sql` 创建数据库并导入
 - 将配置文件 `manifest/config/config.yaml.bak` 复制后改为`manifest/config/config.yaml`
-- 将`manifest/config/config.yaml`中的数据库配置改为你自己的：
+- 将`manifest/config/config.yaml`中的`database.default.link`数据库配置改为你自己的：
 ```yaml
+# Database. 配置参考：https://goframe.org/pages/viewpage.action?pageId=1114245
 database:
   logger:
-    level: "all"
+    path: "logs/database"                       # 日志文件路径。默认为空，表示关闭，仅输出到终端
+    <<: *defaultLogger
     stdout: true
   default:
-    link: "mysql:hotgo:hg123456.@tcp(127.0.0.1:3306)/hotgo?loc=Local&parseTime=true"
+    link: "mysql:hotgo:hg123456.@tcp(127.0.0.1:3306)/hotgo?loc=Local&parseTime=true&charset=utf8mb4"
     debug: true
     Prefix: "hg_"
+```
+
+- 将`hack/config.yaml`中的`gfcli.gen.dao[0].link`数据库配置改为你自己的：
+```yaml
+gfcli:
+  gen:
+    dao:
+      - link: "mysql:hotgo:hg123456.@tcp(127.0.0.1:3306)/hotgo?loc=Local&parseTime=true&charset=utf8mb4"
+        group: "default"                                                # 分组 使用hotgo代码生成功能时必须填
+        #        tables:          ""                                    # 指定当前数据库中需要执行代码生成的数据表。如果为空，表示数据库的所有表都会生成。
+        tablesEx:        "hg_sys_addons_install"                        # 指定当前数据库中需要排除代码生成的数据表。
+        removePrefix: "hg_"
+        descriptionTag: true
+        noModelComment: true
+        jsonCase: "CamelLower"
+        gJsonSupport: true
+        clear: false
 ```
 
 2、web前端：

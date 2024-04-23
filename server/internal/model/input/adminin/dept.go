@@ -12,6 +12,7 @@ import (
 	"hotgo/internal/consts"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/form"
+	"hotgo/utility/tree"
 	"hotgo/utility/validate"
 )
 
@@ -21,7 +22,7 @@ type DeptMaxSortInp struct {
 }
 
 type DeptMaxSortModel struct {
-	Sort int
+	Sort int `json:"sort"`
 }
 
 // DeptEditInp 修改/新增部门数据
@@ -112,7 +113,8 @@ type DeptTree struct {
 }
 
 type DeptListModel struct {
-	List []*DeptTree `json:"list"`
+	List []*entity.AdminDept `json:"list"`
+	Ids  []int64             `json:"ids"`
 }
 
 // DeptStatusInp 更新部门状态
@@ -147,4 +149,27 @@ type DeptOptionInp struct {
 
 type DeptOptionModel struct {
 	List []*DeptTree `json:"list"`
+}
+
+// DeptTreeOption 关系树选项
+type DeptTreeOption struct {
+	Id       int64       `json:"id"   dc:"部门ID"`
+	Pid      int64       `json:"pid"  dc:"父部门ID"`
+	Name     string      `json:"name" dc:"部门名称"`
+	Children []tree.Node `json:"children"  dc:"子节点"`
+}
+
+// ID 获取节点ID
+func (t *DeptTreeOption) ID() int64 {
+	return t.Id
+}
+
+// PID 获取父级节点ID
+func (t *DeptTreeOption) PID() int64 {
+	return t.Pid
+}
+
+// SetChildren 设置子节点数据
+func (t *DeptTreeOption) SetChildren(children []tree.Node) {
+	t.Children = children
 }

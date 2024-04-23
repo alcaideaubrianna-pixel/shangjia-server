@@ -56,9 +56,7 @@ func RegisterEnums(key, label string, opts []*model.Option) {
 func SaveEnums(key, label string, opts []*model.Option) {
 	eLock.Lock()
 	defer eLock.Unlock()
-	if _, ok := enumsOptions[key]; ok {
-		delete(enumsOptions, key)
-	}
+	delete(enumsOptions, key)
 	RegisterEnums(key, label, opts)
 }
 

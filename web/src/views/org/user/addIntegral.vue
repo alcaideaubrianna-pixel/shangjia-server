@@ -94,8 +94,10 @@
   const params = ref<State>(props.formParams);
   const message = useMessage();
   const formRef = ref<any>({});
-  const dialogWidth = ref('75%');
   const formBtnLoading = ref(false);
+  const dialogWidth = computed(() => {
+    return adaModalWidth();
+  });
 
   function confirmForm(e) {
     e.preventDefault();
@@ -115,10 +117,6 @@
       formBtnLoading.value = false;
     });
   }
-
-  onMounted(async () => {
-    adaModalWidth(dialogWidth);
-  });
 
   function closeForm() {
     isShowModal.value = false;

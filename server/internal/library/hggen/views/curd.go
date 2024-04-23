@@ -7,6 +7,7 @@ package views
 
 import (
 	"context"
+	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -17,12 +18,13 @@ import (
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/hggen/internal/cmd/gendao"
-	"hotgo/internal/library/hggen/internal/utility/utils"
 	"hotgo/internal/library/hgorm"
 	"hotgo/internal/model"
 	"hotgo/internal/model/input/sysin"
+	"hotgo/internal/service"
 	"hotgo/utility/convert"
 	"hotgo/utility/file"
+	"hotgo/utility/tree"
 	"runtime"
 	"strings"
 )
@@ -32,18 +34,41 @@ var Curd = gCurd{}
 type gCurd struct{}
 
 type CurdStep struct {
-	HasMaxSort       bool `json:"hasMaxSort"`
-	HasAdd           bool `json:"hasAdd"`
-	HasBatchDel      bool `json:"hasBatchDel"`
-	HasExport        bool `json:"hasExport"`
-	HasNotFilterAuth bool `json:"hasNotFilterAuth"`
-	HasEdit          bool `json:"hasEdit"`
-	HasDel           bool `json:"hasDel"`
-	HasView          bool `json:"hasView"`
-	HasStatus        bool `json:"hasStatus"`
-	HasSwitch        bool `json:"hasSwitch"`
-	HasCheck         bool `json:"hasCheck"`
-	HasMenu          bool `json:"hasMenu"`
+	HasMaxSort            bool        // 最大排序
+	HasAdd                bool        // 表单添加
+	HasBatchDel           bool        // 批量删除
+	HasExport             bool        // 表格导出
+	HasNotFilterAuth      bool        // 不过滤认证权限
+	HasEdit               bool        // 表单编辑
+	HasDel                bool        // 删除
+	HasView               bool        // 查看详情
+	HasStatus             bool        // 修改状态
+	HasSwitch             bool        // 数值开关
+	HasCheck              bool        // 勾选列
+	HasMenu               bool        // 菜单权限
+	IsTreeTable           bool        // 树型列表
+	IsOptionTreeTable     bool        // 选项式树型列表
+	HasRules              bool        // 表单验证规则
+	HasRulesValidator     bool        // 表单验证器
+	HasSearchForm         bool        // 列表搜索
+	HasDict               bool        // 字典
+	HasFuncDict           bool        // 注册方法字典
+	HasQueryMemberSummary bool        // 查询用户摘要
+	HasHookMemberSummary  bool        // hook用户摘要
+	ImportModel           ImportModel // 公用导包 - model.ts
+	ActionColumnWidth     int64       // 列表操作栏宽度
+	IsAddon               bool        // 是否是插件
+}
+
+// ImportModel 导包 - model.ts
+type ImportModel struct {
+	NaiveUI       []string
+	UtilsIs       []string
+	UtilsUrl      []string
+	UtilsDate     []string
+	UtilsValidate []string
+	UtilsHotGo    []string
+	UtilsIndex    []string
 }
 
 type CurdOptionsJoin struct {
@@ -63,16 +88,50 @@ type CurdOptionsMenu struct {
 	Sort int    `json:"sort"`
 }
 
+type OptionsTree struct {
+	TitleColumn string `json:"titleColumn"`
+	StyleType   int    `json:"styleType"`
+	TitleField  *sysin.GenCodesColumnListModel
+}
+
+// PresetStep 预设生成流程参数
+type PresetStep struct {
+	FormGridCols int `json:"formGridCols" dc:"表单显示的栅格数量"`
+}
+
 type CurdOptions struct {
 	AutoOps       []string           `json:"autoOps"`
 	ColumnOps     []string           `json:"columnOps"`
 	HeadOps       []string           `json:"headOps"`
 	Join          []*CurdOptionsJoin `json:"join"`
 	Menu          *CurdOptionsMenu   `json:"menu"`
+	Tree          *OptionsTree       `json:"tree"`
 	TemplateGroup string             `json:"templateGroup"`
 	ApiPrefix     string             `json:"apiPrefix"`
+	ImportWebApi  string             `json:"importWebApi"`
+	FuncDict      *FuncDict          `json:"funcDict"`
+	PresetStep    *PresetStep        `json:"presetStep"`
 	Step          *CurdStep          // 转换后的流程控制条件
+	DictOps       CurdOptionsDict    // 字典选项
 	dictMap       g.Map              // 字典选项 -> 字段映射关系
+}
+
+type FuncDict struct {
+	ValueColumn string // 选项值
+	LabelColumn string //选项名称
+	Value       *sysin.GenCodesColumnListModel
+	Label       *sysin.GenCodesColumnListModel
+}
+
+type CurdOptionsDict struct {
+	Has     bool
+	Types   []string
+	Schemas []*OptionsSchemasField
+}
+
+type OptionsSchemasField struct {
+	Field string
+	Type  string
 }
 
 type CurdPreviewInput struct {
@@ -98,31 +157,44 @@ func (l *gCurd) initInput(ctx context.Context, in *CurdPreviewInput) (err error)
 	in.content = new(sysin.GenCodesPreviewModel)
 	in.content.Views = make(map[string]*sysin.GenFile)
 
-	// 加载主表配置
-	if err = in.In.MasterColumns.Scan(&in.masterFields); err != nil {
-		return
+	// 初始化生成选项
+	if err = initOptions(in); err != nil {
+		return err
 	}
 
-	if len(in.masterFields) == 0 {
-		if in.masterFields, err = DoTableColumns(ctx, &sysin.GenCodesColumnListInp{Name: in.In.DbName, Table: in.In.TableName}, in.DaoConfig); err != nil {
-			return
-		}
+	// 初始化表字段配置
+	if err = initTableField(ctx, in); err != nil {
+		return err
 	}
 
-	// 主键属性
-	in.pk = l.getPkField(in)
-	if in.pk == nil {
-		return gerror.New("initInput no primary key is set in the table!")
-	}
-
-	// 加载选项
-	if err = in.In.Options.Scan(&in.options); err != nil {
-		return
+	// 初始化树表
+	if err = initTableTree(in); err != nil {
+		return err
 	}
 
 	initStep(in)
-	in.options.dictMap = make(g.Map)
 
+	// 初始化方法字典
+	if err = initFuncDict(in); err != nil {
+		return err
+	}
+
+	// 初始化生成模板
+	if err = initTemplate(in); err != nil {
+		return err
+	}
+	return
+}
+
+func initOptions(in *CurdPreviewInput) (err error) {
+	if err = in.In.Options.Scan(&in.options); err != nil {
+		return
+	}
+	in.options.dictMap = make(g.Map)
+	return
+}
+
+func initTemplate(in *CurdPreviewInput) (err error) {
 	if len(in.Config.Application.Crud.Templates)-1 < in.In.GenTemplate {
 		return gerror.New("没有找到生成模板的配置，请检查！")
 	}
@@ -141,20 +213,126 @@ func (l *gCurd) initInput(ctx context.Context, in *CurdPreviewInput) (err error)
 	return
 }
 
+func initFuncDict(in *CurdPreviewInput) (err error) {
+	if !in.options.Step.HasFuncDict || in.options.FuncDict == nil {
+		return
+	}
+
+	if len(in.options.FuncDict.LabelColumn) == 0 || len(in.options.FuncDict.ValueColumn) == 0 {
+		err = gerror.New("生成字典选项必须设置选项值和选项名称")
+		return err
+	}
+
+	for _, field := range in.masterFields {
+		if field.Name == in.options.FuncDict.ValueColumn {
+			in.options.FuncDict.Value = field
+		}
+
+		if field.Name == in.options.FuncDict.LabelColumn {
+			in.options.FuncDict.Label = field
+		}
+	}
+	return
+}
+
+func initTableField(ctx context.Context, in *CurdPreviewInput) (err error) {
+	// 加载主表配置
+	if err = in.In.MasterColumns.Scan(&in.masterFields); err != nil {
+		return
+	}
+
+	if len(in.masterFields) == 0 {
+		if in.masterFields, err = DoTableColumns(ctx, &sysin.GenCodesColumnListInp{Name: in.In.DbName, Table: in.In.TableName}, in.DaoConfig); err != nil {
+			return
+		}
+	}
+
+	// 主键属性
+	in.pk = getPkField(in)
+	if in.pk == nil {
+		return gerror.New("initInput no primary key is set in the table!")
+	}
+
+	in.masterFields = ReviseFields(in.masterFields)
+
+	// 检查表命名
+	var names = []string{in.In.DaoName}
+	for _, v := range in.options.Join {
+		v.Columns = ReviseFields(v.Columns)
+		names = append(names, v.DaoName)
+	}
+	if err = CheckIllegalName("数据库表名", names...); err != nil {
+		return
+	}
+
+	if err = CheckIllegalName("实体命名", in.In.VarName); err != nil {
+		return
+	}
+	return
+}
+
+func initTableTree(in *CurdPreviewInput) (err error) {
+	// 检查树表字段
+	if in.In.GenType == consts.GenCodesTypeTree {
+		if err = CheckTreeTableFields(in.masterFields); err != nil {
+			return err
+		}
+
+		// 解析选项树名称字段
+		has := false
+		for _, field := range in.masterFields {
+			if in.options.Tree.TitleColumn == field.Name {
+				in.options.Tree.TitleField = field
+				has = true
+				break
+			}
+		}
+		if !has {
+			err = gerror.New("请选择一个有效的树名称字段")
+			return
+		}
+	}
+	return err
+}
+
 func initStep(in *CurdPreviewInput) {
 	in.options.Step = new(CurdStep)
 	in.options.Step.HasMaxSort = HasMaxSort(in.masterFields)
 	in.options.Step.HasAdd = gstr.InArray(in.options.HeadOps, "add")
-	in.options.Step.HasBatchDel = gstr.InArray(in.options.HeadOps, "batchDel")
+	in.options.Step.HasBatchDel = gstr.InArray(in.options.HeadOps, "batchDel") && gstr.InArray(in.options.ColumnOps, "check")
 	in.options.Step.HasExport = gstr.InArray(in.options.HeadOps, "export")
 	in.options.Step.HasNotFilterAuth = gstr.InArray(in.options.ColumnOps, "notFilterAuth")
 	in.options.Step.HasEdit = gstr.InArray(in.options.ColumnOps, "edit")
 	in.options.Step.HasDel = gstr.InArray(in.options.ColumnOps, "del")
 	in.options.Step.HasView = gstr.InArray(in.options.ColumnOps, "view")
 	in.options.Step.HasStatus = HasStatus(in.options.ColumnOps, in.masterFields)
-	in.options.Step.HasSwitch = HasSwitch(in.options.ColumnOps, in.masterFields)
+	in.options.Step.HasSwitch = HasSwitch(in.masterFields)
 	in.options.Step.HasCheck = gstr.InArray(in.options.ColumnOps, "check")
 	in.options.Step.HasMenu = gstr.InArray(in.options.AutoOps, "genMenuPermissions")
+	in.options.Step.HasQueryMemberSummary = HasQueryMemberSummary(in.masterFields)
+	in.options.Step.HasHookMemberSummary = HasHookMemberSummary(in.masterFields)
+	in.options.Step.IsTreeTable = in.In.GenType == consts.GenCodesTypeTree
+	if in.options.Step.IsTreeTable {
+		in.options.Step.IsOptionTreeTable = in.options.Tree.StyleType == consts.GenCodesTreeStyleTypeOption
+	}
+	in.options.Step.HasFuncDict = gstr.InArray(in.options.AutoOps, "genFuncDict")
+	in.options.Step.IsAddon = in.Config.Application.Crud.Templates[in.In.GenTemplate].IsAddon
+	if in.options.PresetStep.FormGridCols < 1 {
+		in.options.PresetStep.FormGridCols = 1
+	}
+}
+
+// getPkField 获取主键
+func getPkField(in *CurdPreviewInput) *sysin.GenCodesColumnListModel {
+	if len(in.masterFields) == 0 {
+		panic("getPkField masterFields uninitialized.")
+	}
+	for _, field := range in.masterFields {
+		if IsIndexPK(field.Index) {
+			return field
+		}
+	}
+	return nil
 }
 
 func (l *gCurd) loadView(ctx context.Context, in *CurdPreviewInput) (err error) {
@@ -170,14 +348,14 @@ func (l *gCurd) loadView(ctx context.Context, in *CurdPreviewInput) (err error) 
 
 	now := gtime.Now()
 	view.BindFuncMap(g.Map{
-		"NowYear": now.Year,        // 当前年
-		"ToLower": strings.ToLower, // 全部小写
-		"LcFirst": gstr.LcFirst,    // 首字母小写
-		"UcFirst": gstr.UcFirst,    // 首字母大写
+		"NowYear":   now.Year,        // 当前年
+		"ToLower":   strings.ToLower, // 全部小写
+		"LcFirst":   gstr.LcFirst,    // 首字母小写
+		"UcFirst":   gstr.UcFirst,    // 首字母大写
+		"ToTSArray": ToTSArray,       // 转为ts数组格式
 	})
 
-	dictOptions, err := l.generateWebModelDictOptions(ctx, in)
-	if err != nil {
+	if err = l.generateWebModelDictOptions(ctx, in); err != nil {
 		return
 	}
 
@@ -193,9 +371,9 @@ func (l *gCurd) loadView(ctx context.Context, in *CurdPreviewInput) (err error) 
 		importService = "hotgo/addons/" + in.In.AddonName + "/service"
 	}
 
-	importWebApi := "@/api/" + gstr.LcFirst(in.In.VarName)
+	in.options.ImportWebApi = "@/api/" + gstr.LcFirst(in.In.VarName)
 	if temp.IsAddon {
-		importWebApi = "@/api/addons/" + in.In.AddonName + "/" + gstr.LcFirst(in.In.VarName)
+		in.options.ImportWebApi = "@/api/addons/" + in.In.AddonName + "/" + gstr.LcFirst(in.In.VarName)
 	}
 
 	componentPrefix := gstr.LcFirst(in.In.VarName)
@@ -216,12 +394,12 @@ func (l *gCurd) loadView(ctx context.Context, in *CurdPreviewInput) (err error) 
 		"masterFields":     in.masterFields,                                             // 主表字段
 		"pk":               in.pk,                                                       // 主键属性
 		"options":          in.options,                                                  // 提交选项
-		"dictOptions":      dictOptions,                                                 // web字典选项
+		"dictOptions":      in.options.DictOps,                                          // web字典选项
 		"importApi":        importApi,                                                   // 导入goApi包
 		"importInput":      importInput,                                                 // 导入input包
 		"importController": importController,                                            // 导入控制器包
 		"importService":    importService,                                               // 导入业务服务
-		"importWebApi":     importWebApi,                                                // 导入webApi
+		"importWebApi":     in.options.ImportWebApi,                                     // 导入webApi
 		"apiPrefix":        in.options.ApiPrefix,                                        // api前缀
 		"componentPrefix":  componentPrefix,                                             // vue子组件前缀
 	})
@@ -231,6 +409,7 @@ func (l *gCurd) loadView(ctx context.Context, in *CurdPreviewInput) (err error) 
 }
 
 func (l *gCurd) DoBuild(ctx context.Context, in *CurdBuildInput) (err error) {
+	st := gtime.Now()
 	preview, err := l.DoPreview(ctx, in.PreviewIn)
 	if err != nil {
 		return
@@ -296,10 +475,6 @@ func (l *gCurd) DoBuild(ctx context.Context, in *CurdBuildInput) (err error) {
 		if err = gfile.PutContents(vi.Path, strings.TrimSpace(vi.Content)); err != nil {
 			return gerror.Newf("writing content to '%s' failed: %v", vi.Path, err)
 		}
-
-		if gstr.Str(vi.Path, `.`) == ".go" {
-			utils.GoFmt(vi.Path)
-		}
 	}
 
 	// 后置操作
@@ -312,6 +487,7 @@ func (l *gCurd) DoBuild(ctx context.Context, in *CurdBuildInput) (err error) {
 			}
 		}
 	}
+	g.Log().Debugf(ctx, "generate code operation completed, %vms", gtime.Now().Sub(st).Milliseconds())
 	return
 }
 
@@ -386,6 +562,11 @@ func (l *gCurd) generateApiContent(ctx context.Context, in *CurdPreviewInput) (e
 		return err
 	}
 
+	genFile.Content, err = FormatGo(ctx, name, genFile.Content)
+	if err != nil {
+		return err
+	}
+
 	genFile.Path = file.MergeAbs(in.Config.Application.Crud.Templates[in.In.GenTemplate].ApiPath, strings.ToLower(in.In.VarName), strings.ToLower(in.In.VarName)+".go")
 	genFile.Meth = consts.GenCodesBuildMethCreate
 	if gfile.Exists(genFile.Path) {
@@ -417,6 +598,12 @@ func (l *gCurd) generateInputContent(ctx context.Context, in *CurdPreviewInput) 
 	if err != nil {
 		return err
 	}
+
+	genFile.Content, err = FormatGo(ctx, name, genFile.Content)
+	if err != nil {
+		return err
+	}
+
 	genFile.Path = file.MergeAbs(in.Config.Application.Crud.Templates[in.In.GenTemplate].InputPath, convert.CamelCaseToUnderline(in.In.VarName)+".go")
 	genFile.Meth = consts.GenCodesBuildMethCreate
 	if gfile.Exists(genFile.Path) {
@@ -443,6 +630,12 @@ func (l *gCurd) generateControllerContent(ctx context.Context, in *CurdPreviewIn
 	if err != nil {
 		return err
 	}
+
+	genFile.Content, err = FormatGo(ctx, name, genFile.Content)
+	if err != nil {
+		return err
+	}
+
 	genFile.Path = file.MergeAbs(in.Config.Application.Crud.Templates[in.In.GenTemplate].ControllerPath, convert.CamelCaseToUnderline(in.In.VarName)+".go")
 	genFile.Meth = consts.GenCodesBuildMethCreate
 	if gfile.Exists(genFile.Path) {
@@ -473,6 +666,12 @@ func (l *gCurd) generateLogicContent(ctx context.Context, in *CurdPreviewInput) 
 	if err != nil {
 		return err
 	}
+
+	genFile.Content, err = FormatGo(ctx, name, genFile.Content)
+	if err != nil {
+		return err
+	}
+
 	genFile.Path = file.MergeAbs(in.Config.Application.Crud.Templates[in.In.GenTemplate].LogicPath, convert.CamelCaseToUnderline(in.In.VarName)+".go")
 	genFile.Meth = consts.GenCodesBuildMethCreate
 	if gfile.Exists(genFile.Path) {
@@ -495,6 +694,11 @@ func (l *gCurd) generateRouterContent(ctx context.Context, in *CurdPreviewInput)
 		genFile = new(sysin.GenFile)
 	)
 	genFile.Content, err = in.view.Parse(ctx, name+".template", tplData)
+	if err != nil {
+		return err
+	}
+
+	genFile.Content, err = FormatGo(ctx, name, genFile.Content)
 	if err != nil {
 		return err
 	}
@@ -524,6 +728,8 @@ func (l *gCurd) generateWebApiContent(ctx context.Context, in *CurdPreviewInput)
 	if err != nil {
 		return err
 	}
+
+	genFile.Content = FormatTs(genFile.Content)
 
 	genFile.Path = file.MergeAbs(in.Config.Application.Crud.Templates[in.In.GenTemplate].WebApiPath, gstr.LcFirst(in.In.VarName), "index.ts")
 	genFile.Meth = consts.GenCodesBuildMethCreate
@@ -556,6 +762,8 @@ func (l *gCurd) generateWebModelContent(ctx context.Context, in *CurdPreviewInpu
 		return
 	}
 
+	genFile.Content = FormatTs(genFile.Content)
+
 	genFile.Path = file.MergeAbs(in.Config.Application.Crud.Templates[in.In.GenTemplate].WebViewsPath, gstr.LcFirst(in.In.VarName), "model.ts")
 	genFile.Meth = consts.GenCodesBuildMethCreate
 	if gfile.Exists(genFile.Path) {
@@ -586,6 +794,8 @@ func (l *gCurd) generateWebIndexContent(ctx context.Context, in *CurdPreviewInpu
 		return err
 	}
 
+	genFile.Content = FormatVue(genFile.Content)
+
 	genFile.Path = file.MergeAbs(in.Config.Application.Crud.Templates[in.In.GenTemplate].WebViewsPath, gstr.LcFirst(in.In.VarName), "index.vue")
 	genFile.Meth = consts.GenCodesBuildMethCreate
 	if gfile.Exists(genFile.Path) {
@@ -615,6 +825,8 @@ func (l *gCurd) generateWebEditContent(ctx context.Context, in *CurdPreviewInput
 	if err != nil {
 		return err
 	}
+
+	genFile.Content = FormatVue(genFile.Content)
 
 	genFile.Path = file.MergeAbs(in.Config.Application.Crud.Templates[in.In.GenTemplate].WebViewsPath, gstr.LcFirst(in.In.VarName), "edit.vue")
 	genFile.Meth = consts.GenCodesBuildMethCreate
@@ -651,6 +863,8 @@ func (l *gCurd) generateWebViewContent(ctx context.Context, in *CurdPreviewInput
 		return err
 	}
 
+	genFile.Content = FormatVue(genFile.Content)
+
 	genFile.Path = file.MergeAbs(in.Config.Application.Crud.Templates[in.In.GenTemplate].WebViewsPath, gstr.LcFirst(in.In.VarName), "view.vue")
 	genFile.Meth = consts.GenCodesBuildMethCreate
 	if gfile.Exists(genFile.Path) {
@@ -683,6 +897,11 @@ func (l *gCurd) generateSqlContent(ctx context.Context, in *CurdPreviewInput) (e
 		genFile = new(sysin.GenFile)
 	)
 
+	menus, err := service.AdminMenu().GetFastList(ctx)
+	if err != nil {
+		return err
+	}
+
 	tplData["dirPid"], tplData["dirLevel"], tplData["dirTree"], err = hgorm.AutoUpdateTree(ctx, &dao.AdminMenu, 0, int64(in.options.Menu.Pid))
 	if err != nil {
 		return err
@@ -692,9 +911,30 @@ func (l *gCurd) generateSqlContent(ctx context.Context, in *CurdPreviewInput) (e
 	tplData["btnLevel"] = tplData["dirLevel"].(int) + 2
 	tplData["sortLevel"] = tplData["dirLevel"].(int) + 3
 
+	pageRedirect := ""
 	if in.options.Menu.Pid > 0 {
 		tplData["mainComponent"] = "ParentLayout"
+		menu, ok := menus[int64(in.options.Menu.Pid)]
+		if !ok {
+			err = gerror.New("选择的上级菜单不存在")
+			return
+		}
+		for _, id := range tree.GetIds(menu.Tree) {
+			if v, ok2 := menus[id]; ok2 {
+				if !gstr.HasSuffix(pageRedirect, "/") && !gstr.HasPrefix(v.Path, "/") {
+					pageRedirect += "/"
+				}
+				pageRedirect += v.Path
+			}
+		}
+
+		if !gstr.HasSuffix(pageRedirect, "/") && !gstr.HasPrefix(menu.Path, "/") {
+			pageRedirect += "/"
+		}
+		pageRedirect += menu.Path
 	}
+	pageRedirect += "/" + gstr.LcFirst(in.In.VarName) + "/index"
+	tplData["pageRedirect"] = pageRedirect
 
 	genFile.Path = file.MergeAbs(in.Config.Application.Crud.Templates[in.In.GenTemplate].SqlPath, convert.CamelCaseToUnderline(in.In.VarName)+"_menu.sql")
 	genFile.Meth = consts.GenCodesBuildMethCreate
@@ -706,6 +946,48 @@ func (l *gCurd) generateSqlContent(ctx context.Context, in *CurdPreviewInput) (e
 	if !in.options.Step.HasMenu {
 		genFile.Meth = consts.GenCodesBuildIgnore
 		genFile.Required = false
+	}
+
+	// 需要生成时，检查菜单命名是否存在
+	if genFile.Meth == consts.GenCodesBuildMethCreate {
+		menuNamePrefix := gstr.LcFirst(in.In.VarName)
+		menuNames := []string{menuNamePrefix, menuNamePrefix + "Index"}
+		if in.options.Step.HasEdit {
+			menuNames = append(menuNames, menuNamePrefix+"Edit")
+			menuNames = append(menuNames, menuNamePrefix+"View")
+		}
+		if in.options.Step.HasView {
+			menuNames = append(menuNames, menuNamePrefix+"View")
+		}
+		if in.options.Step.HasMaxSort {
+			menuNames = append(menuNames, menuNamePrefix+"MaxSort")
+		}
+		if in.options.Step.HasDel {
+			menuNames = append(menuNames, menuNamePrefix+"Delete")
+		}
+		if in.options.Step.HasStatus {
+			menuNames = append(menuNames, menuNamePrefix+"Status")
+		}
+		if in.options.Step.HasSwitch {
+			menuNames = append(menuNames, menuNamePrefix+"Switch")
+		}
+		if in.options.Step.HasExport {
+			menuNames = append(menuNames, menuNamePrefix+"Export")
+		}
+		if in.options.Step.IsTreeTable {
+			menuNames = append(menuNames, menuNamePrefix+"TreeOption")
+		}
+
+		menuNames = convert.UniqueSlice(menuNames)
+		hasMenus, err := service.AdminMenu().Model(ctx).Fields("name").WhereIn("name", menuNames).Array()
+		if err != nil {
+			return err
+		}
+
+		if len(hasMenus) > 0 {
+			err = gerror.Newf("要生成的菜单中有已存在的路由别名，请检查并删除:%v", strings.Join(gvar.New(hasMenus).Strings(), `、`))
+			return err
+		}
 	}
 
 	tplData["generatePath"] = genFile.Path

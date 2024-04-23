@@ -20,7 +20,6 @@ import (
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
-	"hotgo/utility/validate"
 	"time"
 )
 
@@ -37,46 +36,6 @@ func init() {
 // Delete 删除
 func (s *sSysSmsLog) Delete(ctx context.Context, in *sysin.SmsLogDeleteInp) (err error) {
 	_, err = dao.SysSmsLog.Ctx(ctx).WherePri(in.Id).Delete()
-	return
-}
-
-// Edit 修改/新增
-func (s *sSysSmsLog) Edit(ctx context.Context, in *sysin.SmsLogEditInp) (err error) {
-	if in.Ip == "" {
-		err = gerror.New("ip不能为空")
-		return
-	}
-
-	// 修改
-	if in.Id > 0 {
-		_, err = dao.SysSmsLog.Ctx(ctx).WherePri(in.Id).Data(in).Update()
-		return
-	}
-
-	// 新增
-	_, err = dao.SysSmsLog.Ctx(ctx).Data(in).Insert()
-	return
-}
-
-// Status 更新短信状态
-func (s *sSysSmsLog) Status(ctx context.Context, in *sysin.SmsLogStatusInp) (err error) {
-	if in.Id <= 0 {
-		err = gerror.New("ID不能为空")
-		return
-	}
-
-	if in.Status <= 0 {
-		err = gerror.New("状态不能为空")
-		return
-	}
-
-	if !validate.InSlice(consts.StatusSlice, in.Status) {
-		err = gerror.New("状态不正确")
-		return
-	}
-
-	// 修改
-	_, err = dao.SysSmsLog.Ctx(ctx).WherePri(in.Id).Data(dao.SysSmsLog.Columns().Status, in.Status).Update()
 	return
 }
 
@@ -245,7 +204,7 @@ func (s *sSysSmsLog) AllowSend(ctx context.Context, models *entity.SysSmsLog, co
 	}
 
 	if config.SmsMaxIpLimit > 0 {
-		count, err := s.NowDayCount(ctx, models.Event, models.Mobile)
+		count, err := s.NowDayIpSendCount(ctx, models.Event)
 		if err != nil {
 			return err
 		}
@@ -258,10 +217,10 @@ func (s *sSysSmsLog) AllowSend(ctx context.Context, models *entity.SysSmsLog, co
 	return
 }
 
-// NowDayCount 当天发送次数
-func (s *sSysSmsLog) NowDayCount(ctx context.Context, event, mobile string) (count int, err error) {
+// NowDayIpSendCount 当天IP累计发送次数
+func (s *sSysSmsLog) NowDayIpSendCount(ctx context.Context, event string) (count int, err error) {
 	return dao.SysSmsLog.Ctx(ctx).
-		Where("mobile", mobile).
+		Where("ip", location.GetClientIp(ghttp.RequestFromCtx(ctx))).
 		Where("event", event).
 		WhereGTE("created_at", gtime.Now().Format("Y-m-d")).
 		Count()

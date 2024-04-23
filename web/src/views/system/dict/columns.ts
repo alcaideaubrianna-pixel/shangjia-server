@@ -3,7 +3,7 @@ import { NTag } from 'naive-ui';
 
 export const columns = [
   {
-    title: 'id',
+    title: '字典ID',
     key: 'id',
   },
   {

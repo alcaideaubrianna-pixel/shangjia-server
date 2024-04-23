@@ -54,12 +54,6 @@ func (c *cDept) List(ctx context.Context, req *dept.ListReq) (res *dept.ListRes,
 	return
 }
 
-// Status 更新部门状态
-func (c *cDept) Status(ctx context.Context, req *dept.StatusReq) (res *dept.StatusRes, err error) {
-	err = service.AdminDept().Status(ctx, &req.DeptStatusInp)
-	return
-}
-
 // Option 获取部门选项树
 func (c *cDept) Option(ctx context.Context, req *dept.OptionReq) (res *dept.OptionRes, err error) {
 	list, totalCount, err := service.AdminDept().Option(ctx, &req.DeptOptionInp)
@@ -70,5 +64,12 @@ func (c *cDept) Option(ctx context.Context, req *dept.OptionReq) (res *dept.Opti
 	res = new(dept.OptionRes)
 	res.DeptOptionModel = list
 	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+// TreeOption 获取部门管理关系树选项
+func (c *cDept) TreeOption(ctx context.Context, req *dept.TreeOptionReq) (res *dept.TreeOptionRes, err error) {
+	data, err := service.AdminDept().TreeOption(ctx)
+	res = (*dept.TreeOptionRes)(&data)
 	return
 }

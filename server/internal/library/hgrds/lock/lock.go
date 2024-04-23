@@ -168,6 +168,7 @@ func (l *Lock) startWatchDog() {
 			}
 		case <-l.watchDog:
 			// 已经解锁
+			l.wg.Done()
 			return
 		}
 	}

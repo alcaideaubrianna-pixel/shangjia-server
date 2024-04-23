@@ -47,6 +47,11 @@ func GetModelTable(m *gdb.Model) (tablesInit, tables string) {
 	return
 }
 
+// EscapeFieldsToSlice 将转义过的字段转换为字段集切片
+func EscapeFieldsToSlice(s string) []string {
+	return gstr.Explode(",", gstr.Replace(gstr.Replace(s, "`,`", ","), "`", ""))
+}
+
 // GetMapKeys 获取map的所有key
 func GetMapKeys[K comparable](m map[K]any) []K {
 	j := 0

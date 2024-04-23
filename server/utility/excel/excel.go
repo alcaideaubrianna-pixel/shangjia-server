@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"reflect"
 	"time"
+	"unicode"
 )
 
 var (
@@ -53,6 +54,7 @@ func ExportByStructs(ctx context.Context, tags []string, list interface{}, fileN
 			widthRow = v
 		}
 	}
+
 	if err = f.SetColWidth(sheetName, "A", widthRow, 30); err != nil {
 		return err
 	}
@@ -75,18 +77,19 @@ func ExportByStructs(ctx context.Context, tags []string, list interface{}, fileN
 		}
 	}
 
-	// 强转类型
-	writer := ghttp.RequestFromCtx(ctx).Response.Writer
-	w, ok := interface{}(writer).(*ghttp.ResponseWriter)
-	if !ok {
-		return gerror.New("Response.Writer uninitialized!")
+	r := ghttp.RequestFromCtx(ctx)
+	if r == nil {
+		err = gerror.New("ctx not http request")
+		return
 	}
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.xlsx", url.QueryEscape(fileName)))
-	w.Header().Set("Content-Transfer-Encoding", "binary")
-	w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition")
 
-	if err = f.Write(w); err != nil {
+	writer := r.Response.Writer
+	writer.Header().Set("Content-Type", "application/octet-stream")
+	writer.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.xlsx", url.QueryEscape(fileName)))
+	writer.Header().Set("Content-Transfer-Encoding", "binary")
+	writer.Header().Set("Access-Control-Expose-Headers", "Content-Disposition")
+
+	if err = f.Write(writer); err != nil {
 		return
 	}
 
@@ -103,7 +106,7 @@ func ExportByStructs(ctx context.Context, tags []string, list interface{}, fileN
 // letter 生成完整的表头
 func letter(length int) []string {
 	var str []string
-	for i := 0; i < length; i++ {
+	for i := 1; i <= length; i++ {
 		str = append(str, numToChars(i))
 	}
 	return str
@@ -122,4 +125,16 @@ func numToChars(num int) string {
 		cols = char[k] + cols
 	}
 	return cols
+}
+
+// NextLetter 传入一个字母，获取下一个字母
+func NextLetter(input string) string {
+	if len(input) == 0 {
+		return ""
+	}
+	upperInput := unicode.ToUpper(rune(input[0]))
+	if upperInput >= 'A' && upperInput < 'Z' {
+		return string(upperInput + 1)
+	}
+	return "A"
 }

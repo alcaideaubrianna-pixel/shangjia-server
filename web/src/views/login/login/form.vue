@@ -292,7 +292,9 @@
         message.success('登录成功，即将进入系统');
         if (route.name === LOGIN_NAME) {
           await router.replace('/');
-        } else await router.replace(toPath);
+        } else {
+          await router.replace(toPath);
+        }
       } else {
         message.destroyAll();
         message.info(msg || '登录失败');

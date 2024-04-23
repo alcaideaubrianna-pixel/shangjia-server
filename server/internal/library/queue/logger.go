@@ -30,6 +30,6 @@ func ConsumerLog(ctx context.Context, topic string, mqMsg MqMsg, err error) {
 // ProducerLog 生产日志
 func ProducerLog(ctx context.Context, topic string, mqMsg MqMsg, err error) {
 	if err != nil {
-		Logger().Errorf(ctx, ProducerLogErrFormat, topic, string(mqMsg.Body), err)
+		Logger().Infof(ctx, ProducerLogErrFormat, topic, string(mqMsg.Body), err)
 	}
 }

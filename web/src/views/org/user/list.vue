@@ -20,7 +20,8 @@
       ref="actionRef"
       :actionColumn="actionColumn"
       @update:checked-row-keys="onCheckedRow"
-      :scroll-x="1280"
+      :scroll-x="1500"
+      :resizeHeightOffset="-10000"
     >
       <template #tableTitle>
         <n-button
@@ -87,51 +88,8 @@
       >
         <n-grid x-gap="24" :cols="2">
           <n-gi>
-            <n-form-item label="姓名" path="realName">
-              <n-input placeholder="请输入姓名" v-model:value="formParams.realName" />
-            </n-form-item>
-          </n-gi>
-          <n-gi>
             <n-form-item label="用户名" path="username">
               <n-input placeholder="请输入登录用户名" v-model:value="formParams.username" />
-            </n-form-item>
-          </n-gi>
-        </n-grid>
-
-        <n-grid x-gap="24" :cols="2">
-          <n-gi>
-            <n-form-item label="绑定角色" path="roleId">
-              <n-tree-select
-                key-field="id"
-                :options="options.role"
-                :default-value="formParams.roleId"
-                :default-expand-all="true"
-                @update:value="handleUpdateRoleValue"
-              />
-            </n-form-item>
-          </n-gi>
-          <n-gi>
-            <n-form-item label="所属部门" path="deptId">
-              <n-tree-select
-                key-field="id"
-                :options="options.dept"
-                :default-value="formParams.deptId"
-                :default-expand-all="true"
-                @update:value="handleUpdateDeptValue"
-              />
-            </n-form-item>
-          </n-gi>
-        </n-grid>
-
-        <n-grid x-gap="24" :cols="2">
-          <n-gi>
-            <n-form-item label="绑定岗位" path="postIds">
-              <n-select
-                :default-value="formParams.postIds"
-                multiple
-                :options="options.post"
-                @update:value="handleUpdatePostValue"
-              />
             </n-form-item>
           </n-gi>
           <n-gi>
@@ -144,7 +102,57 @@
             </n-form-item>
           </n-gi>
         </n-grid>
+
+        <n-grid x-gap="24" :cols="2">
+          <n-gi>
+            <n-form-item label="所属部门" path="deptId">
+              <n-tree-select
+                key-field="id"
+                :options="options.dept"
+                :default-value="formParams.deptId"
+                @update:value="handleUpdateDeptValue"
+                clearable
+                filterable
+                default-expand-all
+              />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="绑定角色" path="roleId">
+              <n-tree-select
+                key-field="id"
+                :options="options.role"
+                :default-value="formParams.roleId"
+                @update:value="handleUpdateRoleValue"
+                clearable
+                filterable
+                default-expand-all
+              />
+            </n-form-item>
+          </n-gi>
+        </n-grid>
+
         <n-divider title-placement="left">填写更多信息（可选)</n-divider>
+        <n-grid x-gap="24" :cols="2">
+          <n-gi>
+            <n-form-item label="姓名" path="realName">
+              <n-input placeholder="请输入姓名" v-model:value="formParams.realName" />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="绑定岗位" path="postIds">
+              <n-select
+                :default-value="formParams.postIds"
+                :options="options.post"
+                @update:value="handleUpdatePostValue"
+                multiple
+                clearable
+                filterable
+              />
+            </n-form-item>
+          </n-gi>
+        </n-grid>
+
         <n-grid x-gap="24" :cols="2">
           <n-gi>
             <n-form-item label="手机号" path="mobile">
@@ -163,7 +171,7 @@
             <n-form-item label="性别" path="sex">
               <n-radio-group v-model:value="formParams.sex" name="sex">
                 <n-radio-button
-                  v-for="status in sexOptions"
+                  v-for="status in options.sys_user_sex"
                   :key="status.value"
                   :value="status.value"
                   :label="status.label"
@@ -175,7 +183,7 @@
             <n-form-item label="状态" path="status">
               <n-radio-group v-model:value="formParams.status" name="status">
                 <n-radio-button
-                  v-for="status in statusOptions"
+                  v-for="status in options.sys_normal_disable"
                   :key="status.value"
                   :value="status.value"
                   :label="status.label"
@@ -229,7 +237,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { h, reactive, ref, onMounted } from 'vue';
+  import { h, reactive, ref, onMounted, computed } from 'vue';
   import { useDialog, useMessage } from 'naive-ui';
   import { ActionItem, BasicTable, TableAction } from '@/components/Table';
   import { BasicForm } from '@/components/Form/index';
@@ -237,7 +245,6 @@
   import { columns } from './columns';
   import { PlusOutlined, DeleteOutlined } from '@vicons/antd';
   import { QrCodeOutline } from '@vicons/ionicons5';
-  import { sexOptions, statusOptions } from '@/enums/optionsiEnum';
   import { adaModalWidth } from '@/utils/hotgo';
   import { getRandomString } from '@/utils/charset';
   import { cloneDeep } from 'lodash-es';
@@ -279,16 +286,18 @@
   const formRef = ref<any>({});
   const batchDeleteDisabled = ref(true);
   const checkedIds = ref([]);
-  const dialogWidth = ref('50%');
   const formParams = ref<any>();
   const showQrModal = ref(false);
   const qrParams = ref({
     name: '',
     qrUrl: '',
   });
+  const dialogWidth = computed(() => {
+    return adaModalWidth();
+  });
 
   const actionColumn = reactive({
-    width: 240,
+    width: 280,
     title: '操作',
     key: 'action',
     fixed: 'right',
@@ -389,7 +398,6 @@
   }
 
   const loadDataTable = async (res) => {
-    adaModalWidth(dialogWidth);
     return await List({ ...res, ...searchFormRef.value?.formModel, ...{ roleId: props.type } });
   };
 

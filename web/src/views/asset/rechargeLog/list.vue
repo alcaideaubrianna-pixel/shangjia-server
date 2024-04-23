@@ -21,7 +21,7 @@
         ref="actionRef"
         :actionColumn="actionColumn"
         @update:checked-row-keys="onCheckedRow"
-        :scroll-x="1280"
+        :scroll-x="scrollX"
         :resizeHeightOffset="-10000"
       >
         <template #tableTitle>
@@ -74,7 +74,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { h, reactive, ref } from 'vue';
+  import { computed, h, reactive, ref } from 'vue';
   import { useDialog, useMessage } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, useForm } from '@/components/Form/index';
@@ -84,6 +84,8 @@
   import { ExportOutlined, DeleteOutlined } from '@vicons/antd';
   import ApplyRefund from './applyRefund.vue';
   import AcceptRefund from './acceptRefund.vue';
+  import { adaTableScrollX } from '@/utils/hotgo';
+
   interface Props {
     type?: string;
   }
@@ -140,6 +142,10 @@
         ],
       });
     },
+  });
+
+  const scrollX = computed(() => {
+    return adaTableScrollX(columns, actionColumn.width);
   });
 
   const [register, {}] = useForm({

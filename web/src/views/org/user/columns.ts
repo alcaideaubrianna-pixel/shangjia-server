@@ -1,5 +1,5 @@
 import { h } from 'vue';
-import { NAvatar, NTag } from 'naive-ui';
+import { NAvatar, NTag, NText } from 'naive-ui';
 import { formatBefore } from '@/utils/dateUtil';
 
 export const columns = [
@@ -17,6 +17,12 @@ export const columns = [
     title: '姓名',
     key: 'realName',
     width: 100,
+    render(row) {
+      if (row.realName == '') {
+        return h(NText, { depth: 3 }, { default: () => '未设置' });
+      }
+      return row.realName;
+    },
   },
   {
     title: '头像',

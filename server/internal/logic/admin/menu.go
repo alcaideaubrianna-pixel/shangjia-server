@@ -19,6 +19,7 @@ import (
 	"hotgo/internal/library/casbin"
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/library/hgorm"
+	"hotgo/internal/library/hgorm/handler"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/adminin"
 	"hotgo/internal/service"
@@ -34,6 +35,11 @@ func NewAdminMenu() *sAdminMenu {
 
 func init() {
 	service.RegisterAdminMenu(NewAdminMenu())
+}
+
+// Model Orm模型
+func (s *sAdminMenu) Model(ctx context.Context, option ...*handler.Option) *gdb.Model {
+	return handler.Model(dao.AdminMenu.Ctx(ctx), option...)
 }
 
 // Delete 删除
@@ -279,6 +285,20 @@ func (s *sAdminMenu) treeList(pid int64, nodes []*entity.AdminMenu) (list []*adm
 			}
 			list = append(list, item)
 		}
+	}
+	return
+}
+
+// GetFastList 获取菜单列表
+func (s *sAdminMenu) GetFastList(ctx context.Context) (res map[int64]*entity.AdminMenu, err error) {
+	var models []*entity.AdminMenu
+	if err = dao.AdminMenu.Ctx(ctx).Scan(&models); err != nil {
+		return
+	}
+
+	res = make(map[int64]*entity.AdminMenu, len(models))
+	for _, v := range models {
+		res[v.Id] = v
 	}
 	return
 }

@@ -16,8 +16,9 @@ type ReqPageFunc interface {
 
 // PageReq 分页请求
 type PageReq struct {
-	Page    int `json:"page" example:"10" d:"1" v:"min:1#页码最小值不能低于1"  dc:"当前页码"`
-	PerPage int `json:"pageSize" example:"1" d:"10" v:"min:1|max:200#每页数量最小值不能低于1|最大值不能大于200" dc:"每页数量"`
+	Page       int  `json:"page" example:"10" d:"1" v:"min:1#页码最小值不能低于1"  dc:"当前页码"`
+	PerPage    int  `json:"pageSize" example:"1" d:"10" v:"min:1|max:200#每页数量最小值不能低于1|最大值不能大于200" dc:"每页数量"`
+	Pagination bool `json:"pagination" d:"true" dc:"是否需要进行分页"`
 }
 
 // GetPage 获取当前页码

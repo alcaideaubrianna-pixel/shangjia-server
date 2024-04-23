@@ -18,7 +18,7 @@ type adminDeptDao struct {
 }
 
 var (
-	// AdminDept is globally common accessible object for table hg_admin_dept operations.
+	// AdminDept is globally public accessible object for table hg_admin_dept operations.
 	AdminDept = adminDeptDao{
 		internal.NewAdminDeptDao(),
 	}

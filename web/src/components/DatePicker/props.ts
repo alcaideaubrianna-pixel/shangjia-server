@@ -15,4 +15,8 @@ export const basicProps = {
     type: String as PropType<string> | undefined | Date,
     default: () => '',
   },
+  showShortcuts: {
+    type: Boolean as PropType<boolean>,
+    default: () => true,
+  },
 };

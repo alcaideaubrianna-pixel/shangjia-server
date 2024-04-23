@@ -20,14 +20,6 @@ export function Edit(params) {
   });
 }
 
-export function Status(params) {
-  return http.request({
-    url: '/post/status',
-    method: 'POST',
-    params,
-  });
-}
-
 export function Delete(params) {
   return http.request({
     url: '/post/delete',

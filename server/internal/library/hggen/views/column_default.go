@@ -181,12 +181,12 @@ func setDefaultFormMode(field *sysin.GenCodesColumnListModel) {
 		return
 	}
 
-	if field.GoType == GoTypeString && field.Length >= 200 && field.Length <= 500 {
+	if field.GoType == GoTypeString && field.Length >= 256 && field.Length <= 512 {
 		field.FormMode = FormModeInputTextarea
 		return
 	}
 
-	if field.GoType == GoTypeString && field.Length > 500 {
+	if field.GoType == GoTypeString && field.Length > 512 {
 		field.FormMode = FormModeInputEditor
 		return
 	}

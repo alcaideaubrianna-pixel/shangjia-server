@@ -20,32 +20,38 @@ type SysLoginLogDao struct {
 
 // SysLoginLogColumns defines and stores column names for table hg_sys_login_log.
 type SysLoginLogColumns struct {
-	Id        string // 日志ID
-	ReqId     string // 请求ID
-	MemberId  string // 用户ID
-	Username  string // 用户名
-	Response  string // 响应数据
-	LoginAt   string // 登录时间
-	LoginIp   string // 登录IP
-	ErrMsg    string // 错误提示
-	Status    string // 状态
-	CreatedAt string // 创建时间
-	UpdatedAt string // 修改时间
+	Id         string // 日志ID
+	ReqId      string // 请求ID
+	MemberId   string // 用户ID
+	Username   string // 用户名
+	Response   string // 响应数据
+	LoginAt    string // 登录时间
+	LoginIp    string // 登录IP
+	ProvinceId string // 省编码
+	CityId     string // 市编码
+	UserAgent  string // UA信息
+	ErrMsg     string // 错误提示
+	Status     string // 状态
+	CreatedAt  string // 创建时间
+	UpdatedAt  string // 修改时间
 }
 
 // sysLoginLogColumns holds the columns for table hg_sys_login_log.
 var sysLoginLogColumns = SysLoginLogColumns{
-	Id:        "id",
-	ReqId:     "req_id",
-	MemberId:  "member_id",
-	Username:  "username",
-	Response:  "response",
-	LoginAt:   "login_at",
-	LoginIp:   "login_ip",
-	ErrMsg:    "err_msg",
-	Status:    "status",
-	CreatedAt: "created_at",
-	UpdatedAt: "updated_at",
+	Id:         "id",
+	ReqId:      "req_id",
+	MemberId:   "member_id",
+	Username:   "username",
+	Response:   "response",
+	LoginAt:    "login_at",
+	LoginIp:    "login_ip",
+	ProvinceId: "province_id",
+	CityId:     "city_id",
+	UserAgent:  "user_agent",
+	ErrMsg:     "err_msg",
+	Status:     "status",
+	CreatedAt:  "created_at",
+	UpdatedAt:  "updated_at",
 }
 
 // NewSysLoginLogDao creates and returns a new DAO object for table data access.

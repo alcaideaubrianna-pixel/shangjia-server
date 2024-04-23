@@ -18,9 +18,9 @@ func GetResourcePath(ctx context.Context) string {
 	if len(cacheResourcePath) > 0 {
 		return cacheResourcePath
 	}
-	basePath := g.Cfg().MustGet(ctx, "hotgo.addonsResourcePath").String()
+	basePath := g.Cfg().MustGet(ctx, "system.addonsResourcePath").String()
 	if basePath == "" {
-		g.Log().Warning(ctx, "addons GetResourcePath not config found:'hotgo.addonsResourcePath', use default values:'resource'")
+		g.Log().Warning(ctx, "addons GetResourcePath not config found:'system.addonsResourcePath', use default values:'resource'")
 		basePath = "resource"
 	}
 

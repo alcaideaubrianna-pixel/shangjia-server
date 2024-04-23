@@ -20,19 +20,22 @@ type GenCodesColumn struct {
 	Extra        string      `json:"extra" dc:"额外选项"`
 	// 自定义生成属性
 	// Alias      string `json:"alias" dc:"字段别名"`
-	GoName     string `json:"goName" dc:"Go属性"`
-	GoType     string `json:"goType" dc:"Go类型"`
-	TsName     string `json:"tsName" dc:"Ts属性"`
-	TsType     string `json:"tsType" dc:"Ts类型"`
-	IsList     bool   `json:"isList" dc:"列表"`
-	IsExport   bool   `json:"isExport" dc:"导出"`
-	IsSort     bool   `json:"isSort" dc:"排序"`
-	IsQuery    bool   `json:"isQuery" dc:"查询"`
-	QueryWhere string `json:"queryWhere" dc:"查询条件"`
-	IsEdit     bool   `json:"isEdit" dc:"编辑"`
-	Required   bool   `json:"required" dc:"必填"`
-	Unique     bool   `json:"unique" dc:"唯一性"`
-	FormMode   string `json:"formMode" dc:"表单组件"`
-	FormRole   string `json:"formRole" dc:"表单验证"`
-	DictType   int64  `json:"dictType" dc:"字典类型ID"`
+	GoName       string `json:"goName" dc:"Go属性"`
+	GoType       string `json:"goType" dc:"Go类型"`
+	TsName       string `json:"tsName" dc:"Ts属性"`
+	TsType       string `json:"tsType" dc:"Ts类型"`
+	IsList       bool   `json:"isList" dc:"列表"`
+	IsExport     bool   `json:"isExport" dc:"导出"`
+	IsSort       bool   `json:"isSort" dc:"排序"`
+	IsQuery      bool   `json:"isQuery" dc:"查询"`
+	QueryWhere   string `json:"queryWhere" dc:"查询条件"`
+	IsEdit       bool   `json:"isEdit" dc:"编辑"`
+	Required     bool   `json:"required" dc:"必填"`
+	Unique       bool   `json:"unique" dc:"唯一性"`
+	FormMode     string `json:"formMode" dc:"表单组件"`
+	FormRole     string `json:"formRole" dc:"表单验证"`
+	FormGridSpan int    `json:"formGridSpan" dc:"栅格占位数量"`
+	DictType     int64  `json:"dictType" dc:"字典类型ID"`
+	Align        string `json:"align"    dc:"排列方式"`
+	Width        int64  `json:"width"    dc:"列宽"`
 }

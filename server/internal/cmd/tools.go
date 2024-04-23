@@ -7,9 +7,11 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcmd"
+	"github.com/gogf/gf/v2/os/gres"
 	"hotgo/internal/library/casbin"
 )
 
@@ -35,6 +37,8 @@ var (
 			switch method {
 			case "casbin":
 				err = handleCasbin(ctx, args)
+			case "gres":
+				err = handleGRes(ctx, args)
 			default:
 				err = gerror.Newf("tools method[%v] does not exist", method)
 			}
@@ -63,6 +67,41 @@ func handleCasbin(ctx context.Context, args map[string]string) (err error) {
 		err = casbin.Refresh(ctx)
 	default:
 		err = gerror.Newf("casbin a1 is invalid, a1:%v", a1)
+	}
+	return
+}
+
+func handleGRes(ctx context.Context, args map[string]string) (err error) {
+	a1, ok := args["a1"]
+	if !ok {
+		err = gerror.New("gres args cannot be empty.")
+		return
+	}
+
+	switch a1 {
+	case "dump":
+		gres.Dump()
+	case "content":
+		path, ok := args["a2"]
+		if !ok {
+			err = gerror.New("缺少查看文件路径参数：`a2`")
+			return
+		}
+
+		if !gres.Contains(path) {
+			err = gerror.Newf("没有找到资源文件:%v", path)
+			return
+		}
+		content := string(gres.GetContent(path))
+
+		if len(content) == 0 {
+			err = gerror.Newf("没有找到资源文件内容，请确认传入`a2`参数是一个文件，a2:%v", path)
+			return
+		}
+		fmt.Println("以下是资源文件内容:")
+		fmt.Println(content)
+	default:
+		err = gerror.Newf("handleGRes a1 is invalid, a1:%v", a1)
 	}
 	return
 }

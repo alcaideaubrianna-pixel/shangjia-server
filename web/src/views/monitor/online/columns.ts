@@ -46,18 +46,31 @@ export const columns = [
     key: 'avatar',
     width: 80,
     render(row) {
-      return h(NAvatar, {
-        size: 32,
-        src: row.avatar,
-      });
+      if (row.avatar !== '') {
+        return h(NAvatar, {
+          circle: true,
+          size: 'small',
+          src: row.avatar,
+        });
+      } else {
+        return h(
+          NAvatar,
+          {
+            circle: true,
+            size: 'small',
+          },
+          {
+            default: () => row.username.substring(0, 2),
+          }
+        );
+      }
     },
   },
   {
     title: '登录IP',
     key: 'ip',
-    width: 120,
+    width: 150,
   },
-
   // {
   //   title: 'IP地区',
   //   key: 'region',

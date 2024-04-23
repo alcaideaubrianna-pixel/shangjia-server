@@ -14,6 +14,9 @@ import (
 type AddonHgexampleTable struct {
 	g.Meta      `orm:"table:hg_addon_hgexample_table, do:true"`
 	Id          interface{} // ID
+	Pid         interface{} // 上级ID
+	Level       interface{} // 树等级
+	Tree        interface{} // 关系树
 	CategoryId  interface{} // 分类ID
 	Flag        *gjson.Json // 标签
 	Title       interface{} // 标题
@@ -40,9 +43,6 @@ type AddonHgexampleTable struct {
 	Hobby       *gjson.Json // 爱好
 	Channel     interface{} // 渠道
 	CityId      interface{} // 所在城市
-	Pid         interface{} // 上级ID
-	Level       interface{} // 树等级
-	Tree        interface{} // 关系树
 	Remark      interface{} // 备注
 	Status      interface{} // 状态
 	CreatedBy   interface{} // 创建者

@@ -24,7 +24,7 @@ export function checkStatus(status: number, msg: string): void {
       $message.error('网络请求超时');
       break;
     case 500:
-      $message.error('服务器错误,请联系管理员!');
+      $message.error('服务器错误,请稍候重试!');
       break;
     case 501:
       $message.error('网络未实现');

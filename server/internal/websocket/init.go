@@ -43,7 +43,7 @@ func WsPage(r *ghttp.Request) {
 			return true
 		},
 	}
-	conn, err := upGrader.Upgrade(r.Response.ResponseWriter, r.Request, nil)
+	conn, err := upGrader.Upgrade(r.Response.Writer, r.Request, nil)
 	if err != nil {
 		return
 	}

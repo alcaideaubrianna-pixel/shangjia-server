@@ -11,6 +11,9 @@
         {{ item.label }}
       </n-button>
     </n-space>
+    <n-space justify="center" class="mt-2">
+      <n-text depth="3">SaaS系统多租户多应用设计</n-text>
+    </n-space>
   </n-space>
 </template>
 
@@ -23,7 +26,7 @@
 
   const accounts = [
     {
-      label: '超级管理员',
+      label: '超管',
       username: 'admin',
       password: '123456',
     },
@@ -33,8 +36,18 @@
       password: '123456',
     },
     {
-      label: '代理商',
+      label: '租户',
       username: 'ameng',
+      password: '123456',
+    },
+    {
+      label: '商户',
+      username: 'abai',
+      password: '123456',
+    },
+    {
+      label: '用户',
+      username: 'asong',
       password: '123456',
     },
   ];

@@ -4,8 +4,8 @@ import { cloneDeep } from 'lodash-es';
 import { FormSchema } from '@/components/Form';
 import { isNullObject } from '@/utils/is';
 import { defRangeShortcuts } from '@/utils/dateUtil';
-import { getOptionLabel, getOptionTag, Options } from '@/utils/hotgo';
-import { loginStatusOptions } from '@/enums/optionsiEnum';
+import { getOptionLabel, getOptionTag, Option } from '@/utils/hotgo';
+import { Dicts } from '@/api/dict/dict';
 
 export interface State {
   id: number;
@@ -40,10 +40,6 @@ export function newState(state: State | null): State {
   return cloneDeep(defaultState);
 }
 
-export const options = ref<Options>({
-  sys_normal_disable: [],
-});
-
 export const rules = {};
 
 export const schemas = ref<FormSchema[]>([
@@ -59,7 +55,7 @@ export const schemas = ref<FormSchema[]>([
     },
   },
   {
-    field: 'sysLogIp',
+    field: 'loginIp',
     component: 'NInput',
     label: 'IP地址',
     componentProps: {
@@ -76,7 +72,7 @@ export const schemas = ref<FormSchema[]>([
     defaultValue: null,
     componentProps: {
       placeholder: '请选择状态',
-      options: loginStatusOptions,
+      options: [],
       onUpdateValue: (e: any) => {
         console.log(e);
       },
@@ -125,7 +121,7 @@ export const columns = [
   },
   {
     title: '登录IP',
-    key: 'sysLogIp',
+    key: 'loginIp',
     width: 160,
   },
   {
@@ -156,11 +152,11 @@ export const columns = [
           style: {
             marginRight: '6px',
           },
-          type: getOptionTag(loginStatusOptions, row.status),
+          type: getOptionTag(options.value.sys_login_status, row.status),
           bordered: false,
         },
         {
-          default: () => getOptionLabel(loginStatusOptions, row.status),
+          default: () => getOptionLabel(options.value.sys_login_status, row.status),
         }
       );
     },
@@ -187,3 +183,24 @@ export const columns = [
     width: 180,
   },
 ];
+
+// 字典数据选项
+export const options = ref({
+  sys_login_status: [] as Option[],
+});
+
+// 加载字典数据选项
+export function loadOptions() {
+  Dicts({
+    types: ['sys_login_status'],
+  }).then((res) => {
+    options.value = res;
+    for (const item of schemas.value) {
+      switch (item.field) {
+        case 'status':
+          item.componentProps.options = options.value.sys_login_status;
+          break;
+      }
+    }
+  });
+}

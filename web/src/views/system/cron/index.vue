@@ -21,7 +21,8 @@
         ref="actionRef"
         :actionColumn="actionColumn"
         @update:checked-row-keys="onCheckedRow"
-        :scroll-x="1090"
+        :scroll-x="scrollX"
+        :resizeHeightOffset="-10000"
       >
         <template #tableTitle>
           <n-button type="primary" @click="addTable">
@@ -181,7 +182,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { h, reactive, ref, onBeforeMount } from 'vue';
+  import { h, reactive, ref, onBeforeMount, computed } from 'vue';
   import { useDialog, useMessage } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, FormSchema, useForm } from '@/components/Form/index';
@@ -189,6 +190,7 @@
   import { columns } from './columns';
   import { DeleteOutlined, GroupOutlined, PlusOutlined } from '@vicons/antd';
   import GroupModal from './modal/modal.vue';
+  import { adaTableScrollX } from '@/utils/hotgo';
 
   const optionTreeData = ref<any>([]);
   const defaultValueRef = () => ({
@@ -335,7 +337,7 @@
     width: 320,
     title: '操作',
     key: 'action',
-    // fixed: 'right',
+    fixed: 'right',
     render(record) {
       return h(TableAction as any, {
         style: 'button',
@@ -368,6 +370,10 @@
         },
       });
     },
+  });
+
+  const scrollX = computed(() => {
+    return adaTableScrollX(columns, actionColumn.width);
   });
 
   const [register, {}] = useForm({

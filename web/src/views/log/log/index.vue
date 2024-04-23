@@ -20,7 +20,7 @@
         ref="actionRef"
         :actionColumn="actionColumn"
         @update:checked-row-keys="onCheckedRow"
-        :scroll-x="1280"
+        :scroll-x="scrollX"
         :resizeHeightOffset="-20000"
       >
         <template #tableTitle>
@@ -39,7 +39,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { h, reactive, ref } from 'vue';
+  import { computed, h, reactive, ref } from 'vue';
   import { useDialog, useMessage } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, FormSchema, useForm } from '@/components/Form/index';
@@ -47,6 +47,7 @@
   import { columns } from './columns';
   import { useRouter } from 'vue-router';
   import { DeleteOutlined } from '@vicons/antd';
+  import { adaTableScrollX } from '@/utils/hotgo';
 
   const dialog = useDialog();
   const batchDeleteDisabled = ref(true);
@@ -56,9 +57,9 @@
     {
       field: 'member_id',
       component: 'NInput',
-      label: '操作人员',
+      label: '操作人',
       componentProps: {
-        placeholder: '请输入操作人员ID',
+        placeholder: '请输入操作人ID',
         onInput: (e: any) => {
           console.log(e);
         },
@@ -183,7 +184,7 @@
   });
 
   const actionColumn = reactive({
-    width: 150,
+    width: 160,
     title: '操作',
     key: 'action',
     fixed: 'right',
@@ -202,6 +203,10 @@
         ],
       });
     },
+  });
+
+  const scrollX = computed(() => {
+    return adaTableScrollX(columns, actionColumn.width);
   });
 
   const [register, {}] = useForm({

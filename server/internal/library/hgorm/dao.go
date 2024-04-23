@@ -38,6 +38,39 @@ func GenJoinOnRelation(masterTable, masterField, joinTable, alias, onField strin
 	return []string{joinTable, alias, relation}
 }
 
+func JoinFields(ctx context.Context, entity interface{}, dao daoInstance, as string) (fs string) {
+	entityFs, err := convert.GetEntityFieldTags(entity)
+	if err != nil {
+		return
+	}
+
+	if len(entityFs) == 0 {
+		return ""
+	}
+
+	fields, err := dao.Ctx(ctx).TableFields(dao.Table())
+	if err != nil {
+		return
+	}
+
+	var columns []string
+	for _, v := range entityFs {
+		if !gstr.HasPrefix(v, as) {
+			continue
+		}
+
+		field := gstr.CaseSnakeFirstUpper(gstr.StrEx(v, as))
+		if _, ok := fields[field]; ok {
+			columns = append(columns, fmt.Sprintf("`%s`.`%s` as `%s`", dao.Table(), field, v))
+		}
+	}
+
+	if len(columns) > 0 {
+		return gstr.Implode(",", convert.UniqueSlice(columns))
+	}
+	return
+}
+
 // GenJoinSelect 生成关联表select
 // 这里会将实体中的字段驼峰转为下划线于数据库进行匹配，意味着数据库字段必须全部是小写字母+下划线的格式
 func GenJoinSelect(ctx context.Context, entity interface{}, dao daoInstance, joins []*Join) (allFields string, err error) {

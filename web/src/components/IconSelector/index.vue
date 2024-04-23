@@ -7,12 +7,7 @@
       <template v-else>
         <AntdSelector v-model:value="formValue" />
       </template>
-      <n-input
-        v-bind="$props"
-        :value="formValue"
-        :style="{ width: '70%' }"
-        placeholder="请选择图标"
-      />
+      <n-input v-bind="$props" :value="formValue" placeholder="请选择图标" />
     </n-input-group>
   </div>
 </template>

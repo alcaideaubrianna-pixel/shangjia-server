@@ -25,7 +25,8 @@
         ref="actionRef"
         :actionColumn="actionColumn"
         @update:checked-row-keys="onCheckedRow"
-        :scroll-x="1280"
+        :scroll-x="scrollX"
+        :resizeHeightOffset="-20000"
       >
         <template #tableTitle>
           <n-button type="error" @click="batchDelete" :disabled="batchDeleteDisabled">
@@ -43,15 +44,15 @@
 </template>
 
 <script lang="ts" setup>
-  import { h, reactive, ref } from 'vue';
+  import { computed, h, reactive, ref } from 'vue';
   import { NTag, useDialog, useMessage } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, FormSchema, useForm } from '@/components/Form/index';
   import { getLogList, Delete } from '@/api/log/smslog';
   import { DeleteOutlined } from '@vicons/antd';
   import { Dicts } from '@/api/dict/dict';
-  import { getOptionLabel, getOptionTag, Options } from '@/utils/hotgo';
-  import { defRangeShortcuts } from "@/utils/dateUtil";
+  import { adaTableScrollX, getOptionLabel, getOptionTag, Options } from '@/utils/hotgo';
+  import { defRangeShortcuts } from '@/utils/dateUtil';
 
   const options = ref<Options>({
     config_sms_template: [],
@@ -233,6 +234,10 @@
         ],
       });
     },
+  });
+
+  const scrollX = computed(() => {
+    return adaTableScrollX(columns, actionColumn.width);
   });
 
   const [register, {}] = useForm({

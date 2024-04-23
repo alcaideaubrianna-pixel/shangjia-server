@@ -114,7 +114,7 @@ func (s *sSysServeLicense) Export(ctx context.Context, in *sysin.ServeLicenseLis
 	}
 
 	var (
-		fileName  = "导出服务许可证-" + gctx.CtxId(ctx) + ".xlsx"
+		fileName  = "导出服务许可证-" + gctx.CtxId(ctx)
 		sheetName = fmt.Sprintf("索引条件共%v行,共%v页,当前导出是第%v页,本页共%v行", totalCount, form.CalPageCount(totalCount, in.PerPage), in.Page, len(list))
 		exports   []sysin.ServeLicenseExportModel
 	)

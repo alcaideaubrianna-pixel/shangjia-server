@@ -226,6 +226,10 @@ func (s *sAdminRole) Delete(ctx context.Context, in *adminin.RoleDeleteInp) (err
 		return gerror.New("数据不存在或已删除！")
 	}
 
+	if models.Key == consts.SuperRoleKey {
+		return gerror.New("超管角色禁止删除！")
+	}
+
 	has, err := dao.AdminRole.Ctx(ctx).Where("pid", models.Id).One()
 	if err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)

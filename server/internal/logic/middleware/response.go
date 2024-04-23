@@ -82,7 +82,7 @@ func parseResponse(r *ghttp.Request) (code int, message string, resp interface{}
 	}
 
 	// 是否输出错误堆栈到页面
-	if g.Cfg().MustGet(ctx, "hotgo.debug", true).Bool() {
+	if simple.Debug(ctx) {
 		message = gerror.Current(err).Error()
 		if getContentType(r) == consts.HTTPContentTypeHtml {
 			resp = charset.SerializeStack(err)

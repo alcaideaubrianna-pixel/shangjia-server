@@ -1,9 +1,21 @@
 import { h, unref } from 'vue';
 import type { App, Plugin } from 'vue';
-import { NIcon, NTag, NTooltip } from 'naive-ui';
+import {
+  NAvatar,
+  NBadge,
+  NButton,
+  NIcon,
+  NPopover,
+  NTable,
+  NTag,
+  NTooltip,
+  SelectRenderTag,
+} from 'naive-ui';
+import { EllipsisHorizontalCircleOutline } from '@vicons/ionicons5';
 import { PageEnum } from '@/enums/pageEnum';
 import { isObject } from './is/index';
 import { cloneDeep } from 'lodash-es';
+import { VNode } from '@vue/runtime-core';
 
 export const renderTooltip = (trigger, content) => {
   return h(NTooltip, null, {
@@ -36,6 +48,100 @@ export function renderNew(type = 'warning', text = 'New', color: object = newTag
       },
       { default: () => text }
     );
+}
+
+// render 标记
+export function renderBadge(node: VNode) {
+  return h(
+    NBadge,
+    {
+      dot: true,
+      type: 'info',
+    },
+    { default: () => node }
+  );
+}
+
+// render 标签
+export const renderTag: SelectRenderTag = ({ option }) => {
+  return h(
+    NTag,
+    {
+      type: option.listClass as 'success' | 'warning' | 'error' | 'info' | 'primary' | 'default',
+    },
+    { default: () => option.label }
+  );
+};
+
+export interface MemberSumma {
+  id: number; // 用户ID
+  realName: string; // 真实姓名
+  username: string; // 用户名
+  avatar: string; // 头像
+}
+
+// render 操作人摘要
+export const renderPopoverMemberSumma = (member?: MemberSumma) => {
+  if (!member) {
+    return '';
+  }
+  return h(
+    NPopover,
+    { trigger: 'hover' },
+    {
+      trigger: () =>
+        h(
+          NButton,
+          {
+            strong: true,
+            size: 'small',
+            text: true,
+            iconPlacement: 'right',
+          },
+          { default: () => member.realName, icon: renderIcon(EllipsisHorizontalCircleOutline) }
+        ),
+      default: () =>
+        h(
+          NTable,
+          {
+            props: {
+              bordered: false,
+              'single-line': false,
+              size: 'small',
+            },
+          },
+          [
+            h('thead', [
+              h('tr', { align: 'center' }, [
+                h('th', '用户ID'),
+                h('th', '头像'),
+                h('th', '姓名'),
+                h('th', '用户名'),
+              ]),
+            ]),
+            h('tbody', [
+              h('tr', { align: 'center' }, [
+                h('td', member.id),
+                h('td', h(NAvatar, { src: member.avatar, round: true, size: 'small' })),
+                h('td', member.realName),
+                h('td', member.username),
+              ]),
+            ]),
+          ]
+        ),
+    }
+  );
+};
+
+// render html
+export function renderHtmlTooltip(content: string) {
+  content = content.replace(/\n/g, '<br>');
+  const html = h('p', { id: 'app' }, [
+    h('div', {
+      innerHTML: content,
+    }),
+  ]);
+  return renderTooltip(html, html);
 }
 
 /**
@@ -174,35 +280,6 @@ export const withInstall = <T>(component: T, alias?: string) => {
   return component as T & Plugin;
 };
 
-/**
- *  找到对应的节点
- * */
-let result = null;
-
-export function getTreeItem(data: any[], key?: string | number): any {
-  data.map((item) => {
-    if (item.key === key) {
-      result = item;
-    } else {
-      if (item.children && item.children.length) {
-        getTreeItem(item.children, key);
-      }
-    }
-  });
-  return result;
-}
-
-export function getTreeAll(data: any[]): any[] {
-  const treeAll: any[] = [];
-  data.map((item) => {
-    treeAll.push(item.key);
-    if (item.children && item.children.length) {
-      treeAll.push(...getTreeAll(item.children));
-    }
-  });
-  return treeAll;
-}
-
 // dynamic use hook props
 export function getDynamicProps<T, U>(props: T): Partial<U> {
   const ret: Recordable = {};
@@ -269,15 +346,18 @@ export function getAllExpandKeys(treeData: any): any[] {
   return expandedKeys;
 }
 
-// 从树中查找指定ID
-export function findTreeDataById(data: any[], id: number | string) {
+// 从树中查找指定节点
+export function findTreeNode(data: any[], key?: string | number, keyField = 'key'): any {
   for (const item of data) {
-    if (item.id === id) {
+    if (item[keyField] == key) {
       return item;
-    }
-    if (item.children) {
-      const found = findTreeDataById(item.children, id);
-      if (found) return found;
+    } else {
+      if (item.children && item.children.length) {
+        const foundItem = findTreeNode(item.children, key);
+        if (foundItem) {
+          return foundItem;
+        }
+      }
     }
   }
   return null;

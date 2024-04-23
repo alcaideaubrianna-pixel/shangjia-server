@@ -23,8 +23,8 @@ var (
 
 // signalHandlerForOverall 关闭信号处理
 func signalHandlerForOverall(sig os.Signal) {
-	serverCloseSignal <- struct{}{}
 	serverCloseEvent(gctx.GetInitCtx())
+	serverCloseSignal <- struct{}{}
 }
 
 // signalListen 信号监听

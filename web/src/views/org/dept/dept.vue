@@ -1,20 +1,44 @@
 <template>
   <div>
-    <n-card :bordered="false" title="部门管理">
+    <div class="n-layout-page-header">
+      <n-card :bordered="false" title="部门管理">
+        <!--  这是由系统生成的CURD表格，你可以将此行注释改为表格的描述 -->
+      </n-card>
+    </div>
+    <n-card :bordered="false" class="proCard">
       <BasicForm
+        ref="searchFormRef"
         @register="register"
-        @submit="handleSubmit"
-        @reset="handleReset"
-        @keyup.enter="handleSubmit"
-        ref="formRef"
+        @submit="reloadTable"
+        @reset="reloadTable"
+        @keyup.enter="reloadTable"
       >
         <template #statusSlot="{ model, field }">
           <n-input v-model:value="model[field]" />
         </template>
       </BasicForm>
-      <n-space vertical :size="12">
-        <n-space>
-          <n-button type="primary" @click="addTable">
+      <BasicTable
+        ref="actionRef"
+        openChecked
+        :columns="columns"
+        :request="loadDataTable"
+        :row-key="(row) => row.id"
+        :actionColumn="actionColumn"
+        :scroll-x="1280"
+        :resizeHeightOffset="-10000"
+        :cascade="false"
+        :expanded-row-keys="expandedKeys"
+        @update:expanded-row-keys="updateExpandedKeys"
+        :checked-row-keys="checkedIds"
+        @update:checked-row-keys="handleOnCheckedRow"
+      >
+        <template #tableTitle>
+          <n-button
+            type="primary"
+            @click="addTable"
+            class="min-left-space"
+            v-if="hasPermission(['/dept/edit'])"
+          >
             <template #icon>
               <n-icon>
                 <PlusOutlined />
@@ -22,175 +46,91 @@
             </template>
             添加部门
           </n-button>
-        </n-space>
-
-        <n-data-table
-          v-if="data.length > 0 || !loading"
-          :columns="columns"
-          :data="data"
-          :row-key="rowKey"
-          :loading="loading"
-          :resizeHeightOffset="-20000"
-          default-expand-all
-        />
-      </n-space>
-
-      <n-modal
-        v-model:show="showModal"
-        :show-icon="false"
-        preset="dialog"
-        :title="formParams?.id > 0 ? '编辑部门 #' + formParams?.id : '添加部门'"
-      >
-        <n-form
-          :model="formParams"
-          :rules="rules"
-          ref="formRef"
-          label-placement="left"
-          :label-width="80"
-          class="py-4"
-        >
-          <n-form-item label="上级部门" path="pid">
-            <n-tree-select
-              key-field="id"
-              :options="options"
-              :default-value="optionsDefaultValue"
-              :default-expand-all="true"
-              @update:value="handleUpdateValue"
-            />
-          </n-form-item>
-
-          <n-form-item label="部门名称" path="name">
-            <n-input placeholder="请输入名称" v-model:value="formParams.name" />
-          </n-form-item>
-
-          <n-form-item label="部门编码" path="code">
-            <n-input placeholder="请输入部门编码" v-model:value="formParams.code" />
-          </n-form-item>
-
-          <n-form-item label="负责人" path="leader">
-            <n-input placeholder="请输入负责人" v-model:value="formParams.leader" />
-          </n-form-item>
-
-          <n-form-item label="联系电话" path="phone">
-            <n-input placeholder="请输入联系电话" v-model:value="formParams.phone" />
-          </n-form-item>
-
-          <n-form-item label="邮箱" path="email">
-            <n-input placeholder="请输入邮箱" v-model:value="formParams.email" />
-          </n-form-item>
-
-          <n-form-item label="排序" path="sort">
-            <n-input-number v-model:value="formParams.sort" clearable style="width: 100%" />
-          </n-form-item>
-
-          <n-form-item label="状态" path="status">
-            <n-radio-group v-model:value="formParams.status" name="status">
-              <n-radio-button
-                v-for="status in statusOptions"
-                :key="status.value"
-                :value="status.value"
-                :label="status.label"
-              />
-            </n-radio-group>
-          </n-form-item>
-        </n-form>
-
-        <template #action>
-          <n-space>
-            <n-button @click="() => (showModal = false)">取消</n-button>
-            <n-button type="info" :loading="formBtnLoading" @click="confirmForm">确定</n-button>
-          </n-space>
+          <n-button
+            type="error"
+            @click="handleBatchDelete"
+            class="min-left-space"
+            v-if="hasPermission(['/dept/delete'])"
+          >
+            <template #icon>
+              <n-icon>
+                <DeleteOutlined />
+              </n-icon>
+            </template>
+            批量删除
+          </n-button>
+          <n-button
+            type="primary"
+            icon-placement="left"
+            @click="handleAllExpanded"
+            class="min-left-space"
+          >
+            全部{{ expandedKeys.length ? '收起' : '展开' }}
+            <template #icon>
+              <div class="flex items-center">
+                <n-icon size="14">
+                  <AlignLeftOutlined />
+                </n-icon>
+              </div>
+            </template>
+          </n-button>
         </template>
-      </n-modal>
+      </BasicTable>
     </n-card>
+    <Edit ref="editRef" @reloadTable="reloadTable" />
   </div>
 </template>
 
-<script lang="ts" setup name="org_dept">
-  import { h, onMounted, ref } from 'vue';
-  import { DataTableColumns, NButton, NTag, useDialog, useMessage } from 'naive-ui';
-  import { BasicForm, FormSchema, useForm } from '@/components/Form/index';
-  import { PlusOutlined } from '@vicons/antd';
-  import { TableAction } from '@/components/Table';
-  import { statusActions, statusOptions } from '@/enums/optionsiEnum';
-  import { Delete, Edit, getDeptList, Status } from '@/api/org/dept';
-  import { cloneDeep } from 'lodash-es';
-  import { renderIcon, renderTooltip } from '@/utils';
-  import { HelpCircleOutline } from '@vicons/ionicons5';
-  import { defRangeShortcuts } from '@/utils/dateUtil';
+<script lang="ts" setup>
+  import { h, reactive, ref, onMounted } from 'vue';
+  import { useDialog, useMessage } from 'naive-ui';
+  import { BasicTable, TableAction } from '@/components/Table';
+  import { BasicForm, useForm } from '@/components/Form/index';
+  import { usePermission } from '@/hooks/web/usePermission';
+  import { getDeptList, Delete } from '@/api/org/dept';
+  import { PlusOutlined, DeleteOutlined, AlignLeftOutlined } from '@vicons/antd';
+  import { columns, schemas, loadOptions, newState, filterIds } from './model';
+  import { convertListToTree } from '@/utils/hotgo';
+  import Edit from './edit.vue';
 
-  type RowData = {
-    createdAt: string;
-    status: number;
-    name: string;
-    id: number;
-    children?: RowData[];
-  };
+  const dialog = useDialog();
+  const message = useMessage();
+  const { hasPermission } = usePermission();
+  const actionRef = ref();
+  const searchFormRef = ref<any>({});
+  const editRef = ref();
+  const checkedIds = ref([]);
+  const expandedKeys = ref([]);
+  const allTreeKeys = ref([]);
 
-  const rules = {
-    name: {
-      required: true,
-      trigger: ['blur', 'input'],
-      message: '请输入名称',
+  const actionColumn = reactive({
+    width: 160,
+    title: '操作',
+    key: 'action',
+    fixed: 'right',
+    render(record) {
+      return h(TableAction as any, {
+        style: 'button',
+        actions: [
+          {
+            label: '编辑',
+            onClick: handleEdit.bind(null, record),
+            auth: ['/dept/edit'],
+          },
+          {
+            label: '添加',
+            onClick: handleAdd.bind(null, record),
+            auth: ['/dept/edit'],
+          },
+          {
+            label: '删除',
+            onClick: handleDelete.bind(null, record),
+            auth: ['/dept/delete'],
+          },
+        ],
+      });
     },
-    code: {
-      required: true,
-      trigger: ['blur', 'input'],
-      message: '请输入编码',
-    },
-  };
-
-  const schemas: FormSchema[] = [
-    {
-      field: 'name',
-      component: 'NInput',
-      label: '部门名称',
-      componentProps: {
-        placeholder: '请输入部门名称',
-        onInput: (e: any) => {
-          console.log(e);
-        },
-      },
-      rules: [{ message: '请输入部门名称', trigger: ['blur'] }],
-    },
-    {
-      field: 'code',
-      component: 'NInput',
-      label: '部门编码',
-      componentProps: {
-        placeholder: '请输入部门编码',
-        showButton: false,
-        onInput: (e: any) => {
-          console.log(e);
-        },
-      },
-    },
-    {
-      field: 'leader',
-      component: 'NInput',
-      label: '负责人',
-      componentProps: {
-        placeholder: '请输入负责人',
-        showButton: false,
-        onInput: (e: any) => {
-          console.log(e);
-        },
-      },
-    },
-    {
-      field: 'createdAt',
-      component: 'NDatePicker',
-      label: '创建时间',
-      componentProps: {
-        type: 'datetimerange',
-        clearable: true,
-        shortcuts: defRangeShortcuts(),
-        onUpdateValue: (e: any) => {
-          console.log(e);
-        },
-      },
-    },
-  ];
+  });
 
   const [register, {}] = useForm({
     gridProps: { cols: '1 s:1 m:2 l:3 xl:4 2xl:4' },
@@ -198,167 +138,45 @@
     schemas,
   });
 
-  const options = ref<any>([]);
-  const optionsDefaultValue = ref<any>(null);
-  const loading = ref(false);
-  const formRef: any = ref(null);
-  const message = useMessage();
-  const dialog = useDialog();
-  const showModal = ref(false);
-  const formBtnLoading = ref(false);
-  let formParams = ref<any>();
-  const data = ref<any>([]);
-  const rowKey = (row: RowData) => row.id;
-
-  const defaultState = {
-    id: 0,
-    pid: 0,
-    name: '',
-    code: '',
-    type: '',
-    leader: '',
-    phone: '',
-    email: '',
-    sort: 0,
-    status: 1,
-    createdAt: '',
-    updatedAt: '',
+  // 加载普通数表数据
+  const loadDataTable = async (res = {}) => {
+    filterIds.value = [];
+    const params = { ...(searchFormRef.value?.formModel ?? {}), ...res, pagination: false };
+    const dataSource = await getDeptList(params);
+    allTreeKeys.value = expandedKeys.value = dataSource.list.map((item) => item.id);
+    dataSource.list = convertListToTree(dataSource.list, 'id');
+    filterIds.value = dataSource.ids;
+    return dataSource;
   };
 
-  const columns: DataTableColumns<RowData> = [
-    {
-      title(_column) {
-        return renderTooltip(
-          h(
-            NButton,
-            {
-              strong: true,
-              size: 'small',
-              text: true,
-              iconPlacement: 'right',
-            },
-            { default: () => '部门', icon: renderIcon(HelpCircleOutline) }
-          ),
-          '支持上下级部门，点击列表中左侧 > 按钮可展开下级部门列表'
-        );
-      },
-      key: 'name',
-      render(row) {
-        return h(
-          NTag,
-          {
-            type: 'info',
-          },
-          {
-            default: () => row.name,
-          }
-        );
-      },
-      width: 200,
-    },
-    // {
-    //   title: '部门ID',
-    //   key: 'index',
-    //   width: 100,
-    // },
-    {
-      title: '部门编码',
-      key: 'code',
-      width: 100,
-    },
-    {
-      title: '负责人',
-      key: 'leader',
-      width: 100,
-    },
-    {
-      title: '联系电话',
-      key: 'phone',
-      width: 150,
-    },
-    {
-      title: '邮箱',
-      key: 'email',
-      width: 150,
-    },
-    {
-      title: '状态',
-      key: 'status',
-      width: 80,
-      render(row) {
-        return h(
-          NTag,
-          {
-            style: {
-              marginRight: '6px',
-            },
-            type: row.status == 1 ? 'info' : 'error',
-            bordered: false,
-          },
-          {
-            default: () => (row.status == 1 ? '正常' : '已禁用'),
-          }
-        );
-      },
-    },
-    {
-      title: '创建时间',
-      key: 'createdAt',
-      width: 150,
-      render: (rows, _) => {
-        return rows.createdAt;
-      },
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 220,
-      fixed: 'right',
-      render(record: any) {
-        return h(TableAction as any, {
-          style: 'button',
-          actions: [
-            {
-              label: '添加',
-              onClick: handleAddSub.bind(null, record),
-            },
-            {
-              label: '编辑',
-              onClick: handleEdit.bind(null, record),
-            },
-            {
-              label: '删除',
-              onClick: handleDelete.bind(null, record),
-            },
-          ],
-          dropDownActions: statusActions,
-          select: (key) => {
-            updateStatus(record.id, key);
-          },
-        });
-      },
-    },
-  ];
+  // 更新选中的行
+  function handleOnCheckedRow(rowKeys) {
+    checkedIds.value = rowKeys;
+  }
 
+  // 重新加载表格数据
+  function reloadTable() {
+    actionRef.value?.reload();
+  }
+
+  // 添加数据
   function addTable() {
-    showModal.value = true;
-    formParams.value = cloneDeep(defaultState);
-    optionsDefaultValue.value = 0;
+    editRef.value.openModal(null);
   }
 
-  function handleAddSub(record: Recordable) {
-    showModal.value = true;
-    formParams.value = cloneDeep(defaultState);
-    optionsDefaultValue.value = record.id;
+  // 添加树节点下级数据
+  function handleAdd(record: Recordable) {
+    const state = newState(null);
+    state.pid = record.id;
+    editRef.value.openModal(state);
   }
 
+  // 编辑数据
   function handleEdit(record: Recordable) {
-    showModal.value = true;
-    formParams.value = cloneDeep(record);
-    formParams.value.children = 0;
-    optionsDefaultValue.value = formParams.value.pid;
+    editRef.value.openModal(record);
   }
 
+  // 单个删除
   function handleDelete(record: Recordable) {
     dialog.warning({
       title: '警告',
@@ -366,84 +184,53 @@
       positiveText: '确定',
       negativeText: '取消',
       onPositiveClick: () => {
-        Delete(record)
-          .then((_res) => {
-            message.success('操作成功');
-            loadDataTable({});
-          })
-          .catch((e: Error) => {
-            message.error(e.message ?? '操作失败');
-          });
-      },
-      onNegativeClick: () => {
-        // message.error('取消');
+        Delete(record).then((_res) => {
+          message.success('删除成功');
+          reloadTable();
+        });
       },
     });
   }
 
-  function updateStatus(id: any, status: any) {
-    Status({ id: id, status: status })
-      .then((_res) => {
-        message.success('操作成功');
-        setTimeout(() => {
-          loadDataTable({});
-        });
-      })
-      .catch((e: Error) => {
-        message.error(e.message ?? '操作失败');
-      });
-  }
-
-  function confirmForm(e: { preventDefault: () => void }) {
-    e.preventDefault();
-    formBtnLoading.value = true;
-    formRef.value.validate((errors: any) => {
-      if (!errors) {
-        Edit(formParams.value).then((_res) => {
-          message.success('操作成功');
-          setTimeout(() => {
-            showModal.value = false;
-            loadDataTable({});
-          });
-        });
-      } else {
-        message.error('请填写完整信息');
-      }
-      formBtnLoading.value = false;
-    });
-  }
-
-  async function handleSubmit(values: Recordable) {
-    await loadDataTable(values);
-  }
-
-  function handleReset(_values: Recordable) {}
-
-  const loadDataTable = async (res: Recordable<any>) => {
-    loading.value = true;
-    const tmp = await getDeptList({ ...res, ...formRef.value?.formModel });
-    data.value = tmp?.list;
-    if (data.value === undefined || data.value === null) {
-      data.value = [];
+  // 批量删除
+  function handleBatchDelete() {
+    if (checkedIds.value.length < 1) {
+      message.error('请至少选择一项要删除的数据');
+      return;
     }
 
-    options.value = [
-      {
-        index: 0,
-        id: 0,
-        label: '顶级部门',
-        children: data.value,
+    dialog.warning({
+      title: '警告',
+      content: '你确定要批量删除？',
+      positiveText: '确定',
+      negativeText: '取消',
+      onPositiveClick: () => {
+        Delete({ id: checkedIds.value }).then((_res) => {
+          checkedIds.value = [];
+          message.success('删除成功');
+          reloadTable();
+        });
       },
-    ];
-
-    loading.value = false;
-  };
-
-  onMounted(async () => {
-    await loadDataTable({});
-  });
-
-  function handleUpdateValue(value: any) {
-    formParams.value.pid = value;
+    });
   }
+
+  // 收起/展开全部树节点
+  function handleAllExpanded() {
+    if (expandedKeys.value.length) {
+      expandedKeys.value = [];
+    } else {
+      expandedKeys.value = allTreeKeys.value;
+    }
+  }
+
+  // 更新展开的树节点
+  function updateExpandedKeys(openKeys: never[]) {
+    expandedKeys.value = openKeys;
+  }
+
+  onMounted(() => {
+    loadOptions();
+  });
 </script>
+
+<style lang="less" scoped></style>
