@@ -225,7 +225,7 @@ func (s *sAdminCash) Apply(ctx context.Context, in *adminin.CashApplyInp) (err e
 			"status":     consts.CashStatusWait,
 			"msg":        "",
 			"ip":         location.GetClientIp(ghttp.RequestFromCtx(ctx)),
-		}).InsertAndGetId()
+		}).OmitEmptyData().InsertAndGetId()
 		if err != nil {
 			return
 		}

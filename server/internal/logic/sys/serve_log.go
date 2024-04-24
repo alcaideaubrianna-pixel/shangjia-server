@@ -126,6 +126,6 @@ func (s *sSysServeLog) View(ctx context.Context, in *sysin.ServeLogViewInp) (res
 
 // RealWrite 真实写入
 func (s *sSysServeLog) RealWrite(ctx context.Context, models entity.SysServeLog) (err error) {
-	_, err = dao.SysServeLog.Ctx(ctx).FieldsEx(dao.SysLog.Columns().Id).Data(models).Insert()
+	_, err = dao.SysServeLog.Ctx(ctx).FieldsEx(dao.SysLog.Columns().Id).Data(models).OmitEmptyData().Insert()
 	return
 }

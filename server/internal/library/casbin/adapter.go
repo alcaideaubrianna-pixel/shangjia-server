@@ -151,7 +151,7 @@ func (a *adapter) SavePolicy(model model.Model) (err error) {
 	}
 
 	if count := len(policyRules); count > 0 {
-		if _, err = a.model().Insert(policyRules); err != nil {
+		if _, err = a.model().OmitEmptyData().Insert(policyRules); err != nil {
 			return
 		}
 	}
@@ -160,7 +160,7 @@ func (a *adapter) SavePolicy(model model.Model) (err error) {
 
 // AddPolicy adds a policy rule to the storage.
 func (a *adapter) AddPolicy(sec string, ptype string, rule []string) (err error) {
-	_, err = a.model().Insert(a.buildPolicyRule(ptype, rule))
+	_, err = a.model().OmitEmptyData().Insert(a.buildPolicyRule(ptype, rule))
 	return
 }
 
@@ -176,7 +176,7 @@ func (a *adapter) AddPolicies(sec string, ptype string, rules [][]string) (err e
 		policyRules = append(policyRules, a.buildPolicyRule(ptype, rule))
 	}
 
-	_, err = a.model().Insert(policyRules)
+	_, err = a.model().OmitEmptyData().Insert(policyRules)
 	return
 }
 

@@ -224,7 +224,7 @@ func (s *sAdminOrder) Create(ctx context.Context, in *adminin.OrderCreateInp) (r
 			Money:     in.Money,
 			Remark:    in.Remark,
 			Status:    consts.OrderStatusNotPay,
-		}).Insert()
+		}).OmitEmptyData().Insert()
 		if err != nil {
 			return
 		}
@@ -348,7 +348,7 @@ func (s *sAdminOrder) Edit(ctx context.Context, in *adminin.OrderEditInp) (err e
 		FieldsEx(
 			dao.AdminOrder.Columns().Id,
 		).
-		Data(in).Insert()
+		Data(in).OmitEmptyData().Insert()
 	return
 }
 

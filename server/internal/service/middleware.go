@@ -37,14 +37,6 @@ type (
 		Blacklist(r *ghttp.Request)
 		// Develop 开发工具白名单过滤
 		Develop(r *ghttp.Request)
-		// GetFilterRoutes 获取支持预处理的web路由
-		GetFilterRoutes(r *ghttp.Request) map[string]ghttp.RouterItem
-		// GenFilterRequestKey 根据请求生成唯一key
-		GenFilterRequestKey(r *ghttp.Request) string
-		// GenFilterRouteKey 根据路由生成唯一key
-		GenFilterRouteKey(r *ghttp.Router) string
-		// GenRouteKey 生成唯一key
-		GenRouteKey(method, path string) string
 		// PreFilter 请求输入预处理
 		// api使用gf规范路由并且XxxReq结构体实现了validate.Filter接口即可
 		PreFilter(r *ghttp.Request)

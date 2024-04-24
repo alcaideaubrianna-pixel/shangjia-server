@@ -97,7 +97,7 @@ func (s *sAdminCreditsLog) SaveBalance(ctx context.Context, in *adminin.CreditsL
 	data.Ip = in.Ip
 	data.MapId = in.MapId
 
-	_, err = dao.AdminCreditsLog.Ctx(ctx).Data(data).Insert()
+	_, err = dao.AdminCreditsLog.Ctx(ctx).Data(data).OmitEmptyData().Insert()
 	return
 }
 
@@ -156,7 +156,7 @@ func (s *sAdminCreditsLog) SaveIntegral(ctx context.Context, in *adminin.Credits
 	data.Ip = in.Ip
 	data.MapId = in.MapId
 
-	_, err = dao.AdminCreditsLog.Ctx(ctx).Data(data).Insert()
+	_, err = dao.AdminCreditsLog.Ctx(ctx).Data(data).OmitEmptyData().Insert()
 	return
 }
 

@@ -14,15 +14,18 @@
             <template #label>请求地址</template>
             {{ data.url }}
           </n-descriptions-item>
-          <n-descriptions-item label="请求耗时">{{ data.takeUpTime }} ms</n-descriptions-item>
+          <n-descriptions-item label="接口名称"
+            >{{ data.tags }} / {{ data.summary }}</n-descriptions-item
+          >
           <n-descriptions-item label="访问IP">{{ data.ip }}</n-descriptions-item>
           <n-descriptions-item label="IP归属地">{{ data.cityLabel }}</n-descriptions-item>
           <n-descriptions-item label="链路ID">{{ data.reqId }}</n-descriptions-item>
+          <n-descriptions-item label="请求耗时">{{ data.takeUpTime }} ms</n-descriptions-item>
           <n-descriptions-item label="响应时间">{{
-            timestampToTime(data.timestamp)
+            data.timestamp > 0 ? timestampToTime(data.timestamp) : '--'
           }}</n-descriptions-item>
 
-          <n-descriptions-item label="创建时间">{{ data.createdAt }}</n-descriptions-item>
+          <n-descriptions-item label="访问时间">{{ data.createdAt }}</n-descriptions-item>
         </n-descriptions>
       </n-card>
       <n-card
@@ -131,22 +134,13 @@
 
   const message = useMessage();
   const router = useRouter();
-  const logId = Number(router.currentRoute.value.params.id);
+  const params = router.currentRoute.value.params;
   const loading = ref(false);
-
-  onMounted(() => {
-    if (logId === undefined || logId < 1) {
-      message.error('ID不正确，请检查！');
-      return;
-    }
-    getInfo();
-  });
-
   const data = ref({});
 
   const getInfo = () => {
     loading.value = true;
-    View({ id: logId })
+    View(params)
       .then((res) => {
         data.value = res;
       })
@@ -154,6 +148,14 @@
         loading.value = false;
       });
   };
+
+  onMounted(() => {
+    if (!params.id) {
+      message.error('日志ID不正确，请检查！');
+      return;
+    }
+    getInfo();
+  });
 </script>
 
 <style lang="less" scoped>

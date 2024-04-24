@@ -88,7 +88,7 @@ func (s *sSysGenCodes) Edit(ctx context.Context, in *sysin.GenCodesEditInp) (res
 	in.MasterColumns = gjson.New("[]")
 	in.Status = consts.GenCodesStatusWait
 	in.CreatedAt = gtime.Now()
-	id, err := dao.SysGenCodes.Ctx(ctx).Data(in).InsertAndGetId()
+	id, err := dao.SysGenCodes.Ctx(ctx).Data(in).OmitEmptyData().InsertAndGetId()
 	if err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return

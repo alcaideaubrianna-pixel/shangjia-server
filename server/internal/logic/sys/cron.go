@@ -89,7 +89,7 @@ func (s *sSysCron) Edit(ctx context.Context, in *sysin.CronEditInp) (err error) 
 	}
 
 	// 新增
-	in.SysCron.Id, err = dao.SysCron.Ctx(ctx).Data(in).InsertAndGetId()
+	in.SysCron.Id, err = dao.SysCron.Ctx(ctx).Data(in).OmitEmptyData().InsertAndGetId()
 	if err != nil || in.SysCron.Id < 1 {
 		return
 	}

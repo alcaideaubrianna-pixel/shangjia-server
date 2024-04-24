@@ -161,7 +161,7 @@ func (s *sSysCurdDemo) Edit(ctx context.Context, in *sysin.CurdDemoEditInp) (err
 		in.CreatedBy = contexts.GetUserId(ctx)
 		if _, err = s.Model(ctx, &handler.Option{FilterAuth: false}).
 			Fields(sysin.CurdDemoInsertFields{}).
-			Data(in).Insert(); err != nil {
+			Data(in).OmitEmptyData().Insert(); err != nil {
 			err = gerror.Wrap(err, "新增CURD列表失败，请稍后重试！")
 		}
 		return

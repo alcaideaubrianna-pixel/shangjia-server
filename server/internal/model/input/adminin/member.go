@@ -147,7 +147,7 @@ type MemberAddInp struct {
 }
 
 func (in *MemberEditInp) Filter(ctx context.Context) (err error) {
-	if in.Password != "" {
+	if in.Id < 1 || in.Password != "" {
 		if err := g.Validator().
 			Rules("length:6,16").
 			Messages("新密码不能为空#新密码需在6~16之间").

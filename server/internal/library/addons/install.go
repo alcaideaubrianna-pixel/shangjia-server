@@ -65,7 +65,7 @@ func Install(m Module) (err error) {
 			_, _ = GetModel(m.Ctx()).Where("id", record.Id).Delete()
 		}
 
-		if _, err = GetModel(m.Ctx()).Data(data).Insert(); err != nil {
+		if _, err = GetModel(m.Ctx()).Data(data).OmitEmptyData().Insert(); err != nil {
 			return err
 		}
 		return m.Install(ctx)

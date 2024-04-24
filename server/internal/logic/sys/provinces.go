@@ -92,7 +92,7 @@ func (s *sSysProvinces) Edit(ctx context.Context, in *sysin.ProvincesEditInp) (e
 	}
 
 	// 新增
-	if _, err = dao.SysProvinces.Ctx(ctx).Fields(sysin.ProvincesInsertFields{}).Data(in).Insert(); err != nil {
+	if _, err = dao.SysProvinces.Ctx(ctx).Fields(sysin.ProvincesInsertFields{}).Data(in).OmitEmptyData().Insert(); err != nil {
 		err = gerror.Wrap(err, "新增省市区数据失败！")
 	}
 	return

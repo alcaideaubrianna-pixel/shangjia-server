@@ -117,7 +117,7 @@ func (s *sAdminDept) Edit(ctx context.Context, in *adminin.DeptEditInp) (err err
 		}
 
 		// 新增
-		if _, err = s.Model(ctx, &handler.Option{FilterAuth: false}).Data(in).Insert(); err != nil {
+		if _, err = s.Model(ctx, &handler.Option{FilterAuth: false}).Data(in).OmitEmptyData().Insert(); err != nil {
 			err = gerror.Wrap(err, "新增部门管理失败，请稍后重试！")
 		}
 		return

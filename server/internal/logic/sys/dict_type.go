@@ -96,7 +96,7 @@ func (s *sSysDictType) Edit(ctx context.Context, in *sysin.DictTypeEditInp) (err
 	}
 
 	// 新增
-	if _, err = dao.SysDictType.Ctx(ctx).Fields(sysin.DictTypeInsertFields{}).Data(in).Insert(); err != nil {
+	if _, err = dao.SysDictType.Ctx(ctx).Fields(sysin.DictTypeInsertFields{}).Data(in).OmitEmptyData().Insert(); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 	}
 	return

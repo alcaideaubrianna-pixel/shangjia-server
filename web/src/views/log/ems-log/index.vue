@@ -64,9 +64,9 @@
     {
       field: 'url',
       component: 'NInput',
-      label: '访问路径',
+      label: '接口路径',
       componentProps: {
-        placeholder: '请输入访问路径',
+        placeholder: '请输入接口路径',
         onInput: (e: any) => {
           console.log(e);
         },

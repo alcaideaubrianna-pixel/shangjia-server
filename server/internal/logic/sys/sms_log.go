@@ -138,7 +138,7 @@ func (s *sSysSmsLog) SendCode(ctx context.Context, in *sysin.SendCodeInp) (err e
 	data.CreatedAt = gtime.Now()
 	data.UpdatedAt = gtime.Now()
 
-	_, err = dao.SysSmsLog.Ctx(ctx).Data(data).Insert()
+	_, err = dao.SysSmsLog.Ctx(ctx).Data(data).OmitEmptyData().Insert()
 	return
 }
 

@@ -564,7 +564,7 @@ func (s *sAdminMember) Edit(ctx context.Context, in *adminin.MemberEditInp) (err
 	}
 
 	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (err error) {
-		id, err := dao.AdminMember.Ctx(ctx).Data(data).InsertAndGetId()
+		id, err := dao.AdminMember.Ctx(ctx).Data(data).OmitEmptyData().InsertAndGetId()
 		if err != nil {
 			err = gerror.Wrap(err, "新增用户失败，请稍后重试！")
 			return

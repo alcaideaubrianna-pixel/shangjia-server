@@ -132,7 +132,7 @@ func (s *sPayRefund) Refund(ctx context.Context, in *payin.PayRefundInp) (res *p
 	}
 
 	// 创建退款记录
-	if _, err = s.Model(ctx).Data(data).Insert(); err != nil {
+	if _, err = s.Model(ctx).Data(data).OmitEmptyData().Insert(); err != nil {
 		return
 	}
 	return

@@ -38,18 +38,6 @@ func (c *cLoginLog) Export(ctx context.Context, req *loginlog.ExportReq) (res *l
 	return
 }
 
-// View 获取指定登录日志信息
-func (c *cLoginLog) View(ctx context.Context, req *loginlog.ViewReq) (res *loginlog.ViewRes, err error) {
-	data, err := service.SysLoginLog().View(ctx, &req.LoginLogViewInp)
-	if err != nil {
-		return
-	}
-
-	res = new(loginlog.ViewRes)
-	res.LoginLogViewModel = data
-	return
-}
-
 // Delete 删除登录日志
 func (c *cLoginLog) Delete(ctx context.Context, req *loginlog.DeleteReq) (res *loginlog.DeleteRes, err error) {
 	err = service.SysLoginLog().Delete(ctx, &req.LoginLogDeleteInp)
