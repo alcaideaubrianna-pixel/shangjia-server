@@ -45,7 +45,7 @@ module.exports = defineConfig({
       { varsIgnorePattern: '.*', args: 'none' },
     ],
     'space-before-function-paren': 'off',
-
+    'vue/multi-word-component-names': 'off',
     'vue/attributes-order': 'off',
     'vue/one-component-per-file': 'off',
     'vue/html-closing-bracket-newline': 'off',

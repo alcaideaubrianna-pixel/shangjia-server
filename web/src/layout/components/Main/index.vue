@@ -1,13 +1,15 @@
 <template>
   <RouterView>
     <template #default="{ Component, route }">
-      {{ retryKeepAlive(route) }}
+      {{ setKeepAlive(route) }}
       <template v-if="mode === 'production'">
         <transition :name="getTransitionName" appear mode="out-in">
-          <keep-alive v-if="keepAliveComponents.length" :include="keepAliveComponents">
-            <component :is="Component" :key="route.fullPath" />
-          </keep-alive>
-          <component :is="Component" v-else :key="route.fullPath" />
+          <div>
+            <keep-alive v-if="keepAliveComponents.length" :include="keepAliveComponents">
+              <component :is="Component" :key="route.fullPath" />
+            </keep-alive>
+            <component :is="Component" v-else :key="route.fullPath" />
+          </div>
         </transition>
       </template>
       <template v-else>
@@ -40,12 +42,11 @@
       },
     },
     setup() {
+      const mode = import.meta.env.MODE;
       const router = useRouter();
       const { getIsPageAnimate, getPageAnimateType } = useProjectSetting();
       const asyncRouteStore = useAsyncRouteStore();
-      // 需要缓存的路由组件
       const keepAliveComponents = computed(() => asyncRouteStore.keepAliveComponents);
-
       const getTransitionName = computed(() => {
         return unref(getIsPageAnimate) ? unref(getPageAnimateType) : '';
       });
@@ -56,7 +57,7 @@
         return currentComponent.name || currentComponent.__name;
       }
 
-      function retryKeepAlive(route) {
+      function setKeepAlive(route) {
         if (!route?.meta?.keepAlive) {
           return;
         }
@@ -65,26 +66,15 @@
         if (currentName === undefined || route.name === undefined) {
           return;
         }
-
-        const index = keepAliveComponents.value.findIndex((name) => name === route.name);
-        if (index > -1 && currentName !== route.name) {
-          const index2 = keepAliveComponents.value.findIndex((name) => name === currentName);
-          if (index2 === -1) {
-            console.warn(
-              `the routing name configured on the backend is inconsistent with the component name in the. vue file. KeepAlive has been retried based on the actual component name, but this may cause unexpected issues.\n routeName:` +
-                route.name +
-                ',currentName:' +
-                currentName
-            );
-            asyncRouteStore.keepAliveComponents.push(currentName);
-          }
+        if (!keepAliveComponents.value.includes(currentName)) {
+          asyncRouteStore.keepAliveComponents.push(currentName);
         }
       }
-      const mode = import.meta.env.MODE;
+
       return {
         keepAliveComponents,
         getTransitionName,
-        retryKeepAlive,
+        setKeepAlive,
         mode,
       };
     },
