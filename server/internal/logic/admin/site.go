@@ -126,7 +126,7 @@ func (s *sAdminSite) Register(ctx context.Context, in *adminin.RegisterInp) (err
 
 	// 提交注册信息
 	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (err error) {
-		id, err := dao.AdminMember.Ctx(ctx).Data(data).InsertAndGetId()
+		id, err := dao.AdminMember.Ctx(ctx).Data(data).OmitEmptyData().InsertAndGetId()
 		if err != nil {
 			err = gerror.Wrap(err, consts.ErrorORM)
 			return

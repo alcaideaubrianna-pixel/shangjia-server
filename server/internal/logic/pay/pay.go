@@ -110,7 +110,7 @@ func (s *sPay) Edit(ctx context.Context, in payin.PayEditInp) (err error) {
 	}
 
 	// 新增
-	_, err = s.Model(ctx, &handler.Option{FilterAuth: false}).Data(in).Insert()
+	_, err = s.Model(ctx, &handler.Option{FilterAuth: false}).Data(in).OmitEmptyData().Insert()
 	return
 }
 

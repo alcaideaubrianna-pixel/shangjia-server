@@ -113,7 +113,7 @@ func (s *sSysOptionTreeDemo) Edit(ctx context.Context, in *sysin.OptionTreeDemoE
 		in.CreatedBy = contexts.GetUserId(ctx)
 		if _, err = s.Model(ctx, &handler.Option{FilterAuth: false}).
 			Fields(sysin.OptionTreeDemoInsertFields{}).
-			Data(in).Insert(); err != nil {
+			Data(in).OmitEmptyData().Insert(); err != nil {
 			err = gerror.Wrap(err, "新增选项树表失败，请稍后重试！")
 		}
 		return

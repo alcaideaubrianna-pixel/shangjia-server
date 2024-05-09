@@ -146,7 +146,7 @@ func (s *sAdminRole) UpdatePermissions(ctx context.Context, in *adminin.UpdatePe
 			})
 		}
 
-		if _, err = dao.AdminRoleMenu.Ctx(ctx).Data(list).Insert(); err != nil {
+		if _, err = dao.AdminRoleMenu.Ctx(ctx).Data(list).OmitEmptyData().Insert(); err != nil {
 			err = gerror.Wrap(err, consts.ErrorORM)
 			return
 		}
@@ -189,7 +189,7 @@ func (s *sAdminRole) Edit(ctx context.Context, in *adminin.RoleEditInp) (err err
 	}
 
 	// 新增
-	if _, err = dao.AdminRole.Ctx(ctx).Fields(adminin.RoleInsertFields{}).Data(in).Insert(); err != nil {
+	if _, err = dao.AdminRole.Ctx(ctx).Fields(adminin.RoleInsertFields{}).Data(in).OmitEmptyData().Insert(); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return
 	}

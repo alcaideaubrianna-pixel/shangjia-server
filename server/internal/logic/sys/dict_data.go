@@ -60,7 +60,7 @@ func (s *sSysDictData) Edit(ctx context.Context, in *sysin.DictDataEditInp) (err
 		return gerror.Wrap(err, "类型选择无效，请检查")
 	}
 
-	_, err = dao.SysDictData.Ctx(ctx).Fields(sysin.DictDataInsertFields{}).Data(in).Insert()
+	_, err = dao.SysDictData.Ctx(ctx).Fields(sysin.DictDataInsertFields{}).Data(in).OmitEmptyData().Insert()
 	if err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return err

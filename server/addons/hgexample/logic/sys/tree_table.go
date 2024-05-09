@@ -125,7 +125,7 @@ func (s *sSysTreeTable) Edit(ctx context.Context, in *sysin.TableEditInp) (err e
 			}
 		} else {
 			in.CreatedBy = contexts.GetUserId(ctx)
-			if _, err = s.Model(ctx, &handler.Option{FilterAuth: false}).Data(in).Insert(); err != nil {
+			if _, err = s.Model(ctx, &handler.Option{FilterAuth: false}).Data(in).OmitEmptyData().Insert(); err != nil {
 				err = gerror.Wrap(err, "新增表格失败，请稍后重试！")
 				return err
 			}

@@ -88,7 +88,7 @@ func (s *sAdminNotice) Edit(ctx context.Context, in *adminin.NoticeEditInp) (err
 	// 新增
 	in.CreatedBy = member.Id
 	in.CreatedAt = gtime.Now()
-	in.Id, err = s.Model(ctx, &handler.Option{FilterAuth: false}).Data(in).InsertAndGetId()
+	in.Id, err = s.Model(ctx, &handler.Option{FilterAuth: false}).Data(in).OmitEmptyData().InsertAndGetId()
 	if err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return err
@@ -426,7 +426,7 @@ func (s *sAdminNotice) updatedReadClicks(ctx context.Context, noticeId, memberId
 	}
 
 	if models == nil {
-		_, err = dao.AdminNoticeRead.Ctx(ctx).Data(entity.AdminNoticeRead{NoticeId: noticeId, MemberId: memberId}).Insert()
+		_, err = dao.AdminNoticeRead.Ctx(ctx).Data(entity.AdminNoticeRead{NoticeId: noticeId, MemberId: memberId}).OmitEmptyData().Insert()
 		return
 	}
 	_, err = dao.AdminNoticeRead.Ctx(ctx).Where(dao.AdminNoticeRead.Columns().Id, models.Id).Increment(dao.AdminNoticeRead.Columns().Clicks, 1)

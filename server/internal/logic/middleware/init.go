@@ -27,15 +27,12 @@ import (
 	"hotgo/utility/validate"
 	"net/http"
 	"strings"
-	"sync"
 )
 
 type sMiddleware struct {
-	LoginUrl         string                      // 登录路由地址
-	DemoWhiteList    g.Map                       // 演示模式放行的路由白名单
-	NotRecordRequest g.Map                       // 不记录请求数据的路由（当前请求数据过大时会影响响应效率，可以将路径放到该选项中改善）
-	FilterRoutes     map[string]ghttp.RouterItem // 支持预处理的web路由
-	routeMutex       sync.Mutex
+	LoginUrl         string // 登录路由地址
+	DemoWhiteList    g.Map  // 演示模式放行的路由白名单
+	NotRecordRequest g.Map  // 不记录请求数据的路由（当前请求数据过大时会影响响应效率，可以将路径放到该选项中改善）
 }
 
 func init() {

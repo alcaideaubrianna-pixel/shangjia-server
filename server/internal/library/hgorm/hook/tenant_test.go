@@ -50,7 +50,7 @@ func TestSaveTenant_User(t *testing.T) {
 		cols.Status:      consts.PayStatusWait,
 	}
 
-	_, err := dao.AddonHgexampleTenantOrder.Ctx(ctx).Data(data).Hook(hook.SaveTenant).Insert()
+	_, err := dao.AddonHgexampleTenantOrder.Ctx(ctx).Data(data).Hook(hook.SaveTenant).OmitEmptyData().Insert()
 	if err != nil {
 		panic(err)
 	}

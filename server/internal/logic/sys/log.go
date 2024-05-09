@@ -7,6 +7,8 @@ package sys
 
 import (
 	"context"
+	"fmt"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -17,7 +19,9 @@ import (
 	"github.com/gogf/gf/v2/util/gconv"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
+	"hotgo/internal/global"
 	"hotgo/internal/library/contexts"
+	"hotgo/internal/library/dict"
 	"hotgo/internal/library/hgorm/handler"
 	"hotgo/internal/library/hgorm/hook"
 	"hotgo/internal/library/location"
@@ -38,6 +42,11 @@ func NewSysLog() *sSysLog {
 
 func init() {
 	service.RegisterSysLog(NewSysLog())
+}
+
+// Model 请求日志Orm模型
+func (s *sSysLog) Model(ctx context.Context, option ...*handler.Option) *gdb.Model {
+	return handler.Model(dao.SysLog.Ctx(ctx), option...)
 }
 
 // Export 导出
@@ -96,7 +105,7 @@ func (s *sSysLog) Export(ctx context.Context, in *sysin.LogListInp) (err error) 
 
 // RealWrite 真实写入
 func (s *sSysLog) RealWrite(ctx context.Context, log entity.SysLog) (err error) {
-	_, err = dao.SysLog.Ctx(ctx).FieldsEx(dao.SysLog.Columns().Id).Data(log).Insert()
+	_, err = dao.SysLog.Ctx(ctx).FieldsEx(dao.SysLog.Columns().Id).Data(log).Unscoped().OmitEmptyData().Insert()
 	return
 }
 
@@ -111,7 +120,11 @@ func (s *sSysLog) AutoLog(ctx context.Context) error {
 		}()
 
 		config, err := service.SysConfig().GetLoadLog(ctx)
-		if err != nil || !config.Switch {
+		if err != nil {
+			return
+		}
+
+		if config == nil || !config.Switch {
 			return
 		}
 
@@ -167,6 +180,10 @@ func (s *sSysLog) AnalysisLog(ctx context.Context) entity.SysLog {
 		}
 	}
 
+	if timestamp == 0 {
+		timestamp = gtime.Timestamp()
+	}
+
 	// 请求头
 	if reqHeadersBytes, _ := gjson.New(request.Header).MarshalJSON(); len(reqHeadersBytes) > 0 {
 		headerData = gjson.New(reqHeadersBytes)
@@ -209,6 +226,8 @@ func (s *sSysLog) AnalysisLog(ctx context.Context) entity.SysLog {
 		takeUpTime = tt
 	}
 
+	headerData.MustSet("qqq", request.EnterTime.String())
+
 	data = entity.SysLog{
 		AppId:      appId,
 		MerchantId: 0,
@@ -230,19 +249,43 @@ func (s *sSysLog) AnalysisLog(ctx context.Context) entity.SysLog {
 		UserAgent:  request.Header.Get("User-Agent"),
 		Status:     consts.StatusEnabled,
 		TakeUpTime: takeUpTime,
+		UpdatedAt:  gtime.Now(),
+		CreatedAt:  request.EnterTime,
 	}
 	return data
 }
 
-// View 获取指定字典类型信息
+// View 获取指定请求日志信息
 func (s *sSysLog) View(ctx context.Context, in *sysin.LogViewInp) (res *sysin.LogViewModel, err error) {
-	if err = dao.SysLog.Ctx(ctx).Handler(handler.FilterAuth).Hook(hook.CityLabel).Where("id", in.Id).Scan(&res); err != nil {
+	mod := s.Model(ctx)
+
+	count, err := service.SysLoginLog().Model(ctx).
+		LeftJoinOnFields(dao.SysLog.Table(), dao.SysLoginLog.Columns().ReqId, "=", dao.SysLog.Columns().ReqId).
+		WherePrefix(dao.SysLog.Table(), dao.SysLog.Columns().Id, in.Id).Count()
+	if err != nil {
+		return nil, err
+	}
+
+	if count > 0 {
+		mod = dao.SysLog.Ctx(ctx)
+	}
+
+	if err = mod.Hook(hook.CityLabel).WherePri(in.Id).Scan(&res); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return
 	}
 
 	if res == nil {
 		return
+	}
+
+	routes := global.LoadHTTPRoutes(ghttp.RequestFromCtx(ctx))
+	key := global.GenRouteKey(res.Method, res.Url)
+	route, ok := routes[key]
+	if ok {
+		res.Tags = route.Tags
+		res.Summary = route.Summary
+		res.Description = route.Description
 	}
 
 	if simple.IsDemo(ctx) {
@@ -255,15 +298,15 @@ func (s *sSysLog) View(ctx context.Context, in *sysin.LogViewInp) (res *sysin.Lo
 	return
 }
 
-// Delete 删除
+// Delete 删除请求日志
 func (s *sSysLog) Delete(ctx context.Context, in *sysin.LogDeleteInp) (err error) {
-	_, err = dao.SysLog.Ctx(ctx).Handler(handler.FilterAuth).Where("id", in.Id).Delete()
+	_, err = s.Model(ctx).WherePri(in.Id).Delete()
 	return
 }
 
-// List 列表
+// List 请求日志列表
 func (s *sSysLog) List(ctx context.Context, in *sysin.LogListInp) (list []*sysin.LogListModel, totalCount int, err error) {
-	mod := dao.SysLog.Ctx(ctx).Handler(handler.FilterAuth).FieldsEx("get_data", "header_data", "post_data")
+	mod := s.Model(ctx).FieldsEx("get_data", "header_data", "post_data")
 
 	// 访问路径
 	if in.Url != "" {
@@ -273,6 +316,11 @@ func (s *sSysLog) List(ctx context.Context, in *sysin.LogListInp) (list []*sysin
 	// 模块
 	if in.Module != "" {
 		mod = mod.Where("module", in.Module)
+	}
+
+	// 链路ID
+	if in.ReqId != "" {
+		mod = mod.Where("req_id", in.ReqId)
 	}
 
 	// 请求方式
@@ -301,8 +349,8 @@ func (s *sSysLog) List(ctx context.Context, in *sysin.LogListInp) (list []*sysin
 	}
 
 	// 请求耗时
-	if in.TakeUpTime > 0 {
-		mod = mod.WhereGTE("take_up_time", in.TakeUpTime)
+	if dict.HasOptionKey(consts.HTTPHandlerTimeOptions, in.TakeUpTime) {
+		mod = mod.Where(fmt.Sprintf("`take_up_time` %v", in.TakeUpTime))
 	}
 
 	totalCount, err = mod.Count()
@@ -310,35 +358,40 @@ func (s *sSysLog) List(ctx context.Context, in *sysin.LogListInp) (list []*sysin
 		return
 	}
 
-	if err = mod.Page(in.Page, in.PerPage).Order("id desc").Scan(&list); err != nil {
+	if err = mod.Page(in.Page, in.PerPage).Hook(hook.CityLabel).Order("id desc").Scan(&list); err != nil {
 		return
 	}
 
-	for i := 0; i < len(list); i++ {
-		// 管理员
-		if list[i].AppId == consts.AppAdmin {
-			memberName, err := dao.AdminMember.Ctx(ctx).Fields("realname").Where("id", list[i].MemberId).Value()
+	routes := global.LoadHTTPRoutes(ghttp.RequestFromCtx(ctx))
+	for _, v := range list {
+		if v.AppId == consts.AppAdmin {
+			memberName, err := dao.AdminMember.Ctx(ctx).Fields("realname").WherePri(v.MemberId).Value()
 			if err != nil {
 				err = gerror.Wrap(err, consts.ErrorORM)
 				return list, totalCount, err
 			}
-			list[i].MemberName = memberName.String()
+			v.MemberName = memberName.String()
 		}
 
-		// 接口
-		// ...
-
-		if list[i].MemberName == "" {
-			list[i].MemberName = "游客"
+		if v.MemberName == "" {
+			v.MemberName = "游客"
 		}
 
 		// 截取请求url路径
-		if gstr.Contains(list[i].Url, "?") {
-			list[i].Url = gstr.StrTillEx(list[i].Url, "?")
+		if gstr.Contains(v.Url, "?") {
+			v.Url = gstr.StrTillEx(v.Url, "?")
+		}
+
+		key := global.GenRouteKey(v.Method, v.Url)
+		route, ok := routes[key]
+		if ok {
+			v.Tags = route.Tags
+			v.Summary = route.Summary
+			v.Description = route.Description
 		}
 
 		if simple.IsDemo(ctx) {
-			list[i].HeaderData = gjson.New(`{
+			v.HeaderData = gjson.New(`{
 			   "none": [
 			       "` + consts.DemoTips + `"
 			   ]

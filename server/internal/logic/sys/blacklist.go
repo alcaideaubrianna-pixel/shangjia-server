@@ -60,7 +60,7 @@ func (s *sSysBlacklist) Edit(ctx context.Context, in *sysin.BlacklistEditInp) (e
 	}
 
 	// 新增
-	_, err = dao.SysBlacklist.Ctx(ctx).Data(in).Insert()
+	_, err = dao.SysBlacklist.Ctx(ctx).Data(in).OmitEmptyData().Insert()
 	return
 }
 

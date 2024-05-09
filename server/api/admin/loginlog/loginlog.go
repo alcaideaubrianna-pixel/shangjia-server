@@ -30,16 +30,6 @@ type ExportReq struct {
 
 type ExportRes struct{}
 
-// ViewReq 获取登录日志指定信息
-type ViewReq struct {
-	g.Meta `path:"/loginLog/view" method:"get" tags:"登录日志" summary:"获取登录日志指定信息"`
-	sysin.LoginLogViewInp
-}
-
-type ViewRes struct {
-	*sysin.LoginLogViewModel
-}
-
 // DeleteReq 删除登录日志
 type DeleteReq struct {
 	g.Meta `path:"/loginLog/delete" method:"post" tags:"登录日志" summary:"删除登录日志"`

@@ -18,15 +18,6 @@ export function Delete(params) {
   });
 }
 
-// 获取登录日志指定详情
-export function View(params) {
-  return http.request({
-    url: '/loginLog/view',
-    method: 'GET',
-    params,
-  });
-}
-
 // 导出登录日志
 export function Export(params) {
   jumpExport('/loginLog/export', params);

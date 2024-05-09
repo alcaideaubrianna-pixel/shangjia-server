@@ -31,7 +31,7 @@ func (s *sAdminMemberPost) UpdatePostIds(ctx context.Context, memberId int64, po
 	}
 
 	for i := 0; i < len(postIds); i++ {
-		_, err = dao.AdminMemberPost.Ctx(ctx).Insert(entity.AdminMemberPost{
+		_, err = dao.AdminMemberPost.Ctx(ctx).OmitEmptyData().Insert(entity.AdminMemberPost{
 			MemberId: memberId,
 			PostId:   postIds[i],
 		})

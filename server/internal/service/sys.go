@@ -243,6 +243,8 @@ type (
 		Build(ctx context.Context, in *sysin.GenCodesBuildInp) (err error)
 	}
 	ISysLog interface {
+		// Model 请求日志Orm模型
+		Model(ctx context.Context, option ...*handler.Option) *gdb.Model
 		// Export 导出
 		Export(ctx context.Context, in *sysin.LogListInp) (err error)
 		// RealWrite 真实写入
@@ -251,24 +253,22 @@ type (
 		AutoLog(ctx context.Context) error
 		// AnalysisLog 解析日志数据
 		AnalysisLog(ctx context.Context) entity.SysLog
-		// View 获取指定字典类型信息
+		// View 获取指定请求日志信息
 		View(ctx context.Context, in *sysin.LogViewInp) (res *sysin.LogViewModel, err error)
-		// Delete 删除
+		// Delete 删除请求日志
 		Delete(ctx context.Context, in *sysin.LogDeleteInp) (err error)
-		// List 列表
+		// List 请求日志列表
 		List(ctx context.Context, in *sysin.LogListInp) (list []*sysin.LogListModel, totalCount int, err error)
 	}
 	ISysLoginLog interface {
 		// Model 登录日志Orm模型
-		Model(ctx context.Context) *gdb.Model
+		Model(ctx context.Context, option ...*handler.Option) *gdb.Model
 		// List 获取登录日志列表
 		List(ctx context.Context, in *sysin.LoginLogListInp) (list []*sysin.LoginLogListModel, totalCount int, err error)
 		// Export 导出登录日志
 		Export(ctx context.Context, in *sysin.LoginLogListInp) (err error)
 		// Delete 删除登录日志
 		Delete(ctx context.Context, in *sysin.LoginLogDeleteInp) (err error)
-		// View 获取登录日志指定信息
-		View(ctx context.Context, in *sysin.LoginLogViewInp) (res *sysin.LoginLogViewModel, err error)
 		// Push 推送登录日志
 		Push(ctx context.Context, in *sysin.LoginLogPushInp)
 		// RealWrite 真实写入

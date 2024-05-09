@@ -92,7 +92,7 @@ func (s *sPay) Create(ctx context.Context, in payin.PayCreateInp) (res *payin.Pa
 	}
 
 	// 创建支付记录
-	if _, err = s.Model(ctx).Data(data).Insert(); err != nil {
+	if _, err = s.Model(ctx).Data(data).OmitEmptyData().Insert(); err != nil {
 		return
 	}
 

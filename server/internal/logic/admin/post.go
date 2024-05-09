@@ -96,7 +96,7 @@ func (s *sAdminPost) Edit(ctx context.Context, in *adminin.PostEditInp) (err err
 	}
 
 	// 新增
-	_, err = dao.AdminPost.Ctx(ctx).Data(in).Insert()
+	_, err = dao.AdminPost.Ctx(ctx).Data(in).OmitEmptyData().Insert()
 	return
 }
 

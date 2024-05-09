@@ -98,7 +98,7 @@ func (s *sSysTestCategory) Edit(ctx context.Context, in *sysin.TestCategoryEditI
 		// 新增
 		if _, err = s.Model(ctx, &handler.Option{FilterAuth: false}).
 			Fields(sysin.TestCategoryInsertFields{}).
-			Data(in).Insert(); err != nil {
+			Data(in).OmitEmptyData().Insert(); err != nil {
 			err = gerror.Wrap(err, "新增测试分类失败，请稍后重试！")
 		}
 		return

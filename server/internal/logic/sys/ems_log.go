@@ -61,7 +61,7 @@ func (s *sSysEmsLog) Edit(ctx context.Context, in *sysin.EmsLogEditInp) (err err
 	}
 
 	// 新增
-	_, err = dao.SysEmsLog.Ctx(ctx).Data(in).Insert()
+	_, err = dao.SysEmsLog.Ctx(ctx).Data(in).OmitEmptyData().Insert()
 	return
 }
 
@@ -190,7 +190,7 @@ func (s *sSysEmsLog) Send(ctx context.Context, in *sysin.SendEmsInp) (err error)
 	data.CreatedAt = gtime.Now()
 	data.UpdatedAt = gtime.Now()
 
-	_, err = dao.SysEmsLog.Ctx(ctx).Data(data).Insert()
+	_, err = dao.SysEmsLog.Ctx(ctx).Data(data).OmitEmptyData().Insert()
 	return
 }
 

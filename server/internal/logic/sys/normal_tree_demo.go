@@ -113,7 +113,7 @@ func (s *sSysNormalTreeDemo) Edit(ctx context.Context, in *sysin.NormalTreeDemoE
 		in.CreatedBy = contexts.GetUserId(ctx)
 		if _, err = s.Model(ctx, &handler.Option{FilterAuth: false}).
 			Fields(sysin.NormalTreeDemoInsertFields{}).
-			Data(in).Insert(); err != nil {
+			Data(in).OmitEmptyData().Insert(); err != nil {
 			err = gerror.Wrap(err, "新增普通树表失败，请稍后重试！")
 		}
 		return

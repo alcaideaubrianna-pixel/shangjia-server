@@ -49,21 +49,29 @@ export default () => {
   let timer: ReturnType<typeof setTimeout>;
   const createSocket = () => {
     console.log('[WebSocket] createSocket...');
-    if (useUserStore.token === '') {
+    if (useUserStore.token === '' || useUserStore.config?.wsAddr == '') {
       console.error('[WebSocket] 用户未登录，稍后重试...');
-      reconnect();
+      resetReconnect();
       return;
     }
     try {
       socket = new WebSocket(`${useUserStore.config?.wsAddr}?authorization=${useUserStore.token}`);
       init();
+      if (lockReconnect) {
+        lockReconnect = false;
+      }
     } catch (e) {
       console.error(`[WebSocket] createSocket err: ${e}`);
-      reconnect();
+      resetReconnect();
+      return;
     }
+  };
+
+  const resetReconnect = () => {
     if (lockReconnect) {
       lockReconnect = false;
     }
+    reconnect();
   };
 
   const reconnect = () => {
@@ -73,7 +81,7 @@ export default () => {
     clearTimeout(timer);
     timer = setTimeout(() => {
       createSocket();
-    }, SocketEnum.HeartBeatInterval);
+    }, 2000);
   };
 
   const init = () => {

@@ -75,7 +75,9 @@ func GenHashOption(key interface{}, label string) *model.Option {
 	tag := "default"
 	if _, err := hash.Write(gconv.Bytes(label)); err == nil {
 		index := int(hash.Sum32()) % len(strings)
-		tag = strings[index]
+		if index < len(strings) {
+			tag = strings[index]
+		}
 	}
 	return &model.Option{
 		Key:       key,

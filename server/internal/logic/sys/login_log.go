@@ -43,13 +43,13 @@ func init() {
 }
 
 // Model 登录日志Orm模型
-func (s *sSysLoginLog) Model(ctx context.Context) *gdb.Model {
-	return dao.SysLoginLog.Ctx(ctx)
+func (s *sSysLoginLog) Model(ctx context.Context, option ...*handler.Option) *gdb.Model {
+	return handler.Model(dao.SysLoginLog.Ctx(ctx), option...)
 }
 
 // List 获取登录日志列表
 func (s *sSysLoginLog) List(ctx context.Context, in *sysin.LoginLogListInp) (list []*sysin.LoginLogListModel, totalCount int, err error) {
-	mod := dao.SysLoginLog.Ctx(ctx)
+	mod := s.Model(ctx)
 
 	// 查询状态
 	if in.Status > 0 {
@@ -76,7 +76,7 @@ func (s *sSysLoginLog) List(ctx context.Context, in *sysin.LoginLogListInp) (lis
 		return
 	}
 
-	if err = mod.Fields(sysin.LoginLogListModel{}).Hook(hook.CityLabel).Handler(handler.FilterAuth).Page(in.Page, in.PerPage).OrderDesc(dao.SysLoginLog.Columns().Id).Scan(&list); err != nil {
+	if err = mod.Fields(sysin.LoginLogListModel{}).Hook(hook.CityLabel).Page(in.Page, in.PerPage).OrderDesc(dao.SysLoginLog.Columns().Id).Scan(&list); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return list, totalCount, err
 	}
@@ -121,13 +121,7 @@ func (s *sSysLoginLog) Export(ctx context.Context, in *sysin.LoginLogListInp) (e
 
 // Delete 删除登录日志
 func (s *sSysLoginLog) Delete(ctx context.Context, in *sysin.LoginLogDeleteInp) (err error) {
-	_, err = dao.SysLoginLog.Ctx(ctx).Where(dao.SysLoginLog.Columns().Id, in.Id).Delete()
-	return
-}
-
-// View 获取登录日志指定信息
-func (s *sSysLoginLog) View(ctx context.Context, in *sysin.LoginLogViewInp) (res *sysin.LoginLogViewModel, err error) {
-	err = dao.SysLoginLog.Ctx(ctx).Where(dao.SysLoginLog.Columns().Id, in.Id).Scan(&res)
+	_, err = s.Model(ctx).WherePri(in.Id).Delete()
 	return
 }
 
@@ -181,6 +175,6 @@ func (s *sSysLoginLog) Push(ctx context.Context, in *sysin.LoginLogPushInp) {
 
 // RealWrite 真实写入
 func (s *sSysLoginLog) RealWrite(ctx context.Context, models entity.SysLoginLog) (err error) {
-	_, err = dao.SysLoginLog.Ctx(ctx).FieldsEx(dao.SysLog.Columns().Id).Data(models).Insert()
+	_, err = dao.SysLoginLog.Ctx(ctx).Data(models).OmitEmptyData().Insert()
 	return
 }

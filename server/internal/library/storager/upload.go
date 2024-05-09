@@ -233,7 +233,7 @@ func write(ctx context.Context, meta *FileMeta, fullPath string) (models *entity
 		Status:    consts.StatusEnabled,
 	}
 
-	id, err := GetModel(ctx).Data(models).InsertAndGetId()
+	id, err := GetModel(ctx).Data(models).OmitEmptyData().InsertAndGetId()
 	if err != nil {
 		return
 	}

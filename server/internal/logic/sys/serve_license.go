@@ -142,7 +142,7 @@ func (s *sSysServeLicense) Edit(ctx context.Context, in *sysin.ServeLicenseEditI
 	}
 
 	// 新增
-	if _, err = s.Model(ctx, &handler.Option{FilterAuth: false}).Fields(sysin.ServeLicenseInsertFields{}).Data(in).Insert(); err != nil {
+	if _, err = s.Model(ctx, &handler.Option{FilterAuth: false}).Fields(sysin.ServeLicenseInsertFields{}).Data(in).OmitEmptyData().Insert(); err != nil {
 		err = gerror.Wrap(err, "新增服务许可证失败，请稍后重试！")
 	}
 	return
