@@ -89,7 +89,7 @@ func (m *MsgParser) RegisterRPCRouter(routers ...interface{}) (err error) {
 
 // RegisterInterceptor 注册拦截器
 func (m *MsgParser) RegisterInterceptor(interceptors ...Interceptor) {
-	m.interceptors = append(interceptors, interceptors...)
+	m.interceptors = append(m.interceptors, interceptors...)
 }
 
 // Encoding 消息编码
