@@ -4,7 +4,7 @@ CREATE TABLE `hg_addon_hgexample_table` (                 -- 插件_案例_表�
 `flag` TEXT   DEFAULT NULL ,                              -- 标签
 `title` TEXT NOT NULL ,                                   -- 标题
 `description` TEXT NOT NULL ,                             -- 描述
-`content` TEXT NOT NULL ,                                 -- 内容
+`content` TEXT DEFAULT NULL ,                             -- 内容
 `image` TEXT DEFAULT NULL ,                               -- 单图
 `images` TEXT   DEFAULT NULL ,                            -- 多图
 `attachfile` TEXT DEFAULT NULL ,                          -- 附件
@@ -17,18 +17,18 @@ CREATE TABLE `hg_addon_hgexample_table` (                 -- 插件_案例_表�
 `start_at` datetime DEFAULT NULL ,                        -- 开启时间
 `end_at` datetime DEFAULT NULL ,                          -- 结束时间
 `switch` INTEGER DEFAULT NULL ,                           -- 开关
-`sort` INTEGER NOT NULL ,                                 -- 排序
+`sort` INTEGER DEFAULT NULL ,                             -- 排序
 `avatar` TEXT DEFAULT '' ,                                -- 头像
 `sex` INTEGER DEFAULT NULL ,                              -- 性别
 `qq` TEXT DEFAULT '' ,                                    -- QQ
 `email` TEXT DEFAULT '' ,                                 -- 邮箱
 `mobile` TEXT DEFAULT '' ,                                -- 手机号码
 `hobby` TEXT   DEFAULT NULL ,                             -- 爱好
-`channel` INTEGER NOT NULL DEFAULT 1 ,                    -- 渠道
+`channel` INTEGER DEFAULT 1 ,                             -- 渠道
 `city_id` INTEGER DEFAULT 0 ,                             -- 所在城市
 `pid` INTEGER NOT NULL ,                                  -- 上级ID
 `level` INTEGER DEFAULT 1 ,                               -- 树等级
-`tree` TEXT NOT NULL ,                                    -- 关系树
+`tree` TEXT DEFAULT NULL ,                                -- 关系树
 `remark` TEXT DEFAULT NULL ,                              -- 备注
 `status` INTEGER DEFAULT 1 ,                              -- 状态
 `created_by` INTEGER DEFAULT 0 ,                          -- 创建者
@@ -37,6 +37,20 @@ CREATE TABLE `hg_addon_hgexample_table` (                 -- 插件_案例_表�
 `updated_at` datetime DEFAULT NULL ,                      -- 修改时间
 `deleted_at` datetime DEFAULT NULL ,                      -- 删除时间
 PRIMARY KEY (`id`)
+);
+CREATE TABLE `hg_addon_hgexample_tenant_order` (          -- 多租户_充值订单
+  `id` INTEGER NOT NULL  ,                                -- ID
+  `tenant_id` INTEGER DEFAULT NULL,                       -- 租户ID
+  `merchant_id` INTEGER NOT NULL,                         -- 商户ID
+  `user_id` INTEGER NOT NULL,                             -- 用户ID
+  `product_name` TEXT DEFAULT NULL,                       -- 购买产品
+  `order_sn` TEXT DEFAULT NULL,                           -- 订单号
+  `money` decimal(10,2) NOT NULL,                         -- 充值金额
+  `remark` TEXT DEFAULT NULL,                             -- 备注
+  `status` INTEGER DEFAULT 1,                             -- 订单状态
+  `created_at` datetime DEFAULT NULL,                     -- 创建时间
+  `updated_at` datetime DEFAULT NULL,                     -- 修改时间
+  PRIMARY KEY (`id`)
 );
 CREATE TABLE `hg_admin_cash` (                            -- 管理员_提现记录表
 `id` INTEGER NOT NULL  ,                                  -- ID
@@ -152,7 +166,6 @@ CREATE TABLE `hg_admin_menu` (                            -- 管理员_菜单权
   `updated_at` datetime DEFAULT NULL,                     -- 更新时间
   `created_at` datetime DEFAULT NULL                      -- 创建时间
 );
-CREATE TABLE sqlite_sequence(name,seq);
 CREATE TABLE `hg_admin_notice` (                          -- 管理员_通知公告
   `id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,        -- 公告ID
   `title` TEXT NOT NULL,                                  -- 公告标题
@@ -444,15 +457,31 @@ CREATE TABLE `hg_sys_gen_codes` (                         -- 系统_代码生成
 );
 CREATE TABLE `hg_sys_gen_curd_demo` (                     -- 系统_生成curd演示
   `id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,        -- ID
-  `category_id` INTEGER NOT NULL,                         -- 分类ID
+  `category_id` INTEGER DEFAULT 0,                        -- 分类ID
   `title` TEXT NOT NULL,                                  -- 标题
-  `description` TEXT NOT NULL,                            -- 描述
-  `content` text NOT NULL,                                -- 内容
+  `description` TEXT DEFAULT '',                          -- 描述
+  `content` text DEFAULT NULL,                            -- 内容
   `image` TEXT DEFAULT NULL,                              -- 单图
   `attachfile` TEXT DEFAULT NULL,                         -- 附件
   `city_id` INTEGER DEFAULT 0,                            -- 所在城市
   `switch` INTEGER DEFAULT 1,                             -- 显示开关
-  `sort` INTEGER NOT NULL,                                -- 排序
+  `sort` INTEGER DEFAULT NULL,                            -- 排序
+  `status` INTEGER DEFAULT 1,                             -- 状态
+  `created_by` INTEGER DEFAULT 0,                         -- 创建者
+  `updated_by` INTEGER DEFAULT 0,                         -- 更新者
+  `created_at` datetime DEFAULT NULL,                     -- 创建时间
+  `updated_at` datetime DEFAULT NULL,                     -- 修改时间
+  `deleted_at` datetime DEFAULT NULL                      -- 删除时间
+);
+CREATE TABLE `hg_sys_gen_tree_demo` (                     -- 系统_生成树演示
+  `id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,        -- ID
+  `pid` INTEGER DEFAULT NULL,                             -- 上级ID
+  `level` INTEGER DEFAULT 1,                              -- 关系树级别
+  `tree` TEXT DEFAULT NULL,                               -- 关系树
+  `category_id` INTEGER DEFAULT 0,                        -- 分类ID
+  `title` TEXT NOT NULL,                                  -- 标题
+  `description` TEXT DEFAULT NULL,                        -- 描述
+  `sort` INTEGER DEFAULT NULL,                            -- 排序
   `status` INTEGER DEFAULT 1,                             -- 状态
   `created_by` INTEGER DEFAULT 0,                         -- 创建者
   `updated_by` INTEGER DEFAULT 0,                         -- 更新者
@@ -490,9 +519,12 @@ CREATE TABLE IF NOT EXISTS "hg_sys_login_log" (           -- 系统_登录日志
   `req_id` TEXT DEFAULT NULL,                             -- 请求ID
   `member_id` INTEGER DEFAULT 0,                          -- 用户ID
   `username` TEXT DEFAULT NULL,                           -- 用户名
-  `response` TEXT,                                        -- 响应数据（SQLite不支持CHECK(json_valid())约束，请在应用层确保JSON格式正确）
+  `response` TEXT,                                        -- 响应数据
   `login_at` datetime DEFAULT NULL,                       -- 登录时间
   `login_ip` TEXT DEFAULT NULL,                           -- 登录IP
+  `province_id` INTEGER DEFAULT NULL,                     -- 省编码
+  `city_id` INTEGER DEFAULT NULL,                         -- 市编码
+  `user_agent` TEXT DEFAULT NULL,                         -- UA信息
   `err_msg` TEXT DEFAULT NULL,                            -- 错误提示
   `status` INTEGER NOT NULL DEFAULT 1,                    -- 状态
   `created_at` datetime DEFAULT NULL,                     -- 创建时间
@@ -509,7 +541,7 @@ CREATE TABLE `hg_sys_serve_license` (                     -- 系统_服务许可
   `login_times` INTEGER DEFAULT NULL,                     -- 登录次数
   `last_login_at` datetime DEFAULT NULL,                  -- 最后登录时间
   `last_active_at` datetime DEFAULT NULL,                 -- 最后心跳
-  `routes` TEXT,                                          -- 路由表，空使用默认分组路由（SQLite不支持CHECK(json_valid())约束，请在应用层确保JSON格式正确）
+  `routes` TEXT,                                          -- 路由表，空使用默认分组路由
   `allowed_ips` TEXT DEFAULT NULL,                        -- IP白名单
   `end_at` datetime NOT NULL,                             -- 授权有效期
   `remark` TEXT DEFAULT NULL,                             -- 备注
@@ -522,7 +554,7 @@ CREATE TABLE `hg_sys_serve_log` (                         -- 系统_服务日志
   `trace_id` TEXT DEFAULT NULL,                           -- 链路ID
   `level_format` TEXT DEFAULT NULL,                       -- 日志级别
   `content` text DEFAULT NULL,                            -- 日志内容
-  `stack` TEXT,                                           -- 打印堆栈（SQLite不支持JSON有效性检查）
+  `stack` TEXT,                                           -- 打印堆栈
   `line` TEXT NOT NULL,                                   -- 调用行
   `trigger_ns` INTEGER DEFAULT NULL,                      -- 触发时间(ns)
   `status` INTEGER NOT NULL DEFAULT 1,                    -- 状态
@@ -543,6 +575,7 @@ CREATE TABLE `hg_sys_sms_log` (                           -- 系统_短信发送
 CREATE TABLE `hg_test_category` (                         -- 测试分类
   `id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,        -- 分类ID
   `name` TEXT NOT NULL,                                   -- 分类名称
+  `short_name` TEXT DEFAULT NULL,                         -- 简称
   `description` TEXT DEFAULT NULL,                        -- 描述
   `sort` INTEGER NOT NULL,                                -- 排序
   `remark` TEXT DEFAULT NULL,                             -- 备注
@@ -580,6 +613,10 @@ CREATE TABLE `hg_gen_curd_test` (                         -- 测试_代码生成
   "deleted_at" DATETIME                                   -- 删除时间
 );
 
+CREATE INDEX `hg_addon_hgexample_tenant_order_order_sn` ON `hg_addon_hgexample_tenant_order` (`order_sn`);
+CREATE INDEX `hg_addon_hgexample_tenant_order_member_id` ON `hg_addon_hgexample_tenant_order` (`user_id`);
+CREATE INDEX `hg_addon_hgexample_tenant_order_merchant_id` ON `hg_addon_hgexample_tenant_order` (`merchant_id`);
+CREATE INDEX `hg_addon_hgexample_tenant_order_agent_id` ON `hg_addon_hgexample_tenant_order` (`tenant_id`);
 CREATE INDEX `hg_admin_cash_admin_id` ON `hg_admin_cash` (`member_id`);
 CREATE INDEX `hg_admin_credits_log_member_id` ON `hg_admin_credits_log` (`member_id`);
 CREATE INDEX `hg_admin_dept_pid` ON `hg_admin_dept` (`pid`);
@@ -598,8 +635,7 @@ CREATE UNIQUE INDEX `hg_pay_log_order_sn` ON `hg_pay_log` (`order_sn`);
 CREATE INDEX `hg_pay_log_member_id` ON `hg_pay_log` (`member_id`);
 CREATE INDEX `hg_pay_refund_order_sn` ON `hg_pay_refund` (`order_sn`);
 CREATE UNIQUE INDEX `hg_sys_addons_config_addon_name_2` ON `hg_sys_addons_config` (`addon_name`);
-CREATE INDEX `hg_sys_addons_config_addon_name` ON `hg_sys_addons_config` (`addon_name`);
-CREATE INDEX `hg_sys_addons_config_addon_name_3` ON `hg_sys_addons_config` (`addon_name`);
+CREATE INDEX `hg_addons_config_addon_name` ON `hg_sys_addons_config` (`addon_name`);
 CREATE UNIQUE INDEX `hg_sys_addons_install_name` ON `hg_sys_addons_install` (`name`);
 CREATE INDEX `hg_sys_attachment_md5` ON `hg_sys_attachment` (`md5`);
 CREATE UNIQUE INDEX `hg_sys_blacklist_name` ON `hg_sys_blacklist` (`ip`);

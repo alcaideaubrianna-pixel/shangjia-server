@@ -1,5 +1,3 @@
--- Adminer 4.8.1 MySQL 11.2.2-MariaDB-1:11.2.2+maria~ubu2204 dump
-
 -- SET NAMES utf8;
 -- SET time_zone = '+00:00';
 -- SET foreign_key_checks = 0;
@@ -12,8 +10,7 @@ INSERT INTO `hg_addon_hgexample_table` (`id`, `pid`, `level`, `tree`, `category_
 (2,	0,	1,	'',	0,	'[1]',	'测试2',	'描述',	'<h2><strong>不知道写点啥！</strong></h2><p><br></p><p><img src=\"http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqbknawlkgdttuxl.png\"></p>',	'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqbmxmtaq06gbnqa.jpeg',	'[\"http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqborf529kf4cxbm.jpeg\"]',	'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqawg96ba4cuezvv.xlsx',	'[\"http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqaup19k9oznyixz.doc\"]',	'{}',	2.5,	10.00,	0,	'2023-02-18',	NULL,	NULL,	2,	30,	'',	0,	'',	'1561561@qq.com',	'15303830571',	'[2, 1]',	3,	140214,	'',	1,	1,	1,	'2023-02-06 14:17:11',	'2023-11-13 17:18:18',	NULL),
 (3,	1,	2,	'tr_1 ',	0,	'[1]',	'AAA',	'',	'',	'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqamvhlq4w3ki6bl.webp',	'[\"http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqborf529kf4cxbm.jpeg\"]',	'',	'{}',	'{}',	1.0,	10.00,	0,	'2023-11-13',	NULL,	NULL,	1,	40,	'',	0,	'13311',	'1331@qq.cc',	'15303830571',	'{}',	0,	0,	'',	1,	1,	1,	'2023-11-13 17:34:42',	'2023-11-13 17:55:26',	NULL),
 (4,	1,	2,	'tr_1 ',	0,	'[1]',	'BBB',	'',	'',	'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqamvhlq4w3ki6bl.webp',	'[\"http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqborf529kf4cxbm.jpeg\"]',	'',	'{}',	'{}',	2.5,	10.00,	0,	'2023-11-13',	NULL,	NULL,	0,	50,	'',	0,	'12212',	'165165@q.cc',	'15303830561',	'{}',	0,	0,	'',	1,	1,	1,	'2023-11-13 17:43:58',	'2023-11-13 17:43:58',	NULL),
-(5,	3,	3,	'tr_1 tr_3',	0,	'[1]',	'A1',	'',	'',	'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqamvhlq4w3ki6bl.webp',	'[\"http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqborf529kf4cxbm.jpeg\"]',	'',	'{}',	'{}',	1.0,	10.00,	0,	'2023-11-13',	NULL,	NULL,	1,	60,	'',	0,	'10121212',	'122112@qq.cc',	'15303830571',	'{}',	0,	0,	'',	1,	1,	1,	'2023-11-13 17:45:22',	'2023-12-29 14:22:12',	NULL),
-(6,	4,	1,	NULL,	NULL,	NULL,	'B1',	NULL,	NULL,	NULL,	NULL,	NULL,	NULL,	NULL,	0.0,	0.00,	NULL,	NULL,	NULL,	NULL,	NULL,	NULL,	'',	NULL,	'',	'',	'',	NULL,	1,	0,	'',	1,	1,	1,	'2024-04-07 16:38:37',	'2024-04-07 16:38:37',	'2024-04-07 16:58:09');
+(5,	3,	3,	'tr_1 tr_3',	0,	'[1]',	'A1',	'',	'',	'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqamvhlq4w3ki6bl.webp',	'[\"http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqborf529kf4cxbm.jpeg\"]',	'',	'{}',	'{}',	1.0,	10.00,	0,	'2023-11-13',	NULL,	NULL,	1,	60,	'',	0,	'10121212',	'122112@qq.cc',	'15303830571',	'{}',	0,	0,	'',	1,	1,	1,	'2023-11-13 17:45:22',	'2023-12-29 14:22:12',	NULL);
 
 INSERT INTO `hg_addon_hgexample_tenant_order` (`id`, `tenant_id`, `merchant_id`, `user_id`, `product_name`, `order_sn`, `money`, `remark`, `status`, `created_at`, `updated_at`) VALUES
 (1,	8,	11,	12,	'羊毛混纺大衣',	'20230502074731zsv1Vh',	99.90,	'',	1,	'2024-04-10 00:00:00',	'2024-04-19 00:00:00');
@@ -5134,4 +5131,4 @@ INSERT INTO `hg_test_category` (`id`, `name`, `short_name`, `description`, `sort
 (3,	'微信公众号',	'W',	'',	30,	'',	1,	'2023-01-03 00:00:00',	'2023-01-03 00:00:00',	NULL),
 (4,	'系统搭建',	'X',	'',	40,	'',	1,	'2023-01-03 00:00:00',	'2023-01-03 00:00:00',	NULL);
 
--- 2024-05-11 11:08:07
+-- 2024-05-13 02:00:07
