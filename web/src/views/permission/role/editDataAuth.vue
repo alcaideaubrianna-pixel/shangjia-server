@@ -24,6 +24,7 @@
               <n-tree-select
                 multiple
                 key-field="id"
+                label-field="name"
                 :options="deptList"
                 v-model:value="formValue.customDept"
                 :default-expand-all="true"
