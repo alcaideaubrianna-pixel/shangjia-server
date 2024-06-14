@@ -1719,7 +1719,7 @@ CREATE TABLE IF NOT EXISTS `hg_sys_attachment` (
   `name` varchar(1000) DEFAULT NULL COMMENT '文件原始名',
   `kind` varchar(16) DEFAULT NULL COMMENT '上传类型',
   `mime_type` varchar(128) NOT NULL DEFAULT '' COMMENT '扩展类型',
-  `naive_type` varchar(32) NOT NULL COMMENT 'NaiveUI类型',
+  `naive_type` varchar(32) NOT NULL DEFAULT '' COMMENT 'NaiveUI类型',
   `path` varchar(1000) DEFAULT NULL COMMENT '本地路径',
   `file_url` varchar(1000) DEFAULT NULL COMMENT 'url',
   `size` bigint(20) DEFAULT '0' COMMENT '文件大小',
