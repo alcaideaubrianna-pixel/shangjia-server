@@ -16,6 +16,7 @@ export function UploadImage(params) {
   const headers = {
     Authorization: useUserStore.token,
     uploadType: 'default',
+    'Content-Type': 'multipart/form-data',
   };
   return http.request({
     url: '/upload/file',
