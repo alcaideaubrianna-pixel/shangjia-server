@@ -192,8 +192,6 @@ linters-settings:
     # Report about shadowed variables.
     # Default: false
     # check-shadowing: true
-    enable:
-      - shadow
     # Settings per analyzer.
     settings:
       # Analyzer name, run `go tool vet help` to see all analyzers.
