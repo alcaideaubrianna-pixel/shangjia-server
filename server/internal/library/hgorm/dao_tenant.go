@@ -8,10 +8,12 @@ package hgorm
 import (
 	"context"
 	"hotgo/internal/consts"
+	"hotgo/internal/dao"
 	"hotgo/utility/tree"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/text/gstr"
 )
 
 // TenantRelation 租户关系
@@ -24,8 +26,9 @@ type TenantRelation struct {
 
 // GetTenantRelation 获取租户关系
 func GetTenantRelation(ctx context.Context, memberId int64) (tr *TenantRelation, err error) {
-	data, err := g.Model("hg_admin_member u").Ctx(ctx).
-		LeftJoin("hg_admin_dept d", "u.dept_id=d.id").
+
+	data, err := g.Model(gstr.Join([]string{dao.AdminMember.Table(), "u"}, " ")).Ctx(ctx).
+		LeftJoin(gstr.Join([]string{dao.AdminDept.Table(), "d"}, " "), "u.dept_id=d.id").
 		Fields("u.tree,d.type").
 		Where("u.id", memberId).One()
 	if err != nil {
@@ -40,8 +43,8 @@ func GetTenantRelation(ctx context.Context, memberId int64) (tr *TenantRelation,
 	ids := tree.GetIds(data["tree"].String())
 
 	getRelationId := func(deptType string) (int64, error) {
-		id, err := g.Model("hg_admin_member u").Ctx(ctx).
-			LeftJoin("hg_admin_dept d", "u.dept_id=d.id").
+		id, err := g.Model(gstr.Join([]string{dao.AdminMember.Table(), "u"}, " ")).Ctx(ctx).
+			LeftJoin(gstr.Join([]string{dao.AdminDept.Table(), "d"}, " "), "u.dept_id=d.id").
 			Fields("u.id").
 			WhereIn("u.id", ids).Where("d.type", deptType).
 			OrderAsc("u.level"). // 确保是第一关系

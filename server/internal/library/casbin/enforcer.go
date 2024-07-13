@@ -7,15 +7,18 @@ package casbin
 
 import (
 	"context"
+	"hotgo/internal/consts"
+	"hotgo/internal/dao"
+	"net/http"
+	"strings"
+
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"
 	_ "github.com/gogf/gf/contrib/drivers/mysql/v2"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/gres"
-	"hotgo/internal/consts"
-	"net/http"
-	"strings"
+	"github.com/gogf/gf/v2/text/gstr"
 )
 
 const (
@@ -76,10 +79,9 @@ func loadPermissions(ctx context.Context) {
 		polices []*Policy
 		err     error
 	)
-
-	err = g.Model("hg_admin_role r").
-		LeftJoin("hg_admin_role_menu rm", "r.id=rm.role_id").
-		LeftJoin("hg_admin_menu m", "rm.menu_id=m.id").
+	err = g.Model(gstr.Join([]string{dao.AdminRole.Table(), "r"}, " ")).
+		LeftJoin(gstr.Join([]string{dao.AdminRoleMenu.Table(), "rm"}, " "), "r.id=rm.role_id").
+		LeftJoin(gstr.Join([]string{dao.AdminMenu.Table(), "m"}, " "), "rm.menu_id=m.id").
 		Fields("r.key,m.permissions").
 		Where("r.status", consts.StatusEnabled).
 		Where("m.status", consts.StatusEnabled).
