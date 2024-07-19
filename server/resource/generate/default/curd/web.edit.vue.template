@@ -102,6 +102,7 @@
         message.error('请填写完整信息');
       }
       formBtnLoading.value = false;
+      loading.value = false;
     });
   }
 
