@@ -13,6 +13,9 @@ type Node interface {
 
 // ListToTree 根据上下级关系将列表数据转为树状数据
 func ListToTree(pid int64, nodes []Node) (list []Node, err error) {
+	if len(nodes) == 0 {
+		return nodes, nil
+	}
 	for _, v := range nodes {
 		if v.PID() == pid {
 			item := v
