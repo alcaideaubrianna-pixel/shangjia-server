@@ -27,8 +27,8 @@ type CurdDemoUpdateFields struct {
 	Image       string `json:"image"       dc:"单图"`
 	Attachfile  string `json:"attachfile"  dc:"附件"`
 	CityId      int64  `json:"cityId"      dc:"所在城市"`
-	Sort        int    `json:"sort"        dc:"排序"`
 	Switch      int    `json:"switch"      dc:"显示开关"`
+	Sort        int    `json:"sort"        dc:"排序"`
 	UpdatedBy   int64  `json:"updatedBy"   dc:"更新者"`
 }
 
@@ -40,8 +40,8 @@ type CurdDemoInsertFields struct {
 	Image       string `json:"image"       dc:"单图"`
 	Attachfile  string `json:"attachfile"  dc:"附件"`
 	CityId      int64  `json:"cityId"      dc:"所在城市"`
-	Sort        int    `json:"sort"        dc:"排序"`
 	Switch      int    `json:"switch"      dc:"显示开关"`
+	Sort        int    `json:"sort"        dc:"排序"`
 	CreatedBy   int64  `json:"createdBy"   dc:"创建者"`
 }
 
@@ -123,13 +123,13 @@ type CurdDemoListModel struct {
 	Description      string            `json:"description"      dc:"描述"`
 	Image            string            `json:"image"            dc:"单图"`
 	Attachfile       string            `json:"attachfile"       dc:"附件"`
-	Sort             int               `json:"sort"             dc:"排序"`
 	Switch           int               `json:"switch"           dc:"显示开关"`
+	Sort             int               `json:"sort"             dc:"排序"`
 	CreatedBy        int64             `json:"createdBy"        dc:"创建者"`
 	CreatedBySumma   *hook.MemberSumma `json:"createdBySumma"   dc:"创建者摘要信息"`
-	CreatedAt        *gtime.Time       `json:"createdAt"        dc:"创建时间"`
 	UpdatedBy        int64             `json:"updatedBy"        dc:"更新者"`
 	UpdatedBySumma   *hook.MemberSumma `json:"updatedBySumma"   dc:"更新者摘要信息"`
+	CreatedAt        *gtime.Time       `json:"createdAt"        dc:"创建时间"`
 	UpdatedAt        *gtime.Time       `json:"updatedAt"        dc:"修改时间"`
 	TestCategoryName string            `json:"testCategoryName" dc:"关联分类"`
 }
@@ -142,11 +142,11 @@ type CurdDemoExportModel struct {
 	Image            string      `json:"image"            dc:"单图"`
 	Attachfile       string      `json:"attachfile"       dc:"附件"`
 	CityId           int64       `json:"cityId"           dc:"所在城市"`
-	Sort             int         `json:"sort"             dc:"排序"`
 	Switch           int         `json:"switch"           dc:"显示开关"`
+	Sort             int         `json:"sort"             dc:"排序"`
 	CreatedBy        int64       `json:"createdBy"        dc:"创建者"`
-	CreatedAt        *gtime.Time `json:"createdAt"        dc:"创建时间"`
 	UpdatedBy        int64       `json:"updatedBy"        dc:"更新者"`
+	CreatedAt        *gtime.Time `json:"createdAt"        dc:"创建时间"`
 	TestCategoryName string      `json:"testCategoryName" dc:"关联分类"`
 }
 

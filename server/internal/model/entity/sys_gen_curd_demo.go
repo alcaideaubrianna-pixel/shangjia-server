@@ -23,6 +23,7 @@ type SysGenCurdDemo struct {
 	Status      int         `json:"status"      orm:"status"      description:"状态"`
 	CreatedBy   int64       `json:"createdBy"   orm:"created_by"  description:"创建者"`
 	UpdatedBy   int64       `json:"updatedBy"   orm:"updated_by"  description:"更新者"`
+	DeletedBy   int64       `json:"deletedBy"   orm:"deleted_by"  description:"删除者"`
 	CreatedAt   *gtime.Time `json:"createdAt"   orm:"created_at"  description:"创建时间"`
 	UpdatedAt   *gtime.Time `json:"updatedAt"   orm:"updated_at"  description:"修改时间"`
 	DeletedAt   *gtime.Time `json:"deletedAt"   orm:"deleted_at"  description:"删除时间"`

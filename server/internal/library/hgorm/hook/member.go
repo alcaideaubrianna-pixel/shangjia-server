@@ -81,6 +81,7 @@ var MemberSummary = gdb.HookHandler{
 		var (
 			createdByIds []int64
 			updatedByIds []int64
+			deletedByIds []int64
 			memberIds    []int64
 		)
 
@@ -91,6 +92,9 @@ var MemberSummary = gdb.HookHandler{
 			if record["updated_by"].Int64() > 0 {
 				updatedByIds = append(updatedByIds, record["updated_by"].Int64())
 			}
+			if record["deleted_by"].Int64() > 0 {
+				deletedByIds = append(deletedByIds, record["deleted_by"].Int64())
+			}
 			if record["member_id"].Int64() > 0 {
 				memberIds = append(memberIds, record["member_id"].Int64())
 			}
@@ -98,6 +102,7 @@ var MemberSummary = gdb.HookHandler{
 
 		memberIds = append(memberIds, createdByIds...)
 		memberIds = append(memberIds, updatedByIds...)
+		memberIds = append(memberIds, deletedByIds...)
 		memberIds = convert.UniqueSlice(memberIds)
 		if len(memberIds) == 0 {
 			return
@@ -127,6 +132,9 @@ var MemberSummary = gdb.HookHandler{
 			}
 			if record["updated_by"].Int64() > 0 {
 				record["updatedBySumma"] = gvar.New(findMember(record["updated_by"]))
+			}
+			if record["deleted_by"].Int64() > 0 {
+				record["deletedBySumma"] = gvar.New(findMember(record["deleted_by"]))
 			}
 			if record["member_id"].Int64() > 0 {
 				record["memberBySumma"] = gvar.New(findMember(record["member_id"]))

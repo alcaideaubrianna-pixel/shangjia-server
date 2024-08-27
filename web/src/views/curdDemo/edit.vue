@@ -53,14 +53,14 @@
                 </n-form-item>
               </n-gi>
               <n-gi span="1">
-                <n-form-item label="排序" path="sort">
-                  <n-input-number placeholder="请输入排序" v-model:value="formValue.sort" />
-                </n-form-item>
-              </n-gi>
-              <n-gi span="1">
                 <n-form-item label="显示开关" path="switch">
                   <n-switch :unchecked-value="2" :checked-value="1" v-model:value="formValue.switch"
         />
+                </n-form-item>
+              </n-gi>
+              <n-gi span="1">
+                <n-form-item label="排序" path="sort">
+                  <n-input-number placeholder="请输入排序" v-model:value="formValue.sort" />
                 </n-form-item>
               </n-gi>
             </n-grid>

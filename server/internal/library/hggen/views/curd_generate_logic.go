@@ -23,6 +23,7 @@ const (
 	LogicEditUnique     = "\t// 验证'%s'唯一\n\tif err = hgorm.IsUnique(ctx, &dao.%s, g.Map{dao.%s.Columns().%s: in.%s}, \"%s已存在\", in.Id); err != nil {\n\t\treturn\n\t}\n"
 	LogicSwitchUpdate   = "g.Map{\n\t\tin.Key:                       in.Value,\n%s}"
 	LogicStatusUpdate   = "g.Map{\n\t\tdao.%s.Columns().Status:    in.Status,\n%s}"
+	LogicDeletedUpdate  = "g.Map{\n%s}"
 )
 
 func (l *gCurd) logicTplData(ctx context.Context, in *CurdPreviewInput) (data g.Map, err error) {
@@ -35,7 +36,29 @@ func (l *gCurd) logicTplData(ctx context.Context, in *CurdPreviewInput) (data g.
 	data["switchFields"] = l.generateLogicSwitchFields(ctx, in)
 	data["switchUpdate"] = l.generateLogicSwitchUpdate(ctx, in)
 	data["statusUpdate"] = l.generateLogicStatusUpdate(ctx, in)
+	data["deletedUpdate"] = l.generateLogicDeletedUpdate(ctx, in)
 	return
+}
+
+func (l *gCurd) generateLogicDeletedUpdate(ctx context.Context, in *CurdPreviewInput) string {
+	isDestroy := false
+	var update string
+	for _, field := range in.masterFields {
+		if field.GoName == "DeletedBy" {
+			update += "\t\tdao." + in.In.DaoName + ".Columns().DeletedBy: contexts.GetUserId(ctx),\n"
+			isDestroy = true
+		}
+		if field.GoName == "DeletedAt" {
+			update += "\t\tdao." + in.In.DaoName + ".Columns().DeletedAt: gtime.Now(),\n"
+		}
+	}
+
+	if !isDestroy {
+		return ""
+	}
+
+	update += "\t"
+	return fmt.Sprintf(LogicDeletedUpdate, update)
 }
 
 func (l *gCurd) generateLogicStatusUpdate(ctx context.Context, in *CurdPreviewInput) string {

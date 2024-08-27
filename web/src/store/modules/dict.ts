@@ -21,11 +21,13 @@ export type FuncDictType = 'testCategoryOption';
 // 可以把常用的字典类型加入进来，这样会有IDE提示
 export type DictType = DefaultDictType | EnumsDictType | FuncDictType | string;
 
+export type DictListClass = 'default' | 'error' | 'primary' | 'info' | 'success' | 'warning';
+
 export interface Option {
   label: string;
   value: string | number;
   key: string | number;
-  listClass: 'default' | 'error' | 'primary' | 'info' | 'success' | 'warning';
+  listClass: DictListClass;
   extra: any;
 }
 
@@ -88,7 +90,7 @@ export const useDictStore = defineStore({
         return local;
       }
       const opts = this.options[type] ?? [];
-      if (opts === undefined || opts?.length === 0) {
+      if (!opts || opts?.length === 0) {
         return null;
       }
       return opts;
@@ -96,6 +98,9 @@ export const useDictStore = defineStore({
 
     // 获取选项名称
     getLabel(type: DictType, value: any) {
+      if (value === null || value === undefined) {
+        return ``;
+      }
       const opts = this.checkOptionValue(type);
       if (!opts) {
         return ``;
@@ -109,10 +114,10 @@ export const useDictStore = defineStore({
     },
 
     // 获取选项标签类型
-    getType(
-      type: DictType,
-      value: any
-    ): 'default' | 'error' | 'primary' | 'info' | 'success' | 'warning' {
+    getType(type: DictType, value: any): DictListClass {
+      if (value === null || value === undefined) {
+        return `default`;
+      }
       const opts = this.checkOptionValue(type);
       if (!opts) {
         return `default`;
@@ -127,6 +132,9 @@ export const useDictStore = defineStore({
 
     // 获取选项额外的数据配置
     getExtra(type: DictType, value: any): any {
+      if (value === null || value === undefined) {
+        return null;
+      }
       const opts = this.checkOptionValue(type);
       if (!opts) {
         return null;
@@ -141,6 +149,9 @@ export const useDictStore = defineStore({
 
     // 是否存在指定选项值
     hasValue(type: DictType, value: any): boolean {
+      if (value === null || value === undefined) {
+        return false;
+      }
       const opts = this.checkOptionValue(type);
       if (!opts) {
         return false;

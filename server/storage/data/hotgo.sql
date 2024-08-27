@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net
 --
 -- Host: localhost
--- Generation Time: 2024-04-21 22:59:42
+-- Generation Time: 2024-08-27 19:04:42
 -- 服务器版本： 5.7.37-log
 -- PHP Version: 5.6.40
 
@@ -75,8 +75,7 @@ INSERT INTO `hg_addon_hgexample_table` (`id`, `pid`, `level`, `tree`, `category_
 (2, 0, 1, '', 0, '[1]', '测试2', '描述', '<h2><strong>不知道写点啥！</strong></h2><p><br></p><p><img src="http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqbknawlkgdttuxl.png"></p>', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqbmxmtaq06gbnqa.jpeg', '["http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqborf529kf4cxbm.jpeg"]', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqawg96ba4cuezvv.xlsx', '["http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqaup19k9oznyixz.doc"]', '{}', '2.5', '10.00', 0, '2023-02-18', NULL, NULL, 2, 30, '', 0, '', '1561561@qq.com', '15303830571', '[2, 1]', 3, 140214, '', 1, 1, 1, '2023-02-06 14:17:11', '2023-11-13 17:18:18', NULL),
 (3, 1, 2, 'tr_1 ', 0, '[1]', 'AAA', '', '', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqamvhlq4w3ki6bl.webp', '["http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqborf529kf4cxbm.jpeg"]', '', '{}', '{}', '1.0', '10.00', 0, '2023-11-13', NULL, NULL, 1, 40, '', 0, '13311', '1331@qq.cc', '15303830571', '{}', 0, 0, '', 1, 1, 1, '2023-11-13 17:34:42', '2023-11-13 17:55:26', NULL),
 (4, 1, 2, 'tr_1 ', 0, '[1]', 'BBB', '', '', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqamvhlq4w3ki6bl.webp', '["http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqborf529kf4cxbm.jpeg"]', '', '{}', '{}', '2.5', '10.00', 0, '2023-11-13', NULL, NULL, 0, 50, '', 0, '12212', '165165@q.cc', '15303830561', '{}', 0, 0, '', 1, 1, 1, '2023-11-13 17:43:58', '2023-11-13 17:43:58', NULL),
-(5, 3, 3, 'tr_1 tr_3', 0, '[1]', 'A1', '', '', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqamvhlq4w3ki6bl.webp', '["http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqborf529kf4cxbm.jpeg"]', '', '{}', '{}', '1.0', '10.00', 0, '2023-11-13', NULL, NULL, 1, 60, '', 0, '10121212', '122112@qq.cc', '15303830571', '{}', 0, 0, '', 1, 1, 1, '2023-11-13 17:45:22', '2023-12-29 14:22:12', NULL),
-(6, 4, 1, NULL, NULL, NULL, 'B1', NULL, NULL, NULL, NULL, NULL, NULL, NULL, '0.0', '0.00', NULL, NULL, NULL, NULL, NULL, NULL, '', NULL, '', '', '', NULL, 1, 0, '', 1, 1, 1, '2024-04-07 16:38:37', '2024-04-07 16:38:37', '2024-04-07 16:58:09');
+(5, 3, 3, 'tr_1 tr_3', 0, '[1]', 'A1', '', '', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqamvhlq4w3ki6bl.webp1', '["http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdqborf529kf4cxbm.jpeg"]', '', '{}', '{}', '1.0', '10.00', 0, '2023-11-13', NULL, NULL, 1, 60, '', 0, '10121212', '122112@qq.cc', '15303830571', '{}', 3, 0, '', 1, 1, 1, '2023-11-13 17:45:22', '2024-07-21 21:55:01', NULL);
 
 -- --------------------------------------------------------
 
@@ -153,7 +152,7 @@ CREATE TABLE IF NOT EXISTS `hg_admin_credits_log` (
   `status` tinyint(1) DEFAULT '1' COMMENT '状态',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '修改时间'
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COMMENT='管理员_资产变动表';
+) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COMMENT='管理员_资产变动表';
 
 --
 -- 转存表中的数据 `hg_admin_credits_log`
@@ -162,7 +161,11 @@ CREATE TABLE IF NOT EXISTS `hg_admin_credits_log` (
 INSERT INTO `hg_admin_credits_log` (`id`, `member_id`, `app_id`, `addons_name`, `credit_type`, `credit_group`, `before_num`, `num`, `after_num`, `remark`, `ip`, `map_id`, `status`, `created_at`, `updated_at`) VALUES
 (1, 1, 'admin', '', 'balance', 'apply_cash', '99391.78', '-100.00', '99291.78', '后台申请提现', '127.0.0.1', 1, 0, '2023-05-29 14:16:57', '2023-05-29 14:16:57'),
 (2, 1, 'admin', '', 'balance', 'op_incr', '99291.78', '-1.00', '99290.78', '为后台用户:8 操作增加余额:1', '127.0.0.1', 0, 0, '2023-07-06 17:17:39', '2023-07-06 17:17:39'),
-(3, 8, 'admin', '', 'balance', 'incr', '3.22', '1.00', '4.22', '后台用户:1 为你操作增加余额:1', '127.0.0.1', 0, 0, '2023-07-06 17:17:39', '2023-07-06 17:17:39');
+(3, 8, 'admin', '', 'balance', 'incr', '3.22', '1.00', '4.22', '后台用户:1 为你操作增加余额:1', '127.0.0.1', 0, 0, '2023-07-06 17:17:39', '2023-07-06 17:17:39'),
+(4, 1, 'admin', '', 'balance', 'op_incr', '99290.78', '-1.00', '99289.78', '为后台用户:13 操作增加余额:1', '::1', 0, 1, '2024-07-21 21:49:40', '2024-07-21 21:49:40'),
+(5, 13, 'admin', '', 'balance', 'incr', '0.00', '1.00', '1.00', '后台用户:1 为你操作增加余额:1', '::1', 0, 1, '2024-07-21 21:49:40', '2024-07-21 21:49:40'),
+(6, 1, 'admin', '', 'integral', 'op_incr', '89.00', '-1.00', '88.00', '为后台用户:12 操作增加积分:1', '::1', 0, 1, '2024-07-21 21:49:46', '2024-07-21 21:49:46'),
+(7, 12, 'admin', '', 'integral', 'incr', '0.00', '1.00', '1.00', '后台用户:1 为你操作增加积分:1', '::1', 0, 1, '2024-07-21 21:49:46', '2024-07-21 21:49:46');
 
 -- --------------------------------------------------------
 
@@ -185,14 +188,14 @@ CREATE TABLE IF NOT EXISTS `hg_admin_dept` (
   `status` tinyint(1) DEFAULT '1' COMMENT '部门状态',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间'
-) ENGINE=InnoDB AUTO_INCREMENT=112 DEFAULT CHARSET=utf8mb4 COMMENT='管理员_部门';
+) ENGINE=InnoDB AUTO_INCREMENT=113 DEFAULT CHARSET=utf8mb4 COMMENT='管理员_部门';
 
 --
 -- 转存表中的数据 `hg_admin_dept`
 --
 
 INSERT INTO `hg_admin_dept` (`id`, `pid`, `name`, `code`, `type`, `leader`, `phone`, `email`, `level`, `tree`, `sort`, `status`, `created_at`, `updated_at`) VALUES
-(100, 0, 'hotgo', 'hotgo', 'company', 'mengshuai', '15303830571', '133814250@qq.com', 1, '', 10, 1, '2022-01-04 09:54:52', '2024-04-12 09:29:30'),
+(100, 0, 'hotgo', 'hotgo', 'company', 'mengshuai', '15303830571', '133814250@qq.com', 1, '', 10, 1, '2022-01-04 09:54:52', '2024-04-24 23:14:24'),
 (101, 100, '深圳总公司', 'shenzhen', 'company', 'hotgo', '15888888888', 'hotgo@qq.com', 2, 'tr_100 ', 20, 1, '2022-01-04 17:54:52', '2023-08-02 14:03:23'),
 (102, 100, '租户', 'tenant', 'tenant', 'hotgo', '15888888888', 'hotgo@qq.com', 2, 'tr_100 ', 1000, 1, '2022-01-04 01:54:52', '2024-04-13 22:24:58'),
 (103, 101, '研发部门', 'science', 'company', 'hotgo', '15888888888', 'hotgo@qq.com', 3, 'tr_100 tr_101 ', 40, 1, '2022-01-04 17:54:52', '2024-04-12 09:29:37'),
@@ -244,13 +247,13 @@ CREATE TABLE IF NOT EXISTS `hg_admin_member` (
 --
 
 INSERT INTO `hg_admin_member` (`id`, `dept_id`, `role_id`, `real_name`, `username`, `password_hash`, `salt`, `password_reset_token`, `integral`, `balance`, `avatar`, `sex`, `qq`, `email`, `mobile`, `birthday`, `city_id`, `address`, `pid`, `level`, `tree`, `invite_code`, `cash`, `last_active_at`, `remark`, `status`, `created_at`, `updated_at`) VALUES
-(1, 100, 1, '孟帅', 'admin', 'a7c588fffeb2c1d99b29879d7fe97c78', '6541561', '', '89.00', '99290.78', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdq8er9nfkchdopav.png', 1, '133814250', '133814250@qq.com', '15303830571', '2016-04-16', 410172, '莲花街001号', 0, 1, '', '111', '{"name": "孟帅", "account": "15303830571", "payeeCode": "http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdq8mqal5isvcb58g.jpg"}', '2024-04-21 22:58:56', NULL, 1, '2021-02-12 17:59:45', '2024-04-21 22:58:56'),
-(3, 100, 2, '测试管理员', 'test', 'a7c588fffeb2c1d99b29879d7fe97c78', '6541561', '', '0.00', '4.00', 'http://alioss.qvnidaye.com//images/2021/03/12/image_1615529198_vMK4kwq2.jpg', 1, '', 'c@qq.cc', '15303888888', '2016-04-13', 371100, '大潮街道666号', 1, 2, 'tr_1 ', '222', NULL, '2024-04-12 12:44:18', '', 1, '2022-02-11 17:59:45', '2024-04-12 12:44:18'),
+(1, 100, 1, '孟帅', 'admin', 'a7c588fffeb2c1d99b29879d7fe97c78', '6541561', '', '88.00', '99289.78', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdq8er9nfkchdopav.png', 1, '133814250', '133814250@qq.com', '15303830571', '2016-04-16', 410172, '莲花街001号', 0, 1, '', '111', '{"name": "孟帅", "account": "15303830571", "payeeCode": "http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdq8mqal5isvcb58g.jpg"}', '2024-08-27 19:02:49', NULL, 1, '2021-02-12 17:59:45', '2024-08-27 19:02:49'),
+(3, 100, 2, '测试管理员', 'test', 'a7c588fffeb2c1d99b29879d7fe97c78', '6541561', '', '0.00', '4.00', 'http://alioss.qvnidaye.com//images/2021/03/12/image_1615529198_vMK4kwq2.jpg', 1, '', 'c@qq.cc', '15303888888', '2016-04-13', 371100, '大潮街道666号', 1, 2, 'tr_1 ', '222', NULL, '2024-04-24 11:47:48', '', 1, '2022-02-11 17:59:45', '2024-04-24 11:47:48'),
 (8, 102, 200, '阿萌', 'ameng', '382df3b083a27886edb94e669a857c33', 'hfuUEb', '', '11.00', '4.22', '', 2, '', '', '', NULL, 0, '', 1, 2, 'tr_1 ', '333', NULL, '2024-04-16 18:56:00', '', 1, '2023-02-03 17:34:31', '2024-04-16 18:56:00'),
 (9, 100, 206, '黄敏', 'test_finance', '151f5f6bb8b223fc7b589a32effb6f91', 'FhShzw', '', '0.00', '0.00', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdq8er9nfkchdopav.png', 1, '', '', '', NULL, 0, '', 1, 2, 'tr_1 ', '5jZUI3uWLfcj', NULL, NULL, '', 1, '2023-08-02 11:30:45', '2023-08-02 11:31:09'),
 (11, 111, 209, '刘芳', 'abai', '5787c7a121190011fac8376b1d3e0396', 'puUFvx', '', '0.00', '0.00', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdq8er9nfkchdopav.png', 1, '', '', '', NULL, 0, '', 8, 3, 'tr_1 tr_8 ', 'SH5akjqInb2p', NULL, '2024-04-16 18:56:02', '', 1, '2023-08-02 14:24:50', '2024-04-16 18:56:02'),
-(12, 110, 210, '李明', 'asong', '18d1e667e2e756c03186ff6d33b18fd4', 'ONYhgf', '', '0.00', '0.00', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdq8er9nfkchdopav.png', 1, '', '', '', NULL, 0, '', 11, 4, 'tr_1 tr_8 tr_11 ', 'pHffclXhgeg9', NULL, '2024-04-16 18:56:01', '', 1, '2023-08-02 14:50:49', '2024-04-16 18:56:01'),
-(13, 110, 210, '', 'user123', 'a67ec13a65125a6b2566c4229c6c496a', 'auQwMY', '', '0.00', '0.00', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdq8er9nfkchdopav.png', 1, '', '', '', NULL, 0, '', 1, 2, 'tr_1 ', 'bpZPxskFMBra', NULL, '2024-04-12 11:52:31', '', 1, '2024-04-12 10:50:46', '2024-04-12 22:29:03');
+(12, 110, 210, '李明', 'asong', '18d1e667e2e756c03186ff6d33b18fd4', 'ONYhgf', '', '1.00', '0.00', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdq8er9nfkchdopav.png', 1, '', '', '', NULL, 0, '', 11, 4, 'tr_1 tr_8 tr_11 ', 'pHffclXhgeg9', NULL, '2024-04-23 18:05:03', '', 1, '2023-08-02 14:50:49', '2024-07-21 21:49:46'),
+(13, 110, 210, '', 'user123', 'a67ec13a65125a6b2566c4229c6c496a', 'auQwMY', '', '0.00', '1.00', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdq8er9nfkchdopav.png', 1, '', '', '', NULL, 0, '', 1, 2, 'tr_1 ', 'bpZPxskFMBra', NULL, '2024-04-12 11:52:31', '', 1, '2024-04-12 10:50:46', '2024-07-21 21:49:40');
 
 -- --------------------------------------------------------
 
@@ -303,7 +306,7 @@ CREATE TABLE IF NOT EXISTS `hg_admin_menu` (
   `id` bigint(20) NOT NULL COMMENT '菜单ID',
   `pid` bigint(20) DEFAULT '0' COMMENT '父菜单ID',
   `level` int(11) NOT NULL DEFAULT '1' COMMENT '关系树等级',
-  `tree` varchar(255) NOT NULL DEFAULT '' COMMENT '关系树',
+  `tree` varchar(255) NOT NULL COMMENT '关系树',
   `title` varchar(64) NOT NULL COMMENT '菜单名称',
   `name` varchar(128) NOT NULL COMMENT '名称编码',
   `path` varchar(200) DEFAULT NULL COMMENT '路由地址',
@@ -326,7 +329,7 @@ CREATE TABLE IF NOT EXISTS `hg_admin_menu` (
   `status` tinyint(1) DEFAULT '1' COMMENT '菜单状态',
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间'
-) ENGINE=InnoDB AUTO_INCREMENT=2423 DEFAULT CHARSET=utf8mb4 COMMENT='管理员_菜单权限';
+) ENGINE=InnoDB AUTO_INCREMENT=2431 DEFAULT CHARSET=utf8mb4 COMMENT='管理员_菜单权限';
 
 --
 -- 转存表中的数据 `hg_admin_menu`
@@ -350,8 +353,8 @@ INSERT INTO `hg_admin_menu` (`id`, `pid`, `level`, `tree`, `title`, `name`, `pat
 (2072, 2068, 2, 'tr_2068 ', '黑名单', 'system_blacklist', 'blacklist', '', 2, '', '', '', '/system/blacklist/index', 1, '', 0, 0, '', 0, 0, 0, 40, '', 1, '2023-11-13 15:16:58', '2022-09-16 17:34:01'),
 (2073, 2219, 3, 'tr_2093 tr_2219 ', '个人设置', 'home_account', 'account', '', 2, '', '', '', '/home/account/account', 1, '', 0, 0, '', 0, 0, 0, 10, '', 1, '2023-11-17 15:27:49', '2022-09-16 17:34:35'),
 (2074, 2093, 2, 'tr_2093 ', '日志管理', 'Logs', '/log', '', 1, '/apply/log/log', '', '', 'ParentLayout', 1, '', 0, 0, '', 0, 0, 0, 10, '', 1, '2024-04-12 13:41:45', '2022-09-16 01:38:32'),
-(2075, 2074, 3, 'tr_2093 tr_2074 ', '全局日志', 'log', 'log', '', 2, '', '/log/list', '', '/log/log/index', 0, '', 0, 0, '', 0, 0, 0, 10, '', 1, '2023-11-17 15:27:32', '2022-09-09 17:39:16'),
-(2076, 2074, 3, 'tr_2093 tr_2074 ', '登录日志', 'login_log', 'login-log', '', 2, '', '', '', '/log/login-log/index', 0, '', 0, 0, '', 1, 0, 0, 20, '', 1, '2023-11-17 15:27:32', '2022-09-15 20:04:20'),
+(2075, 2074, 3, 'tr_2093 tr_2074 ', '全局日志', 'log', 'log', '', 2, '', '/log/list', '', '/log/log/index', 2, '', 2, 2, '', 1, 2, 2, 10, '', 1, '2024-04-24 11:03:39', '2022-09-09 17:39:16'),
+(2076, 2074, 3, 'tr_2093 tr_2074 ', '登录日志', 'login_log', 'login-log', '', 2, '', '', '', '/log/login-log/index', 2, '', 2, 2, '', 1, 2, 2, 20, '', 1, '2024-04-24 11:03:42', '2022-09-15 20:04:20'),
 (2077, 2074, 3, 'tr_2093 tr_2074 ', '全局日志详情', 'log_view', 'view/:id?', '', 2, '', '/log/view', '', '/log/log/view', 0, 'log', 0, 0, '', 0, 1, 0, 15, '', 1, '2023-11-17 15:27:32', '2022-09-14 20:07:04'),
 (2082, 2076, 4, 'tr_2093 tr_2074 tr_2076 ', '登录日志详情', 'loginLogView', 'view/:id?', '', 3, '', '/loginLog/view', '', '/log/login-log/view', 0, 'login_log', 0, 0, '', 0, 1, 0, 62, '', 1, '2023-11-17 15:27:32', '2022-09-14 20:07:04'),
 (2083, 2076, 4, 'tr_2093 tr_2074 tr_2076 ', '登录日志列表', 'login_log_index', 'index', '', 3, '', '/loginLog/list', '', '/log/login-log/index', 0, 'login_log', 0, 0, '', 0, 1, 0, 61, '', 1, '2023-11-17 15:27:32', '2022-09-15 04:38:33'),
@@ -539,7 +542,7 @@ CREATE TABLE IF NOT EXISTS `hg_admin_notice` (
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间'
-) ENGINE=InnoDB AUTO_INCREMENT=35 DEFAULT CHARSET=utf8mb4 COMMENT='管理员_通知公告';
+) ENGINE=InnoDB AUTO_INCREMENT=33 DEFAULT CHARSET=utf8mb4 COMMENT='管理员_通知公告';
 
 --
 -- 转存表中的数据 `hg_admin_notice`
@@ -572,7 +575,7 @@ CREATE TABLE IF NOT EXISTS `hg_admin_notice_read` (
 
 INSERT INTO `hg_admin_notice_read` (`id`, `notice_id`, `member_id`, `clicks`, `updated_at`, `created_at`) VALUES
 (1, 31, 1, 2, '2023-04-26 22:44:51', '2023-04-25 22:59:16'),
-(2, 30, 1, 22, '2023-11-17 15:30:02', '2023-04-25 23:01:27'),
+(2, 30, 1, 23, '2024-07-21 10:34:04', '2023-04-25 23:01:27'),
 (3, 32, 3, 0, '2023-04-28 16:48:41', '2023-04-28 16:48:41'),
 (4, 29, 3, 4, '2023-08-11 14:42:22', '2023-04-28 16:48:47'),
 (5, 30, 3, 3, '2023-08-11 15:24:45', '2023-04-28 16:48:47'),
@@ -623,7 +626,7 @@ CREATE TABLE IF NOT EXISTS `hg_admin_order` (
   `status` tinyint(4) DEFAULT '1' COMMENT '状态',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '修改时间'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='管理员_充值订单';
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COMMENT='管理员_充值订单';
 
 -- --------------------------------------------------------
 
@@ -704,375 +707,7 @@ CREATE TABLE IF NOT EXISTS `hg_admin_role_casbin` (
   `v3` varchar(256) DEFAULT NULL,
   `v4` varchar(256) DEFAULT NULL,
   `v5` varchar(256) DEFAULT NULL
-) ENGINE=InnoDB AUTO_INCREMENT=17783 DEFAULT CHARSET=utf8mb4 ROW_FORMAT=DYNAMIC COMMENT='管理员_casbin权限表';
-
---
--- 转存表中的数据 `hg_admin_role_casbin`
---
-
-INSERT INTO `hg_admin_role_casbin` (`id`, `p_type`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`) VALUES
-(17421, 'p', 'manage', 'dashboard', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17422, 'p', 'manage', '/console/stat', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17423, 'p', 'manage', 'dashboard_workplace', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17424, 'p', 'manage', '/dept/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17425, 'p', 'manage', '/post/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17426, 'p', 'manage', '/role/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17427, 'p', 'manage', '/member/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17428, 'p', 'manage', '/dept/option', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17429, 'p', 'manage', '/post/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17430, 'p', 'manage', '/menu/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17431, 'p', 'manage', '/role/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17432, 'p', 'manage', '/role/dataScope/select', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17433, 'p', 'manage', '/role/getPermissions', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17434, 'p', 'manage', '/log/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17435, 'p', 'manage', '/log/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17436, 'p', 'manage', '/loginLog/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17437, 'p', 'manage', '/loginLog/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17438, 'p', 'manage', '/smsLog/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17439, 'p', 'manage', '/serveLog/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17440, 'p', 'manage', '/serveLog/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17441, 'p', 'manage', '/monitor/userOnlineList', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17442, 'p', 'manage', '/notice/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17443, 'p', 'manage', '/attachment/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17444, 'p', 'manage', '/provinces/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17445, 'p', 'manage', '/provinces/tree', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17446, 'p', 'manage', '/provinces/childrenList', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17447, 'p', 'manage', '/provinces/uniqueId', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17448, 'p', 'manage', '/member/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17449, 'p', 'manage', '/member/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17450, 'p', 'manage', '/member/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17451, 'p', 'manage', '/member/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17452, 'p', 'manage', '/dept/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17453, 'p', 'manage', '/dept/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17454, 'p', 'manage', '/dept/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17455, 'p', 'manage', '/post/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17456, 'p', 'manage', '/post/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17457, 'p', 'manage', '/post/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17458, 'p', 'manage', '/upload/file', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17459, 'p', 'manage', '/hgexample/table/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17460, 'p', 'manage', '/hgexample/table/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17461, 'p', 'manage', '/loginLog/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17462, 'p', 'manage', '/loginLog/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17463, 'p', 'manage', '/serveLog/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17464, 'p', 'manage', '/serveLog/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17465, 'p', 'manage', '/notice/maxSort', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17466, 'p', 'manage', '/notice/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17467, 'p', 'manage', '/notice/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17468, 'p', 'manage', '/notice/switch', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17469, 'p', 'manage', '/notice/editNotify', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17470, 'p', 'manage', '/notice/editNotice', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17471, 'p', 'manage', '/notice/editLetter', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17472, 'p', 'manage', '/notice/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17473, 'p', 'manage', '/notice/messageList', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17474, 'p', 'manage', '/hgexample/table/maxSort', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17475, 'p', 'manage', '/hgexample/table/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17476, 'p', 'manage', '/hgexample/table/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17477, 'p', 'manage', '/hgexample/table/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17478, 'p', 'manage', '/hgexample/table/switch', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17479, 'p', 'manage', '/hgexample/table/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17480, 'p', 'manage', '/hgexample/config/get', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17481, 'p', 'manage', '/hgexample/config/update', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17482, 'p', 'manage', '/order/create', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17483, 'p', 'manage', '/order/option', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17484, 'p', 'manage', '/creditsLog/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17485, 'p', 'manage', '/creditsLog/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17486, 'p', 'manage', '/creditsLog/option', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17487, 'p', 'manage', '/order/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17488, 'p', 'manage', '/order/acceptRefund', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17489, 'p', 'manage', '/order/applyRefund', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17490, 'p', 'manage', '/order/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17491, 'p', 'manage', '/cash/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17492, 'p', 'manage', '/cash/apply', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17493, 'p', 'manage', '/config/getCash', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17494, 'p', 'manage', '/cash/apply', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17495, 'p', 'manage', '/cash/payment', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17496, 'p', 'manage', '/cash/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17497, 'p', 'manage', '/member/addBalance', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17498, 'p', 'manage', '/member/addIntegral', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17499, 'p', 'manage', '/member/resetPwd', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17500, 'p', 'manage', '/dept/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17501, 'p', 'manage', '/post/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17502, 'p', 'manage', '/role/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17503, 'p', 'manage', '/member/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17504, 'p', 'manage', '/dept/option', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17505, 'p', 'manage', '/config/get', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17506, 'p', 'manage', '/config/update', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17507, 'p', 'manage', '/dictType/tree', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17508, 'p', 'manage', '/dictData/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17509, 'p', 'manage', '/config/typeSelect', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17510, 'p', 'manage', '/dictData/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17511, 'p', 'manage', '/dictData/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17512, 'p', 'manage', '/dictType/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17513, 'p', 'manage', '/dictType/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17514, 'p', 'manage', '/cron/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17515, 'p', 'manage', '/cronGroup/select', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17516, 'p', 'manage', '/cronGroup/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17517, 'p', 'manage', '/cron/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17518, 'p', 'manage', '/cron/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17519, 'p', 'manage', '/cron/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17520, 'p', 'manage', '/cron/onlineExec', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17521, 'p', 'manage', '/cronGroup/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17522, 'p', 'manage', '/cronGroup/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17523, 'p', 'manage', '/blacklist/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17524, 'p', 'manage', '/blacklist/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17525, 'p', 'manage', '/blacklist/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17526, 'p', 'manage', '/blacklist/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17527, 'p', 'manage', '/member/updatePwd', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17528, 'p', 'manage', '/member/updateMobile', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17529, 'p', 'manage', '/member/updateEmail', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17530, 'p', 'manage', '/serveLicense/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17531, 'p', 'manage', '/serveLicense/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17532, 'p', 'manage', '/serveLicense/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17533, 'p', 'manage', '/serveLicense/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17534, 'p', 'manage', '/serveLicense/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17535, 'p', 'manage', '/serveLicense/assignRouter', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17536, 'p', 'manage', '/member/updateProfile', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17537, 'p', 'manage', '/member/updateCash', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17538, 'p', 'manage', '/role/updatePermissions', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17539, 'p', 'manage', '/role/dataScope/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17540, 'p', 'manage', '/role/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17541, 'p', 'manage', '/role/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17542, 'p', 'manage', '/menu/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17543, 'p', 'manage', '/menu/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17544, 'p', 'manage', '/log/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17545, 'p', 'manage', '/smsLog/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17546, 'p', 'manage', '/monitor/userOffline', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17547, 'p', 'manage', '/provinces/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17548, 'p', 'manage', '/provinces/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17549, 'p', 'manage', '/hgexample/table/tree', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17550, 'p', 'manage', '/hgexample/treeTable/select', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17551, 'p', 'manage', '/hgexample/comp/importExcel', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17552, 'p', 'manage', '/hgexample/tenantOrder/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17553, 'p', 'manage', '/hgexample/tenantOrder/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17554, 'p', 'manage', '/hgexample/tenantOrder/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17555, 'p', 'manage', '/hgexample/tenantOrder/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17556, 'p', 'manage', '/hgexample/tenantOrder/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17557, 'p', 'tenant', 'dashboard', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17558, 'p', 'tenant', '/console/stat', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17559, 'p', 'tenant', 'dashboard_workplace', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17560, 'p', 'tenant', '/log/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17561, 'p', 'tenant', '/log/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17562, 'p', 'tenant', '/loginLog/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17563, 'p', 'tenant', '/loginLog/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17564, 'p', 'tenant', '/attachment/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17565, 'p', 'tenant', '/upload/file', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17566, 'p', 'tenant', '/hgexample/table/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17567, 'p', 'tenant', '/hgexample/table/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17568, 'p', 'tenant', '/loginLog/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17569, 'p', 'tenant', '/loginLog/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17570, 'p', 'tenant', '/notice/messageList', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17571, 'p', 'tenant', '/hgexample/table/maxSort', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17572, 'p', 'tenant', '/hgexample/table/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17573, 'p', 'tenant', '/hgexample/table/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17574, 'p', 'tenant', '/hgexample/table/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17575, 'p', 'tenant', '/hgexample/table/switch', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17576, 'p', 'tenant', '/hgexample/table/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17577, 'p', 'tenant', '/hgexample/config/get', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17578, 'p', 'tenant', '/hgexample/config/update', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17579, 'p', 'tenant', '/order/create', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17580, 'p', 'tenant', '/order/option', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17581, 'p', 'tenant', '/creditsLog/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17582, 'p', 'tenant', '/creditsLog/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17583, 'p', 'tenant', '/creditsLog/option', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17584, 'p', 'tenant', '/order/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17585, 'p', 'tenant', '/order/acceptRefund', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17586, 'p', 'tenant', '/order/applyRefund', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17587, 'p', 'tenant', '/order/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17588, 'p', 'tenant', '/cash/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17589, 'p', 'tenant', '/cash/apply', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17590, 'p', 'tenant', '/config/getCash', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17591, 'p', 'tenant', '/cash/apply', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17592, 'p', 'tenant', '/member/updatePwd', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17593, 'p', 'tenant', '/member/updateMobile', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17594, 'p', 'tenant', '/member/updateEmail', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17595, 'p', 'tenant', '/member/updateProfile', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17596, 'p', 'tenant', '/member/updateCash', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17597, 'p', 'tenant', '/log/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17598, 'p', 'tenant', '/hgexample/table/tree', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17599, 'p', 'tenant', '/hgexample/treeTable/select', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17600, 'p', 'tenant', '/hgexample/comp/importExcel', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17601, 'p', 'tenant', '/hgexample/tenantOrder/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17602, 'p', 'tenant', '/hgexample/tenantOrder/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17603, 'p', 'tenant', '/hgexample/tenantOrder/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17604, 'p', 'tenant', '/hgexample/tenantOrder/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17605, 'p', 'tenant', '/hgexample/tenantOrder/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17606, 'p', 'finance', 'dashboard', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17607, 'p', 'finance', '/console/stat', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17608, 'p', 'finance', 'dashboard_workplace', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17609, 'p', 'finance', '/dept/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17610, 'p', 'finance', '/post/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17611, 'p', 'finance', '/role/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17612, 'p', 'finance', '/member/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17613, 'p', 'finance', '/dept/option', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17614, 'p', 'finance', '/post/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17615, 'p', 'finance', '/menu/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17616, 'p', 'finance', '/role/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17617, 'p', 'finance', '/role/dataScope/select', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17618, 'p', 'finance', '/role/getPermissions', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17619, 'p', 'finance', '/log/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17620, 'p', 'finance', '/log/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17621, 'p', 'finance', '/loginLog/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17622, 'p', 'finance', '/loginLog/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17623, 'p', 'finance', '/smsLog/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17624, 'p', 'finance', '/serveLog/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17625, 'p', 'finance', '/serveLog/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17626, 'p', 'finance', '/monitor/userOnlineList', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17627, 'p', 'finance', '/notice/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17628, 'p', 'finance', '/attachment/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17629, 'p', 'finance', '/provinces/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17630, 'p', 'finance', '/provinces/tree', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17631, 'p', 'finance', '/provinces/childrenList', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17632, 'p', 'finance', '/provinces/uniqueId', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17633, 'p', 'finance', '/member/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17634, 'p', 'finance', '/member/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17635, 'p', 'finance', '/member/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17636, 'p', 'finance', '/member/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17637, 'p', 'finance', '/dept/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17638, 'p', 'finance', '/dept/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17639, 'p', 'finance', '/dept/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17640, 'p', 'finance', '/post/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17641, 'p', 'finance', '/post/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17642, 'p', 'finance', '/post/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17643, 'p', 'finance', '/upload/file', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17644, 'p', 'finance', '/hgexample/table/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17645, 'p', 'finance', '/hgexample/table/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17646, 'p', 'finance', '/loginLog/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17647, 'p', 'finance', '/loginLog/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17648, 'p', 'finance', '/serveLog/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17649, 'p', 'finance', '/serveLog/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17650, 'p', 'finance', '/notice/maxSort', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17651, 'p', 'finance', '/notice/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17652, 'p', 'finance', '/notice/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17653, 'p', 'finance', '/notice/switch', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17654, 'p', 'finance', '/notice/editNotify', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17655, 'p', 'finance', '/notice/editNotice', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17656, 'p', 'finance', '/notice/editLetter', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17657, 'p', 'finance', '/notice/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17658, 'p', 'finance', '/hgexample/table/maxSort', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17659, 'p', 'finance', '/hgexample/table/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17660, 'p', 'finance', '/hgexample/table/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17661, 'p', 'finance', '/hgexample/table/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17662, 'p', 'finance', '/hgexample/table/switch', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17663, 'p', 'finance', '/hgexample/table/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17664, 'p', 'business', 'dashboard', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17665, 'p', 'business', '/console/stat', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17666, 'p', 'business', 'dashboard_workplace', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17667, 'p', 'science', 'dashboard', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17668, 'p', 'science', '/console/stat', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17669, 'p', 'science', 'dashboard_workplace', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17670, 'p', 'science', '/dept/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17671, 'p', 'science', '/post/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17672, 'p', 'science', '/role/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17673, 'p', 'science', '/member/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17674, 'p', 'science', '/dept/option', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17675, 'p', 'science', '/member/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17676, 'p', 'science', '/member/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17677, 'p', 'science', '/member/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17678, 'p', 'science', '/member/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17679, 'p', 'science', '/member/addBalance', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17680, 'p', 'science', '/dept/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17681, 'p', 'science', '/post/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17682, 'p', 'science', '/role/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17683, 'p', 'science', '/member/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17684, 'p', 'science', '/dept/option', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17685, 'p', 'merchant', 'dashboard', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17686, 'p', 'merchant', '/console/stat', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17687, 'p', 'merchant', 'dashboard_workplace', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17688, 'p', 'merchant', '/log/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17689, 'p', 'merchant', '/log/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17690, 'p', 'merchant', '/loginLog/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17691, 'p', 'merchant', '/loginLog/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17692, 'p', 'merchant', '/attachment/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17693, 'p', 'merchant', '/upload/file', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17694, 'p', 'merchant', '/hgexample/table/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17695, 'p', 'merchant', '/hgexample/table/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17696, 'p', 'merchant', '/loginLog/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17697, 'p', 'merchant', '/loginLog/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17698, 'p', 'merchant', '/notice/messageList', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17699, 'p', 'merchant', '/hgexample/table/maxSort', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17700, 'p', 'merchant', '/hgexample/table/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17701, 'p', 'merchant', '/hgexample/table/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17702, 'p', 'merchant', '/hgexample/table/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17703, 'p', 'merchant', '/hgexample/table/switch', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17704, 'p', 'merchant', '/hgexample/table/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17705, 'p', 'merchant', '/hgexample/config/get', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17706, 'p', 'merchant', '/hgexample/config/update', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17707, 'p', 'merchant', '/order/create', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17708, 'p', 'merchant', '/order/option', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17709, 'p', 'merchant', '/creditsLog/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17710, 'p', 'merchant', '/creditsLog/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17711, 'p', 'merchant', '/creditsLog/option', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17712, 'p', 'merchant', '/order/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17713, 'p', 'merchant', '/order/acceptRefund', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17714, 'p', 'merchant', '/order/applyRefund', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17715, 'p', 'merchant', '/order/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17716, 'p', 'merchant', '/cash/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17717, 'p', 'merchant', '/cash/apply', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17718, 'p', 'merchant', '/config/getCash', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17719, 'p', 'merchant', '/cash/apply', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17720, 'p', 'merchant', '/member/updatePwd', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17721, 'p', 'merchant', '/member/updateMobile', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17722, 'p', 'merchant', '/member/updateEmail', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17723, 'p', 'merchant', '/member/updateProfile', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17724, 'p', 'merchant', '/member/updateCash', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17725, 'p', 'merchant', '/log/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17726, 'p', 'merchant', '/hgexample/table/tree', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17727, 'p', 'merchant', '/hgexample/treeTable/select', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17728, 'p', 'merchant', '/hgexample/comp/importExcel', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17729, 'p', 'merchant', '/hgexample/tenantOrder/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17730, 'p', 'merchant', '/hgexample/tenantOrder/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17731, 'p', 'merchant', '/hgexample/tenantOrder/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17732, 'p', 'merchant', '/hgexample/tenantOrder/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17733, 'p', 'merchant', '/hgexample/tenantOrder/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17734, 'p', 'user', 'dashboard', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17735, 'p', 'user', '/console/stat', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17736, 'p', 'user', 'dashboard_workplace', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17737, 'p', 'user', '/log/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17738, 'p', 'user', '/log/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17739, 'p', 'user', '/loginLog/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17740, 'p', 'user', '/loginLog/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17741, 'p', 'user', '/attachment/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17742, 'p', 'user', '/upload/file', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17743, 'p', 'user', '/hgexample/table/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17744, 'p', 'user', '/hgexample/table/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17745, 'p', 'user', '/loginLog/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17746, 'p', 'user', '/loginLog/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17747, 'p', 'user', '/notice/messageList', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17748, 'p', 'user', '/hgexample/table/maxSort', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17749, 'p', 'user', '/hgexample/table/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17750, 'p', 'user', '/hgexample/table/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17751, 'p', 'user', '/hgexample/table/status', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17752, 'p', 'user', '/hgexample/table/switch', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17753, 'p', 'user', '/hgexample/table/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17754, 'p', 'user', '/hgexample/config/get', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17755, 'p', 'user', '/hgexample/config/update', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17756, 'p', 'user', '/order/create', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17757, 'p', 'user', '/order/option', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17758, 'p', 'user', '/creditsLog/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17759, 'p', 'user', '/creditsLog/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17760, 'p', 'user', '/creditsLog/option', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17761, 'p', 'user', '/order/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17762, 'p', 'user', '/order/acceptRefund', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17763, 'p', 'user', '/order/applyRefund', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17764, 'p', 'user', '/order/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17765, 'p', 'user', '/cash/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17766, 'p', 'user', '/cash/apply', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17767, 'p', 'user', '/config/getCash', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17768, 'p', 'user', '/cash/apply', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17769, 'p', 'user', '/member/updatePwd', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17770, 'p', 'user', '/member/updateMobile', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17771, 'p', 'user', '/member/updateEmail', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17772, 'p', 'user', '/member/updateProfile', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17773, 'p', 'user', '/member/updateCash', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17774, 'p', 'user', '/log/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17775, 'p', 'user', '/hgexample/table/tree', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17776, 'p', 'user', '/hgexample/treeTable/select', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17777, 'p', 'user', '/hgexample/comp/importExcel', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17778, 'p', 'user', '/hgexample/tenantOrder/list', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17779, 'p', 'user', '/hgexample/tenantOrder/view', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17780, 'p', 'user', '/hgexample/tenantOrder/edit', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17781, 'p', 'user', '/hgexample/tenantOrder/delete', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', ''),
-(17782, 'p', 'user', '/hgexample/tenantOrder/export', 'GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD', '', '', '');
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=DYNAMIC COMMENT='管理员_casbin权限表';
 
 -- --------------------------------------------------------
 
@@ -1628,7 +1263,7 @@ CREATE TABLE IF NOT EXISTS `hg_pay_log` (
   `status` tinyint(4) DEFAULT '1' COMMENT '状态',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '修改时间'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付_支付日志';
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COMMENT='支付_支付日志';
 
 -- --------------------------------------------------------
 
@@ -1680,7 +1315,7 @@ CREATE TABLE IF NOT EXISTS `hg_sys_addons_config` (
 --
 
 INSERT INTO `hg_sys_addons_config` (`id`, `addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`) VALUES
-(1, 'hgexample', 'basic', '测试参数', 'string', 'basicTest', 'HotGo', 'HotGo', 10, '测试参数，可以按需添加配置自定义参数', 0, 1, '2023-02-14 10:56:01', '2024-04-13 23:56:36');
+(1, 'hgexample', 'basic', '测试参数', 'string', 'basicTest', 'HotGo', 'HotGo', 10, '测试参数，可以按需添加配置自定义参数', 0, 1, '2023-02-14 10:56:01', '2024-07-21 21:54:49');
 
 -- --------------------------------------------------------
 
@@ -1702,7 +1337,7 @@ CREATE TABLE IF NOT EXISTS `hg_sys_addons_install` (
 --
 
 INSERT INTO `hg_sys_addons_install` (`id`, `name`, `version`, `status`, `created_at`, `updated_at`) VALUES
-(1, 'hgexample', 'v1.0.0', 1, '2023-02-02 00:00:00', '2023-04-28 16:46:02');
+(1, 'hgexample', 'v1.0.0', 1, '2023-02-02 00:00:00', '2024-07-21 19:05:44');
 
 -- --------------------------------------------------------
 
@@ -1719,7 +1354,7 @@ CREATE TABLE IF NOT EXISTS `hg_sys_attachment` (
   `name` varchar(1000) DEFAULT NULL COMMENT '文件原始名',
   `kind` varchar(16) DEFAULT NULL COMMENT '上传类型',
   `mime_type` varchar(128) NOT NULL DEFAULT '' COMMENT '扩展类型',
-  `naive_type` varchar(32) NOT NULL DEFAULT '' COMMENT 'NaiveUI类型',
+  `naive_type` varchar(32) DEFAULT NULL COMMENT 'NaiveUI类型',
   `path` varchar(1000) DEFAULT NULL COMMENT '本地路径',
   `file_url` varchar(1000) DEFAULT NULL COMMENT 'url',
   `size` bigint(20) DEFAULT '0' COMMENT '文件大小',
@@ -1728,7 +1363,7 @@ CREATE TABLE IF NOT EXISTS `hg_sys_attachment` (
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '修改时间'
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COMMENT='系统_附件管理';
+) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COMMENT='系统_附件管理';
 
 -- --------------------------------------------------------
 
@@ -1876,16 +1511,16 @@ INSERT INTO `hg_sys_config` (`id`, `group`, `name`, `type`, `key`, `value`, `def
 (109, 'wechat', '开放平台AppSecret', 'string', 'openPlatformAppSecret', '', '', 1050, '请填写微信开放平台平台后台的AppSecret', 1, 1, '2021-01-30 13:27:43', '2023-07-26 16:06:53'),
 (110, 'wechat', '开放平台EncodingAESKey', 'string', 'openPlatformEncodingAESKey', '', '', 1060, '与开放平台接入设置值一致，必须为英文或者数字，长度为43个字符. 请妥善保管,EncodingAESKey 泄露将可能被窃取或篡改平台的操作数据', 1, 1, '2021-01-30 13:27:43', '2023-07-26 16:06:53'),
 (111, 'wechat', '开放平台token', 'string', 'openPlatformToken', '', '', 1070, '', 1, 1, '2021-01-30 13:27:43', '2023-07-26 16:06:53'),
-(112, 'login', '注册开关', 'int', 'loginRegisterSwitch', '1', '1', 1100, '', 1, 1, '2021-09-29 23:51:21', '2023-08-04 17:03:36'),
-(113, 'login', '验证码开关', 'int', 'loginCaptchaSwitch', '1', '1', 1110, '', 1, 1, '2021-09-29 23:51:21', '2023-08-04 17:03:36'),
-(114, 'login', '用户协议', 'string', 'loginProtocol', '<p><span style="color: rgb(31, 34, 37);">用户协议..</span></p>', '', 1120, '', 1, 1, '2021-09-29 23:51:21', '2023-08-04 17:03:36'),
-(115, 'login', '隐私权政策', 'string', 'loginPolicy', '<p><span style="color: rgb(31, 34, 37);">隐私权政策..</span></p>', '', 1130, '', 1, 1, '2021-09-29 23:51:21', '2023-08-04 17:03:36'),
-(116, 'login', '默认注册角色', 'int64', 'loginRoleId', '202', '', 1140, '', 1, 1, '2021-09-29 23:51:21', '2023-08-04 17:03:36'),
-(117, 'login', '默认注册部门', 'int64', 'loginDeptId', '109', '', 1150, '', 1, 1, '2021-09-29 23:51:21', '2023-08-04 17:03:36'),
-(118, 'login', '默认注册岗位', '[]int64', 'loginPostIds', '[6]', '', 1160, '', 1, 1, '2021-09-29 23:51:21', '2023-08-04 17:03:36'),
-(119, 'login', '默认注册头像', 'string', 'loginAvatar', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdq8er9nfkchdopav.png', '', 1170, '', 1, 1, '2021-09-29 23:51:21', '2023-08-04 17:03:36'),
-(120, 'login', '强制邀请', 'int', 'loginForceInvite', '2', '1', 1190, '', 1, 1, '2021-09-29 23:51:21', '2023-08-04 17:03:36'),
-(121, 'login', '自动获取openId', 'int', 'loginAutoOpenId', '2', '1', 1195, '', 1, 1, '2021-09-29 23:51:21', '2023-08-04 17:03:36'),
+(112, 'login', '注册开关', 'int', 'loginRegisterSwitch', '1', '1', 1100, '', 1, 1, '2021-09-29 23:51:21', '2024-08-27 19:02:48'),
+(113, 'login', '验证码开关', 'int', 'loginCaptchaSwitch', '1', '1', 1110, '', 1, 1, '2021-09-29 23:51:21', '2024-08-27 19:02:48'),
+(114, 'login', '用户协议', 'string', 'loginProtocol', '<p><span style="color: rgb(31, 34, 37);">用户协议..</span></p>', '', 1120, '', 1, 1, '2021-09-29 23:51:21', '2024-08-27 19:02:48'),
+(115, 'login', '隐私权政策', 'string', 'loginPolicy', '<p><span style="color: rgb(31, 34, 37);">隐私权政策..</span></p>', '', 1130, '', 1, 1, '2021-09-29 23:51:21', '2024-08-27 19:02:48'),
+(116, 'login', '默认注册角色', 'int64', 'loginRoleId', '210', '', 1140, '', 1, 1, '2021-09-29 23:51:21', '2024-08-27 19:02:49'),
+(117, 'login', '默认注册部门', 'int64', 'loginDeptId', '110', '', 1150, '', 1, 1, '2021-09-29 23:51:21', '2024-08-27 19:02:48'),
+(118, 'login', '默认注册岗位', '[]int64', 'loginPostIds', '[4]', '', 1160, '', 1, 1, '2021-09-29 23:51:21', '2024-08-27 19:02:48'),
+(119, 'login', '默认注册头像', 'string', 'loginAvatar', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdq8er9nfkchdopav.png', '', 1170, '', 1, 1, '2021-09-29 23:51:21', '2024-08-27 19:02:48'),
+(120, 'login', '强制邀请', 'int', 'loginForceInvite', '2', '1', 1190, '', 1, 1, '2021-09-29 23:51:21', '2024-08-27 19:02:49'),
+(121, 'login', '自动获取openId', 'int', 'loginAutoOpenId', '2', '1', 1195, '', 1, 1, '2021-09-29 23:51:21', '2024-08-27 19:02:48'),
 (122, 'upload', 'minio AccessKey', 'string', 'uploadMinioAccessKey', '', '', 650, '', 1, 1, '2021-01-30 13:27:43', '2024-02-28 16:56:35'),
 (123, 'upload', 'minio SecretKey', 'string', 'uploadMinioSecretKey', '', '', 650, '', 1, 1, '2021-01-30 13:27:43', '2024-02-28 16:56:35'),
 (124, 'upload', 'minio地域节点', 'string', 'uploadMinioEndpoint', '', '', 650, '', 1, 1, '2021-01-30 13:27:43', '2024-02-28 16:56:35'),
@@ -1972,7 +1607,7 @@ CREATE TABLE IF NOT EXISTS `hg_sys_dict_data` (
   `status` tinyint(1) DEFAULT '1' COMMENT '状态',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间'
-) ENGINE=InnoDB AUTO_INCREMENT=166 DEFAULT CHARSET=utf8mb4 COMMENT='系统_字典数据';
+) ENGINE=InnoDB AUTO_INCREMENT=171 DEFAULT CHARSET=utf8mb4 COMMENT='系统_字典数据';
 
 --
 -- 转存表中的数据 `hg_sys_dict_data`
@@ -2074,7 +1709,7 @@ INSERT INTO `hg_sys_dict_data` (`id`, `label`, `value`, `value_type`, `type`, `l
 
 CREATE TABLE IF NOT EXISTS `hg_sys_dict_type` (
   `id` bigint(20) NOT NULL COMMENT '字典类型ID',
-  `pid` bigint(20) NOT NULL COMMENT '父类字典类型ID',
+  `pid` bigint(20) NOT NULL DEFAULT '0' COMMENT '父类字典类型ID',
   `name` varchar(100) DEFAULT '' COMMENT '字典类型名称',
   `type` varchar(100) DEFAULT '' COMMENT '字典类型',
   `sort` int(11) DEFAULT '0' COMMENT '排序',
@@ -2082,7 +1717,7 @@ CREATE TABLE IF NOT EXISTS `hg_sys_dict_type` (
   `status` tinyint(1) DEFAULT '1' COMMENT '字典类型状态',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间'
-) ENGINE=InnoDB AUTO_INCREMENT=43 DEFAULT CHARSET=utf8mb4 COMMENT='系统_字典类型';
+) ENGINE=InnoDB AUTO_INCREMENT=45 DEFAULT CHARSET=utf8mb4 COMMENT='系统_字典类型';
 
 --
 -- 转存表中的数据 `hg_sys_dict_type`
@@ -2164,17 +1799,17 @@ CREATE TABLE IF NOT EXISTS `hg_sys_gen_codes` (
   `status` tinyint(1) DEFAULT '1' COMMENT '生成状态',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间'
-) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COMMENT='系统_代码生成记录';
+) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8mb4 COMMENT='系统_代码生成记录';
 
 --
 -- 转存表中的数据 `hg_sys_gen_codes`
 --
 
 INSERT INTO `hg_sys_gen_codes` (`id`, `gen_type`, `gen_template`, `var_name`, `options`, `db_name`, `table_name`, `table_comment`, `dao_name`, `master_columns`, `addon_name`, `status`, `created_at`, `updated_at`) VALUES
-(1, 10, 0, 'CurdDemo', '{"join": [{"uuid": "pgJsFoqfaGjqgKjy", "alias": "testCategory", "field": "id", "columns": [{"dc": "分类ID", "id": 1, "name": "id", "extra": "auto_increment", "index": "PRI", "goName": "TestCategoryId", "goType": "int64", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "testCategoryId", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0}, {"dc": "关联分类", "id": 2, "name": "name", "align": "left", "extra": "", "index": "", "width": 100, "goName": "TestCategoryName", "goType": "string", "isEdit": false, "isList": true, "isSort": false, "length": 255, "tsName": "testCategoryName", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": 0, "formMode": "", "formRole": "", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": ""}, {"dc": "分类简称", "id": 3, "name": "short_name", "align": "left", "extra": "", "index": "", "width": null, "goName": "TestCategoryShortName", "goType": "string", "isEdit": false, "isList": false, "isSort": false, "length": 128, "tsName": "testCategoryShortName", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(128)", "dataType": "varchar", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "LIKE %...%", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "描述", "id": 3, "name": "description", "extra": "", "index": "", "goName": "TestCategoryDescription", "goType": "string", "isEdit": false, "isList": false, "isSort": false, "length": 255, "tsName": "testCategoryDescription", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": ""}, {"dc": "排序", "id": 4, "name": "sort", "extra": "", "index": "", "goName": "TestCategorySort", "goType": "int", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "testCategorySort", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0}, {"dc": "备注", "id": 5, "name": "remark", "extra": "", "index": "", "goName": "TestCategoryRemark", "goType": "string", "isEdit": false, "isList": false, "isSort": false, "length": 255, "tsName": "testCategoryRemark", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": ""}, {"dc": "状态", "id": 6, "name": "status", "extra": "", "index": "", "goName": "TestCategoryStatus", "goType": "int", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "testCategoryStatus", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "tinyint(1)", "dataType": "tinyint", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1}, {"dc": "创建时间", "id": 7, "name": "created_at", "extra": "", "index": "", "goName": "TestCategoryCreatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "testCategoryCreatedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": ""}, {"dc": "修改时间", "id": 8, "name": "updated_at", "extra": "", "index": "", "goName": "TestCategoryUpdatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "testCategoryUpdatedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": ""}, {"dc": "删除时间", "id": 9, "name": "deleted_at", "extra": "", "index": "", "goName": "TestCategoryDeletedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "testCategoryDeletedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": ""}], "daoName": "TestCategory", "linkMode": 1, "linkTable": "hg_test_category", "masterField": "category_id"}], "menu": {"pid": 2366, "icon": "", "sort": 10}, "tree": {"styleType": 1, "titleColumn": null}, "autoOps": ["genMenuPermissions", "runDao", "runService", "forcedCover"], "headOps": ["add", "batchDel", "export"], "funcDict": {"labelColumn": "title", "valueColumn": "id"}, "columnOps": ["edit", "del", "switch", "check"], "presetStep": {"formGridCols": 2}}', 'default', 'hg_sys_gen_curd_demo', 'CURD列表', 'SysGenCurdDemo', '[{"dc": "ID", "id": 1, "name": "id", "align": "left", "extra": "auto_increment", "index": "PRI", "width": 50, "goName": "Id", "goType": "int64", "isEdit": false, "isList": true, "isSort": true, "length": 0, "tsName": "id", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "Input", "formRole": "none", "isExport": true, "required": true, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0, "formGridSpan": 1}, {"dc": "标题", "id": 3, "name": "title", "align": "left", "extra": "", "index": "", "width": 150, "goName": "Title", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 64, "tsName": "title", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "varchar(64)", "dataType": "varchar", "dictType": null, "formMode": "Input", "formRole": "none", "isExport": true, "required": true, "queryWhere": "LIKE %...%", "isAllowNull": "NO", "defaultValue": "", "formGridSpan": 1}, {"dc": "描述", "id": 4, "name": "description", "align": "left", "extra": "", "index": "", "width": 300, "goName": "Description", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 255, "tsName": "description", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "InputTextarea", "formRole": "none", "isExport": true, "required": true, "queryWhere": "LIKE %...%", "isAllowNull": "NO", "defaultValue": "", "formGridSpan": 2}, {"dc": "内容", "id": 5, "name": "content", "align": "left", "extra": "", "index": "", "width": null, "goName": "Content", "goType": "string", "isEdit": true, "isList": false, "isSort": false, "length": 65535, "tsName": "content", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "text", "dataType": "text", "dictType": null, "formMode": "InputEditor", "formRole": "none", "isExport": false, "required": true, "queryWhere": "LIKE %...%", "isAllowNull": "NO", "defaultValue": "", "formGridSpan": 2}, {"dc": "单图", "id": 6, "name": "image", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Image", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 255, "tsName": "image", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "UploadImage", "formRole": "none", "isExport": true, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "附件", "id": 7, "name": "attachfile", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Attachfile", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 255, "tsName": "attachfile", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "UploadFile", "formRole": "none", "isExport": true, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "所在城市", "id": 8, "name": "city_id", "align": "left", "extra": "", "index": "", "width": null, "goName": "CityId", "goType": "int64", "isEdit": true, "isList": false, "isSort": false, "length": 0, "tsName": "cityId", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "CitySelector", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "排序", "id": 10, "name": "sort", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Sort", "goType": "int", "isEdit": true, "isList": true, "isSort": true, "length": 0, "tsName": "sort", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": true, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0, "formGridSpan": 1}, {"dc": "显示开关", "id": 9, "name": "switch", "align": "left", "extra": "", "index": "", "width": 150, "goName": "Switch", "goType": "int", "isEdit": true, "isList": true, "isSort": false, "length": 0, "tsName": "switch", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": null, "formMode": "Switch", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1, "formGridSpan": 1}, {"dc": "状态", "id": 11, "name": "status", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Status", "goType": "int", "isEdit": true, "isList": true, "isSort": false, "length": 0, "tsName": "status", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "tinyint(1)", "dataType": "tinyint", "dictType": 3, "formMode": "Select", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1, "formGridSpan": 1}, {"dc": "创建者", "id": 12, "name": "created_by", "align": "left", "extra": "", "index": "", "width": 150, "goName": "CreatedBy", "goType": "int64", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "createdBy", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "创建时间", "id": 14, "name": "created_at", "align": "left", "extra": "", "index": "", "width": 180, "goName": "CreatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "createdAt", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "TimeRange", "formRole": "none", "isExport": true, "required": false, "queryWhere": "BETWEEN", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "更新者", "id": 13, "name": "updated_by", "align": "left", "extra": "", "index": "", "width": 150, "goName": "UpdatedBy", "goType": "int64", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "updatedBy", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "修改时间", "id": 15, "name": "updated_at", "align": "left", "extra": "", "index": "", "width": 180, "goName": "UpdatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "updatedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "删除时间", "id": 16, "name": "deleted_at", "align": "left", "extra": "", "index": "", "width": null, "goName": "DeletedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "deletedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "测试分类", "id": 2, "name": "category_id", "align": "left", "extra": "", "index": "", "width": 100, "goName": "CategoryId", "goType": "int64", "isEdit": true, "isList": true, "isSort": false, "length": 0, "tsName": "categoryId", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": -300004223237244, "formMode": "Select", "formRole": "none", "isExport": true, "required": true, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0, "formGridSpan": 1}]', '', 1, '2023-01-18 11:51:22', '2024-04-21 18:53:42'),
-(8, 10, 0, 'TestCategory', '{"join": [], "menu": {"pid": 2366, "icon": "", "sort": 1000}, "tree": {"styleType": 1, "titleColumn": null}, "autoOps": ["genMenuPermissions", "runService", "genFuncDict", "forcedCover"], "headOps": ["add", "batchDel"], "funcDict": {"labelColumn": "name", "valueColumn": "id"}, "columnOps": ["edit", "del", "check", "status"], "presetStep": {"formGridCols": 2}}', 'default', 'hg_test_category', '测试分类', 'TestCategory', '[{"dc": "分类ID", "id": 1, "name": "id", "align": "left", "extra": "auto_increment", "index": "PRI", "width": 80, "goName": "Id", "goType": "int64", "isEdit": false, "isList": true, "isSort": true, "length": 0, "tsName": "id", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": true, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0, "formGridSpan": 2}, {"dc": "分类名称", "id": 2, "name": "name", "align": "left", "extra": "", "index": "", "width": null, "goName": "Name", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 255, "tsName": "name", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "Input", "formRole": "none", "isExport": true, "required": true, "queryWhere": "LIKE %...%", "isAllowNull": "NO", "defaultValue": "", "formGridSpan": 2}, {"dc": "简称", "id": 3, "name": "short_name", "align": "left", "extra": "", "index": "", "width": 80, "goName": "ShortName", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 128, "tsName": "shortName", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(128)", "dataType": "varchar", "dictType": null, "formMode": "Input", "formRole": "none", "isExport": true, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 2}, {"dc": "描述", "id": 3, "name": "description", "align": "left", "extra": "", "index": "", "width": 300, "goName": "Description", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 255, "tsName": "description", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "InputTextarea", "formRole": "none", "isExport": true, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 2}, {"dc": "排序", "id": 4, "name": "sort", "align": "left", "extra": "", "index": "", "width": null, "goName": "Sort", "goType": "int", "isEdit": true, "isList": false, "isSort": true, "length": 0, "tsName": "sort", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": true, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0, "formGridSpan": 1}, {"dc": "状态", "id": 6, "name": "status", "align": "left", "extra": "", "index": "", "width": null, "goName": "Status", "goType": "int", "isEdit": true, "isList": true, "isSort": false, "length": 0, "tsName": "status", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "tinyint(1)", "dataType": "tinyint", "dictType": 3, "formMode": "Select", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1, "formGridSpan": 1}, {"dc": "备注", "id": 5, "name": "remark", "align": "left", "extra": "", "index": "", "width": null, "goName": "Remark", "goType": "string", "isEdit": true, "isList": false, "isSort": false, "length": 255, "tsName": "remark", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "InputTextarea", "formRole": "none", "isExport": true, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 2}, {"dc": "创建时间", "id": 7, "name": "created_at", "align": "left", "extra": "", "index": "", "width": 180, "goName": "CreatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "createdAt", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "TimeRange", "formRole": "none", "isExport": true, "required": false, "queryWhere": "BETWEEN", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "修改时间", "id": 8, "name": "updated_at", "align": "left", "extra": "", "index": "", "width": null, "goName": "UpdatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "updatedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "删除时间", "id": 9, "name": "deleted_at", "align": "left", "extra": "", "index": "", "width": null, "goName": "DeletedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "deletedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}]', 'hgexample', 1, '2024-04-08 15:18:07', '2024-04-12 23:50:26'),
-(9, 11, 0, 'NormalTreeDemo', '{"join": [], "menu": {"pid": 2366, "icon": "", "sort": 200}, "tree": {"styleType": 1, "titleColumn": "title"}, "autoOps": ["genMenuPermissions", "runDao", "runService", "forcedCover"], "headOps": ["add", "batchDel"], "funcDict": {"labelColumn": null, "valueColumn": null}, "columnOps": ["edit", "del", "check"], "presetStep": {"formGridCols": 2}}', 'default', 'hg_sys_gen_tree_demo', '普通树表', 'SysGenTreeDemo', '[{"dc": "标题", "id": 6, "name": "title", "align": "left", "extra": "", "index": "", "width": 200, "goName": "Title", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 64, "tsName": "title", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "varchar(64)", "dataType": "varchar", "dictType": null, "formMode": "Input", "formRole": "none", "isExport": true, "required": true, "queryWhere": "LIKE %...%", "isAllowNull": "NO", "defaultValue": "", "formGridSpan": 2}, {"dc": "ID", "id": 1, "name": "id", "align": "left", "extra": "auto_increment", "index": "PRI", "width": 100, "goName": "Id", "goType": "int64", "isEdit": false, "isList": false, "isSort": true, "length": 0, "tsName": "id", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": true, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0, "formGridSpan": 1}, {"dc": "上级", "id": 2, "name": "pid", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Pid", "goType": "int64", "isEdit": true, "isList": false, "isSort": false, "length": 0, "tsName": "pid", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 2}, {"dc": "关系树级别", "id": 3, "name": "level", "align": "left", "extra": "", "index": "", "width": null, "goName": "Level", "goType": "int", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "level", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1, "formGridSpan": 1}, {"dc": "关系树", "id": 4, "name": "tree", "align": "left", "extra": "", "index": "", "width": null, "goName": "Tree", "goType": "string", "isEdit": false, "isList": false, "isSort": false, "length": 4294967295, "tsName": "tree", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "longtext", "dataType": "longtext", "dictType": null, "formMode": "InputEditor", "formRole": "none", "isExport": false, "required": false, "queryWhere": "LIKE %...%", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "测试分类", "id": 5, "name": "category_id", "align": "left", "extra": "", "index": "", "width": 100, "goName": "CategoryId", "goType": "int64", "isEdit": true, "isList": true, "isSort": false, "length": 0, "tsName": "categoryId", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": -300004223237244, "formMode": "Select", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 2}, {"dc": "描述", "id": 7, "name": "description", "align": "left", "extra": "", "index": "", "width": 300, "goName": "Description", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 255, "tsName": "description", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "Input", "formRole": "none", "isExport": true, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 2}, {"dc": "排序", "id": 8, "name": "sort", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Sort", "goType": "int", "isEdit": true, "isList": false, "isSort": true, "length": 0, "tsName": "sort", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "状态", "id": 9, "name": "status", "align": "left", "extra": "", "index": "", "width": 150, "goName": "Status", "goType": "int", "isEdit": true, "isList": true, "isSort": false, "length": 0, "tsName": "status", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "tinyint(1)", "dataType": "tinyint", "dictType": 3, "formMode": "Select", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1, "formGridSpan": 1}, {"dc": "创建者", "id": 10, "name": "created_by", "align": "left", "extra": "", "index": "", "width": 100, "goName": "CreatedBy", "goType": "int64", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "createdBy", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "更新者", "id": 11, "name": "updated_by", "align": "left", "extra": "", "index": "", "width": 100, "goName": "UpdatedBy", "goType": "int64", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "updatedBy", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "创建时间", "id": 12, "name": "created_at", "align": "left", "extra": "", "index": "", "width": 180, "goName": "CreatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "createdAt", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "TimeRange", "formRole": "none", "isExport": true, "required": false, "queryWhere": "BETWEEN", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "修改时间", "id": 13, "name": "updated_at", "align": "left", "extra": "", "index": "", "width": 180, "goName": "UpdatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "updatedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "删除时间", "id": 14, "name": "deleted_at", "align": "left", "extra": "", "index": "", "width": null, "goName": "DeletedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "deletedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}]', '', 1, '2024-04-09 16:06:13', '2024-04-12 22:57:18'),
-(10, 11, 0, 'OptionTreeDemo', '{"join": [], "menu": {"pid": 2366, "icon": "", "sort": 300}, "tree": {"styleType": 2, "titleColumn": "title"}, "autoOps": ["genMenuPermissions", "runDao", "runService", "forcedCover"], "headOps": ["add", "batchDel"], "funcDict": {"labelColumn": null, "valueColumn": null}, "columnOps": ["edit", "del", "check"], "presetStep": {"formGridCols": 2}}', 'default', 'hg_sys_gen_tree_demo', '选项树表', 'SysGenTreeDemo', '[{"dc": "标题", "id": 6, "name": "title", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Title", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 64, "tsName": "title", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "varchar(64)", "dataType": "varchar", "dictType": null, "formMode": "Input", "formRole": "none", "isExport": true, "required": true, "queryWhere": "LIKE %...%", "isAllowNull": "NO", "defaultValue": "", "formGridSpan": 2}, {"dc": "ID", "id": 1, "name": "id", "align": "left", "extra": "auto_increment", "index": "PRI", "width": 100, "goName": "Id", "goType": "int64", "isEdit": false, "isList": false, "isSort": true, "length": 0, "tsName": "id", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": true, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0, "formGridSpan": 1}, {"dc": "上级", "id": 2, "name": "pid", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Pid", "goType": "int64", "isEdit": true, "isList": false, "isSort": false, "length": 0, "tsName": "pid", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 2}, {"dc": "关系树级别", "id": 3, "name": "level", "align": "left", "extra": "", "index": "", "width": null, "goName": "Level", "goType": "int", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "level", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1, "formGridSpan": 1}, {"dc": "关系树", "id": 4, "name": "tree", "align": "left", "extra": "", "index": "", "width": null, "goName": "Tree", "goType": "string", "isEdit": false, "isList": false, "isSort": false, "length": 4294967295, "tsName": "tree", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "longtext", "dataType": "longtext", "dictType": null, "formMode": "InputEditor", "formRole": "none", "isExport": false, "required": false, "queryWhere": "LIKE %...%", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "测试分类", "id": 5, "name": "category_id", "align": "left", "extra": "", "index": "", "width": 100, "goName": "CategoryId", "goType": "int64", "isEdit": true, "isList": true, "isSort": false, "length": 0, "tsName": "categoryId", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": -300004223237244, "formMode": "Select", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 2}, {"dc": "描述", "id": 7, "name": "description", "align": "left", "extra": "", "index": "", "width": 300, "goName": "Description", "goType": "string", "isEdit": true, "isList": false, "isSort": false, "length": 255, "tsName": "description", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "InputTextarea", "formRole": "none", "isExport": true, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 2}, {"dc": "排序", "id": 8, "name": "sort", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Sort", "goType": "int", "isEdit": true, "isList": false, "isSort": true, "length": 0, "tsName": "sort", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "状态", "id": 9, "name": "status", "align": "left", "extra": "", "index": "", "width": 150, "goName": "Status", "goType": "int", "isEdit": true, "isList": true, "isSort": false, "length": 0, "tsName": "status", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "tinyint(1)", "dataType": "tinyint", "dictType": 3, "formMode": "Select", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1, "formGridSpan": 1}, {"dc": "创建者", "id": 10, "name": "created_by", "align": "left", "extra": "", "index": "", "width": 100, "goName": "CreatedBy", "goType": "int64", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "createdBy", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "更新者", "id": 11, "name": "updated_by", "align": "left", "extra": "", "index": "", "width": 100, "goName": "UpdatedBy", "goType": "int64", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "updatedBy", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "创建时间", "id": 12, "name": "created_at", "align": "left", "extra": "", "index": "", "width": 180, "goName": "CreatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "createdAt", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "TimeRange", "formRole": "none", "isExport": true, "required": false, "queryWhere": "BETWEEN", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "修改时间", "id": 13, "name": "updated_at", "align": "left", "extra": "", "index": "", "width": 180, "goName": "UpdatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "updatedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "删除时间", "id": 14, "name": "deleted_at", "align": "left", "extra": "", "index": "", "width": null, "goName": "DeletedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "deletedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}]', '', 1, '2024-04-09 17:20:33', '2024-04-12 23:44:42');
+(1, 10, 0, 'CurdDemo', '{"join": [{"uuid": "pgJsFoqfaGjqgKjy", "alias": "testCategory", "field": "id", "columns": [{"dc": "分类ID", "id": 1, "name": "id", "extra": "auto_increment", "index": "PRI", "goName": "TestCategoryId", "goType": "int64", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "testCategoryId", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0}, {"dc": "关联分类", "id": 2, "name": "name", "align": "left", "extra": "", "index": "", "width": 100, "goName": "TestCategoryName", "goType": "string", "isEdit": false, "isList": true, "isSort": false, "length": 255, "tsName": "testCategoryName", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": 0, "formMode": "", "formRole": "", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": ""}, {"dc": "分类简称", "id": 3, "name": "short_name", "align": "left", "extra": "", "index": "", "width": null, "goName": "TestCategoryShortName", "goType": "string", "isEdit": false, "isList": false, "isSort": false, "length": 128, "tsName": "testCategoryShortName", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(128)", "dataType": "varchar", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "LIKE %...%", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "描述", "id": 3, "name": "description", "extra": "", "index": "", "goName": "TestCategoryDescription", "goType": "string", "isEdit": false, "isList": false, "isSort": false, "length": 255, "tsName": "testCategoryDescription", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": ""}, {"dc": "排序", "id": 4, "name": "sort", "extra": "", "index": "", "goName": "TestCategorySort", "goType": "int", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "testCategorySort", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0}, {"dc": "备注", "id": 5, "name": "remark", "extra": "", "index": "", "goName": "TestCategoryRemark", "goType": "string", "isEdit": false, "isList": false, "isSort": false, "length": 255, "tsName": "testCategoryRemark", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": ""}, {"dc": "状态", "id": 6, "name": "status", "extra": "", "index": "", "goName": "TestCategoryStatus", "goType": "int", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "testCategoryStatus", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "tinyint(1)", "dataType": "tinyint", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1}, {"dc": "创建时间", "id": 7, "name": "created_at", "extra": "", "index": "", "goName": "TestCategoryCreatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "testCategoryCreatedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": ""}, {"dc": "修改时间", "id": 8, "name": "updated_at", "extra": "", "index": "", "goName": "TestCategoryUpdatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "testCategoryUpdatedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": ""}, {"dc": "删除时间", "id": 9, "name": "deleted_at", "extra": "", "index": "", "goName": "TestCategoryDeletedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "testCategoryDeletedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": 0, "formMode": "", "formRole": "", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": ""}], "daoName": "TestCategory", "linkMode": 1, "linkTable": "hg_test_category", "masterField": "category_id"}], "menu": {"pid": 2366, "icon": "", "sort": 10}, "tree": {"styleType": 1, "titleColumn": null}, "autoOps": ["genMenuPermissions", "runDao", "runService", "forcedCover"], "headOps": ["add", "batchDel", "export"], "funcDict": {"labelColumn": "title", "valueColumn": "id"}, "columnOps": ["edit", "del", "switch", "check", "status"], "presetStep": {"formGridCols": 2}}', 'default', 'hg_sys_gen_curd_demo', 'CURD列表', 'SysGenCurdDemo', '[{"dc": "ID", "id": 1, "name": "id", "align": "left", "extra": "auto_increment", "index": "PRI", "width": 50, "goName": "Id", "goType": "int64", "isEdit": false, "isList": true, "isSort": true, "length": 0, "tsName": "id", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "Input", "formRole": "none", "isExport": true, "required": true, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0, "formGridSpan": 1}, {"dc": "测试分类", "id": 2, "name": "category_id", "align": "left", "extra": "", "index": "", "width": 100, "goName": "CategoryId", "goType": "int64", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "categoryId", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": -300004223237244, "formMode": "Select", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0, "formGridSpan": 1}, {"dc": "标题", "id": 3, "name": "title", "align": "left", "extra": "", "index": "", "width": 150, "goName": "Title", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 64, "tsName": "title", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "varchar(64)", "dataType": "varchar", "dictType": null, "formMode": "Input", "formRole": "none", "isExport": true, "required": true, "queryWhere": "LIKE %...%", "isAllowNull": "NO", "defaultValue": "", "formGridSpan": 1}, {"dc": "描述", "id": 4, "name": "description", "align": "left", "extra": "", "index": "", "width": 300, "goName": "Description", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 255, "tsName": "description", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "InputTextarea", "formRole": "none", "isExport": true, "required": true, "queryWhere": "LIKE %...%", "isAllowNull": "NO", "defaultValue": "", "formGridSpan": 2}, {"dc": "内容", "id": 5, "name": "content", "align": "left", "extra": "", "index": "", "width": null, "goName": "Content", "goType": "string", "isEdit": true, "isList": false, "isSort": false, "length": 65535, "tsName": "content", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "text", "dataType": "text", "dictType": null, "formMode": "InputEditor", "formRole": "none", "isExport": false, "required": true, "queryWhere": "LIKE %...%", "isAllowNull": "NO", "defaultValue": "", "formGridSpan": 2}, {"dc": "单图", "id": 6, "name": "image", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Image", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 255, "tsName": "image", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "UploadImage", "formRole": "none", "isExport": true, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "附件", "id": 7, "name": "attachfile", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Attachfile", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 255, "tsName": "attachfile", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "UploadFile", "formRole": "none", "isExport": true, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "所在城市", "id": 8, "name": "city_id", "align": "left", "extra": "", "index": "", "width": null, "goName": "CityId", "goType": "int64", "isEdit": true, "isList": false, "isSort": false, "length": 0, "tsName": "cityId", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "CitySelector", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "显示开关", "id": 9, "name": "switch", "align": "left", "extra": "", "index": "", "width": 150, "goName": "Switch", "goType": "int", "isEdit": true, "isList": true, "isSort": false, "length": 0, "tsName": "switch", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": null, "formMode": "Switch", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1, "formGridSpan": 1}, {"dc": "排序", "id": 10, "name": "sort", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Sort", "goType": "int", "isEdit": true, "isList": true, "isSort": true, "length": 0, "tsName": "sort", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": true, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0, "formGridSpan": 1}, {"dc": "状态", "id": 11, "name": "status", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Status", "goType": "int", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "status", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "tinyint(1)", "dataType": "tinyint", "dictType": 3, "formMode": "Select", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1, "formGridSpan": 1}, {"dc": "创建者", "id": 12, "name": "created_by", "align": "left", "extra": "", "index": "", "width": 150, "goName": "CreatedBy", "goType": "int64", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "createdBy", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "更新者", "id": 13, "name": "updated_by", "align": "left", "extra": "", "index": "", "width": 150, "goName": "UpdatedBy", "goType": "int64", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "updatedBy", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "删除者", "id": 14, "name": "deleted_by", "align": "left", "extra": "", "index": "", "width": null, "goName": "DeletedBy", "goType": "int64", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "deletedBy", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "创建时间", "id": 14, "name": "created_at", "align": "left", "extra": "", "index": "", "width": 180, "goName": "CreatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "createdAt", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "TimeRange", "formRole": "none", "isExport": true, "required": false, "queryWhere": "BETWEEN", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "修改时间", "id": 15, "name": "updated_at", "align": "left", "extra": "", "index": "", "width": 180, "goName": "UpdatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "updatedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "删除时间", "id": 16, "name": "deleted_at", "align": "left", "extra": "", "index": "", "width": null, "goName": "DeletedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "deletedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}]', '', 1, '2023-01-18 11:51:22', '2024-08-27 18:45:04'),
+(8, 10, 0, 'TestCategory', '{"join": [], "menu": {"pid": 2366, "icon": "", "sort": 1000}, "tree": {"styleType": 1, "titleColumn": null}, "autoOps": ["genMenuPermissions", "runService", "genFuncDict", "forcedCover"], "headOps": ["add", "batchDel"], "funcDict": {"labelColumn": "name", "valueColumn": "id"}, "columnOps": ["edit", "del", "check", "status"], "presetStep": {"formGridCols": 2}}', 'default', 'hg_test_category', '测试分类', 'TestCategory', '[{"dc": "分类ID", "id": 1, "name": "id", "align": "left", "extra": "auto_increment", "index": "PRI", "width": 80, "goName": "Id", "goType": "int64", "isEdit": false, "isList": true, "isSort": true, "length": 0, "tsName": "id", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": true, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0, "formGridSpan": 2}, {"dc": "分类名称", "id": 2, "name": "name", "align": "left", "extra": "", "index": "", "width": null, "goName": "Name", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 255, "tsName": "name", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "Input", "formRole": "none", "isExport": true, "required": true, "queryWhere": "LIKE %...%", "isAllowNull": "NO", "defaultValue": "", "formGridSpan": 2}, {"dc": "简称", "id": 3, "name": "short_name", "align": "left", "extra": "", "index": "", "width": 80, "goName": "ShortName", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 128, "tsName": "shortName", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(128)", "dataType": "varchar", "dictType": null, "formMode": "Input", "formRole": "none", "isExport": true, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 2}, {"dc": "描述", "id": 3, "name": "description", "align": "left", "extra": "", "index": "", "width": 300, "goName": "Description", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 255, "tsName": "description", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "InputTextarea", "formRole": "none", "isExport": true, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 2}, {"dc": "排序", "id": 4, "name": "sort", "align": "left", "extra": "", "index": "", "width": null, "goName": "Sort", "goType": "int", "isEdit": true, "isList": false, "isSort": true, "length": 0, "tsName": "sort", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": true, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0, "formGridSpan": 1}, {"dc": "状态", "id": 6, "name": "status", "align": "left", "extra": "", "index": "", "width": null, "goName": "Status", "goType": "int", "isEdit": true, "isList": true, "isSort": false, "length": 0, "tsName": "status", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "tinyint(1)", "dataType": "tinyint", "dictType": 3, "formMode": "Select", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1, "formGridSpan": 1}, {"dc": "备注", "id": 5, "name": "remark", "align": "left", "extra": "", "index": "", "width": null, "goName": "Remark", "goType": "string", "isEdit": true, "isList": false, "isSort": false, "length": 255, "tsName": "remark", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "InputTextarea", "formRole": "none", "isExport": true, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 2}, {"dc": "创建时间", "id": 7, "name": "created_at", "align": "left", "extra": "", "index": "", "width": 180, "goName": "CreatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "createdAt", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "TimeRange", "formRole": "none", "isExport": true, "required": false, "queryWhere": "BETWEEN", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "修改时间", "id": 8, "name": "updated_at", "align": "left", "extra": "", "index": "", "width": null, "goName": "UpdatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "updatedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "删除时间", "id": 9, "name": "deleted_at", "align": "left", "extra": "", "index": "", "width": null, "goName": "DeletedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "deletedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}]', 'hgexample', 1, '2024-04-08 15:18:07', '2024-07-20 21:41:45'),
+(9, 11, 0, 'NormalTreeDemo', '{"join": [], "menu": {"pid": 2366, "icon": "", "sort": 200}, "tree": {"styleType": 1, "titleColumn": "title"}, "autoOps": ["genMenuPermissions", "runDao", "runService", "forcedCover"], "headOps": ["add", "batchDel"], "funcDict": {"labelColumn": null, "valueColumn": null}, "columnOps": ["edit", "del", "check"], "presetStep": {"formGridCols": 2}}', 'default', 'hg_sys_gen_tree_demo', '普通树表', 'SysGenTreeDemo', '[{"dc": "标题", "id": 6, "name": "title", "align": "left", "extra": "", "index": "", "width": 200, "goName": "Title", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 64, "tsName": "title", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "varchar(64)", "dataType": "varchar", "dictType": null, "formMode": "Input", "formRole": "none", "isExport": true, "required": true, "queryWhere": "LIKE %...%", "isAllowNull": "NO", "defaultValue": "", "formGridSpan": 2}, {"dc": "ID", "id": 1, "name": "id", "align": "left", "extra": "auto_increment", "index": "PRI", "width": 100, "goName": "Id", "goType": "int64", "isEdit": false, "isList": false, "isSort": true, "length": 0, "tsName": "id", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": true, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0, "formGridSpan": 1}, {"dc": "上级", "id": 2, "name": "pid", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Pid", "goType": "int64", "isEdit": true, "isList": false, "isSort": false, "length": 0, "tsName": "pid", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 2}, {"dc": "关系树级别", "id": 3, "name": "level", "align": "left", "extra": "", "index": "", "width": null, "goName": "Level", "goType": "int", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "level", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1, "formGridSpan": 1}, {"dc": "关系树", "id": 4, "name": "tree", "align": "left", "extra": "", "index": "", "width": null, "goName": "Tree", "goType": "string", "isEdit": false, "isList": false, "isSort": false, "length": 4294967295, "tsName": "tree", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "longtext", "dataType": "longtext", "dictType": null, "formMode": "InputEditor", "formRole": "none", "isExport": false, "required": false, "queryWhere": "LIKE %...%", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "测试分类", "id": 5, "name": "category_id", "align": "left", "extra": "", "index": "", "width": 100, "goName": "CategoryId", "goType": "int64", "isEdit": true, "isList": true, "isSort": false, "length": 0, "tsName": "categoryId", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": -300004223237244, "formMode": "Select", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 2}, {"dc": "描述", "id": 7, "name": "description", "align": "left", "extra": "", "index": "", "width": 300, "goName": "Description", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 255, "tsName": "description", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "Input", "formRole": "none", "isExport": true, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 2}, {"dc": "排序", "id": 8, "name": "sort", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Sort", "goType": "int", "isEdit": true, "isList": false, "isSort": true, "length": 0, "tsName": "sort", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "状态", "id": 9, "name": "status", "align": "left", "extra": "", "index": "", "width": 150, "goName": "Status", "goType": "int", "isEdit": true, "isList": true, "isSort": false, "length": 0, "tsName": "status", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "tinyint(1)", "dataType": "tinyint", "dictType": 3, "formMode": "Select", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1, "formGridSpan": 1}, {"dc": "创建者", "id": 10, "name": "created_by", "align": "left", "extra": "", "index": "", "width": 100, "goName": "CreatedBy", "goType": "int64", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "createdBy", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "更新者", "id": 11, "name": "updated_by", "align": "left", "extra": "", "index": "", "width": 100, "goName": "UpdatedBy", "goType": "int64", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "updatedBy", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "创建时间", "id": 12, "name": "created_at", "align": "left", "extra": "", "index": "", "width": 180, "goName": "CreatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "createdAt", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "TimeRange", "formRole": "none", "isExport": true, "required": false, "queryWhere": "BETWEEN", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "修改时间", "id": 13, "name": "updated_at", "align": "left", "extra": "", "index": "", "width": 180, "goName": "UpdatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "updatedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "删除时间", "id": 14, "name": "deleted_at", "align": "left", "extra": "", "index": "", "width": null, "goName": "DeletedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "deletedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}]', '', 1, '2024-04-09 16:06:13', '2024-07-25 16:34:59'),
+(10, 11, 0, 'OptionTreeDemo', '{"join": [], "menu": {"pid": 2366, "icon": "", "sort": 300}, "tree": {"styleType": 2, "titleColumn": "title"}, "autoOps": ["genMenuPermissions", "runDao", "runService", "forcedCover"], "headOps": ["add", "batchDel"], "funcDict": {"labelColumn": null, "valueColumn": null}, "columnOps": ["edit", "del", "check"], "presetStep": {"formGridCols": 2}}', 'default', 'hg_sys_gen_tree_demo', '选项树表', 'SysGenTreeDemo', '[{"dc": "标题", "id": 6, "name": "title", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Title", "goType": "string", "isEdit": true, "isList": true, "isSort": false, "length": 64, "tsName": "title", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "varchar(64)", "dataType": "varchar", "dictType": null, "formMode": "Input", "formRole": "none", "isExport": true, "required": true, "queryWhere": "LIKE %...%", "isAllowNull": "NO", "defaultValue": "", "formGridSpan": 2}, {"dc": "ID", "id": 1, "name": "id", "align": "left", "extra": "auto_increment", "index": "PRI", "width": 100, "goName": "Id", "goType": "int64", "isEdit": false, "isList": false, "isSort": true, "length": 0, "tsName": "id", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": true, "queryWhere": "=", "isAllowNull": "NO", "defaultValue": 0, "formGridSpan": 1}, {"dc": "上级", "id": 2, "name": "pid", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Pid", "goType": "int64", "isEdit": true, "isList": false, "isSort": false, "length": 0, "tsName": "pid", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 2}, {"dc": "关系树级别", "id": 3, "name": "level", "align": "left", "extra": "", "index": "", "width": null, "goName": "Level", "goType": "int", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "level", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1, "formGridSpan": 1}, {"dc": "关系树", "id": 4, "name": "tree", "align": "left", "extra": "", "index": "", "width": null, "goName": "Tree", "goType": "string", "isEdit": false, "isList": false, "isSort": false, "length": 4294967295, "tsName": "tree", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "longtext", "dataType": "longtext", "dictType": 3, "formMode": "SelectMultiple", "formRole": "none", "isExport": false, "required": false, "queryWhere": "LIKE %...%", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "测试分类", "id": 5, "name": "category_id", "align": "left", "extra": "", "index": "", "width": 100, "goName": "CategoryId", "goType": "int64", "isEdit": true, "isList": true, "isSort": false, "length": 0, "tsName": "categoryId", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": -300004223237244, "formMode": "Select", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 2}, {"dc": "描述", "id": 7, "name": "description", "align": "left", "extra": "", "index": "", "width": 300, "goName": "Description", "goType": "string", "isEdit": true, "isList": false, "isSort": false, "length": 255, "tsName": "description", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "varchar(255)", "dataType": "varchar", "dictType": null, "formMode": "Input", "formRole": "none", "isExport": false, "required": false, "queryWhere": "LIKE", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 2}, {"dc": "排序", "id": 8, "name": "sort", "align": "left", "extra": "", "index": "", "width": 100, "goName": "Sort", "goType": "int", "isEdit": true, "isList": false, "isSort": true, "length": 0, "tsName": "sort", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "int(11)", "dataType": "int", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "状态", "id": 9, "name": "status", "align": "left", "extra": "", "index": "", "width": 150, "goName": "Status", "goType": "int", "isEdit": true, "isList": true, "isSort": false, "length": 0, "tsName": "status", "tsType": "number", "unique": false, "isQuery": true, "sqlType": "tinyint(1)", "dataType": "tinyint", "dictType": 3, "formMode": "Select", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 1, "formGridSpan": 1}, {"dc": "创建者", "id": 10, "name": "created_by", "align": "left", "extra": "", "index": "", "width": 100, "goName": "CreatedBy", "goType": "int64", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "createdBy", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "更新者", "id": 11, "name": "updated_by", "align": "left", "extra": "", "index": "", "width": 100, "goName": "UpdatedBy", "goType": "int64", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "updatedBy", "tsType": "number", "unique": false, "isQuery": false, "sqlType": "bigint(20)", "dataType": "bigint", "dictType": null, "formMode": "InputNumber", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": 0, "formGridSpan": 1}, {"dc": "创建时间", "id": 12, "name": "created_at", "align": "left", "extra": "", "index": "", "width": 180, "goName": "CreatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": true, "isSort": false, "length": 0, "tsName": "createdAt", "tsType": "string", "unique": false, "isQuery": true, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "TimeRange", "formRole": "none", "isExport": true, "required": false, "queryWhere": "BETWEEN", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "修改时间", "id": 13, "name": "updated_at", "align": "left", "extra": "", "index": "", "width": 180, "goName": "UpdatedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "updatedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": true, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}, {"dc": "删除时间", "id": 14, "name": "deleted_at", "align": "left", "extra": "", "index": "", "width": null, "goName": "DeletedAt", "goType": "*gtime.Time", "isEdit": false, "isList": false, "isSort": false, "length": 0, "tsName": "deletedAt", "tsType": "string", "unique": false, "isQuery": false, "sqlType": "datetime", "dataType": "datetime", "dictType": null, "formMode": "Time", "formRole": "none", "isExport": false, "required": false, "queryWhere": "=", "isAllowNull": "YES", "defaultValue": "", "formGridSpan": 1}]', '', 1, '2024-04-09 17:20:33', '2024-07-25 16:35:34');
 
 -- --------------------------------------------------------
 
@@ -2196,29 +1831,18 @@ CREATE TABLE IF NOT EXISTS `hg_sys_gen_curd_demo` (
   `status` tinyint(1) DEFAULT '1' COMMENT '状态',
   `created_by` bigint(20) DEFAULT '0' COMMENT '创建者',
   `updated_by` bigint(20) DEFAULT '0' COMMENT '更新者',
+  `deleted_by` bigint(20) DEFAULT '0' COMMENT '删除者',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '修改时间',
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间'
-) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf8mb4 COMMENT='系统_生成curd演示';
+) ENGINE=InnoDB AUTO_INCREMENT=16 DEFAULT CHARSET=utf8mb4 COMMENT='系统_生成curd演示';
 
 --
 -- 转存表中的数据 `hg_sys_gen_curd_demo`
 --
 
-INSERT INTO `hg_sys_gen_curd_demo` (`id`, `category_id`, `title`, `description`, `content`, `image`, `attachfile`, `city_id`, `switch`, `sort`, `status`, `created_by`, `updated_by`, `created_at`, `updated_at`, `deleted_at`) VALUES
-(1, 1, '测试标题', '这是一个CRUD生成演示，关联测试分类', '<h2><strong>不知道写点啥！</strong></h2><p><br></p><iframe class="ql-video" frameborder="0" allowfullscreen="true" src="https://media.w3.org/2010/05/sintel/trailer.mp4"></iframe><p><br></p><p><img src="http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdq9iuv0phsg8patk.png"></p>', 'https://bufanyun.cn-bj.ufileos.com/hotgo/logo.sig.png', 'http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2022-12-30/cpf1x44idoycrtajf2.xlsx', 120102, 1, 10, 1, 1, 1, '2022-12-15 19:30:14', '2024-04-08 22:50:54', NULL),
-(2, 0, '1', '1', '<p>1</p>', '', '', 150404, 1, 20, 1, 1, 0, '2023-11-16 10:08:29', '2023-11-16 10:08:29', '2023-11-16 10:09:20'),
-(3, 0, '1221', '212', '<p>1</p>', '', '', 0, 1, 30, 1, 1, 0, '2023-11-16 10:09:07', '2023-11-16 10:09:07', '2023-11-16 10:09:15'),
-(4, 0, '12', '12', '<p>12</p>', '', '', 120101, 1, 20, 1, 1, 0, '2023-11-16 10:09:45', '2023-11-16 10:09:45', '2023-11-16 10:10:12'),
-(5, 0, '12', '1212', '<p>1221</p>', '', '', 150421, 1, 30, 1, 1, 0, '2023-11-16 10:09:56', '2023-11-16 10:09:56', '2023-11-16 10:10:08'),
-(6, 0, '1', '1', '<p>1</p>', '', '', 0, 1, 20, 1, 1, 0, '2023-11-16 10:12:46', '2023-11-16 10:12:46', '2023-11-16 10:14:11'),
-(7, 0, '1', '1', '<p>1</p><p><br></p>', '', '', 0, 1, 30, 1, 1, 0, '2023-11-16 10:12:51', '2023-11-16 10:12:51', '2023-11-16 10:13:04'),
-(8, 0, '1', '1', '<p>1</p>', '', '', 0, 1, 30, 1, 1, 0, '2023-11-16 10:13:56', '2023-11-16 10:13:56', '2023-11-16 10:14:06'),
-(9, 0, '1', '1', '<p>1</p>', '', '', 0, 1, 20, 1, 1, 0, '2023-11-16 10:29:10', '2023-11-16 10:29:10', '2023-11-16 10:29:54'),
-(10, 0, '11', '1', '<p>1</p>', '', '', 0, 1, 30, 1, 1, 0, '2023-11-16 10:29:14', '2023-11-16 10:29:14', '2023-11-16 10:29:46'),
-(11, 0, '1', '1', '<p>1</p>', '', '', 0, 1, 20, 1, 1, 0, '2023-11-16 11:01:07', '2023-11-16 11:01:07', '2023-11-16 11:01:33'),
-(12, 0, '1', '1', '<p>1</p>', '', '', 0, 1, 30, 1, 1, 0, '2023-11-16 11:01:11', '2023-11-16 11:01:11', '2023-11-16 11:01:27'),
-(13, 10, '1', '1', '<p>1221在线咨询</p>', 'http://localhost:8000/attachment/2023-12-29/cy0mrx6emnw0emztdj.png', '', 0, 1, 20, 1, 1, 0, '2023-12-29 15:14:56', '2023-12-29 15:14:56', '2023-12-29 15:15:00');
+INSERT INTO `hg_sys_gen_curd_demo` (`id`, `category_id`, `title`, `description`, `content`, `image`, `attachfile`, `city_id`, `switch`, `sort`, `status`, `created_by`, `updated_by`, `deleted_by`, `created_at`, `updated_at`, `deleted_at`) VALUES
+(1, 1, '测试标题', '这是一个CRUD生成演示，关联测试分类', '<h2><strong>不知道写点啥！</strong></h2><p><br></p><iframe class="ql-video" frameborder="0" allowfullscreen="true" src="https://media.w3.org/2010/05/sintel/trailer.mp4"></iframe><p><br></p><p><img src="http://bufanyun.cn-bj.ufileos.com/hotgo/attachment/2023-02-09/cqdq9iuv0phsg8patk.png"></p>', 'http://localhost:8000/attachment/2024-07-25/d2ygbofye7ogy6kf5b.png', '["http://localhost:8000/attachment/2024-07-25/d2yh86z5wxgoyuuyv7.png","http://localhost:8000/attachment/2024-07-25/d2yh88mewqkovxgk0l.png"]', 120102, 1, 10, 1, 1, 1, NULL, '2022-12-15 19:30:14', '2024-07-25 16:28:31', NULL);
 
 -- --------------------------------------------------------
 
@@ -2241,40 +1865,20 @@ CREATE TABLE IF NOT EXISTS `hg_sys_gen_tree_demo` (
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '修改时间',
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间'
-) ENGINE=InnoDB AUTO_INCREMENT=28 DEFAULT CHARSET=utf8mb4 COMMENT='系统_生成树表演示';
+) ENGINE=InnoDB AUTO_INCREMENT=41 DEFAULT CHARSET=utf8mb4 COMMENT='系统_生成树表演示';
 
 --
 -- 转存表中的数据 `hg_sys_gen_tree_demo`
 --
 
 INSERT INTO `hg_sys_gen_tree_demo` (`id`, `pid`, `level`, `tree`, `category_id`, `title`, `description`, `sort`, `status`, `created_by`, `updated_by`, `created_at`, `updated_at`, `deleted_at`) VALUES
-(1, 0, 1, NULL, 1, '道生一', '这是一个普通树形表格的生成演示。', 10, 1, 1, 1, '2022-12-15 19:30:14', '2024-04-07 15:37:48', NULL),
-(2, NULL, 1, NULL, 0, '1', '1', 20, 1, 1, 0, '2023-11-16 10:08:29', '2023-11-16 10:08:29', '2023-11-16 10:09:20'),
-(3, NULL, 1, NULL, 0, '1221', '212', 30, 1, 1, 0, '2023-11-16 10:09:07', '2023-11-16 10:09:07', '2023-11-16 10:09:15'),
-(4, NULL, 1, NULL, 0, '12', '12', 20, 1, 1, 0, '2023-11-16 10:09:45', '2023-11-16 10:09:45', '2023-11-16 10:10:12'),
-(5, NULL, 1, NULL, 0, '12', '1212', 30, 1, 1, 0, '2023-11-16 10:09:56', '2023-11-16 10:09:56', '2023-11-16 10:10:08'),
-(6, NULL, 1, NULL, 0, '1', '1', 20, 1, 1, 0, '2023-11-16 10:12:46', '2023-11-16 10:12:46', '2023-11-16 10:14:11'),
-(7, NULL, 1, NULL, 0, '1', '1', 30, 1, 1, 0, '2023-11-16 10:12:51', '2023-11-16 10:12:51', '2023-11-16 10:13:04'),
-(8, NULL, 1, NULL, 0, '1', '1', 30, 1, 1, 0, '2023-11-16 10:13:56', '2023-11-16 10:13:56', '2023-11-16 10:14:06'),
-(9, NULL, 1, NULL, 0, '1', '1', 20, 1, 1, 0, '2023-11-16 10:29:10', '2023-11-16 10:29:10', '2023-11-16 10:29:54'),
-(10, NULL, 1, NULL, 0, '11', '1', 30, 1, 1, 0, '2023-11-16 10:29:14', '2023-11-16 10:29:14', '2023-11-16 10:29:46'),
-(11, NULL, 1, NULL, 0, '1', '1', 20, 1, 1, 0, '2023-11-16 11:01:07', '2023-11-16 11:01:07', '2023-11-16 11:01:33'),
-(12, NULL, 1, NULL, 0, '1', '1', 30, 1, 1, 0, '2023-11-16 11:01:11', '2023-11-16 11:01:11', '2023-11-16 11:01:27'),
-(13, NULL, 1, NULL, 10, '1', '1', 20, 1, 1, 0, '2023-12-29 15:14:56', '2023-12-29 15:14:56', '2023-12-29 15:15:00'),
-(14, 1, 1, NULL, 1, '一生二', '', 20, 1, 1, 1, '2024-04-09 17:07:55', '2024-04-09 17:07:55', NULL),
-(15, 14, 1, NULL, 2, '二生三', '', 30, 1, 1, 1, '2024-04-09 17:08:03', '2024-04-09 17:08:03', NULL),
-(16, 15, 1, NULL, 4, '三生万物', '', 40, 1, 1, 1, '2024-04-09 17:13:54', '2024-04-09 17:13:54', NULL),
-(17, 0, 1, NULL, 1, '一帆风顺', '', 50, 1, 1, 1, '2024-04-09 17:24:58', '2024-04-09 17:24:58', NULL),
-(18, 0, 1, NULL, 0, '一帆风顺', '', 60, 1, 1, 0, '2024-04-09 17:25:23', '2024-04-09 17:25:23', '2024-04-09 17:26:45'),
-(19, 17, 1, NULL, 1, '二龙戏珠', '', 60, 1, 1, 1, '2024-04-09 17:27:40', '2024-04-09 17:27:40', NULL),
-(20, 19, 1, NULL, 1, '三心二意', '', 70, 1, 1, 1, '2024-04-09 17:27:44', '2024-04-09 17:27:44', NULL),
-(21, 0, 1, NULL, 0, '3', '', 80, 1, 1, 1, '2024-04-09 17:28:53', '2024-04-09 17:33:52', '2024-04-12 22:43:08'),
-(22, 0, 1, NULL, 0, '4', '', 90, 1, 1, 0, '2024-04-09 17:30:12', '2024-04-09 17:30:12', '2024-04-09 17:33:44'),
-(23, 0, 1, NULL, 0, '5', '', 100, 1, 1, 0, '2024-04-09 17:30:36', '2024-04-09 17:30:36', '2024-04-09 17:33:38'),
-(24, 0, 1, NULL, 0, '6', '', 110, 1, 1, 0, '2024-04-09 17:31:11', '2024-04-09 17:31:11', '2024-04-09 17:33:44'),
-(25, 0, 1, NULL, 0, '7', '', 120, 1, 1, 0, '2024-04-09 17:31:48', '2024-04-09 17:31:48', '2024-04-09 17:55:58'),
-(26, 0, 1, NULL, 0, '4', '', 90, 1, 1, 0, '2024-04-09 17:56:06', '2024-04-09 17:56:06', '2024-04-12 22:43:25'),
-(27, 26, 1, NULL, 0, '5', '', 100, 1, 1, 0, '2024-04-09 17:56:13', '2024-04-09 17:56:13', '2024-04-12 22:43:21');
+(1, 0, 1, NULL, 1, '道生一', '这是一个普通树形表格的生成演示。', 10, 1, 1, 1, '2022-12-15 19:30:14', '2024-07-20 23:38:07', NULL),
+(14, 1, 2, 'tr_1 ', 1, '一生二', '', 20, 1, 1, 1, '2024-04-09 17:07:55', '2024-07-21 00:20:15', NULL),
+(15, 14, 3, 'tr_1 tr_14 ', 2, '二生三', '', 30, 1, 1, 1, '2024-04-09 17:08:03', '2024-07-21 00:17:21', NULL),
+(16, 15, 4, 'tr_1 tr_14 tr_15 ', 4, '三生万物', '', 40, 1, 1, 1, '2024-04-09 17:13:54', '2024-07-21 00:17:24', NULL),
+(17, 0, 1, '', 1, '一帆风顺', '', 50, 1, 1, 1, '2024-04-09 17:24:58', '2024-07-21 00:18:13', NULL),
+(19, 17, 2, 'tr_17 ', 1, '二龙戏珠', '', 60, 1, 1, 1, '2024-04-09 17:27:40', '2024-07-21 00:17:30', NULL),
+(20, 19, 3, 'tr_17 tr_19 ', 1, '三心二意', '', 70, 1, 1, 1, '2024-04-09 17:27:44', '2024-07-21 00:17:33', NULL);
 
 -- --------------------------------------------------------
 
@@ -6062,7 +5666,7 @@ CREATE TABLE IF NOT EXISTS `hg_sys_serve_license` (
 --
 
 INSERT INTO `hg_sys_serve_license` (`id`, `group`, `name`, `appid`, `secret_key`, `remote_addr`, `online_limit`, `login_times`, `last_login_at`, `last_active_at`, `routes`, `allowed_ips`, `end_at`, `remark`, `status`, `created_at`, `updated_at`) VALUES
-(1, 'cron', '定时任务', '1002', 'hotgo', '127.0.0.1:55606', 1, 1, '2024-04-21 22:52:03', '2024-04-21 22:56:17', NULL, '127.0.0.1', '2033-03-09 00:00:00', '这是默认的定时任务TCP客户端授权凭证。', 1, '2023-03-11 00:00:00', '2024-04-21 22:56:17'),
+(1, 'cron', '定时任务', '1002', 'hotgo', '127.0.0.1:62082', 1, 193, '2024-07-21 21:46:36', '2024-07-21 21:59:08', NULL, '127.0.0.1', '2033-03-09 00:00:00', '这是默认的定时任务TCP客户端授权凭证。', 1, '2023-03-11 00:00:00', '2024-07-21 21:59:08'),
 (2, 'auth', '授权服务', 'mengshuai', '123456', '127.0.0.1:50640', 1, 3, '2023-07-26 17:05:30', '2023-07-26 17:07:01', '["ExampleRPCHelloReq", "ExampleHelloReq", "AuthSummaryReq"]', '127.0.0.1', '2033-03-09 00:00:00', '这是一个测试的授权服务，可以为第三方平台提供授权支持。', 1, '2023-03-11 00:00:00', '2023-07-26 17:07:01');
 
 -- --------------------------------------------------------
@@ -6442,12 +6046,12 @@ ALTER TABLE `hg_admin_cash`
 -- AUTO_INCREMENT for table `hg_admin_credits_log`
 --
 ALTER TABLE `hg_admin_credits_log`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '变动ID',AUTO_INCREMENT=4;
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '变动ID',AUTO_INCREMENT=8;
 --
 -- AUTO_INCREMENT for table `hg_admin_dept`
 --
 ALTER TABLE `hg_admin_dept`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '部门ID',AUTO_INCREMENT=112;
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '部门ID',AUTO_INCREMENT=113;
 --
 -- AUTO_INCREMENT for table `hg_admin_member`
 --
@@ -6457,12 +6061,12 @@ ALTER TABLE `hg_admin_member`
 -- AUTO_INCREMENT for table `hg_admin_menu`
 --
 ALTER TABLE `hg_admin_menu`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '菜单ID',AUTO_INCREMENT=2423;
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '菜单ID',AUTO_INCREMENT=2431;
 --
 -- AUTO_INCREMENT for table `hg_admin_notice`
 --
 ALTER TABLE `hg_admin_notice`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '公告ID',AUTO_INCREMENT=35;
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '公告ID',AUTO_INCREMENT=33;
 --
 -- AUTO_INCREMENT for table `hg_admin_notice_read`
 --
@@ -6477,7 +6081,7 @@ ALTER TABLE `hg_admin_oauth`
 -- AUTO_INCREMENT for table `hg_admin_order`
 --
 ALTER TABLE `hg_admin_order`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键';
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键',AUTO_INCREMENT=2;
 --
 -- AUTO_INCREMENT for table `hg_admin_post`
 --
@@ -6492,12 +6096,12 @@ ALTER TABLE `hg_admin_role`
 -- AUTO_INCREMENT for table `hg_admin_role_casbin`
 --
 ALTER TABLE `hg_admin_role_casbin`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT,AUTO_INCREMENT=17783;
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT;
 --
 -- AUTO_INCREMENT for table `hg_pay_log`
 --
 ALTER TABLE `hg_pay_log`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键';
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键',AUTO_INCREMENT=2;
 --
 -- AUTO_INCREMENT for table `hg_pay_refund`
 --
@@ -6517,7 +6121,7 @@ ALTER TABLE `hg_sys_addons_install`
 -- AUTO_INCREMENT for table `hg_sys_attachment`
 --
 ALTER TABLE `hg_sys_attachment`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '文件ID',AUTO_INCREMENT=3;
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '文件ID',AUTO_INCREMENT=9;
 --
 -- AUTO_INCREMENT for table `hg_sys_blacklist`
 --
@@ -6542,12 +6146,12 @@ ALTER TABLE `hg_sys_cron_group`
 -- AUTO_INCREMENT for table `hg_sys_dict_data`
 --
 ALTER TABLE `hg_sys_dict_data`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '字典数据ID',AUTO_INCREMENT=166;
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '字典数据ID',AUTO_INCREMENT=171;
 --
 -- AUTO_INCREMENT for table `hg_sys_dict_type`
 --
 ALTER TABLE `hg_sys_dict_type`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '字典类型ID',AUTO_INCREMENT=43;
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '字典类型ID',AUTO_INCREMENT=45;
 --
 -- AUTO_INCREMENT for table `hg_sys_ems_log`
 --
@@ -6557,17 +6161,17 @@ ALTER TABLE `hg_sys_ems_log`
 -- AUTO_INCREMENT for table `hg_sys_gen_codes`
 --
 ALTER TABLE `hg_sys_gen_codes`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '生成ID',AUTO_INCREMENT=11;
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '生成ID',AUTO_INCREMENT=12;
 --
 -- AUTO_INCREMENT for table `hg_sys_gen_curd_demo`
 --
 ALTER TABLE `hg_sys_gen_curd_demo`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',AUTO_INCREMENT=14;
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',AUTO_INCREMENT=16;
 --
 -- AUTO_INCREMENT for table `hg_sys_gen_tree_demo`
 --
 ALTER TABLE `hg_sys_gen_tree_demo`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',AUTO_INCREMENT=28;
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',AUTO_INCREMENT=41;
 --
 -- AUTO_INCREMENT for table `hg_sys_log`
 --

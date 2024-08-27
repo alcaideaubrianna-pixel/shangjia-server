@@ -33,6 +33,7 @@ type SysGenCurdDemoColumns struct {
 	Status      string // 状态
 	CreatedBy   string // 创建者
 	UpdatedBy   string // 更新者
+	DeletedBy   string // 删除者
 	CreatedAt   string // 创建时间
 	UpdatedAt   string // 修改时间
 	DeletedAt   string // 删除时间
@@ -53,6 +54,7 @@ var sysGenCurdDemoColumns = SysGenCurdDemoColumns{
 	Status:      "status",
 	CreatedBy:   "created_by",
 	UpdatedBy:   "updated_by",
+	DeletedBy:   "deleted_by",
 	CreatedAt:   "created_at",
 	UpdatedAt:   "updated_at",
 	DeletedAt:   "deleted_at",

@@ -25,6 +25,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gctx"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/gconv"
 )
 
@@ -161,7 +162,10 @@ func (s *sSysCurdDemo) Edit(ctx context.Context, in *sysin.CurdDemoEditInp) (err
 // Delete 删除CURD列表
 func (s *sSysCurdDemo) Delete(ctx context.Context, in *sysin.CurdDemoDeleteInp) (err error) {
 
-	if _, err = s.Model(ctx).WherePri(in.Id).Delete(); err != nil {
+	if _, err = s.Model(ctx).WherePri(in.Id).Data(g.Map{
+		dao.SysGenCurdDemo.Columns().DeletedBy: contexts.GetUserId(ctx),
+		dao.SysGenCurdDemo.Columns().DeletedAt: gtime.Now(),
+	}).Update(); err != nil {
 		err = gerror.Wrap(err, "删除CURD列表失败，请稍后重试！")
 		return
 	}

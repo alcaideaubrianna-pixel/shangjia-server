@@ -34,6 +34,7 @@ var defaultEditSwitch = map[string]bool{
 	"tree":       false,
 	"created_by": false,
 	"updated_by": false,
+	"deleted_by": false,
 	"created_at": false,
 	"updated_at": false,
 	"deleted_at": false,

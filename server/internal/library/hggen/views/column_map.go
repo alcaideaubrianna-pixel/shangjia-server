@@ -256,7 +256,7 @@ func IsSelectFormMode(formMode string) bool {
 
 func HasColumn(fields []*sysin.GenCodesColumnListModel, column string) bool {
 	for _, field := range fields {
-		if field.GoName == column {
+		if field.Name == column {
 			return true
 		}
 	}
@@ -273,14 +273,14 @@ func HasColumnWithFormMode(fields []*sysin.GenCodesColumnListModel, formMode str
 }
 
 func HasMaxSort(fields []*sysin.GenCodesColumnListModel) bool {
-	return HasColumn(fields, "Sort")
+	return HasColumn(fields, "sort")
 }
 
 func HasStatus(headOps []string, fields []*sysin.GenCodesColumnListModel) bool {
 	if !gstr.InArray(headOps, "status") {
 		return false
 	}
-	return HasColumn(fields, "Status")
+	return HasColumn(fields, "status")
 }
 
 func HasSwitch(fields []*sysin.GenCodesColumnListModel) bool {

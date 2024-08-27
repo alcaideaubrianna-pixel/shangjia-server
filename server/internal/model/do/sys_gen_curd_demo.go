@@ -25,6 +25,7 @@ type SysGenCurdDemo struct {
 	Status      interface{} // 状态
 	CreatedBy   interface{} // 创建者
 	UpdatedBy   interface{} // 更新者
+	DeletedBy   interface{} // 删除者
 	CreatedAt   *gtime.Time // 创建时间
 	UpdatedAt   *gtime.Time // 修改时间
 	DeletedAt   *gtime.Time // 删除时间

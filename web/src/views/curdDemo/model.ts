@@ -14,23 +14,24 @@ const $message = window['$message'];
 
 export class State {
   public id = 0; // ID
+  public categoryId = null; // 测试分类
   public title = ''; // 标题
   public description = ''; // 描述
   public content = ''; // 内容
   public image = ''; // 单图
   public attachfile = ''; // 附件
   public cityId = null; // 所在城市
-  public sort = 0; // 排序
   public switch = 2; // 显示开关
+  public sort = 0; // 排序
   public status = 1; // 状态
   public createdBy = 0; // 创建者
   public createdBySumma?: null | MemberSumma = null; // 创建者摘要信息
-  public createdAt = ''; // 创建时间
   public updatedBy = 0; // 更新者
   public updatedBySumma?: null | MemberSumma = null; // 更新者摘要信息
+  public deletedBy = 0; // 删除者
+  public createdAt = ''; // 创建时间
   public updatedAt = ''; // 修改时间
   public deletedAt = ''; // 删除时间
-  public categoryId = null; // 测试分类
 
   constructor(state?: Partial<State>) {
     if (state) {
@@ -188,12 +189,6 @@ export const columns = [
     },
   },
   {
-    title: '排序',
-    key: 'sort',
-    align: 'left',
-    width: 100,
-  },
-  {
     title: '显示开关',
     key: 'switch',
     align: 'left',
@@ -215,6 +210,12 @@ export const columns = [
     },
   },
   {
+    title: '排序',
+    key: 'sort',
+    align: 'left',
+    width: 100,
+  },
+  {
     title: '创建者',
     key: 'createdBy',
     align: 'left',
@@ -224,12 +225,6 @@ export const columns = [
     },
   },
   {
-    title: '创建时间',
-    key: 'createdAt',
-    align: 'left',
-    width: 180,
-  },
-  {
     title: '更新者',
     key: 'updatedBy',
     align: 'left',
@@ -237,6 +232,12 @@ export const columns = [
     render(row: State) {
       return renderPopoverMemberSumma(row.updatedBySumma);
     },
+  },
+  {
+    title: '创建时间',
+    key: 'createdAt',
+    align: 'left',
+    width: 180,
   },
   {
     title: '修改时间',
