@@ -39,3 +39,9 @@ gfcli:
 #      dstFolder: "internal/service"
 #      dstFileNameCase: "CamelLower"
 #      clear: true
+    ctrl:
+      # api/api下的接口可以使用gf gen ctrl自动生成控制器相关代码
+      srcFolder: "api/api"
+      dstFolder: "internal/controller/api"
+      clear: true
+      merge: false
