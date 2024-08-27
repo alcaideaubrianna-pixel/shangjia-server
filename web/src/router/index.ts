@@ -3,9 +3,10 @@ import { createRouter, createWebHashHistory, RouteRecordRaw } from 'vue-router';
 import { RedirectRoute } from '@/router/base';
 import { PageEnum } from '@/enums/pageEnum';
 import { createRouterGuards } from './router-guards';
+import { createRouterIcon } from './router-icons';
 
 // @ts-ignore
-const modules = import.meta.globEager('./modules/**/*.ts');
+const modules = import.meta.glob('./modules/**/*.ts');
 const routeModuleList: RouteRecordRaw[] = [];
 
 Object.keys(modules).forEach((key) => {
@@ -55,6 +56,7 @@ export function setupRouter(app: App) {
   app.use(router);
   // 创建路由守卫
   createRouterGuards(router);
+  createRouterIcon();
 }
 
 export default router;

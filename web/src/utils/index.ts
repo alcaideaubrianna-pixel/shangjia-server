@@ -19,7 +19,7 @@ import { cloneDeep } from 'lodash-es';
 import { VNode } from 'vue';
 import { DictType, useDictStore } from '@/store/modules/dict';
 import { fallbackSrc } from '@/utils/hotgo';
-import {getFileExt} from "@/utils/urlUtils";
+import { getFileExt } from '@/utils/urlUtils';
 
 export const renderTooltip = (trigger, content) => {
   return h(NTooltip, null, {

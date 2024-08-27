@@ -129,10 +129,9 @@ export const dynamicImport = (
  * 移除隐藏的菜单
  * @param menus
  */
-export const removeHiddenMenus = (menus: RouteRecordRaw[]) => {
-  const arr = [];
+export const removeHiddenMenus = (menus: any[]) => {
+  const arr: any[] = [];
   for (let j = 0; j < menus.length; j++) {
-    // console.log('menus[j]:' + JSON.stringify(menus[j]));
     if (menus[j].meta?.type === 3) {
       continue;
     }
@@ -140,19 +139,13 @@ export const removeHiddenMenus = (menus: RouteRecordRaw[]) => {
       continue;
     }
 
-    // @ts-ignore
     if (menus[j].children?.length > 0) {
-      // @ts-ignore
       menus[j].children = removeHiddenMenus(menus[j].children);
       if (menus[j].children?.length === 0) {
         delete menus[j].children;
       }
     }
-
-    // @ts-ignore
     arr.push(menus[j]);
   }
-
-  // @ts-ignore
   return arr;
 };

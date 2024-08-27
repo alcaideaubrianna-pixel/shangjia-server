@@ -19,7 +19,7 @@
                 </div>
               </template>
               <template v-else-if="index === 2" #extra="{ extra }">
-                <n-progress type="line" :percentage="extra.data" />
+                <n-progress type="line" :percentage="Number(extra.data)" />
               </template>
               <template v-else-if="index === 3" #extra>
                 <LoadChart ref="loadChartRef" :data-model="dataSource.load" />
