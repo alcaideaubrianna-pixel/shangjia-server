@@ -23,6 +23,7 @@ import (
 	"hotgo/internal/global"
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/library/dict"
+	"hotgo/internal/library/hgorm"
 	"hotgo/internal/library/hgorm/handler"
 	"hotgo/internal/library/hgorm/hook"
 	"hotgo/internal/library/location"
@@ -372,12 +373,14 @@ func (s *sSysLog) List(ctx context.Context, in *sysin.LogListInp) (list []*sysin
 	// 非生产环境，允许关键词查询日志
 	// 生成环境使用需谨慎，日志量大易产生慢日志
 	if !gmode.IsProduct() && in.Keyword != "" {
-		mod = mod.Where("(`get_data` LIKE '%" +
-			in.Keyword + "%' or `post_data` LIKE '%" +
-			in.Keyword + "%' or `header_data` LIKE '%" +
-			in.Keyword + "%' or `error_data` LIKE '%" +
-			in.Keyword + "%' or `error_msg` LIKE '%" +
-			in.Keyword + "%')")
+		filterColumns := map[string]string{
+			"get_data":    "LIKE",
+			"post_data":   "LIKE",
+			"header_data": "LIKE",
+			"error_data":  "LIKE",
+			"error_msg":   "LIKE",
+		}
+		mod = hgorm.FilterKeywordsWithOr(mod, filterColumns, in.Keyword)
 	}
 
 	totalCount, err = mod.Count()

@@ -14,6 +14,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/text/gstr"
 	"hotgo/utility/convert"
+	"strings"
 )
 
 type daoInstance interface {
@@ -196,4 +197,32 @@ func IsUnique(ctx context.Context, dao daoInstance, where g.Map, message string,
 		return gerror.New(message)
 	}
 	return nil
+}
+
+// FilterKeywordsWithOr 多条件关键词OR查询
+func FilterKeywordsWithOr(m *gdb.Model, filterColumns map[string]string, keyword string) *gdb.Model {
+	if filterColumns == nil || len(filterColumns) == 0 {
+		return m
+	}
+
+	conditions := make([]string, 0)
+	args := make([]interface{}, 0)
+
+	for col, operator := range filterColumns {
+		val := keyword
+		var condition string
+		switch operator {
+		case "LIKE":
+			condition = fmt.Sprintf("%s LIKE ?", col)
+			val = "%" + keyword + "%"
+		default:
+			condition = fmt.Sprintf("%s = ?", col)
+		}
+
+		conditions = append(conditions, condition)
+		args = append(args, val)
+	}
+
+	filter := fmt.Sprintf("(%s)", strings.Join(conditions, " OR "))
+	return m.Where(filter, args...)
 }
