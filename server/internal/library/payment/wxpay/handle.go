@@ -8,8 +8,8 @@ package wxpay
 import (
 	"context"
 	"crypto/rsa"
+	"github.com/go-pay/crypto/xpem"
 	"github.com/go-pay/gopay"
-	"github.com/go-pay/gopay/pkg/xpem"
 	"github.com/go-pay/gopay/wechat/v3"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -88,7 +88,7 @@ func (h *wxPay) Notify(ctx context.Context, in payin.NotifyInp) (res *payin.Noti
 		return
 	}
 
-	notify, err := notifyReq.DecryptCipherText(h.config.WxPayAPIv3Key)
+	notify, err := notifyReq.DecryptPayCipherText(h.config.WxPayAPIv3Key)
 	if err != nil {
 		return
 	}
