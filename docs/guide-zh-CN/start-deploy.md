@@ -41,7 +41,7 @@ cd server &&  make build
 cd server                                             # 切换到服务端目录下
 rm -rf ./resource/public/admin/                       # 删除之前的web资源
 mkdir ./resource/public/admin/                        # 重新创建web资源存放目录，除首次编译后续可以跳过执行此步骤
-cd ../web && yarn build                               # 切换到web项目下，编译web项目
+cd ../web && pnpm run build                               # 切换到web项目下，编译web项目
 \cp -rf ./dist/*  ../server/resource/public/admin/    # 将编译好的web资源复制到server对应的资源存放路径下
 cd ../server                                          # 切换回服务端目录下
 echo "y" | gf build                                   # 编译hotgo服务端
@@ -58,7 +58,7 @@ echo "y" | gf build                              # 编译hotgo服务端
 
 # 编译web端
 cd web                                           
-yarn build
+pnpm run build 或 npm run build
 
 # web端编译完成后，将web/dist/*中的文件上传到`server`端线上运行目录：/resource/public/admin即可
 # 至此，web端和server端都可以独立覆盖更新

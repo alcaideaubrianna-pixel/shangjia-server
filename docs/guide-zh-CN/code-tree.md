@@ -10,7 +10,7 @@ gf run main.go
 
 # web端
 cd web
-yarn dev
+pnpm run dev 或 npm run dev
 ```
 
 以下是一个基本的树形CURD生成流程

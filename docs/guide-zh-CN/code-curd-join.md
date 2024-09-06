@@ -10,7 +10,7 @@ gf run main.go
 
 # web端
 cd web
-yarn dev
+pnpm run dev 或 npm run dev
 ```
 
 以下是一个关联表的CURD生成流程

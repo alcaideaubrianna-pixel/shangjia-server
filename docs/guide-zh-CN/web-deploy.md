@@ -15,7 +15,7 @@
 
 项目开发完成之后，执行以下命令进行构建
 ```shell
-yarn build
+pnpm run build 或 npm run build
 ```
 构建打包成功之后，会在根目录生成 dist 文件夹，里面就是构建打包好的文件
 
@@ -40,15 +40,15 @@ VITE_LEGACY = true
 使用项目自定的命令进行预览(推荐)
 ```shell
 # 先打包在进行预览
-yarn preview
+pnpm run preview 或 npm run preview
 # 直接预览本地 dist 文件目录
-yarn preview:dist
+pnpm run preview:dist 或 npm run preview:dist
 ```
 
 - 本地服务器预览(通过 live-server)
 ```shell
 # 1.全局安装live-server
-yarn global add live-server
+npm -g install live-server
 # 2. 进入打包的后目录
 cd ./dist
 # 本地预览，默认端口8080
@@ -60,7 +60,7 @@ live-server --port 9000
 ### 分析构建文件体积
 如果你的构建文件很大，可以通过项目内置 [rollup-plugin-analyzer](https://github.com/doesdev/rollup-plugin-analyzer) 插件进行代码体积分析，从而优化你的代码。
 ```shell
-yarn report
+pnpm run report 或 npm run report
 ```
 运行之后，在自动打开的页面可以看到具体的体积分布，以分析哪些依赖有问题。
 
