@@ -62,10 +62,10 @@ func Install(m Module) (err error) {
 	}
 	return g.DB().Transaction(m.Ctx(), func(ctx context.Context, tx gdb.TX) error {
 		if record != nil {
-			_, _ = GetModel(m.Ctx()).Where("id", record.Id).Delete()
+			_, _ = GetModel(ctx).Where("id", record.Id).Delete()
 		}
 
-		if _, err = GetModel(m.Ctx()).Data(data).OmitEmptyData().Insert(); err != nil {
+		if _, err = GetModel(ctx).Data(data).OmitEmptyData().Insert(); err != nil {
 			return err
 		}
 		return m.Install(ctx)
@@ -87,7 +87,7 @@ func Upgrade(m Module) (err error) {
 		"version": m.GetSkeleton().Version,
 	}
 	return g.DB().Transaction(m.Ctx(), func(ctx context.Context, tx gdb.TX) error {
-		if _, err = GetModel(m.Ctx()).Where("id", record.Id).Data(data).Update(); err != nil {
+		if _, err = GetModel(ctx).Where("id", record.Id).Data(data).Update(); err != nil {
 			return err
 		}
 		return m.Upgrade(ctx)
@@ -110,7 +110,7 @@ func UnInstall(m Module) (err error) {
 		"status":  consts.AddonsInstallStatusUn,
 	}
 	return g.DB().Transaction(m.Ctx(), func(ctx context.Context, tx gdb.TX) error {
-		if _, err = GetModel(m.Ctx()).Where("id", record.Id).Data(data).Update(); err != nil {
+		if _, err = GetModel(ctx).Where("id", record.Id).Data(data).Update(); err != nil {
 			return err
 		}
 		return m.UnInstall(ctx)

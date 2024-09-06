@@ -88,13 +88,13 @@ gfcli:
 2、web前端：
 ```shell script
     cd web
-    # 首先确定你以安装node16.0以上版本并安装了包[npm、yarn]，否则可能会出现一些未知报错
+    # 首先确定你以安装node16.0以上版本并安装了包[npm、pnpm]，否则可能会出现一些未知报错
     
     # 安装依赖
-    yarn install 
+    pnpm install 
     
     # 启动web项目
-    yarn dev 
+    pnpm run dev 
     
     # 如果顺利，至此到浏览器打开：http://你的IP:8001/admin
     # 登录账号：admin, 密码：123456

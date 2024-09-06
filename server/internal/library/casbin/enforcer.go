@@ -111,14 +111,19 @@ func loadPermissions(ctx context.Context) {
 }
 
 func Clear(ctx context.Context) (err error) {
-	_, err = Enforcer.RemovePolicies(Enforcer.GetPolicy())
+	policy, err := Enforcer.GetPolicy()
+	if err != nil {
+		g.Log().Warningf(ctx, "Enforcer RemovePolicies err:%+v", err)
+		return
+	}
+	_, err = Enforcer.RemovePolicies(policy)
 	if err != nil {
 		g.Log().Warningf(ctx, "Enforcer RemovePolicies err:%+v", err)
 		return
 	}
 
 	// 检查是否清理干净
-	if len(Enforcer.GetPolicy()) > 0 {
+	if len(policy) > 0 {
 		return Clear(ctx)
 	}
 	return
