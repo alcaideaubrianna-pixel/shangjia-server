@@ -151,11 +151,11 @@ func (s *s@{.servFunName}) Delete(ctx context.Context, in *@{.templateGroup}in.@
 		return gerror.New("请先删除该@{.tableComment}下的所有下级！")
 	}@{end}
 	@{ if eq .deletedUpdate "" }
-	if _, err = s.Model(ctx@{ if eq .options.Step.HasNotFilterAuth true } ,&handler.Option{FilterAuth: false}@{end}).WherePri(in.@{.pk.GoName}).Delete();err != nil {
+	if _, err = s.Model(ctx@{ if eq .options.Step.HasNotFilterAuth true } ,&handler.Option{FilterAuth: false}@{end}).WherePri(in.@{.pk.GoName}).Unscoped().Delete();err != nil {
 		err = gerror.Wrap(err, "删除@{.tableComment}失败，请稍后重试！")
     	return
 	}@{else}
-	if _, err = s.Model(ctx@{ if eq .options.Step.HasNotFilterAuth true } ,&handler.Option{FilterAuth: false}@{end}).WherePri(in.@{.pk.GoName}).Data(@{.deletedUpdate}).Update();err != nil {
+	if _, err = s.Model(ctx@{ if eq .options.Step.HasNotFilterAuth true } ,&handler.Option{FilterAuth: false}@{end}).WherePri(in.@{.pk.GoName}).Data(@{.deletedUpdate}).Unscoped().Update();err != nil {
 		err = gerror.Wrap(err, "删除@{.tableComment}失败，请稍后重试！")
 		return
 	}@{end}

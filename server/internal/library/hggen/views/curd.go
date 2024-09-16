@@ -403,6 +403,7 @@ func (l *gCurd) loadView(ctx context.Context, in *CurdPreviewInput) (err error) 
 		"importWebApi":     in.options.ImportWebApi,                                     // 导入webApi
 		"apiPrefix":        in.options.ApiPrefix,                                        // api前缀
 		"componentPrefix":  componentPrefix,                                             // vue子组件前缀
+		"in":  				in.In, 														 // 在模版中使用`in`参数,如:插件目录名称
 	})
 
 	in.view = view
