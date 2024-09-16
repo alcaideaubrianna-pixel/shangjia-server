@@ -8,7 +8,7 @@
 ### 环境要求
 
 - node版本 >= v16.0.0
-- golang版本 >= v1.21
+- golang版本 >= v1.23
 - goframe版本 >=v2.7.0
 - mysql版本 >=5.7
 
