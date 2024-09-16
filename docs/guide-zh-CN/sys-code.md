@@ -128,7 +128,7 @@ gfcli:
 ### 生成CRUD表格
 
 - 推荐使用热编译方式启动HotGo，这样生成完成页面自动刷新即可看到新生成内容，无需手动重启
-- 服务端热编译启动：`gf run main.go`, web前端启动：`yarn dev`
+- 服务端热编译启动：`gf run main.go`, web前端启动：`pnpm run dev` 或 `npm run dev`
 
 1、创建数据表
 

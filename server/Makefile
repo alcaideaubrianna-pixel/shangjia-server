@@ -9,7 +9,7 @@ ADMIN_RESOURCE_PATH = "/resource/public/admin/"
 build:
 	@rm -rf ./$(ADMIN_RESOURCE_PATH)
 	@mkdir ./$(ADMIN_RESOURCE_PATH)
-	@cd ../web && yarn build && \cp -rf ./dist/*  ../server$(ADMIN_RESOURCE_PATH)
+	@cd ../web && pnpm run build && \cp -rf ./dist/*  ../server$(ADMIN_RESOURCE_PATH)
 	@cd ../server
 	@echo "y" | gf build
 
@@ -37,7 +37,7 @@ auth:
 # 启动web服务
 .PHONY: web
 web:
-	@cd ../web && yarn dev
+	@cd ../web && pnpm run dev
 
 # 刷新casbin权限
 .PHONY: refresh
