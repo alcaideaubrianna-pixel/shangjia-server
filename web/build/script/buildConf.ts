@@ -10,7 +10,7 @@ import { getConfigFileName } from '../getConfigFileName';
 
 import pkg from '../../package.json';
 
-function createConfig(
+async function createConfig(
   {
     configName,
     config,
@@ -27,7 +27,7 @@ function createConfig(
         writable: false,
       });
     `.replace(/\s/g, '');
-    fs.mkdirp(getRootPath(OUTPUT_DIR));
+    await fs.mkdirp(getRootPath(OUTPUT_DIR));
     fs.writeFileSync(getRootPath(`${OUTPUT_DIR}/${configFileName}`), configStr);
 
     console.log(chalk.cyan(`✨ [${pkg.name}]`) + ` - configuration file is build successfully:`);
@@ -37,8 +37,8 @@ function createConfig(
   }
 }
 
-export function runBuildConfig() {
+export async function runBuildConfig() {
   const config = getEnvConfig();
   const configFileName = getConfigFileName(config);
-  createConfig({ config, configName: configFileName });
+  await createConfig({ config, configName: configFileName });
 }
