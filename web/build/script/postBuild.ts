@@ -2,7 +2,7 @@
 
 import { runBuildConfig } from './buildConf';
 import chalk from 'chalk';
-
+import process from 'node:process'
 import pkg from '../../package.json';
 
 export const runBuild = async () => {
@@ -20,4 +20,4 @@ export const runBuild = async () => {
     process.exit(1);
   }
 };
-runBuild();
+runBuild().then();
