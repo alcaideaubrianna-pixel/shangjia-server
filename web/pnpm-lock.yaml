@@ -114,6 +114,9 @@ importers:
       '@commitlint/config-conventional':
         specifier: ^19.4.1
         version: 19.4.1
+      '@eslint/eslintrc':
+        specifier: ^3.1.0
+        version: 3.1.0
       '@types/fs-extra':
         specifier: ^11.0.4
         version: 11.0.4
