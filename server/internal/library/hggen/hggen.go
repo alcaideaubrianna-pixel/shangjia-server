@@ -179,7 +179,11 @@ func GenTypeSelect(ctx context.Context) (res sysin.GenTypeSelects, err error) {
 			Templates: make(sysin.GenTemplateSelects, 0),
 		}
 
-		confName, ok := consts.GenCodesTypeConfMap[k]
+		km := k
+		if km == consts.GenCodesTypeTree {
+			km = consts.GenCodesTypeCurd
+		}
+		confName, ok := consts.GenCodesTypeConfMap[km]
 		if ok {
 			var temps []*model.GenerateAppCrudTemplate
 			err = g.Cfg().MustGet(ctx, "hggen.application."+confName+".templates").Scan(&temps)

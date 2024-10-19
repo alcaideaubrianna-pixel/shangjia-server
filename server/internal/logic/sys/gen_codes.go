@@ -177,8 +177,14 @@ func (s *sSysGenCodes) List(ctx context.Context, in *sysin.GenCodesListInp) (lis
 		if row == nil {
 			return ""
 		}
+
+		genType := int(row.GenType)
+		if genType == consts.GenCodesTypeTree {
+			genType = consts.GenCodesTypeCurd
+		}
+
 		for _, v := range typeSelect {
-			if v.Value == int(row.GenType) {
+			if v.Value == genType {
 				for index, template := range v.Templates {
 					if index == row.GenTemplate {
 						return template.Label
@@ -186,7 +192,6 @@ func (s *sSysGenCodes) List(ctx context.Context, in *sysin.GenCodesListInp) (lis
 				}
 			}
 		}
-
 		return ""
 	}
 
