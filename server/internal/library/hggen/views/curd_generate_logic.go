@@ -20,7 +20,7 @@ const (
 	LogicWhereNoSupport = "\t// TODO 暂不支持生成[ %s ]查询方式，请自行补充此处代码！"
 	LogicEditUpdate     = "\tif _, err = s.Model(ctx%s).\n\t\t\tFields(%sin.%sUpdateFields{}).\n\t\t\tWherePri(in.%s).Data(in).Update(); err != nil {\n\t\t\terr = gerror.Wrap(err, \"修改%s失败，请稍后重试！\")\n\t\t}\n\t\treturn"
 	LogicEditInsert     = "\tif _, err = s.Model(ctx, &handler.Option{FilterAuth: false}).\n\t\tFields(%sin.%sInsertFields{}).\n\t\tData(in).OmitEmptyData().Insert(); err != nil {\n\t\terr = gerror.Wrap(err, \"新增%s失败，请稍后重试！\")\n\t}"
-	LogicEditUnique     = "\t// 验证'%s'唯一\n\tif err = hgorm.IsUnique(ctx, &dao.%s, g.Map{dao.%s.Columns().%s: in.%s}, \"%s已存在\", in.Id); err != nil {\n\t\treturn\n\t}\n"
+	LogicEditUnique     = "\t// 验证'%s'唯一\n\tif err = hgorm.IsUnique(ctx, &dao.%s, g.Map{dao.%s.Columns().%s: in.%s}, \"%s已存在\", in.%s); err != nil {\n\t\treturn\n\t}\n"
 	LogicSwitchUpdate   = "g.Map{\n\t\tin.Key:                       in.Value,\n%s}"
 	LogicStatusUpdate   = "g.Map{\n\t\tdao.%s.Columns().Status:    in.Status,\n%s}"
 	LogicDeletedUpdate  = "g.Map{\n%s}"
@@ -115,7 +115,7 @@ func (l *gCurd) generateLogicEdit(ctx context.Context, in *CurdPreviewInput) g.M
 		}
 
 		if field.Unique {
-			uniqueBuffer.WriteString(fmt.Sprintf(LogicEditUnique, field.GoName, in.In.DaoName, in.In.DaoName, field.GoName, field.GoName, field.Dc))
+			uniqueBuffer.WriteString(fmt.Sprintf(LogicEditUnique, field.GoName, in.In.DaoName, in.In.DaoName, field.GoName, field.GoName, field.Dc,in.pk.GoName))
 		}
 	}
 
