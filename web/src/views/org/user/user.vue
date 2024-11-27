@@ -1,9 +1,6 @@
 <template>
   <div>
-    <div class="n-layout-page-header">
-      <n-card :bordered="false" title="后台用户" />
-    </div>
-    <n-card :bordered="false" class="proCard">
+    <n-card :bordered="false" class="proCard" title="后台用户">
       <n-tabs
         type="card"
         class="card-tabs"

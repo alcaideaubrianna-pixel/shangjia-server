@@ -796,7 +796,7 @@ func (s *sAdminMember) VerifySuperId(ctx context.Context, verifyId int64) bool {
 
 // LoadSuperAdmin 加载超管数据
 func (s *sAdminMember) LoadSuperAdmin(ctx context.Context) {
-	value, err := dao.AdminRole.Ctx(ctx).Where(dao.AdminRole.Columns().Key, consts.SuperRoleKey).Value()
+	value, err := dao.AdminRole.Ctx(ctx).Fields("id").Where(dao.AdminRole.Columns().Key, consts.SuperRoleKey).Value()
 	if err != nil {
 		g.Log().Errorf(ctx, "LoadSuperAdmin AdminRole err:%+v", err)
 		return

@@ -113,7 +113,7 @@ export function updateConfig(params) {
 
 	webConfigSystem = `<template>
   <div>
-    <n-grid cols="24 300:1 600:24" :x-gap="24">
+    <n-grid cols="24 300:1 600:24" :x-gap="12">
       <n-grid-item span="6">
         <n-card :bordered="false" size="small" class="proCard">
           <n-thing

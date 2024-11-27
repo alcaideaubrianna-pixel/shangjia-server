@@ -5,9 +5,9 @@
         <!--  这是由系统生成的CURD表格，你可以将此行注释改为表格的描述 -->
       </n-card>
     </div>
-    <n-grid class="mt-4" cols="1 s:1 m:1 l:4 xl:4 2xl:4" responsive="screen" :x-gap="12">
+    <n-grid cols="1 s:1 m:1 l:4 xl:4 2xl:4" responsive="screen" :x-gap="12">
       <n-gi span="1">
-        <n-card :segmented="{ content: true }" :bordered="false" size="small">
+        <n-card :segmented="{ content: true }" :bordered="false" size="small" class="proCard">
           <template #header>
             <n-space>
               <n-button type="info" icon-placement="left" @click="addTable" v-if="hasPermission(['/optionTreeDemo/edit'])">

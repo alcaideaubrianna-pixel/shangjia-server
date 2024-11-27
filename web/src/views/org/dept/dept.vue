@@ -1,11 +1,6 @@
 <template>
   <div>
-    <div class="n-layout-page-header">
-      <n-card :bordered="false" title="部门管理">
-        <!--  这是由系统生成的CURD表格，你可以将此行注释改为表格的描述 -->
-      </n-card>
-    </div>
-    <n-card :bordered="false" class="proCard">
+    <n-card :bordered="false" class="proCard" title="部门管理">
       <BasicForm
         ref="searchFormRef"
         @register="register"

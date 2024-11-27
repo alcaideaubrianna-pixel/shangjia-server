@@ -1,11 +1,9 @@
 import { h, ref } from 'vue';
-import { NTag } from 'naive-ui';
 import { cloneDeep } from 'lodash-es';
 import { FormSchema } from '@/components/Form';
-import { isNullObject } from '@/utils/is';
 import { defRangeShortcuts } from '@/utils/dateUtil';
+import { renderOptionTag } from '@/utils';
 import { useDictStore } from '@/store/modules/dict';
-import type { FormRules } from 'naive-ui/es/form/src/interface';
 
 const dict = useDictStore();
 
@@ -39,7 +37,7 @@ export function newState(state: State | Record<string, any> | null): State {
 }
 
 // 表单验证规则
-export const rules: FormRules = {
+export const rules = {
   name: {
     required: true,
     trigger: ['blur', 'input'],
@@ -137,23 +135,8 @@ export const columns = [
     key: 'status',
     align: 'left',
     width: -1,
-    render(row) {
-      if (isNullObject(row.status)) {
-        return ``;
-      }
-      return h(
-        NTag,
-        {
-          style: {
-            marginRight: '6px',
-          },
-          type: dict.getType('sys_normal_disable', row.status),
-          bordered: false,
-        },
-        {
-          default: () => dict.getLabel('sys_normal_disable', row.status),
-        }
-      );
+    render(row: State) {
+      return renderOptionTag('sys_normal_disable', row.status);
     },
   },
   {

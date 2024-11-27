@@ -130,7 +130,8 @@ func (s *sSysOptionTreeDemo) Delete(ctx context.Context, in *sysin.OptionTreeDem
 	if count > 0 {
 		return gerror.New("请先删除该选项树表下的所有下级！")
 	}
-	if _, err = s.Model(ctx).WherePri(in.Id).Delete(); err != nil {
+
+	if _, err = s.Model(ctx).WherePri(in.Id).Unscoped().Delete(); err != nil {
 		err = gerror.Wrap(err, "删除选项树表失败，请稍后重试！")
 		return
 	}

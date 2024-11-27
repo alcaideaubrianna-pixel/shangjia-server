@@ -1,6 +1,6 @@
 <template>
   <div>
-    <n-grid cols="24 300:1 600:24" :x-gap="24">
+    <n-grid cols="24 300:1 600:24" :x-gap="12">
       <n-grid-item span="6">
         <n-card :bordered="false" size="small" class="proCard">
           <n-thing
@@ -34,7 +34,9 @@
   </div>
 </template>
 <script lang="ts">
-  import { defineAsyncComponent, defineComponent, reactive, toRefs } from 'vue';
+  import { defineAsyncComponent, defineComponent, reactive, toRefs, onMounted } from 'vue';
+  import { useRouter } from 'vue-router';
+  import { pushHashRouterParameter } from '@/utils/urlUtils';
   /** 异步加载的组件，用到的时候再加载组件 */
   const BasicSetting = defineAsyncComponent(() => {
       return import('./BasicSetting.vue');
@@ -141,6 +143,7 @@
       LoginSetting,
     },
     setup() {
+      const router = useRouter();
       const state = reactive({
         type: 1,
         typeTitle: '基本设置',
@@ -149,7 +152,25 @@
       function switchType(e) {
         state.type = e.key;
         state.typeTitle = e.name;
+        pushHashRouterParameter(window.location.href, 'type', e.key);
       }
+
+      function setDefaultOption() {
+        const key = router.currentRoute.value.query.type as unknown as number;
+        if (key !== undefined && key > 0) {
+          for (const item of typeTabList) {
+            if (item.key == key) {
+              switchType(item);
+            }
+          }
+        }
+      }
+
+      onMounted(() => {
+        if (router.currentRoute.value.query?.type) {
+          setDefaultOption();
+        }
+      });
 
       return {
         ...toRefs(state),

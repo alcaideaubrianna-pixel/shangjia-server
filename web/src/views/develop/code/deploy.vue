@@ -1,7 +1,7 @@
 <template>
   <div>
     <n-spin :show="show" description="正在生成配置信息...">
-      <n-card>
+      <n-card class="proCard">
         <n-tabs
           type="card"
           class="card-tabs"

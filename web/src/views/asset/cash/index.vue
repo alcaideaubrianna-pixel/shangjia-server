@@ -1,10 +1,6 @@
 <template>
   <div>
-    <div class="n-layout-page-header">
-      <n-card :bordered="false" title="提现管理" />
-    </div>
-
-    <n-card :bordered="false" class="proCard">
+    <n-card :bordered="false" class="proCard" title="提现管理">
       <n-tabs
         type="card"
         class="card-tabs"

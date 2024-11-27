@@ -63,3 +63,19 @@ export function goBackOrToPage(to: RouteLocationRaw): void {
     });
   }
 }
+
+//  更新hash路由get参数，不刷新页面
+export function pushHashRouterParameter(url, key, value) {
+  const urlParts = url.split('?');
+  let newUrl = '';
+  if (urlParts.length >= 2) {
+    const baseUrl = urlParts[0];
+    const queryString = urlParts[1];
+    const searchParams = new URLSearchParams(queryString);
+    searchParams.set(key, value);
+    newUrl = `${baseUrl}?${searchParams.toString()}`;
+  } else {
+    newUrl = `${url}?${key}=${value}`;
+  }
+  window.history.pushState({ path: newUrl }, '', newUrl);
+}

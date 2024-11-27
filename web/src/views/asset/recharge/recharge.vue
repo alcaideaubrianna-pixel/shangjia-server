@@ -4,7 +4,7 @@
       <n-card :bordered="false" title="在线充值"> 余额可用于购买付费产品或商城消费 </n-card>
     </div>
     <n-spin :show="loading">
-      <n-grid class="mt-6" cols="1 s:1 m:1 l:4 xl:4 2xl:4" responsive="screen" :x-gap="12">
+      <n-grid cols="1 s:1 m:1 l:4 xl:4 2xl:4" responsive="screen" :x-gap="12">
         <n-gi span="4">
           <n-card :bordered="false" class="proCard">
             <n-thing>

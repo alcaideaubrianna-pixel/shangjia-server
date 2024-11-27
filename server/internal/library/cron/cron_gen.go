@@ -35,7 +35,9 @@ func GenLoggerByCtx(ctx context.Context) *glog.Logger {
 		Logger().Panic(ctx, "获取定时任务序列号失败!")
 	}
 
+	crons.RLock()
 	logger, ok := crons.loggers[sn]
+	crons.RUnlock()
 	if ok {
 		return logger
 	}

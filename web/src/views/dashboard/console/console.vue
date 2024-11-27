@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="mt-2">
     <Company v-if="userStore.isCompanyDept" />
     <Tenant v-else-if="userStore.isTenantDept" />
     <Merchant v-else-if="userStore.isMerchantDept" />

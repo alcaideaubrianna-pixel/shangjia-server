@@ -1,6 +1,6 @@
 <template>
   <div>
-    <n-card :bordered="false" title="角色管理">
+    <n-card :bordered="false" class="proCard" title="角色管理">
       <n-space vertical :size="12">
         <n-space>
           <n-button type="primary" @click="addTable">

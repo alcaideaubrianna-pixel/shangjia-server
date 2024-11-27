@@ -3,9 +3,9 @@
     <div class="n-layout-page-header">
       <n-card :bordered="false" title="表格例子"> 一个树形表格例子 </n-card>
     </div>
-    <n-grid class="mt-6" cols="1 s:1 m:1 l:4 xl:4 2xl:4" responsive="screen" :x-gap="12">
+    <n-grid cols="1 s:1 m:1 l:4 xl:4 2xl:4" responsive="screen" :x-gap="12">
       <n-gi span="1">
-        <n-card :segmented="{ content: true }" :bordered="false" size="small">
+        <n-card :segmented="{ content: true }" :bordered="false" size="small" class="proCard">
           <template #header>
             <n-space>
               <n-button type="info" icon-placement="left" @click="openCreateDrawer">
@@ -88,7 +88,7 @@
         </n-card>
       </n-gi>
       <n-gi span="3">
-        <n-card :segmented="{ content: true }" :bordered="false" size="small">
+        <n-card :segmented="{ content: true }" :bordered="false" size="small" class="proCard">
           <template #header>
             <n-space>
               <n-icon size="18">

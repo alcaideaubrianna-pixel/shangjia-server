@@ -1,9 +1,6 @@
 <template>
   <div>
-    <div class="n-layout-page-header">
-      <n-card :bordered="false" title="在线用户" />
-    </div>
-    <n-card :bordered="false" class="proCard">
+    <n-card :bordered="false" class="proCard" title="在线用户">
       <BasicForm @register="register" @submit="handleSubmit" @reset="handleReset">
         <template #statusSlot="{ model, field }">
           <n-input v-model:value="model[field]" />

@@ -136,6 +136,16 @@ func GenHashOption(key interface{}, label string, extra ...any) *model.Option {
 	}
 }
 
+// GetOption 通过key找到label
+func GetOption(ses []*model.Option, key interface{}) *model.Option {
+	for _, v := range ses {
+		if gconv.String(v.Key) == gconv.String(key) {
+			return v
+		}
+	}
+	return nil
+}
+
 // GetOptionLabel 通过key找到label
 func GetOptionLabel(ses []*model.Option, key interface{}) string {
 	for _, v := range ses {
@@ -154,4 +164,17 @@ func HasOptionKey(ses []*model.Option, key interface{}) bool {
 		}
 	}
 	return false
+}
+
+// UniqueOption 去重选项
+func UniqueOption(src []*model.Option) (dst []*model.Option) {
+	temp := map[string]struct{}{}
+	for _, item := range src {
+		key := gconv.String(item.Key)
+		if _, ok := temp[key]; !ok {
+			temp[key] = struct{}{}
+			dst = append(dst, item)
+		}
+	}
+	return dst
 }

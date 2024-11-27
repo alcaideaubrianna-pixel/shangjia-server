@@ -3,7 +3,7 @@
 // @Copyright  Copyright (c) 2024 HotGo CLI
 // @Author  Ms <133814250@qq.com>
 // @License  https://github.com/bufanyun/hotgo/blob/master/LICENSE
-// @AutoGenerate Version 2.15.1
+// @AutoGenerate Version 2.15.7
 package sys
 
 import (
@@ -108,7 +108,7 @@ func (s *sSysTestCategory) Edit(ctx context.Context, in *sysin.TestCategoryEditI
 // Delete 删除测试分类
 func (s *sSysTestCategory) Delete(ctx context.Context, in *sysin.TestCategoryDeleteInp) (err error) {
 
-	if _, err = s.Model(ctx).WherePri(in.Id).Delete(); err != nil {
+	if _, err = s.Model(ctx).WherePri(in.Id).Unscoped().Delete(); err != nil {
 		err = gerror.Wrap(err, "删除测试分类失败，请稍后重试！")
 		return
 	}

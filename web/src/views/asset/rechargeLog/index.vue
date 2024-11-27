@@ -1,9 +1,6 @@
 <template>
   <div>
-    <div class="n-layout-page-header">
-      <n-card :bordered="false" title="充值记录" />
-    </div>
-    <n-card :bordered="false" class="proCard">
+    <n-card :bordered="false" title="充值记录" class="proCard">
       <n-tabs
         type="card"
         class="card-tabs"

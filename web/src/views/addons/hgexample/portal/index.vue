@@ -1,6 +1,6 @@
 <template>
   <div>
-    <n-card title="应用入口" style="margin-bottom: 16px">
+    <n-card title="应用入口" class="proCard">
       <n-tabs type="line" animated>
         <n-tab-pane name="admin" tab="后台API">
           <Form path="/admin/hgexample/index/test?name=HotGo" />
