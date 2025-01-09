@@ -206,6 +206,13 @@ func (s *sSysLog) AnalysisLog(ctx context.Context) entity.SysLog {
 
 	if postData.IsNil() || len(postData.Map()) == 0 {
 		postData = gjson.New(consts.NilJsonToString)
+	} else {
+		// 隐藏明文显示的密码
+		for k := range postData.Map() {
+			if gstr.ContainsI(k, "password") {
+				postData.MustSet(k, "******")
+			}
+		}
 	}
 
 	// 当前登录用户
