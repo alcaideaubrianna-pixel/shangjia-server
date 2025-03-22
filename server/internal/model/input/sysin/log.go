@@ -14,16 +14,17 @@ import (
 type LogListInp struct {
 	form.PageReq
 	form.StatusReq
-	ReqId      string  `json:"reqId"          dc:"对外ID"`
-	Module     string  `json:"module"         dc:"应用端口"`
-	MemberId   int     `json:"memberId"       dc:"用户ID"`
-	TakeUpTime string  `json:"takeUpTime"     dc:"请求耗时"`
-	Method     string  `json:"method"         dc:"请求方式"`
-	Url        string  `json:"url"            dc:"请求路径"`
-	Ip         string  `json:"ip"             dc:"访问IP"`
-	ErrorCode  string  `json:"errorCode"      dc:"状态码"`
-	CreatedAt  []int64 `json:"createdAt"      dc:"创建时间"`
-	Keyword    string  `json:"keyword"        dc:"关键词"`
+	ReqId           string   `json:"reqId"          dc:"对外ID"`
+	Module          string   `json:"module"         dc:"应用端口"`
+	MemberId        int      `json:"memberId"       dc:"用户ID"`
+	TakeUpTime      string   `json:"takeUpTime"     dc:"请求耗时"`
+	Method          string   `json:"method"         dc:"请求方式"`
+	Url             string   `json:"url"            dc:"请求路径"`
+	Ip              string   `json:"ip"             dc:"访问IP"`
+	ErrorCode       string   `json:"errorCode"      dc:"状态码"`
+	CreatedAt       []int64  `json:"createdAt"      dc:"创建时间"`
+	Keyword         string   `json:"keyword"        dc:"关键词"`
+	ComplexMemberId []string `json:"complexMemberId" dc:"操作人筛选"`
 }
 
 type LogListModel struct {

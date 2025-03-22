@@ -146,6 +146,10 @@ export function isNullOrUnDef(val: unknown): val is null | undefined {
   return isUnDef(val) || isNull(val);
 }
 
+export function isEmpty(value: any): boolean {
+  return value === undefined || value === null || value === '';
+}
+
 // 判断字串符是否以字母开头
 export function isLetterBegin(str) {
   return /^[A-z]/.test(str);

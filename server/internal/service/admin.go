@@ -106,6 +106,10 @@ type (
 		GetIdByCode(ctx context.Context, in *adminin.GetIdByCodeInp) (res *adminin.GetIdByCodeModel, err error)
 		// Select 获取可选的用户选项
 		Select(ctx context.Context, in *adminin.MemberSelectInp) (res []*adminin.MemberSelectModel, err error)
+		// GetLowerIds 获取指定用户的所有下级ID集合
+		GetLowerIds(ctx context.Context, memberId int64) (ids []int64, err error)
+		// GetComplexMemberIds 组合查找符合条件的用户ID
+		GetComplexMemberIds(ctx context.Context, memberIdx string, opt string) (ids []int64, err error)
 		// GetIdsByKeyword 根据关键词查找符合条件的用户ID
 		GetIdsByKeyword(ctx context.Context, ks string) (res []int64, err error)
 		// VerifySuperId 验证是否为超管

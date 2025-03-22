@@ -58,7 +58,6 @@
   }
 
   const emit = defineEmits(['reloadTable', 'updateShowModal']);
-
   const props = withDefaults(defineProps<Props>(), {
     showModal: false,
     formParams: () => {

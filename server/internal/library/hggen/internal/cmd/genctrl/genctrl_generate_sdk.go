@@ -15,6 +15,7 @@ import (
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
+
 	"hotgo/internal/library/hggen/internal/consts"
 	"hotgo/internal/library/hggen/internal/utility/mlog"
 )
@@ -179,6 +180,7 @@ func (c *apiSdkGenerator) doGenerateSdkImplementer(
 			"{Version}":         item.Version,
 			"{MethodName}":      item.MethodName,
 			"{ImplementerName}": implementerName,
+			"{MethodComment}":   item.GetComment(),
 		}))
 		implementerFileContent += "\n"
 	}

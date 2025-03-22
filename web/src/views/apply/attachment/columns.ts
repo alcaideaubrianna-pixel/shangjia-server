@@ -106,7 +106,7 @@ export const columns = [
   {
     title: '文件名称',
     key: 'name',
-    width: 120,
+    width: 150,
   },
   {
     title: '文件',
@@ -157,7 +157,7 @@ export const columns = [
   {
     title: '扩展类型',
     key: 'mimeType',
-    width: 120,
+    width: 200,
   },
   {
     title: '上传时间',

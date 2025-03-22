@@ -8,7 +8,6 @@
         ref="formRef"
         label-placement="top"
       >
-        <n-divider title-placement="left">基础设置</n-divider>
         <n-form-item label="默认驱动" path="uploadDrive">
           <n-select
             placeholder="默认驱动"
@@ -16,46 +15,16 @@
             v-model:value="formValue.uploadDrive"
           />
         </n-form-item>
-        <n-form-item label="图片大小限制" path="uploadImageSize">
-          <n-input-number
-            :show-button="false"
-            placeholder="请输入"
-            v-model:value="formValue.uploadImageSize"
-          >
-            <template #suffix> MB</template>
-          </n-input-number>
-        </n-form-item>
 
-        <n-form-item label="文件大小限制" path="uploadFileSize">
-          <n-input-number
-            :show-button="false"
-            placeholder="请输入"
-            v-model:value="formValue.uploadFileSize"
-          >
-            <template #suffix> MB</template>
-          </n-input-number>
-        </n-form-item>
-
-        <n-form-item label="图片类型限制" path="uploadImageType">
-          <n-input v-model:value="formValue.uploadImageType" placeholder="" />
-        </n-form-item>
-
-        <n-form-item label="文件类型限制" path="uploadFileType">
-          <n-input v-model:value="formValue.uploadFileType" placeholder="" />
-        </n-form-item>
         <n-tabs type="card" size="small" v-model:value="tabName">
-          <n-tab-pane name="local">
-            <template #tab> 本地存储</template>
-            <n-divider title-placement="left">本地存储</n-divider>
+          <n-tab-pane name="local" tab="本地存储">
             <n-form-item label="本地存储路径" path="uploadLocalPath">
               <n-input v-model:value="formValue.uploadLocalPath" placeholder="" />
               <template #feedback>填对外访问的相对路径</template>
             </n-form-item>
           </n-tab-pane>
 
-          <n-tab-pane name="oss">
-            <template #tab> 阿里云OSS存储</template>
-            <n-divider title-placement="left">阿里云OSS存储</n-divider>
+          <n-tab-pane name="oss" tab="阿里云OSS">
             <n-form-item label="AccessKey ID" path="uploadOssSecretId">
               <n-input
                 type="password"
@@ -102,9 +71,7 @@
             </n-form-item>
           </n-tab-pane>
 
-          <n-tab-pane name="cos">
-            <template #tab> 腾讯云COS存储</template>
-            <n-divider title-placement="left">腾讯云COS存储</n-divider>
+          <n-tab-pane name="cos" tab="腾讯云COS">
             <n-form-item label="APPID" path="uploadCosSecretId">
               <n-input v-model:value="formValue.uploadCosSecretId" />
               <template #feedback>
@@ -138,9 +105,7 @@
             </n-form-item>
           </n-tab-pane>
 
-          <n-tab-pane name="qiniu">
-            <template #tab> 七牛云对象存储</template>
-            <n-divider title-placement="left">七牛云对象存储</n-divider>
+          <n-tab-pane name="qiniu" tab="七牛云对象存储">
             <n-form-item label="AccessKey" path="uploadQiNiuAccessKey">
               <n-input
                 type="password"
@@ -183,9 +148,7 @@
             </n-form-item>
           </n-tab-pane>
 
-          <n-tab-pane name="ucloud">
-            <template #tab> ucloud对象存储</template>
-            <n-divider title-placement="left">ucloud对象存储</n-divider>
+          <n-tab-pane name="ucloud" tab="UC对象存储">
             <n-form-item label="公钥" path="uploadUCloudPublicKey">
               <n-input
                 type="password"
@@ -237,9 +200,7 @@
             </n-form-item>
           </n-tab-pane>
 
-          <n-tab-pane name="minio">
-            <template #tab> minio对象存储</template>
-            <n-divider title-placement="left">minio对象存储</n-divider>
+          <n-tab-pane name="minio" tab="MinIO">
             <n-form-item label="AccessKey ID" path="uploadMinioAccessKey">
               <n-input
                 type="password"
@@ -295,6 +256,45 @@
             </n-form-item>
           </n-tab-pane>
         </n-tabs>
+
+        <n-grid x-gap="24" :cols="4" class="mt-4">
+          <n-gi>
+            <n-form-item label="图片大小限制" path="uploadImageSize">
+              <n-input-number
+                :show-button="false"
+                placeholder="请输入"
+                v-model:value="formValue.uploadImageSize"
+              >
+                <template #suffix> MB</template>
+              </n-input-number>
+            </n-form-item>
+          </n-gi>
+          <n-gi :span="3">
+            <n-form-item label="图片类型限制" path="uploadImageType">
+              <n-input v-model:value="formValue.uploadImageType" placeholder="" />
+            </n-form-item>
+          </n-gi>
+        </n-grid>
+
+        <n-grid x-gap="24" :cols="4">
+          <n-gi>
+            <n-form-item label="文件大小限制" path="uploadFileSize">
+              <n-input-number
+                :show-button="false"
+                placeholder="请输入"
+                v-model:value="formValue.uploadFileSize"
+              >
+                <template #suffix> MB</template>
+              </n-input-number>
+            </n-form-item>
+          </n-gi>
+          <n-gi :span="3">
+            <n-form-item label="文件类型限制" path="uploadFileType">
+              <n-input v-model:value="formValue.uploadFileType" placeholder="" />
+            </n-form-item>
+          </n-gi>
+        </n-grid>
+
         <div>
           <n-space>
             <n-button type="primary" @click="formSubmit">保存更新</n-button>

@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"hotgo/internal/consts"
 	"hotgo/internal/library/dict"
+	"hotgo/internal/library/hgorm/hook"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/form"
 	"hotgo/internal/model/input/payin"
@@ -114,6 +115,7 @@ type OrderListInp struct {
 	Status           int           `json:"status"            dc:"状态"`
 	CreatedAt        []*gtime.Time `json:"createdAt"         dc:"创建时间"`
 	PayLogOutTradeNo string        `json:"payLogOutTradeNo"  dc:"商户订单号"`
+	ComplexMemberId  []string      `json:"complexMemberId" dc:"下单用户"`
 }
 
 func (in *OrderListInp) Filter(ctx context.Context) (err error) {
@@ -122,8 +124,9 @@ func (in *OrderListInp) Filter(ctx context.Context) (err error) {
 
 type OrderListModel struct {
 	entity.AdminOrder
-	OutTradeNo string `json:"payLogOutTradeNo"  dc:"商户订单号"`
-	PayType    string `json:"payLogPayType"  dc:"支付类型"`
+	OutTradeNo    string            `json:"payLogOutTradeNo"  dc:"商户订单号"`
+	PayType       string            `json:"payLogPayType"  dc:"支付类型"`
+	MemberBySumma *hook.MemberSumma `json:"memberBySumma"   dc:"下单用户信息"`
 }
 
 // OrderExportModel 导出充值订单

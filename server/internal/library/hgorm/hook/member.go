@@ -109,7 +109,7 @@ var MemberSummary = gdb.HookHandler{
 		}
 
 		var members []*MemberSumma
-		if err = g.Model("admin_member").Ctx(ctx).WhereIn("id", memberIds).Scan(&members); err != nil {
+		if err = g.Model("admin_member").Ctx(ctx).Fields(MemberSumma{}).WhereIn("id", memberIds).Scan(&members); err != nil {
 			return nil, err
 		}
 

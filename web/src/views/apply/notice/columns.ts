@@ -1,9 +1,7 @@
 import { h } from 'vue';
 import { NAvatar, NAvatarGroup, NTooltip } from 'naive-ui';
 import { renderOptionTag } from '@/utils';
-import { useDictStore } from '@/store/modules/dict';
 
-const dict = useDictStore();
 export const columns = [
   {
     title: 'ID',
@@ -106,7 +104,3 @@ export const columns = [
     width: 180,
   },
 ];
-
-export function loadOptions() {
-  dict.loadOptions(['sys_normal_disable']);
-}

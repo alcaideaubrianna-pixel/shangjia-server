@@ -48,16 +48,15 @@ export const schemas = ref<FormSchema[]>([
     },
   },
   {
-    field: 'memberId',
-    component: 'NInput',
+    field: 'complexMemberId',
+    component: 'ComplexMemberPicker',
     label: '操作人',
     componentProps: {
-      placeholder: '请输入操作人ID',
+      placeholder: '请选择操作人',
       onInput: (e: any) => {
         console.log(e);
       },
     },
-    rules: [{ trigger: ['blur'] }],
   },
   {
     field: 'url',

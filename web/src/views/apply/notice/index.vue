@@ -26,7 +26,7 @@
         ref="actionRef"
         :actionColumn="actionColumn"
         @update:checked-row-keys="onCheckedRow"
-        :scroll-x="1280"
+        :scroll-x="scrollX"
         :resizeHeightOffset="-20000"
       >
         <template #tableTitle>
@@ -88,109 +88,8 @@
           </n-button>
         </template>
       </BasicTable>
-
-      <n-modal
-        v-model:show="showModal"
-        :show-icon="false"
-        :block-scroll="false"
-        :mask-closable="false"
-        preset="dialog"
-        :title="
-          formParams.id > 0
-            ? '编辑' + dict.getLabel('noticeTypeOptions', formParams.type) + ' #' + formParams.id
-            : '发送' + dict.getLabel('noticeTypeOptions', formParams.type)
-        "
-        :style="{
-          width: dialogWidth,
-        }"
-      >
-        <n-alert :show-icon="false" type="info">
-          消息发送成功后如果接收人在线会立即收到一条消息通知，编辑已发送的消息不会再次通知
-        </n-alert>
-        <n-form
-          :model="formParams"
-          :rules="rules"
-          ref="formRef"
-          label-placement="left"
-          :label-width="80"
-          class="py-4"
-        >
-          <n-form-item label="消息标题" path="title">
-            <n-input placeholder="请输入消息标题" v-model:value="formParams.title" />
-          </n-form-item>
-
-          <n-form-item label="接收人" path="receiver" v-if="formParams.type === 3">
-            <n-select
-              multiple
-              :options="options"
-              :render-label="renderLabel"
-              :render-tag="renderMultipleSelectTag"
-              v-model:value="formParams.receiver"
-              filterable
-            />
-          </n-form-item>
-
-          <n-form-item label="消息内容" path="content">
-            <template v-if="formParams.type === 1">
-              <n-input
-                type="textarea"
-                :autosize="{ minRows: 3, maxRows: 30 }"
-                placeholder="请输入通知内容"
-                v-model:value="formParams.content"
-              />
-            </template>
-            <template v-else>
-              <Editor style="height: 450px" v-model:value="formParams.content" />
-            </template>
-          </n-form-item>
-
-          <n-grid x-gap="24" :cols="2">
-            <n-gi>
-              <n-form-item label="标签" path="tag">
-                <n-select
-                  clearable
-                  placeholder="可以不填"
-                  :render-tag="renderTag"
-                  v-model:value="formParams.tag"
-                  :options="dict.getOptionUnRef('noticeTagOptions')"
-                />
-              </n-form-item>
-            </n-gi>
-            <n-gi>
-              <n-form-item label="排序" path="sort">
-                <n-input-number style="width: 100%" v-model:value="formParams.sort" clearable />
-              </n-form-item>
-            </n-gi>
-          </n-grid>
-
-          <n-form-item label="状态" path="status">
-            <n-radio-group v-model:value="formParams.status" name="status">
-              <n-radio-button
-                v-for="status in statusOptions"
-                :key="status.value"
-                :value="status.value"
-                :label="status.label"
-              />
-            </n-radio-group>
-          </n-form-item>
-
-          <n-form-item label="备注" path="remark">
-            <n-input
-              type="textarea"
-              placeholder="请输入备注，没有可以不填"
-              v-model:value="formParams.remark"
-            />
-          </n-form-item>
-        </n-form>
-
-        <template #action>
-          <n-space>
-            <n-button @click="() => (showModal = false)">取消</n-button>
-            <n-button type="info" :loading="formBtnLoading" @click="confirmForm">立即发送</n-button>
-          </n-space>
-        </template>
-      </n-modal>
     </n-card>
+    <Edit ref="editRef" @reload-table="reloadTable" />
   </div>
 </template>
 
@@ -198,117 +97,25 @@
   import { computed, h, onMounted, reactive, ref } from 'vue';
   import { useDialog, useMessage } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
-  import { BasicForm, FormSchema, useForm } from '@/components/Form/index';
-  import {
-    Delete,
-    EditNotify,
-    EditLetter,
-    EditNotice,
-    List,
-    MaxSort,
-    Status,
-  } from '@/api/apply/notice';
-  import { columns, loadOptions } from './columns';
+  import { BasicForm, useForm } from '@/components/Form/index';
+  import { Delete, List, Status } from '@/api/apply/notice';
   import { BellOutlined, DeleteOutlined, NotificationOutlined, SendOutlined } from '@vicons/antd';
-  import { statusOptions } from '@/enums/optionsiEnum';
-  import { personOption, renderLabel, renderMultipleSelectTag } from '@/enums/systemMessageEnum';
-  import { adaModalWidth } from '@/utils/hotgo';
-  import { renderTag } from '@/utils';
-  import Editor from '@/components/Editor/editor.vue';
-  import { cloneDeep } from 'lodash-es';
-  import { GetMemberOption } from '@/api/org/user';
+  import { adaTableScrollX } from '@/utils/hotgo';
   import { usePermission } from '@/hooks/web/usePermission';
   import { useDictStore } from '@/store/modules/dict';
-
-  const dict = useDictStore();
-  const rules = {
-    title: {
-      required: true,
-      trigger: ['blur', 'input'],
-      message: '请输入消息标题',
-    },
-  };
-
-  const schemas: FormSchema[] = [
-    {
-      field: 'type',
-      component: 'NSelect',
-      label: '消息类型',
-      defaultValue: null,
-      componentProps: {
-        placeholder: '请选择消息类型',
-        options: dict.getOption('noticeTypeOptions'),
-        onUpdateValue: (e: any) => {
-          console.log(e);
-        },
-      },
-    },
-    {
-      field: 'title',
-      component: 'NInput',
-      label: '消息标题',
-      componentProps: {
-        placeholder: '请输入消息标题',
-        onUpdateValue: (e: any) => {
-          console.log(e);
-        },
-      },
-      rules: [{ message: '请输入消息标题', trigger: ['blur'] }],
-    },
-    {
-      field: 'content',
-      component: 'NInput',
-      label: '消息内容',
-      componentProps: {
-        placeholder: '请输入消息内容关键词',
-        showButton: false,
-        onUpdateValue: (e: any) => {
-          console.log(e);
-        },
-      },
-    },
-    {
-      field: 'status',
-      component: 'NSelect',
-      label: '状态',
-      defaultValue: null,
-      componentProps: {
-        placeholder: '请选择类型',
-        options: dict.getOption('sys_normal_disable'),
-        onUpdateValue: (e: any) => {
-          console.log(e);
-        },
-      },
-    },
-  ];
+  import { columns } from './columns';
+  import { schemas, loadOptions } from './model';
+  import Edit from './edit.vue';
 
   const { hasPermission } = usePermission();
   const message = useMessage();
+  const dict = useDictStore();
   const actionRef = ref();
   const dialog = useDialog();
-  const showModal = ref(false);
-  const formBtnLoading = ref(false);
   const searchFormRef = ref<any>({});
-  const formRef = ref<any>({});
+  const editRef = ref();
   const batchDeleteDisabled = ref(true);
   const checkedIds = ref([]);
-  const options = ref<personOption[]>();
-  const dialogWidth = computed(() => {
-    return adaModalWidth();
-  });
-
-  const resetFormParams = {
-    id: 0,
-    title: '',
-    type: 1,
-    tag: 0,
-    content: '',
-    receiver: null,
-    remark: '',
-    sort: 0,
-    status: 1,
-  };
-  let formParams = ref<any>(cloneDeep(resetFormParams));
 
   const actionColumn = reactive({
     width: 200,
@@ -351,6 +158,10 @@
     },
   });
 
+  const scrollX = computed(() => {
+    return adaTableScrollX(columns, actionColumn.width);
+  });
+
   const [register, {}] = useForm({
     gridProps: { cols: '1 s:1 m:2 l:3 xl:4 2xl:4' },
     labelWidth: 80,
@@ -358,12 +169,7 @@
   });
 
   function addTable(type) {
-    showModal.value = true;
-    formParams.value = cloneDeep(resetFormParams);
-    formParams.value.type = type;
-    MaxSort().then((res) => {
-      formParams.value.sort = res.sort;
-    });
+    editRef.value.openModal(null, type);
   }
 
   const loadDataTable = async (res) => {
@@ -379,52 +185,8 @@
     actionRef.value.reload();
   }
 
-  function confirmForm(e) {
-    e.preventDefault();
-    formBtnLoading.value = true;
-    formRef.value.validate((errors) => {
-      if (!errors) {
-        switch (formParams.value.type) {
-          case 1:
-            EditNotify(formParams.value).then((_res) => {
-              message.success('操作成功');
-              setTimeout(() => {
-                showModal.value = false;
-                reloadTable();
-              });
-            });
-            break;
-          case 2:
-            EditNotice(formParams.value).then((_res) => {
-              message.success('操作成功');
-              setTimeout(() => {
-                showModal.value = false;
-                reloadTable();
-              });
-            });
-            break;
-          case 3:
-            EditLetter(formParams.value).then((_res) => {
-              message.success('操作成功');
-              setTimeout(() => {
-                showModal.value = false;
-                reloadTable();
-              });
-            });
-            break;
-          default:
-            message.error('公告类型不支持');
-        }
-      } else {
-        message.error('请填写完整信息');
-      }
-      formBtnLoading.value = false;
-    });
-  }
-
   function handleEdit(record: Recordable) {
-    showModal.value = true;
-    formParams.value = cloneDeep(record);
+    editRef.value.openModal(record, record.type);
   }
 
   function handleDelete(record: Recordable) {
@@ -474,13 +236,8 @@
     });
   }
 
-  async function getMemberOption() {
-    options.value = await GetMemberOption();
-  }
-
-  onMounted(async () => {
+  onMounted(() => {
     loadOptions();
-    await getMemberOption();
   });
 </script>
 

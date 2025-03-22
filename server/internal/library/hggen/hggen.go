@@ -49,7 +49,7 @@ func Dao(ctx context.Context) (err error) {
 		inp.ImportPrefix = utils.GetImportPath(inp.Path)
 		inp.Path = tempPathPrefix + "/" + inp.Path
 
-		if err = gfile.Remove(inp.Path); err != nil {
+		if err = gfile.RemoveAll(inp.Path); err != nil {
 			err = gerror.Newf("清理临时生成目录失败:%v", err)
 			return err
 		}

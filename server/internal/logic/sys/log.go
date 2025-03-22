@@ -357,6 +357,18 @@ func (s *sSysLog) List(ctx context.Context, in *sysin.LogListInp) (list []*sysin
 		mod = mod.Where("member_id", in.MemberId)
 	}
 
+	// 操作人筛选
+	if len(in.ComplexMemberId) == 2 && len(in.ComplexMemberId[0]) > 0 {
+		memberIds, err := service.AdminMember().GetComplexMemberIds(ctx, in.ComplexMemberId[0], in.ComplexMemberId[1])
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(memberIds) == 0 {
+			return nil, 0, nil
+		}
+		mod = mod.WhereIn("member_id", memberIds)
+	}
+
 	// 访问IP
 	if in.Ip != "" {
 		mod = mod.Where("ip", in.Ip)

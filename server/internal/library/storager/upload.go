@@ -103,10 +103,6 @@ func DoUpload(ctx context.Context, typ string, file *ghttp.UploadFile) (result *
 
 // ValidateFileMeta 验证文件元数据
 func ValidateFileMeta(typ string, meta *FileMeta) (err error) {
-	if _, err = GetFileMimeType(meta.Ext); err != nil {
-		return
-	}
-
 	switch typ {
 	case KindImg:
 		if !IsImgType(meta.Ext) {
@@ -152,7 +148,7 @@ func ValidateFileMeta(typ string, meta *FileMeta) (err error) {
 		}
 
 		if len(config.FileType) > 0 && !validate.InSlice(strings.Split(config.FileType, `,`), meta.Ext) {
-			err = gerror.New("上传文件类型未经允许")
+			err = gerror.Newf("上传文件类型未经允许:%v", meta.Ext)
 			return
 		}
 	}
@@ -190,10 +186,7 @@ func GetFileMeta(file *ghttp.UploadFile) (meta *FileMeta, err error) {
 	meta.Size = file.Size
 	meta.Ext = Ext(file.Filename)
 	meta.Kind = GetFileKind(meta.Ext)
-	meta.MimeType, err = GetFileMimeType(meta.Ext)
-	if err != nil {
-		return
-	}
+	meta.MimeType = GetFileMimeType(meta.Ext)
 
 	// 兼容naiveUI
 	naiveType := meta.MimeType
@@ -272,10 +265,7 @@ func CheckMultipart(ctx context.Context, in *CheckMultipartParams) (res *CheckMu
 	meta.Size = in.Size
 	meta.Ext = Ext(in.FileName)
 	meta.Kind = GetFileKind(meta.Ext)
-	meta.MimeType, err = GetFileMimeType(meta.Ext)
-	if err != nil {
-		return
-	}
+	meta.MimeType = GetFileMimeType(meta.Ext)
 
 	// 兼容naiveUI
 	naiveType := "text/plain"

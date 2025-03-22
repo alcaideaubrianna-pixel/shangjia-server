@@ -53,7 +53,6 @@
   const dialog = useDialog();
   const batchDeleteDisabled = ref(true);
   const checkedIds = ref([]);
-
   const router = useRouter();
   const message = useMessage();
   const actionRef = ref();

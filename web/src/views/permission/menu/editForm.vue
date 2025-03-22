@@ -129,18 +129,12 @@
                 <template #trigger>
                   <n-icon :component="QuestionCircleOutlined" :size="18" :depth="3" />
                 </template>
-                请填写API路径地址，可同时作用于server端接口鉴权和web端细粒度权限。一次添加多个权限用,分割
+                请填写API路径地址，可同时作用于server端接口鉴权和web端细粒度权限
               </n-tooltip>
               分配权限
             </template>
           </n-form-item>
         </n-gi>
-        <!--              <n-gi>-->
-        <!--                <n-form-item label="权限名称" path="permissionName">-->
-        <!--                  <n-input placeholder="权限名称" v-model:value="formParams.permissionName" />-->
-        <!--                  <template #feedback>分配权限存在多个时，权限名称只绑定到第一个权限</template>-->
-        <!--                </n-form-item>-->
-        <!--              </n-gi>-->
       </n-grid>
 
       <n-grid cols="2 300:1 600:2">

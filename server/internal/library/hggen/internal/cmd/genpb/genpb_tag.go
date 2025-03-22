@@ -16,6 +16,7 @@ import (
 	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/gconv"
+
 	"hotgo/internal/library/hggen/internal/utility/utils"
 )
 
@@ -71,6 +72,10 @@ func (c CGenPb) doTagReplacement(ctx context.Context, content string) (string, e
 			if !lineTagMap.IsEmpty() {
 				tagContent := c.listMapToStructTag(lineTagMap)
 				lineTagMap.Clear()
+				// If already have it, don't add it anymore
+				if gstr.Contains(gstr.StrTill(line, "` //"), tagContent) {
+					continue
+				}
 				line, _ = gregex.ReplaceString("`(.+)`", fmt.Sprintf("`$1 %s`", tagContent), line)
 			}
 			lines[index] = line

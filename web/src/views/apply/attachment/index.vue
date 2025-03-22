@@ -21,7 +21,7 @@
         ref="actionRef"
         :actionColumn="actionColumn"
         @update:checked-row-keys="onCheckedRow"
-        :scroll-x="1280"
+        :scroll-x="scrollX"
         :resizeHeightOffset="-20000"
       >
         <template #tableTitle>
@@ -77,7 +77,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { h, onMounted, reactive, ref } from 'vue';
+  import { computed, h, onMounted, reactive, ref } from 'vue';
   import { useDialog, useMessage } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, useForm } from '@/components/Form/index';
@@ -93,6 +93,7 @@
   import FileUpload from '@/components/FileChooser/src/Upload.vue';
   import MultipartUpload from '@/components/Upload/multipartUpload.vue';
   import { Attachment } from '@/components/FileChooser/src/model';
+  import { adaTableScrollX } from '@/utils/hotgo';
 
   const message = useMessage();
   const actionRef = ref();
@@ -106,7 +107,7 @@
   const multipartUploadRef = ref();
 
   const actionColumn = reactive({
-    width: 120,
+    width: 132,
     title: '操作',
     key: 'action',
     fixed: 'right',
@@ -126,6 +127,10 @@
         ],
       });
     },
+  });
+
+  const scrollX = computed(() => {
+    return adaTableScrollX(columns, actionColumn.width);
   });
 
   const [register, {}] = useForm({

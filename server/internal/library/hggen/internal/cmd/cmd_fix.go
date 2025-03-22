@@ -9,13 +9,13 @@ package cmd
 import (
 	"context"
 
-	"github.com/gogf/gf/v2/os/gproc"
-	"github.com/gogf/gf/v2/text/gregex"
-
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gfile"
+	"github.com/gogf/gf/v2/os/gproc"
+	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
+
 	"hotgo/internal/library/hggen/internal/utility/mlog"
 )
 

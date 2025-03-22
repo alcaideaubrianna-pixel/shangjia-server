@@ -16,6 +16,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/text/gstr"
+	"github.com/gogf/gf/v2/util/gconv"
 	"github.com/gogf/gf/v2/util/grand"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
@@ -28,6 +29,7 @@ import (
 	"hotgo/internal/model/input/adminin"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
+	"hotgo/utility/convert"
 	"hotgo/utility/tree"
 	"hotgo/utility/validate"
 	"sync"
@@ -761,6 +763,52 @@ func (s *sAdminMember) Select(ctx context.Context, in *adminin.MemberSelectInp) 
 	if err != nil {
 		err = gerror.Wrap(err, "获取可选用户选项失败，请稍后重试！")
 	}
+	return
+}
+
+// GetLowerIds 获取指定用户的所有下级ID集合
+func (s *sAdminMember) GetLowerIds(ctx context.Context, memberId int64) (ids []int64, err error) {
+	array, err := dao.AdminMember.Ctx(ctx).
+		Fields("id").
+		WhereLike("tree", "%"+tree.GenLabel("", memberId)+"%").
+		Array()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, v := range array {
+		ids = append(ids, v.Int64())
+	}
+	return
+}
+
+// GetComplexMemberIds 组合查找符合条件的用户ID
+func (s *sAdminMember) GetComplexMemberIds(ctx context.Context, memberIdx, opt string) (ids []int64, err error) {
+	memberId := gconv.Int64(memberIdx)
+	count, err := s.FilterAuthModel(ctx, contexts.GetUserId(ctx)).WherePri(memberId).Count()
+	if err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return
+	}
+
+	switch opt {
+	case "1": // 仅查自己
+		ids = append(ids, memberId)
+	case "2": // 仅查下级
+		ids, err = s.GetLowerIds(ctx, memberId)
+		if err != nil {
+			return nil, err
+		}
+	default: // 查全部
+		ids, err = s.GetLowerIds(ctx, memberId)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, memberId)
+	}
+	ids = convert.UniqueSlice(ids)
 	return
 }
 

@@ -17,6 +17,7 @@ import (
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
+	"hotgo/internal/library/hgorm/hook"
 	"hotgo/internal/library/location"
 	"hotgo/internal/model"
 	"hotgo/internal/model/entity"
@@ -80,6 +81,18 @@ func (s *sAdminCash) List(ctx context.Context, in *adminin.CashListInp) (list []
 		mod = mod.Where("member_id", in.MemberId)
 	}
 
+	// 用户筛选
+	if len(in.ComplexMemberId) == 2 && len(in.ComplexMemberId[0]) > 0 {
+		memberIds, err := service.AdminMember().GetComplexMemberIds(ctx, in.ComplexMemberId[0], in.ComplexMemberId[1])
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(memberIds) == 0 {
+			return nil, 0, nil
+		}
+		mod = mod.WhereIn(dao.AdminOrder.Columns().MemberId, memberIds)
+	}
+
 	if len(in.CreatedAt) == 2 {
 		mod = mod.WhereBetween("created_at", gtime.New(in.CreatedAt[0]), gtime.New(in.CreatedAt[1]))
 	}
@@ -92,6 +105,9 @@ func (s *sAdminCash) List(ctx context.Context, in *adminin.CashListInp) (list []
 	if !isSuper {
 		mod = mod.Where("member_id", opMemberId)
 	}
+
+	// 申请人摘要信息
+	mod = mod.Hook(hook.MemberSummary)
 
 	totalCount, err = mod.Count()
 	if err != nil {
@@ -106,19 +122,6 @@ func (s *sAdminCash) List(ctx context.Context, in *adminin.CashListInp) (list []
 	if err = mod.Page(in.Page, in.PerPage).Order("id desc").Scan(&list); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return
-	}
-
-	for _, v := range list {
-		var member *entity.AdminMember
-		if err = dao.AdminMember.Ctx(ctx).Fields("real_name", "username").Where("id", v.MemberId).Scan(&member); err != nil {
-			err = gerror.Wrap(err, consts.ErrorORM)
-			return list, totalCount, err
-		}
-
-		if member != nil {
-			v.MemberName = member.RealName
-			v.MemberUser = member.Username
-		}
 	}
 	return
 }

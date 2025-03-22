@@ -1,5 +1,6 @@
 import { h } from 'vue';
 import { NTag } from 'naive-ui';
+import { renderPopoverMemberSumma } from '@/utils';
 
 const msgMap = {
   1: '处理中',
@@ -29,20 +30,12 @@ export const columns = [
     width: 100,
   },
   {
-    title: '用户名',
-    key: 'memberUser',
-    render(row) {
-      return row.memberUser;
-    },
+    title: '申请人',
+    key: 'memberId',
     width: 100,
-  },
-  {
-    title: '姓名',
-    key: 'memberName',
     render(row) {
-      return row.memberName;
+      return renderPopoverMemberSumma(row.memberBySumma);
     },
-    width: 100,
   },
   {
     title: '提现金额',

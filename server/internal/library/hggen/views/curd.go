@@ -403,7 +403,7 @@ func (l *gCurd) loadView(ctx context.Context, in *CurdPreviewInput) (err error) 
 		"importWebApi":     in.options.ImportWebApi,                                     // 导入webApi
 		"apiPrefix":        in.options.ApiPrefix,                                        // api前缀
 		"componentPrefix":  componentPrefix,                                             // vue子组件前缀
-		"in":  				in.In, 														 // 在模版中使用`in`参数,如:插件目录名称
+		"in":               in.In,                                                       // 在模版中使用`in`参数,如:插件目录名称
 	})
 
 	in.view = view
@@ -453,7 +453,7 @@ func (l *gCurd) DoBuild(ctx context.Context, in *CurdBuildInput) (err error) {
 
 		// 导入失败，将sql文件删除
 		if err = ImportSql(ctx, vi.Path); err != nil {
-			_ = gfile.Remove(vi.Path)
+			_ = gfile.RemoveAll(vi.Path)
 		}
 		return
 	}

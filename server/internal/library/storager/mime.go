@@ -158,26 +158,26 @@ func IsZipType(ext string) bool {
 // 如果文件类型没有加入系统映射类型，默认认为不是合法的文件类型。建议将常用的上传文件类型加入映射关系。
 // 当然你也可以不做限制，可以上传任意文件。但需要谨慎处理和设置相应的安全措施。
 // 获取任意扩展名的扩展类型：mime.TypeByExtension(".xls")
-func GetFileMimeType(ext string) (string, error) {
+func GetFileMimeType(ext string) string {
 	if mime, ok := imgType[ext]; ok {
-		return mime, nil
+		return mime
 	}
 	if mime, ok := docType[ext]; ok {
-		return mime, nil
+		return mime
 	}
 	if mime, ok := audioType[ext]; ok {
-		return mime, nil
+		return mime
 	}
 	if mime, ok := videoType[ext]; ok {
-		return mime, nil
+		return mime
 	}
 	if mime, ok := zipType[ext]; ok {
-		return mime, nil
+		return mime
 	}
 	if mime, ok := otherType[ext]; ok {
-		return mime, nil
+		return mime
 	}
-	return "", gerror.Newf("Invalid file type:%v", ext)
+	return "application/octet-stream"
 }
 
 // GetFileKind 获取文件上传类型

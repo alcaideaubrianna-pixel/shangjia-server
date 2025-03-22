@@ -3,7 +3,7 @@ import { cloneDeep } from 'lodash-es';
 import { FormSchema } from '@/components/Form';
 import { defRangeShortcuts } from '@/utils/dateUtil';
 import { useDictStore } from '@/store/modules/dict';
-import { renderOptionTag } from '@/utils';
+import { MemberSumma, renderOptionTag, renderPopoverMemberSumma } from '@/utils';
 
 export interface State {
   id: number;
@@ -20,6 +20,7 @@ export interface State {
   refundReason: string;
   rejectRefundReason: string;
   payLogPayType: string;
+  memberBySumma?: null | MemberSumma;
 }
 
 export const defaultState = {
@@ -51,12 +52,12 @@ export const rules = {};
 
 export const schemas = ref<FormSchema[]>([
   {
-    field: 'memberId',
-    component: 'NInput',
-    label: '管理员ID',
+    field: 'complexMemberId',
+    component: 'ComplexMemberPicker',
+    label: '下单用户',
     componentProps: {
-      placeholder: '请输入管理员ID',
-      onUpdateValue: (e: any) => {
+      placeholder: '请选择下单用户',
+      onInput: (e: any) => {
         console.log(e);
       },
     },
@@ -100,24 +101,17 @@ export const schemas = ref<FormSchema[]>([
 
 export const columns = [
   {
-    title: '订单ID',
-    key: 'id',
-    width: 100,
-  },
-  {
-    title: '管理员ID',
-    key: 'memberId',
-    width: 100,
-  },
-  {
     title: '业务订单号',
     key: 'orderSn',
-    width: 260,
+    width: 220,
   },
   {
-    title: '商户订单号',
-    key: 'payLogOutTradeNo',
-    width: 260,
+    title: '下单用户',
+    key: 'memberId',
+    width: 100,
+    render(row: State) {
+      return renderPopoverMemberSumma(row.memberBySumma);
+    },
   },
   {
     title: '支付方式',
@@ -142,6 +136,11 @@ export const columns = [
       return renderOptionTag('orderStatus', row.status);
     },
     width: 150,
+  },
+  {
+    title: '商户订单号',
+    key: 'payLogOutTradeNo',
+    width: 220,
   },
   {
     title: '创建时间',

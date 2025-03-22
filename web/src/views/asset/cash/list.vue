@@ -118,7 +118,7 @@
             </n-carousel>
           </n-form-item>
 
-          <n-form-item label="提现状态" path="status">
+          <n-form-item label="变更提现状态" path="status">
             <n-radio-group v-model:value="paymentParams.status" name="status">
               <n-radio-button
                 v-for="status in statusOptions"
@@ -187,16 +187,15 @@
 
   const schemas: FormSchema[] = [
     {
-      field: 'memberId',
-      component: 'NInput',
-      label: '管理员ID',
+      field: 'complexMemberId',
+      component: 'ComplexMemberPicker',
+      label: '申请人',
       componentProps: {
-        placeholder: '请输入管理员ID',
-        onUpdateValue: (e: any) => {
+        placeholder: '请选择申请人',
+        onInput: (e: any) => {
           console.log(e);
         },
       },
-      rules: [{ message: '请输入管理员ID', trigger: ['blur'] }],
     },
     {
       field: 'ip',

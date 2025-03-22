@@ -66,6 +66,13 @@
               v-bind="getComponentProps(schema)"
             />
           </template>
+          <template v-else-if="schema.component === 'ComplexMemberPicker'">
+            <ComplexMemberPicker
+              :class="{ isFull: schema.isFull !== false && getProps.isFull }"
+              v-model:value="formModel[schema.field]"
+              v-bind="getComponentProps(schema)"
+            />
+          </template>
           <!--动态渲染表单组件-->
           <component
             v-else
@@ -147,18 +154,16 @@
   import { createPlaceholderMessage } from './helper';
   import { useFormEvents } from './hooks/useFormEvents';
   import { useFormValues } from './hooks/useFormValues';
-
+  import ComplexMemberPicker from '../../ComplexMemberPicker/index.vue';
   import { basicProps } from './props';
   import { DownOutlined, UpOutlined, QuestionCircleOutlined } from '@vicons/antd';
-
   import type { Ref } from 'vue';
   import type { GridProps } from 'naive-ui/lib/grid';
   import type { FormSchema, FormProps, FormActionType } from './types/form';
-
-  import {isArray, isBoolean, isFunction} from '@/utils/is';
+  import { isArray, isBoolean, isFunction } from '@/utils/is';
   import { deepMerge } from '@/utils';
   import { usePermission } from '@/hooks/web/usePermission';
-  import {ActionItem} from "@/components/Table";
+  import { ActionItem } from '@/components/Table';
 
   export default defineComponent({
     name: 'BasicForm',
@@ -237,7 +242,7 @@
       });
 
       const getBindValue = computed(
-        () => ({ ...attrs, ...props, ...unref(getProps) } as Recordable)
+        () => ({ ...attrs, ...props, ...unref(getProps) }) as Recordable
       );
 
       const getSchema = computed((): FormSchema[] => {

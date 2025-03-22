@@ -6,6 +6,7 @@
 package adminin
 
 import (
+	"hotgo/internal/library/hgorm/hook"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/form"
 )
@@ -24,13 +25,13 @@ type CashViewModel struct {
 type CashListInp struct {
 	form.PageReq
 	form.StatusReq
-	MemberId  int64   `json:"memberId"`
-	CreatedAt []int64 `json:"created_at"`
+	MemberId        int64    `json:"memberId"`
+	CreatedAt       []int64  `json:"created_at"`
+	ComplexMemberId []string `json:"complexMemberId" dc:"申请人"`
 }
 
 type CashListModel struct {
-	MemberUser string `json:"memberUser"`
-	MemberName string `json:"memberName"`
+	MemberBySumma *hook.MemberSumma `json:"memberBySumma"   dc:"申请人信息"`
 	entity.AdminCash
 }
 

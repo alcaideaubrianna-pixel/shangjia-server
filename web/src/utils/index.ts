@@ -183,7 +183,6 @@ export const renderPopoverMemberSumma = (member: MemberSumma | null | undefined)
         h(
           NButton,
           {
-            strong: true,
             size: 'small',
             text: true,
             iconPlacement: 'right',

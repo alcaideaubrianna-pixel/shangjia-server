@@ -14,6 +14,7 @@ import (
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/hgorm/handler"
+	"hotgo/internal/library/hgorm/hook"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/adminin"
 	"hotgo/internal/model/input/form"
@@ -174,6 +175,18 @@ func (s *sAdminCreditsLog) List(ctx context.Context, in *adminin.CreditsLogListI
 		mod = mod.Where(dao.AdminCreditsLog.Columns().MemberId, in.MemberId)
 	}
 
+	// 用户筛选
+	if len(in.ComplexMemberId) == 2 && len(in.ComplexMemberId[0]) > 0 {
+		memberIds, err := service.AdminMember().GetComplexMemberIds(ctx, in.ComplexMemberId[0], in.ComplexMemberId[1])
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(memberIds) == 0 {
+			return nil, 0, nil
+		}
+		mod = mod.WhereIn(dao.AdminOrder.Columns().MemberId, memberIds)
+	}
+
 	// 查询应用id
 	if in.AppId != "" {
 		mod = mod.WhereLike(dao.AdminCreditsLog.Columns().AppId, in.AppId)
@@ -209,7 +222,10 @@ func (s *sAdminCreditsLog) List(ctx context.Context, in *adminin.CreditsLogListI
 		mod = mod.WhereBetween(dao.AdminCreditsLog.Columns().CreatedAt, in.CreatedAt[0], in.CreatedAt[1])
 	}
 
-	totalCount, err = mod.Clone().Count(1)
+	// 操作人摘要信息
+	mod = mod.Hook(hook.MemberSummary)
+
+	totalCount, err = mod.Clone().Count()
 	if err != nil {
 		return
 	}

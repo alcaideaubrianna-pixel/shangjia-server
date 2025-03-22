@@ -2,18 +2,18 @@ import { ref } from 'vue';
 import { FormSchema } from '@/components/Form';
 import { defRangeShortcuts } from '@/utils/dateUtil';
 import { useDictStore } from '@/store/modules/dict';
-import { renderOptionTag } from '@/utils';
+import { renderOptionTag, renderPopoverMemberSumma } from '@/utils';
 
 const dict = useDictStore();
 
 export const schemas = ref<FormSchema[]>([
   {
-    field: 'memberId',
-    component: 'NInput',
-    label: '管理员ID',
+    field: 'complexMemberId',
+    component: 'ComplexMemberPicker',
+    label: '选择用户',
     componentProps: {
-      placeholder: '请输入管理员ID',
-      onUpdateValue: (e: any) => {
+      placeholder: '请选择用户',
+      onInput: (e: any) => {
         console.log(e);
       },
     },
@@ -21,10 +21,10 @@ export const schemas = ref<FormSchema[]>([
   {
     field: 'creditGroup',
     component: 'NSelect',
-    label: '组别',
+    label: '变动组别',
     defaultValue: null,
     componentProps: {
-      placeholder: '请选择变动的组别',
+      placeholder: '请选择变动组别',
       options: dict.getOption('creditGroup'),
       onUpdateValue: (e: any) => {
         console.log(e);
@@ -86,9 +86,12 @@ export const columns = [
     width: 100,
   },
   {
-    title: '管理员ID',
+    title: '用户',
     key: 'memberId',
     width: 100,
+    render(row) {
+      return renderPopoverMemberSumma(row.memberBySumma);
+    },
   },
   {
     title: '变动类型',
@@ -99,7 +102,7 @@ export const columns = [
     width: 150,
   },
   {
-    title: '组别',
+    title: '变动组别',
     key: 'creditGroup',
     render(row) {
       return renderOptionTag('creditGroup', row.creditGroup);

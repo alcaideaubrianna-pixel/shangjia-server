@@ -81,7 +81,7 @@ export default () => {
     clearTimeout(timer);
     timer = setTimeout(() => {
       createSocket();
-    }, 2000);
+    }, 1000 * 10);
   };
 
   const init = () => {

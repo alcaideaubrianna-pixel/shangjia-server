@@ -25,7 +25,7 @@
 
 > 需要本地具有 git node golang 环境
 
-- node版本 >= 16.0.0
+- node版本 >= 20.0.0
 - golang版本 >= 1.23
 - mysql版本 >= 5.7，引擎需要是 innoDB
 - IDE推荐：Goland

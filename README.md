@@ -6,13 +6,13 @@
     </p>
     <p align="center">
         <a href="https://goframe.org/pages/viewpage.action?pageId=1114119" target="_blank">
-	        <img src="https://img.shields.io/badge/goframe-2.8-green" alt="goframe">
+	        <img src="https://img.shields.io/badge/goframe-2.9.0-green" alt="goframe">
 	    </a>
 	    <a href="https://v3.vuejs.org/" target="_blank">
 	        <img src="https://img.shields.io/badge/vue.js-vue3.4-green" alt="vue">
 	    </a>
 	    <a href="https://www.naiveui.com" target="_blank">
-	        <img src="https://img.shields.io/badge/naiveui-%3E2.39.0-blue" alt="naiveui">
+	        <img src="https://img.shields.io/badge/naiveui-%3E2.41.0-blue" alt="naiveui">
 	    </a>
 		<a href="https://www.tslang.cn/" target="_blank">
 	        <img src="https://img.shields.io/badge/typescript-%3E4.0.0-blue" alt="typescript">
@@ -136,7 +136,7 @@
 
 * 本项目包含的第三方源码和二进制文件之版权信息另行标注。
 
-* 版权所有Copyright © 2020-2024 by Ms (https://github.com/bufanyun/hotgo)
+* 版权所有Copyright © 2020-2025 by Ms (https://github.com/bufanyun/hotgo)
 
 * All rights reserved。
 
@@ -154,7 +154,7 @@
 
 
 ## [感谢JetBrains提供的免费GoLand](https://jb.gg/OpenSource)
-[![avatar](https://camo.githubusercontent.com/323657c6e81419b8e151e9da4c71f409e3fcc65d630535170c59fe4807dbc905/68747470733a2f2f676f6672616d652e6f72672f646f776e6c6f61642f7468756d626e61696c732f313131343131392f6a6574627261696e732e706e67)](https://jb.gg/OpenSource)
+[![avatar](https://resources.jetbrains.com/storage/products/company/brand/logos/jb_beam.svg)](https://jb.gg/OpenSource)
 
 
 ## License

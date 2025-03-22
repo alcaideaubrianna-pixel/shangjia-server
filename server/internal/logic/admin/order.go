@@ -13,6 +13,7 @@ import (
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/library/hgorm"
 	"hotgo/internal/library/hgorm/handler"
+	"hotgo/internal/library/hgorm/hook"
 	"hotgo/internal/library/payment"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/adminin"
@@ -276,10 +277,25 @@ func (s *sAdminOrder) List(ctx context.Context, in *adminin.OrderListInp) (list 
 		mod = mod.Where(dao.AdminOrder.Columns().MemberId, in.MemberId)
 	}
 
+	// 下单用户筛选
+	if len(in.ComplexMemberId) == 2 && len(in.ComplexMemberId[0]) > 0 {
+		memberIds, err := service.AdminMember().GetComplexMemberIds(ctx, in.ComplexMemberId[0], in.ComplexMemberId[1])
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(memberIds) == 0 {
+			return nil, 0, nil
+		}
+		mod = mod.WhereIn(dao.AdminOrder.Columns().MemberId, memberIds)
+	}
+
 	mod = mod.LeftJoin(hgorm.GenJoinOnRelation(
 		dao.AdminOrder.Table(), dao.AdminOrder.Columns().OrderSn, // 主表表名,关联条件
 		dao.PayLog.Table(), "payLog", dao.PayLog.Columns().OrderSn, // 关联表表名,别名,关联条件
 	)...)
+
+	// 操作人摘要信息
+	mod = mod.Hook(hook.MemberSummary)
 
 	totalCount, err = mod.Clone().Count(1)
 	if err != nil {
