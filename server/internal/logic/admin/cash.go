@@ -90,7 +90,7 @@ func (s *sAdminCash) List(ctx context.Context, in *adminin.CashListInp) (list []
 		if len(memberIds) == 0 {
 			return nil, 0, nil
 		}
-		mod = mod.WhereIn(dao.AdminOrder.Columns().MemberId, memberIds)
+		mod = mod.WhereIn("member_id", memberIds)
 	}
 
 	if len(in.CreatedAt) == 2 {

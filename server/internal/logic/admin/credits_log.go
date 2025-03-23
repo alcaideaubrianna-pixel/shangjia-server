@@ -184,7 +184,7 @@ func (s *sAdminCreditsLog) List(ctx context.Context, in *adminin.CreditsLogListI
 		if len(memberIds) == 0 {
 			return nil, 0, nil
 		}
-		mod = mod.WhereIn(dao.AdminOrder.Columns().MemberId, memberIds)
+		mod = mod.WhereIn(dao.AdminCreditsLog.Columns().MemberId, memberIds)
 	}
 
 	// 查询应用id
