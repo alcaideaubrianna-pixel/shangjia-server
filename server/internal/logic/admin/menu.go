@@ -7,12 +7,6 @@ package admin
 
 import (
 	"context"
-	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/text/gstr"
-	"github.com/gogf/gf/v2/util/gconv"
-	"github.com/gogf/gf/v2/util/gmode"
 	"hotgo/api/admin/role"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
@@ -25,6 +19,13 @@ import (
 	"hotgo/internal/service"
 	"hotgo/utility/convert"
 	"hotgo/utility/validate"
+
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/text/gstr"
+	"github.com/gogf/gf/v2/util/gconv"
+	"github.com/gogf/gf/v2/util/gmode"
 )
 
 type sAdminMenu struct{}
@@ -44,7 +45,7 @@ func (s *sAdminMenu) Model(ctx context.Context, option ...*handler.Option) *gdb.
 
 // Delete 删除
 func (s *sAdminMenu) Delete(ctx context.Context, in *adminin.MenuDeleteInp) (err error) {
-	exist, err := dao.AdminMenu.Ctx(ctx).Where("pid", in.Id).One()
+	exist, err := dao.AdminMenu.Ctx(ctx).Where(dao.AdminMenu.Columns().Pid, in.Id).One()
 	if err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return err
@@ -52,7 +53,7 @@ func (s *sAdminMenu) Delete(ctx context.Context, in *adminin.MenuDeleteInp) (err
 	if !exist.IsEmpty() {
 		return gerror.New("请先删除该菜单下的所有菜单！")
 	}
-	_, err = dao.AdminMenu.Ctx(ctx).Where("id", in.Id).Delete()
+	_, err = dao.AdminMenu.Ctx(ctx).Where(dao.AdminMenu.Columns().Id, in.Id).Delete()
 	return
 }
 
@@ -105,7 +106,7 @@ func (s *sAdminMenu) Edit(ctx context.Context, in *adminin.MenuEditInp) (err err
 		}
 
 		if in.Id > 0 {
-			if _, err = dao.AdminMenu.Ctx(ctx).Where("id", in.Id).Data(in).Update(); err != nil {
+			if _, err = dao.AdminMenu.Ctx(ctx).Where(dao.AdminMenu.Columns().Id, in.Id).Data(in).Update(); err != nil {
 				err = gerror.Wrap(err, "修改菜单失败！")
 				return err
 			}
@@ -178,17 +179,17 @@ func (s *sAdminMenu) GetMenuList(ctx context.Context, memberId int64) (res *role
 		allMenus []*adminin.MenuRouteSummary
 		menus    []*adminin.MenuRouteSummary
 		treeMap  = make(map[string][]*adminin.MenuRouteSummary)
-		mod      = dao.AdminMenu.Ctx(ctx).Where("status", consts.StatusEnabled).WhereIn("type", []int{1, 2})
+		mod      = dao.AdminMenu.Ctx(ctx).Where(dao.AdminMenu.Columns().Status, consts.StatusEnabled).WhereIn(dao.AdminMenu.Columns().Type, []int{1, 2})
 	)
 
 	// 非超管验证允许的菜单列表
 	if !service.AdminMember().VerifySuperId(ctx, memberId) {
-		menuIds, err := dao.AdminRoleMenu.Ctx(ctx).Fields("menu_id").Where("role_id", contexts.GetRoleId(ctx)).Array()
+		menuIds, err := dao.AdminRoleMenu.Ctx(ctx).Fields(dao.AdminRoleMenu.Columns().MenuId).Where(dao.AdminRoleMenu.Columns().RoleId, contexts.GetRoleId(ctx)).Array()
 		if err != nil {
 			return nil, err
 		}
 		if len(menuIds) > 0 {
-			pidList, err := dao.AdminMenu.Ctx(ctx).Fields("pid").WhereIn("id", menuIds).Group("pid").Array()
+			pidList, err := dao.AdminMenu.Ctx(ctx).Fields(dao.AdminMenu.Columns().Pid).WhereIn(dao.AdminMenu.Columns().Id, menuIds).Group("pid").Array()
 			if err != nil {
 				return nil, err
 			}
@@ -196,10 +197,10 @@ func (s *sAdminMenu) GetMenuList(ctx context.Context, memberId int64) (res *role
 				menuIds = append(pidList, menuIds...)
 			}
 		}
-		mod = mod.Where("id", menuIds)
+		mod = mod.Where(dao.AdminMenu.Columns().Id, menuIds)
 	}
 
-	if err = mod.Order("sort asc,id desc").Scan(&allMenus); err != nil || len(allMenus) == 0 {
+	if err = mod.Order(dao.AdminMenu.Columns().Sort, dao.AdminMenu.Columns().Id, "desc").Scan(&allMenus); err != nil || len(allMenus) == 0 {
 		return
 	}
 
@@ -237,12 +238,14 @@ func (s *sAdminMenu) LoginPermissions(ctx context.Context, memberId int64) (list
 
 	var (
 		allPermissions []*Permissions
-		mod            = dao.AdminMenu.Ctx(ctx).Fields("permissions").Where("status", consts.StatusEnabled).Where("permissions != ?", "")
+		mod            = dao.AdminMenu.Ctx(ctx).Fields(dao.AdminMenu.Columns().Permissions).
+				Where(dao.AdminMenu.Columns().Status, consts.StatusEnabled).
+				WhereNot(dao.AdminMenu.Columns().Permissions, "")
 	)
 
 	// 非超管验证允许的菜单列表
 	if !service.AdminMember().VerifySuperId(ctx, memberId) {
-		menuIds, err := dao.AdminRoleMenu.Ctx(ctx).Fields("menu_id").Where("role_id", contexts.GetRoleId(ctx)).Array()
+		menuIds, err := dao.AdminRoleMenu.Ctx(ctx).Fields(dao.AdminRoleMenu.Columns().MenuId).Where(dao.AdminRoleMenu.Columns().RoleId, contexts.GetRoleId(ctx)).Array()
 		if err != nil {
 			return nil, err
 		}

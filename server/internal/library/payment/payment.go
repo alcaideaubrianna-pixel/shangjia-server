@@ -8,15 +8,16 @@ package payment
 import (
 	"context"
 	"fmt"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gogf/gf/v2/util/grand"
 	"hotgo/internal/consts"
+	"hotgo/internal/dao"
 	"hotgo/internal/library/payment/alipay"
 	"hotgo/internal/library/payment/qqpay"
 	"hotgo/internal/library/payment/wxpay"
 	"hotgo/internal/model/input/payin"
 	"hotgo/utility/validate"
+
+	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/grand"
 )
 
 // PayClient 支付客户端
@@ -53,40 +54,40 @@ func New(name ...string) PayClient {
 }
 
 // GenOrderSn 生成业务订单号
-func GenOrderSn() string {
+func GenOrderSn(ctx context.Context) string {
 	orderSn := fmt.Sprintf("HG@%v%v", gtime.Now().Format("YmdHis"), grand.S(4))
-	count, err := g.Model("pay_log").Where("order_sn", orderSn).Count()
+	count, err := dao.PayLog.Ctx(ctx).Where(dao.PayLog.Columns().OrderSn, orderSn).Count()
 	if err != nil {
 		panic(fmt.Sprintf("payment.GenOrderSn err:%+v", err))
 	}
 	if count > 0 {
-		return GenOrderSn()
+		return GenOrderSn(ctx)
 	}
 	return orderSn
 }
 
 // GenOutTradeNo 生成商户订单号
-func GenOutTradeNo() string {
+func GenOutTradeNo(ctx context.Context) string {
 	outTradeNo := fmt.Sprintf("%v%v", gtime.Now().Format("YmdHis"), grand.N(10000000, 99999999))
-	count, err := g.Model("pay_log").Where("out_trade_no", outTradeNo).Count()
+	count, err := dao.PayLog.Ctx(ctx).Where(dao.PayLog.Columns().OutTradeNo, outTradeNo).Count()
 	if err != nil {
 		panic(fmt.Sprintf("payment.GenOutTradeNo err:%+v", err))
 	}
 	if count > 0 {
-		return GenOutTradeNo()
+		return GenOutTradeNo(ctx)
 	}
 	return outTradeNo
 }
 
 // GenRefundSn 生成退款订单号
-func GenRefundSn() string {
+func GenRefundSn(ctx context.Context) string {
 	outTradeNo := fmt.Sprintf("%v%v", gtime.Now().Format("YmdHis"), grand.N(10000, 99999))
-	count, err := g.Model("pay_refund").Where("refund_trade_no", outTradeNo).Count()
+	count, err := dao.PayRefund.Ctx(ctx).Where(dao.PayRefund.Columns().RefundTradeNo, outTradeNo).Count()
 	if err != nil {
 		panic(fmt.Sprintf("payment.GenRefundSn err:%+v", err))
 	}
 	if count > 0 {
-		return GenRefundSn()
+		return GenRefundSn(ctx)
 	}
 	return outTradeNo
 }

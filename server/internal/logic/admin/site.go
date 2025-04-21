@@ -258,7 +258,7 @@ func (s *sAdminSite) handleLogin(ctx context.Context, mb *entity.AdminMember) (r
 
 // getLoginRoleAndDept 获取登录的角色和部门信息
 func (s *sAdminSite) getLoginRoleAndDept(ctx context.Context, roleId, deptId int64) (role *entity.AdminRole, dept *entity.AdminDept, err error) {
-	if err = dao.AdminRole.Ctx(ctx).Fields("id,key,status").WherePri(roleId).Scan(&role); err != nil {
+	if err = dao.AdminRole.Ctx(ctx).Fields(dao.AdminRole.Columns().Id, dao.AdminRole.Columns().Key, dao.AdminRole.Columns().Status).WherePri(roleId).Scan(&role); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return
 	}
@@ -273,7 +273,7 @@ func (s *sAdminSite) getLoginRoleAndDept(ctx context.Context, roleId, deptId int
 		return
 	}
 
-	if err = dao.AdminDept.Ctx(ctx).Fields("id,type,status").WherePri(deptId).Scan(&dept); err != nil {
+	if err = dao.AdminDept.Ctx(ctx).Fields(dao.AdminDept.Columns().Id, dao.AdminDept.Columns().Type, dao.AdminDept.Columns().Status).WherePri(deptId).Scan(&dept); err != nil {
 		err = gerror.Wrap(err, "获取部门信息失败，请稍后重试！")
 		return
 	}

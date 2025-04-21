@@ -7,11 +7,13 @@ package addons
 
 import (
 	"context"
+	"hotgo/internal/consts"
+	"hotgo/internal/dao"
+
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
-	"hotgo/internal/consts"
 )
 
 // InstallRecord 安装记录
@@ -24,11 +26,11 @@ type InstallRecord struct {
 }
 
 func GetModel(ctx context.Context) *gdb.Model {
-	return g.Model("sys_addons_install").Ctx(ctx)
+	return dao.SysAddonsInstall.Ctx(ctx)
 }
 
 func ScanInstall(m Module) (record *InstallRecord, err error) {
-	err = GetModel(m.Ctx()).Where("name", m.GetSkeleton().Name).Scan(&record)
+	err = GetModel(m.Ctx()).Where(dao.SysAddonsInstall.Columns().Name, m.GetSkeleton().Name).Scan(&record)
 	return
 }
 
@@ -56,13 +58,13 @@ func Install(m Module) (err error) {
 	}
 
 	data := g.Map{
-		"name":    m.GetSkeleton().Name,
-		"version": m.GetSkeleton().Version,
-		"status":  consts.AddonsInstallStatusOk,
+		dao.SysAddonsInstall.Columns().Name:    m.GetSkeleton().Name,
+		dao.SysAddonsInstall.Columns().Version: m.GetSkeleton().Version,
+		dao.SysAddonsInstall.Columns().Status:  consts.AddonsInstallStatusOk,
 	}
 	return g.DB().Transaction(m.Ctx(), func(ctx context.Context, tx gdb.TX) error {
 		if record != nil {
-			_, _ = GetModel(ctx).Where("id", record.Id).Delete()
+			_, _ = GetModel(ctx).Where(dao.SysAddonsInstall.Columns().Id, record.Id).Delete()
 		}
 
 		if _, err = GetModel(ctx).Data(data).OmitEmptyData().Insert(); err != nil {
@@ -84,10 +86,10 @@ func Upgrade(m Module) (err error) {
 	}
 
 	data := g.Map{
-		"version": m.GetSkeleton().Version,
+		dao.SysAddonsInstall.Columns().Version: m.GetSkeleton().Version,
 	}
 	return g.DB().Transaction(m.Ctx(), func(ctx context.Context, tx gdb.TX) error {
-		if _, err = GetModel(ctx).Where("id", record.Id).Data(data).Update(); err != nil {
+		if _, err = GetModel(ctx).Where(dao.SysAddonsInstall.Columns().Id, record.Id).Data(data).Update(); err != nil {
 			return err
 		}
 		return m.Upgrade(ctx)
@@ -106,11 +108,11 @@ func UnInstall(m Module) (err error) {
 	}
 
 	data := g.Map{
-		"version": m.GetSkeleton().Version,
-		"status":  consts.AddonsInstallStatusUn,
+		dao.SysAddonsInstall.Columns().Version: m.GetSkeleton().Version,
+		dao.SysAddonsInstall.Columns().Status:  consts.AddonsInstallStatusUn,
 	}
 	return g.DB().Transaction(m.Ctx(), func(ctx context.Context, tx gdb.TX) error {
-		if _, err = GetModel(ctx).Where("id", record.Id).Data(data).Update(); err != nil {
+		if _, err = GetModel(ctx).Where(dao.SysAddonsInstall.Columns().Id, record.Id).Data(data).Update(); err != nil {
 			return err
 		}
 		return m.UnInstall(ctx)

@@ -7,14 +7,16 @@ package handler
 
 import (
 	"context"
-	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/text/gstr"
 	"hotgo/internal/consts"
+	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/model/entity"
 	"hotgo/utility/convert"
 	"hotgo/utility/tree"
+
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/text/gstr"
 )
 
 // FilterAuth 过滤数据权限
@@ -56,7 +58,7 @@ func FilterAuthWithField(filterField string) func(m *gdb.Model) *gdb.Model {
 			return m
 		}
 
-		err := g.Model("admin_role").Where("id", co.User.RoleId).Scan(&role)
+		err := dao.AdminRole.Ctx(ctx).Where(dao.AdminRole.Columns().Id, co.User.RoleId).Scan(&role)
 		if err != nil {
 			g.Log().Panicf(ctx, "failed to role information err:%+v", err)
 		}
@@ -71,7 +73,7 @@ func FilterAuthWithField(filterField string) func(m *gdb.Model) *gdb.Model {
 		}
 
 		getDeptIds := func(in interface{}) []gdb.Value {
-			ds, err := g.Model("admin_member").Fields("id").Where("dept_id", in).Array()
+			ds, err := dao.AdminMember.Ctx(ctx).Fields(dao.AdminMember.Columns().Id).Where(dao.AdminMember.Columns().DeptId, in).Array()
 			if err != nil {
 				g.Log().Panic(ctx, "failed to get member dept data")
 			}
@@ -102,9 +104,9 @@ func FilterAuthWithField(filterField string) func(m *gdb.Model) *gdb.Model {
 
 // GetDeptAndSub 获取指定部门的所有下级，含本部门
 func GetDeptAndSub(ctx context.Context, deptId int64) (ids []int64) {
-	array, err := g.Model("admin_dept").
-		WhereLike("tree", "%"+tree.GetIdLabel(deptId)+"%").
-		Fields("id").
+	array, err := dao.AdminDept.Ctx(ctx).
+		WhereLike(dao.AdminDept.Columns().Tree, "%"+tree.GetIdLabel(deptId)+"%").
+		Fields(dao.AdminDept.Columns().Id).
 		Array()
 	if err != nil {
 		g.Log().Panicf(ctx, "GetDeptAndSub err:%+v", err)
@@ -121,9 +123,9 @@ func GetDeptAndSub(ctx context.Context, deptId int64) (ids []int64) {
 
 // GetSelfAndSub 获取直属下级，包含自己
 func GetSelfAndSub(ctx context.Context, memberId int64) (ids []int64) {
-	array, err := g.Model("admin_member").
-		Where("pid", memberId).
-		Fields("id").
+	array, err := dao.AdminMember.Ctx(ctx).
+		Where(dao.AdminMember.Columns().Pid, memberId).
+		Fields(dao.AdminMember.Columns().Id).
 		Array()
 	if err != nil {
 		g.Log().Panicf(ctx, "GetSelfAndSub err:%+v", err)
@@ -140,9 +142,9 @@ func GetSelfAndSub(ctx context.Context, memberId int64) (ids []int64) {
 
 // GetSelfAndAllSub 获取全部下级，包含自己
 func GetSelfAndAllSub(ctx context.Context, memberId int64) (ids []int64) {
-	array, err := g.Model("admin_member").
-		WhereLike("tree", "%"+tree.GetIdLabel(memberId)+"%").
-		Fields("id").
+	array, err := dao.AdminMember.Ctx(ctx).
+		WhereLike(dao.AdminMember.Columns().Tree, "%"+tree.GetIdLabel(memberId)+"%").
+		Fields(dao.AdminMember.Columns().Id).
 		Array()
 	if err != nil {
 		g.Log().Panicf(ctx, "GetSelfAndAllSub err:%+v", err)

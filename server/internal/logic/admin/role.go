@@ -7,10 +7,6 @@ package admin
 
 import (
 	"context"
-	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/encoding/gjson"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/casbin"
@@ -24,6 +20,11 @@ import (
 	"hotgo/utility/tree"
 	"hotgo/utility/validate"
 	"sort"
+
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/encoding/gjson"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 type sAdminRole struct{}
@@ -92,7 +93,7 @@ func (s *sAdminRole) List(ctx context.Context, in *adminin.RoleListInp) (res *ad
 
 // GetName 获取指定角色的名称
 func (s *sAdminRole) GetName(ctx context.Context, id int64) (name string, err error) {
-	r, err := dao.AdminRole.Ctx(ctx).Fields("name").WherePri(id).Order("id desc").Value()
+	r, err := dao.AdminRole.Ctx(ctx).Fields(dao.AdminRole.Columns().Name).WherePri(id).OrderDesc(dao.AdminRole.Columns().Id).Value()
 	if err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return
@@ -102,7 +103,7 @@ func (s *sAdminRole) GetName(ctx context.Context, id int64) (name string, err er
 
 // GetMemberList 获取指定用户的岗位列表
 func (s *sAdminRole) GetMemberList(ctx context.Context, id int64) (list []*adminin.RoleListModel, err error) {
-	if err = dao.AdminRole.Ctx(ctx).WherePri(id).Order("id desc").Scan(&list); err != nil {
+	if err = dao.AdminRole.Ctx(ctx).WherePri(id).OrderDesc(dao.AdminRole.Columns().Id).Scan(&list); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 	}
 	return
@@ -110,7 +111,7 @@ func (s *sAdminRole) GetMemberList(ctx context.Context, id int64) (list []*admin
 
 // GetPermissions 更改角色菜单权限
 func (s *sAdminRole) GetPermissions(ctx context.Context, in *adminin.GetPermissionsInp) (res *adminin.GetPermissionsModel, err error) {
-	values, err := dao.AdminRoleMenu.Ctx(ctx).Fields("menu_id").Where("role_id", in.RoleId).Array()
+	values, err := dao.AdminRoleMenu.Ctx(ctx).Fields(dao.AdminRoleMenu.Columns().MenuId).Where(dao.AdminRoleMenu.Columns().RoleId, in.RoleId).Array()
 	if err != nil {
 		return
 	}

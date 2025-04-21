@@ -84,7 +84,7 @@ func (s *sSysLoginLog) List(ctx context.Context, in *sysin.LoginLogListInp) (lis
 	for _, v := range list {
 		v.Os = useragent.GetOs(v.UserAgent)
 		v.Browser = useragent.GetBrowser(v.UserAgent)
-		v.SysLogId, err = dao.SysLog.Ctx(ctx).Fields("id").Where("req_id", v.ReqId).Value()
+		v.SysLogId, err = dao.SysLog.Ctx(ctx).Fields(dao.SysLog.Columns().Id).Where(dao.SysLog.Columns().ReqId, v.ReqId).Value()
 		if err != nil {
 			return nil, 0, err
 		}

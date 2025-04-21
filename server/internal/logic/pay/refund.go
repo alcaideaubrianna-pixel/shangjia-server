@@ -10,10 +10,6 @@ package pay
 import (
 	"context"
 	"fmt"
-	"github.com/gogf/gf/v2/encoding/gjson"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/net/ghttp"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/hgorm/handler"
@@ -25,6 +21,11 @@ import (
 	"hotgo/internal/service"
 	"hotgo/utility/convert"
 	"hotgo/utility/excel"
+
+	"github.com/gogf/gf/v2/encoding/gjson"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/net/ghttp"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/os/gctx"
@@ -76,7 +77,7 @@ func (s *sPayRefund) Refund(ctx context.Context, in *payin.PayRefundInp) (res *p
 	}
 	traceIds = append(traceIds, gctx.CtxId(ctx))
 
-	refundSn := payment.GenRefundSn()
+	refundSn := payment.GenRefundSn(ctx)
 
 	// 创建第三方平台退款
 	req := payin.RefundInp{

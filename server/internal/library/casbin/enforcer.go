@@ -7,6 +7,7 @@ package casbin
 
 import (
 	"context"
+	"fmt"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"net/http"
@@ -79,14 +80,18 @@ func loadPermissions(ctx context.Context) {
 		polices []*Policy
 		err     error
 	)
+	//别名拼接 r.key m.permissions
+	q := func(alias string, column string) string {
+		return fmt.Sprintf("%s.%s", alias, column)
+	}
 	err = g.Model(gstr.Join([]string{dao.AdminRole.Table(), "r"}, " ")).
 		LeftJoin(gstr.Join([]string{dao.AdminRoleMenu.Table(), "rm"}, " "), "r.id=rm.role_id").
 		LeftJoin(gstr.Join([]string{dao.AdminMenu.Table(), "m"}, " "), "rm.menu_id=m.id").
-		Fields("r.key,m.permissions").
-		Where("r.status", consts.StatusEnabled).
-		Where("m.status", consts.StatusEnabled).
-		Where("m.permissions !=?", "").
-		Where("r.key !=?", consts.SuperRoleKey).
+		Fields(q("r", dao.AdminRole.Columns().Key), q("m", dao.AdminMenu.Columns().Permissions)).
+		Where(q("r", dao.AdminRole.Columns().Status), consts.StatusEnabled).
+		Where(q("m", dao.AdminMenu.Columns().Status), consts.StatusEnabled).
+		Where(q("m", dao.AdminMenu.Columns().Permissions), "").
+		Where(q("r", dao.AdminRole.Columns().Key), consts.SuperRoleKey).
 		Scan(&polices)
 	if err != nil {
 		g.Log().Fatalf(ctx, "loadPermissions Scan err:%v", err)

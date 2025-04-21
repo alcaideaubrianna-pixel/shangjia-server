@@ -7,10 +7,11 @@ package hook
 
 import (
 	"context"
+	"hotgo/internal/dao"
+	"hotgo/utility/convert"
+
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/frame/g"
-	"hotgo/utility/convert"
 )
 
 // MemberInfo 后台用户信息
@@ -23,9 +24,9 @@ var MemberInfo = gdb.HookHandler{
 		for i, record := range result {
 			// 部门
 			if !record["dept_id"].IsEmpty() {
-				deptName, err := g.Model("admin_dept").Ctx(ctx).
-					Fields("name").
-					Where("id", record["dept_id"]).
+				deptName, err := dao.AdminDept.Ctx(ctx).
+					Fields(dao.AdminDept.Columns().Name).
+					Where(dao.AdminDept.Columns().Id, record["dept_id"]).
 					Value()
 				if err != nil {
 					break
@@ -35,9 +36,9 @@ var MemberInfo = gdb.HookHandler{
 
 			// 角色
 			if !record["role_id"].IsEmpty() {
-				roleName, err := g.Model("admin_role").Ctx(ctx).
-					Fields("name").
-					Where("id", record["role_id"]).
+				roleName, err := dao.AdminRole.Ctx(ctx).
+					Fields(dao.AdminRole.Columns().Name).
+					Where(dao.AdminRole.Columns().Id, record["role_id"]).
 					Value()
 				if err != nil {
 					break
@@ -109,7 +110,7 @@ var MemberSummary = gdb.HookHandler{
 		}
 
 		var members []*MemberSumma
-		if err = g.Model("admin_member").Ctx(ctx).Fields(MemberSumma{}).WhereIn("id", memberIds).Scan(&members); err != nil {
+		if err = dao.AdminMember.Ctx(ctx).Fields(MemberSumma{}).WhereIn(dao.AdminMember.Columns().Id, memberIds).Scan(&members); err != nil {
 			return nil, err
 		}
 

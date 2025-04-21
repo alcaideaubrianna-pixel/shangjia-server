@@ -39,7 +39,7 @@ func (c *cSms) SendBindSms(ctx context.Context, _ *common.SendBindSmsReq) (res *
 		return
 	}
 
-	if err = g.Model("admin_member").Fields("mobile").Where("id", memberId).Scan(&models); err != nil {
+	if err = dao.AdminMember.Ctx(ctx).Fields(dao.AdminMember.Columns().Mobile).Where(dao.AdminMember.Columns().Id, memberId).Scan(&models); err != nil {
 		return
 	}
 

@@ -7,17 +7,18 @@ package sys
 
 import (
 	"context"
-	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gogf/gf/v2/text/gstr"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
 	"hotgo/utility/simple"
+
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/text/gstr"
 )
 
 var AddonsMaskDemoField []string
@@ -47,11 +48,12 @@ func (s *sSysAddonsConfig) GetConfigByGroup(ctx context.Context, in *sysin.GetAd
 	var (
 		mod    = dao.SysAddonsConfig.Ctx(ctx)
 		models []*entity.SysAddonsConfig
+		cols   = dao.SysAddonsConfig.Columns()
 	)
 
-	if err = mod.Fields("key", "value", "type").
-		Where("addon_name", in.AddonName).
-		Where("group", in.Group).
+	if err = mod.Fields(cols.Key, cols.Value, cols.Type).
+		Where(cols.AddonName, in.AddonName).
+		Where(cols.Group, in.Group).
 		Scan(&models); err != nil {
 		return nil, err
 	}

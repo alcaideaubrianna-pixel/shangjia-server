@@ -7,14 +7,16 @@ package sys
 
 import (
 	"context"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
+	"fmt"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/hgorm"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/form"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
+
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 type sSysProvinces struct{}
@@ -206,9 +208,10 @@ func (s *sSysProvinces) UniqueId(ctx context.Context, in *sysin.ProvincesUniqueI
 // Select 省市区选项
 func (s *sSysProvinces) Select(ctx context.Context, in *sysin.ProvincesSelectInp) (res *sysin.ProvincesSelectModel, err error) {
 	res = new(sysin.ProvincesSelectModel)
-	mod := dao.SysProvinces.Ctx(ctx).Fields("id as value, title as label, level").Where("pid", in.Value)
+	cols := dao.SysProvinces.Columns()
+	mod := dao.SysProvinces.Ctx(ctx).Fields(fmt.Sprintf("%s as value, %s as label, %s ", cols.Id, cols.Title, cols.Level)).Where(cols.Pid, in.Value)
 
-	if err = mod.Order("sort asc,id asc").Scan(&res.List); err != nil {
+	if err = mod.OrderAsc(cols.Sort).OrderAsc(cols.Id).Scan(&res.List); err != nil {
 		err = gerror.Wrap(err, "获取省市区选项失败！")
 		return
 	}
