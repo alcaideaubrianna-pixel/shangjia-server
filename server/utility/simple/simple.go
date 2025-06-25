@@ -68,7 +68,7 @@ func CheckPassword(input, salt, hash string) (err error) {
 	}
 
 	if hash != gmd5.MustEncryptString(password+salt) {
-		err = gerror.New("用户密码不正确")
+		err = gerror.New("用户名或密码错误")
 		return
 	}
 	return
