@@ -176,6 +176,7 @@ type WechatConfig struct {
 type LoginConfig struct {
 	RegisterSwitch int     `json:"loginRegisterSwitch"`
 	CaptchaSwitch  int     `json:"loginCaptchaSwitch"`
+	CaptchaType    int     `json:"loginCaptchaType"`
 	Avatar         string  `json:"loginAvatar"`
 	RoleId         int64   `json:"loginRoleId"`
 	DeptId         int64   `json:"loginDeptId"`

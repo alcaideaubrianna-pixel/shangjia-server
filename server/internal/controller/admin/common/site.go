@@ -95,7 +95,11 @@ func (c *cSite) LoginConfig(ctx context.Context, _ *common.SiteLoginConfigReq) (
 
 // Captcha 登录验证码
 func (c *cSite) Captcha(ctx context.Context, _ *common.LoginCaptchaReq) (res *common.LoginCaptchaRes, err error) {
-	cid, base64 := captcha.Generate(ctx)
+	loginConf, err := service.SysConfig().GetLogin(ctx)
+	if err != nil {
+		return
+	}
+	cid, base64 := captcha.Generate(ctx, loginConf.CaptchaType)
 	res = &common.LoginCaptchaRes{Cid: cid, Base64: base64}
 	return
 }
