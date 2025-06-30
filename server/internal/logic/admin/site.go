@@ -154,7 +154,7 @@ func (s *sAdminSite) AccountLogin(ctx context.Context, in *adminin.AccountLoginI
 	}
 
 	if mb == nil {
-		err = gerror.New("账号不存在")
+		err = gerror.New("用户名或密码错误")
 		return
 	}
 

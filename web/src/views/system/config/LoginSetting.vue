@@ -12,6 +12,15 @@
           </n-radio-group>
         </n-form-item>
 
+        <n-form-item label="验证码方式" path="loginCaptchaType">
+          <n-radio-group v-model:value="formValue.loginCaptchaType" name="loginCaptchaType">
+            <n-space>
+              <n-radio :value="1">字符</n-radio>
+              <n-radio :value="2">算数</n-radio>
+            </n-space>
+          </n-radio-group>
+        </n-form-item>
+
         <n-form-item label="注册开关" path="loginRegisterSwitch">
           <n-radio-group v-model:value="formValue.loginRegisterSwitch" name="cashSwitch">
             <n-space>
@@ -113,6 +122,7 @@
   const formValue = ref({
     loginRegisterSwitch: 1,
     loginCaptchaSwitch: 1,
+    loginCaptchaType: 1, // 1: 'str' or 2: 'numMath'
     loginForceInvite: 2,
     loginAutoOpenId: 2,
     loginAvatar: '',

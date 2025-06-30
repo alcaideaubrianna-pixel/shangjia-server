@@ -82,6 +82,9 @@ func (s *sSysLoginLog) List(ctx context.Context, in *sysin.LoginLogListInp) (lis
 	}
 
 	for _, v := range list {
+		if v.Response.Contains("token") {
+			v.Response.Set("token", "******")
+		}
 		v.Os = useragent.GetOs(v.UserAgent)
 		v.Browser = useragent.GetBrowser(v.UserAgent)
 		v.SysLogId, err = dao.SysLog.Ctx(ctx).Fields(dao.SysLog.Columns().Id).Where(dao.SysLog.Columns().ReqId, v.ReqId).Value()

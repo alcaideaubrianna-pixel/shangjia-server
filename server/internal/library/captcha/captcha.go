@@ -7,6 +7,7 @@ package captcha
 
 import (
 	"context"
+	"hotgo/internal/consts"
 	"image/color"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -18,44 +19,52 @@ import (
 var store = base64Captcha.DefaultMemStore
 
 // Generate 生成验证码
-func Generate(ctx context.Context) (id string, base64 string) {
-	// 字符
-	//	driver := &base64Captcha.DriverString{
-	//		Height: 42,
-	//		Width:  100,
-	//		//NoiseCount:      50,
-	//		//ShowLineOptions: 20,
-	//		Length: 4,
-	//		BgColor: &color.RGBA{
-	//			R: 255,
-	//			G: 250,
-	//			B: 250,
-	//			A: 250,
-	//		},
-	//		Source: "0123456789", // abcdefghjkmnpqrstuvwxyz23456789
-	//		Fonts:  []string{"chromohv.ttf"},
-	//	}
+func Generate(ctx context.Context, captchaType int) (id string, base64 string) {
+	var err error
 
+	switch captchaType {
 	// 算数
-	driver := &base64Captcha.DriverMath{
-		Height:          42,
-		Width:           100,
-		NoiseCount:      0,
-		ShowLineOptions: 0,
-		BgColor: &color.RGBA{
-			R: 255,
-			G: 250,
-			B: 250,
-			A: 250,
-		},
-		Fonts: []string{"chromohv.ttf"},
+	case consts.CaptchaTypeMath:
+		driver := &base64Captcha.DriverMath{
+			Height:          42,
+			Width:           100,
+			NoiseCount:      0,
+			ShowLineOptions: 0,
+			BgColor: &color.RGBA{
+				R: 255,
+				G: 250,
+				B: 250,
+				A: 250,
+			},
+			Fonts: []string{"chromohv.ttf"},
+		}
+		c := base64Captcha.NewCaptcha(driver.ConvertFonts(), store)
+		id, base64, _, err = c.Generate()
+	// 字符
+	default:
+		driver := &base64Captcha.DriverString{
+			Height: 42,
+			Width:  100,
+			//NoiseCount:      50,
+			//ShowLineOptions: 20,
+			Length: 4,
+			BgColor: &color.RGBA{
+				R: 255,
+				G: 250,
+				B: 250,
+				A: 250,
+			},
+			Source: "abcdefghjkmnpqrstuvwxyz23456789", // abcdefghjkmnpqrstuvwxyz23456789
+			Fonts:  []string{"chromohv.ttf"},
+		}
+		c := base64Captcha.NewCaptcha(driver.ConvertFonts(), store)
+		id, base64, _, err = c.Generate()
 	}
 
-	c := base64Captcha.NewCaptcha(driver.ConvertFonts(), store)
-	id, base64, _, err := c.Generate()
 	if err != nil {
 		g.Log().Errorf(ctx, "captcha.Generate err:%+v", err)
 	}
+
 	return
 }
 
