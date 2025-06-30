@@ -207,7 +207,8 @@ func (s *sSysConfig) GetConfigByGroup(ctx context.Context, in *sysin.GetConfigIn
 	}
 
 	var models []*entity.SysConfig
-	if err = dao.SysConfig.Ctx(ctx).Fields("key", "value", "type").Where("group", in.Group).Scan(&models); err != nil {
+	cols := dao.SysConfig.Columns()
+	if err = dao.SysConfig.Ctx(ctx).Fields(cols.Key, cols.Value, cols.Type).Where(cols.Group, in.Group).Scan(&models); err != nil {
 		err = gerror.Wrapf(err, "获取配置分组[ %v ]失败，请稍后重试！", in.Group)
 		return
 	}

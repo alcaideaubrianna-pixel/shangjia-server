@@ -7,17 +7,18 @@ package location
 
 import (
 	"context"
+	"hotgo/internal/consts"
+	"hotgo/internal/dao"
+	"hotgo/internal/model/entity"
+	"hotgo/utility/tree"
+
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
-	"hotgo/internal/consts"
-	"hotgo/internal/model/entity"
-	"hotgo/utility/tree"
 )
 
 func GetModel(ctx context.Context) *gdb.Model {
-	return g.Model("sys_provinces").Ctx(ctx)
+	return dao.SysProvinces.Ctx(ctx)
 }
 
 // ParseSimpleRegion 通过地区ID解析地区名称，自动加入上级地区
@@ -30,7 +31,7 @@ func ParseSimpleRegion(ctx context.Context, id int64, spilt ...string) (string, 
 		err    error
 	)
 
-	if err = GetModel(ctx).Fields("title,level,tree").Where("id", id).Scan(&models); err != nil {
+	if err = GetModel(ctx).Fields(dao.SysProvinces.Columns().Title, dao.SysProvinces.Columns().Level, dao.SysProvinces.Columns().Tree).Where(dao.SysProvinces.Columns().Id, id).Scan(&models); err != nil {
 		return "", err
 	}
 
@@ -76,14 +77,14 @@ func ParseRegion(ctx context.Context, province int64, city int64, county int64, 
 	}
 
 	if province > 0 && province < 999999 {
-		provinceName, err = GetModel(ctx).Where("id", province).Fields("title").Value()
+		provinceName, err = GetModel(ctx).Where(dao.SysProvinces.Columns().Id, province).Fields(dao.SysProvinces.Columns().Title).Value()
 		if err != nil {
 			err = gerror.Wrap(err, consts.ErrorORM)
 			return "", err
 		}
 
 		if city > 0 {
-			cityName, err = GetModel(ctx).Where("id", city).Fields("title").Value()
+			cityName, err = GetModel(ctx).Where(dao.SysProvinces.Columns().Id, city).Fields(dao.SysProvinces.Columns().Title).Value()
 			if err != nil {
 				err = gerror.Wrap(err, consts.ErrorORM)
 				return "", err
@@ -91,7 +92,7 @@ func ParseRegion(ctx context.Context, province int64, city int64, county int64, 
 		}
 
 		if county > 0 {
-			countyName, err = GetModel(ctx).Where("id", county).Fields("title").Value()
+			countyName, err = GetModel(ctx).Where(dao.SysProvinces.Columns().Id, county).Fields(dao.SysProvinces.Columns().Title).Value()
 			if err != nil {
 				err = gerror.Wrap(err, consts.ErrorORM)
 				return "", err

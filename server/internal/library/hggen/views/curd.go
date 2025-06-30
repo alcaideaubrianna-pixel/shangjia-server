@@ -981,7 +981,7 @@ func (l *gCurd) generateSqlContent(ctx context.Context, in *CurdPreviewInput) (e
 		}
 
 		menuNames = convert.UniqueSlice(menuNames)
-		hasMenus, err := service.AdminMenu().Model(ctx).Fields("name").WhereIn("name", menuNames).Array()
+		hasMenus, err := service.AdminMenu().Model(ctx).Fields(dao.AdminMenu.Columns().Name).WhereIn(dao.AdminMenu.Columns().Name, menuNames).Array()
 		if err != nil {
 			return err
 		}

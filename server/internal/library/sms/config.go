@@ -7,9 +7,10 @@ package sms
 
 import (
 	"context"
-	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/frame/g"
+	"hotgo/internal/dao"
 	"hotgo/internal/model"
+
+	"github.com/gogf/gf/v2/database/gdb"
 )
 
 var config *model.SmsConfig
@@ -23,5 +24,5 @@ func GetConfig() *model.SmsConfig {
 }
 
 func GetModel(ctx context.Context) *gdb.Model {
-	return g.Model("sys_sms_log").Ctx(ctx)
+	return dao.SysSmsLog.Ctx(ctx)
 }

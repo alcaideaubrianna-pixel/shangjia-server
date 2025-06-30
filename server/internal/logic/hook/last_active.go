@@ -7,16 +7,18 @@ package hook
 
 import (
 	"context"
+	"hotgo/internal/consts"
+	"hotgo/internal/dao"
+	"hotgo/internal/library/contexts"
+	"hotgo/utility/simple"
+	"sync"
+	"time"
+
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gctx"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/os/gtimer"
-	"hotgo/internal/consts"
-	"hotgo/internal/library/contexts"
-	"hotgo/utility/simple"
-	"sync"
-	"time"
 )
 
 type visitor struct {
@@ -80,10 +82,9 @@ func (s *sHook) lastAdminActive(r *ghttp.Request) {
 
 	if allow(member.Id) {
 		simple.SafeGo(ctx, func(ctx context.Context) {
-			_, err := g.Model("admin_member").
-				Ctx(ctx).
-				Where("id", member.Id).
-				Data(g.Map{"last_active_at": gtime.Now()}).
+			_, err := dao.AdminMember.Ctx(ctx).
+				Where(dao.AdminMember.Columns().Id, member.Id).
+				Data(g.Map{dao.AdminMember.Columns().LastActiveAt: gtime.Now()}).
 				Update()
 			if err != nil {
 				g.Log().Warningf(ctx, "hook lastActive err:%+v, memberId:%v", err, member.Id)

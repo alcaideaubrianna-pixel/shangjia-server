@@ -8,13 +8,14 @@ package sys
 import (
 	"context"
 	"errors"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/dict"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
+
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 type sSysDictData struct{}
@@ -119,7 +120,7 @@ func (s *sSysDictData) List(ctx context.Context, in *sysin.DictDataListInp) (lis
 
 // GetId 获取指定类型的ID
 func (s *sSysDictData) GetId(ctx context.Context, t string) (id int64, err error) {
-	m := dao.SysDictType.Ctx(ctx).Fields("id").Where("type", t).Where("status", consts.StatusEnabled)
+	m := dao.SysDictType.Ctx(ctx).Fields(dao.SysDictType.Columns().Id).Where(dao.SysDictType.Columns().Type, t).Where(dao.SysDictType.Columns().Status, consts.StatusEnabled)
 	val, err := m.Value()
 	if err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
@@ -130,7 +131,7 @@ func (s *sSysDictData) GetId(ctx context.Context, t string) (id int64, err error
 
 // GetType 获取指定ID的类型标识
 func (s *sSysDictData) GetType(ctx context.Context, id int64) (types string, err error) {
-	m := dao.SysDictType.Ctx(ctx).Fields("type").Where("id", id).Where("status", consts.StatusEnabled)
+	m := dao.SysDictType.Ctx(ctx).Fields(dao.SysDictType.Columns().Type).Where(dao.SysDictType.Columns().Id, id).Where(dao.SysDictType.Columns().Status, consts.StatusEnabled)
 	val, err := m.Value()
 	if err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
@@ -141,8 +142,8 @@ func (s *sSysDictData) GetType(ctx context.Context, id int64) (types string, err
 
 // GetTypes 获取指定ID的所有类型标识，包含下级
 func (s *sSysDictData) GetTypes(ctx context.Context, id int64) (types []string, err error) {
-	columns, err := dao.SysDictType.Ctx(ctx).Fields("type").
-		Where("id", id).WhereOr("pid", id).Where("status", consts.StatusEnabled).
+	columns, err := dao.SysDictType.Ctx(ctx).Fields(dao.SysDictType.Columns().Type).
+		Where(dao.SysDictType.Columns().Id, id).WhereOr(dao.SysDictType.Columns().Pid, id).Where(dao.SysDictType.Columns().Status, consts.StatusEnabled).
 		Array()
 	types = g.NewVar(columns).Strings()
 	return

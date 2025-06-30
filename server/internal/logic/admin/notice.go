@@ -7,11 +7,7 @@ package admin
 
 import (
 	"context"
-	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gogf/gf/v2/util/gconv"
+	"fmt"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
@@ -23,6 +19,12 @@ import (
 	"hotgo/internal/websocket"
 	"hotgo/utility/simple"
 	"hotgo/utility/validate"
+
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/gconv"
 )
 
 type sAdminNotice struct{}
@@ -202,14 +204,15 @@ func (s *sAdminNotice) List(ctx context.Context, in *adminin.NoticeListInp) (lis
 		// 接收人头像组
 		if v.Type == consts.NoticeTypeLetter {
 			err = dao.AdminMember.Ctx(ctx).
-				Fields("real_name as name,avatar as src").
-				WhereIn("id", v.Receiver.Var().Int64s()).
+				Fields(fmt.Sprintf("%s as name,%s as src", dao.AdminMember.Columns().RealName, dao.AdminMember.Columns().Avatar)).
+				WhereIn(dao.AdminMember.Columns().Id, v.Receiver.Var().Int64s()).
 				Scan(&v.ReceiverGroup)
 			if err != nil {
 				return
 			}
 		}
-		if v.ReceiverGroup == nil || len(v.ReceiverGroup) == 0 {
+
+		if g.IsNil(v.ReceiverGroup) || len(v.ReceiverGroup) == 0 {
 			v.ReceiverGroup = make([]form.AvatarGroup, 0)
 		}
 
@@ -251,13 +254,13 @@ func (s *sAdminNotice) PullMessages(ctx context.Context, in *adminin.PullMessage
 	}
 
 	for _, v := range res.List {
-		count, _ := dao.AdminNoticeRead.Ctx(ctx).Where("notice_id", v.Id).Where("member_id", memberId).Count()
+		count, _ := dao.AdminNoticeRead.Ctx(ctx).Where(dao.AdminNoticeRead.Columns().NoticeId, v.Id).Where(dao.AdminNoticeRead.Columns().MemberId, memberId).Count()
 		if count > 0 {
 			v.IsRead = true
 		}
 
 		if v.Type == consts.NoticeTypeLetter {
-			val, err := dao.AdminMember.Ctx(ctx).Fields("avatar").Where("id", v.CreatedBy).Value()
+			val, err := dao.AdminMember.Ctx(ctx).Fields(dao.AdminMember.Columns().Avatar).Where(dao.AdminMember.Columns().Id, v.CreatedBy).Value()
 			if err == nil {
 				v.SenderAvatar = val.String()
 			}
@@ -322,8 +325,8 @@ func (s *sAdminNotice) UnreadCount(ctx context.Context, in *adminin.NoticeUnread
 // messageIds 获取我的消息所有的消息ID
 func (s *sAdminNotice) messageIds(ctx context.Context, memberId int64) (ids []int64, err error) {
 	columns, err := s.Model(ctx, &handler.Option{FilterAuth: false}).
-		Fields("id").
-		Where("status", consts.StatusEnabled).
+		Fields(dao.AdminNotice.Columns().Id).
+		Where(dao.AdminNotice.Columns().Status, consts.StatusEnabled).
 		Where("(`type` IN(?) OR (`type` = ? and JSON_CONTAINS(`receiver`,'"+gconv.String(memberId)+"')))",
 			[]int{consts.NoticeTypeNotify, consts.NoticeTypeNotice}, consts.NoticeTypeLetter,
 		).Array()
@@ -467,13 +470,13 @@ func (s *sAdminNotice) MessageList(ctx context.Context, in *adminin.NoticeMessag
 	}
 
 	for _, v := range list {
-		count, _ := dao.AdminNoticeRead.Ctx(ctx).Where("notice_id", v.Id).Where("member_id", memberId).Count()
+		count, _ := dao.AdminNoticeRead.Ctx(ctx).Where(dao.AdminNoticeRead.Columns().NoticeId, v.Id).Where(dao.AdminNoticeRead.Columns().MemberId, memberId).Count()
 		if count > 0 {
 			v.IsRead = true
 		}
 
 		if v.Type == consts.NoticeTypeLetter {
-			val, err := dao.AdminMember.Ctx(ctx).Fields("avatar").Where("id", v.CreatedBy).Value()
+			val, err := dao.AdminMember.Ctx(ctx).Fields(dao.AdminMember.Columns().Avatar).Where(dao.AdminMember.Columns().Id, v.CreatedBy).Value()
 			if err == nil {
 				v.SenderAvatar = val.String()
 			}

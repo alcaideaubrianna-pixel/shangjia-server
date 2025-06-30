@@ -7,10 +7,6 @@ package sys
 
 import (
 	"context"
-	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gctx"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/cron"
@@ -20,6 +16,11 @@ import (
 	"hotgo/internal/service"
 	"hotgo/utility/simple"
 	"hotgo/utility/validate"
+
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gctx"
 )
 
 type sSysCron struct{}
@@ -202,7 +203,7 @@ func (s *sSysCron) List(ctx context.Context, in *sysin.CronListInp) (list []*sys
 
 // GetName 获取分组名称
 func (s *sSysCron) GetName(ctx context.Context, id int64) (name string, err error) {
-	m := dao.SysCronGroup.Ctx(ctx).Fields("name").Where("id", id)
+	m := dao.SysCronGroup.Ctx(ctx).Fields(dao.SysCronGroup.Columns().Name).Where(dao.SysCronGroup.Columns().Id, id)
 	list, err := m.Value()
 	if err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)

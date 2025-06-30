@@ -239,7 +239,7 @@ func (s *sAdminDept) List(ctx context.Context, in *adminin.DeptListInp) (res *ad
 // GetName 获取部门名称
 func (s *sAdminDept) GetName(ctx context.Context, id int64) (name string, err error) {
 	var data *entity.AdminDept
-	if err = dao.AdminDept.Ctx(ctx).Where("id", id).Fields("name").Scan(&data); err != nil {
+	if err = dao.AdminDept.Ctx(ctx).Where(dao.AdminDept.Columns().Id, id).Fields(dao.AdminDept.Columns().Name).Scan(&data); err != nil {
 		err = gerror.Wrap(err, "获取部门名称失败！")
 		return
 	}

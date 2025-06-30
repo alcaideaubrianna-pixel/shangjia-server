@@ -8,12 +8,8 @@ package storager
 import (
 	"context"
 	"fmt"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/net/ghttp"
-	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gogf/gf/v2/util/grand"
 	"hotgo/internal/consts"
+	"hotgo/internal/dao"
 	"hotgo/internal/library/cache"
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/model/entity"
@@ -24,6 +20,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/net/ghttp"
+	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/grand"
 )
 
 // UploadDrive 存储驱动
@@ -236,7 +238,7 @@ func write(ctx context.Context, meta *FileMeta, fullPath string) (models *entity
 
 // HasFile 检查附件是否存在
 func HasFile(ctx context.Context, md5 string) (res *entity.SysAttachment, err error) {
-	if err = GetModel(ctx).Where("md5", md5).Scan(&res); err != nil {
+	if err = GetModel(ctx).Where(dao.SysAttachment.Columns().Md5, md5).Scan(&res); err != nil {
 		err = gerror.Wrap(err, "检查文件hash时出现错误")
 		return
 	}
@@ -248,8 +250,8 @@ func HasFile(ctx context.Context, md5 string) (res *entity.SysAttachment, err er
 	// 只有在上传时才会检查md5值，如果附件存在则更新最后上传时间，保证上传列表更新显示在最前面
 	if res.Id > 0 {
 		update := g.Map{
-			"status":     consts.StatusEnabled,
-			"updated_at": gtime.Now(),
+			dao.SysAttachment.Columns().Status:    consts.StatusEnabled,
+			dao.SysAttachment.Columns().UpdatedAt: gtime.Now(),
 		}
 		_, _ = GetModel(ctx).WherePri(res.Id).Data(update).Update()
 	}

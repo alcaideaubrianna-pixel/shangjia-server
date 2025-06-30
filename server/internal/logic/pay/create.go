@@ -78,7 +78,7 @@ func (s *sPay) Create(ctx context.Context, in payin.PayCreateInp) (res *payin.Pa
 		MchId:         mchId,
 		Subject:       in.Subject,
 		Detail:        in.Detail,
-		OutTradeNo:    payment.GenOutTradeNo(),
+		OutTradeNo:    payment.GenOutTradeNo(ctx),
 		TransactionId: "",
 		PayType:       in.PayType,
 		PayAmount:     in.PayAmount,

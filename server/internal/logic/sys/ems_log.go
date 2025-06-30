@@ -8,13 +8,6 @@ package sys
 import (
 	"context"
 	"fmt"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/net/ghttp"
-	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gogf/gf/v2/os/gview"
-	"github.com/gogf/gf/v2/text/gstr"
-	"github.com/gogf/gf/v2/util/grand"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
@@ -29,6 +22,14 @@ import (
 	"hotgo/utility/useragent"
 	"hotgo/utility/validate"
 	"time"
+
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/net/ghttp"
+	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/os/gview"
+	"github.com/gogf/gf/v2/text/gstr"
+	"github.com/gogf/gf/v2/util/grand"
 )
 
 type sSysEmsLog struct{}
@@ -270,7 +271,7 @@ func (s *sSysEmsLog) newView(ctx context.Context, in *sysin.SendEmsInp, config *
 			switch user.App {
 			// 后台用户
 			case consts.AppAdmin:
-				_, err = g.Model("admin_member").Ctx(ctx).Where("id", user.Id).Data(g.Map{"password_reset_token": resetToken}).Update()
+				_, err = dao.AdminMember.Ctx(ctx).Where(dao.AdminMember.Columns().Id, user.Id).Data(g.Map{dao.AdminMember.Columns().PasswordResetToken: resetToken}).Update()
 				if err != nil {
 					return
 				}
@@ -379,7 +380,7 @@ func (s *sSysEmsLog) VerifyCode(ctx context.Context, in *sysin.VerifyEmsCodeInp)
 	}
 
 	var models *entity.SysEmsLog
-	if err = dao.SysEmsLog.Ctx(ctx).Where("event", in.Event).Where("email", in.Email).Order("id desc").Scan(&models); err != nil {
+	if err = dao.SysEmsLog.Ctx(ctx).Where(dao.SysEmsLog.Columns().Event, in.Event).Where(dao.SysEmsLog.Columns().Email, in.Email).Order(dao.SysEmsLog.Columns().Id, false).Scan(&models); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return err
 	}
@@ -407,15 +408,15 @@ func (s *sSysEmsLog) VerifyCode(ctx context.Context, in *sysin.VerifyEmsCodeInp)
 	}
 
 	if models.Code != in.Code {
-		_, _ = dao.SysEmsLog.Ctx(ctx).Where("id", models.Id).Increment("times", 1)
+		_, _ = dao.SysEmsLog.Ctx(ctx).Where(dao.SysEmsLog.Columns().Id, models.Id).Increment(dao.SysEmsLog.Columns().Times, 1)
 		err = gerror.New("验证码错误！")
 		return
 	}
 
-	_, err = dao.SysEmsLog.Ctx(ctx).Where("id", models.Id).Data(g.Map{
-		"times":      models.Times + 1,
-		"status":     consts.CodeStatusUsed,
-		"updated_at": gtime.Now(),
+	_, err = dao.SysEmsLog.Ctx(ctx).Where(dao.SysEmsLog.Columns().Id, models.Id).Data(g.Map{
+		dao.SysEmsLog.Columns().Times:     models.Times + 1,
+		dao.SysEmsLog.Columns().Status:    consts.CodeStatusUsed,
+		dao.SysEmsLog.Columns().UpdatedAt: gtime.Now(),
 	}).Update()
 	return
 }

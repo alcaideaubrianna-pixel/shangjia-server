@@ -53,7 +53,7 @@ func (c *cEms) SendBindEms(ctx context.Context, _ *common.SendBindEmsReq) (res *
 		return
 	}
 
-	if err = g.Model("admin_member").Fields("email").Where("id", memberId).Scan(&models); err != nil {
+	if err = dao.AdminMember.Ctx(ctx).Fields(dao.AdminMember.Columns().Email).Where(dao.AdminMember.Columns().Id, memberId).Scan(&models); err != nil {
 		return
 	}
 

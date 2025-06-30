@@ -10,12 +10,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/util/gconv"
+	"hotgo/internal/dao"
 	"hotgo/internal/library/dict"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/utility/convert"
+
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/util/gconv"
 )
 
 type StateItem struct {
@@ -181,9 +183,9 @@ func (l *gCurd) generateWebModelDictOptions(ctx context.Context, in *CurdPreview
 	}
 
 	if len(dictTypeIds) > 0 {
-		err := g.Model("sys_dict_type").Ctx(ctx).
-			Fields("id", "type").
-			WhereIn("id", dictTypeIds).
+		err := dao.SysDictType.Ctx(ctx).
+			Fields(dao.SysDictType.Columns().Id, dao.SysDictType.Columns().Type).
+			WhereIn(dao.SysDictType.Columns().Id, dictTypeIds).
 			Scan(&dictTypeList)
 		if err != nil {
 			return err

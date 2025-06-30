@@ -7,13 +7,14 @@ package sys
 
 import (
 	"context"
-	"github.com/gogf/gf/v2/errors/gerror"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/form"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
+
+	"github.com/gogf/gf/v2/errors/gerror"
 )
 
 type sSysCronGroup struct{}
@@ -104,7 +105,7 @@ func (s *sSysCronGroup) List(ctx context.Context, in *sysin.CronGroupListInp) (l
 		return
 	}
 
-	if err = mod.Page(in.Page, in.PerPage).Order("id desc").Scan(&list); err != nil {
+	if err = mod.Page(in.Page, in.PerPage).OrderDesc(dao.SysCronGroup.Columns().Id).Scan(&list); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 	}
 
@@ -112,7 +113,7 @@ func (s *sSysCronGroup) List(ctx context.Context, in *sysin.CronGroupListInp) (l
 		if v.Pid < 1 {
 			continue
 		}
-		name, err := dao.SysCronGroup.Ctx(ctx).Fields("name").WherePri(v.Pid).Value()
+		name, err := dao.SysCronGroup.Ctx(ctx).Fields(dao.SysCronGroup.Columns().Name).WherePri(v.Pid).Value()
 		if err != nil {
 			return nil, 0, err
 		}

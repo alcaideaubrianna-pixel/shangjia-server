@@ -44,7 +44,7 @@ func (s *sAdminCash) View(ctx context.Context, in *adminin.CashViewInp) (res *ad
 		return
 	}
 
-	if err = dao.AdminCash.Ctx(ctx).Where("id", in.Id).Scan(&res); err != nil {
+	if err = dao.AdminCash.Ctx(ctx).Where(dao.AdminCash.Columns().Id, in.Id).Scan(&res); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return
 	}
@@ -55,7 +55,7 @@ func (s *sAdminCash) View(ctx context.Context, in *adminin.CashViewInp) (res *ad
 	}
 
 	var mem *entity.AdminMember
-	err = dao.AdminMember.Ctx(ctx).Where("id", res.MemberId).Scan(&mem)
+	err = dao.AdminMember.Ctx(ctx).Where(dao.AdminMember.Columns().Id, res.MemberId).Scan(&mem)
 	if err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return
@@ -78,7 +78,7 @@ func (s *sAdminCash) List(ctx context.Context, in *adminin.CashListInp) (list []
 	)
 
 	if in.MemberId > 0 {
-		mod = mod.Where("member_id", in.MemberId)
+		mod = mod.Where(dao.AdminCash.Columns().MemberId, in.MemberId)
 	}
 
 	// 用户筛选
@@ -90,20 +90,20 @@ func (s *sAdminCash) List(ctx context.Context, in *adminin.CashListInp) (list []
 		if len(memberIds) == 0 {
 			return nil, 0, nil
 		}
-		mod = mod.WhereIn("member_id", memberIds)
+		mod = mod.WhereIn(dao.AdminCash.Columns().MemberId, memberIds)
 	}
 
 	if len(in.CreatedAt) == 2 {
-		mod = mod.WhereBetween("created_at", gtime.New(in.CreatedAt[0]), gtime.New(in.CreatedAt[1]))
+		mod = mod.WhereBetween(dao.AdminCash.Columns().CreatedAt, gtime.New(in.CreatedAt[0]), gtime.New(in.CreatedAt[1]))
 	}
 
 	// 请求方式
 	if in.Status > 0 {
-		mod = mod.Where("status", in.Status)
+		mod = mod.Where(dao.AdminCash.Columns().Status, in.Status)
 	}
 
 	if !isSuper {
-		mod = mod.Where("member_id", opMemberId)
+		mod = mod.Where(dao.AdminCash.Columns().MemberId, opMemberId)
 	}
 
 	// 申请人摘要信息
@@ -119,7 +119,7 @@ func (s *sAdminCash) List(ctx context.Context, in *adminin.CashListInp) (list []
 		return
 	}
 
-	if err = mod.Page(in.Page, in.PerPage).Order("id desc").Scan(&list); err != nil {
+	if err = mod.Page(in.Page, in.PerPage).Order(dao.AdminCash.Columns().Id + " DESC").Scan(&list); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return
 	}
@@ -144,8 +144,8 @@ func (s *sAdminCash) Apply(ctx context.Context, in *adminin.CashApplyInp) (err e
 	}
 
 	count, err := dao.AdminCash.Ctx(ctx).
-		Where("member_id", in.MemberId).
-		Where("status", consts.StatusEnabled).
+		Where(dao.AdminCash.Columns().MemberId, in.MemberId).
+		Where(dao.AdminCash.Columns().Status, consts.StatusEnabled).
 		Count()
 	if err != nil {
 		return
@@ -156,7 +156,7 @@ func (s *sAdminCash) Apply(ctx context.Context, in *adminin.CashApplyInp) (err e
 		return
 	}
 
-	if err = dao.AdminMember.Ctx(ctx).Where("id", in.MemberId).Scan(&member); err != nil {
+	if err = dao.AdminMember.Ctx(ctx).Where(dao.AdminMember.Columns().Id, in.MemberId).Scan(&member); err != nil {
 		err = gerror.Newf("获取用户信息失败:%+v", err.Error())
 		return
 	}
@@ -220,14 +220,14 @@ func (s *sAdminCash) Apply(ctx context.Context, in *adminin.CashApplyInp) (err e
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (err error) {
 		// 添加提现记录
 		lastInsertId, err := dao.AdminCash.Ctx(ctx).Data(g.Map{
-			"member_id":  in.MemberId,
-			"money":      in.Money,
-			"fee":        fee,
-			"last_money": lastMoney,
-			"created_at": gtime.Now(),
-			"status":     consts.CashStatusWait,
-			"msg":        "",
-			"ip":         location.GetClientIp(ghttp.RequestFromCtx(ctx)),
+			dao.AdminCash.Columns().MemberId:  in.MemberId,
+			dao.AdminCash.Columns().Money:     in.Money,
+			dao.AdminCash.Columns().Fee:       fee,
+			dao.AdminCash.Columns().LastMoney: lastMoney,
+			dao.AdminCash.Columns().CreatedAt: gtime.Now(),
+			dao.AdminCash.Columns().Status:    consts.CashStatusWait,
+			dao.AdminCash.Columns().Msg:       "",
+			dao.AdminCash.Columns().Ip:        location.GetClientIp(ghttp.RequestFromCtx(ctx)),
 		}).OmitEmptyData().InsertAndGetId()
 		if err != nil {
 			return
@@ -262,7 +262,7 @@ func (s *sAdminCash) Payment(ctx context.Context, in *adminin.CashPaymentInp) (e
 	}
 
 	var models *entity.AdminCash
-	if err = dao.AdminCash.Ctx(ctx).Where("id", in.Id).Scan(&models); err != nil {
+	if err = dao.AdminCash.Ctx(ctx).Where(dao.AdminCash.Columns().Id, in.Id).Scan(&models); err != nil {
 		return
 	}
 
@@ -276,10 +276,10 @@ func (s *sAdminCash) Payment(ctx context.Context, in *adminin.CashPaymentInp) (e
 		return
 	}
 
-	_, err = dao.AdminCash.Ctx(ctx).Where("id", models.Id).Data(g.Map{
-		"handle_at": gtime.Now(),
-		"status":    in.Status,
-		"msg":       gstr.Trim(in.Msg, " "),
+	_, err = dao.AdminCash.Ctx(ctx).Where(dao.AdminCash.Columns().Id, models.Id).Data(g.Map{
+		dao.AdminCash.Columns().HandleAt: gtime.Now(),
+		dao.AdminCash.Columns().Status:   in.Status,
+		dao.AdminCash.Columns().Msg:      gstr.Trim(in.Msg, " "),
 	}).Update()
 	return
 }

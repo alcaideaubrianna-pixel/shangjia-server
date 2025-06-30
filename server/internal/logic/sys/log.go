@@ -8,16 +8,6 @@ package sys
 import (
 	"context"
 	"fmt"
-	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/encoding/gjson"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/net/ghttp"
-	"github.com/gogf/gf/v2/os/gctx"
-	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gogf/gf/v2/text/gstr"
-	"github.com/gogf/gf/v2/util/gconv"
-	"github.com/gogf/gf/v2/util/gmode"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/global"
@@ -34,6 +24,17 @@ import (
 	"hotgo/utility/excel"
 	"hotgo/utility/simple"
 	"hotgo/utility/validate"
+
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/encoding/gjson"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/net/ghttp"
+	"github.com/gogf/gf/v2/os/gctx"
+	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/text/gstr"
+	"github.com/gogf/gf/v2/util/gconv"
+	"github.com/gogf/gf/v2/util/gmode"
 )
 
 type sSysLog struct{}
@@ -414,7 +415,7 @@ func (s *sSysLog) List(ctx context.Context, in *sysin.LogListInp) (list []*sysin
 	routes := global.LoadHTTPRoutes(ghttp.RequestFromCtx(ctx))
 	for _, v := range list {
 		if v.AppId == consts.AppAdmin {
-			memberName, err := dao.AdminMember.Ctx(ctx).Fields("realname").WherePri(v.MemberId).Value()
+			memberName, err := dao.AdminMember.Ctx(ctx).Fields(dao.AdminMember.Columns().RealName).WherePri(v.MemberId).Value()
 			if err != nil {
 				err = gerror.Wrap(err, consts.ErrorORM)
 				return list, totalCount, err

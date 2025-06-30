@@ -148,7 +148,7 @@ func StartALL(sysCron []*entity.SysCron) (err error) {
 
 		// 执行完毕，单次和多次执行的任务更新状态
 		if cron.Policy == consts.CronPolicyOnce || cron.Policy == consts.CronPolicyTimes {
-			if _, err = dao.SysCron.Ctx(gctx.GetInitCtx()).Where("id", cron.Id).Data(g.Map{"status": consts.StatusDisable, "updated_at": gtime.Now()}).Update(); err != nil {
+			if _, err = dao.SysCron.Ctx(gctx.GetInitCtx()).Where(dao.SysCron.Columns().Id, cron.Id).Data(g.Map{dao.SysCron.Columns().Status: consts.StatusDisable, dao.SysCron.Columns().UpdatedAt: gtime.Now()}).Update(); err != nil {
 				err = gerror.Wrap(err, "定时任务执行失败！")
 				return err
 			}
