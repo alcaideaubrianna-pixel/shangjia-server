@@ -11,6 +11,7 @@ import (
 	"github.com/go-pay/crypto/xpem"
 	"github.com/go-pay/gopay"
 	"github.com/go-pay/gopay/wechat/v3"
+	"github.com/go-pay/smap"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -142,16 +143,16 @@ func GetClient(config *model.PayConfig) (client *wechat.ClientV3, err error) {
 	if err != nil {
 		return
 	}
-	snPkMap := make(map[string]*rsa.PublicKey)
+
+	client.SnCertMap = smap.Map[string, *rsa.PublicKey]{}
 	for sn, cert := range snCertMap {
 		pubKey, err := xpem.DecodePublicKey([]byte(cert))
 		if err != nil {
 			return nil, err
 		}
-		snPkMap[sn] = pubKey
+		client.SnCertMap.Store(sn, pubKey)
 	}
 
-	client.SnCertMap = snPkMap
 	client.WxSerialNo = serialNo
 
 	// 打开Debug开关，输出日志，默认关闭
@@ -167,15 +168,14 @@ func getPublicKeyMap(client *wechat.ClientV3) (wxPublicKeyMap map[string]*rsa.Pu
 		return
 	}
 
-	snPkMap := make(map[string]*rsa.PublicKey)
+	client.SnCertMap = smap.Map[string, *rsa.PublicKey]{}
 	for sn, cert := range snCertMap {
 		pubKey, err := xpem.DecodePublicKey([]byte(cert))
 		if err != nil {
 			return nil, err
 		}
-		snPkMap[sn] = pubKey
+		client.SnCertMap.Store(sn, pubKey)
 	}
-	client.SnCertMap = snPkMap
 	client.WxSerialNo = serialNo
 
 	wxPublicKeyMap = client.WxPublicKeyMap()

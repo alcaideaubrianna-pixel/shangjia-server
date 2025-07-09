@@ -11,14 +11,15 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
-// PayRefundDao is the data access object for table hg_pay_refund.
+// PayRefundDao is the data access object for the table hg_pay_refund.
 type PayRefundDao struct {
-	table   string           // table is the underlying table name of the DAO.
-	group   string           // group is the database configuration group name of current DAO.
-	columns PayRefundColumns // columns contains all the column names of Table for convenient usage.
+	table    string             // table is the underlying table name of the DAO.
+	group    string             // group is the database configuration group name of the current DAO.
+	columns  PayRefundColumns   // columns contains all the column names of Table for convenient usage.
+	handlers []gdb.ModelHandler // handlers for customized model modification.
 }
 
-// PayRefundColumns defines and stores column names for table hg_pay_refund.
+// PayRefundColumns defines and stores column names for the table hg_pay_refund.
 type PayRefundColumns struct {
 	Id            string // 主键ID
 	MemberId      string // 会员ID
@@ -35,7 +36,7 @@ type PayRefundColumns struct {
 	UpdatedAt     string // 更新时间
 }
 
-// payRefundColumns holds the columns for table hg_pay_refund.
+// payRefundColumns holds the columns for the table hg_pay_refund.
 var payRefundColumns = PayRefundColumns{
 	Id:            "id",
 	MemberId:      "member_id",
@@ -53,44 +54,49 @@ var payRefundColumns = PayRefundColumns{
 }
 
 // NewPayRefundDao creates and returns a new DAO object for table data access.
-func NewPayRefundDao() *PayRefundDao {
+func NewPayRefundDao(handlers ...gdb.ModelHandler) *PayRefundDao {
 	return &PayRefundDao{
-		group:   "default",
-		table:   "hg_pay_refund",
-		columns: payRefundColumns,
+		group:    "default",
+		table:    "hg_pay_refund",
+		columns:  payRefundColumns,
+		handlers: handlers,
 	}
 }
 
-// DB retrieves and returns the underlying raw database management object of current DAO.
+// DB retrieves and returns the underlying raw database management object of the current DAO.
 func (dao *PayRefundDao) DB() gdb.DB {
 	return g.DB(dao.group)
 }
 
-// Table returns the table name of current dao.
+// Table returns the table name of the current DAO.
 func (dao *PayRefundDao) Table() string {
 	return dao.table
 }
 
-// Columns returns all column names of current dao.
+// Columns returns all column names of the current DAO.
 func (dao *PayRefundDao) Columns() PayRefundColumns {
 	return dao.columns
 }
 
-// Group returns the configuration group name of database of current dao.
+// Group returns the database configuration group name of the current DAO.
 func (dao *PayRefundDao) Group() string {
 	return dao.group
 }
 
-// Ctx creates and returns the Model for current DAO, It automatically sets the context for current operation.
+// Ctx creates and returns a Model for the current DAO. It automatically sets the context for the current operation.
 func (dao *PayRefundDao) Ctx(ctx context.Context) *gdb.Model {
-	return dao.DB().Model(dao.table).Safe().Ctx(ctx)
+	model := dao.DB().Model(dao.table)
+	for _, handler := range dao.handlers {
+		model = handler(model)
+	}
+	return model.Safe().Ctx(ctx)
 }
 
 // Transaction wraps the transaction logic using function f.
-// It rollbacks the transaction and returns the error from function f if it returns non-nil error.
+// It rolls back the transaction and returns the error if function f returns a non-nil error.
 // It commits the transaction and returns nil if function f returns nil.
 //
-// Note that, you should not Commit or Rollback the transaction in function f
+// Note: Do not commit or roll back the transaction in function f,
 // as it is automatically handled by this function.
 func (dao *PayRefundDao) Transaction(ctx context.Context, f func(ctx context.Context, tx gdb.TX) error) (err error) {
 	return dao.Ctx(ctx).Transaction(ctx, f)
