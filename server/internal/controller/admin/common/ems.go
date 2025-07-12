@@ -7,14 +7,15 @@ package common
 
 import (
 	"context"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 	"hotgo/api/admin/common"
 	"hotgo/internal/consts"
+	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
+
+	"github.com/gogf/gf/v2/errors/gerror"
 )
 
 var Ems = new(cEms)
