@@ -16,6 +16,7 @@ import (
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"
 	_ "github.com/gogf/gf/contrib/drivers/mysql/v2"
+	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/gres"
@@ -35,7 +36,7 @@ var Enforcer *casbin.Enforcer
 // InitEnforcer 初始化
 func InitEnforcer(ctx context.Context) {
 	var (
-		link   = g.Cfg().MustGet(ctx, "database.default.link")
+		link   = getDbLink(ctx)
 		a, err = NewAdapter(link.String())
 	)
 
@@ -68,6 +69,26 @@ func InitEnforcer(ctx context.Context) {
 		g.Log().Panicf(ctx, "casbin NewEnforcer err：%v", err)
 	}
 	loadPermissions(ctx)
+}
+
+// GetDbLink 获取数据库链接
+func getDbLink(ctx context.Context) *gvar.Var {
+
+	link := g.Cfg().MustGet(ctx, "database.default")
+	//读写分离
+	if !link.IsSlice() {
+		return g.Cfg().MustGet(ctx, "database.default.link")
+	}
+
+	for _, v := range link.Array() {
+		// 只获取主库
+		val := v.(map[string]interface{})
+		if val["role"] == "master" {
+			return gvar.New(val["link"])
+		}
+	}
+	return gvar.New("database.default.0.link")
+
 }
 
 func loadPermissions(ctx context.Context) {

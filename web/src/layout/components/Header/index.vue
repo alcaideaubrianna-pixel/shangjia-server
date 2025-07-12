@@ -69,6 +69,7 @@
       </n-breadcrumb>
     </div>
     <div class="layout-header-right">
+      <Search />
       <!--      <div-->
       <!--        class="layout-header-trigger layout-header-trigger-min"-->
       <!--        v-for="item in iconList"-->
@@ -200,6 +201,8 @@
   import { notificationStoreWidthOut } from '@/store/modules/notification';
   import { getIcon } from '@/enums/systemMessageEnum';
 
+  import Search from './Search.vue';
+
   export default defineComponent({
     name: 'PageHeader',
     components: {
@@ -208,6 +211,7 @@
       ProjectSetting,
       AsideMenu,
       SystemMessage,
+      Search,
     },
     props: {
       collapsed: {

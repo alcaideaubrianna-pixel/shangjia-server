@@ -7,6 +7,7 @@ package common
 
 import (
 	"context"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"hotgo/api/admin/common"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
@@ -14,8 +15,6 @@ import (
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
-
-	"github.com/gogf/gf/v2/errors/gerror"
 )
 
 var Sms = new(cSms)
