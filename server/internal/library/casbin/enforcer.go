@@ -111,8 +111,8 @@ func loadPermissions(ctx context.Context) {
 		Fields(q("r", dao.AdminRole.Columns().Key), q("m", dao.AdminMenu.Columns().Permissions)).
 		Where(q("r", dao.AdminRole.Columns().Status), consts.StatusEnabled).
 		Where(q("m", dao.AdminMenu.Columns().Status), consts.StatusEnabled).
-		Where(q("m", dao.AdminMenu.Columns().Permissions), "").
-		Where(q("r", dao.AdminRole.Columns().Key), consts.SuperRoleKey).
+		WhereNot(q("m", dao.AdminMenu.Columns().Permissions), "").
+		WhereNot(q("r", dao.AdminRole.Columns().Key), consts.SuperRoleKey).
 		Scan(&polices)
 	if err != nil {
 		g.Log().Fatalf(ctx, "loadPermissions Scan err:%v", err)
