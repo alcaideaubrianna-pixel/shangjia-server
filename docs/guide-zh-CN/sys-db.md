@@ -117,6 +117,7 @@
 ![](images/sys-db-by2.png)
 
 - 查询代码片段，参考路径：[server/internal/logic/admin/member.go](../../server/internal/logic/admin/member.go)
+
 ```go
 
 // 查询创建者

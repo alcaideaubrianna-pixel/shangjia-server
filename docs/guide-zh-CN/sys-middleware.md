@@ -82,6 +82,7 @@ func main()  {
 - 下面我们以`text/xml`为例简单演示几种使用方法：
 
 1. 当你使用规范化路由时，可直接在XxxRes结构体的`g.Meta`中声明响应类型：
+
 ```go
 type HelloReq struct {
     g.Meta `path:"/hello" tags:"Hello" method:"get" summary:"You first hello api"`
@@ -95,6 +96,7 @@ type HelloRes struct {
 ```
 
 2. 在响应前设置响应头：
+
 ```go
 var (
     Hello = cHello{}
@@ -146,9 +148,7 @@ func main()  {
 
 2. 在`server/internal/logic/middleware/response.go`中根据请求的独有特征进行单独的处理，兼容后续http处理。
 
-
 #### 重写响应错误提示
-
 - 在实际开发中，我们可能想要隐藏一些敏感错误，返回给客户端友好的错误提示，但开发者同时又想需要看到真实的敏感错误。对此hotgo已经进行了过滤处理，下面是一个简单的例子：
 
 ```go
@@ -195,6 +195,7 @@ func test() error {
 ```
 
 - 控制台的输出日志：
+
 ```shell
 2023-05-15 18:05:07.776 {084022730d495f17f19e550140f3e1a8} 200 "GET http localhost:8000 /admin/member/list?page=1&pageSize=10&roleId=-1 HTTP/1.1" 0.002, 127.0.0.1, "http://192.168.0.207:8001/login", "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.71 Safari/537.36 Co
 re/1.94.197.400 QQBrowser/11.7.5287.400", -1, "", ""
