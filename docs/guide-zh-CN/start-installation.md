@@ -69,7 +69,7 @@ gfcli:
 三、 启动服务
 
 1、服务端：
-```shell script
+```shell
       cd server
       
       # 设置国内代理，如果已经设置好了代理可以跳过
@@ -86,7 +86,7 @@ gfcli:
 ```
 
 2、web前端：
-```shell script
+```shell
     cd web
     # 首先确定你以安装node16.0以上版本并安装了包[npm、pnpm]，否则可能会出现一些未知报错
     

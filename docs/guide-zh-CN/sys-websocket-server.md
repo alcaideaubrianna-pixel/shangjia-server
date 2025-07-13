@@ -16,6 +16,7 @@
 #### 1.消息处理接口
 - 消息处理在设计上采用了接口化的思路。只需要实现以下接口，即可进行WebSocket消息注册
 - 文件路径：server/internal/websocket/model.go
+
 ```go
 package websocket
 
@@ -26,6 +27,7 @@ type EventHandler func(client *Client, req *WRequest)
 #### 2.定义消息处理方法
 - 以下是功能案例中的一个简单演示，实现了消息处理接口，并将收到的消息原样发送给客户端
 - 文件路径：server/addons/hgexample/controller/websocket/handler/index.go
+
 ```go
 package handler
 
@@ -52,6 +54,7 @@ func (c *cIndex) TestMessage(client *websocket.Client, req *websocket.WRequest) 
 #### 3.注册消息
 - 定义消息处理方法后，需要将其注册到WebSocket消息处理器，一般放在对应应用模块的`router/websocket.go`下即可
 - 文件路径：server/addons/hgexample/router/websocket.go
+
 ```go
 package router
 
@@ -80,6 +83,7 @@ func WebSocket(ctx context.Context, group *ghttp.RouterGroup) {
 
 ### 常用方法
 - websocket服务器还提供了一些常用的方法，下面只对部分进行说明
+
 ```go
 func test() {
 	websocket.SendToAll()      // 发送全部客户端
@@ -105,6 +109,7 @@ func test() {
 ### 其他
 - WebSocket被连接时需验证用户认证中间件，所以用户必须登录成功后才能连接成功
 - 参考文件：server/internal/logic/middleware/weboscket_auth.go
+
 ```go
 package middleware
 

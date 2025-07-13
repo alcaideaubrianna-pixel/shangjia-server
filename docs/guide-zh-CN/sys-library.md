@@ -158,6 +158,7 @@ func test(ctx context.Context) {
 
 #### 字典数据选项
 - 文件路径：server/internal/model/dict.go
+
 ```go
 package model
 
@@ -232,6 +233,7 @@ var CreditGroupOptions = []*model.Option{
 
 ##### 方法字典接口
 - 文件路径：server/internal/consts/credit_log.go
+
 ```go
 package dict
 

@@ -9,6 +9,7 @@
 
 #### 模块结构
 - 文件路径：server/internal/library/addons/module.go
+
 ```go
 // Skeleton 模块骨架
 type Skeleton struct {
@@ -43,6 +44,7 @@ type Module interface {
 #### 获取模块信息
 
 - 在插件模块内
+
 ```go
 package main
 
@@ -57,6 +59,7 @@ func test()  {
 ```
 
 - 在插件模块外
+
 ```go
 package main
 

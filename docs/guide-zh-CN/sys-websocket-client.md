@@ -12,6 +12,7 @@
 ###  全局消息监听
 - 所有全局的消息监听都在这里
 - 文件路径：web/src/utils/websocket/registerMessage.ts
+
 ```ts
 import { TABS_ROUTES } from '@/store/mutation-types';
 import { SocketEnum } from '@/enums/socketEnum';
@@ -51,6 +52,7 @@ export function registerGlobalMessage() {
 #### 单页面消息监听
 - 当你只需要某个页面使用WebSocket，这将是一个不错的选择，下面是一个简单的演示例子
 - 文件路径：web/src/views/addons/hgexample/portal/websocketTest.vue
+
 ```vue
 <template>
   <div>
@@ -190,6 +192,7 @@ export function registerGlobalMessage() {
 
 #### 发送消息
 - 向服务器发送一条消息
+
 ```ts
   import { sendMsg } from '@/utils/websocket';
 

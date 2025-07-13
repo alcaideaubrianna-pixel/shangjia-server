@@ -44,6 +44,7 @@ SaaS系统多租户多应用设计，已成为互联网企业的重要发展建�
 
 - 在用户登录成功后，server端可通过上下文来获取用户部门类型来确定用户身份
 - 文件路径：server/internal/library/contexts/context.go
+
 ```go
 package contexts
 
@@ -87,6 +88,7 @@ func IsUserDept(ctx context.Context) bool {
 
 - 在用户登录成功后，web端可通`useUserStore`来获取用户部门类型来确定用户身份
 - 文件路径：web/src/store/modules/user.ts
+
 ```vue
 <script lang="ts" setup>
 import { useUserStore } from '@/store/modules/user';
@@ -125,6 +127,7 @@ HotGo定位是中小型应用开发，推荐采用一套数据库不同Schema。
 下面是多租户功能演示例子代码中的使用片段
 
 - 封装查询Model
+
 ```go
 // Model 多租户功能演示ORM模型
 func (s *sSysTenantOrder) Model(ctx context.Context, option ...*handler.Option) *gdb.Model {
