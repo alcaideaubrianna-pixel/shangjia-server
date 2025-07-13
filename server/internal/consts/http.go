@@ -57,4 +57,5 @@ var HTTPHandlerTimeOptions = []*model.Option{
 var HTTPApiCodeOptions = []*model.Option{
 	dict.GenSuccessOption(gcode.CodeOK.Code(), fmt.Sprintf("%v %v", gcode.CodeOK.Code(), "成功")),
 	dict.GenWarningOption(gcode.CodeNil.Code(), fmt.Sprintf("%v %v", gcode.CodeNil.Code(), "失败")),
+	dict.GenWarningOption(gcode.CodeSecurityReason.Code(), fmt.Sprintf("%v %v", gcode.CodeSecurityReason.Code(), "无访问权限")),
 }

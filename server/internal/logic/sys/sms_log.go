@@ -103,7 +103,11 @@ func (s *sSysSmsLog) SendCode(ctx context.Context, in *sysin.SendCodeInp) (err e
 	}
 
 	var models *entity.SysSmsLog
-	if err = dao.SysSmsLog.Ctx(ctx).Where(dao.SysSmsLog.Columns().Event, in.Event).Where(dao.SysSmsLog.Columns().Mobile, in.Mobile).Scan(&models); err != nil {
+	if err = dao.SysSmsLog.Ctx(ctx).
+		Where(dao.SysSmsLog.Columns().Event, in.Event).
+		Where(dao.SysSmsLog.Columns().Mobile, in.Mobile).
+		OrderDesc(dao.SysSmsLog.Columns().Id).
+		Scan(&models); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return
 	}

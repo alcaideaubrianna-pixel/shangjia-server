@@ -199,14 +199,19 @@
     <div class="mt-4">
       <n-grid cols="1 s:2 m:3 l:8 xl:8 2xl:8" responsive="screen" :x-gap="16" :y-gap="8">
         <n-grid-item v-for="(item, index) in iconList" :key="index" @click="item.eventObject || {}">
-          <NCard content-style="padding-top: 0;" size="small" :bordered="false">
+          <NCard
+            content-style="padding-top: 0;"
+            size="small"
+            :bordered="false"
+            v-on="item.eventObject || {}"
+          >
             <template #footer>
               <n-skeleton v-if="loading" size="medium" />
               <div class="cursor-pointer" v-else>
                 <p class="flex justify-center">
                   <span>
                     <n-icon :size="item.size" class="flex-1" :color="item.color">
-                      <component :is="item.icon" v-on="item.eventObject || {}" />
+                      <component :is="item.icon" />
                     </n-icon>
                   </span>
                 </p>

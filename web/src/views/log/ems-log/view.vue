@@ -107,7 +107,7 @@
 <script lang="ts" setup>
   import { onMounted, ref } from 'vue';
   import { JsonViewer } from 'vue3-json-viewer';
-  import 'vue3-json-viewer/dist/index.css';
+  import 'vue3-json-viewer/dist/vue3-json-viewer.css';
   import { useRouter } from 'vue-router';
   import { useMessage } from 'naive-ui';
   import { View } from '@/api/log/log';

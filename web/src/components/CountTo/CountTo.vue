@@ -1,7 +1,8 @@
 <template>
-  <span :style="{ color }">
+  <span :style="{ color }" v-if="endVal > 0">
     {{ value }}
   </span>
+  <span :style="{ color }" v-else> 0 </span>
 </template>
 <script lang="ts">
   import { defineComponent, ref, computed, watchEffect, unref, onMounted, watch } from 'vue';

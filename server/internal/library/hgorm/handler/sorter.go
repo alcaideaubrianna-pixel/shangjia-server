@@ -46,9 +46,13 @@ func Sorter(in ISorter) func(m *gdb.Model) *gdb.Model {
 
 				var sorter2 []*form.Sorter
 				for k, sorter := range sorters {
-					if gstr.HasPrefix(sorter.ColumnKey, as) {
+					as2 := as
+					if gstr.Contains(sorter.ColumnKey, `.`) {
+						as2 += "."
+					}
+					if gstr.HasPrefix(sorter.ColumnKey, as2) {
 						sorter2 = append(sorter2, &form.Sorter{
-							ColumnKey: gstr.Replace(sorter.ColumnKey, as, ""),
+							ColumnKey: gstr.Replace(sorter.ColumnKey, as2, ""),
 							Order:     sorter.Order,
 						})
 						removeIndex = append(removeIndex, k)

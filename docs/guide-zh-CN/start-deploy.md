@@ -78,7 +78,7 @@ pnpm run build 或 npm run build
 ### Nginx配置
 ```
       # websocket
-      location ^~ /socket  {
+      location = /socket  {
   			proxy_pass http://127.0.0.1:8000/socket;
   			proxy_set_header X-Real-IP $remote_addr;
   			proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -98,7 +98,9 @@ pnpm run build 或 npm run build
           proxy_set_header  X-Real-IP $remote_addr;
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
           proxy_set_header X-Forwarded-Proto $scheme;
-          proxy_pass http://127.0.0.1:8000/; # 设置代理服务器的协议和地址
+          proxy_pass http://127.0.0.1:8000/;
+          proxy_redirect off;
+          proxy_buffering off;
           proxy_http_version 1.1;
           proxy_set_header Upgrade $http_upgrade;
           proxy_set_header Connection upgrade;

@@ -757,7 +757,8 @@ func (s *sAdminMember) GetIdByCode(ctx context.Context, in *adminin.GetIdByCodeI
 
 // Select 获取可选的用户选项
 func (s *sAdminMember) Select(ctx context.Context, in *adminin.MemberSelectInp) (res []*adminin.MemberSelectModel, err error) {
-	err = dao.AdminMember.Ctx(ctx).Fields(fmt.Printf("%s as value,%s as label,%s,%s", dao.AdminMember.Columns().Id, dao.AdminMember.Columns().RealName, dao.AdminMember.Columns().Username, dao.AdminMember.Columns().Avatar)).
+	fields := fmt.Sprintf("%s as value,%s as label,%s,%s", dao.AdminMember.Columns().Id, dao.AdminMember.Columns().RealName, dao.AdminMember.Columns().Username, dao.AdminMember.Columns().Avatar)
+	err = dao.AdminMember.Ctx(ctx).Fields(fields).
 		Handler(handler.FilterAuthWithField("id")).
 		Scan(&res)
 	if err != nil {

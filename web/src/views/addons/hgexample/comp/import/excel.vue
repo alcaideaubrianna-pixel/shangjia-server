@@ -46,7 +46,7 @@
   import { ImportExcel } from '@/api/addons/hgexample/comp';
   import type { UploadFileParams } from '@/utils/http/axios/types';
   import { JsonViewer } from 'vue3-json-viewer';
-  import 'vue3-json-viewer/dist/index.css';
+  import 'vue3-json-viewer/dist/vue3-json-viewer.css';
 
   const message = useMessage();
   const response = ref<any>({});

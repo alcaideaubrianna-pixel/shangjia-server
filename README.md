@@ -1,6 +1,6 @@
 # HotGo-V2
 <div align="center">
-	<img width="140px" src="https://bufanyun.cn-bj.ufileos.com/hotgo/logo.sig.png">
+	<img width="140px" src="https://gmycos.facms.cn/hotgo/logo.sig.png">
     <p>
         <h1>HotGo V2</h1>
     </p>
@@ -12,7 +12,7 @@
 	        <img src="https://img.shields.io/badge/vue.js-vue3.4-green" alt="vue">
 	    </a>
 	    <a href="https://www.naiveui.com" target="_blank">
-	        <img src="https://img.shields.io/badge/naiveui-%3E2.41.0-blue" alt="naiveui">
+	        <img src="https://img.shields.io/badge/naiveui-%3E2.42.0-blue" alt="naiveui">
 	    </a>
 		<a href="https://www.tslang.cn/" target="_blank">
 	        <img src="https://img.shields.io/badge/typescript-%3E4.0.0-blue" alt="typescript">
@@ -124,8 +124,8 @@
 
 
 ## 交流QQ群
-交流群①：190966648  <a target="_blank" href="https://qm.qq.com/cgi-bin/qm/qr?k=mJafkvme3VNyiQlCFIFNRtY8Xlr7pj9U&jump_from=webapi&authKey=jL10vIESr+vO8wpxwyd6DlChzkrbHpzN9uhAsIHgAinL/Vvd+nvuRyilf2UqUlCy"><img border="0" src="https://bufanyun.cn-bj.ufileos.com/hotgo/group.png" alt="HotGo框架交流1群" title="HotGo框架交流1群"></a>
-> <img src="https://bufanyun.cn-bj.ufileos.com/hotgo/hotgo1qun.png" width="400px"/>
+交流群①：190966648  <a target="_blank" href="https://qm.qq.com/cgi-bin/qm/qr?k=mJafkvme3VNyiQlCFIFNRtY8Xlr7pj9U&jump_from=webapi&authKey=jL10vIESr+vO8wpxwyd6DlChzkrbHpzN9uhAsIHgAinL/Vvd+nvuRyilf2UqUlCy"><img border="0" src="https://gmycos.facms.cn/hotgo/group.png" alt="HotGo框架交流1群" title="HotGo框架交流1群"></a>
+> <img src="https://gmycos.facms.cn/hotgo/hotgo1qun.png" width="400px"/>
 
 
 ## 商用说明

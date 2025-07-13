@@ -119,7 +119,11 @@ func (s *sSysEmsLog) List(ctx context.Context, in *sysin.EmsLogListInp) (list []
 // Send 发送邮件
 func (s *sSysEmsLog) Send(ctx context.Context, in *sysin.SendEmsInp) (err error) {
 	var models *entity.SysEmsLog
-	if err = dao.SysEmsLog.Ctx(ctx).Where("event", in.Event).Where("email", in.Email).Scan(&models); err != nil {
+	if err = dao.SysEmsLog.Ctx(ctx).
+		Where("event", in.Event).
+		Where("email", in.Email).
+		OrderDesc(dao.SysEmsLog.Columns().Id).
+		Scan(&models); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return
 	}
@@ -239,7 +243,7 @@ func (s *sSysEmsLog) newView(ctx context.Context, in *sysin.SendEmsInp, config *
 		basic = new(model.BasicConfig)
 		basic.Name = simple.AppName(ctx)
 		basic.Domain = "https://hotgo.facms.cn"
-		basic.Logo = "http://bufanyun.cn-bj.ufileos.com/haoka/attachment/images/2023-02-04/cq9kf7s66jt7hkpvbh.png"
+		basic.Logo = "https://gmycos.facms.cn/haoka/attachment/images/2023-02-04/cq9kf7s66jt7hkpvbh.png"
 		basic.SystemOpen = true
 	}
 
@@ -380,7 +384,11 @@ func (s *sSysEmsLog) VerifyCode(ctx context.Context, in *sysin.VerifyEmsCodeInp)
 	}
 
 	var models *entity.SysEmsLog
-	if err = dao.SysEmsLog.Ctx(ctx).Where(dao.SysEmsLog.Columns().Event, in.Event).Where(dao.SysEmsLog.Columns().Email, in.Email).Order(dao.SysEmsLog.Columns().Id, false).Scan(&models); err != nil {
+	if err = dao.SysEmsLog.Ctx(ctx).
+		Where(dao.SysEmsLog.Columns().Event, in.Event).
+		Where(dao.SysEmsLog.Columns().Email, in.Email).
+		OrderDesc(dao.SysEmsLog.Columns().Id).
+		Scan(&models); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return err
 	}

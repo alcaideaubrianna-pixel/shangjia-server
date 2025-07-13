@@ -110,7 +110,7 @@
   import { ExportOutlined, DeleteOutlined } from '@vicons/antd';
   import { useRouter } from 'vue-router';
   import { JsonViewer } from 'vue3-json-viewer';
-  import 'vue3-json-viewer/dist/index.css';
+  import 'vue3-json-viewer/dist/vue3-json-viewer.css';
   import { adaTableScrollX } from '@/utils/hotgo';
   import { loadOptions } from './model';
 
