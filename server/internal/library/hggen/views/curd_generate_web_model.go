@@ -14,6 +14,7 @@ import (
 	"hotgo/internal/library/dict"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/utility/convert"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -24,6 +25,7 @@ type StateItem struct {
 	Name         string
 	DefaultValue interface{}
 	Dc           string
+	DataType     string // 新增字段：存储字段类型信息
 }
 
 func (l *gCurd) webModelTplData(ctx context.Context, in *CurdPreviewInput) (data g.Map, err error) {
@@ -112,13 +114,20 @@ func (l *gCurd) generateWebModelImport(ctx context.Context, in *CurdPreviewInput
 
 func (l *gCurd) generateWebModelStateItems(ctx context.Context, in *CurdPreviewInput) (items []*StateItem) {
 	for _, field := range in.masterFields {
+		dataType := field.DataType
+		if dataType == "" && field.SqlType != "" {
+			if parts := strings.SplitN(field.SqlType, "(", 2); len(parts) > 0 {
+				dataType = parts[0]
+			}
+		}
 		var value = field.DefaultValue
 		if value == nil {
 			value = "null"
 		}
-		if value == "" {
-			value = `''`
-		}
+		//注释为空判断 避免模版生成的model.ts重复加引号
+		//if value == "" {
+		//	value = `''`
+		//}
 
 		// 选项组件默认值调整
 		if gconv.Int(value) == 0 && IsSelectFormMode(field.FormMode) {
@@ -145,6 +154,7 @@ func (l *gCurd) generateWebModelStateItems(ctx context.Context, in *CurdPreviewI
 			items = append(items, &StateItem{
 				Name:         field.TsName + "Summa?: null | MemberSumma",
 				DefaultValue: "null",
+				DataType:     dataType,
 				Dc:           field.Dc + "摘要信息",
 			})
 		}
