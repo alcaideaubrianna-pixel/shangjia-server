@@ -2,9 +2,16 @@
 
 @{.const}
 
-export class State {@{range .stateItems}
-  public @{.Name} = @{.DefaultValue}; // @{.Dc}@{end}
-
+export class State {
+@{range .stateItems}
+  public @{.Name} = @{if and .DataType (or
+      (eq .DataType "varchar")
+      (eq .DataType "char")
+      (eq .DataType "text")
+      (eq .DataType "json")
+      (eq .DataType "date")
+      (eq .DataType "datetime")
+    )}'@{.DefaultValue}'@{else}@{.DefaultValue}@{end};//@{.Dc}@{end}
   constructor(state?: Partial<State>) {
     if (state) {
       Object.assign(this, state);
