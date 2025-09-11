@@ -309,7 +309,7 @@ func (l *gCurd) generateWebModelFormSchemaEach(buffer *bytes.Buffer, fields []*s
 
 		// 这里根据编辑表单组件来进行推断，如果没有则使用默认input，这可能会导致和查询条件所需参数不符的情况
 		switch field.FormMode {
-		case FormModeInput, FormModeInputTextarea, FormModeInputEditor:
+		case FormModeInput, FormModeInputTextarea, FormModeInputEditor, FormModeInputYaml:
 			component = defaultComponent
 
 		case FormModeInputNumber:

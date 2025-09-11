@@ -123,7 +123,7 @@ func (s *s@{.servFunName}) Export(ctx context.Context, in *@{.templateGroup}in.@
 @{ if eq .options.Step.HasEdit true }
 // Edit 修改/新增@{.tableComment}
 func (s *s@{.servFunName}) Edit(ctx context.Context, in *@{.templateGroup}in.@{.varName}EditInp) (err error) {
-@{.edit.unique}	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (err error) {
+@{.edit.unique}@{.edit.validation}	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (err error) {
 		@{ if eq .options.Step.IsTreeTable true }in.Pid, in.Level, in.Tree, err = hgorm.AutoUpdateTree(ctx, &dao.@{.daoName}, in.@{.pk.GoName}, in.Pid)
 		if err != nil {
 			return err

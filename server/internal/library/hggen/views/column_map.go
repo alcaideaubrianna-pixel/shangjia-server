@@ -100,6 +100,7 @@ const (
 	FormModeInputNumber    = "InputNumber"    // 数字输入
 	FormModeInputTextarea  = "InputTextarea"  // 文本域
 	FormModeInputEditor    = "InputEditor"    // 富文本
+	FormModeInputYaml      = "InputYaml"      // YAML配置
 	FormModeInputDynamic   = "InputDynamic"   // 动态键值对
 	FormModeDate           = "Date"           // 日期选择(Y-M-D)
 	FormModeDateRange      = "DateRange"      // 日期范围选择
@@ -122,7 +123,7 @@ const (
 )
 
 var FormModes = []string{
-	FormModeInput, FormModeInputNumber, FormModeInputTextarea, FormModeInputEditor, FormModeInputDynamic,
+	FormModeInput, FormModeInputNumber, FormModeInputTextarea, FormModeInputEditor, FormModeInputYaml, FormModeInputDynamic,
 	FormModeDate, FormModeDateRange, FormModeTime, FormModeTimeRange,
 	FormModeRadio, FormModeCheckbox, FormModeSelect, FormModeSelectMultiple, FormModeTreeSelect, FormModeCascader,
 	FormModeUploadImage, FormModeUploadImages, FormModeUploadFile, FormModeUploadFiles,
@@ -136,6 +137,7 @@ var FormModeMap = map[string]string{
 	FormModeInputNumber:    "数字输入",
 	FormModeInputTextarea:  "文本域",
 	FormModeInputEditor:    "富文本",
+	FormModeInputYaml:      "YAML配置",
 	FormModeInputDynamic:   "动态键值对",
 	FormModeDate:           "日期选择(Y-M-D)",
 	FormModeDateRange:      "日期范围选择",
@@ -173,6 +175,7 @@ const (
 	FormRoleAccount    = "account"
 	FormRolePassword   = "password"
 	FormRoleAmount     = "amount"
+	FormRoleYaml       = "yaml"
 )
 
 var FormRoleMap = map[string]string{
@@ -191,6 +194,7 @@ var FormRoleMap = map[string]string{
 	FormRoleAccount:    "账号",
 	FormRolePassword:   "密码",
 	FormRoleAmount:     "金额",
+	FormRoleYaml:       "YAML格式",
 }
 
 // 查询条件
