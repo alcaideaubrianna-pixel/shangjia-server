@@ -62,14 +62,14 @@
   import { useProjectSettingStore } from '@/store/modules/projectSetting';
 
   const rules: FormRules = {
-    label: {
+    name: {
       required: true,
-      message: '请输入标题',
+      message: '请输入类型名称',
       trigger: 'blur',
     },
-    path: {
+    type: {
       required: true,
-      message: '请输入路径',
+      message: '请输入类型编码,
       trigger: 'blur',
     },
   };
