@@ -69,7 +69,7 @@
     },
     type: {
       required: true,
-      message: '请输入类型编码,
+      message: '请输入类型编码',
       trigger: 'blur',
     },
   };
