@@ -111,7 +111,7 @@ func (s *sAdminMenu) Edit(ctx context.Context, in *adminin.MenuEditInp) (err err
 				return err
 			}
 		} else {
-			if _, err = dao.AdminMenu.Ctx(ctx).Data(in).OmitEmptyData().Insert(); err != nil {
+			if _, err = dao.AdminMenu.Ctx(ctx).Data(in).OmitNilData().Insert(); err != nil {
 				err = gerror.Wrap(err, "新增菜单失败！")
 				return err
 			}
