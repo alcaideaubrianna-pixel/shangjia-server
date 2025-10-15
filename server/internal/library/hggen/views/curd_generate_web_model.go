@@ -124,10 +124,17 @@ func (l *gCurd) generateWebModelStateItems(ctx context.Context, in *CurdPreviewI
 		if value == nil {
 			value = "null"
 		}
-		//注释为空判断 避免模版生成的model.ts重复加引号
-		//if value == "" {
-		//	value = `''`
-		//}
+		if value == "" {
+			// 修复字符串字段为空时的处理
+			if isStringType(field.TsType, dataType) {
+				value = "" // 模板会自动加引号变成 ''
+			} else {
+				value = "null"
+			}
+		} else if valueStr, ok := value.(string); ok && isStringType(field.TsType, dataType) {
+			// 对于字符串类型，直接使用原值，模板会自动加引号
+			value = valueStr
+		}
 
 		// 选项组件默认值调整
 		if gconv.Int(value) == 0 && IsSelectFormMode(field.FormMode) {
@@ -146,6 +153,7 @@ func (l *gCurd) generateWebModelStateItems(ctx context.Context, in *CurdPreviewI
 		items = append(items, &StateItem{
 			Name:         field.TsName,
 			DefaultValue: value,
+			DataType:     dataType,
 			Dc:           field.Dc,
 		})
 
@@ -451,4 +459,27 @@ func (l *gCurd) generateWebModelColumnsEach(buffer *bytes.Buffer, in *CurdPrevie
 		buffer.WriteString(component)
 	}
 	return
+}
+
+// isStringType 判断字段是否为字符串类型
+func isStringType(tsType, dataType string) bool {
+	// 根据 TypeScript 类型判断
+	if tsType == "string" {
+		return true
+	}
+
+	// 根据数据库数据类型判断
+	stringTypes := []string{
+		"varchar", "char", "text", "longtext", "mediumtext", "tinytext",
+		"nvarchar", "nchar", "ntext",
+		"string", "enum", "set",
+	}
+
+	for _, t := range stringTypes {
+		if strings.EqualFold(dataType, t) {
+			return true
+		}
+	}
+
+	return false
 }
