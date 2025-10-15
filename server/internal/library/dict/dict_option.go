@@ -6,9 +6,10 @@
 package dict
 
 import (
-	"github.com/gogf/gf/v2/util/gconv"
 	"hash/fnv"
 	"hotgo/internal/model"
+
+	"github.com/gogf/gf/v2/util/gconv"
 )
 
 // GenDefaultOption 生成默认表格回显样式
@@ -122,8 +123,8 @@ func GenHashOption(key interface{}, label string, extra ...any) *model.Option {
 
 	tag := "default"
 	if _, err := hash.Write(gconv.Bytes(label)); err == nil {
-		index := int(hash.Sum32()) % len(strings)
-		if index < len(strings) {
+		index := uint32(hash.Sum32()) % uint32(len(strings))
+		if index < uint32(len(strings)) {
 			tag = strings[index]
 		}
 	}
