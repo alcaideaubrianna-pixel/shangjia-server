@@ -159,6 +159,45 @@ func (s *sAdminNotice) View(ctx context.Context, in *adminin.NoticeViewInp) (res
 	return res, nil
 }
 
+// api列表 不需要登陆
+func (s *sAdminNotice) ApiList(ctx context.Context, in *adminin.NoticeListInp) (list []*adminin.NoticeViewModel, totalCount int, err error) {
+
+
+	mod := s.Model(ctx)
+
+	if in.Title != "" {
+		mod = mod.WhereLike("title", "%"+in.Title+"%")
+	}
+
+	if in.Content != "" {
+		mod = mod.WhereLike("content", "%"+in.Content+"%")
+	}
+
+	if in.Type > 0 {
+		mod = mod.Where("type", in.Type)
+	}
+
+	if in.Status > 0 {
+		mod = mod.Where("status", in.Status)
+	}
+
+	totalCount, err = mod.Count()
+	if err != nil {
+		err = gerror.Wrap(err, consts.ErrorORM)
+		return list, totalCount, err
+	}
+
+	if totalCount == 0 {
+		return list, totalCount, nil
+	}
+
+	if err = mod.Page(in.Page, in.PerPage).Order("id desc").Scan(&list); err != nil {
+		err = gerror.Wrap(err, consts.ErrorORM)
+		return list, totalCount, err
+	}
+
+	return list, totalCount, err
+}
 // List 获取列表
 func (s *sAdminNotice) List(ctx context.Context, in *adminin.NoticeListInp) (list []*adminin.NoticeListModel, totalCount int, err error) {
 	var memberId = contexts.GetUserId(ctx)
@@ -291,7 +330,8 @@ func (s *sAdminNotice) UnreadCount(ctx context.Context, in *adminin.NoticeUnread
 
 	stat := func(t int) (count int) {
 		all, err := dao.AdminNotice.Ctx(ctx).As("nr").
-			Where("type =? and id IN(?)", t, in.MessageIds).
+			Where("type", t).
+			WhereIn("id", in.MessageIds).
 			Count()
 		if err != nil {
 			g.Log().Infof(ctx, "UnreadCount stat err:%+v", err)
@@ -304,7 +344,8 @@ func (s *sAdminNotice) UnreadCount(ctx context.Context, in *adminin.NoticeUnread
 
 		read, err := dao.AdminNoticeRead.Ctx(ctx).As("nr").
 			LeftJoin("admin_notice n", "nr.notice_id=n.id").
-			Where("n.type = ? and n.id IN(?)", t, in.MessageIds).
+			Where("n.type", t).
+			WhereIn("n.id", in.MessageIds).
 			Where("nr.member_id", in.MemberId).
 			Count()
 		if err != nil {
@@ -327,8 +368,9 @@ func (s *sAdminNotice) messageIds(ctx context.Context, memberId int64) (ids []in
 	columns, err := s.Model(ctx, &handler.Option{FilterAuth: false}).
 		Fields(dao.AdminNotice.Columns().Id).
 		Where(dao.AdminNotice.Columns().Status, consts.StatusEnabled).
-		Where("(`type` IN(?) OR (`type` = ? and JSON_CONTAINS(`receiver`,'"+gconv.String(memberId)+"')))",
-			[]int{consts.NoticeTypeNotify, consts.NoticeTypeNotice}, consts.NoticeTypeLetter,
+		Where(
+			s.Model(ctx, &handler.Option{FilterAuth: false}).Builder().WhereIn("type",[]int{consts.NoticeTypeNotify, consts.NoticeTypeNotice}).
+			WhereOr(s.Model(ctx, &handler.Option{FilterAuth: false}).Builder().Where("type", consts.NoticeTypeLetter).Wheref("receiver->>'$.key'= ?", gconv.String(memberId))),
 		).Array()
 	if err != nil {
 		err = gerror.Wrap(err, "获取我的消息失败！")
@@ -381,7 +423,8 @@ func (s *sAdminNotice) ReadAll(ctx context.Context, in *adminin.NoticeReadAllInp
 
 	array, err := dao.AdminNotice.Ctx(ctx).
 		Fields("id").
-		Where("type = ? and id IN(?)", in.Type, allMessageIds).
+		Where("type", in.Type).
+		WhereIn("id", allMessageIds).
 		Array()
 	if err != nil {
 		return
@@ -395,7 +438,8 @@ func (s *sAdminNotice) ReadAll(ctx context.Context, in *adminin.NoticeReadAllInp
 	array, err = dao.AdminNoticeRead.Ctx(ctx).As("nr").
 		Fields("nr.notice_id").
 		LeftJoin("admin_notice n", "nr.notice_id=n.id").
-		Where("n.type = ? and n.id IN(?)", in.Type, messageIds).
+		Where("n.type", in.Type).
+		WhereIn("n.id", messageIds).
 		Where("nr.member_id", memberId).
 		Array()
 	if err != nil {
