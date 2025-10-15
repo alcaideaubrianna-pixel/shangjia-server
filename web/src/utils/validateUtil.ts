@@ -1,4 +1,5 @@
 import { FormItemRule } from 'naive-ui';
+import * as yaml from 'js-yaml';
 /**
  * @description 表单验证封装
  */
@@ -220,6 +221,27 @@ export const validate = {
       }
     }
     return true;
+  },
+  // YAML格式验证
+  yaml(rule: FormItemRule, value: any, callback: Function): boolean | Error {
+    if (!value && !rule.required) {
+      callback();
+      return true;
+    }
+    if (!value) {
+      callback(new Error('请输入YAML配置'));
+      return false;
+    }
+
+    try {
+      // 使用 js-yaml 进行同步验证
+      yaml.load(value);
+      callback();
+      return true;
+    } catch (error: any) {
+      callback(new Error(`YAML格式错误: ${error.message}`));
+      return false;
+    }
   },
   // 不验证
   none(_rule: FormItemRule, _value: any, callback: Function): boolean {

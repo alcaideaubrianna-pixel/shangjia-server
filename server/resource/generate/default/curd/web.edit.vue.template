@@ -30,7 +30,7 @@
       <template #action>
         <n-space>
           <n-button @click="closeForm"> 取消 </n-button>
-          <n-button type="info" :loading="formBtnLoading" @click="confirmForm"> 确定 </n-button>
+          <n-button type="info" :loading="formBtnLoading" :disabled="!isFormValid" @click="confirmForm"> 确定 </n-button>
         </n-space>
       </template>
     </n-modal>
@@ -54,7 +54,7 @@
   const dialogWidth = computed(() => {
     return adaModalWidth(840);
   });
-
+@{.script.setup}
   // 提交表单
   function confirmForm(e) {
     e.preventDefault();

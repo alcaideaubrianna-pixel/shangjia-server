@@ -99,10 +99,11 @@ func (l *gCurd) generateLogicSwitchFields(ctx context.Context, in *CurdPreviewIn
 
 func (l *gCurd) generateLogicEdit(ctx context.Context, in *CurdPreviewInput) g.Map {
 	var (
-		data         = make(g.Map)
-		updateBuffer = bytes.NewBuffer(nil)
-		insertBuffer = bytes.NewBuffer(nil)
-		uniqueBuffer = bytes.NewBuffer(nil)
+		data            = make(g.Map)
+		updateBuffer    = bytes.NewBuffer(nil)
+		insertBuffer    = bytes.NewBuffer(nil)
+		uniqueBuffer    = bytes.NewBuffer(nil)
+		validationBuffer = bytes.NewBuffer(nil)
 	)
 
 	for _, field := range in.masterFields {
@@ -117,6 +118,11 @@ func (l *gCurd) generateLogicEdit(ctx context.Context, in *CurdPreviewInput) g.M
 		if field.Unique {
 			uniqueBuffer.WriteString(fmt.Sprintf(LogicEditUnique, field.GoName, in.In.DaoName, in.In.DaoName, field.GoName, field.GoName, field.Dc,in.pk.GoName))
 		}
+
+		// 添加 YAML 格式验证
+		if field.IsEdit && field.FormRole == FormRoleYaml {
+			validationBuffer.WriteString(fmt.Sprintf(EditInpValidatorYaml, field.GoName, field.Dc))
+		}
 	}
 
 	notFilterAuth := ""
@@ -130,6 +136,7 @@ func (l *gCurd) generateLogicEdit(ctx context.Context, in *CurdPreviewInput) g.M
 	data["update"] = updateBuffer.String()
 	data["insert"] = insertBuffer.String()
 	data["unique"] = uniqueBuffer.String()
+	data["validation"] = validationBuffer.String()
 	return data
 }
 

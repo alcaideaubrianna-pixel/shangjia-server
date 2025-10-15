@@ -34,6 +34,9 @@ func (l *gCurd) generateWebViewItem(ctx context.Context, in *CurdPreviewInput) s
 		case FormModeInputTextarea, FormModeInputEditor:
 			component = fmt.Sprintf("<n-descriptions-item>\n          <template #label>%s</template>\n          <span v-html=\"formValue.%s\"></span></n-descriptions-item>", field.Dc, field.TsName)
 
+		case FormModeInputYaml:
+			component = fmt.Sprintf("<n-descriptions-item>\n          <template #label>%s</template>\n          <pre style=\"white-space: pre-wrap; font-family: monospace; background: #f5f5f5; padding: 10px; border-radius: 4px;\">{{ formValue.%s }}</pre></n-descriptions-item>", field.Dc, field.TsName)
+
 		case FormModeInputDynamic:
 			component = defaultComponent
 

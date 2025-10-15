@@ -53,6 +53,9 @@ func (l *gCurd) generateWebEditFormItem(ctx context.Context, in *CurdPreviewInpu
 		case FormModeInputEditor:
 			component = fmt.Sprintf("<n-form-item label=\"%s\" path=\"%s\">\n            <Editor style=\"height: 450px\" id=\"%s\" v-model:value=\"formValue.%s\" />\n          </n-form-item>", field.Dc, field.TsName, field.TsName, field.TsName)
 
+		case FormModeInputYaml:
+			component = fmt.Sprintf("<n-form-item label=\"%s\" path=\"%s\">\n            <YamlEditor ref=\"%sYamlRef\" v-model:value=\"formValue.%s\" :height=\"400\" placeholder=\"请输入%s\" validate-on-blur show-stats prevent-invalid-submit @error=\"handleYamlError\" @valid=\"handleYamlValid\" @validation-change=\"(isValid) => handleYamlValidationChange(isValid, '%s')\" />\n          </n-form-item>", field.Dc, field.TsName, field.TsName, field.TsName, field.Dc, field.TsName)
+
 		case FormModeInputDynamic:
 			component = fmt.Sprintf("<n-form-item label=\"%s\" path=\"%s\">\n            <n-dynamic-input\n            v-model:value=\"formValue.%s\"\n            preset=\"pair\"\n            key-placeholder=\"键名\"\n            value-placeholder=\"键值\"\n          />\n          </n-form-item>", field.Dc, field.TsName, field.TsName)
 
@@ -150,6 +153,7 @@ func (l *gCurd) generateWebEditScript(ctx context.Context, in *CurdPreviewInput)
 		data         = make(g.Map)
 		importBuffer = bytes.NewBuffer(nil)
 		setupBuffer  = bytes.NewBuffer(nil)
+		hasYamlField = false
 	)
 
 	importBuffer.WriteString("  import { ref, computed } from 'vue';\n")
@@ -190,6 +194,11 @@ func (l *gCurd) generateWebEditScript(ctx context.Context, in *CurdPreviewInput)
 			if !gstr.Contains(importBuffer.String(), `import Editor`) {
 				importBuffer.WriteString("  import Editor from '@/components/Editor/editor.vue';\n")
 			}
+		case FormModeInputYaml:
+			if !gstr.Contains(importBuffer.String(), `import YamlEditor`) {
+				importBuffer.WriteString("  import YamlEditor from '@/components/YamlEditor/index.vue';\n")
+			}
+			hasYamlField = true
 		case FormModeUploadImage, FormModeUploadImages:
 			if !gstr.Contains(importBuffer.String(), `import UploadImage`) {
 				importBuffer.WriteString("  import UploadImage from '@/components/Upload/uploadImage.vue';\n")
@@ -205,6 +214,13 @@ func (l *gCurd) generateWebEditScript(ctx context.Context, in *CurdPreviewInput)
 				importBuffer.WriteString("  import CitySelector from '@/components/CitySelector/citySelector.vue';\n")
 			}
 		}
+	}
+
+	// 根据是否有 YAML 字段添加相应的验证逻辑
+	if hasYamlField {
+		setupBuffer.WriteString("  const yamlValidationStates = ref(new Map());\n  const isFormValid = computed(() => {\n    for (const [fieldName, isValid] of yamlValidationStates.value) {\n      if (!isValid) return false;\n    }\n    return true;\n  });\n  const handleYamlError = (error) => {\n    console.error('YAML 验证错误:', error);\n  };\n  const handleYamlValid = (content) => {\n    console.log('YAML 验证通过:', content);\n  };\n  const handleYamlValidationChange = (isValid, fieldName) => {\n    yamlValidationStates.value.set(fieldName, isValid);\n  };\n")
+	} else {
+		setupBuffer.WriteString("  const isFormValid = ref(true);\n")
 	}
 
 	data["import"] = importBuffer.String()
