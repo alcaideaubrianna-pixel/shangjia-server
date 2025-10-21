@@ -24,7 +24,6 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gogf/gf/v2/util/gconv"
 )
 
 type sAdminNotice struct{}
@@ -162,7 +161,6 @@ func (s *sAdminNotice) View(ctx context.Context, in *adminin.NoticeViewInp) (res
 // api列表 不需要登陆
 func (s *sAdminNotice) ApiList(ctx context.Context, in *adminin.NoticeListInp) (list []*adminin.NoticeViewModel, totalCount int, err error) {
 
-
 	mod := s.Model(ctx)
 
 	if in.Title != "" {
@@ -198,6 +196,7 @@ func (s *sAdminNotice) ApiList(ctx context.Context, in *adminin.NoticeListInp) (
 
 	return list, totalCount, err
 }
+
 // List 获取列表
 func (s *sAdminNotice) List(ctx context.Context, in *adminin.NoticeListInp) (list []*adminin.NoticeListModel, totalCount int, err error) {
 	var memberId = contexts.GetUserId(ctx)
@@ -369,8 +368,8 @@ func (s *sAdminNotice) messageIds(ctx context.Context, memberId int64) (ids []in
 		Fields(dao.AdminNotice.Columns().Id).
 		Where(dao.AdminNotice.Columns().Status, consts.StatusEnabled).
 		Where(
-			s.Model(ctx, &handler.Option{FilterAuth: false}).Builder().WhereIn("type",[]int{consts.NoticeTypeNotify, consts.NoticeTypeNotice}).
-			WhereOr(s.Model(ctx, &handler.Option{FilterAuth: false}).Builder().Where("type", consts.NoticeTypeLetter).Wheref("receiver->>'$.key'= ?", gconv.String(memberId))),
+			s.Model(ctx, &handler.Option{FilterAuth: false}).Builder().WhereIn("type", []int{consts.NoticeTypeNotify, consts.NoticeTypeNotice}).
+				WhereOr(s.Model(ctx, &handler.Option{FilterAuth: false}).Builder().Where("type", consts.NoticeTypeLetter)),
 		).Array()
 	if err != nil {
 		err = gerror.Wrap(err, "获取我的消息失败！")
