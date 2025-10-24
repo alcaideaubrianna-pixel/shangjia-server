@@ -1,6 +1,6 @@
 // Package admin
 // @Link  https://github.com/bufanyun/hotgo
-// @Copyright  Copyright (c) 2023 HotGo CLI
+// @Copyright  Copyright (c) 2025 HotGo CLI
 // @Author  Ms <133814250@qq.com>
 // @License  https://github.com/bufanyun/hotgo/blob/master/LICENSE
 package admin
@@ -231,14 +231,24 @@ func (s *sAdminRole) Delete(ctx context.Context, in *adminin.RoleDeleteInp) (err
 		return gerror.New("超管角色禁止删除！")
 	}
 
-	has, err := dao.AdminRole.Ctx(ctx).Where("pid", models.Id).One()
+	exist, err := dao.AdminRole.Ctx(ctx).Where("pid", models.Id).Exist()
 	if err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return
 	}
 
-	if !has.IsEmpty() {
+	if exist {
 		return gerror.New("请先删除该角色下得所有子级！")
+	}
+
+	exist, err = dao.AdminMember.Ctx(ctx).Where("role_id", models.Id).Exist()
+	if err != nil {
+		err = gerror.Wrap(err, consts.ErrorORM)
+		return
+	}
+
+	if exist {
+		return gerror.New("请先删除该角色下得所有用户账号！")
 	}
 
 	if _, err = dao.AdminRole.Ctx(ctx).Where("id", in.Id).Delete(); err != nil {

@@ -77,7 +77,7 @@
             type: 'default',
           },
           {
-            label: '添加',
+            label: '添加子角色',
             onClick: handleAddSub.bind(null, record),
           },
           {

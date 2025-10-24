@@ -15,7 +15,7 @@ import {
   BellOutlined,
 } from '@vicons/antd';
 
-import { Refresh } from '@vicons/ionicons5';
+import { Refresh, LanguageOutline } from '@vicons/ionicons5';
 
 export default {
   SettingOutlined,
@@ -33,4 +33,5 @@ export default {
   CheckOutlined,
   BellOutlined,
   Refresh,
+  LanguageOutline,
 };

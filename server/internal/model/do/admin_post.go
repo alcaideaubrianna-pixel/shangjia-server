@@ -12,12 +12,12 @@ import (
 // AdminPost is the golang structure of table hg_admin_post for DAO operations like Where/Data.
 type AdminPost struct {
 	g.Meta    `orm:"table:hg_admin_post, do:true"`
-	Id        interface{} // 岗位ID
-	Code      interface{} // 岗位编码
-	Name      interface{} // 岗位名称
-	Remark    interface{} // 备注
-	Sort      interface{} // 排序
-	Status    interface{} // 状态
+	Id        any         // 岗位ID
+	Code      any         // 岗位编码
+	Name      any         // 岗位名称
+	Remark    any         // 备注
+	Sort      any         // 排序
+	Status    any         // 状态
 	CreatedAt *gtime.Time // 创建时间
 	UpdatedAt *gtime.Time // 更新时间
 }

@@ -76,6 +76,7 @@
   import { useLoadingBar } from 'naive-ui';
   import { useRoute } from 'vue-router';
   import { useProjectSettingStore } from '@/store/modules/projectSetting';
+  import { useI18nStore } from '@/store/modules/i18n';
 
   const { getDarkTheme } = useDesignSetting();
   const {
@@ -89,6 +90,7 @@
 
   const route = useRoute();
   const settingStore = useProjectSettingStore();
+  const i18nStore = useI18nStore();
 
   const navMode = getNavMode;
 
@@ -183,6 +185,7 @@
   onMounted(() => {
     checkMobileMode();
     window.addEventListener('resize', watchWidth);
+    i18nStore.initLocale();
     //挂载在 window 方便与在js中使用
     window['$loading'] = useLoadingBar();
     window['$loading'].finish();

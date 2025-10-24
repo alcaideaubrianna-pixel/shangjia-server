@@ -25,6 +25,7 @@
     - [WebSocket服务器](/docs/guide-zh-CN/sys-websocket-server.md)
     - [TCP服务器](/docs/guide-zh-CN/sys-tcp-server.md)
     - [SaaS多租户](/docs/guide-zh-CN/sys-tenant.md)
+    - [国际化](/docs/guide-zh-CN/sys-i18n.md)
     - [单元测试](/docs/guide-zh-CN/sys-test.md)
 
 

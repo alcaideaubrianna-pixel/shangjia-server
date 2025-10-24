@@ -5,3 +5,4 @@ export const CURRENT_LOGIN_CONFIG = 'CURRENT-LOGIN-CONFIG'; // 当前登录配�
 export const IS_LOCKSCREEN = 'IS-LOCKSCREEN'; // 是否锁屏
 export const TABS_ROUTES = 'TABS-ROUTES'; // 标签页
 export const CURRENT_DICT = 'CURRENT-DICT'; // 当前用户字典配置
+export const CurrentLocale = 'Current-Locale'; // 当前语言

@@ -27,6 +27,7 @@
 - [WebSocket服务器](sys-websocket-server.md)
 - [TCP服务器](sys-tcp-server.md)
 - [SaaS多租户](sys-tenant.md)
+- [国际化](sys-i18n.md)
 - [单元测试](sys-test.md)
 
 

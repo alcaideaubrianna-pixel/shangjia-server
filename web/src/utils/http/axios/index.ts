@@ -6,20 +6,17 @@ import { checkStatus } from './checkStatus';
 import { formatRequestDate, joinTimestamp } from './helper';
 import { ContentTypeEnum, RequestEnum, ResultEnum } from '@/enums/httpEnum';
 import { PageEnum } from '@/enums/pageEnum';
-
 import { useGlobSetting } from '@/hooks/setting';
-
 import { isString, isUrl } from '@/utils/is/';
 import { deepMerge } from '@/utils';
 import { setObjToUrlParams } from '@/utils/urlUtils';
-
 import { CreateAxiosOptions, RequestOptions, Result } from './types';
-
 import { useUserStoreWidthOut } from '@/store/modules/user';
 import router from '@/router';
 import { storage } from '@/utils/Storage';
 import { encodeParams } from '@/utils/urlUtils';
 import { delNullProperty } from '@/utils/array';
+import { useI18nStore } from '@/store/modules/i18n';
 
 const globSetting = useGlobSetting();
 const urlPrefix = globSetting.urlPrefix || '';
@@ -182,6 +179,7 @@ const transform: AxiosTransform = {
    */
   requestInterceptors: (config, options) => {
     // 请求之前处理config
+    const i18nStore = useI18nStore();
     const userStore = useUserStoreWidthOut();
     const token = userStore.getToken;
     if (token && (config as Recordable)?.requestOptions?.withToken !== false) {
@@ -190,6 +188,7 @@ const transform: AxiosTransform = {
         ? `${options.authenticationScheme} ${token}`
         : token;
     }
+    config.headers.Locale = i18nStore.getLocale();
     return config;
   },
 

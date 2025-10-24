@@ -95,3 +95,12 @@ type UploadPartInp struct {
 type UploadPartModel struct {
 	*storager.UploadPartModel
 }
+
+// ImageTransferStorageInp 图片链接转存
+type ImageTransferStorageInp struct {
+	Url string `json:"url" v:"required#图片链接不能为空" dc:"图片链接"`
+}
+
+type ImageTransferStorageModel struct {
+	*AttachmentListModel
+}

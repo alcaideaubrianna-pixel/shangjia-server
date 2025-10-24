@@ -13,18 +13,18 @@ import (
 // SysLoginLog is the golang structure of table hg_sys_login_log for DAO operations like Where/Data.
 type SysLoginLog struct {
 	g.Meta     `orm:"table:hg_sys_login_log, do:true"`
-	Id         interface{} // 日志ID
-	ReqId      interface{} // 请求ID
-	MemberId   interface{} // 用户ID
-	Username   interface{} // 用户名
+	Id         any         // 日志ID
+	ReqId      any         // 请求ID
+	MemberId   any         // 用户ID
+	Username   any         // 用户名
 	Response   *gjson.Json // 响应数据
 	LoginAt    *gtime.Time // 登录时间
-	LoginIp    interface{} // 登录IP
-	ProvinceId interface{} // 省编码
-	CityId     interface{} // 市编码
-	UserAgent  interface{} // UA信息
-	ErrMsg     interface{} // 错误提示
-	Status     interface{} // 状态
+	LoginIp    any         // 登录IP
+	ProvinceId any         // 省编码
+	CityId     any         // 市编码
+	UserAgent  any         // UA信息
+	ErrMsg     any         // 错误提示
+	Status     any         // 状态
 	CreatedAt  *gtime.Time // 创建时间
 	UpdatedAt  *gtime.Time // 修改时间
 }

@@ -134,6 +134,30 @@
           <span>全屏</span>
         </n-tooltip>
       </div>
+
+      <!-- 国际化 -->
+      <div
+        class="layout-header-trigger layout-header-trigger-min"
+        v-if="userStore.loginConfig?.i18nSwitch"
+      >
+        <n-dropdown
+          :value="i18nStore.getLocale()"
+          trigger="click"
+          @select="localeSelect"
+          :options="availableLocales"
+          show-arrow
+        >
+          <n-tooltip placement="bottom">
+            <template #trigger>
+              <n-icon size="18">
+                <LanguageOutline />
+              </n-icon>
+            </template>
+            <span>切换语言</span>
+          </n-tooltip>
+        </n-dropdown>
+      </div>
+
       <!-- 个人中心 -->
       <div class="layout-header-trigger layout-header-trigger-min">
         <n-dropdown trigger="click" @select="avatarSelect" :options="avatarOptions" show-arrow>
@@ -200,7 +224,7 @@
   import SystemMessage from './SystemMessage.vue';
   import { notificationStoreWidthOut } from '@/store/modules/notification';
   import { getIcon } from '@/enums/systemMessageEnum';
-
+  import { availableLocales, useI18nStore } from '@/store/modules/i18n';
   import Search from './Search.vue';
 
   export default defineComponent({
@@ -222,6 +246,7 @@
       },
     },
     setup(props, { emit }) {
+      const i18nStore = useI18nStore();
       const userStore = useUserStore();
       const notificationStore = notificationStoreWidthOut();
       const useLockscreen = useLockscreenStore();
@@ -238,7 +263,7 @@
 
       // const { username, avatar } = userStore?.info || {};
       const drawerSetting = ref();
-      const projectName = import.meta.env.VITE_GLOB_APP_TITLE;
+      const projectName = userStore.loginConfig?.projectName;
 
       const state = reactive({
         // username: username || '',
@@ -431,6 +456,15 @@
         }
       };
 
+      // 多久下拉菜单
+      const localeSelect = (key) => {
+        i18nStore.setLocale(key);
+        message.success('切换成功');
+        setTimeout(function () {
+          location.reload();
+        }, 800);
+      };
+
       function openSetting() {
         const { openDrawer } = drawerSetting.value;
         openDrawer();
@@ -543,6 +577,9 @@
         userStore,
         updateMenu,
         projectName,
+        localeSelect,
+        i18nStore,
+        availableLocales,
       };
     },
   });

@@ -36,3 +36,13 @@ type UploadPartReq struct {
 type UploadPartRes struct {
 	*sysin.UploadPartModel
 }
+
+// ImageTransferStorageReq 图片链接转存
+type ImageTransferStorageReq struct {
+	g.Meta `path:"/upload/imageTransferStorage" tags:"附件" method:"post" summary:"图片链接转存"`
+	sysin.ImageTransferStorageInp
+}
+
+type ImageTransferStorageRes struct {
+	*sysin.ImageTransferStorageModel
+}

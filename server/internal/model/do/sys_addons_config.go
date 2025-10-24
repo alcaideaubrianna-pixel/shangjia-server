@@ -12,18 +12,18 @@ import (
 // SysAddonsConfig is the golang structure of table hg_sys_addons_config for DAO operations like Where/Data.
 type SysAddonsConfig struct {
 	g.Meta       `orm:"table:hg_sys_addons_config, do:true"`
-	Id           interface{} // 配置ID
-	AddonName    interface{} // 插件名称
-	Group        interface{} // 分组
-	Name         interface{} // 参数名称
-	Type         interface{} // 键值类型:string,int,uint,bool,datetime,date
-	Key          interface{} // 参数键名
-	Value        interface{} // 参数键值
-	DefaultValue interface{} // 默认值
-	Sort         interface{} // 排序
-	Tip          interface{} // 变量描述
-	IsDefault    interface{} // 是否为系统默认
-	Status       interface{} // 状态
+	Id           any         // 配置ID
+	AddonName    any         // 插件名称
+	Group        any         // 分组
+	Name         any         // 参数名称
+	Type         any         // 键值类型:string,int,uint,bool,datetime,date
+	Key          any         // 参数键名
+	Value        any         // 参数键值
+	DefaultValue any         // 默认值
+	Sort         any         // 排序
+	Tip          any         // 变量描述
+	IsDefault    any         // 是否为系统默认
+	Status       any         // 状态
 	CreatedAt    *gtime.Time // 创建时间
 	UpdatedAt    *gtime.Time // 更新时间
 }

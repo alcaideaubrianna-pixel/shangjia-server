@@ -7,6 +7,7 @@ package common
 
 import (
 	"context"
+	"github.com/gogf/gf/v2/i18n/gi18n"
 	"hotgo/api/admin/common"
 	"hotgo/internal/consts"
 	"hotgo/internal/library/captcha"
@@ -90,6 +91,9 @@ func (c *cSite) LoginConfig(ctx context.Context, _ *common.SiteLoginConfigReq) (
 	}
 
 	res.LoginConfig = login
+	res.I18nSwitch = g.Cfg().MustGet(ctx, "system.i18n.switch", true).Bool()
+	res.DefaultLanguage = g.Cfg().MustGet(ctx, "system.i18n.defaultLanguage", consts.SysDefaultLanguage).String()
+	res.ProjectName = gi18n.T(ctx, "HotGo管理系统")
 	return
 }
 

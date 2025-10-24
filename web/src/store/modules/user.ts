@@ -67,6 +67,9 @@ export interface LoginConfigState {
   loginAutoOpenId: number;
   loginProtocol: string;
   loginPolicy: string;
+  i18nSwitch: boolean;
+  defaultLanguage: string;
+  projectName: string;
 }
 
 export interface IUserState {

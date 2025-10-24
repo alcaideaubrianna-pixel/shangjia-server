@@ -47,3 +47,12 @@ export function ClearKind(params) {
     params,
   });
 }
+
+// 链接图片转存
+export function ImageTransferStorage(params) {
+  return http.request({
+    url: '/upload/imageTransferStorage',
+    method: 'POST',
+    params,
+  });
+}

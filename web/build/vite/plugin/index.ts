@@ -1,6 +1,7 @@
 import type { Plugin } from 'vite';
 import Components from 'unplugin-vue-components/vite';
 import { NaiveUiResolver } from 'unplugin-vue-components/resolvers';
+import AutoImport from 'unplugin-auto-import/vite';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import setupExtend from 'vite-plugin-vue-setup-extend';
 import vue from '@vitejs/plugin-vue';
@@ -21,6 +22,18 @@ export function createVitePlugins(viteEnv: ViteEnv, isBuild: boolean) {
     Components({
       dts: true,
       resolvers: [NaiveUiResolver()],
+    }),
+
+    // 自动引入API
+    AutoImport({
+      imports: [
+        'vue',
+        'vue-router',
+        {
+          '@/locale/index': ['t'],
+        },
+      ],
+      dts: 'auto-imports.d.ts',
     }),
 
     // 支持顶级wait

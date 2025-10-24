@@ -6,6 +6,8 @@
 </template>
 
 <script>
+  import { useUserStore } from '@/store/modules/user';
+
   export default {
     name: 'Index',
     props: {
@@ -14,7 +16,8 @@
       },
     },
     setup() {
-      const projectName = import.meta.env.VITE_GLOB_APP_TITLE;
+      const userStore = useUserStore();
+      const projectName = userStore.loginConfig?.projectName;
       return {
         projectName,
       };

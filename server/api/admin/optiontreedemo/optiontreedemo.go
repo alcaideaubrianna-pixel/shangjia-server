@@ -1,9 +1,9 @@
 // Package optiontreedemo
 // @Link  https://github.com/bufanyun/hotgo
-// @Copyright  Copyright (c) 2024 HotGo CLI
+// @Copyright  Copyright (c) 2025 HotGo CLI
 // @Author  Ms <133814250@qq.com>
 // @License  https://github.com/bufanyun/hotgo/blob/master/LICENSE
-// @AutoGenerate Version 2.15.7
+// @AutoGenerate Version 2.17.8
 package optiontreedemo
 
 import (

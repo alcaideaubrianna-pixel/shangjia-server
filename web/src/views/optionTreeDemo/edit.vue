@@ -70,7 +70,7 @@
           <n-button @click="closeForm">
             取消
           </n-button>
-          <n-button type="info" :loading="formBtnLoading" @click="confirmForm">
+          <n-button type="info" :loading="formBtnLoading" :disabled="!isFormValid" @click="confirmForm">
             确定
           </n-button>
         </n-space>
@@ -100,6 +100,7 @@
   const dialogWidth = computed(() => {
     return adaModalWidth(840);
   });
+  const isFormValid = ref(true);
 
   // 提交表单
   function confirmForm(e) {

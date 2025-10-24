@@ -1,6 +1,6 @@
 // Package simple
 // @Link  https://github.com/bufanyun/hotgo
-// @Copyright  Copyright (c) 2023 HotGo CLI
+// @Copyright  Copyright (c) 2025 HotGo CLI
 // @Author  Ms <133814250@qq.com>
 // @License  https://github.com/bufanyun/hotgo/blob/master/LICENSE
 package simple
@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/encoding/gbase64"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/glog"
 	"hotgo/internal/consts"
@@ -71,6 +72,40 @@ func CheckPassword(input, salt, hash string) (err error) {
 		err = gerror.New("用户名或密码错误")
 		return
 	}
+	return
+}
+
+// GetHeaderLocale 获取请求头语言设置
+// gf支持格式：en/ja/ru/zh-CN/zh-TW
+func GetHeaderLocale(ctx context.Context) (lang string) {
+	lang = g.Cfg().MustGet(ctx, "system.i18n.defaultLanguage", consts.SysDefaultLanguage).String()
+	// 没有开启国际化，使用默认语言
+	if !g.Cfg().MustGet(ctx, "system.i18n.switch", true).Bool() {
+		return
+	}
+
+	r := ghttp.RequestFromCtx(ctx)
+	if r == nil {
+		return
+	}
+	locale := r.Header.Get("Locale")
+	// 简体中文
+	if locale == "zh-CN" || locale == "zh-Hans" || locale == "zh" || locale == "ZH" {
+		lang = "zh-CN"
+		return
+	}
+	// 繁体
+	if locale == "zh-TW" || locale == "zh-Hant" {
+		lang = "zh-TW"
+		return
+	}
+	// 英文
+	if locale == "en" || locale == "EN" {
+		lang = "en"
+		return
+	}
+	// 更多语言
+	// ...
 	return
 }
 

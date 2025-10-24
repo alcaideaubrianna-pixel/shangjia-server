@@ -27,15 +27,13 @@
 </template>
 
 <script lang="ts" setup>
-  import { ref, computed, onMounted } from 'vue';
-  import type { Component } from 'vue';
   import LoginFrom from './login/index.vue';
   import RegisterFrom from './register/index.vue';
   import { useRouter } from 'vue-router';
   import { useUserStore } from '@/store/modules/user';
 
   const userStore = useUserStore();
-  const projectName = import.meta.env.VITE_GLOB_APP_TITLE;
+  const projectName = computed(() => userStore.loginConfig?.projectName);
 
   interface LoginModule {
     key: string;

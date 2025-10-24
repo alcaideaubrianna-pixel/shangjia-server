@@ -77,6 +77,9 @@ type SiteLoginConfigReq struct {
 
 type SiteLoginConfigRes struct {
 	*model.LoginConfig
+	I18nSwitch      bool   `json:"i18nSwitch" dc:"国际化开关"`
+	DefaultLanguage string `json:"defaultLanguage" dc:"默认语言设置"`
+	ProjectName     string `json:"projectName" dc:"项目名称"`
 }
 
 // SitePingReq ping

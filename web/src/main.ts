@@ -6,11 +6,16 @@ import { setupStore } from '@/store';
 import { setupNaive, setupDirectives } from '@/plugins';
 import { AppProvider } from '@/components/Application';
 import setupWebsocket from '@/utils/websocket/index';
+import i18n from '@/locale/index';
 
 async function bootstrap() {
   const appProvider = createApp(AppProvider);
 
   const app = createApp(App);
+
+  // 国际化
+  app.use(i18n);
+  app.config.globalProperties.t = i18n.global.t;
 
   // 注册全局常用的 naive-ui 组件
   setupNaive(app);

@@ -182,12 +182,12 @@ func IsUnique(ctx context.Context, dao daoInstance, where g.Map, message string,
 		m = m.WhereNot(field, pkId[0])
 	}
 
-	count, err := m.Count(1)
+	exist, err := m.Exist()
 	if err != nil {
 		return err
 	}
 
-	if count > 0 {
+	if exist {
 		if message == "" {
 			for k := range where {
 				message = fmt.Sprintf("in the table：%s, %v not uniqued", dao.Table(), where[k])

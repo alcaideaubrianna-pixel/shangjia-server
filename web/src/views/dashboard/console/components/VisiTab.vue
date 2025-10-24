@@ -3,11 +3,17 @@
     <NRow :gutter="24">
       <NCol :span="24">
         <n-card content-style="padding: 0;" :bordered="false">
-          <n-tabs type="line" size="large" :tabs-padding="20" pane-style="padding: 20px;">
-            <n-tab-pane name="流量消耗趋势">
+          <n-tabs
+            type="line"
+            size="large"
+            :tabs-padding="20"
+            pane-style="padding: 20px;"
+            default-value="FluxTrend"
+          >
+            <n-tab-pane name="FluxTrend" :tab="t('流量消耗趋势')">
               <FluxTrend />
             </n-tab-pane>
-            <n-tab-pane name="客户端访问量">
+            <n-tab-pane name="VisitAmount" :tab="t('客户端访问量')">
               <VisitAmount />
             </n-tab-pane>
           </n-tabs>

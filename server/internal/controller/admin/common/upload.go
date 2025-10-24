@@ -57,3 +57,10 @@ func (c *cUpload) UploadPart(ctx context.Context, req *common.UploadPartReq) (re
 	res.UploadPartModel = data
 	return
 }
+
+// ImageTransferStorage 图片链接转存
+func (c *cUpload) ImageTransferStorage(ctx context.Context, req *common.ImageTransferStorageReq) (res *common.ImageTransferStorageRes, err error) {
+	res = new(common.ImageTransferStorageRes)
+	res.ImageTransferStorageModel, err = service.CommonUpload().ImageTransferStorage(ctx, &req.ImageTransferStorageInp)
+	return
+}

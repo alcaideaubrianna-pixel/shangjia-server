@@ -100,7 +100,7 @@
   const allTreeKeys = ref([]);
 
   const actionColumn = reactive({
-    width: 160,
+    width: 220,
     title: '操作',
     key: 'action',
     fixed: 'right',
@@ -114,7 +114,7 @@
             auth: ['/dept/edit'],
           },
           {
-            label: '添加',
+            label: '添加子部门',
             onClick: handleAdd.bind(null, record),
             auth: ['/dept/edit'],
           },

@@ -52,7 +52,7 @@
             </n-space>
           </template>
           <div class="w-full menu">
-            <n-input type="text" v-model:value="pattern" placeholder="输入菜单名称搜索">
+            <n-input type="text" v-model:value="pattern" placeholder="输入菜单名称或权限路径搜索">
               <template #suffix>
                 <n-icon size="18" class="cursor-pointer">
                   <SearchOutlined />
@@ -72,6 +72,7 @@
                   checkable
                   :virtual-scroll="true"
                   :pattern="pattern"
+                  :filter="filterTreeNode"
                   :data="treeOption"
                   :expandedKeys="expandedKeys"
                   style="max-height: 650px; overflow: hidden"
@@ -163,6 +164,26 @@
 
   function onExpandedKeys(keys) {
     expandedKeys.value = keys;
+  }
+
+  // 按名称和权限搜索
+  function filterTreeNode(pattern: string, node: any) {
+    if (!pattern) return true;
+    const searchText = pattern.toLowerCase();
+
+    const label = (node.label || node.title || '').toLowerCase();
+    if (label.includes(searchText)) {
+      return true;
+    }
+
+    const permissions = node.permissions || '';
+    if (permissions) {
+      const permissionsLower = permissions.toLowerCase();
+      if (permissionsLower.includes(searchText)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // 加载菜单选项树

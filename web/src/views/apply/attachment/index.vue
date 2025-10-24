@@ -57,6 +57,14 @@
             </template>
             上传文档
           </n-button>
+          <n-button type="success" @click="showUrlModal" class="ml-2">
+            <template #icon>
+              <n-icon>
+                <FileImageOutlined />
+              </n-icon>
+            </template>
+            链接转图片
+          </n-button>
           <n-button type="error" @click="batchDelete" :disabled="batchDeleteDisabled" class="ml-2">
             <template #icon>
               <n-icon>
@@ -73,6 +81,7 @@
     <FileUpload ref="imageUploadRef" :finish-call="handleFinishCall" upload-type="image" />
     <FileUpload ref="docUploadRef" :finish-call="handleFinishCall" upload-type="doc" />
     <MultipartUpload ref="multipartUploadRef" @on-finish="handleFinishCall" />
+    <UrlModal ref="urlModalRef" @reloadTable="reloadTable" />
   </div>
 </template>
 
@@ -93,6 +102,7 @@
   import FileUpload from '@/components/FileChooser/src/Upload.vue';
   import MultipartUpload from '@/components/Upload/multipartUpload.vue';
   import { Attachment } from '@/components/FileChooser/src/model';
+  import UrlModal from './urlModal.vue';
   import { adaTableScrollX } from '@/utils/hotgo';
 
   const message = useMessage();
@@ -105,6 +115,7 @@
   const imageUploadRef = ref();
   const docUploadRef = ref();
   const multipartUploadRef = ref();
+  const urlModalRef =ref();
 
   const actionColumn = reactive({
     width: 132,
@@ -214,6 +225,10 @@
     if (success) {
       reloadTable();
     }
+  }
+
+  function showUrlModal() {
+    urlModalRef.value?.showModal();
   }
 
   onMounted(async () => {

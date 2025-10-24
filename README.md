@@ -6,13 +6,13 @@
     </p>
     <p align="center">
         <a href="https://goframe.org/pages/viewpage.action?pageId=1114119" target="_blank">
-	        <img src="https://img.shields.io/badge/goframe-2.9.0-green" alt="goframe">
+	        <img src="https://img.shields.io/badge/goframe-2.9.4-green" alt="goframe">
 	    </a>
 	    <a href="https://v3.vuejs.org/" target="_blank">
 	        <img src="https://img.shields.io/badge/vue.js-vue3.4-green" alt="vue">
 	    </a>
 	    <a href="https://www.naiveui.com" target="_blank">
-	        <img src="https://img.shields.io/badge/naiveui-%3E2.42.0-blue" alt="naiveui">
+	        <img src="https://img.shields.io/badge/naiveui-%3E2.43.1-blue" alt="naiveui">
 	    </a>
 		<a href="https://www.tslang.cn/" target="_blank">
 	        <img src="https://img.shields.io/badge/typescript-%3E4.0.0-blue" alt="typescript">
@@ -136,7 +136,7 @@
 
 * 本项目包含的第三方源码和二进制文件之版权信息另行标注。
 
-* 版权所有Copyright © 2020-2025 by Ms (https://github.com/bufanyun/hotgo)
+* 版权所有Copyright © 2020-2026 by Ms (https://github.com/bufanyun/hotgo)
 
 * All rights reserved。
 
@@ -158,7 +158,7 @@
 
 
 ## License
-[MIT © HotGo-2025](./LICENSE)
+[MIT © HotGo-2026](./LICENSE)
   
 
 

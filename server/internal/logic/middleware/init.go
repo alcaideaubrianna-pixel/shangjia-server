@@ -1,6 +1,6 @@
 // Package middleware
 // @Link  https://github.com/bufanyun/hotgo
-// @Copyright  Copyright (c) 2023 HotGo CLI
+// @Copyright  Copyright (c) 2025 HotGo CLI
 // @Author  Ms <133814250@qq.com>
 // @License  https://github.com/bufanyun/hotgo/blob/master/LICENSE
 package middleware
@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/i18n/gi18n"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/net/gtrace"
 	"github.com/gogf/gf/v2/os/gctx"
@@ -56,6 +57,10 @@ func NewMiddleware() *sMiddleware {
 
 // Ctx 初始化请求上下文
 func (s *sMiddleware) Ctx(r *ghttp.Request) {
+	// 国际化
+	r.SetCtx(gi18n.WithLanguage(r.Context(), simple.GetHeaderLocale(r.Context())))
+
+	// 链路追踪
 	if g.Cfg().MustGet(r.Context(), "jaeger.switch").Bool() {
 		ctx, span := gtrace.NewSpan(r.Context(), "middleware.ctx")
 		span.SetAttributes(attribute.KeyValue{

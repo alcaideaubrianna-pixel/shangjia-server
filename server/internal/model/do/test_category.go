@@ -12,13 +12,13 @@ import (
 // TestCategory is the golang structure of table hg_test_category for DAO operations like Where/Data.
 type TestCategory struct {
 	g.Meta      `orm:"table:hg_test_category, do:true"`
-	Id          interface{} // 分类ID
-	Name        interface{} // 分类名称
-	ShortName   interface{} // 简称
-	Description interface{} // 描述
-	Sort        interface{} // 排序
-	Remark      interface{} // 备注
-	Status      interface{} // 状态
+	Id          any         // 分类ID
+	Name        any         // 分类名称
+	ShortName   any         // 简称
+	Description any         // 描述
+	Sort        any         // 排序
+	Remark      any         // 备注
+	Status      any         // 状态
 	CreatedAt   *gtime.Time // 创建时间
 	UpdatedAt   *gtime.Time // 修改时间
 	DeletedAt   *gtime.Time // 删除时间

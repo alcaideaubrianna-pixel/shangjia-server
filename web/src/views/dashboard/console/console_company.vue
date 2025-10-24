@@ -4,13 +4,13 @@
     <n-grid cols="1 s:2 m:3 l:4 xl:4 2xl:4" responsive="screen" :x-gap="12" :y-gap="8">
       <n-grid-item>
         <NCard
-          title="卡板量"
+          :title="t('卡板量')"
           :segmented="{ content: true, footer: true }"
           size="small"
           :bordered="false"
         >
           <template #header-extra>
-            <n-tag type="success">日</n-tag>
+            <n-tag type="success">{{ t('日') }}</n-tag>
           </template>
           <div class="py-1 px-1 flex justify-between">
             <n-skeleton v-if="loading" :width="100" size="medium" />
@@ -20,7 +20,7 @@
             <div class="text-sn">
               <n-skeleton v-if="loading" :width="100" size="medium" />
               <template v-else>
-                日同比
+                {{ t('日同比') }}
                 <CountTo :startVal="1" suffix="%" :endVal="visits.rise" />
                 <n-icon size="12" color="#00ff6f">
                   <CaretUpOutlined />
@@ -30,7 +30,7 @@
             <div class="text-sn">
               <n-skeleton v-if="loading" :width="100" size="medium" />
               <template v-else>
-                周同比
+                {{ t('周同比') }}
                 <CountTo :startVal="1" suffix="%" :endVal="visits.decline" />
                 <n-icon size="12" color="#ffde66">
                   <CaretDownOutlined />
@@ -42,7 +42,7 @@
             <div class="flex justify-between">
               <n-skeleton v-if="loading" text :repeat="2" />
               <template v-else>
-                <div class="text-sn"> 总卡板量： </div>
+                <div class="text-sn"> {{ t('总卡板量：') }} </div>
                 <div class="text-sn">
                   <CountTo :startVal="1" :endVal="visits.amount" />
                 </div>
@@ -53,13 +53,13 @@
       </n-grid-item>
       <n-grid-item>
         <NCard
-          title="激活卡板"
+          :title="t('激活卡板')"
           :segmented="{ content: true, footer: true }"
           size="small"
           :bordered="false"
         >
           <template #header-extra>
-            <n-tag type="info">周</n-tag>
+            <n-tag type="info">{{ t('周') }}</n-tag>
           </template>
           <div class="py-1 px-1 flex justify-between">
             <n-skeleton v-if="loading" :width="100" size="medium" />
@@ -85,10 +85,9 @@
             <div class="flex justify-between">
               <n-skeleton v-if="loading" :width="100" size="medium" />
               <template v-else>
-                <div class="text-sn"> 总激活卡板： </div>
+                <div class="text-sn"> {{ t('总激活卡板：') }} </div>
                 <div class="text-sn">
                   <CountTo :startVal="1" :endVal="saleroom.amount" />
-                  <!-- prefix="￥"-->
                 </div>
               </template>
             </div>
@@ -97,13 +96,13 @@
       </n-grid-item>
       <n-grid-item>
         <NCard
-          title="代理商"
+          :title="t('代理商')"
           :segmented="{ content: true, footer: true }"
           size="small"
           :bordered="false"
         >
           <template #header-extra>
-            <n-tag type="warning">周</n-tag>
+            <n-tag type="warning">{{ t('周') }}</n-tag>
           </template>
           <div class="py-1 px-1 flex justify-between">
             <n-skeleton v-if="loading" :width="100" size="medium" />
@@ -113,7 +112,7 @@
             <div class="text-sn">
               <n-skeleton v-if="loading" :width="100" size="medium" />
               <template v-else>
-                日同比
+                {{ t('日同比') }}
                 <CountTo :startVal="1" suffix="%" :endVal="orderLarge.rise" />
                 <n-icon size="12" color="#00ff6f">
                   <CaretUpOutlined />
@@ -123,7 +122,7 @@
             <div class="text-sn">
               <n-skeleton v-if="loading" :width="100" size="medium" />
               <template v-else>
-                周同比
+                {{ t('周同比') }}
                 <CountTo :startVal="1" suffix="%" :endVal="orderLarge.rise" />
                 <n-icon size="12" color="#ffde66">
                   <CaretDownOutlined />
@@ -135,7 +134,7 @@
             <div class="flex justify-between">
               <n-skeleton v-if="loading" :width="100" size="medium" />
               <template v-else>
-                <div class="text-sn"> 总代理商量： </div>
+                <div class="text-sn"> {{ t('总代理商量：') }} </div>
                 <div class="text-sn">
                   <CountTo :startVal="1" suffix="%" :endVal="orderLarge.amount" />
                 </div>
@@ -146,13 +145,13 @@
       </n-grid-item>
       <n-grid-item>
         <NCard
-          title="提现佣金"
+          :title="t('提现佣金')"
           :segmented="{ content: true, footer: true }"
           size="small"
           :bordered="false"
         >
           <template #header-extra>
-            <n-tag type="error">月</n-tag>
+            <n-tag type="error">{{ t('月') }}</n-tag>
           </template>
           <div class="py-1 px-1 flex justify-between">
             <n-skeleton v-if="loading" :width="100" size="medium" />
@@ -162,7 +161,7 @@
             <div class="text-sn">
               <n-skeleton v-if="loading" :width="100" size="medium" />
               <template v-else>
-                月同比
+                {{ t('月同比') }}
                 <CountTo :startVal="1" suffix="%" :endVal="volume.rise" />
                 <n-icon size="12" color="#00ff6f">
                   <CaretUpOutlined />
@@ -172,7 +171,7 @@
             <div class="text-sn">
               <n-skeleton v-if="loading" :width="100" size="medium" />
               <template v-else>
-                月同比
+                {{ t('月同比') }}
                 <CountTo :startVal="1" suffix="%" :endVal="volume.decline" />
                 <n-icon size="12" color="#ffde66">
                   <CaretDownOutlined />
@@ -184,7 +183,7 @@
             <div class="flex justify-between">
               <n-skeleton v-if="loading" :width="100" size="medium" />
               <template v-else>
-                <div class="text-sn"> 总提现额： </div>
+                <div class="text-sn"> {{ t('总提现额：') }} </div>
                 <div class="text-sn">
                   <CountTo prefix="￥" :startVal="1" :endVal="volume.amount" />
                 </div>
@@ -230,8 +229,6 @@
   </div>
 </template>
 <script lang="ts" setup>
-  import { ref, onMounted } from 'vue';
-  import { useRouter } from 'vue-router';
   import { getConsoleInfo } from '@/api/dashboard/console';
   import VisiTab from './components/VisiTab.vue';
   import { CountTo } from '@/components/CountTo';
@@ -256,80 +253,82 @@
   const router = useRouter();
 
   // 图标列表
-  const iconList = [
-    {
-      icon: UsergroupAddOutlined,
-      size: '32',
-      title: '用户',
-      color: '#69c0ff',
-      eventObject: {
-        click: () => router.push({ name: 'user' }),
+  const iconList = computed(() => {
+    return [
+      {
+        icon: UsergroupAddOutlined,
+        size: '32',
+        title: t('用户'),
+        color: '#69c0ff',
+        eventObject: {
+          click: () => router.push({ name: 'user' }),
+        },
       },
-    },
-    {
-      icon: BarChartOutlined,
-      size: '32',
-      title: '分析',
-      color: '#69c0ff',
-      eventObject: {
-        click: () => {},
+      {
+        icon: BarChartOutlined,
+        size: '32',
+        title: t('分析'),
+        color: '#69c0ff',
+        eventObject: {
+          click: () => {},
+        },
       },
-    },
-    {
-      icon: ShoppingCartOutlined,
-      size: '32',
-      title: '商品',
-      color: '#ff9c6e',
-      eventObject: {
-        click: () => {},
+      {
+        icon: ShoppingCartOutlined,
+        size: '32',
+        title: t('商品'),
+        color: '#ff9c6e',
+        eventObject: {
+          click: () => {},
+        },
       },
-    },
-    {
-      icon: AccountBookOutlined,
-      size: '32',
-      title: '订单',
-      color: '#b37feb',
-      eventObject: {
-        click: () => {},
+      {
+        icon: AccountBookOutlined,
+        size: '32',
+        title: t('订单'),
+        color: '#b37feb',
+        eventObject: {
+          click: () => {},
+        },
       },
-    },
-    {
-      icon: CreditCardOutlined,
-      size: '32',
-      title: '票据',
-      color: '#ffd666',
-      eventObject: {
-        click: () => {},
+      {
+        icon: CreditCardOutlined,
+        size: '32',
+        title: t('票据'),
+        color: '#ffd666',
+        eventObject: {
+          click: () => {},
+        },
       },
-    },
-    {
-      icon: MailOutlined,
-      size: '32',
-      title: '消息',
-      color: '#5cdbd3',
-      eventObject: {
-        click: () => {},
+      {
+        icon: MailOutlined,
+        size: '32',
+        title: t('消息'),
+        color: '#5cdbd3',
+        eventObject: {
+          click: () => {},
+        },
       },
-    },
-    {
-      icon: TagsOutlined,
-      size: '32',
-      title: '标签',
-      color: '#ff85c0',
-      eventObject: {
-        click: () => {},
+      {
+        icon: TagsOutlined,
+        size: '32',
+        title: t('标签'),
+        color: '#ff85c0',
+        eventObject: {
+          click: () => {},
+        },
       },
-    },
-    {
-      icon: SettingOutlined,
-      size: '32',
-      title: '配置',
-      color: '#ffc069',
-      eventObject: {
-        click: () => {},
+      {
+        icon: SettingOutlined,
+        size: '32',
+        title: t('配置'),
+        color: '#ffc069',
+        eventObject: {
+          click: () => {},
+        },
       },
-    },
-  ];
+    ];
+  });
 
   onMounted(async () => {
     const data = await getConsoleInfo();

@@ -12,16 +12,16 @@ import (
 // SysProvinces is the golang structure of table hg_sys_provinces for DAO operations like Where/Data.
 type SysProvinces struct {
 	g.Meta    `orm:"table:hg_sys_provinces, do:true"`
-	Id        interface{} // 省市区ID
-	Title     interface{} // 栏目名称
-	Pinyin    interface{} // 拼音
-	Lng       interface{} // 经度
-	Lat       interface{} // 纬度
-	Pid       interface{} // 父栏目
-	Level     interface{} // 关系树等级
-	Tree      interface{} // 关系
-	Sort      interface{} // 排序
-	Status    interface{} // 状态
+	Id        any         // 省市区ID
+	Title     any         // 栏目名称
+	Pinyin    any         // 拼音
+	Lng       any         // 经度
+	Lat       any         // 纬度
+	Pid       any         // 父栏目
+	Level     any         // 关系树等级
+	Tree      any         // 关系
+	Sort      any         // 排序
+	Status    any         // 状态
 	CreatedAt *gtime.Time // 创建时间
 	UpdatedAt *gtime.Time // 更新时间
 }

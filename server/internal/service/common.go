@@ -21,6 +21,8 @@ type (
 		CheckMultipart(ctx context.Context, in *sysin.CheckMultipartInp) (res *sysin.CheckMultipartModel, err error)
 		// UploadPart 上传分片
 		UploadPart(ctx context.Context, in *sysin.UploadPartInp) (res *sysin.UploadPartModel, err error)
+		// ImageTransferStorage 图片链接转存
+		ImageTransferStorage(ctx context.Context, in *sysin.ImageTransferStorageInp) (res *sysin.ImageTransferStorageModel, err error)
 	}
 	ICommonWechat interface {
 		// Authorize 微信用户授权

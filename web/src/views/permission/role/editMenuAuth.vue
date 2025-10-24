@@ -1,82 +1,78 @@
 <template>
   <div>
-    <n-modal
-      v-model:show="showModal"
-      :show-icon="false"
-      :mask-closable="false"
-      preset="dialog"
-      :title="'分配 ' + formValue.name + ' 的菜单权限'"
-    >
-      <n-spin :show="loading" description="请稍候...">
-        <div class="py-3 menu-list" :style="{ maxHeight: '90vh', height: '70vh' }">
-          <n-input size="small" v-model:value="pattern" placeholder="输入菜单名称搜索" class="mb-2">
-            <template #suffix>
-              <n-icon size="18" class="cursor-pointer">
-                <SearchOutlined />
-              </n-icon>
-            </template>
-          </n-input>
-          <n-tree
-            block-line
-            checkable
-            check-on-click
-            default-expand-all
-            virtual-scroll
-            :data="treeData"
-            :pattern="pattern"
-            :expandedKeys="expandedKeys"
-            :checked-keys="checkedKeys"
-            style="max-height: 950px; overflow: hidden"
-            @update:checked-keys="checkedTree"
-            @update:expanded-keys="onExpandedKeys"
-          />
-        </div>
-      </n-spin>
-      <template #action>
-        <n-space class="mt-6" v-if="showImportSelect">
-          <n-input-group>
-            <n-tree-select
-              size="small"
-              placeholder="请选择一个要导入的角色"
-              :consistent-menu-width="false"
-              clearable
-              filterable
+    <n-drawer v-model:show="showModal" :width="dialogWidth" :show-icon="false" preset="dialog">
+      <n-drawer-content closable :title="`分配 ${formValue.name} 的菜单权限`">
+        <n-spin :show="loading" description="请稍候...">
+          <div :style="{ maxHeight: '78vh', height: '78vh' }">
+            <n-input v-model:value="pattern" placeholder="输入菜单名称或权限路径搜索" class="mb-2">
+              <template #suffix>
+                <n-icon size="18" class="cursor-pointer">
+                  <SearchOutlined />
+                </n-icon>
+              </template>
+            </n-input>
+            <n-tree
+              block-line
+              checkable
+              check-on-click
               default-expand-all
-              :options="editRoleOption"
-              key-field="id"
-              label-field="name"
-              :on-update:value="handleImportSelect"
+              virtual-scroll
+              :data="treeData"
+              :pattern="pattern"
+              :filter="filterTreeNode"
+              :expandedKeys="expandedKeys"
+              :checked-keys="checkedKeys"
+              style="max-height: 950px; overflow: hidden"
+              @update:checked-keys="checkedTree"
+              @update:expanded-keys="onExpandedKeys"
             />
-            <div class="mr-2"></div>
-            <n-button ghost @click="showImportSelect = false" size="small"> 取消 </n-button>
-          </n-input-group>
-        </n-space>
+          </div>
+        </n-spin>
+        <template #footer>
+          <n-space v-if="showImportSelect">
+            <n-input-group>
+              <n-tree-select
+                placeholder="请选择一个要导入的角色"
+                :consistent-menu-width="false"
+                clearable
+                filterable
+                default-expand-all
+                :options="editRoleOption"
+                key-field="id"
+                label-field="name"
+                :on-update:value="handleImportSelect"
+                style="width: 300px"
+              />
+              <div class="mr-2"></div>
+              <n-button ghost @click="showImportSelect = false"> 取消 </n-button>
+            </n-input-group>
+          </n-space>
 
-        <n-space class="mt-6 space-group" v-if="!showImportSelect" size="small">
-          <n-button ghost @click="showImportSelect = true" size="small"> 导入权限 </n-button>
-          <n-button type="info" ghost icon-placement="left" @click="packHandle" size="small">
-            全部{{ expandedKeys.length ? '收起' : '展开' }}
-          </n-button>
-          <n-button type="info" ghost icon-placement="left" @click="checkedAllHandle" size="small">
-            全部{{ checkedAll ? '取消' : '选择' }}
-          </n-button>
+          <n-space v-if="!showImportSelect">
+            <n-button ghost @click="showImportSelect = true"> 导入权限 </n-button>
+            <n-button type="info" ghost icon-placement="left" @click="packHandle">
+              全部{{ expandedKeys.length ? '收起' : '展开' }}
+            </n-button>
+            <n-button type="info" ghost icon-placement="left" @click="checkedAllHandle">
+              全部{{ checkedAll ? '取消' : '选择' }}
+            </n-button>
 
-          <n-popconfirm @positive-click="confirmForm">
-            <template #trigger>
-              <n-button type="primary" :loading="formBtnLoading" size="small">提交</n-button>
-            </template>
-            你正在修改 {{ formValue.name }} 的菜单权限，确定要提交吗？
-          </n-popconfirm>
-        </n-space>
-      </template>
-    </n-modal>
+            <n-popconfirm @positive-click="confirmForm">
+              <template #trigger>
+                <n-button type="primary" :loading="formBtnLoading">提交</n-button>
+              </template>
+              你正在修改 {{ formValue.name }} 的菜单权限，确定要提交吗？
+            </n-popconfirm>
+          </n-space>
+        </template>
+      </n-drawer-content>
+    </n-drawer>
   </div>
 </template>
 
 <script lang="ts" setup>
   import { computed, ref } from 'vue';
   import { GetPermissions, getRoleList, UpdatePermissions } from '@/api/system/role';
-  import { useProjectSettingStore } from '@/store/modules/projectSetting';
   import { NButton, useMessage } from 'naive-ui';
   import { adaModalWidth, getTreeKeys } from '@/utils/hotgo';
   import { findTreeNode, getAllExpandKeys } from '@/utils';
@@ -86,7 +82,6 @@
 
   const emit = defineEmits(['reloadTable']);
   const message = useMessage();
-  const settingStore = useProjectSettingStore();
   const loading = ref(false);
   const showModal = ref(false);
   const formValue = ref<State>(newState(null));
@@ -111,7 +106,7 @@
   });
 
   const dialogWidth = computed(() => {
-    return adaModalWidth(840);
+    return adaModalWidth(630);
   });
 
   function confirmForm(e) {
@@ -132,11 +127,6 @@
       .finally(() => {
         formBtnLoading.value = false;
       });
-  }
-
-  function closeForm() {
-    showModal.value = false;
-    loading.value = false;
   }
 
   function checkedTree(keys) {
@@ -163,6 +153,26 @@
       checkedKeys.value = [];
       checkedAll.value = false;
     }
+  }
+
+  // 按名称和权限搜索
+  function filterTreeNode(pattern: string, node: any) {
+    if (!pattern) return true;
+    const searchText = pattern.toLowerCase();
+
+    const label = (node.label || node.title || '').toLowerCase();
+    if (label.includes(searchText)) {
+      return true;
+    }
+
+    const permissions = node.permissions || '';
+    if (permissions) {
+      const permissionsLower = permissions.toLowerCase();
+      if (permissionsLower.includes(searchText)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function handleImportSelect(key: number) {
@@ -208,9 +218,4 @@
   });
 </script>
 
-<style lang="less">
-  .space-group {
-    margin-left: -8px;
-    margin-right: -8px;
-  }
-</style>
+<style lang="less" scoped></style>

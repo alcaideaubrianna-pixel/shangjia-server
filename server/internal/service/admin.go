@@ -163,6 +163,8 @@ type (
 		MaxSort(ctx context.Context, in *adminin.NoticeMaxSortInp) (res *adminin.NoticeMaxSortModel, err error)
 		// View 获取指定字典类型信息
 		View(ctx context.Context, in *adminin.NoticeViewInp) (res *adminin.NoticeViewModel, err error)
+		// api列表 不需要登陆
+		ApiList(ctx context.Context, in *adminin.NoticeListInp) (list []*adminin.NoticeViewModel, totalCount int, err error)
 		// List 获取列表
 		List(ctx context.Context, in *adminin.NoticeListInp) (list []*adminin.NoticeListModel, totalCount int, err error)
 		// PullMessages 拉取未读消息列表

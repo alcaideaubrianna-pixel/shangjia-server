@@ -17,6 +17,8 @@ import tabsView from './tabs-view';
 import lockscreen from './lockscreen';
 // @ts-ignore
 import dict from './dict';
+// @ts-ignore
+import i18n from './i18n';
 
 export default {
   asyncRoute,
@@ -24,4 +26,5 @@ export default {
   tabsView,
   lockscreen,
   dict,
+  i18n,
 };

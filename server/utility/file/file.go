@@ -6,10 +6,14 @@
 package file
 
 import (
-	"github.com/gogf/gf/v2/os/gfile"
+	"bytes"
 	"hotgo/utility/format"
+	"io"
+	"mime/multipart"
 	"os"
 	"path/filepath"
+
+	"github.com/gogf/gf/v2/os/gfile"
 )
 
 // 文件信息
@@ -65,4 +69,35 @@ func MergeAbs(path string, fileName ...string) string {
 	var paths = []string{gfile.RealPath(path)}
 	paths = append(paths, fileName...)
 	return gfile.Join(paths...)
+}
+
+// NewMultipartFileHeader 创建一个MultipartFileHeader
+func NewMultipartFileHeader(filename string, b []byte) (*multipart.FileHeader, error) {
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err = io.Copy(part, bytes.NewReader(b)); err != nil {
+		return nil, err
+	}
+
+	if err = writer.Close(); err != nil {
+		return nil, err
+	}
+
+	reader := multipart.NewReader(body, writer.Boundary())
+	form, err := reader.ReadForm(int64(len(b)) + 1024)
+	if err != nil {
+		return nil, err
+	}
+	defer form.RemoveAll()
+
+	if files, ok := form.File["file"]; ok && len(files) > 0 {
+		return files[0], nil
+	}
+	return nil, io.ErrUnexpectedEOF
 }

@@ -1,9 +1,9 @@
 // Package sysin
 // @Link  https://github.com/bufanyun/hotgo
-// @Copyright  Copyright (c) 2024 HotGo CLI
+// @Copyright  Copyright (c) 2025 HotGo CLI
 // @Author  Ms <133814250@qq.com>
 // @License  https://github.com/bufanyun/hotgo/blob/master/LICENSE
-// @AutoGenerate Version 2.15.7
+// @AutoGenerate Version 2.17.8
 package sysin
 
 import (
@@ -53,7 +53,6 @@ func (in *OptionTreeDemoEditInp) Filter(ctx context.Context) (err error) {
 	if err := g.Validator().Rules("required").Data(in.Title).Messages("标题不能为空").Run(ctx); err != nil {
 		return err.Current()
 	}
-
 	return
 }
 
@@ -122,9 +121,10 @@ type OptionTreeDemoMaxSortModel struct {
 
 // OptionTreeDemoTreeOption 关系树选项
 type OptionTreeDemoTreeOption struct {
-	Title    string      `json:"title" dc:"标题"`
-	Id       int64       `json:"id"    dc:"ID"`
-	Pid      int64       `json:"pid"   dc:"上级"`
+	Title string `json:"title" dc:"标题"`
+	Id    int64  `json:"id"    dc:"ID"`
+	Pid   int64  `json:"pid"   dc:"上级"`
+
 	Children []tree.Node `json:"children"  dc:"子节点"`
 }
 

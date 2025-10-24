@@ -13,17 +13,17 @@ import (
 // AdminNotice is the golang structure of table hg_admin_notice for DAO operations like Where/Data.
 type AdminNotice struct {
 	g.Meta    `orm:"table:hg_admin_notice, do:true"`
-	Id        interface{} // 公告ID
-	Title     interface{} // 公告标题
-	Type      interface{} // 公告类型
-	Tag       interface{} // 标签
-	Content   interface{} // 公告内容
+	Id        any         // 公告ID
+	Title     any         // 公告标题
+	Type      any         // 公告类型
+	Tag       any         // 标签
+	Content   any         // 公告内容
 	Receiver  *gjson.Json // 接收者
-	Remark    interface{} // 备注
-	Sort      interface{} // 排序
-	Status    interface{} // 公告状态
-	CreatedBy interface{} // 发送人
-	UpdatedBy interface{} // 修改人
+	Remark    any         // 备注
+	Sort      any         // 排序
+	Status    any         // 公告状态
+	CreatedBy any         // 发送人
+	UpdatedBy any         // 修改人
 	CreatedAt *gtime.Time // 创建时间
 	UpdatedAt *gtime.Time // 更新时间
 	DeletedAt *gtime.Time // 删除时间
