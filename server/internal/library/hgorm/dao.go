@@ -143,7 +143,7 @@ func GetPkField(ctx context.Context, dao daoInstance) (string, error) {
 	}
 
 	for _, field := range fields {
-		if field.Key == "PRI" {
+		if  strings.ToUpper(field.Key) == "PRI" {
 			return field.Name, nil
 		}
 	}
