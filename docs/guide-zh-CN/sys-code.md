@@ -108,6 +108,7 @@ gfcli:
   gen:
     dao:
       - link: "mysql:hotgo:hg123456.@tcp(127.0.0.1:3306)/hotgo?loc=Local&parseTime=true"
+#      - link: "pgsql:postgres:hg123456@tcp(127.0.0.1:5432)/hotgo"
         group: "default"                                                # 分组 使用hotgo代码生成功能时必须填
         #        tables:          ""                                    # 指定当前数据库中需要执行代码生成的数据表。如果为空，表示数据库的所有表都会生成。
         tablesEx:        "hg_sys_addons_install"                        # 指定当前数据库中需要排除代码生成的数据表。
@@ -267,6 +268,7 @@ INSERT INTO `hg_test_table` (`id`, `category_id`, `title`, `description`, `conte
   gen:
     dao:
       - link: "mysql:hotgo:hg123456.@tcp(127.0.0.1:3306)/hotgo?loc=Local&parseTime=true"
+#      - link: "pgsql:postgres:hg123456@tcp(127.0.0.1:5432)/hotgo"
         group: "default"                                                # 分组 使用hotgo代码生成功能时必须填
         tablesEx:        "hg_sys_addons_install"                        # 指定当前数据库中需要排除代码生成的数据表。
         removePrefix: "hg_"
@@ -296,6 +298,7 @@ database:
     stdout: true
   default:
     link: "mysql:hotgo:hg123456.@tcp(127.0.0.1:3306)/hotgo?loc=Local&parseTime=true"
+#    - link: "pgsql:postgres:hg123456@tcp(127.0.0.1:5432)/hotgo"
     debug: true
     Prefix: "hg_"
   default2:
@@ -350,7 +353,7 @@ hggen:
 
 ### 指定数据库驱动
 
-> HotGo默认使用mysql驱动，如果你想用其他数据库驱动打开下方文件中注释即可
+> HotGo默认使用mysql驱动，如果你想用其他数据库驱动打开下方文件中注释即可，目前已支持mysql、pgsql
 
 修改文件路径：server/internal/library/hggen/internal/cmd/cmd_gen_dao.go
 ```go
@@ -361,7 +364,7 @@ import (
 	//_ "github.com/gogf/gf/contrib/drivers/mssql/v2"
 	_ "github.com/gogf/gf/contrib/drivers/mysql/v2"
 	//_ "github.com/gogf/gf/contrib/drivers/oracle/v2"
-	//_ "github.com/gogf/gf/contrib/drivers/pgsql/v2"
+	_ "github.com/gogf/gf/contrib/drivers/pgsql/v2"
 	//_ "github.com/gogf/gf/contrib/drivers/sqlite/v2"
 
 	"hotgo/internal/library/hggen/internal/cmd/gendao"

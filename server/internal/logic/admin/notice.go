@@ -60,6 +60,11 @@ func (s *sAdminNotice) Edit(ctx context.Context, in *adminin.NoticeEditInp) (err
 		return
 	}
 
+	if in.Content == "" {
+		err = gerror.New("请输入消息内容")
+		return
+	}
+
 	if in.Type == consts.NoticeTypeLetter && len(in.Receiver) == 0 {
 		err = gerror.New("私信类型必须选择接收人")
 		return

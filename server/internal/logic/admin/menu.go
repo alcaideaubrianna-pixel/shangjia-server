@@ -99,6 +99,11 @@ func (s *sAdminMenu) Edit(ctx context.Context, in *adminin.MenuEditInp) (err err
 		return
 	}
 
+	if (in.Type == 1 || in.Type == 2) && len(in.Component) == 0 {
+		err = gerror.Newf("请先设置目录组件/路径")
+		return
+	}
+
 	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		in.Pid, in.Level, in.Tree, err = hgorm.AutoUpdateTree(ctx, &dao.AdminMenu, in.Id, in.Pid)
 		if err != nil {
@@ -111,7 +116,7 @@ func (s *sAdminMenu) Edit(ctx context.Context, in *adminin.MenuEditInp) (err err
 				return err
 			}
 		} else {
-			if _, err = dao.AdminMenu.Ctx(ctx).Data(in).OmitNilData().Insert(); err != nil {
+			if _, err = dao.AdminMenu.Ctx(ctx).Data(in).OmitEmptyData().Insert(); err != nil {
 				err = gerror.Wrap(err, "新增菜单失败！")
 				return err
 			}
@@ -239,8 +244,8 @@ func (s *sAdminMenu) LoginPermissions(ctx context.Context, memberId int64) (list
 	var (
 		allPermissions []*Permissions
 		mod            = dao.AdminMenu.Ctx(ctx).Fields(dao.AdminMenu.Columns().Permissions).
-				Where(dao.AdminMenu.Columns().Status, consts.StatusEnabled).
-				WhereNot(dao.AdminMenu.Columns().Permissions, "")
+			Where(dao.AdminMenu.Columns().Status, consts.StatusEnabled).
+			WhereNot(dao.AdminMenu.Columns().Permissions, "")
 	)
 
 	// 非超管验证允许的菜单列表

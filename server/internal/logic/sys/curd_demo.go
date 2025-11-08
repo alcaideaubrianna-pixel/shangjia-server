@@ -1,9 +1,9 @@
 // Package sys
 // @Link  https://github.com/bufanyun/hotgo
-// @Copyright  Copyright (c) 2024 HotGo CLI
+// @Copyright  Copyright (c) 2025 HotGo CLI
 // @Author  Ms <133814250@qq.com>
 // @License  https://github.com/bufanyun/hotgo/blob/master/LICENSE
-// @AutoGenerate Version 2.15.7
+// @AutoGenerate Version 2.18.6
 package sys
 
 import (
@@ -77,6 +77,15 @@ func (s *sSysCurdDemo) List(ctx context.Context, in *sysin.CurdDemoListInp) (lis
 			return nil, 0, err
 		}
 		mod = mod.WhereIn(dao.SysGenCurdDemo.Columns().CreatedBy, ids)
+	}
+
+	// 查询删除者
+	if in.DeletedBy != "" {
+		ids, err := service.AdminMember().GetIdsByKeyword(ctx, in.DeletedBy)
+		if err != nil {
+			return nil, 0, err
+		}
+		mod = mod.WhereIn(dao.SysGenCurdDemo.Columns().DeletedBy, ids)
 	}
 
 	// 查询创建时间
@@ -165,7 +174,7 @@ func (s *sSysCurdDemo) Delete(ctx context.Context, in *sysin.CurdDemoDeleteInp) 
 	if _, err = s.Model(ctx).WherePri(in.Id).Data(g.Map{
 		dao.SysGenCurdDemo.Columns().DeletedBy: contexts.GetUserId(ctx),
 		dao.SysGenCurdDemo.Columns().DeletedAt: gtime.Now(),
-	}).Update(); err != nil {
+	}).Unscoped().Update(); err != nil {
 		err = gerror.Wrap(err, "删除CURD列表失败，请稍后重试！")
 		return
 	}

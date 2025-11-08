@@ -11,6 +11,7 @@ export class State {
       (eq .DataType "json")
       (eq .DataType "date")
       (eq .DataType "datetime")
+      (eq .DataType "TIMESTAMP")
     )}'@{.DefaultValue}'@{else}@{.DefaultValue}@{end};//@{.Dc}@{end}
   constructor(state?: Partial<State>) {
     if (state) {

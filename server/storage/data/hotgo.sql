@@ -28,7 +28,7 @@ SET time_zone = "+00:00";
 
 CREATE TABLE IF NOT EXISTS `hg_addon_hgexample_table` (
   `id` bigint(20) NOT NULL COMMENT 'ID',
-  `pid` bigint(20) NOT NULL COMMENT '上级ID',
+  `pid` bigint(20) DEFAULT '0' COMMENT '上级ID',
   `level` int(11) DEFAULT '1' COMMENT '树等级',
   `tree` varchar(512) DEFAULT NULL COMMENT '关系树',
   `category_id` bigint(20) DEFAULT NULL COMMENT '分类ID',
@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS `hg_admin_cash` (
   `last_money` decimal(10,2) NOT NULL COMMENT '最终到账金额',
   `ip` varchar(128) NOT NULL COMMENT '申请人IP',
   `status` bigint(20) NOT NULL COMMENT '状态码',
-  `msg` varchar(128) NOT NULL COMMENT '处理结果',
+  `msg` varchar(128) DEFAULT NULL COMMENT '处理结果',
   `handle_at` datetime DEFAULT NULL COMMENT '处理时间',
   `created_at` datetime NOT NULL COMMENT '申请时间'
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COMMENT='管理员_提现记录表';
@@ -306,7 +306,7 @@ CREATE TABLE IF NOT EXISTS `hg_admin_menu` (
   `id` bigint(20) NOT NULL COMMENT '菜单ID',
   `pid` bigint(20) DEFAULT '0' COMMENT '父菜单ID',
   `level` int(11) NOT NULL DEFAULT '1' COMMENT '关系树等级',
-  `tree` varchar(255) NOT NULL COMMENT '关系树',
+  `tree` varchar(255) DEFAULT NULL COMMENT '关系树',
   `title` varchar(64) NOT NULL COMMENT '菜单名称',
   `name` varchar(128) NOT NULL COMMENT '名称编码',
   `path` varchar(200) DEFAULT NULL COMMENT '路由地址',
@@ -315,7 +315,7 @@ CREATE TABLE IF NOT EXISTS `hg_admin_menu` (
   `redirect` varchar(255) DEFAULT NULL COMMENT '重定向地址',
   `permissions` varchar(512) DEFAULT NULL COMMENT '菜单包含权限集合',
   `permission_name` varchar(64) DEFAULT NULL COMMENT '权限名称',
-  `component` varchar(255) NOT NULL COMMENT '组件路径',
+  `component` varchar(255) DEFAULT NULL COMMENT '组件路径',
   `always_show` tinyint(1) DEFAULT '0' COMMENT '取消自动计算根路由模式',
   `active_menu` varchar(255) DEFAULT NULL COMMENT '高亮菜单编码',
   `is_root` tinyint(1) DEFAULT '0' COMMENT '是否跟路由',
@@ -1949,7 +1949,7 @@ CREATE TABLE IF NOT EXISTS `hg_sys_provinces` (
   `lat` varchar(20) DEFAULT '' COMMENT '纬度',
   `pid` bigint(20) NOT NULL DEFAULT '0' COMMENT '父栏目',
   `level` int(11) NOT NULL DEFAULT '1' COMMENT '关系树等级',
-  `tree` varchar(200) NOT NULL COMMENT '关系',
+  `tree` varchar(200) DEFAULT NULL COMMENT '关系树',
   `sort` int(11) DEFAULT '0' COMMENT '排序',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',

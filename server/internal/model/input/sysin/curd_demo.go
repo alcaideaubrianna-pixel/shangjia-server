@@ -1,9 +1,9 @@
 // Package sysin
 // @Link  https://github.com/bufanyun/hotgo
-// @Copyright  Copyright (c) 2024 HotGo CLI
+// @Copyright  Copyright (c) 2025 HotGo CLI
 // @Author  Ms <133814250@qq.com>
 // @License  https://github.com/bufanyun/hotgo/blob/master/LICENSE
-// @AutoGenerate Version 2.15.7
+// @AutoGenerate Version 2.18.6
 package sysin
 
 import (
@@ -55,22 +55,18 @@ func (in *CurdDemoEditInp) Filter(ctx context.Context) (err error) {
 	if err := g.Validator().Rules("required").Data(in.Title).Messages("标题不能为空").Run(ctx); err != nil {
 		return err.Current()
 	}
-
 	// 验证描述
 	if err := g.Validator().Rules("required").Data(in.Description).Messages("描述不能为空").Run(ctx); err != nil {
 		return err.Current()
 	}
-
 	// 验证内容
 	if err := g.Validator().Rules("required").Data(in.Content).Messages("内容不能为空").Run(ctx); err != nil {
 		return err.Current()
 	}
-
 	// 验证排序
 	if err := g.Validator().Rules("required").Data(in.Sort).Messages("排序不能为空").Run(ctx); err != nil {
 		return err.Current()
 	}
-
 	return
 }
 
@@ -100,6 +96,7 @@ type CurdDemoViewModel struct {
 	entity.SysGenCurdDemo
 	CreatedBySumma *hook.MemberSumma `json:"createdBySumma" dc:"创建者摘要信息"`
 	UpdatedBySumma *hook.MemberSumma `json:"updatedBySumma" dc:"更新者摘要信息"`
+	DeletedBySumma *hook.MemberSumma `json:"deletedBySumma" dc:"删除者摘要信息"`
 }
 
 // CurdDemoListInp 获取CURD列表列表
@@ -109,6 +106,7 @@ type CurdDemoListInp struct {
 	Title            string        `json:"title"            dc:"标题"`
 	Description      string        `json:"description"      dc:"描述"`
 	CreatedBy        string        `json:"createdBy"        dc:"创建者"`
+	DeletedBy        string        `json:"deletedBy"        dc:"删除者"`
 	CreatedAt        []*gtime.Time `json:"createdAt"        dc:"创建时间"`
 	TestCategoryName string        `json:"testCategoryName" dc:"关联分类"`
 }
@@ -129,6 +127,8 @@ type CurdDemoListModel struct {
 	CreatedBySumma   *hook.MemberSumma `json:"createdBySumma"   dc:"创建者摘要信息"`
 	UpdatedBy        int64             `json:"updatedBy"        dc:"更新者"`
 	UpdatedBySumma   *hook.MemberSumma `json:"updatedBySumma"   dc:"更新者摘要信息"`
+	DeletedBy        int64             `json:"deletedBy"        dc:"删除者"`
+	DeletedBySumma   *hook.MemberSumma `json:"deletedBySumma"   dc:"删除者摘要信息"`
 	CreatedAt        *gtime.Time       `json:"createdAt"        dc:"创建时间"`
 	UpdatedAt        *gtime.Time       `json:"updatedAt"        dc:"修改时间"`
 	TestCategoryName string            `json:"testCategoryName" dc:"关联分类"`
@@ -146,6 +146,7 @@ type CurdDemoExportModel struct {
 	Sort             int         `json:"sort"             dc:"排序"`
 	CreatedBy        int64       `json:"createdBy"        dc:"创建者"`
 	UpdatedBy        int64       `json:"updatedBy"        dc:"更新者"`
+	DeletedBy        int64       `json:"deletedBy"        dc:"删除者"`
 	CreatedAt        *gtime.Time `json:"createdAt"        dc:"创建时间"`
 	TestCategoryName string      `json:"testCategoryName" dc:"关联分类"`
 }

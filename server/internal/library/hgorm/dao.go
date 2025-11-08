@@ -9,12 +9,15 @@ package hgorm
 import (
 	"context"
 	"fmt"
+	"strings"
+
+	"hotgo/utility/convert"
+	"hotgo/utility/db"
+
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/text/gstr"
-	"hotgo/utility/convert"
-	"strings"
 )
 
 type daoInstance interface {
@@ -35,7 +38,8 @@ func LeftJoin(m *gdb.Model, masterTable, masterField, joinTable, alias, onField 
 
 // GenJoinOnRelation 生成关联表关联条件
 func GenJoinOnRelation(masterTable, masterField, joinTable, alias, onField string) []string {
-	relation := fmt.Sprintf("`%s`.`%s` = `%s`.`%s`", alias, onField, masterTable, masterField)
+	q := db.GetQuoteChar()
+	relation := fmt.Sprintf("%s%s%s.%s%s%s = %s%s%s.%s%s%s", q, alias, q, q, onField, q, q, masterTable, q, q, masterField, q)
 	return []string{joinTable, alias, relation}
 }
 
@@ -62,7 +66,7 @@ func JoinFields(ctx context.Context, entity interface{}, dao daoInstance, as str
 
 		field := gstr.CaseSnakeFirstUpper(gstr.StrEx(v, as))
 		if _, ok := fields[field]; ok {
-			columns = append(columns, fmt.Sprintf("`%s`.`%s` as `%s`", dao.Table(), field, v))
+			columns = append(columns, db.QuoteFieldAs(dao.Table(), field, v))
 		}
 	}
 
@@ -117,7 +121,7 @@ func GenJoinSelect(ctx context.Context, entity interface{}, dao daoInstance, joi
 		jd, joinField := getJoinAttribute(field)
 		if jd != nil {
 			if _, ok := jd.fields[joinField]; ok {
-				tmpFields = append(tmpFields, fmt.Sprintf("`%s`.`%s` as `%s`", jd.Alias, joinField, field))
+				tmpFields = append(tmpFields, db.QuoteFieldAs(jd.Alias, joinField, field))
 				continue
 			}
 		}
@@ -125,7 +129,7 @@ func GenJoinSelect(ctx context.Context, entity interface{}, dao daoInstance, joi
 		// 主表
 		originalField := gstr.CaseSnakeFirstUpper(field)
 		if _, ok := masterFields[originalField]; ok {
-			tmpFields = append(tmpFields, fmt.Sprintf("`%s`.`%s`", dao.Table(), originalField))
+			tmpFields = append(tmpFields, db.QuoteField(dao.Table(), originalField))
 			continue
 		}
 	}
@@ -143,7 +147,7 @@ func GetPkField(ctx context.Context, dao daoInstance) (string, error) {
 	}
 
 	for _, field := range fields {
-		if  strings.ToUpper(field.Key) == "PRI" {
+		if strings.ToUpper(field.Key) == "PRI" {
 			return field.Name, nil
 		}
 	}

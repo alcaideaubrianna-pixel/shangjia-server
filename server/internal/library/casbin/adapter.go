@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"math"
 	"strings"
@@ -35,6 +36,23 @@ CREATE TABLE IF NOT EXISTS %s (
   PRIMARY KEY (id) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8 COLLATE = utf8_general_ci COMMENT = '管理员_casbin权限表' ROW_FORMAT = Dynamic;
 `
+	createPolicyTablePgSql = `CREATE TABLE IF NOT EXISTS "public"."%s" (
+  "id" int8 NOT NULL DEFAULT nextval('hg_admin_role_casbin_id_seq'::regclass),
+  "p_type" varchar(64) COLLATE "pg_catalog"."default",
+  "v0" varchar(256) COLLATE "pg_catalog"."default",
+  "v1" varchar(256) COLLATE "pg_catalog"."default",
+  "v2" varchar(256) COLLATE "pg_catalog"."default",
+  "v3" varchar(256) COLLATE "pg_catalog"."default",
+  "v4" varchar(256) COLLATE "pg_catalog"."default",
+  "v5" varchar(256) COLLATE "pg_catalog"."default",
+  CONSTRAINT "hg_admin_role_casbin_pkey" PRIMARY KEY ("id")
+)
+;
+
+ALTER TABLE "public"."%s" 
+  OWNER TO "postgres";
+
+COMMENT ON TABLE "public"."%s" IS '管理员_casbin权限表';`
 )
 
 type (
@@ -106,6 +124,10 @@ func (a *adapter) model() *gdb.Model {
 
 // create a policy table when it's not exists.
 func (a *adapter) createPolicyTable() (err error) {
+	if a.db.GetConfig().Type == consts.DBPgsql {
+		_, err = a.db.Exec(context.TODO(), fmt.Sprintf(createPolicyTablePgSql, a.table, a.table, a.table))
+		return
+	}
 	_, err = a.db.Exec(context.TODO(), fmt.Sprintf(createPolicyTableSql, a.table))
 	return
 }
@@ -154,7 +176,7 @@ func (a *adapter) SavePolicy(model model.Model) (err error) {
 	}
 
 	if count := len(policyRules); count > 0 {
-		if _, err = a.model().OmitEmptyData().Insert(policyRules); err != nil {
+		if _, err = a.model().OmitEmptyData().FieldsEx(policyColumnsName.ID).Insert(policyRules); err != nil {
 			return
 		}
 	}
@@ -163,7 +185,7 @@ func (a *adapter) SavePolicy(model model.Model) (err error) {
 
 // AddPolicy adds a policy rule to the storage.
 func (a *adapter) AddPolicy(sec string, ptype string, rule []string) (err error) {
-	_, err = a.model().OmitEmptyData().Insert(a.buildPolicyRule(ptype, rule))
+	_, err = a.model().OmitEmptyData().FieldsEx(policyColumnsName.ID).Insert(a.buildPolicyRule(ptype, rule))
 	return
 }
 
@@ -179,7 +201,7 @@ func (a *adapter) AddPolicies(sec string, ptype string, rules [][]string) (err e
 		policyRules = append(policyRules, a.buildPolicyRule(ptype, rule))
 	}
 
-	_, err = a.model().OmitEmptyData().Insert(policyRules)
+	_, err = a.model().OmitEmptyData().FieldsEx(policyColumnsName.ID).Insert(policyRules)
 	return
 }
 

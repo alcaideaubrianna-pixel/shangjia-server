@@ -8,12 +8,6 @@ package sys
 import (
 	"context"
 	"fmt"
-	"github.com/gogf/gf/v2/encoding/gjson"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gogf/gf/v2/text/gregex"
-	"github.com/gogf/gf/v2/text/gstr"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/hggen"
@@ -22,6 +16,13 @@ import (
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
 	"hotgo/utility/validate"
+
+	"github.com/gogf/gf/v2/encoding/gjson"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/text/gregex"
+	"github.com/gogf/gf/v2/text/gstr"
 )
 
 type sSysGenCodes struct{}
@@ -211,13 +212,30 @@ func (s *sSysGenCodes) Selects(ctx context.Context, in *sysin.GenCodesSelectsInp
 // TableSelect 表选项
 func (s *sSysGenCodes) TableSelect(ctx context.Context, in *sysin.GenCodesTableSelectInp) (res []*sysin.GenCodesTableSelectModel, err error) {
 	var (
-		sql           = "SELECT TABLE_NAME as value, TABLE_COMMENT as label FROM information_schema.`TABLES` WHERE TABLE_SCHEMA = '%s'"
+		sql           string
 		config        = g.DB(in.Name).GetConfig()
 		disableTables = g.Cfg().MustGet(ctx, "hggen.disableTables").Strings()
 		lists         []*sysin.GenCodesTableSelectModel
 	)
 
-	if err = g.DB(in.Name).Ctx(ctx).Raw(fmt.Sprintf(sql, config.Name)).Scan(&lists); err != nil {
+	// 根据数据库类型使用不同的SQL
+	if config.Type == consts.DBPgsql {
+		// PostgreSQL: 使用pg_catalog查询表和注释
+		sql = `
+			SELECT 
+				c.relname as value,
+				COALESCE(obj_description(c.oid), '') as label
+			FROM pg_class c
+			JOIN pg_namespace n ON c.relnamespace = n.oid
+			WHERE n.nspname = 'public' 
+				AND c.relkind = 'r'
+			ORDER BY c.relname`
+	} else {
+		// MySQL: 使用information_schema.TABLES
+		sql = fmt.Sprintf("SELECT TABLE_NAME as value, TABLE_COMMENT as label FROM information_schema.TABLES WHERE TABLE_SCHEMA = '%s'", config.Name)
+	}
+
+	if err = g.DB(in.Name).Ctx(ctx).Raw(sql).Scan(&lists); err != nil {
 		return
 	}
 
@@ -260,11 +278,32 @@ func (s *sSysGenCodes) TableSelect(ctx context.Context, in *sysin.GenCodesTableS
 // ColumnSelect 表字段选项
 func (s *sSysGenCodes) ColumnSelect(ctx context.Context, in *sysin.GenCodesColumnSelectInp) (res []*sysin.GenCodesColumnSelectModel, err error) {
 	var (
-		sql    = "select COLUMN_NAME as value,COLUMN_COMMENT as label from information_schema.COLUMNS where TABLE_SCHEMA = '%s' and TABLE_NAME = '%s'"
+		sql    string
 		config = g.DB(in.Name).GetConfig()
 	)
 
-	if err = g.DB(in.Name).Ctx(ctx).Raw(fmt.Sprintf(sql, config.Name, in.Table)).Scan(&res); err != nil {
+	// 根据数据库类型使用不同的SQL
+	if config.Type == consts.DBPgsql {
+		// PostgreSQL: 使用pg_catalog查询列注释
+		sql = `
+			SELECT 
+				a.attname as value,
+				COALESCE(col_description(a.attrelid, a.attnum), '') as label
+			FROM pg_attribute a
+			JOIN pg_class c ON a.attrelid = c.oid
+			JOIN pg_namespace n ON c.relnamespace = n.oid
+			WHERE n.nspname = 'public' 
+				AND c.relname = '%s'
+				AND a.attnum > 0 
+				AND NOT a.attisdropped
+			ORDER BY a.attnum`
+		sql = fmt.Sprintf(sql, in.Table)
+	} else {
+		// MySQL: 使用information_schema.COLUMNS
+		sql = fmt.Sprintf("SELECT COLUMN_NAME as value, COLUMN_COMMENT as label FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'", config.Name, in.Table)
+	}
+
+	if err = g.DB(in.Name).Ctx(ctx).Raw(sql).Scan(&res); err != nil {
 		return
 	}
 

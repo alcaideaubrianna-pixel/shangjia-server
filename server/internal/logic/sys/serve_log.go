@@ -74,7 +74,7 @@ func (s *sSysServeLog) List(ctx context.Context, in *sysin.ServeLogListInp) (lis
 		dao.SysLog.Table(), "sysLog", dao.SysLog.Columns().ReqId, // 关联表表名,别名,关联条件
 	)...)
 
-	totalCount, err = mod.Clone().Count(1)
+	totalCount, err = mod.Clone().Count()
 	if err != nil || totalCount == 0 {
 		return
 	}

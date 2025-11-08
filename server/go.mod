@@ -16,6 +16,7 @@ require (
 	github.com/go-pay/gopay v1.5.114
 	github.com/go-pay/smap v0.0.2
 	github.com/gogf/gf/contrib/drivers/mysql/v2 v2.9.4
+	github.com/gogf/gf/contrib/drivers/pgsql/v2 v2.9.5-0.20251017101031-c02148cd6b8b
 	github.com/gogf/gf/contrib/nosql/redis/v2 v2.9.4
 	github.com/gogf/gf/contrib/trace/jaeger/v2 v2.7.4
 	github.com/gogf/gf/v2 v2.9.4
@@ -99,6 +100,7 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
+	github.com/lib/pq v1.10.9 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/magiconair/properties v1.8.10 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect

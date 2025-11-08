@@ -32,7 +32,7 @@
 
 ### 指定数据库驱动
 
-> HotGo默认使用mysql驱动，如果你想用其他数据库驱动打开下方文件中注释即可
+> HotGo默认使用mysql驱动，如果你想用其他数据库驱动打开下方文件中注释即可，目前已支持mysql、pgsql
 
 - 修改文件路径：[server/internal/library/hggen/internal/cmd/cmd_gen_dao.go](../../server/internal/library/hggen/internal/cmd/cmd_gen_dao.go)
 
@@ -44,7 +44,7 @@ import (
 	//_ "github.com/gogf/gf/contrib/drivers/mssql/v2"
 	_ "github.com/gogf/gf/contrib/drivers/mysql/v2"
 	//_ "github.com/gogf/gf/contrib/drivers/oracle/v2"
-	//_ "github.com/gogf/gf/contrib/drivers/pgsql/v2"
+	_ "github.com/gogf/gf/contrib/drivers/pgsql/v2"
 	//_ "github.com/gogf/gf/contrib/drivers/sqlite/v2"
 
 	"hotgo/internal/library/hggen/internal/cmd/gendao"

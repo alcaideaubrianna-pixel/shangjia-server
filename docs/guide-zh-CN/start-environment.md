@@ -27,5 +27,5 @@
 
 - node版本 >= 20.0.0
 - golang版本 >= 1.23
-- mysql版本 >= 5.7，引擎需要是 innoDB
+- mysql版本 >= 5.7，引擎需要是 innoDB 或 postgresql版本 >=14
 - IDE推荐：Goland

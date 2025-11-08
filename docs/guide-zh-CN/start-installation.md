@@ -9,8 +9,8 @@
 
 - node版本 >= v20.0.0
 - golang版本 >= v1.23
-- goframe版本 >=v2.7.0
-- mysql版本 >=5.7
+- goframe版本 >=v2.9.4
+- mysql版本 >=5.7 或 postgresql版本 >=14
 
 > 必须先看[环境搭建文档](start-environment.md)，如果安装遇到问题务必先查看[常见问题文档](start-issue.md)
 

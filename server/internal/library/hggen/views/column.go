@@ -8,24 +8,72 @@ package views
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/gconv"
+	"hotgo/internal/consts"
 	"hotgo/internal/library/hggen/internal/cmd/gendao"
 	"hotgo/internal/model/input/sysin"
-	"strings"
 )
 
 // DoTableColumns 获取指定表生成字段列表
 func DoTableColumns(ctx context.Context, in *sysin.GenCodesColumnListInp, config gendao.CGenDaoInput) (fields []*sysin.GenCodesColumnListModel, err error) {
 	var (
-		sql  = "select ORDINAL_POSITION as `id`, COLUMN_NAME as `name`, COLUMN_COMMENT as `dc`, DATA_TYPE as `dataType`, COLUMN_TYPE as `sqlType`, CHARACTER_MAXIMUM_LENGTH as `length`, IS_NULLABLE as `isAllowNull`, COLUMN_DEFAULT as `defaultValue`, COLUMN_KEY as `index`, EXTRA as `extra` from information_schema.COLUMNS where TABLE_SCHEMA = '%s' and TABLE_NAME = '%s' ORDER BY `id` ASC"
+		sql  string
 		conf = g.DB(in.Name).GetConfig()
 	)
 
-	err = g.DB(in.Name).Ctx(ctx).Raw(fmt.Sprintf(sql, conf.Name, in.Table)).Scan(&fields)
+	// 根据数据库类型使用不同的SQL
+	if conf.Type == consts.DBPgsql {
+		// PostgreSQL: 使用pg_catalog查询列详细信息
+		sql = `
+			SELECT 
+				a.attnum as id,
+				a.attname as name,
+				COALESCE(col_description(a.attrelid, a.attnum), '') as dc,
+				t.typname as dataType,
+				CASE 
+					WHEN a.atttypmod > 0 THEN t.typname || '(' || (a.atttypmod - 4) || ')'
+					ELSE t.typname
+				END as sqlType,
+				CASE 
+					WHEN a.atttypmod > 0 THEN a.atttypmod - 4
+					ELSE NULL
+				END as length,
+				CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END as isAllowNull,
+				pg_get_expr(ad.adbin, ad.adrelid) as defaultValue,
+				CASE 
+					WHEN pk.contype = 'p' THEN 'PRI'
+					WHEN uk.contype = 'u' THEN 'UNI'
+					ELSE ''
+				END as "index",
+				CASE 
+					WHEN ad.adbin IS NOT NULL AND ad.adbin LIKE '%nextval%' THEN 'auto_increment'
+					ELSE ''
+				END as extra
+			FROM pg_attribute a
+			JOIN pg_class c ON a.attrelid = c.oid
+			JOIN pg_namespace n ON c.relnamespace = n.oid
+			JOIN pg_type t ON a.atttypid = t.oid
+			LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
+			LEFT JOIN pg_constraint pk ON pk.conrelid = c.oid AND pk.contype = 'p' AND a.attnum = ANY(pk.conkey)
+			LEFT JOIN pg_constraint uk ON uk.conrelid = c.oid AND uk.contype = 'u' AND a.attnum = ANY(uk.conkey)
+			WHERE n.nspname = 'public'
+				AND c.relname = '%s'
+				AND a.attnum > 0
+				AND NOT a.attisdropped
+			ORDER BY a.attnum`
+		sql = fmt.Sprintf(sql, in.Table)
+	} else {
+		// MySQL: 使用information_schema.COLUMNS
+		sql = fmt.Sprintf("SELECT ORDINAL_POSITION as id, COLUMN_NAME as name, COLUMN_COMMENT as dc, DATA_TYPE as dataType, COLUMN_TYPE as sqlType, CHARACTER_MAXIMUM_LENGTH as length, IS_NULLABLE as isAllowNull, COLUMN_DEFAULT as defaultValue, COLUMN_KEY as `index`, EXTRA as extra FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s' ORDER BY id ASC", conf.Name, in.Table)
+	}
+
+	err = g.DB(in.Name).Ctx(ctx).Raw(sql).Scan(&fields)
 	if err != nil {
 		return nil, err
 	}

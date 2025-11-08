@@ -178,7 +178,7 @@ func (s *sPayRefund) List(ctx context.Context, in *payin.PayRefundListInp) (list
 		mod = mod.WhereBetween(dao.PayRefund.Columns().CreatedAt, in.CreatedAt[0], in.CreatedAt[1])
 	}
 
-	totalCount, err = mod.Clone().Count(1)
+	totalCount, err = mod.Clone().Count()
 	if err != nil {
 		return
 	}

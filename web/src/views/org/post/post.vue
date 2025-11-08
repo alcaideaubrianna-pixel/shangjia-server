@@ -184,7 +184,7 @@
     code: '',
     name: '',
     remark: '',
-    sort: null,
+    sort: 10,
     status: 1,
   };
   const formParams = ref<any>(resetFormParams);

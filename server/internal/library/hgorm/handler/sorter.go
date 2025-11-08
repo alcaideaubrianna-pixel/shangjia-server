@@ -6,16 +6,18 @@
 package handler
 
 import (
-	"fmt"
+	"regexp"
+
+	"hotgo/internal/consts"
+	"hotgo/internal/model/input/form"
+	"hotgo/utility/convert"
+	"hotgo/utility/db"
+
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/gutil"
-	"hotgo/internal/consts"
-	"hotgo/internal/model/input/form"
-	"hotgo/utility/convert"
-	"regexp"
 )
 
 // ISorter 排序器接口，实现该接口即可使用Handler匹配排序，支持多字段排序
@@ -62,7 +64,7 @@ func Sorter(in ISorter) func(m *gdb.Model) *gdb.Model {
 				if len(sorter2) > 0 {
 					sorter2 = mappingAndFilterToTableFields(fds, sorter2)
 					for _, v := range sorter2 {
-						v.ColumnKey = fmt.Sprintf("`%v`.`%v`", as, v.ColumnKey)
+						v.ColumnKey = db.QuoteField(as, v.ColumnKey)
 					}
 					newSorters = append(newSorters, sorter2...)
 				}
@@ -71,7 +73,7 @@ func Sorter(in ISorter) func(m *gdb.Model) *gdb.Model {
 			// 移除关联表字段
 			sorters = mappingAndFilterToTableFields(fields, removeSorterIndexes(sorters, removeIndex))
 			for _, v := range sorters {
-				v.ColumnKey = fmt.Sprintf("`%v`.`%v`", masterTable, v.ColumnKey)
+				v.ColumnKey = db.QuoteField(masterTable, v.ColumnKey)
 			}
 
 			sorters = append(newSorters, sorters...)
@@ -79,7 +81,7 @@ func Sorter(in ISorter) func(m *gdb.Model) *gdb.Model {
 			// 单表
 			sorters = mappingAndFilterToTableFields(fields, sorters)
 			for _, v := range sorters {
-				v.ColumnKey = fmt.Sprintf("`%v`.`%v`", masterTable, v.ColumnKey)
+				v.ColumnKey = db.QuoteField(masterTable, v.ColumnKey)
 			}
 		}
 
@@ -123,11 +125,11 @@ func Sorter(in ISorter) func(m *gdb.Model) *gdb.Model {
 		if len(aliases) > 0 {
 			for as, table := range aliases {
 				if table == masterTable {
-					return m.OrderDesc(fmt.Sprintf("`%v`.`%v`", as, pk))
+					return m.OrderDesc(db.QuoteField(as, pk))
 				}
 			}
 		}
-		return m.OrderDesc(fmt.Sprintf("`%v`.`%v`", masterTable, pk))
+		return m.OrderDesc(db.QuoteField(masterTable, pk))
 	}
 }
 

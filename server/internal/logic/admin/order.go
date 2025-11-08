@@ -297,7 +297,7 @@ func (s *sAdminOrder) List(ctx context.Context, in *adminin.OrderListInp) (list 
 	// 操作人摘要信息
 	mod = mod.Hook(hook.MemberSummary)
 
-	totalCount, err = mod.Clone().Count(1)
+	totalCount, err = mod.Clone().Count()
 	if err != nil {
 		return
 	}
