@@ -27,7 +27,13 @@
                   @{end}
 
                   @{ if eq .options.Step.HasEdit true }
-                  <n-button v-if="hasPermission(['/@{.apiPrefix}/edit'])" type="info" icon-placement="left" @click="handleEdit(selectedState)" :disabled="selectedState.@{.pk.TsName} < 1">
+                  <n-button
+                    v-if="hasPermission(['/@{.apiPrefix}/edit'])"
+                    type="info"
+                    icon-placement="left"
+                    @click="handleEdit(selectedState)"
+                    :disabled="selectedState.@{.pk.TsName} < 1"
+                  >
                     <template #icon>
                       <div class="flex items-center">
                         <n-icon size="14">
@@ -40,7 +46,13 @@
                   @{end}
 
                   @{ if eq .options.Step.HasBatchDel true }
-                  <n-button v-if="hasPermission(['/@{.apiPrefix}/delete'])" type="error" icon-placement="left" @click="handleDelete(selectedState)" :disabled="selectedState.@{.pk.TsName} < 1">
+                  <n-button
+                    v-if="hasPermission(['/@{.apiPrefix}/delete'])"
+                    type="error"
+                    icon-placement="left"
+                    @click="handleDelete(selectedState)"
+                    :disabled="selectedState.@{.pk.TsName} < 1"
+                  >
                     <template #icon>
                       <div class="flex items-center">
                         <n-icon size="14">
@@ -78,7 +90,21 @@
                       <n-spin size="medium" />
                     </div>
                   </template>
-                  <n-tree v-else show-line block-line cascade virtual-scroll :pattern="pattern" :data="treeOption" :expandedKeys="expandedKeys" style="height: 75vh" key-field="@{.pk.TsName}" label-field="@{.options.Tree.TitleField.TsName}" @update:selected-keys="handleSelected" @update:expanded-keys="handleOnExpandedKeys" />
+                  <n-tree
+                    v-else
+                    show-line
+                    block-line
+                    cascade
+                    virtual-scroll
+                    :pattern="pattern"
+                    :data="treeOption"
+                    :expandedKeys="expandedKeys"
+                    style="height: 75vh"
+                    key-field="@{.pk.TsName}"
+                    label-field="@{.options.Tree.TitleField.TsName}"
+                    @update:selected-keys="handleSelected"
+                    @update:expanded-keys="handleOnExpandedKeys"
+                  />
                 </div>
               </div>
             </n-card>
@@ -95,7 +121,13 @@
               </template>
               <n-result v-show="selectedState.@{.pk.TsName} < 1" status="info" title="提示" description="请先从列表选择一项后，进行编辑">
                 <template #footer>
-                  <n-button type="info" icon-placement="left" @{ if eq .options.Step.IsOptionTreeTable true }@click="handleAdd(selectedState)"@{end} @{ if eq .options.Step.IsOptionTreeTable false }@click="addTable"@{end} v-if="hasPermission(['/@{.apiPrefix}/edit'])">
+                  <n-button
+                    type="info"
+                    icon-placement="left"
+                    @{ if eq .options.Step.IsOptionTreeTable true }@click="handleAdd(selectedState)"
+                    @{end}@{ if eq .options.Step.IsOptionTreeTable false }@click="addTable"
+                    @{end}v-if="hasPermission(['/@{.apiPrefix}/edit'])"
+                  >
                     <template #icon>
                       <div class="flex items-center">
                         <n-icon size="14">
@@ -110,18 +142,47 @@
 @{end}
 
 @{ if eq .isSearchForm true }
-      <BasicForm @{ if eq .options.Step.IsOptionTreeTable true }v-if="selectedState.@{.pk.TsName} > 0"@{end} ref="searchFormRef" @register="register" @submit="reloadTable" @reset="reloadTable" @keyup.enter="reloadTable">
+      <BasicForm
+        @{ if eq .options.Step.IsOptionTreeTable true }v-if="selectedState.@{.pk.TsName} > 0"
+        @{end}ref="searchFormRef"
+        @register="register"
+        @submit="reloadTable"
+        @reset="reloadTable"
+        @keyup.enter="reloadTable"
+      >
         <template #statusSlot="{ model, field }">
           <n-input v-model:value="model[field]" />
         </template>
       </BasicForm>
 @{end}
 
-      <BasicTable @{ if eq .options.Step.IsOptionTreeTable true }v-if="selectedState.@{.pk.TsName} > 0"@{end} ref="actionRef" @{ if eq .options.Step.HasCheck true }openChecked@{end} :columns="columns" :request="loadDataTable" :row-key="(row) => row.@{.pk.TsName}" :actionColumn="actionColumn" :scroll-x="scrollX" :resizeHeightOffset="-10000" @{ if and (eq .options.Step.IsTreeTable true) (eq .options.Step.IsOptionTreeTable false) }:cascade="false" :expanded-row-keys="expandedKeys" @update:expanded-row-keys="updateExpandedKeys"@{end} @{ if eq .options.Step.HasCheck true }:checked-row-keys="checkedIds"@{end} @{ if eq .options.Step.HasCheck true }@update:checked-row-keys="handleOnCheckedRow"@{end}>
+      <BasicTable
+        @{ if eq .options.Step.IsOptionTreeTable true }v-if="selectedState.@{.pk.TsName} > 0"
+        @{end}ref="actionRef"
+        @{ if eq .options.Step.HasCheck true }openChecked
+        @{end}:columns="columns"
+        :request="loadDataTable"
+        :row-key="(row) => row.@{.pk.TsName}"
+        :actionColumn="actionColumn"
+        :scroll-x="scrollX"
+        :resizeHeightOffset="-10000"
+        @{ if and (eq .options.Step.IsTreeTable true) (eq .options.Step.IsOptionTreeTable false) }:cascade="false"
+        :expanded-row-keys="expandedKeys"
+        @update:expanded-row-keys="updateExpandedKeys"
+        @{end}@{ if eq .options.Step.HasCheck true }:checked-row-keys="checkedIds"
+        @{end}@{ if eq .options.Step.HasCheck true }@update:checked-row-keys="handleOnCheckedRow"
+        @{end}
+      >
         <template #tableTitle>
 
 @{ if eq .options.Step.HasAdd true }
-          <n-button type="primary" @{ if eq .options.Step.IsOptionTreeTable true }@click="handleAdd(selectedState)"@{end} @{ if eq .options.Step.IsOptionTreeTable false }@click="addTable"@{end} class="min-left-space" v-if="hasPermission(['/@{.apiPrefix}/edit'])">
+          <n-button
+            type="primary"
+            @{ if eq .options.Step.IsOptionTreeTable true }@click="handleAdd(selectedState)"
+            @{end}@{ if eq .options.Step.IsOptionTreeTable false }@click="addTable"
+            @{end}class="min-left-space"
+            v-if="hasPermission(['/@{.apiPrefix}/edit'])"
+          >
             <template #icon>
               <n-icon>
                 <PlusOutlined />
@@ -132,7 +193,12 @@
 @{end}
 
 @{ if eq .options.Step.HasBatchDel true }
-          <n-button type="error" @click="handleBatchDelete" class="min-left-space" v-if="hasPermission(['/@{.apiPrefix}/delete'])">
+          <n-button
+            type="error"
+            @click="handleBatchDelete"
+            class="min-left-space"
+            v-if="hasPermission(['/@{.apiPrefix}/delete'])"
+          >
             <template #icon>
               <n-icon>
                 <DeleteOutlined />
@@ -143,7 +209,12 @@
 @{end}
 
 @{ if eq .options.Step.HasExport true }
-          <n-button type="primary" @click="handleExport" class="min-left-space" v-if="hasPermission(['/@{.apiPrefix}/export'])">
+          <n-button
+            type="primary"
+            @click="handleExport"
+            class="min-left-space"
+            v-if="hasPermission(['/@{.apiPrefix}/export'])"
+          >
             <template #icon>
               <n-icon>
                 <ExportOutlined />

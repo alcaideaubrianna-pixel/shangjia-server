@@ -896,8 +896,14 @@ func (l *gCurd) generateSqlContent(ctx context.Context, in *CurdPreviewInput) (e
 			"menuTable":     config.Prefix + "admin_menu",
 			"mainComponent": "LAYOUT",
 		}
-		genFile = new(sysin.GenFile)
+		genFile     = new(sysin.GenFile)
+		templateName = "source.sql.template"
 	)
+
+	// 根据数据库类型选择不同的模板
+	if config.Type == consts.DBPgsql {
+		templateName = "source_pgsql.sql.template"
+	}
 
 	menus, err := service.AdminMenu().GetFastList(ctx)
 	if err != nil {
@@ -993,7 +999,7 @@ func (l *gCurd) generateSqlContent(ctx context.Context, in *CurdPreviewInput) (e
 	}
 
 	tplData["generatePath"] = genFile.Path
-	genFile.Content, err = in.view.Parse(ctx, name+".template", tplData)
+	genFile.Content, err = in.view.Parse(ctx, templateName, tplData)
 	if err != nil {
 		return err
 	}

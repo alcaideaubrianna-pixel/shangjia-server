@@ -99,10 +99,10 @@ func (l *gCurd) generateLogicSwitchFields(ctx context.Context, in *CurdPreviewIn
 
 func (l *gCurd) generateLogicEdit(ctx context.Context, in *CurdPreviewInput) g.Map {
 	var (
-		data            = make(g.Map)
-		updateBuffer    = bytes.NewBuffer(nil)
-		insertBuffer    = bytes.NewBuffer(nil)
-		uniqueBuffer    = bytes.NewBuffer(nil)
+		data             = make(g.Map)
+		updateBuffer     = bytes.NewBuffer(nil)
+		insertBuffer     = bytes.NewBuffer(nil)
+		uniqueBuffer     = bytes.NewBuffer(nil)
 		validationBuffer = bytes.NewBuffer(nil)
 	)
 
@@ -116,7 +116,7 @@ func (l *gCurd) generateLogicEdit(ctx context.Context, in *CurdPreviewInput) g.M
 		}
 
 		if field.Unique {
-			uniqueBuffer.WriteString(fmt.Sprintf(LogicEditUnique, field.GoName, in.In.DaoName, in.In.DaoName, field.GoName, field.GoName, field.Dc,in.pk.GoName))
+			uniqueBuffer.WriteString(fmt.Sprintf(LogicEditUnique, field.GoName, in.In.DaoName, in.In.DaoName, field.GoName, field.GoName, field.Dc, in.pk.GoName))
 		}
 
 		// 添加 YAML 格式验证
@@ -246,6 +246,8 @@ func (l *gCurd) generateLogicListWhereEach(buffer *bytes.Buffer, in *CurdPreview
 
 		if IsNumberType(field.GoType) {
 			linkMode = `in.` + field.GoName + ` > 0`
+		} else if field.GoType == GoTypeBool {
+			linkMode = `true` // bool 类型始终可以查询
 		} else if field.GoType == GoTypeGTime {
 			linkMode = `in.` + field.GoName + ` != nil`
 		} else if field.GoType == GoTypeJson {
@@ -286,12 +288,23 @@ func (l *gCurd) generateLogicListWhereEach(buffer *bytes.Buffer, in *CurdPreview
 		case WhereModeNotBetween:
 			whereTag = "\tif " + linkMode + " {\n\t\tmod = mod." + wherePrefix + "NotBetween(" + tablePrefix + "dao." + daoName + ".Columns()." + columnName + ", in." + field.GoName + "[0], in." + field.GoName + "[1])\n\t}"
 		case WhereModeLike:
-			whereTag = "\tif " + linkMode + " {\n\t\tmod = mod." + wherePrefix + "Like(" + tablePrefix + "dao." + daoName + ".Columns()." + columnName + ", in." + field.GoName + ")\n\t}"
+			fieldValue := "in." + field.GoName
+			if field.GoType != GoTypeString && field.GoType != GoTypeBytes {
+				fieldValue = "gconv.String(in." + field.GoName + ")"
+			}
+			whereTag = "\tif " + linkMode + " {\n\t\tmod = mod." + wherePrefix + "Like(" + tablePrefix + "dao." + daoName + ".Columns()." + columnName + ", " + fieldValue + ")\n\t}"
 		case WhereModeLikeAll:
 			val := `"%"+in.` + field.GoName + `+"%"`
+			if field.GoType != GoTypeString && field.GoType != GoTypeBytes {
+				val = `"%"+gconv.String(in.` + field.GoName + `)+"%"`
+			}
 			whereTag = "\tif " + linkMode + " {\n\t\tmod = mod." + wherePrefix + "Like(" + tablePrefix + "dao." + daoName + ".Columns()." + columnName + ", " + val + ")\n\t}"
 		case WhereModeNotLike:
-			whereTag = "\tif " + linkMode + " {\n\t\tmod = mod." + wherePrefix + "NotLike(" + tablePrefix + "dao." + daoName + ".Columns()." + columnName + ", in." + field.GoName + ")\n\t}"
+			fieldValue := "in." + field.GoName
+			if field.GoType != GoTypeString && field.GoType != GoTypeBytes {
+				fieldValue = "gconv.String(in." + field.GoName + ")"
+			}
+			whereTag = "\tif " + linkMode + " {\n\t\tmod = mod." + wherePrefix + "NotLike(" + tablePrefix + "dao." + daoName + ".Columns()." + columnName + ", " + fieldValue + ")\n\t}"
 		case WhereModeJsonContains:
 			val := tablePrefix + `"JSON_CONTAINS("+dao.` + daoName + `.Columns().` + columnName + `+",?)", in.` + field.GoName
 			whereTag = "\tif " + linkMode + " {\n\t\tmod = mod." + wherePrefix + "(" + val + ")\n\t}"

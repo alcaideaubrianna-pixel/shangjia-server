@@ -3,16 +3,8 @@
 @{.const}
 
 export class State {
-@{range .stateItems}
-  public @{.Name} = @{if and .DataType (or
-      (eq .DataType "varchar")
-      (eq .DataType "char")
-      (eq .DataType "text")
-      (eq .DataType "json")
-      (eq .DataType "date")
-      (eq .DataType "datetime")
-      (eq .DataType "TIMESTAMP")
-    )}'@{.DefaultValue}'@{else}@{.DefaultValue}@{end};//@{.Dc}@{end}
+@{range .stateItems}  public @{.Name} = @{if and .DataType (or (eq .DataType "varchar") (eq .DataType "char") (eq .DataType "bpchar") (eq .DataType "text") (eq .DataType "json") (eq .DataType "jsonb") (eq .DataType "date") (eq .DataType "time") (eq .DataType "timetz") (eq .DataType "datetime") (eq .DataType "timestamp") (eq .DataType "timestamptz") (eq .DataType "TIMESTAMP") (eq .DataType "interval") (eq .DataType "uuid") (eq .DataType "bytea") (eq .DataType "inet") (eq .DataType "cidr") (eq .DataType "macaddr") (eq .DataType "macaddr8") (eq .DataType "bit") (eq .DataType "varbit") (eq .DataType "point") (eq .DataType "line") (eq .DataType "lseg") (eq .DataType "box") (eq .DataType "path") (eq .DataType "polygon") (eq .DataType "circle") (eq .DataType "money")) (ne .DefaultValue "null")}'@{.DefaultValue}'@{else}@{.DefaultValue}@{end}; // @{.Dc}
+@{end}
   constructor(state?: Partial<State>) {
     if (state) {
       Object.assign(this, state);

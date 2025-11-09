@@ -8,6 +8,7 @@ package views
 import (
 	"bytes"
 	"context"
+
 	"github.com/gogf/gf/v2/frame/g"
 )
 
@@ -17,7 +18,7 @@ func (l *gCurd) webIndexTplData(ctx context.Context, in *CurdPreviewInput) (g.Ma
 		importBuffer      = bytes.NewBuffer(nil)
 		importVueMethod   = []string{"h", "reactive", "ref", "computed"}
 		importApiMethod   = []string{"List"}
-		importModelMethod = []string{"columns", "schemas"}
+		importModelMethod = []string{"columns", "schemas", "State"}
 		importUtilsMethod = []string{"adaTableScrollX"}
 		importIcons       []string
 		actionWidth       int64 = 72
@@ -100,7 +101,6 @@ func (l *gCurd) webIndexTplData(ctx context.Context, in *CurdPreviewInput) (g.Ma
 	}
 
 	// 导入基础包
-	importBuffer.WriteString("  import " + ImportWebMethod(importVueMethod) + " from 'vue';\n")
 	importBuffer.WriteString("  import { useDialog, useMessage } from 'naive-ui';\n")
 	importBuffer.WriteString("  import { BasicTable, TableAction } from '@/components/Table';\n")
 	importBuffer.WriteString("  import { BasicForm, useForm } from '@/components/Form/index';\n")

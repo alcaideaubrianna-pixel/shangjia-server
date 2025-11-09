@@ -13,13 +13,12 @@
 </template>
 
 <script lang="ts" setup>
-  import { computed, ref } from 'vue';
   import { useMessage } from 'naive-ui';
   import { View } from '@{.importWebApi}';
   import { State, newState } from './model';
   import { adaModalWidth } from '@/utils/hotgo';
-  import { getFileExt } from '@/utils/urlUtils';
-  @{ if eq .options.DictOps.Has true }import { useDictStore } from '@/store/modules/dict';@{end}
+  @{ if eq .hasUploadFile true }import { getFileExt } from '@/utils/urlUtils';
+  @{end}@{ if eq .options.DictOps.Has true }import { useDictStore } from '@/store/modules/dict';@{end}
 
   const message = useMessage();
   @{ if eq .options.DictOps.Has true }const dict = useDictStore();@{end}
@@ -29,7 +28,7 @@
   const dialogWidth = computed(() => {
     return adaModalWidth(580);
   });
-  const fileAvatarCSS = computed(() => {
+  @{ if eq .hasUploadFile true }const fileAvatarCSS = computed(() => {
     return {
       '--n-merged-size': `var(--n-avatar-size-override, 80px)`,
       '--n-font-size': `18px`,
@@ -40,6 +39,7 @@
   function download(url: string) {
     window.open(url);
   }
+  @{end}
 
   // 打开模态框
   function openModal(state: State) {

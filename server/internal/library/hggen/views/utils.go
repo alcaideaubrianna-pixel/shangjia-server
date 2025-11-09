@@ -8,7 +8,6 @@ package views
 import (
 	"context"
 	"fmt"
-	"github.com/gogf/gf/v2/util/gutil"
 	"hotgo/internal/consts"
 	"hotgo/internal/library/hggen/views/gohtml"
 	"hotgo/internal/model"
@@ -21,10 +20,14 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/gogf/gf/v2/util/gutil"
+
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gfile"
+	"github.com/gogf/gf/v2/os/gproc"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/gconv"
@@ -79,8 +82,17 @@ func ImportSql(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
+	sqlContent := string(rows)
+	config := g.DB("default").GetConfig()
+	if config.Type == consts.DBPgsql {
+		return importSqlPgsql(ctx, sqlContent)
+	}
+	return importSqlMysql(ctx, sqlContent)
+}
 
-	sqlArr := strings.Split(string(rows), "\n")
+// importSqlMysql 导出mysql文件
+func importSqlMysql(ctx context.Context, sqlContent string) error {
+	sqlArr := strings.Split(sqlContent, "\n")
 	for _, sql := range sqlArr {
 		sql = strings.TrimSpace(sql)
 		if sql == "" || strings.HasPrefix(sql, "--") {
@@ -90,6 +102,53 @@ func ImportSql(ctx context.Context, path string) error {
 		g.Log().Infof(ctx, "views.ImportSql sql:%v, exec:%+v, err:%+v", sql, exec, err)
 		if err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// importSqlPgsql 导出pgsql文件
+func importSqlPgsql(ctx context.Context, sqlContent string) error {
+	lines := strings.Split(sqlContent, "\n")
+	var currentStmt strings.Builder
+	inDoBlock := false
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		if trimmedLine == "" || strings.HasPrefix(trimmedLine, "--") {
+			continue
+		}
+
+		currentStmt.WriteString(line)
+		currentStmt.WriteString("\n")
+
+		if strings.HasPrefix(trimmedLine, "DO $$") || strings.HasPrefix(trimmedLine, "DO $") {
+			inDoBlock = true
+			continue
+		}
+
+		if inDoBlock && (strings.HasPrefix(trimmedLine, "END $$;") || strings.HasPrefix(trimmedLine, "END $")) {
+			inDoBlock = false
+			stmt := currentStmt.String()
+			exec, err := g.DB().Exec(ctx, stmt)
+			g.Log().Infof(ctx, "importSqlPgsql DO block executed, exec:%+v, err:%+v", exec, err)
+			if err != nil {
+				g.Log().Errorf(ctx, "importSqlPgsql error: %v, sql: %s", err, stmt)
+				return err
+			}
+			currentStmt.Reset()
+			continue
+		}
+
+		if !inDoBlock && strings.HasSuffix(trimmedLine, ";") {
+			stmt := currentStmt.String()
+			exec, err := g.DB().Exec(ctx, stmt)
+			g.Log().Infof(ctx, "importSqlPgsql sql executed, exec:%+v, err:%+v", exec, err)
+			if err != nil {
+				g.Log().Errorf(ctx, "importSqlPgsql error: %v, sql: %s", err, stmt)
+				return err
+			}
+			currentStmt.Reset()
 		}
 	}
 	return nil
@@ -299,22 +358,182 @@ func FormatGo(ctx context.Context, name, code string) (string, error) {
 }
 
 func FormatVue(code string) string {
+	if formatted, ok := tryPrettierFormat(code, "vue"); ok {
+		return formatted
+	}
+
 	endTag := `</template>`
 	vueLen := gstr.PosR(code, endTag)
 	vueCode := code[:vueLen+len(endTag)]
 	tsCode := code[vueLen+len(endTag):]
+
 	vueCode = gohtml.Format(vueCode)
+	vueCode = formatVueTemplate(vueCode)
 	tsCode = FormatTs(tsCode)
 	return vueCode + tsCode
 }
 
 func FormatTs(code string) string {
+	if formatted, ok := tryPrettierFormat(code, "typescript"); ok {
+		return formatted
+	}
 	code = replaceEmptyLinesWithSpace(code)
+	code = formatTypeScript(code)
 	return code + "\n"
 }
 
+// tryPrettierFormat 尝试使用 Prettier 格式化代码
+func tryPrettierFormat(code string, parser string) (string, bool) {
+	webDir := gfile.Abs("./web")
+	prettierBin := gfile.Join(webDir, "node_modules", ".bin", "prettier")
+
+	if !gfile.Exists(prettierBin) {
+		return "", false
+	}
+
+	tmpFile := gfile.Temp(gtime.TimestampNanoStr()) + "." + getFileExt(parser)
+	defer gfile.Remove(tmpFile)
+
+	if err := gfile.PutContents(tmpFile, code); err != nil {
+		return "", false
+	}
+
+	cmd := fmt.Sprintf("cd %s && %s --write %s 2>/dev/null", webDir, prettierBin, tmpFile)
+	_, err := gproc.ShellExec(context.Background(), cmd)
+	if err != nil {
+		return "", false
+	}
+
+	formatted := gfile.GetContents(tmpFile)
+	if formatted == "" {
+		return "", false
+	}
+	return formatted, true
+}
+
+// getFileExt 根据 parser 类型返回文件扩展名
+func getFileExt(parser string) string {
+	switch parser {
+	case "vue":
+		return "vue"
+	case "typescript":
+		return "ts"
+	default:
+		return "txt"
+	}
+}
+
+// formatVueTemplate 格式化 Vue 模板代码
+func formatVueTemplate(code string) string {
+	lines := strings.Split(code, "\n")
+	var result []string
+	lastLineWasOpenTag := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if lastLineWasOpenTag && trimmed == "" {
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "<") && !strings.HasPrefix(trimmed, "</") &&
+			!strings.HasSuffix(trimmed, "/>") && !strings.HasSuffix(trimmed, ">") &&
+			!strings.HasPrefix(trimmed, "<!--") {
+			lastLineWasOpenTag = true
+			result = append(result, line)
+			continue
+		}
+
+		lastLineWasOpenTag = false
+		if trimmed == "/>" {
+			if len(result) > 0 {
+				prevLine := result[len(result)-1]
+				re := regexp.MustCompile(`^(\s*)`)
+				matches := re.FindStringSubmatch(prevLine)
+				if len(matches) > 1 {
+					line = matches[1] + "/>"
+				}
+			}
+		} else if strings.Contains(line, "/>") {
+			re := regexp.MustCompile(`\s*/>`)
+			line = re.ReplaceAllString(line, " />")
+		}
+
+		if strings.HasPrefix(trimmed, "<") && !strings.HasPrefix(trimmed, "</") &&
+			!strings.HasPrefix(trimmed, "<!--") && len(trimmed) > 100 {
+			line = formatLongVueTag(line)
+		}
+		result = append(result, line)
+	}
+	return strings.Join(result, "\n")
+}
+
+// formatLongVueTag 格式化过长的 Vue 标签
+func formatLongVueTag(line string) string {
+	re := regexp.MustCompile(`\s+`)
+	parts := strings.SplitN(line, ">", 2)
+	if len(parts) == 2 {
+		tagPart := re.ReplaceAllString(parts[0], " ")
+		tagPart = strings.TrimSpace(tagPart)
+		return tagPart + ">" + parts[1]
+	}
+	return line
+}
+
+// formatTypeScript 格式化 TypeScript 代码
+func formatTypeScript(code string) string {
+	lines := strings.Split(code, "\n")
+	var result []string
+	inClass := false
+	lastWasField := false
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "export class") {
+			inClass = true
+			result = append(result, line)
+			continue
+		}
+
+		if inClass && (strings.HasPrefix(trimmed, "constructor(") ||
+			strings.HasPrefix(trimmed, "public ") && strings.Contains(trimmed, "(")) {
+			if lastWasField && len(result) > 0 {
+				result = append(result, "")
+			}
+			inClass = false
+			lastWasField = false
+			result = append(result, line)
+			continue
+		}
+
+		if inClass && strings.HasPrefix(trimmed, "public ") && strings.Contains(trimmed, "=") {
+			if lastWasField && len(result) > 0 && strings.TrimSpace(result[len(result)-1]) == "" {
+				result = result[:len(result)-1]
+			}
+			result = append(result, line)
+			lastWasField = true
+			continue
+		}
+
+		if trimmed == "}" && lastWasField {
+			result = append(result, "")
+			lastWasField = false
+		}
+
+		if trimmed == "" {
+			if inClass && lastWasField {
+				continue
+			}
+			if i > 0 && len(result) > 0 && strings.TrimSpace(result[len(result)-1]) == "" {
+				continue
+			}
+		}
+		result = append(result, line)
+	}
+	return strings.Join(result, "\n")
+}
+
 func replaceEmptyLinesWithSpace(input string) string {
-	re := regexp.MustCompile(`\n\s*\n`)
+	re := regexp.MustCompile(`\n\s*\n\s*\n+`)
 	result := re.ReplaceAllString(input, "\n\n")
 	return result
 }

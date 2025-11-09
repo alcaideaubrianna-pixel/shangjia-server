@@ -10,14 +10,15 @@ import (
 	"fmt"
 	"strings"
 
+	"hotgo/internal/consts"
+	"hotgo/internal/library/hggen/internal/cmd/gendao"
+	"hotgo/internal/model/input/sysin"
+
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/gconv"
-	"hotgo/internal/consts"
-	"hotgo/internal/library/hggen/internal/cmd/gendao"
-	"hotgo/internal/model/input/sysin"
 )
 
 // DoTableColumns 获取指定表生成字段列表
@@ -63,11 +64,10 @@ func DoTableColumns(ctx context.Context, in *sysin.GenCodesColumnListInp, config
 			LEFT JOIN pg_constraint pk ON pk.conrelid = c.oid AND pk.contype = 'p' AND a.attnum = ANY(pk.conkey)
 			LEFT JOIN pg_constraint uk ON uk.conrelid = c.oid AND uk.contype = 'u' AND a.attnum = ANY(uk.conkey)
 			WHERE n.nspname = 'public'
-				AND c.relname = '%s'
+				AND c.relname = '` + in.Table + `'
 				AND a.attnum > 0
 				AND NOT a.attisdropped
 			ORDER BY a.attnum`
-		sql = fmt.Sprintf(sql, in.Table)
 	} else {
 		// MySQL: 使用information_schema.COLUMNS
 		sql = fmt.Sprintf("SELECT ORDINAL_POSITION as id, COLUMN_NAME as name, COLUMN_COMMENT as dc, DATA_TYPE as dataType, COLUMN_TYPE as sqlType, CHARACTER_MAXIMUM_LENGTH as length, IS_NULLABLE as isAllowNull, COLUMN_DEFAULT as defaultValue, COLUMN_KEY as `index`, EXTRA as extra FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s' ORDER BY id ASC", conf.Name, in.Table)

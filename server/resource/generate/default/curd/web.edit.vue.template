@@ -21,8 +21,11 @@
             :label-width="100"
             class="py-4"
           >
-           <n-grid cols="1 s:1 m:@{.options.PresetStep.FormGridCols} l:@{.options.PresetStep.FormGridCols} xl:@{.options.PresetStep.FormGridCols} 2xl:@{.options.PresetStep.FormGridCols}" responsive="screen">
-            @{.formItem}
+            <n-grid
+              cols="1 s:1 m:@{.options.PresetStep.FormGridCols} l:@{.options.PresetStep.FormGridCols} xl:@{.options.PresetStep.FormGridCols} 2xl:@{.options.PresetStep.FormGridCols}"
+              responsive="screen"
+            >
+              @{.formItem}
             </n-grid>
           </n-form>
         </n-spin>

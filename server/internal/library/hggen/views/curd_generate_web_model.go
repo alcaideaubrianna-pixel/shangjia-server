@@ -46,8 +46,6 @@ func (l *gCurd) generateWebModelImport(ctx context.Context, in *CurdPreviewInput
 	importBuffer := bytes.NewBuffer(nil)
 	constBuffer := bytes.NewBuffer(nil)
 
-	importBuffer.WriteString("import { h, ref } from 'vue';\n")
-
 	// 导入基础组件
 	if len(in.options.Step.ImportModel.NaiveUI) > 0 {
 		importBuffer.WriteString("import " + ImportWebMethod(in.options.Step.ImportModel.NaiveUI) + " from 'naive-ui';\n")
@@ -120,19 +118,25 @@ func (l *gCurd) generateWebModelStateItems(ctx context.Context, in *CurdPreviewI
 				dataType = parts[0]
 			}
 		}
+
+		isStr := isStringType(field.TsType, dataType)
+		isArray := strings.HasPrefix(dataType, "_") || strings.Contains(field.SqlType, "[]")
+
 		var value = field.DefaultValue
 		if value == nil {
-			value = "null"
-		}
-		if value == "" {
-			// 修复字符串字段为空时的处理
-			if isStringType(field.TsType, dataType) {
-				value = "" // 模板会自动加引号变成 ''
+			if isArray {
+				value = "null"
+			} else if isStr {
+				value = ""
 			} else {
 				value = "null"
 			}
-		} else if valueStr, ok := value.(string); ok && isStringType(field.TsType, dataType) {
-			// 对于字符串类型，直接使用原值，模板会自动加引号
+		}
+		if value == "" {
+			if isArray || !isStr {
+				value = "null"
+			}
+		} else if valueStr, ok := value.(string); ok && isStr {
 			value = valueStr
 		}
 
@@ -470,9 +474,14 @@ func isStringType(tsType, dataType string) bool {
 
 	// 根据数据库数据类型判断
 	stringTypes := []string{
+		// mysql
 		"varchar", "char", "text", "longtext", "mediumtext", "tinytext",
 		"nvarchar", "nchar", "ntext",
 		"string", "enum", "set",
+		// pgsql
+		"bpchar", "date", "time", "timetz", "timestamp", "timestamptz", "interval",
+		"uuid", "bytea", "inet", "cidr", "macaddr", "macaddr8", "bit", "varbit", "json", "jsonb",
+		"point", "line", "lseg", "box", "path", "polygon", "circle", "money",
 	}
 
 	for _, t := range stringTypes {
@@ -480,6 +489,5 @@ func isStringType(tsType, dataType string) bool {
 			return true
 		}
 	}
-
 	return false
 }
