@@ -7,10 +7,11 @@ package consts
 
 import (
 	"fmt"
-	"github.com/gogf/gf/v2/errors/gcode"
 	"hotgo/internal/library/dict"
 	"hotgo/internal/model"
 	"net/http"
+
+	"github.com/gogf/gf/v2/errors/gcode"
 )
 
 func init() {
@@ -20,10 +21,11 @@ func init() {
 }
 
 const (
-	HTTPContentTypeXml    = "text/xml"
-	HTTPContentTypeHtml   = "text/html"
-	HTTPContentTypeStream = "text/event-stream"
-	HTTPContentTypeJson   = "application/json"
+	HTTPContentTypeXml         = "text/xml"
+	HTTPContentTypeHtml        = "text/html"
+	HTTPContentTypeStream      = "text/event-stream"
+	HTTPContentTypeJson        = "application/json"
+	HTTPContentTypeOctetStream = "application/octet-stream"
 )
 
 // HTTPMethodOptions HTTP请求方式选项
