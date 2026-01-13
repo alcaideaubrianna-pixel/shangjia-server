@@ -27,7 +27,7 @@ git clone https://github.com/bufanyun/hotgo.git && cd hotgo
 
 1、服务端：
 - 项目数据库文件 `storage/data/hotgo.sql` 创建数据库并导入
-- 将配置文件 `manifest/config/config.yaml.bak` 复制后改为`manifest/config/config.yaml`
+- 将配置文件 `manifest/config/config.example.yaml` 复制后改为`manifest/config/config.yaml`
 - 将`manifest/config/config.yaml`中的`database.default.link`数据库配置改为你自己的：
 ```yaml
 # Database. 配置参考：https://goframe.org/pages/viewpage.action?pageId=1114245
@@ -37,6 +37,7 @@ database:
     <<: *defaultLogger
     stdout: true
   default:
+#   link: "mysql:账号:密码@tcp(127.0.0.1:3306)/数据库名?loc=Local&parseTime=true&charset=utf8mb4"
     link: "mysql:hotgo:hg123456.@tcp(127.0.0.1:3306)/hotgo?loc=Local&parseTime=true&charset=utf8mb4"
     debug: true
     Prefix: "hg_"
