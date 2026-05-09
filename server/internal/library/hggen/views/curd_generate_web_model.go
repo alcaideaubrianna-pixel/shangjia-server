@@ -428,7 +428,7 @@ func (l *gCurd) generateWebModelColumnsEach(buffer *bytes.Buffer, in *CurdPrevie
 				err = gerror.Newf("设置多选下拉框选项时，必须选择字典类型，字段名称:%v", field.Name)
 				return
 			}
-			component = fmt.Sprintf("  {\n    title: '%s',\n    key: '%s',\n    align: '%v',\n    width: %v,\n    render(row: State) {\n      if (isNullObject(row.%s) || !isArray(row.%s)) {\n        return ``;\n      }\n      return row.%s.map((tagKey) => {\n        return renderOptionTag('%s', row.tagKey)\n      });\n    },\n  },\n", field.Dc, field.TsName, field.Align, field.Width, field.TsName, field.TsName, field.TsName, in.options.dictMap[field.TsName])
+			component = fmt.Sprintf("  {\n    title: '%s',\n    key: '%s',\n    align: '%v',\n    width: %v,\n    render(row: State) {\n      if (isNullObject(row.%s) || !Array.isArray(row.%s)) {\n        return ``;\n      }\n      return row.%s.map((tagKey) => {\n        return renderOptionTag('%s', tagKey)\n      });\n    },\n  },\n", field.Dc, field.TsName, field.Align, field.Width, field.TsName, field.TsName, field.TsName, in.options.dictMap[field.TsName])
 			in.options.Step.ImportModel.NaiveUI = append(in.options.Step.ImportModel.NaiveUI, "NTag")
 			in.options.Step.ImportModel.UtilsIs = append(in.options.Step.ImportModel.UtilsIs, "isNullObject")
 
