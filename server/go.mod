@@ -15,11 +15,11 @@ require (
 	github.com/go-pay/crypto v0.0.1
 	github.com/go-pay/gopay v1.5.114
 	github.com/go-pay/smap v0.0.2
-	github.com/gogf/gf/contrib/drivers/mysql/v2 v2.9.4
-	github.com/gogf/gf/contrib/drivers/pgsql/v2 v2.9.5-0.20251017101031-c02148cd6b8b
-	github.com/gogf/gf/contrib/nosql/redis/v2 v2.9.4
+	github.com/gogf/gf/contrib/drivers/mysql/v2 v2.10.0
+	github.com/gogf/gf/contrib/drivers/pgsql/v2 v2.10.0
+	github.com/gogf/gf/contrib/nosql/redis/v2 v2.10.0
 	github.com/gogf/gf/contrib/trace/jaeger/v2 v2.7.4
-	github.com/gogf/gf/v2 v2.9.4
+	github.com/gogf/gf/v2 v2.10.0
 	github.com/gogf/selfupdate v0.0.0-20231215043001-5c48c528462f
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
@@ -66,6 +66,7 @@ require (
 	github.com/eapache/go-xerial-snappy v0.0.0-20230731223053-c322873962e3 // indirect
 	github.com/eapache/queue v1.1.0 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
+	github.com/emirpasic/gods/v2 v2.0.0-alpha // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/fatih/structs v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect

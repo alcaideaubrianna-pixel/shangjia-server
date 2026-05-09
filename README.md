@@ -6,13 +6,13 @@
     </p>
     <p align="center">
         <a href="https://goframe.org/pages/viewpage.action?pageId=1114119" target="_blank">
-	        <img src="https://img.shields.io/badge/goframe-2.9.4-green" alt="goframe">
+	        <img src="https://img.shields.io/badge/goframe-2.10.0-green" alt="goframe">
 	    </a>
 	    <a href="https://v3.vuejs.org/" target="_blank">
 	        <img src="https://img.shields.io/badge/vue.js-vue3.4-green" alt="vue">
 	    </a>
 	    <a href="https://www.naiveui.com" target="_blank">
-	        <img src="https://img.shields.io/badge/naiveui-%3E2.43.1-blue" alt="naiveui">
+	        <img src="https://img.shields.io/badge/naiveui-%3E2.44.1-blue" alt="naiveui">
 	    </a>
 		<a href="https://www.tslang.cn/" target="_blank">
 	        <img src="https://img.shields.io/badge/typescript-%3E4.0.0-blue" alt="typescript">
@@ -28,8 +28,9 @@
 
 
 ## 平台简介
-* 基于全新GoFrame2+Vue3+NaiveUI+uniapp开发的全栖框架，为二次开发而生，适合中小型完整应用开发。
-* 前端采用Naive-Ui-Admin、Vue、Naive UI、uniapp。
+* 基于 GoFrame2 + Vue3 + NaiveUI + uniapp 的企业级全栈框架，为二次开发而生。
+* 前端采用 Naive-Ui-Admin、Vue、Naive UI、uniapp。
+* 企业级 AI 赋能基础开发平台，内置 AI 开发规范，适配主流 AI 开发工具，实现人机协同开发，大幅提升开发效率。
 
 ## 演示地址
 -  [https://hotgo.facms.cn/admin](https://hotgo.facms.cn/admin)
