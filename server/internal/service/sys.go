@@ -114,6 +114,18 @@ type (
 		// ClusterSync 集群同步
 		ClusterSync(ctx context.Context, message *gredis.Message)
 	}
+	ISysContent interface {
+		// ListProfiles 获取前台资料列表
+		ListProfiles(ctx context.Context, in *sysin.ContentProfileListInp) (list []*sysin.ContentProfileListModel, totalCount int, err error)
+		// ViewProfile 获取前台资料详情
+		ViewProfile(ctx context.Context, in *sysin.ContentProfileViewInp) (res *sysin.ContentProfileViewModel, err error)
+		// ImportFeiNiu 从 FeiNiu_bot 增量导入资料
+		ImportFeiNiu(ctx context.Context, in *sysin.ContentImportFeiNiuInp) (res *sysin.ContentImportFeiNiuModel, err error)
+		// ImportOverview 获取内容导入概览
+		ImportOverview(ctx context.Context, in *sysin.ContentImportOverviewInp) (res *sysin.ContentImportOverviewModel, err error)
+		// ImportRunList 获取内容导入运行记录
+		ImportRunList(ctx context.Context, in *sysin.ContentImportRunListInp) (list []*sysin.ContentImportRunListModel, totalCount int, err error)
+	}
 	ISysCron interface {
 		StartCron(ctx context.Context)
 		// Delete 删除
@@ -411,6 +423,7 @@ var (
 	localSysAttachment     ISysAttachment
 	localSysBlacklist      ISysBlacklist
 	localSysConfig         ISysConfig
+	localSysContent        ISysContent
 	localSysCron           ISysCron
 	localSysCronGroup      ISysCronGroup
 	localSysCurdDemo       ISysCurdDemo
@@ -482,6 +495,17 @@ func SysConfig() ISysConfig {
 
 func RegisterSysConfig(i ISysConfig) {
 	localSysConfig = i
+}
+
+func SysContent() ISysContent {
+	if localSysContent == nil {
+		panic("implement not found for interface ISysContent, forgot register?")
+	}
+	return localSysContent
+}
+
+func RegisterSysContent(i ISysContent) {
+	localSysContent = i
 }
 
 func SysCron() ISysCron {

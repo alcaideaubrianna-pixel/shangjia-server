@@ -8,6 +8,7 @@ package router
 import (
 	"context"
 	"hotgo/internal/consts"
+	"hotgo/internal/controller/api/content"
 	"hotgo/internal/controller/api/member"
 	"hotgo/internal/controller/api/pay"
 	"hotgo/internal/service"
@@ -20,7 +21,8 @@ import (
 func Api(ctx context.Context, group *ghttp.RouterGroup) {
 	group.Group(simple.RouterPrefix(ctx, consts.AppApi), func(group *ghttp.RouterGroup) {
 		group.Bind(
-			pay.NewV1(), // 支付异步通知
+			pay.NewV1(),     // 支付异步通知
+			content.NewV1(), // 公开内容资料
 		)
 		group.Middleware(service.Middleware().ApiAuth)
 		group.Bind(

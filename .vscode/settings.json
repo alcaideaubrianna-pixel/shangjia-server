@@ -1,0 +1,12 @@
+{
+  "go.toolsManagement.autoUpdate": true,
+  "go.delveConfig": {
+    "dlvLoadConfig": {
+      "followPointers": true,
+      "maxVariableRecurse": 1,
+      "maxStringLen": 256,
+      "maxArrayValues": 64,
+      "maxStructFields": -1
+    }
+  }
+}

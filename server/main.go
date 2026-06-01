@@ -13,6 +13,7 @@ import (
 	_ "github.com/gogf/gf/contrib/nosql/redis/v2"
 	"github.com/gogf/gf/v2/os/gctx"
 	_ "hotgo/addons/modules"
+	"hotgo/internal/bootstrap"
 	"hotgo/internal/cmd"
 	"hotgo/internal/global"
 	_ "hotgo/internal/logic"
@@ -20,6 +21,9 @@ import (
 
 func main() {
 	var ctx = gctx.GetInitCtx()
+	if err := bootstrap.InitDatabase(ctx); err != nil {
+		panic(err)
+	}
 	global.Init(ctx)
 	cmd.Main.Run(ctx)
 }

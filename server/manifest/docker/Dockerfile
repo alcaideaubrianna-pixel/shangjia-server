@@ -8,6 +8,7 @@ ENV WORKDIR                 /app
 ADD hack                $WORKDIR/hack/
 ADD manifest/config                $WORKDIR/manifest/config/
 ADD resource                $WORKDIR/resource/
+ADD storage                $WORKDIR/storage/
 ADD ./temp/linux_amd64/hotgo $WORKDIR/hotgo
 ADD ./manifest/docker/entrypoint.sh $WORKDIR/entrypoint.sh
 RUN chmod +x $WORKDIR/hotgo
@@ -20,4 +21,3 @@ RUN chmod +x $WORKDIR/entrypoint.sh
 
 WORKDIR $WORKDIR
 CMD ./entrypoint.sh
-

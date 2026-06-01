@@ -1,0 +1,36 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "HotGo Server: hot reload",
+      "type": "shell",
+      "command": "gf",
+      "args": [
+        "run",
+        "main.go",
+        "-w",
+        "manifest/config/*.yaml",
+        "--args",
+        "all"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/server",
+        "env": {
+          "GF_GCFG_PATH": "manifest/config",
+          "GF_GCFG_FILE": "config.yaml"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Web: dev",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["run", "dev"],
+      "options": {
+        "cwd": "${workspaceFolder}/web"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

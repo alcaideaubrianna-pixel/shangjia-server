@@ -1,7 +1,7 @@
 # hotgo系统配置
 system:
   # 应用名称
-  appName: "hotgo"
+  appName: "youban"
   # debug开关，开启后接口出现错误时会向前端输出堆栈信息，可选：false|true，默认为true
   debug: true
   # gf运行模式，可选：not-set|develop|testing|staging|product。product模式下后台【开发工具】菜单自动隐藏
@@ -175,7 +175,7 @@ router:
 
 # 缓存驱动
 cache:
-  adapter: "file"                    # 缓存驱动方式，支持：memory|redis|file，不填默认memory
+  adapter: "redis"                   # 缓存驱动方式，支持：memory|redis|file，不填默认memory
   fileDir: "./storage/cache"         # 文件缓存路径，adapter=file时必填
 
 
@@ -192,8 +192,8 @@ token:
 # 消息队列
 queue:
   switch: true                                        # 队列开关，可选：true|false，默认为true
-  driver: "disk"                                      # 队列驱动，可选：disk|redis|rocketmq|kafka，默认为disk
-  groupName: "hotgo"                                  # mq群组名称
+  driver: "redis"                                     # 队列驱动，可选：disk|redis|rocketmq|kafka，默认为disk
+  groupName: "youban"                                 # mq群组名称
   # 磁盘队列
   disk:
     path: "./storage/diskqueue"                       # 数据存放路径
@@ -222,7 +222,7 @@ queue:
 redis:
   default:
     address: "127.0.0.1:6379"
-    db: "2"
+    db: "3"
     pass: ""
     idleTimeout: "20"
 
@@ -234,15 +234,27 @@ database:
     <<: *defaultLogger
     stdout: true
   default:
-    link: "mysql:hotgo:hg123456.@tcp(127.0.0.1:3306)/hotgo?loc=Local&parseTime=true&charset=utf8mb4"
+    link: "mysql:hotgo:hg123456.@tcp(127.0.0.1:3306)/youban_hotgo?loc=Local&parseTime=true&charset=utf8mb4"
     debug: true
     Prefix: "hg_"
+  # FeiNiu_bot 只读数据源，用于资料增量导入
+  feiniu:
+    link: "mysql:readonly:password@tcp(127.0.0.1:3306)/feiniu?loc=Local&parseTime=true&charset=utf8mb4"
+    debug: false
+    Prefix: ""
 
 
 # 链路追踪
 jaeger:
   switch: false                                   # 链路追踪开关，可选：true|false，默认为false
   endpoint: "127.0.0.1:6831"                      # jaeger-agent上报地址
+
+
+# 内容导入
+contentImport:
+  feiniu:
+    dbGroup: "feiniu"                             # FeiNiu_bot 数据库分组
+    batchSize: 200                                # 单次导入批量大小
 
 
 # 生成代码
