@@ -1,5 +1,0 @@
-*
-!dist/
-!dist/**
-!Dockerfile
-!nginx.conf.template

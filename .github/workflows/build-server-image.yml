@@ -36,7 +36,6 @@ jobs:
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           echo "server=ghcr.io/${owner}/youban-server" >> "$GITHUB_OUTPUT"
-          echo "admin_web=ghcr.io/${owner}/youban-admin-web" >> "$GITHUB_OUTPUT"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -112,32 +111,7 @@ jobs:
           cache-from: type=gha,scope=server
           cache-to: type=gha,mode=max,scope=server
 
-      - name: Admin web metadata
-        id: admin_web_meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ steps.image.outputs.admin_web }}
-          tags: |
-            type=raw,value=latest,enable=${{ github.ref_name == 'develop' || github.ref_name == github.event.repository.default_branch }}
-            type=ref,event=branch
-            type=ref,event=tag
-            type=sha,prefix=sha-
-
-      - name: Build and push admin web image
-        uses: docker/build-push-action@v6
-        with:
-          context: web
-          file: web/Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: ${{ steps.admin_web_meta.outputs.tags }}
-          labels: ${{ steps.admin_web_meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
       - name: Image summary
         run: |
           echo "### Published server image" >> "$GITHUB_STEP_SUMMARY"
           echo '${{ steps.server_meta.outputs.tags }}' >> "$GITHUB_STEP_SUMMARY"
-          echo "### Published admin web image" >> "$GITHUB_STEP_SUMMARY"
-          echo '${{ steps.admin_web_meta.outputs.tags }}' >> "$GITHUB_STEP_SUMMARY"
