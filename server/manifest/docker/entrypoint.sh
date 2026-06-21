@@ -1,5 +1,5 @@
-#!/bin/bash
+#!/bin/sh
+set -e
 
-cd /app && ./hotgo &
-echo "hotgo start all server.."
-tail -f /dev/null
+cd /app
+exec ./hotgo

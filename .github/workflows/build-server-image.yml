@@ -1,11 +1,17 @@
-name: build-server-image
+name: build-images
 
 on:
   push:
     branches:
+      - develop
       - main
+      - v2.0
+      - web
+    tags:
+      - "v*"
     paths:
       - "server/**"
+      - "web/**"
       - ".github/workflows/build-server-image.yml"
   workflow_dispatch:
 
@@ -25,9 +31,36 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set image name
+      - name: Set image names
         id: image
-        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/youban-server" >> "$GITHUB_OUTPUT"
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "server=ghcr.io/${owner}/youban-server" >> "$GITHUB_OUTPUT"
+          echo "admin_web=ghcr.io/${owner}/youban-admin-web" >> "$GITHUB_OUTPUT"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Build admin web
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Copy admin web into server resources
+        run: |
+          rm -rf server/resource/public/admin
+          mkdir -p server/resource/public/admin
+          cp -R web/dist/. server/resource/public/admin/
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -57,22 +90,54 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Docker metadata
-        id: meta
+        id: server_meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ steps.image.outputs.name }}
+          images: ${{ steps.image.outputs.server }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref_name == 'develop' || github.ref_name == github.event.repository.default_branch }}
+            type=ref,event=branch
+            type=ref,event=tag
             type=sha,prefix=sha-
 
-      - name: Build and push image
+      - name: Build and push server image
         uses: docker/build-push-action@v6
         with:
           context: server
           file: server/manifest/docker/Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.server_meta.outputs.tags }}
+          labels: ${{ steps.server_meta.outputs.labels }}
+          cache-from: type=gha,scope=server
+          cache-to: type=gha,mode=max,scope=server
+
+      - name: Admin web metadata
+        id: admin_web_meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.admin_web }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref_name == 'develop' || github.ref_name == github.event.repository.default_branch }}
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,prefix=sha-
+
+      - name: Build and push admin web image
+        uses: docker/build-push-action@v6
+        with:
+          context: web
+          file: web/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.admin_web_meta.outputs.tags }}
+          labels: ${{ steps.admin_web_meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Image summary
+        run: |
+          echo "### Published server image" >> "$GITHUB_STEP_SUMMARY"
+          echo '${{ steps.server_meta.outputs.tags }}' >> "$GITHUB_STEP_SUMMARY"
+          echo "### Published admin web image" >> "$GITHUB_STEP_SUMMARY"
+          echo '${{ steps.admin_web_meta.outputs.tags }}' >> "$GITHUB_STEP_SUMMARY"
