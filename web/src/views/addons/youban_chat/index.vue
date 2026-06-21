@@ -16,14 +16,15 @@
             @reset="reloadConversationTable"
             @keyup.enter="reloadConversationTable"
           />
-          <BasicTable
-            ref="conversationTableRef"
+          <n-data-table
             :columns="columns"
-            :request="loadConversationTable"
+            :data="conversations"
+            :loading="conversationLoading"
+            :pagination="conversationPagination"
             :row-key="(row) => row.id"
             :scroll-x="scrollX"
-            :resizeHeightOffset="-10000"
             size="small"
+            remote
           />
         </n-tab-pane>
 
@@ -272,7 +273,6 @@
   import { computed, h, onMounted, reactive, ref } from 'vue';
   import { NButton, NTag, useMessage } from 'naive-ui';
   import { BasicForm, useForm } from '@/components/Form/index';
-  import { BasicTable } from '@/components/Table';
   import { adaTableScrollX } from '@/utils/hotgo';
   import {
     BindingList,
@@ -292,7 +292,9 @@
 
   const message = useMessage();
   const activeTab = ref('conversations');
-  const conversationTableRef = ref();
+  const conversationLoading = ref(false);
+  const conversations = ref<any[]>([]);
+  const conversationPagination = reactive(createPagination(loadConversations));
   const searchFormRef = ref<any>({});
   const detailVisible = ref(false);
   const currentConversation = ref<any>(null);
@@ -513,10 +515,6 @@
     },
   ];
 
-  const loadConversationTable = async (res) => {
-    return await ConversationList({ ...searchFormRef.value?.formModel, ...res });
-  };
-
   function createPagination(loader: () => void) {
     const pagination: any = {
       page: 1,
@@ -538,7 +536,23 @@
   }
 
   function reloadConversationTable() {
-    conversationTableRef.value?.reload?.();
+    conversationPagination.page = 1;
+    loadConversations();
+  }
+
+  async function loadConversations() {
+    conversationLoading.value = true;
+    try {
+      const res: any = await ConversationList({
+        ...searchFormRef.value?.formModel,
+        page: conversationPagination.page,
+        perPage: conversationPagination.pageSize,
+      });
+      conversations.value = res?.list || [];
+      conversationPagination.itemCount = res?.totalCount || res?.total || 0;
+    } finally {
+      conversationLoading.value = false;
+    }
   }
 
   async function openDetail(row: Recordable) {
@@ -772,6 +786,7 @@
   }
 
   onMounted(() => {
+    loadConversations();
     loadBots();
     loadChannelOptions();
     loadBindings();
