@@ -2,7 +2,8 @@
 .idea
 .user.ini
 .DS_Store
+__debug_bin*
+server/__debug_bin*
 pull.bat
 push.sh
 /dist
-
