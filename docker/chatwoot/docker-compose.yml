@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DATABASE:-chatwoot}
+      POSTGRES_USER: ${POSTGRES_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - chatwoot_postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - chatwoot_redis:/data
+    ports:
+      - "6379:6379"
+
+  rails:
+    image: chatwoot/chatwoot:latest
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "3000:3000"
+    volumes:
+      - chatwoot_storage:/app/storage
+    command: ["bundle", "exec", "rails", "s", "-p", "3000", "-b", "0.0.0.0"]
+
+  sidekiq:
+    image: chatwoot/chatwoot:latest
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - chatwoot_storage:/app/storage
+    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
+
+volumes:
+  chatwoot_postgres:
+  chatwoot_redis:
+  chatwoot_storage:

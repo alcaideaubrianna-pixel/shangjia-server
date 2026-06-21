@@ -223,8 +223,35 @@
         return map.includes(fileType);
       }
 
+      function checkImageAspectRatio(file: File) {
+        if (props.fileType !== 'image' || !props.imageAspectRatio) {
+          return Promise.resolve(true);
+        }
+        return new Promise<boolean>((resolve) => {
+          const url = URL.createObjectURL(file);
+          const img = new Image();
+          img.onload = () => {
+            URL.revokeObjectURL(url);
+            const ratio = img.naturalWidth / img.naturalHeight;
+            const valid = Math.abs(ratio - props.imageAspectRatio) <= props.imageAspectRatioTolerance;
+            if (!valid) {
+              message.error(
+                `图片比例需为 8:3，当前为 ${img.naturalWidth}:${img.naturalHeight}`
+              );
+            }
+            resolve(valid);
+          };
+          img.onerror = () => {
+            URL.revokeObjectURL(url);
+            message.error('读取图片尺寸失败');
+            resolve(false);
+          };
+          img.src = url;
+        });
+      }
+
       //上传之前
-      function beforeUpload({ file }) {
+      async function beforeUpload({ file }) {
         const fileInfo = file.file;
         // 设置最大值，则判断
         if (props.maxSize && fileInfo.size / 1024 / 1024 >= props.maxSize) {
@@ -243,7 +270,7 @@
           return false;
         }
 
-        return true;
+        return checkImageAspectRatio(fileInfo);
       }
 
       //上传结束

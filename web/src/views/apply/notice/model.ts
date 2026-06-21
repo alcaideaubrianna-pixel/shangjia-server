@@ -11,6 +11,11 @@ export class State {
   tag: number = 1;
   content: string;
   receiver: number[];
+  isBanner: number = 0;
+  bannerImg: string;
+  bannerUrl: string;
+  publishAt: string;
+  expireAt: string;
   remark: string;
   sort: number;
   status: number = 1;
@@ -105,9 +110,22 @@ export const schemas: FormSchema[] = [
       },
     },
   },
+  {
+    field: 'isBanner',
+    component: 'NSelect',
+    label: 'Banner',
+    defaultValue: null,
+    componentProps: {
+      placeholder: '请选择是否Banner',
+      options: [
+        { label: '是', value: 1 },
+        { label: '否', value: 0 },
+      ],
+    },
+  },
 ];
 
 // 加载字典数据选项
 export function loadOptions() {
-  dict.loadOptions(['sys_normal_disable']);
+  dict.loadOptions(['sys_normal_disable', 'noticeTypeOptions', 'noticeTagOptions']);
 }

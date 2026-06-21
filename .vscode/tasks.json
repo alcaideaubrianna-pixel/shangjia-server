@@ -2,6 +2,16 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "HotGo Dev: full stack",
+      "dependsOn": ["HotGo Server: hot reload", "Web: dev"],
+      "dependsOrder": "parallel",
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
       "label": "HotGo Server: hot reload",
       "type": "shell",
       "command": "gf",
@@ -9,7 +19,7 @@
         "run",
         "main.go",
         "-w",
-        "manifest/config/*.yaml",
+        "internal,api,addons,utility,manifest/config,storage",
         "--args",
         "all"
       ],

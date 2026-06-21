@@ -22,10 +22,10 @@ gfcli:
 
   gen:
     dao:
-      - link: "mysql:hotgo:hg123456.@tcp(127.0.0.1:3306)/hotgo?loc=Local&parseTime=true&charset=utf8mb4"
+      - link: "mysql:hotgo:hg123456.@tcp(127.0.0.1:3306)/youban_hotgo?loc=Local&parseTime=true&charset=utf8mb4"
 #      - link: "pgsql:postgres:hg123456@tcp(127.0.0.1:5432)/hotgo"
         group: "default"                                                # 分组 使用hotgo代码生成功能时必须填
-        #        tables:          ""                                    # 指定当前数据库中需要执行代码生成的数据表。如果为空，表示数据库的所有表都会生成。
+        tables:          "hg_content_channel,hg_content_profile,hg_content_media,hg_content_source_map,hg_content_import_checkpoint,hg_content_import_run" # 指定当前数据库中需要执行代码生成的数据表。如果为空，表示数据库的所有表都会生成。
         tablesEx:        "hg_sys_addons_install"                        # 指定当前数据库中需要排除代码生成的数据表。
         removePrefix: "hg_"
         descriptionTag: true
@@ -46,3 +46,10 @@ gfcli:
       dstFolder: "internal/controller/api"
       clear: true
       merge: false
+
+
+# 悦伴聊天
+youbanChat:
+  pocketPing:
+    baseUrl: "http://localhost:3001"
+    apiKey: "youban-local-pocketping"

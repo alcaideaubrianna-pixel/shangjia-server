@@ -3,8 +3,13 @@ package sys
 import (
 	"context"
 	"hotgo/internal/consts"
+	"hotgo/internal/dao"
+	"hotgo/internal/library/token"
+	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
+	"regexp"
+	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -13,15 +18,13 @@ import (
 )
 
 const (
-	contentSourceFeiNiu = "feiniu"
-
-	contentTableProfile    = "hg_content_profile"
-	contentTableMedia      = "hg_content_media"
-	contentTableChannel    = "hg_content_channel"
-	contentTableSourceMap  = "hg_content_source_map"
-	contentTableCheckpoint = "hg_content_import_checkpoint"
-	contentTableImportRun  = "hg_content_import_run"
+	contentSourceFeiNiu      = "feiniu"
+	contentImportCronName    = "content_import_feiniu"
+	contentImportCronTitle   = "FeiNiu 内容自动同步"
+	contentReviewConfigGroup = "content_import_review"
 )
+
+var introFeeRegexp = regexp.MustCompile(`(?im)(?:^|[\s，,。；;、|｜/／（(【\[])(?:介绍费|介紹費|中介费|中介費|服务费|服務費)\s*[:：]?\s*(?:[¥￥]?\s*)?[0-9０-９][0-9０-９,，.\s]*(?:元|块|w|W|万)?[^\n\r，,。；;、|｜）)】\]]*`)
 
 type sSysContent struct{}
 
@@ -33,19 +36,121 @@ func init() {
 	service.RegisterSysContent(NewSysContent())
 }
 
+func aliasField(alias string, column string) string {
+	return alias + "." + column
+}
+
+func aliasFields(alias string, columns ...string) string {
+	fields := make([]string, 0, len(columns))
+	for _, column := range columns {
+		fields = append(fields, aliasField(alias, column))
+	}
+	return strings.Join(fields, ",")
+}
+
+func isPgsql() bool {
+	return strings.EqualFold(g.DB().GetConfig().Type, consts.DBPgsql)
+}
+
+func last24HoursCondition(field string) string {
+	if isPgsql() {
+		return field + " >= NOW() - INTERVAL '24 HOURS'"
+	}
+	return field + " >= DATE_SUB(NOW(), INTERVAL 24 HOUR)"
+}
+
+func coalesceZero(field string) string {
+	if isPgsql() {
+		return "COALESCE(" + field + ",0)"
+	}
+	return "IFNULL(" + field + ",0)"
+}
+
 // ListProfiles 获取前台资料列表。
 func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfileListInp) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
-	mod := g.DB().Model(contentTableProfile + " p").Safe().Ctx(ctx)
+	profileColumns := dao.ContentProfile.Columns()
+	mod := dao.ContentProfile.Ctx(ctx).As("p")
 	mod = s.publicProfileWhere(mod)
+	if len(in.ExcludeActions) == 0 {
+		in.ExcludeActions = []string{"block"}
+	}
+	if memberId := s.requestMemberId(ctx); memberId > 0 {
+		mod = s.excludeMemberProfileActions(ctx, mod, memberId, in.ExcludeActions)
+	}
+	if in.Sort == "recommend" && in.Province == "" {
+		in.Province = s.requestProvince(ctx)
+	}
 
 	if in.Keyword != "" {
-		mod = mod.WhereLike("p.title", "%"+in.Keyword+"%").WhereOrLike("p.summary", "%"+in.Keyword+"%").WhereOrLike("p.profile_no", "%"+in.Keyword+"%")
+		mod = mod.WhereLike(aliasField("p", profileColumns.Title), "%"+in.Keyword+"%").
+			WhereOrLike(aliasField("p", profileColumns.Summary), "%"+in.Keyword+"%").
+			WhereOrLike(aliasField("p", profileColumns.ProfileNo), "%"+in.Keyword+"%")
 	}
 	if in.Province != "" {
-		mod = mod.Where("p.province", in.Province)
+		mod = mod.Where(aliasField("p", profileColumns.Province), in.Province)
 	}
 	if in.City != "" {
-		mod = mod.Where("p.city", in.City)
+		mod = mod.Where(aliasField("p", profileColumns.City), in.City)
+	}
+	if in.AgeMin > 0 {
+		mod = mod.WhereGTE(aliasField("p", profileColumns.Age), in.AgeMin)
+	}
+	if in.AgeMax > 0 {
+		mod = mod.WhereLTE(aliasField("p", profileColumns.Age), in.AgeMax)
+	}
+	if in.HeightMin > 0 {
+		mod = mod.WhereGTE(aliasField("p", profileColumns.Height), in.HeightMin)
+	}
+	if in.HeightMax > 0 {
+		mod = mod.WhereLTE(aliasField("p", profileColumns.Height), in.HeightMax)
+	}
+	if in.WeightMin > 0 {
+		mod = mod.WhereGTE(aliasField("p", profileColumns.Weight), in.WeightMin)
+	}
+	if in.WeightMax > 0 {
+		mod = mod.WhereLTE(aliasField("p", profileColumns.Weight), in.WeightMax)
+	}
+	if in.Cup != "" {
+		mod = mod.Where(aliasField("p", profileColumns.CupSize), in.Cup)
+	}
+	if in.HasVideo == 1 {
+		mod = mod.WhereGT(aliasField("p", profileColumns.VideoCount), 0)
+	}
+	if in.HasVerification == 1 {
+		mod = mod.Where(aliasField("p", profileColumns.HasVerificationVideo), 1)
+	}
+	if in.CanFly == 1 {
+		mod = mod.Where(aliasField("p", profileColumns.CanFlyToProvince), 1)
+	}
+	if in.CanGoAbroad == 1 {
+		mod = mod.Where(aliasField("p", profileColumns.CanGoAbroad), 1)
+	}
+	if in.CanOvernight == 1 {
+		mod = mod.Where(aliasField("p", profileColumns.CanOvernight), 1)
+	}
+	if in.CanCohabitate == 1 {
+		mod = mod.Where(aliasField("p", profileColumns.CanCohabitate), 1)
+	}
+	if in.HasHealthCheck == 1 {
+		mod = mod.Where(aliasField("p", profileColumns.HasHealthCheck), 1)
+	}
+	if in.IsFullMonth == 1 {
+		mod = mod.Where(aliasField("p", profileColumns.IsFullMonth), 1)
+	}
+	if in.IsVirgin == 1 {
+		mod = mod.Where(aliasField("p", profileColumns.IsVirgin), 1)
+	}
+	if in.AcceptSm == 1 {
+		mod = mod.Where(aliasField("p", profileColumns.AcceptSm), 1)
+	}
+	if in.NoCondom == 1 {
+		mod = mod.Where(aliasField("p", profileColumns.NoCondomAfterCheck), 1)
+	}
+	if in.AllowCreampie == 1 {
+		mod = mod.Where(aliasField("p", profileColumns.AllowCreampie), 1)
+	}
+	if in.HasTattoo == 1 {
+		mod = mod.Where(aliasField("p", profileColumns.HasTattoo), 1)
 	}
 
 	totalCount, err = mod.Count()
@@ -59,14 +164,40 @@ func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfile
 	}
 
 	mod = mod.Fields(
-		"p.id,p.profile_no,p.title,p.summary,p.province,p.city,p.age,p.height,p.weight,p.cup_size,p.has_verification_video,p.member_only_video,p.published_at",
+		aliasFields("p",
+			profileColumns.Id,
+			profileColumns.ProfileNo,
+			profileColumns.Title,
+			profileColumns.Summary,
+			profileColumns.Province,
+			profileColumns.City,
+			profileColumns.Age,
+			profileColumns.Height,
+			profileColumns.Weight,
+			profileColumns.CupSize,
+			profileColumns.HasVerificationVideo,
+			profileColumns.MemberOnlyVideo,
+			profileColumns.ImageCount,
+			profileColumns.VideoCount,
+			profileColumns.PublishedAt,
+		),
 	)
 	mod = mod.Page(in.Page, in.PerPage)
 	switch in.Sort {
-	case "oldest":
-		mod = mod.OrderAsc("p.published_at").OrderAsc("p.id")
+	case "hot":
+		viewColumns := dao.MemberProfileView.Columns()
+		mod = mod.
+			LeftJoin(dao.MemberProfileView.Table()+" v", aliasField("v", viewColumns.ProfileId)+"="+aliasField("p", profileColumns.Id)+" AND "+aliasField("v", viewColumns.DeletedAt)+" IS NULL AND "+last24HoursCondition(aliasField("v", viewColumns.LastViewAt))).
+			Group(aliasField("p", profileColumns.Id)).
+			OrderDesc("SUM(" + coalesceZero(aliasField("v", viewColumns.ViewCount)) + ")").
+			OrderDesc(aliasField("p", profileColumns.PublishedAt)).
+			OrderDesc(aliasField("p", profileColumns.Id))
+	case "recommend":
+		mod = mod.OrderDesc(aliasField("p", profileColumns.PublishedAt)).OrderDesc(aliasField("p", profileColumns.Id))
+	case "latest", "newest":
+		mod = mod.OrderDesc(aliasField("p", profileColumns.PublishedAt)).OrderDesc(aliasField("p", profileColumns.Id))
 	default:
-		mod = mod.OrderDesc("p.published_at").OrderDesc("p.id")
+		mod = mod.OrderDesc(aliasField("p", profileColumns.PublishedAt)).OrderDesc(aliasField("p", profileColumns.Id))
 	}
 
 	var rows []contentProfileRow
@@ -76,21 +207,77 @@ func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfile
 	}
 
 	list = make([]*sysin.ContentProfileListModel, 0, len(rows))
+	profileIds := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		profileIds = append(profileIds, row.Id)
+	}
+	coverMap, err := s.getProfileCoverMap(ctx, profileIds)
+	if err != nil {
+		return
+	}
+	mediaMap, err := s.getProfileMediaMap(ctx, profileIds, s.isRequestVip(ctx))
+	if err != nil {
+		return
+	}
 	for _, row := range rows {
 		item := row.toListModel()
-		item.CoverUrl, _ = s.getProfileCoverUrl(ctx, row.Id)
+		item.CoverUrl = coverMap[row.Id]
 		item.Avatar = item.CoverUrl
+		item.Media = mediaMap[row.Id]
+		item.Photos = mediaPhotos(item.Media)
 		list = append(list, item)
 	}
 	return
 }
 
+func (s *sSysContent) requestProvince(ctx context.Context) string {
+	// 简单算法：优先使用请求头中的地理信息，取不到时保持全国推荐。
+	r := g.RequestFromCtx(ctx)
+	if r == nil {
+		return ""
+	}
+	for _, key := range []string{"X-Province", "X-Region", "X-Real-Province"} {
+		if value := strings.TrimSpace(r.Header.Get(key)); value != "" {
+			return strings.TrimSuffix(value, "省")
+		}
+	}
+	return ""
+}
+
+func (s *sSysContent) requestMemberId(ctx context.Context) int64 {
+	r := g.RequestFromCtx(ctx)
+	if r == nil {
+		return 0
+	}
+	user, err := token.ParseLoginUser(r)
+	if err != nil || user == nil || user.Id <= 0 {
+		return 0
+	}
+	return user.Id
+}
+
+func (s *sSysContent) excludeMemberProfileActions(ctx context.Context, mod *gdb.Model, memberId int64, actionTypes []string) *gdb.Model {
+	if memberId <= 0 || len(actionTypes) == 0 {
+		return mod
+	}
+	actionColumns := dao.MemberProfileAction.Columns()
+	return mod.WhereNotIn(
+		aliasField("p", dao.ContentProfile.Columns().Id),
+		dao.MemberProfileAction.Ctx(ctx).
+			Fields(actionColumns.ProfileId).
+			Where(actionColumns.MemberId, memberId).
+			WhereIn(actionColumns.ActionType, actionTypes).
+			WhereNull(actionColumns.DeletedAt),
+	)
+}
+
 // ViewProfile 获取前台资料详情。
 func (s *sSysContent) ViewProfile(ctx context.Context, in *sysin.ContentProfileViewInp) (res *sysin.ContentProfileViewModel, err error) {
+	profileColumns := dao.ContentProfile.Columns()
 	var row *contentProfileRow
-	if err = s.publicProfileWhere(g.DB().Model(contentTableProfile+" p").Safe().Ctx(ctx)).
-		Fields("p.*").
-		Where("p.id", in.Id).
+	if err = s.publicProfileWhere(dao.ContentProfile.Ctx(ctx).As("p")).
+		Fields(aliasField("p", "*")).
+		Where(aliasField("p", profileColumns.Id), in.Id).
 		Scan(&row); err != nil {
 		err = gerror.Wrap(err, "获取资料详情失败，请稍后重试")
 		return
@@ -100,15 +287,19 @@ func (s *sSysContent) ViewProfile(ctx context.Context, in *sysin.ContentProfileV
 		return
 	}
 
+	isVip := s.isRequestVip(ctx)
 	res = &sysin.ContentProfileViewModel{
 		ContentProfileListModel: *row.toListModel(),
 		Intro:                   row.Summary,
-		PlainText:               row.PlainText,
+		Attributes:              buildContentProfileAttributes(row, isVip),
 		ImageCount:              row.ImageCount,
 		VideoCount:              row.VideoCount,
 		MemberOnly:              row.Visibility == consts.ContentVisibilityMemberOnly,
 	}
-	res.Media, err = s.listProfileMedia(ctx, row.Id, false)
+	if isVip {
+		res.PlainText = filterSensitivePlainText(row.PlainText)
+	}
+	res.Media, err = s.listProfileMedia(ctx, row.Id, isVip)
 	if err != nil {
 		return
 	}
@@ -161,10 +352,18 @@ func (s *sSysContent) ImportFeiNiu(ctx context.Context, in *sysin.ContentImportF
 	}
 
 	sourceDB := g.DB(sourceGroup)
+	reviewConfig, err := s.ImportReviewConfig(ctx, &sysin.ContentImportReviewConfigInp{SourceName: contentSourceFeiNiu})
+	if err != nil {
+		return
+	}
 	rows, err := sourceDB.GetAll(ctx, `
 SELECT
   note_id,note_uuid,note_code,title,summary,plain_text,source_key,province,city,age,height,weight,cup_size,
-  has_verification_video,cover_asset_id,image_count,video_count,duplicate_note_id,ingest_status,status,create_time,update_time
+  html_text,source_type,category_code,days_with_escort,expected_living_cost,can_fly_to_province,can_go_abroad,
+  can_overnight,can_cohabitate,has_health_check,is_full_month,is_virgin,accept_sm,no_condom_after_check,
+  allow_creampie,has_tattoo,has_verification_video,is_favorite,edited_at,group_params,tag_params,cover_asset_id,
+  image_count,video_count,text_block_count,duplicate_note_id,storage_policy,ingest_status,remark,status,
+  create_by,create_time,update_by,update_time
 FROM tg_content_note
 WHERE note_id > ? AND status = '0'
 ORDER BY note_id ASC
@@ -179,7 +378,7 @@ LIMIT ?`, lastNoteId, batchSize)
 		res.Scanned++
 		sourceNoteId := source["note_id"].Int64()
 		res.LastSourceNote = sourceNoteId
-		imported, profileId, importErr := s.importFeiNiuProfile(ctx, sourceDB, source)
+		imported, profileId, importErr := s.importFeiNiuProfile(ctx, sourceDB, source, reviewConfig)
 		if importErr != nil {
 			err = importErr
 			_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
@@ -214,93 +413,237 @@ func (s *sSysContent) ImportOverview(ctx context.Context, in *sysin.ContentImpor
 		sourceName = contentSourceFeiNiu
 	}
 	res = &sysin.ContentImportOverviewModel{SourceName: sourceName}
+	profileColumns := dao.ContentProfile.Columns()
+	mediaColumns := dao.ContentMedia.Columns()
+	checkpointColumns := dao.ContentImportCheckpoint.Columns()
+	runColumns := dao.ContentImportRun.Columns()
 
-	res.ProfileTotal, err = g.DB().Model(contentTableProfile).Safe().Ctx(ctx).Where("source_type", sourceName).Count()
+	res.ProfileTotal, err = dao.ContentProfile.Ctx(ctx).Where(profileColumns.SourceType, sourceName).Count()
 	if err != nil {
 		err = gerror.Wrap(err, "统计资料总数失败")
 		return
 	}
-	res.PublicTotal, err = g.DB().Model(contentTableProfile).Safe().Ctx(ctx).
-		Where("source_type", sourceName).
-		Where("review_status", consts.ContentReviewApproved).
-		WhereIn("visibility", []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly}).
+	res.PublicTotal, err = dao.ContentProfile.Ctx(ctx).
+		Where(profileColumns.SourceType, sourceName).
+		Where(profileColumns.ReviewStatus, consts.ContentReviewApproved).
+		WhereIn(profileColumns.Visibility, []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly}).
 		Count()
 	if err != nil {
 		err = gerror.Wrap(err, "统计公开资料数失败")
 		return
 	}
-	res.PendingTotal, err = g.DB().Model(contentTableProfile).Safe().Ctx(ctx).
-		Where("source_type", sourceName).
-		Where("review_status", consts.ContentReviewPending).
+	res.PendingTotal, err = dao.ContentProfile.Ctx(ctx).
+		Where(profileColumns.SourceType, sourceName).
+		Where(profileColumns.ReviewStatus, consts.ContentReviewPending).
 		Count()
 	if err != nil {
 		err = gerror.Wrap(err, "统计待审核资料数失败")
 		return
 	}
-	res.DuplicateTotal, err = g.DB().Model(contentTableProfile).Safe().Ctx(ctx).
-		Where("source_type", sourceName).
-		Where("duplicate_of_id>0").
+	res.DuplicateTotal, err = dao.ContentProfile.Ctx(ctx).
+		Where(profileColumns.SourceType, sourceName).
+		WhereGT(profileColumns.DuplicateOfId, 0).
 		Count()
 	if err != nil {
 		err = gerror.Wrap(err, "统计重复资料数失败")
 		return
 	}
-	res.MediaTotal, err = g.DB().Model(contentTableMedia+" m").Safe().Ctx(ctx).
-		LeftJoin(contentTableProfile+" p", "p.id=m.profile_id").
-		Where("p.source_type", sourceName).
+	res.MediaTotal, err = dao.ContentMedia.Ctx(ctx).As("m").
+		LeftJoin(dao.ContentProfile.Table()+" p", aliasField("p", profileColumns.Id)+"="+aliasField("m", mediaColumns.ProfileId)).
+		Where(aliasField("p", profileColumns.SourceType), sourceName).
 		Count()
 	if err != nil {
 		err = gerror.Wrap(err, "统计媒体总数失败")
 		return
 	}
-	res.DuplicateMedia, err = g.DB().Model(contentTableMedia+" m").Safe().Ctx(ctx).
-		LeftJoin(contentTableProfile+" p", "p.id=m.profile_id").
-		Where("p.source_type", sourceName).
-		Where("m.duplicate_of_media_id>0").
+	res.DuplicateMedia, err = dao.ContentMedia.Ctx(ctx).As("m").
+		LeftJoin(dao.ContentProfile.Table()+" p", aliasField("p", profileColumns.Id)+"="+aliasField("m", mediaColumns.ProfileId)).
+		Where(aliasField("p", profileColumns.SourceType), sourceName).
+		WhereGT(aliasField("m", mediaColumns.DuplicateOfMediaId), 0).
 		Count()
 	if err != nil {
 		err = gerror.Wrap(err, "统计重复媒体数失败")
 		return
 	}
 
-	checkpoint, err := g.DB().Model(contentTableCheckpoint).Safe().Ctx(ctx).
-		Fields("last_source_note_id,last_success_at,last_error").
-		Where("source_name", sourceName).
+	checkpoint, err := dao.ContentImportCheckpoint.Ctx(ctx).
+		Fields(checkpointColumns.LastSourceNoteId, checkpointColumns.LastSuccessAt, checkpointColumns.LastError).
+		Where(checkpointColumns.SourceName, sourceName).
 		One()
 	if err != nil {
 		err = gerror.Wrap(err, "读取导入游标失败")
 		return
 	}
 	if checkpoint != nil {
-		res.LastSourceNoteId = checkpoint["last_source_note_id"].Int64()
-		res.LastSuccessAt = checkpoint["last_success_at"].GTime()
-		res.LastError = checkpoint["last_error"].String()
+		res.LastSourceNoteId = checkpoint[checkpointColumns.LastSourceNoteId].Int64()
+		res.LastSuccessAt = checkpoint[checkpointColumns.LastSuccessAt].GTime()
+		res.LastError = checkpoint[checkpointColumns.LastError].String()
 	}
 
-	lastRun, err := g.DB().Model(contentTableImportRun).Safe().Ctx(ctx).
-		Fields("status,cost_ms").
-		Where("source_name", sourceName).
-		OrderDesc("id").
+	lastRun, err := dao.ContentImportRun.Ctx(ctx).
+		Fields(runColumns.Status, runColumns.CostMs).
+		Where(runColumns.SourceName, sourceName).
+		OrderDesc(runColumns.Id).
 		One()
 	if err != nil {
 		err = gerror.Wrap(err, "读取最近导入运行记录失败")
 		return
 	}
 	if lastRun != nil {
-		res.LastRunStatus = lastRun["status"].String()
-		res.LastRunCostMs = lastRun["cost_ms"].Int()
+		res.LastRunStatus = lastRun[runColumns.Status].String()
+		res.LastRunCostMs = lastRun[runColumns.CostMs].Int()
+	}
+	if err = s.fillImportAutoSyncOverview(ctx, res); err != nil {
+		return
+	}
+	return
+}
+
+// SetImportAutoSync 设置内容自动同步状态。
+func (s *sSysContent) SetImportAutoSync(ctx context.Context, in *sysin.ContentImportAutoSyncInp) (res *sysin.ContentImportAutoSyncModel, err error) {
+	sourceName := in.SourceName
+	if sourceName == "" {
+		sourceName = contentSourceFeiNiu
+	}
+	cronData, err := s.getContentImportCron(ctx)
+	if err != nil {
+		return
+	}
+	if cronData == nil {
+		err = gerror.New("内容自动同步任务未初始化，请重启服务后重试")
+		return
+	}
+
+	status := consts.StatusDisable
+	if in.Enabled {
+		status = consts.StatusEnabled
+	}
+	if err = service.SysCron().Status(ctx, &sysin.CronStatusInp{SysCron: entity.SysCron{Id: cronData.Id, Status: status}}); err != nil {
+		err = gerror.Wrap(err, "更新内容自动同步状态失败")
+		return
+	}
+
+	cronData.Status = status
+	return s.buildImportAutoSyncModel(sourceName, cronData), nil
+}
+
+func (s *sSysContent) ImportReviewConfig(ctx context.Context, in *sysin.ContentImportReviewConfigInp) (res *sysin.ContentImportReviewConfigModel, err error) {
+	sourceName := in.SourceName
+	if sourceName == "" {
+		sourceName = contentSourceFeiNiu
+	}
+	res = defaultContentImportReviewConfig(sourceName)
+	configColumns := dao.SysConfig.Columns()
+	rows, err := dao.SysConfig.Ctx(ctx).
+		Fields(configColumns.Key, configColumns.Value).
+		Where(configColumns.Group, contentReviewConfigGroup+"_"+sourceName).
+		All()
+	if err != nil {
+		err = gerror.Wrap(err, "读取内容审核配置失败")
+		return
+	}
+	for _, row := range rows {
+		switch row[configColumns.Key].String() {
+		case "reviewBatchSize":
+			res.ReviewBatchSize = row[configColumns.Value].Int()
+		case "reviewIntervalMinutes":
+			res.ReviewIntervalMinutes = row[configColumns.Value].Int()
+		case "autoApproveImported":
+			res.AutoApproveImported = row[configColumns.Value].Int()
+		case "freezeDuplicate":
+			res.FreezeDuplicate = row[configColumns.Value].Int()
+		case "defaultReviewStatus":
+			res.DefaultReviewStatus = row[configColumns.Value].String()
+		case "reviewRemark":
+			res.ReviewRemark = row[configColumns.Value].String()
+		}
+	}
+	return
+}
+
+func (s *sSysContent) SetImportReviewConfig(ctx context.Context, in *sysin.ContentImportReviewConfigEditInp) (res *sysin.ContentImportReviewConfigModel, err error) {
+	if err = in.Filter(ctx); err != nil {
+		return
+	}
+	group := contentReviewConfigGroup + "_" + in.SourceName
+	items := []struct {
+		key   string
+		name  string
+		typ   string
+		value interface{}
+	}{
+		{"reviewBatchSize", "审核数量", "int", in.ReviewBatchSize},
+		{"reviewIntervalMinutes", "审核间隔分钟", "int", in.ReviewIntervalMinutes},
+		{"autoApproveImported", "导入后自动通过", "int", in.AutoApproveImported},
+		{"freezeDuplicate", "重复资料自动冻结", "int", in.FreezeDuplicate},
+		{"defaultReviewStatus", "默认审核状态", "string", in.DefaultReviewStatus},
+		{"reviewRemark", "审核备注", "string", in.ReviewRemark},
+	}
+	for index, item := range items {
+		if err = s.saveContentImportReviewConfigItem(ctx, group, item.key, item.name, item.typ, g.NewVar(item.value).String(), index+1); err != nil {
+			return
+		}
+	}
+	return s.ImportReviewConfig(ctx, &sysin.ContentImportReviewConfigInp{SourceName: in.SourceName})
+}
+
+func defaultContentImportReviewConfig(sourceName string) *sysin.ContentImportReviewConfigModel {
+	return &sysin.ContentImportReviewConfigModel{
+		SourceName:            sourceName,
+		ReviewBatchSize:       200,
+		ReviewIntervalMinutes: 30,
+		AutoApproveImported:   1,
+		FreezeDuplicate:       0,
+		DefaultReviewStatus:   consts.ContentReviewApproved,
+	}
+}
+
+func (s *sSysContent) saveContentImportReviewConfigItem(ctx context.Context, group string, key string, name string, typ string, value string, sort int) (err error) {
+	configColumns := dao.SysConfig.Columns()
+	now := gtime.Now()
+	one, err := dao.SysConfig.Ctx(ctx).
+		Fields(configColumns.Id).
+		Where(configColumns.Group, group).
+		Where(configColumns.Key, key).
+		One()
+	if err != nil {
+		err = gerror.Wrap(err, "读取内容审核配置项失败")
+		return
+	}
+	data := g.Map{
+		configColumns.Group:        group,
+		configColumns.Name:         name,
+		configColumns.Type:         typ,
+		configColumns.Key:          key,
+		configColumns.Value:        value,
+		configColumns.DefaultValue: value,
+		configColumns.Sort:         sort,
+		configColumns.Tip:          "内容导入审核配置",
+		configColumns.IsDefault:    1,
+		configColumns.Status:       1,
+		configColumns.UpdatedAt:    now,
+	}
+	if one != nil {
+		_, err = dao.SysConfig.Ctx(ctx).Where(configColumns.Id, one[configColumns.Id].Int64()).Data(data).Update()
+	} else {
+		data[configColumns.CreatedAt] = now
+		_, err = dao.SysConfig.Ctx(ctx).Data(data).Insert()
+	}
+	if err != nil {
+		err = gerror.Wrap(err, "保存内容审核配置失败")
 	}
 	return
 }
 
 // ImportRunList 获取内容导入运行记录。
 func (s *sSysContent) ImportRunList(ctx context.Context, in *sysin.ContentImportRunListInp) (list []*sysin.ContentImportRunListModel, totalCount int, err error) {
-	mod := g.DB().Model(contentTableImportRun).Safe().Ctx(ctx)
+	runColumns := dao.ContentImportRun.Columns()
+	mod := dao.ContentImportRun.Ctx(ctx)
 	if in.SourceName != "" {
-		mod = mod.Where("source_name", in.SourceName)
+		mod = mod.Where(runColumns.SourceName, in.SourceName)
 	}
 	if in.Status != "" {
-		mod = mod.Where("status", in.Status)
+		mod = mod.Where(runColumns.Status, in.Status)
 	}
 	totalCount, err = mod.Count()
 	if err != nil {
@@ -311,9 +654,24 @@ func (s *sSysContent) ImportRunList(ctx context.Context, in *sysin.ContentImport
 		list = []*sysin.ContentImportRunListModel{}
 		return
 	}
-	err = mod.Fields("id,source_name,trigger_type,batch_size,scanned,imported,duplicate,media_imported,last_source_note_id,status,error_message,started_at,finished_at,cost_ms").
+	err = mod.Fields(
+		runColumns.Id,
+		runColumns.SourceName,
+		runColumns.TriggerType,
+		runColumns.BatchSize,
+		runColumns.Scanned,
+		runColumns.Imported,
+		runColumns.Duplicate,
+		runColumns.MediaImported,
+		runColumns.LastSourceNoteId,
+		runColumns.Status,
+		runColumns.ErrorMessage,
+		runColumns.StartedAt,
+		runColumns.FinishedAt,
+		runColumns.CostMs,
+	).
 		Page(in.Page, in.PerPage).
-		OrderDesc("id").
+		OrderDesc(runColumns.Id).
 		Scan(&list)
 	if err != nil {
 		err = gerror.Wrap(err, "获取导入运行记录失败")
@@ -322,65 +680,238 @@ func (s *sSysContent) ImportRunList(ctx context.Context, in *sysin.ContentImport
 }
 
 func (s *sSysContent) publicProfileWhere(mod *gdb.Model) *gdb.Model {
+	profileColumns := dao.ContentProfile.Columns()
 	return mod.
-		Where("p.status", 1).
-		Where("p.review_status", consts.ContentReviewApproved).
-		WhereIn("p.visibility", []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly})
+		Where(aliasField("p", profileColumns.Status), 1).
+		Where(aliasField("p", profileColumns.ReviewStatus), consts.ContentReviewApproved).
+		WhereIn(aliasField("p", profileColumns.Visibility), []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly})
+}
+
+func (s *sSysContent) fillImportAutoSyncOverview(ctx context.Context, res *sysin.ContentImportOverviewModel) (err error) {
+	cronData, err := s.getContentImportCron(ctx)
+	if err != nil {
+		return
+	}
+	model := s.buildImportAutoSyncModel(res.SourceName, cronData)
+	res.AutoSyncCronId = model.AutoSyncCronId
+	res.AutoSyncEnabled = model.AutoSyncEnabled
+	res.AutoSyncStatus = model.AutoSyncStatus
+	res.AutoSyncPattern = model.AutoSyncPattern
+	if res.LastRunStatus == "running" && res.AutoSyncEnabled {
+		res.AutoSyncStatus = "running"
+	}
+	return
+}
+
+func (s *sSysContent) getContentImportCron(ctx context.Context) (data *entity.SysCron, err error) {
+	cronColumns := dao.SysCron.Columns()
+	if err = dao.SysCron.Ctx(ctx).
+		Where(cronColumns.Name, contentImportCronName).
+		OrderDesc(cronColumns.Id).
+		Scan(&data); err != nil {
+		err = gerror.Wrap(err, "读取内容自动同步任务失败")
+	}
+	return
+}
+
+func (s *sSysContent) buildImportAutoSyncModel(sourceName string, cronData *entity.SysCron) *sysin.ContentImportAutoSyncModel {
+	if sourceName == "" {
+		sourceName = contentSourceFeiNiu
+	}
+	res := &sysin.ContentImportAutoSyncModel{
+		SourceName:      sourceName,
+		AutoSyncStatus:  "not_configured",
+		AutoSyncPattern: "0 */30 * * * *",
+	}
+	if cronData == nil {
+		return res
+	}
+	res.AutoSyncCronId = cronData.Id
+	res.AutoSyncEnabled = cronData.Status == consts.StatusEnabled
+	res.AutoSyncPattern = cronData.Pattern
+	if res.AutoSyncEnabled {
+		res.AutoSyncStatus = "enabled"
+	} else {
+		res.AutoSyncStatus = "paused"
+	}
+	return res
+}
+
+func (s *sSysContent) isRequestVip(ctx context.Context) bool {
+	r := g.RequestFromCtx(ctx)
+	if r == nil {
+		return false
+	}
+	user, err := token.ParseLoginUser(r)
+	if err != nil || user == nil || user.Id <= 0 {
+		return false
+	}
+	if strings.EqualFold(user.RoleKey, consts.SuperRoleKey) {
+		return true
+	}
+	ok, err := service.AdminMember().IsVip(ctx, user.Id)
+	return err == nil && ok
 }
 
 func (s *sSysContent) getProfileCoverUrl(ctx context.Context, profileId int64) (url string, err error) {
-	one, err := g.DB().Model(contentTableMedia).Safe().Ctx(ctx).
-		Fields("display_storage_path").
-		Where("profile_id", profileId).
-		Where("media_type", consts.ContentMediaTypeImage).
-		Where("status", 1).
-		OrderAsc("sort_index").
+	mediaColumns := dao.ContentMedia.Columns()
+	one, err := dao.ContentMedia.Ctx(ctx).
+		Fields(mediaColumns.DisplayStoragePath).
+		Where(mediaColumns.ProfileId, profileId).
+		Where(mediaColumns.MediaType, consts.ContentMediaTypeImage).
+		Where(mediaColumns.Status, 1).
+		OrderAsc(mediaColumns.SortIndex).
 		One()
 	if err != nil || one == nil {
 		return "", err
 	}
-	return one["display_storage_path"].String(), nil
+	return one[mediaColumns.DisplayStoragePath].String(), nil
+}
+
+func (s *sSysContent) getProfileCoverMap(ctx context.Context, profileIds []int64) (res map[int64]string, err error) {
+	res = make(map[int64]string, len(profileIds))
+	if len(profileIds) == 0 {
+		return
+	}
+	mediaColumns := dao.ContentMedia.Columns()
+	rows, err := dao.ContentMedia.Ctx(ctx).
+		Fields(mediaColumns.ProfileId, mediaColumns.DisplayStoragePath).
+		WhereIn(mediaColumns.ProfileId, profileIds).
+		Where(mediaColumns.MediaType, consts.ContentMediaTypeImage).
+		Where(mediaColumns.Status, 1).
+		OrderAsc(mediaColumns.ProfileId).
+		OrderAsc(mediaColumns.SortIndex).
+		OrderAsc(mediaColumns.Id).
+		All()
+	if err != nil {
+		err = gerror.Wrap(err, "获取资料封面失败，请稍后重试")
+		return
+	}
+	for _, row := range rows {
+		profileId := row[mediaColumns.ProfileId].Int64()
+		if _, exists := res[profileId]; exists {
+			continue
+		}
+		res[profileId] = row[mediaColumns.DisplayStoragePath].String()
+	}
+	return
+}
+
+func (s *sSysContent) getProfileMediaMap(ctx context.Context, profileIds []int64, isMember bool) (res map[int64][]*sysin.ContentMediaModel, err error) {
+	res = make(map[int64][]*sysin.ContentMediaModel, len(profileIds))
+	if len(profileIds) == 0 {
+		return
+	}
+	mediaColumns := dao.ContentMedia.Columns()
+	rows, err := dao.ContentMedia.Ctx(ctx).
+		Fields(
+			mediaColumns.Id,
+			mediaColumns.ProfileId,
+			mediaColumns.MediaType,
+			mediaColumns.DisplayStoragePath,
+			mediaColumns.PreviewStoragePath,
+			mediaColumns.Width,
+			mediaColumns.Height,
+			mediaColumns.Duration,
+			mediaColumns.ProcessStatus,
+		).
+		WhereIn(mediaColumns.ProfileId, profileIds).
+		Where(mediaColumns.Status, 1).
+		OrderAsc(mediaColumns.ProfileId).
+		OrderAsc(mediaColumns.SortIndex).
+		OrderAsc(mediaColumns.Id).
+		All()
+	if err != nil {
+		err = gerror.Wrap(err, "获取资料媒体失败，请稍后重试")
+		return
+	}
+	imageSeen := make(map[int64]int, len(profileIds))
+	for _, row := range rows {
+		profileId := row[mediaColumns.ProfileId].Int64()
+		mediaType := row[mediaColumns.MediaType].String()
+		imageIndex := imageSeen[profileId]
+		if mediaType == consts.ContentMediaTypeImage {
+			imageSeen[profileId] = imageIndex + 1
+		}
+		res[profileId] = append(res[profileId], buildContentMediaModel(row, isMember, imageIndex))
+	}
+	return
 }
 
 func (s *sSysContent) listProfileMedia(ctx context.Context, profileId int64, isMember bool) (list []*sysin.ContentMediaModel, err error) {
-	rows, err := g.DB().Model(contentTableMedia).Safe().Ctx(ctx).
-		Fields("id,media_type,display_storage_path,preview_storage_path,width,height,duration,process_status").
-		Where("profile_id", profileId).
-		Where("status", 1).
-		OrderAsc("sort_index").
-		OrderAsc("id").
+	mediaColumns := dao.ContentMedia.Columns()
+	rows, err := dao.ContentMedia.Ctx(ctx).
+		Fields(
+			mediaColumns.Id,
+			mediaColumns.MediaType,
+			mediaColumns.DisplayStoragePath,
+			mediaColumns.PreviewStoragePath,
+			mediaColumns.Width,
+			mediaColumns.Height,
+			mediaColumns.Duration,
+			mediaColumns.ProcessStatus,
+		).
+		Where(mediaColumns.ProfileId, profileId).
+		Where(mediaColumns.Status, 1).
+		OrderAsc(mediaColumns.SortIndex).
+		OrderAsc(mediaColumns.Id).
 		All()
 	if err != nil {
 		err = gerror.Wrap(err, "获取资料媒体失败，请稍后重试")
 		return
 	}
 	list = make([]*sysin.ContentMediaModel, 0, len(rows))
+	imageIndex := 0
 	for _, row := range rows {
-		mediaType := row["media_type"].String()
-		locked := mediaType == consts.ContentMediaTypeVideo && !isMember
-		displayUrl := row["display_storage_path"].String()
-		if locked {
-			displayUrl = ""
+		if row[mediaColumns.MediaType].String() == consts.ContentMediaTypeImage {
+			list = append(list, buildContentMediaModel(row, isMember, imageIndex))
+			imageIndex++
+			continue
 		}
-		list = append(list, &sysin.ContentMediaModel{
-			Id:          row["id"].Int64(),
-			Type:        mediaType,
-			DisplayUrl:  displayUrl,
-			PreviewUrl:  row["preview_storage_path"].String(),
-			Width:       row["width"].Int(),
-			Height:      row["height"].Int(),
-			Duration:    row["duration"].Int(),
-			Locked:      locked,
-			ProcessDone: row["process_status"].String() == "processed",
-		})
+		list = append(list, buildContentMediaModel(row, isMember, imageIndex))
 	}
 	return
 }
 
+func buildContentMediaModel(row gdb.Record, isMember bool, imageIndex int) *sysin.ContentMediaModel {
+	mediaColumns := dao.ContentMedia.Columns()
+	mediaType := row[mediaColumns.MediaType].String()
+	locked := !isMember && (mediaType == consts.ContentMediaTypeVideo || (mediaType == consts.ContentMediaTypeImage && imageIndex > 0))
+	displayUrl := row[mediaColumns.DisplayStoragePath].String()
+	previewUrl := row[mediaColumns.PreviewStoragePath].String()
+	if locked {
+		displayUrl = ""
+		previewUrl = ""
+	}
+	return &sysin.ContentMediaModel{
+		Id:          row[mediaColumns.Id].Int64(),
+		Type:        mediaType,
+		DisplayUrl:  displayUrl,
+		PreviewUrl:  previewUrl,
+		Width:       row[mediaColumns.Width].Int(),
+		Height:      row[mediaColumns.Height].Int(),
+		Duration:    row[mediaColumns.Duration].Int(),
+		Locked:      locked,
+		Placeholder: locked,
+		ProcessDone: row[mediaColumns.ProcessStatus].String() == "processed",
+	}
+}
+
+func mediaPhotos(media []*sysin.ContentMediaModel) []string {
+	photos := make([]string, 0, len(media))
+	for _, item := range media {
+		if item.Type == consts.ContentMediaTypeImage && item.DisplayUrl != "" {
+			photos = append(photos, item.DisplayUrl)
+		}
+	}
+	return photos
+}
+
 func (s *sSysContent) getCheckpoint(ctx context.Context, sourceName string) (lastNoteId int64, err error) {
-	one, err := g.DB().Model(contentTableCheckpoint).Safe().Ctx(ctx).
-		Fields("last_source_note_id").
-		Where("source_name", sourceName).
+	checkpointColumns := dao.ContentImportCheckpoint.Columns()
+	one, err := dao.ContentImportCheckpoint.Ctx(ctx).
+		Fields(checkpointColumns.LastSourceNoteId).
+		Where(checkpointColumns.SourceName, sourceName).
 		One()
 	if err != nil {
 		err = gerror.Wrap(err, "读取内容导入游标失败")
@@ -389,27 +920,28 @@ func (s *sSysContent) getCheckpoint(ctx context.Context, sourceName string) (las
 	if one == nil {
 		return 0, nil
 	}
-	return one["last_source_note_id"].Int64(), nil
+	return one[checkpointColumns.LastSourceNoteId].Int64(), nil
 }
 
 func (s *sSysContent) saveCheckpoint(ctx context.Context, sourceName string, lastNoteId int64) (err error) {
 	now := gtime.Now()
-	one, err := g.DB().Model(contentTableCheckpoint).Safe().Ctx(ctx).Fields("id").Where("source_name", sourceName).One()
+	checkpointColumns := dao.ContentImportCheckpoint.Columns()
+	one, err := dao.ContentImportCheckpoint.Ctx(ctx).Fields(checkpointColumns.Id).Where(checkpointColumns.SourceName, sourceName).One()
 	if err != nil {
 		return gerror.Wrap(err, "读取内容导入游标失败")
 	}
 	data := g.Map{
-		"last_source_note_id": lastNoteId,
-		"last_success_at":     now,
-		"last_error":          "",
-		"updated_at":          now,
+		checkpointColumns.LastSourceNoteId: lastNoteId,
+		checkpointColumns.LastSuccessAt:    now,
+		checkpointColumns.LastError:        "",
+		checkpointColumns.UpdatedAt:        now,
 	}
 	if one == nil {
-		data["source_name"] = sourceName
-		data["created_at"] = now
-		_, err = g.DB().Model(contentTableCheckpoint).Safe().Ctx(ctx).Data(data).Insert()
+		data[checkpointColumns.SourceName] = sourceName
+		data[checkpointColumns.CreatedAt] = now
+		_, err = dao.ContentImportCheckpoint.Ctx(ctx).Data(data).Insert()
 	} else {
-		_, err = g.DB().Model(contentTableCheckpoint).Safe().Ctx(ctx).Where("id", one["id"].Int64()).Data(data).Update()
+		_, err = dao.ContentImportCheckpoint.Ctx(ctx).Where(checkpointColumns.Id, one[checkpointColumns.Id].Int64()).Data(data).Update()
 	}
 	if err != nil {
 		err = gerror.Wrap(err, "保存内容导入游标失败")
@@ -418,22 +950,24 @@ func (s *sSysContent) saveCheckpoint(ctx context.Context, sourceName string, las
 }
 
 func (s *sSysContent) saveCheckpointError(ctx context.Context, sourceName string, sourceErr error) (err error) {
-	_, err = g.DB().Model(contentTableCheckpoint).Safe().Ctx(ctx).
-		Where("source_name", sourceName).
-		Data(g.Map{"last_error": sourceErr.Error(), "updated_at": gtime.Now()}).
+	checkpointColumns := dao.ContentImportCheckpoint.Columns()
+	_, err = dao.ContentImportCheckpoint.Ctx(ctx).
+		Where(checkpointColumns.SourceName, sourceName).
+		Data(g.Map{checkpointColumns.LastError: sourceErr.Error(), checkpointColumns.UpdatedAt: gtime.Now()}).
 		Update()
 	return
 }
 
 func (s *sSysContent) createImportRun(ctx context.Context, sourceName string, triggerType string, batchSize int, startedAt *gtime.Time) (id int64, err error) {
-	id, err = g.DB().Model(contentTableImportRun).Safe().Ctx(ctx).Data(g.Map{
-		"source_name":  sourceName,
-		"trigger_type": triggerType,
-		"batch_size":   batchSize,
-		"status":       "running",
-		"started_at":   startedAt,
-		"created_at":   startedAt,
-		"updated_at":   startedAt,
+	runColumns := dao.ContentImportRun.Columns()
+	id, err = dao.ContentImportRun.Ctx(ctx).Data(g.Map{
+		runColumns.SourceName:  sourceName,
+		runColumns.TriggerType: triggerType,
+		runColumns.BatchSize:   batchSize,
+		runColumns.Status:      "running",
+		runColumns.StartedAt:   startedAt,
+		runColumns.CreatedAt:   startedAt,
+		runColumns.UpdatedAt:   startedAt,
 	}).InsertAndGetId()
 	if err != nil {
 		err = gerror.Wrap(err, "创建内容导入运行记录失败")
@@ -447,31 +981,33 @@ func (s *sSysContent) finishImportRun(ctx context.Context, runId int64, status s
 	}
 	finishedAt := gtime.Now()
 	costMs := int(finishedAt.Sub(startedAt).Milliseconds())
+	runColumns := dao.ContentImportRun.Columns()
 	data := g.Map{
-		"status":              status,
-		"error_message":       errorMessage,
-		"finished_at":         finishedAt,
-		"cost_ms":             costMs,
-		"updated_at":          finishedAt,
-		"scanned":             res.Scanned,
-		"imported":            res.Imported,
-		"duplicate":           res.Duplicate,
-		"media_imported":      res.MediaImported,
-		"last_source_note_id": res.LastSourceNote,
+		runColumns.Status:           status,
+		runColumns.ErrorMessage:     errorMessage,
+		runColumns.FinishedAt:       finishedAt,
+		runColumns.CostMs:           costMs,
+		runColumns.UpdatedAt:        finishedAt,
+		runColumns.Scanned:          res.Scanned,
+		runColumns.Imported:         res.Imported,
+		runColumns.Duplicate:        res.Duplicate,
+		runColumns.MediaImported:    res.MediaImported,
+		runColumns.LastSourceNoteId: res.LastSourceNote,
 	}
-	_, err = g.DB().Model(contentTableImportRun).Safe().Ctx(ctx).Where("id", runId).Data(data).Update()
+	_, err = dao.ContentImportRun.Ctx(ctx).Where(runColumns.Id, runId).Data(data).Update()
 	if err != nil {
 		err = gerror.Wrap(err, "更新内容导入运行记录失败")
 	}
 	return
 }
 
-func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, source gdb.Record) (imported bool, profileId int64, err error) {
+func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, source gdb.Record, reviewConfig *sysin.ContentImportReviewConfigModel) (imported bool, profileId int64, err error) {
+	profileColumns := dao.ContentProfile.Columns()
 	profileNo := source["note_code"].String()
 	if profileNo == "" {
 		profileNo = "FN" + source["note_id"].String()
 	}
-	one, err := g.DB().Model(contentTableProfile).Safe().Ctx(ctx).Fields("id").Where("profile_no", profileNo).One()
+	one, err := dao.ContentProfile.Ctx(ctx).Fields(profileColumns.Id).Where(profileColumns.ProfileNo, profileNo).One()
 	if err != nil {
 		err = gerror.Wrap(err, "检查资料是否存在失败")
 		return
@@ -489,40 +1025,72 @@ func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, 
 	if err != nil {
 		return
 	}
+	reviewStatus := mapFeiNiuReviewStatus(source["ingest_status"].String(), reviewConfig)
+	status := 1
+	if duplicateOfId > 0 && reviewConfig != nil && reviewConfig.FreezeDuplicate == 1 {
+		status = 2
+	}
 
 	now := gtime.Now()
 	data := g.Map{
-		"profile_no":             profileNo,
-		"source_type":            contentSourceFeiNiu,
-		"source_note_id":         source["note_id"].Int64(),
-		"source_note_uuid":       source["note_uuid"].String(),
-		"source_key":             source["source_key"].String(),
-		"source_text_hash":       recordString(sourceInfo, "source_text_hash"),
-		"channel_id":             channelId,
-		"duplicate_of_id":        duplicateOfId,
-		"title":                  source["title"].String(),
-		"summary":                source["summary"].String(),
-		"plain_text":             source["plain_text"].String(),
-		"province":               source["province"].String(),
-		"city":                   source["city"].String(),
-		"age":                    source["age"].Int(),
-		"height":                 source["height"].Int(),
-		"weight":                 source["weight"].Int(),
-		"cup_size":               source["cup_size"].String(),
-		"has_verification_video": flagToInt(source["has_verification_video"].String()),
-		"image_count":            source["image_count"].Int(),
-		"video_count":            source["video_count"].Int(),
-		"visibility":             consts.ContentVisibilityPrivate,
-		"review_status":          consts.ContentReviewPending,
-		"import_status":          "imported",
-		"updated_at":             now,
+		profileColumns.ProfileNo:            profileNo,
+		profileColumns.SourceType:           contentSourceFeiNiu,
+		profileColumns.SourceNoteId:         source["note_id"].Int64(),
+		profileColumns.SourceNoteUuid:       source["note_uuid"].String(),
+		profileColumns.SourceKey:            source["source_key"].String(),
+		profileColumns.SourceTextHash:       recordString(sourceInfo, "source_text_hash"),
+		profileColumns.ChannelId:            channelId,
+		profileColumns.DuplicateOfId:        duplicateOfId,
+		profileColumns.Title:                source["title"].String(),
+		profileColumns.Summary:              source["summary"].String(),
+		profileColumns.PlainText:            source["plain_text"].String(),
+		profileColumns.HtmlText:             source["html_text"].String(),
+		profileColumns.SourceCategoryCode:   source["category_code"].String(),
+		profileColumns.DaysWithEscort:       source["days_with_escort"].Int(),
+		profileColumns.ExpectedLivingCost:   source["expected_living_cost"].Int(),
+		profileColumns.CanFlyToProvince:     flagToInt(source["can_fly_to_province"].String()),
+		profileColumns.CanGoAbroad:          flagToInt(source["can_go_abroad"].String()),
+		profileColumns.CanOvernight:         flagToInt(source["can_overnight"].String()),
+		profileColumns.CanCohabitate:        flagToInt(source["can_cohabitate"].String()),
+		profileColumns.HasHealthCheck:       flagToInt(source["has_health_check"].String()),
+		profileColumns.IsFullMonth:          flagToInt(source["is_full_month"].String()),
+		profileColumns.IsVirgin:             flagToInt(source["is_virgin"].String()),
+		profileColumns.AcceptSm:             flagToInt(source["accept_sm"].String()),
+		profileColumns.NoCondomAfterCheck:   flagToInt(source["no_condom_after_check"].String()),
+		profileColumns.AllowCreampie:        flagToInt(source["allow_creampie"].String()),
+		profileColumns.HasTattoo:            flagToInt(source["has_tattoo"].String()),
+		profileColumns.IsFavorite:           flagToInt(source["is_favorite"].String()),
+		profileColumns.SourceEditedAt:       source["edited_at"].GTime(),
+		profileColumns.GroupParams:          source["group_params"].String(),
+		profileColumns.TagParams:            source["tag_params"].String(),
+		profileColumns.TextBlockCount:       source["text_block_count"].Int(),
+		profileColumns.StoragePolicy:        source["storage_policy"].String(),
+		profileColumns.SourceRemark:         source["remark"].String(),
+		profileColumns.SourceCreateBy:       source["create_by"].String(),
+		profileColumns.SourceUpdateBy:       source["update_by"].String(),
+		profileColumns.SourceCreatedAt:      source["create_time"].GTime(),
+		profileColumns.SourceUpdatedAt:      source["update_time"].GTime(),
+		profileColumns.Province:             source["province"].String(),
+		profileColumns.City:                 source["city"].String(),
+		profileColumns.Age:                  source["age"].Int(),
+		profileColumns.Height:               source["height"].Int(),
+		profileColumns.Weight:               source["weight"].Int(),
+		profileColumns.CupSize:              source["cup_size"].String(),
+		profileColumns.HasVerificationVideo: flagToInt(source["has_verification_video"].String()),
+		profileColumns.ImageCount:           source["image_count"].Int(),
+		profileColumns.VideoCount:           source["video_count"].Int(),
+		profileColumns.Visibility:           consts.ContentVisibilityPublic,
+		profileColumns.ReviewStatus:         reviewStatus,
+		profileColumns.ImportStatus:         "imported",
+		profileColumns.Status:               status,
+		profileColumns.UpdatedAt:            now,
 	}
 	if duplicateOfId > 0 {
-		data["import_status"] = "duplicate"
+		data[profileColumns.ImportStatus] = "duplicate"
 	}
 	if one == nil {
-		data["created_at"] = now
-		id, insertErr := g.DB().Model(contentTableProfile).Safe().Ctx(ctx).Data(data).InsertAndGetId()
+		data[profileColumns.CreatedAt] = now
+		id, insertErr := dao.ContentProfile.Ctx(ctx).Data(data).InsertAndGetId()
 		if insertErr != nil {
 			err = gerror.Wrap(insertErr, "导入资料失败")
 			return
@@ -532,8 +1100,8 @@ func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, 
 		}
 		return true, id, nil
 	}
-	profileId = one["id"].Int64()
-	if _, err = g.DB().Model(contentTableProfile).Safe().Ctx(ctx).Where("id", profileId).Data(data).Update(); err != nil {
+	profileId = one[profileColumns.Id].Int64()
+	if _, err = dao.ContentProfile.Ctx(ctx).Where(profileColumns.Id, profileId).Data(data).Update(); err != nil {
 		err = gerror.Wrap(err, "更新资料失败")
 		return
 	}
@@ -544,10 +1112,11 @@ func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, 
 }
 
 func (s *sSysContent) importFeiNiuMedia(ctx context.Context, sourceDB gdb.DB, profileId int64, sourceNoteId int64) (count int, err error) {
+	mediaColumns := dao.ContentMedia.Columns()
 	rows, err := sourceDB.GetAll(ctx, `
 SELECT
   b.asset_id,b.sort_index,a.asset_type,a.binary_md5,a.perceptual_hash,a.width,a.height,a.duration,
-  a.origin_uri,a.preview_uri,c.cos_path,c.status AS cos_status
+  a.origin_uri,a.preview_uri,a.local_preview_path,c.cos_path,c.status AS cos_status
 FROM tg_content_block b
 JOIN tg_content_asset a ON a.asset_id = b.asset_id
 LEFT JOIN tg_content_asset_cos c ON c.asset_id = a.asset_id
@@ -563,10 +1132,10 @@ ORDER BY b.sort_index ASC,b.block_id ASC`, sourceNoteId)
 		if assetId <= 0 {
 			continue
 		}
-		exists, checkErr := g.DB().Model(contentTableMedia).Safe().Ctx(ctx).
-			Fields("id").
-			Where("profile_id", profileId).
-			Where("source_asset_id", assetId).
+		exists, checkErr := dao.ContentMedia.Ctx(ctx).
+			Fields(mediaColumns.Id).
+			Where(mediaColumns.ProfileId, profileId).
+			Where(mediaColumns.SourceAssetId, assetId).
 			One()
 		if checkErr != nil {
 			err = gerror.Wrap(checkErr, "检查媒体是否存在失败")
@@ -580,11 +1149,14 @@ ORDER BY b.sort_index ASC,b.block_id ASC`, sourceNoteId)
 			mediaType = consts.ContentMediaTypeImage
 		}
 		cosPath := row["cos_path"].String()
-		previewPath := row["preview_uri"].String()
-		displayPath := previewPath
-		if mediaType == consts.ContentMediaTypeVideo && cosPath != "" {
-			previewPath = cosPath + ".poster.jpg"
-			displayPath = ""
+		originPath := firstNonEmpty(row["origin_uri"].String(), cosPath)
+		previewPath := firstNonEmpty(row["preview_uri"].String(), row["local_preview_path"].String())
+		displayPath := firstNonEmpty(previewPath, originPath)
+		if mediaType == consts.ContentMediaTypeVideo {
+			displayPath = firstNonEmpty(cosPath, originPath)
+			if previewPath == "" && cosPath != "" {
+				previewPath = cosPath + ".poster.jpg"
+			}
 		}
 		duplicateMedia, checkDuplicateErr := s.getDuplicateMediaByMD5(ctx, mediaType, row["binary_md5"].String())
 		if checkDuplicateErr != nil {
@@ -593,29 +1165,30 @@ ORDER BY b.sort_index ASC,b.block_id ASC`, sourceNoteId)
 		}
 		duplicateMediaId := int64(0)
 		if duplicateMedia != nil {
-			duplicateMediaId = duplicateMedia["id"].Int64()
-			displayPath = duplicateMedia["display_storage_path"].String()
-			previewPath = duplicateMedia["preview_storage_path"].String()
+			duplicateMediaId = duplicateMedia[mediaColumns.Id].Int64()
+			displayPath = duplicateMedia[mediaColumns.DisplayStoragePath].String()
+			previewPath = duplicateMedia[mediaColumns.PreviewStoragePath].String()
 		}
-		_, insertErr := g.DB().Model(contentTableMedia).Safe().Ctx(ctx).Data(g.Map{
-			"profile_id":            profileId,
-			"source_asset_id":       assetId,
-			"media_type":            mediaType,
-			"sort_index":            row["sort_index"].Int(),
-			"original_storage_path": originalStoragePath(cosPath, duplicateMediaId),
-			"display_storage_path":  displayPath,
-			"preview_storage_path":  previewPath,
-			"duplicate_of_media_id": duplicateMediaId,
-			"binary_md5":            row["binary_md5"].String(),
-			"perceptual_hash":       row["perceptual_hash"].String(),
-			"width":                 row["width"].Int(),
-			"height":                row["height"].Int(),
-			"duration":              row["duration"].Int(),
-			"process_status":        "raw",
-			"encrypt_status":        "none",
-			"status":                1,
-			"created_at":            gtime.Now(),
-			"updated_at":            gtime.Now(),
+		now := gtime.Now()
+		_, insertErr := dao.ContentMedia.Ctx(ctx).Data(g.Map{
+			mediaColumns.ProfileId:           profileId,
+			mediaColumns.SourceAssetId:       assetId,
+			mediaColumns.MediaType:           mediaType,
+			mediaColumns.SortIndex:           row["sort_index"].Int(),
+			mediaColumns.OriginalStoragePath: originalStoragePath(cosPath, duplicateMediaId),
+			mediaColumns.DisplayStoragePath:  displayPath,
+			mediaColumns.PreviewStoragePath:  previewPath,
+			mediaColumns.DuplicateOfMediaId:  duplicateMediaId,
+			mediaColumns.BinaryMd5:           row["binary_md5"].String(),
+			mediaColumns.PerceptualHash:      row["perceptual_hash"].String(),
+			mediaColumns.Width:               row["width"].Int(),
+			mediaColumns.Height:              row["height"].Int(),
+			mediaColumns.Duration:            row["duration"].Int(),
+			mediaColumns.ProcessStatus:       "raw",
+			mediaColumns.EncryptStatus:       "none",
+			mediaColumns.Status:              1,
+			mediaColumns.CreatedAt:           now,
+			mediaColumns.UpdatedAt:           now,
 		}).Insert()
 		if insertErr != nil {
 			err = gerror.Wrap(insertErr, "导入媒体失败")
@@ -624,6 +1197,27 @@ ORDER BY b.sort_index ASC,b.block_id ASC`, sourceNoteId)
 		count++
 	}
 	return
+}
+
+func mapFeiNiuReviewStatus(status string, config *sysin.ContentImportReviewConfigModel) string {
+	status = strings.ToLower(strings.TrimSpace(status))
+	switch status {
+	case consts.ContentReviewApproved, "approve", "passed", "pass", "success", "published":
+		return consts.ContentReviewApproved
+	case consts.ContentReviewRejected, "reject", "blocked", "failed":
+		return consts.ContentReviewRejected
+	case consts.ContentReviewPending, "reviewing":
+		return consts.ContentReviewPending
+	}
+	if config != nil {
+		if config.AutoApproveImported == 1 {
+			return consts.ContentReviewApproved
+		}
+		if config.DefaultReviewStatus != "" {
+			return config.DefaultReviewStatus
+		}
+	}
+	return consts.ContentReviewApproved
 }
 
 func (s *sSysContent) getFeiNiuSourceInfo(ctx context.Context, sourceDB gdb.DB, sourceNoteId int64) (row gdb.Record, err error) {
@@ -650,16 +1244,17 @@ LIMIT 1`, sourceNoteId)
 }
 
 func (s *sSysContent) upsertFeiNiuChannel(ctx context.Context, sourceInfo gdb.Record) (channelId int64, err error) {
+	channelColumns := dao.ContentChannel.Columns()
 	sourceChannelId := recordInt64(sourceInfo, "channel_id")
 	if sourceChannelId <= 0 {
 		return 0, nil
 	}
 
 	now := gtime.Now()
-	one, err := g.DB().Model(contentTableChannel).Safe().Ctx(ctx).
-		Fields("id").
-		Where("source_type", contentSourceFeiNiu).
-		Where("source_channel_id", sourceChannelId).
+	one, err := dao.ContentChannel.Ctx(ctx).
+		Fields(channelColumns.Id).
+		Where(channelColumns.SourceType, contentSourceFeiNiu).
+		Where(channelColumns.SourceChannelId, sourceChannelId).
 		One()
 	if err != nil {
 		err = gerror.Wrap(err, "读取本地来源频道失败")
@@ -667,23 +1262,23 @@ func (s *sSysContent) upsertFeiNiuChannel(ctx context.Context, sourceInfo gdb.Re
 	}
 
 	data := g.Map{
-		"source_channel_id": sourceChannelId,
-		"tg_chat_id":        recordString(sourceInfo, "tg_chat_id"),
-		"title":             recordString(sourceInfo, "channel_title"),
-		"username":          recordString(sourceInfo, "channel_username"),
-		"invite_link":       recordString(sourceInfo, "channel_invite_link"),
-		"source_type":       contentSourceFeiNiu,
-		"public_status":     "hidden",
-		"auth_status":       "none",
-		"status":            1,
-		"updated_at":        now,
+		channelColumns.SourceChannelId: sourceChannelId,
+		channelColumns.TgChatId:        recordString(sourceInfo, "tg_chat_id"),
+		channelColumns.Title:           recordString(sourceInfo, "channel_title"),
+		channelColumns.Username:        recordString(sourceInfo, "channel_username"),
+		channelColumns.InviteLink:      recordString(sourceInfo, "channel_invite_link"),
+		channelColumns.SourceType:      contentSourceFeiNiu,
+		channelColumns.PublicStatus:    "hidden",
+		channelColumns.AuthStatus:      "none",
+		channelColumns.Status:          1,
+		channelColumns.UpdatedAt:       now,
 	}
 	if one == nil {
-		data["created_at"] = now
-		channelId, err = g.DB().Model(contentTableChannel).Safe().Ctx(ctx).Data(data).InsertAndGetId()
+		data[channelColumns.CreatedAt] = now
+		channelId, err = dao.ContentChannel.Ctx(ctx).Data(data).InsertAndGetId()
 	} else {
-		channelId = one["id"].Int64()
-		_, err = g.DB().Model(contentTableChannel).Safe().Ctx(ctx).Where("id", channelId).Data(data).Update()
+		channelId = one[channelColumns.Id].Int64()
+		_, err = dao.ContentChannel.Ctx(ctx).Where(channelColumns.Id, channelId).Data(data).Update()
 	}
 	if err != nil {
 		err = gerror.Wrap(err, "保存本地来源频道失败")
@@ -692,35 +1287,36 @@ func (s *sSysContent) upsertFeiNiuChannel(ctx context.Context, sourceInfo gdb.Re
 }
 
 func (s *sSysContent) upsertFeiNiuSourceMap(ctx context.Context, profileId int64, sourceInfo gdb.Record) (err error) {
+	sourceMapColumns := dao.ContentSourceMap.Columns()
 	sourceKey := recordString(sourceInfo, "source_key")
 	if sourceKey == "" {
 		return nil
 	}
 
 	now := gtime.Now()
-	one, err := g.DB().Model(contentTableSourceMap).Safe().Ctx(ctx).Fields("id").Where("source_key", sourceKey).One()
+	one, err := dao.ContentSourceMap.Ctx(ctx).Fields(sourceMapColumns.Id).Where(sourceMapColumns.SourceKey, sourceKey).One()
 	if err != nil {
 		return gerror.Wrap(err, "读取内容来源映射失败")
 	}
 	data := g.Map{
-		"profile_id":        profileId,
-		"source_type":       recordString(sourceInfo, "source_type"),
-		"source_key":        sourceKey,
-		"source_channel_id": recordInt64(sourceInfo, "channel_id"),
-		"source_message_id": recordInt64(sourceInfo, "tg_message_id"),
-		"source_grouped_id": recordInt64(sourceInfo, "tg_grouped_id"),
-		"source_text_hash":  recordString(sourceInfo, "source_text_hash"),
-		"raw_text":          recordString(sourceInfo, "raw_text"),
-		"raw_message_json":  recordString(sourceInfo, "raw_message_json"),
+		sourceMapColumns.ProfileId:       profileId,
+		sourceMapColumns.SourceType:      recordString(sourceInfo, "source_type"),
+		sourceMapColumns.SourceKey:       sourceKey,
+		sourceMapColumns.SourceChannelId: recordInt64(sourceInfo, "channel_id"),
+		sourceMapColumns.SourceMessageId: recordInt64(sourceInfo, "tg_message_id"),
+		sourceMapColumns.SourceGroupedId: recordInt64(sourceInfo, "tg_grouped_id"),
+		sourceMapColumns.SourceTextHash:  recordString(sourceInfo, "source_text_hash"),
+		sourceMapColumns.RawText:         recordString(sourceInfo, "raw_text"),
+		sourceMapColumns.RawMessageJson:  recordString(sourceInfo, "raw_message_json"),
 	}
-	if data["source_type"] == "" {
-		data["source_type"] = contentSourceFeiNiu
+	if data[sourceMapColumns.SourceType] == "" {
+		data[sourceMapColumns.SourceType] = contentSourceFeiNiu
 	}
 	if one == nil {
-		data["created_at"] = now
-		_, err = g.DB().Model(contentTableSourceMap).Safe().Ctx(ctx).Data(data).Insert()
+		data[sourceMapColumns.CreatedAt] = now
+		_, err = dao.ContentSourceMap.Ctx(ctx).Data(data).Insert()
 	} else {
-		_, err = g.DB().Model(contentTableSourceMap).Safe().Ctx(ctx).Where("id", one["id"].Int64()).Data(data).Update()
+		_, err = dao.ContentSourceMap.Ctx(ctx).Where(sourceMapColumns.Id, one[sourceMapColumns.Id].Int64()).Data(data).Update()
 	}
 	if err != nil {
 		err = gerror.Wrap(err, "保存内容来源映射失败")
@@ -729,18 +1325,20 @@ func (s *sSysContent) upsertFeiNiuSourceMap(ctx context.Context, profileId int64
 }
 
 func (s *sSysContent) findDuplicateProfileId(ctx context.Context, sourceNoteId int64, duplicateNoteId int64, sourceInfo gdb.Record) (id int64, err error) {
+	profileColumns := dao.ContentProfile.Columns()
+	sourceMapColumns := dao.ContentSourceMap.Columns()
 	if duplicateNoteId > 0 {
-		one, queryErr := g.DB().Model(contentTableProfile).Safe().Ctx(ctx).
-			Fields("id").
-			Where("source_type", contentSourceFeiNiu).
-			Where("source_note_id", duplicateNoteId).
+		one, queryErr := dao.ContentProfile.Ctx(ctx).
+			Fields(profileColumns.Id).
+			Where(profileColumns.SourceType, contentSourceFeiNiu).
+			Where(profileColumns.SourceNoteId, duplicateNoteId).
 			One()
 		if queryErr != nil {
 			err = gerror.Wrap(queryErr, "检查重复资料失败")
 			return
 		}
 		if one != nil {
-			return one["id"].Int64(), nil
+			return one[profileColumns.Id].Int64(), nil
 		}
 	}
 
@@ -749,14 +1347,14 @@ func (s *sSysContent) findDuplicateProfileId(ctx context.Context, sourceNoteId i
 	if sourceTextHash == "" || sourceChannelId <= 0 {
 		return 0, nil
 	}
-	one, err := g.DB().Model(contentTableProfile+" p").Safe().Ctx(ctx).
-		Fields("p.id").
-		LeftJoin(contentTableSourceMap+" s", "s.profile_id=p.id").
-		Where("p.source_type", contentSourceFeiNiu).
-		Where("p.source_note_id<>?", sourceNoteId).
-		Where("s.source_channel_id", sourceChannelId).
-		Where("s.source_text_hash", sourceTextHash).
-		OrderAsc("p.id").
+	one, err := dao.ContentProfile.Ctx(ctx).As("p").
+		Fields(aliasField("p", profileColumns.Id)).
+		LeftJoin(dao.ContentSourceMap.Table()+" s", aliasField("s", sourceMapColumns.ProfileId)+"="+aliasField("p", profileColumns.Id)).
+		Where(aliasField("p", profileColumns.SourceType), contentSourceFeiNiu).
+		Where(aliasField("p", profileColumns.SourceNoteId)+"<>?", sourceNoteId).
+		Where(aliasField("s", sourceMapColumns.SourceChannelId), sourceChannelId).
+		Where(aliasField("s", sourceMapColumns.SourceTextHash), sourceTextHash).
+		OrderAsc(aliasField("p", profileColumns.Id)).
 		One()
 	if err != nil {
 		err = gerror.Wrap(err, "检查文本重复资料失败")
@@ -765,19 +1363,20 @@ func (s *sSysContent) findDuplicateProfileId(ctx context.Context, sourceNoteId i
 	if one == nil {
 		return 0, nil
 	}
-	return one["id"].Int64(), nil
+	return one[profileColumns.Id].Int64(), nil
 }
 
 func (s *sSysContent) getDuplicateMediaByMD5(ctx context.Context, mediaType string, md5 string) (row gdb.Record, err error) {
 	if mediaType != consts.ContentMediaTypeImage || md5 == "" {
 		return nil, nil
 	}
-	row, err = g.DB().Model(contentTableMedia).Safe().Ctx(ctx).
-		Fields("id,display_storage_path,preview_storage_path").
-		Where("media_type", mediaType).
-		Where("binary_md5", md5).
-		Where("status", 1).
-		OrderAsc("id").
+	mediaColumns := dao.ContentMedia.Columns()
+	row, err = dao.ContentMedia.Ctx(ctx).
+		Fields(mediaColumns.Id, mediaColumns.DisplayStoragePath, mediaColumns.PreviewStoragePath).
+		Where(mediaColumns.MediaType, mediaType).
+		Where(mediaColumns.BinaryMd5, md5).
+		Where(mediaColumns.Status, 1).
+		OrderAsc(mediaColumns.Id).
 		One()
 	if err != nil {
 		err = gerror.Wrap(err, "检查重复媒体失败")
@@ -790,6 +1389,79 @@ func originalStoragePath(cosPath string, duplicateMediaId int64) string {
 		return ""
 	}
 	return cosPath
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func boolText(value int) string {
+	if value == 1 {
+		return "是"
+	}
+	return "否"
+}
+
+func appendAttribute(list []*sysin.ContentProfileAttributeItem, label string, value interface{}, suffix string) []*sysin.ContentProfileAttributeItem {
+	text := strings.TrimSpace(g.NewVar(value).String())
+	if text == "" || text == "0" || text == "<nil>" {
+		return list
+	}
+	return append(list, &sysin.ContentProfileAttributeItem{
+		Label: label,
+		Value: text + suffix,
+	})
+}
+
+func buildContentProfileAttributes(row *contentProfileRow, isVip bool) []*sysin.ContentProfileAttributeItem {
+	if row == nil {
+		return []*sysin.ContentProfileAttributeItem{}
+	}
+	list := make([]*sysin.ContentProfileAttributeItem, 0, 18)
+	list = appendAttribute(list, "年龄", row.Age, "岁")
+	list = appendAttribute(list, "身高", row.Height, "cm")
+	list = appendAttribute(list, "体重", row.Weight, "kg")
+	list = appendAttribute(list, "罩杯", row.CupSize, "")
+	list = appendAttribute(list, "城市", strings.TrimSpace(row.Province+" "+row.City), "")
+	list = appendAttribute(list, "期望生活费", row.ExpectedLivingCost, "")
+	if !isVip {
+		return list
+	}
+	list = appendAttribute(list, "陪伴天数", row.DaysWithEscort, "天")
+	list = append(list,
+		&sysin.ContentProfileAttributeItem{Label: "可飞外省", Value: boolText(row.CanFlyToProvince)},
+		&sysin.ContentProfileAttributeItem{Label: "可出国", Value: boolText(row.CanGoAbroad)},
+		&sysin.ContentProfileAttributeItem{Label: "可过夜", Value: boolText(row.CanOvernight)},
+		&sysin.ContentProfileAttributeItem{Label: "可同居", Value: boolText(row.CanCohabitate)},
+		&sysin.ContentProfileAttributeItem{Label: "有体检", Value: boolText(row.HasHealthCheck)},
+		&sysin.ContentProfileAttributeItem{Label: "满月", Value: boolText(row.IsFullMonth)},
+		&sysin.ContentProfileAttributeItem{Label: "是否处", Value: boolText(row.IsVirgin)},
+		&sysin.ContentProfileAttributeItem{Label: "接受SM", Value: boolText(row.AcceptSm)},
+		&sysin.ContentProfileAttributeItem{Label: "体检后无套", Value: boolText(row.NoCondomAfterCheck)},
+		&sysin.ContentProfileAttributeItem{Label: "可内射", Value: boolText(row.AllowCreampie)},
+		&sysin.ContentProfileAttributeItem{Label: "有纹身", Value: boolText(row.HasTattoo)},
+	)
+	list = appendAttribute(list, "备注", row.SourceRemark, "")
+	return list
+}
+
+func filterSensitivePlainText(text string) string {
+	text = introFeeRegexp.ReplaceAllString(text, "")
+	lines := strings.Split(text, "\n")
+	cleaned := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			cleaned = append(cleaned, line)
+		}
+	}
+	return strings.Join(cleaned, "\n")
 }
 
 func recordString(record gdb.Record, key string) string {
@@ -827,6 +1499,22 @@ type contentProfileRow struct {
 	Title                string      `json:"title"`
 	Summary              string      `json:"summary"`
 	PlainText            string      `json:"plainText"`
+	DaysWithEscort       int         `json:"daysWithEscort"`
+	ExpectedLivingCost   int         `json:"expectedLivingCost"`
+	CanFlyToProvince     int         `json:"canFlyToProvince"`
+	CanGoAbroad          int         `json:"canGoAbroad"`
+	CanOvernight         int         `json:"canOvernight"`
+	CanCohabitate        int         `json:"canCohabitate"`
+	HasHealthCheck       int         `json:"hasHealthCheck"`
+	IsFullMonth          int         `json:"isFullMonth"`
+	IsVirgin             int         `json:"isVirgin"`
+	AcceptSm             int         `json:"acceptSm"`
+	NoCondomAfterCheck   int         `json:"noCondomAfterCheck"`
+	AllowCreampie        int         `json:"allowCreampie"`
+	HasTattoo            int         `json:"hasTattoo"`
+	GroupParams          string      `json:"groupParams"`
+	TagParams            string      `json:"tagParams"`
+	SourceRemark         string      `json:"sourceRemark"`
 	Province             string      `json:"province"`
 	City                 string      `json:"city"`
 	Age                  int         `json:"age"`
@@ -861,6 +1549,8 @@ func (row contentProfileRow) toListModel() *sysin.ContentProfileListModel {
 		HasVideo:    row.VideoCount > 0,
 		VideoLocked: row.VideoCount > 0 && row.MemberOnlyVideo == 1,
 		Verified:    row.HasVerificationVideo == 1,
+		ImageCount:  row.ImageCount,
+		VideoCount:  row.VideoCount,
 		PublishedAt: row.PublishedAt,
 	}
 }

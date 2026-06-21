@@ -136,3 +136,22 @@ type AddIntegralReq struct {
 }
 
 type AddIntegralRes struct{}
+
+// VipReq 设置VIP会员
+type VipReq struct {
+	g.Meta `path:"/member/vip" method:"post" tags:"用户" summary:"设置VIP会员"`
+	adminin.MemberSetVipInp
+}
+
+type VipRes struct{}
+
+// VipLogListReq 查询VIP日志列表
+type VipLogListReq struct {
+	g.Meta `path:"/member/vipLogList" method:"get" tags:"用户" summary:"获取VIP日志列表"`
+	adminin.MemberVipLogListInp
+}
+
+type VipLogListRes struct {
+	List []*adminin.MemberVipLogListModel `json:"list" dc:"数据列表"`
+	form.PageRes
+}

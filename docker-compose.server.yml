@@ -1,0 +1,40 @@
+services:
+  hotgo-postgres:
+    image: postgres:16-alpine
+    container_name: youban-hotgo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${HOTGO_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${HOTGO_POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${HOTGO_POSTGRES_DB:-youban_hotgo}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${HOTGO_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - hotgo_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  hotgo-redis:
+    image: redis:7-alpine
+    container_name: youban-hotgo-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${HOTGO_REDIS_PORT:-6379}:6379"
+    volumes:
+      - hotgo_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  hotgo_postgres_data:
+  hotgo_redis_data:

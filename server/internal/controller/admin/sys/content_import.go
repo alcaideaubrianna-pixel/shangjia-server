@@ -48,3 +48,34 @@ func (c *cContentImport) RunList(ctx context.Context, req *contentimport.RunList
 	res.PageRes.Pack(req, totalCount)
 	return
 }
+
+// AutoSync 设置 FeiNiu 自动同步状态。
+func (c *cContentImport) AutoSync(ctx context.Context, req *contentimport.AutoSyncReq) (res *contentimport.AutoSyncRes, err error) {
+	data, err := service.SysContent().SetImportAutoSync(ctx, &req.ContentImportAutoSyncInp)
+	if err != nil {
+		return
+	}
+	res = new(contentimport.AutoSyncRes)
+	res.ContentImportAutoSyncModel = data
+	return
+}
+
+func (c *cContentImport) ReviewConfig(ctx context.Context, req *contentimport.ReviewConfigReq) (res *contentimport.ReviewConfigRes, err error) {
+	data, err := service.SysContent().ImportReviewConfig(ctx, &req.ContentImportReviewConfigInp)
+	if err != nil {
+		return
+	}
+	res = new(contentimport.ReviewConfigRes)
+	res.ContentImportReviewConfigModel = data
+	return
+}
+
+func (c *cContentImport) SaveReviewConfig(ctx context.Context, req *contentimport.SaveReviewConfigReq) (res *contentimport.SaveReviewConfigRes, err error) {
+	data, err := service.SysContent().SetImportReviewConfig(ctx, &req.ContentImportReviewConfigEditInp)
+	if err != nil {
+		return
+	}
+	res = new(contentimport.SaveReviewConfigRes)
+	res.ContentImportReviewConfigModel = data
+	return
+}

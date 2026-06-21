@@ -1,10 +1,13 @@
-FROM loads/alpine:3.8
+FROM debian:bookworm-slim
 
 ###############################################################################
 #                                INSTALLATION
 ###############################################################################
 
 ENV WORKDIR                 /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 ADD hack                $WORKDIR/hack/
 ADD manifest/config                $WORKDIR/manifest/config/
 ADD resource                $WORKDIR/resource/

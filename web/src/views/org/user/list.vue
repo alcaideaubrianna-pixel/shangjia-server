@@ -220,6 +220,49 @@
       :formParams="formParams"
     />
 
+    <n-modal
+      v-model:show="showVipModal"
+      :mask-closable="false"
+      :show-icon="false"
+      preset="dialog"
+      :title="'修改会员 #' + vipParams.memberId"
+      :style="{ width: '520px' }"
+    >
+      <n-form
+        :model="vipParams"
+        label-placement="left"
+        :label-width="90"
+        class="py-4"
+      >
+        <n-form-item label="用户类型" path="vipStatus">
+          <n-radio-group v-model:value="vipParams.vipStatus" name="vipStatus">
+            <n-radio-button :value="2" label="普通用户" />
+            <n-radio-button :value="1" label="会员用户" />
+          </n-radio-group>
+        </n-form-item>
+        <n-form-item v-if="vipParams.vipStatus === 1" label="会员等级" path="vipLevel">
+          <n-input-number v-model:value="vipParams.vipLevel" :min="1" :max="99" />
+        </n-form-item>
+        <n-form-item v-if="vipParams.vipStatus === 1" label="到期时间" path="vipExpiredAt">
+          <DatePicker v-model:formValue="vipParams.vipExpiredAt" type="datetime" />
+        </n-form-item>
+        <n-form-item label="备注" path="remark">
+          <n-input
+            type="textarea"
+            placeholder="请输入备注"
+            v-model:value="vipParams.remark"
+          />
+        </n-form-item>
+      </n-form>
+
+      <template #action>
+        <n-space>
+          <n-button @click="() => (showVipModal = false)">取消</n-button>
+          <n-button type="info" :loading="vipBtnLoading" @click="confirmVipForm">确定</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
     <n-modal v-model:show="showQrModal" :show-icon="false" preset="dialog" title="邀请注册二维码">
       <n-form class="py-4">
         <div class="text-center">
@@ -241,7 +284,7 @@
   import { useDialog, useMessage } from 'naive-ui';
   import { ActionItem, BasicTable, TableAction } from '@/components/Table';
   import { BasicForm } from '@/components/Form/index';
-  import { Delete, Edit, List, ResetPwd } from '@/api/org/user';
+  import { Delete, Edit, List, ResetPwd, Vip } from '@/api/org/user';
   import { columns } from './columns';
   import { PlusOutlined, DeleteOutlined } from '@vicons/antd';
   import { QrCodeOutline } from '@vicons/ionicons5';
@@ -264,6 +307,7 @@
   import { LoginRoute } from '@/router';
   import { getNowUrl } from '@/utils/urlUtils';
   import { useDictStore } from '@/store/modules/dict';
+  import DatePicker from '@/components/DatePicker/datePicker.vue';
 
   interface Props {
     type?: string;
@@ -296,6 +340,16 @@
   const batchDeleteDisabled = ref(true);
   const checkedIds = ref([]);
   const formParams = ref<any>();
+  const showVipModal = ref(false);
+  const vipBtnLoading = ref(false);
+  const vipParams = ref({
+    memberId: 0,
+    username: '',
+    vipStatus: 2,
+    vipLevel: 1,
+    vipExpiredAt: '',
+    remark: '',
+  });
   const showQrModal = ref(false);
   const qrParams = ref({
     name: '',
@@ -344,6 +398,9 @@
           if (key === 101) {
             return handleAddIntegral(record);
           }
+          if (key === 103) {
+            return handleVip(record);
+          }
           if (key === 102) {
             if (userStore.loginConfig?.loginRegisterSwitch !== 1) {
               message.error('管理员暂未开启此功能');
@@ -377,6 +434,11 @@
       {
         label: '变更积分',
         key: 101,
+      },
+      {
+        label: '修改会员',
+        key: 103,
+        auth: ['/member/vip'],
       },
     ];
 
@@ -514,6 +576,55 @@
   function handleAddIntegral(record: Recordable) {
     showIntegralModal.value = true;
     formParams.value = addNewState(record as addState);
+  }
+
+  function handleVip(record: Recordable) {
+    vipParams.value = {
+      memberId: Number(record.id),
+      username: record.username,
+      vipStatus: record.vipStatus || 2,
+      vipLevel: record.isVip || record.vipStatus === 1 ? record.vipLevel || 1 : 1,
+      vipExpiredAt: record.vipStatus === 1 ? record.vipExpiredAt || '' : '',
+      remark: '',
+    };
+    showVipModal.value = true;
+  }
+
+  function confirmVipForm(e) {
+    e.preventDefault();
+    if (![1, 2].includes(Number(vipParams.value.vipStatus))) {
+      message.error('请选择用户类型');
+      return;
+    }
+    if (vipParams.value.vipStatus === 1) {
+      if (!vipParams.value.vipLevel || vipParams.value.vipLevel < 1) {
+        message.error('请输入会员等级');
+        return;
+      }
+      if (!vipParams.value.vipExpiredAt) {
+        message.error('请选择到期时间');
+        return;
+      }
+      if (new Date(vipParams.value.vipExpiredAt).getTime() <= Date.now()) {
+        message.error('到期时间必须大于当前时间');
+        return;
+      }
+    }
+    vipBtnLoading.value = true;
+    const params = cloneDeep(vipParams.value);
+    if (params.vipStatus !== 1) {
+      params.vipLevel = 0;
+      params.vipExpiredAt = '';
+    }
+    Vip(params)
+      .then(() => {
+        message.success('操作成功');
+        showVipModal.value = false;
+        reloadTable();
+      })
+      .finally(() => {
+        vipBtnLoading.value = false;
+      });
   }
 
   function handleInviteQR(code: any) {

@@ -25,3 +25,13 @@ type ViewProfileReq struct {
 type ViewProfileRes struct {
 	*sysin.ContentProfileViewModel
 }
+
+type ListAnnouncementsReq struct {
+	g.Meta `path:"/content/announcements" method:"get" tags:"前台公告" summary:"获取前台公告列表"`
+	sysin.AppAnnouncementPublicListInp
+}
+
+type ListAnnouncementsRes struct {
+	form.PageRes
+	List []*sysin.AppAnnouncementPublicListModel `json:"list" dc:"公告列表"`
+}

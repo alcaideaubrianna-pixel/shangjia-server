@@ -143,3 +143,24 @@ func (c *cMember) AddIntegral(ctx context.Context, req *member.AddIntegralReq) (
 	err = service.AdminMember().AddIntegral(ctx, &req.MemberAddIntegralInp)
 	return
 }
+
+// Vip 设置VIP会员
+func (c *cMember) Vip(ctx context.Context, req *member.VipReq) (res *member.VipRes, err error) {
+	err = service.AdminMember().SetVip(ctx, &req.MemberSetVipInp)
+	return
+}
+
+// VipLogList 查看VIP日志列表
+func (c *cMember) VipLogList(ctx context.Context, req *member.VipLogListReq) (res *member.VipLogListRes, err error) {
+	list, totalCount, err := service.AdminMember().VipLogList(ctx, &req.MemberVipLogListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*adminin.MemberVipLogListModel{}
+	}
+	res = new(member.VipLogListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}

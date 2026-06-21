@@ -1,6 +1,6 @@
 module hotgo
 
-go 1.24.4
+go 1.24.6
 
 require (
 	github.com/IBM/sarama v1.45.2
@@ -15,6 +15,7 @@ require (
 	github.com/go-pay/crypto v0.0.1
 	github.com/go-pay/gopay v1.5.114
 	github.com/go-pay/smap v0.0.2
+	github.com/go-telegram/bot v1.21.0
 	github.com/gogf/gf/contrib/drivers/mysql/v2 v2.10.0
 	github.com/gogf/gf/contrib/drivers/pgsql/v2 v2.10.0
 	github.com/gogf/gf/contrib/nosql/redis/v2 v2.10.0
@@ -53,6 +54,7 @@ require (
 	github.com/alibabacloud-go/openapi-util v0.1.0 // indirect
 	github.com/alibabacloud-go/tea-utils v1.3.1 // indirect
 	github.com/aliyun/credentials-go v1.4.5 // indirect
+	github.com/aws/aws-sdk-go v1.55.8 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.6.1 // indirect
 	github.com/bradfitz/gomemcache v0.0.0-20220106215444-fb4bf637b56d // indirect
 	github.com/casbin/govaluate v1.3.0 // indirect
@@ -98,6 +100,7 @@ require (
 	github.com/jcmturner/gofork v1.7.6 // indirect
 	github.com/jcmturner/gokrb5/v8 v8.4.4 // indirect
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
+	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
@@ -119,7 +122,7 @@ require (
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/philhofer/fwd v1.1.3-0.20240916144458-20a13a1f6b7c // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
-	github.com/pkg/errors v0.8.1 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475 // indirect
 	github.com/redis/go-redis/v9 v9.12.1 // indirect
@@ -138,8 +141,12 @@ require (
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
+	github.com/u2takey/ffmpeg-go v0.5.0 // indirect
+	github.com/u2takey/go-utils v0.3.1 // indirect
 	github.com/xuri/efp v0.0.1 // indirect
 	github.com/xuri/nfp v0.0.1 // indirect
+	github.com/yazmeyaa/go-rlottie v1.0.3 // indirect
+	github.com/yazmeyaa/telegram_sticker_converter v1.0.5 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel/exporters/jaeger v1.14.0 // indirect
@@ -148,7 +155,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.38.0 // indirect
 	go.uber.org/atomic v1.5.1 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
-	golang.org/x/image v0.25.0 // indirect
+	golang.org/x/image v0.30.0 // indirect
 	golang.org/x/lint v0.0.0-20190930215403-16217165b5de // indirect
 	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect

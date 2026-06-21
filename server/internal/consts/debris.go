@@ -13,6 +13,7 @@ const (
 	RegionSpilt           = " / "     // 地区分隔符
 	Unknown               = "Unknown" // Unknown
 	SuperRoleKey          = "super"   // 超管角色唯一标识符，通过角色验证超管
+	VipRoleKey            = "vip"     // VIP角色唯一标识符，通过角色验证内容会员
 	MaxServeLogContentLen = 2048      // 最大保留服务日志内容大小
 	SysDefaultLanguage    = "zh_CN"   // 系统默认语言，当配置文件没有国际化配置时生效
 )

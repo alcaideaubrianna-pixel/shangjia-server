@@ -100,6 +100,10 @@ func (s *sAdminNotice) Edit(ctx context.Context, in *adminin.NoticeEditInp) (err
 		return err
 	}
 
+	if !s.shouldPushNow(in) {
+		return nil
+	}
+
 	// 推送通知
 	response := &websocket.WResponse{
 		Event: "notice",
@@ -115,6 +119,20 @@ func (s *sAdminNotice) Edit(ctx context.Context, in *adminin.NoticeEditInp) (err
 		}
 	})
 	return
+}
+
+func (s *sAdminNotice) shouldPushNow(in *adminin.NoticeEditInp) bool {
+	now := gtime.Now()
+	if in.Status != consts.StatusEnabled {
+		return false
+	}
+	if in.PublishAt != nil && in.PublishAt.After(now) {
+		return false
+	}
+	if in.ExpireAt != nil && !in.ExpireAt.After(now) {
+		return false
+	}
+	return true
 }
 
 // Status 更新部门状态
@@ -180,6 +198,10 @@ func (s *sAdminNotice) ApiList(ctx context.Context, in *adminin.NoticeListInp) (
 		mod = mod.Where("type", in.Type)
 	}
 
+	if in.IsBanner > 0 {
+		mod = mod.Where(dao.AdminNotice.Columns().IsBanner, in.IsBanner)
+	}
+
 	if in.Status > 0 {
 		mod = mod.Where("status", in.Status)
 	}
@@ -224,6 +246,10 @@ func (s *sAdminNotice) List(ctx context.Context, in *adminin.NoticeListInp) (lis
 		mod = mod.Where("type", in.Type)
 	}
 
+	if in.IsBanner > 0 {
+		mod = mod.Where(dao.AdminNotice.Columns().IsBanner, in.IsBanner)
+	}
+
 	if in.Status > 0 {
 		mod = mod.Where("status", in.Status)
 	}
@@ -266,6 +292,42 @@ func (s *sAdminNotice) List(ctx context.Context, in *adminin.NoticeListInp) (lis
 		}
 	}
 	return list, totalCount, err
+}
+
+// PublicList 前台公告列表。
+func (s *sAdminNotice) PublicList(ctx context.Context, in *adminin.NoticePublicListInp) (list []*adminin.NoticePublicListModel, totalCount int, err error) {
+	mod := s.publicNoticeModel(ctx)
+	if in.IsBanner > 0 {
+		mod = mod.Where(dao.AdminNotice.Columns().IsBanner, in.IsBanner)
+	}
+	totalCount, err = mod.Count()
+	if err != nil {
+		err = gerror.Wrap(err, consts.ErrorORM)
+		return
+	}
+	if totalCount == 0 {
+		list = []*adminin.NoticePublicListModel{}
+		return
+	}
+	if err = mod.Fields(
+		dao.AdminNotice.Columns().Id,
+		dao.AdminNotice.Columns().Title,
+		dao.AdminNotice.Columns().Tag,
+		dao.AdminNotice.Columns().Content,
+		dao.AdminNotice.Columns().IsBanner,
+		dao.AdminNotice.Columns().BannerImg,
+		dao.AdminNotice.Columns().BannerUrl,
+		dao.AdminNotice.Columns().Status,
+		dao.AdminNotice.Columns().PublishAt,
+		dao.AdminNotice.Columns().ExpireAt,
+		dao.AdminNotice.Columns().CreatedAt,
+	).Page(in.Page, in.PerPage).
+		OrderDesc(dao.AdminNotice.Columns().Sort).
+		OrderDesc(dao.AdminNotice.Columns().Id).
+		Scan(&list); err != nil {
+		err = gerror.Wrap(err, consts.ErrorORM)
+	}
+	return
 }
 
 // PullMessages 拉取未读消息列表
@@ -372,6 +434,8 @@ func (s *sAdminNotice) messageIds(ctx context.Context, memberId int64) (ids []in
 	columns, err := s.Model(ctx, &handler.Option{FilterAuth: false}).
 		Fields(dao.AdminNotice.Columns().Id).
 		Where(dao.AdminNotice.Columns().Status, consts.StatusEnabled).
+		Where("(publish_at IS NULL OR publish_at<=?)", gtime.Now()).
+		Where("(expire_at IS NULL OR expire_at>?)", gtime.Now()).
 		Where(
 			s.Model(ctx, &handler.Option{FilterAuth: false}).Builder().WhereIn("type", []int{consts.NoticeTypeNotify, consts.NoticeTypeNotice}).
 				WhereOr(s.Model(ctx, &handler.Option{FilterAuth: false}).Builder().Where("type", consts.NoticeTypeLetter)),
@@ -383,6 +447,15 @@ func (s *sAdminNotice) messageIds(ctx context.Context, memberId int64) (ids []in
 
 	ids = g.NewVar(columns).Int64s()
 	return
+}
+
+func (s *sAdminNotice) publicNoticeModel(ctx context.Context) *gdb.Model {
+	now := gtime.Now()
+	return s.Model(ctx, &handler.Option{FilterAuth: false}).
+		Where(dao.AdminNotice.Columns().Type, consts.NoticeTypeNotice).
+		Where(dao.AdminNotice.Columns().Status, consts.StatusEnabled).
+		Where("(publish_at IS NULL OR publish_at<=?)", now).
+		Where("(expire_at IS NULL OR expire_at>?)", now)
 }
 
 // UpRead 更新已读

@@ -81,6 +81,37 @@
                 </n-radio-group>
               </n-form-item>
 
+              <n-form-item label="发布时间" path="publishAt">
+                <DatePicker v-model:formValue="formValue.publishAt" type="datetime" />
+              </n-form-item>
+
+              <n-form-item label="过期时间" path="expireAt">
+                <DatePicker v-model:formValue="formValue.expireAt" type="datetime" />
+              </n-form-item>
+
+              <template v-if="formValue.type === 2">
+                <n-form-item label="Banner" path="isBanner">
+                  <n-switch
+                    v-model:value="formValue.isBanner"
+                    :checked-value="1"
+                    :unchecked-value="0"
+                  />
+                </n-form-item>
+
+                <template v-if="formValue.isBanner === 1">
+                  <n-form-item label="Banner图" path="bannerImg">
+                    <UploadImage :maxNumber="1" v-model:value="formValue.bannerImg" />
+                  </n-form-item>
+
+                  <n-form-item label="跳转链接" path="bannerUrl">
+                    <n-input
+                      placeholder="请输入Banner跳转链接"
+                      v-model:value="formValue.bannerUrl"
+                    />
+                  </n-form-item>
+                </template>
+              </template>
+
               <n-form-item label="备注" path="remark">
                 <n-input
                   type="textarea"
@@ -95,7 +126,7 @@
           <n-space>
             <n-button @click="closeForm"> 取消 </n-button>
             <n-button type="primary" :loading="formBtnLoading" @click="confirmForm">
-              立即发送
+              {{ formValue.publishAt ? '保存发布计划' : '立即发送' }}
             </n-button>
           </n-space>
         </template>
@@ -116,6 +147,8 @@
   import { MaxSort, EditLetter, EditNotice, EditNotify } from '@/api/apply/notice';
   import { renderTag } from '@/utils';
   import { adaModalWidth } from '@/utils/hotgo';
+  import DatePicker from '@/components/DatePicker/datePicker.vue';
+  import UploadImage from '@/components/Upload/uploadImage.vue';
   import { State, newState, rules } from './model';
 
   const emit = defineEmits(['reloadTable']);

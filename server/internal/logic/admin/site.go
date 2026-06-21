@@ -17,6 +17,7 @@ import (
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
 	"hotgo/utility/simple"
+	"strings"
 
 	"github.com/gogf/gf/v2/crypto/gmd5"
 	"github.com/gogf/gf/v2/database/gdb"
@@ -141,6 +142,122 @@ func (s *sAdminSite) Register(ctx context.Context, in *adminin.RegisterInp) (err
 	})
 }
 
+// MobileRegister 移动端账号注册
+func (s *sAdminSite) MobileRegister(ctx context.Context, in *adminin.MemberRegisterInp) (res *adminin.LoginModel, err error) {
+	config, err := service.SysConfig().GetLogin(ctx)
+	if err != nil {
+		return
+	}
+
+	if config.ForceInvite == 1 && in.InviteCode == "" {
+		return nil, gerror.New("请填写邀请码")
+	}
+	if config.RegisterSwitch != 1 {
+		return nil, gerror.New("管理员未开放注册")
+	}
+	if config.RoleId < 1 {
+		return nil, gerror.New("管理员未配置默认角色")
+	}
+	if config.DeptId < 1 {
+		return nil, gerror.New("管理员未配置默认部门")
+	}
+
+	account := strings.TrimSpace(in.Account)
+	if account == "" {
+		return nil, gerror.New("账号不能为空")
+	}
+
+	var data adminin.MemberAddInp
+	data.Pid = 1
+	if in.ShareToken != "" && in.InviteCode == "" {
+		share, shareErr := service.SysMemberApp().OpenShare(ctx, &sysin.MemberShareOpenInp{ShareToken: in.ShareToken})
+		if shareErr == nil && share != nil {
+			in.InviteCode = share.InviteCode
+		}
+	}
+	if in.InviteCode != "" {
+		pmb, err := service.AdminMember().GetIdByCode(ctx, &adminin.GetIdByCodeInp{Code: in.InviteCode})
+		if err != nil {
+			return nil, err
+		}
+		if pmb == nil {
+			return nil, gerror.New("邀请人信息不存在")
+		}
+		data.Pid = pmb.Id
+	}
+
+	cols := dao.AdminMember.Columns()
+	if err = s.verifyRegisterAccountUnique(ctx, cols.Username, account, "账号已存在"); err != nil {
+		return nil, err
+	}
+
+	email := ""
+	mobile := ""
+	if strings.Contains(account, "@") {
+		email = account
+		if err = s.verifyRegisterAccountUnique(ctx, cols.Email, email, "邮箱已存在"); err != nil {
+			return nil, err
+		}
+	} else if isMobileAccount(account) {
+		mobile = account
+		if err = s.verifyRegisterAccountUnique(ctx, cols.Mobile, mobile, "手机号已存在"); err != nil {
+			return nil, err
+		}
+	}
+
+	data.MemberEditInp = &adminin.MemberEditInp{
+		Id:       0,
+		RoleId:   config.RoleId,
+		PostIds:  config.PostIds,
+		DeptId:   config.DeptId,
+		Username: account,
+		Password: in.Password,
+		RealName: "",
+		Avatar:   config.Avatar,
+		Sex:      3,
+		Email:    email,
+		Mobile:   mobile,
+		Status:   consts.StatusEnabled,
+	}
+	data.Salt = grand.S(6)
+	data.InviteCode = grand.S(12)
+	data.PasswordHash = gmd5.MustEncryptString(data.Password + data.Salt)
+	data.Level, data.Tree, err = service.AdminMember().GenTree(ctx, data.Pid)
+	if err != nil {
+		return nil, err
+	}
+
+	var member *entity.AdminMember
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (err error) {
+		id, err := dao.AdminMember.Ctx(ctx).Data(data).OmitEmptyData().InsertAndGetId()
+		if err != nil {
+			return gerror.Wrap(err, consts.ErrorORM)
+		}
+
+		if err = service.AdminMemberPost().UpdatePostIds(ctx, id, config.PostIds); err != nil {
+			return gerror.Wrap(err, consts.ErrorORM)
+		}
+
+		if err = dao.AdminMember.Ctx(ctx).WherePri(id).Scan(&member); err != nil {
+			return gerror.Wrap(err, consts.ErrorORM)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if member == nil {
+		return nil, gerror.New("注册失败，请稍后重试")
+	}
+	if in.ShareToken != "" {
+		if bindErr := service.SysMemberApp().BindShareRegister(ctx, &sysin.MemberShareRegisterInp{ShareToken: in.ShareToken, MemberId: member.Id}); bindErr != nil {
+			g.Log().Warning(ctx, "绑定分享注册归因失败", g.Map{"memberId": member.Id, "shareToken": in.ShareToken, "err": bindErr.Error()})
+		}
+	}
+
+	return s.handleLogin(ctx, member)
+}
+
 // AccountLogin 账号登录
 func (s *sAdminSite) AccountLogin(ctx context.Context, in *adminin.AccountLoginInp) (res *adminin.LoginModel, err error) {
 	defer func() {
@@ -148,7 +265,12 @@ func (s *sAdminSite) AccountLogin(ctx context.Context, in *adminin.AccountLoginI
 	}()
 
 	var mb *entity.AdminMember
-	if err = dao.AdminMember.Ctx(ctx).Where("username", in.Username).Scan(&mb); err != nil {
+	cols := dao.AdminMember.Columns()
+	if err = dao.AdminMember.Ctx(ctx).
+		Where(cols.Username, in.Username).
+		WhereOr(cols.Mobile, in.Username).
+		WhereOr(cols.Email, in.Username).
+		Scan(&mb); err != nil {
 		err = gerror.Wrap(err, consts.ErrorORM)
 		return
 	}
@@ -177,6 +299,32 @@ func (s *sAdminSite) AccountLogin(ctx context.Context, in *adminin.AccountLoginI
 
 	res, err = s.handleLogin(ctx, mb)
 	return
+}
+
+func (s *sAdminSite) verifyRegisterAccountUnique(ctx context.Context, column, value, message string) (err error) {
+	if value == "" {
+		return nil
+	}
+	count, err := dao.AdminMember.Ctx(ctx).Where(column, value).Count()
+	if err != nil {
+		return gerror.Wrap(err, consts.ErrorORM)
+	}
+	if count > 0 {
+		return gerror.New(message)
+	}
+	return nil
+}
+
+func isMobileAccount(account string) bool {
+	if len(account) != 11 {
+		return false
+	}
+	for _, v := range account {
+		if v < '0' || v > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // MobileLogin 手机号登录

@@ -80,6 +80,18 @@ func LoggingServeLogHandler(ctx context.Context, in *glog.HandlerInput) {
 		if r != nil && r.Server != nil && in.Logger.GetConfig().Path == r.Server.Logger().GetConfig().Path {
 			return
 		}
+		// 队列自身异常不再进入服务日志队列，避免 Redis/队列故障时递归刷屏。
+		if strings.Contains(in.Logger.GetConfig().Path, "logs/queue") {
+			return
+		}
+		// 服务日志自身和数据库日志不能再次进入服务日志入库流程，否则写库失败会递归记录自身。
+		if strings.Contains(in.CallerPath, "internal/logic/sys/serve_log.go") || strings.Contains(in.Logger.GetConfig().Path, "logs/database") {
+			return
+		}
+		// Postgres 事务一旦失败会进入 aborted 状态，继续在同一事务内写服务日志只会触发递归错误。
+		if len(in.Content) > 0 && strings.Contains(gvar.New(in.Content).String(), "current transaction is aborted") {
+			return
+		}
 
 		conf, err := service.SysConfig().GetLoadServeLog(ctx)
 		if err != nil {
@@ -126,7 +138,7 @@ func LoggingServeLogHandler(ctx context.Context, in *glog.HandlerInput) {
 		if conf.Queue {
 			err = queue.Push(consts.QueueServeLogTopic, data)
 		} else {
-			err = service.SysServeLog().RealWrite(ctx, data)
+			err = service.SysServeLog().RealWrite(gctx.New(), data)
 		}
 	})
 

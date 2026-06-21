@@ -1,0 +1,7 @@
+.git
+.github
+__debug_bin*
+logs
+temp/*
+!temp/linux_amd64/
+!temp/linux_amd64/hotgo

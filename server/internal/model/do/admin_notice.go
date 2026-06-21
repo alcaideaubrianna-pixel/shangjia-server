@@ -19,6 +19,11 @@ type AdminNotice struct {
 	Tag       any         // 标签
 	Content   any         // 公告内容
 	Receiver  *gjson.Json // 接收者
+	IsBanner  any         // 是否Banner
+	BannerImg any         // Banner图片
+	BannerUrl any         // Banner链接
+	PublishAt *gtime.Time // 定时发布时间
+	ExpireAt  *gtime.Time // 过期时间
 	Remark    any         // 备注
 	Sort      any         // 排序
 	Status    any         // 公告状态

@@ -100,6 +100,16 @@ type (
 		GenTree(ctx context.Context, pid int64) (level int, newTree string, err error)
 		// LoginMemberInfo 获取登录用户信息
 		LoginMemberInfo(ctx context.Context) (res *adminin.LoginMemberInfoModel, err error)
+		// IsVip 判断用户是否为有效VIP
+		IsVip(ctx context.Context, memberId int64) (bool, error)
+		// GetVip 获取用户VIP信息
+		GetVip(ctx context.Context, memberId int64) (res *adminin.MemberVipModel, err error)
+		// OpenVip 开通或延长用户VIP
+		OpenVip(ctx context.Context, memberId int64, days int, remark string) error
+		// SetVip 后台设置用户VIP
+		SetVip(ctx context.Context, in *adminin.MemberSetVipInp) error
+		// VipLogList 获取VIP日志列表
+		VipLogList(ctx context.Context, in *adminin.MemberVipLogListInp) (list []*adminin.MemberVipLogListModel, totalCount int, err error)
 		// MemberLoginStat 用户登录统计
 		MemberLoginStat(ctx context.Context, in *adminin.MemberLoginStatInp) (res *adminin.MemberLoginStatModel, err error)
 		// GetIdByCode 通过邀请码获取用户ID
@@ -165,6 +175,8 @@ type (
 		View(ctx context.Context, in *adminin.NoticeViewInp) (res *adminin.NoticeViewModel, err error)
 		// api列表 不需要登陆
 		ApiList(ctx context.Context, in *adminin.NoticeListInp) (list []*adminin.NoticeViewModel, totalCount int, err error)
+		// PublicList 前台公告列表
+		PublicList(ctx context.Context, in *adminin.NoticePublicListInp) (list []*adminin.NoticePublicListModel, totalCount int, err error)
 		// List 获取列表
 		List(ctx context.Context, in *adminin.NoticeListInp) (list []*adminin.NoticeListModel, totalCount int, err error)
 		// PullMessages 拉取未读消息列表
@@ -247,6 +259,8 @@ type (
 	IAdminSite interface {
 		// Register 账号注册
 		Register(ctx context.Context, in *adminin.RegisterInp) (err error)
+		// MobileRegister 移动端账号注册
+		MobileRegister(ctx context.Context, in *adminin.MemberRegisterInp) (res *adminin.LoginModel, err error)
 		// AccountLogin 账号登录
 		AccountLogin(ctx context.Context, in *adminin.AccountLoginInp) (res *adminin.LoginModel, err error)
 		// MobileLogin 手机号登录

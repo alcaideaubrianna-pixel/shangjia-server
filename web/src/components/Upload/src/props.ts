@@ -17,11 +17,19 @@ export const basicProps = {
   },
   maxSize: {
     type: Number as PropType<number>,
-    default: 2,
+    default: 0,
   },
   maxNumber: {
     type: Number as PropType<number>,
     default: Infinity,
+  },
+  imageAspectRatio: {
+    type: Number as PropType<number>,
+    default: 0,
+  },
+  imageAspectRatioTolerance: {
+    type: Number as PropType<number>,
+    default: 0.02,
   },
   value: {
     type: String as PropType<string>,

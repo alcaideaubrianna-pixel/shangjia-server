@@ -71,6 +71,34 @@ export const columns = [
     },
   },
   {
+    title: 'VIP',
+    key: 'isVip',
+    width: 130,
+    render(row) {
+      const enabled = row.vipStatus === 1;
+      const type = row.isVip ? 'warning' : enabled ? 'error' : 'default';
+      const label = row.isVip ? `VIP${row.vipLevel || 1}` : enabled ? '已过期' : '非VIP';
+      return h(
+        NTag,
+        {
+          type,
+          bordered: false,
+        },
+        {
+          default: () => label,
+        }
+      );
+    },
+  },
+  {
+    title: 'VIP到期',
+    key: 'vipExpiredAt',
+    width: 170,
+    render(row) {
+      return row.vipExpiredAt || '-';
+    },
+  },
+  {
     title: '所属部门',
     key: 'deptName',
     width: 100,

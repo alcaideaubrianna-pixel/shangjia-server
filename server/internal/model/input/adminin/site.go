@@ -31,6 +31,28 @@ func (in *RegisterInp) Filter(ctx context.Context) (err error) {
 	return
 }
 
+// MemberRegisterInp 移动端账号注册
+type MemberRegisterInp struct {
+	Account    string `json:"account" v:"required#账号不能为空" dc:"用户名/邮箱/手机号"`
+	Password   string `json:"password" v:"required#密码不能为空" dc:"密码"`
+	InviteCode string `json:"inviteCode" dc:"邀请码"`
+	ShareToken string `json:"shareToken" dc:"分享TOKEN"`
+}
+
+func (in *MemberRegisterInp) Filter(ctx context.Context) (err error) {
+	password, err := simple.DecryptText(in.Password)
+	if err != nil {
+		return err
+	}
+
+	if err = g.Validator().Data(password).Rules("password").Messages("密码长度在6~18之间").Run(ctx); err != nil {
+		return
+	}
+
+	in.Password = password
+	return
+}
+
 // LoginModel 统一登录响应
 type LoginModel struct {
 	Id       int64  `json:"id"              dc:"用户ID"`

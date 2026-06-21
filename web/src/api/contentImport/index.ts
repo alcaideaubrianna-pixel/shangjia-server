@@ -23,3 +23,27 @@ export function RunFeiNiu(params = {}) {
     params,
   });
 }
+
+export function AutoSync(params = {}) {
+  return http.request({
+    url: '/contentImport/autoSync',
+    method: 'POST',
+    params,
+  });
+}
+
+export function ReviewConfig(params = {}) {
+  return http.request({
+    url: '/contentImport/reviewConfig',
+    method: 'get',
+    params,
+  });
+}
+
+export function SaveReviewConfig(params = {}) {
+  return http.request({
+    url: '/contentImport/saveReviewConfig',
+    method: 'POST',
+    params,
+  });
+}

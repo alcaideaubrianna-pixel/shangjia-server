@@ -27,6 +27,11 @@ type AdminNoticeColumns struct {
 	Tag       string // 标签
 	Content   string // 公告内容
 	Receiver  string // 接收者
+	IsBanner  string // 是否Banner
+	BannerImg string // Banner图片
+	BannerUrl string // Banner链接
+	PublishAt string // 定时发布时间
+	ExpireAt  string // 过期时间
 	Remark    string // 备注
 	Sort      string // 排序
 	Status    string // 公告状态
@@ -45,6 +50,11 @@ var adminNoticeColumns = AdminNoticeColumns{
 	Tag:       "tag",
 	Content:   "content",
 	Receiver:  "receiver",
+	IsBanner:  "is_banner",
+	BannerImg: "banner_img",
+	BannerUrl: "banner_url",
+	PublishAt: "publish_at",
+	ExpireAt:  "expire_at",
 	Remark:    "remark",
 	Sort:      "sort",
 	Status:    "status",

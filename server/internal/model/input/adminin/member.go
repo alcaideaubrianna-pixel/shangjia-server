@@ -86,29 +86,33 @@ type MemberResetPwdInp struct {
 }
 
 type LoginMemberInfoModel struct {
-	Id          int64       `json:"id"                 dc:"用户ID"`
-	DeptName    string      `json:"deptName"           dc:"所属部门"`
-	RoleName    string      `json:"roleName"           dc:"所属角色"`
-	Permissions []string    `json:"permissions"        dc:"角色信息"`
-	DeptType    string      `json:"deptType"           dc:"部门类型"`
-	DeptId      int64       `json:"-"                  dc:"部门ID"`
-	RoleId      int64       `json:"-"                  dc:"角色ID"`
-	Username    string      `json:"username"           dc:"用户名"`
-	RealName    string      `json:"realName"           dc:"姓名"`
-	Avatar      string      `json:"avatar"             dc:"头像"`
-	Balance     float64     `json:"balance"            dc:"余额"`
-	Integral    float64     `json:"integral"           dc:"积分"`
-	Sex         int         `json:"sex"                dc:"性别"`
-	Qq          string      `json:"qq"                 dc:"qq"`
-	Email       string      `json:"email"              dc:"邮箱"`
-	Mobile      string      `json:"mobile"             dc:"手机号码"`
-	Birthday    *gtime.Time `json:"birthday"           dc:"生日"`
-	CityId      int64       `json:"cityId"             dc:"城市编码"`
-	Address     string      `json:"address"            dc:"联系地址"`
-	Cash        *MemberCash `json:"cash"               dc:"收款信息"`
-	CreatedAt   *gtime.Time `json:"createdAt"          dc:"创建时间"`
-	OpenId      string      `json:"openId"             dc:"本次登录的openId"` // 区别与绑定的微信openid
-	InviteCode  string      `json:"inviteCode"         dc:"邀请码"`
+	Id           int64       `json:"id"                 dc:"用户ID"`
+	DeptName     string      `json:"deptName"           dc:"所属部门"`
+	RoleName     string      `json:"roleName"           dc:"所属角色"`
+	Permissions  []string    `json:"permissions"        dc:"角色信息"`
+	DeptType     string      `json:"deptType"           dc:"部门类型"`
+	DeptId       int64       `json:"-"                  dc:"部门ID"`
+	RoleId       int64       `json:"-"                  dc:"角色ID"`
+	Username     string      `json:"username"           dc:"用户名"`
+	RealName     string      `json:"realName"           dc:"姓名"`
+	Avatar       string      `json:"avatar"             dc:"头像"`
+	Balance      float64     `json:"balance"            dc:"余额"`
+	Integral     float64     `json:"integral"           dc:"积分"`
+	Sex          int         `json:"sex"                dc:"性别"`
+	Qq           string      `json:"qq"                 dc:"qq"`
+	Email        string      `json:"email"              dc:"邮箱"`
+	Mobile       string      `json:"mobile"             dc:"手机号码"`
+	Birthday     *gtime.Time `json:"birthday"           dc:"生日"`
+	CityId       int64       `json:"cityId"             dc:"城市编码"`
+	Address      string      `json:"address"            dc:"联系地址"`
+	Cash         *MemberCash `json:"cash"               dc:"收款信息"`
+	CreatedAt    *gtime.Time `json:"createdAt"          dc:"创建时间"`
+	OpenId       string      `json:"openId"             dc:"本次登录的openId"` // 区别与绑定的微信openid
+	InviteCode   string      `json:"inviteCode"         dc:"邀请码"`
+	IsVip        bool        `json:"isVip"              dc:"是否VIP"`
+	VipStatus    int         `json:"vipStatus"          dc:"VIP状态"`
+	VipLevel     int         `json:"vipLevel"           dc:"VIP等级"`
+	VipExpiredAt *gtime.Time `json:"vipExpiredAt"       dc:"VIP到期时间"`
 	*MemberLoginStatModel
 }
 
@@ -134,6 +138,10 @@ type MemberEditInp struct {
 	Mobile       string      `json:"mobile"                                        dc:"手机号码"`
 	Remark       string      `json:"remark"                                        dc:"备注"`
 	Status       int         `json:"status"                                        dc:"状态"`
+	VipStatus    int         `json:"vipStatus"                                     dc:"VIP状态"`
+	VipLevel     int         `json:"vipLevel"                                      dc:"VIP等级"`
+	VipExpiredAt *gtime.Time `json:"vipExpiredAt"                                  dc:"VIP到期时间"`
+	VipRemark    string      `json:"vipRemark"                                     dc:"VIP备注"`
 }
 
 // MemberAddInp 新增用户
@@ -180,8 +188,12 @@ type MemberViewInp struct {
 
 type MemberViewModel struct {
 	entity.AdminMember
-	DeptName string `json:"deptName"    dc:"所属部门"`
-	RoleName string `json:"roleName"    dc:"所属角色"`
+	DeptName     string      `json:"deptName"    dc:"所属部门"`
+	RoleName     string      `json:"roleName"    dc:"所属角色"`
+	IsVip        bool        `json:"isVip"       dc:"是否VIP"`
+	VipStatus    int         `json:"vipStatus"   dc:"VIP状态"`
+	VipLevel     int         `json:"vipLevel"    dc:"VIP等级"`
+	VipExpiredAt *gtime.Time `json:"vipExpiredAt" dc:"VIP到期时间"`
 }
 
 // MemberListInp 获取用户列表
@@ -198,14 +210,74 @@ type MemberListInp struct {
 	Name      string  `json:"name"       dc:"岗位名称"`
 	Code      string  `json:"code"       dc:"岗位编码"`
 	CreatedAt []int64 `json:"createdAt"  dc:"创建时间"`
+	VipStatus int     `json:"vipStatus"  dc:"VIP状态"`
 }
 
 type MemberListModel struct {
 	entity.AdminMember
-	DeptName string  `json:"deptName"    dc:"所属部门"`
-	RoleName string  `json:"roleName"    dc:"所属角色"`
-	PostIds  []int64 `json:"postIds"     dc:"岗位"`
-	DeptId   int64   `json:"deptId"      dc:"部门ID"`
+	DeptName     string      `json:"deptName"    dc:"所属部门"`
+	RoleName     string      `json:"roleName"    dc:"所属角色"`
+	PostIds      []int64     `json:"postIds"     dc:"岗位"`
+	DeptId       int64       `json:"deptId"      dc:"部门ID"`
+	IsVip        bool        `json:"isVip"       dc:"是否VIP"`
+	VipStatus    int         `json:"vipStatus"   dc:"VIP状态"`
+	VipLevel     int         `json:"vipLevel"    dc:"VIP等级"`
+	VipExpiredAt *gtime.Time `json:"vipExpiredAt" dc:"VIP到期时间"`
+}
+
+type MemberVipModel struct {
+	MemberId     int64       `json:"memberId"     dc:"用户ID"`
+	IsVip        bool        `json:"isVip"        dc:"是否VIP"`
+	VipStatus    int         `json:"vipStatus"    dc:"VIP状态"`
+	VipLevel     int         `json:"vipLevel"     dc:"VIP等级"`
+	VipExpiredAt *gtime.Time `json:"vipExpiredAt" dc:"VIP到期时间"`
+}
+
+type MemberSetVipInp struct {
+	MemberId     int64       `json:"memberId"     v:"required#用户ID不能为空" dc:"用户ID"`
+	VipStatus    int         `json:"vipStatus"    v:"required#用户类型不能为空" dc:"VIP状态"`
+	VipLevel     int         `json:"vipLevel"     dc:"VIP等级"`
+	VipExpiredAt *gtime.Time `json:"vipExpiredAt" dc:"VIP到期时间"`
+	Remark       string      `json:"remark"       dc:"备注"`
+}
+
+func (in *MemberSetVipInp) Filter(ctx context.Context) (err error) {
+	if in.MemberId <= 0 {
+		return gerror.New("用户ID不能为空")
+	}
+	if !validate.InSlice(consts.StatusSlice, in.VipStatus) {
+		return gerror.New("用户类型不正确")
+	}
+	if in.VipStatus == consts.StatusEnabled {
+		if in.VipLevel <= 0 {
+			return gerror.New("VIP等级不能为空")
+		}
+		if in.VipExpiredAt == nil || in.VipExpiredAt.IsZero() {
+			return gerror.New("VIP到期时间不能为空")
+		}
+		if !in.VipExpiredAt.After(gtime.Now()) {
+			return gerror.New("VIP到期时间必须大于当前时间")
+		}
+		return nil
+	}
+	in.VipLevel = 0
+	in.VipExpiredAt = nil
+	return nil
+}
+
+type MemberVipLogListInp struct {
+	form.PageReq
+	MemberId   int64         `json:"memberId" dc:"用户ID"`
+	Username   string        `json:"username" dc:"用户名"`
+	OperatorId int64         `json:"operatorId" dc:"操作人ID"`
+	Source     string        `json:"source" dc:"来源"`
+	CreatedAt  []*gtime.Time `json:"createdAt" dc:"创建时间"`
+}
+
+type MemberVipLogListModel struct {
+	entity.MemberVipLog
+	Username     string `json:"username" dc:"用户名"`
+	OperatorName string `json:"operatorName" dc:"操作人"`
 }
 
 // MemberCash 用户提现配置

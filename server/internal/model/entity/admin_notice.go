@@ -17,6 +17,11 @@ type AdminNotice struct {
 	Tag       int         `json:"tag"       orm:"tag"        description:"标签"`
 	Content   string      `json:"content"   orm:"content"    description:"公告内容"`
 	Receiver  *gjson.Json `json:"receiver"  orm:"receiver"   description:"接收者"`
+	IsBanner  int         `json:"isBanner"  orm:"is_banner"  description:"是否Banner"`
+	BannerImg string      `json:"bannerImg" orm:"banner_img" description:"Banner图片"`
+	BannerUrl string      `json:"bannerUrl" orm:"banner_url" description:"Banner链接"`
+	PublishAt *gtime.Time `json:"publishAt" orm:"publish_at" description:"定时发布时间"`
+	ExpireAt  *gtime.Time `json:"expireAt"  orm:"expire_at"  description:"过期时间"`
 	Remark    string      `json:"remark"    orm:"remark"     description:"备注"`
 	Sort      int         `json:"sort"      orm:"sort"       description:"排序"`
 	Status    int         `json:"status"    orm:"status"     description:"公告状态"`

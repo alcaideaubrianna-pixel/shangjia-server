@@ -25,6 +25,7 @@ import (
 	"hotgo/internal/library/hgorm"
 	"hotgo/internal/library/hgorm/handler"
 	"hotgo/internal/library/hgorm/hook"
+	"hotgo/internal/model/do"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/adminin"
 	"hotgo/internal/model/input/sysin"
@@ -530,7 +531,7 @@ func (s *sAdminMember) Edit(ctx context.Context, in *adminin.MemberEditInp) (err
 			mod = mod.FieldsEx(cols.PasswordHash)
 		}
 
-		return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (err error) {
+		if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (err error) {
 			if _, err = mod.WherePri(in.Id).Data(in).Update(); err != nil {
 				err = gerror.Wrap(err, "修改用户信息失败，请稍后重试！")
 				return
@@ -543,7 +544,10 @@ func (s *sAdminMember) Edit(ctx context.Context, in *adminin.MemberEditInp) (err
 
 			needLoadSuperAdmin = in.RoleId == s.superAdmin.RoleId
 			return
-		})
+		}); err != nil {
+			return err
+		}
+		return s.saveVipByMemberEdit(ctx, in.Id, in)
 	}
 
 	// 新增用户时的额外属性
@@ -578,6 +582,9 @@ func (s *sAdminMember) Edit(ctx context.Context, in *adminin.MemberEditInp) (err
 		}
 
 		needLoadSuperAdmin = in.RoleId == s.superAdmin.RoleId
+		if err = s.saveVipByMemberEdit(ctx, id, in); err != nil {
+			return
+		}
 		return
 	})
 }
@@ -586,6 +593,12 @@ func (s *sAdminMember) Edit(ctx context.Context, in *adminin.MemberEditInp) (err
 func (s *sAdminMember) View(ctx context.Context, in *adminin.MemberViewInp) (res *adminin.MemberViewModel, err error) {
 	if err = s.FilterAuthModel(ctx, contexts.GetUserId(ctx)).Hook(hook.MemberInfo).WherePri(in.Id).Scan(&res); err != nil {
 		err = gerror.Wrap(err, "获取用户信息失败，请稍后重试！")
+		return
+	}
+	if res != nil {
+		if err = s.fillVipModel(ctx, &res.IsVip, &res.VipStatus, &res.VipLevel, &res.VipExpiredAt, res.Id); err != nil {
+			return
+		}
 	}
 	return
 }
@@ -619,6 +632,20 @@ func (s *sAdminMember) List(ctx context.Context, in *adminin.MemberListInp) (lis
 		mod = mod.Where(cols.RoleId, in.RoleId)
 	}
 
+	if in.VipStatus > 0 {
+		vipColumns := dao.MemberVip.Columns()
+		vipIds, err := dao.MemberVip.Ctx(ctx).
+			Fields(vipColumns.MemberId).
+			Where(vipColumns.Status, in.VipStatus).
+			WhereNull(vipColumns.DeletedAt).
+			Array()
+		if err != nil {
+			err = gerror.Wrap(err, "查询VIP用户失败，请稍后重试！")
+			return nil, 0, err
+		}
+		mod = mod.WhereIn(cols.Id, g.NewVar(vipIds).Int64s())
+	}
+
 	if in.Id > 0 {
 		mod = mod.Where(cols.Id, in.Id)
 	}
@@ -643,6 +670,9 @@ func (s *sAdminMember) List(ctx context.Context, in *adminin.MemberListInp) (lis
 			return nil, 0, err
 		}
 		v.PostIds = g.NewVar(columns).Int64s()
+	}
+	if err = s.fillVipList(ctx, list); err != nil {
+		return nil, 0, err
 	}
 	return
 }
@@ -713,6 +743,251 @@ func (s *sAdminMember) LoginMemberInfo(ctx context.Context) (res *adminin.LoginM
 	res.Email = gstr.HideStr(res.Email, 40, `*`)
 	res.OpenId, _ = service.CommonWechat().GetOpenId(ctx)
 	res.DeptType = contexts.GetDeptType(ctx)
+	if err = s.fillVipModel(ctx, &res.IsVip, &res.VipStatus, &res.VipLevel, &res.VipExpiredAt, res.Id); err != nil {
+		return
+	}
+	return
+}
+
+// IsVip 判断用户是否为有效VIP
+func (s *sAdminMember) IsVip(ctx context.Context, memberId int64) (bool, error) {
+	res, err := s.GetVip(ctx, memberId)
+	if err != nil {
+		return false, err
+	}
+	return res != nil && res.IsVip, nil
+}
+
+// GetVip 获取用户VIP信息
+func (s *sAdminMember) GetVip(ctx context.Context, memberId int64) (res *adminin.MemberVipModel, err error) {
+	res = &adminin.MemberVipModel{
+		MemberId:  memberId,
+		VipStatus: consts.StatusDisable,
+		VipLevel:  0,
+	}
+	if memberId <= 0 {
+		return
+	}
+
+	var vip *entity.MemberVip
+	cols := dao.MemberVip.Columns()
+	if err = dao.MemberVip.Ctx(ctx).
+		Where(cols.MemberId, memberId).
+		WhereNull(cols.DeletedAt).
+		Scan(&vip); err != nil {
+		err = gerror.Wrap(err, "获取VIP信息失败，请稍后重试！")
+		return
+	}
+	if vip == nil {
+		return
+	}
+
+	res.VipStatus = vip.Status
+	res.VipLevel = vip.Level
+	res.VipExpiredAt = vip.ExpiredAt
+	res.IsVip = vip.Status == consts.StatusEnabled && (vip.ExpiredAt == nil || vip.ExpiredAt.After(gtime.Now()))
+	return
+}
+
+// OpenVip 开通或延长用户VIP
+func (s *sAdminMember) OpenVip(ctx context.Context, memberId int64, days int, remark string) error {
+	if memberId <= 0 {
+		return gerror.New("用户ID不能为空")
+	}
+	if days <= 0 {
+		return gerror.New("开通天数必须大于0")
+	}
+	vip, err := s.GetVip(ctx, memberId)
+	if err != nil {
+		return err
+	}
+	base := gtime.Now()
+	if vip.IsVip && vip.VipExpiredAt != nil && vip.VipExpiredAt.After(base) {
+		base = vip.VipExpiredAt
+	}
+	return s.saveVip(ctx, memberId, consts.StatusEnabled, 1, base.AddDate(0, 0, days), remark, "payment")
+}
+
+// SetVip 后台设置用户VIP
+func (s *sAdminMember) SetVip(ctx context.Context, in *adminin.MemberSetVipInp) error {
+	if err := in.Filter(ctx); err != nil {
+		return err
+	}
+
+	var mb *entity.AdminMember
+	if err := s.FilterAuthModel(ctx, contexts.GetUserId(ctx)).WherePri(in.MemberId).Scan(&mb); err != nil {
+		return gerror.Wrap(err, "获取用户信息失败，请稍后重试！")
+	}
+	if mb == nil {
+		return gerror.New("用户信息不存在")
+	}
+
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		return s.saveVip(ctx, in.MemberId, in.VipStatus, in.VipLevel, in.VipExpiredAt, in.Remark, "admin")
+	})
+}
+
+func (s *sAdminMember) saveVipByMemberEdit(ctx context.Context, memberId int64, in *adminin.MemberEditInp) (err error) {
+	if memberId <= 0 || (in.VipStatus <= 0 && in.VipLevel <= 0 && in.VipExpiredAt == nil && in.VipRemark == "") {
+		return nil
+	}
+	status := in.VipStatus
+	if status <= 0 {
+		status = consts.StatusDisable
+	}
+	level := in.VipLevel
+	if level <= 0 {
+		level = 1
+	}
+	return s.saveVip(ctx, memberId, status, level, in.VipExpiredAt, in.VipRemark, "admin")
+}
+
+func (s *sAdminMember) saveVip(ctx context.Context, memberId int64, status int, level int, expiredAt *gtime.Time, remark string, source string) (err error) {
+	before, err := s.GetVip(ctx, memberId)
+	if err != nil {
+		return err
+	}
+	if status == consts.StatusEnabled && (expiredAt == nil || expiredAt.IsZero()) {
+		return gerror.New("VIP到期时间不能为空")
+	}
+	if status != consts.StatusEnabled {
+		level = 0
+		expiredAt = nil
+	}
+
+	now := gtime.Now()
+	cols := dao.MemberVip.Columns()
+	count, err := dao.MemberVip.Ctx(ctx).Where(cols.MemberId, memberId).Count()
+	if err != nil {
+		return gerror.Wrap(err, "检查VIP信息失败，请稍后重试！")
+	}
+
+	data := do.MemberVip{
+		MemberId:  memberId,
+		Level:     level,
+		Status:    status,
+		ExpiredAt: expiredAt,
+		Remark:    remark,
+		UpdatedAt: now,
+	}
+	if status == consts.StatusEnabled {
+		data.OpenedAt = now
+	}
+	if count > 0 {
+		if _, err = dao.MemberVip.Ctx(ctx).Where(cols.MemberId, memberId).Data(data).Update(); err != nil {
+			return gerror.Wrap(err, "更新VIP信息失败，请稍后重试！")
+		}
+	} else {
+		data.CreatedAt = now
+		if _, err = dao.MemberVip.Ctx(ctx).Data(data).Insert(); err != nil {
+			return gerror.Wrap(err, "保存VIP信息失败，请稍后重试！")
+		}
+	}
+	return s.writeVipLog(ctx, before, memberId, status, level, expiredAt, source, remark)
+}
+
+func (s *sAdminMember) writeVipLog(ctx context.Context, before *adminin.MemberVipModel, memberId int64, status int, level int, expiredAt *gtime.Time, source string, remark string) error {
+	action := "update"
+	if before == nil || before.VipStatus == consts.StatusDisable && before.VipExpiredAt == nil {
+		action = "open"
+	}
+	if status != consts.StatusEnabled {
+		action = "disable"
+	}
+	data := do.MemberVipLog{
+		MemberId:        memberId,
+		OperatorId:      contexts.GetUserId(ctx),
+		Source:          source,
+		Action:          action,
+		BeforeStatus:    before.VipStatus,
+		AfterStatus:     status,
+		BeforeLevel:     before.VipLevel,
+		AfterLevel:      level,
+		BeforeExpiredAt: before.VipExpiredAt,
+		AfterExpiredAt:  expiredAt,
+		Remark:          remark,
+		CreatedAt:       gtime.Now(),
+	}
+	if _, err := dao.MemberVipLog.Ctx(ctx).Data(data).Insert(); err != nil {
+		return gerror.Wrap(err, "写入VIP日志失败，请稍后重试！")
+	}
+	return nil
+}
+
+func (s *sAdminMember) fillVipModel(ctx context.Context, isVip *bool, vipStatus *int, vipLevel *int, vipExpiredAt **gtime.Time, memberId int64) (err error) {
+	vip, err := s.GetVip(ctx, memberId)
+	if err != nil {
+		return err
+	}
+	*isVip = vip.IsVip
+	*vipStatus = vip.VipStatus
+	*vipLevel = vip.VipLevel
+	*vipExpiredAt = vip.VipExpiredAt
+	return nil
+}
+
+func (s *sAdminMember) fillVipList(ctx context.Context, list []*adminin.MemberListModel) (err error) {
+	if len(list) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(list))
+	index := make(map[int64]*adminin.MemberListModel, len(list))
+	for _, item := range list {
+		ids = append(ids, item.Id)
+		index[item.Id] = item
+		item.VipStatus = consts.StatusDisable
+	}
+
+	var rows []*entity.MemberVip
+	cols := dao.MemberVip.Columns()
+	if err = dao.MemberVip.Ctx(ctx).
+		WhereIn(cols.MemberId, ids).
+		WhereNull(cols.DeletedAt).
+		Scan(&rows); err != nil {
+		return gerror.Wrap(err, "获取VIP列表失败，请稍后重试！")
+	}
+	now := gtime.Now()
+	for _, row := range rows {
+		item := index[row.MemberId]
+		if item == nil {
+			continue
+		}
+		item.VipStatus = row.Status
+		item.VipLevel = row.Level
+		item.VipExpiredAt = row.ExpiredAt
+		item.IsVip = row.Status == consts.StatusEnabled && (row.ExpiredAt == nil || row.ExpiredAt.After(now))
+	}
+	return nil
+}
+
+// VipLogList 获取VIP日志列表
+func (s *sAdminMember) VipLogList(ctx context.Context, in *adminin.MemberVipLogListInp) (list []*adminin.MemberVipLogListModel, totalCount int, err error) {
+	logColumns := dao.MemberVipLog.Columns()
+	memberColumns := dao.AdminMember.Columns()
+	mod := dao.MemberVipLog.Ctx(ctx).As("l").
+		LeftJoin(dao.AdminMember.Table()+" m", "m.id=l.member_id").
+		LeftJoin(dao.AdminMember.Table()+" o", "o.id=l.operator_id")
+
+	if in.MemberId > 0 {
+		mod = mod.Where("l."+logColumns.MemberId, in.MemberId)
+	}
+	if in.OperatorId > 0 {
+		mod = mod.Where("l."+logColumns.OperatorId, in.OperatorId)
+	}
+	if in.Source != "" {
+		mod = mod.Where("l."+logColumns.Source, in.Source)
+	}
+	if in.Username != "" {
+		mod = mod.WhereLike("m."+memberColumns.Username, "%"+in.Username+"%")
+	}
+	if len(in.CreatedAt) == 2 {
+		mod = mod.WhereBetween("l."+logColumns.CreatedAt, in.CreatedAt[0], in.CreatedAt[1])
+	}
+
+	fields := "l.*,m.username,o.username AS operator_name"
+	if err = mod.Fields(fields).Page(in.Page, in.PerPage).OrderDesc("l."+logColumns.Id).ScanAndCount(&list, &totalCount, true); err != nil {
+		err = gerror.Wrap(err, "获取VIP日志失败，请稍后重试！")
+	}
 	return
 }
 

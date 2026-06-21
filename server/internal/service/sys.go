@@ -125,6 +125,77 @@ type (
 		ImportOverview(ctx context.Context, in *sysin.ContentImportOverviewInp) (res *sysin.ContentImportOverviewModel, err error)
 		// ImportRunList 获取内容导入运行记录
 		ImportRunList(ctx context.Context, in *sysin.ContentImportRunListInp) (list []*sysin.ContentImportRunListModel, totalCount int, err error)
+		// SetImportAutoSync 设置内容自动同步状态
+		SetImportAutoSync(ctx context.Context, in *sysin.ContentImportAutoSyncInp) (res *sysin.ContentImportAutoSyncModel, err error)
+		// ImportReviewConfig 获取内容审核配置
+		ImportReviewConfig(ctx context.Context, in *sysin.ContentImportReviewConfigInp) (res *sysin.ContentImportReviewConfigModel, err error)
+		// SetImportReviewConfig 设置内容审核配置
+		SetImportReviewConfig(ctx context.Context, in *sysin.ContentImportReviewConfigEditInp) (res *sysin.ContentImportReviewConfigModel, err error)
+	}
+	ISysContentNote interface {
+		// List 获取后台内容笔记列表
+		List(ctx context.Context, in *sysin.ContentNoteListInp) (list []*sysin.ContentNoteListModel, totalCount int, err error)
+		// View 获取后台内容笔记详情
+		View(ctx context.Context, in *sysin.ContentNoteViewInp) (res *sysin.ContentNoteViewModel, err error)
+		// Edit 修改后台内容笔记
+		Edit(ctx context.Context, in *sysin.ContentNoteEditInp) (err error)
+		// MediaEdit 修改后台内容媒体
+		MediaEdit(ctx context.Context, in *sysin.ContentNoteMediaEditInp) (err error)
+		// BatchDelete 批量删除后台内容笔记
+		BatchDelete(ctx context.Context, in *sysin.ContentNoteBatchDeleteInp) (err error)
+		// BatchReview 批量审核后台内容笔记
+		BatchReview(ctx context.Context, in *sysin.ContentNoteBatchReviewInp) (err error)
+		// BatchStatus 批量更新后台内容笔记状态
+		BatchStatus(ctx context.Context, in *sysin.ContentNoteBatchStatusInp) (err error)
+		// BatchRemark 批量备注后台内容笔记
+		BatchRemark(ctx context.Context, in *sysin.ContentNoteBatchRemarkInp) (err error)
+	}
+	ISysMemberApp interface {
+		// Settings 获取移动端个人设置
+		Settings(ctx context.Context, in *sysin.MemberSettingsInp) (res *sysin.MemberSettingsModel, err error)
+		// UpdateSettings 更新移动端个人设置
+		UpdateSettings(ctx context.Context, in *sysin.MemberSettingsEditInp) (err error)
+		// FavoriteList 获取我的收藏资料
+		FavoriteList(ctx context.Context, in *sysin.MemberFavoriteListInp) (list []*sysin.ContentProfileListModel, totalCount int, err error)
+		// BlockedProfileList 获取我的拉黑资料
+		BlockedProfileList(ctx context.Context, in *sysin.MemberBlockedProfileListInp) (list []*sysin.ContentProfileListModel, totalCount int, err error)
+		// FavoriteToggle 收藏/取消收藏资料
+		FavoriteToggle(ctx context.Context, in *sysin.MemberFavoriteToggleInp) (res *sysin.MemberFavoriteToggleModel, err error)
+		// FavoriteIds 获取我的收藏资料ID
+		FavoriteIds(ctx context.Context, in *sysin.MemberFavoriteIdsInp) (res *sysin.MemberFavoriteIdsModel, err error)
+		// ProfileRelation 获取登录用户和资料的关系
+		ProfileRelation(ctx context.Context, in *sysin.MemberProfileRelationInp) (res *sysin.MemberProfileRelationModel, err error)
+		// BlockProfile 拉黑资料
+		BlockProfile(ctx context.Context, in *sysin.MemberProfileActionInp) (err error)
+		// UnblockProfile 解除拉黑资料
+		UnblockProfile(ctx context.Context, in *sysin.MemberProfileActionInp) (err error)
+		// RejectProfile 拒绝资料
+		RejectProfile(ctx context.Context, in *sysin.MemberProfileActionInp) (err error)
+		// ImmersiveProfileList 获取沉浸模式资料列表
+		ImmersiveProfileList(ctx context.Context, in *sysin.MemberImmersiveProfileListInp) (list []*sysin.ContentProfileListModel, totalCount int, err error)
+		// TraceList 获取我的资料浏览痕迹
+		TraceList(ctx context.Context, in *sysin.MemberProfileTraceListInp) (list []*sysin.ContentProfileListModel, totalCount int, err error)
+		// TraceRecord 记录资料浏览痕迹
+		TraceRecord(ctx context.Context, in *sysin.MemberProfileTraceRecordInp) (err error)
+		// Stats 获取我的统计
+		Stats(ctx context.Context, in *sysin.MemberStatsInp) (res *sysin.MemberStatsModel, err error)
+		// Agreement 获取移动端协议
+		Agreement(ctx context.Context, in *sysin.MemberAgreementInp) (res *sysin.MemberAgreementModel, err error)
+		// CreateShare 创建资料分享链接
+		CreateShare(ctx context.Context, in *sysin.MemberShareCreateInp) (res *sysin.MemberShareCreateModel, err error)
+		// OpenShare 打开资料分享链接并记录访问
+		OpenShare(ctx context.Context, in *sysin.MemberShareOpenInp) (res *sysin.MemberShareOpenModel, err error)
+		// BindShareRegister 绑定分享注册归因
+		BindShareRegister(ctx context.Context, in *sysin.MemberShareRegisterInp) (err error)
+	}
+	ISysAppAnnouncement interface {
+		List(ctx context.Context, in *sysin.AppAnnouncementListInp) (list []*sysin.AppAnnouncementListModel, totalCount int, err error)
+		PublicList(ctx context.Context, in *sysin.AppAnnouncementPublicListInp) (list []*sysin.AppAnnouncementPublicListModel, totalCount int, err error)
+		View(ctx context.Context, in *sysin.AppAnnouncementViewInp) (res *sysin.AppAnnouncementViewModel, err error)
+		Edit(ctx context.Context, in *sysin.AppAnnouncementEditInp) (err error)
+		Delete(ctx context.Context, in *sysin.AppAnnouncementDeleteInp) (err error)
+		Status(ctx context.Context, in *sysin.AppAnnouncementStatusInp) (err error)
+		MaxSort(ctx context.Context, in *sysin.AppAnnouncementMaxSortInp) (res *sysin.AppAnnouncementMaxSortModel, err error)
 	}
 	ISysCron interface {
 		StartCron(ctx context.Context)
@@ -418,28 +489,31 @@ type (
 )
 
 var (
-	localSysAddons         ISysAddons
-	localSysAddonsConfig   ISysAddonsConfig
-	localSysAttachment     ISysAttachment
-	localSysBlacklist      ISysBlacklist
-	localSysConfig         ISysConfig
-	localSysContent        ISysContent
-	localSysCron           ISysCron
-	localSysCronGroup      ISysCronGroup
-	localSysCurdDemo       ISysCurdDemo
-	localSysDictData       ISysDictData
-	localSysDictType       ISysDictType
-	localSysEmsLog         ISysEmsLog
-	localSysGenCodes       ISysGenCodes
-	localSysLog            ISysLog
-	localSysLoginLog       ISysLoginLog
-	localSysNormalTreeDemo ISysNormalTreeDemo
-	localSysOptionTreeDemo ISysOptionTreeDemo
-	localSysProvinces      ISysProvinces
-	localSysServeLicense   ISysServeLicense
-	localSysServeLog       ISysServeLog
-	localSysSmsLog         ISysSmsLog
-	localSysTestCategory   ISysTestCategory
+	localSysAddons          ISysAddons
+	localSysAddonsConfig    ISysAddonsConfig
+	localSysAttachment      ISysAttachment
+	localSysBlacklist       ISysBlacklist
+	localSysConfig          ISysConfig
+	localSysContent         ISysContent
+	localSysContentNote     ISysContentNote
+	localSysMemberApp       ISysMemberApp
+	localSysAppAnnouncement ISysAppAnnouncement
+	localSysCron            ISysCron
+	localSysCronGroup       ISysCronGroup
+	localSysCurdDemo        ISysCurdDemo
+	localSysDictData        ISysDictData
+	localSysDictType        ISysDictType
+	localSysEmsLog          ISysEmsLog
+	localSysGenCodes        ISysGenCodes
+	localSysLog             ISysLog
+	localSysLoginLog        ISysLoginLog
+	localSysNormalTreeDemo  ISysNormalTreeDemo
+	localSysOptionTreeDemo  ISysOptionTreeDemo
+	localSysProvinces       ISysProvinces
+	localSysServeLicense    ISysServeLicense
+	localSysServeLog        ISysServeLog
+	localSysSmsLog          ISysSmsLog
+	localSysTestCategory    ISysTestCategory
 )
 
 func SysAddons() ISysAddons {
@@ -506,6 +580,39 @@ func SysContent() ISysContent {
 
 func RegisterSysContent(i ISysContent) {
 	localSysContent = i
+}
+
+func SysContentNote() ISysContentNote {
+	if localSysContentNote == nil {
+		panic("implement not found for interface ISysContentNote, forgot register?")
+	}
+	return localSysContentNote
+}
+
+func RegisterSysContentNote(i ISysContentNote) {
+	localSysContentNote = i
+}
+
+func SysMemberApp() ISysMemberApp {
+	if localSysMemberApp == nil {
+		panic("implement not found for interface ISysMemberApp, forgot register?")
+	}
+	return localSysMemberApp
+}
+
+func RegisterSysMemberApp(i ISysMemberApp) {
+	localSysMemberApp = i
+}
+
+func SysAppAnnouncement() ISysAppAnnouncement {
+	if localSysAppAnnouncement == nil {
+		panic("implement not found for interface ISysAppAnnouncement, forgot register?")
+	}
+	return localSysAppAnnouncement
+}
+
+func RegisterSysAppAnnouncement(i ISysAppAnnouncement) {
+	localSysAppAnnouncement = i
 }
 
 func SysCron() ISysCron {

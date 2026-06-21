@@ -37,3 +37,33 @@ type RunListRes struct {
 	form.PageRes
 	List []*sysin.ContentImportRunListModel `json:"list" dc:"运行记录"`
 }
+
+// AutoSyncReq 设置 FeiNiu 自动同步状态。
+type AutoSyncReq struct {
+	g.Meta `path:"/contentImport/autoSync" method:"post" tags:"内容导入" summary:"设置 FeiNiu 自动同步状态"`
+	sysin.ContentImportAutoSyncInp
+}
+
+type AutoSyncRes struct {
+	*sysin.ContentImportAutoSyncModel
+}
+
+// ReviewConfigReq 获取内容审核配置。
+type ReviewConfigReq struct {
+	g.Meta `path:"/contentImport/reviewConfig" method:"get" tags:"内容导入" summary:"获取内容审核配置"`
+	sysin.ContentImportReviewConfigInp
+}
+
+type ReviewConfigRes struct {
+	*sysin.ContentImportReviewConfigModel
+}
+
+// SaveReviewConfigReq 保存内容审核配置。
+type SaveReviewConfigReq struct {
+	g.Meta `path:"/contentImport/saveReviewConfig" method:"post" tags:"内容导入" summary:"保存内容审核配置"`
+	sysin.ContentImportReviewConfigEditInp
+}
+
+type SaveReviewConfigRes struct {
+	*sysin.ContentImportReviewConfigModel
+}

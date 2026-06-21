@@ -67,6 +67,10 @@ export const defaultState = {
   phone: '',
   sort: 0,
   status: 1,
+  vipStatus: 2,
+  vipLevel: 1,
+  vipExpiredAt: '',
+  vipRemark: '',
   createdAt: '',
   updatedAt: '',
 };
@@ -86,6 +90,10 @@ export interface State {
   phone: string;
   sort: number;
   status: number;
+  vipStatus: number;
+  vipLevel: number;
+  vipExpiredAt: string;
+  vipRemark: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -174,6 +182,16 @@ const schemas: FormSchema[] = [
     },
   },
   {
+    field: 'vipStatus',
+    component: 'NSelect',
+    label: 'VIP状态',
+    defaultValue: null,
+    componentProps: {
+      placeholder: '请选择VIP状态',
+      options: dict.getOption('sys_normal_disable'),
+    },
+  },
+  {
     field: 'created_at',
     component: 'NDatePicker',
     label: '创建时间',
@@ -229,9 +247,9 @@ function registerRoleTabsOption() {
 function treeDataToCompressed(items: any[], source: any) {
   for (const i in source) {
     items.push(source[i]);
-    source[i].children && source[i].children.length > 0
-      ? treeDataToCompressed(items, source[i].children)
-      : ''; // 子级递归
+    if (source[i].children && source[i].children.length > 0) {
+      treeDataToCompressed(items, source[i].children);
+    }
   }
   return items;
 }

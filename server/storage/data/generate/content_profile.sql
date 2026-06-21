@@ -31,6 +31,32 @@ CREATE TABLE IF NOT EXISTS `hg_content_profile` (
   `title` varchar(255) DEFAULT NULL COMMENT '标题',
   `summary` text COMMENT '摘要',
   `plain_text` text COMMENT '正文纯文本',
+  `html_text` text COMMENT 'HTML正文',
+  `source_category_code` varchar(64) DEFAULT NULL COMMENT 'FeiNiu分类编码',
+  `days_with_escort` int(11) DEFAULT NULL COMMENT '陪伴天数',
+  `expected_living_cost` int(11) DEFAULT NULL COMMENT '期望生活费',
+  `can_fly_to_province` tinyint(1) NOT NULL DEFAULT '0' COMMENT '可飞外省',
+  `can_go_abroad` tinyint(1) NOT NULL DEFAULT '0' COMMENT '可出国',
+  `can_overnight` tinyint(1) NOT NULL DEFAULT '0' COMMENT '可过夜',
+  `can_cohabitate` tinyint(1) NOT NULL DEFAULT '0' COMMENT '可同居',
+  `has_health_check` tinyint(1) NOT NULL DEFAULT '0' COMMENT '有体检',
+  `is_full_month` tinyint(1) NOT NULL DEFAULT '0' COMMENT '满月',
+  `is_virgin` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否处',
+  `accept_sm` tinyint(1) NOT NULL DEFAULT '0' COMMENT '接受SM',
+  `no_condom_after_check` tinyint(1) NOT NULL DEFAULT '0' COMMENT '体检后无套',
+  `allow_creampie` tinyint(1) NOT NULL DEFAULT '0' COMMENT '可内射',
+  `has_tattoo` tinyint(1) NOT NULL DEFAULT '0' COMMENT '有纹身',
+  `is_favorite` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否收藏',
+  `source_edited_at` datetime DEFAULT NULL COMMENT 'FeiNiu编辑时间',
+  `group_params` text COMMENT '分组参数',
+  `tag_params` text COMMENT '标签参数',
+  `text_block_count` int(11) NOT NULL DEFAULT '0' COMMENT '文本块数',
+  `storage_policy` varchar(32) DEFAULT NULL COMMENT '存储策略',
+  `source_remark` varchar(500) DEFAULT NULL COMMENT 'FeiNiu备注',
+  `source_create_by` varchar(64) DEFAULT NULL COMMENT 'FeiNiu创建者',
+  `source_update_by` varchar(64) DEFAULT NULL COMMENT 'FeiNiu更新者',
+  `source_created_at` datetime DEFAULT NULL COMMENT 'FeiNiu创建时间',
+  `source_updated_at` datetime DEFAULT NULL COMMENT 'FeiNiu更新时间',
   `province` varchar(64) DEFAULT NULL COMMENT '省份',
   `city` varchar(64) DEFAULT NULL COMMENT '城市',
   `age` int(11) DEFAULT NULL COMMENT '年龄',
@@ -43,8 +69,9 @@ CREATE TABLE IF NOT EXISTS `hg_content_profile` (
   `image_count` int(11) NOT NULL DEFAULT '0' COMMENT '图片数',
   `video_count` int(11) NOT NULL DEFAULT '0' COMMENT '视频数',
   `visibility` varchar(32) NOT NULL DEFAULT 'private' COMMENT '可见性',
-  `review_status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '审核状态',
+  `review_status` varchar(32) NOT NULL DEFAULT 'approved' COMMENT '审核状态',
   `import_status` varchar(32) NOT NULL DEFAULT 'imported' COMMENT '导入状态',
+  `admin_remark` varchar(500) DEFAULT NULL COMMENT '后台备注',
   `published_at` datetime DEFAULT NULL COMMENT '发布时间',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
@@ -138,3 +165,141 @@ CREATE TABLE IF NOT EXISTS `hg_content_import_run` (
   KEY `idx_content_import_run_source_time` (`source_name`, `started_at`),
   KEY `idx_content_import_run_status` (`status`, `started_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容_导入运行记录';
+
+-- 后台笔记管理查询索引。全部幂等执行，支持快速按审核、发布、地区、来源、频道、时间筛选。
+SET @schema := DATABASE();
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'admin_remark') = 0,
+  'ALTER TABLE `hg_content_profile` ADD COLUMN `admin_remark` varchar(500) DEFAULT NULL COMMENT ''后台备注'' AFTER `import_status`',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'html_text') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `html_text` text COMMENT ''HTML正文'' AFTER `plain_text`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'source_category_code') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `source_category_code` varchar(64) DEFAULT NULL COMMENT ''FeiNiu分类编码'' AFTER `html_text`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'days_with_escort') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `days_with_escort` int(11) DEFAULT NULL COMMENT ''陪伴天数'' AFTER `source_category_code`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'expected_living_cost') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `expected_living_cost` int(11) DEFAULT NULL COMMENT ''期望生活费'' AFTER `days_with_escort`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'can_fly_to_province') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `can_fly_to_province` tinyint(1) NOT NULL DEFAULT ''0'' COMMENT ''可飞外省'' AFTER `expected_living_cost`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'can_go_abroad') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `can_go_abroad` tinyint(1) NOT NULL DEFAULT ''0'' COMMENT ''可出国'' AFTER `can_fly_to_province`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'can_overnight') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `can_overnight` tinyint(1) NOT NULL DEFAULT ''0'' COMMENT ''可过夜'' AFTER `can_go_abroad`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'can_cohabitate') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `can_cohabitate` tinyint(1) NOT NULL DEFAULT ''0'' COMMENT ''可同居'' AFTER `can_overnight`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'has_health_check') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `has_health_check` tinyint(1) NOT NULL DEFAULT ''0'' COMMENT ''有体检'' AFTER `can_cohabitate`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'is_full_month') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `is_full_month` tinyint(1) NOT NULL DEFAULT ''0'' COMMENT ''满月'' AFTER `has_health_check`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'is_virgin') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `is_virgin` tinyint(1) NOT NULL DEFAULT ''0'' COMMENT ''是否处'' AFTER `is_full_month`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'accept_sm') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `accept_sm` tinyint(1) NOT NULL DEFAULT ''0'' COMMENT ''接受SM'' AFTER `is_virgin`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'no_condom_after_check') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `no_condom_after_check` tinyint(1) NOT NULL DEFAULT ''0'' COMMENT ''体检后无套'' AFTER `accept_sm`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'allow_creampie') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `allow_creampie` tinyint(1) NOT NULL DEFAULT ''0'' COMMENT ''可内射'' AFTER `no_condom_after_check`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'has_tattoo') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `has_tattoo` tinyint(1) NOT NULL DEFAULT ''0'' COMMENT ''有纹身'' AFTER `allow_creampie`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'is_favorite') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `is_favorite` tinyint(1) NOT NULL DEFAULT ''0'' COMMENT ''是否收藏'' AFTER `has_tattoo`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'source_edited_at') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `source_edited_at` datetime DEFAULT NULL COMMENT ''FeiNiu编辑时间'' AFTER `is_favorite`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'group_params') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `group_params` text COMMENT ''分组参数'' AFTER `source_edited_at`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'tag_params') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `tag_params` text COMMENT ''标签参数'' AFTER `group_params`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'text_block_count') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `text_block_count` int(11) NOT NULL DEFAULT ''0'' COMMENT ''文本块数'' AFTER `tag_params`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'storage_policy') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `storage_policy` varchar(32) DEFAULT NULL COMMENT ''存储策略'' AFTER `text_block_count`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'source_remark') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `source_remark` varchar(500) DEFAULT NULL COMMENT ''FeiNiu备注'' AFTER `storage_policy`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'source_create_by') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `source_create_by` varchar(64) DEFAULT NULL COMMENT ''FeiNiu创建者'' AFTER `source_remark`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'source_update_by') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `source_update_by` varchar(64) DEFAULT NULL COMMENT ''FeiNiu更新者'' AFTER `source_create_by`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'source_created_at') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `source_created_at` datetime DEFAULT NULL COMMENT ''FeiNiu创建时间'' AFTER `source_update_by`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'source_updated_at') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `source_updated_at` datetime DEFAULT NULL COMMENT ''FeiNiu更新时间'' AFTER `source_created_at`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'source_attributes_json') > 0, 'ALTER TABLE `hg_content_profile` DROP COLUMN `source_attributes_json`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+UPDATE `hg_content_profile` SET `review_status` = 'approved' WHERE `source_type` = 'feiniu' AND `review_status` = 'pending';
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_admin_status') = 0,
+  'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_admin_status` (`review_status`, `visibility`, `import_status`, `status`, `id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_admin_created') = 0,
+  'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_admin_created` (`created_at`, `id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_admin_area') = 0,
+  'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_admin_area` (`province`, `city`, `id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_admin_video') = 0,
+  'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_admin_video` (`video_count`, `id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_admin_channel') = 0,
+  'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_admin_channel` (`channel_id`, `id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_admin_age') = 0,
+  'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_admin_age` (`age`, `id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_admin_height') = 0,
+  'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_admin_height` (`height`, `id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_admin_weight') = 0,
+  'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_admin_weight` (`weight`, `id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_admin_days') = 0,
+  'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_admin_days` (`days_with_escort`, `id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_admin_cost') = 0,
+  'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_admin_cost` (`expected_living_cost`, `id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_admin_flags') = 0,
+  'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_admin_flags` (`can_fly_to_province`, `can_go_abroad`, `can_overnight`, `has_health_check`, `id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'ft_content_profile_keyword') = 0,
+  'ALTER TABLE `hg_content_profile` ADD FULLTEXT INDEX `ft_content_profile_keyword` (`profile_no`, `title`, `summary`, `plain_text`, `province`, `city`, `cup_size`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_channel' AND index_name = 'idx_content_channel_source_query') = 0,
+  'ALTER TABLE `hg_content_channel` ADD INDEX `idx_content_channel_source_query` (`source_channel_id`, `id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_channel' AND index_name = 'idx_content_channel_username') = 0,
+  'ALTER TABLE `hg_content_channel` ADD INDEX `idx_content_channel_username` (`username`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;

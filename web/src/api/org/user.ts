@@ -71,3 +71,19 @@ export function AddMemberIntegral(params) {
     params,
   });
 }
+
+export function Vip(params) {
+  return http.request({
+    url: '/member/vip',
+    method: 'POST',
+    params,
+  });
+}
+
+export function VipLogList(params?) {
+  return http.request({
+    url: '/member/vipLogList',
+    method: 'GET',
+    params,
+  });
+}

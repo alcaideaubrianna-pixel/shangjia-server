@@ -1,0 +1,78 @@
+name: build-server-image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "server/**"
+      - ".github/workflows/build-server-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-server-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/youban-server" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.6"
+          cache-dependency-path: server/go.sum
+
+      - name: Test youban chat addon
+        working-directory: server
+        run: go test ./addons/youban_chat/...
+
+      - name: Build Linux binary
+        working-directory: server
+        run: |
+          mkdir -p temp/linux_amd64
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -o temp/linux_amd64/hotgo ./main.go
+          chmod +x temp/linux_amd64/hotgo
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: server
+          file: server/manifest/docker/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

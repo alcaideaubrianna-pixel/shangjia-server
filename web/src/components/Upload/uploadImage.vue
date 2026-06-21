@@ -8,6 +8,8 @@
     :height="100"
     :maxNumber="maxNumber"
     :helpText="helpText"
+    :imageAspectRatio="imageAspectRatio"
+    :imageAspectRatioTolerance="imageAspectRatioTolerance"
     @uploadChange="uploadChange"
     v-model:value="image"
     v-model:values="images"
@@ -24,10 +26,18 @@
     value: string | string[] | null;
     maxNumber: number;
     helpText?: string;
+    imageAspectRatio?: number;
+    imageAspectRatioTolerance?: number;
   }
 
   const emit = defineEmits(['update:value']);
-  const props = withDefaults(defineProps<Props>(), { value: '', maxNumber: 1, helpText: '' });
+  const props = withDefaults(defineProps<Props>(), {
+    value: '',
+    maxNumber: 1,
+    helpText: '',
+    imageAspectRatio: 0,
+    imageAspectRatioTolerance: 0.02,
+  });
   const image = ref<string>('');
   const images = ref<string[]>([]);
   const globSetting = useGlobSetting();

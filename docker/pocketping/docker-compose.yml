@@ -1,0 +1,15 @@
+services:
+  bridge-server:
+    build:
+      context: ../../third_party/pocketping
+      dockerfile: bridge-server/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "3001:3001"
+    volumes:
+      - pocketping_data:/data
+
+volumes:
+  pocketping_data:

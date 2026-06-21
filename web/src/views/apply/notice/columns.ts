@@ -1,5 +1,5 @@
 import { h } from 'vue';
-import { NAvatar, NAvatarGroup, NTooltip } from 'naive-ui';
+import { NAvatar, NAvatarGroup, NImage, NTag, NTooltip } from 'naive-ui';
 import { renderOptionTag } from '@/utils';
 
 export const columns = [
@@ -35,6 +35,27 @@ export const columns = [
       return renderOptionTag('noticeTagOptions', row.tag);
     },
     width: 100,
+  },
+  {
+    title: 'Banner',
+    key: 'isBanner',
+    render(row) {
+      if (row.isBanner !== 1) {
+        return h(NTag, { size: 'small', bordered: false }, { default: () => '否' });
+      }
+      return h('div', { class: 'notice-banner-cell' }, [
+        h(NTag, { type: 'success', size: 'small', bordered: false }, { default: () => '是' }),
+        row.bannerImg
+          ? h(NImage, {
+              width: 72,
+              height: 40,
+              src: row.bannerImg,
+              objectFit: 'cover',
+            })
+          : null,
+      ]);
+    },
+    width: 140,
   },
   {
     title: '接收人',
@@ -92,6 +113,16 @@ export const columns = [
     title: '排序',
     key: 'sort',
     width: 80,
+  },
+  {
+    title: '发布时间',
+    key: 'publishAt',
+    width: 180,
+  },
+  {
+    title: '过期时间',
+    key: 'expireAt',
+    width: 180,
   },
   {
     title: '备注',

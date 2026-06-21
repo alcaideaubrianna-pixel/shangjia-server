@@ -57,11 +57,12 @@ func (s *sSysAttachment) List(ctx context.Context, in *sysin.AttachmentListInp) 
 	mod := s.Model(ctx)
 	memberId := contexts.GetUserId(ctx)
 
-	// 超管允许查看指定用户的附件
-	if service.AdminMember().VerifySuperId(ctx, memberId) && in.MemberId > 0 {
-		mod = mod.Where(dao.SysAttachment.Columns().MemberId, in.MemberId)
+	if service.AdminMember().VerifySuperId(ctx, memberId) {
+		if in.MemberId > 0 {
+			mod = mod.Where(dao.SysAttachment.Columns().MemberId, in.MemberId)
+		}
 	} else {
-		mod = mod.Where(dao.SysAttachment.Columns().MemberId, memberId)
+		mod = mod.Wheref("(%s=? OR %s=0)", dao.SysAttachment.Columns().MemberId, dao.SysAttachment.Columns().MemberId, memberId)
 	}
 
 	if in.Drive != "" {

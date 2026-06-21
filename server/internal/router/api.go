@@ -20,13 +20,11 @@ import (
 // Api 前台路由
 func Api(ctx context.Context, group *ghttp.RouterGroup) {
 	group.Group(simple.RouterPrefix(ctx, consts.AppApi), func(group *ghttp.RouterGroup) {
+		group.Middleware(service.Middleware().ApiAuth)
 		group.Bind(
 			pay.NewV1(),     // 支付异步通知
 			content.NewV1(), // 公开内容资料
-		)
-		group.Middleware(service.Middleware().ApiAuth)
-		group.Bind(
-			member.NewV1(), // 管理员
+			member.NewV1(),  // 移动端公开用户接口
 		)
 	})
 }

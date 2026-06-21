@@ -50,15 +50,35 @@ type NoticeViewModel struct {
 type NoticeListInp struct {
 	form.PageReq
 	form.StatusReq
-	Title   string
-	Content string
-	Type    int64
+	Title    string
+	Content  string
+	Type     int64
+	IsBanner int
 }
 
 type NoticeListModel struct {
 	entity.AdminNotice
 	ReadCount     float64            `json:"readCount"     dc:"阅读次数"`
 	ReceiverGroup []form.AvatarGroup `json:"receiverGroup" dc:"接收人头像组"`
+}
+
+type NoticePublicListInp struct {
+	form.PageReq
+	IsBanner int `json:"isBanner" dc:"是否Banner"`
+}
+
+type NoticePublicListModel struct {
+	Id        int64       `json:"id" dc:"公告ID"`
+	Title     string      `json:"title" dc:"公告标题"`
+	Tag       int         `json:"tag" dc:"标签"`
+	Content   string      `json:"content" dc:"公告内容"`
+	IsBanner  int         `json:"isBanner" dc:"是否Banner"`
+	BannerImg string      `json:"bannerImg" dc:"Banner图片"`
+	BannerUrl string      `json:"bannerUrl" dc:"Banner链接"`
+	Status    int         `json:"status" dc:"公告状态"`
+	PublishAt *gtime.Time `json:"publishAt" dc:"发布时间"`
+	ExpireAt  *gtime.Time `json:"expireAt" dc:"过期时间"`
+	CreatedAt *gtime.Time `json:"createdAt" dc:"创建时间"`
 }
 
 // NoticeStatusInp 更新状态

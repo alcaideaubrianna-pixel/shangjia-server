@@ -158,7 +158,20 @@ router:
     # 前缀
     prefix: "/api"
     # 不需要验证登录的路由地址
-    exceptLogin: [ ]
+    exceptLogin: [
+      "/content/profiles",
+      "/content/profile/view",
+      "/content/announcements",
+      "/member/getIdByCode",
+      "/member/register",
+      "/member/accountLogin",
+      "/youban_chat/chat/webhook",
+      "/youban_chat/chat/bridgeConfig",
+      "/youban_chat/telegram/webhook",
+      "/pay/notify/alipay",
+      "/pay/notify/wxpay",
+      "/pay/notify/qqpay",
+    ]
   # websocket
   websocket:
     # 前缀
@@ -234,7 +247,7 @@ database:
     <<: *defaultLogger
     stdout: true
   default:
-    link: "mysql:hotgo:hg123456.@tcp(127.0.0.1:3306)/youban_hotgo?loc=Local&parseTime=true&charset=utf8mb4"
+    link: "pgsql:postgres:postgres@tcp(127.0.0.1:5432)/youban_hotgo"
     debug: true
     Prefix: "hg_"
   # FeiNiu_bot 只读数据源，用于资料增量导入
@@ -255,6 +268,16 @@ contentImport:
   feiniu:
     dbGroup: "feiniu"                             # FeiNiu_bot 数据库分组
     batchSize: 200                                # 单次导入批量大小
+
+
+# 悦伴聊天
+youbanChat:
+  pocketPing:
+    baseUrl: "http://localhost:3001"              # PocketPing bridge-server 地址
+    apiKey: ""                                    # 可选；与 PocketPing API_KEY 保持一致
+  telegram:
+    chatId: ""                                    # 客服 Telegram supergroup id，用于后台展示话题映射
+    webhookBaseUrl: ""                            # 生产环境公网地址，如：https://api.example.com，本地develop为空时自动使用getUpdates轮询
 
 
 # 生成代码
