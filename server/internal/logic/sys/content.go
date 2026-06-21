@@ -505,12 +505,8 @@ func (s *sSysContent) SetImportAutoSync(ctx context.Context, in *sysin.ContentIm
 	if sourceName == "" {
 		sourceName = contentSourceFeiNiu
 	}
-	cronData, err := s.getContentImportCron(ctx)
+	cronData, err := s.ensureContentImportCron(ctx)
 	if err != nil {
-		return
-	}
-	if cronData == nil {
-		err = gerror.New("内容自动同步任务未初始化，请重启服务后重试")
 		return
 	}
 
@@ -688,7 +684,7 @@ func (s *sSysContent) publicProfileWhere(mod *gdb.Model) *gdb.Model {
 }
 
 func (s *sSysContent) fillImportAutoSyncOverview(ctx context.Context, res *sysin.ContentImportOverviewModel) (err error) {
-	cronData, err := s.getContentImportCron(ctx)
+	cronData, err := s.ensureContentImportCron(ctx)
 	if err != nil {
 		return
 	}
@@ -701,6 +697,47 @@ func (s *sSysContent) fillImportAutoSyncOverview(ctx context.Context, res *sysin
 		res.AutoSyncStatus = "running"
 	}
 	return
+}
+
+func (s *sSysContent) ensureContentImportCron(ctx context.Context) (data *entity.SysCron, err error) {
+	data, err = s.getContentImportCron(ctx)
+	if err != nil || data != nil {
+		return
+	}
+	cronColumns := dao.SysCron.Columns()
+	now := gtime.Now()
+	id, err := dao.SysCron.Ctx(ctx).Data(g.Map{
+		cronColumns.GroupId:   1,
+		cronColumns.Title:     contentImportCronTitle,
+		cronColumns.Name:      contentImportCronName,
+		cronColumns.Params:    "",
+		cronColumns.Pattern:   "0 */30 * * * *",
+		cronColumns.Policy:    consts.CronPolicySingle,
+		cronColumns.Count:     0,
+		cronColumns.Sort:      20,
+		cronColumns.Remark:    "每 30 分钟从 FeiNiu_bot 增量同步资料",
+		cronColumns.Status:    consts.StatusDisable,
+		cronColumns.CreatedAt: now,
+		cronColumns.UpdatedAt: now,
+	}).InsertAndGetId()
+	if err != nil {
+		return nil, gerror.Wrap(err, "初始化内容自动同步任务失败")
+	}
+	return &entity.SysCron{
+		Id:        id,
+		GroupId:   1,
+		Title:     contentImportCronTitle,
+		Name:      contentImportCronName,
+		Params:    "",
+		Pattern:   "0 */30 * * * *",
+		Policy:    consts.CronPolicySingle,
+		Count:     0,
+		Sort:      20,
+		Remark:    "每 30 分钟从 FeiNiu_bot 增量同步资料",
+		Status:    consts.StatusDisable,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}, nil
 }
 
 func (s *sSysContent) getContentImportCron(ctx context.Context) (data *entity.SysCron, err error) {

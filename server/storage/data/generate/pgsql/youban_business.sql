@@ -308,3 +308,8 @@ WHERE media_type = 'video'
   AND deleted_at IS NULL
   AND COALESCE(original_storage_path, '') <> ''
   AND COALESCE(display_storage_path, '') <> original_storage_path;
+
+INSERT INTO hg_sys_cron (group_id, title, name, params, pattern, policy, count, sort, remark, status, created_at, updated_at)
+SELECT 1, 'FeiNiu 内容自动同步', 'content_import_feiniu', '', '0 */30 * * * *', 2, 0, 20, '每 30 分钟从 FeiNiu_bot 增量同步资料', 2, NOW(), NOW()
+WHERE EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'hg_sys_cron')
+  AND NOT EXISTS (SELECT 1 FROM hg_sys_cron WHERE name = 'content_import_feiniu');
