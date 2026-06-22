@@ -654,11 +654,11 @@ LIMIT ?`, queryAfterNoteId, lastNoteId, batchSize)
 	}
 	repaired, err := s.repairFeiNiuMissingMedia(ctx, sourceDB, batchSize)
 	if err != nil {
-		if !errors.Is(err, errFeiNiuMediaPending) {
-			_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
-			return
-		}
 		_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
+		return
+	}
+	if backfillMode || res.LastSourceNote <= lastNoteId {
+		_ = s.clearCheckpointError(ctx, contentSourceFeiNiu)
 	}
 	res.MediaImported += repaired
 	return
@@ -1275,6 +1275,15 @@ func (s *sSysContent) saveCheckpointError(ctx context.Context, sourceName string
 	return
 }
 
+func (s *sSysContent) clearCheckpointError(ctx context.Context, sourceName string) (err error) {
+	checkpointColumns := dao.ContentImportCheckpoint.Columns()
+	_, err = dao.ContentImportCheckpoint.Ctx(ctx).
+		Where(checkpointColumns.SourceName, sourceName).
+		Data(g.Map{checkpointColumns.LastError: "", checkpointColumns.UpdatedAt: gtime.Now()}).
+		Update()
+	return
+}
+
 func (s *sSysContent) createImportRun(ctx context.Context, sourceName string, triggerType string, batchSize int, startedAt *gtime.Time) (id int64, err error) {
 	runColumns := dao.ContentImportRun.Columns()
 	id, err = dao.ContentImportRun.Ctx(ctx).Data(g.Map{
@@ -1608,7 +1617,6 @@ func (s *sSysContent) repairFeiNiuMissingMedia(ctx context.Context, sourceDB gdb
 		if importErr != nil {
 			if errors.Is(importErr, errFeiNiuMediaPending) {
 				_ = s.markFeiNiuProfileMediaPending(ctx, row[profileColumns.Id].Int64())
-				err = importErr
 				continue
 			}
 			err = importErr
