@@ -10,6 +10,7 @@ PORT = int(os.environ.get("DEPLOY_WEBHOOK_PORT", "9088"))
 TOKEN = os.environ.get("DEPLOY_WEBHOOK_TOKEN", "")
 SCRIPT = os.environ.get("DEPLOY_SCRIPT", "/opt/youban/deploy-webhook.sh")
 IMAGE_PREFIX = os.environ.get("IMAGE_PREFIX", "ghcr.io/mjiadfwaff-bot/youban-server:")
+IMAGE_PREFIXES = [item.strip() for item in os.environ.get("IMAGE_PREFIXES", IMAGE_PREFIX).split(",") if item.strip()]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -49,7 +50,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         image = str(payload.get("image", "")).strip()
-        if not image.startswith(IMAGE_PREFIX):
+        if not any(image.startswith(prefix) for prefix in IMAGE_PREFIXES):
             self._send(400, {"error": "image is not allowed"})
             return
 

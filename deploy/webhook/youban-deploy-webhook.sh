@@ -2,7 +2,8 @@
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/youban}"
-IMAGE_PREFIX="${IMAGE_PREFIX:-ghcr.io/mjiadfwaff-bot/youban-server:}"
+SERVER_IMAGE_PREFIX="${SERVER_IMAGE_PREFIX:-ghcr.io/mjiadfwaff-bot/youban-server:}"
+H5_IMAGE_PREFIX="${H5_IMAGE_PREFIX:-ghcr.io/mjiadfwaff-bot/youban-h5:}"
 DOCKER_CONFIG_DIR="${DOCKER_CONFIG_DIR:-/home/ubuntu/.docker}"
 
 image="${1:-}"
@@ -11,8 +12,10 @@ if [[ -z "$image" ]]; then
   exit 2
 fi
 
+env_key=""
 case "$image" in
-  ${IMAGE_PREFIX}*) ;;
+  ${SERVER_IMAGE_PREFIX}*) env_key="YOUBAN_SERVER_IMAGE" ;;
+  ${H5_IMAGE_PREFIX}*) env_key="YOUBAN_H5_IMAGE" ;;
   *)
     echo "image is not allowed: $image" >&2
     exit 2
@@ -21,10 +24,10 @@ esac
 
 cd "$APP_DIR"
 
-if sudo grep -q '^YOUBAN_SERVER_IMAGE=' .env; then
-  sudo sed -i "s#^YOUBAN_SERVER_IMAGE=.*#YOUBAN_SERVER_IMAGE=$image#" .env
+if sudo grep -q "^${env_key}=" .env; then
+  sudo sed -i "s#^${env_key}=.*#${env_key}=$image#" .env
 else
-  echo "YOUBAN_SERVER_IMAGE=$image" | sudo tee -a .env >/dev/null
+  echo "${env_key}=$image" | sudo tee -a .env >/dev/null
 fi
 sudo ./render-config.sh
 sudo env DOCKER_CONFIG="$DOCKER_CONFIG_DIR" docker compose pull

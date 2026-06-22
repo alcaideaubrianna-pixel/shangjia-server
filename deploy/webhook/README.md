@@ -21,7 +21,9 @@ DEPLOY_WEBHOOK_HOST=0.0.0.0
 DEPLOY_WEBHOOK_PORT=9088
 DEPLOY_WEBHOOK_TOKEN=change-me
 DEPLOY_SCRIPT=/opt/youban/deploy-webhook.sh
-IMAGE_PREFIX=ghcr.io/mjiadfwaff-bot/youban-server:
+IMAGE_PREFIXES=ghcr.io/mjiadfwaff-bot/youban-server:,ghcr.io/mjiadfwaff-bot/youban-h5:
 APP_DIR=/opt/youban
 DOCKER_CONFIG_DIR=/home/ubuntu/.docker
+SERVER_IMAGE_PREFIX=ghcr.io/mjiadfwaff-bot/youban-server:
+H5_IMAGE_PREFIX=ghcr.io/mjiadfwaff-bot/youban-h5:
 ```
