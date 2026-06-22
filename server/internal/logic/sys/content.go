@@ -373,6 +373,34 @@ LIMIT ?`, lastNoteId, batchSize)
 		_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
 		return
 	}
+	backfillMode := false
+	if len(rows) == 0 {
+		backfillWindow := g.Cfg().MustGet(ctx, "contentImport.feiniu.backfillWindow", 5000).Int64()
+		if backfillWindow > 0 && lastNoteId > 0 {
+			queryAfterNoteId := int64(0)
+			if lastNoteId > backfillWindow {
+				queryAfterNoteId = lastNoteId - backfillWindow
+			}
+			rows, err = sourceDB.GetAll(ctx, `
+SELECT
+  note_id,note_uuid,note_code,title,summary,plain_text,source_key,province,city,age,height,weight,cup_size,
+  html_text,source_type,category_code,days_with_escort,expected_living_cost,can_fly_to_province,can_go_abroad,
+  can_overnight,can_cohabitate,has_health_check,is_full_month,is_virgin,accept_sm,no_condom_after_check,
+  allow_creampie,has_tattoo,has_verification_video,is_favorite,edited_at,group_params,tag_params,cover_asset_id,
+  image_count,video_count,text_block_count,duplicate_note_id,storage_policy,ingest_status,remark,status,
+  create_by,create_time,update_by,update_time
+FROM tg_content_note
+WHERE note_id > ? AND note_id <= ? AND status = '0'
+ORDER BY update_time ASC,note_id ASC
+LIMIT ?`, queryAfterNoteId, lastNoteId, batchSize)
+			if err != nil {
+				err = gerror.Wrap(err, "回扫 FeiNiu 资料失败，请检查 contentImport.feiniu.dbGroup 配置")
+				_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
+				return
+			}
+			backfillMode = len(rows) > 0
+		}
+	}
 
 	for _, source := range rows {
 		res.Scanned++
@@ -389,7 +417,7 @@ LIMIT ?`, lastNoteId, batchSize)
 		} else {
 			res.Duplicate++
 		}
-		mediaCount, importErr := s.importFeiNiuMedia(ctx, sourceDB, profileId, sourceNoteId)
+		mediaCount, importErr := s.importFeiNiuMedia(ctx, sourceDB, profileId, sourceNoteId, source["image_count"].Int()+source["video_count"].Int())
 		if importErr != nil {
 			err = importErr
 			_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
@@ -398,11 +426,17 @@ LIMIT ?`, lastNoteId, batchSize)
 		res.MediaImported += mediaCount
 	}
 
-	if res.LastSourceNote > lastNoteId {
+	if !backfillMode && res.LastSourceNote > lastNoteId {
 		if err = s.saveCheckpoint(ctx, contentSourceFeiNiu, res.LastSourceNote); err != nil {
 			return
 		}
 	}
+	repaired, err := s.repairFeiNiuMissingMedia(ctx, sourceDB, batchSize)
+	if err != nil {
+		_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
+		return
+	}
+	res.MediaImported += repaired
 	return
 }
 
@@ -517,6 +551,12 @@ func (s *sSysContent) SetImportAutoSync(ctx context.Context, in *sysin.ContentIm
 	if err = service.SysCron().Status(ctx, &sysin.CronStatusInp{SysCron: entity.SysCron{Id: cronData.Id, Status: status}}); err != nil {
 		err = gerror.Wrap(err, "更新内容自动同步状态失败")
 		return
+	}
+	if in.Enabled {
+		if err = service.SysCron().OnlineExec(ctx, &sysin.OnlineExecInp{SysCron: entity.SysCron{Id: cronData.Id, Name: cronData.Name, Params: cronData.Params}}); err != nil {
+			err = gerror.Wrap(err, "启动内容自动同步失败")
+			return
+		}
 	}
 
 	cronData.Status = status
@@ -1044,7 +1084,11 @@ func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, 
 	if profileNo == "" {
 		profileNo = "FN" + source["note_id"].String()
 	}
-	one, err := dao.ContentProfile.Ctx(ctx).Fields(profileColumns.Id).Where(profileColumns.ProfileNo, profileNo).One()
+	one, err := dao.ContentProfile.Ctx(ctx).
+		Fields(profileColumns.Id).
+		Where(profileColumns.SourceType, contentSourceFeiNiu).
+		Where(profileColumns.SourceNoteId, source["note_id"].Int64()).
+		One()
 	if err != nil {
 		err = gerror.Wrap(err, "检查资料是否存在失败")
 		return
@@ -1138,6 +1182,7 @@ func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, 
 		return true, id, nil
 	}
 	profileId = one[profileColumns.Id].Int64()
+	delete(data, profileColumns.ProfileNo)
 	if _, err = dao.ContentProfile.Ctx(ctx).Where(profileColumns.Id, profileId).Data(data).Update(); err != nil {
 		err = gerror.Wrap(err, "更新资料失败")
 		return
@@ -1148,7 +1193,7 @@ func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, 
 	return false, profileId, nil
 }
 
-func (s *sSysContent) importFeiNiuMedia(ctx context.Context, sourceDB gdb.DB, profileId int64, sourceNoteId int64) (count int, err error) {
+func (s *sSysContent) importFeiNiuMedia(ctx context.Context, sourceDB gdb.DB, profileId int64, sourceNoteId int64, expectedMediaCount int) (count int, err error) {
 	mediaColumns := dao.ContentMedia.Columns()
 	rows, err := sourceDB.GetAll(ctx, `
 SELECT
@@ -1161,6 +1206,10 @@ WHERE b.note_id = ? AND b.asset_id IS NOT NULL
 ORDER BY b.sort_index ASC,b.block_id ASC`, sourceNoteId)
 	if err != nil {
 		err = gerror.Wrap(err, "读取 FeiNiu 媒体失败")
+		return
+	}
+	if expectedMediaCount > 0 && len(rows) < expectedMediaCount {
+		err = gerror.Newf("FeiNiu 媒体未就绪 note:%d expected:%d actual:%d", sourceNoteId, expectedMediaCount, len(rows))
 		return
 	}
 
@@ -1178,9 +1227,6 @@ ORDER BY b.sort_index ASC,b.block_id ASC`, sourceNoteId)
 			err = gerror.Wrap(checkErr, "检查媒体是否存在失败")
 			return
 		}
-		if exists != nil {
-			continue
-		}
 		mediaType := row["asset_type"].String()
 		if mediaType == "" {
 			mediaType = consts.ContentMediaTypeImage
@@ -1195,6 +1241,10 @@ ORDER BY b.sort_index ASC,b.block_id ASC`, sourceNoteId)
 				previewPath = cosPath + ".poster.jpg"
 			}
 		}
+		if !isFeiNiuMediaReady(mediaType, cosPath, displayPath) {
+			err = gerror.Newf("FeiNiu 媒体 COS 未就绪 note:%d asset:%d", sourceNoteId, assetId)
+			return
+		}
 		duplicateMedia, checkDuplicateErr := s.getDuplicateMediaByMD5(ctx, mediaType, row["binary_md5"].String())
 		if checkDuplicateErr != nil {
 			err = checkDuplicateErr
@@ -1207,7 +1257,7 @@ ORDER BY b.sort_index ASC,b.block_id ASC`, sourceNoteId)
 			previewPath = duplicateMedia[mediaColumns.PreviewStoragePath].String()
 		}
 		now := gtime.Now()
-		_, insertErr := dao.ContentMedia.Ctx(ctx).Data(g.Map{
+		data := g.Map{
 			mediaColumns.ProfileId:           profileId,
 			mediaColumns.SourceAssetId:       assetId,
 			mediaColumns.MediaType:           mediaType,
@@ -1224,14 +1274,59 @@ ORDER BY b.sort_index ASC,b.block_id ASC`, sourceNoteId)
 			mediaColumns.ProcessStatus:       "raw",
 			mediaColumns.EncryptStatus:       "none",
 			mediaColumns.Status:              1,
-			mediaColumns.CreatedAt:           now,
 			mediaColumns.UpdatedAt:           now,
-		}).Insert()
-		if insertErr != nil {
-			err = gerror.Wrap(insertErr, "导入媒体失败")
+		}
+		if exists == nil {
+			data[mediaColumns.CreatedAt] = now
+			_, err = dao.ContentMedia.Ctx(ctx).Data(data).Insert()
+			if err != nil {
+				err = gerror.Wrap(err, "导入媒体失败")
+				return
+			}
+			count++
+			continue
+		}
+		_, err = dao.ContentMedia.Ctx(ctx).Where(mediaColumns.Id, exists[mediaColumns.Id].Int64()).Data(data).Update()
+		if err != nil {
+			err = gerror.Wrap(err, "更新媒体失败")
 			return
 		}
-		count++
+	}
+	return
+}
+
+func (s *sSysContent) repairFeiNiuMissingMedia(ctx context.Context, sourceDB gdb.DB, limit int) (count int, err error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	profileColumns := dao.ContentProfile.Columns()
+	mediaColumns := dao.ContentMedia.Columns()
+	rows, err := dao.ContentProfile.Ctx(ctx).As("p").
+		Fields(aliasField("p", profileColumns.Id), aliasField("p", profileColumns.SourceNoteId), aliasField("p", profileColumns.ImageCount), aliasField("p", profileColumns.VideoCount)).
+		LeftJoin(dao.ContentMedia.Table()+" m", aliasField("m", mediaColumns.ProfileId)+"="+aliasField("p", profileColumns.Id)).
+		Where(aliasField("p", profileColumns.SourceType), contentSourceFeiNiu).
+		Where(aliasField("p", profileColumns.Status), 1).
+		WhereGT(aliasField("p", profileColumns.ImageCount)+"+"+aliasField("p", profileColumns.VideoCount), 0).
+		Group(aliasField("p", profileColumns.Id)).
+		Having("COUNT(m.id)=0 OR SUM(CASE WHEN m.display_storage_path IS NULL OR m.display_storage_path='' THEN 1 ELSE 0 END)>0").
+		OrderDesc(aliasField("p", profileColumns.SourceUpdatedAt)).
+		OrderDesc(aliasField("p", profileColumns.Id)).
+		Limit(limit).
+		All()
+	if err != nil {
+		err = gerror.Wrap(err, "读取缺失媒体资料失败")
+		return
+	}
+	for _, row := range rows {
+		imported, importErr := s.importFeiNiuMedia(ctx, sourceDB, row[profileColumns.Id].Int64(), row[profileColumns.SourceNoteId].Int64(), row[profileColumns.ImageCount].Int()+row[profileColumns.VideoCount].Int())
+		if importErr != nil {
+			err = importErr
+			return
+		}
+		count += imported
 	}
 	return
 }
@@ -1305,13 +1400,13 @@ func (s *sSysContent) upsertFeiNiuChannel(ctx context.Context, sourceInfo gdb.Re
 		channelColumns.Username:        recordString(sourceInfo, "channel_username"),
 		channelColumns.InviteLink:      recordString(sourceInfo, "channel_invite_link"),
 		channelColumns.SourceType:      contentSourceFeiNiu,
-		channelColumns.PublicStatus:    "hidden",
-		channelColumns.AuthStatus:      "none",
-		channelColumns.Status:          1,
 		channelColumns.UpdatedAt:       now,
 	}
 	if one == nil {
 		data[channelColumns.CreatedAt] = now
+		data[channelColumns.PublicStatus] = "hidden"
+		data[channelColumns.AuthStatus] = "none"
+		data[channelColumns.Status] = 1
 		channelId, err = dao.ContentChannel.Ctx(ctx).Data(data).InsertAndGetId()
 	} else {
 		channelId = one[channelColumns.Id].Int64()
@@ -1426,6 +1521,16 @@ func originalStoragePath(cosPath string, duplicateMediaId int64) string {
 		return ""
 	}
 	return cosPath
+}
+
+func isFeiNiuMediaReady(mediaType string, cosPath string, displayPath string) bool {
+	if strings.TrimSpace(displayPath) == "" {
+		return false
+	}
+	if mediaType == consts.ContentMediaTypeVideo {
+		return strings.TrimSpace(cosPath) != ""
+	}
+	return strings.TrimSpace(cosPath) != ""
 }
 
 func firstNonEmpty(values ...string) string {
