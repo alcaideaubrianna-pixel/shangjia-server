@@ -17,6 +17,14 @@ type ListProfilesRes struct {
 	List []*sysin.ContentProfileListModel `json:"list" dc:"资料列表"`
 }
 
+type FilterOptionsReq struct {
+	g.Meta `path:"/content/filter/options" method:"get" tags:"内容资料" summary:"获取公开资料筛选选项"`
+}
+
+type FilterOptionsRes struct {
+	*sysin.ContentProfileFilterOptionsModel
+}
+
 type ViewProfileReq struct {
 	g.Meta `path:"/content/profile/view" method:"get" tags:"内容资料" summary:"获取公开资料详情"`
 	sysin.ContentProfileViewInp

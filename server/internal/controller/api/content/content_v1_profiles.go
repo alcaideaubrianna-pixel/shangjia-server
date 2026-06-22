@@ -21,6 +21,16 @@ func (c *ControllerV1) ListProfiles(ctx context.Context, req *v1.ListProfilesReq
 	return
 }
 
+func (c *ControllerV1) FilterOptions(ctx context.Context, req *v1.FilterOptionsReq) (res *v1.FilterOptionsRes, err error) {
+	data, err := service.SysContent().FilterOptions(ctx)
+	if err != nil {
+		return
+	}
+	res = new(v1.FilterOptionsRes)
+	res.ContentProfileFilterOptionsModel = data
+	return
+}
+
 func (c *ControllerV1) ViewProfile(ctx context.Context, req *v1.ViewProfileReq) (res *v1.ViewProfileRes, err error) {
 	data, err := service.SysContent().ViewProfile(ctx, &req.ContentProfileViewInp)
 	if err != nil {

@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
+	"hotgo/internal/library/cache"
 	"hotgo/internal/library/token"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -27,6 +30,7 @@ const (
 	contentReviewConfigGroup = "content_import_review"
 	feiNiuCosURLPrefix       = "https://sh-hk-qiuniu-1368574312.cos.ap-hongkong.myqcloud.com/"
 	feiNiuProxyCosPrefix     = "/prod-api/telegram/content-note/cos/"
+	contentFilterOptionsKey  = "content:profile:filter_options"
 )
 
 var errFeiNiuMediaPending = errors.New("feiniu media pending")
@@ -34,6 +38,17 @@ var errFeiNiuMediaPending = errors.New("feiniu media pending")
 var introFeeRegexp = regexp.MustCompile(`(?im)(?:^|[\s，,。；;、|｜/／（(【\[])(?:介绍费|介紹費|中介费|中介費|服务费|服務費)\s*[:：]?\s*(?:[¥￥]?\s*)?[0-9０-９][0-9０-９,，.\s]*(?:元|块|w|W|万)?[^\n\r，,。；;、|｜）)】\]]*`)
 
 type sSysContent struct{}
+
+type contentRegionAggRow struct {
+	Province string `json:"province"`
+	City     string `json:"city"`
+	Count    int    `json:"count"`
+}
+
+type contentOptionAggRow struct {
+	Value string `json:"value"`
+	Count int    `json:"count"`
+}
 
 func NewSysContent() *sSysContent {
 	return &sSysContent{}
@@ -89,9 +104,18 @@ func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfile
 	}
 
 	if in.Keyword != "" {
-		mod = mod.WhereLike(aliasField("p", profileColumns.Title), "%"+in.Keyword+"%").
-			WhereOrLike(aliasField("p", profileColumns.Summary), "%"+in.Keyword+"%").
-			WhereOrLike(aliasField("p", profileColumns.ProfileNo), "%"+in.Keyword+"%")
+		keyword := "%" + strings.TrimSpace(in.Keyword) + "%"
+		mod = mod.Where(
+			"("+strings.Join([]string{
+				aliasField("p", profileColumns.ProfileNo) + " LIKE ?",
+				aliasField("p", profileColumns.Title) + " LIKE ?",
+				aliasField("p", profileColumns.Summary) + " LIKE ?",
+				aliasField("p", profileColumns.Province) + " LIKE ?",
+				aliasField("p", profileColumns.City) + " LIKE ?",
+				aliasField("p", profileColumns.CupSize) + " LIKE ?",
+			}, " OR ")+")",
+			keyword, keyword, keyword, keyword, keyword, keyword,
+		)
 	}
 	if in.Province != "" {
 		mod = mod.Where(aliasField("p", profileColumns.Province), in.Province)
@@ -233,6 +257,181 @@ func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfile
 		item.Media = mediaMap[row.Id]
 		item.Photos = mediaPhotos(item.Media)
 		list = append(list, item)
+	}
+	return
+}
+
+// FilterOptions 获取前台资料筛选选项。
+func (s *sSysContent) FilterOptions(ctx context.Context) (res *sysin.ContentProfileFilterOptionsModel, err error) {
+	cacheVar, err := cache.Instance().Get(ctx, contentFilterOptionsKey)
+	if err == nil && !cacheVar.IsNil() {
+		if err = cacheVar.Scan(&res); err == nil && res != nil {
+			return
+		}
+	}
+
+	res = &sysin.ContentProfileFilterOptionsModel{
+		Regions:    []*sysin.ContentProfileRegionOption{},
+		Cups:       []*sysin.ContentProfileFilterOption{},
+		Attributes: []*sysin.ContentProfileAttributeOption{},
+	}
+	res.Regions, err = s.buildProfileRegionOptions(ctx)
+	if err != nil {
+		return
+	}
+	res.Cups, err = s.buildProfileCupOptions(ctx)
+	if err != nil {
+		return
+	}
+	res.Attributes, err = s.buildProfileAttributeOptions(ctx)
+	if err != nil {
+		return
+	}
+	_ = cache.Instance().Set(ctx, contentFilterOptionsKey, res, 10*time.Minute)
+	return
+}
+
+func (s *sSysContent) buildProfileRegionOptions(ctx context.Context) (list []*sysin.ContentProfileRegionOption, err error) {
+	profileColumns := dao.ContentProfile.Columns()
+	var rows []*contentRegionAggRow
+	if err = s.publicProfileWhere(dao.ContentProfile.Ctx(ctx).As("p")).
+		Fields(aliasField("p", profileColumns.Province)+" AS province", aliasField("p", profileColumns.City)+" AS city", "COUNT(1) AS count").
+		WhereNot(aliasField("p", profileColumns.Province), "").
+		Group(aliasField("p", profileColumns.Province), aliasField("p", profileColumns.City)).
+		OrderDesc("count").
+		Scan(&rows); err != nil {
+		err = gerror.Wrap(err, "获取地区筛选数据失败")
+		return
+	}
+
+	total := 0
+	provinceMap := make(map[string]*sysin.ContentProfileRegionOption)
+	provinceOrder := make([]string, 0)
+	for _, row := range rows {
+		province := strings.TrimSpace(row.Province)
+		city := strings.TrimSpace(row.City)
+		if province == "" {
+			province = city
+		}
+		if province == "" {
+			continue
+		}
+		total += row.Count
+		parent, ok := provinceMap[province]
+		if !ok {
+			parent = &sysin.ContentProfileRegionOption{
+				Label:    province,
+				Value:    province,
+				Province: province,
+				Count:    0,
+				Children: []*sysin.ContentProfileRegionOption{},
+			}
+			provinceMap[province] = parent
+			provinceOrder = append(provinceOrder, province)
+		}
+		parent.Count += row.Count
+		if city != "" && city != province {
+			parent.Children = append(parent.Children, &sysin.ContentProfileRegionOption{
+				Label:    city,
+				Value:    province + "/" + city,
+				Province: province,
+				City:     city,
+				Count:    row.Count,
+			})
+		}
+	}
+
+	sort.SliceStable(provinceOrder, func(i, j int) bool {
+		return provinceMap[provinceOrder[i]].Count > provinceMap[provinceOrder[j]].Count
+	})
+
+	list = []*sysin.ContentProfileRegionOption{{
+		Label: "全国",
+		Value: "",
+		Count: total,
+	}}
+	for _, province := range provinceOrder {
+		item := provinceMap[province]
+		sort.SliceStable(item.Children, func(i, j int) bool {
+			return item.Children[i].Count > item.Children[j].Count
+		})
+		list = append(list, item)
+	}
+	return
+}
+
+func (s *sSysContent) buildProfileCupOptions(ctx context.Context) (list []*sysin.ContentProfileFilterOption, err error) {
+	profileColumns := dao.ContentProfile.Columns()
+	var rows []*contentOptionAggRow
+	if err = s.publicProfileWhere(dao.ContentProfile.Ctx(ctx).As("p")).
+		Fields(aliasField("p", profileColumns.CupSize)+" AS value", "COUNT(1) AS count").
+		WhereNot(aliasField("p", profileColumns.CupSize), "").
+		Group(aliasField("p", profileColumns.CupSize)).
+		OrderAsc(aliasField("p", profileColumns.CupSize)).
+		Scan(&rows); err != nil {
+		err = gerror.Wrap(err, "获取标签筛选数据失败")
+		return
+	}
+	list = []*sysin.ContentProfileFilterOption{{Label: "不限标签", Value: ""}}
+	for _, row := range rows {
+		value := strings.TrimSpace(row.Value)
+		if value == "" {
+			continue
+		}
+		list = append(list, &sysin.ContentProfileFilterOption{
+			Label: value,
+			Value: value,
+			Count: row.Count,
+		})
+	}
+	return
+}
+
+func (s *sSysContent) buildProfileAttributeOptions(ctx context.Context) (list []*sysin.ContentProfileAttributeOption, err error) {
+	profileColumns := dao.ContentProfile.Columns()
+	specs := []struct {
+		Key    string
+		Label  string
+		Column string
+	}{
+		{Key: "hasVideo", Label: "有视频", Column: profileColumns.VideoCount},
+		{Key: "hasVerification", Label: "验证视频", Column: profileColumns.HasVerificationVideo},
+		{Key: "canFly", Label: "可飞", Column: profileColumns.CanFlyToProvince},
+		{Key: "canGoAbroad", Label: "出国", Column: profileColumns.CanGoAbroad},
+		{Key: "canOvernight", Label: "过夜", Column: profileColumns.CanOvernight},
+		{Key: "canCohabitate", Label: "同居", Column: profileColumns.CanCohabitate},
+		{Key: "hasHealthCheck", Label: "体检", Column: profileColumns.HasHealthCheck},
+		{Key: "isFullMonth", Label: "满月", Column: profileColumns.IsFullMonth},
+		{Key: "isVirgin", Label: "处", Column: profileColumns.IsVirgin},
+		{Key: "acceptSm", Label: "SM", Column: profileColumns.AcceptSm},
+		{Key: "noCondom", Label: "无套", Column: profileColumns.NoCondomAfterCheck},
+		{Key: "allowCreampie", Label: "内射", Column: profileColumns.AllowCreampie},
+		{Key: "hasTattoo", Label: "纹身", Column: profileColumns.HasTattoo},
+	}
+	list = make([]*sysin.ContentProfileAttributeOption, 0, len(specs))
+	for _, spec := range specs {
+		mod := s.publicProfileWhere(dao.ContentProfile.Ctx(ctx).As("p"))
+		if spec.Key == "hasVideo" {
+			mod = mod.WhereGT(aliasField("p", spec.Column), 0)
+		} else {
+			mod = mod.Where(aliasField("p", spec.Column), 1)
+		}
+		count, countErr := mod.Count()
+		if countErr != nil {
+			err = gerror.Wrapf(countErr, "获取%s筛选数据失败", spec.Label)
+			return
+		}
+		if count <= 0 {
+			continue
+		}
+		list = append(list, &sysin.ContentProfileAttributeOption{
+			Key: spec.Key,
+			ContentProfileFilterOption: sysin.ContentProfileFilterOption{
+				Label: spec.Label,
+				Value: spec.Key,
+				Count: count,
+			},
+		})
 	}
 	return
 }

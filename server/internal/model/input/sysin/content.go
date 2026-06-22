@@ -61,6 +61,32 @@ type ContentProfileListModel struct {
 	PublishedAt *gtime.Time          `json:"publishedAt" dc:"发布时间"`
 }
 
+type ContentProfileFilterOptionsModel struct {
+	Regions    []*ContentProfileRegionOption    `json:"regions" dc:"地区选项"`
+	Cups       []*ContentProfileFilterOption    `json:"cups" dc:"资料标签选项"`
+	Attributes []*ContentProfileAttributeOption `json:"attributes" dc:"属性选项"`
+}
+
+type ContentProfileRegionOption struct {
+	Label    string                        `json:"label" dc:"显示名称"`
+	Value    string                        `json:"value" dc:"筛选值"`
+	Province string                        `json:"province" dc:"省份/国家"`
+	City     string                        `json:"city" dc:"城市"`
+	Count    int                           `json:"count" dc:"资料数量"`
+	Children []*ContentProfileRegionOption `json:"children,omitempty" dc:"城市列表"`
+}
+
+type ContentProfileFilterOption struct {
+	Label string `json:"label" dc:"显示名称"`
+	Value string `json:"value" dc:"筛选值"`
+	Count int    `json:"count" dc:"资料数量"`
+}
+
+type ContentProfileAttributeOption struct {
+	ContentProfileFilterOption
+	Key string `json:"key" dc:"属性键"`
+}
+
 type ContentProfileViewInp struct {
 	Id int64 `json:"id" v:"required#资料ID不能为空" dc:"资料ID"`
 }

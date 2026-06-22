@@ -104,6 +104,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_content_profile_source_note ON hg_content_p
 CREATE INDEX IF NOT EXISTS idx_content_profile_public ON hg_content_profile (status, visibility, review_status, published_at);
 CREATE INDEX IF NOT EXISTS idx_content_profile_city ON hg_content_profile (province, city);
 CREATE INDEX IF NOT EXISTS idx_content_profile_duplicate ON hg_content_profile (duplicate_of_id);
+CREATE INDEX IF NOT EXISTS idx_content_profile_public_area ON hg_content_profile (status, review_status, import_status, visibility, province, city, published_at, id);
 CREATE INDEX IF NOT EXISTS idx_content_profile_admin_status ON hg_content_profile (review_status, visibility, import_status, status, id);
 CREATE INDEX IF NOT EXISTS idx_content_profile_admin_created ON hg_content_profile (created_at, id);
 CREATE INDEX IF NOT EXISTS idx_content_profile_admin_area ON hg_content_profile (province, city, id);
@@ -115,6 +116,7 @@ CREATE INDEX IF NOT EXISTS idx_content_profile_admin_weight ON hg_content_profil
 CREATE INDEX IF NOT EXISTS idx_content_profile_admin_days ON hg_content_profile (days_with_escort, id);
 CREATE INDEX IF NOT EXISTS idx_content_profile_admin_cost ON hg_content_profile (expected_living_cost, id);
 CREATE INDEX IF NOT EXISTS idx_content_profile_admin_flags ON hg_content_profile (can_fly_to_province, can_go_abroad, can_overnight, has_health_check, id);
+CREATE INDEX IF NOT EXISTS idx_content_profile_public_filters ON hg_content_profile (status, review_status, import_status, visibility, age, height, weight, cup_size, video_count, has_verification_video, id);
 CREATE INDEX IF NOT EXISTS idx_content_profile_keyword ON hg_content_profile USING gin (to_tsvector('simple', coalesce(profile_no,'') || ' ' || coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(plain_text,'') || ' ' || coalesce(province,'') || ' ' || coalesce(city,'') || ' ' || coalesce(cup_size,'')));
 
 CREATE TABLE IF NOT EXISTS hg_content_media (
