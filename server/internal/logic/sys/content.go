@@ -118,10 +118,22 @@ func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfile
 		)
 	}
 	if in.Province != "" {
-		mod = mod.Where(aliasField("p", profileColumns.Province), in.Province)
+		province := strings.TrimSpace(in.Province)
+		mod = mod.Where(
+			"("+aliasField("p", profileColumns.Province)+" = ? OR "+aliasField("p", profileColumns.Province)+" = ? OR "+aliasField("p", profileColumns.Province)+" LIKE ?)",
+			province,
+			province+"省",
+			province+"%",
+		)
 	}
 	if in.City != "" {
-		mod = mod.Where(aliasField("p", profileColumns.City), in.City)
+		city := strings.TrimSpace(in.City)
+		mod = mod.Where(
+			"("+aliasField("p", profileColumns.City)+" = ? OR "+aliasField("p", profileColumns.City)+" = ? OR "+aliasField("p", profileColumns.City)+" LIKE ?)",
+			city,
+			city+"市",
+			city+"%",
+		)
 	}
 	if in.AgeMin > 0 {
 		mod = mod.WhereGTE(aliasField("p", profileColumns.Age), in.AgeMin)
