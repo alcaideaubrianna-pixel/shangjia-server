@@ -127,9 +127,9 @@ INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type
 SELECT NULL, @monitorId, '保存审核配置', 'ContentImportSaveReviewConfig', '', '', '3', '', '/contentImport/saveReviewConfig', '', '', '1', '', '0', '0', '', '0', '1', '0', '3', CONCAT('tr_', @contentId, ' tr_', @monitorId, ' '), '60', '', '1', @now, @now
 WHERE NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'ContentImportSaveReviewConfig');
 
--- 自动同步任务：每 30 分钟执行一次。
+-- 自动同步任务：每分钟执行一次。
 INSERT INTO `hg_sys_cron` (`group_id`, `title`, `name`, `params`, `pattern`, `policy`, `count`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
-SELECT 1, 'FeiNiu 内容自动同步', 'content_import_feiniu', '', '0 */30 * * * *', 1, 0, 20, '每 30 分钟从 FeiNiu_bot 增量同步资料', 1, @now, @now
+SELECT 1, 'FeiNiu 内容自动同步', 'content_import_feiniu', '', '0 */1 * * * *', 1, 0, 20, '每分钟从 FeiNiu_bot 增量同步最多 200 条资料', 1, @now, @now
 WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_cron` WHERE `name` = 'content_import_feiniu');
 
 -- 默认授权给超级管理员和管理员。

@@ -12,8 +12,8 @@ func init() {
 	cron.Register(ContentImportFeiNiu)
 }
 
-// ContentImportFeiNiu 每 30 分钟从 FeiNiu_bot 增量导入内容。
-// 后台定时任务中配置任务名称 content_import_feiniu，cron 表达式 */30 * * * *。
+// ContentImportFeiNiu 每分钟从 FeiNiu_bot 增量导入内容。
+// 后台定时任务中配置任务名称 content_import_feiniu，cron 表达式 0 */1 * * * *。
 var ContentImportFeiNiu = &cContentImportFeiNiu{name: "content_import_feiniu"}
 
 type cContentImportFeiNiu struct {

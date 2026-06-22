@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/token"
@@ -21,10 +23,13 @@ const (
 	contentSourceFeiNiu      = "feiniu"
 	contentImportCronName    = "content_import_feiniu"
 	contentImportCronTitle   = "FeiNiu 内容自动同步"
+	contentImportCronPattern = "0 */1 * * * *"
 	contentReviewConfigGroup = "content_import_review"
 	feiNiuCosURLPrefix       = "https://sh-hk-qiuniu-1368574312.cos.ap-hongkong.myqcloud.com/"
 	feiNiuProxyCosPrefix     = "/prod-api/telegram/content-note/cos/"
 )
+
+var errFeiNiuMediaPending = errors.New("feiniu media pending")
 
 var introFeeRegexp = regexp.MustCompile(`(?im)(?:^|[\s，,。；;、|｜/／（(【\[])(?:介绍费|介紹費|中介费|中介費|服务费|服務費)\s*[:：]?\s*(?:[¥￥]?\s*)?[0-9０-９][0-9０-９,，.\s]*(?:元|块|w|W|万)?[^\n\r，,。；;、|｜）)】\]]*`)
 
@@ -421,11 +426,21 @@ LIMIT ?`, queryAfterNoteId, lastNoteId, batchSize)
 		}
 		mediaCount, importErr := s.importFeiNiuMedia(ctx, sourceDB, profileId, sourceNoteId, source["image_count"].Int()+source["video_count"].Int())
 		if importErr != nil {
+			if errors.Is(importErr, errFeiNiuMediaPending) {
+				_ = s.markFeiNiuProfileMediaPending(ctx, profileId)
+				_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, importErr)
+				continue
+			}
 			err = importErr
 			_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
 			return
 		}
 		if importErr = s.syncFeiNiuCoverMedia(ctx, profileId, source["cover_asset_id"].Int64()); importErr != nil {
+			err = importErr
+			_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
+			return
+		}
+		if importErr = s.markFeiNiuProfileMediaSynced(ctx, profileId); importErr != nil {
 			err = importErr
 			_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
 			return
@@ -440,8 +455,11 @@ LIMIT ?`, queryAfterNoteId, lastNoteId, batchSize)
 	}
 	repaired, err := s.repairFeiNiuMissingMedia(ctx, sourceDB, batchSize)
 	if err != nil {
+		if !errors.Is(err, errFeiNiuMediaPending) {
+			_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
+			return
+		}
 		_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
-		return
 	}
 	res.MediaImported += repaired
 	return
@@ -726,6 +744,7 @@ func (s *sSysContent) publicProfileWhere(mod *gdb.Model) *gdb.Model {
 	profileColumns := dao.ContentProfile.Columns()
 	return mod.
 		Where(aliasField("p", profileColumns.Status), 1).
+		WhereIn(aliasField("p", profileColumns.ImportStatus), []string{"imported", "duplicate"}).
 		Where(aliasField("p", profileColumns.ReviewStatus), consts.ContentReviewApproved).
 		WhereIn(aliasField("p", profileColumns.Visibility), []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly})
 }
@@ -748,21 +767,36 @@ func (s *sSysContent) fillImportAutoSyncOverview(ctx context.Context, res *sysin
 
 func (s *sSysContent) ensureContentImportCron(ctx context.Context) (data *entity.SysCron, err error) {
 	data, err = s.getContentImportCron(ctx)
-	if err != nil || data != nil {
+	if err != nil {
 		return
 	}
 	cronColumns := dao.SysCron.Columns()
 	now := gtime.Now()
+	if data != nil {
+		if data.Pattern != contentImportCronPattern || !strings.Contains(data.Remark, "每分钟") {
+			remark := "每分钟从 FeiNiu_bot 增量同步最多 200 条资料"
+			if _, err = dao.SysCron.Ctx(ctx).
+				Where(cronColumns.Id, data.Id).
+				Data(g.Map{cronColumns.Pattern: contentImportCronPattern, cronColumns.Remark: remark, cronColumns.UpdatedAt: now}).
+				Update(); err != nil {
+				return nil, gerror.Wrap(err, "更新内容自动同步任务配置失败")
+			}
+			data.Pattern = contentImportCronPattern
+			data.Remark = remark
+			data.UpdatedAt = now
+		}
+		return
+	}
 	id, err := dao.SysCron.Ctx(ctx).Data(g.Map{
 		cronColumns.GroupId:   1,
 		cronColumns.Title:     contentImportCronTitle,
 		cronColumns.Name:      contentImportCronName,
 		cronColumns.Params:    "",
-		cronColumns.Pattern:   "0 */30 * * * *",
+		cronColumns.Pattern:   contentImportCronPattern,
 		cronColumns.Policy:    consts.CronPolicySingle,
 		cronColumns.Count:     0,
 		cronColumns.Sort:      20,
-		cronColumns.Remark:    "每 30 分钟从 FeiNiu_bot 增量同步资料",
+		cronColumns.Remark:    "每分钟从 FeiNiu_bot 增量同步最多 200 条资料",
 		cronColumns.Status:    consts.StatusDisable,
 		cronColumns.CreatedAt: now,
 		cronColumns.UpdatedAt: now,
@@ -776,11 +810,11 @@ func (s *sSysContent) ensureContentImportCron(ctx context.Context) (data *entity
 		Title:     contentImportCronTitle,
 		Name:      contentImportCronName,
 		Params:    "",
-		Pattern:   "0 */30 * * * *",
+		Pattern:   contentImportCronPattern,
 		Policy:    consts.CronPolicySingle,
 		Count:     0,
 		Sort:      20,
-		Remark:    "每 30 分钟从 FeiNiu_bot 增量同步资料",
+		Remark:    "每分钟从 FeiNiu_bot 增量同步最多 200 条资料",
 		Status:    consts.StatusDisable,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -805,7 +839,7 @@ func (s *sSysContent) buildImportAutoSyncModel(sourceName string, cronData *enti
 	res := &sysin.ContentImportAutoSyncModel{
 		SourceName:      sourceName,
 		AutoSyncStatus:  "not_configured",
-		AutoSyncPattern: "0 */30 * * * *",
+		AutoSyncPattern: contentImportCronPattern,
 	}
 	if cronData == nil {
 		return res
@@ -1216,7 +1250,7 @@ ORDER BY b.sort_index ASC,b.block_id ASC`, sourceNoteId)
 		return
 	}
 	if expectedMediaCount > 0 && len(rows) < expectedMediaCount {
-		err = gerror.Newf("FeiNiu 媒体未就绪 note:%d expected:%d actual:%d", sourceNoteId, expectedMediaCount, len(rows))
+		err = fmt.Errorf("%w: FeiNiu 媒体未就绪 note:%d expected:%d actual:%d", errFeiNiuMediaPending, sourceNoteId, expectedMediaCount, len(rows))
 		return
 	}
 
@@ -1248,7 +1282,7 @@ ORDER BY b.sort_index ASC,b.block_id ASC`, sourceNoteId)
 			previewPath = firstNonEmpty(previewPath, feiNiuPosterURL(cosPath))
 		}
 		if !isFeiNiuMediaReady(mediaType, cosPath, displayPath) {
-			err = gerror.Newf("FeiNiu 媒体 COS 未就绪 note:%d asset:%d", sourceNoteId, assetId)
+			err = fmt.Errorf("%w: FeiNiu 媒体 COS 未就绪 note:%d asset:%d", errFeiNiuMediaPending, sourceNoteId, assetId)
 			return
 		}
 		duplicateMedia, checkDuplicateErr := s.getDuplicateMediaByMD5(ctx, mediaType, row["binary_md5"].String())
@@ -1301,6 +1335,50 @@ ORDER BY b.sort_index ASC,b.block_id ASC`, sourceNoteId)
 	return
 }
 
+func (s *sSysContent) markFeiNiuProfileMediaPending(ctx context.Context, profileId int64) error {
+	if profileId <= 0 {
+		return nil
+	}
+	profileColumns := dao.ContentProfile.Columns()
+	_, err := dao.ContentProfile.Ctx(ctx).
+		Where(profileColumns.Id, profileId).
+		Data(g.Map{profileColumns.ImportStatus: "media_pending", profileColumns.UpdatedAt: gtime.Now()}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "标记资料媒体待同步失败")
+	}
+	return nil
+}
+
+func (s *sSysContent) markFeiNiuProfileMediaSynced(ctx context.Context, profileId int64) error {
+	if profileId <= 0 {
+		return nil
+	}
+	profileColumns := dao.ContentProfile.Columns()
+	one, err := dao.ContentProfile.Ctx(ctx).
+		Fields(profileColumns.DuplicateOfId).
+		Where(profileColumns.Id, profileId).
+		One()
+	if err != nil {
+		return gerror.Wrap(err, "读取资料重复状态失败")
+	}
+	if one == nil {
+		return nil
+	}
+	importStatus := "imported"
+	if one[profileColumns.DuplicateOfId].Int64() > 0 {
+		importStatus = "duplicate"
+	}
+	_, err = dao.ContentProfile.Ctx(ctx).
+		Where(profileColumns.Id, profileId).
+		Data(g.Map{profileColumns.ImportStatus: importStatus, profileColumns.UpdatedAt: gtime.Now()}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "标记资料媒体已同步失败")
+	}
+	return nil
+}
+
 func (s *sSysContent) repairFeiNiuMissingMedia(ctx context.Context, sourceDB gdb.DB, limit int) (count int, err error) {
 	if limit <= 0 {
 		limit = 200
@@ -1329,10 +1407,19 @@ func (s *sSysContent) repairFeiNiuMissingMedia(ctx context.Context, sourceDB gdb
 	for _, row := range rows {
 		imported, importErr := s.importFeiNiuMedia(ctx, sourceDB, row[profileColumns.Id].Int64(), row[profileColumns.SourceNoteId].Int64(), row[profileColumns.ImageCount].Int()+row[profileColumns.VideoCount].Int())
 		if importErr != nil {
+			if errors.Is(importErr, errFeiNiuMediaPending) {
+				_ = s.markFeiNiuProfileMediaPending(ctx, row[profileColumns.Id].Int64())
+				err = importErr
+				continue
+			}
 			err = importErr
 			return
 		}
 		if importErr = s.syncFeiNiuCoverMedia(ctx, row[profileColumns.Id].Int64(), 0); importErr != nil {
+			err = importErr
+			return
+		}
+		if importErr = s.markFeiNiuProfileMediaSynced(ctx, row[profileColumns.Id].Int64()); importErr != nil {
 			err = importErr
 			return
 		}
