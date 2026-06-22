@@ -22,6 +22,8 @@ const (
 	contentImportCronName    = "content_import_feiniu"
 	contentImportCronTitle   = "FeiNiu 内容自动同步"
 	contentReviewConfigGroup = "content_import_review"
+	feiNiuCosURLPrefix       = "https://sh-hk-qiuniu-1368574312.cos.ap-hongkong.myqcloud.com/"
+	feiNiuProxyCosPrefix     = "/prod-api/telegram/content-note/cos/"
 )
 
 var introFeeRegexp = regexp.MustCompile(`(?im)(?:^|[\s，,。；;、|｜/／（(【\[])(?:介绍费|介紹費|中介费|中介費|服务费|服務費)\s*[:：]?\s*(?:[¥￥]?\s*)?[0-9０-９][0-9０-９,，.\s]*(?:元|块|w|W|万)?[^\n\r，,。；;、|｜）)】\]]*`)
@@ -419,6 +421,11 @@ LIMIT ?`, queryAfterNoteId, lastNoteId, batchSize)
 		}
 		mediaCount, importErr := s.importFeiNiuMedia(ctx, sourceDB, profileId, sourceNoteId, source["image_count"].Int()+source["video_count"].Int())
 		if importErr != nil {
+			err = importErr
+			_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
+			return
+		}
+		if importErr = s.syncFeiNiuCoverMedia(ctx, profileId, source["cover_asset_id"].Int64()); importErr != nil {
 			err = importErr
 			_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
 			return
@@ -1231,15 +1238,14 @@ ORDER BY b.sort_index ASC,b.block_id ASC`, sourceNoteId)
 		if mediaType == "" {
 			mediaType = consts.ContentMediaTypeImage
 		}
-		cosPath := row["cos_path"].String()
-		originPath := firstNonEmpty(row["origin_uri"].String(), cosPath)
-		previewPath := firstNonEmpty(row["preview_uri"].String(), row["local_preview_path"].String())
+		cosPath := normalizeFeiNiuCosPath(row["cos_path"].String())
+		cosURL := feiNiuCosURL(cosPath)
+		originPath := firstNonEmpty(cosURL, normalizeFeiNiuMediaURL(row["origin_uri"].String()), cosPath)
+		previewPath := firstNonEmpty(normalizeFeiNiuMediaURL(row["preview_uri"].String()), normalizeFeiNiuMediaURL(row["local_preview_path"].String()))
 		displayPath := firstNonEmpty(previewPath, originPath)
 		if mediaType == consts.ContentMediaTypeVideo {
-			displayPath = firstNonEmpty(cosPath, originPath)
-			if previewPath == "" && cosPath != "" {
-				previewPath = cosPath + ".poster.jpg"
-			}
+			displayPath = firstNonEmpty(cosURL, originPath)
+			previewPath = firstNonEmpty(previewPath, feiNiuPosterURL(cosPath))
 		}
 		if !isFeiNiuMediaReady(mediaType, cosPath, displayPath) {
 			err = gerror.Newf("FeiNiu 媒体 COS 未就绪 note:%d asset:%d", sourceNoteId, assetId)
@@ -1311,7 +1317,7 @@ func (s *sSysContent) repairFeiNiuMissingMedia(ctx context.Context, sourceDB gdb
 		Where(aliasField("p", profileColumns.Status), 1).
 		WhereGT(aliasField("p", profileColumns.ImageCount)+"+"+aliasField("p", profileColumns.VideoCount), 0).
 		Group(aliasField("p", profileColumns.Id)).
-		Having("COUNT(m.id)=0 OR SUM(CASE WHEN m.display_storage_path IS NULL OR m.display_storage_path='' THEN 1 ELSE 0 END)>0").
+		Having("COUNT(m.id)=0 OR SUM(CASE WHEN m.display_storage_path IS NULL OR m.display_storage_path='' OR m.display_storage_path LIKE '/prod-api/telegram/content-note/cos/%' OR m.display_storage_path LIKE 'telegram/content/%' OR m.preview_storage_path LIKE '/prod-api/telegram/content-note/cos/%' OR m.preview_storage_path LIKE 'telegram/content/%' THEN 1 ELSE 0 END)>0").
 		OrderDesc(aliasField("p", profileColumns.SourceUpdatedAt)).
 		OrderDesc(aliasField("p", profileColumns.Id)).
 		Limit(limit).
@@ -1326,9 +1332,57 @@ func (s *sSysContent) repairFeiNiuMissingMedia(ctx context.Context, sourceDB gdb
 			err = importErr
 			return
 		}
+		if importErr = s.syncFeiNiuCoverMedia(ctx, row[profileColumns.Id].Int64(), 0); importErr != nil {
+			err = importErr
+			return
+		}
 		count += imported
 	}
 	return
+}
+
+func (s *sSysContent) syncFeiNiuCoverMedia(ctx context.Context, profileId int64, coverAssetId int64) (err error) {
+	if profileId <= 0 {
+		return nil
+	}
+	profileColumns := dao.ContentProfile.Columns()
+	mediaColumns := dao.ContentMedia.Columns()
+	mod := dao.ContentMedia.Ctx(ctx).
+		Fields(mediaColumns.Id).
+		Where(mediaColumns.ProfileId, profileId).
+		Where(mediaColumns.MediaType, consts.ContentMediaTypeImage).
+		Where(mediaColumns.Status, 1)
+	if coverAssetId > 0 {
+		mod = mod.Where(mediaColumns.SourceAssetId, coverAssetId)
+	}
+	one, err := mod.OrderAsc(mediaColumns.SortIndex).OrderAsc(mediaColumns.Id).One()
+	if err != nil {
+		return gerror.Wrap(err, "读取封面媒体失败")
+	}
+	if one == nil && coverAssetId > 0 {
+		one, err = dao.ContentMedia.Ctx(ctx).
+			Fields(mediaColumns.Id).
+			Where(mediaColumns.ProfileId, profileId).
+			Where(mediaColumns.MediaType, consts.ContentMediaTypeImage).
+			Where(mediaColumns.Status, 1).
+			OrderAsc(mediaColumns.SortIndex).
+			OrderAsc(mediaColumns.Id).
+			One()
+		if err != nil {
+			return gerror.Wrap(err, "读取默认封面媒体失败")
+		}
+	}
+	if one == nil {
+		return nil
+	}
+	_, err = dao.ContentProfile.Ctx(ctx).
+		Where(profileColumns.Id, profileId).
+		Data(g.Map{profileColumns.CoverMediaId: one[mediaColumns.Id].Int64(), profileColumns.UpdatedAt: gtime.Now()}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "更新封面媒体失败")
+	}
+	return nil
 }
 
 func mapFeiNiuReviewStatus(status string, config *sysin.ContentImportReviewConfigModel) string {
@@ -1521,6 +1575,45 @@ func originalStoragePath(cosPath string, duplicateMediaId int64) string {
 		return ""
 	}
 	return cosPath
+}
+
+func normalizeFeiNiuCosPath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	value = strings.TrimPrefix(value, feiNiuCosURLPrefix)
+	value = strings.TrimPrefix(value, feiNiuProxyCosPrefix)
+	return strings.TrimLeft(value, "/")
+}
+
+func normalizeFeiNiuMediaURL(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if strings.HasPrefix(value, feiNiuProxyCosPrefix) {
+		return feiNiuCosURL(normalizeFeiNiuCosPath(value))
+	}
+	if strings.HasPrefix(value, "telegram/content/") {
+		return feiNiuCosURL(value)
+	}
+	return value
+}
+
+func feiNiuCosURL(path string) string {
+	path = normalizeFeiNiuCosPath(path)
+	if path == "" {
+		return ""
+	}
+	return feiNiuCosURLPrefix + path
+}
+
+func feiNiuPosterURL(cosPath string) string {
+	if cosPath == "" {
+		return ""
+	}
+	return feiNiuCosURL(cosPath + ".poster.jpg")
 }
 
 func isFeiNiuMediaReady(mediaType string, cosPath string, displayPath string) bool {
