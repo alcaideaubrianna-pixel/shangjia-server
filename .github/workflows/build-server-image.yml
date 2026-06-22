@@ -36,6 +36,7 @@ jobs:
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           echo "server=ghcr.io/${owner}/youban-server" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -124,3 +125,20 @@ jobs:
         run: |
           echo "### Published server image" >> "$GITHUB_STEP_SUMMARY"
           echo '${{ steps.server_meta.outputs.tags }}' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy server image
+        if: ${{ github.ref_name == 'develop' }}
+        env:
+          DEPLOY_URL: ${{ secrets.YOUBAN_DEPLOY_URL }}
+          DEPLOY_TOKEN: ${{ secrets.YOUBAN_DEPLOY_TOKEN }}
+          IMAGE: ${{ steps.image.outputs.server }}:sha-${{ steps.image.outputs.short_sha }}
+        run: |
+          if [ -z "$DEPLOY_URL" ] || [ -z "$DEPLOY_TOKEN" ]; then
+            echo "deploy webhook secrets are not configured, skip"
+            exit 0
+          fi
+          curl --fail --show-error --silent \
+            -X POST "$DEPLOY_URL" \
+            -H "Authorization: Bearer $DEPLOY_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data "{\"image\":\"$IMAGE\"}"
