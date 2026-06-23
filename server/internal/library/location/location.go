@@ -25,8 +25,9 @@ import (
 )
 
 const (
-	whoisApi = "https://whois.pconline.com.cn/ipJson.jsp?json=true&ip="
-	dyndns   = "http://members.3322.org/dyndns/getip" // 备用："https://ifconfig.co/ip"
+	whoisApi  = "https://whois.pconline.com.cn/ipJson.jsp?json=true&ip="
+	ipInfoApi = "https://ipinfo.io/"
+	dyndns    = "http://members.3322.org/dyndns/getip" // 备用："https://ifconfig.co/ip"
 )
 
 type IpLocationData struct {
@@ -51,6 +52,14 @@ type WhoisRegionData struct {
 	RegionCode string `json:"regionCode"`
 	Addr       string `json:"addr"`
 	Err        string `json:"err"`
+}
+
+type IpInfoRegionData struct {
+	Ip      string `json:"ip"`
+	City    string `json:"city"`
+	Region  string `json:"region"`
+	Country string `json:"country"`
+	Org     string `json:"org"`
 }
 
 var (
@@ -101,6 +110,66 @@ func WhoisLocation(ctx context.Context, ip string, retry ...int64) (*IpLocationD
 	}, nil
 }
 
+// IpInfoLocation 通过全球 IP 库查询 IP 归属地，主要用于 whois 对港澳台/海外 IP 返回不准确时兜底。
+func IpInfoLocation(ctx context.Context, ip string) (*IpLocationData, error) {
+	response, err := g.Client().Timeout(5*time.Second).Get(ctx, ipInfoApi+ip+"/json")
+	if err != nil {
+		return nil, err
+	}
+	defer response.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ipinfo status:%d", response.StatusCode)
+	}
+
+	var info *IpInfoRegionData
+	if err = gconv.Scan([]byte(response.ReadAllString()), &info); err != nil {
+		return nil, err
+	}
+	if info == nil {
+		return nil, fmt.Errorf("ipinfo empty response")
+	}
+
+	province := normalizeIpInfoProvince(info.Country, info.Region)
+	return &IpLocationData{
+		Ip:       info.Ip,
+		Country:  info.Country,
+		Region:   info.Region,
+		Province: province,
+		City:     info.City,
+		Area:     info.Org,
+	}, nil
+}
+
+func normalizeIpInfoProvince(country string, region string) string {
+	switch strings.ToUpper(strings.TrimSpace(country)) {
+	case "HK":
+		return "香港"
+	case "MO":
+		return "澳门"
+	case "TW":
+		return "台湾"
+	case "CN":
+		return strings.TrimSpace(region)
+	default:
+		return ""
+	}
+}
+
+func needsGlobalLocationFallback(data *IpLocationData) bool {
+	if data == nil {
+		return true
+	}
+	if strings.TrimSpace(data.Province) != "" {
+		return false
+	}
+	region := strings.ToLower(strings.TrimSpace(data.Region))
+	return region == "" ||
+		strings.Contains(region, "noprovince") ||
+		strings.Contains(region, "unknown") ||
+		strings.Contains(region, "未知")
+}
+
 // Cz88Find 通过Cz88的IP库查询IP归属地
 func Cz88Find(ctx context.Context, ip string) (*IpLocationData, error) {
 	loc, err := iploc.OpenWithoutIndexes("./resource/ip/qqwry-utf8.dat")
@@ -147,6 +216,11 @@ func GetLocation(ctx context.Context, ip string) (data *IpLocationData, err erro
 	switch mode {
 	case "whois":
 		data, err = WhoisLocation(ctx, ip)
+		if err == nil && needsGlobalLocationFallback(data) {
+			if fallback, fallbackErr := IpInfoLocation(ctx, ip); fallbackErr == nil && fallback != nil && strings.TrimSpace(fallback.Province) != "" {
+				data = fallback
+			}
+		}
 	default:
 		data, err = Cz88Find(ctx, ip)
 	}
