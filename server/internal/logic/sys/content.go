@@ -442,52 +442,35 @@ func (s *sSysContent) Regions(ctx context.Context) (res *sysin.ContentProfileReg
 	if err != nil {
 		return
 	}
+	total, provinceCountMap, cityCountMap, err := s.buildProfileRegionCountMaps(ctx)
+	if err != nil {
+		return
+	}
+	regions = applyRegionCounts(regions, total, provinceCountMap, cityCountMap, false)
 	res = &sysin.ContentProfileRegionsModel{Regions: regions}
 	_ = cache.Instance().Set(ctx, contentRegionsKey, res, 24*time.Hour)
 	return
 }
 
 func (s *sSysContent) buildProfileRegionOptions(ctx context.Context) (list []*sysin.ContentProfileRegionOption, err error) {
-	profileColumns := dao.ContentProfile.Columns()
-	var rows []*contentRegionAggRow
-	if err = s.publicProfileWhere(dao.ContentProfile.Ctx(ctx).As("p")).
-		Fields(aliasField("p", profileColumns.Province)+" AS province", aliasField("p", profileColumns.City)+" AS city", "COUNT(1) AS count").
-		WhereNot(aliasField("p", profileColumns.Province), "").
-		Group(aliasField("p", profileColumns.Province), aliasField("p", profileColumns.City)).
-		OrderDesc("count").
-		Scan(&rows); err != nil {
-		err = gerror.Wrap(err, "获取地区筛选数据失败")
-		return
-	}
-
 	standardRegions, err := s.buildStandardRegionOptions(ctx)
 	if err != nil {
 		return
 	}
-	total := 0
-	provinceCountMap := make(map[string]int)
-	cityCountMap := make(map[string]map[string]int)
-	for _, row := range rows {
-		province, city := normalizeProfileRegionForOption(row.Province, row.City)
-		if province == "" {
-			continue
-		}
-		total += row.Count
-		provinceCountMap[province] += row.Count
-		if city != "" && city != province {
-			if _, ok := cityCountMap[province]; !ok {
-				cityCountMap[province] = make(map[string]int)
-			}
-			cityCountMap[province][city] += row.Count
-		}
+	total, provinceCountMap, cityCountMap, err := s.buildProfileRegionCountMaps(ctx)
+	if err != nil {
+		return
 	}
+	return applyRegionCounts(standardRegions, total, provinceCountMap, cityCountMap, true), nil
+}
 
+func applyRegionCounts(regions []*sysin.ContentProfileRegionOption, total int, provinceCountMap map[string]int, cityCountMap map[string]map[string]int, onlyWithCount bool) (list []*sysin.ContentProfileRegionOption) {
 	list = []*sysin.ContentProfileRegionOption{{
 		Label: "全国",
 		Value: "",
 		Count: total,
 	}}
-	for _, region := range standardRegions {
+	for _, region := range regions {
 		if region.Value == "" {
 			continue
 		}
@@ -501,10 +484,42 @@ func (s *sSysContent) buildProfileRegionOptions(ctx context.Context) (list []*sy
 			}
 		}
 		item.Children = children
-		if item.Count == 0 && len(item.Children) == 0 {
+		if onlyWithCount && item.Count == 0 && len(item.Children) == 0 {
 			continue
 		}
 		list = append(list, item)
+	}
+	return
+}
+
+func (s *sSysContent) buildProfileRegionCountMaps(ctx context.Context) (total int, provinceCountMap map[string]int, cityCountMap map[string]map[string]int, err error) {
+	profileColumns := dao.ContentProfile.Columns()
+	var rows []*contentRegionAggRow
+	if err = s.publicProfileWhere(dao.ContentProfile.Ctx(ctx).As("p")).
+		Fields(aliasField("p", profileColumns.Province)+" AS province", aliasField("p", profileColumns.City)+" AS city", "COUNT(1) AS count").
+		WhereNot(aliasField("p", profileColumns.Province), "").
+		Group(aliasField("p", profileColumns.Province), aliasField("p", profileColumns.City)).
+		OrderDesc("count").
+		Scan(&rows); err != nil {
+		err = gerror.Wrap(err, "获取地区筛选数据失败")
+		return
+	}
+
+	provinceCountMap = make(map[string]int)
+	cityCountMap = make(map[string]map[string]int)
+	for _, row := range rows {
+		province, city := normalizeProfileRegionForOption(row.Province, row.City)
+		if province == "" {
+			continue
+		}
+		total += row.Count
+		provinceCountMap[province] += row.Count
+		if city != "" && city != province {
+			if _, ok := cityCountMap[province]; !ok {
+				cityCountMap[province] = make(map[string]int)
+			}
+			cityCountMap[province][city] += row.Count
+		}
 	}
 	return
 }
