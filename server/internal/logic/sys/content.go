@@ -126,8 +126,21 @@ func (s *sSysContent) HomeProfileCards(ctx context.Context, in *sysin.HomeProfil
 
 // ListProfiles 获取前台资料列表。
 func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfileListInp) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
-	profileColumns := dao.ContentProfile.Columns()
 	feed := normalizeHomeProfileFeed(in.Feed, in.Sort)
+	list, totalCount, err = s.listProfilesByFilter(ctx, in, feed)
+	if err != nil {
+		return
+	}
+	if feed == homeProfileFeedNearby && len(list) == 0 && in.Page <= 1 && in.Province != "" && in.City == "" && in.Keyword == "" {
+		fallbackInp := *in
+		fallbackInp.Province = ""
+		return s.listProfilesByFilter(ctx, &fallbackInp, feed)
+	}
+	return
+}
+
+func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.ContentProfileListInp, feed homeProfileFeed) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
+	profileColumns := dao.ContentProfile.Columns()
 	mod := dao.ContentProfile.Ctx(ctx).As("p")
 	mod = s.publicProfileWhere(mod)
 	if len(in.ExcludeActions) == 0 {
