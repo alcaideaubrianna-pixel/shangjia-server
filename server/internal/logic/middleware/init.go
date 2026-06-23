@@ -17,6 +17,7 @@ import (
 	"github.com/gogf/gf/v2/os/gctx"
 	"github.com/gogf/gf/v2/text/gstr"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"hotgo/internal/consts"
 	"hotgo/internal/library/addons"
 	"hotgo/internal/library/contexts"
@@ -28,6 +29,7 @@ import (
 	"hotgo/utility/validate"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type sMiddleware struct {
@@ -57,17 +59,24 @@ func NewMiddleware() *sMiddleware {
 
 // Ctx 初始化请求上下文
 func (s *sMiddleware) Ctx(r *ghttp.Request) {
+	start := time.Now()
+	var span *gtrace.Span
+
 	// 国际化
 	r.SetCtx(gi18n.WithLanguage(r.Context(), simple.GetHeaderLocale(r.Context())))
 
 	// 链路追踪
 	if g.Cfg().MustGet(r.Context(), "jaeger.switch").Bool() || g.Cfg().MustGet(r.Context(), "apm.switch").Bool() {
-		ctx, span := gtrace.NewSpan(r.Context(), r.Method+" "+r.URL.Path)
-		span.SetAttributes(attribute.KeyValue{
-			Key:   "traceID",
-			Value: attribute.StringValue(gctx.CtxId(ctx)),
-		})
-		span.End()
+		ctx, traceSpan := gtrace.NewSpan(r.Context(), r.Method+" "+r.URL.Path, trace.WithSpanKind(trace.SpanKindServer))
+		traceSpan.SetAttributes(
+			attribute.String("traceID", gctx.CtxId(ctx)),
+			attribute.String("http.method", r.Method),
+			attribute.String("http.path", r.URL.Path),
+			attribute.String("http.route", r.URL.Path),
+			attribute.String("http.target", r.RequestURI),
+			attribute.String("http.user_agent", r.UserAgent()),
+		)
+		span = traceSpan
 		r.SetCtx(ctx)
 	}
 
@@ -89,6 +98,14 @@ func (s *sMiddleware) Ctx(r *ghttp.Request) {
 
 	r.SetCtx(r.GetNeverDoneCtx())
 	r.Middleware.Next()
+
+	if span != nil {
+		span.SetAttributes(
+			attribute.Int("http.status_code", r.Response.Status),
+			attribute.Int64("http.duration_ms", time.Since(start).Milliseconds()),
+		)
+		span.End()
+	}
 }
 
 func getModule(path string) (module string) {
