@@ -73,6 +73,10 @@ type ContentProfileFilterOptionsModel struct {
 	Attributes []*ContentProfileAttributeOption `json:"attributes" dc:"属性选项"`
 }
 
+type ContentProfileRegionsModel struct {
+	Regions []*ContentProfileRegionOption `json:"regions" dc:"地区选项"`
+}
+
 type ContentProfileRegionOption struct {
 	Label    string                        `json:"label" dc:"显示名称"`
 	Value    string                        `json:"value" dc:"筛选值"`

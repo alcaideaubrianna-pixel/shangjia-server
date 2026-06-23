@@ -121,6 +121,8 @@ type (
 		HomeProfileCards(ctx context.Context, in *sysin.HomeProfileCardsInp) (list []*sysin.ContentProfileListModel, totalCount int, err error)
 		// FilterOptions 获取前台资料筛选选项
 		FilterOptions(ctx context.Context) (res *sysin.ContentProfileFilterOptionsModel, err error)
+		// Regions 获取前台地区目录
+		Regions(ctx context.Context) (res *sysin.ContentProfileRegionsModel, err error)
 		// ViewProfile 获取前台资料详情
 		ViewProfile(ctx context.Context, in *sysin.ContentProfileViewInp) (res *sysin.ContentProfileViewModel, err error)
 		// ImportFeiNiu 从 FeiNiu_bot 增量导入资料

@@ -45,6 +45,16 @@ func (c *ControllerV1) FilterOptions(ctx context.Context, req *v1.FilterOptionsR
 	return
 }
 
+func (c *ControllerV1) Regions(ctx context.Context, req *v1.RegionsReq) (res *v1.RegionsRes, err error) {
+	data, err := service.SysContent().Regions(ctx)
+	if err != nil {
+		return
+	}
+	res = new(v1.RegionsRes)
+	res.ContentProfileRegionsModel = data
+	return
+}
+
 func (c *ControllerV1) ViewProfile(ctx context.Context, req *v1.ViewProfileReq) (res *v1.ViewProfileRes, err error) {
 	data, err := service.SysContent().ViewProfile(ctx, &req.ContentProfileViewInp)
 	if err != nil {

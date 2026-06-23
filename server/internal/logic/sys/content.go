@@ -13,7 +13,6 @@ import (
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -32,6 +31,7 @@ const (
 	feiNiuCosURLPrefix       = "https://sh-hk-qiuniu-1368574312.cos.ap-hongkong.myqcloud.com/"
 	feiNiuProxyCosPrefix     = "/prod-api/telegram/content-note/cos/"
 	contentFilterOptionsKey  = "content:profile:filter_options"
+	contentRegionsKey        = "content:profile:regions"
 	contentProfileStatsTable = "hg_content_profile_stats"
 )
 
@@ -89,6 +89,21 @@ var cityProvinceMap = map[string]string{
 	"乌鲁木齐": "新疆", "拉萨": "西藏", "香港": "香港", "澳门": "澳门", "台北": "台湾",
 	"吉隆坡": "马来西亚", "新加坡": "新加坡", "东京": "日本", "大阪": "日本", "曼谷": "泰国",
 	"首尔": "韩国", "纽约": "美国", "洛杉矶": "美国", "旧金山": "美国", "伦敦": "英国",
+}
+
+var overseasRegionSeeds = map[string][]string{
+	"马来西亚": {"吉隆坡", "槟城"},
+	"新加坡":  {"新加坡"},
+	"日本":   {"东京", "大阪"},
+	"泰国":   {"曼谷"},
+	"美国":   {"纽约", "旧金山", "洛杉矶"},
+	"英国":   {"伦敦", "利兹"},
+	"澳大利亚": {"堪培拉", "墨尔本"},
+	"韩国":   {"首尔"},
+	"奥地利":  {"维也纳"},
+	"菲律宾":  {"马尼拉"},
+	"柬埔寨":  {"柬埔寨"},
+	"阿联酋":  {"迪拜"},
 }
 
 type sSysContent struct{}
@@ -415,6 +430,23 @@ func (s *sSysContent) FilterOptions(ctx context.Context) (res *sysin.ContentProf
 	return
 }
 
+func (s *sSysContent) Regions(ctx context.Context) (res *sysin.ContentProfileRegionsModel, err error) {
+	cacheVar, err := cache.Instance().Get(ctx, contentRegionsKey)
+	if err == nil && !cacheVar.IsNil() {
+		if err = cacheVar.Scan(&res); err == nil && res != nil {
+			return
+		}
+	}
+
+	regions, err := s.buildStandardRegionOptions(ctx)
+	if err != nil {
+		return
+	}
+	res = &sysin.ContentProfileRegionsModel{Regions: regions}
+	_ = cache.Instance().Set(ctx, contentRegionsKey, res, 24*time.Hour)
+	return
+}
+
 func (s *sSysContent) buildProfileRegionOptions(ctx context.Context) (list []*sysin.ContentProfileRegionOption, err error) {
 	profileColumns := dao.ContentProfile.Columns()
 	var rows []*contentRegionAggRow
@@ -428,9 +460,12 @@ func (s *sSysContent) buildProfileRegionOptions(ctx context.Context) (list []*sy
 		return
 	}
 
+	standardRegions, err := s.buildStandardRegionOptions(ctx)
+	if err != nil {
+		return
+	}
 	total := 0
-	provinceMap := make(map[string]*sysin.ContentProfileRegionOption)
-	provinceOrder := make([]string, 0)
+	provinceCountMap := make(map[string]int)
 	cityCountMap := make(map[string]map[string]int)
 	for _, row := range rows {
 		province, city := normalizeProfileRegionForOption(row.Province, row.City)
@@ -438,52 +473,128 @@ func (s *sSysContent) buildProfileRegionOptions(ctx context.Context) (list []*sy
 			continue
 		}
 		total += row.Count
-		parent, ok := provinceMap[province]
-		if !ok {
-			parent = &sysin.ContentProfileRegionOption{
-				Label:    province,
-				Value:    province,
-				Province: province,
-				Count:    0,
-				Children: []*sysin.ContentProfileRegionOption{},
-			}
-			provinceMap[province] = parent
-			provinceOrder = append(provinceOrder, province)
-		}
-		parent.Count += row.Count
+		provinceCountMap[province] += row.Count
 		if city != "" && city != province {
-			if _, ok = cityCountMap[province]; !ok {
+			if _, ok := cityCountMap[province]; !ok {
 				cityCountMap[province] = make(map[string]int)
 			}
 			cityCountMap[province][city] += row.Count
 		}
 	}
 
-	sort.SliceStable(provinceOrder, func(i, j int) bool {
-		return provinceMap[provinceOrder[i]].Count > provinceMap[provinceOrder[j]].Count
-	})
-
 	list = []*sysin.ContentProfileRegionOption{{
 		Label: "全国",
 		Value: "",
 		Count: total,
 	}}
-	for _, province := range provinceOrder {
-		item := provinceMap[province]
-		if cityMap := cityCountMap[province]; len(cityMap) > 0 {
-			for city, count := range cityMap {
-				item.Children = append(item.Children, &sysin.ContentProfileRegionOption{
-					Label:    city,
-					Value:    province + "/" + city,
-					Province: province,
-					City:     city,
-					Count:    count,
-				})
+	for _, region := range standardRegions {
+		if region.Value == "" {
+			continue
+		}
+		item := cloneRegionOption(region)
+		item.Count = provinceCountMap[item.Province]
+		children := make([]*sysin.ContentProfileRegionOption, 0, len(item.Children))
+		for _, child := range item.Children {
+			child.Count = cityCountMap[item.Province][child.City]
+			if child.Count > 0 {
+				children = append(children, child)
 			}
 		}
-		sort.SliceStable(item.Children, func(i, j int) bool {
-			return item.Children[i].Count > item.Children[j].Count
+		item.Children = children
+		if item.Count == 0 && len(item.Children) == 0 {
+			continue
+		}
+		list = append(list, item)
+	}
+	return
+}
+
+func (s *sSysContent) buildStandardRegionOptions(ctx context.Context) (list []*sysin.ContentProfileRegionOption, err error) {
+	cols := dao.SysProvinces.Columns()
+	var rows []*entity.SysProvinces
+	if err = dao.SysProvinces.Ctx(ctx).
+		Fields(cols.Id, cols.Title, cols.Pid, cols.Level, cols.Sort).
+		Where(cols.Status, consts.StatusEnabled).
+		WhereIn(cols.Level, []int{1, 2}).
+		OrderAsc(cols.Level).
+		OrderAsc(cols.Sort).
+		OrderAsc(cols.Id).
+		Scan(&rows); err != nil {
+		err = gerror.Wrap(err, "获取地区目录失败")
+		return
+	}
+
+	provinceMap := make(map[int64]*sysin.ContentProfileRegionOption)
+	order := make([]int64, 0)
+	for _, row := range rows {
+		title := normalizeProvinceAlias(cleanRegionToken(row.Title))
+		if title == "" {
+			title = cleanRegionToken(row.Title)
+		}
+		if title == "" {
+			continue
+		}
+		if row.Level == 1 {
+			if _, ok := provinceMap[row.Id]; ok {
+				continue
+			}
+			provinceMap[row.Id] = &sysin.ContentProfileRegionOption{
+				Label:    title,
+				Value:    title,
+				Province: title,
+				Children: []*sysin.ContentProfileRegionOption{},
+			}
+			order = append(order, row.Id)
+			continue
+		}
+		parent := provinceMap[row.Pid]
+		if parent == nil {
+			continue
+		}
+		city := normalizeCityForProvince(parent.Province, title)
+		if city == "" || city == parent.Province {
+			continue
+		}
+		parent.Children = append(parent.Children, &sysin.ContentProfileRegionOption{
+			Label:    city,
+			Value:    parent.Province + "/" + city,
+			Province: parent.Province,
+			City:     city,
 		})
+	}
+
+	list = []*sysin.ContentProfileRegionOption{{Label: "全国", Value: ""}}
+	exists := make(map[string]bool)
+	for _, id := range order {
+		item := provinceMap[id]
+		if item == nil || exists[item.Province] {
+			continue
+		}
+		exists[item.Province] = true
+		item.Children = dedupeRegionChildren(item.Children)
+		list = append(list, item)
+	}
+	for province, cities := range overseasRegionSeeds {
+		if exists[province] {
+			continue
+		}
+		item := &sysin.ContentProfileRegionOption{
+			Label:    province,
+			Value:    province,
+			Province: province,
+			Children: []*sysin.ContentProfileRegionOption{},
+		}
+		for _, city := range cities {
+			if city == province {
+				continue
+			}
+			item.Children = append(item.Children, &sysin.ContentProfileRegionOption{
+				Label:    city,
+				Value:    province + "/" + city,
+				Province: province,
+				City:     city,
+			})
+		}
 		list = append(list, item)
 	}
 	return
@@ -514,6 +625,40 @@ func normalizeProfileRegionForOption(provinceValue string, cityValue string) (pr
 		city = ""
 	}
 	return
+}
+
+func cloneRegionOption(region *sysin.ContentProfileRegionOption) *sysin.ContentProfileRegionOption {
+	item := &sysin.ContentProfileRegionOption{
+		Label:    region.Label,
+		Value:    region.Value,
+		Province: region.Province,
+		City:     region.City,
+		Count:    region.Count,
+		Children: make([]*sysin.ContentProfileRegionOption, 0, len(region.Children)),
+	}
+	for _, child := range region.Children {
+		item.Children = append(item.Children, &sysin.ContentProfileRegionOption{
+			Label:    child.Label,
+			Value:    child.Value,
+			Province: child.Province,
+			City:     child.City,
+			Count:    child.Count,
+		})
+	}
+	return item
+}
+
+func dedupeRegionChildren(children []*sysin.ContentProfileRegionOption) []*sysin.ContentProfileRegionOption {
+	seen := make(map[string]bool)
+	list := make([]*sysin.ContentProfileRegionOption, 0, len(children))
+	for _, child := range children {
+		if child == nil || child.City == "" || seen[child.City] {
+			continue
+		}
+		seen[child.City] = true
+		list = append(list, child)
+	}
+	return list
 }
 
 func cleanRegionToken(value string) string {
@@ -1618,6 +1763,7 @@ func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, 
 	if duplicateOfId > 0 && reviewConfig != nil && reviewConfig.FreezeDuplicate == 1 {
 		status = 2
 	}
+	province, city := normalizeProfileRegionForOption(source["province"].String(), source["city"].String())
 
 	now := gtime.Now()
 	data := g.Map{
@@ -1658,8 +1804,8 @@ func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, 
 		profileColumns.SourceUpdateBy:       source["update_by"].String(),
 		profileColumns.SourceCreatedAt:      source["create_time"].GTime(),
 		profileColumns.SourceUpdatedAt:      source["update_time"].GTime(),
-		profileColumns.Province:             source["province"].String(),
-		profileColumns.City:                 source["city"].String(),
+		profileColumns.Province:             province,
+		profileColumns.City:                 city,
 		profileColumns.Age:                  source["age"].Int(),
 		profileColumns.Height:               source["height"].Int(),
 		profileColumns.Weight:               source["weight"].Int(),

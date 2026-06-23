@@ -35,6 +35,14 @@ type FilterOptionsRes struct {
 	*sysin.ContentProfileFilterOptionsModel
 }
 
+type RegionsReq struct {
+	g.Meta `path:"/content/regions" method:"get" tags:"内容资料" summary:"获取公开地区目录"`
+}
+
+type RegionsRes struct {
+	*sysin.ContentProfileRegionsModel
+}
+
 type ViewProfileReq struct {
 	g.Meta `path:"/content/profile/view" method:"get" tags:"内容资料" summary:"获取公开资料详情"`
 	sysin.ContentProfileViewInp
