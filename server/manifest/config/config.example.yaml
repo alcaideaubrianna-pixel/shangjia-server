@@ -269,6 +269,9 @@ contentImport:
     dbGroup: "feiniu"                             # FeiNiu_bot 数据库分组
     batchSize: 200                                # 单次导入批量大小
 
+# 内容展示
+content:
+  cdnBaseUrl: ""                                  # 图片/视频 CDN 域名，如：https://cdn.example.com；为空时使用原始 COS 地址
 
 # 悦伴聊天
 youbanChat:

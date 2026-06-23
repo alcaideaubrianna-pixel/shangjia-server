@@ -196,14 +196,16 @@ func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfile
 		mod = mod.Where(aliasField("p", profileColumns.HasTattoo), 1)
 	}
 
-	totalCount, err = mod.Count()
-	if err != nil {
-		err = gerror.Wrap(err, "获取资料数据行失败")
-		return
-	}
-	if totalCount == 0 {
-		list = []*sysin.ContentProfileListModel{}
-		return
+	if in.WithTotal == 1 {
+		totalCount, err = mod.Count()
+		if err != nil {
+			err = gerror.Wrap(err, "获取资料数据行失败")
+			return
+		}
+		if totalCount == 0 {
+			list = []*sysin.ContentProfileListModel{}
+			return
+		}
 	}
 
 	mod = mod.Fields(
@@ -264,7 +266,7 @@ func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfile
 	}
 	for _, row := range rows {
 		item := row.toListModel()
-		item.CoverUrl = coverMap[row.Id]
+		item.CoverUrl = contentAssetURL(coverMap[row.Id])
 		item.Avatar = item.CoverUrl
 		item.Media = mediaMap[row.Id]
 		item.Photos = mediaPhotos(item.Media)
@@ -1094,7 +1096,7 @@ func (s *sSysContent) getProfileCoverUrl(ctx context.Context, profileId int64) (
 	if err != nil || one == nil {
 		return "", err
 	}
-	return one[mediaColumns.DisplayStoragePath].String(), nil
+	return contentAssetURL(one[mediaColumns.DisplayStoragePath].String()), nil
 }
 
 func (s *sSysContent) getProfileCoverMap(ctx context.Context, profileIds []int64) (res map[int64]string, err error) {
@@ -1121,7 +1123,7 @@ func (s *sSysContent) getProfileCoverMap(ctx context.Context, profileIds []int64
 		if _, exists := res[profileId]; exists {
 			continue
 		}
-		res[profileId] = row[mediaColumns.DisplayStoragePath].String()
+		res[profileId] = contentAssetURL(row[mediaColumns.DisplayStoragePath].String())
 	}
 	return
 }
@@ -1206,8 +1208,8 @@ func buildContentMediaModel(row gdb.Record, isMember bool, imageIndex int) *sysi
 	mediaColumns := dao.ContentMedia.Columns()
 	mediaType := row[mediaColumns.MediaType].String()
 	locked := !isMember && (mediaType == consts.ContentMediaTypeVideo || (mediaType == consts.ContentMediaTypeImage && imageIndex > 0))
-	displayUrl := row[mediaColumns.DisplayStoragePath].String()
-	previewUrl := row[mediaColumns.PreviewStoragePath].String()
+	displayUrl := contentAssetURL(row[mediaColumns.DisplayStoragePath].String())
+	previewUrl := contentAssetURL(row[mediaColumns.PreviewStoragePath].String())
 	if locked {
 		displayUrl = ""
 		previewUrl = ""
@@ -1913,6 +1915,24 @@ func feiNiuCosURL(path string) string {
 		return ""
 	}
 	return feiNiuCosURLPrefix + path
+}
+
+func contentAssetURL(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	cdnBase := strings.TrimRight(g.Cfg().MustGet(context.Background(), "content.cdnBaseUrl", "").String(), "/")
+	if cdnBase == "" {
+		return value
+	}
+	if strings.HasPrefix(value, feiNiuCosURLPrefix) {
+		return cdnBase + "/" + normalizeFeiNiuCosPath(value)
+	}
+	if strings.HasPrefix(value, feiNiuProxyCosPrefix) || strings.HasPrefix(value, "telegram/content/") {
+		return cdnBase + "/" + normalizeFeiNiuCosPath(value)
+	}
+	return value
 }
 
 func feiNiuPosterURL(cosPath string) string {

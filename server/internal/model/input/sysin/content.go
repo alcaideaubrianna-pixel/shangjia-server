@@ -34,6 +34,7 @@ type ContentProfileListInp struct {
 	AllowCreampie   int    `json:"allowCreampie" dc:"可内射"`
 	HasTattoo       int    `json:"hasTattoo" dc:"有纹身"`
 	Sort            string `json:"sort" dc:"排序"`
+	WithTotal       int    `json:"withTotal" dc:"是否返回总数"`
 	ExcludeActions  []string
 }
 
