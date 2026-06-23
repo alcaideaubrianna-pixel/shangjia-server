@@ -21,6 +21,20 @@ func (c *ControllerV1) ListProfiles(ctx context.Context, req *v1.ListProfilesReq
 	return
 }
 
+func (c *ControllerV1) HomeProfileCards(ctx context.Context, req *v1.HomeProfileCardsReq) (res *v1.HomeProfileCardsRes, err error) {
+	list, totalCount, err := service.SysContent().HomeProfileCards(ctx, &req.HomeProfileCardsInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.ContentProfileListModel{}
+	}
+	res = new(v1.HomeProfileCardsRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
 func (c *ControllerV1) FilterOptions(ctx context.Context, req *v1.FilterOptionsReq) (res *v1.FilterOptionsRes, err error) {
 	data, err := service.SysContent().FilterOptions(ctx)
 	if err != nil {

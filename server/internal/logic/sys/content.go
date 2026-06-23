@@ -7,6 +7,7 @@ import (
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/cache"
+	"hotgo/internal/library/location"
 	"hotgo/internal/library/token"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/sysin"
@@ -31,6 +32,7 @@ const (
 	feiNiuCosURLPrefix       = "https://sh-hk-qiuniu-1368574312.cos.ap-hongkong.myqcloud.com/"
 	feiNiuProxyCosPrefix     = "/prod-api/telegram/content-note/cos/"
 	contentFilterOptionsKey  = "content:profile:filter_options"
+	contentProfileStatsTable = "hg_content_profile_stats"
 )
 
 var errFeiNiuMediaPending = errors.New("feiniu media pending")
@@ -49,6 +51,14 @@ type contentOptionAggRow struct {
 	Value string `json:"value"`
 	Count int    `json:"count"`
 }
+
+type homeProfileFeed string
+
+const (
+	homeProfileFeedNearby homeProfileFeed = "nearby"
+	homeProfileFeedLatest homeProfileFeed = "latest"
+	homeProfileFeedHot    homeProfileFeed = "hot"
+)
 
 func NewSysContent() *sSysContent {
 	return &sSysContent{}
@@ -88,9 +98,36 @@ func coalesceZero(field string) string {
 	return "IFNULL(" + field + ",0)"
 }
 
+func normalizeHomeProfileFeed(feed string, sort string) homeProfileFeed {
+	switch strings.ToLower(strings.TrimSpace(feed)) {
+	case string(homeProfileFeedNearby), "recommend":
+		return homeProfileFeedNearby
+	case string(homeProfileFeedLatest), "fresh", "newest":
+		return homeProfileFeedLatest
+	case string(homeProfileFeedHot), "active":
+		return homeProfileFeedHot
+	}
+	switch strings.ToLower(strings.TrimSpace(sort)) {
+	case "hot":
+		return homeProfileFeedHot
+	case "latest", "fresh", "newest":
+		return homeProfileFeedLatest
+	default:
+		return homeProfileFeedNearby
+	}
+}
+
+func (s *sSysContent) HomeProfileCards(ctx context.Context, in *sysin.HomeProfileCardsInp) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
+	listInp := in.ContentProfileListInp
+	listInp.Feed = string(normalizeHomeProfileFeed(in.Feed, in.Sort))
+	listInp.Sort = listInp.Feed
+	return s.ListProfiles(ctx, &listInp)
+}
+
 // ListProfiles 获取前台资料列表。
 func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfileListInp) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
 	profileColumns := dao.ContentProfile.Columns()
+	feed := normalizeHomeProfileFeed(in.Feed, in.Sort)
 	mod := dao.ContentProfile.Ctx(ctx).As("p")
 	mod = s.publicProfileWhere(mod)
 	if len(in.ExcludeActions) == 0 {
@@ -99,7 +136,7 @@ func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfile
 	if memberId := s.requestMemberId(ctx); memberId > 0 {
 		mod = s.excludeMemberProfileActions(ctx, mod, memberId, in.ExcludeActions)
 	}
-	if in.Sort == "recommend" && in.Province == "" {
+	if feed == homeProfileFeedNearby && in.Province == "" {
 		in.Province = s.requestProvince(ctx)
 	}
 
@@ -228,21 +265,18 @@ func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfile
 		),
 	)
 	mod = mod.Page(in.Page, in.PerPage)
-	switch in.Sort {
-	case "hot":
-		viewColumns := dao.MemberProfileView.Columns()
+	switch feed {
+	case homeProfileFeedHot:
 		mod = mod.
-			LeftJoin(dao.MemberProfileView.Table()+" v", aliasField("v", viewColumns.ProfileId)+"="+aliasField("p", profileColumns.Id)+" AND "+aliasField("v", viewColumns.DeletedAt)+" IS NULL AND "+last24HoursCondition(aliasField("v", viewColumns.LastViewAt))).
-			Group(aliasField("p", profileColumns.Id)).
-			OrderDesc("SUM(" + coalesceZero(aliasField("v", viewColumns.ViewCount)) + ")").
-			OrderDesc(aliasField("p", profileColumns.PublishedAt)).
+			LeftJoin(contentProfileStatsTable+" ps", "ps.profile_id="+aliasField("p", profileColumns.Id)).
+			OrderDesc(coalesceZero("ps.hot_score")).
+			OrderDesc(coalesceZero("ps.view_24h")).
+			OrderDesc(aliasField("p", profileColumns.SourceCreatedAt)).
 			OrderDesc(aliasField("p", profileColumns.Id))
-	case "recommend":
-		mod = mod.OrderDesc(aliasField("p", profileColumns.PublishedAt)).OrderDesc(aliasField("p", profileColumns.Id))
-	case "latest", "newest":
-		mod = mod.OrderDesc(aliasField("p", profileColumns.PublishedAt)).OrderDesc(aliasField("p", profileColumns.Id))
+	case homeProfileFeedLatest:
+		mod = mod.OrderDesc(aliasField("p", profileColumns.SourceCreatedAt)).OrderDesc(aliasField("p", profileColumns.SourceNoteId)).OrderDesc(aliasField("p", profileColumns.Id))
 	default:
-		mod = mod.OrderDesc(aliasField("p", profileColumns.PublishedAt)).OrderDesc(aliasField("p", profileColumns.Id))
+		mod = mod.OrderDesc(aliasField("p", profileColumns.SourceCreatedAt)).OrderDesc(aliasField("p", profileColumns.SourceNoteId)).OrderDesc(aliasField("p", profileColumns.Id))
 	}
 
 	var rows []contentProfileRow
@@ -451,17 +485,40 @@ func (s *sSysContent) buildProfileAttributeOptions(ctx context.Context) (list []
 }
 
 func (s *sSysContent) requestProvince(ctx context.Context) string {
-	// 简单算法：优先使用请求头中的地理信息，取不到时保持全国推荐。
+	// 优先使用网关/CDN 注入的地理信息，取不到时用客户端 IP 做本地库解析。
 	r := g.RequestFromCtx(ctx)
 	if r == nil {
 		return ""
 	}
 	for _, key := range []string{"X-Province", "X-Region", "X-Real-Province"} {
 		if value := strings.TrimSpace(r.Header.Get(key)); value != "" {
-			return strings.TrimSuffix(value, "省")
+			return normalizeProvinceName(value)
 		}
 	}
-	return ""
+	clientIP := strings.TrimSpace(location.GetClientIp(r))
+	if clientIP == "" {
+		return ""
+	}
+	loc, err := location.GetLocation(ctx, clientIP)
+	if err != nil || loc == nil {
+		return ""
+	}
+	if loc.Province != "" {
+		return normalizeProvinceName(loc.Province)
+	}
+	return normalizeProvinceName(loc.Region)
+}
+
+func normalizeProvinceName(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimSuffix(value, "省")
+	value = strings.TrimSuffix(value, "市")
+	value = strings.TrimSuffix(value, "壮族自治区")
+	value = strings.TrimSuffix(value, "回族自治区")
+	value = strings.TrimSuffix(value, "维吾尔自治区")
+	value = strings.TrimSuffix(value, "自治区")
+	value = strings.TrimSuffix(value, "特别行政区")
+	return value
 }
 
 func (s *sSysContent) requestMemberId(ctx context.Context) int64 {

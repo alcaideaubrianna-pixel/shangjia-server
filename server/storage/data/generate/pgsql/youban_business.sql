@@ -251,6 +251,40 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_member_profile_view_active ON hg_member_pro
 CREATE INDEX IF NOT EXISTS idx_member_last_view ON hg_member_profile_view (member_id, last_view_at);
 CREATE INDEX IF NOT EXISTS idx_member_profile_view_profile ON hg_member_profile_view (profile_id);
 
+CREATE TABLE IF NOT EXISTS hg_content_profile_stats (
+  id bigserial PRIMARY KEY,
+  profile_id bigint NOT NULL DEFAULT 0,
+  view_total integer NOT NULL DEFAULT 0,
+  view_24h integer NOT NULL DEFAULT 0,
+  click_total integer NOT NULL DEFAULT 0,
+  hot_score integer NOT NULL DEFAULT 0,
+  last_view_at timestamp,
+  created_at timestamp,
+  updated_at timestamp
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_content_profile_stats_profile ON hg_content_profile_stats (profile_id);
+CREATE INDEX IF NOT EXISTS idx_content_profile_stats_hot ON hg_content_profile_stats (hot_score, view_24h, profile_id);
+CREATE INDEX IF NOT EXISTS idx_content_profile_stats_view ON hg_content_profile_stats (last_view_at, profile_id);
+
+INSERT INTO hg_content_profile_stats (profile_id, view_total, view_24h, click_total, hot_score, last_view_at, created_at, updated_at)
+SELECT profile_id,
+       COALESCE(SUM(view_count), 0),
+       COALESCE(SUM(view_count), 0),
+       0,
+       COALESCE(SUM(CASE WHEN last_view_at >= NOW() - INTERVAL '24 HOURS' THEN view_count ELSE 0 END), 0),
+       MAX(last_view_at),
+       NOW(),
+       NOW()
+FROM hg_member_profile_view
+WHERE deleted_at IS NULL
+GROUP BY profile_id
+ON CONFLICT (profile_id) DO UPDATE SET
+  view_total = EXCLUDED.view_total,
+  hot_score = EXCLUDED.hot_score,
+  view_24h = EXCLUDED.view_24h,
+  last_view_at = EXCLUDED.last_view_at,
+  updated_at = EXCLUDED.updated_at;
+
 CREATE TABLE IF NOT EXISTS hg_member_share (
   id bigserial PRIMARY KEY,
   member_id bigint NOT NULL DEFAULT 0,

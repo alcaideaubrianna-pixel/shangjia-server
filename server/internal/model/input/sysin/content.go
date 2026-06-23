@@ -10,6 +10,7 @@ import (
 
 type ContentProfileListInp struct {
 	form.PageReq
+	Feed            string `json:"feed" dc:"首页流：nearby/latest/hot"`
 	Keyword         string `json:"keyword" dc:"关键词"`
 	Province        string `json:"province" dc:"省份"`
 	City            string `json:"city" dc:"城市"`
@@ -36,6 +37,10 @@ type ContentProfileListInp struct {
 	Sort            string `json:"sort" dc:"排序"`
 	WithTotal       int    `json:"withTotal" dc:"是否返回总数"`
 	ExcludeActions  []string
+}
+
+type HomeProfileCardsInp struct {
+	ContentProfileListInp
 }
 
 type ContentProfileListModel struct {

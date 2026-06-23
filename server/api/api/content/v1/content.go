@@ -17,6 +17,16 @@ type ListProfilesRes struct {
 	List []*sysin.ContentProfileListModel `json:"list" dc:"资料列表"`
 }
 
+type HomeProfileCardsReq struct {
+	g.Meta `path:"/home/profile-cards" method:"get" tags:"首页" summary:"获取首页资料卡片"`
+	sysin.HomeProfileCardsInp
+}
+
+type HomeProfileCardsRes struct {
+	form.PageRes
+	List []*sysin.ContentProfileListModel `json:"list" dc:"资料卡片列表"`
+}
+
 type FilterOptionsReq struct {
 	g.Meta `path:"/content/filter/options" method:"get" tags:"内容资料" summary:"获取公开资料筛选选项"`
 }

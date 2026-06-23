@@ -117,6 +117,8 @@ type (
 	ISysContent interface {
 		// ListProfiles 获取前台资料列表
 		ListProfiles(ctx context.Context, in *sysin.ContentProfileListInp) (list []*sysin.ContentProfileListModel, totalCount int, err error)
+		// HomeProfileCards 获取首页资料卡片
+		HomeProfileCards(ctx context.Context, in *sysin.HomeProfileCardsInp) (list []*sysin.ContentProfileListModel, totalCount int, err error)
 		// FilterOptions 获取前台资料筛选选项
 		FilterOptions(ctx context.Context) (res *sysin.ContentProfileFilterOptionsModel, err error)
 		// ViewProfile 获取前台资料详情

@@ -408,6 +408,9 @@ func (s *sSysMemberApp) TraceRecord(ctx context.Context, in *sysin.MemberProfile
 		if err != nil {
 			err = gerror.Wrap(err, "更新浏览痕迹失败，请稍后重试")
 		}
+		if err = s.increaseProfileStats(ctx, in.ProfileId); err != nil {
+			err = gerror.Wrap(err, "更新资料热度失败，请稍后重试")
+		}
 		return
 	}
 	_, err = dao.MemberProfileView.Ctx(ctx).Data(g.Map{
@@ -418,8 +421,41 @@ func (s *sSysMemberApp) TraceRecord(ctx context.Context, in *sysin.MemberProfile
 	}).Insert()
 	if err != nil {
 		err = gerror.Wrap(err, "记录浏览痕迹失败，请稍后重试")
+		return
+	}
+	if err = s.increaseProfileStats(ctx, in.ProfileId); err != nil {
+		err = gerror.Wrap(err, "更新资料热度失败，请稍后重试")
 	}
 	return
+}
+
+func (s *sSysMemberApp) increaseProfileStats(ctx context.Context, profileId int64) error {
+	if profileId <= 0 {
+		return nil
+	}
+	now := gtime.Now().String()
+	if isPgsql() {
+		_, err := g.DB().Exec(ctx, `
+INSERT INTO hg_content_profile_stats (profile_id, view_total, view_24h, click_total, hot_score, last_view_at, created_at, updated_at)
+VALUES (?, 1, 1, 0, 1, ?, ?, ?)
+ON CONFLICT (profile_id) DO UPDATE SET
+  view_total = hg_content_profile_stats.view_total + 1,
+  view_24h = hg_content_profile_stats.view_24h + 1,
+  hot_score = hg_content_profile_stats.hot_score + 1,
+  last_view_at = EXCLUDED.last_view_at,
+  updated_at = EXCLUDED.updated_at`, profileId, now, now, now)
+		return err
+	}
+	_, err := g.DB().Exec(ctx, `
+INSERT INTO hg_content_profile_stats (profile_id, view_total, view_24h, click_total, hot_score, last_view_at, created_at, updated_at)
+VALUES (?, 1, 1, 0, 1, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+  view_total = view_total + 1,
+  view_24h = view_24h + 1,
+  hot_score = hot_score + 1,
+  last_view_at = VALUES(last_view_at),
+  updated_at = VALUES(updated_at)`, profileId, now, now, now)
+	return err
 }
 
 func (s *sSysMemberApp) Stats(ctx context.Context, in *sysin.MemberStatsInp) (res *sysin.MemberStatsModel, err error) {
