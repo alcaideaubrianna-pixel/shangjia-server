@@ -159,6 +159,7 @@ router:
     prefix: "/api"
     # 不需要验证登录的路由地址
     exceptLogin: [
+      "/home/profile-cards",
       "/content/profiles",
       "/content/profile/view",
       "/content/announcements",
