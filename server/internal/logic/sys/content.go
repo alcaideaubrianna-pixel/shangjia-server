@@ -38,6 +38,58 @@ const (
 var errFeiNiuMediaPending = errors.New("feiniu media pending")
 
 var introFeeRegexp = regexp.MustCompile(`(?im)(?:^|[\s，,。；;、|｜/／（(【\[])(?:介绍费|介紹費|中介费|中介費|服务费|服務費)\s*[:：]?\s*(?:[¥￥]?\s*)?[0-9０-９][0-9０-９,，.\s]*(?:元|块|w|W|万)?[^\n\r，,。；;、|｜）)】\]]*`)
+var regionNoiseRegexp = regexp.MustCompile(`(?i)(省份|城市|地区|区域|位置|坐标|地址|可|t8|T8|年龄|身高|体重|罩杯|编号|:|：|\(|\)|（|）|\[|\]|【|】)`)
+
+var provinceAliases = map[string]string{
+	"北京": "北京", "北京市": "北京",
+	"天津": "天津", "天津市": "天津",
+	"河北": "河北", "河北省": "河北",
+	"山西": "山西", "山西省": "山西",
+	"内蒙": "内蒙古", "内蒙古": "内蒙古", "内蒙古自治区": "内蒙古",
+	"辽宁": "辽宁", "辽宁省": "辽宁",
+	"吉林": "吉林", "吉林省": "吉林",
+	"黑龙江": "黑龙江", "黑龙江省": "黑龙江",
+	"上海": "上海", "上海市": "上海",
+	"江苏": "江苏", "江苏省": "江苏",
+	"浙江": "浙江", "浙江省": "浙江",
+	"安徽": "安徽", "安徽省": "安徽",
+	"福建": "福建", "福建省": "福建",
+	"江西": "江西", "江西省": "江西",
+	"山东": "山东", "山东省": "山东",
+	"河南": "河南", "河南省": "河南",
+	"湖北": "湖北", "湖北省": "湖北",
+	"湖南": "湖南", "湖南省": "湖南",
+	"广东": "广东", "广东省": "广东",
+	"广西": "广西", "广西壮族": "广西", "广西壮族自治区": "广西",
+	"海南": "海南", "海南省": "海南",
+	"重庆": "重庆", "重庆市": "重庆",
+	"四川": "四川", "四川省": "四川",
+	"贵州": "贵州", "贵州省": "贵州",
+	"云南": "云南", "云南省": "云南",
+	"西藏": "西藏", "西藏自治区": "西藏",
+	"陕西": "陕西", "陕西省": "陕西",
+	"甘肃": "甘肃", "甘肃省": "甘肃",
+	"青海": "青海", "青海省": "青海",
+	"宁夏": "宁夏", "宁夏回族自治区": "宁夏",
+	"新疆": "新疆", "新疆维吾尔自治区": "新疆",
+	"香港": "香港", "香港特别行政区": "香港", "中国香港": "香港",
+	"澳门": "澳门", "澳门特别行政区": "澳门",
+	"台湾": "台湾", "台湾省": "台湾",
+}
+
+var cityProvinceMap = map[string]string{
+	"北京": "北京", "天津": "天津", "上海": "上海", "重庆": "重庆",
+	"广州": "广东", "深圳": "广东", "佛山": "广东", "东莞": "广东", "珠海": "广东", "惠州": "广东", "中山": "广东",
+	"杭州": "浙江", "宁波": "浙江", "温州": "浙江", "绍兴": "浙江", "金华": "浙江", "义乌": "浙江", "嘉兴": "浙江",
+	"南京": "江苏", "苏州": "江苏", "无锡": "江苏", "常州": "江苏",
+	"成都": "四川", "武汉": "湖北", "长沙": "湖南", "郑州": "河南", "西安": "陕西", "昆明": "云南",
+	"厦门": "福建", "福州": "福建", "青岛": "山东", "济南": "山东", "合肥": "安徽", "南昌": "江西",
+	"太原": "山西", "沈阳": "辽宁", "大连": "辽宁", "长春": "吉林", "哈尔滨": "黑龙江",
+	"南宁": "广西", "海口": "海南", "贵阳": "贵州", "兰州": "甘肃", "银川": "宁夏", "西宁": "青海",
+	"乌鲁木齐": "新疆", "拉萨": "西藏", "香港": "香港", "澳门": "澳门", "台北": "台湾",
+	"吉隆坡": "马来西亚", "新加坡": "新加坡", "东京": "日本", "大阪": "日本", "曼谷": "泰国",
+	"首尔": "韩国", "纽约": "美国", "洛杉矶": "美国", "旧金山": "美国", "伦敦": "英国",
+}
 
 type sSysContent struct{}
 
@@ -380,11 +432,7 @@ func (s *sSysContent) buildProfileRegionOptions(ctx context.Context) (list []*sy
 	provinceMap := make(map[string]*sysin.ContentProfileRegionOption)
 	provinceOrder := make([]string, 0)
 	for _, row := range rows {
-		province := strings.TrimSpace(row.Province)
-		city := strings.TrimSpace(row.City)
-		if province == "" {
-			province = city
-		}
+		province, city := normalizeProfileRegionForOption(row.Province, row.City)
 		if province == "" {
 			continue
 		}
@@ -430,6 +478,94 @@ func (s *sSysContent) buildProfileRegionOptions(ctx context.Context) (list []*sy
 		list = append(list, item)
 	}
 	return
+}
+
+func normalizeProfileRegionForOption(provinceValue string, cityValue string) (province string, city string) {
+	province = cleanRegionToken(provinceValue)
+	city = cleanRegionToken(cityValue)
+	if normalized := normalizeProvinceAlias(province); normalized != "" {
+		province = normalized
+	} else if mapped := provinceByCity(province); mapped != "" {
+		city = firstKnownCity(province, city)
+		province = mapped
+	}
+	if province == "" {
+		if mapped := provinceByCity(city); mapped != "" {
+			province = mapped
+		}
+	}
+	if province == "" && city != "" {
+		province = city
+		city = ""
+	}
+	if city == province {
+		city = ""
+	}
+	return
+}
+
+func cleanRegionToken(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	value = strings.ReplaceAll(value, "，", ",")
+	value = strings.ReplaceAll(value, "、", ",")
+	value = strings.ReplaceAll(value, "／", "/")
+	value = strings.TrimSpace(regionNoiseRegexp.ReplaceAllString(value, ""))
+	for _, sep := range []string{"/", ",", " ", "\n", "\t"} {
+		if strings.Contains(value, sep) {
+			value = strings.TrimSpace(strings.Split(value, sep)[0])
+		}
+	}
+	return strings.TrimSpace(value)
+}
+
+func normalizeProvinceAlias(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if province, ok := provinceAliases[value]; ok {
+		return province
+	}
+	for alias, province := range provinceAliases {
+		if strings.HasPrefix(value, alias) {
+			return province
+		}
+	}
+	return ""
+}
+
+func provinceByCity(value string) string {
+	value = cleanRegionToken(value)
+	if value == "" {
+		return ""
+	}
+	if province, ok := cityProvinceMap[value]; ok {
+		return province
+	}
+	for city, province := range cityProvinceMap {
+		if strings.HasPrefix(value, city) {
+			return province
+		}
+	}
+	return ""
+}
+
+func firstKnownCity(values ...string) string {
+	for _, value := range values {
+		value = cleanRegionToken(value)
+		if value == "" {
+			continue
+		}
+		for city := range cityProvinceMap {
+			if value == city || strings.HasPrefix(value, city) {
+				return city
+			}
+		}
+	}
+	return ""
 }
 
 func (s *sSysContent) buildProfileCupOptions(ctx context.Context) (list []*sysin.ContentProfileFilterOption, err error) {

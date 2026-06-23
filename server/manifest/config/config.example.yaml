@@ -161,6 +161,7 @@ router:
     exceptLogin: [
       "/home/profile-cards",
       "/content/profiles",
+      "/content/filter/options",
       "/content/profile/view",
       "/content/announcements",
       "/member/getIdByCode",
