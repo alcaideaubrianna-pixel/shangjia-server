@@ -160,14 +160,7 @@ func needsGlobalLocationFallback(data *IpLocationData) bool {
 	if data == nil {
 		return true
 	}
-	if strings.TrimSpace(data.Province) != "" {
-		return false
-	}
-	region := strings.ToLower(strings.TrimSpace(data.Region))
-	return region == "" ||
-		strings.Contains(region, "noprovince") ||
-		strings.Contains(region, "unknown") ||
-		strings.Contains(region, "未知")
+	return strings.TrimSpace(data.Province) == ""
 }
 
 // Cz88Find 通过Cz88的IP库查询IP归属地
