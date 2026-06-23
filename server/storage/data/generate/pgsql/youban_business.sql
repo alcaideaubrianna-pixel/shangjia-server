@@ -105,6 +105,18 @@ CREATE INDEX IF NOT EXISTS idx_content_profile_public ON hg_content_profile (sta
 CREATE INDEX IF NOT EXISTS idx_content_profile_city ON hg_content_profile (province, city);
 CREATE INDEX IF NOT EXISTS idx_content_profile_duplicate ON hg_content_profile (duplicate_of_id);
 CREATE INDEX IF NOT EXISTS idx_content_profile_public_area ON hg_content_profile (status, review_status, import_status, visibility, province, city, published_at, id);
+CREATE INDEX IF NOT EXISTS idx_content_profile_public_latest_partial ON hg_content_profile (source_created_at DESC, source_note_id DESC, id DESC)
+  WHERE status = 1
+    AND review_status = 'approved'
+    AND import_status IN ('imported', 'duplicate')
+    AND visibility IN ('public', 'member_only')
+    AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_content_profile_public_area_latest_partial ON hg_content_profile (province, city, source_created_at DESC, source_note_id DESC, id DESC)
+  WHERE status = 1
+    AND review_status = 'approved'
+    AND import_status IN ('imported', 'duplicate')
+    AND visibility IN ('public', 'member_only')
+    AND deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_content_profile_admin_status ON hg_content_profile (review_status, visibility, import_status, status, id);
 CREATE INDEX IF NOT EXISTS idx_content_profile_admin_created ON hg_content_profile (created_at, id);
 CREATE INDEX IF NOT EXISTS idx_content_profile_admin_area ON hg_content_profile (province, city, id);

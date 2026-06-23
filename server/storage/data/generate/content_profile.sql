@@ -213,6 +213,20 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_public_latest') = 0,
+  'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_public_latest` (`status`, `review_status`, `import_status`, `visibility`, `source_created_at`, `source_note_id`, `id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_public_area_latest') = 0,
+  'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_public_area_latest` (`status`, `review_status`, `import_status`, `visibility`, `province`, `city`, `source_created_at`, `source_note_id`, `id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_admin_created') = 0,
   'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_admin_created` (`created_at`, `id`)',
   'SELECT 1');
