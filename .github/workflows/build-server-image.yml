@@ -137,13 +137,7 @@ jobs:
             echo "telegram secrets are not configured, skip"
             exit 0
           fi
-          text=$(cat <<EOF
-✅ <b>youban-server 构建成功</b>
-版本：${GITHUB_REF_NAME} / ${GITHUB_SHA::7}
-镜像：<code>${IMAGE}</code>
-仓库：${GITHUB_REPOSITORY}
-EOF
-)
+          text=$(printf '✅ <b>youban-server 构建成功</b>\n版本：%s / %s\n镜像：<code>%s</code>\n仓库：%s' "$GITHUB_REF_NAME" "${GITHUB_SHA::7}" "$IMAGE" "$GITHUB_REPOSITORY")
           curl --fail --show-error --silent \
             -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d "chat_id=${TELEGRAM_CHAT_ID}" \
@@ -161,14 +155,7 @@ EOF
             echo "telegram secrets are not configured, skip"
             exit 0
           fi
-          text=$(cat <<EOF
-❌ <b>youban-server 构建失败</b>
-版本：${GITHUB_REF_NAME} / ${GITHUB_SHA::7}
-镜像：<code>${IMAGE}</code>
-仓库：${GITHUB_REPOSITORY}
-日志：https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
-EOF
-)
+          text=$(printf '❌ <b>youban-server 构建失败</b>\n版本：%s / %s\n镜像：<code>%s</code>\n仓库：%s\n日志：https://github.com/%s/actions/runs/%s' "$GITHUB_REF_NAME" "${GITHUB_SHA::7}" "$IMAGE" "$GITHUB_REPOSITORY" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
           curl --fail --show-error --silent \
             -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d "chat_id=${TELEGRAM_CHAT_ID}" \
