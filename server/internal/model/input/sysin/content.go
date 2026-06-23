@@ -16,11 +16,15 @@ type ContentProfileListInp struct {
 	City            string `json:"city" dc:"城市"`
 	AgeMin          int    `json:"ageMin" dc:"最小年龄"`
 	AgeMax          int    `json:"ageMax" dc:"最大年龄"`
+	AgeRanges       string `json:"ageRanges" dc:"年龄范围，逗号分隔"`
 	HeightMin       int    `json:"heightMin" dc:"最小身高"`
 	HeightMax       int    `json:"heightMax" dc:"最大身高"`
+	HeightRanges    string `json:"heightRanges" dc:"身高范围，逗号分隔"`
 	WeightMin       int    `json:"weightMin" dc:"最小体重"`
 	WeightMax       int    `json:"weightMax" dc:"最大体重"`
+	WeightRanges    string `json:"weightRanges" dc:"体重范围，逗号分隔"`
 	Cup             string `json:"cup" dc:"资料标签"`
+	Cups            string `json:"cups" dc:"资料标签，逗号分隔"`
 	HasVideo        int    `json:"hasVideo" dc:"是否有视频"`
 	HasVerification int    `json:"hasVerification" dc:"是否有验证视频"`
 	CanFly          int    `json:"canFly" dc:"可飞外省"`

@@ -151,6 +151,69 @@ func isPgsql() bool {
 	return strings.EqualFold(g.DB().GetConfig().Type, consts.DBPgsql)
 }
 
+type contentFilterRange struct {
+	Min int
+	Max int
+}
+
+func splitFilterValues(value string) []string {
+	parts := strings.Split(value, ",")
+	list := make([]string, 0, len(parts))
+	seen := make(map[string]bool)
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || seen[part] {
+			continue
+		}
+		seen[part] = true
+		list = append(list, part)
+	}
+	return list
+}
+
+func parseFilterRanges(value string) []contentFilterRange {
+	values := splitFilterValues(value)
+	ranges := make([]contentFilterRange, 0, len(values))
+	for _, item := range values {
+		pair := strings.SplitN(item, "-", 2)
+		min := g.NewVar(pair[0]).Int()
+		max := 0
+		if len(pair) > 1 {
+			max = g.NewVar(pair[1]).Int()
+		}
+		if min <= 0 && max <= 0 {
+			continue
+		}
+		ranges = append(ranges, contentFilterRange{Min: min, Max: max})
+	}
+	return ranges
+}
+
+func applyRangeFilters(mod *gdb.Model, field string, ranges []contentFilterRange) *gdb.Model {
+	conditions := make([]string, 0, len(ranges))
+	args := make([]interface{}, 0, len(ranges)*2)
+	for _, item := range ranges {
+		if item.Min > 0 && item.Max > 0 {
+			conditions = append(conditions, "("+field+" >= ? AND "+field+" <= ?)")
+			args = append(args, item.Min, item.Max)
+			continue
+		}
+		if item.Min > 0 {
+			conditions = append(conditions, "("+field+" >= ?)")
+			args = append(args, item.Min)
+			continue
+		}
+		if item.Max > 0 {
+			conditions = append(conditions, "("+field+" <= ?)")
+			args = append(args, item.Max)
+		}
+	}
+	if len(conditions) == 0 {
+		return mod
+	}
+	return mod.Where("("+strings.Join(conditions, " OR ")+")", args...)
+}
+
 func last24HoursCondition(field string) string {
 	if isPgsql() {
 		return field + " >= NOW() - INTERVAL '24 HOURS'"
@@ -258,25 +321,36 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 			city+"%",
 		)
 	}
-	if in.AgeMin > 0 {
+	if in.AgeRanges != "" {
+		mod = applyRangeFilters(mod, aliasField("p", profileColumns.Age), parseFilterRanges(in.AgeRanges))
+	} else if in.AgeMin > 0 {
 		mod = mod.WhereGTE(aliasField("p", profileColumns.Age), in.AgeMin)
+		if in.AgeMax > 0 {
+			mod = mod.WhereLTE(aliasField("p", profileColumns.Age), in.AgeMax)
+		}
 	}
-	if in.AgeMax > 0 {
-		mod = mod.WhereLTE(aliasField("p", profileColumns.Age), in.AgeMax)
-	}
-	if in.HeightMin > 0 {
+	if in.HeightRanges != "" {
+		mod = applyRangeFilters(mod, aliasField("p", profileColumns.Height), parseFilterRanges(in.HeightRanges))
+	} else if in.HeightMin > 0 {
 		mod = mod.WhereGTE(aliasField("p", profileColumns.Height), in.HeightMin)
+		if in.HeightMax > 0 {
+			mod = mod.WhereLTE(aliasField("p", profileColumns.Height), in.HeightMax)
+		}
 	}
-	if in.HeightMax > 0 {
-		mod = mod.WhereLTE(aliasField("p", profileColumns.Height), in.HeightMax)
-	}
-	if in.WeightMin > 0 {
+	if in.WeightRanges != "" {
+		mod = applyRangeFilters(mod, aliasField("p", profileColumns.Weight), parseFilterRanges(in.WeightRanges))
+	} else if in.WeightMin > 0 {
 		mod = mod.WhereGTE(aliasField("p", profileColumns.Weight), in.WeightMin)
+		if in.WeightMax > 0 {
+			mod = mod.WhereLTE(aliasField("p", profileColumns.Weight), in.WeightMax)
+		}
 	}
-	if in.WeightMax > 0 {
-		mod = mod.WhereLTE(aliasField("p", profileColumns.Weight), in.WeightMax)
-	}
-	if in.Cup != "" {
+	if in.Cups != "" {
+		cups := splitFilterValues(in.Cups)
+		if len(cups) > 0 {
+			mod = mod.WhereIn(aliasField("p", profileColumns.CupSize), cups)
+		}
+	} else if in.Cup != "" {
 		mod = mod.Where(aliasField("p", profileColumns.CupSize), in.Cup)
 	}
 	if in.HasVideo == 1 {
