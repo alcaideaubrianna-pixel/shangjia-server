@@ -137,6 +137,7 @@ func (s *sSysMemberApp) listProfilesByMemberActionWithWhere(ctx context.Context,
 			profileColumns.VideoCount,
 			profileColumns.PublishedAt,
 		),
+		aliasField(alias, orderColumn)+" AS action_at",
 	).
 		Page(page, perPage).
 		OrderDesc(aliasField(alias, orderColumn)).
@@ -164,6 +165,7 @@ func (s *sSysMemberApp) listProfilesByMemberActionWithWhere(ctx context.Context,
 	list = make([]*sysin.ContentProfileListModel, 0, len(rows))
 	for _, row := range rows {
 		item := row.toListModel()
+		item.ActionAt = row.ActionAt
 		item.CoverUrl = coverMap[row.Id]
 		item.Avatar = item.CoverUrl
 		item.Media = mediaMap[row.Id]

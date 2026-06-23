@@ -69,6 +69,7 @@ type ContentProfileListModel struct {
 	Media       []*ContentMediaModel `json:"media" dc:"媒体列表"`
 	Photos      []string             `json:"photos" dc:"图片展示地址"`
 	PublishedAt *gtime.Time          `json:"publishedAt" dc:"发布时间"`
+	ActionAt    *gtime.Time          `json:"actionAt" dc:"用户动作时间"`
 }
 
 type ContentProfileFilterOptionsModel struct {
@@ -146,6 +147,17 @@ type ContentImportFeiNiuModel struct {
 	Duplicate      int   `json:"duplicate" dc:"重复数量"`
 	MediaImported  int   `json:"mediaImported" dc:"媒体导入数量"`
 	LastSourceNote int64 `json:"lastSourceNote" dc:"最后来源笔记ID"`
+}
+
+type ContentDedupePHashInp struct {
+	StartId int64 `json:"startId" dc:"起始资料ID"`
+	Limit   int   `json:"limit" dc:"处理上限"`
+}
+
+type ContentDedupePHashModel struct {
+	Scanned int   `json:"scanned" dc:"扫描资料数"`
+	Frozen  int   `json:"frozen" dc:"停用重复资料数"`
+	LastId  int64 `json:"lastId" dc:"最后扫描资料ID"`
 }
 
 type ContentImportOverviewInp struct {

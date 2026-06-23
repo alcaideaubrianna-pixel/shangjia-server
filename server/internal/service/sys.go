@@ -127,6 +127,8 @@ type (
 		ViewProfile(ctx context.Context, in *sysin.ContentProfileViewInp) (res *sysin.ContentProfileViewModel, err error)
 		// ImportFeiNiu 从 FeiNiu_bot 增量导入资料
 		ImportFeiNiu(ctx context.Context, in *sysin.ContentImportFeiNiuInp) (res *sysin.ContentImportFeiNiuModel, err error)
+		// DedupeProfilesByImagePHash 根据图片感知哈希停用重复资料
+		DedupeProfilesByImagePHash(ctx context.Context, in *sysin.ContentDedupePHashInp) (res *sysin.ContentDedupePHashModel, err error)
 		// ImportOverview 获取内容导入概览
 		ImportOverview(ctx context.Context, in *sysin.ContentImportOverviewInp) (res *sysin.ContentImportOverviewModel, err error)
 		// ImportRunList 获取内容导入运行记录

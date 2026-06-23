@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"hotgo/internal/consts"
@@ -13,6 +15,7 @@ import (
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,6 +36,7 @@ const (
 	contentFilterOptionsKey  = "content:profile:filter_options"
 	contentRegionsKey        = "content:profile:regions"
 	contentProfileStatsTable = "hg_content_profile_stats"
+	contentImagePHashSigKey  = "content:profile:image_phash_sig:"
 )
 
 var errFeiNiuMediaPending = errors.New("feiniu media pending")
@@ -304,10 +308,10 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 		)
 	}
 	if in.Province != "" {
-		mod = mod.Where(aliasField("p", profileColumns.Province), normalizeProvinceName(in.Province))
+		mod = mod.WhereIn(aliasField("p", profileColumns.Province), provinceFilterValues(in.Province))
 	}
 	if in.City != "" {
-		mod = mod.Where(aliasField("p", profileColumns.City), normalizeCityName(in.City))
+		mod = mod.WhereIn(aliasField("p", profileColumns.City), cityFilterValues(in.Province, in.City))
 	}
 	if in.AgeRanges != "" {
 		mod = applyRangeFilters(mod, aliasField("p", profileColumns.Age), parseFilterRanges(in.AgeRanges))
@@ -504,11 +508,6 @@ func (s *sSysContent) Regions(ctx context.Context) (res *sysin.ContentProfileReg
 	if err != nil {
 		return
 	}
-	total, provinceCountMap, cityCountMap, err := s.buildProfileRegionCountMaps(ctx)
-	if err != nil {
-		return
-	}
-	regions = applyRegionCounts(regions, total, provinceCountMap, cityCountMap, false)
 	res = &sysin.ContentProfileRegionsModel{Regions: regions}
 	_ = cache.Instance().Set(ctx, contentRegionsKey, res, 24*time.Hour)
 	return
@@ -933,7 +932,66 @@ func normalizeProvinceName(value string) string {
 func normalizeCityName(value string) string {
 	value = strings.TrimSpace(value)
 	value = strings.TrimSuffix(value, "市")
+	value = strings.TrimSuffix(value, "地区")
+	value = strings.TrimSuffix(value, "自治州")
+	value = strings.TrimSuffix(value, "盟")
 	return value
+}
+
+func provinceFilterValues(value string) []string {
+	raw := strings.TrimSpace(value)
+	normalized := normalizeProvinceName(raw)
+	values := uniqueNonEmptyStrings(raw, normalized)
+	switch normalized {
+	case "广西":
+		values = append(values, "广西壮族自治区")
+	case "宁夏":
+		values = append(values, "宁夏回族自治区")
+	case "新疆":
+		values = append(values, "新疆维吾尔自治区")
+	case "内蒙古", "西藏":
+		values = append(values, normalized+"自治区")
+	case "香港", "澳门":
+		values = append(values, normalized+"特别行政区", "中国"+normalized)
+	default:
+		if normalized != "" && normalized != raw {
+			values = append(values, normalized+"省", normalized+"市")
+		}
+	}
+	return uniqueNonEmptyStrings(values...)
+}
+
+func cityFilterValues(province string, city string) []string {
+	raw := strings.TrimSpace(city)
+	normalized := normalizeCityName(raw)
+	provinceName := normalizeProvinceName(province)
+	values := uniqueNonEmptyStrings(raw, normalized)
+	if normalized != "" {
+		values = append(values, normalized+"市", normalized+"地区", normalized+"自治州", normalized+"盟")
+		if provinceName != "" {
+			values = append(values,
+				provinceName+normalized,
+				provinceName+"省"+normalized,
+				provinceName+normalized+"市",
+				provinceName+"省"+normalized+"市",
+			)
+		}
+	}
+	return uniqueNonEmptyStrings(values...)
+}
+
+func uniqueNonEmptyStrings(values ...string) []string {
+	seen := make(map[string]bool)
+	list := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		list = append(list, value)
+	}
+	return list
 }
 
 func (s *sSysContent) requestMemberId(ctx context.Context) int64 {
@@ -1125,6 +1183,11 @@ LIMIT ?`, queryAfterNoteId, lastNoteId, batchSize)
 			_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
 			return
 		}
+		if importErr = s.freezeDuplicateProfileByImagePHash(ctx, profileId); importErr != nil {
+			err = importErr
+			_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
+			return
+		}
 		if importErr = s.markFeiNiuProfileMediaSynced(ctx, profileId); importErr != nil {
 			err = importErr
 			_ = s.saveCheckpointError(ctx, contentSourceFeiNiu, err)
@@ -1147,6 +1210,68 @@ LIMIT ?`, queryAfterNoteId, lastNoteId, batchSize)
 		_ = s.clearCheckpointError(ctx, contentSourceFeiNiu)
 	}
 	res.MediaImported += repaired
+	return
+}
+
+func (s *sSysContent) DedupeProfilesByImagePHash(ctx context.Context, in *sysin.ContentDedupePHashInp) (res *sysin.ContentDedupePHashModel, err error) {
+	if in == nil {
+		in = &sysin.ContentDedupePHashInp{}
+	}
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 1000
+	}
+	if limit > 10000 {
+		limit = 10000
+	}
+	res = &sysin.ContentDedupePHashModel{}
+	profileColumns := dao.ContentProfile.Columns()
+	mediaColumns := dao.ContentMedia.Columns()
+	query := dao.ContentProfile.Ctx(ctx).As("p").
+		Fields(aliasField("p", profileColumns.Id)).
+		LeftJoin(dao.ContentMedia.Table()+" m", aliasField("m", mediaColumns.ProfileId)+"="+aliasField("p", profileColumns.Id)).
+		Where(aliasField("p", profileColumns.Status), consts.StatusEnabled).
+		Where(aliasField("p", profileColumns.ReviewStatus), consts.ContentReviewApproved).
+		WhereIn(aliasField("p", profileColumns.ImportStatus), []string{"imported", "duplicate"}).
+		WhereIn(aliasField("p", profileColumns.Visibility), []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly}).
+		WhereNull(aliasField("p", profileColumns.DeletedAt)).
+		Where(aliasField("m", mediaColumns.MediaType), consts.ContentMediaTypeImage).
+		Where(aliasField("m", mediaColumns.Status), consts.StatusEnabled).
+		WhereNot(aliasField("m", mediaColumns.PerceptualHash), "")
+	if in.StartId > 0 {
+		query = query.Where(aliasField("p", profileColumns.Id)+">?", in.StartId)
+	}
+	rows, err := query.
+		Group(aliasField("p", profileColumns.Id)).
+		Having("COUNT(m.id)>0 AND COUNT(m.id)=COUNT(NULLIF(m.perceptual_hash,''))").
+		OrderAsc(aliasField("p", profileColumns.Id)).
+		Limit(limit).
+		All()
+	if err != nil {
+		err = gerror.Wrap(err, "读取图片感知哈希待去重资料失败")
+		return
+	}
+	for _, row := range rows {
+		profileId := row[profileColumns.Id].Int64()
+		if profileId <= 0 {
+			continue
+		}
+		res.LastId = profileId
+		res.Scanned++
+		duplicateOfId, signature, findErr := s.findDuplicateProfileByImagePHash(ctx, profileId)
+		if findErr != nil {
+			err = findErr
+			return
+		}
+		if duplicateOfId <= 0 {
+			continue
+		}
+		if freezeErr := s.freezeDuplicateProfile(ctx, profileId, duplicateOfId, signature); freezeErr != nil {
+			err = freezeErr
+			return
+		}
+		res.Frozen++
+	}
 	return
 }
 
@@ -2113,6 +2238,10 @@ func (s *sSysContent) repairFeiNiuMissingMedia(ctx context.Context, sourceDB gdb
 			err = importErr
 			return
 		}
+		if importErr = s.freezeDuplicateProfileByImagePHash(ctx, row[profileColumns.Id].Int64()); importErr != nil {
+			err = importErr
+			return
+		}
 		if importErr = s.markFeiNiuProfileMediaSynced(ctx, row[profileColumns.Id].Int64()); importErr != nil {
 			err = importErr
 			return
@@ -2289,6 +2418,177 @@ func (s *sSysContent) upsertFeiNiuSourceMap(ctx context.Context, profileId int64
 		err = gerror.Wrap(err, "保存内容来源映射失败")
 	}
 	return
+}
+
+func (s *sSysContent) freezeDuplicateProfileByImagePHash(ctx context.Context, profileId int64) (err error) {
+	duplicateOfId, signature, err := s.findDuplicateProfileByImagePHash(ctx, profileId)
+	if err != nil || duplicateOfId <= 0 {
+		return err
+	}
+	return s.freezeDuplicateProfile(ctx, profileId, duplicateOfId, signature)
+}
+
+func (s *sSysContent) freezeDuplicateProfile(ctx context.Context, profileId int64, duplicateOfId int64, signature string) (err error) {
+	profileColumns := dao.ContentProfile.Columns()
+	_, err = dao.ContentProfile.Ctx(ctx).
+		Where(profileColumns.Id, profileId).
+		Data(g.Map{
+			profileColumns.DuplicateOfId: duplicateOfId,
+			profileColumns.ImportStatus:  "duplicate",
+			profileColumns.Status:        consts.StatusDisable,
+			profileColumns.AdminRemark:   "图片感知哈希完全重复，自动停用",
+			profileColumns.UpdatedAt:     gtime.Now(),
+		}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "停用图片重复资料失败")
+	}
+	if signature != "" {
+		_ = cache.Instance().Set(ctx, imagePHashSignatureCacheKey(signature), duplicateOfId, 24*time.Hour)
+	}
+	return nil
+}
+
+func (s *sSysContent) findDuplicateProfileByImagePHash(ctx context.Context, profileId int64) (duplicateOfId int64, signature string, err error) {
+	signature, imageCount, err := s.profileImagePHashSignature(ctx, profileId)
+	if err != nil || signature == "" || imageCount == 0 {
+		return
+	}
+	cacheKey := imagePHashSignatureCacheKey(signature)
+	cacheVar, cacheErr := cache.Instance().Get(ctx, cacheKey)
+	if cacheErr == nil && !cacheVar.IsNil() {
+		cachedId := cacheVar.Int64()
+		if cachedId > 0 && cachedId != profileId {
+			ok, verifyErr := s.isActiveProfileImagePHashSignature(ctx, cachedId, signature, imageCount)
+			if verifyErr != nil {
+				err = verifyErr
+				return
+			}
+			if ok {
+				return cachedId, signature, nil
+			}
+		}
+	}
+
+	mediaColumns := dao.ContentMedia.Columns()
+	profileColumns := dao.ContentProfile.Columns()
+	rows, queryErr := dao.ContentMedia.Ctx(ctx).As("m").
+		Fields(aliasField("m", mediaColumns.ProfileId), aliasField("m", mediaColumns.PerceptualHash)).
+		LeftJoin(dao.ContentProfile.Table()+" p", aliasField("p", profileColumns.Id)+"="+aliasField("m", mediaColumns.ProfileId)).
+		Where(aliasField("m", mediaColumns.MediaType), consts.ContentMediaTypeImage).
+		Where(aliasField("m", mediaColumns.Status), consts.StatusEnabled).
+		WhereNot(aliasField("m", mediaColumns.PerceptualHash), "").
+		Where(aliasField("p", profileColumns.Status), consts.StatusEnabled).
+		Where(aliasField("p", profileColumns.ReviewStatus), consts.ContentReviewApproved).
+		WhereIn(aliasField("p", profileColumns.ImportStatus), []string{"imported", "duplicate"}).
+		WhereIn(aliasField("p", profileColumns.Visibility), []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly}).
+		WhereNull(aliasField("p", profileColumns.DeletedAt)).
+		Where(aliasField("m", mediaColumns.ProfileId)+"<>?", profileId).
+		Where(aliasField("m", mediaColumns.ProfileId)+"<?", profileId).
+		WhereIn(aliasField("m", mediaColumns.PerceptualHash), strings.Split(signature, "|")).
+		OrderAsc(aliasField("m", mediaColumns.ProfileId)).
+		All()
+	if queryErr != nil {
+		err = gerror.Wrap(queryErr, "查询图片感知哈希重复资料失败")
+		return
+	}
+
+	hashesByProfile := make(map[int64][]string)
+	for _, row := range rows {
+		id := row[mediaColumns.ProfileId].Int64()
+		hash := strings.TrimSpace(row[mediaColumns.PerceptualHash].String())
+		if id <= 0 || hash == "" {
+			continue
+		}
+		hashesByProfile[id] = append(hashesByProfile[id], hash)
+	}
+	candidateIds := make([]int64, 0, len(hashesByProfile))
+	for candidateId := range hashesByProfile {
+		candidateIds = append(candidateIds, candidateId)
+	}
+	sort.Slice(candidateIds, func(i, j int) bool {
+		return candidateIds[i] < candidateIds[j]
+	})
+	for _, candidateId := range candidateIds {
+		hashes := hashesByProfile[candidateId]
+		sort.Strings(hashes)
+		if strings.Join(hashes, "|") != signature {
+			continue
+		}
+		ok, verifyErr := s.isActiveProfileImagePHashSignature(ctx, candidateId, signature, imageCount)
+		if verifyErr != nil {
+			err = verifyErr
+			return
+		}
+		if ok {
+			duplicateOfId = candidateId
+			_ = cache.Instance().Set(ctx, cacheKey, duplicateOfId, 24*time.Hour)
+			return
+		}
+	}
+	_ = cache.Instance().Set(ctx, cacheKey, profileId, 24*time.Hour)
+	return
+}
+
+func (s *sSysContent) isActiveProfileImagePHashSignature(ctx context.Context, profileId int64, signature string, imageCount int) (ok bool, err error) {
+	profileColumns := dao.ContentProfile.Columns()
+	count, err := dao.ContentProfile.Ctx(ctx).
+		Where(profileColumns.Id, profileId).
+		Where(profileColumns.Status, consts.StatusEnabled).
+		Where(profileColumns.ReviewStatus, consts.ContentReviewApproved).
+		WhereIn(profileColumns.ImportStatus, []string{"imported", "duplicate"}).
+		WhereIn(profileColumns.Visibility, []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly}).
+		WhereNull(profileColumns.DeletedAt).
+		Count()
+	if err != nil {
+		err = gerror.Wrap(err, "校验图片重复资料状态失败")
+		return
+	}
+	if count == 0 {
+		return false, nil
+	}
+	currentSignature, currentImageCount, err := s.profileImagePHashSignature(ctx, profileId)
+	if err != nil {
+		return
+	}
+	ok = currentImageCount == imageCount && currentSignature == signature
+	return
+}
+
+func (s *sSysContent) profileImagePHashSignature(ctx context.Context, profileId int64) (signature string, imageCount int, err error) {
+	mediaColumns := dao.ContentMedia.Columns()
+	rows, err := dao.ContentMedia.Ctx(ctx).
+		Fields(mediaColumns.PerceptualHash).
+		Where(mediaColumns.ProfileId, profileId).
+		Where(mediaColumns.MediaType, consts.ContentMediaTypeImage).
+		Where(mediaColumns.Status, consts.StatusEnabled).
+		OrderAsc(mediaColumns.SortIndex).
+		OrderAsc(mediaColumns.Id).
+		Array()
+	if err != nil {
+		err = gerror.Wrap(err, "读取资料图片感知哈希失败")
+		return
+	}
+	imageCount = len(rows)
+	if imageCount == 0 {
+		return
+	}
+	hashes := make([]string, 0, len(rows))
+	for _, row := range rows {
+		hash := strings.TrimSpace(row.String())
+		if hash == "" {
+			return "", imageCount, nil
+		}
+		hashes = append(hashes, hash)
+	}
+	sort.Strings(hashes)
+	signature = strings.Join(hashes, "|")
+	return
+}
+
+func imagePHashSignatureCacheKey(signature string) string {
+	sum := sha1.Sum([]byte(signature))
+	return contentImagePHashSigKey + hex.EncodeToString(sum[:])
 }
 
 func (s *sSysContent) findDuplicateProfileId(ctx context.Context, sourceNoteId int64, duplicateNoteId int64, sourceInfo gdb.Record) (id int64, err error) {
@@ -2561,6 +2861,7 @@ type contentProfileRow struct {
 	VideoCount           int         `json:"videoCount"`
 	Visibility           string      `json:"visibility"`
 	PublishedAt          *gtime.Time `json:"publishedAt"`
+	ActionAt             *gtime.Time `json:"actionAt"`
 }
 
 func (row contentProfileRow) toListModel() *sysin.ContentProfileListModel {

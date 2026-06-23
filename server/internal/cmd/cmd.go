@@ -36,6 +36,7 @@ var (
 		---------------------------------------------------------------------------------
 		工具
 		>> 释放casbin权限，用于清理无效的权限设置  [go run main.go tools -m=casbin -a1=refresh]
+		>> 清理图片感知哈希完全重复的资料  [go run main.go tools -m=content -a1=dedupePHash -startId=0 -limit=10000]
 		>> 打印所有打包的资源文件列表  [go run main.go tools -m=gres -a1=dump]
 		>> 打印指定打包的资源文件内容  [go run main.go tools -m=gres -a1=content -a2=resource/template/home/index.html]
 		---------------------------------------------------------------------------------

@@ -13,6 +13,8 @@ import (
 	"github.com/gogf/gf/v2/os/gcmd"
 	"github.com/gogf/gf/v2/os/gres"
 	"hotgo/internal/library/casbin"
+	"hotgo/internal/model/input/sysin"
+	"hotgo/internal/service"
 )
 
 var (
@@ -37,6 +39,8 @@ var (
 			switch method {
 			case "casbin":
 				err = handleCasbin(ctx, args)
+			case "content":
+				err = handleContent(ctx, args)
 			case "gres":
 				err = handleGRes(ctx, args)
 			default:
@@ -67,6 +71,29 @@ func handleCasbin(ctx context.Context, args map[string]string) (err error) {
 		err = casbin.Refresh(ctx)
 	default:
 		err = gerror.Newf("casbin a1 is invalid, a1:%v", a1)
+	}
+	return
+}
+
+func handleContent(ctx context.Context, args map[string]string) (err error) {
+	a1, ok := args["a1"]
+	if !ok {
+		err = gerror.New("content args cannot be empty.")
+		return
+	}
+
+	switch a1 {
+	case "dedupePHash":
+		res, dedupeErr := service.SysContent().DedupeProfilesByImagePHash(ctx, &sysin.ContentDedupePHashInp{
+			StartId: g.NewVar(args["startId"]).Int64(),
+			Limit:   g.NewVar(args["limit"]).Int(),
+		})
+		if dedupeErr != nil {
+			return dedupeErr
+		}
+		g.Log().Infof(ctx, "content dedupe phash done, scanned:%d frozen:%d lastId:%d", res.Scanned, res.Frozen, res.LastId)
+	default:
+		err = gerror.Newf("content a1 is invalid, a1:%v", a1)
 	}
 	return
 }
