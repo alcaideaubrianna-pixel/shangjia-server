@@ -85,6 +85,23 @@ CREATE TABLE IF NOT EXISTS `hg_content_profile` (
   KEY `idx_content_profile_duplicate` (`duplicate_of_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容_资料';
 
+CREATE TABLE IF NOT EXISTS `hg_sys_ip_location_cache` (
+  `ip` varchar(64) NOT NULL COMMENT 'IP地址',
+  `country` varchar(64) DEFAULT NULL COMMENT '国家',
+  `region` varchar(128) DEFAULT NULL COMMENT '地区',
+  `province` varchar(128) DEFAULT NULL COMMENT '省份',
+  `province_code` bigint(20) NOT NULL DEFAULT '0' COMMENT '省份编码',
+  `city` varchar(128) DEFAULT NULL COMMENT '城市',
+  `city_code` bigint(20) NOT NULL DEFAULT '0' COMMENT '城市编码',
+  `area` varchar(255) DEFAULT NULL COMMENT '区域',
+  `area_code` bigint(20) NOT NULL DEFAULT '0' COMMENT '区域编码',
+  `expires_at` datetime NOT NULL COMMENT '过期时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`ip`),
+  KEY `idx_sys_ip_location_cache_expires` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统_IP归属地缓存';
+
 CREATE TABLE IF NOT EXISTS `hg_content_media` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
   `profile_id` bigint(20) NOT NULL COMMENT '资料ID',

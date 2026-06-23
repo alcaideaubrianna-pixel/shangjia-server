@@ -8,17 +8,20 @@ package location
 import (
 	"context"
 	"fmt"
+	"hotgo/internal/consts"
 	"hotgo/utility/validate"
 	"io"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/encoding/gcharset"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/gconv"
 	"github.com/kayon/iploc"
@@ -28,6 +31,9 @@ const (
 	whoisApi  = "https://whois.pconline.com.cn/ipJson.jsp?json=true&ip="
 	ipInfoApi = "https://ipinfo.io/"
 	dyndns    = "http://members.3322.org/dyndns/getip" // 备用："https://ifconfig.co/ip"
+
+	ipLocationCacheTable = "hg_sys_ip_location_cache"
+	ipLocationCacheTTL   = 30 * 24 * time.Hour
 )
 
 type IpLocationData struct {
@@ -63,8 +69,23 @@ type IpInfoRegionData struct {
 }
 
 var (
-	defaultRetry int64 = 3 // 默认重试次数
+	defaultRetry                 int64 = 3 // 默认重试次数
+	initIpLocationCacheTableOnce sync.Once
+	initIpLocationCacheTableErr  error
 )
+
+type ipLocationCacheRow struct {
+	Ip           string      `json:"ip" orm:"ip"`
+	Country      string      `json:"country" orm:"country"`
+	Region       string      `json:"region" orm:"region"`
+	Province     string      `json:"province" orm:"province"`
+	ProvinceCode int64       `json:"provinceCode" orm:"province_code"`
+	City         string      `json:"city" orm:"city"`
+	CityCode     int64       `json:"cityCode" orm:"city_code"`
+	Area         string      `json:"area" orm:"area"`
+	AreaCode     int64       `json:"areaCode" orm:"area_code"`
+	ExpiresAt    *gtime.Time `json:"expiresAt" orm:"expires_at"`
+}
 
 // WhoisLocation 通过Whois接口查询IP归属地
 func WhoisLocation(ctx context.Context, ip string, retry ...int64) (*IpLocationData, error) {
@@ -163,6 +184,155 @@ func needsGlobalLocationFallback(data *IpLocationData) bool {
 	return strings.TrimSpace(data.Province) == ""
 }
 
+func getCachedLocationFromDB(ctx context.Context, ip string) (*IpLocationData, error) {
+	if err := ensureIpLocationCacheTable(ctx); err != nil {
+		return nil, err
+	}
+	var row *ipLocationCacheRow
+	err := g.DB().Model(ipLocationCacheTable).
+		Ctx(ctx).
+		Where("ip", ip).
+		Where("expires_at > ?", gtime.Now()).
+		Scan(&row)
+	if err != nil || row == nil {
+		return nil, err
+	}
+	return &IpLocationData{
+		Ip:           row.Ip,
+		Country:      row.Country,
+		Region:       row.Region,
+		Province:     row.Province,
+		ProvinceCode: row.ProvinceCode,
+		City:         row.City,
+		CityCode:     row.CityCode,
+		Area:         row.Area,
+		AreaCode:     row.AreaCode,
+	}, nil
+}
+
+func setCachedLocationToDB(ctx context.Context, ip string, data *IpLocationData) {
+	if data == nil {
+		return
+	}
+	if err := ensureIpLocationCacheTable(ctx); err != nil {
+		g.Log().Warningf(ctx, "初始化IP归属地缓存表失败 ip:%s err:%+v", ip, err)
+		return
+	}
+	expiresAt := gtime.New(time.Now().Add(ipLocationCacheTTL))
+	now := gtime.Now()
+	if isPgsql() {
+		_, err := g.DB().Exec(ctx, `
+INSERT INTO hg_sys_ip_location_cache
+  (ip, country, region, province, province_code, city, city_code, area, area_code, expires_at, created_at, updated_at)
+VALUES
+  (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (ip) DO UPDATE SET
+  country = EXCLUDED.country,
+  region = EXCLUDED.region,
+  province = EXCLUDED.province,
+  province_code = EXCLUDED.province_code,
+  city = EXCLUDED.city,
+  city_code = EXCLUDED.city_code,
+  area = EXCLUDED.area,
+  area_code = EXCLUDED.area_code,
+  expires_at = EXCLUDED.expires_at,
+  updated_at = EXCLUDED.updated_at`,
+			ip, data.Country, data.Region, data.Province, data.ProvinceCode, data.City, data.CityCode, data.Area, data.AreaCode, expiresAt, now, now,
+		)
+		if err != nil {
+			g.Log().Warningf(ctx, "写入IP归属地缓存失败 ip:%s err:%+v", ip, err)
+		}
+		return
+	}
+
+	_, err := g.DB().Exec(ctx, `
+INSERT INTO hg_sys_ip_location_cache
+  (ip, country, region, province, province_code, city, city_code, area, area_code, expires_at, created_at, updated_at)
+VALUES
+  (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+  country = VALUES(country),
+  region = VALUES(region),
+  province = VALUES(province),
+  province_code = VALUES(province_code),
+  city = VALUES(city),
+  city_code = VALUES(city_code),
+  area = VALUES(area),
+  area_code = VALUES(area_code),
+  expires_at = VALUES(expires_at),
+  updated_at = VALUES(updated_at)`,
+		ip, data.Country, data.Region, data.Province, data.ProvinceCode, data.City, data.CityCode, data.Area, data.AreaCode, expiresAt, now, now,
+	)
+	if err != nil {
+		g.Log().Warningf(ctx, "写入IP归属地缓存失败 ip:%s err:%+v", ip, err)
+	}
+}
+
+func ensureIpLocationCacheTable(ctx context.Context) error {
+	initIpLocationCacheTableOnce.Do(func() {
+		defer func() {
+			if exception := recover(); exception != nil {
+				initIpLocationCacheTableErr = fmt.Errorf("init ip location cache table panic: %v", exception)
+			}
+		}()
+		var sql string
+		if isPgsql() {
+			sql = `
+CREATE TABLE IF NOT EXISTS hg_sys_ip_location_cache (
+  ip varchar(64) PRIMARY KEY,
+  country varchar(64),
+  region varchar(128),
+  province varchar(128),
+  province_code bigint NOT NULL DEFAULT 0,
+  city varchar(128),
+  city_code bigint NOT NULL DEFAULT 0,
+  area varchar(255),
+  area_code bigint NOT NULL DEFAULT 0,
+  expires_at timestamp NOT NULL,
+  created_at timestamp,
+  updated_at timestamp
+);
+CREATE INDEX IF NOT EXISTS idx_sys_ip_location_cache_expires ON hg_sys_ip_location_cache (expires_at);`
+		} else {
+			sql = `
+CREATE TABLE IF NOT EXISTS hg_sys_ip_location_cache (
+  ip varchar(64) NOT NULL,
+  country varchar(64) DEFAULT NULL,
+  region varchar(128) DEFAULT NULL,
+  province varchar(128) DEFAULT NULL,
+  province_code bigint NOT NULL DEFAULT 0,
+  city varchar(128) DEFAULT NULL,
+  city_code bigint NOT NULL DEFAULT 0,
+  area varchar(255) DEFAULT NULL,
+  area_code bigint NOT NULL DEFAULT 0,
+  expires_at datetime NOT NULL,
+  created_at datetime DEFAULT NULL,
+  updated_at datetime DEFAULT NULL,
+  PRIMARY KEY (ip),
+  KEY idx_sys_ip_location_cache_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
+		}
+		for _, statement := range strings.Split(sql, ";") {
+			statement = strings.TrimSpace(statement)
+			if statement == "" {
+				continue
+			}
+			if _, err := g.DB().Exec(ctx, statement); err != nil {
+				initIpLocationCacheTableErr = err
+				return
+			}
+		}
+	})
+	return initIpLocationCacheTableErr
+}
+
+func isPgsql() bool {
+	defer func() {
+		recover()
+	}()
+	return strings.EqualFold(g.DB().GetConfig().Type, consts.DBPgsql)
+}
+
 // Cz88Find 通过Cz88的IP库查询IP归属地
 func Cz88Find(ctx context.Context, ip string) (*IpLocationData, error) {
 	loc, err := iploc.OpenWithoutIndexes("./resource/ip/qqwry-utf8.dat")
@@ -198,11 +368,20 @@ func GetLocation(ctx context.Context, ip string) (data *IpLocationData, err erro
 		return cache.GetIpCache(ip)
 	}
 
+	if data, err = getCachedLocationFromDB(ctx, ip); err == nil && data != nil {
+		cache.SetIpCache(ip, data)
+		return data, nil
+	}
+
 	cache.Lock()
 	defer cache.Unlock()
 
 	if cache.Contains(ip) {
 		return cache.GetIpCache(ip)
+	}
+	if data, err = getCachedLocationFromDB(ctx, ip); err == nil && data != nil {
+		cache.SetIpCache(ip, data)
+		return data, nil
 	}
 
 	mode := g.Cfg().MustGet(ctx, "system.ipMethod", "cz88").String()
@@ -220,6 +399,7 @@ func GetLocation(ctx context.Context, ip string) (data *IpLocationData, err erro
 
 	if err == nil && data != nil {
 		cache.SetIpCache(ip, data)
+		setCachedLocationToDB(ctx, ip, data)
 	}
 	return
 }

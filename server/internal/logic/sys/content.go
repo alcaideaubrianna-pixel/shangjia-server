@@ -304,22 +304,10 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 		)
 	}
 	if in.Province != "" {
-		province := strings.TrimSpace(in.Province)
-		mod = mod.Where(
-			"("+aliasField("p", profileColumns.Province)+" = ? OR "+aliasField("p", profileColumns.Province)+" = ? OR "+aliasField("p", profileColumns.Province)+" LIKE ?)",
-			province,
-			province+"省",
-			province+"%",
-		)
+		mod = mod.Where(aliasField("p", profileColumns.Province), normalizeProvinceName(in.Province))
 	}
 	if in.City != "" {
-		city := strings.TrimSpace(in.City)
-		mod = mod.Where(
-			"("+aliasField("p", profileColumns.City)+" = ? OR "+aliasField("p", profileColumns.City)+" = ? OR "+aliasField("p", profileColumns.City)+" LIKE ?)",
-			city,
-			city+"市",
-			city+"%",
-		)
+		mod = mod.Where(aliasField("p", profileColumns.City), normalizeCityName(in.City))
 	}
 	if in.AgeRanges != "" {
 		mod = applyRangeFilters(mod, aliasField("p", profileColumns.Age), parseFilterRanges(in.AgeRanges))
@@ -939,6 +927,12 @@ func normalizeProvinceName(value string) string {
 	value = strings.TrimSuffix(value, "维吾尔自治区")
 	value = strings.TrimSuffix(value, "自治区")
 	value = strings.TrimSuffix(value, "特别行政区")
+	return value
+}
+
+func normalizeCityName(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimSuffix(value, "市")
 	return value
 }
 

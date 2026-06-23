@@ -131,6 +131,22 @@ CREATE INDEX IF NOT EXISTS idx_content_profile_admin_flags ON hg_content_profile
 CREATE INDEX IF NOT EXISTS idx_content_profile_public_filters ON hg_content_profile (status, review_status, import_status, visibility, age, height, weight, cup_size, video_count, has_verification_video, id);
 CREATE INDEX IF NOT EXISTS idx_content_profile_keyword ON hg_content_profile USING gin (to_tsvector('simple', coalesce(profile_no,'') || ' ' || coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(plain_text,'') || ' ' || coalesce(province,'') || ' ' || coalesce(city,'') || ' ' || coalesce(cup_size,'')));
 
+CREATE TABLE IF NOT EXISTS hg_sys_ip_location_cache (
+  ip varchar(64) PRIMARY KEY,
+  country varchar(64),
+  region varchar(128),
+  province varchar(128),
+  province_code bigint NOT NULL DEFAULT 0,
+  city varchar(128),
+  city_code bigint NOT NULL DEFAULT 0,
+  area varchar(255),
+  area_code bigint NOT NULL DEFAULT 0,
+  expires_at timestamp NOT NULL,
+  created_at timestamp,
+  updated_at timestamp
+);
+CREATE INDEX IF NOT EXISTS idx_sys_ip_location_cache_expires ON hg_sys_ip_location_cache (expires_at);
+
 CREATE TABLE IF NOT EXISTS hg_content_media (
   id bigserial PRIMARY KEY,
   profile_id bigint NOT NULL,
