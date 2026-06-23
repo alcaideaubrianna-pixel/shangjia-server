@@ -126,6 +126,55 @@ jobs:
           echo "### Published server image" >> "$GITHUB_STEP_SUMMARY"
           echo '${{ steps.server_meta.outputs.tags }}' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Notify Telegram build success
+        if: ${{ success() }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.YOUBAN_TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.YOUBAN_TELEGRAM_CHAT_ID }}
+          IMAGE: ${{ steps.image.outputs.server }}:sha-${{ steps.image.outputs.short_sha }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "telegram secrets are not configured, skip"
+            exit 0
+          fi
+          text=$(cat <<EOF
+✅ <b>youban-server 构建成功</b>
+版本：${GITHUB_REF_NAME} / ${GITHUB_SHA::7}
+镜像：<code>${IMAGE}</code>
+仓库：${GITHUB_REPOSITORY}
+EOF
+)
+          curl --fail --show-error --silent \
+            -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            -d "parse_mode=HTML" \
+            --data-urlencode "text=${text}" || echo "telegram notify failed"
+
+      - name: Notify Telegram build failure
+        if: ${{ failure() }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.YOUBAN_TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.YOUBAN_TELEGRAM_CHAT_ID }}
+          IMAGE: ${{ steps.image.outputs.server }}:sha-${{ steps.image.outputs.short_sha }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "telegram secrets are not configured, skip"
+            exit 0
+          fi
+          text=$(cat <<EOF
+❌ <b>youban-server 构建失败</b>
+版本：${GITHUB_REF_NAME} / ${GITHUB_SHA::7}
+镜像：<code>${IMAGE}</code>
+仓库：${GITHUB_REPOSITORY}
+日志：https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+EOF
+)
+          curl --fail --show-error --silent \
+            -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            -d "parse_mode=HTML" \
+            --data-urlencode "text=${text}" || echo "telegram notify failed"
+
       - name: Deploy server image
         if: ${{ github.ref_name == 'develop' }}
         env:

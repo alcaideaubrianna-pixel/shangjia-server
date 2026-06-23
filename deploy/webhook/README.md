@@ -6,6 +6,8 @@ Required GitHub Actions secrets:
 
 - `YOUBAN_DEPLOY_URL`: `http://YOUR_SERVER:9088/deploy`
 - `YOUBAN_DEPLOY_TOKEN`: same token as `/opt/youban/deploy-webhook.env`
+- `YOUBAN_TELEGRAM_BOT_TOKEN`: Telegram bot token for build notifications
+- `YOUBAN_TELEGRAM_CHAT_ID`: Telegram chat id for build notifications
 
 Server files:
 
@@ -26,4 +28,6 @@ APP_DIR=/opt/youban
 DOCKER_CONFIG_DIR=/home/ubuntu/.docker
 SERVER_IMAGE_PREFIX=ghcr.io/mjiadfwaff-bot/youban-server:
 H5_IMAGE_PREFIX=ghcr.io/mjiadfwaff-bot/youban-h5:
+TELEGRAM_BOT_TOKEN=change-me
+TELEGRAM_CHAT_ID=-4994315896
 ```
