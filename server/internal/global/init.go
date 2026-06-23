@@ -27,8 +27,17 @@ import (
 	"hotgo/utility/charset"
 	"hotgo/utility/simple"
 	"hotgo/utility/validate"
+	"os"
 	"runtime"
 	"strings"
+	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 func Init(ctx context.Context) {
@@ -149,6 +158,10 @@ func LoggingServeLogHandler(ctx context.Context, in *glog.HandlerInput) {
 
 // InitTrace 初始化链路追踪
 func InitTrace(ctx context.Context) {
+	if g.Cfg().MustGet(ctx, "apm.switch").Bool() {
+		InitTencentAPM(ctx)
+		return
+	}
 	if !g.Cfg().MustGet(ctx, "jaeger.switch").Bool() {
 		return
 	}
@@ -162,6 +175,59 @@ func InitTrace(ctx context.Context) {
 		_ = tp.Shutdown(ctx)
 		g.Log().Debug(ctx, "jaeger closed ..")
 	})
+}
+
+// InitTencentAPM 初始化腾讯云APM链路追踪。
+func InitTencentAPM(ctx context.Context) {
+	endpoint := g.Cfg().MustGet(ctx, "apm.endpoint").String()
+	token := g.Cfg().MustGet(ctx, "apm.token").String()
+	serviceName := g.Cfg().MustGet(ctx, "apm.serviceName", "youban-server").String()
+	if endpoint == "" || token == "" {
+		g.Log().Warning(ctx, "apm.switch已开启，但apm.endpoint或apm.token为空，跳过APM初始化")
+		return
+	}
+
+	hostName, _ := os.Hostname()
+	if cfgHostName := g.Cfg().MustGet(ctx, "apm.hostName").String(); cfgHostName != "" {
+		hostName = cfgHostName
+	}
+
+	exportCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	opts := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(endpoint)}
+	if !g.Cfg().MustGet(ctx, "apm.secure").Bool() {
+		opts = append(opts, otlptracegrpc.WithInsecure())
+	}
+	exporter, err := otlptracegrpc.New(exportCtx, opts...)
+	if err != nil {
+		g.Log().Fatalf(ctx, "初始化腾讯云APM exporter失败: %+v", err)
+		return
+	}
+
+	res, err := resource.New(ctx, resource.WithAttributes(
+		attribute.String("token", token),
+		attribute.String("service.name", serviceName),
+		attribute.String("host.name", hostName),
+		attribute.String("deployment.environment", gmode.Mode()),
+		attribute.String("service.version", consts.VersionApp),
+	))
+	if err != nil {
+		g.Log().Fatalf(ctx, "初始化腾讯云APM resource失败: %+v", err)
+		return
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(res),
+	)
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	simple.Event().Register(consts.EventServerClose, func(ctx context.Context, args ...interface{}) {
+		_ = tp.Shutdown(ctx)
+		g.Log().Debug(ctx, "tencent apm closed ..")
+	})
+	g.Log().Infof(ctx, "腾讯云APM已启用 endpoint:%s service:%s host:%s", endpoint, serviceName, hostName)
 }
 
 // SetGFMode 设置gf运行模式

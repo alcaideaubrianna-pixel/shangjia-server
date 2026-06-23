@@ -23,6 +23,8 @@ type (
 		Ctx(r *ghttp.Request)
 		// CORS allows Cross-origin resource sharing.
 		CORS(r *ghttp.Request)
+		// AccessLog 记录结构化访问日志
+		AccessLog(r *ghttp.Request)
 		// DemoLimit 演示系统操作限制
 		DemoLimit(r *ghttp.Request)
 		// Addon 插件中间件

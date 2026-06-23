@@ -104,6 +104,11 @@ logger:
   queue:
     path: "logs/queue"                      # 日志文件路径。默认为空，表示关闭，仅输出到终端
     <<: *defaultLogger
+  # 结构化访问日志：g.Log("access")
+  access:
+    path: "logs/access"                     # 独立访问日志目录，便于CLS采集
+    <<: *defaultLogger
+    stdout: true
   # tcp服务器：g.Log("tcpServer")
   tcpServer:
     path: "logs/tcpServer"                  # 日志文件路径。默认为空，表示关闭，仅输出到终端
@@ -264,6 +269,15 @@ database:
 jaeger:
   switch: false                                   # 链路追踪开关，可选：true|false，默认为false
   endpoint: "127.0.0.1:6831"                      # jaeger-agent上报地址
+
+# 腾讯云APM，开启后优先使用APM OpenTelemetry上报链路数据
+apm:
+  switch: false
+  endpoint: ""
+  token: ""
+  serviceName: "youban-server"
+  hostName: ""
+  secure: false
 
 
 # 内容导入
