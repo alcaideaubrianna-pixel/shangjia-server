@@ -127,11 +127,20 @@ func (s *sSysContent) HomeProfileCards(ctx context.Context, in *sysin.HomeProfil
 // ListProfiles 获取前台资料列表。
 func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfileListInp) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
 	feed := normalizeHomeProfileFeed(in.Feed, in.Sort)
-	list, totalCount, err = s.listProfilesByFilter(ctx, in, feed)
+	queryInp := *in
+	autoProvince := false
+	if feed == homeProfileFeedNearby && strings.TrimSpace(queryInp.Province) == "" {
+		if province := s.requestProvince(ctx); province != "" {
+			queryInp.Province = province
+			autoProvince = true
+		}
+	}
+
+	list, totalCount, err = s.listProfilesByFilter(ctx, &queryInp, feed)
 	if err != nil {
 		return
 	}
-	if feed == homeProfileFeedNearby && len(list) == 0 && in.Page <= 1 && in.Province != "" && in.City == "" && in.Keyword == "" {
+	if autoProvince && len(list) == 0 && queryInp.Page <= 1 && queryInp.City == "" && queryInp.Keyword == "" {
 		fallbackInp := *in
 		fallbackInp.Province = ""
 		return s.listProfilesByFilter(ctx, &fallbackInp, feed)
@@ -148,9 +157,6 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 	}
 	if memberId := s.requestMemberId(ctx); memberId > 0 {
 		mod = s.excludeMemberProfileActions(ctx, mod, memberId, in.ExcludeActions)
-	}
-	if feed == homeProfileFeedNearby && in.Province == "" {
-		in.Province = s.requestProvince(ctx)
 	}
 
 	if in.Keyword != "" {
