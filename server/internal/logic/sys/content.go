@@ -295,7 +295,12 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 	case homeProfileFeedLatest:
 		mod = mod.OrderDesc(aliasField("p", profileColumns.SourceCreatedAt)).OrderDesc(aliasField("p", profileColumns.SourceNoteId)).OrderDesc(aliasField("p", profileColumns.Id))
 	default:
-		mod = mod.OrderDesc(aliasField("p", profileColumns.SourceCreatedAt)).OrderDesc(aliasField("p", profileColumns.SourceNoteId)).OrderDesc(aliasField("p", profileColumns.Id))
+		mod = mod.
+			LeftJoin(contentProfileStatsTable+" ps", "ps.profile_id="+aliasField("p", profileColumns.Id)).
+			OrderDesc(coalesceZero("ps.hot_score")).
+			OrderDesc(coalesceZero("ps.view_24h")).
+			OrderDesc(aliasField("p", profileColumns.SourceCreatedAt)).
+			OrderDesc(aliasField("p", profileColumns.Id))
 	}
 
 	var rows []contentProfileRow
