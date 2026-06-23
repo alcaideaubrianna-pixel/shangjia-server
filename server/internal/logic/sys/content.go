@@ -79,7 +79,7 @@ var provinceAliases = map[string]string{
 
 var cityProvinceMap = map[string]string{
 	"北京": "北京", "天津": "天津", "上海": "上海", "重庆": "重庆",
-	"广州": "广东", "深圳": "广东", "佛山": "广东", "东莞": "广东", "珠海": "广东", "惠州": "广东", "中山": "广东",
+	"广州": "广东", "深圳": "广东", "佛山": "广东", "东莞": "广东", "珠海": "广东", "惠州": "广东", "中山": "广东", "汕头": "广东", "揭阳": "广东", "湛江": "广东", "江门": "广东", "肇庆": "广东", "茂名": "广东", "清远": "广东", "河源": "广东", "梅州": "广东", "汕尾": "广东", "潮州": "广东", "韶关": "广东", "阳江": "广东", "云浮": "广东",
 	"杭州": "浙江", "宁波": "浙江", "温州": "浙江", "绍兴": "浙江", "金华": "浙江", "义乌": "浙江", "嘉兴": "浙江",
 	"南京": "江苏", "苏州": "江苏", "无锡": "江苏", "常州": "江苏",
 	"成都": "四川", "武汉": "湖北", "长沙": "湖南", "郑州": "河南", "西安": "陕西", "昆明": "云南",
@@ -431,6 +431,7 @@ func (s *sSysContent) buildProfileRegionOptions(ctx context.Context) (list []*sy
 	total := 0
 	provinceMap := make(map[string]*sysin.ContentProfileRegionOption)
 	provinceOrder := make([]string, 0)
+	cityCountMap := make(map[string]map[string]int)
 	for _, row := range rows {
 		province, city := normalizeProfileRegionForOption(row.Province, row.City)
 		if province == "" {
@@ -451,13 +452,10 @@ func (s *sSysContent) buildProfileRegionOptions(ctx context.Context) (list []*sy
 		}
 		parent.Count += row.Count
 		if city != "" && city != province {
-			parent.Children = append(parent.Children, &sysin.ContentProfileRegionOption{
-				Label:    city,
-				Value:    province + "/" + city,
-				Province: province,
-				City:     city,
-				Count:    row.Count,
-			})
+			if _, ok = cityCountMap[province]; !ok {
+				cityCountMap[province] = make(map[string]int)
+			}
+			cityCountMap[province][city] += row.Count
 		}
 	}
 
@@ -472,6 +470,17 @@ func (s *sSysContent) buildProfileRegionOptions(ctx context.Context) (list []*sy
 	}}
 	for _, province := range provinceOrder {
 		item := provinceMap[province]
+		if cityMap := cityCountMap[province]; len(cityMap) > 0 {
+			for city, count := range cityMap {
+				item.Children = append(item.Children, &sysin.ContentProfileRegionOption{
+					Label:    city,
+					Value:    province + "/" + city,
+					Province: province,
+					City:     city,
+					Count:    count,
+				})
+			}
+		}
 		sort.SliceStable(item.Children, func(i, j int) bool {
 			return item.Children[i].Count > item.Children[j].Count
 		})
@@ -498,6 +507,9 @@ func normalizeProfileRegionForOption(provinceValue string, cityValue string) (pr
 		province = city
 		city = ""
 	}
+	if province != "" && city != "" {
+		city = normalizeCityForProvince(province, city)
+	}
 	if city == province {
 		city = ""
 	}
@@ -513,7 +525,7 @@ func cleanRegionToken(value string) string {
 	value = strings.ReplaceAll(value, "、", ",")
 	value = strings.ReplaceAll(value, "／", "/")
 	value = strings.TrimSpace(regionNoiseRegexp.ReplaceAllString(value, ""))
-	for _, sep := range []string{"/", ",", " ", "\n", "\t"} {
+	for _, sep := range []string{"\n", "\t"} {
 		if strings.Contains(value, sep) {
 			value = strings.TrimSpace(strings.Split(value, sep)[0])
 		}
@@ -546,7 +558,7 @@ func provinceByCity(value string) string {
 		return province
 	}
 	for city, province := range cityProvinceMap {
-		if strings.HasPrefix(value, city) {
+		if strings.HasPrefix(value, city) || strings.Contains(value, city) {
 			return province
 		}
 	}
@@ -560,12 +572,27 @@ func firstKnownCity(values ...string) string {
 			continue
 		}
 		for city := range cityProvinceMap {
-			if value == city || strings.HasPrefix(value, city) {
+			if value == city || strings.HasPrefix(value, city) || strings.Contains(value, city) {
 				return city
 			}
 		}
 	}
 	return ""
+}
+
+func normalizeCityForProvince(province string, city string) string {
+	city = strings.TrimSpace(city)
+	if city == "" {
+		return ""
+	}
+	if strings.HasPrefix(city, province) {
+		city = strings.TrimSpace(strings.TrimPrefix(city, province))
+		city = strings.Trim(city, "/,，、 -")
+	}
+	if mapped := provinceByCity(city); mapped == province {
+		return firstKnownCity(city)
+	}
+	return city
 }
 
 func (s *sSysContent) buildProfileCupOptions(ctx context.Context) (list []*sysin.ContentProfileFilterOption, err error) {
