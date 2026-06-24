@@ -75,6 +75,8 @@ type chatConversationRow struct {
 	LastMessageAt      *gtime.Time `json:"last_message_at"`
 	UnreadCount        int         `json:"unread_count"`
 	Status             string      `json:"status"`
+	PinnedAt           *gtime.Time `json:"pinned_at"`
+	HiddenBeforeAt     *gtime.Time `json:"hidden_before_at"`
 }
 
 type chatMessageRow struct {
@@ -306,6 +308,9 @@ func (s *sSysChat) Start(ctx context.Context, in *sysin.ChatStartInp) (res *sysi
 		err = gerror.New("请先登录")
 		return
 	}
+	if err = s.ensureConversationUserColumns(ctx); err != nil {
+		return
+	}
 	var profile *profileBrief
 	if in.ProfileId > 0 {
 		profile, err = s.getProfileBrief(ctx, in.ProfileId)
@@ -323,6 +328,21 @@ func (s *sSysChat) Start(ctx context.Context, in *sysin.ChatStartInp) (res *sysi
 	}
 	if binding == nil || strings.TrimSpace(binding.TgChatId) == "" || strings.TrimSpace(binding.BotToken) == "" {
 		err = gerror.New("客服群未绑定，请先在后台生成绑定码并在Telegram群内完成绑定")
+		return
+	}
+	if in.ProfileId == 0 {
+		row, err = s.ensureGlobalConversation(ctx, memberId)
+		if err != nil {
+			return
+		}
+		if row == nil {
+			err = gerror.New("全局客服群未绑定，请先在后台生成绑定码并在Telegram群内完成绑定")
+			return
+		}
+		if err = s.ensureConversationRoute(ctx, row, binding); err != nil {
+			return
+		}
+		res = s.packStart(row)
 		return
 	}
 	if row != nil {
@@ -422,13 +442,20 @@ func (s *sSysChat) Messages(ctx context.Context, in *sysin.ChatMessagesInp) (res
 		err = gerror.New("请先登录")
 		return
 	}
+	if err = s.ensureConversationUserColumns(ctx); err != nil {
+		return
+	}
 	row, err := s.getConversationById(ctx, memberId, in.ConversationId)
 	if err != nil {
 		return
 	}
 	mod := g.DB().Model(chatMessageTable).Ctx(ctx).
 		Where("conversation_id", row.Id).
+		WhereGTE("created_at", gtime.Now().AddDate(0, 0, -7)).
 		WhereNull("deleted_at")
+	if row.HiddenBeforeAt != nil {
+		mod = mod.WhereGT("created_at", row.HiddenBeforeAt)
+	}
 	if in.AfterId > 0 {
 		mod = mod.WhereGT("id", in.AfterId)
 	}
@@ -443,6 +470,61 @@ func (s *sSysChat) Messages(ctx context.Context, in *sysin.ChatMessagesInp) (res
 	}
 	res = &sysin.ChatMessagesModel{List: list}
 	return
+}
+
+func (s *sSysChat) Pin(ctx context.Context, in *sysin.ChatConversationPinInp) (err error) {
+	memberId := contexts.GetUserId(ctx)
+	if memberId <= 0 {
+		return gerror.New("请先登录")
+	}
+	if err = s.ensureConversationUserColumns(ctx); err != nil {
+		return
+	}
+	row, err := s.getConversationById(ctx, memberId, in.ConversationId)
+	if err != nil {
+		return
+	}
+	data := g.Map{"updated_at": gtime.Now()}
+	if row.ProfileId == 0 || in.Pinned == 1 {
+		data["pinned_at"] = gtime.Now()
+	} else {
+		data["pinned_at"] = nil
+	}
+	_, err = g.DB().Model(chatConversationTable).Ctx(ctx).Where("id", row.Id).Data(data).Update()
+	if err != nil {
+		return gerror.Wrap(err, "更新会话置顶失败")
+	}
+	return nil
+}
+
+func (s *sSysChat) Clear(ctx context.Context, in *sysin.ChatConversationClearInp) (err error) {
+	memberId := contexts.GetUserId(ctx)
+	if memberId <= 0 {
+		return gerror.New("请先登录")
+	}
+	if err = s.ensureConversationUserColumns(ctx); err != nil {
+		return
+	}
+	row, err := s.getConversationById(ctx, memberId, in.ConversationId)
+	if err != nil {
+		return
+	}
+	now := gtime.Now()
+	data := g.Map{
+		"hidden_before_at": now,
+		"unread_count":     0,
+		"last_message":     "",
+		"last_message_at":  nil,
+		"updated_at":       now,
+	}
+	if row.ProfileId == 0 {
+		data["pinned_at"] = now
+	}
+	_, err = g.DB().Model(chatConversationTable).Ctx(ctx).Where("id", row.Id).Data(data).Update()
+	if err != nil {
+		return gerror.Wrap(err, "清空聊天记录失败")
+	}
+	return nil
 }
 
 func (s *sSysChat) Read(ctx context.Context, in *sysin.ChatReadInp) (err error) {
@@ -533,8 +615,13 @@ func (s *sSysChat) Unread(ctx context.Context) (res *sysin.ChatUnreadModel, err 
 		err = gerror.New("请先登录")
 		return
 	}
+	if err = s.ensureConversationUserColumns(ctx); err != nil {
+		return
+	}
 	value, err := g.DB().Model(chatConversationTable).Ctx(ctx).
 		Where("member_id", memberId).
+		Where("(hidden_before_at IS NULL OR last_message_at IS NULL OR last_message_at > hidden_before_at)").
+		Where("(last_message_at IS NULL OR last_message_at >= ?)", gtime.Now().AddDate(0, 0, -7)).
 		WhereNull("deleted_at").
 		Fields("COALESCE(SUM(unread_count),0)").
 		Value()
@@ -617,6 +704,12 @@ func (s *sSysChat) List(ctx context.Context, in *sysin.ChatConversationListInp) 
 		return
 	}
 	memberId := contexts.GetUserId(ctx)
+	if err = s.ensureConversationUserColumns(ctx); err != nil {
+		return
+	}
+	if _, err = s.ensureGlobalConversation(ctx, memberId); err != nil {
+		return
+	}
 	profileColumns := dao.ContentProfile.Columns()
 	mediaColumns := dao.ContentMedia.Columns()
 	mod := g.DB().Model(chatConversationTable+" c").Ctx(ctx).
@@ -624,10 +717,16 @@ func (s *sSysChat) List(ctx context.Context, in *sysin.ChatConversationListInp) 
 		LeftJoin(dao.ContentMedia.Table()+" m", chatAliasField("m", mediaColumns.ProfileId)+"="+chatAliasField("p", profileColumns.Id)+" AND "+chatAliasField("m", mediaColumns.MediaType)+"='image' AND "+chatAliasField("m", mediaColumns.SortIndex)+"=0 AND "+chatAliasField("m", mediaColumns.DeletedAt)+" IS NULL").
 		Where(chatAliasField("c", "member_id"), memberId).
 		WhereNull(chatAliasField("c", "deleted_at")).
+		Where("("+chatAliasField("c", "profile_id")+"=0 OR "+chatAliasField("c", "last_message_at")+" IS NOT NULL OR "+chatAliasField("c", "unread_count")+">0)").
+		Where("("+chatAliasField("c", "profile_id")+"=0 OR "+chatAliasField("c", "last_message_at")+" IS NULL OR "+chatAliasField("c", "last_message_at")+">=?)", gtime.Now().AddDate(0, 0, -7)).
+		Where("(" + chatAliasField("c", "profile_id") + "=0 OR " + chatAliasField("c", "hidden_before_at") + " IS NULL OR " + chatAliasField("c", "last_message_at") + " IS NULL OR " + chatAliasField("c", "last_message_at") + ">" + chatAliasField("c", "hidden_before_at") + ")").
 		Fields(strings.Join([]string{
 			chatAliasField("c", "id"),
 			chatAliasField("c", "id") + " AS conversation_id",
 			chatAliasField("c", "profile_id"),
+			"CASE WHEN " + chatAliasField("c", "profile_id") + "=0 THEN true ELSE false END AS is_global",
+			"CASE WHEN " + chatAliasField("c", "profile_id") + "=0 OR " + chatAliasField("c", "pinned_at") + " IS NOT NULL THEN true ELSE false END AS is_pinned",
+			"CASE WHEN " + chatAliasField("c", "profile_id") + "=0 THEN false ELSE true END AS can_delete",
 			chatAliasField("c", "last_message"),
 			chatAliasField("c", "last_message_at"),
 			chatAliasField("c", "unread_count"),
@@ -639,12 +738,22 @@ func (s *sSysChat) List(ctx context.Context, in *sysin.ChatConversationListInp) 
 			chatAliasField("p", profileColumns.Height),
 			"COALESCE(" + chatAliasField("m", mediaColumns.PreviewStoragePath) + "," + chatAliasField("m", mediaColumns.DisplayStoragePath) + ",'') AS avatar",
 		}, ","))
-	mod = mod.Page(in.Page, in.PerPage).OrderDesc(chatAliasField("c", "updated_at")).OrderDesc(chatAliasField("c", "id"))
+	mod = mod.Page(in.Page, in.PerPage).
+		Order(gdb.Raw("CASE WHEN " + chatAliasField("c", "profile_id") + "=0 THEN 1 ELSE 0 END DESC")).
+		Order(gdb.Raw("CASE WHEN " + chatAliasField("c", "pinned_at") + " IS NULL THEN 0 ELSE 1 END DESC")).
+		OrderDesc(chatAliasField("c", "pinned_at")).
+		OrderDesc(chatAliasField("c", "updated_at")).
+		OrderDesc(chatAliasField("c", "id"))
 	if err = mod.ScanAndCount(&list, &totalCount, false); err != nil {
 		err = gerror.Wrap(err, "获取聊天会话列表失败")
 		return
 	}
 	for _, item := range list {
+		if item.IsGlobal {
+			item.Name = "悦伴客服"
+			item.LastMessage = firstNonEmptyString(item.LastMessage, "有问题随时联系悦伴客服")
+			continue
+		}
 		item.Name = strings.ToLower(item.ProfileNo)
 		if item.LastMessage == "" {
 			item.LastMessage = "暂无消息"
@@ -1274,6 +1383,50 @@ func (s *sSysChat) getConversation(ctx context.Context, memberId, profileId int6
 	return
 }
 
+func (s *sSysChat) ensureGlobalConversation(ctx context.Context, memberId int64) (*chatConversationRow, error) {
+	row, err := s.getConversation(ctx, memberId, 0)
+	if err != nil {
+		return nil, err
+	}
+	if row != nil {
+		if row.PinnedAt == nil {
+			_, _ = g.DB().Model(chatConversationTable).Ctx(ctx).Where("id", row.Id).Data(g.Map{"pinned_at": gtime.Now(), "updated_at": gtime.Now()}).Update()
+		}
+		return row, nil
+	}
+	binding, err := s.getGlobalBinding(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if binding == nil || strings.TrimSpace(binding.TgChatId) == "" || strings.TrimSpace(binding.BotToken) == "" {
+		return nil, nil
+	}
+	now := gtime.Now()
+	id, err := g.DB().Model(chatConversationTable).Ctx(ctx).Data(g.Map{
+		"member_id":            memberId,
+		"profile_id":           0,
+		"bot_id":               routeBotId(binding),
+		"tg_chat_id":           routeTargetChatId(binding),
+		"routing_rule_id":      0,
+		"assigned_operator_id": 0,
+		"status":               "opened",
+		"last_message":         "有问题随时联系悦伴客服",
+		"last_message_at":      now,
+		"pinned_at":            now,
+		"created_at":           now,
+		"updated_at":           now,
+	}).InsertAndGetId()
+	if err != nil {
+		return nil, gerror.Wrap(err, "创建全局客服会话失败")
+	}
+	sessionId := chatSessionId(id)
+	_, err = g.DB().Model(chatConversationTable).Ctx(ctx).Where("id", id).Data(g.Map{"pocketping_session_id": sessionId, "updated_at": now}).Update()
+	if err != nil {
+		return nil, gerror.Wrap(err, "更新全局客服会话失败")
+	}
+	return &chatConversationRow{Id: id, MemberId: memberId, ProfileId: 0, ChatSessionId: sessionId, BotId: routeBotId(binding), TgChatId: routeTargetChatId(binding), Status: "opened", PinnedAt: now}, nil
+}
+
 func (s *sSysChat) getConversationById(ctx context.Context, memberId, conversationId int64) (row *chatConversationRow, err error) {
 	err = g.DB().Model(chatConversationTable).Ctx(ctx).Where("member_id", memberId).Where("id", conversationId).WhereNull("deleted_at").Scan(&row)
 	if err != nil {
@@ -1429,6 +1582,26 @@ func (s *sSysChat) ensureTelegramMessageReadColumns(ctx context.Context) error {
 	for _, sql := range sqlList {
 		if _, err := g.DB().Exec(ctx, sql); err != nil {
 			return gerror.Wrap(err, "初始化消息已读字段失败")
+		}
+	}
+	return nil
+}
+
+func (s *sSysChat) ensureConversationUserColumns(ctx context.Context) error {
+	sqlList := []string{
+		`ALTER TABLE hg_youban_chat_conversation ADD COLUMN IF NOT EXISTS pinned_at timestamp`,
+		`ALTER TABLE hg_youban_chat_conversation ADD COLUMN IF NOT EXISTS hidden_before_at timestamp`,
+		`CREATE INDEX IF NOT EXISTS idx_ybc_member_pinned_updated ON hg_youban_chat_conversation (member_id, pinned_at, updated_at)`,
+	}
+	if strings.ToLower(g.DB().GetConfig().Type) != consts.DBPgsql {
+		sqlList = []string{
+			"ALTER TABLE `hg_youban_chat_conversation` ADD COLUMN IF NOT EXISTS `pinned_at` datetime DEFAULT NULL COMMENT '置顶时间'",
+			"ALTER TABLE `hg_youban_chat_conversation` ADD COLUMN IF NOT EXISTS `hidden_before_at` datetime DEFAULT NULL COMMENT '用户清空记录时间'",
+		}
+	}
+	for _, sql := range sqlList {
+		if _, err := g.DB().Exec(ctx, sql); err != nil {
+			return gerror.Wrap(err, "初始化会话用户字段失败")
 		}
 	}
 	return nil

@@ -33,6 +33,15 @@ type ChatMessagesInp struct {
 	AfterId        int64 `json:"afterId"        dc:"只返回此消息ID之后的数据"`
 }
 
+type ChatConversationPinInp struct {
+	ConversationId int64 `json:"conversationId" v:"required|min:1#会话ID不能为空|会话ID不能为空" dc:"会话ID"`
+	Pinned         int   `json:"pinned"         dc:"是否置顶：1置顶 0取消"`
+}
+
+type ChatConversationClearInp struct {
+	ConversationId int64 `json:"conversationId" v:"required|min:1#会话ID不能为空|会话ID不能为空" dc:"会话ID"`
+}
+
 type ChatMessageAttachmentModel struct {
 	Id          int64  `json:"id"          dc:"附件ID"`
 	Name        string `json:"name"        dc:"文件名"`
@@ -166,6 +175,9 @@ type ChatConversationListModel struct {
 	Id             int64  `json:"id"             dc:"本地会话ID"`
 	ConversationId int64  `json:"conversationId" dc:"会话ID"`
 	ProfileId      int64  `json:"profileId"      dc:"资料ID"`
+	IsGlobal       bool   `json:"isGlobal"       dc:"是否全局客服"`
+	IsPinned       bool   `json:"isPinned"       dc:"是否置顶"`
+	CanDelete      bool   `json:"canDelete"      dc:"是否允许移除会话入口"`
 	ProfileNo      string `json:"profileNo"      dc:"资料编号"`
 	Name           string `json:"name"           dc:"显示名称"`
 	Avatar         string `json:"avatar"         dc:"头像"`

@@ -13,6 +13,8 @@ type ISysChat interface {
 	Start(ctx context.Context, in *sysin.ChatStartInp) (res *sysin.ChatStartModel, err error)
 	Send(ctx context.Context, in *sysin.ChatSendInp) (res *sysin.ChatSendModel, err error)
 	Messages(ctx context.Context, in *sysin.ChatMessagesInp) (res *sysin.ChatMessagesModel, err error)
+	Pin(ctx context.Context, in *sysin.ChatConversationPinInp) (err error)
+	Clear(ctx context.Context, in *sysin.ChatConversationClearInp) (err error)
 	Read(ctx context.Context, in *sysin.ChatReadInp) (err error)
 	Upload(ctx context.Context, in *sysin.ChatUploadInp, file *ghttp.UploadFile) (res *sysin.ChatUploadModel, err error)
 	Unread(ctx context.Context) (res *sysin.ChatUnreadModel, err error)

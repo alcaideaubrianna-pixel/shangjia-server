@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS hg_youban_chat_conversation (
   last_message varchar(500),
   last_message_at timestamp,
   unread_count integer NOT NULL DEFAULT 0,
+  pinned_at timestamp,
+  hidden_before_at timestamp,
   status varchar(32) NOT NULL DEFAULT 'opened',
   created_at timestamp,
   updated_at timestamp,
@@ -25,6 +27,9 @@ ALTER TABLE hg_youban_chat_conversation ADD COLUMN IF NOT EXISTS pocketping_sess
 ALTER TABLE hg_youban_chat_conversation ADD COLUMN IF NOT EXISTS routing_rule_id bigint NOT NULL DEFAULT 0;
 ALTER TABLE hg_youban_chat_conversation ADD COLUMN IF NOT EXISTS assigned_operator_id bigint NOT NULL DEFAULT 0;
 ALTER TABLE hg_youban_chat_conversation ADD COLUMN IF NOT EXISTS bot_id bigint NOT NULL DEFAULT 0;
+ALTER TABLE hg_youban_chat_conversation ADD COLUMN IF NOT EXISTS pinned_at timestamp;
+ALTER TABLE hg_youban_chat_conversation ADD COLUMN IF NOT EXISTS hidden_before_at timestamp;
+CREATE INDEX IF NOT EXISTS idx_ybc_member_pinned_updated ON hg_youban_chat_conversation (member_id, pinned_at, updated_at);
 
 CREATE TABLE IF NOT EXISTS hg_youban_chat_message (
   id bigserial PRIMARY KEY,

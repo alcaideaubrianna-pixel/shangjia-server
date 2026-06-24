@@ -844,48 +844,32 @@ func (s *sSysContent) buildProfileCupOptions(ctx context.Context) (list []*sysin
 }
 
 func (s *sSysContent) buildProfileAttributeOptions(ctx context.Context) (list []*sysin.ContentProfileAttributeOption, err error) {
-	profileColumns := dao.ContentProfile.Columns()
 	specs := []struct {
-		Key    string
-		Label  string
-		Column string
+		Key   string
+		Label string
 	}{
-		{Key: "hasVideo", Label: "有视频", Column: profileColumns.VideoCount},
-		{Key: "hasVerification", Label: "验证视频", Column: profileColumns.HasVerificationVideo},
-		{Key: "canFly", Label: "可飞", Column: profileColumns.CanFlyToProvince},
-		{Key: "canGoAbroad", Label: "出国", Column: profileColumns.CanGoAbroad},
-		{Key: "canOvernight", Label: "过夜", Column: profileColumns.CanOvernight},
-		{Key: "canCohabitate", Label: "同居", Column: profileColumns.CanCohabitate},
-		{Key: "hasHealthCheck", Label: "体检", Column: profileColumns.HasHealthCheck},
-		{Key: "isFullMonth", Label: "满月", Column: profileColumns.IsFullMonth},
-		{Key: "isVirgin", Label: "处", Column: profileColumns.IsVirgin},
-		{Key: "acceptSm", Label: "SM", Column: profileColumns.AcceptSm},
-		{Key: "noCondom", Label: "无套", Column: profileColumns.NoCondomAfterCheck},
-		{Key: "allowCreampie", Label: "内射", Column: profileColumns.AllowCreampie},
-		{Key: "hasTattoo", Label: "纹身", Column: profileColumns.HasTattoo},
+		{Key: "hasVideo", Label: "有视频"},
+		{Key: "hasVerification", Label: "验证视频"},
+		{Key: "canFly", Label: "可飞"},
+		{Key: "canGoAbroad", Label: "出国"},
+		{Key: "canOvernight", Label: "过夜"},
+		{Key: "canCohabitate", Label: "同居"},
+		{Key: "hasHealthCheck", Label: "体检"},
+		{Key: "isFullMonth", Label: "满月"},
+		{Key: "isVirgin", Label: "处"},
+		{Key: "acceptSm", Label: "SM"},
+		{Key: "noCondom", Label: "无套"},
+		{Key: "allowCreampie", Label: "内射"},
+		{Key: "hasTattoo", Label: "纹身"},
 	}
 	list = make([]*sysin.ContentProfileAttributeOption, 0, len(specs))
 	for _, spec := range specs {
-		mod := s.publicProfileWhere(dao.ContentProfile.Ctx(ctx).As("p"))
-		if spec.Key == "hasVideo" {
-			mod = mod.WhereGT(aliasField("p", spec.Column), 0)
-		} else {
-			mod = mod.Where(aliasField("p", spec.Column), 1)
-		}
-		count, countErr := mod.Count()
-		if countErr != nil {
-			err = gerror.Wrapf(countErr, "获取%s筛选数据失败", spec.Label)
-			return
-		}
-		if count <= 0 {
-			continue
-		}
 		list = append(list, &sysin.ContentProfileAttributeOption{
 			Key: spec.Key,
 			ContentProfileFilterOption: sysin.ContentProfileFilterOption{
 				Label: spec.Label,
 				Value: spec.Key,
-				Count: count,
+				Count: 0,
 			},
 		})
 	}

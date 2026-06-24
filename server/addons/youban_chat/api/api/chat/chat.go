@@ -34,6 +34,20 @@ type MessagesRes struct {
 	*sysin.ChatMessagesModel
 }
 
+type PinReq struct {
+	g.Meta `path:"/chat/pin" method:"post" tags:"悦伴聊天" summary:"置顶或取消置顶会话"`
+	sysin.ChatConversationPinInp
+}
+
+type PinRes struct{}
+
+type ClearReq struct {
+	g.Meta `path:"/chat/clear" method:"post" tags:"悦伴聊天" summary:"清空聊天记录"`
+	sysin.ChatConversationClearInp
+}
+
+type ClearRes struct{}
+
 type ReadReq struct {
 	g.Meta `path:"/chat/read" method:"post" tags:"悦伴聊天" summary:"标记聊天已读"`
 	sysin.ChatReadInp

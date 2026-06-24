@@ -42,6 +42,24 @@ func (c *cChat) Messages(ctx context.Context, req *chat.MessagesReq) (res *chat.
 	return
 }
 
+func (c *cChat) Pin(ctx context.Context, req *chat.PinReq) (res *chat.PinRes, err error) {
+	err = service.SysChat().Pin(ctx, &req.ChatConversationPinInp)
+	if err != nil {
+		return
+	}
+	res = &chat.PinRes{}
+	return
+}
+
+func (c *cChat) Clear(ctx context.Context, req *chat.ClearReq) (res *chat.ClearRes, err error) {
+	err = service.SysChat().Clear(ctx, &req.ChatConversationClearInp)
+	if err != nil {
+		return
+	}
+	res = &chat.ClearRes{}
+	return
+}
+
 func (c *cChat) Read(ctx context.Context, req *chat.ReadReq) (res *chat.ReadRes, err error) {
 	err = service.SysChat().Read(ctx, &req.ChatReadInp)
 	if err != nil {

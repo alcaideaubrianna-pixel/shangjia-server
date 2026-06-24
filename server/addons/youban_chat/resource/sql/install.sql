@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_chat_conversation` (
   `last_message` varchar(500) DEFAULT NULL COMMENT '最后消息',
   `last_message_at` datetime DEFAULT NULL COMMENT '最后消息时间',
   `unread_count` int(11) NOT NULL DEFAULT '0' COMMENT '未读数',
+  `pinned_at` datetime DEFAULT NULL COMMENT '置顶时间',
+  `hidden_before_at` datetime DEFAULT NULL COMMENT '用户清空记录时间',
   `status` varchar(32) NOT NULL DEFAULT 'opened' COMMENT '状态',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
@@ -27,6 +29,8 @@ ALTER TABLE `hg_youban_chat_conversation` ADD COLUMN IF NOT EXISTS `pocketping_s
 ALTER TABLE `hg_youban_chat_conversation` ADD COLUMN IF NOT EXISTS `routing_rule_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '路由规则ID' AFTER `tg_message_thread_id`;
 ALTER TABLE `hg_youban_chat_conversation` ADD COLUMN IF NOT EXISTS `assigned_operator_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '分配客服ID' AFTER `routing_rule_id`;
 ALTER TABLE `hg_youban_chat_conversation` ADD COLUMN IF NOT EXISTS `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Bot ID' AFTER `tg_message_thread_id`;
+ALTER TABLE `hg_youban_chat_conversation` ADD COLUMN IF NOT EXISTS `pinned_at` datetime DEFAULT NULL COMMENT '置顶时间';
+ALTER TABLE `hg_youban_chat_conversation` ADD COLUMN IF NOT EXISTS `hidden_before_at` datetime DEFAULT NULL COMMENT '用户清空记录时间';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_chat_message` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
