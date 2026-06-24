@@ -96,7 +96,7 @@ func (s *sSysChat) syncTelegramBotMenu(ctx context.Context, botToken string) err
 		}
 	}
 	if _, err = bot.SetChatMenuButton(ctx, &tgbot.SetChatMenuButtonParams{
-		MenuButton: &models.MenuButtonCommands{},
+		MenuButton: &models.MenuButtonCommands{Type: models.MenuButtonTypeCommands},
 	}); err != nil {
 		return err
 	}
