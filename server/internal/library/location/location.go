@@ -28,9 +28,10 @@ import (
 )
 
 const (
-	whoisApi  = "https://whois.pconline.com.cn/ipJson.jsp?json=true&ip="
-	ipInfoApi = "https://ipinfo.io/"
-	dyndns    = "http://members.3322.org/dyndns/getip" // 备用："https://ifconfig.co/ip"
+	whoisApi   = "https://whois.pconline.com.cn/ipJson.jsp?json=true&ip="
+	ipWhoisApi = "https://ipwho.is/"
+	ipInfoApi  = "https://ipinfo.io/"
+	dyndns     = "http://members.3322.org/dyndns/getip" // 备用："https://ifconfig.co/ip"
 
 	ipLocationCacheTable = "hg_sys_ip_location_cache"
 	ipLocationCacheTTL   = 30 * 24 * time.Hour
@@ -66,6 +67,26 @@ type IpInfoRegionData struct {
 	Region  string `json:"region"`
 	Country string `json:"country"`
 	Org     string `json:"org"`
+}
+
+type IpWhoisRegionData struct {
+	Ip            string `json:"ip"`
+	Success       bool   `json:"success"`
+	Type          string `json:"type"`
+	Continent     string `json:"continent"`
+	ContinentCode string `json:"continent_code"`
+	Country       string `json:"country"`
+	CountryCode   string `json:"country_code"`
+	Region        string `json:"region"`
+	RegionCode    string `json:"region_code"`
+	City          string `json:"city"`
+	Message       string `json:"message"`
+	Connection    struct {
+		ASN    int    `json:"asn"`
+		Org    string `json:"org"`
+		ISP    string `json:"isp"`
+		Domain string `json:"domain"`
+	} `json:"connection"`
 }
 
 var (
@@ -162,7 +183,45 @@ func IpInfoLocation(ctx context.Context, ip string) (*IpLocationData, error) {
 	}, nil
 }
 
+// IpWhoisLocation 通过 ipwho.is 查询全球 IP 归属地。该接口免费、无需 token，业务侧必须配合缓存使用。
+func IpWhoisLocation(ctx context.Context, ip string) (*IpLocationData, error) {
+	response, err := g.Client().Timeout(2*time.Second).Get(ctx, ipWhoisApi+ip)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ipwhois status:%d", response.StatusCode)
+	}
+
+	var info *IpWhoisRegionData
+	if err = gconv.Scan([]byte(response.ReadAllString()), &info); err != nil {
+		return nil, err
+	}
+	if info == nil {
+		return nil, fmt.Errorf("ipwhois empty response")
+	}
+	if !info.Success {
+		return nil, fmt.Errorf("ipwhois failed: %s", info.Message)
+	}
+
+	province := normalizeGlobalProvince(info.CountryCode, info.Region)
+	return &IpLocationData{
+		Ip:       info.Ip,
+		Country:  info.CountryCode,
+		Region:   info.Region,
+		Province: province,
+		City:     info.City,
+		Area:     strings.TrimSpace(info.Connection.Org),
+	}, nil
+}
+
 func normalizeIpInfoProvince(country string, region string) string {
+	return normalizeGlobalProvince(country, region)
+}
+
+func normalizeGlobalProvince(country string, region string) string {
 	switch strings.ToUpper(strings.TrimSpace(country)) {
 	case "HK":
 		return "香港"
@@ -173,7 +232,7 @@ func normalizeIpInfoProvince(country string, region string) string {
 	case "CN":
 		return strings.TrimSpace(region)
 	default:
-		return ""
+		return strings.TrimSpace(region)
 	}
 }
 
@@ -386,6 +445,8 @@ func GetLocation(ctx context.Context, ip string) (data *IpLocationData, err erro
 
 	mode := g.Cfg().MustGet(ctx, "system.ipMethod", "cz88").String()
 	switch mode {
+	case "ipwhois":
+		data, err = IpWhoisLocation(ctx, ip)
 	case "whois":
 		data, err = WhoisLocation(ctx, ip)
 		if err == nil && needsGlobalLocationFallback(data) {

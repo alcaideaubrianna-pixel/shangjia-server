@@ -6,8 +6,8 @@ system:
   debug: true
   # gf运行模式，可选：not-set|develop|testing|staging|product。product模式下后台【开发工具】菜单自动隐藏
   mode: "develop"
-  # IP归属地解析方法，可选：cz88|whois，默认为whois
-  ipMethod: "whois"
+  # IP归属地解析方法，可选：ipwhois|cz88|whois，默认为ipwhois。ipwhois会配合本地DB缓存，避免频繁请求外部接口
+  ipMethod: "ipwhois"
   # 是否为演示系统，可选：false|true
   isDemo: false
   # 是否为集群部署，可选：false|true 默认为false。开启集群必须配置redis，通过redis发布订阅进行集群之间的数据同步
