@@ -35,7 +35,7 @@ func (s *sPay) Create(ctx context.Context, in payin.PayCreateInp) (res *payin.Pa
 		in.TradeType = payment.AutoTradeType(in.PayType, request.UserAgent())
 	}
 
-	if in.Openid == "" {
+	if in.PayType == consts.PayTypeWxPay && in.Openid == "" {
 		if in.Openid, err = service.CommonWechat().GetOpenId(ctx); err != nil {
 			return
 		}
@@ -66,6 +66,8 @@ func (s *sPay) Create(ctx context.Context, in payin.PayCreateInp) (res *payin.Pa
 		mchId = config.WxPayMchId
 	case consts.PayTypeQQPay:
 		mchId = config.QQPayMchId
+	case consts.PayTypeRainbow:
+		mchId = config.RainbowPid
 	}
 
 	data := &entity.PayLog{
@@ -133,6 +135,8 @@ func (s *sPay) GenNotifyURL(ctx context.Context, in payin.PayCreateInp) (notifyU
 		object = v1.NotifyWxPayReq{}
 	case consts.PayTypeQQPay:
 		object = v1.NotifyQQPayReq{}
+	case consts.PayTypeRainbow:
+		object = v1.NotifyRainbowReq{}
 	default:
 		err = gerror.Newf("未被支持的支付方式：%v", in.PayType)
 		return

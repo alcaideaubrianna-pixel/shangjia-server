@@ -60,7 +60,7 @@
                 <span>过期时间：{{ formatTime(item.expireAt) }}</span>
                 <span>排序：{{ item.sort || 0 }}</span>
               </div>
-              <div class="notice-content" v-html="item.content"></div>
+              <div class="notice-content" v-html="renderMarkdown(item.content)"></div>
 
               <template #footer>
                 <n-space>
@@ -103,7 +103,7 @@
         :src="activeAnnouncement.bannerImg"
         :alt="activeAnnouncement.title"
       />
-      <div class="announcement-detail" v-html="activeAnnouncement.content"></div>
+      <div class="announcement-detail markdown-body" v-html="renderMarkdown(activeAnnouncement.content)"></div>
     </n-modal>
 
     <n-modal
@@ -124,8 +124,17 @@
           <n-input v-model:value="formValue.title" placeholder="请输入公告标题" />
         </n-form-item>
         <n-form-item label="正文" path="content">
-          <div class="announcement-editor-wrap">
-            <Editor v-model:value="formValue.content" />
+          <div class="announcement-md-editor">
+            <n-input
+              v-model:value="formValue.content"
+              type="textarea"
+              placeholder="请输入 Markdown 正文，支持标题、列表、引用、表格、链接、图片和 HTML"
+              :autosize="{ minRows: 18, maxRows: 30 }"
+            />
+            <div class="announcement-md-preview">
+              <div class="preview-title">预览</div>
+              <div class="markdown-body" v-html="renderMarkdown(formValue.content)"></div>
+            </div>
           </div>
         </n-form-item>
         <n-form-item label="Banner" path="isBanner">
@@ -174,9 +183,9 @@
 <script lang="ts" setup>
   import { computed, onMounted, ref } from 'vue';
   import { useMessage } from 'naive-ui';
+  import MarkdownIt from 'markdown-it';
   import { Edit, List, MaxSort, Status } from '@/api/appAnnouncement';
   import DatePicker from '@/components/DatePicker/datePicker.vue';
-  import Editor from '@/components/Editor/editor.vue';
   import UploadImage from '@/components/Upload/uploadImage.vue';
 
   const loading = ref(false);
@@ -189,6 +198,11 @@
   const activeAnnouncement = ref<Recordable>({});
   const formRef = ref();
   const formValue = ref<Recordable>(newFormValue());
+  const markdown = new MarkdownIt({
+    html: true,
+    linkify: true,
+    breaks: true,
+  });
   const rules = {
     title: { required: true, trigger: ['input', 'blur'], message: '请输入公告标题' },
     content: { required: true, trigger: ['input', 'blur'], message: '请输入公告正文' },
@@ -259,6 +273,13 @@
       return '-';
     }
     return value;
+  }
+
+  function renderMarkdown(value?: string) {
+    if (!value) {
+      return '<p class="empty-preview">暂无内容</p>';
+    }
+    return markdown.render(value);
   }
 
   function newFormValue() {
@@ -365,39 +386,99 @@
     }
   }
 
-  :global(.announcement-edit-modal .announcement-editor-wrap) {
+  :global(.announcement-edit-modal) {
+    width: min(1180px, calc(100vw - 48px));
+  }
+
+  :global(.announcement-edit-modal .announcement-md-editor) {
     width: 100%;
-    min-height: 360px;
-    height: 360px;
-    max-height: 72vh;
-    resize: vertical;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+    gap: 16px;
+  }
+
+  :global(.announcement-edit-modal .announcement-md-preview) {
+    min-height: 420px;
+    max-height: 68vh;
     overflow: auto;
+    padding: 16px;
+    background: var(--card-color);
     border: 1px solid var(--border-color);
     border-radius: 4px;
   }
 
-  :global(.announcement-edit-modal .announcement-editor-wrap .quillEditor) {
-    height: 100%;
-    min-height: 100%;
+  :global(.announcement-edit-modal .preview-title) {
+    margin-bottom: 12px;
+    color: var(--text-color-3);
+    font-size: 13px;
+    font-weight: 600;
   }
 
-  :global(.announcement-edit-modal .announcement-editor-wrap .ql-toolbar.ql-snow) {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    background: var(--body-color);
-    border: none;
-    border-bottom: 1px solid var(--border-color);
+  :global(.announcement-edit-modal .markdown-body) {
+    color: var(--text-color-1);
+    line-height: 1.8;
+    word-break: break-word;
   }
 
-  :global(.announcement-edit-modal .announcement-editor-wrap .ql-container.ql-snow) {
-    height: calc(100% - 43px);
-    min-height: 300px;
-    border: none;
+  :global(.announcement-edit-modal .markdown-body h1),
+  :global(.announcement-edit-modal .markdown-body h2),
+  :global(.announcement-edit-modal .markdown-body h3) {
+    margin: 24px 0 12px;
+    font-weight: 700;
+    line-height: 1.35;
   }
 
-  :global(.announcement-edit-modal .announcement-editor-wrap .ql-editor) {
-    min-height: 300px;
-    white-space: pre-wrap;
+  :global(.announcement-edit-modal .markdown-body p) {
+    margin: 0 0 12px;
+  }
+
+  :global(.announcement-edit-modal .markdown-body ul),
+  :global(.announcement-edit-modal .markdown-body ol) {
+    padding-left: 22px;
+    margin: 0 0 12px;
+  }
+
+  :global(.announcement-edit-modal .markdown-body blockquote) {
+    margin: 12px 0;
+    padding: 8px 12px;
+    color: var(--text-color-2);
+    border-left: 3px solid var(--primary-color);
+    background: var(--hover-color);
+  }
+
+  :global(.announcement-edit-modal .markdown-body code) {
+    padding: 2px 5px;
+    background: var(--hover-color);
+    border-radius: 4px;
+  }
+
+  :global(.announcement-edit-modal .markdown-body pre) {
+    overflow: auto;
+    padding: 12px;
+    background: var(--hover-color);
+    border-radius: 4px;
+  }
+
+  :global(.announcement-edit-modal .markdown-body img) {
+    max-width: 100%;
+    border-radius: 6px;
+  }
+
+  :global(.announcement-edit-modal .markdown-body table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+  }
+
+  :global(.announcement-edit-modal .markdown-body th),
+  :global(.announcement-edit-modal .markdown-body td) {
+    padding: 8px;
+    border: 1px solid var(--border-color);
+  }
+
+  @media (max-width: 900px) {
+    :global(.announcement-edit-modal .announcement-md-editor) {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

@@ -15,6 +15,7 @@ import (
 	"hotgo/internal/library/hgorm/handler"
 	"hotgo/internal/library/hgorm/hook"
 	"hotgo/internal/library/payment"
+	"hotgo/internal/model"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/adminin"
 	"hotgo/internal/model/input/form"
@@ -193,6 +194,43 @@ func (s *sAdminOrder) PayNotify(ctx context.Context, in *payin.NotifyCallFuncInp
 	return
 }
 
+// MemberVipPayNotify 会员认证支付成功通知
+func (s *sAdminOrder) MemberVipPayNotify(ctx context.Context, in *payin.NotifyCallFuncInp) (err error) {
+	var models *entity.AdminOrder
+	if err = s.Model(ctx).Where(dao.AdminOrder.Columns().OrderSn, in.Pay.OrderSn).Scan(&models); err != nil {
+		return
+	}
+	if models == nil {
+		err = gerror.New("会员认证订单不存在")
+		return
+	}
+	if models.Status != consts.OrderStatusNotPay {
+		err = gerror.New("会员认证订单已被处理，无需重复操作")
+		return
+	}
+	if models.OrderType != consts.OrderTypeMemberVip {
+		err = gerror.New("订单类型不是会员认证订单")
+		return
+	}
+
+	days := int(models.ProductId)
+	if days <= 0 {
+		days = 30
+	}
+
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (err error) {
+		_, err = s.Model(ctx).Where(dao.AdminOrder.Columns().Id, models.Id).Data(g.Map{
+			dao.AdminOrder.Columns().Status: consts.OrderStatusDone,
+		}).Update()
+		if err != nil {
+			return
+		}
+
+		return service.AdminMember().OpenVip(ctx, int64(models.MemberId), days, in.Pay.Subject)
+	})
+	return
+}
+
 // Create 创建充值订单
 func (s *sAdminOrder) Create(ctx context.Context, in *adminin.OrderCreateInp) (res *adminin.OrderCreateModel, err error) {
 	var (
@@ -247,6 +285,119 @@ func (s *sAdminOrder) Create(ctx context.Context, in *adminin.OrderCreateInp) (r
 		return
 	})
 	return
+}
+
+// CreateMemberVipPay 创建会员认证支付订单
+func (s *sAdminOrder) CreateMemberVipPay(ctx context.Context, in *adminin.MemberVipPayCreateInp) (res *adminin.MemberVipPayCreateModel, err error) {
+	if err = in.Filter(ctx); err != nil {
+		return
+	}
+
+	memberId := contexts.GetUserId(ctx)
+	if memberId <= 0 {
+		err = gerror.New("请先登录")
+		return
+	}
+
+	vipConfig, err := service.SysConfig().GetMemberVip(ctx)
+	if err != nil {
+		return
+	}
+	if vipConfig == nil || !vipConfig.Enabled {
+		err = gerror.New("会员认证支付暂未开启")
+		return
+	}
+	payItem := findMemberVipPayItem(vipConfig, in.TradeType)
+	if payItem == nil || !payItem.Enabled {
+		err = gerror.New("当前支付方式暂未开启")
+		return
+	}
+	if vipConfig.Days <= 0 {
+		vipConfig.Days = 30
+	}
+	if payItem.Money <= 0 {
+		err = gerror.New("当前支付方式价格配置错误")
+		return
+	}
+
+	var (
+		orderSn = payment.GenOrderSn(ctx)
+		subject = fmt.Sprintf("会员认证:%d天", vipConfig.Days)
+	)
+
+	res = new(adminin.MemberVipPayCreateModel)
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (err error) {
+		_, err = s.Model(ctx).Data(entity.AdminOrder{
+			MemberId:  memberId,
+			OrderType: consts.OrderTypeMemberVip,
+			ProductId: int64(vipConfig.Days),
+			OrderSn:   orderSn,
+			Money:     payItem.Money,
+			Remark:    subject,
+			Status:    consts.OrderStatusNotPay,
+		}).OmitEmptyData().Insert()
+		if err != nil {
+			return
+		}
+
+		create, err := service.Pay().Create(ctx, payin.PayCreateInp{
+			Subject:    subject,
+			OrderSn:    orderSn,
+			OrderGroup: consts.OrderGroupMemberVip,
+			PayType:    in.PayType,
+			TradeType:  in.TradeType,
+			PayAmount:  payItem.Money,
+			ReturnUrl:  in.ReturnUrl,
+		})
+		if err != nil {
+			return err
+		}
+
+		res.Order = create.Order
+		return
+	})
+	return
+}
+
+// GetMemberVipPayConfig 获取会员认证支付配置
+func (s *sAdminOrder) GetMemberVipPayConfig(ctx context.Context) (res *adminin.MemberVipConfigModel, err error) {
+	config, err := service.SysConfig().GetMemberVip(ctx)
+	if err != nil {
+		return
+	}
+	if config == nil {
+		config = &model.MemberVipConfig{}
+	}
+	res = &adminin.MemberVipConfigModel{
+		Enabled:          config.Enabled,
+		CustomerFallback: config.CustomerFallback,
+		Days:             config.Days,
+		PayItems:         make([]*adminin.MemberVipPayItemModel, 0, len(config.PayItems)),
+	}
+	for _, item := range config.PayItems {
+		if item == nil {
+			continue
+		}
+		res.PayItems = append(res.PayItems, &adminin.MemberVipPayItemModel{
+			Label:     item.Label,
+			TradeType: item.TradeType,
+			Enabled:   item.Enabled,
+			Money:     item.Money,
+		})
+	}
+	return
+}
+
+func findMemberVipPayItem(config *model.MemberVipConfig, tradeType string) *model.MemberVipPayItem {
+	if config == nil {
+		return nil
+	}
+	for _, item := range config.PayItems {
+		if item != nil && item.TradeType == tradeType {
+			return item
+		}
+	}
+	return nil
 }
 
 // List 获取充值订单列表

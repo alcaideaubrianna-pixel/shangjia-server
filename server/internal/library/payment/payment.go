@@ -12,6 +12,7 @@ import (
 	"hotgo/internal/dao"
 	"hotgo/internal/library/payment/alipay"
 	"hotgo/internal/library/payment/qqpay"
+	"hotgo/internal/library/payment/rainbow"
 	"hotgo/internal/library/payment/wxpay"
 	"hotgo/internal/model/input/payin"
 	"hotgo/utility/validate"
@@ -47,6 +48,8 @@ func New(name ...string) PayClient {
 		client = wxpay.New(config)
 	case consts.PayTypeQQPay:
 		client = qqpay.New(config)
+	case consts.PayTypeRainbow:
+		client = rainbow.New(config)
 	default:
 		panic(fmt.Sprintf("暂不支持的支付方式:%v", payType))
 	}
@@ -119,6 +122,8 @@ func AutoTradeType(payType, userAgent string) (tradeType string) {
 			return consts.TradeTypeQQWap
 		}
 		return consts.TradeTypeQQWeb
+	case consts.PayTypeRainbow:
+		return consts.TradeTypeRainbowAliPay
 	default:
 	}
 	return

@@ -108,6 +108,10 @@ type AppAnnouncementPublicListInp struct {
 	IsBanner int `json:"isBanner" dc:"是否Banner"`
 }
 
+type AppAnnouncementPublicViewInp struct {
+	Id int64 `json:"id" v:"required#公告ID不能为空" dc:"公告ID"`
+}
+
 type AppAnnouncementPublicListModel struct {
 	Id        int64       `json:"id" dc:"ID"`
 	Title     string      `json:"title" dc:"公告标题"`

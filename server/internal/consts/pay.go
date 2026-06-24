@@ -18,22 +18,24 @@ func init() {
 }
 
 const (
-	PayTypeALL    = ""       // 全部
-	PayTypeWxPay  = "wxpay"  // 微信支付
-	PayTypeAliPay = "alipay" // 支付宝
-	PayTypeQQPay  = "qqpay"  // QQ支付
+	PayTypeALL     = ""        // 全部
+	PayTypeWxPay   = "wxpay"   // 微信支付
+	PayTypeAliPay  = "alipay"  // 支付宝
+	PayTypeQQPay   = "qqpay"   // QQ支付
+	PayTypeRainbow = "rainbow" // 彩虹易支付
 )
 
 var (
 	PayTypeSlice = []string{
-		PayTypeWxPay, PayTypeAliPay, PayTypeQQPay,
+		PayTypeWxPay, PayTypeAliPay, PayTypeQQPay, PayTypeRainbow,
 	}
 
 	PayTypeNameMap = map[string]string{
-		PayTypeALL:    "全部",
-		PayTypeWxPay:  "微信支付",
-		PayTypeAliPay: "支付宝",
-		PayTypeQQPay:  "QQ支付",
+		PayTypeALL:     "全部",
+		PayTypeWxPay:   "微信支付",
+		PayTypeAliPay:  "支付宝",
+		PayTypeQQPay:   "QQ支付",
+		PayTypeRainbow: "彩虹易支付",
 	}
 )
 
@@ -58,12 +60,18 @@ const (
 	// QQ
 	TradeTypeQQWeb = "qqweb" // PC网页
 	TradeTypeQQWap = "qqwap" // 移动端
+
+	// 彩虹易支付
+	TradeTypeRainbowAliPay = "alipay" // 支付宝
+	TradeTypeRainbowWxPay  = "wxpay"  // 微信支付
+	TradeTypeRainbowUSDT   = "usdt"   // USDT
 )
 
 var (
-	TradeTypeWxSlice  = []string{TradeTypeWxMP, TradeTypeWxMini, TradeTypeWxApp, TradeTypeWxScan, TradeTypeWxPos, TradeTypeWxH5}
-	TradeTypeAliSlice = []string{TradeTypeAliWeb, TradeTypeAliApp, TradeTypeAliScan, TradeTypeAliWap, TradeTypeAliPos}
-	TradeTypeQQSlice  = []string{TradeTypeQQWeb, TradeTypeQQWap}
+	TradeTypeWxSlice      = []string{TradeTypeWxMP, TradeTypeWxMini, TradeTypeWxApp, TradeTypeWxScan, TradeTypeWxPos, TradeTypeWxH5}
+	TradeTypeAliSlice     = []string{TradeTypeAliWeb, TradeTypeAliApp, TradeTypeAliScan, TradeTypeAliWap, TradeTypeAliPos}
+	TradeTypeQQSlice      = []string{TradeTypeQQWeb, TradeTypeQQWap}
+	TradeTypeRainbowSlice = []string{TradeTypeRainbowAliPay, TradeTypeRainbowWxPay, TradeTypeRainbowUSDT}
 )
 
 // 支付状态
@@ -93,4 +101,5 @@ var PayTypeOptions = []*model.Option{
 	dict.GenSuccessOption(PayTypeWxPay, "微信支付"),
 	dict.GenInfoOption(PayTypeAliPay, "支付宝"),
 	dict.GenDefaultOption(PayTypeQQPay, "QQ支付"),
+	dict.GenPrimaryOption(PayTypeRainbow, "彩虹易支付"),
 }

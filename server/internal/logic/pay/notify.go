@@ -26,7 +26,8 @@ import (
 // RegisterNotifyCall 注册支付成功回调方法
 func (s *sPay) RegisterNotifyCall() {
 	payment.RegisterNotifyCallMap(map[string]payment.NotifyCallFunc{
-		consts.OrderGroupAdminOrder: service.AdminOrder().PayNotify, // 后台充值订单
+		consts.OrderGroupAdminOrder: service.AdminOrder().PayNotify,          // 后台充值订单
+		consts.OrderGroupMemberVip:  service.AdminOrder().MemberVipPayNotify, // 会员认证订单
 	})
 }
 

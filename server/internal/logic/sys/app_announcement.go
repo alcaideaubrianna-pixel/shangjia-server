@@ -59,12 +59,30 @@ func (s *sSysAppAnnouncement) PublicList(ctx context.Context, in *sysin.AppAnnou
 		Where(cols.Status, consts.StatusEnabled).
 		Where("(publish_at IS NULL OR publish_at<=?)", now).
 		Where("(expire_at IS NULL OR expire_at>?)", now)
-	if in.IsBanner > 0 {
+	if in.IsBanner >= 0 {
 		mod = mod.Where(cols.IsBanner, in.IsBanner)
 	}
 	mod = mod.Page(in.Page, in.PerPage).OrderDesc(cols.Sort).OrderDesc(cols.Id)
 	if err = mod.ScanAndCount(&list, &totalCount, false); err != nil {
 		err = gerror.Wrap(err, "获取APP公告列表失败，请稍后重试！")
+	}
+	return
+}
+
+func (s *sSysAppAnnouncement) PublicView(ctx context.Context, in *sysin.AppAnnouncementPublicViewInp) (res *sysin.AppAnnouncementPublicListModel, err error) {
+	cols := dao.AppAnnouncement.Columns()
+	now := gtime.Now()
+	err = s.Model(ctx, &handler.Option{FilterAuth: false}).
+		Where(cols.Id, in.Id).
+		Where(cols.Status, consts.StatusEnabled).
+		Where("(publish_at IS NULL OR publish_at<=?)", now).
+		Where("(expire_at IS NULL OR expire_at>?)", now).
+		Scan(&res)
+	if err != nil {
+		return nil, gerror.Wrap(err, "获取APP公告详情失败，请稍后重试！")
+	}
+	if res == nil {
+		return nil, gerror.New("公告不存在或未发布")
 	}
 	return
 }

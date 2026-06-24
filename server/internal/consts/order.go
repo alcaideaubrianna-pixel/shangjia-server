@@ -21,14 +21,16 @@ func init() {
 const (
 	OrderGroupDefault    = "order"       // 普通订单
 	OrderGroupAdminOrder = "admin_order" // 后台充值订单
+	OrderGroupMemberVip  = "member_vip"  // 会员认证订单
 	// 还可以设置其他，方便后期扩展..
 )
 
 // 订单类型
 
 const (
-	OrderTypeBalance = "balance" // 余额充值
-	OrderTypeProduct = "product" // 购买产品
+	OrderTypeBalance   = "balance"    // 余额充值
+	OrderTypeProduct   = "product"    // 购买产品
+	OrderTypeMemberVip = "member_vip" // 会员认证
 )
 
 const (

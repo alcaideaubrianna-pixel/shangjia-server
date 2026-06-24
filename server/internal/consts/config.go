@@ -63,6 +63,7 @@ var ConfigMaskDemoField = map[string]struct{}{
 
 	// 支付
 	"payWxPayMchId": {}, "payWxPaySerialNo": {}, "payWxPayAPIv3Key": {}, "payWxPayPrivateKey": {}, "payQQPayMchId": {}, "payQQPayApiKey": {},
+	"payRainbowPid": {}, "payRainbowPrivateKey": {}, "payRainbowPlatformPublicKey": {},
 
 	// 微信
 	"officialAccountAppSecret": {}, "officialAccountToken": {}, "officialAccountEncodingAESKey": {}, "openPlatformAppSecret": {},

@@ -47,6 +47,23 @@ type InfoRes struct {
 	*adminin.LoginMemberInfoModel
 }
 
+type MemberVipPayReq struct {
+	g.Meta `path:"/member/vip/pay" method:"post" tags:"移动端用户" summary:"创建会员认证支付订单"`
+	adminin.MemberVipPayCreateInp
+}
+
+type MemberVipPayRes struct {
+	*adminin.MemberVipPayCreateModel
+}
+
+type MemberVipConfigReq struct {
+	g.Meta `path:"/member/vip/config" method:"get" tags:"移动端用户" summary:"获取会员认证支付配置"`
+}
+
+type MemberVipConfigRes struct {
+	*adminin.MemberVipConfigModel
+}
+
 type UpdateProfileReq struct {
 	g.Meta `path:"/member/profile/update" method:"post" tags:"移动端用户" summary:"更新登录用户资料"`
 	adminin.MemberUpdateProfileInp

@@ -85,6 +85,8 @@ type (
 		GetWechat(ctx context.Context) (conf *model.WechatConfig, err error)
 		// GetPay 获取支付配置
 		GetPay(ctx context.Context) (conf *model.PayConfig, err error)
+		// GetMemberVip 获取会员认证配置
+		GetMemberVip(ctx context.Context) (conf *model.MemberVipConfig, err error)
 		// GetSms 获取短信配置
 		GetSms(ctx context.Context) (conf *model.SmsConfig, err error)
 		// GetGeo 获取地理配置
@@ -201,6 +203,7 @@ type (
 	ISysAppAnnouncement interface {
 		List(ctx context.Context, in *sysin.AppAnnouncementListInp) (list []*sysin.AppAnnouncementListModel, totalCount int, err error)
 		PublicList(ctx context.Context, in *sysin.AppAnnouncementPublicListInp) (list []*sysin.AppAnnouncementPublicListModel, totalCount int, err error)
+		PublicView(ctx context.Context, in *sysin.AppAnnouncementPublicViewInp) (res *sysin.AppAnnouncementPublicListModel, err error)
 		View(ctx context.Context, in *sysin.AppAnnouncementViewInp) (res *sysin.AppAnnouncementViewModel, err error)
 		Edit(ctx context.Context, in *sysin.AppAnnouncementEditInp) (err error)
 		Delete(ctx context.Context, in *sysin.AppAnnouncementDeleteInp) (err error)

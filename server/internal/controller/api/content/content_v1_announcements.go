@@ -21,3 +21,13 @@ func (c *ControllerV1) ListAnnouncements(ctx context.Context, req *v1.ListAnnoun
 	res.PageRes.Pack(req, totalCount)
 	return
 }
+
+func (c *ControllerV1) ViewAnnouncement(ctx context.Context, req *v1.ViewAnnouncementReq) (res *v1.ViewAnnouncementRes, err error) {
+	data, err := service.SysAppAnnouncement().PublicView(ctx, &req.AppAnnouncementPublicViewInp)
+	if err != nil {
+		return
+	}
+	res = new(v1.ViewAnnouncementRes)
+	res.AppAnnouncementPublicListModel = data
+	return
+}

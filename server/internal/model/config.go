@@ -148,6 +148,26 @@ type PayConfig struct {
 	QQPayAppId  string `json:"payQQPayAppId"`
 	QQPayMchId  string `json:"payQQPayMchId"`
 	QQPayApiKey string `json:"payQQPayApiKey"`
+	// 彩虹易支付
+	RainbowGateway           string `json:"payRainbowGateway"`
+	RainbowPid               string `json:"payRainbowPid"`
+	RainbowPrivateKey        string `json:"payRainbowPrivateKey"`
+	RainbowPlatformPublicKey string `json:"payRainbowPlatformPublicKey"`
+	RainbowMethod            string `json:"payRainbowMethod"`
+}
+
+type MemberVipPayItem struct {
+	Label     string  `json:"label"`
+	TradeType string  `json:"tradeType"`
+	Enabled   bool    `json:"enabled"`
+	Money     float64 `json:"money"`
+}
+
+type MemberVipConfig struct {
+	Enabled          bool                `json:"memberVipEnabled"`
+	CustomerFallback bool                `json:"memberVipCustomerFallback"`
+	Days             int                 `json:"memberVipDays"`
+	PayItems         []*MemberVipPayItem `json:"memberVipPayItems"`
 }
 
 // WechatOfficialAccountConfig 微信公众号配置

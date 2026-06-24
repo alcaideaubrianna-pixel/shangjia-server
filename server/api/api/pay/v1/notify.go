@@ -39,3 +39,13 @@ type NotifyQQPayRes struct {
 	g.Meta `mime:"text/xml" type:"string"`
 	*payin.PayNotifyModel
 }
+
+// NotifyRainbowReq 彩虹易支付回调
+type NotifyRainbowReq struct {
+	g.Meta `path:"/pay/notify/rainbow" method:"get" tags:"支付异步通知" summary:"彩虹易支付回调"`
+}
+
+type NotifyRainbowRes struct {
+	g.Meta `mime:"text/html" type:"string" example:"success"`
+	*payin.PayNotifyModel
+}

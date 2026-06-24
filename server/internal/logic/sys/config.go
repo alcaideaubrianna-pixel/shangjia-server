@@ -24,6 +24,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/database/gredis"
+	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -111,6 +112,22 @@ func (s *sSysConfig) GetPay(ctx context.Context) (conf *model.PayConfig, err err
 		return
 	}
 	err = gconv.Scan(models.List, &conf)
+	return
+}
+
+// GetMemberVip 获取会员认证配置
+func (s *sSysConfig) GetMemberVip(ctx context.Context) (conf *model.MemberVipConfig, err error) {
+	if err = s.ensureMemberVipConfig(ctx); err != nil {
+		return
+	}
+	models, err := s.GetConfigByGroup(ctx, &sysin.GetConfigInp{Group: "member_vip"})
+	if err != nil {
+		return
+	}
+	err = gconv.Scan(models.List, &conf)
+	if conf == nil {
+		conf = defaultMemberVipConfig()
+	}
 	return
 }
 
@@ -205,6 +222,11 @@ func (s *sSysConfig) GetConfigByGroup(ctx context.Context, in *sysin.GetConfigIn
 		err = gerror.New("分组不能为空")
 		return
 	}
+	if in.Group == "member_vip" {
+		if err = s.ensureMemberVipConfig(ctx); err != nil {
+			return
+		}
+	}
 
 	var models []*entity.SysConfig
 	cols := dao.SysConfig.Columns()
@@ -263,7 +285,7 @@ func (s *sSysConfig) UpdateConfigByGroup(ctx context.Context, in *sysin.UpdateCo
 			}
 
 			// 更新
-			_, err = dao.SysConfig.Ctx(ctx).Where("id", row.Id).Data(g.Map{"value": v, "updated_at": gtime.Now()}).Update()
+			_, err = dao.SysConfig.Ctx(ctx).Where("id", row.Id).Data(g.Map{"value": normalizeConfigValue(v), "updated_at": gtime.Now()}).Update()
 			if err != nil {
 				return
 			}
@@ -290,6 +312,76 @@ func (s *sSysConfig) getConfigByKey(key string, models []*entity.SysConfig) *ent
 		}
 	}
 	return nil
+}
+
+func normalizeConfigValue(value interface{}) interface{} {
+	switch value.(type) {
+	case map[string]interface{}, []interface{}:
+		return gjson.New(value).String()
+	default:
+		return value
+	}
+}
+
+func (s *sSysConfig) ensureMemberVipConfig(ctx context.Context) (err error) {
+	defaults := []struct {
+		key   string
+		name  string
+		typ   string
+		value interface{}
+		sort  int
+	}{
+		{key: "memberVipEnabled", name: "会员认证支付开关", typ: consts.ConfigTypeBool, value: true, sort: 1},
+		{key: "memberVipCustomerFallback", name: "关闭支付时打开客服", typ: consts.ConfigTypeBool, value: true, sort: 2},
+		{key: "memberVipDays", name: "会员认证天数", typ: consts.ConfigTypeInt, value: 30, sort: 3},
+		{key: "memberVipPayItems", name: "会员认证支付渠道", typ: consts.ConfigTypeString, value: gjson.New(defaultMemberVipConfig().PayItems).String(), sort: 4},
+	}
+
+	cols := dao.SysConfig.Columns()
+	var rows []*entity.SysConfig
+	if err = dao.SysConfig.Ctx(ctx).Where(cols.Group, "member_vip").Scan(&rows); err != nil {
+		return
+	}
+
+	exists := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		exists[row.Key] = struct{}{}
+	}
+
+	for _, item := range defaults {
+		if _, ok := exists[item.key]; ok {
+			continue
+		}
+		_, err = dao.SysConfig.Ctx(ctx).Data(g.Map{
+			cols.Group:     "member_vip",
+			cols.Key:       item.key,
+			cols.Name:      item.name,
+			cols.Type:      item.typ,
+			cols.Value:     item.value,
+			cols.Sort:      item.sort,
+			cols.Tip:       "会员认证支付配置",
+			cols.Status:    consts.StatusEnabled,
+			cols.CreatedAt: gtime.Now(),
+			cols.UpdatedAt: gtime.Now(),
+		}).Insert()
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
+func defaultMemberVipConfig() *model.MemberVipConfig {
+	return &model.MemberVipConfig{
+		Enabled:          true,
+		CustomerFallback: true,
+		Days:             30,
+		PayItems: []*model.MemberVipPayItem{
+			{Label: "支付宝", TradeType: consts.TradeTypeRainbowAliPay, Enabled: true, Money: 30},
+			{Label: "微信", TradeType: consts.TradeTypeRainbowWxPay, Enabled: true, Money: 30},
+			{Label: "USDT", TradeType: consts.TradeTypeRainbowUSDT, Enabled: true, Money: 30},
+		},
+	}
 }
 
 // syncUpdate 同步更新一些加载配置

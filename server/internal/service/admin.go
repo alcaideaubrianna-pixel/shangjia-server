@@ -199,8 +199,14 @@ type (
 		ApplyRefund(ctx context.Context, in *adminin.OrderApplyRefundInp) (err error)
 		// PayNotify 支付成功通知
 		PayNotify(ctx context.Context, in *payin.NotifyCallFuncInp) (err error)
+		// MemberVipPayNotify 会员认证支付成功通知
+		MemberVipPayNotify(ctx context.Context, in *payin.NotifyCallFuncInp) (err error)
 		// Create 创建充值订单
 		Create(ctx context.Context, in *adminin.OrderCreateInp) (res *adminin.OrderCreateModel, err error)
+		// CreateMemberVipPay 创建会员认证支付订单
+		CreateMemberVipPay(ctx context.Context, in *adminin.MemberVipPayCreateInp) (res *adminin.MemberVipPayCreateModel, err error)
+		// GetMemberVipPayConfig 获取会员认证支付配置
+		GetMemberVipPayConfig(ctx context.Context) (res *adminin.MemberVipConfigModel, err error)
 		// List 获取充值订单列表
 		List(ctx context.Context, in *adminin.OrderListInp) (list []*adminin.OrderListModel, totalCount int, err error)
 		// Export 导出充值订单

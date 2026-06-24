@@ -15,6 +15,8 @@ type IMemberV1 interface {
 	Register(ctx context.Context, req *v1.RegisterReq) (res *v1.RegisterRes, err error)
 	AccountLogin(ctx context.Context, req *v1.AccountLoginReq) (res *v1.AccountLoginRes, err error)
 	Info(ctx context.Context, req *v1.InfoReq) (res *v1.InfoRes, err error)
+	MemberVipPay(ctx context.Context, req *v1.MemberVipPayReq) (res *v1.MemberVipPayRes, err error)
+	MemberVipConfig(ctx context.Context, req *v1.MemberVipConfigReq) (res *v1.MemberVipConfigRes, err error)
 	UpdateProfile(ctx context.Context, req *v1.UpdateProfileReq) (res *v1.UpdateProfileRes, err error)
 	UpdatePassword(ctx context.Context, req *v1.UpdatePasswordReq) (res *v1.UpdatePasswordRes, err error)
 	Settings(ctx context.Context, req *v1.SettingsReq) (res *v1.SettingsRes, err error)

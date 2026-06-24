@@ -72,6 +72,41 @@ type OrderCreateModel struct {
 	Order *payin.CreateOrderModel `json:"order"`
 }
 
+// MemberVipPayCreateInp 创建会员认证支付订单
+type MemberVipPayCreateInp struct {
+	PayType   string `json:"payType"   dc:"支付方式"`
+	TradeType string `json:"tradeType" dc:"交易类型"`
+	ReturnUrl string `json:"returnUrl" dc:"买家付款成功跳转地址"`
+}
+
+func (in *MemberVipPayCreateInp) Filter(ctx context.Context) (err error) {
+	if in.PayType == "" {
+		in.PayType = consts.PayTypeRainbow
+	}
+	if in.TradeType == "" {
+		in.TradeType = consts.TradeTypeRainbowAliPay
+	}
+	return
+}
+
+type MemberVipPayCreateModel struct {
+	Order *payin.CreateOrderModel `json:"order"`
+}
+
+type MemberVipPayItemModel struct {
+	Label     string  `json:"label"`
+	TradeType string  `json:"tradeType"`
+	Enabled   bool    `json:"enabled"`
+	Money     float64 `json:"money"`
+}
+
+type MemberVipConfigModel struct {
+	Enabled          bool                     `json:"enabled"`
+	CustomerFallback bool                     `json:"customerFallback"`
+	Days             int                      `json:"days"`
+	PayItems         []*MemberVipPayItemModel `json:"payItems"`
+}
+
 // OrderEditInp 修改/新增充值订单
 type OrderEditInp struct {
 	entity.AdminOrder

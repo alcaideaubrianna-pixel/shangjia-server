@@ -93,6 +93,94 @@
           <template #feedback>API秘钥值</template>
         </n-form-item>
 
+        <n-divider title-placement="left">彩虹易支付</n-divider>
+        <n-alert :show-icon="false" type="info">
+          彩虹易支付使用 V2 统一下单接口，接口类型建议填写 jump，支付成功后异步回调地址为
+          /api/pay/notify/rainbow。
+        </n-alert>
+        <n-form-item label="网关地址" path="payRainbowGateway">
+          <n-input
+            v-model:value="formValue.payRainbowGateway"
+            placeholder="https://pay.v8jisu.cn"
+            clearable
+          />
+          <template #feedback>不填写时默认使用 https://pay.v8jisu.cn</template>
+        </n-form-item>
+
+        <n-form-item label="商户ID" path="payRainbowPid">
+          <n-input v-model:value="formValue.payRainbowPid" placeholder="" clearable />
+        </n-form-item>
+
+        <n-form-item label="接口类型" path="payRainbowMethod">
+          <n-input v-model:value="formValue.payRainbowMethod" placeholder="jump" clearable />
+          <template #feedback>可填 web、jump、jsapi、app、scan、applet，H5推荐 jump</template>
+        </n-form-item>
+
+        <n-form-item label="商户私钥" path="payRainbowPrivateKey">
+          <n-input
+            type="textarea"
+            v-model:value="formValue.payRainbowPrivateKey"
+            placeholder="-----BEGIN PRIVATE KEY-----"
+            clearable
+          />
+          <template #feedback>用于 SHA256WithRSA 签名，可填写 PEM 内容或服务器文件路径</template>
+        </n-form-item>
+
+        <n-form-item label="平台公钥" path="payRainbowPlatformPublicKey">
+          <n-input
+            type="textarea"
+            v-model:value="formValue.payRainbowPlatformPublicKey"
+            placeholder="-----BEGIN PUBLIC KEY-----"
+            clearable
+          />
+          <template #feedback>用于验证彩虹回调签名，可填写 PEM 内容或服务器文件路径</template>
+        </n-form-item>
+
+        <n-divider title-placement="left">会员认证</n-divider>
+        <n-form-item label="开启支付" path="memberVipEnabled">
+          <n-switch size="large" v-model:value="formValue.memberVipEnabled" />
+          <template #feedback>关闭后，移动端点击开通会员将打开客服聊天</template>
+        </n-form-item>
+
+        <n-form-item label="客服兜底" path="memberVipCustomerFallback">
+          <n-switch size="large" v-model:value="formValue.memberVipCustomerFallback" />
+          <template #feedback>支付关闭或无可用支付渠道时打开客服聊天</template>
+        </n-form-item>
+
+        <n-form-item label="认证天数" path="memberVipDays">
+          <n-input-number v-model:value="formValue.memberVipDays" :min="1" clearable />
+        </n-form-item>
+
+        <n-form-item label="渠道价格" path="memberVipPayItems">
+          <n-space vertical class="w-full">
+            <n-card
+              v-for="(item, index) in formValue.memberVipPayItems"
+              :key="item.tradeType"
+              size="small"
+              embedded
+            >
+              <n-grid :cols="24" :x-gap="12" :y-gap="8" responsive="screen">
+                <n-form-item-gi :span="5" label="名称">
+                  <n-input v-model:value="item.label" />
+                </n-form-item-gi>
+                <n-form-item-gi :span="5" label="通道">
+                  <n-input v-model:value="item.tradeType" />
+                </n-form-item-gi>
+                <n-form-item-gi :span="5" label="价格">
+                  <n-input-number v-model:value="item.money" :min="0" clearable />
+                </n-form-item-gi>
+                <n-form-item-gi :span="4" label="启用">
+                  <n-switch v-model:value="item.enabled" />
+                </n-form-item-gi>
+                <n-form-item-gi :span="5" label="操作">
+                  <n-button tertiary type="error" @click="removeVipPayItem(index)">删除</n-button>
+                </n-form-item-gi>
+              </n-grid>
+            </n-card>
+            <n-button tertiary type="primary" @click="addVipPayItem">新增渠道</n-button>
+          </n-space>
+        </n-form-item>
+
         <div>
           <n-space>
             <n-button type="primary" @click="formSubmit">保存更新</n-button>
@@ -184,12 +272,36 @@
     payQQPayAppId: '',
     payQQPayMchId: '',
     payQQPayApiKey: '',
+    payRainbowGateway: 'https://pay.v8jisu.cn',
+    payRainbowPid: '',
+    payRainbowPrivateKey: '',
+    payRainbowPlatformPublicKey: '',
+    payRainbowMethod: 'jump',
+    memberVipEnabled: true,
+    memberVipCustomerFallback: true,
+    memberVipDays: 30,
+    memberVipPayItems: [
+      { label: '支付宝', tradeType: 'alipay', enabled: true, money: 30 },
+      { label: '微信', tradeType: 'wxpay', enabled: true, money: 30 },
+      { label: 'USDT', tradeType: 'usdt', enabled: true, money: 30 },
+    ],
   });
 
   function formSubmit() {
     formRef.value.validate((errors) => {
       if (!errors) {
-        updateConfig({ group: group.value, list: formValue.value }).then((_res) => {
+        const { memberVipEnabled, memberVipCustomerFallback, memberVipDays, memberVipPayItems, ...payConfig } =
+          formValue.value;
+        const memberVipConfig = {
+          memberVipEnabled,
+          memberVipCustomerFallback,
+          memberVipDays,
+          memberVipPayItems,
+        };
+        Promise.all([
+          updateConfig({ group: group.value, list: payConfig }),
+          updateConfig({ group: 'member_vip', list: memberVipConfig }),
+        ]).then((_res) => {
           message.success('更新成功');
           load();
         });
@@ -199,12 +311,29 @@
     });
   }
 
+  function addVipPayItem() {
+    formValue.value.memberVipPayItems.push({
+      label: '新渠道',
+      tradeType: '',
+      enabled: true,
+      money: 0,
+    });
+  }
+
+  function removeVipPayItem(index: number) {
+    formValue.value.memberVipPayItems.splice(index, 1);
+  }
+
   function load() {
     show.value = true;
     loadOptions();
-    getConfig({ group: group.value })
-      .then((res) => {
-        formValue.value = res.list;
+    Promise.all([getConfig({ group: group.value }), getConfig({ group: 'member_vip' })])
+      .then(([payRes, memberVipRes]) => {
+        formValue.value = {
+          ...formValue.value,
+          ...(payRes.list || {}),
+          ...(memberVipRes.list || {}),
+        };
       })
       .finally(() => {
         show.value = false;
