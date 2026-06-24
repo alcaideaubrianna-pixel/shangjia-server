@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -2436,6 +2438,7 @@ func (s *sSysChat) saveTelegramFileAttachment(ctx context.Context, botToken stri
 	}
 	data := response.ReadAll()
 	name := fallbackString(file.FileName, "telegram_attachment")
+	contentType := strings.ToLower(strings.TrimSpace(response.Header.Get("Content-Type")))
 	if file.ConvertTGS {
 		converted, convertedName, convertedType, convertErr := convertTelegramTGS(ctx, name, data)
 		if convertErr != nil {
@@ -2444,13 +2447,16 @@ func (s *sSysChat) saveTelegramFileAttachment(ctx context.Context, botToken stri
 		data = converted
 		name = convertedName
 		file.FileType = convertedType
+		contentType = mime.TypeByExtension(filepath.Ext(name))
 	}
-	attachment, err := storager.DoUpload(ctx, storagerKindByFileType(file.FileType), bytesUploadFile(name, data))
+	fileType := normalizeAttachmentType(file.FileType, name, contentType)
+	name = ensureAttachmentExt(name, fileType, contentType)
+	attachment, err := storager.DoUpload(ctx, storagerKindByFileType(fileType), bytesUploadFile(name, data))
 	if err != nil {
 		return nil, err
 	}
 	url := storager.LastUrl(ctx, attachment.FileUrl, attachment.Drive)
-	return &sysin.ChatMessageAttachmentModel{Id: attachment.Id, Name: attachment.Name, FileType: fallbackString(file.FileType, attachmentTypeByName(name)), DataUrl: url, ThumbUrl: url, FallbackUrl: url}, nil
+	return &sysin.ChatMessageAttachmentModel{Id: attachment.Id, Name: attachment.Name, FileType: fileType, DataUrl: url, ThumbUrl: url, FallbackUrl: url}, nil
 }
 
 func convertTelegramTGS(ctx context.Context, name string, data []byte) ([]byte, string, string, error) {
@@ -2793,12 +2799,18 @@ func localUploadAttachment(ctx context.Context, file *ghttp.UploadFile) (*sysin.
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取上传文件失败")
 	}
-	attachment, err := storager.DoUpload(ctx, storagerKindByFileName(file.Filename), bytesUploadFile(file.Filename, data))
+	contentType := ""
+	if file.FileHeader != nil && file.FileHeader.Header != nil {
+		contentType = file.FileHeader.Header.Get("Content-Type")
+	}
+	fileType := normalizeAttachmentType("", file.Filename, contentType)
+	name := ensureAttachmentExt(file.Filename, fileType, contentType)
+	attachment, err := storager.DoUpload(ctx, storagerKindByFileType(fileType), bytesUploadFile(name, data))
 	if err != nil {
 		return nil, err
 	}
 	url := storager.LastUrl(ctx, attachment.FileUrl, attachment.Drive)
-	return &sysin.ChatMessageAttachmentModel{Id: attachment.Id, Name: attachment.Name, FileType: attachmentTypeByName(file.Filename), FallbackUrl: url, DataUrl: url, ThumbUrl: url, Data: data}, nil
+	return &sysin.ChatMessageAttachmentModel{Id: attachment.Id, Name: attachment.Name, FileType: fileType, FallbackUrl: url, DataUrl: url, ThumbUrl: url, Data: data}, nil
 }
 
 func (s *sSysChat) bindTelegramChatByCode(ctx context.Context, code string, msg *sysin.TelegramMessageInp, botId int64) error {
@@ -2961,14 +2973,82 @@ func telegramBotDisplayName(user *models.User) string {
 }
 
 func attachmentTypeByName(name string) string {
-	lower := strings.ToLower(name)
-	if strings.HasSuffix(lower, ".mp4") || strings.HasSuffix(lower, ".mov") || strings.HasSuffix(lower, ".m4v") {
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
+	if ext == "" {
+		return "file"
+	}
+	if storager.IsVideoType(ext) {
 		return "video"
 	}
-	if strings.HasSuffix(lower, ".jpg") || strings.HasSuffix(lower, ".jpeg") || strings.HasSuffix(lower, ".png") || strings.HasSuffix(lower, ".webp") || strings.HasSuffix(lower, ".gif") {
+	if storager.IsImgType(ext) {
 		return "image"
 	}
 	return "file"
+}
+
+func normalizeAttachmentType(fileType, name, contentType string) string {
+	fileType = strings.ToLower(strings.TrimSpace(fileType))
+	if fileType == "image" || fileType == "video" {
+		return fileType
+	}
+	if byName := attachmentTypeByName(name); byName != "file" {
+		return byName
+	}
+	if byMime := attachmentTypeByMime(contentType); byMime != "file" {
+		return byMime
+	}
+	return "file"
+}
+
+func ensureAttachmentExt(name, fileType, contentType string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "attachment"
+	}
+	if strings.TrimSpace(filepath.Ext(name)) != "" {
+		return name
+	}
+	ext := attachmentExtByMime(contentType)
+	if ext == "" {
+		switch fileType {
+		case "image":
+			ext = ".jpg"
+		case "video":
+			ext = ".mp4"
+		}
+	}
+	if ext == "" {
+		return name
+	}
+	return name + ext
+}
+
+func attachmentExtByMime(contentType string) string {
+	contentType = strings.TrimSpace(strings.Split(strings.ToLower(contentType), ";")[0])
+	if contentType == "" {
+		return ""
+	}
+	switch contentType {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "video/mp4":
+		return ".mp4"
+	case "video/webm":
+		return ".webm"
+	case "video/quicktime":
+		return ".mov"
+	}
+	exts, err := mime.ExtensionsByType(contentType)
+	if err != nil || len(exts) == 0 {
+		return ""
+	}
+	return exts[0]
 }
 
 func replaceFileExt(name string, ext string) string {
@@ -3038,7 +3118,7 @@ func uniquePositiveInt64s(ids []int64) []int64 {
 }
 
 func attachmentTypeByMime(mime string) string {
-	mime = strings.ToLower(mime)
+	mime = strings.TrimSpace(strings.Split(strings.ToLower(mime), ";")[0])
 	if strings.HasPrefix(mime, "image/") {
 		return "image"
 	}
