@@ -5,6 +5,8 @@ import (
 	v1 "hotgo/api/api/content/v1"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
+
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 func (c *ControllerV1) ListProfiles(ctx context.Context, req *v1.ListProfilesReq) (res *v1.ListProfilesRes, err error) {
@@ -30,6 +32,20 @@ func (c *ControllerV1) HomeProfileCards(ctx context.Context, req *v1.HomeProfile
 		list = []*sysin.ContentProfileListModel{}
 	}
 	res = new(v1.HomeProfileCardsRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *ControllerV1) ImageSearch(ctx context.Context, req *v1.ImageSearchReq) (res *v1.ImageSearchRes, err error) {
+	list, totalCount, err := service.SysContent().ImageSearch(ctx, &req.ContentProfileImageSearchInp, g.RequestFromCtx(ctx).GetUploadFile("image"))
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.ContentProfileListModel{}
+	}
+	res = new(v1.ImageSearchRes)
 	res.List = list
 	res.PageRes.Pack(req, totalCount)
 	return

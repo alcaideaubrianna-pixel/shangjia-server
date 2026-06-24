@@ -9,6 +9,7 @@ import (
 type IContentV1 interface {
 	ListProfiles(ctx context.Context, req *v1.ListProfilesReq) (res *v1.ListProfilesRes, err error)
 	HomeProfileCards(ctx context.Context, req *v1.HomeProfileCardsReq) (res *v1.HomeProfileCardsRes, err error)
+	ImageSearch(ctx context.Context, req *v1.ImageSearchReq) (res *v1.ImageSearchRes, err error)
 	FilterOptions(ctx context.Context, req *v1.FilterOptionsReq) (res *v1.FilterOptionsRes, err error)
 	Regions(ctx context.Context, req *v1.RegionsReq) (res *v1.RegionsRes, err error)
 	ViewProfile(ctx context.Context, req *v1.ViewProfileReq) (res *v1.ViewProfileRes, err error)

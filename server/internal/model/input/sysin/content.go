@@ -47,6 +47,11 @@ type HomeProfileCardsInp struct {
 	ContentProfileListInp
 }
 
+type ContentProfileImageSearchInp struct {
+	form.PageReq
+	Threshold int `json:"threshold" dc:"最大汉明距离，默认12"`
+}
+
 type ContentProfileListModel struct {
 	Id          int64                `json:"id" dc:"ID"`
 	ProfileNo   string               `json:"profileNo" dc:"资料编号"`

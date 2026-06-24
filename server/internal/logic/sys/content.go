@@ -14,14 +14,22 @@ import (
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"math"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/corona10/goimagehash"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
@@ -258,6 +266,41 @@ func (s *sSysContent) HomeProfileCards(ctx context.Context, in *sysin.HomeProfil
 	return s.ListProfiles(ctx, &listInp)
 }
 
+func (s *sSysContent) ImageSearch(ctx context.Context, in *sysin.ContentProfileImageSearchInp, file *ghttp.UploadFile) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
+	if in == nil {
+		in = &sysin.ContentProfileImageSearchInp{}
+	}
+	if in.Page <= 0 {
+		in.Page = 1
+	}
+	if in.PerPage <= 0 {
+		in.PerPage = 12
+	}
+	if in.PerPage > 50 {
+		in.PerPage = 50
+	}
+	threshold := in.Threshold
+	if threshold <= 0 {
+		threshold = 12
+	}
+	if threshold > 32 {
+		threshold = 32
+	}
+	queryHash, err := imagePHashFromUpload(file)
+	if err != nil {
+		return nil, 0, err
+	}
+	profileIds, totalCount, err := s.findSimilarProfileIdsByPHash(ctx, queryHash, threshold, in.Page, in.PerPage)
+	if err != nil {
+		return
+	}
+	if len(profileIds) == 0 {
+		return []*sysin.ContentProfileListModel{}, totalCount, nil
+	}
+	list, _, err = s.listProfilesByIds(ctx, profileIds)
+	return
+}
+
 // ListProfiles 获取前台资料列表。
 func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfileListInp) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
 	feed := normalizeHomeProfileFeed(in.Feed, in.Sort)
@@ -464,6 +507,65 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 		list = append(list, item)
 	}
 	return
+}
+
+func (s *sSysContent) listProfilesByIds(ctx context.Context, profileIds []int64) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
+	if len(profileIds) == 0 {
+		return []*sysin.ContentProfileListModel{}, 0, nil
+	}
+	profileColumns := dao.ContentProfile.Columns()
+	rows := make([]contentProfileRow, 0, len(profileIds))
+	err = s.publicProfileWhere(dao.ContentProfile.Ctx(ctx).As("p")).
+		Fields(
+			aliasFields("p",
+				profileColumns.Id,
+				profileColumns.ProfileNo,
+				profileColumns.Title,
+				profileColumns.Summary,
+				profileColumns.Province,
+				profileColumns.City,
+				profileColumns.Age,
+				profileColumns.Height,
+				profileColumns.Weight,
+				profileColumns.CupSize,
+				profileColumns.HasVerificationVideo,
+				profileColumns.MemberOnlyVideo,
+				profileColumns.ImageCount,
+				profileColumns.VideoCount,
+				profileColumns.PublishedAt,
+			),
+		).
+		WhereIn(aliasField("p", profileColumns.Id), profileIds).
+		Scan(&rows)
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "获取相似资料失败，请稍后重试")
+	}
+	rowMap := make(map[int64]contentProfileRow, len(rows))
+	for _, row := range rows {
+		rowMap[row.Id] = row
+	}
+	coverMap, err := s.getProfileCoverMap(ctx, profileIds)
+	if err != nil {
+		return
+	}
+	mediaMap, err := s.getProfileMediaMap(ctx, profileIds, s.isRequestVip(ctx))
+	if err != nil {
+		return
+	}
+	list = make([]*sysin.ContentProfileListModel, 0, len(profileIds))
+	for _, id := range profileIds {
+		row, ok := rowMap[id]
+		if !ok {
+			continue
+		}
+		item := row.toListModel()
+		item.CoverUrl = contentAssetURL(coverMap[row.Id])
+		item.Avatar = item.CoverUrl
+		item.Media = mediaMap[row.Id]
+		item.Photos = mediaPhotos(item.Media)
+		list = append(list, item)
+	}
+	return list, len(list), nil
 }
 
 // FilterOptions 获取前台资料筛选选项。
@@ -2568,6 +2670,122 @@ func (s *sSysContent) profileImagePHashSignature(ctx context.Context, profileId 
 	sort.Strings(hashes)
 	signature = strings.Join(hashes, "|")
 	return
+}
+
+type profilePHashDistance struct {
+	ProfileId int64
+	Distance  int
+}
+
+func (s *sSysContent) findSimilarProfileIdsByPHash(ctx context.Context, queryHash *goimagehash.ImageHash, threshold int, page int, perPage int) (profileIds []int64, totalCount int, err error) {
+	profileColumns := dao.ContentProfile.Columns()
+	mediaColumns := dao.ContentMedia.Columns()
+	rows, err := dao.ContentMedia.Ctx(ctx).As("m").
+		Fields(aliasField("m", mediaColumns.ProfileId), aliasField("m", mediaColumns.PerceptualHash)).
+		LeftJoin(dao.ContentProfile.Table()+" p", aliasField("p", profileColumns.Id)+"="+aliasField("m", mediaColumns.ProfileId)).
+		Where(aliasField("m", mediaColumns.MediaType), consts.ContentMediaTypeImage).
+		Where(aliasField("m", mediaColumns.Status), consts.StatusEnabled).
+		WhereNot(aliasField("m", mediaColumns.PerceptualHash), "").
+		Where(aliasField("p", profileColumns.Status), consts.StatusEnabled).
+		Where(aliasField("p", profileColumns.ReviewStatus), consts.ContentReviewApproved).
+		WhereIn(aliasField("p", profileColumns.ImportStatus), []string{"imported", "duplicate"}).
+		WhereIn(aliasField("p", profileColumns.Visibility), []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly}).
+		WhereNull(aliasField("p", profileColumns.DeletedAt)).
+		All()
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "查询图片相似资料失败")
+	}
+	distanceByProfile := make(map[int64]int)
+	for _, row := range rows {
+		profileId := row[mediaColumns.ProfileId].Int64()
+		if profileId <= 0 {
+			continue
+		}
+		hash, ok := parseStoredPHash(row[mediaColumns.PerceptualHash].String())
+		if !ok {
+			continue
+		}
+		distance, distanceErr := queryHash.Distance(hash)
+		if distanceErr != nil || distance > threshold {
+			continue
+		}
+		current, exists := distanceByProfile[profileId]
+		if !exists || distance < current {
+			distanceByProfile[profileId] = distance
+		}
+	}
+	items := make([]profilePHashDistance, 0, len(distanceByProfile))
+	for profileId, distance := range distanceByProfile {
+		items = append(items, profilePHashDistance{ProfileId: profileId, Distance: distance})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Distance == items[j].Distance {
+			return items[i].ProfileId > items[j].ProfileId
+		}
+		return items[i].Distance < items[j].Distance
+	})
+	totalCount = len(items)
+	if totalCount == 0 {
+		return []int64{}, 0, nil
+	}
+	start := (page - 1) * perPage
+	if start < 0 {
+		start = 0
+	}
+	if start >= totalCount {
+		return []int64{}, totalCount, nil
+	}
+	end := int(math.Min(float64(start+perPage), float64(totalCount)))
+	profileIds = make([]int64, 0, end-start)
+	for _, item := range items[start:end] {
+		profileIds = append(profileIds, item.ProfileId)
+	}
+	return
+}
+
+func imagePHashFromUpload(file *ghttp.UploadFile) (*goimagehash.ImageHash, error) {
+	if file == nil {
+		return nil, gerror.New("请先上传要搜索的图片")
+	}
+	reader, err := file.Open()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取上传图片失败")
+	}
+	defer reader.Close()
+	img, _, err := image.Decode(reader)
+	if err != nil {
+		return nil, gerror.New("图片格式不支持，请上传 JPG、PNG 或 GIF")
+	}
+	hash, err := goimagehash.PerceptionHash(img)
+	if err != nil {
+		return nil, gerror.Wrap(err, "计算图片感知哈希失败")
+	}
+	return hash, nil
+}
+
+func parseStoredPHash(value string) (*goimagehash.ImageHash, bool) {
+	normalized := strings.TrimSpace(strings.ToLower(value))
+	if normalized == "" {
+		return nil, false
+	}
+	if strings.Contains(normalized, ":") {
+		parts := strings.Split(normalized, ":")
+		normalized = parts[len(parts)-1]
+	}
+	normalized = strings.TrimPrefix(normalized, "0x")
+	base := 16
+	if len(normalized) != 16 {
+		if _, err := strconv.ParseUint(normalized, 10, 64); err == nil {
+			base = 10
+		} else {
+			return nil, false
+		}
+	}
+	hashValue, err := strconv.ParseUint(normalized, base, 64)
+	if err != nil {
+		return nil, false
+	}
+	return goimagehash.NewImageHash(hashValue, goimagehash.PHash), true
 }
 
 func imagePHashSignatureCacheKey(signature string) string {

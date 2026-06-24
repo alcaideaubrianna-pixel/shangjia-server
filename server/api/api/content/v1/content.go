@@ -27,6 +27,16 @@ type HomeProfileCardsRes struct {
 	List []*sysin.ContentProfileListModel `json:"list" dc:"资料卡片列表"`
 }
 
+type ImageSearchReq struct {
+	g.Meta `path:"/content/profile/image-search" method:"post" mime:"multipart/form-data" tags:"内容资料" summary:"上传图片搜索相似资料"`
+	sysin.ContentProfileImageSearchInp
+}
+
+type ImageSearchRes struct {
+	form.PageRes
+	List []*sysin.ContentProfileListModel `json:"list" dc:"相似资料列表"`
+}
+
 type FilterOptionsReq struct {
 	g.Meta `path:"/content/filter/options" method:"get" tags:"内容资料" summary:"获取公开资料筛选选项"`
 }
