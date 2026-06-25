@@ -107,11 +107,64 @@ func (s *sSysConfig) GetWechat(ctx context.Context) (conf *model.WechatConfig, e
 
 // GetPay 获取支付配置
 func (s *sSysConfig) GetPay(ctx context.Context) (conf *model.PayConfig, err error) {
+	if err = s.ensureRainbowPayConfig(ctx); err != nil {
+		return
+	}
 	models, err := s.GetConfigByGroup(ctx, &sysin.GetConfigInp{Group: "pay"})
 	if err != nil {
 		return
 	}
 	err = gconv.Scan(models.List, &conf)
+	return
+}
+
+func (s *sSysConfig) ensureRainbowPayConfig(ctx context.Context) (err error) {
+	defaults := []struct {
+		key   string
+		name  string
+		typ   string
+		value interface{}
+		sort  int
+		tip   string
+	}{
+		{key: "payRainbowGateway", name: "彩虹易支付网关地址", typ: consts.ConfigTypeString, value: "https://pay.v8jisu.cn", sort: 940, tip: "彩虹易支付网关地址"},
+		{key: "payRainbowPid", name: "彩虹易支付商户ID", typ: consts.ConfigTypeString, value: "", sort: 950, tip: "彩虹易支付商户ID"},
+		{key: "payRainbowMethod", name: "彩虹易支付接口类型", typ: consts.ConfigTypeString, value: "jump", sort: 960, tip: "彩虹易支付接口类型，如 jump"},
+		{key: "payRainbowPrivateKey", name: "彩虹易支付商户私钥", typ: consts.ConfigTypeString, value: "", sort: 970, tip: "用于 SHA256WithRSA 签名，可填写 PEM 内容或服务器文件路径"},
+		{key: "payRainbowPlatformPublicKey", name: "彩虹易支付平台公钥", typ: consts.ConfigTypeString, value: "", sort: 980, tip: "用于验证彩虹回调签名，可填写 PEM 内容或服务器文件路径"},
+	}
+
+	cols := dao.SysConfig.Columns()
+	var rows []*entity.SysConfig
+	if err = dao.SysConfig.Ctx(ctx).Where(cols.Group, "pay").Scan(&rows); err != nil {
+		return
+	}
+	exists := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		exists[row.Key] = struct{}{}
+	}
+	for _, item := range defaults {
+		if _, ok := exists[item.key]; ok {
+			continue
+		}
+		_, err = dao.SysConfig.Ctx(ctx).Data(g.Map{
+			cols.Group:        "pay",
+			cols.Key:          item.key,
+			cols.Name:         item.name,
+			cols.Type:         item.typ,
+			cols.Value:        normalizeConfigValue(item.value),
+			cols.DefaultValue: normalizeConfigValue(item.value),
+			cols.IsDefault:    0,
+			cols.Sort:         item.sort,
+			cols.Tip:          item.tip,
+			cols.Status:       consts.StatusEnabled,
+			cols.CreatedAt:    gtime.Now(),
+			cols.UpdatedAt:    gtime.Now(),
+		}).Insert()
+		if err != nil {
+			return
+		}
+	}
 	return
 }
 
