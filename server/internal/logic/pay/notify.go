@@ -9,6 +9,7 @@ package pay
 
 import (
 	"context"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -66,34 +67,35 @@ func (s *sPay) Notify(ctx context.Context, in *payin.PayNotifyInp) (res *payin.P
 	models.PayIp = location.GetClientIp(ghttp.RequestFromCtx(ctx))
 	models.TraceIds = gjson.New(traceIds)
 
-	result, err := s.Model(ctx).
-		Fields(
-			dao.PayLog.Columns().TransactionId,
-			dao.PayLog.Columns().PayStatus,
-			dao.PayLog.Columns().PayAt,
-			dao.PayLog.Columns().PayIp,
-			dao.PayLog.Columns().TraceIds,
-			dao.PayLog.Columns().ActualAmount,
-		).
-		Where(dao.PayLog.Columns().Id, models.Id).
-		Where(dao.PayLog.Columns().PayStatus, consts.PayStatusWait).
-		OmitEmpty().
-		Data(models).Update()
-	if err != nil {
-		return
-	}
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (err error) {
+		result, err := s.Model(ctx).
+			Fields(
+				dao.PayLog.Columns().TransactionId,
+				dao.PayLog.Columns().PayStatus,
+				dao.PayLog.Columns().PayAt,
+				dao.PayLog.Columns().PayIp,
+				dao.PayLog.Columns().TraceIds,
+				dao.PayLog.Columns().ActualAmount,
+			).
+			Where(dao.PayLog.Columns().Id, models.Id).
+			Where(dao.PayLog.Columns().PayStatus, consts.PayStatusWait).
+			OmitEmpty().
+			Data(models).Update()
+		if err != nil {
+			return
+		}
 
-	ret, err := result.RowsAffected()
-	if err != nil {
-		return
-	}
+		ret, err := result.RowsAffected()
+		if err != nil {
+			return
+		}
 
-	if ret == 0 {
-		g.Log().Warningf(ctx, "没有被更新的数据行")
-		return
-	}
+		if ret == 0 {
+			g.Log().Warningf(ctx, "没有被更新的数据行")
+			return
+		}
 
-	// 回调业务
-	payment.NotifyCall(ctx, &payin.NotifyCallFuncInp{Pay: models})
+		return payment.NotifyCall(ctx, &payin.NotifyCallFuncInp{Pay: models})
+	})
 	return
 }

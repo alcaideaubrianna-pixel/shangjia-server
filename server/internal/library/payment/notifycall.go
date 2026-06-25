@@ -9,9 +9,7 @@ import (
 	"context"
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/frame/g"
-	"hotgo/internal/library/contexts"
 	"hotgo/internal/model/input/payin"
-	"hotgo/utility/simple"
 	"sync"
 )
 
@@ -41,15 +39,14 @@ func RegisterNotifyCallMap(calls map[string]NotifyCallFunc) {
 	}
 }
 
-// NotifyCall 执行订单分组的异步回调
-func NotifyCall(ctx context.Context, in *payin.NotifyCallFuncInp) {
+// NotifyCall 执行订单分组的回调
+func NotifyCall(ctx context.Context, in *payin.NotifyCallFuncInp) error {
 	f, ok := notifyCall[in.Pay.OrderGroup]
 	if ok {
-		ctx = contexts.Detach(ctx)
-		simple.SafeGo(ctx, func(ctx context.Context) {
-			if err := f(ctx, in); err != nil {
-				g.Log().Warningf(ctx, "payment.NotifyCall in:%+v exec err:%+v", gjson.New(in.Pay).String(), err)
-			}
-		})
+		if err := f(ctx, in); err != nil {
+			g.Log().Warningf(ctx, "payment.NotifyCall in:%+v exec err:%+v", gjson.New(in.Pay).String(), err)
+			return err
+		}
 	}
+	return nil
 }
