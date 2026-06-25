@@ -993,7 +993,7 @@ func (s *sAdminMember) VipLogList(ctx context.Context, in *adminin.MemberVipLogL
 	}
 
 	fields := "l.*,m.username,o.username AS operator_name"
-	if err = mod.Fields(fields).Page(in.Page, in.PerPage).OrderDesc("l."+logColumns.Id).ScanAndCount(&list, &totalCount, true); err != nil {
+	if err = mod.Fields(fields).Page(in.Page, in.PerPage).OrderDesc("l."+logColumns.Id).ScanAndCount(&list, &totalCount, false); err != nil {
 		err = gerror.Wrap(err, "获取VIP日志失败，请稍后重试！")
 	}
 	return

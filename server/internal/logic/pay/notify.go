@@ -51,7 +51,8 @@ func (s *sPay) Notify(ctx context.Context, in *payin.PayNotifyInp) (res *payin.P
 		return
 	}
 
-	if models.PayStatus != consts.PayStatusWait && models.PayStatus != consts.PayStatusOk {
+	originPayStatus := models.PayStatus
+	if originPayStatus != consts.PayStatusWait && originPayStatus != consts.PayStatusOk {
 		err = gerror.Newf("商户订单号[%v]已被处理，请勿重复操作", data.OutTradeNo)
 		return
 	}
@@ -70,7 +71,7 @@ func (s *sPay) Notify(ctx context.Context, in *payin.PayNotifyInp) (res *payin.P
 	models.TraceIds = gjson.New(traceIds)
 
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (err error) {
-		if models.PayStatus == consts.PayStatusWait {
+		if originPayStatus == consts.PayStatusWait {
 			var result sql.Result
 			result, err = s.Model(ctx).
 				Fields(
