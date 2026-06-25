@@ -88,10 +88,12 @@
 
   interface Props {
     type?: string;
+    orderType?: string;
   }
 
   const props = withDefaults(defineProps<Props>(), {
     type: '-1',
+    orderType: 'balance',
   });
   const { hasPermission } = usePermission();
   const actionRef = ref();
@@ -155,7 +157,11 @@
   });
 
   const loadDataTable = async (res) => {
-    return await List({ ...searchFormRef.value?.formModel, ...res, ...{ status: props.type } });
+    return await List({
+      ...searchFormRef.value?.formModel,
+      ...res,
+      ...{ status: props.type, orderType: props.orderType },
+    });
   };
 
   function reloadTable() {

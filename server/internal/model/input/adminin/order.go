@@ -144,6 +144,7 @@ type OrderViewModel struct {
 type OrderListInp struct {
 	form.PageReq
 	MemberId         uint64        `json:"memberId"          dc:"用户id"`
+	OrderType        string        `json:"orderType"         dc:"订单类型"`
 	OrderSn          string        `json:"orderSn"           dc:"业务订单号"`
 	Status           int           `json:"status"            dc:"状态"`
 	CreatedAt        []*gtime.Time `json:"createdAt"         dc:"创建时间"`

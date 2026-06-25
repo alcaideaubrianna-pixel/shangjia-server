@@ -12,6 +12,7 @@ import (
 
 func init() {
 	dict.RegisterEnums("orderStatus", "订单状态", OrderStatusOptions)
+	dict.RegisterEnums("orderType", "订单类型", OrderTypeOptions)
 	dict.RegisterEnums("acceptRefundStatus", "订单退款受理状态", OrderAcceptRefundOptions)
 }
 
@@ -32,6 +33,12 @@ const (
 	OrderTypeProduct   = "product"    // 购买产品
 	OrderTypeMemberVip = "member_vip" // 会员认证
 )
+
+var OrderTypeOptions = []*model.Option{
+	dict.GenPrimaryOption(OrderTypeBalance, "余额充值"),
+	dict.GenInfoOption(OrderTypeProduct, "购买产品"),
+	dict.GenSuccessOption(OrderTypeMemberVip, "会员认证"),
+}
 
 const (
 	OrderStatusALL           = -1 // 全部状态

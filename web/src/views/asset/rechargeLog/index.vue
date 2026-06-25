@@ -1,6 +1,6 @@
 <template>
   <div>
-    <n-card :bordered="false" title="充值记录" class="proCard">
+    <n-card :bordered="false" title="余额充值记录" class="proCard">
       <n-tabs
         type="card"
         class="card-tabs"
@@ -14,7 +14,7 @@
           v-for="item in dict.getOptionUnRef('orderStatus')"
           :key="item.key"
         >
-          <List :type="defaultTab" />
+          <List :type="defaultTab" orderType="balance" />
         </n-tab-pane>
       </n-tabs>
     </n-card>

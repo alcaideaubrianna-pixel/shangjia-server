@@ -431,6 +431,11 @@ func (s *sAdminOrder) List(ctx context.Context, in *adminin.OrderListInp) (list 
 		mod = mod.WhereLike(dao.AdminOrder.Columns().OrderSn, in.OrderSn)
 	}
 
+	// 查询订单类型
+	if in.OrderType != "" {
+		mod = mod.Where(dao.AdminOrder.Columns().OrderType, in.OrderType)
+	}
+
 	// 查询状态
 	if in.Status > 0 {
 		mod = mod.Where(dao.AdminOrder.Columns().Status, in.Status)

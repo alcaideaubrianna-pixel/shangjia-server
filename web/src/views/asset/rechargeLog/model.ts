@@ -52,6 +52,15 @@ export const rules = {};
 
 export const schemas = ref<FormSchema[]>([
   {
+    field: 'orderType',
+    component: 'NSelect',
+    label: '订单类型',
+    componentProps: {
+      options: dict.getOptions('orderType'),
+      placeholder: '请选择订单类型',
+    },
+  },
+  {
     field: 'complexMemberId',
     component: 'ComplexMemberPicker',
     label: '下单用户',
@@ -106,6 +115,14 @@ export const columns = [
     width: 220,
   },
   {
+    title: '订单类型',
+    key: 'orderType',
+    render(row) {
+      return renderOptionTag('orderType', row.orderType);
+    },
+    width: 120,
+  },
+  {
     title: '下单用户',
     key: 'memberId',
     width: 100,
@@ -150,5 +167,5 @@ export const columns = [
 ];
 
 export function loadOptions() {
-  dict.loadOptions(['payType', 'orderStatus', 'acceptRefundStatus']);
+  dict.loadOptions(['payType', 'orderType', 'orderStatus', 'acceptRefundStatus']);
 }
