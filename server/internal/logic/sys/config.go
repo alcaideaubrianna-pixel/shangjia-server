@@ -353,16 +353,18 @@ func (s *sSysConfig) ensureMemberVipConfig(ctx context.Context) (err error) {
 			continue
 		}
 		_, err = dao.SysConfig.Ctx(ctx).Data(g.Map{
-			cols.Group:     "member_vip",
-			cols.Key:       item.key,
-			cols.Name:      item.name,
-			cols.Type:      item.typ,
-			cols.Value:     normalizeConfigValue(item.value),
-			cols.Sort:      item.sort,
-			cols.Tip:       "会员认证支付配置",
-			cols.Status:    consts.StatusEnabled,
-			cols.CreatedAt: gtime.Now(),
-			cols.UpdatedAt: gtime.Now(),
+			cols.Group:        "member_vip",
+			cols.Key:          item.key,
+			cols.Name:         item.name,
+			cols.Type:         item.typ,
+			cols.Value:        normalizeConfigValue(item.value),
+			cols.DefaultValue: normalizeConfigValue(item.value),
+			cols.IsDefault:    0,
+			cols.Sort:         item.sort,
+			cols.Tip:          "会员认证支付配置",
+			cols.Status:       consts.StatusEnabled,
+			cols.CreatedAt:    gtime.Now(),
+			cols.UpdatedAt:    gtime.Now(),
 		}).Insert()
 		if err != nil {
 			return
