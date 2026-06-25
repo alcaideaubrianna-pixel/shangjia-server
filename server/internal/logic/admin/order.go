@@ -204,6 +204,9 @@ func (s *sAdminOrder) MemberVipPayNotify(ctx context.Context, in *payin.NotifyCa
 		err = gerror.New("会员认证订单不存在")
 		return
 	}
+	if models.Status == consts.OrderStatusDone {
+		return
+	}
 	if models.Status != consts.OrderStatusNotPay {
 		err = gerror.New("会员认证订单已被处理，无需重复操作")
 		return

@@ -894,16 +894,24 @@ func (s *sAdminMember) writeVipLog(ctx context.Context, before *adminin.MemberVi
 	if status != consts.StatusEnabled {
 		action = "disable"
 	}
+	beforeStatus := 0
+	beforeLevel := 0
+	var beforeExpiredAt *gtime.Time
+	if before != nil {
+		beforeStatus = before.VipStatus
+		beforeLevel = before.VipLevel
+		beforeExpiredAt = before.VipExpiredAt
+	}
 	data := do.MemberVipLog{
 		MemberId:        memberId,
 		OperatorId:      contexts.GetUserId(ctx),
 		Source:          source,
 		Action:          action,
-		BeforeStatus:    before.VipStatus,
+		BeforeStatus:    beforeStatus,
 		AfterStatus:     status,
-		BeforeLevel:     before.VipLevel,
+		BeforeLevel:     beforeLevel,
 		AfterLevel:      level,
-		BeforeExpiredAt: before.VipExpiredAt,
+		BeforeExpiredAt: beforeExpiredAt,
 		AfterExpiredAt:  expiredAt,
 		Remark:          remark,
 		CreatedAt:       gtime.Now(),
