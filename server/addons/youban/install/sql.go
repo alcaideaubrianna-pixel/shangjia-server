@@ -23,10 +23,12 @@ var mysqlBusinessSqlFiles = []string{
 	"storage/data/generate/member_profile_view.sql",
 	"storage/data/generate/member_profile_action.sql",
 	"storage/data/generate/content_media_video_display_fix.sql",
+	"storage/data/generate/youban_cdn_config.sql",
 }
 
 var pgsqlBusinessSqlFiles = []string{
 	"storage/data/generate/pgsql/youban_business.sql",
+	"storage/data/generate/pgsql/youban_cdn_config.sql",
 }
 
 func Install(ctx context.Context) error {

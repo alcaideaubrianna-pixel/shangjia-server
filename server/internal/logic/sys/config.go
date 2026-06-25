@@ -319,7 +319,7 @@ func normalizeConfigValue(value interface{}) interface{} {
 	case map[string]interface{}, []interface{}:
 		return gjson.New(value).String()
 	default:
-		return value
+		return gconv.String(value)
 	}
 }
 
@@ -357,7 +357,7 @@ func (s *sSysConfig) ensureMemberVipConfig(ctx context.Context) (err error) {
 			cols.Key:       item.key,
 			cols.Name:      item.name,
 			cols.Type:      item.typ,
-			cols.Value:     item.value,
+			cols.Value:     normalizeConfigValue(item.value),
 			cols.Sort:      item.sort,
 			cols.Tip:       "会员认证支付配置",
 			cols.Status:    consts.StatusEnabled,
