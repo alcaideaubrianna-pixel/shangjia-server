@@ -151,34 +151,16 @@
           <n-input-number v-model:value="formValue.memberVipDays" :min="1" clearable />
         </n-form-item>
 
-        <n-form-item label="渠道价格" path="memberVipPayItems">
-          <n-space vertical class="w-full">
-            <n-card
-              v-for="(item, index) in formValue.memberVipPayItems"
-              :key="item.tradeType"
-              size="small"
-              embedded
-            >
-              <n-grid :cols="24" :x-gap="12" :y-gap="8" responsive="screen">
-                <n-form-item-gi :span="5" label="名称">
-                  <n-input v-model:value="item.label" />
-                </n-form-item-gi>
-                <n-form-item-gi :span="5" label="通道">
-                  <n-input v-model:value="item.tradeType" />
-                </n-form-item-gi>
-                <n-form-item-gi :span="5" label="价格">
-                  <n-input-number v-model:value="item.money" :min="0" clearable />
-                </n-form-item-gi>
-                <n-form-item-gi :span="4" label="启用">
-                  <n-switch v-model:value="item.enabled" />
-                </n-form-item-gi>
-                <n-form-item-gi :span="5" label="操作">
-                  <n-button tertiary type="error" @click="removeVipPayItem(index)">删除</n-button>
-                </n-form-item-gi>
-              </n-grid>
-            </n-card>
-            <n-button tertiary type="primary" @click="addVipPayItem">新增渠道</n-button>
-          </n-space>
+        <n-form-item label="认证价格" path="memberVipMoney">
+          <n-input-number
+            v-model:value="formValue.memberVipMoney"
+            :min="0"
+            :precision="2"
+            clearable
+          >
+            <template #suffix>元</template>
+          </n-input-number>
+          <template #feedback>支付宝、微信、USDT 等支付类型统一走彩虹易支付，使用同一个认证价格</template>
         </n-form-item>
 
         <div>
@@ -280,23 +262,19 @@
     memberVipEnabled: true,
     memberVipCustomerFallback: true,
     memberVipDays: 30,
-    memberVipPayItems: [
-      { label: '支付宝', tradeType: 'alipay', enabled: true, money: 30 },
-      { label: '微信', tradeType: 'wxpay', enabled: true, money: 30 },
-      { label: 'USDT', tradeType: 'usdt', enabled: true, money: 30 },
-    ],
+    memberVipMoney: 30,
   });
 
   function formSubmit() {
     formRef.value.validate((errors) => {
       if (!errors) {
-        const { memberVipEnabled, memberVipCustomerFallback, memberVipDays, memberVipPayItems, ...payConfig } =
+        const { memberVipEnabled, memberVipCustomerFallback, memberVipDays, memberVipMoney, memberVipPayItems, ...payConfig } =
           formValue.value;
         const memberVipConfig = {
           memberVipEnabled,
           memberVipCustomerFallback,
           memberVipDays,
-          memberVipPayItems,
+          memberVipMoney,
         };
         Promise.all([
           updateConfig({ group: group.value, list: payConfig }),
@@ -309,19 +287,6 @@
         message.error('验证失败，请填写完整信息');
       }
     });
-  }
-
-  function addVipPayItem() {
-    formValue.value.memberVipPayItems.push({
-      label: '新渠道',
-      tradeType: '',
-      enabled: true,
-      money: 0,
-    });
-  }
-
-  function removeVipPayItem(index: number) {
-    formValue.value.memberVipPayItems.splice(index, 1);
   }
 
   function load() {

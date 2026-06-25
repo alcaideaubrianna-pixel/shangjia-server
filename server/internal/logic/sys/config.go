@@ -334,7 +334,8 @@ func (s *sSysConfig) ensureMemberVipConfig(ctx context.Context) (err error) {
 		{key: "memberVipEnabled", name: "会员认证支付开关", typ: consts.ConfigTypeBool, value: true, sort: 1},
 		{key: "memberVipCustomerFallback", name: "关闭支付时打开客服", typ: consts.ConfigTypeBool, value: true, sort: 2},
 		{key: "memberVipDays", name: "会员认证天数", typ: consts.ConfigTypeInt, value: 30, sort: 3},
-		{key: "memberVipPayItems", name: "会员认证支付渠道", typ: consts.ConfigTypeString, value: gjson.New(defaultMemberVipConfig().PayItems).String(), sort: 4},
+		{key: "memberVipMoney", name: "会员认证价格", typ: consts.ConfigTypeFloat64, value: 30, sort: 4},
+		{key: "memberVipPayItems", name: "会员认证支付渠道", typ: consts.ConfigTypeString, value: gjson.New(defaultMemberVipConfig().PayItems).String(), sort: 5},
 	}
 
 	cols := dao.SysConfig.Columns()
@@ -378,6 +379,7 @@ func defaultMemberVipConfig() *model.MemberVipConfig {
 		Enabled:          true,
 		CustomerFallback: true,
 		Days:             30,
+		Money:            30,
 		PayItems: []*model.MemberVipPayItem{
 			{Label: "支付宝", TradeType: consts.TradeTypeRainbowAliPay, Enabled: true, Money: 30},
 			{Label: "微信", TradeType: consts.TradeTypeRainbowWxPay, Enabled: true, Money: 30},

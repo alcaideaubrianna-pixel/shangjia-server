@@ -307,16 +307,16 @@ func (s *sAdminOrder) CreateMemberVipPay(ctx context.Context, in *adminin.Member
 		err = gerror.New("会员认证支付暂未开启")
 		return
 	}
-	payItem := findMemberVipPayItem(vipConfig, in.TradeType)
-	if payItem == nil || !payItem.Enabled {
-		err = gerror.New("当前支付方式暂未开启")
+	if !isMemberVipTradeType(in.TradeType) {
+		err = gerror.New("当前支付方式暂不支持")
 		return
 	}
 	if vipConfig.Days <= 0 {
 		vipConfig.Days = 30
 	}
-	if payItem.Money <= 0 {
-		err = gerror.New("当前支付方式价格配置错误")
+	money := memberVipMoney(vipConfig)
+	if money <= 0 {
+		err = gerror.New("会员认证价格配置错误")
 		return
 	}
 
@@ -332,7 +332,7 @@ func (s *sAdminOrder) CreateMemberVipPay(ctx context.Context, in *adminin.Member
 			OrderType: consts.OrderTypeMemberVip,
 			ProductId: int64(vipConfig.Days),
 			OrderSn:   orderSn,
-			Money:     payItem.Money,
+			Money:     money,
 			Remark:    subject,
 			Status:    consts.OrderStatusNotPay,
 		}).OmitEmptyData().Insert()
@@ -346,7 +346,7 @@ func (s *sAdminOrder) CreateMemberVipPay(ctx context.Context, in *adminin.Member
 			OrderGroup: consts.OrderGroupMemberVip,
 			PayType:    in.PayType,
 			TradeType:  in.TradeType,
-			PayAmount:  payItem.Money,
+			PayAmount:  money,
 			ReturnUrl:  in.ReturnUrl,
 		})
 		if err != nil {
@@ -372,12 +372,10 @@ func (s *sAdminOrder) GetMemberVipPayConfig(ctx context.Context) (res *adminin.M
 		Enabled:          config.Enabled,
 		CustomerFallback: config.CustomerFallback,
 		Days:             config.Days,
-		PayItems:         make([]*adminin.MemberVipPayItemModel, 0, len(config.PayItems)),
+		Money:            memberVipMoney(config),
+		PayItems:         make([]*adminin.MemberVipPayItemModel, 0, 3),
 	}
-	for _, item := range config.PayItems {
-		if item == nil {
-			continue
-		}
+	for _, item := range memberVipPayItems(config) {
 		res.PayItems = append(res.PayItems, &adminin.MemberVipPayItemModel{
 			Label:     item.Label,
 			TradeType: item.TradeType,
@@ -388,16 +386,37 @@ func (s *sAdminOrder) GetMemberVipPayConfig(ctx context.Context) (res *adminin.M
 	return
 }
 
-func findMemberVipPayItem(config *model.MemberVipConfig, tradeType string) *model.MemberVipPayItem {
+func memberVipMoney(config *model.MemberVipConfig) float64 {
 	if config == nil {
-		return nil
+		return 0
+	}
+	if config.Money > 0 {
+		return config.Money
 	}
 	for _, item := range config.PayItems {
-		if item != nil && item.TradeType == tradeType {
-			return item
+		if item != nil && item.Enabled && item.Money > 0 {
+			return item.Money
 		}
 	}
-	return nil
+	return 0
+}
+
+func memberVipPayItems(config *model.MemberVipConfig) []*model.MemberVipPayItem {
+	money := memberVipMoney(config)
+	return []*model.MemberVipPayItem{
+		{Label: "支付宝", TradeType: consts.TradeTypeRainbowAliPay, Enabled: true, Money: money},
+		{Label: "微信", TradeType: consts.TradeTypeRainbowWxPay, Enabled: true, Money: money},
+		{Label: "USDT", TradeType: consts.TradeTypeRainbowUSDT, Enabled: true, Money: money},
+	}
+}
+
+func isMemberVipTradeType(tradeType string) bool {
+	switch tradeType {
+	case consts.TradeTypeRainbowAliPay, consts.TradeTypeRainbowWxPay, consts.TradeTypeRainbowUSDT:
+		return true
+	default:
+		return false
+	}
 }
 
 // List 获取充值订单列表

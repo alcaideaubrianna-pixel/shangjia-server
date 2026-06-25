@@ -104,6 +104,7 @@ type MemberVipConfigModel struct {
 	Enabled          bool                     `json:"enabled"`
 	CustomerFallback bool                     `json:"customerFallback"`
 	Days             int                      `json:"days"`
+	Money            float64                  `json:"money"`
 	PayItems         []*MemberVipPayItemModel `json:"payItems"`
 }
 
