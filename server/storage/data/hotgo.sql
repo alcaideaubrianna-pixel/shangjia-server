@@ -419,6 +419,7 @@ INSERT INTO `hg_admin_menu` (`id`, `pid`, `level`, `tree`, `title`, `name`, `pat
 (2236, 2237, 3, 'tr_2093 tr_2237 ', '资金变动', 'creditsLogIndex', 'creditsLogIndex', '', 2, '', '/creditsLog/list,/creditsLog/option', '', '/asset/creditsLog/index', 1, '', 0, 0, '', 0, 0, 0, 10, '', 1, '2024-04-12 13:53:36', NULL),
 (2237, 2093, 2, 'tr_2093 ', '资金管理', 'asset', '/asset', '', 1, '/apply/asset/creditsLogIndex', '', '', 'ParentLayout', 1, '', 0, 2, '', 0, 0, 0, 20, '', 1, '2024-04-12 13:53:54', '2023-04-18 22:16:20'),
 (2240, 2232, 4, 'tr_2093 tr_2237 tr_2232 ', '充值记录', 'asset_recharge_log', '', '', 3, '', '/order/list', '', '', 1, '', 0, 2, '', 0, 0, 0, 40, '', 1, '2023-11-17 15:28:23', '2023-04-18 23:26:01'),
+(2282, 2237, 3, 'tr_2093 tr_2237 ', '会员认证订单', 'member_vip_order', 'memberVipOrder', '', 2, '', '/order/list', '', '/org/memberVipOrder/index', 1, '', 0, 0, '', 0, 0, 0, 35, '', 1, '2026-06-26 00:00:00', '2026-06-26 00:00:00'),
 (2241, 2232, 4, 'tr_2093 tr_2237 tr_2232 ', '受理退款', 'asset_recharge_accept_refund', '', '', 3, '', '/order/acceptRefund', '', '', 1, '', 0, 2, '', 0, 0, 0, 40, '', 1, '2023-11-17 15:28:23', '2023-04-18 23:26:01'),
 (2242, 2232, 4, 'tr_2093 tr_2237 tr_2232 ', '申请退款', 'asset_recharge_apply_refund', '', '', 3, '', '/order/applyRefund', '', '', 1, '', 0, 2, '', 0, 0, 0, 40, '', 1, '2023-11-17 15:28:23', '2023-04-18 23:26:01'),
 (2243, 2232, 4, 'tr_2093 tr_2237 tr_2232 ', '删除关闭订单', 'asset_recharge_order_delete', '', '', 3, '', '/order/delete', '', '', 1, '', 0, 2, '', 0, 0, 0, 40, '', 1, '2023-11-17 15:28:23', '2023-04-18 23:26:01'),

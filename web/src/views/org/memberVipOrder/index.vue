@@ -1,7 +1,7 @@
 <template>
   <div>
     <n-card :bordered="false" title="会员认证订单" class="proCard">
-      <List orderType="member_vip" />
+      <List orderType="member_vip" :show-actions="false" />
     </n-card>
   </div>
 </template>

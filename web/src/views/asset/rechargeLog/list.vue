@@ -89,11 +89,13 @@
   interface Props {
     type?: string;
     orderType?: string;
+    showActions?: boolean;
   }
 
   const props = withDefaults(defineProps<Props>(), {
     type: '-1',
     orderType: 'balance',
+    showActions: true,
   });
   const { hasPermission } = usePermission();
   const actionRef = ref();
@@ -112,6 +114,9 @@
     key: 'action',
     fixed: 'right',
     render(record) {
+      if (!props.showActions) {
+        return '-';
+      }
       return h(TableAction as any, {
         style: 'button',
         actions: [
