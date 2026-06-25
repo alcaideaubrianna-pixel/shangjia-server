@@ -42,7 +42,7 @@ type NotifyQQPayRes struct {
 
 // NotifyRainbowReq 彩虹易支付回调
 type NotifyRainbowReq struct {
-	g.Meta `path:"/pay/notify/rainbow" method:"get" tags:"支付异步通知" summary:"彩虹易支付回调"`
+	g.Meta `path:"/pay/notify/rainbow" method:"all" tags:"支付异步通知" summary:"彩虹易支付回调"`
 }
 
 type NotifyRainbowRes struct {

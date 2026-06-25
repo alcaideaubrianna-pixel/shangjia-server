@@ -11,6 +11,7 @@ import (
 	"hotgo/internal/model/input/payin"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/gconv"
@@ -42,11 +43,12 @@ func (h *rainbowPay) Notify(ctx context.Context, in payin.NotifyInp) (res *payin
 	}
 
 	request := ghttp.RequestFromCtx(ctx)
-	params := request.GetQueryMap()
+	params := request.GetMap()
 	signParamsMap := make(map[string]string, len(params))
 	for key, value := range params {
 		signParamsMap[key] = gconv.String(value)
 	}
+	g.Log().Info(ctx, "收到彩虹易支付回调", signParamsMap)
 
 	if err = verifyParams(signParamsMap, h.config.RainbowKey); err != nil {
 		return
