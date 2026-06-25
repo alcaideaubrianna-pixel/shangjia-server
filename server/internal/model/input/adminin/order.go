@@ -83,9 +83,6 @@ func (in *MemberVipPayCreateInp) Filter(ctx context.Context) (err error) {
 	if in.PayType == "" {
 		in.PayType = consts.PayTypeRainbow
 	}
-	if in.TradeType == "" {
-		in.TradeType = consts.TradeTypeRainbowAliPay
-	}
 	return
 }
 

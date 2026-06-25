@@ -149,11 +149,10 @@ type PayConfig struct {
 	QQPayMchId  string `json:"payQQPayMchId"`
 	QQPayApiKey string `json:"payQQPayApiKey"`
 	// 彩虹易支付
-	RainbowGateway           string `json:"payRainbowGateway"`
-	RainbowPid               string `json:"payRainbowPid"`
-	RainbowPrivateKey        string `json:"payRainbowPrivateKey"`
-	RainbowPlatformPublicKey string `json:"payRainbowPlatformPublicKey"`
-	RainbowMethod            string `json:"payRainbowMethod"`
+	RainbowGateway string `json:"payRainbowGateway"`
+	RainbowPid     string `json:"payRainbowPid"`
+	RainbowKey     string `json:"payRainbowKey"`
+	RainbowMethod  string `json:"payRainbowMethod"`
 }
 
 type MemberVipPayItem struct {

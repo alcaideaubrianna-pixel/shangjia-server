@@ -307,7 +307,7 @@ func (s *sAdminOrder) CreateMemberVipPay(ctx context.Context, in *adminin.Member
 		err = gerror.New("会员认证支付暂未开启")
 		return
 	}
-	if !isMemberVipTradeType(in.TradeType) {
+	if in.TradeType != "" && !isMemberVipTradeType(in.TradeType) {
 		err = gerror.New("当前支付方式暂不支持")
 		return
 	}

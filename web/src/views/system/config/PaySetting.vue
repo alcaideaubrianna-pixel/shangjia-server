@@ -95,8 +95,7 @@
 
         <n-divider title-placement="left">彩虹易支付</n-divider>
         <n-alert :show-icon="false" type="info">
-          彩虹易支付使用 V2 统一下单接口，接口类型建议填写 jump，支付成功后异步回调地址为
-          /api/pay/notify/rainbow。
+          彩虹易支付使用 V1 MD5 签名方式，支付成功后异步回调地址为 /api/pay/notify/rainbow。
         </n-alert>
         <n-form-item label="网关地址" path="payRainbowGateway">
           <n-input
@@ -111,29 +110,9 @@
           <n-input v-model:value="formValue.payRainbowPid" placeholder="" clearable />
         </n-form-item>
 
-        <n-form-item label="接口类型" path="payRainbowMethod">
-          <n-input v-model:value="formValue.payRainbowMethod" placeholder="jump" clearable />
-          <template #feedback>可填 web、jump、jsapi、app、scan、applet，H5推荐 jump</template>
-        </n-form-item>
-
-        <n-form-item label="商户私钥" path="payRainbowPrivateKey">
-          <n-input
-            type="textarea"
-            v-model:value="formValue.payRainbowPrivateKey"
-            placeholder="-----BEGIN PRIVATE KEY-----"
-            clearable
-          />
-          <template #feedback>用于 SHA256WithRSA 签名，可填写 PEM 内容或服务器文件路径</template>
-        </n-form-item>
-
-        <n-form-item label="平台公钥" path="payRainbowPlatformPublicKey">
-          <n-input
-            type="textarea"
-            v-model:value="formValue.payRainbowPlatformPublicKey"
-            placeholder="-----BEGIN PUBLIC KEY-----"
-            clearable
-          />
-          <template #feedback>用于验证彩虹回调签名，可填写 PEM 内容或服务器文件路径</template>
+        <n-form-item label="MD5密钥" path="payRainbowKey">
+          <n-input v-model:value="formValue.payRainbowKey" placeholder="" clearable />
+          <template #feedback>彩虹易支付商户后台的 MD5 通讯密钥</template>
         </n-form-item>
 
         <n-divider title-placement="left">会员认证</n-divider>
@@ -256,8 +235,7 @@
     payQQPayApiKey: '',
     payRainbowGateway: 'https://pay.v8jisu.cn',
     payRainbowPid: '',
-    payRainbowPrivateKey: '',
-    payRainbowPlatformPublicKey: '',
+    payRainbowKey: '',
     payRainbowMethod: 'jump',
     memberVipEnabled: true,
     memberVipCustomerFallback: true,

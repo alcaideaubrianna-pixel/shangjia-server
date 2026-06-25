@@ -129,9 +129,8 @@ func (s *sSysConfig) ensureRainbowPayConfig(ctx context.Context) (err error) {
 	}{
 		{key: "payRainbowGateway", name: "彩虹易支付网关地址", typ: consts.ConfigTypeString, value: "https://pay.v8jisu.cn", sort: 940, tip: "彩虹易支付网关地址"},
 		{key: "payRainbowPid", name: "彩虹易支付商户ID", typ: consts.ConfigTypeString, value: "", sort: 950, tip: "彩虹易支付商户ID"},
-		{key: "payRainbowMethod", name: "彩虹易支付接口类型", typ: consts.ConfigTypeString, value: "jump", sort: 960, tip: "彩虹易支付接口类型，如 jump"},
-		{key: "payRainbowPrivateKey", name: "彩虹易支付商户私钥", typ: consts.ConfigTypeString, value: "", sort: 970, tip: "用于 SHA256WithRSA 签名，可填写 PEM 内容或服务器文件路径"},
-		{key: "payRainbowPlatformPublicKey", name: "彩虹易支付平台公钥", typ: consts.ConfigTypeString, value: "", sort: 980, tip: "用于验证彩虹回调签名，可填写 PEM 内容或服务器文件路径"},
+		{key: "payRainbowKey", name: "彩虹易支付MD5密钥", typ: consts.ConfigTypeString, value: "", sort: 960, tip: "彩虹易支付 V1 接口 MD5 签名密钥"},
+		{key: "payRainbowMethod", name: "彩虹易支付接口类型", typ: consts.ConfigTypeString, value: "jump", sort: 970, tip: "兼容旧配置，V1接口固定使用跳转支付"},
 	}
 
 	cols := dao.SysConfig.Columns()
