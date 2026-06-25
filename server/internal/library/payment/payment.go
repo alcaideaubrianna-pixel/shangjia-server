@@ -123,7 +123,7 @@ func AutoTradeType(payType, userAgent string) (tradeType string) {
 		}
 		return consts.TradeTypeQQWeb
 	case consts.PayTypeRainbow:
-		return consts.TradeTypeRainbowAliPay
+		return ""
 	default:
 	}
 	return
