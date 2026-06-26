@@ -700,6 +700,26 @@ func (s *sSysChat) TelegramWebhook(ctx context.Context, in *sysin.TelegramWebhoo
 	return nil
 }
 
+func (s *sSysChat) TelegramWebhookRaw(ctx context.Context, botId int64, body []byte, fallback *sysin.TelegramWebhookInp) error {
+	if len(body) == 0 {
+		return s.TelegramWebhook(ctx, fallback)
+	}
+	var update models.Update
+	if err := json.Unmarshal(body, &update); err != nil {
+		g.Log().Warningf(ctx, "解析Telegram webhook原始消息失败，使用兼容入参 bot:%d err:%+v", botId, err)
+		return s.TelegramWebhook(ctx, fallback)
+	}
+	in, err := telegramUpdateToWebhookInp(&update)
+	if err != nil {
+		return err
+	}
+	if in == nil {
+		return s.TelegramWebhook(ctx, fallback)
+	}
+	in.BotId = botId
+	return s.TelegramWebhook(ctx, in)
+}
+
 func (s *sSysChat) List(ctx context.Context, in *sysin.ChatConversationListInp) (list []*sysin.ChatConversationListModel, totalCount int, err error) {
 	if contexts.GetUserId(ctx) <= 0 {
 		err = gerror.New("请先登录")
@@ -2377,7 +2397,7 @@ func (s *sSysChat) telegramMessageAttachments(ctx context.Context, row *chatConv
 		item, itemErr := s.saveTelegramFileAttachment(ctx, botToken, file)
 		if itemErr != nil {
 			if file.Optional {
-				g.Log().Warningf(ctx, "保存Telegram可选附件失败 message:%d file:%s err:%+v", msg.MessageId, file.FileName, itemErr)
+				g.Log().Warningf(ctx, "保存Telegram可选附件失败 message:%d file:%s type:%s convert:%v err:%+v", msg.MessageId, file.FileName, file.FileType, file.ConvertTGS, itemErr)
 				continue
 			}
 			return nil, itemErr
@@ -2496,7 +2516,7 @@ func (s *sSysChat) saveTelegramFileAttachment(ctx context.Context, botToken stri
 	name = ensureAttachmentExt(name, fileType, contentType)
 	attachment, err := storager.DoUpload(ctx, storagerKindByFileType(fileType), bytesUploadFile(name, data))
 	if err != nil {
-		return nil, err
+		return nil, gerror.Wrapf(err, "保存Telegram附件失败 file:%s type:%s contentType:%s size:%d", name, fileType, contentType, len(data))
 	}
 	url := storager.LastUrl(ctx, attachment.FileUrl, attachment.Drive)
 	return &sysin.ChatMessageAttachmentModel{Id: attachment.Id, Name: attachment.Name, FileType: fileType, DataUrl: url, ThumbUrl: url, FallbackUrl: url}, nil

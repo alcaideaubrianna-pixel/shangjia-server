@@ -19,6 +19,7 @@ type ISysChat interface {
 	Upload(ctx context.Context, in *sysin.ChatUploadInp, file *ghttp.UploadFile) (res *sysin.ChatUploadModel, err error)
 	Unread(ctx context.Context) (res *sysin.ChatUnreadModel, err error)
 	TelegramWebhook(ctx context.Context, in *sysin.TelegramWebhookInp) (err error)
+	TelegramWebhookRaw(ctx context.Context, botId int64, body []byte, fallback *sysin.TelegramWebhookInp) (err error)
 	List(ctx context.Context, in *sysin.ChatConversationListInp) (list []*sysin.ChatConversationListModel, totalCount int, err error)
 	WidgetSession(ctx context.Context, in *sysin.ChatWidgetSessionInp) (res *sysin.ChatWidgetSessionModel, err error)
 	AdminList(ctx context.Context, in *sysin.AdminChatConversationListInp) (list []*sysin.AdminChatConversationListModel, totalCount int, err error)

@@ -93,7 +93,7 @@ func (c *cChat) Unread(ctx context.Context, req *chat.UnreadReq) (res *chat.Unre
 }
 
 func (c *cChat) TelegramWebhook(ctx context.Context, req *chat.TelegramWebhookReq) (res *chat.TelegramWebhookRes, err error) {
-	err = service.SysChat().TelegramWebhook(ctx, &req.TelegramWebhookInp)
+	err = service.SysChat().TelegramWebhookRaw(ctx, req.BotId, g.RequestFromCtx(ctx).GetBody(), &req.TelegramWebhookInp)
 	if err != nil {
 		return
 	}
