@@ -179,6 +179,7 @@ router:
       "/pay/notify/alipay",
       "/pay/notify/wxpay",
       "/pay/notify/qqpay",
+      "/pay/notify/rainbow",
     ]
   # websocket
   websocket:
