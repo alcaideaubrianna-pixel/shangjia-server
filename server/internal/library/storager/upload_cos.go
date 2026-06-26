@@ -11,8 +11,10 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/tencentyun/cos-go-sdk-v5"
+	"mime"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // CosDrive 腾讯云cos驱动
@@ -25,15 +27,23 @@ func (d *CosDrive) Upload(ctx context.Context, file *ghttp.UploadFile) (fullPath
 		err = gerror.New("COS存储驱动必须配置存储路径!")
 		return
 	}
-
-	// 流式上传本地小文件
-	f2, err := file.Open()
-	defer func() { _ = f2.Close() }()
-	if err != nil {
+	if strings.TrimSpace(config.CosBucketURL) == "" {
+		err = gerror.New("COS存储驱动必须配置Bucket访问域名!")
 		return
 	}
 
-	URL, _ := url.Parse(config.CosBucketURL)
+	// 流式上传本地小文件
+	f2, err := file.Open()
+	if err != nil {
+		return
+	}
+	defer func() { _ = f2.Close() }()
+
+	URL, err := url.Parse(strings.TrimSpace(config.CosBucketURL))
+	if err != nil {
+		err = gerror.Wrap(err, "COS Bucket访问域名配置不正确")
+		return
+	}
 	client := cos.NewClient(&cos.BaseURL{BucketURL: URL}, &http.Client{
 		Transport: &cos.AuthorizationTransport{
 			SecretID:  config.CosSecretId,
@@ -42,7 +52,15 @@ func (d *CosDrive) Upload(ctx context.Context, file *ghttp.UploadFile) (fullPath
 	})
 
 	fullPath = GenFullPath(config.CosPath, gfile.Ext(file.Filename))
-	_, err = client.Object.Put(ctx, fullPath, f2, nil)
+	opt := &cos.ObjectPutOptions{
+		ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
+			CacheControl: "public, max-age=31536000, immutable",
+		},
+	}
+	if contentType := mime.TypeByExtension(gfile.Ext(file.Filename)); contentType != "" {
+		opt.ContentType = contentType
+	}
+	_, err = client.Object.Put(ctx, fullPath, f2, opt)
 	return
 }
 
