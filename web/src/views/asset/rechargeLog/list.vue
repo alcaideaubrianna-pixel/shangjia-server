@@ -90,12 +90,14 @@
     type?: string;
     orderType?: string;
     showActions?: boolean;
+    showOrderTypeFilter?: boolean;
   }
 
   const props = withDefaults(defineProps<Props>(), {
     type: '-1',
     orderType: 'balance',
     showActions: true,
+    showOrderTypeFilter: true,
   });
   const { hasPermission } = usePermission();
   const actionRef = ref();
@@ -158,7 +160,11 @@
   const [register, {}] = useForm({
     gridProps: { cols: '1 s:1 m:2 l:3 xl:4 2xl:4' },
     labelWidth: 80,
-    schemas,
+    schemas: computed(() =>
+      props.showOrderTypeFilter
+        ? schemas.value
+        : schemas.value.filter((item) => item.field !== 'orderType')
+    ),
   });
 
   const loadDataTable = async (res) => {

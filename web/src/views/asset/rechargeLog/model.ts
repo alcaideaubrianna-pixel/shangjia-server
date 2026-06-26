@@ -56,7 +56,7 @@ export const schemas = ref<FormSchema[]>([
     component: 'NSelect',
     label: '订单类型',
     componentProps: {
-      options: dict.getOptions('orderType'),
+      options: dict.getOption('orderType'),
       placeholder: '请选择订单类型',
     },
   },

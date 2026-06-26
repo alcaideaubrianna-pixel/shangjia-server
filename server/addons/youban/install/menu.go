@@ -61,7 +61,7 @@ var youbanMenuSpecs = []menuSpec{
 	{ParentName: "ContentImportMonitor", Title: "审核配置", Name: "ContentImportReviewConfig", Type: 3, Permissions: "/contentImport/reviewConfig", AlwaysShow: 1, Hidden: 1, Sort: 50, Status: 1},
 	{ParentName: "ContentImportMonitor", Title: "保存审核配置", Name: "ContentImportSaveReviewConfig", Type: 3, Permissions: "/contentImport/saveReviewConfig", AlwaysShow: 1, Hidden: 1, Sort: 60, Status: 1},
 	{ParentName: "Org", Title: "会员日志", Name: "OrgVipLog", Path: "vip-log", Type: 2, Permissions: "/member/vipLogList", Component: "/org/vipLog/index", AlwaysShow: 1, Sort: 15, Status: 1},
-	{ParentName: "Asset", Title: "会员认证订单", Name: "AssetMemberVipOrder", Path: "memberVipOrder", Type: 2, Permissions: "/order/list", Component: "/org/memberVipOrder/index", AlwaysShow: 1, Sort: 35, Status: 1},
+	{ParentName: "asset", Title: "会员认证订单", Name: "AssetMemberVipOrder", Path: "memberVipOrder", Type: 2, Permissions: "/order/list", Component: "/org/memberVipOrder/index", AlwaysShow: 1, Sort: 35, Status: 1},
 }
 
 func installMenus(ctx context.Context) error {
