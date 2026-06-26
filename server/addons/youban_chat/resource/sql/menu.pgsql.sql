@@ -69,7 +69,7 @@ FROM (SELECT id FROM hg_admin_menu WHERE name = 'YoubanChat' LIMIT 1) root
 JOIN (SELECT id FROM hg_admin_menu WHERE name = 'YoubanChatWorkbench' LIMIT 1) list ON 1=1
 JOIN (
   VALUES
-    ('客服会话详情', 'YoubanChatConversationView', '/youban_chat/chat/view,/youban_chat/chat/messages', 10),
+    ('客服会话详情', 'YoubanChatConversationView', '/youban_chat/chat/view,/youban_chat/chat/messages,/youban_chat/chat/clear', 10),
     ('Bot管理', 'YoubanChatBot', '/youban_chat/chat/botList,/youban_chat/chat/saveBot', 25),
     ('频道群绑定', 'YoubanChatBinding', '/youban_chat/chat/bindingList,/youban_chat/chat/saveBinding,/youban_chat/chat/channelOptions', 30),
     ('客服绑定', 'YoubanChatOperator', '/youban_chat/chat/operatorList,/youban_chat/chat/saveOperator', 40),
@@ -78,6 +78,11 @@ JOIN (
 WHERE root.id IS NOT NULL
   AND list.id IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM hg_admin_menu m WHERE m.name = item.name);
+
+UPDATE hg_admin_menu
+SET permissions = '/youban_chat/chat/view,/youban_chat/chat/messages,/youban_chat/chat/clear',
+    updated_at = NOW()
+WHERE name = 'YoubanChatConversationView';
 
 INSERT INTO hg_admin_role_menu (role_id, menu_id)
 SELECT r.id, m.id
@@ -95,4 +100,3 @@ WHERE r.id IN (1, 2)
   AND NOT EXISTS (
     SELECT 1 FROM hg_admin_role_menu rm WHERE rm.role_id = r.id AND rm.menu_id = m.id
   );
-

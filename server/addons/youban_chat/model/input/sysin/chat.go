@@ -259,6 +259,10 @@ type AdminChatConversationViewInp struct {
 	Id int64 `json:"id" v:"required|min:1#会话ID不能为空|会话ID不能为空" dc:"会话ID"`
 }
 
+type AdminChatConversationClearInp struct {
+	ConversationId int64 `json:"conversationId" v:"required|min:1#会话ID不能为空|会话ID不能为空" dc:"会话ID"`
+}
+
 type AdminChatConversationViewModel struct {
 	*AdminChatConversationListModel
 	MemberAvatar string `json:"memberAvatar" dc:"会员头像"`

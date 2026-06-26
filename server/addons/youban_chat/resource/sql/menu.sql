@@ -47,8 +47,13 @@ SET `pid` = @rootId,
 WHERE `id` = @listId;
 
 INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type`, `redirect`, `permissions`, `permission_name`, `component`, `always_show`, `active_menu`, `is_root`, `is_frame`, `frame_src`, `keep_alive`, `hidden`, `affix`, `level`, `tree`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
-SELECT NULL, @listId, '客服会话详情', 'YoubanChatConversationView', '', '', '3', '', '/youban_chat/chat/view,/youban_chat/chat/messages', '', '', '1', '', '0', '0', '', '0', '1', '0', '3', CONCAT('tr_', @rootId, ' tr_', @listId, ' '), '10', '', '1', @now, @now
+SELECT NULL, @listId, '客服会话详情', 'YoubanChatConversationView', '', '', '3', '', '/youban_chat/chat/view,/youban_chat/chat/messages,/youban_chat/chat/clear', '', '', '1', '', '0', '0', '', '0', '1', '0', '3', CONCAT('tr_', @rootId, ' tr_', @listId, ' '), '10', '', '1', @now, @now
 WHERE @listId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'YoubanChatConversationView');
+
+UPDATE `hg_admin_menu`
+SET `permissions` = '/youban_chat/chat/view,/youban_chat/chat/messages,/youban_chat/chat/clear',
+    `updated_at` = @now
+WHERE `name` = 'YoubanChatConversationView';
 
 INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type`, `redirect`, `permissions`, `permission_name`, `component`, `always_show`, `active_menu`, `is_root`, `is_frame`, `frame_src`, `keep_alive`, `hidden`, `affix`, `level`, `tree`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
 SELECT NULL, @listId, 'Bot管理', 'YoubanChatBot', '', '', '3', '', '/youban_chat/chat/botList,/youban_chat/chat/saveBot', '', '', '1', '', '0', '0', '', '0', '1', '0', '3', CONCAT('tr_', @rootId, ' tr_', @listId, ' '), '25', '', '1', @now, @now

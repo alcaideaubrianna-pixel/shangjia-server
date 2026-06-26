@@ -74,13 +74,13 @@
 </template>
 
 <script lang="ts" setup>
-  import { computed, h, reactive, ref } from 'vue';
+  import { computed, h, onMounted, reactive, ref } from 'vue';
   import { useDialog, useMessage } from 'naive-ui';
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, useForm } from '@/components/Form/index';
   import { usePermission } from '@/hooks/web/usePermission';
   import { List, Export, Delete } from '@/api/order';
-  import { State, columns, schemas, newState } from './model';
+  import { State, columns, schemas, newState, loadOptions } from './model';
   import { ExportOutlined, DeleteOutlined } from '@vicons/antd';
   import ApplyRefund from './applyRefund.vue';
   import AcceptRefund from './acceptRefund.vue';
@@ -242,6 +242,10 @@
 
   defineExpose({
     reloadTable,
+  });
+
+  onMounted(() => {
+    loadOptions();
   });
 </script>
 

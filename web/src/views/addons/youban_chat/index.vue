@@ -123,6 +123,10 @@
           </n-descriptions-item>
         </n-descriptions>
 
+        <n-space v-if="currentConversation" class="detail-actions" justify="end">
+          <n-button type="error" ghost :disabled="messageLoading" @click="handleClearConversation">清空聊天记录</n-button>
+        </n-space>
+
         <n-divider />
         <n-spin :show="messageLoading">
           <n-empty v-if="messages.length === 0" description="暂无聊天记录" />
@@ -271,13 +275,14 @@
 
 <script lang="ts" setup>
   import { computed, h, onMounted, reactive, ref } from 'vue';
-  import { NButton, NTag, useMessage } from 'naive-ui';
+  import { NButton, NTag, useDialog, useMessage } from 'naive-ui';
   import { BasicForm, useForm } from '@/components/Form/index';
   import { adaTableScrollX } from '@/utils/hotgo';
   import {
     BindingList,
     BotList,
     ChannelOptions,
+    ClearConversation,
     ConversationList,
     ConversationView,
     FeatureList,
@@ -291,6 +296,7 @@
   import { createColumns, schemas } from './model';
 
   const message = useMessage();
+  const dialog = useDialog();
   const activeTab = ref('conversations');
   const conversationLoading = ref(false);
   const conversations = ref<any[]>([]);
@@ -568,6 +574,32 @@
     }
   }
 
+  function handleClearConversation() {
+    if (!currentConversation.value?.id) {
+      return;
+    }
+    dialog.warning({
+      title: '清空聊天记录',
+      content: '确定清空当前会话的全部聊天记录？清空后 H5 也不会再显示这些消息。',
+      positiveText: '确定清空',
+      negativeText: '取消',
+      onPositiveClick: async () => {
+        messageLoading.value = true;
+        try {
+          await ClearConversation({ conversationId: currentConversation.value.id });
+          messages.value = [];
+          currentConversation.value.lastMessage = '';
+          currentConversation.value.lastMessageAt = '';
+          currentConversation.value.unreadCount = 0;
+          message.success('聊天记录已清空');
+          await loadConversations();
+        } finally {
+          messageLoading.value = false;
+        }
+      },
+    });
+  }
+
   function handleTabChange(tab: string) {
     if (tab === 'operators') {
       loadOperators();
@@ -813,6 +845,10 @@
     color: #374151;
     line-height: 22px;
     word-break: break-word;
+  }
+
+  .detail-actions {
+    margin-top: 12px;
   }
 
   .message-list {

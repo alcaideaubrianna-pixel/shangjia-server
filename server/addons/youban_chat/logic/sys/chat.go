@@ -865,6 +865,49 @@ func (s *sSysChat) AdminMessages(ctx context.Context, in *sysin.AdminChatMessage
 	return
 }
 
+func (s *sSysChat) AdminClear(ctx context.Context, in *sysin.AdminChatConversationClearInp) (err error) {
+	if in == nil || in.ConversationId <= 0 {
+		err = gerror.New("会话ID不能为空")
+		return
+	}
+	var row *chatConversationRow
+	if err = g.DB().Model(chatConversationTable).Ctx(ctx).
+		Where("id", in.ConversationId).
+		WhereNull("deleted_at").
+		Scan(&row); err != nil {
+		err = gerror.Wrap(err, "读取客服会话失败")
+		return
+	}
+	if row == nil {
+		return gerror.New("客服会话不存在")
+	}
+	now := gtime.Now()
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if _, err = tx.Model(chatMessageTable).Ctx(ctx).
+			Where("conversation_id", in.ConversationId).
+			WhereNull("deleted_at").
+			Data(g.Map{"deleted_at": now, "updated_at": now}).
+			Update(); err != nil {
+			return gerror.Wrap(err, "清空客服聊天消息失败")
+		}
+		data := g.Map{
+			"hidden_before_at": now,
+			"unread_count":     0,
+			"last_message":     "",
+			"last_message_at":  nil,
+			"updated_at":       now,
+		}
+		if _, err = tx.Model(chatConversationTable).Ctx(ctx).
+			Where("id", in.ConversationId).
+			Data(data).
+			Update(); err != nil {
+			return gerror.Wrap(err, "更新客服会话失败")
+		}
+		return nil
+	})
+	return
+}
+
 func (s *sSysChat) AdminBotList(ctx context.Context, in *sysin.AdminChatBotListInp) (list []*sysin.AdminChatBotModel, totalCount int, err error) {
 	if in == nil {
 		in = &sysin.AdminChatBotListInp{}

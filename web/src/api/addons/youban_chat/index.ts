@@ -24,6 +24,14 @@ export function MessageList(params = {}) {
   });
 }
 
+export function ClearConversation(params = {}) {
+  return http.request({
+    url: '/youban_chat/chat/clear',
+    method: 'POST',
+    params,
+  });
+}
+
 export function MarkRead(params = {}) {
   return http.request({
     url: '/youban_chat/chat/read',

@@ -24,6 +24,7 @@ type ISysChat interface {
 	AdminList(ctx context.Context, in *sysin.AdminChatConversationListInp) (list []*sysin.AdminChatConversationListModel, totalCount int, err error)
 	AdminView(ctx context.Context, in *sysin.AdminChatConversationViewInp) (res *sysin.AdminChatConversationViewModel, err error)
 	AdminMessages(ctx context.Context, in *sysin.AdminChatMessageListInp) (list []*sysin.ChatMessageModel, totalCount int, err error)
+	AdminClear(ctx context.Context, in *sysin.AdminChatConversationClearInp) (err error)
 	AdminBotList(ctx context.Context, in *sysin.AdminChatBotListInp) (list []*sysin.AdminChatBotModel, totalCount int, err error)
 	AdminSaveBot(ctx context.Context, in *sysin.AdminChatBotSaveInp) (err error)
 	AdminBindingList(ctx context.Context, in *sysin.AdminChatBindingListInp) (list []*sysin.AdminChatBindingModel, totalCount int, err error)

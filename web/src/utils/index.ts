@@ -175,6 +175,7 @@ export const renderPopoverMemberSumma = (member: MemberSumma | null | undefined)
   if (!member) {
     return '';
   }
+  const displayName = member.realName || member.username || `ID ${member.id}`;
   return h(
     NPopover,
     { trigger: 'hover' },
@@ -187,7 +188,7 @@ export const renderPopoverMemberSumma = (member: MemberSumma | null | undefined)
             text: true,
             iconPlacement: 'right',
           },
-          { default: () => member.realName, icon: renderIcon(EllipsisHorizontalCircleOutline) }
+          { default: () => displayName, icon: renderIcon(EllipsisHorizontalCircleOutline) }
         ),
       default: () =>
         h(
@@ -212,8 +213,8 @@ export const renderPopoverMemberSumma = (member: MemberSumma | null | undefined)
               h('tr', { align: 'center' }, [
                 h('td', member.id),
                 h('td', h(NAvatar, { src: member.avatar, round: true, size: 'small' })),
-                h('td', member.realName),
-                h('td', member.username),
+                h('td', member.realName || '-'),
+                h('td', member.username || '-'),
               ]),
             ]),
           ]

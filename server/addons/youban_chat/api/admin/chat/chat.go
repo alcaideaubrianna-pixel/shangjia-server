@@ -36,6 +36,13 @@ type MessagesRes struct {
 	List []*sysin.ChatMessageModel `json:"list" dc:"消息列表"`
 }
 
+type ClearReq struct {
+	g.Meta `path:"/chat/clear" method:"post" tags:"悦伴聊天后台" summary:"清空客服聊天记录"`
+	sysin.AdminChatConversationClearInp
+}
+
+type ClearRes struct{}
+
 type BotListReq struct {
 	g.Meta `path:"/chat/botList" method:"get" tags:"悦伴聊天后台" summary:"Bot列表"`
 	sysin.AdminChatBotListInp

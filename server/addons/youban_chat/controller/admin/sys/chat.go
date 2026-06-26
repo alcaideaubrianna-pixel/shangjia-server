@@ -50,6 +50,11 @@ func (c *cChat) Messages(ctx context.Context, req *chat.MessagesReq) (res *chat.
 	return
 }
 
+func (c *cChat) Clear(ctx context.Context, req *chat.ClearReq) (res *chat.ClearRes, err error) {
+	err = service.SysChat().AdminClear(ctx, &req.AdminChatConversationClearInp)
+	return
+}
+
 func (c *cChat) BotList(ctx context.Context, req *chat.BotListReq) (res *chat.BotListRes, err error) {
 	list, totalCount, err := service.SysChat().AdminBotList(ctx, &req.AdminChatBotListInp)
 	if err != nil {
