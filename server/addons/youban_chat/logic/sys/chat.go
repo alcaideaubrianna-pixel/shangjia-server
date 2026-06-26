@@ -468,7 +468,7 @@ func (s *sSysChat) Messages(ctx context.Context, in *sysin.ChatMessagesInp) (res
 	}
 	list := make([]*sysin.ChatMessageModel, 0, len(rows))
 	for _, item := range rows {
-		list = append(list, packLocalChatMessage(item))
+		list = append(list, packApiChatMessage(item))
 	}
 	res = &sysin.ChatMessagesModel{List: list}
 	return
@@ -668,6 +668,9 @@ func (s *sSysChat) TelegramWebhook(ctx context.Context, in *sysin.TelegramWebhoo
 	attachments, err := s.telegramMessageAttachments(ctx, row, msg)
 	if err != nil {
 		return
+	}
+	if telegramHasVisualEmoji(msg) && len(attachments) > 0 {
+		text = ""
 	}
 	if strings.TrimSpace(text) == "" && len(attachments) == 0 {
 		return nil
@@ -2799,6 +2802,31 @@ func packLocalChatMessage(item *chatMessageRow) *sysin.ChatMessageModel {
 	return &sysin.ChatMessageModel{Id: item.Id, ClientMessageId: item.ExternalMessageId, ConversationId: item.ConversationId, Direction: item.Direction, Content: item.Content, ContentType: item.ContentType, Status: item.Status, SenderName: item.SenderName, CreatedAt: createdAt, ReadAt: readAt, Attachments: attachments}
 }
 
+func packApiChatMessage(item *chatMessageRow) *sysin.ChatMessageModel {
+	message := packLocalChatMessage(item)
+	message.SenderName = ""
+	if message.Direction == "service" && message.ContentType == "image" && isTelegramVisualEmojiMessage(message) {
+		message.Content = ""
+	}
+	return message
+}
+
+func isTelegramVisualEmojiMessage(message *sysin.ChatMessageModel) bool {
+	if message == nil || !strings.HasPrefix(message.ClientMessageId, "telegram_") {
+		return false
+	}
+	for _, attachment := range message.Attachments {
+		if attachment == nil {
+			continue
+		}
+		name := strings.TrimSpace(attachment.Name)
+		if strings.HasPrefix(name, "telegram_sticker_") || strings.HasPrefix(name, "telegram_custom_emoji_") {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeClientMessageId(clientMessageId string, memberId int64) string {
 	clientMessageId = strings.TrimSpace(clientMessageId)
 	if clientMessageId != "" {
@@ -3225,6 +3253,13 @@ func telegramHasCustomEmoji(msg *sysin.TelegramMessageInp) bool {
 		}
 	}
 	return false
+}
+
+func telegramHasVisualEmoji(msg *sysin.TelegramMessageInp) bool {
+	if msg == nil {
+		return false
+	}
+	return msg.Sticker != nil || telegramHasCustomEmoji(msg)
 }
 
 func stickerText(sticker *sysin.TelegramStickerInp) string {

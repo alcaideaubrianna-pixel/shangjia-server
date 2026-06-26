@@ -100,7 +100,7 @@
             <n-form-item label="上传 Bucket 域名" path="uploadCosBucketURL">
               <n-input v-model:value="formValue.uploadCosBucketURL" placeholder="" />
               <template #feedback
-                >服务端 SDK 上传地址，例如：https://bucket-appid.cos.ap-hongkong.myqcloud.com</template
+                >服务端 SDK 上传地址，例如：https://bucket.example.com</template
               >
             </n-form-item>
             <n-form-item label="公开访问域名" path="uploadCosPublicURL">

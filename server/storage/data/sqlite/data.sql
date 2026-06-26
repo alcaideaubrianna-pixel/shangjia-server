@@ -1170,7 +1170,7 @@ INSERT INTO `hg_sys_config` (`id`, `group`, `name`, `type`, `key`, `value`, `def
 (56,	'upload',	'COS存储路径',	'string',	'uploadCosPath',	'hotgo/attachment/',	'hotgo/attachment/',	450,	'COS对象存储中的相对路径',	1,	1,	'2021-01-30 13:27:43',	'2024-02-28 16:56:35'),
 (57,	'upload',	'COS秘钥ID',	'string',	'uploadCosSecretId',	'',	'',	460,	'子账号密钥获取可参考 https://cloud.tencent.com/document/product/598/37140',	1,	1,	'2021-01-30 13:27:43',	'2024-02-28 16:56:35'),
 (58,	'upload',	'COS秘钥',	'string',	'uploadCosSecretKey',	'',	'',	470,	'',	1,	1,	'2021-01-30 13:27:43',	'2024-02-28 16:56:35'),
-(59,	'upload',	'COS上传Bucket域名',	'string',	'uploadCosBucketURL',	'',	'https://xxx-1253625515.cos.ap-beijing.myqcloud.com',	480,	'服务端SDK上传地址，例如：https://bucket-appid.cos.ap-hongkong.myqcloud.com',	1,	1,	'2021-01-30 13:27:43',	'2024-02-28 16:56:35'),
+(59,	'upload',	'COS上传Bucket域名',	'string',	'uploadCosBucketURL',	'',	'https://bucket.example.com',	480,	'服务端SDK上传地址，例如：https://bucket.example.com',	1,	1,	'2021-01-30 13:27:43',	'2024-02-28 16:56:35'),
 (159,	'upload',	'COS公开访问域名',	'string',	'uploadCosPublicURL',	'',	'',	490,	'前端展示/CDN域名，服务端上传仍使用COS Bucket域名',	1,	1,	'2026-06-26 13:30:00',	'2026-06-26 13:30:00'),
 (60,	'upload',	'OSS存储路径',	'string',	'uploadOssPath',	'hotgo/attachment/',	'hotgo/attachment/',	500,	'OSS对象存储中的相对路径',	1,	1,	'2021-01-30 13:27:43',	'2024-02-28 16:56:35'),
 (61,	'upload',	'OSS秘钥ID',	'string',	'uploadOssSecretId',	'',	'',	510,	'阿里云账号AccessKey拥有所有API的访问权限，风险很高。强烈建议您创建并使用RAM用户进行API访问或日常运维，请登录RAM控制台创建RAM用户。',	1,	1,	'2021-01-30 13:27:43',	'2024-02-28 16:56:35'),

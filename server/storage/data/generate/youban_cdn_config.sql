@@ -7,6 +7,6 @@ WHERE NOT EXISTS (
 
 UPDATE `hg_sys_config`
 SET `name` = 'COS上传Bucket域名',
-    `tip` = '服务端SDK上传地址，例如：https://bucket-appid.cos.ap-hongkong.myqcloud.com',
+    `tip` = '服务端SDK上传地址，例如：https://bucket.example.com',
     `updated_at` = NOW()
 WHERE `group` = 'upload' AND `key` = 'uploadCosBucketURL';
