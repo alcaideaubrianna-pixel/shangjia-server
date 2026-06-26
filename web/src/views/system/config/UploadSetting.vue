@@ -97,11 +97,15 @@
               <n-input v-model:value="formValue.uploadCosPath" placeholder="" />
               <template #feedback>填对对象存储中的相对路径</template>
             </n-form-item>
-            <n-form-item label="访问域名" path="uploadCosBucketURL">
+            <n-form-item label="上传 Bucket 域名" path="uploadCosBucketURL">
               <n-input v-model:value="formValue.uploadCosBucketURL" placeholder="" />
               <template #feedback
-                >控制台查看地址：https://console.cloud.tencent.com/cos5/bucket</template
+                >服务端 SDK 上传地址，例如：https://bucket-appid.cos.ap-hongkong.myqcloud.com</template
               >
+            </n-form-item>
+            <n-form-item label="公开访问域名" path="uploadCosPublicURL">
+              <n-input v-model:value="formValue.uploadCosPublicURL" placeholder="" />
+              <template #feedback>前端展示/CDN 域名，例如：https://img.example.com；为空则使用 Bucket 域名</template>
             </n-form-item>
           </n-tab-pane>
 
@@ -346,6 +350,7 @@
     uploadCosSecretId: '',
     uploadCosSecretKey: '',
     uploadCosBucketURL: '',
+    uploadCosPublicURL: '',
     uploadCosPath: '',
     uploadOssSecretId: '',
     uploadOssSecretKey: '',

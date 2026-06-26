@@ -73,6 +73,7 @@ type UploadConfig struct {
 	CosSecretId  string `json:"uploadCosSecretId"`
 	CosSecretKey string `json:"uploadCosSecretKey"`
 	CosBucketURL string `json:"uploadCosBucketURL"`
+	CosPublicURL string `json:"uploadCosPublicURL"`
 	CosPath      string `json:"uploadCosPath"`
 	// 阿里云oss配置
 	OssSecretId  string `json:"uploadOssSecretId"`

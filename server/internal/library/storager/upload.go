@@ -169,7 +169,10 @@ func LastUrl(ctx context.Context, fullPath, drive string) string {
 	case consts.UploadDriveUCloud:
 		return config.UCloudEndpoint + "/" + fullPath
 	case consts.UploadDriveCos:
-		return config.CosBucketURL + "/" + fullPath
+		if publicURL := strings.TrimRight(config.CosPublicURL, "/"); publicURL != "" {
+			return publicURL + "/" + fullPath
+		}
+		return strings.TrimRight(config.CosBucketURL, "/") + "/" + fullPath
 	case consts.UploadDriveOss:
 		return config.OssBucketURL + "/" + fullPath
 	case consts.UploadDriveQiNiu:
