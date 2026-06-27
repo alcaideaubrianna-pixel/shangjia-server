@@ -170,6 +170,7 @@ type AppAnnouncementPublicListModel struct {
 
 func ArticleCategories() []*AppAnnouncementCategoryModel {
 	return []*AppAnnouncementCategoryModel{
+		{Code: "home", Name: "首页推荐", Description: "用于首页 Banner、推荐阅读和首页重点内容展示。"},
 		{Code: "about", Name: "关于我们", Description: "了解悦伴平台、服务规则和用户权益。"},
 		{Code: "case", Name: "交友成功案例", Description: "分享真实同城交友体验和平台使用案例。"},
 		{Code: "blog", Name: "博客", Description: "分享同城交友、高端社交和会员认证相关看法。"},
