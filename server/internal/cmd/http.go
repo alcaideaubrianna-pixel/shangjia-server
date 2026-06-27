@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gcmd"
 	"github.com/gogf/gf/v2/util/gmode"
+	_ "hotgo/addons/modules"
 	"hotgo/internal/library/addons"
 	"hotgo/internal/library/casbin"
 	"hotgo/internal/library/hggen"
