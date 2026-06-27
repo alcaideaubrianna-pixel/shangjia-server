@@ -280,7 +280,10 @@ func (s *sSysContent) HomeProfileCards(ctx context.Context, in *sysin.HomeProfil
 	if in.Page <= 1 && in.Keyword == "" && in.Province == "" && in.City == "" {
 		list, totalCount, err = s.homeRecommendedProfiles(ctx, in)
 		if err != nil {
-			return
+			if !isMissingHomeRecommendColumnError(err) {
+				return
+			}
+			err = nil
 		}
 		if len(list) > 0 {
 			return
@@ -346,6 +349,15 @@ func (s *sSysContent) homeRecommendedProfiles(ctx context.Context, in *sysin.Hom
 	}
 	list, err = s.buildProfileListFromRows(ctx, rows)
 	return list, len(list), err
+}
+
+func isMissingHomeRecommendColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "does not exist") &&
+		(strings.Contains(errMsg, contentProfileHomeRecommend) || strings.Contains(errMsg, contentProfileHomeSort))
 }
 
 func (s *sSysContent) ImageSearch(ctx context.Context, in *sysin.ContentProfileImageSearchInp, file *ghttp.UploadFile) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
@@ -539,7 +551,7 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 			profileColumns.ImageCount,
 			profileColumns.VideoCount,
 			profileColumns.PublishedAt,
-		) + ", " + aliasField("p", contentProfileHomeRecommend) + ", " + aliasField("p", contentProfileHomeSort),
+		),
 	)
 	mod = mod.Page(in.Page, in.PerPage)
 	switch feed {
