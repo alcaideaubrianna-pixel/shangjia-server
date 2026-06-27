@@ -2,6 +2,9 @@ CREATE TABLE IF NOT EXISTS hg_app_announcement (
   id bigserial PRIMARY KEY,
   title varchar(255) NOT NULL,
   content text,
+  category_code varchar(64) NOT NULL DEFAULT 'blog',
+  category_name varchar(64) NOT NULL DEFAULT '博客',
+  summary varchar(500),
   is_banner smallint NOT NULL DEFAULT 0,
   banner_img varchar(500),
   banner_url varchar(500),
@@ -15,6 +18,10 @@ CREATE TABLE IF NOT EXISTS hg_app_announcement (
   updated_at timestamp,
   deleted_at timestamp
 );
+ALTER TABLE hg_app_announcement ADD COLUMN IF NOT EXISTS category_code varchar(64) NOT NULL DEFAULT 'blog';
+ALTER TABLE hg_app_announcement ADD COLUMN IF NOT EXISTS category_name varchar(64) NOT NULL DEFAULT '博客';
+ALTER TABLE hg_app_announcement ADD COLUMN IF NOT EXISTS summary varchar(500);
+CREATE INDEX IF NOT EXISTS idx_app_announcement_category ON hg_app_announcement (category_code, status, publish_at, sort, id);
 CREATE INDEX IF NOT EXISTS idx_app_announcement_public ON hg_app_announcement (status, publish_at, expire_at, sort, id);
 CREATE INDEX IF NOT EXISTS idx_app_announcement_banner ON hg_app_announcement (is_banner, status, publish_at, expire_at, sort, id);
 
@@ -93,6 +100,8 @@ CREATE TABLE IF NOT EXISTS hg_content_profile (
   review_status varchar(32) NOT NULL DEFAULT 'approved',
   import_status varchar(32) NOT NULL DEFAULT 'imported',
   admin_remark varchar(500),
+  home_recommend smallint NOT NULL DEFAULT 0,
+  home_sort integer NOT NULL DEFAULT 0,
   published_at timestamp,
   status smallint NOT NULL DEFAULT 1,
   created_at timestamp,
@@ -130,6 +139,10 @@ CREATE INDEX IF NOT EXISTS idx_content_profile_admin_cost ON hg_content_profile 
 CREATE INDEX IF NOT EXISTS idx_content_profile_admin_flags ON hg_content_profile (can_fly_to_province, can_go_abroad, can_overnight, has_health_check, id);
 CREATE INDEX IF NOT EXISTS idx_content_profile_public_filters ON hg_content_profile (status, review_status, import_status, visibility, age, height, weight, cup_size, video_count, has_verification_video, id);
 CREATE INDEX IF NOT EXISTS idx_content_profile_keyword ON hg_content_profile USING gin (to_tsvector('simple', coalesce(profile_no,'') || ' ' || coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(plain_text,'') || ' ' || coalesce(province,'') || ' ' || coalesce(city,'') || ' ' || coalesce(cup_size,'')));
+
+ALTER TABLE hg_content_profile ADD COLUMN IF NOT EXISTS home_recommend smallint NOT NULL DEFAULT 0;
+ALTER TABLE hg_content_profile ADD COLUMN IF NOT EXISTS home_sort integer NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_content_profile_home_recommend ON hg_content_profile (home_recommend, home_sort, status, review_status, visibility, id);
 
 CREATE TABLE IF NOT EXISTS hg_sys_ip_location_cache (
   ip varchar(64) PRIMARY KEY,

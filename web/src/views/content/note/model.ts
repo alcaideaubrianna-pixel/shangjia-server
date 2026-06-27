@@ -179,6 +179,7 @@ export const schemas = ref<FormSchema[]>([
   { field: 'allowCreampie', component: 'NSelect', label: '内射', componentProps: { options: yesNoOptions, placeholder: '请选择', clearable: true } },
   { field: 'hasTattoo', component: 'NSelect', label: '纹身', componentProps: { options: yesNoOptions, placeholder: '请选择', clearable: true } },
   { field: 'isFavorite', component: 'NSelect', label: '收藏', componentProps: { options: yesNoOptions, placeholder: '请选择', clearable: true } },
+  { field: 'homeRecommend', component: 'NSelect', label: '首页推荐', componentProps: { options: yesNoOptions, placeholder: '请选择', clearable: true } },
   {
     field: 'visibility',
     component: 'NSelect',
@@ -406,6 +407,14 @@ export const columns = [
     width: 100,
     render(row) {
       return renderImport(row.importStatus);
+    },
+  },
+  {
+    title: '首页推荐',
+    key: 'homeRecommend',
+    width: 100,
+    render(row) {
+      return row.homeRecommend === 1 ? tag('success', `推荐 ${row.homeSort || 0}`) : tag('default', '否');
     },
   },
   {

@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS `hg_content_profile` (
   `review_status` varchar(32) NOT NULL DEFAULT 'approved' COMMENT '审核状态',
   `import_status` varchar(32) NOT NULL DEFAULT 'imported' COMMENT '导入状态',
   `admin_remark` varchar(500) DEFAULT NULL COMMENT '后台备注',
+  `home_recommend` tinyint(1) NOT NULL DEFAULT '0' COMMENT '首页推荐',
+  `home_sort` int(11) NOT NULL DEFAULT '0' COMMENT '首页推荐排序',
   `published_at` datetime DEFAULT NULL COMMENT '发布时间',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
@@ -220,6 +222,8 @@ SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_sche
 SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'source_created_at') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `source_created_at` datetime DEFAULT NULL COMMENT ''FeiNiu创建时间'' AFTER `source_update_by`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'source_updated_at') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `source_updated_at` datetime DEFAULT NULL COMMENT ''FeiNiu更新时间'' AFTER `source_created_at`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'source_attributes_json') > 0, 'ALTER TABLE `hg_content_profile` DROP COLUMN `source_attributes_json`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'home_recommend') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `home_recommend` tinyint(1) NOT NULL DEFAULT ''0'' COMMENT ''首页推荐'' AFTER `admin_remark`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND column_name = 'home_sort') = 0, 'ALTER TABLE `hg_content_profile` ADD COLUMN `home_sort` int(11) NOT NULL DEFAULT ''0'' COMMENT ''首页推荐排序'' AFTER `home_recommend`', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 UPDATE `hg_content_profile` SET `review_status` = 'approved' WHERE `source_type` = 'feiniu' AND `review_status` = 'pending';
 
@@ -309,6 +313,13 @@ DEALLOCATE PREPARE stmt;
 
 SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_admin_flags') = 0,
   'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_admin_flags` (`can_fly_to_province`, `can_go_abroad`, `can_overnight`, `has_health_check`, `id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF((SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = @schema AND table_name = 'hg_content_profile' AND index_name = 'idx_content_profile_home_recommend') = 0,
+  'ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_home_recommend` (`home_recommend`, `home_sort`, `status`, `review_status`, `visibility`, `id`)',
   'SELECT 1');
 PREPARE stmt FROM @sql;
 EXECUTE stmt;

@@ -121,6 +121,8 @@ type (
 		ListProfiles(ctx context.Context, in *sysin.ContentProfileListInp) (list []*sysin.ContentProfileListModel, totalCount int, err error)
 		// HomeProfileCards 获取首页资料卡片
 		HomeProfileCards(ctx context.Context, in *sysin.HomeProfileCardsInp) (list []*sysin.ContentProfileListModel, totalCount int, err error)
+		// ClearHomeProfileCardsCache 清理首页资料卡片缓存
+		ClearHomeProfileCardsCache(ctx context.Context)
 		// ImageSearch 上传图片搜索相似资料
 		ImageSearch(ctx context.Context, in *sysin.ContentProfileImageSearchInp, file *ghttp.UploadFile) (list []*sysin.ContentProfileListModel, totalCount int, err error)
 		// FilterOptions 获取前台资料筛选选项

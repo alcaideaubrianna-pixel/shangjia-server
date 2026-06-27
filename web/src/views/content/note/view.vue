@@ -29,6 +29,8 @@
               <n-descriptions-item label="可见性">{{ data.visibility || '-' }}</n-descriptions-item>
               <n-descriptions-item label="审核状态">{{ data.reviewStatus || '-' }}</n-descriptions-item>
               <n-descriptions-item label="导入状态">{{ data.importStatus || '-' }}</n-descriptions-item>
+              <n-descriptions-item label="首页推荐">{{ data.homeRecommend === 1 ? '是' : '否' }}</n-descriptions-item>
+              <n-descriptions-item label="首页排序">{{ data.homeSort || 0 }}</n-descriptions-item>
               <n-descriptions-item label="状态">{{ data.status === 2 ? '冻结' : '正常' }}</n-descriptions-item>
               <n-descriptions-item label="发布时间">{{ data.publishedAt || '-' }}</n-descriptions-item>
               <n-descriptions-item label="导入时间">{{ data.createdAt || '-' }}</n-descriptions-item>
@@ -74,6 +76,12 @@
                 </n-form-item-gi>
                 <n-form-item-gi label="会员视频" path="memberOnlyVideo">
                   <n-select v-model:value="formValue.memberOnlyVideo" :options="yesNoOptions" />
+                </n-form-item-gi>
+                <n-form-item-gi label="首页推荐" path="homeRecommend">
+                  <n-select v-model:value="formValue.homeRecommend" :options="yesNoOptions" />
+                </n-form-item-gi>
+                <n-form-item-gi label="首页排序" path="homeSort">
+                  <n-input-number v-model:value="formValue.homeSort" :show-button="false" clearable class="w-full" />
                 </n-form-item-gi>
                 <n-form-item-gi label="正文" path="plainText" :span="2">
                   <n-input v-model:value="formValue.plainText" type="textarea" :autosize="{ minRows: 8, maxRows: 18 }" />
@@ -189,6 +197,8 @@
     'reviewStatus',
     'importStatus',
     'adminRemark',
+    'homeRecommend',
+    'homeSort',
     'status',
   ];
 

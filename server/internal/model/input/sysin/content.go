@@ -53,28 +53,30 @@ type ContentProfileImageSearchInp struct {
 }
 
 type ContentProfileListModel struct {
-	Id          int64                `json:"id" dc:"ID"`
-	ProfileNo   string               `json:"profileNo" dc:"资料编号"`
-	Name        string               `json:"name" dc:"昵称"`
-	Title       string               `json:"title" dc:"标题"`
-	Summary     string               `json:"summary" dc:"摘要"`
-	Province    string               `json:"province" dc:"省份"`
-	City        string               `json:"city" dc:"城市"`
-	Age         int                  `json:"age" dc:"年龄"`
-	Height      int                  `json:"height" dc:"身高"`
-	Weight      int                  `json:"weight" dc:"体重"`
-	Cup         string               `json:"cup" dc:"资料标签"`
-	Avatar      string               `json:"avatar" dc:"主图"`
-	CoverUrl    string               `json:"coverUrl" dc:"封面"`
-	HasVideo    bool                 `json:"hasVideo" dc:"是否有视频"`
-	VideoLocked bool                 `json:"videoLocked" dc:"视频是否锁定"`
-	Verified    bool                 `json:"verified" dc:"是否认证"`
-	ImageCount  int                  `json:"imageCount" dc:"图片数"`
-	VideoCount  int                  `json:"videoCount" dc:"视频数"`
-	Media       []*ContentMediaModel `json:"media" dc:"媒体列表"`
-	Photos      []string             `json:"photos" dc:"图片展示地址"`
-	PublishedAt *gtime.Time          `json:"publishedAt" dc:"发布时间"`
-	ActionAt    *gtime.Time          `json:"actionAt" dc:"用户动作时间"`
+	Id            int64                `json:"id" dc:"ID"`
+	ProfileNo     string               `json:"profileNo" dc:"资料编号"`
+	Name          string               `json:"name" dc:"昵称"`
+	Title         string               `json:"title" dc:"标题"`
+	Summary       string               `json:"summary" dc:"摘要"`
+	Province      string               `json:"province" dc:"省份"`
+	City          string               `json:"city" dc:"城市"`
+	Age           int                  `json:"age" dc:"年龄"`
+	Height        int                  `json:"height" dc:"身高"`
+	Weight        int                  `json:"weight" dc:"体重"`
+	Cup           string               `json:"cup" dc:"资料标签"`
+	Avatar        string               `json:"avatar" dc:"主图"`
+	CoverUrl      string               `json:"coverUrl" dc:"封面"`
+	HasVideo      bool                 `json:"hasVideo" dc:"是否有视频"`
+	VideoLocked   bool                 `json:"videoLocked" dc:"视频是否锁定"`
+	Verified      bool                 `json:"verified" dc:"是否认证"`
+	ImageCount    int                  `json:"imageCount" dc:"图片数"`
+	VideoCount    int                  `json:"videoCount" dc:"视频数"`
+	HomeRecommend int                  `json:"homeRecommend" dc:"首页推荐"`
+	HomeSort      int                  `json:"homeSort" dc:"首页推荐排序"`
+	Media         []*ContentMediaModel `json:"media" dc:"媒体列表"`
+	Photos        []string             `json:"photos" dc:"图片展示地址"`
+	PublishedAt   *gtime.Time          `json:"publishedAt" dc:"发布时间"`
+	ActionAt      *gtime.Time          `json:"actionAt" dc:"用户动作时间"`
 }
 
 type ContentProfileFilterOptionsModel struct {
@@ -294,6 +296,7 @@ type ContentNoteListInp struct {
 	AllowCreampie   int           `json:"allowCreampie" dc:"可内射"`
 	HasTattoo       int           `json:"hasTattoo" dc:"有纹身"`
 	IsFavorite      int           `json:"isFavorite" dc:"收藏"`
+	HomeRecommend   int           `json:"homeRecommend" dc:"首页推荐"`
 	Status          int           `json:"status" dc:"状态"`
 	HasVerification int           `json:"hasVerification" dc:"是否有验证视频"`
 	MemberOnlyVideo int           `json:"memberOnlyVideo" dc:"视频是否会员可见"`
@@ -359,6 +362,8 @@ type ContentNoteListModel struct {
 	ReviewStatus         string                   `json:"reviewStatus" dc:"审核状态"`
 	ImportStatus         string                   `json:"importStatus" dc:"导入状态"`
 	AdminRemark          string                   `json:"adminRemark" dc:"后台备注"`
+	HomeRecommend        int                      `json:"homeRecommend" dc:"首页推荐"`
+	HomeSort             int                      `json:"homeSort" dc:"首页推荐排序"`
 	Status               int                      `json:"status" dc:"状态"`
 	PublishedAt          *gtime.Time              `json:"publishedAt" dc:"发布时间"`
 	CreatedAt            *gtime.Time              `json:"createdAt" dc:"创建时间"`
@@ -386,6 +391,8 @@ type ContentNoteUpdateFields struct {
 	ReviewStatus         string `json:"reviewStatus" dc:"审核状态"`
 	ImportStatus         string `json:"importStatus" dc:"导入状态"`
 	AdminRemark          string `json:"adminRemark" dc:"后台备注"`
+	HomeRecommend        int    `json:"homeRecommend" dc:"首页推荐"`
+	HomeSort             int    `json:"homeSort" dc:"首页推荐排序"`
 	Status               int    `json:"status" dc:"状态"`
 }
 

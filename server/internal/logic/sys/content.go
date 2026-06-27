@@ -34,17 +34,20 @@ import (
 )
 
 const (
-	contentSourceFeiNiu      = "feiniu"
-	contentImportCronName    = "content_import_feiniu"
-	contentImportCronTitle   = "FeiNiu 内容自动同步"
-	contentImportCronPattern = "0 */1 * * * *"
-	contentReviewConfigGroup = "content_import_review"
-	feiNiuCosURLPrefix       = "https://sh-hk-qiuniu-1368574312.cos.ap-hongkong.myqcloud.com/"
-	feiNiuProxyCosPrefix     = "/prod-api/telegram/content-note/cos/"
-	contentFilterOptionsKey  = "content:profile:filter_options"
-	contentRegionsKey        = "content:profile:regions"
-	contentProfileStatsTable = "hg_content_profile_stats"
-	contentImagePHashSigKey  = "content:profile:image_phash_sig:"
+	contentSourceFeiNiu         = "feiniu"
+	contentImportCronName       = "content_import_feiniu"
+	contentImportCronTitle      = "FeiNiu 内容自动同步"
+	contentImportCronPattern    = "0 */1 * * * *"
+	contentReviewConfigGroup    = "content_import_review"
+	feiNiuCosURLPrefix          = "https://sh-hk-qiuniu-1368574312.cos.ap-hongkong.myqcloud.com/"
+	feiNiuProxyCosPrefix        = "/prod-api/telegram/content-note/cos/"
+	contentFilterOptionsKey     = "content:profile:filter_options"
+	contentRegionsKey           = "content:profile:regions"
+	contentHomeCardsKeyBase     = "content:home:profile_cards"
+	contentProfileStatsTable    = "hg_content_profile_stats"
+	contentImagePHashSigKey     = "content:profile:image_phash_sig:"
+	contentProfileHomeRecommend = "home_recommend"
+	contentProfileHomeSort      = "home_sort"
 )
 
 var errFeiNiuMediaPending = errors.New("feiniu media pending")
@@ -260,10 +263,89 @@ func normalizeHomeProfileFeed(feed string, sort string) homeProfileFeed {
 }
 
 func (s *sSysContent) HomeProfileCards(ctx context.Context, in *sysin.HomeProfileCardsInp) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
+	if in.Page <= 1 && s.requestMemberId(ctx) <= 0 && in.Keyword == "" && in.Province == "" && in.City == "" {
+		cacheKey := homeProfileCardsCacheKey(in)
+		cacheVar, cacheErr := cache.Instance().Get(ctx, cacheKey)
+		if cacheErr == nil && !cacheVar.IsNil() {
+			if cacheErr = cacheVar.Scan(&list); cacheErr == nil && len(list) > 0 {
+				return list, len(list), nil
+			}
+		}
+		defer func() {
+			if err == nil && len(list) > 0 {
+				_ = cache.Instance().Set(ctx, cacheKey, list, 5*time.Minute)
+			}
+		}()
+	}
+	if in.Page <= 1 && in.Keyword == "" && in.Province == "" && in.City == "" {
+		list, totalCount, err = s.homeRecommendedProfiles(ctx, in)
+		if err != nil {
+			return
+		}
+		if len(list) > 0 {
+			return
+		}
+	}
 	listInp := in.ContentProfileListInp
 	listInp.Feed = string(normalizeHomeProfileFeed(in.Feed, in.Sort))
 	listInp.Sort = listInp.Feed
 	return s.ListProfiles(ctx, &listInp)
+}
+
+func homeProfileCardsCacheKey(in *sysin.HomeProfileCardsInp) string {
+	pageSize := in.PerPage
+	if pageSize <= 0 {
+		pageSize = 3
+	}
+	if pageSize > 12 {
+		pageSize = 12
+	}
+	feed := normalizeHomeProfileFeed(in.Feed, in.Sort)
+	return fmt.Sprintf("%s:%d:%s", contentHomeCardsKeyBase, pageSize, feed)
+}
+
+func (s *sSysContent) homeRecommendedProfiles(ctx context.Context, in *sysin.HomeProfileCardsInp) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
+	pageSize := in.PerPage
+	if pageSize <= 0 {
+		pageSize = 3
+	}
+	if pageSize > 12 {
+		pageSize = 12
+	}
+
+	profileColumns := dao.ContentProfile.Columns()
+	rows := make([]contentProfileRow, 0, pageSize)
+	err = s.publicProfileWhere(dao.ContentProfile.Ctx(ctx).As("p")).
+		Fields(
+			aliasFields("p",
+				profileColumns.Id,
+				profileColumns.ProfileNo,
+				profileColumns.Title,
+				profileColumns.Summary,
+				profileColumns.Province,
+				profileColumns.City,
+				profileColumns.Age,
+				profileColumns.Height,
+				profileColumns.Weight,
+				profileColumns.CupSize,
+				profileColumns.HasVerificationVideo,
+				profileColumns.MemberOnlyVideo,
+				profileColumns.ImageCount,
+				profileColumns.VideoCount,
+				profileColumns.PublishedAt,
+			)+", "+aliasField("p", contentProfileHomeRecommend)+", "+aliasField("p", contentProfileHomeSort),
+		).
+		Where(aliasField("p", contentProfileHomeRecommend), 1).
+		OrderDesc(aliasField("p", contentProfileHomeSort)).
+		OrderDesc(aliasField("p", profileColumns.SourceCreatedAt)).
+		OrderDesc(aliasField("p", profileColumns.Id)).
+		Limit(pageSize).
+		Scan(&rows)
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "获取首页推荐资料失败")
+	}
+	list, err = s.buildProfileListFromRows(ctx, rows)
+	return list, len(list), err
 }
 
 func (s *sSysContent) ImageSearch(ctx context.Context, in *sysin.ContentProfileImageSearchInp, file *ghttp.UploadFile) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
@@ -457,7 +539,7 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 			profileColumns.ImageCount,
 			profileColumns.VideoCount,
 			profileColumns.PublishedAt,
-		),
+		) + ", " + aliasField("p", contentProfileHomeRecommend) + ", " + aliasField("p", contentProfileHomeSort),
 	)
 	mod = mod.Page(in.Page, in.PerPage)
 	switch feed {
@@ -485,6 +567,11 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 		return
 	}
 
+	list, err = s.buildProfileListFromRows(ctx, rows)
+	return
+}
+
+func (s *sSysContent) buildProfileListFromRows(ctx context.Context, rows []contentProfileRow) (list []*sysin.ContentProfileListModel, err error) {
 	list = make([]*sysin.ContentProfileListModel, 0, len(rows))
 	profileIds := make([]int64, 0, len(rows))
 	for _, row := range rows {
@@ -1643,6 +1730,21 @@ func (s *sSysContent) publicProfileWhere(mod *gdb.Model) *gdb.Model {
 		WhereIn(aliasField("p", profileColumns.ImportStatus), []string{"imported", "duplicate"}).
 		Where(aliasField("p", profileColumns.ReviewStatus), consts.ContentReviewApproved).
 		WhereIn(aliasField("p", profileColumns.Visibility), []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly})
+}
+
+func (s *sSysContent) ClearHomeProfileCardsCache(ctx context.Context) {
+	keys := []interface{}{
+		contentHomeCardsKeyBase + ":3:" + string(homeProfileFeedNearby),
+		contentHomeCardsKeyBase + ":3:" + string(homeProfileFeedLatest),
+		contentHomeCardsKeyBase + ":3:" + string(homeProfileFeedHot),
+		contentHomeCardsKeyBase + ":9:" + string(homeProfileFeedNearby),
+		contentHomeCardsKeyBase + ":9:" + string(homeProfileFeedLatest),
+		contentHomeCardsKeyBase + ":9:" + string(homeProfileFeedHot),
+		contentHomeCardsKeyBase + ":12:" + string(homeProfileFeedNearby),
+		contentHomeCardsKeyBase + ":12:" + string(homeProfileFeedLatest),
+		contentHomeCardsKeyBase + ":12:" + string(homeProfileFeedHot),
+	}
+	_, _ = cache.Instance().Remove(ctx, keys...)
 }
 
 func (s *sSysContent) fillImportAutoSyncOverview(ctx context.Context, res *sysin.ContentImportOverviewModel) (err error) {
@@ -3061,6 +3163,8 @@ type contentProfileRow struct {
 	MemberOnlyVideo      int         `json:"memberOnlyVideo"`
 	ImageCount           int         `json:"imageCount"`
 	VideoCount           int         `json:"videoCount"`
+	HomeRecommend        int         `json:"homeRecommend"`
+	HomeSort             int         `json:"homeSort"`
 	Visibility           string      `json:"visibility"`
 	PublishedAt          *gtime.Time `json:"publishedAt"`
 	ActionAt             *gtime.Time `json:"actionAt"`
@@ -3072,22 +3176,24 @@ func (row contentProfileRow) toListModel() *sysin.ContentProfileListModel {
 		name = row.ProfileNo
 	}
 	return &sysin.ContentProfileListModel{
-		Id:          row.Id,
-		ProfileNo:   row.ProfileNo,
-		Name:        name,
-		Title:       row.Title,
-		Summary:     row.Summary,
-		Province:    row.Province,
-		City:        row.City,
-		Age:         row.Age,
-		Height:      row.Height,
-		Weight:      row.Weight,
-		Cup:         row.CupSize,
-		HasVideo:    row.VideoCount > 0,
-		VideoLocked: row.VideoCount > 0 && row.MemberOnlyVideo == 1,
-		Verified:    row.HasVerificationVideo == 1,
-		ImageCount:  row.ImageCount,
-		VideoCount:  row.VideoCount,
-		PublishedAt: row.PublishedAt,
+		Id:            row.Id,
+		ProfileNo:     row.ProfileNo,
+		Name:          name,
+		Title:         row.Title,
+		Summary:       row.Summary,
+		Province:      row.Province,
+		City:          row.City,
+		Age:           row.Age,
+		Height:        row.Height,
+		Weight:        row.Weight,
+		Cup:           row.CupSize,
+		HasVideo:      row.VideoCount > 0,
+		VideoLocked:   row.VideoCount > 0 && row.MemberOnlyVideo == 1,
+		Verified:      row.HasVerificationVideo == 1,
+		ImageCount:    row.ImageCount,
+		VideoCount:    row.VideoCount,
+		HomeRecommend: row.HomeRecommend,
+		HomeSort:      row.HomeSort,
+		PublishedAt:   row.PublishedAt,
 	}
 }

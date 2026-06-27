@@ -83,7 +83,9 @@ func (s *sSysContentNote) Edit(ctx context.Context, in *sysin.ContentNoteEditInp
 		Data(in).
 		Update(); err != nil {
 		err = gerror.Wrap(err, "修改内容笔记失败，请稍后重试")
+		return
 	}
+	service.SysContent().ClearHomeProfileCardsCache(ctx)
 	return
 }
 
@@ -146,7 +148,9 @@ func (s *sSysContentNote) MediaEdit(ctx context.Context, in *sysin.ContentNoteMe
 		Update()
 	if err != nil {
 		err = gerror.Wrap(err, "更新笔记媒体数量失败")
+		return
 	}
+	service.SysContent().ClearHomeProfileCardsCache(ctx)
 	return
 }
 
@@ -163,7 +167,9 @@ func (s *sSysContentNote) BatchDelete(ctx context.Context, in *sysin.ContentNote
 		Unscoped().
 		Update(); err != nil {
 		err = gerror.Wrap(err, "批量删除内容笔记失败")
+		return
 	}
+	service.SysContent().ClearHomeProfileCardsCache(ctx)
 	return
 }
 
@@ -183,7 +189,9 @@ func (s *sSysContentNote) BatchReview(ctx context.Context, in *sysin.ContentNote
 		}).
 		Update(); err != nil {
 		err = gerror.Wrap(err, "批量审核内容笔记失败")
+		return
 	}
+	service.SysContent().ClearHomeProfileCardsCache(ctx)
 	return
 }
 
@@ -203,7 +211,9 @@ func (s *sSysContentNote) BatchStatus(ctx context.Context, in *sysin.ContentNote
 		}).
 		Update(); err != nil {
 		err = gerror.Wrap(err, "批量更新内容笔记状态失败")
+		return
 	}
+	service.SysContent().ClearHomeProfileCardsCache(ctx)
 	return
 }
 
@@ -290,6 +300,8 @@ func (s *sSysContentNote) listFields(mod *gdb.Model) *gdb.Model {
 			profileColumns.ReviewStatus,
 			profileColumns.ImportStatus,
 			profileColumns.AdminRemark,
+			contentProfileHomeRecommend,
+			contentProfileHomeSort,
 			profileColumns.Status,
 			profileColumns.PublishedAt,
 			profileColumns.CreatedAt,
@@ -409,6 +421,7 @@ func (s *sSysContentNote) applyListWhere(mod *gdb.Model, in *sysin.ContentNoteLi
 	mod = applyBoolIntWhere(mod, noteAliasField("p", profileColumns.AllowCreampie), in.AllowCreampie)
 	mod = applyBoolIntWhere(mod, noteAliasField("p", profileColumns.HasTattoo), in.HasTattoo)
 	mod = applyBoolIntWhere(mod, noteAliasField("p", profileColumns.IsFavorite), in.IsFavorite)
+	mod = applyBoolIntWhere(mod, noteAliasField("p", contentProfileHomeRecommend), in.HomeRecommend)
 	if in.Status > 0 {
 		mod = mod.Where(noteAliasField("p", profileColumns.Status)+"=?", in.Status)
 	}
