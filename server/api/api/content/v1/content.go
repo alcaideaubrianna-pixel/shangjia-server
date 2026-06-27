@@ -80,3 +80,19 @@ type ViewAnnouncementReq struct {
 type ViewAnnouncementRes struct {
 	*sysin.AppAnnouncementPublicListModel
 }
+
+type ListArticleCategoriesReq struct {
+	g.Meta `path:"/content/article/categories" method:"get" tags:"前台文章" summary:"获取文章分类列表"`
+}
+
+type ListArticleCategoriesRes struct {
+	List []*sysin.AppAnnouncementCategoryModel `json:"list" dc:"分类列表"`
+}
+
+type SeoFooterReq struct {
+	g.Meta `path:"/content/seo-footer" method:"get" tags:"前台SEO" summary:"获取SEO页脚配置"`
+}
+
+type SeoFooterRes struct {
+	*sysin.SeoFooterModel
+}

@@ -2,6 +2,9 @@ CREATE TABLE IF NOT EXISTS `hg_app_announcement` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
   `title` varchar(255) NOT NULL COMMENT '公告标题',
   `content` longtext COMMENT '公告内容',
+  `category_code` varchar(64) NOT NULL DEFAULT 'blog' COMMENT '文章分类编码',
+  `category_name` varchar(64) NOT NULL DEFAULT '博客' COMMENT '文章分类名称',
+  `summary` varchar(500) DEFAULT NULL COMMENT '摘要',
   `is_banner` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否Banner',
   `banner_img` varchar(500) DEFAULT NULL COMMENT 'Banner图片',
   `banner_url` varchar(500) DEFAULT NULL COMMENT 'Banner链接',
@@ -15,6 +18,7 @@ CREATE TABLE IF NOT EXISTS `hg_app_announcement` (
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
+  KEY `idx_app_announcement_category` (`category_code`, `status`, `publish_at`, `sort`, `id`),
   KEY `idx_app_announcement_public` (`status`, `publish_at`, `expire_at`, `sort`, `id`),
   KEY `idx_app_announcement_banner` (`is_banner`, `status`, `publish_at`, `expire_at`, `sort`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='APP公告';

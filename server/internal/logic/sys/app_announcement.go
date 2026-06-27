@@ -12,6 +12,7 @@ import (
 	"hotgo/utility/validate"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gtime"
 )
@@ -35,6 +36,9 @@ func (s *sSysAppAnnouncement) List(ctx context.Context, in *sysin.AppAnnouncemen
 	cols := dao.AppAnnouncement.Columns()
 	if in.Title != "" {
 		mod = mod.WhereLike(cols.Title, "%"+in.Title+"%")
+	}
+	if in.CategoryCode != "" {
+		mod = mod.Where(cols.CategoryCode, in.CategoryCode)
 	}
 	if in.IsBanner > 0 {
 		mod = mod.Where(cols.IsBanner, in.IsBanner)
@@ -62,9 +66,32 @@ func (s *sSysAppAnnouncement) PublicList(ctx context.Context, in *sysin.AppAnnou
 	if in.IsBanner >= 0 {
 		mod = mod.Where(cols.IsBanner, in.IsBanner)
 	}
+	if in.CategoryCode != "" {
+		mod = mod.Where(cols.CategoryCode, in.CategoryCode)
+	}
 	mod = mod.Page(in.Page, in.PerPage).OrderDesc(cols.Sort).OrderDesc(cols.Id)
 	if err = mod.ScanAndCount(&list, &totalCount, false); err != nil {
 		err = gerror.Wrap(err, "获取APP公告列表失败，请稍后重试！")
+	}
+	return
+}
+
+func (s *sSysAppAnnouncement) PublicCategories(ctx context.Context) (list []*sysin.AppAnnouncementCategoryModel, err error) {
+	list = sysin.ArticleCategories()
+	cols := dao.AppAnnouncement.Columns()
+	now := gtime.Now()
+	for _, item := range list {
+		count, countErr := s.Model(ctx, &handler.Option{FilterAuth: false}).
+			Where(cols.Status, consts.StatusEnabled).
+			Where(cols.IsBanner, 0).
+			Where(cols.CategoryCode, item.Code).
+			Where("(publish_at IS NULL OR publish_at<=?)", now).
+			Where("(expire_at IS NULL OR expire_at>?)", now).
+			Count()
+		if countErr != nil {
+			return nil, gerror.Wrap(countErr, "获取文章分类数量失败")
+		}
+		item.TotalCount = count
 	}
 	return
 }
@@ -83,6 +110,22 @@ func (s *sSysAppAnnouncement) PublicView(ctx context.Context, in *sysin.AppAnnou
 	}
 	if res == nil {
 		return nil, gerror.New("公告不存在或未发布")
+	}
+	return
+}
+
+func (s *sSysAppAnnouncement) SeoFooter(ctx context.Context) (res *sysin.SeoFooterModel, err error) {
+	config, err := service.SysConfig().GetConfigByGroup(ctx, &sysin.GetConfigInp{Group: "seo"})
+	if err != nil {
+		return nil, err
+	}
+	res = new(sysin.SeoFooterModel)
+	raw := config.List["seoFooter"]
+	if raw == nil {
+		return
+	}
+	if err = gjson.New(raw).Scan(res); err != nil {
+		err = gerror.Wrap(err, "解析SEO页脚配置失败")
 	}
 	return
 }

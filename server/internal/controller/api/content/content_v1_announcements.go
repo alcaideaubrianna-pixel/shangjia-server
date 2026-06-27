@@ -31,3 +31,26 @@ func (c *ControllerV1) ViewAnnouncement(ctx context.Context, req *v1.ViewAnnounc
 	res.AppAnnouncementPublicListModel = data
 	return
 }
+
+func (c *ControllerV1) ListArticleCategories(ctx context.Context, req *v1.ListArticleCategoriesReq) (res *v1.ListArticleCategoriesRes, err error) {
+	list, err := service.SysAppAnnouncement().PublicCategories(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.AppAnnouncementCategoryModel{}
+	}
+	res = new(v1.ListArticleCategoriesRes)
+	res.List = list
+	return
+}
+
+func (c *ControllerV1) SeoFooter(ctx context.Context, req *v1.SeoFooterReq) (res *v1.SeoFooterRes, err error) {
+	data, err := service.SysAppAnnouncement().SeoFooter(ctx)
+	if err != nil {
+		return
+	}
+	res = new(v1.SeoFooterRes)
+	res.SeoFooterModel = data
+	return
+}

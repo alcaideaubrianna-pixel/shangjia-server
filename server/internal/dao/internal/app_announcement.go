@@ -15,39 +15,45 @@ type AppAnnouncementDao struct {
 }
 
 type AppAnnouncementColumns struct {
-	Id        string
-	Title     string
-	Content   string
-	IsBanner  string
-	BannerImg string
-	BannerUrl string
-	PublishAt string
-	ExpireAt  string
-	Sort      string
-	Status    string
-	CreatedBy string
-	UpdatedBy string
-	CreatedAt string
-	UpdatedAt string
-	DeletedAt string
+	Id           string
+	Title        string
+	Content      string
+	CategoryCode string
+	CategoryName string
+	Summary      string
+	IsBanner     string
+	BannerImg    string
+	BannerUrl    string
+	PublishAt    string
+	ExpireAt     string
+	Sort         string
+	Status       string
+	CreatedBy    string
+	UpdatedBy    string
+	CreatedAt    string
+	UpdatedAt    string
+	DeletedAt    string
 }
 
 var appAnnouncementColumns = AppAnnouncementColumns{
-	Id:        "id",
-	Title:     "title",
-	Content:   "content",
-	IsBanner:  "is_banner",
-	BannerImg: "banner_img",
-	BannerUrl: "banner_url",
-	PublishAt: "publish_at",
-	ExpireAt:  "expire_at",
-	Sort:      "sort",
-	Status:    "status",
-	CreatedBy: "created_by",
-	UpdatedBy: "updated_by",
-	CreatedAt: "created_at",
-	UpdatedAt: "updated_at",
-	DeletedAt: "deleted_at",
+	Id:           "id",
+	Title:        "title",
+	Content:      "content",
+	CategoryCode: "category_code",
+	CategoryName: "category_name",
+	Summary:      "summary",
+	IsBanner:     "is_banner",
+	BannerImg:    "banner_img",
+	BannerUrl:    "banner_url",
+	PublishAt:    "publish_at",
+	ExpireAt:     "expire_at",
+	Sort:         "sort",
+	Status:       "status",
+	CreatedBy:    "created_by",
+	UpdatedBy:    "updated_by",
+	CreatedAt:    "created_at",
+	UpdatedAt:    "updated_at",
+	DeletedAt:    "deleted_at",
 }
 
 func NewAppAnnouncementDao(handlers ...gdb.ModelHandler) *AppAnnouncementDao {

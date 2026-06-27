@@ -52,6 +52,9 @@
                   <n-tag v-if="item.isBanner === 1" size="small" type="success" :bordered="false">
                     Banner
                   </n-tag>
+                  <n-tag v-if="item.categoryName" size="small" type="info" :bordered="false">
+                    {{ item.categoryName }}
+                  </n-tag>
                 </n-space>
               </template>
 
@@ -60,7 +63,7 @@
                 <span>过期时间：{{ formatTime(item.expireAt) }}</span>
                 <span>排序：{{ item.sort || 0 }}</span>
               </div>
-              <div class="notice-content" v-html="renderMarkdown(item.content)"></div>
+              <div class="notice-content rich-content" v-html="renderRichText(item.content)"></div>
 
               <template #footer>
                 <n-space>
@@ -103,7 +106,10 @@
         :src="activeAnnouncement.bannerImg"
         :alt="activeAnnouncement.title"
       />
-      <div class="announcement-detail markdown-body" v-html="renderMarkdown(activeAnnouncement.content)"></div>
+      <div
+        class="announcement-detail rich-content"
+        v-html="renderRichText(activeAnnouncement.content)"
+      ></div>
     </n-modal>
 
     <n-modal
@@ -123,17 +129,28 @@
         <n-form-item label="标题" path="title">
           <n-input v-model:value="formValue.title" placeholder="请输入公告标题" />
         </n-form-item>
+        <n-form-item label="文章分类" path="categoryCode">
+          <n-select
+            v-model:value="formValue.categoryCode"
+            :options="categoryOptions"
+            placeholder="请选择文章分类"
+            @update:value="handleCategoryChange"
+          />
+        </n-form-item>
+        <n-form-item label="摘要" path="summary">
+          <n-input
+            v-model:value="formValue.summary"
+            type="textarea"
+            placeholder="请输入文章摘要，用于分类页卡片展示"
+            :autosize="{ minRows: 2, maxRows: 4 }"
+          />
+        </n-form-item>
         <n-form-item label="正文" path="content">
-          <div class="announcement-md-editor">
-            <n-input
-              v-model:value="formValue.content"
-              type="textarea"
-              placeholder="请输入 Markdown 正文，支持标题、列表、引用、表格、链接、图片和 HTML"
-              :autosize="{ minRows: 18, maxRows: 30 }"
-            />
-            <div class="announcement-md-preview">
+          <div class="announcement-rich-editor">
+            <Editor v-model:value="formValue.content" id="announcementEditor" />
+            <div class="announcement-rich-preview">
               <div class="preview-title">预览</div>
-              <div class="markdown-body" v-html="renderMarkdown(formValue.content)"></div>
+              <div class="rich-content" v-html="renderRichText(formValue.content)"></div>
             </div>
           </div>
         </n-form-item>
@@ -183,9 +200,9 @@
 <script lang="ts" setup>
   import { computed, onMounted, ref } from 'vue';
   import { useMessage } from 'naive-ui';
-  import MarkdownIt from 'markdown-it';
   import { Edit, List, MaxSort, Status } from '@/api/appAnnouncement';
   import DatePicker from '@/components/DatePicker/datePicker.vue';
+  import Editor from '@/components/Editor/editor.vue';
   import UploadImage from '@/components/Upload/uploadImage.vue';
 
   const loading = ref(false);
@@ -198,13 +215,16 @@
   const activeAnnouncement = ref<Recordable>({});
   const formRef = ref();
   const formValue = ref<Recordable>(newFormValue());
-  const markdown = new MarkdownIt({
-    html: true,
-    linkify: true,
-    breaks: true,
-  });
+  const categoryOptions = [
+    { label: '关于我们', value: 'about' },
+    { label: '交友成功案例', value: 'case' },
+    { label: '博客', value: 'blog' },
+    { label: '文档', value: 'docs' },
+    { label: '新闻', value: 'news' },
+  ];
   const rules = {
     title: { required: true, trigger: ['input', 'blur'], message: '请输入公告标题' },
+    categoryCode: { required: true, trigger: ['change', 'blur'], message: '请选择文章分类' },
     content: { required: true, trigger: ['input', 'blur'], message: '请输入公告正文' },
   };
 
@@ -237,6 +257,7 @@
 
   function handleEdit(item: Recordable) {
     formValue.value = { ...newFormValue(), ...item };
+    handleCategoryChange(formValue.value.categoryCode || 'blog');
     editVisible.value = true;
   }
 
@@ -268,6 +289,11 @@
     detailVisible.value = true;
   }
 
+  function handleCategoryChange(value: string) {
+    const option = categoryOptions.find((item) => item.value === value);
+    formValue.value.categoryName = option?.label || '博客';
+  }
+
   function formatTime(value?: string) {
     if (!value) {
       return '-';
@@ -275,11 +301,11 @@
     return value;
   }
 
-  function renderMarkdown(value?: string) {
+  function renderRichText(value?: string) {
     if (!value) {
       return '<p class="empty-preview">暂无内容</p>';
     }
-    return markdown.render(value);
+    return value;
   }
 
   function newFormValue() {
@@ -287,6 +313,9 @@
       id: 0,
       title: '',
       content: '',
+      categoryCode: 'blog',
+      categoryName: '博客',
+      summary: '',
       isBanner: 0,
       bannerImg: '',
       bannerUrl: '',
@@ -390,14 +419,14 @@
     width: min(1180px, calc(100vw - 48px));
   }
 
-  :global(.announcement-edit-modal .announcement-md-editor) {
+  :global(.announcement-edit-modal .announcement-rich-editor) {
     width: 100%;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
     gap: 16px;
   }
 
-  :global(.announcement-edit-modal .announcement-md-preview) {
+  :global(.announcement-edit-modal .announcement-rich-preview) {
     min-height: 420px;
     max-height: 68vh;
     overflow: auto;
@@ -414,31 +443,31 @@
     font-weight: 600;
   }
 
-  :global(.announcement-edit-modal .markdown-body) {
+  :global(.rich-content) {
     color: var(--text-color-1);
     line-height: 1.8;
     word-break: break-word;
   }
 
-  :global(.announcement-edit-modal .markdown-body h1),
-  :global(.announcement-edit-modal .markdown-body h2),
-  :global(.announcement-edit-modal .markdown-body h3) {
+  :global(.rich-content h1),
+  :global(.rich-content h2),
+  :global(.rich-content h3) {
     margin: 24px 0 12px;
     font-weight: 700;
     line-height: 1.35;
   }
 
-  :global(.announcement-edit-modal .markdown-body p) {
+  :global(.rich-content p) {
     margin: 0 0 12px;
   }
 
-  :global(.announcement-edit-modal .markdown-body ul),
-  :global(.announcement-edit-modal .markdown-body ol) {
+  :global(.rich-content ul),
+  :global(.rich-content ol) {
     padding-left: 22px;
     margin: 0 0 12px;
   }
 
-  :global(.announcement-edit-modal .markdown-body blockquote) {
+  :global(.rich-content blockquote) {
     margin: 12px 0;
     padding: 8px 12px;
     color: var(--text-color-2);
@@ -446,38 +475,38 @@
     background: var(--hover-color);
   }
 
-  :global(.announcement-edit-modal .markdown-body code) {
+  :global(.rich-content code) {
     padding: 2px 5px;
     background: var(--hover-color);
     border-radius: 4px;
   }
 
-  :global(.announcement-edit-modal .markdown-body pre) {
+  :global(.rich-content pre) {
     overflow: auto;
     padding: 12px;
     background: var(--hover-color);
     border-radius: 4px;
   }
 
-  :global(.announcement-edit-modal .markdown-body img) {
+  :global(.rich-content img) {
     max-width: 100%;
     border-radius: 6px;
   }
 
-  :global(.announcement-edit-modal .markdown-body table) {
+  :global(.rich-content table) {
     width: 100%;
     border-collapse: collapse;
     margin: 12px 0;
   }
 
-  :global(.announcement-edit-modal .markdown-body th),
-  :global(.announcement-edit-modal .markdown-body td) {
+  :global(.rich-content th),
+  :global(.rich-content td) {
     padding: 8px;
     border: 1px solid var(--border-color);
   }
 
   @media (max-width: 900px) {
-    :global(.announcement-edit-modal .announcement-md-editor) {
+    :global(.announcement-edit-modal .announcement-rich-editor) {
       grid-template-columns: 1fr;
     }
   }

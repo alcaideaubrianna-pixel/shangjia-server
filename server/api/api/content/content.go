@@ -15,4 +15,6 @@ type IContentV1 interface {
 	ViewProfile(ctx context.Context, req *v1.ViewProfileReq) (res *v1.ViewProfileRes, err error)
 	ListAnnouncements(ctx context.Context, req *v1.ListAnnouncementsReq) (res *v1.ListAnnouncementsRes, err error)
 	ViewAnnouncement(ctx context.Context, req *v1.ViewAnnouncementReq) (res *v1.ViewAnnouncementRes, err error)
+	ListArticleCategories(ctx context.Context, req *v1.ListArticleCategoriesReq) (res *v1.ListArticleCategoriesRes, err error)
+	SeoFooter(ctx context.Context, req *v1.SeoFooterReq) (res *v1.SeoFooterRes, err error)
 }

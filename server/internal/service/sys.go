@@ -203,7 +203,9 @@ type (
 	ISysAppAnnouncement interface {
 		List(ctx context.Context, in *sysin.AppAnnouncementListInp) (list []*sysin.AppAnnouncementListModel, totalCount int, err error)
 		PublicList(ctx context.Context, in *sysin.AppAnnouncementPublicListInp) (list []*sysin.AppAnnouncementPublicListModel, totalCount int, err error)
+		PublicCategories(ctx context.Context) (list []*sysin.AppAnnouncementCategoryModel, err error)
 		PublicView(ctx context.Context, in *sysin.AppAnnouncementPublicViewInp) (res *sysin.AppAnnouncementPublicListModel, err error)
+		SeoFooter(ctx context.Context) (res *sysin.SeoFooterModel, err error)
 		View(ctx context.Context, in *sysin.AppAnnouncementViewInp) (res *sysin.AppAnnouncementViewModel, err error)
 		Edit(ctx context.Context, in *sysin.AppAnnouncementEditInp) (err error)
 		Delete(ctx context.Context, in *sysin.AppAnnouncementDeleteInp) (err error)
