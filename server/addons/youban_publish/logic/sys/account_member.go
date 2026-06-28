@@ -7,6 +7,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
 	"hotgo/internal/consts"
@@ -23,10 +24,11 @@ func (s *sSysPublish) prepareAdminMemberBinding(ctx context.Context, in *sysin.A
 		in.AdminMemberId = 0
 		return nil
 	}
-	value, err := g.DB().Model(publishAccountTable).Safe().Ctx(ctx).
-		Fields(publishAccountFieldAdminMemberId).
-		Where(publishFieldId, in.Id).
-		WhereNull(publishAccountFieldDeletedAt).
+	accountColumns := pdao.YoubanPublishAccount.Columns()
+	value, err := pdao.YoubanPublishAccount.Ctx(ctx).
+		Fields(accountColumns.AdminMemberId).
+		Where(accountColumns.Id, in.Id).
+		WhereNull(accountColumns.DeletedAt).
 		Value()
 	if err != nil {
 		return gerror.Wrap(err, "读取账号绑定关系失败")
@@ -49,12 +51,13 @@ func (s *sSysPublish) prepareAccountParent(ctx context.Context, in *sysin.Accoun
 	if in.Id > 0 && in.ParentId == in.Id {
 		return gerror.New("上架账号不能选择自己作为管理员账号")
 	}
-	count, err := g.DB().Model(publishAccountTable).Safe().Ctx(ctx).
-		Where(publishFieldId, in.ParentId).
-		Where(publishAccountFieldMerchantId, in.MerchantId).
-		Where(publishAccountFieldAccountType, sysin.PublishAccountTypeAdmin).
-		Where(publishAccountFieldStatus, consts.StatusEnabled).
-		WhereNull(publishAccountFieldDeletedAt).
+	accountColumns := pdao.YoubanPublishAccount.Columns()
+	count, err := pdao.YoubanPublishAccount.Ctx(ctx).
+		Where(accountColumns.Id, in.ParentId).
+		Where(accountColumns.MerchantId, in.MerchantId).
+		Where(accountColumns.AccountType, sysin.PublishAccountTypeAdmin).
+		Where(accountColumns.Status, consts.StatusEnabled).
+		WhereNull(accountColumns.DeletedAt).
 		Count()
 	if err != nil {
 		return gerror.Wrap(err, "检查管理员账号失败")
@@ -69,10 +72,11 @@ func (s *sSysPublish) adminMemberIdsForAccounts(ctx context.Context, tx gdb.TX, 
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	if err = tx.Model(publishAccountTable).Safe().Ctx(ctx).
-		Fields(publishAccountFieldAdminMemberId).
-		WhereIn(publishFieldId, ids).
-		WhereNull(publishAccountFieldDeletedAt).
+	accountColumns := pdao.YoubanPublishAccount.Columns()
+	if err = tx.Model(pdao.YoubanPublishAccount.Table()).Safe().Ctx(ctx).
+		Fields(accountColumns.AdminMemberId).
+		WhereIn(accountColumns.Id, ids).
+		WhereNull(accountColumns.DeletedAt).
 		Scan(&memberIds); err != nil {
 		return nil, gerror.Wrap(err, "读取账号绑定关系失败")
 	}
@@ -114,9 +118,10 @@ func (s *sSysPublish) ensureAdminMemberForAccount(ctx context.Context, in *sysin
 	}
 	if existing.Int64() > 0 {
 		memberId = existing.Int64()
-		bound, err := g.DB().Model(publishAccountTable).Safe().Ctx(ctx).
-			Where(publishAccountFieldAdminMemberId, memberId).
-			WhereNull(publishAccountFieldDeletedAt).
+		accountColumns := pdao.YoubanPublishAccount.Columns()
+		bound, err := pdao.YoubanPublishAccount.Ctx(ctx).
+			Where(accountColumns.AdminMemberId, memberId).
+			WhereNull(accountColumns.DeletedAt).
 			Count()
 		if err != nil {
 			return 0, gerror.Wrap(err, "检查账号绑定关系失败")

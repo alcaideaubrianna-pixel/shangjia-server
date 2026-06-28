@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
 	"hotgo/internal/library/contexts"
@@ -36,19 +37,20 @@ func init() {
 }
 
 func (s *sSysPublish) AdminMerchantList(ctx context.Context, in *sysin.MerchantListInp) (list []*sysin.MerchantModel, totalCount int, err error) {
-	mod := g.DB().Model(publishMerchantTable).Safe().Ctx(ctx).WhereNull("deleted_at")
+	merchantColumns := pdao.YoubanPublishMerchant.Columns()
+	mod := pdao.YoubanPublishMerchant.Ctx(ctx).WhereNull(merchantColumns.DeletedAt)
 	if in.Status > 0 {
-		mod = mod.Where("status", in.Status)
+		mod = mod.Where(merchantColumns.Status, in.Status)
 	}
 	kw := strings.TrimSpace(in.Keyword)
 	if kw != "" {
-		mod = mod.WhereLike("name", "%"+kw+"%").WhereOrLike("contact_name", "%"+kw+"%")
+		mod = mod.WhereLike(merchantColumns.Name, "%"+kw+"%").WhereOrLike(merchantColumns.ContactName, "%"+kw+"%")
 	}
 	totalCount, err = mod.Clone().Count()
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取商家总数失败")
 	}
-	if err = mod.Page(in.Page, in.PerPage).OrderDesc("id").Scan(&list); err != nil {
+	if err = mod.Page(in.Page, in.PerPage).OrderDesc(merchantColumns.Id).Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取商家列表失败")
 	}
 	return
@@ -58,21 +60,22 @@ func (s *sSysPublish) AdminMerchantSave(ctx context.Context, in *sysin.MerchantS
 	if err = in.Filter(ctx); err != nil {
 		return
 	}
+	merchantColumns := pdao.YoubanPublishMerchant.Columns()
 	data := g.Map{
-		"name":          in.Name,
-		"contact_name":  strings.TrimSpace(in.ContactName),
-		"contact_phone": strings.TrimSpace(in.ContactPhone),
-		"remark":        strings.TrimSpace(in.Remark),
-		"status":        in.Status,
-		"updated_by":    contexts.GetUserId(ctx),
-		"updated_at":    gtime.Now(),
+		merchantColumns.Name:         in.Name,
+		merchantColumns.ContactName:  strings.TrimSpace(in.ContactName),
+		merchantColumns.ContactPhone: strings.TrimSpace(in.ContactPhone),
+		merchantColumns.Remark:       strings.TrimSpace(in.Remark),
+		merchantColumns.Status:       in.Status,
+		merchantColumns.UpdatedBy:    contexts.GetUserId(ctx),
+		merchantColumns.UpdatedAt:    gtime.Now(),
 	}
 	if in.Id > 0 {
-		_, err = g.DB().Model(publishMerchantTable).Safe().Ctx(ctx).Where("id", in.Id).WhereNull("deleted_at").Data(data).Update()
+		_, err = pdao.YoubanPublishMerchant.Ctx(ctx).Where(merchantColumns.Id, in.Id).WhereNull(merchantColumns.DeletedAt).Data(data).Update()
 	} else {
-		data["created_by"] = contexts.GetUserId(ctx)
-		data["created_at"] = gtime.Now()
-		_, err = g.DB().Model(publishMerchantTable).Safe().Ctx(ctx).Data(data).Insert()
+		data[merchantColumns.CreatedBy] = contexts.GetUserId(ctx)
+		data[merchantColumns.CreatedAt] = gtime.Now()
+		_, err = pdao.YoubanPublishMerchant.Ctx(ctx).Data(data).Insert()
 	}
 	if err != nil {
 		return gerror.Wrap(err, "保存商家失败")
@@ -84,9 +87,10 @@ func (s *sSysPublish) AdminMerchantDelete(ctx context.Context, in *sysin.Merchan
 	if len(in.Ids) == 0 {
 		return gerror.New("请选择要删除的数据")
 	}
-	_, err = g.DB().Model(publishMerchantTable).Safe().Ctx(ctx).WhereIn("id", in.Ids).Data(g.Map{
-		"deleted_by": contexts.GetUserId(ctx),
-		"deleted_at": gtime.Now(),
+	merchantColumns := pdao.YoubanPublishMerchant.Columns()
+	_, err = pdao.YoubanPublishMerchant.Ctx(ctx).WhereIn(merchantColumns.Id, in.Ids).Data(g.Map{
+		merchantColumns.DeletedBy: contexts.GetUserId(ctx),
+		merchantColumns.DeletedAt: gtime.Now(),
 	}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "删除商家失败")
@@ -116,30 +120,31 @@ func (s *sSysPublish) AdminAccountSave(ctx context.Context, in *sysin.AccountSav
 		return err
 	}
 	in.AdminMemberId = memberId
+	accountColumns := pdao.YoubanPublishAccount.Columns()
 	data := g.Map{
-		publishAccountFieldMerchantId:    in.MerchantId,
-		publishAccountFieldAdminMemberId: in.AdminMemberId,
-		publishAccountFieldParentId:      in.ParentId,
-		publishAccountFieldAccountType:   in.AccountType,
-		publishAccountFieldNickname:      strings.TrimSpace(in.Nickname),
-		publishAccountFieldUsername:      strings.TrimSpace(in.Username),
-		"telegram_user_id":               strings.TrimSpace(in.TelegramUserId),
-		"telegram_username":              strings.TrimSpace(in.TelegramUsername),
-		"daily_publish_limit":            in.DailyPublishLimit,
-		"can_direct_publish":             in.CanDirectPublish,
-		"allowed_channel_json":           strings.TrimSpace(in.AllowedChannelJson),
-		"allowed_region_json":            strings.TrimSpace(in.AllowedRegionJson),
-		"remark":                         strings.TrimSpace(in.Remark),
-		publishAccountFieldStatus:        in.Status,
-		"updated_by":                     contexts.GetUserId(ctx),
-		"updated_at":                     gtime.Now(),
+		accountColumns.MerchantId:         in.MerchantId,
+		accountColumns.AdminMemberId:      in.AdminMemberId,
+		accountColumns.ParentId:           in.ParentId,
+		accountColumns.AccountType:        in.AccountType,
+		accountColumns.Nickname:           strings.TrimSpace(in.Nickname),
+		accountColumns.Username:           strings.TrimSpace(in.Username),
+		accountColumns.TelegramUserId:     strings.TrimSpace(in.TelegramUserId),
+		accountColumns.TelegramUsername:   strings.TrimSpace(in.TelegramUsername),
+		accountColumns.DailyPublishLimit:  in.DailyPublishLimit,
+		accountColumns.CanDirectPublish:   in.CanDirectPublish,
+		accountColumns.AllowedChannelJson: strings.TrimSpace(in.AllowedChannelJson),
+		accountColumns.AllowedRegionJson:  strings.TrimSpace(in.AllowedRegionJson),
+		accountColumns.Remark:             strings.TrimSpace(in.Remark),
+		accountColumns.Status:             in.Status,
+		accountColumns.UpdatedBy:          contexts.GetUserId(ctx),
+		accountColumns.UpdatedAt:          gtime.Now(),
 	}
 	if in.Id > 0 {
-		_, err = g.DB().Model(publishAccountTable).Safe().Ctx(ctx).Where(publishFieldId, in.Id).WhereNull(publishAccountFieldDeletedAt).Data(data).Update()
+		_, err = pdao.YoubanPublishAccount.Ctx(ctx).Where(accountColumns.Id, in.Id).WhereNull(accountColumns.DeletedAt).Data(data).Update()
 	} else {
-		data["created_by"] = contexts.GetUserId(ctx)
-		data["created_at"] = gtime.Now()
-		_, err = g.DB().Model(publishAccountTable).Safe().Ctx(ctx).Data(data).Insert()
+		data[accountColumns.CreatedBy] = contexts.GetUserId(ctx)
+		data[accountColumns.CreatedAt] = gtime.Now()
+		_, err = pdao.YoubanPublishAccount.Ctx(ctx).Data(data).Insert()
 	}
 	if err != nil {
 		return gerror.Wrap(err, "保存上架账号失败")
@@ -156,9 +161,10 @@ func (s *sSysPublish) AdminAccountDelete(ctx context.Context, in *sysin.AccountD
 		if err != nil {
 			return err
 		}
-		if _, err = tx.Model(publishAccountTable).Safe().Ctx(ctx).WhereIn(publishFieldId, in.Ids).Data(g.Map{
-			"deleted_by":                 contexts.GetUserId(ctx),
-			publishAccountFieldDeletedAt: gtime.Now(),
+		accountColumns := pdao.YoubanPublishAccount.Columns()
+		if _, err = tx.Model(pdao.YoubanPublishAccount.Table()).Safe().Ctx(ctx).WhereIn(accountColumns.Id, in.Ids).Data(g.Map{
+			accountColumns.DeletedBy: contexts.GetUserId(ctx),
+			accountColumns.DeletedAt: gtime.Now(),
 		}).Update(); err != nil {
 			return gerror.Wrap(err, "删除上架账号失败")
 		}
@@ -227,18 +233,19 @@ func (s *sSysPublish) MyTaskCancel(ctx context.Context, in *sysin.TaskCancelInp)
 }
 
 func (s *sSysPublish) accountList(ctx context.Context, in *sysin.AccountListInp) (list []*sysin.AccountModel, totalCount int, err error) {
-	mod := g.DB().Model(publishAccountTable+" a").Safe().Ctx(ctx).
+	accountColumns := pdao.YoubanPublishAccount.Columns()
+	mod := pdao.YoubanPublishAccount.DB().Model(pdao.YoubanPublishAccount.Table()+" a").Safe().Ctx(ctx).
 		LeftJoin(publishMerchantTable+" m", "m.id=a.merchant_id").
-		WhereNull("a.deleted_at").
+		WhereNull("a." + accountColumns.DeletedAt).
 		Fields("a.*,m.name AS merchant_name")
 	if in.MerchantId > 0 {
-		mod = mod.Where("a."+publishAccountFieldMerchantId, in.MerchantId)
+		mod = mod.Where("a."+accountColumns.MerchantId, in.MerchantId)
 	}
 	if in.AccountType != "" {
-		mod = mod.Where("a."+publishAccountFieldAccountType, in.AccountType)
+		mod = mod.Where("a."+accountColumns.AccountType, in.AccountType)
 	}
 	if in.Status > 0 {
-		mod = mod.Where("a."+publishAccountFieldStatus, in.Status)
+		mod = mod.Where("a."+accountColumns.Status, in.Status)
 	}
 	kw := strings.TrimSpace(in.Keyword)
 	if kw != "" {
@@ -248,22 +255,23 @@ func (s *sSysPublish) accountList(ctx context.Context, in *sysin.AccountListInp)
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取账号总数失败")
 	}
-	if err = mod.Page(in.Page, in.PerPage).OrderDesc("a.id").Scan(&list); err != nil {
+	if err = mod.Page(in.Page, in.PerPage).OrderDesc("a." + accountColumns.Id).Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取账号列表失败")
 	}
 	return
 }
 
 func (s *sSysPublish) taskList(ctx context.Context, in *sysin.TaskListInp) (list []*sysin.TaskModel, totalCount int, err error) {
+	taskColumns := pdao.YoubanPublishTask.Columns()
 	mod := s.taskModel(ctx)
 	if in.MerchantId > 0 {
-		mod = mod.Where("t.merchant_id", in.MerchantId)
+		mod = mod.Where("t."+taskColumns.MerchantId, in.MerchantId)
 	}
 	if in.AccountId > 0 {
-		mod = mod.Where("t.account_id", in.AccountId)
+		mod = mod.Where("t."+taskColumns.AccountId, in.AccountId)
 	}
 	if in.Status != "" {
-		mod = mod.Where("t.status", in.Status)
+		mod = mod.Where("t."+taskColumns.Status, in.Status)
 	}
 	kw := strings.TrimSpace(in.Keyword)
 	if kw != "" {
@@ -273,17 +281,18 @@ func (s *sSysPublish) taskList(ctx context.Context, in *sysin.TaskListInp) (list
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取任务总数失败")
 	}
-	if err = mod.Page(in.Page, in.PerPage).OrderDesc("t.id").Scan(&list); err != nil {
+	if err = mod.Page(in.Page, in.PerPage).OrderDesc("t." + taskColumns.Id).Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取任务列表失败")
 	}
 	return
 }
 
 func (s *sSysPublish) taskModel(ctx context.Context) *gdb.Model {
-	return g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
+	taskColumns := pdao.YoubanPublishTask.Columns()
+	return pdao.YoubanPublishTask.DB().Model(pdao.YoubanPublishTask.Table()+" t").Safe().Ctx(ctx).
 		LeftJoin(publishMerchantTable+" m", "m.id=t.merchant_id").
 		LeftJoin(publishAccountTable+" a", "a.id=t.account_id").
-		WhereNull("t.deleted_at").
+		WhereNull("t." + taskColumns.DeletedAt).
 		Fields("t.*,m.name AS merchant_name,a.nickname AS account_nickname,a.username AS account_username")
 }
 
@@ -300,12 +309,13 @@ func (s *sSysPublish) saveTask(ctx context.Context, in *sysin.TaskSaveInp) (id i
 	if err = s.ensureAccountBelongsMerchant(ctx, in.AccountId, in.MerchantId); err != nil {
 		return 0, err
 	}
+	taskColumns := pdao.YoubanPublishTask.Columns()
 	if in.Id == 0 && strings.TrimSpace(in.ClientRequestId) != "" {
-		existing, findErr := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-			Where("merchant_id", in.MerchantId).
-			Where("client_request_id", strings.TrimSpace(in.ClientRequestId)).
-			WhereNull("deleted_at").
-			Fields("id").
+		existing, findErr := pdao.YoubanPublishTask.Ctx(ctx).
+			Where(taskColumns.MerchantId, in.MerchantId).
+			Where(taskColumns.ClientRequestId, strings.TrimSpace(in.ClientRequestId)).
+			WhereNull(taskColumns.DeletedAt).
+			Fields(taskColumns.Id).
 			Value()
 		if findErr != nil {
 			return 0, gerror.Wrap(findErr, "检查幂等请求失败")
@@ -315,27 +325,27 @@ func (s *sSysPublish) saveTask(ctx context.Context, in *sysin.TaskSaveInp) (id i
 		}
 	}
 	data := g.Map{
-		"merchant_id":       in.MerchantId,
-		"account_id":        in.AccountId,
-		"client_request_id": strings.TrimSpace(in.ClientRequestId),
-		"title":             strings.TrimSpace(in.Title),
-		"province":          strings.TrimSpace(in.Province),
-		"city":              strings.TrimSpace(in.City),
-		"plain_text":        strings.TrimSpace(in.PlainText),
-		"tg_push_enabled":   in.TgPushEnabled,
-		"updated_by":        contexts.GetUserId(ctx),
-		"updated_at":        gtime.Now(),
+		taskColumns.MerchantId:      in.MerchantId,
+		taskColumns.AccountId:       in.AccountId,
+		taskColumns.ClientRequestId: strings.TrimSpace(in.ClientRequestId),
+		taskColumns.Title:           strings.TrimSpace(in.Title),
+		taskColumns.Province:        strings.TrimSpace(in.Province),
+		taskColumns.City:            strings.TrimSpace(in.City),
+		taskColumns.PlainText:       strings.TrimSpace(in.PlainText),
+		taskColumns.TgPushEnabled:   in.TgPushEnabled,
+		taskColumns.UpdatedBy:       contexts.GetUserId(ctx),
+		taskColumns.UpdatedAt:       gtime.Now(),
 	}
 	if in.Id > 0 {
-		_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", in.Id).WhereNull("deleted_at").Data(data).Update()
+		_, err = pdao.YoubanPublishTask.Ctx(ctx).Where(taskColumns.Id, in.Id).WhereNull(taskColumns.DeletedAt).Data(data).Update()
 		id = in.Id
 	} else {
-		data["status"] = sysin.PublishTaskStatusDraft
-		data["tg_status"] = "pending"
-		data["media_count"] = 0
-		data["created_by"] = contexts.GetUserId(ctx)
-		data["created_at"] = gtime.Now()
-		id, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
+		data[taskColumns.Status] = sysin.PublishTaskStatusDraft
+		data[taskColumns.TgStatus] = "pending"
+		data[taskColumns.MediaCount] = 0
+		data[taskColumns.CreatedBy] = contexts.GetUserId(ctx)
+		data[taskColumns.CreatedAt] = gtime.Now()
+		id, err = pdao.YoubanPublishTask.Ctx(ctx).Data(data).InsertAndGetId()
 	}
 	if err != nil {
 		return 0, gerror.Wrap(err, "保存上架任务失败")
@@ -446,15 +456,17 @@ func (s *sSysPublish) currentAccount(ctx context.Context) (*sysin.AccountModel, 
 	if userId <= 0 {
 		return nil, gerror.New("请先登录")
 	}
+	accountColumns := pdao.YoubanPublishAccount.Columns()
+	merchantColumns := pdao.YoubanPublishMerchant.Columns()
 	var account *sysin.AccountModel
-	err := g.DB().Model(publishAccountTable+" a").Safe().Ctx(ctx).
-		LeftJoin(publishMerchantTable+" m", "m.id=a.merchant_id").
-		Where("a."+publishAccountFieldAdminMemberId, userId).
-		Where("a."+publishAccountFieldStatus, 1).
-		WhereNull("a." + publishAccountFieldDeletedAt).
-		WhereNull("m." + publishFieldDeletedAt).
+	err := pdao.YoubanPublishAccount.DB().Model(pdao.YoubanPublishAccount.Table()+" a").Safe().Ctx(ctx).
+		LeftJoin(pdao.YoubanPublishMerchant.Table()+" m", "m.id=a.merchant_id").
+		Where("a."+accountColumns.AdminMemberId, userId).
+		Where("a."+accountColumns.Status, 1).
+		WhereNull("a." + accountColumns.DeletedAt).
+		WhereNull("m." + merchantColumns.DeletedAt).
 		Fields("a.*,m.name AS merchant_name").
-		OrderAsc("a.id").
+		OrderAsc("a." + accountColumns.Id).
 		Scan(&account)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取当前上架账号失败")
@@ -466,7 +478,8 @@ func (s *sSysPublish) currentAccount(ctx context.Context) (*sysin.AccountModel, 
 }
 
 func (s *sSysPublish) ensureMerchant(ctx context.Context, merchantId int64) error {
-	count, err := g.DB().Model(publishMerchantTable).Safe().Ctx(ctx).Where("id", merchantId).WhereNull("deleted_at").Count()
+	merchantColumns := pdao.YoubanPublishMerchant.Columns()
+	count, err := pdao.YoubanPublishMerchant.Ctx(ctx).Where(merchantColumns.Id, merchantId).WhereNull(merchantColumns.DeletedAt).Count()
 	if err != nil {
 		return gerror.Wrap(err, "检查商家失败")
 	}
@@ -477,10 +490,11 @@ func (s *sSysPublish) ensureMerchant(ctx context.Context, merchantId int64) erro
 }
 
 func (s *sSysPublish) ensureAccountBelongsMerchant(ctx context.Context, accountId int64, merchantId int64) error {
-	count, err := g.DB().Model(publishAccountTable).Safe().Ctx(ctx).
-		Where(publishFieldId, accountId).
-		Where(publishAccountFieldMerchantId, merchantId).
-		WhereNull(publishAccountFieldDeletedAt).
+	accountColumns := pdao.YoubanPublishAccount.Columns()
+	count, err := pdao.YoubanPublishAccount.Ctx(ctx).
+		Where(accountColumns.Id, accountId).
+		Where(accountColumns.MerchantId, merchantId).
+		WhereNull(accountColumns.DeletedAt).
 		Count()
 	if err != nil {
 		return gerror.Wrap(err, "检查上架账号失败")

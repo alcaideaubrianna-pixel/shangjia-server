@@ -1,23 +1,13 @@
 package sys
 
-const (
-	publishMerchantTable  = "hg_youban_publish_merchant"
-	publishAccountTable   = "hg_youban_publish_account"
-	publishTaskTable      = "hg_youban_publish_task"
-	publishMediaTable     = "hg_youban_publish_media"
-	publishTgJobTable     = "hg_youban_publish_tg_job"
-	publishBotTable       = "hg_youban_publish_bot"
-	publishTgLoginTable   = "hg_youban_publish_tg_login"
-	publishFieldId        = "id"
-	publishFieldStatus    = "status"
-	publishFieldDeletedAt = "deleted_at"
+import pdao "hotgo/addons/youban_publish/internal/dao"
 
-	publishAccountFieldMerchantId    = "merchant_id"
-	publishAccountFieldAdminMemberId = "admin_member_id"
-	publishAccountFieldParentId      = "parent_id"
-	publishAccountFieldAccountType   = "account_type"
-	publishAccountFieldNickname      = "nickname"
-	publishAccountFieldUsername      = "username"
-	publishAccountFieldStatus        = "status"
-	publishAccountFieldDeletedAt     = "deleted_at"
+var (
+	publishMerchantTable = pdao.YoubanPublishMerchant.Table()
+	publishAccountTable  = pdao.YoubanPublishAccount.Table()
+	publishTaskTable     = pdao.YoubanPublishTask.Table()
+	publishMediaTable    = pdao.YoubanPublishMedia.Table()
+	publishTgJobTable    = pdao.YoubanPublishTgJob.Table()
+	publishBotTable      = pdao.YoubanPublishBot.Table()
+	publishTgLoginTable  = pdao.YoubanPublishTgLogin.Table()
 )
