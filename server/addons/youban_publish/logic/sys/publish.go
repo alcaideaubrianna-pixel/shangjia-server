@@ -235,27 +235,31 @@ func (s *sSysPublish) MyTaskCancel(ctx context.Context, in *sysin.TaskCancelInp)
 
 func (s *sSysPublish) accountList(ctx context.Context, in *sysin.AccountListInp) (list []*sysin.AccountModel, totalCount int, err error) {
 	accountColumns := pdao.YoubanPublishAccount.Columns()
-	mod := pdao.YoubanPublishAccount.DB().Model(pdao.YoubanPublishAccount.Table()+" a").Safe().Ctx(ctx).
+	base := pdao.YoubanPublishAccount.DB().Model(pdao.YoubanPublishAccount.Table()+" a").Safe().Ctx(ctx).
 		LeftJoin(publishTenantTable+" m", "m.id=a.tenant_id").
-		WhereNull("a." + accountColumns.DeletedAt).
-		Fields("a.*,m.name AS tenant_name")
-	if in.TenantId > 0 {
-		mod = mod.Where("a."+accountColumns.TenantId, in.TenantId)
+		WhereNull("a." + accountColumns.DeletedAt)
+	applyFilters := func(mod *gdb.Model) *gdb.Model {
+		if in.TenantId > 0 {
+			mod = mod.Where("a."+accountColumns.TenantId, in.TenantId)
+		}
+		if in.AccountType != "" {
+			mod = mod.Where("a."+accountColumns.AccountType, in.AccountType)
+		}
+		if in.Status > 0 {
+			mod = mod.Where("a."+accountColumns.Status, in.Status)
+		}
+		kw := strings.TrimSpace(in.Keyword)
+		if kw != "" {
+			mod = mod.Where("(a.nickname LIKE ? OR a.username LIKE ?)", "%"+kw+"%", "%"+kw+"%")
+		}
+		return mod
 	}
-	if in.AccountType != "" {
-		mod = mod.Where("a."+accountColumns.AccountType, in.AccountType)
-	}
-	if in.Status > 0 {
-		mod = mod.Where("a."+accountColumns.Status, in.Status)
-	}
-	kw := strings.TrimSpace(in.Keyword)
-	if kw != "" {
-		mod = mod.Where("(a.nickname LIKE ? OR a.username LIKE ?)", "%"+kw+"%", "%"+kw+"%")
-	}
-	totalCount, err = mod.Clone().Fields("a." + accountColumns.Id).Count()
+	base = applyFilters(base)
+	totalCount, err = base.Clone().Count()
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取账号总数失败")
 	}
+	mod := base.Fields("a.*,m.name AS tenant_name")
 	if err = mod.Page(in.Page, in.PerPage).OrderDesc("a." + accountColumns.Id).Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取账号列表失败")
 	}
@@ -264,36 +268,46 @@ func (s *sSysPublish) accountList(ctx context.Context, in *sysin.AccountListInp)
 
 func (s *sSysPublish) taskList(ctx context.Context, in *sysin.TaskListInp) (list []*sysin.TaskModel, totalCount int, err error) {
 	taskColumns := pdao.YoubanPublishTask.Columns()
-	mod := s.taskModel(ctx)
-	if in.TenantId > 0 {
-		mod = mod.Where("t."+taskColumns.TenantId, in.TenantId)
+	applyFilters := func(mod *gdb.Model) *gdb.Model {
+		if in.TenantId > 0 {
+			mod = mod.Where("t."+taskColumns.TenantId, in.TenantId)
+		}
+		if in.AccountId > 0 {
+			mod = mod.Where("t."+taskColumns.AccountId, in.AccountId)
+		}
+		if in.Status != "" {
+			mod = mod.Where("t."+taskColumns.Status, in.Status)
+		}
+		kw := strings.TrimSpace(in.Keyword)
+		if kw != "" {
+			mod = mod.Where("(t.title LIKE ? OR t.client_request_id LIKE ?)", "%"+kw+"%", "%"+kw+"%")
+		}
+		return mod
 	}
-	if in.AccountId > 0 {
-		mod = mod.Where("t."+taskColumns.AccountId, in.AccountId)
-	}
-	if in.Status != "" {
-		mod = mod.Where("t."+taskColumns.Status, in.Status)
-	}
-	kw := strings.TrimSpace(in.Keyword)
-	if kw != "" {
-		mod = mod.Where("(t.title LIKE ? OR t.client_request_id LIKE ?)", "%"+kw+"%", "%"+kw+"%")
-	}
-	totalCount, err = mod.Clone().Fields("t." + taskColumns.Id).Count()
+	base := s.taskBaseModel(ctx)
+	base = applyFilters(base)
+	totalCount, err = base.Clone().Count()
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取任务总数失败")
 	}
+	mod := s.taskListModel(ctx)
+	mod = applyFilters(mod)
 	if err = mod.Page(in.Page, in.PerPage).OrderDesc("t." + taskColumns.Id).Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取任务列表失败")
 	}
 	return
 }
 
-func (s *sSysPublish) taskModel(ctx context.Context) *gdb.Model {
+func (s *sSysPublish) taskBaseModel(ctx context.Context) *gdb.Model {
 	taskColumns := pdao.YoubanPublishTask.Columns()
 	return pdao.YoubanPublishTask.DB().Model(pdao.YoubanPublishTask.Table()+" t").Safe().Ctx(ctx).
 		LeftJoin(publishTenantTable+" m", "m.id=t.tenant_id").
 		LeftJoin(publishAccountTable+" a", "a.id=t.account_id").
-		WhereNull("t." + taskColumns.DeletedAt).
+		WhereNull("t." + taskColumns.DeletedAt)
+}
+
+func (s *sSysPublish) taskListModel(ctx context.Context) *gdb.Model {
+	return s.taskBaseModel(ctx).
 		Fields("t.*,m.name AS tenant_name,a.nickname AS account_nickname,a.username AS account_username")
 }
 
