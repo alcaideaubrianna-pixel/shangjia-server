@@ -19,6 +19,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"math"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -3025,7 +3026,30 @@ func contentAssetURL(value string) string {
 	if strings.HasPrefix(value, feiNiuProxyCosPrefix) || strings.HasPrefix(value, "telegram/content/") {
 		return cdnBase + "/" + normalizeFeiNiuCosPath(value)
 	}
+	if cosPath := normalizeContentCosURLPath(value); cosPath != "" {
+		return cdnBase + "/" + cosPath
+	}
 	return value
+}
+
+func normalizeContentCosURLPath(value string) string {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	host := strings.ToLower(parsed.Host)
+	if !strings.Contains(host, ".cos.") || !strings.HasSuffix(host, ".myqcloud.com") {
+		return ""
+	}
+	path := strings.TrimLeft(parsed.EscapedPath(), "/")
+	path, err = url.PathUnescape(path)
+	if err != nil {
+		return ""
+	}
+	if !strings.HasPrefix(path, "telegram/content/") {
+		return ""
+	}
+	return normalizeFeiNiuCosPath(path)
 }
 
 func feiNiuPosterURL(cosPath string) string {
