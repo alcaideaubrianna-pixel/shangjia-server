@@ -37,6 +37,33 @@ func (s *sSysPublish) prepareAdminMemberBinding(ctx context.Context, in *sysin.A
 	return nil
 }
 
+func (s *sSysPublish) prepareAccountParent(ctx context.Context, in *sysin.AccountSaveInp) error {
+	if in.AccountType == sysin.PublishAccountTypeAdmin {
+		in.ParentId = 0
+		return nil
+	}
+	if in.ParentId <= 0 {
+		return gerror.New("上架账号必须选择管理员账号")
+	}
+	if in.Id > 0 && in.ParentId == in.Id {
+		return gerror.New("上架账号不能选择自己作为管理员账号")
+	}
+	count, err := g.DB().Model(publishAccountTable).Safe().Ctx(ctx).
+		Where(publishFieldId, in.ParentId).
+		Where(publishAccountFieldMerchantId, in.MerchantId).
+		Where(publishAccountFieldAccountType, sysin.PublishAccountTypeAdmin).
+		Where(publishAccountFieldStatus, consts.StatusEnabled).
+		WhereNull(publishAccountFieldDeletedAt).
+		Count()
+	if err != nil {
+		return gerror.Wrap(err, "检查管理员账号失败")
+	}
+	if count == 0 {
+		return gerror.New("管理员账号不存在或不可用")
+	}
+	return nil
+}
+
 func (s *sSysPublish) ensureAdminMemberForAccount(ctx context.Context, in *sysin.AccountSaveInp) (memberId int64, err error) {
 	accountConf, err := service.SysConfig().GetAccount(ctx)
 	if err != nil {

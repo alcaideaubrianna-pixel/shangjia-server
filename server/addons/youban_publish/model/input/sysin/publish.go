@@ -120,7 +120,7 @@ func (in *AccountSaveInp) Filter(ctx context.Context) error {
 	}
 	in.AccountType = strings.TrimSpace(in.AccountType)
 	if in.AccountType == "" {
-		in.AccountType = PublishAccountTypeUploader
+		in.AccountType = PublishAccountTypeAdmin
 	}
 	if in.AccountType != PublishAccountTypeAdmin && in.AccountType != PublishAccountTypeUploader {
 		return gerror.New("账号类型不合法")
