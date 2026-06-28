@@ -251,7 +251,7 @@ func (s *sSysPublish) accountList(ctx context.Context, in *sysin.AccountListInp)
 	if kw != "" {
 		mod = mod.Where("(a.nickname LIKE ? OR a.username LIKE ?)", "%"+kw+"%", "%"+kw+"%")
 	}
-	totalCount, err = mod.Clone().Count()
+	totalCount, err = mod.Clone().Fields("a." + accountColumns.Id).Count()
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取账号总数失败")
 	}
@@ -277,7 +277,7 @@ func (s *sSysPublish) taskList(ctx context.Context, in *sysin.TaskListInp) (list
 	if kw != "" {
 		mod = mod.Where("(t.title LIKE ? OR t.client_request_id LIKE ?)", "%"+kw+"%", "%"+kw+"%")
 	}
-	totalCount, err = mod.Clone().Count()
+	totalCount, err = mod.Clone().Fields("t." + taskColumns.Id).Count()
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取任务总数失败")
 	}
