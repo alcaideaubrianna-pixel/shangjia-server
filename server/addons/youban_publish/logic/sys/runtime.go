@@ -2,8 +2,11 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
+
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 type publishRuntimeMutex struct {
@@ -44,6 +47,7 @@ func (s *sSysPublish) StopRuntime() {
 }
 
 func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
+	go s.runTelegramRuntime(ctx)
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -51,7 +55,98 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// TG publish jobs will be consumed here in the next milestone.
+			if err := s.consumeTelegramJobs(ctx); err != nil {
+				g.Log().Warningf(ctx, "消费上架插件TG任务失败：%+v", err)
+			}
+		}
+	}
+}
+
+func (s *sSysPublish) runTelegramRuntime(ctx context.Context) {
+	time.Sleep(2 * time.Second)
+	conf, err := NewSysConfig().GetTelegram(ctx)
+	if err != nil {
+		g.Log().Warningf(ctx, "读取上架插件Telegram配置失败：%+v", err)
+		return
+	}
+	mode := conf.BotRuntimeMode
+	if mode == "" || mode == "auto" {
+		systemMode := g.Cfg().MustGet(ctx, "system.mode", "").String()
+		if systemMode == "" || systemMode == "develop" || systemMode == "testing" || systemMode == "not-set" {
+			mode = "pull"
+		} else {
+			mode = "webhook"
+		}
+	}
+	switch mode {
+	case "pull", "polling":
+		s.runTelegramPolling(ctx)
+	case "webhook":
+		s.setupTelegramWebhooks(ctx)
+		<-ctx.Done()
+	default:
+		g.Log().Warningf(ctx, "未知上架插件Bot运行模式：%s", mode)
+	}
+}
+
+func (s *sSysPublish) runTelegramPolling(ctx context.Context) {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	runningBots := map[string]struct{}{}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			bots, err := s.enabledBots(ctx)
+			if err != nil {
+				g.Log().Warningf(ctx, "读取上架插件Bot失败：%+v", err)
+				continue
+			}
+			for _, item := range bots {
+				if item == nil || item.BotToken == "" {
+					continue
+				}
+				if _, ok := runningBots[item.BotToken]; ok {
+					continue
+				}
+				bot, err := s.telegramBot(ctx, item.BotToken)
+				if err != nil {
+					g.Log().Warningf(ctx, "初始化上架插件Bot失败 bot:%d err:%+v", item.Id, err)
+					continue
+				}
+				if err = s.telegramDeleteWebhook(ctx, item.BotToken); err != nil {
+					g.Log().Warningf(ctx, "清理上架插件Bot webhook失败 bot:%d err:%+v", item.Id, err)
+				}
+				runningBots[item.BotToken] = struct{}{}
+				go bot.Start(ctx)
+			}
+		}
+	}
+}
+
+func (s *sSysPublish) setupTelegramWebhooks(ctx context.Context) {
+	conf, err := NewSysConfig().GetTelegram(ctx)
+	if err != nil {
+		g.Log().Warningf(ctx, "读取上架插件Telegram配置失败：%+v", err)
+		return
+	}
+	if conf.WebhookBaseUrl == "" {
+		g.Log().Warning(ctx, "上架插件Webhook Base URL未配置，跳过自动setWebhook")
+		return
+	}
+	bots, err := s.enabledBots(ctx)
+	if err != nil {
+		g.Log().Warningf(ctx, "读取上架插件Bot失败：%+v", err)
+		return
+	}
+	for _, item := range bots {
+		if item == nil || item.BotToken == "" {
+			continue
+		}
+		webhookURL := fmt.Sprintf("%s/api/youban_publish/telegram/webhook?botId=%d", conf.WebhookBaseUrl, item.Id)
+		if err = s.telegramSetWebhook(ctx, item.BotToken, webhookURL); err != nil {
+			g.Log().Warningf(ctx, "设置上架插件Bot webhook失败 bot:%d err:%+v", item.Id, err)
 		}
 	}
 }

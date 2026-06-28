@@ -256,3 +256,52 @@ type MediaModel struct {
 	CreatedAt    *gtime.Time `json:"createdAt" dc:"创建时间"`
 	UpdatedAt    *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
+
+type BotListInp struct {
+	form.PageReq
+	Keyword string `json:"keyword" dc:"关键词"`
+	Status  int    `json:"status" dc:"状态"`
+}
+
+type BotModel struct {
+	Id          int64       `json:"id" dc:"ID"`
+	BotName     string      `json:"botName" dc:"Bot名称"`
+	BotUsername string      `json:"botUsername" dc:"Bot用户名"`
+	BotToken    string      `json:"botToken" dc:"Bot Token"`
+	Remark      string      `json:"remark" dc:"备注"`
+	Status      int         `json:"status" dc:"状态"`
+	CreatedAt   *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt   *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
+type BotSaveInp struct {
+	Id          int64  `json:"id" dc:"ID"`
+	BotName     string `json:"botName" dc:"Bot名称"`
+	BotUsername string `json:"botUsername" dc:"Bot用户名"`
+	BotToken    string `json:"botToken" dc:"Bot Token"`
+	Remark      string `json:"remark" dc:"备注"`
+	Status      int    `json:"status" dc:"状态：1启用 2停用"`
+}
+
+type BotDeleteInp struct {
+	Ids []int64 `json:"ids" v:"required#请选择要删除的数据" dc:"ID列表"`
+}
+
+type TelegramLoginStartInp struct{}
+
+type TelegramLoginModel struct {
+	Id               int64       `json:"id" dc:"ID"`
+	LoginToken       string      `json:"loginToken" dc:"登录令牌"`
+	QrUrl            string      `json:"qrUrl" dc:"二维码地址"`
+	TelegramUserId   string      `json:"telegramUserId" dc:"TG用户ID"`
+	TelegramUsername string      `json:"telegramUsername" dc:"TG用户名"`
+	Status           string      `json:"status" dc:"状态"`
+	ErrorMessage     string      `json:"errorMessage" dc:"错误信息"`
+	ExpiresAt        *gtime.Time `json:"expiresAt" dc:"过期时间"`
+	CreatedAt        *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt        *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
+type TelegramLoginStatusInp struct {
+	LoginToken string `json:"loginToken" v:"required#登录令牌不能为空" dc:"登录令牌"`
+}

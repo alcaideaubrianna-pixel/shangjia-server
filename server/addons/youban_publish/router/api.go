@@ -15,6 +15,9 @@ import (
 func Api(ctx context.Context, group *ghttp.RouterGroup) {
 	prefix := addons.RouterPrefix(ctx, consts.AppApi, global.GetSkeleton().Name)
 	group.Group(prefix, func(group *ghttp.RouterGroup) {
+		group.Bind(api.Webhook)
+	})
+	group.Group(prefix, func(group *ghttp.RouterGroup) {
 		group.Middleware(service.Middleware().ApiAuth)
 		group.Bind(api.Publish)
 	})

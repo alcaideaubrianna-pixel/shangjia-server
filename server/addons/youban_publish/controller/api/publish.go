@@ -94,3 +94,21 @@ func (c *cPublish) DeleteMedia(ctx context.Context, req *publish.DeleteMediaReq)
 	res = &publish.DeleteMediaRes{}
 	return
 }
+
+func (c *cPublish) TelegramLoginStart(ctx context.Context, req *publish.TelegramLoginStartReq) (res *publish.TelegramLoginStartRes, err error) {
+	data, err := service.SysPublish().TelegramLoginStart(ctx, &req.TelegramLoginStartInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.TelegramLoginStartRes{TelegramLoginModel: data}
+	return
+}
+
+func (c *cPublish) TelegramLoginStatus(ctx context.Context, req *publish.TelegramLoginStatusReq) (res *publish.TelegramLoginStatusRes, err error) {
+	data, err := service.SysPublish().TelegramLoginStatus(ctx, &req.TelegramLoginStatusInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.TelegramLoginStatusRes{TelegramLoginModel: data}
+	return
+}

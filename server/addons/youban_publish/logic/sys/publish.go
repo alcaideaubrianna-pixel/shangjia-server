@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	tgbot "github.com/go-telegram/bot"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -20,12 +21,15 @@ const (
 	publishTaskTable     = "hg_youban_publish_task"
 	publishMediaTable    = "hg_youban_publish_media"
 	publishTgJobTable    = "hg_youban_publish_tg_job"
+	publishBotTable      = "hg_youban_publish_bot"
 )
 
 type sSysPublish struct {
 	runtimeCancel context.CancelFunc
 	runtimeDone   chan struct{}
 	runtimeMu     publishRuntimeMutex
+	telegramBotMu publishRuntimeMutex
+	telegramBots  map[string]*tgbot.Bot
 }
 
 func NewSysPublish() *sSysPublish {

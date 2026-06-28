@@ -23,6 +23,9 @@ type ISysPublish interface {
 	AdminTaskCancel(ctx context.Context, in *sysin.TaskCancelInp) (err error)
 	AdminMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error)
 	AdminMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error)
+	AdminBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error)
+	AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) (err error)
+	AdminBotDelete(ctx context.Context, in *sysin.BotDeleteInp) (err error)
 	CurrentAccount(ctx context.Context) (res *sysin.CurrentAccountModel, err error)
 	MyTaskList(ctx context.Context, in *sysin.TaskListInp) (list []*sysin.TaskModel, totalCount int, err error)
 	MyTaskSave(ctx context.Context, in *sysin.TaskSaveInp) (id int64, err error)
@@ -31,6 +34,9 @@ type ISysPublish interface {
 	MyMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile) (res *sysin.MediaModel, err error)
 	MyMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error)
 	MyMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error)
+	TelegramWebhookRaw(ctx context.Context, botId int64, body []byte) (err error)
+	TelegramLoginStart(ctx context.Context, in *sysin.TelegramLoginStartInp) (res *sysin.TelegramLoginModel, err error)
+	TelegramLoginStatus(ctx context.Context, in *sysin.TelegramLoginStatusInp) (res *sysin.TelegramLoginModel, err error)
 }
 
 var localSysPublish ISysPublish

@@ -6,7 +6,7 @@ INSERT INTO "hg_admin_menu" (
 )
 SELECT
   root."id", '上架系统', 'youbanPublish', 'youbanPublish', 'icon-park-outline:upload-one', 2,
-  '', '/youban_publish/publish/merchant/list,/youban_publish/publish/merchant/save,/youban_publish/publish/merchant/delete,/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete,/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel',
+  '', '/youban_publish/publish/merchant/list,/youban_publish/publish/merchant/save,/youban_publish/publish/merchant/delete,/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete,/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel,/youban_publish/publish/media/list,/youban_publish/publish/media/delete,/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete,/youban_publish/publish/config/get,/youban_publish/publish/config/update',
   '', '/addons/youbanPublish/index', 1, '', 0, 0, '', 1, 2, 0, 2, CONCAT('tr_', root."id", ' '),
   32, '悦伴上架系统插件后台', 1, NOW(), NOW()
 FROM (SELECT "id" FROM "hg_admin_menu" WHERE "name" = 'addons' LIMIT 1) root
@@ -19,7 +19,7 @@ SET "title" = '上架系统',
     "icon" = 'icon-park-outline:upload-one',
     "type" = 2,
     "redirect" = '',
-    "permissions" = '/youban_publish/publish/merchant/list,/youban_publish/publish/merchant/save,/youban_publish/publish/merchant/delete,/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete,/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel',
+    "permissions" = '/youban_publish/publish/merchant/list,/youban_publish/publish/merchant/save,/youban_publish/publish/merchant/delete,/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete,/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel,/youban_publish/publish/media/list,/youban_publish/publish/media/delete,/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete,/youban_publish/publish/config/get,/youban_publish/publish/config/update',
     "component" = '/addons/youbanPublish/index',
     "always_show" = 1,
     "hidden" = 2,

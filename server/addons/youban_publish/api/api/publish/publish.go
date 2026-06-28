@@ -72,3 +72,21 @@ type DeleteMediaReq struct {
 }
 
 type DeleteMediaRes struct{}
+
+type TelegramLoginStartReq struct {
+	g.Meta `path:"/telegram/login/start" method:"post" tags:"上架插件" summary:"发起Telegram扫码登录"`
+	sysin.TelegramLoginStartInp
+}
+
+type TelegramLoginStartRes struct {
+	*sysin.TelegramLoginModel
+}
+
+type TelegramLoginStatusReq struct {
+	g.Meta `path:"/telegram/login/status" method:"get" tags:"上架插件" summary:"查询Telegram扫码登录状态"`
+	sysin.TelegramLoginStatusInp
+}
+
+type TelegramLoginStatusRes struct {
+	*sysin.TelegramLoginModel
+}

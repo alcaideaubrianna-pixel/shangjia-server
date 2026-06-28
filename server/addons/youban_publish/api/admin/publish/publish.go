@@ -103,3 +103,27 @@ type MediaDeleteReq struct {
 }
 
 type MediaDeleteRes struct{}
+
+type BotListReq struct {
+	g.Meta `path:"/publish/bot/list" method:"get" tags:"上架插件后台" summary:"Bot列表"`
+	sysin.BotListInp
+}
+
+type BotListRes struct {
+	form.PageRes
+	List []*sysin.BotModel `json:"list" dc:"Bot列表"`
+}
+
+type BotSaveReq struct {
+	g.Meta `path:"/publish/bot/save" method:"post" tags:"上架插件后台" summary:"新增或编辑Bot"`
+	sysin.BotSaveInp
+}
+
+type BotSaveRes struct{}
+
+type BotDeleteReq struct {
+	g.Meta `path:"/publish/bot/delete" method:"post" tags:"上架插件后台" summary:"删除Bot"`
+	sysin.BotDeleteInp
+}
+
+type BotDeleteRes struct{}

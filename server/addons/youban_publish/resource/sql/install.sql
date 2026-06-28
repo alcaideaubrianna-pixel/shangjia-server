@@ -118,3 +118,67 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
   KEY `idx_ybp_tg_job_status_retry` (`status`,`next_retry_at`,`id`),
   KEY `idx_ybp_tg_job_task` (`task_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG发布任务';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_bot` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `bot_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'Bot名称',
+  `bot_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'Bot用户名',
+  `bot_token` varchar(255) NOT NULL DEFAULT '' COMMENT 'Bot Token',
+  `remark` varchar(500) NOT NULL DEFAULT '' COMMENT '备注',
+  `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
+  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
+  `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_bot_status` (`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架Bot配置';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_login` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '商家ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
+  `login_token` varchar(128) NOT NULL DEFAULT '' COMMENT '登录令牌',
+  `qr_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '二维码地址',
+  `telegram_user_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户ID',
+  `telegram_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户名',
+  `session_key` varchar(255) NOT NULL DEFAULT '' COMMENT '会话存储键',
+  `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '状态',
+  `error_message` text COMMENT '错误信息',
+  `expires_at` datetime DEFAULT NULL COMMENT '过期时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_tg_login_token` (`login_token`),
+  KEY `idx_ybp_tg_login_account` (`account_id`,`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架TG扫码登录';
+
+INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
+SELECT 'youban_publish', 'telegram', 'Telegram App ID', 'int', 'appId', '0', '0', 10, '扫码登录使用的 Telegram API ID，来自 my.telegram.org', 0, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_addons_config` WHERE `addon_name`='youban_publish' AND `key`='appId');
+
+INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
+SELECT 'youban_publish', 'telegram', 'Telegram App Hash', 'string', 'appHash', '', '', 20, '扫码登录使用的 Telegram App Hash，来自 my.telegram.org', 0, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_addons_config` WHERE `addon_name`='youban_publish' AND `key`='appHash');
+
+INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
+SELECT 'youban_publish', 'telegram', '代理地址', 'string', 'proxyUrl', '', '', 30, '本地开发可配置 socks5://127.0.0.1:7890，也支持 http/https 代理', 0, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_addons_config` WHERE `addon_name`='youban_publish' AND `key`='proxyUrl');
+
+INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
+SELECT 'youban_publish', 'telegram', 'Bot运行模式', 'string', 'botRuntimeMode', 'auto', 'auto', 40, 'auto/develop 使用 pull，production 使用 webhook；也可显式配置 pull/webhook', 0, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_addons_config` WHERE `addon_name`='youban_publish' AND `key`='botRuntimeMode');
+
+INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
+SELECT 'youban_publish', 'telegram', 'Webhook Base URL', 'string', 'webhookBaseUrl', '', '', 50, '线上 webhook 的公网域名，例如 https://api.example.com', 0, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_addons_config` WHERE `addon_name`='youban_publish' AND `key`='webhookBaseUrl');
+
+INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
+SELECT 'youban_publish', 'telegram', 'Webhook Secret', 'string', 'webhookSecret', '', '', 60, 'Telegram webhook secret token，可选', 0, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_addons_config` WHERE `addon_name`='youban_publish' AND `key`='webhookSecret');
+
+INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
+SELECT 'youban_publish', 'telegram', '默认推送 Chat ID', 'string', 'defaultTargetChat', '', '', 70, '资料发布后默认推送的 Telegram chat_id，可由后续频道配置覆盖', 0, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_addons_config` WHERE `addon_name`='youban_publish' AND `key`='defaultTargetChat');

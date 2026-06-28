@@ -136,3 +136,33 @@ func (c *cPublish) MediaDelete(ctx context.Context, req *publish.MediaDeleteReq)
 	res = &publish.MediaDeleteRes{}
 	return
 }
+
+func (c *cPublish) BotList(ctx context.Context, req *publish.BotListReq) (res *publish.BotListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminBotList(ctx, &req.BotListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.BotModel{}
+	}
+	res = new(publish.BotListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublish) BotSave(ctx context.Context, req *publish.BotSaveReq) (res *publish.BotSaveRes, err error) {
+	if err = service.SysPublish().AdminBotSave(ctx, &req.BotSaveInp); err != nil {
+		return nil, err
+	}
+	res = &publish.BotSaveRes{}
+	return
+}
+
+func (c *cPublish) BotDelete(ctx context.Context, req *publish.BotDeleteReq) (res *publish.BotDeleteRes, err error) {
+	if err = service.SysPublish().AdminBotDelete(ctx, &req.BotDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.BotDeleteRes{}
+	return
+}
