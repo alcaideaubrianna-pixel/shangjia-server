@@ -105,6 +105,9 @@ func (s *sSysPublish) AdminAccountSave(ctx context.Context, in *sysin.AccountSav
 	if err = s.ensureMerchant(ctx, in.MerchantId); err != nil {
 		return
 	}
+	if err = s.prepareAdminMemberBinding(ctx, in); err != nil {
+		return err
+	}
 	memberId, err := s.ensureAdminMemberForAccount(ctx, in)
 	if err != nil {
 		return err

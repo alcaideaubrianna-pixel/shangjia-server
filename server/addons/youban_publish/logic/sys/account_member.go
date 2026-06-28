@@ -17,6 +17,26 @@ import (
 
 const publishGeneratedPasswordLength = 12
 
+func (s *sSysPublish) prepareAdminMemberBinding(ctx context.Context, in *sysin.AccountSaveInp) error {
+	if in.Id <= 0 {
+		in.AdminMemberId = 0
+		return nil
+	}
+	value, err := g.DB().Model(publishAccountTable).Safe().Ctx(ctx).
+		Fields(publishAccountFieldAdminMemberId).
+		Where(publishFieldId, in.Id).
+		WhereNull(publishAccountFieldDeletedAt).
+		Value()
+	if err != nil {
+		return gerror.Wrap(err, "读取账号绑定关系失败")
+	}
+	if value.IsNil() || value.Int64() <= 0 {
+		return gerror.New("上架账号不存在")
+	}
+	in.AdminMemberId = value.Int64()
+	return nil
+}
+
 func (s *sSysPublish) ensureAdminMemberForAccount(ctx context.Context, in *sysin.AccountSaveInp) (memberId int64, err error) {
 	accountConf, err := service.SysConfig().GetAccount(ctx)
 	if err != nil {
