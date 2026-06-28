@@ -87,3 +87,19 @@ type TaskCancelReq struct {
 }
 
 type TaskCancelRes struct{}
+
+type MediaListReq struct {
+	g.Meta `path:"/publish/media/list" method:"get" tags:"上架插件后台" summary:"任务媒体列表"`
+	sysin.MediaListInp
+}
+
+type MediaListRes struct {
+	List []*sysin.MediaModel `json:"list" dc:"媒体列表"`
+}
+
+type MediaDeleteReq struct {
+	g.Meta `path:"/publish/media/delete" method:"post" tags:"上架插件后台" summary:"删除任务媒体"`
+	sysin.MediaDeleteInp
+}
+
+type MediaDeleteRes struct{}

@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+
+	"github.com/gogf/gf/v2/net/ghttp"
 )
 
 type ISysPublish interface {
@@ -19,11 +21,16 @@ type ISysPublish interface {
 	AdminTaskSave(ctx context.Context, in *sysin.TaskSaveInp) (id int64, err error)
 	AdminTaskSubmit(ctx context.Context, in *sysin.TaskSubmitInp) (err error)
 	AdminTaskCancel(ctx context.Context, in *sysin.TaskCancelInp) (err error)
+	AdminMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error)
+	AdminMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error)
 	CurrentAccount(ctx context.Context) (res *sysin.CurrentAccountModel, err error)
 	MyTaskList(ctx context.Context, in *sysin.TaskListInp) (list []*sysin.TaskModel, totalCount int, err error)
 	MyTaskSave(ctx context.Context, in *sysin.TaskSaveInp) (id int64, err error)
 	MyTaskSubmit(ctx context.Context, in *sysin.TaskSubmitInp) (err error)
 	MyTaskCancel(ctx context.Context, in *sysin.TaskCancelInp) (err error)
+	MyMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile) (res *sysin.MediaModel, err error)
+	MyMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error)
+	MyMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error)
 }
 
 var localSysPublish ISysPublish

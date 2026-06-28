@@ -56,6 +56,9 @@ func (s *sSysPublish) publishTaskToProfile(ctx context.Context, task gdb.Record)
 			return gerror.Wrap(updateErr, "回写资料ID失败")
 		}
 		profileId = id
+		if syncErr := s.syncTaskMediaToProfile(ctx, tx, locked["id"].Int64(), id); syncErr != nil {
+			return syncErr
+		}
 		return nil
 	})
 	if err != nil {

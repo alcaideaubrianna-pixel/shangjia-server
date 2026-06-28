@@ -3,6 +3,9 @@ package api
 import (
 	"context"
 
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+
 	"hotgo/addons/youban_publish/api/api/publish"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
@@ -59,5 +62,35 @@ func (c *cPublish) CancelTask(ctx context.Context, req *publish.CancelTaskReq) (
 		return
 	}
 	res = &publish.CancelTaskRes{}
+	return
+}
+
+func (c *cPublish) UploadMedia(ctx context.Context, req *publish.UploadMediaReq) (res *publish.UploadMediaRes, err error) {
+	file := g.RequestFromCtx(ctx).GetUploadFile("file")
+	if file == nil {
+		return nil, gerror.New("没有找到上传的文件")
+	}
+	data, err := service.SysPublish().MyMediaUpload(ctx, &req.MediaUploadInp, file)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.UploadMediaRes{MediaModel: data}
+	return
+}
+
+func (c *cPublish) MediaList(ctx context.Context, req *publish.MediaListReq) (res *publish.MediaListRes, err error) {
+	list, err := service.SysPublish().MyMediaList(ctx, &req.MediaListInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.MediaListRes{List: list}
+	return
+}
+
+func (c *cPublish) DeleteMedia(ctx context.Context, req *publish.DeleteMediaReq) (res *publish.DeleteMediaRes, err error) {
+	if err = service.SysPublish().MyMediaDelete(ctx, &req.MediaDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.DeleteMediaRes{}
 	return
 }

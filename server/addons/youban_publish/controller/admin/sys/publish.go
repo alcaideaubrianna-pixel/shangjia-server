@@ -116,3 +116,23 @@ func (c *cPublish) TaskCancel(ctx context.Context, req *publish.TaskCancelReq) (
 	res = &publish.TaskCancelRes{}
 	return
 }
+
+func (c *cPublish) MediaList(ctx context.Context, req *publish.MediaListReq) (res *publish.MediaListRes, err error) {
+	list, err := service.SysPublish().AdminMediaList(ctx, &req.MediaListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.MediaModel{}
+	}
+	res = &publish.MediaListRes{List: list}
+	return
+}
+
+func (c *cPublish) MediaDelete(ctx context.Context, req *publish.MediaDeleteReq) (res *publish.MediaDeleteRes, err error) {
+	if err = service.SysPublish().AdminMediaDelete(ctx, &req.MediaDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.MediaDeleteRes{}
+	return
+}

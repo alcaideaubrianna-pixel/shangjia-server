@@ -18,6 +18,7 @@ const (
 	publishMerchantTable = "hg_youban_publish_merchant"
 	publishAccountTable  = "hg_youban_publish_account"
 	publishTaskTable     = "hg_youban_publish_task"
+	publishMediaTable    = "hg_youban_publish_media"
 	publishTgJobTable    = "hg_youban_publish_tg_job"
 )
 
@@ -306,7 +307,6 @@ func (s *sSysPublish) saveTask(ctx context.Context, in *sysin.TaskSaveInp) (id i
 		"province":          strings.TrimSpace(in.Province),
 		"city":              strings.TrimSpace(in.City),
 		"plain_text":        strings.TrimSpace(in.PlainText),
-		"media_count":       in.MediaCount,
 		"tg_push_enabled":   in.TgPushEnabled,
 		"updated_by":        contexts.GetUserId(ctx),
 		"updated_at":        gtime.Now(),
@@ -317,6 +317,7 @@ func (s *sSysPublish) saveTask(ctx context.Context, in *sysin.TaskSaveInp) (id i
 	} else {
 		data["status"] = sysin.PublishTaskStatusDraft
 		data["tg_status"] = "pending"
+		data["media_count"] = 0
 		data["created_by"] = contexts.GetUserId(ctx)
 		data["created_at"] = gtime.Now()
 		id, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()

@@ -208,3 +208,51 @@ type TaskSubmitInp struct {
 type TaskCancelInp struct {
 	Id int64 `json:"id" v:"required|min:1#任务ID不能为空|任务ID不能为空" dc:"任务ID"`
 }
+
+type MediaUploadInp struct {
+	TaskId    int64  `json:"taskId" dc:"任务ID"`
+	MediaType string `json:"mediaType" dc:"媒体类型：image/video"`
+	SortIndex int    `json:"sortIndex" dc:"排序"`
+}
+
+func (in *MediaUploadInp) Filter(ctx context.Context) error {
+	if in.TaskId <= 0 {
+		return gerror.New("任务ID不能为空")
+	}
+	in.MediaType = strings.TrimSpace(in.MediaType)
+	if in.MediaType == "" {
+		in.MediaType = "image"
+	}
+	if in.MediaType != "image" && in.MediaType != "video" {
+		return gerror.New("媒体类型不合法")
+	}
+	return nil
+}
+
+type MediaListInp struct {
+	TaskId int64 `json:"taskId" v:"required|min:1#任务ID不能为空|任务ID不能为空" dc:"任务ID"`
+}
+
+type MediaDeleteInp struct {
+	Id int64 `json:"id" v:"required|min:1#媒体ID不能为空|媒体ID不能为空" dc:"媒体ID"`
+}
+
+type MediaModel struct {
+	Id           int64       `json:"id" dc:"ID"`
+	MerchantId   int64       `json:"merchantId" dc:"商家ID"`
+	AccountId    int64       `json:"accountId" dc:"账号ID"`
+	TaskId       int64       `json:"taskId" dc:"任务ID"`
+	ProfileId    int64       `json:"profileId" dc:"资料ID"`
+	AttachmentId int64       `json:"attachmentId" dc:"附件ID"`
+	MediaType    string      `json:"mediaType" dc:"媒体类型"`
+	Name         string      `json:"name" dc:"文件名"`
+	FileUrl      string      `json:"fileUrl" dc:"访问地址"`
+	StoragePath  string      `json:"storagePath" dc:"存储路径"`
+	MimeType     string      `json:"mimeType" dc:"MIME"`
+	Md5          string      `json:"md5" dc:"MD5"`
+	Size         int64       `json:"size" dc:"大小"`
+	SortIndex    int         `json:"sortIndex" dc:"排序"`
+	Status       int         `json:"status" dc:"状态"`
+	CreatedAt    *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt    *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}

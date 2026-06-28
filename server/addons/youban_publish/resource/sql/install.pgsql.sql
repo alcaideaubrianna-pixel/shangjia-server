@@ -68,6 +68,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_task_client_request" ON "hg_youban_pub
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_merchant_status" ON "hg_youban_publish_task" ("merchant_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_account_status" ON "hg_youban_publish_task" ("account_id", "status", "id");
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_media" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "merchant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "task_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "attachment_id" bigint NOT NULL DEFAULT 0,
+  "media_type" varchar(16) NOT NULL DEFAULT 'image',
+  "name" varchar(255) NOT NULL DEFAULT '',
+  "file_url" varchar(1024) NOT NULL DEFAULT '',
+  "storage_path" varchar(1024) NOT NULL DEFAULT '',
+  "mime_type" varchar(128) NOT NULL DEFAULT '',
+  "md5" varchar(64) NOT NULL DEFAULT '',
+  "size" bigint NOT NULL DEFAULT 0,
+  "sort_index" integer NOT NULL DEFAULT 0,
+  "status" smallint NOT NULL DEFAULT 1,
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "deleted_by" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_task_attachment" ON "hg_youban_publish_media" ("task_id", "attachment_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_task_sort" ON "hg_youban_publish_media" ("task_id", "sort_index", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_profile" ON "hg_youban_publish_media" ("profile_id", "id");
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_job" (
   "id" BIGSERIAL PRIMARY KEY,
   "task_id" bigint NOT NULL DEFAULT 0,

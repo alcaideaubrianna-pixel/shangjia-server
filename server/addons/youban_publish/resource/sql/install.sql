@@ -71,6 +71,34 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_task` (
   KEY `idx_ybp_task_account_status` (`account_id`,`status`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架任务';
 
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '商家ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
+  `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '任务ID',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
+  `attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'HotGo附件ID',
+  `media_type` varchar(16) NOT NULL DEFAULT 'image' COMMENT '媒体类型',
+  `name` varchar(255) NOT NULL DEFAULT '' COMMENT '文件名',
+  `file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '访问地址',
+  `storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '存储路径',
+  `mime_type` varchar(128) NOT NULL DEFAULT '' COMMENT 'MIME',
+  `md5` varchar(64) NOT NULL DEFAULT '' COMMENT 'MD5',
+  `size` bigint(20) NOT NULL DEFAULT '0' COMMENT '大小',
+  `sort_index` int(11) NOT NULL DEFAULT '0' COMMENT '排序',
+  `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
+  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
+  `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_media_task_attachment` (`task_id`,`attachment_id`),
+  KEY `idx_ybp_media_task_sort` (`task_id`,`sort_index`,`id`),
+  KEY `idx_ybp_media_profile` (`profile_id`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架媒体';
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
   `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '任务ID',
