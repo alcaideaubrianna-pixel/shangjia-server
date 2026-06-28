@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -64,6 +65,34 @@ func (s *sSysPublish) prepareAccountParent(ctx context.Context, in *sysin.Accoun
 	return nil
 }
 
+func (s *sSysPublish) adminMemberIdsForAccounts(ctx context.Context, tx gdb.TX, ids []int64) (memberIds []int64, err error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if err = tx.Model(publishAccountTable).Safe().Ctx(ctx).
+		Fields(publishAccountFieldAdminMemberId).
+		WhereIn(publishFieldId, ids).
+		WhereNull(publishAccountFieldDeletedAt).
+		Scan(&memberIds); err != nil {
+		return nil, gerror.Wrap(err, "读取账号绑定关系失败")
+	}
+	return memberIds, nil
+}
+
+func (s *sSysPublish) disableAdminMembers(ctx context.Context, tx gdb.TX, memberIds []int64) error {
+	if len(memberIds) == 0 {
+		return nil
+	}
+	memberColumns := dao.AdminMember.Columns()
+	if _, err := tx.Model(dao.AdminMember.Table()).Safe().Ctx(ctx).
+		WhereIn(memberColumns.Id, memberIds).
+		Data(g.Map{memberColumns.Status: consts.StatusDisable}).
+		Update(); err != nil {
+		return gerror.Wrap(err, "禁用后台登录账号失败")
+	}
+	return nil
+}
+
 func (s *sSysPublish) ensureAdminMemberForAccount(ctx context.Context, in *sysin.AccountSaveInp) (memberId int64, err error) {
 	accountConf, err := service.SysConfig().GetAccount(ctx)
 	if err != nil {
@@ -72,9 +101,6 @@ func (s *sSysPublish) ensureAdminMemberForAccount(ctx context.Context, in *sysin
 
 	if in.AdminMemberId > 0 {
 		memberId = in.AdminMemberId
-		if in.Password == "" {
-			return memberId, nil
-		}
 		return memberId, s.saveAdminMember(ctx, memberId, in, accountConf.DefaultRoleId, accountConf.DefaultDeptId)
 	}
 
@@ -95,11 +121,11 @@ func (s *sSysPublish) ensureAdminMemberForAccount(ctx context.Context, in *sysin
 		if err != nil {
 			return 0, gerror.Wrap(err, "检查账号绑定关系失败")
 		}
-		if bound == 0 && in.Id == 0 {
+		if in.Id == 0 {
 			return 0, gerror.New("后台账号已存在，请更换账号")
 		}
-		if in.Password == "" {
-			return memberId, nil
+		if bound == 0 {
+			return 0, gerror.New("后台账号已存在，请更换账号")
 		}
 		return memberId, s.saveAdminMember(ctx, memberId, in, accountConf.DefaultRoleId, accountConf.DefaultDeptId)
 	}

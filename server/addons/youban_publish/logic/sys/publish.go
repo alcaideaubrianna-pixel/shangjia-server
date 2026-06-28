@@ -151,14 +151,19 @@ func (s *sSysPublish) AdminAccountDelete(ctx context.Context, in *sysin.AccountD
 	if len(in.Ids) == 0 {
 		return gerror.New("请选择要删除的数据")
 	}
-	_, err = g.DB().Model(publishAccountTable).Safe().Ctx(ctx).WhereIn(publishFieldId, in.Ids).Data(g.Map{
-		"deleted_by":                 contexts.GetUserId(ctx),
-		publishAccountFieldDeletedAt: gtime.Now(),
-	}).Update()
-	if err != nil {
-		return gerror.Wrap(err, "删除上架账号失败")
-	}
-	return nil
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		memberIds, err := s.adminMemberIdsForAccounts(ctx, tx, in.Ids)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Model(publishAccountTable).Safe().Ctx(ctx).WhereIn(publishFieldId, in.Ids).Data(g.Map{
+			"deleted_by":                 contexts.GetUserId(ctx),
+			publishAccountFieldDeletedAt: gtime.Now(),
+		}).Update(); err != nil {
+			return gerror.Wrap(err, "删除上架账号失败")
+		}
+		return s.disableAdminMembers(ctx, tx, memberIds)
+	})
 }
 
 func (s *sSysPublish) AdminTaskList(ctx context.Context, in *sysin.TaskListInp) (list []*sysin.TaskModel, totalCount int, err error) {
