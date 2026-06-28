@@ -245,7 +245,7 @@ func coalesceZero(field string) string {
 
 func normalizeHomeProfileFeed(feed string, sort string) homeProfileFeed {
 	switch strings.ToLower(strings.TrimSpace(feed)) {
-	case string(homeProfileFeedNearby), "recommend":
+	case string(homeProfileFeedNearby):
 		return homeProfileFeedNearby
 	case string(homeProfileFeedLatest), "fresh", "newest":
 		return homeProfileFeedLatest
@@ -258,11 +258,12 @@ func normalizeHomeProfileFeed(feed string, sort string) homeProfileFeed {
 	case "latest", "fresh", "newest":
 		return homeProfileFeedLatest
 	default:
-		return homeProfileFeedNearby
+		return homeProfileFeedLatest
 	}
 }
 
 func (s *sSysContent) HomeProfileCards(ctx context.Context, in *sysin.HomeProfileCardsInp) (list []*sysin.ContentProfileListModel, totalCount int, err error) {
+	feed := normalizeHomeProfileFeed(in.Feed, in.Sort)
 	if in.Page <= 1 && s.requestMemberId(ctx) <= 0 && in.Keyword == "" && in.Province == "" && in.City == "" {
 		cacheKey := homeProfileCardsCacheKey(in)
 		cacheVar, cacheErr := cache.Instance().Get(ctx, cacheKey)
@@ -277,7 +278,7 @@ func (s *sSysContent) HomeProfileCards(ctx context.Context, in *sysin.HomeProfil
 			}
 		}()
 	}
-	if in.Page <= 1 && in.Keyword == "" && in.Province == "" && in.City == "" {
+	if feed == homeProfileFeedNearby && in.Page <= 1 && in.Keyword == "" && in.Province == "" && in.City == "" {
 		list, totalCount, err = s.homeRecommendedProfiles(ctx, in)
 		if err != nil {
 			if !isMissingHomeRecommendColumnError(err) {
@@ -290,7 +291,7 @@ func (s *sSysContent) HomeProfileCards(ctx context.Context, in *sysin.HomeProfil
 		}
 	}
 	listInp := in.ContentProfileListInp
-	listInp.Feed = string(normalizeHomeProfileFeed(in.Feed, in.Sort))
+	listInp.Feed = string(feed)
 	listInp.Sort = listInp.Feed
 	return s.ListProfiles(ctx, &listInp)
 }
@@ -400,7 +401,10 @@ func (s *sSysContent) ListProfiles(ctx context.Context, in *sysin.ContentProfile
 	feed := normalizeHomeProfileFeed(in.Feed, in.Sort)
 	queryInp := *in
 	autoProvince := false
-	if feed == homeProfileFeedNearby && strings.TrimSpace(queryInp.Province) == "" {
+	if strings.EqualFold(strings.TrimSpace(in.Feed), string(homeProfileFeedNearby)) &&
+		strings.TrimSpace(queryInp.Province) == "" &&
+		strings.TrimSpace(queryInp.City) == "" &&
+		strings.TrimSpace(queryInp.Keyword) == "" {
 		if province := s.requestProvince(ctx); province != "" {
 			queryInp.Province = province
 			autoProvince = true
