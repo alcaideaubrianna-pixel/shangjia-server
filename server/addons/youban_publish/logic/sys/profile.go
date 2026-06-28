@@ -86,7 +86,7 @@ func (s *sSysPublish) createContentProfile(ctx context.Context, tx gdb.TX, task 
 		columns.Visibility:      consts.ContentVisibilityPrivate,
 		columns.ReviewStatus:    consts.ContentReviewPending,
 		columns.ImportStatus:    "pending",
-		columns.AdminRemark:     fmt.Sprintf("youban_publish task:%d merchant:%d account:%d", task["id"].Int64(), task["merchant_id"].Int64(), task["account_id"].Int64()),
+		columns.AdminRemark:     fmt.Sprintf("youban_publish task:%d tenant:%d account:%d", task["id"].Int64(), task["tenant_id"].Int64(), task["account_id"].Int64()),
 		columns.SourceCreateBy:  fmt.Sprintf("%d", task["account_id"].Int64()),
 		columns.SourceUpdateBy:  fmt.Sprintf("%d", task["account_id"].Int64()),
 		columns.SourceCreatedAt: now,
@@ -105,7 +105,7 @@ func (s *sSysPublish) createContentProfile(ctx context.Context, tx gdb.TX, task 
 func publishProfileSourceKey(task gdb.Record) string {
 	clientRequestId := strings.TrimSpace(task["client_request_id"].String())
 	if clientRequestId != "" {
-		return fmt.Sprintf("youban_publish:%d:%s", task["merchant_id"].Int64(), clientRequestId)
+		return fmt.Sprintf("youban_publish:%d:%s", task["tenant_id"].Int64(), clientRequestId)
 	}
 	return fmt.Sprintf("youban_publish:task:%d", task["id"].Int64())
 }

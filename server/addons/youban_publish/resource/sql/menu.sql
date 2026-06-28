@@ -28,8 +28,8 @@ SET @publishId := (SELECT `id` FROM `hg_admin_menu` WHERE `name` = 'youbanPublis
 SET @publishTree := (SELECT `tree` FROM `hg_admin_menu` WHERE `name` = 'youbanPublish' LIMIT 1);
 
 INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type`, `redirect`, `permissions`, `permission_name`, `component`, `always_show`, `active_menu`, `is_root`, `is_frame`, `frame_src`, `keep_alive`, `hidden`, `affix`, `level`, `tree`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
-SELECT NULL, @publishId, '商户管理', 'youbanPublishMerchant', '', '', '3', '', '/youban_publish/publish/merchant/list,/youban_publish/publish/merchant/save,/youban_publish/publish/merchant/delete', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '10', '上架系统按钮权限', '1', @now, @now
-WHERE @publishId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanPublishMerchant');
+SELECT NULL, @publishId, '租户管理', 'youbanPublishTenant', '', '', '3', '', '/youban_publish/publish/tenant/list,/youban_publish/publish/tenant/save,/youban_publish/publish/tenant/delete', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '10', '上架系统按钮权限', '1', @now, @now
+WHERE @publishId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanPublishTenant');
 INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type`, `redirect`, `permissions`, `permission_name`, `component`, `always_show`, `active_menu`, `is_root`, `is_frame`, `frame_src`, `keep_alive`, `hidden`, `affix`, `level`, `tree`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
 SELECT NULL, @publishId, '账号管理', 'youbanPublishAccount', '', '', '3', '', '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '20', '上架系统按钮权限', '1', @now, @now
 WHERE @publishId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanPublishAccount');
@@ -49,7 +49,7 @@ WHERE @publishId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE
 UPDATE `hg_admin_menu`
 SET `pid` = @publishId,
     `title` = CASE `name`
-        WHEN 'youbanPublishMerchant' THEN '商户管理'
+        WHEN 'youbanPublishTenant' THEN '租户管理'
         WHEN 'youbanPublishAccount' THEN '账号管理'
         WHEN 'youbanPublishTask' THEN '上架任务'
         WHEN 'youbanPublishMedia' THEN '资料媒体'
@@ -59,7 +59,7 @@ SET `pid` = @publishId,
     END,
     `type` = '3',
     `permissions` = CASE `name`
-        WHEN 'youbanPublishMerchant' THEN '/youban_publish/publish/merchant/list,/youban_publish/publish/merchant/save,/youban_publish/publish/merchant/delete'
+        WHEN 'youbanPublishTenant' THEN '/youban_publish/publish/tenant/list,/youban_publish/publish/tenant/save,/youban_publish/publish/tenant/delete'
         WHEN 'youbanPublishAccount' THEN '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete'
         WHEN 'youbanPublishTask' THEN '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel'
         WHEN 'youbanPublishMedia' THEN '/youban_publish/publish/media/list,/youban_publish/publish/media/delete'
@@ -72,7 +72,7 @@ SET `pid` = @publishId,
     `level` = '3',
     `tree` = CONCAT(@publishTree, 'tr_', @publishId, ' '),
     `sort` = CASE `name`
-        WHEN 'youbanPublishMerchant' THEN '10'
+        WHEN 'youbanPublishTenant' THEN '10'
         WHEN 'youbanPublishAccount' THEN '20'
         WHEN 'youbanPublishTask' THEN '30'
         WHEN 'youbanPublishMedia' THEN '40'
@@ -84,7 +84,7 @@ SET `pid` = @publishId,
     `status` = '1',
     `updated_at` = @now
 WHERE @publishId IS NOT NULL AND `name` IN (
-  'youbanPublishMerchant',
+  'youbanPublishTenant',
   'youbanPublishAccount',
   'youbanPublishTask',
   'youbanPublishMedia',
@@ -97,7 +97,7 @@ SELECT r.`id`, m.`id`
 FROM `hg_admin_role` r
 JOIN `hg_admin_menu` m ON m.`name` IN (
   'youbanPublish',
-  'youbanPublishMerchant',
+  'youbanPublishTenant',
   'youbanPublishAccount',
   'youbanPublishTask',
   'youbanPublishMedia',

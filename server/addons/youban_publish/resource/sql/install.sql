@@ -1,3 +1,20 @@
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tenant` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `name` varchar(128) NOT NULL DEFAULT '' COMMENT '租户名称',
+  `contact_name` varchar(128) NOT NULL DEFAULT '' COMMENT '联系人',
+  `contact_phone` varchar(64) NOT NULL DEFAULT '' COMMENT '联系电话',
+  `remark` varchar(500) NOT NULL DEFAULT '' COMMENT '备注',
+  `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
+  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
+  `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_tenant_status` (`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架租户';
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_merchant` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
   `name` varchar(128) NOT NULL DEFAULT '' COMMENT '商家名称',
@@ -13,11 +30,17 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_merchant` (
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
   KEY `idx_ybp_merchant_status` (`status`,`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架商家';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架商家兼容表';
+
+INSERT INTO `hg_youban_publish_tenant` (`id`, `name`, `contact_name`, `contact_phone`, `remark`, `status`, `created_by`, `updated_by`, `deleted_by`, `created_at`, `updated_at`, `deleted_at`)
+SELECT m.`id`, m.`name`, m.`contact_name`, m.`contact_phone`, m.`remark`, m.`status`, m.`created_by`, m.`updated_by`, m.`deleted_by`, m.`created_at`, m.`updated_at`, m.`deleted_at`
+FROM `hg_youban_publish_merchant` m
+WHERE NOT EXISTS (SELECT 1 FROM `hg_youban_publish_tenant` t WHERE t.`id` = m.`id`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_account` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '商家ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID',
   `admin_member_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '绑定系统账号ID',
   `parent_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '父账号ID',
   `account_type` varchar(32) NOT NULL DEFAULT 'uploader' COMMENT '账号类型',
@@ -38,13 +61,19 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_account` (
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
-  KEY `idx_ybp_account_merchant` (`merchant_id`,`account_type`,`status`),
+  KEY `idx_ybp_account_tenant` (`tenant_id`,`account_type`,`status`),
   KEY `idx_ybp_account_admin_member` (`admin_member_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架账号';
 
+ALTER TABLE `hg_youban_publish_account` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `id`;
+ALTER TABLE `hg_youban_publish_account` ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
+UPDATE `hg_youban_publish_account` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
+ALTER TABLE `hg_youban_publish_account` ADD KEY `idx_ybp_account_tenant` (`tenant_id`,`account_type`,`status`);
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_task` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '商家ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID',
   `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
   `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
   `client_request_id` varchar(128) NOT NULL DEFAULT '' COMMENT '客户端幂等ID',
@@ -66,14 +95,21 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_task` (
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
-  KEY `idx_ybp_task_client_request` (`merchant_id`,`client_request_id`),
-  KEY `idx_ybp_task_merchant_status` (`merchant_id`,`status`,`id`),
+  KEY `idx_ybp_task_tenant_client_request` (`tenant_id`,`client_request_id`),
+  KEY `idx_ybp_task_tenant_status` (`tenant_id`,`status`,`id`),
   KEY `idx_ybp_task_account_status` (`account_id`,`status`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架任务';
 
+ALTER TABLE `hg_youban_publish_task` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `id`;
+ALTER TABLE `hg_youban_publish_task` ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
+UPDATE `hg_youban_publish_task` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
+ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_tenant_client_request` (`tenant_id`,`client_request_id`);
+ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_tenant_status` (`tenant_id`,`status`,`id`);
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '商家ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID',
   `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
   `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '任务ID',
   `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
@@ -99,10 +135,15 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   KEY `idx_ybp_media_profile` (`profile_id`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架媒体';
 
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `id`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
+UPDATE `hg_youban_publish_media` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
   `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '任务ID',
-  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '商家ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID',
   `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
   `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
   `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Bot ID',
@@ -119,8 +160,13 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
   KEY `idx_ybp_tg_job_task` (`task_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG发布任务';
 
+ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `task_id`;
+ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
+UPDATE `hg_youban_publish_tg_job` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_bot` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID，0表示全局默认',
   `bot_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'Bot名称',
   `bot_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'Bot用户名',
   `bot_token` varchar(255) NOT NULL DEFAULT '' COMMENT 'Bot Token',
@@ -133,12 +179,17 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_bot` (
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
+  KEY `idx_ybp_bot_tenant` (`tenant_id`,`status`,`id`),
   KEY `idx_ybp_bot_status` (`status`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架Bot配置';
 
+ALTER TABLE `hg_youban_publish_bot` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID，0表示全局默认' AFTER `id`;
+ALTER TABLE `hg_youban_publish_bot` ADD KEY `idx_ybp_bot_tenant` (`tenant_id`,`status`,`id`);
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_login` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '商家ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID',
   `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
   `login_token` varchar(128) NOT NULL DEFAULT '' COMMENT '登录令牌',
   `qr_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '二维码地址',
@@ -154,6 +205,10 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_login` (
   KEY `idx_ybp_tg_login_token` (`login_token`),
   KEY `idx_ybp_tg_login_account` (`account_id`,`status`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架TG扫码登录';
+
+ALTER TABLE `hg_youban_publish_tg_login` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `id`;
+ALTER TABLE `hg_youban_publish_tg_login` ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
+UPDATE `hg_youban_publish_tg_login` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
 
 INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
 SELECT 'youban_publish', 'telegram', 'Telegram App ID', 'int', 'appId', '0', '0', 10, '扫码登录使用的 Telegram API ID，来自 my.telegram.org', 0, 1, NOW(), NOW()

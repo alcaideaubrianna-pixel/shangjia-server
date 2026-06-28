@@ -54,7 +54,7 @@ func (s *sSysPublish) prepareAccountParent(ctx context.Context, in *sysin.Accoun
 	accountColumns := pdao.YoubanPublishAccount.Columns()
 	count, err := pdao.YoubanPublishAccount.Ctx(ctx).
 		Where(accountColumns.Id, in.ParentId).
-		Where(accountColumns.MerchantId, in.MerchantId).
+		Where(accountColumns.TenantId, in.TenantId).
 		Where(accountColumns.AccountType, sysin.PublishAccountTypeAdmin).
 		Where(accountColumns.Status, consts.StatusEnabled).
 		WhereNull(accountColumns.DeletedAt).

@@ -21,27 +21,28 @@ type YoubanPublishAccountDao struct {
 
 // YoubanPublishAccountColumns defines and stores column names for the table hg_youban_publish_account.
 type YoubanPublishAccountColumns struct {
-	Id                 string // 主键
-	MerchantId         string // 商家ID
-	AdminMemberId      string // 绑定系统账号ID
-	ParentId           string // 父账号ID
-	AccountType        string // 账号类型
-	Nickname           string // 昵称
-	Username           string // 用户名
-	TelegramUserId     string // TG用户ID
-	TelegramUsername   string // TG用户名
-	DailyPublishLimit  string // 每日上架额度
-	CanDirectPublish   string // 是否可直接发布
-	AllowedChannelJson string // 可发布频道JSON
-	AllowedRegionJson  string // 可发布地区JSON
-	Remark             string // 备注
-	Status             string // 状态
-	CreatedBy          string // 创建人
-	UpdatedBy          string // 更新人
-	DeletedBy          string // 删除人
-	CreatedAt          string // 创建时间
-	UpdatedAt          string // 更新时间
-	DeletedAt          string // 删除时间
+	Id                 string //
+	MerchantId         string //
+	AdminMemberId      string //
+	ParentId           string //
+	AccountType        string //
+	Nickname           string //
+	Username           string //
+	TelegramUserId     string //
+	TelegramUsername   string //
+	DailyPublishLimit  string //
+	CanDirectPublish   string //
+	AllowedChannelJson string //
+	AllowedRegionJson  string //
+	Remark             string //
+	Status             string //
+	CreatedBy          string //
+	UpdatedBy          string //
+	DeletedBy          string //
+	CreatedAt          string //
+	UpdatedAt          string //
+	DeletedAt          string //
+	TenantId           string //
 }
 
 // youbanPublishAccountColumns holds the columns for the table hg_youban_publish_account.
@@ -67,6 +68,7 @@ var youbanPublishAccountColumns = YoubanPublishAccountColumns{
 	CreatedAt:          "created_at",
 	UpdatedAt:          "updated_at",
 	DeletedAt:          "deleted_at",
+	TenantId:           "tenant_id",
 }
 
 // NewYoubanPublishAccountDao creates and returns a new DAO object for table data access.

@@ -21,19 +21,20 @@ type YoubanPublishTgLoginDao struct {
 
 // YoubanPublishTgLoginColumns defines and stores column names for the table hg_youban_publish_tg_login.
 type YoubanPublishTgLoginColumns struct {
-	Id               string // 主键
-	MerchantId       string // 商家ID
-	AccountId        string // 账号ID
-	LoginToken       string // 登录令牌
-	QrUrl            string // 二维码地址
-	TelegramUserId   string // TG用户ID
-	TelegramUsername string // TG用户名
-	SessionKey       string // 会话存储键
-	Status           string // 状态
-	ErrorMessage     string // 错误信息
-	ExpiresAt        string // 过期时间
-	CreatedAt        string // 创建时间
-	UpdatedAt        string // 更新时间
+	Id               string //
+	MerchantId       string //
+	AccountId        string //
+	LoginToken       string //
+	QrUrl            string //
+	TelegramUserId   string //
+	TelegramUsername string //
+	SessionKey       string //
+	Status           string //
+	ErrorMessage     string //
+	ExpiresAt        string //
+	CreatedAt        string //
+	UpdatedAt        string //
+	TenantId         string //
 }
 
 // youbanPublishTgLoginColumns holds the columns for the table hg_youban_publish_tg_login.
@@ -51,6 +52,7 @@ var youbanPublishTgLoginColumns = YoubanPublishTgLoginColumns{
 	ExpiresAt:        "expires_at",
 	CreatedAt:        "created_at",
 	UpdatedAt:        "updated_at",
+	TenantId:         "tenant_id",
 }
 
 // NewYoubanPublishTgLoginDao creates and returns a new DAO object for table data access.

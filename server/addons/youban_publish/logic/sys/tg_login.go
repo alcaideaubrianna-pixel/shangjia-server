@@ -62,12 +62,13 @@ func (s *sSysPublish) TelegramLoginStart(ctx context.Context, in *sysin.Telegram
 	now := gtime.Now()
 	token := grand.S(40)
 	expiresAt := now.Add(5 * time.Minute)
-	sessionKey, sessionPath, err := s.telegramSessionPath(account.MerchantId, account.Id, token)
+	sessionKey, sessionPath, err := s.telegramSessionPath(account.TenantId, account.Id, token)
 	if err != nil {
 		return nil, err
 	}
 	data := g.Map{
-		"merchant_id": account.MerchantId,
+		"tenant_id":   account.TenantId,
+		"merchant_id": account.TenantId,
 		"account_id":  account.Id,
 		"login_token": token,
 		"session_key": sessionKey,
@@ -89,7 +90,7 @@ func (s *sSysPublish) TelegramLoginStart(ctx context.Context, in *sysin.Telegram
 		passwordCh: make(chan string),
 	}
 	s.storeLoginRuntime(token, runtime)
-	go s.runTelegramLogin(loginCtx, runtime, conf, account.MerchantId, account.Id, sessionKey, sessionPath)
+	go s.runTelegramLogin(loginCtx, runtime, conf, account.TenantId, account.Id, sessionKey, sessionPath)
 
 	return s.telegramLoginById(ctx, id, account.Id)
 }
@@ -139,7 +140,7 @@ func (s *sSysPublish) TelegramLoginPassword(ctx context.Context, in *sysin.Teleg
 	return s.telegramLoginByToken(ctx, token, account.Id)
 }
 
-func (s *sSysPublish) runTelegramLogin(ctx context.Context, runtime *telegramLoginRuntime, conf *model.TelegramConfig, merchantId int64, accountId int64, sessionKey string, sessionPath string) {
+func (s *sSysPublish) runTelegramLogin(ctx context.Context, runtime *telegramLoginRuntime, conf *model.TelegramConfig, tenantId int64, accountId int64, sessionKey string, sessionPath string) {
 	defer func() {
 		runtime.cancel()
 		s.removeLoginRuntime(runtime.loginToken)
@@ -179,7 +180,7 @@ func (s *sSysPublish) runTelegramLogin(ctx context.Context, runtime *telegramLog
 		if err != nil {
 			return err
 		}
-		return s.finishTelegramLogin(runCtx, runtime.loginToken, merchantId, accountId, sessionKey, authorization)
+		return s.finishTelegramLogin(runCtx, runtime.loginToken, tenantId, accountId, sessionKey, authorization)
 	})
 	if err == nil || errors.Is(err, context.Canceled) {
 		return
@@ -216,7 +217,7 @@ func (s *sSysPublish) waitTelegramPassword(ctx context.Context, runtime *telegra
 	}
 }
 
-func (s *sSysPublish) finishTelegramLogin(ctx context.Context, token string, merchantId int64, accountId int64, sessionKey string, authorization *tg.AuthAuthorization) error {
+func (s *sSysPublish) finishTelegramLogin(ctx context.Context, token string, tenantId int64, accountId int64, sessionKey string, authorization *tg.AuthAuthorization) error {
 	user, ok := authorization.User.AsNotEmpty()
 	if !ok {
 		return gerror.New("Telegram授权结果缺少用户信息")
@@ -242,7 +243,7 @@ func (s *sSysPublish) finishTelegramLogin(ctx context.Context, token string, mer
 		}
 		if _, err := tx.Model(publishAccountTable).Safe().Ctx(ctx).
 			Where("id", accountId).
-			Where("merchant_id", merchantId).
+			Where("tenant_id", tenantId).
 			WhereNull("deleted_at").
 			Data(g.Map{
 				"telegram_user_id":  strconv.FormatInt(user.ID, 10),
@@ -347,12 +348,12 @@ func (s *sSysPublish) cancelAccountLogin(accountId int64) {
 	}
 }
 
-func (s *sSysPublish) telegramSessionPath(merchantId int64, accountId int64, token string) (sessionKey string, path string, err error) {
-	dir := filepath.Join(gfile.Pwd(), "runtime", "youban_publish", "telegram_sessions", fmt.Sprintf("merchant_%d", merchantId))
+func (s *sSysPublish) telegramSessionPath(tenantId int64, accountId int64, token string) (sessionKey string, path string, err error) {
+	dir := filepath.Join(gfile.Pwd(), "runtime", "youban_publish", "telegram_sessions", fmt.Sprintf("tenant_%d", tenantId))
 	if err = gfile.Mkdir(dir); err != nil {
 		return "", "", gerror.Wrap(err, "创建Telegram会话目录失败")
 	}
-	sessionKey = fmt.Sprintf("merchant_%d/account_%d/%s.json", merchantId, accountId, token)
+	sessionKey = fmt.Sprintf("tenant_%d/account_%d/%s.json", tenantId, accountId, token)
 	return sessionKey, filepath.Join(dir, fmt.Sprintf("account_%d_%s.json", accountId, token)), nil
 }
 

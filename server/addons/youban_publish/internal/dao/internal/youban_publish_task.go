@@ -21,28 +21,29 @@ type YoubanPublishTaskDao struct {
 
 // YoubanPublishTaskColumns defines and stores column names for the table hg_youban_publish_task.
 type YoubanPublishTaskColumns struct {
-	Id              string // 主键
-	MerchantId      string // 商家ID
-	AccountId       string // 账号ID
-	ProfileId       string // 资料ID
-	ClientRequestId string // 客户端幂等ID
-	Title           string // 标题
-	Province        string // 省份
-	City            string // 城市
-	PlainText       string // 正文
-	MediaCount      string // 媒体数量
-	TgPushEnabled   string // 是否推送TG
-	TgStatus        string // TG状态
-	Status          string // 任务状态
-	ErrorMessage    string // 错误信息
-	SubmittedAt     string // 提交时间
-	PublishedAt     string // 发布时间
-	CreatedBy       string // 创建人
-	UpdatedBy       string // 更新人
-	DeletedBy       string // 删除人
-	CreatedAt       string // 创建时间
-	UpdatedAt       string // 更新时间
-	DeletedAt       string // 删除时间
+	Id              string //
+	MerchantId      string //
+	AccountId       string //
+	ProfileId       string //
+	ClientRequestId string //
+	Title           string //
+	Province        string //
+	City            string //
+	PlainText       string //
+	MediaCount      string //
+	TgPushEnabled   string //
+	TgStatus        string //
+	Status          string //
+	ErrorMessage    string //
+	SubmittedAt     string //
+	PublishedAt     string //
+	CreatedBy       string //
+	UpdatedBy       string //
+	DeletedBy       string //
+	CreatedAt       string //
+	UpdatedAt       string //
+	DeletedAt       string //
+	TenantId        string //
 }
 
 // youbanPublishTaskColumns holds the columns for the table hg_youban_publish_task.
@@ -69,6 +70,7 @@ var youbanPublishTaskColumns = YoubanPublishTaskColumns{
 	CreatedAt:       "created_at",
 	UpdatedAt:       "updated_at",
 	DeletedAt:       "deleted_at",
+	TenantId:        "tenant_id",
 }
 
 // NewYoubanPublishTaskDao creates and returns a new DAO object for table data access.

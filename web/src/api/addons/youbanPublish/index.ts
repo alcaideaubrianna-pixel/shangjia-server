@@ -1,15 +1,15 @@
 import { http } from '@/utils/http/axios';
 
-export function MerchantList(params = {}) {
-  return http.request({ url: '/youban_publish/publish/merchant/list', method: 'get', params });
+export function TenantList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/tenant/list', method: 'get', params });
 }
 
-export function MerchantSave(params = {}) {
-  return http.request({ url: '/youban_publish/publish/merchant/save', method: 'POST', params });
+export function TenantSave(params = {}) {
+  return http.request({ url: '/youban_publish/publish/tenant/save', method: 'POST', params });
 }
 
-export function MerchantDelete(params = {}) {
-  return http.request({ url: '/youban_publish/publish/merchant/delete', method: 'POST', params });
+export function TenantDelete(params = {}) {
+  return http.request({ url: '/youban_publish/publish/tenant/delete', method: 'POST', params });
 }
 
 export function AccountList(params = {}) {

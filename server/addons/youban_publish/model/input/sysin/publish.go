@@ -22,15 +22,15 @@ const (
 	PublishTaskStatusCanceled   = "canceled"
 )
 
-type MerchantListInp struct {
+type TenantListInp struct {
 	form.PageReq
-	Keyword string `json:"keyword" dc:"商家名称/联系人"`
+	Keyword string `json:"keyword" dc:"租户名称/联系人"`
 	Status  int    `json:"status" dc:"状态：1启用 2停用"`
 }
 
-type MerchantModel struct {
+type TenantModel struct {
 	Id           int64       `json:"id" dc:"ID"`
-	Name         string      `json:"name" dc:"商家名称"`
+	Name         string      `json:"name" dc:"租户名称"`
 	ContactName  string      `json:"contactName" dc:"联系人"`
 	ContactPhone string      `json:"contactPhone" dc:"联系电话"`
 	Remark       string      `json:"remark" dc:"备注"`
@@ -39,36 +39,36 @@ type MerchantModel struct {
 	UpdatedAt    *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
-type MerchantSaveInp struct {
+type TenantSaveInp struct {
 	Id           int64  `json:"id" dc:"ID"`
-	Name         string `json:"name" dc:"商家名称"`
+	Name         string `json:"name" dc:"租户名称"`
 	ContactName  string `json:"contactName" dc:"联系人"`
 	ContactPhone string `json:"contactPhone" dc:"联系电话"`
 	Remark       string `json:"remark" dc:"备注"`
 	Status       int    `json:"status" dc:"状态：1启用 2停用"`
 }
 
-func (in *MerchantSaveInp) Filter(ctx context.Context) error {
+func (in *TenantSaveInp) Filter(ctx context.Context) error {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" {
-		return gerror.New("商家名称不能为空")
+		return gerror.New("租户名称不能为空")
 	}
 	if in.Status == 0 {
 		in.Status = 1
 	}
 	if in.Status != 1 && in.Status != 2 {
-		return gerror.New("商家状态不合法")
+		return gerror.New("租户状态不合法")
 	}
 	return nil
 }
 
-type MerchantDeleteInp struct {
+type TenantDeleteInp struct {
 	Ids []int64 `json:"ids" v:"required#请选择要删除的数据" dc:"ID列表"`
 }
 
 type AccountListInp struct {
 	form.PageReq
-	MerchantId  int64  `json:"merchantId" dc:"商家ID"`
+	TenantId    int64  `json:"tenantId" dc:"租户ID"`
 	AccountType string `json:"accountType" dc:"账号类型：admin/uploader"`
 	Keyword     string `json:"keyword" dc:"账号/昵称"`
 	Status      int    `json:"status" dc:"状态：1启用 2停用"`
@@ -76,8 +76,8 @@ type AccountListInp struct {
 
 type AccountModel struct {
 	Id                 int64       `json:"id" dc:"ID"`
-	MerchantId         int64       `json:"merchantId" dc:"商家ID"`
-	MerchantName       string      `json:"merchantName" dc:"商家名称"`
+	TenantId           int64       `json:"tenantId" dc:"租户ID"`
+	TenantName         string      `json:"tenantName" dc:"租户名称"`
 	AdminMemberId      int64       `json:"adminMemberId" dc:"绑定系统账号ID"`
 	ParentId           int64       `json:"parentId" dc:"父账号ID"`
 	AccountType        string      `json:"accountType" dc:"账号类型"`
@@ -97,7 +97,7 @@ type AccountModel struct {
 
 type AccountSaveInp struct {
 	Id                 int64  `json:"id" dc:"ID"`
-	MerchantId         int64  `json:"merchantId" dc:"商家ID"`
+	TenantId           int64  `json:"tenantId" dc:"租户ID"`
 	AdminMemberId      int64  `json:"adminMemberId" dc:"绑定系统账号ID"`
 	ParentId           int64  `json:"parentId" dc:"父账号ID"`
 	AccountType        string `json:"accountType" dc:"账号类型：admin/uploader"`
@@ -115,8 +115,8 @@ type AccountSaveInp struct {
 }
 
 func (in *AccountSaveInp) Filter(ctx context.Context) error {
-	if in.MerchantId <= 0 {
-		return gerror.New("商家ID不能为空")
+	if in.TenantId <= 0 {
+		return gerror.New("租户ID不能为空")
 	}
 	in.AccountType = strings.TrimSpace(in.AccountType)
 	if in.AccountType == "" {
@@ -153,15 +153,15 @@ type CurrentAccountModel struct {
 
 type TaskListInp struct {
 	form.PageReq
-	MerchantId int64  `json:"merchantId" dc:"商家ID"`
-	AccountId  int64  `json:"accountId" dc:"上架账号ID"`
-	Status     string `json:"status" dc:"任务状态"`
-	Keyword    string `json:"keyword" dc:"标题/编号"`
+	TenantId  int64  `json:"tenantId" dc:"租户ID"`
+	AccountId int64  `json:"accountId" dc:"上架账号ID"`
+	Status    string `json:"status" dc:"任务状态"`
+	Keyword   string `json:"keyword" dc:"标题/编号"`
 }
 
 type TaskModel struct {
 	Id              int64       `json:"id" dc:"ID"`
-	MerchantId      int64       `json:"merchantId" dc:"商家ID"`
+	TenantId        int64       `json:"tenantId" dc:"租户ID"`
 	AccountId       int64       `json:"accountId" dc:"上架账号ID"`
 	ProfileId       int64       `json:"profileId" dc:"资料ID"`
 	ClientRequestId string      `json:"clientRequestId" dc:"客户端幂等ID"`
@@ -178,14 +178,14 @@ type TaskModel struct {
 	PublishedAt     *gtime.Time `json:"publishedAt" dc:"发布时间"`
 	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
 	UpdatedAt       *gtime.Time `json:"updatedAt" dc:"更新时间"`
-	MerchantName    string      `json:"merchantName" dc:"商家名称"`
+	TenantName      string      `json:"tenantName" dc:"租户名称"`
 	AccountNickname string      `json:"accountNickname" dc:"账号昵称"`
 	AccountUsername string      `json:"accountUsername" dc:"账号用户名"`
 }
 
 type TaskSaveInp struct {
 	Id              int64  `json:"id" dc:"ID"`
-	MerchantId      int64  `json:"merchantId" dc:"商家ID，后台可传；API端取当前账号"`
+	TenantId        int64  `json:"tenantId" dc:"租户ID，后台可传；API端取当前账号"`
 	AccountId       int64  `json:"accountId" dc:"上架账号ID，后台可传；API端取当前账号"`
 	ClientRequestId string `json:"clientRequestId" dc:"客户端幂等ID"`
 	Title           string `json:"title" dc:"标题"`
@@ -245,7 +245,7 @@ type MediaDeleteInp struct {
 
 type MediaModel struct {
 	Id           int64       `json:"id" dc:"ID"`
-	MerchantId   int64       `json:"merchantId" dc:"商家ID"`
+	TenantId     int64       `json:"tenantId" dc:"租户ID"`
 	AccountId    int64       `json:"accountId" dc:"账号ID"`
 	TaskId       int64       `json:"taskId" dc:"任务ID"`
 	ProfileId    int64       `json:"profileId" dc:"资料ID"`
@@ -265,12 +265,14 @@ type MediaModel struct {
 
 type BotListInp struct {
 	form.PageReq
-	Keyword string `json:"keyword" dc:"关键词"`
-	Status  int    `json:"status" dc:"状态"`
+	TenantId int64  `json:"tenantId" dc:"租户ID，0表示全局"`
+	Keyword  string `json:"keyword" dc:"关键词"`
+	Status   int    `json:"status" dc:"状态"`
 }
 
 type BotModel struct {
 	Id          int64       `json:"id" dc:"ID"`
+	TenantId    int64       `json:"tenantId" dc:"租户ID，0表示全局"`
 	BotName     string      `json:"botName" dc:"Bot名称"`
 	BotUsername string      `json:"botUsername" dc:"Bot用户名"`
 	BotToken    string      `json:"botToken" dc:"Bot Token"`
@@ -282,6 +284,7 @@ type BotModel struct {
 
 type BotSaveInp struct {
 	Id          int64  `json:"id" dc:"ID"`
+	TenantId    int64  `json:"tenantId" dc:"租户ID，0表示全局"`
 	BotName     string `json:"botName" dc:"Bot名称"`
 	BotUsername string `json:"botUsername" dc:"Bot用户名"`
 	BotToken    string `json:"botToken" dc:"Bot Token"`

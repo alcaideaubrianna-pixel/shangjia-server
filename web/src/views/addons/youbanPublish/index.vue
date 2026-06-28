@@ -2,24 +2,24 @@
   <div>
     <div class="n-layout-page-header">
       <n-card :bordered="false" title="上架系统">
-        <span>管理商户、管理员账号、上架账号、上架任务和 Telegram Bot 配置</span>
+        <span>管理租户、管理员账号、上架账号、上架任务和 Telegram Bot 配置</span>
       </n-card>
     </div>
 
     <n-card :bordered="false" class="proCard">
       <n-tabs v-model:value="activeTab" type="line" animated @update:value="handleTabChange">
-        <n-tab-pane name="merchants" tab="商户">
+        <n-tab-pane name="tenants" tab="租户">
           <n-space class="toolbar" align="center">
-            <n-input v-model:value="merchantQuery.keyword" placeholder="商户名称 / 联系人" clearable @keyup.enter="loadMerchants" />
-            <n-select v-model:value="merchantQuery.status" :options="statusOptionsWithAll" clearable placeholder="状态" class="status-select" />
-            <n-button @click="loadMerchants">查询</n-button>
-            <n-button type="primary" @click="openMerchantModal()">新增商户</n-button>
+            <n-input v-model:value="tenantQuery.keyword" placeholder="租户名称 / 联系人" clearable @keyup.enter="loadTenants" />
+            <n-select v-model:value="tenantQuery.status" :options="statusOptionsWithAll" clearable placeholder="状态" class="status-select" />
+            <n-button @click="loadTenants">查询</n-button>
+            <n-button type="primary" @click="openTenantModal()">新增租户</n-button>
           </n-space>
           <n-data-table
-            :columns="merchantColumns"
-            :data="merchants"
-            :loading="merchantLoading"
-            :pagination="merchantPagination"
+            :columns="tenantColumns"
+            :data="tenants"
+            :loading="tenantLoading"
+            :pagination="tenantPagination"
             :row-key="(row) => row.id"
             :scroll-x="980"
             size="small"
@@ -29,7 +29,7 @@
 
         <n-tab-pane name="accounts" tab="账号">
           <n-space class="toolbar" align="center">
-            <n-select v-model:value="accountQuery.merchantId" :options="merchantOptionsWithAll" clearable filterable placeholder="商户" class="merchant-select" />
+            <n-select v-model:value="accountQuery.tenantId" :options="tenantOptionsWithAll" clearable filterable placeholder="租户" class="tenant-select" />
             <n-select v-model:value="accountQuery.accountType" :options="accountTypeOptionsWithAll" clearable placeholder="账号类型" class="status-select" />
             <n-input v-model:value="accountQuery.keyword" placeholder="账号 / 昵称" clearable @keyup.enter="loadAccounts" />
             <n-button @click="loadAccounts">查询</n-button>
@@ -49,7 +49,7 @@
 
         <n-tab-pane name="tasks" tab="任务">
           <n-space class="toolbar" align="center">
-            <n-select v-model:value="taskQuery.merchantId" :options="merchantOptionsWithAll" clearable filterable placeholder="商户" class="merchant-select" />
+            <n-select v-model:value="taskQuery.tenantId" :options="tenantOptionsWithAll" clearable filterable placeholder="租户" class="tenant-select" />
             <n-select v-model:value="taskQuery.status" :options="taskStatusOptionsWithAll" clearable placeholder="任务状态" class="status-select" />
             <n-input v-model:value="taskQuery.keyword" placeholder="标题 / 请求ID" clearable @keyup.enter="loadTasks" />
             <n-button @click="loadTasks">查询</n-button>
@@ -68,6 +68,7 @@
 
         <n-tab-pane name="bots" tab="Bot">
           <n-space class="toolbar" align="center">
+            <n-select v-model:value="botQuery.tenantId" :options="botTenantOptions" clearable filterable placeholder="租户" class="tenant-select" />
             <n-input v-model:value="botQuery.keyword" placeholder="Bot 名称 / 用户名" clearable @keyup.enter="loadBots" />
             <n-select v-model:value="botQuery.status" :options="statusOptionsWithAll" clearable placeholder="状态" class="status-select" />
             <n-button @click="loadBots">查询</n-button>
@@ -130,19 +131,19 @@
       </n-tabs>
     </n-card>
 
-    <n-modal v-model:show="merchantModalVisible" preset="dialog" title="商户" positive-text="保存" negative-text="取消" @positive-click="saveMerchant">
-      <n-form :model="merchantForm" label-placement="left" label-width="90">
-        <n-form-item label="商户名称"><n-input v-model:value="merchantForm.name" clearable /></n-form-item>
-        <n-form-item label="联系人"><n-input v-model:value="merchantForm.contactName" clearable /></n-form-item>
-        <n-form-item label="联系电话"><n-input v-model:value="merchantForm.contactPhone" clearable /></n-form-item>
-        <n-form-item label="状态"><n-select v-model:value="merchantForm.status" :options="statusOptions" /></n-form-item>
-        <n-form-item label="备注"><n-input v-model:value="merchantForm.remark" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" /></n-form-item>
+    <n-modal v-model:show="tenantModalVisible" preset="dialog" title="租户" positive-text="保存" negative-text="取消" @positive-click="saveTenant">
+      <n-form :model="tenantForm" label-placement="left" label-width="90">
+        <n-form-item label="租户名称"><n-input v-model:value="tenantForm.name" clearable /></n-form-item>
+        <n-form-item label="联系人"><n-input v-model:value="tenantForm.contactName" clearable /></n-form-item>
+        <n-form-item label="联系电话"><n-input v-model:value="tenantForm.contactPhone" clearable /></n-form-item>
+        <n-form-item label="状态"><n-select v-model:value="tenantForm.status" :options="statusOptions" /></n-form-item>
+        <n-form-item label="备注"><n-input v-model:value="tenantForm.remark" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" /></n-form-item>
       </n-form>
     </n-modal>
 
     <n-modal v-model:show="accountModalVisible" preset="dialog" title="账号" positive-text="保存" negative-text="取消" @positive-click="saveAccount">
       <n-form :model="accountForm" label-placement="left" label-width="110">
-        <n-form-item label="商户"><n-select v-model:value="accountForm.merchantId" :options="merchantOptions" filterable /></n-form-item>
+        <n-form-item label="租户"><n-select v-model:value="accountForm.tenantId" :options="tenantOptions" filterable /></n-form-item>
         <n-form-item label="账号类型"><n-select v-model:value="accountForm.accountType" :options="accountTypeOptions" /></n-form-item>
         <n-form-item v-if="accountForm.accountType === 'uploader'" label="管理员账号">
           <n-select v-model:value="accountForm.parentId" :options="adminAccountOptions" filterable clearable />
@@ -159,6 +160,7 @@
 
     <n-modal v-model:show="botModalVisible" preset="dialog" title="Bot配置" positive-text="保存" negative-text="取消" @positive-click="saveBot">
       <n-form :model="botForm" label-placement="left" label-width="100">
+        <n-form-item label="租户"><n-select v-model:value="botForm.tenantId" :options="botTenantOptions" filterable clearable placeholder="不选表示全局默认" /></n-form-item>
         <n-form-item label="Bot名称"><n-input v-model:value="botForm.botName" clearable /></n-form-item>
         <n-form-item label="Bot Token"><n-input v-model:value="botForm.botToken" type="password" show-password-on="click" clearable /></n-form-item>
         <n-form-item label="状态"><n-select v-model:value="botForm.status" :options="statusOptions" /></n-form-item>
@@ -180,9 +182,9 @@
     BotSave,
     ConfigGet,
     ConfigUpdate,
-    MerchantDelete,
-    MerchantList,
-    MerchantSave,
+    TenantDelete,
+    TenantList,
+    TenantSave,
     TaskCancel,
     TaskList,
     TaskSubmit,
@@ -190,7 +192,7 @@
 
   const dialog = useDialog();
   const message = useMessage();
-  const activeTab = ref('merchants');
+  const activeTab = ref('tenants');
 
   const statusOptions = [
     { label: '启用', value: 1 },
@@ -217,41 +219,42 @@
     { label: 'Webhook', value: 'webhook' },
   ];
 
-  const merchants = ref<any[]>([]);
+  const tenants = ref<any[]>([]);
   const accounts = ref<any[]>([]);
   const tasks = ref<any[]>([]);
   const bots = ref<any[]>([]);
 
-  const merchantLoading = ref(false);
+  const tenantLoading = ref(false);
   const accountLoading = ref(false);
   const taskLoading = ref(false);
   const botLoading = ref(false);
   const configLoading = ref(false);
   const configSaving = ref(false);
 
-  const merchantModalVisible = ref(false);
+  const tenantModalVisible = ref(false);
   const accountModalVisible = ref(false);
   const botModalVisible = ref(false);
 
-  const merchantQuery = reactive({ keyword: '', status: 0 });
-  const accountQuery = reactive({ merchantId: null as number | null, accountType: '', keyword: '', status: 0 });
-  const taskQuery = reactive({ merchantId: null as number | null, status: '', keyword: '' });
-  const botQuery = reactive({ keyword: '', status: 0 });
+  const tenantQuery = reactive({ keyword: '', status: 0 });
+  const accountQuery = reactive({ tenantId: null as number | null, accountType: '', keyword: '', status: 0 });
+  const taskQuery = reactive({ tenantId: null as number | null, status: '', keyword: '' });
+  const botQuery = reactive({ tenantId: null as number | null, keyword: '', status: 0 });
 
-  const merchantPagination = createPagination(loadMerchants);
+  const tenantPagination = createPagination(loadTenants);
   const accountPagination = createPagination(loadAccounts);
   const taskPagination = createPagination(loadTasks);
   const botPagination = createPagination(loadBots);
 
-  const merchantOptions = computed(() => merchants.value.map((item) => ({ label: item.name, value: item.id })));
-  const merchantOptionsWithAll = computed(() => [{ label: '全部商户', value: null }, ...merchantOptions.value]);
+  const tenantOptions = computed(() => tenants.value.map((item) => ({ label: item.name, value: item.id })));
+  const tenantOptionsWithAll = computed(() => [{ label: '全部租户', value: null }, ...tenantOptions.value]);
+  const botTenantOptions = computed(() => [{ label: '全局默认', value: 0 }, ...tenantOptions.value]);
   const adminAccountOptions = computed(() =>
     accounts.value
-      .filter((item) => item.accountType === 'admin' && item.merchantId === accountForm.merchantId)
+      .filter((item) => item.accountType === 'admin' && item.tenantId === accountForm.tenantId)
       .map((item) => ({ label: `${item.nickname || item.username} (${item.username})`, value: item.id }))
   );
 
-  const merchantForm = reactive(newMerchantForm());
+  const tenantForm = reactive(newTenantForm());
   const accountForm = reactive(newAccountForm());
   const botForm = reactive(newBotForm());
   const telegramConfig = reactive({
@@ -265,9 +268,9 @@
   });
   const accountConfig = reactive({ defaultRoleId: 10, defaultDeptId: 1 });
 
-  const merchantColumns = [
+  const tenantColumns = [
     { title: 'ID', key: 'id', width: 80 },
-    { title: '商户名称', key: 'name', width: 180 },
+    { title: '租户名称', key: 'name', width: 180 },
     { title: '联系人', key: 'contactName', width: 140 },
     { title: '联系电话', key: 'contactPhone', width: 150 },
     { title: '状态', key: 'status', width: 100, render: (row) => renderStatus(row.status) },
@@ -278,14 +281,14 @@
       width: 160,
       fixed: 'right',
       render(row) {
-        return h(NSpace, {}, { default: () => [actionButton('编辑', () => openMerchantModal(row)), dangerButton('删除', () => deleteMerchant(row.id))] });
+        return h(NSpace, {}, { default: () => [actionButton('编辑', () => openTenantModal(row)), dangerButton('删除', () => deleteTenant(row.id))] });
       },
     },
   ];
 
   const accountColumns = [
     { title: 'ID', key: 'id', width: 80 },
-    { title: '商户', key: 'merchantName', width: 160 },
+    { title: '租户', key: 'tenantName', width: 160 },
     { title: '类型', key: 'accountType', width: 110, render: (row) => accountTypeLabel(row.accountType) },
     { title: '账号', key: 'username', width: 160 },
     { title: '昵称', key: 'nickname', width: 160 },
@@ -306,7 +309,7 @@
 
   const taskColumns = [
     { title: 'ID', key: 'id', width: 80 },
-    { title: '商户', key: 'merchantName', width: 150 },
+    { title: '租户', key: 'tenantName', width: 150 },
     { title: '账号', key: 'accountUsername', width: 150 },
     { title: '标题', key: 'title', width: 220 },
     { title: '地区', key: 'city', width: 140, render: (row) => [row.province, row.city].filter(Boolean).join(' / ') || '-' },
@@ -327,6 +330,7 @@
 
   const botColumns = [
     { title: 'ID', key: 'id', width: 80 },
+    { title: '租户', key: 'tenantId', width: 160, render: (row) => tenantName(row.tenantId) },
     { title: 'Bot名称', key: 'botName', width: 180 },
     { title: '用户名', key: 'botUsername', width: 180 },
     { title: '状态', key: 'status', width: 100, render: (row) => renderStatus(row.status) },
@@ -343,7 +347,7 @@
   ];
 
   onMounted(async () => {
-    await loadMerchants();
+    await loadTenants();
   });
 
   function createPagination(loader: () => void) {
@@ -373,14 +377,14 @@
     if (tab === 'config') await loadConfigs();
   }
 
-  async function loadMerchants() {
-    merchantLoading.value = true;
+  async function loadTenants() {
+    tenantLoading.value = true;
     try {
-      const res: any = await MerchantList({ ...merchantQuery, page: merchantPagination.page, perPage: merchantPagination.pageSize });
-      merchants.value = res?.list || [];
-      merchantPagination.itemCount = res?.totalCount || res?.total || 0;
+      const res: any = await TenantList({ ...tenantQuery, page: tenantPagination.page, perPage: tenantPagination.pageSize });
+      tenants.value = res?.list || [];
+      tenantPagination.itemCount = res?.totalCount || res?.total || 0;
     } finally {
-      merchantLoading.value = false;
+      tenantLoading.value = false;
     }
   }
 
@@ -438,21 +442,21 @@
     }
   }
 
-  function openMerchantModal(row: any = null) {
-    Object.assign(merchantForm, newMerchantForm(), row || {});
-    merchantModalVisible.value = true;
+  function openTenantModal(row: any = null) {
+    Object.assign(tenantForm, newTenantForm(), row || {});
+    tenantModalVisible.value = true;
   }
 
-  async function saveMerchant() {
-    await MerchantSave(merchantForm);
-    message.success('商户已保存');
-    await loadMerchants();
+  async function saveTenant() {
+    await TenantSave(tenantForm);
+    message.success('租户已保存');
+    await loadTenants();
   }
 
   function openAccountModal(row: any = null) {
     Object.assign(accountForm, newAccountForm(), row || {});
-    if (!accountForm.merchantId && merchants.value.length === 1) {
-      accountForm.merchantId = merchants.value[0].id;
+    if (!accountForm.tenantId && tenants.value.length === 1) {
+      accountForm.tenantId = tenants.value[0].id;
     }
     accountModalVisible.value = true;
   }
@@ -474,10 +478,10 @@
     await loadBots();
   }
 
-  function deleteMerchant(id: number) {
-    confirmDelete('确认删除该商户？', async () => {
-      await MerchantDelete({ ids: [id] });
-      await loadMerchants();
+  function deleteTenant(id: number) {
+    confirmDelete('确认删除该租户？', async () => {
+      await TenantDelete({ ids: [id] });
+      await loadTenants();
     });
   }
 
@@ -542,14 +546,19 @@
     return accountTypeOptions.find((item) => item.value === type)?.label || type || '-';
   }
 
-  function newMerchantForm() {
+  function tenantName(id: number) {
+    if (!id) return '全局默认';
+    return tenants.value.find((item) => item.id === id)?.name || `租户 ${id}`;
+  }
+
+  function newTenantForm() {
     return { id: 0, name: '', contactName: '', contactPhone: '', remark: '', status: 1 };
   }
 
   function newAccountForm() {
     return {
       id: 0,
-      merchantId: null,
+      tenantId: null,
       parentId: null,
       accountType: 'admin',
       username: '',
@@ -563,7 +572,7 @@
   }
 
   function newBotForm() {
-    return { id: 0, botName: '', botToken: '', remark: '', status: 1 };
+    return { id: 0, tenantId: 0, botName: '', botToken: '', remark: '', status: 1 };
   }
 </script>
 
@@ -576,7 +585,7 @@
     width: 140px;
   }
 
-  .merchant-select {
+  .tenant-select {
     width: 180px;
   }
 

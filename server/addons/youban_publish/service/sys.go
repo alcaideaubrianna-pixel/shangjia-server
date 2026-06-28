@@ -11,9 +11,9 @@ import (
 type ISysPublish interface {
 	StartRuntime(ctx context.Context)
 	StopRuntime()
-	AdminMerchantList(ctx context.Context, in *sysin.MerchantListInp) (list []*sysin.MerchantModel, totalCount int, err error)
-	AdminMerchantSave(ctx context.Context, in *sysin.MerchantSaveInp) (err error)
-	AdminMerchantDelete(ctx context.Context, in *sysin.MerchantDeleteInp) (err error)
+	AdminTenantList(ctx context.Context, in *sysin.TenantListInp) (list []*sysin.TenantModel, totalCount int, err error)
+	AdminTenantSave(ctx context.Context, in *sysin.TenantSaveInp) (err error)
+	AdminTenantDelete(ctx context.Context, in *sysin.TenantDeleteInp) (err error)
 	AdminAccountList(ctx context.Context, in *sysin.AccountListInp) (list []*sysin.AccountModel, totalCount int, err error)
 	AdminAccountSave(ctx context.Context, in *sysin.AccountSaveInp) (err error)
 	AdminAccountDelete(ctx context.Context, in *sysin.AccountDeleteInp) (err error)

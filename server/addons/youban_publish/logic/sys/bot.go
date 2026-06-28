@@ -25,6 +25,9 @@ func (s *sSysPublish) AdminBotList(ctx context.Context, in *sysin.BotListInp) (l
 		in = &sysin.BotListInp{}
 	}
 	mod := g.DB().Model(publishBotTable).Safe().Ctx(ctx).WhereNull("deleted_at")
+	if in.TenantId > 0 {
+		mod = mod.Where("tenant_id", in.TenantId)
+	}
 	if in.Status > 0 {
 		mod = mod.Where("status", in.Status)
 	}
@@ -65,6 +68,7 @@ func (s *sSysPublish) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) (e
 		botName = telegramBotDisplayName(tgUser)
 	}
 	data := g.Map{
+		"tenant_id":    in.TenantId,
 		"bot_name":     botName,
 		"bot_username": strings.TrimPrefix(strings.TrimSpace(tgUser.Username), "@"),
 		"bot_token":    botToken,
@@ -101,10 +105,16 @@ func (s *sSysPublish) AdminBotDelete(ctx context.Context, in *sysin.BotDeleteInp
 	return nil
 }
 
-func (s *sSysPublish) enabledBots(ctx context.Context) (list []*sysin.BotModel, err error) {
-	if err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).
+func (s *sSysPublish) enabledBots(ctx context.Context, tenantId int64) (list []*sysin.BotModel, err error) {
+	mod := g.DB().Model(publishBotTable).Safe().Ctx(ctx).
 		Where("status", 1).
-		WhereNull("deleted_at").
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	} else if tenantId == 0 {
+		mod = mod.Where("tenant_id", 0)
+	}
+	if err = mod.
 		OrderAsc("id").
 		Scan(&list); err != nil {
 		return nil, gerror.Wrap(err, "读取Bot配置失败")
@@ -115,13 +125,17 @@ func (s *sSysPublish) enabledBots(ctx context.Context) (list []*sysin.BotModel, 
 	return list, nil
 }
 
-func (s *sSysPublish) getBotById(ctx context.Context, id int64) (bot *sysin.BotModel, err error) {
+func (s *sSysPublish) getBotById(ctx context.Context, id int64, tenantId int64) (bot *sysin.BotModel, err error) {
 	if id <= 0 {
 		return nil, gerror.New("Bot ID不能为空")
 	}
-	if err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).
+	mod := g.DB().Model(publishBotTable).Safe().Ctx(ctx).
 		Where("id", id).
-		WhereNull("deleted_at").
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id IN(0, ?)", tenantId)
+	}
+	if err = mod.
 		Scan(&bot); err != nil {
 		return nil, gerror.Wrap(err, "读取Bot配置失败")
 	}

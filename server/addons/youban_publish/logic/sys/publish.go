@@ -36,64 +36,64 @@ func init() {
 	service.RegisterSysPublish(NewSysPublish())
 }
 
-func (s *sSysPublish) AdminMerchantList(ctx context.Context, in *sysin.MerchantListInp) (list []*sysin.MerchantModel, totalCount int, err error) {
-	merchantColumns := pdao.YoubanPublishMerchant.Columns()
-	mod := pdao.YoubanPublishMerchant.Ctx(ctx).WhereNull(merchantColumns.DeletedAt)
+func (s *sSysPublish) AdminTenantList(ctx context.Context, in *sysin.TenantListInp) (list []*sysin.TenantModel, totalCount int, err error) {
+	tenantColumns := pdao.YoubanPublishTenant.Columns()
+	mod := pdao.YoubanPublishTenant.Ctx(ctx).WhereNull(tenantColumns.DeletedAt)
 	if in.Status > 0 {
-		mod = mod.Where(merchantColumns.Status, in.Status)
+		mod = mod.Where(tenantColumns.Status, in.Status)
 	}
 	kw := strings.TrimSpace(in.Keyword)
 	if kw != "" {
-		mod = mod.WhereLike(merchantColumns.Name, "%"+kw+"%").WhereOrLike(merchantColumns.ContactName, "%"+kw+"%")
+		mod = mod.WhereLike(tenantColumns.Name, "%"+kw+"%").WhereOrLike(tenantColumns.ContactName, "%"+kw+"%")
 	}
 	totalCount, err = mod.Clone().Count()
 	if err != nil {
-		return nil, 0, gerror.Wrap(err, "获取商家总数失败")
+		return nil, 0, gerror.Wrap(err, "获取租户总数失败")
 	}
-	if err = mod.Page(in.Page, in.PerPage).OrderDesc(merchantColumns.Id).Scan(&list); err != nil {
-		return nil, 0, gerror.Wrap(err, "获取商家列表失败")
+	if err = mod.Page(in.Page, in.PerPage).OrderDesc(tenantColumns.Id).Scan(&list); err != nil {
+		return nil, 0, gerror.Wrap(err, "获取租户列表失败")
 	}
 	return
 }
 
-func (s *sSysPublish) AdminMerchantSave(ctx context.Context, in *sysin.MerchantSaveInp) (err error) {
+func (s *sSysPublish) AdminTenantSave(ctx context.Context, in *sysin.TenantSaveInp) (err error) {
 	if err = in.Filter(ctx); err != nil {
 		return
 	}
-	merchantColumns := pdao.YoubanPublishMerchant.Columns()
+	tenantColumns := pdao.YoubanPublishTenant.Columns()
 	data := g.Map{
-		merchantColumns.Name:         in.Name,
-		merchantColumns.ContactName:  strings.TrimSpace(in.ContactName),
-		merchantColumns.ContactPhone: strings.TrimSpace(in.ContactPhone),
-		merchantColumns.Remark:       strings.TrimSpace(in.Remark),
-		merchantColumns.Status:       in.Status,
-		merchantColumns.UpdatedBy:    contexts.GetUserId(ctx),
-		merchantColumns.UpdatedAt:    gtime.Now(),
+		tenantColumns.Name:         in.Name,
+		tenantColumns.ContactName:  strings.TrimSpace(in.ContactName),
+		tenantColumns.ContactPhone: strings.TrimSpace(in.ContactPhone),
+		tenantColumns.Remark:       strings.TrimSpace(in.Remark),
+		tenantColumns.Status:       in.Status,
+		tenantColumns.UpdatedBy:    contexts.GetUserId(ctx),
+		tenantColumns.UpdatedAt:    gtime.Now(),
 	}
 	if in.Id > 0 {
-		_, err = pdao.YoubanPublishMerchant.Ctx(ctx).Where(merchantColumns.Id, in.Id).WhereNull(merchantColumns.DeletedAt).Data(data).Update()
+		_, err = pdao.YoubanPublishTenant.Ctx(ctx).Where(tenantColumns.Id, in.Id).WhereNull(tenantColumns.DeletedAt).Data(data).Update()
 	} else {
-		data[merchantColumns.CreatedBy] = contexts.GetUserId(ctx)
-		data[merchantColumns.CreatedAt] = gtime.Now()
-		_, err = pdao.YoubanPublishMerchant.Ctx(ctx).Data(data).Insert()
+		data[tenantColumns.CreatedBy] = contexts.GetUserId(ctx)
+		data[tenantColumns.CreatedAt] = gtime.Now()
+		_, err = pdao.YoubanPublishTenant.Ctx(ctx).Data(data).Insert()
 	}
 	if err != nil {
-		return gerror.Wrap(err, "保存商家失败")
+		return gerror.Wrap(err, "保存租户失败")
 	}
 	return nil
 }
 
-func (s *sSysPublish) AdminMerchantDelete(ctx context.Context, in *sysin.MerchantDeleteInp) (err error) {
+func (s *sSysPublish) AdminTenantDelete(ctx context.Context, in *sysin.TenantDeleteInp) (err error) {
 	if len(in.Ids) == 0 {
 		return gerror.New("请选择要删除的数据")
 	}
-	merchantColumns := pdao.YoubanPublishMerchant.Columns()
-	_, err = pdao.YoubanPublishMerchant.Ctx(ctx).WhereIn(merchantColumns.Id, in.Ids).Data(g.Map{
-		merchantColumns.DeletedBy: contexts.GetUserId(ctx),
-		merchantColumns.DeletedAt: gtime.Now(),
+	tenantColumns := pdao.YoubanPublishTenant.Columns()
+	_, err = pdao.YoubanPublishTenant.Ctx(ctx).WhereIn(tenantColumns.Id, in.Ids).Data(g.Map{
+		tenantColumns.DeletedBy: contexts.GetUserId(ctx),
+		tenantColumns.DeletedAt: gtime.Now(),
 	}).Update()
 	if err != nil {
-		return gerror.Wrap(err, "删除商家失败")
+		return gerror.Wrap(err, "删除租户失败")
 	}
 	return nil
 }
@@ -106,7 +106,7 @@ func (s *sSysPublish) AdminAccountSave(ctx context.Context, in *sysin.AccountSav
 	if err = in.Filter(ctx); err != nil {
 		return
 	}
-	if err = s.ensureMerchant(ctx, in.MerchantId); err != nil {
+	if err = s.ensureTenant(ctx, in.TenantId); err != nil {
 		return
 	}
 	if err = s.prepareAdminMemberBinding(ctx, in); err != nil {
@@ -122,7 +122,8 @@ func (s *sSysPublish) AdminAccountSave(ctx context.Context, in *sysin.AccountSav
 	in.AdminMemberId = memberId
 	accountColumns := pdao.YoubanPublishAccount.Columns()
 	data := g.Map{
-		accountColumns.MerchantId:         in.MerchantId,
+		accountColumns.TenantId:           in.TenantId,
+		accountColumns.MerchantId:         in.TenantId,
 		accountColumns.AdminMemberId:      in.AdminMemberId,
 		accountColumns.ParentId:           in.ParentId,
 		accountColumns.AccountType:        in.AccountType,
@@ -201,7 +202,7 @@ func (s *sSysPublish) MyTaskList(ctx context.Context, in *sysin.TaskListInp) (li
 	if err != nil {
 		return nil, 0, err
 	}
-	in.MerchantId = account.MerchantId
+	in.TenantId = account.TenantId
 	in.AccountId = account.Id
 	return s.taskList(ctx, in)
 }
@@ -211,7 +212,7 @@ func (s *sSysPublish) MyTaskSave(ctx context.Context, in *sysin.TaskSaveInp) (id
 	if err != nil {
 		return 0, err
 	}
-	in.MerchantId = account.MerchantId
+	in.TenantId = account.TenantId
 	in.AccountId = account.Id
 	return s.saveTask(ctx, in)
 }
@@ -235,11 +236,11 @@ func (s *sSysPublish) MyTaskCancel(ctx context.Context, in *sysin.TaskCancelInp)
 func (s *sSysPublish) accountList(ctx context.Context, in *sysin.AccountListInp) (list []*sysin.AccountModel, totalCount int, err error) {
 	accountColumns := pdao.YoubanPublishAccount.Columns()
 	mod := pdao.YoubanPublishAccount.DB().Model(pdao.YoubanPublishAccount.Table()+" a").Safe().Ctx(ctx).
-		LeftJoin(publishMerchantTable+" m", "m.id=a.merchant_id").
+		LeftJoin(publishTenantTable+" m", "m.id=a.tenant_id").
 		WhereNull("a." + accountColumns.DeletedAt).
-		Fields("a.*,m.name AS merchant_name")
-	if in.MerchantId > 0 {
-		mod = mod.Where("a."+accountColumns.MerchantId, in.MerchantId)
+		Fields("a.*,m.name AS tenant_name")
+	if in.TenantId > 0 {
+		mod = mod.Where("a."+accountColumns.TenantId, in.TenantId)
 	}
 	if in.AccountType != "" {
 		mod = mod.Where("a."+accountColumns.AccountType, in.AccountType)
@@ -264,8 +265,8 @@ func (s *sSysPublish) accountList(ctx context.Context, in *sysin.AccountListInp)
 func (s *sSysPublish) taskList(ctx context.Context, in *sysin.TaskListInp) (list []*sysin.TaskModel, totalCount int, err error) {
 	taskColumns := pdao.YoubanPublishTask.Columns()
 	mod := s.taskModel(ctx)
-	if in.MerchantId > 0 {
-		mod = mod.Where("t."+taskColumns.MerchantId, in.MerchantId)
+	if in.TenantId > 0 {
+		mod = mod.Where("t."+taskColumns.TenantId, in.TenantId)
 	}
 	if in.AccountId > 0 {
 		mod = mod.Where("t."+taskColumns.AccountId, in.AccountId)
@@ -290,29 +291,29 @@ func (s *sSysPublish) taskList(ctx context.Context, in *sysin.TaskListInp) (list
 func (s *sSysPublish) taskModel(ctx context.Context) *gdb.Model {
 	taskColumns := pdao.YoubanPublishTask.Columns()
 	return pdao.YoubanPublishTask.DB().Model(pdao.YoubanPublishTask.Table()+" t").Safe().Ctx(ctx).
-		LeftJoin(publishMerchantTable+" m", "m.id=t.merchant_id").
+		LeftJoin(publishTenantTable+" m", "m.id=t.tenant_id").
 		LeftJoin(publishAccountTable+" a", "a.id=t.account_id").
 		WhereNull("t." + taskColumns.DeletedAt).
-		Fields("t.*,m.name AS merchant_name,a.nickname AS account_nickname,a.username AS account_username")
+		Fields("t.*,m.name AS tenant_name,a.nickname AS account_nickname,a.username AS account_username")
 }
 
 func (s *sSysPublish) saveTask(ctx context.Context, in *sysin.TaskSaveInp) (id int64, err error) {
 	if err = in.Filter(ctx); err != nil {
 		return 0, err
 	}
-	if in.MerchantId <= 0 {
-		return 0, gerror.New("商家ID不能为空")
+	if in.TenantId <= 0 {
+		return 0, gerror.New("租户ID不能为空")
 	}
 	if in.AccountId <= 0 {
 		return 0, gerror.New("上架账号ID不能为空")
 	}
-	if err = s.ensureAccountBelongsMerchant(ctx, in.AccountId, in.MerchantId); err != nil {
+	if err = s.ensureAccountBelongsTenant(ctx, in.AccountId, in.TenantId); err != nil {
 		return 0, err
 	}
 	taskColumns := pdao.YoubanPublishTask.Columns()
 	if in.Id == 0 && strings.TrimSpace(in.ClientRequestId) != "" {
 		existing, findErr := pdao.YoubanPublishTask.Ctx(ctx).
-			Where(taskColumns.MerchantId, in.MerchantId).
+			Where(taskColumns.TenantId, in.TenantId).
 			Where(taskColumns.ClientRequestId, strings.TrimSpace(in.ClientRequestId)).
 			WhereNull(taskColumns.DeletedAt).
 			Fields(taskColumns.Id).
@@ -325,7 +326,8 @@ func (s *sSysPublish) saveTask(ctx context.Context, in *sysin.TaskSaveInp) (id i
 		}
 	}
 	data := g.Map{
-		taskColumns.MerchantId:      in.MerchantId,
+		taskColumns.TenantId:        in.TenantId,
+		taskColumns.MerchantId:      in.TenantId,
 		taskColumns.AccountId:       in.AccountId,
 		taskColumns.ClientRequestId: strings.TrimSpace(in.ClientRequestId),
 		taskColumns.Title:           strings.TrimSpace(in.Title),
@@ -420,7 +422,8 @@ func (s *sSysPublish) ensureTgJob(ctx context.Context, taskId int64) error {
 	}
 	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
 		"task_id":     taskId,
-		"merchant_id": row["merchant_id"].Int64(),
+		"tenant_id":   row["tenant_id"].Int64(),
+		"merchant_id": row["tenant_id"].Int64(),
 		"account_id":  row["account_id"].Int64(),
 		"profile_id":  row["profile_id"].Int64(),
 		"status":      "pending",
@@ -457,15 +460,15 @@ func (s *sSysPublish) currentAccount(ctx context.Context) (*sysin.AccountModel, 
 		return nil, gerror.New("请先登录")
 	}
 	accountColumns := pdao.YoubanPublishAccount.Columns()
-	merchantColumns := pdao.YoubanPublishMerchant.Columns()
+	tenantColumns := pdao.YoubanPublishTenant.Columns()
 	var account *sysin.AccountModel
 	err := pdao.YoubanPublishAccount.DB().Model(pdao.YoubanPublishAccount.Table()+" a").Safe().Ctx(ctx).
-		LeftJoin(pdao.YoubanPublishMerchant.Table()+" m", "m.id=a.merchant_id").
+		LeftJoin(pdao.YoubanPublishTenant.Table()+" m", "m.id=a.tenant_id").
 		Where("a."+accountColumns.AdminMemberId, userId).
 		Where("a."+accountColumns.Status, 1).
 		WhereNull("a." + accountColumns.DeletedAt).
-		WhereNull("m." + merchantColumns.DeletedAt).
-		Fields("a.*,m.name AS merchant_name").
+		WhereNull("m." + tenantColumns.DeletedAt).
+		Fields("a.*,m.name AS tenant_name").
 		OrderAsc("a." + accountColumns.Id).
 		Scan(&account)
 	if err != nil {
@@ -477,30 +480,30 @@ func (s *sSysPublish) currentAccount(ctx context.Context) (*sysin.AccountModel, 
 	return account, nil
 }
 
-func (s *sSysPublish) ensureMerchant(ctx context.Context, merchantId int64) error {
-	merchantColumns := pdao.YoubanPublishMerchant.Columns()
-	count, err := pdao.YoubanPublishMerchant.Ctx(ctx).Where(merchantColumns.Id, merchantId).WhereNull(merchantColumns.DeletedAt).Count()
+func (s *sSysPublish) ensureTenant(ctx context.Context, tenantId int64) error {
+	tenantColumns := pdao.YoubanPublishTenant.Columns()
+	count, err := pdao.YoubanPublishTenant.Ctx(ctx).Where(tenantColumns.Id, tenantId).WhereNull(tenantColumns.DeletedAt).Count()
 	if err != nil {
-		return gerror.Wrap(err, "检查商家失败")
+		return gerror.Wrap(err, "检查租户失败")
 	}
 	if count == 0 {
-		return gerror.New("商家不存在")
+		return gerror.New("租户不存在")
 	}
 	return nil
 }
 
-func (s *sSysPublish) ensureAccountBelongsMerchant(ctx context.Context, accountId int64, merchantId int64) error {
+func (s *sSysPublish) ensureAccountBelongsTenant(ctx context.Context, accountId int64, tenantId int64) error {
 	accountColumns := pdao.YoubanPublishAccount.Columns()
 	count, err := pdao.YoubanPublishAccount.Ctx(ctx).
 		Where(accountColumns.Id, accountId).
-		Where(accountColumns.MerchantId, merchantId).
+		Where(accountColumns.TenantId, tenantId).
 		WhereNull(accountColumns.DeletedAt).
 		Count()
 	if err != nil {
 		return gerror.Wrap(err, "检查上架账号失败")
 	}
 	if count == 0 {
-		return gerror.New("上架账号不存在或不属于该商家")
+		return gerror.New("上架账号不存在或不属于该租户")
 	}
 	return nil
 }

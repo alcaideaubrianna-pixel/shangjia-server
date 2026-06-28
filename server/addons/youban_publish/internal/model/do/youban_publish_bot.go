@@ -12,16 +12,17 @@ import (
 // YoubanPublishBot is the golang structure of table hg_youban_publish_bot for DAO operations like Where/Data.
 type YoubanPublishBot struct {
 	g.Meta      `orm:"table:hg_youban_publish_bot, do:true"`
-	Id          any         // 主键
-	BotName     any         // Bot名称
-	BotUsername any         // Bot用户名
-	BotToken    any         // Bot Token
-	Remark      any         // 备注
-	Status      any         // 状态
-	CreatedBy   any         // 创建人
-	UpdatedBy   any         // 更新人
-	DeletedBy   any         // 删除人
-	CreatedAt   *gtime.Time // 创建时间
-	UpdatedAt   *gtime.Time // 更新时间
-	DeletedAt   *gtime.Time // 删除时间
+	Id          any         //
+	BotName     any         //
+	BotUsername any         //
+	BotToken    any         //
+	Remark      any         //
+	Status      any         //
+	CreatedBy   any         //
+	UpdatedBy   any         //
+	DeletedBy   any         //
+	CreatedAt   *gtime.Time //
+	UpdatedAt   *gtime.Time //
+	DeletedAt   *gtime.Time //
+	TenantId    any         //
 }

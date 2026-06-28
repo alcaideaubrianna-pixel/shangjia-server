@@ -8,8 +8,8 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
-// YoubanPublishMerchant is the golang structure for table youban_publish_merchant.
-type YoubanPublishMerchant struct {
+// YoubanPublishTenant is the golang structure for table youban_publish_tenant.
+type YoubanPublishTenant struct {
 	Id           int64       `json:"id"           orm:"id"            description:""`
 	Name         string      `json:"name"         orm:"name"          description:""`
 	ContactName  string      `json:"contactName"  orm:"contact_name"  description:""`

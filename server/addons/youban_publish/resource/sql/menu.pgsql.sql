@@ -37,7 +37,7 @@ WITH parent AS (
 ), buttons AS (
   SELECT *
   FROM (VALUES
-    ('商户管理', 'youbanPublishMerchant', '/youban_publish/publish/merchant/list,/youban_publish/publish/merchant/save,/youban_publish/publish/merchant/delete', 10),
+    ('租户管理', 'youbanPublishTenant', '/youban_publish/publish/tenant/list,/youban_publish/publish/tenant/save,/youban_publish/publish/tenant/delete', 10),
     ('账号管理', 'youbanPublishAccount', '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete', 20),
     ('上架任务', 'youbanPublishTask', '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel', 30),
     ('资料媒体', 'youbanPublishMedia', '/youban_publish/publish/media/list,/youban_publish/publish/media/delete', 40),
@@ -65,7 +65,7 @@ WITH parent AS (
 ), buttons AS (
   SELECT *
   FROM (VALUES
-    ('商户管理', 'youbanPublishMerchant', '/youban_publish/publish/merchant/list,/youban_publish/publish/merchant/save,/youban_publish/publish/merchant/delete', 10),
+    ('租户管理', 'youbanPublishTenant', '/youban_publish/publish/tenant/list,/youban_publish/publish/tenant/save,/youban_publish/publish/tenant/delete', 10),
     ('账号管理', 'youbanPublishAccount', '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete', 20),
     ('上架任务', 'youbanPublishTask', '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel', 30),
     ('资料媒体', 'youbanPublishMedia', '/youban_publish/publish/media/list,/youban_publish/publish/media/delete', 40),
@@ -93,7 +93,7 @@ SELECT r."id", m."id"
 FROM "hg_admin_role" r
 JOIN "hg_admin_menu" m ON m."name" IN (
   'youbanPublish',
-  'youbanPublishMerchant',
+  'youbanPublishTenant',
   'youbanPublishAccount',
   'youbanPublishTask',
   'youbanPublishMedia',

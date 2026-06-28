@@ -46,7 +46,7 @@ func (s *sSysPublish) TelegramWebhookRaw(ctx context.Context, botId int64, body 
 		return gerror.Wrap(err, "解析Telegram webhook失败")
 	}
 	if botId > 0 {
-		if _, err := s.getBotById(ctx, botId); err != nil {
+		if _, err := s.getBotById(ctx, botId, 0); err != nil {
 			return err
 		}
 	}

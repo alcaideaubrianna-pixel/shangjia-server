@@ -57,7 +57,7 @@ func (s *sSysPublish) consumeTelegramJob(ctx context.Context, job gdb.Record) er
 	if targetChatId == "" {
 		return s.failTelegramJob(ctx, job, "Telegram目标Chat ID未配置")
 	}
-	botToken, err := s.telegramJobBotToken(ctx, botId)
+	botToken, err := s.telegramJobBotToken(ctx, botId, job["tenant_id"].Int64())
 	if err != nil {
 		return s.failTelegramJob(ctx, job, err.Error())
 	}
@@ -96,9 +96,9 @@ func (s *sSysPublish) consumeTelegramJob(ctx context.Context, job gdb.Record) er
 	return nil
 }
 
-func (s *sSysPublish) telegramJobBotToken(ctx context.Context, botId int64) (string, error) {
+func (s *sSysPublish) telegramJobBotToken(ctx context.Context, botId int64, tenantId int64) (string, error) {
 	if botId > 0 {
-		bot, err := s.getBotById(ctx, botId)
+		bot, err := s.getBotById(ctx, botId, tenantId)
 		if err != nil {
 			return "", err
 		}
@@ -107,9 +107,15 @@ func (s *sSysPublish) telegramJobBotToken(ctx context.Context, botId int64) (str
 		}
 		return strings.TrimSpace(bot.BotToken), nil
 	}
-	bots, err := s.enabledBots(ctx)
+	bots, err := s.enabledBots(ctx, tenantId)
 	if err != nil {
 		return "", err
+	}
+	if len(bots) == 0 && tenantId > 0 {
+		bots, err = s.enabledBots(ctx, 0)
+		if err != nil {
+			return "", err
+		}
 	}
 	if len(bots) == 0 || bots[0] == nil || strings.TrimSpace(bots[0].BotToken) == "" {
 		return "", gerror.New("未配置可用Bot")

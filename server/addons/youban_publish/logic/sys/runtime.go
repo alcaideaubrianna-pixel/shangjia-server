@@ -98,7 +98,7 @@ func (s *sSysPublish) runTelegramPolling(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			bots, err := s.enabledBots(ctx)
+			bots, err := s.enabledBots(ctx, -1)
 			if err != nil {
 				g.Log().Warningf(ctx, "读取上架插件Bot失败：%+v", err)
 				continue
@@ -135,7 +135,7 @@ func (s *sSysPublish) setupTelegramWebhooks(ctx context.Context) {
 		g.Log().Warning(ctx, "上架插件Webhook Base URL未配置，跳过自动setWebhook")
 		return
 	}
-	bots, err := s.enabledBots(ctx)
+	bots, err := s.enabledBots(ctx, -1)
 	if err != nil {
 		g.Log().Warningf(ctx, "读取上架插件Bot失败：%+v", err)
 		return

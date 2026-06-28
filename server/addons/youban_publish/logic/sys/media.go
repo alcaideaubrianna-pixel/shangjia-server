@@ -76,7 +76,8 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 	}
 	now := gtime.Now()
 	data := g.Map{
-		"merchant_id":   task["merchant_id"].Int64(),
+		"tenant_id":     task["tenant_id"].Int64(),
+		"merchant_id":   task["tenant_id"].Int64(),
 		"account_id":    task["account_id"].Int64(),
 		"task_id":       task["id"].Int64(),
 		"profile_id":    task["profile_id"].Int64(),

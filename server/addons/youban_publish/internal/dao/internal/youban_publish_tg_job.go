@@ -21,20 +21,21 @@ type YoubanPublishTgJobDao struct {
 
 // YoubanPublishTgJobColumns defines and stores column names for the table hg_youban_publish_tg_job.
 type YoubanPublishTgJobColumns struct {
-	Id           string // 主键
-	TaskId       string // 任务ID
-	MerchantId   string // 商家ID
-	AccountId    string // 账号ID
-	ProfileId    string // 资料ID
-	BotId        string // Bot ID
-	TargetChatId string // 目标Chat ID
-	TgMessageId  string // TG消息ID
-	Status       string // 状态
-	RetryCount   string // 重试次数
-	NextRetryAt  string // 下次重试时间
-	ErrorMessage string // 错误信息
-	CreatedAt    string // 创建时间
-	UpdatedAt    string // 更新时间
+	Id           string //
+	TaskId       string //
+	MerchantId   string //
+	AccountId    string //
+	ProfileId    string //
+	BotId        string //
+	TargetChatId string //
+	TgMessageId  string //
+	Status       string //
+	RetryCount   string //
+	NextRetryAt  string //
+	ErrorMessage string //
+	CreatedAt    string //
+	UpdatedAt    string //
+	TenantId     string //
 }
 
 // youbanPublishTgJobColumns holds the columns for the table hg_youban_publish_tg_job.
@@ -53,6 +54,7 @@ var youbanPublishTgJobColumns = YoubanPublishTgJobColumns{
 	ErrorMessage: "error_message",
 	CreatedAt:    "created_at",
 	UpdatedAt:    "updated_at",
+	TenantId:     "tenant_id",
 }
 
 // NewYoubanPublishTgJobDao creates and returns a new DAO object for table data access.

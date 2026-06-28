@@ -7,29 +7,29 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
-type MerchantListReq struct {
-	g.Meta `path:"/publish/merchant/list" method:"get" tags:"上架插件后台" summary:"商家列表"`
-	sysin.MerchantListInp
+type TenantListReq struct {
+	g.Meta `path:"/publish/tenant/list" method:"get" tags:"上架插件后台" summary:"租户列表"`
+	sysin.TenantListInp
 }
 
-type MerchantListRes struct {
+type TenantListRes struct {
 	form.PageRes
-	List []*sysin.MerchantModel `json:"list" dc:"商家列表"`
+	List []*sysin.TenantModel `json:"list" dc:"租户列表"`
 }
 
-type MerchantSaveReq struct {
-	g.Meta `path:"/publish/merchant/save" method:"post" tags:"上架插件后台" summary:"新增或编辑商家"`
-	sysin.MerchantSaveInp
+type TenantSaveReq struct {
+	g.Meta `path:"/publish/tenant/save" method:"post" tags:"上架插件后台" summary:"新增或编辑租户"`
+	sysin.TenantSaveInp
 }
 
-type MerchantSaveRes struct{}
+type TenantSaveRes struct{}
 
-type MerchantDeleteReq struct {
-	g.Meta `path:"/publish/merchant/delete" method:"post" tags:"上架插件后台" summary:"删除商家"`
-	sysin.MerchantDeleteInp
+type TenantDeleteReq struct {
+	g.Meta `path:"/publish/tenant/delete" method:"post" tags:"上架插件后台" summary:"删除租户"`
+	sysin.TenantDeleteInp
 }
 
-type MerchantDeleteRes struct{}
+type TenantDeleteRes struct{}
 
 type AccountListReq struct {
 	g.Meta `path:"/publish/account/list" method:"get" tags:"上架插件后台" summary:"上架账号列表"`

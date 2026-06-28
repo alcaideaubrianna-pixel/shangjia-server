@@ -21,27 +21,28 @@ type YoubanPublishMediaDao struct {
 
 // YoubanPublishMediaColumns defines and stores column names for the table hg_youban_publish_media.
 type YoubanPublishMediaColumns struct {
-	Id           string // 主键
-	MerchantId   string // 商家ID
-	AccountId    string // 账号ID
-	TaskId       string // 任务ID
-	ProfileId    string // 资料ID
-	AttachmentId string // HotGo附件ID
-	MediaType    string // 媒体类型
-	Name         string // 文件名
-	FileUrl      string // 访问地址
-	StoragePath  string // 存储路径
-	MimeType     string // MIME
-	Md5          string // MD5
-	Size         string // 大小
-	SortIndex    string // 排序
-	Status       string // 状态
-	CreatedBy    string // 创建人
-	UpdatedBy    string // 更新人
-	DeletedBy    string // 删除人
-	CreatedAt    string // 创建时间
-	UpdatedAt    string // 更新时间
-	DeletedAt    string // 删除时间
+	Id           string //
+	MerchantId   string //
+	AccountId    string //
+	TaskId       string //
+	ProfileId    string //
+	AttachmentId string //
+	MediaType    string //
+	Name         string //
+	FileUrl      string //
+	StoragePath  string //
+	MimeType     string //
+	Md5          string //
+	Size         string //
+	SortIndex    string //
+	Status       string //
+	CreatedBy    string //
+	UpdatedBy    string //
+	DeletedBy    string //
+	CreatedAt    string //
+	UpdatedAt    string //
+	DeletedAt    string //
+	TenantId     string //
 }
 
 // youbanPublishMediaColumns holds the columns for the table hg_youban_publish_media.
@@ -67,6 +68,7 @@ var youbanPublishMediaColumns = YoubanPublishMediaColumns{
 	CreatedAt:    "created_at",
 	UpdatedAt:    "updated_at",
 	DeletedAt:    "deleted_at",
+	TenantId:     "tenant_id",
 }
 
 // NewYoubanPublishMediaDao creates and returns a new DAO object for table data access.

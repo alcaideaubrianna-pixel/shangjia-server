@@ -12,35 +12,35 @@ var Publish = cPublish{}
 
 type cPublish struct{}
 
-func (c *cPublish) MerchantList(ctx context.Context, req *publish.MerchantListReq) (res *publish.MerchantListRes, err error) {
-	list, totalCount, err := service.SysPublish().AdminMerchantList(ctx, &req.MerchantListInp)
+func (c *cPublish) TenantList(ctx context.Context, req *publish.TenantListReq) (res *publish.TenantListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminTenantList(ctx, &req.TenantListInp)
 	if err != nil {
 		return
 	}
 	if list == nil {
-		list = []*sysin.MerchantModel{}
+		list = []*sysin.TenantModel{}
 	}
-	res = new(publish.MerchantListRes)
+	res = new(publish.TenantListRes)
 	res.List = list
 	res.PageRes.Pack(req, totalCount)
 	return
 }
 
-func (c *cPublish) MerchantSave(ctx context.Context, req *publish.MerchantSaveReq) (res *publish.MerchantSaveRes, err error) {
-	err = service.SysPublish().AdminMerchantSave(ctx, &req.MerchantSaveInp)
+func (c *cPublish) TenantSave(ctx context.Context, req *publish.TenantSaveReq) (res *publish.TenantSaveRes, err error) {
+	err = service.SysPublish().AdminTenantSave(ctx, &req.TenantSaveInp)
 	if err != nil {
 		return
 	}
-	res = &publish.MerchantSaveRes{}
+	res = &publish.TenantSaveRes{}
 	return
 }
 
-func (c *cPublish) MerchantDelete(ctx context.Context, req *publish.MerchantDeleteReq) (res *publish.MerchantDeleteRes, err error) {
-	err = service.SysPublish().AdminMerchantDelete(ctx, &req.MerchantDeleteInp)
+func (c *cPublish) TenantDelete(ctx context.Context, req *publish.TenantDeleteReq) (res *publish.TenantDeleteRes, err error) {
+	err = service.SysPublish().AdminTenantDelete(ctx, &req.TenantDeleteInp)
 	if err != nil {
 		return
 	}
-	res = &publish.MerchantDeleteRes{}
+	res = &publish.TenantDeleteRes{}
 	return
 }
 
