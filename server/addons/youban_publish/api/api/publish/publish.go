@@ -90,3 +90,12 @@ type TelegramLoginStatusReq struct {
 type TelegramLoginStatusRes struct {
 	*sysin.TelegramLoginModel
 }
+
+type TelegramLoginPasswordReq struct {
+	g.Meta `path:"/telegram/login/password" method:"post" tags:"上架插件" summary:"提交Telegram二次验证密码"`
+	sysin.TelegramLoginPasswordInp
+}
+
+type TelegramLoginPasswordRes struct {
+	*sysin.TelegramLoginModel
+}

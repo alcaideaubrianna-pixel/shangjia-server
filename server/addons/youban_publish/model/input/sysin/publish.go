@@ -305,3 +305,8 @@ type TelegramLoginModel struct {
 type TelegramLoginStatusInp struct {
 	LoginToken string `json:"loginToken" v:"required#登录令牌不能为空" dc:"登录令牌"`
 }
+
+type TelegramLoginPasswordInp struct {
+	LoginToken string `json:"loginToken" v:"required#登录令牌不能为空" dc:"登录令牌"`
+	Password   string `json:"password" v:"required#二次验证密码不能为空" dc:"二次验证密码"`
+}

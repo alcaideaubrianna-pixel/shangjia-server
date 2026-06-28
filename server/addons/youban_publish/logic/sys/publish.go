@@ -30,10 +30,14 @@ type sSysPublish struct {
 	runtimeMu     publishRuntimeMutex
 	telegramBotMu publishRuntimeMutex
 	telegramBots  map[string]*tgbot.Bot
+	tgLoginMu     publishRuntimeMutex
+	tgLogins      map[string]*telegramLoginRuntime
 }
 
 func NewSysPublish() *sSysPublish {
-	return &sSysPublish{}
+	return &sSysPublish{
+		tgLogins: make(map[string]*telegramLoginRuntime),
+	}
 }
 
 func init() {

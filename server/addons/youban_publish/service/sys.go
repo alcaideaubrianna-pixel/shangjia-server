@@ -37,6 +37,7 @@ type ISysPublish interface {
 	TelegramWebhookRaw(ctx context.Context, botId int64, body []byte) (err error)
 	TelegramLoginStart(ctx context.Context, in *sysin.TelegramLoginStartInp) (res *sysin.TelegramLoginModel, err error)
 	TelegramLoginStatus(ctx context.Context, in *sysin.TelegramLoginStatusInp) (res *sysin.TelegramLoginModel, err error)
+	TelegramLoginPassword(ctx context.Context, in *sysin.TelegramLoginPasswordInp) (res *sysin.TelegramLoginModel, err error)
 }
 
 var localSysPublish ISysPublish

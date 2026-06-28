@@ -112,3 +112,12 @@ func (c *cPublish) TelegramLoginStatus(ctx context.Context, req *publish.Telegra
 	res = &publish.TelegramLoginStatusRes{TelegramLoginModel: data}
 	return
 }
+
+func (c *cPublish) TelegramLoginPassword(ctx context.Context, req *publish.TelegramLoginPasswordReq) (res *publish.TelegramLoginPasswordRes, err error) {
+	data, err := service.SysPublish().TelegramLoginPassword(ctx, &req.TelegramLoginPasswordInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.TelegramLoginPasswordRes{TelegramLoginModel: data}
+	return
+}
