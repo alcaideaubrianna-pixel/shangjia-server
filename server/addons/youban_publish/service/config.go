@@ -9,6 +9,7 @@ import (
 
 type ISysConfig interface {
 	GetTelegram(ctx context.Context) (conf *model.TelegramConfig, err error)
+	GetAccount(ctx context.Context) (conf *model.AccountConfig, err error)
 	GetConfigByGroup(ctx context.Context, in *sysin.GetConfigInp) (res *sysin.GetConfigModel, err error)
 	UpdateConfigByGroup(ctx context.Context, in *sysin.UpdateConfigInp) error
 }

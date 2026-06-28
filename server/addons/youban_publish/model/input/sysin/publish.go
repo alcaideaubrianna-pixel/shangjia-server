@@ -103,6 +103,7 @@ type AccountSaveInp struct {
 	AccountType        string `json:"accountType" dc:"账号类型：admin/uploader"`
 	Nickname           string `json:"nickname" dc:"昵称"`
 	Username           string `json:"username" dc:"用户名"`
+	Password           string `json:"password" dc:"登录密码，新增时为空自动生成；编辑时为空不修改"`
 	TelegramUserId     string `json:"telegramUserId" dc:"TG用户ID"`
 	TelegramUsername   string `json:"telegramUsername" dc:"TG用户名"`
 	DailyPublishLimit  int    `json:"dailyPublishLimit" dc:"每日上架额度"`
@@ -126,8 +127,13 @@ func (in *AccountSaveInp) Filter(ctx context.Context) error {
 	}
 	in.Nickname = strings.TrimSpace(in.Nickname)
 	if in.Nickname == "" {
-		return gerror.New("账号昵称不能为空")
+		in.Nickname = strings.TrimSpace(in.Username)
 	}
+	in.Username = strings.TrimSpace(in.Username)
+	if in.Username == "" {
+		return gerror.New("账号不能为空")
+	}
+	in.Password = strings.TrimSpace(in.Password)
 	if in.Status == 0 {
 		in.Status = 1
 	}

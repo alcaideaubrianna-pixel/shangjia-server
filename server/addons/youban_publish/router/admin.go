@@ -5,18 +5,9 @@ import (
 
 	"github.com/gogf/gf/v2/net/ghttp"
 
-	"hotgo/addons/youban_publish/controller/admin/sys"
-	"hotgo/addons/youban_publish/global"
-	"hotgo/internal/consts"
-	"hotgo/internal/library/addons"
-	"hotgo/internal/service"
+	"hotgo/addons/youban_publish/router/genrouter"
 )
 
 func Admin(ctx context.Context, group *ghttp.RouterGroup) {
-	prefix := addons.RouterPrefix(ctx, consts.AppAdmin, global.GetSkeleton().Name)
-	group.Group(prefix, func(group *ghttp.RouterGroup) {
-		group.Middleware(service.Middleware().AdminAuth)
-		group.Bind(sys.Publish)
-		group.Bind(sys.Config)
-	})
+	genrouter.Register(ctx, group)
 }

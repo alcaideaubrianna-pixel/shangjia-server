@@ -29,8 +29,6 @@ import (
 )
 
 const (
-	publishTgLoginTable = "hg_youban_publish_tg_login"
-
 	tgLoginStatusPending          = "pending"
 	tgLoginStatusScanning         = "scanning"
 	tgLoginStatusPasswordRequired = "password_required"

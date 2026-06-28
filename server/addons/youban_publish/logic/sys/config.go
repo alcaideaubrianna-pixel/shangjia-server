@@ -14,6 +14,7 @@ import (
 )
 
 const publishConfigGroupTelegram = "telegram"
+const publishConfigGroupAccount = "account"
 
 type sSysConfig struct{}
 
@@ -42,6 +43,30 @@ func (s *sSysConfig) GetTelegram(ctx context.Context) (conf *model.TelegramConfi
 	conf.WebhookBaseUrl = strings.TrimRight(strings.TrimSpace(conf.WebhookBaseUrl), "/")
 	conf.WebhookSecret = strings.TrimSpace(conf.WebhookSecret)
 	conf.DefaultTargetChat = strings.TrimSpace(conf.DefaultTargetChat)
+	return conf, nil
+}
+
+func (s *sSysConfig) GetAccount(ctx context.Context) (conf *model.AccountConfig, err error) {
+	in := &sysin.GetConfigInp{}
+	in.AddonName = global.GetSkeleton().Name
+	in.Group = publishConfigGroupAccount
+	res, err := baseservice.SysAddonsConfig().GetConfigByGroup(ctx, &in.GetAddonsConfigInp)
+	if err != nil {
+		return nil, err
+	}
+	conf = &model.AccountConfig{
+		DefaultRoleId: 10,
+		DefaultDeptId: 1,
+	}
+	if err = gconv.Struct(res.List, conf); err != nil {
+		return nil, err
+	}
+	if conf.DefaultRoleId <= 0 {
+		conf.DefaultRoleId = 10
+	}
+	if conf.DefaultDeptId <= 0 {
+		conf.DefaultDeptId = 1
+	}
 	return conf, nil
 }
 

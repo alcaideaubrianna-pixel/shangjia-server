@@ -15,15 +15,6 @@ import (
 	"hotgo/internal/library/contexts"
 )
 
-const (
-	publishMerchantTable = "hg_youban_publish_merchant"
-	publishAccountTable  = "hg_youban_publish_account"
-	publishTaskTable     = "hg_youban_publish_task"
-	publishMediaTable    = "hg_youban_publish_media"
-	publishTgJobTable    = "hg_youban_publish_tg_job"
-	publishBotTable      = "hg_youban_publish_bot"
-)
-
 type sSysPublish struct {
 	runtimeCancel context.CancelFunc
 	runtimeDone   chan struct{}
@@ -114,26 +105,31 @@ func (s *sSysPublish) AdminAccountSave(ctx context.Context, in *sysin.AccountSav
 	if err = s.ensureMerchant(ctx, in.MerchantId); err != nil {
 		return
 	}
+	memberId, err := s.ensureAdminMemberForAccount(ctx, in)
+	if err != nil {
+		return err
+	}
+	in.AdminMemberId = memberId
 	data := g.Map{
-		"merchant_id":          in.MerchantId,
-		"admin_member_id":      in.AdminMemberId,
-		"parent_id":            in.ParentId,
-		"account_type":         in.AccountType,
-		"nickname":             strings.TrimSpace(in.Nickname),
-		"username":             strings.TrimSpace(in.Username),
-		"telegram_user_id":     strings.TrimSpace(in.TelegramUserId),
-		"telegram_username":    strings.TrimSpace(in.TelegramUsername),
-		"daily_publish_limit":  in.DailyPublishLimit,
-		"can_direct_publish":   in.CanDirectPublish,
-		"allowed_channel_json": strings.TrimSpace(in.AllowedChannelJson),
-		"allowed_region_json":  strings.TrimSpace(in.AllowedRegionJson),
-		"remark":               strings.TrimSpace(in.Remark),
-		"status":               in.Status,
-		"updated_by":           contexts.GetUserId(ctx),
-		"updated_at":           gtime.Now(),
+		publishAccountFieldMerchantId:    in.MerchantId,
+		publishAccountFieldAdminMemberId: in.AdminMemberId,
+		publishAccountFieldParentId:      in.ParentId,
+		publishAccountFieldAccountType:   in.AccountType,
+		publishAccountFieldNickname:      strings.TrimSpace(in.Nickname),
+		publishAccountFieldUsername:      strings.TrimSpace(in.Username),
+		"telegram_user_id":               strings.TrimSpace(in.TelegramUserId),
+		"telegram_username":              strings.TrimSpace(in.TelegramUsername),
+		"daily_publish_limit":            in.DailyPublishLimit,
+		"can_direct_publish":             in.CanDirectPublish,
+		"allowed_channel_json":           strings.TrimSpace(in.AllowedChannelJson),
+		"allowed_region_json":            strings.TrimSpace(in.AllowedRegionJson),
+		"remark":                         strings.TrimSpace(in.Remark),
+		publishAccountFieldStatus:        in.Status,
+		"updated_by":                     contexts.GetUserId(ctx),
+		"updated_at":                     gtime.Now(),
 	}
 	if in.Id > 0 {
-		_, err = g.DB().Model(publishAccountTable).Safe().Ctx(ctx).Where("id", in.Id).WhereNull("deleted_at").Data(data).Update()
+		_, err = g.DB().Model(publishAccountTable).Safe().Ctx(ctx).Where(publishFieldId, in.Id).WhereNull(publishAccountFieldDeletedAt).Data(data).Update()
 	} else {
 		data["created_by"] = contexts.GetUserId(ctx)
 		data["created_at"] = gtime.Now()
@@ -149,9 +145,9 @@ func (s *sSysPublish) AdminAccountDelete(ctx context.Context, in *sysin.AccountD
 	if len(in.Ids) == 0 {
 		return gerror.New("请选择要删除的数据")
 	}
-	_, err = g.DB().Model(publishAccountTable).Safe().Ctx(ctx).WhereIn("id", in.Ids).Data(g.Map{
-		"deleted_by": contexts.GetUserId(ctx),
-		"deleted_at": gtime.Now(),
+	_, err = g.DB().Model(publishAccountTable).Safe().Ctx(ctx).WhereIn(publishFieldId, in.Ids).Data(g.Map{
+		"deleted_by":                 contexts.GetUserId(ctx),
+		publishAccountFieldDeletedAt: gtime.Now(),
 	}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "删除上架账号失败")
@@ -225,13 +221,13 @@ func (s *sSysPublish) accountList(ctx context.Context, in *sysin.AccountListInp)
 		WhereNull("a.deleted_at").
 		Fields("a.*,m.name AS merchant_name")
 	if in.MerchantId > 0 {
-		mod = mod.Where("a.merchant_id", in.MerchantId)
+		mod = mod.Where("a."+publishAccountFieldMerchantId, in.MerchantId)
 	}
 	if in.AccountType != "" {
-		mod = mod.Where("a.account_type", in.AccountType)
+		mod = mod.Where("a."+publishAccountFieldAccountType, in.AccountType)
 	}
 	if in.Status > 0 {
-		mod = mod.Where("a.status", in.Status)
+		mod = mod.Where("a."+publishAccountFieldStatus, in.Status)
 	}
 	kw := strings.TrimSpace(in.Keyword)
 	if kw != "" {
@@ -442,10 +438,10 @@ func (s *sSysPublish) currentAccount(ctx context.Context) (*sysin.AccountModel, 
 	var account *sysin.AccountModel
 	err := g.DB().Model(publishAccountTable+" a").Safe().Ctx(ctx).
 		LeftJoin(publishMerchantTable+" m", "m.id=a.merchant_id").
-		Where("a.admin_member_id", userId).
-		Where("a.status", 1).
-		WhereNull("a.deleted_at").
-		WhereNull("m.deleted_at").
+		Where("a."+publishAccountFieldAdminMemberId, userId).
+		Where("a."+publishAccountFieldStatus, 1).
+		WhereNull("a." + publishAccountFieldDeletedAt).
+		WhereNull("m." + publishFieldDeletedAt).
 		Fields("a.*,m.name AS merchant_name").
 		OrderAsc("a.id").
 		Scan(&account)
@@ -471,9 +467,9 @@ func (s *sSysPublish) ensureMerchant(ctx context.Context, merchantId int64) erro
 
 func (s *sSysPublish) ensureAccountBelongsMerchant(ctx context.Context, accountId int64, merchantId int64) error {
 	count, err := g.DB().Model(publishAccountTable).Safe().Ctx(ctx).
-		Where("id", accountId).
-		Where("merchant_id", merchantId).
-		WhereNull("deleted_at").
+		Where(publishFieldId, accountId).
+		Where(publishAccountFieldMerchantId, merchantId).
+		WhereNull(publishAccountFieldDeletedAt).
 		Count()
 	if err != nil {
 		return gerror.Wrap(err, "检查上架账号失败")

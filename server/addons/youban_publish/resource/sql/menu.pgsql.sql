@@ -6,8 +6,8 @@ INSERT INTO "hg_admin_menu" (
 )
 SELECT
   root."id", '上架系统', 'youbanPublish', 'youbanPublish', 'icon-park-outline:upload-one', 2,
-  '', '/youban_publish/publish/merchant/list,/youban_publish/publish/merchant/save,/youban_publish/publish/merchant/delete,/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete,/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel,/youban_publish/publish/media/list,/youban_publish/publish/media/delete,/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete,/youban_publish/publish/config/get,/youban_publish/publish/config/update',
-  '', '/addons/youbanPublish/index', 1, '', 0, 0, '', 1, 2, 0, 2, CONCAT('tr_', root."id", ' '),
+  '', '', '', '/addons/youbanPublish/index', 1, '', 0,
+  0, '', 1, 2, 0, 2, 'tr_' || root."id"::text || ' ',
   32, '悦伴上架系统插件后台', 1, NOW(), NOW()
 FROM (SELECT "id" FROM "hg_admin_menu" WHERE "name" = 'addons' LIMIT 1) root
 WHERE NOT EXISTS (SELECT 1 FROM "hg_admin_menu" WHERE "name" = 'youbanPublish');
@@ -19,22 +19,87 @@ SET "title" = '上架系统',
     "icon" = 'icon-park-outline:upload-one',
     "type" = 2,
     "redirect" = '',
-    "permissions" = '/youban_publish/publish/merchant/list,/youban_publish/publish/merchant/save,/youban_publish/publish/merchant/delete,/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete,/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel,/youban_publish/publish/media/list,/youban_publish/publish/media/delete,/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete,/youban_publish/publish/config/get,/youban_publish/publish/config/update',
+    "permissions" = '',
+    "permission_name" = '',
     "component" = '/addons/youbanPublish/index',
     "always_show" = 1,
     "hidden" = 2,
     "level" = 2,
-    "tree" = CONCAT('tr_', root."id", ' '),
+    "tree" = 'tr_' || root."id"::text || ' ',
     "sort" = 32,
     "status" = 1,
     "updated_at" = NOW()
 FROM (SELECT "id" FROM "hg_admin_menu" WHERE "name" = 'addons' LIMIT 1) root
 WHERE "hg_admin_menu"."name" = 'youbanPublish';
 
+WITH parent AS (
+  SELECT "id", "tree" FROM "hg_admin_menu" WHERE "name" = 'youbanPublish' LIMIT 1
+), buttons AS (
+  SELECT *
+  FROM (VALUES
+    ('商户管理', 'youbanPublishMerchant', '/youban_publish/publish/merchant/list,/youban_publish/publish/merchant/save,/youban_publish/publish/merchant/delete', 10),
+    ('账号管理', 'youbanPublishAccount', '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete', 20),
+    ('上架任务', 'youbanPublishTask', '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel', 30),
+    ('资料媒体', 'youbanPublishMedia', '/youban_publish/publish/media/list,/youban_publish/publish/media/delete', 40),
+    ('机器人配置', 'youbanPublishBot', '/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete', 50),
+    ('插件配置', 'youbanPublishConfig', '/youban_publish/publish/config/get,/youban_publish/publish/config/update', 60)
+  ) AS t("title", "name", "permissions", "sort")
+)
+INSERT INTO "hg_admin_menu" (
+  "pid", "title", "name", "path", "icon", "type", "redirect", "permissions",
+  "permission_name", "component", "always_show", "active_menu", "is_root",
+  "is_frame", "frame_src", "keep_alive", "hidden", "affix", "level", "tree",
+  "sort", "remark", "status", "created_at", "updated_at"
+)
+SELECT
+  parent."id", buttons."title", buttons."name", '', '', 3, '', buttons."permissions",
+  '', '', 0, 'youbanPublish', 0, 0, '', 0, 1, 0, 3,
+  parent."tree" || 'tr_' || parent."id"::text || ' ',
+  buttons."sort", '上架系统按钮权限', 1, NOW(), NOW()
+FROM parent
+CROSS JOIN buttons
+WHERE NOT EXISTS (SELECT 1 FROM "hg_admin_menu" m WHERE m."name" = buttons."name");
+
+WITH parent AS (
+  SELECT "id", "tree" FROM "hg_admin_menu" WHERE "name" = 'youbanPublish' LIMIT 1
+), buttons AS (
+  SELECT *
+  FROM (VALUES
+    ('商户管理', 'youbanPublishMerchant', '/youban_publish/publish/merchant/list,/youban_publish/publish/merchant/save,/youban_publish/publish/merchant/delete', 10),
+    ('账号管理', 'youbanPublishAccount', '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete', 20),
+    ('上架任务', 'youbanPublishTask', '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel', 30),
+    ('资料媒体', 'youbanPublishMedia', '/youban_publish/publish/media/list,/youban_publish/publish/media/delete', 40),
+    ('机器人配置', 'youbanPublishBot', '/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete', 50),
+    ('插件配置', 'youbanPublishConfig', '/youban_publish/publish/config/get,/youban_publish/publish/config/update', 60)
+  ) AS t("title", "name", "permissions", "sort")
+)
+UPDATE "hg_admin_menu" m
+SET "pid" = parent."id",
+    "title" = buttons."title",
+    "type" = 3,
+    "permissions" = buttons."permissions",
+    "active_menu" = 'youbanPublish',
+    "hidden" = 1,
+    "level" = 3,
+    "tree" = parent."tree" || 'tr_' || parent."id"::text || ' ',
+    "sort" = buttons."sort",
+    "status" = 1,
+    "updated_at" = NOW()
+FROM parent, buttons
+WHERE m."name" = buttons."name";
+
 INSERT INTO "hg_admin_role_menu" ("role_id", "menu_id")
 SELECT r."id", m."id"
 FROM "hg_admin_role" r
-JOIN "hg_admin_menu" m ON m."name" = 'youbanPublish'
+JOIN "hg_admin_menu" m ON m."name" IN (
+  'youbanPublish',
+  'youbanPublishMerchant',
+  'youbanPublishAccount',
+  'youbanPublishTask',
+  'youbanPublishMedia',
+  'youbanPublishBot',
+  'youbanPublishConfig'
+)
 WHERE r."id" IN (1, 2)
   AND NOT EXISTS (
     SELECT 1 FROM "hg_admin_role_menu" rm WHERE rm."role_id" = r."id" AND rm."menu_id" = m."id"

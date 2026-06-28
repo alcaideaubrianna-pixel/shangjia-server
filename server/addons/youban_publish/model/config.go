@@ -9,3 +9,8 @@ type TelegramConfig struct {
 	WebhookSecret     string `json:"webhookSecret"`
 	DefaultTargetChat string `json:"defaultTargetChat"`
 }
+
+type AccountConfig struct {
+	DefaultRoleId int64 `json:"defaultRoleId"`
+	DefaultDeptId int64 `json:"defaultDeptId"`
+}
