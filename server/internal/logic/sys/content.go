@@ -10,6 +10,7 @@ import (
 	"hotgo/internal/dao"
 	"hotgo/internal/library/cache"
 	"hotgo/internal/library/location"
+	"hotgo/internal/library/storager"
 	"hotgo/internal/library/token"
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/sysin"
@@ -3016,8 +3017,11 @@ func contentAssetURL(value string) string {
 	if value == "" {
 		return ""
 	}
-	cdnBase := strings.TrimRight(g.Cfg().MustGet(context.Background(), "content.cdnBaseUrl", "").String(), "/")
+	cdnBase := contentCDNBaseURL()
 	if cdnBase == "" {
+		return value
+	}
+	if strings.HasPrefix(value, cdnBase+"/") {
 		return value
 	}
 	if strings.HasPrefix(value, feiNiuCosURLPrefix) {
@@ -3030,6 +3034,18 @@ func contentAssetURL(value string) string {
 		return cdnBase + "/" + cosPath
 	}
 	return value
+}
+
+func contentCDNBaseURL() string {
+	cdnBase := strings.TrimRight(g.Cfg().MustGet(context.Background(), "content.cdnBaseUrl", "").String(), "/")
+	if cdnBase != "" {
+		return cdnBase
+	}
+	uploadConfig := storager.GetConfig()
+	if uploadConfig == nil {
+		return ""
+	}
+	return strings.TrimRight(uploadConfig.CosPublicURL, "/")
 }
 
 func normalizeContentCosURLPath(value string) string {
