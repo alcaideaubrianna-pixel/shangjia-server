@@ -6,6 +6,8 @@
 package middleware
 
 import (
+	"net/http"
+
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/text/gstr"
@@ -30,10 +32,12 @@ func (s *sMiddleware) ApiAuth(r *ghttp.Request) {
 
 	// 将用户信息传递到上下文中
 	if err := s.DeliverUserContext(r); err != nil {
+		r.Response.Status = http.StatusUnauthorized
 		response.JsonExit(r, gcode.CodeNotAuthorized.Code(), err.Error())
 		return
 	}
 	if user := contexts.GetUser(ctx); user == nil || user.App != consts.AppApi {
+		r.Response.Status = http.StatusUnauthorized
 		response.JsonExit(r, gcode.CodeNotAuthorized.Code(), "API接口需要商家账号登录")
 		return
 	}

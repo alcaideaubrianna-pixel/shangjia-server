@@ -6,6 +6,8 @@
 package middleware
 
 import (
+	"net/http"
+
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -32,10 +34,12 @@ func (s *sMiddleware) AdminAuth(r *ghttp.Request) {
 
 	// 将用户信息传递到上下文中
 	if err := s.DeliverUserContext(r); err != nil {
+		r.Response.Status = http.StatusUnauthorized
 		response.JsonExit(r, gcode.CodeNotAuthorized.Code(), err.Error())
 		return
 	}
 	if user := contexts.GetUser(ctx); user == nil || user.App != consts.AppAdmin {
+		r.Response.Status = http.StatusUnauthorized
 		response.JsonExit(r, gcode.CodeNotAuthorized.Code(), "后台接口需要管理员登录")
 		return
 	}

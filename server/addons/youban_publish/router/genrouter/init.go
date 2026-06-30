@@ -8,7 +8,6 @@ import (
 	"hotgo/addons/youban_publish/global"
 	"hotgo/internal/consts"
 	"hotgo/internal/library/addons"
-	"hotgo/internal/service"
 )
 
 var (
@@ -22,7 +21,7 @@ func Register(ctx context.Context, group *ghttp.RouterGroup) {
 		if len(NoLoginRouter) > 0 {
 			group.Bind(NoLoginRouter...)
 		}
-		group.Middleware(service.Middleware().AdminAuth)
+		group.Middleware(publishAdminAuth)
 		if len(LoginRequiredRouter) > 0 {
 			group.Bind(LoginRequiredRouter...)
 		}

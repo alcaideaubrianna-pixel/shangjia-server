@@ -52,6 +52,7 @@ func (s *sSysPublish) loginPublishAccount(ctx context.Context, account *sysin.Ac
 	user := &model.Identity{
 		Id:       account.Id,
 		Pid:      account.ParentId,
+		DeptType: account.AccountType,
 		Username: account.Username,
 		RealName: account.Nickname,
 		App:      consts.AppApi,
