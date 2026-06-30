@@ -20,6 +20,10 @@ export function AccountSave(params = {}) {
   return http.request({ url: '/youban_publish/publish/account/save', method: 'POST', params });
 }
 
+export function AccountResetPassword(params = {}) {
+  return http.request({ url: '/youban_publish/publish/account/resetPwd', method: 'POST', params });
+}
+
 export function AccountDelete(params = {}) {
   return http.request({ url: '/youban_publish/publish/account/delete', method: 'POST', params });
 }

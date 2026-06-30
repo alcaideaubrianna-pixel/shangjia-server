@@ -41,11 +41,12 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_account` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
   `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID',
-  `admin_member_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '绑定系统账号ID',
   `parent_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '父账号ID',
   `account_type` varchar(32) NOT NULL DEFAULT 'uploader' COMMENT '账号类型',
   `nickname` varchar(128) NOT NULL DEFAULT '' COMMENT '昵称',
   `username` varchar(128) NOT NULL DEFAULT '' COMMENT '用户名',
+  `password_hash` varchar(128) NOT NULL DEFAULT '' COMMENT '密码hash',
+  `salt` varchar(16) NOT NULL DEFAULT '' COMMENT '密码盐',
   `telegram_user_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户ID',
   `telegram_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户名',
   `daily_publish_limit` int(11) NOT NULL DEFAULT '0' COMMENT '每日上架额度',
@@ -61,12 +62,13 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_account` (
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
-  KEY `idx_ybp_account_tenant` (`tenant_id`,`account_type`,`status`),
-  KEY `idx_ybp_account_admin_member` (`admin_member_id`,`status`)
+  KEY `idx_ybp_account_tenant` (`tenant_id`,`account_type`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架账号';
 
 ALTER TABLE `hg_youban_publish_account` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `id`;
 ALTER TABLE `hg_youban_publish_account` ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
+ALTER TABLE `hg_youban_publish_account` ADD COLUMN `password_hash` varchar(128) NOT NULL DEFAULT '' COMMENT '密码hash' AFTER `username`;
+ALTER TABLE `hg_youban_publish_account` ADD COLUMN `salt` varchar(16) NOT NULL DEFAULT '' COMMENT '密码盐' AFTER `password_hash`;
 UPDATE `hg_youban_publish_account` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
 ALTER TABLE `hg_youban_publish_account` ADD KEY `idx_ybp_account_tenant` (`tenant_id`,`account_type`,`status`);
 
@@ -238,10 +240,9 @@ INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`
 SELECT 'youban_publish', 'telegram', '默认推送 Chat ID', 'string', 'defaultTargetChat', '', '', 70, '资料发布后默认推送的 Telegram chat_id，可由后续频道配置覆盖', 0, 1, NOW(), NOW()
 WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_addons_config` WHERE `addon_name`='youban_publish' AND `key`='defaultTargetChat');
 
-INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
-SELECT 'youban_publish', 'account', '默认角色ID', 'int', 'defaultRoleId', '10', '10', 10, '创建管理员账号和上架账号时绑定的 HotGo 后台角色ID', 0, 1, NOW(), NOW()
-WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_addons_config` WHERE `addon_name`='youban_publish' AND `key`='defaultRoleId');
-
-INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
-SELECT 'youban_publish', 'account', '默认部门ID', 'int', 'defaultDeptId', '1', '1', 20, '创建管理员账号和上架账号时绑定的 HotGo 后台部门ID', 0, 1, NOW(), NOW()
-WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_addons_config` WHERE `addon_name`='youban_publish' AND `key`='defaultDeptId');
+UPDATE `hg_sys_addons_config`
+SET `status` = 2,
+    `updated_at` = NOW()
+WHERE `addon_name` = 'youban_publish'
+  AND `group` = 'account'
+  AND `key` IN ('defaultRoleId', 'defaultDeptId');

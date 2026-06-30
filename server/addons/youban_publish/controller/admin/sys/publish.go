@@ -27,11 +27,14 @@ func (c *cPublish) TenantList(ctx context.Context, req *publish.TenantListReq) (
 }
 
 func (c *cPublish) TenantSave(ctx context.Context, req *publish.TenantSaveReq) (res *publish.TenantSaveRes, err error) {
-	err = service.SysPublish().AdminTenantSave(ctx, &req.TenantSaveInp)
+	saveRes, err := service.SysPublish().AdminTenantSave(ctx, &req.TenantSaveInp)
 	if err != nil {
 		return
 	}
-	res = &publish.TenantSaveRes{}
+	res = &publish.TenantSaveRes{Password: ""}
+	if saveRes != nil {
+		res.Password = saveRes.Password
+	}
 	return
 }
 
@@ -59,11 +62,23 @@ func (c *cPublish) AccountList(ctx context.Context, req *publish.AccountListReq)
 }
 
 func (c *cPublish) AccountSave(ctx context.Context, req *publish.AccountSaveReq) (res *publish.AccountSaveRes, err error) {
-	err = service.SysPublish().AdminAccountSave(ctx, &req.AccountSaveInp)
+	saveRes, err := service.SysPublish().AdminAccountSave(ctx, &req.AccountSaveInp)
 	if err != nil {
 		return
 	}
-	res = &publish.AccountSaveRes{}
+	res = &publish.AccountSaveRes{Password: ""}
+	if saveRes != nil {
+		res.Password = saveRes.Password
+	}
+	return
+}
+
+func (c *cPublish) AccountResetPassword(ctx context.Context, req *publish.AccountResetPasswordReq) (res *publish.AccountResetPasswordRes, err error) {
+	saveRes, err := service.SysPublish().AdminAccountResetPassword(ctx, &req.AccountResetPasswordInp)
+	if err != nil {
+		return
+	}
+	res = &publish.AccountResetPasswordRes{Password: saveRes.Password}
 	return
 }
 

@@ -41,11 +41,12 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_account" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
   "merchant_id" bigint NOT NULL DEFAULT 0,
-  "admin_member_id" bigint NOT NULL DEFAULT 0,
   "parent_id" bigint NOT NULL DEFAULT 0,
   "account_type" varchar(32) NOT NULL DEFAULT 'uploader',
   "nickname" varchar(128) NOT NULL DEFAULT '',
   "username" varchar(128) NOT NULL DEFAULT '',
+  "password_hash" varchar(128) NOT NULL DEFAULT '',
+  "salt" varchar(16) NOT NULL DEFAULT '',
   "telegram_user_id" varchar(128) NOT NULL DEFAULT '',
   "telegram_username" varchar(128) NOT NULL DEFAULT '',
   "daily_publish_limit" integer NOT NULL DEFAULT 0,
@@ -63,9 +64,10 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_account" (
 );
 ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "tenant_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "merchant_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "password_hash" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "salt" varchar(16) NOT NULL DEFAULT '';
 UPDATE "hg_youban_publish_account" SET "tenant_id" = "merchant_id" WHERE "tenant_id" = 0 AND "merchant_id" > 0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_account_tenant" ON "hg_youban_publish_account" ("tenant_id", "account_type", "status");
-CREATE INDEX IF NOT EXISTS "idx_ybp_account_admin_member" ON "hg_youban_publish_account" ("admin_member_id", "status");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_task" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -216,10 +218,9 @@ INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key"
 SELECT 'youban_publish', 'telegram', '默认推送 Chat ID', 'string', 'defaultTargetChat', '', '', 70, '资料发布后默认推送的 Telegram chat_id，可由后续频道配置覆盖', 0, 1, NOW(), NOW()
 WHERE NOT EXISTS (SELECT 1 FROM "hg_sys_addons_config" WHERE "addon_name"='youban_publish' AND "key"='defaultTargetChat');
 
-INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
-SELECT 'youban_publish', 'account', '默认角色ID', 'int', 'defaultRoleId', '10', '10', 10, '创建管理员账号和上架账号时绑定的 HotGo 后台角色ID', 0, 1, NOW(), NOW()
-WHERE NOT EXISTS (SELECT 1 FROM "hg_sys_addons_config" WHERE "addon_name"='youban_publish' AND "key"='defaultRoleId');
-
-INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
-SELECT 'youban_publish', 'account', '默认部门ID', 'int', 'defaultDeptId', '1', '1', 20, '创建管理员账号和上架账号时绑定的 HotGo 后台部门ID', 0, 1, NOW(), NOW()
-WHERE NOT EXISTS (SELECT 1 FROM "hg_sys_addons_config" WHERE "addon_name"='youban_publish' AND "key"='defaultDeptId');
+UPDATE "hg_sys_addons_config"
+SET "status" = 2,
+    "updated_at" = NOW()
+WHERE "addon_name" = 'youban_publish'
+  AND "group" = 'account'
+  AND "key" IN ('defaultRoleId', 'defaultDeptId');

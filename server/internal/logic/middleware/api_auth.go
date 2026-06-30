@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/text/gstr"
 	"hotgo/internal/consts"
+	"hotgo/internal/library/contexts"
 	"hotgo/internal/library/response"
 	"hotgo/utility/simple"
 )
@@ -30,6 +31,10 @@ func (s *sMiddleware) ApiAuth(r *ghttp.Request) {
 	// 将用户信息传递到上下文中
 	if err := s.DeliverUserContext(r); err != nil {
 		response.JsonExit(r, gcode.CodeNotAuthorized.Code(), err.Error())
+		return
+	}
+	if user := contexts.GetUser(ctx); user == nil || user.App != consts.AppApi {
+		response.JsonExit(r, gcode.CodeNotAuthorized.Code(), "API接口需要商家账号登录")
 		return
 	}
 

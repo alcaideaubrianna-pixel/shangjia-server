@@ -22,7 +22,9 @@ type TenantSaveReq struct {
 	sysin.TenantSaveInp
 }
 
-type TenantSaveRes struct{}
+type TenantSaveRes struct {
+	Password string `json:"password" dc:"管理员初始密码"`
+}
 
 type TenantDeleteReq struct {
 	g.Meta `path:"/publish/tenant/delete" method:"post" tags:"上架插件后台" summary:"删除租户"`
@@ -46,7 +48,18 @@ type AccountSaveReq struct {
 	sysin.AccountSaveInp
 }
 
-type AccountSaveRes struct{}
+type AccountSaveRes struct {
+	Password string `json:"password" dc:"初始密码"`
+}
+
+type AccountResetPasswordReq struct {
+	g.Meta `path:"/publish/account/resetPwd" method:"post" tags:"上架插件后台" summary:"重置上架账号密码"`
+	sysin.AccountResetPasswordInp
+}
+
+type AccountResetPasswordRes struct {
+	Password string `json:"password" dc:"重置后的密码"`
+}
 
 type AccountDeleteReq struct {
 	g.Meta `path:"/publish/account/delete" method:"post" tags:"上架插件后台" summary:"删除上架账号"`

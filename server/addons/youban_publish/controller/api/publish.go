@@ -12,8 +12,10 @@ import (
 )
 
 var Publish = cPublish{}
+var PublishAuth = cPublishAuth{}
 
 type cPublish struct{}
+type cPublishAuth struct{}
 
 func (c *cPublish) CurrentAccount(ctx context.Context, req *publish.CurrentAccountReq) (res *publish.CurrentAccountRes, err error) {
 	data, err := service.SysPublish().CurrentAccount(ctx)
@@ -21,6 +23,41 @@ func (c *cPublish) CurrentAccount(ctx context.Context, req *publish.CurrentAccou
 		return
 	}
 	res = &publish.CurrentAccountRes{CurrentAccountModel: data}
+	return
+}
+
+func (c *cPublish) UpdateAccountPassword(ctx context.Context, req *publish.UpdateAccountPasswordReq) (res *publish.UpdateAccountPasswordRes, err error) {
+	if err = service.SysPublish().UpdateAccountPassword(ctx, &req.UpdateAccountPasswordInp); err != nil {
+		return nil, err
+	}
+	res = &publish.UpdateAccountPasswordRes{}
+	return
+}
+
+func (c *cPublish) UpdateAccountProfile(ctx context.Context, req *publish.UpdateAccountProfileReq) (res *publish.UpdateAccountProfileRes, err error) {
+	data, err := service.SysPublish().UpdateAccountProfile(ctx, &req.UpdateAccountProfileInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.UpdateAccountProfileRes{CurrentAccountModel: data}
+	return
+}
+
+func (c *cPublishAuth) AccountLogin(ctx context.Context, req *publish.AccountLoginReq) (res *publish.AccountLoginRes, err error) {
+	data, err := service.SysPublish().AccountLogin(ctx, &req.AccountLoginInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AccountLoginRes{AccountLoginModel: data}
+	return
+}
+
+func (c *cPublishAuth) AccountRegister(ctx context.Context, req *publish.AccountRegisterReq) (res *publish.AccountRegisterRes, err error) {
+	data, err := service.SysPublish().AccountRegister(ctx, &req.AccountRegisterInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AccountRegisterRes{AccountRegisterModel: data}
 	return
 }
 

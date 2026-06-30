@@ -9,16 +9,17 @@ import (
 	"hotgo/addons/youban_publish/global"
 	"hotgo/internal/consts"
 	"hotgo/internal/library/addons"
-	"hotgo/internal/service"
 )
 
 func Api(ctx context.Context, group *ghttp.RouterGroup) {
 	prefix := addons.RouterPrefix(ctx, consts.AppApi, global.GetSkeleton().Name)
 	group.Group(prefix, func(group *ghttp.RouterGroup) {
 		group.Bind(api.Webhook)
-	})
-	group.Group(prefix, func(group *ghttp.RouterGroup) {
-		group.Middleware(service.Middleware().ApiAuth)
-		group.Bind(api.Publish)
+		group.Bind(
+			api.PublishAuth,
+		)
+		withAuth(group, consts.AppApi, func(group *ghttp.RouterGroup) {
+			group.Bind(api.Publish)
+		})
 	})
 }

@@ -31,7 +31,7 @@ INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type
 SELECT NULL, @publishId, '租户管理', 'youbanPublishTenant', '', '', '3', '', '/youban_publish/publish/tenant/list,/youban_publish/publish/tenant/save,/youban_publish/publish/tenant/delete', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '10', '上架系统按钮权限', '1', @now, @now
 WHERE @publishId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanPublishTenant');
 INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type`, `redirect`, `permissions`, `permission_name`, `component`, `always_show`, `active_menu`, `is_root`, `is_frame`, `frame_src`, `keep_alive`, `hidden`, `affix`, `level`, `tree`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
-SELECT NULL, @publishId, '账号管理', 'youbanPublishAccount', '', '', '3', '', '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '20', '上架系统按钮权限', '1', @now, @now
+SELECT NULL, @publishId, '账号管理', 'youbanPublishAccount', '', '', '3', '', '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/resetPwd,/youban_publish/publish/account/delete', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '20', '上架系统按钮权限', '1', @now, @now
 WHERE @publishId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanPublishAccount');
 INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type`, `redirect`, `permissions`, `permission_name`, `component`, `always_show`, `active_menu`, `is_root`, `is_frame`, `frame_src`, `keep_alive`, `hidden`, `affix`, `level`, `tree`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
 SELECT NULL, @publishId, '上架任务', 'youbanPublishTask', '', '', '3', '', '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '30', '上架系统按钮权限', '1', @now, @now
@@ -60,7 +60,7 @@ SET `pid` = @publishId,
     `type` = '3',
     `permissions` = CASE `name`
         WHEN 'youbanPublishTenant' THEN '/youban_publish/publish/tenant/list,/youban_publish/publish/tenant/save,/youban_publish/publish/tenant/delete'
-        WHEN 'youbanPublishAccount' THEN '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete'
+        WHEN 'youbanPublishAccount' THEN '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/resetPwd,/youban_publish/publish/account/delete'
         WHEN 'youbanPublishTask' THEN '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel'
         WHEN 'youbanPublishMedia' THEN '/youban_publish/publish/media/list,/youban_publish/publish/media/delete'
         WHEN 'youbanPublishBot' THEN '/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete'
@@ -108,3 +108,35 @@ WHERE r.`id` IN (1, 2)
   AND NOT EXISTS (
     SELECT 1 FROM `hg_admin_role_menu` rm WHERE rm.`role_id` = r.`id` AND rm.`menu_id` = m.`id`
   );
+
+DELETE rm FROM `hg_admin_role_menu` rm
+JOIN `hg_admin_menu` m ON m.`id` = rm.`menu_id`
+WHERE m.`name` IN ('YoubanChat', 'YoubanChatWorkbench', 'YoubanChatConversationView', 'YoubanChatBot', 'YoubanChatBinding', 'YoubanChatOperator', 'YoubanChatFeature')
+   OR m.`title` IN ('客服会话', '客服工作台', '客服会话详情')
+   OR m.`component` = '/addons/youban_chat/index'
+   OR m.`permissions` LIKE '/youban_chat/%';
+
+UPDATE `hg_admin_menu`
+SET `status` = '2',
+    `hidden` = '1',
+    `updated_at` = @now
+WHERE `name` IN ('YoubanChat', 'YoubanChatWorkbench', 'YoubanChatConversationView', 'YoubanChatBot', 'YoubanChatBinding', 'YoubanChatOperator', 'YoubanChatFeature')
+   OR `title` IN ('客服会话', '客服工作台', '客服会话详情')
+   OR `component` = '/addons/youban_chat/index'
+   OR `permissions` LIKE '/youban_chat/%';
+
+UPDATE `hg_admin_menu`
+SET `pid` = @addonsId,
+    `title` = '插件管理',
+    `path` = 'addons',
+    `type` = '2',
+    `redirect` = '',
+    `permissions` = '/addons/selects,/addons/list',
+    `component` = '/develop/addons/index',
+    `always_show` = '1',
+    `hidden` = '0',
+    `level` = '2',
+    `tree` = CONCAT('tr_', @addonsId, ' '),
+    `status` = '1',
+    `updated_at` = @now
+WHERE @addonsId IS NOT NULL AND `name` = 'develop_addons';

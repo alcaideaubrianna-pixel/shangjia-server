@@ -24,42 +24,49 @@ const (
 
 type TenantListInp struct {
 	form.PageReq
-	Keyword string `json:"keyword" dc:"租户名称/联系人"`
+	Keyword string `json:"keyword" dc:"管理员账号/备注"`
 	Status  int    `json:"status" dc:"状态：1启用 2停用"`
 }
 
 type TenantModel struct {
-	Id           int64       `json:"id" dc:"ID"`
-	Name         string      `json:"name" dc:"租户名称"`
-	ContactName  string      `json:"contactName" dc:"联系人"`
-	ContactPhone string      `json:"contactPhone" dc:"联系电话"`
-	Remark       string      `json:"remark" dc:"备注"`
-	Status       int         `json:"status" dc:"状态"`
-	CreatedAt    *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt    *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id             int64       `json:"id" dc:"ID"`
+	Name           string      `json:"name" dc:"内部归属名称"`
+	AdminAccountId int64       `json:"adminAccountId" dc:"管理员账号ID"`
+	Username       string      `json:"username" dc:"管理员登录账号"`
+	Remark         string      `json:"remark" dc:"备注"`
+	Status         int         `json:"status" dc:"状态"`
+	CreatedAt      *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt      *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type TenantSaveInp struct {
-	Id           int64  `json:"id" dc:"ID"`
-	Name         string `json:"name" dc:"租户名称"`
-	ContactName  string `json:"contactName" dc:"联系人"`
-	ContactPhone string `json:"contactPhone" dc:"联系电话"`
-	Remark       string `json:"remark" dc:"备注"`
-	Status       int    `json:"status" dc:"状态：1启用 2停用"`
+	Id       int64  `json:"id" dc:"ID"`
+	Name     string `json:"name" dc:"内部归属名称"`
+	Username string `json:"username" dc:"管理员登录账号，新增账号归属时必填"`
+	Password string `json:"password" dc:"管理员登录密码，新增为空自动生成"`
+	Remark   string `json:"remark" dc:"备注"`
+	Status   int    `json:"status" dc:"状态：1启用 2停用"`
 }
 
 func (in *TenantSaveInp) Filter(ctx context.Context) error {
 	in.Name = strings.TrimSpace(in.Name)
-	if in.Name == "" {
-		return gerror.New("租户名称不能为空")
+	in.Username = strings.TrimSpace(in.Username)
+	in.Password = strings.TrimSpace(in.Password)
+	if in.Id == 0 && in.Username == "" {
+		return gerror.New("管理员登录账号不能为空")
 	}
 	if in.Status == 0 {
 		in.Status = 1
 	}
 	if in.Status != 1 && in.Status != 2 {
-		return gerror.New("租户状态不合法")
+		return gerror.New("账号归属状态不合法")
 	}
 	return nil
+}
+
+type TenantSaveModel struct {
+	Id       int64  `json:"id" dc:"租户ID"`
+	Password string `json:"password" dc:"管理员初始密码"`
 }
 
 type TenantDeleteInp struct {
@@ -68,17 +75,17 @@ type TenantDeleteInp struct {
 
 type AccountListInp struct {
 	form.PageReq
-	TenantId    int64  `json:"tenantId" dc:"租户ID"`
-	AccountType string `json:"accountType" dc:"账号类型：admin/uploader"`
-	Keyword     string `json:"keyword" dc:"账号/昵称"`
-	Status      int    `json:"status" dc:"状态：1启用 2停用"`
+	TenantId       int64  `json:"tenantId" dc:"租户ID"`
+	AccountType    string `json:"accountType" dc:"账号类型：admin/uploader"`
+	ExcludeCurrent int    `json:"excludeCurrent" dc:"是否排除当前登录账号：1是 0否"`
+	Keyword        string `json:"keyword" dc:"账号/昵称"`
+	Status         int    `json:"status" dc:"状态：1启用 2停用"`
 }
 
 type AccountModel struct {
 	Id                 int64       `json:"id" dc:"ID"`
 	TenantId           int64       `json:"tenantId" dc:"租户ID"`
-	TenantName         string      `json:"tenantName" dc:"租户名称"`
-	AdminMemberId      int64       `json:"adminMemberId" dc:"绑定系统账号ID"`
+	TenantName         string      `json:"tenantName" dc:"账号归属"`
 	ParentId           int64       `json:"parentId" dc:"父账号ID"`
 	AccountType        string      `json:"accountType" dc:"账号类型"`
 	Nickname           string      `json:"nickname" dc:"昵称"`
@@ -89,8 +96,11 @@ type AccountModel struct {
 	CanDirectPublish   int         `json:"canDirectPublish" dc:"是否可直接发布"`
 	AllowedChannelJson string      `json:"allowedChannelJson" dc:"可发布频道JSON"`
 	AllowedRegionJson  string      `json:"allowedRegionJson" dc:"可发布地区JSON"`
+	DownCount          int         `json:"downCount" dc:"下架资料数量"`
+	LastLoginAt        *gtime.Time `json:"lastLoginAt" dc:"最后登录时间"`
 	Remark             string      `json:"remark" dc:"备注"`
 	Status             int         `json:"status" dc:"状态"`
+	UploadCount        int         `json:"uploadCount" dc:"上架资料数量"`
 	CreatedAt          *gtime.Time `json:"createdAt" dc:"创建时间"`
 	UpdatedAt          *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
@@ -98,7 +108,6 @@ type AccountModel struct {
 type AccountSaveInp struct {
 	Id                 int64  `json:"id" dc:"ID"`
 	TenantId           int64  `json:"tenantId" dc:"租户ID"`
-	AdminMemberId      int64  `json:"adminMemberId" dc:"绑定系统账号ID"`
 	ParentId           int64  `json:"parentId" dc:"父账号ID"`
 	AccountType        string `json:"accountType" dc:"账号类型：admin/uploader"`
 	Nickname           string `json:"nickname" dc:"昵称"`
@@ -115,9 +124,6 @@ type AccountSaveInp struct {
 }
 
 func (in *AccountSaveInp) Filter(ctx context.Context) error {
-	if in.TenantId <= 0 {
-		return gerror.New("租户ID不能为空")
-	}
 	in.AccountType = strings.TrimSpace(in.AccountType)
 	if in.AccountType == "" {
 		in.AccountType = PublishAccountTypeAdmin
@@ -147,8 +153,122 @@ type AccountDeleteInp struct {
 	Ids []int64 `json:"ids" v:"required#请选择要删除的数据" dc:"ID列表"`
 }
 
+type AccountResetPasswordInp struct {
+	Id       int64  `json:"id" v:"required|min:1#账号ID不能为空|账号ID不能为空" dc:"上架账号ID"`
+	Password string `json:"password" dc:"新密码，为空自动生成"`
+}
+
+type AccountSaveModel struct {
+	Id       int64  `json:"id" dc:"账号ID"`
+	Password string `json:"password" dc:"账号初始密码"`
+}
+
 type CurrentAccountModel struct {
-	*AccountModel
+	Id          int64       `json:"id" dc:"账号ID"`
+	TenantId    int64       `json:"tenantId" dc:"租户ID"`
+	ParentId    int64       `json:"parentId" dc:"父账号ID"`
+	AccountType string      `json:"accountType" dc:"账号类型"`
+	Nickname    string      `json:"nickname" dc:"账号名称"`
+	Username    string      `json:"username" dc:"用户名"`
+	Remark      string      `json:"remark" dc:"个人简介"`
+	Status      int         `json:"status" dc:"状态"`
+	CreatedAt   *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt   *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
+type UpdateAccountPasswordInp struct {
+	OldPassword string `json:"oldPassword" v:"required#当前密码不能为空" dc:"当前密码"`
+	NewPassword string `json:"newPassword" v:"required#新密码不能为空" dc:"新密码"`
+}
+
+func (in *UpdateAccountPasswordInp) Filter(ctx context.Context) error {
+	in.OldPassword = strings.TrimSpace(in.OldPassword)
+	in.NewPassword = strings.TrimSpace(in.NewPassword)
+	if in.OldPassword == "" {
+		return gerror.New("当前密码不能为空")
+	}
+	if in.NewPassword == "" {
+		return gerror.New("新密码不能为空")
+	}
+	if len([]rune(in.NewPassword)) < 6 {
+		return gerror.New("新密码至少 6 位")
+	}
+	if in.OldPassword == in.NewPassword {
+		return gerror.New("新密码不能与当前密码相同")
+	}
+	return nil
+}
+
+type UpdateAccountProfileInp struct {
+	Nickname string `json:"nickname" v:"required#账号名称不能为空" dc:"账号名称"`
+	Remark   string `json:"remark" dc:"个人简介"`
+}
+
+func (in *UpdateAccountProfileInp) Filter(ctx context.Context) error {
+	in.Nickname = strings.TrimSpace(in.Nickname)
+	in.Remark = strings.TrimSpace(in.Remark)
+	if in.Nickname == "" {
+		return gerror.New("账号名称不能为空")
+	}
+	return nil
+}
+
+type AccountLoginInp struct {
+	Username string `json:"username" v:"required#账号不能为空" dc:"账号"`
+	Password string `json:"password" v:"required#密码不能为空" dc:"密码"`
+}
+
+func (in *AccountLoginInp) Filter(ctx context.Context) error {
+	in.Username = strings.TrimSpace(in.Username)
+	in.Password = strings.TrimSpace(in.Password)
+	if in.Username == "" {
+		return gerror.New("账号不能为空")
+	}
+	if in.Password == "" {
+		return gerror.New("密码不能为空")
+	}
+	return nil
+}
+
+type AccountLoginModel struct {
+	Id          int64  `json:"id" dc:"账号ID"`
+	TenantId    int64  `json:"tenantId" dc:"租户ID"`
+	AccountType string `json:"accountType" dc:"账号类型"`
+	Username    string `json:"username" dc:"账号"`
+	Nickname    string `json:"nickname" dc:"昵称"`
+	Token       string `json:"token" dc:"登录token"`
+	Expires     int64  `json:"expires" dc:"登录有效期"`
+}
+
+type AccountRegisterInp struct {
+	Username   string `json:"username" v:"required#账号不能为空" dc:"管理员账号"`
+	Password   string `json:"password" v:"required#密码不能为空" dc:"登录密码"`
+	Name       string `json:"name" dc:"租户名称"`
+	InviteCode string `json:"inviteCode" v:"required#邀请码不能为空" dc:"邀请码"`
+}
+
+func (in *AccountRegisterInp) Filter(ctx context.Context) error {
+	in.Username = strings.TrimSpace(in.Username)
+	in.Password = strings.TrimSpace(in.Password)
+	in.Name = strings.TrimSpace(in.Name)
+	in.InviteCode = strings.TrimSpace(in.InviteCode)
+	if in.Username == "" {
+		return gerror.New("账号不能为空")
+	}
+	if in.Password == "" {
+		return gerror.New("密码不能为空")
+	}
+	if in.InviteCode == "" {
+		return gerror.New("邀请码不能为空")
+	}
+	if in.Name == "" {
+		in.Name = in.Username
+	}
+	return nil
+}
+
+type AccountRegisterModel struct {
+	*AccountLoginModel
 }
 
 type TaskListInp struct {
@@ -178,7 +298,7 @@ type TaskModel struct {
 	PublishedAt     *gtime.Time `json:"publishedAt" dc:"发布时间"`
 	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
 	UpdatedAt       *gtime.Time `json:"updatedAt" dc:"更新时间"`
-	TenantName      string      `json:"tenantName" dc:"租户名称"`
+	TenantName      string      `json:"tenantName" dc:"账号归属"`
 	AccountNickname string      `json:"accountNickname" dc:"账号昵称"`
 	AccountUsername string      `json:"accountUsername" dc:"账号用户名"`
 }

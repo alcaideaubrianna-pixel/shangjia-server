@@ -10,7 +10,6 @@ import (
 	"hotgo/internal/library/response"
 	"hotgo/utility/charset"
 	"hotgo/utility/simple"
-	"strings"
 
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -84,16 +83,11 @@ func parseResponse(r *ghttp.Request) (code int, message string, resp interface{}
 		return gcode.CodeOK.Code(), "操作成功", r.GetHandlerResponse()
 	}
 
-	// 移动端公开 API 即使在本地 debug 模式也不能下发错误堆栈。
-	if simple.Debug(ctx) && !isPublicApiRequest(r) {
-		message = gerror.Current(err).Error()
-		if getContentType(r) == consts.HTTPContentTypeHtml {
-			resp = charset.SerializeStack(err)
-		} else {
-			resp = charset.ParseErrStack(err)
-		}
-	} else {
-		message = consts.ErrorMessage(gerror.Current(err))
+	message = consts.ErrorMessage(gerror.Current(err))
+
+	// 仅 HTML 错误页在 debug 时展示堆栈，JSON/XML 接口统一只返回业务错误信息。
+	if getContentType(r) == consts.HTTPContentTypeHtml && simple.Debug(ctx) {
+		resp = charset.SerializeStack(err)
 	}
 
 	code = gerror.Code(err).Code()
@@ -107,10 +101,6 @@ func parseResponse(r *ghttp.Request) (code int, message string, resp interface{}
 		g.Log().Errorf(ctx, "exception:%v", err)
 	}
 	return
-}
-
-func isPublicApiRequest(r *ghttp.Request) bool {
-	return strings.HasPrefix(r.URL.Path, "/api/")
 }
 
 func getContentType(r *ghttp.Request) (contentType string) {

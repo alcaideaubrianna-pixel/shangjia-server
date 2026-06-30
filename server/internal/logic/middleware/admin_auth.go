@@ -35,6 +35,10 @@ func (s *sMiddleware) AdminAuth(r *ghttp.Request) {
 		response.JsonExit(r, gcode.CodeNotAuthorized.Code(), err.Error())
 		return
 	}
+	if user := contexts.GetUser(ctx); user == nil || user.App != consts.AppAdmin {
+		response.JsonExit(r, gcode.CodeNotAuthorized.Code(), "后台接口需要管理员登录")
+		return
+	}
 
 	// 不需要验证权限的路由地址
 	if s.IsExceptAuth(ctx, consts.AppAdmin, path) {

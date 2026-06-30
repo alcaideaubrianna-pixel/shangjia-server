@@ -38,7 +38,7 @@ WITH parent AS (
   SELECT *
   FROM (VALUES
     ('租户管理', 'youbanPublishTenant', '/youban_publish/publish/tenant/list,/youban_publish/publish/tenant/save,/youban_publish/publish/tenant/delete', 10),
-    ('账号管理', 'youbanPublishAccount', '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete', 20),
+    ('账号管理', 'youbanPublishAccount', '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/resetPwd,/youban_publish/publish/account/delete', 20),
     ('上架任务', 'youbanPublishTask', '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel', 30),
     ('资料媒体', 'youbanPublishMedia', '/youban_publish/publish/media/list,/youban_publish/publish/media/delete', 40),
     ('机器人配置', 'youbanPublishBot', '/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete', 50),
@@ -66,7 +66,7 @@ WITH parent AS (
   SELECT *
   FROM (VALUES
     ('租户管理', 'youbanPublishTenant', '/youban_publish/publish/tenant/list,/youban_publish/publish/tenant/save,/youban_publish/publish/tenant/delete', 10),
-    ('账号管理', 'youbanPublishAccount', '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/delete', 20),
+    ('账号管理', 'youbanPublishAccount', '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/resetPwd,/youban_publish/publish/account/delete', 20),
     ('上架任务', 'youbanPublishTask', '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel', 30),
     ('资料媒体', 'youbanPublishMedia', '/youban_publish/publish/media/list,/youban_publish/publish/media/delete', 40),
     ('机器人配置', 'youbanPublishBot', '/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete', 50),
@@ -104,3 +104,39 @@ WHERE r."id" IN (1, 2)
   AND NOT EXISTS (
     SELECT 1 FROM "hg_admin_role_menu" rm WHERE rm."role_id" = r."id" AND rm."menu_id" = m."id"
   );
+
+DELETE FROM "hg_admin_role_menu" rm
+USING "hg_admin_menu" m
+WHERE m."id" = rm."menu_id"
+  AND (
+    m."name" IN ('YoubanChat', 'YoubanChatWorkbench', 'YoubanChatConversationView', 'YoubanChatBot', 'YoubanChatBinding', 'YoubanChatOperator', 'YoubanChatFeature')
+    OR m."title" IN ('客服会话', '客服工作台', '客服会话详情')
+    OR m."component" = '/addons/youban_chat/index'
+    OR m."permissions" LIKE '/youban_chat/%'
+  );
+
+UPDATE "hg_admin_menu"
+SET "status" = 2,
+    "hidden" = 1,
+    "updated_at" = NOW()
+WHERE "name" IN ('YoubanChat', 'YoubanChatWorkbench', 'YoubanChatConversationView', 'YoubanChatBot', 'YoubanChatBinding', 'YoubanChatOperator', 'YoubanChatFeature')
+   OR "title" IN ('客服会话', '客服工作台', '客服会话详情')
+   OR "component" = '/addons/youban_chat/index'
+   OR "permissions" LIKE '/youban_chat/%';
+
+UPDATE "hg_admin_menu"
+SET "pid" = root."id",
+    "title" = '插件管理',
+    "path" = 'addons',
+    "type" = 2,
+    "redirect" = '',
+    "permissions" = '/addons/selects,/addons/list',
+    "component" = '/develop/addons/index',
+    "always_show" = 1,
+    "hidden" = 0,
+    "level" = 2,
+    "tree" = 'tr_' || root."id"::text || ' ',
+    "status" = 1,
+    "updated_at" = NOW()
+FROM (SELECT "id" FROM "hg_admin_menu" WHERE "name" = 'addons' LIMIT 1) root
+WHERE "hg_admin_menu"."name" = 'develop_addons';

@@ -15,6 +15,40 @@ type CurrentAccountRes struct {
 	*sysin.CurrentAccountModel
 }
 
+type UpdateAccountPasswordReq struct {
+	g.Meta `path:"/publish/account/password" method:"post" tags:"上架插件" summary:"修改当前账号密码"`
+	sysin.UpdateAccountPasswordInp
+}
+
+type UpdateAccountPasswordRes struct{}
+
+type UpdateAccountProfileReq struct {
+	g.Meta `path:"/publish/account/profile" method:"post" tags:"上架插件" summary:"修改当前账号基本信息"`
+	sysin.UpdateAccountProfileInp
+}
+
+type UpdateAccountProfileRes struct {
+	*sysin.CurrentAccountModel
+}
+
+type AccountLoginReq struct {
+	g.Meta `path:"/publish/auth/login" method:"post" tags:"上架插件" summary:"上架账号登录"`
+	sysin.AccountLoginInp
+}
+
+type AccountLoginRes struct {
+	*sysin.AccountLoginModel
+}
+
+type AccountRegisterReq struct {
+	g.Meta `path:"/publish/auth/register" method:"post" tags:"上架插件" summary:"上架管理员注册"`
+	sysin.AccountRegisterInp
+}
+
+type AccountRegisterRes struct {
+	*sysin.AccountRegisterModel
+}
+
 type MyTaskListReq struct {
 	g.Meta `path:"/publish/task/list" method:"get" tags:"上架插件" summary:"我的上架任务列表"`
 	sysin.TaskListInp

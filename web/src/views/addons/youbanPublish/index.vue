@@ -2,18 +2,18 @@
   <div>
     <div class="n-layout-page-header">
       <n-card :bordered="false" title="上架系统">
-        <span>管理租户、管理员账号、上架账号、上架任务和 Telegram Bot 配置</span>
+        <span>管理管理员账号、上架账号、上架任务和 Telegram Bot 配置</span>
       </n-card>
     </div>
 
     <n-card :bordered="false" class="proCard">
       <n-tabs v-model:value="activeTab" type="line" animated @update:value="handleTabChange">
-        <n-tab-pane name="tenants" tab="租户">
+        <n-tab-pane name="tenants" tab="账号归属">
           <n-space class="toolbar" align="center">
-            <n-input v-model:value="tenantQuery.keyword" placeholder="租户名称 / 联系人" clearable @keyup.enter="loadTenants" />
+            <n-input v-model:value="tenantQuery.keyword" placeholder="管理员账号 / 备注" clearable @keyup.enter="loadTenants" />
             <n-select v-model:value="tenantQuery.status" :options="statusOptionsWithAll" clearable placeholder="状态" class="status-select" />
             <n-button @click="loadTenants">查询</n-button>
-            <n-button type="primary" @click="openTenantModal()">新增租户</n-button>
+            <n-button type="primary" @click="openTenantModal()">新增账号归属</n-button>
           </n-space>
           <n-data-table
             :columns="tenantColumns"
@@ -29,7 +29,7 @@
 
         <n-tab-pane name="accounts" tab="账号">
           <n-space class="toolbar" align="center">
-            <n-select v-model:value="accountQuery.tenantId" :options="tenantOptionsWithAll" clearable filterable placeholder="租户" class="tenant-select" />
+            <n-select v-model:value="accountQuery.tenantId" :options="tenantOptionsWithAll" clearable filterable placeholder="账号归属" class="tenant-select" />
             <n-select v-model:value="accountQuery.accountType" :options="accountTypeOptionsWithAll" clearable placeholder="账号类型" class="status-select" />
             <n-input v-model:value="accountQuery.keyword" placeholder="账号 / 昵称" clearable @keyup.enter="loadAccounts" />
             <n-button @click="loadAccounts">查询</n-button>
@@ -49,7 +49,7 @@
 
         <n-tab-pane name="tasks" tab="任务">
           <n-space class="toolbar" align="center">
-            <n-select v-model:value="taskQuery.tenantId" :options="tenantOptionsWithAll" clearable filterable placeholder="租户" class="tenant-select" />
+            <n-select v-model:value="taskQuery.tenantId" :options="tenantOptionsWithAll" clearable filterable placeholder="账号归属" class="tenant-select" />
             <n-select v-model:value="taskQuery.status" :options="taskStatusOptionsWithAll" clearable placeholder="任务状态" class="status-select" />
             <n-input v-model:value="taskQuery.keyword" placeholder="标题 / 请求ID" clearable @keyup.enter="loadTasks" />
             <n-button @click="loadTasks">查询</n-button>
@@ -68,7 +68,7 @@
 
         <n-tab-pane name="bots" tab="Bot">
           <n-space class="toolbar" align="center">
-            <n-select v-model:value="botQuery.tenantId" :options="botTenantOptions" clearable filterable placeholder="租户" class="tenant-select" />
+            <n-select v-model:value="botQuery.tenantId" :options="botTenantOptions" clearable filterable placeholder="账号归属" class="tenant-select" />
             <n-input v-model:value="botQuery.keyword" placeholder="Bot 名称 / 用户名" clearable @keyup.enter="loadBots" />
             <n-select v-model:value="botQuery.status" :options="statusOptionsWithAll" clearable placeholder="状态" class="status-select" />
             <n-button @click="loadBots">查询</n-button>
@@ -112,15 +112,6 @@
                   <n-input v-model:value="telegramConfig.defaultTargetChat" clearable />
                 </n-form-item>
               </n-form>
-              <n-divider />
-              <n-form :model="accountConfig" label-placement="left" label-width="150">
-                <n-form-item label="默认角色ID">
-                  <n-input-number v-model:value="accountConfig.defaultRoleId" :min="1" class="w-full" />
-                </n-form-item>
-                <n-form-item label="默认部门ID">
-                  <n-input-number v-model:value="accountConfig.defaultDeptId" :min="1" class="w-full" />
-                </n-form-item>
-              </n-form>
               <n-space justify="end">
                 <n-button @click="loadConfigs">重置</n-button>
                 <n-button type="primary" :loading="configSaving" @click="saveConfigs">保存配置</n-button>
@@ -131,11 +122,17 @@
       </n-tabs>
     </n-card>
 
-    <n-modal v-model:show="tenantModalVisible" preset="dialog" title="租户" positive-text="保存" negative-text="取消" @positive-click="saveTenant">
+    <n-modal
+      v-model:show="tenantModalVisible"
+      preset="dialog"
+      :title="tenantForm.id ? '编辑账号归属' : '新增账号归属'"
+      positive-text="保存"
+      negative-text="取消"
+      @positive-click="saveTenant"
+    >
       <n-form :model="tenantForm" label-placement="left" label-width="90">
-        <n-form-item label="租户名称"><n-input v-model:value="tenantForm.name" clearable /></n-form-item>
-        <n-form-item label="联系人"><n-input v-model:value="tenantForm.contactName" clearable /></n-form-item>
-        <n-form-item label="联系电话"><n-input v-model:value="tenantForm.contactPhone" clearable /></n-form-item>
+        <n-form-item label="管理员账号"><n-input v-model:value="tenantForm.username" clearable placeholder="请输入管理员账号" /></n-form-item>
+        <n-form-item label="登录密码"><n-input v-model:value="tenantForm.password" type="password" show-password-on="click" clearable placeholder="新增时不填自动生成" /></n-form-item>
         <n-form-item label="状态"><n-select v-model:value="tenantForm.status" :options="statusOptions" /></n-form-item>
         <n-form-item label="备注"><n-input v-model:value="tenantForm.remark" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" /></n-form-item>
       </n-form>
@@ -143,14 +140,14 @@
 
     <n-modal v-model:show="accountModalVisible" preset="dialog" title="账号" positive-text="保存" negative-text="取消" @positive-click="saveAccount">
       <n-form :model="accountForm" label-placement="left" label-width="110">
-        <n-form-item label="租户"><n-select v-model:value="accountForm.tenantId" :options="tenantOptions" filterable /></n-form-item>
+        <n-form-item label="账号归属"><n-select v-model:value="accountForm.tenantId" :options="tenantOptions" filterable /></n-form-item>
         <n-form-item label="账号类型"><n-select v-model:value="accountForm.accountType" :options="accountTypeOptions" /></n-form-item>
         <n-form-item v-if="accountForm.accountType === 'uploader'" label="管理员账号">
           <n-select v-model:value="accountForm.parentId" :options="adminAccountOptions" filterable clearable />
         </n-form-item>
         <n-form-item label="登录账号"><n-input v-model:value="accountForm.username" clearable /></n-form-item>
         <n-form-item label="登录密码"><n-input v-model:value="accountForm.password" type="password" show-password-on="click" clearable placeholder="新增为空自动生成，编辑为空不修改" /></n-form-item>
-        <n-form-item label="昵称"><n-input v-model:value="accountForm.nickname" clearable /></n-form-item>
+        <n-form-item label="账号名称"><n-input v-model:value="accountForm.nickname" clearable /></n-form-item>
         <n-form-item label="每日额度"><n-input-number v-model:value="accountForm.dailyPublishLimit" :min="0" class="w-full" /></n-form-item>
         <n-form-item label="直接发布"><n-switch v-model:value="accountForm.canDirectPublish" :checked-value="1" :unchecked-value="0" /></n-form-item>
         <n-form-item label="状态"><n-select v-model:value="accountForm.status" :options="statusOptions" /></n-form-item>
@@ -158,9 +155,38 @@
       </n-form>
     </n-modal>
 
+    <n-modal
+      v-model:show="resetPasswordVisible"
+      preset="dialog"
+      title="重置密码"
+      positive-text="确认重置"
+      negative-text="取消"
+      @positive-click="resetPassword"
+    >
+      <n-form :model="resetPasswordForm" label-placement="left" label-width="90">
+        <n-form-item label="账号"><n-input v-model:value="resetPasswordForm.username" disabled /></n-form-item>
+        <n-form-item label="新密码">
+          <n-input
+            v-model:value="resetPasswordForm.password"
+            type="password"
+            show-password-on="click"
+            clearable
+            placeholder="不填写则自动生成随机密码"
+          />
+        </n-form-item>
+      </n-form>
+    </n-modal>
+
+    <n-modal v-model:show="resetPasswordResultVisible" preset="dialog" title="密码已重置" positive-text="复制密码" negative-text="确定" @positive-click="copyResetPassword">
+      <n-space vertical>
+        <div>请保存以下新密码，关闭后将不再显示。</div>
+        <n-input v-model:value="resetPasswordResult.password" readonly />
+      </n-space>
+    </n-modal>
+
     <n-modal v-model:show="botModalVisible" preset="dialog" title="Bot配置" positive-text="保存" negative-text="取消" @positive-click="saveBot">
       <n-form :model="botForm" label-placement="left" label-width="100">
-        <n-form-item label="租户"><n-select v-model:value="botForm.tenantId" :options="botTenantOptions" filterable clearable placeholder="不选表示全局默认" /></n-form-item>
+        <n-form-item label="账号归属"><n-select v-model:value="botForm.tenantId" :options="botTenantOptions" filterable clearable placeholder="不选表示全局默认" /></n-form-item>
         <n-form-item label="Bot名称"><n-input v-model:value="botForm.botName" clearable /></n-form-item>
         <n-form-item label="Bot Token"><n-input v-model:value="botForm.botToken" type="password" show-password-on="click" clearable /></n-form-item>
         <n-form-item label="状态"><n-select v-model:value="botForm.status" :options="statusOptions" /></n-form-item>
@@ -176,6 +202,7 @@
   import {
     AccountDelete,
     AccountList,
+    AccountResetPassword,
     AccountSave,
     BotDelete,
     BotList,
@@ -233,6 +260,8 @@
 
   const tenantModalVisible = ref(false);
   const accountModalVisible = ref(false);
+  const resetPasswordVisible = ref(false);
+  const resetPasswordResultVisible = ref(false);
   const botModalVisible = ref(false);
 
   const tenantQuery = reactive({ keyword: '', status: 0 });
@@ -245,8 +274,8 @@
   const taskPagination = createPagination(loadTasks);
   const botPagination = createPagination(loadBots);
 
-  const tenantOptions = computed(() => tenants.value.map((item) => ({ label: item.name, value: item.id })));
-  const tenantOptionsWithAll = computed(() => [{ label: '全部租户', value: null }, ...tenantOptions.value]);
+  const tenantOptions = computed(() => tenants.value.map((item) => ({ label: accountOwnerName(item), value: item.id })));
+  const tenantOptionsWithAll = computed(() => [{ label: '全部账号归属', value: null }, ...tenantOptions.value]);
   const botTenantOptions = computed(() => [{ label: '全局默认', value: 0 }, ...tenantOptions.value]);
   const adminAccountOptions = computed(() =>
     accounts.value
@@ -256,6 +285,8 @@
 
   const tenantForm = reactive(newTenantForm());
   const accountForm = reactive(newAccountForm());
+  const resetPasswordForm = reactive({ id: 0, username: '', password: '' });
+  const resetPasswordResult = reactive({ password: '' });
   const botForm = reactive(newBotForm());
   const telegramConfig = reactive({
     appId: 0,
@@ -266,14 +297,12 @@
     webhookSecret: '',
     defaultTargetChat: '',
   });
-  const accountConfig = reactive({ defaultRoleId: 10, defaultDeptId: 1 });
 
   const tenantColumns = [
     { title: 'ID', key: 'id', width: 80 },
-    { title: '租户名称', key: 'name', width: 180 },
-    { title: '联系人', key: 'contactName', width: 140 },
-    { title: '联系电话', key: 'contactPhone', width: 150 },
+    { title: '管理员账号', key: 'username', width: 180, render: (row) => row.username || '-' },
     { title: '状态', key: 'status', width: 100, render: (row) => renderStatus(row.status) },
+    { title: '备注', key: 'remark', width: 260 },
     { title: '创建时间', key: 'createdAt', width: 170 },
     {
       title: '操作',
@@ -281,17 +310,17 @@
       width: 160,
       fixed: 'right',
       render(row) {
-        return h(NSpace, {}, { default: () => [actionButton('编辑', () => openTenantModal(row)), dangerButton('删除', () => deleteTenant(row.id))] });
+        return h(NSpace, {}, { default: () => [actionButton('编辑', () => openTenantModal(row)), actionButton('重置密码', () => openTenantResetPassword(row)), dangerButton('删除', () => deleteTenant(row.id))] });
       },
     },
   ];
 
   const accountColumns = [
     { title: 'ID', key: 'id', width: 80 },
-    { title: '租户', key: 'tenantName', width: 160 },
+    { title: '账号归属', key: 'tenantId', width: 160, render: (row) => tenantName(row.tenantId) },
     { title: '类型', key: 'accountType', width: 110, render: (row) => accountTypeLabel(row.accountType) },
     { title: '账号', key: 'username', width: 160 },
-    { title: '昵称', key: 'nickname', width: 160 },
+    { title: '账号名称', key: 'nickname', width: 160 },
     { title: '每日额度', key: 'dailyPublishLimit', width: 100 },
     { title: '直接发布', key: 'canDirectPublish', width: 100, render: (row) => (row.canDirectPublish === 1 ? '是' : '否') },
     { title: '状态', key: 'status', width: 100, render: (row) => renderStatus(row.status) },
@@ -302,14 +331,14 @@
       width: 160,
       fixed: 'right',
       render(row) {
-        return h(NSpace, {}, { default: () => [actionButton('编辑', () => openAccountModal(row)), dangerButton('删除', () => deleteAccount(row.id))] });
+        return h(NSpace, {}, { default: () => [actionButton('编辑', () => openAccountModal(row)), actionButton('重置密码', () => openAccountResetPassword(row)), dangerButton('删除', () => deleteAccount(row.id))] });
       },
     },
   ];
 
   const taskColumns = [
     { title: 'ID', key: 'id', width: 80 },
-    { title: '租户', key: 'tenantName', width: 150 },
+    { title: '账号归属', key: 'tenantId', width: 150, render: (row) => tenantName(row.tenantId) },
     { title: '账号', key: 'accountUsername', width: 150 },
     { title: '标题', key: 'title', width: 220 },
     { title: '地区', key: 'city', width: 140, render: (row) => [row.province, row.city].filter(Boolean).join(' / ') || '-' },
@@ -330,7 +359,7 @@
 
   const botColumns = [
     { title: 'ID', key: 'id', width: 80 },
-    { title: '租户', key: 'tenantId', width: 160, render: (row) => tenantName(row.tenantId) },
+    { title: '账号归属', key: 'tenantId', width: 160, render: (row) => tenantName(row.tenantId) },
     { title: 'Bot名称', key: 'botName', width: 180 },
     { title: '用户名', key: 'botUsername', width: 180 },
     { title: '状态', key: 'status', width: 100, render: (row) => renderStatus(row.status) },
@@ -425,7 +454,6 @@
     configLoading.value = true;
     try {
       Object.assign(telegramConfig, await ConfigGet({ group: 'telegram' }));
-      Object.assign(accountConfig, await ConfigGet({ group: 'account' }));
     } finally {
       configLoading.value = false;
     }
@@ -435,7 +463,6 @@
     configSaving.value = true;
     try {
       await ConfigUpdate({ group: 'telegram', ...telegramConfig });
-      await ConfigUpdate({ group: 'account', ...accountConfig });
       message.success('配置已保存');
     } finally {
       configSaving.value = false;
@@ -444,12 +471,17 @@
 
   function openTenantModal(row: any = null) {
     Object.assign(tenantForm, newTenantForm(), row || {});
+    if (row?.id) {
+      tenantForm.username = '';
+      tenantForm.password = '';
+    }
     tenantModalVisible.value = true;
   }
 
   async function saveTenant() {
+    tenantForm.name = '';
     await TenantSave(tenantForm);
-    message.success('租户已保存');
+    message.success('账号归属已保存');
     await loadTenants();
   }
 
@@ -467,6 +499,37 @@
     await loadAccounts();
   }
 
+  function openTenantResetPassword(row: any) {
+    if (!row.adminAccountId) {
+      message.warning('该账号归属暂无管理员账号');
+      return;
+    }
+    Object.assign(resetPasswordForm, { id: row.adminAccountId, username: row.username || '', password: '' });
+    resetPasswordVisible.value = true;
+  }
+
+  function openAccountResetPassword(row: any) {
+    Object.assign(resetPasswordForm, { id: row.id, username: row.username || '', password: '' });
+    resetPasswordVisible.value = true;
+  }
+
+  async function resetPassword() {
+    const res: any = await AccountResetPassword({ id: resetPasswordForm.id, password: resetPasswordForm.password });
+    if (res?.password) {
+      resetPasswordResult.password = res.password;
+      resetPasswordResultVisible.value = true;
+    } else {
+      message.success('密码已重置');
+    }
+    resetPasswordVisible.value = false;
+  }
+
+  async function copyResetPassword() {
+    if (!resetPasswordResult.password) return;
+    await navigator.clipboard.writeText(resetPasswordResult.password);
+    message.success('密码已复制');
+  }
+
   function openBotModal(row: any = null) {
     Object.assign(botForm, newBotForm(), row || {});
     botModalVisible.value = true;
@@ -479,14 +542,14 @@
   }
 
   function deleteTenant(id: number) {
-    confirmDelete('确认删除该租户？', async () => {
+    confirmDelete('确认删除该账号归属？', async () => {
       await TenantDelete({ ids: [id] });
       await loadTenants();
     });
   }
 
   function deleteAccount(id: number) {
-    confirmDelete('确认删除该账号？绑定的后台登录账号会同步停用。', async () => {
+    confirmDelete('确认删除该上架系统账号？', async () => {
       await AccountDelete({ ids: [id] });
       await loadAccounts();
     });
@@ -548,11 +611,16 @@
 
   function tenantName(id: number) {
     if (!id) return '全局默认';
-    return tenants.value.find((item) => item.id === id)?.name || `租户 ${id}`;
+    const tenant = tenants.value.find((item) => item.id === id);
+    return tenant ? accountOwnerName(tenant) : `账号归属 ${id}`;
+  }
+
+  function accountOwnerName(item: any) {
+    return item.username || item.name || `账号归属 ${item.id}`;
   }
 
   function newTenantForm() {
-    return { id: 0, name: '', contactName: '', contactPhone: '', remark: '', status: 1 };
+    return { id: 0, name: '', username: '', password: '', remark: '', status: 1 };
   }
 
   function newAccountForm() {
