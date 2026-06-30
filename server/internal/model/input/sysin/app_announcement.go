@@ -171,6 +171,8 @@ type AppAnnouncementPublicListModel struct {
 func ArticleCategories() []*AppAnnouncementCategoryModel {
 	return []*AppAnnouncementCategoryModel{
 		{Code: "home", Name: "首页推荐", Description: "用于首页 Banner、推荐阅读和首页重点内容展示。"},
+		{Code: "guide", Name: "包养指南", Description: "包养平台、高端交友、会员认证和隐私保护相关指南。"},
+		{Code: "city", Name: "城市包养", Description: "北京包养、上海包养、深圳包养、广州包养等城市入口与筛选建议。"},
 		{Code: "about", Name: "关于我们", Description: "了解悦伴平台、服务规则和用户权益。"},
 		{Code: "case", Name: "交友成功案例", Description: "分享真实同城交友体验和平台使用案例。"},
 		{Code: "blog", Name: "博客", Description: "分享同城交友、高端社交和会员认证相关看法。"},
