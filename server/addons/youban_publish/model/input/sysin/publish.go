@@ -465,9 +465,6 @@ type TgAccountStartLoginInp struct {
 }
 
 func (in *TgAccountStartLoginInp) Filter(ctx context.Context) error {
-	if in.TenantId <= 0 {
-		return gerror.New("请选择账号归属")
-	}
 	in.DisplayName = strings.TrimSpace(in.DisplayName)
 	in.Remark = strings.TrimSpace(in.Remark)
 	return nil

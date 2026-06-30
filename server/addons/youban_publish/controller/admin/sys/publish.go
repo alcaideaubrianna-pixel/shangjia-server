@@ -49,6 +49,50 @@ func (c *cPublishServer) TenantDelete(ctx context.Context, req *publish.TenantDe
 	return
 }
 
+func (c *cPublishServer) AccountList(ctx context.Context, req *publish.AccountListReq) (res *publish.AccountListRes, err error) {
+	list, totalCount, err := service.SysPublish().ServerAccountList(ctx, &req.AccountListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.AccountModel{}
+	}
+	res = new(publish.AccountListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) AccountSave(ctx context.Context, req *publish.AccountSaveReq) (res *publish.AccountSaveRes, err error) {
+	saveRes, err := service.SysPublish().ServerAccountSave(ctx, &req.AccountSaveInp)
+	if err != nil {
+		return
+	}
+	res = &publish.AccountSaveRes{Password: ""}
+	if saveRes != nil {
+		res.Password = saveRes.Password
+	}
+	return
+}
+
+func (c *cPublishServer) AccountResetPassword(ctx context.Context, req *publish.AccountResetPasswordReq) (res *publish.AccountResetPasswordRes, err error) {
+	saveRes, err := service.SysPublish().ServerAccountResetPassword(ctx, &req.AccountResetPasswordInp)
+	if err != nil {
+		return
+	}
+	res = &publish.AccountResetPasswordRes{Password: saveRes.Password}
+	return
+}
+
+func (c *cPublishServer) AccountDelete(ctx context.Context, req *publish.AccountDeleteReq) (res *publish.AccountDeleteRes, err error) {
+	err = service.SysPublish().ServerAccountDelete(ctx, &req.AccountDeleteInp)
+	if err != nil {
+		return
+	}
+	res = &publish.AccountDeleteRes{}
+	return
+}
+
 func (c *cPublishAdmin) AccountList(ctx context.Context, req *publish.AccountListReq) (res *publish.AccountListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminAccountList(ctx, &req.AccountListInp)
 	if err != nil {
