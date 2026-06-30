@@ -18,6 +18,9 @@ func Api(ctx context.Context, group *ghttp.RouterGroup) {
 		group.Bind(
 			api.PublishAuth,
 		)
+		withPublishAdminAuth(group, func(group *ghttp.RouterGroup) {
+			group.Bind(api.PublishAdmin)
+		})
 		withAuth(group, consts.AppApi, func(group *ghttp.RouterGroup) {
 			group.Bind(api.Publish)
 		})

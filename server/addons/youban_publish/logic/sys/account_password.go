@@ -29,7 +29,7 @@ func (s *sSysPublish) prepareAccountParent(ctx context.Context, in *sysin.Accoun
 		return nil
 	}
 	if in.ParentId <= 0 {
-		in.ParentId = contexts.GetUserId(ctx)
+		return gerror.New("请选择管理员账号")
 	}
 	if in.Id > 0 && in.ParentId == in.Id {
 		return gerror.New("上架账号不能选择自己作为管理员账号")

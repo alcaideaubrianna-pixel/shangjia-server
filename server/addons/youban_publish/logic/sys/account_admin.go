@@ -16,27 +16,33 @@ import (
 )
 
 func (s *sSysPublish) AdminAccountList(ctx context.Context, in *sysin.AccountListInp) (list []*sysin.AccountModel, totalCount int, err error) {
-	current, err := s.currentAccount(ctx)
+	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
-	in.TenantId = current.TenantId
+	if in == nil {
+		in = &sysin.AccountListInp{}
+	}
+	in.TenantId = account.TenantId
 	return s.accountList(ctx, in)
 }
 
 func (s *sSysPublish) AdminAccountSave(ctx context.Context, in *sysin.AccountSaveInp) (res *sysin.AccountSaveModel, err error) {
-	current, err := s.currentAccount(ctx)
+	if in == nil {
+		return nil, gerror.New("账号信息不能为空")
+	}
+	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if in.Id == current.Id {
-		return nil, gerror.New("不能在账号管理中操作当前登录账号")
-	}
-	in.TenantId = current.TenantId
+	in.TenantId = account.TenantId
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
-	if err = s.ensureEditableAccount(ctx, in.Id, current.TenantId); err != nil {
+	if in.AccountType == sysin.PublishAccountTypeUploader && in.ParentId <= 0 {
+		in.ParentId = account.Id
+	}
+	if err = s.ensureEditableAccount(ctx, in.Id, in.TenantId); err != nil {
 		return nil, err
 	}
 	if err = s.prepareAccountParent(ctx, in); err != nil {
@@ -49,15 +55,15 @@ func (s *sSysPublish) AdminAccountSave(ctx context.Context, in *sysin.AccountSav
 }
 
 func (s *sSysPublish) AdminAccountResetPassword(ctx context.Context, in *sysin.AccountResetPasswordInp) (res *sysin.AccountSaveModel, err error) {
-	current, err := s.currentAccount(ctx)
+	if in == nil || in.Id <= 0 {
+		return nil, gerror.New("账号ID不能为空")
+	}
+	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if in.Id == current.Id {
+	if in.Id == account.Id {
 		return nil, gerror.New("不能重置当前登录账号密码")
-	}
-	if err = s.ensureEditableAccount(ctx, in.Id, current.TenantId); err != nil {
-		return nil, err
 	}
 	accountColumns := pdao.YoubanPublishAccount.Columns()
 	password := strings.TrimSpace(in.Password)
@@ -65,11 +71,11 @@ func (s *sSysPublish) AdminAccountResetPassword(ctx context.Context, in *sysin.A
 		password = string(charset.RandomCreateBytes(publishGeneratedPasswordLength))
 	}
 	saveIn := &sysin.AccountSaveInp{Id: in.Id, Password: password}
-	data := g.Map{accountColumns.UpdatedBy: contexts.GetUserId(ctx), accountColumns.UpdatedAt: gtime.Now()}
+	data := g.Map{accountColumns.UpdatedBy: account.Id, accountColumns.UpdatedAt: gtime.Now()}
 	s.fillAccountPasswordData(data, saveIn)
 	result, err := pdao.YoubanPublishAccount.Ctx(ctx).
 		Where(accountColumns.Id, in.Id).
-		Where(accountColumns.TenantId, current.TenantId).
+		Where(accountColumns.TenantId, account.TenantId).
 		WhereNull(accountColumns.DeletedAt).
 		Data(data).
 		Update()
@@ -84,22 +90,23 @@ func (s *sSysPublish) AdminAccountResetPassword(ctx context.Context, in *sysin.A
 }
 
 func (s *sSysPublish) AdminAccountDelete(ctx context.Context, in *sysin.AccountDeleteInp) (err error) {
-	if len(in.Ids) == 0 {
-		return gerror.New("请选择要删除的数据")
-	}
-	current, err := s.currentAccount(ctx)
+	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return err
 	}
+	if in == nil || len(in.Ids) == 0 {
+		return gerror.New("请选择要删除的数据")
+	}
+	in.Ids = uniqueIds(in.Ids)
 	for _, id := range in.Ids {
-		if id == current.Id {
+		if id == account.Id {
 			return gerror.New("不能删除当前登录账号")
 		}
 	}
 	accountColumns := pdao.YoubanPublishAccount.Columns()
 	count, err := pdao.YoubanPublishAccount.Ctx(ctx).
 		WhereIn(accountColumns.Id, in.Ids).
-		Where(accountColumns.TenantId, current.TenantId).
+		Where(accountColumns.TenantId, account.TenantId).
 		WhereNull(accountColumns.DeletedAt).
 		Count()
 	if err != nil {
@@ -108,10 +115,13 @@ func (s *sSysPublish) AdminAccountDelete(ctx context.Context, in *sysin.AccountD
 	if count != len(in.Ids) {
 		return gerror.New("存在无权操作的账号")
 	}
-	_, err = pdao.YoubanPublishAccount.Ctx(ctx).WhereIn(accountColumns.Id, in.Ids).Where(accountColumns.TenantId, current.TenantId).Data(g.Map{
-		accountColumns.DeletedBy: contexts.GetUserId(ctx),
-		accountColumns.DeletedAt: gtime.Now(),
-	}).Update()
+	_, err = pdao.YoubanPublishAccount.Ctx(ctx).
+		WhereIn(accountColumns.Id, in.Ids).
+		Where(accountColumns.TenantId, account.TenantId).
+		Data(g.Map{
+			accountColumns.DeletedBy: account.Id,
+			accountColumns.DeletedAt: gtime.Now(),
+		}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "删除上架账号失败")
 	}
@@ -147,7 +157,14 @@ func (s *sSysPublish) savePublishAccount(ctx context.Context, tx gdb.TX, in *sys
 		mod = tx.Model(pdao.YoubanPublishAccount.Table()).Safe().Ctx(ctx)
 	}
 	if in.Id > 0 {
-		_, err = mod.Where(accountColumns.Id, in.Id).Where(accountColumns.TenantId, in.TenantId).WhereNull(accountColumns.DeletedAt).Data(data).Update()
+		result, updateErr := mod.Where(accountColumns.Id, in.Id).Where(accountColumns.TenantId, in.TenantId).WhereNull(accountColumns.DeletedAt).Data(data).Update()
+		if updateErr != nil {
+			return gerror.Wrap(updateErr, "保存上架账号失败")
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			return gerror.New("账号不存在或无权操作")
+		}
 	} else {
 		data[accountColumns.CreatedBy] = contexts.GetUserId(ctx)
 		data[accountColumns.CreatedAt] = gtime.Now()

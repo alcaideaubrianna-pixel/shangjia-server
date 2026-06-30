@@ -13,9 +13,11 @@ import (
 
 var Publish = cPublish{}
 var PublishAuth = cPublishAuth{}
+var PublishAdmin = cPublishAdmin{}
 
 type cPublish struct{}
 type cPublishAuth struct{}
+type cPublishAdmin struct{}
 
 func (c *cPublish) CurrentAccount(ctx context.Context, req *publish.CurrentAccountReq) (res *publish.CurrentAccountRes, err error) {
 	data, err := service.SysPublish().CurrentAccount(ctx)
@@ -58,6 +60,202 @@ func (c *cPublishAuth) AccountRegister(ctx context.Context, req *publish.Account
 		return nil, err
 	}
 	res = &publish.AccountRegisterRes{AccountRegisterModel: data}
+	return
+}
+
+func (c *cPublishAdmin) AccountList(ctx context.Context, req *publish.AdminAccountListReq) (res *publish.AdminAccountListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminAccountList(ctx, &req.AccountListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.AccountModel{}
+	}
+	res = new(publish.AdminAccountListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishAdmin) AccountSave(ctx context.Context, req *publish.AdminAccountSaveReq) (res *publish.AdminAccountSaveRes, err error) {
+	saveRes, err := service.SysPublish().AdminAccountSave(ctx, &req.AccountSaveInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminAccountSaveRes{}
+	if saveRes != nil {
+		res.Password = saveRes.Password
+	}
+	return
+}
+
+func (c *cPublishAdmin) AccountResetPassword(ctx context.Context, req *publish.AdminAccountResetPasswordReq) (res *publish.AdminAccountResetPasswordRes, err error) {
+	saveRes, err := service.SysPublish().AdminAccountResetPassword(ctx, &req.AccountResetPasswordInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminAccountResetPasswordRes{Password: saveRes.Password}
+	return
+}
+
+func (c *cPublishAdmin) AccountDelete(ctx context.Context, req *publish.AdminAccountDeleteReq) (res *publish.AdminAccountDeleteRes, err error) {
+	if err = service.SysPublish().AdminAccountDelete(ctx, &req.AccountDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminAccountDeleteRes{}
+	return
+}
+
+func (c *cPublishAdmin) BotList(ctx context.Context, req *publish.AdminBotListReq) (res *publish.AdminBotListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminBotList(ctx, &req.BotListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.BotModel{}
+	}
+	res = new(publish.AdminBotListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishAdmin) BotSave(ctx context.Context, req *publish.AdminBotSaveReq) (res *publish.AdminBotSaveRes, err error) {
+	if err = service.SysPublish().AdminBotSave(ctx, &req.BotSaveInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminBotSaveRes{}
+	return
+}
+
+func (c *cPublishAdmin) BotDelete(ctx context.Context, req *publish.AdminBotDeleteReq) (res *publish.AdminBotDeleteRes, err error) {
+	if err = service.SysPublish().AdminBotDelete(ctx, &req.BotDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminBotDeleteRes{}
+	return
+}
+
+func (c *cPublishAdmin) BotRefresh(ctx context.Context, req *publish.AdminBotRefreshReq) (res *publish.AdminBotRefreshRes, err error) {
+	list, err := service.SysPublish().AdminBotRefresh(ctx, &req.BotRefreshInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.BotRefreshModel{}
+	}
+	res = &publish.AdminBotRefreshRes{List: list}
+	return
+}
+
+func (c *cPublishAdmin) TgAccountList(ctx context.Context, req *publish.AdminTgAccountListReq) (res *publish.AdminTgAccountListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminTgAccountList(ctx, &req.TgAccountListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.TgAccountModel{}
+	}
+	res = new(publish.AdminTgAccountListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishAdmin) TgAccountStartLogin(ctx context.Context, req *publish.AdminTgAccountStartLoginReq) (res *publish.AdminTgAccountStartLoginRes, err error) {
+	item, err := service.SysPublish().AdminTgAccountStartLogin(ctx, &req.TgAccountStartLoginInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminTgAccountStartLoginRes{TgAccountModel: item}
+	return
+}
+
+func (c *cPublishAdmin) TgAccountLoginStatus(ctx context.Context, req *publish.AdminTgAccountLoginStatusReq) (res *publish.AdminTgAccountLoginStatusRes, err error) {
+	item, err := service.SysPublish().AdminTgAccountLoginStatus(ctx, &req.TgAccountLoginStatusInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminTgAccountLoginStatusRes{TgAccountModel: item}
+	return
+}
+
+func (c *cPublishAdmin) TgAccountPassword(ctx context.Context, req *publish.AdminTgAccountPasswordReq) (res *publish.AdminTgAccountPasswordRes, err error) {
+	item, err := service.SysPublish().AdminTgAccountPassword(ctx, &req.TgAccountPasswordInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminTgAccountPasswordRes{TgAccountModel: item}
+	return
+}
+
+func (c *cPublishAdmin) TgAccountDelete(ctx context.Context, req *publish.AdminTgAccountDeleteReq) (res *publish.AdminTgAccountDeleteRes, err error) {
+	if err = service.SysPublish().AdminTgAccountDelete(ctx, &req.TgAccountDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminTgAccountDeleteRes{}
+	return
+}
+
+func (c *cPublishAdmin) TgAccountRefresh(ctx context.Context, req *publish.AdminTgAccountRefreshReq) (res *publish.AdminTgAccountRefreshRes, err error) {
+	list, err := service.SysPublish().AdminTgAccountRefresh(ctx, &req.TgAccountRefreshInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.TgAccountRefreshModel{}
+	}
+	res = &publish.AdminTgAccountRefreshRes{List: list}
+	return
+}
+
+func (c *cPublishAdmin) ChannelList(ctx context.Context, req *publish.AdminChannelListReq) (res *publish.AdminChannelListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminChannelList(ctx, &req.ChannelListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.ChannelModel{}
+	}
+	res = new(publish.AdminChannelListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishAdmin) ChannelSave(ctx context.Context, req *publish.AdminChannelSaveReq) (res *publish.AdminChannelSaveRes, err error) {
+	if err = service.SysPublish().AdminChannelSave(ctx, &req.ChannelSaveInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminChannelSaveRes{}
+	return
+}
+
+func (c *cPublishAdmin) ChannelDelete(ctx context.Context, req *publish.AdminChannelDeleteReq) (res *publish.AdminChannelDeleteRes, err error) {
+	if err = service.SysPublish().AdminChannelDelete(ctx, &req.ChannelDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminChannelDeleteRes{}
+	return
+}
+
+func (c *cPublishAdmin) ChannelBatchBots(ctx context.Context, req *publish.AdminChannelBatchBotsReq) (res *publish.AdminChannelBatchBotsRes, err error) {
+	if err = service.SysPublish().AdminChannelBatchBots(ctx, &req.ChannelBatchBotsInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminChannelBatchBotsRes{}
+	return
+}
+
+func (c *cPublishAdmin) ChannelRefresh(ctx context.Context, req *publish.AdminChannelRefreshReq) (res *publish.AdminChannelRefreshRes, err error) {
+	list, err := service.SysPublish().AdminChannelRefresh(ctx, &req.ChannelRefreshInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.ChannelRefreshModel{}
+	}
+	res = &publish.AdminChannelRefreshRes{List: list}
 	return
 }
 

@@ -36,6 +36,17 @@ func (s *sSysPublish) currentAccount(ctx context.Context) (*sysin.AccountModel, 
 	return account, nil
 }
 
+func (s *sSysPublish) currentAdminAccount(ctx context.Context) (*sysin.AccountModel, error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if account.AccountType != sysin.PublishAccountTypeAdmin {
+		return nil, gerror.New("当前账号无管理权限")
+	}
+	return account, nil
+}
+
 func (s *sSysPublish) ensureTenant(ctx context.Context, tenantId int64) error {
 	tenantColumns := pdao.YoubanPublishTenant.Columns()
 	count, err := pdao.YoubanPublishTenant.Ctx(ctx).Where(tenantColumns.Id, tenantId).WhereNull(tenantColumns.DeletedAt).Count()

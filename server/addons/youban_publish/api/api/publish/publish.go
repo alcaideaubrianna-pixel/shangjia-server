@@ -49,6 +49,167 @@ type AccountRegisterRes struct {
 	*sysin.AccountRegisterModel
 }
 
+type AdminAccountListReq struct {
+	g.Meta `path:"/publish/admin/account/list" method:"get" tags:"上架插件管理端" summary:"账号列表"`
+	sysin.AccountListInp
+}
+
+type AdminAccountListRes struct {
+	form.PageRes
+	List []*sysin.AccountModel `json:"list" dc:"账号列表"`
+}
+
+type AdminAccountSaveReq struct {
+	g.Meta `path:"/publish/admin/account/save" method:"post" tags:"上架插件管理端" summary:"新增或编辑账号"`
+	sysin.AccountSaveInp
+}
+
+type AdminAccountSaveRes struct {
+	Password string `json:"password" dc:"随机密码"`
+}
+
+type AdminAccountResetPasswordReq struct {
+	g.Meta `path:"/publish/admin/account/resetPwd" method:"post" tags:"上架插件管理端" summary:"重置账号密码"`
+	sysin.AccountResetPasswordInp
+}
+
+type AdminAccountResetPasswordRes struct {
+	Password string `json:"password" dc:"随机密码"`
+}
+
+type AdminAccountDeleteReq struct {
+	g.Meta `path:"/publish/admin/account/delete" method:"post" tags:"上架插件管理端" summary:"删除账号"`
+	sysin.AccountDeleteInp
+}
+
+type AdminAccountDeleteRes struct{}
+
+type AdminBotListReq struct {
+	g.Meta `path:"/publish/admin/bot/list" method:"get" tags:"上架插件管理端" summary:"Bot列表"`
+	sysin.BotListInp
+}
+
+type AdminBotListRes struct {
+	form.PageRes
+	List []*sysin.BotModel `json:"list" dc:"Bot列表"`
+}
+
+type AdminBotSaveReq struct {
+	g.Meta `path:"/publish/admin/bot/save" method:"post" tags:"上架插件管理端" summary:"保存Bot"`
+	sysin.BotSaveInp
+}
+
+type AdminBotSaveRes struct{}
+
+type AdminBotDeleteReq struct {
+	g.Meta `path:"/publish/admin/bot/delete" method:"post" tags:"上架插件管理端" summary:"删除Bot"`
+	sysin.BotDeleteInp
+}
+
+type AdminBotDeleteRes struct{}
+
+type AdminBotRefreshReq struct {
+	g.Meta `path:"/publish/admin/bot/refresh" method:"post" tags:"上架插件管理端" summary:"刷新Bot状态"`
+	sysin.BotRefreshInp
+}
+
+type AdminBotRefreshRes struct {
+	List []*sysin.BotRefreshModel `json:"list" dc:"刷新结果"`
+}
+
+type AdminTgAccountListReq struct {
+	g.Meta `path:"/publish/admin/tgAccount/list" method:"get" tags:"上架插件管理端" summary:"TG账号列表"`
+	sysin.TgAccountListInp
+}
+
+type AdminTgAccountListRes struct {
+	form.PageRes
+	List []*sysin.TgAccountModel `json:"list" dc:"TG账号列表"`
+}
+
+type AdminTgAccountStartLoginReq struct {
+	g.Meta `path:"/publish/admin/tgAccount/startLogin" method:"post" tags:"上架插件管理端" summary:"发起TG账号扫码登录"`
+	sysin.TgAccountStartLoginInp
+}
+
+type AdminTgAccountStartLoginRes struct {
+	*sysin.TgAccountModel
+}
+
+type AdminTgAccountLoginStatusReq struct {
+	g.Meta `path:"/publish/admin/tgAccount/loginStatus" method:"get" tags:"上架插件管理端" summary:"查询TG账号扫码登录状态"`
+	sysin.TgAccountLoginStatusInp
+}
+
+type AdminTgAccountLoginStatusRes struct {
+	*sysin.TgAccountModel
+}
+
+type AdminTgAccountPasswordReq struct {
+	g.Meta `path:"/publish/admin/tgAccount/password" method:"post" tags:"上架插件管理端" summary:"提交TG账号二次验证密码"`
+	sysin.TgAccountPasswordInp
+}
+
+type AdminTgAccountPasswordRes struct {
+	*sysin.TgAccountModel
+}
+
+type AdminTgAccountDeleteReq struct {
+	g.Meta `path:"/publish/admin/tgAccount/delete" method:"post" tags:"上架插件管理端" summary:"删除TG账号"`
+	sysin.TgAccountDeleteInp
+}
+
+type AdminTgAccountDeleteRes struct{}
+
+type AdminTgAccountRefreshReq struct {
+	g.Meta `path:"/publish/admin/tgAccount/refresh" method:"post" tags:"上架插件管理端" summary:"刷新TG账号状态"`
+	sysin.TgAccountRefreshInp
+}
+
+type AdminTgAccountRefreshRes struct {
+	List []*sysin.TgAccountRefreshModel `json:"list" dc:"刷新结果"`
+}
+
+type AdminChannelListReq struct {
+	g.Meta `path:"/publish/admin/channel/list" method:"get" tags:"上架插件管理端" summary:"频道列表"`
+	sysin.ChannelListInp
+}
+
+type AdminChannelListRes struct {
+	form.PageRes
+	List []*sysin.ChannelModel `json:"list" dc:"频道列表"`
+}
+
+type AdminChannelSaveReq struct {
+	g.Meta `path:"/publish/admin/channel/save" method:"post" tags:"上架插件管理端" summary:"新增或编辑频道"`
+	sysin.ChannelSaveInp
+}
+
+type AdminChannelSaveRes struct{}
+
+type AdminChannelDeleteReq struct {
+	g.Meta `path:"/publish/admin/channel/delete" method:"post" tags:"上架插件管理端" summary:"删除频道"`
+	sysin.ChannelDeleteInp
+}
+
+type AdminChannelDeleteRes struct{}
+
+type AdminChannelBatchBotsReq struct {
+	g.Meta `path:"/publish/admin/channel/batchBots" method:"post" tags:"上架插件管理端" summary:"批量编辑频道Bot"`
+	sysin.ChannelBatchBotsInp
+}
+
+type AdminChannelBatchBotsRes struct{}
+
+type AdminChannelRefreshReq struct {
+	g.Meta `path:"/publish/admin/channel/refresh" method:"post" tags:"上架插件管理端" summary:"批量刷新频道状态"`
+	sysin.ChannelRefreshInp
+}
+
+type AdminChannelRefreshRes struct {
+	List []*sysin.ChannelRefreshModel `json:"list" dc:"刷新结果"`
+}
+
 type MyTaskListReq struct {
 	g.Meta `path:"/publish/task/list" method:"get" tags:"上架插件" summary:"我的上架任务列表"`
 	sysin.TaskListInp

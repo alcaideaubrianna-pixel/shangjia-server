@@ -20,6 +20,11 @@ const (
 	PublishTaskStatusPublished  = "published"
 	PublishTaskStatusFailed     = "failed"
 	PublishTaskStatusCanceled   = "canceled"
+
+	PublishTgAccountStatusPending    = "pending"
+	PublishTgAccountStatusAuthorized = "authorized"
+	PublishTgAccountStatusExpired    = "expired"
+	PublishTgAccountStatusFailed     = "failed"
 )
 
 type TenantListInp struct {
@@ -414,6 +419,191 @@ type BotSaveInp struct {
 
 type BotDeleteInp struct {
 	Ids []int64 `json:"ids" v:"required#请选择要删除的数据" dc:"ID列表"`
+}
+
+type BotRefreshInp struct {
+	Ids []int64 `json:"ids" v:"required#请选择要刷新的Bot" dc:"Bot ID列表"`
+}
+
+type BotRefreshModel struct {
+	Id           int64  `json:"id" dc:"Bot ID"`
+	BotUsername  string `json:"botUsername" dc:"Bot用户名"`
+	Status       int    `json:"status" dc:"状态"`
+	ErrorMessage string `json:"errorMessage" dc:"错误信息"`
+}
+
+type TgAccountListInp struct {
+	form.PageReq
+	TenantId int64  `json:"tenantId" dc:"租户ID"`
+	Keyword  string `json:"keyword" dc:"TG用户/备注"`
+	Status   string `json:"status" dc:"状态"`
+}
+
+type TgAccountModel struct {
+	Id               int64       `json:"id" dc:"ID"`
+	TenantId         int64       `json:"tenantId" dc:"租户ID"`
+	AccountId        int64       `json:"accountId" dc:"创建账号ID"`
+	DisplayName      string      `json:"displayName" dc:"显示名称"`
+	TelegramUserId   string      `json:"telegramUserId" dc:"TG用户ID"`
+	TelegramUsername string      `json:"telegramUsername" dc:"TG用户名"`
+	SessionKey       string      `json:"sessionKey" dc:"会话存储键"`
+	LoginToken       string      `json:"loginToken" dc:"登录令牌"`
+	QrUrl            string      `json:"qrUrl" dc:"二维码地址"`
+	Remark           string      `json:"remark" dc:"备注"`
+	Status           string      `json:"status" dc:"状态"`
+	ErrorMessage     string      `json:"errorMessage" dc:"错误信息"`
+	LastLoginAt      *gtime.Time `json:"lastLoginAt" dc:"最后授权时间"`
+	ExpiresAt        *gtime.Time `json:"expiresAt" dc:"二维码过期时间"`
+	CreatedAt        *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt        *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
+type TgAccountStartLoginInp struct {
+	TenantId    int64  `json:"tenantId" dc:"租户ID"`
+	DisplayName string `json:"displayName" dc:"显示名称"`
+	Remark      string `json:"remark" dc:"备注"`
+}
+
+func (in *TgAccountStartLoginInp) Filter(ctx context.Context) error {
+	if in.TenantId <= 0 {
+		return gerror.New("请选择账号归属")
+	}
+	in.DisplayName = strings.TrimSpace(in.DisplayName)
+	in.Remark = strings.TrimSpace(in.Remark)
+	return nil
+}
+
+type TgAccountLoginStatusInp struct {
+	LoginToken string `json:"loginToken" v:"required#登录令牌不能为空" dc:"登录令牌"`
+}
+
+type TgAccountPasswordInp struct {
+	LoginToken string `json:"loginToken" v:"required#登录令牌不能为空" dc:"登录令牌"`
+	Password   string `json:"password" v:"required#二次验证密码不能为空" dc:"二次验证密码"`
+}
+
+type TgAccountDeleteInp struct {
+	Ids []int64 `json:"ids" v:"required#请选择要删除的TG账号" dc:"ID列表"`
+}
+
+type TgAccountRefreshInp struct {
+	Ids []int64 `json:"ids" v:"required#请选择要刷新的TG账号" dc:"TG账号ID列表"`
+}
+
+type TgAccountRefreshModel struct {
+	Id           int64  `json:"id" dc:"TG账号ID"`
+	Status       string `json:"status" dc:"状态"`
+	ErrorMessage string `json:"errorMessage" dc:"错误信息"`
+}
+
+type ChannelListInp struct {
+	form.PageReq
+	TenantId    int64  `json:"tenantId" dc:"租户ID"`
+	TgAccountId int64  `json:"tgAccountId" dc:"TG账号ID"`
+	Keyword     string `json:"keyword" dc:"频道名称/Chat ID"`
+	Status      int    `json:"status" dc:"状态：1启用 2停用"`
+}
+
+type ChannelModel struct {
+	Id                 int64       `json:"id" dc:"ID"`
+	TenantId           int64       `json:"tenantId" dc:"租户ID"`
+	TgAccountId        int64       `json:"tgAccountId" dc:"TG账号ID"`
+	TgAccountName      string      `json:"tgAccountName" dc:"TG账号名称"`
+	ChannelTitle       string      `json:"channelTitle" dc:"频道名称"`
+	ChannelUsername    string      `json:"channelUsername" dc:"频道用户名"`
+	TargetChatId       string      `json:"targetChatId" dc:"目标Chat ID"`
+	PublishDirection   string      `json:"publishDirection" dc:"上架/下架频道：up/down"`
+	BotIds             []int64     `json:"botIds" dc:"绑定Bot ID列表"`
+	BotIdJson          string      `json:"botIdJson" dc:"绑定Bot ID JSON"`
+	Remark             string      `json:"remark" dc:"备注"`
+	Status             int         `json:"status" dc:"状态"`
+	LastRefreshStatus  string      `json:"lastRefreshStatus" dc:"最近刷新状态"`
+	LastRefreshMessage string      `json:"lastRefreshMessage" dc:"最近刷新信息"`
+	LastRefreshAt      *gtime.Time `json:"lastRefreshAt" dc:"最近刷新时间"`
+	CreatedAt          *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt          *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
+type ChannelSaveInp struct {
+	Id               int64   `json:"id" dc:"ID"`
+	TenantId         int64   `json:"tenantId" dc:"租户ID"`
+	TgAccountId      int64   `json:"tgAccountId" dc:"TG账号ID"`
+	ChannelTitle     string  `json:"channelTitle" dc:"频道名称"`
+	ChannelUsername  string  `json:"channelUsername" dc:"频道用户名"`
+	TargetChatId     string  `json:"targetChatId" dc:"目标Chat ID"`
+	PublishDirection string  `json:"publishDirection" dc:"上架/下架频道：up/down"`
+	BotIds           []int64 `json:"botIds" dc:"绑定Bot ID列表"`
+	Remark           string  `json:"remark" dc:"备注"`
+	Status           int     `json:"status" dc:"状态：1启用 2停用"`
+}
+
+func (in *ChannelSaveInp) Filter(ctx context.Context) error {
+	if in.TenantId <= 0 {
+		return gerror.New("请选择账号归属")
+	}
+	if in.TgAccountId <= 0 {
+		return gerror.New("请选择TG账号")
+	}
+	in.ChannelTitle = strings.TrimSpace(in.ChannelTitle)
+	in.ChannelUsername = strings.TrimPrefix(strings.TrimSpace(in.ChannelUsername), "@")
+	in.TargetChatId = strings.TrimSpace(in.TargetChatId)
+	in.PublishDirection = strings.TrimSpace(in.PublishDirection)
+	if in.PublishDirection == "" {
+		in.PublishDirection = "up"
+	}
+	if in.PublishDirection != "up" && in.PublishDirection != "down" {
+		return gerror.New("频道类型不合法")
+	}
+	if in.ChannelTitle == "" && in.ChannelUsername == "" && in.TargetChatId == "" {
+		return gerror.New("频道名称、用户名或Chat ID至少填写一项")
+	}
+	if in.Status == 0 {
+		in.Status = 1
+	}
+	if in.Status != 1 && in.Status != 2 {
+		return gerror.New("频道状态不合法")
+	}
+	in.BotIds = uniquePositiveInt64(in.BotIds)
+	in.Remark = strings.TrimSpace(in.Remark)
+	return nil
+}
+
+type ChannelDeleteInp struct {
+	Ids []int64 `json:"ids" v:"required#请选择要删除的频道" dc:"频道ID列表"`
+}
+
+type ChannelBatchBotsInp struct {
+	Ids    []int64 `json:"ids" v:"required#请选择频道" dc:"频道ID列表"`
+	BotIds []int64 `json:"botIds" dc:"绑定Bot ID列表"`
+}
+
+type ChannelRefreshInp struct {
+	Ids []int64 `json:"ids" v:"required#请选择要刷新的频道" dc:"频道ID列表"`
+}
+
+type ChannelRefreshModel struct {
+	Id                 int64  `json:"id" dc:"频道ID"`
+	LastRefreshStatus  string `json:"lastRefreshStatus" dc:"刷新状态"`
+	LastRefreshMessage string `json:"lastRefreshMessage" dc:"刷新信息"`
+}
+
+func uniquePositiveInt64(values []int64) []int64 {
+	if len(values) == 0 {
+		return []int64{}
+	}
+	seen := make(map[int64]struct{}, len(values))
+	list := make([]int64, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		list = append(list, value)
+	}
+	return list
 }
 
 type TelegramLoginStartInp struct{}

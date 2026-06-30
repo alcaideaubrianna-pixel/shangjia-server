@@ -196,6 +196,57 @@ UPDATE "hg_youban_publish_tg_login" SET "tenant_id" = "merchant_id" WHERE "tenan
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_login_token" ON "hg_youban_publish_tg_login" ("login_token");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_login_account" ON "hg_youban_publish_tg_login" ("account_id", "status", "id");
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_account" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "merchant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "display_name" varchar(128) NOT NULL DEFAULT '',
+  "telegram_user_id" varchar(128) NOT NULL DEFAULT '',
+  "telegram_username" varchar(128) NOT NULL DEFAULT '',
+  "session_key" varchar(255) NOT NULL DEFAULT '',
+  "login_token" varchar(128) NOT NULL DEFAULT '',
+  "qr_url" varchar(1024) NOT NULL DEFAULT '',
+  "remark" varchar(500) NOT NULL DEFAULT '',
+  "status" varchar(32) NOT NULL DEFAULT 'pending',
+  "error_message" text,
+  "last_login_at" timestamp DEFAULT NULL,
+  "expires_at" timestamp DEFAULT NULL,
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "deleted_by" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_account_tenant" ON "hg_youban_publish_tg_account" ("tenant_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_account_login" ON "hg_youban_publish_tg_account" ("login_token");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "merchant_id" bigint NOT NULL DEFAULT 0,
+  "tg_account_id" bigint NOT NULL DEFAULT 0,
+  "channel_title" varchar(128) NOT NULL DEFAULT '',
+  "channel_username" varchar(128) NOT NULL DEFAULT '',
+  "target_chat_id" varchar(128) NOT NULL DEFAULT '',
+  "publish_direction" varchar(16) NOT NULL DEFAULT 'up',
+  "bot_id_json" text,
+  "remark" varchar(500) NOT NULL DEFAULT '',
+  "status" smallint NOT NULL DEFAULT 1,
+  "last_refresh_status" varchar(32) NOT NULL DEFAULT '',
+  "last_refresh_message" varchar(500) NOT NULL DEFAULT '',
+  "last_refresh_at" timestamp DEFAULT NULL,
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "deleted_by" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_channel_tenant_account" ON "hg_youban_publish_channel" ("tenant_id", "tg_account_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_channel_chat" ON "hg_youban_publish_channel" ("tenant_id", "target_chat_id");
+
 INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
 SELECT 'youban_publish', 'telegram', 'Telegram App ID', 'int', 'appId', '0', '0', 10, '扫码登录使用的 Telegram API ID，来自 my.telegram.org', 0, 1, NOW(), NOW()
 WHERE NOT EXISTS (SELECT 1 FROM "hg_sys_addons_config" WHERE "addon_name"='youban_publish' AND "key"='appId');

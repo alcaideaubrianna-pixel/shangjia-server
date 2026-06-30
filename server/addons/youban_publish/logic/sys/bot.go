@@ -17,17 +17,19 @@ import (
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
-	"hotgo/internal/library/contexts"
 )
 
 func (s *sSysPublish) AdminBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error) {
 	if in == nil {
 		in = &sysin.BotListInp{}
 	}
-	mod := g.DB().Model(publishBotTable).Safe().Ctx(ctx).WhereNull("deleted_at")
-	if in.TenantId > 0 {
-		mod = mod.Where("tenant_id", in.TenantId)
+	current, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, 0, err
 	}
+	mod := g.DB().Model(publishBotTable).Safe().Ctx(ctx).
+		Where("tenant_id", current.TenantId).
+		WhereNull("deleted_at")
 	if in.Status > 0 {
 		mod = mod.Where("status", in.Status)
 	}
@@ -47,6 +49,10 @@ func (s *sSysPublish) AdminBotList(ctx context.Context, in *sysin.BotListInp) (l
 func (s *sSysPublish) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) (err error) {
 	if in == nil {
 		return gerror.New("Bot配置不能为空")
+	}
+	current, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return err
 	}
 	botToken := strings.TrimSpace(in.BotToken)
 	if botToken == "" {
@@ -68,19 +74,22 @@ func (s *sSysPublish) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) (e
 		botName = telegramBotDisplayName(tgUser)
 	}
 	data := g.Map{
-		"tenant_id":    in.TenantId,
+		"tenant_id":    current.TenantId,
 		"bot_name":     botName,
 		"bot_username": strings.TrimPrefix(strings.TrimSpace(tgUser.Username), "@"),
 		"bot_token":    botToken,
 		"remark":       strings.TrimSpace(in.Remark),
 		"status":       status,
-		"updated_by":   contexts.GetUserId(ctx),
+		"updated_by":   current.Id,
 		"updated_at":   gtime.Now(),
 	}
 	if in.Id > 0 {
-		_, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).Where("id", in.Id).WhereNull("deleted_at").Data(data).Update()
+		if err = s.ensureBotsBelongTenant(ctx, []int64{in.Id}, current.TenantId); err != nil {
+			return err
+		}
+		_, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).Where("id", in.Id).Where("tenant_id", current.TenantId).WhereNull("deleted_at").Data(data).Update()
 	} else {
-		data["created_by"] = contexts.GetUserId(ctx)
+		data["created_by"] = current.Id
 		data["created_at"] = gtime.Now()
 		_, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).Data(data).Insert()
 	}
@@ -92,17 +101,90 @@ func (s *sSysPublish) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) (e
 }
 
 func (s *sSysPublish) AdminBotDelete(ctx context.Context, in *sysin.BotDeleteInp) (err error) {
-	if len(in.Ids) == 0 {
+	if in == nil || len(in.Ids) == 0 {
 		return gerror.New("请选择要删除的数据")
 	}
-	if _, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).WhereIn("id", in.Ids).Data(g.Map{
-		"deleted_by": contexts.GetUserId(ctx),
+	in.Ids = uniqueIds(in.Ids)
+	current, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return err
+	}
+	if err = s.ensureBotsBelongTenant(ctx, in.Ids, current.TenantId); err != nil {
+		return err
+	}
+	if _, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).WhereIn("id", in.Ids).Where("tenant_id", current.TenantId).Data(g.Map{
+		"deleted_by": current.Id,
 		"deleted_at": gtime.Now(),
 	}).Update(); err != nil {
 		return gerror.Wrap(err, "删除Bot配置失败")
 	}
 	s.clearTelegramBotCache()
 	return nil
+}
+
+func (s *sSysPublish) AdminBotRefresh(ctx context.Context, in *sysin.BotRefreshInp) (list []*sysin.BotRefreshModel, err error) {
+	if in == nil || len(in.Ids) == 0 {
+		return nil, gerror.New("请选择要刷新的Bot")
+	}
+	in.Ids = uniqueIds(in.Ids)
+	current, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var bots []*sysin.BotModel
+	if err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).
+		WhereIn("id", in.Ids).
+		Where("tenant_id", current.TenantId).
+		WhereNull("deleted_at").
+		Scan(&bots); err != nil {
+		return nil, gerror.Wrap(err, "读取Bot配置失败")
+	}
+	if len(bots) != len(in.Ids) {
+		return nil, gerror.New("存在无权操作的Bot")
+	}
+	now := gtime.Now()
+	list = make([]*sysin.BotRefreshModel, 0, len(bots))
+	for _, item := range bots {
+		result := &sysin.BotRefreshModel{Id: item.Id, Status: item.Status}
+		tgUser, refreshErr := s.telegramBotProfile(ctx, item.BotToken)
+		if refreshErr != nil {
+			result.ErrorMessage = refreshErr.Error()
+			_, _ = g.DB().Model(publishBotTable).Safe().Ctx(ctx).
+				Where("id", item.Id).
+				Where("tenant_id", current.TenantId).
+				WhereNull("deleted_at").
+				Data(g.Map{
+					"status":     2,
+					"updated_by": current.Id,
+					"updated_at": now,
+				}).
+				Update()
+			result.Status = 2
+			list = append(list, result)
+			continue
+		}
+		username := strings.TrimPrefix(strings.TrimSpace(tgUser.Username), "@")
+		result.BotUsername = username
+		result.Status = 1
+		_, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).
+			Where("id", item.Id).
+			Where("tenant_id", current.TenantId).
+			WhereNull("deleted_at").
+			Data(g.Map{
+				"bot_name":     telegramBotDisplayName(tgUser),
+				"bot_username": username,
+				"status":       1,
+				"updated_by":   current.Id,
+				"updated_at":   now,
+			}).
+			Update()
+		if err != nil {
+			return nil, gerror.Wrap(err, "刷新Bot状态失败")
+		}
+		list = append(list, result)
+	}
+	s.clearTelegramBotCache()
+	return list, nil
 }
 
 func (s *sSysPublish) enabledBots(ctx context.Context, tenantId int64) (list []*sysin.BotModel, err error) {

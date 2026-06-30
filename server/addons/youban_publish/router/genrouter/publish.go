@@ -3,5 +3,6 @@ package genrouter
 import "hotgo/addons/youban_publish/controller/admin/sys"
 
 func init() {
-	LoginRequiredRouter = append(LoginRequiredRouter, sys.Publish, sys.Config)
+	AdminRequiredRouter = append(AdminRequiredRouter, sys.Publish, sys.Config)
+	LoginRequiredRouter = append(LoginRequiredRouter, sys.PublishAdmin)
 }

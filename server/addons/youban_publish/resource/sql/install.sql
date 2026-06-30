@@ -212,6 +212,59 @@ ALTER TABLE `hg_youban_publish_tg_login` ADD COLUMN `tenant_id` bigint(20) NOT N
 ALTER TABLE `hg_youban_publish_tg_login` ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
 UPDATE `hg_youban_publish_tg_login` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
 
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_account` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建账号ID',
+  `display_name` varchar(128) NOT NULL DEFAULT '' COMMENT '显示名称',
+  `telegram_user_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户ID',
+  `telegram_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户名',
+  `session_key` varchar(255) NOT NULL DEFAULT '' COMMENT '会话存储键',
+  `login_token` varchar(128) NOT NULL DEFAULT '' COMMENT '登录令牌',
+  `qr_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '二维码地址',
+  `remark` varchar(500) NOT NULL DEFAULT '' COMMENT '备注',
+  `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '状态',
+  `error_message` text COMMENT '错误信息',
+  `last_login_at` datetime DEFAULT NULL COMMENT '最后授权时间',
+  `expires_at` datetime DEFAULT NULL COMMENT '二维码过期时间',
+  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
+  `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_tg_account_tenant` (`tenant_id`,`status`,`id`),
+  KEY `idx_ybp_tg_account_login` (`login_token`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架TG账号';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_channel` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID',
+  `tg_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG账号ID',
+  `channel_title` varchar(128) NOT NULL DEFAULT '' COMMENT '频道名称',
+  `channel_username` varchar(128) NOT NULL DEFAULT '' COMMENT '频道用户名',
+  `target_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '目标Chat ID',
+  `publish_direction` varchar(16) NOT NULL DEFAULT 'up' COMMENT '上架/下架频道',
+  `bot_id_json` text COMMENT '绑定Bot ID JSON',
+  `remark` varchar(500) NOT NULL DEFAULT '' COMMENT '备注',
+  `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
+  `last_refresh_status` varchar(32) NOT NULL DEFAULT '' COMMENT '最近刷新状态',
+  `last_refresh_message` varchar(500) NOT NULL DEFAULT '' COMMENT '最近刷新信息',
+  `last_refresh_at` datetime DEFAULT NULL COMMENT '最近刷新时间',
+  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
+  `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_channel_tenant_account` (`tenant_id`,`tg_account_id`,`status`,`id`),
+  KEY `idx_ybp_channel_chat` (`tenant_id`,`target_chat_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架频道配置';
+
 INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
 SELECT 'youban_publish', 'telegram', 'Telegram App ID', 'int', 'appId', '0', '0', 10, '扫码登录使用的 Telegram API ID，来自 my.telegram.org', 0, 1, NOW(), NOW()
 WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_addons_config` WHERE `addon_name`='youban_publish' AND `key`='appId');

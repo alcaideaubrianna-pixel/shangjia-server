@@ -26,6 +26,7 @@ import (
 
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/contexts"
 )
 
 const (
@@ -38,10 +39,12 @@ const (
 )
 
 type telegramLoginRuntime struct {
-	loginToken string
-	accountId  int64
-	cancel     context.CancelFunc
-	passwordCh chan string
+	loginToken  string
+	accountId   int64
+	tgAccountId int64
+	tenantId    int64
+	cancel      context.CancelFunc
+	passwordCh  chan string
 }
 
 func (s *sSysPublish) TelegramLoginStart(ctx context.Context, in *sysin.TelegramLoginStartInp) (res *sysin.TelegramLoginModel, err error) {
@@ -86,11 +89,12 @@ func (s *sSysPublish) TelegramLoginStart(ctx context.Context, in *sysin.Telegram
 	runtime := &telegramLoginRuntime{
 		loginToken: token,
 		accountId:  account.Id,
+		tenantId:   account.TenantId,
 		cancel:     cancel,
 		passwordCh: make(chan string),
 	}
 	s.storeLoginRuntime(token, runtime)
-	go s.runTelegramLogin(loginCtx, runtime, conf, account.TenantId, account.Id, sessionKey, sessionPath)
+	go s.runTelegramLogin(loginCtx, runtime, conf, account.TenantId, account.Id, 0, sessionKey, sessionPath, s.updateTelegramLoginStatus)
 
 	return s.telegramLoginById(ctx, id, account.Id)
 }
@@ -140,7 +144,9 @@ func (s *sSysPublish) TelegramLoginPassword(ctx context.Context, in *sysin.Teleg
 	return s.telegramLoginByToken(ctx, token, account.Id)
 }
 
-func (s *sSysPublish) runTelegramLogin(ctx context.Context, runtime *telegramLoginRuntime, conf *model.TelegramConfig, tenantId int64, accountId int64, sessionKey string, sessionPath string) {
+type telegramLoginStatusUpdater func(ctx context.Context, token string, accountId int64, data g.Map) error
+
+func (s *sSysPublish) runTelegramLogin(ctx context.Context, runtime *telegramLoginRuntime, conf *model.TelegramConfig, tenantId int64, accountId int64, tgAccountId int64, sessionKey string, sessionPath string, updateStatus telegramLoginStatusUpdater) {
 	defer func() {
 		runtime.cancel()
 		s.removeLoginRuntime(runtime.loginToken)
@@ -153,7 +159,7 @@ func (s *sSysPublish) runTelegramLogin(ctx context.Context, runtime *telegramLog
 		UpdateHandler:  dispatcher,
 	}
 	if resolver, err := telegramMTProtoResolver(conf.ProxyUrl); err != nil {
-		s.markTelegramLoginFailed(context.Background(), runtime.loginToken, accountId, err.Error())
+		s.markTelegramLoginFailed(context.Background(), runtime.loginToken, accountId, err.Error(), updateStatus)
 		return
 	} else if resolver != nil {
 		options.Resolver = resolver
@@ -163,7 +169,7 @@ func (s *sSysPublish) runTelegramLogin(ctx context.Context, runtime *telegramLog
 	err := client.Run(ctx, func(runCtx context.Context) error {
 		qr := client.QR()
 		authorization, err := qr.Auth(runCtx, loggedIn, func(showCtx context.Context, token qrlogin.Token) error {
-			return s.updateTelegramLoginStatus(showCtx, runtime.loginToken, accountId, g.Map{
+			return updateStatus(showCtx, runtime.loginToken, accountId, g.Map{
 				"qr_url":        token.URL(),
 				"status":        tgLoginStatusScanning,
 				"error_message": "",
@@ -171,7 +177,7 @@ func (s *sSysPublish) runTelegramLogin(ctx context.Context, runtime *telegramLog
 			})
 		})
 		if telegramPasswordNeeded(err) {
-			s.updateTelegramLoginStatus(runCtx, runtime.loginToken, accountId, g.Map{
+			updateStatus(runCtx, runtime.loginToken, accountId, g.Map{
 				"status":        tgLoginStatusPasswordRequired,
 				"error_message": "",
 			})
@@ -179,6 +185,9 @@ func (s *sSysPublish) runTelegramLogin(ctx context.Context, runtime *telegramLog
 		}
 		if err != nil {
 			return err
+		}
+		if tgAccountId > 0 {
+			return s.finishAdminTgAccountLogin(runCtx, runtime.loginToken, tenantId, accountId, tgAccountId, sessionKey, authorization)
 		}
 		return s.finishTelegramLogin(runCtx, runtime.loginToken, tenantId, accountId, sessionKey, authorization)
 	})
@@ -189,7 +198,7 @@ func (s *sSysPublish) runTelegramLogin(ctx context.Context, runtime *telegramLog
 	if errors.Is(err, context.DeadlineExceeded) {
 		status = tgLoginStatusExpired
 	}
-	_ = s.updateTelegramLoginStatus(context.Background(), runtime.loginToken, accountId, g.Map{
+	_ = updateStatus(context.Background(), runtime.loginToken, accountId, g.Map{
 		"status":        status,
 		"error_message": err.Error(),
 	})
@@ -203,7 +212,7 @@ func (s *sSysPublish) waitTelegramPassword(ctx context.Context, runtime *telegra
 		case password := <-runtime.passwordCh:
 			authorization, err := client.Auth().Password(ctx, password)
 			if errors.Is(err, auth.ErrPasswordInvalid) {
-				_ = s.updateTelegramLoginStatus(ctx, runtime.loginToken, runtime.accountId, g.Map{
+				_ = s.updateLoginRuntimeStatus(ctx, runtime, g.Map{
 					"status":        tgLoginStatusPasswordRequired,
 					"error_message": "二次验证密码错误，请重新输入",
 				})
@@ -259,6 +268,44 @@ func (s *sSysPublish) finishTelegramLogin(ctx context.Context, token string, ten
 	return nil
 }
 
+func (s *sSysPublish) finishAdminTgAccountLogin(ctx context.Context, token string, tenantId int64, accountId int64, tgAccountId int64, sessionKey string, authorization *tg.AuthAuthorization) error {
+	user, ok := authorization.User.AsNotEmpty()
+	if !ok {
+		return gerror.New("Telegram授权结果缺少用户信息")
+	}
+	username := user.Username
+	if username == "" {
+		username = strings.TrimSpace(strings.TrimSpace(user.FirstName + " " + user.LastName))
+	}
+	displayName := username
+	if displayName == "" {
+		displayName = fmt.Sprintf("TG账号-%d", user.ID)
+	}
+	now := gtime.Now()
+	_, err := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
+		Where("id", tgAccountId).
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		Where("login_token", token).
+		WhereNull("deleted_at").
+		Data(g.Map{
+			"display_name":      displayName,
+			"telegram_user_id":  strconv.FormatInt(user.ID, 10),
+			"telegram_username": username,
+			"session_key":       sessionKey,
+			"status":            sysin.PublishTgAccountStatusAuthorized,
+			"error_message":     "",
+			"last_login_at":     now,
+			"updated_by":        contexts.GetUserId(ctx),
+			"updated_at":        now,
+		}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "保存TG账号授权信息失败")
+	}
+	return nil
+}
+
 func telegramPasswordNeeded(err error) bool {
 	return errors.Is(err, auth.ErrPasswordAuthNeeded) || tgerr.Is(err, "SESSION_PASSWORD_NEEDED")
 }
@@ -305,8 +352,29 @@ func (s *sSysPublish) updateTelegramLoginStatus(ctx context.Context, token strin
 	return nil
 }
 
-func (s *sSysPublish) markTelegramLoginFailed(ctx context.Context, token string, accountId int64, message string) {
-	_ = s.updateTelegramLoginStatus(ctx, token, accountId, g.Map{
+func (s *sSysPublish) updateLoginRuntimeStatus(ctx context.Context, runtime *telegramLoginRuntime, data g.Map) error {
+	if runtime.tgAccountId > 0 {
+		return s.updateAdminTgAccountLoginStatus(ctx, runtime.loginToken, runtime.accountId, data)
+	}
+	return s.updateTelegramLoginStatus(ctx, runtime.loginToken, runtime.accountId, data)
+}
+
+func (s *sSysPublish) updateAdminTgAccountLoginStatus(ctx context.Context, token string, accountId int64, data g.Map) error {
+	data["updated_at"] = gtime.Now()
+	_, err := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
+		Where("login_token", token).
+		Where("account_id", accountId).
+		WhereNull("deleted_at").
+		Data(data).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "更新TG账号扫码登录状态失败")
+	}
+	return nil
+}
+
+func (s *sSysPublish) markTelegramLoginFailed(ctx context.Context, token string, accountId int64, message string, updateStatus telegramLoginStatusUpdater) {
+	_ = updateStatus(ctx, token, accountId, g.Map{
 		"status":        tgLoginStatusFailed,
 		"error_message": message,
 	})
