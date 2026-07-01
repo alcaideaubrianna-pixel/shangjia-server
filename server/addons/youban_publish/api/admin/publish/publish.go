@@ -117,6 +117,30 @@ type MediaDeleteReq struct {
 
 type MediaDeleteRes struct{}
 
+type TagListReq struct {
+	g.Meta `path:"/publish/tag/list" method:"get" tags:"上架插件后台" summary:"标签列表"`
+	sysin.TagListInp
+}
+
+type TagListRes struct {
+	form.PageRes
+	List []*sysin.TagModel `json:"list" dc:"标签列表"`
+}
+
+type TagSaveReq struct {
+	g.Meta `path:"/publish/tag/save" method:"post" tags:"上架插件后台" summary:"新增或编辑标签"`
+	sysin.TagSaveInp
+}
+
+type TagSaveRes struct{}
+
+type TagDeleteReq struct {
+	g.Meta `path:"/publish/tag/delete" method:"post" tags:"上架插件后台" summary:"删除标签"`
+	sysin.TagDeleteInp
+}
+
+type TagDeleteRes struct{}
+
 type BotListReq struct {
 	g.Meta `path:"/publish/bot/list" method:"get" tags:"上架插件后台" summary:"Bot列表"`
 	sysin.BotListInp

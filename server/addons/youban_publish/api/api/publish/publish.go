@@ -238,6 +238,92 @@ type AdminChannelRefreshRes struct {
 	List []*sysin.ChannelRefreshModel `json:"list" dc:"刷新结果"`
 }
 
+type AdminProfileListReq struct {
+	g.Meta `path:"/publish/admin/profile/list" method:"get" tags:"上架插件管理端" summary:"资料列表"`
+	sysin.ProfileListInp
+}
+
+type AdminProfileListRes struct {
+	form.PageRes
+	List []*sysin.ProfileModel `json:"list" dc:"资料列表"`
+}
+
+type AdminProfileSaveReq struct {
+	g.Meta `path:"/publish/admin/profile/save" method:"post" tags:"上架插件管理端" summary:"保存资料"`
+	sysin.ProfileSaveInp
+}
+
+type AdminProfileSaveRes struct {
+	Id     int64 `json:"id" dc:"资料ID"`
+	TaskId int64 `json:"taskId" dc:"任务ID"`
+}
+
+type AdminProfileDeleteReq struct {
+	g.Meta `path:"/publish/admin/profile/delete" method:"post" tags:"上架插件管理端" summary:"删除资料"`
+	sysin.ProfileDeleteInp
+}
+
+type AdminProfileDeleteRes struct{}
+
+type AdminProfileStatusReq struct {
+	g.Meta `path:"/publish/admin/profile/status" method:"post" tags:"上架插件管理端" summary:"资料上下架状态"`
+	sysin.ProfileStatusInp
+}
+
+type AdminProfileStatusRes struct{}
+
+type AdminNoteListReq struct {
+	g.Meta `path:"/publish/admin/note/list" method:"get" tags:"上架插件管理端" summary:"笔记列表"`
+	sysin.NoteListInp
+}
+
+type AdminNoteListRes struct {
+	form.PageRes
+	List []*sysin.NoteModel `json:"list" dc:"笔记列表"`
+}
+
+type AdminTagListReq struct {
+	g.Meta `path:"/publish/admin/tag/list" method:"get" tags:"上架插件管理端" summary:"标签列表"`
+	sysin.TagListInp
+}
+
+type AdminTagListRes struct {
+	form.PageRes
+	List []*sysin.TagModel `json:"list" dc:"标签列表"`
+}
+
+type AdminTagSaveReq struct {
+	g.Meta `path:"/publish/admin/tag/save" method:"post" tags:"上架插件管理端" summary:"新增标签"`
+	sysin.TagSaveInp
+}
+
+type AdminTagSaveRes struct{}
+
+type AdminTagDeleteReq struct {
+	g.Meta `path:"/publish/admin/tag/delete" method:"post" tags:"上架插件管理端" summary:"删除标签"`
+	sysin.TagDeleteInp
+}
+
+type AdminTagDeleteRes struct{}
+
+type AdminCityForwardReq struct {
+	g.Meta `path:"/publish/admin/city/forward" method:"get" tags:"上架插件管理端" summary:"城市转发"`
+	sysin.CityForwardInp
+}
+
+type AdminCityForwardRes struct {
+	*sysin.CityForwardModel
+}
+
+type AdminProfileStatsReq struct {
+	g.Meta `path:"/publish/admin/profile/stats" method:"get" tags:"上架插件管理端" summary:"个人中心统计趋势"`
+	sysin.TrendInp
+}
+
+type AdminProfileStatsRes struct {
+	*sysin.ProfileStatsModel
+}
+
 type MyTaskListReq struct {
 	g.Meta `path:"/publish/task/list" method:"get" tags:"上架插件" summary:"我的上架任务列表"`
 	sysin.TaskListInp
@@ -295,6 +381,92 @@ type DeleteMediaReq struct {
 }
 
 type DeleteMediaRes struct{}
+
+type MyProfileListReq struct {
+	g.Meta `path:"/publish/profile/list" method:"get" tags:"上架插件" summary:"我的资料列表"`
+	sysin.ProfileListInp
+}
+
+type MyProfileListRes struct {
+	form.PageRes
+	List []*sysin.ProfileModel `json:"list" dc:"资料列表"`
+}
+
+type MyProfileSaveReq struct {
+	g.Meta `path:"/publish/profile/save" method:"post" tags:"上架插件" summary:"保存我的资料"`
+	sysin.ProfileSaveInp
+}
+
+type MyProfileSaveRes struct {
+	Id     int64 `json:"id" dc:"资料ID"`
+	TaskId int64 `json:"taskId" dc:"任务ID"`
+}
+
+type MyProfileDeleteReq struct {
+	g.Meta `path:"/publish/profile/delete" method:"post" tags:"上架插件" summary:"删除我的资料"`
+	sysin.ProfileDeleteInp
+}
+
+type MyProfileDeleteRes struct{}
+
+type MyProfileStatusReq struct {
+	g.Meta `path:"/publish/profile/status" method:"post" tags:"上架插件" summary:"我的资料上下架状态"`
+	sysin.ProfileStatusInp
+}
+
+type MyProfileStatusRes struct{}
+
+type MyNoteListReq struct {
+	g.Meta `path:"/publish/note/list" method:"get" tags:"上架插件" summary:"我的笔记列表"`
+	sysin.NoteListInp
+}
+
+type MyNoteListRes struct {
+	form.PageRes
+	List []*sysin.NoteModel `json:"list" dc:"笔记列表"`
+}
+
+type MyTagListReq struct {
+	g.Meta `path:"/publish/tag/list" method:"get" tags:"上架插件" summary:"标签列表"`
+	sysin.TagListInp
+}
+
+type MyTagListRes struct {
+	form.PageRes
+	List []*sysin.TagModel `json:"list" dc:"标签列表"`
+}
+
+type MyTagSaveReq struct {
+	g.Meta `path:"/publish/tag/save" method:"post" tags:"上架插件" summary:"新增标签"`
+	sysin.TagSaveInp
+}
+
+type MyTagSaveRes struct{}
+
+type MyTagDeleteReq struct {
+	g.Meta `path:"/publish/tag/delete" method:"post" tags:"上架插件" summary:"删除标签"`
+	sysin.TagDeleteInp
+}
+
+type MyTagDeleteRes struct{}
+
+type MyCityForwardReq struct {
+	g.Meta `path:"/publish/city/forward" method:"get" tags:"上架插件" summary:"城市转发"`
+	sysin.CityForwardInp
+}
+
+type MyCityForwardRes struct {
+	*sysin.CityForwardModel
+}
+
+type MyProfileStatsReq struct {
+	g.Meta `path:"/publish/profile/stats" method:"get" tags:"上架插件" summary:"个人中心统计趋势"`
+	sysin.TrendInp
+}
+
+type MyProfileStatsRes struct {
+	*sysin.ProfileStatsModel
+}
 
 type TelegramLoginStartReq struct {
 	g.Meta `path:"/telegram/login/start" method:"post" tags:"上架插件" summary:"发起Telegram扫码登录"`

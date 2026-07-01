@@ -141,6 +141,64 @@ ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tenant_id` bigint(20) NOT NULL
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
 UPDATE `hg_youban_publish_media` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
 
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tag` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `name` varchar(64) NOT NULL DEFAULT '' COMMENT '标签名称',
+  `review_status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '审核状态',
+  `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
+  `use_count` int(11) NOT NULL DEFAULT '0' COMMENT '使用数量',
+  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
+  `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_tag_name_deleted` (`name`,`deleted_at`),
+  KEY `idx_ybp_tag_review_status` (`review_status`,`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架标签';
+
+ALTER TABLE `hg_youban_publish_tag` ADD COLUMN `name` varchar(64) NOT NULL DEFAULT '' COMMENT '标签名称' AFTER `id`;
+ALTER TABLE `hg_youban_publish_tag` ADD COLUMN `review_status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '审核状态' AFTER `name`;
+ALTER TABLE `hg_youban_publish_tag` ADD COLUMN `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态' AFTER `review_status`;
+ALTER TABLE `hg_youban_publish_tag` ADD COLUMN `use_count` int(11) NOT NULL DEFAULT '0' COMMENT '使用数量' AFTER `status`;
+ALTER TABLE `hg_youban_publish_tag` ADD COLUMN `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人' AFTER `use_count`;
+ALTER TABLE `hg_youban_publish_tag` ADD COLUMN `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人' AFTER `created_by`;
+ALTER TABLE `hg_youban_publish_tag` ADD COLUMN `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人' AFTER `updated_by`;
+ALTER TABLE `hg_youban_publish_tag` ADD COLUMN `created_at` datetime DEFAULT NULL COMMENT '创建时间' AFTER `deleted_by`;
+ALTER TABLE `hg_youban_publish_tag` ADD COLUMN `updated_at` datetime DEFAULT NULL COMMENT '更新时间' AFTER `created_at`;
+ALTER TABLE `hg_youban_publish_tag` ADD COLUMN `deleted_at` datetime DEFAULT NULL COMMENT '删除时间' AFTER `updated_at`;
+ALTER TABLE `hg_youban_publish_tag` ADD UNIQUE KEY `uk_ybp_tag_name_deleted` (`name`,`deleted_at`);
+ALTER TABLE `hg_youban_publish_tag` ADD KEY `idx_ybp_tag_review_status` (`review_status`,`status`,`id`);
+
+INSERT INTO `hg_youban_publish_tag` (`name`, `review_status`, `status`, `use_count`, `created_by`, `updated_by`, `deleted_by`, `created_at`, `updated_at`, `deleted_at`)
+SELECT seed.`name`, 'approved', 1, 0, 0, 0, 0, NOW(), NOW(), NULL
+FROM (
+  SELECT '颜值' AS `name` UNION ALL
+  SELECT '穿搭' UNION ALL
+  SELECT '美食' UNION ALL
+  SELECT '探店' UNION ALL
+  SELECT '旅行' UNION ALL
+  SELECT '运动' UNION ALL
+  SELECT '健身' UNION ALL
+  SELECT '摄影' UNION ALL
+  SELECT '音乐' UNION ALL
+  SELECT '舞蹈' UNION ALL
+  SELECT '日常' UNION ALL
+  SELECT '生活' UNION ALL
+  SELECT '情感' UNION ALL
+  SELECT '职场' UNION ALL
+  SELECT '学习' UNION ALL
+  SELECT '数码' UNION ALL
+  SELECT '游戏' UNION ALL
+  SELECT '电影' UNION ALL
+  SELECT '宠物' UNION ALL
+  SELECT '家居'
+) seed
+WHERE NOT EXISTS (
+  SELECT 1 FROM `hg_youban_publish_tag` t WHERE t.`name` = seed.`name` AND t.`deleted_at` IS NULL
+);
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
   `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '任务ID',

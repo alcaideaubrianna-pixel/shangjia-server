@@ -291,6 +291,111 @@ func (c *cPublishAdmin) ChannelRefresh(ctx context.Context, req *publish.AdminCh
 	return
 }
 
+func (c *cPublishAdmin) ProfileList(ctx context.Context, req *publish.AdminProfileListReq) (res *publish.AdminProfileListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminProfileList(ctx, &req.ProfileListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.ProfileModel{}
+	}
+	res = new(publish.AdminProfileListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishAdmin) ProfileSave(ctx context.Context, req *publish.AdminProfileSaveReq) (res *publish.AdminProfileSaveRes, err error) {
+	data, err := service.SysPublish().AdminProfileSave(ctx, &req.ProfileSaveInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminProfileSaveRes{}
+	if data != nil {
+		res.Id = data.Id
+		res.TaskId = data.TaskId
+	}
+	return
+}
+
+func (c *cPublishAdmin) ProfileDelete(ctx context.Context, req *publish.AdminProfileDeleteReq) (res *publish.AdminProfileDeleteRes, err error) {
+	if err = service.SysPublish().AdminProfileDelete(ctx, &req.ProfileDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminProfileDeleteRes{}
+	return
+}
+
+func (c *cPublishAdmin) ProfileStatus(ctx context.Context, req *publish.AdminProfileStatusReq) (res *publish.AdminProfileStatusRes, err error) {
+	if err = service.SysPublish().AdminProfileStatus(ctx, &req.ProfileStatusInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminProfileStatusRes{}
+	return
+}
+
+func (c *cPublishAdmin) NoteList(ctx context.Context, req *publish.AdminNoteListReq) (res *publish.AdminNoteListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminNoteList(ctx, &req.NoteListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.NoteModel{}
+	}
+	res = new(publish.AdminNoteListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishAdmin) TagList(ctx context.Context, req *publish.AdminTagListReq) (res *publish.AdminTagListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminTagList(ctx, &req.TagListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.TagModel{}
+	}
+	res = new(publish.AdminTagListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishAdmin) TagSave(ctx context.Context, req *publish.AdminTagSaveReq) (res *publish.AdminTagSaveRes, err error) {
+	if err = service.SysPublish().AdminTagSave(ctx, &req.TagSaveInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminTagSaveRes{}
+	return
+}
+
+func (c *cPublishAdmin) TagDelete(ctx context.Context, req *publish.AdminTagDeleteReq) (res *publish.AdminTagDeleteRes, err error) {
+	if err = service.SysPublish().AdminTagDelete(ctx, &req.TagDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminTagDeleteRes{}
+	return
+}
+
+func (c *cPublishAdmin) CityForward(ctx context.Context, req *publish.AdminCityForwardReq) (res *publish.AdminCityForwardRes, err error) {
+	data, err := service.SysPublish().AdminCityForward(ctx, &req.CityForwardInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminCityForwardRes{CityForwardModel: data}
+	return
+}
+
+func (c *cPublishAdmin) ProfileStats(ctx context.Context, req *publish.AdminProfileStatsReq) (res *publish.AdminProfileStatsRes, err error) {
+	data, err := service.SysPublish().AdminProfileStats(ctx, &req.TrendInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminProfileStatsRes{ProfileStatsModel: data}
+	return
+}
+
 func (c *cPublish) MyTaskList(ctx context.Context, req *publish.MyTaskListReq) (res *publish.MyTaskListRes, err error) {
 	list, totalCount, err := service.SysPublish().MyTaskList(ctx, &req.TaskListInp)
 	if err != nil {
@@ -359,6 +464,111 @@ func (c *cPublish) DeleteMedia(ctx context.Context, req *publish.DeleteMediaReq)
 		return nil, err
 	}
 	res = &publish.DeleteMediaRes{}
+	return
+}
+
+func (c *cPublish) MyProfileList(ctx context.Context, req *publish.MyProfileListReq) (res *publish.MyProfileListRes, err error) {
+	list, totalCount, err := service.SysPublish().MyProfileList(ctx, &req.ProfileListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.ProfileModel{}
+	}
+	res = new(publish.MyProfileListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublish) MyProfileSave(ctx context.Context, req *publish.MyProfileSaveReq) (res *publish.MyProfileSaveRes, err error) {
+	data, err := service.SysPublish().MyProfileSave(ctx, &req.ProfileSaveInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.MyProfileSaveRes{}
+	if data != nil {
+		res.Id = data.Id
+		res.TaskId = data.TaskId
+	}
+	return
+}
+
+func (c *cPublish) MyProfileDelete(ctx context.Context, req *publish.MyProfileDeleteReq) (res *publish.MyProfileDeleteRes, err error) {
+	if err = service.SysPublish().MyProfileDelete(ctx, &req.ProfileDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.MyProfileDeleteRes{}
+	return
+}
+
+func (c *cPublish) MyProfileStatus(ctx context.Context, req *publish.MyProfileStatusReq) (res *publish.MyProfileStatusRes, err error) {
+	if err = service.SysPublish().MyProfileStatus(ctx, &req.ProfileStatusInp); err != nil {
+		return nil, err
+	}
+	res = &publish.MyProfileStatusRes{}
+	return
+}
+
+func (c *cPublish) MyNoteList(ctx context.Context, req *publish.MyNoteListReq) (res *publish.MyNoteListRes, err error) {
+	list, totalCount, err := service.SysPublish().MyNoteList(ctx, &req.NoteListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.NoteModel{}
+	}
+	res = new(publish.MyNoteListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublish) MyTagList(ctx context.Context, req *publish.MyTagListReq) (res *publish.MyTagListRes, err error) {
+	list, totalCount, err := service.SysPublish().MyTagList(ctx, &req.TagListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.TagModel{}
+	}
+	res = new(publish.MyTagListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublish) MyTagSave(ctx context.Context, req *publish.MyTagSaveReq) (res *publish.MyTagSaveRes, err error) {
+	if err = service.SysPublish().MyTagSave(ctx, &req.TagSaveInp); err != nil {
+		return nil, err
+	}
+	res = &publish.MyTagSaveRes{}
+	return
+}
+
+func (c *cPublish) MyTagDelete(ctx context.Context, req *publish.MyTagDeleteReq) (res *publish.MyTagDeleteRes, err error) {
+	if err = service.SysPublish().MyTagDelete(ctx, &req.TagDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.MyTagDeleteRes{}
+	return
+}
+
+func (c *cPublish) MyCityForward(ctx context.Context, req *publish.MyCityForwardReq) (res *publish.MyCityForwardRes, err error) {
+	data, err := service.SysPublish().MyCityForward(ctx, &req.CityForwardInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.MyCityForwardRes{CityForwardModel: data}
+	return
+}
+
+func (c *cPublish) MyProfileStats(ctx context.Context, req *publish.MyProfileStatsReq) (res *publish.MyProfileStatsRes, err error) {
+	data, err := service.SysPublish().MyProfileStats(ctx, &req.TrendInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.MyProfileStatsRes{ProfileStatsModel: data}
 	return
 }
 

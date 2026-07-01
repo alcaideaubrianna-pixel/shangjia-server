@@ -139,6 +139,13 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 	if err = s.refreshTaskMediaCount(ctx, task["id"].Int64()); err != nil {
 		return nil, err
 	}
+	if task["profile_id"].Int64() > 0 {
+		if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+			return s.syncTaskMediaToProfile(ctx, tx, task["id"].Int64(), task["profile_id"].Int64())
+		}); err != nil {
+			return nil, err
+		}
+	}
 	var media *sysin.MediaModel
 	if err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", mediaId).Scan(&media); err != nil {
 		return nil, gerror.Wrap(err, "读取任务媒体失败")

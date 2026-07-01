@@ -41,8 +41,9 @@ WITH parent AS (
     ('账号管理', 'youbanPublishAccount', '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/resetPwd,/youban_publish/publish/account/delete', 20),
     ('上架任务', 'youbanPublishTask', '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel', 30),
     ('资料媒体', 'youbanPublishMedia', '/youban_publish/publish/media/list,/youban_publish/publish/media/delete', 40),
-    ('机器人配置', 'youbanPublishBot', '/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete', 50),
-    ('插件配置', 'youbanPublishConfig', '/youban_publish/publish/config/get,/youban_publish/publish/config/update', 60)
+    ('标签审核', 'youbanPublishTag', '/youban_publish/publish/tag/list,/youban_publish/publish/tag/save,/youban_publish/publish/tag/delete', 50),
+    ('机器人配置', 'youbanPublishBot', '/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete', 60),
+    ('插件配置', 'youbanPublishConfig', '/youban_publish/publish/config/get,/youban_publish/publish/config/update', 70)
   ) AS t("title", "name", "permissions", "sort")
 )
 INSERT INTO "hg_admin_menu" (
@@ -69,8 +70,9 @@ WITH parent AS (
     ('账号管理', 'youbanPublishAccount', '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/resetPwd,/youban_publish/publish/account/delete', 20),
     ('上架任务', 'youbanPublishTask', '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel', 30),
     ('资料媒体', 'youbanPublishMedia', '/youban_publish/publish/media/list,/youban_publish/publish/media/delete', 40),
-    ('机器人配置', 'youbanPublishBot', '/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete', 50),
-    ('插件配置', 'youbanPublishConfig', '/youban_publish/publish/config/get,/youban_publish/publish/config/update', 60)
+    ('标签审核', 'youbanPublishTag', '/youban_publish/publish/tag/list,/youban_publish/publish/tag/save,/youban_publish/publish/tag/delete', 50),
+    ('机器人配置', 'youbanPublishBot', '/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete', 60),
+    ('插件配置', 'youbanPublishConfig', '/youban_publish/publish/config/get,/youban_publish/publish/config/update', 70)
   ) AS t("title", "name", "permissions", "sort")
 )
 UPDATE "hg_admin_menu" m
@@ -97,6 +99,7 @@ JOIN "hg_admin_menu" m ON m."name" IN (
   'youbanPublishAccount',
   'youbanPublishTask',
   'youbanPublishMedia',
+  'youbanPublishTag',
   'youbanPublishBot',
   'youbanPublishConfig'
 )

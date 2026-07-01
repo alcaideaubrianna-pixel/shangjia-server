@@ -40,6 +40,18 @@ export function TaskCancel(params = {}) {
   return http.request({ url: '/youban_publish/publish/task/cancel', method: 'POST', params });
 }
 
+export function TagList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/tag/list', method: 'get', params });
+}
+
+export function TagSave(params = {}) {
+  return http.request({ url: '/youban_publish/publish/tag/save', method: 'POST', params });
+}
+
+export function TagDelete(params = {}) {
+  return http.request({ url: '/youban_publish/publish/tag/delete', method: 'POST', params });
+}
+
 export function BotList(params = {}) {
   return http.request({ url: '/youban_publish/publish/bot/list', method: 'get', params });
 }

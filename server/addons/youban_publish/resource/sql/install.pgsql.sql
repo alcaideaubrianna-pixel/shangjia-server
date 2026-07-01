@@ -132,6 +132,64 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_media_task_attachment" ON "hg_youban_publish
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_task_sort" ON "hg_youban_publish_media" ("task_id", "sort_index", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_profile" ON "hg_youban_publish_media" ("profile_id", "id");
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tag" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "name" varchar(64) NOT NULL DEFAULT '',
+  "review_status" varchar(32) NOT NULL DEFAULT 'pending',
+  "status" smallint NOT NULL DEFAULT 1,
+  "use_count" integer NOT NULL DEFAULT 0,
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "deleted_by" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tag_name_deleted" ON "hg_youban_publish_tag" ("name", "deleted_at");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tag_review_status" ON "hg_youban_publish_tag" ("review_status", "status", "id");
+
+ALTER TABLE "hg_youban_publish_tag" ADD COLUMN IF NOT EXISTS "name" varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_tag" ADD COLUMN IF NOT EXISTS "review_status" varchar(32) NOT NULL DEFAULT 'pending';
+ALTER TABLE "hg_youban_publish_tag" ADD COLUMN IF NOT EXISTS "status" smallint NOT NULL DEFAULT 1;
+ALTER TABLE "hg_youban_publish_tag" ADD COLUMN IF NOT EXISTS "use_count" integer NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_tag" ADD COLUMN IF NOT EXISTS "created_by" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_tag" ADD COLUMN IF NOT EXISTS "updated_by" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_tag" ADD COLUMN IF NOT EXISTS "deleted_by" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_tag" ADD COLUMN IF NOT EXISTS "created_at" timestamp DEFAULT NULL;
+ALTER TABLE "hg_youban_publish_tag" ADD COLUMN IF NOT EXISTS "updated_at" timestamp DEFAULT NULL;
+ALTER TABLE "hg_youban_publish_tag" ADD COLUMN IF NOT EXISTS "deleted_at" timestamp DEFAULT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tag_name_deleted" ON "hg_youban_publish_tag" ("name", "deleted_at");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tag_review_status" ON "hg_youban_publish_tag" ("review_status", "status", "id");
+
+INSERT INTO "hg_youban_publish_tag" ("name", "review_status", "status", "use_count", "created_by", "updated_by", "deleted_by", "created_at", "updated_at", "deleted_at")
+SELECT seed."name", 'approved', 1, 0, 0, 0, 0, NOW(), NOW(), NULL
+FROM (
+  VALUES
+    ('颜值'),
+    ('穿搭'),
+    ('美食'),
+    ('探店'),
+    ('旅行'),
+    ('运动'),
+    ('健身'),
+    ('摄影'),
+    ('音乐'),
+    ('舞蹈'),
+    ('日常'),
+    ('生活'),
+    ('情感'),
+    ('职场'),
+    ('学习'),
+    ('数码'),
+    ('游戏'),
+    ('电影'),
+    ('宠物'),
+    ('家居')
+) AS seed("name")
+WHERE NOT EXISTS (
+  SELECT 1 FROM "hg_youban_publish_tag" t WHERE t."name" = seed."name" AND t."deleted_at" IS NULL
+);
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_job" (
   "id" BIGSERIAL PRIMARY KEY,
   "task_id" bigint NOT NULL DEFAULT 0,

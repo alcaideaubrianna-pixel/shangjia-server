@@ -156,6 +156,36 @@ func (c *cPublishServer) MediaDelete(ctx context.Context, req *publish.MediaDele
 	return
 }
 
+func (c *cPublishServer) TagList(ctx context.Context, req *publish.TagListReq) (res *publish.TagListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminTagList(ctx, &req.TagListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.TagModel{}
+	}
+	res = new(publish.TagListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) TagSave(ctx context.Context, req *publish.TagSaveReq) (res *publish.TagSaveRes, err error) {
+	if err = service.SysPublish().ServerTagSave(ctx, &req.TagSaveInp); err != nil {
+		return nil, err
+	}
+	res = &publish.TagSaveRes{}
+	return
+}
+
+func (c *cPublishServer) TagDelete(ctx context.Context, req *publish.TagDeleteReq) (res *publish.TagDeleteRes, err error) {
+	if err = service.SysPublish().ServerTagDelete(ctx, &req.TagDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.TagDeleteRes{}
+	return
+}
+
 func (c *cPublishServer) BotList(ctx context.Context, req *publish.BotListReq) (res *publish.BotListRes, err error) {
 	list, totalCount, err := service.SysPublish().ServerBotList(ctx, &req.BotListInp)
 	if err != nil {
@@ -388,6 +418,36 @@ func (c *cPublishAdmin) MediaDelete(ctx context.Context, req *publish.MediaDelet
 		return nil, err
 	}
 	res = &publish.MediaDeleteRes{}
+	return
+}
+
+func (c *cPublishAdmin) TagList(ctx context.Context, req *publish.TagListReq) (res *publish.TagListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminTagList(ctx, &req.TagListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.TagModel{}
+	}
+	res = new(publish.TagListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishAdmin) TagSave(ctx context.Context, req *publish.TagSaveReq) (res *publish.TagSaveRes, err error) {
+	if err = service.SysPublish().AdminTagSave(ctx, &req.TagSaveInp); err != nil {
+		return nil, err
+	}
+	res = &publish.TagSaveRes{}
+	return
+}
+
+func (c *cPublishAdmin) TagDelete(ctx context.Context, req *publish.TagDeleteReq) (res *publish.TagDeleteRes, err error) {
+	if err = service.SysPublish().AdminTagDelete(ctx, &req.TagDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.TagDeleteRes{}
 	return
 }
 

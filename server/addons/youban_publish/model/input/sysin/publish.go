@@ -27,6 +27,10 @@ const (
 	PublishTgAccountStatusAuthorized = "authorized"
 	PublishTgAccountStatusExpired    = "expired"
 	PublishTgAccountStatusFailed     = "failed"
+
+	PublishTagReviewPending  = "pending"
+	PublishTagReviewApproved = "approved"
+	PublishTagReviewRejected = "rejected"
 )
 
 type TenantListInp struct {
@@ -388,6 +392,190 @@ type MediaModel struct {
 	Status       int         `json:"status" dc:"状态"`
 	CreatedAt    *gtime.Time `json:"createdAt" dc:"创建时间"`
 	UpdatedAt    *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
+type ProfileListInp struct {
+	form.PageReq
+	TenantId     int64  `json:"tenantId" dc:"租户ID"`
+	AccountId    int64  `json:"accountId" dc:"上架账号ID"`
+	Keyword      string `json:"keyword" dc:"标题/编号/正文"`
+	Province     string `json:"province" dc:"省份"`
+	City         string `json:"city" dc:"城市"`
+	Tag          string `json:"tag" dc:"标签"`
+	ReviewStatus string `json:"reviewStatus" dc:"审核状态"`
+	Visibility   string `json:"visibility" dc:"可见性"`
+	Status       int    `json:"status" dc:"状态：1上架 2下架"`
+}
+
+type ProfileModel struct {
+	Id           int64       `json:"id" dc:"资料ID"`
+	TaskId       int64       `json:"taskId" dc:"任务ID"`
+	TenantId     int64       `json:"tenantId" dc:"租户ID"`
+	AccountId    int64       `json:"accountId" dc:"上架账号ID"`
+	ProfileNo    string      `json:"profileNo" dc:"资料编号"`
+	Title        string      `json:"title" dc:"标题"`
+	Summary      string      `json:"summary" dc:"摘要"`
+	PlainText    string      `json:"plainText" dc:"正文"`
+	Province     string      `json:"province" dc:"省份"`
+	City         string      `json:"city" dc:"城市"`
+	Tag          string      `json:"tag" dc:"标签"`
+	Visibility   string      `json:"visibility" dc:"可见性"`
+	ReviewStatus string      `json:"reviewStatus" dc:"审核状态"`
+	Status       int         `json:"status" dc:"状态"`
+	ImageCount   int         `json:"imageCount" dc:"图片数"`
+	VideoCount   int         `json:"videoCount" dc:"视频数"`
+	PublishedAt  *gtime.Time `json:"publishedAt" dc:"发布时间"`
+	CreatedAt    *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt    *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
+type ProfileSaveInp struct {
+	Id         int64  `json:"id" dc:"资料ID"`
+	TaskId     int64  `json:"taskId" dc:"任务ID"`
+	Title      string `json:"title" v:"required#标题不能为空" dc:"标题"`
+	Province   string `json:"province" dc:"省份"`
+	City       string `json:"city" dc:"城市"`
+	PlainText  string `json:"plainText" dc:"正文"`
+	Tag        string `json:"tag" dc:"标签"`
+	Visibility string `json:"visibility" dc:"可见性：private/public/member_only"`
+	Status     int    `json:"status" dc:"状态：1上架 2下架"`
+}
+
+func (in *ProfileSaveInp) Filter(ctx context.Context) error {
+	in.Title = strings.TrimSpace(in.Title)
+	in.Province = strings.TrimSpace(in.Province)
+	in.City = strings.TrimSpace(in.City)
+	in.PlainText = strings.TrimSpace(in.PlainText)
+	in.Tag = strings.TrimSpace(in.Tag)
+	in.Visibility = strings.TrimSpace(in.Visibility)
+	if in.Title == "" {
+		return gerror.New("标题不能为空")
+	}
+	if in.Visibility == "" {
+		in.Visibility = "private"
+	}
+	if in.Visibility != "private" && in.Visibility != "public" && in.Visibility != "member_only" {
+		return gerror.New("可见性不合法")
+	}
+	if in.Status == 0 {
+		in.Status = 1
+	}
+	if in.Status != 1 && in.Status != 2 {
+		return gerror.New("资料状态不合法")
+	}
+	return nil
+}
+
+type ProfileSaveModel struct {
+	Id     int64 `json:"id" dc:"资料ID"`
+	TaskId int64 `json:"taskId" dc:"任务ID"`
+}
+
+type ProfileDeleteInp struct {
+	Ids []int64 `json:"ids" v:"required#请选择要删除的资料" dc:"资料ID列表"`
+}
+
+type ProfileStatusInp struct {
+	Ids    []int64 `json:"ids" v:"required#请选择要处理的资料" dc:"资料ID列表"`
+	Status int     `json:"status" v:"required#状态不能为空" dc:"状态：1上架 2下架"`
+}
+
+type NoteListInp struct {
+	ProfileListInp
+}
+
+type NoteModel struct {
+	ProfileModel
+	Media []*MediaModel `json:"media" dc:"媒体列表"`
+}
+
+type TagListInp struct {
+	form.PageReq
+	Keyword      string `json:"keyword" dc:"关键词"`
+	ReviewStatus string `json:"reviewStatus" dc:"审核状态"`
+	Status       int    `json:"status" dc:"状态"`
+}
+
+type TagModel struct {
+	Id                int64       `json:"id" dc:"ID"`
+	Name              string      `json:"name" dc:"标签名"`
+	ReviewStatus      string      `json:"reviewStatus" dc:"审核状态"`
+	Status            int         `json:"status" dc:"状态"`
+	UseCount          int         `json:"useCount" dc:"使用数量"`
+	CreatedBy         int64       `json:"createdBy" dc:"创建人ID"`
+	CreatorUsername   string      `json:"creatorUsername" dc:"创建人账号"`
+	CreatorTenantId   int64       `json:"creatorTenantId" dc:"创建人租户ID"`
+	CreatorTenantName string      `json:"creatorTenantName" dc:"创建人租户"`
+	CreatedAt         *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt         *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
+type TagSaveInp struct {
+	Name         string `json:"name" v:"required#标签名称不能为空" dc:"标签名"`
+	ReviewStatus string `json:"reviewStatus" dc:"审核状态"`
+	Status       int    `json:"status" dc:"状态"`
+}
+
+func (in *TagSaveInp) Filter(ctx context.Context) error {
+	in.Name = strings.TrimSpace(in.Name)
+	in.ReviewStatus = strings.TrimSpace(in.ReviewStatus)
+	if in.Name == "" {
+		return gerror.New("标签名称不能为空")
+	}
+	if in.ReviewStatus == "" {
+		in.ReviewStatus = PublishTagReviewPending
+	}
+	if in.ReviewStatus != PublishTagReviewPending && in.ReviewStatus != PublishTagReviewApproved && in.ReviewStatus != PublishTagReviewRejected {
+		return gerror.New("标签审核状态不合法")
+	}
+	if in.Status == 0 {
+		in.Status = 1
+	}
+	if in.Status != 1 && in.Status != 2 {
+		return gerror.New("标签状态不合法")
+	}
+	return nil
+}
+
+type TagDeleteInp struct {
+	Ids []int64 `json:"ids" v:"required#请选择要删除的标签" dc:"标签ID列表"`
+}
+
+type CityForwardInp struct {
+	ParentId int64 `json:"parentId" dc:"父级地区ID，为0返回省份"`
+}
+
+type CityForwardModel struct {
+	List []*CityOptionModel `json:"list" dc:"省市选项"`
+}
+
+type CityOptionModel struct {
+	Label    string             `json:"label" dc:"地区名称"`
+	Value    int64              `json:"value" dc:"地区ID"`
+	Level    int                `json:"level" dc:"地区等级"`
+	IsLeaf   bool               `json:"isLeaf" dc:"是否叶子"`
+	Children []*CityOptionModel `json:"children,omitempty" dc:"子级"`
+}
+
+type TrendInp struct {
+	Days int `json:"days" dc:"趋势天数，默认7，最多90"`
+}
+
+type TrendPointModel struct {
+	Date         string `json:"date" dc:"日期"`
+	ProfileCount int    `json:"profileCount" dc:"新增资料数"`
+	UpCount      int    `json:"upCount" dc:"上架数"`
+	DownCount    int    `json:"downCount" dc:"下架数"`
+}
+
+type ProfileStatsModel struct {
+	Total     int                `json:"total" dc:"资料总数"`
+	UpCount   int                `json:"upCount" dc:"上架数"`
+	DownCount int                `json:"downCount" dc:"下架数"`
+	Pending   int                `json:"pending" dc:"待审核数"`
+	Approved  int                `json:"approved" dc:"审核通过数"`
+	Rejected  int                `json:"rejected" dc:"审核拒绝数"`
+	Trend     []*TrendPointModel `json:"trend" dc:"趋势"`
 }
 
 type BotListInp struct {

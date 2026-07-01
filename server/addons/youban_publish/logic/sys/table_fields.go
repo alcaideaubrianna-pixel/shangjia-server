@@ -13,4 +13,5 @@ var (
 	publishTgAccountTable = "hg_youban_publish_tg_account"
 	publishChannelTable   = "hg_youban_publish_channel"
 	publishTgChannelTable = "hg_youban_publish_tg_channel"
+	publishTagTable       = "hg_youban_publish_tag"
 )

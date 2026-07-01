@@ -40,10 +40,13 @@ INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type
 SELECT NULL, @publishId, '资料媒体', 'youbanPublishMedia', '', '', '3', '', '/youban_publish/publish/media/list,/youban_publish/publish/media/delete', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '40', '上架系统按钮权限', '1', @now, @now
 WHERE @publishId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanPublishMedia');
 INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type`, `redirect`, `permissions`, `permission_name`, `component`, `always_show`, `active_menu`, `is_root`, `is_frame`, `frame_src`, `keep_alive`, `hidden`, `affix`, `level`, `tree`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
-SELECT NULL, @publishId, '机器人配置', 'youbanPublishBot', '', '', '3', '', '/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '50', '上架系统按钮权限', '1', @now, @now
+SELECT NULL, @publishId, '标签审核', 'youbanPublishTag', '', '', '3', '', '/youban_publish/publish/tag/list,/youban_publish/publish/tag/save,/youban_publish/publish/tag/delete', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '50', '上架系统按钮权限', '1', @now, @now
+WHERE @publishId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanPublishTag');
+INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type`, `redirect`, `permissions`, `permission_name`, `component`, `always_show`, `active_menu`, `is_root`, `is_frame`, `frame_src`, `keep_alive`, `hidden`, `affix`, `level`, `tree`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
+SELECT NULL, @publishId, '机器人配置', 'youbanPublishBot', '', '', '3', '', '/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '60', '上架系统按钮权限', '1', @now, @now
 WHERE @publishId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanPublishBot');
 INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type`, `redirect`, `permissions`, `permission_name`, `component`, `always_show`, `active_menu`, `is_root`, `is_frame`, `frame_src`, `keep_alive`, `hidden`, `affix`, `level`, `tree`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
-SELECT NULL, @publishId, '插件配置', 'youbanPublishConfig', '', '', '3', '', '/youban_publish/publish/config/get,/youban_publish/publish/config/update', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '60', '上架系统按钮权限', '1', @now, @now
+SELECT NULL, @publishId, '插件配置', 'youbanPublishConfig', '', '', '3', '', '/youban_publish/publish/config/get,/youban_publish/publish/config/update', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '70', '上架系统按钮权限', '1', @now, @now
 WHERE @publishId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanPublishConfig');
 
 UPDATE `hg_admin_menu`
@@ -53,6 +56,7 @@ SET `pid` = @publishId,
         WHEN 'youbanPublishAccount' THEN '账号管理'
         WHEN 'youbanPublishTask' THEN '上架任务'
         WHEN 'youbanPublishMedia' THEN '资料媒体'
+        WHEN 'youbanPublishTag' THEN '标签审核'
         WHEN 'youbanPublishBot' THEN '机器人配置'
         WHEN 'youbanPublishConfig' THEN '插件配置'
         ELSE `title`
@@ -63,6 +67,7 @@ SET `pid` = @publishId,
         WHEN 'youbanPublishAccount' THEN '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/resetPwd,/youban_publish/publish/account/delete'
         WHEN 'youbanPublishTask' THEN '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel'
         WHEN 'youbanPublishMedia' THEN '/youban_publish/publish/media/list,/youban_publish/publish/media/delete'
+        WHEN 'youbanPublishTag' THEN '/youban_publish/publish/tag/list,/youban_publish/publish/tag/save,/youban_publish/publish/tag/delete'
         WHEN 'youbanPublishBot' THEN '/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete'
         WHEN 'youbanPublishConfig' THEN '/youban_publish/publish/config/get,/youban_publish/publish/config/update'
         ELSE `permissions`
@@ -76,8 +81,9 @@ SET `pid` = @publishId,
         WHEN 'youbanPublishAccount' THEN '20'
         WHEN 'youbanPublishTask' THEN '30'
         WHEN 'youbanPublishMedia' THEN '40'
-        WHEN 'youbanPublishBot' THEN '50'
-        WHEN 'youbanPublishConfig' THEN '60'
+        WHEN 'youbanPublishTag' THEN '50'
+        WHEN 'youbanPublishBot' THEN '60'
+        WHEN 'youbanPublishConfig' THEN '70'
         ELSE `sort`
     END,
     `remark` = '上架系统按钮权限',
@@ -88,6 +94,7 @@ WHERE @publishId IS NOT NULL AND `name` IN (
   'youbanPublishAccount',
   'youbanPublishTask',
   'youbanPublishMedia',
+  'youbanPublishTag',
   'youbanPublishBot',
   'youbanPublishConfig'
 );
@@ -101,6 +108,7 @@ JOIN `hg_admin_menu` m ON m.`name` IN (
   'youbanPublishAccount',
   'youbanPublishTask',
   'youbanPublishMedia',
+  'youbanPublishTag',
   'youbanPublishBot',
   'youbanPublishConfig'
 )
