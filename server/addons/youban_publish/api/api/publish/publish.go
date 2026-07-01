@@ -399,6 +399,16 @@ type MyProfileListRes struct {
 	List []*sysin.ProfileModel `json:"list" dc:"资料列表"`
 }
 
+type MyChannelListReq struct {
+	g.Meta `path:"/publish/channel/list" method:"get" tags:"上架插件" summary:"我的可选推送频道"`
+	sysin.ChannelListInp
+}
+
+type MyChannelListRes struct {
+	form.PageRes
+	List []*sysin.ChannelModel `json:"list" dc:"频道列表"`
+}
+
 type MyProfileViewReq struct {
 	g.Meta `path:"/publish/profile/view" method:"get" tags:"上架插件" summary:"我的资料详情"`
 	sysin.ProfileViewInp
@@ -406,6 +416,14 @@ type MyProfileViewReq struct {
 
 type MyProfileViewRes struct {
 	*sysin.ProfileViewModel
+}
+
+type MyProfileOptionsReq struct {
+	g.Meta `path:"/publish/profile/options" method:"get" tags:"上架插件" summary:"我的资料页面选项"`
+}
+
+type MyProfileOptionsRes struct {
+	*sysin.ProfileOptionsModel
 }
 
 type MyProfileSaveReq struct {

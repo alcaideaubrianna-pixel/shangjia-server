@@ -16,6 +16,7 @@ import (
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
+	"hotgo/internal/model/input/form"
 	basesysin "hotgo/internal/model/input/sysin"
 	iservice "hotgo/internal/service"
 )
@@ -50,6 +51,19 @@ func (s *sSysPublish) MyProfileView(ctx context.Context, in *sysin.ProfileViewIn
 		return nil, err
 	}
 	return &sysin.ProfileViewModel{Profile: profile, Media: media}, nil
+}
+
+func (s *sSysPublish) MyProfileOptions(ctx context.Context) (res *sysin.ProfileOptionsModel, err error) {
+	channels, _, err := s.MyChannelList(ctx, &sysin.ChannelListInp{
+		PageReq: form.PageReq{
+			Page:    1,
+			PerPage: 200,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &sysin.ProfileOptionsModel{Channels: channels}, nil
 }
 
 func (s *sSysPublish) MyProfileSave(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error) {
@@ -284,6 +298,22 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	if tenantId <= 0 || accountId <= 0 {
 		return nil, gerror.New("上架账号信息不完整")
 	}
+	in.ChannelIds = uniqueIds(in.ChannelIds)
+	channelJSON, err := encodeBotIds(in.ChannelIds)
+	if err != nil {
+		return nil, err
+	}
+	if len(in.ChannelIds) > 0 {
+		if err = s.ensureProfileChannels(ctx, in.ChannelIds, tenantId); err != nil {
+			return nil, err
+		}
+	}
+	tgPushEnabled := 0
+	tgStatus := "skipped"
+	if len(in.ChannelIds) > 0 {
+		tgPushEnabled = 1
+		tgStatus = "pending"
+	}
 	now := gtime.Now()
 	var profileId int64
 	var taskId int64
@@ -316,8 +346,9 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 				"city":            in.City,
 				"plain_text":      in.PlainText,
 				"media_count":     0,
-				"tg_push_enabled": 0,
-				"tg_status":       "skipped",
+				"channel_id_json": channelJSON,
+				"tg_push_enabled": tgPushEnabled,
+				"tg_status":       tgStatus,
 				"status":          sysin.PublishTaskStatusDraft,
 				"created_by":      contexts.GetUserId(ctx),
 				"updated_by":      contexts.GetUserId(ctx),
@@ -334,11 +365,17 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			if err != nil {
 				return err
 			}
-			if _, err = tx.Model(publishTaskTable).Ctx(ctx).Where("id", taskId).Data(g.Map{"profile_id": profileId, "updated_at": now}).Update(); err != nil {
+			if _, err = tx.Model(publishTaskTable).Ctx(ctx).Where("id", taskId).Data(g.Map{
+				"profile_id":      profileId,
+				"channel_id_json": channelJSON,
+				"tg_push_enabled": tgPushEnabled,
+				"tg_status":       tgStatus,
+				"updated_at":      now,
+			}).Update(); err != nil {
 				return gerror.Wrap(err, "回写资料任务失败")
 			}
 		} else {
-			if err = s.updateProfileFromInput(ctx, tx, in, profileId, taskId, tenantId, accountId); err != nil {
+			if err = s.updateProfileFromInput(ctx, tx, in, profileId, taskId, tenantId, accountId, channelJSON, tgPushEnabled, tgStatus); err != nil {
 				return err
 			}
 		}
@@ -652,7 +689,7 @@ func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, acco
 }
 
 func profileListFields() string {
-	return "p.id,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city,p.cup_size AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id"
+	return "p.id,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city,p.cup_size AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,t.channel_id_json"
 }
 
 func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
@@ -757,7 +794,7 @@ func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	return id, nil
 }
 
-func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, profileId int64, taskId int64, tenantId int64, accountId int64) error {
+func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, profileId int64, taskId int64, tenantId int64, accountId int64, channelJSON string, tgPushEnabled int, tgStatus string) error {
 	columns := dao.ContentProfile.Columns()
 	now := gtime.Now()
 	data := g.Map{
@@ -780,13 +817,16 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		return gerror.Wrap(err, "更新资料失败")
 	}
 	if _, err := tx.Model(publishTaskTable).Ctx(ctx).Where("id", taskId).Data(g.Map{
-		"title":      in.Title,
-		"province":   in.Province,
-		"city":       in.City,
-		"plain_text": in.PlainText,
-		"status":     sysin.PublishTaskStatusDraft,
-		"updated_by": contexts.GetUserId(ctx),
-		"updated_at": now,
+		"title":           in.Title,
+		"province":        in.Province,
+		"city":            in.City,
+		"plain_text":      in.PlainText,
+		"channel_id_json": channelJSON,
+		"tg_push_enabled": tgPushEnabled,
+		"tg_status":       tgStatus,
+		"status":          sysin.PublishTaskStatusDraft,
+		"updated_by":      contexts.GetUserId(ctx),
+		"updated_at":      now,
 	}).Update(); err != nil {
 		return gerror.Wrap(err, "更新资料任务失败")
 	}
@@ -854,6 +894,27 @@ func (s *sSysPublish) allowedProfileIds(ctx context.Context, ids []int64, tenant
 		res = append(res, row.ProfileId)
 	}
 	return res, nil
+}
+
+func (s *sSysPublish) ensureProfileChannels(ctx context.Context, ids []int64, tenantId int64) error {
+	ids = uniqueIds(ids)
+	if len(ids) == 0 {
+		return nil
+	}
+	count, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		WhereIn("id", ids).
+		Where("tenant_id", tenantId).
+		Where("publish_direction", "up").
+		Where("status", 1).
+		WhereNull("deleted_at").
+		Count()
+	if err != nil {
+		return gerror.Wrap(err, "检查推送频道失败")
+	}
+	if count != len(ids) {
+		return gerror.New("存在无权操作或不可用的推送频道")
+	}
+	return nil
 }
 
 func (s *sSysPublish) mediaListByProfile(ctx context.Context, profileId int64, tenantId int64, accountId int64) (list []*sysin.MediaModel, err error) {

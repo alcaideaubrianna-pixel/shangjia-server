@@ -42,6 +42,37 @@ func (s *sSysPublish) AdminChannelList(ctx context.Context, in *sysin.ChannelLis
 	return list, totalCount, nil
 }
 
+func (s *sSysPublish) MyChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	if in == nil {
+		in = &sysin.ChannelListInp{}
+	}
+	in.TenantId = account.TenantId
+	in.PublishDirection = "up"
+	in.Status = 1
+	base := s.channelBaseModel(ctx)
+	base = applyChannelFilters(base, in)
+	totalCount, err = base.Clone().Count()
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "获取频道总数失败")
+	}
+	if err = base.Fields("c.*,ta.display_name AS tg_account_name").
+		Page(in.Page, in.PerPage).
+		OrderDesc("c.is_default_selected").
+		OrderDesc("c.id").
+		Scan(&list); err != nil {
+		return nil, 0, gerror.Wrap(err, "获取频道列表失败")
+	}
+	if list == nil {
+		list = []*sysin.ChannelModel{}
+	}
+	applyChannelBotIds(list)
+	return list, totalCount, nil
+}
+
 func (s *sSysPublish) ServerChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error) {
 	if in == nil {
 		in = &sysin.ChannelListInp{}
@@ -111,18 +142,22 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	}
 	now := gtime.Now()
 	data := g.Map{
-		"tenant_id":         in.TenantId,
-		"merchant_id":       in.TenantId,
-		"tg_account_id":     in.TgAccountId,
-		"channel_title":     in.ChannelTitle,
-		"channel_username":  in.ChannelUsername,
-		"target_chat_id":    in.TargetChatId,
-		"publish_direction": in.PublishDirection,
-		"bot_id_json":       botJSON,
-		"remark":            in.Remark,
-		"status":            in.Status,
-		"updated_by":        account.Id,
-		"updated_at":        now,
+		"tenant_id":             in.TenantId,
+		"merchant_id":           in.TenantId,
+		"tg_account_id":         in.TgAccountId,
+		"channel_title":         in.ChannelTitle,
+		"channel_username":      in.ChannelUsername,
+		"target_chat_id":        in.TargetChatId,
+		"publish_direction":     in.PublishDirection,
+		"cycle_publish_enabled": in.CyclePublishEnabled,
+		"cycle_publish_days":    in.CyclePublishDays,
+		"cycle_publish_time":    in.CyclePublishTime,
+		"is_default_selected":   in.IsDefaultSelected,
+		"bot_id_json":           botJSON,
+		"remark":                in.Remark,
+		"status":                in.Status,
+		"updated_by":            account.Id,
+		"updated_at":            now,
 	}
 	if in.Id > 0 {
 		_, err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
@@ -324,6 +359,9 @@ func applyChannelFilters(mod *gdb.Model, in *sysin.ChannelListInp) *gdb.Model {
 	}
 	if in.TgAccountId > 0 {
 		mod = mod.Where("c.tg_account_id", in.TgAccountId)
+	}
+	if direction := strings.TrimSpace(in.PublishDirection); direction != "" {
+		mod = mod.Where("c.publish_direction", direction)
 	}
 	if in.Status > 0 {
 		mod = mod.Where("c.status", in.Status)

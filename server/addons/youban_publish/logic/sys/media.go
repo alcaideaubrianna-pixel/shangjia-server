@@ -246,6 +246,10 @@ func (s *sSysPublish) findMySimilarProfileIdsByPHash(ctx context.Context, queryH
 	for profileId, distance := range distanceByProfile {
 		items = append(items, publishProfilePHashDistance{ProfileId: profileId, Distance: distance})
 	}
+	items, err = s.filterVisibleProfilePHashItems(ctx, items, tenantId, accountId)
+	if err != nil {
+		return nil, 0, err
+	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Distance == items[j].Distance {
 			return items[i].ProfileId > items[j].ProfileId
@@ -269,6 +273,41 @@ func (s *sSysPublish) findMySimilarProfileIdsByPHash(ctx context.Context, queryH
 		profileIds = append(profileIds, item.ProfileId)
 	}
 	return profileIds, totalCount, nil
+}
+
+func (s *sSysPublish) filterVisibleProfilePHashItems(ctx context.Context, items []publishProfilePHashDistance, tenantId int64, accountId int64) ([]publishProfilePHashDistance, error) {
+	if len(items) == 0 {
+		return items, nil
+	}
+	profileIds := make([]int64, 0, len(items))
+	for _, item := range items {
+		profileIds = append(profileIds, item.ProfileId)
+	}
+	base, err := s.profileBaseModel(ctx, tenantId, accountId)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := base.Fields("p.id").WhereIn("p.id", profileIds).All()
+	if err != nil {
+		return nil, gerror.Wrap(err, "过滤图片相似资料失败")
+	}
+	visibleIds := make(map[int64]struct{}, len(rows))
+	for _, row := range rows {
+		id := row["id"].Int64()
+		if id > 0 {
+			visibleIds[id] = struct{}{}
+		}
+	}
+	if len(visibleIds) == len(items) {
+		return items, nil
+	}
+	filtered := make([]publishProfilePHashDistance, 0, len(visibleIds))
+	for _, item := range items {
+		if _, ok := visibleIds[item.ProfileId]; ok {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered, nil
 }
 
 func uploadImagePHash(file *ghttp.UploadFile) (string, error) {

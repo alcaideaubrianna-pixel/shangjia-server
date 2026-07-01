@@ -489,12 +489,35 @@ func (c *cPublish) MyProfileList(ctx context.Context, req *publish.MyProfileList
 	return
 }
 
+func (c *cPublish) MyChannelList(ctx context.Context, req *publish.MyChannelListReq) (res *publish.MyChannelListRes, err error) {
+	list, totalCount, err := service.SysPublish().MyChannelList(ctx, &req.ChannelListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.ChannelModel{}
+	}
+	res = new(publish.MyChannelListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
 func (c *cPublish) MyProfileView(ctx context.Context, req *publish.MyProfileViewReq) (res *publish.MyProfileViewRes, err error) {
 	data, err := service.SysPublish().MyProfileView(ctx, &req.ProfileViewInp)
 	if err != nil {
 		return nil, err
 	}
 	res = &publish.MyProfileViewRes{ProfileViewModel: data}
+	return
+}
+
+func (c *cPublish) MyProfileOptions(ctx context.Context, req *publish.MyProfileOptionsReq) (res *publish.MyProfileOptionsRes, err error) {
+	data, err := service.SysPublish().MyProfileOptions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.MyProfileOptionsRes{ProfileOptionsModel: data}
 	return
 }
 

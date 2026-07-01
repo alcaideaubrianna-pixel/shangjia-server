@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_task` (
   `city` varchar(64) NOT NULL DEFAULT '' COMMENT '城市',
   `plain_text` text COMMENT '正文',
   `media_count` int(11) NOT NULL DEFAULT '0' COMMENT '媒体数量',
+  `channel_id_json` text COMMENT '推送频道ID JSON',
   `tg_push_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否推送TG',
   `tg_status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT 'TG状态',
   `status` varchar(32) NOT NULL DEFAULT 'draft' COMMENT '任务状态',
@@ -104,6 +105,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_task` (
 
 ALTER TABLE `hg_youban_publish_task` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `id`;
 ALTER TABLE `hg_youban_publish_task` ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
+ALTER TABLE `hg_youban_publish_task` ADD COLUMN `channel_id_json` text COMMENT '推送频道ID JSON' AFTER `media_count`;
 UPDATE `hg_youban_publish_task` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
 ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_tenant_client_request` (`tenant_id`,`client_request_id`);
 ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_tenant_status` (`tenant_id`,`status`,`id`);
@@ -345,6 +347,10 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_channel` (
   `channel_username` varchar(128) NOT NULL DEFAULT '' COMMENT '频道用户名',
   `target_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '目标Chat ID',
   `publish_direction` varchar(16) NOT NULL DEFAULT 'up' COMMENT '上架/下架频道',
+  `cycle_publish_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否循环上架',
+  `cycle_publish_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环上架天数',
+  `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环上架时间',
+  `is_default_selected` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否默认选中',
   `bot_id_json` text COMMENT '绑定Bot ID JSON',
   `remark` varchar(500) NOT NULL DEFAULT '' COMMENT '备注',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
@@ -359,8 +365,14 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_channel` (
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
   KEY `idx_ybp_channel_tenant_account` (`tenant_id`,`tg_account_id`,`status`,`id`),
+  KEY `idx_ybp_channel_tenant_direction` (`tenant_id`,`publish_direction`,`status`,`id`),
   KEY `idx_ybp_channel_chat` (`tenant_id`,`target_chat_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架频道配置';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否循环上架' AFTER `publish_direction`;
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环上架天数' AFTER `cycle_publish_enabled`;
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环上架时间' AFTER `cycle_publish_days`;
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `is_default_selected` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否默认选中' AFTER `cycle_publish_time`;
+ALTER TABLE `hg_youban_publish_channel` ADD KEY `idx_ybp_channel_tenant_direction` (`tenant_id`,`publish_direction`,`status`,`id`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_channel` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',

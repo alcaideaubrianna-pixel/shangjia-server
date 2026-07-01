@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_task" (
   "city" varchar(64) NOT NULL DEFAULT '',
   "plain_text" text,
   "media_count" integer NOT NULL DEFAULT 0,
+  "channel_id_json" text,
   "tg_push_enabled" smallint NOT NULL DEFAULT 1,
   "tg_status" varchar(32) NOT NULL DEFAULT 'pending',
   "status" varchar(32) NOT NULL DEFAULT 'draft',
@@ -96,6 +97,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_task" (
 );
 ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "tenant_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "merchant_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "channel_id_json" text;
 UPDATE "hg_youban_publish_task" SET "tenant_id" = "merchant_id" WHERE "tenant_id" = 0 AND "merchant_id" > 0;
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_task_tenant_client_request" ON "hg_youban_publish_task" ("tenant_id", "client_request_id") WHERE "client_request_id" <> '';
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_tenant_status" ON "hg_youban_publish_task" ("tenant_id", "status", "id");
@@ -326,6 +328,10 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel" (
   "channel_username" varchar(128) NOT NULL DEFAULT '',
   "target_chat_id" varchar(128) NOT NULL DEFAULT '',
   "publish_direction" varchar(16) NOT NULL DEFAULT 'up',
+  "cycle_publish_enabled" smallint NOT NULL DEFAULT 0,
+  "cycle_publish_days" integer NOT NULL DEFAULT 4,
+  "cycle_publish_time" varchar(16) NOT NULL DEFAULT '',
+  "is_default_selected" smallint NOT NULL DEFAULT 1,
   "bot_id_json" text,
   "remark" varchar(500) NOT NULL DEFAULT '',
   "status" smallint NOT NULL DEFAULT 1,
@@ -340,7 +346,12 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel" (
   "deleted_at" timestamp DEFAULT NULL
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_channel_tenant_account" ON "hg_youban_publish_channel" ("tenant_id", "tg_account_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_channel_tenant_direction" ON "hg_youban_publish_channel" ("tenant_id", "publish_direction", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_channel_chat" ON "hg_youban_publish_channel" ("tenant_id", "target_chat_id");
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_days" integer NOT NULL DEFAULT 4;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_time" varchar(16) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "is_default_selected" smallint NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_channel" (
   "id" BIGSERIAL PRIMARY KEY,
