@@ -18,6 +18,7 @@ import (
 	"github.com/gotd/td/tg"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/contexts"
 )
 
 func (s *sSysPublish) AdminTgAccountList(ctx context.Context, in *sysin.TgAccountListInp) (list []*sysin.TgAccountModel, totalCount int, err error) {
@@ -31,6 +32,28 @@ func (s *sSysPublish) AdminTgAccountList(ctx context.Context, in *sysin.TgAccoun
 	base := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
 		Where("tenant_id", current.TenantId).
 		WhereNull("deleted_at")
+	base = applyTgAccountFilters(base, in)
+	totalCount, err = base.Clone().Count()
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "获取TG账号总数失败")
+	}
+	if err = base.Page(in.Page, in.PerPage).OrderDesc("id").Scan(&list); err != nil {
+		return nil, 0, gerror.Wrap(err, "获取TG账号列表失败")
+	}
+	if list == nil {
+		list = []*sysin.TgAccountModel{}
+	}
+	return list, totalCount, nil
+}
+
+func (s *sSysPublish) ServerTgAccountList(ctx context.Context, in *sysin.TgAccountListInp) (list []*sysin.TgAccountModel, totalCount int, err error) {
+	if in == nil {
+		in = &sysin.TgAccountListInp{}
+	}
+	base := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).WhereNull("deleted_at")
+	if in.TenantId > 0 {
+		base = base.Where("tenant_id", in.TenantId)
+	}
 	base = applyTgAccountFilters(base, in)
 	totalCount, err = base.Clone().Count()
 	if err != nil {
@@ -207,6 +230,23 @@ func (s *sSysPublish) AdminTgAccountDelete(ctx context.Context, in *sysin.TgAcco
 	return nil
 }
 
+func (s *sSysPublish) ServerTgAccountDelete(ctx context.Context, in *sysin.TgAccountDeleteInp) (err error) {
+	if in == nil || len(in.Ids) == 0 {
+		return gerror.New("请选择要删除的TG账号")
+	}
+	in.Ids = uniqueIds(in.Ids)
+	if _, err = g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
+		WhereIn("id", in.Ids).
+		Data(g.Map{
+			"deleted_by": contexts.GetUserId(ctx),
+			"deleted_at": gtime.Now(),
+		}).
+		Update(); err != nil {
+		return gerror.Wrap(err, "删除TG账号失败")
+	}
+	return nil
+}
+
 func (s *sSysPublish) AdminTgAccountRefresh(ctx context.Context, in *sysin.TgAccountRefreshInp) (list []*sysin.TgAccountRefreshModel, err error) {
 	if in == nil || len(in.Ids) == 0 {
 		return nil, gerror.New("请选择要刷新的TG账号")
@@ -222,6 +262,32 @@ func (s *sSysPublish) AdminTgAccountRefresh(ctx context.Context, in *sysin.TgAcc
 	list = make([]*sysin.TgAccountRefreshModel, 0, len(in.Ids))
 	for _, id := range uniqueIds(in.Ids) {
 		status, message := s.refreshAdminTgAccountSession(ctx, id, current.TenantId, current.Id)
+		list = append(list, &sysin.TgAccountRefreshModel{
+			Id:           id,
+			Status:       status,
+			ErrorMessage: message,
+		})
+	}
+	return list, nil
+}
+
+func (s *sSysPublish) ServerTgAccountRefresh(ctx context.Context, in *sysin.TgAccountRefreshInp) (list []*sysin.TgAccountRefreshModel, err error) {
+	if in == nil || len(in.Ids) == 0 {
+		return nil, gerror.New("请选择要刷新的TG账号")
+	}
+	in.Ids = uniqueIds(in.Ids)
+	list = make([]*sysin.TgAccountRefreshModel, 0, len(in.Ids))
+	for _, id := range in.Ids {
+		item, itemErr := s.adminTgAccountById(ctx, id, 0)
+		if itemErr != nil {
+			list = append(list, &sysin.TgAccountRefreshModel{
+				Id:           id,
+				Status:       sysin.PublishTgAccountStatusFailed,
+				ErrorMessage: itemErr.Error(),
+			})
+			continue
+		}
+		status, message := s.refreshAdminTgAccountSession(ctx, id, item.TenantId, contexts.GetUserId(ctx))
 		list = append(list, &sysin.TgAccountRefreshModel{
 			Id:           id,
 			Status:       status,

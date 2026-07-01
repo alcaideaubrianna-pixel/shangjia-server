@@ -3,6 +3,8 @@ package sys
 import (
 	"context"
 
+	"github.com/gogf/gf/v2/errors/gerror"
+
 	"hotgo/addons/youban_publish/api/admin/publish"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
@@ -90,6 +92,197 @@ func (c *cPublishServer) AccountDelete(ctx context.Context, req *publish.Account
 		return
 	}
 	res = &publish.AccountDeleteRes{}
+	return
+}
+
+func (c *cPublishServer) TaskList(ctx context.Context, req *publish.TaskListReq) (res *publish.TaskListRes, err error) {
+	list, totalCount, err := service.SysPublish().ServerTaskList(ctx, &req.TaskListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.TaskModel{}
+	}
+	res = new(publish.TaskListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) TaskSave(ctx context.Context, req *publish.TaskSaveReq) (res *publish.TaskSaveRes, err error) {
+	id, err := service.SysPublish().ServerTaskSave(ctx, &req.TaskSaveInp)
+	if err != nil {
+		return
+	}
+	res = &publish.TaskSaveRes{Id: id}
+	return
+}
+
+func (c *cPublishServer) TaskSubmit(ctx context.Context, req *publish.TaskSubmitReq) (res *publish.TaskSubmitRes, err error) {
+	err = service.SysPublish().ServerTaskSubmit(ctx, &req.TaskSubmitInp)
+	if err != nil {
+		return
+	}
+	res = &publish.TaskSubmitRes{}
+	return
+}
+
+func (c *cPublishServer) TaskCancel(ctx context.Context, req *publish.TaskCancelReq) (res *publish.TaskCancelRes, err error) {
+	err = service.SysPublish().ServerTaskCancel(ctx, &req.TaskCancelInp)
+	if err != nil {
+		return
+	}
+	res = &publish.TaskCancelRes{}
+	return
+}
+
+func (c *cPublishServer) MediaList(ctx context.Context, req *publish.MediaListReq) (res *publish.MediaListRes, err error) {
+	list, err := service.SysPublish().ServerMediaList(ctx, &req.MediaListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.MediaModel{}
+	}
+	res = &publish.MediaListRes{List: list}
+	return
+}
+
+func (c *cPublishServer) MediaDelete(ctx context.Context, req *publish.MediaDeleteReq) (res *publish.MediaDeleteRes, err error) {
+	if err = service.SysPublish().ServerMediaDelete(ctx, &req.MediaDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.MediaDeleteRes{}
+	return
+}
+
+func (c *cPublishServer) BotList(ctx context.Context, req *publish.BotListReq) (res *publish.BotListRes, err error) {
+	list, totalCount, err := service.SysPublish().ServerBotList(ctx, &req.BotListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.BotModel{}
+	}
+	res = new(publish.BotListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) BotSave(ctx context.Context, req *publish.BotSaveReq) (res *publish.BotSaveRes, err error) {
+	if err = service.SysPublish().ServerBotSave(ctx, &req.BotSaveInp); err != nil {
+		return nil, err
+	}
+	res = &publish.BotSaveRes{}
+	return
+}
+
+func (c *cPublishServer) BotDelete(ctx context.Context, req *publish.BotDeleteReq) (res *publish.BotDeleteRes, err error) {
+	if err = service.SysPublish().ServerBotDelete(ctx, &req.BotDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.BotDeleteRes{}
+	return
+}
+
+func (c *cPublishServer) BotRefresh(ctx context.Context, req *publish.BotRefreshReq) (res *publish.BotRefreshRes, err error) {
+	list, err := service.SysPublish().ServerBotRefresh(ctx, &req.BotRefreshInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.BotRefreshModel{}
+	}
+	res = &publish.BotRefreshRes{List: list}
+	return
+}
+
+func (c *cPublishServer) TgAccountList(ctx context.Context, req *publish.TgAccountListReq) (res *publish.TgAccountListRes, err error) {
+	list, totalCount, err := service.SysPublish().ServerTgAccountList(ctx, &req.TgAccountListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.TgAccountModel{}
+	}
+	res = new(publish.TgAccountListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) TgAccountStartLogin(ctx context.Context, req *publish.TgAccountStartLoginReq) (res *publish.TgAccountStartLoginRes, err error) {
+	return nil, gerror.New("请在上架端管理员账号中绑定TG账号")
+}
+
+func (c *cPublishServer) TgAccountLoginStatus(ctx context.Context, req *publish.TgAccountLoginStatusReq) (res *publish.TgAccountLoginStatusRes, err error) {
+	return nil, gerror.New("请在上架端管理员账号中查看TG账号登录状态")
+}
+
+func (c *cPublishServer) TgAccountPassword(ctx context.Context, req *publish.TgAccountPasswordReq) (res *publish.TgAccountPasswordRes, err error) {
+	return nil, gerror.New("请在上架端管理员账号中提交TG账号二次验证")
+}
+
+func (c *cPublishServer) TgAccountDelete(ctx context.Context, req *publish.TgAccountDeleteReq) (res *publish.TgAccountDeleteRes, err error) {
+	if err = service.SysPublish().ServerTgAccountDelete(ctx, &req.TgAccountDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.TgAccountDeleteRes{}
+	return
+}
+
+func (c *cPublishServer) TgAccountRefresh(ctx context.Context, req *publish.TgAccountRefreshReq) (res *publish.TgAccountRefreshRes, err error) {
+	list, err := service.SysPublish().ServerTgAccountRefresh(ctx, &req.TgAccountRefreshInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.TgAccountRefreshModel{}
+	}
+	res = &publish.TgAccountRefreshRes{List: list}
+	return
+}
+
+func (c *cPublishServer) ChannelList(ctx context.Context, req *publish.ChannelListReq) (res *publish.ChannelListRes, err error) {
+	list, totalCount, err := service.SysPublish().ServerChannelList(ctx, &req.ChannelListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.ChannelModel{}
+	}
+	res = new(publish.ChannelListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) ChannelSave(ctx context.Context, req *publish.ChannelSaveReq) (res *publish.ChannelSaveRes, err error) {
+	return nil, gerror.New("请在上架端管理员账号中配置频道")
+}
+
+func (c *cPublishServer) ChannelDelete(ctx context.Context, req *publish.ChannelDeleteReq) (res *publish.ChannelDeleteRes, err error) {
+	if err = service.SysPublish().ServerChannelDelete(ctx, &req.ChannelDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.ChannelDeleteRes{}
+	return
+}
+
+func (c *cPublishServer) ChannelBatchBots(ctx context.Context, req *publish.ChannelBatchBotsReq) (res *publish.ChannelBatchBotsRes, err error) {
+	return nil, gerror.New("请在上架端管理员账号中批量编辑频道Bot")
+}
+
+func (c *cPublishServer) ChannelRefresh(ctx context.Context, req *publish.ChannelRefreshReq) (res *publish.ChannelRefreshRes, err error) {
+	list, err := service.SysPublish().ServerChannelRefresh(ctx, &req.ChannelRefreshInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.ChannelRefreshModel{}
+	}
+	res = &publish.ChannelRefreshRes{List: list}
 	return
 }
 

@@ -33,6 +33,20 @@ func (s *sSysPublish) AdminMediaDelete(ctx context.Context, in *sysin.MediaDelet
 	return s.deleteMediaByTenant(ctx, in.Id, account.TenantId, account.Id)
 }
 
+func (s *sSysPublish) ServerMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error) {
+	if in == nil {
+		return nil, gerror.New("任务ID不能为空")
+	}
+	return s.mediaListByTenant(ctx, in.TaskId, 0)
+}
+
+func (s *sSysPublish) ServerMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error) {
+	if in == nil {
+		return gerror.New("媒体ID不能为空")
+	}
+	return s.deleteMediaByTenant(ctx, in.Id, 0, contexts.GetUserId(ctx))
+}
+
 func (s *sSysPublish) MyMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile) (res *sysin.MediaModel, err error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {
@@ -161,10 +175,13 @@ func (s *sSysPublish) mediaListByTenant(ctx context.Context, taskId int64, tenan
 	if _, err = s.getTaskByTenant(ctx, taskId, tenantId); err != nil {
 		return nil, err
 	}
-	err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("task_id", taskId).
-		Where("tenant_id", tenantId).
-		WhereNull("deleted_at").
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	err = mod.
 		OrderAsc("sort_index").
 		OrderAsc("id").
 		Scan(&list)
@@ -216,25 +233,27 @@ func (s *sSysPublish) deleteMediaByTenant(ctx context.Context, id int64, tenantI
 	if id <= 0 {
 		return gerror.New("媒体ID不能为空")
 	}
-	row, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("id", id).
-		Where("tenant_id", tenantId).
-		WhereNull("deleted_at").
-		One()
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	row, err := mod.One()
 	if err != nil {
 		return gerror.Wrap(err, "读取任务媒体失败")
 	}
 	if row.IsEmpty() {
 		return gerror.New("任务媒体不存在")
 	}
-	if _, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("id", id).
-		Where("tenant_id", tenantId).
-		Data(g.Map{
-			"deleted_by": operatorId,
-			"deleted_at": gtime.Now(),
-		}).
-		Update(); err != nil {
+	updateMod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", id)
+	if tenantId > 0 {
+		updateMod = updateMod.Where("tenant_id", tenantId)
+	}
+	if _, err = updateMod.Data(g.Map{
+		"deleted_by": operatorId,
+		"deleted_at": gtime.Now(),
+	}).Update(); err != nil {
 		return gerror.Wrap(err, "删除任务媒体失败")
 	}
 	if err = s.refreshTaskMediaCount(ctx, row["task_id"].Int64()); err != nil {

@@ -26,6 +26,34 @@ func (s *sSysPublish) AdminTaskList(ctx context.Context, in *sysin.TaskListInp) 
 	return s.taskList(ctx, in)
 }
 
+func (s *sSysPublish) ServerTaskList(ctx context.Context, in *sysin.TaskListInp) (list []*sysin.TaskModel, totalCount int, err error) {
+	if in == nil {
+		in = &sysin.TaskListInp{}
+	}
+	return s.taskList(ctx, in)
+}
+
+func (s *sSysPublish) ServerTaskSave(ctx context.Context, in *sysin.TaskSaveInp) (id int64, err error) {
+	if in == nil {
+		return 0, gerror.New("任务信息不能为空")
+	}
+	return s.saveTask(ctx, in)
+}
+
+func (s *sSysPublish) ServerTaskSubmit(ctx context.Context, in *sysin.TaskSubmitInp) (err error) {
+	if in == nil || in.Id <= 0 {
+		return gerror.New("任务ID不能为空")
+	}
+	return s.submitTaskByTenant(ctx, in.Id, 0, contexts.GetUserId(ctx))
+}
+
+func (s *sSysPublish) ServerTaskCancel(ctx context.Context, in *sysin.TaskCancelInp) (err error) {
+	if in == nil || in.Id <= 0 {
+		return gerror.New("任务ID不能为空")
+	}
+	return s.cancelTaskByTenant(ctx, in.Id, 0, contexts.GetUserId(ctx))
+}
+
 func (s *sSysPublish) AdminTaskSave(ctx context.Context, in *sysin.TaskSaveInp) (id int64, err error) {
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
@@ -409,16 +437,16 @@ func (s *sSysPublish) submitTask(ctx context.Context, id int64, accountId int64)
 		return err
 	}
 	if _, err = s.publishTaskToProfile(ctx, task); err != nil {
-			_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-				Where("id", id).
-				Where("tenant_id", task["tenant_id"].Int64()).
-				WhereNull("deleted_at").
-				Data(g.Map{
-					"status":        sysin.PublishTaskStatusFailed,
-					"error_message": err.Error(),
-					"updated_by":    contexts.GetUserId(ctx),
-					"updated_at":    gtime.Now(),
-				}).Update()
+		_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+			Where("id", id).
+			Where("tenant_id", task["tenant_id"].Int64()).
+			WhereNull("deleted_at").
+			Data(g.Map{
+				"status":        sysin.PublishTaskStatusFailed,
+				"error_message": err.Error(),
+				"updated_by":    contexts.GetUserId(ctx),
+				"updated_at":    gtime.Now(),
+			}).Update()
 		return err
 	}
 	return s.ensureTgJob(ctx, id)
@@ -432,11 +460,14 @@ func (s *sSysPublish) submitTaskByTenant(ctx context.Context, id int64, tenantId
 	if task["status"].String() == sysin.PublishTaskStatusCanceled {
 		return gerror.New("已取消的任务不能提交")
 	}
-		_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-			Where("id", id).
-			Where("tenant_id", tenantId).
-			WhereNull("deleted_at").
-			Data(g.Map{
+	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Where("id", id).
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	_, err = mod.
+		Data(g.Map{
 			"status":        sysin.PublishTaskStatusPending,
 			"tg_status":     "pending",
 			"error_message": "",
@@ -453,17 +484,18 @@ func (s *sSysPublish) submitTaskByTenant(ctx context.Context, id int64, tenantId
 		return err
 	}
 	if _, err = s.publishTaskToProfile(ctx, task); err != nil {
-			_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-				Where("id", id).
-				Where("tenant_id", tenantId).
-				WhereNull("deleted_at").
-				Data(g.Map{
-				"status":        sysin.PublishTaskStatusFailed,
-				"error_message": err.Error(),
-				"updated_by":    operatorId,
-				"updated_at":    gtime.Now(),
-			}).
-			Update()
+		failMod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+			Where("id", id).
+			WhereNull("deleted_at")
+		if tenantId > 0 {
+			failMod = failMod.Where("tenant_id", tenantId)
+		}
+		_, _ = failMod.Data(g.Map{
+			"status":        sysin.PublishTaskStatusFailed,
+			"error_message": err.Error(),
+			"updated_by":    operatorId,
+			"updated_at":    gtime.Now(),
+		}).Update()
 		return err
 	}
 	return s.ensureTgJob(ctx, id)
@@ -493,16 +525,17 @@ func (s *sSysPublish) cancelTaskByTenant(ctx context.Context, id int64, tenantId
 	if _, err = s.getTaskByTenant(ctx, id, tenantId); err != nil {
 		return err
 	}
-	_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
 		Where("id", id).
-		Where("tenant_id", tenantId).
-		WhereNull("deleted_at").
-		Data(g.Map{
-			"status":     sysin.PublishTaskStatusCanceled,
-			"updated_by": operatorId,
-			"updated_at": gtime.Now(),
-		}).
-		Update()
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	_, err = mod.Data(g.Map{
+		"status":     sysin.PublishTaskStatusCanceled,
+		"updated_by": operatorId,
+		"updated_at": gtime.Now(),
+	}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "取消上架任务失败")
 	}
@@ -562,14 +595,13 @@ func (s *sSysPublish) getTaskByTenant(ctx context.Context, id int64, tenantId in
 	if id <= 0 {
 		return nil, gerror.New("任务ID不能为空")
 	}
-	if tenantId <= 0 {
-		return nil, gerror.New("租户ID不能为空")
-	}
-	row, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
 		Where("id", id).
-		Where("tenant_id", tenantId).
-		WhereNull("deleted_at").
-		One()
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	row, err := mod.One()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取上架任务失败")
 	}

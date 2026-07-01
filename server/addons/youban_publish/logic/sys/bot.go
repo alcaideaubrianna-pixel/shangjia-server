@@ -17,6 +17,7 @@ import (
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
+	"hotgo/internal/library/contexts"
 )
 
 func (s *sSysPublish) AdminBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error) {
@@ -46,6 +47,45 @@ func (s *sSysPublish) AdminBotList(ctx context.Context, in *sysin.BotListInp) (l
 	return list, totalCount, nil
 }
 
+func (s *sSysPublish) ServerBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error) {
+	if in == nil {
+		in = &sysin.BotListInp{}
+	}
+	return s.botList(ctx, in)
+}
+
+func (s *sSysPublish) ServerBotSave(ctx context.Context, in *sysin.BotSaveInp) (err error) {
+	if in == nil {
+		return gerror.New("Bot配置不能为空")
+	}
+	if in.TenantId <= 0 {
+		return gerror.New("请选择账号归属")
+	}
+	return s.saveBot(ctx, in, in.TenantId, contexts.GetUserId(ctx))
+}
+
+func (s *sSysPublish) ServerBotDelete(ctx context.Context, in *sysin.BotDeleteInp) (err error) {
+	if in == nil || len(in.Ids) == 0 {
+		return gerror.New("请选择要删除的数据")
+	}
+	in.Ids = uniqueIds(in.Ids)
+	if _, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).WhereIn("id", in.Ids).Data(g.Map{
+		"deleted_by": contexts.GetUserId(ctx),
+		"deleted_at": gtime.Now(),
+	}).Update(); err != nil {
+		return gerror.Wrap(err, "删除Bot配置失败")
+	}
+	s.clearTelegramBotCache()
+	return nil
+}
+
+func (s *sSysPublish) ServerBotRefresh(ctx context.Context, in *sysin.BotRefreshInp) (list []*sysin.BotRefreshModel, err error) {
+	if in == nil || len(in.Ids) == 0 {
+		return nil, gerror.New("请选择要刷新的Bot")
+	}
+	return s.refreshBots(ctx, uniqueIds(in.Ids), 0, contexts.GetUserId(ctx))
+}
+
 func (s *sSysPublish) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) (err error) {
 	if in == nil {
 		return gerror.New("Bot配置不能为空")
@@ -54,6 +94,31 @@ func (s *sSysPublish) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) (e
 	if err != nil {
 		return err
 	}
+	return s.saveBot(ctx, in, current.TenantId, current.Id)
+}
+
+func (s *sSysPublish) botList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error) {
+	mod := g.DB().Model(publishBotTable).Safe().Ctx(ctx).WhereNull("deleted_at")
+	if in.TenantId > 0 {
+		mod = mod.Where("tenant_id", in.TenantId)
+	}
+	if in.Status > 0 {
+		mod = mod.Where("status", in.Status)
+	}
+	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		mod = mod.Where("(bot_name LIKE ? OR bot_username LIKE ? OR remark LIKE ?)", like, like, like)
+	}
+	if err = mod.Page(in.Page, in.PerPage).OrderDesc("id").ScanAndCount(&list, &totalCount, false); err != nil {
+		return nil, 0, gerror.Wrap(err, "获取Bot列表失败")
+	}
+	if list == nil {
+		list = []*sysin.BotModel{}
+	}
+	return list, totalCount, nil
+}
+
+func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantId int64, operatorId int64) (err error) {
 	botToken := strings.TrimSpace(in.BotToken)
 	if botToken == "" {
 		return gerror.New("Bot Token不能为空")
@@ -74,22 +139,31 @@ func (s *sSysPublish) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) (e
 		botName = telegramBotDisplayName(tgUser)
 	}
 	data := g.Map{
-		"tenant_id":    current.TenantId,
+		"tenant_id":    tenantId,
 		"bot_name":     botName,
 		"bot_username": strings.TrimPrefix(strings.TrimSpace(tgUser.Username), "@"),
 		"bot_token":    botToken,
 		"remark":       strings.TrimSpace(in.Remark),
 		"status":       status,
-		"updated_by":   current.Id,
+		"updated_by":   operatorId,
 		"updated_at":   gtime.Now(),
 	}
 	if in.Id > 0 {
-		if err = s.ensureBotsBelongTenant(ctx, []int64{in.Id}, current.TenantId); err != nil {
-			return err
+		if tenantId > 0 {
+			if err = s.ensureBotsBelongTenant(ctx, []int64{in.Id}, tenantId); err != nil {
+				return err
+			}
 		}
-		_, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).Where("id", in.Id).Where("tenant_id", current.TenantId).WhereNull("deleted_at").Data(data).Update()
+		mod := g.DB().Model(publishBotTable).Safe().Ctx(ctx).Where("id", in.Id).WhereNull("deleted_at")
+		if tenantId > 0 {
+			mod = mod.Where("tenant_id", tenantId)
+		}
+		_, err = mod.Data(data).Update()
 	} else {
-		data["created_by"] = current.Id
+		if tenantId <= 0 {
+			return gerror.New("请选择账号归属")
+		}
+		data["created_by"] = operatorId
 		data["created_at"] = gtime.Now()
 		_, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).Data(data).Insert()
 	}
@@ -131,15 +205,21 @@ func (s *sSysPublish) AdminBotRefresh(ctx context.Context, in *sysin.BotRefreshI
 	if err != nil {
 		return nil, err
 	}
+	return s.refreshBots(ctx, in.Ids, current.TenantId, current.Id)
+}
+
+func (s *sSysPublish) refreshBots(ctx context.Context, ids []int64, tenantId int64, operatorId int64) (list []*sysin.BotRefreshModel, err error) {
 	var bots []*sysin.BotModel
-	if err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).
-		WhereIn("id", in.Ids).
-		Where("tenant_id", current.TenantId).
-		WhereNull("deleted_at").
-		Scan(&bots); err != nil {
+	mod := g.DB().Model(publishBotTable).Safe().Ctx(ctx).
+		WhereIn("id", ids).
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	if err = mod.Scan(&bots); err != nil {
 		return nil, gerror.Wrap(err, "读取Bot配置失败")
 	}
-	if len(bots) != len(in.Ids) {
+	if len(bots) != len(ids) {
 		return nil, gerror.New("存在无权操作的Bot")
 	}
 	now := gtime.Now()
@@ -151,11 +231,10 @@ func (s *sSysPublish) AdminBotRefresh(ctx context.Context, in *sysin.BotRefreshI
 			result.ErrorMessage = refreshErr.Error()
 			_, _ = g.DB().Model(publishBotTable).Safe().Ctx(ctx).
 				Where("id", item.Id).
-				Where("tenant_id", current.TenantId).
 				WhereNull("deleted_at").
 				Data(g.Map{
 					"status":     2,
-					"updated_by": current.Id,
+					"updated_by": operatorId,
 					"updated_at": now,
 				}).
 				Update()
@@ -168,13 +247,12 @@ func (s *sSysPublish) AdminBotRefresh(ctx context.Context, in *sysin.BotRefreshI
 		result.Status = 1
 		_, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).
 			Where("id", item.Id).
-			Where("tenant_id", current.TenantId).
 			WhereNull("deleted_at").
 			Data(g.Map{
 				"bot_name":     telegramBotDisplayName(tgUser),
 				"bot_username": username,
 				"status":       1,
-				"updated_by":   current.Id,
+				"updated_by":   operatorId,
 				"updated_at":   now,
 			}).
 			Update()

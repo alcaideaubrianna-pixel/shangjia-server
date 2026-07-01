@@ -19,7 +19,6 @@ var (
 
 func Register(ctx context.Context, group *ghttp.RouterGroup) {
 	adminPrefix := addons.RouterPrefix(ctx, consts.AppAdmin, global.GetSkeleton().Name)
-	apiPrefix := addons.RouterPrefix(ctx, consts.AppApi, global.GetSkeleton().Name)
 	group.Group(adminPrefix, func(group *ghttp.RouterGroup) {
 		if len(NoLoginRouter) > 0 {
 			group.Bind(NoLoginRouter...)
@@ -29,12 +28,6 @@ func Register(ctx context.Context, group *ghttp.RouterGroup) {
 		group.Middleware(service.Middleware().AdminAuth)
 		if len(AdminRequiredRouter) > 0 {
 			group.Bind(AdminRequiredRouter...)
-		}
-	})
-	group.Group(apiPrefix, func(group *ghttp.RouterGroup) {
-		group.Middleware(publishAdminAuth)
-		if len(LoginRequiredRouter) > 0 {
-			group.Bind(LoginRequiredRouter...)
 		}
 	})
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/contexts"
 )
 
 func (s *sSysPublish) AdminChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error) {
@@ -22,6 +23,29 @@ func (s *sSysPublish) AdminChannelList(ctx context.Context, in *sysin.ChannelLis
 		in = &sysin.ChannelListInp{}
 	}
 	in.TenantId = account.TenantId
+	base := s.channelBaseModel(ctx)
+	base = applyChannelFilters(base, in)
+	totalCount, err = base.Clone().Count()
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "获取频道总数失败")
+	}
+	if err = base.Fields("c.*,ta.display_name AS tg_account_name").
+		Page(in.Page, in.PerPage).
+		OrderDesc("c.id").
+		Scan(&list); err != nil {
+		return nil, 0, gerror.Wrap(err, "获取频道列表失败")
+	}
+	if list == nil {
+		list = []*sysin.ChannelModel{}
+	}
+	applyChannelBotIds(list)
+	return list, totalCount, nil
+}
+
+func (s *sSysPublish) ServerChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error) {
+	if in == nil {
+		in = &sysin.ChannelListInp{}
+	}
 	base := s.channelBaseModel(ctx)
 	base = applyChannelFilters(base, in)
 	totalCount, err = base.Clone().Count()
@@ -126,6 +150,23 @@ func (s *sSysPublish) AdminChannelDelete(ctx context.Context, in *sysin.ChannelD
 	return nil
 }
 
+func (s *sSysPublish) ServerChannelDelete(ctx context.Context, in *sysin.ChannelDeleteInp) (err error) {
+	if in == nil || len(in.Ids) == 0 {
+		return gerror.New("请选择要删除的频道")
+	}
+	in.Ids = uniqueIds(in.Ids)
+	if _, err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		WhereIn("id", in.Ids).
+		Data(g.Map{
+			"deleted_by": contexts.GetUserId(ctx),
+			"deleted_at": gtime.Now(),
+		}).
+		Update(); err != nil {
+		return gerror.Wrap(err, "删除频道配置失败")
+	}
+	return nil
+}
+
 func (s *sSysPublish) AdminChannelBatchBots(ctx context.Context, in *sysin.ChannelBatchBotsInp) (err error) {
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
@@ -198,6 +239,48 @@ func (s *sSysPublish) AdminChannelRefresh(ctx context.Context, in *sysin.Channel
 				"last_refresh_message": message,
 				"last_refresh_at":      now,
 				"updated_by":           account.Id,
+				"updated_at":           now,
+			}).
+			Update(); err != nil {
+			return nil, gerror.Wrap(err, "刷新频道状态失败")
+		}
+		list = append(list, &sysin.ChannelRefreshModel{
+			Id:                 item.Id,
+			LastRefreshStatus:  status,
+			LastRefreshMessage: message,
+		})
+	}
+	return list, nil
+}
+
+func (s *sSysPublish) ServerChannelRefresh(ctx context.Context, in *sysin.ChannelRefreshInp) (list []*sysin.ChannelRefreshModel, err error) {
+	if in == nil || len(in.Ids) == 0 {
+		return nil, gerror.New("请选择要刷新的频道")
+	}
+	in.Ids = uniqueIds(in.Ids)
+	var channels []*sysin.ChannelModel
+	if err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		WhereIn("id", in.Ids).
+		WhereNull("deleted_at").
+		Scan(&channels); err != nil {
+		return nil, gerror.Wrap(err, "读取频道配置失败")
+	}
+	now := gtime.Now()
+	list = make([]*sysin.ChannelRefreshModel, 0, len(channels))
+	for _, item := range channels {
+		status := "success"
+		message := "mock刷新成功，真实TG频道校验待接入"
+		if strings.TrimSpace(item.TargetChatId) == "" && strings.TrimSpace(item.ChannelUsername) == "" {
+			status = "failed"
+			message = "频道缺少Chat ID或用户名"
+		}
+		if _, err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+			Where("id", item.Id).
+			Data(g.Map{
+				"last_refresh_status":  status,
+				"last_refresh_message": message,
+				"last_refresh_at":      now,
+				"updated_by":           contexts.GetUserId(ctx),
 				"updated_at":           now,
 			}).
 			Update(); err != nil {
