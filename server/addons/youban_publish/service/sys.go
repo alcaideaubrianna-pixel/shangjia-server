@@ -98,6 +98,7 @@ type ISysPublish interface {
 	MyMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile) (res *sysin.MediaModel, err error)
 	MyMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error)
 	MyMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error)
+	MyMediaSort(ctx context.Context, in *sysin.MediaSortInp) (err error)
 	TelegramWebhookRaw(ctx context.Context, botId int64, body []byte) (err error)
 	TelegramLoginStart(ctx context.Context, in *sysin.TelegramLoginStartInp) (res *sysin.TelegramLoginModel, err error)
 	TelegramLoginStatus(ctx context.Context, in *sysin.TelegramLoginStatusInp) (res *sysin.TelegramLoginModel, err error)

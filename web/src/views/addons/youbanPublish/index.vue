@@ -419,7 +419,10 @@
     >
       <n-form :model="tagForm" label-placement="left" label-width="90">
         <n-form-item label="标签名称"
-          ><n-input v-model:value="tagForm.name" clearable placeholder="请输入标签名称"
+          ><n-input
+            v-model:value="tagForm.name"
+            clearable
+            placeholder="请输入标签名称，多个标签用逗号分隔"
         /></n-form-item>
         <n-form-item label="审核状态"
           ><n-select v-model:value="tagForm.reviewStatus" :options="reviewStatusOptions"

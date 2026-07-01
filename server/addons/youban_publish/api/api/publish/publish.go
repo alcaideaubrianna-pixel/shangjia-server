@@ -382,6 +382,13 @@ type DeleteMediaReq struct {
 
 type DeleteMediaRes struct{}
 
+type SortMediaReq struct {
+	g.Meta `path:"/publish/media/sort" method:"post" tags:"上架插件" summary:"保存任务媒体排序"`
+	sysin.MediaSortInp
+}
+
+type SortMediaRes struct{}
+
 type MyProfileListReq struct {
 	g.Meta `path:"/publish/profile/list" method:"get" tags:"上架插件" summary:"我的资料列表"`
 	sysin.ProfileListInp

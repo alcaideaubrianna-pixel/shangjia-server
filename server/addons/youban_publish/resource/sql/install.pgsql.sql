@@ -110,8 +110,10 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media" (
   "profile_id" bigint NOT NULL DEFAULT 0,
   "attachment_id" bigint NOT NULL DEFAULT 0,
   "media_type" varchar(16) NOT NULL DEFAULT 'image',
+  "purpose" varchar(16) NOT NULL DEFAULT 'display',
   "name" varchar(255) NOT NULL DEFAULT '',
   "file_url" varchar(1024) NOT NULL DEFAULT '',
+  "poster_url" varchar(1024) NOT NULL DEFAULT '',
   "storage_path" varchar(1024) NOT NULL DEFAULT '',
   "mime_type" varchar(128) NOT NULL DEFAULT '',
   "md5" varchar(64) NOT NULL DEFAULT '',
@@ -129,11 +131,14 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media" (
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "tenant_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "merchant_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "perceptual_hash" varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "purpose" varchar(16) NOT NULL DEFAULT 'display';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "poster_url" varchar(1024) NOT NULL DEFAULT '';
 UPDATE "hg_youban_publish_media" SET "tenant_id" = "merchant_id" WHERE "tenant_id" = 0 AND "merchant_id" > 0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_task_attachment" ON "hg_youban_publish_media" ("task_id", "attachment_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_task_sort" ON "hg_youban_publish_media" ("task_id", "sort_index", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_profile" ON "hg_youban_publish_media" ("profile_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash" ON "hg_youban_publish_media" ("perceptual_hash");
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_purpose" ON "hg_youban_publish_media" ("task_id", "purpose", "sort_index", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_face" (
   "id" BIGSERIAL PRIMARY KEY,

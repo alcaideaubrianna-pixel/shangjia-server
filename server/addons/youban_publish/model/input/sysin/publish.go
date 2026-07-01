@@ -349,6 +349,7 @@ type TaskCancelInp struct {
 type MediaUploadInp struct {
 	TaskId    int64  `json:"taskId" dc:"任务ID"`
 	MediaType string `json:"mediaType" dc:"媒体类型：image/video"`
+	Purpose   string `json:"purpose" dc:"用途：display/verify"`
 	SortIndex int    `json:"sortIndex" dc:"排序"`
 }
 
@@ -363,6 +364,13 @@ func (in *MediaUploadInp) Filter(ctx context.Context) error {
 	if in.MediaType != "image" && in.MediaType != "video" {
 		return gerror.New("媒体类型不合法")
 	}
+	in.Purpose = strings.TrimSpace(in.Purpose)
+	if in.Purpose == "" {
+		in.Purpose = "display"
+	}
+	if in.Purpose != "display" && in.Purpose != "verify" {
+		return gerror.New("媒体用途不合法")
+	}
 	return nil
 }
 
@@ -374,6 +382,39 @@ type MediaDeleteInp struct {
 	Id int64 `json:"id" v:"required|min:1#媒体ID不能为空|媒体ID不能为空" dc:"媒体ID"`
 }
 
+type MediaSortItem struct {
+	Id        int64  `json:"id" dc:"媒体ID"`
+	Purpose   string `json:"purpose" dc:"用途：display/verify"`
+	SortIndex int    `json:"sortIndex" dc:"排序"`
+}
+
+type MediaSortInp struct {
+	TaskId int64            `json:"taskId" v:"required|min:1#任务ID不能为空|任务ID不能为空" dc:"任务ID"`
+	Items  []*MediaSortItem `json:"items" dc:"排序列表"`
+}
+
+func (in *MediaSortInp) Filter(ctx context.Context) error {
+	if in.TaskId <= 0 {
+		return gerror.New("任务ID不能为空")
+	}
+	for _, item := range in.Items {
+		if item == nil || item.Id <= 0 {
+			return gerror.New("媒体ID不能为空")
+		}
+		item.Purpose = strings.TrimSpace(item.Purpose)
+		if item.Purpose == "" {
+			item.Purpose = "display"
+		}
+		if item.Purpose != "display" && item.Purpose != "verify" {
+			return gerror.New("媒体用途不合法")
+		}
+		if item.SortIndex <= 0 {
+			return gerror.New("媒体排序不能为空")
+		}
+	}
+	return nil
+}
+
 type MediaModel struct {
 	Id             int64       `json:"id" dc:"ID"`
 	TenantId       int64       `json:"tenantId" dc:"租户ID"`
@@ -382,8 +423,10 @@ type MediaModel struct {
 	ProfileId      int64       `json:"profileId" dc:"资料ID"`
 	AttachmentId   int64       `json:"attachmentId" dc:"附件ID"`
 	MediaType      string      `json:"mediaType" dc:"媒体类型"`
+	Purpose        string      `json:"purpose" dc:"用途：display/verify"`
 	Name           string      `json:"name" dc:"文件名"`
 	FileUrl        string      `json:"fileUrl" dc:"访问地址"`
+	PosterUrl      string      `json:"posterUrl" dc:"视频封面"`
 	StoragePath    string      `json:"storagePath" dc:"存储路径"`
 	MimeType       string      `json:"mimeType" dc:"MIME"`
 	Md5            string      `json:"md5" dc:"MD5"`

@@ -117,8 +117,10 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
   `attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'HotGo附件ID',
   `media_type` varchar(16) NOT NULL DEFAULT 'image' COMMENT '媒体类型',
+  `purpose` varchar(16) NOT NULL DEFAULT 'display' COMMENT '用途：display展示 verify验证',
   `name` varchar(255) NOT NULL DEFAULT '' COMMENT '文件名',
   `file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '访问地址',
+  `poster_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '视频封面',
   `storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '存储路径',
   `mime_type` varchar(128) NOT NULL DEFAULT '' COMMENT 'MIME',
   `md5` varchar(64) NOT NULL DEFAULT '' COMMENT 'MD5',
@@ -136,12 +138,15 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   KEY `idx_ybp_media_task_attachment` (`task_id`,`attachment_id`),
   KEY `idx_ybp_media_task_sort` (`task_id`,`sort_index`,`id`),
   KEY `idx_ybp_media_profile` (`profile_id`,`id`),
-  KEY `idx_ybp_media_phash` (`perceptual_hash`)
+  KEY `idx_ybp_media_phash` (`perceptual_hash`),
+  KEY `idx_ybp_media_purpose` (`task_id`,`purpose`,`sort_index`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架媒体';
 
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `id`;
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `perceptual_hash` varchar(64) NOT NULL DEFAULT '' COMMENT '图片感知哈希' AFTER `md5`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN `purpose` varchar(16) NOT NULL DEFAULT 'display' COMMENT '用途：display展示 verify验证' AFTER `media_type`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN `poster_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '视频封面' AFTER `file_url`;
 UPDATE `hg_youban_publish_media` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_media_face` (

@@ -109,6 +109,52 @@ func (s *sSysPublish) MyMediaDelete(ctx context.Context, in *sysin.MediaDeleteIn
 	return s.deleteMedia(ctx, in.Id, account.Id)
 }
 
+func (s *sSysPublish) MyMediaSort(ctx context.Context, in *sysin.MediaSortInp) (err error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return err
+	}
+	if in == nil {
+		return gerror.New("媒体排序不能为空")
+	}
+	if err = in.Filter(ctx); err != nil {
+		return err
+	}
+	task, err := s.getTask(ctx, in.TaskId, account.Id)
+	if err != nil {
+		return err
+	}
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		for _, item := range in.Items {
+			result, updateErr := tx.Model(publishMediaTable).Ctx(ctx).
+				Where("id", item.Id).
+				Where("task_id", in.TaskId).
+				Where("account_id", account.Id).
+				WhereNull("deleted_at").
+				Data(g.Map{
+					"purpose":    item.Purpose,
+					"sort_index": item.SortIndex,
+					"updated_by": contexts.GetUserId(ctx),
+					"updated_at": gtime.Now(),
+				}).
+				Update()
+			if updateErr != nil {
+				return gerror.Wrap(updateErr, "更新媒体排序失败")
+			}
+			affected, _ := result.RowsAffected()
+			if affected == 0 {
+				return gerror.New("媒体不存在或无权操作")
+			}
+		}
+		if task["profile_id"].Int64() > 0 {
+			if syncErr := s.syncTaskMediaToProfile(ctx, tx, in.TaskId, task["profile_id"].Int64()); syncErr != nil {
+				return syncErr
+			}
+		}
+		return nil
+	})
+}
+
 func (s *sSysPublish) MyProfileImageSearch(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile) (list []*sysin.NoteModel, totalCount int, err error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {
@@ -279,8 +325,10 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 		"profile_id":      task["profile_id"].Int64(),
 		"attachment_id":   attachment.Id,
 		"media_type":      in.MediaType,
+		"purpose":         in.Purpose,
 		"name":            attachment.Name,
 		"file_url":        attachment.FileUrl,
+		"poster_url":      "",
 		"storage_path":    attachment.Path,
 		"mime_type":       attachment.MimeType,
 		"md5":             attachment.Md5,

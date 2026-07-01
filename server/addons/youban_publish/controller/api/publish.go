@@ -467,6 +467,14 @@ func (c *cPublish) DeleteMedia(ctx context.Context, req *publish.DeleteMediaReq)
 	return
 }
 
+func (c *cPublish) SortMedia(ctx context.Context, req *publish.SortMediaReq) (res *publish.SortMediaRes, err error) {
+	if err = service.SysPublish().MyMediaSort(ctx, &req.MediaSortInp); err != nil {
+		return nil, err
+	}
+	res = &publish.SortMediaRes{}
+	return
+}
+
 func (c *cPublish) MyProfileList(ctx context.Context, req *publish.MyProfileListReq) (res *publish.MyProfileListRes, err error) {
 	list, totalCount, err := service.SysPublish().MyProfileList(ctx, &req.ProfileListInp)
 	if err != nil {

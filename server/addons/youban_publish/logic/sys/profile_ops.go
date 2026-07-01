@@ -451,7 +451,22 @@ func (s *sSysPublish) saveTag(ctx context.Context, in *sysin.TagSaveInp, operato
 		in.Status = 1
 	}
 	now := gtime.Now()
-	existing, err := g.DB().Model(publishTagTable).Safe().Ctx(ctx).Where("name", in.Name).WhereNull("deleted_at").Fields("id,created_by,review_status").One()
+	names := splitTagNames(in.Name)
+	if len(names) == 0 {
+		return gerror.New("标签名称不能为空")
+	}
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		for _, name := range names {
+			if err := s.saveOneTag(ctx, tx, name, in.ReviewStatus, in.Status, operatorId, isAdmin, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *sSysPublish) saveOneTag(ctx context.Context, tx gdb.TX, name string, reviewStatus string, status int, operatorId int64, isAdmin bool, now *gtime.Time) error {
+	existing, err := tx.Model(publishTagTable).Safe().Ctx(ctx).Where("name", name).WhereNull("deleted_at").Fields("id,created_by,review_status").One()
 	if err != nil {
 		return gerror.Wrap(err, "检查标签失败")
 	}
@@ -459,23 +474,43 @@ func (s *sSysPublish) saveTag(ctx context.Context, in *sysin.TagSaveInp, operato
 		return gerror.New("标签已存在，请等待审核或选择已有标签")
 	}
 	data := g.Map{
-		"name":          in.Name,
-		"review_status": in.ReviewStatus,
-		"status":        in.Status,
+		"name":          name,
+		"review_status": reviewStatus,
+		"status":        status,
 		"updated_by":    operatorId,
 		"updated_at":    now,
 	}
 	if !existing.IsEmpty() {
-		_, err = g.DB().Model(publishTagTable).Safe().Ctx(ctx).Where("id", existing["id"].Int64()).Data(data).Update()
+		_, err = tx.Model(publishTagTable).Safe().Ctx(ctx).Where("id", existing["id"].Int64()).Data(data).Update()
 	} else {
 		data["created_by"] = operatorId
 		data["created_at"] = now
-		_, err = g.DB().Model(publishTagTable).Safe().Ctx(ctx).Data(data).Insert()
+		_, err = tx.Model(publishTagTable).Safe().Ctx(ctx).Data(data).Insert()
 	}
 	if err != nil {
 		return gerror.Wrap(err, "保存标签失败")
 	}
 	return nil
+}
+
+func splitTagNames(name string) []string {
+	parts := strings.FieldsFunc(name, func(r rune) bool {
+		return r == ',' || r == '，'
+	})
+	list := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		list = append(list, item)
+	}
+	return list
 }
 
 func (s *sSysPublish) deleteTags(ctx context.Context, in *sysin.TagDeleteInp, operatorId int64, isAdmin bool) (err error) {
