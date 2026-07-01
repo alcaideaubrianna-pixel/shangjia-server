@@ -21,13 +21,17 @@ func authMiddleware(appName string) func(*ghttp.Request) {
 }
 
 func withAuth(group *ghttp.RouterGroup, appName string, bind func(group *ghttp.RouterGroup)) {
-	group.Middleware(authMiddleware(appName))
-	bind(group)
+	group.Group("/", func(group *ghttp.RouterGroup) {
+		group.Middleware(authMiddleware(appName))
+		bind(group)
+	})
 }
 
 func withPublishAdminAuth(group *ghttp.RouterGroup, bind func(group *ghttp.RouterGroup)) {
-	group.Middleware(publishAdminAuth)
-	bind(group)
+	group.Group("/", func(group *ghttp.RouterGroup) {
+		group.Middleware(publishAdminAuth)
+		bind(group)
+	})
 }
 
 func publishAdminAuth(r *ghttp.Request) {
