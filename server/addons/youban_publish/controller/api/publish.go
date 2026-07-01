@@ -231,6 +231,38 @@ func (c *cPublishAdmin) ChannelSave(ctx context.Context, req *publish.AdminChann
 	return
 }
 
+func (c *cPublishAdmin) ChannelCacheList(ctx context.Context, req *publish.AdminChannelCacheListReq) (res *publish.AdminChannelCacheListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminChannelCacheList(ctx, &req.ChannelCacheListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.ChannelCacheModel{}
+	}
+	res = new(publish.AdminChannelCacheListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishAdmin) ChannelCacheRefresh(ctx context.Context, req *publish.AdminChannelCacheRefreshReq) (res *publish.AdminChannelCacheRefreshRes, err error) {
+	item, err := service.SysPublish().AdminChannelCacheRefresh(ctx, &req.ChannelCacheRefreshInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminChannelCacheRefreshRes{ChannelCacheRefreshModel: item}
+	return
+}
+
+func (c *cPublishAdmin) ChannelCheck(ctx context.Context, req *publish.AdminChannelCheckReq) (res *publish.AdminChannelCheckRes, err error) {
+	item, err := service.SysPublish().AdminChannelCheck(ctx, &req.ChannelCheckInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminChannelCheckRes{ChannelCheckModel: item}
+	return
+}
+
 func (c *cPublishAdmin) ChannelDelete(ctx context.Context, req *publish.AdminChannelDeleteReq) (res *publish.AdminChannelDeleteRes, err error) {
 	if err = service.SysPublish().AdminChannelDelete(ctx, &req.ChannelDeleteInp); err != nil {
 		return nil, err

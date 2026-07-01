@@ -120,8 +120,15 @@ func (s *sSysPublish) botList(ctx context.Context, in *sysin.BotListInp) (list [
 
 func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantId int64, operatorId int64) (err error) {
 	botToken := strings.TrimSpace(in.BotToken)
-	if botToken == "" {
+	if botToken == "" && in.Id <= 0 {
 		return gerror.New("Bot Token不能为空")
+	}
+	if botToken == "" {
+		bot, err := s.getBotById(ctx, in.Id, tenantId)
+		if err != nil {
+			return err
+		}
+		botToken = bot.BotToken
 	}
 	tgUser, err := s.telegramBotProfile(ctx, botToken)
 	if err != nil {

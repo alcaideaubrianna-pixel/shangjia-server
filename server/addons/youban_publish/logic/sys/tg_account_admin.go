@@ -94,42 +94,35 @@ func (s *sSysPublish) AdminTgAccountStartLogin(ctx context.Context, in *sysin.Tg
 	if err != nil {
 		return nil, err
 	}
-	displayName := in.DisplayName
-	if displayName == "" {
-		displayName = "TG账号-" + token[:8]
-	}
-	id, err := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).Data(g.Map{
-		"tenant_id":     current.TenantId,
-		"merchant_id":   current.TenantId,
-		"account_id":    current.Id,
-		"display_name":  displayName,
-		"login_token":   token,
-		"qr_url":        "",
-		"session_key":   sessionKey,
-		"remark":        in.Remark,
-		"status":        sysin.PublishTgAccountStatusPending,
-		"error_message": "",
-		"expires_at":    expiresAt,
-		"created_by":    current.Id,
-		"updated_by":    current.Id,
-		"created_at":    now,
-		"updated_at":    now,
+	id, err := g.DB().Model(publishTgLoginTable).Safe().Ctx(ctx).Data(g.Map{
+		"tenant_id":   current.TenantId,
+		"merchant_id": current.TenantId,
+		"account_id":  current.Id,
+		"login_token": token,
+		"session_key": sessionKey,
+		"status":      tgLoginStatusPending,
+		"expires_at":  expiresAt,
+		"created_at":  now,
+		"updated_at":  now,
 	}).InsertAndGetId()
 	if err != nil {
 		return nil, gerror.Wrap(err, "创建TG账号扫码会话失败")
 	}
 	loginCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	runtime := &telegramLoginRuntime{
-		loginToken:  token,
-		accountId:   current.Id,
-		tgAccountId: id,
-		tenantId:    current.TenantId,
-		cancel:      cancel,
-		passwordCh:  make(chan string),
+		loginToken:       token,
+		accountId:        current.Id,
+		tenantId:         current.TenantId,
+		adminTgAccount:   true,
+		tgAccountName:    in.DisplayName,
+		tgAccountRemark:  in.Remark,
+		tgLoginSessionId: id,
+		cancel:           cancel,
+		passwordCh:       make(chan string),
 	}
 	s.storeLoginRuntime(token, runtime)
-	go s.runTelegramLogin(loginCtx, runtime, conf, current.TenantId, current.Id, id, sessionKey, sessionPath, s.updateAdminTgAccountLoginStatus)
-	return s.adminTgAccountById(ctx, id, current.TenantId)
+	go s.runTelegramLogin(loginCtx, runtime, conf, current.TenantId, current.Id, sessionKey, sessionPath, s.updateTelegramLoginStatus)
+	return s.adminTgAccountLoginById(ctx, id, current.TenantId, current.Id)
 }
 
 func (s *sSysPublish) AdminTgAccountLoginStatus(ctx context.Context, in *sysin.TgAccountLoginStatusInp) (res *sysin.TgAccountModel, err error) {
@@ -140,32 +133,27 @@ func (s *sSysPublish) AdminTgAccountLoginStatus(ctx context.Context, in *sysin.T
 	if err != nil {
 		return nil, err
 	}
-	var item *sysin.TgAccountModel
-	if err = g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
-		Where("tenant_id", current.TenantId).
-		Where("account_id", current.Id).
-		Where("login_token", strings.TrimSpace(in.LoginToken)).
-		WhereNull("deleted_at").
-		Scan(&item); err != nil {
-		return nil, gerror.Wrap(err, "读取TG账号扫码状态失败")
+	item, err := s.adminTgAccountLoginByToken(ctx, strings.TrimSpace(in.LoginToken), current.TenantId, current.Id)
+	if err != nil {
+		return nil, err
 	}
-	if item == nil || item.Id <= 0 {
-		return nil, gerror.New("TG账号扫码会话不存在")
+	if item.Status == sysin.PublishTgAccountStatusAuthorized {
+		return s.adminTgAccountByToken(ctx, strings.TrimSpace(in.LoginToken), current.TenantId, current.Id)
 	}
-	if item.Status != sysin.PublishTgAccountStatusAuthorized && item.ExpiresAt != nil && item.ExpiresAt.Before(gtime.Now()) {
-		if _, err = g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
-			Where("id", item.Id).
+	if item.ExpiresAt != nil && item.ExpiresAt.Before(gtime.Now()) {
+		if _, err = g.DB().Model(publishTgLoginTable).Safe().Ctx(ctx).
 			Where("tenant_id", current.TenantId).
+			Where("account_id", current.Id).
+			Where("login_token", strings.TrimSpace(in.LoginToken)).
 			Data(g.Map{
 				"status":        sysin.PublishTgAccountStatusExpired,
 				"error_message": "扫码会话已过期",
-				"updated_by":    current.Id,
 				"updated_at":    gtime.Now(),
 			}).
 			Update(); err != nil {
 			return nil, gerror.Wrap(err, "更新TG账号扫码状态失败")
 		}
-		return s.adminTgAccountById(ctx, item.Id, item.TenantId)
+		return s.adminTgAccountLoginByToken(ctx, strings.TrimSpace(in.LoginToken), current.TenantId, current.Id)
 	}
 	return item, nil
 }
@@ -196,13 +184,17 @@ func (s *sSysPublish) AdminTgAccountPassword(ctx context.Context, in *sysin.TgAc
 	if runtime == nil {
 		return nil, gerror.New("扫码登录会话已失效，请重新发起登录")
 	}
+	if err = s.updateTelegramLoginStatus(ctx, strings.TrimSpace(in.LoginToken), current.Id, g.Map{
+		"error_message": "",
+	}); err != nil {
+		return nil, err
+	}
 	select {
 	case runtime.passwordCh <- password:
 	case <-time.After(10 * time.Second):
 		return nil, gerror.New("提交二次验证密码超时，请重试")
 	}
-	time.Sleep(300 * time.Millisecond)
-	return s.AdminTgAccountLoginStatus(ctx, &sysin.TgAccountLoginStatusInp{LoginToken: in.LoginToken})
+	return s.waitAdminTgAccountPasswordResult(ctx, strings.TrimSpace(in.LoginToken), current.TenantId, current.Id)
 }
 
 func (s *sSysPublish) AdminTgAccountDelete(ctx context.Context, in *sysin.TgAccountDeleteInp) (err error) {
@@ -325,6 +317,86 @@ func (s *sSysPublish) adminTgAccountById(ctx context.Context, id int64, tenantId
 	return item, nil
 }
 
+func (s *sSysPublish) adminTgAccountByToken(ctx context.Context, token string, tenantId int64, accountId int64) (*sysin.TgAccountModel, error) {
+	var item *sysin.TgAccountModel
+	mod := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
+		Where("login_token", strings.TrimSpace(token)).
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	if accountId > 0 {
+		mod = mod.Where("account_id", accountId)
+	}
+	if err := mod.Scan(&item); err != nil {
+		return nil, gerror.Wrap(err, "读取TG账号失败")
+	}
+	if item == nil || item.Id <= 0 {
+		return nil, gerror.New("TG账号不存在")
+	}
+	return item, nil
+}
+
+func (s *sSysPublish) adminTgAccountLoginById(ctx context.Context, id int64, tenantId int64, accountId int64) (*sysin.TgAccountModel, error) {
+	var item *sysin.TgAccountModel
+	mod := g.DB().Model(publishTgLoginTable).Safe().Ctx(ctx).Where("id", id)
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	if accountId > 0 {
+		mod = mod.Where("account_id", accountId)
+	}
+	if err := mod.Scan(&item); err != nil {
+		return nil, gerror.Wrap(err, "读取TG账号扫码会话失败")
+	}
+	if item == nil || item.Id <= 0 {
+		return nil, gerror.New("TG账号扫码会话不存在")
+	}
+	return item, nil
+}
+
+func (s *sSysPublish) adminTgAccountLoginByToken(ctx context.Context, token string, tenantId int64, accountId int64) (*sysin.TgAccountModel, error) {
+	var item *sysin.TgAccountModel
+	mod := g.DB().Model(publishTgLoginTable).Safe().Ctx(ctx).Where("login_token", strings.TrimSpace(token))
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	if accountId > 0 {
+		mod = mod.Where("account_id", accountId)
+	}
+	if err := mod.Scan(&item); err != nil {
+		return nil, gerror.Wrap(err, "读取TG账号扫码状态失败")
+	}
+	if item == nil || item.Id <= 0 {
+		return nil, gerror.New("TG账号扫码会话不存在")
+	}
+	return item, nil
+}
+
+func (s *sSysPublish) waitAdminTgAccountPasswordResult(ctx context.Context, token string, tenantId int64, accountId int64) (*sysin.TgAccountModel, error) {
+	deadline := time.Now().Add(8 * time.Second)
+	for {
+		item, err := s.adminTgAccountLoginByToken(ctx, token, tenantId, accountId)
+		if err != nil {
+			return nil, err
+		}
+		if item.Status == sysin.PublishTgAccountStatusAuthorized {
+			return s.adminTgAccountByToken(ctx, token, tenantId, accountId)
+		}
+		if item.Status == sysin.PublishTgAccountStatusFailed || item.Status == sysin.PublishTgAccountStatusExpired {
+			return item, nil
+		}
+		if time.Now().After(deadline) {
+			return item, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+}
+
 func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64, tenantId int64, operatorId int64) (status string, message string) {
 	item, err := s.adminTgAccountById(ctx, id, tenantId)
 	if err != nil {
@@ -333,13 +405,13 @@ func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64
 	conf, err := NewSysConfig().GetTelegram(ctx)
 	if err != nil {
 		message = err.Error()
-		s.updateTgAccountRefreshResult(ctx, id, tenantId, operatorId, sysin.PublishTgAccountStatusFailed, message, nil, "")
+		s.updateTgAccountRefreshResult(ctx, id, tenantId, operatorId, sysin.PublishTgAccountStatusFailed, message, nil, "", "")
 		return sysin.PublishTgAccountStatusFailed, message
 	}
 	sessionPath, err := s.telegramSessionPathByKey(item.SessionKey)
 	if err != nil {
 		message = err.Error()
-		s.updateTgAccountRefreshResult(ctx, id, tenantId, operatorId, sysin.PublishTgAccountStatusFailed, message, nil, "")
+		s.updateTgAccountRefreshResult(ctx, id, tenantId, operatorId, sysin.PublishTgAccountStatusFailed, message, nil, "", "")
 		return sysin.PublishTgAccountStatusFailed, message
 	}
 	options := telegram.Options{
@@ -347,7 +419,7 @@ func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64
 	}
 	if resolver, err := telegramMTProtoResolver(conf.ProxyUrl); err != nil {
 		message = err.Error()
-		s.updateTgAccountRefreshResult(ctx, id, tenantId, operatorId, sysin.PublishTgAccountStatusFailed, message, nil, "")
+		s.updateTgAccountRefreshResult(ctx, id, tenantId, operatorId, sysin.PublishTgAccountStatusFailed, message, nil, "", "")
 		return sysin.PublishTgAccountStatusFailed, message
 	} else if resolver != nil {
 		options.Resolver = resolver
@@ -366,21 +438,20 @@ func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64
 	})
 	if err != nil {
 		message = err.Error()
-		s.updateTgAccountRefreshResult(context.Background(), id, tenantId, operatorId, sysin.PublishTgAccountStatusFailed, message, nil, "")
+		s.updateTgAccountRefreshResult(context.Background(), id, tenantId, operatorId, sysin.PublishTgAccountStatusFailed, message, nil, "", "")
 		return sysin.PublishTgAccountStatusFailed, message
 	}
 	username := ""
+	displayName := ""
 	if self != nil {
 		username = self.Username
-		if username == "" {
-			username = strings.TrimSpace(strings.TrimSpace(self.FirstName + " " + self.LastName))
-		}
+		displayName = strings.TrimSpace(strings.TrimSpace(self.FirstName + " " + self.LastName))
 	}
-	s.updateTgAccountRefreshResult(ctx, id, tenantId, operatorId, sysin.PublishTgAccountStatusAuthorized, "", self, username)
+	s.updateTgAccountRefreshResult(ctx, id, tenantId, operatorId, sysin.PublishTgAccountStatusAuthorized, "", self, username, displayName)
 	return sysin.PublishTgAccountStatusAuthorized, ""
 }
 
-func (s *sSysPublish) updateTgAccountRefreshResult(ctx context.Context, id int64, tenantId int64, operatorId int64, status string, message string, user *tg.User, username string) {
+func (s *sSysPublish) updateTgAccountRefreshResult(ctx context.Context, id int64, tenantId int64, operatorId int64, status string, message string, user *tg.User, username string, displayName string) {
 	data := g.Map{
 		"status":        status,
 		"error_message": message,
@@ -392,6 +463,13 @@ func (s *sSysPublish) updateTgAccountRefreshResult(ctx context.Context, id int64
 		if user != nil {
 			data["telegram_user_id"] = strconv.FormatInt(user.ID, 10)
 			data["telegram_username"] = username
+			data["telegram_first_name"] = user.FirstName
+			data["telegram_last_name"] = user.LastName
+			data["telegram_phone"] = user.Phone
+			data["telegram_is_bot"] = boolToInt(user.Bot)
+			if displayName != "" {
+				data["display_name"] = displayName
+			}
 		}
 	}
 	_, _ = g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).

@@ -74,6 +74,9 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		return gerror.New("频道配置不能为空")
 	}
 	in.TenantId = account.TenantId
+	if in.TenantId <= 0 {
+		return gerror.New("当前账号未绑定账号归属")
+	}
 	if err = in.Filter(ctx); err != nil {
 		return err
 	}
@@ -83,6 +86,20 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	if err = s.ensureBotsBelongTenant(ctx, in.BotIds, in.TenantId); err != nil {
 		return err
 	}
+	checkRes, err := s.checkAdminChannelBots(ctx, &sysin.ChannelCheckInp{
+		BotIds:       in.BotIds,
+		TargetChatId: in.TargetChatId,
+		TgAccountId:  in.TgAccountId,
+	}, in.TenantId, true)
+	if err != nil {
+		return err
+	}
+	if !channelCheckAllowed(checkRes) {
+		return gerror.New(channelCheckMessage(checkRes))
+	}
+	in.ChannelTitle = checkRes.ChannelTitle
+	in.ChannelUsername = checkRes.ChannelUsername
+	in.TargetChatId = checkRes.TargetChatId
 	if in.Id > 0 {
 		if err = s.ensureChannelsBelongTenant(ctx, []int64{in.Id}, in.TenantId); err != nil {
 			return err

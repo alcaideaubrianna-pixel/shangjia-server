@@ -102,8 +102,12 @@
                 <n-form-item label="Bot运行模式">
                   <n-select v-model:value="telegramConfig.botRuntimeMode" :options="botRuntimeOptions" />
                 </n-form-item>
-                <n-form-item label="Webhook Base URL">
-                  <n-input v-model:value="telegramConfig.webhookBaseUrl" clearable />
+                <n-form-item label="Webhook 域名覆盖">
+                  <n-input
+                    v-model:value="telegramConfig.webhookBaseUrl"
+                    :placeholder="systemDomain || '为空时使用系统配置域名'"
+                    clearable
+                  />
                 </n-form-item>
                 <n-form-item label="Webhook Secret">
                   <n-input v-model:value="telegramConfig.webhookSecret" clearable />
@@ -216,6 +220,7 @@
     TaskList,
     TaskSubmit,
   } from '@/api/addons/youbanPublish';
+  import { getConfig as getSysConfig } from '@/api/sys/config';
 
   const dialog = useDialog();
   const message = useMessage();
@@ -273,6 +278,7 @@
   const accountPagination = createPagination(loadAccounts);
   const taskPagination = createPagination(loadTasks);
   const botPagination = createPagination(loadBots);
+  const systemDomain = ref('');
 
   const tenantOptions = computed(() => tenants.value.map((item) => ({ label: accountOwnerName(item), value: item.id })));
   const tenantOptionsWithAll = computed(() => [{ label: '全部账号归属', value: null }, ...tenantOptions.value]);
@@ -288,7 +294,10 @@
   const resetPasswordForm = reactive({ id: 0, username: '', password: '' });
   const resetPasswordResult = reactive({ password: '' });
   const botForm = reactive(newBotForm());
-  const telegramConfig = reactive({
+  const telegramConfig = reactive(newTelegramConfig());
+
+  function newTelegramConfig() {
+    return {
     appId: 0,
     appHash: '',
     proxyUrl: '',
@@ -296,7 +305,8 @@
     webhookBaseUrl: '',
     webhookSecret: '',
     defaultTargetChat: '',
-  });
+    };
+  }
 
   const tenantColumns = [
     { title: 'ID', key: 'id', width: 80 },
@@ -453,7 +463,12 @@
   async function loadConfigs() {
     configLoading.value = true;
     try {
-      Object.assign(telegramConfig, await ConfigGet({ group: 'telegram' }));
+      const [addonConfig, basicConfig] = await Promise.all([
+        ConfigGet({ group: 'telegram' }),
+        getSysConfig({ group: 'basic' }),
+      ]);
+      systemDomain.value = basicConfig?.list?.basicDomain || '';
+      Object.assign(telegramConfig, newTelegramConfig(), addonConfig?.list || {});
     } finally {
       configLoading.value = false;
     }
@@ -462,7 +477,7 @@
   async function saveConfigs() {
     configSaving.value = true;
     try {
-      await ConfigUpdate({ group: 'telegram', ...telegramConfig });
+      await ConfigUpdate({ group: 'telegram', list: { ...telegramConfig } });
       message.success('配置已保存');
     } finally {
       configSaving.value = false;

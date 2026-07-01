@@ -187,6 +187,34 @@ type AdminChannelSaveReq struct {
 
 type AdminChannelSaveRes struct{}
 
+type AdminChannelCacheListReq struct {
+	g.Meta `path:"/publish/admin/channel/cache/list" method:"get" tags:"上架插件管理端" summary:"TG账号频道缓存列表"`
+	sysin.ChannelCacheListInp
+}
+
+type AdminChannelCacheListRes struct {
+	form.PageRes
+	List []*sysin.ChannelCacheModel `json:"list" dc:"频道缓存列表"`
+}
+
+type AdminChannelCacheRefreshReq struct {
+	g.Meta `path:"/publish/admin/channel/cache/refresh" method:"post" tags:"上架插件管理端" summary:"刷新TG账号频道缓存"`
+	sysin.ChannelCacheRefreshInp
+}
+
+type AdminChannelCacheRefreshRes struct {
+	*sysin.ChannelCacheRefreshModel
+}
+
+type AdminChannelCheckReq struct {
+	g.Meta `path:"/publish/admin/channel/check" method:"post" tags:"上架插件管理端" summary:"检测频道Bot权限"`
+	sysin.ChannelCheckInp
+}
+
+type AdminChannelCheckRes struct {
+	*sysin.ChannelCheckModel
+}
+
 type AdminChannelDeleteReq struct {
 	g.Meta `path:"/publish/admin/channel/delete" method:"post" tags:"上架插件管理端" summary:"删除频道"`
 	sysin.ChannelDeleteInp

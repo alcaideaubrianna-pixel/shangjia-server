@@ -41,8 +41,10 @@ func (s *sSysConfig) GetTelegram(ctx context.Context) (conf *model.TelegramConfi
 	conf.ProxyUrl = strings.TrimSpace(conf.ProxyUrl)
 	conf.BotRuntimeMode = strings.ToLower(strings.TrimSpace(conf.BotRuntimeMode))
 	conf.WebhookBaseUrl = strings.TrimRight(strings.TrimSpace(conf.WebhookBaseUrl), "/")
-	if basic, basicErr := baseservice.SysConfig().GetBasic(ctx); basicErr == nil && basic != nil && strings.TrimSpace(basic.Domain) != "" {
-		conf.WebhookBaseUrl = strings.TrimRight(strings.TrimSpace(basic.Domain), "/")
+	if conf.WebhookBaseUrl == "" {
+		if basic, basicErr := baseservice.SysConfig().GetBasic(ctx); basicErr == nil && basic != nil && strings.TrimSpace(basic.Domain) != "" {
+			conf.WebhookBaseUrl = strings.TrimRight(strings.TrimSpace(basic.Domain), "/")
+		}
 	}
 	conf.WebhookSecret = strings.TrimSpace(conf.WebhookSecret)
 	conf.DefaultTargetChat = strings.TrimSpace(conf.DefaultTargetChat)

@@ -204,6 +204,10 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_account" (
   "display_name" varchar(128) NOT NULL DEFAULT '',
   "telegram_user_id" varchar(128) NOT NULL DEFAULT '',
   "telegram_username" varchar(128) NOT NULL DEFAULT '',
+  "telegram_first_name" varchar(128) NOT NULL DEFAULT '',
+  "telegram_last_name" varchar(128) NOT NULL DEFAULT '',
+  "telegram_phone" varchar(64) NOT NULL DEFAULT '',
+  "telegram_is_bot" smallint NOT NULL DEFAULT 0,
   "session_key" varchar(255) NOT NULL DEFAULT '',
   "login_token" varchar(128) NOT NULL DEFAULT '',
   "qr_url" varchar(1024) NOT NULL DEFAULT '',
@@ -219,6 +223,10 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_account" (
   "updated_at" timestamp DEFAULT NULL,
   "deleted_at" timestamp DEFAULT NULL
 );
+ALTER TABLE "hg_youban_publish_tg_account" ADD COLUMN IF NOT EXISTS "telegram_first_name" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_tg_account" ADD COLUMN IF NOT EXISTS "telegram_last_name" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_tg_account" ADD COLUMN IF NOT EXISTS "telegram_phone" varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_tg_account" ADD COLUMN IF NOT EXISTS "telegram_is_bot" smallint NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_account_tenant" ON "hg_youban_publish_tg_account" ("tenant_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_account_login" ON "hg_youban_publish_tg_account" ("login_token");
 
@@ -246,6 +254,27 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel" (
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_channel_tenant_account" ON "hg_youban_publish_channel" ("tenant_id", "tg_account_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_channel_chat" ON "hg_youban_publish_channel" ("tenant_id", "target_chat_id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_channel" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "merchant_id" bigint NOT NULL DEFAULT 0,
+  "tg_account_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" varchar(128) NOT NULL DEFAULT '',
+  "access_hash" varchar(128) NOT NULL DEFAULT '',
+  "channel_title" varchar(128) NOT NULL DEFAULT '',
+  "channel_username" varchar(128) NOT NULL DEFAULT '',
+  "is_broadcast" smallint NOT NULL DEFAULT 0,
+  "is_megagroup" smallint NOT NULL DEFAULT 0,
+  "can_post_messages" smallint NOT NULL DEFAULT 0,
+  "can_invite_users" smallint NOT NULL DEFAULT 0,
+  "can_add_admins" smallint NOT NULL DEFAULT 0,
+  "last_sync_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_channel_account_channel" ON "hg_youban_publish_tg_channel" ("tenant_id", "tg_account_id", "channel_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_channel_search" ON "hg_youban_publish_tg_channel" ("tenant_id", "tg_account_id", "channel_title", "channel_username");
 
 INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
 SELECT 'youban_publish', 'telegram', 'Telegram App ID', 'int', 'appId', '0', '0', 10, '扫码登录使用的 Telegram API ID，来自 my.telegram.org', 0, 1, NOW(), NOW()

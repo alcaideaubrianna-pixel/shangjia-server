@@ -22,6 +22,8 @@ const (
 	PublishTaskStatusCanceled   = "canceled"
 
 	PublishTgAccountStatusPending    = "pending"
+	PublishTgAccountStatusScanning   = "scanning"
+	PublishTgAccountStatusPassword   = "password_required"
 	PublishTgAccountStatusAuthorized = "authorized"
 	PublishTgAccountStatusExpired    = "expired"
 	PublishTgAccountStatusFailed     = "failed"
@@ -440,22 +442,26 @@ type TgAccountListInp struct {
 }
 
 type TgAccountModel struct {
-	Id               int64       `json:"id" dc:"ID"`
-	TenantId         int64       `json:"tenantId" dc:"租户ID"`
-	AccountId        int64       `json:"accountId" dc:"创建账号ID"`
-	DisplayName      string      `json:"displayName" dc:"显示名称"`
-	TelegramUserId   string      `json:"telegramUserId" dc:"TG用户ID"`
-	TelegramUsername string      `json:"telegramUsername" dc:"TG用户名"`
-	SessionKey       string      `json:"sessionKey" dc:"会话存储键"`
-	LoginToken       string      `json:"loginToken" dc:"登录令牌"`
-	QrUrl            string      `json:"qrUrl" dc:"二维码地址"`
-	Remark           string      `json:"remark" dc:"备注"`
-	Status           string      `json:"status" dc:"状态"`
-	ErrorMessage     string      `json:"errorMessage" dc:"错误信息"`
-	LastLoginAt      *gtime.Time `json:"lastLoginAt" dc:"最后授权时间"`
-	ExpiresAt        *gtime.Time `json:"expiresAt" dc:"二维码过期时间"`
-	CreatedAt        *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt        *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id                int64       `json:"id" dc:"ID"`
+	TenantId          int64       `json:"tenantId" dc:"租户ID"`
+	AccountId         int64       `json:"accountId" dc:"创建账号ID"`
+	DisplayName       string      `json:"displayName" dc:"显示名称"`
+	TelegramUserId    string      `json:"telegramUserId" dc:"TG用户ID"`
+	TelegramUsername  string      `json:"telegramUsername" dc:"TG用户名"`
+	TelegramFirstName string      `json:"telegramFirstName" dc:"TG名"`
+	TelegramLastName  string      `json:"telegramLastName" dc:"TG姓"`
+	TelegramPhone     string      `json:"telegramPhone" dc:"TG手机号"`
+	TelegramIsBot     int         `json:"telegramIsBot" dc:"是否Bot"`
+	SessionKey        string      `json:"sessionKey" dc:"会话存储键"`
+	LoginToken        string      `json:"loginToken" dc:"登录令牌"`
+	QrUrl             string      `json:"qrUrl" dc:"二维码地址"`
+	Remark            string      `json:"remark" dc:"备注"`
+	Status            string      `json:"status" dc:"状态"`
+	ErrorMessage      string      `json:"errorMessage" dc:"错误信息"`
+	LastLoginAt       *gtime.Time `json:"lastLoginAt" dc:"最后授权时间"`
+	ExpiresAt         *gtime.Time `json:"expiresAt" dc:"二维码过期时间"`
+	CreatedAt         *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt         *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type TgAccountStartLoginInp struct {
@@ -535,9 +541,6 @@ type ChannelSaveInp struct {
 }
 
 func (in *ChannelSaveInp) Filter(ctx context.Context) error {
-	if in.TenantId <= 0 {
-		return gerror.New("请选择账号归属")
-	}
 	if in.TgAccountId <= 0 {
 		return gerror.New("请选择TG账号")
 	}
@@ -572,6 +575,67 @@ type ChannelDeleteInp struct {
 type ChannelBatchBotsInp struct {
 	Ids    []int64 `json:"ids" v:"required#请选择频道" dc:"频道ID列表"`
 	BotIds []int64 `json:"botIds" dc:"绑定Bot ID列表"`
+}
+
+type ChannelCacheListInp struct {
+	form.PageReq
+	TgAccountId int64  `json:"tgAccountId" dc:"TG账号ID"`
+	Keyword     string `json:"keyword" dc:"关键词"`
+}
+
+type ChannelCacheModel struct {
+	Id              int64       `json:"id" dc:"ID"`
+	TenantId        int64       `json:"tenantId" dc:"租户ID"`
+	TgAccountId     int64       `json:"tgAccountId" dc:"TG账号ID"`
+	ChannelId       string      `json:"channelId" dc:"频道ID"`
+	AccessHash      string      `json:"accessHash" dc:"AccessHash"`
+	ChannelTitle    string      `json:"channelTitle" dc:"频道名称"`
+	ChannelUsername string      `json:"channelUsername" dc:"频道用户名"`
+	IsBroadcast     int         `json:"isBroadcast" dc:"是否频道"`
+	IsMegagroup     int         `json:"isMegagroup" dc:"是否群组"`
+	CanPostMessages int         `json:"canPostMessages" dc:"账号可发频道消息"`
+	CanInviteUsers  int         `json:"canInviteUsers" dc:"账号可邀请用户"`
+	CanAddAdmins    int         `json:"canAddAdmins" dc:"账号可添加管理员"`
+	LastSyncAt      *gtime.Time `json:"lastSyncAt" dc:"最后同步时间"`
+}
+
+type ChannelCacheRefreshInp struct {
+	TgAccountId int64 `json:"tgAccountId" v:"required|min:1#请选择TG账号|请选择TG账号" dc:"TG账号ID"`
+}
+
+type ChannelCacheRefreshModel struct {
+	Count       int    `json:"count" dc:"同步数量"`
+	Message     string `json:"message" dc:"同步结果"`
+	SyncedAt    string `json:"syncedAt" dc:"同步时间"`
+	TgAccountId int64  `json:"tgAccountId" dc:"TG账号ID"`
+}
+
+type ChannelCheckInp struct {
+	TgAccountId  int64   `json:"tgAccountId" v:"required|min:1#请选择TG账号|请选择TG账号" dc:"TG账号ID"`
+	TargetChatId string  `json:"targetChatId" v:"required#请选择频道" dc:"频道ID"`
+	BotIds       []int64 `json:"botIds" dc:"Bot ID列表"`
+}
+
+type ChannelCheckBotModel struct {
+	BotId          int64  `json:"botId" dc:"Bot ID"`
+	BotName        string `json:"botName" dc:"Bot名称"`
+	BotUsername    string `json:"botUsername" dc:"Bot用户名"`
+	CanSendMessage int    `json:"canSendMessage" dc:"是否可发送消息"`
+	InChannel      int    `json:"inChannel" dc:"是否在频道中"`
+	Status         string `json:"status" dc:"检测状态"`
+	Message        string `json:"message" dc:"检测信息"`
+}
+
+type ChannelCheckModel struct {
+	Allowed         int                     `json:"allowed" dc:"是否允许保存"`
+	CanAddBot       int                     `json:"canAddBot" dc:"账号是否可添加Bot"`
+	CanAddAdmin     int                     `json:"canAddAdmin" dc:"账号是否可添加管理员"`
+	CanInviteUsers  int                     `json:"canInviteUsers" dc:"账号是否可邀请用户"`
+	ChannelTitle    string                  `json:"channelTitle" dc:"频道名称"`
+	ChannelUsername string                  `json:"channelUsername" dc:"频道用户名"`
+	Message         string                  `json:"message" dc:"检测信息"`
+	TargetChatId    string                  `json:"targetChatId" dc:"频道ID"`
+	BotResults      []*ChannelCheckBotModel `json:"botResults" dc:"Bot检测结果"`
 }
 
 type ChannelRefreshInp struct {

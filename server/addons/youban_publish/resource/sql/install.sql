@@ -220,6 +220,10 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_account` (
   `display_name` varchar(128) NOT NULL DEFAULT '' COMMENT '显示名称',
   `telegram_user_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户ID',
   `telegram_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户名',
+  `telegram_first_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG名',
+  `telegram_last_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG姓',
+  `telegram_phone` varchar(64) NOT NULL DEFAULT '' COMMENT 'TG手机号',
+  `telegram_is_bot` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否Bot',
   `session_key` varchar(255) NOT NULL DEFAULT '' COMMENT '会话存储键',
   `login_token` varchar(128) NOT NULL DEFAULT '' COMMENT '登录令牌',
   `qr_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '二维码地址',
@@ -238,6 +242,11 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_account` (
   KEY `idx_ybp_tg_account_tenant` (`tenant_id`,`status`,`id`),
   KEY `idx_ybp_tg_account_login` (`login_token`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架TG账号';
+
+ALTER TABLE `hg_youban_publish_tg_account` ADD COLUMN `telegram_first_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG名' AFTER `telegram_username`;
+ALTER TABLE `hg_youban_publish_tg_account` ADD COLUMN `telegram_last_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG姓' AFTER `telegram_first_name`;
+ALTER TABLE `hg_youban_publish_tg_account` ADD COLUMN `telegram_phone` varchar(64) NOT NULL DEFAULT '' COMMENT 'TG手机号' AFTER `telegram_last_name`;
+ALTER TABLE `hg_youban_publish_tg_account` ADD COLUMN `telegram_is_bot` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否Bot' AFTER `telegram_phone`;
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_channel` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -264,6 +273,28 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_channel` (
   KEY `idx_ybp_channel_tenant_account` (`tenant_id`,`tg_account_id`,`status`,`id`),
   KEY `idx_ybp_channel_chat` (`tenant_id`,`target_chat_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架频道配置';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_channel` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID',
+  `tg_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG账号ID',
+  `channel_id` varchar(128) NOT NULL DEFAULT '' COMMENT '频道ID',
+  `access_hash` varchar(128) NOT NULL DEFAULT '' COMMENT 'AccessHash',
+  `channel_title` varchar(128) NOT NULL DEFAULT '' COMMENT '频道名称',
+  `channel_username` varchar(128) NOT NULL DEFAULT '' COMMENT '频道用户名',
+  `is_broadcast` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否频道',
+  `is_megagroup` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否群组',
+  `can_post_messages` tinyint(1) NOT NULL DEFAULT '0' COMMENT '账号可发频道消息',
+  `can_invite_users` tinyint(1) NOT NULL DEFAULT '0' COMMENT '账号可邀请用户',
+  `can_add_admins` tinyint(1) NOT NULL DEFAULT '0' COMMENT '账号可添加管理员',
+  `last_sync_at` datetime DEFAULT NULL COMMENT '最后同步时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_tg_channel_account_channel` (`tenant_id`,`tg_account_id`,`channel_id`),
+  KEY `idx_ybp_tg_channel_search` (`tenant_id`,`tg_account_id`,`channel_title`,`channel_username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架TG账号频道缓存';
 
 INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
 SELECT 'youban_publish', 'telegram', 'Telegram App ID', 'int', 'appId', '0', '0', 10, '扫码登录使用的 Telegram API ID，来自 my.telegram.org', 0, 1, NOW(), NOW()

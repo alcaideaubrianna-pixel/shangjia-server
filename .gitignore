@@ -7,3 +7,4 @@ server/__debug_bin*
 pull.bat
 push.sh
 /dist
+/server/runtime/
