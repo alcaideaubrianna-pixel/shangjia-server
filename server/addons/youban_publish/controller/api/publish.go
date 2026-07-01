@@ -481,6 +481,15 @@ func (c *cPublish) MyProfileList(ctx context.Context, req *publish.MyProfileList
 	return
 }
 
+func (c *cPublish) MyProfileView(ctx context.Context, req *publish.MyProfileViewReq) (res *publish.MyProfileViewRes, err error) {
+	data, err := service.SysPublish().MyProfileView(ctx, &req.ProfileViewInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.MyProfileViewRes{ProfileViewModel: data}
+	return
+}
+
 func (c *cPublish) MyProfileSave(ctx context.Context, req *publish.MyProfileSaveReq) (res *publish.MyProfileSaveRes, err error) {
 	data, err := service.SysPublish().MyProfileSave(ctx, &req.ProfileSaveInp)
 	if err != nil {
@@ -507,6 +516,24 @@ func (c *cPublish) MyProfileStatus(ctx context.Context, req *publish.MyProfileSt
 		return nil, err
 	}
 	res = &publish.MyProfileStatusRes{}
+	return
+}
+
+func (c *cPublish) MyProfileImageSearch(ctx context.Context, req *publish.MyProfileImageSearchReq) (res *publish.MyProfileImageSearchRes, err error) {
+	file := g.RequestFromCtx(ctx).GetUploadFile("image")
+	if file == nil {
+		return nil, gerror.New("请先上传要搜索的图片")
+	}
+	list, totalCount, err := service.SysPublish().MyProfileImageSearch(ctx, &req.ProfileImageSearchInp, file)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.NoteModel{}
+	}
+	res = new(publish.MyProfileImageSearchRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
 	return
 }
 

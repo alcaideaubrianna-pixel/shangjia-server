@@ -375,23 +375,24 @@ type MediaDeleteInp struct {
 }
 
 type MediaModel struct {
-	Id           int64       `json:"id" dc:"ID"`
-	TenantId     int64       `json:"tenantId" dc:"租户ID"`
-	AccountId    int64       `json:"accountId" dc:"账号ID"`
-	TaskId       int64       `json:"taskId" dc:"任务ID"`
-	ProfileId    int64       `json:"profileId" dc:"资料ID"`
-	AttachmentId int64       `json:"attachmentId" dc:"附件ID"`
-	MediaType    string      `json:"mediaType" dc:"媒体类型"`
-	Name         string      `json:"name" dc:"文件名"`
-	FileUrl      string      `json:"fileUrl" dc:"访问地址"`
-	StoragePath  string      `json:"storagePath" dc:"存储路径"`
-	MimeType     string      `json:"mimeType" dc:"MIME"`
-	Md5          string      `json:"md5" dc:"MD5"`
-	Size         int64       `json:"size" dc:"大小"`
-	SortIndex    int         `json:"sortIndex" dc:"排序"`
-	Status       int         `json:"status" dc:"状态"`
-	CreatedAt    *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt    *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id             int64       `json:"id" dc:"ID"`
+	TenantId       int64       `json:"tenantId" dc:"租户ID"`
+	AccountId      int64       `json:"accountId" dc:"账号ID"`
+	TaskId         int64       `json:"taskId" dc:"任务ID"`
+	ProfileId      int64       `json:"profileId" dc:"资料ID"`
+	AttachmentId   int64       `json:"attachmentId" dc:"附件ID"`
+	MediaType      string      `json:"mediaType" dc:"媒体类型"`
+	Name           string      `json:"name" dc:"文件名"`
+	FileUrl        string      `json:"fileUrl" dc:"访问地址"`
+	StoragePath    string      `json:"storagePath" dc:"存储路径"`
+	MimeType       string      `json:"mimeType" dc:"MIME"`
+	Md5            string      `json:"md5" dc:"MD5"`
+	PerceptualHash string      `json:"perceptualHash" dc:"图片感知哈希"`
+	Size           int64       `json:"size" dc:"大小"`
+	SortIndex      int         `json:"sortIndex" dc:"排序"`
+	Status         int         `json:"status" dc:"状态"`
+	CreatedAt      *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt      *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type ProfileListInp struct {
@@ -405,6 +406,10 @@ type ProfileListInp struct {
 	ReviewStatus string `json:"reviewStatus" dc:"审核状态"`
 	Visibility   string `json:"visibility" dc:"可见性"`
 	Status       int    `json:"status" dc:"状态：1上架 2下架"`
+}
+
+type ProfileViewInp struct {
+	Id int64 `json:"id" v:"required|min:1#资料ID不能为空|资料ID不能为空" dc:"资料ID"`
 }
 
 type ProfileModel struct {
@@ -427,6 +432,16 @@ type ProfileModel struct {
 	PublishedAt  *gtime.Time `json:"publishedAt" dc:"发布时间"`
 	CreatedAt    *gtime.Time `json:"createdAt" dc:"创建时间"`
 	UpdatedAt    *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
+type ProfileViewModel struct {
+	Profile *ProfileModel `json:"profile" dc:"资料详情"`
+	Media   []*MediaModel `json:"media" dc:"媒体列表"`
+}
+
+type ProfileImageSearchInp struct {
+	form.PageReq
+	Threshold int `json:"threshold" dc:"相似度阈值，越小越严格"`
 }
 
 type ProfileSaveInp struct {

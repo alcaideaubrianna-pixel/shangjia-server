@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media" (
   "storage_path" varchar(1024) NOT NULL DEFAULT '',
   "mime_type" varchar(128) NOT NULL DEFAULT '',
   "md5" varchar(64) NOT NULL DEFAULT '',
+  "perceptual_hash" varchar(64) NOT NULL DEFAULT '',
   "size" bigint NOT NULL DEFAULT 0,
   "sort_index" integer NOT NULL DEFAULT 0,
   "status" smallint NOT NULL DEFAULT 1,
@@ -127,10 +128,33 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media" (
 );
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "tenant_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "merchant_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "perceptual_hash" varchar(64) NOT NULL DEFAULT '';
 UPDATE "hg_youban_publish_media" SET "tenant_id" = "merchant_id" WHERE "tenant_id" = 0 AND "merchant_id" > 0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_task_attachment" ON "hg_youban_publish_media" ("task_id", "attachment_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_task_sort" ON "hg_youban_publish_media" ("task_id", "sort_index", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_profile" ON "hg_youban_publish_media" ("profile_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash" ON "hg_youban_publish_media" ("perceptual_hash");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_face" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "media_id" bigint NOT NULL DEFAULT 0,
+  "face_index" integer NOT NULL DEFAULT 0,
+  "bbox_json" text NOT NULL DEFAULT '',
+  "embedding_model" varchar(64) NOT NULL DEFAULT '',
+  "embedding_vector" text NOT NULL DEFAULT '',
+  "feature_hash" varchar(128) NOT NULL DEFAULT '',
+  "quality_score" numeric(10,4) NOT NULL DEFAULT 0,
+  "status" smallint NOT NULL DEFAULT 1,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_face_media" ON "hg_youban_publish_media_face" ("media_id", "face_index");
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_face_profile" ON "hg_youban_publish_media_face" ("tenant_id", "account_id", "profile_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_face_feature" ON "hg_youban_publish_media_face" ("feature_hash");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tag" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -187,7 +211,7 @@ FROM (
     ('家居')
 ) AS seed("name")
 WHERE NOT EXISTS (
-  SELECT 1 FROM "hg_youban_publish_tag" t WHERE t."name" = seed."name" AND t."deleted_at" IS NULL
+  SELECT 1 FROM "hg_youban_publish_tag"
 );
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_job" (

@@ -528,7 +528,7 @@
   const tenantPagination = createPagination(loadTenants);
   const accountPagination = createPagination(loadAccounts);
   const taskPagination = createPagination(loadTasks);
-  const tagPagination = createPagination(loadTags);
+  const tagPagination = createPagination(loadTags, 20);
   const botPagination = createPagination(loadBots);
   const systemDomain = ref('');
   const selectedTagRowKeys = ref<number[]>([]);
@@ -761,10 +761,10 @@
     }
   });
 
-  function createPagination(loader: () => void) {
+  function createPagination(loader: () => void, pageSize = 10) {
     const pagination: any = {
       page: 1,
-      pageSize: 10,
+      pageSize,
       itemCount: 0,
       showSizePicker: true,
       pageSizes: [10, 20, 50],

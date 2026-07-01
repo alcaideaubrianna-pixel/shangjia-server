@@ -392,6 +392,15 @@ type MyProfileListRes struct {
 	List []*sysin.ProfileModel `json:"list" dc:"资料列表"`
 }
 
+type MyProfileViewReq struct {
+	g.Meta `path:"/publish/profile/view" method:"get" tags:"上架插件" summary:"我的资料详情"`
+	sysin.ProfileViewInp
+}
+
+type MyProfileViewRes struct {
+	*sysin.ProfileViewModel
+}
+
 type MyProfileSaveReq struct {
 	g.Meta `path:"/publish/profile/save" method:"post" tags:"上架插件" summary:"保存我的资料"`
 	sysin.ProfileSaveInp
@@ -415,6 +424,16 @@ type MyProfileStatusReq struct {
 }
 
 type MyProfileStatusRes struct{}
+
+type MyProfileImageSearchReq struct {
+	g.Meta `path:"/publish/profile/image-search" method:"post" mime:"multipart/form-data" tags:"上架插件" summary:"我的资料图片搜索"`
+	sysin.ProfileImageSearchInp
+}
+
+type MyProfileImageSearchRes struct {
+	form.PageRes
+	List []*sysin.NoteModel `json:"list" dc:"笔记列表"`
+}
 
 type MyNoteListReq struct {
 	g.Meta `path:"/publish/note/list" method:"get" tags:"上架插件" summary:"我的笔记列表"`

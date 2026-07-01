@@ -2,7 +2,17 @@ package sys
 
 import (
 	"context"
+	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"math"
+	"sort"
+	"strconv"
+	"strings"
 
+	"github.com/corona10/goimagehash"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -69,11 +79,18 @@ func (s *sSysPublish) MyMediaUpload(ctx context.Context, in *sysin.MediaUploadIn
 	if in.MediaType == "video" {
 		uploadType = storager.KindVideo
 	}
+	perceptualHash := ""
+	if in.MediaType == "image" {
+		perceptualHash, err = uploadImagePHash(file)
+		if err != nil {
+			return nil, err
+		}
+	}
 	attachment, err := service.CommonUpload().UploadFile(ctx, uploadType, file)
 	if err != nil {
 		return nil, err
 	}
-	return s.saveMediaAttachment(ctx, task, in, attachment)
+	return s.saveMediaAttachment(ctx, task, in, attachment, perceptualHash)
 }
 
 func (s *sSysPublish) MyMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error) {
@@ -92,29 +109,187 @@ func (s *sSysPublish) MyMediaDelete(ctx context.Context, in *sysin.MediaDeleteIn
 	return s.deleteMedia(ctx, in.Id, account.Id)
 }
 
-func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, in *sysin.MediaUploadInp, attachment *basesysin.AttachmentListModel) (res *sysin.MediaModel, err error) {
+func (s *sSysPublish) MyProfileImageSearch(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile) (list []*sysin.NoteModel, totalCount int, err error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	if in == nil {
+		in = &sysin.ProfileImageSearchInp{}
+	}
+	if in.Page <= 0 {
+		in.Page = 1
+	}
+	if in.PerPage <= 0 {
+		in.PerPage = 20
+	}
+	if in.PerPage > 50 {
+		in.PerPage = 50
+	}
+	threshold := in.Threshold
+	if threshold <= 0 {
+		threshold = 12
+	}
+	if threshold > 32 {
+		threshold = 32
+	}
+	queryHash, err := uploadImagePHashValue(file)
+	if err != nil {
+		return nil, 0, err
+	}
+	profileIds, totalCount, err := s.findMySimilarProfileIdsByPHash(ctx, queryHash, threshold, in.Page, in.PerPage, account.TenantId, account.Id)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(profileIds) == 0 {
+		return []*sysin.NoteModel{}, totalCount, nil
+	}
+	list = make([]*sysin.NoteModel, 0, len(profileIds))
+	for _, profileId := range profileIds {
+		profile, viewErr := s.profileView(ctx, profileId, account.TenantId, account.Id)
+		if viewErr != nil {
+			return nil, 0, viewErr
+		}
+		note := &sysin.NoteModel{ProfileModel: *profile}
+		note.Media, err = s.mediaListByProfile(ctx, profile.Id, account.TenantId, account.Id)
+		if err != nil {
+			return nil, 0, err
+		}
+		list = append(list, note)
+	}
+	return list, totalCount, nil
+}
+
+type publishProfilePHashDistance struct {
+	Distance  int
+	ProfileId int64
+}
+
+func (s *sSysPublish) findMySimilarProfileIdsByPHash(ctx context.Context, queryHash *goimagehash.ImageHash, threshold int, page int, perPage int, tenantId int64, accountId int64) (profileIds []int64, totalCount int, err error) {
+	rows, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Fields("profile_id,perceptual_hash").
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		Where("media_type", "image").
+		WhereNot("perceptual_hash", "").
+		WhereNull("deleted_at").
+		All()
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "查询图片相似资料失败")
+	}
+	distanceByProfile := make(map[int64]int)
+	for _, row := range rows {
+		profileId := row["profile_id"].Int64()
+		if profileId <= 0 {
+			continue
+		}
+		hash, ok := parseUploadPHash(row["perceptual_hash"].String())
+		if !ok {
+			continue
+		}
+		distance, distanceErr := queryHash.Distance(hash)
+		if distanceErr != nil || distance > threshold {
+			continue
+		}
+		current, exists := distanceByProfile[profileId]
+		if !exists || distance < current {
+			distanceByProfile[profileId] = distance
+		}
+	}
+	items := make([]publishProfilePHashDistance, 0, len(distanceByProfile))
+	for profileId, distance := range distanceByProfile {
+		items = append(items, publishProfilePHashDistance{ProfileId: profileId, Distance: distance})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Distance == items[j].Distance {
+			return items[i].ProfileId > items[j].ProfileId
+		}
+		return items[i].Distance < items[j].Distance
+	})
+	totalCount = len(items)
+	if totalCount == 0 {
+		return []int64{}, 0, nil
+	}
+	start := (page - 1) * perPage
+	if start < 0 {
+		start = 0
+	}
+	if start >= totalCount {
+		return []int64{}, totalCount, nil
+	}
+	end := int(math.Min(float64(start+perPage), float64(totalCount)))
+	profileIds = make([]int64, 0, end-start)
+	for _, item := range items[start:end] {
+		profileIds = append(profileIds, item.ProfileId)
+	}
+	return profileIds, totalCount, nil
+}
+
+func uploadImagePHash(file *ghttp.UploadFile) (string, error) {
+	hash, err := uploadImagePHashValue(file)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%016x", hash.GetHash()), nil
+}
+
+func uploadImagePHashValue(file *ghttp.UploadFile) (*goimagehash.ImageHash, error) {
+	if file == nil {
+		return nil, gerror.New("没有找到上传的文件")
+	}
+	reader, err := file.Open()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取上传图片失败")
+	}
+	defer reader.Close()
+	img, _, err := image.Decode(reader)
+	if err != nil {
+		return nil, gerror.New("图片格式不支持，请上传 JPG、PNG 或 GIF")
+	}
+	hash, err := goimagehash.PerceptionHash(img)
+	if err != nil {
+		return nil, gerror.Wrap(err, "计算图片感知哈希失败")
+	}
+	return hash, nil
+}
+
+func parseUploadPHash(value string) (*goimagehash.ImageHash, bool) {
+	normalized := strings.TrimSpace(strings.ToLower(value))
+	if normalized == "" {
+		return nil, false
+	}
+	normalized = strings.TrimPrefix(normalized, "0x")
+	hashValue, err := strconv.ParseUint(normalized, 16, 64)
+	if err != nil {
+		return nil, false
+	}
+	return goimagehash.NewImageHash(hashValue, goimagehash.PHash), true
+}
+
+func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, in *sysin.MediaUploadInp, attachment *basesysin.AttachmentListModel, perceptualHash string) (res *sysin.MediaModel, err error) {
 	if attachment == nil || attachment.Id <= 0 {
 		return nil, gerror.New("附件上传失败")
 	}
 	now := gtime.Now()
 	data := g.Map{
-		"tenant_id":     task["tenant_id"].Int64(),
-		"merchant_id":   task["tenant_id"].Int64(),
-		"account_id":    task["account_id"].Int64(),
-		"task_id":       task["id"].Int64(),
-		"profile_id":    task["profile_id"].Int64(),
-		"attachment_id": attachment.Id,
-		"media_type":    in.MediaType,
-		"name":          attachment.Name,
-		"file_url":      attachment.FileUrl,
-		"storage_path":  attachment.Path,
-		"mime_type":     attachment.MimeType,
-		"md5":           attachment.Md5,
-		"size":          attachment.Size,
-		"sort_index":    in.SortIndex,
-		"status":        1,
-		"updated_by":    contexts.GetUserId(ctx),
-		"updated_at":    now,
+		"tenant_id":       task["tenant_id"].Int64(),
+		"merchant_id":     task["tenant_id"].Int64(),
+		"account_id":      task["account_id"].Int64(),
+		"task_id":         task["id"].Int64(),
+		"profile_id":      task["profile_id"].Int64(),
+		"attachment_id":   attachment.Id,
+		"media_type":      in.MediaType,
+		"name":            attachment.Name,
+		"file_url":        attachment.FileUrl,
+		"storage_path":    attachment.Path,
+		"mime_type":       attachment.MimeType,
+		"md5":             attachment.Md5,
+		"perceptual_hash": perceptualHash,
+		"size":            attachment.Size,
+		"sort_index":      in.SortIndex,
+		"status":          1,
+		"updated_by":      contexts.GetUserId(ctx),
+		"updated_at":      now,
 	}
 	existingId, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("task_id", task["id"].Int64()).
@@ -332,6 +507,7 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 			mediaColumns.DisplayStoragePath:  item.StoragePath,
 			mediaColumns.PreviewStoragePath:  item.StoragePath,
 			mediaColumns.BinaryMd5:           item.Md5,
+			mediaColumns.PerceptualHash:      item.PerceptualHash,
 			mediaColumns.ProcessStatus:       "raw",
 			mediaColumns.EncryptStatus:       "none",
 			mediaColumns.Status:              1,

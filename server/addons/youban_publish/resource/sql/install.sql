@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   `storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '存储路径',
   `mime_type` varchar(128) NOT NULL DEFAULT '' COMMENT 'MIME',
   `md5` varchar(64) NOT NULL DEFAULT '' COMMENT 'MD5',
+  `perceptual_hash` varchar(64) NOT NULL DEFAULT '' COMMENT '图片感知哈希',
   `size` bigint(20) NOT NULL DEFAULT '0' COMMENT '大小',
   `sort_index` int(11) NOT NULL DEFAULT '0' COMMENT '排序',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
@@ -134,12 +135,36 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   PRIMARY KEY (`id`),
   KEY `idx_ybp_media_task_attachment` (`task_id`,`attachment_id`),
   KEY `idx_ybp_media_task_sort` (`task_id`,`sort_index`,`id`),
-  KEY `idx_ybp_media_profile` (`profile_id`,`id`)
+  KEY `idx_ybp_media_profile` (`profile_id`,`id`),
+  KEY `idx_ybp_media_phash` (`perceptual_hash`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架媒体';
 
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `id`;
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN `perceptual_hash` varchar(64) NOT NULL DEFAULT '' COMMENT '图片感知哈希' AFTER `md5`;
 UPDATE `hg_youban_publish_media` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_media_face` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
+  `media_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '媒体ID',
+  `face_index` int(11) NOT NULL DEFAULT '0' COMMENT '图片内人脸序号',
+  `bbox_json` text NOT NULL COMMENT '人脸框JSON',
+  `embedding_model` varchar(64) NOT NULL DEFAULT '' COMMENT '特征模型',
+  `embedding_vector` longtext NOT NULL COMMENT '人脸向量',
+  `feature_hash` varchar(128) NOT NULL DEFAULT '' COMMENT '特征哈希',
+  `quality_score` decimal(10,4) NOT NULL DEFAULT '0.0000' COMMENT '质量分',
+  `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_media_face_media` (`media_id`,`face_index`),
+  KEY `idx_ybp_media_face_profile` (`tenant_id`,`account_id`,`profile_id`),
+  KEY `idx_ybp_media_face_feature` (`feature_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架媒体人脸特征';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tag` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -196,7 +221,7 @@ FROM (
   SELECT '家居'
 ) seed
 WHERE NOT EXISTS (
-  SELECT 1 FROM `hg_youban_publish_tag` t WHERE t.`name` = seed.`name` AND t.`deleted_at` IS NULL
+  SELECT 1 FROM `hg_youban_publish_tag`
 );
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (

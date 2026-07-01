@@ -33,6 +33,25 @@ func (s *sSysPublish) MyProfileList(ctx context.Context, in *sysin.ProfileListIn
 	return s.profileList(ctx, in)
 }
 
+func (s *sSysPublish) MyProfileView(ctx context.Context, in *sysin.ProfileViewInp) (res *sysin.ProfileViewModel, err error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil || in.Id <= 0 {
+		return nil, gerror.New("资料ID不能为空")
+	}
+	profile, err := s.profileView(ctx, in.Id, account.TenantId, account.Id)
+	if err != nil {
+		return nil, err
+	}
+	media, err := s.mediaListByProfile(ctx, profile.Id, account.TenantId, account.Id)
+	if err != nil {
+		return nil, err
+	}
+	return &sysin.ProfileViewModel{Profile: profile, Media: media}, nil
+}
+
 func (s *sSysPublish) MyProfileSave(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {
@@ -207,7 +226,7 @@ func (s *sSysPublish) profileList(ctx context.Context, in *sysin.ProfileListInp)
 	if err != nil {
 		return nil, 0, err
 	}
-	base = s.applyProfileFilters(base, in)
+	base = s.applyProfileFilters(ctx, base, in)
 	totalCount, err = base.Clone().Count()
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "统计资料失败")
@@ -215,11 +234,27 @@ func (s *sSysPublish) profileList(ctx context.Context, in *sysin.ProfileListInp)
 	if totalCount == 0 {
 		return []*sysin.ProfileModel{}, 0, nil
 	}
-	fields := "p.id,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city,p.cup_size AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id"
-	if err = base.Fields(fields).Page(in.Page, in.PerPage).OrderDesc("p.updated_at").OrderDesc("p.id").Scan(&list); err != nil {
+	if err = base.Fields(profileListFields()).Page(in.Page, in.PerPage).OrderDesc("p.updated_at").OrderDesc("p.id").Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取资料列表失败")
 	}
 	return
+}
+
+func (s *sSysPublish) profileView(ctx context.Context, profileId int64, tenantId int64, accountId int64) (res *sysin.ProfileModel, err error) {
+	if profileId <= 0 {
+		return nil, gerror.New("资料ID不能为空")
+	}
+	base, err := s.profileBaseModel(ctx, tenantId, accountId)
+	if err != nil {
+		return nil, err
+	}
+	if err = base.Where("p.id", profileId).Fields(profileListFields()).Scan(&res); err != nil {
+		return nil, gerror.Wrap(err, "获取资料详情失败")
+	}
+	if res == nil || res.Id <= 0 {
+		return nil, gerror.New("资料不存在或无权操作")
+	}
+	return res, nil
 }
 
 func (s *sSysPublish) noteList(ctx context.Context, in *sysin.NoteListInp) (list []*sysin.NoteModel, totalCount int, err error) {
@@ -581,13 +616,28 @@ func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, acco
 	return mod, nil
 }
 
-func (s *sSysPublish) applyProfileFilters(mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
+func profileListFields() string {
+	return "p.id,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city,p.cup_size AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id"
+}
+
+func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
 	if in == nil {
 		return mod
 	}
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
-		mod = mod.Where("(p.profile_no LIKE ? OR p.title LIKE ? OR p.summary LIKE ? OR p.plain_text LIKE ?)", like, like, like, like)
+		tagIds := s.tagIdsByKeyword(ctx, keyword)
+		if len(tagIds) > 0 {
+			args := []interface{}{like, like, like, like, like}
+			conditions := []string{"p.profile_no LIKE ?", "p.title LIKE ?", "p.summary LIKE ?", "p.plain_text LIKE ?", "p.cup_size LIKE ?"}
+			for _, tagId := range tagIds {
+				conditions = append(conditions, "p.cup_size = ?", "p.cup_size LIKE ?", "p.cup_size LIKE ?", "p.cup_size LIKE ?")
+				args = append(args, tagId, tagId+",%", "%,"+tagId, "%,"+tagId+",%")
+			}
+			mod = mod.Where("("+strings.Join(conditions, " OR ")+")", args...)
+		} else {
+			mod = mod.Where("(p.profile_no LIKE ? OR p.title LIKE ? OR p.summary LIKE ? OR p.plain_text LIKE ? OR p.cup_size LIKE ?)", like, like, like, like, like)
+		}
 	}
 	if in.Province != "" {
 		mod = mod.Where("p.province", strings.TrimSpace(in.Province))
@@ -608,6 +658,34 @@ func (s *sSysPublish) applyProfileFilters(mod *gdb.Model, in *sysin.ProfileListI
 		mod = mod.Where("p.status", in.Status)
 	}
 	return mod
+}
+
+func (s *sSysPublish) tagIdsByKeyword(ctx context.Context, keyword string) []string {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return []string{}
+	}
+	var rows []struct {
+		Id int64 `json:"id"`
+	}
+	err := g.DB().Model(publishTagTable).Safe().Ctx(ctx).
+		Fields("id").
+		WhereLike("name", "%"+keyword+"%").
+		Where("status", 1).
+		Where("review_status", sysin.PublishTagReviewApproved).
+		WhereNull("deleted_at").
+		Limit(50).
+		Scan(&rows)
+	if err != nil || len(rows) == 0 {
+		return []string{}
+	}
+	res := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.Id > 0 {
+			res = append(res, strconv.FormatInt(row.Id, 10))
+		}
+	}
+	return res
 }
 
 func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, tenantId int64, accountId int64, taskId int64) (int64, error) {
