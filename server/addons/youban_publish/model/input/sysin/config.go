@@ -1,8 +1,14 @@
 package sysin
 
 import (
+	"context"
+	"regexp"
+	"strings"
+
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
+	"hotgo/addons/youban_publish/model"
 	basesysin "hotgo/internal/model/input/sysin"
 )
 
@@ -16,4 +22,231 @@ type GetConfigModel struct {
 
 type UpdateConfigInp struct {
 	basesysin.UpdateAddonsConfigInp
+}
+
+type PublishConfigViewInp struct{}
+
+type PublishConfigViewModel struct {
+	*model.PublishConfig
+}
+
+type PublishConfigSaveInp struct {
+	model.PublishConfig
+}
+
+func (in *PublishConfigSaveInp) Filter(ctx context.Context) error {
+	in.CyclePublishTime = strings.TrimSpace(in.CyclePublishTime)
+	in.SendWindowStart = strings.TrimSpace(in.SendWindowStart)
+	in.SendWindowEnd = strings.TrimSpace(in.SendWindowEnd)
+	in.FailureStrategy = strings.TrimSpace(in.FailureStrategy)
+	if in.FailureStrategy == "" {
+		in.FailureStrategy = "continue"
+	}
+	if in.FailureStrategy != "continue" && in.FailureStrategy != "stop" {
+		return gerror.New("失败处理策略不合法")
+	}
+	if err := checkSwitch(in.CyclePublishEnabled, "循环上架开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.SkipDownChannelEnabled, "下架频道推送开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.SendWindowEnabled, "发送时间窗口开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.RetryEnabled, "重试开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.DefaultAntiScanEnabled, "防扫图默认开关"); err != nil {
+		return err
+	}
+	if in.CyclePublishEnabled == 1 && in.CyclePublishDays <= 0 {
+		in.CyclePublishDays = 4
+	}
+	if in.CyclePublishDays < 0 || in.CyclePublishDays > 365 {
+		return gerror.New("循环上架天数不合法")
+	}
+	if in.SendIntervalSeconds <= 0 {
+		in.SendIntervalSeconds = 3
+	}
+	if in.SendIntervalSeconds > 3600 {
+		return gerror.New("发送间隔不能超过3600秒")
+	}
+	if err := checkTimeRange(in.SendWindowEnabled, in.SendWindowStart, in.SendWindowEnd); err != nil {
+		return err
+	}
+	if in.MaxRetryCount < 0 || in.MaxRetryCount > 10 {
+		return gerror.New("最大重试次数不合法")
+	}
+	if in.RetryIntervalMinutes <= 0 {
+		in.RetryIntervalMinutes = 5
+	}
+	if in.RetryIntervalMinutes > 1440 {
+		return gerror.New("重试间隔不能超过1440分钟")
+	}
+	return nil
+}
+
+type AutoDeleteConfigViewInp struct{}
+
+type AutoDeleteConfigViewModel struct {
+	*model.AutoDeleteConfig
+}
+
+type AutoDeleteConfigSaveInp struct {
+	model.AutoDeleteConfig
+}
+
+func (in *AutoDeleteConfigSaveInp) Filter(ctx context.Context) error {
+	if err := checkSwitch(in.Enabled, "频道自动删除开关"); err != nil {
+		return err
+	}
+	in.BotIds = uniquePositiveInt64Config(in.BotIds)
+	in.Keywords = uniqueStringsConfig(in.Keywords)
+	return nil
+}
+
+type AntiScanConfigViewInp struct{}
+
+type AntiScanConfigViewModel struct {
+	*model.AntiScanConfig
+}
+
+type AntiScanConfigSaveInp struct {
+	model.AntiScanConfig
+}
+
+func (in *AntiScanConfigSaveInp) Filter(ctx context.Context) error {
+	in.MaskMode = strings.ToLower(strings.TrimSpace(in.MaskMode))
+	in.QrText = strings.TrimSpace(in.QrText)
+	in.StickerImage = strings.TrimSpace(in.StickerImage)
+	in.WatermarkText = strings.TrimSpace(in.WatermarkText)
+	in.StickerText = strings.TrimSpace(in.StickerText)
+	if in.MaskMode == "" {
+		in.MaskMode = "qr"
+	}
+	if in.MaskMode != "qr" && in.MaskMode != "sticker" {
+		return gerror.New("打码方式不合法")
+	}
+	if err := checkSwitch(in.Enabled, "防扫图开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.DefaultNewNoteEnabled, "新笔记默认防扫图开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.MetadataStripEnabled, "移除图片元信息开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.PortraitBackgroundEnabled, "人像背景贴图开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.BackgroundReplaceEnabled, "体验替换背景开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.WatermarkEnabled, "水印开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.NoiseEnabled, "噪点扰动开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.CompressionEnabled, "压缩重采样开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.ColorJitterEnabled, "色彩轻扰动开关"); err != nil {
+		return err
+	}
+	if in.MaskCount <= 0 {
+		in.MaskCount = 1
+	}
+	if in.MaskCount > 2 {
+		return gerror.New("打码数量不能超过2个")
+	}
+	if in.StickerOpacity <= 0 {
+		in.StickerOpacity = 18
+	}
+	if in.StickerOpacity > 100 {
+		return gerror.New("贴图透明度不能超过100")
+	}
+	if in.NoiseStrength <= 0 {
+		in.NoiseStrength = 18
+	}
+	if in.NoiseStrength > 60 {
+		return gerror.New("噪点强度不能超过60")
+	}
+	if in.CompressionQuality <= 0 {
+		in.CompressionQuality = 82
+	}
+	if in.CompressionQuality < 60 || in.CompressionQuality > 95 {
+		return gerror.New("输出质量必须在60到95之间")
+	}
+	return nil
+}
+
+func checkSwitch(value int, name string) error {
+	if value != 0 && value != 1 {
+		return gerror.Newf("%s不合法", name)
+	}
+	return nil
+}
+
+func checkTimeRange(enabled int, start string, end string) error {
+	if start != "" && !isTimeHHMM(start) {
+		return gerror.New("发送开始时间格式不合法")
+	}
+	if end != "" && !isTimeHHMM(end) {
+		return gerror.New("发送结束时间格式不合法")
+	}
+	if enabled == 1 {
+		if start == "" || end == "" {
+			return gerror.New("启用发送时间窗口后，请设置开始和结束时间")
+		}
+		if start >= end {
+			return gerror.New("发送开始时间必须早于结束时间")
+		}
+	}
+	return nil
+}
+
+func isTimeHHMM(value string) bool {
+	matched, _ := regexp.MatchString(`^([01]\d|2[0-3]):[0-5]\d$`, value)
+	return matched
+}
+
+func uniquePositiveInt64Config(items []int64) []int64 {
+	if len(items) == 0 {
+		return []int64{}
+	}
+	seen := make(map[int64]struct{}, len(items))
+	list := make([]int64, 0, len(items))
+	for _, item := range items {
+		if item <= 0 {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		list = append(list, item)
+	}
+	return list
+}
+
+func uniqueStringsConfig(items []string) []string {
+	if len(items) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(items))
+	list := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		list = append(list, item)
+	}
+	return list
 }

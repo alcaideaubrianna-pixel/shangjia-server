@@ -324,6 +324,54 @@ type AdminProfileStatsRes struct {
 	*sysin.ProfileStatsModel
 }
 
+type AdminPublishConfigViewReq struct {
+	g.Meta `path:"/publish/admin/config/view" method:"get" tags:"上架插件管理端" summary:"查看全局推送配置"`
+	sysin.PublishConfigViewInp
+}
+
+type AdminPublishConfigViewRes struct {
+	*sysin.PublishConfigViewModel
+}
+
+type AdminPublishConfigSaveReq struct {
+	g.Meta `path:"/publish/admin/config/save" method:"post" tags:"上架插件管理端" summary:"保存全局推送配置"`
+	sysin.PublishConfigSaveInp
+}
+
+type AdminPublishConfigSaveRes struct{}
+
+type AdminAutoDeleteConfigViewReq struct {
+	g.Meta `path:"/publish/admin/autoDelete/view" method:"get" tags:"上架插件管理端" summary:"查看频道自动删除配置"`
+	sysin.AutoDeleteConfigViewInp
+}
+
+type AdminAutoDeleteConfigViewRes struct {
+	*sysin.AutoDeleteConfigViewModel
+}
+
+type AdminAutoDeleteConfigSaveReq struct {
+	g.Meta `path:"/publish/admin/autoDelete/save" method:"post" tags:"上架插件管理端" summary:"保存频道自动删除配置"`
+	sysin.AutoDeleteConfigSaveInp
+}
+
+type AdminAutoDeleteConfigSaveRes struct{}
+
+type AdminAntiScanConfigViewReq struct {
+	g.Meta `path:"/publish/admin/antiScan/view" method:"get" tags:"上架插件管理端" summary:"查看防扫图配置"`
+	sysin.AntiScanConfigViewInp
+}
+
+type AdminAntiScanConfigViewRes struct {
+	*sysin.AntiScanConfigViewModel
+}
+
+type AdminAntiScanConfigSaveReq struct {
+	g.Meta `path:"/publish/admin/antiScan/save" method:"post" tags:"上架插件管理端" summary:"保存防扫图配置"`
+	sysin.AntiScanConfigSaveInp
+}
+
+type AdminAntiScanConfigSaveRes struct{}
+
 type MyTaskListReq struct {
 	g.Meta `path:"/publish/task/list" method:"get" tags:"上架插件" summary:"我的上架任务列表"`
 	sysin.TaskListInp

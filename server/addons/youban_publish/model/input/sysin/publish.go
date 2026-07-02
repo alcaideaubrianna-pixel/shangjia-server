@@ -456,26 +456,29 @@ type ProfileViewInp struct {
 }
 
 type ProfileModel struct {
-	Id            int64       `json:"id" dc:"资料ID"`
-	TaskId        int64       `json:"taskId" dc:"任务ID"`
-	TenantId      int64       `json:"tenantId" dc:"租户ID"`
-	AccountId     int64       `json:"accountId" dc:"上架账号ID"`
-	ChannelIdJson string      `json:"channelIdJson" dc:"推送频道ID JSON"`
-	ProfileNo     string      `json:"profileNo" dc:"资料编号"`
-	Title         string      `json:"title" dc:"标题"`
-	Summary       string      `json:"summary" dc:"摘要"`
-	PlainText     string      `json:"plainText" dc:"正文"`
-	Province      string      `json:"province" dc:"省份"`
-	City          string      `json:"city" dc:"城市"`
-	Tag           string      `json:"tag" dc:"标签"`
-	Visibility    string      `json:"visibility" dc:"可见性"`
-	ReviewStatus  string      `json:"reviewStatus" dc:"审核状态"`
-	Status        int         `json:"status" dc:"状态"`
-	ImageCount    int         `json:"imageCount" dc:"图片数"`
-	VideoCount    int         `json:"videoCount" dc:"视频数"`
-	PublishedAt   *gtime.Time `json:"publishedAt" dc:"发布时间"`
-	CreatedAt     *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt     *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id              int64       `json:"id" dc:"资料ID"`
+	TaskId          int64       `json:"taskId" dc:"任务ID"`
+	TenantId        int64       `json:"tenantId" dc:"租户ID"`
+	AccountId       int64       `json:"accountId" dc:"上架账号ID"`
+	Nickname        string      `json:"nickname" dc:"账号名称"`
+	ChannelIdJson   string      `json:"channelIdJson" dc:"推送频道ID JSON"`
+	AntiScanEnabled int         `json:"antiScanEnabled" dc:"是否防扫图处理"`
+	CustomerRemark  string      `json:"customerRemark" dc:"客服备注"`
+	ProfileNo       string      `json:"profileNo" dc:"资料编号"`
+	Title           string      `json:"title" dc:"标题"`
+	Summary         string      `json:"summary" dc:"摘要"`
+	PlainText       string      `json:"plainText" dc:"正文"`
+	Province        string      `json:"province" dc:"省份"`
+	City            string      `json:"city" dc:"城市"`
+	Tag             string      `json:"tag" dc:"标签"`
+	Visibility      string      `json:"visibility" dc:"可见性"`
+	ReviewStatus    string      `json:"reviewStatus" dc:"审核状态"`
+	Status          int         `json:"status" dc:"状态"`
+	ImageCount      int         `json:"imageCount" dc:"图片数"`
+	VideoCount      int         `json:"videoCount" dc:"视频数"`
+	PublishedAt     *gtime.Time `json:"publishedAt" dc:"发布时间"`
+	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt       *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type ProfileViewModel struct {
@@ -493,16 +496,19 @@ type ProfileImageSearchInp struct {
 }
 
 type ProfileSaveInp struct {
-	Id         int64   `json:"id" dc:"资料ID"`
-	TaskId     int64   `json:"taskId" dc:"任务ID"`
-	ChannelIds []int64 `json:"channelIds" dc:"推送频道ID列表"`
-	Title      string  `json:"title" v:"required#标题不能为空" dc:"标题"`
-	Province   string  `json:"province" dc:"省份"`
-	City       string  `json:"city" dc:"城市"`
-	PlainText  string  `json:"plainText" dc:"正文"`
-	Tag        string  `json:"tag" dc:"标签"`
-	Visibility string  `json:"visibility" dc:"可见性：private/public/member_only"`
-	Status     int     `json:"status" dc:"状态：1上架 2下架"`
+	Id              int64   `json:"id" dc:"资料ID"`
+	TaskId          int64   `json:"taskId" dc:"任务ID"`
+	ChannelIds      []int64 `json:"channelIds" dc:"推送频道ID列表"`
+	Title           string  `json:"title" v:"required#标题不能为空" dc:"标题"`
+	Province        string  `json:"province" dc:"省份"`
+	City            string  `json:"city" dc:"城市"`
+	PlainText       string  `json:"plainText" dc:"正文"`
+	Tag             string  `json:"tag" dc:"标签"`
+	CustomerRemark  string  `json:"customerRemark" dc:"客服备注"`
+	AntiScanEnabled int     `json:"antiScanEnabled" dc:"是否防扫图处理"`
+	PublishAt       string  `json:"publishAt" dc:"定时上架时间"`
+	Visibility      string  `json:"visibility" dc:"可见性：private/public/member_only"`
+	Status          int     `json:"status" dc:"状态：1上架 2下架"`
 }
 
 func (in *ProfileSaveInp) Filter(ctx context.Context) error {
@@ -511,6 +517,8 @@ func (in *ProfileSaveInp) Filter(ctx context.Context) error {
 	in.City = strings.TrimSpace(in.City)
 	in.PlainText = strings.TrimSpace(in.PlainText)
 	in.Tag = strings.TrimSpace(in.Tag)
+	in.CustomerRemark = strings.TrimSpace(in.CustomerRemark)
+	in.PublishAt = strings.TrimSpace(in.PublishAt)
 	in.Visibility = strings.TrimSpace(in.Visibility)
 	if in.Title == "" {
 		return gerror.New("标题不能为空")
@@ -526,6 +534,12 @@ func (in *ProfileSaveInp) Filter(ctx context.Context) error {
 	}
 	if in.Status != 1 && in.Status != 2 {
 		return gerror.New("资料状态不合法")
+	}
+	if in.AntiScanEnabled != 0 && in.AntiScanEnabled != 1 {
+		return gerror.New("防扫图配置不合法")
+	}
+	if in.PublishAt != "" && gtime.NewFromStr(in.PublishAt) == nil {
+		return gerror.New("定时上架时间不合法")
 	}
 	return nil
 }

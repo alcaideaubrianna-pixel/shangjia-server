@@ -396,6 +396,57 @@ func (c *cPublishAdmin) ProfileStats(ctx context.Context, req *publish.AdminProf
 	return
 }
 
+func (c *cPublishAdmin) PublishConfigView(ctx context.Context, req *publish.AdminPublishConfigViewReq) (res *publish.AdminPublishConfigViewRes, err error) {
+	data, err := service.SysConfig().PublishConfigView(ctx, &req.PublishConfigViewInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminPublishConfigViewRes{PublishConfigViewModel: data}
+	return
+}
+
+func (c *cPublishAdmin) PublishConfigSave(ctx context.Context, req *publish.AdminPublishConfigSaveReq) (res *publish.AdminPublishConfigSaveRes, err error) {
+	if err = service.SysConfig().PublishConfigSave(ctx, &req.PublishConfigSaveInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminPublishConfigSaveRes{}
+	return
+}
+
+func (c *cPublishAdmin) AutoDeleteConfigView(ctx context.Context, req *publish.AdminAutoDeleteConfigViewReq) (res *publish.AdminAutoDeleteConfigViewRes, err error) {
+	data, err := service.SysConfig().AutoDeleteConfigView(ctx, &req.AutoDeleteConfigViewInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminAutoDeleteConfigViewRes{AutoDeleteConfigViewModel: data}
+	return
+}
+
+func (c *cPublishAdmin) AutoDeleteConfigSave(ctx context.Context, req *publish.AdminAutoDeleteConfigSaveReq) (res *publish.AdminAutoDeleteConfigSaveRes, err error) {
+	if err = service.SysConfig().AutoDeleteConfigSave(ctx, &req.AutoDeleteConfigSaveInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminAutoDeleteConfigSaveRes{}
+	return
+}
+
+func (c *cPublishAdmin) AntiScanConfigView(ctx context.Context, req *publish.AdminAntiScanConfigViewReq) (res *publish.AdminAntiScanConfigViewRes, err error) {
+	data, err := service.SysConfig().AntiScanConfigView(ctx, &req.AntiScanConfigViewInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminAntiScanConfigViewRes{AntiScanConfigViewModel: data}
+	return
+}
+
+func (c *cPublishAdmin) AntiScanConfigSave(ctx context.Context, req *publish.AdminAntiScanConfigSaveReq) (res *publish.AdminAntiScanConfigSaveRes, err error) {
+	if err = service.SysConfig().AntiScanConfigSave(ctx, &req.AntiScanConfigSaveInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminAntiScanConfigSaveRes{}
+	return
+}
+
 func (c *cPublish) MyTaskList(ctx context.Context, req *publish.MyTaskListReq) (res *publish.MyTaskListRes, err error) {
 	list, totalCount, err := service.SysPublish().MyTaskList(ctx, &req.TaskListInp)
 	if err != nil {

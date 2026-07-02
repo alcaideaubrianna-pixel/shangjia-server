@@ -85,6 +85,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_task` (
   `plain_text` text COMMENT '正文',
   `media_count` int(11) NOT NULL DEFAULT '0' COMMENT '媒体数量',
   `channel_id_json` text COMMENT '推送频道ID JSON',
+  `customer_remark` text COMMENT '客服备注',
+  `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否防扫图处理',
   `tg_push_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否推送TG',
   `tg_status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT 'TG状态',
   `status` varchar(32) NOT NULL DEFAULT 'draft' COMMENT '任务状态',
@@ -106,6 +108,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_task` (
 ALTER TABLE `hg_youban_publish_task` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `id`;
 ALTER TABLE `hg_youban_publish_task` ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
 ALTER TABLE `hg_youban_publish_task` ADD COLUMN `channel_id_json` text COMMENT '推送频道ID JSON' AFTER `media_count`;
+ALTER TABLE `hg_youban_publish_task` ADD COLUMN `customer_remark` text COMMENT '客服备注' AFTER `channel_id_json`;
+ALTER TABLE `hg_youban_publish_task` ADD COLUMN `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否防扫图处理' AFTER `customer_remark`;
 UPDATE `hg_youban_publish_task` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
 ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_tenant_client_request` (`tenant_id`,`client_request_id`);
 ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_tenant_status` (`tenant_id`,`status`,`id`);
@@ -424,9 +428,68 @@ INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`
 SELECT 'youban_publish', 'telegram', '默认推送 Chat ID', 'string', 'defaultTargetChat', '', '', 70, '资料发布后默认推送的 Telegram chat_id，可由后续频道配置覆盖', 0, 1, NOW(), NOW()
 WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_addons_config` WHERE `addon_name`='youban_publish' AND `key`='defaultTargetChat');
 
+INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
+SELECT seed.`addon_name`, seed.`group`, seed.`name`, seed.`type`, seed.`key`, seed.`value`, seed.`default_value`, seed.`sort`, seed.`tip`, 0, 1, NOW(), NOW()
+FROM (
+  SELECT 'youban_publish' AS `addon_name`, 'publish' AS `group`, '循环上架开关' AS `name`, 'int' AS `type`, 'cyclePublishEnabled' AS `key`, '0' AS `value`, '0' AS `default_value`, 100 AS `sort`, '是否启用全局循环上架' AS `tip` UNION ALL
+  SELECT 'youban_publish', 'publish', '循环上架天数', 'int', 'cyclePublishDays', '4', '4', 110, '循环上架间隔天数' UNION ALL
+  SELECT 'youban_publish', 'publish', '循环上架时间', 'string', 'cyclePublishTime', '09:00', '09:00', 120, '每天循环上架执行时间' UNION ALL
+  SELECT 'youban_publish', 'publish', '下架不推送到下架频道', 'int', 'skipDownChannelEnabled', '1', '1', 130, '资料下架时是否跳过下架频道推送' UNION ALL
+  SELECT 'youban_publish', 'publish', '发送间隔秒数', 'int', 'sendIntervalSeconds', '3', '3', 140, 'Telegram 消息发送间隔' UNION ALL
+  SELECT 'youban_publish', 'publish', '发送时间窗口开关', 'int', 'sendWindowEnabled', '0', '0', 150, '是否限制自动发送执行时间段' UNION ALL
+  SELECT 'youban_publish', 'publish', '发送开始时间', 'string', 'sendWindowStart', '', '', 160, '自动发送允许开始时间' UNION ALL
+  SELECT 'youban_publish', 'publish', '发送结束时间', 'string', 'sendWindowEnd', '', '', 170, '自动发送允许结束时间' UNION ALL
+  SELECT 'youban_publish', 'publish', '失败处理策略', 'string', 'failureStrategy', 'continue', 'continue', 180, 'continue 继续后续任务，stop 停止后续任务' UNION ALL
+  SELECT 'youban_publish', 'publish', '失败重试开关', 'int', 'retryEnabled', '1', '1', 190, '发送失败后是否重试' UNION ALL
+  SELECT 'youban_publish', 'publish', '最大重试次数', 'int', 'maxRetryCount', '3', '3', 200, '发送失败最大重试次数' UNION ALL
+  SELECT 'youban_publish', 'publish', '重试间隔分钟', 'int', 'retryIntervalMinutes', '5', '5', 210, '发送失败重试间隔' UNION ALL
+  SELECT 'youban_publish', 'publish', '默认防扫图开关', 'int', 'defaultAntiScanEnabled', '1', '1', 220, '新发布内容默认是否启用防扫图' UNION ALL
+  SELECT 'youban_publish', 'autoDelete', '频道自动删除开关', 'int', 'autoDeleteEnabled', '0', '0', 200, '是否启用频道自动删除' UNION ALL
+  SELECT 'youban_publish', 'autoDelete', '自动删除 Bot ID', '[]int64', 'botIds', '[]', '[]', 210, '执行自动删除的 Bot ID 列表' UNION ALL
+  SELECT 'youban_publish', 'autoDelete', '自动删除关键词', '[]string', 'keywords', '[]', '[]', 220, '命中后自动删除的关键词列表' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '防扫图总开关', 'int', 'antiScanEnabled', '1', '1', 300, '是否启用防扫图能力' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '新笔记默认防扫图', 'int', 'defaultNewNoteEnabled', '1', '1', 310, '新笔记默认是否开启防扫图' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '移除图片元信息', 'int', 'metadataStripEnabled', '1', '1', 320, '是否移除 EXIF 等图片元信息' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '人像背景贴图', 'int', 'portraitBackgroundEnabled', '1', '1', 330, '是否启用人像背景贴图' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '体验替换背景', 'int', 'backgroundReplaceEnabled', '0', '0', 340, '是否预留替换背景处理' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '打码方式', 'string', 'maskMode', 'qr', 'qr', 350, '打码方式：qr二维码模式，sticker贴图模式' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '打码数量', 'int', 'maskCount', '1', '1', 360, '同一张图打码数量，最多2个' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '二维码文案', 'string', 'qrText', '仅供本频道查看', '仅供本频道查看', 370, '二维码模式的展示文案' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '贴图图片', 'string', 'stickerImage', '', '', 380, '贴图模式使用的正方形贴图' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '贴图透明度', 'int', 'stickerOpacity', '18', '18', 390, '防扫图贴图透明度，1-100' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '水印开关', 'int', 'watermarkEnabled', '1', '1', 400, '是否启用轻水印扰动' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '水印文案', 'string', 'watermarkText', 'youban', 'youban', 410, '防扫图水印文案' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '贴纸文案', 'string', 'stickerText', '', '', 420, '防扫图贴纸文案' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '噪点扰动', 'int', 'noiseEnabled', '1', '1', 430, '是否启用轻微噪点扰动' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '噪点强度', 'int', 'noiseStrength', '18', '18', 440, '噪点扰动强度' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '压缩重采样', 'int', 'compressionEnabled', '1', '1', 450, '是否启用压缩重采样' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '输出质量', 'int', 'compressionQuality', '82', '82', 460, '压缩重采样输出质量' UNION ALL
+  SELECT 'youban_publish', 'antiScan', '色彩轻扰动', 'int', 'colorJitterEnabled', '1', '1', 470, '是否启用色彩轻扰动'
+) seed
+WHERE NOT EXISTS (
+  SELECT 1 FROM `hg_sys_addons_config` c
+  WHERE c.`addon_name` = seed.`addon_name`
+    AND c.`group` = seed.`group`
+    AND c.`key` = seed.`key`
+);
+
 UPDATE `hg_sys_addons_config`
 SET `status` = 2,
     `updated_at` = NOW()
 WHERE `addon_name` = 'youban_publish'
   AND `group` = 'account'
   AND `key` IN ('defaultRoleId', 'defaultDeptId');
+
+UPDATE `hg_sys_addons_config`
+SET `status` = 2,
+    `updated_at` = NOW()
+WHERE `addon_name` = 'youban_publish'
+  AND `group` = 'antiScan'
+  AND `key` IN ('enabled', 'mode', 'method', 'stickerStyle', 'stickerDensity', 'qrMaskEnabled', 'qrCustomStickerEnabled', 'qrCount', 'customStickerEnabled');
+
+UPDATE `hg_sys_addons_config`
+SET `status` = 2,
+    `updated_at` = NOW()
+WHERE `addon_name` = 'youban_publish'
+  AND `group` = 'autoDelete'
+  AND `key` = 'enabled';
