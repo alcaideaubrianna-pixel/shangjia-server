@@ -44,22 +44,13 @@ func (s *sSysPublish) StopRuntime() {
 		case <-time.After(3 * time.Second):
 		}
 	}
+	s.stopTelegramQueueWorker()
 }
 
 func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
+	s.startTelegramQueueWorker(ctx)
 	go s.runTelegramRuntime(ctx)
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := s.consumeTelegramJobs(ctx); err != nil {
-				g.Log().Warningf(ctx, "消费上架插件TG任务失败：%+v", err)
-			}
-		}
-	}
+	<-ctx.Done()
 }
 
 func (s *sSysPublish) runTelegramRuntime(ctx context.Context) {
