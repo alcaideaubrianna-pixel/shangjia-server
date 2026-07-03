@@ -113,6 +113,10 @@ func (s *sSysPublish) detectAntiScanImage(ctx context.Context, imageHash string,
 	if cached, ok := s.getAntiScanDetectionCache(ctx, imageHash); ok {
 		return cached, []string{}, nil
 	}
+	imageBytes, err := normalizeTencentVisionImageBytes(imageBytes)
+	if err != nil {
+		return nil, nil, err
+	}
 	client := newTencentVisionClient(conf.TencentSecretId, conf.TencentSecretKey, conf.TencentRegion, conf.TencentBdaEndpoint, conf.TencentIaiEndpoint)
 	result, err := client.detect(ctx, base64.StdEncoding.EncodeToString(imageBytes))
 	if err != nil {

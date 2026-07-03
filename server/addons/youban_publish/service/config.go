@@ -21,6 +21,7 @@ type ISysConfig interface {
 	CloudResourceConfigSave(ctx context.Context, in *sysin.CloudResourceConfigSaveInp) error
 	AntiScanConfigView(ctx context.Context, in *sysin.AntiScanConfigViewInp) (res *sysin.AntiScanConfigViewModel, err error)
 	AntiScanConfigSave(ctx context.Context, in *sysin.AntiScanConfigSaveInp) error
+	AntiScanConfigSaveTab(ctx context.Context, in *sysin.AntiScanConfigSaveTabInp) error
 }
 
 var localSysConfig ISysConfig

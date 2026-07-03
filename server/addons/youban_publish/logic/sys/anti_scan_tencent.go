@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"strconv"
 	"strings"
 	"time"
@@ -59,6 +61,26 @@ func (c *tencentVisionClient) detect(ctx context.Context, imageBase64 string) (*
 		SegmentRaw: segmentRaw,
 		FaceCount:  faceCount,
 	}, nil
+}
+
+func normalizeTencentVisionImageBytes(imageBytes []byte) ([]byte, error) {
+	_, format, err := image.DecodeConfig(bytes.NewReader(imageBytes))
+	if err != nil {
+		return nil, gerror.New("图片格式不支持，请上传 JPG、PNG、GIF 或 WEBP")
+	}
+	switch strings.ToLower(format) {
+	case "jpeg", "png":
+		return imageBytes, nil
+	}
+	img, _, err := image.Decode(bytes.NewReader(imageBytes))
+	if err != nil {
+		return nil, gerror.New("图片格式不支持，请上传 JPG、PNG、GIF 或 WEBP")
+	}
+	buf := bytes.NewBuffer(nil)
+	if err = jpeg.Encode(buf, img, &jpeg.Options{Quality: 92}); err != nil {
+		return nil, gerror.Wrap(err, "转换腾讯云检测图片失败")
+	}
+	return buf.Bytes(), nil
 }
 
 // detectFace 调用腾讯云 IAI DetectFace，结果用于二维码和贴图避开人脸区域。

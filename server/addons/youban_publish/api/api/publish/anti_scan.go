@@ -22,6 +22,13 @@ type AdminCloudResourceConfigSaveReq struct {
 
 type AdminCloudResourceConfigSaveRes struct{}
 
+type AdminAntiScanConfigSaveTabReq struct {
+	g.Meta `path:"/publish/admin/antiScan/saveTab" method:"post" tags:"上架插件管理端" summary:"按分栏保存防扫图配置"`
+	sysin.AntiScanConfigSaveTabInp
+}
+
+type AdminAntiScanConfigSaveTabRes struct{}
+
 type AdminAntiScanPreviewReq struct {
 	g.Meta `path:"/publish/admin/antiScan/preview" method:"post" tags:"上架插件管理端" summary:"防扫图实时预览"`
 	sysin.AntiScanPreviewInp

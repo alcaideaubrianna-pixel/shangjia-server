@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 
@@ -165,6 +166,9 @@ func (s *sSysConfig) CloudResourceConfigSave(ctx context.Context, in *sysin.Clou
 		}
 		in.TencentSecretKey = oldConf.TencentSecretKey
 	}
+	if err := validateCloudResourceCredential(ctx, &in.CloudResourceConfig); err != nil {
+		return err
+	}
 	return s.updateConfigGroup(ctx, publishConfigGroupCloudResource, cloudResourceConfigMap(&in.CloudResourceConfig))
 }
 
@@ -193,6 +197,35 @@ func (s *sSysConfig) AntiScanConfigSave(ctx context.Context, in *sysin.AntiScanC
 		return err
 	}
 	return s.updateConfigGroup(ctx, publishConfigGroupAntiScan, antiScanConfigMap(&in.AntiScanConfig))
+}
+
+func (s *sSysConfig) AntiScanConfigSaveTab(ctx context.Context, in *sysin.AntiScanConfigSaveTabInp) error {
+	if in == nil {
+		return gerror.New("防扫图分栏配置不能为空")
+	}
+	if err := in.Filter(ctx); err != nil {
+		return err
+	}
+	return s.updateConfigGroup(ctx, publishConfigGroupAntiScan, antiScanTabConfigMap(in.Tab, &in.AntiScanConfig))
+}
+
+func validateCloudResourceCredential(ctx context.Context, conf *model.CloudResourceConfig) error {
+	if conf.TencentVisionEnabled != 1 {
+		return nil
+	}
+	imageBytes, _, err := readAntiScanPreviewImage(ctx, nil, 1)
+	if err != nil {
+		return err
+	}
+	imageBytes, err = normalizeTencentVisionImageBytes(imageBytes)
+	if err != nil {
+		return err
+	}
+	client := newTencentVisionClient(conf.TencentSecretId, conf.TencentSecretKey, conf.TencentRegion, conf.TencentBdaEndpoint, conf.TencentIaiEndpoint)
+	if _, err = client.detect(ctx, base64.StdEncoding.EncodeToString(imageBytes)); err != nil {
+		return gerror.Wrap(err, "腾讯云视觉密钥或权限校验失败")
+	}
+	return nil
 }
 
 func (s *sSysConfig) scanConfigGroup(ctx context.Context, group string, dst interface{}) error {
@@ -368,6 +401,65 @@ func antiScanConfigMap(conf *model.AntiScanConfig) g.Map {
 		"sharpenBlurEnabled":         conf.SharpenBlurEnabled,
 		"sharpenBlurMode":            conf.SharpenBlurMode,
 		"sharpenBlurStrength":        conf.SharpenBlurStrength,
+	}
+}
+
+func antiScanTabConfigMap(tab string, conf *model.AntiScanConfig) g.Map {
+	switch tab {
+	case "basic":
+		return g.Map{
+			"metadataStripEnabled": conf.MetadataStripEnabled,
+			"resizeEnabled":        conf.ResizeEnabled,
+			"resizeScale":          conf.ResizeScale,
+			"cropEnabled":          conf.CropEnabled,
+			"cropPercent":          conf.CropPercent,
+			"compressionEnabled":   conf.CompressionEnabled,
+			"compressionQuality":   conf.CompressionQuality,
+		}
+	case "disturbance":
+		return g.Map{
+			"noiseEnabled":              conf.NoiseEnabled,
+			"noiseStrength":             conf.NoiseStrength,
+			"jpegQualityControlEnabled": conf.JpegQualityControlEnabled,
+			"colorJitterEnabled":        conf.ColorJitterEnabled,
+			"colorJitterStrength":       conf.ColorJitterStrength,
+			"sharpenBlurEnabled":        conf.SharpenBlurEnabled,
+			"sharpenBlurMode":           conf.SharpenBlurMode,
+			"sharpenBlurStrength":       conf.SharpenBlurStrength,
+		}
+	case "mask":
+		return g.Map{
+			"maskEnabled":    conf.MaskEnabled,
+			"maskMode":       conf.MaskMode,
+			"maskCount":      conf.MaskCount,
+			"qrText":         conf.QrText,
+			"stickerOpacity": conf.StickerOpacity,
+			"stickerImage":   conf.StickerImage,
+			"stickerText":    conf.StickerText,
+		}
+	case "scope":
+		return g.Map{
+			"antiScanEnabled":            conf.Enabled,
+			"defaultNewNoteEnabled":      conf.DefaultNewNoteEnabled,
+			"existingBatchEnabled":       conf.ExistingBatchEnabled,
+			"forceBeforeSendEnabled":     conf.ForceBeforeSendEnabled,
+			"allowSingleOverrideEnabled": conf.AllowSingleOverrideEnabled,
+		}
+	case "watermark":
+		return g.Map{
+			"portraitBackgroundEnabled": conf.PortraitBackgroundEnabled,
+			"backgroundReplaceEnabled":  conf.BackgroundReplaceEnabled,
+			"backgroundBlurEnabled":     conf.BackgroundBlurEnabled,
+			"backgroundTextureEnabled":  conf.BackgroundTextureEnabled,
+			"stickerOpacity":            conf.StickerOpacity,
+			"watermarkEnabled":          conf.WatermarkEnabled,
+			"profileNoWatermarkEnabled": conf.ProfileNoWatermarkEnabled,
+			"watermarkFontSize":         conf.WatermarkFontSize,
+			"watermarkOpacity":          conf.WatermarkOpacity,
+			"watermarkText":             conf.WatermarkText,
+		}
+	default:
+		return antiScanConfigMap(conf)
 	}
 }
 

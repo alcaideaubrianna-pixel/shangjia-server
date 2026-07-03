@@ -116,6 +116,26 @@ type AntiScanConfigSaveInp struct {
 	model.AntiScanConfig
 }
 
+type AntiScanConfigSaveTabInp struct {
+	Tab string `json:"tab"`
+	model.AntiScanConfig
+}
+
+func (in *AntiScanConfigSaveTabInp) Filter(ctx context.Context) error {
+	in.Tab = strings.ToLower(strings.TrimSpace(in.Tab))
+	switch in.Tab {
+	case "basic", "disturbance", "mask", "scope", "watermark":
+	default:
+		return gerror.New("防扫图分栏不合法")
+	}
+	save := &AntiScanConfigSaveInp{AntiScanConfig: in.AntiScanConfig}
+	if err := save.Filter(ctx); err != nil {
+		return err
+	}
+	in.AntiScanConfig = save.AntiScanConfig
+	return nil
+}
+
 func (in *AntiScanConfigSaveInp) Filter(ctx context.Context) error {
 	in.MaskMode = strings.ToLower(strings.TrimSpace(in.MaskMode))
 	in.QrText = strings.TrimSpace(in.QrText)

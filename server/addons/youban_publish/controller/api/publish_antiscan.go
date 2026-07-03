@@ -35,3 +35,11 @@ func (c *cPublishAdmin) AntiScanPreview(ctx context.Context, req *publish.AdminA
 	res = &publish.AdminAntiScanPreviewRes{AntiScanPreviewModel: data}
 	return
 }
+
+func (c *cPublishAdmin) AntiScanConfigSaveTab(ctx context.Context, req *publish.AdminAntiScanConfigSaveTabReq) (res *publish.AdminAntiScanConfigSaveTabRes, err error) {
+	if err = service.SysConfig().AntiScanConfigSaveTab(ctx, &req.AntiScanConfigSaveTabInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminAntiScanConfigSaveTabRes{}
+	return
+}
