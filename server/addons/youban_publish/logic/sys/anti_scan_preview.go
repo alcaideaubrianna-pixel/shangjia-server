@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"image"
 	_ "image/gif"
-	_ "image/jpeg"
+	"image/jpeg"
 	_ "image/png"
 	"strings"
 
@@ -34,7 +34,7 @@ import (
 
 const (
 	antiScanCacheTable           = "hg_youban_publish_anti_scan_cache"
-	antiScanPreviewRenderVersion = 2
+	antiScanPreviewRenderVersion = 3
 )
 
 // AdminAntiScanPreview 生成防扫图实时预览，并按图片 pHash + 配置 hash 复用缓存。
@@ -177,6 +177,10 @@ func uploadAntiScanPreview(ctx context.Context, imageBytes []byte, in *sysin.Ant
 	if err != nil {
 		return "", gerror.New("图片格式不支持，请上传 JPG、PNG、GIF 或 WEBP")
 	}
+	imageBytes, format, err = normalizeAntiScanPreviewUploadBytes(imageBytes, format)
+	if err != nil {
+		return "", err
+	}
 	fileHeader, err := file.NewMultipartFileHeader("anti-scan-preview."+antiScanImageExt(format), imageBytes)
 	if err != nil {
 		return "", gerror.Wrap(err, "创建预览图片失败")
@@ -186,6 +190,21 @@ func uploadAntiScanPreview(ctx context.Context, imageBytes []byte, in *sysin.Ant
 		return "", err
 	}
 	return attachment.FileUrl, nil
+}
+
+func normalizeAntiScanPreviewUploadBytes(imageBytes []byte, format string) ([]byte, string, error) {
+	if strings.ToLower(format) != "webp" {
+		return imageBytes, format, nil
+	}
+	img, _, err := image.Decode(bytes.NewReader(imageBytes))
+	if err != nil {
+		return nil, "", gerror.New("图片格式不支持，请上传 JPG、PNG、GIF 或 WEBP")
+	}
+	buf := bytes.NewBuffer(nil)
+	if err = jpeg.Encode(buf, img, &jpeg.Options{Quality: 92}); err != nil {
+		return nil, "", gerror.Wrap(err, "转换预览图片失败")
+	}
+	return buf.Bytes(), "jpeg", nil
 }
 
 func antiScanImageExt(format string) string {
