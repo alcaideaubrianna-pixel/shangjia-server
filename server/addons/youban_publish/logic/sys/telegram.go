@@ -3,7 +3,6 @@ package sys
 import (
 	"context"
 	"encoding/json"
-	"strings"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -22,7 +21,7 @@ func (s *sSysPublish) telegramSetWebhook(ctx context.Context, botToken string, w
 	}
 	params := &tgbot.SetWebhookParams{
 		URL:            webhookURL,
-		AllowedUpdates: []string{"message", "edited_message"},
+		AllowedUpdates: telegramAllowedUpdateNames(),
 	}
 	if conf.WebhookSecret != "" {
 		params.SecretToken = conf.WebhookSecret
@@ -59,19 +58,11 @@ func (s *sSysPublish) telegramUpdateHandler(ctx context.Context, currentBot *tgb
 }
 
 func (s *sSysPublish) handleTelegramUpdate(ctx context.Context, botId int64, update *models.Update) {
-	if update == nil {
-		return
-	}
-	msg := update.Message
-	if msg == nil {
-		msg = update.EditedMessage
-	}
+	msg, updateType := telegramUpdateMessage(update)
 	if msg == nil {
 		return
 	}
-	text := strings.TrimSpace(msg.Text)
-	if text == "" && msg.Caption != "" {
-		text = strings.TrimSpace(msg.Caption)
-	}
-	g.Log().Infof(ctx, "收到上架插件Telegram消息 bot:%d chat:%d message:%d text:%s", botId, msg.Chat.ID, msg.ID, text)
+	text := telegramMessageText(msg)
+	g.Log().Infof(ctx, "收到上架插件Telegram消息 bot:%d type:%s chat:%d message:%d text:%s", botId, updateType, msg.Chat.ID, msg.ID, text)
+	s.handleTelegramAutoDelete(ctx, botId, msg, text)
 }

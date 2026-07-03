@@ -7,6 +7,8 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	"hotgo/internal/dao"
 )
 
 func (s *sSysPublish) lockTelegramJob(ctx context.Context, jobId int64) (telegramJobRecord, bool, error) {
@@ -41,16 +43,20 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 		Where("purpose", purpose).
 		WhereNull("deleted_at").
 		OrderAsc("sort_index").OrderAsc("id")
-	if err := mod.Fields("id,media_type,purpose,file_url,poster_url,tg_file_id,tg_thumb_file_id,sort_index").Scan(&rows); err != nil {
+	if err := mod.Fields("id,media_type,purpose,file_url,poster_url,storage_path,poster_storage_path,tg_file_id,tg_thumb_file_id,sort_index").Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "读取TG媒体失败")
 	}
 	return rows, nil
 }
 
 func (s *sSysPublish) telegramJobTask(ctx context.Context, taskId int64) (gdb.Record, error) {
-	row, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Where("id", taskId).
-		WhereNull("deleted_at").
+	fields := "t.id,t.tenant_id,t.account_id,t.profile_id,t.title,t.province,t.city,t.plain_text,t.tg_push_enabled,t.channel_id_json,a.nickname AS account_nickname,p.profile_no"
+	row, err := g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
+		LeftJoin(publishAccountTable+" a", "a.id=t.account_id AND a.deleted_at IS NULL").
+		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=t.profile_id AND p.deleted_at IS NULL").
+		Fields(fields).
+		Where("t.id", taskId).
+		WhereNull("t.deleted_at").
 		One()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取上架任务失败")

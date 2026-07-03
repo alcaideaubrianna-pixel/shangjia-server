@@ -211,7 +211,7 @@ func (s *sSysPublish) submitTask(ctx context.Context, id int64, accountId int64)
 	if err != nil {
 		return err
 	}
-	if task["status"].String() == sysin.PublishTaskStatusCanceled {
+	if !canSubmitPublishTask(task) {
 		return gerror.New("已取消的任务不能提交")
 	}
 	_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
@@ -254,7 +254,7 @@ func (s *sSysPublish) submitTaskByTenant(ctx context.Context, id int64, tenantId
 	if err != nil {
 		return err
 	}
-	if task["status"].String() == sysin.PublishTaskStatusCanceled {
+	if !canSubmitPublishTask(task) {
 		return gerror.New("已取消的任务不能提交")
 	}
 	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
@@ -296,6 +296,13 @@ func (s *sSysPublish) submitTaskByTenant(ctx context.Context, id int64, tenantId
 		return err
 	}
 	return s.ensureTgJob(ctx, id)
+}
+
+func canSubmitPublishTask(task gdb.Record) bool {
+	if task["status"].String() != sysin.PublishTaskStatusCanceled {
+		return true
+	}
+	return task["profile_id"].Int64() > 0
 }
 
 func (s *sSysPublish) cancelTask(ctx context.Context, id int64, accountId int64) (err error) {

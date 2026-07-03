@@ -8,6 +8,9 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
+	"hotgo/internal/dao"
+	iservice "hotgo/internal/service"
 )
 
 func (s *sSysPublish) updateTelegramMediaFileIds(ctx context.Context, messages []*telegramSentMessage) error {
@@ -75,7 +78,7 @@ func (s *sSysPublish) allTelegramTaskJobsSent(ctx context.Context, taskId int64)
 	}
 	pending, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("task_id", taskId).
-		WhereNot("status", "sent").
+		WhereNotIn("status", []string{"sent", "superseded"}).
 		Count()
 	if err != nil {
 		return false, gerror.Wrap(err, "统计未完成TG任务失败")
@@ -84,18 +87,40 @@ func (s *sSysPublish) allTelegramTaskJobsSent(ctx context.Context, taskId int64)
 }
 
 func (s *sSysPublish) markTaskPublishedAfterTelegram(ctx context.Context, taskId int64) (bool, error) {
+	task, err := s.telegramJobTask(ctx, taskId)
+	if err != nil {
+		return false, err
+	}
+	profileId := task["profile_id"].Int64()
+	now := gtime.Now()
 	result, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
 		Where("id", taskId).
 		WhereNot("status", sysin.PublishTaskStatusPublished).
 		Data(g.Map{
 			"status":       sysin.PublishTaskStatusPublished,
 			"tg_status":    "sent",
-			"published_at": gtime.Now(),
-			"updated_at":   gtime.Now(),
+			"published_at": now,
+			"updated_at":   now,
 		}).
 		Update()
 	if err != nil {
 		return false, gerror.Wrap(err, "更新上架任务发布状态失败")
+	}
+	if profileId > 0 {
+		profileColumns := dao.ContentProfile.Columns()
+		_, err = dao.ContentProfile.Ctx(ctx).
+			Where(profileColumns.Id, profileId).
+			Data(g.Map{
+				profileColumns.Status:      1,
+				profileColumns.Visibility:  consts.ContentVisibilityPublic,
+				profileColumns.PublishedAt: now,
+				profileColumns.UpdatedAt:   now,
+			}).
+			Update()
+		if err != nil {
+			return false, gerror.Wrap(err, "同步资料上架状态失败")
+		}
+		iservice.SysContent().ClearHomeProfileCardsCache(ctx)
 	}
 	affected, _ := result.RowsAffected()
 	return affected > 0, nil

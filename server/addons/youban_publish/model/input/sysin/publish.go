@@ -174,6 +174,72 @@ type AccountSaveModel struct {
 	Password string `json:"password" dc:"账号初始密码"`
 }
 
+type AccountSettingViewInp struct {
+	AccountId int64 `json:"accountId" v:"required|min:1#账号ID不能为空|账号ID不能为空" dc:"账号ID"`
+}
+
+type AccountSettingSaveInp struct {
+	AccountId          int64  `json:"accountId" v:"required|min:1#账号ID不能为空|账号ID不能为空" dc:"账号ID"`
+	EnableSuffix       int    `json:"enableSuffix" dc:"是否启用发送后缀"`
+	SuffixContent      string `json:"suffixContent" dc:"发送后缀内容"`
+	EnableTitleMark    int    `json:"enableTitleMark" dc:"是否启用编号标识"`
+	MarkMode           string `json:"markMode" dc:"前缀模式：nickname/custom"`
+	NumberSource       string `json:"numberSource" dc:"编号来源：sequence/random"`
+	CustomMarkText     string `json:"customMarkText" dc:"自定义前缀"`
+	MarkPosition       string `json:"markPosition" dc:"显示位置：top/bottom/feeLine"`
+	DefaultRecycleDays int    `json:"defaultRecycleDays" dc:"默认循环天数"`
+}
+
+func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
+	in.SuffixContent = strings.TrimSpace(in.SuffixContent)
+	in.MarkMode = strings.TrimSpace(in.MarkMode)
+	in.NumberSource = strings.TrimSpace(in.NumberSource)
+	in.CustomMarkText = strings.TrimSpace(in.CustomMarkText)
+	in.MarkPosition = strings.TrimSpace(in.MarkPosition)
+	if in.MarkMode == "" {
+		in.MarkMode = "nickname"
+	}
+	if in.MarkMode != "nickname" && in.MarkMode != "custom" {
+		return gerror.New("标识模式不合法")
+	}
+	if in.NumberSource == "" {
+		in.NumberSource = "sequence"
+	}
+	if in.NumberSource != "sequence" && in.NumberSource != "random" {
+		return gerror.New("编号来源不合法")
+	}
+	if in.MarkPosition == "" {
+		in.MarkPosition = "top"
+	}
+	if in.MarkPosition != "top" && in.MarkPosition != "bottom" && in.MarkPosition != "feeLine" {
+		return gerror.New("标识显示位置不合法")
+	}
+	if in.EnableSuffix != 0 && in.EnableSuffix != 1 {
+		return gerror.New("发送后缀开关不合法")
+	}
+	if in.EnableTitleMark != 0 && in.EnableTitleMark != 1 {
+		return gerror.New("编号标识开关不合法")
+	}
+	if in.DefaultRecycleDays < 0 || in.DefaultRecycleDays > 30 {
+		return gerror.New("默认循环天数必须在 1-30 天之间")
+	}
+	return nil
+}
+
+type AccountSettingModel struct {
+	AccountId          int64       `json:"accountId" dc:"账号ID"`
+	EnableSuffix       int         `json:"enableSuffix" dc:"是否启用发送后缀"`
+	SuffixContent      string      `json:"suffixContent" dc:"发送后缀内容"`
+	EnableTitleMark    int         `json:"enableTitleMark" dc:"是否启用编号标识"`
+	MarkMode           string      `json:"markMode" dc:"前缀模式"`
+	NumberSource       string      `json:"numberSource" dc:"编号来源"`
+	CustomMarkText     string      `json:"customMarkText" dc:"自定义前缀"`
+	MarkPosition       string      `json:"markPosition" dc:"显示位置"`
+	DefaultRecycleDays int         `json:"defaultRecycleDays" dc:"默认循环天数"`
+	CreatedAt          *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt          *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
 type CurrentAccountModel struct {
 	Id          int64       `json:"id" dc:"账号ID"`
 	TenantId    int64       `json:"tenantId" dc:"租户ID"`
@@ -416,26 +482,27 @@ func (in *MediaSortInp) Filter(ctx context.Context) error {
 }
 
 type MediaModel struct {
-	Id             int64       `json:"id" dc:"ID"`
-	TenantId       int64       `json:"tenantId" dc:"租户ID"`
-	AccountId      int64       `json:"accountId" dc:"账号ID"`
-	TaskId         int64       `json:"taskId" dc:"任务ID"`
-	ProfileId      int64       `json:"profileId" dc:"资料ID"`
-	AttachmentId   int64       `json:"attachmentId" dc:"附件ID"`
-	MediaType      string      `json:"mediaType" dc:"媒体类型"`
-	Purpose        string      `json:"purpose" dc:"用途：display/verify"`
-	Name           string      `json:"name" dc:"文件名"`
-	FileUrl        string      `json:"fileUrl" dc:"访问地址"`
-	PosterUrl      string      `json:"posterUrl" dc:"视频封面"`
-	StoragePath    string      `json:"storagePath" dc:"存储路径"`
-	MimeType       string      `json:"mimeType" dc:"MIME"`
-	Md5            string      `json:"md5" dc:"MD5"`
-	PerceptualHash string      `json:"perceptualHash" dc:"图片感知哈希"`
-	Size           int64       `json:"size" dc:"大小"`
-	SortIndex      int         `json:"sortIndex" dc:"排序"`
-	Status         int         `json:"status" dc:"状态"`
-	CreatedAt      *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt      *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id                int64       `json:"id" dc:"ID"`
+	TenantId          int64       `json:"tenantId" dc:"租户ID"`
+	AccountId         int64       `json:"accountId" dc:"账号ID"`
+	TaskId            int64       `json:"taskId" dc:"任务ID"`
+	ProfileId         int64       `json:"profileId" dc:"资料ID"`
+	AttachmentId      int64       `json:"attachmentId" dc:"附件ID"`
+	MediaType         string      `json:"mediaType" dc:"媒体类型"`
+	Purpose           string      `json:"purpose" dc:"用途：display/verify"`
+	Name              string      `json:"name" dc:"文件名"`
+	FileUrl           string      `json:"fileUrl" dc:"访问地址"`
+	PosterUrl         string      `json:"posterUrl" dc:"视频封面"`
+	StoragePath       string      `json:"storagePath" dc:"存储路径"`
+	PosterStoragePath string      `json:"posterStoragePath" dc:"视频封面存储路径"`
+	MimeType          string      `json:"mimeType" dc:"MIME"`
+	Md5               string      `json:"md5" dc:"MD5"`
+	PerceptualHash    string      `json:"perceptualHash" dc:"图片感知哈希"`
+	Size              int64       `json:"size" dc:"大小"`
+	SortIndex         int         `json:"sortIndex" dc:"排序"`
+	Status            int         `json:"status" dc:"状态"`
+	CreatedAt         *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt         *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type ProfileListInp struct {
@@ -452,11 +519,13 @@ type ProfileListInp struct {
 }
 
 type ProfileViewInp struct {
-	Id int64 `json:"id" v:"required|min:1#资料ID不能为空|资料ID不能为空" dc:"资料ID"`
+	Id   int64  `json:"id" dc:"资料ID"`
+	Uuid string `json:"uuid" dc:"资料UUID"`
 }
 
 type ProfileModel struct {
 	Id              int64       `json:"id" dc:"资料ID"`
+	Uuid            string      `json:"uuid" dc:"资料UUID"`
 	TaskId          int64       `json:"taskId" dc:"任务ID"`
 	TenantId        int64       `json:"tenantId" dc:"租户ID"`
 	AccountId       int64       `json:"accountId" dc:"上架账号ID"`
@@ -497,6 +566,7 @@ type ProfileImageSearchInp struct {
 
 type ProfileSaveInp struct {
 	Id              int64   `json:"id" dc:"资料ID"`
+	Uuid            string  `json:"uuid" dc:"资料UUID"`
 	TaskId          int64   `json:"taskId" dc:"任务ID"`
 	ChannelIds      []int64 `json:"channelIds" dc:"推送频道ID列表"`
 	Title           string  `json:"title" v:"required#标题不能为空" dc:"标题"`
@@ -545,17 +615,20 @@ func (in *ProfileSaveInp) Filter(ctx context.Context) error {
 }
 
 type ProfileSaveModel struct {
-	Id     int64 `json:"id" dc:"资料ID"`
-	TaskId int64 `json:"taskId" dc:"任务ID"`
+	Id     int64  `json:"id" dc:"资料ID"`
+	Uuid   string `json:"uuid" dc:"资料UUID"`
+	TaskId int64  `json:"taskId" dc:"任务ID"`
 }
 
 type ProfileDeleteInp struct {
-	Ids []int64 `json:"ids" v:"required#请选择要删除的资料" dc:"资料ID列表"`
+	Ids   []int64  `json:"ids" dc:"资料ID列表"`
+	Uuids []string `json:"uuids" dc:"资料UUID列表"`
 }
 
 type ProfileStatusInp struct {
-	Ids    []int64 `json:"ids" v:"required#请选择要处理的资料" dc:"资料ID列表"`
-	Status int     `json:"status" v:"required#状态不能为空" dc:"状态：1上架 2下架"`
+	Ids    []int64  `json:"ids" dc:"资料ID列表"`
+	Uuids  []string `json:"uuids" dc:"资料UUID列表"`
+	Status int      `json:"status" v:"required#状态不能为空" dc:"状态：1上架 2下架"`
 }
 
 type NoteListInp struct {

@@ -104,6 +104,28 @@ UPDATE `hg_youban_publish_task` SET `tenant_id` = `merchant_id` WHERE `tenant_id
 ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_tenant_client_request` (`tenant_id`,`client_request_id`);
 ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_tenant_status` (`tenant_id`,`status`,`id`);
 
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_account_setting` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
+  `enable_suffix` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否启用发送后缀',
+  `suffix_content` text COMMENT '发送后缀内容',
+  `enable_title_mark` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否启用编号标识',
+  `mark_mode` varchar(16) NOT NULL DEFAULT 'nickname' COMMENT '标识模式',
+  `number_source` varchar(16) NOT NULL DEFAULT 'sequence' COMMENT '编号来源',
+  `custom_mark_text` varchar(128) NOT NULL DEFAULT '' COMMENT '自定义标识文字',
+  `mark_position` varchar(16) NOT NULL DEFAULT 'bottom' COMMENT '显示位置',
+  `default_recycle_days` int(11) NOT NULL DEFAULT '0' COMMENT '默认循环天数',
+  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
+  `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_account_setting_account` (`tenant_id`,`account_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架账号推送设置';
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
@@ -117,6 +139,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   `name` varchar(255) NOT NULL DEFAULT '' COMMENT '文件名',
   `file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '访问地址',
   `poster_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '视频封面',
+  `poster_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '视频封面存储路径',
   `tg_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram文件ID',
   `tg_thumb_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram缩略图文件ID',
   `storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '存储路径',
@@ -142,6 +165,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
 
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `id`, ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `perceptual_hash` varchar(64) NOT NULL DEFAULT '' COMMENT '图片感知哈希' AFTER `md5`, ADD COLUMN `purpose` varchar(16) NOT NULL DEFAULT 'display' COMMENT '用途：display展示 verify验证' AFTER `media_type`, ADD COLUMN `poster_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '视频封面' AFTER `file_url`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN `poster_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '视频封面存储路径' AFTER `poster_url`;
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tg_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram文件ID' AFTER `poster_url`, ADD COLUMN `tg_thumb_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram缩略图文件ID' AFTER `tg_file_id`;
 UPDATE `hg_youban_publish_media` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
 

@@ -50,6 +50,7 @@ func (s *sSysPublish) StopRuntime() {
 func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	s.startTelegramQueueWorker(ctx)
 	go s.runTelegramRuntime(ctx)
+	go s.runScheduledPublishRuntime(ctx)
 	<-ctx.Done()
 }
 

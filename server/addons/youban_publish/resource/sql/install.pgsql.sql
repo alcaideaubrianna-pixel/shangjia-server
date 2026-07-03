@@ -101,6 +101,28 @@ UPDATE "hg_youban_publish_task" SET "tenant_id" = "merchant_id" WHERE "tenant_id
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_task_tenant_client_request" ON "hg_youban_publish_task" ("tenant_id", "client_request_id") WHERE "client_request_id" <> '';
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_tenant_status" ON "hg_youban_publish_task" ("tenant_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_account_status" ON "hg_youban_publish_task" ("account_id", "status", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_account_setting" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "enable_suffix" smallint NOT NULL DEFAULT 0,
+  "suffix_content" text,
+  "enable_title_mark" smallint NOT NULL DEFAULT 0,
+  "mark_mode" varchar(16) NOT NULL DEFAULT 'nickname',
+  "number_source" varchar(16) NOT NULL DEFAULT 'sequence',
+  "custom_mark_text" varchar(128) NOT NULL DEFAULT '',
+  "mark_position" varchar(16) NOT NULL DEFAULT 'bottom',
+  "default_recycle_days" integer NOT NULL DEFAULT 0,
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "deleted_by" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_account_setting_account" ON "hg_youban_publish_account_setting" ("tenant_id", "account_id") WHERE "deleted_at" IS NULL;
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_media" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
@@ -114,6 +136,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media" (
   "name" varchar(255) NOT NULL DEFAULT '',
   "file_url" varchar(1024) NOT NULL DEFAULT '',
   "poster_url" varchar(1024) NOT NULL DEFAULT '',
+  "poster_storage_path" varchar(1024) NOT NULL DEFAULT '',
   "tg_file_id" varchar(255) NOT NULL DEFAULT '',
   "tg_thumb_file_id" varchar(255) NOT NULL DEFAULT '',
   "storage_path" varchar(1024) NOT NULL DEFAULT '',
@@ -135,6 +158,7 @@ ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "merchant_id" big
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "perceptual_hash" varchar(64) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "purpose" varchar(16) NOT NULL DEFAULT 'display';
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "poster_url" varchar(1024) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "poster_storage_path" varchar(1024) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "tg_file_id" varchar(255) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "tg_thumb_file_id" varchar(255) NOT NULL DEFAULT '';
 UPDATE "hg_youban_publish_media" SET "tenant_id" = "merchant_id" WHERE "tenant_id" = 0 AND "merchant_id" > 0;

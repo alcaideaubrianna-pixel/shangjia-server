@@ -28,6 +28,15 @@ func (c *cPublish) CurrentAccount(ctx context.Context, req *publish.CurrentAccou
 	return
 }
 
+func (c *cPublish) AccountSettingView(ctx context.Context, req *publish.AccountSettingViewReq) (res *publish.AccountSettingViewRes, err error) {
+	data, err := service.SysPublish().MyAccountSettingView(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AccountSettingViewRes{AccountSettingModel: data}
+	return
+}
+
 func (c *cPublish) UpdateAccountPassword(ctx context.Context, req *publish.UpdateAccountPasswordReq) (res *publish.UpdateAccountPasswordRes, err error) {
 	if err = service.SysPublish().UpdateAccountPassword(ctx, &req.UpdateAccountPasswordInp); err != nil {
 		return nil, err
@@ -103,6 +112,24 @@ func (c *cPublishAdmin) AccountDelete(ctx context.Context, req *publish.AdminAcc
 		return nil, err
 	}
 	res = &publish.AdminAccountDeleteRes{}
+	return
+}
+
+func (c *cPublishAdmin) AccountSettingView(ctx context.Context, req *publish.AdminAccountSettingViewReq) (res *publish.AdminAccountSettingViewRes, err error) {
+	data, err := service.SysPublish().AdminAccountSettingView(ctx, &req.AccountSettingViewInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminAccountSettingViewRes{AccountSettingModel: data}
+	return
+}
+
+func (c *cPublishAdmin) AccountSettingSave(ctx context.Context, req *publish.AdminAccountSettingSaveReq) (res *publish.AdminAccountSettingSaveRes, err error) {
+	data, err := service.SysPublish().AdminAccountSettingSave(ctx, &req.AccountSettingSaveInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminAccountSettingSaveRes{AccountSettingModel: data}
 	return
 }
 
@@ -291,6 +318,36 @@ func (c *cPublishAdmin) ChannelRefresh(ctx context.Context, req *publish.AdminCh
 	return
 }
 
+func (c *cPublishAdmin) UploadMedia(ctx context.Context, req *publish.AdminUploadMediaReq) (res *publish.AdminUploadMediaRes, err error) {
+	file := g.RequestFromCtx(ctx).GetUploadFile("file")
+	if file == nil {
+		return nil, gerror.New("没有找到上传的文件")
+	}
+	poster := g.RequestFromCtx(ctx).GetUploadFile("poster")
+	data, err := service.SysPublish().AdminMediaUpload(ctx, &req.MediaUploadInp, file, poster)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminUploadMediaRes{MediaModel: data}
+	return
+}
+
+func (c *cPublishAdmin) SortMedia(ctx context.Context, req *publish.AdminSortMediaReq) (res *publish.AdminSortMediaRes, err error) {
+	if err = service.SysPublish().AdminMediaSort(ctx, &req.MediaSortInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminSortMediaRes{}
+	return
+}
+
+func (c *cPublishAdmin) DeleteMedia(ctx context.Context, req *publish.AdminDeleteMediaReq) (res *publish.AdminDeleteMediaRes, err error) {
+	if err = service.SysPublish().AdminMediaDelete(ctx, &req.MediaDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminDeleteMediaRes{}
+	return
+}
+
 func (c *cPublishAdmin) ProfileList(ctx context.Context, req *publish.AdminProfileListReq) (res *publish.AdminProfileListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminProfileList(ctx, &req.ProfileListInp)
 	if err != nil {
@@ -305,6 +362,15 @@ func (c *cPublishAdmin) ProfileList(ctx context.Context, req *publish.AdminProfi
 	return
 }
 
+func (c *cPublishAdmin) ProfileView(ctx context.Context, req *publish.AdminProfileViewReq) (res *publish.AdminProfileViewRes, err error) {
+	data, err := service.SysPublish().AdminProfileView(ctx, &req.ProfileViewInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminProfileViewRes{ProfileViewModel: data}
+	return
+}
+
 func (c *cPublishAdmin) ProfileSave(ctx context.Context, req *publish.AdminProfileSaveReq) (res *publish.AdminProfileSaveRes, err error) {
 	data, err := service.SysPublish().AdminProfileSave(ctx, &req.ProfileSaveInp)
 	if err != nil {
@@ -313,6 +379,7 @@ func (c *cPublishAdmin) ProfileSave(ctx context.Context, req *publish.AdminProfi
 	res = &publish.AdminProfileSaveRes{}
 	if data != nil {
 		res.Id = data.Id
+		res.Uuid = data.Uuid
 		res.TaskId = data.TaskId
 	}
 	return
@@ -493,7 +560,8 @@ func (c *cPublish) UploadMedia(ctx context.Context, req *publish.UploadMediaReq)
 	if file == nil {
 		return nil, gerror.New("没有找到上传的文件")
 	}
-	data, err := service.SysPublish().MyMediaUpload(ctx, &req.MediaUploadInp, file)
+	poster := g.RequestFromCtx(ctx).GetUploadFile("poster")
+	data, err := service.SysPublish().MyMediaUpload(ctx, &req.MediaUploadInp, file, poster)
 	if err != nil {
 		return nil, err
 	}
@@ -580,6 +648,7 @@ func (c *cPublish) MyProfileSave(ctx context.Context, req *publish.MyProfileSave
 	res = &publish.MyProfileSaveRes{}
 	if data != nil {
 		res.Id = data.Id
+		res.Uuid = data.Uuid
 		res.TaskId = data.TaskId
 	}
 	return

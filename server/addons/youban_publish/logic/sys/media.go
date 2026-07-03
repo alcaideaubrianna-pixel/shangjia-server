@@ -22,9 +22,7 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
-	"hotgo/internal/library/storager"
 	basesysin "hotgo/internal/model/input/sysin"
-	"hotgo/internal/service"
 )
 
 func (s *sSysPublish) AdminMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error) {
@@ -43,6 +41,24 @@ func (s *sSysPublish) AdminMediaDelete(ctx context.Context, in *sysin.MediaDelet
 	return s.deleteMediaByTenant(ctx, in.Id, account.TenantId, account.Id)
 }
 
+func (s *sSysPublish) AdminMediaSort(ctx context.Context, in *sysin.MediaSortInp) (err error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return err
+	}
+	if in == nil {
+		return gerror.New("媒体排序不能为空")
+	}
+	if err = in.Filter(ctx); err != nil {
+		return err
+	}
+	task, err := s.getTaskByTenant(ctx, in.TaskId, account.TenantId)
+	if err != nil {
+		return err
+	}
+	return s.sortTaskMedia(ctx, in, task, 0)
+}
+
 func (s *sSysPublish) ServerMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error) {
 	if in == nil {
 		return nil, gerror.New("任务ID不能为空")
@@ -55,42 +71,6 @@ func (s *sSysPublish) ServerMediaDelete(ctx context.Context, in *sysin.MediaDele
 		return gerror.New("媒体ID不能为空")
 	}
 	return s.deleteMediaByTenant(ctx, in.Id, 0, contexts.GetUserId(ctx))
-}
-
-func (s *sSysPublish) MyMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile) (res *sysin.MediaModel, err error) {
-	account, err := s.currentAccount(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err = in.Filter(ctx); err != nil {
-		return nil, err
-	}
-	task, err := s.getTask(ctx, in.TaskId, account.Id)
-	if err != nil {
-		return nil, err
-	}
-	if task["status"].String() != sysin.PublishTaskStatusDraft {
-		return nil, gerror.New("仅草稿任务可以上传媒体")
-	}
-	if file == nil {
-		return nil, gerror.New("没有找到上传的文件")
-	}
-	uploadType := storager.KindImg
-	if in.MediaType == "video" {
-		uploadType = storager.KindVideo
-	}
-	perceptualHash := ""
-	if in.MediaType == "image" {
-		perceptualHash, err = uploadImagePHash(file)
-		if err != nil {
-			return nil, err
-		}
-	}
-	attachment, err := service.CommonUpload().UploadFile(ctx, uploadType, file)
-	if err != nil {
-		return nil, err
-	}
-	return s.saveMediaAttachment(ctx, task, in, attachment, perceptualHash)
 }
 
 func (s *sSysPublish) MyMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error) {
@@ -124,19 +104,25 @@ func (s *sSysPublish) MyMediaSort(ctx context.Context, in *sysin.MediaSortInp) (
 	if err != nil {
 		return err
 	}
+	return s.sortTaskMedia(ctx, in, task, account.Id)
+}
+
+func (s *sSysPublish) sortTaskMedia(ctx context.Context, in *sysin.MediaSortInp, task gdb.Record, accountId int64) error {
 	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		for _, item := range in.Items {
-			result, updateErr := tx.Model(publishMediaTable).Ctx(ctx).
+			mod := tx.Model(publishMediaTable).Ctx(ctx).
 				Where("id", item.Id).
 				Where("task_id", in.TaskId).
-				Where("account_id", account.Id).
-				WhereNull("deleted_at").
-				Data(g.Map{
-					"purpose":    item.Purpose,
-					"sort_index": item.SortIndex,
-					"updated_by": contexts.GetUserId(ctx),
-					"updated_at": gtime.Now(),
-				}).
+				WhereNull("deleted_at")
+			if accountId > 0 {
+				mod = mod.Where("account_id", accountId)
+			}
+			result, updateErr := mod.Data(g.Map{
+				"purpose":    item.Purpose,
+				"sort_index": item.SortIndex,
+				"updated_by": contexts.GetUserId(ctx),
+				"updated_at": gtime.Now(),
+			}).
 				Update()
 			if updateErr != nil {
 				return gerror.Wrap(updateErr, "更新媒体排序失败")
@@ -351,32 +337,33 @@ func parseUploadPHash(value string) (*goimagehash.ImageHash, bool) {
 	return goimagehash.NewImageHash(hashValue, goimagehash.PHash), true
 }
 
-func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, in *sysin.MediaUploadInp, attachment *basesysin.AttachmentListModel, perceptualHash string) (res *sysin.MediaModel, err error) {
+func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, in *sysin.MediaUploadInp, attachment *basesysin.AttachmentListModel, poster *basesysin.AttachmentListModel, perceptualHash string) (res *sysin.MediaModel, err error) {
 	if attachment == nil || attachment.Id <= 0 {
 		return nil, gerror.New("附件上传失败")
 	}
 	now := gtime.Now()
 	data := g.Map{
-		"tenant_id":       task["tenant_id"].Int64(),
-		"merchant_id":     task["tenant_id"].Int64(),
-		"account_id":      task["account_id"].Int64(),
-		"task_id":         task["id"].Int64(),
-		"profile_id":      task["profile_id"].Int64(),
-		"attachment_id":   attachment.Id,
-		"media_type":      in.MediaType,
-		"purpose":         in.Purpose,
-		"name":            attachment.Name,
-		"file_url":        attachment.FileUrl,
-		"poster_url":      "",
-		"storage_path":    attachment.Path,
-		"mime_type":       attachment.MimeType,
-		"md5":             attachment.Md5,
-		"perceptual_hash": perceptualHash,
-		"size":            attachment.Size,
-		"sort_index":      in.SortIndex,
-		"status":          1,
-		"updated_by":      contexts.GetUserId(ctx),
-		"updated_at":      now,
+		"tenant_id":           task["tenant_id"].Int64(),
+		"merchant_id":         task["tenant_id"].Int64(),
+		"account_id":          task["account_id"].Int64(),
+		"task_id":             task["id"].Int64(),
+		"profile_id":          task["profile_id"].Int64(),
+		"attachment_id":       attachment.Id,
+		"media_type":          in.MediaType,
+		"purpose":             in.Purpose,
+		"name":                attachment.Name,
+		"file_url":            attachment.FileUrl,
+		"poster_url":          posterFileUrl(poster),
+		"poster_storage_path": posterStoragePath(poster),
+		"storage_path":        attachment.Path,
+		"mime_type":           attachment.MimeType,
+		"md5":                 attachment.Md5,
+		"perceptual_hash":     perceptualHash,
+		"size":                attachment.Size,
+		"sort_index":          in.SortIndex,
+		"status":              1,
+		"updated_by":          contexts.GetUserId(ctx),
+		"updated_at":          now,
 	}
 	existingId, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("task_id", task["id"].Int64()).

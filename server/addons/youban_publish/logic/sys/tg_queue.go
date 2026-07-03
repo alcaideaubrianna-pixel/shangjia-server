@@ -35,6 +35,14 @@ func (e *tgRetryAfterError) Unwrap() error {
 }
 
 func (s *sSysPublish) enqueueTelegramJob(ctx context.Context, jobId int64, delay time.Duration) error {
+	return s.enqueueTelegramTask(ctx, tgTaskTypePublish, jobId, delay)
+}
+
+func (s *sSysPublish) enqueueTelegramDeleteJob(ctx context.Context, jobId int64, delay time.Duration) error {
+	return s.enqueueTelegramTask(ctx, tgTaskTypeDelete, jobId, delay)
+}
+
+func (s *sSysPublish) enqueueTelegramTask(ctx context.Context, taskType string, jobId int64, delay time.Duration) error {
 	if jobId <= 0 {
 		return nil
 	}
@@ -46,7 +54,7 @@ func (s *sSysPublish) enqueueTelegramJob(ctx context.Context, jobId int64, delay
 	if err != nil {
 		return err
 	}
-	task := asynq.NewTask(tgTaskTypePublish, payload)
+	task := asynq.NewTask(taskType, payload)
 	options := []asynq.Option{
 		asynq.Queue(tgQueueNameDefault),
 		asynq.MaxRetry(10),

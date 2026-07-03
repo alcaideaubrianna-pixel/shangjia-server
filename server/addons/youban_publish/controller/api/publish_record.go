@@ -30,6 +30,15 @@ func (c *cPublishAdmin) PublishRecordList(ctx context.Context, req *publish.Admi
 	return
 }
 
+func (c *cPublishAdmin) DevPublishChainTest(ctx context.Context, req *publish.AdminDevPublishChainTestReq) (res *publish.AdminDevPublishChainTestRes, err error) {
+	data, err := service.SysPublish().AdminDevPublishChainTest(ctx, &req.DevPublishChainTestInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminDevPublishChainTestRes{DevPublishChainTestModel: data}
+	return
+}
+
 func (c *cPublish) MyPublishRecordList(ctx context.Context, req *publish.MyPublishRecordListReq) (res *publish.MyPublishRecordListRes, err error) {
 	list, totalCount, err := service.SysPublish().MyPublishRecordList(ctx, &req.PublishRecordListInp)
 	if err != nil {
@@ -41,5 +50,14 @@ func (c *cPublish) MyPublishRecordList(ctx context.Context, req *publish.MyPubli
 	res = new(publish.MyPublishRecordListRes)
 	res.List = list
 	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublish) MyDevPublishChainTest(ctx context.Context, req *publish.MyDevPublishChainTestReq) (res *publish.MyDevPublishChainTestRes, err error) {
+	data, err := service.SysPublish().MyDevPublishChainTest(ctx, &req.DevPublishChainTestInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.MyDevPublishChainTestRes{DevPublishChainTestModel: data}
 	return
 }

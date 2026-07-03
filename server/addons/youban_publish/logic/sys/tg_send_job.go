@@ -27,6 +27,7 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 }
 
 func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJobRecord) error {
+	job.TargetChatId = normalizeTelegramChannelChatID(job.TargetChatId)
 	if strings.TrimSpace(job.TargetChatId) == "" {
 		return gerror.New("TG目标频道未配置")
 	}
@@ -52,11 +53,11 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	}
 	messages, err := s.sendTelegramDisplayPart(ctx, bot, job.TargetChatId, caption, displayMedia)
 	if err != nil {
-		return err
+		return gerror.Wrapf(err, "TG展示资料推送失败，job:%d，channel:%d，chat:%s", job.Id, job.ChannelId, job.TargetChatId)
 	}
 	verifyMessages, err := s.sendTelegramVerifyPart(ctx, bot, job.TargetChatId, verifyMedia)
 	if err != nil {
-		return err
+		return gerror.Wrapf(err, "TG验证资料推送失败，job:%d，channel:%d，chat:%s", job.Id, job.ChannelId, job.TargetChatId)
 	}
 	messages = append(messages, verifyMessages...)
 	if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
@@ -68,6 +69,9 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 func (s *sSysPublish) sendTelegramDisplayPart(ctx context.Context, bot *tgbot.Bot, chatId string, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
 	if len(media) > 0 {
 		return s.sendTelegramMediaSet(ctx, bot, chatId, "display", caption, media)
+	}
+	if strings.TrimSpace(caption) == "" {
+		return nil, gerror.New("展示资料和推送文案不能同时为空")
 	}
 	msg, err := bot.SendMessage(ctx, &tgbot.SendMessageParams{ChatID: chatId, Text: caption})
 	if err != nil {
@@ -137,5 +141,27 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 	if err != nil || !updated {
 		return err
 	}
-	return s.incrementDailyPublishStat(ctx, job)
+	if err = s.incrementDailyPublishStat(ctx, job); err != nil {
+		return err
+	}
+	return s.scheduleTelegramCycleDelete(ctx, job)
+}
+
+func (s *sSysPublish) scheduleTelegramCycleDelete(ctx context.Context, job telegramJobRecord) error {
+	if job.CycleEnabled != 1 {
+		return nil
+	}
+	days := defaultCycleDays(job.CycleDays)
+	delay := time.Duration(days) * 24 * time.Hour
+	if isDevelopMode(ctx) {
+		if seconds := g.Cfg().MustGet(ctx, "youbanPublish.cycle.devDelaySeconds", 0).Int(); seconds > 0 {
+			delay = time.Duration(seconds) * time.Second
+		}
+	}
+	nextCycleAt := gtime.Now().Add(delay)
+	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
+		"next_cycle_at": nextCycleAt,
+		"updated_at":    gtime.Now(),
+	}).Update()
+	return s.enqueueTelegramDeleteJob(ctx, job.Id, delay)
 }

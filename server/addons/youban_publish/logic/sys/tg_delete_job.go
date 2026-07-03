@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"time"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -13,6 +14,9 @@ func (s *sSysPublish) DeleteTelegramJobMessages(ctx context.Context, jobId int64
 	job, err := s.telegramJobById(ctx, jobId)
 	if err != nil {
 		return err
+	}
+	if delay := telegramCycleDeleteDelay(job); delay > 0 {
+		return s.enqueueTelegramDeleteJob(ctx, job.Id, delay)
 	}
 	botToken, err := s.telegramJobBotToken(ctx, job.BotId, job.TenantId)
 	if err != nil {
@@ -27,6 +31,7 @@ func (s *sSysPublish) DeleteTelegramJobMessages(ctx context.Context, jobId int64
 		return err
 	}
 	for _, item := range messages {
+		item.TargetChatId = normalizeTelegramChannelChatID(item.TargetChatId)
 		if item.MessageId <= 0 || item.TargetChatId == "" {
 			continue
 		}
@@ -44,7 +49,7 @@ func (s *sSysPublish) DeleteTelegramJobMessages(ctx context.Context, jobId int64
 			Update()
 	}
 	s.appendTelegramJobLog(ctx, job, "delete", "success", "TG历史消息删除成功")
-	return nil
+	return s.requeueTelegramCyclePublish(ctx, job)
 }
 
 func (s *sSysPublish) telegramJobById(ctx context.Context, jobId int64) (telegramJobRecord, error) {
@@ -79,4 +84,35 @@ type telegramDeleteMessage struct {
 	Id           int64  `json:"id"`
 	TargetChatId string `json:"targetChatId"`
 	MessageId    int64  `json:"messageId"`
+}
+
+func (s *sSysPublish) requeueTelegramCyclePublish(ctx context.Context, job telegramJobRecord) error {
+	if job.CycleEnabled != 1 {
+		return nil
+	}
+	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", job.Id).
+		Data(g.Map{
+			"status":        "pending",
+			"retry_count":   0,
+			"next_retry_at": nil,
+			"error_message": "",
+			"updated_at":    gtime.Now(),
+		}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "重置循环上架任务失败")
+	}
+	return s.enqueueTelegramJob(ctx, job.Id, 0)
+}
+
+func telegramCycleDeleteDelay(job telegramJobRecord) time.Duration {
+	if job.NextCycleAt == nil {
+		return 0
+	}
+	delay := job.NextCycleAt.Sub(gtime.Now())
+	if delay <= 0 {
+		return 0
+	}
+	return delay
 }

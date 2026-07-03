@@ -15,6 +15,14 @@ type CurrentAccountRes struct {
 	*sysin.CurrentAccountModel
 }
 
+type AccountSettingViewReq struct {
+	g.Meta `path:"/publish/account/setting/view" method:"get" tags:"上架插件" summary:"当前账号推送设置详情"`
+}
+
+type AccountSettingViewRes struct {
+	*sysin.AccountSettingModel
+}
+
 type UpdateAccountPasswordReq struct {
 	g.Meta `path:"/publish/account/password" method:"post" tags:"上架插件" summary:"修改当前账号密码"`
 	sysin.UpdateAccountPasswordInp
@@ -83,6 +91,24 @@ type AdminAccountDeleteReq struct {
 }
 
 type AdminAccountDeleteRes struct{}
+
+type AdminAccountSettingViewReq struct {
+	g.Meta `path:"/publish/admin/account/setting/view" method:"get" tags:"上架插件管理端" summary:"账号推送设置详情"`
+	sysin.AccountSettingViewInp
+}
+
+type AdminAccountSettingViewRes struct {
+	*sysin.AccountSettingModel
+}
+
+type AdminAccountSettingSaveReq struct {
+	g.Meta `path:"/publish/admin/account/setting/save" method:"post" tags:"上架插件管理端" summary:"保存账号推送设置"`
+	sysin.AccountSettingSaveInp
+}
+
+type AdminAccountSettingSaveRes struct {
+	*sysin.AccountSettingModel
+}
 
 type AdminBotListReq struct {
 	g.Meta `path:"/publish/admin/bot/list" method:"get" tags:"上架插件管理端" summary:"Bot列表"`
@@ -238,6 +264,29 @@ type AdminChannelRefreshRes struct {
 	List []*sysin.ChannelRefreshModel `json:"list" dc:"刷新结果"`
 }
 
+type AdminUploadMediaReq struct {
+	g.Meta `path:"/publish/admin/media/upload" method:"post" mime:"multipart/form-data" tags:"上架插件管理端" summary:"上传资料媒体"`
+	sysin.MediaUploadInp
+}
+
+type AdminUploadMediaRes struct {
+	*sysin.MediaModel
+}
+
+type AdminSortMediaReq struct {
+	g.Meta `path:"/publish/admin/media/sort" method:"post" tags:"上架插件管理端" summary:"保存资料媒体排序"`
+	sysin.MediaSortInp
+}
+
+type AdminSortMediaRes struct{}
+
+type AdminDeleteMediaReq struct {
+	g.Meta `path:"/publish/admin/media/delete" method:"post" tags:"上架插件管理端" summary:"删除资料媒体"`
+	sysin.MediaDeleteInp
+}
+
+type AdminDeleteMediaRes struct{}
+
 type AdminProfileListReq struct {
 	g.Meta `path:"/publish/admin/profile/list" method:"get" tags:"上架插件管理端" summary:"资料列表"`
 	sysin.ProfileListInp
@@ -248,14 +297,24 @@ type AdminProfileListRes struct {
 	List []*sysin.ProfileModel `json:"list" dc:"资料列表"`
 }
 
+type AdminProfileViewReq struct {
+	g.Meta `path:"/publish/admin/profile/view" method:"get" tags:"上架插件管理端" summary:"资料详情"`
+	sysin.ProfileViewInp
+}
+
+type AdminProfileViewRes struct {
+	*sysin.ProfileViewModel
+}
+
 type AdminProfileSaveReq struct {
 	g.Meta `path:"/publish/admin/profile/save" method:"post" tags:"上架插件管理端" summary:"保存资料"`
 	sysin.ProfileSaveInp
 }
 
 type AdminProfileSaveRes struct {
-	Id     int64 `json:"id" dc:"资料ID"`
-	TaskId int64 `json:"taskId" dc:"任务ID"`
+	Id     int64  `json:"id" dc:"资料ID"`
+	Uuid   string `json:"uuid" dc:"资料UUID"`
+	TaskId int64  `json:"taskId" dc:"任务ID"`
 }
 
 type AdminProfileDeleteReq struct {
@@ -480,8 +539,9 @@ type MyProfileSaveReq struct {
 }
 
 type MyProfileSaveRes struct {
-	Id     int64 `json:"id" dc:"资料ID"`
-	TaskId int64 `json:"taskId" dc:"任务ID"`
+	Id     int64  `json:"id" dc:"资料ID"`
+	Uuid   string `json:"uuid" dc:"资料UUID"`
+	TaskId int64  `json:"taskId" dc:"任务ID"`
 }
 
 type MyProfileDeleteReq struct {

@@ -1,14 +1,18 @@
 package sys
 
+import "github.com/gogf/gf/v2/os/gtime"
+
 type telegramMediaItem struct {
-	Id            int64  `json:"id"`
-	MediaType     string `json:"mediaType"`
-	Purpose       string `json:"purpose"`
-	FileUrl       string `json:"fileUrl"`
-	PosterUrl     string `json:"posterUrl"`
-	TgFileId      string `json:"tgFileId"`
-	TgThumbFileId string `json:"tgThumbFileId"`
-	SortIndex     int    `json:"sortIndex"`
+	Id                int64  `json:"id"`
+	MediaType         string `json:"mediaType"`
+	Purpose           string `json:"purpose"`
+	FileUrl           string `json:"fileUrl"`
+	PosterUrl         string `json:"posterUrl"`
+	StoragePath       string `json:"storagePath"`
+	PosterStoragePath string `json:"posterStoragePath"`
+	TgFileId          string `json:"tgFileId"`
+	TgThumbFileId     string `json:"tgThumbFileId"`
+	SortIndex         int    `json:"sortIndex"`
 }
 
 type telegramSentMessage struct {
@@ -20,12 +24,16 @@ type telegramSentMessage struct {
 }
 
 type telegramJobRecord struct {
-	Id           int64  `json:"id"`
-	TaskId       int64  `json:"taskId"`
-	TenantId     int64  `json:"tenantId"`
-	AccountId    int64  `json:"accountId"`
-	ProfileId    int64  `json:"profileId"`
-	BotId        int64  `json:"botId"`
-	TargetChatId string `json:"targetChatId"`
-	RetryCount   int    `json:"retryCount"`
+	Id           int64       `json:"id"`
+	TaskId       int64       `json:"taskId"`
+	TenantId     int64       `json:"tenantId"`
+	AccountId    int64       `json:"accountId"`
+	ProfileId    int64       `json:"profileId"`
+	ChannelId    int64       `json:"channelId"`
+	BotId        int64       `json:"botId"`
+	CycleDays    int         `json:"cycleDays"`
+	CycleEnabled int         `json:"cycleEnabled"`
+	TargetChatId string      `json:"targetChatId"`
+	NextCycleAt  *gtime.Time `json:"nextCycleAt"`
+	RetryCount   int         `json:"retryCount"`
 }

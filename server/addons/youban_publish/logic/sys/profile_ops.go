@@ -39,10 +39,14 @@ func (s *sSysPublish) MyProfileView(ctx context.Context, in *sysin.ProfileViewIn
 	if err != nil {
 		return nil, err
 	}
-	if in == nil || in.Id <= 0 {
-		return nil, gerror.New("资料ID不能为空")
+	if in == nil || !hasProfileSelector(in.Id, in.Uuid) {
+		return nil, gerror.New("资料UUID不能为空")
 	}
-	profile, err := s.profileView(ctx, in.Id, account.TenantId, account.Id)
+	profileId, err := s.resolveProfileId(ctx, in.Id, in.Uuid, account.TenantId, account.Id)
+	if err != nil {
+		return nil, err
+	}
+	profile, err := s.profileView(ctx, profileId, account.TenantId, account.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -155,10 +159,38 @@ func (s *sSysPublish) AdminProfileList(ctx context.Context, in *sysin.ProfileLis
 	return s.profileList(ctx, in)
 }
 
+func (s *sSysPublish) AdminProfileView(ctx context.Context, in *sysin.ProfileViewInp) (res *sysin.ProfileViewModel, err error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil || !hasProfileSelector(in.Id, in.Uuid) {
+		return nil, gerror.New("资料UUID不能为空")
+	}
+	profileId, err := s.resolveProfileId(ctx, in.Id, in.Uuid, account.TenantId, 0)
+	if err != nil {
+		return nil, err
+	}
+	profile, err := s.profileView(ctx, profileId, account.TenantId, 0)
+	if err != nil {
+		return nil, err
+	}
+	media, err := s.mediaListByProfile(ctx, profile.Id, account.TenantId, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &sysin.ProfileViewModel{Profile: profile, Media: media}, nil
+}
+
 func (s *sSysPublish) AdminProfileSave(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error) {
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if in != nil && in.Id <= 0 && normalizeProfileUUID(in.Uuid) != "" {
+		if in.Id, err = s.resolveProfileId(ctx, 0, in.Uuid, account.TenantId, 0); err != nil {
+			return nil, err
+		}
 	}
 	return s.saveProfile(ctx, in, account.TenantId, account.Id)
 }
@@ -251,6 +283,9 @@ func (s *sSysPublish) profileList(ctx context.Context, in *sysin.ProfileListInp)
 	if err = base.Fields(profileListFields()).Page(in.Page, in.PerPage).OrderDesc("p.updated_at").OrderDesc("p.id").Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取资料列表失败")
 	}
+	if err = s.ensureProfileListUUID(ctx, list); err != nil {
+		return nil, 0, err
+	}
 	return
 }
 
@@ -267,6 +302,9 @@ func (s *sSysPublish) profileView(ctx context.Context, profileId int64, tenantId
 	}
 	if res == nil || res.Id <= 0 {
 		return nil, gerror.New("资料不存在或无权操作")
+	}
+	if err = s.ensureProfileModelUUID(ctx, res); err != nil {
+		return nil, err
 	}
 	return res, nil
 }
@@ -297,6 +335,11 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	}
 	if tenantId <= 0 || accountId <= 0 {
 		return nil, gerror.New("上架账号信息不完整")
+	}
+	if in.Id <= 0 && normalizeProfileUUID(in.Uuid) != "" {
+		if in.Id, err = s.resolveProfileId(ctx, 0, in.Uuid, tenantId, accountId); err != nil {
+			return nil, err
+		}
 	}
 	in.ChannelIds = uniqueIds(in.ChannelIds)
 	channelJSON, err := encodeBotIds(in.ChannelIds)
@@ -398,14 +441,22 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 		return nil, err
 	}
 	iservice.SysContent().ClearHomeProfileCardsCache(ctx)
-	return &sysin.ProfileSaveModel{Id: profileId, TaskId: taskId}, nil
+	profile, err := s.profileView(ctx, profileId, tenantId, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &sysin.ProfileSaveModel{Id: profileId, Uuid: profile.Uuid, TaskId: taskId}, nil
 }
 
 func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDeleteInp, tenantId int64, accountId int64) (err error) {
-	if in == nil || len(in.Ids) == 0 {
+	if in == nil || (len(in.Ids) == 0 && len(in.Uuids) == 0) {
 		return gerror.New("请选择要删除的资料")
 	}
-	ids, err := s.allowedProfileIds(ctx, in.Ids, tenantId, accountId)
+	targetIds, err := s.allowedProfileTargetIds(ctx, in.Ids, in.Uuids, tenantId, accountId)
+	if err != nil {
+		return err
+	}
+	ids, err := s.allowedProfileIds(ctx, targetIds, tenantId, accountId)
 	if err != nil {
 		return err
 	}
@@ -422,18 +473,28 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 }
 
 func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.ProfileStatusInp, tenantId int64, accountId int64) (err error) {
-	if in == nil || len(in.Ids) == 0 {
+	if in == nil || (len(in.Ids) == 0 && len(in.Uuids) == 0) {
 		return gerror.New("请选择要处理的资料")
 	}
 	if in.Status != 1 && in.Status != 2 {
 		return gerror.New("资料状态不合法")
 	}
-	ids, err := s.allowedProfileIds(ctx, in.Ids, tenantId, accountId)
+	targetIds, err := s.allowedProfileTargetIds(ctx, in.Ids, in.Uuids, tenantId, accountId)
+	if err != nil {
+		return err
+	}
+	ids, err := s.allowedProfileIds(ctx, targetIds, tenantId, accountId)
 	if err != nil {
 		return err
 	}
 	if len(ids) == 0 {
 		return gerror.New("资料不存在或无权操作")
+	}
+	var downPlan *profileDownPlan
+	if in.Status == 2 {
+		if downPlan, err = s.prepareProfileDownPlan(ctx, tenantId); err != nil {
+			return err
+		}
 	}
 	columns := dao.ContentProfile.Columns()
 	data := g.Map{columns.Status: in.Status, columns.UpdatedAt: gtime.Now()}
@@ -459,6 +520,11 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 		taskData["published_at"] = gtime.Now()
 	}
 	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).WhereIn("profile_id", ids).Data(taskData).Update()
+	if in.Status == 2 {
+		if err = s.handleProfilesDown(ctx, ids, tenantId, downPlan); err != nil {
+			return err
+		}
+	}
 	iservice.SysContent().ClearHomeProfileCardsCache(ctx)
 	return nil
 }
@@ -711,7 +777,7 @@ func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, acco
 }
 
 func profileListFields() string {
-	return "p.id,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city,p.cup_size AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.admin_remark AS customer_remark,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,a.nickname,t.channel_id_json,t.anti_scan_enabled"
+	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city,p.cup_size AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.admin_remark AS customer_remark,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,a.nickname,t.channel_id_json,t.anti_scan_enabled"
 }
 
 func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
@@ -785,9 +851,14 @@ func (s *sSysPublish) tagIdsByKeyword(ctx context.Context, keyword string) []str
 func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, tenantId int64, accountId int64, taskId int64) (int64, error) {
 	columns := dao.ContentProfile.Columns()
 	now := gtime.Now()
+	profileNo, err := s.nextAccountProfileNo(ctx, tx, tenantId, accountId)
+	if err != nil {
+		return 0, err
+	}
 	data := g.Map{
-		columns.ProfileNo:       fmt.Sprintf("YBP%d", taskId),
+		columns.ProfileNo:       profileNo,
 		columns.SourceType:      publishProfileSourceType,
+		columns.SourceNoteUuid:  newPublishProfileUUID(),
 		columns.SourceKey:       fmt.Sprintf("youban_publish:profile:%d", taskId),
 		columns.Title:           in.Title,
 		columns.Summary:         profileSummary(in.PlainText),

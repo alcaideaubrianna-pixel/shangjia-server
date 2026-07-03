@@ -22,6 +22,9 @@ func (s *sSysPublish) ensureTgJobs(ctx context.Context, taskId int64) error {
 	if err != nil {
 		return err
 	}
+	if err = s.prepareTelegramTaskForResubmit(ctx, task, channels); err != nil {
+		return err
+	}
 	for _, channel := range channels {
 		jobId, err := s.ensureTgChannelJob(ctx, task, channel)
 		if err != nil {
@@ -57,15 +60,15 @@ func (s *sSysPublish) telegramJobChannels(ctx context.Context, task gdb.Record) 
 }
 
 func (s *sSysPublish) ensureTgChannelJob(ctx context.Context, task gdb.Record, channel telegramJobChannel) (int64, error) {
-	var jobId int64
-	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	value, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("task_id", task["id"].Int64()).
 		Where("channel_id", channel.Id).
 		Fields("id").
-		Scan(&jobId)
+		Value()
 	if err != nil {
 		return 0, gerror.Wrap(err, "读取TG频道任务失败")
 	}
+	jobId := value.Int64()
 	if jobId > 0 {
 		return jobId, nil
 	}
@@ -79,7 +82,7 @@ func (s *sSysPublish) ensureTgChannelJob(ctx context.Context, task gdb.Record, c
 		"profile_id":         task["profile_id"].Int64(),
 		"channel_id":         channel.Id,
 		"bot_id":             botId,
-		"target_chat_id":     channel.TargetChatId,
+		"target_chat_id":     normalizeTelegramChannelChatID(channel.TargetChatId),
 		"status":             "pending",
 		"cycle_enabled":      channel.CyclePublishEnabled,
 		"cycle_days":         defaultCycleDays(channel.CyclePublishDays),
