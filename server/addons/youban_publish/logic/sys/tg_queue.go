@@ -35,6 +35,11 @@ func (e *tgRetryAfterError) Unwrap() error {
 }
 
 func (s *sSysPublish) enqueueTelegramJob(ctx context.Context, jobId int64, delay time.Duration) error {
+	if delay <= 0 {
+		if windowDelay, enabled := s.telegramPublishWindowDelay(ctx); enabled && windowDelay > 0 {
+			delay = windowDelay
+		}
+	}
 	return s.enqueueTelegramTask(ctx, tgTaskTypePublish, jobId, delay)
 }
 

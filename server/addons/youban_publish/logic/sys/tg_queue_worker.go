@@ -53,6 +53,9 @@ func (s *sSysPublish) handleTelegramPublishTask(ctx context.Context, task *asynq
 	if err != nil {
 		return err
 	}
+	if delay, enabled := s.telegramPublishWindowDelay(ctx); enabled && delay > 0 {
+		return &tgRetryAfterError{after: delay, err: errTelegramPublishWindowBlocked}
+	}
 	return s.SendTelegramJob(ctx, payload.JobId)
 }
 
