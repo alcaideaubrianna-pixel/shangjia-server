@@ -5,11 +5,14 @@ import (
 	"image/color"
 	"image/draw"
 	"math"
+	"os"
 	"strings"
+	"sync"
 
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
+	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -33,7 +36,10 @@ func applyAntiScanWatermarks(dst *image.RGBA, in *sysin.AntiScanPreviewInp) {
 	}
 	fontSize := clampInt(in.WatermarkFontSize, 12, 56)
 	alpha := uint8(clampInt(in.WatermarkOpacity*255/100, 13, 204))
-	text := firstASCII(strings.Join(lines, "  "), "youban preview")
+	text := strings.TrimSpace(strings.Join(lines, "  "))
+	if text == "" {
+		text = "youban preview"
+	}
 	mark := rotateWatermark(renderWatermarkText(text, fontSize, alpha), -24)
 	stepX := maxInt(mark.Bounds().Dx()+fontSize*6, 120)
 	stepY := maxInt(mark.Bounds().Dy()+fontSize*3, 80)
@@ -45,6 +51,24 @@ func applyAntiScanWatermarks(dst *image.RGBA, in *sysin.AntiScanPreviewInp) {
 }
 
 func renderWatermarkText(text string, fontSize int, alpha uint8) *image.RGBA {
+	face, ok := newWatermarkFontFace(fontSize)
+	if !ok {
+		return renderBasicWatermarkText(text, fontSize, alpha)
+	}
+	defer face.Close()
+	drawer := font.Drawer{Face: face}
+	width := maxInt((drawer.MeasureString(text)>>6).Ceil()+fontSize, fontSize*4)
+	height := maxInt((face.Metrics().Height>>6).Ceil()+fontSize/2, fontSize*2)
+	dst := image.NewRGBA(image.Rect(0, 0, width, height))
+	drawer.Dst = dst
+	drawer.Src = &image.Uniform{C: color.RGBA{R: 24, G: 32, B: 42, A: alpha}}
+	drawer.Dot = fixed.P(fontSize/2, fontSize+fontSize/3)
+	drawer.DrawString(text)
+	return dst
+}
+
+func renderBasicWatermarkText(text string, fontSize int, alpha uint8) *image.RGBA {
+	text = firstASCII(text, "youban preview")
 	baseWidth := maxInt(len(text)*8+8, 64)
 	baseHeight := 18
 	base := image.NewRGBA(image.Rect(0, 0, baseWidth, baseHeight))
@@ -102,4 +126,60 @@ func firstASCII(value string, fallback string) string {
 		return fallback
 	}
 	return buf.String()
+}
+
+var (
+	watermarkFont     *opentype.Font
+	watermarkFontOnce sync.Once
+)
+
+func newWatermarkFontFace(fontSize int) (font.Face, bool) {
+	watermarkFontOnce.Do(func() {
+		watermarkFont = loadWatermarkFont()
+	})
+	if watermarkFont == nil {
+		return nil, false
+	}
+	face, err := opentype.NewFace(watermarkFont, &opentype.FaceOptions{
+		Size:    float64(fontSize),
+		DPI:     72,
+		Hinting: font.HintingFull,
+	})
+	return face, err == nil
+}
+
+func loadWatermarkFont() *opentype.Font {
+	for _, path := range watermarkFontPaths() {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		collection, err := opentype.ParseCollection(data)
+		if err == nil && collection.NumFonts() > 0 {
+			if fontItem, fontErr := collection.Font(0); fontErr == nil {
+				return fontItem
+			}
+		}
+		if fontItem, err := opentype.Parse(data); err == nil {
+			return fontItem
+		}
+	}
+	return nil
+}
+
+func watermarkFontPaths() []string {
+	return []string{
+		"/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+		"/System/Library/Fonts/PingFang.ttc",
+		"/System/Library/Fonts/STHeiti Medium.ttc",
+		"/System/Library/Fonts/Hiragino Sans GB.ttc",
+		"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+		"/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+		"/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+		"/usr/share/fonts/truetype/noto/NotoSansSC-Regular.ttf",
+		"/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+		"/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+		"/usr/share/fonts/truetype/arphic/uming.ttc",
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+	}
 }
