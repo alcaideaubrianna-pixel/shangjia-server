@@ -61,7 +61,7 @@ func renderWatermarkText(text string, fontSize int, alpha uint8) *image.RGBA {
 	height := maxInt((face.Metrics().Height>>6).Ceil()+fontSize/2, fontSize*2)
 	dst := image.NewRGBA(image.Rect(0, 0, width, height))
 	drawer.Dst = dst
-	drawer.Src = &image.Uniform{C: color.RGBA{R: 24, G: 32, B: 42, A: alpha}}
+	drawer.Src = &image.Uniform{C: watermarkTextColor(alpha)}
 	drawer.Dot = fixed.P(fontSize/2, fontSize+fontSize/3)
 	drawer.DrawString(text)
 	return dst
@@ -72,12 +72,16 @@ func renderBasicWatermarkText(text string, fontSize int, alpha uint8) *image.RGB
 	baseWidth := maxInt(len(text)*8+8, 64)
 	baseHeight := 18
 	base := image.NewRGBA(image.Rect(0, 0, baseWidth, baseHeight))
-	drawBasicText(base, 4, 13, text, color.RGBA{R: 24, G: 32, B: 42, A: alpha})
+	drawBasicText(base, 4, 13, text, watermarkTextColor(alpha))
 	width := maxInt(baseWidth*fontSize/13, 1)
 	height := maxInt(baseHeight*fontSize/13, 1)
 	scaled := image.NewRGBA(image.Rect(0, 0, width, height))
 	xdraw.NearestNeighbor.Scale(scaled, scaled.Bounds(), base, base.Bounds(), draw.Over, nil)
 	return scaled
+}
+
+func watermarkTextColor(alpha uint8) color.RGBA {
+	return color.RGBA{R: 0, G: 0, B: 0, A: alpha}
 }
 
 func rotateWatermark(src *image.RGBA, degrees float64) *image.RGBA {

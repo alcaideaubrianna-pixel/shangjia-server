@@ -32,7 +32,10 @@ import (
 	"hotgo/utility/file"
 )
 
-const antiScanCacheTable = "hg_youban_publish_anti_scan_cache"
+const (
+	antiScanCacheTable           = "hg_youban_publish_anti_scan_cache"
+	antiScanPreviewRenderVersion = 2
+)
 
 // AdminAntiScanPreview 生成防扫图实时预览，并按图片 pHash + 配置 hash 复用缓存。
 func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiScanPreviewInp, upload *ghttp.UploadFile) (res *sysin.AntiScanPreviewModel, err error) {
@@ -160,8 +163,9 @@ func antiScanImagePHash(imageBytes []byte) (string, error) {
 
 func antiScanConfigHash(in *sysin.AntiScanPreviewInp, cloudEnabled int) string {
 	data, _ := json.Marshal(g.Map{
-		"antiScan":     in.AntiScanConfig,
-		"cloudEnabled": cloudEnabled,
+		"antiScan":      in.AntiScanConfig,
+		"cloudEnabled":  cloudEnabled,
+		"renderVersion": antiScanPreviewRenderVersion,
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
