@@ -8,7 +8,9 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 
+	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/dao"
 )
 
@@ -21,6 +23,39 @@ func (s *sSysPublish) nextAccountProfileNo(ctx context.Context, tx gdb.TX, tenan
 		return s.nextRandomProfileNo(ctx, tx, tenantId, accountId)
 	}
 	return s.nextSequenceProfileNo(ctx, tx, tenantId, accountId)
+}
+
+func (s *sSysPublish) previewAccountProfileNo(ctx context.Context, tenantId int64, accountId int64, source string) (string, error) {
+	if source == "random" {
+		return randomProfileNo()
+	}
+	count, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		WhereGT("profile_id", 0).
+		WhereNull("deleted_at").
+		Count()
+	if err != nil {
+		return "", gerror.Wrap(err, "生成账号资料编号预览失败")
+	}
+	return fmt.Sprintf("%03d", count+1), nil
+}
+
+func accountSettingPreviewMark(setting *sysin.AccountSettingModel, accountName string, profileNo string) string {
+	if setting == nil || setting.EnableTitleMark != 1 || profileNo == "" {
+		return ""
+	}
+	if setting.NumberSource == "random" {
+		return profileNo
+	}
+	prefix := setting.CustomMarkText
+	if setting.MarkMode != "custom" || prefix == "" {
+		prefix = accountName
+	}
+	if prefix == "" {
+		return profileNo
+	}
+	return prefix + profileNo
 }
 
 func (s *sSysPublish) nextSequenceProfileNo(ctx context.Context, tx gdb.TX, tenantId int64, accountId int64) (string, error) {

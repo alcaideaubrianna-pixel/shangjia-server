@@ -235,6 +235,7 @@ type AccountSettingModel struct {
 	NumberSource       string      `json:"numberSource" dc:"编号来源"`
 	CustomMarkText     string      `json:"customMarkText" dc:"自定义前缀"`
 	MarkPosition       string      `json:"markPosition" dc:"显示位置"`
+	PreviewMark        string      `json:"previewMark" dc:"编号标识预览"`
 	DefaultRecycleDays int         `json:"defaultRecycleDays" dc:"默认循环天数"`
 	CreatedAt          *gtime.Time `json:"createdAt" dc:"创建时间"`
 	UpdatedAt          *gtime.Time `json:"updatedAt" dc:"更新时间"`

@@ -65,11 +65,50 @@ func (s *sSysPublish) accountSetting(ctx context.Context, tenantId int64, accoun
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取账号推送设置失败")
 	}
-	if row.IsEmpty() {
-		return model, nil
+	if !row.IsEmpty() {
+		fillAccountSettingModel(model, row)
 	}
-	fillAccountSettingModel(model, row)
+	if err = s.fillAccountSettingPreview(ctx, tenantId, accountId, model); err != nil {
+		return nil, err
+	}
 	return model, nil
+}
+
+func (s *sSysPublish) fillAccountSettingPreview(ctx context.Context, tenantId int64, accountId int64, model *sysin.AccountSettingModel) error {
+	if model == nil || model.EnableTitleMark != 1 {
+		return nil
+	}
+	accountName, err := s.accountDisplayName(ctx, tenantId, accountId)
+	if err != nil {
+		return err
+	}
+	profileNo, err := s.previewAccountProfileNo(ctx, tenantId, accountId, model.NumberSource)
+	if err != nil {
+		return err
+	}
+	model.PreviewMark = accountSettingPreviewMark(model, accountName, profileNo)
+	return nil
+}
+
+func (s *sSysPublish) accountDisplayName(ctx context.Context, tenantId int64, accountId int64) (string, error) {
+	accountColumns := pdao.YoubanPublishAccount.Columns()
+	row, err := pdao.YoubanPublishAccount.Ctx(ctx).
+		Where(accountColumns.Id, accountId).
+		Where(accountColumns.TenantId, tenantId).
+		WhereNull(accountColumns.DeletedAt).
+		Fields(accountColumns.Nickname, accountColumns.Username).
+		One()
+	if err != nil {
+		return "", gerror.Wrap(err, "读取账号信息失败")
+	}
+	if row.IsEmpty() {
+		return "", gerror.New("账号不存在或无权操作")
+	}
+	name := strings.TrimSpace(row[accountColumns.Nickname].String())
+	if name == "" {
+		name = strings.TrimSpace(row[accountColumns.Username].String())
+	}
+	return name, nil
 }
 
 func (s *sSysPublish) saveAccountSetting(ctx context.Context, tenantId int64, operatorId int64, in *sysin.AccountSettingSaveInp) error {
