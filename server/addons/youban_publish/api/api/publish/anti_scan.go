@@ -1,0 +1,32 @@
+package publish
+
+import (
+	"github.com/gogf/gf/v2/frame/g"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
+)
+
+type AdminCloudResourceConfigViewReq struct {
+	g.Meta `path:"/publish/admin/cloudResource/view" method:"get" tags:"上架插件管理端" summary:"查看云资源配置"`
+	sysin.CloudResourceConfigViewInp
+}
+
+type AdminCloudResourceConfigViewRes struct {
+	*sysin.CloudResourceConfigViewModel
+}
+
+type AdminCloudResourceConfigSaveReq struct {
+	g.Meta `path:"/publish/admin/cloudResource/save" method:"post" tags:"上架插件管理端" summary:"保存云资源配置"`
+	sysin.CloudResourceConfigSaveInp
+}
+
+type AdminCloudResourceConfigSaveRes struct{}
+
+type AdminAntiScanPreviewReq struct {
+	g.Meta `path:"/publish/admin/antiScan/preview" method:"post" tags:"上架插件管理端" summary:"防扫图实时预览"`
+	sysin.AntiScanPreviewInp
+}
+
+type AdminAntiScanPreviewRes struct {
+	*sysin.AntiScanPreviewModel
+}

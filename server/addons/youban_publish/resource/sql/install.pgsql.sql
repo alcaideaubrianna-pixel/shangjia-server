@@ -189,6 +189,26 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_media_face_media" ON "hg_youban_publish_medi
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_face_profile" ON "hg_youban_publish_media_face" ("tenant_id", "account_id", "profile_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_face_feature" ON "hg_youban_publish_media_face" ("feature_hash");
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_anti_scan_cache" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "image_hash" varchar(64) NOT NULL DEFAULT '',
+  "config_hash" varchar(64) NOT NULL DEFAULT '',
+  "provider" varchar(32) NOT NULL DEFAULT '',
+  "face_count" integer NOT NULL DEFAULT 0,
+  "face_json" text NOT NULL DEFAULT '',
+  "segment_json" text NOT NULL DEFAULT '',
+  "original_url" varchar(1024) NOT NULL DEFAULT '',
+  "preview_url" varchar(1024) NOT NULL DEFAULT '',
+  "warnings_json" text NOT NULL DEFAULT '',
+  "cloud_raw_saved" smallint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_image" ON "hg_youban_publish_anti_scan_cache" ("image_hash");
+CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_config" ON "hg_youban_publish_anti_scan_cache" ("image_hash", "config_hash");
+CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_provider" ON "hg_youban_publish_anti_scan_cache" ("provider", "cloud_raw_saved");
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tag" (
   "id" BIGSERIAL PRIMARY KEY,
   "name" varchar(64) NOT NULL DEFAULT '',
@@ -460,6 +480,24 @@ INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key"
 SELECT seed."addon_name", seed."group", seed."name", seed."type", seed."key", seed."value", seed."default_value", seed."sort", seed."tip", 0, 1, NOW(), NOW()
 FROM (
   VALUES
+    ('youban_publish', 'cloudResource', '腾讯云视觉开关', 'int', 'tencentVisionEnabled', '0', '0', 80, '是否启用腾讯云人脸检测和人像分割'),
+    ('youban_publish', 'cloudResource', '腾讯云 SecretId', 'string', 'tencentSecretId', '', '', 90, 'CAM 子用户 SecretId，仅授予 BDA/IAI 必要权限'),
+    ('youban_publish', 'cloudResource', '腾讯云 SecretKey', 'string', 'tencentSecretKey', '', '', 100, 'CAM 子用户 SecretKey，页面回显会脱敏'),
+    ('youban_publish', 'cloudResource', '腾讯云 Region', 'string', 'tencentRegion', 'ap-guangzhou', 'ap-guangzhou', 110, '腾讯云接口地域，默认 ap-guangzhou'),
+    ('youban_publish', 'cloudResource', '腾讯云 BDA Endpoint', 'string', 'tencentBdaEndpoint', 'bda.tencentcloudapi.com', 'bda.tencentcloudapi.com', 120, '人体分析接口域名'),
+    ('youban_publish', 'cloudResource', '腾讯云 IAI Endpoint', 'string', 'tencentIaiEndpoint', 'iai.tencentcloudapi.com', 'iai.tencentcloudapi.com', 130, '人脸识别接口域名')
+) AS seed("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip")
+WHERE NOT EXISTS (
+  SELECT 1 FROM "hg_sys_addons_config" c
+  WHERE c."addon_name" = seed."addon_name"
+    AND c."group" = seed."group"
+    AND c."key" = seed."key"
+);
+
+INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
+SELECT seed."addon_name", seed."group", seed."name", seed."type", seed."key", seed."value", seed."default_value", seed."sort", seed."tip", 0, 1, NOW(), NOW()
+FROM (
+  VALUES
     ('youban_publish', 'publish', '循环上架开关', 'int', 'cyclePublishEnabled', '0', '0', 100, '是否启用全局循环上架'),
     ('youban_publish', 'publish', '循环上架天数', 'int', 'cyclePublishDays', '4', '4', 110, '循环上架间隔天数'),
     ('youban_publish', 'publish', '循环上架时间', 'string', 'cyclePublishTime', '09:00', '09:00', 120, '每天循环上架执行时间'),
@@ -472,28 +510,46 @@ FROM (
     ('youban_publish', 'publish', '失败重试开关', 'int', 'retryEnabled', '1', '1', 190, '发送失败后是否重试'),
     ('youban_publish', 'publish', '最大重试次数', 'int', 'maxRetryCount', '3', '3', 200, '发送失败最大重试次数'),
     ('youban_publish', 'publish', '重试间隔分钟', 'int', 'retryIntervalMinutes', '5', '5', 210, '发送失败重试间隔'),
-    ('youban_publish', 'publish', '默认防扫图开关', 'int', 'defaultAntiScanEnabled', '1', '1', 220, '新发布内容默认是否启用防扫图'),
+    ('youban_publish', 'publish', '默认防扫图开关', 'int', 'defaultAntiScanEnabled', '0', '0', 220, '新发布内容默认是否启用防扫图'),
     ('youban_publish', 'autoDelete', '频道自动删除开关', 'int', 'autoDeleteEnabled', '0', '0', 200, '是否启用频道自动删除'),
     ('youban_publish', 'autoDelete', '自动删除 Bot ID', '[]int64', 'botIds', '[]', '[]', 210, '执行自动删除的 Bot ID 列表'),
     ('youban_publish', 'autoDelete', '自动删除关键词', '[]string', 'keywords', '[]', '[]', 220, '命中后自动删除的关键词列表'),
-    ('youban_publish', 'antiScan', '防扫图总开关', 'int', 'antiScanEnabled', '1', '1', 300, '是否启用防扫图能力'),
-    ('youban_publish', 'antiScan', '新笔记默认防扫图', 'int', 'defaultNewNoteEnabled', '1', '1', 310, '新笔记默认是否开启防扫图'),
-    ('youban_publish', 'antiScan', '移除图片元信息', 'int', 'metadataStripEnabled', '1', '1', 320, '是否移除 EXIF 等图片元信息'),
-    ('youban_publish', 'antiScan', '人像背景贴图', 'int', 'portraitBackgroundEnabled', '1', '1', 330, '是否启用人像背景贴图'),
-    ('youban_publish', 'antiScan', '体验替换背景', 'int', 'backgroundReplaceEnabled', '0', '0', 340, '是否预留替换背景处理'),
-    ('youban_publish', 'antiScan', '打码方式', 'string', 'maskMode', 'qr', 'qr', 350, '打码方式：qr二维码模式，sticker贴图模式'),
-    ('youban_publish', 'antiScan', '打码数量', 'int', 'maskCount', '1', '1', 360, '同一张图打码数量，最多2个'),
-    ('youban_publish', 'antiScan', '二维码文案', 'string', 'qrText', '仅供本频道查看', '仅供本频道查看', 370, '二维码模式的展示文案'),
-    ('youban_publish', 'antiScan', '贴图图片', 'string', 'stickerImage', '', '', 380, '贴图模式使用的正方形贴图'),
-    ('youban_publish', 'antiScan', '贴图透明度', 'int', 'stickerOpacity', '18', '18', 390, '防扫图贴图透明度，1-100'),
-    ('youban_publish', 'antiScan', '水印开关', 'int', 'watermarkEnabled', '1', '1', 400, '是否启用轻水印扰动'),
-    ('youban_publish', 'antiScan', '水印文案', 'string', 'watermarkText', 'youban', 'youban', 410, '防扫图水印文案'),
-    ('youban_publish', 'antiScan', '贴纸文案', 'string', 'stickerText', '', '', 420, '防扫图贴纸文案'),
-    ('youban_publish', 'antiScan', '噪点扰动', 'int', 'noiseEnabled', '1', '1', 430, '是否启用轻微噪点扰动'),
-    ('youban_publish', 'antiScan', '噪点强度', 'int', 'noiseStrength', '18', '18', 440, '噪点扰动强度'),
-    ('youban_publish', 'antiScan', '压缩重采样', 'int', 'compressionEnabled', '1', '1', 450, '是否启用压缩重采样'),
-    ('youban_publish', 'antiScan', '输出质量', 'int', 'compressionQuality', '82', '82', 460, '压缩重采样输出质量'),
-    ('youban_publish', 'antiScan', '色彩轻扰动', 'int', 'colorJitterEnabled', '1', '1', 470, '是否启用色彩轻扰动')
+    ('youban_publish', 'antiScan', '防扫图总开关', 'int', 'antiScanEnabled', '0', '0', 300, '是否启用防扫图能力'),
+    ('youban_publish', 'antiScan', '新笔记默认防扫图', 'int', 'defaultNewNoteEnabled', '0', '0', 310, '新笔记默认是否开启防扫图'),
+    ('youban_publish', 'antiScan', '已有资料批量处理', 'int', 'existingBatchEnabled', '0', '0', 320, '是否对已有资料触发批量处理意图'),
+    ('youban_publish', 'antiScan', '发送前强制处理', 'int', 'forceBeforeSendEnabled', '0', '0', 330, '发送前是否强制生成防扫图副本'),
+    ('youban_publish', 'antiScan', '单条资料允许覆盖', 'int', 'allowSingleOverrideEnabled', '0', '0', 340, '单条资料是否允许覆盖全局开关'),
+    ('youban_publish', 'antiScan', '移除图片元信息', 'int', 'metadataStripEnabled', '0', '0', 350, '是否移除 EXIF 等图片元信息'),
+    ('youban_publish', 'antiScan', '尺寸微调', 'int', 'resizeEnabled', '0', '0', 360, '是否轻微调整图片尺寸'),
+    ('youban_publish', 'antiScan', '尺寸缩放比例', 'int', 'resizeScale', '96', '96', 370, '尺寸缩放比例，80-100'),
+    ('youban_publish', 'antiScan', '轻微裁剪', 'int', 'cropEnabled', '0', '0', 380, '是否轻微裁剪图片边缘'),
+    ('youban_publish', 'antiScan', '裁剪比例', 'int', 'cropPercent', '2', '2', 390, '边缘裁剪比例，1-8'),
+    ('youban_publish', 'antiScan', '人像背景贴图', 'int', 'portraitBackgroundEnabled', '0', '0', 410, '是否启用人像背景贴图'),
+    ('youban_publish', 'antiScan', '人像背景替换', 'int', 'backgroundReplaceEnabled', '0', '0', 420, '是否启用替换背景处理'),
+    ('youban_publish', 'antiScan', '背景模糊', 'int', 'backgroundBlurEnabled', '0', '0', 430, '是否模糊背景'),
+    ('youban_publish', 'antiScan', '背景纹理叠加', 'int', 'backgroundTextureEnabled', '0', '0', 440, '是否叠加背景纹理'),
+    ('youban_publish', 'antiScan', '内容遮挡', 'int', 'maskEnabled', '0', '0', 450, '是否启用二维码或贴图遮挡'),
+    ('youban_publish', 'antiScan', '打码方式', 'string', 'maskMode', 'qr', 'qr', 460, '打码方式：qr二维码模式，sticker贴图模式'),
+    ('youban_publish', 'antiScan', '打码数量', 'int', 'maskCount', '1', '1', 470, '同一张图打码数量，最多3个'),
+    ('youban_publish', 'antiScan', '二维码文案', 'string', 'qrText', '', '', 480, '二维码模式的展示文案'),
+    ('youban_publish', 'antiScan', '贴图图片', 'string', 'stickerImage', '', '', 490, '贴图模式使用的正方形贴图'),
+    ('youban_publish', 'antiScan', '贴图透明度', 'int', 'stickerOpacity', '18', '18', 500, '防扫图贴图透明度，1-100'),
+    ('youban_publish', 'antiScan', '水印开关', 'int', 'watermarkEnabled', '0', '0', 510, '是否启用背景水印'),
+    ('youban_publish', 'antiScan', '资料编号水印', 'int', 'profileNoWatermarkEnabled', '0', '0', 520, '是否叠加资料编号水印'),
+    ('youban_publish', 'antiScan', '水印字体大小', 'int', 'watermarkFontSize', '22', '22', 530, '水印字体大小，12-56'),
+    ('youban_publish', 'antiScan', '水印透明度', 'int', 'watermarkOpacity', '28', '28', 540, '水印透明度，5-80'),
+    ('youban_publish', 'antiScan', '水印文案', 'string', 'watermarkText', '', '', 550, '防扫图水印文案'),
+    ('youban_publish', 'antiScan', '贴纸文案', 'string', 'stickerText', '', '', 560, '防扫图贴纸文案'),
+    ('youban_publish', 'antiScan', '噪点扰动', 'int', 'noiseEnabled', '0', '0', 570, '是否启用轻微噪点扰动'),
+    ('youban_publish', 'antiScan', '噪点强度', 'int', 'noiseStrength', '18', '18', 580, '噪点扰动强度'),
+    ('youban_publish', 'antiScan', '压缩重采样', 'int', 'compressionEnabled', '0', '0', 590, '是否启用压缩重采样'),
+    ('youban_publish', 'antiScan', '输出质量', 'int', 'compressionQuality', '82', '82', 600, '压缩重采样输出质量'),
+    ('youban_publish', 'antiScan', 'JPEG质量控制', 'int', 'jpegQualityControlEnabled', '0', '0', 610, '是否启用 JPEG 质量控制'),
+    ('youban_publish', 'antiScan', '色彩轻扰动', 'int', 'colorJitterEnabled', '0', '0', 620, '是否启用色彩轻扰动'),
+    ('youban_publish', 'antiScan', '色彩扰动强度', 'int', 'colorJitterStrength', '12', '12', 630, '色彩扰动强度'),
+    ('youban_publish', 'antiScan', '锐化模糊微扰', 'int', 'sharpenBlurEnabled', '0', '0', 640, '是否启用锐化或模糊微扰'),
+    ('youban_publish', 'antiScan', '微扰方式', 'string', 'sharpenBlurMode', 'blur', 'blur', 650, 'blur 或 sharpen'),
+    ('youban_publish', 'antiScan', '微扰强度', 'int', 'sharpenBlurStrength', '8', '8', 660, '锐化模糊微扰强度')
 ) AS seed("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip")
 WHERE NOT EXISTS (
   SELECT 1 FROM "hg_sys_addons_config" c

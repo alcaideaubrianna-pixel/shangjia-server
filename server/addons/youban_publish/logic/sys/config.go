@@ -21,6 +21,7 @@ const publishConfigGroupAccount = "account"
 const publishConfigGroupPublish = "publish"
 const publishConfigGroupAutoDelete = "autoDelete"
 const publishConfigGroupAntiScan = "antiScan"
+const publishConfigGroupCloudResource = "cloudResource"
 
 type sSysConfig struct{}
 
@@ -140,6 +141,33 @@ func (s *sSysConfig) AutoDeleteConfigSave(ctx context.Context, in *sysin.AutoDel
 	return s.updateConfigGroup(ctx, publishConfigGroupAutoDelete, autoDeleteConfigMap(&in.AutoDeleteConfig))
 }
 
+func (s *sSysConfig) CloudResourceConfigView(ctx context.Context, in *sysin.CloudResourceConfigViewInp) (res *sysin.CloudResourceConfigViewModel, err error) {
+	conf := defaultCloudResourceConfig()
+	if err = s.scanConfigGroup(ctx, publishConfigGroupCloudResource, conf); err != nil {
+		return nil, err
+	}
+	conf.TencentSecretKey = maskSecretValue(conf.TencentSecretKey)
+	res = &sysin.CloudResourceConfigViewModel{CloudResourceConfig: conf}
+	return
+}
+
+func (s *sSysConfig) CloudResourceConfigSave(ctx context.Context, in *sysin.CloudResourceConfigSaveInp) error {
+	if in == nil {
+		return gerror.New("云资源配置不能为空")
+	}
+	if err := in.Filter(ctx); err != nil {
+		return err
+	}
+	if strings.Contains(in.TencentSecretKey, "*") {
+		oldConf, err := s.GetCloudResource(ctx)
+		if err != nil {
+			return err
+		}
+		in.TencentSecretKey = oldConf.TencentSecretKey
+	}
+	return s.updateConfigGroup(ctx, publishConfigGroupCloudResource, cloudResourceConfigMap(&in.CloudResourceConfig))
+}
+
 func (s *sSysConfig) AntiScanConfigView(ctx context.Context, in *sysin.AntiScanConfigViewInp) (res *sysin.AntiScanConfigViewModel, err error) {
 	conf := defaultAntiScanConfig()
 	if err = s.scanConfigGroup(ctx, publishConfigGroupAntiScan, conf); err != nil {
@@ -147,6 +175,14 @@ func (s *sSysConfig) AntiScanConfigView(ctx context.Context, in *sysin.AntiScanC
 	}
 	res = &sysin.AntiScanConfigViewModel{AntiScanConfig: conf}
 	return
+}
+
+func (s *sSysConfig) GetCloudResource(ctx context.Context) (conf *model.CloudResourceConfig, err error) {
+	conf = defaultCloudResourceConfig()
+	if err = s.scanConfigGroup(ctx, publishConfigGroupCloudResource, conf); err != nil {
+		return nil, err
+	}
+	return conf, nil
 }
 
 func (s *sSysConfig) AntiScanConfigSave(ctx context.Context, in *sysin.AntiScanConfigSaveInp) error {
@@ -195,7 +231,7 @@ func defaultPublishConfig() *model.PublishConfig {
 		RetryEnabled:           1,
 		MaxRetryCount:          3,
 		RetryIntervalMinutes:   5,
-		DefaultAntiScanEnabled: 1,
+		DefaultAntiScanEnabled: 0,
 	}
 }
 
@@ -207,26 +243,53 @@ func defaultAutoDeleteConfig() *model.AutoDeleteConfig {
 	}
 }
 
+func defaultCloudResourceConfig() *model.CloudResourceConfig {
+	return &model.CloudResourceConfig{
+		TencentVisionEnabled: 0,
+		TencentRegion:        "ap-guangzhou",
+		TencentBdaEndpoint:   "bda.tencentcloudapi.com",
+		TencentIaiEndpoint:   "iai.tencentcloudapi.com",
+	}
+}
+
 func defaultAntiScanConfig() *model.AntiScanConfig {
 	return &model.AntiScanConfig{
-		Enabled:                   1,
-		DefaultNewNoteEnabled:     1,
-		MetadataStripEnabled:      1,
-		PortraitBackgroundEnabled: 1,
-		BackgroundReplaceEnabled:  0,
-		MaskMode:                  "qr",
-		MaskCount:                 1,
-		QrText:                    "仅供本频道查看",
-		StickerOpacity:            18,
-		StickerImage:              "",
-		WatermarkEnabled:          1,
-		WatermarkText:             "youban",
-		StickerText:               "",
-		NoiseEnabled:              1,
-		NoiseStrength:             18,
-		CompressionEnabled:        1,
-		CompressionQuality:        82,
-		ColorJitterEnabled:        1,
+		Enabled:                    0,
+		DefaultNewNoteEnabled:      0,
+		ExistingBatchEnabled:       0,
+		ForceBeforeSendEnabled:     0,
+		AllowSingleOverrideEnabled: 0,
+		MetadataStripEnabled:       0,
+		ResizeEnabled:              0,
+		ResizeScale:                96,
+		CropEnabled:                0,
+		CropPercent:                2,
+		PortraitBackgroundEnabled:  0,
+		BackgroundReplaceEnabled:   0,
+		BackgroundBlurEnabled:      0,
+		BackgroundTextureEnabled:   0,
+		MaskEnabled:                0,
+		MaskMode:                   "qr",
+		MaskCount:                  1,
+		QrText:                     "",
+		StickerOpacity:             18,
+		StickerImage:               "",
+		WatermarkEnabled:           0,
+		ProfileNoWatermarkEnabled:  0,
+		WatermarkFontSize:          22,
+		WatermarkOpacity:           28,
+		WatermarkText:              "",
+		StickerText:                "",
+		NoiseEnabled:               0,
+		NoiseStrength:              18,
+		CompressionEnabled:         0,
+		CompressionQuality:         82,
+		JpegQualityControlEnabled:  0,
+		ColorJitterEnabled:         0,
+		ColorJitterStrength:        12,
+		SharpenBlurEnabled:         0,
+		SharpenBlurMode:            "blur",
+		SharpenBlurStrength:        8,
 	}
 }
 
@@ -256,27 +319,67 @@ func autoDeleteConfigMap(conf *model.AutoDeleteConfig) g.Map {
 	}
 }
 
+func cloudResourceConfigMap(conf *model.CloudResourceConfig) g.Map {
+	return g.Map{
+		"tencentVisionEnabled": conf.TencentVisionEnabled,
+		"tencentSecretId":      conf.TencentSecretId,
+		"tencentSecretKey":     conf.TencentSecretKey,
+		"tencentRegion":        conf.TencentRegion,
+		"tencentBdaEndpoint":   conf.TencentBdaEndpoint,
+		"tencentIaiEndpoint":   conf.TencentIaiEndpoint,
+	}
+}
+
 func antiScanConfigMap(conf *model.AntiScanConfig) g.Map {
 	return g.Map{
-		"antiScanEnabled":           conf.Enabled,
-		"defaultNewNoteEnabled":     conf.DefaultNewNoteEnabled,
-		"metadataStripEnabled":      conf.MetadataStripEnabled,
-		"portraitBackgroundEnabled": conf.PortraitBackgroundEnabled,
-		"backgroundReplaceEnabled":  conf.BackgroundReplaceEnabled,
-		"maskMode":                  conf.MaskMode,
-		"maskCount":                 conf.MaskCount,
-		"qrText":                    conf.QrText,
-		"stickerOpacity":            conf.StickerOpacity,
-		"stickerImage":              conf.StickerImage,
-		"watermarkEnabled":          conf.WatermarkEnabled,
-		"watermarkText":             conf.WatermarkText,
-		"stickerText":               conf.StickerText,
-		"noiseEnabled":              conf.NoiseEnabled,
-		"noiseStrength":             conf.NoiseStrength,
-		"compressionEnabled":        conf.CompressionEnabled,
-		"compressionQuality":        conf.CompressionQuality,
-		"colorJitterEnabled":        conf.ColorJitterEnabled,
+		"antiScanEnabled":            conf.Enabled,
+		"defaultNewNoteEnabled":      conf.DefaultNewNoteEnabled,
+		"existingBatchEnabled":       conf.ExistingBatchEnabled,
+		"forceBeforeSendEnabled":     conf.ForceBeforeSendEnabled,
+		"allowSingleOverrideEnabled": conf.AllowSingleOverrideEnabled,
+		"metadataStripEnabled":       conf.MetadataStripEnabled,
+		"resizeEnabled":              conf.ResizeEnabled,
+		"resizeScale":                conf.ResizeScale,
+		"cropEnabled":                conf.CropEnabled,
+		"cropPercent":                conf.CropPercent,
+		"portraitBackgroundEnabled":  conf.PortraitBackgroundEnabled,
+		"backgroundReplaceEnabled":   conf.BackgroundReplaceEnabled,
+		"backgroundBlurEnabled":      conf.BackgroundBlurEnabled,
+		"backgroundTextureEnabled":   conf.BackgroundTextureEnabled,
+		"maskEnabled":                conf.MaskEnabled,
+		"maskMode":                   conf.MaskMode,
+		"maskCount":                  conf.MaskCount,
+		"qrText":                     conf.QrText,
+		"stickerOpacity":             conf.StickerOpacity,
+		"stickerImage":               conf.StickerImage,
+		"watermarkEnabled":           conf.WatermarkEnabled,
+		"profileNoWatermarkEnabled":  conf.ProfileNoWatermarkEnabled,
+		"watermarkFontSize":          conf.WatermarkFontSize,
+		"watermarkOpacity":           conf.WatermarkOpacity,
+		"watermarkText":              conf.WatermarkText,
+		"stickerText":                conf.StickerText,
+		"noiseEnabled":               conf.NoiseEnabled,
+		"noiseStrength":              conf.NoiseStrength,
+		"compressionEnabled":         conf.CompressionEnabled,
+		"compressionQuality":         conf.CompressionQuality,
+		"jpegQualityControlEnabled":  conf.JpegQualityControlEnabled,
+		"colorJitterEnabled":         conf.ColorJitterEnabled,
+		"colorJitterStrength":        conf.ColorJitterStrength,
+		"sharpenBlurEnabled":         conf.SharpenBlurEnabled,
+		"sharpenBlurMode":            conf.SharpenBlurMode,
+		"sharpenBlurStrength":        conf.SharpenBlurStrength,
 	}
+}
+
+func maskSecretValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 8 {
+		return "********"
+	}
+	return value[:4] + "****" + value[len(value)-4:]
 }
 
 func mustConfigJSON(value interface{}) string {

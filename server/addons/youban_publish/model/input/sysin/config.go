@@ -128,13 +128,40 @@ func (in *AntiScanConfigSaveInp) Filter(ctx context.Context) error {
 	if in.MaskMode != "qr" && in.MaskMode != "sticker" {
 		return gerror.New("打码方式不合法")
 	}
+	if in.WatermarkFontSize <= 0 {
+		in.WatermarkFontSize = 22
+	}
+	if in.WatermarkFontSize < 12 || in.WatermarkFontSize > 56 {
+		return gerror.New("水印字体大小必须在12到56之间")
+	}
+	if in.WatermarkOpacity <= 0 {
+		in.WatermarkOpacity = 28
+	}
+	if in.WatermarkOpacity < 5 || in.WatermarkOpacity > 80 {
+		return gerror.New("水印透明度必须在5到80之间")
+	}
 	if err := checkSwitch(in.Enabled, "防扫图开关"); err != nil {
 		return err
 	}
 	if err := checkSwitch(in.DefaultNewNoteEnabled, "新笔记默认防扫图开关"); err != nil {
 		return err
 	}
+	if err := checkSwitch(in.ExistingBatchEnabled, "已有资料批量处理开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.ForceBeforeSendEnabled, "发送前强制处理开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.AllowSingleOverrideEnabled, "单条资料覆盖开关"); err != nil {
+		return err
+	}
 	if err := checkSwitch(in.MetadataStripEnabled, "移除图片元信息开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.ResizeEnabled, "尺寸微调开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.CropEnabled, "轻微裁剪开关"); err != nil {
 		return err
 	}
 	if err := checkSwitch(in.PortraitBackgroundEnabled, "人像背景贴图开关"); err != nil {
@@ -143,7 +170,19 @@ func (in *AntiScanConfigSaveInp) Filter(ctx context.Context) error {
 	if err := checkSwitch(in.BackgroundReplaceEnabled, "体验替换背景开关"); err != nil {
 		return err
 	}
+	if err := checkSwitch(in.BackgroundBlurEnabled, "背景模糊开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.BackgroundTextureEnabled, "背景纹理叠加开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.MaskEnabled, "内容遮挡开关"); err != nil {
+		return err
+	}
 	if err := checkSwitch(in.WatermarkEnabled, "水印开关"); err != nil {
+		return err
+	}
+	if err := checkSwitch(in.ProfileNoWatermarkEnabled, "资料编号水印开关"); err != nil {
 		return err
 	}
 	if err := checkSwitch(in.NoiseEnabled, "噪点扰动开关"); err != nil {
@@ -152,14 +191,32 @@ func (in *AntiScanConfigSaveInp) Filter(ctx context.Context) error {
 	if err := checkSwitch(in.CompressionEnabled, "压缩重采样开关"); err != nil {
 		return err
 	}
+	if err := checkSwitch(in.JpegQualityControlEnabled, "JPEG质量控制开关"); err != nil {
+		return err
+	}
 	if err := checkSwitch(in.ColorJitterEnabled, "色彩轻扰动开关"); err != nil {
 		return err
+	}
+	if err := checkSwitch(in.SharpenBlurEnabled, "锐化模糊微扰开关"); err != nil {
+		return err
+	}
+	if in.ResizeScale <= 0 {
+		in.ResizeScale = 96
+	}
+	if in.ResizeScale < 80 || in.ResizeScale > 100 {
+		return gerror.New("尺寸缩放比例必须在80到100之间")
+	}
+	if in.CropPercent <= 0 {
+		in.CropPercent = 2
+	}
+	if in.CropPercent < 1 || in.CropPercent > 8 {
+		return gerror.New("裁剪比例必须在1到8之间")
 	}
 	if in.MaskCount <= 0 {
 		in.MaskCount = 1
 	}
-	if in.MaskCount > 2 {
-		return gerror.New("打码数量不能超过2个")
+	if in.MaskCount > 3 {
+		return gerror.New("打码数量不能超过3个")
 	}
 	if in.StickerOpacity <= 0 {
 		in.StickerOpacity = 18
@@ -173,11 +230,30 @@ func (in *AntiScanConfigSaveInp) Filter(ctx context.Context) error {
 	if in.NoiseStrength > 60 {
 		return gerror.New("噪点强度不能超过60")
 	}
+	if in.ColorJitterStrength <= 0 {
+		in.ColorJitterStrength = 12
+	}
+	if in.ColorJitterStrength > 40 {
+		return gerror.New("色彩扰动强度不能超过40")
+	}
 	if in.CompressionQuality <= 0 {
 		in.CompressionQuality = 82
 	}
 	if in.CompressionQuality < 60 || in.CompressionQuality > 95 {
 		return gerror.New("输出质量必须在60到95之间")
+	}
+	in.SharpenBlurMode = strings.ToLower(strings.TrimSpace(in.SharpenBlurMode))
+	if in.SharpenBlurMode == "" {
+		in.SharpenBlurMode = "blur"
+	}
+	if in.SharpenBlurMode != "blur" && in.SharpenBlurMode != "sharpen" {
+		return gerror.New("锐化模糊模式不合法")
+	}
+	if in.SharpenBlurStrength <= 0 {
+		in.SharpenBlurStrength = 8
+	}
+	if in.SharpenBlurStrength > 30 {
+		return gerror.New("锐化模糊强度不能超过30")
 	}
 	return nil
 }

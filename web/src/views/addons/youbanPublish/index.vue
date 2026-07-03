@@ -131,10 +131,14 @@
             />
             <n-button @click="loadTags">查询</n-button>
             <n-button type="primary" @click="openTagModal()">新增标签</n-button>
-            <n-button :disabled="!selectedTagRowKeys.length" @click="batchUpdateTagReview('approved')"
+            <n-button
+              :disabled="!selectedTagRowKeys.length"
+              @click="batchUpdateTagReview('approved')"
               >批量通过</n-button
             >
-            <n-button :disabled="!selectedTagRejectRows.length" @click="batchUpdateTagReview('rejected')"
+            <n-button
+              :disabled="!selectedTagRejectRows.length"
+              @click="batchUpdateTagReview('rejected')"
               >批量驳回</n-button
             >
             <n-button type="error" :disabled="!selectedTagRowKeys.length" @click="batchDeleteTags"
@@ -233,6 +237,23 @@
               <n-space justify="end">
                 <n-button @click="loadConfigs">重置</n-button>
                 <n-button type="primary" :loading="configSaving" @click="saveConfigs"
+                  >保存配置</n-button
+                >
+              </n-space>
+            </n-space>
+          </n-spin>
+        </n-tab-pane>
+
+        <n-tab-pane name="cloudResource" tab="云资源配置">
+          <n-spin :show="cloudResourceLoading">
+            <n-space vertical class="config-section">
+              <CloudResourceConfig :model="cloudResourceConfig" />
+              <n-space justify="end">
+                <n-button @click="loadCloudResourceConfig">重置</n-button>
+                <n-button
+                  type="primary"
+                  :loading="cloudResourceSaving"
+                  @click="saveCloudResourceConfig"
                   >保存配置</n-button
                 >
               </n-space>
@@ -438,6 +459,7 @@
 <script lang="ts" setup>
   import { computed, h, onMounted, reactive, ref } from 'vue';
   import { NButton, NPopover, NSpace, NTag, useDialog, useMessage } from 'naive-ui';
+  import CloudResourceConfig from './components/cloud-resource-config.vue';
   import {
     AccountDelete,
     AccountList,
@@ -509,6 +531,8 @@
   const botLoading = ref(false);
   const configLoading = ref(false);
   const configSaving = ref(false);
+  const cloudResourceLoading = ref(false);
+  const cloudResourceSaving = ref(false);
 
   const tenantModalVisible = ref(false);
   const accountModalVisible = ref(false);
@@ -571,6 +595,7 @@
   const botForm = reactive(newBotForm());
   const tagForm = reactive(newTagForm());
   const telegramConfig = reactive(newTelegramConfig());
+  const cloudResourceConfig = reactive(newCloudResourceConfig());
 
   function newTelegramConfig() {
     return {
@@ -581,6 +606,17 @@
       webhookBaseUrl: '',
       webhookSecret: '',
       defaultTargetChat: '',
+    };
+  }
+
+  function newCloudResourceConfig() {
+    return {
+      tencentVisionEnabled: 0,
+      tencentSecretId: '',
+      tencentSecretKey: '',
+      tencentRegion: 'ap-guangzhou',
+      tencentBdaEndpoint: 'bda.tencentcloudapi.com',
+      tencentIaiEndpoint: 'iai.tencentcloudapi.com',
     };
   }
 
@@ -799,6 +835,7 @@
     if (tab === 'tags') await loadTags();
     if (tab === 'bots') await loadBots();
     if (tab === 'config') await loadConfigs();
+    if (tab === 'cloudResource') await loadCloudResourceConfig();
   }
 
   async function reloadActiveTabData() {
@@ -906,6 +943,27 @@
       message.success('配置已保存');
     } finally {
       configSaving.value = false;
+    }
+  }
+
+  async function loadCloudResourceConfig() {
+    cloudResourceLoading.value = true;
+    try {
+      const res: any = await ConfigGet({ group: 'cloudResource' });
+      Object.assign(cloudResourceConfig, newCloudResourceConfig(), res?.list || {});
+    } finally {
+      cloudResourceLoading.value = false;
+    }
+  }
+
+  async function saveCloudResourceConfig() {
+    cloudResourceSaving.value = true;
+    try {
+      rememberActiveTab();
+      await ConfigUpdate({ group: 'cloudResource', list: { ...cloudResourceConfig } });
+      message.success('云资源配置已保存');
+    } finally {
+      cloudResourceSaving.value = false;
     }
   }
 
@@ -1142,11 +1200,7 @@
       { trigger: 'click' },
       {
         trigger: () =>
-          h(
-            NButton,
-            { size: 'small', text: true, type: 'primary' },
-            { default: () => username }
-          ),
+          h(NButton, { size: 'small', text: true, type: 'primary' }, { default: () => username }),
         default: () => `账号归属：${row.creatorTenantName || row.creatorTenantId || '-'}`,
       }
     );

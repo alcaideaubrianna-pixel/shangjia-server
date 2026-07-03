@@ -48,6 +48,7 @@ type ISysPublish interface {
 	AdminMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile) (res *sysin.MediaModel, err error)
 	AdminMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error)
 	AdminMediaSort(ctx context.Context, in *sysin.MediaSortInp) (err error)
+	AdminAntiScanPreview(ctx context.Context, in *sysin.AntiScanPreviewInp, file *ghttp.UploadFile) (res *sysin.AntiScanPreviewModel, err error)
 	ServerTagSave(ctx context.Context, in *sysin.TagSaveInp) (err error)
 	ServerTagDelete(ctx context.Context, in *sysin.TagDeleteInp) (err error)
 	AdminBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error)
