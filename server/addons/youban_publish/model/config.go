@@ -44,6 +44,10 @@ type CloudResourceConfig struct {
 	TencentRegion        string `json:"tencentRegion"`
 	TencentBdaEndpoint   string `json:"tencentBdaEndpoint"`
 	TencentIaiEndpoint   string `json:"tencentIaiEndpoint"`
+	FapiHubEnabled       int    `json:"fapiHubEnabled"`
+	FapiHubApiKey        string `json:"fapiHubApiKey"`
+	FapiHubEndpoint      string `json:"fapiHubEndpoint"`
+	FapiHubModel         string `json:"fapiHubModel"`
 }
 
 type AntiScanConfig struct {

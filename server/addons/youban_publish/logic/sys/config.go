@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"strings"
 
@@ -148,6 +147,7 @@ func (s *sSysConfig) CloudResourceConfigView(ctx context.Context, in *sysin.Clou
 		return nil, err
 	}
 	conf.TencentSecretKey = maskSecretValue(conf.TencentSecretKey)
+	conf.FapiHubApiKey = maskSecretValue(conf.FapiHubApiKey)
 	res = &sysin.CloudResourceConfigViewModel{CloudResourceConfig: conf}
 	return
 }
@@ -165,6 +165,13 @@ func (s *sSysConfig) CloudResourceConfigSave(ctx context.Context, in *sysin.Clou
 			return err
 		}
 		in.TencentSecretKey = oldConf.TencentSecretKey
+	}
+	if strings.Contains(in.FapiHubApiKey, "*") {
+		oldConf, err := s.GetCloudResource(ctx)
+		if err != nil {
+			return err
+		}
+		in.FapiHubApiKey = oldConf.FapiHubApiKey
 	}
 	if err := validateCloudResourceCredential(ctx, &in.CloudResourceConfig); err != nil {
 		return err
@@ -207,25 +214,6 @@ func (s *sSysConfig) AntiScanConfigSaveTab(ctx context.Context, in *sysin.AntiSc
 		return err
 	}
 	return s.updateConfigGroup(ctx, publishConfigGroupAntiScan, antiScanTabConfigMap(in.Tab, &in.AntiScanConfig))
-}
-
-func validateCloudResourceCredential(ctx context.Context, conf *model.CloudResourceConfig) error {
-	if conf.TencentVisionEnabled != 1 {
-		return nil
-	}
-	imageBytes, _, err := readAntiScanPreviewImage(ctx, nil, 1)
-	if err != nil {
-		return err
-	}
-	imageBytes, err = normalizeTencentVisionImageBytes(imageBytes)
-	if err != nil {
-		return err
-	}
-	client := newTencentVisionClient(conf.TencentSecretId, conf.TencentSecretKey, conf.TencentRegion, conf.TencentBdaEndpoint, conf.TencentIaiEndpoint)
-	if _, err = client.detect(ctx, base64.StdEncoding.EncodeToString(imageBytes)); err != nil {
-		return gerror.Wrap(err, "腾讯云视觉密钥或权限校验失败")
-	}
-	return nil
 }
 
 func (s *sSysConfig) scanConfigGroup(ctx context.Context, group string, dst interface{}) error {
@@ -273,15 +261,6 @@ func defaultAutoDeleteConfig() *model.AutoDeleteConfig {
 		Enabled:  0,
 		BotIds:   []int64{},
 		Keywords: []string{},
-	}
-}
-
-func defaultCloudResourceConfig() *model.CloudResourceConfig {
-	return &model.CloudResourceConfig{
-		TencentVisionEnabled: 0,
-		TencentRegion:        "ap-guangzhou",
-		TencentBdaEndpoint:   "bda.tencentcloudapi.com",
-		TencentIaiEndpoint:   "iai.tencentcloudapi.com",
 	}
 }
 
@@ -349,17 +328,6 @@ func autoDeleteConfigMap(conf *model.AutoDeleteConfig) g.Map {
 		"autoDeleteEnabled": conf.Enabled,
 		"botIds":            mustConfigJSON(conf.BotIds),
 		"keywords":          mustConfigJSON(conf.Keywords),
-	}
-}
-
-func cloudResourceConfigMap(conf *model.CloudResourceConfig) g.Map {
-	return g.Map{
-		"tencentVisionEnabled": conf.TencentVisionEnabled,
-		"tencentSecretId":      conf.TencentSecretId,
-		"tencentSecretKey":     conf.TencentSecretKey,
-		"tencentRegion":        conf.TencentRegion,
-		"tencentBdaEndpoint":   conf.TencentBdaEndpoint,
-		"tencentIaiEndpoint":   conf.TencentIaiEndpoint,
 	}
 }
 

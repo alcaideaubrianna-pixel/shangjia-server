@@ -54,7 +54,7 @@ func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiSc
 	if err != nil {
 		return nil, err
 	}
-	configHash := antiScanConfigHash(in, cloudConf.TencentVisionEnabled)
+	configHash := antiScanConfigHash(in, cloudConf)
 	noop := isAntiScanNoop(in)
 	if cached, ok := s.getAntiScanPreviewCache(ctx, imageHash, configHash); ok {
 		cached.CacheHit = 1
@@ -63,7 +63,7 @@ func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiSc
 	detectRes := &antiScanDetectResult{Provider: "none"}
 	warnings := []string{}
 	if !noop {
-		detectRes, warnings, err = s.detectAntiScanImage(ctx, imageHash, imageBytes, cloudConf)
+		detectRes, warnings, err = s.detectAntiScanImage(ctx, imageHash, imageBytes, in, cloudConf)
 		if err != nil {
 			return nil, err
 		}
@@ -102,33 +102,119 @@ type antiScanDetectResult struct {
 	SegmentRaw    string
 }
 
-// detectAntiScanImage 获取人脸检测和人像分割结果，避免同一张图重复请求腾讯云。
-func (s *sSysPublish) detectAntiScanImage(ctx context.Context, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig) (*antiScanDetectResult, []string, error) {
+// detectAntiScanImage 按功能需要获取云识别结果，避免同一张图重复调用收费接口。
+func (s *sSysPublish) detectAntiScanImage(ctx context.Context, imageHash string, imageBytes []byte, in *sysin.AntiScanPreviewInp, conf *model.CloudResourceConfig) (*antiScanDetectResult, []string, error) {
 	if conf == nil {
 		return nil, nil, gerror.New("云资源配置不合法")
 	}
+	res := &antiScanDetectResult{Provider: "none"}
+	warnings := []string{}
+	if needsAntiScanFaceDetection(in) {
+		faceRaw, faceCount, err := s.getOrCreateAntiScanFaceDetection(ctx, imageHash, imageBytes, conf)
+		if err != nil {
+			return nil, nil, err
+		}
+		res.FaceRaw = faceRaw
+		res.FaceCount = faceCount
+		if faceRaw != "" {
+			res.CloudRawSaved = 1
+			res.Provider = appendAntiScanProvider(res.Provider, "tencent-face")
+		} else {
+			warnings = append(warnings, "腾讯云人脸检测未启用，二维码/贴图只能按默认位置避让")
+		}
+	}
+	if needsAntiScanMatting(in) {
+		segmentRaw, err := s.getOrCreateAntiScanMatting(ctx, imageHash, imageBytes, conf)
+		if err != nil {
+			return nil, nil, err
+		}
+		res.SegmentRaw = segmentRaw
+		if segmentRaw != "" {
+			res.CloudRawSaved = 1
+			res.Provider = appendAntiScanProvider(res.Provider, "fapihub-matting")
+		} else {
+			warnings = append(warnings, "FAPIHub 抠图未启用，背景替换将降级为本地纹理处理")
+		}
+	}
+	return res, warnings, nil
+}
+
+func needsAntiScanFaceDetection(in *sysin.AntiScanPreviewInp) bool {
+	return in.MaskEnabled == 1 && in.MaskCount > 0
+}
+
+func needsAntiScanMatting(in *sysin.AntiScanPreviewInp) bool {
+	return in.BackgroundReplaceEnabled == 1 || in.PortraitBackgroundEnabled == 1
+}
+
+func appendAntiScanProvider(current string, next string) string {
+	if current == "" || current == "none" {
+		return next
+	}
+	if strings.Contains(current, next) {
+		return current
+	}
+	return current + "+" + next
+}
+
+func (s *sSysPublish) getOrCreateAntiScanFaceDetection(ctx context.Context, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig) (string, int, error) {
+	if cached, ok := s.getAntiScanFaceCache(ctx, imageHash); ok {
+		return cached.FaceRaw, cached.FaceCount, nil
+	}
 	if conf.TencentVisionEnabled != 1 {
-		return &antiScanDetectResult{Provider: "none"}, []string{"腾讯云视觉未启用，已跳过人像分割和人脸检测"}, nil
+		return "", 0, nil
 	}
-	if cached, ok := s.getAntiScanDetectionCache(ctx, imageHash); ok {
-		return cached, []string{}, nil
-	}
-	imageBytes, err := normalizeTencentVisionImageBytes(imageBytes)
+	normalized, err := normalizeTencentVisionImageBytes(imageBytes)
 	if err != nil {
-		return nil, nil, err
+		return "", 0, err
 	}
 	client := newTencentVisionClient(conf.TencentSecretId, conf.TencentSecretKey, conf.TencentRegion, conf.TencentBdaEndpoint, conf.TencentIaiEndpoint)
-	result, err := client.detect(ctx, base64.StdEncoding.EncodeToString(imageBytes))
+	faceRaw, faceCount, err := client.detectFace(ctx, base64.StdEncoding.EncodeToString(normalized))
 	if err != nil {
-		return nil, nil, err
+		return "", 0, err
 	}
-	return &antiScanDetectResult{
+	if err = s.saveAntiScanDetectionPart(ctx, imageHash, &antiScanDetectResult{
 		CloudRawSaved: 1,
-		FaceCount:     result.FaceCount,
-		FaceRaw:       result.FaceRaw,
-		Provider:      "tencent",
-		SegmentRaw:    result.SegmentRaw,
-	}, []string{}, nil
+		FaceCount:     faceCount,
+		FaceRaw:       faceRaw,
+		Provider:      "tencent-face",
+	}); err != nil {
+		return "", 0, err
+	}
+	return faceRaw, faceCount, nil
+}
+
+func (s *sSysPublish) getOrCreateAntiScanMatting(ctx context.Context, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig) (string, error) {
+	if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash); ok {
+		return cached.SegmentRaw, nil
+	}
+	if conf.FapiHubEnabled != 1 {
+		return "", nil
+	}
+	client := newFapiHubClient(conf.FapiHubApiKey, conf.FapiHubEndpoint, conf.FapiHubModel)
+	pngBytes, err := client.removeBackground(ctx, imageBytes)
+	if err != nil {
+		return "", err
+	}
+	segmentRaw := encodeFapiHubSegmentPortrait(pngBytes)
+	if err = s.saveAntiScanDetectionPart(ctx, imageHash, &antiScanDetectResult{
+		CloudRawSaved: 1,
+		Provider:      "fapihub-matting",
+		SegmentRaw:    segmentRaw,
+	}); err != nil {
+		return "", err
+	}
+	return segmentRaw, nil
+}
+
+func encodeFapiHubSegmentPortrait(imageBytes []byte) string {
+	data, _ := json.Marshal(g.Map{
+		"Provider": "fapihub",
+		"Response": g.Map{
+			"ResultImage": base64.StdEncoding.EncodeToString(imageBytes),
+		},
+	})
+	return string(data)
 }
 
 func readAntiScanPreviewImage(ctx context.Context, upload *ghttp.UploadFile, useDefault int) ([]byte, string, error) {
@@ -166,10 +252,18 @@ func antiScanImagePHash(imageBytes []byte) (string, error) {
 	return fmt.Sprintf("%016x", hash.GetHash()), nil
 }
 
-func antiScanConfigHash(in *sysin.AntiScanPreviewInp, cloudEnabled int) string {
+func antiScanConfigHash(in *sysin.AntiScanPreviewInp, cloudConf *model.CloudResourceConfig) string {
+	cloudData := g.Map{}
+	if cloudConf != nil {
+		cloudData = g.Map{
+			"fapiHubEnabled":       cloudConf.FapiHubEnabled,
+			"fapiHubModel":         cloudConf.FapiHubModel,
+			"tencentVisionEnabled": cloudConf.TencentVisionEnabled,
+		}
+	}
 	data, _ := json.Marshal(g.Map{
 		"antiScan":      in.AntiScanConfig,
-		"cloudEnabled":  cloudEnabled,
+		"cloud":         cloudData,
 		"renderVersion": antiScanPreviewRenderVersion,
 	})
 	sum := sha256.Sum256(data)
@@ -245,10 +339,10 @@ func (s *sSysPublish) getAntiScanPreviewCache(ctx context.Context, imageHash str
 	}, true
 }
 
-func (s *sSysPublish) getAntiScanDetectionCache(ctx context.Context, imageHash string) (*antiScanDetectResult, bool) {
+func (s *sSysPublish) getAntiScanFaceCache(ctx context.Context, imageHash string) (*antiScanDetectResult, bool) {
 	row, err := g.DB().Model(antiScanCacheTable).Safe().Ctx(ctx).
 		Where("image_hash", imageHash).
-		Where("provider <> ''").
+		Where("face_json <> ''").
 		Where("cloud_raw_saved", 1).
 		WhereNull("deleted_at").
 		OrderDesc("id").
@@ -261,8 +355,43 @@ func (s *sSysPublish) getAntiScanDetectionCache(ctx context.Context, imageHash s
 		FaceCount:     row["face_count"].Int(),
 		FaceRaw:       row["face_json"].String(),
 		Provider:      row["provider"].String(),
+	}, true
+}
+
+func (s *sSysPublish) getAntiScanSegmentCache(ctx context.Context, imageHash string) (*antiScanDetectResult, bool) {
+	row, err := g.DB().Model(antiScanCacheTable).Safe().Ctx(ctx).
+		Where("image_hash", imageHash).
+		Where("segment_json <> ''").
+		Where("cloud_raw_saved", 1).
+		WhereNull("deleted_at").
+		OrderDesc("id").
+		One()
+	if err != nil || row.IsEmpty() {
+		return nil, false
+	}
+	return &antiScanDetectResult{
+		CloudRawSaved: row["cloud_raw_saved"].Int(),
+		Provider:      row["provider"].String(),
 		SegmentRaw:    row["segment_json"].String(),
 	}, true
+}
+
+func (s *sSysPublish) saveAntiScanDetectionPart(ctx context.Context, imageHash string, detect *antiScanDetectResult) error {
+	_, err := g.DB().Model(antiScanCacheTable).Safe().Ctx(ctx).Data(g.Map{
+		"image_hash":      imageHash,
+		"config_hash":     "",
+		"provider":        strings.TrimSpace(detect.Provider),
+		"face_count":      detect.FaceCount,
+		"face_json":       detect.FaceRaw,
+		"segment_json":    detect.SegmentRaw,
+		"original_url":    "",
+		"preview_url":     "",
+		"warnings_json":   "[]",
+		"cloud_raw_saved": detect.CloudRawSaved,
+		"created_at":      gtime.Now(),
+		"updated_at":      gtime.Now(),
+	}).Insert()
+	return err
 }
 
 func (s *sSysPublish) saveAntiScanPreviewCache(ctx context.Context, res *sysin.AntiScanPreviewModel, detect *antiScanDetectResult) error {
