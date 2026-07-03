@@ -55,13 +55,27 @@ func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiSc
 		return nil, err
 	}
 	configHash := antiScanConfigHash(in, cloudConf.TencentVisionEnabled)
+	noop := isAntiScanNoop(in)
+	if noop && originalUrl != "" {
+		return &sysin.AntiScanPreviewModel{
+			CacheHit:      0,
+			ConfigHash:    configHash,
+			FaceCount:     0,
+			ImageHash:     imageHash,
+			OriginalUrl:   originalUrl,
+			PreviewUrl:    originalUrl,
+			Provider:      "none",
+			Warnings:      []string{},
+			CloudRawSaved: 0,
+		}, nil
+	}
 	if cached, ok := s.getAntiScanPreviewCache(ctx, imageHash, configHash); ok {
 		cached.CacheHit = 1
 		return cached, nil
 	}
 	detectRes := &antiScanDetectResult{Provider: "none"}
 	warnings := []string{}
-	if !isAntiScanNoop(in) {
+	if !noop {
 		detectRes, warnings, err = s.detectAntiScanImage(ctx, imageHash, imageBytes, cloudConf)
 		if err != nil {
 			return nil, err
