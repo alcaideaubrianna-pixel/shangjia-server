@@ -39,6 +39,7 @@ type AutoDeleteConfig struct {
 
 type CloudResourceConfig struct {
 	TencentVisionEnabled int    `json:"tencentVisionEnabled"`
+	TencentCloudSite     string `json:"tencentCloudSite"`
 	TencentSecretId      string `json:"tencentSecretId"`
 	TencentSecretKey     string `json:"tencentSecretKey"`
 	TencentRegion        string `json:"tencentRegion"`

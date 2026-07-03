@@ -22,6 +22,7 @@ type CloudResourceConfigSaveInp struct {
 func (in *CloudResourceConfigSaveInp) Filter(ctx context.Context) error {
 	in.TencentSecretId = strings.TrimSpace(in.TencentSecretId)
 	in.TencentSecretKey = strings.TrimSpace(in.TencentSecretKey)
+	in.TencentCloudSite = strings.TrimSpace(in.TencentCloudSite)
 	in.TencentRegion = strings.TrimSpace(in.TencentRegion)
 	in.TencentBdaEndpoint = strings.TrimSpace(in.TencentBdaEndpoint)
 	in.TencentIaiEndpoint = strings.TrimSpace(in.TencentIaiEndpoint)
@@ -34,14 +35,29 @@ func (in *CloudResourceConfigSaveInp) Filter(ctx context.Context) error {
 	if err := checkSwitch(in.FapiHubEnabled, "FAPIHub 抠图开关"); err != nil {
 		return err
 	}
-	if in.TencentRegion == "" {
+	if in.TencentCloudSite == "" {
+		in.TencentCloudSite = "mainland"
+	}
+	if in.TencentCloudSite != "mainland" && in.TencentCloudSite != "intl" {
+		return gerror.New("腾讯云站点不合法")
+	}
+	if in.TencentCloudSite == "intl" && in.TencentRegion == "ap-guangzhou" {
+		in.TencentRegion = ""
+	}
+	if in.TencentCloudSite == "mainland" && in.TencentRegion == "" {
 		in.TencentRegion = "ap-guangzhou"
 	}
 	if in.TencentBdaEndpoint == "" {
 		in.TencentBdaEndpoint = "bda.tencentcloudapi.com"
 	}
-	if in.TencentIaiEndpoint == "" {
-		in.TencentIaiEndpoint = "iai.tencentcloudapi.com"
+	if in.TencentCloudSite == "intl" {
+		if in.TencentIaiEndpoint == "" || in.TencentIaiEndpoint == "iai.tencentcloudapi.com" {
+			in.TencentIaiEndpoint = "iai.intl.tencentcloudapi.com"
+		}
+	} else {
+		if in.TencentIaiEndpoint == "" || in.TencentIaiEndpoint == "iai.intl.tencentcloudapi.com" {
+			in.TencentIaiEndpoint = "iai.tencentcloudapi.com"
+		}
 	}
 	if in.FapiHubEndpoint == "" {
 		in.FapiHubEndpoint = "https://fapihub.com/v2/rembg/"

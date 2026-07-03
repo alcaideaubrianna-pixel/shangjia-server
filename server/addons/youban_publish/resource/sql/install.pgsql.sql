@@ -481,11 +481,12 @@ SELECT seed."addon_name", seed."group", seed."name", seed."type", seed."key", se
 FROM (
   VALUES
     ('youban_publish', 'cloudResource', '腾讯云人脸检测开关', 'int', 'tencentVisionEnabled', '0', '0', 80, '是否启用腾讯云人脸检测，用于二维码和贴图避开人脸'),
+    ('youban_publish', 'cloudResource', '腾讯云站点', 'string', 'tencentCloudSite', 'mainland', 'mainland', 85, 'mainland 国内云；intl 国际云'),
     ('youban_publish', 'cloudResource', '腾讯云 SecretId', 'string', 'tencentSecretId', '', '', 90, 'CAM 子用户 SecretId，仅授予 IAI 必要权限'),
     ('youban_publish', 'cloudResource', '腾讯云 SecretKey', 'string', 'tencentSecretKey', '', '', 100, 'CAM 子用户 SecretKey，页面回显会脱敏'),
-    ('youban_publish', 'cloudResource', '腾讯云 Region', 'string', 'tencentRegion', 'ap-guangzhou', 'ap-guangzhou', 110, '腾讯云接口地域，默认 ap-guangzhou'),
+    ('youban_publish', 'cloudResource', '腾讯云 Region', 'string', 'tencentRegion', 'ap-guangzhou', 'ap-guangzhou', 110, '国内云默认 ap-guangzhou，国际云可留空'),
     ('youban_publish', 'cloudResource', '腾讯云 BDA Endpoint', 'string', 'tencentBdaEndpoint', 'bda.tencentcloudapi.com', 'bda.tencentcloudapi.com', 120, '旧国内版人体分析接口域名，当前默认不强制使用'),
-    ('youban_publish', 'cloudResource', '腾讯云 IAI Endpoint', 'string', 'tencentIaiEndpoint', 'iai.tencentcloudapi.com', 'iai.tencentcloudapi.com', 130, '人脸识别接口域名，国际版可填 iai.intl.tencentcloudapi.com'),
+    ('youban_publish', 'cloudResource', '腾讯云 IAI Endpoint', 'string', 'tencentIaiEndpoint', 'iai.tencentcloudapi.com', 'iai.tencentcloudapi.com', 130, '国内云 iai.tencentcloudapi.com；国际云 iai.intl.tencentcloudapi.com'),
     ('youban_publish', 'cloudResource', 'FAPIHub抠图开关', 'int', 'fapiHubEnabled', '0', '0', 140, '是否启用 FAPIHub 抠图，用于背景替换和人像背景贴图'),
     ('youban_publish', 'cloudResource', 'FAPIHub API Key', 'string', 'fapiHubApiKey', '', '', 150, 'FAPIHub API Key，页面回显会脱敏'),
     ('youban_publish', 'cloudResource', 'FAPIHub Endpoint', 'string', 'fapiHubEndpoint', 'https://fapihub.com/v2/rembg/', 'https://fapihub.com/v2/rembg/', 160, 'FAPIHub 抠图接口地址'),

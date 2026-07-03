@@ -612,6 +612,7 @@
   function newCloudResourceConfig() {
     return {
       tencentVisionEnabled: 0,
+      tencentCloudSite: 'mainland',
       tencentSecretId: '',
       tencentSecretKey: '',
       tencentRegion: 'ap-guangzhou',

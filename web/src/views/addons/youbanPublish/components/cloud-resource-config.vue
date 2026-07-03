@@ -13,6 +13,12 @@
             :unchecked-value="0"
           />
         </n-form-item>
+        <n-form-item label="腾讯云站点">
+          <n-radio-group v-model:value="model.tencentCloudSite" @update:value="applyTencentCloudSite">
+            <n-radio-button value="mainland">国内云</n-radio-button>
+            <n-radio-button value="intl">国际云</n-radio-button>
+          </n-radio-group>
+        </n-form-item>
         <n-form-item label="SecretId">
           <n-input
             v-model:value="model.tencentSecretId"
@@ -76,13 +82,14 @@
 </template>
 
 <script lang="ts" setup>
-  defineProps<{
+  const props = defineProps<{
     model: {
       fapiHubApiKey: string;
       fapiHubEnabled: number;
       fapiHubEndpoint: string;
       fapiHubModel: string;
       tencentBdaEndpoint: string;
+      tencentCloudSite: string;
       tencentIaiEndpoint: string;
       tencentRegion: string;
       tencentSecretId: string;
@@ -90,6 +97,25 @@
       tencentVisionEnabled: number;
     };
   }>();
+
+  function applyTencentCloudSite(value: string) {
+    props.model.tencentCloudSite = value;
+    if (value === 'intl') {
+      if (!props.model.tencentIaiEndpoint || props.model.tencentIaiEndpoint === 'iai.tencentcloudapi.com') {
+        props.model.tencentIaiEndpoint = 'iai.intl.tencentcloudapi.com';
+      }
+      if (props.model.tencentRegion === 'ap-guangzhou') {
+        props.model.tencentRegion = '';
+      }
+      return;
+    }
+    if (!props.model.tencentIaiEndpoint || props.model.tencentIaiEndpoint === 'iai.intl.tencentcloudapi.com') {
+      props.model.tencentIaiEndpoint = 'iai.tencentcloudapi.com';
+    }
+    if (!props.model.tencentRegion) {
+      props.model.tencentRegion = 'ap-guangzhou';
+    }
+  }
 </script>
 
 <style scoped>

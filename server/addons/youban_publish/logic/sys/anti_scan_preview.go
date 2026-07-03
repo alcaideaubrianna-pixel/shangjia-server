@@ -168,7 +168,7 @@ func (s *sSysPublish) getOrCreateAntiScanFaceDetection(ctx context.Context, imag
 	if err != nil {
 		return "", 0, err
 	}
-	client := newTencentVisionClient(conf.TencentSecretId, conf.TencentSecretKey, conf.TencentRegion, conf.TencentBdaEndpoint, conf.TencentIaiEndpoint)
+	client := newTencentVisionClient(conf.TencentSecretId, conf.TencentSecretKey, conf.TencentCloudSite, conf.TencentRegion, conf.TencentBdaEndpoint, conf.TencentIaiEndpoint)
 	faceRaw, faceCount, err := client.detectFace(ctx, base64.StdEncoding.EncodeToString(normalized))
 	if err != nil {
 		return "", 0, err
@@ -258,6 +258,8 @@ func antiScanConfigHash(in *sysin.AntiScanPreviewInp, cloudConf *model.CloudReso
 		cloudData = g.Map{
 			"fapiHubEnabled":       cloudConf.FapiHubEnabled,
 			"fapiHubModel":         cloudConf.FapiHubModel,
+			"tencentCloudSite":     cloudConf.TencentCloudSite,
+			"tencentIaiEndpoint":   cloudConf.TencentIaiEndpoint,
 			"tencentVisionEnabled": cloudConf.TencentVisionEnabled,
 		}
 	}

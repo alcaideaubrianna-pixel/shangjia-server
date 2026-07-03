@@ -13,6 +13,7 @@ import (
 func defaultCloudResourceConfig() *model.CloudResourceConfig {
 	return &model.CloudResourceConfig{
 		TencentVisionEnabled: 0,
+		TencentCloudSite:     "mainland",
 		TencentRegion:        "ap-guangzhou",
 		TencentBdaEndpoint:   "bda.tencentcloudapi.com",
 		TencentIaiEndpoint:   "iai.tencentcloudapi.com",
@@ -25,6 +26,7 @@ func defaultCloudResourceConfig() *model.CloudResourceConfig {
 func cloudResourceConfigMap(conf *model.CloudResourceConfig) g.Map {
 	return g.Map{
 		"tencentVisionEnabled": conf.TencentVisionEnabled,
+		"tencentCloudSite":     conf.TencentCloudSite,
 		"tencentSecretId":      conf.TencentSecretId,
 		"tencentSecretKey":     conf.TencentSecretKey,
 		"tencentRegion":        conf.TencentRegion,
@@ -60,7 +62,7 @@ func validateTencentFaceCredential(ctx context.Context, conf *model.CloudResourc
 	if err != nil {
 		return err
 	}
-	client := newTencentVisionClient(conf.TencentSecretId, conf.TencentSecretKey, conf.TencentRegion, conf.TencentBdaEndpoint, conf.TencentIaiEndpoint)
+	client := newTencentVisionClient(conf.TencentSecretId, conf.TencentSecretKey, conf.TencentCloudSite, conf.TencentRegion, conf.TencentBdaEndpoint, conf.TencentIaiEndpoint)
 	if _, _, err = client.detectFace(ctx, base64.StdEncoding.EncodeToString(normalized)); err != nil {
 		return gerror.Wrap(err, "腾讯云人脸检测密钥或权限校验失败")
 	}

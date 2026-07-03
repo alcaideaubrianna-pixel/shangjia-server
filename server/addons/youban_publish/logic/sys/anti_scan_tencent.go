@@ -19,6 +19,7 @@ import (
 type tencentVisionClient struct {
 	secretId    string
 	secretKey   string
+	cloudSite   string
 	region      string
 	bdaEndpoint string
 	iaiEndpoint string
@@ -30,10 +31,15 @@ type tencentVisionResult struct {
 	FaceCount  int
 }
 
-func newTencentVisionClient(confSecretId string, confSecretKey string, region string, bdaEndpoint string, iaiEndpoint string) *tencentVisionClient {
+func newTencentVisionClient(confSecretId string, confSecretKey string, cloudSite string, region string, bdaEndpoint string, iaiEndpoint string) *tencentVisionClient {
+	cloudSite = strings.TrimSpace(cloudSite)
+	if cloudSite == "" {
+		cloudSite = "mainland"
+	}
 	return &tencentVisionClient{
 		secretId:    strings.TrimSpace(confSecretId),
 		secretKey:   strings.TrimSpace(confSecretKey),
+		cloudSite:   cloudSite,
 		region:      strings.TrimSpace(region),
 		bdaEndpoint: strings.TrimSpace(bdaEndpoint),
 		iaiEndpoint: strings.TrimSpace(iaiEndpoint),
@@ -79,8 +85,15 @@ func normalizeTencentVisionImageBytes(imageBytes []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// detectFace 调用腾讯云 IAI DetectFace，结果用于二维码和贴图避开人脸区域。
+// detectFace 调用腾讯云人脸检测，结果用于二维码和贴图避开人脸区域。
 func (c *tencentVisionClient) detectFace(ctx context.Context, imageBase64 string) (string, int, error) {
+	if c.cloudSite == "intl" {
+		return c.detectFaceIntl(ctx, imageBase64)
+	}
+	return c.detectFaceMainland(ctx, imageBase64)
+}
+
+func (c *tencentVisionClient) detectFaceMainland(ctx context.Context, imageBase64 string) (string, int, error) {
 	_ = ctx
 	client, err := c.newIaiClient()
 	if err != nil {
@@ -99,6 +112,73 @@ func (c *tencentVisionClient) detectFace(ctx context.Context, imageBase64 string
 	raw := resp.ToJsonString()
 	count := countTencentFaces(raw)
 	return raw, count, nil
+}
+
+func (c *tencentVisionClient) detectFaceIntl(ctx context.Context, imageBase64 string) (string, int, error) {
+	_ = ctx
+	client, err := c.newIaiClient()
+	if err != nil {
+		return "", 0, err
+	}
+	req := iai.NewDetectFaceAttributesRequest()
+	req.Image = common.StringPtr(imageBase64)
+	req.MaxFaceNum = common.Uint64Ptr(20)
+	req.FaceAttributesType = common.StringPtr("None")
+	req.FaceModelVersion = common.StringPtr("3.0")
+	req.NeedRotateDetection = common.Uint64Ptr(1)
+	resp, err := client.DetectFaceAttributes(req)
+	if err != nil {
+		return "", 0, wrapTencentSDKError(err, "调用腾讯云国际版人脸检测失败")
+	}
+	raw := normalizeTencentIntlFaceRaw(resp.ToJsonString())
+	count := countTencentFaces(raw)
+	return raw, count, nil
+}
+
+func normalizeTencentIntlFaceRaw(raw string) string {
+	var parsed struct {
+		Response struct {
+			ImageWidth      uint64 `json:"ImageWidth"`
+			ImageHeight     uint64 `json:"ImageHeight"`
+			FaceDetailInfos []struct {
+				FaceRect struct {
+					X      int64  `json:"X"`
+					Y      int64  `json:"Y"`
+					Width  uint64 `json:"Width"`
+					Height uint64 `json:"Height"`
+				} `json:"FaceRect"`
+			} `json:"FaceDetailInfos"`
+			RequestId string `json:"RequestId"`
+		} `json:"Response"`
+	}
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return raw
+	}
+	faceInfos := make([]map[string]int64, 0, len(parsed.Response.FaceDetailInfos))
+	for _, item := range parsed.Response.FaceDetailInfos {
+		if item.FaceRect.Width == 0 || item.FaceRect.Height == 0 {
+			continue
+		}
+		faceInfos = append(faceInfos, map[string]int64{
+			"X":      item.FaceRect.X,
+			"Y":      item.FaceRect.Y,
+			"Width":  int64(item.FaceRect.Width),
+			"Height": int64(item.FaceRect.Height),
+		})
+	}
+	data, err := json.Marshal(map[string]interface{}{
+		"Provider": "tencent-intl",
+		"Response": map[string]interface{}{
+			"ImageWidth":  parsed.Response.ImageWidth,
+			"ImageHeight": parsed.Response.ImageHeight,
+			"FaceInfos":   faceInfos,
+			"RequestId":   parsed.Response.RequestId,
+		},
+	})
+	if err != nil {
+		return raw
+	}
+	return string(data)
 }
 
 // segmentPortrait 调用腾讯云 BDA SegmentPortraitPic，结果用于人像背景替换。
