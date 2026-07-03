@@ -86,6 +86,13 @@ func (s *sSysConfig) GetConfigByGroup(ctx context.Context, in *sysin.GetConfigIn
 	if in.Group == "" {
 		in.Group = publishConfigGroupTelegram
 	}
+	if in.Group == publishConfigGroupCloudResource {
+		cloudRes, cloudErr := s.CloudResourceConfigView(ctx, &sysin.CloudResourceConfigViewInp{})
+		if cloudErr != nil {
+			return nil, cloudErr
+		}
+		return &sysin.GetConfigModel{List: gconv.Map(cloudRes.CloudResourceConfig)}, nil
+	}
 	in.AddonName = global.GetSkeleton().Name
 	models, err := baseservice.SysAddonsConfig().GetConfigByGroup(ctx, &in.GetAddonsConfigInp)
 	if err != nil {
@@ -98,6 +105,13 @@ func (s *sSysConfig) GetConfigByGroup(ctx context.Context, in *sysin.GetConfigIn
 func (s *sSysConfig) UpdateConfigByGroup(ctx context.Context, in *sysin.UpdateConfigInp) error {
 	if in.Group == "" {
 		in.Group = publishConfigGroupTelegram
+	}
+	if in.Group == publishConfigGroupCloudResource {
+		saveInp := &sysin.CloudResourceConfigSaveInp{}
+		if err := gconv.Struct(in.List, saveInp); err != nil {
+			return err
+		}
+		return s.CloudResourceConfigSave(ctx, saveInp)
 	}
 	in.AddonName = global.GetSkeleton().Name
 	return baseservice.SysAddonsConfig().UpdateConfigByGroup(ctx, &in.UpdateAddonsConfigInp)

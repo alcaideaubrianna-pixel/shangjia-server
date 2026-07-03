@@ -617,6 +617,10 @@
       tencentRegion: 'ap-guangzhou',
       tencentBdaEndpoint: 'bda.tencentcloudapi.com',
       tencentIaiEndpoint: 'iai.tencentcloudapi.com',
+      fapiHubEnabled: 0,
+      fapiHubApiKey: '',
+      fapiHubEndpoint: 'https://fapihub.com/v2/rembg/',
+      fapiHubModel: 'falcon',
     };
   }
 

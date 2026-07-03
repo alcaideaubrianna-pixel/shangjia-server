@@ -1,12 +1,12 @@
 <template>
   <n-space vertical class="cloud-resource-config">
     <n-alert type="info" :bordered="false">
-      云资源配置用于防扫图、人像分割、人脸检测等能力。当前已接入腾讯云视觉，后续可在这里继续扩展阿里云、火山、百度等厂商。
+      云资源配置用于防扫图预览和后续发送链路。所有密钥保存到后台配置表，不使用环境变量注入。
     </n-alert>
 
-    <n-card size="small" title="腾讯云视觉">
+    <n-card size="small" title="腾讯云人脸检测">
       <n-form :model="model" label-placement="left" label-width="170">
-        <n-form-item label="启用腾讯云视觉">
+        <n-form-item label="启用人脸检测">
           <n-switch
             v-model:value="model.tencentVisionEnabled"
             :checked-value="1"
@@ -41,11 +41,35 @@
       </n-form>
     </n-card>
 
+    <n-card size="small" title="FAPIHub 抠图">
+      <n-form :model="model" label-placement="left" label-width="170">
+        <n-form-item label="启用背景抠图">
+          <n-switch v-model:value="model.fapiHubEnabled" :checked-value="1" :unchecked-value="0" />
+        </n-form-item>
+        <n-form-item label="API Key">
+          <n-input
+            v-model:value="model.fapiHubApiKey"
+            clearable
+            placeholder="请输入 FAPIHub API Key"
+            show-password-on="click"
+            type="password"
+          />
+        </n-form-item>
+        <n-form-item label="Endpoint">
+          <n-input v-model:value="model.fapiHubEndpoint" placeholder="https://fapihub.com/v2/rembg/" />
+        </n-form-item>
+        <n-form-item label="Model">
+          <n-input v-model:value="model.fapiHubModel" placeholder="falcon" />
+        </n-form-item>
+      </n-form>
+    </n-card>
+
     <n-card size="small" title="权限要求">
       <n-space vertical class="cloud-help">
-        <div>CAM 子用户建议只授权 BDA 的 SegmentPortraitPic 和 IAI 的 DetectFace。</div>
-        <div>不要使用主账号密钥；SecretKey 保存后再次打开会脱敏显示。</div>
-        <div>预览接口会按图片 pHash 缓存识别结果，避免重复请求云厂商。</div>
+        <div>腾讯云只用于 DetectFace 人脸检测，二维码和贴图会避开人脸区域。</div>
+        <div>FAPIHub 用于背景替换和人像背景贴图，保存时会调用默认预览图验证 API Key。</div>
+        <div>SecretKey 和 API Key 保存后再次打开会脱敏显示。</div>
+        <div>预览接口会按图片 pHash 缓存人脸检测、抠图结果和最终处理图，避免重复请求收费接口。</div>
       </n-space>
     </n-card>
   </n-space>
@@ -54,6 +78,10 @@
 <script lang="ts" setup>
   defineProps<{
     model: {
+      fapiHubApiKey: string;
+      fapiHubEnabled: number;
+      fapiHubEndpoint: string;
+      fapiHubModel: string;
       tencentBdaEndpoint: string;
       tencentIaiEndpoint: string;
       tencentRegion: string;
