@@ -3,22 +3,18 @@ package sys
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"image"
 	"image/jpeg"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
+	bda "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/bda/v20200324"
+	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
+	tcerr "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/errors"
+	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
+	iai "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/iai/v20200303"
 )
-
-const tencentCloudAlgorithm = "TC3-HMAC-SHA256"
 
 type tencentVisionClient struct {
 	secretId    string
@@ -85,81 +81,82 @@ func normalizeTencentVisionImageBytes(imageBytes []byte) ([]byte, error) {
 
 // detectFace 调用腾讯云 IAI DetectFace，结果用于二维码和贴图避开人脸区域。
 func (c *tencentVisionClient) detectFace(ctx context.Context, imageBase64 string) (string, int, error) {
-	body := g.Map{
-		"Image":                imageBase64,
-		"NeedFaceAttributes":   0,
-		"NeedQualityDetection": 0,
-	}
-	raw, err := c.call(ctx, c.iaiEndpoint, "iai", "DetectFace", "2020-03-03", body)
+	_ = ctx
+	client, err := c.newIaiClient()
 	if err != nil {
 		return "", 0, err
 	}
+	req := iai.NewDetectFaceRequest()
+	req.Image = common.StringPtr(imageBase64)
+	req.MaxFaceNum = common.Uint64Ptr(20)
+	req.NeedFaceAttributes = common.Uint64Ptr(0)
+	req.NeedQualityDetection = common.Uint64Ptr(0)
+	req.NeedRotateDetection = common.Uint64Ptr(1)
+	resp, err := client.DetectFace(req)
+	if err != nil {
+		return "", 0, wrapTencentSDKError(err, "调用腾讯云人脸检测失败")
+	}
+	raw := resp.ToJsonString()
 	count := countTencentFaces(raw)
 	return raw, count, nil
 }
 
 // segmentPortrait 调用腾讯云 BDA SegmentPortraitPic，结果用于人像背景替换。
 func (c *tencentVisionClient) segmentPortrait(ctx context.Context, imageBase64 string) (string, error) {
-	body := g.Map{"Image": imageBase64}
-	return c.call(ctx, c.bdaEndpoint, "bda", "SegmentPortraitPic", "2020-03-24", body)
-}
-
-// call 使用腾讯云 TC3-HMAC-SHA256 签名发起视觉 API 请求，避免引入额外 SDK。
-func (c *tencentVisionClient) call(ctx context.Context, endpoint string, service string, action string, version string, body g.Map) (string, error) {
-	payload, err := json.Marshal(body)
+	_ = ctx
+	client, err := c.newBdaClient()
 	if err != nil {
-		return "", gerror.Wrap(err, "编码腾讯云请求失败")
+		return "", err
 	}
-	timestamp := time.Now().Unix()
-	auth := c.authorization(endpoint, service, action, payload, timestamp)
-	resp, err := g.Client().
-		SetHeader("Authorization", auth).
-		SetHeader("Content-Type", "application/json; charset=utf-8").
-		SetHeader("Host", endpoint).
-		SetHeader("X-TC-Action", action).
-		SetHeader("X-TC-Version", version).
-		SetHeader("X-TC-Timestamp", strconv.FormatInt(timestamp, 10)).
-		SetHeader("X-TC-Region", c.region).
-		SetTimeout(20*time.Second).
-		Post(ctx, "https://"+endpoint, bytes.NewReader(payload))
+	req := bda.NewSegmentPortraitPicRequest()
+	req.Image = common.StringPtr(imageBase64)
+	req.RspImgType = common.StringPtr("base64")
+	req.Scene = common.StringPtr("GEN")
+	resp, err := client.SegmentPortraitPic(req)
 	if err != nil {
-		return "", gerror.Wrap(err, "请求腾讯云视觉接口失败")
+		return "", wrapTencentSDKError(err, "调用腾讯云人像分割失败")
 	}
-	defer resp.Close()
-	raw := string(resp.ReadAll())
-	if resp.StatusCode != 200 {
-		return "", gerror.Newf("腾讯云视觉接口 HTTP %d: %s", resp.StatusCode, raw)
-	}
-	if strings.Contains(raw, `"Error"`) {
-		return "", gerror.Newf("腾讯云视觉接口返回错误: %s", raw)
-	}
-	return raw, nil
+	return resp.ToJsonString(), nil
 }
 
-func (c *tencentVisionClient) authorization(endpoint string, service string, action string, payload []byte, timestamp int64) string {
-	date := time.Unix(timestamp, 0).UTC().Format("2006-01-02")
-	hashedPayload := sha256Hex(payload)
-	canonicalHeaders := fmt.Sprintf("content-type:application/json; charset=utf-8\nhost:%s\nx-tc-action:%s\n", endpoint, strings.ToLower(action))
-	signedHeaders := "content-type;host;x-tc-action"
-	canonicalRequest := "POST\n/\n\n" + canonicalHeaders + "\n" + signedHeaders + "\n" + hashedPayload
-	credentialScope := date + "/" + service + "/tc3_request"
-	stringToSign := tencentCloudAlgorithm + "\n" + strconv.FormatInt(timestamp, 10) + "\n" + credentialScope + "\n" + sha256Hex([]byte(canonicalRequest))
-	secretDate := hmacSHA256([]byte("TC3"+c.secretKey), date)
-	secretService := hmacSHA256(secretDate, service)
-	secretSigning := hmacSHA256(secretService, "tc3_request")
-	signature := hex.EncodeToString(hmacSHA256(secretSigning, stringToSign))
-	return fmt.Sprintf("%s Credential=%s/%s, SignedHeaders=%s, Signature=%s", tencentCloudAlgorithm, c.secretId, credentialScope, signedHeaders, signature)
+func (c *tencentVisionClient) newIaiClient() (*iai.Client, error) {
+	client, err := iai.NewClient(c.credential(), c.region, c.clientProfile(c.iaiEndpoint))
+	if err != nil {
+		return nil, gerror.Wrap(err, "初始化腾讯云人脸识别客户端失败")
+	}
+	return client, nil
 }
 
-func sha256Hex(data []byte) string {
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])
+func (c *tencentVisionClient) newBdaClient() (*bda.Client, error) {
+	client, err := bda.NewClient(c.credential(), c.region, c.clientProfile(c.bdaEndpoint))
+	if err != nil {
+		return nil, gerror.Wrap(err, "初始化腾讯云人体分析客户端失败")
+	}
+	return client, nil
 }
 
-func hmacSHA256(key []byte, msg string) []byte {
-	mac := hmac.New(sha256.New, key)
-	mac.Write([]byte(msg))
-	return mac.Sum(nil)
+func (c *tencentVisionClient) credential() *common.Credential {
+	return common.NewCredential(c.secretId, c.secretKey)
+}
+
+func (c *tencentVisionClient) clientProfile(endpoint string) *profile.ClientProfile {
+	cpf := profile.NewClientProfile()
+	cpf.SignMethod = "TC3-HMAC-SHA256"
+	cpf.HttpProfile = profile.NewHttpProfile()
+	cpf.HttpProfile.Endpoint = strings.TrimPrefix(strings.TrimPrefix(endpoint, "https://"), "http://")
+	cpf.HttpProfile.ReqMethod = "POST"
+	cpf.HttpProfile.ReqTimeout = 20
+	return cpf
+}
+
+func wrapTencentSDKError(err error, prefix string) error {
+	if sdkErr, ok := err.(*tcerr.TencentCloudSDKError); ok {
+		if sdkErr.GetRequestId() == "" {
+			return gerror.Newf("%s: %s %s", prefix, sdkErr.GetCode(), sdkErr.GetMessage())
+		}
+		return gerror.Newf("%s: %s %s requestId=%s", prefix, sdkErr.GetCode(), sdkErr.GetMessage(), sdkErr.GetRequestId())
+	}
+	return gerror.Wrap(err, prefix)
 }
 
 func countTencentFaces(raw string) int {
