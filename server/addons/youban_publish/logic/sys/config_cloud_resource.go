@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/base64"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -44,11 +45,6 @@ func validateCloudResourceCredential(ctx context.Context, conf *model.CloudResou
 	if err != nil {
 		return err
 	}
-	if conf.TencentVisionEnabled == 1 {
-		if err = validateTencentFaceCredential(ctx, conf, imageBytes); err != nil {
-			return err
-		}
-	}
 	if conf.FapiHubEnabled == 1 {
 		if err = validateFapiHubCredential(ctx, conf, imageBytes); err != nil {
 			return err
@@ -72,6 +68,9 @@ func validateTencentFaceCredential(ctx context.Context, conf *model.CloudResourc
 func validateFapiHubCredential(ctx context.Context, conf *model.CloudResourceConfig, imageBytes []byte) error {
 	client := newFapiHubClient(conf.FapiHubApiKey, conf.FapiHubEndpoint, conf.FapiHubModel)
 	if _, err := client.removeBackground(ctx, imageBytes); err != nil {
+		if strings.Contains(err.Error(), "HTTP 400") {
+			return gerror.Wrap(err, "FAPIHub 抠图接口请求校验失败")
+		}
 		return gerror.Wrap(err, "FAPIHub 抠图密钥或权限校验失败")
 	}
 	return nil

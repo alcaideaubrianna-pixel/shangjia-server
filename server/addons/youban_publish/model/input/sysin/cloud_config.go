@@ -41,8 +41,8 @@ func (in *CloudResourceConfigSaveInp) Filter(ctx context.Context) error {
 	if in.TencentCloudSite != "mainland" && in.TencentCloudSite != "intl" {
 		return gerror.New("腾讯云站点不合法")
 	}
-	if in.TencentCloudSite == "intl" && in.TencentRegion == "ap-guangzhou" {
-		in.TencentRegion = ""
+	if in.TencentCloudSite == "intl" && (in.TencentRegion == "" || in.TencentRegion == "ap-guangzhou") {
+		in.TencentRegion = "ap-singapore"
 	}
 	if in.TencentCloudSite == "mainland" && in.TencentRegion == "" {
 		in.TencentRegion = "ap-guangzhou"

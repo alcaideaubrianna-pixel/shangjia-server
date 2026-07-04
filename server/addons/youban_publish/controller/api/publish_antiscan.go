@@ -6,6 +6,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"hotgo/addons/youban_publish/api/api/publish"
+	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
 )
 
@@ -41,5 +42,27 @@ func (c *cPublishAdmin) AntiScanConfigSaveTab(ctx context.Context, req *publish.
 		return nil, err
 	}
 	res = &publish.AdminAntiScanConfigSaveTabRes{}
+	return
+}
+
+func (c *cPublishAdmin) AntiScanMaterialList(ctx context.Context, req *publish.AdminAntiScanMaterialListReq) (res *publish.AdminAntiScanMaterialListRes, err error) {
+	list, err := service.SysPublish().AdminAntiScanMaterialList(ctx, &req.AntiScanMaterialListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.AntiScanMaterialModel{}
+	}
+	res = &publish.AdminAntiScanMaterialListRes{List: list}
+	return
+}
+
+func (c *cPublishAdmin) AntiScanMaterialUpload(ctx context.Context, req *publish.AdminAntiScanMaterialUploadReq) (res *publish.AdminAntiScanMaterialUploadRes, err error) {
+	file := g.RequestFromCtx(ctx).GetUploadFile("file")
+	data, err := service.SysPublish().AdminAntiScanMaterialUpload(ctx, &req.AntiScanMaterialUploadInp, file)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminAntiScanMaterialUploadRes{AntiScanMaterialModel: data}
 	return
 }

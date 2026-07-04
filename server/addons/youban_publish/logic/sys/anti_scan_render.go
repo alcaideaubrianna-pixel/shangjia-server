@@ -11,7 +11,6 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
-	"math"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -31,6 +30,16 @@ type antiScanFaceBox struct {
 	H int
 }
 
+type antiScanMaskItem struct {
+	Type string  `json:"type"`
+	Text string  `json:"text"`
+	Src  string  `json:"src"`
+	X    float64 `json:"x"`
+	Y    float64 `json:"y"`
+	W    float64 `json:"w"`
+	H    float64 `json:"h"`
+}
+
 // renderAntiScanPreview 按当前配置生成真实预览图，后续发送链路可复用同一处理入口。
 func renderAntiScanPreview(ctx context.Context, src []byte, in *sysin.AntiScanPreviewInp, detect *antiScanDetectResult) ([]byte, []string, error) {
 	if isAntiScanNoop(in) {
@@ -40,13 +49,12 @@ func renderAntiScanPreview(ctx context.Context, src []byte, in *sysin.AntiScanPr
 	if err != nil {
 		return nil, nil, gerror.New("图片格式不支持，请上传 JPG、PNG、GIF 或 WEBP")
 	}
-	faces := parseTencentFaceBoxes(detect.FaceRaw)
 	warnings := []string{}
 	canvas := imageToRGBA(base)
-	if in.BackgroundReplaceEnabled == 1 || in.PortraitBackgroundEnabled == 1 || in.BackgroundTextureEnabled == 1 || in.BackgroundBlurEnabled == 1 {
+	if in.BackgroundReplaceEnabled == 1 || in.BackgroundTextureEnabled == 1 {
 		next, usedSegment := applyAntiScanBackground(canvas, detect.SegmentRaw, in)
 		canvas = next
-		if !usedSegment && (in.BackgroundReplaceEnabled == 1 || in.PortraitBackgroundEnabled == 1) {
+		if !usedSegment && in.BackgroundReplaceEnabled == 1 {
 			warnings = append(warnings, "未获取到可用人像分割结果，背景替换已降级为纹理叠加")
 		}
 	}
@@ -60,8 +68,7 @@ func renderAntiScanPreview(ctx context.Context, src []byte, in *sysin.AntiScanPr
 		canvas = applySharpenBlur(canvas, in.SharpenBlurMode, in.SharpenBlurStrength)
 	}
 	if in.MaskEnabled == 1 && in.MaskCount > 0 {
-		sticker := loadAntiScanSticker(ctx, in.StickerImage)
-		applyAntiScanMasks(canvas, faces, in, sticker)
+		applyAntiScanMasks(ctx, canvas, in)
 	}
 	applyAntiScanWatermarks(canvas, in)
 	canvas = applyCropResize(canvas, in)
@@ -76,9 +83,7 @@ func isAntiScanNoop(in *sysin.AntiScanPreviewInp) bool {
 	return in.MetadataStripEnabled == 0 &&
 		in.ResizeEnabled == 0 &&
 		in.CropEnabled == 0 &&
-		in.PortraitBackgroundEnabled == 0 &&
 		in.BackgroundReplaceEnabled == 0 &&
-		in.BackgroundBlurEnabled == 0 &&
 		in.BackgroundTextureEnabled == 0 &&
 		in.MaskEnabled == 0 &&
 		in.WatermarkEnabled == 0 &&
@@ -100,13 +105,7 @@ func imageToRGBA(src image.Image) *image.RGBA {
 func applyAntiScanBackground(src *image.RGBA, segmentRaw string, in *sysin.AntiScanPreviewInp) (*image.RGBA, bool) {
 	bounds := src.Bounds()
 	bg := patternedBackground(bounds.Dx(), bounds.Dy(), in)
-	if in.BackgroundBlurEnabled == 1 {
-		bg = boxBlur(src, 5+in.StickerOpacity/10)
-		if in.BackgroundTextureEnabled == 1 || in.PortraitBackgroundEnabled == 1 {
-			overlayTexture(bg, in.StickerOpacity)
-		}
-	}
-	if in.BackgroundReplaceEnabled != 1 && in.PortraitBackgroundEnabled != 1 {
+	if in.BackgroundReplaceEnabled != 1 {
 		overlayTexture(src, in.StickerOpacity)
 		return src, false
 	}
@@ -122,28 +121,6 @@ func applyAntiScanBackground(src *image.RGBA, segmentRaw string, in *sysin.AntiS
 	}
 	draw.Draw(bg, bounds, portrait, image.Point{}, draw.Over)
 	return bg, true
-}
-
-func patternedBackground(width int, height int, in *sysin.AntiScanPreviewInp) *image.RGBA {
-	dst := image.NewRGBA(image.Rect(0, 0, width, height))
-	c1 := color.RGBA{R: 238, G: 232, B: 218, A: 255}
-	c2 := color.RGBA{R: 204, G: 214, B: 204, A: 255}
-	c3 := color.RGBA{R: 178, G: 164, B: 146, A: 255}
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			tile := (x/42 + y/42) % 2
-			c := c1
-			if tile == 1 {
-				c = c2
-			}
-			if (x+y)%96 < 4 || int(math.Abs(float64(x-y)))%120 < 3 {
-				c = c3
-			}
-			dst.SetRGBA(x, y, c)
-		}
-	}
-	overlayTexture(dst, in.StickerOpacity)
-	return dst
 }
 
 func overlayTexture(dst *image.RGBA, opacity int) {
@@ -188,71 +165,57 @@ func decodeTencentSegmentPortrait(raw string) (image.Image, bool) {
 	return img, err == nil
 }
 
-func parseTencentFaceBoxes(raw string) []antiScanFaceBox {
-	var parsed struct {
-		Response struct {
-			FaceInfos []struct {
-				X      int `json:"X"`
-				Y      int `json:"Y"`
-				Width  int `json:"Width"`
-				Height int `json:"Height"`
-			} `json:"FaceInfos"`
-		} `json:"Response"`
+func applyAntiScanMasks(ctx context.Context, dst *image.RGBA, in *sysin.AntiScanPreviewInp) {
+	items := parseAntiScanMaskItems(in.MaskItemsJson)
+	if len(items) == 0 {
+		return
 	}
-	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+	for i, item := range items {
+		if i >= 3 {
+			return
+		}
+		rect := maskItemRect(dst.Bounds(), item)
+		if item.Type == "sticker" {
+			drawStickerMask(dst, rect, in.StickerOpacity, loadAntiScanSticker(ctx, item.Src))
+		} else {
+			drawQRCodeMask(dst, rect, item.Text, in.StickerOpacity)
+		}
+	}
+}
+
+func parseAntiScanMaskItems(raw string) []antiScanMaskItem {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
 		return nil
 	}
-	boxes := make([]antiScanFaceBox, 0, len(parsed.Response.FaceInfos))
-	for _, item := range parsed.Response.FaceInfos {
-		if item.Width > 0 && item.Height > 0 {
-			boxes = append(boxes, antiScanFaceBox{X: item.X, Y: item.Y, W: item.Width, H: item.Height})
-		}
+	var items []antiScanMaskItem
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return nil
 	}
-	return boxes
+	return items
 }
 
-func applyAntiScanMasks(dst *image.RGBA, faces []antiScanFaceBox, in *sysin.AntiScanPreviewInp, sticker image.Image) {
-	count := clampInt(in.MaskCount, 1, 3)
-	for i := 0; i < count; i++ {
-		rect := pickMaskRect(dst.Bounds(), faces, i)
-		if in.MaskMode == "sticker" {
-			drawStickerMask(dst, rect, in.StickerOpacity, sticker)
-			continue
-		}
-		drawQRCodeMask(dst, rect, in.QrText, in.StickerOpacity)
-	}
-}
-
-func pickMaskRect(bounds image.Rectangle, faces []antiScanFaceBox, index int) image.Rectangle {
+func maskItemRect(bounds image.Rectangle, item antiScanMaskItem) image.Rectangle {
 	w := bounds.Dx()
 	h := bounds.Dy()
-	size := clampInt(minInt(w, h)/5, 72, 180)
-	margin := clampInt(size/3, 18, 64)
-	candidates := []image.Rectangle{
-		image.Rect(w-margin-size, h-margin-size, w-margin, h-margin),
-		image.Rect(margin, h-margin-size, margin+size, h-margin),
-		image.Rect(w-margin-size, margin, w-margin, margin+size),
-		image.Rect(margin, margin, margin+size, margin+size),
-		image.Rect(w/2-size/2, h-margin-size, w/2+size/2, h-margin),
+	maxMaskW := maxInt(32, int(float64(w)*0.38))
+	maxMaskH := maxInt(32, int(float64(h)*0.38))
+	x := clampInt(int(item.X*float64(w)), 0, w-1)
+	y := clampInt(int(item.Y*float64(h)), 0, h-1)
+	rw := clampInt(int(item.W*float64(w)), 32, maxMaskW)
+	rh := clampInt(int(item.H*float64(h)), 32, maxMaskH)
+	if item.Type != "sticker" {
+		size := minInt(rw, rh)
+		rw = size
+		rh = size
 	}
-	for offset := 0; offset < len(candidates); offset++ {
-		rect := candidates[(index+offset)%len(candidates)]
-		if !overlapsAnyFace(expandRect(rect, size/8, bounds), faces, bounds) {
-			return rect
-		}
+	if x+rw > w {
+		x = maxInt(0, w-rw)
 	}
-	return candidates[index%len(candidates)]
-}
-
-func overlapsAnyFace(rect image.Rectangle, faces []antiScanFaceBox, bounds image.Rectangle) bool {
-	for _, face := range faces {
-		faceRect := image.Rect(face.X, face.Y, face.X+face.W, face.Y+face.H)
-		faceRect = expandRect(faceRect, maxInt(face.W, face.H)/2, bounds)
-		if rect.Overlaps(faceRect) {
-			return true
-		}
+	if y+rh > h {
+		y = maxInt(0, h-rh)
 	}
-	return false
+	return image.Rect(x, y, x+rw, y+rh)
 }
 
 func drawQRCodeMask(dst *image.RGBA, rect image.Rectangle, text string, opacity int) {

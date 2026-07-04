@@ -7,14 +7,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"image"
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
 	"strings"
 
-	"github.com/corona10/goimagehash"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -34,10 +32,10 @@ import (
 
 const (
 	antiScanCacheTable           = "hg_youban_publish_anti_scan_cache"
-	antiScanPreviewRenderVersion = 3
+	antiScanPreviewRenderVersion = 4
 )
 
-// AdminAntiScanPreview 生成防扫图实时预览，并按图片 pHash + 配置 hash 复用缓存。
+// AdminAntiScanPreview 生成防扫图实时预览，预览产物按精确图片哈希 + 配置 hash 复用缓存。
 func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiScanPreviewInp, upload *ghttp.UploadFile) (res *sysin.AntiScanPreviewModel, err error) {
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
@@ -46,7 +44,7 @@ func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiSc
 	if err != nil {
 		return nil, err
 	}
-	imageHash, err := antiScanImagePHash(imageBytes)
+	imageHash, err := antiScanImageHash(imageBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +100,7 @@ type antiScanDetectResult struct {
 	SegmentRaw    string
 }
 
-// detectAntiScanImage 按功能需要获取云识别结果，避免同一张图重复调用收费接口。
+// detectAntiScanImage 按精确图片哈希缓存云识别结果，避免相似图误复用抠图结果。
 func (s *sSysPublish) detectAntiScanImage(ctx context.Context, imageHash string, imageBytes []byte, in *sysin.AntiScanPreviewInp, conf *model.CloudResourceConfig) (*antiScanDetectResult, []string, error) {
 	if conf == nil {
 		return nil, nil, gerror.New("云资源配置不合法")
@@ -140,11 +138,11 @@ func (s *sSysPublish) detectAntiScanImage(ctx context.Context, imageHash string,
 }
 
 func needsAntiScanFaceDetection(in *sysin.AntiScanPreviewInp) bool {
-	return in.MaskEnabled == 1 && in.MaskCount > 0
+	return false
 }
 
 func needsAntiScanMatting(in *sysin.AntiScanPreviewInp) bool {
-	return in.BackgroundReplaceEnabled == 1 || in.PortraitBackgroundEnabled == 1
+	return in.BackgroundReplaceEnabled == 1
 }
 
 func appendAntiScanProvider(current string, next string) string {
@@ -240,16 +238,12 @@ func readAntiScanPreviewImage(ctx context.Context, upload *ghttp.UploadFile, use
 	return gfile.GetBytes(path), "/addons/" + global.GetSkeleton().Name + "/antiscan/default-preview.webp", nil
 }
 
-func antiScanImagePHash(imageBytes []byte) (string, error) {
-	img, _, err := image.Decode(bytes.NewReader(imageBytes))
-	if err != nil {
+func antiScanImageHash(imageBytes []byte) (string, error) {
+	if _, _, err := image.Decode(bytes.NewReader(imageBytes)); err != nil {
 		return "", gerror.New("图片格式不支持，请上传 JPG、PNG、GIF 或 WEBP")
 	}
-	hash, err := goimagehash.PerceptionHash(img)
-	if err != nil {
-		return "", gerror.Wrap(err, "计算图片感知哈希失败")
-	}
-	return fmt.Sprintf("%016x", hash.GetHash()), nil
+	sum := sha256.Sum256(imageBytes)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func antiScanConfigHash(in *sysin.AntiScanPreviewInp, cloudConf *model.CloudResourceConfig) string {

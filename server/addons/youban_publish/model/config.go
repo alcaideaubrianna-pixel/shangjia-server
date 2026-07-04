@@ -66,12 +66,15 @@ type AntiScanConfig struct {
 	BackgroundReplaceEnabled   int    `json:"backgroundReplaceEnabled"`
 	BackgroundBlurEnabled      int    `json:"backgroundBlurEnabled"`
 	BackgroundTextureEnabled   int    `json:"backgroundTextureEnabled"`
+	BackgroundTexturePreset    string `json:"backgroundTexturePreset"`
+	BackgroundTextureImage     string `json:"backgroundTextureImage"`
 	MaskEnabled                int    `json:"maskEnabled"`
 	MaskMode                   string `json:"maskMode"`
 	MaskCount                  int    `json:"maskCount"`
 	QrText                     string `json:"qrText"`
 	StickerOpacity             int    `json:"stickerOpacity"`
 	StickerImage               string `json:"stickerImage"`
+	MaskItemsJson              string `json:"maskItemsJson"`
 	WatermarkEnabled           int    `json:"watermarkEnabled"`
 	ProfileNoWatermarkEnabled  int    `json:"profileNoWatermarkEnabled"`
 	WatermarkFontSize          int    `json:"watermarkFontSize"`

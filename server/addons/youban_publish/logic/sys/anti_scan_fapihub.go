@@ -3,9 +3,13 @@ package sys
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"image"
+	"image/jpeg"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"strings"
 	"time"
 
@@ -39,9 +43,13 @@ func (c *fapiHubClient) removeBackground(ctx context.Context, imageBytes []byte)
 	if c.apiKey == "" {
 		return nil, gerror.New("FAPIHub API Key 未配置")
 	}
+	imageBytes, contentType, ext, err := normalizeFapiHubImageBytes(imageBytes)
+	if err != nil {
+		return nil, err
+	}
 	body := bytes.NewBuffer(nil)
 	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("image", "anti-scan-source.jpg")
+	part, err := createFapiHubImagePart(writer, contentType, ext)
 	if err != nil {
 		return nil, gerror.Wrap(err, "创建 FAPIHub 图片表单失败")
 	}
@@ -79,4 +87,46 @@ func (c *fapiHubClient) removeBackground(ctx context.Context, imageBytes []byte)
 		return nil, gerror.New("FAPIHub 抠图接口返回空图片")
 	}
 	return respBytes, nil
+}
+
+func createFapiHubImagePart(writer *multipart.Writer, contentType string, ext string) (io.Writer, error) {
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image"; filename="anti-scan-source.%s"`, ext))
+	header.Set("Content-Type", contentType)
+	return writer.CreatePart(header)
+}
+
+func normalizeFapiHubImageBytes(imageBytes []byte) ([]byte, string, string, error) {
+	contentType := http.DetectContentType(imageBytes)
+	switch contentType {
+	case "image/jpeg":
+		return imageBytes, contentType, "jpg", nil
+	case "image/png":
+		return imageBytes, contentType, "png", nil
+	case "image/gif":
+		return imageBytes, contentType, "gif", nil
+	case "image/webp":
+		return imageBytes, contentType, "webp", nil
+	case "image/bmp":
+		return imageBytes, contentType, "bmp", nil
+	}
+	_, format, err := image.DecodeConfig(bytes.NewReader(imageBytes))
+	if err == nil {
+		switch strings.ToLower(format) {
+		case "jpeg":
+			return imageBytes, "image/jpeg", "jpg", nil
+		case "png", "gif", "webp", "bmp":
+			format = strings.ToLower(format)
+			return imageBytes, "image/" + format, format, nil
+		}
+	}
+	img, _, err := image.Decode(bytes.NewReader(imageBytes))
+	if err != nil {
+		return nil, "", "", gerror.New("图片格式不支持，请上传 JPG、PNG、GIF、WEBP 或 BMP")
+	}
+	buf := bytes.NewBuffer(nil)
+	if err = jpeg.Encode(buf, img, &jpeg.Options{Quality: 92}); err != nil {
+		return nil, "", "", gerror.Wrap(err, "转换 FAPIHub 图片失败")
+	}
+	return buf.Bytes(), "image/jpeg", "jpg", nil
 }

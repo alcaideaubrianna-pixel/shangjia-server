@@ -36,7 +36,7 @@
           />
         </n-form-item>
         <n-form-item label="Region">
-          <n-input v-model:value="model.tencentRegion" placeholder="ap-guangzhou" />
+          <n-input v-model:value="model.tencentRegion" placeholder="国内云 ap-guangzhou，国际云 ap-singapore" />
         </n-form-item>
         <n-form-item label="BDA Endpoint">
           <n-input v-model:value="model.tencentBdaEndpoint" placeholder="bda.tencentcloudapi.com" />
@@ -72,7 +72,8 @@
 
     <n-card size="small" title="权限要求">
       <n-space vertical class="cloud-help">
-        <div>腾讯云只用于 DetectFace 人脸检测，二维码和贴图会避开人脸区域。</div>
+        <div>腾讯云只用于人脸检测，国内云使用 DetectFace，国际云使用 DetectFaceAttributes。</div>
+        <div>国际云 Region 需要填写，默认使用 ap-singapore；Endpoint 默认 iai.intl.tencentcloudapi.com。</div>
         <div>FAPIHub 用于背景替换和人像背景贴图，保存时会调用默认预览图验证 API Key。</div>
         <div>SecretKey 和 API Key 保存后再次打开会脱敏显示。</div>
         <div>预览接口会按图片 pHash 缓存人脸检测、抠图结果和最终处理图，避免重复请求收费接口。</div>
@@ -104,8 +105,8 @@
       if (!props.model.tencentIaiEndpoint || props.model.tencentIaiEndpoint === 'iai.tencentcloudapi.com') {
         props.model.tencentIaiEndpoint = 'iai.intl.tencentcloudapi.com';
       }
-      if (props.model.tencentRegion === 'ap-guangzhou') {
-        props.model.tencentRegion = '';
+      if (!props.model.tencentRegion || props.model.tencentRegion === 'ap-guangzhou') {
+        props.model.tencentRegion = 'ap-singapore';
       }
       return;
     }

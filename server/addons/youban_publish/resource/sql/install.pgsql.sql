@@ -209,6 +209,20 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_image" ON "hg_youban_publish_anti_
 CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_config" ON "hg_youban_publish_anti_scan_cache" ("image_hash", "config_hash");
 CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_provider" ON "hg_youban_publish_anti_scan_cache" ("provider", "cloud_raw_saved");
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_anti_scan_material" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "type" varchar(32) NOT NULL DEFAULT 'sticker',
+  "name" varchar(120) NOT NULL DEFAULT '',
+  "url" varchar(1024) NOT NULL DEFAULT '',
+  "sort" integer NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_material_owner" ON "hg_youban_publish_anti_scan_material" ("tenant_id", "account_id", "type", "deleted_at");
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tag" (
   "id" BIGSERIAL PRIMARY KEY,
   "name" varchar(64) NOT NULL DEFAULT '',
@@ -484,7 +498,7 @@ FROM (
     ('youban_publish', 'cloudResource', '腾讯云站点', 'string', 'tencentCloudSite', 'mainland', 'mainland', 85, 'mainland 国内云；intl 国际云'),
     ('youban_publish', 'cloudResource', '腾讯云 SecretId', 'string', 'tencentSecretId', '', '', 90, 'CAM 子用户 SecretId，仅授予 IAI 必要权限'),
     ('youban_publish', 'cloudResource', '腾讯云 SecretKey', 'string', 'tencentSecretKey', '', '', 100, 'CAM 子用户 SecretKey，页面回显会脱敏'),
-    ('youban_publish', 'cloudResource', '腾讯云 Region', 'string', 'tencentRegion', 'ap-guangzhou', 'ap-guangzhou', 110, '国内云默认 ap-guangzhou，国际云可留空'),
+    ('youban_publish', 'cloudResource', '腾讯云 Region', 'string', 'tencentRegion', 'ap-guangzhou', 'ap-guangzhou', 110, '国内云默认 ap-guangzhou，国际云默认 ap-singapore'),
     ('youban_publish', 'cloudResource', '腾讯云 BDA Endpoint', 'string', 'tencentBdaEndpoint', 'bda.tencentcloudapi.com', 'bda.tencentcloudapi.com', 120, '旧国内版人体分析接口域名，当前默认不强制使用'),
     ('youban_publish', 'cloudResource', '腾讯云 IAI Endpoint', 'string', 'tencentIaiEndpoint', 'iai.tencentcloudapi.com', 'iai.tencentcloudapi.com', 130, '国内云 iai.tencentcloudapi.com；国际云 iai.intl.tencentcloudapi.com'),
     ('youban_publish', 'cloudResource', 'FAPIHub抠图开关', 'int', 'fapiHubEnabled', '0', '0', 140, '是否启用 FAPIHub 抠图，用于背景替换和人像背景贴图'),
@@ -533,11 +547,14 @@ FROM (
     ('youban_publish', 'antiScan', '人像背景替换', 'int', 'backgroundReplaceEnabled', '0', '0', 420, '是否启用替换背景处理'),
     ('youban_publish', 'antiScan', '背景模糊', 'int', 'backgroundBlurEnabled', '0', '0', 430, '是否模糊背景'),
     ('youban_publish', 'antiScan', '背景纹理叠加', 'int', 'backgroundTextureEnabled', '0', '0', 440, '是否叠加背景纹理'),
+    ('youban_publish', 'antiScan', '背景纹理预设', 'string', 'backgroundTexturePreset', 'rabbit', 'rabbit', 445, '背景纹理预设 rabbit/heart/dot/grid'),
+    ('youban_publish', 'antiScan', '素材库背景贴图', 'string', 'backgroundTextureImage', '', '', 446, '素材库背景贴图地址，留空使用预设'),
     ('youban_publish', 'antiScan', '内容遮挡', 'int', 'maskEnabled', '0', '0', 450, '是否启用二维码或贴图遮挡'),
     ('youban_publish', 'antiScan', '打码方式', 'string', 'maskMode', 'qr', 'qr', 460, '打码方式：qr二维码模式，sticker贴图模式'),
     ('youban_publish', 'antiScan', '打码数量', 'int', 'maskCount', '1', '1', 470, '同一张图打码数量，最多3个'),
     ('youban_publish', 'antiScan', '二维码文案', 'string', 'qrText', '', '', 480, '二维码模式的展示文案'),
     ('youban_publish', 'antiScan', '贴图图片', 'string', 'stickerImage', '', '', 490, '贴图模式使用的正方形贴图'),
+    ('youban_publish', 'antiScan', '手动遮挡素材', 'string', 'maskItemsJson', '[]', '[]', 495, '手动摆放二维码或贴图 JSON'),
     ('youban_publish', 'antiScan', '贴图透明度', 'int', 'stickerOpacity', '18', '18', 500, '防扫图贴图透明度，1-100'),
     ('youban_publish', 'antiScan', '水印开关', 'int', 'watermarkEnabled', '0', '0', 510, '是否启用背景水印'),
     ('youban_publish', 'antiScan', '资料编号水印', 'int', 'profileNoWatermarkEnabled', '0', '0', 520, '是否叠加资料编号水印'),

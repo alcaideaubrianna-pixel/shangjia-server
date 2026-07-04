@@ -217,6 +217,9 @@ func (s *sSysConfig) AntiScanConfigSave(ctx context.Context, in *sysin.AntiScanC
 	if err := in.Filter(ctx); err != nil {
 		return err
 	}
+	if err := s.ensureAntiScanConfigRows(ctx); err != nil {
+		return err
+	}
 	return s.updateConfigGroup(ctx, publishConfigGroupAntiScan, antiScanConfigMap(&in.AntiScanConfig))
 }
 
@@ -225,6 +228,9 @@ func (s *sSysConfig) AntiScanConfigSaveTab(ctx context.Context, in *sysin.AntiSc
 		return gerror.New("防扫图分栏配置不能为空")
 	}
 	if err := in.Filter(ctx); err != nil {
+		return err
+	}
+	if err := s.ensureAntiScanConfigRows(ctx); err != nil {
 		return err
 	}
 	return s.updateConfigGroup(ctx, publishConfigGroupAntiScan, antiScanTabConfigMap(in.Tab, &in.AntiScanConfig))
@@ -294,12 +300,15 @@ func defaultAntiScanConfig() *model.AntiScanConfig {
 		BackgroundReplaceEnabled:   0,
 		BackgroundBlurEnabled:      0,
 		BackgroundTextureEnabled:   0,
+		BackgroundTexturePreset:    "rabbit",
+		BackgroundTextureImage:     "",
 		MaskEnabled:                0,
 		MaskMode:                   "qr",
 		MaskCount:                  1,
 		QrText:                     "",
 		StickerOpacity:             18,
 		StickerImage:               "",
+		MaskItemsJson:              "[]",
 		WatermarkEnabled:           0,
 		ProfileNoWatermarkEnabled:  0,
 		WatermarkFontSize:          22,
@@ -361,12 +370,15 @@ func antiScanConfigMap(conf *model.AntiScanConfig) g.Map {
 		"backgroundReplaceEnabled":   conf.BackgroundReplaceEnabled,
 		"backgroundBlurEnabled":      conf.BackgroundBlurEnabled,
 		"backgroundTextureEnabled":   conf.BackgroundTextureEnabled,
+		"backgroundTexturePreset":    conf.BackgroundTexturePreset,
+		"backgroundTextureImage":     conf.BackgroundTextureImage,
 		"maskEnabled":                conf.MaskEnabled,
 		"maskMode":                   conf.MaskMode,
 		"maskCount":                  conf.MaskCount,
 		"qrText":                     conf.QrText,
 		"stickerOpacity":             conf.StickerOpacity,
 		"stickerImage":               conf.StickerImage,
+		"maskItemsJson":              conf.MaskItemsJson,
 		"watermarkEnabled":           conf.WatermarkEnabled,
 		"profileNoWatermarkEnabled":  conf.ProfileNoWatermarkEnabled,
 		"watermarkFontSize":          conf.WatermarkFontSize,
@@ -417,6 +429,7 @@ func antiScanTabConfigMap(tab string, conf *model.AntiScanConfig) g.Map {
 			"qrText":         conf.QrText,
 			"stickerOpacity": conf.StickerOpacity,
 			"stickerImage":   conf.StickerImage,
+			"maskItemsJson":  conf.MaskItemsJson,
 			"stickerText":    conf.StickerText,
 		}
 	case "scope":
@@ -433,6 +446,8 @@ func antiScanTabConfigMap(tab string, conf *model.AntiScanConfig) g.Map {
 			"backgroundReplaceEnabled":  conf.BackgroundReplaceEnabled,
 			"backgroundBlurEnabled":     conf.BackgroundBlurEnabled,
 			"backgroundTextureEnabled":  conf.BackgroundTextureEnabled,
+			"backgroundTexturePreset":   conf.BackgroundTexturePreset,
+			"backgroundTextureImage":    conf.BackgroundTextureImage,
 			"stickerOpacity":            conf.StickerOpacity,
 			"watermarkEnabled":          conf.WatermarkEnabled,
 			"profileNoWatermarkEnabled": conf.ProfileNoWatermarkEnabled,

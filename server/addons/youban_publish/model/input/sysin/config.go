@@ -140,10 +140,19 @@ func (in *AntiScanConfigSaveInp) Filter(ctx context.Context) error {
 	in.MaskMode = strings.ToLower(strings.TrimSpace(in.MaskMode))
 	in.QrText = strings.TrimSpace(in.QrText)
 	in.StickerImage = strings.TrimSpace(in.StickerImage)
+	in.MaskItemsJson = strings.TrimSpace(in.MaskItemsJson)
+	in.BackgroundTexturePreset = strings.ToLower(strings.TrimSpace(in.BackgroundTexturePreset))
+	in.BackgroundTextureImage = strings.TrimSpace(in.BackgroundTextureImage)
 	in.WatermarkText = strings.TrimSpace(in.WatermarkText)
 	in.StickerText = strings.TrimSpace(in.StickerText)
 	if in.MaskMode == "" {
 		in.MaskMode = "qr"
+	}
+	if in.BackgroundTexturePreset == "" {
+		in.BackgroundTexturePreset = "rabbit"
+	}
+	if !isBackgroundTexturePreset(in.BackgroundTexturePreset) {
+		return gerror.New("背景纹理预设不合法")
 	}
 	if in.MaskMode != "qr" && in.MaskMode != "sticker" {
 		return gerror.New("打码方式不合法")
@@ -283,6 +292,15 @@ func checkSwitch(value int, name string) error {
 		return gerror.Newf("%s不合法", name)
 	}
 	return nil
+}
+
+func isBackgroundTexturePreset(value string) bool {
+	switch value {
+	case "rabbit", "heart", "dot", "grid":
+		return true
+	default:
+		return false
+	}
 }
 
 func checkTimeRange(enabled int, start string, end string) error {

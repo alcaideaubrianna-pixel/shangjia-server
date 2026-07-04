@@ -2,6 +2,7 @@ package router
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -48,10 +49,23 @@ func publishAdminAuth(r *ghttp.Request) {
 		return
 	}
 
+	if isPublishSharedAdminPath(r.URL.Path) {
+		r.Middleware.Next()
+		return
+	}
+
 	if user.DeptType != sysin.PublishAccountTypeAdmin {
 		response.JsonExit(r, gcode.CodeSecurityReason.Code(), "当前账号无管理权限")
 		return
 	}
 
 	r.Middleware.Next()
+}
+
+// isPublishSharedAdminPath 判断管理员路由中允许上架账号共同使用的接口。
+func isPublishSharedAdminPath(path string) bool {
+	return strings.HasSuffix(path, "/publish/admin/antiScan/preview") ||
+		strings.HasSuffix(path, "/publish-admin/antiScan/preview") ||
+		strings.Contains(path, "/publish/admin/antiScan/material/") ||
+		strings.Contains(path, "/publish-admin/antiScan/material/")
 }

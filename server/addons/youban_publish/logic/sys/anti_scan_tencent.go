@@ -36,13 +36,31 @@ func newTencentVisionClient(confSecretId string, confSecretKey string, cloudSite
 	if cloudSite == "" {
 		cloudSite = "mainland"
 	}
+	region = strings.TrimSpace(region)
+	iaiEndpoint = strings.TrimSpace(iaiEndpoint)
+	if cloudSite == "intl" {
+		// 国际版 IAI SDK 仍要求 Region 必传，空值会在请求前被 SDK 拦截。
+		if region == "" || region == "ap-guangzhou" {
+			region = "ap-singapore"
+		}
+		if iaiEndpoint == "" || iaiEndpoint == "iai.tencentcloudapi.com" {
+			iaiEndpoint = "iai.intl.tencentcloudapi.com"
+		}
+	} else {
+		if region == "" {
+			region = "ap-guangzhou"
+		}
+		if iaiEndpoint == "" || iaiEndpoint == "iai.intl.tencentcloudapi.com" {
+			iaiEndpoint = "iai.tencentcloudapi.com"
+		}
+	}
 	return &tencentVisionClient{
 		secretId:    strings.TrimSpace(confSecretId),
 		secretKey:   strings.TrimSpace(confSecretKey),
 		cloudSite:   cloudSite,
-		region:      strings.TrimSpace(region),
+		region:      region,
 		bdaEndpoint: strings.TrimSpace(bdaEndpoint),
-		iaiEndpoint: strings.TrimSpace(iaiEndpoint),
+		iaiEndpoint: iaiEndpoint,
 	}
 }
 

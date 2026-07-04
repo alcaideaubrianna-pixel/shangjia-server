@@ -37,3 +37,21 @@ type AdminAntiScanPreviewReq struct {
 type AdminAntiScanPreviewRes struct {
 	*sysin.AntiScanPreviewModel
 }
+
+type AdminAntiScanMaterialListReq struct {
+	g.Meta `path:"/publish/admin/antiScan/material/list" method:"get" tags:"上架插件管理端" summary:"防扫图素材列表"`
+	sysin.AntiScanMaterialListInp
+}
+
+type AdminAntiScanMaterialListRes struct {
+	List []*sysin.AntiScanMaterialModel `json:"list" dc:"素材列表"`
+}
+
+type AdminAntiScanMaterialUploadReq struct {
+	g.Meta `path:"/publish/admin/antiScan/material/upload" method:"post" mime:"multipart/form-data" tags:"上架插件管理端" summary:"上传防扫图素材"`
+	sysin.AntiScanMaterialUploadInp
+}
+
+type AdminAntiScanMaterialUploadRes struct {
+	*sysin.AntiScanMaterialModel
+}
