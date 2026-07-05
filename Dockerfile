@@ -60,7 +60,7 @@ COPY --from=web-builder /src/web/dist/. ./resource/public/admin/
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     rm -f internal/packed/packed.go \
-    && gf pack resource,storage internal/packed/packed.go --keepPath=true \
+    && gf pack resource,storage,manifest/config internal/packed/packed.go --keepPath=true \
     && CGO_ENABLED=1 go build -trimpath -o /tmp/hotgo ./main.go \
     && chmod +x /tmp/hotgo
 
