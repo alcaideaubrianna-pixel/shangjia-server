@@ -53,6 +53,8 @@ export function getEnvConfig(match = 'VITE_GLOB_', confFiles = ['.env', '.env.pr
     } catch (error) {}
   });
 
+  envConfig = { ...envConfig, ...process.env };
+
   Object.keys(envConfig).forEach((key) => {
     const reg = new RegExp(`^(${match})`);
     if (!reg.test(key)) {
