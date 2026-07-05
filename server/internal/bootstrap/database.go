@@ -34,6 +34,7 @@ var databaseInitSqlFiles = map[string][]string{
 	},
 	consts.DBPgsql: {
 		"storage/data/hotgo-pg.sql",
+		"storage/data/generate/pgsql/admin_notice_extension.sql",
 		"storage/data/generate/pgsql/youban_business.sql",
 		"storage/data/generate/pgsql/member_vip_permission.sql",
 		"storage/data/generate/pgsql/youban_cdn_config.sql",
@@ -126,6 +127,20 @@ func validateDatabaseSeed(ctx context.Context, dbType string) (err error) {
 	if total == 0 {
 		return gerror.New("检测到数据库已存在表，但核心角色数据为空；请清空数据库后重新初始化，或按初始化 SQL 补齐 hg_admin_role 数据")
 	}
+	requiredColumns := map[string][]string{
+		"hg_admin_notice": {"publish_at", "expire_at"},
+	}
+	for table, columns := range requiredColumns {
+		for _, column := range columns {
+			exists, err := hasDatabaseColumn(ctx, dbType, table, column)
+			if err != nil {
+				return gerror.Wrapf(err, "检查核心数据字段失败：%s.%s", table, column)
+			}
+			if !exists {
+				return gerror.Newf("检测到数据库已存在表，但缺少核心数据字段 %s.%s；请使用空库重新初始化，或执行完整业务初始化 SQL", table, column)
+			}
+		}
+	}
 	return nil
 }
 
@@ -143,6 +158,35 @@ func hasDatabaseTable(ctx context.Context, dbType, table string) (bool, error) {
 			return false, err
 		}
 		return !value.IsNil() && value.String() != "", nil
+	}
+}
+
+func hasDatabaseColumn(ctx context.Context, dbType, table, column string) (bool, error) {
+	switch dbType {
+	case consts.DBPgsql:
+		value, err := g.DB().GetValue(ctx, `
+SELECT 1
+FROM information_schema.columns
+WHERE table_schema = current_schema()
+  AND table_name = ?
+  AND column_name = ?
+LIMIT 1`, table, column)
+		if err != nil {
+			return false, err
+		}
+		return !value.IsNil(), nil
+	default:
+		value, err := g.DB().GetValue(ctx, `
+SELECT 1
+FROM information_schema.columns
+WHERE table_schema = DATABASE()
+  AND table_name = ?
+  AND column_name = ?
+LIMIT 1`, table, column)
+		if err != nil {
+			return false, err
+		}
+		return !value.IsNil(), nil
 	}
 }
 

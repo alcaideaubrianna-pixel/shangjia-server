@@ -29,7 +29,9 @@ var mysqlBusinessSqlFiles = []string{
 }
 
 var pgsqlBusinessSqlFiles = []string{
+	"storage/data/generate/pgsql/admin_notice_extension.sql",
 	"storage/data/generate/pgsql/youban_business.sql",
+	"storage/data/generate/pgsql/member_vip_permission.sql",
 	"storage/data/generate/pgsql/youban_cdn_config.sql",
 	"storage/data/generate/pgsql/member_vip_money_config.sql",
 	"storage/data/generate/pgsql/rainbow_pay_config.sql",
