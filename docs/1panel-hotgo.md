@@ -89,6 +89,8 @@ database:
 
 启动时报 `pq: relation "hg_sys_config" does not exist`，说明数据库连接已经成功，但目标库还没有 HotGo 基础表。确认 `.env` 启用了 `YOUBAN_AUTO_INIT_DATABASE=true`，并且连接的是一个空库；如果库里已有其它业务表但没有 HotGo 表，需要先清理为真正空库，或手动导入 `storage/data/hotgo-pg.sql`。
 
+如果日志里持续出现 `connect to 127.0.0.1:8099 error`，这是 HotGo 的 TCP 客户端在尝试连接主服务 TCP server。单容器只跑 HTTP 时可以忽略，或把启动命令固定为 `./main http`；后续拆出独立 cron 容器时，把 cron 容器的 `YOUBAN_TCP_CRON_ADDRESS` 设置为主服务容器地址，例如 `youban-server:8099`。
+
 ## GitHub Actions Secrets
 
 在 GitHub 私有仓库的 Settings -> Secrets and variables -> Actions 里配置：
