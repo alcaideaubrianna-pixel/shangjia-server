@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"database/sql"
 	"hotgo/internal/consts"
 	"os"
 	"strings"
@@ -33,19 +34,26 @@ func InitDatabase(ctx context.Context) (err error) {
 	if err != nil {
 		return gerror.Wrap(err, "检查数据库状态失败")
 	}
-	if len(tables) == 0 {
-		g.Log().Info(ctx, "检测到默认数据库为空，开始初始化数据库")
-		sqlFiles, ok := databaseInitSqlFiles[dbType]
-		if !ok {
-			return gerror.Newf("暂不支持当前数据库初始化：%s", dbType)
-		}
+	if len(tables) > 0 {
+		return validateDatabaseSeed(ctx, dbType)
+	}
+
+	g.Log().Info(ctx, "检测到默认数据库为空，开始初始化数据库")
+	sqlFiles, ok := databaseInitSqlFiles[dbType]
+	if !ok {
+		return gerror.Newf("暂不支持当前数据库初始化：%s", dbType)
+	}
+	if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		for _, file := range sqlFiles {
-			if err = execSqlFile(ctx, file); err != nil {
+			if err = execSqlFile(ctx, tx, file); err != nil {
 				return gerror.Wrapf(err, "执行初始化 SQL 失败：%s", file)
 			}
 		}
-		g.Log().Info(ctx, "数据库初始化完成")
+		return nil
+	}); err != nil {
+		return err
 	}
+	g.Log().Info(ctx, "数据库初始化完成")
 	return nil
 }
 
@@ -72,7 +80,47 @@ func getDatabaseTables(ctx context.Context, dbType string) (tables gdb.Result, e
 	}
 }
 
-func execSqlFile(ctx context.Context, path string) (err error) {
+func validateDatabaseSeed(ctx context.Context, dbType string) (err error) {
+	exists, err := hasDatabaseTable(ctx, dbType, "hg_admin_role")
+	if err != nil {
+		return gerror.Wrap(err, "检查核心角色表失败")
+	}
+	if !exists {
+		return gerror.New("检测到数据库已存在表，但缺少核心角色表 hg_admin_role；请使用空库重新初始化")
+	}
+
+	total, err := g.DB().GetCount(ctx, "SELECT COUNT(*) FROM hg_admin_role")
+	if err != nil {
+		return gerror.Wrap(err, "检查核心角色数据失败")
+	}
+	if total == 0 {
+		return gerror.New("检测到数据库已存在表，但核心角色数据为空；请清空数据库后重新初始化，或按初始化 SQL 补齐 hg_admin_role 数据")
+	}
+	return nil
+}
+
+func hasDatabaseTable(ctx context.Context, dbType, table string) (bool, error) {
+	switch dbType {
+	case consts.DBPgsql:
+		value, err := g.DB().GetValue(ctx, "SELECT to_regclass(?)", "public."+table)
+		if err != nil {
+			return false, err
+		}
+		return !value.IsNil() && value.String() != "", nil
+	default:
+		value, err := g.DB().GetValue(ctx, "SHOW TABLES LIKE ?", table)
+		if err != nil {
+			return false, err
+		}
+		return !value.IsNil() && value.String() != "", nil
+	}
+}
+
+type sqlExecutor interface {
+	ExecContext(ctx context.Context, sql string, args ...any) (sql.Result, error)
+}
+
+func execSqlFile(ctx context.Context, executor sqlExecutor, path string) (err error) {
 	content := readSqlFile(path)
 	if strings.TrimSpace(content) == "" {
 		return gerror.Newf("初始化 SQL 文件不存在或为空：%s", path)
@@ -83,7 +131,7 @@ func execSqlFile(ctx context.Context, path string) (err error) {
 		if sql == "" {
 			continue
 		}
-		if _, err = g.DB().Exec(ctx, sql); err != nil {
+		if _, err = executor.ExecContext(ctx, sql); err != nil {
 			return gerror.Wrapf(err, "执行 SQL 失败：%s 第 %d 段\n%s", path, index+1, sql)
 		}
 	}
