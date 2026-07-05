@@ -13,6 +13,7 @@ import (
 	_ "github.com/gogf/gf/contrib/nosql/redis/v2"
 	"github.com/gogf/gf/v2/os/gctx"
 	_ "hotgo/addons/modules"
+	"hotgo/internal/bootstrap/envconfig"
 	"hotgo/internal/cmd"
 	"hotgo/internal/global"
 	_ "hotgo/internal/logic"
@@ -20,7 +21,7 @@ import (
 
 func main() {
 	var ctx = gctx.GetInitCtx()
-	global.ApplyEnvConfig(ctx)
+	envconfig.Apply(ctx)
 	global.Init(ctx)
 	cmd.Main.Run(ctx)
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gctx"
+	"hotgo/internal/bootstrap/envconfig"
 	"hotgo/internal/library/queue/disk"
 	"hotgo/utility/charset"
 	"sync"
@@ -82,6 +83,7 @@ var (
 func init() {
 	mqProducerInstanceMap = make(map[string]MqProducer)
 	mqConsumerInstanceMap = make(map[string]MqConsumer)
+	envconfig.Apply(ctx)
 	if err := g.Cfg().MustGet(ctx, "queue").Scan(&config); err != nil {
 		Logger().Warningf(ctx, "queue init err:%+v", err)
 	}

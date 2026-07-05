@@ -6,6 +6,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcfg"
 	"github.com/gogf/gf/v2/os/gctx"
+	"hotgo/internal/bootstrap/envconfig"
 )
 
 func TestApplyEnvConfig(t *testing.T) {
@@ -55,7 +56,7 @@ database:
 	t.Setenv("YOUBAN_DB_PASSWORD", "db-pass")
 	t.Setenv("YOUBAN_DB_DEBUG", "false")
 
-	ApplyEnvConfig(ctx)
+	envconfig.Apply(ctx)
 
 	assertCfg := func(key string, want string) {
 		t.Helper()

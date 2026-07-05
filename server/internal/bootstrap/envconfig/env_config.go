@@ -1,4 +1,4 @@
-package global
+package envconfig
 
 import (
 	"context"
@@ -9,12 +9,12 @@ import (
 	"github.com/gogf/gf/v2/os/gcfg"
 )
 
-type envConfigItem struct {
+type item struct {
 	Key     string
 	EnvKeys []string
 }
 
-var envConfigItems = []envConfigItem{
+var items = []item{
 	{Key: "system.appName", EnvKeys: []string{"GF_SYSTEM_APPNAME", "YOUBAN_APP_NAME", "APP_NAME"}},
 	{Key: "system.mode", EnvKeys: []string{"GF_SYSTEM_MODE", "YOUBAN_MODE", "APP_MODE", "MODE"}},
 	{Key: "system.debug", EnvKeys: []string{"GF_SYSTEM_DEBUG", "YOUBAN_DEBUG", "APP_DEBUG", "DEBUG"}},
@@ -35,8 +35,8 @@ var envConfigItems = []envConfigItem{
 	{Key: "youbanChat.telegram.webhookBaseUrl", EnvKeys: []string{"GF_YOUBANCHAT_TELEGRAM_WEBHOOKBASEURL", "YOUBAN_CHAT_TELEGRAM_WEBHOOK_BASE_URL"}},
 }
 
-// ApplyEnvConfig overlays selected runtime configuration from environment variables.
-func ApplyEnvConfig(ctx context.Context) {
+// Apply overlays selected runtime configuration from environment variables.
+func Apply(ctx context.Context) {
 	_ = ctx
 
 	adapter, ok := g.Cfg().GetAdapter().(*gcfg.AdapterFile)
@@ -44,8 +44,8 @@ func ApplyEnvConfig(ctx context.Context) {
 		return
 	}
 
-	applyDerivedEnv(adapter)
-	for _, item := range envConfigItems {
+	applyDerived(adapter)
+	for _, item := range items {
 		if value, ok := firstEnv(item.EnvKeys...); ok {
 			if item.Key == "database.default.link" && value == "" {
 				continue
@@ -55,7 +55,7 @@ func ApplyEnvConfig(ctx context.Context) {
 	}
 }
 
-func applyDerivedEnv(adapter *gcfg.AdapterFile) {
+func applyDerived(adapter *gcfg.AdapterFile) {
 	if value, ok := firstEnv("GF_SERVER_PORT", "YOUBAN_SERVER_PORT", "PORT"); ok && value != "" {
 		_ = adapter.Set("server.address", ":"+strings.TrimPrefix(value, ":"))
 	}
