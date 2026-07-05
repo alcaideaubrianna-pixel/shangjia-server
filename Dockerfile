@@ -68,7 +68,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM debian:trixie-slim AS runtime
 
 ENV WORKDIR=/app \
-    PORT=8000 \
     TZ=Asia/Shanghai
 
 RUN apt-get update \
@@ -83,7 +82,7 @@ COPY --from=server-builder /src/server/resource ./resource
 COPY --from=server-builder /src/server/storage ./storage
 COPY --from=server-builder /src/server/addons ./addons
 COPY --from=server-builder --chmod=755 /tmp/hotgo ./hotgo
-COPY --chmod=755 deploy/zeabur/entrypoint.sh ./entrypoint.sh
+COPY --from=server-builder --chmod=755 /src/server/manifest/docker/entrypoint.sh ./entrypoint.sh
 
 EXPOSE 8000
 

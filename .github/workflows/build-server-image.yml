@@ -3,15 +3,15 @@ name: build-images
 on:
   push:
     branches:
-      - develop
+      - sj/develop
       - main
-      - v2.0
-      - web
     tags:
       - "v*"
     paths:
       - "server/**"
       - "web/**"
+      - "Dockerfile"
+      - ".dockerignore"
       - ".github/workflows/build-server-image.yml"
   workflow_dispatch:
 
@@ -38,56 +38,6 @@ jobs:
           echo "server=ghcr.io/${owner}/youban-server" >> "$GITHUB_OUTPUT"
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
-
-      - name: Build admin web
-        working-directory: web
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm run build
-
-      - name: Copy admin web into server resources
-        run: |
-          rm -rf server/resource/public/admin
-          mkdir -p server/resource/public/admin
-          cp -R web/dist/. server/resource/public/admin/
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.24.6"
-          cache-dependency-path: server/go.sum
-
-      - name: Install GoFrame CLI
-        run: go install github.com/gogf/gf/cmd/gf/v2@v2.10.0
-
-      - name: Test youban chat addon
-        working-directory: server
-        run: go test ./addons/youban_chat/...
-
-      - name: Pack server resources
-        working-directory: server
-        run: |
-          rm -f internal/packed/packed.go
-          gf pack resource,storage internal/packed/packed.go --keepPath=true
-
-      - name: Build Linux binary
-        working-directory: server
-        run: |
-          mkdir -p temp/linux_amd64
-          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -o temp/linux_amd64/hotgo ./main.go
-          chmod +x temp/linux_amd64/hotgo
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -104,7 +54,7 @@ jobs:
         with:
           images: ${{ steps.image.outputs.server }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref_name == 'develop' || github.ref_name == github.event.repository.default_branch }}
+            type=raw,value=latest,enable=${{ github.ref_name == 'sj/develop' || github.ref_name == github.event.repository.default_branch }}
             type=ref,event=branch
             type=ref,event=tag
             type=sha,prefix=sha-
@@ -112,8 +62,8 @@ jobs:
       - name: Build and push server image
         uses: docker/build-push-action@v6
         with:
-          context: server
-          file: server/manifest/docker/Dockerfile
+          context: .
+          file: Dockerfile
           push: true
           platforms: linux/amd64
           tags: ${{ steps.server_meta.outputs.tags }}
@@ -163,18 +113,29 @@ jobs:
             --data-urlencode "text=${text}" || echo "telegram notify failed"
 
       - name: Deploy server image
-        if: ${{ github.ref_name == 'develop' }}
+        if: ${{ github.ref_name == 'sj/develop' }}
         env:
-          DEPLOY_URL: ${{ secrets.YOUBAN_DEPLOY_URL }}
-          DEPLOY_TOKEN: ${{ secrets.YOUBAN_DEPLOY_TOKEN }}
+          ONEPANEL_BASE_URL: ${{ secrets.ONEPANEL_BASE_URL }}
+          ONEPANEL_API_KEY: ${{ secrets.ONEPANEL_API_KEY }}
+          ONEPANEL_CONTAINER_NAME: ${{ secrets.ONEPANEL_CONTAINER_NAME }}
           IMAGE: ${{ steps.image.outputs.server }}:sha-${{ steps.image.outputs.short_sha }}
         run: |
-          if [ -z "$DEPLOY_URL" ] || [ -z "$DEPLOY_TOKEN" ]; then
-            echo "deploy webhook secrets are not configured, skip"
+          if [ -z "$ONEPANEL_BASE_URL" ] || [ -z "$ONEPANEL_API_KEY" ] || [ -z "$ONEPANEL_CONTAINER_NAME" ]; then
+            echo "1Panel secrets are not configured, skip"
             exit 0
           fi
+
+          timestamp="$(date +%s)"
+          token="$(printf '1panel%s%s' "$ONEPANEL_API_KEY" "$timestamp" | md5sum | awk '{print $1}')"
+          base_url="${ONEPANEL_BASE_URL%/}"
+          body="$(jq -nc \
+            --arg name "$ONEPANEL_CONTAINER_NAME" \
+            --arg image "$IMAGE" \
+            '{names: [$name], image: $image, forcePull: true}')"
+
           curl --fail --show-error --silent \
-            -X POST "$DEPLOY_URL" \
-            -H "Authorization: Bearer $DEPLOY_TOKEN" \
+            -X POST "$base_url/api/v2/containers/upgrade" \
+            -H "1Panel-Token: $token" \
+            -H "1Panel-Timestamp: $timestamp" \
             -H "Content-Type: application/json" \
-            --data "{\"image\":\"$IMAGE\"}"
+            --data "$body"
