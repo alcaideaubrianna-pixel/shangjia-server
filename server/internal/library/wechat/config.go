@@ -21,6 +21,15 @@ var (
 )
 
 func SetConfig(c *model.WechatConfig) {
+	if c == nil {
+		c = &model.WechatConfig{}
+	}
+	if c.WechatOfficialAccountConfig == nil {
+		c.WechatOfficialAccountConfig = &model.WechatOfficialAccountConfig{}
+	}
+	if c.WechatOpenPlatformConfig == nil {
+		c.WechatOpenPlatformConfig = &model.WechatOpenPlatformConfig{}
+	}
 	config = c
 	ctx := gctx.GetInitCtx()
 	GetOfficialAccount(ctx, true)
@@ -32,6 +41,9 @@ func GetConfig() *model.WechatConfig {
 
 // NewOfficialAccount 微信公众号实例
 func NewOfficialAccount(ctx context.Context) *officialaccount.OfficialAccount {
+	if config == nil {
+		SetConfig(nil)
+	}
 	cfg := &offConfig.Config{
 		AppID:          config.OfficialAppID,
 		AppSecret:      config.OfficialAppSecret,
