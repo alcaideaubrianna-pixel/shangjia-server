@@ -1908,7 +1908,7 @@ INSERT INTO hg_admin_menu (
        0, 2, '', 0, 0, 0, 40,
        '', 1, '2023-11-17 15:28:23', '2023-04-18 23:26:01'),
 
-      (2282, 2237, 3, 'tr_2093 tr_2237 ', '会员认证订单', 'member_vip_order', 'memberVipOrder', '', 2, '',
+      (2431, 2237, 3, 'tr_2093 tr_2237 ', '会员认证订单', 'member_vip_order', 'memberVipOrder', '', 2, '',
        '/order/list', '', '/org/memberVipOrder/index', 1, '',
        0, 0, '', 0, 0, 0, 35,
        '', 1, '2026-06-26 00:00:00', '2026-06-26 00:00:00'),
@@ -6923,7 +6923,7 @@ ALTER SEQUENCE hg_admin_dept_id_seq RESTART WITH 113;
 ALTER SEQUENCE hg_admin_member_id_seq RESTART WITH 14;
 
 -- hg_admin_menu
-ALTER SEQUENCE hg_admin_menu_id_seq RESTART WITH 2431;
+ALTER SEQUENCE hg_admin_menu_id_seq RESTART WITH 2432;
 
 -- hg_admin_notice
 ALTER SEQUENCE hg_admin_notice_id_seq RESTART WITH 33;
