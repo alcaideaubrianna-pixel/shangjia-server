@@ -15,8 +15,31 @@ import (
 )
 
 var databaseInitSqlFiles = map[string][]string{
-	consts.DBMysql: {"storage/data/hotgo.sql"},
-	consts.DBPgsql: {"storage/data/hotgo-pg.sql"},
+	consts.DBMysql: {
+		"storage/data/hotgo.sql",
+		"storage/data/generate/youban_hotgo_compat.sql",
+		"storage/data/generate/content_profile.sql",
+		"storage/data/generate/content_import_monitor_menu.sql",
+		"storage/data/generate/admin_notice_extension.sql",
+		"storage/data/generate/app_announcement.sql",
+		"storage/data/generate/member_vip.sql",
+		"storage/data/generate/member_app_settings.sql",
+		"storage/data/generate/member_share.sql",
+		"storage/data/generate/member_profile_view.sql",
+		"storage/data/generate/member_profile_action.sql",
+		"storage/data/generate/content_media_video_display_fix.sql",
+		"storage/data/generate/youban_cdn_config.sql",
+		"storage/data/generate/member_vip_money_config.sql",
+		"storage/data/generate/rainbow_pay_config.sql",
+	},
+	consts.DBPgsql: {
+		"storage/data/hotgo-pg.sql",
+		"storage/data/generate/pgsql/youban_business.sql",
+		"storage/data/generate/pgsql/member_vip_permission.sql",
+		"storage/data/generate/pgsql/youban_cdn_config.sql",
+		"storage/data/generate/pgsql/member_vip_money_config.sql",
+		"storage/data/generate/pgsql/rainbow_pay_config.sql",
+	},
 }
 
 // InitDatabaseFromEnv initializes an empty database when explicitly enabled.
@@ -81,12 +104,19 @@ func getDatabaseTables(ctx context.Context, dbType string) (tables gdb.Result, e
 }
 
 func validateDatabaseSeed(ctx context.Context, dbType string) (err error) {
-	exists, err := hasDatabaseTable(ctx, dbType, "hg_admin_role")
-	if err != nil {
-		return gerror.Wrap(err, "检查核心角色表失败")
+	requiredTables := []string{
+		"hg_admin_role",
+		"hg_member_vip",
+		"hg_member_vip_log",
 	}
-	if !exists {
-		return gerror.New("检测到数据库已存在表，但缺少核心角色表 hg_admin_role；请使用空库重新初始化")
+	for _, table := range requiredTables {
+		exists, err := hasDatabaseTable(ctx, dbType, table)
+		if err != nil {
+			return gerror.Wrapf(err, "检查核心数据表失败：%s", table)
+		}
+		if !exists {
+			return gerror.Newf("检测到数据库已存在表，但缺少核心数据表 %s；请使用空库重新初始化，或执行完整业务初始化 SQL", table)
+		}
 	}
 
 	total, err := g.DB().GetCount(ctx, "SELECT COUNT(*) FROM hg_admin_role")
