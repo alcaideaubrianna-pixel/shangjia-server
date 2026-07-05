@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"hotgo/internal/consts"
+	"os"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -15,6 +16,14 @@ import (
 var databaseInitSqlFiles = map[string][]string{
 	consts.DBMysql: {"storage/data/hotgo.sql"},
 	consts.DBPgsql: {"storage/data/hotgo-pg.sql"},
+}
+
+// InitDatabaseFromEnv initializes an empty database when explicitly enabled.
+func InitDatabaseFromEnv(ctx context.Context) (err error) {
+	if !envEnabled("YOUBAN_AUTO_INIT_DATABASE", "GF_AUTO_INIT_DATABASE") {
+		return nil
+	}
+	return InitDatabase(ctx)
 }
 
 // InitDatabase 初始化 HotGo 基础空库。该方法仅供显式初始化流程调用，普通启动不执行业务补丁。
@@ -38,6 +47,20 @@ func InitDatabase(ctx context.Context) (err error) {
 		g.Log().Info(ctx, "数据库初始化完成")
 	}
 	return nil
+}
+
+func envEnabled(keys ...string) bool {
+	for _, key := range keys {
+		value, ok := os.LookupEnv(key)
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "1", "true", "yes", "on":
+			return true
+		}
+	}
+	return false
 }
 
 func getDatabaseTables(ctx context.Context, dbType string) (tables gdb.Result, err error) {

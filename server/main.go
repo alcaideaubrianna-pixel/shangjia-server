@@ -11,8 +11,10 @@ import (
 	_ "github.com/gogf/gf/contrib/drivers/mysql/v2"
 	_ "github.com/gogf/gf/contrib/drivers/pgsql/v2"
 	_ "github.com/gogf/gf/contrib/nosql/redis/v2"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gctx"
 	_ "hotgo/addons/modules"
+	"hotgo/internal/bootstrap"
 	"hotgo/internal/bootstrap/envconfig"
 	"hotgo/internal/cmd"
 	"hotgo/internal/global"
@@ -22,6 +24,9 @@ import (
 func main() {
 	var ctx = gctx.GetInitCtx()
 	envconfig.Apply(ctx)
+	if err := bootstrap.InitDatabaseFromEnv(ctx); err != nil {
+		g.Log().Fatalf(ctx, "初始化数据库失败: %+v", err)
+	}
 	global.Init(ctx)
 	cmd.Main.Run(ctx)
 }

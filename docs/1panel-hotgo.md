@@ -4,6 +4,8 @@
 
 线上继续维护 `.env`。新镜像启动时会读取 `YOUBAN_*` / `GF_*` 环境变量，并覆盖镜像内置的 HotGo 配置；不再要求每次执行 `render-config.sh`。
 
+HotGo 的部署规范不是每台服务器手动改 `config.yaml`。运行配置走 `.env`，数据库初始化走一次性 SQL/插件安装流程。当前镜像支持 `YOUBAN_AUTO_INIT_DATABASE=true`：启动时会在 `global.Init` 之前检查默认数据库，如果库里没有任何表，就自动导入 HotGo 基础 SQL；已有表时直接跳过。
+
 ## 首次在 1Panel 创建容器
 
 需要先在 1Panel 手动创建一次容器，后续 GitHub Actions 才能通过 1Panel API 升级这个容器的镜像。
@@ -19,6 +21,16 @@ chmod +x render-config.sh
 vim .env
 docker compose up -d
 ```
+
+首次使用空 PostgreSQL 库时，`.env` 里保留：
+
+```env
+YOUBAN_AUTO_INIT_DATABASE=true
+```
+
+这个变量只负责初始化 HotGo 基础表，例如 `hg_sys_config`、`hg_sys_menu`、`hg_sys_addons_install`。它是空库保护逻辑，不会在已有库上重复导入。
+
+悦伴业务表和插件表仍按 HotGo 插件规范安装/升级：基础表初始化成功后，在后台插件管理安装对应模块，或通过后续自动化脚本显式执行插件 install/upgrade。日常镜像升级只需要 GitHub Actions 推新镜像并让 1Panel 重建容器，不需要重新初始化数据库。
 
 对应容器配置：
 
@@ -74,6 +86,8 @@ database:
 ```
 
 启动时报 `configuration missing for database node "database"`，通常是容器没有拿到数据库环境变量，或者镜像不是包含 env 覆盖逻辑的新版本。
+
+启动时报 `pq: relation "hg_sys_config" does not exist`，说明数据库连接已经成功，但目标库还没有 HotGo 基础表。确认 `.env` 启用了 `YOUBAN_AUTO_INIT_DATABASE=true`，并且连接的是一个空库；如果库里已有其它业务表但没有 HotGo 表，需要先清理为真正空库，或手动导入 `storage/data/hotgo-pg.sql`。
 
 ## GitHub Actions Secrets
 
