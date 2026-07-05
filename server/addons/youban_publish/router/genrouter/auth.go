@@ -1,7 +1,6 @@
 package genrouter
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gcode"
@@ -16,14 +15,12 @@ import (
 
 func publishAdminAuth(r *ghttp.Request) {
 	if err := service.Middleware().DeliverUserContext(r); err != nil {
-		r.Response.Status = http.StatusUnauthorized
 		response.JsonExit(r, gcode.CodeNotAuthorized.Code(), err.Error())
 		return
 	}
 
 	user := contexts.GetUser(r.Context())
 	if user == nil || user.App != consts.AppApi {
-		r.Response.Status = http.StatusUnauthorized
 		response.JsonExit(r, gcode.CodeNotAuthorized.Code(), "请先登录上架系统")
 		return
 	}
