@@ -3,12 +3,13 @@ services:
     image: ${YOUBAN_SERVER_IMAGE}
     container_name: youban-server
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       TZ: ${YOUBAN_TZ:-Asia/Shanghai}
     ports:
       - "${YOUBAN_HTTP_PORT:-8000}:8000"
     volumes:
-      - ${YOUBAN_CONFIG_FILE:-./server.config.yaml}:/app/manifest/config/config.yaml:ro
       - ./data/logs:/app/logs
       - ./data/attachment:/app/resource/public/attachment
       - ./data/addons:/app/resource/addons

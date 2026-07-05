@@ -20,6 +20,7 @@ import (
 
 func main() {
 	var ctx = gctx.GetInitCtx()
+	global.ApplyEnvConfig(ctx)
 	global.Init(ctx)
 	cmd.Main.Run(ctx)
 }

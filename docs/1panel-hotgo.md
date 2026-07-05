@@ -2,7 +2,7 @@
 
 当前部署方式固定为：GitHub Actions 构建并推送 GHCR 镜像，1Panel 只负责运行容器和升级镜像。HotGo 后端配置保持原生方式，运行时读取容器内 `/app/manifest/config/config.yaml`。
 
-线上可以继续维护 `.env`，但 `.env` 不是 HotGo 直接读取的配置。部署目录里的 `render-config.sh` 会把 `YOUBAN_*` 变量渲染成 `server.config.yaml`，再挂载到容器内的 `/app/manifest/config/config.yaml`。
+线上继续维护 `.env`。新镜像启动时会读取 `YOUBAN_*` / `GF_*` 环境变量，并覆盖镜像内置的 HotGo 配置；不再要求每次执行 `render-config.sh`。
 
 ## 首次在 1Panel 创建容器
 
@@ -17,7 +17,6 @@ cp deploy/1panel/render-config.sh /opt/youban/render-config.sh
 cd /opt/youban
 chmod +x render-config.sh
 vim .env
-./render-config.sh
 docker compose up -d
 ```
 
@@ -29,7 +28,6 @@ docker compose up -d
 - 网络：加入 PostgreSQL、Redis 所在的 1Panel Docker 网络
 - 重启策略：`unless-stopped`
 - 时区环境变量：`TZ=Asia/Shanghai`
-- 配置挂载：`/opt/youban/server.config.yaml` 挂载到 `/app/manifest/config/config.yaml`
 
 如果 GHCR 镜像不是公开包，需要先在服务器上执行 `docker login ghcr.io`，或者在 1Panel 镜像仓库配置 GHCR 凭据。
 
@@ -38,11 +36,10 @@ docker compose up -d
 日常修改 `.env`，再执行：
 
 ```bash
-./render-config.sh
 docker compose up -d --force-recreate
 ```
 
-最终生成的 `server.config.yaml` 至少会包含这些 HotGo 节点：
+容器启动后会把 `.env` 中的变量覆盖到这些 HotGo 节点：
 
 ```yaml
 system:
@@ -76,7 +73,7 @@ database:
     Prefix: "hg_"
 ```
 
-启动时报 `configuration missing for database node "database"`，通常不是数据库连不上，而是容器没有加载到 `/app/manifest/config/config.yaml`，或者 `server.config.yaml` 没生成/挂载路径写错。
+启动时报 `configuration missing for database node "database"`，通常是容器没有拿到数据库环境变量，或者镜像不是包含 env 覆盖逻辑的新版本。
 
 ## GitHub Actions Secrets
 
