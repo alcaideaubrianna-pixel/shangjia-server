@@ -116,6 +116,7 @@ jobs:
             --data-urlencode "text=${text}" || echo "telegram notify failed"
 
       - name: Deploy server image
+        id: deploy
         if: ${{ github.ref_name == 'sj/develop' }}
         env:
           ONEPANEL_BASE_URL: ${{ secrets.ONEPANEL_BASE_URL }}
@@ -125,6 +126,7 @@ jobs:
         run: |
           if [ -z "$ONEPANEL_BASE_URL" ] || [ -z "$ONEPANEL_API_KEY" ] || [ -z "$ONEPANEL_CONTAINER_NAME" ]; then
             echo "1Panel secrets are not configured, skip"
+            echo "deployed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -142,3 +144,38 @@ jobs:
             -H "1Panel-Timestamp: $timestamp" \
             -H "Content-Type: application/json" \
             --data "$body"
+          echo "deployed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Telegram deploy success
+        if: ${{ github.ref_name == 'sj/develop' && steps.deploy.outputs.deployed == 'true' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.YOUBAN_TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.YOUBAN_TELEGRAM_CHAT_ID }}
+          ONEPANEL_BASE_URL: ${{ secrets.ONEPANEL_BASE_URL }}
+          ONEPANEL_CONTAINER_NAME: ${{ secrets.ONEPANEL_CONTAINER_NAME }}
+          YOUBAN_SERVER_HOST: ${{ secrets.YOUBAN_SERVER_HOST }}
+          YOUBAN_HTTP_PORT: ${{ secrets.YOUBAN_HTTP_PORT }}
+          IMAGE: ${{ steps.image.outputs.server }}:sha-${{ steps.image.outputs.short_sha }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "telegram secrets are not configured, skip"
+            exit 0
+          fi
+
+          service_host="$YOUBAN_SERVER_HOST"
+          if [ -z "$service_host" ] && [ -n "$ONEPANEL_BASE_URL" ]; then
+            service_host="$(printf '%s' "$ONEPANEL_BASE_URL" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##; s#/.*$##; s#:[0-9]+$##')"
+          fi
+
+          service_port="${YOUBAN_HTTP_PORT:-8000}"
+          service_addr="$service_host"
+          if [ -n "$service_host" ]; then
+            service_addr="${service_host}:${service_port}"
+          fi
+
+          text=$(printf '🚀 <b>youban-server 部署成功</b>\n分支：%s\n版本：%s\n镜像：<code>%s</code>\n容器：<code>%s</code>\n服务地址：<code>%s</code>\n日志：https://github.com/%s/actions/runs/%s' "$GITHUB_REF_NAME" "${GITHUB_SHA::7}" "$IMAGE" "$ONEPANEL_CONTAINER_NAME" "$service_addr" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
+          curl --fail --show-error --silent \
+            -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            -d "parse_mode=HTML" \
+            --data-urlencode "text=${text}" || echo "telegram notify failed"

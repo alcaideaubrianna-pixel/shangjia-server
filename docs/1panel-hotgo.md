@@ -98,6 +98,8 @@ database:
 - `ONEPANEL_CONTAINER_NAME`：需要升级的容器名，例如 `youban-server`
 - `YOUBAN_TELEGRAM_BOT_TOKEN`：可选，构建通知用
 - `YOUBAN_TELEGRAM_CHAT_ID`：可选，构建通知用
+- `YOUBAN_SERVER_HOST`：可选，部署成功通知里的服务 IP 或域名，例如 `1.2.3.4`
+- `YOUBAN_HTTP_PORT`：可选，部署成功通知里的服务端口，例如 `8000`
 
 `sj/develop` 分支推送后，workflow 会构建：
 
