@@ -1,0 +1,38 @@
+services:
+  youban-server:
+    image: ${YOUBAN_SERVER_IMAGE}
+    container_name: youban-server
+    restart: unless-stopped
+    environment:
+      TZ: ${YOUBAN_TZ:-Asia/Shanghai}
+    ports:
+      - "${YOUBAN_HTTP_PORT:-8000}:8000"
+    volumes:
+      - ${YOUBAN_CONFIG_FILE:-./server.config.yaml}:/app/manifest/config/config.yaml:ro
+      - ./data/logs:/app/logs
+      - ./data/attachment:/app/resource/public/attachment
+      - ./data/addons:/app/resource/addons
+      - ./data/storage:/app/storage
+    networks:
+      - youban-network
+
+  youban-h5:
+    profiles:
+      - h5
+    image: ${YOUBAN_H5_IMAGE:-nginx:alpine}
+    container_name: youban-h5
+    restart: unless-stopped
+    environment:
+      TZ: ${YOUBAN_TZ:-Asia/Shanghai}
+      BACKEND_UPSTREAM: http://youban-server:8000
+    ports:
+      - "${YOUBAN_H5_PORT:-9000}:80"
+    depends_on:
+      - youban-server
+    networks:
+      - youban-network
+
+networks:
+  youban-network:
+    name: ${YOUBAN_DOCKER_NETWORK:-1panel-network}
+    external: true

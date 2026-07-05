@@ -10,8 +10,11 @@ on:
     paths:
       - "server/**"
       - "web/**"
+      - "deploy/**"
+      - "docs/**"
       - "Dockerfile"
       - ".dockerignore"
+      - ".env.example"
       - ".github/workflows/build-server-image.yml"
   workflow_dispatch:
 

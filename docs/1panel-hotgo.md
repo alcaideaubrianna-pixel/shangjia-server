@@ -2,11 +2,26 @@
 
 当前部署方式固定为：GitHub Actions 构建并推送 GHCR 镜像，1Panel 只负责运行容器和升级镜像。HotGo 后端配置保持原生方式，运行时读取容器内 `/app/manifest/config/config.yaml`。
 
+线上可以继续维护 `.env`，但 `.env` 不是 HotGo 直接读取的配置。部署目录里的 `render-config.sh` 会把 `YOUBAN_*` 变量渲染成 `server.config.yaml`，再挂载到容器内的 `/app/manifest/config/config.yaml`。
+
 ## 首次在 1Panel 创建容器
 
 需要先在 1Panel 手动创建一次容器，后续 GitHub Actions 才能通过 1Panel API 升级这个容器的镜像。
 
-建议容器配置：
+推荐直接使用 [deploy/1panel](../deploy/1panel/) 目录：
+
+```bash
+cp deploy/1panel/.env.example /opt/youban/.env
+cp deploy/1panel/docker-compose.yml /opt/youban/docker-compose.yml
+cp deploy/1panel/render-config.sh /opt/youban/render-config.sh
+cd /opt/youban
+chmod +x render-config.sh
+vim .env
+./render-config.sh
+docker compose up -d
+```
+
+对应容器配置：
 
 - 镜像：`ghcr.io/alcaideaubrianna-pixel/youban-server:latest`
 - 容器名：`youban-server`
@@ -14,13 +29,20 @@
 - 网络：加入 PostgreSQL、Redis 所在的 1Panel Docker 网络
 - 重启策略：`unless-stopped`
 - 时区环境变量：`TZ=Asia/Shanghai`
-- 配置挂载：`/opt/youban/config.yaml` 挂载到 `/app/manifest/config/config.yaml`
+- 配置挂载：`/opt/youban/server.config.yaml` 挂载到 `/app/manifest/config/config.yaml`
 
 如果 GHCR 镜像不是公开包，需要先在服务器上执行 `docker login ghcr.io`，或者在 1Panel 镜像仓库配置 GHCR 凭据。
 
-## 生产 config.yaml
+## 生产配置
 
-不要把数据库、Redis、Token 之类配置写成 `.env` 环境变量。HotGo 原生配置在 `config.yaml`，至少确认下面这些节点存在：
+日常修改 `.env`，再执行：
+
+```bash
+./render-config.sh
+docker compose up -d --force-recreate
+```
+
+最终生成的 `server.config.yaml` 至少会包含这些 HotGo 节点：
 
 ```yaml
 system:
@@ -54,7 +76,7 @@ database:
     Prefix: "hg_"
 ```
 
-启动时报 `configuration missing for database node "database"`，通常不是数据库连不上，而是容器没有加载到 `/app/manifest/config/config.yaml`，或者挂载路径写错。
+启动时报 `configuration missing for database node "database"`，通常不是数据库连不上，而是容器没有加载到 `/app/manifest/config/config.yaml`，或者 `server.config.yaml` 没生成/挂载路径写错。
 
 ## GitHub Actions Secrets
 
