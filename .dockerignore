@@ -19,6 +19,7 @@ server/temp
 server/__debug_bin*
 server/internal/packed/packed.go
 server/resource/public/admin
+server/manifest/config/config.yaml
 server/storage/cache
 server/storage/diskqueue
 

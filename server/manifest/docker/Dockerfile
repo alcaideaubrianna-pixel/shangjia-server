@@ -10,6 +10,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY hack $WORKDIR/hack/
 COPY manifest/config $WORKDIR/manifest/config/
+RUN cp $WORKDIR/manifest/config/config.example.yaml $WORKDIR/manifest/config/config.yaml
 COPY resource $WORKDIR/resource/
 COPY storage $WORKDIR/storage/
 COPY addons $WORKDIR/addons/

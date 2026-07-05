@@ -54,6 +54,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
 COPY server ./
+RUN cp manifest/config/config.example.yaml manifest/config/config.yaml
 RUN rm -rf resource/public/admin && mkdir -p resource/public/admin
 COPY --from=web-builder /src/web/dist/. ./resource/public/admin/
 
