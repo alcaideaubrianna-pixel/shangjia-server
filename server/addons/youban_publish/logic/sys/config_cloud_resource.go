@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/base64"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -49,18 +48,6 @@ func validateCloudResourceCredential(ctx context.Context, conf *model.CloudResou
 		if err = validateFapiHubCredential(ctx, conf, imageBytes); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func validateTencentFaceCredential(ctx context.Context, conf *model.CloudResourceConfig, imageBytes []byte) error {
-	normalized, err := normalizeTencentVisionImageBytes(imageBytes)
-	if err != nil {
-		return err
-	}
-	client := newTencentVisionClient(conf.TencentSecretId, conf.TencentSecretKey, conf.TencentCloudSite, conf.TencentRegion, conf.TencentBdaEndpoint, conf.TencentIaiEndpoint)
-	if _, _, err = client.detectFace(ctx, base64.StdEncoding.EncodeToString(normalized)); err != nil {
-		return gerror.Wrap(err, "腾讯云人脸检测密钥或权限校验失败")
 	}
 	return nil
 }

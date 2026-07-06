@@ -32,6 +32,8 @@ func (in *CloudResourceConfigSaveInp) Filter(ctx context.Context) error {
 	if err := checkSwitch(in.TencentVisionEnabled, "腾讯云视觉开关"); err != nil {
 		return err
 	}
+	// 人脸检测已从防扫图链路停用，保留字段仅用于兼容历史配置。
+	in.TencentVisionEnabled = 0
 	if err := checkSwitch(in.FapiHubEnabled, "FAPIHub 抠图开关"); err != nil {
 		return err
 	}
@@ -64,9 +66,6 @@ func (in *CloudResourceConfigSaveInp) Filter(ctx context.Context) error {
 	}
 	if in.FapiHubModel == "" {
 		in.FapiHubModel = "falcon"
-	}
-	if in.TencentVisionEnabled == 1 && (in.TencentSecretId == "" || in.TencentSecretKey == "") {
-		return gerror.New("启用腾讯云视觉后必须配置 SecretId 和 SecretKey")
 	}
 	if in.FapiHubEnabled == 1 && in.FapiHubApiKey == "" {
 		return gerror.New("启用 FAPIHub 抠图后必须配置 API Key")

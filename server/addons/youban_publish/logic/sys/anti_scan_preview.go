@@ -250,11 +250,8 @@ func antiScanConfigHash(in *sysin.AntiScanPreviewInp, cloudConf *model.CloudReso
 	cloudData := g.Map{}
 	if cloudConf != nil {
 		cloudData = g.Map{
-			"fapiHubEnabled":       cloudConf.FapiHubEnabled,
-			"fapiHubModel":         cloudConf.FapiHubModel,
-			"tencentCloudSite":     cloudConf.TencentCloudSite,
-			"tencentIaiEndpoint":   cloudConf.TencentIaiEndpoint,
-			"tencentVisionEnabled": cloudConf.TencentVisionEnabled,
+			"fapiHubEnabled": cloudConf.FapiHubEnabled,
+			"fapiHubModel":   cloudConf.FapiHubModel,
 		}
 	}
 	data, _ := json.Marshal(g.Map{
