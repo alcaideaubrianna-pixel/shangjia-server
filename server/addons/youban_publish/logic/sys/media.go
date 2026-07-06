@@ -8,6 +8,8 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"math"
+	"net"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -352,8 +354,8 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 		"media_type":          in.MediaType,
 		"purpose":             in.Purpose,
 		"name":                attachment.Name,
-		"file_url":            attachment.FileUrl,
-		"poster_url":          posterFileUrl(poster),
+		"file_url":            normalizeMediaFileURL(attachment.FileUrl, attachment.Path),
+		"poster_url":          normalizeMediaFileURL(posterFileUrl(poster), posterStoragePath(poster)),
 		"poster_storage_path": posterStoragePath(poster),
 		"storage_path":        attachment.Path,
 		"mime_type":           attachment.MimeType,
@@ -421,6 +423,7 @@ func (s *sSysPublish) mediaList(ctx context.Context, taskId int64, accountId int
 	if list == nil {
 		list = []*sysin.MediaModel{}
 	}
+	normalizeMediaListFileURL(list)
 	return list, nil
 }
 
@@ -447,7 +450,40 @@ func (s *sSysPublish) mediaListByTenant(ctx context.Context, taskId int64, tenan
 	if list == nil {
 		list = []*sysin.MediaModel{}
 	}
+	normalizeMediaListFileURL(list)
 	return list, nil
+}
+
+func normalizeMediaListFileURL(list []*sysin.MediaModel) {
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		item.FileUrl = normalizeMediaFileURL(item.FileUrl, item.StoragePath)
+		item.PosterUrl = normalizeMediaFileURL(item.PosterUrl, item.PosterStoragePath)
+	}
+}
+
+func normalizeMediaFileURL(fileURL string, storagePath string) string {
+	fileURL = strings.TrimSpace(fileURL)
+	storagePath = strings.TrimSpace(storagePath)
+	if storagePath == "" {
+		return fileURL
+	}
+	if fileURL == "" || isLocalMediaURL(fileURL) {
+		return "/" + strings.TrimLeft(storagePath, "/")
+	}
+	return fileURL
+}
+
+func isLocalMediaURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Hostname() == "" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	ip := net.ParseIP(host)
+	return host == "localhost" || host == "0.0.0.0" || host == "::1" || ip != nil && ip.IsLoopback()
 }
 
 func (s *sSysPublish) deleteMedia(ctx context.Context, id int64, accountId int64) (err error) {

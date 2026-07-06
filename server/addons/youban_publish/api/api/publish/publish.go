@@ -483,6 +483,26 @@ type MyImportTaskViewRes struct {
 	*sysin.ImportTaskModel
 }
 
+type MyImportRunListReq struct {
+	g.Meta `path:"/publish/importRun/list" method:"get" tags:"上架插件" summary:"我的旧站导入执行记录列表"`
+	sysin.ImportRunListInp
+}
+
+type MyImportRunListRes struct {
+	form.PageRes
+	List []*sysin.ImportRunModel `json:"list" dc:"执行记录列表"`
+}
+
+type MyImportRunLogListReq struct {
+	g.Meta `path:"/publish/importRun/logs" method:"get" tags:"上架插件" summary:"我的旧站导入执行日志"`
+	sysin.ImportRunLogListInp
+}
+
+type MyImportRunLogListRes struct {
+	form.PageRes
+	List []*sysin.ImportRunLogModel `json:"list" dc:"日志列表"`
+}
+
 type UploadMediaReq struct {
 	g.Meta `path:"/publish/media/upload" method:"post" mime:"multipart/form-data" tags:"上架插件" summary:"上传任务媒体"`
 	sysin.MediaUploadInp

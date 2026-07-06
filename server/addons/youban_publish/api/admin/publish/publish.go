@@ -101,6 +101,50 @@ type TaskCancelReq struct {
 
 type TaskCancelRes struct{}
 
+type ProfileListReq struct {
+	g.Meta `path:"/publish/profile/list" method:"get" tags:"上架插件后台" summary:"笔记资料列表"`
+	sysin.ProfileListInp
+}
+
+type ProfileListRes struct {
+	form.PageRes
+	List []*sysin.ProfileModel `json:"list" dc:"资料列表"`
+}
+
+type ProfileViewReq struct {
+	g.Meta `path:"/publish/profile/view" method:"get" tags:"上架插件后台" summary:"笔记资料详情"`
+	sysin.ProfileViewInp
+}
+
+type ProfileViewRes struct {
+	*sysin.ProfileViewModel
+}
+
+type ProfileSaveReq struct {
+	g.Meta `path:"/publish/profile/save" method:"post" tags:"上架插件后台" summary:"编辑笔记资料"`
+	sysin.ProfileSaveInp
+}
+
+type ProfileSaveRes struct {
+	Id     int64  `json:"id" dc:"资料ID"`
+	Uuid   string `json:"uuid" dc:"资料UUID"`
+	TaskId int64  `json:"taskId" dc:"任务ID"`
+}
+
+type ProfileDeleteReq struct {
+	g.Meta `path:"/publish/profile/delete" method:"post" tags:"上架插件后台" summary:"删除笔记资料"`
+	sysin.ProfileDeleteInp
+}
+
+type ProfileDeleteRes struct{}
+
+type ProfileReviewReq struct {
+	g.Meta `path:"/publish/profile/review" method:"post" tags:"上架插件后台" summary:"审核笔记资料"`
+	sysin.ProfileReviewInp
+}
+
+type ProfileReviewRes struct{}
+
 type ImportTaskListReq struct {
 	g.Meta `path:"/publish/importTask/list" method:"get" tags:"上架插件后台" summary:"旧站导入任务列表"`
 	sysin.ImportTaskListInp
@@ -149,6 +193,72 @@ type ImportTaskRetryReq struct {
 }
 
 type ImportTaskRetryRes struct{}
+
+type ImportTaskScanReq struct {
+	g.Meta `path:"/publish/importTask/scan" method:"post" tags:"上架插件后台" summary:"扫描旧站导入差异"`
+	sysin.ImportTaskScanInp
+}
+
+type ImportTaskScanRes struct {
+	*sysin.ImportTaskScanModel
+}
+
+type ImportTaskRepairReq struct {
+	g.Meta `path:"/publish/importTask/repair" method:"post" tags:"上架插件后台" summary:"补齐旧站导入差异"`
+	sysin.ImportTaskRepairInp
+}
+
+type ImportTaskRepairRes struct{}
+
+type ImportRunListReq struct {
+	g.Meta `path:"/publish/importRun/list" method:"get" tags:"上架插件后台" summary:"旧站导入执行记录列表"`
+	sysin.ImportRunListInp
+}
+
+type ImportRunListRes struct {
+	form.PageRes
+	List []*sysin.ImportRunModel `json:"list" dc:"执行记录列表"`
+}
+
+type ImportRunCreateReq struct {
+	g.Meta `path:"/publish/importRun/create" method:"post" tags:"上架插件后台" summary:"创建旧站导入执行记录"`
+	sysin.ImportRunCreateInp
+}
+
+type ImportRunCreateRes struct {
+	Id int64 `json:"id" dc:"记录ID"`
+}
+
+type ImportRunDeleteReq struct {
+	g.Meta `path:"/publish/importRun/delete" method:"post" tags:"上架插件后台" summary:"删除旧站导入执行记录"`
+	sysin.ImportRunActionInp
+}
+
+type ImportRunDeleteRes struct{}
+
+type ImportRunCancelReq struct {
+	g.Meta `path:"/publish/importRun/cancel" method:"post" tags:"上架插件后台" summary:"取消旧站导入执行记录"`
+	sysin.ImportRunActionInp
+}
+
+type ImportRunCancelRes struct{}
+
+type ImportRunLogListReq struct {
+	g.Meta `path:"/publish/importRun/logs" method:"get" tags:"上架插件后台" summary:"旧站导入执行日志"`
+	sysin.ImportRunLogListInp
+}
+
+type ImportRunLogListRes struct {
+	form.PageRes
+	List []*sysin.ImportRunLogModel `json:"list" dc:"日志列表"`
+}
+
+type ImportRunLogClearReq struct {
+	g.Meta `path:"/publish/importRun/clearLogs" method:"post" tags:"上架插件后台" summary:"清理旧站导入执行日志"`
+	sysin.ImportRunActionInp
+}
+
+type ImportRunLogClearRes struct{}
 
 type MediaListReq struct {
 	g.Meta `path:"/publish/media/list" method:"get" tags:"上架插件后台" summary:"任务媒体列表"`

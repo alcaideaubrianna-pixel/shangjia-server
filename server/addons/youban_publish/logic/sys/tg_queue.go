@@ -23,7 +23,8 @@ type tgQueuePayload struct {
 }
 
 type importQueuePayload struct {
-	Id int64 `json:"id"`
+	Id    int64 `json:"id"`
+	RunId int64 `json:"runId"`
 }
 
 type tgRetryAfterError struct {
@@ -61,6 +62,35 @@ func (s *sSysPublish) enqueueImportTask(ctx context.Context, id int64, delay tim
 		return err
 	}
 	payload, err := json.Marshal(importQueuePayload{Id: id})
+	if err != nil {
+		return err
+	}
+	task := asynq.NewTask(tgTaskTypeImport, payload)
+	options := []asynq.Option{
+		asynq.Queue(tgQueueNameDefault),
+		asynq.MaxRetry(3),
+		asynq.Timeout(2 * time.Hour),
+		asynq.Unique(30 * time.Second),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err = client.EnqueueContext(ctx, task, options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	return err
+}
+
+func (s *sSysPublish) enqueueImportRun(ctx context.Context, runId int64, delay time.Duration) error {
+	if runId <= 0 {
+		return nil
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(importQueuePayload{RunId: runId})
 	if err != nil {
 		return err
 	}
@@ -160,7 +190,7 @@ func decodeImportQueuePayload(task *asynq.Task) (importQueuePayload, error) {
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return payload, fmt.Errorf("解析导入队列任务失败: %w", err)
 	}
-	if payload.Id <= 0 {
+	if payload.Id <= 0 && payload.RunId <= 0 {
 		return payload, fmt.Errorf("导入队列任务缺少id")
 	}
 	return payload, nil

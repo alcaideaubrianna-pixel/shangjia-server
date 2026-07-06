@@ -44,6 +44,26 @@ export function TaskCancel(params = {}) {
   return http.request({ url: '/youban_publish/publish/task/cancel', method: 'POST', params });
 }
 
+export function ProfileList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/profile/list', method: 'get', params });
+}
+
+export function ProfileView(params = {}) {
+  return http.request({ url: '/youban_publish/publish/profile/view', method: 'get', params });
+}
+
+export function ProfileSave(params = {}) {
+  return http.request({ url: '/youban_publish/publish/profile/save', method: 'POST', params });
+}
+
+export function ProfileDelete(params = {}) {
+  return http.request({ url: '/youban_publish/publish/profile/delete', method: 'POST', params });
+}
+
+export function ProfileReview(params = {}) {
+  return http.request({ url: '/youban_publish/publish/profile/review', method: 'POST', params });
+}
+
 export function ImportTaskList(params = {}) {
   return http.request({ url: '/youban_publish/publish/importTask/list', method: 'get', params });
 }
@@ -66,6 +86,38 @@ export function ImportTaskCancel(params = {}) {
 
 export function ImportTaskRetry(params = {}) {
   return http.request({ url: '/youban_publish/publish/importTask/retry', method: 'POST', params });
+}
+
+export function ImportTaskScan(params = {}) {
+  return http.request({ url: '/youban_publish/publish/importTask/scan', method: 'POST', params });
+}
+
+export function ImportTaskRepair(params = {}) {
+  return http.request({ url: '/youban_publish/publish/importTask/repair', method: 'POST', params });
+}
+
+export function ImportRunList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/importRun/list', method: 'get', params });
+}
+
+export function ImportRunCreate(params = {}) {
+  return http.request({ url: '/youban_publish/publish/importRun/create', method: 'POST', params });
+}
+
+export function ImportRunDelete(params = {}) {
+  return http.request({ url: '/youban_publish/publish/importRun/delete', method: 'POST', params });
+}
+
+export function ImportRunCancel(params = {}) {
+  return http.request({ url: '/youban_publish/publish/importRun/cancel', method: 'POST', params });
+}
+
+export function ImportRunLogList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/importRun/logs', method: 'get', params });
+}
+
+export function ImportRunLogClear(params = {}) {
+  return http.request({ url: '/youban_publish/publish/importRun/clearLogs', method: 'POST', params });
 }
 
 export function TagList(params = {}) {

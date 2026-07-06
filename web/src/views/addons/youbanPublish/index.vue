@@ -111,6 +111,10 @@
           />
         </n-tab-pane>
 
+        <n-tab-pane name="profiles" tab="笔记资料">
+          <ProfilePanel />
+        </n-tab-pane>
+
         <n-tab-pane name="importTasks" tab="旧站导入">
           <ImportTaskPanel />
         </n-tab-pane>
@@ -470,6 +474,7 @@
   import CloudResourceConfig from './components/cloud-resource-config.vue';
   import DashboardPanel from './components/dashboard-panel.vue';
   import ImportTaskPanel from './components/import-task-panel.vue';
+  import ProfilePanel from './components/profile-panel.vue';
   import {
     AccountDelete,
     AccountList,

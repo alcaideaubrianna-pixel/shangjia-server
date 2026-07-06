@@ -136,6 +136,59 @@ func (c *cPublishServer) TaskCancel(ctx context.Context, req *publish.TaskCancel
 	return
 }
 
+func (c *cPublishServer) ProfileList(ctx context.Context, req *publish.ProfileListReq) (res *publish.ProfileListRes, err error) {
+	list, totalCount, err := service.SysPublish().ServerProfileList(ctx, &req.ProfileListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.ProfileModel{}
+	}
+	res = new(publish.ProfileListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) ProfileView(ctx context.Context, req *publish.ProfileViewReq) (res *publish.ProfileViewRes, err error) {
+	data, err := service.SysPublish().ServerProfileView(ctx, &req.ProfileViewInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.ProfileViewRes{ProfileViewModel: data}
+	return
+}
+
+func (c *cPublishServer) ProfileSave(ctx context.Context, req *publish.ProfileSaveReq) (res *publish.ProfileSaveRes, err error) {
+	data, err := service.SysPublish().ServerProfileSave(ctx, &req.ProfileSaveInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.ProfileSaveRes{}
+	if data != nil {
+		res.Id = data.Id
+		res.Uuid = data.Uuid
+		res.TaskId = data.TaskId
+	}
+	return
+}
+
+func (c *cPublishServer) ProfileDelete(ctx context.Context, req *publish.ProfileDeleteReq) (res *publish.ProfileDeleteRes, err error) {
+	if err = service.SysPublish().ServerProfileDelete(ctx, &req.ProfileDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.ProfileDeleteRes{}
+	return
+}
+
+func (c *cPublishServer) ProfileReview(ctx context.Context, req *publish.ProfileReviewReq) (res *publish.ProfileReviewRes, err error) {
+	if err = service.SysPublish().ServerProfileReview(ctx, &req.ProfileReviewInp); err != nil {
+		return nil, err
+	}
+	res = &publish.ProfileReviewRes{}
+	return
+}
+
 func (c *cPublishServer) MediaList(ctx context.Context, req *publish.MediaListReq) (res *publish.MediaListRes, err error) {
 	list, err := service.SysPublish().ServerMediaList(ctx, &req.MediaListInp)
 	if err != nil {
@@ -402,7 +455,7 @@ func (c *cPublishAdmin) TaskCancel(ctx context.Context, req *publish.TaskCancelR
 }
 
 func (c *cPublishServer) ImportTaskList(ctx context.Context, req *publish.ImportTaskListReq) (res *publish.ImportTaskListRes, err error) {
-	list, totalCount, err := service.SysPublish().AdminImportTaskList(ctx, &req.ImportTaskListInp)
+	list, totalCount, err := service.SysPublish().ServerImportTaskList(ctx, &req.ImportTaskListInp)
 	if err != nil {
 		return
 	}
@@ -416,7 +469,7 @@ func (c *cPublishServer) ImportTaskList(ctx context.Context, req *publish.Import
 }
 
 func (c *cPublishServer) ImportTaskCreate(ctx context.Context, req *publish.ImportTaskCreateReq) (res *publish.ImportTaskCreateRes, err error) {
-	id, err := service.SysPublish().AdminImportTaskCreate(ctx, &req.ImportTaskCreateInp)
+	id, err := service.SysPublish().ServerImportTaskCreate(ctx, &req.ImportTaskCreateInp)
 	if err != nil {
 		return
 	}
@@ -425,7 +478,7 @@ func (c *cPublishServer) ImportTaskCreate(ctx context.Context, req *publish.Impo
 }
 
 func (c *cPublishServer) ImportTaskView(ctx context.Context, req *publish.ImportTaskViewReq) (res *publish.ImportTaskViewRes, err error) {
-	data, err := service.SysPublish().AdminImportTaskView(ctx, &req.ImportTaskViewInp)
+	data, err := service.SysPublish().ServerImportTaskView(ctx, &req.ImportTaskViewInp)
 	if err != nil {
 		return
 	}
@@ -434,7 +487,7 @@ func (c *cPublishServer) ImportTaskView(ctx context.Context, req *publish.Import
 }
 
 func (c *cPublishServer) ImportTaskStart(ctx context.Context, req *publish.ImportTaskStartReq) (res *publish.ImportTaskStartRes, err error) {
-	if err = service.SysPublish().AdminImportTaskStart(ctx, &req.ImportTaskActionInp); err != nil {
+	if err = service.SysPublish().ServerImportTaskStart(ctx, &req.ImportTaskActionInp); err != nil {
 		return
 	}
 	res = &publish.ImportTaskStartRes{}
@@ -442,7 +495,7 @@ func (c *cPublishServer) ImportTaskStart(ctx context.Context, req *publish.Impor
 }
 
 func (c *cPublishServer) ImportTaskCancel(ctx context.Context, req *publish.ImportTaskCancelReq) (res *publish.ImportTaskCancelRes, err error) {
-	if err = service.SysPublish().AdminImportTaskCancel(ctx, &req.ImportTaskActionInp); err != nil {
+	if err = service.SysPublish().ServerImportTaskCancel(ctx, &req.ImportTaskActionInp); err != nil {
 		return
 	}
 	res = &publish.ImportTaskCancelRes{}
@@ -450,10 +503,88 @@ func (c *cPublishServer) ImportTaskCancel(ctx context.Context, req *publish.Impo
 }
 
 func (c *cPublishServer) ImportTaskRetry(ctx context.Context, req *publish.ImportTaskRetryReq) (res *publish.ImportTaskRetryRes, err error) {
-	if err = service.SysPublish().AdminImportTaskRetry(ctx, &req.ImportTaskActionInp); err != nil {
+	if err = service.SysPublish().ServerImportTaskRetry(ctx, &req.ImportTaskActionInp); err != nil {
 		return
 	}
 	res = &publish.ImportTaskRetryRes{}
+	return
+}
+
+func (c *cPublishServer) ImportTaskScan(ctx context.Context, req *publish.ImportTaskScanReq) (res *publish.ImportTaskScanRes, err error) {
+	data, err := service.SysPublish().ServerImportTaskScan(ctx, &req.ImportTaskScanInp)
+	if err != nil {
+		return
+	}
+	res = &publish.ImportTaskScanRes{ImportTaskScanModel: data}
+	return
+}
+
+func (c *cPublishServer) ImportTaskRepair(ctx context.Context, req *publish.ImportTaskRepairReq) (res *publish.ImportTaskRepairRes, err error) {
+	if err = service.SysPublish().ServerImportTaskRepair(ctx, &req.ImportTaskRepairInp); err != nil {
+		return
+	}
+	res = &publish.ImportTaskRepairRes{}
+	return
+}
+
+func (c *cPublishServer) ImportRunList(ctx context.Context, req *publish.ImportRunListReq) (res *publish.ImportRunListRes, err error) {
+	list, totalCount, err := service.SysPublish().ServerImportRunList(ctx, &req.ImportRunListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.ImportRunModel{}
+	}
+	res = new(publish.ImportRunListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) ImportRunCreate(ctx context.Context, req *publish.ImportRunCreateReq) (res *publish.ImportRunCreateRes, err error) {
+	id, err := service.SysPublish().ServerImportRunCreate(ctx, &req.ImportRunCreateInp)
+	if err != nil {
+		return
+	}
+	res = &publish.ImportRunCreateRes{Id: id}
+	return
+}
+
+func (c *cPublishServer) ImportRunDelete(ctx context.Context, req *publish.ImportRunDeleteReq) (res *publish.ImportRunDeleteRes, err error) {
+	if err = service.SysPublish().ServerImportRunDelete(ctx, &req.ImportRunActionInp); err != nil {
+		return
+	}
+	res = &publish.ImportRunDeleteRes{}
+	return
+}
+
+func (c *cPublishServer) ImportRunCancel(ctx context.Context, req *publish.ImportRunCancelReq) (res *publish.ImportRunCancelRes, err error) {
+	if err = service.SysPublish().ServerImportRunCancel(ctx, &req.ImportRunActionInp); err != nil {
+		return
+	}
+	res = &publish.ImportRunCancelRes{}
+	return
+}
+
+func (c *cPublishServer) ImportRunLogList(ctx context.Context, req *publish.ImportRunLogListReq) (res *publish.ImportRunLogListRes, err error) {
+	list, totalCount, err := service.SysPublish().ServerImportRunLogList(ctx, &req.ImportRunLogListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.ImportRunLogModel{}
+	}
+	res = new(publish.ImportRunLogListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) ImportRunLogClear(ctx context.Context, req *publish.ImportRunLogClearReq) (res *publish.ImportRunLogClearRes, err error) {
+	if err = service.SysPublish().ServerImportRunLogClear(ctx, &req.ImportRunActionInp); err != nil {
+		return
+	}
+	res = &publish.ImportRunLogClearRes{}
 	return
 }
 

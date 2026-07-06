@@ -73,5 +73,8 @@ func (s *sSysPublish) handleImportTask(ctx context.Context, task *asynq.Task) er
 	if err != nil {
 		return err
 	}
+	if payload.RunId > 0 {
+		return s.ExecuteImportRun(ctx, payload.RunId)
+	}
 	return s.ExecuteImportTask(ctx, payload.Id)
 }

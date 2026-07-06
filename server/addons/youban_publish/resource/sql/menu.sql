@@ -37,8 +37,14 @@ INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type
 SELECT NULL, @publishId, '上架任务', 'youbanPublishTask', '', '', '3', '', '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '30', '上架系统按钮权限', '1', @now, @now
 WHERE @publishId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanPublishTask');
 INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type`, `redirect`, `permissions`, `permission_name`, `component`, `always_show`, `active_menu`, `is_root`, `is_frame`, `frame_src`, `keep_alive`, `hidden`, `affix`, `level`, `tree`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
-SELECT NULL, @publishId, '旧站导入', 'youbanPublishImportTask', '', '', '3', '', '/youban_publish/publish/importTask/list,/youban_publish/publish/importTask/create,/youban_publish/publish/importTask/view,/youban_publish/publish/importTask/start,/youban_publish/publish/importTask/cancel,/youban_publish/publish/importTask/retry', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '35', '上架系统按钮权限', '1', @now, @now
+SELECT NULL, @publishId, '笔记资料', 'youbanPublishProfile', '', '', '3', '', '/youban_publish/publish/profile/list,/youban_publish/publish/profile/view,/youban_publish/publish/profile/save,/youban_publish/publish/profile/delete,/youban_publish/publish/profile/review', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '34', '上架系统按钮权限', '1', @now, @now
+WHERE @publishId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanPublishProfile');
+INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type`, `redirect`, `permissions`, `permission_name`, `component`, `always_show`, `active_menu`, `is_root`, `is_frame`, `frame_src`, `keep_alive`, `hidden`, `affix`, `level`, `tree`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
+SELECT NULL, @publishId, '导入任务', 'youbanPublishImportTask', '', '', '3', '', '/youban_publish/publish/importTask/list,/youban_publish/publish/importTask/create,/youban_publish/publish/importTask/view,/youban_publish/publish/importTask/start,/youban_publish/publish/importTask/cancel,/youban_publish/publish/importTask/retry,/youban_publish/publish/importTask/scan,/youban_publish/publish/importTask/repair', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '35', '上架系统按钮权限', '1', @now, @now
 WHERE @publishId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanPublishImportTask');
+INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type`, `redirect`, `permissions`, `permission_name`, `component`, `always_show`, `active_menu`, `is_root`, `is_frame`, `frame_src`, `keep_alive`, `hidden`, `affix`, `level`, `tree`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
+SELECT NULL, @publishId, '导入记录', 'youbanPublishImportRun', '', '', '3', '', '/youban_publish/publish/importRun/list,/youban_publish/publish/importRun/create,/youban_publish/publish/importRun/delete,/youban_publish/publish/importRun/cancel,/youban_publish/publish/importRun/logs,/youban_publish/publish/importRun/clearLogs', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '36', '上架系统按钮权限', '1', @now, @now
+WHERE @publishId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanPublishImportRun');
 INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type`, `redirect`, `permissions`, `permission_name`, `component`, `always_show`, `active_menu`, `is_root`, `is_frame`, `frame_src`, `keep_alive`, `hidden`, `affix`, `level`, `tree`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
 SELECT NULL, @publishId, '资料媒体', 'youbanPublishMedia', '', '', '3', '', '/youban_publish/publish/media/list,/youban_publish/publish/media/delete', '', '', '0', 'youbanPublish', '0', '0', '', '0', '1', '0', '3', CONCAT(@publishTree, 'tr_', @publishId, ' '), '40', '上架系统按钮权限', '1', @now, @now
 WHERE @publishId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanPublishMedia');
@@ -58,7 +64,9 @@ SET `pid` = @publishId,
         WHEN 'youbanPublishTenant' THEN '租户管理'
         WHEN 'youbanPublishAccount' THEN '账号管理'
         WHEN 'youbanPublishTask' THEN '上架任务'
-        WHEN 'youbanPublishImportTask' THEN '旧站导入'
+        WHEN 'youbanPublishProfile' THEN '笔记资料'
+        WHEN 'youbanPublishImportTask' THEN '导入任务'
+        WHEN 'youbanPublishImportRun' THEN '导入记录'
         WHEN 'youbanPublishMedia' THEN '资料媒体'
         WHEN 'youbanPublishTag' THEN '标签审核'
         WHEN 'youbanPublishBot' THEN '机器人配置'
@@ -70,7 +78,9 @@ SET `pid` = @publishId,
         WHEN 'youbanPublishTenant' THEN '/youban_publish/publish/tenant/list,/youban_publish/publish/tenant/save,/youban_publish/publish/tenant/delete'
         WHEN 'youbanPublishAccount' THEN '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/resetPwd,/youban_publish/publish/account/delete'
         WHEN 'youbanPublishTask' THEN '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel'
-        WHEN 'youbanPublishImportTask' THEN '/youban_publish/publish/importTask/list,/youban_publish/publish/importTask/create,/youban_publish/publish/importTask/view,/youban_publish/publish/importTask/start,/youban_publish/publish/importTask/cancel,/youban_publish/publish/importTask/retry'
+        WHEN 'youbanPublishProfile' THEN '/youban_publish/publish/profile/list,/youban_publish/publish/profile/view,/youban_publish/publish/profile/save,/youban_publish/publish/profile/delete,/youban_publish/publish/profile/review'
+        WHEN 'youbanPublishImportTask' THEN '/youban_publish/publish/importTask/list,/youban_publish/publish/importTask/create,/youban_publish/publish/importTask/view,/youban_publish/publish/importTask/start,/youban_publish/publish/importTask/cancel,/youban_publish/publish/importTask/retry,/youban_publish/publish/importTask/scan,/youban_publish/publish/importTask/repair'
+        WHEN 'youbanPublishImportRun' THEN '/youban_publish/publish/importRun/list,/youban_publish/publish/importRun/create,/youban_publish/publish/importRun/delete,/youban_publish/publish/importRun/cancel,/youban_publish/publish/importRun/logs,/youban_publish/publish/importRun/clearLogs'
         WHEN 'youbanPublishMedia' THEN '/youban_publish/publish/media/list,/youban_publish/publish/media/delete'
         WHEN 'youbanPublishTag' THEN '/youban_publish/publish/tag/list,/youban_publish/publish/tag/save,/youban_publish/publish/tag/delete'
         WHEN 'youbanPublishBot' THEN '/youban_publish/publish/bot/list,/youban_publish/publish/bot/save,/youban_publish/publish/bot/delete'
@@ -85,7 +95,9 @@ SET `pid` = @publishId,
         WHEN 'youbanPublishTenant' THEN '10'
         WHEN 'youbanPublishAccount' THEN '20'
         WHEN 'youbanPublishTask' THEN '30'
+        WHEN 'youbanPublishProfile' THEN '34'
         WHEN 'youbanPublishImportTask' THEN '35'
+        WHEN 'youbanPublishImportRun' THEN '36'
         WHEN 'youbanPublishMedia' THEN '40'
         WHEN 'youbanPublishTag' THEN '50'
         WHEN 'youbanPublishBot' THEN '60'
@@ -99,7 +111,9 @@ WHERE @publishId IS NOT NULL AND `name` IN (
   'youbanPublishTenant',
   'youbanPublishAccount',
   'youbanPublishTask',
+  'youbanPublishProfile',
   'youbanPublishImportTask',
+  'youbanPublishImportRun',
   'youbanPublishMedia',
   'youbanPublishTag',
   'youbanPublishBot',
@@ -114,7 +128,9 @@ JOIN `hg_admin_menu` m ON m.`name` IN (
   'youbanPublishTenant',
   'youbanPublishAccount',
   'youbanPublishTask',
+  'youbanPublishProfile',
   'youbanPublishImportTask',
+  'youbanPublishImportRun',
   'youbanPublishMedia',
   'youbanPublishTag',
   'youbanPublishBot',

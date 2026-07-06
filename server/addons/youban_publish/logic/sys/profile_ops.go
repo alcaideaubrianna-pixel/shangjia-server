@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -267,6 +266,79 @@ func (s *sSysPublish) AdminProfileStats(ctx context.Context, in *sysin.TrendInp)
 	return s.profileStats(ctx, in, account.TenantId, 0)
 }
 
+func (s *sSysPublish) ServerProfileList(ctx context.Context, in *sysin.ProfileListInp) (list []*sysin.ProfileModel, totalCount int, err error) {
+	if in == nil {
+		in = &sysin.ProfileListInp{}
+	}
+	return s.profileList(ctx, in)
+}
+
+func (s *sSysPublish) ServerProfileView(ctx context.Context, in *sysin.ProfileViewInp) (res *sysin.ProfileViewModel, err error) {
+	if in == nil || !hasProfileSelector(in.Id, in.Uuid) {
+		return nil, gerror.New("资料ID不能为空")
+	}
+	profileId, err := s.resolveProfileId(ctx, in.Id, in.Uuid, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	profile, err := s.profileView(ctx, profileId, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	media, err := s.mediaListByProfile(ctx, profile.Id, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &sysin.ProfileViewModel{Profile: profile, Media: media}, nil
+}
+
+func (s *sSysPublish) ServerProfileSave(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error) {
+	if in == nil || in.Id <= 0 {
+		return nil, gerror.New("资料ID不能为空")
+	}
+	task, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Where("profile_id", in.Id).
+		WhereNull("deleted_at").
+		One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取资料任务失败")
+	}
+	if task.IsEmpty() {
+		return nil, gerror.New("资料不属于上架端")
+	}
+	return s.saveProfile(ctx, in, task["tenant_id"].Int64(), task["account_id"].Int64())
+}
+
+func (s *sSysPublish) ServerProfileDelete(ctx context.Context, in *sysin.ProfileDeleteInp) (err error) {
+	return s.deleteProfiles(ctx, in, 0, 0)
+}
+
+func (s *sSysPublish) ServerProfileReview(ctx context.Context, in *sysin.ProfileReviewInp) (err error) {
+	if err = in.Filter(ctx); err != nil {
+		return err
+	}
+	targetIds, err := s.allowedProfileTargetIds(ctx, in.Ids, in.Uuids, 0, 0)
+	if err != nil {
+		return err
+	}
+	ids, err := s.allowedProfileIds(ctx, targetIds, 0, 0)
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return gerror.New("资料不存在或无权操作")
+	}
+	columns := dao.ContentProfile.Columns()
+	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).Data(g.Map{
+		columns.ReviewStatus: in.ReviewStatus,
+		columns.UpdatedAt:    gtime.Now(),
+	}).Update(); err != nil {
+		return gerror.Wrap(err, "审核资料失败")
+	}
+	iservice.SysContent().ClearHomeProfileCardsCache(ctx)
+	return nil
+}
+
 func (s *sSysPublish) profileList(ctx context.Context, in *sysin.ProfileListInp) (list []*sysin.ProfileModel, totalCount int, err error) {
 	base, err := s.profileBaseModel(ctx, in.TenantId, in.AccountId)
 	if err != nil {
@@ -284,6 +356,9 @@ func (s *sSysPublish) profileList(ctx context.Context, in *sysin.ProfileListInp)
 		return nil, 0, gerror.Wrap(err, "获取资料列表失败")
 	}
 	if err = s.ensureProfileListUUID(ctx, list); err != nil {
+		return nil, 0, err
+	}
+	if err = s.applyProfileOwnerNames(ctx, list); err != nil {
 		return nil, 0, err
 	}
 	return
@@ -689,17 +764,12 @@ func (s *sSysPublish) cityForward(ctx context.Context, in *sysin.CityForwardInp,
 }
 
 func (s *sSysPublish) profileStats(ctx context.Context, in *sysin.TrendInp, tenantId int64, accountId int64) (res *sysin.ProfileStatsModel, err error) {
-	if in == nil {
-		in = &sysin.TrendInp{}
+	// 资料趋势和发布趋势共用同一套日期规则，避免前后端口径不一致。
+	dateRange, err := resolveTrendDateRange(in)
+	if err != nil {
+		return nil, err
 	}
-	days := in.Days
-	if days <= 0 {
-		days = 7
-	}
-	if days > 90 {
-		days = 90
-	}
-	res = &sysin.ProfileStatsModel{Trend: make([]*sysin.TrendPointModel, 0, days)}
+	res = &sysin.ProfileStatsModel{Trend: make([]*sysin.TrendPointModel, 0, dateRange.Days)}
 	base, err := s.profileBaseModel(ctx, tenantId, accountId)
 	if err != nil {
 		return nil, err
@@ -727,20 +797,21 @@ func (s *sSysPublish) profileStats(ctx context.Context, in *sysin.TrendInp, tena
 		Count  int    `json:"count"`
 		Status int    `json:"status"`
 	}
-	start := time.Now().AddDate(0, 0, -days+1).Format("2006-01-02")
 	trendMod, err := s.profileBaseModel(ctx, tenantId, accountId)
 	if err != nil {
 		return nil, err
 	}
 	if err = trendMod.Fields("DATE(p.created_at) AS date,p.status,COUNT(*) AS count").
-		WhereGTE("p.created_at", start+" 00:00:00").
+		WhereGTE("p.created_at", dateRange.Start+" 00:00:00").
+		WhereLTE("p.created_at", dateRange.End+" 23:59:59").
 		Group("DATE(p.created_at),p.status").
 		Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "获取资料趋势失败")
 	}
-	index := make(map[string]*sysin.TrendPointModel, days)
-	for i := days - 1; i >= 0; i-- {
-		date := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
+	index := make(map[string]*sysin.TrendPointModel, dateRange.Days)
+	start, _ := parseTrendDate(dateRange.Start, "开始日期")
+	for i := 0; i < dateRange.Days; i++ {
+		date := start.AddDate(0, 0, i).Format(trendDateLayout)
 		point := &sysin.TrendPointModel{Date: date}
 		index[date] = point
 		res.Trend = append(res.Trend, point)
@@ -764,6 +835,7 @@ func (s *sSysPublish) profileStats(ctx context.Context, in *sysin.TrendInp, tena
 func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, accountId int64) (*gdb.Model, error) {
 	mod := dao.ContentProfile.Ctx(ctx).As("p").
 		LeftJoin(publishTaskTable+" t", "t.profile_id=p.id AND t.deleted_at IS NULL").
+		LeftJoin(publishTenantTable+" tenant", "tenant.id=t.tenant_id").
 		LeftJoin(publishAccountTable+" a", "a.id=t.account_id AND a.deleted_at IS NULL").
 		Where("p.source_type", publishProfileSourceType).
 		WhereNull("p.deleted_at")
@@ -777,7 +849,7 @@ func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, acco
 }
 
 func profileListFields() string {
-	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city,p.cup_size AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.admin_remark AS customer_remark,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,a.nickname,t.channel_id_json,t.anti_scan_enabled"
+	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city,p.cup_size AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.admin_remark AS customer_remark,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,tenant.name AS tenant_name,a.nickname,t.channel_id_json,t.anti_scan_enabled"
 }
 
 func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
@@ -806,7 +878,8 @@ func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, i
 		mod = mod.Where("p.city", strings.TrimSpace(in.City))
 	}
 	if in.Tag != "" {
-		mod = mod.Where("p.cup_size", strings.TrimSpace(in.Tag))
+		tag := strings.TrimSpace(in.Tag)
+		mod = mod.Where("(p.cup_size = ? OR p.cup_size LIKE ? OR p.cup_size LIKE ? OR p.cup_size LIKE ?)", tag, tag+",%", "%,"+tag, "%,"+tag+",%")
 	}
 	if in.ReviewStatus != "" {
 		mod = mod.Where("p.review_status", strings.TrimSpace(in.ReviewStatus))
@@ -818,6 +891,31 @@ func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, i
 		mod = mod.Where("p.status", in.Status)
 	}
 	return mod
+}
+
+func (s *sSysPublish) applyProfileOwnerNames(ctx context.Context, list []*sysin.ProfileModel) error {
+	tenantIds := make([]int64, 0, len(list))
+	for _, item := range list {
+		if item != nil && item.TenantId > 0 {
+			tenantIds = append(tenantIds, item.TenantId)
+		}
+	}
+	names, err := s.tenantOwnerNames(ctx, tenantIds)
+	if err != nil {
+		return err
+	}
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		if strings.TrimSpace(item.TenantName) == "" {
+			item.TenantName = names[item.TenantId]
+		}
+		if item.TenantName == "" && item.TenantId > 0 {
+			item.TenantName = fmt.Sprintf("账号归属#%d", item.TenantId)
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) tagIdsByKeyword(ctx context.Context, keyword string) []string {
@@ -1032,5 +1130,6 @@ func (s *sSysPublish) mediaListByProfile(ctx context.Context, profileId int64, t
 	if list == nil {
 		list = []*sysin.MediaModel{}
 	}
+	normalizeMediaListFileURL(list)
 	return list, nil
 }

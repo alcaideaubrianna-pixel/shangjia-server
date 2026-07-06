@@ -151,6 +151,61 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_import_task_scope" ON "hg_youban_publish_imp
 CREATE INDEX IF NOT EXISTS "idx_ybp_import_task_status" ON "hg_youban_publish_import_task" ("status", "updated_at");
 CREATE INDEX IF NOT EXISTS "idx_ybp_import_task_source" ON "hg_youban_publish_import_task" ("source_name", "id");
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_import_run" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "task_id" bigint NOT NULL DEFAULT 0,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "source_name" varchar(64) NOT NULL DEFAULT 'lyy_cms',
+  "base_url" varchar(255) NOT NULL DEFAULT '',
+  "username" varchar(128) NOT NULL DEFAULT '',
+  "run_type" varchar(32) NOT NULL DEFAULT 'import',
+  "import_mode" varchar(32) NOT NULL DEFAULT 'incremental',
+  "scan_mode" varchar(32) NOT NULL DEFAULT 'recent',
+  "recent_count" integer NOT NULL DEFAULT 100,
+  "status" varchar(32) NOT NULL DEFAULT 'pending',
+  "stage" varchar(32) NOT NULL DEFAULT 'created',
+  "progress_total" integer NOT NULL DEFAULT 0,
+  "progress_done" integer NOT NULL DEFAULT 0,
+  "page_total" integer NOT NULL DEFAULT 0,
+  "page_done" integer NOT NULL DEFAULT 0,
+  "item_total" integer NOT NULL DEFAULT 0,
+  "item_done" integer NOT NULL DEFAULT 0,
+  "imported" integer NOT NULL DEFAULT 0,
+  "duplicate" integer NOT NULL DEFAULT 0,
+  "media_total" integer NOT NULL DEFAULT 0,
+  "media_done" integer NOT NULL DEFAULT 0,
+  "media_imported" integer NOT NULL DEFAULT 0,
+  "media_missing_storage" integer NOT NULL DEFAULT 0,
+  "tg_total" integer NOT NULL DEFAULT 0,
+  "tg_done" integer NOT NULL DEFAULT 0,
+  "tg_matched" integer NOT NULL DEFAULT 0,
+  "error_message" text,
+  "params_json" text,
+  "result_json" text,
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "deleted_by" bigint NOT NULL DEFAULT 0,
+  "started_at" timestamp DEFAULT NULL,
+  "finished_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_import_run_scope" ON "hg_youban_publish_import_run" ("tenant_id", "account_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_import_run_task" ON "hg_youban_publish_import_run" ("task_id", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_import_run_log" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "run_id" bigint NOT NULL DEFAULT 0,
+  "level" varchar(16) NOT NULL DEFAULT 'info',
+  "stage" varchar(32) NOT NULL DEFAULT '',
+  "message" text,
+  "context" text,
+  "created_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_import_run_log_run" ON "hg_youban_publish_import_run_log" ("run_id", "id");
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_account_setting" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,

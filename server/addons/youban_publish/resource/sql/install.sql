@@ -154,6 +154,63 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_import_task` (
   KEY `idx_ybp_import_task_source` (`source_name`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架旧站导入任务';
 
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_import_run` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '导入任务ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架账号ID',
+  `source_name` varchar(64) NOT NULL DEFAULT 'lyy_cms' COMMENT '来源名称',
+  `base_url` varchar(255) NOT NULL DEFAULT '' COMMENT '旧站域名',
+  `username` varchar(128) NOT NULL DEFAULT '' COMMENT '旧站账号',
+  `run_type` varchar(32) NOT NULL DEFAULT 'import' COMMENT '执行类型',
+  `import_mode` varchar(32) NOT NULL DEFAULT 'incremental' COMMENT '导入方式',
+  `scan_mode` varchar(32) NOT NULL DEFAULT 'recent' COMMENT '扫描范围',
+  `recent_count` int(11) NOT NULL DEFAULT '100' COMMENT '最近数量',
+  `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '状态',
+  `stage` varchar(32) NOT NULL DEFAULT 'created' COMMENT '阶段',
+  `progress_total` int(11) NOT NULL DEFAULT '0' COMMENT '总进度',
+  `progress_done` int(11) NOT NULL DEFAULT '0' COMMENT '已完成进度',
+  `page_total` int(11) NOT NULL DEFAULT '0' COMMENT '总页数',
+  `page_done` int(11) NOT NULL DEFAULT '0' COMMENT '已完成页数',
+  `item_total` int(11) NOT NULL DEFAULT '0' COMMENT '资料总数',
+  `item_done` int(11) NOT NULL DEFAULT '0' COMMENT '已处理资料数',
+  `imported` int(11) NOT NULL DEFAULT '0' COMMENT '导入数量',
+  `duplicate` int(11) NOT NULL DEFAULT '0' COMMENT '重复数量',
+  `media_total` int(11) NOT NULL DEFAULT '0' COMMENT '媒体总数',
+  `media_done` int(11) NOT NULL DEFAULT '0' COMMENT '已处理媒体数',
+  `media_imported` int(11) NOT NULL DEFAULT '0' COMMENT '媒体导入数量',
+  `media_missing_storage` int(11) NOT NULL DEFAULT '0' COMMENT '未迁移到当前存储媒体数',
+  `tg_total` int(11) NOT NULL DEFAULT '0' COMMENT 'TG消息总数',
+  `tg_done` int(11) NOT NULL DEFAULT '0' COMMENT 'TG已处理数',
+  `tg_matched` int(11) NOT NULL DEFAULT '0' COMMENT 'TG匹配数量',
+  `error_message` text COMMENT '错误信息',
+  `params_json` longtext COMMENT '执行参数JSON',
+  `result_json` longtext COMMENT '执行结果JSON',
+  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
+  `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人',
+  `started_at` datetime DEFAULT NULL COMMENT '开始时间',
+  `finished_at` datetime DEFAULT NULL COMMENT '结束时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_import_run_scope` (`tenant_id`,`account_id`,`status`,`id`),
+  KEY `idx_ybp_import_run_task` (`task_id`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架旧站导入执行记录';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_import_run_log` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `run_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '执行记录ID',
+  `level` varchar(16) NOT NULL DEFAULT 'info' COMMENT '日志级别',
+  `stage` varchar(32) NOT NULL DEFAULT '' COMMENT '阶段',
+  `message` text COMMENT '消息',
+  `context` longtext COMMENT '上下文JSON',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_import_run_log_run` (`run_id`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架旧站导入执行日志';
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_account_setting` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',

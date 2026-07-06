@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -83,14 +82,17 @@ func (s *sSysPublish) dashboardTgAccountCounts(ctx context.Context, tenantId int
 }
 
 func (s *sSysPublish) dashboardPublishTrend(ctx context.Context, in *sysin.TrendInp, tenantId int64, accountId int64) ([]*sysin.DashboardTrendPoint, error) {
-	// 趋势查询限制最大 90 天，后续可平滑替换为日统计表。
-	days := normalizeTrendDays(in)
-	start := time.Now().AddDate(0, 0, -days+1).Format("2006-01-02")
+	// 统一解析 days 或 startDate/endDate，确保趋势查询窗口不超过 90 天。
+	dateRange, err := resolveTrendDateRange(in)
+	if err != nil {
+		return nil, err
+	}
 	var rows []dashboardTrendRow
 	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
 		Fields("DATE(created_at) AS date", "status", "COUNT(*) AS count").
 		Where("tenant_id", tenantId).
-		WhereGTE("created_at", start+" 00:00:00").
+		WhereGTE("created_at", dateRange.Start+" 00:00:00").
+		WhereLTE("created_at", dateRange.End+" 23:59:59").
 		WhereNull("deleted_at").
 		Group("DATE(created_at),status")
 	if accountId > 0 {
@@ -99,14 +101,15 @@ func (s *sSysPublish) dashboardPublishTrend(ctx context.Context, in *sysin.Trend
 	if err := mod.Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "统计发布趋势失败")
 	}
-	return buildDashboardPublishTrend(days, rows), nil
+	return buildDashboardPublishTrend(dateRange, rows), nil
 }
 
-func buildDashboardPublishTrend(days int, rows []dashboardTrendRow) []*sysin.DashboardTrendPoint {
-	points := make([]*sysin.DashboardTrendPoint, 0, days)
-	index := make(map[string]*sysin.DashboardTrendPoint, days)
-	for i := days - 1; i >= 0; i-- {
-		date := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
+func buildDashboardPublishTrend(dateRange *trendDateRange, rows []dashboardTrendRow) []*sysin.DashboardTrendPoint {
+	points := make([]*sysin.DashboardTrendPoint, 0, dateRange.Days)
+	index := make(map[string]*sysin.DashboardTrendPoint, dateRange.Days)
+	start, _ := parseTrendDate(dateRange.Start, "开始日期")
+	for i := 0; i < dateRange.Days; i++ {
+		date := start.AddDate(0, 0, i).Format(trendDateLayout)
 		point := &sysin.DashboardTrendPoint{Date: date}
 		points = append(points, point)
 		index[date] = point
@@ -126,15 +129,4 @@ func buildDashboardPublishTrend(days int, rows []dashboardTrendRow) []*sysin.Das
 		}
 	}
 	return points
-}
-
-func normalizeTrendDays(in *sysin.TrendInp) int {
-	days := 7
-	if in != nil && in.Days > 0 {
-		days = in.Days
-	}
-	if days > 90 {
-		days = 90
-	}
-	return days
 }

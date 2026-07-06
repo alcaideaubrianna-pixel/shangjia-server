@@ -578,6 +578,34 @@ func (c *cPublish) MyImportTaskView(ctx context.Context, req *publish.MyImportTa
 	return
 }
 
+func (c *cPublish) MyImportRunList(ctx context.Context, req *publish.MyImportRunListReq) (res *publish.MyImportRunListRes, err error) {
+	list, totalCount, err := service.SysPublish().MyImportRunList(ctx, &req.ImportRunListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.ImportRunModel{}
+	}
+	res = new(publish.MyImportRunListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublish) MyImportRunLogList(ctx context.Context, req *publish.MyImportRunLogListReq) (res *publish.MyImportRunLogListRes, err error) {
+	list, totalCount, err := service.SysPublish().MyImportRunLogList(ctx, &req.ImportRunLogListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.ImportRunLogModel{}
+	}
+	res = new(publish.MyImportRunLogListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
 func (c *cPublish) UploadMedia(ctx context.Context, req *publish.UploadMediaReq) (res *publish.UploadMediaRes, err error) {
 	file := g.RequestFromCtx(ctx).GetUploadFile("file")
 	if file == nil {

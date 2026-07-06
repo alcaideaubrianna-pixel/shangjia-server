@@ -7,6 +7,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"hotgo/internal/consts"
 	"hotgo/internal/model/input/form"
 )
 
@@ -530,6 +531,7 @@ type ProfileModel struct {
 	TaskId          int64       `json:"taskId" dc:"任务ID"`
 	TenantId        int64       `json:"tenantId" dc:"租户ID"`
 	AccountId       int64       `json:"accountId" dc:"上架账号ID"`
+	TenantName      string      `json:"tenantName" dc:"账号归属"`
 	Nickname        string      `json:"nickname" dc:"账号名称"`
 	ChannelIdJson   string      `json:"channelIdJson" dc:"推送频道ID JSON"`
 	AntiScanEnabled int         `json:"antiScanEnabled" dc:"是否防扫图处理"`
@@ -632,6 +634,23 @@ type ProfileStatusInp struct {
 	Status int      `json:"status" v:"required#状态不能为空" dc:"状态：1上架 2下架"`
 }
 
+type ProfileReviewInp struct {
+	Ids          []int64  `json:"ids" dc:"资料ID列表"`
+	Uuids        []string `json:"uuids" dc:"资料UUID列表"`
+	ReviewStatus string   `json:"reviewStatus" v:"required#审核状态不能为空" dc:"审核状态"`
+}
+
+func (in *ProfileReviewInp) Filter(ctx context.Context) error {
+	if in == nil || (len(in.Ids) == 0 && len(in.Uuids) == 0) {
+		return gerror.New("请选择要审核的资料")
+	}
+	in.ReviewStatus = strings.TrimSpace(in.ReviewStatus)
+	if in.ReviewStatus != consts.ContentReviewApproved && in.ReviewStatus != consts.ContentReviewRejected && in.ReviewStatus != consts.ContentReviewPending {
+		return gerror.New("审核状态不合法")
+	}
+	return nil
+}
+
 type NoteListInp struct {
 	ProfileListInp
 }
@@ -710,7 +729,9 @@ type CityOptionModel struct {
 }
 
 type TrendInp struct {
-	Days int `json:"days" dc:"趋势天数，默认7，最多90"`
+	Days      int    `json:"days" dc:"趋势天数，默认7，最多90"`
+	StartDate string `json:"startDate" dc:"趋势开始日期，格式YYYY-MM-DD"`
+	EndDate   string `json:"endDate" dc:"趋势结束日期，格式YYYY-MM-DD"`
 }
 
 type TrendPointModel struct {
