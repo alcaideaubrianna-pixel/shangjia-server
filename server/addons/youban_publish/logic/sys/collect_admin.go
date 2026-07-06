@@ -1,0 +1,197 @@
+package sys
+
+import (
+	"context"
+	"strings"
+
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
+
+	pdao "hotgo/addons/youban_publish/internal/dao"
+	"hotgo/addons/youban_publish/model/input/sysin"
+)
+
+func (s *sSysPublish) CollectSourceList(ctx context.Context, in *sysin.CollectSourceListInp) (list []*sysin.CollectSourceModel, totalCount int, err error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	if in == nil {
+		in = &sysin.CollectSourceListInp{}
+	}
+	mod := pdao.YoubanPublishCollectSource.Ctx(ctx).
+		Where("tenant_id", account.TenantId).
+		Where("account_id", account.Id).
+		WhereNull("deleted_at")
+	if in.SourceType != "" {
+		mod = mod.Where("source_type", strings.TrimSpace(in.SourceType))
+	}
+	if in.Status > 0 {
+		mod = mod.Where("status", in.Status)
+	}
+	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		mod = mod.Where("(title LIKE ? OR source_username LIKE ? OR source_chat_id LIKE ?)", like, like, like)
+	}
+	if totalCount, err = mod.Count(); err != nil {
+		return nil, 0, gerror.Wrap(err, "统计采集源失败")
+	}
+	if err = mod.Page(in.Page, in.PerPage).OrderDesc("id").Scan(&list); err != nil {
+		return nil, 0, gerror.Wrap(err, "获取采集源失败")
+	}
+	if err = s.fillCollectSourceRules(ctx, list); err != nil {
+		return nil, 0, err
+	}
+	return
+}
+
+func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSourceSaveInp) (id int64, err error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if in == nil {
+		return 0, gerror.New("采集源参数不能为空")
+	}
+	if err = in.Filter(ctx); err != nil {
+		return 0, err
+	}
+	now := gtime.Now()
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		data := g.Map{
+			"tenant_id":         account.TenantId,
+			"account_id":        account.Id,
+			"source_type":       in.SourceType,
+			"title":             in.Title,
+			"source_chat_id":    in.SourceChatId,
+			"source_username":   in.SourceUsername,
+			"tg_account_id":     in.TgAccountId,
+			"bot_id":            in.BotId,
+			"follow_account_id": in.FollowAccountId,
+			"collect_enabled":   in.CollectEnabled,
+			"status":            in.Status,
+			"remark":            in.Remark,
+			"updated_by":        account.Id,
+			"updated_at":        now,
+		}
+		if in.Id > 0 {
+			if _, err = tx.Model(pdao.YoubanPublishCollectSource.Table()).Ctx(ctx).
+				Where("id", in.Id).
+				Where("tenant_id", account.TenantId).
+				Where("account_id", account.Id).
+				WhereNull("deleted_at").
+				Data(data).
+				Update(); err != nil {
+				return gerror.Wrap(err, "更新采集源失败")
+			}
+			id = in.Id
+		} else {
+			data["created_by"] = account.Id
+			data["created_at"] = now
+			newId, err := tx.Model(pdao.YoubanPublishCollectSource.Table()).Ctx(ctx).Data(data).InsertAndGetId()
+			if err != nil {
+				return gerror.Wrap(err, "创建采集源失败")
+			}
+			id = newId
+		}
+		return s.saveCollectSourceRules(ctx, tx, account.TenantId, id, in.RuleIds)
+	})
+	return id, err
+}
+
+func (s *sSysPublish) CollectSourceDelete(ctx context.Context, in *sysin.IdsInp) error {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return err
+	}
+	if in == nil || len(in.Ids) == 0 {
+		return gerror.New("请选择采集源")
+	}
+	_, err = pdao.YoubanPublishCollectSource.Ctx(ctx).
+		WhereIn("id", uniqueIds(in.Ids)).
+		Where("tenant_id", account.TenantId).
+		Where("account_id", account.Id).
+		Data(g.Map{"deleted_at": gtime.Now(), "deleted_by": account.Id}).
+		Update()
+	return gerror.Wrap(err, "删除采集源失败")
+}
+
+func (s *sSysPublish) CollectSourceStatus(ctx context.Context, in *sysin.CollectStatusInp) error {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return err
+	}
+	if in == nil || in.Id <= 0 {
+		return gerror.New("采集源ID不能为空")
+	}
+	data := g.Map{"updated_at": gtime.Now(), "updated_by": account.Id}
+	if in.Enabled == 1 {
+		data["collect_enabled"] = 1
+	} else {
+		data["collect_enabled"] = 0
+	}
+	if in.Status > 0 {
+		data["status"] = in.Status
+	}
+	_, err = pdao.YoubanPublishCollectSource.Ctx(ctx).
+		Where("id", in.Id).
+		Where("tenant_id", account.TenantId).
+		Where("account_id", account.Id).
+		WhereNull("deleted_at").
+		Data(data).
+		Update()
+	return gerror.Wrap(err, "更新采集源状态失败")
+}
+
+func (s *sSysPublish) fillCollectSourceRules(ctx context.Context, list []*sysin.CollectSourceModel) error {
+	sourceIds := make([]int64, 0, len(list))
+	for _, item := range list {
+		if item != nil {
+			sourceIds = append(sourceIds, item.Id)
+		}
+	}
+	if len(sourceIds) == 0 {
+		return nil
+	}
+	var rows []struct {
+		SourceId int64 `json:"sourceId"`
+		RuleId   int64 `json:"ruleId"`
+	}
+	if err := pdao.YoubanPublishCollectSourceRule.Ctx(ctx).WhereIn("source_id", sourceIds).Where("status", 1).OrderAsc("sort").Scan(&rows); err != nil {
+		return gerror.Wrap(err, "读取采集源规则失败")
+	}
+	ruleMap := map[int64][]int64{}
+	for _, row := range rows {
+		ruleMap[row.SourceId] = append(ruleMap[row.SourceId], row.RuleId)
+	}
+	for _, item := range list {
+		item.RuleIds = ruleMap[item.Id]
+	}
+	return nil
+}
+
+func (s *sSysPublish) saveCollectSourceRules(ctx context.Context, tx gdb.TX, tenantId int64, sourceId int64, ruleIds []int64) error {
+	if _, err := tx.Model(pdao.YoubanPublishCollectSourceRule.Table()).Ctx(ctx).Where("source_id", sourceId).Delete(); err != nil {
+		return gerror.Wrap(err, "清理采集源规则失败")
+	}
+	now := gtime.Now()
+	for index, ruleId := range uniqueIds(ruleIds) {
+		if ruleId <= 0 {
+			continue
+		}
+		if _, err := tx.Model(pdao.YoubanPublishCollectSourceRule.Table()).Ctx(ctx).Data(g.Map{
+			"tenant_id":  tenantId,
+			"source_id":  sourceId,
+			"rule_id":    ruleId,
+			"sort":       index + 1,
+			"status":     1,
+			"created_at": now,
+			"updated_at": now,
+		}).Insert(); err != nil {
+			return gerror.Wrap(err, "保存采集源规则失败")
+		}
+	}
+	return nil
+}

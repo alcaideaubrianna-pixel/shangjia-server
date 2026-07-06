@@ -65,4 +65,5 @@ func (s *sSysPublish) handleTelegramUpdate(ctx context.Context, botId int64, upd
 	text := telegramMessageText(msg)
 	g.Log().Infof(ctx, "收到上架插件Telegram消息 bot:%d type:%s chat:%d message:%d text:%s", botId, updateType, msg.Chat.ID, msg.ID, text)
 	s.handleTelegramAutoDelete(ctx, botId, msg, text)
+	s.collectBotMessage(ctx, botId, msg)
 }

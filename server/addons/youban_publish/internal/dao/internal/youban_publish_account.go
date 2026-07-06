@@ -21,54 +21,72 @@ type YoubanPublishAccountDao struct {
 
 // YoubanPublishAccountColumns defines and stores column names for the table hg_youban_publish_account.
 type YoubanPublishAccountColumns struct {
-	Id                 string //
-	MerchantId         string //
-	AdminMemberId      string //
-	ParentId           string //
-	AccountType        string //
-	Nickname           string //
-	Username           string //
-	TelegramUserId     string //
-	TelegramUsername   string //
-	DailyPublishLimit  string //
-	CanDirectPublish   string //
-	AllowedChannelJson string //
-	AllowedRegionJson  string //
-	Remark             string //
-	Status             string //
-	CreatedBy          string //
-	UpdatedBy          string //
-	DeletedBy          string //
-	CreatedAt          string //
-	UpdatedAt          string //
-	DeletedAt          string //
-	TenantId           string //
+	Id                     string // 主键
+	TenantId               string // 租户ID
+	MerchantId             string // 商家ID
+	AdminMemberId          string // 绑定系统账号ID
+	ParentId               string // 父账号ID
+	AccountType            string // 账号类型
+	Nickname               string // 昵称
+	Username               string // 用户名
+	PasswordHash           string // 密码hash
+	Salt                   string // 密码盐
+	TelegramUserId         string // TG用户ID
+	TelegramUsername       string // TG用户名
+	DailyPublishLimit      string // 每日上架额度
+	CanDirectPublish       string // 是否可直接发布
+	AllowedChannelJson     string // 可发布频道JSON
+	AllowedRegionJson      string // 可发布地区JSON
+	Remark                 string // 备注
+	Status                 string // 状态
+	CreatedBy              string // 创建人
+	UpdatedBy              string // 更新人
+	DeletedBy              string // 删除人
+	CreatedAt              string // 创建时间
+	UpdatedAt              string // 更新时间
+	DeletedAt              string // 删除时间
+	AvatarUrl              string // 头像地址
+	ContactTelegram        string // 联系TG
+	ContactWechat          string // 联系微信
+	ContactPhone           string // 联系电话
+	ContactOther           string // 其他联系方式
+	FollowApprovalRequired string // 关注我是否需要审批
+	PublicFollowEnabled    string // 是否公开关注
 }
 
 // youbanPublishAccountColumns holds the columns for the table hg_youban_publish_account.
 var youbanPublishAccountColumns = YoubanPublishAccountColumns{
-	Id:                 "id",
-	MerchantId:         "merchant_id",
-	AdminMemberId:      "admin_member_id",
-	ParentId:           "parent_id",
-	AccountType:        "account_type",
-	Nickname:           "nickname",
-	Username:           "username",
-	TelegramUserId:     "telegram_user_id",
-	TelegramUsername:   "telegram_username",
-	DailyPublishLimit:  "daily_publish_limit",
-	CanDirectPublish:   "can_direct_publish",
-	AllowedChannelJson: "allowed_channel_json",
-	AllowedRegionJson:  "allowed_region_json",
-	Remark:             "remark",
-	Status:             "status",
-	CreatedBy:          "created_by",
-	UpdatedBy:          "updated_by",
-	DeletedBy:          "deleted_by",
-	CreatedAt:          "created_at",
-	UpdatedAt:          "updated_at",
-	DeletedAt:          "deleted_at",
-	TenantId:           "tenant_id",
+	Id:                     "id",
+	TenantId:               "tenant_id",
+	MerchantId:             "merchant_id",
+	AdminMemberId:          "admin_member_id",
+	ParentId:               "parent_id",
+	AccountType:            "account_type",
+	Nickname:               "nickname",
+	Username:               "username",
+	PasswordHash:           "password_hash",
+	Salt:                   "salt",
+	TelegramUserId:         "telegram_user_id",
+	TelegramUsername:       "telegram_username",
+	DailyPublishLimit:      "daily_publish_limit",
+	CanDirectPublish:       "can_direct_publish",
+	AllowedChannelJson:     "allowed_channel_json",
+	AllowedRegionJson:      "allowed_region_json",
+	Remark:                 "remark",
+	Status:                 "status",
+	CreatedBy:              "created_by",
+	UpdatedBy:              "updated_by",
+	DeletedBy:              "deleted_by",
+	CreatedAt:              "created_at",
+	UpdatedAt:              "updated_at",
+	DeletedAt:              "deleted_at",
+	AvatarUrl:              "avatar_url",
+	ContactTelegram:        "contact_telegram",
+	ContactWechat:          "contact_wechat",
+	ContactPhone:           "contact_phone",
+	ContactOther:           "contact_other",
+	FollowApprovalRequired: "follow_approval_required",
+	PublicFollowEnabled:    "public_follow_enabled",
 }
 
 // NewYoubanPublishAccountDao creates and returns a new DAO object for table data access.
