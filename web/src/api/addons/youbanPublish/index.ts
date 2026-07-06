@@ -4,6 +4,10 @@ export function TenantList(params = {}) {
   return http.request({ url: '/youban_publish/publish/tenant/list', method: 'get', params });
 }
 
+export function Dashboard(params = {}) {
+  return http.request({ url: '/youban_publish/publish/dashboard', method: 'get', params });
+}
+
 export function TenantSave(params = {}) {
   return http.request({ url: '/youban_publish/publish/tenant/save', method: 'POST', params });
 }

@@ -2,6 +2,10 @@
   <div>
     <n-card :bordered="false" class="proCard">
       <n-tabs v-model:value="activeTab" type="line" animated @update:value="handleTabChange">
+        <n-tab-pane name="dashboard" tab="工作台">
+          <DashboardPanel />
+        </n-tab-pane>
+
         <n-tab-pane name="tenants" tab="账号归属">
           <n-space class="toolbar" align="center">
             <n-input
@@ -464,6 +468,7 @@
   import { computed, h, onMounted, reactive, ref } from 'vue';
   import { NButton, NPopover, NSpace, NTag, useDialog, useMessage } from 'naive-ui';
   import CloudResourceConfig from './components/cloud-resource-config.vue';
+  import DashboardPanel from './components/dashboard-panel.vue';
   import ImportTaskPanel from './components/import-task-panel.vue';
   import {
     AccountDelete,
@@ -490,7 +495,7 @@
   const dialog = useDialog();
   const message = useMessage();
   const activeTabStorageKey = 'youban_publish_admin_active_tab';
-  const activeTab = ref(sessionStorage.getItem(activeTabStorageKey) || 'tenants');
+  const activeTab = ref(sessionStorage.getItem(activeTabStorageKey) || 'dashboard');
 
   const statusOptions = [
     { label: '启用', value: 1 },
@@ -840,6 +845,7 @@
   }
 
   async function loadCurrentTab(tab: string) {
+    if (tab === 'dashboard') return;
     if (tab === 'importTasks') return;
     if (tab === 'accounts') await loadAccounts();
     if (tab === 'tasks') await loadTasks();
