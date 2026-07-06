@@ -27,6 +27,15 @@ func (c *cPublish) AccountProfileSave(ctx context.Context, req *publish.AccountP
 	return &publish.AccountProfileSaveRes{AccountProfileModel: data}, nil
 }
 
+func (c *cPublish) AccountUpload(ctx context.Context, req *publish.AccountUploadReq) (res *publish.AccountUploadRes, err error) {
+	file := g.RequestFromCtx(ctx).GetUploadFile("file")
+	data, err := service.SysPublish().MyAccountImageUpload(ctx, file)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AccountUploadRes{AttachmentListModel: data}, nil
+}
+
 func (c *cPublish) AccountFollowList(ctx context.Context, req *publish.AccountFollowListReq) (res *publish.AccountFollowListRes, err error) {
 	list, totalCount, err := service.SysPublish().AccountFollowList(ctx, &req.AccountFollowListInp)
 	if err != nil {

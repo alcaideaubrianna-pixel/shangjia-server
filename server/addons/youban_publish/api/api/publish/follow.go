@@ -3,6 +3,7 @@ package publish
 import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/model/input/form"
+	basesysin "hotgo/internal/model/input/sysin"
 
 	"github.com/gogf/gf/v2/frame/g"
 )
@@ -23,6 +24,14 @@ type AccountProfileSaveReq struct {
 
 type AccountProfileSaveRes struct {
 	*sysin.AccountProfileModel
+}
+
+type AccountUploadReq struct {
+	g.Meta `path:"/publish/account/upload" method:"post" mime:"multipart/form-data" tags:"上架插件" summary:"上传账号图片"`
+}
+
+type AccountUploadRes struct {
+	*basesysin.AttachmentListModel
 }
 
 type AccountFollowListReq struct {

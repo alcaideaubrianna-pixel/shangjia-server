@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	basesysin "hotgo/internal/model/input/sysin"
 
 	"github.com/gogf/gf/v2/net/ghttp"
 )
@@ -110,6 +111,7 @@ type ISysPublish interface {
 	MyDashboardTodo(ctx context.Context) (res *sysin.DashboardTodoModel, err error)
 	UpdateAccountPassword(ctx context.Context, in *sysin.UpdateAccountPasswordInp) (err error)
 	UpdateAccountProfile(ctx context.Context, in *sysin.UpdateAccountProfileInp) (res *sysin.CurrentAccountModel, err error)
+	MyAccountImageUpload(ctx context.Context, file *ghttp.UploadFile) (res *basesysin.AttachmentListModel, err error)
 	MyProfileList(ctx context.Context, in *sysin.ProfileListInp) (list []*sysin.ProfileModel, totalCount int, err error)
 	MyChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error)
 	MyProfileView(ctx context.Context, in *sysin.ProfileViewInp) (res *sysin.ProfileViewModel, err error)

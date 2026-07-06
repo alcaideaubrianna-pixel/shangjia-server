@@ -73,6 +73,7 @@ func (s *sSysPublish) accountFollowStatus(ctx context.Context, followerId int64,
 func (s *sSysPublish) publicFollowAccounts(ctx context.Context, account *sysin.AccountModel, in *sysin.AccountFollowListInp) ([]*sysin.AccountFollowModel, int, error) {
 	mod := pdao.YoubanPublishAccount.Ctx(ctx).
 		Where("tenant_id", account.TenantId).
+		Where("account_type", sysin.PublishAccountTypeAdmin).
 		Where("public_follow_enabled", 1).
 		Where("status", 1).
 		WhereNot("id", account.Id).
