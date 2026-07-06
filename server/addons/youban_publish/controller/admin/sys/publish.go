@@ -401,6 +401,62 @@ func (c *cPublishAdmin) TaskCancel(ctx context.Context, req *publish.TaskCancelR
 	return
 }
 
+func (c *cPublishServer) ImportTaskList(ctx context.Context, req *publish.ImportTaskListReq) (res *publish.ImportTaskListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminImportTaskList(ctx, &req.ImportTaskListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.ImportTaskModel{}
+	}
+	res = new(publish.ImportTaskListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) ImportTaskCreate(ctx context.Context, req *publish.ImportTaskCreateReq) (res *publish.ImportTaskCreateRes, err error) {
+	id, err := service.SysPublish().AdminImportTaskCreate(ctx, &req.ImportTaskCreateInp)
+	if err != nil {
+		return
+	}
+	res = &publish.ImportTaskCreateRes{Id: id}
+	return
+}
+
+func (c *cPublishServer) ImportTaskView(ctx context.Context, req *publish.ImportTaskViewReq) (res *publish.ImportTaskViewRes, err error) {
+	data, err := service.SysPublish().AdminImportTaskView(ctx, &req.ImportTaskViewInp)
+	if err != nil {
+		return
+	}
+	res = &publish.ImportTaskViewRes{ImportTaskModel: data}
+	return
+}
+
+func (c *cPublishServer) ImportTaskStart(ctx context.Context, req *publish.ImportTaskStartReq) (res *publish.ImportTaskStartRes, err error) {
+	if err = service.SysPublish().AdminImportTaskStart(ctx, &req.ImportTaskActionInp); err != nil {
+		return
+	}
+	res = &publish.ImportTaskStartRes{}
+	return
+}
+
+func (c *cPublishServer) ImportTaskCancel(ctx context.Context, req *publish.ImportTaskCancelReq) (res *publish.ImportTaskCancelRes, err error) {
+	if err = service.SysPublish().AdminImportTaskCancel(ctx, &req.ImportTaskActionInp); err != nil {
+		return
+	}
+	res = &publish.ImportTaskCancelRes{}
+	return
+}
+
+func (c *cPublishServer) ImportTaskRetry(ctx context.Context, req *publish.ImportTaskRetryReq) (res *publish.ImportTaskRetryRes, err error) {
+	if err = service.SysPublish().AdminImportTaskRetry(ctx, &req.ImportTaskActionInp); err != nil {
+		return
+	}
+	res = &publish.ImportTaskRetryRes{}
+	return
+}
+
 func (c *cPublishAdmin) MediaList(ctx context.Context, req *publish.MediaListReq) (res *publish.MediaListRes, err error) {
 	list, err := service.SysPublish().AdminMediaList(ctx, &req.MediaListInp)
 	if err != nil {

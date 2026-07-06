@@ -102,6 +102,55 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_task_tenant_client_request" ON "hg_you
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_tenant_status" ON "hg_youban_publish_task" ("tenant_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_account_status" ON "hg_youban_publish_task" ("account_id", "status", "id");
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_import_task" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "source_name" varchar(64) NOT NULL DEFAULT 'lyy_cms',
+  "base_url" varchar(255) NOT NULL DEFAULT '',
+  "username" varchar(128) NOT NULL DEFAULT '',
+  "password_cipher" varchar(512) NOT NULL DEFAULT '',
+  "limit_count" integer NOT NULL DEFAULT 0,
+  "per_page" integer NOT NULL DEFAULT 12,
+  "proxy_enabled" smallint NOT NULL DEFAULT 0,
+  "proxy_pool" text,
+  "media_concurrency" integer NOT NULL DEFAULT 4,
+  "channel_id_json" text,
+  "tg_start_at" timestamp DEFAULT NULL,
+  "tg_end_at" timestamp DEFAULT NULL,
+  "status" varchar(32) NOT NULL DEFAULT 'pending',
+  "stage" varchar(32) NOT NULL DEFAULT 'created',
+  "progress_total" integer NOT NULL DEFAULT 0,
+  "progress_done" integer NOT NULL DEFAULT 0,
+  "page_total" integer NOT NULL DEFAULT 0,
+  "page_done" integer NOT NULL DEFAULT 0,
+  "item_total" integer NOT NULL DEFAULT 0,
+  "item_done" integer NOT NULL DEFAULT 0,
+  "imported" integer NOT NULL DEFAULT 0,
+  "duplicate" integer NOT NULL DEFAULT 0,
+  "media_total" integer NOT NULL DEFAULT 0,
+  "media_done" integer NOT NULL DEFAULT 0,
+  "media_imported" integer NOT NULL DEFAULT 0,
+  "tg_total" integer NOT NULL DEFAULT 0,
+  "tg_done" integer NOT NULL DEFAULT 0,
+  "tg_matched" integer NOT NULL DEFAULT 0,
+  "last_source_note_id" bigint NOT NULL DEFAULT 0,
+  "error_message" text,
+  "result_json" text,
+  "remark" varchar(500) NOT NULL DEFAULT '',
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "deleted_by" bigint NOT NULL DEFAULT 0,
+  "started_at" timestamp DEFAULT NULL,
+  "finished_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_import_task_scope" ON "hg_youban_publish_import_task" ("tenant_id", "account_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_import_task_status" ON "hg_youban_publish_import_task" ("status", "updated_at");
+CREATE INDEX IF NOT EXISTS "idx_ybp_import_task_source" ON "hg_youban_publish_import_task" ("source_name", "id");
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_account_setting" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,

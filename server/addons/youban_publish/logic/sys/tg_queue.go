@@ -15,10 +15,15 @@ const (
 	tgQueueNameDefault = "youban_publish_tg"
 	tgTaskTypePublish  = "youban_publish:tg:publish"
 	tgTaskTypeDelete   = "youban_publish:tg:delete"
+	tgTaskTypeImport   = "youban_publish:import:legacy"
 )
 
 type tgQueuePayload struct {
 	JobId int64 `json:"jobId"`
+}
+
+type importQueuePayload struct {
+	Id int64 `json:"id"`
 }
 
 type tgRetryAfterError struct {
@@ -45,6 +50,35 @@ func (s *sSysPublish) enqueueTelegramJob(ctx context.Context, jobId int64, delay
 
 func (s *sSysPublish) enqueueTelegramDeleteJob(ctx context.Context, jobId int64, delay time.Duration) error {
 	return s.enqueueTelegramTask(ctx, tgTaskTypeDelete, jobId, delay)
+}
+
+func (s *sSysPublish) enqueueImportTask(ctx context.Context, id int64, delay time.Duration) error {
+	if id <= 0 {
+		return nil
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(importQueuePayload{Id: id})
+	if err != nil {
+		return err
+	}
+	task := asynq.NewTask(tgTaskTypeImport, payload)
+	options := []asynq.Option{
+		asynq.Queue(tgQueueNameDefault),
+		asynq.MaxRetry(3),
+		asynq.Timeout(2 * time.Hour),
+		asynq.Unique(30 * time.Second),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err = client.EnqueueContext(ctx, task, options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	return err
 }
 
 func (s *sSysPublish) enqueueTelegramTask(ctx context.Context, taskType string, jobId int64, delay time.Duration) error {
@@ -117,6 +151,17 @@ func decodeTelegramQueuePayload(task *asynq.Task) (tgQueuePayload, error) {
 	}
 	if payload.JobId <= 0 {
 		return payload, fmt.Errorf("TG队列任务缺少jobId")
+	}
+	return payload, nil
+}
+
+func decodeImportQueuePayload(task *asynq.Task) (importQueuePayload, error) {
+	var payload importQueuePayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return payload, fmt.Errorf("解析导入队列任务失败: %w", err)
+	}
+	if payload.Id <= 0 {
+		return payload, fmt.Errorf("导入队列任务缺少id")
 	}
 	return payload, nil
 }

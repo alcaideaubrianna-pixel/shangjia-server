@@ -6,6 +6,7 @@ var (
 	publishTenantTable         = pdao.YoubanPublishTenant.Table()
 	publishAccountTable        = pdao.YoubanPublishAccount.Table()
 	publishTaskTable           = pdao.YoubanPublishTask.Table()
+	publishImportTaskTable     = pdao.YoubanPublishImportTask.Table()
 	publishMediaTable          = pdao.YoubanPublishMedia.Table()
 	publishTgJobTable          = pdao.YoubanPublishTgJob.Table()
 	publishBotTable            = pdao.YoubanPublishBot.Table()

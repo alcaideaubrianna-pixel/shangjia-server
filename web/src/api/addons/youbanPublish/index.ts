@@ -40,6 +40,30 @@ export function TaskCancel(params = {}) {
   return http.request({ url: '/youban_publish/publish/task/cancel', method: 'POST', params });
 }
 
+export function ImportTaskList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/importTask/list', method: 'get', params });
+}
+
+export function ImportTaskCreate(params = {}) {
+  return http.request({ url: '/youban_publish/publish/importTask/create', method: 'POST', params });
+}
+
+export function ImportTaskView(params = {}) {
+  return http.request({ url: '/youban_publish/publish/importTask/view', method: 'get', params });
+}
+
+export function ImportTaskStart(params = {}) {
+  return http.request({ url: '/youban_publish/publish/importTask/start', method: 'POST', params });
+}
+
+export function ImportTaskCancel(params = {}) {
+  return http.request({ url: '/youban_publish/publish/importTask/cancel', method: 'POST', params });
+}
+
+export function ImportTaskRetry(params = {}) {
+  return http.request({ url: '/youban_publish/publish/importTask/retry', method: 'POST', params });
+}
+
 export function TagList(params = {}) {
   return http.request({ url: '/youban_publish/publish/tag/list', method: 'get', params });
 }

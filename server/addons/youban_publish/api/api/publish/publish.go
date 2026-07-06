@@ -464,6 +464,25 @@ type CancelTaskReq struct {
 
 type CancelTaskRes struct{}
 
+type MyImportTaskListReq struct {
+	g.Meta `path:"/publish/importTask/list" method:"get" tags:"上架插件" summary:"我的旧站导入任务列表"`
+	sysin.ImportTaskListInp
+}
+
+type MyImportTaskListRes struct {
+	form.PageRes
+	List []*sysin.ImportTaskModel `json:"list" dc:"任务列表"`
+}
+
+type MyImportTaskViewReq struct {
+	g.Meta `path:"/publish/importTask/view" method:"get" tags:"上架插件" summary:"我的旧站导入任务详情"`
+	sysin.ImportTaskViewInp
+}
+
+type MyImportTaskViewRes struct {
+	*sysin.ImportTaskModel
+}
+
 type UploadMediaReq struct {
 	g.Meta `path:"/publish/media/upload" method:"post" mime:"multipart/form-data" tags:"上架插件" summary:"上传任务媒体"`
 	sysin.MediaUploadInp

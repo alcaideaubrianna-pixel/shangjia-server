@@ -555,6 +555,29 @@ func (c *cPublish) CancelTask(ctx context.Context, req *publish.CancelTaskReq) (
 	return
 }
 
+func (c *cPublish) MyImportTaskList(ctx context.Context, req *publish.MyImportTaskListReq) (res *publish.MyImportTaskListRes, err error) {
+	list, totalCount, err := service.SysPublish().MyImportTaskList(ctx, &req.ImportTaskListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.ImportTaskModel{}
+	}
+	res = new(publish.MyImportTaskListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublish) MyImportTaskView(ctx context.Context, req *publish.MyImportTaskViewReq) (res *publish.MyImportTaskViewRes, err error) {
+	data, err := service.SysPublish().MyImportTaskView(ctx, &req.ImportTaskViewInp)
+	if err != nil {
+		return
+	}
+	res = &publish.MyImportTaskViewRes{ImportTaskModel: data}
+	return
+}
+
 func (c *cPublish) UploadMedia(ctx context.Context, req *publish.UploadMediaReq) (res *publish.UploadMediaRes, err error) {
 	file := g.RequestFromCtx(ctx).GetUploadFile("file")
 	if file == nil {

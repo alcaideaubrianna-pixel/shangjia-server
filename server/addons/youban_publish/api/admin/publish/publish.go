@@ -101,6 +101,55 @@ type TaskCancelReq struct {
 
 type TaskCancelRes struct{}
 
+type ImportTaskListReq struct {
+	g.Meta `path:"/publish/importTask/list" method:"get" tags:"上架插件后台" summary:"旧站导入任务列表"`
+	sysin.ImportTaskListInp
+}
+
+type ImportTaskListRes struct {
+	form.PageRes
+	List []*sysin.ImportTaskModel `json:"list" dc:"任务列表"`
+}
+
+type ImportTaskCreateReq struct {
+	g.Meta `path:"/publish/importTask/create" method:"post" tags:"上架插件后台" summary:"创建旧站导入任务"`
+	sysin.ImportTaskCreateInp
+}
+
+type ImportTaskCreateRes struct {
+	Id int64 `json:"id" dc:"任务ID"`
+}
+
+type ImportTaskViewReq struct {
+	g.Meta `path:"/publish/importTask/view" method:"get" tags:"上架插件后台" summary:"旧站导入任务详情"`
+	sysin.ImportTaskViewInp
+}
+
+type ImportTaskViewRes struct {
+	*sysin.ImportTaskModel
+}
+
+type ImportTaskStartReq struct {
+	g.Meta `path:"/publish/importTask/start" method:"post" tags:"上架插件后台" summary:"启动旧站导入任务"`
+	sysin.ImportTaskActionInp
+}
+
+type ImportTaskStartRes struct{}
+
+type ImportTaskCancelReq struct {
+	g.Meta `path:"/publish/importTask/cancel" method:"post" tags:"上架插件后台" summary:"取消旧站导入任务"`
+	sysin.ImportTaskActionInp
+}
+
+type ImportTaskCancelRes struct{}
+
+type ImportTaskRetryReq struct {
+	g.Meta `path:"/publish/importTask/retry" method:"post" tags:"上架插件后台" summary:"重试旧站导入任务"`
+	sysin.ImportTaskActionInp
+}
+
+type ImportTaskRetryRes struct{}
+
 type MediaListReq struct {
 	g.Meta `path:"/publish/media/list" method:"get" tags:"上架插件后台" summary:"任务媒体列表"`
 	sysin.MediaListInp
@@ -265,4 +314,13 @@ type ChannelRefreshReq struct {
 
 type ChannelRefreshRes struct {
 	List []*sysin.ChannelRefreshModel `json:"list" dc:"刷新结果"`
+}
+
+type DashboardReq struct {
+	g.Meta `path:"/publish/dashboard" method:"get" tags:"上架插件后台" summary:"后台控制台"`
+	sysin.TrendInp
+}
+
+type DashboardRes struct {
+	*sysin.ServerDashboardModel
 }

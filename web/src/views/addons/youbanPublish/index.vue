@@ -107,6 +107,10 @@
           />
         </n-tab-pane>
 
+        <n-tab-pane name="importTasks" tab="旧站导入">
+          <ImportTaskPanel />
+        </n-tab-pane>
+
         <n-tab-pane name="tags" tab="标签审核">
           <n-space class="toolbar" align="center">
             <n-input
@@ -460,6 +464,7 @@
   import { computed, h, onMounted, reactive, ref } from 'vue';
   import { NButton, NPopover, NSpace, NTag, useDialog, useMessage } from 'naive-ui';
   import CloudResourceConfig from './components/cloud-resource-config.vue';
+  import ImportTaskPanel from './components/import-task-panel.vue';
   import {
     AccountDelete,
     AccountList,
@@ -835,6 +840,7 @@
   }
 
   async function loadCurrentTab(tab: string) {
+    if (tab === 'importTasks') return;
     if (tab === 'accounts') await loadAccounts();
     if (tab === 'tasks') await loadTasks();
     if (tab === 'tags') await loadTags();
