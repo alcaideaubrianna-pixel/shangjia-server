@@ -28,11 +28,33 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "上架任务已下架或不可发布，跳过TG推送")
 		return s.markTelegramJobSuperseded(ctx, job.Id)
 	}
+	if err = s.markTaskPublishingStarted(ctx, job.TaskId); err != nil {
+		return err
+	}
 	s.appendTelegramJobLog(ctx, job, "publish", "started", s.telegramJobPublishMessage(job, "开始推送TG资料"))
 	if err = s.sendLockedTelegramJob(ctx, job); err != nil {
 		return s.handleTelegramJobError(ctx, job, err)
 	}
 	return s.completeTelegramJob(ctx, job)
+}
+
+func (s *sSysPublish) markTaskPublishingStarted(ctx context.Context, taskId int64) error {
+	if taskId <= 0 {
+		return nil
+	}
+	_, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Where("id", taskId).
+		WhereNull("deleted_at").
+		Data(g.Map{
+			"status":     sysin.PublishTaskStatusPublishing,
+			"tg_status":  "sending",
+			"updated_at": gtime.Now(),
+		}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "更新上架中状态失败")
+	}
+	return nil
 }
 
 func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJobRecord) error {

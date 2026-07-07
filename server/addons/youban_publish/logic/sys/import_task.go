@@ -257,10 +257,25 @@ func (s *sSysPublish) ServerImportRunCreate(ctx context.Context, in *sysin.Impor
 	if err != nil {
 		return 0, err
 	}
+	channelIds := uniqueIds(in.ChannelIds)
+	if len(channelIds) == 0 {
+		channelIds = decodeImportTaskChannelIds(row["channel_id_json"].String())
+	}
+	if in.TgMatchEnabled == 1 {
+		if len(channelIds) == 0 {
+			return 0, gerror.New("请先选择要匹配的TG频道")
+		}
+		if err = s.ensureChannelsBelongTenant(ctx, channelIds, row["tenant_id"].Int64()); err != nil {
+			return 0, err
+		}
+	}
 	params, _ := json.Marshal(g.Map{
-		"importMode":  in.ImportMode,
-		"scanMode":    in.ScanMode,
-		"recentCount": in.RecentCount,
+		"importMode":      in.ImportMode,
+		"scanMode":        in.ScanMode,
+		"recentCount":     in.RecentCount,
+		"tgMatchEnabled":  in.TgMatchEnabled,
+		"tgMatchDays":     in.TgMatchDays,
+		"matchChannelIds": channelIds,
 	})
 	now := gtime.Now()
 	id, err := g.DB().Model(importRunTable).Safe().Ctx(ctx).Data(g.Map{
@@ -758,20 +773,130 @@ func (s *sSysPublish) ExecuteImportRun(ctx context.Context, runId int64) (err er
 		_ = s.appendImportRunLog(ctx, runId, "warning", "canceled", "导入记录已取消，跳过完成状态写入", nil)
 		return nil
 	}
+	tgMatched := 0
+	if runType != sysin.ImportRunTypeScan {
+		params := parseImportRunParams(run["params_json"].String())
+		tgMatched, err = s.matchImportRunTelegramMessages(ctx, runId, task, params, scan.Items)
+		if err != nil {
+			return err
+		}
+	}
 	finishMessage := "扫描完成"
 	if runType != sysin.ImportRunTypeScan {
 		finishMessage = "导入完成"
 	} else {
 		finishMessage = "仅扫描完成，未导入资料"
 	}
-	_ = s.appendImportRunLog(ctx, runId, "info", importStageFinished, finishMessage, g.Map{"sourceTotal": total, "missing": scan.MissingTotal, "imported": imported, "mediaImported": mediaImported})
+	_ = s.appendImportRunLog(ctx, runId, "info", importStageFinished, finishMessage, g.Map{"sourceTotal": total, "missing": scan.MissingTotal, "imported": imported, "mediaImported": mediaImported, "tgMatched": tgMatched})
 	return s.updateImportRunProgress(ctx, runId, g.Map{
 		"status":      sysin.ImportTaskStatusSuccess,
 		"stage":       importStageFinished,
 		"result_json": string(result),
+		"tg_matched":  tgMatched,
 		"finished_at": gtime.Now(),
 		"updated_at":  gtime.Now(),
 	})
+}
+
+type importRunParams struct {
+	TgMatchEnabled int     `json:"tgMatchEnabled"`
+	TgMatchDays    int     `json:"tgMatchDays"`
+	ChannelIds     []int64 `json:"matchChannelIds"`
+}
+
+func parseImportRunParams(raw string) importRunParams {
+	params := importRunParams{TgMatchDays: sysin.DefaultImportTgMatchDays}
+	if strings.TrimSpace(raw) == "" {
+		return params
+	}
+	_ = json.Unmarshal([]byte(raw), &params)
+	if params.TgMatchDays <= 0 {
+		params.TgMatchDays = sysin.DefaultImportTgMatchDays
+	}
+	if params.TgMatchDays > 365 {
+		params.TgMatchDays = 365
+	}
+	params.ChannelIds = uniqueIds(params.ChannelIds)
+	return params
+}
+
+func (s *sSysPublish) matchImportRunTelegramMessages(ctx context.Context, runId int64, task gdb.Record, params importRunParams, items []*sysin.ImportTaskScanItem) (int, error) {
+	if params.TgMatchEnabled != 1 {
+		return 0, nil
+	}
+	channelIds := params.ChannelIds
+	if len(channelIds) == 0 {
+		channelIds = decodeImportTaskChannelIds(task["channel_id_json"].String())
+	}
+	if len(channelIds) == 0 {
+		_ = s.appendImportRunLog(ctx, runId, "warning", importStageTgMatch, "已开启TG匹配，但未选择频道，跳过", nil)
+		return 0, nil
+	}
+	channels, err := s.importRunTgMatchChannels(ctx, task["tenant_id"].Int64(), channelIds)
+	if err != nil {
+		return 0, err
+	}
+	if len(channels) == 0 {
+		_ = s.appendImportRunLog(ctx, runId, "warning", importStageTgMatch, "未找到可匹配的TG频道，跳过", nil)
+		return 0, nil
+	}
+	if err = s.updateImportRunProgress(ctx, runId, g.Map{"stage": importStageTgMatch, "tg_total": len(items), "tg_done": 0, "updated_at": gtime.Now()}); err != nil {
+		return 0, err
+	}
+	_ = s.appendImportRunLog(ctx, runId, "info", importStageTgMatch, "开始拉取TG频道媒体消息", g.Map{"channels": len(channels), "days": params.TgMatchDays})
+	cutoff := time.Now().AddDate(0, 0, -params.TgMatchDays).Unix()
+	scanned := 0
+	for _, channel := range channels {
+		time.Sleep(400 * time.Millisecond)
+		count, scanErr := s.scanTgChannelMessagesSince(ctx, task["tenant_id"].Int64(), channel, cutoff)
+		scanned += count
+		_ = s.appendImportRunLog(ctx, runId, "info", importStageTgMatch, "TG频道媒体消息拉取完成", g.Map{"channelId": channel.Id, "scanned": count})
+		if scanErr != nil {
+			return 0, scanErr
+		}
+	}
+	_ = s.appendImportRunLog(ctx, runId, "info", importStageTgMatch, "开始按标题匹配TG媒体消息", g.Map{"scanned": scanned})
+	matched := 0
+	for index, item := range items {
+		if item == nil || item.TaskId <= 0 || item.ProfileId <= 0 {
+			continue
+		}
+		taskRow, err := s.tgMessageRepairTask(ctx, item.ProfileId, task["tenant_id"].Int64(), task["account_id"].Int64())
+		if err != nil {
+			return matched, err
+		}
+		if taskRow.IsEmpty() {
+			continue
+		}
+		matches, err := s.matchTgRepairMessages(ctx, task["tenant_id"].Int64(), taskRow, channels)
+		if err != nil {
+			return matched, err
+		}
+		if len(matches) > 0 {
+			if err = s.saveTgRepairMatches(ctx, taskRow, matches); err != nil {
+				return matched, err
+			}
+			matched++
+			_ = s.appendImportRunLog(ctx, runId, "info", importStageTgMatch, "TG消息匹配成功", g.Map{"sourceNoteId": item.SourceNoteId, "profileId": item.ProfileId, "taskId": item.TaskId, "messages": len(matches)})
+		}
+		_ = s.updateImportRunProgress(ctx, runId, g.Map{"tg_done": index + 1, "tg_matched": matched, "updated_at": gtime.Now()})
+	}
+	return matched, nil
+}
+
+func (s *sSysPublish) importRunTgMatchChannels(ctx context.Context, tenantId int64, channelIds []int64) ([]tgMessageRepairChannel, error) {
+	channels := make([]tgMessageRepairChannel, 0, len(channelIds))
+	for _, channelId := range uniqueIds(channelIds) {
+		channel, err := s.tgRepairChannelById(ctx, tenantId, channelId)
+		if err != nil {
+			return nil, err
+		}
+		if channel.TgAccountId <= 0 {
+			continue
+		}
+		channels = append(channels, channel)
+	}
+	return channels, nil
 }
 
 func (s *sSysPublish) importTaskList(ctx context.Context, in *sysin.ImportTaskListInp) (list []*sysin.ImportTaskModel, totalCount int, err error) {

@@ -27,6 +27,8 @@ const (
 	ImportRunTypeImport = "import"
 	ImportRunTypeScan   = "scan"
 	ImportRunTypeRepair = "repair"
+
+	DefaultImportTgMatchDays = 180
 )
 
 type ImportTaskCreateInp struct {
@@ -209,11 +211,14 @@ type ImportTaskQueuePayload struct {
 }
 
 type ImportRunCreateInp struct {
-	TaskId      int64  `json:"taskId" v:"required#任务ID不能为空" dc:"任务ID"`
-	RunType     string `json:"runType" dc:"执行类型：import/scan/repair"`
-	ImportMode  string `json:"importMode" dc:"导入方式"`
-	ScanMode    string `json:"scanMode" dc:"扫描范围"`
-	RecentCount int    `json:"recentCount" dc:"最近扫描数量"`
+	TaskId         int64   `json:"taskId" v:"required#任务ID不能为空" dc:"任务ID"`
+	RunType        string  `json:"runType" dc:"执行类型：import/scan/repair"`
+	ImportMode     string  `json:"importMode" dc:"导入方式"`
+	ScanMode       string  `json:"scanMode" dc:"扫描范围"`
+	RecentCount    int     `json:"recentCount" dc:"最近扫描数量"`
+	TgMatchEnabled int     `json:"tgMatchEnabled" dc:"是否导入后匹配TG消息"`
+	TgMatchDays    int     `json:"tgMatchDays" dc:"TG消息拉取天数"`
+	ChannelIds     []int64 `json:"channelIds" dc:"TG匹配频道ID"`
 }
 
 func (in *ImportRunCreateInp) Filter(ctx context.Context) error {
@@ -240,6 +245,17 @@ func (in *ImportRunCreateInp) Filter(ctx context.Context) error {
 	}
 	in.ScanMode = scan.ScanMode
 	in.RecentCount = scan.RecentCount
+	if in.TgMatchEnabled != 1 {
+		in.TgMatchEnabled = 0
+	}
+	if in.TgMatchEnabled == 1 {
+		if in.TgMatchDays <= 0 {
+			in.TgMatchDays = DefaultImportTgMatchDays
+		}
+		if in.TgMatchDays > 365 {
+			in.TgMatchDays = 365
+		}
+	}
 	return nil
 }
 

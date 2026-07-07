@@ -224,9 +224,6 @@ func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenan
 	if !canSubmitPublishTask(task) {
 		return gerror.New("已取消的任务不能提交")
 	}
-	if task["tg_push_enabled"].Int() != 1 {
-		return s.markTaskSavedWithoutPublish(ctx, task, operatorId)
-	}
 	hasChannels, err := s.hasPublishChannels(ctx, task)
 	if err != nil {
 		return err
@@ -242,12 +239,13 @@ func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenan
 	}
 	_, err = mod.
 		Data(g.Map{
-			"status":        sysin.PublishTaskStatusPending,
-			"tg_status":     "pending",
-			"error_message": "",
-			"submitted_at":  gtime.Now(),
-			"updated_by":    operatorId,
-			"updated_at":    gtime.Now(),
+			"status":          sysin.PublishTaskStatusPublishing,
+			"tg_status":       "pending",
+			"tg_push_enabled": 1,
+			"error_message":   "",
+			"submitted_at":    gtime.Now(),
+			"updated_by":      operatorId,
+			"updated_at":      gtime.Now(),
 		}).
 		Update()
 	if err != nil {

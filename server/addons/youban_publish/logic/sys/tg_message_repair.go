@@ -64,6 +64,7 @@ type tgMessageRepairCacheRow struct {
 	TgMessageId  int64       `json:"tgMessageId"`
 	MessageText  string      `json:"messageText"`
 	MessageDate  *gtime.Time `json:"messageDate"`
+	MediaType    string      `json:"mediaType"`
 	MediaGroupId string      `json:"mediaGroupId"`
 }
 
@@ -410,8 +411,15 @@ func (s *sSysPublish) tgMessageRepairChannels(ctx context.Context, task gdb.Reco
 }
 
 func (s *sSysPublish) scanTgChannelMessages(ctx context.Context, tenantId int64, channel tgMessageRepairChannel) (int, error) {
+	return s.scanTgChannelMessagesSince(ctx, tenantId, channel, time.Now().AddDate(0, -6, 0).Unix())
+}
+
+func (s *sSysPublish) scanTgChannelMessagesSince(ctx context.Context, tenantId int64, channel tgMessageRepairChannel, cutoff int64) (int, error) {
 	if channel.TgAccountId <= 0 {
 		return 0, gerror.New("频道未绑定协议号，无法拉取历史消息")
+	}
+	if err := ensureTgMessageCacheMediaTypeColumn(ctx); err != nil {
+		return 0, err
 	}
 	cache, err := s.tgChannelCacheByChannelId(ctx, tenantId, channel.TgAccountId, channel.TargetChatId)
 	if err != nil {
@@ -461,7 +469,6 @@ func (s *sSysPublish) scanTgChannelMessages(ctx context.Context, tenantId int64,
 	scanned := 0
 	err = client.Run(runCtx, func(ctx context.Context) error {
 		offsetID := 0
-		cutoff := time.Now().AddDate(0, -6, 0).Unix()
 		for {
 			var res tg.MessagesMessagesClass
 			var pageErr error
@@ -496,6 +503,9 @@ func (s *sSysPublish) scanTgChannelMessages(ctx context.Context, tenantId int64,
 					stop = true
 					continue
 				}
+				if telegramHistoryMessageMediaType(message) == "" {
+					continue
+				}
 				scanned++
 				if err = s.upsertTgMessageCache(ctx, tenantId, channel, message); err != nil {
 					return err
@@ -514,6 +524,21 @@ func (s *sSysPublish) scanTgChannelMessages(ctx context.Context, tenantId int64,
 		return scanned, gerror.Wrap(err, "拉取TG频道历史消息失败")
 	}
 	return scanned, nil
+}
+
+func ensureTgMessageCacheMediaTypeColumn(ctx context.Context) error {
+	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
+		_, err := g.DB().Exec(ctx, `ALTER TABLE "hg_youban_publish_tg_message_cache" ADD COLUMN IF NOT EXISTS "media_type" varchar(32) NOT NULL DEFAULT ''`)
+		if err != nil {
+			return gerror.Wrap(err, "检查TG消息缓存媒体类型字段失败")
+		}
+		return nil
+	}
+	_, err := g.DB().Exec(ctx, "ALTER TABLE `hg_youban_publish_tg_message_cache` ADD COLUMN `media_type` varchar(32) NOT NULL DEFAULT '' COMMENT '媒体类型' AFTER `message_text`")
+	if err != nil && !isIgnorableImportTaskServerIPColumnError(err) {
+		return gerror.Wrap(err, "检查TG消息缓存媒体类型字段失败")
+	}
+	return nil
 }
 
 func (s *sSysPublish) latestTgMessageCacheId(ctx context.Context, tenantId int64, channelId int64) (int64, error) {
@@ -578,7 +603,35 @@ func tgHistoryMessages(res tg.MessagesMessagesClass) []*tg.Message {
 	return items
 }
 
+func telegramHistoryMessageMediaType(message *tg.Message) string {
+	if message == nil || message.Media == nil {
+		return ""
+	}
+	switch media := message.Media.(type) {
+	case *tg.MessageMediaPhoto:
+		return "photo"
+	case *tg.MessageMediaDocument:
+		if doc, ok := media.Document.(*tg.Document); ok {
+			for _, attr := range doc.Attributes {
+				switch attr.(type) {
+				case *tg.DocumentAttributeVideo:
+					return "video"
+				case *tg.DocumentAttributeAudio:
+					return "audio"
+				}
+			}
+		}
+		return "document"
+	default:
+		return ""
+	}
+}
+
 func (s *sSysPublish) upsertTgMessageCache(ctx context.Context, tenantId int64, channel tgMessageRepairChannel, message *tg.Message) error {
+	mediaType := telegramHistoryMessageMediaType(message)
+	if mediaType == "" {
+		return nil
+	}
 	messageDate := gtime.NewFromTime(time.Unix(int64(message.Date), 0))
 	mediaGroupId := ""
 	if groupedId, ok := message.GetGroupedID(); ok && groupedId != 0 {
@@ -591,6 +644,7 @@ func (s *sSysPublish) upsertTgMessageCache(ctx context.Context, tenantId int64, 
 		"target_chat_id": channel.TargetChatId,
 		"tg_message_id":  message.ID,
 		"message_text":   message.Message,
+		"media_type":     mediaType,
 		"message_date":   messageDate,
 		"media_group_id": mediaGroupId,
 		"updated_at":     gtime.Now(),
@@ -626,6 +680,7 @@ func (s *sSysPublish) matchTgRepairMessages(ctx context.Context, tenantId int64,
 	mod := g.DB().Model(publishTgMessageCacheTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		WhereIn("channel_id", channelIds).
+		Where("media_type <>", "").
 		OrderDesc("message_date").
 		Limit(5000)
 	var rows []tgMessageRepairCacheRow
@@ -645,7 +700,72 @@ func (s *sSysPublish) matchTgRepairMessages(ctx context.Context, tenantId int64,
 			}
 		}
 	}
-	return matches, nil
+	return s.expandTgRepairMediaMatches(ctx, tenantId, matches)
+}
+
+func (s *sSysPublish) expandTgRepairMediaMatches(ctx context.Context, tenantId int64, matches []tgMessageRepairCacheRow) ([]tgMessageRepairCacheRow, error) {
+	if len(matches) == 0 {
+		return matches, nil
+	}
+	expanded := make([]tgMessageRepairCacheRow, 0, len(matches))
+	seen := make(map[string]struct{})
+	addRows := func(rows []tgMessageRepairCacheRow) {
+		for _, row := range rows {
+			key := fmt.Sprintf("%d:%d", row.ChannelId, row.TgMessageId)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			expanded = append(expanded, row)
+		}
+	}
+	for _, match := range matches {
+		if match.MediaGroupId == "" {
+			addRows([]tgMessageRepairCacheRow{match})
+			continue
+		}
+		var groupRows []tgMessageRepairCacheRow
+		err := g.DB().Model(publishTgMessageCacheTable).Safe().Ctx(ctx).
+			Where("tenant_id", tenantId).
+			Where("channel_id", match.ChannelId).
+			Where("media_group_id", match.MediaGroupId).
+			Where("media_type <>", "").
+			OrderAsc("tg_message_id").
+			Scan(&groupRows)
+		if err != nil {
+			return nil, gerror.Wrap(err, "读取TG媒体组缓存失败")
+		}
+		addRows(groupRows)
+		if len(groupRows) > 0 {
+			if video, err := s.nextVerifyVideoAfterMediaGroup(ctx, tenantId, groupRows[len(groupRows)-1]); err != nil {
+				return nil, err
+			} else if video.TgMessageId > 0 {
+				addRows([]tgMessageRepairCacheRow{video})
+			}
+		}
+	}
+	return expanded, nil
+}
+
+func (s *sSysPublish) nextVerifyVideoAfterMediaGroup(ctx context.Context, tenantId int64, last tgMessageRepairCacheRow) (tgMessageRepairCacheRow, error) {
+	var row tgMessageRepairCacheRow
+	if last.MessageDate == nil {
+		return row, nil
+	}
+	err := g.DB().Model(publishTgMessageCacheTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("channel_id", last.ChannelId).
+		Where("media_type", "video").
+		WhereGT("tg_message_id", last.TgMessageId).
+		WhereGTE("message_date", last.MessageDate).
+		WhereLTE("message_date", last.MessageDate.Add(3*time.Minute)).
+		OrderAsc("tg_message_id").
+		Limit(1).
+		Scan(&row)
+	if err != nil {
+		return row, gerror.Wrap(err, "读取TG媒体组后续视频失败")
+	}
+	return row, nil
 }
 
 func tgRepairMatchKeywords(task gdb.Record) []string {

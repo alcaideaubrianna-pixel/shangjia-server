@@ -2,56 +2,154 @@
   <n-tabs v-model:value="activeTab" type="line" animated>
     <n-tab-pane name="tasks" tab="导入任务">
       <n-space class="toolbar" align="center">
-        <n-select v-model:value="query.tenantId" :options="tenantOptionsWithAll" clearable filterable placeholder="账号归属" class="tenant-select" @update:value="handleQueryTenantChange" />
-        <n-select v-model:value="query.accountId" :options="queryAccountOptionsWithAll" clearable filterable placeholder="上架账号" class="tenant-select" />
-        <n-input v-model:value="query.keyword" placeholder="域名 / 账号 / 备注" clearable @keyup.enter="loadTasks" />
+        <n-select
+          v-model:value="query.tenantId"
+          :options="tenantOptionsWithAll"
+          clearable
+          filterable
+          placeholder="账号归属"
+          class="tenant-select"
+          @update:value="handleQueryTenantChange"
+        />
+        <n-select
+          v-model:value="query.accountId"
+          :options="queryAccountOptionsWithAll"
+          clearable
+          filterable
+          placeholder="上架账号"
+          class="tenant-select"
+        />
+        <n-input
+          v-model:value="query.keyword"
+          placeholder="域名 / 账号 / 备注"
+          clearable
+          @keyup.enter="loadTasks"
+        />
         <n-button @click="loadTasks">查询</n-button>
         <n-button type="primary" @click="openCreateModal">新建导入</n-button>
         <n-button @click="loadTasks">刷新</n-button>
       </n-space>
-      <n-data-table :columns="taskColumns" :data="tasks" :loading="loading" :pagination="taskPagination" :row-key="(row) => row.id" :scroll-x="1420" size="small" remote />
+      <n-data-table
+        :columns="taskColumns"
+        :data="tasks"
+        :loading="loading"
+        :pagination="taskPagination"
+        :row-key="(row) => row.id"
+        :scroll-x="1420"
+        size="small"
+        remote
+      />
     </n-tab-pane>
 
     <n-tab-pane name="runs" tab="导入记录">
       <div class="run-filter">
         <div class="run-filter-grid">
-          <n-select v-model:value="runQuery.tenantId" :options="tenantOptionsWithAll" clearable filterable placeholder="账号归属" @update:value="handleRunTenantChange" />
-          <n-select v-model:value="runQuery.accountId" :options="runAccountOptionsWithAll" clearable filterable placeholder="上架账号" />
-          <n-select v-model:value="runQuery.runType" :options="runTypeOptionsWithAll" clearable placeholder="类型" />
-          <n-select v-model:value="runQuery.status" :options="statusOptionsWithAll" clearable placeholder="状态" />
-          <n-input v-model:value="runQuery.keyword" placeholder="域名 / 账号" clearable @keyup.enter="loadRuns" />
+          <n-select
+            v-model:value="runQuery.tenantId"
+            :options="tenantOptionsWithAll"
+            clearable
+            filterable
+            placeholder="账号归属"
+            @update:value="handleRunTenantChange"
+          />
+          <n-select
+            v-model:value="runQuery.accountId"
+            :options="runAccountOptionsWithAll"
+            clearable
+            filterable
+            placeholder="上架账号"
+          />
+          <n-select
+            v-model:value="runQuery.runType"
+            :options="runTypeOptionsWithAll"
+            clearable
+            placeholder="类型"
+          />
+          <n-select
+            v-model:value="runQuery.status"
+            :options="statusOptionsWithAll"
+            clearable
+            placeholder="状态"
+          />
+          <n-input
+            v-model:value="runQuery.keyword"
+            placeholder="域名 / 账号"
+            clearable
+            @keyup.enter="loadRuns"
+          />
           <n-space class="filter-actions" justify="end">
             <n-button @click="loadRuns">查询</n-button>
             <n-button @click="loadRuns">刷新</n-button>
           </n-space>
         </div>
       </div>
-      <n-data-table :columns="runColumns" :data="runs" :loading="runLoading" :pagination="runPagination" :row-key="(row) => row.id" :scroll-x="2140" size="small" remote />
+      <n-data-table
+        :columns="runColumns"
+        :data="runs"
+        :loading="runLoading"
+        :pagination="runPagination"
+        :row-key="(row) => row.id"
+        :scroll-x="2140"
+        size="small"
+        remote
+      />
     </n-tab-pane>
   </n-tabs>
 
-  <n-modal v-model:show="modalVisible" preset="dialog" :title="taskModalTitle" positive-text="保存" negative-text="取消" @positive-click="createTask">
+  <n-modal
+    v-model:show="modalVisible"
+    preset="dialog"
+    :title="taskModalTitle"
+    positive-text="保存"
+    negative-text="取消"
+    @positive-click="createTask"
+  >
     <n-form :model="form" label-placement="left" label-width="110">
       <n-form-item label="账号归属">
-        <n-select v-model:value="form.tenantId" :options="tenantOptions" filterable placeholder="请选择账号归属" @update:value="handleFormTenantChange" />
+        <n-select
+          v-model:value="form.tenantId"
+          :options="tenantOptions"
+          filterable
+          placeholder="请选择账号归属"
+          @update:value="handleFormTenantChange"
+        />
       </n-form-item>
       <n-form-item label="导入账号">
-        <n-select v-model:value="form.accountId" :options="formAccountOptions" filterable placeholder="请选择导入到哪个上架账号" />
+        <n-select
+          v-model:value="form.accountId"
+          :options="formAccountOptions"
+          filterable
+          placeholder="请选择导入到哪个上架账号"
+        />
       </n-form-item>
       <n-form-item label="旧站域名">
         <n-input v-model:value="form.baseUrl" clearable placeholder="https://example.com" />
       </n-form-item>
       <n-form-item label="服务器 IP">
-        <n-input v-model:value="form.serverIp" clearable placeholder="DNS失效时填写，例如 154.26.238.214" />
+        <n-input
+          v-model:value="form.serverIp"
+          clearable
+          placeholder="DNS失效时填写，例如 154.26.238.214"
+        />
       </n-form-item>
       <n-form-item label="旧站账号">
         <n-input v-model:value="form.username" clearable />
       </n-form-item>
       <n-form-item label="旧站密码">
-        <n-input v-model:value="form.password" type="password" show-password-on="click" :placeholder="form.id ? '留空表示不修改密码' : ''" />
+        <n-input
+          v-model:value="form.password"
+          type="password"
+          show-password-on="click"
+          :placeholder="form.id ? '留空表示不修改密码' : ''"
+        />
       </n-form-item>
       <n-form-item label="旧站Cookie">
-        <n-input v-model:value="form.legacyCookie" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" placeholder="可填写 Cookie 或完整 Set-Cookie，留空表示不修改" />
+        <n-input
+          v-model:value="form.legacyCookie"
+          type="textarea"
+          :autosize="{ minRows: 3, maxRows: 6 }"
+          placeholder="可填写 Cookie 或完整 Set-Cookie，留空表示不修改"
+        />
       </n-form-item>
       <n-form-item label="测试数量">
         <n-input-number v-model:value="form.limitCount" :min="0" :max="100000" class="w-full" />
@@ -70,19 +168,45 @@
           </n-space>
         </n-radio-group>
       </n-form-item>
+      <n-form-item label="关联频道">
+        <n-select
+          v-model:value="form.channelIds"
+          :options="formChannelOptions"
+          multiple
+          filterable
+          clearable
+          placeholder="可选，导入后用于TG消息匹配和资料频道归属"
+        />
+      </n-form-item>
       <n-form-item label="代理池">
         <n-space vertical class="w-full">
           <n-switch v-model:value="proxyEnabled" />
-          <n-input v-model:value="form.proxyPool" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" placeholder="一行一个代理地址" />
+          <n-input
+            v-model:value="form.proxyPool"
+            type="textarea"
+            :autosize="{ minRows: 3, maxRows: 6 }"
+            placeholder="一行一个代理地址"
+          />
         </n-space>
       </n-form-item>
       <n-form-item label="备注">
-        <n-input v-model:value="form.remark" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" />
+        <n-input
+          v-model:value="form.remark"
+          type="textarea"
+          :autosize="{ minRows: 2, maxRows: 4 }"
+        />
       </n-form-item>
     </n-form>
   </n-modal>
 
-  <n-modal v-model:show="runModalVisible" preset="dialog" title="创建导入记录" positive-text="创建并入队" negative-text="取消" @positive-click="createRun">
+  <n-modal
+    v-model:show="runModalVisible"
+    preset="dialog"
+    title="创建导入记录"
+    positive-text="创建并入队"
+    negative-text="取消"
+    @positive-click="createRun"
+  >
     <n-form :model="runForm" label-placement="left" label-width="90">
       <n-form-item label="执行类型">
         <n-radio-group v-model:value="runForm.runType">
@@ -112,12 +236,39 @@
           </n-space>
         </n-radio-group>
       </n-form-item>
+      <n-form-item v-if="runForm.runType !== 'scan'" label="TG匹配">
+        <n-space vertical class="w-full">
+          <n-switch v-model:value="runTgMatchEnabled" />
+          <template v-if="runTgMatchEnabled">
+            <n-select
+              v-model:value="runForm.channelIds"
+              :options="runChannelOptions"
+              multiple
+              filterable
+              clearable
+              placeholder="选择需要匹配的上架频道"
+            />
+            <n-input-number
+              v-model:value="runForm.tgMatchDays"
+              :min="1"
+              :max="365"
+              class="w-full"
+              placeholder="拉取最近多少天TG媒体消息"
+            />
+          </template>
+        </n-space>
+      </n-form-item>
     </n-form>
   </n-modal>
 
   <n-modal v-model:show="logModalVisible" preset="card" :title="logModalTitle" class="log-modal">
     <n-collapse v-if="groupedLogs.length" class="log-groups">
-      <n-collapse-item v-for="group in groupedLogs" :key="group.sourceNoteId" :title="group.title" :name="group.sourceNoteId">
+      <n-collapse-item
+        v-for="group in groupedLogs"
+        :key="group.sourceNoteId"
+        :title="group.title"
+        :name="group.sourceNoteId"
+      >
         <n-data-table
           :columns="logColumns"
           :data="group.items"
@@ -151,6 +302,7 @@
   import { NButton, NProgress, NSpace, NTag, useMessage } from 'naive-ui';
   import {
     AccountList,
+    ChannelList,
     ImportRunCancel,
     ImportRunCreate,
     ImportRunDelete,
@@ -172,16 +324,28 @@
   const runModalVisible = ref(false);
   const logModalVisible = ref(false);
   const proxyEnabled = ref(false);
+  const runTgMatchEnabled = ref(false);
   const tasks = ref<Recordable[]>([]);
   const runs = ref<Recordable[]>([]);
   const logs = ref<Recordable[]>([]);
   const tenants = ref<Recordable[]>([]);
   const accounts = ref<Recordable[]>([]);
+  const channels = ref<Recordable[]>([]);
   const currentTaskId = ref<number | null>(null);
   const currentRunId = ref<number | null>(null);
 
-  const query = reactive({ tenantId: null as number | null, accountId: null as number | null, keyword: '' });
-  const runQuery = reactive({ tenantId: null as number | null, accountId: null as number | null, runType: undefined as string | undefined, status: undefined as string | undefined, keyword: '' });
+  const query = reactive({
+    tenantId: null as number | null,
+    accountId: null as number | null,
+    keyword: '',
+  });
+  const runQuery = reactive({
+    tenantId: null as number | null,
+    accountId: null as number | null,
+    runType: undefined as string | undefined,
+    status: undefined as string | undefined,
+    keyword: '',
+  });
   const form = reactive({
     id: null as number | null,
     sourceName: 'lyy_cms',
@@ -196,11 +360,19 @@
     perPage: 12,
     mediaConcurrency: 4,
     importMode: 'incremental',
+    channelIds: [] as number[],
     proxyEnabled: 0,
     proxyPool: '',
     remark: '',
   });
-  const runForm = reactive({ runType: 'scan', scanMode: 'recent', recentCount: 100, importMode: 'incremental' });
+  const runForm = reactive({
+    runType: 'scan',
+    scanMode: 'recent',
+    recentCount: 100,
+    importMode: 'incremental',
+    tgMatchDays: 180,
+    channelIds: [] as number[],
+  });
 
   const taskPagination = reactive({
     page: 1,
@@ -236,8 +408,12 @@
   });
   const logPagination = reactive({ pageSize: 10 });
   const currentRun = computed(() => runs.value.find((item) => item.id === currentRunId.value));
-  const logModalTitle = computed(() => (currentRun.value ? `执行日志 #${currentRun.value.id}` : '执行日志'));
-  const normalizedLogs = computed(() => logs.value.map((item) => ({ ...item, parsedContext: parseLogContext(item.context) })));
+  const logModalTitle = computed(() =>
+    currentRun.value ? `执行日志 #${currentRun.value.id}` : '执行日志'
+  );
+  const normalizedLogs = computed(() =>
+    logs.value.map((item) => ({ ...item, parsedContext: parseLogContext(item.context) }))
+  );
   const groupedLogs = computed(() => {
     const groups = new Map<number, Recordable[]>();
     normalizedLogs.value.forEach((item) => {
@@ -252,7 +428,9 @@
       items,
     }));
   });
-  const ungroupedLogs = computed(() => normalizedLogs.value.filter((item) => Number(item.parsedContext?.sourceNoteId || 0) <= 0));
+  const ungroupedLogs = computed(() =>
+    normalizedLogs.value.filter((item) => Number(item.parsedContext?.sourceNoteId || 0) <= 0)
+  );
 
   const statusOptions = [
     { label: '待执行', value: 'pending' },
@@ -266,15 +444,37 @@
     { label: '补全', value: 'repair' },
     { label: '仅扫描', value: 'scan' },
   ];
-  const statusOptionsWithAll = computed(() => [{ label: '全部状态', value: undefined }, ...statusOptions]);
-  const runTypeOptionsWithAll = computed(() => [{ label: '全部类型', value: undefined }, ...runTypeOptions]);
-  const tenantOptions = computed(() => tenants.value.map((item) => ({ label: accountOwnerName(item), value: item.id })));
-  const tenantOptionsWithAll = computed(() => [{ label: '全部账号归属', value: null }, ...tenantOptions.value]);
+  const statusOptionsWithAll = computed(() => [
+    { label: '全部状态', value: undefined },
+    ...statusOptions,
+  ]);
+  const runTypeOptionsWithAll = computed(() => [
+    { label: '全部类型', value: undefined },
+    ...runTypeOptions,
+  ]);
+  const tenantOptions = computed(() =>
+    tenants.value.map((item) => ({ label: accountOwnerName(item), value: item.id }))
+  );
+  const tenantOptionsWithAll = computed(() => [
+    { label: '全部账号归属', value: null },
+    ...tenantOptions.value,
+  ]);
   const queryAccountOptions = computed(() => accountOptionsByTenant(query.tenantId));
-  const queryAccountOptionsWithAll = computed(() => [{ label: '全部上架账号', value: null }, ...queryAccountOptions.value]);
+  const queryAccountOptionsWithAll = computed(() => [
+    { label: '全部上架账号', value: null },
+    ...queryAccountOptions.value,
+  ]);
   const runAccountOptions = computed(() => accountOptionsByTenant(runQuery.tenantId));
-  const runAccountOptionsWithAll = computed(() => [{ label: '全部上架账号', value: null }, ...runAccountOptions.value]);
+  const runAccountOptionsWithAll = computed(() => [
+    { label: '全部上架账号', value: null },
+    ...runAccountOptions.value,
+  ]);
   const formAccountOptions = computed(() => accountOptionsByTenant(form.tenantId));
+  const formChannelOptions = computed(() => channelOptionsByTenant(form.tenantId));
+  const runChannelOptions = computed(() => {
+    const task = tasks.value.find((item) => item.id === currentTaskId.value);
+    return channelOptionsByTenant(task?.tenantId || null);
+  });
   const taskModalTitle = computed(() => (form.id ? '修改导入任务' : '新建导入任务'));
 
   const taskColumns = [
@@ -296,13 +496,29 @@
       width: 220,
       fixed: 'right',
       render(row) {
-        return h(NSpace, { size: 8 }, {
-          default: () => [
-            h(NButton, { size: 'small', onClick: () => openEditModal(row) }, { default: () => '修改' }),
-            h(NButton, { size: 'small', onClick: () => openRunModal(row.id, 'scan') }, { default: () => '仅扫描' }),
-            h(NButton, { size: 'small', type: 'primary', onClick: () => openRunModal(row.id, 'import') }, { default: () => '导入资料' }),
-          ],
-        });
+        return h(
+          NSpace,
+          { size: 8 },
+          {
+            default: () => [
+              h(
+                NButton,
+                { size: 'small', onClick: () => openEditModal(row) },
+                { default: () => '修改' }
+              ),
+              h(
+                NButton,
+                { size: 'small', onClick: () => openRunModal(row.id, 'scan') },
+                { default: () => '仅扫描' }
+              ),
+              h(
+                NButton,
+                { size: 'small', type: 'primary', onClick: () => openRunModal(row.id, 'import') },
+                { default: () => '导入资料' }
+              ),
+            ],
+          }
+        );
       },
     },
   ];
@@ -310,7 +526,13 @@
   const runColumns = [
     { title: 'ID', key: 'id', width: 80 },
     { title: '任务ID', key: 'taskId', width: 90 },
-    { title: '类型', key: 'runType', width: 90, render: (row) => runTypeOptions.find((item) => item.value === row.runType)?.label || row.runType },
+    {
+      title: '类型',
+      key: 'runType',
+      width: 90,
+      render: (row) =>
+        runTypeOptions.find((item) => item.value === row.runType)?.label || row.runType,
+    },
     { title: '账号归属', key: 'tenantName', width: 150 },
     { title: '旧站域名', key: 'baseUrl', width: 220, ellipsis: { tooltip: true } },
     { title: '旧站账号', key: 'username', width: 140 },
@@ -320,15 +542,42 @@
       key: 'status',
       width: 100,
       render(row) {
-        const map = { pending: ['default', '待执行'], running: ['warning', '执行中'], success: ['success', '成功'], failed: ['error', '失败'], canceled: ['default', '已取消'] };
+        const map = {
+          pending: ['default', '待执行'],
+          running: ['warning', '执行中'],
+          success: ['success', '成功'],
+          failed: ['error', '失败'],
+          canceled: ['default', '已取消'],
+        };
         const item = map[row.status] || ['default', row.status || '-'];
         return h(NTag, { type: item[0] as any, bordered: false }, { default: () => item[1] });
       },
     },
     { title: '阶段', key: 'stage', width: 110 },
-    { title: '进度', key: 'percent', width: 170, render: (row) => h(NProgress, { type: 'line', percentage: Math.min(100, Math.round(row.percent || 0)), indicatorPlacement: 'inside', processing: row.status === 'running' }) },
-    { title: '资料', key: 'itemDone', width: 110, render: (row) => `${row.itemDone || 0}/${row.itemTotal || 0}` },
-    { title: '媒体', key: 'mediaDone', width: 110, render: (row) => `${row.mediaDone || 0}/${row.mediaTotal || 0}` },
+    {
+      title: '进度',
+      key: 'percent',
+      width: 170,
+      render: (row) =>
+        h(NProgress, {
+          type: 'line',
+          percentage: Math.min(100, Math.round(row.percent || 0)),
+          indicatorPlacement: 'inside',
+          processing: row.status === 'running',
+        }),
+    },
+    {
+      title: '资料',
+      key: 'itemDone',
+      width: 110,
+      render: (row) => `${row.itemDone || 0}/${row.itemTotal || 0}`,
+    },
+    {
+      title: '媒体',
+      key: 'mediaDone',
+      width: 110,
+      render: (row) => `${row.mediaDone || 0}/${row.mediaTotal || 0}`,
+    },
     { title: '未迁移存储', key: 'mediaMissingStorage', width: 120 },
     { title: 'TG匹配', key: 'tgMatched', width: 100 },
     { title: '错误', key: 'errorMessage', width: 240, ellipsis: { tooltip: true } },
@@ -342,14 +591,43 @@
       width: 230,
       fixed: 'right',
       render(row) {
-        return h(NSpace, { size: 8 }, {
-          default: () => [
-            h(NButton, { size: 'small', onClick: () => openLogs(row.id) }, { default: () => '日志' }),
-            h(NButton, { size: 'small', disabled: row.status !== 'running' && row.status !== 'pending', onClick: () => cancelRun(row.id) }, { default: () => '取消' }),
-            h(NButton, { size: 'small', disabled: row.status === 'running', onClick: () => retryRun(row) }, { default: () => '重试' }),
-            h(NButton, { size: 'small', type: 'error', disabled: row.status === 'running', onClick: () => deleteRun(row.id) }, { default: () => '删除' }),
-          ],
-        });
+        return h(
+          NSpace,
+          { size: 8 },
+          {
+            default: () => [
+              h(
+                NButton,
+                { size: 'small', onClick: () => openLogs(row.id) },
+                { default: () => '日志' }
+              ),
+              h(
+                NButton,
+                {
+                  size: 'small',
+                  disabled: row.status !== 'running' && row.status !== 'pending',
+                  onClick: () => cancelRun(row.id),
+                },
+                { default: () => '取消' }
+              ),
+              h(
+                NButton,
+                { size: 'small', disabled: row.status === 'running', onClick: () => retryRun(row) },
+                { default: () => '重试' }
+              ),
+              h(
+                NButton,
+                {
+                  size: 'small',
+                  type: 'error',
+                  disabled: row.status === 'running',
+                  onClick: () => deleteRun(row.id),
+                },
+                { default: () => '删除' }
+              ),
+            ],
+          }
+        );
       },
     },
   ];
@@ -358,12 +636,19 @@
     { title: '级别', key: 'level', width: 80 },
     { title: '阶段', key: 'stage', width: 100 },
     { title: '内容', key: 'message', width: 520, ellipsis: { tooltip: true } },
-    { title: '上下文', key: 'context', width: 160, ellipsis: { tooltip: true }, render: (row) => renderLogContext(row) },
+    {
+      title: '上下文',
+      key: 'context',
+      width: 160,
+      ellipsis: { tooltip: true },
+      render: (row) => renderLogContext(row),
+    },
   ];
 
   onMounted(async () => {
     await loadTenants();
     await loadAccounts();
+    await loadChannels();
     await loadTasks();
   });
 
@@ -377,14 +662,33 @@
   }
 
   async function loadAccounts() {
-    const res: any = await AccountList({ page: 1, perPage: 200, accountType: 'uploader', status: 1 });
+    const res: any = await AccountList({
+      page: 1,
+      perPage: 200,
+      accountType: 'uploader',
+      status: 1,
+    });
     accounts.value = res?.list || [];
+  }
+
+  async function loadChannels() {
+    const res: any = await ChannelList({
+      page: 1,
+      perPage: 200,
+      publishDirection: 'up',
+      status: 1,
+    });
+    channels.value = res?.list || [];
   }
 
   async function loadTasks() {
     loading.value = true;
     try {
-      const res: any = await ImportTaskList({ ...query, page: taskPagination.page, perPage: taskPagination.pageSize });
+      const res: any = await ImportTaskList({
+        ...query,
+        page: taskPagination.page,
+        perPage: taskPagination.pageSize,
+      });
       tasks.value = res?.list || [];
       taskPagination.itemCount = res?.totalCount || res?.total || 0;
     } finally {
@@ -395,7 +699,11 @@
   async function loadRuns() {
     runLoading.value = true;
     try {
-      const res: any = await ImportRunList({ ...runQuery, page: runPagination.page, perPage: runPagination.pageSize });
+      const res: any = await ImportRunList({
+        ...runQuery,
+        page: runPagination.page,
+        perPage: runPagination.pageSize,
+      });
       runs.value = res?.list || [];
       runPagination.itemCount = res?.totalCount || res?.total || 0;
     } finally {
@@ -426,6 +734,7 @@
     form.perPage = data.perPage ?? 12;
     form.mediaConcurrency = data.mediaConcurrency ?? 4;
     form.importMode = getTaskImportMode(data);
+    form.channelIds = decodeIdJson(data.channelIdJson);
     form.proxyEnabled = data.proxyEnabled || 0;
     form.proxyPool = data.proxyPool || '';
     form.remark = data.remark || '';
@@ -468,6 +777,7 @@
     form.perPage = 12;
     form.mediaConcurrency = 4;
     form.importMode = 'incremental';
+    form.channelIds = [];
     form.proxyEnabled = 0;
     form.proxyPool = '';
     form.remark = '';
@@ -479,7 +789,7 @@
     try {
       const data = JSON.parse(row.resultJson);
       return data?.importMode === 'overwrite' ? 'overwrite' : 'incremental';
-    } catch (e) {
+    } catch {
       return 'incremental';
     }
   }
@@ -490,19 +800,39 @@
     runForm.scanMode = 'recent';
     runForm.recentCount = 100;
     runForm.importMode = 'incremental';
+    runForm.tgMatchDays = 180;
+    runForm.channelIds = decodeIdJson(
+      tasks.value.find((item) => item.id === taskId)?.channelIdJson
+    );
+    runTgMatchEnabled.value = false;
     runModalVisible.value = true;
   }
 
   async function createRun() {
     if (!currentTaskId.value) return false;
-    await ImportRunCreate({ taskId: currentTaskId.value, ...runForm });
+    const tgMatchEnabled = runForm.runType !== 'scan' && runTgMatchEnabled.value;
+    if (tgMatchEnabled && runForm.channelIds.length === 0) {
+      message.warning('请选择需要匹配的TG频道');
+      return false;
+    }
+    await ImportRunCreate({
+      taskId: currentTaskId.value,
+      ...runForm,
+      tgMatchEnabled: tgMatchEnabled ? 1 : 0,
+    });
     message.success('导入记录已创建并入队');
     activeTab.value = 'runs';
     await loadRuns();
   }
 
   async function retryRun(row: Recordable) {
-    await ImportRunCreate({ taskId: row.taskId, runType: row.runType, scanMode: row.scanMode, recentCount: row.recentCount, importMode: row.importMode });
+    await ImportRunCreate({
+      taskId: row.taskId,
+      runType: row.runType,
+      scanMode: row.scanMode,
+      recentCount: row.recentCount,
+      importMode: row.importMode,
+    });
     message.success('已创建新的重试记录');
     await loadRuns();
   }
@@ -540,7 +870,7 @@
     if (!value) return {};
     try {
       return JSON.parse(value);
-    } catch (e) {
+    } catch {
       return {};
     }
   }
@@ -549,7 +879,8 @@
     const context = row.parsedContext || parseLogContext(row.context);
     const parts = [];
     if (context.index && context.total) parts.push(`${context.index}/${context.total}`);
-    if (context.mediaImported !== undefined && context.mediaTotal !== undefined) parts.push(`媒体 ${context.mediaImported}/${context.mediaTotal}`);
+    if (context.mediaImported !== undefined && context.mediaTotal !== undefined)
+      parts.push(`媒体 ${context.mediaImported}/${context.mediaTotal}`);
     if (context.size) parts.push(`${context.size}B`);
     if (context.path) parts.push(context.path);
     if (context.title) parts.push(context.title);
@@ -574,16 +905,41 @@
 
   function handleFormTenantChange() {
     form.accountId = null;
+    form.channelIds = [];
   }
 
   function accountOptionsByTenant(tenantId: number | null) {
     return accounts.value
       .filter((item) => !tenantId || item.tenantId === tenantId)
-      .map((item) => ({ label: `${item.nickname || item.username} (${item.username})`, value: item.id }));
+      .map((item) => ({
+        label: `${item.nickname || item.username} (${item.username})`,
+        value: item.id,
+      }));
+  }
+
+  function channelOptionsByTenant(tenantId: number | null) {
+    return channels.value
+      .filter((item) => !tenantId || item.tenantId === tenantId)
+      .map((item) => ({
+        label: `${item.channelTitle || item.channelUsername || item.targetChatId} (${item.targetChatId})`,
+        value: item.id,
+      }));
+  }
+
+  function decodeIdJson(value: string) {
+    if (!value) return [];
+    try {
+      const data = JSON.parse(value);
+      return Array.isArray(data) ? data.map((item) => Number(item)).filter((item) => item > 0) : [];
+    } catch {
+      return [];
+    }
   }
 
   function accountOwnerName(item: Recordable) {
-    return item.username ? `${item.name || item.tenantName || item.username} (${item.username})` : item.name || '-';
+    return item.username
+      ? `${item.name || item.tenantName || item.username} (${item.username})`
+      : item.name || '-';
   }
 </script>
 
@@ -602,7 +958,9 @@
 
   .run-filter-grid {
     display: grid;
-    grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(120px, 0.7fr) minmax(120px, 0.7fr) minmax(220px, 1.2fr) auto;
+    grid-template-columns:
+      minmax(180px, 1fr) minmax(180px, 1fr) minmax(120px, 0.7fr) minmax(120px, 0.7fr)
+      minmax(220px, 1.2fr) auto;
     gap: 12px;
     align-items: center;
   }

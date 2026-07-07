@@ -474,6 +474,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_message_cache" (
   "target_chat_id" varchar(128) NOT NULL DEFAULT '',
   "tg_message_id" bigint NOT NULL DEFAULT 0,
   "message_text" text,
+  "media_type" varchar(32) NOT NULL DEFAULT '',
   "message_date" timestamp DEFAULT NULL,
   "media_group_id" varchar(128) NOT NULL DEFAULT '',
   "created_at" timestamp DEFAULT NULL,
@@ -481,6 +482,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_message_cache" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_msg_cache_msg" ON "hg_youban_publish_tg_message_cache" ("tenant_id", "channel_id", "tg_message_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_msg_cache_channel" ON "hg_youban_publish_tg_message_cache" ("tenant_id", "tg_account_id", "channel_id", "message_date");
+ALTER TABLE "hg_youban_publish_tg_message_cache" ADD COLUMN IF NOT EXISTS "media_type" varchar(32) NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_job_log" (
   "id" BIGSERIAL PRIMARY KEY,

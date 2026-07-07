@@ -603,23 +603,6 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 		}
 		return &sysin.ProfileStatusModel{Message: "资料已提交上架"}, nil
 	}
-	repairRunIds, err := s.startMissingTelegramMessageRepairsForDown(ctx, ids, tenantId, accountId)
-	if err != nil {
-		return nil, err
-	}
-	repairIds := make(map[int64]struct{}, len(repairRunIds))
-	for _, runId := range repairRunIds {
-		if runId <= 0 {
-			continue
-		}
-		profileId, findErr := s.tgMessageRepairRunProfileId(ctx, runId)
-		if findErr != nil {
-			return nil, findErr
-		}
-		if profileId > 0 {
-			repairIds[profileId] = struct{}{}
-		}
-	}
 	columns := dao.ContentProfile.Columns()
 	data := g.Map{columns.Status: in.Status, columns.UpdatedAt: gtime.Now()}
 	data[columns.Visibility] = consts.ContentVisibilityPrivate
@@ -637,24 +620,11 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 			return nil, err
 		}
 	}
-	asyncDownIds := make([]int64, 0, len(ids))
-	for _, id := range ids {
-		if _, ok := repairIds[id]; ok {
-			continue
-		}
-		asyncDownIds = append(asyncDownIds, id)
-	}
-	if err = s.enqueueProfileDownRun(ctx, tenantId, asyncDownIds, 0); err != nil {
+	if err = s.enqueueProfileDownRun(ctx, tenantId, ids, 0); err != nil {
 		return nil, gerror.Wrap(err, "加入资料下架队列失败")
 	}
 	iservice.SysContent().ClearHomeProfileCardsCache(ctx)
-	out := &sysin.ProfileStatusModel{Message: "资料已下架，TG消息将在后台清理"}
-	if len(repairRunIds) > 0 {
-		out.NeedRepair = 1
-		out.RepairRunId = repairRunIds[0]
-		out.Message = "资料已下架，导入资料TG消息将在后台修复并清理"
-	}
-	return out, nil
+	return &sysin.ProfileStatusModel{Message: "资料已下架，已有TG消息将在后台清理"}, nil
 }
 
 func (s *sSysPublish) submitProfilesByIds(ctx context.Context, ids []int64, tenantId int64, accountId int64) error {

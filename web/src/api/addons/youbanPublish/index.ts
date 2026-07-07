@@ -20,6 +20,10 @@ export function AccountList(params = {}) {
   return http.request({ url: '/youban_publish/publish/account/list', method: 'get', params });
 }
 
+export function ChannelList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/channel/list', method: 'get', params });
+}
+
 export function AccountSave(params = {}) {
   return http.request({ url: '/youban_publish/publish/account/save', method: 'POST', params });
 }
@@ -117,7 +121,11 @@ export function ImportRunLogList(params = {}) {
 }
 
 export function ImportRunLogClear(params = {}) {
-  return http.request({ url: '/youban_publish/publish/importRun/clearLogs', method: 'POST', params });
+  return http.request({
+    url: '/youban_publish/publish/importRun/clearLogs',
+    method: 'POST',
+    params,
+  });
 }
 
 export function TagList(params = {}) {

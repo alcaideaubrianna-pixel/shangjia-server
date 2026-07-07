@@ -706,6 +706,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_message_cache` (
   `target_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '目标Chat ID',
   `tg_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG消息ID',
   `message_text` text COMMENT '消息文本',
+  `media_type` varchar(32) NOT NULL DEFAULT '' COMMENT '媒体类型',
   `message_date` datetime DEFAULT NULL COMMENT '消息时间',
   `media_group_id` varchar(128) NOT NULL DEFAULT '' COMMENT '媒体组ID',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
