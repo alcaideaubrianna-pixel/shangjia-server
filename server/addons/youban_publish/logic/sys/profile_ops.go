@@ -85,10 +85,10 @@ func (s *sSysPublish) MyProfileDelete(ctx context.Context, in *sysin.ProfileDele
 	return s.deleteProfiles(ctx, in, account.TenantId, account.Id)
 }
 
-func (s *sSysPublish) MyProfileStatus(ctx context.Context, in *sysin.ProfileStatusInp) (err error) {
+func (s *sSysPublish) MyProfileStatus(ctx context.Context, in *sysin.ProfileStatusInp) (res *sysin.ProfileStatusModel, err error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	return s.updateProfileStatus(ctx, in, account.TenantId, account.Id)
 }
@@ -202,10 +202,10 @@ func (s *sSysPublish) AdminProfileDelete(ctx context.Context, in *sysin.ProfileD
 	return s.deleteProfiles(ctx, in, account.TenantId, 0)
 }
 
-func (s *sSysPublish) AdminProfileStatus(ctx context.Context, in *sysin.ProfileStatusInp) (err error) {
+func (s *sSysPublish) AdminProfileStatus(ctx context.Context, in *sysin.ProfileStatusInp) (res *sysin.ProfileStatusModel, err error) {
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	return s.updateProfileStatus(ctx, in, account.TenantId, 0)
 }
@@ -583,56 +583,92 @@ func (s *sSysPublish) handleProfilesDownBeforeDelete(ctx context.Context, ids []
 	return nil
 }
 
-func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.ProfileStatusInp, tenantId int64, accountId int64) (err error) {
+func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.ProfileStatusInp, tenantId int64, accountId int64) (res *sysin.ProfileStatusModel, err error) {
 	if in == nil || (len(in.Ids) == 0 && len(in.Uuids) == 0) {
-		return gerror.New("请选择要处理的资料")
+		return nil, gerror.New("请选择要处理的资料")
 	}
 	if in.Status != 1 && in.Status != 2 {
-		return gerror.New("资料状态不合法")
+		return nil, gerror.New("资料状态不合法")
 	}
 	targetIds, err := s.allowedProfileTargetIds(ctx, in.Ids, in.Uuids, tenantId, accountId)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ids, err := s.allowedProfileIds(ctx, targetIds, tenantId, accountId)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(ids) == 0 {
-		return gerror.New("资料不存在或无权操作")
+		return nil, gerror.New("资料不存在或无权操作")
+	}
+	if in.Status == 1 {
+		if err = s.submitProfilesByIds(ctx, ids, tenantId, accountId); err != nil {
+			return nil, err
+		}
+		return &sysin.ProfileStatusModel{Message: "资料已提交上架"}, nil
 	}
 	var downPlan *profileDownPlan
-	if in.Status == 2 {
-		if downPlan, err = s.prepareProfileDownPlan(ctx, tenantId); err != nil {
-			return err
-		}
+	if downPlan, err = s.prepareProfileDownPlan(ctx, tenantId); err != nil {
+		return nil, err
+	}
+	repairRunId, err := s.startMissingTelegramMessageRepairForDown(ctx, ids, tenantId, accountId)
+	if err != nil {
+		return nil, err
+	}
+	if repairRunId > 0 {
+		return &sysin.ProfileStatusModel{
+			NeedRepair:  1,
+			RepairRunId: repairRunId,
+			Message:     "正在修复导入资料的TG消息记录，修复完成后会自动下架",
+		}, nil
 	}
 	columns := dao.ContentProfile.Columns()
 	data := g.Map{columns.Status: in.Status, columns.UpdatedAt: gtime.Now()}
-	if in.Status == 1 {
-		data[columns.Visibility] = consts.ContentVisibilityPublic
-		data[columns.PublishedAt] = gtime.Now()
-	} else {
-		data[columns.Visibility] = consts.ContentVisibilityPrivate
-	}
+	data[columns.Visibility] = consts.ContentVisibilityPrivate
 	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).Data(data).Update(); err != nil {
-		return gerror.Wrap(err, "更新资料状态失败")
+		return nil, gerror.Wrap(err, "更新资料状态失败")
 	}
-	taskStatus := sysin.PublishTaskStatusPublished
 	taskData := g.Map{
-		"status":     taskStatus,
+		"status":     sysin.PublishTaskStatusCanceled,
 		"updated_by": contexts.GetUserId(ctx),
 		"updated_at": gtime.Now(),
 	}
-	if in.Status == 2 {
-		taskStatus = sysin.PublishTaskStatusCanceled
-		taskData["status"] = taskStatus
-	} else {
-		taskData["published_at"] = gtime.Now()
-	}
 	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).WhereIn("profile_id", ids).Data(taskData).Update()
-	if in.Status == 2 {
-		if err = s.handleProfilesDown(ctx, ids, tenantId, downPlan); err != nil {
+	if err = s.handleProfilesDown(ctx, ids, tenantId, downPlan); err != nil {
+		return nil, err
+	}
+	iservice.SysContent().ClearHomeProfileCardsCache(ctx)
+	return &sysin.ProfileStatusModel{Message: "资料已下架"}, nil
+}
+
+func (s *sSysPublish) submitProfilesByIds(ctx context.Context, ids []int64, tenantId int64, accountId int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Fields("id").
+		WhereIn("profile_id", ids).
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	if accountId > 0 {
+		mod = mod.Where("account_id", accountId)
+	}
+	var rows []struct {
+		Id int64 `orm:"id"`
+	}
+	if err := mod.Scan(&rows); err != nil {
+		return gerror.Wrap(err, "读取资料上架任务失败")
+	}
+	if len(rows) == 0 {
+		return gerror.New("资料缺少上架任务")
+	}
+	for _, row := range rows {
+		if row.Id <= 0 {
+			continue
+		}
+		if err := s.submitTaskByTenant(ctx, row.Id, tenantId, contexts.GetUserId(ctx)); err != nil {
 			return err
 		}
 	}
@@ -885,7 +921,7 @@ func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, acco
 }
 
 func profileListFields() string {
-	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city,p.cup_size AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.admin_remark AS customer_remark,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,tenant.name AS tenant_name,a.nickname,t.channel_id_json,t.anti_scan_enabled"
+	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city,p.cup_size AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.admin_remark AS customer_remark,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,tenant.name AS tenant_name,a.nickname,t.channel_id_json,t.anti_scan_enabled,t.status AS task_status,t.tg_status,t.tg_push_enabled"
 }
 
 func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
@@ -1042,6 +1078,19 @@ func isProfileNoUniqueConstraintError(err error) bool {
 func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, profileId int64, taskId int64, tenantId int64, accountId int64, channelJSON string, tgPushEnabled int, tgStatus string, publishAt *gtime.Time) error {
 	columns := dao.ContentProfile.Columns()
 	now := gtime.Now()
+	current, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).
+		Where(columns.Id, profileId).
+		Fields(columns.Status, columns.PublishedAt, columns.Visibility).
+		One()
+	if err != nil {
+		return gerror.Wrap(err, "读取资料当前状态失败")
+	}
+	nextStatus := in.Status
+	nextVisibility := in.Visibility
+	if current[columns.Status].Int() == 1 && tgPushEnabled == 1 {
+		nextStatus = 1
+		nextVisibility = consts.ContentVisibilityPublic
+	}
 	data := g.Map{
 		columns.Title:           in.Title,
 		columns.Summary:         profileSummary(in.PlainText),
@@ -1049,14 +1098,14 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		columns.Province:        in.Province,
 		columns.City:            in.City,
 		columns.CupSize:         in.Tag,
-		columns.Visibility:      in.Visibility,
+		columns.Visibility:      nextVisibility,
 		columns.AdminRemark:     in.CustomerRemark,
 		columns.SourceUpdateBy:  strconv.FormatInt(accountId, 10),
 		columns.SourceUpdatedAt: now,
-		columns.Status:          in.Status,
+		columns.Status:          nextStatus,
 		columns.UpdatedAt:       now,
 	}
-	if in.Status == 1 && publishAt == nil {
+	if nextStatus == 1 && publishAt == nil {
 		publishAt = now
 	}
 	data[columns.PublishedAt] = publishAt

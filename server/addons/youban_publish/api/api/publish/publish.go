@@ -329,7 +329,27 @@ type AdminProfileStatusReq struct {
 	sysin.ProfileStatusInp
 }
 
-type AdminProfileStatusRes struct{}
+type AdminProfileStatusRes struct {
+	*sysin.ProfileStatusModel
+}
+
+type AdminTgMessageRepairStartReq struct {
+	g.Meta `path:"/publish/admin/profile/messageRepair/start" method:"post" tags:"上架插件管理端" summary:"启动TG消息修复"`
+	sysin.TgMessageRepairStartInp
+}
+
+type AdminTgMessageRepairStartRes struct {
+	*sysin.TgMessageRepairModel
+}
+
+type AdminTgMessageRepairViewReq struct {
+	g.Meta `path:"/publish/admin/profile/messageRepair/view" method:"get" tags:"上架插件管理端" summary:"查看TG消息修复进度"`
+	sysin.TgMessageRepairViewInp
+}
+
+type AdminTgMessageRepairViewRes struct {
+	*sysin.TgMessageRepairModel
+}
 
 type AdminNoteListReq struct {
 	g.Meta `path:"/publish/admin/note/list" method:"get" tags:"上架插件管理端" summary:"笔记列表"`
@@ -595,7 +615,27 @@ type MyProfileStatusReq struct {
 	sysin.ProfileStatusInp
 }
 
-type MyProfileStatusRes struct{}
+type MyProfileStatusRes struct {
+	*sysin.ProfileStatusModel
+}
+
+type MyTgMessageRepairStartReq struct {
+	g.Meta `path:"/publish/profile/messageRepair/start" method:"post" tags:"上架插件" summary:"启动我的TG消息修复"`
+	sysin.TgMessageRepairStartInp
+}
+
+type MyTgMessageRepairStartRes struct {
+	*sysin.TgMessageRepairModel
+}
+
+type MyTgMessageRepairViewReq struct {
+	g.Meta `path:"/publish/profile/messageRepair/view" method:"get" tags:"上架插件" summary:"查看我的TG消息修复进度"`
+	sysin.TgMessageRepairViewInp
+}
+
+type MyTgMessageRepairViewRes struct {
+	*sysin.TgMessageRepairModel
+}
 
 type MyProfileImageSearchReq struct {
 	g.Meta `path:"/publish/profile/image-search" method:"post" mime:"multipart/form-data" tags:"上架插件" summary:"我的资料图片搜索"`

@@ -16,6 +16,7 @@ const (
 	tgTaskTypePublish  = "youban_publish:tg:publish"
 	tgTaskTypeDelete   = "youban_publish:tg:delete"
 	tgTaskTypeImport   = "youban_publish:import:legacy"
+	tgTaskTypeRepair   = "youban_publish:tg:message_repair"
 )
 
 type tgQueuePayload struct {
@@ -24,6 +25,10 @@ type tgQueuePayload struct {
 
 type importQueuePayload struct {
 	Id    int64 `json:"id"`
+	RunId int64 `json:"runId"`
+}
+
+type tgMessageRepairQueuePayload struct {
 	RunId int64 `json:"runId"`
 }
 
@@ -95,6 +100,35 @@ func (s *sSysPublish) enqueueImportRun(ctx context.Context, runId int64, delay t
 		return err
 	}
 	task := asynq.NewTask(tgTaskTypeImport, payload)
+	options := []asynq.Option{
+		asynq.Queue(tgQueueNameDefault),
+		asynq.MaxRetry(0),
+		asynq.Timeout(2 * time.Hour),
+		asynq.Unique(30 * time.Second),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err = client.EnqueueContext(ctx, task, options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	return err
+}
+
+func (s *sSysPublish) enqueueTgMessageRepairRun(ctx context.Context, runId int64, delay time.Duration) error {
+	if runId <= 0 {
+		return nil
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(tgMessageRepairQueuePayload{RunId: runId})
+	if err != nil {
+		return err
+	}
+	task := asynq.NewTask(tgTaskTypeRepair, payload)
 	options := []asynq.Option{
 		asynq.Queue(tgQueueNameDefault),
 		asynq.MaxRetry(0),
@@ -192,6 +226,17 @@ func decodeImportQueuePayload(task *asynq.Task) (importQueuePayload, error) {
 	}
 	if payload.Id <= 0 && payload.RunId <= 0 {
 		return payload, fmt.Errorf("导入队列任务缺少id")
+	}
+	return payload, nil
+}
+
+func decodeTgMessageRepairQueuePayload(task *asynq.Task) (tgMessageRepairQueuePayload, error) {
+	var payload tgMessageRepairQueuePayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return payload, fmt.Errorf("解析TG消息修复队列任务失败: %w", err)
+	}
+	if payload.RunId <= 0 {
+		return payload, fmt.Errorf("TG消息修复队列任务缺少runId")
 	}
 	return payload, nil
 }

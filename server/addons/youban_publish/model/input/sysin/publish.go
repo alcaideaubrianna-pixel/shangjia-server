@@ -547,6 +547,9 @@ type ProfileModel struct {
 	ChannelIdJson   string      `json:"channelIdJson" dc:"推送频道ID JSON"`
 	AntiScanEnabled int         `json:"antiScanEnabled" dc:"是否防扫图处理"`
 	CustomerRemark  string      `json:"customerRemark" dc:"客服备注"`
+	TaskStatus      string      `json:"taskStatus" dc:"上架任务状态"`
+	TgStatus        string      `json:"tgStatus" dc:"TG推送状态"`
+	TgPushEnabled   int         `json:"tgPushEnabled" dc:"是否推送TG"`
 	ProfileNo       string      `json:"profileNo" dc:"资料编号"`
 	Title           string      `json:"title" dc:"标题"`
 	Summary         string      `json:"summary" dc:"摘要"`
@@ -644,6 +647,39 @@ type ProfileStatusInp struct {
 	Ids    []int64  `json:"ids" dc:"资料ID列表"`
 	Uuids  []string `json:"uuids" dc:"资料UUID列表"`
 	Status int      `json:"status" v:"required#状态不能为空" dc:"状态：1上架 2下架"`
+}
+
+type ProfileStatusModel struct {
+	NeedRepair  int    `json:"needRepair" dc:"是否需要修复TG消息"`
+	RepairRunId int64  `json:"repairRunId" dc:"修复任务ID"`
+	Message     string `json:"message" dc:"提示信息"`
+}
+
+type TgMessageRepairStartInp struct {
+	ProfileId int64  `json:"profileId" dc:"资料ID"`
+	Uuid      string `json:"uuid" dc:"资料UUID"`
+}
+
+type TgMessageRepairViewInp struct {
+	RunId int64 `json:"runId" v:"required#修复任务ID不能为空" dc:"修复任务ID"`
+}
+
+type TgMessageRepairModel struct {
+	Id           int64       `json:"id" dc:"ID"`
+	TenantId     int64       `json:"tenantId" dc:"租户ID"`
+	AccountId    int64       `json:"accountId" dc:"账号ID"`
+	ProfileId    int64       `json:"profileId" dc:"资料ID"`
+	TaskId       int64       `json:"taskId" dc:"任务ID"`
+	Status       string      `json:"status" dc:"状态"`
+	Stage        string      `json:"stage" dc:"阶段"`
+	Progress     int         `json:"progress" dc:"进度"`
+	ChannelCount int         `json:"channelCount" dc:"频道数量"`
+	ScannedCount int         `json:"scannedCount" dc:"扫描消息数"`
+	MatchedCount int         `json:"matchedCount" dc:"匹配消息数"`
+	ErrorMessage string      `json:"errorMessage" dc:"错误信息"`
+	CreatedAt    *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt    *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	FinishedAt   *gtime.Time `json:"finishedAt" dc:"完成时间"`
 }
 
 type ProfileReviewInp struct {

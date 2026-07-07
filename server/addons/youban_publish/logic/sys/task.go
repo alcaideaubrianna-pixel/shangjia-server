@@ -11,6 +11,8 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
+	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
 )
 
@@ -214,6 +216,16 @@ func (s *sSysPublish) submitTask(ctx context.Context, id int64, accountId int64)
 	if !canSubmitPublishTask(task) {
 		return gerror.New("已取消的任务不能提交")
 	}
+	if task["tg_push_enabled"].Int() != 1 {
+		return s.markTaskSavedWithoutPublish(ctx, task, contexts.GetUserId(ctx))
+	}
+	hasChannels, err := s.hasPublishChannels(ctx, task)
+	if err != nil {
+		return err
+	}
+	if !hasChannels {
+		return s.markTaskSavedWithoutPublish(ctx, task, contexts.GetUserId(ctx))
+	}
 	_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
 		Where("id", id).
 		Where("tenant_id", task["tenant_id"].Int64()).
@@ -257,6 +269,16 @@ func (s *sSysPublish) submitTaskByTenant(ctx context.Context, id int64, tenantId
 	if !canSubmitPublishTask(task) {
 		return gerror.New("已取消的任务不能提交")
 	}
+	if task["tg_push_enabled"].Int() != 1 {
+		return s.markTaskSavedWithoutPublish(ctx, task, operatorId)
+	}
+	hasChannels, err := s.hasPublishChannels(ctx, task)
+	if err != nil {
+		return err
+	}
+	if !hasChannels {
+		return s.markTaskSavedWithoutPublish(ctx, task, operatorId)
+	}
 	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
 		Where("id", id).
 		WhereNull("deleted_at")
@@ -296,6 +318,60 @@ func (s *sSysPublish) submitTaskByTenant(ctx context.Context, id int64, tenantId
 		return err
 	}
 	return s.ensureTgJob(ctx, id)
+}
+
+func (s *sSysPublish) markTaskSavedWithoutPublish(ctx context.Context, task gdb.Record, operatorId int64) error {
+	if task.IsEmpty() {
+		return nil
+	}
+	_, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Where("id", task["id"].Int64()).
+		WhereNull("deleted_at").
+		Data(g.Map{
+			"status":        sysin.PublishTaskStatusDraft,
+			"tg_status":     "skipped",
+			"error_message": "",
+			"updated_by":    operatorId,
+			"updated_at":    gtime.Now(),
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "保存未上架任务失败")
+	}
+	profileId := task["profile_id"].Int64()
+	if profileId <= 0 {
+		return nil
+	}
+	columns := dao.ContentProfile.Columns()
+	_, err = dao.ContentProfile.Ctx(ctx).
+		Where(columns.Id, profileId).
+		Data(g.Map{
+			columns.Status:     2,
+			columns.Visibility: consts.ContentVisibilityPrivate,
+			columns.UpdatedAt:  gtime.Now(),
+		}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "同步未上架资料状态失败")
+	}
+	return nil
+}
+
+func (s *sSysPublish) hasPublishChannels(ctx context.Context, task gdb.Record) (bool, error) {
+	mod := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Where("tenant_id", task["tenant_id"].Int64()).
+		Where("publish_direction", "up").
+		Where("status", 1).
+		WhereNull("deleted_at")
+	if channelIds := decodeInt64JSON(task["channel_id_json"].String()); len(channelIds) > 0 {
+		mod = mod.WhereIn("id", channelIds)
+	} else {
+		mod = mod.Where("is_default_selected", 1)
+	}
+	count, err := mod.Count()
+	if err != nil {
+		return false, gerror.Wrap(err, "检查上架频道失败")
+	}
+	return count > 0, nil
 }
 
 func canSubmitPublishTask(task gdb.Record) bool {

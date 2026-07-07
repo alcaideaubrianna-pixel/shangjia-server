@@ -97,6 +97,25 @@ type CollectEventProcessReq struct {
 
 type CollectEventProcessRes struct{}
 
+type CollectContentListReq struct {
+	g.Meta `path:"/publish/collect/content/list" method:"get" tags:"上架插件" summary:"采集内容池列表"`
+	sysin.CollectContentListInp
+}
+
+type CollectContentListRes struct {
+	form.PageRes
+	List []*sysin.CollectContentModel `json:"list" dc:"内容池列表"`
+}
+
+type CollectContentViewReq struct {
+	g.Meta `path:"/publish/collect/content/view" method:"get" tags:"上架插件" summary:"采集内容池详情"`
+	sysin.CollectContentViewInp
+}
+
+type CollectContentViewRes struct {
+	*sysin.CollectContentModel
+}
+
 type CollectReviewListReq struct {
 	g.Meta `path:"/publish/collect/review/list" method:"get" tags:"上架插件" summary:"采集审核列表"`
 	sysin.CollectReviewListInp

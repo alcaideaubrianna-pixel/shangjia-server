@@ -435,6 +435,42 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_job" ON "hg_youban_publish_tg_mes
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_task" ON "hg_youban_publish_tg_message" ("task_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_profile" ON "hg_youban_publish_tg_message" ("tenant_id", "account_id", "profile_id");
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_message_repair_run" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "task_id" bigint NOT NULL DEFAULT 0,
+  "status" varchar(32) NOT NULL DEFAULT 'pending',
+  "stage" varchar(32) NOT NULL DEFAULT '',
+  "progress" integer NOT NULL DEFAULT 0,
+  "channel_count" integer NOT NULL DEFAULT 0,
+  "scanned_count" integer NOT NULL DEFAULT 0,
+  "matched_count" integer NOT NULL DEFAULT 0,
+  "error_message" varchar(1000) NOT NULL DEFAULT '',
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "finished_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_msg_repair_scope" ON "hg_youban_publish_tg_message_repair_run" ("tenant_id", "account_id", "profile_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_msg_repair_status" ON "hg_youban_publish_tg_message_repair_run" ("status", "updated_at", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_message_cache" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "tg_account_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0,
+  "target_chat_id" varchar(128) NOT NULL DEFAULT '',
+  "tg_message_id" bigint NOT NULL DEFAULT 0,
+  "message_text" text,
+  "message_date" timestamp DEFAULT NULL,
+  "media_group_id" varchar(128) NOT NULL DEFAULT '',
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_msg_cache_msg" ON "hg_youban_publish_tg_message_cache" ("tenant_id", "channel_id", "tg_message_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_msg_cache_channel" ON "hg_youban_publish_tg_message_cache" ("tenant_id", "tg_account_id", "channel_id", "message_date");
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_job_log" (
   "id" BIGSERIAL PRIMARY KEY,
   "job_id" bigint NOT NULL DEFAULT 0,
@@ -843,6 +879,52 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_event_unique" ON "hg_youban_pu
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_source" ON "hg_youban_publish_collect_event" ("tenant_id", "source_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_chat" ON "hg_youban_publish_collect_event" ("source_chat_id", "source_message_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_dedupe" ON "hg_youban_publish_collect_event" ("tenant_id", "dedupe_key", "created_at");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_content" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "first_event_id" bigint NOT NULL DEFAULT 0,
+  "last_event_id" bigint NOT NULL DEFAULT 0,
+  "source_type" varchar(32) NOT NULL DEFAULT '',
+  "raw_text" text,
+  "normalized_text" text,
+  "media_count" integer NOT NULL DEFAULT 0,
+  "media_signature" varchar(128) NOT NULL DEFAULT '',
+  "media_json" text,
+  "text_hash" varchar(64) NOT NULL DEFAULT '',
+  "dedupe_key" varchar(128) NOT NULL DEFAULT '',
+  "duplicate_total" integer NOT NULL DEFAULT 0,
+  "status" varchar(32) NOT NULL DEFAULT 'active',
+  "first_seen_at" timestamp DEFAULT NULL,
+  "previous_seen_at" timestamp DEFAULT NULL,
+  "last_seen_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_content_dedupe" ON "hg_youban_publish_collect_content" ("tenant_id", "account_id", "dedupe_key");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_content_text" ON "hg_youban_publish_collect_content" ("tenant_id", "account_id", "text_hash", "first_seen_at");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_content_seen" ON "hg_youban_publish_collect_content" ("tenant_id", "account_id", "last_seen_at");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_content_previous" ON "hg_youban_publish_collect_content" ("tenant_id", "account_id", "previous_seen_at");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_content_media" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "content_id" bigint NOT NULL DEFAULT 0,
+  "media_type" varchar(32) NOT NULL DEFAULT '',
+  "source_file_id" varchar(255) NOT NULL DEFAULT '',
+  "source_unique_key" varchar(255) NOT NULL DEFAULT '',
+  "file_md5" varchar(64) NOT NULL DEFAULT '',
+  "file_phash" varchar(128) NOT NULL DEFAULT '',
+  "sort_index" integer NOT NULL DEFAULT 0,
+  "status" varchar(32) NOT NULL DEFAULT 'active',
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_content_media_file" ON "hg_youban_publish_collect_content_media" ("content_id", "source_file_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_content_media_content" ON "hg_youban_publish_collect_content_media" ("tenant_id", "account_id", "content_id", "sort_index");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_content_media_hash" ON "hg_youban_publish_collect_content_media" ("tenant_id", "file_md5", "file_phash");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_review" (
   "id" BIGSERIAL PRIMARY KEY,

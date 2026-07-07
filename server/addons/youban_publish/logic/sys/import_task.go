@@ -1177,8 +1177,13 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 		detail.City = cityCode
 	}
 	_ = s.appendImportRunLog(ctx, runId, "info", importStageDetail, "笔记文本采集完成", g.Map{"sourceNoteId": sourceNoteId, "title": detail.Title, "mediaTotal": len(detail.Media)})
-	channelIds := decodeImportTaskChannelIds(taskRow["channel_id_json"].String())
+	channelIds, err := s.importTaskChannelIds(ctx, taskRow)
+	if err != nil {
+		return nil, err
+	}
 	now := gtime.Now()
+	sourceCreatedAt := legacyCMSTimeOrDefault(detail.CreatedAt, now)
+	sourceUpdatedAt := legacyCMSTimeOrDefault(detail.UpdatedAt, sourceCreatedAt)
 	restoredTaskId, restoredProfileId, err := s.restoreLegacyCMSImportedLocal(ctx, taskRow, sourceNoteId, now)
 	if err != nil {
 		return nil, err
@@ -1214,6 +1219,10 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 	if saved.TaskId, saved.Id, err = s.bindLegacyCMSClientRequestID(ctx, taskRow, saved.TaskId, saved.Id, clientRequestId, now); err != nil {
 		return nil, err
 	}
+	channelJSON, err := encodeBotIds(channelIds)
+	if err != nil {
+		return nil, err
+	}
 	sourceKey := legacyCMSProfileSourceKey(taskRow, sourceNoteId)
 	profileColumns := dao.ContentProfile.Columns()
 	if _, err = dao.ContentProfile.Ctx(ctx).Where(profileColumns.Id, saved.Id).Data(g.Map{
@@ -1225,11 +1234,12 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 		profileColumns.ImportStatus:    "imported",
 		profileColumns.SourceCreateBy:  taskRow["username"].String(),
 		profileColumns.SourceUpdateBy:  taskRow["username"].String(),
-		profileColumns.SourceCreatedAt: detail.CreatedAt,
-		profileColumns.SourceUpdatedAt: detail.UpdatedAt,
+		profileColumns.SourceCreatedAt: sourceCreatedAt,
+		profileColumns.SourceUpdatedAt: sourceUpdatedAt,
 		profileColumns.AdminRemark:     "",
 		profileColumns.Status:          legacyCMSProfileStatus(sourceItem.Status),
-		profileColumns.UpdatedAt:       now,
+		profileColumns.CreatedAt:       sourceCreatedAt,
+		profileColumns.UpdatedAt:       sourceUpdatedAt,
 	}).Update(); err != nil {
 		return nil, gerror.Wrap(err, "更新旧站资料来源信息失败")
 	}
@@ -1240,7 +1250,11 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 		"customer_remark":   "",
 		"client_request_id": clientRequestId,
 		"status":            legacyCMSPublishTaskStatus(sourceItem.Status),
-		"updated_at":        now,
+		"tg_status":         legacyCMSPublishTaskTgStatus(sourceItem.Status),
+		"tg_push_enabled":   legacyCMSPublishTaskTgPushEnabled(sourceItem.Status, channelIds),
+		"channel_id_json":   channelJSON,
+		"created_at":        sourceCreatedAt,
+		"updated_at":        sourceUpdatedAt,
 	}).Update(); err != nil {
 		return nil, gerror.Wrap(err, "更新旧站导入任务标题失败")
 	}
@@ -1293,6 +1307,41 @@ func decodeImportTaskChannelIds(value string) []int64 {
 		return []int64{}
 	}
 	return uniqueIds(ids)
+}
+
+func (s *sSysPublish) importTaskChannelIds(ctx context.Context, taskRow gdb.Record) ([]int64, error) {
+	channelIds := decodeImportTaskChannelIds(taskRow["channel_id_json"].String())
+	if len(channelIds) > 0 {
+		return channelIds, nil
+	}
+	return s.defaultImportTaskChannelIds(ctx, taskRow["tenant_id"].Int64())
+}
+
+func (s *sSysPublish) defaultImportTaskChannelIds(ctx context.Context, tenantId int64) ([]int64, error) {
+	if tenantId <= 0 {
+		return []int64{}, nil
+	}
+	var rows []struct {
+		Id int64 `orm:"id"`
+	}
+	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Fields("id").
+		Where("tenant_id", tenantId).
+		Where("publish_direction", "up").
+		Where("status", 1).
+		Where("is_default_selected", 1).
+		WhereNull("deleted_at").
+		OrderAsc("id").
+		Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "读取默认上架频道失败")
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row.Id > 0 {
+			ids = append(ids, row.Id)
+		}
+	}
+	return uniqueIds(ids), nil
 }
 
 func (s *sSysPublish) clearImportTaskMedia(ctx context.Context, taskId int64, profileId int64) error {
@@ -2435,10 +2484,42 @@ func legacyCMSProfileStatus(status string) int {
 }
 
 func legacyCMSPublishTaskStatus(status string) string {
-	if strings.TrimSpace(status) == "published" {
-		return sysin.PublishTaskStatusPending
+	switch strings.TrimSpace(status) {
+	case "published":
+		return sysin.PublishTaskStatusPublished
+	case "down":
+		return sysin.PublishTaskStatusCanceled
+	default:
+		return sysin.PublishTaskStatusDraft
 	}
-	return sysin.PublishTaskStatusDraft
+}
+
+func legacyCMSPublishTaskTgStatus(status string) string {
+	switch strings.TrimSpace(status) {
+	case "published":
+		return "sent"
+	case "down":
+		return sysin.PublishTaskStatusCanceled
+	default:
+		return "skipped"
+	}
+}
+
+func legacyCMSPublishTaskTgPushEnabled(status string, channelIds []int64) int {
+	if strings.TrimSpace(status) == "published" && len(channelIds) > 0 {
+		return 1
+	}
+	return 0
+}
+
+func legacyCMSTimeOrDefault(value *gtime.Time, fallback *gtime.Time) *gtime.Time {
+	if value != nil {
+		return value
+	}
+	if fallback != nil {
+		return fallback
+	}
+	return gtime.Now()
 }
 
 func parseLegacyCMSDetail(html string, sourceNoteId int64, baseURL string) *legacyCMSDetail {

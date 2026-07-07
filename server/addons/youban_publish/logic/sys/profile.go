@@ -10,7 +10,6 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
-	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 )
@@ -47,10 +46,8 @@ func (s *sSysPublish) publishTaskToProfile(ctx context.Context, task gdb.Record)
 		if _, updateErr := tx.Model(publishTaskTable).Ctx(ctx).
 			Where("id", locked["id"].Int64()).
 			Data(g.Map{
-				"profile_id":   id,
-				"status":       sysin.PublishTaskStatusPublished,
-				"published_at": now,
-				"updated_at":   now,
+				"profile_id": id,
+				"updated_at": now,
 			}).
 			Update(); updateErr != nil {
 			return gerror.Wrap(updateErr, "回写资料ID失败")
@@ -91,7 +88,7 @@ func (s *sSysPublish) createContentProfile(ctx context.Context, tx gdb.TX, task 
 		columns.SourceUpdateBy:  fmt.Sprintf("%d", task["account_id"].Int64()),
 		columns.SourceCreatedAt: now,
 		columns.SourceUpdatedAt: now,
-		columns.Status:          1,
+		columns.Status:          2,
 		columns.CreatedAt:       now,
 		columns.UpdatedAt:       now,
 	}

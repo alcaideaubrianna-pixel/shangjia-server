@@ -81,6 +81,10 @@ func (s *sSysPublish) CollectReviewAction(ctx context.Context, in *sysin.Collect
 				return err
 			}
 		}
+	} else if in.Status == sysin.CollectReviewStatusRejected {
+		if err = s.rejectCollectReviews(ctx, uniqueIds(in.Ids), account.TenantId, account.Id, in.Reason); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -108,12 +112,59 @@ func (s *sSysPublish) approveCollectReview(ctx context.Context, reviewId int64, 
 	if event.IsEmpty() || rule.IsEmpty() {
 		return gerror.New("采集审核关联数据不存在")
 	}
-	taskId, err := s.createCollectPublishTask(ctx, event, rule, review["raw_text"].String())
+	content, err := s.collectContentSnapshot(ctx, event)
 	if err != nil {
+		_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())
+		return err
+	}
+	taskId, err := s.createCollectPublishTask(ctx, event, content, rule, review["raw_text"].String())
+	if err != nil {
+		_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())
 		return err
 	}
 	if err = s.ensureCollectTgJobs(ctx, taskId, rule); err != nil {
+		_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())
 		return err
 	}
 	return s.markCollectDispatchQueued(ctx, review["dispatch_id"].Int64(), taskId)
+}
+
+func (s *sSysPublish) rejectCollectReviews(ctx context.Context, reviewIds []int64, tenantId int64, accountId int64, reason string) error {
+	if len(reviewIds) == 0 {
+		return nil
+	}
+	var rows []struct {
+		DispatchId int64 `json:"dispatchId"`
+	}
+	if err := pdao.YoubanPublishCollectReview.Ctx(ctx).
+		Fields("dispatch_id").
+		WhereIn("id", reviewIds).
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		Where("status", sysin.CollectReviewStatusRejected).
+		WhereGT("dispatch_id", 0).
+		Scan(&rows); err != nil {
+		return gerror.Wrap(err, "读取采集审核分发失败")
+	}
+	dispatchIds := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		dispatchIds = append(dispatchIds, row.DispatchId)
+	}
+	if len(dispatchIds) == 0 {
+		return nil
+	}
+	message := strings.TrimSpace(reason)
+	if message == "" {
+		message = "审核拒绝"
+	}
+	_, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		WhereIn("id", uniqueIds(dispatchIds)).
+		Data(g.Map{
+			"status":        sysin.CollectDispatchStatusSkipped,
+			"error_message": message,
+			"finished_at":   gtime.Now(),
+			"updated_at":    gtime.Now(),
+		}).
+		Update()
+	return gerror.Wrap(err, "更新采集审核拒绝分发状态失败")
 }

@@ -161,3 +161,19 @@ func (s *sSysPublish) markCollectDispatchFailedByTask(ctx context.Context, taskI
 		Update()
 	return gerror.Wrap(err, "更新采集分发失败状态失败")
 }
+
+func (s *sSysPublish) markCollectDispatchFailed(ctx context.Context, dispatchId int64, message string) error {
+	if dispatchId <= 0 {
+		return nil
+	}
+	_, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Where("id", dispatchId).
+		Data(g.Map{
+			"status":        sysin.CollectDispatchStatusFailed,
+			"error_message": message,
+			"finished_at":   gtime.Now(),
+			"updated_at":    gtime.Now(),
+		}).
+		Update()
+	return gerror.Wrap(err, "更新采集分发失败状态失败")
+}

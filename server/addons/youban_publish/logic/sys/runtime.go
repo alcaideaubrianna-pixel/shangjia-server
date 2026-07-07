@@ -44,6 +44,7 @@ func (s *sSysPublish) StopRuntime() {
 		case <-time.After(3 * time.Second):
 		}
 	}
+	s.stopCollectGroupedEventTimers()
 	s.stopTelegramQueueWorker()
 }
 

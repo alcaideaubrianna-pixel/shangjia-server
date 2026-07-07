@@ -108,6 +108,28 @@ func (c *cPublish) CollectEventProcess(ctx context.Context, req *publish.Collect
 	return &publish.CollectEventProcessRes{}, nil
 }
 
+func (c *cPublish) CollectContentList(ctx context.Context, req *publish.CollectContentListReq) (res *publish.CollectContentListRes, err error) {
+	list, totalCount, err := service.SysPublish().CollectContentList(ctx, &req.CollectContentListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.CollectContentModel{}
+	}
+	res = new(publish.CollectContentListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublish) CollectContentView(ctx context.Context, req *publish.CollectContentViewReq) (res *publish.CollectContentViewRes, err error) {
+	data, err := service.SysPublish().CollectContentView(ctx, &req.CollectContentViewInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.CollectContentViewRes{CollectContentModel: data}, nil
+}
+
 func (c *cPublish) CollectReviewList(ctx context.Context, req *publish.CollectReviewListReq) (res *publish.CollectReviewListRes, err error) {
 	list, totalCount, err := service.SysPublish().CollectReviewList(ctx, &req.CollectReviewListInp)
 	if err != nil {

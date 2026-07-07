@@ -33,9 +33,13 @@ type collectReplaceRule struct {
 	To   string `json:"to"`
 }
 
-func (s *sSysPublish) evaluateCollectRule(ctx context.Context, event gdb.Record, rule gdb.Record) (*collectRuleDecision, error) {
+func (s *sSysPublish) evaluateCollectRule(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (*collectRuleDecision, error) {
 	rawText := strings.TrimSpace(event["raw_text"].String())
 	mediaCount := event["media_count"].Int()
+	if content != nil {
+		rawText = content.RawText
+		mediaCount = content.MediaCount
+	}
 	if rule["block_plain_text"].Int() == 1 && mediaCount == 0 {
 		return skippedCollectRule("纯文本"), nil
 	}
@@ -60,7 +64,7 @@ func (s *sSysPublish) evaluateCollectRule(ctx context.Context, event gdb.Record,
 		return skippedCollectRule("未命中标签"), nil
 	}
 	if rule["dedupe_enabled"].Int() == 1 {
-		duplicated, err := s.collectDuplicated(ctx, event, rule["dedupe_days"].Int())
+		duplicated, err := s.collectDuplicated(ctx, event, content, rule["dedupe_days"].Int())
 		if err != nil {
 			return nil, err
 		}
@@ -95,11 +99,14 @@ func skippedCollectRule(reason string) *collectRuleDecision {
 	}
 }
 
-func (s *sSysPublish) collectDuplicated(ctx context.Context, event gdb.Record, days int) (bool, error) {
+func (s *sSysPublish) collectDuplicated(ctx context.Context, event gdb.Record, content *collectContentResult, days int) (bool, error) {
 	if days <= 0 || days > 7 {
 		days = 7
 	}
 	since := gtime.NewFromTime(time.Now().AddDate(0, 0, -days))
+	if content != nil && content.PreviousSeenAt != nil {
+		return !content.PreviousSeenAt.Before(since), nil
+	}
 	mod := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Where("tenant_id", event["tenant_id"].Int64()).
 		Where("account_id", event["account_id"].Int64()).

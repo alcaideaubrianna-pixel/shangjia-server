@@ -18,6 +18,8 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
+const collectGroupedEventDelay = 3 * time.Second
+
 func (s *sSysPublish) collectBotMessage(ctx context.Context, botId int64, msg *models.Message) {
 	if msg == nil {
 		return
@@ -174,11 +176,32 @@ func mergeCollectMediaJSON(existing string, next string) (string, int) {
 }
 
 func (s *sSysPublish) scheduleCollectGroupedEvent(eventId int64, tenantId int64, accountId int64) {
-	go func() {
-		time.Sleep(2 * time.Second)
+	s.collectGroupMu.Lock()
+	if s.collectGroupTimers == nil {
+		s.collectGroupTimers = make(map[int64]*time.Timer)
+	}
+	if timer := s.collectGroupTimers[eventId]; timer != nil {
+		timer.Stop()
+	}
+	s.collectGroupTimers[eventId] = time.AfterFunc(collectGroupedEventDelay, func() {
 		ctx := context.Background()
+		s.collectGroupMu.Lock()
+		delete(s.collectGroupTimers, eventId)
+		s.collectGroupMu.Unlock()
 		if err := s.processCollectEvent(ctx, eventId, tenantId, accountId); err != nil {
 			g.Log().Warningf(ctx, "处理Bot媒体组采集事件失败 event:%d err:%+v", eventId, err)
 		}
-	}()
+	})
+	s.collectGroupMu.Unlock()
+}
+
+func (s *sSysPublish) stopCollectGroupedEventTimers() {
+	s.collectGroupMu.Lock()
+	defer s.collectGroupMu.Unlock()
+	for eventId, timer := range s.collectGroupTimers {
+		if timer != nil {
+			timer.Stop()
+		}
+		delete(s.collectGroupTimers, eventId)
+	}
 }

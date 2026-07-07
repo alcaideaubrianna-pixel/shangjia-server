@@ -186,6 +186,54 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_event` (
   KEY `idx_ybp_collect_event_dedupe` (`tenant_id`,`dedupe_key`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集事件';
 
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_content` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '所属账号ID',
+  `first_event_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '首次事件ID',
+  `last_event_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '最近事件ID',
+  `source_type` varchar(32) NOT NULL DEFAULT '' COMMENT '来源类型',
+  `raw_text` text COMMENT '原始文本',
+  `normalized_text` text COMMENT '归一化文本',
+  `media_count` int(11) NOT NULL DEFAULT '0' COMMENT '媒体数量',
+  `media_signature` varchar(128) NOT NULL DEFAULT '' COMMENT '媒体签名',
+  `media_json` longtext COMMENT '媒体JSON',
+  `text_hash` varchar(64) NOT NULL DEFAULT '' COMMENT '文本哈希',
+  `dedupe_key` varchar(128) NOT NULL DEFAULT '' COMMENT '去重键',
+  `duplicate_total` int(11) NOT NULL DEFAULT '0' COMMENT '重复命中数',
+  `status` varchar(32) NOT NULL DEFAULT 'active' COMMENT '状态',
+  `first_seen_at` datetime DEFAULT NULL COMMENT '首次出现时间',
+  `previous_seen_at` datetime DEFAULT NULL COMMENT '上次出现时间',
+  `last_seen_at` datetime DEFAULT NULL COMMENT '最近出现时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_collect_content_dedupe` (`tenant_id`,`account_id`,`dedupe_key`),
+  KEY `idx_ybp_collect_content_text` (`tenant_id`,`account_id`,`text_hash`,`first_seen_at`),
+  KEY `idx_ybp_collect_content_seen` (`tenant_id`,`account_id`,`last_seen_at`),
+  KEY `idx_ybp_collect_content_previous` (`tenant_id`,`account_id`,`previous_seen_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集内容池';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_content_media` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '所属账号ID',
+  `content_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '内容ID',
+  `media_type` varchar(32) NOT NULL DEFAULT '' COMMENT '媒体类型',
+  `source_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT '来源文件ID',
+  `source_unique_key` varchar(255) NOT NULL DEFAULT '' COMMENT '来源唯一键',
+  `file_md5` varchar(64) NOT NULL DEFAULT '' COMMENT '文件MD5',
+  `file_phash` varchar(128) NOT NULL DEFAULT '' COMMENT '图片感知哈希',
+  `sort_index` int(11) NOT NULL DEFAULT '0' COMMENT '排序',
+  `status` varchar(32) NOT NULL DEFAULT 'active' COMMENT '状态',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_collect_content_media_file` (`content_id`,`source_file_id`),
+  KEY `idx_ybp_collect_content_media_content` (`tenant_id`,`account_id`,`content_id`,`sort_index`),
+  KEY `idx_ybp_collect_content_media_hash` (`tenant_id`,`file_md5`,`file_phash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集内容媒体';
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_review` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
@@ -618,6 +666,44 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_message` (
   KEY `idx_ybp_tg_message_task` (`task_id`,`id`),
   KEY `idx_ybp_tg_message_profile` (`tenant_id`,`account_id`,`profile_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG消息记录';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_message_repair_run` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
+  `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架任务ID',
+  `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '状态',
+  `stage` varchar(32) NOT NULL DEFAULT '' COMMENT '阶段',
+  `progress` int(11) NOT NULL DEFAULT '0' COMMENT '进度',
+  `channel_count` int(11) NOT NULL DEFAULT '0' COMMENT '频道数',
+  `scanned_count` int(11) NOT NULL DEFAULT '0' COMMENT '扫描消息数',
+  `matched_count` int(11) NOT NULL DEFAULT '0' COMMENT '匹配消息数',
+  `error_message` varchar(1000) NOT NULL DEFAULT '' COMMENT '错误信息',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `finished_at` datetime DEFAULT NULL COMMENT '完成时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_tg_msg_repair_scope` (`tenant_id`,`account_id`,`profile_id`,`id`),
+  KEY `idx_ybp_tg_msg_repair_status` (`status`,`updated_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG消息修复任务';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_message_cache` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `tg_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG协议号ID',
+  `channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '频道配置ID',
+  `target_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '目标Chat ID',
+  `tg_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG消息ID',
+  `message_text` text COMMENT '消息文本',
+  `message_date` datetime DEFAULT NULL COMMENT '消息时间',
+  `media_group_id` varchar(128) NOT NULL DEFAULT '' COMMENT '媒体组ID',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_tg_msg_cache_msg` (`tenant_id`,`channel_id`,`tg_message_id`),
+  KEY `idx_ybp_tg_msg_cache_channel` (`tenant_id`,`tg_account_id`,`channel_id`,`message_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG历史消息缓存';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job_log` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键', `job_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG任务ID',

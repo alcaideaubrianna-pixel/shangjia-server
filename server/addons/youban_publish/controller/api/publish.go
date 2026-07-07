@@ -395,10 +395,29 @@ func (c *cPublishAdmin) ProfileDelete(ctx context.Context, req *publish.AdminPro
 }
 
 func (c *cPublishAdmin) ProfileStatus(ctx context.Context, req *publish.AdminProfileStatusReq) (res *publish.AdminProfileStatusRes, err error) {
-	if err = service.SysPublish().AdminProfileStatus(ctx, &req.ProfileStatusInp); err != nil {
+	data, err := service.SysPublish().AdminProfileStatus(ctx, &req.ProfileStatusInp)
+	if err != nil {
 		return nil, err
 	}
-	res = &publish.AdminProfileStatusRes{}
+	res = &publish.AdminProfileStatusRes{ProfileStatusModel: data}
+	return
+}
+
+func (c *cPublishAdmin) TgMessageRepairStart(ctx context.Context, req *publish.AdminTgMessageRepairStartReq) (res *publish.AdminTgMessageRepairStartRes, err error) {
+	data, err := service.SysPublish().AdminTgMessageRepairStart(ctx, &req.TgMessageRepairStartInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminTgMessageRepairStartRes{TgMessageRepairModel: data}
+	return
+}
+
+func (c *cPublishAdmin) TgMessageRepairView(ctx context.Context, req *publish.AdminTgMessageRepairViewReq) (res *publish.AdminTgMessageRepairViewRes, err error) {
+	data, err := service.SysPublish().AdminTgMessageRepairView(ctx, &req.TgMessageRepairViewInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminTgMessageRepairViewRes{TgMessageRepairModel: data}
 	return
 }
 
@@ -716,10 +735,29 @@ func (c *cPublish) MyProfileDelete(ctx context.Context, req *publish.MyProfileDe
 }
 
 func (c *cPublish) MyProfileStatus(ctx context.Context, req *publish.MyProfileStatusReq) (res *publish.MyProfileStatusRes, err error) {
-	if err = service.SysPublish().MyProfileStatus(ctx, &req.ProfileStatusInp); err != nil {
+	data, err := service.SysPublish().MyProfileStatus(ctx, &req.ProfileStatusInp)
+	if err != nil {
 		return nil, err
 	}
-	res = &publish.MyProfileStatusRes{}
+	res = &publish.MyProfileStatusRes{ProfileStatusModel: data}
+	return
+}
+
+func (c *cPublish) MyTgMessageRepairStart(ctx context.Context, req *publish.MyTgMessageRepairStartReq) (res *publish.MyTgMessageRepairStartRes, err error) {
+	data, err := service.SysPublish().MyTgMessageRepairStart(ctx, &req.TgMessageRepairStartInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.MyTgMessageRepairStartRes{TgMessageRepairModel: data}
+	return
+}
+
+func (c *cPublish) MyTgMessageRepairView(ctx context.Context, req *publish.MyTgMessageRepairViewReq) (res *publish.MyTgMessageRepairViewRes, err error) {
+	data, err := service.SysPublish().MyTgMessageRepairView(ctx, &req.TgMessageRepairViewInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.MyTgMessageRepairViewRes{TgMessageRepairModel: data}
 	return
 }
 

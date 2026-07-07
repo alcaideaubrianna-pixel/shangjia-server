@@ -91,6 +91,11 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if event["status"].String() == sysin.CollectEventStatusProcessed {
 		return nil
 	}
+	content, err := s.ensureCollectContent(ctx, event)
+	if err != nil {
+		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
+		return err
+	}
 	rules, err := s.collectEventRules(ctx, event, tenantId, accountId)
 	if err != nil {
 		return err
@@ -100,7 +105,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	}
 	matched := false
 	for _, rule := range rules {
-		ruleMatched, dispatchErr := s.dispatchCollectEventByRule(ctx, event, rule)
+		ruleMatched, dispatchErr := s.dispatchCollectEventByRule(ctx, event, content, rule)
 		if dispatchErr != nil {
 			err = dispatchErr
 			_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
@@ -145,8 +150,8 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	return rows, nil
 }
 
-func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.Record, rule gdb.Record) (bool, error) {
-	decision, err := s.evaluateCollectRule(ctx, event, rule)
+func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (bool, error) {
+	decision, err := s.evaluateCollectRule(ctx, event, content, rule)
 	if err != nil {
 		return false, err
 	}
@@ -177,9 +182,9 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		return false, gerror.Wrap(err, "更新采集跳过记录失败")
 	}
 	if rule["review_enabled"].Int() == 1 {
-		return true, s.createCollectReview(ctx, event, rule, dispatchId, decision.Text)
+		return true, s.createCollectReview(ctx, event, content, rule, dispatchId, decision.Text)
 	}
-	taskId, err := s.createCollectPublishTask(ctx, event, rule, decision.Text)
+	taskId, err := s.createCollectPublishTask(ctx, event, content, rule, decision.Text)
 	if err != nil {
 		return false, err
 	}
@@ -192,8 +197,14 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 	return true, nil
 }
 
-func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record, rule gdb.Record, dispatchId int64, text string) error {
+func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, dispatchId int64, text string) error {
 	now := gtime.Now()
+	mediaCount := event["media_count"].Int()
+	mediaJSON := event["media_json"].String()
+	if content != nil {
+		mediaCount = content.MediaCount
+		mediaJSON = content.MediaJSON
+	}
 	reviewId, err := pdao.YoubanPublishCollectReview.Ctx(ctx).Data(g.Map{
 		"tenant_id":              event["tenant_id"].Int64(),
 		"account_id":             event["account_id"].Int64(),
@@ -202,8 +213,8 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 		"event_id":               event["id"].Int64(),
 		"dispatch_id":            dispatchId,
 		"raw_text":               text,
-		"media_count":            event["media_count"].Int(),
-		"media_json":             event["media_json"].String(),
+		"media_count":            mediaCount,
+		"media_json":             mediaJSON,
 		"target_channel_id_json": rule["target_channel_id_json"].String(),
 		"bot_id_json":            rule["bot_id_json"].String(),
 		"status":                 sysin.CollectReviewStatusPending,
@@ -221,10 +232,14 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 	return gerror.Wrap(err, "更新采集审核分发失败")
 }
 
-func (s *sSysPublish) createCollectPublishTask(ctx context.Context, event gdb.Record, rule gdb.Record, text string) (int64, error) {
+func (s *sSysPublish) createCollectPublishTask(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (int64, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		text = strings.TrimSpace(event["raw_text"].String())
+	}
+	mediaCount := event["media_count"].Int()
+	if content != nil {
+		mediaCount = content.MediaCount
 	}
 	title := collectTitle(text)
 	channelJSON := rule["target_channel_id_json"].String()
@@ -236,7 +251,7 @@ func (s *sSysPublish) createCollectPublishTask(ctx context.Context, event gdb.Re
 		"client_request_id": fmt.Sprintf("collect:%s:%d", event["source_unique_key"].String(), rule["id"].Int64()),
 		"title":             title,
 		"plain_text":        text,
-		"media_count":       event["media_count"].Int(),
+		"media_count":       mediaCount,
 		"channel_id_json":   channelJSON,
 		"tg_push_enabled":   1,
 		"tg_status":         "pending",
@@ -248,15 +263,19 @@ func (s *sSysPublish) createCollectPublishTask(ctx context.Context, event gdb.Re
 	if err != nil {
 		return 0, gerror.Wrap(err, "创建采集上架任务失败")
 	}
-	if err = s.createCollectPublishMedia(ctx, event, taskId); err != nil {
+	if err = s.createCollectPublishMedia(ctx, event, content, taskId); err != nil {
 		return 0, err
 	}
 	return taskId, nil
 }
 
-func (s *sSysPublish) createCollectPublishMedia(ctx context.Context, event gdb.Record, taskId int64) error {
+func (s *sSysPublish) createCollectPublishMedia(ctx context.Context, event gdb.Record, content *collectContentResult, taskId int64) error {
 	var items []collectMediaItem
-	if err := json.Unmarshal([]byte(event["media_json"].String()), &items); err != nil {
+	mediaJSON := event["media_json"].String()
+	if content != nil {
+		mediaJSON = content.MediaJSON
+	}
+	if err := json.Unmarshal([]byte(mediaJSON), &items); err != nil {
 		return nil
 	}
 	now := gtime.Now()
@@ -266,10 +285,8 @@ func (s *sSysPublish) createCollectPublishMedia(ctx context.Context, event gdb.R
 		if fileId == "" {
 			continue
 		}
-		mediaType := "image"
-		if item.Type == "video" {
-			mediaType = "video"
-		} else if item.Type != "photo" {
+		mediaType := collectPublishMediaType(item.Type)
+		if mediaType == "" {
 			continue
 		}
 		_, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(g.Map{

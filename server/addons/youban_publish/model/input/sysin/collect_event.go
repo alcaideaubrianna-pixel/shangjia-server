@@ -50,6 +50,58 @@ type CollectEventProcessInp struct {
 	Id int64 `json:"id" v:"required|min:1#事件ID不能为空|事件ID不能为空" dc:"事件ID"`
 }
 
+type CollectContentListInp struct {
+	form.PageReq
+	Keyword       string `json:"keyword" dc:"关键词"`
+	Status        string `json:"status" dc:"状态"`
+	Duplicated    int    `json:"duplicated" dc:"是否重复：1重复 2不重复"`
+	MinMediaCount int    `json:"minMediaCount" dc:"最小媒体数"`
+}
+
+type CollectContentViewInp struct {
+	Id int64 `json:"id" v:"required|min:1#内容ID不能为空|内容ID不能为空" dc:"内容ID"`
+}
+
+type CollectContentModel struct {
+	Id             int64                       `json:"id" dc:"ID"`
+	TenantId       int64                       `json:"tenantId" dc:"租户ID"`
+	AccountId      int64                       `json:"accountId" dc:"账号ID"`
+	FirstEventId   int64                       `json:"firstEventId" dc:"首次事件ID"`
+	LastEventId    int64                       `json:"lastEventId" dc:"最近事件ID"`
+	SourceType     string                      `json:"sourceType" dc:"来源类型"`
+	RawText        string                      `json:"rawText" dc:"原始文本"`
+	NormalizedText string                      `json:"normalizedText" dc:"归一化文本"`
+	MediaCount     int                         `json:"mediaCount" dc:"媒体数"`
+	MediaSignature string                      `json:"mediaSignature" dc:"媒体签名"`
+	MediaJson      string                      `json:"mediaJson" dc:"媒体JSON"`
+	TextHash       string                      `json:"textHash" dc:"文本哈希"`
+	DedupeKey      string                      `json:"dedupeKey" dc:"去重键"`
+	DuplicateTotal int                         `json:"duplicateTotal" dc:"重复次数"`
+	Status         string                      `json:"status" dc:"状态"`
+	FirstSeenAt    *gtime.Time                 `json:"firstSeenAt" dc:"首次出现时间"`
+	PreviousSeenAt *gtime.Time                 `json:"previousSeenAt" dc:"上次出现时间"`
+	LastSeenAt     *gtime.Time                 `json:"lastSeenAt" dc:"最近出现时间"`
+	CreatedAt      *gtime.Time                 `json:"createdAt" dc:"创建时间"`
+	UpdatedAt      *gtime.Time                 `json:"updatedAt" dc:"更新时间"`
+	MediaList      []*CollectContentMediaModel `json:"mediaList,omitempty" dc:"媒体列表"`
+}
+
+type CollectContentMediaModel struct {
+	Id              int64       `json:"id" dc:"ID"`
+	TenantId        int64       `json:"tenantId" dc:"租户ID"`
+	AccountId       int64       `json:"accountId" dc:"账号ID"`
+	ContentId       int64       `json:"contentId" dc:"内容ID"`
+	MediaType       string      `json:"mediaType" dc:"媒体类型"`
+	SourceFileId    string      `json:"sourceFileId" dc:"来源文件ID"`
+	SourceUniqueKey string      `json:"sourceUniqueKey" dc:"来源唯一键"`
+	FileMd5         string      `json:"fileMd5" dc:"文件MD5"`
+	FilePhash       string      `json:"filePhash" dc:"图片感知哈希"`
+	SortIndex       int         `json:"sortIndex" dc:"排序"`
+	Status          string      `json:"status" dc:"状态"`
+	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt       *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
 type CollectReviewListInp struct {
 	form.PageReq
 	Status   string `json:"status" dc:"状态"`
