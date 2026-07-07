@@ -16,6 +16,16 @@ import (
 )
 
 func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
+	targetJob, err := s.telegramJobById(ctx, jobId)
+	if err != nil {
+		return err
+	}
+	return s.withTelegramChannelLock(ctx, targetJob.TargetChatId, func() error {
+		return s.sendTelegramJobLockedByChannel(ctx, jobId)
+	})
+}
+
+func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId int64) error {
 	job, locked, err := s.lockTelegramJob(ctx, jobId)
 	if err != nil || !locked {
 		return err

@@ -11,6 +11,12 @@ import (
 )
 
 func (s *sSysPublish) deleteTelegramMessageSet(ctx context.Context, job telegramJobRecord, reason string) error {
+	return s.withTelegramChannelLock(ctx, job.TargetChatId, func() error {
+		return s.deleteTelegramMessageSetLockedByChannel(ctx, job, reason)
+	})
+}
+
+func (s *sSysPublish) deleteTelegramMessageSetLockedByChannel(ctx context.Context, job telegramJobRecord, reason string) error {
 	messages, err := s.telegramJobActiveMessages(ctx, job)
 	if err != nil {
 		return err

@@ -22,14 +22,18 @@ type sSysPublish struct {
 	tgQueueClient *asynq.Client
 	tgQueueServer *asynq.Server
 
+	telegramChannelMu    publishRuntimeMutex
+	telegramChannelLocks map[string]*publishRuntimeMutex
+
 	collectGroupMu     publishRuntimeMutex
 	collectGroupTimers map[int64]*time.Timer
 }
 
 func NewSysPublish() *sSysPublish {
 	return &sSysPublish{
-		tgLogins:           make(map[string]*telegramLoginRuntime),
-		collectGroupTimers: make(map[int64]*time.Timer),
+		tgLogins:             make(map[string]*telegramLoginRuntime),
+		telegramChannelLocks: make(map[string]*publishRuntimeMutex),
+		collectGroupTimers:   make(map[int64]*time.Timer),
 	}
 }
 
