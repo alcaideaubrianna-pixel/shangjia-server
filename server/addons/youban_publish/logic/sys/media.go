@@ -380,6 +380,10 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 		"perceptual_hash":      perceptualHash,
 		"edit_config_json":     strings.TrimSpace(in.EditConfigJson),
 		"edit_status":          editStatus,
+		"tg_file_id":           "",
+		"tg_thumb_file_id":     "",
+		"tg_cache_asset_hash":  "",
+		"tg_cache_status":      tgCacheStatusInvalid,
 		"size":                 attachment.Size,
 		"sort_index":           in.SortIndex,
 		"status":               1,
@@ -409,7 +413,11 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 		data["edited_file_url"] = normalizeMediaFileURL(attachment.FileUrl, attachment.Path)
 		data["edited_storage_path"] = attachment.Path
 	}
-	if originalAttachment != nil && originalAttachment.Id > 0 {
+	if editStatus == mediaEditStatusRaw {
+		data["original_attachment_id"] = attachment.Id
+		data["original_file_url"] = normalizeMediaFileURL(attachment.FileUrl, attachment.Path)
+		data["original_storage_path"] = attachment.Path
+	} else if originalAttachment != nil && originalAttachment.Id > 0 {
 		data["original_attachment_id"] = originalAttachment.Id
 		data["original_file_url"] = normalizeMediaFileURL(originalAttachment.FileUrl, originalAttachment.Path)
 		data["original_storage_path"] = originalAttachment.Path
@@ -518,6 +526,13 @@ func normalizeMediaListFileURL(list []*sysin.MediaModel) {
 		item.OriginalFileUrl = normalizeMediaFileURL(item.OriginalFileUrl, item.OriginalStoragePath)
 		item.EditedFileUrl = normalizeMediaFileURL(item.EditedFileUrl, item.EditedStoragePath)
 		item.PosterUrl = normalizeMediaFileURL(item.PosterUrl, item.PosterStoragePath)
+		asset := newProfileMediaFromModel(item).EffectiveAsset()
+		if strings.TrimSpace(asset.FileUrl) != "" {
+			item.FileUrl = normalizeMediaFileURL(asset.FileUrl, asset.StoragePath)
+		}
+		if strings.TrimSpace(asset.StoragePath) != "" {
+			item.StoragePath = asset.StoragePath
+		}
 	}
 }
 
@@ -543,9 +558,15 @@ ALTER TABLE "hg_youban_publish_media"
   ADD COLUMN IF NOT EXISTS "edited_file_url" varchar(1024) NOT NULL DEFAULT '',
   ADD COLUMN IF NOT EXISTS "edited_storage_path" varchar(1024) NOT NULL DEFAULT '',
   ADD COLUMN IF NOT EXISTS "edit_config_json" text,
-  ADD COLUMN IF NOT EXISTS "edit_status" varchar(16) NOT NULL DEFAULT 'raw'`)
+  ADD COLUMN IF NOT EXISTS "edit_status" varchar(16) NOT NULL DEFAULT 'raw',
+  ADD COLUMN IF NOT EXISTS "tg_cache_asset_hash" varchar(1024) NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS "tg_cache_status" varchar(16) NOT NULL DEFAULT 'invalid'`)
 		if err != nil {
 			return gerror.Wrap(err, "检查任务媒体编辑字段失败")
+		}
+		_, err = g.DB().Exec(ctx, `ALTER TABLE "hg_youban_publish_media" ALTER COLUMN "tg_cache_asset_hash" TYPE varchar(1024)`)
+		if err != nil {
+			return gerror.Wrap(err, "检查TG媒体缓存字段长度失败")
 		}
 		_, err = g.DB().Exec(ctx, `
 UPDATE "hg_youban_publish_media"
@@ -564,6 +585,16 @@ WHERE ("edit_status" = '' OR "edit_status" = 'raw' OR "edit_status" IS NULL)
 		if err != nil {
 			return gerror.Wrap(err, "补齐任务媒体编辑状态失败")
 		}
+		_, err = g.DB().Exec(ctx, `
+UPDATE "hg_youban_publish_media"
+SET "tg_cache_status" = 'valid',
+    "tg_cache_asset_hash" = COALESCE(NULLIF("md5", ''), NULLIF("storage_path", ''), NULLIF("file_url", ''))
+WHERE "tg_file_id" <> ''
+  AND ("tg_cache_status" = '' OR "tg_cache_status" = 'invalid' OR "tg_cache_status" IS NULL)
+  AND "edit_status" = 'raw'`)
+		if err != nil {
+			return gerror.Wrap(err, "补齐TG媒体缓存状态失败")
+		}
 		return nil
 	}
 	statements := []string{
@@ -575,6 +606,9 @@ WHERE ("edit_status" = '' OR "edit_status" = 'raw' OR "edit_status" IS NULL)
 		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edited_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '编辑后存储路径' AFTER `original_storage_path`",
 		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edit_config_json` text COMMENT '图片编辑配置' AFTER `perceptual_hash`",
 		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edit_status` varchar(16) NOT NULL DEFAULT 'raw' COMMENT '编辑状态：raw/edited' AFTER `edit_config_json`",
+		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tg_cache_asset_hash` varchar(1024) NOT NULL DEFAULT '' COMMENT 'TG缓存素材Hash' AFTER `tg_thumb_file_id`",
+		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tg_cache_status` varchar(16) NOT NULL DEFAULT 'invalid' COMMENT 'TG缓存状态' AFTER `tg_cache_asset_hash`",
+		"ALTER TABLE `hg_youban_publish_media` MODIFY COLUMN `tg_cache_asset_hash` varchar(1024) NOT NULL DEFAULT '' COMMENT 'TG缓存素材Hash'",
 	}
 	for _, statement := range statements {
 		if _, err := g.DB().Exec(ctx, statement); err != nil && !isIgnorableImportTaskServerIPColumnError(err) {
@@ -586,6 +620,9 @@ WHERE ("edit_status" = '' OR "edit_status" = 'raw' OR "edit_status" IS NULL)
 	}
 	if _, err := g.DB().Exec(ctx, "UPDATE `hg_youban_publish_media` SET `edit_status`='edited' WHERE (`edit_status`='' OR `edit_status`='raw' OR `edit_status` IS NULL) AND (`edited_attachment_id`>0 OR `edited_storage_path`<>'' OR `edited_file_url`<>'' OR lower(`name`) LIKE '%-edited.%' OR lower(`name`) LIKE '%_edited.%')"); err != nil {
 		return gerror.Wrap(err, "补齐任务媒体编辑状态失败")
+	}
+	if _, err := g.DB().Exec(ctx, "UPDATE `hg_youban_publish_media` SET `tg_cache_status`='valid', `tg_cache_asset_hash`=COALESCE(NULLIF(`md5`, ''), NULLIF(`storage_path`, ''), NULLIF(`file_url`, '')) WHERE `tg_file_id`<>'' AND (`tg_cache_status`='' OR `tg_cache_status`='invalid' OR `tg_cache_status` IS NULL) AND `edit_status`='raw'"); err != nil {
+		return gerror.Wrap(err, "补齐TG媒体缓存状态失败")
 	}
 	return nil
 }
@@ -631,8 +668,12 @@ func (s *sSysPublish) deleteMedia(ctx context.Context, id int64, accountId int64
 		return gerror.New("任务媒体不存在")
 	}
 	if _, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", id).Data(g.Map{
-		"deleted_by": contexts.GetUserId(ctx),
-		"deleted_at": gtime.Now(),
+		"tg_file_id":          "",
+		"tg_thumb_file_id":    "",
+		"tg_cache_asset_hash": "",
+		"tg_cache_status":     tgCacheStatusInvalid,
+		"deleted_by":          contexts.GetUserId(ctx),
+		"deleted_at":          gtime.Now(),
 	}).Update(); err != nil {
 		return gerror.Wrap(err, "删除任务媒体失败")
 	}
@@ -679,8 +720,12 @@ func (s *sSysPublish) deleteMediaByTenant(ctx context.Context, id int64, tenantI
 		updateMod = updateMod.Where("tenant_id", tenantId)
 	}
 	if _, err = updateMod.Data(g.Map{
-		"deleted_by": operatorId,
-		"deleted_at": gtime.Now(),
+		"tg_file_id":          "",
+		"tg_thumb_file_id":    "",
+		"tg_cache_asset_hash": "",
+		"tg_cache_status":     tgCacheStatusInvalid,
+		"deleted_by":          operatorId,
+		"deleted_at":          gtime.Now(),
 	}).Update(); err != nil {
 		return gerror.Wrap(err, "删除任务媒体失败")
 	}
@@ -748,7 +793,8 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 		} else {
 			imageCount++
 		}
-		previewStoragePath := item.StoragePath
+		asset := newProfileMediaFromModel(item).EffectiveAsset()
+		previewStoragePath := asset.StoragePath
 		if mediaType == "video" && strings.TrimSpace(item.PosterStoragePath) != "" {
 			previewStoragePath = item.PosterStoragePath
 		}
@@ -766,7 +812,7 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 			mediaColumns.MediaType:           mediaType,
 			mediaColumns.SortIndex:           item.SortIndex,
 			mediaColumns.OriginalStoragePath: originalStoragePath,
-			mediaColumns.DisplayStoragePath:  item.StoragePath,
+			mediaColumns.DisplayStoragePath:  asset.StoragePath,
 			mediaColumns.PreviewStoragePath:  previewStoragePath,
 			mediaColumns.BinaryMd5:           item.Md5,
 			mediaColumns.PerceptualHash:      item.PerceptualHash,

@@ -21,54 +21,86 @@ type YoubanPublishMediaDao struct {
 
 // YoubanPublishMediaColumns defines and stores column names for the table hg_youban_publish_media.
 type YoubanPublishMediaColumns struct {
-	Id           string //
-	MerchantId   string //
-	AccountId    string //
-	TaskId       string //
-	ProfileId    string //
-	AttachmentId string //
-	MediaType    string //
-	Name         string //
-	FileUrl      string //
-	StoragePath  string //
-	MimeType     string //
-	Md5          string //
-	Size         string //
-	SortIndex    string //
-	Status       string //
-	CreatedBy    string //
-	UpdatedBy    string //
-	DeletedBy    string //
-	CreatedAt    string //
-	UpdatedAt    string //
-	DeletedAt    string //
-	TenantId     string //
+	Id                   string //
+	TenantId             string //
+	MerchantId           string //
+	AccountId            string //
+	TaskId               string //
+	ProfileId            string //
+	AttachmentId         string //
+	MediaType            string //
+	Name                 string //
+	FileUrl              string //
+	StoragePath          string //
+	MimeType             string //
+	Md5                  string //
+	Size                 string //
+	SortIndex            string //
+	Status               string //
+	CreatedBy            string //
+	UpdatedBy            string //
+	DeletedBy            string //
+	CreatedAt            string //
+	UpdatedAt            string //
+	DeletedAt            string //
+	PerceptualHash       string //
+	Purpose              string //
+	PosterUrl            string //
+	TgFileId             string //
+	TgThumbFileId        string //
+	PosterStoragePath    string //
+	OriginalAttachmentId string //
+	OriginalFileUrl      string //
+	OriginalStoragePath  string //
+	EditedAttachmentId   string //
+	EditedFileUrl        string //
+	EditedStoragePath    string //
+	EditConfigJson       string //
+	EditStatus           string //
+	TgCacheAssetHash     string //
+	TgCacheStatus        string //
 }
 
 // youbanPublishMediaColumns holds the columns for the table hg_youban_publish_media.
 var youbanPublishMediaColumns = YoubanPublishMediaColumns{
-	Id:           "id",
-	MerchantId:   "merchant_id",
-	AccountId:    "account_id",
-	TaskId:       "task_id",
-	ProfileId:    "profile_id",
-	AttachmentId: "attachment_id",
-	MediaType:    "media_type",
-	Name:         "name",
-	FileUrl:      "file_url",
-	StoragePath:  "storage_path",
-	MimeType:     "mime_type",
-	Md5:          "md5",
-	Size:         "size",
-	SortIndex:    "sort_index",
-	Status:       "status",
-	CreatedBy:    "created_by",
-	UpdatedBy:    "updated_by",
-	DeletedBy:    "deleted_by",
-	CreatedAt:    "created_at",
-	UpdatedAt:    "updated_at",
-	DeletedAt:    "deleted_at",
-	TenantId:     "tenant_id",
+	Id:                   "id",
+	TenantId:             "tenant_id",
+	MerchantId:           "merchant_id",
+	AccountId:            "account_id",
+	TaskId:               "task_id",
+	ProfileId:            "profile_id",
+	AttachmentId:         "attachment_id",
+	MediaType:            "media_type",
+	Name:                 "name",
+	FileUrl:              "file_url",
+	StoragePath:          "storage_path",
+	MimeType:             "mime_type",
+	Md5:                  "md5",
+	Size:                 "size",
+	SortIndex:            "sort_index",
+	Status:               "status",
+	CreatedBy:            "created_by",
+	UpdatedBy:            "updated_by",
+	DeletedBy:            "deleted_by",
+	CreatedAt:            "created_at",
+	UpdatedAt:            "updated_at",
+	DeletedAt:            "deleted_at",
+	PerceptualHash:       "perceptual_hash",
+	Purpose:              "purpose",
+	PosterUrl:            "poster_url",
+	TgFileId:             "tg_file_id",
+	TgThumbFileId:        "tg_thumb_file_id",
+	PosterStoragePath:    "poster_storage_path",
+	OriginalAttachmentId: "original_attachment_id",
+	OriginalFileUrl:      "original_file_url",
+	OriginalStoragePath:  "original_storage_path",
+	EditedAttachmentId:   "edited_attachment_id",
+	EditedFileUrl:        "edited_file_url",
+	EditedStoragePath:    "edited_storage_path",
+	EditConfigJson:       "edit_config_json",
+	EditStatus:           "edit_status",
+	TgCacheAssetHash:     "tg_cache_asset_hash",
+	TgCacheStatus:        "tg_cache_status",
 }
 
 // NewYoubanPublishMediaDao creates and returns a new DAO object for table data access.

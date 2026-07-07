@@ -2,7 +2,10 @@ package sys
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -136,6 +139,9 @@ func (s *sSysPublish) tgMessageRepairView(ctx context.Context, in *sysin.TgMessa
 	}
 	var item sysin.TgMessageRepairModel
 	if err := mod.Scan(&item); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, gerror.New("TG消息修复任务不存在")
+		}
 		return nil, gerror.Wrap(err, "读取TG消息修复任务失败")
 	}
 	if item.Id <= 0 {
@@ -195,7 +201,11 @@ func (s *sSysPublish) createTgMessageRepairRun(ctx context.Context, profileId in
 		WhereIn("status", []string{tgMessageRepairStatusPending, tgMessageRepairStatusRunning}).
 		OrderDesc("id").
 		Scan(&existing); err != nil {
-		return 0, gerror.Wrap(err, "读取TG消息修复任务失败")
+		if errors.Is(err, sql.ErrNoRows) {
+			err = nil
+		} else {
+			return 0, gerror.Wrap(err, "读取TG消息修复任务失败")
+		}
 	}
 	if existing.Id > 0 {
 		return existing.Id, nil
@@ -260,6 +270,7 @@ func (s *sSysPublish) ExecuteTgMessageRepairRun(ctx context.Context, runId int64
 	}
 	scanned := 0
 	for _, channel := range channels {
+		time.Sleep(400 * time.Millisecond)
 		count, scanErr := s.scanTgChannelMessages(ctx, run.TenantId, channel)
 		scanned += count
 		_ = s.updateTgMessageRepairRun(ctx, runId, g.Map{"scanned_count": scanned, "progress": 55, "updated_at": gtime.Now()})
@@ -275,7 +286,17 @@ func (s *sSysPublish) ExecuteTgMessageRepairRun(ctx context.Context, runId int64
 		return err
 	}
 	if len(matches) == 0 {
-		return gerror.New("没有匹配到对应的TG频道消息，请确认频道和标题是否一致")
+		if err = s.finishProfileDownWithoutRepair(ctx, task); err != nil {
+			return err
+		}
+		return s.updateTgMessageRepairRun(ctx, runId, g.Map{
+			"status":        tgMessageRepairStatusSuccess,
+			"stage":         "skipped",
+			"progress":      100,
+			"error_message": "未匹配到对应的TG频道消息，已仅同步本地下架状态",
+			"finished_at":   gtime.Now(),
+			"updated_at":    gtime.Now(),
+		})
 	}
 	if err = s.saveTgRepairMatches(ctx, task, matches); err != nil {
 		return err
@@ -323,7 +344,7 @@ func (s *sSysPublish) updateTgMessageRepairRun(ctx context.Context, runId int64,
 
 func (s *sSysPublish) tgMessageRepairTask(ctx context.Context, profileId int64, tenantId int64, accountId int64) (gdb.Record, error) {
 	mod := g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
-		Fields("t.id,t.tenant_id,t.account_id,t.profile_id,t.title,t.profile_no,t.plain_text,t.channel_id_json,t.status,t.tg_status,t.published_at,t.created_at,t.updated_at,p.source_type,p.source_key,p.source_created_at,p.source_updated_at").
+		Fields("t.id,t.tenant_id,t.account_id,t.profile_id,t.title,p.profile_no,t.plain_text,t.channel_id_json,t.status,t.tg_status,t.published_at,t.created_at,t.updated_at,p.source_type,p.source_key,p.source_created_at,p.source_updated_at").
 		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=t.profile_id AND p.deleted_at IS NULL").
 		Where("t.tenant_id", tenantId).
 		Where("t.profile_id", profileId).
@@ -409,13 +430,21 @@ func (s *sSysPublish) scanTgChannelMessages(ctx context.Context, tenantId int64,
 		offsetID := 0
 		cutoff := time.Now().AddDate(0, -6, 0).Unix()
 		for {
-			res, err := client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
-				Peer:     &tg.InputPeerChannel{ChannelID: channelID, AccessHash: accessHash},
-				OffsetID: offsetID,
-				Limit:    100,
-			})
-			if err != nil {
-				return err
+			var res tg.MessagesMessagesClass
+			var pageErr error
+			for attempt := 0; attempt < 4; attempt++ {
+				res, pageErr = client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
+					Peer:     &tg.InputPeerChannel{ChannelID: channelID, AccessHash: accessHash},
+					OffsetID: offsetID,
+					Limit:    100,
+				})
+				if pageErr == nil {
+					break
+				}
+				if !isTgRepairRetryableErr(pageErr) || attempt == 3 {
+					return pageErr
+				}
+				time.Sleep(tgRepairBackoffDelay(attempt, pageErr))
 			}
 			messages := tgHistoryMessages(res)
 			if len(messages) == 0 {
@@ -441,13 +470,43 @@ func (s *sSysPublish) scanTgChannelMessages(ctx context.Context, tenantId int64,
 			if stop || offsetID <= 0 || len(messages) < 100 {
 				return nil
 			}
-			time.Sleep(250 * time.Millisecond)
+			time.Sleep(600 * time.Millisecond)
 		}
 	})
 	if err != nil {
 		return scanned, gerror.Wrap(err, "拉取TG频道历史消息失败")
 	}
 	return scanned, nil
+}
+
+func isTgRepairRetryableErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "flood_wait") ||
+		strings.Contains(message, "too many requests") ||
+		strings.Contains(message, "timeout") ||
+		strings.Contains(message, "eof") ||
+		strings.Contains(message, "connection reset") ||
+		strings.Contains(message, "broken pipe")
+}
+
+func tgRepairBackoffDelay(attempt int, err error) time.Duration {
+	if err == nil {
+		return time.Second
+	}
+	message := strings.ToLower(err.Error())
+	if idx := strings.Index(message, "flood_wait_"); idx >= 0 {
+		value := 0
+		if _, scanErr := fmt.Sscanf(message[idx+11:], "%d", &value); scanErr == nil && value > 0 {
+			return time.Duration(value+2) * time.Second
+		}
+	}
+	if attempt < 0 {
+		attempt = 0
+	}
+	return time.Duration(attempt+1) * time.Second
 }
 
 func tgHistoryMessages(res tg.MessagesMessagesClass) []*tg.Message {
@@ -595,6 +654,9 @@ func (s *sSysPublish) tgRepairChannelById(ctx context.Context, tenantId int64, c
 		Where("id", channelId).
 		WhereNull("deleted_at").
 		Scan(&channel); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return channel, gerror.New("TG修复频道不存在")
+		}
 		return channel, gerror.Wrap(err, "读取TG修复频道失败")
 	}
 	if channel.Id <= 0 {
@@ -709,6 +771,24 @@ func (s *sSysPublish) finishProfileDownAfterRepair(ctx context.Context, task gdb
 	if err = s.handleProfilesDown(ctx, []int64{profileId}, tenantId, plan); err != nil {
 		return err
 	}
+	iservice.SysContent().ClearHomeProfileCardsCache(ctx)
+	return nil
+}
+
+func (s *sSysPublish) finishProfileDownWithoutRepair(ctx context.Context, task gdb.Record) error {
+	profileId := task["profile_id"].Int64()
+	columns := dao.ContentProfile.Columns()
+	if _, err := dao.ContentProfile.Ctx(ctx).Where(columns.Id, profileId).Data(g.Map{
+		columns.Status:     2,
+		columns.Visibility: consts.ContentVisibilityPrivate,
+		columns.UpdatedAt:  gtime.Now(),
+	}).Update(); err != nil {
+		return gerror.Wrap(err, "更新资料下架状态失败")
+	}
+	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", task["id"].Int64()).Data(g.Map{
+		"status":     sysin.PublishTaskStatusCanceled,
+		"updated_at": gtime.Now(),
+	}).Update()
 	iservice.SysContent().ClearHomeProfileCardsCache(ctx)
 	return nil
 }

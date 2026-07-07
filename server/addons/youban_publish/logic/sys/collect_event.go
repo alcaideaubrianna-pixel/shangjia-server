@@ -270,6 +270,9 @@ func (s *sSysPublish) createCollectPublishTask(ctx context.Context, event gdb.Re
 }
 
 func (s *sSysPublish) createCollectPublishMedia(ctx context.Context, event gdb.Record, content *collectContentResult, taskId int64) error {
+	if err := ensureMediaEditColumns(ctx); err != nil {
+		return err
+	}
 	var items []collectMediaItem
 	mediaJSON := event["media_json"].String()
 	if content != nil {
@@ -281,29 +284,39 @@ func (s *sSysPublish) createCollectPublishMedia(ctx context.Context, event gdb.R
 	now := gtime.Now()
 	sortIndex := 1
 	for _, item := range items {
-		fileId := strings.TrimSpace(item.FileId)
-		if fileId == "" {
+		if collectMediaSourceKey(item) == "" {
 			continue
 		}
 		mediaType := collectPublishMediaType(item.Type)
 		if mediaType == "" {
 			continue
 		}
+		storagePath := strings.TrimSpace(item.StoragePath)
+		fileUrl := strings.TrimSpace(item.FileUrl)
+		cacheStatus := tgCacheStatusInvalid
+		if strings.TrimSpace(item.FileId) != "" {
+			cacheStatus = tgCacheStatusValid
+		}
 		_, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(g.Map{
-			"tenant_id":   event["tenant_id"].Int64(),
-			"merchant_id": event["tenant_id"].Int64(),
-			"account_id":  event["account_id"].Int64(),
-			"task_id":     taskId,
-			"media_type":  mediaType,
-			"purpose":     "display",
-			"name":        fmt.Sprintf("collect-%d-%d", event["id"].Int64(), sortIndex),
-			"tg_file_id":  fileId,
-			"sort_index":  sortIndex,
-			"status":      1,
-			"created_at":  now,
-			"updated_at":  now,
-			"created_by":  event["account_id"].Int64(),
-			"updated_by":  event["account_id"].Int64(),
+			"tenant_id":           event["tenant_id"].Int64(),
+			"merchant_id":         event["tenant_id"].Int64(),
+			"account_id":          event["account_id"].Int64(),
+			"task_id":             taskId,
+			"media_type":          mediaType,
+			"purpose":             "display",
+			"name":                fmt.Sprintf("collect-%d-%d", event["id"].Int64(), sortIndex),
+			"tg_file_id":          strings.TrimSpace(item.FileId),
+			"file_url":            fileUrl,
+			"storage_path":        storagePath,
+			"tg_cache_asset_hash": mediaAssetHash(storagePath, fileUrl),
+			"tg_cache_status":     cacheStatus,
+			"poster_url":          strings.TrimSpace(item.PosterUrl),
+			"sort_index":          sortIndex,
+			"status":              1,
+			"created_at":          now,
+			"updated_at":          now,
+			"created_by":          event["account_id"].Int64(),
+			"updated_by":          event["account_id"].Int64(),
 		}).Insert()
 		if err != nil {
 			return gerror.Wrap(err, "创建采集媒体失败")

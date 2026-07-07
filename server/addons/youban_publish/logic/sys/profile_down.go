@@ -20,14 +20,6 @@ type profileDownPlan struct {
 }
 
 func (s *sSysPublish) prepareProfileDownPlan(ctx context.Context, tenantId int64) (*profileDownPlan, error) {
-	return s.prepareProfileDownPlanWithRequiredChannel(ctx, tenantId, true)
-}
-
-func (s *sSysPublish) prepareProfileDownPlanForDelete(ctx context.Context, tenantId int64) (*profileDownPlan, error) {
-	return s.prepareProfileDownPlanWithRequiredChannel(ctx, tenantId, false)
-}
-
-func (s *sSysPublish) prepareProfileDownPlanWithRequiredChannel(ctx context.Context, tenantId int64, required bool) (*profileDownPlan, error) {
 	res, err := NewSysConfig().PublishConfigView(ctx, &sysin.PublishConfigViewInp{})
 	if err != nil {
 		return nil, err
@@ -41,9 +33,6 @@ func (s *sSysPublish) prepareProfileDownPlanWithRequiredChannel(ctx context.Cont
 		return nil, err
 	}
 	if len(channels) == 0 {
-		if !required {
-			return plan, nil
-		}
 		return nil, gerror.New("没有配置下架频道")
 	}
 	plan.Notify = true

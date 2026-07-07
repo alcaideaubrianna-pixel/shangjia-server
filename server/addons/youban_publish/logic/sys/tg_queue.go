@@ -15,6 +15,7 @@ const (
 	tgQueueNameDefault = "youban_publish_tg"
 	tgTaskTypePublish  = "youban_publish:tg:publish"
 	tgTaskTypeDelete   = "youban_publish:tg:delete"
+	tgTaskTypeCleanup  = "youban_publish:tg:cleanup"
 	tgTaskTypeImport   = "youban_publish:import:legacy"
 	tgTaskTypeRepair   = "youban_publish:tg:message_repair"
 )
@@ -56,6 +57,10 @@ func (s *sSysPublish) enqueueTelegramJob(ctx context.Context, jobId int64, delay
 
 func (s *sSysPublish) enqueueTelegramDeleteJob(ctx context.Context, jobId int64, delay time.Duration) error {
 	return s.enqueueTelegramTask(ctx, tgTaskTypeDelete, jobId, delay)
+}
+
+func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64, delay time.Duration) error {
+	return s.enqueueTelegramTask(ctx, tgTaskTypeCleanup, jobId, delay)
 }
 
 func (s *sSysPublish) enqueueImportTask(ctx context.Context, id int64, delay time.Duration) error {

@@ -538,7 +538,7 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 	if len(ids) == 0 {
 		return gerror.New("资料不存在或无权操作")
 	}
-	if err = s.handleProfilesDownBeforeDelete(ctx, ids); err != nil {
+	if err = s.enqueueProfilesTelegramCleanupBeforeDelete(ctx, ids, tenantId); err != nil {
 		return err
 	}
 	columns := dao.ContentProfile.Columns()
@@ -550,35 +550,26 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 	return nil
 }
 
-func (s *sSysPublish) handleProfilesDownBeforeDelete(ctx context.Context, ids []int64) error {
+func (s *sSysPublish) enqueueProfilesTelegramCleanupBeforeDelete(ctx context.Context, ids []int64, tenantId int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	var rows []struct {
-		Id       int64 `orm:"id"`
-		TenantId int64 `orm:"tenant_id"`
-	}
-	if err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("profile_id AS id,tenant_id").
+	var jobs []telegramResubmitJob
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
 		WhereIn("profile_id", ids).
-		WhereNull("deleted_at").
-		Scan(&rows); err != nil {
-		return gerror.Wrap(err, "读取删除资料下架信息失败")
+		Where("status", "sent").
+		Scan(&jobs); err != nil {
+		return gerror.Wrap(err, "读取资料TG清理任务失败")
 	}
-	idsByTenant := make(map[int64][]int64)
-	for _, row := range rows {
-		if row.Id > 0 && row.TenantId > 0 {
-			idsByTenant[row.TenantId] = append(idsByTenant[row.TenantId], row.Id)
+	for _, job := range jobs {
+		if job.Id <= 0 {
+			continue
 		}
-	}
-	for tenantId, tenantProfileIds := range idsByTenant {
-		plan, err := s.prepareProfileDownPlanForDelete(ctx, tenantId)
-		if err != nil {
-			return err
+		if err := s.enqueueTelegramCleanupJob(ctx, job.Id, 0); err != nil {
+			return gerror.Wrap(err, "加入资料TG清理队列失败")
 		}
-		if err = s.handleProfilesDown(ctx, uniqueIds(tenantProfileIds), tenantId, plan); err != nil {
-			return err
-		}
+		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "delete", "queued", "资料已删除，TG历史消息已加入异步清理队列")
 	}
 	return nil
 }

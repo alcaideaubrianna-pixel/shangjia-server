@@ -12,6 +12,7 @@ type telegramMediaItem struct {
 	PosterStoragePath string `json:"posterStoragePath"`
 	TgFileId          string `json:"tgFileId"`
 	TgThumbFileId     string `json:"tgThumbFileId"`
+	AssetHash         string `json:"assetHash"`
 	SortIndex         int    `json:"sortIndex"`
 }
 
@@ -21,6 +22,7 @@ type telegramSentMessage struct {
 	Purpose      string
 	MediaId      int64
 	TgFileId     string
+	AssetHash    string
 }
 
 type telegramJobRecord struct {

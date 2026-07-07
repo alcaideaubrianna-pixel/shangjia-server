@@ -18,6 +18,18 @@ func (s *sSysPublish) DeleteTelegramJobMessages(ctx context.Context, jobId int64
 	if delay := telegramCycleDeleteDelay(job); delay > 0 {
 		return s.enqueueTelegramDeleteJob(ctx, job.Id, delay)
 	}
+	return s.deleteTelegramJobMessages(ctx, job, true)
+}
+
+func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int64) error {
+	job, err := s.telegramJobById(ctx, jobId)
+	if err != nil {
+		return err
+	}
+	return s.deleteTelegramJobMessages(ctx, job, false)
+}
+
+func (s *sSysPublish) deleteTelegramJobMessages(ctx context.Context, job telegramJobRecord, requeueCycle bool) error {
 	botToken, err := s.telegramJobBotToken(ctx, job.BotId, job.TenantId)
 	if err != nil {
 		return err
@@ -49,7 +61,10 @@ func (s *sSysPublish) DeleteTelegramJobMessages(ctx context.Context, jobId int64
 			Update()
 	}
 	s.appendTelegramJobLog(ctx, job, "delete", "success", "TG历史消息删除成功")
-	return s.requeueTelegramCyclePublish(ctx, job)
+	if requeueCycle {
+		return s.requeueTelegramCyclePublish(ctx, job)
+	}
+	return nil
 }
 
 func (s *sSysPublish) telegramJobById(ctx context.Context, jobId int64) (telegramJobRecord, error) {

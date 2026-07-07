@@ -252,6 +252,8 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media" (
   "poster_storage_path" varchar(1024) NOT NULL DEFAULT '',
   "tg_file_id" varchar(255) NOT NULL DEFAULT '',
   "tg_thumb_file_id" varchar(255) NOT NULL DEFAULT '',
+  "tg_cache_asset_hash" varchar(1024) NOT NULL DEFAULT '',
+  "tg_cache_status" varchar(16) NOT NULL DEFAULT 'invalid',
   "storage_path" varchar(1024) NOT NULL DEFAULT '',
   "original_storage_path" varchar(1024) NOT NULL DEFAULT '',
   "edited_storage_path" varchar(1024) NOT NULL DEFAULT '',
@@ -278,6 +280,8 @@ ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "poster_url" varc
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "poster_storage_path" varchar(1024) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "tg_file_id" varchar(255) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "tg_thumb_file_id" varchar(255) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "tg_cache_asset_hash" varchar(1024) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "tg_cache_status" varchar(16) NOT NULL DEFAULT 'invalid';
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "original_attachment_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "original_file_url" varchar(1024) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "original_storage_path" varchar(1024) NOT NULL DEFAULT '';
@@ -289,6 +293,7 @@ ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "edit_status" var
 UPDATE "hg_youban_publish_media" SET "tenant_id" = "merchant_id" WHERE "tenant_id" = 0 AND "merchant_id" > 0;
 UPDATE "hg_youban_publish_media" SET "original_attachment_id" = "attachment_id", "original_file_url" = "file_url", "original_storage_path" = "storage_path" WHERE "original_attachment_id" = 0 AND "attachment_id" > 0;
 UPDATE "hg_youban_publish_media" SET "edit_status" = 'edited' WHERE ("edit_status" = '' OR "edit_status" = 'raw' OR "edit_status" IS NULL) AND ("edited_attachment_id" > 0 OR "edited_storage_path" <> '' OR "edited_file_url" <> '' OR lower("name") LIKE '%-edited.%' OR lower("name") LIKE '%_edited.%');
+UPDATE "hg_youban_publish_media" SET "tg_cache_status" = 'valid', "tg_cache_asset_hash" = COALESCE(NULLIF("md5", ''), NULLIF("storage_path", ''), NULLIF("file_url", '')) WHERE "tg_file_id" <> '' AND ("tg_cache_status" = '' OR "tg_cache_status" = 'invalid' OR "tg_cache_status" IS NULL) AND "edit_status" = 'raw';
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_task_attachment" ON "hg_youban_publish_media" ("task_id", "attachment_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_task_sort" ON "hg_youban_publish_media" ("task_id", "sort_index", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_profile" ON "hg_youban_publish_media" ("profile_id", "id");

@@ -21,8 +21,12 @@ func (s *sSysPublish) updateTelegramMediaFileIds(ctx context.Context, messages [
 		}
 		_, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 			Where("id", item.MediaId).
-			Where("tg_file_id", "").
-			Data(g.Map{"tg_file_id": item.TgFileId, "updated_at": now}).
+			Data(g.Map{
+				"tg_file_id":          item.TgFileId,
+				"tg_cache_asset_hash": item.AssetHash,
+				"tg_cache_status":     tgCacheStatusValid,
+				"updated_at":          now,
+			}).
 			Update()
 		if err != nil {
 			return gerror.Wrap(err, "更新TG媒体file_id失败")
@@ -106,6 +110,10 @@ func (s *sSysPublish) markTaskPublishedAfterTelegram(ctx context.Context, taskId
 	if err != nil {
 		return false, gerror.Wrap(err, "更新上架任务发布状态失败")
 	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return false, nil
+	}
 	if profileId > 0 {
 		profileColumns := dao.ContentProfile.Columns()
 		_, err = dao.ContentProfile.Ctx(ctx).
@@ -122,6 +130,8 @@ func (s *sSysPublish) markTaskPublishedAfterTelegram(ctx context.Context, taskId
 		}
 		iservice.SysContent().ClearHomeProfileCardsCache(ctx)
 	}
-	affected, _ := result.RowsAffected()
-	return affected > 0, nil
+	if err = s.collectFollowProfilePublished(ctx, task); err != nil {
+		g.Log().Warningf(ctx, "关注采集发布资料失败 task:%d profile:%d err:%+v", taskId, profileId, err)
+	}
+	return true, nil
 }

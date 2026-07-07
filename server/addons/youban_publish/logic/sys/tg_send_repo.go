@@ -37,14 +37,38 @@ func (s *sSysPublish) lockTelegramJob(ctx context.Context, jobId int64) (telegra
 }
 
 func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecord, purpose string) ([]*telegramMediaItem, error) {
-	var rows []*telegramMediaItem
-	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+	if err := ensureMediaEditColumns(ctx); err != nil {
+		return nil, err
+	}
+	records, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("task_id", job.TaskId).
 		Where("purpose", purpose).
 		WhereNull("deleted_at").
-		OrderAsc("sort_index").OrderAsc("id")
-	if err := mod.Fields("id,media_type,purpose,file_url,poster_url,storage_path,poster_storage_path,tg_file_id,tg_thumb_file_id,sort_index").Scan(&rows); err != nil {
+		OrderAsc("sort_index").OrderAsc("id").
+		All()
+	if err != nil {
 		return nil, gerror.Wrap(err, "读取TG媒体失败")
+	}
+	rows := make([]*telegramMediaItem, 0, len(records))
+	for _, record := range records {
+		media := newProfileMediaFromRecord(record)
+		asset := media.EffectiveAsset()
+		rows = append(rows, &telegramMediaItem{
+			Id:                record["id"].Int64(),
+			MediaType:         record["media_type"].String(),
+			Purpose:           record["purpose"].String(),
+			FileUrl:           normalizeMediaFileURL(asset.FileUrl, asset.StoragePath),
+			PosterUrl:         normalizeMediaFileURL(record["poster_url"].String(), record["poster_storage_path"].String()),
+			StoragePath:       asset.StoragePath,
+			PosterStoragePath: record["poster_storage_path"].String(),
+			TgFileId:          media.ValidTgFileId(asset),
+			TgThumbFileId:     "",
+			AssetHash:         asset.Hash,
+			SortIndex:         record["sort_index"].Int(),
+		})
+		if rows[len(rows)-1].TgFileId != "" {
+			rows[len(rows)-1].TgThumbFileId = record["tg_thumb_file_id"].String()
+		}
 	}
 	return rows, nil
 }

@@ -291,10 +291,14 @@ func (s *sSysPublish) upsertTgChannelCache(ctx context.Context, tenantId int64, 
 
 func (s *sSysPublish) tgChannelCacheByChannelId(ctx context.Context, tenantId int64, tgAccountId int64, channelId string) (*sysin.ChannelCacheModel, error) {
 	var item *sysin.ChannelCacheModel
+	ids := tgChannelCacheLookupIds(channelId)
+	if len(ids) == 0 {
+		return nil, gerror.New("请选择当前TG账号下的频道")
+	}
 	if err := g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("tg_account_id", tgAccountId).
-		Where("channel_id", strings.TrimSpace(channelId)).
+		WhereIn("channel_id", ids).
 		Scan(&item); err != nil {
 		return nil, gerror.Wrap(err, "读取频道缓存失败")
 	}
@@ -302,6 +306,37 @@ func (s *sSysPublish) tgChannelCacheByChannelId(ctx context.Context, tenantId in
 		return nil, gerror.New("请先刷新频道缓存，并选择当前TG账号下的频道")
 	}
 	return item, nil
+}
+
+func tgChannelCacheLookupIds(channelId string) []string {
+	raw := strings.TrimSpace(channelId)
+	if raw == "" {
+		return nil
+	}
+	ids := []string{raw}
+	if strings.HasPrefix(raw, "-100") && len(raw) > 4 {
+		ids = append(ids, strings.TrimPrefix(raw, "-100"))
+	} else if !strings.HasPrefix(raw, "-") {
+		ids = append(ids, "-100"+raw)
+	}
+	return uniqueStrings(ids)
+}
+
+func uniqueStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (s *sSysPublish) channelCheckBots(ctx context.Context, ids []int64, tenantId int64) ([]*sysin.BotModel, error) {

@@ -133,8 +133,11 @@ func (s *sSysPublish) saveCollectBotEvent(ctx context.Context, source g.Map, bot
 }
 
 type collectMediaItem struct {
-	Type   string `json:"type"`
-	FileId string `json:"fileId"`
+	Type        string `json:"type"`
+	FileId      string `json:"fileId"`
+	FileUrl     string `json:"fileUrl,omitempty"`
+	StoragePath string `json:"storagePath,omitempty"`
+	PosterUrl   string `json:"posterUrl,omitempty"`
 }
 
 func collectTelegramMedia(msg *models.Message) (int, string) {
@@ -161,10 +164,11 @@ func mergeCollectMediaJSON(existing string, next string) (string, int) {
 	seen := map[string]struct{}{}
 	merged := make([]collectMediaItem, 0, len(items)+len(nextItems))
 	for _, item := range append(items, nextItems...) {
-		if strings.TrimSpace(item.FileId) == "" {
+		sourceKey := collectMediaSourceKey(item)
+		if sourceKey == "" {
 			continue
 		}
-		key := item.Type + ":" + item.FileId
+		key := item.Type + ":" + sourceKey
 		if _, ok := seen[key]; ok {
 			continue
 		}

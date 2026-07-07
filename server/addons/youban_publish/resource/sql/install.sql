@@ -492,6 +492,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   `poster_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '视频封面存储路径',
   `tg_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram文件ID',
   `tg_thumb_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram缩略图文件ID',
+  `tg_cache_asset_hash` varchar(1024) NOT NULL DEFAULT '' COMMENT 'TG缓存素材Hash',
+  `tg_cache_status` varchar(16) NOT NULL DEFAULT 'invalid' COMMENT 'TG缓存状态',
   `storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '存储路径',
   `original_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始存储路径',
   `edited_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '编辑后存储路径',
@@ -521,6 +523,7 @@ ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tenant_id` bigint(20) NOT NULL
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `perceptual_hash` varchar(64) NOT NULL DEFAULT '' COMMENT '图片感知哈希' AFTER `md5`, ADD COLUMN `purpose` varchar(16) NOT NULL DEFAULT 'display' COMMENT '用途：display展示 verify验证' AFTER `media_type`, ADD COLUMN `poster_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '视频封面' AFTER `file_url`;
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `poster_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '视频封面存储路径' AFTER `poster_url`;
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tg_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram文件ID' AFTER `poster_url`, ADD COLUMN `tg_thumb_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram缩略图文件ID' AFTER `tg_file_id`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tg_cache_asset_hash` varchar(1024) NOT NULL DEFAULT '' COMMENT 'TG缓存素材Hash' AFTER `tg_thumb_file_id`, ADD COLUMN `tg_cache_status` varchar(16) NOT NULL DEFAULT 'invalid' COMMENT 'TG缓存状态' AFTER `tg_cache_asset_hash`;
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `original_attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '原始HotGo附件ID' AFTER `attachment_id`;
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `original_file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始访问地址' AFTER `file_url`;
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `original_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始存储路径' AFTER `storage_path`;
@@ -532,6 +535,7 @@ ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edit_status` varchar(16) NOT N
 UPDATE `hg_youban_publish_media` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
 UPDATE `hg_youban_publish_media` SET `original_attachment_id` = `attachment_id`, `original_file_url` = `file_url`, `original_storage_path` = `storage_path` WHERE `original_attachment_id` = 0 AND `attachment_id` > 0;
 UPDATE `hg_youban_publish_media` SET `edit_status` = 'edited' WHERE (`edit_status` = '' OR `edit_status` = 'raw' OR `edit_status` IS NULL) AND (`edited_attachment_id` > 0 OR `edited_storage_path` <> '' OR `edited_file_url` <> '' OR lower(`name`) LIKE '%-edited.%' OR lower(`name`) LIKE '%_edited.%');
+UPDATE `hg_youban_publish_media` SET `tg_cache_status` = 'valid', `tg_cache_asset_hash` = COALESCE(NULLIF(`md5`, ''), NULLIF(`storage_path`, ''), NULLIF(`file_url`, '')) WHERE `tg_file_id` <> '' AND (`tg_cache_status` = '' OR `tg_cache_status` = 'invalid' OR `tg_cache_status` IS NULL) AND `edit_status` = 'raw';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_media_face` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',

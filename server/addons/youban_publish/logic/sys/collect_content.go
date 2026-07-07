@@ -249,8 +249,8 @@ func (s *sSysPublish) syncCollectContentMedia(ctx context.Context, event gdb.Rec
 	mediaCols := mediaDao.Columns()
 	sortIndex := 1
 	for _, item := range items {
-		fileId := strings.TrimSpace(item.FileId)
-		if fileId == "" {
+		sourceKey := collectMediaSourceKey(item)
+		if sourceKey == "" {
 			continue
 		}
 		mediaType := collectPublishMediaType(item.Type)
@@ -259,7 +259,7 @@ func (s *sSysPublish) syncCollectContentMedia(ctx context.Context, event gdb.Rec
 		}
 		existing, err := mediaDao.Ctx(ctx).
 			Where(mediaCols.ContentId, contentId).
-			Where(mediaCols.SourceFileId, fileId).
+			Where(mediaCols.SourceFileId, sourceKey).
 			Fields(mediaCols.Id).
 			Value()
 		if err != nil {
@@ -274,7 +274,7 @@ func (s *sSysPublish) syncCollectContentMedia(ctx context.Context, event gdb.Rec
 			mediaCols.AccountId:       event["account_id"].Int64(),
 			mediaCols.ContentId:       contentId,
 			mediaCols.MediaType:       mediaType,
-			mediaCols.SourceFileId:    fileId,
+			mediaCols.SourceFileId:    sourceKey,
 			mediaCols.SourceUniqueKey: event["source_unique_key"].String(),
 			mediaCols.SortIndex:       sortIndex,
 			mediaCols.Status:          "active",
@@ -300,14 +300,27 @@ func collectMediaSignature(mediaJSON string) string {
 	}
 	keys := make([]string, 0, len(items))
 	for _, item := range items {
-		fileId := strings.TrimSpace(item.FileId)
-		if fileId == "" {
+		sourceKey := collectMediaSourceKey(item)
+		if sourceKey == "" {
 			continue
 		}
-		keys = append(keys, strings.TrimSpace(item.Type)+":"+fileId)
+		keys = append(keys, strings.TrimSpace(item.Type)+":"+sourceKey)
 	}
 	sort.Strings(keys)
 	return collectHash(strings.Join(keys, "|"))
+}
+
+func collectMediaSourceKey(item collectMediaItem) string {
+	if source := strings.TrimSpace(item.FileId); source != "" {
+		return "tg:" + source
+	}
+	if source := strings.TrimSpace(item.StoragePath); source != "" {
+		return "path:" + source
+	}
+	if source := strings.TrimSpace(item.FileUrl); source != "" {
+		return "url:" + source
+	}
+	return ""
 }
 
 func collectPublishMediaType(sourceType string) string {

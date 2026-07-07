@@ -511,6 +511,8 @@ type MediaModel struct {
 	PerceptualHash       string      `json:"perceptualHash" dc:"图片感知哈希"`
 	EditConfigJson       string      `json:"editConfigJson" dc:"图片编辑配置"`
 	EditStatus           string      `json:"editStatus" dc:"编辑状态：raw/edited"`
+	TgCacheAssetHash     string      `json:"tgCacheAssetHash" dc:"TG缓存素材Hash"`
+	TgCacheStatus        string      `json:"tgCacheStatus" dc:"TG缓存状态"`
 	Size                 int64       `json:"size" dc:"大小"`
 	SortIndex            int         `json:"sortIndex" dc:"排序"`
 	Status               int         `json:"status" dc:"状态"`

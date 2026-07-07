@@ -25,6 +25,7 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tgTaskTypePublish, s.handleTelegramPublishTask)
 	mux.HandleFunc(tgTaskTypeDelete, s.handleTelegramDeleteTask)
+	mux.HandleFunc(tgTaskTypeCleanup, s.handleTelegramCleanupTask)
 	mux.HandleFunc(tgTaskTypeImport, s.handleImportTask)
 	mux.HandleFunc(tgTaskTypeRepair, s.handleTgMessageRepairTask)
 
@@ -67,6 +68,14 @@ func (s *sSysPublish) handleTelegramDeleteTask(ctx context.Context, task *asynq.
 		return err
 	}
 	return s.DeleteTelegramJobMessages(ctx, payload.JobId)
+}
+
+func (s *sSysPublish) handleTelegramCleanupTask(ctx context.Context, task *asynq.Task) error {
+	payload, err := decodeTelegramQueuePayload(task)
+	if err != nil {
+		return err
+	}
+	return s.CleanupTelegramJobMessages(ctx, payload.JobId)
 }
 
 func (s *sSysPublish) handleImportTask(ctx context.Context, task *asynq.Task) error {

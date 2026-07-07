@@ -20,7 +20,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 	if len(media) == 1 {
 		return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0])
 	}
-	group, mediaIds, closers := s.telegramInputMediaGroup(media, caption)
+	group, mediaIds, assetHashes, closers := s.telegramInputMediaGroup(media, caption)
 	defer closeTelegramMediaFiles(closers)
 	if len(group) == 0 {
 		return nil, nil
@@ -32,7 +32,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 	if err != nil {
 		return nil, err
 	}
-	return telegramSentMessagesFromGroup(msgs, purpose, mediaIds), nil
+	return telegramSentMessagesFromGroup(msgs, purpose, mediaIds, assetHashes), nil
 }
 
 func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem) ([]*telegramSentMessage, error) {
@@ -61,7 +61,7 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		if err != nil {
 			return nil, err
 		}
-		return telegramSentMessagesFromSingle(msg, purpose, media.Id)
+		return telegramSentMessagesFromSingle(msg, purpose, media.Id, media.AssetHash)
 	default:
 		msg, err := bot.SendPhoto(ctx, &tgbot.SendPhotoParams{
 			ChatID:  chatId,
@@ -71,13 +71,14 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		if err != nil {
 			return nil, err
 		}
-		return telegramSentMessagesFromSingle(msg, purpose, media.Id)
+		return telegramSentMessagesFromSingle(msg, purpose, media.Id, media.AssetHash)
 	}
 }
 
-func (s *sSysPublish) telegramInputMediaGroup(media []*telegramMediaItem, caption string) ([]models.InputMedia, []int64, []io.Closer) {
+func (s *sSysPublish) telegramInputMediaGroup(media []*telegramMediaItem, caption string) ([]models.InputMedia, []int64, []string, []io.Closer) {
 	group := make([]models.InputMedia, 0, len(media))
 	mediaIds := make([]int64, 0, len(media))
+	assetHashes := make([]string, 0, len(media))
 	closers := make([]io.Closer, 0, len(media))
 	for _, item := range media {
 		source, attachment, closer, err := telegramInputMediaSource(item)
@@ -97,8 +98,9 @@ func (s *sSysPublish) telegramInputMediaGroup(media []*telegramMediaItem, captio
 			group = append(group, &models.InputMediaPhoto{Media: source, Caption: itemCaption, MediaAttachment: attachment})
 		}
 		mediaIds = append(mediaIds, item.Id)
+		assetHashes = append(assetHashes, item.AssetHash)
 	}
-	return group, mediaIds, closers
+	return group, mediaIds, assetHashes, closers
 }
 
 func telegramInputFile(media *telegramMediaItem) (models.InputFile, io.Closer, error) {
@@ -230,7 +232,7 @@ func closeTelegramMediaFiles(closers []io.Closer) {
 	}
 }
 
-func telegramSentMessagesFromGroup(msgs []*models.Message, purpose string, mediaIds []int64) []*telegramSentMessage {
+func telegramSentMessagesFromGroup(msgs []*models.Message, purpose string, mediaIds []int64, assetHashes []string) []*telegramSentMessage {
 	list := make([]*telegramSentMessage, 0, len(msgs))
 	for i, msg := range msgs {
 		if msg == nil {
@@ -240,18 +242,23 @@ func telegramSentMessagesFromGroup(msgs []*models.Message, purpose string, media
 		if i < len(mediaIds) {
 			mediaId = mediaIds[i]
 		}
+		assetHash := ""
+		if i < len(assetHashes) {
+			assetHash = assetHashes[i]
+		}
 		list = append(list, &telegramSentMessage{
 			MessageId:    int64(msg.ID),
 			MediaGroupId: msg.MediaGroupID,
 			Purpose:      purpose,
 			MediaId:      mediaId,
 			TgFileId:     telegramMessageFileId(msg),
+			AssetHash:    assetHash,
 		})
 	}
 	return list
 }
 
-func telegramSentMessagesFromSingle(msg *models.Message, purpose string, mediaId int64) ([]*telegramSentMessage, error) {
+func telegramSentMessagesFromSingle(msg *models.Message, purpose string, mediaId int64, assetHash string) ([]*telegramSentMessage, error) {
 	if msg == nil {
 		return nil, nil
 	}
@@ -261,5 +268,6 @@ func telegramSentMessagesFromSingle(msg *models.Message, purpose string, mediaId
 		Purpose:      purpose,
 		MediaId:      mediaId,
 		TgFileId:     telegramMessageFileId(msg),
+		AssetHash:    assetHash,
 	}}, nil
 }

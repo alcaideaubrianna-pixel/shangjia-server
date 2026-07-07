@@ -209,60 +209,15 @@ func (s *sSysPublish) saveTask(ctx context.Context, in *sysin.TaskSaveInp) (id i
 }
 
 func (s *sSysPublish) submitTask(ctx context.Context, id int64, accountId int64) (err error) {
-	task, err := s.getTask(ctx, id, accountId)
-	if err != nil {
-		return err
-	}
-	if !canSubmitPublishTask(task) {
-		return gerror.New("已取消的任务不能提交")
-	}
-	if task["tg_push_enabled"].Int() != 1 {
-		return s.markTaskSavedWithoutPublish(ctx, task, contexts.GetUserId(ctx))
-	}
-	hasChannels, err := s.hasPublishChannels(ctx, task)
-	if err != nil {
-		return err
-	}
-	if !hasChannels {
-		return s.markTaskSavedWithoutPublish(ctx, task, contexts.GetUserId(ctx))
-	}
-	_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Where("id", id).
-		Where("tenant_id", task["tenant_id"].Int64()).
-		WhereNull("deleted_at").
-		Data(g.Map{
-			"status":        sysin.PublishTaskStatusPending,
-			"tg_status":     "pending",
-			"error_message": "",
-			"submitted_at":  gtime.Now(),
-			"updated_by":    contexts.GetUserId(ctx),
-			"updated_at":    gtime.Now(),
-		}).Update()
-	if err != nil {
-		return gerror.Wrap(err, "提交上架任务失败")
-	}
-	task, err = s.getTask(ctx, id, accountId)
-	if err != nil {
-		return err
-	}
-	if _, err = s.publishTaskToProfile(ctx, task); err != nil {
-		_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-			Where("id", id).
-			Where("tenant_id", task["tenant_id"].Int64()).
-			WhereNull("deleted_at").
-			Data(g.Map{
-				"status":        sysin.PublishTaskStatusFailed,
-				"error_message": err.Error(),
-				"updated_by":    contexts.GetUserId(ctx),
-				"updated_at":    gtime.Now(),
-			}).Update()
-		return err
-	}
-	return s.ensureTgJob(ctx, id)
+	return s.submitPublishWorkflow(ctx, id, 0, accountId, contexts.GetUserId(ctx))
 }
 
 func (s *sSysPublish) submitTaskByTenant(ctx context.Context, id int64, tenantId int64, operatorId int64) (err error) {
-	task, err := s.getTaskByTenant(ctx, id, tenantId)
+	return s.submitPublishWorkflow(ctx, id, tenantId, 0, operatorId)
+}
+
+func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenantId int64, accountId int64, operatorId int64) (err error) {
+	task, err := s.getPublishWorkflowTask(ctx, id, tenantId, accountId)
 	if err != nil {
 		return err
 	}
@@ -298,7 +253,7 @@ func (s *sSysPublish) submitTaskByTenant(ctx context.Context, id int64, tenantId
 	if err != nil {
 		return gerror.Wrap(err, "提交上架任务失败")
 	}
-	task, err = s.getTaskByTenant(ctx, id, tenantId)
+	task, err = s.getPublishWorkflowTask(ctx, id, tenantId, accountId)
 	if err != nil {
 		return err
 	}
@@ -318,6 +273,13 @@ func (s *sSysPublish) submitTaskByTenant(ctx context.Context, id int64, tenantId
 		return err
 	}
 	return s.ensureTgJob(ctx, id)
+}
+
+func (s *sSysPublish) getPublishWorkflowTask(ctx context.Context, id int64, tenantId int64, accountId int64) (gdb.Record, error) {
+	if accountId > 0 {
+		return s.getTask(ctx, id, accountId)
+	}
+	return s.getTaskByTenant(ctx, id, tenantId)
 }
 
 func (s *sSysPublish) markTaskSavedWithoutPublish(ctx context.Context, task gdb.Record, operatorId int64) error {

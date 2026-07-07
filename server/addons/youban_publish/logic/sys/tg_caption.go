@@ -29,14 +29,7 @@ func buildTelegramTaskCaption(row gdb.Record, setting *sysin.AccountSettingModel
 	if setting != nil && setting.EnableTitleMark == 1 && setting.MarkPosition == "top" && mark != "" {
 		lines = append(lines, mark)
 	}
-	region := strings.TrimSpace(row["province"].String() + " " + row["city"].String())
-	if region != "" {
-		lines = append(lines, "地区："+region)
-	}
 	if text := strings.TrimSpace(row["plain_text"].String()); text != "" {
-		if len(lines) > 0 {
-			lines = append(lines, "")
-		}
 		lines = append(lines, text)
 	}
 	if setting != nil && setting.EnableTitleMark == 1 && setting.MarkPosition != "top" && mark != "" {
@@ -72,6 +65,9 @@ func appendCaptionMark(lines []string, mark string, position string) []string {
 func telegramCaptionMark(row gdb.Record, setting *sysin.AccountSettingModel) string {
 	if setting == nil || setting.EnableTitleMark != 1 {
 		return ""
+	}
+	if title := strings.TrimSpace(row["title"].String()); title != "" {
+		return title
 	}
 	number := telegramCaptionNumber(row)
 	if number == "" {
