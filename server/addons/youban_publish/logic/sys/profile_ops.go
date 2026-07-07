@@ -538,12 +538,48 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 	if len(ids) == 0 {
 		return gerror.New("资料不存在或无权操作")
 	}
+	if err = s.handleProfilesDownBeforeDelete(ctx, ids); err != nil {
+		return err
+	}
 	columns := dao.ContentProfile.Columns()
 	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).Data(g.Map{columns.DeletedAt: gtime.Now()}).Unscoped().Update(); err != nil {
 		return gerror.Wrap(err, "删除资料失败")
 	}
 	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).WhereIn("profile_id", ids).Data(g.Map{"deleted_by": contexts.GetUserId(ctx), "deleted_at": gtime.Now()}).Update()
 	iservice.SysContent().ClearHomeProfileCardsCache(ctx)
+	return nil
+}
+
+func (s *sSysPublish) handleProfilesDownBeforeDelete(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	var rows []struct {
+		Id       int64 `orm:"id"`
+		TenantId int64 `orm:"tenant_id"`
+	}
+	if err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Fields("profile_id AS id,tenant_id").
+		WhereIn("profile_id", ids).
+		WhereNull("deleted_at").
+		Scan(&rows); err != nil {
+		return gerror.Wrap(err, "读取删除资料下架信息失败")
+	}
+	idsByTenant := make(map[int64][]int64)
+	for _, row := range rows {
+		if row.Id > 0 && row.TenantId > 0 {
+			idsByTenant[row.TenantId] = append(idsByTenant[row.TenantId], row.Id)
+		}
+	}
+	for tenantId, tenantProfileIds := range idsByTenant {
+		plan, err := s.prepareProfileDownPlanForDelete(ctx, tenantId)
+		if err != nil {
+			return err
+		}
+		if err = s.handleProfilesDown(ctx, uniqueIds(tenantProfileIds), tenantId, plan); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -949,12 +985,7 @@ func (s *sSysPublish) tagIdsByKeyword(ctx context.Context, keyword string) []str
 func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, tenantId int64, accountId int64, taskId int64) (int64, error) {
 	columns := dao.ContentProfile.Columns()
 	now := gtime.Now()
-	profileNo, err := s.nextAccountProfileNo(ctx, tx, tenantId, accountId)
-	if err != nil {
-		return 0, err
-	}
 	data := g.Map{
-		columns.ProfileNo:       profileNo,
 		columns.SourceType:      publishProfileSourceType,
 		columns.SourceNoteUuid:  newPublishProfileUUID(),
 		columns.SourceKey:       fmt.Sprintf("youban_publish:profile:%d", taskId),
@@ -981,11 +1012,31 @@ func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	}
 	data[columns.PublishedAt] = publishedAt
 	data[columns.AdminRemark] = in.CustomerRemark
-	id, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Data(data).InsertAndGetId()
-	if err != nil {
-		return 0, gerror.Wrap(err, "创建资料失败")
+	var lastErr error
+	for i := 0; i < 1000; i++ {
+		profileNo, err := s.nextAccountProfileNo(ctx, tx, tenantId, accountId)
+		if err != nil {
+			return 0, err
+		}
+		data[columns.ProfileNo] = profileNo
+		id, insertErr := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Data(data).InsertAndGetId()
+		if insertErr == nil {
+			return id, nil
+		}
+		lastErr = insertErr
+		if !isProfileNoUniqueConstraintError(insertErr) {
+			return 0, gerror.Wrap(insertErr, "创建资料失败")
+		}
 	}
-	return id, nil
+	return 0, gerror.Wrap(lastErr, "创建资料失败，资料编号重复")
+}
+
+func isProfileNoUniqueConstraintError(err error) bool {
+	if !isUniqueConstraintError(err) {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "profile_no") || strings.Contains(message, "uk_content_profile_no")
 }
 
 func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, profileId int64, taskId int64, tenantId int64, accountId int64, channelJSON string, tgPushEnabled int, tgStatus string, publishAt *gtime.Time) error {
@@ -1117,6 +1168,9 @@ func (s *sSysPublish) ensureProfileChannels(ctx context.Context, ids []int64, te
 }
 
 func (s *sSysPublish) mediaListByProfile(ctx context.Context, profileId int64, tenantId int64, accountId int64) (list []*sysin.MediaModel, err error) {
+	if err = ensureMediaEditColumns(ctx); err != nil {
+		return nil, err
+	}
 	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("profile_id", profileId).WhereNull("deleted_at")
 	if tenantId > 0 {
 		mod = mod.Where("tenant_id", tenantId)

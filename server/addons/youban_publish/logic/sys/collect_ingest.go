@@ -28,9 +28,13 @@ func (s *sSysPublish) collectBotMessage(ctx context.Context, botId int64, msg *m
 		return
 	}
 	for _, source := range sources {
-		eventId, err := s.saveCollectBotEvent(ctx, source, botId, msg)
+		eventId, grouped, err := s.saveCollectBotEvent(ctx, source, botId, msg)
 		if err != nil {
 			g.Log().Warningf(ctx, "保存Bot采集事件失败 source:%d msg:%d err:%+v", gconv.Int64(source["id"]), msg.ID, err)
+			continue
+		}
+		if grouped {
+			s.scheduleCollectGroupedEvent(eventId, gconv.Int64(source["tenant_id"]), gconv.Int64(source["account_id"]))
 			continue
 		}
 		if err = s.processCollectEvent(ctx, eventId, gconv.Int64(source["tenant_id"]), gconv.Int64(source["account_id"])); err != nil {
@@ -61,19 +65,36 @@ func (s *sSysPublish) collectSourcesByBotMessage(ctx context.Context, botId int6
 	return rows, nil
 }
 
-func (s *sSysPublish) saveCollectBotEvent(ctx context.Context, source g.Map, botId int64, msg *models.Message) (int64, error) {
+func (s *sSysPublish) saveCollectBotEvent(ctx context.Context, source g.Map, botId int64, msg *models.Message) (int64, bool, error) {
 	chatId := strconv.FormatInt(msg.Chat.ID, 10)
+	grouped := strings.TrimSpace(msg.MediaGroupID) != ""
 	uniqueKey := fmt.Sprintf("bot:%d:%s:%d", botId, chatId, msg.ID)
-	value, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Fields("id").Where("source_unique_key", uniqueKey).Value()
-	if err != nil {
-		return 0, err
+	if grouped {
+		uniqueKey = fmt.Sprintf("bot:%d:%s:group:%s", botId, chatId, msg.MediaGroupID)
 	}
-	if id := value.Int64(); id > 0 {
-		return id, nil
+	record, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("source_unique_key", uniqueKey).One()
+	if err != nil {
+		return 0, grouped, err
 	}
 	rawText := strings.TrimSpace(telegramMessageText(msg))
 	mediaCount, mediaJson := collectTelegramMedia(msg)
 	now := gtime.Now()
+	if !record.IsEmpty() {
+		nextText := strings.TrimSpace(record["raw_text"].String())
+		if nextText == "" {
+			nextText = rawText
+		}
+		nextMediaJson, nextMediaCount := mergeCollectMediaJSON(record["media_json"].String(), mediaJson)
+		_, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", record["id"].Int64()).Data(g.Map{
+			"raw_text":    nextText,
+			"media_count": nextMediaCount,
+			"media_json":  nextMediaJson,
+			"text_hash":   collectHash(nextText),
+			"dedupe_key":  collectHash(fmt.Sprintf("%s:%s:%d", nextText, nextMediaJson, nextMediaCount)),
+			"updated_at":  now,
+		}).Update()
+		return record["id"].Int64(), grouped, err
+	}
 	receivedAt := now
 	if msg.Date > 0 {
 		receivedAt = gtime.NewFromTime(time.Unix(int64(msg.Date), 0))
@@ -99,28 +120,65 @@ func (s *sSysPublish) saveCollectBotEvent(ctx context.Context, source g.Map, bot
 		"updated_at":        now,
 	}).InsertAndGetId()
 	if err != nil {
-		return 0, err
+		return 0, grouped, err
 	}
 	_, _ = pdao.YoubanPublishCollectSource.Ctx(ctx).Where("id", source["id"]).Data(g.Map{
 		"event_total":   gdb.Raw("event_total+1"),
 		"last_event_at": now,
 		"updated_at":    now,
 	}).Update()
-	return eventId, nil
+	return eventId, grouped, nil
+}
+
+type collectMediaItem struct {
+	Type   string `json:"type"`
+	FileId string `json:"fileId"`
 }
 
 func collectTelegramMedia(msg *models.Message) (int, string) {
-	items := make([]map[string]string, 0, 2)
+	items := make([]collectMediaItem, 0, 2)
 	if len(msg.Photo) > 0 {
 		photo := msg.Photo[len(msg.Photo)-1]
-		items = append(items, map[string]string{"type": "photo", "fileId": photo.FileID})
+		items = append(items, collectMediaItem{Type: "photo", FileId: photo.FileID})
 	}
 	if msg.Video != nil {
-		items = append(items, map[string]string{"type": "video", "fileId": msg.Video.FileID})
+		items = append(items, collectMediaItem{Type: "video", FileId: msg.Video.FileID})
 	}
 	if msg.Document != nil {
-		items = append(items, map[string]string{"type": "document", "fileId": msg.Document.FileID})
+		items = append(items, collectMediaItem{Type: "document", FileId: msg.Document.FileID})
 	}
 	data, _ := json.Marshal(items)
 	return len(items), string(data)
+}
+
+func mergeCollectMediaJSON(existing string, next string) (string, int) {
+	items := make([]collectMediaItem, 0)
+	_ = json.Unmarshal([]byte(existing), &items)
+	var nextItems []collectMediaItem
+	_ = json.Unmarshal([]byte(next), &nextItems)
+	seen := map[string]struct{}{}
+	merged := make([]collectMediaItem, 0, len(items)+len(nextItems))
+	for _, item := range append(items, nextItems...) {
+		if strings.TrimSpace(item.FileId) == "" {
+			continue
+		}
+		key := item.Type + ":" + item.FileId
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		merged = append(merged, item)
+	}
+	data, _ := json.Marshal(merged)
+	return string(data), len(merged)
+}
+
+func (s *sSysPublish) scheduleCollectGroupedEvent(eventId int64, tenantId int64, accountId int64) {
+	go func() {
+		time.Sleep(2 * time.Second)
+		ctx := context.Background()
+		if err := s.processCollectEvent(ctx, eventId, tenantId, accountId); err != nil {
+			g.Log().Warningf(ctx, "处理Bot媒体组采集事件失败 event:%d err:%+v", eventId, err)
+		}
+	}()
 }

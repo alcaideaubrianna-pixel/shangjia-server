@@ -9,20 +9,24 @@
         <n-button type="primary" @click="openCreateModal">新建导入</n-button>
         <n-button @click="loadTasks">刷新</n-button>
       </n-space>
-      <n-data-table :columns="taskColumns" :data="tasks" :loading="loading" :pagination="taskPagination" :row-key="(row) => row.id" :scroll-x="1320" size="small" remote />
+      <n-data-table :columns="taskColumns" :data="tasks" :loading="loading" :pagination="taskPagination" :row-key="(row) => row.id" :scroll-x="1420" size="small" remote />
     </n-tab-pane>
 
     <n-tab-pane name="runs" tab="导入记录">
-      <n-space class="toolbar" align="center">
-        <n-select v-model:value="runQuery.tenantId" :options="tenantOptionsWithAll" clearable filterable placeholder="账号归属" class="tenant-select" @update:value="handleRunTenantChange" />
-        <n-select v-model:value="runQuery.accountId" :options="runAccountOptionsWithAll" clearable filterable placeholder="上架账号" class="tenant-select" />
-        <n-select v-model:value="runQuery.runType" :options="runTypeOptionsWithAll" clearable placeholder="类型" class="status-select" />
-        <n-select v-model:value="runQuery.status" :options="statusOptionsWithAll" clearable placeholder="状态" class="status-select" />
-        <n-input v-model:value="runQuery.keyword" placeholder="域名 / 账号" clearable @keyup.enter="loadRuns" />
-        <n-button @click="loadRuns">查询</n-button>
-        <n-button @click="loadRuns">刷新</n-button>
-      </n-space>
-      <n-data-table :columns="runColumns" :data="runs" :loading="runLoading" :pagination="runPagination" :row-key="(row) => row.id" :scroll-x="1720" size="small" remote />
+      <div class="run-filter">
+        <div class="run-filter-grid">
+          <n-select v-model:value="runQuery.tenantId" :options="tenantOptionsWithAll" clearable filterable placeholder="账号归属" @update:value="handleRunTenantChange" />
+          <n-select v-model:value="runQuery.accountId" :options="runAccountOptionsWithAll" clearable filterable placeholder="上架账号" />
+          <n-select v-model:value="runQuery.runType" :options="runTypeOptionsWithAll" clearable placeholder="类型" />
+          <n-select v-model:value="runQuery.status" :options="statusOptionsWithAll" clearable placeholder="状态" />
+          <n-input v-model:value="runQuery.keyword" placeholder="域名 / 账号" clearable @keyup.enter="loadRuns" />
+          <n-space class="filter-actions" justify="end">
+            <n-button @click="loadRuns">查询</n-button>
+            <n-button @click="loadRuns">刷新</n-button>
+          </n-space>
+        </div>
+      </div>
+      <n-data-table :columns="runColumns" :data="runs" :loading="runLoading" :pagination="runPagination" :row-key="(row) => row.id" :scroll-x="2140" size="small" remote />
     </n-tab-pane>
   </n-tabs>
 
@@ -37,11 +41,17 @@
       <n-form-item label="旧站域名">
         <n-input v-model:value="form.baseUrl" clearable placeholder="https://example.com" />
       </n-form-item>
+      <n-form-item label="服务器 IP">
+        <n-input v-model:value="form.serverIp" clearable placeholder="DNS失效时填写，例如 154.26.238.214" />
+      </n-form-item>
       <n-form-item label="旧站账号">
         <n-input v-model:value="form.username" clearable />
       </n-form-item>
       <n-form-item label="旧站密码">
         <n-input v-model:value="form.password" type="password" show-password-on="click" :placeholder="form.id ? '留空表示不修改密码' : ''" />
+      </n-form-item>
+      <n-form-item label="旧站Cookie">
+        <n-input v-model:value="form.legacyCookie" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" placeholder="可填写 Cookie 或完整 Set-Cookie，留空表示不修改" />
       </n-form-item>
       <n-form-item label="测试数量">
         <n-input-number v-model:value="form.limitCount" :min="0" :max="100000" class="w-full" />
@@ -105,7 +115,7 @@
     </n-form>
   </n-modal>
 
-  <n-modal v-model:show="logModalVisible" preset="card" title="执行日志" class="log-modal">
+  <n-modal v-model:show="logModalVisible" preset="card" :title="logModalTitle" class="log-modal">
     <n-collapse v-if="groupedLogs.length" class="log-groups">
       <n-collapse-item v-for="group in groupedLogs" :key="group.sourceNoteId" :title="group.title" :name="group.sourceNoteId">
         <n-data-table
@@ -178,8 +188,10 @@
     tenantId: null as number | null,
     accountId: null as number | null,
     baseUrl: '',
+    serverIp: '',
     username: '',
     password: '',
+    legacyCookie: '',
     limitCount: 100,
     perPage: 12,
     mediaConcurrency: 4,
@@ -223,6 +235,8 @@
     },
   });
   const logPagination = reactive({ pageSize: 10 });
+  const currentRun = computed(() => runs.value.find((item) => item.id === currentRunId.value));
+  const logModalTitle = computed(() => (currentRun.value ? `执行日志 #${currentRun.value.id}` : '执行日志'));
   const normalizedLogs = computed(() => logs.value.map((item) => ({ ...item, parsedContext: parseLogContext(item.context) })));
   const groupedLogs = computed(() => {
     const groups = new Map<number, Recordable[]>();
@@ -268,6 +282,7 @@
     { title: '来源', key: 'sourceName', width: 110 },
     { title: '账号归属', key: 'tenantName', width: 150 },
     { title: '旧站域名', key: 'baseUrl', width: 220, ellipsis: { tooltip: true } },
+    { title: '服务器IP', key: 'serverIp', width: 140, ellipsis: { tooltip: true } },
     { title: '旧站账号', key: 'username', width: 140 },
     { title: '上架账号', key: 'accountName', width: 130 },
     { title: '测试数量', key: 'limitCount', width: 100 },
@@ -317,6 +332,9 @@
     { title: '未迁移存储', key: 'mediaMissingStorage', width: 120 },
     { title: 'TG匹配', key: 'tgMatched', width: 100 },
     { title: '错误', key: 'errorMessage', width: 240, ellipsis: { tooltip: true } },
+    { title: '创建时间', key: 'createdAt', width: 180 },
+    { title: '开始时间', key: 'startedAt', width: 180 },
+    { title: '完成时间', key: 'finishedAt', width: 180 },
     { title: '更新时间', key: 'updatedAt', width: 180 },
     {
       title: '操作',
@@ -400,8 +418,10 @@
     form.tenantId = data.tenantId || null;
     form.accountId = data.accountId || null;
     form.baseUrl = data.baseUrl || '';
+    form.serverIp = data.serverIp || '';
     form.username = data.username || '';
     form.password = '';
+    form.legacyCookie = '';
     form.limitCount = data.limitCount ?? 100;
     form.perPage = data.perPage ?? 12;
     form.mediaConcurrency = data.mediaConcurrency ?? 4;
@@ -426,6 +446,9 @@
     if (payload.id && !payload.password) {
       delete payload.password;
     }
+    if (!payload.legacyCookie) {
+      delete payload.legacyCookie;
+    }
     await ImportTaskCreate(payload);
     message.success('导入任务已保存');
     await loadTasks();
@@ -437,8 +460,10 @@
     form.tenantId = null;
     form.accountId = null;
     form.baseUrl = '';
+    form.serverIp = '';
     form.username = '';
     form.password = '';
+    form.legacyCookie = '';
     form.limitCount = 100;
     form.perPage = 12;
     form.mediaConcurrency = 4;
@@ -563,6 +588,45 @@
 </script>
 
 <style scoped>
+  .toolbar,
+  .run-filter {
+    margin-bottom: 12px;
+  }
+
+  .run-filter {
+    padding: 12px;
+    background: var(--n-color);
+    border: 1px solid var(--n-border-color);
+    border-radius: 6px;
+  }
+
+  .run-filter-grid {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(120px, 0.7fr) minmax(120px, 0.7fr) minmax(220px, 1.2fr) auto;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .filter-actions {
+    min-width: 136px;
+  }
+
+  @media (max-width: 1180px) {
+    .run-filter-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .filter-actions {
+      justify-content: flex-start !important;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .run-filter-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
   :deep(.log-modal) {
     width: min(1080px, calc(100vw - 48px));
   }

@@ -17,8 +17,10 @@ type YoubanPublishImportTask struct {
 	AccountId        any         // 上架账号ID
 	SourceName       any         // 来源名称
 	BaseUrl          any         // 旧站域名
+	ServerIp         any         // 旧站服务器IP
 	Username         any         // 旧站账号
 	PasswordCipher   any         // 旧站密码密文
+	CookieCipher     any         // 旧站Cookie密文
 	LimitCount       any         // 测试采集数量
 	PerPage          any         // 每页数量
 	ProxyEnabled     any         // 是否启用代理

@@ -324,7 +324,8 @@ func (c *cPublishAdmin) UploadMedia(ctx context.Context, req *publish.AdminUploa
 		return nil, gerror.New("没有找到上传的文件")
 	}
 	poster := g.RequestFromCtx(ctx).GetUploadFile("poster")
-	data, err := service.SysPublish().AdminMediaUpload(ctx, &req.MediaUploadInp, file, poster)
+	originalFile := g.RequestFromCtx(ctx).GetUploadFile("originalFile")
+	data, err := service.SysPublish().AdminMediaUpload(ctx, &req.MediaUploadInp, file, poster, originalFile)
 	if err != nil {
 		return nil, err
 	}
@@ -612,7 +613,8 @@ func (c *cPublish) UploadMedia(ctx context.Context, req *publish.UploadMediaReq)
 		return nil, gerror.New("没有找到上传的文件")
 	}
 	poster := g.RequestFromCtx(ctx).GetUploadFile("poster")
-	data, err := service.SysPublish().MyMediaUpload(ctx, &req.MediaUploadInp, file, poster)
+	originalFile := g.RequestFromCtx(ctx).GetUploadFile("originalFile")
+	data, err := service.SysPublish().MyMediaUpload(ctx, &req.MediaUploadInp, file, poster, originalFile)
 	if err != nil {
 		return nil, err
 	}

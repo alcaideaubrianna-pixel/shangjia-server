@@ -108,8 +108,10 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_import_task" (
   "account_id" bigint NOT NULL DEFAULT 0,
   "source_name" varchar(64) NOT NULL DEFAULT 'lyy_cms',
   "base_url" varchar(255) NOT NULL DEFAULT '',
+  "server_ip" varchar(64) NOT NULL DEFAULT '',
   "username" varchar(128) NOT NULL DEFAULT '',
   "password_cipher" varchar(512) NOT NULL DEFAULT '',
+  "cookie_cipher" text,
   "limit_count" integer NOT NULL DEFAULT 0,
   "per_page" integer NOT NULL DEFAULT 12,
   "proxy_enabled" smallint NOT NULL DEFAULT 0,
@@ -150,6 +152,9 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_import_task" (
 CREATE INDEX IF NOT EXISTS "idx_ybp_import_task_scope" ON "hg_youban_publish_import_task" ("tenant_id", "account_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_import_task_status" ON "hg_youban_publish_import_task" ("status", "updated_at");
 CREATE INDEX IF NOT EXISTS "idx_ybp_import_task_source" ON "hg_youban_publish_import_task" ("source_name", "id");
+
+ALTER TABLE "hg_youban_publish_import_task" ADD COLUMN IF NOT EXISTS "server_ip" varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_import_task" ADD COLUMN IF NOT EXISTS "cookie_cipher" text;
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_import_run" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -235,18 +240,26 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media" (
   "task_id" bigint NOT NULL DEFAULT 0,
   "profile_id" bigint NOT NULL DEFAULT 0,
   "attachment_id" bigint NOT NULL DEFAULT 0,
+  "original_attachment_id" bigint NOT NULL DEFAULT 0,
+  "edited_attachment_id" bigint NOT NULL DEFAULT 0,
   "media_type" varchar(16) NOT NULL DEFAULT 'image',
   "purpose" varchar(16) NOT NULL DEFAULT 'display',
   "name" varchar(255) NOT NULL DEFAULT '',
   "file_url" varchar(1024) NOT NULL DEFAULT '',
+  "original_file_url" varchar(1024) NOT NULL DEFAULT '',
+  "edited_file_url" varchar(1024) NOT NULL DEFAULT '',
   "poster_url" varchar(1024) NOT NULL DEFAULT '',
   "poster_storage_path" varchar(1024) NOT NULL DEFAULT '',
   "tg_file_id" varchar(255) NOT NULL DEFAULT '',
   "tg_thumb_file_id" varchar(255) NOT NULL DEFAULT '',
   "storage_path" varchar(1024) NOT NULL DEFAULT '',
+  "original_storage_path" varchar(1024) NOT NULL DEFAULT '',
+  "edited_storage_path" varchar(1024) NOT NULL DEFAULT '',
   "mime_type" varchar(128) NOT NULL DEFAULT '',
   "md5" varchar(64) NOT NULL DEFAULT '',
   "perceptual_hash" varchar(64) NOT NULL DEFAULT '',
+  "edit_config_json" text,
+  "edit_status" varchar(16) NOT NULL DEFAULT 'raw',
   "size" bigint NOT NULL DEFAULT 0,
   "sort_index" integer NOT NULL DEFAULT 0,
   "status" smallint NOT NULL DEFAULT 1,
@@ -265,7 +278,17 @@ ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "poster_url" varc
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "poster_storage_path" varchar(1024) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "tg_file_id" varchar(255) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "tg_thumb_file_id" varchar(255) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "original_attachment_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "original_file_url" varchar(1024) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "original_storage_path" varchar(1024) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "edited_attachment_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "edited_file_url" varchar(1024) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "edited_storage_path" varchar(1024) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "edit_config_json" text;
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "edit_status" varchar(16) NOT NULL DEFAULT 'raw';
 UPDATE "hg_youban_publish_media" SET "tenant_id" = "merchant_id" WHERE "tenant_id" = 0 AND "merchant_id" > 0;
+UPDATE "hg_youban_publish_media" SET "original_attachment_id" = "attachment_id", "original_file_url" = "file_url", "original_storage_path" = "storage_path" WHERE "original_attachment_id" = 0 AND "attachment_id" > 0;
+UPDATE "hg_youban_publish_media" SET "edit_status" = 'edited' WHERE ("edit_status" = '' OR "edit_status" = 'raw' OR "edit_status" IS NULL) AND ("edited_attachment_id" > 0 OR "edited_storage_path" <> '' OR "edited_file_url" <> '' OR lower("name") LIKE '%-edited.%' OR lower("name") LIKE '%_edited.%');
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_task_attachment" ON "hg_youban_publish_media" ("task_id", "attachment_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_task_sort" ON "hg_youban_publish_media" ("task_id", "sort_index", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_profile" ON "hg_youban_publish_media" ("profile_id", "id");

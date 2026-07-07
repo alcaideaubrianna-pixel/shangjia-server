@@ -68,7 +68,17 @@ func (s *sSysPublish) nextSequenceProfileNo(ctx context.Context, tx gdb.TX, tena
 	if err != nil {
 		return "", gerror.Wrap(err, "生成账号资料编号失败")
 	}
-	return fmt.Sprintf("%03d", count+1), nil
+	for i := count + 1; i <= count+1000; i++ {
+		code := fmt.Sprintf("%03d", i)
+		exists, existsErr := s.accountProfileNoExists(ctx, tx, tenantId, accountId, code)
+		if existsErr != nil {
+			return "", existsErr
+		}
+		if !exists {
+			return code, nil
+		}
+	}
+	return "", gerror.New("生成资料编号失败，请重试")
 }
 
 func (s *sSysPublish) nextRandomProfileNo(ctx context.Context, tx gdb.TX, tenantId int64, accountId int64) (string, error) {
@@ -107,11 +117,8 @@ func randomProfileNo() (string, error) {
 func (s *sSysPublish) accountProfileNoExists(ctx context.Context, tx gdb.TX, tenantId int64, accountId int64, profileNo string) (bool, error) {
 	profileColumns := dao.ContentProfile.Columns()
 	count, err := tx.Model(dao.ContentProfile.Table()+" p").Ctx(ctx).
-		LeftJoin(publishTaskTable+" t", "t.profile_id=p.id AND t.deleted_at IS NULL").
-		Where("t.tenant_id", tenantId).
-		Where("t.account_id", accountId).
+		Unscoped().
 		Where("p."+profileColumns.ProfileNo, profileNo).
-		WhereNull("p." + profileColumns.DeletedAt).
 		Count()
 	if err != nil {
 		return false, gerror.Wrap(err, "检查资料编号失败")

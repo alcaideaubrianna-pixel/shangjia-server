@@ -145,6 +145,112 @@ func (s *sSysPublish) CollectSourceStatus(ctx context.Context, in *sysin.Collect
 	return gerror.Wrap(err, "更新采集源状态失败")
 }
 
+func (s *sSysPublish) CollectSourceDown(ctx context.Context, in *sysin.CollectSourceDownInp) error {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return err
+	}
+	if in == nil || in.Id <= 0 {
+		return gerror.New("采集源ID不能为空")
+	}
+	source, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
+		Where("id", in.Id).
+		Where("tenant_id", account.TenantId).
+		Where("account_id", account.Id).
+		WhereNull("deleted_at").
+		One()
+	if err != nil {
+		return gerror.Wrap(err, "读取采集源失败")
+	}
+	if source.IsEmpty() {
+		return gerror.New("采集源不存在")
+	}
+	now := gtime.Now()
+	_, err = pdao.YoubanPublishCollectSource.Ctx(ctx).
+		Where("id", in.Id).
+		Data(g.Map{"collect_enabled": 0, "updated_by": account.Id, "updated_at": now}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "停止采集源失败")
+	}
+	taskIds, err := s.collectSourceTaskIds(ctx, in.Id, account.TenantId, account.Id)
+	if err != nil {
+		return err
+	}
+	if len(taskIds) == 0 {
+		return nil
+	}
+	if err = s.downCollectSourceTasks(ctx, taskIds, account.TenantId); err != nil {
+		return err
+	}
+	_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Where("source_id", in.Id).
+		Where("tenant_id", account.TenantId).
+		Where("account_id", account.Id).
+		WhereIn("task_id", taskIds).
+		Data(g.Map{
+			"status":        sysin.CollectDispatchStatusSkipped,
+			"error_message": "采集源一键下架",
+			"finished_at":   now,
+			"updated_at":    now,
+		}).
+		Update()
+	return gerror.Wrap(err, "更新采集分发下架状态失败")
+}
+
+func (s *sSysPublish) collectSourceTaskIds(ctx context.Context, sourceId int64, tenantId int64, accountId int64) ([]int64, error) {
+	var rows []struct {
+		TaskId int64 `json:"taskId"`
+	}
+	err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Fields("DISTINCT task_id").
+		Where("source_id", sourceId).
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		WhereGT("task_id", 0).
+		Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取采集源任务失败")
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.TaskId)
+	}
+	return uniqueIds(ids), nil
+}
+
+func (s *sSysPublish) downCollectSourceTasks(ctx context.Context, taskIds []int64, tenantId int64) error {
+	var jobs []telegramResubmitJob
+	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		WhereIn("task_id", taskIds).
+		WhereIn("status", []string{"pending", "failed_retry", "failed", "sent"}).
+		Scan(&jobs)
+	if err != nil {
+		return gerror.Wrap(err, "读取采集源TG任务失败")
+	}
+	for _, job := range jobs {
+		if err = s.deleteTelegramJobMessagesForResubmit(ctx, job); err != nil {
+			return err
+		}
+		if err = s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
+			return err
+		}
+		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "down", "deleted", "采集源一键下架，TG历史消息已删除")
+	}
+	_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		WhereIn("id", taskIds).
+		Data(g.Map{
+			"status":        sysin.PublishTaskStatusCanceled,
+			"tg_status":     sysin.PublishTaskStatusCanceled,
+			"error_message": "采集源一键下架",
+			"updated_at":    gtime.Now(),
+		}).
+		Update()
+	return gerror.Wrap(err, "更新采集源任务下架状态失败")
+}
+
 func (s *sSysPublish) fillCollectSourceRules(ctx context.Context, list []*sysin.CollectSourceModel) error {
 	sourceIds := make([]int64, 0, len(list))
 	for _, item := range list {

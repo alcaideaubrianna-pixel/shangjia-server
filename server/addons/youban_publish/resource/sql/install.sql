@@ -296,8 +296,10 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_import_task` (
   `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架账号ID',
   `source_name` varchar(64) NOT NULL DEFAULT 'lyy_cms' COMMENT '来源名称',
   `base_url` varchar(255) NOT NULL DEFAULT '' COMMENT '旧站域名',
+  `server_ip` varchar(64) NOT NULL DEFAULT '' COMMENT '旧站服务器IP，DNS失效时使用',
   `username` varchar(128) NOT NULL DEFAULT '' COMMENT '旧站账号',
   `password_cipher` varchar(512) NOT NULL DEFAULT '' COMMENT '旧站密码密文',
+  `cookie_cipher` text COMMENT '旧站Cookie密文',
   `limit_count` int(11) NOT NULL DEFAULT '0' COMMENT '测试采集数量',
   `per_page` int(11) NOT NULL DEFAULT '12' COMMENT '每页数量',
   `proxy_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否启用代理',
@@ -339,6 +341,9 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_import_task` (
   KEY `idx_ybp_import_task_status` (`status`,`updated_at`),
   KEY `idx_ybp_import_task_source` (`source_name`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架旧站导入任务';
+
+ALTER TABLE `hg_youban_publish_import_task` ADD COLUMN `server_ip` varchar(64) NOT NULL DEFAULT '' COMMENT '旧站服务器IP，DNS失效时使用' AFTER `base_url`;
+ALTER TABLE `hg_youban_publish_import_task` ADD COLUMN `cookie_cipher` text COMMENT '旧站Cookie密文' AFTER `password_cipher`;
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_import_run` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -427,18 +432,26 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '任务ID',
   `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
   `attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'HotGo附件ID',
+  `original_attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '原始HotGo附件ID',
+  `edited_attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '编辑后HotGo附件ID',
   `media_type` varchar(16) NOT NULL DEFAULT 'image' COMMENT '媒体类型',
   `purpose` varchar(16) NOT NULL DEFAULT 'display' COMMENT '用途：display展示 verify验证',
   `name` varchar(255) NOT NULL DEFAULT '' COMMENT '文件名',
   `file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '访问地址',
+  `original_file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始访问地址',
+  `edited_file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '编辑后访问地址',
   `poster_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '视频封面',
   `poster_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '视频封面存储路径',
   `tg_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram文件ID',
   `tg_thumb_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram缩略图文件ID',
   `storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '存储路径',
+  `original_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始存储路径',
+  `edited_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '编辑后存储路径',
   `mime_type` varchar(128) NOT NULL DEFAULT '' COMMENT 'MIME',
   `md5` varchar(64) NOT NULL DEFAULT '' COMMENT 'MD5',
   `perceptual_hash` varchar(64) NOT NULL DEFAULT '' COMMENT '图片感知哈希',
+  `edit_config_json` text COMMENT '图片编辑配置',
+  `edit_status` varchar(16) NOT NULL DEFAULT 'raw' COMMENT '编辑状态：raw/edited',
   `size` bigint(20) NOT NULL DEFAULT '0' COMMENT '大小',
   `sort_index` int(11) NOT NULL DEFAULT '0' COMMENT '排序',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
@@ -460,7 +473,17 @@ ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tenant_id` bigint(20) NOT NULL
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `perceptual_hash` varchar(64) NOT NULL DEFAULT '' COMMENT '图片感知哈希' AFTER `md5`, ADD COLUMN `purpose` varchar(16) NOT NULL DEFAULT 'display' COMMENT '用途：display展示 verify验证' AFTER `media_type`, ADD COLUMN `poster_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '视频封面' AFTER `file_url`;
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `poster_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '视频封面存储路径' AFTER `poster_url`;
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tg_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram文件ID' AFTER `poster_url`, ADD COLUMN `tg_thumb_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'Telegram缩略图文件ID' AFTER `tg_file_id`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN `original_attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '原始HotGo附件ID' AFTER `attachment_id`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN `original_file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始访问地址' AFTER `file_url`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN `original_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始存储路径' AFTER `storage_path`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edited_attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '编辑后HotGo附件ID' AFTER `original_attachment_id`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edited_file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '编辑后访问地址' AFTER `original_file_url`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edited_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '编辑后存储路径' AFTER `original_storage_path`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edit_config_json` text COMMENT '图片编辑配置' AFTER `perceptual_hash`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edit_status` varchar(16) NOT NULL DEFAULT 'raw' COMMENT '编辑状态：raw/edited' AFTER `edit_config_json`;
 UPDATE `hg_youban_publish_media` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
+UPDATE `hg_youban_publish_media` SET `original_attachment_id` = `attachment_id`, `original_file_url` = `file_url`, `original_storage_path` = `storage_path` WHERE `original_attachment_id` = 0 AND `attachment_id` > 0;
+UPDATE `hg_youban_publish_media` SET `edit_status` = 'edited' WHERE (`edit_status` = '' OR `edit_status` = 'raw' OR `edit_status` IS NULL) AND (`edited_attachment_id` > 0 OR `edited_storage_path` <> '' OR `edited_file_url` <> '' OR lower(`name`) LIKE '%-edited.%' OR lower(`name`) LIKE '%_edited.%');
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_media_face` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',

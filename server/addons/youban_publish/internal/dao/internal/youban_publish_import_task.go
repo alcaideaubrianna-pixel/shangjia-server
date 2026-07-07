@@ -26,8 +26,10 @@ type YoubanPublishImportTaskColumns struct {
 	AccountId        string // 上架账号ID
 	SourceName       string // 来源名称
 	BaseUrl          string // 旧站域名
+	ServerIp         string // 旧站服务器IP
 	Username         string // 旧站账号
 	PasswordCipher   string // 旧站密码密文
+	CookieCipher     string // 旧站Cookie密文
 	LimitCount       string // 测试采集数量
 	PerPage          string // 每页数量
 	ProxyEnabled     string // 是否启用代理
@@ -73,8 +75,10 @@ var youbanPublishImportTaskColumns = YoubanPublishImportTaskColumns{
 	AccountId:        "account_id",
 	SourceName:       "source_name",
 	BaseUrl:          "base_url",
+	ServerIp:         "server_ip",
 	Username:         "username",
 	PasswordCipher:   "password_cipher",
+	CookieCipher:     "cookie_cipher",
 	LimitCount:       "limit_count",
 	PerPage:          "per_page",
 	ProxyEnabled:     "proxy_enabled",

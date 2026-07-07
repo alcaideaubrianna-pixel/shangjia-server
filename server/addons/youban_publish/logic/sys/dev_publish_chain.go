@@ -152,7 +152,7 @@ func (s *sSysPublish) attachDevTestFiles(ctx context.Context, taskId int64, acco
 			MediaType: mediaType,
 			Purpose:   devMediaPurpose(mediaType),
 			SortIndex: i + 1,
-		}, attachment, nil, pHash)
+		}, attachment, nil, nil, pHash)
 		if err != nil {
 			return nil, err
 		}

@@ -415,10 +415,13 @@ type TaskCancelInp struct {
 }
 
 type MediaUploadInp struct {
-	TaskId    int64  `json:"taskId" dc:"任务ID"`
-	MediaType string `json:"mediaType" dc:"媒体类型：image/video"`
-	Purpose   string `json:"purpose" dc:"用途：display/verify"`
-	SortIndex int    `json:"sortIndex" dc:"排序"`
+	TaskId         int64  `json:"taskId" dc:"任务ID"`
+	MediaId        int64  `json:"mediaId" dc:"媒体ID，编辑已有媒体时传入"`
+	MediaType      string `json:"mediaType" dc:"媒体类型：image/video"`
+	Purpose        string `json:"purpose" dc:"用途：display/verify"`
+	SortIndex      int    `json:"sortIndex" dc:"排序"`
+	EditConfigJson string `json:"editConfigJson" dc:"图片编辑配置"`
+	EditStatus     string `json:"editStatus" dc:"编辑状态：raw/edited"`
 }
 
 func (in *MediaUploadInp) Filter(ctx context.Context) error {
@@ -484,27 +487,35 @@ func (in *MediaSortInp) Filter(ctx context.Context) error {
 }
 
 type MediaModel struct {
-	Id                int64       `json:"id" dc:"ID"`
-	TenantId          int64       `json:"tenantId" dc:"租户ID"`
-	AccountId         int64       `json:"accountId" dc:"账号ID"`
-	TaskId            int64       `json:"taskId" dc:"任务ID"`
-	ProfileId         int64       `json:"profileId" dc:"资料ID"`
-	AttachmentId      int64       `json:"attachmentId" dc:"附件ID"`
-	MediaType         string      `json:"mediaType" dc:"媒体类型"`
-	Purpose           string      `json:"purpose" dc:"用途：display/verify"`
-	Name              string      `json:"name" dc:"文件名"`
-	FileUrl           string      `json:"fileUrl" dc:"访问地址"`
-	PosterUrl         string      `json:"posterUrl" dc:"视频封面"`
-	StoragePath       string      `json:"storagePath" dc:"存储路径"`
-	PosterStoragePath string      `json:"posterStoragePath" dc:"视频封面存储路径"`
-	MimeType          string      `json:"mimeType" dc:"MIME"`
-	Md5               string      `json:"md5" dc:"MD5"`
-	PerceptualHash    string      `json:"perceptualHash" dc:"图片感知哈希"`
-	Size              int64       `json:"size" dc:"大小"`
-	SortIndex         int         `json:"sortIndex" dc:"排序"`
-	Status            int         `json:"status" dc:"状态"`
-	CreatedAt         *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt         *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id                   int64       `json:"id" dc:"ID"`
+	TenantId             int64       `json:"tenantId" dc:"租户ID"`
+	AccountId            int64       `json:"accountId" dc:"账号ID"`
+	TaskId               int64       `json:"taskId" dc:"任务ID"`
+	ProfileId            int64       `json:"profileId" dc:"资料ID"`
+	AttachmentId         int64       `json:"attachmentId" dc:"附件ID"`
+	OriginalAttachmentId int64       `json:"originalAttachmentId" dc:"原始附件ID"`
+	EditedAttachmentId   int64       `json:"editedAttachmentId" dc:"编辑后附件ID"`
+	MediaType            string      `json:"mediaType" dc:"媒体类型"`
+	Purpose              string      `json:"purpose" dc:"用途：display/verify"`
+	Name                 string      `json:"name" dc:"文件名"`
+	FileUrl              string      `json:"fileUrl" dc:"访问地址"`
+	OriginalFileUrl      string      `json:"originalFileUrl" dc:"原始访问地址"`
+	EditedFileUrl        string      `json:"editedFileUrl" dc:"编辑后访问地址"`
+	PosterUrl            string      `json:"posterUrl" dc:"视频封面"`
+	StoragePath          string      `json:"storagePath" dc:"存储路径"`
+	OriginalStoragePath  string      `json:"originalStoragePath" dc:"原始存储路径"`
+	EditedStoragePath    string      `json:"editedStoragePath" dc:"编辑后存储路径"`
+	PosterStoragePath    string      `json:"posterStoragePath" dc:"视频封面存储路径"`
+	MimeType             string      `json:"mimeType" dc:"MIME"`
+	Md5                  string      `json:"md5" dc:"MD5"`
+	PerceptualHash       string      `json:"perceptualHash" dc:"图片感知哈希"`
+	EditConfigJson       string      `json:"editConfigJson" dc:"图片编辑配置"`
+	EditStatus           string      `json:"editStatus" dc:"编辑状态：raw/edited"`
+	Size                 int64       `json:"size" dc:"大小"`
+	SortIndex            int         `json:"sortIndex" dc:"排序"`
+	Status               int         `json:"status" dc:"状态"`
+	CreatedAt            *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt            *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type ProfileListInp struct {
@@ -548,6 +559,7 @@ type ProfileModel struct {
 	Status          int         `json:"status" dc:"状态"`
 	ImageCount      int         `json:"imageCount" dc:"图片数"`
 	VideoCount      int         `json:"videoCount" dc:"视频数"`
+	CanEdit         bool        `json:"canEdit" dc:"当前账号是否可编辑"`
 	PublishedAt     *gtime.Time `json:"publishedAt" dc:"发布时间"`
 	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
 	UpdatedAt       *gtime.Time `json:"updatedAt" dc:"更新时间"`

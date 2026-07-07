@@ -2,12 +2,17 @@ package sys
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	htmlpkg "html"
 	"math/rand"
+	"net"
+	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
 	"path"
 	"regexp"
 	"strings"
@@ -21,6 +26,7 @@ import (
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/library/storager"
 	"hotgo/internal/model"
+	basesysin "hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
 	"hotgo/utility/file"
 
@@ -101,11 +107,17 @@ func (s *sSysPublish) ServerImportTaskCreate(ctx context.Context, in *sysin.Impo
 }
 
 func (s *sSysPublish) createImportTask(ctx context.Context, in *sysin.ImportTaskCreateInp, operatorId int64) (id int64, err error) {
+	if err = ensureImportTaskLegacyColumns(ctx); err != nil {
+		return 0, err
+	}
 	if in == nil {
 		return 0, gerror.New("导入任务参数不能为空")
 	}
 	if err = in.Filter(ctx); err != nil {
 		return 0, err
+	}
+	if in.ServerIp == "" {
+		in.ServerIp = defaultLegacyCMSServerIP(in.BaseUrl)
 	}
 	if in.TenantId <= 0 {
 		return 0, gerror.New("请选择账号归属")
@@ -134,6 +146,7 @@ func (s *sSysPublish) createImportTask(ctx context.Context, in *sysin.ImportTask
 		"account_id":        in.AccountId,
 		"source_name":       in.SourceName,
 		"base_url":          in.BaseUrl,
+		"server_ip":         in.ServerIp,
 		"username":          in.Username,
 		"limit_count":       in.LimitCount,
 		"per_page":          in.PerPage,
@@ -148,6 +161,9 @@ func (s *sSysPublish) createImportTask(ctx context.Context, in *sysin.ImportTask
 	if in.Password != "" {
 		data["password_cipher"] = encodeImportPassword(in.Password)
 	}
+	if in.LegacyCookie != "" {
+		data["cookie_cipher"] = encodeImportPassword(normalizeLegacyCMSCookie(in.LegacyCookie))
+	}
 	control, _ := json.Marshal(g.Map{"importMode": in.ImportMode})
 	data["result_json"] = string(control)
 	if len(in.TgRange) == 2 {
@@ -161,8 +177,8 @@ func (s *sSysPublish) createImportTask(ctx context.Context, in *sysin.ImportTask
 		}
 		return in.Id, nil
 	}
-	if in.Password == "" {
-		return 0, gerror.New("旧站密码不能为空")
+	if in.Password == "" && in.LegacyCookie == "" {
+		return 0, gerror.New("旧站密码和Cookie必须填写一个")
 	}
 	data["created_by"] = operatorId
 	data["created_at"] = now
@@ -311,7 +327,7 @@ func (s *sSysPublish) ServerImportTaskScan(ctx context.Context, in *sysin.Import
 	if err = importer.login(ctx); err != nil {
 		return nil, err
 	}
-	sourceIds, err := importer.collectSourceIds(ctx, in.ScanMode, in.RecentCount, 0)
+	sourceItems, err := importer.collectSourceItems(ctx, in.ScanMode, in.RecentCount, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -319,12 +335,12 @@ func (s *sSysPublish) ServerImportTaskScan(ctx context.Context, in *sysin.Import
 		TaskId:      in.Id,
 		ScanMode:    in.ScanMode,
 		RecentCount: in.RecentCount,
-		SourceTotal: len(sourceIds),
-		Items:       make([]*sysin.ImportTaskScanItem, 0, len(sourceIds)),
+		SourceTotal: len(sourceItems),
+		Items:       make([]*sysin.ImportTaskScanItem, 0, len(sourceItems)),
 		ScannedAt:   gtime.Now(),
 	}
-	for _, sourceId := range sourceIds {
-		item, itemErr := s.scanImportTaskSourceItem(ctx, row, sourceId)
+	for _, sourceItem := range sourceItems {
+		item, itemErr := s.scanImportTaskSourceItem(ctx, row, sourceItem)
 		if itemErr != nil {
 			return nil, itemErr
 		}
@@ -539,7 +555,7 @@ func (s *sSysPublish) ExecuteImportTask(ctx context.Context, id int64) (err erro
 	if err != nil {
 		return gerror.Wrap(err, "读取旧站导入任务失败")
 	}
-	if row.IsEmpty() || row["status"].String() == sysin.ImportTaskStatusRunning || row["status"].String() == sysin.ImportTaskStatusCanceled {
+	if row.IsEmpty() || row["status"].String() != sysin.ImportTaskStatusPending {
 		return nil
 	}
 	ctx = importRuntimeContext(ctx, row["created_by"].Int64())
@@ -611,7 +627,7 @@ func (s *sSysPublish) ExecuteImportRun(ctx context.Context, runId int64) (err er
 	if err != nil {
 		return gerror.Wrap(err, "读取导入执行记录失败")
 	}
-	if run.IsEmpty() || run["status"].String() == sysin.ImportTaskStatusRunning || run["status"].String() == sysin.ImportTaskStatusCanceled {
+	if run.IsEmpty() || run["status"].String() != sysin.ImportTaskStatusPending {
 		return nil
 	}
 	ctx = importRuntimeContext(ctx, run["created_by"].Int64())
@@ -659,11 +675,11 @@ func (s *sSysPublish) ExecuteImportRun(ctx context.Context, runId int64) (err er
 	if importMode == "" {
 		importMode = sysin.ImportTaskModeIncremental
 	}
-	sourceIds, err := importer.collectSourceIds(ctx, scanMode, run["recent_count"].Int(), task["limit_count"].Int())
+	sourceItems, err := importer.collectSourceItems(ctx, scanMode, run["recent_count"].Int(), task["limit_count"].Int())
 	if err != nil {
 		return err
 	}
-	total := len(sourceIds)
+	total := len(sourceItems)
 	_ = s.updateImportRunProgress(ctx, runId, g.Map{
 		"item_total":     total,
 		"progress_total": total,
@@ -672,7 +688,7 @@ func (s *sSysPublish) ExecuteImportRun(ctx context.Context, runId int64) (err er
 	scan := &sysin.ImportTaskScanModel{TaskId: task["id"].Int64(), ScanMode: scanMode, RecentCount: run["recent_count"].Int(), SourceTotal: total, Items: make([]*sysin.ImportTaskScanItem, 0, total), ScannedAt: gtime.Now()}
 	imported := 0
 	mediaImported := 0
-	for idx, sourceId := range sourceIds {
+	for idx, sourceItem := range sourceItems {
 		canceled, cancelErr := s.isImportRunCanceled(ctx, runId)
 		if cancelErr != nil {
 			return cancelErr
@@ -681,7 +697,7 @@ func (s *sSysPublish) ExecuteImportRun(ctx context.Context, runId int64) (err er
 			_ = s.appendImportRunLog(ctx, runId, "warning", "canceled", "导入记录已取消，停止执行", nil)
 			return nil
 		}
-		item, itemErr := s.scanImportTaskSourceItem(ctx, task, sourceId)
+		item, itemErr := s.scanImportTaskSourceItem(ctx, task, sourceItem)
 		if itemErr != nil {
 			return itemErr
 		}
@@ -699,9 +715,9 @@ func (s *sSysPublish) ExecuteImportRun(ctx context.Context, runId int64) (err er
 		if runType != sysin.ImportRunTypeScan {
 			oldMediaTotal := item.MediaTotal
 			oldMediaMissing := item.MediaMissingStorage
-			_ = s.appendImportRunLog(ctx, runId, "info", importStageDetail, "开始采集笔记文本", g.Map{"sourceNoteId": sourceId, "index": idx + 1, "total": total})
+			_ = s.appendImportRunLog(ctx, runId, "info", importStageDetail, "开始采集笔记文本", g.Map{"sourceNoteId": sourceItem.SourceNoteId, "sourceStatus": sourceItem.StatusLabel, "index": idx + 1, "total": total})
 			var importRes *legacyCMSImportResult
-			importRes, itemErr = s.importLegacyCMSDetail(ctx, runId, importer, task, sourceId, importMode, item)
+			importRes, itemErr = s.importLegacyCMSDetail(ctx, runId, importer, task, sourceItem, importMode, item)
 			if itemErr != nil {
 				return itemErr
 			}
@@ -719,7 +735,7 @@ func (s *sSysPublish) ExecuteImportRun(ctx context.Context, runId int64) (err er
 			if scan.MediaMissingStorage < 0 {
 				scan.MediaMissingStorage = 0
 			}
-			_ = s.appendImportRunLog(ctx, runId, "info", importStageDetail, importRes.Message, g.Map{"sourceNoteId": sourceId, "profileId": importRes.ProfileId, "taskId": importRes.TaskId})
+			_ = s.appendImportRunLog(ctx, runId, "info", importStageDetail, importRes.Message, g.Map{"sourceNoteId": sourceItem.SourceNoteId, "sourceStatus": sourceItem.StatusLabel, "profileId": importRes.ProfileId, "taskId": importRes.TaskId})
 		}
 		_ = s.updateImportRunProgress(ctx, runId, g.Map{
 			"item_done":             idx + 1,
@@ -759,6 +775,9 @@ func (s *sSysPublish) ExecuteImportRun(ctx context.Context, runId int64) (err er
 }
 
 func (s *sSysPublish) importTaskList(ctx context.Context, in *sysin.ImportTaskListInp) (list []*sysin.ImportTaskModel, totalCount int, err error) {
+	if err = ensureImportTaskLegacyColumns(ctx); err != nil {
+		return nil, 0, err
+	}
 	mod := pdao.YoubanPublishImportTask.Ctx(ctx).As("t").
 		LeftJoin(publishTenantTable+" m", "m.id=t.tenant_id").
 		LeftJoin(publishAccountTable+" a", "a.id=t.account_id").
@@ -780,11 +799,15 @@ func (s *sSysPublish) importTaskList(ctx context.Context, in *sysin.ImportTaskLi
 	if err = s.applyImportTaskOwnerNames(ctx, list); err != nil {
 		return nil, 0, err
 	}
+	maskImportTaskSecrets(list...)
 	fillImportTaskPercent(list)
 	return list, totalCount, nil
 }
 
 func (s *sSysPublish) importTaskView(ctx context.Context, id int64, tenantId int64, accountId int64) (*sysin.ImportTaskModel, error) {
+	if err := ensureImportTaskLegacyColumns(ctx); err != nil {
+		return nil, err
+	}
 	var item *sysin.ImportTaskModel
 	mod := pdao.YoubanPublishImportTask.Ctx(ctx).As("t").
 		LeftJoin(publishTenantTable+" m", "m.id=t.tenant_id").
@@ -803,11 +826,25 @@ func (s *sSysPublish) importTaskView(ctx context.Context, id int64, tenantId int
 	if item == nil {
 		return nil, gerror.New("旧站导入任务不存在")
 	}
+	maskImportTaskSecrets(item)
 	fillImportTaskPercent([]*sysin.ImportTaskModel{item})
 	return item, nil
 }
 
+func maskImportTaskSecrets(list ...*sysin.ImportTaskModel) {
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		item.PasswordCipher = ""
+		item.CookieCipher = ""
+	}
+}
+
 func (s *sSysPublish) importTaskRow(ctx context.Context, id int64) (gdb.Record, error) {
+	if err := ensureImportTaskLegacyColumns(ctx); err != nil {
+		return nil, err
+	}
 	row, err := pdao.YoubanPublishImportTask.Ctx(ctx).Where("id", id).WhereNull("deleted_at").One()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取旧站导入任务失败")
@@ -818,12 +855,62 @@ func (s *sSysPublish) importTaskRow(ctx context.Context, id int64) (gdb.Record, 
 	return row, nil
 }
 
-func (s *sSysPublish) scanImportTaskSourceItem(ctx context.Context, row gdb.Record, sourceNoteId int64) (*sysin.ImportTaskScanItem, error) {
-	clientRequestId := legacyCMSClientRequestID(row, sourceNoteId)
+func ensureImportTaskLegacyColumns(ctx context.Context) error {
+	if err := ensureImportTaskServerIPColumn(ctx); err != nil {
+		return err
+	}
+	return ensureImportTaskCookieColumn(ctx)
+}
+
+func ensureImportTaskServerIPColumn(ctx context.Context) error {
+	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
+		_, err := g.DB().Exec(ctx, `ALTER TABLE "hg_youban_publish_import_task" ADD COLUMN IF NOT EXISTS "server_ip" varchar(64) NOT NULL DEFAULT ''`)
+		if err != nil {
+			return gerror.Wrap(err, "检查旧站导入任务服务器IP字段失败")
+		}
+		return nil
+	}
+	_, err := g.DB().Exec(ctx, "ALTER TABLE `hg_youban_publish_import_task` ADD COLUMN `server_ip` varchar(64) NOT NULL DEFAULT '' COMMENT '旧站服务器IP，DNS失效时使用' AFTER `base_url`")
+	if err != nil && !isIgnorableImportTaskServerIPColumnError(err) {
+		return gerror.Wrap(err, "检查旧站导入任务服务器IP字段失败")
+	}
+	return nil
+}
+
+func ensureImportTaskCookieColumn(ctx context.Context) error {
+	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
+		_, err := g.DB().Exec(ctx, `ALTER TABLE "hg_youban_publish_import_task" ADD COLUMN IF NOT EXISTS "cookie_cipher" text`)
+		if err != nil {
+			return gerror.Wrap(err, "检查旧站导入任务Cookie字段失败")
+		}
+		return nil
+	}
+	_, err := g.DB().Exec(ctx, "ALTER TABLE `hg_youban_publish_import_task` ADD COLUMN `cookie_cipher` text COMMENT '旧站Cookie密文' AFTER `password_cipher`")
+	if err != nil && !isIgnorableImportTaskServerIPColumnError(err) {
+		return gerror.Wrap(err, "检查旧站导入任务Cookie字段失败")
+	}
+	return nil
+}
+
+func isIgnorableImportTaskServerIPColumnError(err error) bool {
+	if err == nil {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "duplicate column") || strings.Contains(message, "already exists")
+}
+
+func (s *sSysPublish) scanImportTaskSourceItem(ctx context.Context, row gdb.Record, sourceItem *legacyCMSListItem) (*sysin.ImportTaskScanItem, error) {
+	if sourceItem == nil || sourceItem.SourceNoteId <= 0 {
+		return nil, gerror.New("旧站资料ID不能为空")
+	}
+	clientRequestId := legacyCMSClientRequestID(row, sourceItem.SourceNoteId)
 	item := &sysin.ImportTaskScanItem{
-		SourceNoteId:    sourceNoteId,
-		ClientRequestId: clientRequestId,
-		Status:          "missing",
+		SourceNoteId:      sourceItem.SourceNoteId,
+		SourceStatus:      sourceItem.Status,
+		SourceStatusLabel: sourceItem.StatusLabel,
+		ClientRequestId:   clientRequestId,
+		Status:            "missing",
 	}
 	task, err := pdao.YoubanPublishTask.Ctx(ctx).
 		Where("tenant_id", row["tenant_id"].Int64()).
@@ -837,7 +924,7 @@ func (s *sSysPublish) scanImportTaskSourceItem(ctx context.Context, row gdb.Reco
 	if task.IsEmpty() {
 		profile, profileErr := dao.ContentProfile.Ctx(ctx).
 			Fields(dao.ContentProfile.Columns().Id).
-			Where(dao.ContentProfile.Columns().SourceKey, legacyCMSProfileSourceKey(row, sourceNoteId)).
+			Where(dao.ContentProfile.Columns().SourceKey, legacyCMSProfileSourceKey(row, sourceItem.SourceNoteId)).
 			WhereNull(dao.ContentProfile.Columns().DeletedAt).
 			One()
 		if profileErr != nil {
@@ -877,6 +964,170 @@ func (s *sSysPublish) scanImportTaskSourceItem(ctx context.Context, row gdb.Reco
 	return item, nil
 }
 
+func (s *sSysPublish) restoreLegacyCMSImportedLocal(ctx context.Context, row gdb.Record, sourceNoteId int64, now *gtime.Time) (taskId int64, profileId int64, err error) {
+	clientRequestId := legacyCMSClientRequestID(row, sourceNoteId)
+	task, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Unscoped().
+		Where("tenant_id", row["tenant_id"].Int64()).
+		Where("client_request_id", clientRequestId).
+		One()
+	if err != nil {
+		return 0, 0, gerror.Wrap(err, "读取旧站导入幂等任务失败")
+	}
+	if !task.IsEmpty() {
+		taskId = task["id"].Int64()
+		profileId = task["profile_id"].Int64()
+		restoreTaskData := g.Map{
+			"account_id": row["account_id"].Int64(),
+			"deleted_at": nil,
+			"deleted_by": 0,
+			"updated_at": now,
+		}
+		if _, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Unscoped().Where("id", taskId).Data(restoreTaskData).Update(); err != nil {
+			return 0, 0, gerror.Wrap(err, "恢复旧站导入任务失败")
+		}
+		if profileId > 0 {
+			profileColumns := dao.ContentProfile.Columns()
+			if _, err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Unscoped().Where(profileColumns.Id, profileId).Data(g.Map{
+				profileColumns.DeletedAt: nil,
+				profileColumns.UpdatedAt: now,
+			}).Update(); err != nil {
+				return 0, 0, gerror.Wrap(err, "恢复旧站导入资料失败")
+			}
+		}
+		return taskId, profileId, nil
+	}
+	sourceKey := legacyCMSProfileSourceKey(row, sourceNoteId)
+	profileColumns := dao.ContentProfile.Columns()
+	profile, err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
+		Unscoped().
+		Where(profileColumns.SourceKey, sourceKey).
+		One()
+	if err != nil {
+		return 0, 0, gerror.Wrap(err, "读取旧站导入资料失败")
+	}
+	if profile.IsEmpty() {
+		return 0, 0, nil
+	}
+	profileId = profile["id"].Int64()
+	if _, err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Unscoped().Where(profileColumns.Id, profileId).Data(g.Map{
+		profileColumns.DeletedAt: nil,
+		profileColumns.UpdatedAt: now,
+	}).Update(); err != nil {
+		return 0, 0, gerror.Wrap(err, "恢复旧站导入资料失败")
+	}
+	task, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Unscoped().Where("profile_id", profileId).One()
+	if err != nil {
+		return 0, 0, gerror.Wrap(err, "读取旧站导入资料任务失败")
+	}
+	if task.IsEmpty() {
+		return 0, profileId, nil
+	}
+	taskId = task["id"].Int64()
+	if _, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Unscoped().Where("id", taskId).Data(g.Map{
+		"tenant_id":         row["tenant_id"].Int64(),
+		"merchant_id":       row["tenant_id"].Int64(),
+		"account_id":        row["account_id"].Int64(),
+		"client_request_id": clientRequestId,
+		"deleted_at":        nil,
+		"deleted_by":        0,
+		"updated_at":        now,
+	}).Update(); err != nil {
+		return 0, 0, gerror.Wrap(err, "恢复旧站导入资料任务失败")
+	}
+	return taskId, profileId, nil
+}
+
+func (s *sSysPublish) preferLegacyCMSIdempotentTask(ctx context.Context, row gdb.Record, currentTaskId int64, currentProfileId int64, clientRequestId string, now *gtime.Time) (taskId int64, profileId int64, err error) {
+	taskId = currentTaskId
+	profileId = currentProfileId
+	if strings.TrimSpace(clientRequestId) == "" {
+		return taskId, profileId, nil
+	}
+	exists, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Unscoped().
+		Where("tenant_id", row["tenant_id"].Int64()).
+		Where("client_request_id", clientRequestId).
+		One()
+	if err != nil {
+		return 0, 0, gerror.Wrap(err, "读取旧站导入幂等任务失败")
+	}
+	if exists.IsEmpty() || exists["id"].Int64() == currentTaskId {
+		return taskId, profileId, nil
+	}
+	taskId = exists["id"].Int64()
+	profileId = exists["profile_id"].Int64()
+	if profileId <= 0 {
+		profileId = currentProfileId
+	}
+	if _, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Unscoped().Where("id", taskId).Data(g.Map{
+		"account_id": row["account_id"].Int64(),
+		"profile_id": profileId,
+		"deleted_at": nil,
+		"deleted_by": 0,
+		"updated_at": now,
+	}).Update(); err != nil {
+		return 0, 0, gerror.Wrap(err, "恢复旧站导入幂等任务失败")
+	}
+	if profileId > 0 {
+		profileColumns := dao.ContentProfile.Columns()
+		if _, err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Unscoped().Where(profileColumns.Id, profileId).Data(g.Map{
+			profileColumns.DeletedAt: nil,
+			profileColumns.UpdatedAt: now,
+		}).Update(); err != nil {
+			return 0, 0, gerror.Wrap(err, "恢复旧站导入幂等资料失败")
+		}
+	}
+	if currentTaskId > 0 && currentTaskId != taskId {
+		_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Unscoped().Where("id", currentTaskId).Data(g.Map{
+			"deleted_at": now,
+			"updated_at": now,
+		}).Update()
+	}
+	if currentProfileId > 0 && currentProfileId != profileId {
+		profileColumns := dao.ContentProfile.Columns()
+		_, _ = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Unscoped().Where(profileColumns.Id, currentProfileId).Data(g.Map{
+			profileColumns.DeletedAt: now,
+			profileColumns.UpdatedAt: now,
+		}).Update()
+	}
+	return taskId, profileId, nil
+}
+
+func (s *sSysPublish) bindLegacyCMSClientRequestID(ctx context.Context, row gdb.Record, taskId int64, profileId int64, clientRequestId string, now *gtime.Time) (int64, int64, error) {
+	if strings.TrimSpace(clientRequestId) == "" || taskId <= 0 {
+		return taskId, profileId, nil
+	}
+	if _, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).Data(g.Map{
+		"client_request_id": clientRequestId,
+		"updated_at":        now,
+	}).Update(); err != nil {
+		if !isUniqueConstraintError(err) {
+			return 0, 0, gerror.Wrap(err, "更新旧站导入任务幂等键失败")
+		}
+		nextTaskId, nextProfileId, restoreErr := s.preferLegacyCMSIdempotentTask(ctx, row, taskId, profileId, clientRequestId, now)
+		if restoreErr != nil {
+			return 0, 0, restoreErr
+		}
+		if nextTaskId == taskId {
+			return 0, 0, gerror.Wrap(err, "更新旧站导入任务幂等键失败")
+		}
+		taskId = nextTaskId
+		profileId = nextProfileId
+	}
+	return taskId, profileId, nil
+}
+
+func isUniqueConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "duplicate key") ||
+		strings.Contains(message, "unique constraint") ||
+		strings.Contains(message, "duplicate entry")
+}
+
 type legacyCMSImportResult struct {
 	TaskId        int64
 	ProfileId     int64
@@ -905,15 +1156,11 @@ type legacyCMSMedia struct {
 	SortIndex int
 }
 
-func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, importer *legacyCMSImporter, taskRow gdb.Record, sourceNoteId int64, importMode string, scanItem *sysin.ImportTaskScanItem) (*legacyCMSImportResult, error) {
-	if scanItem != nil && scanItem.Status == "existing" && importMode == sysin.ImportTaskModeIncremental && scanItem.MediaMissingStorage == 0 {
-		return &legacyCMSImportResult{
-			TaskId:     scanItem.TaskId,
-			ProfileId:  scanItem.ProfileId,
-			MediaTotal: scanItem.MediaTotal,
-			Message:    "本地已存在，增量模式跳过",
-		}, nil
+func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, importer *legacyCMSImporter, taskRow gdb.Record, sourceItem *legacyCMSListItem, importMode string, scanItem *sysin.ImportTaskScanItem) (*legacyCMSImportResult, error) {
+	if sourceItem == nil || sourceItem.SourceNoteId <= 0 {
+		return nil, gerror.New("旧站资料ID不能为空")
 	}
+	sourceNoteId := sourceItem.SourceNoteId
 	detail, err := importer.fetchDetail(ctx, sourceNoteId)
 	if err != nil {
 		return nil, err
@@ -921,8 +1168,21 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 	detail.Title = normalizeLegacyImportedTitle(detail.Title, sourceNoteId)
 	detail.Province = normalizeLegacyLocationValue(detail.Province)
 	detail.City = normalizeLegacyLocationValue(detail.City)
+	provinceCode, cityCode, err := resolveLegacyCMSRegionCodes(ctx, detail.Province, detail.City)
+	if err != nil {
+		return nil, err
+	}
+	if provinceCode != "" || cityCode != "" {
+		detail.Province = provinceCode
+		detail.City = cityCode
+	}
 	_ = s.appendImportRunLog(ctx, runId, "info", importStageDetail, "笔记文本采集完成", g.Map{"sourceNoteId": sourceNoteId, "title": detail.Title, "mediaTotal": len(detail.Media)})
 	channelIds := decodeImportTaskChannelIds(taskRow["channel_id_json"].String())
+	now := gtime.Now()
+	restoredTaskId, restoredProfileId, err := s.restoreLegacyCMSImportedLocal(ctx, taskRow, sourceNoteId, now)
+	if err != nil {
+		return nil, err
+	}
 	input := &sysin.ProfileSaveInp{
 		TaskId:         scanItem.TaskId,
 		Title:          detail.Title,
@@ -930,28 +1190,33 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 		City:           detail.City,
 		PlainText:      detail.PlainText,
 		ChannelIds:     channelIds,
-		CustomerRemark: fmt.Sprintf("旧站导入：%s #%d", taskRow["base_url"].String(), sourceNoteId),
+		CustomerRemark: "",
 		Visibility:     consts.ContentVisibilityPrivate,
-		Status:         1,
+		Status:         legacyCMSProfileStatus(sourceItem.Status),
+	}
+	if restoredTaskId > 0 {
+		input.TaskId = restoredTaskId
 	}
 	if scanItem.ProfileId > 0 {
 		input.Id = scanItem.ProfileId
+	}
+	if restoredProfileId > 0 {
+		input.Id = restoredProfileId
 	}
 	saved, err := s.saveProfile(ctx, input, taskRow["tenant_id"].Int64(), taskRow["account_id"].Int64())
 	if err != nil {
 		return nil, err
 	}
-	now := gtime.Now()
-	sourceKey := legacyCMSProfileSourceKey(taskRow, sourceNoteId)
 	clientRequestId := legacyCMSClientRequestID(taskRow, sourceNoteId)
-	if _, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", saved.TaskId).Data(g.Map{
-		"client_request_id": clientRequestId,
-		"updated_at":        now,
-	}).Update(); err != nil {
-		return nil, gerror.Wrap(err, "更新旧站导入任务幂等键失败")
+	if saved.TaskId, saved.Id, err = s.preferLegacyCMSIdempotentTask(ctx, taskRow, saved.TaskId, saved.Id, clientRequestId, now); err != nil {
+		return nil, err
 	}
+	if saved.TaskId, saved.Id, err = s.bindLegacyCMSClientRequestID(ctx, taskRow, saved.TaskId, saved.Id, clientRequestId, now); err != nil {
+		return nil, err
+	}
+	sourceKey := legacyCMSProfileSourceKey(taskRow, sourceNoteId)
 	profileColumns := dao.ContentProfile.Columns()
-	profileData := g.Map{
+	if _, err = dao.ContentProfile.Ctx(ctx).Where(profileColumns.Id, saved.Id).Data(g.Map{
 		profileColumns.Title:           detail.Title,
 		profileColumns.Province:        detail.Province,
 		profileColumns.City:            detail.City,
@@ -962,16 +1227,20 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 		profileColumns.SourceUpdateBy:  taskRow["username"].String(),
 		profileColumns.SourceCreatedAt: detail.CreatedAt,
 		profileColumns.SourceUpdatedAt: detail.UpdatedAt,
+		profileColumns.AdminRemark:     "",
+		profileColumns.Status:          legacyCMSProfileStatus(sourceItem.Status),
 		profileColumns.UpdatedAt:       now,
-	}
-	if _, err = dao.ContentProfile.Ctx(ctx).Where(profileColumns.Id, saved.Id).Data(profileData).Update(); err != nil {
+	}).Update(); err != nil {
 		return nil, gerror.Wrap(err, "更新旧站资料来源信息失败")
 	}
 	if _, err = pdao.YoubanPublishTask.Ctx(ctx).Where("id", saved.TaskId).Data(g.Map{
-		"title":      detail.Title,
-		"province":   detail.Province,
-		"city":       detail.City,
-		"updated_at": now,
+		"title":             detail.Title,
+		"province":          detail.Province,
+		"city":              detail.City,
+		"customer_remark":   "",
+		"client_request_id": clientRequestId,
+		"status":            legacyCMSPublishTaskStatus(sourceItem.Status),
+		"updated_at":        now,
 	}).Update(); err != nil {
 		return nil, gerror.Wrap(err, "更新旧站导入任务标题失败")
 	}
@@ -990,6 +1259,13 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 		mediaImported, err = s.importLegacyCMSMedia(ctx, runId, sourceNoteId, importer, task, detail.Media)
 		if err != nil {
 			return nil, err
+		}
+		if mediaImported > 0 {
+			if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+				return s.syncTaskMediaToProfile(ctx, tx, saved.TaskId, saved.Id)
+			}); err != nil {
+				return nil, err
+			}
 		}
 		_ = s.appendImportRunLog(ctx, runId, "info", importStageMedia, "笔记资源采集完成", g.Map{"sourceNoteId": sourceNoteId, "profileId": saved.Id, "mediaImported": mediaImported, "mediaTotal": len(detail.Media)})
 	}
@@ -1069,6 +1345,14 @@ func (s *sSysPublish) importLegacyCMSMedia(ctx context.Context, runId int64, sou
 		if err != nil {
 			return imported, err
 		}
+		var posterAttachment *basesysin.AttachmentListModel
+		if item.MediaType == "video" {
+			posterAttachment, err = legacyCMSVideoPoster(ctx, name, content)
+			if err != nil {
+				_ = s.appendImportRunLog(ctx, runId, "warning", importStageMedia, "旧站视频封面生成失败，继续导入视频", g.Map{"sourceNoteId": sourceNoteId, "name": name, "error": err.Error(), "sortIndex": idx + 1})
+				posterAttachment = nil
+			}
+		}
 		_ = s.appendImportRunLog(ctx, runId, "info", importStageMedia, "资源已写入当前存储", g.Map{"sourceNoteId": sourceNoteId, "attachmentId": attachment.Id, "path": attachment.Path, "purpose": purpose, "sortIndex": idx + 1})
 		sortIndex := item.SortIndex
 		if sortIndex <= 0 {
@@ -1079,12 +1363,75 @@ func (s *sSysPublish) importLegacyCMSMedia(ctx context.Context, runId int64, sou
 			MediaType: item.MediaType,
 			Purpose:   purpose,
 			SortIndex: sortIndex,
-		}, attachment, nil, perceptualHash); err != nil {
+		}, attachment, posterAttachment, nil, perceptualHash); err != nil {
 			return imported, err
 		}
 		imported++
 	}
 	return imported, nil
+}
+
+func legacyCMSVideoPoster(ctx context.Context, videoName string, content []byte) (*basesysin.AttachmentListModel, error) {
+	if len(content) == 0 {
+		return nil, nil
+	}
+	ffmpegPath, err := legacyCMSFFmpegPath(ctx)
+	if err != nil {
+		return nil, err
+	}
+	input, err := os.CreateTemp("", "ybp-legacy-video-*"+path.Ext(videoName))
+	if err != nil {
+		return nil, gerror.Wrap(err, "创建旧站视频临时文件失败")
+	}
+	inputPath := input.Name()
+	defer os.Remove(inputPath)
+	if _, err = input.Write(content); err != nil {
+		_ = input.Close()
+		return nil, gerror.Wrap(err, "写入旧站视频临时文件失败")
+	}
+	if err = input.Close(); err != nil {
+		return nil, gerror.Wrap(err, "关闭旧站视频临时文件失败")
+	}
+	output, err := os.CreateTemp("", "ybp-legacy-poster-*.jpg")
+	if err != nil {
+		return nil, gerror.Wrap(err, "创建旧站视频封面临时文件失败")
+	}
+	outputPath := output.Name()
+	_ = output.Close()
+	defer os.Remove(outputPath)
+	cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	outputBytes, err := exec.CommandContext(cmdCtx, ffmpegPath, "-y", "-ss", "00:00:01", "-i", inputPath, "-frames:v", "1", "-q:v", "2", outputPath).CombinedOutput()
+	if err != nil {
+		return nil, gerror.Wrapf(err, "生成旧站视频封面失败：%s", ellipsisString(strings.TrimSpace(string(outputBytes)), 500))
+	}
+	posterBytes, err := os.ReadFile(outputPath)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取旧站视频封面失败")
+	}
+	if len(posterBytes) == 0 {
+		return nil, nil
+	}
+	posterName := strings.TrimSuffix(path.Base(videoName), path.Ext(videoName)) + ".jpg"
+	fileHeader, err := file.NewMultipartFileHeader(posterName, posterBytes)
+	if err != nil {
+		return nil, gerror.Wrap(err, "创建旧站视频封面上传文件失败")
+	}
+	return service.CommonUpload().UploadFile(ctx, storager.KindImg, &ghttp.UploadFile{FileHeader: fileHeader})
+}
+
+func legacyCMSFFmpegPath(ctx context.Context) (string, error) {
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return "", gerror.New("ffmpeg 未安装，无法生成旧站视频封面")
+	}
+	cmdCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	outputBytes, err := exec.CommandContext(cmdCtx, ffmpegPath, "-version").CombinedOutput()
+	if err != nil {
+		return "", gerror.Wrapf(err, "ffmpeg 不可用，请检查本机或容器内 ffmpeg 依赖：%s", ellipsisString(strings.TrimSpace(string(outputBytes)), 500))
+	}
+	return ffmpegPath, nil
 }
 
 func legacyCMSClientRequestID(row gdb.Record, sourceNoteId int64) string {
@@ -1462,8 +1809,10 @@ func decodeImportPassword(cipher string) string {
 
 type legacyCMSImporter struct {
 	baseURL       string
+	serverIP      string
 	username      string
 	password      string
+	legacyCookie  string
 	perPage       int
 	proxyURL      string
 	lastRequestAt time.Time
@@ -1474,7 +1823,13 @@ type legacyCMSImporter struct {
 type legacyCMSListPage struct {
 	PageTotal int
 	ItemTotal int
-	Items     []int64
+	Items     []*legacyCMSListItem
+}
+
+type legacyCMSListItem struct {
+	SourceNoteId int64
+	Status       string
+	StatusLabel  string
 }
 
 func newLegacyCMSImporter(row gdb.Record) *legacyCMSImporter {
@@ -1486,14 +1841,114 @@ func newLegacyCMSImporter(row gdb.Record) *legacyCMSImporter {
 	if proxyURL != "" {
 		client.SetProxy(proxyURL)
 	}
-	return &legacyCMSImporter{
-		baseURL:  strings.TrimRight(row["base_url"].String(), "/"),
-		username: row["username"].String(),
-		password: decodeImportPassword(row["password_cipher"].String()),
-		perPage:  normalizeLegacyCMSPerPage(row["per_page"].Int()),
-		proxyURL: proxyURL,
-		client:   client,
+	serverIP := legacyCMSServerIP(row)
+	if proxyURL == "" && serverIP != "" {
+		applyLegacyCMSHostOverride(client, strings.TrimRight(row["base_url"].String(), "/"), serverIP)
 	}
+	return &legacyCMSImporter{
+		baseURL:      strings.TrimRight(row["base_url"].String(), "/"),
+		serverIP:     serverIP,
+		username:     row["username"].String(),
+		password:     decodeImportPassword(row["password_cipher"].String()),
+		legacyCookie: normalizeLegacyCMSCookie(decodeImportPassword(row["cookie_cipher"].String())),
+		perPage:      normalizeLegacyCMSPerPage(row["per_page"].Int()),
+		proxyURL:     proxyURL,
+		client:       client,
+	}
+}
+
+func legacyCMSServerIP(row gdb.Record) string {
+	serverIP := strings.TrimSpace(row["server_ip"].String())
+	if serverIP != "" {
+		return serverIP
+	}
+	return defaultLegacyCMSServerIP(row["base_url"].String())
+}
+
+func defaultLegacyCMSServerIP(baseURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return ""
+	}
+	hostname := strings.ToLower(parsed.Hostname())
+	if hostname == "yyby521.xyz" || strings.HasSuffix(hostname, ".yyby521.xyz") {
+		return "154.26.238.214"
+	}
+	return ""
+}
+
+func normalizeLegacyCMSCookie(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	lines := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == '\n' || r == '\r'
+	})
+	items := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(lower, "set-cookie:") {
+			line = strings.TrimSpace(line[len("set-cookie:"):])
+		} else if strings.Contains(line, ":") {
+			continue
+		}
+		if idx := strings.Index(line, ";"); idx >= 0 {
+			line = strings.TrimSpace(line[:idx])
+		}
+		if line != "" && strings.Contains(line, "=") {
+			items = append(items, line)
+		}
+	}
+	return strings.Join(items, "; ")
+}
+
+func applyLegacyCMSHostOverride(client *gclient.Client, baseURL string, serverIP string) {
+	if client == nil || strings.TrimSpace(serverIP) == "" {
+		return
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Hostname() == "" {
+		return
+	}
+	hostname := strings.ToLower(parsed.Hostname())
+	port := parsed.Port()
+	if port == "" {
+		if parsed.Scheme == "http" {
+			port = "80"
+		} else {
+			port = "443"
+		}
+	}
+	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+	transport := &http.Transport{
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true, ServerName: hostname},
+		DisableKeepAlives:     true,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   50,
+		MaxConnsPerHost:       100,
+		IdleConnTimeout:       90 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ForceAttemptHTTP2:     true,
+		DisableCompression:    false,
+		DialContext: func(ctx context.Context, network string, address string) (net.Conn, error) {
+			requestHost, requestPort, err := net.SplitHostPort(address)
+			if err == nil && strings.EqualFold(requestHost, hostname) {
+				if requestPort == "" {
+					requestPort = port
+				}
+				return dialer.DialContext(ctx, network, net.JoinHostPort(serverIP, requestPort))
+			}
+			return dialer.DialContext(ctx, network, address)
+		},
+	}
+	client.Transport = transport
 }
 
 func selectLegacyCMSProxy(enabled int, pool string) string {
@@ -1533,11 +1988,14 @@ func normalizeLegacyCMSProxyURL(proxyURL string) string {
 	return "http://" + proxyURL
 }
 
-func legacyCMSRequestErrorMessage(message string, proxyURL string) string {
+func legacyCMSRequestErrorMessage(message string, proxyURL string, serverIP string) string {
 	if proxyURL != "" {
 		return message + "，已使用代理：" + proxyURL
 	}
-	return message + "，请检查旧站域名 DNS 是否可解析，或在导入任务中启用代理池"
+	if serverIP != "" {
+		return message + "，已使用服务器IP：" + serverIP
+	}
+	return message + "，请检查旧站域名 DNS 是否可解析，或在导入任务中填写服务器IP"
 }
 
 func (i *legacyCMSImporter) beforeRequest(ctx context.Context) error {
@@ -1651,10 +2109,14 @@ func legacyCMSRetryWait(ctx context.Context, attempt int) error {
 }
 
 func (i *legacyCMSImporter) login(ctx context.Context) error {
+	if i.legacyCookie != "" {
+		i.client.SetHeader("Cookie", i.legacyCookie)
+		return i.validateCookie(ctx)
+	}
 	loginURL := i.baseURL + "/user/login"
 	resp, err := i.get(ctx, loginURL)
 	if err != nil {
-		return gerror.Wrap(err, legacyCMSRequestErrorMessage("读取旧站登录页失败", i.proxyURL))
+		return gerror.Wrap(err, legacyCMSRequestErrorMessage("读取旧站登录页失败", i.proxyURL, i.serverIP))
 	}
 	if resp.StatusCode != 200 {
 		resp.Close()
@@ -1680,7 +2142,53 @@ func (i *legacyCMSImporter) login(ctx context.Context) error {
 	if resp.StatusCode != 200 && resp.StatusCode != 303 && resp.StatusCode != 302 {
 		return gerror.Newf("旧站登录响应异常：%d", resp.StatusCode)
 	}
+	if resp.StatusCode == 200 {
+		loginResult := resp.ReadAllString()
+		if loginError := legacyCMSLoginError(loginResult); loginError != "" {
+			return gerror.New("旧站登录失败：" + loginError)
+		}
+	}
 	return nil
+}
+
+func (i *legacyCMSImporter) validateCookie(ctx context.Context) error {
+	resp, err := i.get(ctx, i.baseURL+"/user/contents", g.Map{
+		"per_page": normalizeLegacyCMSPerPage(i.perPage),
+		"page":     1,
+	})
+	if err != nil {
+		return gerror.Wrap(err, "校验旧站Cookie失败")
+	}
+	defer resp.Close()
+	if resp.StatusCode != 200 {
+		return gerror.Newf("旧站Cookie校验响应异常：%d", resp.StatusCode)
+	}
+	html := resp.ReadAllString()
+	if loginError := legacyCMSLoginError(html); loginError != "" {
+		return gerror.New("旧站Cookie已失效：" + loginError)
+	}
+	return nil
+}
+
+func legacyCMSLoginError(pageHTML string) string {
+	if match := regexpLegacyFlashError.FindStringSubmatch(pageHTML); len(match) == 2 {
+		message := strings.TrimSpace(cleanLegacyHTMLText(match[1]))
+		if message != "" {
+			return message
+		}
+	}
+	lower := strings.ToLower(pageHTML)
+	if strings.Contains(pageHTML, "用户名或密码错误") {
+		return "用户名或密码错误"
+	}
+	if strings.Contains(pageHTML, "登录尝试过于频繁") {
+		return "登录尝试过于频繁，请稍后再试"
+	}
+	if strings.Contains(pageHTML, "用户登录") ||
+		strings.Contains(lower, `name="_csrf_token"`) && strings.Contains(lower, `name="password"`) && strings.Contains(lower, `name="username"`) {
+		return "登录未生效，请检查旧站账号或密码"
+	}
+	return ""
 }
 
 func parseLegacyCSRFToken(pageHTML string) string {
@@ -1718,6 +2226,9 @@ func (i *legacyCMSImporter) fetchListPage(ctx context.Context, page int) (*legac
 		return nil, gerror.Newf("旧站列表响应异常：%d，per_page=%d page=%d", resp.StatusCode, i.perPage, page)
 	}
 	html := resp.ReadAllString()
+	if loginError := legacyCMSLoginError(html); loginError != "" {
+		return nil, gerror.New("旧站登录未生效：" + loginError)
+	}
 	return parseLegacyCMSList(html), nil
 }
 
@@ -1792,18 +2303,18 @@ func ellipsisString(value string, max int) string {
 	return string(runes[:max]) + "..."
 }
 
-func (i *legacyCMSImporter) collectSourceIds(ctx context.Context, scanMode string, recentCount int, limitCount int) ([]int64, error) {
+func (i *legacyCMSImporter) collectSourceItems(ctx context.Context, scanMode string, recentCount int, limitCount int) ([]*legacyCMSListItem, error) {
 	first, err := i.fetchListPage(ctx, 1)
 	if err != nil {
 		return nil, err
 	}
-	sourceIds := append([]int64{}, first.Items...)
+	sourceItems := append([]*legacyCMSListItem{}, first.Items...)
 	maxCount := limitCount
 	if scanMode == sysin.ImportTaskScanModeRecent {
 		maxCount = recentCount
 	}
-	if maxCount > 0 && len(sourceIds) >= maxCount {
-		return sourceIds[:maxCount], nil
+	if maxCount > 0 && len(sourceItems) >= maxCount {
+		return sourceItems[:maxCount], nil
 	}
 	maxPages := first.PageTotal
 	if scanMode == sysin.ImportTaskScanModeRecent && maxCount > 0 {
@@ -1826,27 +2337,37 @@ func (i *legacyCMSImporter) collectSourceIds(ctx context.Context, scanMode strin
 		if len(list.Items) == 0 {
 			break
 		}
-		for _, sourceId := range list.Items {
-			if sourceId > 0 && !int64In(sourceId, sourceIds) {
-				sourceIds = append(sourceIds, sourceId)
+		for _, sourceItem := range list.Items {
+			if sourceItem != nil && sourceItem.SourceNoteId > 0 && !legacyCMSListItemIn(sourceItem.SourceNoteId, sourceItems) {
+				sourceItems = append(sourceItems, sourceItem)
 			}
-			if maxCount > 0 && len(sourceIds) >= maxCount {
-				return sourceIds[:maxCount], nil
+			if maxCount > 0 && len(sourceItems) >= maxCount {
+				return sourceItems[:maxCount], nil
 			}
 		}
 	}
-	return sourceIds, nil
+	return sourceItems, nil
+}
+
+func legacyCMSListItemIn(sourceNoteId int64, items []*legacyCMSListItem) bool {
+	for _, item := range items {
+		if item != nil && item.SourceNoteId == sourceNoteId {
+			return true
+		}
+	}
+	return false
 }
 
 func parseLegacyCMSList(html string) *legacyCMSListPage {
 	res := &legacyCMSListPage{}
-	for _, match := range regexpLegacyViewID.FindAllStringSubmatch(html, -1) {
-		if len(match) != 2 {
+	for _, match := range regexpLegacyViewID.FindAllStringSubmatchIndex(html, -1) {
+		if len(match) < 4 {
 			continue
 		}
-		id := g.NewVar(match[1]).Int64()
-		if id > 0 && !int64In(id, res.Items) {
-			res.Items = append(res.Items, id)
+		id := g.NewVar(html[match[2]:match[3]]).Int64()
+		if id > 0 && !legacyCMSListItemIn(id, res.Items) {
+			status, label := parseLegacyCMSListStatus(legacyCMSListItemHTMLWindow(html, match[0], match[1]))
+			res.Items = append(res.Items, &legacyCMSListItem{SourceNoteId: id, Status: status, StatusLabel: label})
 		}
 	}
 	if match := regexpLegacyPage.FindStringSubmatch(html); len(match) == 3 {
@@ -1854,6 +2375,70 @@ func parseLegacyCMSList(html string) *legacyCMSListPage {
 		res.ItemTotal = g.NewVar(match[2]).Int()
 	}
 	return res
+}
+
+func legacyCMSListItemHTMLWindow(html string, start int, end int) string {
+	if start < 0 {
+		start = 0
+	}
+	if end > len(html) {
+		end = len(html)
+	}
+	from := start - 2000
+	if from < 0 {
+		from = 0
+	}
+	to := end + 1000
+	if to > len(html) {
+		to = len(html)
+	}
+	return html[from:to]
+}
+
+func parseLegacyCMSListStatus(itemHTML string) (status string, label string) {
+	if match := regexpLegacyStatusBadge.FindStringSubmatch(itemHTML); len(match) == 2 {
+		label = cleanLegacyHTMLText(match[1])
+	}
+	if label == "" {
+		text := cleanLegacyHTMLText(itemHTML)
+		switch {
+		case strings.Contains(text, "已上架"):
+			label = "已上架"
+		case strings.Contains(text, "已下架"):
+			label = "已下架"
+		case strings.Contains(text, "未上架"):
+			label = "未上架"
+		}
+	}
+	return normalizeLegacyCMSListStatus(label), label
+}
+
+func normalizeLegacyCMSListStatus(label string) string {
+	label = strings.TrimSpace(label)
+	switch {
+	case strings.Contains(label, "已上架"):
+		return "published"
+	case strings.Contains(label, "已下架"):
+		return "down"
+	case strings.Contains(label, "未上架"):
+		return "unpublished"
+	default:
+		return ""
+	}
+}
+
+func legacyCMSProfileStatus(status string) int {
+	if strings.TrimSpace(status) == "published" {
+		return 1
+	}
+	return 2
+}
+
+func legacyCMSPublishTaskStatus(status string) string {
+	if strings.TrimSpace(status) == "published" {
+		return sysin.PublishTaskStatusPending
+	}
+	return sysin.PublishTaskStatusDraft
 }
 
 func parseLegacyCMSDetail(html string, sourceNoteId int64, baseURL string) *legacyCMSDetail {
@@ -1938,10 +2523,22 @@ func parseLegacyCMSMediaURLs(html string, baseURL string, purpose string) []*leg
 
 func parseLegacyCMSMediaPurpose(html string) string {
 	text := cleanLegacyHTMLText(html)
-	if strings.Contains(text, "第2次") || strings.Contains(text, "第二次发送") || strings.Contains(text, "验证资源") {
+	firstIndex := firstLegacyPurposeIndex(text, "第1次", "第一次", "第一次发送", "展示资料")
+	secondIndex := firstLegacyPurposeIndex(text, "第2次", "第二次", "第二次发送", "验证资源")
+	if secondIndex >= 0 && (firstIndex < 0 || secondIndex < firstIndex) {
 		return "verify"
 	}
 	return "display"
+}
+
+func firstLegacyPurposeIndex(text string, patterns ...string) int {
+	res := -1
+	for _, pattern := range patterns {
+		if idx := strings.Index(text, pattern); idx >= 0 && (res < 0 || idx < res) {
+			res = idx
+		}
+	}
+	return res
 }
 
 func normalizeLegacyCMSMediaPurpose(purpose string) string {
@@ -1991,6 +2588,142 @@ func normalizeLegacyImportedTitle(title string, sourceNoteId int64) string {
 
 func normalizeLegacyLocationValue(value string) string {
 	return normalizeLegacyTextValue(value)
+}
+
+type legacyCMSRegionOption struct {
+	Id    int64
+	Pid   int64
+	Level int
+	Title string
+}
+
+type legacyCMSRegionIndex struct {
+	provincesByName map[string]*legacyCMSRegionOption
+	citiesByName    map[string][]*legacyCMSRegionOption
+	childrenByPid   map[int64][]*legacyCMSRegionOption
+}
+
+var legacyCMSRegionIndexCache struct {
+	sync.RWMutex
+	index *legacyCMSRegionIndex
+}
+
+func resolveLegacyCMSRegionCodes(ctx context.Context, provinceName string, cityName string) (provinceCode string, cityCode string, err error) {
+	provinceName = normalizeLegacyRegionName(provinceName)
+	cityName = normalizeLegacyRegionName(cityName)
+	if provinceName == "" && cityName == "" {
+		return "", "", nil
+	}
+	if isNumericRegionCode(provinceName) && isNumericRegionCode(cityName) {
+		return provinceName, cityName, nil
+	}
+	index, err := getLegacyCMSRegionIndex(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	var province *legacyCMSRegionOption
+	if provinceName != "" {
+		province = index.provincesByName[provinceName]
+		if province != nil {
+			provinceCode = fmt.Sprintf("%d", province.Id)
+		}
+	}
+	if cityName == "" {
+		return provinceCode, "", nil
+	}
+	if province != nil {
+		for _, child := range index.childrenByPid[province.Id] {
+			if normalizeLegacyRegionName(child.Title) == cityName {
+				return provinceCode, fmt.Sprintf("%d", child.Id), nil
+			}
+		}
+	}
+	matches := index.citiesByName[cityName]
+	if len(matches) == 1 {
+		city := matches[0]
+		cityCode = fmt.Sprintf("%d", city.Id)
+		if provinceCode == "" && city.Pid > 0 {
+			provinceCode = fmt.Sprintf("%d", city.Pid)
+		}
+	}
+	return provinceCode, cityCode, nil
+}
+
+func getLegacyCMSRegionIndex(ctx context.Context) (*legacyCMSRegionIndex, error) {
+	legacyCMSRegionIndexCache.RLock()
+	cached := legacyCMSRegionIndexCache.index
+	legacyCMSRegionIndexCache.RUnlock()
+	if cached != nil {
+		return cached, nil
+	}
+	legacyCMSRegionIndexCache.Lock()
+	defer legacyCMSRegionIndexCache.Unlock()
+	if legacyCMSRegionIndexCache.index != nil {
+		return legacyCMSRegionIndexCache.index, nil
+	}
+	cols := dao.SysProvinces.Columns()
+	var rows []*legacyCMSRegionOption
+	if err := dao.SysProvinces.Ctx(ctx).
+		Fields(fmt.Sprintf("%s,%s,%s,%s", cols.Id, cols.Pid, cols.Level, cols.Title)).
+		Where(cols.Status, 1).
+		WhereIn(cols.Level, []int{1, 2}).
+		Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "读取全局城市编码失败")
+	}
+	index := &legacyCMSRegionIndex{
+		provincesByName: make(map[string]*legacyCMSRegionOption),
+		citiesByName:    make(map[string][]*legacyCMSRegionOption),
+		childrenByPid:   make(map[int64][]*legacyCMSRegionOption),
+	}
+	for _, row := range rows {
+		if row == nil || row.Id <= 0 {
+			continue
+		}
+		name := normalizeLegacyRegionName(row.Title)
+		if name == "" {
+			continue
+		}
+		if row.Level <= 1 || row.Pid == 0 {
+			index.provincesByName[name] = row
+			continue
+		}
+		index.citiesByName[name] = append(index.citiesByName[name], row)
+		index.childrenByPid[row.Pid] = append(index.childrenByPid[row.Pid], row)
+	}
+	legacyCMSRegionIndexCache.index = index
+	return index, nil
+}
+
+func normalizeLegacyRegionName(value string) string {
+	value = normalizeLegacyLocationValue(value)
+	if value == "" || isNumericRegionCode(value) {
+		return value
+	}
+	replacer := strings.NewReplacer(
+		" ", "",
+		"\t", "",
+		"　", "",
+		"省", "",
+		"市", "",
+		"自治区", "",
+		"特别行政区", "",
+		"壮族", "",
+		"回族", "",
+		"维吾尔", "",
+	)
+	return replacer.Replace(value)
+}
+
+func isNumericRegionCode(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeLegacyTextValue(value string) string {
@@ -2060,18 +2793,20 @@ func legacyMediaType(mediaURL string) string {
 }
 
 var (
-	regexpLegacyInput      = regexp.MustCompile(`(?is)<input\b[^>]*>`)
-	regexpLegacyCSRFName   = regexp.MustCompile(`(?is)\bname\s*=\s*["']_csrf_token["']`)
-	regexpLegacyInputValue = regexp.MustCompile(`(?is)\bvalue\s*=\s*(?:"([^"]*)"|'([^']*)')`)
-	regexpLegacyViewID     = regexp.MustCompile(`/user/content/view/(\d+)`)
-	regexpLegacyPage       = regexp.MustCompile(`第\s*\d+\s*/\s*(\d+)\s*页（共\s*(\d+)\s*条`)
-	regexpLegacyH1         = regexp.MustCompile(`(?is)<h1[^>]*>(.*?)</h1>`)
-	regexpLegacyPreWrap    = regexp.MustCompile(`(?is)<div\b[^>]*white-space\s*:\s*pre-wrap[^>]*>(.*?)</div>`)
-	regexpLegacyInfoText   = regexp.MustCompile(`(?is)<div\b[^>]*class\s*=\s*["'][^"']*user-info-text[^"']*["'][^>]*>(.*?)</div>`)
-	regexpLegacyFileCard   = regexp.MustCompile(`(?is)<div\b[^>]*class\s*=\s*["'][^"']*file-card[^"']*["'][^>]*>`)
-	regexpLegacyUploadURL  = regexp.MustCompile(`(?is)(?:src|href)\s*=\s*["']([^"']*/uploads/[^"']+)["']`)
-	regexpLegacyBR         = regexp.MustCompile(`(?is)<br\s*/?>`)
-	regexpLegacyTag        = regexp.MustCompile(`(?is)<[^>]+>`)
+	regexpLegacyInput       = regexp.MustCompile(`(?is)<input\b[^>]*>`)
+	regexpLegacyCSRFName    = regexp.MustCompile(`(?is)\bname\s*=\s*["']_csrf_token["']`)
+	regexpLegacyInputValue  = regexp.MustCompile(`(?is)\bvalue\s*=\s*(?:"([^"]*)"|'([^']*)')`)
+	regexpLegacyFlashError  = regexp.MustCompile(`(?is)<div\b[^>]*class\s*=\s*["'][^"']*flash[^"']*error[^"']*["'][^>]*>(.*?)</div>`)
+	regexpLegacyStatusBadge = regexp.MustCompile(`(?is)<span\b[^>]*class\s*=\s*["'][^"']*status-badge[^"']*["'][^>]*>(.*?)</span>`)
+	regexpLegacyViewID      = regexp.MustCompile(`/user/content/view/(\d+)`)
+	regexpLegacyPage        = regexp.MustCompile(`第\s*\d+\s*/\s*(\d+)\s*页（共\s*(\d+)\s*条`)
+	regexpLegacyH1          = regexp.MustCompile(`(?is)<h1[^>]*>(.*?)</h1>`)
+	regexpLegacyPreWrap     = regexp.MustCompile(`(?is)<div\b[^>]*white-space\s*:\s*pre-wrap[^>]*>(.*?)</div>`)
+	regexpLegacyInfoText    = regexp.MustCompile(`(?is)<div\b[^>]*class\s*=\s*["'][^"']*user-info-text[^"']*["'][^>]*>(.*?)</div>`)
+	regexpLegacyFileCard    = regexp.MustCompile(`(?is)<div\b[^>]*class\s*=\s*["'][^"']*file-card[^"']*["'][^>]*>`)
+	regexpLegacyUploadURL   = regexp.MustCompile(`(?is)(?:src|href)\s*=\s*["']([^"']*/uploads/[^"']+)["']`)
+	regexpLegacyBR          = regexp.MustCompile(`(?is)<br\s*/?>`)
+	regexpLegacyTag         = regexp.MustCompile(`(?is)<[^>]+>`)
 )
 
 func int64In(id int64, list []int64) bool {

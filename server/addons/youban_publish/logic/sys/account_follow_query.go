@@ -97,7 +97,7 @@ func (s *sSysPublish) publicFollowAccounts(ctx context.Context, account *sysin.A
 	return rows, totalCount, nil
 }
 
-func (s *sSysPublish) noteListByAccounts(ctx context.Context, in *sysin.ProfileListInp, tenantId int64, accountIds []int64) ([]*sysin.NoteModel, int, error) {
+func (s *sSysPublish) noteListByAccounts(ctx context.Context, in *sysin.ProfileListInp, tenantId int64, accountIds []int64, viewer *sysin.AccountModel) ([]*sysin.NoteModel, int, error) {
 	if len(accountIds) == 0 {
 		return []*sysin.NoteModel{}, 0, nil
 	}
@@ -120,6 +120,7 @@ func (s *sSysPublish) noteListByAccounts(ctx context.Context, in *sysin.ProfileL
 	}
 	list := make([]*sysin.NoteModel, 0, len(profiles))
 	for _, item := range profiles {
+		item.CanEdit = canEditFollowNote(viewer, item)
 		note := &sysin.NoteModel{ProfileModel: *item}
 		note.Media, err = s.mediaListByProfile(ctx, item.Id, item.TenantId, item.AccountId)
 		if err != nil {
@@ -128,4 +129,14 @@ func (s *sSysPublish) noteListByAccounts(ctx context.Context, in *sysin.ProfileL
 		list = append(list, note)
 	}
 	return list, totalCount, nil
+}
+
+func canEditFollowNote(viewer *sysin.AccountModel, profile *sysin.ProfileModel) bool {
+	if viewer == nil || profile == nil {
+		return false
+	}
+	if profile.AccountId == viewer.Id {
+		return true
+	}
+	return viewer.AccountType == sysin.PublishAccountTypeAdmin && profile.TenantId == viewer.TenantId
 }

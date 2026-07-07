@@ -40,6 +40,13 @@ type CollectSourceStatusReq struct {
 
 type CollectSourceStatusRes struct{}
 
+type CollectSourceDownReq struct {
+	g.Meta `path:"/publish/collect/source/down" method:"post" tags:"上架插件" summary:"一键下架采集源"`
+	sysin.CollectSourceDownInp
+}
+
+type CollectSourceDownRes struct{}
+
 type CollectRuleListReq struct {
 	g.Meta `path:"/publish/collect/rule/list" method:"get" tags:"上架插件" summary:"采集规则列表"`
 	sysin.CollectRuleListInp

@@ -44,6 +44,13 @@ func (c *cPublish) CollectSourceStatus(ctx context.Context, req *publish.Collect
 	return &publish.CollectSourceStatusRes{}, nil
 }
 
+func (c *cPublish) CollectSourceDown(ctx context.Context, req *publish.CollectSourceDownReq) (res *publish.CollectSourceDownRes, err error) {
+	if err = service.SysPublish().CollectSourceDown(ctx, &req.CollectSourceDownInp); err != nil {
+		return nil, err
+	}
+	return &publish.CollectSourceDownRes{}, nil
+}
+
 func (c *cPublish) CollectRuleList(ctx context.Context, req *publish.CollectRuleListReq) (res *publish.CollectRuleListRes, err error) {
 	list, totalCount, err := service.SysPublish().CollectRuleList(ctx, &req.CollectRuleListInp)
 	if err != nil {

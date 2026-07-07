@@ -68,7 +68,7 @@ func (s *sSysPublish) enqueueImportTask(ctx context.Context, id int64, delay tim
 	task := asynq.NewTask(tgTaskTypeImport, payload)
 	options := []asynq.Option{
 		asynq.Queue(tgQueueNameDefault),
-		asynq.MaxRetry(3),
+		asynq.MaxRetry(0),
 		asynq.Timeout(2 * time.Hour),
 		asynq.Unique(30 * time.Second),
 	}
@@ -97,7 +97,7 @@ func (s *sSysPublish) enqueueImportRun(ctx context.Context, runId int64, delay t
 	task := asynq.NewTask(tgTaskTypeImport, payload)
 	options := []asynq.Option{
 		asynq.Queue(tgQueueNameDefault),
-		asynq.MaxRetry(3),
+		asynq.MaxRetry(0),
 		asynq.Timeout(2 * time.Hour),
 		asynq.Unique(30 * time.Second),
 	}

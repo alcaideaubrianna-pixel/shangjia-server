@@ -267,7 +267,7 @@ func (s *sSysPublish) FollowNoteList(ctx context.Context, in *sysin.FollowNoteLi
 	if err != nil {
 		return nil, 0, err
 	}
-	return s.noteListByAccounts(ctx, &in.ProfileListInp, account.TenantId, accountIds)
+	return s.noteListByAccounts(ctx, &in.ProfileListInp, account.TenantId, accountIds, account)
 }
 
 func (s *sSysPublish) FollowNoteImageSearch(ctx context.Context, in *sysin.FollowNoteListInp, file *ghttp.UploadFile) ([]*sysin.NoteModel, int, error) {

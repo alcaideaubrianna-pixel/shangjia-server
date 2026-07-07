@@ -112,17 +112,8 @@ func (s *sSysPublish) approveCollectReview(ctx context.Context, reviewId int64, 
 	if err != nil {
 		return err
 	}
-	if err = s.ensureTgJobs(ctx, taskId); err != nil {
+	if err = s.ensureCollectTgJobs(ctx, taskId, rule); err != nil {
 		return err
 	}
-	_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).
-		Where("id", review["dispatch_id"].Int64()).
-		Data(g.Map{
-			"task_id":     taskId,
-			"status":      sysin.CollectDispatchStatusSent,
-			"updated_at":  gtime.Now(),
-			"finished_at": gtime.Now(),
-		}).
-		Update()
-	return gerror.Wrap(err, "更新采集分发失败")
+	return s.markCollectDispatchQueued(ctx, review["dispatch_id"].Int64(), taskId)
 }

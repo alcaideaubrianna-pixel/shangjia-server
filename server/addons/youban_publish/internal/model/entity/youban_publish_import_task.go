@@ -15,8 +15,10 @@ type YoubanPublishImportTask struct {
 	AccountId        int64       `json:"accountId"        orm:"account_id"          description:"上架账号ID"`
 	SourceName       string      `json:"sourceName"       orm:"source_name"         description:"来源名称"`
 	BaseUrl          string      `json:"baseUrl"          orm:"base_url"            description:"旧站域名"`
+	ServerIp         string      `json:"serverIp"         orm:"server_ip"           description:"旧站服务器IP"`
 	Username         string      `json:"username"         orm:"username"            description:"旧站账号"`
 	PasswordCipher   string      `json:"passwordCipher"   orm:"password_cipher"     description:"旧站密码密文"`
+	CookieCipher     string      `json:"cookieCipher"     orm:"cookie_cipher"       description:"旧站Cookie密文"`
 	LimitCount       int         `json:"limitCount"       orm:"limit_count"         description:"测试采集数量"`
 	PerPage          int         `json:"perPage"          orm:"per_page"            description:"每页数量"`
 	ProxyEnabled     int         `json:"proxyEnabled"     orm:"proxy_enabled"       description:"是否启用代理"`

@@ -13,7 +13,7 @@ import (
 	"hotgo/internal/service"
 )
 
-func (s *sSysPublish) AdminMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile) (res *sysin.MediaModel, err error) {
+func (s *sSysPublish) AdminMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile, originalFile *ghttp.UploadFile) (res *sysin.MediaModel, err error) {
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
@@ -25,10 +25,10 @@ func (s *sSysPublish) AdminMediaUpload(ctx context.Context, in *sysin.MediaUploa
 	if err != nil {
 		return nil, err
 	}
-	return s.saveUploadedTaskMedia(ctx, task, in, file, poster)
+	return s.saveUploadedTaskMedia(ctx, task, in, file, poster, originalFile)
 }
 
-func (s *sSysPublish) MyMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile) (res *sysin.MediaModel, err error) {
+func (s *sSysPublish) MyMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile, originalFile *ghttp.UploadFile) (res *sysin.MediaModel, err error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {
 		return nil, err
@@ -40,10 +40,10 @@ func (s *sSysPublish) MyMediaUpload(ctx context.Context, in *sysin.MediaUploadIn
 	if err != nil {
 		return nil, err
 	}
-	return s.saveUploadedTaskMedia(ctx, task, in, file, poster)
+	return s.saveUploadedTaskMedia(ctx, task, in, file, poster, originalFile)
 }
 
-func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile) (*sysin.MediaModel, error) {
+func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile, originalFile *ghttp.UploadFile) (*sysin.MediaModel, error) {
 	if task["status"].String() != sysin.PublishTaskStatusDraft {
 		return nil, gerror.New("仅草稿任务可以上传媒体")
 	}
@@ -70,7 +70,14 @@ func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record
 	if err != nil {
 		return nil, err
 	}
-	return s.saveMediaAttachment(ctx, task, in, attachment, posterAttachment, perceptualHash)
+	var originalAttachment *basesysin.AttachmentListModel
+	if originalFile != nil && in.MediaType == "image" {
+		originalAttachment, err = service.CommonUpload().UploadFile(ctx, storager.KindImg, originalFile)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return s.saveMediaAttachment(ctx, task, in, attachment, posterAttachment, originalAttachment, perceptualHash)
 }
 
 func uploadMediaPosterForType(ctx context.Context, mediaType string, poster *ghttp.UploadFile) (*basesysin.AttachmentListModel, error) {

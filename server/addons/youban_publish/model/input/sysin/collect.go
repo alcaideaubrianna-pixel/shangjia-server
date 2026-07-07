@@ -205,3 +205,7 @@ type CollectStatusInp struct {
 	Enabled int   `json:"enabled" dc:"开关"`
 	Status  int   `json:"status" dc:"状态"`
 }
+
+type CollectSourceDownInp struct {
+	Id int64 `json:"id" v:"required|min:1#采集源ID不能为空|采集源ID不能为空" dc:"采集源ID"`
+}

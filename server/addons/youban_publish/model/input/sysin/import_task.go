@@ -35,8 +35,10 @@ type ImportTaskCreateInp struct {
 	TenantId         int64         `json:"tenantId" dc:"租户ID"`
 	AccountId        int64         `json:"accountId" dc:"上架账号ID"`
 	BaseUrl          string        `json:"baseUrl" v:"required#旧站域名不能为空" dc:"旧站域名"`
-	Username         string        `json:"username" v:"required#旧站账号不能为空" dc:"旧站账号"`
+	ServerIp         string        `json:"serverIp" dc:"旧站服务器IP，DNS失效时使用"`
+	Username         string        `json:"username" dc:"旧站账号"`
 	Password         string        `json:"password" dc:"旧站密码"`
+	LegacyCookie     string        `json:"legacyCookie" dc:"旧站登录Cookie"`
 	LimitCount       int           `json:"limitCount" dc:"测试采集数量"`
 	PerPage          int           `json:"perPage" dc:"每页数量"`
 	ProxyEnabled     int           `json:"proxyEnabled" dc:"是否启用代理"`
@@ -54,15 +56,19 @@ func (in *ImportTaskCreateInp) Filter(ctx context.Context) error {
 		in.SourceName = "lyy_cms"
 	}
 	in.BaseUrl = strings.TrimRight(strings.TrimSpace(in.BaseUrl), "/")
+	in.ServerIp = strings.TrimSpace(in.ServerIp)
 	in.Username = strings.TrimSpace(in.Username)
+	in.LegacyCookie = strings.TrimSpace(in.LegacyCookie)
 	if in.BaseUrl == "" {
 		return gerror.New("旧站域名不能为空")
 	}
-	if in.Username == "" {
-		return gerror.New("旧站账号不能为空")
-	}
-	if in.Id <= 0 && in.Password == "" {
-		return gerror.New("旧站密码不能为空")
+	if in.LegacyCookie == "" {
+		if in.Username == "" {
+			return gerror.New("旧站账号不能为空")
+		}
+		if in.Id <= 0 && in.Password == "" {
+			return gerror.New("旧站密码不能为空")
+		}
 	}
 	if in.PerPage <= 0 {
 		in.PerPage = 12
@@ -188,6 +194,8 @@ type ImportTaskScanModel struct {
 
 type ImportTaskScanItem struct {
 	SourceNoteId        int64  `json:"sourceNoteId" dc:"旧站资料ID"`
+	SourceStatus        string `json:"sourceStatus" dc:"旧站状态：published/down/unpublished"`
+	SourceStatusLabel   string `json:"sourceStatusLabel" dc:"旧站状态文本"`
 	ClientRequestId     string `json:"clientRequestId" dc:"幂等ID"`
 	Status              string `json:"status" dc:"状态：missing existing"`
 	TaskId              int64  `json:"taskId" dc:"本地任务ID"`

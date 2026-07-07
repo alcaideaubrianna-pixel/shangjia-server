@@ -34,6 +34,14 @@
       />
       <n-button @click="loadProfiles">查询</n-button>
       <n-button @click="loadProfiles">刷新</n-button>
+      <n-button type="primary" :disabled="!selectedProfileIds.length" @click="batchReviewProfiles('approved')">批量通过</n-button>
+      <n-button :disabled="!selectedProfileIds.length" @click="batchReviewProfiles('rejected')">批量驳回</n-button>
+      <n-popconfirm @positive-click="batchDeleteProfiles">
+        <template #trigger>
+          <n-button type="error" :disabled="!selectedProfileIds.length">批量删除</n-button>
+        </template>
+        确认删除选中的笔记资料？
+      </n-popconfirm>
     </n-space>
 
     <n-data-table
@@ -42,9 +50,11 @@
       :loading="loading"
       :pagination="pagination"
       :row-key="(row) => row.id"
-      :scroll-x="1760"
+      :checked-row-keys="checkedRowKeys"
+      :scroll-x="1820"
       size="small"
       remote
+      @update:checked-row-keys="handleCheckedRowKeys"
     />
 
     <n-modal v-model:show="editVisible" preset="dialog" title="编辑笔记资料" positive-text="保存" negative-text="取消" @positive-click="saveProfile">
@@ -87,6 +97,7 @@
   const loading = ref(false);
   const editVisible = ref(false);
   const profiles = ref<Recordable[]>([]);
+  const checkedRowKeys = ref<Array<number | string>>([]);
   const tenants = ref<Recordable[]>([]);
   const accounts = ref<Recordable[]>([]);
   const tags = ref<Recordable[]>([]);
@@ -154,8 +165,12 @@
     { label: '上架', value: 1 },
     { label: '下架', value: 2 },
   ];
+  const selectedProfileIds = computed(() =>
+    checkedRowKeys.value.map((id) => Number(id)).filter((id) => id > 0)
+  );
 
   const columns = [
+    { type: 'selection', width: 48, fixed: 'left' },
     { title: 'ID', key: 'id', width: 80 },
     { title: '资料编号', key: 'profileNo', width: 120 },
     { title: '账号归属', key: 'tenantName', width: 150 },
@@ -225,6 +240,7 @@
       });
       profiles.value = res?.list || [];
       pagination.itemCount = res?.totalCount || res?.total || 0;
+      checkedRowKeys.value = [];
     } finally {
       loading.value = false;
     }
@@ -270,6 +286,32 @@
   async function deleteProfile(row: Recordable) {
     await ProfileDelete({ ids: [row.id] });
     message.success('笔记资料已删除');
+    await loadProfiles();
+  }
+
+  function handleCheckedRowKeys(keys: Array<number | string>) {
+    checkedRowKeys.value = keys;
+  }
+
+  async function batchReviewProfiles(reviewStatus: string) {
+    const ids = selectedProfileIds.value;
+    if (!ids.length) {
+      message.warning('请选择笔记资料');
+      return;
+    }
+    await ProfileReview({ ids, reviewStatus });
+    message.success(reviewStatus === 'approved' ? '已批量审核通过' : '已批量驳回');
+    await loadProfiles();
+  }
+
+  async function batchDeleteProfiles() {
+    const ids = selectedProfileIds.value;
+    if (!ids.length) {
+      message.warning('请选择笔记资料');
+      return;
+    }
+    await ProfileDelete({ ids });
+    message.success('已批量删除笔记资料');
     await loadProfiles();
   }
 

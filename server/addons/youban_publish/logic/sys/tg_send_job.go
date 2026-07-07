@@ -117,6 +117,7 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 			"error_message": err.Error(),
 			"updated_at":    gtime.Now(),
 		}).Update()
+		_ = s.markCollectDispatchFailedByTask(ctx, job.TaskId, err.Error())
 		return err
 	}
 	return &tgRetryAfterError{after: retryDelay, err: err}
@@ -142,6 +143,9 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 		return err
 	}
 	if err = s.incrementDailyPublishStat(ctx, job); err != nil {
+		return err
+	}
+	if err = s.markCollectDispatchSentByTask(ctx, job.TaskId); err != nil {
 		return err
 	}
 	return s.scheduleTelegramCycleDelete(ctx, job)

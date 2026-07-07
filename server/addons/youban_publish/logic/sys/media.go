@@ -22,6 +22,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
 	basesysin "hotgo/internal/model/input/sysin"
@@ -339,44 +340,88 @@ func parseUploadPHash(value string) (*goimagehash.ImageHash, bool) {
 	return goimagehash.NewImageHash(hashValue, goimagehash.PHash), true
 }
 
-func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, in *sysin.MediaUploadInp, attachment *basesysin.AttachmentListModel, poster *basesysin.AttachmentListModel, perceptualHash string) (res *sysin.MediaModel, err error) {
+func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, in *sysin.MediaUploadInp, attachment *basesysin.AttachmentListModel, poster *basesysin.AttachmentListModel, originalAttachment *basesysin.AttachmentListModel, perceptualHash string) (res *sysin.MediaModel, err error) {
 	if attachment == nil || attachment.Id <= 0 {
 		return nil, gerror.New("附件上传失败")
 	}
-	now := gtime.Now()
-	data := g.Map{
-		"tenant_id":           task["tenant_id"].Int64(),
-		"merchant_id":         task["tenant_id"].Int64(),
-		"account_id":          task["account_id"].Int64(),
-		"task_id":             task["id"].Int64(),
-		"profile_id":          task["profile_id"].Int64(),
-		"attachment_id":       attachment.Id,
-		"media_type":          in.MediaType,
-		"purpose":             in.Purpose,
-		"name":                attachment.Name,
-		"file_url":            normalizeMediaFileURL(attachment.FileUrl, attachment.Path),
-		"poster_url":          normalizeMediaFileURL(posterFileUrl(poster), posterStoragePath(poster)),
-		"poster_storage_path": posterStoragePath(poster),
-		"storage_path":        attachment.Path,
-		"mime_type":           attachment.MimeType,
-		"md5":                 attachment.Md5,
-		"perceptual_hash":     perceptualHash,
-		"size":                attachment.Size,
-		"sort_index":          in.SortIndex,
-		"status":              1,
-		"updated_by":          contexts.GetUserId(ctx),
-		"updated_at":          now,
+	if err = ensureMediaEditColumns(ctx); err != nil {
+		return nil, err
 	}
-	existingId, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("task_id", task["id"].Int64()).
-		Where("attachment_id", attachment.Id).
-		WhereNull("deleted_at").
-		Fields("id").
-		Value()
+	now := gtime.Now()
+	editStatus := strings.TrimSpace(in.EditStatus)
+	if editStatus == "" {
+		editStatus = "raw"
+	}
+	if editStatus != "raw" && editStatus != "edited" {
+		editStatus = "edited"
+	}
+	if in.EditStatus == "" && (in.MediaId > 0 || originalAttachment != nil) {
+		editStatus = "edited"
+	}
+	data := g.Map{
+		"tenant_id":            task["tenant_id"].Int64(),
+		"merchant_id":          task["tenant_id"].Int64(),
+		"account_id":           task["account_id"].Int64(),
+		"task_id":              task["id"].Int64(),
+		"profile_id":           task["profile_id"].Int64(),
+		"attachment_id":        attachment.Id,
+		"edited_attachment_id": 0,
+		"media_type":           in.MediaType,
+		"purpose":              in.Purpose,
+		"name":                 attachment.Name,
+		"file_url":             normalizeMediaFileURL(attachment.FileUrl, attachment.Path),
+		"edited_file_url":      "",
+		"poster_url":           normalizeMediaFileURL(posterFileUrl(poster), posterStoragePath(poster)),
+		"poster_storage_path":  posterStoragePath(poster),
+		"storage_path":         attachment.Path,
+		"edited_storage_path":  "",
+		"mime_type":            attachment.MimeType,
+		"md5":                  attachment.Md5,
+		"perceptual_hash":      perceptualHash,
+		"edit_config_json":     strings.TrimSpace(in.EditConfigJson),
+		"edit_status":          editStatus,
+		"size":                 attachment.Size,
+		"sort_index":           in.SortIndex,
+		"status":               1,
+		"updated_by":           contexts.GetUserId(ctx),
+		"updated_at":           now,
+	}
+	var existing gdb.Record
+	if in.MediaId > 0 {
+		existing, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+			Where("id", in.MediaId).
+			Where("task_id", task["id"].Int64()).
+			WhereNull("deleted_at").
+			One()
+	} else {
+		existing, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+			Where("task_id", task["id"].Int64()).
+			Where("attachment_id", attachment.Id).
+			WhereNull("deleted_at").
+			One()
+	}
 	if err != nil {
 		return nil, gerror.Wrap(err, "检查任务媒体失败")
 	}
-	mediaId := existingId.Int64()
+	mediaId := existing["id"].Int64()
+	if editStatus == "edited" {
+		data["edited_attachment_id"] = attachment.Id
+		data["edited_file_url"] = normalizeMediaFileURL(attachment.FileUrl, attachment.Path)
+		data["edited_storage_path"] = attachment.Path
+	}
+	if originalAttachment != nil && originalAttachment.Id > 0 {
+		data["original_attachment_id"] = originalAttachment.Id
+		data["original_file_url"] = normalizeMediaFileURL(originalAttachment.FileUrl, originalAttachment.Path)
+		data["original_storage_path"] = originalAttachment.Path
+	} else if mediaId == 0 {
+		data["original_attachment_id"] = attachment.Id
+		data["original_file_url"] = normalizeMediaFileURL(attachment.FileUrl, attachment.Path)
+		data["original_storage_path"] = attachment.Path
+	} else if mediaId > 0 && existing["original_attachment_id"].Int64() <= 0 {
+		data["original_attachment_id"] = existing["attachment_id"].Int64()
+		data["original_file_url"] = normalizeMediaFileURL(existing["file_url"].String(), existing["storage_path"].String())
+		data["original_storage_path"] = existing["storage_path"].String()
+	}
 	if mediaId > 0 {
 		_, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", mediaId).Data(data).Update()
 	} else {
@@ -401,12 +446,16 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 	if err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", mediaId).Scan(&media); err != nil {
 		return nil, gerror.Wrap(err, "读取任务媒体失败")
 	}
+	normalizeMediaListFileURL([]*sysin.MediaModel{media})
 	return media, nil
 }
 
 func (s *sSysPublish) mediaList(ctx context.Context, taskId int64, accountId int64) (list []*sysin.MediaModel, err error) {
 	if taskId <= 0 {
 		return nil, gerror.New("任务ID不能为空")
+	}
+	if err = ensureMediaEditColumns(ctx); err != nil {
+		return nil, err
 	}
 	if _, err = s.getTask(ctx, taskId, accountId); err != nil {
 		return nil, err
@@ -430,6 +479,9 @@ func (s *sSysPublish) mediaList(ctx context.Context, taskId int64, accountId int
 func (s *sSysPublish) mediaListByTenant(ctx context.Context, taskId int64, tenantId int64) (list []*sysin.MediaModel, err error) {
 	if taskId <= 0 {
 		return nil, gerror.New("任务ID不能为空")
+	}
+	if err = ensureMediaEditColumns(ctx); err != nil {
+		return nil, err
 	}
 	if _, err = s.getTaskByTenant(ctx, taskId, tenantId); err != nil {
 		return nil, err
@@ -459,9 +511,83 @@ func normalizeMediaListFileURL(list []*sysin.MediaModel) {
 		if item == nil {
 			continue
 		}
+		if (item.EditStatus == "" || item.EditStatus == "raw") && isLikelyEditedMedia(item) {
+			item.EditStatus = "edited"
+		}
 		item.FileUrl = normalizeMediaFileURL(item.FileUrl, item.StoragePath)
+		item.OriginalFileUrl = normalizeMediaFileURL(item.OriginalFileUrl, item.OriginalStoragePath)
+		item.EditedFileUrl = normalizeMediaFileURL(item.EditedFileUrl, item.EditedStoragePath)
 		item.PosterUrl = normalizeMediaFileURL(item.PosterUrl, item.PosterStoragePath)
 	}
+}
+
+func isLikelyEditedMedia(item *sysin.MediaModel) bool {
+	if item == nil {
+		return false
+	}
+	if item.EditedAttachmentId > 0 || strings.TrimSpace(item.EditedStoragePath) != "" || strings.TrimSpace(item.EditedFileUrl) != "" {
+		return true
+	}
+	name := strings.ToLower(strings.TrimSpace(item.Name))
+	return strings.Contains(name, "-edited.") || strings.Contains(name, "_edited.")
+}
+
+func ensureMediaEditColumns(ctx context.Context) error {
+	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
+		_, err := g.DB().Exec(ctx, `
+ALTER TABLE "hg_youban_publish_media"
+  ADD COLUMN IF NOT EXISTS "original_attachment_id" bigint NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS "original_file_url" varchar(1024) NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS "original_storage_path" varchar(1024) NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS "edited_attachment_id" bigint NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS "edited_file_url" varchar(1024) NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS "edited_storage_path" varchar(1024) NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS "edit_config_json" text,
+  ADD COLUMN IF NOT EXISTS "edit_status" varchar(16) NOT NULL DEFAULT 'raw'`)
+		if err != nil {
+			return gerror.Wrap(err, "检查任务媒体编辑字段失败")
+		}
+		_, err = g.DB().Exec(ctx, `
+UPDATE "hg_youban_publish_media"
+SET "original_attachment_id" = "attachment_id",
+    "original_file_url" = "file_url",
+    "original_storage_path" = "storage_path"
+WHERE "original_attachment_id" = 0 AND "attachment_id" > 0`)
+		if err != nil {
+			return gerror.Wrap(err, "补齐任务媒体原始素材字段失败")
+		}
+		_, err = g.DB().Exec(ctx, `
+UPDATE "hg_youban_publish_media"
+SET "edit_status" = 'edited'
+WHERE ("edit_status" = '' OR "edit_status" = 'raw' OR "edit_status" IS NULL)
+  AND ("edited_attachment_id" > 0 OR "edited_storage_path" <> '' OR "edited_file_url" <> '' OR lower("name") LIKE '%-edited.%' OR lower("name") LIKE '%_edited.%')`)
+		if err != nil {
+			return gerror.Wrap(err, "补齐任务媒体编辑状态失败")
+		}
+		return nil
+	}
+	statements := []string{
+		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `original_attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '原始HotGo附件ID' AFTER `attachment_id`",
+		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `original_file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始访问地址' AFTER `file_url`",
+		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `original_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始存储路径' AFTER `storage_path`",
+		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edited_attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '编辑后HotGo附件ID' AFTER `original_attachment_id`",
+		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edited_file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '编辑后访问地址' AFTER `original_file_url`",
+		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edited_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '编辑后存储路径' AFTER `original_storage_path`",
+		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edit_config_json` text COMMENT '图片编辑配置' AFTER `perceptual_hash`",
+		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edit_status` varchar(16) NOT NULL DEFAULT 'raw' COMMENT '编辑状态：raw/edited' AFTER `edit_config_json`",
+	}
+	for _, statement := range statements {
+		if _, err := g.DB().Exec(ctx, statement); err != nil && !isIgnorableImportTaskServerIPColumnError(err) {
+			return gerror.Wrap(err, "检查任务媒体编辑字段失败")
+		}
+	}
+	if _, err := g.DB().Exec(ctx, "UPDATE `hg_youban_publish_media` SET `original_attachment_id`=`attachment_id`, `original_file_url`=`file_url`, `original_storage_path`=`storage_path` WHERE `original_attachment_id`=0 AND `attachment_id`>0"); err != nil {
+		return gerror.Wrap(err, "补齐任务媒体原始素材字段失败")
+	}
+	if _, err := g.DB().Exec(ctx, "UPDATE `hg_youban_publish_media` SET `edit_status`='edited' WHERE (`edit_status`='' OR `edit_status`='raw' OR `edit_status` IS NULL) AND (`edited_attachment_id`>0 OR `edited_storage_path`<>'' OR `edited_file_url`<>'' OR lower(`name`) LIKE '%-edited.%' OR lower(`name`) LIKE '%_edited.%')"); err != nil {
+		return gerror.Wrap(err, "补齐任务媒体编辑状态失败")
+	}
+	return nil
 }
 
 func normalizeMediaFileURL(fileURL string, storagePath string) string {
@@ -490,6 +616,9 @@ func (s *sSysPublish) deleteMedia(ctx context.Context, id int64, accountId int64
 	if id <= 0 {
 		return gerror.New("媒体ID不能为空")
 	}
+	if err = ensureMediaEditColumns(ctx); err != nil {
+		return err
+	}
 	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", id).WhereNull("deleted_at")
 	if accountId > 0 {
 		mod = mod.Where("account_id", accountId)
@@ -512,9 +641,13 @@ func (s *sSysPublish) deleteMedia(ctx context.Context, id int64, accountId int64
 	}
 	if row["profile_id"].Int64() > 0 {
 		mediaColumns := dao.ContentMedia.Columns()
+		sourceAssetId := row["original_attachment_id"].Int64()
+		if sourceAssetId <= 0 {
+			sourceAssetId = row["attachment_id"].Int64()
+		}
 		_, _ = dao.ContentMedia.Ctx(ctx).
 			Where(mediaColumns.ProfileId, row["profile_id"].Int64()).
-			Where(mediaColumns.SourceAssetId, row["attachment_id"].Int64()).
+			Where(mediaColumns.SourceAssetId, sourceAssetId).
 			Data(g.Map{mediaColumns.DeletedAt: gtime.Now()}).
 			Update()
 	}
@@ -524,6 +657,9 @@ func (s *sSysPublish) deleteMedia(ctx context.Context, id int64, accountId int64
 func (s *sSysPublish) deleteMediaByTenant(ctx context.Context, id int64, tenantId int64, operatorId int64) (err error) {
 	if id <= 0 {
 		return gerror.New("媒体ID不能为空")
+	}
+	if err = ensureMediaEditColumns(ctx); err != nil {
+		return err
 	}
 	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("id", id).
@@ -553,9 +689,13 @@ func (s *sSysPublish) deleteMediaByTenant(ctx context.Context, id int64, tenantI
 	}
 	if row["profile_id"].Int64() > 0 {
 		mediaColumns := dao.ContentMedia.Columns()
+		sourceAssetId := row["original_attachment_id"].Int64()
+		if sourceAssetId <= 0 {
+			sourceAssetId = row["attachment_id"].Int64()
+		}
 		_, _ = dao.ContentMedia.Ctx(ctx).
 			Where(mediaColumns.ProfileId, row["profile_id"].Int64()).
-			Where(mediaColumns.SourceAssetId, row["attachment_id"].Int64()).
+			Where(mediaColumns.SourceAssetId, sourceAssetId).
 			Data(g.Map{mediaColumns.DeletedAt: gtime.Now()}).
 			Update()
 	}
@@ -608,14 +748,26 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 		} else {
 			imageCount++
 		}
+		previewStoragePath := item.StoragePath
+		if mediaType == "video" && strings.TrimSpace(item.PosterStoragePath) != "" {
+			previewStoragePath = item.PosterStoragePath
+		}
+		sourceAssetId := item.OriginalAttachmentId
+		if sourceAssetId <= 0 {
+			sourceAssetId = item.AttachmentId
+		}
+		originalStoragePath := strings.TrimSpace(item.OriginalStoragePath)
+		if originalStoragePath == "" {
+			originalStoragePath = item.StoragePath
+		}
 		data := g.Map{
 			mediaColumns.ProfileId:           profileId,
-			mediaColumns.SourceAssetId:       item.AttachmentId,
+			mediaColumns.SourceAssetId:       sourceAssetId,
 			mediaColumns.MediaType:           mediaType,
 			mediaColumns.SortIndex:           item.SortIndex,
-			mediaColumns.OriginalStoragePath: item.StoragePath,
+			mediaColumns.OriginalStoragePath: originalStoragePath,
 			mediaColumns.DisplayStoragePath:  item.StoragePath,
-			mediaColumns.PreviewStoragePath:  item.StoragePath,
+			mediaColumns.PreviewStoragePath:  previewStoragePath,
 			mediaColumns.BinaryMd5:           item.Md5,
 			mediaColumns.PerceptualHash:      item.PerceptualHash,
 			mediaColumns.ProcessStatus:       "raw",
@@ -626,7 +778,7 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 		}
 		existing, err := tx.Model(dao.ContentMedia.Table()).Ctx(ctx).
 			Where(mediaColumns.ProfileId, profileId).
-			Where(mediaColumns.SourceAssetId, item.AttachmentId).
+			Where(mediaColumns.SourceAssetId, sourceAssetId).
 			Fields(mediaColumns.Id).
 			Value()
 		if err != nil {

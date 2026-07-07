@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -85,6 +87,9 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	}
 	if event.IsEmpty() {
 		return gerror.New("采集事件不存在")
+	}
+	if event["status"].String() == sysin.CollectEventStatusProcessed {
+		return nil
 	}
 	rules, err := s.collectEventRules(ctx, event, tenantId, accountId)
 	if err != nil {
@@ -178,16 +183,13 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 	if err != nil {
 		return false, err
 	}
-	if err = s.ensureTgJobs(ctx, taskId); err != nil {
+	if err = s.ensureCollectTgJobs(ctx, taskId, rule); err != nil {
 		return false, err
 	}
-	_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
-		"task_id":     taskId,
-		"status":      sysin.CollectDispatchStatusSent,
-		"updated_at":  gtime.Now(),
-		"finished_at": gtime.Now(),
-	}).Update()
-	return true, gerror.Wrap(err, "更新采集分发记录失败")
+	if err = s.markCollectDispatchQueued(ctx, dispatchId, taskId); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record, rule gdb.Record, dispatchId int64, text string) error {
@@ -231,7 +233,7 @@ func (s *sSysPublish) createCollectPublishTask(ctx context.Context, event gdb.Re
 		"tenant_id":         event["tenant_id"].Int64(),
 		"merchant_id":       event["tenant_id"].Int64(),
 		"account_id":        event["account_id"].Int64(),
-		"client_request_id": "collect:" + event["source_unique_key"].String(),
+		"client_request_id": fmt.Sprintf("collect:%s:%d", event["source_unique_key"].String(), rule["id"].Int64()),
 		"title":             title,
 		"plain_text":        text,
 		"media_count":       event["media_count"].Int(),
@@ -246,7 +248,52 @@ func (s *sSysPublish) createCollectPublishTask(ctx context.Context, event gdb.Re
 	if err != nil {
 		return 0, gerror.Wrap(err, "创建采集上架任务失败")
 	}
+	if err = s.createCollectPublishMedia(ctx, event, taskId); err != nil {
+		return 0, err
+	}
 	return taskId, nil
+}
+
+func (s *sSysPublish) createCollectPublishMedia(ctx context.Context, event gdb.Record, taskId int64) error {
+	var items []collectMediaItem
+	if err := json.Unmarshal([]byte(event["media_json"].String()), &items); err != nil {
+		return nil
+	}
+	now := gtime.Now()
+	sortIndex := 1
+	for _, item := range items {
+		fileId := strings.TrimSpace(item.FileId)
+		if fileId == "" {
+			continue
+		}
+		mediaType := "image"
+		if item.Type == "video" {
+			mediaType = "video"
+		} else if item.Type != "photo" {
+			continue
+		}
+		_, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(g.Map{
+			"tenant_id":   event["tenant_id"].Int64(),
+			"merchant_id": event["tenant_id"].Int64(),
+			"account_id":  event["account_id"].Int64(),
+			"task_id":     taskId,
+			"media_type":  mediaType,
+			"purpose":     "display",
+			"name":        fmt.Sprintf("collect-%d-%d", event["id"].Int64(), sortIndex),
+			"tg_file_id":  fileId,
+			"sort_index":  sortIndex,
+			"status":      1,
+			"created_at":  now,
+			"updated_at":  now,
+			"created_by":  event["account_id"].Int64(),
+			"updated_by":  event["account_id"].Int64(),
+		}).Insert()
+		if err != nil {
+			return gerror.Wrap(err, "创建采集媒体失败")
+		}
+		sortIndex++
+	}
+	return nil
 }
 
 func (s *sSysPublish) markCollectEvent(ctx context.Context, id int64, status string, message string) error {
