@@ -170,21 +170,7 @@ func (s *sSysPublish) telegramJobPublishMessage(job telegramJobRecord, message s
 }
 
 func (s *sSysPublish) scheduleTelegramCycleDelete(ctx context.Context, job telegramJobRecord) error {
-	plan := newPublishCyclePlan(job)
-	if !plan.Enabled() {
-		return nil
-	}
-	now := gtime.Now()
-	delay := plan.DeleteDelay(ctx, now)
-	nextCycleAt := now.Add(delay)
-	if !isDevelopMode(ctx) {
-		nextCycleAt = plan.NextDeleteAt(now)
-	}
-	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
-		"next_cycle_at": nextCycleAt,
-		"updated_at":    gtime.Now(),
-	}).Update()
-	return s.enqueueTelegramDeleteJob(ctx, job.Id, delay)
+	return s.ensureCyclePlanForJob(ctx, job)
 }
 
 func (s *sSysPublish) canSendTelegramJob(ctx context.Context, job telegramJobRecord) (bool, error) {

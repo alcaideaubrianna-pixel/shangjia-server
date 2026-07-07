@@ -1000,3 +1000,62 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_account_follow" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_account_follow_pair" ON "hg_youban_publish_account_follow" ("follower_account_id", "following_account_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_account_follow_follower" ON "hg_youban_publish_account_follow" ("tenant_id", "follower_account_id", "status");
 CREATE INDEX IF NOT EXISTS "idx_ybp_account_follow_following" ON "hg_youban_publish_account_follow" ("tenant_id", "following_account_id", "status");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_cycle_plan" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "task_id" bigint NOT NULL DEFAULT 0,
+  "enabled" smallint NOT NULL DEFAULT 0,
+  "interval_seconds" integer NOT NULL DEFAULT 345600,
+  "publish_time" varchar(16) NOT NULL DEFAULT '',
+  "next_run_at" timestamp DEFAULT NULL,
+  "last_run_at" timestamp DEFAULT NULL,
+  "last_run_id" bigint NOT NULL DEFAULT 0,
+  "status" varchar(32) NOT NULL DEFAULT 'active',
+  "source" varchar(32) NOT NULL DEFAULT '',
+  "locked_at" timestamp DEFAULT NULL,
+  "last_error_message" text,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_cycle_plan_profile" ON "hg_youban_publish_cycle_plan" ("tenant_id", "account_id", "profile_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_plan_due" ON "hg_youban_publish_cycle_plan" ("enabled", "status", "next_run_at", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_plan_account" ON "hg_youban_publish_cycle_plan" ("tenant_id", "account_id", "status");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_cycle_run" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "plan_id" bigint NOT NULL DEFAULT 0,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "task_id" bigint NOT NULL DEFAULT 0,
+  "status" varchar(32) NOT NULL DEFAULT 'pending',
+  "stage" varchar(32) NOT NULL DEFAULT 'created',
+  "scheduled_at" timestamp DEFAULT NULL,
+  "started_at" timestamp DEFAULT NULL,
+  "finished_at" timestamp DEFAULT NULL,
+  "error_message" text,
+  "retry_count" integer NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_run_plan" ON "hg_youban_publish_cycle_run" ("plan_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_run_owner" ON "hg_youban_publish_cycle_run" ("tenant_id", "account_id", "status", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_cycle_run_log" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "run_id" bigint NOT NULL DEFAULT 0,
+  "plan_id" bigint NOT NULL DEFAULT 0,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "level" varchar(16) NOT NULL DEFAULT 'info',
+  "stage" varchar(32) NOT NULL DEFAULT '',
+  "message" text,
+  "context_json" jsonb,
+  "created_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_run_log_run" ON "hg_youban_publish_cycle_run_log" ("run_id", "id");

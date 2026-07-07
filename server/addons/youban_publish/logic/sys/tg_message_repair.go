@@ -454,6 +454,10 @@ func (s *sSysPublish) scanTgChannelMessages(ctx context.Context, tenantId int64,
 	client := telegram.NewClient(conf.AppId, conf.AppHash, options)
 	runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+	latestCachedMessageId, err := s.latestTgMessageCacheId(ctx, tenantId, channel.Id)
+	if err != nil {
+		return 0, err
+	}
 	scanned := 0
 	err = client.Run(runCtx, func(ctx context.Context) error {
 		offsetID := 0
@@ -484,6 +488,10 @@ func (s *sSysPublish) scanTgChannelMessages(ctx context.Context, tenantId int64,
 				if message == nil || message.ID <= 0 {
 					continue
 				}
+				if latestCachedMessageId > 0 && int64(message.ID) <= latestCachedMessageId {
+					stop = true
+					continue
+				}
 				if int64(message.Date) < cutoff {
 					stop = true
 					continue
@@ -506,6 +514,18 @@ func (s *sSysPublish) scanTgChannelMessages(ctx context.Context, tenantId int64,
 		return scanned, gerror.Wrap(err, "拉取TG频道历史消息失败")
 	}
 	return scanned, nil
+}
+
+func (s *sSysPublish) latestTgMessageCacheId(ctx context.Context, tenantId int64, channelId int64) (int64, error) {
+	value, err := g.DB().Model(publishTgMessageCacheTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("channel_id", channelId).
+		Fields("MAX(tg_message_id)").
+		Value()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取TG消息缓存游标失败")
+	}
+	return value.Int64(), nil
 }
 
 func isTgRepairRetryableErr(err error) bool {

@@ -139,6 +139,20 @@ func writeTelegramHTMLElement(builder *strings.Builder, node *xhtml.Node) {
 		writeTelegramWrappedElement(builder, "u", node)
 	case "s", "strike", "del":
 		writeTelegramWrappedElement(builder, "s", node)
+	case "code":
+		writeTelegramWrappedElement(builder, "code", node)
+	case "pre":
+		writeTelegramWrappedElement(builder, "pre", node)
+	case "blockquote":
+		writeTelegramBlockquoteElement(builder, node)
+	case "tg-spoiler":
+		writeTelegramWrappedElement(builder, "tg-spoiler", node)
+	case "tg-emoji":
+		writeTelegramEmojiElement(builder, node)
+	case "tg-time":
+		writeTelegramTimeElement(builder, node)
+	case "span":
+		writeTelegramSpanElement(builder, node)
 	case "a":
 		writeTelegramLinkElement(builder, node)
 	case "br":
@@ -154,6 +168,56 @@ func writeTelegramHTMLElement(builder *strings.Builder, node *xhtml.Node) {
 	}
 }
 
+func writeTelegramSpanElement(builder *strings.Builder, node *xhtml.Node) {
+	if telegramAttr(node, "data-telegram-spoiler") == "true" || strings.Contains(" "+telegramAttr(node, "class")+" ", " tg-spoiler ") {
+		writeTelegramWrappedElement(builder, "tg-spoiler", node)
+		return
+	}
+	writeTelegramHTMLChildren(builder, node)
+}
+
+func writeTelegramBlockquoteElement(builder *strings.Builder, node *xhtml.Node) {
+	builder.WriteString("<blockquote")
+	if _, ok := telegramAttrValue(node, "expandable"); ok {
+		builder.WriteString(" expandable")
+	}
+	builder.WriteString(">")
+	writeTelegramHTMLChildren(builder, node)
+	builder.WriteString("</blockquote>")
+}
+
+func writeTelegramEmojiElement(builder *strings.Builder, node *xhtml.Node) {
+	emojiId := telegramAttr(node, "emoji-id")
+	if emojiId == "" {
+		writeTelegramHTMLChildren(builder, node)
+		return
+	}
+	builder.WriteString(`<tg-emoji emoji-id="`)
+	builder.WriteString(stdhtml.EscapeString(emojiId))
+	builder.WriteString(`">`)
+	writeTelegramHTMLChildren(builder, node)
+	builder.WriteString("</tg-emoji>")
+}
+
+func writeTelegramTimeElement(builder *strings.Builder, node *xhtml.Node) {
+	unix := telegramAttr(node, "unix")
+	if unix == "" {
+		writeTelegramHTMLChildren(builder, node)
+		return
+	}
+	builder.WriteString(`<tg-time unix="`)
+	builder.WriteString(stdhtml.EscapeString(unix))
+	builder.WriteString(`"`)
+	if format := telegramAttr(node, "format"); format != "" {
+		builder.WriteString(` format="`)
+		builder.WriteString(stdhtml.EscapeString(format))
+		builder.WriteString(`"`)
+	}
+	builder.WriteString(">")
+	writeTelegramHTMLChildren(builder, node)
+	builder.WriteString("</tg-time>")
+}
+
 func writeTelegramWrappedElement(builder *strings.Builder, tag string, node *xhtml.Node) {
 	builder.WriteString("<")
 	builder.WriteString(tag)
@@ -165,13 +229,7 @@ func writeTelegramWrappedElement(builder *strings.Builder, tag string, node *xht
 }
 
 func writeTelegramLinkElement(builder *strings.Builder, node *xhtml.Node) {
-	href := ""
-	for _, attr := range node.Attr {
-		if strings.EqualFold(attr.Key, "href") {
-			href = strings.TrimSpace(attr.Val)
-			break
-		}
-	}
+	href := telegramAttr(node, "href")
 	if href == "" {
 		writeTelegramHTMLChildren(builder, node)
 		return
@@ -212,4 +270,18 @@ func writeTelegramHTMLChildren(builder *strings.Builder, node *xhtml.Node) {
 	for child := node.FirstChild; child != nil; child = child.NextSibling {
 		writeTelegramHTMLNode(builder, child)
 	}
+}
+
+func telegramAttr(node *xhtml.Node, key string) string {
+	value, _ := telegramAttrValue(node, key)
+	return value
+}
+
+func telegramAttrValue(node *xhtml.Node, key string) (string, bool) {
+	for _, attr := range node.Attr {
+		if strings.EqualFold(attr.Key, key) {
+			return strings.TrimSpace(attr.Val), true
+		}
+	}
+	return "", false
 }

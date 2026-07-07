@@ -19,6 +19,9 @@ var (
 	publishTgMessageRepairRunTable  = pdao.YoubanPublishTgMessageRepairRun.Table()
 	publishTgMessageCacheTable      = pdao.YoubanPublishTgMessageCache.Table()
 	publishTgJobLogTable            = "hg_youban_publish_tg_job_log"
+	publishCyclePlanTable           = pdao.YoubanPublishCyclePlan.Table()
+	publishCycleRunTable            = pdao.YoubanPublishCycleRun.Table()
+	publishCycleRunLogTable         = pdao.YoubanPublishCycleRunLog.Table()
 	publishDailyStatTable           = "hg_youban_publish_daily_stat"
 	publishAccountSettingTable      = "hg_youban_publish_account_setting"
 	publishCollectContentTable      = pdao.YoubanPublishCollectContent.Table()

@@ -541,6 +541,11 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 	if err = s.enqueueProfilesTelegramCleanupBeforeDelete(ctx, ids, tenantId); err != nil {
 		return err
 	}
+	for _, id := range ids {
+		if err = s.disableCyclePlanForProfile(ctx, tenantId, accountId, id); err != nil {
+			return err
+		}
+	}
 	columns := dao.ContentProfile.Columns()
 	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).Data(g.Map{columns.DeletedAt: gtime.Now()}).Unscoped().Update(); err != nil {
 		return gerror.Wrap(err, "删除资料失败")
@@ -627,6 +632,11 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 		"updated_at": gtime.Now(),
 	}
 	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).WhereIn("profile_id", ids).Data(taskData).Update()
+	for _, id := range ids {
+		if err = s.disableCyclePlanForProfile(ctx, tenantId, accountId, id); err != nil {
+			return nil, err
+		}
+	}
 	asyncDownIds := make([]int64, 0, len(ids))
 	for _, id := range ids {
 		if _, ok := repairIds[id]; ok {

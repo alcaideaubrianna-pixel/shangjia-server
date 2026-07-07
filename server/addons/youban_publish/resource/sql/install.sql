@@ -1014,3 +1014,65 @@ SET `status` = 2,
 WHERE `addon_name` = 'youban_publish'
   AND `group` = 'autoDelete'
   AND `key` = 'enabled';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_cycle_plan` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架账号ID',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
+  `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架任务ID',
+  `enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否启用',
+  `interval_seconds` int(11) NOT NULL DEFAULT '345600' COMMENT '循环间隔秒',
+  `publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '指定发布时间',
+  `next_run_at` datetime DEFAULT NULL COMMENT '下次执行时间',
+  `last_run_at` datetime DEFAULT NULL COMMENT '上次执行时间',
+  `last_run_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '最近执行ID',
+  `status` varchar(32) NOT NULL DEFAULT 'active' COMMENT '状态',
+  `source` varchar(32) NOT NULL DEFAULT '' COMMENT '来源',
+  `locked_at` datetime DEFAULT NULL COMMENT '锁定时间',
+  `last_error_message` text COMMENT '最近错误',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_cycle_plan_profile` (`tenant_id`,`account_id`,`profile_id`),
+  KEY `idx_ybp_cycle_plan_due` (`enabled`,`status`,`next_run_at`,`id`),
+  KEY `idx_ybp_cycle_plan_account` (`tenant_id`,`account_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架循环计划';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_cycle_run` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `plan_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '循环计划ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架账号ID',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
+  `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架任务ID',
+  `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '状态',
+  `stage` varchar(32) NOT NULL DEFAULT 'created' COMMENT '阶段',
+  `scheduled_at` datetime DEFAULT NULL COMMENT '计划执行时间',
+  `started_at` datetime DEFAULT NULL COMMENT '开始时间',
+  `finished_at` datetime DEFAULT NULL COMMENT '完成时间',
+  `error_message` text COMMENT '错误信息',
+  `retry_count` int(11) NOT NULL DEFAULT '0' COMMENT '重试次数',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_cycle_run_plan` (`plan_id`,`id`),
+  KEY `idx_ybp_cycle_run_owner` (`tenant_id`,`account_id`,`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架循环执行记录';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_cycle_run_log` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `run_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '执行ID',
+  `plan_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '计划ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架账号ID',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
+  `level` varchar(16) NOT NULL DEFAULT 'info' COMMENT '级别',
+  `stage` varchar(32) NOT NULL DEFAULT '' COMMENT '阶段',
+  `message` text COMMENT '内容',
+  `context_json` json DEFAULT NULL COMMENT '上下文',
+  `created_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_cycle_run_log_run` (`run_id`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架循环执行日志';

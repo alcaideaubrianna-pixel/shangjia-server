@@ -13,28 +13,9 @@ func (s *sSysPublish) DeleteTelegramJobMessages(ctx context.Context, jobId int64
 	if err != nil {
 		return err
 	}
-	plan := newPublishCyclePlan(job)
-	if !plan.Enabled() {
-		return nil
-	}
-	s.appendTelegramJobLog(ctx, job, "cycle_delete", "started", "循环上架开始处理")
-	task, err := s.cycleTaskForJob(ctx, job)
-	if err != nil {
-		return err
-	}
-	if !plan.CanRepublish(task) {
-		s.appendTelegramJobLog(ctx, job, "cycle_delete", "skipped", cycleSkipMessage(job, task))
-		_ = s.disableTelegramJobCycle(ctx, job.Id)
-		return nil
-	}
-	if delay := plan.DueDelay(gtime.Now()); delay > 0 {
-		s.appendTelegramJobLog(ctx, job, "cycle_delete", "delayed", "循环上架未到执行时间，已重新延迟")
-		return s.enqueueTelegramDeleteJob(ctx, job.Id, delay)
-	}
-	if err = s.deleteTelegramMessageSet(ctx, job, "循环上架"); err != nil {
-		return err
-	}
-	return s.requeueTelegramCyclePublish(ctx, job)
+	s.appendTelegramJobLog(ctx, job, "cycle_delete", "skipped", "旧循环上架队列已废弃，改由循环计划执行")
+	_ = s.disableTelegramJobCycle(ctx, job.Id)
+	return nil
 }
 
 func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int64) error {

@@ -19,6 +19,7 @@ const (
 	tgTaskTypeImport   = "youban_publish:import:legacy"
 	tgTaskTypeRepair   = "youban_publish:tg:message_repair"
 	tgTaskTypeDown     = "youban_publish:profile:down"
+	tgTaskTypeCycleRun = "youban_publish:cycle:run"
 )
 
 type tgQueuePayload struct {
@@ -37,6 +38,10 @@ type tgMessageRepairQueuePayload struct {
 type profileDownQueuePayload struct {
 	TenantId   int64   `json:"tenantId"`
 	ProfileIds []int64 `json:"profileIds"`
+}
+
+type cycleRunQueuePayload struct {
+	RunId int64 `json:"runId"`
 }
 
 type tgRetryAfterError struct {
@@ -184,6 +189,43 @@ func (s *sSysPublish) enqueueProfileDownRun(ctx context.Context, tenantId int64,
 		return nil
 	}
 	return err
+}
+
+func (s *sSysPublish) enqueueCycleRun(ctx context.Context, runId int64, delay time.Duration) error {
+	if runId <= 0 {
+		return nil
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(cycleRunQueuePayload{RunId: runId})
+	if err != nil {
+		return err
+	}
+	task := asynq.NewTask(tgTaskTypeCycleRun, payload)
+	options := []asynq.Option{
+		asynq.Queue(tgQueueNameDefault),
+		asynq.MaxRetry(3),
+		asynq.Timeout(30 * time.Minute),
+		asynq.Unique(30 * time.Second),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err = client.EnqueueContext(ctx, task, options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	return err
+}
+
+func decodeCycleRunQueuePayload(task *asynq.Task) (cycleRunQueuePayload, error) {
+	var payload cycleRunQueuePayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return payload, err
+	}
+	return payload, nil
 }
 
 func (s *sSysPublish) enqueueTelegramTask(ctx context.Context, taskType string, jobId int64, delay time.Duration) error {

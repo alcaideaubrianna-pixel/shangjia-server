@@ -52,7 +52,7 @@ func (s *sSysPublish) AdminAccountSettingSave(ctx context.Context, in *sysin.Acc
 	if err = s.saveAccountSetting(ctx, admin.TenantId, admin.Id, in); err != nil {
 		return nil, err
 	}
-	if err = s.syncAccountCycleSettingToJobs(ctx, admin.TenantId, in.AccountId, accountCycleSetting{
+	if err = s.syncAccountCycleSettingToPlans(ctx, admin.TenantId, in.AccountId, accountCycleSetting{
 		Enabled:     in.CyclePublishEnabled,
 		Days:        in.CyclePublishDays,
 		PublishTime: in.CyclePublishTime,
@@ -222,85 +222,4 @@ func fillAccountSettingModel(model *sysin.AccountSettingModel, row gdb.Record) {
 	if model.CyclePublishDays <= 0 {
 		model.CyclePublishDays = 4
 	}
-}
-
-func (s *sSysPublish) syncAccountCycleSettingToJobs(ctx context.Context, tenantId int64, accountId int64, cycle accountCycleSetting) error {
-	if tenantId <= 0 || accountId <= 0 {
-		return nil
-	}
-	now := gtime.Now()
-	data := g.Map{
-		"cycle_enabled":      cycle.Enabled,
-		"cycle_days":         defaultCycleDays(cycle.Days),
-		"cycle_publish_time": cycle.PublishTime,
-		"updated_at":         now,
-	}
-	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("tenant_id", tenantId).
-		Where("account_id", accountId).
-		WhereIn("status", []string{"pending", "sending", "failed_retry", "failed"}).
-		Data(data).
-		Update()
-	if err != nil {
-		return gerror.Wrap(err, "同步账号循环上架设置失败")
-	}
-	disableSentData := g.Map{
-		"cycle_enabled":      0,
-		"cycle_days":         defaultCycleDays(cycle.Days),
-		"cycle_publish_time": cycle.PublishTime,
-		"next_cycle_at":      nil,
-		"updated_at":         now,
-	}
-	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("tenant_id", tenantId).
-		Where("account_id", accountId).
-		Where("status", "sent").
-		Data(disableSentData).
-		Update()
-	if err != nil {
-		return gerror.Wrap(err, "清理账号历史循环上架任务失败")
-	}
-	if cycle.Enabled != 1 {
-		return nil
-	}
-	var jobs []telegramJobRecord
-	err = g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
-		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
-		Fields("j.*").
-		Where("j.tenant_id", tenantId).
-		Where("j.account_id", accountId).
-		Where("j.status", "sent").
-		Where("t.status", sysin.PublishTaskStatusPublished).
-		WhereNull("t.deleted_at").
-		OrderAsc("j.id").
-		Scan(&jobs)
-	if err != nil {
-		return gerror.Wrap(err, "读取账号已上架TG任务失败")
-	}
-	for _, job := range jobs {
-		plan := newPublishCyclePlan(job)
-		job.CycleEnabled = cycle.Enabled
-		job.CycleDays = defaultCycleDays(cycle.Days)
-		job.CyclePublishTime = cycle.PublishTime
-		plan = newPublishCyclePlan(job)
-		delay := plan.DeleteDelay(ctx, now)
-		nextCycleAt := now.Add(delay)
-		if !isDevelopMode(ctx) {
-			nextCycleAt = plan.NextDeleteAt(now)
-		}
-		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-			Where("id", job.Id).
-			Data(g.Map{
-				"cycle_enabled":      cycle.Enabled,
-				"cycle_days":         defaultCycleDays(cycle.Days),
-				"cycle_publish_time": cycle.PublishTime,
-				"next_cycle_at":      nextCycleAt,
-				"updated_at":         gtime.Now(),
-			}).
-			Update()
-		if err = s.enqueueTelegramDeleteJob(ctx, job.Id, delay); err != nil {
-			return gerror.Wrap(err, "加入循环上架队列失败")
-		}
-	}
-	return nil
 }
