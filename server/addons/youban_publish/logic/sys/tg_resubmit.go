@@ -2,9 +2,7 @@ package sys
 
 import (
 	"context"
-	"fmt"
 
-	tgbot "github.com/go-telegram/bot"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -56,42 +54,7 @@ func (s *sSysPublish) telegramTaskReusableJobs(ctx context.Context, taskId int64
 }
 
 func (s *sSysPublish) deleteTelegramJobMessagesForResubmit(ctx context.Context, job telegramResubmitJob) error {
-	record := job.telegramJobRecord()
-	messages, err := s.telegramJobActiveMessages(ctx, record)
-	if err != nil {
-		return err
-	}
-	if len(messages) == 0 {
-		s.appendTelegramJobLog(ctx, record, "delete", "skipped", "编辑资料前未找到可删除的TG旧消息")
-		return nil
-	}
-	botToken, err := s.telegramJobBotToken(ctx, job.BotId, job.TenantId)
-	if err != nil {
-		return err
-	}
-	bot, err := s.telegramBot(ctx, botToken)
-	if err != nil {
-		return err
-	}
-	s.appendTelegramJobLog(ctx, record, "delete", "started", "编辑资料，开始删除TG旧消息")
-	for _, item := range messages {
-		chatId := normalizeTelegramChannelChatID(item.TargetChatId)
-		if item.MessageId <= 0 || chatId == "" {
-			continue
-		}
-		_, err = bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{ChatID: chatId, MessageID: int(item.MessageId)})
-		if err != nil {
-			message := fmt.Sprintf("删除TG旧消息失败，频道:%s，消息:%d，错误:%s", chatId, item.MessageId, err.Error())
-			s.appendTelegramJobLog(ctx, record, "delete", "failed", message)
-			return gerror.New(message)
-		}
-		_, _ = g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
-			Where("id", item.Id).
-			Data(g.Map{"status": "deleted", "deleted_at": gtime.Now(), "updated_at": gtime.Now()}).
-			Update()
-	}
-	s.appendTelegramJobLog(ctx, record, "delete", "success", "编辑资料，TG旧消息删除成功")
-	return nil
+	return s.deleteTelegramMessageSet(ctx, job.telegramJobRecord(), "编辑资料")
 }
 
 func (s *sSysPublish) resetTelegramJobForResubmit(ctx context.Context, jobId int64) error {

@@ -35,7 +35,6 @@ type PublishConfigSaveInp struct {
 }
 
 func (in *PublishConfigSaveInp) Filter(ctx context.Context) error {
-	in.CyclePublishTime = strings.TrimSpace(in.CyclePublishTime)
 	in.SendWindowStart = strings.TrimSpace(in.SendWindowStart)
 	in.SendWindowEnd = strings.TrimSpace(in.SendWindowEnd)
 	in.FailureStrategy = strings.TrimSpace(in.FailureStrategy)
@@ -44,9 +43,6 @@ func (in *PublishConfigSaveInp) Filter(ctx context.Context) error {
 	}
 	if in.FailureStrategy != "continue" && in.FailureStrategy != "stop" {
 		return gerror.New("失败处理策略不合法")
-	}
-	if err := checkSwitch(in.CyclePublishEnabled, "循环上架开关"); err != nil {
-		return err
 	}
 	if err := checkSwitch(in.SkipDownChannelEnabled, "下架频道推送开关"); err != nil {
 		return err
@@ -59,12 +55,6 @@ func (in *PublishConfigSaveInp) Filter(ctx context.Context) error {
 	}
 	if err := checkSwitch(in.DefaultAntiScanEnabled, "防扫图默认开关"); err != nil {
 		return err
-	}
-	if in.CyclePublishEnabled == 1 && in.CyclePublishDays <= 0 {
-		in.CyclePublishDays = 4
-	}
-	if in.CyclePublishDays < 0 || in.CyclePublishDays > 365 {
-		return gerror.New("循环上架天数不合法")
 	}
 	if in.SendIntervalSeconds <= 0 {
 		in.SendIntervalSeconds = 3

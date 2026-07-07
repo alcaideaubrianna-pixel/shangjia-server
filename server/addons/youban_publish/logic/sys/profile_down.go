@@ -33,15 +33,19 @@ func (s *sSysPublish) prepareProfileDownPlan(ctx context.Context, tenantId int64
 		return nil, err
 	}
 	if len(channels) == 0 {
-		return nil, gerror.New("没有配置下架频道")
+		return plan, nil
 	}
 	plan.Notify = true
 	plan.Channels = channels
 	return plan, nil
 }
 
-func (s *sSysPublish) handleProfilesDown(ctx context.Context, ids []int64, tenantId int64, plan *profileDownPlan) error {
+func (s *sSysPublish) handleProfilesDown(ctx context.Context, ids []int64, tenantId int64) error {
 	if err := s.deleteProfilesTelegramMessages(ctx, ids, tenantId); err != nil {
+		return err
+	}
+	plan, err := s.prepareProfileDownPlan(ctx, tenantId)
+	if err != nil {
 		return err
 	}
 	if plan == nil || !plan.Notify {

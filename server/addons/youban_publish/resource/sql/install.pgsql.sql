@@ -223,6 +223,9 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_account_setting" (
   "custom_mark_text" varchar(128) NOT NULL DEFAULT '',
   "mark_position" varchar(16) NOT NULL DEFAULT 'bottom',
   "default_recycle_days" integer NOT NULL DEFAULT 0,
+  "cycle_publish_enabled" smallint NOT NULL DEFAULT 0,
+  "cycle_publish_days" integer NOT NULL DEFAULT 4,
+  "cycle_publish_time" varchar(16) NOT NULL DEFAULT '',
   "created_by" bigint NOT NULL DEFAULT 0,
   "updated_by" bigint NOT NULL DEFAULT 0,
   "deleted_by" bigint NOT NULL DEFAULT 0,
@@ -231,6 +234,9 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_account_setting" (
   "deleted_at" timestamp DEFAULT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_account_setting_account" ON "hg_youban_publish_account_setting" ("tenant_id", "account_id") WHERE "deleted_at" IS NULL;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "cycle_publish_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "cycle_publish_days" integer NOT NULL DEFAULT 4;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "cycle_publish_time" varchar(16) NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_media" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -685,9 +691,6 @@ INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key"
 SELECT seed."addon_name", seed."group", seed."name", seed."type", seed."key", seed."value", seed."default_value", seed."sort", seed."tip", 0, 1, NOW(), NOW()
 FROM (
   VALUES
-    ('youban_publish', 'publish', '循环上架开关', 'int', 'cyclePublishEnabled', '0', '0', 100, '是否启用全局循环上架'),
-    ('youban_publish', 'publish', '循环上架天数', 'int', 'cyclePublishDays', '4', '4', 110, '循环上架间隔天数'),
-    ('youban_publish', 'publish', '循环上架时间', 'string', 'cyclePublishTime', '09:00', '09:00', 120, '每天循环上架执行时间'),
     ('youban_publish', 'publish', '下架不推送到下架频道', 'int', 'skipDownChannelEnabled', '1', '1', 130, '资料下架时是否跳过下架频道推送'),
     ('youban_publish', 'publish', '发送间隔秒数', 'int', 'sendIntervalSeconds', '3', '3', 140, 'Telegram 消息发送间隔'),
     ('youban_publish', 'publish', '发送时间窗口开关', 'int', 'sendWindowEnabled', '0', '0', 150, '是否限制自动发送执行时间段'),
@@ -747,6 +750,10 @@ WHERE NOT EXISTS (
     AND c."group" = seed."group"
     AND c."key" = seed."key"
 );
+DELETE FROM "hg_sys_addons_config"
+WHERE "addon_name" = 'youban_publish'
+  AND "group" = 'publish'
+  AND "key" IN ('cyclePublishEnabled', 'cyclePublishDays', 'cyclePublishTime');
 
 UPDATE "hg_sys_addons_config"
 SET "status" = 2,

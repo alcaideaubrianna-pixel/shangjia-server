@@ -151,20 +151,35 @@ func (s *sSysPublish) tgMessageRepairView(ctx context.Context, in *sysin.TgMessa
 }
 
 func (s *sSysPublish) startMissingTelegramMessageRepairForDown(ctx context.Context, ids []int64, tenantId int64, accountId int64) (int64, error) {
+	runIds, err := s.startMissingTelegramMessageRepairsForDown(ctx, ids, tenantId, accountId)
+	if err != nil || len(runIds) == 0 {
+		return 0, err
+	}
+	return runIds[0], nil
+}
+
+func (s *sSysPublish) startMissingTelegramMessageRepairsForDown(ctx context.Context, ids []int64, tenantId int64, accountId int64) ([]int64, error) {
+	runIds := make([]int64, 0)
 	for _, profileId := range ids {
 		if profileId <= 0 {
 			continue
 		}
 		need, err := s.profileNeedsTgMessageRepair(ctx, profileId, tenantId, accountId)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		if !need {
 			continue
 		}
-		return s.createTgMessageRepairRun(ctx, profileId, tenantId, accountId)
+		runId, err := s.createTgMessageRepairRun(ctx, profileId, tenantId, accountId)
+		if err != nil {
+			return nil, err
+		}
+		if runId > 0 {
+			runIds = append(runIds, runId)
+		}
 	}
-	return 0, nil
+	return runIds, nil
 }
 
 func (s *sSysPublish) profileNeedsTgMessageRepair(ctx context.Context, profileId int64, tenantId int64, accountId int64) (bool, error) {
@@ -233,6 +248,20 @@ func (s *sSysPublish) createTgMessageRepairRun(ctx context.Context, profileId in
 		return 0, gerror.Wrap(err, "加入TG消息修复队列失败")
 	}
 	return runId, nil
+}
+
+func (s *sSysPublish) tgMessageRepairRunProfileId(ctx context.Context, runId int64) (int64, error) {
+	if runId <= 0 {
+		return 0, nil
+	}
+	value, err := g.DB().Model(publishTgMessageRepairRunTable).Safe().Ctx(ctx).
+		Where("id", runId).
+		Fields("profile_id").
+		Value()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取TG消息修复资料失败")
+	}
+	return value.Int64(), nil
 }
 
 func (s *sSysPublish) ExecuteTgMessageRepairRun(ctx context.Context, runId int64) (err error) {
@@ -764,11 +793,7 @@ func (s *sSysPublish) finishProfileDownAfterRepair(ctx context.Context, task gdb
 		"status":     sysin.PublishTaskStatusCanceled,
 		"updated_at": gtime.Now(),
 	}).Update()
-	plan, err := s.prepareProfileDownPlan(ctx, tenantId)
-	if err != nil {
-		return err
-	}
-	if err = s.handleProfilesDown(ctx, []int64{profileId}, tenantId, plan); err != nil {
+	if err := s.handleProfilesDown(ctx, []int64{profileId}, tenantId); err != nil {
 		return err
 	}
 	iservice.SysContent().ClearHomeProfileCardsCache(ctx)

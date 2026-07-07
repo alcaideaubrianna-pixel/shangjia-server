@@ -26,16 +26,18 @@ type telegramSentMessage struct {
 }
 
 type telegramJobRecord struct {
-	Id           int64       `json:"id"`
-	TaskId       int64       `json:"taskId"`
-	TenantId     int64       `json:"tenantId"`
-	AccountId    int64       `json:"accountId"`
-	ProfileId    int64       `json:"profileId"`
-	ChannelId    int64       `json:"channelId"`
-	BotId        int64       `json:"botId"`
-	CycleDays    int         `json:"cycleDays"`
-	CycleEnabled int         `json:"cycleEnabled"`
-	TargetChatId string      `json:"targetChatId"`
-	NextCycleAt  *gtime.Time `json:"nextCycleAt"`
-	RetryCount   int         `json:"retryCount"`
+	Id               int64       `json:"id"`
+	TaskId           int64       `json:"taskId"`
+	TenantId         int64       `json:"tenantId"`
+	AccountId        int64       `json:"accountId"`
+	ProfileId        int64       `json:"profileId"`
+	ChannelId        int64       `json:"channelId"`
+	BotId            int64       `json:"botId"`
+	Status           string      `json:"status"`
+	CycleDays        int         `json:"cycleDays"`
+	CycleEnabled     int         `json:"cycleEnabled"`
+	CyclePublishTime string      `json:"cyclePublishTime"`
+	TargetChatId     string      `json:"targetChatId"`
+	NextCycleAt      *gtime.Time `json:"nextCycleAt"`
+	RetryCount       int         `json:"retryCount"`
 }

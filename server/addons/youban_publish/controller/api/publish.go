@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 
+	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/net/ghttp"
 
 	"hotgo/addons/youban_publish/api/api/publish"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -125,12 +127,39 @@ func (c *cPublishAdmin) AccountSettingView(ctx context.Context, req *publish.Adm
 }
 
 func (c *cPublishAdmin) AccountSettingSave(ctx context.Context, req *publish.AdminAccountSettingSaveReq) (res *publish.AdminAccountSettingSaveRes, err error) {
-	data, err := service.SysPublish().AdminAccountSettingSave(ctx, &req.AccountSettingSaveInp)
+	in := req.AccountSettingSaveInp
+	fillAccountSettingSaveInpFromRequest(ctx, &in)
+	data, err := service.SysPublish().AdminAccountSettingSave(ctx, &in)
 	if err != nil {
 		return nil, err
 	}
 	res = &publish.AdminAccountSettingSaveRes{AccountSettingModel: data}
 	return
+}
+
+func fillAccountSettingSaveInpFromRequest(ctx context.Context, in *sysin.AccountSettingSaveInp) {
+	if in == nil {
+		return
+	}
+	r := ghttp.RequestFromCtx(ctx)
+	if r == nil || len(r.GetBody()) == 0 {
+		return
+	}
+	body := gjson.New(r.GetBody())
+	if body == nil {
+		return
+	}
+	in.AccountId = body.Get("accountId", in.AccountId).Int64()
+	in.EnableSuffix = body.Get("enableSuffix", in.EnableSuffix).Int()
+	in.SuffixContent = body.Get("suffixContent", in.SuffixContent).String()
+	in.EnableTitleMark = body.Get("enableTitleMark", in.EnableTitleMark).Int()
+	in.MarkMode = body.Get("markMode", in.MarkMode).String()
+	in.NumberSource = body.Get("numberSource", in.NumberSource).String()
+	in.CustomMarkText = body.Get("customMarkText", in.CustomMarkText).String()
+	in.MarkPosition = body.Get("markPosition", in.MarkPosition).String()
+	in.CyclePublishEnabled = body.Get("cyclePublishEnabled", in.CyclePublishEnabled).Int()
+	in.CyclePublishDays = body.Get("cyclePublishDays", in.CyclePublishDays).Int()
+	in.CyclePublishTime = body.Get("cyclePublishTime", in.CyclePublishTime).String()
 }
 
 func (c *cPublishAdmin) BotList(ctx context.Context, req *publish.AdminBotListReq) (res *publish.AdminBotListRes, err error) {

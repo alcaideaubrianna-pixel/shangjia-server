@@ -598,20 +598,22 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 		}
 		return &sysin.ProfileStatusModel{Message: "资料已提交上架"}, nil
 	}
-	var downPlan *profileDownPlan
-	if downPlan, err = s.prepareProfileDownPlan(ctx, tenantId); err != nil {
-		return nil, err
-	}
-	repairRunId, err := s.startMissingTelegramMessageRepairForDown(ctx, ids, tenantId, accountId)
+	repairRunIds, err := s.startMissingTelegramMessageRepairsForDown(ctx, ids, tenantId, accountId)
 	if err != nil {
 		return nil, err
 	}
-	if repairRunId > 0 {
-		return &sysin.ProfileStatusModel{
-			NeedRepair:  1,
-			RepairRunId: repairRunId,
-			Message:     "正在修复导入资料的TG消息记录，修复完成后会自动下架",
-		}, nil
+	repairIds := make(map[int64]struct{}, len(repairRunIds))
+	for _, runId := range repairRunIds {
+		if runId <= 0 {
+			continue
+		}
+		profileId, findErr := s.tgMessageRepairRunProfileId(ctx, runId)
+		if findErr != nil {
+			return nil, findErr
+		}
+		if profileId > 0 {
+			repairIds[profileId] = struct{}{}
+		}
 	}
 	columns := dao.ContentProfile.Columns()
 	data := g.Map{columns.Status: in.Status, columns.UpdatedAt: gtime.Now()}
@@ -625,11 +627,24 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 		"updated_at": gtime.Now(),
 	}
 	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).WhereIn("profile_id", ids).Data(taskData).Update()
-	if err = s.handleProfilesDown(ctx, ids, tenantId, downPlan); err != nil {
-		return nil, err
+	asyncDownIds := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := repairIds[id]; ok {
+			continue
+		}
+		asyncDownIds = append(asyncDownIds, id)
+	}
+	if err = s.enqueueProfileDownRun(ctx, tenantId, asyncDownIds, 0); err != nil {
+		return nil, gerror.Wrap(err, "加入资料下架队列失败")
 	}
 	iservice.SysContent().ClearHomeProfileCardsCache(ctx)
-	return &sysin.ProfileStatusModel{Message: "资料已下架"}, nil
+	out := &sysin.ProfileStatusModel{Message: "资料已下架，TG消息将在后台清理"}
+	if len(repairRunIds) > 0 {
+		out.NeedRepair = 1
+		out.RepairRunId = repairRunIds[0]
+		out.Message = "资料已下架，导入资料TG消息将在后台修复并清理"
+	}
+	return out, nil
 }
 
 func (s *sSysPublish) submitProfilesByIds(ctx context.Context, ids []int64, tenantId int64, accountId int64) error {

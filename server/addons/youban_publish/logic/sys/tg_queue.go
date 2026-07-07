@@ -18,6 +18,7 @@ const (
 	tgTaskTypeCleanup  = "youban_publish:tg:cleanup"
 	tgTaskTypeImport   = "youban_publish:import:legacy"
 	tgTaskTypeRepair   = "youban_publish:tg:message_repair"
+	tgTaskTypeDown     = "youban_publish:profile:down"
 )
 
 type tgQueuePayload struct {
@@ -31,6 +32,11 @@ type importQueuePayload struct {
 
 type tgMessageRepairQueuePayload struct {
 	RunId int64 `json:"runId"`
+}
+
+type profileDownQueuePayload struct {
+	TenantId   int64   `json:"tenantId"`
+	ProfileIds []int64 `json:"profileIds"`
 }
 
 type tgRetryAfterError struct {
@@ -150,6 +156,36 @@ func (s *sSysPublish) enqueueTgMessageRepairRun(ctx context.Context, runId int64
 	return err
 }
 
+func (s *sSysPublish) enqueueProfileDownRun(ctx context.Context, tenantId int64, profileIds []int64, delay time.Duration) error {
+	profileIds = uniqueIds(profileIds)
+	if tenantId <= 0 || len(profileIds) == 0 {
+		return nil
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(profileDownQueuePayload{TenantId: tenantId, ProfileIds: profileIds})
+	if err != nil {
+		return err
+	}
+	task := asynq.NewTask(tgTaskTypeDown, payload)
+	options := []asynq.Option{
+		asynq.Queue(tgQueueNameDefault),
+		asynq.MaxRetry(10),
+		asynq.Timeout(30 * time.Minute),
+		asynq.Unique(30 * time.Second),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err = client.EnqueueContext(ctx, task, options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	return err
+}
+
 func (s *sSysPublish) enqueueTelegramTask(ctx context.Context, taskType string, jobId int64, delay time.Duration) error {
 	if jobId <= 0 {
 		return nil
@@ -242,6 +278,18 @@ func decodeTgMessageRepairQueuePayload(task *asynq.Task) (tgMessageRepairQueuePa
 	}
 	if payload.RunId <= 0 {
 		return payload, fmt.Errorf("TG消息修复队列任务缺少runId")
+	}
+	return payload, nil
+}
+
+func decodeProfileDownQueuePayload(task *asynq.Task) (profileDownQueuePayload, error) {
+	var payload profileDownQueuePayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return payload, fmt.Errorf("解析资料下架队列任务失败: %w", err)
+	}
+	payload.ProfileIds = uniqueIds(payload.ProfileIds)
+	if payload.TenantId <= 0 || len(payload.ProfileIds) == 0 {
+		return payload, fmt.Errorf("资料下架队列任务缺少tenantId或profileIds")
 	}
 	return payload, nil
 }

@@ -2,9 +2,7 @@ package sys
 
 import (
 	"context"
-	"time"
 
-	tgbot "github.com/go-telegram/bot"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -15,10 +13,28 @@ func (s *sSysPublish) DeleteTelegramJobMessages(ctx context.Context, jobId int64
 	if err != nil {
 		return err
 	}
-	if delay := telegramCycleDeleteDelay(job); delay > 0 {
+	plan := newPublishCyclePlan(job)
+	if !plan.Enabled() {
+		return nil
+	}
+	s.appendTelegramJobLog(ctx, job, "cycle_delete", "started", "循环上架开始处理")
+	task, err := s.cycleTaskForJob(ctx, job)
+	if err != nil {
+		return err
+	}
+	if !plan.CanRepublish(task) {
+		s.appendTelegramJobLog(ctx, job, "cycle_delete", "skipped", cycleSkipMessage(job, task))
+		_ = s.disableTelegramJobCycle(ctx, job.Id)
+		return nil
+	}
+	if delay := plan.DueDelay(gtime.Now()); delay > 0 {
+		s.appendTelegramJobLog(ctx, job, "cycle_delete", "delayed", "循环上架未到执行时间，已重新延迟")
 		return s.enqueueTelegramDeleteJob(ctx, job.Id, delay)
 	}
-	return s.deleteTelegramJobMessages(ctx, job, true)
+	if err = s.deleteTelegramMessageSet(ctx, job, "循环上架"); err != nil {
+		return err
+	}
+	return s.requeueTelegramCyclePublish(ctx, job)
 }
 
 func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int64) error {
@@ -26,45 +42,7 @@ func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int6
 	if err != nil {
 		return err
 	}
-	return s.deleteTelegramJobMessages(ctx, job, false)
-}
-
-func (s *sSysPublish) deleteTelegramJobMessages(ctx context.Context, job telegramJobRecord, requeueCycle bool) error {
-	botToken, err := s.telegramJobBotToken(ctx, job.BotId, job.TenantId)
-	if err != nil {
-		return err
-	}
-	bot, err := s.telegramBot(ctx, botToken)
-	if err != nil {
-		return err
-	}
-	messages, err := s.telegramJobActiveMessages(ctx, job)
-	if err != nil {
-		return err
-	}
-	for _, item := range messages {
-		item.TargetChatId = normalizeTelegramChannelChatID(item.TargetChatId)
-		if item.MessageId <= 0 || item.TargetChatId == "" {
-			continue
-		}
-		_, err = bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{
-			ChatID:    item.TargetChatId,
-			MessageID: int(item.MessageId),
-		})
-		if err != nil {
-			s.appendTelegramJobLog(ctx, job, "delete", "failed", err.Error())
-			return err
-		}
-		_, _ = g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
-			Where("id", item.Id).
-			Data(g.Map{"status": "deleted", "deleted_at": gtime.Now(), "updated_at": gtime.Now()}).
-			Update()
-	}
-	s.appendTelegramJobLog(ctx, job, "delete", "success", "TG历史消息删除成功")
-	if requeueCycle {
-		return s.requeueTelegramCyclePublish(ctx, job)
-	}
-	return nil
+	return s.deleteTelegramMessageSet(ctx, job, "资料清理")
 }
 
 func (s *sSysPublish) telegramJobById(ctx context.Context, jobId int64) (telegramJobRecord, error) {
@@ -102,10 +80,16 @@ type telegramDeleteMessage struct {
 }
 
 func (s *sSysPublish) requeueTelegramCyclePublish(ctx context.Context, job telegramJobRecord) error {
-	if job.CycleEnabled != 1 {
+	plan := newPublishCyclePlan(job)
+	task, err := s.cycleTaskForJob(ctx, job)
+	if err != nil {
+		return err
+	}
+	if !plan.CanRepublish(task) {
+		s.appendTelegramJobLog(ctx, job, "cycle_publish", "skipped", cycleSkipMessage(job, task))
 		return nil
 	}
-	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
 		Data(g.Map{
 			"status":        "pending",
@@ -118,16 +102,24 @@ func (s *sSysPublish) requeueTelegramCyclePublish(ctx context.Context, job teleg
 	if err != nil {
 		return gerror.Wrap(err, "重置循环上架任务失败")
 	}
+	s.appendTelegramJobLog(ctx, job, "cycle_publish", "queued", "循环上架发布已加入队列")
 	return s.enqueueTelegramJob(ctx, job.Id, 0)
 }
 
-func telegramCycleDeleteDelay(job telegramJobRecord) time.Duration {
-	if job.NextCycleAt == nil {
-		return 0
+func (s *sSysPublish) disableTelegramJobCycle(ctx context.Context, jobId int64) error {
+	if jobId <= 0 {
+		return nil
 	}
-	delay := job.NextCycleAt.Sub(gtime.Now())
-	if delay <= 0 {
-		return 0
+	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", jobId).
+		Data(g.Map{
+			"cycle_enabled": 0,
+			"next_cycle_at": nil,
+			"updated_at":    gtime.Now(),
+		}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "清理无效循环上架任务失败")
 	}
-	return delay
+	return nil
 }

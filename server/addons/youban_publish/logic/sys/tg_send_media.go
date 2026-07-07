@@ -57,6 +57,7 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 			Video:     input,
 			Thumbnail: thumbnail,
 			Caption:   caption,
+			ParseMode: telegramMediaParseMode(caption),
 		})
 		if err != nil {
 			return nil, err
@@ -64,9 +65,10 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		return telegramSentMessagesFromSingle(msg, purpose, media.Id, media.AssetHash)
 	default:
 		msg, err := bot.SendPhoto(ctx, &tgbot.SendPhotoParams{
-			ChatID:  chatId,
-			Photo:   input,
-			Caption: caption,
+			ChatID:    chatId,
+			Photo:     input,
+			Caption:   caption,
+			ParseMode: telegramMediaParseMode(caption),
 		})
 		if err != nil {
 			return nil, err
@@ -93,14 +95,21 @@ func (s *sSysPublish) telegramInputMediaGroup(media []*telegramMediaItem, captio
 			itemCaption = caption
 		}
 		if item.MediaType == "video" {
-			group = append(group, &models.InputMediaVideo{Media: source, Caption: itemCaption, Thumbnail: telegramVideoGroupThumbnail(item), MediaAttachment: attachment})
+			group = append(group, &models.InputMediaVideo{Media: source, Caption: itemCaption, ParseMode: telegramMediaParseMode(itemCaption), Thumbnail: telegramVideoGroupThumbnail(item), MediaAttachment: attachment})
 		} else {
-			group = append(group, &models.InputMediaPhoto{Media: source, Caption: itemCaption, MediaAttachment: attachment})
+			group = append(group, &models.InputMediaPhoto{Media: source, Caption: itemCaption, ParseMode: telegramMediaParseMode(itemCaption), MediaAttachment: attachment})
 		}
 		mediaIds = append(mediaIds, item.Id)
 		assetHashes = append(assetHashes, item.AssetHash)
 	}
 	return group, mediaIds, assetHashes, closers
+}
+
+func telegramMediaParseMode(caption string) models.ParseMode {
+	if strings.TrimSpace(caption) == "" {
+		return ""
+	}
+	return models.ParseModeHTML
 }
 
 func telegramInputFile(media *telegramMediaItem) (models.InputFile, io.Closer, error) {

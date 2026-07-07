@@ -142,22 +142,19 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	}
 	now := gtime.Now()
 	data := g.Map{
-		"tenant_id":             in.TenantId,
-		"merchant_id":           in.TenantId,
-		"tg_account_id":         in.TgAccountId,
-		"channel_title":         in.ChannelTitle,
-		"channel_username":      in.ChannelUsername,
-		"target_chat_id":        in.TargetChatId,
-		"publish_direction":     in.PublishDirection,
-		"cycle_publish_enabled": in.CyclePublishEnabled,
-		"cycle_publish_days":    in.CyclePublishDays,
-		"cycle_publish_time":    in.CyclePublishTime,
-		"is_default_selected":   in.IsDefaultSelected,
-		"bot_id_json":           botJSON,
-		"remark":                in.Remark,
-		"status":                in.Status,
-		"updated_by":            account.Id,
-		"updated_at":            now,
+		"tenant_id":           in.TenantId,
+		"merchant_id":         in.TenantId,
+		"tg_account_id":       in.TgAccountId,
+		"channel_title":       in.ChannelTitle,
+		"channel_username":    in.ChannelUsername,
+		"target_chat_id":      in.TargetChatId,
+		"publish_direction":   in.PublishDirection,
+		"is_default_selected": in.IsDefaultSelected,
+		"bot_id_json":         botJSON,
+		"remark":              in.Remark,
+		"status":              in.Status,
+		"updated_by":          account.Id,
+		"updated_at":          now,
 	}
 	if in.Id > 0 {
 		_, err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).

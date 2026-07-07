@@ -16,9 +16,6 @@ type AccountConfig struct {
 }
 
 type PublishConfig struct {
-	CyclePublishEnabled    int    `json:"cyclePublishEnabled"`
-	CyclePublishDays       int    `json:"cyclePublishDays"`
-	CyclePublishTime       string `json:"cyclePublishTime"`
 	SkipDownChannelEnabled int    `json:"skipDownChannelEnabled"`
 	SendIntervalSeconds    int    `json:"sendIntervalSeconds"`
 	SendWindowEnabled      int    `json:"sendWindowEnabled"`

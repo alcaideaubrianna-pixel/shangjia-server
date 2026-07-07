@@ -112,6 +112,7 @@ func (s *sSysPublish) AdminAccountList(ctx context.Context, in *sysin.AccountLis
 		in = &sysin.AccountListInp{}
 	}
 	in.TenantId = account.TenantId
+	in.ManagerAccountId = account.Id
 	return s.accountList(ctx, in)
 }
 
@@ -127,11 +128,13 @@ func (s *sSysPublish) AdminAccountSave(ctx context.Context, in *sysin.AccountSav
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
-	if in.AccountType == sysin.PublishAccountTypeUploader && in.ParentId <= 0 {
+	if in.AccountType == sysin.PublishAccountTypeUploader {
 		in.ParentId = account.Id
 	}
-	if err = s.ensureEditableAccount(ctx, in.Id, in.TenantId); err != nil {
-		return nil, err
+	if in.Id > 0 {
+		if err = s.ensureAdminManageableAccount(ctx, account, in.Id); err != nil {
+			return nil, err
+		}
 	}
 	if err = s.prepareAccountParent(ctx, in); err != nil {
 		return nil, err
@@ -152,6 +155,9 @@ func (s *sSysPublish) AdminAccountResetPassword(ctx context.Context, in *sysin.A
 	}
 	if in.Id == account.Id {
 		return nil, gerror.New("不能重置当前登录账号密码")
+	}
+	if err = s.ensureAdminManageableAccount(ctx, account, in.Id); err != nil {
+		return nil, err
 	}
 	accountColumns := pdao.YoubanPublishAccount.Columns()
 	password := strings.TrimSpace(in.Password)
@@ -189,6 +195,9 @@ func (s *sSysPublish) AdminAccountDelete(ctx context.Context, in *sysin.AccountD
 	for _, id := range in.Ids {
 		if id == account.Id {
 			return gerror.New("不能删除当前登录账号")
+		}
+		if err = s.ensureAdminManageableAccount(ctx, account, id); err != nil {
+			return err
 		}
 	}
 	accountColumns := pdao.YoubanPublishAccount.Columns()

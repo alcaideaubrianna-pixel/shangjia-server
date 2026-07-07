@@ -260,9 +260,6 @@ func (s *sSysConfig) updateConfigGroup(ctx context.Context, group string, list g
 
 func defaultPublishConfig() *model.PublishConfig {
 	return &model.PublishConfig{
-		CyclePublishEnabled:    0,
-		CyclePublishDays:       4,
-		CyclePublishTime:       "09:00",
 		SkipDownChannelEnabled: 1,
 		SendIntervalSeconds:    3,
 		SendWindowEnabled:      0,
@@ -330,9 +327,6 @@ func defaultAntiScanConfig() *model.AntiScanConfig {
 
 func publishConfigMap(conf *model.PublishConfig) g.Map {
 	return g.Map{
-		"cyclePublishEnabled":    conf.CyclePublishEnabled,
-		"cyclePublishDays":       conf.CyclePublishDays,
-		"cyclePublishTime":       conf.CyclePublishTime,
 		"skipDownChannelEnabled": conf.SkipDownChannelEnabled,
 		"sendIntervalSeconds":    conf.SendIntervalSeconds,
 		"sendWindowEnabled":      conf.SendWindowEnabled,

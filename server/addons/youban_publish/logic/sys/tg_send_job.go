@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tgbot "github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -19,7 +20,15 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 	if err != nil || !locked {
 		return err
 	}
-	s.appendTelegramJobLog(ctx, job, "publish", "started", "开始推送TG资料")
+	allowed, err := s.canSendTelegramJob(ctx, job)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "上架任务已下架或不可发布，跳过TG推送")
+		return s.markTelegramJobSuperseded(ctx, job.Id)
+	}
+	s.appendTelegramJobLog(ctx, job, "publish", "started", s.telegramJobPublishMessage(job, "开始推送TG资料"))
 	if err = s.sendLockedTelegramJob(ctx, job); err != nil {
 		return s.handleTelegramJobError(ctx, job, err)
 	}
@@ -73,7 +82,7 @@ func (s *sSysPublish) sendTelegramDisplayPart(ctx context.Context, bot *tgbot.Bo
 	if strings.TrimSpace(caption) == "" {
 		return nil, gerror.New("展示资料和推送文案不能同时为空")
 	}
-	msg, err := bot.SendMessage(ctx, &tgbot.SendMessageParams{ChatID: chatId, Text: caption})
+	msg, err := bot.SendMessage(ctx, &tgbot.SendMessageParams{ChatID: chatId, Text: caption, ParseMode: models.ParseModeHTML})
 	if err != nil {
 		return nil, err
 	}
@@ -133,39 +142,63 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 	if err != nil {
 		return gerror.Wrap(err, "更新TG任务状态失败")
 	}
-	s.appendTelegramJobLog(ctx, job, "publish", "sent", "TG资料推送成功")
+	s.appendTelegramJobLog(ctx, job, "publish", "sent", s.telegramJobPublishMessage(job, "TG资料推送成功"))
 	allSent, err := s.allTelegramTaskJobsSent(ctx, job.TaskId)
 	if err != nil || !allSent {
 		return err
 	}
 	updated, err := s.markTaskPublishedAfterTelegram(ctx, job.TaskId)
-	if err != nil || !updated {
+	if err != nil {
 		return err
 	}
-	if err = s.incrementDailyPublishStat(ctx, job); err != nil {
-		return err
-	}
-	if err = s.markCollectDispatchSentByTask(ctx, job.TaskId); err != nil {
-		return err
+	if updated {
+		if err = s.incrementDailyPublishStat(ctx, job); err != nil {
+			return err
+		}
+		if err = s.markCollectDispatchSentByTask(ctx, job.TaskId); err != nil {
+			return err
+		}
 	}
 	return s.scheduleTelegramCycleDelete(ctx, job)
 }
 
+func (s *sSysPublish) telegramJobPublishMessage(job telegramJobRecord, message string) string {
+	if job.CycleEnabled == 1 && job.NextCycleAt != nil {
+		return "循环上架发布：" + message
+	}
+	return message
+}
+
 func (s *sSysPublish) scheduleTelegramCycleDelete(ctx context.Context, job telegramJobRecord) error {
-	if job.CycleEnabled != 1 {
+	plan := newPublishCyclePlan(job)
+	if !plan.Enabled() {
 		return nil
 	}
-	days := defaultCycleDays(job.CycleDays)
-	delay := time.Duration(days) * 24 * time.Hour
-	if isDevelopMode(ctx) {
-		if seconds := g.Cfg().MustGet(ctx, "youbanPublish.cycle.devDelaySeconds", 0).Int(); seconds > 0 {
-			delay = time.Duration(seconds) * time.Second
-		}
+	now := gtime.Now()
+	delay := plan.DeleteDelay(ctx, now)
+	nextCycleAt := now.Add(delay)
+	if !isDevelopMode(ctx) {
+		nextCycleAt = plan.NextDeleteAt(now)
 	}
-	nextCycleAt := gtime.Now().Add(delay)
 	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
 		"next_cycle_at": nextCycleAt,
 		"updated_at":    gtime.Now(),
 	}).Update()
 	return s.enqueueTelegramDeleteJob(ctx, job.Id, delay)
+}
+
+func (s *sSysPublish) canSendTelegramJob(ctx context.Context, job telegramJobRecord) (bool, error) {
+	task, err := s.cycleTaskForJob(ctx, job)
+	if err != nil {
+		return false, err
+	}
+	if task.IsEmpty() {
+		return false, nil
+	}
+	switch task["status"].String() {
+	case sysin.PublishTaskStatusPending, sysin.PublishTaskStatusPublishing, sysin.PublishTaskStatusPublished:
+		return true, nil
+	default:
+		return false, nil
+	}
 }

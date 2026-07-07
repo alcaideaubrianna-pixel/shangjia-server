@@ -21,6 +21,9 @@ func (s *sSysPublish) accountList(ctx context.Context, in *sysin.AccountListInp)
 		if in.TenantId > 0 {
 			mod = mod.Where("a."+accountColumns.TenantId, in.TenantId)
 		}
+		if in.ManagerAccountId > 0 {
+			mod = mod.Wheref("(a.%s = ? OR a.%s = ?)", accountColumns.ParentId, accountColumns.Id, in.ManagerAccountId, in.ManagerAccountId)
+		}
 		if in.AccountType != "" {
 			mod = mod.Where("a."+accountColumns.AccountType, in.AccountType)
 		}

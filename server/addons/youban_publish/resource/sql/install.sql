@@ -462,6 +462,9 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_account_setting` (
   `custom_mark_text` varchar(128) NOT NULL DEFAULT '' COMMENT '自定义标识文字',
   `mark_position` varchar(16) NOT NULL DEFAULT 'bottom' COMMENT '显示位置',
   `default_recycle_days` int(11) NOT NULL DEFAULT '0' COMMENT '默认循环天数',
+  `cycle_publish_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否循环上架',
+  `cycle_publish_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环上架天数',
+  `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环上架时间',
   `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
   `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
   `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人',
@@ -471,6 +474,9 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_account_setting` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ybp_account_setting_account` (`tenant_id`,`account_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架账号推送设置';
+ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN `cycle_publish_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否循环上架' AFTER `default_recycle_days`;
+ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN `cycle_publish_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环上架天数' AFTER `cycle_publish_enabled`;
+ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环上架时间' AFTER `cycle_publish_days`;
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -924,10 +930,7 @@ WHERE NOT EXISTS (
 INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
 SELECT seed.`addon_name`, seed.`group`, seed.`name`, seed.`type`, seed.`key`, seed.`value`, seed.`default_value`, seed.`sort`, seed.`tip`, 0, 1, NOW(), NOW()
 FROM (
-  SELECT 'youban_publish' AS `addon_name`, 'publish' AS `group`, '循环上架开关' AS `name`, 'int' AS `type`, 'cyclePublishEnabled' AS `key`, '0' AS `value`, '0' AS `default_value`, 100 AS `sort`, '是否启用全局循环上架' AS `tip` UNION ALL
-  SELECT 'youban_publish', 'publish', '循环上架天数', 'int', 'cyclePublishDays', '4', '4', 110, '循环上架间隔天数' UNION ALL
-  SELECT 'youban_publish', 'publish', '循环上架时间', 'string', 'cyclePublishTime', '09:00', '09:00', 120, '每天循环上架执行时间' UNION ALL
-  SELECT 'youban_publish', 'publish', '下架不推送到下架频道', 'int', 'skipDownChannelEnabled', '1', '1', 130, '资料下架时是否跳过下架频道推送' UNION ALL
+  SELECT 'youban_publish' AS `addon_name`, 'publish' AS `group`, '下架不推送到下架频道' AS `name`, 'int' AS `type`, 'skipDownChannelEnabled' AS `key`, '1' AS `value`, '1' AS `default_value`, 130 AS `sort`, '资料下架时是否跳过下架频道推送' AS `tip` UNION ALL
   SELECT 'youban_publish', 'publish', '发送间隔秒数', 'int', 'sendIntervalSeconds', '3', '3', 140, 'Telegram 消息发送间隔' UNION ALL
   SELECT 'youban_publish', 'publish', '发送时间窗口开关', 'int', 'sendWindowEnabled', '0', '0', 150, '是否限制自动发送执行时间段' UNION ALL
   SELECT 'youban_publish', 'publish', '发送开始时间', 'string', 'sendWindowStart', '', '', 160, '自动发送允许开始时间' UNION ALL
@@ -986,6 +989,10 @@ WHERE NOT EXISTS (
     AND c.`group` = seed.`group`
     AND c.`key` = seed.`key`
 );
+DELETE FROM `hg_sys_addons_config`
+WHERE `addon_name` = 'youban_publish'
+  AND `group` = 'publish'
+  AND `key` IN ('cyclePublishEnabled', 'cyclePublishDays', 'cyclePublishTime');
 
 UPDATE `hg_sys_addons_config`
 SET `status` = 2,

@@ -21,7 +21,7 @@ func (s *sSysPublish) AdminAccountSettingView(ctx context.Context, in *sysin.Acc
 	if in == nil || in.AccountId <= 0 {
 		return nil, gerror.New("账号ID不能为空")
 	}
-	if err = s.ensureTenantAccount(ctx, admin.TenantId, in.AccountId); err != nil {
+	if err = s.ensureAdminManageableAccount(ctx, admin, in.AccountId); err != nil {
 		return nil, err
 	}
 	return s.accountSetting(ctx, admin.TenantId, in.AccountId)
@@ -46,10 +46,17 @@ func (s *sSysPublish) AdminAccountSettingSave(ctx context.Context, in *sysin.Acc
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
-	if err = s.ensureTenantAccount(ctx, admin.TenantId, in.AccountId); err != nil {
+	if err = s.ensureAdminManageableAccount(ctx, admin, in.AccountId); err != nil {
 		return nil, err
 	}
 	if err = s.saveAccountSetting(ctx, admin.TenantId, admin.Id, in); err != nil {
+		return nil, err
+	}
+	if err = s.syncAccountCycleSettingToJobs(ctx, admin.TenantId, in.AccountId, accountCycleSetting{
+		Enabled:     in.CyclePublishEnabled,
+		Days:        in.CyclePublishDays,
+		PublishTime: in.CyclePublishTime,
+	}); err != nil {
 		return nil, err
 	}
 	return s.accountSetting(ctx, admin.TenantId, in.AccountId)
@@ -114,18 +121,20 @@ func (s *sSysPublish) accountDisplayName(ctx context.Context, tenantId int64, ac
 func (s *sSysPublish) saveAccountSetting(ctx context.Context, tenantId int64, operatorId int64, in *sysin.AccountSettingSaveInp) error {
 	now := gtime.Now()
 	data := g.Map{
-		"tenant_id":            tenantId,
-		"account_id":           in.AccountId,
-		"enable_suffix":        in.EnableSuffix,
-		"suffix_content":       in.SuffixContent,
-		"enable_title_mark":    in.EnableTitleMark,
-		"mark_mode":            in.MarkMode,
-		"number_source":        in.NumberSource,
-		"custom_mark_text":     in.CustomMarkText,
-		"mark_position":        in.MarkPosition,
-		"default_recycle_days": in.DefaultRecycleDays,
-		"updated_by":           operatorId,
-		"updated_at":           now,
+		"tenant_id":             tenantId,
+		"account_id":            in.AccountId,
+		"enable_suffix":         in.EnableSuffix,
+		"suffix_content":        in.SuffixContent,
+		"enable_title_mark":     in.EnableTitleMark,
+		"mark_mode":             in.MarkMode,
+		"number_source":         in.NumberSource,
+		"custom_mark_text":      in.CustomMarkText,
+		"mark_position":         in.MarkPosition,
+		"cycle_publish_enabled": in.CyclePublishEnabled,
+		"cycle_publish_days":    in.CyclePublishDays,
+		"cycle_publish_time":    in.CyclePublishTime,
+		"updated_by":            operatorId,
+		"updated_at":            now,
 	}
 	count, err := g.DB().Model(publishAccountSettingTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
@@ -153,11 +162,18 @@ func (s *sSysPublish) saveAccountSetting(ctx context.Context, tenantId int64, op
 	return nil
 }
 
-func (s *sSysPublish) ensureTenantAccount(ctx context.Context, tenantId int64, accountId int64) error {
+func (s *sSysPublish) ensureAdminManageableAccount(ctx context.Context, admin *sysin.AccountModel, accountId int64) error {
+	if admin == nil || admin.Id <= 0 || admin.TenantId <= 0 {
+		return gerror.New("当前账号无管理权限")
+	}
+	if accountId <= 0 {
+		return gerror.New("账号ID不能为空")
+	}
 	accountColumns := pdao.YoubanPublishAccount.Columns()
 	count, err := pdao.YoubanPublishAccount.Ctx(ctx).
 		Where(accountColumns.Id, accountId).
-		Where(accountColumns.TenantId, tenantId).
+		Where(accountColumns.TenantId, admin.TenantId).
+		Wheref("(%s = ? OR %s = ?)", accountColumns.ParentId, accountColumns.Id, admin.Id, admin.Id).
 		WhereNull(accountColumns.DeletedAt).
 		Count()
 	if err != nil {
@@ -171,12 +187,12 @@ func (s *sSysPublish) ensureTenantAccount(ctx context.Context, tenantId int64, a
 
 func defaultAccountSetting(accountId int64) *sysin.AccountSettingModel {
 	return &sysin.AccountSettingModel{
-		AccountId:          accountId,
-		EnableTitleMark:    1,
-		MarkMode:           "nickname",
-		NumberSource:       "sequence",
-		MarkPosition:       "top",
-		DefaultRecycleDays: 0,
+		AccountId:        accountId,
+		EnableTitleMark:  1,
+		MarkMode:         "nickname",
+		NumberSource:     "sequence",
+		MarkPosition:     "top",
+		CyclePublishDays: 4,
 	}
 }
 
@@ -189,7 +205,9 @@ func fillAccountSettingModel(model *sysin.AccountSettingModel, row gdb.Record) {
 	model.NumberSource = strings.TrimSpace(row["number_source"].String())
 	model.CustomMarkText = strings.TrimSpace(row["custom_mark_text"].String())
 	model.MarkPosition = strings.TrimSpace(row["mark_position"].String())
-	model.DefaultRecycleDays = row["default_recycle_days"].Int()
+	model.CyclePublishEnabled = row["cycle_publish_enabled"].Int()
+	model.CyclePublishDays = row["cycle_publish_days"].Int()
+	model.CyclePublishTime = strings.TrimSpace(row["cycle_publish_time"].String())
 	model.CreatedAt = row["created_at"].GTime()
 	model.UpdatedAt = row["updated_at"].GTime()
 	if model.MarkMode == "" {
@@ -201,4 +219,88 @@ func fillAccountSettingModel(model *sysin.AccountSettingModel, row gdb.Record) {
 	if model.MarkPosition == "" {
 		model.MarkPosition = "bottom"
 	}
+	if model.CyclePublishDays <= 0 {
+		model.CyclePublishDays = 4
+	}
+}
+
+func (s *sSysPublish) syncAccountCycleSettingToJobs(ctx context.Context, tenantId int64, accountId int64, cycle accountCycleSetting) error {
+	if tenantId <= 0 || accountId <= 0 {
+		return nil
+	}
+	now := gtime.Now()
+	data := g.Map{
+		"cycle_enabled":      cycle.Enabled,
+		"cycle_days":         defaultCycleDays(cycle.Days),
+		"cycle_publish_time": cycle.PublishTime,
+		"updated_at":         now,
+	}
+	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "failed"}).
+		Data(data).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "同步账号循环上架设置失败")
+	}
+	disableSentData := g.Map{
+		"cycle_enabled":      0,
+		"cycle_days":         defaultCycleDays(cycle.Days),
+		"cycle_publish_time": cycle.PublishTime,
+		"next_cycle_at":      nil,
+		"updated_at":         now,
+	}
+	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		Where("status", "sent").
+		Data(disableSentData).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "清理账号历史循环上架任务失败")
+	}
+	if cycle.Enabled != 1 {
+		return nil
+	}
+	var jobs []telegramJobRecord
+	err = g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
+		Fields("j.*").
+		Where("j.tenant_id", tenantId).
+		Where("j.account_id", accountId).
+		Where("j.status", "sent").
+		Where("t.status", sysin.PublishTaskStatusPublished).
+		WhereNull("t.deleted_at").
+		OrderAsc("j.id").
+		Scan(&jobs)
+	if err != nil {
+		return gerror.Wrap(err, "读取账号已上架TG任务失败")
+	}
+	for _, job := range jobs {
+		plan := newPublishCyclePlan(job)
+		job.CycleEnabled = cycle.Enabled
+		job.CycleDays = defaultCycleDays(cycle.Days)
+		job.CyclePublishTime = cycle.PublishTime
+		plan = newPublishCyclePlan(job)
+		delay := plan.DeleteDelay(ctx, now)
+		nextCycleAt := now.Add(delay)
+		if !isDevelopMode(ctx) {
+			nextCycleAt = plan.NextDeleteAt(now)
+		}
+		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", job.Id).
+			Data(g.Map{
+				"cycle_enabled":      cycle.Enabled,
+				"cycle_days":         defaultCycleDays(cycle.Days),
+				"cycle_publish_time": cycle.PublishTime,
+				"next_cycle_at":      nextCycleAt,
+				"updated_at":         gtime.Now(),
+			}).
+			Update()
+		if err = s.enqueueTelegramDeleteJob(ctx, job.Id, delay); err != nil {
+			return gerror.Wrap(err, "加入循环上架队列失败")
+		}
+	}
+	return nil
 }

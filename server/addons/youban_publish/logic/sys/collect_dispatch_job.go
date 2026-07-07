@@ -49,7 +49,14 @@ func (s *sSysPublish) ensureCollectTgChannelJob(ctx context.Context, task gdb.Re
 	if err != nil {
 		return 0, gerror.Wrap(err, "读取采集TG频道任务失败")
 	}
+	cycle, err := s.telegramJobCycleSetting(ctx, task)
+	if err != nil {
+		return 0, err
+	}
 	if jobId := value.Int64(); jobId > 0 {
+		if err = s.updateTelegramJobCycleSetting(ctx, jobId, cycle); err != nil {
+			return 0, err
+		}
 		return jobId, nil
 	}
 	botId, err := collectChannelBotId(channel, ruleBotIds)
@@ -67,9 +74,9 @@ func (s *sSysPublish) ensureCollectTgChannelJob(ctx context.Context, task gdb.Re
 		"bot_id":             botId,
 		"target_chat_id":     normalizeTelegramChannelChatID(channel.TargetChatId),
 		"status":             "pending",
-		"cycle_enabled":      channel.CyclePublishEnabled,
-		"cycle_days":         defaultCycleDays(channel.CyclePublishDays),
-		"cycle_publish_time": channel.CyclePublishTime,
+		"cycle_enabled":      cycle.Enabled,
+		"cycle_days":         defaultCycleDays(cycle.Days),
+		"cycle_publish_time": cycle.PublishTime,
 		"created_at":         now,
 		"updated_at":         now,
 	}).InsertAndGetId()
