@@ -119,8 +119,9 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	if err = s.ensureBotsBelongTenant(ctx, in.BotIds, in.TenantId); err != nil {
 		return err
 	}
+	isCreate := in.Id <= 0
 	var existing *sysin.ChannelModel
-	if in.Id > 0 {
+	if !isCreate {
 		if err = s.ensureChannelsBelongTenant(ctx, []int64{in.Id}, in.TenantId); err != nil {
 			return err
 		}
@@ -129,8 +130,8 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 			return err
 		}
 	}
-	needChannelCheck := existing == nil || existing.TgAccountId != in.TgAccountId || existing.TargetChatId != in.TargetChatId || existing.PublishDirection != in.PublishDirection || !sameInt64Slice(existing.BotIds, in.BotIds)
-	if needChannelCheck {
+	// 新建时才做 TG 侧检测；编辑只落本地 DB，避免每次保存都触发远程校验。
+	if isCreate {
 		checkRes, err := s.checkAdminChannelBots(ctx, &sysin.ChannelCheckInp{
 			BotIds:       in.BotIds,
 			TargetChatId: in.TargetChatId,
@@ -146,9 +147,15 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		in.ChannelUsername = checkRes.ChannelUsername
 		in.TargetChatId = checkRes.TargetChatId
 	} else if existing != nil {
-		in.ChannelTitle = existing.ChannelTitle
-		in.ChannelUsername = existing.ChannelUsername
-		in.TargetChatId = existing.TargetChatId
+		if strings.TrimSpace(in.ChannelTitle) == "" {
+			in.ChannelTitle = existing.ChannelTitle
+		}
+		if strings.TrimSpace(in.ChannelUsername) == "" {
+			in.ChannelUsername = existing.ChannelUsername
+		}
+		if strings.TrimSpace(in.TargetChatId) == "" {
+			in.TargetChatId = existing.TargetChatId
+		}
 	}
 	botJSON, err := encodeBotIds(in.BotIds)
 	if err != nil {
