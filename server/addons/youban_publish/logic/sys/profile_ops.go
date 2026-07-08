@@ -451,15 +451,13 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			return nil, err
 		}
 	}
-	in.ChannelIds = uniqueIds(in.ChannelIds)
-	channelJSON, err := encodeBotIds(in.ChannelIds)
+	in.ChannelIds, err = s.availableProfileChannelIds(ctx, in.ChannelIds, tenantId)
 	if err != nil {
 		return nil, err
 	}
-	if len(in.ChannelIds) > 0 {
-		if err = s.ensureProfileChannels(ctx, in.ChannelIds, tenantId); err != nil {
-			return nil, err
-		}
+	channelJSON, err := encodeBotIds(in.ChannelIds)
+	if err != nil {
+		return nil, err
 	}
 	tgPushEnabled := 0
 	tgStatus := "skipped"
@@ -1234,6 +1232,40 @@ func (s *sSysPublish) ensureProfileChannels(ctx context.Context, ids []int64, te
 		return gerror.New("存在无权操作或不可用的推送频道")
 	}
 	return nil
+}
+
+func (s *sSysPublish) availableProfileChannelIds(ctx context.Context, ids []int64, tenantId int64) ([]int64, error) {
+	ids = uniqueIds(ids)
+	if len(ids) == 0 {
+		return []int64{}, nil
+	}
+	var rows []struct {
+		Id int64 `json:"id"`
+	}
+	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Fields("id").
+		WhereIn("id", ids).
+		Where("tenant_id", tenantId).
+		Where("publish_direction", "up").
+		Where("status", 1).
+		WhereNull("deleted_at").
+		Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "检查推送频道失败")
+	}
+	available := make(map[int64]struct{}, len(rows))
+	for _, row := range rows {
+		if row.Id > 0 {
+			available[row.Id] = struct{}{}
+		}
+	}
+	list := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := available[id]; ok {
+			list = append(list, id)
+		}
+	}
+	return list, nil
 }
 
 func (s *sSysPublish) mediaListByProfile(ctx context.Context, profileId int64, tenantId int64, accountId int64) (list []*sysin.MediaModel, err error) {
