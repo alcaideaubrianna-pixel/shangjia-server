@@ -19,7 +19,13 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 		Queues:         map[string]int{tgQueueNameDefault: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
+	mediaServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 2).Int(),
+		Queues:         map[string]int{tgQueueNameMedia: 1},
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
 	s.tgQueueServer = server
+	s.mediaQueueServer = mediaServer
 	s.tgQueueMu.Unlock()
 
 	mux := asynq.NewServeMux()
@@ -41,17 +47,30 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 			g.Log().Errorf(ctx, "启动上架插件TG队列失败：%+v", err)
 		}
 	}()
+
+	mediaMux := asynq.NewServeMux()
+	mediaMux.HandleFunc(tgTaskTypeCollectMedia, s.handleCollectMediaCacheTask)
+	go func() {
+		if err := mediaServer.Run(mediaMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动上架插件媒体缓存队列失败：%+v", err)
+		}
+	}()
 }
 
 func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.tgQueueMu.Lock()
 	server := s.tgQueueServer
+	mediaServer := s.mediaQueueServer
 	client := s.tgQueueClient
 	s.tgQueueServer = nil
+	s.mediaQueueServer = nil
 	s.tgQueueClient = nil
 	s.tgQueueMu.Unlock()
 	if server != nil {
 		server.Shutdown()
+	}
+	if mediaServer != nil {
+		mediaServer.Shutdown()
 	}
 	if client != nil {
 		_ = client.Close()
@@ -156,6 +175,9 @@ func (s *sSysPublish) handleCollectMediaCacheTask(ctx context.Context, task *asy
 	payload, err := decodeCollectMediaQueuePayload(task)
 	if err != nil {
 		return err
+	}
+	if queue, ok := asynq.GetQueueName(ctx); ok && queue != tgQueueNameMedia {
+		return s.enqueueCollectMediaCache(ctx, payload, 0)
 	}
 	return s.ExecuteCollectMediaCache(ctx, payload)
 }

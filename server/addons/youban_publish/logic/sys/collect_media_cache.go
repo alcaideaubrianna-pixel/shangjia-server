@@ -19,7 +19,10 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
+	"hotgo/internal/library/contexts"
 	"hotgo/internal/library/storager"
+	"hotgo/internal/model"
 	"hotgo/internal/service"
 	"hotgo/utility/file"
 )
@@ -36,6 +39,7 @@ func (s *sSysPublish) prepareCollectMediaAsset(ctx context.Context, event gdb.Re
 }
 
 func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload collectMediaQueuePayload) error {
+	ctx = collectMediaRuntimeContext(ctx, payload.AccountId)
 	lock := s.collectMediaAccountLock(payload.TenantId, payload.TgAccountId)
 	lock.Lock()
 	defer lock.Unlock()
@@ -63,6 +67,34 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 		}
 	}
 	return s.processCollectEvent(ctx, payload.EventId, payload.TenantId, payload.AccountId)
+}
+
+func collectMediaRuntimeContext(ctx context.Context, accountId int64) context.Context {
+	current := contexts.Get(ctx)
+	if current == nil {
+		return context.WithValue(ctx, consts.ContextHTTPKey, &model.Context{
+			Module:    consts.AppApi,
+			AddonName: "youban_publish",
+			User: &model.Identity{
+				Id:  accountId,
+				App: consts.AppApi,
+			},
+			Data: g.Map{},
+		})
+	}
+	if current.Module == "" {
+		current.Module = consts.AppApi
+	}
+	if current.AddonName == "" {
+		current.AddonName = "youban_publish"
+	}
+	if current.User == nil || current.User.Id <= 0 {
+		current.User = &model.Identity{Id: accountId, App: consts.AppApi}
+	}
+	if current.User.App == "" {
+		current.User.App = consts.AppApi
+	}
+	return ctx
 }
 
 func (s *sSysPublish) collectMediaCacheEvent(ctx context.Context, payload collectMediaQueuePayload) (gdb.Record, error) {

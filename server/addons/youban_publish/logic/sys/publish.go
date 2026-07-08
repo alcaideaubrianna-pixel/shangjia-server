@@ -11,16 +11,16 @@ import (
 )
 
 type sSysPublish struct {
-	runtimeCancel context.CancelFunc
-	runtimeDone   chan struct{}
-	runtimeMu     publishRuntimeMutex
-	telegramBotMu publishRuntimeMutex
-	telegramBots  map[string]*tgbot.Bot
-	tgLoginMu     publishRuntimeMutex
-	tgLogins      map[string]*telegramLoginRuntime
-	tgQueueMu     publishRuntimeMutex
-	tgQueueClient *asynq.Client
-	tgQueueServer *asynq.Server
+	runtimeCancel    context.CancelFunc
+	runtimeDone      chan struct{}
+	runtimeMu        publishRuntimeMutex
+	telegramBotMu    publishRuntimeMutex
+	telegramBots     map[string]*tgbot.Bot
+	tgLoginMu        publishRuntimeMutex
+	tgLogins         map[string]*telegramLoginRuntime
+	tgQueueMu        publishRuntimeMutex
+	tgQueueClient    *asynq.Client
+	tgQueueServer    *asynq.Server
 	mediaQueueServer *asynq.Server
 
 	telegramChannelMu    publishRuntimeMutex
