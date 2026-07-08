@@ -17,6 +17,29 @@ type CollectSourceListRes struct {
 	List []*sysin.CollectSourceModel `json:"list" dc:"采集源列表"`
 }
 
+type CollectConfigReq struct {
+	g.Meta `path:"/publish/collect/config" method:"get" tags:"上架插件" summary:"采集总开关配置"`
+}
+
+type CollectConfigRes struct {
+	*sysin.CollectConfigModel
+}
+
+type CollectConfigSaveReq struct {
+	g.Meta `path:"/publish/collect/config" method:"post" tags:"上架插件" summary:"保存采集总开关"`
+	sysin.CollectConfigSaveInp
+}
+
+type CollectConfigSaveRes struct{}
+
+type CollectStatsReq struct {
+	g.Meta `path:"/publish/collect/stats" method:"get" tags:"上架插件" summary:"采集统计"`
+}
+
+type CollectStatsRes struct {
+	*sysin.CollectStatsModel
+}
+
 type CollectSourceSaveReq struct {
 	g.Meta `path:"/publish/collect/source/save" method:"post" tags:"上架插件" summary:"保存采集源"`
 	sysin.CollectSourceSaveInp

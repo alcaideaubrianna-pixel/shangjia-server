@@ -25,15 +25,20 @@ type sSysPublish struct {
 	telegramChannelMu    publishRuntimeMutex
 	telegramChannelLocks map[string]*publishRuntimeMutex
 
-	collectGroupMu     publishRuntimeMutex
-	collectGroupTimers map[int64]*time.Timer
+	collectGroupMu        publishRuntimeMutex
+	collectGroupTimers    map[int64]*time.Timer
+	collectMediaMu        publishRuntimeMutex
+	collectMediaLocks     map[string]*publishRuntimeMutex
+	collectMediaLastTouch map[string]time.Time
 }
 
 func NewSysPublish() *sSysPublish {
 	return &sSysPublish{
-		tgLogins:             make(map[string]*telegramLoginRuntime),
-		telegramChannelLocks: make(map[string]*publishRuntimeMutex),
-		collectGroupTimers:   make(map[int64]*time.Timer),
+		tgLogins:              make(map[string]*telegramLoginRuntime),
+		telegramChannelLocks:  make(map[string]*publishRuntimeMutex),
+		collectGroupTimers:    make(map[int64]*time.Timer),
+		collectMediaLocks:     make(map[string]*publishRuntimeMutex),
+		collectMediaLastTouch: make(map[string]time.Time),
 	}
 }
 

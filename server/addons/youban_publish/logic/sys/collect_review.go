@@ -122,7 +122,7 @@ func (s *sSysPublish) approveCollectReview(ctx context.Context, reviewId int64, 
 		_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())
 		return err
 	}
-	if err = s.ensureCollectTgJobs(ctx, taskId, rule); err != nil {
+	if err = s.ensureCollectTgJobs(ctx, taskId); err != nil {
 		_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())
 		return err
 	}

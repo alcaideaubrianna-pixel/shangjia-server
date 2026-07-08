@@ -6,123 +6,17 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
-func (s *sSysPublish) ensureCollectTgJobs(ctx context.Context, taskId int64, rule gdb.Record) error {
-	if err := ensureTelegramOperationColumns(ctx); err != nil {
-		return err
-	}
-	task, err := s.telegramJobTask(ctx, taskId)
-	if err != nil {
-		return err
-	}
-	if task["tg_push_enabled"].Int() != 1 {
-		return nil
-	}
-	channels, err := s.telegramJobChannels(ctx, task)
-	if err != nil {
-		return err
-	}
-	operationNo := task["tg_operation_no"].String()
-	if operationNo == "" {
-		operationNo = newTelegramOperationNo("collect", taskId)
-		if _, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).Data(g.Map{
-			"tg_operation_no": operationNo,
-			"updated_at":      gtime.Now(),
-		}).Update(); err != nil {
-			return gerror.Wrap(err, "更新采集TG操作号失败")
-		}
-	}
-	if err = s.prepareTelegramTaskForResubmit(ctx, task, channels, operationNo); err != nil {
-		return err
-	}
-	ruleBotIds := decodeBotIds(rule["bot_id_json"].String())
-	for _, channel := range channels {
-		jobId, err := s.ensureCollectTgChannelJob(ctx, task, channel, ruleBotIds, operationNo)
-		if err != nil {
-			return err
-		}
-		if err = s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
-			return gerror.Wrap(err, "采集TG任务入队失败")
-		}
-	}
-	return nil
-}
-
-func (s *sSysPublish) ensureCollectTgChannelJob(ctx context.Context, task gdb.Record, channel telegramJobChannel, ruleBotIds []int64, operationNo string) (int64, error) {
-	value, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("task_id", task["id"].Int64()).
-		Where("operation_no", operationNo).
-		Where("channel_id", channel.Id).
-		Fields("id").
-		Value()
-	if err != nil {
-		return 0, gerror.Wrap(err, "读取采集TG频道任务失败")
-	}
-	cycle, err := s.telegramJobCycleSetting(ctx, task)
-	if err != nil {
-		return 0, err
-	}
-	if jobId := value.Int64(); jobId > 0 {
-		if err = s.updateTelegramJobCycleSetting(ctx, jobId, cycle); err != nil {
-			return 0, err
-		}
-		return jobId, nil
-	}
-	botId, err := collectChannelBotId(channel, ruleBotIds)
-	if err != nil {
-		return 0, err
-	}
-	now := gtime.Now()
-	jobId, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
-		"task_id":            task["id"].Int64(),
-		"operation_no":       operationNo,
-		"tenant_id":          task["tenant_id"].Int64(),
-		"merchant_id":        task["tenant_id"].Int64(),
-		"account_id":         task["account_id"].Int64(),
-		"profile_id":         task["profile_id"].Int64(),
-		"channel_id":         channel.Id,
-		"bot_id":             botId,
-		"target_chat_id":     normalizeTelegramChannelChatID(channel.TargetChatId),
-		"status":             "pending",
-		"cycle_enabled":      cycle.Enabled,
-		"cycle_days":         defaultCycleDays(cycle.Days),
-		"cycle_publish_time": cycle.PublishTime,
-		"created_at":         now,
-		"updated_at":         now,
-	}).InsertAndGetId()
-	if err != nil {
-		return 0, gerror.Wrap(err, "创建采集TG频道任务失败")
-	}
-	return jobId, nil
-}
-
-func collectChannelBotId(channel telegramJobChannel, ruleBotIds []int64) (int64, error) {
-	channelBotIds := decodeBotIds(channel.BotIdJson)
-	if len(channelBotIds) == 0 {
-		botId := firstPositiveId(ruleBotIds)
-		if botId <= 0 {
-			return 0, gerror.New("目标频道未配置可用推送BOT")
-		}
-		return botId, nil
-	}
-	for _, ruleBotId := range ruleBotIds {
-		if containsInt64(channelBotIds, ruleBotId) {
-			return ruleBotId, nil
-		}
-	}
-	if len(ruleBotIds) > 0 {
-		return 0, gerror.New("规则选择的推送BOT未绑定到目标频道")
-	}
-	botId := firstPositiveId(channelBotIds)
-	if botId <= 0 {
-		return 0, gerror.New("目标频道未配置可用推送BOT")
-	}
-	return botId, nil
+func (s *sSysPublish) ensureCollectTgJobs(ctx context.Context, taskId int64) error {
+	return s.submitTelegramPublish(ctx, telegramPublishRequest{
+		TaskId:                 taskId,
+		OperationPrefix:        telegramPublishBizCollect,
+		AllowCreateOperationNo: true,
+	})
 }
 
 func containsInt64(values []int64, target int64) bool {

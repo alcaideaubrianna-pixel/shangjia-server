@@ -11,42 +11,11 @@ import (
 )
 
 func (s *sSysPublish) ensureTgJobs(ctx context.Context, taskId int64, operationNo string) error {
-	if err := ensureTelegramOperationColumns(ctx); err != nil {
-		return err
-	}
-	task, err := s.telegramJobTask(ctx, taskId)
-	if err != nil {
-		return err
-	}
-	if operationNo == "" {
-		operationNo = task["tg_operation_no"].String()
-	}
-	if operationNo == "" {
-		return gerror.New("TG操作号不能为空")
-	}
-	if task["tg_operation_no"].String() != "" && task["tg_operation_no"].String() != operationNo {
-		return nil
-	}
-	if task["tg_push_enabled"].Int() != 1 {
-		return nil
-	}
-	channels, err := s.telegramJobChannels(ctx, task)
-	if err != nil {
-		return err
-	}
-	if err = s.prepareTelegramTaskForResubmit(ctx, task, channels, operationNo); err != nil {
-		return err
-	}
-	for _, channel := range channels {
-		jobId, err := s.ensureTgChannelJob(ctx, task, channel, operationNo)
-		if err != nil {
-			return err
-		}
-		if err = s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
-			return gerror.Wrap(err, "TG任务入队失败")
-		}
-	}
-	return nil
+	return s.submitTelegramPublish(ctx, telegramPublishRequest{
+		TaskId:          taskId,
+		OperationNo:     operationNo,
+		OperationPrefix: telegramPublishBizProfile,
+	})
 }
 
 func (s *sSysPublish) telegramJobChannels(ctx context.Context, task gdb.Record) ([]telegramJobChannel, error) {
@@ -69,52 +38,6 @@ func (s *sSysPublish) telegramJobChannels(ctx context.Context, task gdb.Record) 
 		return nil, gerror.New("未配置可推送频道")
 	}
 	return channels, nil
-}
-
-func (s *sSysPublish) ensureTgChannelJob(ctx context.Context, task gdb.Record, channel telegramJobChannel, operationNo string) (int64, error) {
-	value, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("task_id", task["id"].Int64()).
-		Where("operation_no", operationNo).
-		Where("channel_id", channel.Id).
-		Fields("id").
-		Value()
-	if err != nil {
-		return 0, gerror.Wrap(err, "读取TG频道任务失败")
-	}
-	cycle, err := s.telegramJobCycleSetting(ctx, task)
-	if err != nil {
-		return 0, err
-	}
-	jobId := value.Int64()
-	if jobId > 0 {
-		if err = s.updateTelegramJobCycleSetting(ctx, jobId, cycle); err != nil {
-			return 0, err
-		}
-		return jobId, nil
-	}
-	botId := firstPositiveId(decodeBotIds(channel.BotIdJson))
-	now := gtime.Now()
-	jobId, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
-		"task_id":            task["id"].Int64(),
-		"operation_no":       operationNo,
-		"tenant_id":          task["tenant_id"].Int64(),
-		"merchant_id":        task["tenant_id"].Int64(),
-		"account_id":         task["account_id"].Int64(),
-		"profile_id":         task["profile_id"].Int64(),
-		"channel_id":         channel.Id,
-		"bot_id":             botId,
-		"target_chat_id":     normalizeTelegramChannelChatID(channel.TargetChatId),
-		"status":             "pending",
-		"cycle_enabled":      cycle.Enabled,
-		"cycle_days":         defaultCycleDays(cycle.Days),
-		"cycle_publish_time": cycle.PublishTime,
-		"created_at":         now,
-		"updated_at":         now,
-	}).InsertAndGetId()
-	if err != nil {
-		return 0, gerror.Wrap(err, "创建TG频道任务失败")
-	}
-	return jobId, nil
 }
 
 func (s *sSysPublish) telegramJobCycleSetting(ctx context.Context, task gdb.Record) (accountCycleSetting, error) {

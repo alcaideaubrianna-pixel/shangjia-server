@@ -24,6 +24,9 @@ func (s *sSysPublish) collectBotMessage(ctx context.Context, botId int64, msg *m
 	if msg == nil {
 		return
 	}
+	if !s.collectGlobalEnabled(ctx) {
+		return
+	}
 	sources, err := s.collectSourcesByBotMessage(ctx, botId, msg)
 	if err != nil {
 		g.Log().Warningf(ctx, "读取Bot采集源失败 bot:%d chat:%d err:%+v", botId, msg.Chat.ID, err)
@@ -138,6 +141,7 @@ type collectMediaItem struct {
 	FileUrl     string `json:"fileUrl,omitempty"`
 	StoragePath string `json:"storagePath,omitempty"`
 	PosterUrl   string `json:"posterUrl,omitempty"`
+	MetaJson    string `json:"metaJson,omitempty"`
 }
 
 func collectTelegramMedia(msg *models.Message) (int, string) {

@@ -33,6 +33,7 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 	mux.HandleFunc(tgTaskTypeImportSync, s.handleImportTgSyncTask)
 	mux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
 	mux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
+	mux.HandleFunc(tgTaskTypeCollectMedia, s.handleCollectMediaCacheTask)
 
 	go func() {
 		if err := server.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
@@ -140,4 +141,12 @@ func (s *sSysPublish) handleCycleRunTask(ctx context.Context, task *asynq.Task) 
 		return err
 	}
 	return s.ExecuteCycleRun(ctx, payload.RunId)
+}
+
+func (s *sSysPublish) handleCollectMediaCacheTask(ctx context.Context, task *asynq.Task) error {
+	payload, err := decodeCollectMediaQueuePayload(task)
+	if err != nil {
+		return err
+	}
+	return s.ExecuteCollectMediaCache(ctx, payload)
 }

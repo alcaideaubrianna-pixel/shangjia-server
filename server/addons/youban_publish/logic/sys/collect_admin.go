@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -44,6 +45,9 @@ func (s *sSysPublish) CollectSourceList(ctx context.Context, in *sysin.CollectSo
 	if err = s.fillCollectSourceRules(ctx, list); err != nil {
 		return nil, 0, err
 	}
+	if err = s.fillCollectSourceChannelTitles(ctx, list); err != nil {
+		return nil, 0, err
+	}
 	return
 }
 
@@ -55,26 +59,32 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 	if in == nil {
 		return 0, gerror.New("采集源参数不能为空")
 	}
+	if err = ensureCollectSourceColumns(ctx); err != nil {
+		return 0, err
+	}
 	if err = in.Filter(ctx); err != nil {
 		return 0, err
 	}
 	now := gtime.Now()
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		data := g.Map{
-			"tenant_id":         account.TenantId,
-			"account_id":        account.Id,
-			"source_type":       in.SourceType,
-			"title":             in.Title,
-			"source_chat_id":    in.SourceChatId,
-			"source_username":   in.SourceUsername,
-			"tg_account_id":     in.TgAccountId,
-			"bot_id":            in.BotId,
-			"follow_account_id": in.FollowAccountId,
-			"collect_enabled":   in.CollectEnabled,
-			"status":            in.Status,
-			"remark":            in.Remark,
-			"updated_by":        account.Id,
-			"updated_at":        now,
+			"tenant_id":               account.TenantId,
+			"account_id":              account.Id,
+			"source_type":             in.SourceType,
+			"title":                   in.Title,
+			"source_chat_id":          in.SourceChatId,
+			"source_username":         in.SourceUsername,
+			"tg_account_id":           in.TgAccountId,
+			"bot_id":                  in.BotId,
+			"follow_account_id":       in.FollowAccountId,
+			"collect_enabled":         in.CollectEnabled,
+			"history_collect_enabled": in.HistoryCollectEnabled,
+			"history_collect_mode":    in.HistoryCollectMode,
+			"history_collect_days":    in.HistoryCollectDays,
+			"status":                  in.Status,
+			"remark":                  in.Remark,
+			"updated_by":              account.Id,
+			"updated_at":              now,
 		}
 		if in.Id > 0 {
 			if _, err = tx.Model(pdao.YoubanPublishCollectSource.Table()).Ctx(ctx).
@@ -276,6 +286,84 @@ func (s *sSysPublish) fillCollectSourceRules(ctx context.Context, list []*sysin.
 		item.RuleIds = ruleMap[item.Id]
 	}
 	return nil
+}
+
+func (s *sSysPublish) fillCollectSourceChannelTitles(ctx context.Context, list []*sysin.CollectSourceModel) error {
+	tgAccountIds := make([]int64, 0, len(list))
+	tenantIds := make([]int64, 0, len(list))
+	channelIds := make([]string, 0, len(list))
+	wanted := map[string]struct{}{}
+	for _, item := range list {
+		if item == nil || item.SourceType != sysin.CollectSourceTypeAccount || item.TgAccountId <= 0 || strings.TrimSpace(item.SourceChatId) == "" {
+			continue
+		}
+		tenantIds = append(tenantIds, item.TenantId)
+		tgAccountIds = append(tgAccountIds, item.TgAccountId)
+		for _, channelId := range tgChannelCacheLookupIds(item.SourceChatId) {
+			channelIds = append(channelIds, channelId)
+			wanted[collectSourceChannelKey(item.TgAccountId, channelId)] = struct{}{}
+		}
+	}
+	tenantIds = uniqueIds(tenantIds)
+	tgAccountIds = uniqueIds(tgAccountIds)
+	channelIds = uniqueStrings(channelIds)
+	if len(tenantIds) == 0 || len(tgAccountIds) == 0 || len(channelIds) == 0 {
+		return nil
+	}
+	var rows []struct {
+		TgAccountId     int64  `json:"tgAccountId"`
+		ChannelId       string `json:"channelId"`
+		ChannelTitle    string `json:"channelTitle"`
+		ChannelUsername string `json:"channelUsername"`
+	}
+	if err := g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).
+		Fields("tg_account_id,channel_id,channel_title,channel_username").
+		WhereIn("tenant_id", tenantIds).
+		WhereIn("tg_account_id", tgAccountIds).
+		WhereIn("channel_id", channelIds).
+		Scan(&rows); err != nil {
+		return gerror.Wrap(err, "读取采集源频道缓存失败")
+	}
+	cacheMap := make(map[string]collectSourceChannelCacheValue, len(rows))
+	for _, row := range rows {
+		key := collectSourceChannelKey(row.TgAccountId, row.ChannelId)
+		if _, ok := wanted[key]; !ok {
+			continue
+		}
+		cacheMap[key] = collectSourceChannelCacheValue{Title: row.ChannelTitle, Username: row.ChannelUsername}
+	}
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		if cache, ok := collectSourceChannelCache(item.TgAccountId, item.SourceChatId, cacheMap); ok {
+			if strings.TrimSpace(cache.Title) != "" {
+				item.Title = cache.Title
+			}
+			if strings.TrimSpace(cache.Username) != "" {
+				item.SourceUsername = cache.Username
+			}
+		}
+	}
+	return nil
+}
+
+func collectSourceChannelKey(tgAccountId int64, channelId string) string {
+	return strconv.FormatInt(tgAccountId, 10) + ":" + strings.TrimSpace(channelId)
+}
+
+type collectSourceChannelCacheValue struct {
+	Title    string
+	Username string
+}
+
+func collectSourceChannelCache(tgAccountId int64, channelId string, cacheMap map[string]collectSourceChannelCacheValue) (collectSourceChannelCacheValue, bool) {
+	for _, lookupId := range tgChannelCacheLookupIds(channelId) {
+		if cache, ok := cacheMap[collectSourceChannelKey(tgAccountId, lookupId)]; ok {
+			return cache, true
+		}
+	}
+	return collectSourceChannelCacheValue{}, false
 }
 
 func (s *sSysPublish) saveCollectSourceRules(ctx context.Context, tx gdb.TX, tenantId int64, sourceId int64, ruleIds []int64) error {

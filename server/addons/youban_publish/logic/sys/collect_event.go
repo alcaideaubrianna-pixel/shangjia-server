@@ -45,6 +45,9 @@ func (s *sSysPublish) CollectEventList(ctx context.Context, in *sysin.CollectEve
 	if err = mod.Fields(fields).Page(in.Page, in.PerPage).OrderDesc("e.id").Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取采集事件失败")
 	}
+	for _, item := range list {
+		item.MediaCacheStatus, item.MediaCacheMessage = collectEventMediaCacheView(item.MediaJson, item.MediaCount, item.Status, item.ErrorMessage)
+	}
 	return
 }
 
@@ -90,6 +93,14 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	}
 	if event["status"].String() == sysin.CollectEventStatusProcessed {
 		return nil
+	}
+	if collectEventNeedsMediaCache(event) {
+		return s.enqueueCollectMediaCache(ctx, collectMediaQueuePayload{
+			EventId:     eventId,
+			TenantId:    tenantId,
+			AccountId:   accountId,
+			TgAccountId: event["tg_account_id"].Int64(),
+		}, 0)
 	}
 	content, err := s.ensureCollectContent(ctx, event)
 	if err != nil {
@@ -188,7 +199,7 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 	if err != nil {
 		return false, err
 	}
-	if err = s.ensureCollectTgJobs(ctx, taskId, rule); err != nil {
+	if err = s.ensureCollectTgJobs(ctx, taskId); err != nil {
 		return false, err
 	}
 	if err = s.markCollectDispatchQueued(ctx, dispatchId, taskId); err != nil {
@@ -287,6 +298,10 @@ func (s *sSysPublish) createCollectPublishMedia(ctx context.Context, event gdb.R
 		if collectMediaSourceKey(item) == "" {
 			continue
 		}
+		item, err := s.prepareCollectMediaAsset(ctx, event, item)
+		if err != nil {
+			return err
+		}
 		mediaType := collectPublishMediaType(item.Type)
 		if mediaType == "" {
 			continue
@@ -297,7 +312,7 @@ func (s *sSysPublish) createCollectPublishMedia(ctx context.Context, event gdb.R
 		if strings.TrimSpace(item.FileId) != "" {
 			cacheStatus = tgCacheStatusValid
 		}
-		_, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(g.Map{
+		_, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(g.Map{
 			"tenant_id":           event["tenant_id"].Int64(),
 			"merchant_id":         event["tenant_id"].Int64(),
 			"account_id":          event["account_id"].Int64(),

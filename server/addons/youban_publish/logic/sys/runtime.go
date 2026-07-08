@@ -54,6 +54,7 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	go s.runScheduledPublishRuntime(ctx)
 	go s.runCyclePlanScheduler(ctx)
 	go s.runTelegramJobRecovery(ctx)
+	go s.runAccountCollectSupervisor(ctx)
 	<-ctx.Done()
 }
 

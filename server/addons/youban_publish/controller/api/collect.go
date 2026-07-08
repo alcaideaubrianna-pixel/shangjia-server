@@ -22,6 +22,29 @@ func (c *cPublish) CollectSourceList(ctx context.Context, req *publish.CollectSo
 	return
 }
 
+func (c *cPublish) CollectConfig(ctx context.Context, req *publish.CollectConfigReq) (res *publish.CollectConfigRes, err error) {
+	data, err := service.SysPublish().CollectConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.CollectConfigRes{CollectConfigModel: data}, nil
+}
+
+func (c *cPublish) CollectConfigSave(ctx context.Context, req *publish.CollectConfigSaveReq) (res *publish.CollectConfigSaveRes, err error) {
+	if err = service.SysPublish().CollectConfigSave(ctx, &req.CollectConfigSaveInp); err != nil {
+		return nil, err
+	}
+	return &publish.CollectConfigSaveRes{}, nil
+}
+
+func (c *cPublish) CollectStats(ctx context.Context, req *publish.CollectStatsReq) (res *publish.CollectStatsRes, err error) {
+	data, err := service.SysPublish().CollectStats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.CollectStatsRes{CollectStatsModel: data}, nil
+}
+
 func (c *cPublish) CollectSourceSave(ctx context.Context, req *publish.CollectSourceSaveReq) (res *publish.CollectSourceSaveRes, err error) {
 	id, err := service.SysPublish().CollectSourceSave(ctx, &req.CollectSourceSaveInp)
 	if err != nil {

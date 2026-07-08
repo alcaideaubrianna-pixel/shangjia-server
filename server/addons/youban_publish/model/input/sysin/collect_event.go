@@ -18,28 +18,30 @@ type CollectEventListInp struct {
 }
 
 type CollectEventModel struct {
-	Id              int64       `json:"id" dc:"ID"`
-	TenantId        int64       `json:"tenantId" dc:"租户ID"`
-	AccountId       int64       `json:"accountId" dc:"账号ID"`
-	SourceId        int64       `json:"sourceId" dc:"采集源ID"`
-	SourceTitle     string      `json:"sourceTitle" dc:"采集源名称"`
-	SourceType      string      `json:"sourceType" dc:"来源类型"`
-	BotId           int64       `json:"botId" dc:"机器人ID"`
-	TgAccountId     int64       `json:"tgAccountId" dc:"协议号ID"`
-	SourceChatId    string      `json:"sourceChatId" dc:"来源Chat ID"`
-	SourceMessageId int64       `json:"sourceMessageId" dc:"来源消息ID"`
-	SourceGroupedId string      `json:"sourceGroupedId" dc:"媒体组ID"`
-	SourceUniqueKey string      `json:"sourceUniqueKey" dc:"来源唯一键"`
-	RawText         string      `json:"rawText" dc:"原始文本"`
-	MediaCount      int         `json:"mediaCount" dc:"媒体数"`
-	MediaJson       string      `json:"mediaJson" dc:"媒体JSON"`
-	TextHash        string      `json:"textHash" dc:"文本哈希"`
-	DedupeKey       string      `json:"dedupeKey" dc:"去重键"`
-	Status          string      `json:"status" dc:"状态"`
-	ErrorMessage    string      `json:"errorMessage" dc:"错误信息"`
-	ReceivedAt      *gtime.Time `json:"receivedAt" dc:"接收时间"`
-	ProcessedAt     *gtime.Time `json:"processedAt" dc:"处理时间"`
-	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
+	Id                int64       `json:"id" dc:"ID"`
+	TenantId          int64       `json:"tenantId" dc:"租户ID"`
+	AccountId         int64       `json:"accountId" dc:"账号ID"`
+	SourceId          int64       `json:"sourceId" dc:"采集源ID"`
+	SourceTitle       string      `json:"sourceTitle" dc:"采集源名称"`
+	SourceType        string      `json:"sourceType" dc:"来源类型"`
+	BotId             int64       `json:"botId" dc:"机器人ID"`
+	TgAccountId       int64       `json:"tgAccountId" dc:"协议号ID"`
+	SourceChatId      string      `json:"sourceChatId" dc:"来源Chat ID"`
+	SourceMessageId   int64       `json:"sourceMessageId" dc:"来源消息ID"`
+	SourceGroupedId   string      `json:"sourceGroupedId" dc:"媒体组ID"`
+	SourceUniqueKey   string      `json:"sourceUniqueKey" dc:"来源唯一键"`
+	RawText           string      `json:"rawText" dc:"原始文本"`
+	MediaCount        int         `json:"mediaCount" dc:"媒体数"`
+	MediaJson         string      `json:"mediaJson" dc:"媒体JSON"`
+	MediaCacheStatus  string      `json:"mediaCacheStatus" dc:"媒体缓存状态"`
+	MediaCacheMessage string      `json:"mediaCacheMessage" dc:"媒体缓存说明"`
+	TextHash          string      `json:"textHash" dc:"文本哈希"`
+	DedupeKey         string      `json:"dedupeKey" dc:"去重键"`
+	Status            string      `json:"status" dc:"状态"`
+	ErrorMessage      string      `json:"errorMessage" dc:"错误信息"`
+	ReceivedAt        *gtime.Time `json:"receivedAt" dc:"接收时间"`
+	ProcessedAt       *gtime.Time `json:"processedAt" dc:"处理时间"`
+	CreatedAt         *gtime.Time `json:"createdAt" dc:"创建时间"`
 }
 
 type CollectEventClearInp struct {

@@ -14,11 +14,13 @@ import (
 
 var mysqlBusinessSqlFiles = []string{
 	"addons/youban_publish/resource/sql/install.sql",
+	"addons/youban_publish/resource/sql/upgrade.sql",
 	"addons/youban_publish/resource/sql/menu.sql",
 }
 
 var pgsqlBusinessSqlFiles = []string{
 	"addons/youban_publish/resource/sql/install.pgsql.sql",
+	"addons/youban_publish/resource/sql/upgrade.pgsql.sql",
 	"addons/youban_publish/resource/sql/menu.pgsql.sql",
 }
 

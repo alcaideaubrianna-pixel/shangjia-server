@@ -117,6 +117,7 @@ func collectMessageMediaJSON(media []collectMediaItem) (string, int) {
 		item.FileUrl = strings.TrimSpace(item.FileUrl)
 		item.StoragePath = strings.TrimSpace(item.StoragePath)
 		item.PosterUrl = strings.TrimSpace(item.PosterUrl)
+		item.MetaJson = strings.TrimSpace(item.MetaJson)
 		if item.Type == "" || collectMediaSourceKey(item) == "" {
 			continue
 		}

@@ -15,6 +15,9 @@ const (
 	CollectSourceTypeBot     = "bot"
 	CollectSourceTypeFollow  = "follow"
 
+	CollectHistoryModeAll        = "all"
+	CollectHistoryModeRecentDays = "recent_days"
+
 	CollectEventStatusPending   = "pending"
 	CollectEventStatusProcessed = "processed"
 	CollectEventStatusIgnored   = "ignored"
@@ -38,42 +41,75 @@ type CollectSourceListInp struct {
 	Status     int    `json:"status" dc:"状态"`
 }
 
+type CollectConfigModel struct {
+	Enabled int `json:"enabled" dc:"采集总开关"`
+}
+
+type CollectConfigSaveInp struct {
+	Enabled int `json:"enabled" dc:"采集总开关"`
+}
+
+func (in *CollectConfigSaveInp) Filter(ctx context.Context) error {
+	if in.Enabled != 0 {
+		in.Enabled = 1
+	}
+	return nil
+}
+
+type CollectStatsModel struct {
+	BackupChannelCount  int `json:"backupChannelCount" dc:"备份群数量"`
+	BlockedCount        int `json:"blockedCount" dc:"已屏蔽数量"`
+	CollectingCount     int `json:"collectingCount" dc:"采集中数量"`
+	EventCount          int `json:"eventCount" dc:"采集事件数"`
+	FailedDispatchCount int `json:"failedDispatchCount" dc:"失败分发数"`
+	PendingReviewCount  int `json:"pendingReviewCount" dc:"待审核数"`
+	PushSuccessRate     int `json:"pushSuccessRate" dc:"推送成功率"`
+	RuleCount           int `json:"ruleCount" dc:"规则数"`
+	TodayPushedCount    int `json:"todayPushedCount" dc:"今日成功推送"`
+}
+
 type CollectSourceModel struct {
-	Id              int64       `json:"id" dc:"ID"`
-	TenantId        int64       `json:"tenantId" dc:"租户ID"`
-	AccountId       int64       `json:"accountId" dc:"账号ID"`
-	SourceType      string      `json:"sourceType" dc:"来源类型"`
-	Title           string      `json:"title" dc:"名称"`
-	SourceChatId    string      `json:"sourceChatId" dc:"频道/群聊ID"`
-	SourceUsername  string      `json:"sourceUsername" dc:"用户名"`
-	TgAccountId     int64       `json:"tgAccountId" dc:"协议号ID"`
-	BotId           int64       `json:"botId" dc:"机器人ID"`
-	FollowAccountId int64       `json:"followAccountId" dc:"关注账号ID"`
-	CollectEnabled  int         `json:"collectEnabled" dc:"采集开关"`
-	RuleIds         []int64     `json:"ruleIds" dc:"绑定规则ID"`
-	Status          int         `json:"status" dc:"状态"`
-	EventTotal      int64       `json:"eventTotal" dc:"事件总数"`
-	SuccessTotal    int64       `json:"successTotal" dc:"成功数"`
-	FailedTotal     int64       `json:"failedTotal" dc:"失败数"`
-	LastEventAt     *gtime.Time `json:"lastEventAt" dc:"最后事件时间"`
-	Remark          string      `json:"remark" dc:"备注"`
-	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt       *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id                    int64       `json:"id" dc:"ID"`
+	TenantId              int64       `json:"tenantId" dc:"租户ID"`
+	AccountId             int64       `json:"accountId" dc:"账号ID"`
+	SourceType            string      `json:"sourceType" dc:"来源类型"`
+	Title                 string      `json:"title" dc:"名称"`
+	SourceChatId          string      `json:"sourceChatId" dc:"频道/群聊ID"`
+	SourceUsername        string      `json:"sourceUsername" dc:"用户名"`
+	TgAccountId           int64       `json:"tgAccountId" dc:"协议号ID"`
+	BotId                 int64       `json:"botId" dc:"机器人ID"`
+	FollowAccountId       int64       `json:"followAccountId" dc:"关注账号ID"`
+	CollectEnabled        int         `json:"collectEnabled" dc:"采集开关"`
+	HistoryCollectEnabled int         `json:"historyCollectEnabled" dc:"历史采集开关"`
+	HistoryCollectMode    string      `json:"historyCollectMode" dc:"历史采集模式"`
+	HistoryCollectDays    int         `json:"historyCollectDays" dc:"历史采集天数"`
+	RuleIds               []int64     `json:"ruleIds" dc:"绑定规则ID"`
+	Status                int         `json:"status" dc:"状态"`
+	EventTotal            int64       `json:"eventTotal" dc:"事件总数"`
+	SuccessTotal          int64       `json:"successTotal" dc:"成功数"`
+	FailedTotal           int64       `json:"failedTotal" dc:"失败数"`
+	LastEventAt           *gtime.Time `json:"lastEventAt" dc:"最后事件时间"`
+	Remark                string      `json:"remark" dc:"备注"`
+	CreatedAt             *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt             *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type CollectSourceSaveInp struct {
-	Id              int64   `json:"id" dc:"ID"`
-	SourceType      string  `json:"sourceType" dc:"来源类型"`
-	Title           string  `json:"title" dc:"名称"`
-	SourceChatId    string  `json:"sourceChatId" dc:"频道/群聊ID"`
-	SourceUsername  string  `json:"sourceUsername" dc:"用户名"`
-	TgAccountId     int64   `json:"tgAccountId" dc:"协议号ID"`
-	BotId           int64   `json:"botId" dc:"机器人ID"`
-	FollowAccountId int64   `json:"followAccountId" dc:"关注账号ID"`
-	CollectEnabled  int     `json:"collectEnabled" dc:"采集开关"`
-	RuleIds         []int64 `json:"ruleIds" dc:"绑定规则ID"`
-	Remark          string  `json:"remark" dc:"备注"`
-	Status          int     `json:"status" dc:"状态"`
+	Id                    int64   `json:"id" dc:"ID"`
+	SourceType            string  `json:"sourceType" dc:"来源类型"`
+	Title                 string  `json:"title" dc:"名称"`
+	SourceChatId          string  `json:"sourceChatId" dc:"频道/群聊ID"`
+	SourceUsername        string  `json:"sourceUsername" dc:"用户名"`
+	TgAccountId           int64   `json:"tgAccountId" dc:"协议号ID"`
+	BotId                 int64   `json:"botId" dc:"机器人ID"`
+	FollowAccountId       int64   `json:"followAccountId" dc:"关注账号ID"`
+	CollectEnabled        int     `json:"collectEnabled" dc:"采集开关"`
+	HistoryCollectEnabled int     `json:"historyCollectEnabled" dc:"历史采集开关"`
+	HistoryCollectMode    string  `json:"historyCollectMode" dc:"历史采集模式"`
+	HistoryCollectDays    int     `json:"historyCollectDays" dc:"历史采集天数"`
+	RuleIds               []int64 `json:"ruleIds" dc:"绑定规则ID"`
+	Remark                string  `json:"remark" dc:"备注"`
+	Status                int     `json:"status" dc:"状态"`
 }
 
 func (in *CollectSourceSaveInp) Filter(ctx context.Context) error {
@@ -94,10 +130,36 @@ func (in *CollectSourceSaveInp) Filter(ctx context.Context) error {
 	if in.CollectEnabled != 1 {
 		in.CollectEnabled = 0
 	}
+	in.HistoryCollectEnabled, in.HistoryCollectMode, in.HistoryCollectDays = NormalizeCollectHistoryConfig(
+		in.SourceType,
+		in.HistoryCollectEnabled,
+		in.HistoryCollectMode,
+		in.HistoryCollectDays,
+	)
 	if in.Status == 0 {
 		in.Status = 1
 	}
 	return nil
+}
+
+func NormalizeCollectHistoryConfig(sourceType string, enabled int, mode string, days int) (int, string, int) {
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		mode = CollectHistoryModeRecentDays
+	}
+	if mode != CollectHistoryModeAll && mode != CollectHistoryModeRecentDays {
+		mode = CollectHistoryModeRecentDays
+	}
+	if days <= 0 {
+		days = 30
+	}
+	if days > 365 {
+		days = 365
+	}
+	if strings.TrimSpace(sourceType) != CollectSourceTypeAccount || enabled != 1 {
+		return 0, mode, days
+	}
+	return 1, mode, days
 }
 
 type CollectRuleListInp struct {
@@ -118,9 +180,11 @@ type CollectRuleModel struct {
 	ReviewEnabled        int         `json:"reviewEnabled" dc:"审核开关"`
 	DedupeEnabled        int         `json:"dedupeEnabled" dc:"去重开关"`
 	DedupeDays           int         `json:"dedupeDays" dc:"去重天数"`
+	FullMatchEnabled     int         `json:"fullMatchEnabled" dc:"全量匹配"`
 	KeywordJson          string      `json:"keywordJson" dc:"关键词JSON"`
 	TagJson              string      `json:"tagJson" dc:"标签JSON"`
 	ReplaceJson          string      `json:"replaceJson" dc:"替换JSON"`
+	DeleteTextJson       string      `json:"deleteTextJson" dc:"删除文本JSON"`
 	BlockTextJson        string      `json:"blockTextJson" dc:"屏蔽文本JSON"`
 	BlockLink            int         `json:"blockLink" dc:"屏蔽链接"`
 	BlockUsername        int         `json:"blockUsername" dc:"屏蔽用户名"`
@@ -148,9 +212,11 @@ type CollectRuleSaveInp struct {
 	ReviewEnabled        int    `json:"reviewEnabled" dc:"审核开关"`
 	DedupeEnabled        int    `json:"dedupeEnabled" dc:"去重开关"`
 	DedupeDays           int    `json:"dedupeDays" dc:"去重天数"`
+	FullMatchEnabled     int    `json:"fullMatchEnabled" dc:"全量匹配"`
 	KeywordJson          string `json:"keywordJson" dc:"关键词JSON"`
 	TagJson              string `json:"tagJson" dc:"标签JSON"`
 	ReplaceJson          string `json:"replaceJson" dc:"替换JSON"`
+	DeleteTextJson       string `json:"deleteTextJson" dc:"删除文本JSON"`
 	BlockTextJson        string `json:"blockTextJson" dc:"屏蔽文本JSON"`
 	BlockLink            int    `json:"blockLink" dc:"屏蔽链接"`
 	BlockUsername        int    `json:"blockUsername" dc:"屏蔽用户名"`
@@ -170,14 +236,12 @@ func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
 	in.Name = strings.TrimSpace(in.Name)
 	in.TargetChannelIdJson = strings.TrimSpace(in.TargetChannelIdJson)
 	in.BotIdJson = strings.TrimSpace(in.BotIdJson)
+	in.DeleteTextJson = strings.TrimSpace(in.DeleteTextJson)
 	if in.Name == "" {
 		return gerror.New("规则名称不能为空")
 	}
 	if emptyCollectJSON(in.TargetChannelIdJson) {
 		return gerror.New("目标频道不能为空")
-	}
-	if emptyCollectJSON(in.BotIdJson) {
-		return gerror.New("推送BOT不能为空")
 	}
 	if in.DedupeDays <= 0 || in.DedupeDays > 7 {
 		in.DedupeDays = 7

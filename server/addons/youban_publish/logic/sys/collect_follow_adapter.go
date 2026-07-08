@@ -17,6 +17,9 @@ import (
 )
 
 func (s *sSysPublish) collectFollowProfilePublished(ctx context.Context, task gdb.Record) error {
+	if !s.collectGlobalEnabled(ctx) {
+		return nil
+	}
 	if task.IsEmpty() || task["profile_id"].Int64() <= 0 {
 		return nil
 	}

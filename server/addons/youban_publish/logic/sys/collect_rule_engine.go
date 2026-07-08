@@ -55,13 +55,19 @@ func (s *sSysPublish) evaluateCollectRule(ctx context.Context, event gdb.Record,
 	if blockedText := matchCollectTerms(rawText, collectStringList(rule["block_text_json"].String())); blockedText != "" {
 		return skippedCollectRule("屏蔽文本:" + blockedText), nil
 	}
-	matchedKeywords := matchedCollectTerms(rawText, collectStringList(rule["keyword_json"].String()))
-	if len(collectStringList(rule["keyword_json"].String())) > 0 && len(matchedKeywords) == 0 {
-		return skippedCollectRule("未命中关键词"), nil
-	}
-	matchedTags := matchedCollectTags(rawText, collectStringList(rule["tag_json"].String()))
-	if len(collectStringList(rule["tag_json"].String())) > 0 && len(matchedTags) == 0 {
-		return skippedCollectRule("未命中标签"), nil
+	matchedKeywords := []string(nil)
+	matchedTags := []string(nil)
+	if rule["full_match_enabled"].Int() != 1 {
+		keywords := collectStringList(rule["keyword_json"].String())
+		matchedKeywords = matchedCollectTerms(rawText, keywords)
+		if len(keywords) > 0 && len(matchedKeywords) == 0 {
+			return skippedCollectRule("未命中关键词"), nil
+		}
+		tags := collectStringList(rule["tag_json"].String())
+		matchedTags = matchedCollectTags(rawText, tags)
+		if len(tags) > 0 && len(matchedTags) == 0 {
+			return skippedCollectRule("未命中标签"), nil
+		}
 	}
 	if rule["dedupe_enabled"].Int() == 1 {
 		duplicated, err := s.collectDuplicated(ctx, event, content, rule["dedupe_days"].Int())
@@ -72,7 +78,8 @@ func (s *sSysPublish) evaluateCollectRule(ctx context.Context, event gdb.Record,
 			return skippedCollectRule("图文重复"), nil
 		}
 	}
-	text := applyCollectReplacements(rawText, collectReplaceList(rule["replace_json"].String()))
+	text := applyCollectTextDeletes(rawText, collectStringList(rule["delete_text_json"].String()))
+	text = applyCollectReplacements(text, collectReplaceList(rule["replace_json"].String()))
 	if rule["header_enabled"].Int() == 1 && strings.TrimSpace(rule["header_markdown"].String()) != "" {
 		text = strings.TrimSpace(rule["header_markdown"].String()) + "\n\n" + text
 	}
@@ -246,6 +253,17 @@ func applyCollectReplacements(text string, rules []collectReplaceRule) string {
 			continue
 		}
 		text = strings.ReplaceAll(text, rule.From, rule.To)
+	}
+	return text
+}
+
+func applyCollectTextDeletes(text string, values []string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		text = strings.ReplaceAll(text, value, "")
 	}
 	return text
 }

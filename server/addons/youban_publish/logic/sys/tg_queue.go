@@ -12,17 +12,18 @@ import (
 )
 
 const (
-	tgQueueNameDefault    = "youban_publish_tg"
-	tgTaskTypeSubmit      = "youban_publish:tg:submit"
-	tgTaskTypePublish     = "youban_publish:tg:publish"
-	tgTaskTypeDelete      = "youban_publish:tg:delete"
-	tgTaskTypeCleanup     = "youban_publish:tg:cleanup"
-	tgTaskTypeImport      = "youban_publish:import:legacy"
-	tgTaskTypeRepair      = "youban_publish:tg:message_repair"
-	tgTaskTypeImportMatch = "youban_publish:import:tg_match"
-	tgTaskTypeImportSync  = "youban_publish:import:tg_sync"
-	tgTaskTypeDown        = "youban_publish:profile:down"
-	tgTaskTypeCycleRun    = "youban_publish:cycle:run"
+	tgQueueNameDefault     = "youban_publish_tg"
+	tgTaskTypeSubmit       = "youban_publish:tg:submit"
+	tgTaskTypePublish      = "youban_publish:tg:publish"
+	tgTaskTypeDelete       = "youban_publish:tg:delete"
+	tgTaskTypeCleanup      = "youban_publish:tg:cleanup"
+	tgTaskTypeImport       = "youban_publish:import:legacy"
+	tgTaskTypeRepair       = "youban_publish:tg:message_repair"
+	tgTaskTypeImportMatch  = "youban_publish:import:tg_match"
+	tgTaskTypeImportSync   = "youban_publish:import:tg_sync"
+	tgTaskTypeDown         = "youban_publish:profile:down"
+	tgTaskTypeCycleRun     = "youban_publish:cycle:run"
+	tgTaskTypeCollectMedia = "youban_publish:collect:media_cache"
 )
 
 type tgQueuePayload struct {

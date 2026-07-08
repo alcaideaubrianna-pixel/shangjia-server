@@ -47,6 +47,9 @@ func (s *sSysPublish) CollectRuleSave(ctx context.Context, in *sysin.CollectRule
 	if err != nil {
 		return 0, err
 	}
+	if err = ensureCollectRuleColumns(ctx); err != nil {
+		return 0, err
+	}
 	if in == nil {
 		return 0, gerror.New("规则参数不能为空")
 	}
@@ -65,9 +68,11 @@ func (s *sSysPublish) CollectRuleSave(ctx context.Context, in *sysin.CollectRule
 		"review_enabled":          switchInt(in.ReviewEnabled),
 		"dedupe_enabled":          switchDefaultOn(in.DedupeEnabled),
 		"dedupe_days":             in.DedupeDays,
+		"full_match_enabled":      switchInt(in.FullMatchEnabled),
 		"keyword_json":            in.KeywordJson,
 		"tag_json":                in.TagJson,
 		"replace_json":            in.ReplaceJson,
+		"delete_text_json":        in.DeleteTextJson,
 		"block_text_json":         in.BlockTextJson,
 		"block_link":              switchDefaultOn(in.BlockLink),
 		"block_username":          switchDefaultOn(in.BlockUsername),
