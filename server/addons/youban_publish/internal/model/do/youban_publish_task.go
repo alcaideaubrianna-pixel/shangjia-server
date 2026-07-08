@@ -13,6 +13,7 @@ import (
 type YoubanPublishTask struct {
 	g.Meta          `orm:"table:hg_youban_publish_task, do:true"`
 	Id              any         //
+	TenantId        any         //
 	MerchantId      any         //
 	AccountId       any         //
 	ProfileId       any         //
@@ -34,5 +35,8 @@ type YoubanPublishTask struct {
 	CreatedAt       *gtime.Time //
 	UpdatedAt       *gtime.Time //
 	DeletedAt       *gtime.Time //
-	TenantId        any         //
+	ChannelIdJson   any         //
+	CustomerRemark  any         //
+	AntiScanEnabled any         //
+	TgOperationNo   any         //
 }

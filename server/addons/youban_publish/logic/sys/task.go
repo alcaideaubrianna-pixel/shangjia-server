@@ -216,6 +216,9 @@ func (s *sSysPublish) submitTaskByTenant(ctx context.Context, id int64, tenantId
 }
 
 func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenantId int64, accountId int64, operatorId int64) (err error) {
+	if err = ensureTelegramOperationColumns(ctx); err != nil {
+		return err
+	}
 	task, err := s.getPublishWorkflowTask(ctx, id, tenantId, accountId)
 	if err != nil {
 		return err
@@ -233,14 +236,16 @@ func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenan
 	if !hasChannels {
 		return s.markTaskSavedWithoutPublish(ctx, task, operatorId)
 	}
-	if err = s.markTaskPublishQueued(ctx, id, tenantId, operatorId); err != nil {
+	operationNo := newTelegramOperationNo("publish", id)
+	if err = s.markTaskPublishQueued(ctx, id, tenantId, operatorId, operationNo); err != nil {
 		return err
 	}
 	if err = s.enqueuePublishSubmitTask(ctx, publishSubmitQueuePayload{
-		TaskId:     id,
-		TenantId:   tenantId,
-		AccountId:  accountId,
-		OperatorId: operatorId,
+		TaskId:      id,
+		TenantId:    tenantId,
+		AccountId:   accountId,
+		OperatorId:  operatorId,
+		OperationNo: operationNo,
 	}, 0); err != nil {
 		_ = s.markTaskPublishFailed(ctx, id, tenantId, operatorId, err)
 		return gerror.Wrap(err, "上架任务加入队列失败")
@@ -248,7 +253,7 @@ func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenan
 	return nil
 }
 
-func (s *sSysPublish) markTaskPublishQueued(ctx context.Context, id int64, tenantId int64, operatorId int64) error {
+func (s *sSysPublish) markTaskPublishQueued(ctx context.Context, id int64, tenantId int64, operatorId int64, operationNo string) error {
 	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
 		Where("id", id).
 		WhereNull("deleted_at")
@@ -259,6 +264,7 @@ func (s *sSysPublish) markTaskPublishQueued(ctx context.Context, id int64, tenan
 		Data(g.Map{
 			"status":          sysin.PublishTaskStatusPublishing,
 			"tg_status":       "pending",
+			"tg_operation_no": operationNo,
 			"tg_push_enabled": 1,
 			"error_message":   "",
 			"submitted_at":    gtime.Now(),
@@ -293,6 +299,9 @@ func (s *sSysPublish) markTaskPublishFailed(ctx context.Context, id int64, tenan
 }
 
 func (s *sSysPublish) executePublishSubmitWorkflow(ctx context.Context, payload publishSubmitQueuePayload) error {
+	if err := ensureTelegramOperationColumns(ctx); err != nil {
+		return err
+	}
 	task, err := s.getPublishWorkflowTask(ctx, payload.TaskId, payload.TenantId, payload.AccountId)
 	if err != nil {
 		return err
@@ -300,11 +309,14 @@ func (s *sSysPublish) executePublishSubmitWorkflow(ctx context.Context, payload 
 	if task["status"].String() != sysin.PublishTaskStatusPublishing {
 		return nil
 	}
+	if payload.OperationNo != "" && task["tg_operation_no"].String() != payload.OperationNo {
+		return nil
+	}
 	if _, err = s.publishTaskToProfile(ctx, task); err != nil {
 		_ = s.markTaskPublishFailed(ctx, payload.TaskId, payload.TenantId, payload.OperatorId, err)
 		return err
 	}
-	if err = s.ensureTgJob(ctx, payload.TaskId); err != nil {
+	if err = s.ensureTgJob(ctx, payload.TaskId, payload.OperationNo); err != nil {
 		_ = s.markTaskPublishFailed(ctx, payload.TaskId, payload.TenantId, payload.OperatorId, err)
 		return err
 	}
@@ -326,11 +338,12 @@ func (s *sSysPublish) markTaskSavedWithoutPublish(ctx context.Context, task gdb.
 		Where("id", task["id"].Int64()).
 		WhereNull("deleted_at").
 		Data(g.Map{
-			"status":        sysin.PublishTaskStatusDraft,
-			"tg_status":     "skipped",
-			"error_message": "",
-			"updated_by":    operatorId,
-			"updated_at":    gtime.Now(),
+			"status":          sysin.PublishTaskStatusDraft,
+			"tg_status":       "skipped",
+			"tg_operation_no": "",
+			"error_message":   "",
+			"updated_by":      operatorId,
+			"updated_at":      gtime.Now(),
 		}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "保存未上架任务失败")
@@ -412,8 +425,8 @@ func (s *sSysPublish) cancelTaskByTenant(ctx context.Context, id int64, tenantId
 	return nil
 }
 
-func (s *sSysPublish) ensureTgJob(ctx context.Context, taskId int64) error {
-	return s.ensureTgJobs(ctx, taskId)
+func (s *sSysPublish) ensureTgJob(ctx context.Context, taskId int64, operationNo string) error {
+	return s.ensureTgJobs(ctx, taskId, operationNo)
 }
 
 func (s *sSysPublish) getTask(ctx context.Context, id int64, accountId int64) (gdb.Record, error) {

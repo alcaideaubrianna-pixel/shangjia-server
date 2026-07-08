@@ -279,6 +279,9 @@ func (s *sSysPublish) cycleSentJobs(ctx context.Context, plan cyclePlanRecord) (
 }
 
 func (s *sSysPublish) requeueCycleTaskTelegramJobs(ctx context.Context, plan cyclePlanRecord) error {
+	if err := ensureTelegramOperationColumns(ctx); err != nil {
+		return err
+	}
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("task_id", plan.TaskId).
@@ -291,22 +294,56 @@ func (s *sSysPublish) requeueCycleTaskTelegramJobs(ctx context.Context, plan cyc
 		return gerror.Wrap(err, "读取循环上架待重投TG任务失败")
 	}
 	now := gtime.Now()
+	operationNo := newTelegramOperationNo("cycle", plan.TaskId)
+	_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Where("id", plan.TaskId).
+		Where("profile_id", plan.ProfileId).
+		Where("account_id", plan.AccountId).
+		Where("status", sysin.PublishTaskStatusPublished).
+		WhereNull("deleted_at").
+		Data(g.Map{"tg_operation_no": operationNo, "tg_status": "pending", "updated_at": now}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "更新循环上架操作号失败")
+	}
 	for _, job := range jobs {
+		jobId, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
+			"task_id":            job.TaskId,
+			"operation_no":       operationNo,
+			"tenant_id":          job.TenantId,
+			"merchant_id":        job.TenantId,
+			"account_id":         job.AccountId,
+			"profile_id":         job.ProfileId,
+			"channel_id":         job.ChannelId,
+			"bot_id":             job.BotId,
+			"target_chat_id":     normalizeTelegramChannelChatID(job.TargetChatId),
+			"status":             "pending",
+			"cycle_enabled":      job.CycleEnabled,
+			"cycle_days":         defaultCycleDays(job.CycleDays),
+			"cycle_publish_time": job.CyclePublishTime,
+			"created_at":         now,
+			"updated_at":         now,
+		}).InsertAndGetId()
+		if err != nil {
+			return gerror.Wrap(err, "创建循环上架TG任务失败")
+		}
 		_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("id", job.Id).
 			Data(g.Map{
-				"status":        "pending",
-				"retry_count":   0,
+				"status":        "superseded",
 				"next_retry_at": nil,
-				"error_message": "",
+				"next_cycle_at": nil,
 				"updated_at":    now,
 			}).
 			Update()
 		if err != nil {
-			return gerror.Wrap(err, "重置循环上架TG任务失败")
+			return gerror.Wrap(err, "废弃旧循环上架TG任务失败")
 		}
-		s.appendTelegramJobLog(ctx, job, "cycle_publish", "queued", "循环上架发布已加入队列")
-		if err = s.enqueueTelegramJob(ctx, job.Id, 0); err != nil {
+		newJob := job
+		newJob.Id = jobId
+		newJob.OperationNo = operationNo
+		s.appendTelegramJobLog(ctx, newJob, "cycle_publish", "queued", "循环上架发布已加入队列")
+		if err = s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
 			return gerror.Wrap(err, "循环上架TG任务入队失败")
 		}
 	}

@@ -9,12 +9,15 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
-const telegramSendingJobRecoverAfter = 5 * time.Minute
+const telegramSendingJobRecoverAfter = 2 * time.Minute
 
 func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	time.Sleep(15 * time.Second)
+	if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
+		g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
+	}
 	for {
 		select {
 		case <-ctx.Done():

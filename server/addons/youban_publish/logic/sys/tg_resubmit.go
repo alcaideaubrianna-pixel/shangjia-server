@@ -9,7 +9,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
-func (s *sSysPublish) prepareTelegramTaskForResubmit(ctx context.Context, task gdb.Record, channels []telegramJobChannel) error {
+func (s *sSysPublish) prepareTelegramTaskForResubmit(ctx context.Context, task gdb.Record, channels []telegramJobChannel, operationNo string) error {
 	selected := make(map[int64]struct{}, len(channels))
 	for _, channel := range channels {
 		selected[channel.Id] = struct{}{}
@@ -22,20 +22,21 @@ func (s *sSysPublish) prepareTelegramTaskForResubmit(ctx context.Context, task g
 		if job.Id <= 0 {
 			continue
 		}
+		if job.OperationNo == operationNo {
+			continue
+		}
 		if job.Status == "sent" {
 			if err = s.deleteTelegramJobMessagesForResubmit(ctx, job); err != nil {
 				return err
 			}
 		}
-		if _, ok := selected[job.ChannelId]; ok {
-			if err = s.resetTelegramJobForResubmit(ctx, job.Id); err != nil {
-				return err
-			}
-		} else {
+		if _, ok := selected[job.ChannelId]; !ok {
 			s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "delete", "superseded", "编辑资料后频道已取消，旧消息已删除")
-			if err = s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
-				return err
-			}
+		} else {
+			s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "publish", "superseded", "新的上架操作已创建，旧TG任务已废弃")
+		}
+		if err = s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -45,7 +46,7 @@ func (s *sSysPublish) telegramTaskReusableJobs(ctx context.Context, taskId int64
 	var jobs []telegramResubmitJob
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("task_id", taskId).
-		WhereIn("status", []string{"pending", "failed_retry", "failed", "sent"}).
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "failed", "sent"}).
 		Scan(&jobs)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取TG历史任务失败")
@@ -95,6 +96,7 @@ func (s *sSysPublish) markTelegramJobSuperseded(ctx context.Context, jobId int64
 type telegramResubmitJob struct {
 	Id           int64  `json:"id"`
 	TaskId       int64  `json:"taskId"`
+	OperationNo  string `json:"operationNo"`
 	TenantId     int64  `json:"tenantId"`
 	AccountId    int64  `json:"accountId"`
 	ProfileId    int64  `json:"profileId"`
@@ -108,6 +110,7 @@ func (job telegramResubmitJob) telegramJobRecord() telegramJobRecord {
 	return telegramJobRecord{
 		Id:           job.Id,
 		TaskId:       job.TaskId,
+		OperationNo:  job.OperationNo,
 		TenantId:     job.TenantId,
 		AccountId:    job.AccountId,
 		ProfileId:    job.ProfileId,

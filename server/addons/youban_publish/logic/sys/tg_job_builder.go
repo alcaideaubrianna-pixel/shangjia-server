@@ -10,10 +10,22 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
-func (s *sSysPublish) ensureTgJobs(ctx context.Context, taskId int64) error {
+func (s *sSysPublish) ensureTgJobs(ctx context.Context, taskId int64, operationNo string) error {
+	if err := ensureTelegramOperationColumns(ctx); err != nil {
+		return err
+	}
 	task, err := s.telegramJobTask(ctx, taskId)
 	if err != nil {
 		return err
+	}
+	if operationNo == "" {
+		operationNo = task["tg_operation_no"].String()
+	}
+	if operationNo == "" {
+		return gerror.New("TG操作号不能为空")
+	}
+	if task["tg_operation_no"].String() != "" && task["tg_operation_no"].String() != operationNo {
+		return nil
 	}
 	if task["tg_push_enabled"].Int() != 1 {
 		return nil
@@ -22,11 +34,11 @@ func (s *sSysPublish) ensureTgJobs(ctx context.Context, taskId int64) error {
 	if err != nil {
 		return err
 	}
-	if err = s.prepareTelegramTaskForResubmit(ctx, task, channels); err != nil {
+	if err = s.prepareTelegramTaskForResubmit(ctx, task, channels, operationNo); err != nil {
 		return err
 	}
 	for _, channel := range channels {
-		jobId, err := s.ensureTgChannelJob(ctx, task, channel)
+		jobId, err := s.ensureTgChannelJob(ctx, task, channel, operationNo)
 		if err != nil {
 			return err
 		}
@@ -59,9 +71,10 @@ func (s *sSysPublish) telegramJobChannels(ctx context.Context, task gdb.Record) 
 	return channels, nil
 }
 
-func (s *sSysPublish) ensureTgChannelJob(ctx context.Context, task gdb.Record, channel telegramJobChannel) (int64, error) {
+func (s *sSysPublish) ensureTgChannelJob(ctx context.Context, task gdb.Record, channel telegramJobChannel, operationNo string) (int64, error) {
 	value, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("task_id", task["id"].Int64()).
+		Where("operation_no", operationNo).
 		Where("channel_id", channel.Id).
 		Fields("id").
 		Value()
@@ -83,6 +96,7 @@ func (s *sSysPublish) ensureTgChannelJob(ctx context.Context, task gdb.Record, c
 	now := gtime.Now()
 	jobId, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
 		"task_id":            task["id"].Int64(),
+		"operation_no":       operationNo,
 		"tenant_id":          task["tenant_id"].Int64(),
 		"merchant_id":        task["tenant_id"].Int64(),
 		"account_id":         task["account_id"].Int64(),

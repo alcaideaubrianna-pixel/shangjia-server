@@ -66,13 +66,14 @@ func (s *sSysPublish) incrementDailyPublishStat(ctx context.Context, job telegra
 	return nil
 }
 
-func (s *sSysPublish) allTelegramTaskJobsSent(ctx context.Context, taskId int64) (bool, error) {
+func (s *sSysPublish) allTelegramTaskJobsSent(ctx context.Context, taskId int64, operationNo string) (bool, error) {
 	if taskId <= 0 {
 		return false, nil
 	}
-	total, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	totalMod := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("task_id", taskId).
-		Count()
+		Where("operation_no", operationNo)
+	total, err := totalMod.Count()
 	if err != nil {
 		return false, gerror.Wrap(err, "统计TG任务失败")
 	}
@@ -81,6 +82,7 @@ func (s *sSysPublish) allTelegramTaskJobsSent(ctx context.Context, taskId int64)
 	}
 	pending, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("task_id", taskId).
+		Where("operation_no", operationNo).
 		WhereNotIn("status", []string{"sent", "superseded"}).
 		Count()
 	if err != nil {
@@ -89,7 +91,7 @@ func (s *sSysPublish) allTelegramTaskJobsSent(ctx context.Context, taskId int64)
 	return pending == 0, nil
 }
 
-func (s *sSysPublish) markTaskPublishedAfterTelegram(ctx context.Context, taskId int64) (bool, error) {
+func (s *sSysPublish) markTaskPublishedAfterTelegram(ctx context.Context, taskId int64, operationNo string) (bool, error) {
 	task, err := s.telegramJobTask(ctx, taskId)
 	if err != nil {
 		return false, err
@@ -99,6 +101,7 @@ func (s *sSysPublish) markTaskPublishedAfterTelegram(ctx context.Context, taskId
 	result, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
 		Where("id", taskId).
 		Where("status", sysin.PublishTaskStatusPublishing).
+		Where("tg_operation_no", operationNo).
 		Data(g.Map{
 			"status":       sysin.PublishTaskStatusPublished,
 			"tg_status":    "sent",
@@ -124,4 +127,23 @@ func (s *sSysPublish) markTaskPublishedAfterTelegram(ctx context.Context, taskId
 		g.Log().Warningf(ctx, "关注采集发布资料失败 task:%d profile:%d err:%+v", taskId, profileId, err)
 	}
 	return true, nil
+}
+
+func (s *sSysPublish) markPublishedTaskTelegramSent(ctx context.Context, taskId int64, operationNo string) error {
+	if taskId <= 0 || operationNo == "" {
+		return nil
+	}
+	_, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Where("id", taskId).
+		Where("status", sysin.PublishTaskStatusPublished).
+		Where("tg_operation_no", operationNo).
+		Data(g.Map{
+			"tg_status":  "sent",
+			"updated_at": gtime.Now(),
+		}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "更新循环上架TG状态失败")
+	}
+	return nil
 }

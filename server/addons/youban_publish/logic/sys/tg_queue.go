@@ -30,10 +30,11 @@ type tgQueuePayload struct {
 }
 
 type publishSubmitQueuePayload struct {
-	TaskId     int64 `json:"taskId"`
-	TenantId   int64 `json:"tenantId"`
-	AccountId  int64 `json:"accountId"`
-	OperatorId int64 `json:"operatorId"`
+	TaskId      int64  `json:"taskId"`
+	TenantId    int64  `json:"tenantId"`
+	AccountId   int64  `json:"accountId"`
+	OperatorId  int64  `json:"operatorId"`
+	OperationNo string `json:"operationNo"`
 }
 
 type importQueuePayload struct {

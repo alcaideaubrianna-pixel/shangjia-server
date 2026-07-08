@@ -111,7 +111,7 @@ func (s *sSysPublish) cycleTaskForJob(ctx context.Context, job telegramJobRecord
 		return nil, gerror.New("TG任务缺少上架任务ID")
 	}
 	row, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("id,status,tg_status,deleted_at").
+		Fields("id,status,tg_status,tg_operation_no,deleted_at").
 		Where("id", job.TaskId).
 		WhereNull("deleted_at").
 		One()

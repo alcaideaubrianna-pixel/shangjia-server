@@ -13,10 +13,18 @@ import (
 
 func (s *sSysPublish) lockTelegramJob(ctx context.Context, jobId int64) (telegramJobRecord, bool, error) {
 	var job telegramJobRecord
+	if err := ensureTelegramOperationColumns(ctx); err != nil {
+		return job, false, err
+	}
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", jobId).
 		WhereIn("status", []string{"pending", "failed_retry"}).
-		Data(g.Map{"status": "sending", "updated_at": gtime.Now()}).
+		Data(g.Map{
+			"status":        "sending",
+			"error_message": "",
+			"sent_at":       nil,
+			"updated_at":    gtime.Now(),
+		}).
 		Update()
 	if err != nil {
 		return job, false, gerror.Wrap(err, "锁定TG任务失败")
@@ -74,7 +82,7 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 }
 
 func (s *sSysPublish) telegramJobTask(ctx context.Context, taskId int64) (gdb.Record, error) {
-	fields := "t.id,t.tenant_id,t.account_id,t.profile_id,t.title,t.province,t.city,t.plain_text,t.tg_push_enabled,t.channel_id_json,a.nickname AS account_nickname,p.profile_no"
+	fields := "t.id,t.tenant_id,t.account_id,t.profile_id,t.title,t.province,t.city,t.plain_text,t.tg_push_enabled,t.tg_operation_no,t.channel_id_json,a.nickname AS account_nickname,p.profile_no"
 	row, err := g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
 		LeftJoin(publishAccountTable+" a", "a.id=t.account_id AND a.deleted_at IS NULL").
 		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=t.profile_id AND p.deleted_at IS NULL").

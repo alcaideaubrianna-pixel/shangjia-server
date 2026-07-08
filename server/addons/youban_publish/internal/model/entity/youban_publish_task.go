@@ -11,6 +11,7 @@ import (
 // YoubanPublishTask is the golang structure for table youban_publish_task.
 type YoubanPublishTask struct {
 	Id              int64       `json:"id"              orm:"id"                description:""`
+	TenantId        int64       `json:"tenantId"        orm:"tenant_id"         description:""`
 	MerchantId      int64       `json:"merchantId"      orm:"merchant_id"       description:""`
 	AccountId       int64       `json:"accountId"       orm:"account_id"        description:""`
 	ProfileId       int64       `json:"profileId"       orm:"profile_id"        description:""`
@@ -32,5 +33,8 @@ type YoubanPublishTask struct {
 	CreatedAt       *gtime.Time `json:"createdAt"       orm:"created_at"        description:""`
 	UpdatedAt       *gtime.Time `json:"updatedAt"       orm:"updated_at"        description:""`
 	DeletedAt       *gtime.Time `json:"deletedAt"       orm:"deleted_at"        description:""`
-	TenantId        int64       `json:"tenantId"        orm:"tenant_id"         description:""`
+	ChannelIdJson   string      `json:"channelIdJson"   orm:"channel_id_json"   description:""`
+	CustomerRemark  string      `json:"customerRemark"  orm:"customer_remark"   description:""`
+	AntiScanEnabled int         `json:"antiScanEnabled" orm:"anti_scan_enabled" description:""`
+	TgOperationNo   string      `json:"tgOperationNo"   orm:"tg_operation_no"   description:""`
 }

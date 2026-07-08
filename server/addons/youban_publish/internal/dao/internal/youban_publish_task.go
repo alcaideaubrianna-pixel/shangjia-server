@@ -22,6 +22,7 @@ type YoubanPublishTaskDao struct {
 // YoubanPublishTaskColumns defines and stores column names for the table hg_youban_publish_task.
 type YoubanPublishTaskColumns struct {
 	Id              string //
+	TenantId        string //
 	MerchantId      string //
 	AccountId       string //
 	ProfileId       string //
@@ -43,12 +44,16 @@ type YoubanPublishTaskColumns struct {
 	CreatedAt       string //
 	UpdatedAt       string //
 	DeletedAt       string //
-	TenantId        string //
+	ChannelIdJson   string //
+	CustomerRemark  string //
+	AntiScanEnabled string //
+	TgOperationNo   string //
 }
 
 // youbanPublishTaskColumns holds the columns for the table hg_youban_publish_task.
 var youbanPublishTaskColumns = YoubanPublishTaskColumns{
 	Id:              "id",
+	TenantId:        "tenant_id",
 	MerchantId:      "merchant_id",
 	AccountId:       "account_id",
 	ProfileId:       "profile_id",
@@ -70,7 +75,10 @@ var youbanPublishTaskColumns = YoubanPublishTaskColumns{
 	CreatedAt:       "created_at",
 	UpdatedAt:       "updated_at",
 	DeletedAt:       "deleted_at",
-	TenantId:        "tenant_id",
+	ChannelIdJson:   "channel_id_json",
+	CustomerRemark:  "customer_remark",
+	AntiScanEnabled: "anti_scan_enabled",
+	TgOperationNo:   "tg_operation_no",
 }
 
 // NewYoubanPublishTaskDao creates and returns a new DAO object for table data access.

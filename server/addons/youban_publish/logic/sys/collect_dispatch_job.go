@@ -13,6 +13,9 @@ import (
 )
 
 func (s *sSysPublish) ensureCollectTgJobs(ctx context.Context, taskId int64, rule gdb.Record) error {
+	if err := ensureTelegramOperationColumns(ctx); err != nil {
+		return err
+	}
 	task, err := s.telegramJobTask(ctx, taskId)
 	if err != nil {
 		return err
@@ -24,12 +27,22 @@ func (s *sSysPublish) ensureCollectTgJobs(ctx context.Context, taskId int64, rul
 	if err != nil {
 		return err
 	}
-	if err = s.prepareTelegramTaskForResubmit(ctx, task, channels); err != nil {
+	operationNo := task["tg_operation_no"].String()
+	if operationNo == "" {
+		operationNo = newTelegramOperationNo("collect", taskId)
+		if _, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).Data(g.Map{
+			"tg_operation_no": operationNo,
+			"updated_at":      gtime.Now(),
+		}).Update(); err != nil {
+			return gerror.Wrap(err, "更新采集TG操作号失败")
+		}
+	}
+	if err = s.prepareTelegramTaskForResubmit(ctx, task, channels, operationNo); err != nil {
 		return err
 	}
 	ruleBotIds := decodeBotIds(rule["bot_id_json"].String())
 	for _, channel := range channels {
-		jobId, err := s.ensureCollectTgChannelJob(ctx, task, channel, ruleBotIds)
+		jobId, err := s.ensureCollectTgChannelJob(ctx, task, channel, ruleBotIds, operationNo)
 		if err != nil {
 			return err
 		}
@@ -40,9 +53,10 @@ func (s *sSysPublish) ensureCollectTgJobs(ctx context.Context, taskId int64, rul
 	return nil
 }
 
-func (s *sSysPublish) ensureCollectTgChannelJob(ctx context.Context, task gdb.Record, channel telegramJobChannel, ruleBotIds []int64) (int64, error) {
+func (s *sSysPublish) ensureCollectTgChannelJob(ctx context.Context, task gdb.Record, channel telegramJobChannel, ruleBotIds []int64, operationNo string) (int64, error) {
 	value, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("task_id", task["id"].Int64()).
+		Where("operation_no", operationNo).
 		Where("channel_id", channel.Id).
 		Fields("id").
 		Value()
@@ -66,6 +80,7 @@ func (s *sSysPublish) ensureCollectTgChannelJob(ctx context.Context, task gdb.Re
 	now := gtime.Now()
 	jobId, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
 		"task_id":            task["id"].Int64(),
+		"operation_no":       operationNo,
 		"tenant_id":          task["tenant_id"].Int64(),
 		"merchant_id":        task["tenant_id"].Int64(),
 		"account_id":         task["account_id"].Int64(),
