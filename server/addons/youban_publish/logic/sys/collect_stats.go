@@ -77,15 +77,24 @@ func (s *sSysPublish) collectTodayPushedCount(ctx context.Context, tenantId int6
 }
 
 func (s *sSysPublish) collectBackupChannelCount(ctx context.Context, tenantId int64, accountId int64) (int, error) {
-	count, err := pdao.YoubanPublishCollectRule.Ctx(ctx).
+	rows, err := pdao.YoubanPublishCollectRule.Ctx(ctx).
+		Fields("backup_channel_id,backup_channel_id_json").
 		Where("tenant_id", tenantId).Where("account_id", accountId).
-		Where("status", 1).WhereGT("backup_channel_id", 0).WhereNull("deleted_at").
-		Fields("COUNT(DISTINCT backup_channel_id)").
-		Value()
+		Where("status", 1).
+		Where("(backup_channel_id > 0 OR COALESCE(backup_channel_id_json, '') NOT IN ('', '[]', 'null'))").
+		WhereNull("deleted_at").
+		All()
 	if err != nil {
 		return 0, gerror.Wrap(err, "统计备份频道失败")
 	}
-	return count.Int(), nil
+	ids := make([]int64, 0)
+	for _, row := range rows {
+		ids = append(ids, decodeInt64JSON(row["backup_channel_id_json"].String())...)
+		if row["backup_channel_id"].Int64() > 0 {
+			ids = append(ids, row["backup_channel_id"].Int64())
+		}
+	}
+	return len(uniqueIds(ids)), nil
 }
 
 func (s *sSysPublish) collectPushSuccessRate(ctx context.Context, tenantId int64, accountId int64) (int, error) {
