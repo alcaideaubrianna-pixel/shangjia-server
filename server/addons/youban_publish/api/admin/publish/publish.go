@@ -260,6 +260,99 @@ type ImportRunLogClearReq struct {
 
 type ImportRunLogClearRes struct{}
 
+type ImportRunMatchConfigReq struct {
+	g.Meta `path:"/publish/importRunMatch/config" method:"get" tags:"上架插件后台" summary:"导入记录TG匹配配置"`
+	sysin.ImportRunMatchConfigInp
+}
+
+type ImportRunMatchConfigRes struct {
+	*sysin.ImportRunMatchConfigModel
+}
+
+type ImportRunMatchStartReq struct {
+	g.Meta `path:"/publish/importRunMatch/start" method:"post" tags:"上架插件后台" summary:"启动导入记录TG匹配扫描"`
+	sysin.ImportRunMatchStartInp
+}
+
+type ImportRunMatchStartRes struct {
+	*sysin.ImportRunMatchRunModel
+}
+
+type ImportRunTgSyncStartReq struct {
+	g.Meta `path:"/publish/importRunTgSync/start" method:"post" tags:"上架插件后台" summary:"同步导入记录TG频道消息"`
+	sysin.ImportRunTgSyncStartInp
+}
+
+type ImportRunTgSyncStartRes struct {
+	*sysin.ImportRunMatchRunModel
+}
+
+type ImportRunMatchViewReq struct {
+	g.Meta `path:"/publish/importRunMatch/view" method:"get" tags:"上架插件后台" summary:"导入记录TG匹配进度"`
+	sysin.ImportRunMatchViewInp
+}
+
+type ImportRunMatchViewRes struct {
+	*sysin.ImportRunMatchRunModel
+}
+
+type ImportRunMatchItemListReq struct {
+	g.Meta `path:"/publish/importRunMatch/items" method:"get" tags:"上架插件后台" summary:"导入记录TG匹配资料列表"`
+	sysin.ImportRunMatchItemListInp
+}
+
+type ImportRunMatchItemListRes struct {
+	form.PageRes
+	List []*sysin.ImportRunMatchItemModel `json:"list" dc:"匹配资料列表"`
+}
+
+type ImportRunMatchCandidateListReq struct {
+	g.Meta `path:"/publish/importRunMatch/candidates" method:"get" tags:"上架插件后台" summary:"导入记录TG匹配候选消息"`
+	sysin.ImportRunMatchCandidateListInp
+}
+
+type ImportRunMatchCandidateListRes struct {
+	List []*sysin.ImportRunMatchCandidateModel `json:"list" dc:"候选消息列表"`
+}
+
+type ImportRunMatchCandidateSearchReq struct {
+	g.Meta `path:"/publish/importRunMatch/candidateSearch" method:"get" tags:"上架插件后台" summary:"搜索导入记录TG匹配候选消息"`
+	sysin.ImportRunMatchCandidateSearchInp
+}
+
+type ImportRunMatchCandidateSearchRes struct {
+	form.PageRes
+	List []*sysin.ImportRunMatchCandidateModel `json:"list" dc:"候选消息列表"`
+}
+
+type ImportRunMatchSaveDraftReq struct {
+	g.Meta `path:"/publish/importRunMatch/saveDraft" method:"post" tags:"上架插件后台" summary:"保存导入记录TG匹配草稿"`
+	sysin.ImportRunMatchSaveDraftInp
+}
+
+type ImportRunMatchSaveDraftRes struct{}
+
+type ImportRunMatchConfirmReq struct {
+	g.Meta `path:"/publish/importRunMatch/confirm" method:"post" tags:"上架插件后台" summary:"确认导入记录TG匹配"`
+	sysin.ImportRunMatchConfirmInp
+}
+
+type ImportRunMatchConfirmRes struct{}
+
+type ImportRunMatchBatchConfirmReq struct {
+	g.Meta `path:"/publish/importRunMatch/batchConfirm" method:"post" tags:"上架插件后台" summary:"批量确认导入记录TG自动匹配"`
+	sysin.ImportRunMatchBatchConfirmInp
+}
+
+type ImportRunMatchBatchConfirmRes struct{}
+
+type ImportRunMatchSkipReq struct {
+	g.Meta `path:"/publish/importRunMatch/skip" method:"post" tags:"上架插件后台" summary:"跳过导入记录TG匹配"`
+	sysin.ImportRunMatchSkipInp
+}
+
+type ImportRunMatchSkipRes struct{}
+
 type MediaListReq struct {
 	g.Meta `path:"/publish/media/list" method:"get" tags:"上架插件后台" summary:"任务媒体列表"`
 	sysin.MediaListInp

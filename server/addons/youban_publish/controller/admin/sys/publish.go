@@ -588,6 +588,114 @@ func (c *cPublishServer) ImportRunLogClear(ctx context.Context, req *publish.Imp
 	return
 }
 
+func (c *cPublishServer) ImportRunMatchConfig(ctx context.Context, req *publish.ImportRunMatchConfigReq) (res *publish.ImportRunMatchConfigRes, err error) {
+	data, err := service.SysPublish().ServerImportRunMatchConfig(ctx, &req.ImportRunMatchConfigInp)
+	if err != nil {
+		return
+	}
+	res = &publish.ImportRunMatchConfigRes{ImportRunMatchConfigModel: data}
+	return
+}
+
+func (c *cPublishServer) ImportRunMatchStart(ctx context.Context, req *publish.ImportRunMatchStartReq) (res *publish.ImportRunMatchStartRes, err error) {
+	data, err := service.SysPublish().ServerImportRunMatchStart(ctx, &req.ImportRunMatchStartInp)
+	if err != nil {
+		return
+	}
+	res = &publish.ImportRunMatchStartRes{ImportRunMatchRunModel: data}
+	return
+}
+
+func (c *cPublishServer) ImportRunTgSyncStart(ctx context.Context, req *publish.ImportRunTgSyncStartReq) (res *publish.ImportRunTgSyncStartRes, err error) {
+	data, err := service.SysPublish().ServerImportRunTgSyncStart(ctx, &req.ImportRunTgSyncStartInp)
+	if err != nil {
+		return
+	}
+	res = &publish.ImportRunTgSyncStartRes{ImportRunMatchRunModel: data}
+	return
+}
+
+func (c *cPublishServer) ImportRunMatchView(ctx context.Context, req *publish.ImportRunMatchViewReq) (res *publish.ImportRunMatchViewRes, err error) {
+	data, err := service.SysPublish().ServerImportRunMatchView(ctx, &req.ImportRunMatchViewInp)
+	if err != nil {
+		return
+	}
+	res = &publish.ImportRunMatchViewRes{ImportRunMatchRunModel: data}
+	return
+}
+
+func (c *cPublishServer) ImportRunMatchItemList(ctx context.Context, req *publish.ImportRunMatchItemListReq) (res *publish.ImportRunMatchItemListRes, err error) {
+	list, totalCount, err := service.SysPublish().ServerImportRunMatchItemList(ctx, &req.ImportRunMatchItemListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.ImportRunMatchItemModel{}
+	}
+	res = new(publish.ImportRunMatchItemListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) ImportRunMatchCandidateList(ctx context.Context, req *publish.ImportRunMatchCandidateListReq) (res *publish.ImportRunMatchCandidateListRes, err error) {
+	list, err := service.SysPublish().ServerImportRunMatchCandidateList(ctx, &req.ImportRunMatchCandidateListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.ImportRunMatchCandidateModel{}
+	}
+	res = &publish.ImportRunMatchCandidateListRes{List: list}
+	return
+}
+
+func (c *cPublishServer) ImportRunMatchCandidateSearch(ctx context.Context, req *publish.ImportRunMatchCandidateSearchReq) (res *publish.ImportRunMatchCandidateSearchRes, err error) {
+	list, totalCount, err := service.SysPublish().ServerImportRunMatchCandidateSearch(ctx, &req.ImportRunMatchCandidateSearchInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.ImportRunMatchCandidateModel{}
+	}
+	res = new(publish.ImportRunMatchCandidateSearchRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) ImportRunMatchSaveDraft(ctx context.Context, req *publish.ImportRunMatchSaveDraftReq) (res *publish.ImportRunMatchSaveDraftRes, err error) {
+	if err = service.SysPublish().ServerImportRunMatchSaveDraft(ctx, &req.ImportRunMatchSaveDraftInp); err != nil {
+		return
+	}
+	res = &publish.ImportRunMatchSaveDraftRes{}
+	return
+}
+
+func (c *cPublishServer) ImportRunMatchConfirm(ctx context.Context, req *publish.ImportRunMatchConfirmReq) (res *publish.ImportRunMatchConfirmRes, err error) {
+	if err = service.SysPublish().ServerImportRunMatchConfirm(ctx, &req.ImportRunMatchConfirmInp); err != nil {
+		return
+	}
+	res = &publish.ImportRunMatchConfirmRes{}
+	return
+}
+
+func (c *cPublishServer) ImportRunMatchBatchConfirm(ctx context.Context, req *publish.ImportRunMatchBatchConfirmReq) (res *publish.ImportRunMatchBatchConfirmRes, err error) {
+	if err = service.SysPublish().ServerImportRunMatchBatchConfirm(ctx, &req.ImportRunMatchBatchConfirmInp); err != nil {
+		return
+	}
+	res = &publish.ImportRunMatchBatchConfirmRes{}
+	return
+}
+
+func (c *cPublishServer) ImportRunMatchSkip(ctx context.Context, req *publish.ImportRunMatchSkipReq) (res *publish.ImportRunMatchSkipRes, err error) {
+	if err = service.SysPublish().ServerImportRunMatchSkip(ctx, &req.ImportRunMatchSkipInp); err != nil {
+		return
+	}
+	res = &publish.ImportRunMatchSkipRes{}
+	return
+}
+
 func (c *cPublishAdmin) MediaList(ctx context.Context, req *publish.MediaListReq) (res *publish.MediaListRes, err error) {
 	list, err := service.SysPublish().AdminMediaList(ctx, &req.MediaListInp)
 	if err != nil {

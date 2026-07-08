@@ -36,7 +36,6 @@ func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("status", "sending").
 		WhereLTE("updated_at", deadline).
-		WhereNull("deleted_at").
 		OrderAsc("updated_at").
 		Limit(limit).
 		Scan(&jobs)

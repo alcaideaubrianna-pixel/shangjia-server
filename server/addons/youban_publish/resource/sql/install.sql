@@ -450,6 +450,80 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_import_run_log` (
   KEY `idx_ybp_import_run_log_run` (`run_id`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架旧站导入执行日志';
 
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_import_match_run` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `import_run_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '导入执行记录ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架账号ID',
+  `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '状态',
+  `stage` varchar(32) NOT NULL DEFAULT 'created' COMMENT '阶段',
+  `channel_id_json` text COMMENT '频道ID JSON',
+  `scan_days` int(11) NOT NULL DEFAULT '180' COMMENT '扫描天数',
+  `threshold` int(11) NOT NULL DEFAULT '80' COMMENT '自动匹配阈值',
+  `profile_total` int(11) NOT NULL DEFAULT '0' COMMENT '资料总数',
+  `profile_done` int(11) NOT NULL DEFAULT '0' COMMENT '已处理资料',
+  `candidate_total` int(11) NOT NULL DEFAULT '0' COMMENT '候选总数',
+  `auto_matched` int(11) NOT NULL DEFAULT '0' COMMENT '自动匹配数',
+  `manual_pending` int(11) NOT NULL DEFAULT '0' COMMENT '待人工确认数',
+  `confirmed` int(11) NOT NULL DEFAULT '0' COMMENT '已确认数',
+  `skipped` int(11) NOT NULL DEFAULT '0' COMMENT '已跳过数',
+  `error_message` text COMMENT '错误信息',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `finished_at` datetime DEFAULT NULL COMMENT '完成时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_import_match_run_import` (`import_run_id`,`id`),
+  KEY `idx_ybp_import_match_run_scope` (`tenant_id`,`account_id`,`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架导入TG匹配执行';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_import_match_item` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `match_run_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '匹配执行ID',
+  `import_run_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '导入执行记录ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架账号ID',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
+  `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '任务ID',
+  `channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '频道ID',
+  `display_group_key` varchar(128) NOT NULL DEFAULT '' COMMENT '展示资料TG组',
+  `verify_group_key` varchar(128) NOT NULL DEFAULT '' COMMENT '验证资料TG组',
+  `display_score` int(11) NOT NULL DEFAULT '0' COMMENT '展示资料分数',
+  `verify_score` int(11) NOT NULL DEFAULT '0' COMMENT '验证资料分数',
+  `total_score` int(11) NOT NULL DEFAULT '0' COMMENT '总分',
+  `match_status` varchar(32) NOT NULL DEFAULT 'manual_pending' COMMENT '匹配状态',
+  `match_mode` varchar(32) NOT NULL DEFAULT '' COMMENT '匹配方式',
+  `reason_json` text COMMENT '匹配原因JSON',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_import_match_item_scope` (`match_run_id`,`profile_id`,`channel_id`),
+  KEY `idx_ybp_import_match_item_profile` (`profile_id`,`task_id`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架导入TG匹配明细';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_import_match_candidate` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `match_run_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '匹配执行ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '频道ID',
+  `group_key` varchar(128) NOT NULL DEFAULT '' COMMENT '媒体组键',
+  `media_group_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG媒体组ID',
+  `first_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '首条消息ID',
+  `last_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '末条消息ID',
+  `message_date` datetime DEFAULT NULL COMMENT '消息时间',
+  `caption_text` text COMMENT '文案',
+  `media_count` int(11) NOT NULL DEFAULT '0' COMMENT '媒体数量',
+  `media_types` varchar(128) NOT NULL DEFAULT '' COMMENT '媒体类型',
+  `preview_json` text COMMENT '预览JSON',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_import_match_candidate_group` (`match_run_id`,`channel_id`,`group_key`),
+  KEY `idx_ybp_import_match_candidate_channel` (`match_run_id`,`channel_id`,`message_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架导入TG候选组';
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_account_setting` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',

@@ -295,10 +295,306 @@
       </n-space>
     </template>
   </n-modal>
+
+  <n-modal
+    v-model:show="matchModalVisible"
+    preset="card"
+    :title="matchModalTitle"
+    class="match-modal"
+  >
+    <n-space vertical size="large">
+      <n-form :model="matchForm" label-placement="left" label-width="92">
+        <div class="match-config-grid">
+          <n-form-item label="匹配频道">
+            <n-select
+              v-model:value="matchForm.channelIds"
+              :options="matchChannelOptions"
+              multiple
+              filterable
+              clearable
+              placeholder="选择需要拉取和匹配的上架频道"
+            />
+          </n-form-item>
+          <n-form-item label="拉取天数">
+            <n-input-number v-model:value="matchForm.scanDays" :min="1" :max="365" class="w-full" />
+          </n-form-item>
+          <n-form-item label="自动阈值">
+            <n-input-number
+              v-model:value="matchForm.threshold"
+              :min="1"
+              :max="100"
+              class="w-full"
+            />
+          </n-form-item>
+          <n-form-item label="操作">
+            <n-space>
+              <n-button type="primary" :loading="matchStarting" @click="startImportRunMatch">
+                {{ matchPrimaryButtonText }}
+              </n-button>
+              <n-button @click="refreshImportRunMatch">刷新</n-button>
+              <n-button
+                :disabled="!matchRun?.id"
+                :loading="matchConfirming"
+                @click="batchConfirmImportRunMatch"
+              >
+                批量确认自动匹配
+              </n-button>
+            </n-space>
+          </n-form-item>
+        </div>
+      </n-form>
+
+      <div v-if="matchRun?.id" class="match-status">
+        <n-space align="center">
+          <n-tag :type="matchRunStatusType(matchRun.status)" :bordered="false">
+            {{ matchRunStatusText(matchRun.status) }}
+          </n-tag>
+          <span>阶段：{{ matchRun.stage || '-' }}</span>
+          <span>资料：{{ matchRun.profileDone || 0 }}/{{ matchRun.profileTotal || 0 }}</span>
+          <span>候选：{{ matchRun.candidateTotal || 0 }}</span>
+          <span>自动：{{ matchRun.autoMatched || 0 }}</span>
+          <span>待人工：{{ matchRun.manualPending || 0 }}</span>
+          <span>已确认：{{ matchRun.confirmed || 0 }}</span>
+        </n-space>
+        <n-progress
+          type="line"
+          :percentage="matchRunPercent"
+          :processing="matchRun.status === 'running' || matchRun.status === 'pending'"
+          indicator-placement="inside"
+        />
+        <n-alert v-if="matchRun.errorMessage" type="error" :bordered="false">
+          {{ matchRun.errorMessage }}
+        </n-alert>
+      </div>
+
+      <div class="match-body">
+        <n-data-table
+          :columns="matchItemColumns"
+          :data="matchItems"
+          :loading="matchItemLoading"
+          :pagination="matchItemPagination"
+          :row-key="(row) => row.id"
+          :row-props="matchItemRowProps"
+          :scroll-x="1180"
+          size="small"
+          remote
+        />
+        <div class="candidate-panel">
+          <template v-if="activeMatchItem">
+            <div class="review-header">
+              <div>
+                <strong>{{
+                  activeMatchItem.title || activeMatchItem.profileNo || activeMatchItem.profileId
+                }}</strong>
+                <div class="muted-text">
+                  {{ activeMatchItem.channelName || activeMatchItem.channelId }}
+                </div>
+              </div>
+              <n-space>
+                <n-button size="small" @click="moveActiveMatchItem(-1)">上一条</n-button>
+                <n-button size="small" @click="moveActiveMatchItem(1)">下一条</n-button>
+                <n-button size="small" type="primary" @click="confirmAndNext"
+                  >确认并下一条</n-button
+                >
+              </n-space>
+            </div>
+
+            <div class="review-grid">
+              <div class="review-text">
+                <div class="review-label">资料文本</div>
+                <n-scrollbar class="review-scroll">
+                  <div class="pre-wrap">
+                    {{ activeMatchItem.plainText || activeMatchItem.title || '-' }}
+                  </div>
+                </n-scrollbar>
+              </div>
+              <div class="review-text">
+                <div class="review-label">TG 消息文本</div>
+                <n-tabs v-model:value="activePreviewPurpose" type="segment" size="small">
+                  <n-tab-pane name="display" tab="展示资料">
+                    <div class="binding-toolbar">
+                      <n-tag
+                        :type="activeMatchItem.displayGroupKey ? 'success' : 'warning'"
+                        :bordered="false"
+                      >
+                        {{ selectedCandidateText(activeMatchItem.displayGroupKey) }}
+                      </n-tag>
+                      <n-space>
+                        <n-button size="small" @click="openCandidateSearch('display')"
+                          >搜索替换</n-button
+                        >
+                        <n-button size="small" @click="clearCandidateBinding('display')"
+                          >取消</n-button
+                        >
+                      </n-space>
+                    </div>
+                    <n-scrollbar class="review-scroll">
+                      <div class="pre-wrap">
+                        {{ selectedCandidateCaption(activeMatchItem.displayGroupKey) }}
+                      </div>
+                    </n-scrollbar>
+                  </n-tab-pane>
+                  <n-tab-pane name="verify" tab="验证资料">
+                    <div class="binding-toolbar">
+                      <n-tag
+                        :type="activeMatchItem.verifyGroupKey ? 'success' : 'warning'"
+                        :bordered="false"
+                      >
+                        {{ selectedCandidateText(activeMatchItem.verifyGroupKey) }}
+                      </n-tag>
+                      <n-space>
+                        <n-button size="small" @click="openCandidateSearch('verify')"
+                          >搜索替换</n-button
+                        >
+                        <n-button size="small" @click="clearCandidateBinding('verify')"
+                          >取消</n-button
+                        >
+                      </n-space>
+                    </div>
+                    <n-scrollbar class="review-scroll">
+                      <div class="pre-wrap">
+                        {{ selectedCandidateCaption(activeMatchItem.verifyGroupKey) }}
+                      </div>
+                    </n-scrollbar>
+                  </n-tab-pane>
+                </n-tabs>
+              </div>
+            </div>
+
+            <n-spin :show="matchCandidateLoading">
+              <div class="candidate-tools">
+                <span class="muted-text"
+                  >点击候选卡片按“展示资料、验证资料”的顺序绑定；再次点击已绑定卡片取消。</span
+                >
+                <n-button
+                  size="small"
+                  @click="openCandidateSearch(nextCandidatePurpose(activeMatchItem))"
+                >
+                  搜索 TG 消息
+                </n-button>
+              </div>
+              <div class="candidate-list">
+                <div
+                  v-for="candidate in matchCandidates"
+                  :key="candidate.id"
+                  class="candidate-card"
+                  :class="candidateCardClass(candidate)"
+                  @click="toggleCandidateBinding(candidate)"
+                >
+                  <div class="candidate-card-head">
+                    <n-space align="center">
+                      <n-tag
+                        v-if="candidateBindingLabel(candidate)"
+                        type="success"
+                        :bordered="false"
+                      >
+                        {{ candidateBindingLabel(candidate) }}
+                      </n-tag>
+                      <n-tag :bordered="false">分数 {{ candidate.score || 0 }}</n-tag>
+                      <n-tag :bordered="false">{{ candidate.mediaTypes || '-' }}</n-tag>
+                      <span>{{ candidate.mediaCount || 0 }} 个媒体</span>
+                    </n-space>
+                    <span class="muted-text">{{ candidate.messageDate || '' }}</span>
+                  </div>
+                  <div class="review-label">TG 文案</div>
+                  <div class="candidate-caption">
+                    {{ candidate.captionText || '-' }}
+                  </div>
+                </div>
+                <n-empty v-if="!matchCandidates.length" description="当前资料没有候选消息" />
+              </div>
+            </n-spin>
+          </template>
+          <n-empty v-else description="点击左侧资料行查看候选消息" />
+        </div>
+      </div>
+    </n-space>
+    <template #footer>
+      <n-space justify="end">
+        <n-button @click="matchModalVisible = false">关闭</n-button>
+      </n-space>
+    </template>
+  </n-modal>
+
+  <n-modal
+    v-model:show="candidateSearchVisible"
+    preset="card"
+    :title="candidateSearchTitle"
+    class="candidate-search-modal"
+  >
+    <n-space vertical size="large">
+      <div class="candidate-search-bar">
+        <n-input
+          v-model:value="candidateSearchQuery.keyword"
+          clearable
+          placeholder="搜索 TG 文案 / 消息组 / media group"
+          @keyup.enter="loadCandidateSearch"
+        />
+        <n-button type="primary" :loading="candidateSearchLoading" @click="loadCandidateSearch">
+          搜索
+        </n-button>
+      </div>
+      <div class="candidate-search-layout">
+        <div class="review-text">
+          <div class="review-label">资料文本</div>
+          <n-scrollbar class="candidate-search-scroll">
+            <div class="pre-wrap">
+              {{ activeMatchItem?.plainText || activeMatchItem?.title || '-' }}
+            </div>
+          </n-scrollbar>
+        </div>
+        <div class="review-text">
+          <div class="review-label">TG 消息列表</div>
+          <n-spin :show="candidateSearchLoading">
+            <div class="candidate-search-list">
+              <div
+                v-for="candidate in candidateSearchList"
+                :key="candidate.id"
+                class="candidate-card"
+                :class="candidateCardClass(candidate)"
+                @click="selectCandidateFromSearch(candidate)"
+              >
+                <div class="candidate-card-head">
+                  <n-space align="center">
+                    <n-tag v-if="candidateBindingLabel(candidate)" type="success" :bordered="false">
+                      {{ candidateBindingLabel(candidate) }}
+                    </n-tag>
+                    <n-tag :bordered="false">分数 {{ candidate.score || 0 }}</n-tag>
+                    <n-tag :bordered="false">{{ candidate.mediaTypes || '-' }}</n-tag>
+                    <span>{{ candidate.mediaCount || 0 }} 个媒体</span>
+                  </n-space>
+                  <span class="muted-text">{{ candidate.messageDate || '' }}</span>
+                </div>
+                <div class="candidate-caption">
+                  {{ candidate.captionText || '-' }}
+                </div>
+              </div>
+              <n-empty v-if="!candidateSearchList.length" description="没有找到TG消息" />
+            </div>
+          </n-spin>
+          <n-pagination
+            v-model:page="candidateSearchPagination.page"
+            v-model:page-size="candidateSearchPagination.pageSize"
+            :item-count="candidateSearchPagination.itemCount"
+            :page-sizes="[10, 20, 50]"
+            show-size-picker
+            class="candidate-search-pagination"
+            @update:page="loadCandidateSearch"
+            @update:page-size="handleCandidateSearchPageSize"
+          />
+        </div>
+      </div>
+    </n-space>
+    <template #footer>
+      <n-space justify="end">
+        <n-button @click="candidateSearchVisible = false">关闭</n-button>
+      </n-space>
+    </template>
+  </n-modal>
 </template>
 
 <script lang="ts" setup>
-  import { computed, h, onMounted, reactive, ref, watch } from 'vue';
+  import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
   import { NButton, NProgress, NSpace, NTag, useMessage } from 'naive-ui';
   import {
     AccountList,
@@ -309,6 +605,17 @@
     ImportRunList,
     ImportRunLogClear,
     ImportRunLogList,
+    ImportRunMatchBatchConfirm,
+    ImportRunMatchCandidateList,
+    ImportRunMatchCandidateSearch,
+    ImportRunMatchConfig,
+    ImportRunMatchConfirm,
+    ImportRunMatchItemList,
+    ImportRunMatchSaveDraft,
+    ImportRunMatchSkip,
+    ImportRunMatchStart,
+    ImportRunMatchView,
+    ImportRunTgSyncStart,
     ImportTaskCreate,
     ImportTaskList,
     ImportTaskView,
@@ -323,6 +630,8 @@
   const modalVisible = ref(false);
   const runModalVisible = ref(false);
   const logModalVisible = ref(false);
+  const matchModalVisible = ref(false);
+  const candidateSearchVisible = ref(false);
   const proxyEnabled = ref(false);
   const runTgMatchEnabled = ref(false);
   const tasks = ref<Recordable[]>([]);
@@ -333,6 +642,22 @@
   const channels = ref<Recordable[]>([]);
   const currentTaskId = ref<number | null>(null);
   const currentRunId = ref<number | null>(null);
+  const currentMatchImportRunId = ref<number | null>(null);
+  const matchActionMode = ref<'match' | 'sync'>('match');
+  const matchStarting = ref(false);
+  const matchConfirming = ref(false);
+  const matchItemLoading = ref(false);
+  const matchCandidateLoading = ref(false);
+  const candidateSearchLoading = ref(false);
+  const matchRun = ref<Recordable | null>(null);
+  const matchChannels = ref<Recordable[]>([]);
+  const matchItems = ref<Recordable[]>([]);
+  const matchCandidates = ref<Recordable[]>([]);
+  const candidateSearchList = ref<Recordable[]>([]);
+  const activeMatchItem = ref<Recordable | null>(null);
+  const activePreviewPurpose = ref<'display' | 'verify'>('display');
+  const candidateSearchPurpose = ref<'display' | 'verify'>('display');
+  let matchPollTimer: number | null = null;
 
   const query = reactive({
     tenantId: null as number | null,
@@ -373,6 +698,14 @@
     tgMatchDays: 180,
     channelIds: [] as number[],
   });
+  const matchForm = reactive({
+    channelIds: [] as number[],
+    scanDays: 180,
+    threshold: 80,
+  });
+  const candidateSearchQuery = reactive({
+    keyword: '',
+  });
 
   const taskPagination = reactive({
     page: 1,
@@ -407,10 +740,62 @@
     },
   });
   const logPagination = reactive({ pageSize: 10 });
+  const candidateSearchPagination = reactive({
+    page: 1,
+    pageSize: 20,
+    itemCount: 0,
+  });
+  const matchItemPagination = reactive({
+    page: 1,
+    pageSize: 10,
+    itemCount: 0,
+    showSizePicker: true,
+    pageSizes: [10, 20, 50],
+    onChange: (page: number) => {
+      matchItemPagination.page = page;
+      loadImportRunMatchItems();
+    },
+    onUpdatePageSize: (pageSize: number) => {
+      matchItemPagination.pageSize = pageSize;
+      matchItemPagination.page = 1;
+      loadImportRunMatchItems();
+    },
+  });
   const currentRun = computed(() => runs.value.find((item) => item.id === currentRunId.value));
   const logModalTitle = computed(() =>
     currentRun.value ? `执行日志 #${currentRun.value.id}` : '执行日志'
   );
+  const matchModalTitle = computed(() =>
+    currentMatchImportRunId.value
+      ? `${matchActionMode.value === 'sync' ? '同步TG消息' : 'TG消息匹配'} #${currentMatchImportRunId.value}`
+      : matchActionMode.value === 'sync'
+        ? '同步TG消息'
+        : 'TG消息匹配'
+  );
+  const matchPrimaryButtonText = computed(() =>
+    matchActionMode.value === 'sync' ? '同步TG消息' : '开始匹配'
+  );
+  const candidateSearchTitle = computed(
+    () => `选择${candidateSearchPurpose.value === 'display' ? '展示资料' : '验证资料'} TG 消息`
+  );
+  const matchChannelOptions = computed(() =>
+    matchChannels.value.map((item) => ({
+      label: `${item.name || item.targetChatId} (${item.targetChatId})`,
+      value: item.id,
+    }))
+  );
+  const matchRunPercent = computed(() => {
+    if (!matchRun.value?.id) return 0;
+    if (matchRun.value.status === 'success') return 100;
+    if (matchRun.value.profileTotal > 0) {
+      return Math.min(
+        99,
+        Math.round((matchRun.value.profileDone / matchRun.value.profileTotal) * 100)
+      );
+    }
+    if (matchRun.value.status === 'running') return 35;
+    return 0;
+  });
   const normalizedLogs = computed(() =>
     logs.value.map((item) => ({ ...item, parsedContext: parseLogContext(item.context) }))
   );
@@ -444,6 +829,12 @@
     { label: '补全', value: 'repair' },
     { label: '仅扫描', value: 'scan' },
   ];
+  const matchItemStatusMap = {
+    auto_selected: ['success', '自动选择'],
+    manual_pending: ['warning', '待人工'],
+    confirmed: ['success', '已确认'],
+    skipped: ['default', '已跳过'],
+  };
   const statusOptionsWithAll = computed(() => [
     { label: '全部状态', value: undefined },
     ...statusOptions,
@@ -588,7 +979,7 @@
     {
       title: '操作',
       key: 'actions',
-      width: 230,
+      width: 310,
       fixed: 'right',
       render(row) {
         return h(
@@ -600,6 +991,26 @@
                 NButton,
                 { size: 'small', onClick: () => openLogs(row.id) },
                 { default: () => '日志' }
+              ),
+              h(
+                NButton,
+                {
+                  size: 'small',
+                  type: 'primary',
+                  disabled: row.runType === 'scan' || row.status === 'running',
+                  onClick: () => openImportRunMatch(row, 'sync'),
+                },
+                { default: () => '同步TG' }
+              ),
+              h(
+                NButton,
+                {
+                  size: 'small',
+                  type: 'primary',
+                  disabled: row.runType === 'scan' || row.status === 'running',
+                  onClick: () => openImportRunMatch(row, 'match'),
+                },
+                { default: () => 'TG匹配' }
               ),
               h(
                 NButton,
@@ -631,6 +1042,66 @@
       },
     },
   ];
+  const matchItemColumns = [
+    { title: '资料ID', key: 'profileId', width: 90 },
+    { title: '标题', key: 'title', width: 180, ellipsis: { tooltip: true } },
+    { title: '编号', key: 'profileNo', width: 100 },
+    { title: '频道', key: 'channelName', width: 150, ellipsis: { tooltip: true } },
+    {
+      title: '状态',
+      key: 'matchStatus',
+      width: 110,
+      render(row) {
+        const item = matchItemStatusMap[row.matchStatus] || ['default', row.matchStatus || '-'];
+        return h(NTag, { type: item[0] as any, bordered: false }, { default: () => item[1] });
+      },
+    },
+    { title: '展示分', key: 'displayScore', width: 90 },
+    { title: '验证分', key: 'verifyScore', width: 90 },
+    { title: '总分', key: 'totalScore', width: 80 },
+    { title: '展示组', key: 'displayGroupKey', width: 140, ellipsis: { tooltip: true } },
+    { title: '验证组', key: 'verifyGroupKey', width: 140, ellipsis: { tooltip: true } },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 220,
+      fixed: 'right',
+      render(row) {
+        return h(
+          NSpace,
+          { size: 8 },
+          {
+            default: () => [
+              h(
+                NButton,
+                { size: 'small', onClick: () => selectMatchItem(row) },
+                { default: () => '人工匹配' }
+              ),
+              h(
+                NButton,
+                {
+                  size: 'small',
+                  type: 'primary',
+                  disabled: row.matchStatus === 'confirmed',
+                  onClick: () => confirmImportRunMatch(row),
+                },
+                { default: () => '确认' }
+              ),
+              h(
+                NButton,
+                {
+                  size: 'small',
+                  disabled: row.matchStatus === 'confirmed',
+                  onClick: () => skipImportRunMatch(row),
+                },
+                { default: () => '跳过' }
+              ),
+            ],
+          }
+        );
+      },
+    },
+  ];
   const logColumns = [
     { title: '时间', key: 'createdAt', width: 180 },
     { title: '级别', key: 'level', width: 80 },
@@ -652,8 +1123,19 @@
     await loadTasks();
   });
 
+  onUnmounted(() => {
+    stopMatchPolling();
+  });
+
   watch(activeTab, (tab) => {
     if (tab === 'runs') loadRuns();
+  });
+
+  watch(matchModalVisible, (visible) => {
+    if (!visible) {
+      stopMatchPolling();
+      candidateSearchVisible.value = false;
+    }
   });
 
   async function loadTenants() {
@@ -709,6 +1191,366 @@
     } finally {
       runLoading.value = false;
     }
+  }
+
+  async function openImportRunMatch(row: Recordable, mode: 'match' | 'sync' = 'match') {
+    matchActionMode.value = mode;
+    currentMatchImportRunId.value = row.id;
+    activeMatchItem.value = null;
+    matchItems.value = [];
+    matchCandidates.value = [];
+    matchItemPagination.page = 1;
+    const res: any = await ImportRunMatchConfig({ importRunId: row.id });
+    matchChannels.value = res?.channels || [];
+    matchRun.value = res?.latestRun || null;
+    matchForm.channelIds = decodeIdJson(row.channelIdJson);
+    if (!matchForm.channelIds.length && matchRun.value?.channelIds?.length) {
+      matchForm.channelIds = matchRun.value.channelIds;
+    }
+    if (!matchForm.channelIds.length && matchChannels.value.length) {
+      matchForm.channelIds = matchChannels.value.map((item) => item.id);
+    }
+    matchForm.scanDays = matchRun.value?.scanDays || 180;
+    matchForm.threshold = matchRun.value?.threshold || 80;
+    matchModalVisible.value = true;
+    if (matchRun.value?.id) {
+      await loadImportRunMatchItems();
+      startMatchPolling();
+    }
+  }
+
+  async function startImportRunMatch() {
+    if (!currentMatchImportRunId.value) return false;
+    if (!matchForm.channelIds.length) {
+      message.warning('请选择匹配频道');
+      return false;
+    }
+    matchStarting.value = true;
+    try {
+      const res: any =
+        matchActionMode.value === 'sync'
+          ? await ImportRunTgSyncStart({
+              importRunId: currentMatchImportRunId.value,
+              channelIds: matchForm.channelIds,
+              scanDays: matchForm.scanDays,
+            })
+          : await ImportRunMatchStart({
+              importRunId: currentMatchImportRunId.value,
+              channelIds: matchForm.channelIds,
+              threshold: matchForm.threshold,
+            });
+      matchRun.value = res || null;
+      message.success(
+        matchActionMode.value === 'sync' ? 'TG消息同步已加入队列' : 'TG消息匹配已加入队列'
+      );
+      await loadImportRunMatchItems();
+      startMatchPolling();
+    } finally {
+      matchStarting.value = false;
+    }
+    return false;
+  }
+
+  async function refreshImportRunMatch() {
+    if (!matchRun.value?.id && !currentMatchImportRunId.value) return;
+    await loadImportRunMatchView();
+    await loadImportRunMatchItems();
+    if (activeMatchItem.value?.id) {
+      await loadImportRunMatchCandidates(activeMatchItem.value);
+    }
+  }
+
+  async function loadImportRunMatchView() {
+    const params = matchRun.value?.id
+      ? { id: matchRun.value.id }
+      : { importRunId: currentMatchImportRunId.value };
+    const res: any = await ImportRunMatchView(params);
+    matchRun.value = res || null;
+  }
+
+  async function loadImportRunMatchItems() {
+    if (!matchRun.value?.id) return;
+    matchItemLoading.value = true;
+    try {
+      const res: any = await ImportRunMatchItemList({
+        matchRunId: matchRun.value.id,
+        page: matchItemPagination.page,
+        perPage: matchItemPagination.pageSize,
+      });
+      matchItems.value = res?.list || [];
+      matchItemPagination.itemCount = res?.totalCount || res?.total || 0;
+      if (activeMatchItem.value?.id) {
+        activeMatchItem.value =
+          matchItems.value.find((item) => item.id === activeMatchItem.value?.id) ||
+          activeMatchItem.value;
+      }
+      if (!activeMatchItem.value?.id && matchItems.value.length) {
+        const firstPending =
+          matchItems.value.find((item) => item.matchStatus === 'manual_pending') ||
+          matchItems.value[0];
+        await selectMatchItem(firstPending);
+      }
+    } finally {
+      matchItemLoading.value = false;
+    }
+  }
+
+  function matchItemRowProps(row: Recordable) {
+    return {
+      class: activeMatchItem.value?.id === row.id ? 'is-active-match-row' : '',
+      style: 'cursor: pointer;',
+      onClick: () => selectMatchItem(row),
+    };
+  }
+
+  async function selectMatchItem(row: Recordable) {
+    activeMatchItem.value = row;
+    activePreviewPurpose.value = row.displayGroupKey ? 'display' : 'verify';
+    await loadImportRunMatchCandidates(row);
+  }
+
+  async function loadImportRunMatchCandidates(row: Recordable) {
+    matchCandidateLoading.value = true;
+    try {
+      const res: any = await ImportRunMatchCandidateList({ itemId: row.id });
+      matchCandidates.value = res?.list || [];
+    } finally {
+      matchCandidateLoading.value = false;
+    }
+  }
+
+  async function openCandidateSearch(purpose: 'display' | 'verify') {
+    if (!activeMatchItem.value?.id) return;
+    candidateSearchPurpose.value = purpose;
+    activePreviewPurpose.value = purpose;
+    candidateSearchQuery.keyword =
+      activeMatchItem.value.title || activeMatchItem.value.profileNo || '';
+    candidateSearchPagination.page = 1;
+    candidateSearchVisible.value = true;
+    await loadCandidateSearch();
+  }
+
+  async function loadCandidateSearch() {
+    if (!activeMatchItem.value?.id) return;
+    candidateSearchLoading.value = true;
+    try {
+      const res: any = await ImportRunMatchCandidateSearch({
+        itemId: activeMatchItem.value.id,
+        keyword: candidateSearchQuery.keyword,
+        page: candidateSearchPagination.page,
+        perPage: candidateSearchPagination.pageSize,
+      });
+      candidateSearchList.value = res?.list || [];
+      candidateSearchPagination.itemCount = res?.totalCount || res?.total || 0;
+    } finally {
+      candidateSearchLoading.value = false;
+    }
+  }
+
+  async function handleCandidateSearchPageSize(pageSize: number) {
+    candidateSearchPagination.pageSize = pageSize;
+    candidateSearchPagination.page = 1;
+    await loadCandidateSearch();
+  }
+
+  async function selectCandidateFromSearch(row: Recordable) {
+    if (!activeMatchItem.value?.id) return;
+    const payload = {
+      itemId: activeMatchItem.value.id,
+      displayGroupKey: activeMatchItem.value.displayGroupKey || '',
+      verifyGroupKey: activeMatchItem.value.verifyGroupKey || '',
+    };
+    if (candidateSearchPurpose.value === 'display') {
+      payload.displayGroupKey = payload.displayGroupKey === row.groupKey ? '' : row.groupKey;
+      if (payload.displayGroupKey && payload.verifyGroupKey === payload.displayGroupKey) {
+        payload.verifyGroupKey = '';
+      }
+    } else {
+      payload.verifyGroupKey = payload.verifyGroupKey === row.groupKey ? '' : row.groupKey;
+      if (payload.verifyGroupKey && payload.displayGroupKey === payload.verifyGroupKey) {
+        payload.displayGroupKey = '';
+      }
+    }
+    await saveActiveCandidateBinding(payload, '已保存TG消息选择');
+    if (!matchCandidates.value.some((item) => item.groupKey === row.groupKey)) {
+      matchCandidates.value = [row, ...matchCandidates.value];
+    }
+    if (payload.displayGroupKey && payload.verifyGroupKey) {
+      candidateSearchVisible.value = false;
+    } else {
+      candidateSearchPurpose.value = payload.displayGroupKey ? 'verify' : 'display';
+      activePreviewPurpose.value = candidateSearchPurpose.value;
+    }
+  }
+
+  async function toggleCandidateBinding(row: Recordable) {
+    if (!activeMatchItem.value?.id) return;
+    const payload = {
+      itemId: activeMatchItem.value.id,
+      displayGroupKey: activeMatchItem.value.displayGroupKey || '',
+      verifyGroupKey: activeMatchItem.value.verifyGroupKey || '',
+    };
+    let messageText = '';
+    if (payload.displayGroupKey === row.groupKey) {
+      payload.displayGroupKey = '';
+      messageText = '已取消展示资料绑定';
+    } else if (payload.verifyGroupKey === row.groupKey) {
+      payload.verifyGroupKey = '';
+      messageText = '已取消验证资料绑定';
+    } else {
+      const purpose = nextCandidatePurpose(payload);
+      if (purpose === 'display') {
+        payload.displayGroupKey = row.groupKey;
+        if (payload.verifyGroupKey === row.groupKey) payload.verifyGroupKey = '';
+        messageText = '已绑定展示资料';
+      } else {
+        payload.verifyGroupKey = row.groupKey;
+        if (payload.displayGroupKey === row.groupKey) payload.displayGroupKey = '';
+        messageText = '已绑定验证资料';
+      }
+    }
+    await saveActiveCandidateBinding(payload, messageText);
+  }
+
+  async function clearCandidateBinding(purpose: 'display' | 'verify') {
+    if (!activeMatchItem.value?.id) return;
+    const payload = {
+      itemId: activeMatchItem.value.id,
+      displayGroupKey: activeMatchItem.value.displayGroupKey || '',
+      verifyGroupKey: activeMatchItem.value.verifyGroupKey || '',
+    };
+    if (purpose === 'display') payload.displayGroupKey = '';
+    if (purpose === 'verify') payload.verifyGroupKey = '';
+    await saveActiveCandidateBinding(
+      payload,
+      purpose === 'display' ? '已取消展示资料绑定' : '已取消验证资料绑定'
+    );
+  }
+
+  async function saveActiveCandidateBinding(payload: Recordable, messageText: string) {
+    await ImportRunMatchSaveDraft(payload);
+    activeMatchItem.value = { ...activeMatchItem.value, ...payload };
+    matchItems.value = matchItems.value.map((item) =>
+      item.id === payload.itemId
+        ? {
+            ...item,
+            displayGroupKey: payload.displayGroupKey,
+            verifyGroupKey: payload.verifyGroupKey,
+            matchStatus:
+              payload.displayGroupKey && payload.verifyGroupKey
+                ? 'auto_selected'
+                : 'manual_pending',
+          }
+        : item
+    );
+    message.success(messageText || '已保存匹配选择');
+  }
+
+  function nextCandidatePurpose(payload: Recordable): 'display' | 'verify' {
+    if (!payload.displayGroupKey) return 'display';
+    if (!payload.verifyGroupKey) return 'verify';
+    return 'display';
+  }
+
+  function candidateBindingLabel(candidate: Recordable) {
+    if (!activeMatchItem.value) return '';
+    if (candidate.groupKey === activeMatchItem.value.displayGroupKey) return '展示';
+    if (candidate.groupKey === activeMatchItem.value.verifyGroupKey) return '验证';
+    return '';
+  }
+
+  function candidateCardClass(candidate: Recordable) {
+    return {
+      'is-bound-display': candidate.groupKey === activeMatchItem.value?.displayGroupKey,
+      'is-bound-verify': candidate.groupKey === activeMatchItem.value?.verifyGroupKey,
+    };
+  }
+
+  function selectedCandidateText(groupKey: string) {
+    if (!groupKey) return '未选择';
+    const candidate = matchCandidates.value.find((item) => item.groupKey === groupKey);
+    if (!candidate) return groupKey;
+    return `${candidate.firstMessageId || '-'}-${candidate.lastMessageId || '-'} / ${candidate.mediaTypes || '-'} / ${candidate.mediaCount || 0}个媒体`;
+  }
+
+  function selectedCandidateCaption(groupKey: string) {
+    if (!groupKey) return '未选择TG消息';
+    const candidate = matchCandidates.value.find((item) => item.groupKey === groupKey);
+    return candidate?.captionText || '当前页未加载该TG消息，可点击搜索替换查看。';
+  }
+
+  async function moveActiveMatchItem(offset: number) {
+    if (!matchItems.value.length) return;
+    const currentIndex = matchItems.value.findIndex(
+      (item) => item.id === activeMatchItem.value?.id
+    );
+    const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+    const nextIndex = (baseIndex + offset + matchItems.value.length) % matchItems.value.length;
+    await selectMatchItem(matchItems.value[nextIndex]);
+  }
+
+  async function confirmAndNext() {
+    if (!activeMatchItem.value?.id) return;
+    await confirmImportRunMatch(activeMatchItem.value, true);
+  }
+
+  async function confirmImportRunMatch(row: Recordable, goNext = false) {
+    const currentIndex = matchItems.value.findIndex((item) => item.id === row.id);
+    matchConfirming.value = true;
+    try {
+      await ImportRunMatchConfirm({ itemId: row.id });
+      message.success('TG消息绑定已确认');
+      activeMatchItem.value = null;
+      await loadImportRunMatchView();
+      await loadImportRunMatchItems();
+      if (goNext && matchItems.value.length) {
+        const next =
+          matchItems.value
+            .slice(Math.max(currentIndex, 0) + 1)
+            .find((item) => item.matchStatus !== 'confirmed' && item.matchStatus !== 'skipped') ||
+          matchItems.value.find(
+            (item) => item.matchStatus !== 'confirmed' && item.matchStatus !== 'skipped'
+          );
+        if (next) await selectMatchItem(next);
+      }
+    } finally {
+      matchConfirming.value = false;
+    }
+  }
+
+  async function batchConfirmImportRunMatch() {
+    if (!matchRun.value?.id) return;
+    matchConfirming.value = true;
+    try {
+      await ImportRunMatchBatchConfirm({ matchRunId: matchRun.value.id });
+      message.success('自动匹配已批量确认');
+      await refreshImportRunMatch();
+    } finally {
+      matchConfirming.value = false;
+    }
+  }
+
+  async function skipImportRunMatch(row: Recordable) {
+    await ImportRunMatchSkip({ itemId: row.id });
+    message.success('已跳过该资料匹配');
+    await refreshImportRunMatch();
+  }
+
+  function startMatchPolling() {
+    stopMatchPolling();
+    matchPollTimer = window.setInterval(async () => {
+      if (!matchModalVisible.value || !matchRun.value?.id) return;
+      await loadImportRunMatchView();
+      if (matchRun.value?.status === 'running' || matchRun.value?.status === 'pending') return;
+      stopMatchPolling();
+      await loadImportRunMatchItems();
+    }, 2500);
+  }
+
+  function stopMatchPolling() {
+    if (!matchPollTimer) return;
+    window.clearInterval(matchPollTimer);
+    matchPollTimer = null;
   }
 
   function openCreateModal() {
@@ -926,6 +1768,26 @@
       }));
   }
 
+  function matchRunStatusText(status: string) {
+    const map = {
+      pending: '待扫描',
+      running: '扫描中',
+      success: '完成',
+      failed: '失败',
+    };
+    return map[status] || status || '-';
+  }
+
+  function matchRunStatusType(status: string) {
+    const map = {
+      pending: 'default',
+      running: 'warning',
+      success: 'success',
+      failed: 'error',
+    };
+    return (map[status] || 'default') as any;
+  }
+
   function decodeIdJson(value: string) {
     if (!value) return [];
     try {
@@ -987,5 +1849,181 @@
 
   :deep(.log-modal) {
     width: min(1080px, calc(100vw - 48px));
+  }
+
+  :deep(.match-modal) {
+    width: min(1480px, calc(100vw - 48px));
+  }
+
+  :deep(.candidate-search-modal) {
+    width: min(1280px, calc(100vw - 48px));
+  }
+
+  .match-config-grid {
+    display: grid;
+    grid-template-columns: minmax(320px, 1.4fr) minmax(140px, 0.5fr) minmax(140px, 0.5fr) auto;
+    column-gap: 12px;
+    align-items: flex-start;
+  }
+
+  .match-status {
+    display: grid;
+    gap: 8px;
+  }
+
+  .match-body {
+    display: grid;
+    grid-template-columns: minmax(560px, 1fr) minmax(520px, 0.9fr);
+    gap: 14px;
+    align-items: flex-start;
+  }
+
+  .candidate-panel {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--n-border-color);
+    border-radius: 6px;
+  }
+
+  .review-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .review-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .review-text {
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid var(--n-border-color);
+    border-radius: 6px;
+    background: var(--n-color);
+  }
+
+  .binding-toolbar {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .review-label {
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: var(--n-text-color-3);
+  }
+
+  .review-scroll {
+    max-height: 180px;
+  }
+
+  .pre-wrap,
+  .candidate-caption {
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.6;
+  }
+
+  .muted-text {
+    color: var(--n-text-color-3);
+    font-size: 12px;
+  }
+
+  .candidate-list {
+    display: grid;
+    gap: 10px;
+    max-height: 560px;
+    overflow: auto;
+    padding-right: 4px;
+  }
+
+  .candidate-tools {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
+  .candidate-search-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+
+  .candidate-search-layout {
+    display: grid;
+    grid-template-columns: minmax(360px, 0.9fr) minmax(520px, 1.1fr);
+    gap: 12px;
+  }
+
+  .candidate-search-scroll {
+    max-height: 620px;
+  }
+
+  .candidate-search-list {
+    display: grid;
+    gap: 10px;
+    max-height: 580px;
+    overflow: auto;
+    padding-right: 4px;
+  }
+
+  .candidate-search-pagination {
+    justify-content: flex-end;
+    margin-top: 12px;
+  }
+
+  .candidate-card {
+    padding: 10px;
+    border: 1px solid var(--n-border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    background: var(--n-color);
+  }
+
+  .candidate-card:hover {
+    border-color: var(--n-primary-color);
+  }
+
+  .candidate-card.is-bound-display,
+  .candidate-card.is-bound-verify {
+    border-color: var(--n-primary-color);
+    background: rgba(24, 160, 88, 0.08);
+  }
+
+  .candidate-card-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  :deep(.is-active-match-row td) {
+    background: rgba(24, 160, 88, 0.08);
+  }
+
+  @media (max-width: 1180px) {
+    .match-config-grid,
+    .match-body,
+    .review-grid,
+    .candidate-search-layout {
+      grid-template-columns: 1fr;
+    }
+
+    .candidate-tools,
+    .binding-toolbar {
+      align-items: flex-start;
+      flex-direction: column;
+    }
   }
 </style>

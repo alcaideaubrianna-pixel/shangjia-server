@@ -211,6 +211,77 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_import_run_log" (
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_import_run_log_run" ON "hg_youban_publish_import_run_log" ("run_id", "id");
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_import_match_run" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "import_run_id" bigint NOT NULL DEFAULT 0,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "status" varchar(32) NOT NULL DEFAULT 'pending',
+  "stage" varchar(32) NOT NULL DEFAULT 'created',
+  "channel_id_json" text,
+  "scan_days" integer NOT NULL DEFAULT 180,
+  "threshold" integer NOT NULL DEFAULT 80,
+  "profile_total" integer NOT NULL DEFAULT 0,
+  "profile_done" integer NOT NULL DEFAULT 0,
+  "candidate_total" integer NOT NULL DEFAULT 0,
+  "auto_matched" integer NOT NULL DEFAULT 0,
+  "manual_pending" integer NOT NULL DEFAULT 0,
+  "confirmed" integer NOT NULL DEFAULT 0,
+  "skipped" integer NOT NULL DEFAULT 0,
+  "error_message" text,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "finished_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_import_match_run_import" ON "hg_youban_publish_import_match_run" ("import_run_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_import_match_run_scope" ON "hg_youban_publish_import_match_run" ("tenant_id", "account_id", "status", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_import_match_item" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "match_run_id" bigint NOT NULL DEFAULT 0,
+  "import_run_id" bigint NOT NULL DEFAULT 0,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "task_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0,
+  "display_group_key" varchar(128) NOT NULL DEFAULT '',
+  "verify_group_key" varchar(128) NOT NULL DEFAULT '',
+  "display_score" integer NOT NULL DEFAULT 0,
+  "verify_score" integer NOT NULL DEFAULT 0,
+  "total_score" integer NOT NULL DEFAULT 0,
+  "match_status" varchar(32) NOT NULL DEFAULT 'manual_pending',
+  "match_mode" varchar(32) NOT NULL DEFAULT '',
+  "reason_json" text,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_import_match_item_scope" ON "hg_youban_publish_import_match_item" ("match_run_id", "profile_id", "channel_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_import_match_item_profile" ON "hg_youban_publish_import_match_item" ("profile_id", "task_id", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_import_match_candidate" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "match_run_id" bigint NOT NULL DEFAULT 0,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0,
+  "group_key" varchar(128) NOT NULL DEFAULT '',
+  "media_group_id" varchar(128) NOT NULL DEFAULT '',
+  "first_message_id" bigint NOT NULL DEFAULT 0,
+  "last_message_id" bigint NOT NULL DEFAULT 0,
+  "message_date" timestamp DEFAULT NULL,
+  "caption_text" text,
+  "media_count" integer NOT NULL DEFAULT 0,
+  "media_types" varchar(128) NOT NULL DEFAULT '',
+  "preview_json" text,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_import_match_candidate_group" ON "hg_youban_publish_import_match_candidate" ("match_run_id", "channel_id", "group_key");
+CREATE INDEX IF NOT EXISTS "idx_ybp_import_match_candidate_channel" ON "hg_youban_publish_import_match_candidate" ("match_run_id", "channel_id", "message_date");
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_account_setting" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,

@@ -843,7 +843,11 @@ func (s *sSysPublish) ensureTgRepairJob(ctx context.Context, task gdb.Record, ch
 		Where("task_id", task["id"].Int64()).
 		Where("channel_id", channel.Id).
 		Scan(&existing); err != nil {
-		return 0, gerror.Wrap(err, "读取TG修复任务失败")
+		if errors.Is(err, sql.ErrNoRows) {
+			err = nil
+		} else {
+			return 0, gerror.Wrap(err, "读取TG修复任务失败")
+		}
 	}
 	if existing.Id > 0 {
 		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", existing.Id).Data(g.Map{

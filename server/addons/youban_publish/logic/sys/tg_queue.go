@@ -12,14 +12,16 @@ import (
 )
 
 const (
-	tgQueueNameDefault = "youban_publish_tg"
-	tgTaskTypePublish  = "youban_publish:tg:publish"
-	tgTaskTypeDelete   = "youban_publish:tg:delete"
-	tgTaskTypeCleanup  = "youban_publish:tg:cleanup"
-	tgTaskTypeImport   = "youban_publish:import:legacy"
-	tgTaskTypeRepair   = "youban_publish:tg:message_repair"
-	tgTaskTypeDown     = "youban_publish:profile:down"
-	tgTaskTypeCycleRun = "youban_publish:cycle:run"
+	tgQueueNameDefault    = "youban_publish_tg"
+	tgTaskTypePublish     = "youban_publish:tg:publish"
+	tgTaskTypeDelete      = "youban_publish:tg:delete"
+	tgTaskTypeCleanup     = "youban_publish:tg:cleanup"
+	tgTaskTypeImport      = "youban_publish:import:legacy"
+	tgTaskTypeRepair      = "youban_publish:tg:message_repair"
+	tgTaskTypeImportMatch = "youban_publish:import:tg_match"
+	tgTaskTypeImportSync  = "youban_publish:import:tg_sync"
+	tgTaskTypeDown        = "youban_publish:profile:down"
+	tgTaskTypeCycleRun    = "youban_publish:cycle:run"
 )
 
 type tgQueuePayload struct {
@@ -33,6 +35,10 @@ type importQueuePayload struct {
 
 type tgMessageRepairQueuePayload struct {
 	RunId int64 `json:"runId"`
+}
+
+type importMatchQueuePayload struct {
+	MatchRunId int64 `json:"matchRunId"`
 }
 
 type profileDownQueuePayload struct {
@@ -145,6 +151,43 @@ func (s *sSysPublish) enqueueTgMessageRepairRun(ctx context.Context, runId int64
 		return err
 	}
 	task := asynq.NewTask(tgTaskTypeRepair, payload)
+	options := []asynq.Option{
+		asynq.Queue(tgQueueNameDefault),
+		asynq.MaxRetry(0),
+		asynq.Timeout(2 * time.Hour),
+		asynq.Unique(30 * time.Second),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err = client.EnqueueContext(ctx, task, options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	return err
+}
+
+func (s *sSysPublish) enqueueImportMatchRun(ctx context.Context, matchRunId int64, delay time.Duration) error {
+	return s.enqueueImportRunMatchTask(ctx, tgTaskTypeImportMatch, matchRunId, delay)
+}
+
+func (s *sSysPublish) enqueueImportTgSyncRun(ctx context.Context, matchRunId int64, delay time.Duration) error {
+	return s.enqueueImportRunMatchTask(ctx, tgTaskTypeImportSync, matchRunId, delay)
+}
+
+func (s *sSysPublish) enqueueImportRunMatchTask(ctx context.Context, taskType string, matchRunId int64, delay time.Duration) error {
+	if matchRunId <= 0 {
+		return nil
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(importMatchQueuePayload{MatchRunId: matchRunId})
+	if err != nil {
+		return err
+	}
+	task := asynq.NewTask(taskType, payload)
 	options := []asynq.Option{
 		asynq.Queue(tgQueueNameDefault),
 		asynq.MaxRetry(0),
@@ -320,6 +363,17 @@ func decodeTgMessageRepairQueuePayload(task *asynq.Task) (tgMessageRepairQueuePa
 	}
 	if payload.RunId <= 0 {
 		return payload, fmt.Errorf("TG消息修复队列任务缺少runId")
+	}
+	return payload, nil
+}
+
+func decodeImportMatchQueuePayload(task *asynq.Task) (importMatchQueuePayload, error) {
+	var payload importMatchQueuePayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return payload, fmt.Errorf("解析导入TG匹配队列任务失败: %w", err)
+	}
+	if payload.MatchRunId <= 0 {
+		return payload, fmt.Errorf("导入TG匹配队列任务缺少matchRunId")
 	}
 	return payload, nil
 }

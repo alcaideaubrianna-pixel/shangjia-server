@@ -28,6 +28,8 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 	mux.HandleFunc(tgTaskTypeCleanup, s.handleTelegramCleanupTask)
 	mux.HandleFunc(tgTaskTypeImport, s.handleImportTask)
 	mux.HandleFunc(tgTaskTypeRepair, s.handleTgMessageRepairTask)
+	mux.HandleFunc(tgTaskTypeImportMatch, s.handleImportMatchTask)
+	mux.HandleFunc(tgTaskTypeImportSync, s.handleImportTgSyncTask)
 	mux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
 	mux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
 
@@ -97,6 +99,22 @@ func (s *sSysPublish) handleTgMessageRepairTask(ctx context.Context, task *asynq
 		return err
 	}
 	return s.ExecuteTgMessageRepairRun(ctx, payload.RunId)
+}
+
+func (s *sSysPublish) handleImportMatchTask(ctx context.Context, task *asynq.Task) error {
+	payload, err := decodeImportMatchQueuePayload(task)
+	if err != nil {
+		return err
+	}
+	return s.ExecuteImportRunMatch(ctx, payload.MatchRunId)
+}
+
+func (s *sSysPublish) handleImportTgSyncTask(ctx context.Context, task *asynq.Task) error {
+	payload, err := decodeImportMatchQueuePayload(task)
+	if err != nil {
+		return err
+	}
+	return s.ExecuteImportRunTgSync(ctx, payload.MatchRunId)
 }
 
 func (s *sSysPublish) handleProfileDownTask(ctx context.Context, task *asynq.Task) error {

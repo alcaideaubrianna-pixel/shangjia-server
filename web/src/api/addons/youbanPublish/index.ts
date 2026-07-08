@@ -128,6 +128,94 @@ export function ImportRunLogClear(params = {}) {
   });
 }
 
+export function ImportRunMatchConfig(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/importRunMatch/config',
+    method: 'get',
+    params,
+  });
+}
+
+export function ImportRunMatchStart(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/importRunMatch/start',
+    method: 'POST',
+    params,
+  });
+}
+
+export function ImportRunTgSyncStart(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/importRunTgSync/start',
+    method: 'POST',
+    params,
+  });
+}
+
+export function ImportRunMatchView(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/importRunMatch/view',
+    method: 'get',
+    params,
+  });
+}
+
+export function ImportRunMatchItemList(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/importRunMatch/items',
+    method: 'get',
+    params,
+  });
+}
+
+export function ImportRunMatchCandidateList(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/importRunMatch/candidates',
+    method: 'get',
+    params,
+  });
+}
+
+export function ImportRunMatchCandidateSearch(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/importRunMatch/candidateSearch',
+    method: 'get',
+    params,
+  });
+}
+
+export function ImportRunMatchSaveDraft(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/importRunMatch/saveDraft',
+    method: 'POST',
+    params,
+  });
+}
+
+export function ImportRunMatchConfirm(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/importRunMatch/confirm',
+    method: 'POST',
+    params,
+  });
+}
+
+export function ImportRunMatchBatchConfirm(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/importRunMatch/batchConfirm',
+    method: 'POST',
+    params,
+  });
+}
+
+export function ImportRunMatchSkip(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/importRunMatch/skip',
+    method: 'POST',
+    params,
+  });
+}
+
 export function TagList(params = {}) {
   return http.request({ url: '/youban_publish/publish/tag/list', method: 'get', params });
 }
