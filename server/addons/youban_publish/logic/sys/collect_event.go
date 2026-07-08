@@ -79,12 +79,11 @@ func (s *sSysPublish) CollectEventProcess(ctx context.Context, in *sysin.Collect
 }
 
 func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, tenantId int64, accountId int64) error {
-	var event gdb.Record
-	err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+	event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Where("id", eventId).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
-		Scan(&event)
+		One()
 	if err != nil {
 		return gerror.Wrap(err, "读取采集事件失败")
 	}

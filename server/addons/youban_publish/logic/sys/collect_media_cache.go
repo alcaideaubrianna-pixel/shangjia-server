@@ -252,6 +252,9 @@ func uploadCollectDownloadedMedia(ctx context.Context, mediaType string, mimeTyp
 	if len(data) == 0 {
 		return nil, gerror.New("账号采集媒体下载为空")
 	}
+	uploadCtx := context.WithValue(context.Background(), consts.ContextHTTPKey, &model.Context{
+		Module: consts.AppApi,
+	})
 	uploadType := storager.KindImg
 	if strings.TrimSpace(mediaType) == "video" {
 		uploadType = storager.KindVideo
@@ -261,7 +264,7 @@ func uploadCollectDownloadedMedia(ctx context.Context, mediaType string, mimeTyp
 	if err != nil {
 		return nil, gerror.Wrap(err, "创建采集媒体上传文件失败")
 	}
-	attachment, err := service.CommonUpload().UploadFile(ctx, uploadType, &ghttp.UploadFile{FileHeader: header})
+	attachment, err := service.CommonUpload().UploadFile(uploadCtx, uploadType, &ghttp.UploadFile{FileHeader: header})
 	if err != nil {
 		return nil, err
 	}
