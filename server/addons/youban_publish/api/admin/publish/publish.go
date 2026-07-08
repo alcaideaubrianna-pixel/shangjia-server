@@ -353,6 +353,13 @@ type ImportRunMatchSkipReq struct {
 
 type ImportRunMatchSkipRes struct{}
 
+type ImportRunMatchUnbindReq struct {
+	g.Meta `path:"/publish/importRunMatch/unbind" method:"post" tags:"上架插件后台" summary:"取消导入记录TG绑定"`
+	sysin.ImportRunMatchUnbindInp
+}
+
+type ImportRunMatchUnbindRes struct{}
+
 type MediaListReq struct {
 	g.Meta `path:"/publish/media/list" method:"get" tags:"上架插件后台" summary:"任务媒体列表"`
 	sysin.MediaListInp

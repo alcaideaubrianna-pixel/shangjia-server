@@ -180,6 +180,9 @@ func (s *sSysPublish) ServerImportRunMatchItemList(ctx context.Context, in *sysi
 	if strings.TrimSpace(in.Status) != "" {
 		mod = mod.Where("i.match_status", strings.TrimSpace(in.Status))
 	}
+	if in.ChannelId > 0 {
+		mod = mod.Where("i.channel_id", in.ChannelId)
+	}
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
 		mod = mod.Where("(t.title LIKE ? OR p.profile_no LIKE ? OR p.source_key LIKE ? OR t.plain_text LIKE ?)", like, like, like, like)
@@ -388,6 +391,33 @@ func (s *sSysPublish) ServerImportRunMatchSkip(ctx context.Context, in *sysin.Im
 		Update()
 	if err != nil {
 		return gerror.Wrap(err, "跳过导入TG匹配失败")
+	}
+	return s.refreshImportMatchRunCounters(ctx, item.MatchRunId)
+}
+
+func (s *sSysPublish) ServerImportRunMatchUnbind(ctx context.Context, in *sysin.ImportRunMatchUnbindInp) error {
+	if in == nil || in.ItemId <= 0 {
+		return gerror.New("匹配项ID不能为空")
+	}
+	item, err := s.importRunMatchItem(ctx, in.ItemId)
+	if err != nil {
+		return err
+	}
+	if err = s.deleteImportMatchBoundMessages(ctx, item); err != nil {
+		return err
+	}
+	_, err = g.DB().Model(publishImportMatchItemTable).Safe().Ctx(ctx).
+		Where("id", in.ItemId).
+		Data(g.Map{
+			"display_group_key": "",
+			"verify_group_key":  "",
+			"match_status":      sysin.ImportMatchItemStatusManualPending,
+			"match_mode":        "manual",
+			"updated_at":        gtime.Now(),
+		}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "取消导入TG绑定失败")
 	}
 	return s.refreshImportMatchRunCounters(ctx, item.MatchRunId)
 }
@@ -987,6 +1017,40 @@ func (s *sSysPublish) saveImportMatchGroupMessages(ctx context.Context, item *sy
 		if err = s.ensureImportMatchTgMessage(ctx, task, jobId, row, purpose); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (s *sSysPublish) deleteImportMatchBoundMessages(ctx context.Context, item *sysin.ImportRunMatchItemModel) error {
+	keys := []string{strings.TrimSpace(item.DisplayGroupKey), strings.TrimSpace(item.VerifyGroupKey)}
+	messageIds := make([]int64, 0)
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		rows, err := s.importMatchCacheRowsByGroupKey(ctx, item.TenantId, item.ChannelId, key)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			if row.TgMessageId > 0 {
+				messageIds = append(messageIds, row.TgMessageId)
+			}
+		}
+	}
+	messageIds = uniqueIds(messageIds)
+	if len(messageIds) == 0 {
+		return nil
+	}
+	_, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+		Where("tenant_id", item.TenantId).
+		Where("account_id", item.AccountId).
+		Where("profile_id", item.ProfileId).
+		WhereIn("tg_message_id", messageIds).
+		WhereIn("purpose", []string{"display", "verify"}).
+		Delete()
+	if err != nil {
+		return gerror.Wrap(err, "清理导入TG绑定消息失败")
 	}
 	return nil
 }

@@ -321,9 +321,18 @@
           <n-form-item label="自动阈值">
             <n-input-number
               v-model:value="matchForm.threshold"
-              :min="1"
+              :min="80"
               :max="100"
               class="w-full"
+            />
+          </n-form-item>
+          <n-form-item label="资料频道">
+            <n-select
+              v-model:value="matchItemQuery.channelId"
+              :options="matchItemChannelOptions"
+              clearable
+              placeholder="全部频道"
+              @update:value="handleMatchItemFilterChange"
             />
           </n-form-item>
           <n-form-item label="操作">
@@ -460,6 +469,18 @@
                 </n-tabs>
               </div>
             </div>
+
+            <n-space class="binding-actions" justify="end">
+              <n-button
+                size="small"
+                type="error"
+                ghost
+                :disabled="!activeMatchItem.displayGroupKey && !activeMatchItem.verifyGroupKey"
+                @click="unbindImportRunMatch(activeMatchItem)"
+              >
+                取消全部绑定
+              </n-button>
+            </n-space>
 
             <n-spin :show="matchCandidateLoading">
               <div class="candidate-tools">
@@ -614,6 +635,7 @@
     ImportRunMatchSaveDraft,
     ImportRunMatchSkip,
     ImportRunMatchStart,
+    ImportRunMatchUnbind,
     ImportRunMatchView,
     ImportRunTgSyncStart,
     ImportTaskCreate,
@@ -703,6 +725,9 @@
     scanDays: 180,
     threshold: 80,
   });
+  const matchItemQuery = reactive({
+    channelId: null as number | null,
+  });
   const candidateSearchQuery = reactive({
     keyword: '',
   });
@@ -784,6 +809,10 @@
       value: item.id,
     }))
   );
+  const matchItemChannelOptions = computed(() => [
+    { label: '全部频道', value: null },
+    ...matchChannelOptions.value,
+  ]);
   const matchRunPercent = computed(() => {
     if (!matchRun.value?.id) return 0;
     if (matchRun.value.status === 'success') return 100;
@@ -1096,6 +1125,17 @@
                 },
                 { default: () => '跳过' }
               ),
+              h(
+                NButton,
+                {
+                  size: 'small',
+                  type: 'error',
+                  ghost: true,
+                  disabled: !row.displayGroupKey && !row.verifyGroupKey,
+                  onClick: () => unbindImportRunMatch(row),
+                },
+                { default: () => '取消绑定' }
+              ),
             ],
           }
         );
@@ -1200,6 +1240,7 @@
     matchItems.value = [];
     matchCandidates.value = [];
     matchItemPagination.page = 1;
+    matchItemQuery.channelId = null;
     const res: any = await ImportRunMatchConfig({ importRunId: row.id });
     matchChannels.value = res?.channels || [];
     matchRun.value = res?.latestRun || null;
@@ -1211,7 +1252,7 @@
       matchForm.channelIds = matchChannels.value.map((item) => item.id);
     }
     matchForm.scanDays = matchRun.value?.scanDays || 180;
-    matchForm.threshold = matchRun.value?.threshold || 80;
+    matchForm.threshold = Math.max(matchRun.value?.threshold || 80, 80);
     matchModalVisible.value = true;
     if (matchRun.value?.id) {
       await loadImportRunMatchItems();
@@ -1274,6 +1315,7 @@
     try {
       const res: any = await ImportRunMatchItemList({
         matchRunId: matchRun.value.id,
+        channelId: matchItemQuery.channelId || undefined,
         page: matchItemPagination.page,
         perPage: matchItemPagination.pageSize,
       });
@@ -1293,6 +1335,13 @@
     } finally {
       matchItemLoading.value = false;
     }
+  }
+
+  async function handleMatchItemFilterChange() {
+    matchItemPagination.page = 1;
+    activeMatchItem.value = null;
+    matchCandidates.value = [];
+    await loadImportRunMatchItems();
   }
 
   function matchItemRowProps(row: Recordable) {
@@ -1533,6 +1582,21 @@
   async function skipImportRunMatch(row: Recordable) {
     await ImportRunMatchSkip({ itemId: row.id });
     message.success('已跳过该资料匹配');
+    await refreshImportRunMatch();
+  }
+
+  async function unbindImportRunMatch(row: Recordable) {
+    if (!row?.id) return;
+    await ImportRunMatchUnbind({ itemId: row.id });
+    message.success('已取消TG消息绑定');
+    if (activeMatchItem.value?.id === row.id) {
+      activeMatchItem.value = {
+        ...activeMatchItem.value,
+        displayGroupKey: '',
+        verifyGroupKey: '',
+        matchStatus: 'manual_pending',
+      };
+    }
     await refreshImportRunMatch();
   }
 
@@ -1914,6 +1978,10 @@
     gap: 8px;
     align-items: center;
     margin-bottom: 8px;
+  }
+
+  .binding-actions {
+    margin-bottom: 10px;
   }
 
   .review-label {

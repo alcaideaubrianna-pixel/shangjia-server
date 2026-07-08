@@ -53,6 +53,7 @@ type ISysPublish interface {
 	ServerImportRunMatchConfirm(ctx context.Context, in *sysin.ImportRunMatchConfirmInp) (err error)
 	ServerImportRunMatchBatchConfirm(ctx context.Context, in *sysin.ImportRunMatchBatchConfirmInp) (err error)
 	ServerImportRunMatchSkip(ctx context.Context, in *sysin.ImportRunMatchSkipInp) (err error)
+	ServerImportRunMatchUnbind(ctx context.Context, in *sysin.ImportRunMatchUnbindInp) (err error)
 	ServerMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error)
 	ServerMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error)
 	ServerBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error)

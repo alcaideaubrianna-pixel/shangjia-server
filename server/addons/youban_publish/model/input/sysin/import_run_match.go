@@ -44,6 +44,9 @@ func (in *ImportRunMatchStartInp) Filter(ctx context.Context) error {
 	if in.Threshold <= 0 {
 		in.Threshold = 80
 	}
+	if in.Threshold < 80 {
+		in.Threshold = 80
+	}
 	if in.Threshold > 100 {
 		in.Threshold = 100
 	}
@@ -83,6 +86,7 @@ type ImportRunMatchViewInp struct {
 type ImportRunMatchItemListInp struct {
 	form.PageReq
 	MatchRunId int64  `json:"matchRunId" v:"required#匹配运行ID不能为空" dc:"匹配运行ID"`
+	ChannelId  int64  `json:"channelId" dc:"频道ID"`
 	Status     string `json:"status" dc:"匹配状态"`
 	Keyword    string `json:"keyword" dc:"关键词"`
 }
@@ -113,6 +117,10 @@ type ImportRunMatchBatchConfirmInp struct {
 }
 
 type ImportRunMatchSkipInp struct {
+	ItemId int64 `json:"itemId" v:"required#匹配项ID不能为空" dc:"匹配项ID"`
+}
+
+type ImportRunMatchUnbindInp struct {
 	ItemId int64 `json:"itemId" v:"required#匹配项ID不能为空" dc:"匹配项ID"`
 }
 

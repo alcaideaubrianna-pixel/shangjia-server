@@ -696,6 +696,14 @@ func (c *cPublishServer) ImportRunMatchSkip(ctx context.Context, req *publish.Im
 	return
 }
 
+func (c *cPublishServer) ImportRunMatchUnbind(ctx context.Context, req *publish.ImportRunMatchUnbindReq) (res *publish.ImportRunMatchUnbindRes, err error) {
+	if err = service.SysPublish().ServerImportRunMatchUnbind(ctx, &req.ImportRunMatchUnbindInp); err != nil {
+		return
+	}
+	res = &publish.ImportRunMatchUnbindRes{}
+	return
+}
+
 func (c *cPublishAdmin) MediaList(ctx context.Context, req *publish.MediaListReq) (res *publish.MediaListRes, err error) {
 	list, err := service.SysPublish().AdminMediaList(ctx, &req.MediaListInp)
 	if err != nil {

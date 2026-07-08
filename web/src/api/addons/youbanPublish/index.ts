@@ -216,6 +216,14 @@ export function ImportRunMatchSkip(params = {}) {
   });
 }
 
+export function ImportRunMatchUnbind(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/importRunMatch/unbind',
+    method: 'POST',
+    params,
+  });
+}
+
 export function TagList(params = {}) {
   return http.request({ url: '/youban_publish/publish/tag/list', method: 'get', params });
 }
