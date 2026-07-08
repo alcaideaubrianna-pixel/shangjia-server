@@ -2,6 +2,7 @@ package sysin
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -235,6 +236,8 @@ type CollectRuleModel struct {
 	GlobalEnabled        int         `json:"globalEnabled" dc:"全局应用"`
 	TargetChannelIdJson  string      `json:"targetChannelIdJson" dc:"目标频道JSON"`
 	BotIdJson            string      `json:"botIdJson" dc:"BOT JSON"`
+	BackupChannelId      int64       `json:"backupChannelId" dc:"备份频道ID"`
+	BackupChannelIdJson  string      `json:"backupChannelIdJson" dc:"备份频道JSON"`
 	ReviewEnabled        int         `json:"reviewEnabled" dc:"审核开关"`
 	DedupeEnabled        int         `json:"dedupeEnabled" dc:"去重开关"`
 	DedupeDays           int         `json:"dedupeDays" dc:"去重天数"`
@@ -267,6 +270,7 @@ type CollectRuleSaveInp struct {
 	TargetChannelIdJson  string `json:"targetChannelIdJson" dc:"目标频道JSON"`
 	BotIdJson            string `json:"botIdJson" dc:"BOT JSON"`
 	BackupChannelId      int64  `json:"backupChannelId" dc:"备份群ID"`
+	BackupChannelIdJson  string `json:"backupChannelIdJson" dc:"备份频道JSON"`
 	ReviewEnabled        int    `json:"reviewEnabled" dc:"审核开关"`
 	DedupeEnabled        int    `json:"dedupeEnabled" dc:"去重开关"`
 	DedupeDays           int    `json:"dedupeDays" dc:"去重天数"`
@@ -294,12 +298,18 @@ func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
 	in.Name = strings.TrimSpace(in.Name)
 	in.TargetChannelIdJson = strings.TrimSpace(in.TargetChannelIdJson)
 	in.BotIdJson = strings.TrimSpace(in.BotIdJson)
+	in.BackupChannelIdJson = strings.TrimSpace(in.BackupChannelIdJson)
 	in.DeleteTextJson = strings.TrimSpace(in.DeleteTextJson)
 	if in.Name == "" {
 		return gerror.New("规则名称不能为空")
 	}
 	if emptyCollectJSON(in.TargetChannelIdJson) {
 		return gerror.New("目标频道不能为空")
+	}
+	in.BackupChannelIdJson = normalizeCollectIdJSON(in.BackupChannelIdJson, in.BackupChannelId)
+	backupIds := collectPositiveIdsFromJSON(in.BackupChannelIdJson)
+	if len(backupIds) > 0 {
+		in.BackupChannelId = backupIds[0]
 	}
 	if in.DedupeDays <= 0 || in.DedupeDays > 7 {
 		in.DedupeDays = 7
@@ -311,6 +321,30 @@ func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
 		in.Status = 1
 	}
 	return nil
+}
+
+func normalizeCollectIdJSON(raw string, fallback int64) string {
+	ids := collectPositiveIdsFromJSON(raw)
+	if len(ids) == 0 && fallback > 0 {
+		ids = []int64{fallback}
+	}
+	if len(ids) == 0 {
+		return "[]"
+	}
+	data, _ := json.Marshal(uniquePositiveInt64(ids))
+	return string(data)
+}
+
+func collectPositiveIdsFromJSON(raw string) []int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return nil
+	}
+	var ids []int64
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+		return nil
+	}
+	return uniquePositiveInt64(ids)
 }
 
 func emptyCollectJSON(value string) bool {

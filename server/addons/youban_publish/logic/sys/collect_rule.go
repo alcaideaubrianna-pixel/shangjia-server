@@ -65,6 +65,7 @@ func (s *sSysPublish) CollectRuleSave(ctx context.Context, in *sysin.CollectRule
 		"target_channel_id_json":  in.TargetChannelIdJson,
 		"bot_id_json":             in.BotIdJson,
 		"backup_channel_id":       in.BackupChannelId,
+		"backup_channel_id_json":  in.BackupChannelIdJson,
 		"review_enabled":          switchInt(in.ReviewEnabled),
 		"dedupe_enabled":          switchDefaultOn(in.DedupeEnabled),
 		"dedupe_days":             in.DedupeDays,
