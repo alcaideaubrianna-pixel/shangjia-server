@@ -12,7 +12,6 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
-	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
 )
 
@@ -221,6 +220,9 @@ func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenan
 	if err != nil {
 		return err
 	}
+	if task["status"].String() == sysin.PublishTaskStatusPublishing {
+		return nil
+	}
 	if !canSubmitPublishTask(task) {
 		return gerror.New("已取消的任务不能提交")
 	}
@@ -231,13 +233,29 @@ func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenan
 	if !hasChannels {
 		return s.markTaskSavedWithoutPublish(ctx, task, operatorId)
 	}
+	if err = s.markTaskPublishQueued(ctx, id, tenantId, operatorId); err != nil {
+		return err
+	}
+	if err = s.enqueuePublishSubmitTask(ctx, publishSubmitQueuePayload{
+		TaskId:     id,
+		TenantId:   tenantId,
+		AccountId:  accountId,
+		OperatorId: operatorId,
+	}, 0); err != nil {
+		_ = s.markTaskPublishFailed(ctx, id, tenantId, operatorId, err)
+		return gerror.Wrap(err, "上架任务加入队列失败")
+	}
+	return nil
+}
+
+func (s *sSysPublish) markTaskPublishQueued(ctx context.Context, id int64, tenantId int64, operatorId int64) error {
 	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
 		Where("id", id).
 		WhereNull("deleted_at")
 	if tenantId > 0 {
 		mod = mod.Where("tenant_id", tenantId)
 	}
-	_, err = mod.
+	_, err := mod.
 		Data(g.Map{
 			"status":          sysin.PublishTaskStatusPublishing,
 			"tg_status":       "pending",
@@ -251,26 +269,46 @@ func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenan
 	if err != nil {
 		return gerror.Wrap(err, "提交上架任务失败")
 	}
-	task, err = s.getPublishWorkflowTask(ctx, id, tenantId, accountId)
+	return nil
+}
+
+func (s *sSysPublish) markTaskPublishFailed(ctx context.Context, id int64, tenantId int64, operatorId int64, cause error) error {
+	failMod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Where("id", id).
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		failMod = failMod.Where("tenant_id", tenantId)
+	}
+	message := ""
+	if cause != nil {
+		message = cause.Error()
+	}
+	_, err := failMod.Data(g.Map{
+		"status":        sysin.PublishTaskStatusFailed,
+		"error_message": message,
+		"updated_by":    operatorId,
+		"updated_at":    gtime.Now(),
+	}).Update()
+	return err
+}
+
+func (s *sSysPublish) executePublishSubmitWorkflow(ctx context.Context, payload publishSubmitQueuePayload) error {
+	task, err := s.getPublishWorkflowTask(ctx, payload.TaskId, payload.TenantId, payload.AccountId)
 	if err != nil {
 		return err
 	}
+	if task["status"].String() != sysin.PublishTaskStatusPublishing {
+		return nil
+	}
 	if _, err = s.publishTaskToProfile(ctx, task); err != nil {
-		failMod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-			Where("id", id).
-			WhereNull("deleted_at")
-		if tenantId > 0 {
-			failMod = failMod.Where("tenant_id", tenantId)
-		}
-		_, _ = failMod.Data(g.Map{
-			"status":        sysin.PublishTaskStatusFailed,
-			"error_message": err.Error(),
-			"updated_by":    operatorId,
-			"updated_at":    gtime.Now(),
-		}).Update()
+		_ = s.markTaskPublishFailed(ctx, payload.TaskId, payload.TenantId, payload.OperatorId, err)
 		return err
 	}
-	return s.ensureTgJob(ctx, id)
+	if err = s.ensureTgJob(ctx, payload.TaskId); err != nil {
+		_ = s.markTaskPublishFailed(ctx, payload.TaskId, payload.TenantId, payload.OperatorId, err)
+		return err
+	}
+	return nil
 }
 
 func (s *sSysPublish) getPublishWorkflowTask(ctx context.Context, id int64, tenantId int64, accountId int64) (gdb.Record, error) {
@@ -301,15 +339,7 @@ func (s *sSysPublish) markTaskSavedWithoutPublish(ctx context.Context, task gdb.
 	if profileId <= 0 {
 		return nil
 	}
-	columns := dao.ContentProfile.Columns()
-	_, err = dao.ContentProfile.Ctx(ctx).
-		Where(columns.Id, profileId).
-		Data(g.Map{
-			columns.Status:     2,
-			columns.Visibility: consts.ContentVisibilityPrivate,
-			columns.UpdatedAt:  gtime.Now(),
-		}).
-		Update()
+	_, err = s.syncProfilePublishState(ctx, profileId, 2, consts.ContentVisibilityPrivate, nil)
 	if err != nil {
 		return gerror.Wrap(err, "同步未上架资料状态失败")
 	}

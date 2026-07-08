@@ -23,6 +23,7 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 	s.tgQueueMu.Unlock()
 
 	mux := asynq.NewServeMux()
+	mux.HandleFunc(tgTaskTypeSubmit, s.handlePublishSubmitTask)
 	mux.HandleFunc(tgTaskTypePublish, s.handleTelegramPublishTask)
 	mux.HandleFunc(tgTaskTypeDelete, s.handleTelegramDeleteTask)
 	mux.HandleFunc(tgTaskTypeCleanup, s.handleTelegramCleanupTask)
@@ -53,6 +54,14 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	if client != nil {
 		_ = client.Close()
 	}
+}
+
+func (s *sSysPublish) handlePublishSubmitTask(ctx context.Context, task *asynq.Task) error {
+	payload, err := decodePublishSubmitQueuePayload(task)
+	if err != nil {
+		return err
+	}
+	return s.executePublishSubmitWorkflow(ctx, payload)
 }
 
 func (s *sSysPublish) handleTelegramPublishTask(ctx context.Context, task *asynq.Task) error {

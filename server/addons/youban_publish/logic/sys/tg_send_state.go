@@ -9,7 +9,6 @@ import (
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
-	"hotgo/internal/dao"
 	iservice "hotgo/internal/service"
 )
 
@@ -99,7 +98,7 @@ func (s *sSysPublish) markTaskPublishedAfterTelegram(ctx context.Context, taskId
 	now := gtime.Now()
 	result, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
 		Where("id", taskId).
-		WhereNot("status", sysin.PublishTaskStatusPublished).
+		Where("status", sysin.PublishTaskStatusPublishing).
 		Data(g.Map{
 			"status":       sysin.PublishTaskStatusPublished,
 			"tg_status":    "sent",
@@ -115,16 +114,7 @@ func (s *sSysPublish) markTaskPublishedAfterTelegram(ctx context.Context, taskId
 		return false, nil
 	}
 	if profileId > 0 {
-		profileColumns := dao.ContentProfile.Columns()
-		_, err = dao.ContentProfile.Ctx(ctx).
-			Where(profileColumns.Id, profileId).
-			Data(g.Map{
-				profileColumns.Status:      1,
-				profileColumns.Visibility:  consts.ContentVisibilityPublic,
-				profileColumns.PublishedAt: now,
-				profileColumns.UpdatedAt:   now,
-			}).
-			Update()
+		_, err = s.syncProfilePublishState(ctx, profileId, 1, consts.ContentVisibilityPublic, now)
 		if err != nil {
 			return false, gerror.Wrap(err, "同步资料上架状态失败")
 		}

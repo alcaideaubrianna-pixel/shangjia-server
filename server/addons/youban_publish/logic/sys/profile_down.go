@@ -8,6 +8,9 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
+	"hotgo/internal/consts"
+	"hotgo/internal/dao"
+
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -38,6 +41,13 @@ func (s *sSysPublish) prepareProfileDownPlan(ctx context.Context, tenantId int64
 }
 
 func (s *sSysPublish) handleProfilesDown(ctx context.Context, ids []int64, tenantId int64) error {
+	ids, err := s.activeDownProfileIds(ctx, ids, tenantId)
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
 	if err := s.deleteProfilesTelegramMessages(ctx, ids, tenantId); err != nil {
 		return err
 	}
@@ -49,6 +59,36 @@ func (s *sSysPublish) handleProfilesDown(ctx context.Context, ids []int64, tenan
 		return nil
 	}
 	return s.notifyProfilesDown(ctx, ids, tenantId, plan.Channels)
+}
+
+func (s *sSysPublish) activeDownProfileIds(ctx context.Context, ids []int64, tenantId int64) ([]int64, error) {
+	ids = uniqueIds(ids)
+	if len(ids) == 0 {
+		return []int64{}, nil
+	}
+	columns := dao.ContentProfile.Columns()
+	var rows []struct {
+		Id int64 `json:"id"`
+	}
+	err := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
+		Fields("p."+columns.Id+" AS id").
+		LeftJoin(publishTaskTable+" t", "t.profile_id=p.id AND t.deleted_at IS NULL").
+		WhereIn("p."+columns.Id, ids).
+		Where("t.tenant_id", tenantId).
+		Where("p."+columns.Status, 2).
+		Where("p."+columns.Visibility, consts.ContentVisibilityPrivate).
+		WhereNull("p." + columns.DeletedAt).
+		Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取下架资料状态失败")
+	}
+	activeIds := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row.Id > 0 {
+			activeIds = append(activeIds, row.Id)
+		}
+	}
+	return activeIds, nil
 }
 
 func (s *sSysPublish) deleteProfilesTelegramMessages(ctx context.Context, ids []int64, tenantId int64) error {

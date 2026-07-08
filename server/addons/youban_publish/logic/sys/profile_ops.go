@@ -341,7 +341,6 @@ func (s *sSysPublish) ServerProfileReview(ctx context.Context, in *sysin.Profile
 	columns := dao.ContentProfile.Columns()
 	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).Data(g.Map{
 		columns.ReviewStatus: in.ReviewStatus,
-		columns.UpdatedAt:    gtime.Now(),
 	}).Update(); err != nil {
 		return gerror.Wrap(err, "审核资料失败")
 	}
@@ -639,11 +638,10 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 		}
 		return &sysin.ProfileStatusModel{Message: "资料已提交上架"}, nil
 	}
-	columns := dao.ContentProfile.Columns()
-	data := g.Map{columns.Status: in.Status, columns.UpdatedAt: gtime.Now()}
-	data[columns.Visibility] = consts.ContentVisibilityPrivate
-	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).Data(data).Update(); err != nil {
-		return nil, gerror.Wrap(err, "更新资料状态失败")
+	for _, id := range ids {
+		if _, err = s.syncProfilePublishState(ctx, id, in.Status, consts.ContentVisibilityPrivate, nil); err != nil {
+			return nil, gerror.Wrap(err, "更新资料状态失败")
+		}
 	}
 	taskData := g.Map{
 		"status":     sysin.PublishTaskStatusCanceled,

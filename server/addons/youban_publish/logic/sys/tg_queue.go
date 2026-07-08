@@ -13,6 +13,7 @@ import (
 
 const (
 	tgQueueNameDefault    = "youban_publish_tg"
+	tgTaskTypeSubmit      = "youban_publish:tg:submit"
 	tgTaskTypePublish     = "youban_publish:tg:publish"
 	tgTaskTypeDelete      = "youban_publish:tg:delete"
 	tgTaskTypeCleanup     = "youban_publish:tg:cleanup"
@@ -26,6 +27,13 @@ const (
 
 type tgQueuePayload struct {
 	JobId int64 `json:"jobId"`
+}
+
+type publishSubmitQueuePayload struct {
+	TaskId     int64 `json:"taskId"`
+	TenantId   int64 `json:"tenantId"`
+	AccountId  int64 `json:"accountId"`
+	OperatorId int64 `json:"operatorId"`
 }
 
 type importQueuePayload struct {
@@ -78,6 +86,35 @@ func (s *sSysPublish) enqueueTelegramDeleteJob(ctx context.Context, jobId int64,
 
 func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64, delay time.Duration) error {
 	return s.enqueueTelegramTask(ctx, tgTaskTypeCleanup, jobId, delay)
+}
+
+func (s *sSysPublish) enqueuePublishSubmitTask(ctx context.Context, payload publishSubmitQueuePayload, delay time.Duration) error {
+	if payload.TaskId <= 0 {
+		return nil
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	task := asynq.NewTask(tgTaskTypeSubmit, body)
+	options := []asynq.Option{
+		asynq.Queue(tgQueueNameDefault),
+		asynq.MaxRetry(3),
+		asynq.Timeout(10 * time.Minute),
+		asynq.Unique(30 * time.Second),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err = client.EnqueueContext(ctx, task, options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	return err
 }
 
 func (s *sSysPublish) enqueueImportTask(ctx context.Context, id int64, delay time.Duration) error {
@@ -341,6 +378,17 @@ func decodeTelegramQueuePayload(task *asynq.Task) (tgQueuePayload, error) {
 	}
 	if payload.JobId <= 0 {
 		return payload, fmt.Errorf("TG队列任务缺少jobId")
+	}
+	return payload, nil
+}
+
+func decodePublishSubmitQueuePayload(task *asynq.Task) (publishSubmitQueuePayload, error) {
+	var payload publishSubmitQueuePayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return payload, fmt.Errorf("解析上架提交队列任务失败: %w", err)
+	}
+	if payload.TaskId <= 0 {
+		return payload, fmt.Errorf("上架提交队列任务缺少taskId")
 	}
 	return payload, nil
 }

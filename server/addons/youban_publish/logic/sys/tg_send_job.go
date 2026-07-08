@@ -165,7 +165,18 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 }
 
 func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRecord) error {
-	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
+	allowed, err := s.canSendTelegramJob(ctx, job)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "TG发送完成前任务已下架，开始清理已发送消息")
+		if err = s.deleteTelegramMessageSetLockedByChannel(ctx, job, "任务已下架"); err != nil {
+			return err
+		}
+		return s.markTelegramJobSuperseded(ctx, job.Id)
+	}
+	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
 		"status":        "sent",
 		"error_message": "",
 		"sent_at":       gtime.Now(),

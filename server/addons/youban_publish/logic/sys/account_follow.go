@@ -79,6 +79,8 @@ func (s *sSysPublish) AccountFollowList(ctx context.Context, in *sysin.AccountFo
 			Where("f.following_account_id", account.Id)
 		if listType == "request" {
 			mod = mod.Where("f.status", sysin.AccountFollowStatusPending)
+		} else {
+			mod = mod.Where("f.status", sysin.AccountFollowStatusApproved)
 		}
 	case "blocked":
 		mod = mod.LeftJoin(pdao.YoubanPublishAccount.Table()+" a", "a.id=f.follower_account_id").
@@ -89,7 +91,8 @@ func (s *sSysPublish) AccountFollowList(ctx context.Context, in *sysin.AccountFo
 			Where("f.follower_account_id", account.Id)
 	}
 	if listType == "following" {
-		mod = mod.Where("f.tenant_id", account.TenantId)
+		mod = mod.Where("f.tenant_id", account.TenantId).
+			Where("f.status", sysin.AccountFollowStatusApproved)
 	}
 	mod = mod.WhereNull("f.deleted_at")
 	if in.Status != "" {
@@ -161,6 +164,7 @@ func (s *sSysPublish) AccountFollowApply(ctx context.Context, in *sysin.AccountF
 	now := gtime.Now()
 	followDao := pdao.YoubanPublishAccountFollow.Ctx(ctx)
 	existing, err := followDao.
+		Unscoped().
 		Where("follower_account_id", account.Id).
 		Where("following_account_id", targetId).
 		One()
@@ -180,6 +184,7 @@ func (s *sSysPublish) AccountFollowApply(ctx context.Context, in *sysin.AccountF
 	}
 	if !existing.IsEmpty() {
 		_, err = pdao.YoubanPublishAccountFollow.Ctx(ctx).
+			Unscoped().
 			Where("id", existing["id"].Int64()).
 			Data(data).
 			Update()
@@ -293,6 +298,16 @@ func (s *sSysPublish) blockAccountFollow(ctx context.Context, account *sysin.Acc
 		return gerror.New("拉黑账号不存在")
 	}
 	now := gtime.Now()
+	if _, err = pdao.YoubanPublishAccountFollow.Ctx(ctx).
+		Where("((follower_account_id=? AND following_account_id=?) OR (follower_account_id=? AND following_account_id=?))", account.Id, targetAccountId, targetAccountId, account.Id).
+		WhereNull("deleted_at").
+		Data(g.Map{
+			"deleted_at": now,
+			"updated_at": now,
+		}).
+		Update(); err != nil {
+		return gerror.Wrap(err, "清理原关注关系失败")
+	}
 	_, err = pdao.YoubanPublishAccountFollow.Ctx(ctx).Data(g.Map{
 		"tenant_id":                  account.TenantId,
 		"follower_account_id":        targetAccountId,
@@ -387,5 +402,56 @@ func (s *sSysPublish) followNoteAccountIds(ctx context.Context, account *sysin.A
 	for _, row := range rows {
 		ids = append(ids, row.FollowingAccountId)
 	}
-	return uniqueIds(ids), nil
+	return s.expandFollowNoteAccountIds(ctx, uniqueIds(ids))
+}
+
+func (s *sSysPublish) expandFollowNoteAccountIds(ctx context.Context, accountIds []int64) ([]int64, error) {
+	accountIds = uniqueIds(accountIds)
+	if len(accountIds) == 0 {
+		return []int64{}, nil
+	}
+	columns := pdao.YoubanPublishAccount.Columns()
+	var accounts []struct {
+		Id          int64  `json:"id"`
+		TenantId    int64  `json:"tenantId"`
+		AccountType string `json:"accountType"`
+	}
+	if err := pdao.YoubanPublishAccount.Ctx(ctx).
+		Fields(columns.Id, columns.TenantId, columns.AccountType).
+		WhereIn(columns.Id, accountIds).
+		WhereNull(columns.DeletedAt).
+		Scan(&accounts); err != nil {
+		return nil, gerror.Wrap(err, "读取关注账号失败")
+	}
+	tenantIds := make([]int64, 0, len(accounts))
+	result := make([]int64, 0, len(accounts))
+	for _, item := range accounts {
+		if item.Id > 0 {
+			result = append(result, item.Id)
+		}
+		if item.AccountType == sysin.PublishAccountTypeAdmin && item.TenantId > 0 {
+			tenantIds = append(tenantIds, item.TenantId)
+		}
+	}
+	tenantIds = uniqueIds(tenantIds)
+	if len(tenantIds) == 0 {
+		return uniqueIds(result), nil
+	}
+	var tenantAccounts []struct {
+		Id int64 `json:"id"`
+	}
+	if err := pdao.YoubanPublishAccount.Ctx(ctx).
+		Fields(columns.Id).
+		WhereIn(columns.TenantId, tenantIds).
+		Where(columns.Status, 1).
+		WhereNull(columns.DeletedAt).
+		Scan(&tenantAccounts); err != nil {
+		return nil, gerror.Wrap(err, "读取关注租户账号失败")
+	}
+	for _, item := range tenantAccounts {
+		if item.Id > 0 {
+			result = append(result, item.Id)
+		}
+	}
+	return uniqueIds(result), nil
 }

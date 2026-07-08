@@ -925,12 +925,7 @@ func (s *sSysPublish) ensureTgRepairMessage(ctx context.Context, task gdb.Record
 func (s *sSysPublish) finishProfileDownAfterRepair(ctx context.Context, task gdb.Record) error {
 	tenantId := task["tenant_id"].Int64()
 	profileId := task["profile_id"].Int64()
-	columns := dao.ContentProfile.Columns()
-	if _, err := dao.ContentProfile.Ctx(ctx).Where(columns.Id, profileId).Data(g.Map{
-		columns.Status:     2,
-		columns.Visibility: consts.ContentVisibilityPrivate,
-		columns.UpdatedAt:  gtime.Now(),
-	}).Update(); err != nil {
+	if _, err := s.syncProfilePublishState(ctx, profileId, 2, consts.ContentVisibilityPrivate, nil); err != nil {
 		return gerror.Wrap(err, "更新资料下架状态失败")
 	}
 	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", task["id"].Int64()).Data(g.Map{
@@ -946,12 +941,7 @@ func (s *sSysPublish) finishProfileDownAfterRepair(ctx context.Context, task gdb
 
 func (s *sSysPublish) finishProfileDownWithoutRepair(ctx context.Context, task gdb.Record) error {
 	profileId := task["profile_id"].Int64()
-	columns := dao.ContentProfile.Columns()
-	if _, err := dao.ContentProfile.Ctx(ctx).Where(columns.Id, profileId).Data(g.Map{
-		columns.Status:     2,
-		columns.Visibility: consts.ContentVisibilityPrivate,
-		columns.UpdatedAt:  gtime.Now(),
-	}).Update(); err != nil {
+	if _, err := s.syncProfilePublishState(ctx, profileId, 2, consts.ContentVisibilityPrivate, nil); err != nil {
 		return gerror.Wrap(err, "更新资料下架状态失败")
 	}
 	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", task["id"].Int64()).Data(g.Map{
