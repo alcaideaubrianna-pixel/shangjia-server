@@ -185,6 +185,7 @@ func (s *sSysPublish) MyProfileImageSearch(ctx context.Context, in *sysin.Profil
 		if viewErr != nil {
 			return nil, 0, viewErr
 		}
+		markProfilePermission(profile, sysin.ProfilePermissionCreator)
 		note := &sysin.NoteModel{ProfileModel: *profile}
 		note.Media, err = s.mediaListByProfile(ctx, profile.Id, account.TenantId, account.Id)
 		if err != nil {

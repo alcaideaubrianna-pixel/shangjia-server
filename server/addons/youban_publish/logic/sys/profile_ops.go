@@ -30,7 +30,9 @@ func (s *sSysPublish) MyProfileList(ctx context.Context, in *sysin.ProfileListIn
 	}
 	in.TenantId = account.TenantId
 	in.AccountId = account.Id
-	return s.profileList(ctx, in)
+	list, totalCount, err = s.profileList(ctx, in)
+	markProfilesPermission(list, sysin.ProfilePermissionCreator)
+	return
 }
 
 func (s *sSysPublish) MyProfileView(ctx context.Context, in *sysin.ProfileViewInp) (res *sysin.ProfileViewModel, err error) {
@@ -49,6 +51,7 @@ func (s *sSysPublish) MyProfileView(ctx context.Context, in *sysin.ProfileViewIn
 	if err != nil {
 		return nil, err
 	}
+	markProfilePermission(profile, sysin.ProfilePermissionCreator)
 	media, err := s.mediaListByProfile(ctx, profile.Id, account.TenantId, account.Id)
 	if err != nil {
 		return nil, err
@@ -103,7 +106,9 @@ func (s *sSysPublish) MyNoteList(ctx context.Context, in *sysin.NoteListInp) (li
 	}
 	in.TenantId = account.TenantId
 	in.AccountId = account.Id
-	return s.noteList(ctx, in)
+	list, totalCount, err = s.noteList(ctx, in)
+	markNotesPermission(list, sysin.ProfilePermissionCreator)
+	return
 }
 
 func (s *sSysPublish) MyTagList(ctx context.Context, in *sysin.TagListInp) (list []*sysin.TagModel, totalCount int, err error) {
@@ -155,7 +160,9 @@ func (s *sSysPublish) AdminProfileList(ctx context.Context, in *sysin.ProfileLis
 		in = &sysin.ProfileListInp{}
 	}
 	in.TenantId = account.TenantId
-	return s.profileList(ctx, in)
+	list, totalCount, err = s.profileList(ctx, in)
+	markProfilesPermission(list, sysin.ProfilePermissionAdmin)
+	return
 }
 
 func (s *sSysPublish) AdminProfileView(ctx context.Context, in *sysin.ProfileViewInp) (res *sysin.ProfileViewModel, err error) {
@@ -174,6 +181,7 @@ func (s *sSysPublish) AdminProfileView(ctx context.Context, in *sysin.ProfileVie
 	if err != nil {
 		return nil, err
 	}
+	markProfilePermission(profile, sysin.ProfilePermissionAdmin)
 	media, err := s.mediaListByProfile(ctx, profile.Id, account.TenantId, 0)
 	if err != nil {
 		return nil, err
@@ -219,7 +227,9 @@ func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) 
 		in = &sysin.NoteListInp{}
 	}
 	in.TenantId = account.TenantId
-	return s.noteList(ctx, in)
+	list, totalCount, err = s.noteList(ctx, in)
+	markNotesPermission(list, sysin.ProfilePermissionAdmin)
+	return
 }
 
 func (s *sSysPublish) AdminTagList(ctx context.Context, in *sysin.TagListInp) (list []*sysin.TagModel, totalCount int, err error) {
@@ -362,6 +372,32 @@ func (s *sSysPublish) profileList(ctx context.Context, in *sysin.ProfileListInp)
 		return nil, 0, err
 	}
 	return
+}
+
+func markProfilesPermission(list []*sysin.ProfileModel, permission string) {
+	for _, item := range list {
+		markProfilePermission(item, permission)
+	}
+}
+
+func markProfilePermission(item *sysin.ProfileModel, permission string) {
+	if item == nil {
+		return
+	}
+	if permission == "" {
+		permission = sysin.ProfilePermissionVisitor
+	}
+	item.Permission = permission
+	item.CanEdit = permission == sysin.ProfilePermissionCreator || permission == sysin.ProfilePermissionAdmin
+}
+
+func markNotesPermission(list []*sysin.NoteModel, permission string) {
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		markProfilePermission(&item.ProfileModel, permission)
+	}
 }
 
 func (s *sSysPublish) profileView(ctx context.Context, profileId int64, tenantId int64, accountId int64) (res *sysin.ProfileModel, err error) {

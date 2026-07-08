@@ -68,6 +68,15 @@ type FollowNoteListRes struct {
 	List []*sysin.NoteModel `json:"list" dc:"笔记列表"`
 }
 
+type FollowNoteViewReq struct {
+	g.Meta `path:"/publish/follow/note/view" method:"get" tags:"上架插件" summary:"关注账号笔记详情"`
+	sysin.ProfileViewInp
+}
+
+type FollowNoteViewRes struct {
+	*sysin.ProfileViewModel
+}
+
 type FollowNoteImageSearchReq struct {
 	g.Meta `path:"/publish/follow/note/image-search" method:"post" mime:"multipart/form-data" tags:"上架插件" summary:"关注账号笔记图片搜索"`
 	sysin.FollowNoteListInp

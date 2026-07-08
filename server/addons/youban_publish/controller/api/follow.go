@@ -78,6 +78,14 @@ func (c *cPublish) FollowNoteList(ctx context.Context, req *publish.FollowNoteLi
 	return
 }
 
+func (c *cPublish) FollowNoteView(ctx context.Context, req *publish.FollowNoteViewReq) (res *publish.FollowNoteViewRes, err error) {
+	data, err := service.SysPublish().FollowNoteView(ctx, &req.ProfileViewInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.FollowNoteViewRes{ProfileViewModel: data}, nil
+}
+
 func (c *cPublish) FollowNoteImageSearch(ctx context.Context, req *publish.FollowNoteImageSearchReq) (res *publish.FollowNoteImageSearchRes, err error) {
 	file := g.RequestFromCtx(ctx).GetUploadFile("image")
 	if file == nil {

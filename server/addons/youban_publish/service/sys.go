@@ -186,6 +186,7 @@ type ISysPublish interface {
 	AccountFollowApply(ctx context.Context, in *sysin.AccountFollowApplyInp) (err error)
 	AccountFollowAction(ctx context.Context, in *sysin.AccountFollowActionInp) (err error)
 	FollowNoteList(ctx context.Context, in *sysin.FollowNoteListInp) (list []*sysin.NoteModel, totalCount int, err error)
+	FollowNoteView(ctx context.Context, in *sysin.ProfileViewInp) (res *sysin.ProfileViewModel, err error)
 	FollowNoteImageSearch(ctx context.Context, in *sysin.FollowNoteListInp, file *ghttp.UploadFile) (list []*sysin.NoteModel, totalCount int, err error)
 	ExecuteImportTask(ctx context.Context, id int64) (err error)
 	MyMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile, originalFile *ghttp.UploadFile) (res *sysin.MediaModel, err error)

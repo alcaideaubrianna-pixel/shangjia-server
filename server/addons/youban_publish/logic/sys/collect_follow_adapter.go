@@ -33,7 +33,7 @@ func (s *sSysPublish) collectFollowProfilePublished(ctx context.Context, task gd
 	if profile.IsEmpty() {
 		return nil
 	}
-	sources, err := s.collectFollowSources(ctx, authorTenantId, authorAccountId)
+	sources, err := s.collectFollowSources(ctx, authorAccountId)
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func (s *sSysPublish) collectFollowProfilePublished(ctx context.Context, task gd
 			SourceType:      sysin.CollectSourceTypeFollow,
 			SourceChatId:    fmt.Sprintf("account:%d", authorAccountId),
 			SourceMessageId: profileId,
-			SourceUniqueKey: collectFollowProfileUniqueKey(authorAccountId, profile),
+			SourceUniqueKey: collectFollowProfileUniqueKey(source["id"].Int64(), authorAccountId, profile),
 			RawText:         collectFollowProfileText(profile),
 			Media:           media,
 			ReceivedAt:      gtime.Now(),
@@ -69,7 +69,7 @@ func (s *sSysPublish) collectFollowProfilePublished(ctx context.Context, task gd
 	return nil
 }
 
-func (s *sSysPublish) collectFollowSources(ctx context.Context, tenantId int64, authorAccountId int64) ([]gdb.Record, error) {
+func (s *sSysPublish) collectFollowSources(ctx context.Context, authorAccountId int64) ([]gdb.Record, error) {
 	sourceDao := pdao.YoubanPublishCollectSource
 	followDao := pdao.YoubanPublishAccountFollow
 	sourceCols := sourceDao.Columns()
@@ -79,7 +79,6 @@ func (s *sSysPublish) collectFollowSources(ctx context.Context, tenantId int64, 
 			" AND f."+followCols.FollowerAccountId+"=s."+sourceCols.AccountId+
 			" AND f."+followCols.FollowingAccountId+"=s."+sourceCols.FollowAccountId+
 			" AND f."+followCols.Status+"=? AND f."+followCols.DeletedAt+" IS NULL", sysin.AccountFollowStatusApproved).
-		Where("s."+sourceCols.TenantId, tenantId).
 		Where("s."+sourceCols.SourceType, sysin.CollectSourceTypeFollow).
 		Where("s."+sourceCols.FollowAccountId, authorAccountId).
 		Where("s."+sourceCols.CollectEnabled, 1).
@@ -164,10 +163,10 @@ func collectFollowProfileText(profile gdb.Record) string {
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 
-func collectFollowProfileUniqueKey(authorAccountId int64, profile gdb.Record) string {
+func collectFollowProfileUniqueKey(sourceId int64, authorAccountId int64, profile gdb.Record) string {
 	version := profile["updated_at"].String()
 	if updatedAt := profile["updated_at"].GTime(); updatedAt != nil {
 		version = updatedAt.Format("U")
 	}
-	return fmt.Sprintf("follow:%d:profile:%d:%s", authorAccountId, profile["id"].Int64(), version)
+	return fmt.Sprintf("follow:source:%d:author:%d:profile:%d:%s", sourceId, authorAccountId, profile["id"].Int64(), version)
 }

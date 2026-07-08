@@ -15,6 +15,10 @@ const (
 	PublishAccountTypeAdmin    = "admin"
 	PublishAccountTypeUploader = "uploader"
 
+	ProfilePermissionCreator = "creator"
+	ProfilePermissionAdmin   = "admin"
+	ProfilePermissionVisitor = "visitor"
+
 	PublishTaskStatusDraft      = "draft"
 	PublishTaskStatusPending    = "pending"
 	PublishTaskStatusPublishing = "publishing"
@@ -577,6 +581,7 @@ type ProfileModel struct {
 	ImageCount      int         `json:"imageCount" dc:"图片数"`
 	VideoCount      int         `json:"videoCount" dc:"视频数"`
 	CanEdit         bool        `json:"canEdit" dc:"当前账号是否可编辑"`
+	Permission      string      `json:"permission" dc:"当前账号权限：creator/admin/visitor"`
 	PublishedAt     *gtime.Time `json:"publishedAt" dc:"发布时间"`
 	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
 	UpdatedAt       *gtime.Time `json:"updatedAt" dc:"更新时间"`

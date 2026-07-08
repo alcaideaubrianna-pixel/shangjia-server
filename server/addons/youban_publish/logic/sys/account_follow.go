@@ -88,7 +88,10 @@ func (s *sSysPublish) AccountFollowList(ctx context.Context, in *sysin.AccountFo
 		mod = mod.LeftJoin(pdao.YoubanPublishAccount.Table()+" a", "a.id=f.following_account_id").
 			Where("f.follower_account_id", account.Id)
 	}
-	mod = mod.Where("f.tenant_id", account.TenantId).WhereNull("f.deleted_at")
+	if listType == "following" {
+		mod = mod.Where("f.tenant_id", account.TenantId)
+	}
+	mod = mod.WhereNull("f.deleted_at")
 	if in.Status != "" {
 		mod = mod.Where("f.status", strings.TrimSpace(in.Status))
 	}
@@ -102,6 +105,9 @@ func (s *sSysPublish) AccountFollowList(ctx context.Context, in *sysin.AccountFo
 	fields := "f.id,a.id AS account_id,a.nickname,a.username,a.avatar_url,a.remark,f.status,f.approval_required_snapshot,f.created_at,f.approved_at"
 	if err = mod.Fields(fields).Page(in.Page, in.PerPage).OrderDesc("f.id").Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取关注列表失败")
+	}
+	if err = s.enrichAccountFollowModels(ctx, list); err != nil {
+		return nil, 0, err
 	}
 	return
 }
@@ -118,7 +124,7 @@ func (s *sSysPublish) AccountFollowApply(ctx context.Context, in *sysin.AccountF
 		return err
 	}
 	target, err := pdao.YoubanPublishAccount.Ctx(ctx).
-		Where("tenant_id", account.TenantId).
+		Where("account_type", sysin.PublishAccountTypeAdmin).
 		Where("username", in.Username).
 		Where("status", 1).
 		WhereNull("deleted_at").
@@ -133,6 +139,17 @@ func (s *sSysPublish) AccountFollowApply(ctx context.Context, in *sysin.AccountF
 	if targetId == account.Id {
 		return gerror.New("不能关注自己")
 	}
+	blocked, err := pdao.YoubanPublishAccountFollow.Ctx(ctx).
+		Where("((follower_account_id=? AND following_account_id=?) OR (follower_account_id=? AND following_account_id=?))", account.Id, targetId, targetId, account.Id).
+		Where("status", sysin.AccountFollowStatusBlocked).
+		WhereNull("deleted_at").
+		Count()
+	if err != nil {
+		return gerror.Wrap(err, "检查关注黑名单失败")
+	}
+	if blocked > 0 {
+		return gerror.New("该账号暂不可关注")
+	}
 	approval := target["follow_approval_required"].Int()
 	status := sysin.AccountFollowStatusApproved
 	var approvedAt *gtime.Time
@@ -142,6 +159,33 @@ func (s *sSysPublish) AccountFollowApply(ctx context.Context, in *sysin.AccountF
 		approvedAt = gtime.Now()
 	}
 	now := gtime.Now()
+	followDao := pdao.YoubanPublishAccountFollow.Ctx(ctx)
+	existing, err := followDao.
+		Where("follower_account_id", account.Id).
+		Where("following_account_id", targetId).
+		One()
+	if err != nil {
+		return gerror.Wrap(err, "读取关注关系失败")
+	}
+	data := g.Map{
+		"tenant_id":                  account.TenantId,
+		"follower_account_id":        account.Id,
+		"following_account_id":       targetId,
+		"status":                     status,
+		"approval_required_snapshot": approval,
+		"remark":                     in.Remark,
+		"approved_at":                approvedAt,
+		"updated_at":                 now,
+		"deleted_at":                 nil,
+	}
+	if !existing.IsEmpty() {
+		_, err = pdao.YoubanPublishAccountFollow.Ctx(ctx).
+			Where("id", existing["id"].Int64()).
+			Data(data).
+			Update()
+		return gerror.Wrap(err, "提交关注失败")
+	}
+	data["created_at"] = now
 	_, err = pdao.YoubanPublishAccountFollow.Ctx(ctx).Data(g.Map{
 		"tenant_id":                  account.TenantId,
 		"follower_account_id":        account.Id,
@@ -152,12 +196,6 @@ func (s *sSysPublish) AccountFollowApply(ctx context.Context, in *sysin.AccountF
 		"approved_at":                approvedAt,
 		"created_at":                 now,
 		"updated_at":                 now,
-	}).OnDuplicate(g.Map{
-		"status":      status,
-		"remark":      in.Remark,
-		"approved_at": approvedAt,
-		"updated_at":  now,
-		"deleted_at":  nil,
 	}).Insert()
 	return gerror.Wrap(err, "提交关注失败")
 }
@@ -177,8 +215,8 @@ func (s *sSysPublish) AccountFollowAction(ctx context.Context, in *sysin.Account
 		targetAccountId := in.AccountId
 		if in.Id > 0 {
 			row, err := pdao.YoubanPublishAccountFollow.Ctx(ctx).
-				Where("tenant_id", account.TenantId).
 				Where("id", in.Id).
+				Where("(follower_account_id=? OR following_account_id=? OR blocked_by=?)", account.Id, account.Id, account.Id).
 				One()
 			if err != nil {
 				return gerror.Wrap(err, "读取关注记录失败")
@@ -193,11 +231,18 @@ func (s *sSysPublish) AccountFollowAction(ctx context.Context, in *sysin.Account
 		}
 		return s.blockAccountFollow(ctx, account, targetAccountId, in.Remark)
 	}
-	mod := pdao.YoubanPublishAccountFollow.Ctx(ctx).Where("tenant_id", account.TenantId)
+	mod := pdao.YoubanPublishAccountFollow.Ctx(ctx)
 	if in.Id > 0 {
 		mod = mod.Where("id", in.Id)
 	} else {
-		mod = mod.Where("following_account_id", in.AccountId).Where("follower_account_id", account.Id)
+		switch in.Action {
+		case "approve", "reject":
+			mod = mod.Where("following_account_id", account.Id).Where("follower_account_id", in.AccountId)
+		case "unblock":
+			mod = mod.Where("blocked_by", account.Id).Where("(follower_account_id=? OR following_account_id=?)", in.AccountId, in.AccountId)
+		default:
+			mod = mod.Where("following_account_id", in.AccountId).Where("follower_account_id", account.Id)
+		}
 	}
 	data := g.Map{"updated_at": gtime.Now(), "remark": in.Remark}
 	switch in.Action {
@@ -214,6 +259,17 @@ func (s *sSysPublish) AccountFollowAction(ctx context.Context, in *sysin.Account
 	case "unblock", "remove":
 		data["deleted_at"] = gtime.Now()
 	}
+	mod = mod.WhereNull("deleted_at")
+	if in.Id > 0 {
+		switch in.Action {
+		case "approve", "reject":
+			mod = mod.Where("following_account_id", account.Id)
+		case "unblock":
+			mod = mod.Where("blocked_by", account.Id)
+		case "remove":
+			mod = mod.Where("(follower_account_id=? OR following_account_id=? OR blocked_by=?)", account.Id, account.Id, account.Id)
+		}
+	}
 	_, err = mod.Data(data).Update()
 	return gerror.Wrap(err, "处理关注失败")
 }
@@ -226,7 +282,6 @@ func (s *sSysPublish) blockAccountFollow(ctx context.Context, account *sysin.Acc
 		return gerror.New("不能拉黑自己")
 	}
 	exists, err := pdao.YoubanPublishAccount.Ctx(ctx).
-		Where("tenant_id", account.TenantId).
 		Where("id", targetAccountId).
 		Where("status", 1).
 		WhereNull("deleted_at").
@@ -267,7 +322,38 @@ func (s *sSysPublish) FollowNoteList(ctx context.Context, in *sysin.FollowNoteLi
 	if err != nil {
 		return nil, 0, err
 	}
-	return s.noteListByAccounts(ctx, &in.ProfileListInp, account.TenantId, accountIds, account)
+	return s.noteListByAccounts(ctx, &in.ProfileListInp, 0, accountIds, account)
+}
+
+func (s *sSysPublish) FollowNoteView(ctx context.Context, in *sysin.ProfileViewInp) (res *sysin.ProfileViewModel, err error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil || !hasProfileSelector(in.Id, in.Uuid) {
+		return nil, gerror.New("资料UUID不能为空")
+	}
+	profileId, err := s.resolveProfileId(ctx, in.Id, in.Uuid, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	profile, err := s.profileView(ctx, profileId, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	accountIds, err := s.followNoteAccountIds(ctx, account, &sysin.FollowNoteListInp{Scope: "all"})
+	if err != nil {
+		return nil, err
+	}
+	if !containsInt64(accountIds, profile.AccountId) {
+		return nil, gerror.New("资料不存在或无权查看")
+	}
+	markProfilePermission(profile, profilePermissionForViewer(account, profile))
+	media, err := s.mediaListByProfile(ctx, profile.Id, profile.TenantId, profile.AccountId)
+	if err != nil {
+		return nil, err
+	}
+	return &sysin.ProfileViewModel{Profile: profile, Media: media}, nil
 }
 
 func (s *sSysPublish) FollowNoteImageSearch(ctx context.Context, in *sysin.FollowNoteListInp, file *ghttp.UploadFile) ([]*sysin.NoteModel, int, error) {

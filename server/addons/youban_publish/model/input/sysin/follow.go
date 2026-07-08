@@ -89,6 +89,10 @@ type AccountFollowModel struct {
 	Username                 string      `json:"username" dc:"用户名"`
 	AvatarUrl                string      `json:"avatarUrl" dc:"头像"`
 	Remark                   string      `json:"remark" dc:"简介"`
+	NoteCount                int         `json:"noteCount" dc:"笔记数"`
+	FollowingCount           int         `json:"followingCount" dc:"关注数"`
+	FollowerCount            int         `json:"followerCount" dc:"粉丝数"`
+	LastNoteAt               *gtime.Time `json:"lastNoteAt" dc:"最近发布时间"`
 	Status                   string      `json:"status" dc:"状态"`
 	ApprovalRequiredSnapshot int         `json:"approvalRequiredSnapshot" dc:"申请时需审批"`
 	CreatedAt                *gtime.Time `json:"createdAt" dc:"创建时间"`
