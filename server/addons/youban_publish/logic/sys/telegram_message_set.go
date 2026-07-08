@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -41,6 +42,14 @@ func (s *sSysPublish) deleteTelegramMessageSetLockedByChannel(ctx context.Contex
 		}
 		_, err = bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{ChatID: chatId, MessageID: int(item.MessageId)})
 		if err != nil {
+			if isTelegramMessageAlreadyDeletedError(err) {
+				_, _ = g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+					Where("id", item.Id).
+					Data(g.Map{"status": "deleted", "deleted_at": gtime.Now(), "updated_at": gtime.Now()}).
+					Update()
+				s.appendTelegramJobLog(ctx, job, "delete", "skipped", fmt.Sprintf("%s，TG消息已不存在，已同步本地删除状态，频道:%s，消息:%d", reason, chatId, item.MessageId))
+				continue
+			}
 			message := fmt.Sprintf("%s，删除TG消息失败，频道:%s，消息:%d，错误:%s", reason, chatId, item.MessageId, err.Error())
 			s.appendTelegramJobLog(ctx, job, "delete", "failed", message)
 			return gerror.New(message)
@@ -52,4 +61,13 @@ func (s *sSysPublish) deleteTelegramMessageSetLockedByChannel(ctx context.Contex
 	}
 	s.appendTelegramJobLog(ctx, job, "delete", "success", reason+"，TG消息删除成功")
 	return nil
+}
+
+func isTelegramMessageAlreadyDeletedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "message to delete not found") ||
+		strings.Contains(message, "message not found")
 }
