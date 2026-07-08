@@ -87,15 +87,19 @@ func (s *sSysPublish) enqueueTelegramJob(ctx context.Context, jobId int64, delay
 			delay = windowDelay
 		}
 	}
-	return s.enqueueTelegramTask(ctx, tgTaskTypePublish, jobId, delay)
+	return s.enqueueTelegramTask(ctx, tgTaskTypePublish, jobId, delay, true)
 }
 
 func (s *sSysPublish) enqueueTelegramDeleteJob(ctx context.Context, jobId int64, delay time.Duration) error {
-	return s.enqueueTelegramTask(ctx, tgTaskTypeDelete, jobId, delay)
+	return s.enqueueTelegramTask(ctx, tgTaskTypeDelete, jobId, delay, true)
 }
 
 func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64, delay time.Duration) error {
-	return s.enqueueTelegramTask(ctx, tgTaskTypeCleanup, jobId, delay)
+	return s.enqueueTelegramTask(ctx, tgTaskTypeCleanup, jobId, delay, true)
+}
+
+func (s *sSysPublish) requeueTelegramJob(ctx context.Context, taskType string, jobId int64, delay time.Duration) error {
+	return s.enqueueTelegramTask(ctx, taskType, jobId, delay, false)
 }
 
 func (s *sSysPublish) enqueuePublishSubmitTask(ctx context.Context, payload publishSubmitQueuePayload, delay time.Duration) error {
@@ -318,7 +322,7 @@ func decodeCycleRunQueuePayload(task *asynq.Task) (cycleRunQueuePayload, error) 
 	return payload, nil
 }
 
-func (s *sSysPublish) enqueueTelegramTask(ctx context.Context, taskType string, jobId int64, delay time.Duration) error {
+func (s *sSysPublish) enqueueTelegramTask(ctx context.Context, taskType string, jobId int64, delay time.Duration, unique bool) error {
 	if jobId <= 0 {
 		return nil
 	}
@@ -335,7 +339,9 @@ func (s *sSysPublish) enqueueTelegramTask(ctx context.Context, taskType string, 
 		asynq.Queue(tgQueueNameDefault),
 		asynq.MaxRetry(10),
 		asynq.Timeout(5 * time.Minute),
-		asynq.Unique(30 * time.Second),
+	}
+	if unique {
+		options = append(options, asynq.Unique(30*time.Second))
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))

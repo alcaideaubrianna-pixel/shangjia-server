@@ -3,13 +3,17 @@ package sys
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
 	"hotgo/internal/consts"
+	hglock "hotgo/internal/library/hgrds/lock"
 )
+
+const telegramChannelLeaseTTL = 2 * time.Minute
 
 func (s *sSysPublish) withTelegramChannelLock(ctx context.Context, chatId string, fn func() error) error {
 	key := telegramChannelLockKey(chatId)
@@ -17,6 +21,27 @@ func (s *sSysPublish) withTelegramChannelLock(ctx context.Context, chatId string
 	lock.Lock()
 	defer lock.Unlock()
 	return s.withTelegramChannelDBLock(ctx, key, fn)
+}
+
+func (s *sSysPublish) tryTelegramChannelLease(ctx context.Context, chatId string) (*hglock.Lock, bool, error) {
+	key := telegramChannelLockKey(chatId)
+	lease := hglock.NewConfig(telegramChannelLeaseTTL, time.Second).Mutex(key)
+	if err := lease.TryLock(ctx); err != nil {
+		if gerror.Is(err, hglock.ErrLockFailed) {
+			return nil, false, nil
+		}
+		return nil, false, gerror.Wrap(err, "获取TG频道发送令牌失败")
+	}
+	return lease, true, nil
+}
+
+func (s *sSysPublish) releaseTelegramChannelLease(ctx context.Context, lease *hglock.Lock) {
+	if lease == nil {
+		return
+	}
+	if err := lease.Unlock(ctx); err != nil && !gerror.Is(err, hglock.ErrNotExist) {
+		g.Log().Warningf(ctx, "释放TG频道发送令牌失败：%+v", err)
+	}
 }
 
 func (s *sSysPublish) telegramChannelLock(chatId string) *publishRuntimeMutex {

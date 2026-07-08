@@ -23,7 +23,16 @@ func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int6
 	if err != nil {
 		return err
 	}
-	return s.deleteTelegramMessageSet(ctx, job, "资料清理")
+	lease, ok, err := s.tryTelegramChannelLease(ctx, job.TargetChatId)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		delay := s.telegramChannelBusyDelay(ctx, jobId)
+		return s.requeueTelegramJob(ctx, tgTaskTypeCleanup, jobId, delay)
+	}
+	defer s.releaseTelegramChannelLease(ctx, lease)
+	return s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料清理")
 }
 
 func (s *sSysPublish) telegramJobById(ctx context.Context, jobId int64) (telegramJobRecord, error) {
