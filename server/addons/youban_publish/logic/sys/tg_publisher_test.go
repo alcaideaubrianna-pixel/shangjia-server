@@ -45,3 +45,20 @@ func TestCollectStringListSupportsObjects(t *testing.T) {
 		t.Fatalf("unexpected list: %#v", got)
 	}
 }
+
+func TestTelegramCopyMediaRefFromFileId(t *testing.T) {
+	fileId := telegramCopyMediaFileId("4369206706", 123)
+	got, ok := telegramCopyMediaRefFromFileId(fileId)
+	if !ok {
+		t.Fatal("expected copy media ref")
+	}
+	if got.ChatId != "-1004369206706" || got.MessageId != 123 {
+		t.Fatalf("unexpected ref: %#v", got)
+	}
+}
+
+func TestTelegramCopyMediaRefFromInvalidFileId(t *testing.T) {
+	if _, ok := telegramCopyMediaRefFromFileId("gotd:4369206706:123"); ok {
+		t.Fatal("gotd file id should not be treated as copy ref")
+	}
+}

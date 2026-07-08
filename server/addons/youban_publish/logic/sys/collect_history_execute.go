@@ -200,12 +200,16 @@ func (s *sSysPublish) ingestCollectHistoryMessages(ctx context.Context, task *sy
 			stats.events++
 		}
 		if collectMessageHasGotdMedia(message) {
+			delay := time.Duration(0)
+			if message.SourceGroupedId != "" {
+				delay = collectGroupedEventDelay
+			}
 			err = s.enqueueCollectMediaCache(ctx, collectMediaQueuePayload{
 				EventId:     eventId,
 				TenantId:    source.TenantId,
 				AccountId:   source.AccountId,
 				TgAccountId: source.TgAccountId,
-			}, 0)
+			}, delay)
 			if err == nil && !exists {
 				s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "media_cache", "历史采集事件已创建，媒体缓存任务已投递", g.Map{"eventId": eventId, "messageId": msg.ID})
 			}

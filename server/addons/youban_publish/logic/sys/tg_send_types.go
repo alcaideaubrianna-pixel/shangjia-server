@@ -25,6 +25,11 @@ type telegramSentMessage struct {
 	AssetHash    string
 }
 
+type telegramCopyMediaRef struct {
+	ChatId    string
+	MessageId int
+}
+
 type telegramJobRecord struct {
 	Id               int64       `json:"id"`
 	TaskId           int64       `json:"taskId"`

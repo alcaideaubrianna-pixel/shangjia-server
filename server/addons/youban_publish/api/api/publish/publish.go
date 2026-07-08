@@ -273,6 +273,15 @@ type AdminChannelFullPushRes struct {
 	*sysin.ChannelFullPushModel
 }
 
+type AdminChannelBackupCreateReq struct {
+	g.Meta `path:"/publish/admin/channel/backup/create" method:"post" tags:"上架插件管理端" summary:"创建备份频道"`
+	sysin.ChannelBackupCreateInp
+}
+
+type AdminChannelBackupCreateRes struct {
+	*sysin.ChannelBackupCreateModel
+}
+
 type AdminUploadMediaReq struct {
 	g.Meta `path:"/publish/admin/media/upload" method:"post" mime:"multipart/form-data" tags:"上架插件管理端" summary:"上传资料媒体"`
 	sysin.MediaUploadInp

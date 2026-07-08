@@ -66,12 +66,18 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 		if event[eventCols.Status].String() == sysin.CollectEventStatusProcessed {
 			return event[eventCols.Id].Int64(), nil
 		}
+		nextText := strings.TrimSpace(event[eventCols.RawText].String())
+		if nextText == "" {
+			nextText = rawText
+		}
+		nextMediaJSON, nextMediaCount := mergeCollectMediaJSON(event[eventCols.MediaJson].String(), mediaJSON)
 		_, err = eventDao.Ctx(ctx).Where(eventCols.Id, event[eventCols.Id].Int64()).Data(g.Map{
-			eventCols.RawText:      rawText,
-			eventCols.MediaCount:   mediaCount,
-			eventCols.MediaJson:    mediaJSON,
-			eventCols.TextHash:     collectHash(rawText),
-			eventCols.DedupeKey:    dedupeKey,
+			eventCols.RawText:      nextText,
+			eventCols.MediaCount:   nextMediaCount,
+			eventCols.MediaJson:    nextMediaJSON,
+			eventCols.TextHash:     collectHash(nextText),
+			eventCols.DedupeKey:    collectHash(fmt.Sprintf("%s:%s:%d", nextText, nextMediaJSON, nextMediaCount)),
+			eventCols.Status:       sysin.CollectEventStatusPending,
 			eventCols.ErrorMessage: "",
 			eventCols.UpdatedAt:    now,
 		}).Update()

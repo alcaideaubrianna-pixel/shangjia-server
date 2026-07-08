@@ -114,8 +114,9 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		return s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusIgnored, "未命中可用规则")
 	}
 	matched := false
+	reasons := make([]string, 0, len(rules))
 	for _, rule := range rules {
-		ruleMatched, dispatchErr := s.dispatchCollectEventByRule(ctx, event, content, rule)
+		ruleMatched, skipReason, dispatchErr := s.dispatchCollectEventByRule(ctx, event, content, rule)
 		if dispatchErr != nil {
 			err = dispatchErr
 			_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
@@ -123,10 +124,16 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		}
 		if ruleMatched {
 			matched = true
+		} else if strings.TrimSpace(skipReason) != "" {
+			reasons = append(reasons, strings.TrimSpace(skipReason))
 		}
 	}
 	if !matched {
-		return s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusIgnored, "未命中规则或被屏蔽")
+		message := "未命中规则或被屏蔽"
+		if len(reasons) > 0 {
+			message = strings.Join(uniqueStrings(reasons), "；")
+		}
+		return s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusIgnored, message)
 	}
 	return s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusProcessed, "")
 }
@@ -160,10 +167,10 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	return rows, nil
 }
 
-func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (bool, error) {
+func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (bool, string, error) {
 	decision, err := s.evaluateCollectRule(ctx, event, content, rule)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	now := gtime.Now()
 	dispatchId, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Data(g.Map{
@@ -180,7 +187,7 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		"updated_at":             now,
 	}).InsertAndGetId()
 	if err != nil {
-		return false, gerror.Wrap(err, "创建采集分发记录失败")
+		return false, "", gerror.Wrap(err, "创建采集分发记录失败")
 	}
 	if decision.Skipped || !decision.Matched {
 		_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
@@ -189,22 +196,22 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 			"updated_at":    gtime.Now(),
 			"finished_at":   gtime.Now(),
 		}).Update()
-		return false, gerror.Wrap(err, "更新采集跳过记录失败")
+		return false, decision.Reason, gerror.Wrap(err, "更新采集跳过记录失败")
 	}
 	if rule["review_enabled"].Int() == 1 {
-		return true, s.createCollectReview(ctx, event, content, rule, dispatchId, decision.Text)
+		return true, "", s.createCollectReview(ctx, event, content, rule, dispatchId, decision.Text)
 	}
 	taskId, err := s.createCollectPublishTask(ctx, event, content, rule, decision.Text)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	if err = s.ensureCollectTgJobs(ctx, taskId); err != nil {
-		return false, err
+		return false, "", err
 	}
 	if err = s.markCollectDispatchQueued(ctx, dispatchId, taskId); err != nil {
-		return false, err
+		return false, "", err
 	}
-	return true, nil
+	return true, "", nil
 }
 
 func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, dispatchId int64, text string) error {

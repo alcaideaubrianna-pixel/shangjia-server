@@ -121,6 +121,13 @@ func (s *sSysPublish) cacheCollectEventMedia(ctx context.Context, event gdb.Reco
 		return nil, false, gerror.Wrap(err, "解析采集媒体失败")
 	}
 	changed := false
+	forwarded, forwardedChanged, err := s.forwardCollectMediaToBackup(ctx, event, items)
+	if err != nil {
+		return nil, false, err
+	}
+	if forwardedChanged {
+		return forwarded, true, nil
+	}
 	for idx, item := range items {
 		if !strings.HasPrefix(strings.TrimSpace(item.FileId), "gotd:") {
 			continue

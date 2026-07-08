@@ -115,6 +115,7 @@ type ISysPublish interface {
 	AdminChannelBatchBots(ctx context.Context, in *sysin.ChannelBatchBotsInp) (err error)
 	AdminChannelRefresh(ctx context.Context, in *sysin.ChannelRefreshInp) (list []*sysin.ChannelRefreshModel, err error)
 	AdminChannelFullPush(ctx context.Context, in *sysin.ChannelFullPushInp) (res *sysin.ChannelFullPushModel, err error)
+	AdminChannelBackupCreate(ctx context.Context, in *sysin.ChannelBackupCreateInp) (res *sysin.ChannelBackupCreateModel, err error)
 	AccountLogin(ctx context.Context, in *sysin.AccountLoginInp) (res *sysin.AccountLoginModel, err error)
 	AccountRegister(ctx context.Context, in *sysin.AccountRegisterInp) (res *sysin.AccountRegisterModel, err error)
 	CurrentAccount(ctx context.Context) (res *sysin.CurrentAccountModel, err error)

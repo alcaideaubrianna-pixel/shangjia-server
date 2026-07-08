@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	tgbot "github.com/go-telegram/bot"
@@ -16,6 +17,9 @@ import (
 func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
 	if len(media) == 0 {
 		return nil, nil
+	}
+	if telegramMediaSetHasCopyRef(media) {
+		return s.copyTelegramMediaSet(ctx, bot, chatId, purpose, caption, media)
 	}
 	if len(media) == 1 {
 		return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0])
@@ -36,6 +40,9 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 }
 
 func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem) ([]*telegramSentMessage, error) {
+	if ref, ok := telegramCopyMediaRefFromFileId(media.TgFileId); ok {
+		return s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media, ref)
+	}
 	input, closer, err := telegramInputFile(media)
 	if err != nil {
 		return nil, err
@@ -75,6 +82,45 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		}
 		return telegramSentMessagesFromSingle(msg, purpose, media.Id, media.AssetHash)
 	}
+}
+
+func (s *sSysPublish) copyTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
+	messages := make([]*telegramSentMessage, 0, len(media))
+	for idx, item := range media {
+		itemCaption := ""
+		if idx == 0 {
+			itemCaption = caption
+		}
+		sent, err := s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, itemCaption, item)
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, sent...)
+	}
+	return messages, nil
+}
+
+func (s *sSysPublish) copyTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem, ref telegramCopyMediaRef) ([]*telegramSentMessage, error) {
+	msg, err := bot.CopyMessage(ctx, &tgbot.CopyMessageParams{
+		ChatID:     chatId,
+		FromChatID: ref.ChatId,
+		MessageID:  ref.MessageId,
+		Caption:    caption,
+		ParseMode:  telegramMediaParseMode(caption),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if msg == nil {
+		return nil, nil
+	}
+	return []*telegramSentMessage{{
+		MessageId: int64(msg.ID),
+		Purpose:   purpose,
+		MediaId:   media.Id,
+		TgFileId:  media.TgFileId,
+		AssetHash: media.AssetHash,
+	}}, nil
 }
 
 func (s *sSysPublish) telegramInputMediaGroup(media []*telegramMediaItem, caption string) ([]models.InputMedia, []int64, []string, []io.Closer) {
@@ -134,6 +180,43 @@ func telegramInputFile(media *telegramMediaItem) (models.InputFile, io.Closer, e
 		return &models.InputFileString{Data: source}, nil, nil
 	}
 	return nil, nil, gerror.New("媒体文件地址为空")
+}
+
+func telegramMediaSetHasCopyRef(media []*telegramMediaItem) bool {
+	for _, item := range media {
+		if item == nil {
+			continue
+		}
+		if _, ok := telegramCopyMediaRefFromFileId(item.TgFileId); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func telegramCopyMediaFileId(chatId string, messageId int) string {
+	return fmt.Sprintf("copy:%s:%d", normalizeTelegramChannelChatID(chatId), messageId)
+}
+
+func telegramCopyMediaRefFromFileId(fileId string) (telegramCopyMediaRef, bool) {
+	fileId = strings.TrimSpace(fileId)
+	if !strings.HasPrefix(fileId, "copy:") {
+		return telegramCopyMediaRef{}, false
+	}
+	raw := strings.TrimPrefix(fileId, "copy:")
+	index := strings.LastIndex(raw, ":")
+	if index <= 0 || index >= len(raw)-1 {
+		return telegramCopyMediaRef{}, false
+	}
+	messageId, err := strconv.Atoi(raw[index+1:])
+	if err != nil || messageId <= 0 {
+		return telegramCopyMediaRef{}, false
+	}
+	chatId := normalizeTelegramChannelChatID(raw[:index])
+	if strings.TrimSpace(chatId) == "" {
+		return telegramCopyMediaRef{}, false
+	}
+	return telegramCopyMediaRef{ChatId: chatId, MessageId: messageId}, true
 }
 
 func telegramInputMediaSource(media *telegramMediaItem) (string, io.Reader, io.Closer, error) {

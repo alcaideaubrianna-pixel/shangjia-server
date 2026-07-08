@@ -41,16 +41,13 @@ func (s *sSysPublish) evaluateCollectRule(ctx context.Context, event gdb.Record,
 		mediaCount = content.MediaCount
 	}
 	if rule["block_plain_text"].Int() == 1 && mediaCount == 0 {
-		return skippedCollectRule("纯文本"), nil
+		return skippedCollectRule("消息组没有媒体"), nil
 	}
 	if rule["block_link"].Int() == 1 && collectLinkPattern.MatchString(rawText) {
 		return skippedCollectRule("链接"), nil
 	}
 	if rule["block_username"].Int() == 1 && collectUsernamePattern.MatchString(rawText) {
 		return skippedCollectRule("用户名"), nil
-	}
-	if rule["min_media_count_enabled"].Int() == 1 && mediaCount < rule["min_media_count"].Int() {
-		return skippedCollectRule(fmt.Sprintf("媒体数量少于%d", rule["min_media_count"].Int())), nil
 	}
 	if blockedText := matchCollectTerms(rawText, collectStringList(rule["block_text_json"].String())); blockedText != "" {
 		return skippedCollectRule("屏蔽文本:" + blockedText), nil

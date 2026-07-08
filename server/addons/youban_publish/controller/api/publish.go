@@ -353,6 +353,15 @@ func (c *cPublishAdmin) ChannelFullPush(ctx context.Context, req *publish.AdminC
 	return
 }
 
+func (c *cPublishAdmin) ChannelBackupCreate(ctx context.Context, req *publish.AdminChannelBackupCreateReq) (res *publish.AdminChannelBackupCreateRes, err error) {
+	item, err := service.SysPublish().AdminChannelBackupCreate(ctx, &req.ChannelBackupCreateInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminChannelBackupCreateRes{ChannelBackupCreateModel: item}
+	return
+}
+
 func (c *cPublishAdmin) UploadMedia(ctx context.Context, req *publish.AdminUploadMediaReq) (res *publish.AdminUploadMediaRes, err error) {
 	file := g.RequestFromCtx(ctx).GetUploadFile("file")
 	if file == nil {

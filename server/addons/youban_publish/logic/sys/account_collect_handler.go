@@ -60,12 +60,16 @@ func (w *accountCollectWorker) ingestGotdMessage(ctx context.Context, source acc
 		return
 	}
 	if collectMessageHasGotdMedia(message) {
+		delay := time.Duration(0)
+		if message.SourceGroupedId != "" {
+			delay = collectGroupedEventDelay
+		}
 		err = w.service.enqueueCollectMediaCache(ctx, collectMediaQueuePayload{
 			EventId:     eventId,
 			TenantId:    source.TenantId,
 			AccountId:   source.AccountId,
 			TgAccountId: w.tgAccountId,
-		}, 0)
+		}, delay)
 		if err != nil {
 			g.Log().Warningf(ctx, "投递账号采集媒体缓存任务失败 event:%d source:%d err:%+v", eventId, source.Id, err)
 		}
