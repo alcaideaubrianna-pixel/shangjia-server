@@ -13,6 +13,7 @@ import (
 
 const (
 	tgQueueNameDefault       = "youban_publish_tg"
+	tgQueueNameMedia         = "youban_publish_media"
 	tgTaskTypeSubmit         = "youban_publish:tg:submit"
 	tgTaskTypePublish        = "youban_publish:tg:publish"
 	tgTaskTypeDelete         = "youban_publish:tg:delete"
