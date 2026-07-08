@@ -7,7 +7,6 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gtime"
 )
 
 func (s *sSysPublish) ensureTgJobs(ctx context.Context, taskId int64, operationNo string) error {
@@ -18,8 +17,11 @@ func (s *sSysPublish) ensureTgJobs(ctx context.Context, taskId int64, operationN
 	})
 }
 
-func (s *sSysPublish) telegramJobChannels(ctx context.Context, task gdb.Record) ([]telegramJobChannel, error) {
+func (s *sSysPublish) telegramJobChannels(ctx context.Context, task gdb.Record, targetChannelIds ...[]int64) ([]telegramJobChannel, error) {
 	channelIds := decodeInt64JSON(task["channel_id_json"].String())
+	if len(targetChannelIds) > 0 {
+		channelIds = uniqueIds(targetChannelIds[0])
+	}
 	mod := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Where("tenant_id", task["tenant_id"].Int64()).
 		Where("publish_direction", "up").
@@ -31,50 +33,13 @@ func (s *sSysPublish) telegramJobChannels(ctx context.Context, task gdb.Record) 
 		mod = mod.Where("is_default_selected", 1)
 	}
 	var channels []telegramJobChannel
-	if err := mod.Fields("id,target_chat_id,bot_id_json").OrderAsc("id").Scan(&channels); err != nil {
+	if err := mod.Fields("id,target_chat_id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time").OrderAsc("id").Scan(&channels); err != nil {
 		return nil, gerror.Wrap(err, "读取TG推送频道失败")
 	}
 	if len(channels) == 0 {
 		return nil, gerror.New("未配置可推送频道")
 	}
 	return channels, nil
-}
-
-func (s *sSysPublish) telegramJobCycleSetting(ctx context.Context, task gdb.Record) (accountCycleSetting, error) {
-	setting, err := s.accountSetting(ctx, task["tenant_id"].Int64(), task["account_id"].Int64())
-	if err != nil {
-		return accountCycleSetting{}, err
-	}
-	return accountCycleSetting{
-		Enabled:     setting.CyclePublishEnabled,
-		Days:        setting.CyclePublishDays,
-		PublishTime: setting.CyclePublishTime,
-	}, nil
-}
-
-func (s *sSysPublish) updateTelegramJobCycleSetting(ctx context.Context, jobId int64, cycle accountCycleSetting) error {
-	if jobId <= 0 {
-		return nil
-	}
-	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", jobId).
-		Data(g.Map{
-			"cycle_enabled":      cycle.Enabled,
-			"cycle_days":         defaultCycleDays(cycle.Days),
-			"cycle_publish_time": cycle.PublishTime,
-			"updated_at":         gtime.Now(),
-		}).
-		Update()
-	if err != nil {
-		return gerror.Wrap(err, "更新TG任务循环设置失败")
-	}
-	return nil
-}
-
-type accountCycleSetting struct {
-	Enabled     int
-	Days        int
-	PublishTime string
 }
 
 func decodeInt64JSON(raw string) []int64 {
@@ -100,7 +65,10 @@ func defaultCycleDays(days int) int {
 }
 
 type telegramJobChannel struct {
-	Id           int64  `json:"id"`
-	TargetChatId string `json:"targetChatId"`
-	BotIdJson    string `json:"botIdJson"`
+	Id                  int64  `json:"id"`
+	TargetChatId        string `json:"targetChatId"`
+	BotIdJson           string `json:"botIdJson"`
+	CyclePublishEnabled int    `json:"cyclePublishEnabled"`
+	CyclePublishDays    int    `json:"cyclePublishDays"`
+	CyclePublishTime    string `json:"cyclePublishTime"`
 }

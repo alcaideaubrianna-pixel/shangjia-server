@@ -24,6 +24,13 @@ type AdminPublishRecordListRes struct {
 	List []*sysin.PublishRecordModel `json:"list" dc:"发送记录列表"`
 }
 
+type AdminPublishRecordClearReq struct {
+	g.Meta `path:"/publish/admin/record/clear" method:"post" tags:"上架插件管理端" summary:"清空发送记录"`
+	sysin.PublishRecordClearInp
+}
+
+type AdminPublishRecordClearRes struct{}
+
 type AdminDevPublishChainTestReq struct {
 	g.Meta `path:"/publish/admin/dev/publishChainTest" method:"post" tags:"上架插件管理端" summary:"开发环境推送链路测试"`
 	sysin.DevPublishChainTestInp
@@ -42,6 +49,13 @@ type MyPublishRecordListRes struct {
 	form.PageRes
 	List []*sysin.PublishRecordModel `json:"list" dc:"发送记录列表"`
 }
+
+type MyPublishRecordClearReq struct {
+	g.Meta `path:"/publish/record/clear" method:"post" tags:"上架插件" summary:"清空我的发送记录"`
+	sysin.PublishRecordClearInp
+}
+
+type MyPublishRecordClearRes struct{}
 
 type MyDevPublishChainTestReq struct {
 	g.Meta `path:"/publish/dev/publishChainTest" method:"post" tags:"上架插件" summary:"开发环境我的推送链路测试"`

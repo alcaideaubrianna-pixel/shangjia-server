@@ -108,6 +108,9 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 		}
 		return s.saveCollectSourceRules(ctx, tx, account.TenantId, id, in.RuleIds)
 	})
+	if err == nil && id > 0 && in.HistoryCollectEnabled == 1 {
+		go s.maybeCreateCollectHistoryTask(context.Background(), id, account.TenantId, account.Id)
+	}
 	return id, err
 }
 

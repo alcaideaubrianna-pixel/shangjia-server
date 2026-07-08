@@ -185,17 +185,14 @@ type AccountSettingViewInp struct {
 }
 
 type AccountSettingSaveInp struct {
-	AccountId           int64  `json:"accountId" v:"required|min:1#账号ID不能为空|账号ID不能为空" dc:"账号ID"`
-	EnableSuffix        int    `json:"enableSuffix" dc:"是否启用发送后缀"`
-	SuffixContent       string `json:"suffixContent" dc:"发送后缀内容"`
-	EnableTitleMark     int    `json:"enableTitleMark" dc:"是否启用编号标识"`
-	MarkMode            string `json:"markMode" dc:"前缀模式：nickname/custom"`
-	NumberSource        string `json:"numberSource" dc:"编号来源：sequence/random"`
-	CustomMarkText      string `json:"customMarkText" dc:"自定义前缀"`
-	MarkPosition        string `json:"markPosition" dc:"显示位置：top/bottom/feeLine"`
-	CyclePublishEnabled int    `json:"cyclePublishEnabled" dc:"是否循环上架"`
-	CyclePublishDays    int    `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
-	CyclePublishTime    string `json:"cyclePublishTime" dc:"循环上架时间"`
+	AccountId       int64  `json:"accountId" v:"required|min:1#账号ID不能为空|账号ID不能为空" dc:"账号ID"`
+	EnableSuffix    int    `json:"enableSuffix" dc:"是否启用发送后缀"`
+	SuffixContent   string `json:"suffixContent" dc:"发送后缀内容"`
+	EnableTitleMark int    `json:"enableTitleMark" dc:"是否启用编号标识"`
+	MarkMode        string `json:"markMode" dc:"前缀模式：nickname/custom"`
+	NumberSource    string `json:"numberSource" dc:"编号来源：sequence/random"`
+	CustomMarkText  string `json:"customMarkText" dc:"自定义前缀"`
+	MarkPosition    string `json:"markPosition" dc:"显示位置：top/bottom/feeLine"`
 }
 
 func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
@@ -204,7 +201,6 @@ func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
 	in.NumberSource = strings.TrimSpace(in.NumberSource)
 	in.CustomMarkText = strings.TrimSpace(in.CustomMarkText)
 	in.MarkPosition = strings.TrimSpace(in.MarkPosition)
-	in.CyclePublishTime = strings.TrimSpace(in.CyclePublishTime)
 	if in.MarkMode == "" {
 		in.MarkMode = "nickname"
 	}
@@ -229,33 +225,21 @@ func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
 	if in.EnableTitleMark != 0 && in.EnableTitleMark != 1 {
 		return gerror.New("编号标识开关不合法")
 	}
-	if in.CyclePublishEnabled != 0 && in.CyclePublishEnabled != 1 {
-		return gerror.New("循环上架开关不合法")
-	}
-	if in.CyclePublishEnabled == 1 && in.CyclePublishDays <= 0 {
-		in.CyclePublishDays = 4
-	}
-	if in.CyclePublishDays < 0 || in.CyclePublishDays > 365 {
-		return gerror.New("循环时间不合法")
-	}
 	return nil
 }
 
 type AccountSettingModel struct {
-	AccountId           int64       `json:"accountId" dc:"账号ID"`
-	EnableSuffix        int         `json:"enableSuffix" dc:"是否启用发送后缀"`
-	SuffixContent       string      `json:"suffixContent" dc:"发送后缀内容"`
-	EnableTitleMark     int         `json:"enableTitleMark" dc:"是否启用编号标识"`
-	MarkMode            string      `json:"markMode" dc:"前缀模式"`
-	NumberSource        string      `json:"numberSource" dc:"编号来源"`
-	CustomMarkText      string      `json:"customMarkText" dc:"自定义前缀"`
-	MarkPosition        string      `json:"markPosition" dc:"显示位置"`
-	PreviewMark         string      `json:"previewMark" dc:"编号标识预览"`
-	CyclePublishEnabled int         `json:"cyclePublishEnabled" dc:"是否循环上架"`
-	CyclePublishDays    int         `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
-	CyclePublishTime    string      `json:"cyclePublishTime" dc:"循环上架时间"`
-	CreatedAt           *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt           *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	AccountId       int64       `json:"accountId" dc:"账号ID"`
+	EnableSuffix    int         `json:"enableSuffix" dc:"是否启用发送后缀"`
+	SuffixContent   string      `json:"suffixContent" dc:"发送后缀内容"`
+	EnableTitleMark int         `json:"enableTitleMark" dc:"是否启用编号标识"`
+	MarkMode        string      `json:"markMode" dc:"前缀模式"`
+	NumberSource    string      `json:"numberSource" dc:"编号来源"`
+	CustomMarkText  string      `json:"customMarkText" dc:"自定义前缀"`
+	MarkPosition    string      `json:"markPosition" dc:"显示位置"`
+	PreviewMark     string      `json:"previewMark" dc:"编号标识预览"`
+	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt       *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type CurrentAccountModel struct {
@@ -937,38 +921,44 @@ type ChannelListInp struct {
 }
 
 type ChannelModel struct {
-	Id                 int64       `json:"id" dc:"ID"`
-	TenantId           int64       `json:"tenantId" dc:"租户ID"`
-	TgAccountId        int64       `json:"tgAccountId" dc:"TG账号ID"`
-	TgAccountName      string      `json:"tgAccountName" dc:"TG账号名称"`
-	ChannelTitle       string      `json:"channelTitle" dc:"频道名称"`
-	ChannelUsername    string      `json:"channelUsername" dc:"频道用户名"`
-	TargetChatId       string      `json:"targetChatId" dc:"目标Chat ID"`
-	PublishDirection   string      `json:"publishDirection" dc:"上架/下架频道：up/down"`
-	IsDefaultSelected  int         `json:"isDefaultSelected" dc:"是否默认选中"`
-	BotIds             []int64     `json:"botIds" dc:"绑定Bot ID列表"`
-	BotIdJson          string      `json:"botIdJson" dc:"绑定Bot ID JSON"`
-	Remark             string      `json:"remark" dc:"备注"`
-	Status             int         `json:"status" dc:"状态"`
-	LastRefreshStatus  string      `json:"lastRefreshStatus" dc:"最近刷新状态"`
-	LastRefreshMessage string      `json:"lastRefreshMessage" dc:"最近刷新信息"`
-	LastRefreshAt      *gtime.Time `json:"lastRefreshAt" dc:"最近刷新时间"`
-	CreatedAt          *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt          *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id                  int64       `json:"id" dc:"ID"`
+	TenantId            int64       `json:"tenantId" dc:"租户ID"`
+	TgAccountId         int64       `json:"tgAccountId" dc:"TG账号ID"`
+	TgAccountName       string      `json:"tgAccountName" dc:"TG账号名称"`
+	ChannelTitle        string      `json:"channelTitle" dc:"频道名称"`
+	ChannelUsername     string      `json:"channelUsername" dc:"频道用户名"`
+	TargetChatId        string      `json:"targetChatId" dc:"目标Chat ID"`
+	PublishDirection    string      `json:"publishDirection" dc:"上架/下架频道：up/down"`
+	CyclePublishEnabled int         `json:"cyclePublishEnabled" dc:"是否循环上架"`
+	CyclePublishDays    int         `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
+	CyclePublishTime    string      `json:"cyclePublishTime" dc:"循环上架时间"`
+	IsDefaultSelected   int         `json:"isDefaultSelected" dc:"是否默认选中"`
+	BotIds              []int64     `json:"botIds" dc:"绑定Bot ID列表"`
+	BotIdJson           string      `json:"botIdJson" dc:"绑定Bot ID JSON"`
+	Remark              string      `json:"remark" dc:"备注"`
+	Status              int         `json:"status" dc:"状态"`
+	LastRefreshStatus   string      `json:"lastRefreshStatus" dc:"最近刷新状态"`
+	LastRefreshMessage  string      `json:"lastRefreshMessage" dc:"最近刷新信息"`
+	LastRefreshAt       *gtime.Time `json:"lastRefreshAt" dc:"最近刷新时间"`
+	CreatedAt           *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt           *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type ChannelSaveInp struct {
-	Id                int64   `json:"id" dc:"ID"`
-	TenantId          int64   `json:"tenantId" dc:"租户ID"`
-	TgAccountId       int64   `json:"tgAccountId" dc:"TG账号ID"`
-	ChannelTitle      string  `json:"channelTitle" dc:"频道名称"`
-	ChannelUsername   string  `json:"channelUsername" dc:"频道用户名"`
-	TargetChatId      string  `json:"targetChatId" dc:"目标Chat ID"`
-	PublishDirection  string  `json:"publishDirection" dc:"上架/下架频道：up/down"`
-	IsDefaultSelected int     `json:"isDefaultSelected" dc:"是否默认选中"`
-	BotIds            []int64 `json:"botIds" dc:"绑定Bot ID列表"`
-	Remark            string  `json:"remark" dc:"备注"`
-	Status            int     `json:"status" dc:"状态：1启用 2停用"`
+	Id                  int64   `json:"id" dc:"ID"`
+	TenantId            int64   `json:"tenantId" dc:"租户ID"`
+	TgAccountId         int64   `json:"tgAccountId" dc:"TG账号ID"`
+	ChannelTitle        string  `json:"channelTitle" dc:"频道名称"`
+	ChannelUsername     string  `json:"channelUsername" dc:"频道用户名"`
+	TargetChatId        string  `json:"targetChatId" dc:"目标Chat ID"`
+	PublishDirection    string  `json:"publishDirection" dc:"上架/下架频道：up/down"`
+	CyclePublishEnabled int     `json:"cyclePublishEnabled" dc:"是否循环上架"`
+	CyclePublishDays    int     `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
+	CyclePublishTime    string  `json:"cyclePublishTime" dc:"循环上架时间"`
+	IsDefaultSelected   int     `json:"isDefaultSelected" dc:"是否默认选中"`
+	BotIds              []int64 `json:"botIds" dc:"绑定Bot ID列表"`
+	Remark              string  `json:"remark" dc:"备注"`
+	Status              int     `json:"status" dc:"状态：1启用 2停用"`
 }
 
 func (in *ChannelSaveInp) Filter(ctx context.Context) error {
@@ -1000,6 +990,16 @@ func (in *ChannelSaveInp) Filter(ctx context.Context) error {
 	if in.IsDefaultSelected != 1 && in.IsDefaultSelected != 2 {
 		return gerror.New("默认选中配置不合法")
 	}
+	if in.CyclePublishEnabled != 0 && in.CyclePublishEnabled != 1 {
+		return gerror.New("循环上架开关不合法")
+	}
+	if in.CyclePublishEnabled == 1 && in.CyclePublishDays <= 0 {
+		in.CyclePublishDays = 4
+	}
+	if in.CyclePublishDays < 0 || in.CyclePublishDays > 365 {
+		return gerror.New("循环时间不合法")
+	}
+	in.CyclePublishTime = strings.TrimSpace(in.CyclePublishTime)
 	in.BotIds = uniquePositiveInt64(in.BotIds)
 	in.Remark = strings.TrimSpace(in.Remark)
 	return nil
@@ -1083,6 +1083,15 @@ type ChannelRefreshModel struct {
 	Id                 int64  `json:"id" dc:"频道ID"`
 	LastRefreshStatus  string `json:"lastRefreshStatus" dc:"刷新状态"`
 	LastRefreshMessage string `json:"lastRefreshMessage" dc:"刷新信息"`
+}
+
+type ChannelFullPushInp struct {
+	ChannelId int64 `json:"channelId" v:"required|min:1#请选择频道|请选择频道" dc:"频道ID"`
+}
+
+type ChannelFullPushModel struct {
+	ChannelId int64 `json:"channelId" dc:"频道ID"`
+	Queued    int   `json:"queued" dc:"入队数量"`
 }
 
 func uniquePositiveInt64(values []int64) []int64 {

@@ -70,6 +70,35 @@ type CollectSourceDownReq struct {
 
 type CollectSourceDownRes struct{}
 
+type CollectSourceHistoryStartReq struct {
+	g.Meta `path:"/publish/collect/source/history/start" method:"post" tags:"上架插件" summary:"启动采集源历史采集"`
+	sysin.CollectSourceHistoryStartInp
+}
+
+type CollectSourceHistoryStartRes struct {
+	*sysin.CollectHistoryTaskModel
+}
+
+type CollectHistoryTaskListReq struct {
+	g.Meta `path:"/publish/collect/history/task/list" method:"get" tags:"上架插件" summary:"历史采集任务列表"`
+	sysin.CollectHistoryTaskListInp
+}
+
+type CollectHistoryTaskListRes struct {
+	form.PageRes
+	List []*sysin.CollectHistoryTaskModel `json:"list" dc:"历史采集任务列表"`
+}
+
+type CollectHistoryLogListReq struct {
+	g.Meta `path:"/publish/collect/history/log/list" method:"get" tags:"上架插件" summary:"历史采集任务日志"`
+	sysin.CollectHistoryLogListInp
+}
+
+type CollectHistoryLogListRes struct {
+	form.PageRes
+	List []*sysin.CollectHistoryLogModel `json:"list" dc:"历史采集任务日志"`
+}
+
 type CollectRuleListReq struct {
 	g.Meta `path:"/publish/collect/rule/list" method:"get" tags:"上架插件" summary:"采集规则列表"`
 	sysin.CollectRuleListInp

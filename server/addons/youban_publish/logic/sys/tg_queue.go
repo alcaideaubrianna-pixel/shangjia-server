@@ -12,18 +12,19 @@ import (
 )
 
 const (
-	tgQueueNameDefault     = "youban_publish_tg"
-	tgTaskTypeSubmit       = "youban_publish:tg:submit"
-	tgTaskTypePublish      = "youban_publish:tg:publish"
-	tgTaskTypeDelete       = "youban_publish:tg:delete"
-	tgTaskTypeCleanup      = "youban_publish:tg:cleanup"
-	tgTaskTypeImport       = "youban_publish:import:legacy"
-	tgTaskTypeRepair       = "youban_publish:tg:message_repair"
-	tgTaskTypeImportMatch  = "youban_publish:import:tg_match"
-	tgTaskTypeImportSync   = "youban_publish:import:tg_sync"
-	tgTaskTypeDown         = "youban_publish:profile:down"
-	tgTaskTypeCycleRun     = "youban_publish:cycle:run"
-	tgTaskTypeCollectMedia = "youban_publish:collect:media_cache"
+	tgQueueNameDefault       = "youban_publish_tg"
+	tgTaskTypeSubmit         = "youban_publish:tg:submit"
+	tgTaskTypePublish        = "youban_publish:tg:publish"
+	tgTaskTypeDelete         = "youban_publish:tg:delete"
+	tgTaskTypeCleanup        = "youban_publish:tg:cleanup"
+	tgTaskTypeImport         = "youban_publish:import:legacy"
+	tgTaskTypeRepair         = "youban_publish:tg:message_repair"
+	tgTaskTypeImportMatch    = "youban_publish:import:tg_match"
+	tgTaskTypeImportSync     = "youban_publish:import:tg_sync"
+	tgTaskTypeDown           = "youban_publish:profile:down"
+	tgTaskTypeCycleRun       = "youban_publish:cycle:run"
+	tgTaskTypeCollectMedia   = "youban_publish:collect:media_cache"
+	tgTaskTypeCollectHistory = "youban_publish:collect:history"
 )
 
 type tgQueuePayload struct {
@@ -31,11 +32,13 @@ type tgQueuePayload struct {
 }
 
 type publishSubmitQueuePayload struct {
-	TaskId      int64  `json:"taskId"`
-	TenantId    int64  `json:"tenantId"`
-	AccountId   int64  `json:"accountId"`
-	OperatorId  int64  `json:"operatorId"`
-	OperationNo string `json:"operationNo"`
+	TaskId               int64   `json:"taskId"`
+	TenantId             int64   `json:"tenantId"`
+	AccountId            int64   `json:"accountId"`
+	OperatorId           int64   `json:"operatorId"`
+	OperationNo          string  `json:"operationNo"`
+	ChannelIds           []int64 `json:"channelIds"`
+	OnlySelectedChannels bool    `json:"onlySelectedChannels"`
 }
 
 type importQueuePayload struct {
@@ -58,6 +61,10 @@ type profileDownQueuePayload struct {
 
 type cycleRunQueuePayload struct {
 	RunId int64 `json:"runId"`
+}
+
+type collectHistoryQueuePayload struct {
+	TaskId int64 `json:"taskId"`
 }
 
 type tgRetryAfterError struct {

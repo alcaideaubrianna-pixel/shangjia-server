@@ -52,13 +52,6 @@ func (s *sSysPublish) AdminAccountSettingSave(ctx context.Context, in *sysin.Acc
 	if err = s.saveAccountSetting(ctx, admin.TenantId, admin.Id, in); err != nil {
 		return nil, err
 	}
-	if err = s.syncAccountCycleSettingToPlans(ctx, admin.TenantId, in.AccountId, accountCycleSetting{
-		Enabled:     in.CyclePublishEnabled,
-		Days:        in.CyclePublishDays,
-		PublishTime: in.CyclePublishTime,
-	}); err != nil {
-		return nil, err
-	}
 	return s.accountSetting(ctx, admin.TenantId, in.AccountId)
 }
 
@@ -130,9 +123,6 @@ func (s *sSysPublish) saveAccountSetting(ctx context.Context, tenantId int64, op
 		"number_source":         in.NumberSource,
 		"custom_mark_text":      in.CustomMarkText,
 		"mark_position":         in.MarkPosition,
-		"cycle_publish_enabled": in.CyclePublishEnabled,
-		"cycle_publish_days":    in.CyclePublishDays,
-		"cycle_publish_time":    in.CyclePublishTime,
 		"updated_by":            operatorId,
 		"updated_at":            now,
 	}
@@ -187,12 +177,11 @@ func (s *sSysPublish) ensureAdminManageableAccount(ctx context.Context, admin *s
 
 func defaultAccountSetting(accountId int64) *sysin.AccountSettingModel {
 	return &sysin.AccountSettingModel{
-		AccountId:        accountId,
-		EnableTitleMark:  1,
-		MarkMode:         "nickname",
-		NumberSource:     "sequence",
-		MarkPosition:     "top",
-		CyclePublishDays: 4,
+		AccountId:       accountId,
+		EnableTitleMark: 1,
+		MarkMode:        "nickname",
+		NumberSource:    "sequence",
+		MarkPosition:    "top",
 	}
 }
 
@@ -205,9 +194,6 @@ func fillAccountSettingModel(model *sysin.AccountSettingModel, row gdb.Record) {
 	model.NumberSource = strings.TrimSpace(row["number_source"].String())
 	model.CustomMarkText = strings.TrimSpace(row["custom_mark_text"].String())
 	model.MarkPosition = strings.TrimSpace(row["mark_position"].String())
-	model.CyclePublishEnabled = row["cycle_publish_enabled"].Int()
-	model.CyclePublishDays = row["cycle_publish_days"].Int()
-	model.CyclePublishTime = strings.TrimSpace(row["cycle_publish_time"].String())
 	model.CreatedAt = row["created_at"].GTime()
 	model.UpdatedAt = row["updated_at"].GTime()
 	if model.MarkMode == "" {
@@ -218,8 +204,5 @@ func fillAccountSettingModel(model *sysin.AccountSettingModel, row gdb.Record) {
 	}
 	if model.MarkPosition == "" {
 		model.MarkPosition = "bottom"
-	}
-	if model.CyclePublishDays <= 0 {
-		model.CyclePublishDays = 4
 	}
 }

@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -11,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
 )
 
@@ -117,24 +119,36 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	if err = s.ensureBotsBelongTenant(ctx, in.BotIds, in.TenantId); err != nil {
 		return err
 	}
-	checkRes, err := s.checkAdminChannelBots(ctx, &sysin.ChannelCheckInp{
-		BotIds:       in.BotIds,
-		TargetChatId: in.TargetChatId,
-		TgAccountId:  in.TgAccountId,
-	}, in.TenantId, true)
-	if err != nil {
-		return err
-	}
-	if !channelCheckAllowed(checkRes) {
-		return gerror.New(channelCheckMessage(checkRes))
-	}
-	in.ChannelTitle = checkRes.ChannelTitle
-	in.ChannelUsername = checkRes.ChannelUsername
-	in.TargetChatId = checkRes.TargetChatId
+	var existing *sysin.ChannelModel
 	if in.Id > 0 {
 		if err = s.ensureChannelsBelongTenant(ctx, []int64{in.Id}, in.TenantId); err != nil {
 			return err
 		}
+		existing, err = s.channelById(ctx, in.TenantId, in.Id)
+		if err != nil {
+			return err
+		}
+	}
+	needChannelCheck := existing == nil || existing.TgAccountId != in.TgAccountId || existing.TargetChatId != in.TargetChatId || existing.PublishDirection != in.PublishDirection || !sameInt64Slice(existing.BotIds, in.BotIds)
+	if needChannelCheck {
+		checkRes, err := s.checkAdminChannelBots(ctx, &sysin.ChannelCheckInp{
+			BotIds:       in.BotIds,
+			TargetChatId: in.TargetChatId,
+			TgAccountId:  in.TgAccountId,
+		}, in.TenantId, true)
+		if err != nil {
+			return err
+		}
+		if !channelCheckAllowed(checkRes) {
+			return gerror.New(channelCheckMessage(checkRes))
+		}
+		in.ChannelTitle = checkRes.ChannelTitle
+		in.ChannelUsername = checkRes.ChannelUsername
+		in.TargetChatId = checkRes.TargetChatId
+	} else if existing != nil {
+		in.ChannelTitle = existing.ChannelTitle
+		in.ChannelUsername = existing.ChannelUsername
+		in.TargetChatId = existing.TargetChatId
 	}
 	botJSON, err := encodeBotIds(in.BotIds)
 	if err != nil {
@@ -142,19 +156,22 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	}
 	now := gtime.Now()
 	data := g.Map{
-		"tenant_id":           in.TenantId,
-		"merchant_id":         in.TenantId,
-		"tg_account_id":       in.TgAccountId,
-		"channel_title":       in.ChannelTitle,
-		"channel_username":    in.ChannelUsername,
-		"target_chat_id":      in.TargetChatId,
-		"publish_direction":   in.PublishDirection,
-		"is_default_selected": in.IsDefaultSelected,
-		"bot_id_json":         botJSON,
-		"remark":              in.Remark,
-		"status":              in.Status,
-		"updated_by":          account.Id,
-		"updated_at":          now,
+		"tenant_id":             in.TenantId,
+		"merchant_id":           in.TenantId,
+		"tg_account_id":         in.TgAccountId,
+		"channel_title":         in.ChannelTitle,
+		"channel_username":      in.ChannelUsername,
+		"target_chat_id":        in.TargetChatId,
+		"publish_direction":     in.PublishDirection,
+		"cycle_publish_enabled": in.CyclePublishEnabled,
+		"cycle_publish_days":    in.CyclePublishDays,
+		"cycle_publish_time":    in.CyclePublishTime,
+		"is_default_selected":   in.IsDefaultSelected,
+		"bot_id_json":           botJSON,
+		"remark":                in.Remark,
+		"status":                in.Status,
+		"updated_by":            account.Id,
+		"updated_at":            now,
 	}
 	if in.Id > 0 {
 		_, err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
@@ -166,12 +183,42 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	} else {
 		data["created_by"] = account.Id
 		data["created_at"] = now
-		_, err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Data(data).Insert()
+		in.Id, err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
 	}
 	if err != nil {
 		return gerror.Wrap(err, "保存频道配置失败")
 	}
+	if err = s.syncChannelCycleAfterSave(ctx, in.TenantId, in.Id, in.CyclePublishEnabled, in.CyclePublishDays, in.CyclePublishTime); err != nil {
+		return err
+	}
 	return nil
+}
+
+func sameInt64Slice(a []int64, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *sSysPublish) channelById(ctx context.Context, tenantId int64, channelId int64) (*sysin.ChannelModel, error) {
+	if tenantId <= 0 || channelId <= 0 {
+		return &sysin.ChannelModel{}, nil
+	}
+	var channel sysin.ChannelModel
+	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("id", channelId).
+		WhereNull("deleted_at").
+		Scan(&channel); err != nil {
+		return nil, gerror.Wrap(err, "读取频道配置失败")
+	}
+	return &channel, nil
 }
 
 func (s *sSysPublish) AdminChannelDelete(ctx context.Context, in *sysin.ChannelDeleteInp) (err error) {
@@ -300,6 +347,105 @@ func (s *sSysPublish) AdminChannelRefresh(ctx context.Context, in *sysin.Channel
 		})
 	}
 	return list, nil
+}
+
+func (s *sSysPublish) AdminChannelFullPush(ctx context.Context, in *sysin.ChannelFullPushInp) (res *sysin.ChannelFullPushModel, err error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil || in.ChannelId <= 0 {
+		return nil, gerror.New("请选择频道")
+	}
+	channel, err := s.fullPushChannel(ctx, account.TenantId, in.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	queued := 0
+	batchNo := fmt.Sprintf("full_push:%d:%d", channel.Id, gtime.Now().TimestampNano())
+	for {
+		ids, err := s.fullPushPublishedTaskIds(ctx, account.TenantId, 500)
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) == 0 {
+			break
+		}
+		for _, taskId := range ids {
+			operationNo := fmt.Sprintf("%s:%d", batchNo, taskId)
+			if err = s.markTaskPublishQueued(ctx, taskId, account.TenantId, account.Id, operationNo); err != nil {
+				return nil, err
+			}
+			if err = s.enqueuePublishSubmitTask(ctx, publishSubmitQueuePayload{
+				TaskId:               taskId,
+				TenantId:             account.TenantId,
+				OperatorId:           account.Id,
+				OperationNo:          operationNo,
+				ChannelIds:           []int64{channel.Id},
+				OnlySelectedChannels: true,
+			}, 0); err != nil {
+				_ = s.markTaskPublishFailed(ctx, taskId, account.TenantId, account.Id, err)
+				return nil, gerror.Wrap(err, "全量推送任务入队失败")
+			}
+			queued++
+		}
+	}
+	return &sysin.ChannelFullPushModel{ChannelId: channel.Id, Queued: queued}, nil
+}
+
+func (s *sSysPublish) fullPushChannel(ctx context.Context, tenantId int64, channelId int64) (*sysin.ChannelModel, error) {
+	var channel sysin.ChannelModel
+	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Where("id", channelId).
+		Where("tenant_id", tenantId).
+		WhereNull("deleted_at").
+		Scan(&channel); err != nil {
+		return nil, gerror.Wrap(err, "读取频道配置失败")
+	}
+	if channel.Id <= 0 {
+		return nil, gerror.New("频道不存在")
+	}
+	if channel.Status != 1 || channel.PublishDirection != "up" {
+		return nil, gerror.New("请选择启用中的上架频道")
+	}
+	if firstPositiveId(decodeBotIds(channel.BotIdJson)) <= 0 {
+		return nil, gerror.New("目标频道未配置可用推送BOT")
+	}
+	return &channel, nil
+}
+
+func (s *sSysPublish) fullPushPublishedTaskIds(ctx context.Context, tenantId int64, limit int) ([]int64, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	var rows []struct {
+		Id int64 `json:"id"`
+	}
+	err := g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
+		InnerJoin(publishAccountTable+" a", "a.id=t.account_id AND a.deleted_at IS NULL").
+		InnerJoin(dao.ContentProfile.Table()+" p", "p.id=t.profile_id AND p.deleted_at IS NULL").
+		Fields("t.id").
+		Where("t.tenant_id", tenantId).
+		Where("t.status", sysin.PublishTaskStatusPublished).
+		Where("t.deleted_at IS NULL").
+		Where("a.tenant_id", tenantId).
+		Where("a.account_type", sysin.PublishAccountTypeUploader).
+		Where("a.status", 1).
+		Where("p.status", 1).
+		Where("COALESCE(t.client_request_id, '') NOT LIKE ?", "collect:follow:%").
+		OrderAsc("t.id").
+		Limit(limit).
+		Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取全量推送资料失败")
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row.Id > 0 {
+			ids = append(ids, row.Id)
+		}
+	}
+	return ids, nil
 }
 
 func (s *sSysPublish) ServerChannelRefresh(ctx context.Context, in *sysin.ChannelRefreshInp) (list []*sysin.ChannelRefreshModel, err error) {

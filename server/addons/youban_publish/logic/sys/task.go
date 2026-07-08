@@ -316,7 +316,7 @@ func (s *sSysPublish) executePublishSubmitWorkflow(ctx context.Context, payload 
 		_ = s.markTaskPublishFailed(ctx, payload.TaskId, payload.TenantId, payload.OperatorId, err)
 		return err
 	}
-	if err = s.ensureTgJob(ctx, payload.TaskId, payload.OperationNo); err != nil {
+	if err = s.ensureTgJob(ctx, payload.TaskId, payload.OperationNo, payload.ChannelIds, payload.OnlySelectedChannels); err != nil {
 		_ = s.markTaskPublishFailed(ctx, payload.TaskId, payload.TenantId, payload.OperatorId, err)
 		return err
 	}
@@ -425,8 +425,17 @@ func (s *sSysPublish) cancelTaskByTenant(ctx context.Context, id int64, tenantId
 	return nil
 }
 
-func (s *sSysPublish) ensureTgJob(ctx context.Context, taskId int64, operationNo string) error {
-	return s.ensureTgJobs(ctx, taskId, operationNo)
+func (s *sSysPublish) ensureTgJob(ctx context.Context, taskId int64, operationNo string, channelIds []int64, onlySelectedChannels bool) error {
+	if len(channelIds) == 0 {
+		return s.ensureTgJobs(ctx, taskId, operationNo)
+	}
+	return s.submitTelegramPublish(ctx, telegramPublishRequest{
+		TaskId:               taskId,
+		OperationNo:          operationNo,
+		OperationPrefix:      telegramPublishBizProfile,
+		ChannelIds:           channelIds,
+		OnlySelectedChannels: onlySelectedChannels,
+	})
 }
 
 func (s *sSysPublish) getTask(ctx context.Context, id int64, accountId int64) (gdb.Record, error) {

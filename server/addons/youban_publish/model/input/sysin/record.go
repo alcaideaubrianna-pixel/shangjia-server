@@ -19,6 +19,8 @@ type PublishRecordListInp struct {
 	TaskId    int64  `json:"taskId" dc:"任务ID"`
 }
 
+type PublishRecordClearInp struct{}
+
 func (in *PublishRecordListInp) Filter(ctx context.Context) error {
 	in.Action = strings.TrimSpace(in.Action)
 	in.Keyword = strings.TrimSpace(in.Keyword)
@@ -40,11 +42,15 @@ type PublishRecordModel struct {
 	Id              int64       `json:"id" dc:"日志ID"`
 	JobId           int64       `json:"jobId" dc:"TG任务ID"`
 	Message         string      `json:"message" dc:"日志内容"`
+	OperationNo     string      `json:"operationNo" dc:"TG操作号"`
 	ProfileId       int64       `json:"profileId" dc:"资料ID"`
 	Status          string      `json:"status" dc:"状态"`
 	TargetChatId    string      `json:"targetChatId" dc:"目标Chat ID"`
 	TaskId          int64       `json:"taskId" dc:"任务ID"`
 	Title           string      `json:"title" dc:"资料标题"`
+	ProgressDone    int         `json:"progressDone" dc:"批次已完成数量"`
+	ProgressTotal   int         `json:"progressTotal" dc:"批次总数量"`
+	ProgressText    string      `json:"progressText" dc:"批次进度文本"`
 }
 
 type DevPublishChainTestInp struct {

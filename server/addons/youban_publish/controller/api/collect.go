@@ -74,6 +74,42 @@ func (c *cPublish) CollectSourceDown(ctx context.Context, req *publish.CollectSo
 	return &publish.CollectSourceDownRes{}, nil
 }
 
+func (c *cPublish) CollectSourceHistoryStart(ctx context.Context, req *publish.CollectSourceHistoryStartReq) (res *publish.CollectSourceHistoryStartRes, err error) {
+	data, err := service.SysPublish().CollectSourceHistoryStart(ctx, &req.CollectSourceHistoryStartInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.CollectSourceHistoryStartRes{CollectHistoryTaskModel: data}, nil
+}
+
+func (c *cPublish) CollectHistoryTaskList(ctx context.Context, req *publish.CollectHistoryTaskListReq) (res *publish.CollectHistoryTaskListRes, err error) {
+	list, totalCount, err := service.SysPublish().CollectHistoryTaskList(ctx, &req.CollectHistoryTaskListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.CollectHistoryTaskModel{}
+	}
+	res = new(publish.CollectHistoryTaskListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublish) CollectHistoryLogList(ctx context.Context, req *publish.CollectHistoryLogListReq) (res *publish.CollectHistoryLogListRes, err error) {
+	list, totalCount, err := service.SysPublish().CollectHistoryLogList(ctx, &req.CollectHistoryLogListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.CollectHistoryLogModel{}
+	}
+	res = new(publish.CollectHistoryLogListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
 func (c *cPublish) CollectRuleList(ctx context.Context, req *publish.CollectRuleListReq) (res *publish.CollectRuleListRes, err error) {
 	list, totalCount, err := service.SysPublish().CollectRuleList(ctx, &req.CollectRuleListInp)
 	if err != nil {

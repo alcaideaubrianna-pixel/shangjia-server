@@ -577,7 +577,7 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 		return err
 	}
 	for _, id := range ids {
-		if err = s.disableCyclePlanForProfile(ctx, tenantId, accountId, id); err != nil {
+		if err = s.disableCyclePlanForProfile(ctx, tenantId, accountId, id, 0); err != nil {
 			return err
 		}
 	}
@@ -650,7 +650,7 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 	}
 	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).WhereIn("profile_id", ids).Data(taskData).Update()
 	for _, id := range ids {
-		if err = s.disableCyclePlanForProfile(ctx, tenantId, accountId, id); err != nil {
+		if err = s.disableCyclePlanForProfile(ctx, tenantId, accountId, id, 0); err != nil {
 			return nil, err
 		}
 	}

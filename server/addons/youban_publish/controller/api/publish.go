@@ -157,9 +157,6 @@ func fillAccountSettingSaveInpFromRequest(ctx context.Context, in *sysin.Account
 	in.NumberSource = body.Get("numberSource", in.NumberSource).String()
 	in.CustomMarkText = body.Get("customMarkText", in.CustomMarkText).String()
 	in.MarkPosition = body.Get("markPosition", in.MarkPosition).String()
-	in.CyclePublishEnabled = body.Get("cyclePublishEnabled", in.CyclePublishEnabled).Int()
-	in.CyclePublishDays = body.Get("cyclePublishDays", in.CyclePublishDays).Int()
-	in.CyclePublishTime = body.Get("cyclePublishTime", in.CyclePublishTime).String()
 }
 
 func (c *cPublishAdmin) BotList(ctx context.Context, req *publish.AdminBotListReq) (res *publish.AdminBotListRes, err error) {
@@ -344,6 +341,15 @@ func (c *cPublishAdmin) ChannelRefresh(ctx context.Context, req *publish.AdminCh
 		list = []*sysin.ChannelRefreshModel{}
 	}
 	res = &publish.AdminChannelRefreshRes{List: list}
+	return
+}
+
+func (c *cPublishAdmin) ChannelFullPush(ctx context.Context, req *publish.AdminChannelFullPushReq) (res *publish.AdminChannelFullPushRes, err error) {
+	item, err := service.SysPublish().AdminChannelFullPush(ctx, &req.ChannelFullPushInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminChannelFullPushRes{ChannelFullPushModel: item}
 	return
 }
 

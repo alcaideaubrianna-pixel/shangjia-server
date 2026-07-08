@@ -32,6 +32,12 @@ const (
 	CollectDispatchStatusSent      = "sent"
 	CollectDispatchStatusSkipped   = "skipped"
 	CollectDispatchStatusFailed    = "failed"
+
+	CollectHistoryTaskStatusPending = "pending"
+	CollectHistoryTaskStatusRunning = "running"
+	CollectHistoryTaskStatusPaused  = "paused"
+	CollectHistoryTaskStatusSuccess = "success"
+	CollectHistoryTaskStatusFailed  = "failed"
 )
 
 type CollectSourceListInp struct {
@@ -110,6 +116,58 @@ type CollectSourceSaveInp struct {
 	RuleIds               []int64 `json:"ruleIds" dc:"绑定规则ID"`
 	Remark                string  `json:"remark" dc:"备注"`
 	Status                int     `json:"status" dc:"状态"`
+}
+
+type CollectSourceHistoryStartInp struct {
+	Id int64 `json:"id" dc:"采集源ID"`
+}
+
+type CollectHistoryTaskListInp struct {
+	form.PageReq
+	SourceId int64  `json:"sourceId" dc:"采集源ID"`
+	Status   string `json:"status" dc:"状态"`
+}
+
+type CollectHistoryLogListInp struct {
+	form.PageReq
+	TaskId int64 `json:"taskId" dc:"任务ID"`
+}
+
+type CollectHistoryTaskModel struct {
+	Id             int64       `json:"id" dc:"ID"`
+	TenantId       int64       `json:"tenantId" dc:"租户ID"`
+	AccountId      int64       `json:"accountId" dc:"账号ID"`
+	SourceId       int64       `json:"sourceId" dc:"采集源ID"`
+	TgAccountId    int64       `json:"tgAccountId" dc:"协议号ID"`
+	SourceChatId   string      `json:"sourceChatId" dc:"来源频道ID"`
+	Mode           string      `json:"mode" dc:"采集模式"`
+	Days           int         `json:"days" dc:"采集天数"`
+	OffsetId       int         `json:"offsetId" dc:"历史游标"`
+	ScannedCount   int         `json:"scannedCount" dc:"扫描数量"`
+	EventCount     int         `json:"eventCount" dc:"入库事件数"`
+	DuplicateCount int         `json:"duplicateCount" dc:"重复数量"`
+	FailedCount    int         `json:"failedCount" dc:"失败数量"`
+	Status         string      `json:"status" dc:"状态"`
+	ErrorMessage   string      `json:"errorMessage" dc:"错误信息"`
+	NextRunAt      *gtime.Time `json:"nextRunAt" dc:"下次执行时间"`
+	StartedAt      *gtime.Time `json:"startedAt" dc:"开始时间"`
+	FinishedAt     *gtime.Time `json:"finishedAt" dc:"完成时间"`
+	CreatedAt      *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt      *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	SourceTitle    string      `json:"sourceTitle" dc:"采集源名称"`
+	SourceUsername string      `json:"sourceUsername" dc:"采集源用户名"`
+}
+
+type CollectHistoryLogModel struct {
+	Id        int64       `json:"id" dc:"ID"`
+	TaskId    int64       `json:"taskId" dc:"任务ID"`
+	TenantId  int64       `json:"tenantId" dc:"租户ID"`
+	AccountId int64       `json:"accountId" dc:"账号ID"`
+	Level     string      `json:"level" dc:"等级"`
+	Stage     string      `json:"stage" dc:"阶段"`
+	Message   string      `json:"message" dc:"消息"`
+	MetaJson  string      `json:"metaJson" dc:"元数据"`
+	CreatedAt *gtime.Time `json:"createdAt" dc:"创建时间"`
 }
 
 func (in *CollectSourceSaveInp) Filter(ctx context.Context) error {

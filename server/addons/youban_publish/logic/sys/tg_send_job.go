@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -140,9 +141,16 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 		s.appendTelegramJobLog(ctx, job, "publish", "superseded", "TG推送失败时任务已被新操作覆盖，旧任务已废弃")
 		return s.markTelegramJobSuperseded(ctx, job.Id)
 	}
+	var tooMany *tgbot.TooManyRequestsError
+	if errors.As(err, &tooMany) {
+		if switched, switchErr := s.switchTelegramJobToNextBot(ctx, job, err); switchErr != nil {
+			return switchErr
+		} else if switched {
+			return &tgRetryAfterError{after: time.Second, err: err}
+		}
+	}
 	retryCount := job.RetryCount + 1
 	retryDelay := time.Minute
-	var tooMany *tgbot.TooManyRequestsError
 	if errors.As(err, &tooMany) && tooMany.RetryAfter > 0 {
 		retryDelay = time.Duration(tooMany.RetryAfter) * time.Second
 	}
@@ -174,6 +182,30 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 		return err
 	}
 	return &tgRetryAfterError{after: retryDelay, err: err}
+}
+
+func (s *sSysPublish) switchTelegramJobToNextBot(ctx context.Context, job telegramJobRecord, cause error) (bool, error) {
+	nextBotId, err := s.nextTelegramChannelBotId(ctx, job)
+	if err != nil {
+		return false, err
+	}
+	if nextBotId <= 0 || nextBotId == job.BotId {
+		return false, nil
+	}
+	now := gtime.Now()
+	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
+		"bot_id":        nextBotId,
+		"status":        "pending",
+		"retry_count":   job.RetryCount + 1,
+		"next_retry_at": nil,
+		"error_message": "",
+		"updated_at":    now,
+	}).Update()
+	if err != nil {
+		return false, gerror.Wrap(err, "切换备用BOT失败")
+	}
+	s.appendTelegramJobLog(ctx, job, "publish", "bot_switched", fmt.Sprintf("当前BOT限流，已切换备用BOT：%d，原因：%s", nextBotId, cause.Error()))
+	return true, nil
 }
 
 func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRecord) error {

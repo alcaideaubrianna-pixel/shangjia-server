@@ -9,13 +9,14 @@ import (
 )
 
 const publishConfigGroupCollect = "collect"
+const publishConfigKeyCollectEnabled = "collectEnabled"
 
 func (s *sSysPublish) CollectConfig(ctx context.Context) (*sysin.CollectConfigModel, error) {
-	conf := defaultCollectConfig()
-	if err := NewSysConfig().scanConfigGroup(ctx, publishConfigGroupCollect, conf); err != nil {
+	storage := defaultCollectConfigStorage()
+	if err := NewSysConfig().scanConfigGroup(ctx, publishConfigGroupCollect, storage); err != nil {
 		return nil, err
 	}
-	return conf, nil
+	return &sysin.CollectConfigModel{Enabled: storage.CollectEnabled}, nil
 }
 
 func (s *sSysPublish) CollectConfigSave(ctx context.Context, in *sysin.CollectConfigSaveInp) error {
@@ -26,7 +27,7 @@ func (s *sSysPublish) CollectConfigSave(ctx context.Context, in *sysin.CollectCo
 		return err
 	}
 	return NewSysConfig().updateConfigGroup(ctx, publishConfigGroupCollect, g.Map{
-		"enabled": in.Enabled,
+		publishConfigKeyCollectEnabled: in.Enabled,
 	})
 }
 
@@ -41,4 +42,12 @@ func (s *sSysPublish) collectGlobalEnabled(ctx context.Context) bool {
 
 func defaultCollectConfig() *sysin.CollectConfigModel {
 	return &sysin.CollectConfigModel{Enabled: 1}
+}
+
+type collectConfigStorage struct {
+	CollectEnabled int `json:"collectEnabled" dc:"采集总开关"`
+}
+
+func defaultCollectConfigStorage() *collectConfigStorage {
+	return &collectConfigStorage{CollectEnabled: 1}
 }

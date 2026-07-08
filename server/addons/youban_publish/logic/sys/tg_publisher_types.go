@@ -12,6 +12,8 @@ type telegramPublishRequest struct {
 	OperationNo            string
 	OperationPrefix        string
 	AllowCreateOperationNo bool
+	ChannelIds             []int64
+	OnlySelectedChannels   bool
 }
 
 func (req telegramPublishRequest) normalizedOperationPrefix() string {

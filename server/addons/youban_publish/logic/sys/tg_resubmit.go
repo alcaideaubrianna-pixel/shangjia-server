@@ -9,7 +9,8 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
-func (s *sSysPublish) prepareTelegramTaskForResubmit(ctx context.Context, task gdb.Record, channels []telegramJobChannel, operationNo string) error {
+func (s *sSysPublish) prepareTelegramTaskForResubmit(ctx context.Context, task gdb.Record, channels []telegramJobChannel, operationNo string, onlySelectedChannels ...bool) error {
+	selectedOnly := len(onlySelectedChannels) > 0 && onlySelectedChannels[0]
 	selected := make(map[int64]struct{}, len(channels))
 	for _, channel := range channels {
 		selected[channel.Id] = struct{}{}
@@ -24,6 +25,11 @@ func (s *sSysPublish) prepareTelegramTaskForResubmit(ctx context.Context, task g
 		}
 		if job.OperationNo == operationNo {
 			continue
+		}
+		if selectedOnly {
+			if _, ok := selected[job.ChannelId]; !ok {
+				continue
+			}
 		}
 		if job.Status == "sent" {
 			if err = s.deleteTelegramJobMessagesForResubmit(ctx, job); err != nil {

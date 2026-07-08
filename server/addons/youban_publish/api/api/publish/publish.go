@@ -264,6 +264,15 @@ type AdminChannelRefreshRes struct {
 	List []*sysin.ChannelRefreshModel `json:"list" dc:"刷新结果"`
 }
 
+type AdminChannelFullPushReq struct {
+	g.Meta `path:"/publish/admin/channel/fullPush" method:"post" tags:"上架插件管理端" summary:"频道全量推送已上架资料"`
+	sysin.ChannelFullPushInp
+}
+
+type AdminChannelFullPushRes struct {
+	*sysin.ChannelFullPushModel
+}
+
 type AdminUploadMediaReq struct {
 	g.Meta `path:"/publish/admin/media/upload" method:"post" mime:"multipart/form-data" tags:"上架插件管理端" summary:"上传资料媒体"`
 	sysin.MediaUploadInp

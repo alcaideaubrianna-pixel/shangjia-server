@@ -28,6 +28,7 @@ type cyclePlanRecord struct {
 	TenantId        int64       `json:"tenantId"`
 	AccountId       int64       `json:"accountId"`
 	ProfileId       int64       `json:"profileId"`
+	ChannelId       int64       `json:"channelId"`
 	TaskId          int64       `json:"taskId"`
 	Enabled         int         `json:"enabled"`
 	IntervalSeconds int         `json:"intervalSeconds"`
@@ -47,6 +48,7 @@ type cycleRunRecord struct {
 	TenantId     int64       `json:"tenantId"`
 	AccountId    int64       `json:"accountId"`
 	ProfileId    int64       `json:"profileId"`
+	ChannelId    int64       `json:"channelId"`
 	TaskId       int64       `json:"taskId"`
 	Status       string      `json:"status"`
 	Stage        string      `json:"stage"`
@@ -131,6 +133,7 @@ func (s *sSysPublish) createCycleRunForPlan(ctx context.Context, plan cyclePlanR
 		"tenant_id":    plan.TenantId,
 		"account_id":   plan.AccountId,
 		"profile_id":   plan.ProfileId,
+		"channel_id":   plan.ChannelId,
 		"task_id":      plan.TaskId,
 		"status":       cycleRunStatusPending,
 		"stage":        "created",
@@ -199,7 +202,7 @@ func (s *sSysPublish) executeLockedCycleRun(ctx context.Context, run cycleRunRec
 		return err
 	}
 	if plan.Id <= 0 || plan.Enabled != 1 || plan.Status != cyclePlanStatusActive || task.IsEmpty() {
-		_ = s.disableCyclePlanForProfile(ctx, run.TenantId, run.AccountId, run.ProfileId)
+		_ = s.disableCyclePlanForProfile(ctx, run.TenantId, run.AccountId, run.ProfileId, run.ChannelId)
 		s.finishCycleRun(ctx, run, cycleRunStatusSkipped, "skipped", "循环计划或上架任务已失效")
 		s.appendCycleRunLog(ctx, run, "info", "skipped", "循环计划或上架任务已失效", nil)
 		return nil
@@ -269,6 +272,7 @@ func (s *sSysPublish) cycleSentJobs(ctx context.Context, plan cyclePlanRecord) (
 		Where("task_id", plan.TaskId).
 		Where("profile_id", plan.ProfileId).
 		Where("account_id", plan.AccountId).
+		Where("channel_id", plan.ChannelId).
 		Where("status", "sent").
 		OrderAsc("id").
 		Scan(&jobs)
@@ -287,6 +291,7 @@ func (s *sSysPublish) requeueCycleTaskTelegramJobs(ctx context.Context, plan cyc
 		Where("task_id", plan.TaskId).
 		Where("profile_id", plan.ProfileId).
 		Where("account_id", plan.AccountId).
+		Where("channel_id", plan.ChannelId).
 		WhereIn("status", []string{"sent", "failed", "failed_retry"}).
 		OrderAsc("id").
 		Scan(&jobs)
@@ -380,6 +385,7 @@ func (s *sSysPublish) appendCycleRunLog(ctx context.Context, run cycleRunRecord,
 		"tenant_id":    run.TenantId,
 		"account_id":   run.AccountId,
 		"profile_id":   run.ProfileId,
+		"channel_id":   run.ChannelId,
 		"level":        level,
 		"stage":        stage,
 		"message":      message,

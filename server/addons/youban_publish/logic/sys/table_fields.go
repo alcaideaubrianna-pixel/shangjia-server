@@ -29,4 +29,6 @@ var (
 	publishAccountSettingTable       = "hg_youban_publish_account_setting"
 	publishCollectContentTable       = pdao.YoubanPublishCollectContent.Table()
 	publishCollectContentMediaTable  = pdao.YoubanPublishCollectContentMedia.Table()
+	publishCollectHistoryTaskTable   = pdao.YoubanPublishCollectHistoryTask.Table()
+	publishCollectHistoryLogTable    = pdao.YoubanPublishCollectHistoryLog.Table()
 )

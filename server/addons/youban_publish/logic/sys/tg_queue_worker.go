@@ -34,6 +34,7 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 	mux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
 	mux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
 	mux.HandleFunc(tgTaskTypeCollectMedia, s.handleCollectMediaCacheTask)
+	mux.HandleFunc(tgTaskTypeCollectHistory, s.handleCollectHistoryTask)
 
 	go func() {
 		if err := server.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
@@ -109,6 +110,14 @@ func (s *sSysPublish) handleTgMessageRepairTask(ctx context.Context, task *asynq
 		return err
 	}
 	return s.ExecuteTgMessageRepairRun(ctx, payload.RunId)
+}
+
+func (s *sSysPublish) handleCollectHistoryTask(ctx context.Context, task *asynq.Task) error {
+	payload, err := decodeCollectHistoryQueuePayload(task)
+	if err != nil {
+		return err
+	}
+	return s.ExecuteCollectHistoryTask(ctx, payload.TaskId)
 }
 
 func (s *sSysPublish) handleImportMatchTask(ctx context.Context, task *asynq.Task) error {

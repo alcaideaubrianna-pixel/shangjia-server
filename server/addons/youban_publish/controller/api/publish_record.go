@@ -30,6 +30,14 @@ func (c *cPublishAdmin) PublishRecordList(ctx context.Context, req *publish.Admi
 	return
 }
 
+func (c *cPublishAdmin) PublishRecordClear(ctx context.Context, req *publish.AdminPublishRecordClearReq) (res *publish.AdminPublishRecordClearRes, err error) {
+	if err = service.SysPublish().AdminPublishRecordClear(ctx, &req.PublishRecordClearInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminPublishRecordClearRes{}
+	return
+}
+
 func (c *cPublishAdmin) DevPublishChainTest(ctx context.Context, req *publish.AdminDevPublishChainTestReq) (res *publish.AdminDevPublishChainTestRes, err error) {
 	data, err := service.SysPublish().AdminDevPublishChainTest(ctx, &req.DevPublishChainTestInp)
 	if err != nil {
@@ -50,6 +58,14 @@ func (c *cPublish) MyPublishRecordList(ctx context.Context, req *publish.MyPubli
 	res = new(publish.MyPublishRecordListRes)
 	res.List = list
 	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublish) MyPublishRecordClear(ctx context.Context, req *publish.MyPublishRecordClearReq) (res *publish.MyPublishRecordClearRes, err error) {
+	if err = service.SysPublish().MyPublishRecordClear(ctx, &req.PublishRecordClearInp); err != nil {
+		return nil, err
+	}
+	res = &publish.MyPublishRecordClearRes{}
 	return
 }
 
