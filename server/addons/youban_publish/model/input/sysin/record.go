@@ -21,10 +21,45 @@ type PublishRecordListInp struct {
 
 type PublishRecordClearInp struct{}
 
+type TgObserveQueueListInp struct {
+	form.PageReq
+	QueueName string `json:"queueName" dc:"队列名称"`
+	Status    string `json:"status" dc:"状态"`
+}
+
+type TgObserveChannelListInp struct {
+	form.PageReq
+	AccountId int64  `json:"accountId" dc:"账号ID"`
+	ChannelId int64  `json:"channelId" dc:"频道ID"`
+	Keyword   string `json:"keyword" dc:"关键词"`
+}
+
+type TgObserveBotListInp struct {
+	form.PageReq
+	BotId   int64  `json:"botId" dc:"Bot ID"`
+	Keyword string `json:"keyword" dc:"关键词"`
+}
+
 func (in *PublishRecordListInp) Filter(ctx context.Context) error {
 	in.Action = strings.TrimSpace(in.Action)
 	in.Keyword = strings.TrimSpace(in.Keyword)
 	in.Status = strings.TrimSpace(in.Status)
+	return nil
+}
+
+func (in *TgObserveQueueListInp) Filter(ctx context.Context) error {
+	in.QueueName = strings.TrimSpace(in.QueueName)
+	in.Status = strings.TrimSpace(in.Status)
+	return nil
+}
+
+func (in *TgObserveChannelListInp) Filter(ctx context.Context) error {
+	in.Keyword = strings.TrimSpace(in.Keyword)
+	return nil
+}
+
+func (in *TgObserveBotListInp) Filter(ctx context.Context) error {
+	in.Keyword = strings.TrimSpace(in.Keyword)
 	return nil
 }
 
@@ -51,6 +86,58 @@ type PublishRecordModel struct {
 	ProgressDone    int         `json:"progressDone" dc:"批次已完成数量"`
 	ProgressTotal   int         `json:"progressTotal" dc:"批次总数量"`
 	ProgressText    string      `json:"progressText" dc:"批次进度文本"`
+}
+
+type TgObserveQueueStatModel struct {
+	Id            int64       `json:"id" dc:"ID"`
+	StatTime      *gtime.Time `json:"statTime" dc:"统计时间"`
+	QueueName     string      `json:"queueName" dc:"队列名称"`
+	PriorityLevel int         `json:"priorityLevel" dc:"优先级"`
+	Status        string      `json:"status" dc:"状态"`
+	JobCount      int         `json:"jobCount" dc:"任务数"`
+	OldestJobAt   *gtime.Time `json:"oldestJobAt" dc:"最早任务时间"`
+	LatestJobAt   *gtime.Time `json:"latestJobAt" dc:"最新任务时间"`
+	UpdatedAt     *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
+type TgObserveChannelStatModel struct {
+	Id               int64       `json:"id" dc:"ID"`
+	TenantId         int64       `json:"tenantId" dc:"租户ID"`
+	AccountId        int64       `json:"accountId" dc:"账号ID"`
+	AccountName      string      `json:"accountName" dc:"账号名称"`
+	ChannelId        int64       `json:"channelId" dc:"频道ID"`
+	TargetChatId     string      `json:"targetChatId" dc:"目标Chat ID"`
+	ChannelTitle     string      `json:"channelTitle" dc:"频道名称"`
+	PendingCount     int         `json:"pendingCount" dc:"待调度数"`
+	QueuedCount      int         `json:"queuedCount" dc:"已调度数"`
+	SendingCount     int         `json:"sendingCount" dc:"发送中数"`
+	SentCount        int         `json:"sentCount" dc:"成功数"`
+	FailedCount      int         `json:"failedCount" dc:"失败数"`
+	RetryCount       int         `json:"retryCount" dc:"重试数"`
+	RateLimitCount   int         `json:"rateLimitCount" dc:"限流数"`
+	LastSentAt       *gtime.Time `json:"lastSentAt" dc:"最后成功时间"`
+	LastErrorAt      *gtime.Time `json:"lastErrorAt" dc:"最后错误时间"`
+	LastErrorMessage string      `json:"lastErrorMessage" dc:"最后错误"`
+	UpdatedAt        *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
+type TgObserveBotStatModel struct {
+	Id               int64       `json:"id" dc:"ID"`
+	TenantId         int64       `json:"tenantId" dc:"租户ID"`
+	BotId            int64       `json:"botId" dc:"Bot ID"`
+	BotName          string      `json:"botName" dc:"Bot名称"`
+	BotUsername      string      `json:"botUsername" dc:"Bot用户名"`
+	PendingCount     int         `json:"pendingCount" dc:"待调度数"`
+	QueuedCount      int         `json:"queuedCount" dc:"已调度数"`
+	SendingCount     int         `json:"sendingCount" dc:"发送中数"`
+	SentCount        int         `json:"sentCount" dc:"成功数"`
+	FailedCount      int         `json:"failedCount" dc:"失败数"`
+	RetryCount       int         `json:"retryCount" dc:"重试数"`
+	RateLimitCount   int         `json:"rateLimitCount" dc:"限流数"`
+	LastSentAt       *gtime.Time `json:"lastSentAt" dc:"最后成功时间"`
+	LastErrorAt      *gtime.Time `json:"lastErrorAt" dc:"最后错误时间"`
+	LastErrorMessage string      `json:"lastErrorMessage" dc:"最后错误"`
+	UpdatedAt        *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type DevPublishChainTestInp struct {

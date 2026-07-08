@@ -8,11 +8,14 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
 )
 
 const (
+	tgQueueNameUrgent        = "youban_publish_tg_urgent"
 	tgQueueNameDefault       = "youban_publish_tg"
+	tgQueueNameBulk          = "youban_publish_tg_bulk"
 	tgQueueNameMedia         = "youban_publish_media"
 	tgTaskTypeSubmit         = "youban_publish:tg:submit"
 	tgTaskTypePublish        = "youban_publish:tg:publish"
@@ -26,6 +29,12 @@ const (
 	tgTaskTypeCycleRun       = "youban_publish:cycle:run"
 	tgTaskTypeCollectMedia   = "youban_publish:collect:media_cache"
 	tgTaskTypeCollectHistory = "youban_publish:collect:history"
+)
+
+const (
+	tgJobPriorityUrgent  = 10
+	tgJobPriorityDefault = 50
+	tgJobPriorityBulk    = 90
 )
 
 type tgQueuePayload struct {
@@ -58,6 +67,7 @@ type importMatchQueuePayload struct {
 type profileDownQueuePayload struct {
 	TenantId   int64   `json:"tenantId"`
 	ProfileIds []int64 `json:"profileIds"`
+	DownAt     string  `json:"downAt"`
 }
 
 type cycleRunQueuePayload struct {
@@ -87,7 +97,7 @@ func (s *sSysPublish) enqueueTelegramJob(ctx context.Context, jobId int64, delay
 			delay = windowDelay
 		}
 	}
-	return s.enqueueTelegramTask(ctx, tgTaskTypePublish, jobId, delay, true)
+	return s.scheduleTelegramJob(ctx, jobId, delay)
 }
 
 func (s *sSysPublish) enqueueTelegramDeleteJob(ctx context.Context, jobId int64, delay time.Duration) error {
@@ -99,6 +109,9 @@ func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64
 }
 
 func (s *sSysPublish) requeueTelegramJob(ctx context.Context, taskType string, jobId int64, delay time.Duration) error {
+	if taskType == tgTaskTypePublish {
+		return s.scheduleTelegramJob(ctx, jobId, delay)
+	}
 	return s.enqueueTelegramTask(ctx, taskType, jobId, delay, false)
 }
 
@@ -116,7 +129,7 @@ func (s *sSysPublish) enqueuePublishSubmitTask(ctx context.Context, payload publ
 	}
 	task := asynq.NewTask(tgTaskTypeSubmit, body)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameDefault),
+		asynq.Queue(tgQueueNameUrgent),
 		asynq.MaxRetry(3),
 		asynq.Timeout(10 * time.Minute),
 		asynq.Unique(30 * time.Second),
@@ -145,7 +158,7 @@ func (s *sSysPublish) enqueueImportTask(ctx context.Context, id int64, delay tim
 	}
 	task := asynq.NewTask(tgTaskTypeImport, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameDefault),
+		asynq.Queue(tgQueueNameBulk),
 		asynq.MaxRetry(0),
 		asynq.Timeout(2 * time.Hour),
 		asynq.Unique(30 * time.Second),
@@ -174,7 +187,7 @@ func (s *sSysPublish) enqueueImportRun(ctx context.Context, runId int64, delay t
 	}
 	task := asynq.NewTask(tgTaskTypeImport, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameDefault),
+		asynq.Queue(tgQueueNameBulk),
 		asynq.MaxRetry(0),
 		asynq.Timeout(2 * time.Hour),
 		asynq.Unique(30 * time.Second),
@@ -203,7 +216,7 @@ func (s *sSysPublish) enqueueTgMessageRepairRun(ctx context.Context, runId int64
 	}
 	task := asynq.NewTask(tgTaskTypeRepair, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameDefault),
+		asynq.Queue(tgQueueNameBulk),
 		asynq.MaxRetry(0),
 		asynq.Timeout(2 * time.Hour),
 		asynq.Unique(30 * time.Second),
@@ -240,7 +253,7 @@ func (s *sSysPublish) enqueueImportRunMatchTask(ctx context.Context, taskType st
 	}
 	task := asynq.NewTask(taskType, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameDefault),
+		asynq.Queue(tgQueueNameBulk),
 		asynq.MaxRetry(0),
 		asynq.Timeout(2 * time.Hour),
 		asynq.Unique(30 * time.Second),
@@ -264,13 +277,13 @@ func (s *sSysPublish) enqueueProfileDownRun(ctx context.Context, tenantId int64,
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(profileDownQueuePayload{TenantId: tenantId, ProfileIds: profileIds})
+	payload, err := json.Marshal(profileDownQueuePayload{TenantId: tenantId, ProfileIds: profileIds, DownAt: gtime.Now().String()})
 	if err != nil {
 		return err
 	}
 	task := asynq.NewTask(tgTaskTypeDown, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameDefault),
+		asynq.Queue(tgQueueNameUrgent),
 		asynq.MaxRetry(10),
 		asynq.Timeout(30 * time.Minute),
 		asynq.Unique(30 * time.Second),
@@ -299,7 +312,7 @@ func (s *sSysPublish) enqueueCycleRun(ctx context.Context, runId int64, delay ti
 	}
 	task := asynq.NewTask(tgTaskTypeCycleRun, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameDefault),
+		asynq.Queue(tgQueueNameBulk),
 		asynq.MaxRetry(3),
 		asynq.Timeout(30 * time.Minute),
 		asynq.Unique(30 * time.Second),
@@ -323,6 +336,10 @@ func decodeCycleRunQueuePayload(task *asynq.Task) (cycleRunQueuePayload, error) 
 }
 
 func (s *sSysPublish) enqueueTelegramTask(ctx context.Context, taskType string, jobId int64, delay time.Duration, unique bool) error {
+	return s.enqueueTelegramTaskWithQueue(ctx, taskType, jobId, delay, unique, tgQueueNameDefault)
+}
+
+func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType string, jobId int64, delay time.Duration, unique bool, queueName string) error {
 	if jobId <= 0 {
 		return nil
 	}
@@ -335,8 +352,11 @@ func (s *sSysPublish) enqueueTelegramTask(ctx context.Context, taskType string, 
 		return err
 	}
 	task := asynq.NewTask(taskType, payload)
+	if queueName == "" {
+		queueName = tgQueueNameDefault
+	}
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameDefault),
+		asynq.Queue(queueName),
 		asynq.MaxRetry(10),
 		asynq.Timeout(5 * time.Minute),
 	}
@@ -355,6 +375,7 @@ func (s *sSysPublish) enqueueTelegramTask(ctx context.Context, taskType string, 
 	}
 	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
 		"asynq_task_id": info.ID,
+		"queue_name":    queueName,
 		"updated_at":    time.Now(),
 	}).Update()
 	return nil

@@ -20,10 +20,11 @@ func (s *sSysPublish) lockTelegramJob(ctx context.Context, jobId int64) (telegra
 		Where("id", jobId).
 		WhereIn("status", []string{"pending", "failed_retry"}).
 		Data(g.Map{
-			"status":        "sending",
-			"error_message": "",
-			"sent_at":       nil,
-			"updated_at":    gtime.Now(),
+			"status":          "sending",
+			"dispatch_status": tgDispatchStatusProcessing,
+			"error_message":   "",
+			"sent_at":         nil,
+			"updated_at":      gtime.Now(),
 		}).
 		Update()
 	if err != nil {

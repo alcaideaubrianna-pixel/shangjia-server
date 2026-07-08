@@ -101,6 +101,36 @@ type TaskCancelReq struct {
 
 type TaskCancelRes struct{}
 
+type TgObserveQueueListReq struct {
+	g.Meta `path:"/publish/observe/queue/list" method:"get" tags:"上架插件后台" summary:"TG队列观测统计"`
+	sysin.TgObserveQueueListInp
+}
+
+type TgObserveQueueListRes struct {
+	form.PageRes
+	List []*sysin.TgObserveQueueStatModel `json:"list" dc:"队列统计列表"`
+}
+
+type TgObserveChannelListReq struct {
+	g.Meta `path:"/publish/observe/channel/list" method:"get" tags:"上架插件后台" summary:"TG频道观测统计"`
+	sysin.TgObserveChannelListInp
+}
+
+type TgObserveChannelListRes struct {
+	form.PageRes
+	List []*sysin.TgObserveChannelStatModel `json:"list" dc:"频道统计列表"`
+}
+
+type TgObserveBotListReq struct {
+	g.Meta `path:"/publish/observe/bot/list" method:"get" tags:"上架插件后台" summary:"TG Bot观测统计"`
+	sysin.TgObserveBotListInp
+}
+
+type TgObserveBotListRes struct {
+	form.PageRes
+	List []*sysin.TgObserveBotStatModel `json:"list" dc:"Bot统计列表"`
+}
+
 type ProfileListReq struct {
 	g.Meta `path:"/publish/profile/list" method:"get" tags:"上架插件后台" summary:"笔记资料列表"`
 	sysin.ProfileListInp

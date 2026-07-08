@@ -256,6 +256,10 @@
           </n-spin>
         </n-tab-pane>
 
+        <n-tab-pane name="tgObserve" tab="推送观测">
+          <TgObservePanel />
+        </n-tab-pane>
+
         <n-tab-pane name="cloudResource" tab="云资源配置">
           <n-spin :show="cloudResourceLoading">
             <n-space vertical class="config-section">
@@ -475,6 +479,7 @@
   import DashboardPanel from './components/dashboard-panel.vue';
   import ImportTaskPanel from './components/import-task-panel.vue';
   import ProfilePanel from './components/profile-panel.vue';
+  import TgObservePanel from './components/tg-observe-panel.vue';
   import {
     AccountDelete,
     AccountList,
@@ -857,6 +862,7 @@
     if (tab === 'tags') await loadTags();
     if (tab === 'bots') await loadBots();
     if (tab === 'config') await loadConfigs();
+    if (tab === 'tgObserve') return;
     if (tab === 'cloudResource') await loadCloudResourceConfig();
   }
 

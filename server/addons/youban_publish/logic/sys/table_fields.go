@@ -12,6 +12,9 @@ var (
 	publishImportMatchCandidateTable = pdao.YoubanPublishImportMatchCandidate.Table()
 	publishMediaTable                = pdao.YoubanPublishMedia.Table()
 	publishTgJobTable                = pdao.YoubanPublishTgJob.Table()
+	publishTgQueueStatTable          = pdao.YoubanPublishTgQueueStat.Table()
+	publishTgChannelStatTable        = pdao.YoubanPublishTgChannelStat.Table()
+	publishTgBotStatTable            = pdao.YoubanPublishTgBotStat.Table()
 	publishBotTable                  = pdao.YoubanPublishBot.Table()
 	publishTgLoginTable              = pdao.YoubanPublishTgLogin.Table()
 	publishTgAccountTable            = "hg_youban_publish_tg_account"

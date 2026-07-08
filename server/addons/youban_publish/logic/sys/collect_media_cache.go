@@ -130,7 +130,7 @@ func (s *sSysPublish) cacheCollectEventMedia(ctx context.Context, event gdb.Reco
 			changed = true
 			continue
 		}
-		cached, err := s.downloadGotdCollectMedia(ctx, event["tg_account_id"].Int64(), item)
+		cached, err := s.downloadGotdCollectMedia(ctx, event["account_id"].Int64(), event["tg_account_id"].Int64(), item)
 		if err != nil {
 			return nil, false, err
 		}
@@ -190,7 +190,7 @@ func collectEventMediaCacheView(mediaJSON string, mediaCount int, status string,
 	return "none", "无可缓存媒体"
 }
 
-func (s *sSysPublish) downloadGotdCollectMedia(ctx context.Context, tgAccountId int64, item collectMediaItem) (*collectDownloadedMedia, error) {
+func (s *sSysPublish) downloadGotdCollectMedia(ctx context.Context, accountId int64, tgAccountId int64, item collectMediaItem) (*collectDownloadedMedia, error) {
 	if tgAccountId <= 0 {
 		return nil, gerror.New("账号采集媒体缺少TG账号")
 	}
@@ -219,7 +219,7 @@ func (s *sSysPublish) downloadGotdCollectMedia(ctx context.Context, tgAccountId 
 		if _, err := downloader.NewDownloader().Download(client.API(), gotdInputFileLocation(meta)).Stream(runCtx, buf); err != nil {
 			return gerror.Wrap(err, "下载账号采集媒体失败")
 		}
-		result, err = uploadCollectDownloadedMedia(runCtx, item.Type, meta.MimeType, buf.Bytes())
+		result, err = uploadCollectDownloadedMedia(runCtx, accountId, item.Type, meta.MimeType, buf.Bytes())
 		return err
 	})
 	if err != nil {
@@ -248,13 +248,11 @@ func gotdInputFileLocation(meta gotdCollectMediaMeta) tg.InputFileLocationClass 
 	}
 }
 
-func uploadCollectDownloadedMedia(ctx context.Context, mediaType string, mimeType string, data []byte) (*collectDownloadedMedia, error) {
+func uploadCollectDownloadedMedia(ctx context.Context, accountId int64, mediaType string, mimeType string, data []byte) (*collectDownloadedMedia, error) {
 	if len(data) == 0 {
 		return nil, gerror.New("账号采集媒体下载为空")
 	}
-	uploadCtx := context.WithValue(context.Background(), consts.ContextHTTPKey, &model.Context{
-		Module: consts.AppApi,
-	})
+	uploadCtx := collectMediaUploadContext(ctx, accountId)
 	uploadType := storager.KindImg
 	if strings.TrimSpace(mediaType) == "video" {
 		uploadType = storager.KindVideo
@@ -269,6 +267,34 @@ func uploadCollectDownloadedMedia(ctx context.Context, mediaType string, mimeTyp
 		return nil, err
 	}
 	return &collectDownloadedMedia{FileUrl: attachment.FileUrl, Path: attachment.Path}, nil
+}
+
+func collectMediaUploadContext(ctx context.Context, accountId int64) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	current := contexts.Get(ctx)
+	if current == nil {
+		return context.WithValue(ctx, consts.ContextHTTPKey, &model.Context{
+			Module:    consts.AppApi,
+			AddonName: "youban_publish",
+			User:      &model.Identity{Id: accountId, App: consts.AppApi},
+			Data:      g.Map{},
+		})
+	}
+	if current.Module == "" {
+		current.Module = consts.AppApi
+	}
+	if current.AddonName == "" {
+		current.AddonName = "youban_publish"
+	}
+	if current.User == nil || current.User.Id <= 0 {
+		current.User = &model.Identity{Id: accountId, App: consts.AppApi}
+	}
+	if current.User.App == "" {
+		current.User.App = consts.AppApi
+	}
+	return ctx
 }
 
 func collectMediaExt(mediaType string, mimeType string) string {

@@ -16,7 +16,7 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 	}
 	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.concurrency", 20).Int(),
-		Queues:         map[string]int{tgQueueNameDefault: 1},
+		Queues:         map[string]int{tgQueueNameUrgent: 8, tgQueueNameDefault: 4, tgQueueNameBulk: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	mediaServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
@@ -160,7 +160,7 @@ func (s *sSysPublish) handleProfileDownTask(ctx context.Context, task *asynq.Tas
 	if err != nil {
 		return err
 	}
-	return s.handleProfilesDown(ctx, payload.ProfileIds, payload.TenantId)
+	return s.handleProfilesDown(ctx, payload.ProfileIds, payload.TenantId, payload.DownAt)
 }
 
 func (s *sSysPublish) handleCycleRunTask(ctx context.Context, task *asynq.Task) error {

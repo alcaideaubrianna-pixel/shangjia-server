@@ -49,6 +49,103 @@ func (s *sSysPublish) AdminPublishRecordClear(ctx context.Context, in *sysin.Pub
 	return s.publishRecordClear(ctx, account.TenantId, 0)
 }
 
+func (s *sSysPublish) AdminTgObserveQueueList(ctx context.Context, in *sysin.TgObserveQueueListInp) (list []*sysin.TgObserveQueueStatModel, totalCount int, err error) {
+	if _, err = s.currentAdminAccount(ctx); err != nil {
+		return nil, 0, err
+	}
+	if in == nil {
+		in = &sysin.TgObserveQueueListInp{}
+	}
+	if err = in.Filter(ctx); err != nil {
+		return nil, 0, err
+	}
+	mod := g.DB().Model(publishTgQueueStatTable).Safe().Ctx(ctx)
+	if in.QueueName != "" {
+		mod = mod.Where("queue_name", in.QueueName)
+	}
+	if in.Status != "" {
+		mod = mod.Where("status", in.Status)
+	}
+	totalCount, err = mod.Clone().Count()
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "获取TG队列统计总数失败")
+	}
+	err = mod.Page(in.Page, in.PerPage).OrderDesc("job_count").OrderAsc("priority_level").Scan(&list)
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "获取TG队列统计失败")
+	}
+	return
+}
+
+func (s *sSysPublish) AdminTgObserveChannelList(ctx context.Context, in *sysin.TgObserveChannelListInp) (list []*sysin.TgObserveChannelStatModel, totalCount int, err error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	if in == nil {
+		in = &sysin.TgObserveChannelListInp{}
+	}
+	if err = in.Filter(ctx); err != nil {
+		return nil, 0, err
+	}
+	mod := g.DB().Model(publishTgChannelStatTable+" s").Safe().Ctx(ctx).
+		LeftJoin(publishAccountTable+" a", "a.id=s.account_id").
+		Where("s.tenant_id", account.TenantId)
+	if in.AccountId > 0 {
+		mod = mod.Where("s.account_id", in.AccountId)
+	}
+	if in.ChannelId > 0 {
+		mod = mod.Where("s.channel_id", in.ChannelId)
+	}
+	if in.Keyword != "" {
+		like := "%" + in.Keyword + "%"
+		mod = mod.Where("(s.channel_title LIKE ? OR s.target_chat_id LIKE ? OR a.nickname LIKE ?)", like, like, like)
+	}
+	totalCount, err = mod.Clone().Count()
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "获取TG频道统计总数失败")
+	}
+	err = mod.Fields("s.*,a.nickname AS account_name").Page(in.Page, in.PerPage).
+		OrderDesc("s.sending_count").OrderDesc("s.queued_count").OrderDesc("s.pending_count").OrderDesc("s.updated_at").
+		Scan(&list)
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "获取TG频道统计失败")
+	}
+	return
+}
+
+func (s *sSysPublish) AdminTgObserveBotList(ctx context.Context, in *sysin.TgObserveBotListInp) (list []*sysin.TgObserveBotStatModel, totalCount int, err error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	if in == nil {
+		in = &sysin.TgObserveBotListInp{}
+	}
+	if err = in.Filter(ctx); err != nil {
+		return nil, 0, err
+	}
+	mod := g.DB().Model(publishTgBotStatTable).Safe().Ctx(ctx).Where("tenant_id", account.TenantId)
+	if in.BotId > 0 {
+		mod = mod.Where("bot_id", in.BotId)
+	}
+	if in.Keyword != "" {
+		like := "%" + in.Keyword + "%"
+		mod = mod.Where("(bot_name LIKE ? OR bot_username LIKE ?)", like, like)
+	}
+	totalCount, err = mod.Clone().Count()
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "获取TG Bot统计总数失败")
+	}
+	err = mod.Page(in.Page, in.PerPage).
+		OrderDesc("sending_count").OrderDesc("queued_count").OrderDesc("pending_count").OrderDesc("updated_at").
+		Scan(&list)
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "获取TG Bot统计失败")
+	}
+	return
+}
+
 func (s *sSysPublish) MyPublishRecordClear(ctx context.Context, in *sysin.PublishRecordClearInp) (err error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {

@@ -81,7 +81,8 @@ func (s *sSysPublish) collectFollowSources(ctx context.Context, authorAccountId 
 		InnerJoin(followDao.Table()+" f", "f."+followCols.TenantId+"=s."+sourceCols.TenantId+
 			" AND f."+followCols.FollowerAccountId+"=s."+sourceCols.AccountId+
 			" AND f."+followCols.FollowingAccountId+"=s."+sourceCols.FollowAccountId+
-			" AND f."+followCols.Status+"=? AND f."+followCols.DeletedAt+" IS NULL", sysin.AccountFollowStatusApproved).
+			" AND f."+followCols.Status+"='"+sysin.AccountFollowStatusApproved+"'"+
+			" AND f."+followCols.DeletedAt+" IS NULL").
 		Where("s."+sourceCols.SourceType, sysin.CollectSourceTypeFollow).
 		Where("s."+sourceCols.FollowAccountId, authorAccountId).
 		Where("s."+sourceCols.CollectEnabled, 1).

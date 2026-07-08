@@ -21,56 +21,68 @@ type YoubanPublishTgJobDao struct {
 
 // YoubanPublishTgJobColumns defines and stores column names for the table hg_youban_publish_tg_job.
 type YoubanPublishTgJobColumns struct {
-	Id               string //
-	TaskId           string //
-	TenantId         string //
-	MerchantId       string //
-	AccountId        string //
-	ProfileId        string //
-	BotId            string //
-	TargetChatId     string //
-	TgMessageId      string //
-	Status           string //
-	RetryCount       string //
-	NextRetryAt      string //
-	ErrorMessage     string //
-	CreatedAt        string //
-	UpdatedAt        string //
-	ChannelId        string //
-	SentAt           string //
-	CycleEnabled     string //
-	CycleDays        string //
-	NextCycleAt      string //
-	CyclePublishTime string //
-	AsynqTaskId      string //
-	OperationNo      string //
+	Id                string //
+	TaskId            string //
+	TenantId          string //
+	MerchantId        string //
+	AccountId         string //
+	ProfileId         string //
+	BotId             string //
+	TargetChatId      string //
+	TgMessageId       string //
+	Status            string //
+	RetryCount        string //
+	NextRetryAt       string //
+	ErrorMessage      string //
+	CreatedAt         string //
+	UpdatedAt         string //
+	ChannelId         string //
+	SentAt            string //
+	CycleEnabled      string //
+	CycleDays         string //
+	NextCycleAt       string //
+	CyclePublishTime  string //
+	AsynqTaskId       string //
+	OperationNo       string //
+	Priority          string //
+	QueueName         string //
+	DispatchStatus    string //
+	DispatchedAt      string //
+	DispatchCount     string //
+	LastDispatchError string //
 }
 
 // youbanPublishTgJobColumns holds the columns for the table hg_youban_publish_tg_job.
 var youbanPublishTgJobColumns = YoubanPublishTgJobColumns{
-	Id:               "id",
-	TaskId:           "task_id",
-	TenantId:         "tenant_id",
-	MerchantId:       "merchant_id",
-	AccountId:        "account_id",
-	ProfileId:        "profile_id",
-	BotId:            "bot_id",
-	TargetChatId:     "target_chat_id",
-	TgMessageId:      "tg_message_id",
-	Status:           "status",
-	RetryCount:       "retry_count",
-	NextRetryAt:      "next_retry_at",
-	ErrorMessage:     "error_message",
-	CreatedAt:        "created_at",
-	UpdatedAt:        "updated_at",
-	ChannelId:        "channel_id",
-	SentAt:           "sent_at",
-	CycleEnabled:     "cycle_enabled",
-	CycleDays:        "cycle_days",
-	NextCycleAt:      "next_cycle_at",
-	CyclePublishTime: "cycle_publish_time",
-	AsynqTaskId:      "asynq_task_id",
-	OperationNo:      "operation_no",
+	Id:                "id",
+	TaskId:            "task_id",
+	TenantId:          "tenant_id",
+	MerchantId:        "merchant_id",
+	AccountId:         "account_id",
+	ProfileId:         "profile_id",
+	BotId:             "bot_id",
+	TargetChatId:      "target_chat_id",
+	TgMessageId:       "tg_message_id",
+	Status:            "status",
+	RetryCount:        "retry_count",
+	NextRetryAt:       "next_retry_at",
+	ErrorMessage:      "error_message",
+	CreatedAt:         "created_at",
+	UpdatedAt:         "updated_at",
+	ChannelId:         "channel_id",
+	SentAt:            "sent_at",
+	CycleEnabled:      "cycle_enabled",
+	CycleDays:         "cycle_days",
+	NextCycleAt:       "next_cycle_at",
+	CyclePublishTime:  "cycle_publish_time",
+	AsynqTaskId:       "asynq_task_id",
+	OperationNo:       "operation_no",
+	Priority:          "priority",
+	QueueName:         "queue_name",
+	DispatchStatus:    "dispatch_status",
+	DispatchedAt:      "dispatched_at",
+	DispatchCount:     "dispatch_count",
+	LastDispatchError: "last_dispatch_error",
 }
 
 // NewYoubanPublishTgJobDao creates and returns a new DAO object for table data access.

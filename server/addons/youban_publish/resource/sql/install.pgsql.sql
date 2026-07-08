@@ -480,7 +480,9 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_job" (
   "tg_message_id" bigint NOT NULL DEFAULT 0, "asynq_task_id" varchar(128) NOT NULL DEFAULT '', "status" varchar(32) NOT NULL DEFAULT 'pending',
   "retry_count" integer NOT NULL DEFAULT 0, "next_retry_at" timestamp DEFAULT NULL, "sent_at" timestamp DEFAULT NULL,
   "cycle_enabled" smallint NOT NULL DEFAULT 0, "cycle_days" integer NOT NULL DEFAULT 4, "cycle_publish_time" varchar(16) NOT NULL DEFAULT '',
-  "next_cycle_at" timestamp DEFAULT NULL, "error_message" text, "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL
+  "next_cycle_at" timestamp DEFAULT NULL, "priority" integer NOT NULL DEFAULT 100, "queue_name" varchar(64) NOT NULL DEFAULT '',
+  "dispatch_status" varchar(32) NOT NULL DEFAULT 'idle', "dispatched_at" timestamp DEFAULT NULL, "dispatch_count" integer NOT NULL DEFAULT 0,
+  "last_dispatch_error" varchar(512) NOT NULL DEFAULT '', "error_message" text, "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL
 );
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "tenant_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "operation_no" varchar(128) NOT NULL DEFAULT '';
@@ -492,6 +494,12 @@ ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "cycle_enabled" 
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "cycle_days" integer NOT NULL DEFAULT 4;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "cycle_publish_time" varchar(16) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "next_cycle_at" timestamp DEFAULT NULL;
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "priority" integer NOT NULL DEFAULT 100;
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "queue_name" varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "dispatch_status" varchar(32) NOT NULL DEFAULT 'idle';
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "dispatched_at" timestamp DEFAULT NULL;
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "dispatch_count" integer NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "last_dispatch_error" varchar(512) NOT NULL DEFAULT '';
 UPDATE "hg_youban_publish_tg_job" SET "tenant_id" = "merchant_id" WHERE "tenant_id" = 0 AND "merchant_id" > 0;
 DROP INDEX IF EXISTS "uk_ybp_tg_job_task_channel";
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_task_channel" ON "hg_youban_publish_tg_job" ("task_id", "channel_id", "id");
@@ -500,6 +508,68 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_status_retry" ON "hg_youban_publish_t
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_task" ON "hg_youban_publish_tg_job" ("task_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_cycle" ON "hg_youban_publish_tg_job" ("cycle_enabled", "next_cycle_at", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_operation" ON "hg_youban_publish_tg_job" ("operation_no", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_scheduler" ON "hg_youban_publish_tg_job" ("dispatch_status", "status", "priority", "next_retry_at", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_channel_dispatch" ON "hg_youban_publish_tg_job" ("target_chat_id", "dispatch_status", "status", "updated_at");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_queue_stat" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "stat_time" timestamp DEFAULT NULL,
+  "queue_name" varchar(64) NOT NULL DEFAULT '',
+  "priority_level" integer NOT NULL DEFAULT 0,
+  "status" varchar(32) NOT NULL DEFAULT '',
+  "job_count" integer NOT NULL DEFAULT 0,
+  "oldest_job_at" timestamp DEFAULT NULL,
+  "latest_job_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_queue_stat" ON "hg_youban_publish_tg_queue_stat" ("queue_name", "priority_level", "status");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_queue_stat_count" ON "hg_youban_publish_tg_queue_stat" ("job_count", "updated_at");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_channel_stat" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0,
+  "target_chat_id" varchar(128) NOT NULL DEFAULT '',
+  "channel_title" varchar(255) NOT NULL DEFAULT '',
+  "pending_count" integer NOT NULL DEFAULT 0,
+  "queued_count" integer NOT NULL DEFAULT 0,
+  "sending_count" integer NOT NULL DEFAULT 0,
+  "sent_count" integer NOT NULL DEFAULT 0,
+  "failed_count" integer NOT NULL DEFAULT 0,
+  "retry_count" integer NOT NULL DEFAULT 0,
+  "rate_limit_count" integer NOT NULL DEFAULT 0,
+  "last_sent_at" timestamp DEFAULT NULL,
+  "last_error_at" timestamp DEFAULT NULL,
+  "last_error_message" varchar(512) NOT NULL DEFAULT '',
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_channel_stat" ON "hg_youban_publish_tg_channel_stat" ("channel_id", "target_chat_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_channel_stat_tenant" ON "hg_youban_publish_tg_channel_stat" ("tenant_id", "account_id", "updated_at");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_bot_stat" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "bot_id" bigint NOT NULL DEFAULT 0,
+  "bot_name" varchar(128) NOT NULL DEFAULT '',
+  "bot_username" varchar(128) NOT NULL DEFAULT '',
+  "pending_count" integer NOT NULL DEFAULT 0,
+  "queued_count" integer NOT NULL DEFAULT 0,
+  "sending_count" integer NOT NULL DEFAULT 0,
+  "sent_count" integer NOT NULL DEFAULT 0,
+  "failed_count" integer NOT NULL DEFAULT 0,
+  "retry_count" integer NOT NULL DEFAULT 0,
+  "rate_limit_count" integer NOT NULL DEFAULT 0,
+  "last_sent_at" timestamp DEFAULT NULL,
+  "last_error_at" timestamp DEFAULT NULL,
+  "last_error_message" varchar(512) NOT NULL DEFAULT '',
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_bot_stat" ON "hg_youban_publish_tg_bot_stat" ("tenant_id", "bot_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_bot_stat_updated" ON "hg_youban_publish_tg_bot_stat" ("updated_at");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_message" (
   "id" BIGSERIAL PRIMARY KEY,

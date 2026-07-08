@@ -136,6 +136,48 @@ func (c *cPublishServer) TaskCancel(ctx context.Context, req *publish.TaskCancel
 	return
 }
 
+func (c *cPublishServer) TgObserveQueueList(ctx context.Context, req *publish.TgObserveQueueListReq) (res *publish.TgObserveQueueListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminTgObserveQueueList(ctx, &req.TgObserveQueueListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.TgObserveQueueStatModel{}
+	}
+	res = new(publish.TgObserveQueueListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) TgObserveChannelList(ctx context.Context, req *publish.TgObserveChannelListReq) (res *publish.TgObserveChannelListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminTgObserveChannelList(ctx, &req.TgObserveChannelListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.TgObserveChannelStatModel{}
+	}
+	res = new(publish.TgObserveChannelListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) TgObserveBotList(ctx context.Context, req *publish.TgObserveBotListReq) (res *publish.TgObserveBotListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminTgObserveBotList(ctx, &req.TgObserveBotListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.TgObserveBotStatModel{}
+	}
+	res = new(publish.TgObserveBotListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
 func (c *cPublishServer) ProfileList(ctx context.Context, req *publish.ProfileListReq) (res *publish.ProfileListRes, err error) {
 	list, totalCount, err := service.SysPublish().ServerProfileList(ctx, &req.ProfileListInp)
 	if err != nil {

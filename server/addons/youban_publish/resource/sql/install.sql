@@ -762,7 +762,10 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
   `retry_count` int(11) NOT NULL DEFAULT '0' COMMENT '重试次数', `next_retry_at` datetime DEFAULT NULL COMMENT '下次重试时间',
   `sent_at` datetime DEFAULT NULL COMMENT '发送成功时间', `cycle_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否循环上架',
   `cycle_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环天数', `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环发布时间',
-  `next_cycle_at` datetime DEFAULT NULL COMMENT '下次循环时间', `error_message` text COMMENT '错误信息',
+  `next_cycle_at` datetime DEFAULT NULL COMMENT '下次循环时间', `priority` int(11) NOT NULL DEFAULT '100' COMMENT '调度优先级',
+  `queue_name` varchar(64) NOT NULL DEFAULT '' COMMENT '队列名称', `dispatch_status` varchar(32) NOT NULL DEFAULT 'idle' COMMENT '调度状态',
+  `dispatched_at` datetime DEFAULT NULL COMMENT '调度时间', `dispatch_count` int(11) NOT NULL DEFAULT '0' COMMENT '调度次数',
+  `last_dispatch_error` varchar(512) NOT NULL DEFAULT '' COMMENT '最后调度错误', `error_message` text COMMENT '错误信息',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间', `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ybp_tg_job_operation_channel` (`task_id`,`operation_no`,`channel_id`),
@@ -770,7 +773,9 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
   KEY `idx_ybp_tg_job_status_retry` (`status`,`next_retry_at`,`id`),
   KEY `idx_ybp_tg_job_task` (`task_id`),
   KEY `idx_ybp_tg_job_cycle` (`cycle_enabled`,`next_cycle_at`,`id`),
-  KEY `idx_ybp_tg_job_operation` (`operation_no`,`status`,`id`)
+  KEY `idx_ybp_tg_job_operation` (`operation_no`,`status`,`id`),
+  KEY `idx_ybp_tg_job_scheduler` (`dispatch_status`,`status`,`priority`,`next_retry_at`,`id`),
+  KEY `idx_ybp_tg_job_channel_dispatch` (`target_chat_id`,`dispatch_status`,`status`,`updated_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG发布任务';
 
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `task_id`, ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
@@ -778,12 +783,78 @@ ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `operation_no` varchar(128) NO
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '频道ID' AFTER `profile_id`, ADD COLUMN `asynq_task_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'Asynq任务ID' AFTER `tg_message_id`;
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `sent_at` datetime DEFAULT NULL COMMENT '发送成功时间' AFTER `next_retry_at`, ADD COLUMN `cycle_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否循环上架' AFTER `sent_at`;
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `cycle_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环天数' AFTER `cycle_enabled`, ADD COLUMN `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环发布时间' AFTER `cycle_days`, ADD COLUMN `next_cycle_at` datetime DEFAULT NULL COMMENT '下次循环时间' AFTER `cycle_publish_time`;
+ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `priority` int(11) NOT NULL DEFAULT '100' COMMENT '调度优先级' AFTER `next_cycle_at`, ADD COLUMN `queue_name` varchar(64) NOT NULL DEFAULT '' COMMENT '队列名称' AFTER `priority`, ADD COLUMN `dispatch_status` varchar(32) NOT NULL DEFAULT 'idle' COMMENT '调度状态' AFTER `queue_name`, ADD COLUMN `dispatched_at` datetime DEFAULT NULL COMMENT '调度时间' AFTER `dispatch_status`, ADD COLUMN `dispatch_count` int(11) NOT NULL DEFAULT '0' COMMENT '调度次数' AFTER `dispatched_at`, ADD COLUMN `last_dispatch_error` varchar(512) NOT NULL DEFAULT '' COMMENT '最后调度错误' AFTER `dispatch_count`;
 UPDATE `hg_youban_publish_tg_job` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
 ALTER TABLE `hg_youban_publish_tg_job` DROP INDEX `uk_ybp_tg_job_task_channel`;
 ALTER TABLE `hg_youban_publish_tg_job` ADD KEY `idx_ybp_tg_job_task_channel` (`task_id`,`channel_id`,`id`);
 ALTER TABLE `hg_youban_publish_tg_job` ADD UNIQUE KEY `uk_ybp_tg_job_operation_channel` (`task_id`,`operation_no`,`channel_id`);
 ALTER TABLE `hg_youban_publish_tg_job` ADD KEY `idx_ybp_tg_job_cycle` (`cycle_enabled`,`next_cycle_at`,`id`);
 ALTER TABLE `hg_youban_publish_tg_job` ADD KEY `idx_ybp_tg_job_operation` (`operation_no`,`status`,`id`);
+ALTER TABLE `hg_youban_publish_tg_job` ADD KEY `idx_ybp_tg_job_scheduler` (`dispatch_status`,`status`,`priority`,`next_retry_at`,`id`);
+ALTER TABLE `hg_youban_publish_tg_job` ADD KEY `idx_ybp_tg_job_channel_dispatch` (`target_chat_id`,`dispatch_status`,`status`,`updated_at`);
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_queue_stat` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `stat_time` datetime DEFAULT NULL COMMENT '统计时间',
+  `queue_name` varchar(64) NOT NULL DEFAULT '' COMMENT '队列名称',
+  `priority_level` int(11) NOT NULL DEFAULT '0' COMMENT '优先级',
+  `status` varchar(32) NOT NULL DEFAULT '' COMMENT '状态',
+  `job_count` int(11) NOT NULL DEFAULT '0' COMMENT '任务数',
+  `oldest_job_at` datetime DEFAULT NULL COMMENT '最早任务时间',
+  `latest_job_at` datetime DEFAULT NULL COMMENT '最新任务时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_tg_queue_stat` (`queue_name`,`priority_level`,`status`),
+  KEY `idx_ybp_tg_queue_stat_count` (`job_count`,`updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG队列统计';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_channel_stat` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
+  `channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '频道ID',
+  `target_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '目标Chat ID',
+  `channel_title` varchar(255) NOT NULL DEFAULT '' COMMENT '频道名称',
+  `pending_count` int(11) NOT NULL DEFAULT '0' COMMENT '待调度数',
+  `queued_count` int(11) NOT NULL DEFAULT '0' COMMENT '已调度数',
+  `sending_count` int(11) NOT NULL DEFAULT '0' COMMENT '发送中数',
+  `sent_count` int(11) NOT NULL DEFAULT '0' COMMENT '成功数',
+  `failed_count` int(11) NOT NULL DEFAULT '0' COMMENT '失败数',
+  `retry_count` int(11) NOT NULL DEFAULT '0' COMMENT '重试数',
+  `rate_limit_count` int(11) NOT NULL DEFAULT '0' COMMENT '限流数',
+  `last_sent_at` datetime DEFAULT NULL COMMENT '最后成功时间',
+  `last_error_at` datetime DEFAULT NULL COMMENT '最后错误时间',
+  `last_error_message` varchar(512) NOT NULL DEFAULT '' COMMENT '最后错误',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_tg_channel_stat` (`channel_id`,`target_chat_id`),
+  KEY `idx_ybp_tg_channel_stat_tenant` (`tenant_id`,`account_id`,`updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG频道统计';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_bot_stat` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Bot ID',
+  `bot_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'Bot名称',
+  `bot_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'Bot用户名',
+  `pending_count` int(11) NOT NULL DEFAULT '0' COMMENT '待调度数',
+  `queued_count` int(11) NOT NULL DEFAULT '0' COMMENT '已调度数',
+  `sending_count` int(11) NOT NULL DEFAULT '0' COMMENT '发送中数',
+  `sent_count` int(11) NOT NULL DEFAULT '0' COMMENT '成功数',
+  `failed_count` int(11) NOT NULL DEFAULT '0' COMMENT '失败数',
+  `retry_count` int(11) NOT NULL DEFAULT '0' COMMENT '重试数',
+  `rate_limit_count` int(11) NOT NULL DEFAULT '0' COMMENT '限流数',
+  `last_sent_at` datetime DEFAULT NULL COMMENT '最后成功时间',
+  `last_error_at` datetime DEFAULT NULL COMMENT '最后错误时间',
+  `last_error_message` varchar(512) NOT NULL DEFAULT '' COMMENT '最后错误',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_tg_bot_stat` (`tenant_id`,`bot_id`),
+  KEY `idx_ybp_tg_bot_stat_updated` (`updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG Bot统计';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_message` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键', `job_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG任务ID',

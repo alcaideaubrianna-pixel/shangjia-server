@@ -323,6 +323,9 @@ func (s *sSysPublish) requeueCycleTaskTelegramJobs(ctx context.Context, plan cyc
 			"bot_id":             job.BotId,
 			"target_chat_id":     normalizeTelegramChannelChatID(job.TargetChatId),
 			"status":             "pending",
+			"priority":           tgJobPriorityBulk,
+			"queue_name":         tgQueueNameBulk,
+			"dispatch_status":    tgDispatchStatusIdle,
 			"cycle_enabled":      job.CycleEnabled,
 			"cycle_days":         defaultCycleDays(job.CycleDays),
 			"cycle_publish_time": job.CyclePublishTime,
@@ -335,10 +338,11 @@ func (s *sSysPublish) requeueCycleTaskTelegramJobs(ctx context.Context, plan cyc
 		_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("id", job.Id).
 			Data(g.Map{
-				"status":        "superseded",
-				"next_retry_at": nil,
-				"next_cycle_at": nil,
-				"updated_at":    now,
+				"status":          "superseded",
+				"dispatch_status": tgDispatchStatusDone,
+				"next_retry_at":   nil,
+				"next_cycle_at":   nil,
+				"updated_at":      now,
 			}).
 			Update()
 		if err != nil {

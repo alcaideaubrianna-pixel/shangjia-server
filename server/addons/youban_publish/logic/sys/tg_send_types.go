@@ -41,4 +41,9 @@ type telegramJobRecord struct {
 	TargetChatId     string      `json:"targetChatId"`
 	NextCycleAt      *gtime.Time `json:"nextCycleAt"`
 	RetryCount       int         `json:"retryCount"`
+	Priority         int         `json:"priority"`
+	QueueName        string      `json:"queueName"`
+	DispatchStatus   string      `json:"dispatchStatus"`
+	DispatchedAt     *gtime.Time `json:"dispatchedAt"`
+	DispatchCount    int         `json:"dispatchCount"`
 }

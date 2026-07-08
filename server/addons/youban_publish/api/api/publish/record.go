@@ -31,6 +31,36 @@ type AdminPublishRecordClearReq struct {
 
 type AdminPublishRecordClearRes struct{}
 
+type AdminTgObserveQueueListReq struct {
+	g.Meta `path:"/publish/admin/observe/queue/list" method:"get" tags:"上架插件管理端" summary:"TG队列观测统计"`
+	sysin.TgObserveQueueListInp
+}
+
+type AdminTgObserveQueueListRes struct {
+	form.PageRes
+	List []*sysin.TgObserveQueueStatModel `json:"list" dc:"队列统计列表"`
+}
+
+type AdminTgObserveChannelListReq struct {
+	g.Meta `path:"/publish/admin/observe/channel/list" method:"get" tags:"上架插件管理端" summary:"TG频道观测统计"`
+	sysin.TgObserveChannelListInp
+}
+
+type AdminTgObserveChannelListRes struct {
+	form.PageRes
+	List []*sysin.TgObserveChannelStatModel `json:"list" dc:"频道统计列表"`
+}
+
+type AdminTgObserveBotListReq struct {
+	g.Meta `path:"/publish/admin/observe/bot/list" method:"get" tags:"上架插件管理端" summary:"TG Bot观测统计"`
+	sysin.TgObserveBotListInp
+}
+
+type AdminTgObserveBotListRes struct {
+	form.PageRes
+	List []*sysin.TgObserveBotStatModel `json:"list" dc:"Bot统计列表"`
+}
+
 type AdminDevPublishChainTestReq struct {
 	g.Meta `path:"/publish/admin/dev/publishChainTest" method:"post" tags:"上架插件管理端" summary:"开发环境推送链路测试"`
 	sysin.DevPublishChainTestInp

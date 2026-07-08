@@ -12,11 +12,31 @@ import (
 )
 
 func (s *sSysPublish) ensureCollectTgJobs(ctx context.Context, taskId int64) error {
-	return s.submitTelegramPublish(ctx, telegramPublishRequest{
-		TaskId:                 taskId,
-		OperationPrefix:        telegramPublishBizCollect,
-		AllowCreateOperationNo: true,
-	})
+	if taskId <= 0 {
+		return nil
+	}
+	task, err := s.getPublishWorkflowTask(ctx, taskId, 0, 0)
+	if err != nil {
+		return err
+	}
+	operationNo := task["tg_operation_no"].String()
+	if operationNo == "" {
+		operationNo = newTelegramOperationNo(telegramPublishBizCollect, taskId)
+	}
+	if err = s.markTaskPublishQueued(ctx, taskId, task["tenant_id"].Int64(), task["account_id"].Int64(), operationNo); err != nil {
+		return err
+	}
+	if err = s.enqueuePublishSubmitTask(ctx, publishSubmitQueuePayload{
+		TaskId:      taskId,
+		TenantId:    task["tenant_id"].Int64(),
+		AccountId:   task["account_id"].Int64(),
+		OperatorId:  task["account_id"].Int64(),
+		OperationNo: operationNo,
+	}, 0); err != nil {
+		_ = s.markTaskPublishFailed(ctx, taskId, task["tenant_id"].Int64(), task["account_id"].Int64(), err)
+		return gerror.Wrap(err, "采集上架任务加入队列失败")
+	}
+	return nil
 }
 
 func containsInt64(values []int64, target int64) bool {

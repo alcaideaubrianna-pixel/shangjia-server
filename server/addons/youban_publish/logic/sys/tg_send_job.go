@@ -27,7 +27,13 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 	}
 	if !ok {
 		delay := s.telegramChannelBusyDelay(ctx, jobId)
-		return s.requeueTelegramJob(ctx, tgTaskTypePublish, jobId, delay)
+		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
+			"dispatch_status":     tgDispatchStatusIdle,
+			"next_retry_at":       gtime.Now().Add(delay),
+			"last_dispatch_error": "频道正在发送其他任务，已等待重新调度",
+			"updated_at":          gtime.Now(),
+		}).Update()
+		return nil
 	}
 	defer s.releaseTelegramChannelLease(ctx, lease)
 	return s.sendTelegramJobLockedByChannel(ctx, jobId)
@@ -177,11 +183,12 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	}
 	nextRetryAt := gtime.Now().Add(retryDelay)
 	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
-		"status":        status,
-		"retry_count":   retryCount,
-		"next_retry_at": nextRetryAt,
-		"error_message": message,
-		"updated_at":    gtime.Now(),
+		"status":          status,
+		"dispatch_status": tgDispatchStatusIdle,
+		"retry_count":     retryCount,
+		"next_retry_at":   nextRetryAt,
+		"error_message":   message,
+		"updated_at":      gtime.Now(),
 	}).Update()
 	s.appendTelegramJobLog(ctx, job, "publish", status, message)
 	if status == "failed" {
@@ -223,12 +230,13 @@ func (s *sSysPublish) switchTelegramJobToNextBot(ctx context.Context, job telegr
 	}
 	now := gtime.Now()
 	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
-		"bot_id":        nextBotId,
-		"status":        "pending",
-		"retry_count":   job.RetryCount + 1,
-		"next_retry_at": nil,
-		"error_message": "",
-		"updated_at":    now,
+		"bot_id":          nextBotId,
+		"status":          "pending",
+		"dispatch_status": tgDispatchStatusIdle,
+		"retry_count":     job.RetryCount + 1,
+		"next_retry_at":   nil,
+		"error_message":   "",
+		"updated_at":      now,
 	}).Update()
 	if err != nil {
 		return false, gerror.Wrap(err, "切换备用BOT失败")
@@ -250,10 +258,11 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 		return s.markTelegramJobSuperseded(ctx, job.Id)
 	}
 	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
-		"status":        "sent",
-		"error_message": "",
-		"sent_at":       gtime.Now(),
-		"updated_at":    gtime.Now(),
+		"status":          "sent",
+		"dispatch_status": tgDispatchStatusDone,
+		"error_message":   "",
+		"sent_at":         gtime.Now(),
+		"updated_at":      gtime.Now(),
 	}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "更新TG任务状态失败")

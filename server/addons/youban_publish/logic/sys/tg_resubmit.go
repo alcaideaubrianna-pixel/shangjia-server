@@ -68,13 +68,15 @@ func (s *sSysPublish) resetTelegramJobForResubmit(ctx context.Context, jobId int
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", jobId).
 		Data(g.Map{
-			"status":        "pending",
-			"retry_count":   0,
-			"next_retry_at": nil,
-			"next_cycle_at": nil,
-			"error_message": "",
-			"sent_at":       nil,
-			"updated_at":    gtime.Now(),
+			"status":              "pending",
+			"dispatch_status":     tgDispatchStatusIdle,
+			"retry_count":         0,
+			"next_retry_at":       nil,
+			"next_cycle_at":       nil,
+			"error_message":       "",
+			"sent_at":             nil,
+			"last_dispatch_error": "",
+			"updated_at":          gtime.Now(),
 		}).
 		Update()
 	if err != nil {
@@ -87,10 +89,11 @@ func (s *sSysPublish) markTelegramJobSuperseded(ctx context.Context, jobId int64
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", jobId).
 		Data(g.Map{
-			"status":        "superseded",
-			"next_retry_at": nil,
-			"next_cycle_at": nil,
-			"updated_at":    gtime.Now(),
+			"status":          "superseded",
+			"dispatch_status": tgDispatchStatusDone,
+			"next_retry_at":   nil,
+			"next_cycle_at":   nil,
+			"updated_at":      gtime.Now(),
 		}).
 		Update()
 	if err != nil {

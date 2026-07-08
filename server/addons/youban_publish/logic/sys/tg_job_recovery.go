@@ -63,10 +63,11 @@ func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job te
 		Where("status", "sending").
 		WhereLTE("updated_at", now.Add(-telegramSendingJobRecoverAfter)).
 		Data(g.Map{
-			"status":        "failed_retry",
-			"next_retry_at": nil,
-			"error_message": "TG推送任务长时间处于发送中，已自动重新投递",
-			"updated_at":    now,
+			"status":          "failed_retry",
+			"dispatch_status": tgDispatchStatusIdle,
+			"next_retry_at":   nil,
+			"error_message":   "TG推送任务长时间处于发送中，已自动重新投递",
+			"updated_at":      now,
 		}).
 		Update()
 	if err != nil {

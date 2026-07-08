@@ -48,6 +48,22 @@ export function TaskCancel(params = {}) {
   return http.request({ url: '/youban_publish/publish/task/cancel', method: 'POST', params });
 }
 
+export function TgObserveQueueList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/observe/queue/list', method: 'get', params });
+}
+
+export function TgObserveChannelList(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/observe/channel/list',
+    method: 'get',
+    params,
+  });
+}
+
+export function TgObserveBotList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/observe/bot/list', method: 'get', params });
+}
+
 export function ProfileList(params = {}) {
   return http.request({ url: '/youban_publish/publish/profile/list', method: 'get', params });
 }
