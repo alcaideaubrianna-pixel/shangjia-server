@@ -258,7 +258,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_import_match_item" (
   "profile_id" bigint NOT NULL DEFAULT 0,
   "channel_id" bigint NOT NULL DEFAULT 0,
   "task_id" bigint NOT NULL DEFAULT 0,
-  "channel_id" bigint NOT NULL DEFAULT 0,
   "display_group_key" varchar(128) NOT NULL DEFAULT '',
   "verify_group_key" varchar(128) NOT NULL DEFAULT '',
   "display_score" integer NOT NULL DEFAULT 0,
