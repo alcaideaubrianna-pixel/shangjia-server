@@ -825,6 +825,24 @@
     if (matchRun.value.status === 'running') return 35;
     return 0;
   });
+  function runProgressPercent(row: Recordable) {
+    if (row?.status === 'success') return 100;
+    if (row?.scanMode === 'all' && row?.runType !== 'scan') {
+      const scanned = Number(row?.itemDone || 0);
+      const imported = Number(row?.imported || 0);
+      if (scanned > 0) {
+        return Math.min(100, Math.round((imported * 100) / scanned));
+      }
+      return 0;
+    }
+    return Math.min(100, Math.round(row?.percent || 0));
+  }
+  function runProgressText(row: Recordable) {
+    if (row?.scanMode === 'all' && row?.runType !== 'scan') {
+      return `${row?.imported || 0}/${row?.itemDone || 0}`;
+    }
+    return `${row?.itemDone || 0}/${row?.itemTotal || 0}`;
+  }
   const normalizedLogs = computed(() =>
     logs.value.map((item) => ({ ...item, parsedContext: parseLogContext(item.context) }))
   );
@@ -981,7 +999,7 @@
       render: (row) =>
         h(NProgress, {
           type: 'line',
-          percentage: Math.min(100, Math.round(row.percent || 0)),
+          percentage: runProgressPercent(row),
           indicatorPlacement: 'inside',
           processing: row.status === 'running',
         }),
@@ -990,7 +1008,7 @@
       title: '资料',
       key: 'itemDone',
       width: 110,
-      render: (row) => `${row.itemDone || 0}/${row.itemTotal || 0}`,
+      render: (row) => runProgressText(row),
     },
     {
       title: '媒体',

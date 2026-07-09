@@ -430,7 +430,15 @@ func (s *sSysPublish) ServerImportRunList(ctx context.Context, in *sysin.ImportR
 		return nil, 0, gerror.Wrap(err, "获取导入记录失败")
 	}
 	for _, item := range list {
-		if item != nil && item.ProgressTotal > 0 {
+		if item == nil {
+			continue
+		}
+		switch {
+		case item.Status == sysin.ImportTaskStatusSuccess:
+			item.Percent = 100
+		case item.ScanMode == sysin.ImportTaskScanModeAll && item.RunType != sysin.ImportRunTypeScan && item.ItemDone > 0:
+			item.Percent = float64(item.Imported) * 100 / float64(item.ItemDone)
+		case item.ProgressTotal > 0:
 			item.Percent = float64(item.ProgressDone) * 100 / float64(item.ProgressTotal)
 		}
 	}
