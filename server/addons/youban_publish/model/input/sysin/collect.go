@@ -20,6 +20,7 @@ const (
 	CollectHistoryModeRecentDays = "recent_days"
 
 	CollectEventStatusPending      = "pending"
+	CollectEventStatusGroupCollect = "group_collecting"
 	CollectEventStatusWaitingOrder = "waiting_order"
 	CollectEventStatusPrechecked   = "prechecked"
 	CollectEventStatusMediaPending = "media_pending"
@@ -55,16 +56,24 @@ type CollectSourceListInp struct {
 }
 
 type CollectConfigModel struct {
-	Enabled int `json:"enabled" dc:"采集总开关"`
+	Enabled              int `json:"enabled" dc:"采集总开关"`
+	RealtimePushDelaySec int `json:"realtimePushDelaySec" dc:"实时采集推送延迟秒数"`
 }
 
 type CollectConfigSaveInp struct {
-	Enabled int `json:"enabled" dc:"采集总开关"`
+	Enabled              int `json:"enabled" dc:"采集总开关"`
+	RealtimePushDelaySec int `json:"realtimePushDelaySec" dc:"实时采集推送延迟秒数"`
 }
 
 func (in *CollectConfigSaveInp) Filter(ctx context.Context) error {
 	if in.Enabled != 0 {
 		in.Enabled = 1
+	}
+	if in.RealtimePushDelaySec < 0 {
+		in.RealtimePushDelaySec = 0
+	}
+	if in.RealtimePushDelaySec > 600 {
+		in.RealtimePushDelaySec = 600
 	}
 	return nil
 }

@@ -143,9 +143,6 @@ func (s *sSysPublish) refreshPendingCollectTaskForDispatchMode(ctx context.Conte
 		return s.skipPendingCollectDispatchAfterRuleRefresh(ctx, dispatch, event, decision.Reason)
 	}
 	text := strings.TrimSpace(decision.Text)
-	if text == "" {
-		text = strings.TrimSpace(event["raw_text"].String())
-	}
 	title := collectTitle(text)
 	channelJSON := rule["target_channel_id_json"].String()
 	now := gtime.Now()

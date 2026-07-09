@@ -153,6 +153,7 @@ func (s *sSysPublish) collectSourceTriggerEventIds(ctx context.Context, sourceId
 func collectSourceTriggerStatuses() []string {
 	return []string{
 		sysin.CollectEventStatusPending,
+		sysin.CollectEventStatusGroupCollect,
 		sysin.CollectEventStatusWaitingOrder,
 		sysin.CollectEventStatusPrechecked,
 		sysin.CollectEventStatusMediaPending,

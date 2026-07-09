@@ -95,6 +95,10 @@ func (s *sSysPublish) saveCollectBotEvent(ctx context.Context, source g.Map, bot
 		if int64(msg.ID) > 0 && (nextSourceMessageId <= 0 || int64(msg.ID) < nextSourceMessageId) {
 			nextSourceMessageId = int64(msg.ID)
 		}
+		status := sysin.CollectEventStatusPending
+		if grouped {
+			status = sysin.CollectEventStatusGroupCollect
+		}
 		_, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", record["id"].Int64()).Data(g.Map{
 			"raw_text":          nextText,
 			"media_count":       nextMediaCount,
@@ -102,6 +106,7 @@ func (s *sSysPublish) saveCollectBotEvent(ctx context.Context, source g.Map, bot
 			"source_message_id": nextSourceMessageId,
 			"text_hash":         collectHash(nextText),
 			"dedupe_key":        collectHash(fmt.Sprintf("%s:%s:%d", nextText, nextMediaJson, nextMediaCount)),
+			"status":            status,
 			"updated_at":        now,
 		}).Update()
 		if err != nil {
@@ -121,6 +126,10 @@ func (s *sSysPublish) saveCollectBotEvent(ctx context.Context, source g.Map, bot
 	if msg.Date > 0 {
 		receivedAt = gtime.NewFromTime(time.Unix(int64(msg.Date), 0))
 	}
+	status := sysin.CollectEventStatusPending
+	if grouped {
+		status = sysin.CollectEventStatusGroupCollect
+	}
 	eventId, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Data(g.Map{
 		"tenant_id":         source["tenant_id"],
 		"account_id":        source["account_id"],
@@ -136,7 +145,7 @@ func (s *sSysPublish) saveCollectBotEvent(ctx context.Context, source g.Map, bot
 		"media_json":        mediaJson,
 		"text_hash":         collectHash(rawText),
 		"dedupe_key":        collectHash(fmt.Sprintf("%s:%s:%d", rawText, mediaJson, mediaCount)),
-		"status":            sysin.CollectEventStatusPending,
+		"status":            status,
 		"received_at":       receivedAt,
 		"created_at":        now,
 		"updated_at":        now,

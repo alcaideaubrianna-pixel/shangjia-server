@@ -65,19 +65,19 @@ func (s *sSysPublish) AdminChannelCacheRefresh(ctx context.Context, in *sysin.Ch
 	if item.Status != sysin.PublishTgAccountStatusAuthorized {
 		return nil, gerror.New("TG账号未授权，请先刷新账号状态或重新扫码登录")
 	}
-	channels, err := s.fetchTgAccountChannels(ctx, item)
+	channels, err := s.fetchTgAccountChannelCaches(ctx, item)
 	if err != nil {
 		return nil, gerror.Wrap(err, "同步TG账号频道失败")
 	}
 	now := gtime.Now()
 	for _, channel := range channels {
-		if err = s.upsertTgChannelCache(ctx, account.TenantId, in.TgAccountId, channel, now); err != nil {
+		if err = s.upsertTgDialogCache(ctx, account.TenantId, in.TgAccountId, channel, now); err != nil {
 			return nil, err
 		}
 	}
 	return &sysin.ChannelCacheRefreshModel{
 		Count:       len(channels),
-		Message:     "频道缓存已更新",
+		Message:     "群聊 / 频道缓存已更新",
 		SyncedAt:    now.String(),
 		TgAccountId: in.TgAccountId,
 	}, nil
@@ -189,7 +189,19 @@ func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.Chann
 	return res, nil
 }
 
-func (s *sSysPublish) fetchTgAccountChannels(ctx context.Context, item *sysin.TgAccountModel) ([]*tg.Channel, error) {
+type tgDialogCache struct {
+	AccessHash      string
+	CanAddAdmins    int
+	CanInviteUsers  int
+	CanPostMessages int
+	ChannelId       string
+	ChannelTitle    string
+	ChannelUsername string
+	IsBroadcast     int
+	IsMegagroup     int
+}
+
+func (s *sSysPublish) fetchTgAccountChannelCaches(ctx context.Context, item *sysin.TgAccountModel) ([]*tgDialogCache, error) {
 	conf, err := NewSysConfig().GetTelegram(ctx)
 	if err != nil {
 		return nil, err
@@ -207,7 +219,7 @@ func (s *sSysPublish) fetchTgAccountChannels(ctx context.Context, item *sysin.Tg
 	client := telegram.NewClient(conf.AppId, conf.AppHash, options)
 	runCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
 	defer cancel()
-	channels := make([]*tg.Channel, 0)
+	channels := make([]*tgDialogCache, 0)
 	err = client.Run(runCtx, func(ctx context.Context) error {
 		dialogs, err := client.API().MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
 			Limit:      100,
@@ -226,11 +238,18 @@ func (s *sSysPublish) fetchTgAccountChannels(ctx context.Context, item *sysin.Tg
 			chats = []tg.ChatClass{}
 		}
 		for _, chat := range chats {
-			channel, ok := chat.(*tg.Channel)
-			if !ok || channel.Left {
-				continue
+			switch item := chat.(type) {
+			case *tg.Channel:
+				if item.Left {
+					continue
+				}
+				channels = append(channels, tgChannelDialogCache(item))
+			case *tg.Chat:
+				if item.Left || item.Deactivated || item.MigratedTo != nil {
+					continue
+				}
+				channels = append(channels, tgBasicChatDialogCache(item))
 			}
-			channels = append(channels, channel)
 		}
 		return nil
 	})
@@ -240,34 +259,67 @@ func (s *sSysPublish) fetchTgAccountChannels(ctx context.Context, item *sysin.Tg
 	return channels, nil
 }
 
-func (s *sSysPublish) upsertTgChannelCache(ctx context.Context, tenantId int64, tgAccountId int64, channel *tg.Channel, now *gtime.Time) error {
+func tgChannelDialogCache(channel *tg.Channel) *tgDialogCache {
 	if channel == nil {
 		return nil
 	}
-	channelId := strconv.FormatInt(channel.ID, 10)
 	accessHash, _ := channel.GetAccessHash()
 	username, _ := channel.GetUsername()
 	adminRights, hasAdminRights := channel.GetAdminRights()
+	return &tgDialogCache{
+		AccessHash:      strconv.FormatInt(accessHash, 10),
+		CanAddAdmins:    boolToInt(channel.Creator || (hasAdminRights && adminRights.AddAdmins)),
+		CanInviteUsers:  boolToInt(channel.Creator || (hasAdminRights && adminRights.InviteUsers)),
+		CanPostMessages: boolToInt(channel.Creator || channel.Megagroup || (hasAdminRights && adminRights.PostMessages)),
+		ChannelId:       strconv.FormatInt(channel.ID, 10),
+		ChannelTitle:    channel.Title,
+		ChannelUsername: strings.TrimPrefix(username, "@"),
+		IsBroadcast:     boolToInt(channel.Broadcast),
+		IsMegagroup:     boolToInt(channel.Megagroup),
+	}
+}
+
+func tgBasicChatDialogCache(chat *tg.Chat) *tgDialogCache {
+	if chat == nil {
+		return nil
+	}
+	return &tgDialogCache{
+		CanAddAdmins:    boolToInt(chat.Creator || chat.AdminRights.AddAdmins),
+		CanInviteUsers:  boolToInt(chat.Creator || chat.AdminRights.InviteUsers),
+		CanPostMessages: 1,
+		ChannelId:       "-" + strconv.FormatInt(chat.ID, 10),
+		ChannelTitle:    chat.Title,
+	}
+}
+
+func (s *sSysPublish) upsertTgChannelCache(ctx context.Context, tenantId int64, tgAccountId int64, channel *tg.Channel, now *gtime.Time) error {
+	return s.upsertTgDialogCache(ctx, tenantId, tgAccountId, tgChannelDialogCache(channel), now)
+}
+
+func (s *sSysPublish) upsertTgDialogCache(ctx context.Context, tenantId int64, tgAccountId int64, channel *tgDialogCache, now *gtime.Time) error {
+	if channel == nil {
+		return nil
+	}
 	data := g.Map{
 		"tenant_id":         tenantId,
 		"merchant_id":       tenantId,
 		"tg_account_id":     tgAccountId,
-		"channel_id":        channelId,
-		"access_hash":       strconv.FormatInt(accessHash, 10),
-		"channel_title":     channel.Title,
-		"channel_username":  strings.TrimPrefix(username, "@"),
-		"is_broadcast":      boolToInt(channel.Broadcast),
-		"is_megagroup":      boolToInt(channel.Megagroup),
-		"can_post_messages": boolToInt(channel.Creator || (hasAdminRights && adminRights.PostMessages)),
-		"can_invite_users":  boolToInt(channel.Creator || (hasAdminRights && adminRights.InviteUsers)),
-		"can_add_admins":    boolToInt(channel.Creator || (hasAdminRights && adminRights.AddAdmins)),
+		"channel_id":        channel.ChannelId,
+		"access_hash":       channel.AccessHash,
+		"channel_title":     channel.ChannelTitle,
+		"channel_username":  strings.TrimPrefix(channel.ChannelUsername, "@"),
+		"is_broadcast":      channel.IsBroadcast,
+		"is_megagroup":      channel.IsMegagroup,
+		"can_post_messages": channel.CanPostMessages,
+		"can_invite_users":  channel.CanInviteUsers,
+		"can_add_admins":    channel.CanAddAdmins,
 		"last_sync_at":      now,
 		"updated_at":        now,
 	}
 	count, err := g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("tg_account_id", tgAccountId).
-		Where("channel_id", channelId).
+		Where("channel_id", channel.ChannelId).
 		Count()
 	if err != nil {
 		return gerror.Wrap(err, "读取频道缓存失败")
@@ -276,7 +328,7 @@ func (s *sSysPublish) upsertTgChannelCache(ctx context.Context, tenantId int64, 
 		_, err = g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).
 			Where("tenant_id", tenantId).
 			Where("tg_account_id", tgAccountId).
-			Where("channel_id", channelId).
+			Where("channel_id", channel.ChannelId).
 			Data(data).
 			Update()
 	} else {

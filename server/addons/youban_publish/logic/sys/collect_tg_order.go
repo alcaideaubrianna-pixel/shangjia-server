@@ -94,6 +94,10 @@ func (s *sSysPublish) collectTelegramJobHasPreviousActive(ctx context.Context, j
 	if job.CollectSourceId <= 0 || job.CollectSourceMessageId <= 0 || strings.TrimSpace(job.CollectSourceChatId) == "" {
 		return false, nil
 	}
+	taskActive, err := s.collectTelegramJobHasPreviousActiveTask(ctx, job)
+	if err != nil || taskActive {
+		return taskActive, err
+	}
 	mod := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id <> ?", job.Id).
 		Where("collect_source_id", job.CollectSourceId).

@@ -41,6 +41,12 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverCollectEvents(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复采集事件处理失败：%+v", err)
 	}
+	if err := s.recoverProcessedCollectEvents(ctx, 200); err != nil {
+		g.Log().Warningf(ctx, "恢复采集事件完成状态失败：%+v", err)
+	}
+	if err := s.recoverCollectPublishTasks(ctx, 100); err != nil {
+		g.Log().Warningf(ctx, "恢复采集推送任务失败：%+v", err)
+	}
 }
 
 func (s *sSysPublish) recoverCollectHistoryTasks(ctx context.Context, limit int) error {
@@ -98,7 +104,7 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 	}
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
 	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		WhereIn("status", []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusFailed}).
+		WhereIn("status", []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusFailed}).
 		WhereLTE("updated_at", deadline).
 		OrderAsc("updated_at").
 		Limit(limit).
@@ -119,7 +125,7 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 
 func shouldRecoverCollectEvent(row gdb.Record) bool {
 	status := strings.TrimSpace(row["status"].String())
-	if status == sysin.CollectEventStatusPending || status == sysin.CollectEventStatusWaitingOrder || status == sysin.CollectEventStatusPrechecked || status == sysin.CollectEventStatusMediaPending || status == sysin.CollectEventStatusMediaReady {
+	if status == sysin.CollectEventStatusPending || status == sysin.CollectEventStatusGroupCollect || status == sysin.CollectEventStatusWaitingOrder || status == sysin.CollectEventStatusPrechecked || status == sysin.CollectEventStatusMediaPending || status == sysin.CollectEventStatusMediaReady {
 		return true
 	}
 	if status != sysin.CollectEventStatusFailed {
@@ -130,4 +136,50 @@ func shouldRecoverCollectEvent(row gdb.Record) bool {
 		strings.Contains(message, "账号采集媒体") ||
 		strings.Contains(message, "媒体") ||
 		strings.Contains(message, "上一条采集资料")
+}
+
+func (s *sSysPublish) recoverCollectPublishTasks(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	deadline := gtime.Now().Add(-collectEventRecoverAfter)
+	rows, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Fields("id,tenant_id,account_id,channel_id_json,tg_operation_no").
+		Where("collect_source_id > 0").
+		WhereIn("status", []string{sysin.PublishTaskStatusPending, sysin.PublishTaskStatusPublishing}).
+		WhereIn("tg_status", []string{"pending", "failed_retry"}).
+		WhereLTE("updated_at", deadline).
+		WhereNull("deleted_at").
+		OrderAsc("updated_at").
+		Limit(limit).
+		All()
+	if err != nil {
+		return gerror.Wrap(err, "读取待恢复采集推送任务失败")
+	}
+	repaired := 0
+	for _, row := range rows {
+		if row.IsEmpty() || row["id"].Int64() <= 0 {
+			continue
+		}
+		channelIds := decodeInt64JSON(row["channel_id_json"].String())
+		if len(channelIds) == 0 || strings.TrimSpace(row["tg_operation_no"].String()) == "" {
+			continue
+		}
+		needsRepair, err := s.collectTgJobChannelsNeedRepair(ctx, row["id"].Int64(), row["tg_operation_no"].String(), channelIds)
+		if err != nil {
+			return err
+		}
+		if !needsRepair {
+			continue
+		}
+		if err = s.ensureCollectTgJobs(ctx, row["id"].Int64()); err != nil {
+			g.Log().Warningf(ctx, "恢复采集推送TG任务失败 task:%d err:%+v", row["id"].Int64(), err)
+			continue
+		}
+		repaired++
+	}
+	if repaired > 0 {
+		g.Log().Infof(ctx, "已恢复采集推送任务：%d条", repaired)
+	}
+	return nil
 }

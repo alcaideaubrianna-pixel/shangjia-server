@@ -3,6 +3,8 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"strings"
+	"time"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -35,8 +37,35 @@ func (s *sSysPublish) telegramDeleteWebhook(ctx context.Context, botToken string
 	if err != nil {
 		return err
 	}
-	_, err = bot.DeleteWebhook(ctx, &tgbot.DeleteWebhookParams{DropPendingUpdates: false})
-	return err
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		_, err = bot.DeleteWebhook(ctx, &tgbot.DeleteWebhookParams{DropPendingUpdates: false})
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isTelegramWebhookTransientError(err) {
+			return err
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * 500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return lastErr
+}
+
+func isTelegramWebhookTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "unexpected end of JSON input") ||
+		strings.Contains(message, "EOF") ||
+		strings.Contains(message, "Client.Timeout exceeded")
 }
 
 func (s *sSysPublish) TelegramWebhookRaw(ctx context.Context, botId int64, body []byte) error {

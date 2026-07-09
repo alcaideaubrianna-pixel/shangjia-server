@@ -43,6 +43,45 @@ func (s *sSysPublish) MyMediaUpload(ctx context.Context, in *sysin.MediaUploadIn
 	return s.saveUploadedTaskMedia(ctx, task, in, file, poster, originalFile)
 }
 
+func (s *sSysPublish) AdminMessageTemplateMediaUpload(ctx context.Context, in *sysin.MessageTemplateMediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile) (*sysin.MessageTemplateMediaModel, error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil {
+		return nil, gerror.New("上传参数不能为空")
+	}
+	if err = in.Filter(ctx); err != nil {
+		return nil, err
+	}
+	if file == nil {
+		return nil, gerror.New("没有找到上传的文件")
+	}
+	uploadType := storager.KindImg
+	if in.MediaType == "video" {
+		uploadType = storager.KindVideo
+	}
+	attachment, err := service.CommonUpload().UploadFile(ctx, uploadType, file)
+	if err != nil {
+		return nil, err
+	}
+	posterAttachment, err := uploadMediaPosterForType(ctx, in.MediaType, poster)
+	if err != nil {
+		return nil, err
+	}
+	return &sysin.MessageTemplateMediaModel{
+		TenantId:          account.TenantId,
+		MediaType:         in.MediaType,
+		Name:              attachment.Name,
+		FileUrl:           normalizeMediaFileURL(attachment.FileUrl, attachment.Path),
+		StoragePath:       attachment.Path,
+		PosterUrl:         normalizeMediaFileURL(posterFileUrl(posterAttachment), posterStoragePath(posterAttachment)),
+		PosterStoragePath: posterStoragePath(posterAttachment),
+		AssetHash:         attachment.Md5,
+		SortIndex:         in.SortIndex,
+	}, nil
+}
+
 func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile, originalFile *ghttp.UploadFile) (*sysin.MediaModel, error) {
 	if task["status"].String() != sysin.PublishTaskStatusDraft {
 		return nil, gerror.New("仅草稿任务可以上传媒体")

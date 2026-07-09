@@ -65,6 +65,10 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 	if !event.IsEmpty() {
 		return s.mergeCollectMessageEvent(ctx, event, message, mediaJSON, rawText, now)
 	}
+	status := sysin.CollectEventStatusPending
+	if strings.TrimSpace(message.SourceGroupedId) != "" {
+		status = sysin.CollectEventStatusGroupCollect
+	}
 	eventId, err := eventDao.Ctx(ctx).Data(g.Map{
 		eventCols.TenantId:        message.TenantId,
 		eventCols.AccountId:       message.AccountId,
@@ -81,7 +85,7 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 		eventCols.MediaJson:       mediaJSON,
 		eventCols.TextHash:        collectHash(rawText),
 		eventCols.DedupeKey:       dedupeKey,
-		eventCols.Status:          sysin.CollectEventStatusPending,
+		eventCols.Status:          status,
 		eventCols.ReceivedAt:      receivedAt,
 		eventCols.CreatedAt:       now,
 		eventCols.UpdatedAt:       now,
@@ -138,7 +142,7 @@ func (s *sSysPublish) mergeCollectMessageEvent(ctx context.Context, event gdb.Re
 		eventCols.SourceMessageId: nextSourceMessageId,
 		eventCols.TextHash:        collectHash(nextText),
 		eventCols.DedupeKey:       collectHash(fmt.Sprintf("%s:%s:%d", nextText, nextMediaJSON, nextMediaCount)),
-		eventCols.Status:          sysin.CollectEventStatusPending,
+		eventCols.Status:          collectMergedEventStatus(event, message),
 		eventCols.ErrorMessage:    "",
 		eventCols.UpdatedAt:       now,
 	}).Update()
@@ -154,6 +158,17 @@ func (s *sSysPublish) mergeCollectMessageEvent(ctx context.Context, event gdb.Re
 	}
 	s.appendCollectEventLogForRecord(ctx, updated, "ingest", "updated", "采集事件已合并媒体", "")
 	return eventId, nil
+}
+
+func collectMergedEventStatus(event gdb.Record, message *CollectMessage) string {
+	if message != nil && strings.TrimSpace(message.SourceGroupedId) != "" {
+		return sysin.CollectEventStatusGroupCollect
+	}
+	status := strings.TrimSpace(event["status"].String())
+	if status == sysin.CollectEventStatusGroupCollect {
+		return sysin.CollectEventStatusPending
+	}
+	return sysin.CollectEventStatusPending
 }
 
 func isCollectEventUniqueConflict(err error) bool {

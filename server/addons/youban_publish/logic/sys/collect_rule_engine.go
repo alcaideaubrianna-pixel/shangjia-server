@@ -17,8 +17,9 @@ import (
 )
 
 var (
-	collectLinkPattern     = regexp.MustCompile(`(?i)(https?://|t\.me/|telegram\.me/)`)
-	collectUsernamePattern = regexp.MustCompile(`(^|\s)@[A-Za-z0-9_]{4,}`)
+	collectLinkPattern               = regexp.MustCompile(`(?i)(https?://|t\.me/|telegram\.me/)`)
+	collectUsernamePattern           = regexp.MustCompile(`(^|\s)@[A-Za-z0-9_]{4,}`)
+	collectStandaloneCodeCaptionRule = regexp.MustCompile(`^[A-Za-z]{1,4}\d{3,6}$`)
 )
 
 type collectRuleDecision struct {
@@ -63,6 +64,16 @@ func (s *sSysPublish) evaluateCollectRule(ctx context.Context, event gdb.Record,
 	}
 	text := applyCollectTextDeletes(rawText, collectStringList(rule["delete_text_json"].String()))
 	text = applyCollectReplacements(text, collectReplaceList(rule["replace_json"].String()))
+	if shouldDropCollectStandaloneCodeCaption(text, mediaCount) {
+		text = ""
+	}
+	if strings.TrimSpace(text) == "" {
+		return &collectRuleDecision{
+			Matched:   true,
+			Text:      "",
+			MatchJSON: precheck.MatchJSON,
+		}, nil
+	}
 	if rule["header_enabled"].Int() == 1 && strings.TrimSpace(rule["header_markdown"].String()) != "" {
 		text = strings.TrimSpace(rule["header_markdown"].String()) + "\n\n" + text
 	}
@@ -77,6 +88,11 @@ func (s *sSysPublish) evaluateCollectRule(ctx context.Context, event gdb.Record,
 		Text:      strings.TrimSpace(text),
 		MatchJSON: precheck.MatchJSON,
 	}, nil
+}
+
+func shouldDropCollectStandaloneCodeCaption(text string, mediaCount int) bool {
+	text = strings.TrimSpace(text)
+	return mediaCount == 1 && collectStandaloneCodeCaptionRule.MatchString(text)
 }
 
 func skippedCollectRule(reason string) *collectRuleDecision {

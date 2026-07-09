@@ -154,6 +154,9 @@ func (s *sSysPublish) copyTelegramMediaGroup(ctx context.Context, bot *tgbot.Bot
 }
 
 func (s *sSysPublish) copyTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem, ref telegramCopyMediaRef) ([]*telegramSentMessage, error) {
+	if strings.TrimSpace(caption) == "" {
+		return s.copyTelegramSingleMediaWithoutCaption(ctx, bot, chatId, purpose, media, ref)
+	}
 	msg, err := bot.CopyMessage(ctx, &tgbot.CopyMessageParams{
 		ChatID:     chatId,
 		FromChatID: ref.ChatId,
@@ -169,6 +172,28 @@ func (s *sSysPublish) copyTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 	}
 	return []*telegramSentMessage{{
 		MessageId: int64(msg.ID),
+		Purpose:   purpose,
+		MediaId:   media.Id,
+		TgFileId:  media.TgFileId,
+		AssetHash: media.AssetHash,
+	}}, nil
+}
+
+func (s *sSysPublish) copyTelegramSingleMediaWithoutCaption(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, media *telegramMediaItem, ref telegramCopyMediaRef) ([]*telegramSentMessage, error) {
+	copied, err := bot.CopyMessages(ctx, &tgbot.CopyMessagesParams{
+		ChatID:        chatId,
+		FromChatID:    ref.ChatId,
+		MessageIDs:    []int{ref.MessageId},
+		RemoveCaption: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(copied) == 0 || copied[0].ID <= 0 {
+		return nil, nil
+	}
+	return []*telegramSentMessage{{
+		MessageId: int64(copied[0].ID),
 		Purpose:   purpose,
 		MediaId:   media.Id,
 		TgFileId:  media.TgFileId,

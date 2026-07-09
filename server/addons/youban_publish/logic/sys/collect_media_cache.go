@@ -129,7 +129,7 @@ func (s *sSysPublish) collectGroupedMediaCacheDelay(ctx context.Context, event g
 	if updatedAt == nil {
 		return 0
 	}
-	elapsed := time.Since(updatedAt.Time)
+	elapsed := collectLocalElapsedSince(updatedAt)
 	if elapsed < 0 {
 		return 0
 	}
@@ -154,6 +154,24 @@ func (s *sSysPublish) collectGroupedMediaLastIngestAt(ctx context.Context, event
 		return value
 	}
 	return event["updated_at"].GTime()
+}
+
+func collectLocalElapsedSince(value *gtime.Time) time.Duration {
+	if value == nil {
+		return 0
+	}
+	wallClock := value.Time
+	localTime := time.Date(
+		wallClock.Year(),
+		wallClock.Month(),
+		wallClock.Day(),
+		wallClock.Hour(),
+		wallClock.Minute(),
+		wallClock.Second(),
+		wallClock.Nanosecond(),
+		time.Local,
+	)
+	return time.Since(localTime)
 }
 
 func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, event gdb.Record) (bool, error) {

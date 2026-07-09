@@ -89,7 +89,7 @@ func (m *accountCollectSupervisor) sync(ctx context.Context, service *sSysPublis
 		}
 		active[tgAccountId] = struct{}{}
 		signature := accountCollectSourceSignature(sources)
-		if worker := m.workers[tgAccountId]; worker != nil && worker.signature == signature {
+		if worker := m.workers[tgAccountId]; worker != nil && worker.signature == signature && !worker.isDone() {
 			continue
 		}
 		if worker := m.workers[tgAccountId]; worker != nil {
@@ -308,6 +308,18 @@ func (w *accountCollectWorker) stop() {
 	select {
 	case <-w.done:
 	case <-time.After(3 * time.Second):
+	}
+}
+
+func (w *accountCollectWorker) isDone() bool {
+	if w == nil || w.done == nil {
+		return true
+	}
+	select {
+	case <-w.done:
+		return true
+	default:
+		return false
 	}
 }
 

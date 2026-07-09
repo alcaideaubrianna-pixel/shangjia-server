@@ -17,6 +17,40 @@ import (
 
 const collectOrderRetryDelay = 3 * time.Second
 
+func (s *sSysPublish) waitCollectGroupedEventReady(ctx context.Context, event gdb.Record) (bool, error) {
+	if event.IsEmpty() || strings.TrimSpace(event["source_grouped_id"].String()) == "" || strings.TrimSpace(event["status"].String()) != sysin.CollectEventStatusGroupCollect {
+		return false, nil
+	}
+	lastIngestAt := s.collectGroupedMediaLastIngestAt(ctx, event)
+	if lastIngestAt == nil {
+		return false, nil
+	}
+	elapsed := collectLocalElapsedSince(lastIngestAt)
+	if elapsed < collectGroupedEventDelay {
+		delay := collectGroupedEventDelay - elapsed + 500*time.Millisecond
+		message := fmt.Sprintf("媒体组聚合中，等待 %dms 后处理", delay.Milliseconds())
+		s.appendCollectEventLogForRecord(ctx, event, "group", "collecting", message, "")
+		if err := s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
+			EventId:   event["id"].Int64(),
+			TenantId:  event["tenant_id"].Int64(),
+			AccountId: event["account_id"].Int64(),
+		}, delay); err != nil {
+			return false, gerror.Wrap(err, "投递媒体组聚合处理失败")
+		}
+		return true, nil
+	}
+	_, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", event["id"].Int64()).Data(g.Map{
+		"status":        sysin.CollectEventStatusPending,
+		"error_message": "",
+		"updated_at":    gtime.Now(),
+	}).Update()
+	if err != nil {
+		return false, gerror.Wrap(err, "标记媒体组聚合完成失败")
+	}
+	s.appendCollectEventLogForRecord(ctx, event, "group", "ready", "媒体组聚合完成", "")
+	return false, nil
+}
+
 func (s *sSysPublish) waitCollectEventSourceOrder(ctx context.Context, event gdb.Record) (bool, error) {
 	if event.IsEmpty() || event["media_count"].Int() <= 0 || event["source_message_id"].Int64() <= 0 || strings.TrimSpace(event["source_chat_id"].String()) == "" {
 		return false, nil
@@ -49,7 +83,7 @@ func (s *sSysPublish) waitCollectEventSourceOrder(ctx context.Context, event gdb
 }
 
 func (s *sSysPublish) previousActiveCollectEvent(ctx context.Context, event gdb.Record) (gdb.Record, error) {
-	row, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+	mod := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Fields("id,source_message_id,status,media_count").
 		Where("tenant_id", event["tenant_id"].Int64()).
 		Where("account_id", event["account_id"].Int64()).
@@ -57,7 +91,11 @@ func (s *sSysPublish) previousActiveCollectEvent(ctx context.Context, event gdb.
 		Where("source_chat_id", event["source_chat_id"].String()).
 		Where("source_message_id <", event["source_message_id"].Int64()).
 		WhereGT("media_count", 0).
-		WhereIn("status", collectEventOrderBlockingStatuses()).
+		WhereIn("status", collectEventOrderBlockingStatuses())
+	if since := collectEventOrderWindowSince(ctx); since != nil {
+		mod = mod.WhereGTE("received_at", since)
+	}
+	row, err := mod.
 		OrderDesc("source_message_id").
 		OrderDesc("id").
 		Limit(1).
@@ -68,12 +106,22 @@ func (s *sSysPublish) previousActiveCollectEvent(ctx context.Context, event gdb.
 	return row, nil
 }
 
+func collectEventOrderWindowSince(ctx context.Context) *gtime.Time {
+	minutes := g.Cfg().MustGet(ctx, "youbanPublish.collect.orderBlockWindowMinutes", 30).Int()
+	if minutes <= 0 {
+		return nil
+	}
+	return gtime.Now().Add(-time.Duration(minutes) * time.Minute)
+}
+
 func collectEventOrderBlockingStatuses() []string {
 	return []string{
 		sysin.CollectEventStatusPending,
+		sysin.CollectEventStatusGroupCollect,
 		sysin.CollectEventStatusWaitingOrder,
 		sysin.CollectEventStatusPrechecked,
 		sysin.CollectEventStatusMediaPending,
 		sysin.CollectEventStatusMediaReady,
+		sysin.CollectEventStatusDispatched,
 	}
 }

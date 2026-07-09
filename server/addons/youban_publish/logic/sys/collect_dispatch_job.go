@@ -231,7 +231,15 @@ func (s *sSysPublish) markCollectDispatchSentByTask(ctx context.Context, taskId 
 	if taskId <= 0 {
 		return nil
 	}
-	_, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+	rows, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Fields("event_id").
+		Where("task_id", taskId).
+		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing}).
+		All()
+	if err != nil {
+		return gerror.Wrap(err, "读取采集分发事件失败")
+	}
+	_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).
 		Where("task_id", taskId).
 		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing}).
 		Data(g.Map{
@@ -241,14 +249,43 @@ func (s *sSysPublish) markCollectDispatchSentByTask(ctx context.Context, taskId 
 			"updated_at":    gtime.Now(),
 		}).
 		Update()
-	return gerror.Wrap(err, "更新采集分发发送状态失败")
+	if err != nil {
+		return gerror.Wrap(err, "更新采集分发发送状态失败")
+	}
+	for _, row := range rows {
+		eventId := row["event_id"].Int64()
+		if eventId <= 0 {
+			continue
+		}
+		if _, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).
+			Where("id", eventId).
+			Where("status", sysin.CollectEventStatusDispatched).
+			Data(g.Map{
+				"status":        sysin.CollectEventStatusProcessed,
+				"error_message": "",
+				"processed_at":  gtime.Now(),
+				"updated_at":    gtime.Now(),
+			}).
+			Update(); err != nil {
+			return gerror.Wrap(err, "更新采集事件完成状态失败")
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) markCollectDispatchFailedByTask(ctx context.Context, taskId int64, message string) error {
 	if taskId <= 0 {
 		return nil
 	}
-	_, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+	rows, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Fields("event_id").
+		Where("task_id", taskId).
+		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing}).
+		All()
+	if err != nil {
+		return gerror.Wrap(err, "读取采集失败分发事件失败")
+	}
+	_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).
 		Where("task_id", taskId).
 		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing}).
 		Data(g.Map{
@@ -258,14 +295,24 @@ func (s *sSysPublish) markCollectDispatchFailedByTask(ctx context.Context, taskI
 			"updated_at":    gtime.Now(),
 		}).
 		Update()
-	return gerror.Wrap(err, "更新采集分发失败状态失败")
+	if err != nil {
+		return gerror.Wrap(err, "更新采集分发失败状态失败")
+	}
+	return s.markCollectEventsFailedByDispatchRows(ctx, rows, message)
 }
 
 func (s *sSysPublish) markCollectDispatchFailed(ctx context.Context, dispatchId int64, message string) error {
 	if dispatchId <= 0 {
 		return nil
 	}
-	_, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+	rows, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Fields("event_id").
+		Where("id", dispatchId).
+		All()
+	if err != nil {
+		return gerror.Wrap(err, "读取采集失败分发事件失败")
+	}
+	_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).
 		Where("id", dispatchId).
 		Data(g.Map{
 			"status":        sysin.CollectDispatchStatusFailed,
@@ -274,5 +321,31 @@ func (s *sSysPublish) markCollectDispatchFailed(ctx context.Context, dispatchId 
 			"updated_at":    gtime.Now(),
 		}).
 		Update()
-	return gerror.Wrap(err, "更新采集分发失败状态失败")
+	if err != nil {
+		return gerror.Wrap(err, "更新采集分发失败状态失败")
+	}
+	return s.markCollectEventsFailedByDispatchRows(ctx, rows, message)
+}
+
+func (s *sSysPublish) markCollectEventsFailedByDispatchRows(ctx context.Context, rows gdb.Result, message string) error {
+	now := gtime.Now()
+	for _, row := range rows {
+		eventId := row["event_id"].Int64()
+		if eventId <= 0 {
+			continue
+		}
+		if _, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+			Where("id", eventId).
+			Where("status", sysin.CollectEventStatusDispatched).
+			Data(g.Map{
+				"status":        sysin.CollectEventStatusFailed,
+				"error_message": message,
+				"processed_at":  now,
+				"updated_at":    now,
+			}).
+			Update(); err != nil {
+			return gerror.Wrap(err, "更新采集事件失败状态失败")
+		}
+	}
+	return nil
 }

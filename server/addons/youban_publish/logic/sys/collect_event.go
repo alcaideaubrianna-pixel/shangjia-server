@@ -91,6 +91,12 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if collectEventAlreadyMatched(event["status"].String()) {
 		return nil
 	}
+	if waiting, err := s.waitCollectGroupedEventReady(ctx, event); err != nil {
+		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
+		return err
+	} else if waiting {
+		return nil
+	}
 	rules, err := s.collectEventRules(ctx, event, tenantId, accountId)
 	if err != nil {
 		return err
@@ -287,9 +293,6 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 
 func (s *sSysPublish) createCollectPublishTask(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (int64, error) {
 	text = strings.TrimSpace(text)
-	if text == "" {
-		text = strings.TrimSpace(event["raw_text"].String())
-	}
 	mediaCount := event["media_count"].Int()
 	if content != nil {
 		mediaCount = content.MediaCount

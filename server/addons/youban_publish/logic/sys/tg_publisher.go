@@ -50,12 +50,13 @@ func (s *sSysPublish) submitTelegramPublish(ctx context.Context, req telegramPub
 	if err = s.prepareTelegramTaskForResubmit(ctx, task, channels, operationNo, req.OnlySelectedChannels); err != nil {
 		return err
 	}
+	pushDelay := s.collectRealtimePushDelay(ctx, task)
 	for _, channel := range channels {
 		jobId, err := s.ensureTelegramPublishChannelJob(ctx, task, channel, operationNo)
 		if err != nil {
 			return err
 		}
-		if err = s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
+		if err = s.enqueueTelegramJob(ctx, jobId, pushDelay); err != nil {
 			return gerror.Wrap(err, "TG任务入队失败")
 		}
 	}
