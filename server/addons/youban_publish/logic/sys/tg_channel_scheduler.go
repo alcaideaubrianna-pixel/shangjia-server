@@ -112,6 +112,20 @@ func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) er
 		if busy {
 			continue
 		}
+		waitingChannelOrder, err := s.telegramChannelHasEarlierActiveJob(ctx, job)
+		if err != nil {
+			return err
+		}
+		if waitingChannelOrder {
+			continue
+		}
+		waitingContinuation, err := s.telegramChannelHasPendingCollectContinuation(ctx, job)
+		if err != nil {
+			return err
+		}
+		if waitingContinuation {
+			continue
+		}
 		waitingPrevious, err := s.collectTelegramJobHasPreviousActive(ctx, job)
 		if err != nil {
 			return err
@@ -141,7 +155,7 @@ func (s *sSysPublish) telegramSchedulerCandidates(ctx context.Context, limit int
 		WhereIn("status", []string{"pending", "failed_retry"}).
 		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", now).
 		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
-		OrderAsc("priority").OrderAsc("collect_source_id").OrderAsc("collect_source_chat_id").OrderAsc("collect_source_message_id").OrderAsc("id").
+		OrderAsc("priority").OrderAsc("created_at").OrderAsc("id").
 		Limit(limit).
 		Scan(&jobs)
 	if err != nil {

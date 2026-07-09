@@ -48,6 +48,10 @@ INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key"
 SELECT 'youban_publish', 'collect', '采集总开关', 'int', 'collectEnabled', '1', '1', 10, '是否启用采集能力', 0, 1, NOW(), NOW()
 WHERE NOT EXISTS (SELECT 1 FROM "hg_sys_addons_config" WHERE "addon_name"='youban_publish' AND "key"='collectEnabled');
 
+INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
+SELECT 'youban_publish', 'collect', '实时采集推送延迟', 'int', 'realtimePushDelaySec', '60', '60', 20, '实时采集命中规则后延迟推送的秒数，用于等待媒体组和保持来源顺序', 0, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM "hg_sys_addons_config" WHERE "addon_name"='youban_publish' AND "key"='realtimePushDelaySec');
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_history_task" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
@@ -145,3 +149,62 @@ ALTER TABLE "hg_youban_publish_collect_event_log" ADD COLUMN IF NOT EXISTS "disp
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_log_event" ON "hg_youban_publish_collect_event_log" ("event_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_log_owner" ON "hg_youban_publish_collect_event_log" ("tenant_id", "account_id", "created_at");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_log_stage" ON "hg_youban_publish_collect_event_log" ("event_id", "stage", "status");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_template" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "name" varchar(128) NOT NULL DEFAULT '',
+  "text" text,
+  "media_count" integer NOT NULL DEFAULT 0,
+  "status" smallint NOT NULL DEFAULT 1,
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "deleted_by" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_msg_tpl_owner" ON "hg_youban_publish_message_template" ("tenant_id", "status", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_media" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "template_id" bigint NOT NULL DEFAULT 0,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "media_type" varchar(16) NOT NULL DEFAULT 'image',
+  "name" varchar(255) NOT NULL DEFAULT '',
+  "file_url" varchar(1024) NOT NULL DEFAULT '',
+  "storage_path" varchar(1024) NOT NULL DEFAULT '',
+  "poster_url" varchar(1024) NOT NULL DEFAULT '',
+  "poster_storage_path" varchar(1024) NOT NULL DEFAULT '',
+  "tg_file_id" varchar(1024) NOT NULL DEFAULT '',
+  "tg_thumb_file_id" varchar(1024) NOT NULL DEFAULT '',
+  "asset_hash" varchar(1024) NOT NULL DEFAULT '',
+  "sort_index" integer NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_msg_media_tpl" ON "hg_youban_publish_message_media" ("template_id", "sort_index", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_push_plan" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "name" varchar(128) NOT NULL DEFAULT '',
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "template_ids" text,
+  "target_chat_ids" text,
+  "times" text,
+  "interval_seconds" integer NOT NULL DEFAULT 60,
+  "status" smallint NOT NULL DEFAULT 1,
+  "next_run_at" timestamp DEFAULT NULL,
+  "last_run_at" timestamp DEFAULT NULL,
+  "last_result" text,
+  "locked_at" timestamp DEFAULT NULL,
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "deleted_by" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_msg_plan_due" ON "hg_youban_publish_message_push_plan" ("status", "next_run_at", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_msg_plan_owner" ON "hg_youban_publish_message_push_plan" ("tenant_id", "status", "id");

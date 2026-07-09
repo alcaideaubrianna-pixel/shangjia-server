@@ -21,6 +21,9 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 	if err != nil {
 		return err
 	}
+	if isMessagePushOperationNo(targetJob.OperationNo) && targetJob.TaskId == 0 {
+		return s.SendMessagePushJob(ctx, jobId)
+	}
 	lease, ok, err := s.tryTelegramChannelLease(ctx, targetJob.TargetChatId)
 	if err != nil {
 		return err
@@ -38,6 +41,20 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 	defer s.releaseTelegramChannelLease(ctx, lease)
 	if err = s.refreshCollectTaskBeforeTelegramSend(ctx, targetJob); err != nil {
 		return s.handleTelegramPreSendRefreshError(ctx, targetJob, err)
+	}
+	waitingOrder, err := s.telegramChannelHasEarlierActiveJob(ctx, targetJob)
+	if err != nil {
+		return err
+	}
+	if waitingOrder {
+		return s.postponeTelegramJobForChannelOrder(ctx, targetJob)
+	}
+	waitingContinuation, err := s.telegramChannelHasPendingCollectContinuation(ctx, targetJob)
+	if err != nil {
+		return err
+	}
+	if waitingContinuation {
+		return s.postponeTelegramJobForChannelContinuation(ctx, targetJob)
 	}
 	return s.sendTelegramJobLockedByChannel(ctx, jobId)
 }
@@ -185,20 +202,20 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 		if switched, switchErr := s.switchTelegramJobToNextBot(ctx, job, err); switchErr != nil {
 			return switchErr
 		} else if switched {
-			return &tgRetryAfterError{after: time.Second, err: err}
+			return nil
 		}
 	}
 	retryCount := job.RetryCount + 1
-	retryDelay := time.Minute
-	if errors.As(err, &tooMany) && tooMany.RetryAfter > 0 {
-		retryDelay = time.Duration(tooMany.RetryAfter) * time.Second
-	}
-	message := telegramJobFriendlyErrorMessage(err, retryDelay, retryCount)
+	policy := telegramJobErrorRetryPolicy(err, retryCount)
+	message := policy.Message
 	status := "failed_retry"
-	if retryCount >= 10 {
+	if policy.Permanent {
 		status = "failed"
 	}
-	nextRetryAt := gtime.Now().Add(retryDelay)
+	var nextRetryAt any
+	if !policy.Permanent {
+		nextRetryAt = gtime.Now().Add(policy.RetryDelay)
+	}
 	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
 		"status":          status,
 		"dispatch_status": tgDispatchStatusIdle,
@@ -220,21 +237,18 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 			"updated_at":    gtime.Now(),
 		}).Update()
 		_ = s.markCollectDispatchFailedByTask(ctx, job.TaskId, message)
-		return err
-	}
-	return &tgRetryAfterError{after: retryDelay, err: err}
-}
-
-func telegramJobFriendlyErrorMessage(err error, retryDelay time.Duration, retryCount int) string {
-	var tooMany *tgbot.TooManyRequestsError
-	if errors.As(err, &tooMany) {
-		seconds := int(retryDelay.Seconds())
-		if tooMany.RetryAfter > 0 {
-			seconds = tooMany.RetryAfter
+	} else {
+		retryMod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", job.TaskId)
+		if job.OperationNo != "" {
+			retryMod = retryMod.Where("tg_operation_no", job.OperationNo)
 		}
-		return fmt.Sprintf("Telegram 发送频率过快，已触发限流；系统会等待 %d 秒后自动重试（第 %d 次）。建议为该频道配置多个可用推送 BOT，或降低全量推送/循环推送频率。", seconds, retryCount)
+		_, _ = retryMod.Data(g.Map{
+			"tg_status":     "failed_retry",
+			"error_message": message,
+			"updated_at":    gtime.Now(),
+		}).Update()
 	}
-	return err.Error()
+	return nil
 }
 
 func (s *sSysPublish) switchTelegramJobToNextBot(ctx context.Context, job telegramJobRecord, cause error) (bool, error) {

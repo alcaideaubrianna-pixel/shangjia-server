@@ -41,7 +41,7 @@ func buildTelegramTaskCaption(row gdb.Record, setting *sysin.AccountSettingModel
 		lines = appendCaptionMark(lines, telegramEscapeText(mark), setting.MarkPosition)
 	}
 	if setting != nil && setting.EnableSuffix == 1 {
-		if suffix := telegramSuffixHTML(setting.SuffixContent); suffix != "" {
+		if suffix := telegramRichTextHTML(setting.SuffixContent); suffix != "" {
 			if len(lines) > 0 {
 				lines = append(lines, "")
 			}
@@ -107,6 +107,10 @@ func telegramEscapeText(value string) string {
 }
 
 func telegramSuffixHTML(value string) string {
+	return telegramRichTextHTML(value)
+}
+
+func telegramRichTextHTML(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""
@@ -184,13 +188,21 @@ func writeTelegramSpanElement(builder *strings.Builder, node *xhtml.Node) {
 }
 
 func writeTelegramBlockquoteElement(builder *strings.Builder, node *xhtml.Node) {
+	if builder.Len() > 0 && !strings.HasSuffix(builder.String(), "\n") {
+		builder.WriteString("\n")
+	}
 	builder.WriteString("<blockquote")
 	if _, ok := telegramAttrValue(node, "expandable"); ok {
 		builder.WriteString(" expandable")
 	}
 	builder.WriteString(">")
-	writeTelegramHTMLChildren(builder, node)
+	var children strings.Builder
+	writeTelegramHTMLChildren(&children, node)
+	builder.WriteString(strings.Trim(children.String(), "\n"))
 	builder.WriteString("</blockquote>")
+	if !strings.HasSuffix(builder.String(), "\n") {
+		builder.WriteString("\n")
+	}
 }
 
 func writeTelegramEmojiElement(builder *strings.Builder, node *xhtml.Node) {
@@ -252,7 +264,12 @@ func writeTelegramParagraphElement(builder *strings.Builder, node *xhtml.Node) {
 	if builder.Len() > 0 && !strings.HasSuffix(builder.String(), "\n") {
 		builder.WriteString("\n")
 	}
+	beforeLen := builder.Len()
 	writeTelegramHTMLChildren(builder, node)
+	if builder.Len() == beforeLen {
+		builder.WriteString("\n")
+		return
+	}
 	if !strings.HasSuffix(builder.String(), "\n") {
 		builder.WriteString("\n")
 	}

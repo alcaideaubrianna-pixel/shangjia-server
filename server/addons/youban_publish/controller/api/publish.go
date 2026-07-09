@@ -362,6 +362,99 @@ func (c *cPublishAdmin) ChannelBackupCreate(ctx context.Context, req *publish.Ad
 	return
 }
 
+func (c *cPublishAdmin) MessageTemplateList(ctx context.Context, req *publish.AdminMessageTemplateListReq) (res *publish.AdminMessageTemplateListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminMessageTemplateList(ctx, &req.MessageTemplateListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.MessageTemplateModel{}
+	}
+	res = new(publish.AdminMessageTemplateListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishAdmin) MessageTemplateSave(ctx context.Context, req *publish.AdminMessageTemplateSaveReq) (res *publish.AdminMessageTemplateSaveRes, err error) {
+	item, err := service.SysPublish().AdminMessageTemplateSave(ctx, &req.MessageTemplateSaveInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminMessageTemplateSaveRes{MessageTemplateSaveModel: item}
+	return
+}
+
+func (c *cPublishAdmin) MessageTemplateDelete(ctx context.Context, req *publish.AdminMessageTemplateDeleteReq) (res *publish.AdminMessageTemplateDeleteRes, err error) {
+	if err = service.SysPublish().AdminMessageTemplateDelete(ctx, &req.MessageTemplateDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminMessageTemplateDeleteRes{}
+	return
+}
+
+func (c *cPublishAdmin) MessageTemplatePush(ctx context.Context, req *publish.AdminMessageTemplatePushReq) (res *publish.AdminMessageTemplatePushRes, err error) {
+	item, err := service.SysPublish().AdminMessageTemplatePush(ctx, &req.MessageTemplatePushInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminMessageTemplatePushRes{MessageTemplatePushModel: item}
+	return
+}
+
+func (c *cPublishAdmin) MessageTemplateMediaUpload(ctx context.Context, req *publish.AdminMessageTemplateMediaUploadReq) (res *publish.AdminMessageTemplateMediaUploadRes, err error) {
+	file := g.RequestFromCtx(ctx).GetUploadFile("file")
+	if file == nil {
+		return nil, gerror.New("没有找到上传的文件")
+	}
+	poster := g.RequestFromCtx(ctx).GetUploadFile("poster")
+	data, err := service.SysPublish().AdminMessageTemplateMediaUpload(ctx, &req.MessageTemplateMediaUploadInp, file, poster)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminMessageTemplateMediaUploadRes{MessageTemplateMediaModel: data}
+	return
+}
+
+func (c *cPublishAdmin) MessagePushPlanList(ctx context.Context, req *publish.AdminMessagePushPlanListReq) (res *publish.AdminMessagePushPlanListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminMessagePushPlanList(ctx, &req.MessagePushPlanListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.MessagePushPlanModel{}
+	}
+	res = new(publish.AdminMessagePushPlanListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishAdmin) MessagePushPlanSave(ctx context.Context, req *publish.AdminMessagePushPlanSaveReq) (res *publish.AdminMessagePushPlanSaveRes, err error) {
+	item, err := service.SysPublish().AdminMessagePushPlanSave(ctx, &req.MessagePushPlanSaveInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminMessagePushPlanSaveRes{MessagePushPlanSaveModel: item}
+	return
+}
+
+func (c *cPublishAdmin) MessagePushPlanDelete(ctx context.Context, req *publish.AdminMessagePushPlanDeleteReq) (res *publish.AdminMessagePushPlanDeleteRes, err error) {
+	if err = service.SysPublish().AdminMessagePushPlanDelete(ctx, &req.MessagePushPlanDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminMessagePushPlanDeleteRes{}
+	return
+}
+
+func (c *cPublishAdmin) MessagePushPlanStatus(ctx context.Context, req *publish.AdminMessagePushPlanStatusReq) (res *publish.AdminMessagePushPlanStatusRes, err error) {
+	if err = service.SysPublish().AdminMessagePushPlanStatus(ctx, &req.MessagePushPlanStatusInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminMessagePushPlanStatusRes{}
+	return
+}
+
 func (c *cPublishAdmin) UploadMedia(ctx context.Context, req *publish.AdminUploadMediaReq) (res *publish.AdminUploadMediaRes, err error) {
 	file := g.RequestFromCtx(ctx).GetUploadFile("file")
 	if file == nil {

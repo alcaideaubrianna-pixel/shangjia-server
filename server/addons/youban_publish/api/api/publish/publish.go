@@ -282,6 +282,83 @@ type AdminChannelBackupCreateRes struct {
 	*sysin.ChannelBackupCreateModel
 }
 
+type AdminMessageTemplateListReq struct {
+	g.Meta `path:"/publish/admin/messageTemplate/list" method:"get" tags:"上架插件管理端" summary:"消息推送模板列表"`
+	sysin.MessageTemplateListInp
+}
+
+type AdminMessageTemplateListRes struct {
+	form.PageRes
+	List []*sysin.MessageTemplateModel `json:"list" dc:"模板列表"`
+}
+
+type AdminMessageTemplateSaveReq struct {
+	g.Meta `path:"/publish/admin/messageTemplate/save" method:"post" tags:"上架插件管理端" summary:"保存消息推送模板"`
+	sysin.MessageTemplateSaveInp
+}
+
+type AdminMessageTemplateSaveRes struct {
+	*sysin.MessageTemplateSaveModel
+}
+
+type AdminMessageTemplateDeleteReq struct {
+	g.Meta `path:"/publish/admin/messageTemplate/delete" method:"post" tags:"上架插件管理端" summary:"删除消息推送模板"`
+	sysin.MessageTemplateDeleteInp
+}
+
+type AdminMessageTemplateDeleteRes struct{}
+
+type AdminMessageTemplateMediaUploadReq struct {
+	g.Meta `path:"/publish/admin/messageTemplate/media/upload" method:"post" mime:"multipart/form-data" tags:"上架插件管理端" summary:"上传消息模板媒体"`
+	sysin.MessageTemplateMediaUploadInp
+}
+
+type AdminMessageTemplateMediaUploadRes struct {
+	*sysin.MessageTemplateMediaModel
+}
+
+type AdminMessageTemplatePushReq struct {
+	g.Meta `path:"/publish/admin/messageTemplate/push" method:"post" tags:"上架插件管理端" summary:"推送消息模板"`
+	sysin.MessageTemplatePushInp
+}
+
+type AdminMessageTemplatePushRes struct {
+	*sysin.MessageTemplatePushModel
+}
+
+type AdminMessagePushPlanListReq struct {
+	g.Meta `path:"/publish/admin/messagePushPlan/list" method:"get" tags:"上架插件管理端" summary:"消息自动推送计划列表"`
+	sysin.MessagePushPlanListInp
+}
+
+type AdminMessagePushPlanListRes struct {
+	form.PageRes
+	List []*sysin.MessagePushPlanModel `json:"list" dc:"计划列表"`
+}
+
+type AdminMessagePushPlanSaveReq struct {
+	g.Meta `path:"/publish/admin/messagePushPlan/save" method:"post" tags:"上架插件管理端" summary:"保存消息自动推送计划"`
+	sysin.MessagePushPlanSaveInp
+}
+
+type AdminMessagePushPlanSaveRes struct {
+	*sysin.MessagePushPlanSaveModel
+}
+
+type AdminMessagePushPlanDeleteReq struct {
+	g.Meta `path:"/publish/admin/messagePushPlan/delete" method:"post" tags:"上架插件管理端" summary:"删除消息自动推送计划"`
+	sysin.MessagePushPlanDeleteInp
+}
+
+type AdminMessagePushPlanDeleteRes struct{}
+
+type AdminMessagePushPlanStatusReq struct {
+	g.Meta `path:"/publish/admin/messagePushPlan/status" method:"post" tags:"上架插件管理端" summary:"切换消息自动推送计划状态"`
+	sysin.MessagePushPlanStatusInp
+}
+
+type AdminMessagePushPlanStatusRes struct{}
+
 type AdminUploadMediaReq struct {
 	g.Meta `path:"/publish/admin/media/upload" method:"post" mime:"multipart/form-data" tags:"上架插件管理端" summary:"上传资料媒体"`
 	sysin.MediaUploadInp
