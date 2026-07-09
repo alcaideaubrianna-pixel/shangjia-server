@@ -342,7 +342,7 @@ func (s *sSysPublish) ServerImportTaskScan(ctx context.Context, in *sysin.Import
 	if err = importer.login(ctx); err != nil {
 		return nil, err
 	}
-	sourceItems, err := importer.collectSourceItems(ctx, in.ScanMode, in.RecentCount, 0)
+	sourceItems, err := importer.collectSourceItems(ctx, in.ScanMode, in.RecentCount)
 	if err != nil {
 		return nil, err
 	}
@@ -690,7 +690,7 @@ func (s *sSysPublish) ExecuteImportRun(ctx context.Context, runId int64) (err er
 	if importMode == "" {
 		importMode = sysin.ImportTaskModeIncremental
 	}
-	sourceItems, err := importer.collectSourceItems(ctx, scanMode, run["recent_count"].Int(), task["limit_count"].Int())
+	sourceItems, err := importer.collectSourceItems(ctx, scanMode, run["recent_count"].Int())
 	if err != nil {
 		return err
 	}
@@ -2477,13 +2477,13 @@ func ellipsisString(value string, max int) string {
 	return string(runes[:max]) + "..."
 }
 
-func (i *legacyCMSImporter) collectSourceItems(ctx context.Context, scanMode string, recentCount int, limitCount int) ([]*legacyCMSListItem, error) {
+func (i *legacyCMSImporter) collectSourceItems(ctx context.Context, scanMode string, recentCount int) ([]*legacyCMSListItem, error) {
 	first, err := i.fetchListPage(ctx, 1)
 	if err != nil {
 		return nil, err
 	}
 	sourceItems := append([]*legacyCMSListItem{}, first.Items...)
-	maxCount := limitCount
+	maxCount := 0
 	if scanMode == sysin.ImportTaskScanModeRecent {
 		maxCount = recentCount
 	}
