@@ -39,8 +39,10 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 	mux.HandleFunc(tgTaskTypeImportSync, s.handleImportTgSyncTask)
 	mux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
 	mux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
+	mux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
 	mux.HandleFunc(tgTaskTypeCollectMedia, s.handleCollectMediaCacheTask)
 	mux.HandleFunc(tgTaskTypeCollectHistory, s.handleCollectHistoryTask)
+	mux.HandleFunc(tgTaskTypeCollectTrigger, s.handleCollectTriggerTask)
 
 	go func() {
 		if err := server.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
@@ -137,6 +139,23 @@ func (s *sSysPublish) handleCollectHistoryTask(ctx context.Context, task *asynq.
 		return err
 	}
 	return s.ExecuteCollectHistoryTask(ctx, payload.TaskId)
+}
+
+func (s *sSysPublish) handleCollectTriggerTask(ctx context.Context, task *asynq.Task) error {
+	payload, err := decodeCollectTriggerQueuePayload(task)
+	if err != nil {
+		return err
+	}
+	_, err = s.ExecuteCollectSourceTrigger(ctx, payload.SourceId, payload.TenantId, payload.AccountId)
+	return err
+}
+
+func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.Task) error {
+	payload, err := decodeCollectProcessQueuePayload(task)
+	if err != nil {
+		return err
+	}
+	return s.processCollectEvent(ctx, payload.EventId, payload.TenantId, payload.AccountId)
 }
 
 func (s *sSysPublish) handleImportMatchTask(ctx context.Context, task *asynq.Task) error {

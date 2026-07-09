@@ -24,8 +24,11 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 	if len(media) == 1 {
 		return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0])
 	}
-	group, mediaIds, assetHashes, closers := s.telegramInputMediaGroup(media, caption)
+	group, mediaIds, assetHashes, closers, err := s.telegramInputMediaGroup(media, caption)
 	defer closeTelegramMediaFiles(closers)
+	if err != nil {
+		return nil, err
+	}
 	if len(group) == 0 {
 		return nil, nil
 	}
@@ -85,6 +88,9 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 }
 
 func (s *sSysPublish) copyTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
+	if copied, ok, err := s.copyTelegramMediaGroup(ctx, bot, chatId, purpose, caption, media); ok || err != nil {
+		return copied, err
+	}
 	messages := make([]*telegramSentMessage, 0, len(media))
 	for idx, item := range media {
 		itemCaption := ""
@@ -98,6 +104,53 @@ func (s *sSysPublish) copyTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		messages = append(messages, sent...)
 	}
 	return messages, nil
+}
+
+func (s *sSysPublish) copyTelegramMediaGroup(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, bool, error) {
+	if len(media) <= 1 {
+		return nil, false, nil
+	}
+	fromChatId, messageIds, ok := telegramCopyMediaGroupRefs(media)
+	if !ok {
+		return nil, false, nil
+	}
+	copied, err := bot.CopyMessages(ctx, &tgbot.CopyMessagesParams{
+		ChatID:        chatId,
+		FromChatID:    fromChatId,
+		MessageIDs:    messageIds,
+		RemoveCaption: true,
+	})
+	if err != nil {
+		return nil, true, err
+	}
+	if strings.TrimSpace(caption) != "" && len(copied) > 0 && copied[0].ID > 0 {
+		if _, err = bot.EditMessageCaption(ctx, &tgbot.EditMessageCaptionParams{
+			ChatID:    chatId,
+			MessageID: copied[0].ID,
+			Caption:   caption,
+			ParseMode: telegramMediaParseMode(caption),
+		}); err != nil {
+			return nil, true, err
+		}
+	}
+	messages := make([]*telegramSentMessage, 0, len(copied))
+	for index, msg := range copied {
+		if msg.ID <= 0 {
+			continue
+		}
+		if index >= len(media) {
+			continue
+		}
+		item := media[index]
+		messages = append(messages, &telegramSentMessage{
+			MessageId: int64(msg.ID),
+			Purpose:   purpose,
+			MediaId:   item.Id,
+			TgFileId:  item.TgFileId,
+			AssetHash: item.AssetHash,
+		})
+	}
+	return messages, true, nil
 }
 
 func (s *sSysPublish) copyTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem, ref telegramCopyMediaRef) ([]*telegramSentMessage, error) {
@@ -123,15 +176,20 @@ func (s *sSysPublish) copyTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 	}}, nil
 }
 
-func (s *sSysPublish) telegramInputMediaGroup(media []*telegramMediaItem, caption string) ([]models.InputMedia, []int64, []string, []io.Closer) {
+func (s *sSysPublish) telegramInputMediaGroup(media []*telegramMediaItem, caption string) ([]models.InputMedia, []int64, []string, []io.Closer, error) {
 	group := make([]models.InputMedia, 0, len(media))
 	mediaIds := make([]int64, 0, len(media))
 	assetHashes := make([]string, 0, len(media))
 	closers := make([]io.Closer, 0, len(media))
 	for _, item := range media {
 		source, attachment, closer, err := telegramInputMediaSource(item)
-		if err != nil || source == "" {
-			continue
+		if err != nil {
+			closeTelegramMediaFiles(closers)
+			return nil, nil, nil, nil, err
+		}
+		if source == "" {
+			closeTelegramMediaFiles(closers)
+			return nil, nil, nil, nil, gerror.New("媒体文件地址为空")
 		}
 		if closer != nil {
 			closers = append(closers, closer)
@@ -148,7 +206,7 @@ func (s *sSysPublish) telegramInputMediaGroup(media []*telegramMediaItem, captio
 		mediaIds = append(mediaIds, item.Id)
 		assetHashes = append(assetHashes, item.AssetHash)
 	}
-	return group, mediaIds, assetHashes, closers
+	return group, mediaIds, assetHashes, closers, nil
 }
 
 func telegramMediaParseMode(caption string) models.ParseMode {
@@ -192,6 +250,28 @@ func telegramMediaSetHasCopyRef(media []*telegramMediaItem) bool {
 		}
 	}
 	return false
+}
+
+func telegramCopyMediaGroupRefs(media []*telegramMediaItem) (string, []int, bool) {
+	fromChatId := ""
+	messageIds := make([]int, 0, len(media))
+	for _, item := range media {
+		if item == nil {
+			return "", nil, false
+		}
+		ref, ok := telegramCopyMediaRefFromFileId(item.TgFileId)
+		if !ok {
+			return "", nil, false
+		}
+		if fromChatId == "" {
+			fromChatId = ref.ChatId
+		}
+		if fromChatId != ref.ChatId {
+			return "", nil, false
+		}
+		messageIds = append(messageIds, ref.MessageId)
+	}
+	return fromChatId, messageIds, len(messageIds) == len(media)
 }
 
 func telegramCopyMediaFileId(chatId string, messageId int) string {

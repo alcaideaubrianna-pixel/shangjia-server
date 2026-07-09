@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -11,6 +12,9 @@ import (
 
 func (s *sSysPublish) submitTelegramPublish(ctx context.Context, req telegramPublishRequest) error {
 	if err := ensureTelegramOperationColumns(ctx); err != nil {
+		return err
+	}
+	if err := ensureCollectTelegramOrderColumns(ctx); err != nil {
 		return err
 	}
 	task, err := s.telegramJobTask(ctx, req.TaskId)
@@ -72,6 +76,13 @@ func (s *sSysPublish) ensureTelegramPublishChannelJob(ctx context.Context, task 
 		if err = s.updateTelegramJobCycleSetting(ctx, jobId, channel); err != nil {
 			return 0, err
 		}
+		_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", jobId).
+			Data(collectTelegramOrderDataFromTask(task)).
+			Update()
+		if err != nil {
+			return 0, gerror.Wrap(err, "更新TG频道任务采集顺序失败")
+		}
 		return jobId, nil
 	}
 	botId, err := telegramChannelSenderBotId(channel)
@@ -80,24 +91,28 @@ func (s *sSysPublish) ensureTelegramPublishChannelJob(ctx context.Context, task 
 	}
 	now := gtime.Now()
 	jobId, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
-		"task_id":            task["id"].Int64(),
-		"operation_no":       operationNo,
-		"tenant_id":          task["tenant_id"].Int64(),
-		"merchant_id":        task["tenant_id"].Int64(),
-		"account_id":         task["account_id"].Int64(),
-		"profile_id":         task["profile_id"].Int64(),
-		"channel_id":         channel.Id,
-		"bot_id":             botId,
-		"target_chat_id":     normalizeTelegramChannelChatID(channel.TargetChatId),
-		"status":             "pending",
-		"priority":           s.telegramJobPriority(telegramJobRecord{OperationNo: operationNo, CycleEnabled: channel.CyclePublishEnabled}),
-		"queue_name":         telegramQueueNameByPriority(s.telegramJobPriority(telegramJobRecord{OperationNo: operationNo, CycleEnabled: channel.CyclePublishEnabled})),
-		"dispatch_status":    tgDispatchStatusIdle,
-		"cycle_enabled":      channel.CyclePublishEnabled,
-		"cycle_days":         defaultCycleDays(channel.CyclePublishDays),
-		"cycle_publish_time": channel.CyclePublishTime,
-		"created_at":         now,
-		"updated_at":         now,
+		"task_id":                   task["id"].Int64(),
+		"operation_no":              operationNo,
+		"tenant_id":                 task["tenant_id"].Int64(),
+		"merchant_id":               task["tenant_id"].Int64(),
+		"account_id":                task["account_id"].Int64(),
+		"profile_id":                task["profile_id"].Int64(),
+		"channel_id":                channel.Id,
+		"bot_id":                    botId,
+		"target_chat_id":            normalizeTelegramChannelChatID(channel.TargetChatId),
+		"collect_event_id":          task["collect_event_id"].Int64(),
+		"collect_source_id":         task["collect_source_id"].Int64(),
+		"collect_source_chat_id":    strings.TrimSpace(task["collect_source_chat_id"].String()),
+		"collect_source_message_id": task["collect_source_message_id"].Int64(),
+		"status":                    "pending",
+		"priority":                  s.telegramJobPriority(telegramJobRecord{OperationNo: operationNo, CycleEnabled: channel.CyclePublishEnabled}),
+		"queue_name":                telegramQueueNameByPriority(s.telegramJobPriority(telegramJobRecord{OperationNo: operationNo, CycleEnabled: channel.CyclePublishEnabled})),
+		"dispatch_status":           tgDispatchStatusIdle,
+		"cycle_enabled":             channel.CyclePublishEnabled,
+		"cycle_days":                defaultCycleDays(channel.CyclePublishDays),
+		"cycle_publish_time":        channel.CyclePublishTime,
+		"created_at":                now,
+		"updated_at":                now,
 	}).InsertAndGetId()
 	if err != nil {
 		return 0, gerror.Wrap(err, "创建TG频道任务失败")

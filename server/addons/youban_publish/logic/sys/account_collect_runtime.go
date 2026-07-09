@@ -42,7 +42,23 @@ type accountCollectWorker struct {
 	sources     []accountCollectSourceRuntime
 	cancel      context.CancelFunc
 	done        chan struct{}
+	messages    chan accountCollectMessageTask
+	operations  chan accountCollectOperationTask
 }
+
+type accountCollectMessageTask struct {
+	source accountCollectSourceRuntime
+	msg    *tg.Message
+	chatId string
+}
+
+type accountCollectOperationTask struct {
+	ctx  context.Context
+	run  accountCollectOperation
+	done chan error
+}
+
+type accountCollectOperation func(context.Context, *telegram.Client) error
 
 func (s *sSysPublish) runAccountCollectSupervisor(ctx context.Context) {
 	supervisor := &accountCollectSupervisor{workers: make(map[int64]*accountCollectWorker)}
@@ -140,6 +156,8 @@ func startAccountCollectWorker(ctx context.Context, service *sSysPublish, tgAcco
 		sources:     append([]accountCollectSourceRuntime(nil), sources...),
 		cancel:      cancel,
 		done:        make(chan struct{}),
+		messages:    make(chan accountCollectMessageTask, 4096),
+		operations:  make(chan accountCollectOperationTask, 256),
 	}
 	go worker.run(workerCtx)
 	return worker
@@ -176,10 +194,110 @@ func (w *accountCollectWorker) runGotdDispatcher(ctx context.Context) error {
 		if _, err := client.Self(runCtx); err != nil {
 			return err
 		}
+		w.service.registerAccountCollectWorker(w)
+		defer w.service.unregisterAccountCollectWorker(w)
+		go w.runMessageLoop(runCtx)
+		go w.runOperationLoop(runCtx, client)
 		g.Log().Infof(runCtx, "账号采集 dispatcher 已连接 tgAccountId:%d", w.tgAccountId)
 		<-runCtx.Done()
 		return runCtx.Err()
 	})
+}
+
+func (w *accountCollectWorker) runMessageLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case task := <-w.messages:
+			w.ingestGotdMessage(ctx, task.source, task.msg, task.chatId)
+		}
+	}
+}
+
+func (w *accountCollectWorker) runOperationLoop(ctx context.Context, client *telegram.Client) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case task := <-w.operations:
+			task.done <- w.runOperation(ctx, client, task)
+		}
+	}
+}
+
+func (w *accountCollectWorker) runOperation(ctx context.Context, client *telegram.Client, task accountCollectOperationTask) error {
+	if task.run == nil {
+		return nil
+	}
+	runCtx := ctx
+	if task.ctx != nil {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		go func() {
+			select {
+			case <-task.ctx.Done():
+				cancel()
+			case <-runCtx.Done():
+			}
+		}()
+	}
+	return task.run(runCtx, client)
+}
+
+func (s *sSysPublish) registerAccountCollectWorker(worker *accountCollectWorker) {
+	if worker == nil || worker.tgAccountId <= 0 {
+		return
+	}
+	s.accountRuntimeMu.Lock()
+	s.accountRuntimes[worker.tgAccountId] = worker
+	s.accountRuntimeMu.Unlock()
+}
+
+func (s *sSysPublish) unregisterAccountCollectWorker(worker *accountCollectWorker) {
+	if worker == nil || worker.tgAccountId <= 0 {
+		return
+	}
+	s.accountRuntimeMu.Lock()
+	if s.accountRuntimes[worker.tgAccountId] == worker {
+		delete(s.accountRuntimes, worker.tgAccountId)
+	}
+	s.accountRuntimeMu.Unlock()
+}
+
+func (s *sSysPublish) executeAccountCollectOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) (bool, error) {
+	if tgAccountId <= 0 || run == nil {
+		return false, nil
+	}
+	s.accountRuntimeMu.Lock()
+	worker := s.accountRuntimes[tgAccountId]
+	s.accountRuntimeMu.Unlock()
+	if worker == nil {
+		return false, nil
+	}
+	if timeout <= 0 {
+		timeout = 90 * time.Second
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	task := accountCollectOperationTask{
+		ctx:  runCtx,
+		run:  run,
+		done: make(chan error, 1),
+	}
+	select {
+	case worker.operations <- task:
+	case <-runCtx.Done():
+		return true, runCtx.Err()
+	}
+	select {
+	case err := <-task.done:
+		return true, err
+	case <-runCtx.Done():
+		worker.stop()
+		return true, runCtx.Err()
+	}
 }
 
 func (w *accountCollectWorker) stop() {

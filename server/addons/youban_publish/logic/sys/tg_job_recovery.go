@@ -11,6 +11,30 @@ import (
 
 const telegramSendingJobRecoverAfter = 2 * time.Minute
 
+func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	now := gtime.Now()
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		WhereIn("status", []string{"pending", "failed_retry"}).
+		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
+		Data(g.Map{
+			"dispatch_status":     tgDispatchStatusIdle,
+			"next_retry_at":       now,
+			"last_dispatch_error": "服务启动时发现任务调度中断，已重新进入待调度队列",
+			"updated_at":          now,
+		}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "恢复调度中断的TG任务失败")
+	}
+	if affected, _ := result.RowsAffected(); affected > 0 {
+		g.Log().Infof(ctx, "已恢复调度中断的TG任务：%d条", affected)
+	}
+	return s.recoverStaleTelegramSendingJobs(ctx, limit)
+}
+
 func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()

@@ -79,6 +79,24 @@ type CollectSourceHistoryStartRes struct {
 	*sysin.CollectHistoryTaskModel
 }
 
+type CollectSourceTriggerReq struct {
+	g.Meta `path:"/publish/collect/source/trigger" method:"post" tags:"上架插件" summary:"手动触发采集源推送"`
+	sysin.CollectSourceTriggerInp
+}
+
+type CollectSourceTriggerRes struct {
+	*sysin.CollectSourceTriggerModel
+}
+
+type CollectSourceResetReq struct {
+	g.Meta `path:"/publish/collect/source/reset" method:"post" tags:"上架插件" summary:"开发模式重置采集源推送状态"`
+	sysin.CollectSourceResetInp
+}
+
+type CollectSourceResetRes struct {
+	*sysin.CollectSourceResetModel
+}
+
 type CollectHistoryTaskListReq struct {
 	g.Meta `path:"/publish/collect/history/task/list" method:"get" tags:"上架插件" summary:"历史采集任务列表"`
 	sysin.CollectHistoryTaskListInp

@@ -77,6 +77,9 @@ func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) er
 	if limit <= 0 {
 		limit = 50
 	}
+	if err := ensureCollectTelegramOrderColumns(ctx); err != nil {
+		return err
+	}
 	lock := hglock.NewConfig(5*time.Second, 100*time.Millisecond).Mutex("youban_publish:tg_scheduler")
 	if err := lock.TryLock(ctx); err != nil {
 		if gerror.Is(err, hglock.ErrLockFailed) {
@@ -109,6 +112,13 @@ func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) er
 		if busy {
 			continue
 		}
+		waitingPrevious, err := s.collectTelegramJobHasPreviousActive(ctx, job)
+		if err != nil {
+			return err
+		}
+		if waitingPrevious {
+			continue
+		}
 		queued, err := s.dispatchTelegramJob(ctx, job)
 		if err != nil {
 			return err
@@ -131,7 +141,7 @@ func (s *sSysPublish) telegramSchedulerCandidates(ctx context.Context, limit int
 		WhereIn("status", []string{"pending", "failed_retry"}).
 		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", now).
 		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
-		OrderAsc("priority").OrderAsc("id").
+		OrderAsc("priority").OrderAsc("collect_source_id").OrderAsc("collect_source_chat_id").OrderAsc("collect_source_message_id").OrderAsc("id").
 		Limit(limit).
 		Scan(&jobs)
 	if err != nil {

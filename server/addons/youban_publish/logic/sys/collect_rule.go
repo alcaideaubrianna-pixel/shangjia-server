@@ -17,6 +17,9 @@ func (s *sSysPublish) CollectRuleList(ctx context.Context, in *sysin.CollectRule
 	if err != nil {
 		return nil, 0, err
 	}
+	if err = ensureCollectRuleColumns(ctx); err != nil {
+		return nil, 0, err
+	}
 	if in == nil {
 		in = &sysin.CollectRuleListInp{}
 	}
@@ -58,37 +61,35 @@ func (s *sSysPublish) CollectRuleSave(ctx context.Context, in *sysin.CollectRule
 	}
 	now := gtime.Now()
 	data := g.Map{
-		"tenant_id":               account.TenantId,
-		"account_id":              account.Id,
-		"name":                    in.Name,
-		"global_enabled":          switchInt(in.GlobalEnabled),
-		"target_channel_id_json":  in.TargetChannelIdJson,
-		"bot_id_json":             in.BotIdJson,
-		"backup_channel_id":       in.BackupChannelId,
-		"backup_channel_id_json":  in.BackupChannelIdJson,
-		"review_enabled":          switchInt(in.ReviewEnabled),
-		"dedupe_enabled":          switchDefaultOn(in.DedupeEnabled),
-		"dedupe_days":             in.DedupeDays,
-		"full_match_enabled":      switchInt(in.FullMatchEnabled),
-		"keyword_json":            in.KeywordJson,
-		"tag_json":                in.TagJson,
-		"replace_json":            in.ReplaceJson,
-		"delete_text_json":        in.DeleteTextJson,
-		"block_text_json":         in.BlockTextJson,
-		"block_link":              switchDefaultOn(in.BlockLink),
-		"block_username":          switchDefaultOn(in.BlockUsername),
-		"block_plain_text":        switchDefaultOn(in.BlockPlainText),
-		"min_media_count_enabled": switchDefaultOn(in.MinMediaCountEnabled),
-		"min_media_count":         in.MinMediaCount,
-		"show_unique_no":          switchInt(in.ShowUniqueNo),
-		"header_enabled":          switchInt(in.HeaderEnabled),
-		"header_markdown":         in.HeaderMarkdown,
-		"footer_enabled":          switchInt(in.FooterEnabled),
-		"footer_markdown":         in.FooterMarkdown,
-		"sort":                    in.Sort,
-		"status":                  in.Status,
-		"updated_by":              account.Id,
-		"updated_at":              now,
+		"tenant_id":              account.TenantId,
+		"account_id":             account.Id,
+		"name":                   in.Name,
+		"global_enabled":         switchInt(in.GlobalEnabled),
+		"target_channel_id_json": in.TargetChannelIdJson,
+		"bot_id_json":            in.BotIdJson,
+		"backup_channel_id":      in.BackupChannelId,
+		"backup_channel_id_json": in.BackupChannelIdJson,
+		"review_enabled":         switchInt(in.ReviewEnabled),
+		"dedupe_enabled":         switchDefaultOn(in.DedupeEnabled),
+		"dedupe_days":            in.DedupeDays,
+		"full_match_enabled":     switchInt(in.FullMatchEnabled),
+		"keyword_json":           in.KeywordJson,
+		"tag_json":               in.TagJson,
+		"replace_json":           in.ReplaceJson,
+		"delete_text_json":       in.DeleteTextJson,
+		"block_text_json":        in.BlockTextJson,
+		"block_link":             switchDefaultOn(in.BlockLink),
+		"block_username":         switchDefaultOn(in.BlockUsername),
+		"block_plain_text":       switchDefaultOn(in.BlockPlainText),
+		"show_unique_no":         switchInt(in.ShowUniqueNo),
+		"header_enabled":         switchInt(in.HeaderEnabled),
+		"header_markdown":        in.HeaderMarkdown,
+		"footer_enabled":         switchInt(in.FooterEnabled),
+		"footer_markdown":        in.FooterMarkdown,
+		"sort":                   in.Sort,
+		"status":                 in.Status,
+		"updated_by":             account.Id,
+		"updated_at":             now,
 	}
 	if in.Id > 0 {
 		_, err = pdao.YoubanPublishCollectRule.Ctx(ctx).
@@ -101,6 +102,7 @@ func (s *sSysPublish) CollectRuleSave(ctx context.Context, in *sysin.CollectRule
 		if err != nil {
 			return 0, gerror.Wrap(err, "更新采集规则失败")
 		}
+		s.refreshPendingCollectTasksForRuleAsync(in.Id, account.TenantId, account.Id)
 		return in.Id, nil
 	}
 	data["created_by"] = account.Id

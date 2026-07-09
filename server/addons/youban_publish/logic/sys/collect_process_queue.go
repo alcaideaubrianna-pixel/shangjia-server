@@ -10,14 +10,13 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-type collectMediaQueuePayload struct {
-	EventId     int64 `json:"eventId"`
-	TenantId    int64 `json:"tenantId"`
-	AccountId   int64 `json:"accountId"`
-	TgAccountId int64 `json:"tgAccountId"`
+type collectProcessQueuePayload struct {
+	AccountId int64 `json:"accountId"`
+	EventId   int64 `json:"eventId"`
+	TenantId  int64 `json:"tenantId"`
 }
 
-func (s *sSysPublish) enqueueCollectMediaCache(ctx context.Context, payload collectMediaQueuePayload, delay time.Duration) error {
+func (s *sSysPublish) enqueueCollectProcess(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration) error {
 	if payload.EventId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 {
 		return nil
 	}
@@ -29,12 +28,12 @@ func (s *sSysPublish) enqueueCollectMediaCache(ctx context.Context, payload coll
 	if err != nil {
 		return err
 	}
-	task := asynq.NewTask(tgTaskTypeCollectMedia, body)
+	task := asynq.NewTask(tgTaskTypeCollectProcess, body)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameMedia),
-		asynq.Unique(30 * time.Second),
+		asynq.Queue(tgQueueNameDefault),
+		asynq.Unique(10 * time.Second),
 		asynq.MaxRetry(10),
-		asynq.Timeout(30 * time.Minute),
+		asynq.Timeout(10 * time.Minute),
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
@@ -46,13 +45,13 @@ func (s *sSysPublish) enqueueCollectMediaCache(ctx context.Context, payload coll
 	return err
 }
 
-func decodeCollectMediaQueuePayload(task *asynq.Task) (collectMediaQueuePayload, error) {
-	var payload collectMediaQueuePayload
+func decodeCollectProcessQueuePayload(task *asynq.Task) (collectProcessQueuePayload, error) {
+	var payload collectProcessQueuePayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
-		return payload, fmt.Errorf("解析采集媒体缓存任务失败: %w", err)
+		return payload, fmt.Errorf("解析采集事件处理任务失败: %w", err)
 	}
 	if payload.EventId <= 0 {
-		return payload, fmt.Errorf("采集媒体缓存任务缺少eventId")
+		return payload, fmt.Errorf("采集事件处理任务缺少eventId")
 	}
 	return payload, nil
 }

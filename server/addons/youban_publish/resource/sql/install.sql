@@ -111,19 +111,20 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_rule` (
   `global_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否全局应用',
   `target_channel_id_json` text COMMENT '目标频道ID JSON',
   `bot_id_json` text COMMENT '推送BOT ID JSON',
-  `backup_channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '备份群ID',
+  `backup_channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '备份频道ID',
+  `backup_channel_id_json` text COMMENT '备份频道ID JSON',
   `review_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否需要审核',
   `dedupe_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否图文去重',
   `dedupe_days` int(11) NOT NULL DEFAULT '7' COMMENT '去重天数',
+  `full_match_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '全量匹配',
   `keyword_json` text COMMENT '关键词JSON',
   `tag_json` text COMMENT '标签JSON',
   `replace_json` text COMMENT '替换规则JSON',
+  `delete_text_json` text COMMENT '删除文本JSON',
   `block_text_json` text COMMENT '屏蔽文本JSON',
   `block_link` tinyint(1) NOT NULL DEFAULT '1' COMMENT '屏蔽链接',
   `block_username` tinyint(1) NOT NULL DEFAULT '1' COMMENT '屏蔽用户名',
   `block_plain_text` tinyint(1) NOT NULL DEFAULT '1' COMMENT '屏蔽纯文本',
-  `min_media_count_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否限制媒体数量',
-  `min_media_count` int(11) NOT NULL DEFAULT '2' COMMENT '最少媒体数',
   `show_unique_no` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否显示唯一编号',
   `header_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否启用前置文案',
   `header_markdown` text COMMENT '前置Markdown文案',
@@ -185,6 +186,58 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_event` (
   KEY `idx_ybp_collect_event_chat` (`source_chat_id`,`source_message_id`),
   KEY `idx_ybp_collect_event_dedupe` (`tenant_id`,`dedupe_key`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集事件';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_event_media` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
+  `source_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集源ID',
+  `source_type` varchar(32) NOT NULL DEFAULT '' COMMENT '采集源类型',
+  `event_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集事件ID',
+  `source_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '来源频道/群聊ID',
+  `source_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '来源消息ID',
+  `source_grouped_id` varchar(128) NOT NULL DEFAULT '' COMMENT '媒体组ID',
+  `source_media_key` varchar(255) NOT NULL DEFAULT '' COMMENT '来源媒体键',
+  `media_type` varchar(32) NOT NULL DEFAULT '' COMMENT '媒体类型',
+  `source_ref_type` varchar(32) NOT NULL DEFAULT '' COMMENT '来源引用类型',
+  `source_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT '来源文件ID',
+  `source_message_ref` varchar(255) NOT NULL DEFAULT '' COMMENT '来源消息引用',
+  `backup_channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '备份频道ID',
+  `backup_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '备份聊天ID',
+  `backup_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '备份消息ID',
+  `file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '文件访问地址',
+  `storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '存储路径',
+  `poster_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '封面地址',
+  `meta_json` text COMMENT '媒体元数据',
+  `sort_index` int(11) NOT NULL DEFAULT '0' COMMENT '排序',
+  `cache_status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '缓存状态',
+  `error_message` text COMMENT '错误信息',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_collect_event_media_event` (`event_id`,`sort_index`,`id`),
+  KEY `idx_ybp_collect_event_media_owner` (`tenant_id`,`source_id`,`cache_status`,`id`),
+  KEY `idx_ybp_collect_event_media_source` (`source_chat_id`,`source_message_id`,`source_media_key`),
+  KEY `idx_ybp_collect_event_media_file` (`source_file_id`),
+  KEY `idx_ybp_collect_event_media_cache` (`cache_status`,`updated_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集事件媒体';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_event_log` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
+  `event_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集事件ID',
+  `dispatch_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '分发ID',
+  `stage` varchar(64) NOT NULL DEFAULT '' COMMENT '阶段',
+  `status` varchar(32) NOT NULL DEFAULT '' COMMENT '状态',
+  `message` text COMMENT '日志内容',
+  `meta_text` text COMMENT '上下文文本',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_collect_event_log_event` (`event_id`,`id`),
+  KEY `idx_ybp_collect_event_log_owner` (`tenant_id`,`account_id`,`created_at`),
+  KEY `idx_ybp_collect_event_log_stage` (`event_id`,`stage`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集事件日志';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_content` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -352,6 +405,10 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_task` (
   `plain_text` text COMMENT '正文',
   `media_count` int(11) NOT NULL DEFAULT '0' COMMENT '媒体数量',
   `channel_id_json` text COMMENT '推送频道ID JSON',
+  `collect_event_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集事件ID',
+  `collect_source_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集源ID',
+  `collect_source_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '采集来源Chat ID',
+  `collect_source_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集来源消息ID',
   `customer_remark` text COMMENT '客服备注',
   `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否防扫图处理',
   `tg_push_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否推送TG',
@@ -370,11 +427,14 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_task` (
   PRIMARY KEY (`id`),
   KEY `idx_ybp_task_tenant_client_request` (`tenant_id`,`client_request_id`),
   KEY `idx_ybp_task_tenant_status` (`tenant_id`,`status`,`id`),
-  KEY `idx_ybp_task_account_status` (`account_id`,`status`,`id`)
+  KEY `idx_ybp_task_account_status` (`account_id`,`status`,`id`),
+  KEY `idx_ybp_task_collect_order` (`collect_source_id`,`collect_source_chat_id`,`collect_source_message_id`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架任务';
 
 ALTER TABLE `hg_youban_publish_task` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `id`, ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
 ALTER TABLE `hg_youban_publish_task` ADD COLUMN `channel_id_json` text COMMENT '推送频道ID JSON' AFTER `media_count`, ADD COLUMN `customer_remark` text COMMENT '客服备注' AFTER `channel_id_json`, ADD COLUMN `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否防扫图处理' AFTER `customer_remark`;
+ALTER TABLE `hg_youban_publish_task` ADD COLUMN `collect_event_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集事件ID' AFTER `channel_id_json`, ADD COLUMN `collect_source_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集源ID' AFTER `collect_event_id`, ADD COLUMN `collect_source_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '采集来源Chat ID' AFTER `collect_source_id`, ADD COLUMN `collect_source_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集来源消息ID' AFTER `collect_source_chat_id`;
+ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_collect_order` (`collect_source_id`,`collect_source_chat_id`,`collect_source_message_id`,`id`);
 ALTER TABLE `hg_youban_publish_task` ADD COLUMN `tg_operation_no` varchar(128) NOT NULL DEFAULT '' COMMENT '当前TG操作号' AFTER `tg_status`;
 UPDATE `hg_youban_publish_task` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
 ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_tenant_client_request` (`tenant_id`,`client_request_id`);
@@ -758,6 +818,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
   `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID', `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
   `channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '频道ID', `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Bot ID',
   `target_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '目标Chat ID', `tg_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG消息ID',
+  `collect_event_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集事件ID', `collect_source_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集源ID',
+  `collect_source_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '采集来源Chat ID', `collect_source_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集来源消息ID',
   `asynq_task_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'Asynq任务ID', `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '状态',
   `retry_count` int(11) NOT NULL DEFAULT '0' COMMENT '重试次数', `next_retry_at` datetime DEFAULT NULL COMMENT '下次重试时间',
   `sent_at` datetime DEFAULT NULL COMMENT '发送成功时间', `cycle_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否循环上架',
@@ -775,11 +837,13 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
   KEY `idx_ybp_tg_job_cycle` (`cycle_enabled`,`next_cycle_at`,`id`),
   KEY `idx_ybp_tg_job_operation` (`operation_no`,`status`,`id`),
   KEY `idx_ybp_tg_job_scheduler` (`dispatch_status`,`status`,`priority`,`next_retry_at`,`id`),
-  KEY `idx_ybp_tg_job_channel_dispatch` (`target_chat_id`,`dispatch_status`,`status`,`updated_at`)
+  KEY `idx_ybp_tg_job_channel_dispatch` (`target_chat_id`,`dispatch_status`,`status`,`updated_at`),
+  KEY `idx_ybp_tg_job_collect_order` (`channel_id`,`target_chat_id`,`collect_source_id`,`collect_source_chat_id`,`collect_source_message_id`,`status`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG发布任务';
 
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `task_id`, ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `operation_no` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG操作号' AFTER `task_id`;
+ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `collect_event_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集事件ID' AFTER `target_chat_id`, ADD COLUMN `collect_source_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集源ID' AFTER `collect_event_id`, ADD COLUMN `collect_source_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '采集来源Chat ID' AFTER `collect_source_id`, ADD COLUMN `collect_source_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集来源消息ID' AFTER `collect_source_chat_id`;
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '频道ID' AFTER `profile_id`, ADD COLUMN `asynq_task_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'Asynq任务ID' AFTER `tg_message_id`;
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `sent_at` datetime DEFAULT NULL COMMENT '发送成功时间' AFTER `next_retry_at`, ADD COLUMN `cycle_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否循环上架' AFTER `sent_at`;
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN `cycle_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环天数' AFTER `cycle_enabled`, ADD COLUMN `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环发布时间' AFTER `cycle_days`, ADD COLUMN `next_cycle_at` datetime DEFAULT NULL COMMENT '下次循环时间' AFTER `cycle_publish_time`;
@@ -792,6 +856,7 @@ ALTER TABLE `hg_youban_publish_tg_job` ADD KEY `idx_ybp_tg_job_cycle` (`cycle_en
 ALTER TABLE `hg_youban_publish_tg_job` ADD KEY `idx_ybp_tg_job_operation` (`operation_no`,`status`,`id`);
 ALTER TABLE `hg_youban_publish_tg_job` ADD KEY `idx_ybp_tg_job_scheduler` (`dispatch_status`,`status`,`priority`,`next_retry_at`,`id`);
 ALTER TABLE `hg_youban_publish_tg_job` ADD KEY `idx_ybp_tg_job_channel_dispatch` (`target_chat_id`,`dispatch_status`,`status`,`updated_at`);
+ALTER TABLE `hg_youban_publish_tg_job` ADD KEY `idx_ybp_tg_job_collect_order` (`channel_id`,`target_chat_id`,`collect_source_id`,`collect_source_chat_id`,`collect_source_message_id`,`status`,`id`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_queue_stat` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',

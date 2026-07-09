@@ -82,6 +82,22 @@ func (c *cPublish) CollectSourceHistoryStart(ctx context.Context, req *publish.C
 	return &publish.CollectSourceHistoryStartRes{CollectHistoryTaskModel: data}, nil
 }
 
+func (c *cPublish) CollectSourceTrigger(ctx context.Context, req *publish.CollectSourceTriggerReq) (res *publish.CollectSourceTriggerRes, err error) {
+	data, err := service.SysPublish().CollectSourceTrigger(ctx, &req.CollectSourceTriggerInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.CollectSourceTriggerRes{CollectSourceTriggerModel: data}, nil
+}
+
+func (c *cPublish) CollectSourceReset(ctx context.Context, req *publish.CollectSourceResetReq) (res *publish.CollectSourceResetRes, err error) {
+	data, err := service.SysPublish().CollectSourceReset(ctx, &req.CollectSourceResetInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.CollectSourceResetRes{CollectSourceResetModel: data}, nil
+}
+
 func (c *cPublish) CollectHistoryTaskList(ctx context.Context, req *publish.CollectHistoryTaskListReq) (res *publish.CollectHistoryTaskListRes, err error) {
 	list, totalCount, err := service.SysPublish().CollectHistoryTaskList(ctx, &req.CollectHistoryTaskListInp)
 	if err != nil {

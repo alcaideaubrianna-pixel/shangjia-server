@@ -26,6 +26,9 @@ func (s *sSysPublish) telegramJobText(ctx context.Context, taskId int64) (string
 }
 
 func buildTelegramTaskCaption(row gdb.Record, setting *sysin.AccountSettingModel) string {
+	if isCollectPublishTask(row) {
+		return telegramEscapeText(row["plain_text"].String())
+	}
 	lines := make([]string, 0, 6)
 	mark := telegramCaptionMark(row, setting)
 	if setting != nil && setting.EnableTitleMark == 1 && setting.MarkPosition == "top" && mark != "" {
@@ -46,6 +49,10 @@ func buildTelegramTaskCaption(row gdb.Record, setting *sysin.AccountSettingModel
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func isCollectPublishTask(row gdb.Record) bool {
+	return strings.HasPrefix(strings.TrimSpace(row["client_request_id"].String()), "collect:")
 }
 
 func appendCaptionMark(lines []string, mark string, position string) []string {

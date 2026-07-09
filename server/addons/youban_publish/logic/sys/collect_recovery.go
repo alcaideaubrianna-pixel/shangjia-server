@@ -98,7 +98,7 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 	}
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
 	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		WhereIn("status", []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusFailed}).
+		WhereIn("status", []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusFailed}).
 		WhereLTE("updated_at", deadline).
 		OrderAsc("updated_at").
 		Limit(limit).
@@ -119,7 +119,7 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 
 func shouldRecoverCollectEvent(row gdb.Record) bool {
 	status := strings.TrimSpace(row["status"].String())
-	if status == sysin.CollectEventStatusPending {
+	if status == sysin.CollectEventStatusPending || status == sysin.CollectEventStatusWaitingOrder || status == sysin.CollectEventStatusPrechecked || status == sysin.CollectEventStatusMediaPending || status == sysin.CollectEventStatusMediaReady {
 		return true
 	}
 	if status != sysin.CollectEventStatusFailed {
@@ -128,5 +128,6 @@ func shouldRecoverCollectEvent(row gdb.Record) bool {
 	message := strings.ToLower(row["error_message"].String())
 	return strings.Contains(message, "app_id") ||
 		strings.Contains(message, "账号采集媒体") ||
-		strings.Contains(message, "媒体")
+		strings.Contains(message, "媒体") ||
+		strings.Contains(message, "上一条采集资料")
 }

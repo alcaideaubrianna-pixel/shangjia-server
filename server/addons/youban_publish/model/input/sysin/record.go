@@ -73,6 +73,7 @@ type PublishRecordModel struct {
 	ChannelId       int64       `json:"channelId" dc:"频道ID"`
 	ChannelTitle    string      `json:"channelTitle" dc:"频道名称"`
 	ChannelUsername string      `json:"channelUsername" dc:"频道用户名"`
+	ClientRequestId string      `json:"clientRequestId" dc:"客户端幂等ID"`
 	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
 	Id              int64       `json:"id" dc:"日志ID"`
 	JobId           int64       `json:"jobId" dc:"TG任务ID"`

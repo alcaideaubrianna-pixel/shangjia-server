@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"time"
 
@@ -94,38 +95,70 @@ func (s *sSysPublish) executeCollectHistoryTask(ctx context.Context, task *sysin
 func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.Client, task *sysin.CollectHistoryTaskModel, source *sysin.CollectSourceModel, channelID int64, accessHash int64) error {
 	offsetID := task.OffsetId
 	cutoff := collectHistoryCutoff(task)
+	pages := make([]*tg.Message, 0, collectHistoryPageLimit)
+	fetchedPages := 0
+	shouldFinish := false
 	for page := 0; page < collectHistoryPagesPerRun; page++ {
 		messages, err := collectHistoryPage(ctx, client, channelID, accessHash, offsetID)
 		if err != nil {
 			return err
 		}
 		if len(messages) == 0 {
-			return s.finishCollectHistoryTask(ctx, task, "历史消息已拉取完成")
+			shouldFinish = true
+			break
 		}
-		stats, nextOffset, stop, err := s.ingestCollectHistoryMessages(ctx, task, source, messages, cutoff)
-		if err != nil {
-			return err
-		}
-		if nextOffset > 0 {
-			offsetID = nextOffset
-		}
-		if err = s.updateCollectHistoryProgress(ctx, task, stats, offsetID); err != nil {
-			return err
-		}
+		fetchedPages++
+		pages = append(pages, messages...)
+		offsetID = collectHistoryNextOffset(offsetID, messages)
 		s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "page", "历史消息分页处理完成", g.Map{
-			"page":      page + 1,
-			"offsetId":  offsetID,
-			"scanned":   stats.scanned,
-			"events":    stats.events,
-			"duplicate": stats.duplicates,
-			"failed":    stats.failed,
+			"page":     page + 1,
+			"offsetId": offsetID,
+			"fetched":  len(messages),
 		})
-		if stop || len(messages) < collectHistoryPageLimit {
-			return s.finishCollectHistoryTask(ctx, task, "历史消息已拉取完成")
+		if len(messages) < collectHistoryPageLimit {
+			shouldFinish = true
+			break
 		}
 		time.Sleep(collectHistoryPageInterval)
 	}
+	if len(pages) == 0 {
+		return s.finishCollectHistoryTask(ctx, task, "历史消息已拉取完成")
+	}
+	stats, nextOffset, stop, err := s.ingestCollectHistoryMessages(ctx, task, source, pages, cutoff)
+	if err != nil {
+		return err
+	}
+	if nextOffset > 0 {
+		offsetID = nextOffset
+	}
+	if err = s.updateCollectHistoryProgress(ctx, task, stats, offsetID); err != nil {
+		return err
+	}
+	s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "batch", "历史消息批次处理完成", g.Map{
+		"pages":     fetchedPages,
+		"offsetId":  offsetID,
+		"scanned":   stats.scanned,
+		"events":    stats.events,
+		"duplicate": stats.duplicates,
+		"failed":    stats.failed,
+	})
+	if stop || shouldFinish {
+		return s.finishCollectHistoryTask(ctx, task, "历史消息已拉取完成")
+	}
 	return s.rescheduleCollectHistoryTask(ctx, task, offsetID)
+}
+
+func collectHistoryNextOffset(current int, messages []*tg.Message) int {
+	next := current
+	for _, msg := range messages {
+		if msg == nil || msg.ID <= 0 {
+			continue
+		}
+		if next == 0 || msg.ID < next {
+			next = msg.ID
+		}
+	}
+	return next
 }
 
 func collectHistoryPage(ctx context.Context, client *telegram.Client, channelID int64, accessHash int64, offsetID int) ([]*tg.Message, error) {
@@ -170,6 +203,7 @@ func (s *sSysPublish) ingestCollectHistoryMessages(ctx context.Context, task *sy
 		TgAccountId:  source.TgAccountId,
 		SourceChatId: source.SourceChatId,
 	}
+	messages = collectHistoryMessagesInSendOrder(messages)
 	for _, msg := range messages {
 		if msg == nil || msg.ID <= 0 {
 			continue
@@ -199,25 +233,9 @@ func (s *sSysPublish) ingestCollectHistoryMessages(ctx context.Context, task *sy
 		} else {
 			stats.events++
 		}
-		if collectMessageHasGotdMedia(message) {
-			delay := time.Duration(0)
-			if message.SourceGroupedId != "" {
-				delay = collectGroupedEventDelay
-			}
-			err = s.enqueueCollectMediaCache(ctx, collectMediaQueuePayload{
-				EventId:     eventId,
-				TenantId:    source.TenantId,
-				AccountId:   source.AccountId,
-				TgAccountId: source.TgAccountId,
-			}, delay)
-			if err == nil && !exists {
-				s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "media_cache", "历史采集事件已创建，媒体缓存任务已投递", g.Map{"eventId": eventId, "messageId": msg.ID})
-			}
-		} else {
-			err = s.processCollectEvent(ctx, eventId, source.TenantId, source.AccountId)
-			if err == nil && !exists {
-				s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "process", "历史采集文本事件已处理", g.Map{"eventId": eventId, "messageId": msg.ID})
-			}
+		err = s.processCollectEvent(ctx, eventId, source.TenantId, source.AccountId)
+		if err == nil && !exists {
+			s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "process", "历史采集事件已处理", g.Map{"eventId": eventId, "messageId": msg.ID})
 		}
 		if err != nil {
 			stats.failed++
@@ -225,6 +243,19 @@ func (s *sSysPublish) ingestCollectHistoryMessages(ctx context.Context, task *sy
 		}
 	}
 	return stats, nextOffset, stop, nil
+}
+
+func collectHistoryMessagesInSendOrder(messages []*tg.Message) []*tg.Message {
+	ordered := make([]*tg.Message, 0, len(messages))
+	for _, msg := range messages {
+		if msg != nil && msg.ID > 0 {
+			ordered = append(ordered, msg)
+		}
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return ordered[i].ID < ordered[j].ID
+	})
+	return ordered
 }
 
 func collectEventExists(ctx context.Context, uniqueKey string) (bool, error) {

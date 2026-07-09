@@ -2,12 +2,15 @@ package sys
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	"hotgo/internal/consts"
 )
 
 func (s *sSysPublish) runTelegramObserveStatsRefresher(ctx context.Context) {
@@ -51,18 +54,7 @@ func (s *sSysPublish) refreshTelegramQueueStats(ctx context.Context, tx gdb.TX) 
 	}
 	now := gtime.Now()
 	for _, row := range rows {
-		_, err = tx.Ctx(ctx).Model(publishTgQueueStatTable).Data(g.Map{
-			"stat_time":      now,
-			"queue_name":     row["queue_name"].String(),
-			"priority_level": row["priority_level"].Int(),
-			"status":         row["status"].String(),
-			"job_count":      row["job_count"].Int(),
-			"oldest_job_at":  row["oldest_job_at"],
-			"latest_job_at":  row["latest_job_at"],
-			"created_at":     now,
-			"updated_at":     now,
-		}).Insert()
-		if err != nil {
+		if err = s.upsertTelegramQueueStat(ctx, tx, row, now); err != nil {
 			return gerror.Wrap(err, "写入TG队列统计失败")
 		}
 	}
@@ -95,26 +87,7 @@ MAX(j.error_message) AS last_error_message`
 	}
 	now := gtime.Now()
 	for _, row := range rows {
-		_, err = tx.Ctx(ctx).Model(publishTgChannelStatTable).Data(g.Map{
-			"tenant_id":          row["tenant_id"].Int64(),
-			"account_id":         row["account_id"].Int64(),
-			"channel_id":         row["channel_id"].Int64(),
-			"target_chat_id":     row["target_chat_id"].String(),
-			"channel_title":      row["channel_title"].String(),
-			"pending_count":      row["pending_count"].Int(),
-			"queued_count":       row["queued_count"].Int(),
-			"sending_count":      row["sending_count"].Int(),
-			"sent_count":         row["sent_count"].Int(),
-			"failed_count":       row["failed_count"].Int(),
-			"retry_count":        row["retry_count"].Int(),
-			"rate_limit_count":   row["rate_limit_count"].Int(),
-			"last_sent_at":       row["last_sent_at"],
-			"last_error_at":      row["last_error_at"],
-			"last_error_message": row["last_error_message"].String(),
-			"created_at":         now,
-			"updated_at":         now,
-		}).Insert()
-		if err != nil {
+		if err = s.upsertTelegramChannelStat(ctx, tx, row, now); err != nil {
 			return gerror.Wrap(err, "写入TG频道统计失败")
 		}
 	}
@@ -147,27 +120,45 @@ MAX(j.error_message) AS last_error_message`
 	}
 	now := gtime.Now()
 	for _, row := range rows {
-		_, err = tx.Ctx(ctx).Model(publishTgBotStatTable).Data(g.Map{
-			"tenant_id":          row["tenant_id"].Int64(),
-			"bot_id":             row["bot_id"].Int64(),
-			"bot_name":           row["bot_name"].String(),
-			"bot_username":       row["bot_username"].String(),
-			"pending_count":      row["pending_count"].Int(),
-			"queued_count":       row["queued_count"].Int(),
-			"sending_count":      row["sending_count"].Int(),
-			"sent_count":         row["sent_count"].Int(),
-			"failed_count":       row["failed_count"].Int(),
-			"retry_count":        row["retry_count"].Int(),
-			"rate_limit_count":   row["rate_limit_count"].Int(),
-			"last_sent_at":       row["last_sent_at"],
-			"last_error_at":      row["last_error_at"],
-			"last_error_message": row["last_error_message"].String(),
-			"created_at":         now,
-			"updated_at":         now,
-		}).Insert()
-		if err != nil {
+		if err = s.upsertTelegramBotStat(ctx, tx, row, now); err != nil {
 			return gerror.Wrap(err, "写入TG Bot统计失败")
 		}
 	}
 	return nil
+}
+
+func (s *sSysPublish) upsertTelegramQueueStat(ctx context.Context, tx gdb.TX, row gdb.Record, now *gtime.Time) error {
+	args := []interface{}{now, row["queue_name"].String(), row["priority_level"].Int(), row["status"].String(), row["job_count"].Int(), row["oldest_job_at"], row["latest_job_at"], now, now}
+	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
+		_, err := tx.Ctx(ctx).Exec(`INSERT INTO "`+publishTgQueueStatTable+`" ("stat_time","queue_name","priority_level","status","job_count","oldest_job_at","latest_job_at","created_at","updated_at")
+VALUES (?,?,?,?,?,?,?,?,?)
+ON CONFLICT ("queue_name","priority_level","status") DO UPDATE SET "stat_time"=EXCLUDED."stat_time","job_count"=EXCLUDED."job_count","oldest_job_at"=EXCLUDED."oldest_job_at","latest_job_at"=EXCLUDED."latest_job_at","updated_at"=EXCLUDED."updated_at"`, args...)
+		return err
+	}
+	_, err := tx.Ctx(ctx).Exec("INSERT INTO `"+publishTgQueueStatTable+"` (`stat_time`,`queue_name`,`priority_level`,`status`,`job_count`,`oldest_job_at`,`latest_job_at`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `stat_time`=VALUES(`stat_time`),`job_count`=VALUES(`job_count`),`oldest_job_at`=VALUES(`oldest_job_at`),`latest_job_at`=VALUES(`latest_job_at`),`updated_at`=VALUES(`updated_at`)", args...)
+	return err
+}
+
+func (s *sSysPublish) upsertTelegramChannelStat(ctx context.Context, tx gdb.TX, row gdb.Record, now *gtime.Time) error {
+	args := []interface{}{row["tenant_id"].Int64(), row["account_id"].Int64(), row["channel_id"].Int64(), row["target_chat_id"].String(), row["channel_title"].String(), row["pending_count"].Int(), row["queued_count"].Int(), row["sending_count"].Int(), row["sent_count"].Int(), row["failed_count"].Int(), row["retry_count"].Int(), row["rate_limit_count"].Int(), row["last_sent_at"], row["last_error_at"], row["last_error_message"].String(), now, now}
+	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
+		_, err := tx.Ctx(ctx).Exec(`INSERT INTO "`+publishTgChannelStatTable+`" ("tenant_id","account_id","channel_id","target_chat_id","channel_title","pending_count","queued_count","sending_count","sent_count","failed_count","retry_count","rate_limit_count","last_sent_at","last_error_at","last_error_message","created_at","updated_at")
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT ("channel_id","target_chat_id") DO UPDATE SET "tenant_id"=EXCLUDED."tenant_id","account_id"=EXCLUDED."account_id","channel_title"=EXCLUDED."channel_title","pending_count"=EXCLUDED."pending_count","queued_count"=EXCLUDED."queued_count","sending_count"=EXCLUDED."sending_count","sent_count"=EXCLUDED."sent_count","failed_count"=EXCLUDED."failed_count","retry_count"=EXCLUDED."retry_count","rate_limit_count"=EXCLUDED."rate_limit_count","last_sent_at"=EXCLUDED."last_sent_at","last_error_at"=EXCLUDED."last_error_at","last_error_message"=EXCLUDED."last_error_message","updated_at"=EXCLUDED."updated_at"`, args...)
+		return err
+	}
+	_, err := tx.Ctx(ctx).Exec("INSERT INTO `"+publishTgChannelStatTable+"` (`tenant_id`,`account_id`,`channel_id`,`target_chat_id`,`channel_title`,`pending_count`,`queued_count`,`sending_count`,`sent_count`,`failed_count`,`retry_count`,`rate_limit_count`,`last_sent_at`,`last_error_at`,`last_error_message`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `tenant_id`=VALUES(`tenant_id`),`account_id`=VALUES(`account_id`),`channel_title`=VALUES(`channel_title`),`pending_count`=VALUES(`pending_count`),`queued_count`=VALUES(`queued_count`),`sending_count`=VALUES(`sending_count`),`sent_count`=VALUES(`sent_count`),`failed_count`=VALUES(`failed_count`),`retry_count`=VALUES(`retry_count`),`rate_limit_count`=VALUES(`rate_limit_count`),`last_sent_at`=VALUES(`last_sent_at`),`last_error_at`=VALUES(`last_error_at`),`last_error_message`=VALUES(`last_error_message`),`updated_at`=VALUES(`updated_at`)", args...)
+	return err
+}
+
+func (s *sSysPublish) upsertTelegramBotStat(ctx context.Context, tx gdb.TX, row gdb.Record, now *gtime.Time) error {
+	args := []interface{}{row["tenant_id"].Int64(), row["bot_id"].Int64(), row["bot_name"].String(), row["bot_username"].String(), row["pending_count"].Int(), row["queued_count"].Int(), row["sending_count"].Int(), row["sent_count"].Int(), row["failed_count"].Int(), row["retry_count"].Int(), row["rate_limit_count"].Int(), row["last_sent_at"], row["last_error_at"], row["last_error_message"].String(), now, now}
+	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
+		_, err := tx.Ctx(ctx).Exec(`INSERT INTO "`+publishTgBotStatTable+`" ("tenant_id","bot_id","bot_name","bot_username","pending_count","queued_count","sending_count","sent_count","failed_count","retry_count","rate_limit_count","last_sent_at","last_error_at","last_error_message","created_at","updated_at")
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT ("tenant_id","bot_id") DO UPDATE SET "bot_name"=EXCLUDED."bot_name","bot_username"=EXCLUDED."bot_username","pending_count"=EXCLUDED."pending_count","queued_count"=EXCLUDED."queued_count","sending_count"=EXCLUDED."sending_count","sent_count"=EXCLUDED."sent_count","failed_count"=EXCLUDED."failed_count","retry_count"=EXCLUDED."retry_count","rate_limit_count"=EXCLUDED."rate_limit_count","last_sent_at"=EXCLUDED."last_sent_at","last_error_at"=EXCLUDED."last_error_at","last_error_message"=EXCLUDED."last_error_message","updated_at"=EXCLUDED."updated_at"`, args...)
+		return err
+	}
+	_, err := tx.Ctx(ctx).Exec("INSERT INTO `"+publishTgBotStatTable+"` (`tenant_id`,`bot_id`,`bot_name`,`bot_username`,`pending_count`,`queued_count`,`sending_count`,`sent_count`,`failed_count`,`retry_count`,`rate_limit_count`,`last_sent_at`,`last_error_at`,`last_error_message`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `bot_name`=VALUES(`bot_name`),`bot_username`=VALUES(`bot_username`),`pending_count`=VALUES(`pending_count`),`queued_count`=VALUES(`queued_count`),`sending_count`=VALUES(`sending_count`),`sent_count`=VALUES(`sent_count`),`failed_count`=VALUES(`failed_count`),`retry_count`=VALUES(`retry_count`),`rate_limit_count`=VALUES(`rate_limit_count`),`last_sent_at`=VALUES(`last_sent_at`),`last_error_at`=VALUES(`last_error_at`),`last_error_message`=VALUES(`last_error_message`),`updated_at`=VALUES(`updated_at`)", args...)
+	return err
 }

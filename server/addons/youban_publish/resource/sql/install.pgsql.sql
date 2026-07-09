@@ -77,6 +77,10 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_task" (
   "plain_text" text,
   "media_count" integer NOT NULL DEFAULT 0,
   "channel_id_json" text,
+  "collect_event_id" bigint NOT NULL DEFAULT 0,
+  "collect_source_id" bigint NOT NULL DEFAULT 0,
+  "collect_source_chat_id" varchar(128) NOT NULL DEFAULT '',
+  "collect_source_message_id" bigint NOT NULL DEFAULT 0,
   "customer_remark" text,
   "anti_scan_enabled" smallint NOT NULL DEFAULT 0,
   "tg_push_enabled" smallint NOT NULL DEFAULT 1,
@@ -96,6 +100,10 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_task" (
 ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "tenant_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "merchant_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "channel_id_json" text;
+ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_event_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_source_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_source_chat_id" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_source_message_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "customer_remark" text;
 ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "anti_scan_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "tg_operation_no" varchar(128) NOT NULL DEFAULT '';
@@ -104,6 +112,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_task_tenant_client_request" ON "hg_you
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_tenant_status" ON "hg_youban_publish_task" ("tenant_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_account_status" ON "hg_youban_publish_task" ("account_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_tg_operation" ON "hg_youban_publish_task" ("tg_operation_no");
+CREATE INDEX IF NOT EXISTS "idx_ybp_task_collect_order" ON "hg_youban_publish_task" ("collect_source_id", "collect_source_chat_id", "collect_source_message_id", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_import_task" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -477,6 +486,8 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_job" (
   "id" BIGSERIAL PRIMARY KEY, "task_id" bigint NOT NULL DEFAULT 0, "operation_no" varchar(128) NOT NULL DEFAULT '', "tenant_id" bigint NOT NULL DEFAULT 0,
   "merchant_id" bigint NOT NULL DEFAULT 0, "account_id" bigint NOT NULL DEFAULT 0, "profile_id" bigint NOT NULL DEFAULT 0,
   "channel_id" bigint NOT NULL DEFAULT 0, "bot_id" bigint NOT NULL DEFAULT 0, "target_chat_id" varchar(128) NOT NULL DEFAULT '',
+  "collect_event_id" bigint NOT NULL DEFAULT 0, "collect_source_id" bigint NOT NULL DEFAULT 0,
+  "collect_source_chat_id" varchar(128) NOT NULL DEFAULT '', "collect_source_message_id" bigint NOT NULL DEFAULT 0,
   "tg_message_id" bigint NOT NULL DEFAULT 0, "asynq_task_id" varchar(128) NOT NULL DEFAULT '', "status" varchar(32) NOT NULL DEFAULT 'pending',
   "retry_count" integer NOT NULL DEFAULT 0, "next_retry_at" timestamp DEFAULT NULL, "sent_at" timestamp DEFAULT NULL,
   "cycle_enabled" smallint NOT NULL DEFAULT 0, "cycle_days" integer NOT NULL DEFAULT 4, "cycle_publish_time" varchar(16) NOT NULL DEFAULT '',
@@ -488,6 +499,10 @@ ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "tenant_id" bigi
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "operation_no" varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "merchant_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "channel_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_event_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_source_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_source_chat_id" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_source_message_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "asynq_task_id" varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "sent_at" timestamp DEFAULT NULL;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "cycle_enabled" smallint NOT NULL DEFAULT 0;
@@ -510,6 +525,7 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_cycle" ON "hg_youban_publish_tg_job" 
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_operation" ON "hg_youban_publish_tg_job" ("operation_no", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_scheduler" ON "hg_youban_publish_tg_job" ("dispatch_status", "status", "priority", "next_retry_at", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_channel_dispatch" ON "hg_youban_publish_tg_job" ("target_chat_id", "dispatch_status", "status", "updated_at");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_collect_order" ON "hg_youban_publish_tg_job" ("channel_id", "target_chat_id", "collect_source_id", "collect_source_chat_id", "collect_source_message_id", "status", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_queue_stat" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -975,18 +991,19 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_rule" (
   "target_channel_id_json" text,
   "bot_id_json" text,
   "backup_channel_id" bigint NOT NULL DEFAULT 0,
+  "backup_channel_id_json" text,
   "review_enabled" smallint NOT NULL DEFAULT 0,
   "dedupe_enabled" smallint NOT NULL DEFAULT 1,
   "dedupe_days" integer NOT NULL DEFAULT 7,
+  "full_match_enabled" smallint NOT NULL DEFAULT 0,
   "keyword_json" text,
   "tag_json" text,
   "replace_json" text,
+  "delete_text_json" text,
   "block_text_json" text,
   "block_link" smallint NOT NULL DEFAULT 1,
   "block_username" smallint NOT NULL DEFAULT 1,
   "block_plain_text" smallint NOT NULL DEFAULT 1,
-  "min_media_count_enabled" smallint NOT NULL DEFAULT 1,
-  "min_media_count" integer NOT NULL DEFAULT 2,
   "show_unique_no" smallint NOT NULL DEFAULT 0,
   "header_enabled" smallint NOT NULL DEFAULT 0,
   "header_markdown" text,
@@ -1045,6 +1062,56 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_event_unique" ON "hg_youban_pu
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_source" ON "hg_youban_publish_collect_event" ("tenant_id", "source_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_chat" ON "hg_youban_publish_collect_event" ("source_chat_id", "source_message_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_dedupe" ON "hg_youban_publish_collect_event" ("tenant_id", "dedupe_key", "created_at");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_event_media" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "source_id" bigint NOT NULL DEFAULT 0,
+  "source_type" varchar(32) NOT NULL DEFAULT '',
+  "event_id" bigint NOT NULL DEFAULT 0,
+  "source_chat_id" varchar(128) NOT NULL DEFAULT '',
+  "source_message_id" bigint NOT NULL DEFAULT 0,
+  "source_grouped_id" varchar(128) NOT NULL DEFAULT '',
+  "source_media_key" varchar(255) NOT NULL DEFAULT '',
+  "media_type" varchar(32) NOT NULL DEFAULT '',
+  "source_ref_type" varchar(32) NOT NULL DEFAULT '',
+  "source_file_id" varchar(255) NOT NULL DEFAULT '',
+  "source_message_ref" varchar(255) NOT NULL DEFAULT '',
+  "backup_channel_id" bigint NOT NULL DEFAULT 0,
+  "backup_chat_id" varchar(128) NOT NULL DEFAULT '',
+  "backup_message_id" bigint NOT NULL DEFAULT 0,
+  "file_url" varchar(1024) NOT NULL DEFAULT '',
+  "storage_path" varchar(1024) NOT NULL DEFAULT '',
+  "poster_url" varchar(1024) NOT NULL DEFAULT '',
+  "meta_json" text,
+  "sort_index" integer NOT NULL DEFAULT 0,
+  "cache_status" varchar(32) NOT NULL DEFAULT 'pending',
+  "error_message" text,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_media_event" ON "hg_youban_publish_collect_event_media" ("event_id", "sort_index", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_media_owner" ON "hg_youban_publish_collect_event_media" ("tenant_id", "source_id", "cache_status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_media_source" ON "hg_youban_publish_collect_event_media" ("source_chat_id", "source_message_id", "source_media_key");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_media_file" ON "hg_youban_publish_collect_event_media" ("source_file_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_media_cache" ON "hg_youban_publish_collect_event_media" ("cache_status", "updated_at", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_event_log" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "event_id" bigint NOT NULL DEFAULT 0,
+  "dispatch_id" bigint NOT NULL DEFAULT 0,
+  "stage" varchar(64) NOT NULL DEFAULT '',
+  "status" varchar(32) NOT NULL DEFAULT '',
+  "message" text,
+  "meta_text" text,
+  "created_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_log_event" ON "hg_youban_publish_collect_event_log" ("event_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_log_owner" ON "hg_youban_publish_collect_event_log" ("tenant_id", "account_id", "created_at");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_log_stage" ON "hg_youban_publish_collect_event_log" ("event_id", "stage", "status");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_content" (
   "id" BIGSERIAL PRIMARY KEY,

@@ -163,6 +163,7 @@ func (s *sSysPublish) publishRecordList(ctx context.Context, in *sysin.PublishRe
 	mod := s.publishRecordBaseModel(ctx, in, tenantId, accountId).Fields(
 		"l.id,l.job_id,l.task_id,l.tenant_id,l.account_id,l.profile_id,l.bot_id,l.action,l.status,l.message,l.created_at",
 		"j.channel_id,j.target_chat_id,j.operation_no",
+		"t.client_request_id",
 		"p.title",
 		"a.nickname AS account_name",
 		"b.bot_name,b.bot_username",
@@ -174,12 +175,14 @@ func (s *sSysPublish) publishRecordList(ctx context.Context, in *sysin.PublishRe
 	if err = s.enrichPublishRecordFullPushProgress(ctx, list); err != nil {
 		return nil, 0, err
 	}
+	normalizeCollectPublishRecordActions(list)
 	return
 }
 
 func (s *sSysPublish) publishRecordBaseModel(ctx context.Context, in *sysin.PublishRecordListInp, tenantId int64, accountId int64) *gdb.Model {
 	mod := g.DB().Model(publishTgJobLogTable+" l").Safe().Ctx(ctx).
 		LeftJoin(publishTgJobTable+" j", "j.id=l.job_id").
+		LeftJoin(publishTaskTable+" t", "t.id=l.task_id").
 		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=l.profile_id").
 		LeftJoin(publishAccountTable+" a", "a.id=l.account_id").
 		LeftJoin(publishBotTable+" b", "b.id=l.bot_id").
@@ -196,6 +199,8 @@ func (s *sSysPublish) publishRecordBaseModel(ctx context.Context, in *sysin.Publ
 	}
 	if in.Action == "full_push" {
 		mod = mod.Where("j.operation_no LIKE ?", "full_push:%")
+	} else if in.Action == "collect_publish" {
+		mod = mod.Where("l.action", "publish").Where("t.client_request_id LIKE ?", "collect:%")
 	} else if in.Action != "" {
 		mod = mod.Where("l.action", in.Action)
 	}
@@ -270,4 +275,15 @@ func fullPushOperationBatchKey(operationNo string) string {
 		return ""
 	}
 	return strings.Join(parts[:3], ":")
+}
+
+func normalizeCollectPublishRecordActions(list []*sysin.PublishRecordModel) {
+	for _, item := range list {
+		if item == nil || item.Action != "publish" {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(item.ClientRequestId), "collect:") {
+			item.Action = "collect_publish"
+		}
+	}
 }

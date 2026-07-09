@@ -19,10 +19,16 @@ const (
 	CollectHistoryModeAll        = "all"
 	CollectHistoryModeRecentDays = "recent_days"
 
-	CollectEventStatusPending   = "pending"
-	CollectEventStatusProcessed = "processed"
-	CollectEventStatusIgnored   = "ignored"
-	CollectEventStatusFailed    = "failed"
+	CollectEventStatusPending      = "pending"
+	CollectEventStatusWaitingOrder = "waiting_order"
+	CollectEventStatusPrechecked   = "prechecked"
+	CollectEventStatusMediaPending = "media_pending"
+	CollectEventStatusMediaReady   = "media_ready"
+	CollectEventStatusDispatched   = "dispatched"
+	CollectEventStatusMatched      = CollectEventStatusDispatched
+	CollectEventStatusProcessed    = "processed"
+	CollectEventStatusIgnored      = "ignored"
+	CollectEventStatusFailed       = "failed"
 
 	CollectReviewStatusPending  = "pending"
 	CollectReviewStatusApproved = "approved"
@@ -121,6 +127,26 @@ type CollectSourceSaveInp struct {
 
 type CollectSourceHistoryStartInp struct {
 	Id int64 `json:"id" dc:"采集源ID"`
+}
+
+type CollectSourceTriggerInp struct {
+	Id int64 `json:"id" v:"required|min:1#采集源ID不能为空|采集源ID不能为空" dc:"采集源ID"`
+}
+
+type CollectSourceTriggerModel struct {
+	QueuedCount    int `json:"queuedCount" dc:"已投递数量"`
+	ProcessedCount int `json:"processedCount" dc:"已处理数量"`
+	FailedCount    int `json:"failedCount" dc:"失败数量"`
+}
+
+type CollectSourceResetInp struct {
+	Id int64 `json:"id" v:"required|min:1#采集源ID不能为空|采集源ID不能为空" dc:"采集源ID"`
+}
+
+type CollectSourceResetModel struct {
+	EventCount    int `json:"eventCount" dc:"重置事件数量"`
+	DispatchCount int `json:"dispatchCount" dc:"清理分发数量"`
+	ReviewCount   int `json:"reviewCount" dc:"清理审核数量"`
 }
 
 type CollectHistoryTaskListInp struct {
@@ -229,69 +255,65 @@ type CollectRuleListInp struct {
 }
 
 type CollectRuleModel struct {
-	Id                   int64       `json:"id" dc:"ID"`
-	TenantId             int64       `json:"tenantId" dc:"租户ID"`
-	AccountId            int64       `json:"accountId" dc:"账号ID"`
-	Name                 string      `json:"name" dc:"名称"`
-	GlobalEnabled        int         `json:"globalEnabled" dc:"全局应用"`
-	TargetChannelIdJson  string      `json:"targetChannelIdJson" dc:"目标频道JSON"`
-	BotIdJson            string      `json:"botIdJson" dc:"BOT JSON"`
-	BackupChannelId      int64       `json:"backupChannelId" dc:"备份频道ID"`
-	BackupChannelIdJson  string      `json:"backupChannelIdJson" dc:"备份频道JSON"`
-	ReviewEnabled        int         `json:"reviewEnabled" dc:"审核开关"`
-	DedupeEnabled        int         `json:"dedupeEnabled" dc:"去重开关"`
-	DedupeDays           int         `json:"dedupeDays" dc:"去重天数"`
-	FullMatchEnabled     int         `json:"fullMatchEnabled" dc:"全量匹配"`
-	KeywordJson          string      `json:"keywordJson" dc:"关键词JSON"`
-	TagJson              string      `json:"tagJson" dc:"标签JSON"`
-	ReplaceJson          string      `json:"replaceJson" dc:"替换JSON"`
-	DeleteTextJson       string      `json:"deleteTextJson" dc:"删除文本JSON"`
-	BlockTextJson        string      `json:"blockTextJson" dc:"屏蔽文本JSON"`
-	BlockLink            int         `json:"blockLink" dc:"屏蔽链接"`
-	BlockUsername        int         `json:"blockUsername" dc:"屏蔽用户名"`
-	BlockPlainText       int         `json:"blockPlainText" dc:"屏蔽纯文本"`
-	MinMediaCountEnabled int         `json:"minMediaCountEnabled" dc:"媒体数量开关"`
-	MinMediaCount        int         `json:"minMediaCount" dc:"最少媒体数"`
-	ShowUniqueNo         int         `json:"showUniqueNo" dc:"显示唯一编号"`
-	HeaderEnabled        int         `json:"headerEnabled" dc:"前置文案开关"`
-	HeaderMarkdown       string      `json:"headerMarkdown" dc:"前置文案"`
-	FooterEnabled        int         `json:"footerEnabled" dc:"后置文案开关"`
-	FooterMarkdown       string      `json:"footerMarkdown" dc:"后置文案"`
-	Sort                 int         `json:"sort" dc:"排序"`
-	Status               int         `json:"status" dc:"状态"`
-	CreatedAt            *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt            *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id                  int64       `json:"id" dc:"ID"`
+	TenantId            int64       `json:"tenantId" dc:"租户ID"`
+	AccountId           int64       `json:"accountId" dc:"账号ID"`
+	Name                string      `json:"name" dc:"名称"`
+	GlobalEnabled       int         `json:"globalEnabled" dc:"全局应用"`
+	TargetChannelIdJson string      `json:"targetChannelIdJson" dc:"目标频道JSON"`
+	BotIdJson           string      `json:"botIdJson" dc:"BOT JSON"`
+	BackupChannelId     int64       `json:"backupChannelId" dc:"备份频道ID"`
+	BackupChannelIdJson string      `json:"backupChannelIdJson" dc:"备份频道JSON"`
+	ReviewEnabled       int         `json:"reviewEnabled" dc:"审核开关"`
+	DedupeEnabled       int         `json:"dedupeEnabled" dc:"去重开关"`
+	DedupeDays          int         `json:"dedupeDays" dc:"去重天数"`
+	FullMatchEnabled    int         `json:"fullMatchEnabled" dc:"全量匹配"`
+	KeywordJson         string      `json:"keywordJson" dc:"关键词JSON"`
+	TagJson             string      `json:"tagJson" dc:"标签JSON"`
+	ReplaceJson         string      `json:"replaceJson" dc:"替换JSON"`
+	DeleteTextJson      string      `json:"deleteTextJson" dc:"删除文本JSON"`
+	BlockTextJson       string      `json:"blockTextJson" dc:"屏蔽文本JSON"`
+	BlockLink           int         `json:"blockLink" dc:"屏蔽链接"`
+	BlockUsername       int         `json:"blockUsername" dc:"屏蔽用户名"`
+	BlockPlainText      int         `json:"blockPlainText" dc:"屏蔽纯文本"`
+	ShowUniqueNo        int         `json:"showUniqueNo" dc:"显示唯一编号"`
+	HeaderEnabled       int         `json:"headerEnabled" dc:"前置文案开关"`
+	HeaderMarkdown      string      `json:"headerMarkdown" dc:"前置文案"`
+	FooterEnabled       int         `json:"footerEnabled" dc:"后置文案开关"`
+	FooterMarkdown      string      `json:"footerMarkdown" dc:"后置文案"`
+	Sort                int         `json:"sort" dc:"排序"`
+	Status              int         `json:"status" dc:"状态"`
+	CreatedAt           *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt           *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type CollectRuleSaveInp struct {
-	Id                   int64  `json:"id" dc:"ID"`
-	Name                 string `json:"name" dc:"名称"`
-	GlobalEnabled        int    `json:"globalEnabled" dc:"全局应用"`
-	TargetChannelIdJson  string `json:"targetChannelIdJson" dc:"目标频道JSON"`
-	BotIdJson            string `json:"botIdJson" dc:"BOT JSON"`
-	BackupChannelId      int64  `json:"backupChannelId" dc:"备份群ID"`
-	BackupChannelIdJson  string `json:"backupChannelIdJson" dc:"备份频道JSON"`
-	ReviewEnabled        int    `json:"reviewEnabled" dc:"审核开关"`
-	DedupeEnabled        int    `json:"dedupeEnabled" dc:"去重开关"`
-	DedupeDays           int    `json:"dedupeDays" dc:"去重天数"`
-	FullMatchEnabled     int    `json:"fullMatchEnabled" dc:"全量匹配"`
-	KeywordJson          string `json:"keywordJson" dc:"关键词JSON"`
-	TagJson              string `json:"tagJson" dc:"标签JSON"`
-	ReplaceJson          string `json:"replaceJson" dc:"替换JSON"`
-	DeleteTextJson       string `json:"deleteTextJson" dc:"删除文本JSON"`
-	BlockTextJson        string `json:"blockTextJson" dc:"屏蔽文本JSON"`
-	BlockLink            int    `json:"blockLink" dc:"屏蔽链接"`
-	BlockUsername        int    `json:"blockUsername" dc:"屏蔽用户名"`
-	BlockPlainText       int    `json:"blockPlainText" dc:"屏蔽纯文本"`
-	MinMediaCountEnabled int    `json:"minMediaCountEnabled" dc:"媒体数量开关"`
-	MinMediaCount        int    `json:"minMediaCount" dc:"最少媒体数"`
-	ShowUniqueNo         int    `json:"showUniqueNo" dc:"显示唯一编号"`
-	HeaderEnabled        int    `json:"headerEnabled" dc:"前置文案开关"`
-	HeaderMarkdown       string `json:"headerMarkdown" dc:"前置文案"`
-	FooterEnabled        int    `json:"footerEnabled" dc:"后置文案开关"`
-	FooterMarkdown       string `json:"footerMarkdown" dc:"后置文案"`
-	Sort                 int    `json:"sort" dc:"排序"`
-	Status               int    `json:"status" dc:"状态"`
+	Id                  int64  `json:"id" dc:"ID"`
+	Name                string `json:"name" dc:"名称"`
+	GlobalEnabled       int    `json:"globalEnabled" dc:"全局应用"`
+	TargetChannelIdJson string `json:"targetChannelIdJson" dc:"目标频道JSON"`
+	BotIdJson           string `json:"botIdJson" dc:"BOT JSON"`
+	BackupChannelId     int64  `json:"backupChannelId" dc:"备份群ID"`
+	BackupChannelIdJson string `json:"backupChannelIdJson" dc:"备份频道JSON"`
+	ReviewEnabled       int    `json:"reviewEnabled" dc:"审核开关"`
+	DedupeEnabled       int    `json:"dedupeEnabled" dc:"去重开关"`
+	DedupeDays          int    `json:"dedupeDays" dc:"去重天数"`
+	FullMatchEnabled    int    `json:"fullMatchEnabled" dc:"全量匹配"`
+	KeywordJson         string `json:"keywordJson" dc:"关键词JSON"`
+	TagJson             string `json:"tagJson" dc:"标签JSON"`
+	ReplaceJson         string `json:"replaceJson" dc:"替换JSON"`
+	DeleteTextJson      string `json:"deleteTextJson" dc:"删除文本JSON"`
+	BlockTextJson       string `json:"blockTextJson" dc:"屏蔽文本JSON"`
+	BlockLink           int    `json:"blockLink" dc:"屏蔽链接"`
+	BlockUsername       int    `json:"blockUsername" dc:"屏蔽用户名"`
+	BlockPlainText      int    `json:"blockPlainText" dc:"屏蔽纯文本"`
+	ShowUniqueNo        int    `json:"showUniqueNo" dc:"显示唯一编号"`
+	HeaderEnabled       int    `json:"headerEnabled" dc:"前置文案开关"`
+	HeaderMarkdown      string `json:"headerMarkdown" dc:"前置文案"`
+	FooterEnabled       int    `json:"footerEnabled" dc:"后置文案开关"`
+	FooterMarkdown      string `json:"footerMarkdown" dc:"后置文案"`
+	Sort                int    `json:"sort" dc:"排序"`
+	Status              int    `json:"status" dc:"状态"`
 }
 
 func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
@@ -313,9 +335,6 @@ func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
 	}
 	if in.DedupeDays <= 0 || in.DedupeDays > 7 {
 		in.DedupeDays = 7
-	}
-	if in.MinMediaCount <= 0 {
-		in.MinMediaCount = 2
 	}
 	if in.Status == 0 {
 		in.Status = 1

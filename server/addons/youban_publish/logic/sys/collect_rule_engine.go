@@ -13,6 +13,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 var (
@@ -40,40 +41,25 @@ func (s *sSysPublish) evaluateCollectRule(ctx context.Context, event gdb.Record,
 		rawText = content.RawText
 		mediaCount = content.MediaCount
 	}
-	if rule["block_plain_text"].Int() == 1 && mediaCount == 0 {
-		return skippedCollectRule("消息组没有媒体"), nil
-	}
-	if rule["block_link"].Int() == 1 && collectLinkPattern.MatchString(rawText) {
-		return skippedCollectRule("链接"), nil
-	}
-	if rule["block_username"].Int() == 1 && collectUsernamePattern.MatchString(rawText) {
-		return skippedCollectRule("用户名"), nil
-	}
-	if blockedText := matchCollectTerms(rawText, collectStringList(rule["block_text_json"].String())); blockedText != "" {
-		return skippedCollectRule("屏蔽文本:" + blockedText), nil
-	}
-	matchedKeywords := []string(nil)
-	matchedTags := []string(nil)
-	if rule["full_match_enabled"].Int() != 1 {
-		keywords := collectStringList(rule["keyword_json"].String())
-		matchedKeywords = matchedCollectTerms(rawText, keywords)
-		if len(keywords) > 0 && len(matchedKeywords) == 0 {
-			return skippedCollectRule("未命中关键词"), nil
-		}
-		tags := collectStringList(rule["tag_json"].String())
-		matchedTags = matchedCollectTags(rawText, tags)
-		if len(tags) > 0 && len(matchedTags) == 0 {
-			return skippedCollectRule("未命中标签"), nil
-		}
+	precheck := precheckCollectRuleText(rawText, mediaCount, rule)
+	if !precheck.Matched {
+		return skippedCollectRule(precheck.Reason), nil
 	}
 	if rule["dedupe_enabled"].Int() == 1 {
-		duplicated, err := s.collectDuplicated(ctx, event, content, rule["dedupe_days"].Int())
+		duplicated, err := s.collectDuplicated(ctx, event, content, rule, rule["dedupe_days"].Int())
 		if err != nil {
 			return nil, err
 		}
 		if duplicated {
 			return skippedCollectRule("图文重复"), nil
 		}
+	}
+	if strings.TrimSpace(rawText) == "" {
+		return &collectRuleDecision{
+			Matched:   true,
+			Text:      "",
+			MatchJSON: precheck.MatchJSON,
+		}, nil
 	}
 	text := applyCollectTextDeletes(rawText, collectStringList(rule["delete_text_json"].String()))
 	text = applyCollectReplacements(text, collectReplaceList(rule["replace_json"].String()))
@@ -86,11 +72,10 @@ func (s *sSysPublish) evaluateCollectRule(ctx context.Context, event gdb.Record,
 	if rule["show_unique_no"].Int() == 1 {
 		text = fmt.Sprintf("编号: C%010d\n\n%s", event["id"].Int64(), strings.TrimSpace(text))
 	}
-	matchJSON := collectMatchJSON(matchedKeywords, matchedTags)
 	return &collectRuleDecision{
 		Matched:   true,
 		Text:      strings.TrimSpace(text),
-		MatchJSON: matchJSON,
+		MatchJSON: precheck.MatchJSON,
 	}, nil
 }
 
@@ -103,14 +88,11 @@ func skippedCollectRule(reason string) *collectRuleDecision {
 	}
 }
 
-func (s *sSysPublish) collectDuplicated(ctx context.Context, event gdb.Record, content *collectContentResult, days int) (bool, error) {
+func (s *sSysPublish) collectDuplicated(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, days int) (bool, error) {
 	if days <= 0 || days > 7 {
 		days = 7
 	}
 	since := gtime.NewFromTime(time.Now().AddDate(0, 0, -days))
-	if content != nil && content.PreviousSeenAt != nil {
-		return !content.PreviousSeenAt.Before(since), nil
-	}
 	mod := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Where("tenant_id", event["tenant_id"].Int64()).
 		Where("account_id", event["account_id"].Int64()).
@@ -118,21 +100,69 @@ func (s *sSysPublish) collectDuplicated(ctx context.Context, event gdb.Record, c
 		WhereGTE("received_at", since)
 	dedupeKey := strings.TrimSpace(event["dedupe_key"].String())
 	textHash := strings.TrimSpace(event["text_hash"].String())
+	mediaCount := event["media_count"].Int()
+	if content != nil {
+		mediaCount = content.MediaCount
+	}
 	switch {
-	case dedupeKey != "" && textHash != "":
-		mod = mod.Where("(dedupe_key=? OR text_hash=?)", dedupeKey, textHash)
-	case dedupeKey != "":
+	case mediaCount > 0 && dedupeKey != "":
 		mod = mod.Where("dedupe_key", dedupeKey)
-	case textHash != "":
+	case mediaCount <= 0 && textHash != "" && textHash != collectHash(""):
 		mod = mod.Where("text_hash", textHash)
 	default:
 		return false, nil
 	}
-	count, err := mod.Count()
+	rows, err := mod.Fields("id").Limit(200).All()
 	if err != nil {
 		return false, gerror.Wrap(err, "采集去重判断失败")
 	}
-	return count > 0, nil
+	targetIds := decodeInt64JSON(rule["target_channel_id_json"].String())
+	if len(targetIds) == 0 {
+		return false, nil
+	}
+	for _, row := range rows {
+		if duplicated, err := s.collectEventDuplicatedInTargets(ctx, row["id"].Int64(), targetIds); err != nil {
+			return false, err
+		} else if duplicated {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *sSysPublish) collectEventDuplicatedInTargets(ctx context.Context, eventId int64, targetIds []int64) (bool, error) {
+	if eventId <= 0 || len(targetIds) == 0 {
+		return false, nil
+	}
+	rows, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Fields("target_channel_id_json,status").
+		Where("event_id", eventId).
+		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing, sysin.CollectDispatchStatusSent}).
+		All()
+	if err != nil {
+		return false, gerror.Wrap(err, "读取采集去重分发记录失败")
+	}
+	for _, row := range rows {
+		if int64SlicesOverlap(targetIds, decodeInt64JSON(row["target_channel_id_json"].String())) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func int64SlicesOverlap(left []int64, right []int64) bool {
+	seen := make(map[int64]struct{}, len(left))
+	for _, value := range left {
+		if value > 0 {
+			seen[value] = struct{}{}
+		}
+	}
+	for _, value := range right {
+		if _, ok := seen[value]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func collectStringList(raw string) []string {

@@ -28,7 +28,9 @@ const (
 	tgTaskTypeDown           = "youban_publish:profile:down"
 	tgTaskTypeCycleRun       = "youban_publish:cycle:run"
 	tgTaskTypeCollectMedia   = "youban_publish:collect:media_cache"
+	tgTaskTypeCollectProcess = "youban_publish:collect:process"
 	tgTaskTypeCollectHistory = "youban_publish:collect:history"
+	tgTaskTypeCollectTrigger = "youban_publish:collect:trigger"
 )
 
 const (
@@ -76,6 +78,12 @@ type cycleRunQueuePayload struct {
 
 type collectHistoryQueuePayload struct {
 	TaskId int64 `json:"taskId"`
+}
+
+type collectTriggerQueuePayload struct {
+	AccountId int64 `json:"accountId"`
+	SourceId  int64 `json:"sourceId"`
+	TenantId  int64 `json:"tenantId"`
 }
 
 type tgRetryAfterError struct {

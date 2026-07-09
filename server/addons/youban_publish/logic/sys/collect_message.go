@@ -63,25 +63,7 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 		return 0, gerror.Wrap(err, "读取采集事件失败")
 	}
 	if !event.IsEmpty() {
-		if event[eventCols.Status].String() == sysin.CollectEventStatusProcessed {
-			return event[eventCols.Id].Int64(), nil
-		}
-		nextText := strings.TrimSpace(event[eventCols.RawText].String())
-		if nextText == "" {
-			nextText = rawText
-		}
-		nextMediaJSON, nextMediaCount := mergeCollectMediaJSON(event[eventCols.MediaJson].String(), mediaJSON)
-		_, err = eventDao.Ctx(ctx).Where(eventCols.Id, event[eventCols.Id].Int64()).Data(g.Map{
-			eventCols.RawText:      nextText,
-			eventCols.MediaCount:   nextMediaCount,
-			eventCols.MediaJson:    nextMediaJSON,
-			eventCols.TextHash:     collectHash(nextText),
-			eventCols.DedupeKey:    collectHash(fmt.Sprintf("%s:%s:%d", nextText, nextMediaJSON, nextMediaCount)),
-			eventCols.Status:       sysin.CollectEventStatusPending,
-			eventCols.ErrorMessage: "",
-			eventCols.UpdatedAt:    now,
-		}).Update()
-		return event[eventCols.Id].Int64(), gerror.Wrap(err, "更新采集事件失败")
+		return s.mergeCollectMessageEvent(ctx, event, message, mediaJSON, rawText, now)
 	}
 	eventId, err := eventDao.Ctx(ctx).Data(g.Map{
 		eventCols.TenantId:        message.TenantId,
@@ -105,14 +87,90 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 		eventCols.UpdatedAt:       now,
 	}).InsertAndGetId()
 	if err != nil {
+		if isCollectEventUniqueConflict(err) {
+			event, readErr := eventDao.Ctx(ctx).Where(eventCols.SourceUniqueKey, message.SourceUniqueKey).One()
+			if readErr != nil {
+				return 0, gerror.Wrap(readErr, "读取冲突采集事件失败")
+			}
+			if !event.IsEmpty() {
+				return s.mergeCollectMessageEvent(ctx, event, message, mediaJSON, rawText, now)
+			}
+		}
 		return 0, gerror.Wrap(err, "创建采集事件失败")
 	}
+	created, err := eventDao.Ctx(ctx).Where(eventCols.Id, eventId).One()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取采集事件失败")
+	}
+	if err = s.upsertCollectEventMedia(ctx, created, message.Media); err != nil {
+		return 0, err
+	}
+	s.appendCollectEventLogForRecord(ctx, created, "ingest", "created", "采集事件已入库", "")
 	_, _ = sourceDao.Ctx(ctx).Where(sourceCols.Id, message.SourceId).Data(g.Map{
 		sourceCols.EventTotal:  gdb.Raw(sourceCols.EventTotal + "+1"),
 		sourceCols.LastEventAt: now,
 		sourceCols.UpdatedAt:   now,
 	}).Update()
 	return eventId, nil
+}
+
+func (s *sSysPublish) mergeCollectMessageEvent(ctx context.Context, event gdb.Record, message *CollectMessage, mediaJSON string, rawText string, now *gtime.Time) (int64, error) {
+	eventDao := pdao.YoubanPublishCollectEvent
+	eventCols := eventDao.Columns()
+	eventId := event[eventCols.Id].Int64()
+	shouldMerge := collectExistingEventShouldMerge(event, mediaJSON)
+	if collectEventAlreadyMatched(event[eventCols.Status].String()) && !shouldMerge {
+		return eventId, nil
+	}
+	nextText := strings.TrimSpace(event[eventCols.RawText].String())
+	if nextText == "" {
+		nextText = rawText
+	}
+	nextMediaJSON, nextMediaCount := mergeCollectMediaJSON(event[eventCols.MediaJson].String(), mediaJSON)
+	nextSourceMessageId := event[eventCols.SourceMessageId].Int64()
+	if message.SourceMessageId > 0 && (nextSourceMessageId <= 0 || message.SourceMessageId < nextSourceMessageId) {
+		nextSourceMessageId = message.SourceMessageId
+	}
+	_, err := eventDao.Ctx(ctx).Where(eventCols.Id, eventId).Data(g.Map{
+		eventCols.RawText:         nextText,
+		eventCols.MediaCount:      nextMediaCount,
+		eventCols.MediaJson:       nextMediaJSON,
+		eventCols.SourceMessageId: nextSourceMessageId,
+		eventCols.TextHash:        collectHash(nextText),
+		eventCols.DedupeKey:       collectHash(fmt.Sprintf("%s:%s:%d", nextText, nextMediaJSON, nextMediaCount)),
+		eventCols.Status:          sysin.CollectEventStatusPending,
+		eventCols.ErrorMessage:    "",
+		eventCols.UpdatedAt:       now,
+	}).Update()
+	if err != nil {
+		return eventId, gerror.Wrap(err, "更新采集事件失败")
+	}
+	updated, err := eventDao.Ctx(ctx).Where(eventCols.Id, eventId).One()
+	if err != nil {
+		return eventId, gerror.Wrap(err, "读取采集事件失败")
+	}
+	if err = s.upsertCollectEventMedia(ctx, updated, message.Media); err != nil {
+		return eventId, err
+	}
+	s.appendCollectEventLogForRecord(ctx, updated, "ingest", "updated", "采集事件已合并媒体", "")
+	return eventId, nil
+}
+
+func isCollectEventUniqueConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "uk_ybp_collect_event_unique") ||
+		strings.Contains(message, "duplicate key value")
+}
+
+func collectExistingEventShouldMerge(event gdb.Record, mediaJSON string) bool {
+	if strings.TrimSpace(event["source_grouped_id"].String()) == "" || strings.TrimSpace(mediaJSON) == "" || strings.TrimSpace(mediaJSON) == "[]" {
+		return false
+	}
+	nextMediaJSON, nextMediaCount := mergeCollectMediaJSON(event["media_json"].String(), mediaJSON)
+	return nextMediaCount > event["media_count"].Int() || collectMediaSignature(nextMediaJSON) != collectMediaSignature(event["media_json"].String())
 }
 
 func collectMessageMediaJSON(media []collectMediaItem) (string, int) {

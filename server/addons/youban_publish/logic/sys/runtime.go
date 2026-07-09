@@ -50,6 +50,12 @@ func (s *sSysPublish) StopRuntime() {
 
 func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	s.startTelegramQueueWorker(ctx)
+	if err := s.repairCollectTgJobChannels(ctx, 1000); err != nil {
+		g.Log().Warningf(ctx, "修复采集TG目标频道失败：%+v", err)
+	}
+	if err := s.recoverInterruptedTelegramJobs(ctx, 200); err != nil {
+		g.Log().Warningf(ctx, "恢复中断的TG推送任务失败：%+v", err)
+	}
 	go s.runTelegramRuntime(ctx)
 	go s.runScheduledPublishRuntime(ctx)
 	go s.runCyclePlanScheduler(ctx)

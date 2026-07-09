@@ -47,8 +47,12 @@ func (w *accountCollectWorker) handleGotdMessage(ctx context.Context, msg *tg.Me
 		return
 	}
 	for _, source := range sources {
-		source := source
-		go w.ingestGotdMessage(context.Background(), source, msg, chatIds[0])
+		task := accountCollectMessageTask{source: source, msg: msg, chatId: chatIds[0]}
+		select {
+		case w.messages <- task:
+		default:
+			g.Log().Warningf(ctx, "账号采集消息队列已满，跳过消息 tgAccountId:%d source:%d msg:%d", w.tgAccountId, source.Id, msg.ID)
+		}
 	}
 }
 
@@ -59,20 +63,8 @@ func (w *accountCollectWorker) ingestGotdMessage(ctx context.Context, source acc
 		g.Log().Warningf(ctx, "保存账号采集事件失败 source:%d msg:%d err:%+v", source.Id, msg.ID, err)
 		return
 	}
-	if collectMessageHasGotdMedia(message) {
-		delay := time.Duration(0)
-		if message.SourceGroupedId != "" {
-			delay = collectGroupedEventDelay
-		}
-		err = w.service.enqueueCollectMediaCache(ctx, collectMediaQueuePayload{
-			EventId:     eventId,
-			TenantId:    source.TenantId,
-			AccountId:   source.AccountId,
-			TgAccountId: w.tgAccountId,
-		}, delay)
-		if err != nil {
-			g.Log().Warningf(ctx, "投递账号采集媒体缓存任务失败 event:%d source:%d err:%+v", eventId, source.Id, err)
-		}
+	if message.SourceGroupedId != "" {
+		w.service.scheduleCollectGroupedEvent(eventId, source.TenantId, source.AccountId)
 		return
 	}
 	if err = w.service.processCollectEvent(ctx, eventId, source.TenantId, source.AccountId); err != nil {

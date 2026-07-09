@@ -6,6 +6,7 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -19,6 +20,10 @@ func (s *sSysPublish) ensureCollectTgJobs(ctx context.Context, taskId int64) err
 	if err != nil {
 		return err
 	}
+	channelIds := decodeInt64JSON(task["channel_id_json"].String())
+	if len(channelIds) == 0 {
+		return gerror.New("采集规则未配置目标频道")
+	}
 	operationNo := task["tg_operation_no"].String()
 	if operationNo == "" {
 		operationNo = newTelegramOperationNo(telegramPublishBizCollect, taskId)
@@ -26,17 +31,175 @@ func (s *sSysPublish) ensureCollectTgJobs(ctx context.Context, taskId int64) err
 	if err = s.markTaskPublishQueued(ctx, taskId, task["tenant_id"].Int64(), task["account_id"].Int64(), operationNo); err != nil {
 		return err
 	}
+	if err = s.supersedeCollectTgJobsOutsideChannels(ctx, taskId, operationNo, channelIds); err != nil {
+		return err
+	}
 	if err = s.enqueuePublishSubmitTask(ctx, publishSubmitQueuePayload{
-		TaskId:      taskId,
-		TenantId:    task["tenant_id"].Int64(),
-		AccountId:   task["account_id"].Int64(),
-		OperatorId:  task["account_id"].Int64(),
-		OperationNo: operationNo,
+		TaskId:               taskId,
+		TenantId:             task["tenant_id"].Int64(),
+		AccountId:            task["account_id"].Int64(),
+		OperatorId:           task["account_id"].Int64(),
+		OperationNo:          operationNo,
+		ChannelIds:           channelIds,
+		OnlySelectedChannels: true,
 	}, 0); err != nil {
 		_ = s.markTaskPublishFailed(ctx, taskId, task["tenant_id"].Int64(), task["account_id"].Int64(), err)
 		return gerror.Wrap(err, "采集上架任务加入队列失败")
 	}
 	return nil
+}
+
+func (s *sSysPublish) supersedeCollectTgJobsOutsideChannels(ctx context.Context, taskId int64, operationNo string, channelIds []int64) error {
+	if taskId <= 0 || operationNo == "" || len(channelIds) == 0 {
+		return nil
+	}
+	var jobs []telegramResubmitJob
+	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("task_id", taskId).
+		Where("operation_no", operationNo).
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "failed", "sent"}).
+		WhereNotIn("channel_id", channelIds).
+		Scan(&jobs)
+	if err != nil {
+		return gerror.Wrap(err, "读取采集错投TG任务失败")
+	}
+	for _, job := range jobs {
+		if job.Id <= 0 {
+			continue
+		}
+		if job.Status == "sent" {
+			if err = s.deleteTelegramJobMessagesForResubmit(ctx, job); err != nil {
+				return err
+			}
+		}
+		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "publish", "superseded", "采集规则目标频道已校正，错投频道任务已废弃")
+		if err = s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *sSysPublish) repairCollectTgJobChannels(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	if err := s.supersedeMismatchedCollectTgJobs(ctx, limit*4); err != nil {
+		return err
+	}
+	rows, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Fields("id,channel_id_json,tg_operation_no").
+		WhereLike("client_request_id", "collect:%").
+		WhereIn("status", []string{sysin.PublishTaskStatusPending, sysin.PublishTaskStatusPublishing}).
+		WhereNull("deleted_at").
+		OrderAsc("id").
+		Limit(limit).
+		All()
+	if err != nil {
+		return gerror.Wrap(err, "读取采集TG频道修复任务失败")
+	}
+	repaired := 0
+	for _, row := range rows {
+		channelIds := decodeInt64JSON(row["channel_id_json"].String())
+		if len(channelIds) == 0 {
+			continue
+		}
+		needsRepair, err := s.collectTgJobChannelsNeedRepair(ctx, row["id"].Int64(), row["tg_operation_no"].String(), channelIds)
+		if err != nil {
+			return err
+		}
+		if !needsRepair {
+			continue
+		}
+		if err = s.ensureCollectTgJobs(ctx, row["id"].Int64()); err != nil {
+			g.Log().Warningf(ctx, "修复采集TG目标频道失败 task:%d err:%+v", row["id"].Int64(), err)
+			continue
+		}
+		repaired++
+	}
+	if repaired > 0 {
+		g.Log().Infof(ctx, "已修复采集TG目标频道任务：%d条", repaired)
+	}
+	return nil
+}
+
+func (s *sSysPublish) supersedeMismatchedCollectTgJobs(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 400
+	}
+	rows, err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
+		Fields("j.*,t.channel_id_json").
+		WhereLike("t.client_request_id", "collect:%").
+		WhereIn("j.status", []string{"pending", "sending", "failed_retry", "failed", "sent"}).
+		WhereNull("t.deleted_at").
+		OrderAsc("j.id").
+		Limit(limit).
+		All()
+	if err != nil {
+		return gerror.Wrap(err, "读取采集错投TG任务失败")
+	}
+	fixed := 0
+	for _, row := range rows {
+		channelIds := decodeInt64JSON(row["channel_id_json"].String())
+		if len(channelIds) == 0 || containsInt64(channelIds, row["channel_id"].Int64()) {
+			continue
+		}
+		job := collectTelegramResubmitJob(row)
+		if job.Status == "sent" {
+			if err = s.deleteTelegramJobMessagesForResubmit(ctx, job); err != nil {
+				return err
+			}
+		}
+		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "publish", "superseded", "采集规则目标频道已校正，错投频道任务已废弃")
+		if err = s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
+			return err
+		}
+		fixed++
+	}
+	if fixed > 0 {
+		g.Log().Infof(ctx, "已废弃采集错投TG任务：%d条", fixed)
+	}
+	return nil
+}
+
+func (s *sSysPublish) collectTgJobChannelsNeedRepair(ctx context.Context, taskId int64, operationNo string, channelIds []int64) (bool, error) {
+	if taskId <= 0 || operationNo == "" || len(channelIds) == 0 {
+		return false, nil
+	}
+	var jobs []telegramResubmitJob
+	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("task_id", taskId).
+		Where("operation_no", operationNo).
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "failed", "sent"}).
+		Scan(&jobs)
+	if err != nil {
+		return false, gerror.Wrap(err, "读取采集TG任务频道失败")
+	}
+	hasSelected := false
+	for _, job := range jobs {
+		if containsInt64(channelIds, job.ChannelId) {
+			hasSelected = true
+			continue
+		}
+		return true, nil
+	}
+	return !hasSelected, nil
+}
+
+func collectTelegramResubmitJob(row gdb.Record) telegramResubmitJob {
+	return telegramResubmitJob{
+		Id:           row["id"].Int64(),
+		TaskId:       row["task_id"].Int64(),
+		OperationNo:  row["operation_no"].String(),
+		TenantId:     row["tenant_id"].Int64(),
+		AccountId:    row["account_id"].Int64(),
+		ProfileId:    row["profile_id"].Int64(),
+		ChannelId:    row["channel_id"].Int64(),
+		BotId:        row["bot_id"].Int64(),
+		TargetChatId: row["target_chat_id"].String(),
+		Status:       row["status"].String(),
+	}
 }
 
 func containsInt64(values []int64, target int64) bool {

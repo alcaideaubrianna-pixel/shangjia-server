@@ -2,9 +2,6 @@ package sys
 
 import (
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -15,6 +12,7 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 )
 
 func (s *sSysPublish) CollectEventList(ctx context.Context, in *sysin.CollectEventListInp) (list []*sysin.CollectEventModel, totalCount int, err error) {
@@ -90,10 +88,38 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if event.IsEmpty() {
 		return gerror.New("采集事件不存在")
 	}
-	if event["status"].String() == sysin.CollectEventStatusProcessed {
+	if collectEventAlreadyMatched(event["status"].String()) {
 		return nil
 	}
-	if collectEventNeedsMediaCache(event) {
+	rules, err := s.collectEventRules(ctx, event, tenantId, accountId)
+	if err != nil {
+		return err
+	}
+	if len(rules) == 0 {
+		return s.ignoreCollectEvent(ctx, eventId, "未命中可用规则", "precheck")
+	}
+	candidateRules := rules
+	var precheckReasons []string
+	candidateRules, precheckReasons = s.precheckCollectEventRules(event, rules)
+	if len(candidateRules) == 0 {
+		message := "未命中规则或被屏蔽"
+		if len(precheckReasons) > 0 {
+			message = strings.Join(uniqueStrings(precheckReasons), "；")
+		}
+		return s.ignoreCollectEvent(ctx, eventId, message, "precheck")
+	}
+	if waiting, err := s.waitCollectEventSourceOrder(ctx, event); err != nil {
+		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
+		return err
+	} else if waiting {
+		return nil
+	}
+	_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusPrechecked, "")
+	if s.collectEventNeedsMediaCache(ctx, event) {
+		if err = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaPending, "媒体缓存中"); err != nil {
+			return err
+		}
+		s.appendCollectEventLogForRecord(ctx, event, "media", "pending", "媒体等待缓存", "")
 		return s.enqueueCollectMediaCache(ctx, collectMediaQueuePayload{
 			EventId:     eventId,
 			TenantId:    tenantId,
@@ -101,21 +127,18 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 			TgAccountId: event["tg_account_id"].Int64(),
 		}, 0)
 	}
+	if event["media_count"].Int() > 0 {
+		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaReady, "")
+		s.appendCollectEventLogForRecord(ctx, event, "media", "ready", "媒体已就绪", "")
+	}
 	content, err := s.ensureCollectContent(ctx, event)
 	if err != nil {
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
 		return err
 	}
-	rules, err := s.collectEventRules(ctx, event, tenantId, accountId)
-	if err != nil {
-		return err
-	}
-	if len(rules) == 0 {
-		return s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusIgnored, "未命中可用规则")
-	}
 	matched := false
-	reasons := make([]string, 0, len(rules))
-	for _, rule := range rules {
+	reasons := make([]string, 0, len(candidateRules))
+	for _, rule := range candidateRules {
 		ruleMatched, skipReason, dispatchErr := s.dispatchCollectEventByRule(ctx, event, content, rule)
 		if dispatchErr != nil {
 			err = dispatchErr
@@ -133,9 +156,27 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		if len(reasons) > 0 {
 			message = strings.Join(uniqueStrings(reasons), "；")
 		}
-		return s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusIgnored, message)
+		return s.ignoreCollectEvent(ctx, eventId, message, "final")
 	}
-	return s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusProcessed, "")
+	s.appendCollectEventLogForRecord(ctx, event, "dispatch", "dispatched", "采集事件已生成分发任务", "")
+	return s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusDispatched, "")
+}
+
+func (s *sSysPublish) ignoreCollectEvent(ctx context.Context, eventId int64, message string, stage string) error {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		message = "未命中规则或被屏蔽"
+	}
+	if stage == "" {
+		stage = "precheck"
+	}
+	s.appendCollectEventLog(ctx, eventId, stage, "ignored", message, "")
+	return s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusIgnored, message)
+}
+
+func collectEventAlreadyMatched(status string) bool {
+	status = strings.TrimSpace(status)
+	return status == sysin.CollectEventStatusProcessed || status == sysin.CollectEventStatusDispatched || status == "matched"
 }
 
 func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, tenantId int64, accountId int64) ([]gdb.Record, error) {
@@ -172,6 +213,10 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 	if err != nil {
 		return false, "", err
 	}
+	if decision.Skipped || !decision.Matched {
+		s.appendCollectEventLogForRecord(ctx, event, "rule", "skipped", decision.Reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
+		return false, decision.Reason, nil
+	}
 	now := gtime.Now()
 	dispatchId, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Data(g.Map{
 		"tenant_id":              event["tenant_id"].Int64(),
@@ -188,15 +233,6 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 	}).InsertAndGetId()
 	if err != nil {
 		return false, "", gerror.Wrap(err, "创建采集分发记录失败")
-	}
-	if decision.Skipped || !decision.Matched {
-		_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
-			"status":        sysin.CollectDispatchStatusSkipped,
-			"error_message": decision.Reason,
-			"updated_at":    gtime.Now(),
-			"finished_at":   gtime.Now(),
-		}).Update()
-		return false, decision.Reason, gerror.Wrap(err, "更新采集跳过记录失败")
 	}
 	if rule["review_enabled"].Int() == 1 {
 		return true, "", s.createCollectReview(ctx, event, content, rule, dispatchId, decision.Text)
@@ -258,26 +294,85 @@ func (s *sSysPublish) createCollectPublishTask(ctx context.Context, event gdb.Re
 	if content != nil {
 		mediaCount = content.MediaCount
 	}
+	if err := ensureCollectTelegramOrderColumns(ctx); err != nil {
+		return 0, err
+	}
 	title := collectTitle(text)
 	channelJSON := rule["target_channel_id_json"].String()
 	now := gtime.Now()
+	clientRequestId := collectPublishClientRequestId(event, rule)
+	if strings.EqualFold(g.DB().GetConfig().Type, consts.DBPgsql) {
+		return s.upsertCollectPublishTaskPgsql(ctx, event, content, clientRequestId, title, text, mediaCount, channelJSON, now)
+	}
+	existing, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Fields("id,tg_operation_no,status,deleted_at").
+		Where("tenant_id", event["tenant_id"].Int64()).
+		Where("client_request_id", clientRequestId).
+		One()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取采集上架任务失败")
+	}
+	if !existing.IsEmpty() {
+		taskId := existing["id"].Int64()
+		operationNo := newTelegramOperationNo(telegramPublishBizCollect, taskId)
+		_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).Data(g.Map{
+			"title":                     title,
+			"plain_text":                text,
+			"media_count":               mediaCount,
+			"channel_id_json":           channelJSON,
+			"collect_event_id":          event["id"].Int64(),
+			"collect_source_id":         event["source_id"].Int64(),
+			"collect_source_chat_id":    strings.TrimSpace(event["source_chat_id"].String()),
+			"collect_source_message_id": event["source_message_id"].Int64(),
+			"tg_push_enabled":           1,
+			"tg_status":                 "pending",
+			"tg_operation_no":           operationNo,
+			"status":                    sysin.PublishTaskStatusPending,
+			"submitted_at":              now,
+			"updated_at":                now,
+		}).Update()
+		if err != nil {
+			return 0, gerror.Wrap(err, "更新采集上架任务失败")
+		}
+		if err = s.createCollectPublishMedia(ctx, event, content, taskId); err != nil {
+			return 0, err
+		}
+		return taskId, nil
+	}
 	taskId, err := pdao.YoubanPublishTask.Ctx(ctx).Data(g.Map{
-		"tenant_id":         event["tenant_id"].Int64(),
-		"merchant_id":       event["tenant_id"].Int64(),
-		"account_id":        event["account_id"].Int64(),
-		"client_request_id": fmt.Sprintf("collect:%s:%d", event["source_unique_key"].String(), rule["id"].Int64()),
-		"title":             title,
-		"plain_text":        text,
-		"media_count":       mediaCount,
-		"channel_id_json":   channelJSON,
-		"tg_push_enabled":   1,
-		"tg_status":         "pending",
-		"status":            sysin.PublishTaskStatusPending,
-		"submitted_at":      now,
-		"created_at":        now,
-		"updated_at":        now,
+		"tenant_id":                 event["tenant_id"].Int64(),
+		"merchant_id":               event["tenant_id"].Int64(),
+		"account_id":                event["account_id"].Int64(),
+		"client_request_id":         clientRequestId,
+		"title":                     title,
+		"plain_text":                text,
+		"media_count":               mediaCount,
+		"channel_id_json":           channelJSON,
+		"collect_event_id":          event["id"].Int64(),
+		"collect_source_id":         event["source_id"].Int64(),
+		"collect_source_chat_id":    strings.TrimSpace(event["source_chat_id"].String()),
+		"collect_source_message_id": event["source_message_id"].Int64(),
+		"tg_push_enabled":           1,
+		"tg_status":                 "pending",
+		"status":                    sysin.PublishTaskStatusPending,
+		"submitted_at":              now,
+		"created_at":                now,
+		"updated_at":                now,
 	}).InsertAndGetId()
 	if err != nil {
+		if isCollectPublishTaskUniqueConflict(err) {
+			existing, readErr := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+				Fields("id,tg_operation_no,status,deleted_at").
+				Where("tenant_id", event["tenant_id"].Int64()).
+				Where("client_request_id", clientRequestId).
+				One()
+			if readErr != nil {
+				return 0, gerror.Wrap(readErr, "读取冲突采集上架任务失败")
+			}
+			if !existing.IsEmpty() {
+				return s.updateCollectPublishTask(ctx, event, content, existing["id"].Int64(), title, text, mediaCount, channelJSON, now)
+			}
+		}
 		return 0, gerror.Wrap(err, "创建采集上架任务失败")
 	}
 	if err = s.createCollectPublishMedia(ctx, event, content, taskId); err != nil {
@@ -286,90 +381,105 @@ func (s *sSysPublish) createCollectPublishTask(ctx context.Context, event gdb.Re
 	return taskId, nil
 }
 
-func (s *sSysPublish) createCollectPublishMedia(ctx context.Context, event gdb.Record, content *collectContentResult, taskId int64) error {
-	if err := ensureMediaEditColumns(ctx); err != nil {
-		return err
+func (s *sSysPublish) upsertCollectPublishTaskPgsql(ctx context.Context, event gdb.Record, content *collectContentResult, clientRequestId string, title string, text string, mediaCount int, channelJSON string, now *gtime.Time) (int64, error) {
+	sql := fmt.Sprintf(`
+INSERT INTO "%s"(
+	"tenant_id","merchant_id","account_id","client_request_id","title","plain_text","media_count","channel_id_json",
+	"collect_event_id","collect_source_id","collect_source_chat_id","collect_source_message_id",
+	"tg_push_enabled","tg_status","status","submitted_at","created_at","updated_at"
+) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?, ?,?)
+ON CONFLICT ("tenant_id","client_request_id") WHERE "client_request_id" <> ''
+DO UPDATE SET
+	"title"=EXCLUDED."title",
+	"plain_text"=EXCLUDED."plain_text",
+	"media_count"=EXCLUDED."media_count",
+	"channel_id_json"=EXCLUDED."channel_id_json",
+	"collect_event_id"=EXCLUDED."collect_event_id",
+	"collect_source_id"=EXCLUDED."collect_source_id",
+	"collect_source_chat_id"=EXCLUDED."collect_source_chat_id",
+	"collect_source_message_id"=EXCLUDED."collect_source_message_id",
+	"tg_push_enabled"=1,
+	"tg_status"=EXCLUDED."tg_status",
+	"status"=EXCLUDED."status",
+	"deleted_at"=NULL,
+	"submitted_at"=EXCLUDED."submitted_at",
+	"updated_at"=EXCLUDED."updated_at"
+RETURNING "id"`, publishTaskTable)
+	value, err := g.DB().GetValue(ctx, sql,
+		event["tenant_id"].Int64(),
+		event["tenant_id"].Int64(),
+		event["account_id"].Int64(),
+		clientRequestId,
+		title,
+		text,
+		mediaCount,
+		channelJSON,
+		event["id"].Int64(),
+		event["source_id"].Int64(),
+		strings.TrimSpace(event["source_chat_id"].String()),
+		event["source_message_id"].Int64(),
+		"pending",
+		sysin.PublishTaskStatusPending,
+		now,
+		now,
+		now,
+	)
+	if err != nil {
+		return 0, gerror.Wrap(err, "保存采集上架任务失败")
 	}
-	var items []collectMediaItem
-	mediaJSON := event["media_json"].String()
-	if content != nil {
-		mediaJSON = content.MediaJSON
+	taskId := value.Int64()
+	if taskId <= 0 {
+		return 0, gerror.New("保存采集上架任务失败")
 	}
-	if err := json.Unmarshal([]byte(mediaJSON), &items); err != nil {
-		return nil
+	operationNo := newTelegramOperationNo(telegramPublishBizCollect, taskId)
+	if _, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).Data(g.Map{
+		"tg_operation_no": operationNo,
+		"updated_at":      now,
+	}).Update(); err != nil {
+		return 0, gerror.Wrap(err, "更新采集上架任务操作号失败")
 	}
-	now := gtime.Now()
-	sortIndex := 1
-	for _, item := range items {
-		if collectMediaSourceKey(item) == "" {
-			continue
-		}
-		item, err := s.prepareCollectMediaAsset(ctx, event, item)
-		if err != nil {
-			return err
-		}
-		mediaType := collectPublishMediaType(item.Type)
-		if mediaType == "" {
-			continue
-		}
-		storagePath := strings.TrimSpace(item.StoragePath)
-		fileUrl := strings.TrimSpace(item.FileUrl)
-		cacheStatus := tgCacheStatusInvalid
-		if strings.TrimSpace(item.FileId) != "" {
-			cacheStatus = tgCacheStatusValid
-		}
-		_, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(g.Map{
-			"tenant_id":           event["tenant_id"].Int64(),
-			"merchant_id":         event["tenant_id"].Int64(),
-			"account_id":          event["account_id"].Int64(),
-			"task_id":             taskId,
-			"media_type":          mediaType,
-			"purpose":             "display",
-			"name":                fmt.Sprintf("collect-%d-%d", event["id"].Int64(), sortIndex),
-			"tg_file_id":          strings.TrimSpace(item.FileId),
-			"file_url":            fileUrl,
-			"storage_path":        storagePath,
-			"tg_cache_asset_hash": mediaAssetHash(storagePath, fileUrl),
-			"tg_cache_status":     cacheStatus,
-			"poster_url":          strings.TrimSpace(item.PosterUrl),
-			"sort_index":          sortIndex,
-			"status":              1,
-			"created_at":          now,
-			"updated_at":          now,
-			"created_by":          event["account_id"].Int64(),
-			"updated_by":          event["account_id"].Int64(),
-		}).Insert()
-		if err != nil {
-			return gerror.Wrap(err, "创建采集媒体失败")
-		}
-		sortIndex++
+	if err = s.createCollectPublishMedia(ctx, event, content, taskId); err != nil {
+		return 0, err
 	}
-	return nil
+	return taskId, nil
 }
 
-func (s *sSysPublish) markCollectEvent(ctx context.Context, id int64, status string, message string) error {
-	_, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", id).Data(g.Map{
-		"status":        status,
-		"error_message": message,
-		"processed_at":  gtime.Now(),
-		"updated_at":    gtime.Now(),
+func isCollectPublishTaskUniqueConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "uk_ybp_task_tenant_client_request") ||
+		strings.Contains(message, "duplicate key value")
+}
+
+func (s *sSysPublish) updateCollectPublishTask(ctx context.Context, event gdb.Record, content *collectContentResult, taskId int64, title string, text string, mediaCount int, channelJSON string, now *gtime.Time) (int64, error) {
+	if taskId <= 0 {
+		return 0, gerror.New("采集上架任务不存在")
+	}
+	operationNo := newTelegramOperationNo(telegramPublishBizCollect, taskId)
+	_, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).Data(g.Map{
+		"title":                     title,
+		"plain_text":                text,
+		"media_count":               mediaCount,
+		"channel_id_json":           channelJSON,
+		"collect_event_id":          event["id"].Int64(),
+		"collect_source_id":         event["source_id"].Int64(),
+		"collect_source_chat_id":    strings.TrimSpace(event["source_chat_id"].String()),
+		"collect_source_message_id": event["source_message_id"].Int64(),
+		"tg_push_enabled":           1,
+		"tg_status":                 "pending",
+		"tg_operation_no":           operationNo,
+		"status":                    sysin.PublishTaskStatusPending,
+		"deleted_at":                nil,
+		"submitted_at":              now,
+		"updated_at":                now,
 	}).Update()
-	return err
-}
-
-func collectTitle(text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return "采集资料"
+	if err != nil {
+		return 0, gerror.Wrap(err, "更新冲突采集上架任务失败")
 	}
-	runes := []rune(text)
-	if len(runes) > 48 {
-		return string(runes[:48])
+	if err = s.createCollectPublishMedia(ctx, event, content, taskId); err != nil {
+		return 0, err
 	}
-	return text
-}
-
-func collectHash(value string) string {
-	sum := sha1.Sum([]byte(strings.TrimSpace(value)))
-	return hex.EncodeToString(sum[:])
+	return taskId, nil
 }

@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -186,13 +187,12 @@ func (s *sSysPublish) ensureCollectContent(ctx context.Context, event gdb.Record
 
 func (s *sSysPublish) collectContentSnapshot(ctx context.Context, event gdb.Record) (*collectContentResult, error) {
 	result := collectContentFromEvent(event)
-	content := gdb.Record{}
 	contentDao := pdao.YoubanPublishCollectContent
-	err := contentDao.Ctx(ctx).
+	content, err := contentDao.Ctx(ctx).
 		Where("tenant_id", event["tenant_id"].Int64()).
 		Where("account_id", event["account_id"].Int64()).
 		Where("dedupe_key", result.DedupeKey).
-		Scan(&content)
+		One()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取采集内容池失败")
 	}
@@ -300,7 +300,7 @@ func collectMediaSignature(mediaJSON string) string {
 	}
 	keys := make([]string, 0, len(items))
 	for _, item := range items {
-		sourceKey := collectMediaSourceKey(item)
+		sourceKey := collectMediaFingerprint(item)
 		if sourceKey == "" {
 			continue
 		}
@@ -308,6 +308,40 @@ func collectMediaSignature(mediaJSON string) string {
 	}
 	sort.Strings(keys)
 	return collectHash(strings.Join(keys, "|"))
+}
+
+func collectMediaFingerprint(item collectMediaItem) string {
+	if key := collectTelegramMediaFingerprint(item); key != "" {
+		return "tgfp:" + key
+	}
+	return collectMediaSourceKey(item)
+}
+
+func collectTelegramMediaFingerprint(item collectMediaItem) string {
+	metaRaw := strings.TrimSpace(item.MetaJson)
+	if metaRaw == "" {
+		return ""
+	}
+	var meta struct {
+		AccessHash int64  `json:"accessHash"`
+		Id         int64  `json:"id"`
+		Kind       string `json:"kind"`
+		MimeType   string `json:"mimeType"`
+		ThumbSize  string `json:"thumbSize"`
+	}
+	if err := json.Unmarshal([]byte(metaRaw), &meta); err != nil {
+		return ""
+	}
+	if meta.Id == 0 {
+		return ""
+	}
+	parts := []string{
+		strings.TrimSpace(item.Type),
+		strings.TrimSpace(meta.Kind),
+		strings.TrimSpace(meta.MimeType),
+		strings.TrimSpace(meta.ThumbSize),
+	}
+	return strings.Join(parts, ":") + ":" + collectHash(fmt.Sprintf("%d:%d", meta.Id, meta.AccessHash))
 }
 
 func collectMediaSourceKey(item collectMediaItem) string {
