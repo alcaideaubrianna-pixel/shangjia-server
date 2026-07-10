@@ -69,7 +69,18 @@ func (s *sSysPublish) MyProfileOptions(ctx context.Context) (res *sysin.ProfileO
 	if err != nil {
 		return nil, err
 	}
-	return &sysin.ProfileOptionsModel{Channels: channels}, nil
+	return &sysin.ProfileOptionsModel{Channels: filterProfileOptionChannels(channels)}, nil
+}
+
+func filterProfileOptionChannels(channels []*sysin.ChannelModel) []*sysin.ChannelModel {
+	list := make([]*sysin.ChannelModel, 0, len(channels))
+	for _, channel := range channels {
+		if channel == nil || channel.PublishVisible == 2 {
+			continue
+		}
+		list = append(list, channel)
+	}
+	return list
 }
 
 func (s *sSysPublish) MyProfileSave(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error) {
@@ -1241,6 +1252,9 @@ func (s *sSysPublish) allowedProfileIds(ctx context.Context, ids []int64, tenant
 }
 
 func (s *sSysPublish) ensureProfileChannels(ctx context.Context, ids []int64, tenantId int64) error {
+	if err := ensurePublishChannelColumns(ctx); err != nil {
+		return err
+	}
 	ids = uniqueIds(ids)
 	if len(ids) == 0 {
 		return nil
@@ -1249,6 +1263,7 @@ func (s *sSysPublish) ensureProfileChannels(ctx context.Context, ids []int64, te
 		WhereIn("id", ids).
 		Where("tenant_id", tenantId).
 		Where("publish_direction", "up").
+		Where("publish_visible", 1).
 		Where("status", 1).
 		WhereNull("deleted_at").
 		Count()
@@ -1262,6 +1277,9 @@ func (s *sSysPublish) ensureProfileChannels(ctx context.Context, ids []int64, te
 }
 
 func (s *sSysPublish) availableProfileChannelIds(ctx context.Context, ids []int64, tenantId int64) ([]int64, error) {
+	if err := ensurePublishChannelColumns(ctx); err != nil {
+		return nil, err
+	}
 	ids = uniqueIds(ids)
 	if len(ids) == 0 {
 		return []int64{}, nil
@@ -1274,6 +1292,7 @@ func (s *sSysPublish) availableProfileChannelIds(ctx context.Context, ids []int6
 		WhereIn("id", ids).
 		Where("tenant_id", tenantId).
 		Where("publish_direction", "up").
+		Where("publish_visible", 1).
 		Where("status", 1).
 		WhereNull("deleted_at").
 		Scan(&rows)

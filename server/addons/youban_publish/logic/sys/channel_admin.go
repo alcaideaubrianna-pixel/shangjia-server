@@ -17,6 +17,9 @@ import (
 )
 
 func (s *sSysPublish) AdminChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error) {
+	if err = ensurePublishChannelColumns(ctx); err != nil {
+		return nil, 0, err
+	}
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -45,6 +48,9 @@ func (s *sSysPublish) AdminChannelList(ctx context.Context, in *sysin.ChannelLis
 }
 
 func (s *sSysPublish) MyChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error) {
+	if err = ensurePublishChannelColumns(ctx); err != nil {
+		return nil, 0, err
+	}
 	account, err := s.currentAccount(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -57,6 +63,7 @@ func (s *sSysPublish) MyChannelList(ctx context.Context, in *sysin.ChannelListIn
 	in.Status = 1
 	base := s.channelBaseModel(ctx)
 	base = applyChannelFilters(base, in)
+	base = base.Where("c.publish_visible", 1)
 	totalCount, err = base.Clone().Count()
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取频道总数失败")
@@ -76,6 +83,9 @@ func (s *sSysPublish) MyChannelList(ctx context.Context, in *sysin.ChannelListIn
 }
 
 func (s *sSysPublish) ServerChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error) {
+	if err = ensurePublishChannelColumns(ctx); err != nil {
+		return nil, 0, err
+	}
 	if in == nil {
 		in = &sysin.ChannelListInp{}
 	}
@@ -99,6 +109,9 @@ func (s *sSysPublish) ServerChannelList(ctx context.Context, in *sysin.ChannelLi
 }
 
 func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSaveInp) (err error) {
+	if err = ensurePublishChannelColumns(ctx); err != nil {
+		return err
+	}
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return err
@@ -174,6 +187,7 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		"cycle_publish_days":    in.CyclePublishDays,
 		"cycle_publish_time":    in.CyclePublishTime,
 		"is_default_selected":   in.IsDefaultSelected,
+		"publish_visible":       in.PublishVisible,
 		"bot_id_json":           botJSON,
 		"remark":                in.Remark,
 		"status":                in.Status,

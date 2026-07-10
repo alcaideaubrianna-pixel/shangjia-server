@@ -934,6 +934,7 @@ type ChannelModel struct {
 	CyclePublishDays    int         `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
 	CyclePublishTime    string      `json:"cyclePublishTime" dc:"循环上架时间"`
 	IsDefaultSelected   int         `json:"isDefaultSelected" dc:"是否默认选中"`
+	PublishVisible      int         `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
 	BotIds              []int64     `json:"botIds" dc:"绑定Bot ID列表"`
 	BotIdJson           string      `json:"botIdJson" dc:"绑定Bot ID JSON"`
 	Remark              string      `json:"remark" dc:"备注"`
@@ -957,6 +958,7 @@ type ChannelSaveInp struct {
 	CyclePublishDays    int     `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
 	CyclePublishTime    string  `json:"cyclePublishTime" dc:"循环上架时间"`
 	IsDefaultSelected   int     `json:"isDefaultSelected" dc:"是否默认选中"`
+	PublishVisible      int     `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
 	BotIds              []int64 `json:"botIds" dc:"绑定Bot ID列表"`
 	Remark              string  `json:"remark" dc:"备注"`
 	Status              int     `json:"status" dc:"状态：1启用 2停用"`
@@ -990,6 +992,12 @@ func (in *ChannelSaveInp) Filter(ctx context.Context) error {
 	}
 	if in.IsDefaultSelected != 1 && in.IsDefaultSelected != 2 {
 		return gerror.New("默认选中配置不合法")
+	}
+	if in.PublishVisible == 0 {
+		in.PublishVisible = 1
+	}
+	if in.PublishVisible != 1 && in.PublishVisible != 2 {
+		return gerror.New("上架端可见配置不合法")
 	}
 	if in.CyclePublishEnabled != 0 && in.CyclePublishEnabled != 1 {
 		return gerror.New("循环上架开关不合法")

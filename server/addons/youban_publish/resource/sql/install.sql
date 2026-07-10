@@ -1104,6 +1104,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_channel` (
   `cycle_publish_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环上架天数',
   `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环上架时间',
   `is_default_selected` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否默认选中',
+  `publish_visible` tinyint(1) NOT NULL DEFAULT '1' COMMENT '上架端资料选择可见',
   `bot_id_json` text COMMENT '绑定Bot ID JSON',
   `remark` varchar(500) NOT NULL DEFAULT '' COMMENT '备注',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
@@ -1125,6 +1126,7 @@ ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_enabled` tinyi
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环上架天数' AFTER `cycle_publish_enabled`;
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环上架时间' AFTER `cycle_publish_days`;
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `is_default_selected` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否默认选中' AFTER `cycle_publish_time`;
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `publish_visible` tinyint(1) NOT NULL DEFAULT '1' COMMENT '上架端资料选择可见' AFTER `is_default_selected`;
 ALTER TABLE `hg_youban_publish_channel` ADD KEY `idx_ybp_channel_tenant_direction` (`tenant_id`,`publish_direction`,`status`,`id`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_channel` (

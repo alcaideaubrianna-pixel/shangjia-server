@@ -775,6 +775,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel" (
   "cycle_publish_days" integer NOT NULL DEFAULT 4,
   "cycle_publish_time" varchar(16) NOT NULL DEFAULT '',
   "is_default_selected" smallint NOT NULL DEFAULT 1,
+  "publish_visible" smallint NOT NULL DEFAULT 1,
   "bot_id_json" text,
   "remark" varchar(500) NOT NULL DEFAULT '',
   "status" smallint NOT NULL DEFAULT 1,
@@ -795,6 +796,7 @@ ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_days" integer NOT NULL DEFAULT 4;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_time" varchar(16) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "is_default_selected" smallint NOT NULL DEFAULT 1;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "publish_visible" smallint NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_channel" (
   "id" BIGSERIAL PRIMARY KEY,
