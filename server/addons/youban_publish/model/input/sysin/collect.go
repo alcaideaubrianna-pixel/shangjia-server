@@ -283,6 +283,7 @@ type CollectRuleModel struct {
 	KeywordJson         string      `json:"keywordJson" dc:"关键词JSON"`
 	TagJson             string      `json:"tagJson" dc:"标签JSON"`
 	ReplaceJson         string      `json:"replaceJson" dc:"替换JSON"`
+	DeleteLineTextJson  string      `json:"deleteLineTextJson" dc:"整行删除文本JSON"`
 	DeleteTextJson      string      `json:"deleteTextJson" dc:"删除文本JSON"`
 	BlockTextJson       string      `json:"blockTextJson" dc:"屏蔽文本JSON"`
 	BlockLink           int         `json:"blockLink" dc:"屏蔽链接"`
@@ -314,6 +315,7 @@ type CollectRuleSaveInp struct {
 	KeywordJson         string `json:"keywordJson" dc:"关键词JSON"`
 	TagJson             string `json:"tagJson" dc:"标签JSON"`
 	ReplaceJson         string `json:"replaceJson" dc:"替换JSON"`
+	DeleteLineTextJson  string `json:"deleteLineTextJson" dc:"整行删除文本JSON"`
 	DeleteTextJson      string `json:"deleteTextJson" dc:"删除文本JSON"`
 	BlockTextJson       string `json:"blockTextJson" dc:"屏蔽文本JSON"`
 	BlockLink           int    `json:"blockLink" dc:"屏蔽链接"`

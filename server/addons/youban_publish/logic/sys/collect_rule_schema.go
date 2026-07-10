@@ -20,6 +20,7 @@ func ensureCollectRulePgsqlColumns(ctx context.Context) error {
 	statements := []string{
 		`ALTER TABLE "hg_youban_publish_collect_rule" ADD COLUMN IF NOT EXISTS "full_match_enabled" smallint NOT NULL DEFAULT 0`,
 		`ALTER TABLE "hg_youban_publish_collect_rule" ADD COLUMN IF NOT EXISTS "delete_text_json" text`,
+		`ALTER TABLE "hg_youban_publish_collect_rule" ADD COLUMN IF NOT EXISTS "delete_line_text_json" text`,
 		`ALTER TABLE "hg_youban_publish_collect_rule" ADD COLUMN IF NOT EXISTS "backup_channel_id_json" text`,
 	}
 	for _, sql := range statements {
@@ -34,6 +35,7 @@ func ensureCollectRuleMysqlColumns(ctx context.Context) error {
 	statements := []string{
 		"ALTER TABLE `hg_youban_publish_collect_rule` ADD COLUMN `full_match_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '全量匹配' AFTER `dedupe_days`",
 		"ALTER TABLE `hg_youban_publish_collect_rule` ADD COLUMN `delete_text_json` text COMMENT '删除文本JSON' AFTER `replace_json`",
+		"ALTER TABLE `hg_youban_publish_collect_rule` ADD COLUMN `delete_line_text_json` text COMMENT '整行删除文本JSON' AFTER `delete_text_json`",
 		"ALTER TABLE `hg_youban_publish_collect_rule` ADD COLUMN `backup_channel_id_json` text COMMENT '备份频道JSON' AFTER `backup_channel_id`",
 	}
 	for _, sql := range statements {

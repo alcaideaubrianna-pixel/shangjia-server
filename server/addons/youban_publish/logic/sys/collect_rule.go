@@ -76,6 +76,7 @@ func (s *sSysPublish) CollectRuleSave(ctx context.Context, in *sysin.CollectRule
 		"keyword_json":           in.KeywordJson,
 		"tag_json":               in.TagJson,
 		"replace_json":           in.ReplaceJson,
+		"delete_line_text_json":  in.DeleteLineTextJson,
 		"delete_text_json":       in.DeleteTextJson,
 		"block_text_json":        in.BlockTextJson,
 		"block_link":             switchDefaultOn(in.BlockLink),

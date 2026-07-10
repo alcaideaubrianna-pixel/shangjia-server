@@ -62,7 +62,8 @@ func (s *sSysPublish) evaluateCollectRule(ctx context.Context, event gdb.Record,
 			MatchJSON: precheck.MatchJSON,
 		}, nil
 	}
-	text := applyCollectTextDeletes(rawText, collectStringList(rule["delete_text_json"].String()))
+	text := applyCollectLineDeletes(rawText, collectStringList(rule["delete_line_text_json"].String()))
+	text = applyCollectTextDeletes(text, collectStringList(rule["delete_text_json"].String()))
 	text = applyCollectReplacements(text, collectReplaceList(rule["replace_json"].String()))
 	if shouldDropCollectStandaloneCodeCaption(text, mediaCount) {
 		text = ""
@@ -309,6 +310,32 @@ func applyCollectTextDeletes(text string, values []string) string {
 		text = strings.ReplaceAll(text, value, "")
 	}
 	return text
+}
+
+func applyCollectLineDeletes(text string, values []string) string {
+	keywords := normalizedCollectTerms(values)
+	if len(keywords) == 0 {
+		return text
+	}
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if matchCollectTerms(line, keywords) != "" {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
+func normalizedCollectTerms(values []string) []string {
+	list := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			list = append(list, value)
+		}
+	}
+	return list
 }
 
 func collectMatchJSON(keywords []string, tags []string) string {

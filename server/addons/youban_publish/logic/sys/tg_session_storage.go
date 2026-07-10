@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"os"
 	"strings"
 	"sync"
@@ -48,18 +50,19 @@ func (s *telegramDBSessionStorage) LoadSession(ctx context.Context) ([]byte, err
 	if count == 0 {
 		return s.loadFallbackSession(ctx)
 	}
-	var row struct {
-		SessionData []byte `json:"sessionData" orm:"session_data"`
-	}
-	err = g.DB().Model(publishTgSessionTable).Safe().Ctx(ctx).
+	row, err := g.DB().Model(publishTgSessionTable).Safe().Ctx(ctx).
 		Fields("session_data").
 		Where("session_key", s.key).
-		Scan(&row)
+		One()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取TG会话失败")
 	}
-	if len(row.SessionData) > 0 {
-		return append([]byte(nil), row.SessionData...), nil
+	if row.IsEmpty() {
+		return s.loadFallbackSession(ctx)
+	}
+	data := decodeTelegramSessionData(row["session_data"].Bytes())
+	if len(data) > 0 {
+		return data, nil
 	}
 	return s.loadFallbackSession(ctx)
 }
@@ -103,7 +106,7 @@ func (s *telegramDBSessionStorage) storeSession(ctx context.Context, data []byte
 	}
 	saveData := g.Map{
 		"session_key":  s.key,
-		"session_data": append([]byte(nil), data...),
+		"session_data": []byte(base64.StdEncoding.EncodeToString(data)),
 		"updated_at":   now,
 	}
 	if count > 0 {
@@ -121,4 +124,19 @@ func (s *telegramDBSessionStorage) storeSession(ctx context.Context, data []byte
 		return gerror.Wrap(err, "保存TG会话失败")
 	}
 	return nil
+}
+
+func decodeTelegramSessionData(data []byte) []byte {
+	data = []byte(strings.TrimSpace(string(data)))
+	if len(data) == 0 {
+		return nil
+	}
+	if json.Valid(data) {
+		return append([]byte(nil), data...)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(string(data))
+	if err != nil || !json.Valid(decoded) {
+		return nil
+	}
+	return decoded
 }

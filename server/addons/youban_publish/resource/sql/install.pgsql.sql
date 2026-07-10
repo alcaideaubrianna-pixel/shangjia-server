@@ -1011,6 +1011,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_rule" (
   "tag_json" text,
   "replace_json" text,
   "delete_text_json" text,
+  "delete_line_text_json" text,
   "block_text_json" text,
   "block_link" smallint NOT NULL DEFAULT 1,
   "block_username" smallint NOT NULL DEFAULT 1,

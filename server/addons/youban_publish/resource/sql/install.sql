@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_rule` (
   `tag_json` text COMMENT '标签JSON',
   `replace_json` text COMMENT '替换规则JSON',
   `delete_text_json` text COMMENT '删除文本JSON',
+  `delete_line_text_json` text COMMENT '整行删除文本JSON',
   `block_text_json` text COMMENT '屏蔽文本JSON',
   `block_link` tinyint(1) NOT NULL DEFAULT '1' COMMENT '屏蔽链接',
   `block_username` tinyint(1) NOT NULL DEFAULT '1' COMMENT '屏蔽用户名',
