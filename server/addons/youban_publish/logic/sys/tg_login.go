@@ -42,6 +42,7 @@ type telegramLoginRuntime struct {
 	accountId        int64
 	adminTgAccount   bool
 	tenantId         int64
+	tgAccountId      int64
 	tgAccountName    string
 	tgAccountRemark  string
 	tgLoginSessionId int64
@@ -119,7 +120,7 @@ func (s *sSysPublish) TelegramLoginPassword(ctx context.Context, in *sysin.Teleg
 		return nil, err
 	}
 	token := strings.TrimSpace(in.LoginToken)
-	password := strings.TrimSpace(in.Password)
+	password := in.Password
 	if token == "" {
 		return nil, gerror.New("登录令牌不能为空")
 	}
@@ -186,6 +187,7 @@ func (s *sSysPublish) runTelegramLogin(ctx context.Context, runtime *telegramLog
 			updateStatus(runCtx, runtime.loginToken, accountId, g.Map{
 				"status":        tgLoginStatusPasswordRequired,
 				"error_message": "",
+				"expires_at":    gtime.Now().Add(5 * time.Minute),
 			})
 			authorization, err = s.waitTelegramPassword(runCtx, runtime, client)
 		}
@@ -221,6 +223,7 @@ func (s *sSysPublish) waitTelegramPassword(ctx context.Context, runtime *telegra
 				_ = s.updateLoginRuntimeStatus(ctx, runtime, g.Map{
 					"status":        tgLoginStatusPasswordRequired,
 					"error_message": "二次验证密码错误，请重新输入",
+					"expires_at":    gtime.Now().Add(5 * time.Minute),
 				})
 				continue
 			}
@@ -303,7 +306,7 @@ func (s *sSysPublish) finishAdminTgAccountLogin(ctx context.Context, runtime *te
 			}).Update(); err != nil {
 			return gerror.Wrap(err, "更新TG账号扫码登录状态失败")
 		}
-		if _, err := tx.Model(publishTgAccountTable).Safe().Ctx(ctx).Data(g.Map{
+		data := g.Map{
 			"tenant_id":           tenantId,
 			"merchant_id":         tenantId,
 			"account_id":          accountId,
@@ -325,7 +328,19 @@ func (s *sSysPublish) finishAdminTgAccountLogin(ctx context.Context, runtime *te
 			"updated_by":          accountId,
 			"created_at":          now,
 			"updated_at":          now,
-		}).Insert(); err != nil {
+		}
+		if runtime.tgAccountId > 0 {
+			delete(data, "created_by")
+			delete(data, "created_at")
+			if _, err := tx.Model(publishTgAccountTable).Safe().Ctx(ctx).
+				Where("id", runtime.tgAccountId).
+				Where("tenant_id", tenantId).
+				WhereNull("deleted_at").
+				Data(data).
+				Update(); err != nil {
+				return gerror.Wrap(err, "更新TG账号授权信息失败")
+			}
+		} else if _, err := tx.Model(publishTgAccountTable).Safe().Ctx(ctx).Data(data).Insert(); err != nil {
 			return gerror.Wrap(err, "保存TG账号授权信息失败")
 		}
 		return nil

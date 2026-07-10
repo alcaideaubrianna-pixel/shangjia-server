@@ -878,6 +878,7 @@ type TgAccountModel struct {
 
 type TgAccountStartLoginInp struct {
 	TenantId    int64  `json:"tenantId" dc:"租户ID"`
+	TgAccountId int64  `json:"tgAccountId" dc:"重新登录的TG账号ID"`
 	DisplayName string `json:"displayName" dc:"显示名称"`
 	Remark      string `json:"remark" dc:"备注"`
 }

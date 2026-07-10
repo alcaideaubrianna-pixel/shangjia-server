@@ -81,6 +81,12 @@ func (s *sSysPublish) AdminTgAccountStartLogin(ctx context.Context, in *sysin.Tg
 	if conf.AppId <= 0 || strings.TrimSpace(conf.AppHash) == "" {
 		return nil, gerror.New("请先在插件配置中填写Telegram App ID和App Hash")
 	}
+	if in.TgAccountId > 0 {
+		if _, err = s.adminTgAccountById(ctx, in.TgAccountId, current.TenantId); err != nil {
+			return nil, err
+		}
+	}
+	s.cancelAccountLogin(current.Id)
 	now := gtime.Now()
 	token := grand.S(40)
 	expiresAt := now.Add(5 * time.Minute)
@@ -108,6 +114,7 @@ func (s *sSysPublish) AdminTgAccountStartLogin(ctx context.Context, in *sysin.Tg
 		accountId:        current.Id,
 		tenantId:         current.TenantId,
 		adminTgAccount:   true,
+		tgAccountId:      in.TgAccountId,
 		tgAccountName:    in.DisplayName,
 		tgAccountRemark:  in.Remark,
 		tgLoginSessionId: id,
@@ -160,7 +167,7 @@ func (s *sSysPublish) AdminTgAccountPassword(ctx context.Context, in *sysin.TgAc
 	if in == nil || strings.TrimSpace(in.LoginToken) == "" {
 		return nil, gerror.New("登录令牌不能为空")
 	}
-	password := strings.TrimSpace(in.Password)
+	password := in.Password
 	if password == "" {
 		return nil, gerror.New("二次验证密码不能为空")
 	}
