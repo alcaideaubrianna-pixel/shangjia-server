@@ -372,7 +372,20 @@ func (s *sSysPublish) FollowNoteView(ctx context.Context, in *sysin.ProfileViewI
 }
 
 func (s *sSysPublish) FollowNoteImageSearch(ctx context.Context, in *sysin.FollowNoteListInp, file *ghttp.UploadFile) ([]*sysin.NoteModel, int, error) {
-	return s.FollowNoteList(ctx, in)
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	if in == nil {
+		in = &sysin.FollowNoteListInp{}
+	}
+	accountIds, err := s.followNoteAccountIds(ctx, account, in)
+	if err != nil {
+		return nil, 0, err
+	}
+	return s.profileImageSearchByAccountIds(ctx, &sysin.ProfileImageSearchInp{
+		ProfileListInp: in.ProfileListInp,
+	}, file, accountIds, account)
 }
 
 func (s *sSysPublish) followNoteAccountIds(ctx context.Context, account *sysin.AccountModel, in *sysin.FollowNoteListInp) ([]int64, error) {

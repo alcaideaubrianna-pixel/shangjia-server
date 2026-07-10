@@ -34,17 +34,15 @@ func (s *sSysPublish) ensureCollectTgJobs(ctx context.Context, taskId int64) err
 	if err = s.supersedeCollectTgJobsOutsideChannels(ctx, taskId, operationNo, channelIds); err != nil {
 		return err
 	}
-	if err = s.enqueuePublishSubmitTask(ctx, publishSubmitQueuePayload{
+	if err = s.submitTelegramPublish(ctx, telegramPublishRequest{
 		TaskId:               taskId,
-		TenantId:             task["tenant_id"].Int64(),
-		AccountId:            task["account_id"].Int64(),
-		OperatorId:           task["account_id"].Int64(),
 		OperationNo:          operationNo,
+		OperationPrefix:      telegramPublishBizCollect,
 		ChannelIds:           channelIds,
 		OnlySelectedChannels: true,
-	}, 0); err != nil {
+	}); err != nil {
 		_ = s.markTaskPublishFailed(ctx, taskId, task["tenant_id"].Int64(), task["account_id"].Int64(), err)
-		return gerror.Wrap(err, "采集上架任务加入队列失败")
+		return gerror.Wrap(err, "采集TG任务创建失败")
 	}
 	return nil
 }

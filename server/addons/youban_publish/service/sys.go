@@ -156,6 +156,7 @@ type ISysPublish interface {
 	AdminProfileSave(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error)
 	AdminProfileDelete(ctx context.Context, in *sysin.ProfileDeleteInp) (err error)
 	AdminProfileStatus(ctx context.Context, in *sysin.ProfileStatusInp) (res *sysin.ProfileStatusModel, err error)
+	AdminProfileImageSearch(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile) (list []*sysin.NoteModel, totalCount int, err error)
 	AdminTgMessageRepairStart(ctx context.Context, in *sysin.TgMessageRepairStartInp) (res *sysin.TgMessageRepairModel, err error)
 	AdminTgMessageRepairView(ctx context.Context, in *sysin.TgMessageRepairViewInp) (res *sysin.TgMessageRepairModel, err error)
 	AdminNoteList(ctx context.Context, in *sysin.NoteListInp) (list []*sysin.NoteModel, totalCount int, err error)

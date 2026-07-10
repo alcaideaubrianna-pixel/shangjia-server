@@ -428,6 +428,16 @@ type AdminProfileStatusRes struct {
 	*sysin.ProfileStatusModel
 }
 
+type AdminProfileImageSearchReq struct {
+	g.Meta `path:"/publish/admin/profile/image-search" method:"post" mime:"multipart/form-data" tags:"上架插件管理端" summary:"管理端资料图片搜索"`
+	sysin.ProfileImageSearchInp
+}
+
+type AdminProfileImageSearchRes struct {
+	form.PageRes
+	List []*sysin.NoteModel `json:"list" dc:"笔记列表"`
+}
+
 type AdminTgMessageRepairStartReq struct {
 	g.Meta `path:"/publish/admin/profile/messageRepair/start" method:"post" tags:"上架插件管理端" summary:"启动TG消息修复"`
 	sysin.TgMessageRepairStartInp

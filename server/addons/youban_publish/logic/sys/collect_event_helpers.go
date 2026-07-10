@@ -19,7 +19,7 @@ func collectPublishClientRequestId(event gdb.Record, rule gdb.Record) string {
 }
 
 func (s *sSysPublish) createCollectPublishMedia(ctx context.Context, event gdb.Record, content *collectContentResult, taskId int64) error {
-	return s.rebuildCollectPublishMedia(ctx, event, taskId)
+	return s.rebuildCollectPublishMedia(ctx, event, content, taskId)
 }
 
 func (s *sSysPublish) markCollectEvent(ctx context.Context, id int64, status string, message string) error {

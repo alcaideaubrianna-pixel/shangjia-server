@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -11,16 +12,23 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
-func (s *sSysPublish) rebuildCollectPublishMedia(ctx context.Context, event gdb.Record, taskId int64) error {
+func (s *sSysPublish) rebuildCollectPublishMedia(ctx context.Context, event gdb.Record, content *collectContentResult, taskId int64) error {
 	if err := ensureMediaEditColumns(ctx); err != nil {
 		return err
 	}
-	rows, err := s.collectEventMediaRows(ctx, event["id"].Int64())
-	if err != nil {
-		return err
+	items := make([]collectMediaItem, 0)
+	if content != nil && strings.TrimSpace(content.MediaJSON) != "" {
+		_ = json.Unmarshal([]byte(content.MediaJSON), &items)
+	}
+	if len(items) == 0 {
+		rows, err := s.collectEventMediaRows(ctx, event["id"].Int64())
+		if err != nil {
+			return err
+		}
+		items = collectMediaRowsToItems(rows)
 	}
 	now := gtime.Now()
-	if _, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+	if _, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("task_id", taskId).
 		WhereNull("deleted_at").
 		Data(g.Map{
@@ -31,7 +39,7 @@ func (s *sSysPublish) rebuildCollectPublishMedia(ctx context.Context, event gdb.
 		Update(); err != nil {
 		return gerror.Wrap(err, "清理采集旧媒体失败")
 	}
-	return s.insertCollectPublishMediaRows(ctx, event, taskId, "display", collectMediaRowsToItems(rows))
+	return s.insertCollectPublishMediaRows(ctx, event, taskId, "display", items)
 }
 
 func (s *sSysPublish) insertCollectPublishMediaRows(ctx context.Context, event gdb.Record, taskId int64, purpose string, items []collectMediaItem) error {

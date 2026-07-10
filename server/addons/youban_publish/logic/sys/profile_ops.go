@@ -968,8 +968,25 @@ func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, i
 		mod = mod.Where("p.city", strings.TrimSpace(in.City))
 	}
 	if in.Tag != "" {
-		tag := strings.TrimSpace(in.Tag)
-		mod = mod.Where("(p.cup_size = ? OR p.cup_size LIKE ? OR p.cup_size LIKE ? OR p.cup_size LIKE ?)", tag, tag+",%", "%,"+tag, "%,"+tag+",%")
+		tags := splitProfileTagValues(in.Tag)
+		if len(tags) == 1 {
+			tag := strings.TrimSpace(tags[0])
+			mod = mod.Where("(p.cup_size = ? OR p.cup_size LIKE ? OR p.cup_size LIKE ? OR p.cup_size LIKE ?)", tag, tag+",%", "%,"+tag, "%,"+tag+",%")
+		} else if len(tags) > 1 {
+			conditions := make([]string, 0, len(tags)*4)
+			args := make([]interface{}, 0, len(tags)*4)
+			for _, tag := range tags {
+				tag = strings.TrimSpace(tag)
+				if tag == "" {
+					continue
+				}
+				conditions = append(conditions, "(p.cup_size = ? OR p.cup_size LIKE ? OR p.cup_size LIKE ? OR p.cup_size LIKE ?)")
+				args = append(args, tag, tag+",%", "%,"+tag, "%,"+tag+",%")
+			}
+			if len(conditions) > 0 {
+				mod = mod.Where("("+strings.Join(conditions, " OR ")+")", args...)
+			}
+		}
 	}
 	if in.ReviewStatus != "" {
 		mod = mod.Where("p.review_status", strings.TrimSpace(in.ReviewStatus))
@@ -981,6 +998,16 @@ func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, i
 		mod = mod.Where("p.status", in.Status)
 	}
 	return mod
+}
+
+func splitProfileTagValues(value string) []string {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == '，' || r == '|' || r == ';'
+	})
+	if len(parts) == 0 {
+		return []string{strings.TrimSpace(value)}
+	}
+	return parts
 }
 
 func (s *sSysPublish) applyProfileOwnerNames(ctx context.Context, list []*sysin.ProfileModel) error {

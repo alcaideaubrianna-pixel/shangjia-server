@@ -117,6 +117,12 @@ func (s *sSysPublish) approveCollectReview(ctx context.Context, reviewId int64, 
 		_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())
 		return err
 	}
+	content.RawText = strings.TrimSpace(review["raw_text"].String())
+	content.NormalizedText = normalizeCollectText(content.RawText)
+	content.MediaJSON = review["media_json"].String()
+	content.MediaCount = review["media_count"].Int()
+	content.TextHash = collectHash(content.NormalizedText)
+	content.DedupeKey = collectHash(content.NormalizedText + ":" + collectMediaSignature(content.MediaJSON))
 	taskId, err := s.createCollectPublishTask(ctx, event, content, rule, review["raw_text"].String())
 	if err != nil {
 		_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())

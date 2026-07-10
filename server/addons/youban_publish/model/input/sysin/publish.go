@@ -581,7 +581,7 @@ type ProfileOptionsModel struct {
 }
 
 type ProfileImageSearchInp struct {
-	form.PageReq
+	ProfileListInp
 	Threshold int `json:"threshold" dc:"相似度阈值，越小越严格"`
 }
 

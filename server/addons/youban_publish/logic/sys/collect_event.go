@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -223,6 +224,13 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		s.appendCollectEventLogForRecord(ctx, event, "rule", "skipped", decision.Reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
 		return false, decision.Reason, nil
 	}
+	if rule["review_enabled"].Int() == 1 {
+		if merged, err := s.mergeCollectEventIntoPendingReview(ctx, event, content, rule, decision.Text); err != nil {
+			return false, "", err
+		} else if merged {
+			return true, "", nil
+		}
+	}
 	now := gtime.Now()
 	dispatchId, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Data(g.Map{
 		"tenant_id":              event["tenant_id"].Int64(),
@@ -254,6 +262,75 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		return false, "", err
 	}
 	return true, "", nil
+}
+
+func (s *sSysPublish) mergeCollectEventIntoPendingReview(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (bool, error) {
+	if content == nil || !collectMediaJSONHasVideo(content.MediaJSON) {
+		return false, nil
+	}
+	currentMessageId := event["source_message_id"].Int64()
+	if currentMessageId <= 0 || strings.TrimSpace(event["source_chat_id"].String()) == "" {
+		return false, nil
+	}
+	review, err := pdao.YoubanPublishCollectReview.DB().Model(pdao.YoubanPublishCollectReview.Table()+" r").Safe().Ctx(ctx).
+		LeftJoin(pdao.YoubanPublishCollectEvent.Table()+" e", "e.id=r.event_id").
+		Fields("r.id,r.dispatch_id,r.raw_text,r.media_json,r.media_count,e.id AS source_event_id,e.source_message_id").
+		Where("r.tenant_id", event["tenant_id"].Int64()).
+		Where("r.account_id", event["account_id"].Int64()).
+		Where("r.source_id", event["source_id"].Int64()).
+		Where("r.rule_id", rule["id"].Int64()).
+		Where("r.status", sysin.CollectReviewStatusPending).
+		Where("e.source_chat_id", strings.TrimSpace(event["source_chat_id"].String())).
+		Where("e.source_message_id > 0").
+		Where("e.source_message_id < ?", currentMessageId).
+		Where("e.source_message_id >= ?", currentMessageId-20).
+		OrderDesc("e.source_message_id").
+		Limit(1).
+		One()
+	if err != nil {
+		return false, gerror.Wrap(err, "读取待合并采集审核失败")
+	}
+	if review.IsEmpty() || collectMediaJSONHasVideo(review["media_json"].String()) {
+		return false, nil
+	}
+	mediaJSON, mediaCount := mergeCollectMediaJSON(review["media_json"].String(), content.MediaJSON)
+	mergedText := mergeCollectReviewText(review["raw_text"].String(), text)
+	now := gtime.Now()
+	if _, err = pdao.YoubanPublishCollectReview.Ctx(ctx).Where("id", review["id"].Int64()).Data(g.Map{
+		"raw_text":    mergedText,
+		"media_count": mediaCount,
+		"media_json":  mediaJSON,
+		"updated_at":  now,
+	}).Update(); err != nil {
+		return false, gerror.Wrap(err, "合并采集审核失败")
+	}
+	s.appendCollectEventLogForRecord(ctx, event, "review", "merged", "已合并到上一组采集审核", fmt.Sprintf("review=%d", review["id"].Int64()))
+	return true, nil
+}
+
+func collectMediaJSONHasVideo(mediaJSON string) bool {
+	var items []collectMediaItem
+	if err := json.Unmarshal([]byte(mediaJSON), &items); err != nil {
+		return false
+	}
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item.Type), "video") {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeCollectReviewText(existing string, next string) string {
+	existing = strings.TrimSpace(existing)
+	next = strings.TrimSpace(next)
+	if existing == "" {
+		return next
+	}
+	if next == "" || existing == next {
+		return existing
+	}
+	return existing + "\n" + next
 }
 
 func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, dispatchId int64, text string) error {

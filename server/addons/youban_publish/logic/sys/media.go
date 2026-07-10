@@ -152,6 +152,92 @@ func (s *sSysPublish) MyProfileImageSearch(ctx context.Context, in *sysin.Profil
 	if in == nil {
 		in = &sysin.ProfileImageSearchInp{}
 	}
+	in.TenantId = account.TenantId
+	in.AccountId = account.Id
+	return s.profileImageSearch(ctx, in, file, sysin.ProfilePermissionCreator)
+}
+
+func (s *sSysPublish) AdminProfileImageSearch(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile) (list []*sysin.NoteModel, totalCount int, err error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	if in == nil {
+		in = &sysin.ProfileImageSearchInp{}
+	}
+	in.TenantId = account.TenantId
+	in.AccountId = 0
+	return s.profileImageSearch(ctx, in, file, sysin.ProfilePermissionAdmin)
+}
+
+func (s *sSysPublish) profileImageSearch(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile, permission string) (list []*sysin.NoteModel, totalCount int, err error) {
+	normalizeProfileImageSearchInput(in)
+	queryHash, err := uploadImagePHashValue(file)
+	if err != nil {
+		return nil, 0, err
+	}
+	profileIds, totalCount, err := s.findSimilarProfileIdsByPHash(ctx, queryHash, in, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(profileIds) == 0 {
+		return []*sysin.NoteModel{}, totalCount, nil
+	}
+	list = make([]*sysin.NoteModel, 0, len(profileIds))
+	for _, profileId := range profileIds {
+		profile, viewErr := s.profileView(ctx, profileId, in.TenantId, in.AccountId)
+		if viewErr != nil {
+			return nil, 0, viewErr
+		}
+		markProfilePermission(profile, permission)
+		note := &sysin.NoteModel{ProfileModel: *profile}
+		note.Media, err = s.mediaListByProfile(ctx, profile.Id, profile.TenantId, profile.AccountId)
+		if err != nil {
+			return nil, 0, err
+		}
+		list = append(list, note)
+	}
+	return list, totalCount, nil
+}
+
+func (s *sSysPublish) profileImageSearchByAccountIds(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile, accountIds []int64, viewer *sysin.AccountModel) (list []*sysin.NoteModel, totalCount int, err error) {
+	normalizeProfileImageSearchInput(in)
+	accountIds = uniqueIds(accountIds)
+	if len(accountIds) == 0 {
+		return []*sysin.NoteModel{}, 0, nil
+	}
+	queryHash, err := uploadImagePHashValue(file)
+	if err != nil {
+		return nil, 0, err
+	}
+	profileIds, totalCount, err := s.findSimilarProfileIdsByPHash(ctx, queryHash, in, accountIds)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(profileIds) == 0 {
+		return []*sysin.NoteModel{}, totalCount, nil
+	}
+	list = make([]*sysin.NoteModel, 0, len(profileIds))
+	for _, profileId := range profileIds {
+		profile, viewErr := s.profileView(ctx, profileId, 0, 0)
+		if viewErr != nil {
+			return nil, 0, viewErr
+		}
+		if !containsInt64(accountIds, profile.AccountId) {
+			continue
+		}
+		markProfilePermission(profile, profilePermissionForViewer(viewer, profile))
+		note := &sysin.NoteModel{ProfileModel: *profile}
+		note.Media, err = s.mediaListByProfile(ctx, profile.Id, profile.TenantId, profile.AccountId)
+		if err != nil {
+			return nil, 0, err
+		}
+		list = append(list, note)
+	}
+	return list, totalCount, nil
+}
+
+func normalizeProfileImageSearchInput(in *sysin.ProfileImageSearchInp) {
 	if in.Page <= 0 {
 		in.Page = 1
 	}
@@ -161,39 +247,16 @@ func (s *sSysPublish) MyProfileImageSearch(ctx context.Context, in *sysin.Profil
 	if in.PerPage > 50 {
 		in.PerPage = 50
 	}
-	threshold := in.Threshold
-	if threshold <= 0 {
-		threshold = 12
+	if in.Threshold <= 0 {
+		in.Threshold = 12
 	}
-	if threshold > 32 {
-		threshold = 32
+	if in.Threshold > 32 {
+		in.Threshold = 32
 	}
-	queryHash, err := uploadImagePHashValue(file)
-	if err != nil {
-		return nil, 0, err
-	}
-	profileIds, totalCount, err := s.findMySimilarProfileIdsByPHash(ctx, queryHash, threshold, in.Page, in.PerPage, account.TenantId, account.Id)
-	if err != nil {
-		return nil, 0, err
-	}
-	if len(profileIds) == 0 {
-		return []*sysin.NoteModel{}, totalCount, nil
-	}
-	list = make([]*sysin.NoteModel, 0, len(profileIds))
-	for _, profileId := range profileIds {
-		profile, viewErr := s.profileView(ctx, profileId, account.TenantId, account.Id)
-		if viewErr != nil {
-			return nil, 0, viewErr
-		}
-		markProfilePermission(profile, sysin.ProfilePermissionCreator)
-		note := &sysin.NoteModel{ProfileModel: *profile}
-		note.Media, err = s.mediaListByProfile(ctx, profile.Id, account.TenantId, account.Id)
-		if err != nil {
-			return nil, 0, err
-		}
-		list = append(list, note)
-	}
-	return list, totalCount, nil
+	in.Keyword = strings.TrimSpace(in.Keyword)
+	in.Province = strings.TrimSpace(in.Province)
+	in.City = strings.TrimSpace(in.City)
+	in.Tag = strings.TrimSpace(in.Tag)
 }
 
 type publishProfilePHashDistance struct {
@@ -201,15 +264,32 @@ type publishProfilePHashDistance struct {
 	ProfileId int64
 }
 
-func (s *sSysPublish) findMySimilarProfileIdsByPHash(ctx context.Context, queryHash *goimagehash.ImageHash, threshold int, page int, perPage int, tenantId int64, accountId int64) (profileIds []int64, totalCount int, err error) {
-	rows, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+func (s *sSysPublish) findSimilarProfileIdsByPHash(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, accountIds []int64) (profileIds []int64, totalCount int, err error) {
+	candidateProfileIds, err := s.profileImageSearchCandidateProfileIds(ctx, &in.ProfileListInp, accountIds)
+	if err != nil {
+		return nil, 0, err
+	}
+	if candidateProfileIds != nil && len(candidateProfileIds) == 0 {
+		return []int64{}, 0, nil
+	}
+	mediaMod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Fields("profile_id,perceptual_hash").
-		Where("tenant_id", tenantId).
-		Where("account_id", accountId).
 		Where("media_type", "image").
 		WhereNot("perceptual_hash", "").
-		WhereNull("deleted_at").
-		All()
+		WhereNull("deleted_at")
+	if in.TenantId > 0 {
+		mediaMod = mediaMod.Where("tenant_id", in.TenantId)
+	}
+	if in.AccountId > 0 {
+		mediaMod = mediaMod.Where("account_id", in.AccountId)
+	}
+	if len(accountIds) > 0 {
+		mediaMod = mediaMod.WhereIn("account_id", accountIds)
+	}
+	if len(candidateProfileIds) > 0 {
+		mediaMod = mediaMod.WhereIn("profile_id", candidateProfileIds)
+	}
+	rows, err := mediaMod.All()
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "查询图片相似资料失败")
 	}
@@ -224,7 +304,7 @@ func (s *sSysPublish) findMySimilarProfileIdsByPHash(ctx context.Context, queryH
 			continue
 		}
 		distance, distanceErr := queryHash.Distance(hash)
-		if distanceErr != nil || distance > threshold {
+		if distanceErr != nil || distance > in.Threshold {
 			continue
 		}
 		current, exists := distanceByProfile[profileId]
@@ -236,7 +316,7 @@ func (s *sSysPublish) findMySimilarProfileIdsByPHash(ctx context.Context, queryH
 	for profileId, distance := range distanceByProfile {
 		items = append(items, publishProfilePHashDistance{ProfileId: profileId, Distance: distance})
 	}
-	items, err = s.filterVisibleProfilePHashItems(ctx, items, tenantId, accountId)
+	items, err = s.filterVisibleProfilePHashItems(ctx, items, &in.ProfileListInp, accountIds)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -250,14 +330,14 @@ func (s *sSysPublish) findMySimilarProfileIdsByPHash(ctx context.Context, queryH
 	if totalCount == 0 {
 		return []int64{}, 0, nil
 	}
-	start := (page - 1) * perPage
+	start := (in.Page - 1) * in.PerPage
 	if start < 0 {
 		start = 0
 	}
 	if start >= totalCount {
 		return []int64{}, totalCount, nil
 	}
-	end := int(math.Min(float64(start+perPage), float64(totalCount)))
+	end := int(math.Min(float64(start+in.PerPage), float64(totalCount)))
 	profileIds = make([]int64, 0, end-start)
 	for _, item := range items[start:end] {
 		profileIds = append(profileIds, item.ProfileId)
@@ -265,7 +345,46 @@ func (s *sSysPublish) findMySimilarProfileIdsByPHash(ctx context.Context, queryH
 	return profileIds, totalCount, nil
 }
 
-func (s *sSysPublish) filterVisibleProfilePHashItems(ctx context.Context, items []publishProfilePHashDistance, tenantId int64, accountId int64) ([]publishProfilePHashDistance, error) {
+func (s *sSysPublish) profileImageSearchCandidateProfileIds(ctx context.Context, in *sysin.ProfileListInp, accountIds []int64) ([]int64, error) {
+	if !hasProfileSearchFilters(in) {
+		return nil, nil
+	}
+	base, err := s.profileBaseModel(ctx, in.TenantId, in.AccountId)
+	if err != nil {
+		return nil, err
+	}
+	base = s.applyProfileFilters(ctx, base, in)
+	if len(accountIds) > 0 {
+		base = base.WhereIn("t.account_id", accountIds)
+	}
+	rows, err := base.Fields("p.id").All()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取图片搜索候选资料失败")
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		id := row["id"].Int64()
+		if id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+func hasProfileSearchFilters(in *sysin.ProfileListInp) bool {
+	if in == nil {
+		return false
+	}
+	return strings.TrimSpace(in.Keyword) != "" ||
+		strings.TrimSpace(in.Province) != "" ||
+		strings.TrimSpace(in.City) != "" ||
+		strings.TrimSpace(in.Tag) != "" ||
+		strings.TrimSpace(in.ReviewStatus) != "" ||
+		strings.TrimSpace(in.Visibility) != "" ||
+		in.Status > 0
+}
+
+func (s *sSysPublish) filterVisibleProfilePHashItems(ctx context.Context, items []publishProfilePHashDistance, in *sysin.ProfileListInp, accountIds []int64) ([]publishProfilePHashDistance, error) {
 	if len(items) == 0 {
 		return items, nil
 	}
@@ -273,9 +392,13 @@ func (s *sSysPublish) filterVisibleProfilePHashItems(ctx context.Context, items 
 	for _, item := range items {
 		profileIds = append(profileIds, item.ProfileId)
 	}
-	base, err := s.profileBaseModel(ctx, tenantId, accountId)
+	base, err := s.profileBaseModel(ctx, in.TenantId, in.AccountId)
 	if err != nil {
 		return nil, err
+	}
+	base = s.applyProfileFilters(ctx, base, in)
+	if len(accountIds) > 0 {
+		base = base.WhereIn("t.account_id", accountIds)
 	}
 	rows, err := base.Fields("p.id").WhereIn("p.id", profileIds).All()
 	if err != nil {

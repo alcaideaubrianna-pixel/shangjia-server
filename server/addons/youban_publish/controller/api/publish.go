@@ -540,6 +540,24 @@ func (c *cPublishAdmin) ProfileStatus(ctx context.Context, req *publish.AdminPro
 	return
 }
 
+func (c *cPublishAdmin) ProfileImageSearch(ctx context.Context, req *publish.AdminProfileImageSearchReq) (res *publish.AdminProfileImageSearchRes, err error) {
+	file := g.RequestFromCtx(ctx).GetUploadFile("image")
+	if file == nil {
+		return nil, gerror.New("请先上传要搜索的图片")
+	}
+	list, totalCount, err := service.SysPublish().AdminProfileImageSearch(ctx, &req.ProfileImageSearchInp, file)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.NoteModel{}
+	}
+	res = new(publish.AdminProfileImageSearchRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
 func (c *cPublishAdmin) TgMessageRepairStart(ctx context.Context, req *publish.AdminTgMessageRepairStartReq) (res *publish.AdminTgMessageRepairStartRes, err error) {
 	data, err := service.SysPublish().AdminTgMessageRepairStart(ctx, &req.TgMessageRepairStartInp)
 	if err != nil {
