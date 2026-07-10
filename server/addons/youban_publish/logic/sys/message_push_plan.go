@@ -305,7 +305,7 @@ func (s *sSysPublish) executeMessagePushPlan(ctx context.Context, plan messagePu
 		}
 		for channelIndex, channel := range channels {
 			delay := time.Duration(delayIndex*plan.IntervalSeconds) * time.Second
-			operationNo := messagePushPlanOperationNo(plan.Id, scheduledAt, templateId, channel.TargetChatId)
+			operationNo := messagePushPlanOperationNo(plan.Id, scheduledAt, template, channel.TargetChatId)
 			result := s.queueMessageTemplateToChannel(ctx, template, channel, plan.TenantId, plan.AccountId, operationNo, delay)
 			if result.Status == sysin.MessagePushStatusPending {
 				success++
@@ -437,13 +437,17 @@ func shouldWaitMessagePushPlan(templateIndex int, channelIndex int, templateCoun
 	return templateIndex < templateCount-1 || channelIndex < channelCount-1
 }
 
-func messagePushPlanOperationNo(planId int64, scheduledAt *gtime.Time, templateId int64, targetChatId string) string {
+func messagePushPlanOperationNo(planId int64, scheduledAt *gtime.Time, template *sysin.MessageTemplateModel, targetChatId string) string {
 	scheduled := int64(0)
 	if scheduledAt != nil {
 		scheduled = scheduledAt.Timestamp()
 	}
+	templateId := int64(0)
+	if template != nil {
+		templateId = template.Id
+	}
 	targetKey := strings.NewReplacer("-", "", ":", "", "@", "").Replace(normalizeTelegramChannelChatID(targetChatId))
-	return "message_push_plan:" + strconv.FormatInt(planId, 10) + ":" + strconv.FormatInt(scheduled, 10) + ":" + strconv.FormatInt(templateId, 10) + ":" + targetKey
+	return "message_push_plan:" + strconv.FormatInt(planId, 10) + ":" + strconv.FormatInt(scheduled, 10) + ":" + strconv.FormatInt(templateId, 10) + ":" + targetKey + ":" + messageTemplateHash(template)
 }
 
 func mustJsonEncode(value any) string {

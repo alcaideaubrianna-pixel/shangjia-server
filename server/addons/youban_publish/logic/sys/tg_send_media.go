@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -434,6 +435,35 @@ func resolveTelegramLocalPath(path string) string {
 		}
 	}
 	return filepath.Join("resource/public", trimmed)
+}
+
+func localTelegramFileURLPath(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.HasPrefix(raw, "data:") {
+		return ""
+	}
+	path := raw
+	if parsed, err := url.Parse(raw); err == nil {
+		if parsed.Scheme != "" && parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return ""
+		}
+		if parsed.Path != "" {
+			path = parsed.Path
+		}
+	}
+	path = strings.TrimLeft(path, "/")
+	if path == "" {
+		return ""
+	}
+	for _, prefix := range []string{"resource/public/", "public/"} {
+		if strings.HasPrefix(path, prefix) {
+			return path
+		}
+	}
+	if strings.HasPrefix(path, "attachment/") || strings.HasPrefix(path, "upload/") || strings.HasPrefix(path, "uploads/") {
+		return path
+	}
+	return ""
 }
 
 func fileExists(path string) bool {

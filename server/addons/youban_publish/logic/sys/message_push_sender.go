@@ -2,7 +2,9 @@ package sys
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -29,6 +31,21 @@ type messagePushChannel struct {
 	BotIdJson    string `json:"botIdJson"`
 	IsBroadcast  int    `json:"isBroadcast"`
 	IsMegagroup  int    `json:"isMegagroup"`
+}
+
+type messageTemplateForwardSource struct {
+	Peer       tg.InputPeerClass
+	MessageIds []int
+}
+
+type messageTemplateForwardSourceJob struct {
+	Id           int64  `json:"id"`
+	TenantId     int64  `json:"tenantId"`
+	TargetChatId string `json:"targetChatId"`
+}
+
+type messageTemplateForwardSourceMessage struct {
+	MessageId int64 `json:"messageId"`
 }
 
 func (s *sSysPublish) AdminMessageTemplatePush(ctx context.Context, in *sysin.MessageTemplatePushInp) (res *sysin.MessageTemplatePushModel, err error) {
@@ -78,7 +95,7 @@ func (s *sSysPublish) AdminMessageTemplatePush(ctx context.Context, in *sysin.Me
 		Results: make([]*sysin.MessageTemplatePushResultModel, 0, len(channels)),
 	}
 	for _, channel := range channels {
-		operationNo := messagePushManualOperationNo(template.Id, channel)
+		operationNo := messagePushManualOperationNo(template, channel)
 		result := s.queueMessageTemplateToChannelWithPriority(ctx, template, channel, account.TenantId, in.AccountId, operationNo, 0, tgJobPriorityUrgent, tgQueueNameUrgent)
 		res.Results = append(res.Results, result)
 		if result.Status == sysin.MessagePushStatusPending {
@@ -209,7 +226,7 @@ func (s *sSysPublish) SendMessagePushJob(ctx context.Context, jobId int64) error
 func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRecord, template *sysin.MessageTemplateModel, channel *messagePushChannel, tgAccountId int64) error {
 	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusSending, "开始使用账号推送消息模板")
 	media := messageTemplateTelegramMedia(template)
-	messages, err := s.sendMessageTemplateByTgAccount(ctx, tgAccountId, channel, telegramRichTextHTML(template.Text), media)
+	messages, err := s.sendMessageTemplateByTgAccount(ctx, tgAccountId, channel, telegramRichTextHTML(template.Text), media, messageTemplateHash(template))
 	if err != nil {
 		return err
 	}
@@ -230,7 +247,7 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 	return nil
 }
 
-func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAccountId int64, channel *messagePushChannel, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
+func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAccountId int64, channel *messagePushChannel, caption string, media []*telegramMediaItem, templateHash string) ([]*telegramSentMessage, error) {
 	if channel == nil {
 		return nil, gerror.New("推送目标不能为空")
 	}
@@ -238,8 +255,22 @@ func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAcco
 	if err != nil {
 		return nil, err
 	}
+	source, err := s.messageTemplateForwardSource(ctx, tgAccountId, templateHash)
+	if err != nil {
+		g.Log().Warningf(ctx, "读取消息模板复用源失败 tgAccountId:%d templateHash:%s err:%+v", tgAccountId, templateHash, err)
+	}
 	var sent []*telegramSentMessage
 	send := func(runCtx context.Context, client *telegram.Client) error {
+		if source != nil && len(source.MessageIds) > 0 {
+			messages, forwardErr := forwardMessageTemplateWithGotd(runCtx, client, source.Peer, peer, source.MessageIds, media)
+			if forwardErr == nil && len(messages) > 0 {
+				sent = messages
+				return nil
+			}
+			if forwardErr != nil {
+				g.Log().Warningf(runCtx, "复用TG历史消息转发失败，回退上传 tgAccountId:%d templateHash:%s err:%+v", tgAccountId, templateHash, forwardErr)
+			}
+		}
 		sender := gotdmessage.NewSender(client.API())
 		messages, sendErr := sendMessageTemplateWithGotd(runCtx, sender.To(peer), caption, media)
 		if sendErr != nil {
@@ -273,9 +304,7 @@ func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAcco
 	runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	err = client.Run(runCtx, func(runCtx context.Context) error {
-		var sendErr error
-		sent, sendErr = sendMessageTemplateWithGotd(runCtx, gotdmessage.NewSender(client.API()).To(peer), caption, media)
-		return sendErr
+		return send(runCtx, client)
 	})
 	if err != nil {
 		return nil, err
@@ -362,6 +391,12 @@ func gotdMessageUploadOption(media *telegramMediaItem) (gotdmessage.UploadOption
 		return nil, gerror.New("媒体文件为空")
 	}
 	if path := strings.TrimSpace(media.StoragePath); path != "" {
+		localPath := resolveTelegramLocalPath(path)
+		if fileExists(localPath) {
+			return gotdmessage.FromPath(localPath), nil
+		}
+	}
+	if path := localTelegramFileURLPath(media.FileUrl); path != "" {
 		localPath := resolveTelegramLocalPath(path)
 		if fileExists(localPath) {
 			return gotdmessage.FromPath(localPath), nil
@@ -456,22 +491,108 @@ func gotdSentMessagesFromUpdates(updates tg.UpdatesClass, media []*telegramMedia
 	return messages
 }
 
+func forwardMessageTemplateWithGotd(ctx context.Context, client *telegram.Client, fromPeer tg.InputPeerClass, toPeer tg.InputPeerClass, messageIds []int, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
+	if client == nil || fromPeer == nil || toPeer == nil || len(messageIds) == 0 {
+		return nil, gerror.New("TG历史消息转发参数不完整")
+	}
+	updates, err := client.API().MessagesForwardMessages(ctx, &tg.MessagesForwardMessagesRequest{
+		FromPeer: fromPeer,
+		ToPeer:   toPeer,
+		ID:       messageIds,
+		RandomID: collectForwardRandomIds(messageIds),
+		Silent:   true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return gotdSentMessagesFromUpdates(updates, media), nil
+}
+
+func (s *sSysPublish) messageTemplateForwardSource(ctx context.Context, tgAccountId int64, templateHash string) (*messageTemplateForwardSource, error) {
+	templateHash = strings.TrimSpace(templateHash)
+	if tgAccountId <= 0 || templateHash == "" {
+		return nil, nil
+	}
+	var jobs []*messageTemplateForwardSourceJob
+	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		Fields("j.id,j.tenant_id,j.target_chat_id").
+		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id").
+		Where("c.tg_account_id", tgAccountId).
+		Where("j.status", sysin.MessagePushStatusSent).
+		Where("j.operation_no LIKE ?", "message_push%:"+templateHash).
+		OrderDesc("j.id").
+		Limit(10).
+		Scan(&jobs)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取消息模板复用任务失败")
+	}
+	for _, job := range jobs {
+		if job == nil || job.Id <= 0 {
+			continue
+		}
+		cache, cacheErr := s.tgChannelCacheByChannelId(ctx, job.TenantId, tgAccountId, job.TargetChatId)
+		if cacheErr != nil || cache == nil {
+			continue
+		}
+		sourceChannel := &messagePushChannel{
+			TgAccountId:  tgAccountId,
+			AccessHash:   cache.AccessHash,
+			TargetChatId: cache.ChannelId,
+			IsBroadcast:  cache.IsBroadcast,
+			IsMegagroup:  cache.IsMegagroup,
+		}
+		peer, peerErr := messagePushInputPeer(sourceChannel)
+		if peerErr != nil {
+			continue
+		}
+		var rows []*messageTemplateForwardSourceMessage
+		if err = g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+			Fields("tg_message_id AS message_id").
+			Where("job_id", job.Id).
+			Where("status", sysin.MessagePushStatusSent).
+			Where("tg_message_id>?", 0).
+			OrderAsc("id").
+			Scan(&rows); err != nil {
+			return nil, gerror.Wrap(err, "读取消息模板复用消息失败")
+		}
+		messageIds := make([]int, 0, len(rows))
+		for _, row := range rows {
+			if row == nil || row.MessageId <= 0 {
+				continue
+			}
+			messageIds = append(messageIds, int(row.MessageId))
+		}
+		if len(messageIds) == 0 {
+			continue
+		}
+		return &messageTemplateForwardSource{
+			Peer:       peer,
+			MessageIds: messageIds,
+		}, nil
+	}
+	return nil, nil
+}
+
 func (s *sSysPublish) createMessagePushJob(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, botId int64) (telegramJobRecord, error) {
 	now := gtime.Now()
 	targetKey := strings.NewReplacer("-", "", ":", "", "@", "").Replace(channel.TargetChatId)
-	operationNo := fmt.Sprintf("message_push:%d:%d:%d:%s", template.Id, now.TimestampNano(), channel.Id, targetKey)
+	operationNo := fmt.Sprintf("message_push:%d:%d:%d:%s:%s", template.Id, now.TimestampNano(), channel.Id, targetKey, messageTemplateHash(template))
 	return s.createMessagePushJobWithOperation(ctx, template, channel, tenantId, accountId, botId, operationNo, tgJobPriorityUrgent, tgQueueNameUrgent, tgDispatchStatusProcessing, now)
 }
 
-func messagePushManualOperationNo(templateId int64, channel *messagePushChannel) string {
+func messagePushManualOperationNo(template *sysin.MessageTemplateModel, channel *messagePushChannel) string {
 	targetChatId := ""
 	channelId := int64(0)
 	if channel != nil {
 		targetChatId = channel.TargetChatId
 		channelId = channel.Id
 	}
+	templateId := int64(0)
+	if template != nil {
+		templateId = template.Id
+	}
 	targetKey := strings.NewReplacer("-", "", ":", "", "@", "").Replace(normalizeTelegramChannelChatID(targetChatId))
-	return fmt.Sprintf("message_push:%d:%d:%d:%s", templateId, gtime.Now().TimestampNano(), channelId, targetKey)
+	return fmt.Sprintf("message_push:%d:%d:%d:%s:%s", templateId, gtime.Now().TimestampNano(), channelId, targetKey, messageTemplateHash(template))
 }
 
 func (s *sSysPublish) createQueuedMessagePushJob(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, botId int64, operationNo string) (telegramJobRecord, error) {
@@ -807,4 +928,40 @@ func messageTemplateTelegramMedia(template *sysin.MessageTemplateModel) []*teleg
 		})
 	}
 	return media
+}
+
+func messageTemplateHash(template *sysin.MessageTemplateModel) string {
+	if template == nil {
+		return ""
+	}
+	var builder strings.Builder
+	builder.WriteString(strings.TrimSpace(template.Text))
+	builder.WriteByte('\n')
+	for _, item := range template.Media {
+		if item == nil {
+			continue
+		}
+		builder.WriteString(strconv.FormatInt(item.Id, 10))
+		builder.WriteByte('|')
+		builder.WriteString(strings.TrimSpace(item.MediaType))
+		builder.WriteByte('|')
+		builder.WriteString(strings.TrimSpace(item.FileUrl))
+		builder.WriteByte('|')
+		builder.WriteString(strings.TrimSpace(item.StoragePath))
+		builder.WriteByte('|')
+		builder.WriteString(strings.TrimSpace(item.PosterUrl))
+		builder.WriteByte('|')
+		builder.WriteString(strings.TrimSpace(item.PosterStoragePath))
+		builder.WriteByte('|')
+		builder.WriteString(strings.TrimSpace(item.TgFileId))
+		builder.WriteByte('|')
+		builder.WriteString(strings.TrimSpace(item.TgThumbFileId))
+		builder.WriteByte('|')
+		builder.WriteString(strings.TrimSpace(item.AssetHash))
+		builder.WriteByte('|')
+		builder.WriteString(strconv.Itoa(item.SortIndex))
+		builder.WriteByte('\n')
+	}
+	sum := sha256.Sum256([]byte(builder.String()))
+	return hex.EncodeToString(sum[:])[:16]
 }
