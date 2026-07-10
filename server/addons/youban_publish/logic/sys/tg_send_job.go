@@ -16,6 +16,8 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
+var errTelegramJobSuperseded = errors.New("TG推送任务已废弃")
+
 func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 	targetJob, err := s.telegramJobById(ctx, jobId)
 	if err != nil {
@@ -145,12 +147,27 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if err != nil {
 		return err
 	}
+	if stillSending, err := s.telegramJobStillSending(ctx, job.Id); err != nil {
+		return err
+	} else if !stillSending {
+		s.appendTelegramJobLog(ctx, job, "publish", "superseded", "TG展示资料发送前任务已废弃，停止推送")
+		return errTelegramJobSuperseded
+	}
 	messages, err := s.sendTelegramDisplayPart(ctx, bot, job.TargetChatId, caption, displayMedia)
 	if err != nil {
 		return gerror.Wrapf(err, "TG展示资料推送失败，job:%d，channel:%d，chat:%s", job.Id, job.ChannelId, job.TargetChatId)
 	}
+	if stillSending, err := s.telegramJobStillSending(ctx, job.Id); err != nil {
+		return err
+	} else if !stillSending {
+		_ = s.saveTelegramSentMessages(ctx, job, messages)
+		_ = s.updateTelegramMediaFileIds(ctx, messages)
+		s.appendTelegramJobLog(ctx, job, "publish", "superseded", "TG展示资料已发送但任务已废弃，停止推送验证资料")
+		return errTelegramJobSuperseded
+	}
 	verifyMessages, err := s.sendTelegramVerifyPart(ctx, bot, job.TargetChatId, verifyMedia)
 	if err != nil {
+		s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "验证资料推送失败，清理已发送展示资料")
 		return gerror.Wrapf(err, "TG验证资料推送失败，job:%d，channel:%d，chat:%s", job.Id, job.ChannelId, job.TargetChatId)
 	}
 	messages = append(messages, verifyMessages...)
@@ -158,6 +175,21 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		return err
 	}
 	return s.updateTelegramMediaFileIds(ctx, messages)
+}
+
+func (s *sSysPublish) cleanupTelegramSentMessages(ctx context.Context, bot *tgbot.Bot, chatId string, messages []*telegramSentMessage, reason string) {
+	if bot == nil || len(messages) == 0 {
+		return
+	}
+	chatId = normalizeTelegramChannelChatID(chatId)
+	for _, item := range messages {
+		if item == nil || item.MessageId <= 0 {
+			continue
+		}
+		if _, err := bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{ChatID: chatId, MessageID: int(item.MessageId)}); err != nil {
+			g.Log().Warningf(ctx, "清理TG半组消息失败 chat:%s message:%d reason:%s err:%+v", chatId, item.MessageId, reason, err)
+		}
+	}
 }
 
 func (s *sSysPublish) sendTelegramDisplayPart(ctx context.Context, bot *tgbot.Bot, chatId string, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
@@ -185,6 +217,9 @@ func (s *sSysPublish) sendTelegramVerifyPart(ctx context.Context, bot *tgbot.Bot
 }
 
 func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJobRecord, err error) error {
+	if errors.Is(err, errTelegramJobSuperseded) {
+		return nil
+	}
 	allowed, allowedErr := s.canSendTelegramJob(ctx, job)
 	if allowedErr == nil && !allowed {
 		s.appendTelegramJobLog(ctx, job, "publish", "superseded", "TG推送失败时任务已被新操作覆盖，旧任务已废弃")
@@ -270,6 +305,12 @@ func (s *sSysPublish) switchTelegramJobToNextBot(ctx context.Context, job telegr
 }
 
 func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRecord) error {
+	if status, err := s.telegramJobCurrentStatus(ctx, job.Id); err != nil {
+		return err
+	} else if status != "sending" {
+		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "TG发送完成前任务状态已变更，跳过成功标记："+status)
+		return nil
+	}
 	allowed, err := s.canSendTelegramJob(ctx, job)
 	if err != nil {
 		return err
@@ -281,15 +322,23 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 		}
 		return s.markTelegramJobSuperseded(ctx, job.Id)
 	}
-	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
-		"status":          "sent",
-		"dispatch_status": tgDispatchStatusDone,
-		"error_message":   "",
-		"sent_at":         gtime.Now(),
-		"updated_at":      gtime.Now(),
-	}).Update()
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", job.Id).
+		Where("status", "sending").
+		Data(g.Map{
+			"status":          "sent",
+			"dispatch_status": tgDispatchStatusDone,
+			"error_message":   "",
+			"sent_at":         gtime.Now(),
+			"updated_at":      gtime.Now(),
+		}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "更新TG任务状态失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "TG发送完成时任务已不再发送中，跳过成功标记")
+		return nil
 	}
 	s.appendTelegramJobLog(ctx, job, "publish", "sent", s.telegramJobPublishMessage(job, "TG资料推送成功"))
 	allSent, err := s.allTelegramTaskJobsSent(ctx, job.TaskId, job.OperationNo)

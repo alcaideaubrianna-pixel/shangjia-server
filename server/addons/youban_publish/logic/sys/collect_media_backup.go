@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	tgbot "github.com/go-telegram/bot"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -51,6 +52,11 @@ func (s *sSysPublish) forwardCollectMediaToBackup(ctx context.Context, event gdb
 		}
 		if usedRuntime {
 			s.appendCollectEventLogForRecord(ctx, event, "media", "forwarded", "账号采集运行时已完成媒体转存", collectForwardMeta(backup.ChannelId, forwarded))
+			if err = s.validateCollectBackupCopyRefs(ctx, event, backup.ChannelId, forwarded); err != nil {
+				lastErr = err
+				s.appendCollectEventLogForRecord(ctx, event, "media", "retry", "备份频道媒体不可被Bot复制，尝试下一个备份频道", backup.ChannelId+": "+err.Error())
+				continue
+			}
 			return applyCollectBackupForwardResult(items, backup.ChannelId, ids, indexMap, forwarded)
 		}
 		if event["source_type"].String() == sysin.CollectSourceTypeAccount {
@@ -62,6 +68,12 @@ func (s *sSysPublish) forwardCollectMediaToBackup(ctx context.Context, event gdb
 			s.appendCollectEventLogForRecord(ctx, event, "media", "retry", "独立客户端转存失败，尝试下一个备份频道", backup.ChannelId+": "+fallbackErr.Error())
 			continue
 		} else if changed {
+			refs := collectCopyMessageIds(forwardedItems, backup.ChannelId)
+			if err = s.validateCollectBackupCopyRefs(ctx, event, backup.ChannelId, refs); err != nil {
+				lastErr = err
+				s.appendCollectEventLogForRecord(ctx, event, "media", "retry", "备份频道媒体不可被Bot复制，尝试下一个备份频道", backup.ChannelId+": "+err.Error())
+				continue
+			}
 			return forwardedItems, true, nil
 		}
 	}
@@ -70,6 +82,171 @@ func (s *sSysPublish) forwardCollectMediaToBackup(ctx context.Context, event gdb
 		return items, false, lastErr
 	}
 	return items, false, nil
+}
+
+func (s *sSysPublish) validateCollectBackupCopyRefs(ctx context.Context, event gdb.Record, backupChannelId string, messageIds []int) error {
+	messageIds = positiveUniqueInts(messageIds)
+	if len(messageIds) == 0 {
+		return gerror.New("备份频道未返回可复制消息ID")
+	}
+	bots, err := s.collectBackupCopyValidationBots(ctx, event, backupChannelId)
+	if err != nil {
+		return err
+	}
+	if len(bots) == 0 {
+		return gerror.New("备份频道未配置可校验Bot")
+	}
+	chatId := normalizeTelegramChannelChatID(backupChannelId)
+	for _, botToken := range bots {
+		bot, err := s.telegramBot(ctx, botToken)
+		if err != nil {
+			return err
+		}
+		for _, messageId := range messageIds {
+			copied, err := bot.CopyMessage(ctx, &tgbot.CopyMessageParams{
+				ChatID:              chatId,
+				FromChatID:          chatId,
+				MessageID:           messageId,
+				DisableNotification: true,
+			})
+			if err != nil {
+				return gerror.Wrapf(err, "备份频道消息不可复制 chat:%s message:%d", chatId, messageId)
+			}
+			if copied == nil || copied.ID <= 0 {
+				return gerror.Newf("备份频道消息复制校验无返回 chat:%s message:%d", chatId, messageId)
+			}
+			if _, err = bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{ChatID: chatId, MessageID: copied.ID}); err != nil {
+				g.Log().Warningf(ctx, "清理备份频道复制校验消息失败 chat:%s message:%d err:%+v", chatId, copied.ID, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *sSysPublish) collectBackupCopyValidationBots(ctx context.Context, event gdb.Record, backupChannelId string) ([]string, error) {
+	botIds, err := s.collectBackupCopyValidationBotIds(ctx, event, backupChannelId)
+	if err != nil {
+		return nil, err
+	}
+	tokens := make([]string, 0, len(botIds))
+	seen := make(map[string]struct{}, len(botIds))
+	for _, botId := range botIds {
+		bot, err := s.getBotById(ctx, botId, event["tenant_id"].Int64())
+		if err != nil {
+			return nil, err
+		}
+		token := strings.TrimSpace(bot.BotToken)
+		if token == "" {
+			return nil, gerror.Newf("Bot Token未配置 bot:%d", botId)
+		}
+		if _, ok := seen[token]; ok {
+			continue
+		}
+		seen[token] = struct{}{}
+		tokens = append(tokens, token)
+	}
+	return tokens, nil
+}
+
+func (s *sSysPublish) collectBackupCopyValidationBotIds(ctx context.Context, event gdb.Record, backupChannelId string) ([]int64, error) {
+	chatIds := collectBackupChannelChatCandidates(backupChannelId)
+	var rows []struct {
+		BotIdJson string `json:"botIdJson"`
+	}
+	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Fields("bot_id_json").
+		Where("tenant_id", event["tenant_id"].Int64()).
+		Where("publish_direction", "backup").
+		Where("status", 1).
+		WhereIn("target_chat_id", chatIds).
+		WhereNull("deleted_at").
+		Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "读取备份频道Bot配置失败")
+	}
+	ids := make([]int64, 0)
+	for _, row := range rows {
+		ids = append(ids, decodeBotIds(row.BotIdJson)...)
+	}
+	ids = positiveUniqueInt64s(ids)
+	if len(ids) > 0 {
+		return ids, nil
+	}
+	bots, err := s.enabledBots(ctx, event["tenant_id"].Int64())
+	if err != nil {
+		return nil, err
+	}
+	for _, bot := range bots {
+		if bot != nil {
+			ids = append(ids, bot.Id)
+		}
+	}
+	return positiveUniqueInt64s(ids), nil
+}
+
+func collectBackupChannelChatCandidates(channelId string) []string {
+	normalized := normalizeTelegramChannelChatID(channelId)
+	positive := strings.TrimPrefix(normalized, "-100")
+	candidates := []string{strings.TrimSpace(channelId), normalized, positive}
+	seen := make(map[string]struct{}, len(candidates))
+	list := make([]string, 0, len(candidates))
+	for _, item := range candidates {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		list = append(list, item)
+	}
+	return list
+}
+
+func collectCopyMessageIds(items []collectMediaItem, backupChannelId string) []int {
+	chatId := normalizeTelegramChannelChatID(backupChannelId)
+	ids := make([]int, 0, len(items))
+	for _, item := range items {
+		ref, ok := telegramCopyMediaRefFromFileId(item.FileId)
+		if !ok || ref.ChatId != chatId || ref.MessageId <= 0 {
+			continue
+		}
+		ids = append(ids, ref.MessageId)
+	}
+	return positiveUniqueInts(ids)
+}
+
+func positiveUniqueInts(values []int) []int {
+	seen := make(map[int]struct{}, len(values))
+	list := make([]int, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		list = append(list, value)
+	}
+	sort.Ints(list)
+	return list
+}
+
+func positiveUniqueInt64s(values []int64) []int64 {
+	seen := make(map[int64]struct{}, len(values))
+	list := make([]int64, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		list = append(list, value)
+	}
+	return list
 }
 
 func (s *sSysPublish) forwardCollectMediaWithStandaloneClient(ctx context.Context, event gdb.Record, sourcePeer *tg.InputPeerChannel, backupPeer *tg.InputPeerChannel, backupChannelId string, ids []int, indexMap map[int][]int, items []collectMediaItem) ([]collectMediaItem, bool, error) {

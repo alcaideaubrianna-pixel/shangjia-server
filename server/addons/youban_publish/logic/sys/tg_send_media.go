@@ -110,6 +110,9 @@ func (s *sSysPublish) copyTelegramMediaGroup(ctx context.Context, bot *tgbot.Bot
 	if len(media) <= 1 {
 		return nil, false, nil
 	}
+	if strings.TrimSpace(caption) != "" {
+		return nil, false, nil
+	}
 	fromChatId, messageIds, ok := telegramCopyMediaGroupRefs(media)
 	if !ok {
 		return nil, false, nil
@@ -123,16 +126,15 @@ func (s *sSysPublish) copyTelegramMediaGroup(ctx context.Context, bot *tgbot.Bot
 	if err != nil {
 		return nil, true, err
 	}
-	if strings.TrimSpace(caption) != "" && len(copied) > 0 && copied[0].ID > 0 {
-		if _, err = bot.EditMessageCaption(ctx, &tgbot.EditMessageCaptionParams{
-			ChatID:    chatId,
-			MessageID: copied[0].ID,
-			Caption:   caption,
-			ParseMode: telegramMediaParseMode(caption),
-		}); err != nil {
-			return nil, true, err
-		}
+	messages := telegramSentMessagesFromCopiedIDs(copied, purpose, media)
+	if len(messages) != len(media) {
+		s.cleanupTelegramSentMessages(ctx, bot, chatId, messages, "复制媒体组返回数量不完整")
+		return nil, true, gerror.Newf("复制媒体组返回数量不完整，期望:%d 实际:%d", len(media), len(messages))
 	}
+	return messages, true, nil
+}
+
+func telegramSentMessagesFromCopiedIDs(copied []models.MessageID, purpose string, media []*telegramMediaItem) []*telegramSentMessage {
 	messages := make([]*telegramSentMessage, 0, len(copied))
 	for index, msg := range copied {
 		if msg.ID <= 0 {
@@ -150,7 +152,7 @@ func (s *sSysPublish) copyTelegramMediaGroup(ctx context.Context, bot *tgbot.Bot
 			AssetHash: item.AssetHash,
 		})
 	}
-	return messages, true, nil
+	return messages
 }
 
 func (s *sSysPublish) copyTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem, ref telegramCopyMediaRef) ([]*telegramSentMessage, error) {

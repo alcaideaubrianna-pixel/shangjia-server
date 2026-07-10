@@ -45,6 +45,25 @@ func (s *sSysPublish) lockTelegramJob(ctx context.Context, jobId int64) (telegra
 	return job, true, nil
 }
 
+func (s *sSysPublish) telegramJobCurrentStatus(ctx context.Context, jobId int64) (string, error) {
+	value, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", jobId).
+		Fields("status").
+		Value()
+	if err != nil {
+		return "", gerror.Wrap(err, "读取TG任务状态失败")
+	}
+	return value.String(), nil
+}
+
+func (s *sSysPublish) telegramJobStillSending(ctx context.Context, jobId int64) (bool, error) {
+	status, err := s.telegramJobCurrentStatus(ctx, jobId)
+	if err != nil {
+		return false, err
+	}
+	return status == "sending", nil
+}
+
 func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecord, purpose string) ([]*telegramMediaItem, error) {
 	if err := ensureMediaEditColumns(ctx); err != nil {
 		return nil, err
