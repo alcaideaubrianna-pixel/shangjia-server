@@ -370,8 +370,9 @@ func (s *sSysPublish) AdminChannelFullPush(ctx context.Context, in *sysin.Channe
 	}
 	queued := 0
 	batchNo := fmt.Sprintf("full_push:%d:%d", channel.Id, gtime.Now().TimestampNano())
+	lastId := int64(0)
 	for {
-		ids, err := s.fullPushPublishedTaskIds(ctx, account.TenantId, 500)
+		ids, err := s.fullPushPublishedTaskIds(ctx, account.TenantId, lastId, 500)
 		if err != nil {
 			return nil, err
 		}
@@ -379,25 +380,44 @@ func (s *sSysPublish) AdminChannelFullPush(ctx context.Context, in *sysin.Channe
 			break
 		}
 		for _, taskId := range ids {
-			operationNo := fmt.Sprintf("%s:%d", batchNo, taskId)
-			if err = s.markTaskPublishQueued(ctx, taskId, account.TenantId, account.Id, operationNo); err != nil {
-				return nil, err
+			if taskId > lastId {
+				lastId = taskId
 			}
-			if err = s.enqueuePublishSubmitTask(ctx, publishSubmitQueuePayload{
-				TaskId:               taskId,
-				TenantId:             account.TenantId,
-				OperatorId:           account.Id,
-				OperationNo:          operationNo,
-				ChannelIds:           []int64{channel.Id},
-				OnlySelectedChannels: true,
-			}, 0); err != nil {
-				_ = s.markTaskPublishFailed(ctx, taskId, account.TenantId, account.Id, err)
+			operationNo := fmt.Sprintf("%s:%d", batchNo, taskId)
+			if err = s.enqueueFullPushTelegramJob(ctx, taskId, channel.Id, operationNo); err != nil {
 				return nil, gerror.Wrap(err, "全量推送任务入队失败")
 			}
 			queued++
 		}
 	}
 	return &sysin.ChannelFullPushModel{ChannelId: channel.Id, Queued: queued}, nil
+}
+
+func (s *sSysPublish) enqueueFullPushTelegramJob(ctx context.Context, taskId int64, channelId int64, operationNo string) error {
+	task, err := s.telegramJobTask(ctx, taskId)
+	if err != nil {
+		return err
+	}
+	channels, err := s.telegramJobChannels(ctx, task, []int64{channelId})
+	if err != nil {
+		return err
+	}
+	if len(channels) == 0 {
+		return gerror.New("全量推送目标频道不存在")
+	}
+	if err = s.prepareTelegramTaskForResubmit(ctx, task, channels, operationNo, true); err != nil {
+		return err
+	}
+	for _, channel := range channels {
+		jobId, err := s.ensureTelegramPublishChannelJob(ctx, task, channel, operationNo)
+		if err != nil {
+			return err
+		}
+		if err = s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
+			return gerror.Wrap(err, "TG任务入队失败")
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) fullPushChannel(ctx context.Context, tenantId int64, channelId int64) (*sysin.ChannelModel, error) {
@@ -421,28 +441,29 @@ func (s *sSysPublish) fullPushChannel(ctx context.Context, tenantId int64, chann
 	return &channel, nil
 }
 
-func (s *sSysPublish) fullPushPublishedTaskIds(ctx context.Context, tenantId int64, limit int) ([]int64, error) {
+func (s *sSysPublish) fullPushPublishedTaskIds(ctx context.Context, tenantId int64, lastId int64, limit int) ([]int64, error) {
 	if limit <= 0 {
 		limit = 500
 	}
 	var rows []struct {
 		Id int64 `json:"id"`
 	}
-	err := g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
+	mod := g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
 		InnerJoin(publishAccountTable+" a", "a.id=t.account_id AND a.deleted_at IS NULL").
 		InnerJoin(dao.ContentProfile.Table()+" p", "p.id=t.profile_id AND p.deleted_at IS NULL").
 		Fields("t.id").
 		Where("t.tenant_id", tenantId).
-		Where("t.status", sysin.PublishTaskStatusPublished).
+		WhereIn("t.status", []string{sysin.PublishTaskStatusPublished, sysin.PublishTaskStatusPublishing}).
 		Where("t.deleted_at IS NULL").
 		Where("a.tenant_id", tenantId).
 		Where("a.account_type", sysin.PublishAccountTypeUploader).
 		Where("a.status", 1).
 		Where("p.status", 1).
 		Where("COALESCE(t.client_request_id, '') NOT LIKE ?", "collect:follow:%").
+		Where("t.id > ?", lastId).
 		OrderAsc("t.id").
-		Limit(limit).
-		Scan(&rows)
+		Limit(limit)
+	err := mod.Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取全量推送资料失败")
 	}
