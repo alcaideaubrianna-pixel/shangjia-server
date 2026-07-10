@@ -15,6 +15,9 @@ func (s *sSysPublish) telegramChannelHasPendingCollectContinuation(ctx context.C
 	if current.Id <= 0 {
 		return false, nil
 	}
+	if current.CollectSourceId <= 0 || current.CollectSourceMessageId <= 0 || current.CollectSourceChatId == "" {
+		return false, nil
+	}
 	candidate, err := s.telegramChannelPendingCollectContinuation(ctx, current)
 	if err != nil || candidate.IsEmpty() {
 		return false, err
@@ -37,6 +40,8 @@ func (s *sSysPublish) telegramChannelPendingCollectContinuation(ctx context.Cont
 		Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", now).
 		Where("j.collect_source_id > 0").
 		Where("j.collect_source_message_id > 0").
+		Where("j.collect_source_id", current.CollectSourceId).
+		Where("j.collect_source_chat_id", current.CollectSourceChatId).
 		Where("e.id > 0").
 		Where("e.media_count = 1").
 		Where("e.source_grouped_id = ''").

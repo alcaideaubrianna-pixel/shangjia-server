@@ -98,16 +98,18 @@ func (s *sSysPublish) collectTelegramJobHasPreviousActive(ctx context.Context, j
 	if err != nil || taskActive {
 		return taskActive, err
 	}
-	mod := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id <> ?", job.Id).
-		Where("collect_source_id", job.CollectSourceId).
-		Where("collect_source_chat_id", strings.TrimSpace(job.CollectSourceChatId)).
-		Where("collect_source_message_id < ?", job.CollectSourceMessageId).
-		WhereIn("status", []string{"pending", "sending", "failed_retry"})
+	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
+		Where("j.id <> ?", job.Id).
+		Where("j.collect_source_id", job.CollectSourceId).
+		Where("j.collect_source_chat_id", strings.TrimSpace(job.CollectSourceChatId)).
+		Where("j.collect_source_message_id < ?", job.CollectSourceMessageId).
+		WhereIn("j.status", []string{"pending", "sending", "failed_retry"}).
+		Where("(j.task_id = 0 OR (t.id IS NOT NULL AND t.deleted_at IS NULL))")
 	if job.ChannelId > 0 {
-		mod = mod.Where("channel_id", job.ChannelId)
+		mod = mod.Where("j.channel_id", job.ChannelId)
 	} else {
-		mod = mod.Where("target_chat_id", job.TargetChatId)
+		mod = mod.Where("j.target_chat_id", job.TargetChatId)
 	}
 	count, err := mod.Count()
 	if err != nil {

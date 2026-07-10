@@ -42,6 +42,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
 	}
+	if err := s.dispatchTelegramDueJobs(ctx, g.Cfg().MustGet(ctx, "youbanPublish.queue.schedulerBatchSize", 50).Int()); err != nil {
+		g.Log().Warningf(ctx, "调度待恢复TG推送任务失败：%+v", err)
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -49,6 +52,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 		case <-ticker.C:
 			if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
 				g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
+			}
+			if err := s.dispatchTelegramDueJobs(ctx, g.Cfg().MustGet(ctx, "youbanPublish.queue.schedulerBatchSize", 50).Int()); err != nil {
+				g.Log().Warningf(ctx, "调度待恢复TG推送任务失败：%+v", err)
 			}
 		}
 	}

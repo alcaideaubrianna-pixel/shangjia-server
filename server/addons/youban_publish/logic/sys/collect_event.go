@@ -396,6 +396,7 @@ func (s *sSysPublish) createCollectPublishTask(ctx context.Context, event gdb.Re
 		taskId := existing["id"].Int64()
 		operationNo := newTelegramOperationNo(telegramPublishBizCollect, taskId)
 		_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).Data(g.Map{
+			"profile_id":                0,
 			"title":                     title,
 			"plain_text":                text,
 			"media_count":               mediaCount,
@@ -470,6 +471,7 @@ INSERT INTO "%s"(
 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?, ?,?)
 ON CONFLICT ("tenant_id","client_request_id") WHERE "client_request_id" <> ''
 DO UPDATE SET
+	"profile_id"=0,
 	"title"=EXCLUDED."title",
 	"plain_text"=EXCLUDED."plain_text",
 	"media_count"=EXCLUDED."media_count",
@@ -514,6 +516,7 @@ RETURNING "id"`, publishTaskTable)
 	operationNo := newTelegramOperationNo(telegramPublishBizCollect, taskId)
 	if _, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).Data(g.Map{
 		"tg_operation_no": operationNo,
+		"profile_id":      0,
 		"updated_at":      now,
 	}).Update(); err != nil {
 		return 0, gerror.Wrap(err, "更新采集上架任务操作号失败")
@@ -539,6 +542,7 @@ func (s *sSysPublish) updateCollectPublishTask(ctx context.Context, event gdb.Re
 	}
 	operationNo := newTelegramOperationNo(telegramPublishBizCollect, taskId)
 	_, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).Data(g.Map{
+		"profile_id":                0,
 		"title":                     title,
 		"plain_text":                text,
 		"media_count":               mediaCount,

@@ -24,18 +24,20 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	if current.IsEmpty() {
 		return false, nil
 	}
-	mod := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id <> ?", job.Id).
-		WhereIn("status", []string{"pending", "sending", "failed_retry"})
+	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
+		Where("j.id <> ?", job.Id).
+		WhereIn("j.status", []string{"pending", "sending", "failed_retry"}).
+		Where("(j.task_id = 0 OR (t.id IS NOT NULL AND t.deleted_at IS NULL))")
 	if job.ChannelId > 0 {
-		mod = mod.Where("channel_id", job.ChannelId)
+		mod = mod.Where("j.channel_id", job.ChannelId)
 	} else {
-		mod = mod.Where("target_chat_id", normalizeTelegramChannelChatID(job.TargetChatId))
+		mod = mod.Where("j.target_chat_id", normalizeTelegramChannelChatID(job.TargetChatId))
 	}
 	createdAt := current["created_at"].GTime()
 	if job.CollectSourceId > 0 && job.CollectSourceMessageId > 0 && strings.TrimSpace(job.CollectSourceChatId) != "" {
 		mod = mod.Where(
-			`((collect_source_id = ? AND collect_source_chat_id = ? AND collect_source_message_id > 0 AND collect_source_message_id < ?) OR ((collect_source_id <> ? OR collect_source_chat_id <> ? OR collect_source_message_id = 0) AND (created_at < ? OR (created_at = ? AND id < ?))))`,
+			`((j.collect_source_id = ? AND j.collect_source_chat_id = ? AND j.collect_source_message_id > 0 AND j.collect_source_message_id < ?) OR ((j.collect_source_id <> ? OR j.collect_source_chat_id <> ? OR j.collect_source_message_id = 0) AND (j.created_at < ? OR (j.created_at = ? AND j.id < ?))))`,
 			job.CollectSourceId,
 			strings.TrimSpace(job.CollectSourceChatId),
 			job.CollectSourceMessageId,
@@ -46,7 +48,7 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 			job.Id,
 		)
 	} else {
-		mod = mod.Where(`(created_at < ? OR (created_at = ? AND id < ?))`, createdAt, createdAt, job.Id)
+		mod = mod.Where(`(j.created_at < ? OR (j.created_at = ? AND j.id < ?))`, createdAt, createdAt, job.Id)
 	}
 	count, err := mod.Count()
 	if err != nil {

@@ -49,13 +49,6 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 	if waitingOrder {
 		return s.postponeTelegramJobForChannelOrder(ctx, targetJob)
 	}
-	waitingContinuation, err := s.telegramChannelHasPendingCollectContinuation(ctx, targetJob)
-	if err != nil {
-		return err
-	}
-	if waitingContinuation {
-		return s.postponeTelegramJobForChannelContinuation(ctx, targetJob)
-	}
 	return s.sendTelegramJobLockedByChannel(ctx, jobId)
 }
 

@@ -22,6 +22,12 @@ const (
 )
 
 func (s *sSysPublish) runTelegramChannelScheduler(ctx context.Context) {
+	defer func() {
+		if err := recover(); err != nil {
+			g.Log().Warningf(ctx, "TG频道调度器异常退出：%v", err)
+		}
+	}()
+	g.Log().Info(ctx, "TG频道调度器已启动")
 	time.Sleep(time.Second)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -80,14 +86,16 @@ func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) er
 	if err := ensureCollectTelegramOrderColumns(ctx); err != nil {
 		return err
 	}
+	lockCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 	lock := hglock.NewConfig(5*time.Second, 100*time.Millisecond).Mutex("youban_publish:tg_scheduler")
-	if err := lock.TryLock(ctx); err != nil {
+	if err := lock.TryLock(lockCtx); err != nil {
 		if gerror.Is(err, hglock.ErrLockFailed) {
 			return nil
 		}
 		return gerror.Wrap(err, "获取TG调度器锁失败")
 	}
-	defer s.releaseTelegramChannelLease(ctx, lock)
+	defer s.releaseTelegramChannelLease(context.Background(), lock)
 	if err := s.resetStaleTelegramDispatchJobs(ctx); err != nil {
 		return err
 	}
@@ -119,13 +127,6 @@ func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) er
 		if waitingChannelOrder {
 			continue
 		}
-		waitingContinuation, err := s.telegramChannelHasPendingCollectContinuation(ctx, job)
-		if err != nil {
-			return err
-		}
-		if waitingContinuation {
-			continue
-		}
 		waitingPrevious, err := s.collectTelegramJobHasPreviousActive(ctx, job)
 		if err != nil {
 			return err
@@ -151,11 +152,14 @@ func (s *sSysPublish) telegramSchedulerCandidates(ctx context.Context, limit int
 	}
 	var jobs []telegramJobRecord
 	now := gtime.Now()
-	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereIn("status", []string{"pending", "failed_retry"}).
-		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", now).
-		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
-		OrderAsc("priority").OrderAsc("created_at").OrderAsc("id").
+	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
+		Fields("j.*").
+		WhereIn("j.status", []string{"pending", "failed_retry"}).
+		Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", now).
+		Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
+		Where("(j.task_id = 0 OR (t.id IS NOT NULL AND t.deleted_at IS NULL))").
+		OrderAsc("j.priority").OrderAsc("j.created_at").OrderAsc("j.id").
 		Limit(limit).
 		Scan(&jobs)
 	if err != nil {
@@ -169,14 +173,16 @@ func (s *sSysPublish) telegramChannelHasActiveDispatch(ctx context.Context, job 
 	if channelKey == "" {
 		return false, nil
 	}
-	mod := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id <> ?", job.Id).
-		WhereIn("status", []string{"sending", "pending", "failed_retry"}).
-		Where("(dispatch_status IN (?, ?) OR status = ?)", tgDispatchStatusQueued, tgDispatchStatusProcessing, "sending")
+	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
+		Where("j.id <> ?", job.Id).
+		WhereIn("j.status", []string{"sending", "pending", "failed_retry"}).
+		Where("(j.dispatch_status IN (?, ?) OR j.status = ?)", tgDispatchStatusQueued, tgDispatchStatusProcessing, "sending").
+		Where("(j.task_id = 0 OR (t.id IS NOT NULL AND t.deleted_at IS NULL))")
 	if job.ChannelId > 0 {
-		mod = mod.Where("channel_id", job.ChannelId)
+		mod = mod.Where("j.channel_id", job.ChannelId)
 	} else {
-		mod = mod.Where("target_chat_id", job.TargetChatId)
+		mod = mod.Where("j.target_chat_id", job.TargetChatId)
 	}
 	count, err := mod.Count()
 	if err != nil {
