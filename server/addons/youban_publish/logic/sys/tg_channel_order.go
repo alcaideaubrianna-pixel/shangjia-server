@@ -28,6 +28,7 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
 		Where("j.id <> ?", job.Id).
 		WhereIn("j.status", []string{"pending", "sending", "failed_retry"}).
+		Where("(j.status <> 'failed_retry' OR j.next_retry_at IS NULL OR j.next_retry_at <= ?)", gtime.Now()).
 		Where("(j.task_id = 0 OR (t.id IS NOT NULL AND t.deleted_at IS NULL))")
 	if job.ChannelId > 0 {
 		mod = mod.Where("j.channel_id", job.ChannelId)

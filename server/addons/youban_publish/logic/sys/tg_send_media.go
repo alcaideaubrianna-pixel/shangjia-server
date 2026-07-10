@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -269,7 +271,11 @@ func telegramInputFile(media *telegramMediaItem) (models.InputFile, io.Closer, e
 		}
 	}
 	if source := strings.TrimSpace(media.FileUrl); source != "" {
-		return &models.InputFileString{Data: source}, nil, nil
+		file, err := downloadTelegramRemoteMedia(source)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &models.InputFileUpload{Filename: telegramUploadFilename(media, file.Name()), Data: file}, file, nil
 	}
 	return nil, nil, gerror.New("媒体文件地址为空")
 }
@@ -368,9 +374,68 @@ func telegramInputMediaSource(media *telegramMediaItem) (string, io.Reader, io.C
 		}
 	}
 	if source := strings.TrimSpace(media.FileUrl); source != "" {
-		return source, nil, nil, nil
+		file, err := downloadTelegramRemoteMedia(source)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		attachName := fmt.Sprintf("media_%d_%s", media.Id, telegramUploadFilename(media, file.Name()))
+		return "attach://" + attachName, file, file, nil
 	}
 	return "", nil, nil, gerror.New("媒体文件地址为空")
+}
+
+type telegramRemoteMediaFile struct {
+	*os.File
+}
+
+func (f *telegramRemoteMediaFile) Close() error {
+	if f == nil || f.File == nil {
+		return nil
+	}
+	name := f.Name()
+	err := f.File.Close()
+	_ = os.Remove(name)
+	return err
+}
+
+func downloadTelegramRemoteMedia(source string) (*telegramRemoteMediaFile, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return nil, gerror.New("远程媒体地址为空")
+	}
+	req, err := http.NewRequest(http.MethodGet, source, nil)
+	if err != nil {
+		return nil, gerror.Wrap(err, "创建远程媒体下载请求失败")
+	}
+	resp, err := (&http.Client{Timeout: 2 * time.Minute}).Do(req)
+	if err != nil {
+		return nil, gerror.Wrap(err, "下载远程媒体失败")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, gerror.Newf("下载远程媒体失败：HTTP %d", resp.StatusCode)
+	}
+	ext := filepath.Ext(strings.Split(source, "?")[0])
+	if ext == "" {
+		ext = ".media"
+	}
+	file, err := os.CreateTemp("", "ybp-tg-media-*"+ext)
+	if err != nil {
+		return nil, gerror.Wrap(err, "创建远程媒体临时文件失败")
+	}
+	if _, err = io.Copy(file, resp.Body); err != nil {
+		name := file.Name()
+		_ = file.Close()
+		_ = os.Remove(name)
+		return nil, gerror.Wrap(err, "保存远程媒体临时文件失败")
+	}
+	if _, err = file.Seek(0, 0); err != nil {
+		name := file.Name()
+		_ = file.Close()
+		_ = os.Remove(name)
+		return nil, gerror.Wrap(err, "读取远程媒体临时文件失败")
+	}
+	return &telegramRemoteMediaFile{File: file}, nil
 }
 
 func telegramVideoThumbnail(media *telegramMediaItem) (models.InputFile, io.Closer, error) {
@@ -391,7 +456,11 @@ func telegramVideoThumbnail(media *telegramMediaItem) (models.InputFile, io.Clos
 		}
 	}
 	if source := strings.TrimSpace(media.PosterUrl); source != "" {
-		return &models.InputFileString{Data: source}, nil, nil
+		file, err := downloadTelegramRemoteMedia(source)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &models.InputFileUpload{Filename: filepath.Base(file.Name()), Data: file}, file, nil
 	}
 	return nil, nil, nil
 }

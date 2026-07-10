@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"io"
 	"net/http"
 	"os"
@@ -22,6 +24,7 @@ import (
 	gotdmessage "github.com/gotd/td/telegram/message"
 	gotdhtml "github.com/gotd/td/telegram/message/html"
 	"github.com/gotd/td/tg"
+	_ "golang.org/x/image/webp"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
@@ -403,21 +406,80 @@ func gotdMessageUploadOption(ctx context.Context, media *telegramMediaItem) (got
 	if path := strings.TrimSpace(media.StoragePath); path != "" {
 		localPath := resolveTelegramLocalPath(path)
 		if fileExists(localPath) {
-			return gotdmessage.FromPath(localPath), nil, nil
+			return gotdMessageUploadOptionFromPath(ctx, media, localPath, nil)
 		}
 	}
 	if path := localTelegramFileURLPath(media.FileUrl); path != "" {
 		localPath := resolveTelegramLocalPath(path)
 		if fileExists(localPath) {
-			return gotdmessage.FromPath(localPath), nil, nil
+			return gotdMessageUploadOptionFromPath(ctx, media, localPath, nil)
 		}
 	}
 	if path, cleanup, err := downloadMessagePushRemoteMedia(ctx, media); err != nil {
 		return nil, nil, err
 	} else if path != "" {
-		return gotdmessage.FromPath(path), cleanup, nil
+		return gotdMessageUploadOptionFromPath(ctx, media, path, cleanup)
 	}
 	return nil, nil, gerror.New("账号推送媒体文件不存在，请重新上传媒体文件")
+}
+
+func gotdMessageUploadOptionFromPath(ctx context.Context, media *telegramMediaItem, path string, cleanup func()) (gotdmessage.UploadOption, func(), error) {
+	uploadPath := path
+	finalCleanup := cleanup
+	if shouldConvertMessagePushImageToJPEG(media, path) {
+		jpegPath, err := convertMessagePushImageToJPEG(ctx, path)
+		if err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return nil, nil, err
+		}
+		previousCleanup := finalCleanup
+		finalCleanup = func() {
+			if previousCleanup != nil {
+				previousCleanup()
+			}
+			_ = os.Remove(jpegPath)
+		}
+		uploadPath = jpegPath
+	}
+	return gotdmessage.FromPath(uploadPath), finalCleanup, nil
+}
+
+func shouldConvertMessagePushImageToJPEG(media *telegramMediaItem, path string) bool {
+	if media == nil || !strings.EqualFold(strings.TrimSpace(media.MediaType), "image") {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".webp"
+}
+
+func convertMessagePushImageToJPEG(ctx context.Context, path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", gerror.Wrap(err, "打开账号推送图片失败")
+	}
+	defer file.Close()
+	img, _, err := image.Decode(file)
+	if err != nil {
+		return "", gerror.Wrap(err, "解析账号推送图片失败")
+	}
+	output, err := os.CreateTemp("", "ybp-message-push-*.jpg")
+	if err != nil {
+		return "", gerror.Wrap(err, "创建账号推送JPEG临时文件失败")
+	}
+	outputPath := output.Name()
+	if err = jpeg.Encode(output, img, &jpeg.Options{Quality: 90}); err != nil {
+		_ = output.Close()
+		_ = os.Remove(outputPath)
+		return "", gerror.Wrap(err, "转换账号推送图片为JPEG失败")
+	}
+	if err = output.Close(); err != nil {
+		_ = os.Remove(outputPath)
+		return "", gerror.Wrap(err, "关闭账号推送JPEG临时文件失败")
+	}
+	g.Log().Infof(ctx, "账号推送图片已转换为JPEG path:%s", path)
+	return outputPath, nil
 }
 
 func downloadMessagePushRemoteMedia(ctx context.Context, media *telegramMediaItem) (string, func(), error) {

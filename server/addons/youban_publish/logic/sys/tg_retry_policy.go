@@ -13,6 +13,7 @@ import (
 const (
 	telegramRetryMinDelay = 30 * time.Second
 	telegramRetryMaxDelay = 30 * time.Minute
+	telegramRetryMaxCount = 5
 )
 
 type telegramJobRetryPolicy struct {
@@ -29,6 +30,12 @@ func telegramJobErrorRetryPolicy(err error, retryCount int) telegramJobRetryPoli
 		return telegramJobRetryPolicy{
 			Permanent: true,
 			Message:   "Telegram 发送遇到不可恢复错误，已停止该任务并释放频道队列：" + err.Error(),
+		}
+	}
+	if retryCount >= telegramRetryMaxCount {
+		return telegramJobRetryPolicy{
+			Permanent: true,
+			Message:   fmt.Sprintf("Telegram 发送连续失败已达到 %d 次，已停止该任务并释放频道队列：%s", telegramRetryMaxCount, err.Error()),
 		}
 	}
 	delay := telegramRecoverableRetryDelay(err, retryCount)
@@ -79,6 +86,13 @@ func isTelegramPermanentSendError(err error) bool {
 		"bad request: bot was blocked by the user",
 		"bad request: not enough rights",
 		"bad request: have no rights",
+		"photo_ext_invalid",
+		"photo invalid",
+		"photo_ext",
+		"media_invalid",
+		"file_reference_expired",
+		"webpage_curl_failed",
+		"webpage_media_empty",
 		"账号推送暂不支持远程媒体地址",
 		"账号推送媒体文件不存在",
 		"forbidden:",
