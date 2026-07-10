@@ -67,6 +67,10 @@ func (s *sSysPublish) AdminChannelCacheRefresh(ctx context.Context, in *sysin.Ch
 	}
 	channels, err := s.fetchTgAccountChannelCaches(ctx, item)
 	if err != nil {
+		if isTelegramAuthKeyUnregistered(err) {
+			s.expireTgAccountSession(context.Background(), item.Id, account.TenantId, account.Id, tgAccountSessionExpiredMessage)
+			return nil, gerror.New(tgAccountSessionExpiredMessage)
+		}
 		return nil, gerror.Wrap(err, "同步TG账号频道失败")
 	}
 	now := gtime.Now()
@@ -206,11 +210,11 @@ func (s *sSysPublish) fetchTgAccountChannelCaches(ctx context.Context, item *sys
 	if err != nil {
 		return nil, err
 	}
-	sessionPath, err := s.telegramSessionPathByKey(item.SessionKey)
+	storage, err := s.telegramSessionStorage(item.SessionKey)
 	if err != nil {
 		return nil, err
 	}
-	options := telegram.Options{SessionStorage: &telegram.FileSessionStorage{Path: sessionPath}}
+	options := telegram.Options{SessionStorage: storage}
 	if resolver, err := telegramMTProtoResolver(conf.ProxyUrl); err != nil {
 		return nil, err
 	} else if resolver != nil {
@@ -441,11 +445,11 @@ func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgA
 	if err != nil {
 		return err
 	}
-	sessionPath, err := s.telegramSessionPathByKey(account.SessionKey)
+	storage, err := s.telegramSessionStorage(account.SessionKey)
 	if err != nil {
 		return err
 	}
-	options := telegram.Options{SessionStorage: &telegram.FileSessionStorage{Path: sessionPath}}
+	options := telegram.Options{SessionStorage: storage}
 	if resolver, err := telegramMTProtoResolver(conf.ProxyUrl); err != nil {
 		return err
 	} else if resolver != nil {

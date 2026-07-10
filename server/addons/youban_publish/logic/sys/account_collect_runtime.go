@@ -212,6 +212,11 @@ func (w *accountCollectWorker) run(ctx context.Context) {
 	g.Log().Infof(ctx, "账号采集 worker 启动 tgAccountId:%d sources:%d", w.tgAccountId, len(w.sources))
 	defer g.Log().Infof(context.Background(), "账号采集 worker 停止 tgAccountId:%d", w.tgAccountId)
 	if err := w.runGotdDispatcher(ctx); err != nil && !isContextDone(ctx) {
+		if isTelegramAuthKeyUnregistered(err) {
+			if item, itemErr := w.service.accountCollectTgAccount(context.Background(), w.tgAccountId); itemErr == nil {
+				w.service.expireTgAccountSession(context.Background(), item.Id, item.TenantId, 0, tgAccountSessionExpiredMessage)
+			}
+		}
 		g.Log().Warningf(ctx, "账号采集 worker 异常 tgAccountId:%d err:%+v", w.tgAccountId, err)
 	}
 }
@@ -413,12 +418,12 @@ func (s *sSysPublish) newAccountCollectClient(ctx context.Context, conf *model.T
 	if conf == nil || conf.AppId <= 0 || strings.TrimSpace(conf.AppHash) == "" {
 		return nil, gerror.New("请先配置Telegram App ID和App Hash")
 	}
-	sessionPath, err := s.telegramSessionPathByKey(item.SessionKey)
+	storage, err := s.telegramSessionStorage(item.SessionKey)
 	if err != nil {
 		return nil, err
 	}
 	options := telegram.Options{
-		SessionStorage: &telegram.FileSessionStorage{Path: sessionPath},
+		SessionStorage: storage,
 		UpdateHandler:  dispatcher,
 	}
 	if resolver, err := telegramMTProtoResolver(conf.ProxyUrl); err != nil {

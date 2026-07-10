@@ -27,11 +27,11 @@ func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64
 	if err != nil {
 		return s.failTgAccountRefresh(ctx, id, tenantId, operatorId, err.Error())
 	}
-	sessionPath, err := s.telegramSessionPathByKey(item.SessionKey)
+	storage, err := s.telegramSessionStorage(item.SessionKey)
 	if err != nil {
 		return s.failTgAccountRefresh(ctx, id, tenantId, operatorId, err.Error())
 	}
-	options := telegram.Options{SessionStorage: &telegram.FileSessionStorage{Path: sessionPath}}
+	options := telegram.Options{SessionStorage: storage}
 	if resolver, err := telegramMTProtoResolver(conf.ProxyUrl); err != nil {
 		return s.failTgAccountRefresh(ctx, id, tenantId, operatorId, err.Error())
 	} else if resolver != nil {
@@ -39,6 +39,9 @@ func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64
 	}
 	user, err := s.readTelegramSelf(ctx, conf.AppId, conf.AppHash, options)
 	if err != nil {
+		if isTelegramAuthKeyUnregistered(err) {
+			return s.expireTgAccountSession(context.Background(), id, tenantId, operatorId, tgAccountSessionExpiredMessage)
+		}
 		return s.failTgAccountRefresh(context.Background(), id, tenantId, operatorId, err.Error())
 	}
 	username := ""
@@ -54,6 +57,17 @@ func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64
 func (s *sSysPublish) failTgAccountRefresh(ctx context.Context, id int64, tenantId int64, operatorId int64, message string) (string, string) {
 	s.updateTgAccountRefreshResult(ctx, id, tenantId, operatorId, sysin.PublishTgAccountStatusFailed, message, nil, "", "")
 	return sysin.PublishTgAccountStatusFailed, message
+}
+
+const tgAccountSessionExpiredMessage = "TG账号登录态已失效，请重新扫码登录"
+
+func (s *sSysPublish) expireTgAccountSession(ctx context.Context, id int64, tenantId int64, operatorId int64, message string) (string, string) {
+	s.updateTgAccountRefreshResult(ctx, id, tenantId, operatorId, sysin.PublishTgAccountStatusExpired, message, nil, "", "")
+	return sysin.PublishTgAccountStatusExpired, message
+}
+
+func isTelegramAuthKeyUnregistered(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "AUTH_KEY_UNREGISTERED")
 }
 
 func (s *sSysPublish) readTelegramSelf(ctx context.Context, appId int, appHash string, options telegram.Options) (*tg.User, error) {

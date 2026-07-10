@@ -1080,6 +1080,16 @@ ALTER TABLE `hg_youban_publish_tg_account` ADD COLUMN `telegram_last_name` varch
 ALTER TABLE `hg_youban_publish_tg_account` ADD COLUMN `telegram_phone` varchar(64) NOT NULL DEFAULT '' COMMENT 'TG手机号' AFTER `telegram_last_name`;
 ALTER TABLE `hg_youban_publish_tg_account` ADD COLUMN `telegram_is_bot` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否Bot' AFTER `telegram_phone`;
 
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_session` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `session_key` varchar(255) NOT NULL DEFAULT '' COMMENT '会话存储键',
+  `session_data` longblob NOT NULL COMMENT '会话数据',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_ybp_tg_session_key` (`session_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架TG会话';
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_channel` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',

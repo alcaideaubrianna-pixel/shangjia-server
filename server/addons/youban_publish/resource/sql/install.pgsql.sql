@@ -753,6 +753,15 @@ ALTER TABLE "hg_youban_publish_tg_account" ADD COLUMN IF NOT EXISTS "telegram_is
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_account_tenant" ON "hg_youban_publish_tg_account" ("tenant_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_account_login" ON "hg_youban_publish_tg_account" ("login_token");
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_session" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "session_key" varchar(255) NOT NULL DEFAULT '',
+  "session_data" bytea NOT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_ybp_tg_session_key" ON "hg_youban_publish_tg_session" ("session_key");
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,

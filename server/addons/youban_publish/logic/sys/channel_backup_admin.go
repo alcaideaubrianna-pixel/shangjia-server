@@ -129,11 +129,11 @@ func (s *sSysPublish) backupChannelClient(ctx context.Context, conf *model.Teleg
 	if conf == nil || conf.AppId <= 0 || strings.TrimSpace(conf.AppHash) == "" {
 		return nil, gerror.New("请先配置Telegram App ID和App Hash")
 	}
-	sessionPath, err := s.telegramSessionPathByKey(account.SessionKey)
+	storage, err := s.telegramSessionStorage(account.SessionKey)
 	if err != nil {
 		return nil, err
 	}
-	options := telegram.Options{SessionStorage: &telegram.FileSessionStorage{Path: sessionPath}}
+	options := telegram.Options{SessionStorage: storage}
 	if resolver, err := telegramMTProtoResolver(conf.ProxyUrl); err != nil {
 		return nil, err
 	} else if resolver != nil {

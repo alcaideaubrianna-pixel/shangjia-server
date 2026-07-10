@@ -449,11 +449,11 @@ func (s *sSysPublish) scanTgChannelMessagesSince(ctx context.Context, tenantId i
 	if err != nil {
 		return 0, err
 	}
-	sessionPath, err := s.telegramSessionPathByKey(account.SessionKey)
+	storage, err := s.telegramSessionStorage(account.SessionKey)
 	if err != nil {
 		return 0, err
 	}
-	options := telegram.Options{SessionStorage: &telegram.FileSessionStorage{Path: sessionPath}}
+	options := telegram.Options{SessionStorage: storage}
 	if resolver, err := telegramMTProtoResolver(conf.ProxyUrl); err != nil {
 		return 0, err
 	} else if resolver != nil {

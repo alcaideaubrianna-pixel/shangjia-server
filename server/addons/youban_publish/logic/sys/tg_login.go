@@ -161,8 +161,13 @@ func (s *sSysPublish) runTelegramLogin(ctx context.Context, runtime *telegramLog
 
 	dispatcher := tg.NewUpdateDispatcher()
 	loggedIn := qrlogin.OnLoginToken(dispatcher)
+	storage, err := s.telegramSessionStorage(sessionKey)
+	if err != nil {
+		s.markTelegramLoginFailed(context.Background(), runtime.loginToken, accountId, err.Error(), updateStatus)
+		return
+	}
 	options := telegram.Options{
-		SessionStorage: &telegram.FileSessionStorage{Path: sessionPath},
+		SessionStorage: storage,
 		UpdateHandler:  dispatcher,
 	}
 	if resolver, err := telegramMTProtoResolver(conf.ProxyUrl); err != nil {
@@ -173,7 +178,7 @@ func (s *sSysPublish) runTelegramLogin(ctx context.Context, runtime *telegramLog
 	}
 
 	client := telegram.NewClient(conf.AppId, conf.AppHash, options)
-	err := client.Run(ctx, func(runCtx context.Context) error {
+	err = client.Run(ctx, func(runCtx context.Context) error {
 		qr := client.QR()
 		authorization, err := qr.Auth(runCtx, loggedIn, func(showCtx context.Context, token qrlogin.Token) error {
 			return updateStatus(showCtx, runtime.loginToken, accountId, g.Map{
@@ -466,9 +471,6 @@ func (s *sSysPublish) cancelAccountLogin(accountId int64) {
 
 func (s *sSysPublish) telegramSessionPath(tenantId int64, accountId int64, token string) (sessionKey string, path string, err error) {
 	dir := filepath.Join(gfile.Pwd(), "runtime", "youban_publish", "telegram_sessions", fmt.Sprintf("tenant_%d", tenantId))
-	if err = gfile.Mkdir(dir); err != nil {
-		return "", "", gerror.Wrap(err, "创建Telegram会话目录失败")
-	}
 	sessionKey = fmt.Sprintf("tenant_%d/account_%d/%s.json", tenantId, accountId, token)
 	return sessionKey, filepath.Join(dir, fmt.Sprintf("account_%d_%s.json", accountId, token)), nil
 }
