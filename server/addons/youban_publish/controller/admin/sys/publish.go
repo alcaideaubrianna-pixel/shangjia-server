@@ -136,6 +136,20 @@ func (c *cPublishServer) TaskCancel(ctx context.Context, req *publish.TaskCancel
 	return
 }
 
+func (c *cPublishServer) PublishRecordList(ctx context.Context, req *publish.PublishRecordListReq) (res *publish.PublishRecordListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminPublishRecordList(ctx, &req.PublishRecordListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.PublishRecordModel{}
+	}
+	res = new(publish.PublishRecordListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
 func (c *cPublishServer) TgObserveQueueList(ctx context.Context, req *publish.TgObserveQueueListReq) (res *publish.TgObserveQueueListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminTgObserveQueueList(ctx, &req.TgObserveQueueListInp)
 	if err != nil {

@@ -48,6 +48,10 @@ export function TaskCancel(params = {}) {
   return http.request({ url: '/youban_publish/publish/task/cancel', method: 'POST', params });
 }
 
+export function PublishRecordList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/record/list', method: 'get', params });
+}
+
 export function TgObserveQueueList(params = {}) {
   return http.request({ url: '/youban_publish/publish/observe/queue/list', method: 'get', params });
 }

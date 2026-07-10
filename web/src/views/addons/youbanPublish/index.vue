@@ -212,40 +212,67 @@
         <n-tab-pane name="config" tab="配置">
           <n-spin :show="configLoading">
             <n-space vertical class="config-section">
-              <n-form :model="telegramConfig" label-placement="left" label-width="150">
-                <n-form-item label="Telegram App ID">
-                  <n-input-number v-model:value="telegramConfig.appId" :min="0" class="w-full" />
-                </n-form-item>
-                <n-form-item label="Telegram App Hash">
-                  <n-input v-model:value="telegramConfig.appHash" clearable />
-                </n-form-item>
-                <n-form-item label="代理地址">
-                  <n-input
-                    v-model:value="telegramConfig.proxyUrl"
-                    placeholder="socks5://127.0.0.1:7890"
-                    clearable
-                  />
-                </n-form-item>
-                <n-form-item label="Bot运行模式">
-                  <n-select
-                    v-model:value="telegramConfig.botRuntimeMode"
-                    :options="botRuntimeOptions"
-                  />
-                </n-form-item>
-                <n-form-item label="Webhook 域名覆盖">
-                  <n-input
-                    v-model:value="telegramConfig.webhookBaseUrl"
-                    :placeholder="systemDomain || '为空时使用系统配置域名'"
-                    clearable
-                  />
-                </n-form-item>
-                <n-form-item label="Webhook Secret">
-                  <n-input v-model:value="telegramConfig.webhookSecret" clearable />
-                </n-form-item>
-                <n-form-item label="默认推送 Chat ID">
-                  <n-input v-model:value="telegramConfig.defaultTargetChat" clearable />
-                </n-form-item>
-              </n-form>
+              <section class="config-panel">
+                <div class="config-panel-title">Telegram</div>
+                <n-form :model="telegramConfig" label-placement="left" label-width="150">
+                  <n-form-item label="Telegram App ID">
+                    <n-input-number v-model:value="telegramConfig.appId" :min="0" class="w-full" />
+                  </n-form-item>
+                  <n-form-item label="Telegram App Hash">
+                    <n-input v-model:value="telegramConfig.appHash" clearable />
+                  </n-form-item>
+                  <n-form-item label="代理地址">
+                    <n-input
+                      v-model:value="telegramConfig.proxyUrl"
+                      placeholder="socks5://127.0.0.1:7890"
+                      clearable
+                    />
+                  </n-form-item>
+                  <n-form-item label="Bot运行模式">
+                    <n-select
+                      v-model:value="telegramConfig.botRuntimeMode"
+                      :options="botRuntimeOptions"
+                    />
+                  </n-form-item>
+                  <n-form-item label="Webhook 域名覆盖">
+                    <n-input
+                      v-model:value="telegramConfig.webhookBaseUrl"
+                      :placeholder="systemDomain || '为空时使用系统配置域名'"
+                      clearable
+                    />
+                  </n-form-item>
+                  <n-form-item label="Webhook Secret">
+                    <n-input v-model:value="telegramConfig.webhookSecret" clearable />
+                  </n-form-item>
+                  <n-form-item label="默认推送 Chat ID">
+                    <n-input v-model:value="telegramConfig.defaultTargetChat" clearable />
+                  </n-form-item>
+                </n-form>
+              </section>
+
+              <section class="config-panel">
+                <div class="config-panel-title">采集推送</div>
+                <n-form :model="collectConfig" label-placement="left" label-width="150">
+                  <n-form-item label="采集总开关">
+                    <n-switch
+                      v-model:value="collectConfig.collectEnabled"
+                      :checked-value="1"
+                      :unchecked-value="0"
+                    />
+                  </n-form-item>
+                  <n-form-item label="实时推送延迟">
+                    <n-input-number
+                      v-model:value="collectConfig.realtimePushDelaySec"
+                      :min="0"
+                      :max="600"
+                      :step="60"
+                      class="w-full"
+                    >
+                      <template #suffix>秒</template>
+                    </n-input-number>
+                  </n-form-item>
+                </n-form>
+              </section>
               <n-space justify="end">
                 <n-button @click="loadConfigs">重置</n-button>
                 <n-button type="primary" :loading="configSaving" @click="saveConfigs"
@@ -258,6 +285,10 @@
 
         <n-tab-pane name="tgObserve" tab="推送观测">
           <TgObservePanel />
+        </n-tab-pane>
+
+        <n-tab-pane name="publishRecords" tab="发布记录">
+          <PublishRecordPanel />
         </n-tab-pane>
 
         <n-tab-pane name="cloudResource" tab="云资源配置">
@@ -479,6 +510,7 @@
   import DashboardPanel from './components/dashboard-panel.vue';
   import ImportTaskPanel from './components/import-task-panel.vue';
   import ProfilePanel from './components/profile-panel.vue';
+  import PublishRecordPanel from './components/publish-record-panel.vue';
   import TgObservePanel from './components/tg-observe-panel.vue';
   import {
     AccountDelete,
@@ -615,6 +647,7 @@
   const botForm = reactive(newBotForm());
   const tagForm = reactive(newTagForm());
   const telegramConfig = reactive(newTelegramConfig());
+  const collectConfig = reactive(newCollectConfig());
   const cloudResourceConfig = reactive(newCloudResourceConfig());
 
   function newTelegramConfig() {
@@ -626,6 +659,13 @@
       webhookBaseUrl: '',
       webhookSecret: '',
       defaultTargetChat: '',
+    };
+  }
+
+  function newCollectConfig() {
+    return {
+      collectEnabled: 1,
+      realtimePushDelaySec: 600,
     };
   }
 
@@ -863,6 +903,7 @@
     if (tab === 'bots') await loadBots();
     if (tab === 'config') await loadConfigs();
     if (tab === 'tgObserve') return;
+    if (tab === 'publishRecords') return;
     if (tab === 'cloudResource') await loadCloudResourceConfig();
   }
 
@@ -952,12 +993,14 @@
   async function loadConfigs() {
     configLoading.value = true;
     try {
-      const [addonConfig, basicConfig] = await Promise.all([
+      const [telegramRes, collectRes, basicConfig] = await Promise.all([
         ConfigGet({ group: 'telegram' }),
+        ConfigGet({ group: 'collect' }),
         getSysConfig({ group: 'basic' }),
       ]);
       systemDomain.value = basicConfig?.list?.basicDomain || '';
-      Object.assign(telegramConfig, newTelegramConfig(), addonConfig?.list || {});
+      Object.assign(telegramConfig, newTelegramConfig(), telegramRes?.list || {});
+      Object.assign(collectConfig, newCollectConfig(), collectRes?.list || {});
     } finally {
       configLoading.value = false;
     }
@@ -967,7 +1010,10 @@
     configSaving.value = true;
     try {
       rememberActiveTab();
-      await ConfigUpdate({ group: 'telegram', list: { ...telegramConfig } });
+      await Promise.all([
+        ConfigUpdate({ group: 'telegram', list: { ...telegramConfig } }),
+        ConfigUpdate({ group: 'collect', list: { ...collectConfig } }),
+      ]);
       message.success('配置已保存');
     } finally {
       configSaving.value = false;
@@ -1292,5 +1338,18 @@
 
   .config-section {
     max-width: 860px;
+  }
+
+  .config-panel {
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 6px;
+    padding: 16px 18px 2px;
+  }
+
+  .config-panel-title {
+    margin-bottom: 14px;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.2;
   }
 </style>

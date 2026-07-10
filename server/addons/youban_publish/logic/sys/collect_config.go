@@ -46,7 +46,7 @@ func (s *sSysPublish) collectGlobalEnabled(ctx context.Context) bool {
 }
 
 func defaultCollectConfig() *sysin.CollectConfigModel {
-	return &sysin.CollectConfigModel{Enabled: 1, RealtimePushDelaySec: 60}
+	return &sysin.CollectConfigModel{Enabled: 1, RealtimePushDelaySec: 600}
 }
 
 type collectConfigStorage struct {
@@ -55,12 +55,15 @@ type collectConfigStorage struct {
 }
 
 func defaultCollectConfigStorage() *collectConfigStorage {
-	return &collectConfigStorage{CollectEnabled: 1, RealtimePushDelaySec: 60}
+	return &collectConfigStorage{CollectEnabled: 1, RealtimePushDelaySec: 600}
 }
 
 func normalizeCollectRealtimePushDelaySec(seconds int) int {
 	if seconds < 0 {
 		return 0
+	}
+	if seconds > 0 && seconds < 600 {
+		return 600
 	}
 	if seconds > 600 {
 		return 600

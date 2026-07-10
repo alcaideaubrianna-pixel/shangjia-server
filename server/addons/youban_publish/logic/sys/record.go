@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -155,7 +156,7 @@ func (s *sSysPublish) MyPublishRecordClear(ctx context.Context, in *sysin.Publis
 }
 
 func (s *sSysPublish) publishRecordList(ctx context.Context, in *sysin.PublishRecordListInp, tenantId int64, accountId int64) (list []*sysin.PublishRecordModel, totalCount int, err error) {
-	base := s.publishRecordBaseModel(ctx, in, tenantId, accountId)
+	base := s.publishRecordCountModel(ctx, in, tenantId, accountId)
 	totalCount, err = base.Clone().Count()
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取发送记录总数失败")
@@ -167,7 +168,8 @@ func (s *sSysPublish) publishRecordList(ctx context.Context, in *sysin.PublishRe
 		"p.title",
 		"a.nickname AS account_name",
 		"b.bot_name,b.bot_username",
-		"c.channel_title,c.channel_username",
+		"COALESCE(NULLIF(c.channel_title, ''), NULLIF(tc.channel_title, '')) AS channel_title",
+		"c.channel_username",
 	)
 	if err = mod.Page(in.Page, in.PerPage).OrderDesc("l.id").Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取发送记录失败")
@@ -179,7 +181,7 @@ func (s *sSysPublish) publishRecordList(ctx context.Context, in *sysin.PublishRe
 	return
 }
 
-func (s *sSysPublish) publishRecordBaseModel(ctx context.Context, in *sysin.PublishRecordListInp, tenantId int64, accountId int64) *gdb.Model {
+func (s *sSysPublish) publishRecordCountModel(ctx context.Context, in *sysin.PublishRecordListInp, tenantId int64, accountId int64) *gdb.Model {
 	mod := g.DB().Model(publishTgJobLogTable+" l").Safe().Ctx(ctx).
 		LeftJoin(publishTgJobTable+" j", "j.id=l.job_id").
 		LeftJoin(publishTaskTable+" t", "t.id=l.task_id").
@@ -188,8 +190,27 @@ func (s *sSysPublish) publishRecordBaseModel(ctx context.Context, in *sysin.Publ
 		LeftJoin(publishBotTable+" b", "b.id=l.bot_id").
 		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id").
 		Where("l.tenant_id", tenantId)
+	return s.applyPublishRecordFilters(mod, in, accountId)
+}
+
+func (s *sSysPublish) publishRecordBaseModel(ctx context.Context, in *sysin.PublishRecordListInp, tenantId int64, accountId int64) *gdb.Model {
+	mod := g.DB().Model(publishTgJobLogTable+" l").Safe().Ctx(ctx).
+		LeftJoin(publishTgJobTable+" j", "j.id=l.job_id").
+		LeftJoin(publishTaskTable+" t", "t.id=l.task_id").
+		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=l.profile_id").
+		LeftJoin(publishAccountTable+" a", "a.id=l.account_id").
+		LeftJoin(publishBotTable+" b", "b.id=l.bot_id").
+		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id").
+		LeftJoin(publishTgChannelTable+" tc", "tc.tenant_id=j.tenant_id AND tc.tg_account_id=j.account_id AND REPLACE(tc.channel_id, '-100', '')=REPLACE(j.target_chat_id, '-100', '')").
+		Where("l.tenant_id", tenantId)
+	return s.applyPublishRecordFilters(mod, in, accountId)
+}
+
+func (s *sSysPublish) applyPublishRecordFilters(mod *gdb.Model, in *sysin.PublishRecordListInp, accountId int64) *gdb.Model {
 	if accountId > 0 {
 		mod = mod.Where("l.account_id", accountId)
+	} else if in.AccountId > 0 {
+		mod = mod.Where("l.account_id", in.AccountId)
 	}
 	if in.ProfileId > 0 {
 		mod = mod.Where("l.profile_id", in.ProfileId)
@@ -204,12 +225,18 @@ func (s *sSysPublish) publishRecordBaseModel(ctx context.Context, in *sysin.Publ
 	} else if in.Action != "" {
 		mod = mod.Where("l.action", in.Action)
 	}
-	if in.Status != "" {
+	if in.Status == "error" {
+		mod = mod.WhereIn("l.status", []string{"failed", "failed_retry"})
+	} else if in.Status != "" {
 		mod = mod.Where("l.status", in.Status)
 	}
 	if in.Keyword != "" {
 		like := "%" + in.Keyword + "%"
-		mod = mod.Where("(p.title LIKE ? OR l.message LIKE ? OR c.channel_title LIKE ? OR b.bot_name LIKE ?)", like, like, like, like)
+		if id, err := strconv.ParseInt(in.Keyword, 10, 64); err == nil && id > 0 {
+			mod = mod.Where("(p.title LIKE ? OR l.message LIKE ? OR c.channel_title LIKE ? OR b.bot_name LIKE ? OR b.bot_username LIKE ? OR a.nickname LIKE ? OR j.target_chat_id LIKE ? OR EXISTS (SELECT 1 FROM "+publishTgChannelTable+" tc WHERE tc.tenant_id=j.tenant_id AND tc.tg_account_id=j.account_id AND REPLACE(tc.channel_id, '-100', '')=REPLACE(j.target_chat_id, '-100', '') AND tc.channel_title LIKE ?) OR l.id=? OR l.job_id=? OR l.task_id=? OR l.profile_id=?)", like, like, like, like, like, like, like, like, id, id, id, id)
+		} else {
+			mod = mod.Where("(p.title LIKE ? OR l.message LIKE ? OR c.channel_title LIKE ? OR b.bot_name LIKE ? OR b.bot_username LIKE ? OR a.nickname LIKE ? OR j.target_chat_id LIKE ? OR EXISTS (SELECT 1 FROM "+publishTgChannelTable+" tc WHERE tc.tenant_id=j.tenant_id AND tc.tg_account_id=j.account_id AND REPLACE(tc.channel_id, '-100', '')=REPLACE(j.target_chat_id, '-100', '') AND tc.channel_title LIKE ?))", like, like, like, like, like, like, like, like)
+		}
 	}
 	return mod
 }

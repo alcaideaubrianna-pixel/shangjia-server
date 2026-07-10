@@ -231,6 +231,11 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 			return true, "", nil
 		}
 	}
+	if attached, err := s.attachCollectVerifyEventToPreviousTask(ctx, event, content, rule); err != nil {
+		return false, "", err
+	} else if attached {
+		return true, "", nil
+	}
 	now := gtime.Now()
 	dispatchId, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Data(g.Map{
 		"tenant_id":              event["tenant_id"].Int64(),
@@ -262,6 +267,93 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		return false, "", err
 	}
 	return true, "", nil
+}
+
+func (s *sSysPublish) attachCollectVerifyEventToPreviousTask(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (bool, error) {
+	items, ok, err := s.collectVerifyOnlyEventItems(ctx, event, content)
+	if err != nil || !ok {
+		return false, err
+	}
+	previous, err := s.previousCollectPublishTaskForVerify(ctx, event, rule)
+	if err != nil || previous.IsEmpty() {
+		return false, err
+	}
+	taskId := previous["id"].Int64()
+	if err = s.insertCollectPublishMediaRows(ctx, event, taskId, "verify", items); err != nil {
+		return false, err
+	}
+	now := gtime.Now()
+	if _, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).Data(g.Map{
+		"media_count": gdb.Raw("media_count + " + fmt.Sprintf("%d", len(items))),
+		"tg_status":   "pending",
+		"status":      sysin.PublishTaskStatusPending,
+		"updated_at":  now,
+	}).Update(); err != nil {
+		return false, gerror.Wrap(err, "绑定采集验证视频到资料失败")
+	}
+	if _, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("task_id", taskId).WhereIn("status", []string{"pending", "failed_retry"}).Data(g.Map{
+		"status":          "pending",
+		"dispatch_status": tgDispatchStatusIdle,
+		"next_retry_at":   nil,
+		"error_message":   "",
+		"updated_at":      now,
+	}).Update(); err != nil {
+		return false, gerror.Wrap(err, "重置绑定验证视频TG任务失败")
+	}
+	s.appendCollectEventLogForRecord(ctx, event, "dispatch", "attached", "验证视频已绑定到前一个采集资料", fmt.Sprintf("task=%d", taskId))
+	return true, nil
+}
+
+func (s *sSysPublish) collectVerifyOnlyEventItems(ctx context.Context, event gdb.Record, content *collectContentResult) ([]collectMediaItem, bool, error) {
+	if strings.TrimSpace(event["raw_text"].String()) != "" {
+		return nil, false, nil
+	}
+	if content != nil && strings.TrimSpace(content.RawText) != "" {
+		return nil, false, nil
+	}
+	if event["media_count"].Int() <= 0 {
+		return nil, false, nil
+	}
+	rows, err := s.collectEventMediaRows(ctx, event["id"].Int64())
+	if err != nil {
+		return nil, false, err
+	}
+	items := collectMediaRowsToItems(rows)
+	if len(items) == 0 {
+		return nil, false, nil
+	}
+	for _, item := range items {
+		if strings.TrimSpace(item.Type) != "video" {
+			return nil, false, nil
+		}
+	}
+	return items, true, nil
+}
+
+func (s *sSysPublish) previousCollectPublishTaskForVerify(ctx context.Context, event gdb.Record, rule gdb.Record) (gdb.Record, error) {
+	row, err := g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
+		LeftJoin(pdaoCollectEventTable()+" e", "e.id=t.collect_event_id").
+		Fields("t.id,t.status,t.tg_status,t.channel_id_json").
+		Where("t.tenant_id", event["tenant_id"].Int64()).
+		Where("t.account_id", event["account_id"].Int64()).
+		Where("t.collect_source_id", event["source_id"].Int64()).
+		Where("t.collect_source_chat_id", strings.TrimSpace(event["source_chat_id"].String())).
+		Where("t.collect_source_message_id > 0").
+		Where("t.collect_source_message_id < ?", event["source_message_id"].Int64()).
+		Where("t.channel_id_json", rule["target_channel_id_json"].String()).
+		Where("t.deleted_at IS NULL").
+		Where("e.media_count > 0").
+		Where("e.source_grouped_id <> ''").
+		Where("COALESCE(e.raw_text, '') <> ''").
+		Where("NOT EXISTS (SELECT 1 FROM "+pdaoCollectEventTable()+" mid WHERE mid.tenant_id=t.tenant_id AND mid.account_id=t.account_id AND mid.source_id=t.collect_source_id AND mid.source_chat_id=t.collect_source_chat_id AND mid.source_message_id > t.collect_source_message_id AND mid.source_message_id < ? AND mid.media_count > 0 AND COALESCE(mid.raw_text, '') <> '')", event["source_message_id"].Int64()).
+		OrderDesc("t.collect_source_message_id").
+		OrderDesc("t.id").
+		Limit(1).
+		One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "查找验证视频所属采集资料失败")
+	}
+	return row, nil
 }
 
 func (s *sSysPublish) mergeCollectEventIntoPendingReview(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (bool, error) {

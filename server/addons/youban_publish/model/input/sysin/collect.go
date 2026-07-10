@@ -72,6 +72,9 @@ func (in *CollectConfigSaveInp) Filter(ctx context.Context) error {
 	if in.RealtimePushDelaySec < 0 {
 		in.RealtimePushDelaySec = 0
 	}
+	if in.RealtimePushDelaySec > 0 && in.RealtimePushDelaySec < 600 {
+		in.RealtimePushDelaySec = 600
+	}
 	if in.RealtimePushDelaySec > 600 {
 		in.RealtimePushDelaySec = 600
 	}

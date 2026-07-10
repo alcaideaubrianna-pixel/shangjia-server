@@ -101,6 +101,16 @@ type TaskCancelReq struct {
 
 type TaskCancelRes struct{}
 
+type PublishRecordListReq struct {
+	g.Meta `path:"/publish/record/list" method:"get" tags:"上架插件后台" summary:"发送记录列表"`
+	sysin.PublishRecordListInp
+}
+
+type PublishRecordListRes struct {
+	form.PageRes
+	List []*sysin.PublishRecordModel `json:"list" dc:"发送记录列表"`
+}
+
 type TgObserveQueueListReq struct {
 	g.Meta `path:"/publish/observe/queue/list" method:"get" tags:"上架插件后台" summary:"TG队列观测统计"`
 	sysin.TgObserveQueueListInp

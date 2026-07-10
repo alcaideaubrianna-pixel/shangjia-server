@@ -134,6 +134,13 @@ func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) er
 		if waitingPrevious {
 			continue
 		}
+		waitingVerify, err := s.collectTelegramJobHasPendingVerifyContinuation(ctx, job)
+		if err != nil {
+			return err
+		}
+		if waitingVerify {
+			continue
+		}
 		queued, err := s.dispatchTelegramJob(ctx, job)
 		if err != nil {
 			return err

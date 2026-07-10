@@ -35,7 +35,11 @@ func (w *accountCollectWorker) bindGotdHandlers(dispatcher tg.UpdateDispatcher) 
 }
 
 func (w *accountCollectWorker) handleGotdMessage(ctx context.Context, msg *tg.Message) {
-	if w == nil || w.service == nil || msg == nil || msg.Out {
+	if w == nil || w.service == nil || msg == nil {
+		return
+	}
+	w.service.handleGotdAutoDelete(ctx, msg)
+	if msg.Out {
 		return
 	}
 	chatIds := gotdMessageChatIds(msg)

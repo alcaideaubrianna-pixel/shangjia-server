@@ -12,6 +12,7 @@ import (
 
 type PublishRecordListInp struct {
 	form.PageReq
+	AccountId int64  `json:"accountId" dc:"账号ID"`
 	Action    string `json:"action" dc:"动作"`
 	Keyword   string `json:"keyword" dc:"关键词"`
 	ProfileId int64  `json:"profileId" dc:"资料ID"`

@@ -39,7 +39,24 @@ func (s *sSysPublish) rebuildCollectPublishMedia(ctx context.Context, event gdb.
 		Update(); err != nil {
 		return gerror.Wrap(err, "清理采集旧媒体失败")
 	}
-	return s.insertCollectPublishMediaRows(ctx, event, taskId, "display", items)
+	displayItems, verifyItems := splitCollectPublishMediaItems(items)
+	if err := s.insertCollectPublishMediaRows(ctx, event, taskId, "display", displayItems); err != nil {
+		return err
+	}
+	return s.insertCollectPublishMediaRows(ctx, event, taskId, "verify", verifyItems)
+}
+
+func splitCollectPublishMediaItems(items []collectMediaItem) ([]collectMediaItem, []collectMediaItem) {
+	if len(items) <= 1 {
+		return items, nil
+	}
+	last := items[len(items)-1]
+	if strings.TrimSpace(last.Type) != "video" {
+		return items, nil
+	}
+	display := make([]collectMediaItem, len(items)-1)
+	copy(display, items[:len(items)-1])
+	return display, []collectMediaItem{last}
 }
 
 func (s *sSysPublish) insertCollectPublishMediaRows(ctx context.Context, event gdb.Record, taskId int64, purpose string, items []collectMediaItem) error {

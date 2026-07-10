@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -76,9 +78,10 @@ func (s *sSysPublish) AdminMessageTemplatePush(ctx context.Context, in *sysin.Me
 		Results: make([]*sysin.MessageTemplatePushResultModel, 0, len(channels)),
 	}
 	for _, channel := range channels {
-		result := s.sendMessageTemplateToChannel(ctx, template, channel, account.TenantId, in.AccountId)
+		operationNo := messagePushManualOperationNo(template.Id, channel)
+		result := s.queueMessageTemplateToChannelWithPriority(ctx, template, channel, account.TenantId, in.AccountId, operationNo, 0, tgJobPriorityUrgent, tgQueueNameUrgent)
 		res.Results = append(res.Results, result)
-		if result.Status == sysin.MessagePushStatusSent {
+		if result.Status == sysin.MessagePushStatusPending {
 			res.Success++
 		} else {
 			res.Failed++
@@ -128,6 +131,10 @@ func (s *sSysPublish) sendMessageTemplateToChannel(ctx context.Context, template
 }
 
 func (s *sSysPublish) queueMessageTemplateToChannel(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, operationNo string, delay time.Duration) *sysin.MessageTemplatePushResultModel {
+	return s.queueMessageTemplateToChannelWithPriority(ctx, template, channel, tenantId, accountId, operationNo, delay, tgJobPriorityBulk, tgQueueNameBulk)
+}
+
+func (s *sSysPublish) queueMessageTemplateToChannelWithPriority(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, operationNo string, delay time.Duration, priority int, queueName string) *sysin.MessageTemplatePushResultModel {
 	result := &sysin.MessageTemplatePushResultModel{
 		Status: sysin.MessagePushStatusFailed,
 	}
@@ -138,7 +145,7 @@ func (s *sSysPublish) queueMessageTemplateToChannel(ctx context.Context, templat
 	result.ChannelId = channel.Id
 	result.TargetChatId = channel.TargetChatId
 	botId := firstMessagePushBotId(channel)
-	job, err := s.createQueuedMessagePushJob(ctx, template, channel, tenantId, accountId, botId, operationNo)
+	job, err := s.createQueuedMessagePushJobWithPriority(ctx, template, channel, tenantId, accountId, botId, operationNo, priority, queueName)
 	if err != nil {
 		result.Message = err.Error()
 		return result
@@ -380,12 +387,9 @@ func messagePushInputPeer(channel *messagePushChannel) (tg.InputPeerClass, error
 		}
 		return &tg.InputPeerChat{ChatID: channelId}, nil
 	}
-	if channelId < 0 {
-		value := strings.TrimPrefix(strconv.FormatInt(channelId, 10), "-100")
-		channelId, err = strconv.ParseInt(value, 10, 64)
-		if err != nil || channelId <= 0 {
-			return nil, gerror.New("推送目标频道ID无效")
-		}
+	channelId, err = messagePushInputChannelID(channel.TargetChatId)
+	if err != nil {
+		return nil, err
 	}
 	accessHash, err := strconv.ParseInt(strings.TrimSpace(channel.AccessHash), 10, 64)
 	if err != nil {
@@ -394,7 +398,29 @@ func messagePushInputPeer(channel *messagePushChannel) (tg.InputPeerClass, error
 	return &tg.InputPeerChannel{ChannelID: channelId, AccessHash: accessHash}, nil
 }
 
+func messagePushInputChannelID(targetChatId string) (int64, error) {
+	value := strings.TrimSpace(targetChatId)
+	value = strings.TrimPrefix(value, "-")
+	value = strings.TrimPrefix(value, "100")
+	channelId, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || channelId <= 0 {
+		return 0, gerror.New("推送目标频道ID无效")
+	}
+	return channelId, nil
+}
+
 func gotdSentMessagesFromUpdates(updates tg.UpdatesClass, media []*telegramMediaItem) []*telegramSentMessage {
+	if short, ok := updates.(*tg.UpdateShortSentMessage); ok && short.ID > 0 {
+		msg := &telegramSentMessage{
+			MessageId: int64(short.ID),
+			Purpose:   "display",
+		}
+		if len(media) > 0 && media[0] != nil {
+			msg.MediaId = media[0].Id
+			msg.AssetHash = media[0].AssetHash
+		}
+		return []*telegramSentMessage{msg}
+	}
 	updatesList := collectUpdatesList(updates)
 	messages := make([]*telegramSentMessage, 0, len(updatesList))
 	for _, update := range updatesList {
@@ -437,8 +463,23 @@ func (s *sSysPublish) createMessagePushJob(ctx context.Context, template *sysin.
 	return s.createMessagePushJobWithOperation(ctx, template, channel, tenantId, accountId, botId, operationNo, tgJobPriorityUrgent, tgQueueNameUrgent, tgDispatchStatusProcessing, now)
 }
 
+func messagePushManualOperationNo(templateId int64, channel *messagePushChannel) string {
+	targetChatId := ""
+	channelId := int64(0)
+	if channel != nil {
+		targetChatId = channel.TargetChatId
+		channelId = channel.Id
+	}
+	targetKey := strings.NewReplacer("-", "", ":", "", "@", "").Replace(normalizeTelegramChannelChatID(targetChatId))
+	return fmt.Sprintf("message_push:%d:%d:%d:%s", templateId, gtime.Now().TimestampNano(), channelId, targetKey)
+}
+
 func (s *sSysPublish) createQueuedMessagePushJob(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, botId int64, operationNo string) (telegramJobRecord, error) {
-	return s.createMessagePushJobWithOperation(ctx, template, channel, tenantId, accountId, botId, operationNo, tgJobPriorityBulk, tgQueueNameBulk, tgDispatchStatusIdle, gtime.Now())
+	return s.createQueuedMessagePushJobWithPriority(ctx, template, channel, tenantId, accountId, botId, operationNo, tgJobPriorityBulk, tgQueueNameBulk)
+}
+
+func (s *sSysPublish) createQueuedMessagePushJobWithPriority(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, botId int64, operationNo string, priority int, queueName string) (telegramJobRecord, error) {
+	return s.createMessagePushJobWithOperation(ctx, template, channel, tenantId, accountId, botId, operationNo, priority, queueName, tgDispatchStatusIdle, gtime.Now())
 }
 
 func (s *sSysPublish) createMessagePushJobWithOperation(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, botId int64, operationNo string, priority int, queueName string, dispatchStatus string, now *gtime.Time) (telegramJobRecord, error) {
@@ -501,6 +542,9 @@ func (s *sSysPublish) messagePushJobByOperation(ctx context.Context, operationNo
 		Where("channel_id", channelId).
 		Scan(&job)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return job, nil
+		}
 		return job, gerror.Wrap(err, "读取消息推送任务失败")
 	}
 	return job, nil
@@ -531,6 +575,12 @@ func (s *sSysPublish) handleMessagePushQueuedJobError(ctx context.Context, job t
 }
 
 func (s *sSysPublish) messagePushChannelFromJob(ctx context.Context, job telegramJobRecord) (*messagePushChannel, error) {
+	if strings.TrimSpace(job.TargetChatId) != "" {
+		channels, err := s.messagePushCachedTargets(ctx, job.AccountId, []string{normalizeTelegramChannelChatID(job.TargetChatId)}, job.TenantId)
+		if err == nil && len(channels) > 0 {
+			return channels[0], nil
+		}
+	}
 	if job.ChannelId > 0 {
 		channels, err := s.messagePushChannels(ctx, []int64{job.ChannelId}, job.TenantId)
 		if err != nil {
@@ -644,29 +694,45 @@ func (s *sSysPublish) messagePushCachedTargets(ctx context.Context, tgAccountId 
 		IsBroadcast  int    `json:"isBroadcast"`
 		IsMegagroup  int    `json:"isMegagroup"`
 	}
+	lookupIds := messagePushTargetLookupIds(targetChatIds)
 	err := g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).
 		Fields("channel_id,access_hash,channel_title,is_broadcast,is_megagroup").
 		Where("tenant_id", tenantId).
 		Where("tg_account_id", tgAccountId).
-		WhereIn("channel_id", targetChatIds).
+		WhereIn("channel_id", lookupIds).
 		OrderAsc("id").
 		Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取缓存推送目标失败")
 	}
-	if len(rows) != len(targetChatIds) {
-		return nil, gerror.New("存在不属于当前TG账号的推送目标，请刷新缓存后重新选择")
-	}
-	channels := make([]*messagePushChannel, 0, len(rows))
+	rowMap := make(map[string]*messagePushChannel, len(rows))
 	for _, row := range rows {
-		channels = append(channels, &messagePushChannel{
+		channel := &messagePushChannel{
+			Id:           0,
 			TgAccountId:  tgAccountId,
 			AccessHash:   row.AccessHash,
 			ChannelTitle: row.ChannelTitle,
 			IsBroadcast:  row.IsBroadcast,
 			IsMegagroup:  row.IsMegagroup,
 			TargetChatId: row.ChannelId,
-		})
+		}
+		for _, id := range tgChannelCacheLookupIds(row.ChannelId) {
+			rowMap[id] = channel
+		}
+	}
+	channels := make([]*messagePushChannel, 0, len(targetChatIds))
+	for _, targetChatId := range targetChatIds {
+		var channel *messagePushChannel
+		for _, id := range tgChannelCacheLookupIds(targetChatId) {
+			if found := rowMap[id]; found != nil {
+				channel = found
+				break
+			}
+		}
+		if channel == nil {
+			return nil, gerror.New("存在不属于当前TG账号的推送目标，请刷新缓存后重新选择")
+		}
+		channels = append(channels, channel)
 	}
 	return channels, nil
 }
@@ -688,18 +754,22 @@ func (s *sSysPublish) ensureMessagePushTgAccountBelongTenant(ctx context.Context
 }
 
 func (s *sSysPublish) ensureMessagePushTargetCaches(ctx context.Context, tgAccountId int64, targetChatIds []string, tenantId int64) error {
-	count, err := g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).
-		Where("tenant_id", tenantId).
-		Where("tg_account_id", tgAccountId).
-		WhereIn("channel_id", targetChatIds).
-		Count()
+	channels, err := s.messagePushCachedTargets(ctx, tgAccountId, targetChatIds, tenantId)
 	if err != nil {
 		return gerror.Wrap(err, "检查推送目标失败")
 	}
-	if count != len(targetChatIds) {
+	if len(channels) != len(targetChatIds) {
 		return gerror.New("存在不属于当前TG账号的推送目标")
 	}
 	return nil
+}
+
+func messagePushTargetLookupIds(targetChatIds []string) []string {
+	ids := make([]string, 0, len(targetChatIds)*2)
+	for _, targetChatId := range targetChatIds {
+		ids = append(ids, tgChannelCacheLookupIds(targetChatId)...)
+	}
+	return uniqueStrings(ids)
 }
 
 func firstMessagePushBotId(channel *messagePushChannel) int64 {

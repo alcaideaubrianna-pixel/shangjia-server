@@ -15,6 +15,7 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/addons/youban_publish/service"
 )
 
 const accountCollectSupervisorInterval = 15 * time.Second
@@ -84,7 +85,7 @@ func (m *accountCollectSupervisor) sync(ctx context.Context, service *sSysPublis
 	}
 	active := make(map[int64]struct{}, len(groups))
 	for tgAccountId, sources := range groups {
-		if tgAccountId <= 0 || len(sources) == 0 {
+		if tgAccountId <= 0 {
 			continue
 		}
 		active[tgAccountId] = struct{}{}
@@ -114,37 +115,80 @@ func (m *accountCollectSupervisor) stopAll() {
 }
 
 func (s *sSysPublish) enabledAccountCollectSources(ctx context.Context) (map[int64][]accountCollectSourceRuntime, error) {
-	if !s.collectGlobalEnabled(ctx) {
-		return map[int64][]accountCollectSourceRuntime{}, nil
+	groups := make(map[int64][]accountCollectSourceRuntime)
+	if s.collectGlobalEnabled(ctx) {
+		if err := ensureCollectSourceColumns(ctx); err != nil {
+			return nil, err
+		}
+		var rows []accountCollectSourceRuntime
+		err := pdao.YoubanPublishCollectSource.Ctx(ctx).
+			Fields("id,tenant_id,account_id,tg_account_id,source_chat_id,source_username,history_collect_enabled,history_collect_mode,history_collect_days").
+			Where("source_type", sysin.CollectSourceTypeAccount).
+			Where("collect_enabled", 1).
+			Where("status", 1).
+			WhereGT("tg_account_id", 0).
+			WhereNull("deleted_at").
+			OrderAsc("tg_account_id").
+			OrderAsc("id").
+			Scan(&rows)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			row.HistoryCollectEnabled, row.HistoryCollectMode, row.HistoryCollectDays = sysin.NormalizeCollectHistoryConfig(
+				sysin.CollectSourceTypeAccount,
+				row.HistoryCollectEnabled,
+				row.HistoryCollectMode,
+				row.HistoryCollectDays,
+			)
+			groups[row.TgAccountId] = append(groups[row.TgAccountId], row)
+		}
 	}
-	if err := ensureCollectSourceColumns(ctx); err != nil {
+	if enabled, err := s.autoDeleteEnabled(ctx); err != nil {
 		return nil, err
+	} else if enabled {
+		ids, err := s.authorizedTgAccountIds(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			if _, ok := groups[id]; !ok {
+				groups[id] = []accountCollectSourceRuntime{}
+			}
+		}
 	}
-	var rows []accountCollectSourceRuntime
-	err := pdao.YoubanPublishCollectSource.Ctx(ctx).
-		Fields("id,tenant_id,account_id,tg_account_id,source_chat_id,source_username,history_collect_enabled,history_collect_mode,history_collect_days").
-		Where("source_type", sysin.CollectSourceTypeAccount).
-		Where("collect_enabled", 1).
-		Where("status", 1).
-		WhereGT("tg_account_id", 0).
+	return groups, nil
+}
+
+func (s *sSysPublish) autoDeleteEnabled(ctx context.Context) (bool, error) {
+	conf, err := service.SysConfig().AutoDeleteConfigView(ctx, &sysin.AutoDeleteConfigViewInp{})
+	if err != nil {
+		return false, err
+	}
+	return conf != nil && conf.AutoDeleteConfig != nil && conf.Enabled == 1, nil
+}
+
+func (s *sSysPublish) authorizedTgAccountIds(ctx context.Context) ([]int64, error) {
+	var rows []struct {
+		Id int64 `json:"id"`
+	}
+	err := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
+		Fields("id").
+		Where("status", sysin.PublishTgAccountStatusAuthorized).
+		WhereNot("session_key", "").
 		WhereNull("deleted_at").
-		OrderAsc("tg_account_id").
 		OrderAsc("id").
 		Scan(&rows)
 	if err != nil {
-		return nil, err
+		return nil, gerror.Wrap(err, "读取自动删除监听TG账号失败")
 	}
-	groups := make(map[int64][]accountCollectSourceRuntime)
+	ids := make([]int64, 0, len(rows))
 	for _, row := range rows {
-		row.HistoryCollectEnabled, row.HistoryCollectMode, row.HistoryCollectDays = sysin.NormalizeCollectHistoryConfig(
-			sysin.CollectSourceTypeAccount,
-			row.HistoryCollectEnabled,
-			row.HistoryCollectMode,
-			row.HistoryCollectDays,
-		)
-		groups[row.TgAccountId] = append(groups[row.TgAccountId], row)
+		if row.Id > 0 {
+			ids = append(ids, row.Id)
+		}
 	}
-	return groups, nil
+	return ids, nil
 }
 
 func startAccountCollectWorker(ctx context.Context, service *sSysPublish, tgAccountId int64, signature string, sources []accountCollectSourceRuntime) *accountCollectWorker {
