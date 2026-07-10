@@ -416,9 +416,6 @@ func (s *sSysPublish) enqueueFullPushTelegramJob(ctx context.Context, taskId int
 	if len(channels) == 0 {
 		return gerror.New("全量推送目标频道不存在")
 	}
-	if err = s.prepareTelegramTaskForResubmit(ctx, task, channels, operationNo, true); err != nil {
-		return err
-	}
 	for _, channel := range channels {
 		jobId, err := s.ensureTelegramPublishChannelJob(ctx, task, channel, operationNo)
 		if err != nil {

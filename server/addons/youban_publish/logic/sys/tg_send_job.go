@@ -384,7 +384,7 @@ func (s *sSysPublish) canSendTelegramJob(ctx context.Context, job telegramJobRec
 	if task.IsEmpty() {
 		return false, nil
 	}
-	if job.OperationNo != "" && task["tg_operation_no"].String() != "" && task["tg_operation_no"].String() != job.OperationNo {
+	if job.OperationNo != "" && !strings.HasPrefix(job.OperationNo, "full_push:") && task["tg_operation_no"].String() != "" && task["tg_operation_no"].String() != job.OperationNo {
 		return false, nil
 	}
 	switch task["status"].String() {
