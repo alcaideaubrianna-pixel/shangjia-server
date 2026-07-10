@@ -221,39 +221,45 @@ func (s *sSysPublish) fetchTgAccountChannelCaches(ctx context.Context, item *sys
 		options.Resolver = resolver
 	}
 	client := telegram.NewClient(conf.AppId, conf.AppHash, options)
-	runCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+	runCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
+
 	channels := make([]*tgDialogCache, 0)
+	seen := make(map[string]struct{})
 	err = client.Run(runCtx, func(ctx context.Context) error {
-		dialogs, err := client.API().MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
-			Limit:      100,
-			OffsetPeer: &tg.InputPeerEmpty{},
-		})
-		if err != nil {
-			return err
-		}
-		var chats []tg.ChatClass
-		switch data := dialogs.(type) {
-		case *tg.MessagesDialogs:
-			chats = data.GetChats()
-		case *tg.MessagesDialogsSlice:
-			chats = data.GetChats()
-		default:
-			chats = []tg.ChatClass{}
-		}
-		for _, chat := range chats {
-			switch item := chat.(type) {
-			case *tg.Channel:
-				if item.Left {
-					continue
-				}
-				channels = append(channels, tgChannelDialogCache(item))
-			case *tg.Chat:
-				if item.Left || item.Deactivated || item.MigratedTo != nil {
-					continue
-				}
-				channels = append(channels, tgBasicChatDialogCache(item))
+		const pageLimit = 100
+		offsetDate := 0
+		offsetID := 0
+		offsetPeer := tg.InputPeerClass(&tg.InputPeerEmpty{})
+		for {
+			dialogs, err := client.API().MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
+				Limit:      pageLimit,
+				OffsetDate: offsetDate,
+				OffsetID:   offsetID,
+				OffsetPeer: offsetPeer,
+			})
+			if err != nil {
+				return err
 			}
+			pageChats := tgDialogsChats(dialogs)
+			for _, chat := range pageChats {
+				cache := tgDialogCacheFromChat(chat)
+				if cache == nil || strings.TrimSpace(cache.ChannelId) == "" {
+					continue
+				}
+				if _, ok := seen[cache.ChannelId]; ok {
+					continue
+				}
+				seen[cache.ChannelId] = struct{}{}
+				channels = append(channels, cache)
+			}
+			nextDate, nextID, nextPeer, ok := tgDialogsNextOffset(dialogs)
+			if !ok {
+				break
+			}
+			offsetDate = nextDate
+			offsetID = nextID
+			offsetPeer = nextPeer
 		}
 		return nil
 	})
@@ -261,6 +267,117 @@ func (s *sSysPublish) fetchTgAccountChannelCaches(ctx context.Context, item *sys
 		return nil, err
 	}
 	return channels, nil
+}
+
+func tgDialogsChats(dialogs tg.MessagesDialogsClass) []tg.ChatClass {
+	switch data := dialogs.(type) {
+	case *tg.MessagesDialogs:
+		return data.GetChats()
+	case *tg.MessagesDialogsSlice:
+		return data.GetChats()
+	default:
+		return []tg.ChatClass{}
+	}
+}
+
+func tgDialogsNextOffset(dialogs tg.MessagesDialogsClass) (int, int, tg.InputPeerClass, bool) {
+	data, ok := dialogs.(*tg.MessagesDialogsSlice)
+	if !ok || len(data.Dialogs) == 0 {
+		return 0, 0, nil, false
+	}
+	chats := data.GetChats()
+	users := data.GetUsers()
+	messages := data.GetMessages()
+	for i := len(data.Dialogs) - 1; i >= 0; i-- {
+		dialog, ok := data.Dialogs[i].(*tg.Dialog)
+		if !ok || dialog.TopMessage <= 0 || dialog.Peer == nil {
+			continue
+		}
+		offsetPeer, ok := tgInputPeerFromPeer(dialog.Peer, chats, users)
+		if !ok {
+			continue
+		}
+		return tgDialogMessageDate(messages, dialog.Peer, dialog.TopMessage), dialog.TopMessage, offsetPeer, true
+	}
+	return 0, 0, nil, false
+}
+
+func tgDialogMessageDate(messages []tg.MessageClass, peer tg.PeerClass, messageId int) int {
+	for _, message := range messages {
+		switch item := message.(type) {
+		case *tg.Message:
+			if item.ID == messageId && tgPeerEqual(item.PeerID, peer) {
+				return item.Date
+			}
+		case *tg.MessageService:
+			if item.ID == messageId && tgPeerEqual(item.PeerID, peer) {
+				return item.Date
+			}
+		}
+	}
+	return 0
+}
+
+func tgInputPeerFromPeer(peer tg.PeerClass, chats []tg.ChatClass, users []tg.UserClass) (tg.InputPeerClass, bool) {
+	switch item := peer.(type) {
+	case *tg.PeerChat:
+		return &tg.InputPeerChat{ChatID: item.ChatID}, true
+	case *tg.PeerChannel:
+		for _, chat := range chats {
+			channel, ok := chat.(*tg.Channel)
+			if !ok || channel.ID != item.ChannelID {
+				continue
+			}
+			input := channel.AsInputPeer()
+			return input, input != nil
+		}
+	case *tg.PeerUser:
+		for _, userClass := range users {
+			user, ok := userClass.(*tg.User)
+			if !ok || user.ID != item.UserID {
+				continue
+			}
+			accessHash, ok := user.GetAccessHash()
+			if !ok {
+				return nil, false
+			}
+			return &tg.InputPeerUser{UserID: user.ID, AccessHash: accessHash}, true
+		}
+	}
+	return nil, false
+}
+
+func tgPeerEqual(left tg.PeerClass, right tg.PeerClass) bool {
+	switch l := left.(type) {
+	case *tg.PeerChat:
+		r, ok := right.(*tg.PeerChat)
+		return ok && l.ChatID == r.ChatID
+	case *tg.PeerChannel:
+		r, ok := right.(*tg.PeerChannel)
+		return ok && l.ChannelID == r.ChannelID
+	case *tg.PeerUser:
+		r, ok := right.(*tg.PeerUser)
+		return ok && l.UserID == r.UserID
+	default:
+		return false
+	}
+}
+
+func tgDialogCacheFromChat(chat tg.ChatClass) *tgDialogCache {
+	switch item := chat.(type) {
+	case *tg.Channel:
+		if item.Left {
+			return nil
+		}
+		return tgChannelDialogCache(item)
+	case *tg.Chat:
+		if item.Left || item.Deactivated || item.MigratedTo != nil {
+			return nil
+		}
+		return tgBasicChatDialogCache(item)
+	default:
+		return nil
+	}
 }
 
 func tgChannelDialogCache(channel *tg.Channel) *tgDialogCache {
