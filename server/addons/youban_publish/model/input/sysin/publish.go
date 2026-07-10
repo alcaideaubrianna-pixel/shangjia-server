@@ -1095,6 +1095,16 @@ type ChannelFullPushModel struct {
 	Queued    int   `json:"queued" dc:"入队数量"`
 }
 
+type ChannelClearQueueInp struct {
+	ChannelId int64 `json:"channelId" v:"required|min:1#请选择频道|请选择频道" dc:"频道ID"`
+}
+
+type ChannelClearQueueModel struct {
+	ChannelId int64 `json:"channelId" dc:"频道ID"`
+	Cleared   int   `json:"cleared" dc:"清空数量"`
+	Sending   int   `json:"sending" dc:"发送中数量"`
+}
+
 type ChannelBackupCreateInp struct {
 	TgAccountId int64   `json:"tgAccountId" v:"required|min:1#请选择TG账号|请选择TG账号" dc:"TG账号ID"`
 	Title       string  `json:"title" v:"required#请输入备份频道昵称" dc:"频道昵称"`

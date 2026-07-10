@@ -273,6 +273,15 @@ type AdminChannelFullPushRes struct {
 	*sysin.ChannelFullPushModel
 }
 
+type AdminChannelClearQueueReq struct {
+	g.Meta `path:"/publish/admin/channel/clearQueue" method:"post" tags:"上架插件管理端" summary:"清空频道待发送队列"`
+	sysin.ChannelClearQueueInp
+}
+
+type AdminChannelClearQueueRes struct {
+	*sysin.ChannelClearQueueModel
+}
+
 type AdminChannelBackupCreateReq struct {
 	g.Meta `path:"/publish/admin/channel/backup/create" method:"post" tags:"上架插件管理端" summary:"创建备份频道"`
 	sysin.ChannelBackupCreateInp
