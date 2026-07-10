@@ -39,10 +39,19 @@ func (s *telegramDBSessionStorage) LoadSession(ctx context.Context) ([]byte, err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	count, err := g.DB().Model(publishTgSessionTable).Safe().Ctx(ctx).
+		Where("session_key", s.key).
+		Count()
+	if err != nil {
+		return nil, gerror.Wrap(err, "检查TG会话失败")
+	}
+	if count == 0 {
+		return s.loadFallbackSession(ctx)
+	}
 	var row struct {
 		SessionData []byte `json:"sessionData" orm:"session_data"`
 	}
-	err := g.DB().Model(publishTgSessionTable).Safe().Ctx(ctx).
+	err = g.DB().Model(publishTgSessionTable).Safe().Ctx(ctx).
 		Fields("session_data").
 		Where("session_key", s.key).
 		Scan(&row)
@@ -52,6 +61,10 @@ func (s *telegramDBSessionStorage) LoadSession(ctx context.Context) ([]byte, err
 	if len(row.SessionData) > 0 {
 		return append([]byte(nil), row.SessionData...), nil
 	}
+	return s.loadFallbackSession(ctx)
+}
+
+func (s *telegramDBSessionStorage) loadFallbackSession(ctx context.Context) ([]byte, error) {
 	if strings.TrimSpace(s.fallbackPath) == "" {
 		return nil, session.ErrNotFound
 	}
