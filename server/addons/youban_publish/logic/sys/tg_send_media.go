@@ -18,11 +18,14 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 	if len(media) == 0 {
 		return nil, nil
 	}
-	if telegramMediaSetHasCopyRef(media) {
-		return s.copyTelegramMediaSet(ctx, bot, chatId, purpose, caption, media)
-	}
 	if len(media) == 1 {
 		return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0])
+	}
+	if telegramMediaSetHasCopyRef(media) {
+		if strings.TrimSpace(caption) == "" {
+			return s.copyTelegramMediaSet(ctx, bot, chatId, purpose, caption, media)
+		}
+		media = telegramMediaSetWithoutTgFileId(media)
 	}
 	group, mediaIds, assetHashes, closers, err := s.telegramInputMediaGroup(media, caption)
 	defer closeTelegramMediaFiles(closers)
@@ -63,11 +66,12 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 			defer thumbnailCloser.Close()
 		}
 		msg, err := bot.SendVideo(ctx, &tgbot.SendVideoParams{
-			ChatID:    chatId,
-			Video:     input,
-			Thumbnail: thumbnail,
-			Caption:   caption,
-			ParseMode: telegramMediaParseMode(caption),
+			ChatID:            chatId,
+			Video:             input,
+			Thumbnail:         thumbnail,
+			Caption:           caption,
+			ParseMode:         telegramMediaParseMode(caption),
+			SupportsStreaming: true,
 		})
 		if err != nil {
 			return nil, err
@@ -88,22 +92,24 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 }
 
 func (s *sSysPublish) copyTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
-	if copied, ok, err := s.copyTelegramMediaGroup(ctx, bot, chatId, purpose, caption, media); ok || err != nil {
-		return copied, err
+	if len(media) == 0 {
+		return nil, nil
 	}
-	messages := make([]*telegramSentMessage, 0, len(media))
-	for idx, item := range media {
-		itemCaption := ""
-		if idx == 0 {
-			itemCaption = caption
+	if len(media) == 1 {
+		ref, ok := telegramCopyMediaRefFromFileId(media[0].TgFileId)
+		if !ok {
+			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0])
 		}
-		sent, err := s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, itemCaption, item)
-		if err != nil {
-			return nil, err
-		}
-		messages = append(messages, sent...)
+		return s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0], ref)
 	}
-	return messages, nil
+	copied, ok, err := s.copyTelegramMediaGroup(ctx, bot, chatId, purpose, caption, media)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, gerror.New("多媒体组备份引用不完整，禁止逐条发送以避免打散原消息组")
+	}
+	return copied, nil
 }
 
 func (s *sSysPublish) copyTelegramMediaGroup(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, bool, error) {
@@ -226,7 +232,7 @@ func (s *sSysPublish) telegramInputMediaGroup(media []*telegramMediaItem, captio
 			itemCaption = caption
 		}
 		if item.MediaType == "video" {
-			group = append(group, &models.InputMediaVideo{Media: source, Caption: itemCaption, ParseMode: telegramMediaParseMode(itemCaption), Thumbnail: telegramVideoGroupThumbnail(item), MediaAttachment: attachment})
+			group = append(group, &models.InputMediaVideo{Media: source, Caption: itemCaption, ParseMode: telegramMediaParseMode(itemCaption), Thumbnail: telegramVideoGroupThumbnail(item), SupportsStreaming: true, MediaAttachment: attachment})
 		} else {
 			group = append(group, &models.InputMediaPhoto{Media: source, Caption: itemCaption, ParseMode: telegramMediaParseMode(itemCaption), MediaAttachment: attachment})
 		}
@@ -255,7 +261,7 @@ func telegramInputFile(media *telegramMediaItem) (models.InputFile, io.Closer, e
 		localPath := resolveTelegramLocalPath(path)
 		file, err := os.Open(localPath)
 		if err == nil {
-			return &models.InputFileUpload{Filename: filepath.Base(localPath), Data: file}, file, nil
+			return &models.InputFileUpload{Filename: telegramUploadFilename(media, localPath), Data: file}, file, nil
 		}
 		if strings.TrimSpace(media.FileUrl) == "" || isLocalTelegramURL(media.FileUrl) {
 			return nil, nil, gerror.Wrapf(err, "打开本地媒体文件失败:%s", localPath)
@@ -277,6 +283,21 @@ func telegramMediaSetHasCopyRef(media []*telegramMediaItem) bool {
 		}
 	}
 	return false
+}
+
+func telegramMediaSetWithoutTgFileId(media []*telegramMediaItem) []*telegramMediaItem {
+	list := make([]*telegramMediaItem, 0, len(media))
+	for _, item := range media {
+		if item == nil {
+			list = append(list, item)
+			continue
+		}
+		cloned := *item
+		cloned.TgFileId = ""
+		cloned.TgThumbFileId = ""
+		list = append(list, &cloned)
+	}
+	return list
 }
 
 func telegramCopyMediaGroupRefs(media []*telegramMediaItem) (string, []int, bool) {
@@ -338,7 +359,7 @@ func telegramInputMediaSource(media *telegramMediaItem) (string, io.Reader, io.C
 		localPath := resolveTelegramLocalPath(path)
 		file, err := os.Open(localPath)
 		if err == nil {
-			attachName := fmt.Sprintf("media_%d_%s", media.Id, filepath.Base(localPath))
+			attachName := fmt.Sprintf("media_%d_%s", media.Id, telegramUploadFilename(media, localPath))
 			return "attach://" + attachName, file, file, nil
 		}
 		if strings.TrimSpace(media.FileUrl) == "" || isLocalTelegramURL(media.FileUrl) {
@@ -385,6 +406,14 @@ func telegramVideoGroupThumbnail(media *telegramMediaItem) models.InputFile {
 		return &models.InputFileString{Data: source}
 	}
 	return nil
+}
+
+func telegramUploadFilename(media *telegramMediaItem, localPath string) string {
+	name := filepath.Base(localPath)
+	if media != nil && media.MediaType == "video" && strings.EqualFold(filepath.Ext(name), ".m4v") {
+		return strings.TrimSuffix(name, filepath.Ext(name)) + ".mp4"
+	}
+	return name
 }
 
 func resolveTelegramLocalPath(path string) string {

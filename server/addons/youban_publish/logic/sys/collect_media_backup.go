@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +19,8 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+var collectMediaFloodWaitPattern = regexp.MustCompile(`(?i)FLOOD_WAIT[_ ]?\(?([0-9]+)\)?`)
 
 func (s *sSysPublish) forwardCollectMediaToBackup(ctx context.Context, event gdb.Record, items []collectMediaItem) ([]collectMediaItem, bool, error) {
 	backups, err := s.collectEventBackupChannels(ctx, event)
@@ -60,8 +64,7 @@ func (s *sSysPublish) forwardCollectMediaToBackup(ctx context.Context, event gdb
 			return applyCollectBackupForwardResult(items, backup.ChannelId, ids, indexMap, forwarded)
 		}
 		if event["source_type"].String() == sysin.CollectSourceTypeAccount {
-			s.appendCollectEventLogForRecord(ctx, event, "media", "pending", "账号采集运行时未就绪，等待重试媒体转存", "")
-			return items, false, gerror.New("账号采集运行时未就绪，等待重试媒体转存")
+			return items, false, newCollectMediaRetryError("账号采集运行时未就绪，等待重试媒体转存", 15*time.Second)
 		}
 		if forwardedItems, changed, fallbackErr := s.forwardCollectMediaWithStandaloneClient(ctx, event, sourcePeer, backupPeer, backup.ChannelId, ids, indexMap, items); fallbackErr != nil {
 			lastErr = fallbackErr
@@ -78,10 +81,35 @@ func (s *sSysPublish) forwardCollectMediaToBackup(ctx context.Context, event gdb
 		}
 	}
 	if lastErr != nil {
+		if delay, ok := collectMediaFloodWaitDelay(lastErr); ok {
+			message := fmt.Sprintf("备份频道转存触发Telegram限流，等待%s后重试", delay)
+			s.appendCollectEventLogForRecord(ctx, event, "media", "pending", message, lastErr.Error())
+			return items, false, newCollectMediaRetryError(message, delay)
+		}
 		s.appendCollectEventLogForRecord(ctx, event, "media", "failed", "转存媒体到备份频道失败", lastErr.Error())
 		return items, false, lastErr
 	}
 	return items, false, nil
+}
+
+func collectMediaFloodWaitDelay(err error) (time.Duration, bool) {
+	if err == nil {
+		return 0, false
+	}
+	message := err.Error()
+	matches := collectMediaFloodWaitPattern.FindStringSubmatch(message)
+	if len(matches) < 2 {
+		lower := strings.ToLower(message)
+		if !strings.Contains(lower, "too many requests") {
+			return 0, false
+		}
+		return time.Minute, true
+	}
+	seconds, scanErr := strconv.Atoi(matches[1])
+	if scanErr != nil || seconds <= 0 {
+		return time.Minute, true
+	}
+	return time.Duration(seconds+2) * time.Second, true
 }
 
 func (s *sSysPublish) validateCollectBackupCopyRefs(ctx context.Context, event gdb.Record, backupChannelId string, messageIds []int) error {

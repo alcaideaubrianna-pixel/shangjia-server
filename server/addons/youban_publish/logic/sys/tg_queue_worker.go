@@ -43,6 +43,7 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 	mux.HandleFunc(tgTaskTypeCollectMedia, s.handleCollectMediaCacheTask)
 	mux.HandleFunc(tgTaskTypeCollectHistory, s.handleCollectHistoryTask)
 	mux.HandleFunc(tgTaskTypeCollectTrigger, s.handleCollectTriggerTask)
+	mux.HandleFunc(tgTaskTypeCollectSourceDown, s.handleCollectSourceDownTask)
 
 	go func() {
 		if err := server.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
@@ -147,6 +148,15 @@ func (s *sSysPublish) handleCollectTriggerTask(ctx context.Context, task *asynq.
 		return err
 	}
 	_, err = s.ExecuteCollectSourceTrigger(ctx, payload.SourceId, payload.TenantId, payload.AccountId)
+	return err
+}
+
+func (s *sSysPublish) handleCollectSourceDownTask(ctx context.Context, task *asynq.Task) error {
+	payload, err := decodeCollectSourceDownQueuePayload(task)
+	if err != nil {
+		return err
+	}
+	_, err = s.ExecuteCollectSourceDown(ctx, payload.SourceId, payload.TenantId, payload.AccountId)
 	return err
 }
 

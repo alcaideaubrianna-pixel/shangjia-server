@@ -393,3 +393,11 @@ type CollectStatusInp struct {
 type CollectSourceDownInp struct {
 	Id int64 `json:"id" v:"required|min:1#采集源ID不能为空|采集源ID不能为空" dc:"采集源ID"`
 }
+
+type CollectSourceDownModel struct {
+	SourceId     int64 `json:"sourceId" dc:"采集源ID"`
+	TaskCount    int   `json:"taskCount" dc:"关联任务数"`
+	JobCount     int   `json:"jobCount" dc:"TG任务数"`
+	MessageCount int   `json:"messageCount" dc:"目标频道消息数"`
+	Queued       int   `json:"queued" dc:"是否已投递异步任务"`
+}

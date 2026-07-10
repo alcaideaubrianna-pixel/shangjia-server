@@ -190,7 +190,7 @@ type ISysPublish interface {
 	CollectSourceSave(ctx context.Context, in *sysin.CollectSourceSaveInp) (id int64, err error)
 	CollectSourceDelete(ctx context.Context, in *sysin.IdsInp) (err error)
 	CollectSourceStatus(ctx context.Context, in *sysin.CollectStatusInp) (err error)
-	CollectSourceDown(ctx context.Context, in *sysin.CollectSourceDownInp) (err error)
+	CollectSourceDown(ctx context.Context, in *sysin.CollectSourceDownInp) (res *sysin.CollectSourceDownModel, err error)
 	CollectSourceHistoryStart(ctx context.Context, in *sysin.CollectSourceHistoryStartInp) (res *sysin.CollectHistoryTaskModel, err error)
 	CollectSourceTrigger(ctx context.Context, in *sysin.CollectSourceTriggerInp) (res *sysin.CollectSourceTriggerModel, err error)
 	CollectSourceReset(ctx context.Context, in *sysin.CollectSourceResetInp) (res *sysin.CollectSourceResetModel, err error)

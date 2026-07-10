@@ -68,10 +68,11 @@ func (c *cPublish) CollectSourceStatus(ctx context.Context, req *publish.Collect
 }
 
 func (c *cPublish) CollectSourceDown(ctx context.Context, req *publish.CollectSourceDownReq) (res *publish.CollectSourceDownRes, err error) {
-	if err = service.SysPublish().CollectSourceDown(ctx, &req.CollectSourceDownInp); err != nil {
+	data, err := service.SysPublish().CollectSourceDown(ctx, &req.CollectSourceDownInp)
+	if err != nil {
 		return nil, err
 	}
-	return &publish.CollectSourceDownRes{}, nil
+	return &publish.CollectSourceDownRes{CollectSourceDownModel: data}, nil
 }
 
 func (c *cPublish) CollectSourceHistoryStart(ctx context.Context, req *publish.CollectSourceHistoryStartReq) (res *publish.CollectSourceHistoryStartRes, err error) {

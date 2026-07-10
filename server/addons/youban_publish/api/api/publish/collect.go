@@ -68,7 +68,9 @@ type CollectSourceDownReq struct {
 	sysin.CollectSourceDownInp
 }
 
-type CollectSourceDownRes struct{}
+type CollectSourceDownRes struct {
+	*sysin.CollectSourceDownModel
+}
 
 type CollectSourceHistoryStartReq struct {
 	g.Meta `path:"/publish/collect/source/history/start" method:"post" tags:"上架插件" summary:"启动采集源历史采集"`
