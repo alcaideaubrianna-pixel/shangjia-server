@@ -79,6 +79,8 @@ func isTelegramPermanentSendError(err error) bool {
 		"bad request: bot was blocked by the user",
 		"bad request: not enough rights",
 		"bad request: have no rights",
+		"账号推送暂不支持远程媒体地址",
+		"账号推送媒体文件不存在",
 		"forbidden:",
 		"unauthorized",
 	}

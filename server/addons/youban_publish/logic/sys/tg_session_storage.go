@@ -41,6 +41,9 @@ func (s *telegramDBSessionStorage) LoadSession(ctx context.Context) ([]byte, err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := ensureTelegramSessionTable(ctx); err != nil {
+		return nil, err
+	}
 	count, err := g.DB().Model(publishTgSessionTable).Safe().Ctx(ctx).
 		Where("session_key", s.key).
 		Count()
@@ -98,6 +101,9 @@ func (s *telegramDBSessionStorage) StoreSession(ctx context.Context, data []byte
 
 func (s *telegramDBSessionStorage) storeSession(ctx context.Context, data []byte) error {
 	now := gtime.Now()
+	if err := ensureTelegramSessionTable(ctx); err != nil {
+		return err
+	}
 	count, err := g.DB().Model(publishTgSessionTable).Safe().Ctx(ctx).
 		Where("session_key", s.key).
 		Count()
@@ -122,6 +128,32 @@ func (s *telegramDBSessionStorage) storeSession(ctx context.Context, data []byte
 	}
 	if err != nil {
 		return gerror.Wrap(err, "保存TG会话失败")
+	}
+	return nil
+}
+
+func ensureTelegramSessionTable(ctx context.Context) error {
+	dbType := strings.ToLower(g.DB().GetConfig().Type)
+	if strings.Contains(dbType, "pgsql") || strings.Contains(dbType, "postgres") {
+		_, err := g.DB().Exec(ctx, `CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_session" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "session_key" varchar(255) NOT NULL DEFAULT '',
+  "session_data" bytea NOT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+)`)
+		if err != nil {
+			return gerror.Wrap(err, "创建TG会话表失败")
+		}
+		_, err = g.DB().Exec(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS "idx_ybp_tg_session_key" ON "hg_youban_publish_tg_session" ("session_key")`)
+		if err != nil {
+			return gerror.Wrap(err, "创建TG会话索引失败")
+		}
+		return nil
+	}
+	_, err := g.DB().Exec(ctx, "CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_session` (`id` bigint unsigned NOT NULL AUTO_INCREMENT,`session_key` varchar(255) NOT NULL DEFAULT '' COMMENT '会话Key',`session_data` longblob NOT NULL COMMENT '会话数据',`created_at` datetime DEFAULT NULL,`updated_at` datetime DEFAULT NULL,PRIMARY KEY (`id`),UNIQUE KEY `idx_ybp_tg_session_key` (`session_key`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4")
+	if err != nil {
+		return gerror.Wrap(err, "创建TG会话表失败")
 	}
 	return nil
 }

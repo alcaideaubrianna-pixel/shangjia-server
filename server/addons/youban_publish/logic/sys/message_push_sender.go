@@ -7,6 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -353,9 +357,12 @@ func sendMessageTemplateWithGotd(ctx context.Context, builder *gotdmessage.Reque
 }
 
 func sendSingleMessageTemplateMediaWithGotd(ctx context.Context, builder *gotdmessage.RequestBuilder, caption string, media *telegramMediaItem) (tg.UpdatesClass, error) {
-	upload, err := gotdMessageUploadOption(media)
+	upload, cleanup, err := gotdMessageUploadOption(ctx, media)
 	if err != nil {
 		return nil, err
+	}
+	if cleanup != nil {
+		defer cleanup()
 	}
 	captionOptions := []gotdmessage.StyledTextOption{}
 	if strings.TrimSpace(caption) != "" {
@@ -368,9 +375,12 @@ func sendSingleMessageTemplateMediaWithGotd(ctx context.Context, builder *gotdme
 }
 
 func gotdMessageMediaAlbumOption(ctx context.Context, builder *gotdmessage.RequestBuilder, caption string, media *telegramMediaItem) (gotdmessage.MultiMediaOption, error) {
-	upload, err := gotdMessageUploadOption(media)
+	upload, cleanup, err := gotdMessageUploadOption(ctx, media)
 	if err != nil {
 		return nil, err
+	}
+	if cleanup != nil {
+		defer cleanup()
 	}
 	file, err := builder.Upload(upload).AsInputFile(ctx)
 	if err != nil {
@@ -386,23 +396,77 @@ func gotdMessageMediaAlbumOption(ctx context.Context, builder *gotdmessage.Reque
 	return gotdmessage.UploadedPhoto(file, captionOptions...), nil
 }
 
-func gotdMessageUploadOption(media *telegramMediaItem) (gotdmessage.UploadOption, error) {
+func gotdMessageUploadOption(ctx context.Context, media *telegramMediaItem) (gotdmessage.UploadOption, func(), error) {
 	if media == nil {
-		return nil, gerror.New("媒体文件为空")
+		return nil, nil, gerror.New("媒体文件为空")
 	}
 	if path := strings.TrimSpace(media.StoragePath); path != "" {
 		localPath := resolveTelegramLocalPath(path)
 		if fileExists(localPath) {
-			return gotdmessage.FromPath(localPath), nil
+			return gotdmessage.FromPath(localPath), nil, nil
 		}
 	}
 	if path := localTelegramFileURLPath(media.FileUrl); path != "" {
 		localPath := resolveTelegramLocalPath(path)
 		if fileExists(localPath) {
-			return gotdmessage.FromPath(localPath), nil
+			return gotdmessage.FromPath(localPath), nil, nil
 		}
 	}
-	return nil, gerror.New("账号推送暂不支持远程媒体地址，请重新上传媒体文件")
+	if path, cleanup, err := downloadMessagePushRemoteMedia(ctx, media); err != nil {
+		return nil, nil, err
+	} else if path != "" {
+		return gotdmessage.FromPath(path), cleanup, nil
+	}
+	return nil, nil, gerror.New("账号推送媒体文件不存在，请重新上传媒体文件")
+}
+
+func downloadMessagePushRemoteMedia(ctx context.Context, media *telegramMediaItem) (string, func(), error) {
+	source := strings.TrimSpace(media.FileUrl)
+	if source == "" || !strings.HasPrefix(strings.ToLower(source), "http") {
+		return "", nil, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
+	if err != nil {
+		return "", nil, gerror.Wrap(err, "创建远程媒体下载请求失败")
+	}
+	resp, err := (&http.Client{Timeout: 2 * time.Minute}).Do(req)
+	if err != nil {
+		return "", nil, gerror.Wrap(err, "下载账号推送远程媒体失败")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", nil, gerror.Newf("下载账号推送远程媒体失败：HTTP %d", resp.StatusCode)
+	}
+	ext := filepath.Ext(strings.Split(source, "?")[0])
+	if ext == "" {
+		if strings.EqualFold(media.MediaType, "video") {
+			ext = ".mp4"
+		} else {
+			ext = ".jpg"
+		}
+	}
+	file, err := os.CreateTemp("", "ybp-message-push-*"+ext)
+	if err != nil {
+		return "", nil, gerror.Wrap(err, "创建账号推送临时媒体文件失败")
+	}
+	path := file.Name()
+	cleanup := func() {
+		_ = os.Remove(path)
+	}
+	if _, err = io.Copy(file, resp.Body); err != nil {
+		_ = file.Close()
+		cleanup()
+		return "", nil, gerror.Wrap(err, "保存账号推送临时媒体文件失败")
+	}
+	if err = file.Close(); err != nil {
+		cleanup()
+		return "", nil, gerror.Wrap(err, "关闭账号推送临时媒体文件失败")
+	}
+	if !fileExists(path) {
+		cleanup()
+		return "", nil, gerror.New("账号推送临时媒体文件不存在")
+	}
+	return path, cleanup, nil
 }
 
 func messagePushInputPeer(channel *messagePushChannel) (tg.InputPeerClass, error) {
