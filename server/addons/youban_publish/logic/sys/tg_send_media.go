@@ -30,7 +30,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		}
 		media = telegramMediaSetWithoutTgFileId(media)
 	}
-	group, mediaIds, assetHashes, closers, err := s.telegramInputMediaGroup(media, caption)
+	group, mediaIds, assetHashes, closers, err := s.telegramInputMediaGroup(ctx, media, caption)
 	defer closeTelegramMediaFiles(closers)
 	if err != nil {
 		return nil, err
@@ -68,14 +68,17 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		if thumbnailCloser != nil {
 			defer thumbnailCloser.Close()
 		}
-		msg, err := bot.SendVideo(ctx, &tgbot.SendVideoParams{
+		videoMeta := s.telegramVideoMeta(ctx, media)
+		params := &tgbot.SendVideoParams{
 			ChatID:            chatId,
 			Video:             input,
 			Thumbnail:         thumbnail,
 			Caption:           caption,
 			ParseMode:         telegramMediaParseMode(caption),
 			SupportsStreaming: true,
-		})
+		}
+		applyTelegramSendVideoMeta(params, videoMeta)
+		msg, err := bot.SendVideo(ctx, params)
 		if err != nil {
 			return nil, err
 		}
@@ -212,7 +215,7 @@ func (s *sSysPublish) copyTelegramSingleMediaWithoutCaption(ctx context.Context,
 	}}, nil
 }
 
-func (s *sSysPublish) telegramInputMediaGroup(media []*telegramMediaItem, caption string) ([]models.InputMedia, []int64, []string, []io.Closer, error) {
+func (s *sSysPublish) telegramInputMediaGroup(ctx context.Context, media []*telegramMediaItem, caption string) ([]models.InputMedia, []int64, []string, []io.Closer, error) {
 	group := make([]models.InputMedia, 0, len(media))
 	mediaIds := make([]int64, 0, len(media))
 	assetHashes := make([]string, 0, len(media))
@@ -235,7 +238,9 @@ func (s *sSysPublish) telegramInputMediaGroup(media []*telegramMediaItem, captio
 			itemCaption = caption
 		}
 		if item.MediaType == "video" {
-			group = append(group, &models.InputMediaVideo{Media: source, Caption: itemCaption, ParseMode: telegramMediaParseMode(itemCaption), Thumbnail: telegramVideoGroupThumbnail(item), SupportsStreaming: true, MediaAttachment: attachment})
+			video := &models.InputMediaVideo{Media: source, Caption: itemCaption, ParseMode: telegramMediaParseMode(itemCaption), Thumbnail: telegramVideoGroupThumbnail(item), SupportsStreaming: true, MediaAttachment: attachment}
+			applyTelegramInputMediaVideoMeta(video, s.telegramVideoMeta(ctx, item))
+			group = append(group, video)
 		} else {
 			group = append(group, &models.InputMediaPhoto{Media: source, Caption: itemCaption, ParseMode: telegramMediaParseMode(itemCaption), MediaAttachment: attachment})
 		}

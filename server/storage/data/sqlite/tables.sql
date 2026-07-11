@@ -347,6 +347,9 @@ CREATE TABLE `hg_sys_attachment` (                        -- 系统_附件管理
   `path` TEXT DEFAULT NULL,                               -- 本地路径
   `file_url` TEXT DEFAULT NULL,                           -- url
   `size` INTEGER DEFAULT 0,                               -- 文件大小
+  `width` INTEGER NOT NULL DEFAULT 0,                     -- 宽度
+  `height` INTEGER NOT NULL DEFAULT 0,                    -- 高度
+  `duration` INTEGER NOT NULL DEFAULT 0,                  -- 时长
   `ext` TEXT DEFAULT NULL,                                -- 扩展名
   `md5` TEXT DEFAULT NULL,                                -- md5校验码
   `status` INTEGER NOT NULL DEFAULT 1,                    -- 状态

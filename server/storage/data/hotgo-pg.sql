@@ -739,6 +739,9 @@ CREATE TABLE IF NOT EXISTS hg_sys_attachment (
     path VARCHAR(1000),
     file_url VARCHAR(1000),
     size BIGINT DEFAULT 0,
+    width INTEGER NOT NULL DEFAULT 0,
+    height INTEGER NOT NULL DEFAULT 0,
+    duration INTEGER NOT NULL DEFAULT 0,
     ext VARCHAR(50),
     md5 VARCHAR(32),
     status SMALLINT NOT NULL DEFAULT 1,
@@ -759,6 +762,9 @@ COMMENT ON COLUMN hg_sys_attachment.naive_type IS 'NaiveUI类型';
 COMMENT ON COLUMN hg_sys_attachment.path IS '本地路径';
 COMMENT ON COLUMN hg_sys_attachment.file_url IS 'url';
 COMMENT ON COLUMN hg_sys_attachment.size IS '文件大小';
+COMMENT ON COLUMN hg_sys_attachment.width IS '宽度';
+COMMENT ON COLUMN hg_sys_attachment.height IS '高度';
+COMMENT ON COLUMN hg_sys_attachment.duration IS '时长';
 COMMENT ON COLUMN hg_sys_attachment.ext IS '扩展名';
 COMMENT ON COLUMN hg_sys_attachment.md5 IS 'md5校验码';
 COMMENT ON COLUMN hg_sys_attachment.status IS '状态';

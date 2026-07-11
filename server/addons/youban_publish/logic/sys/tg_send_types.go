@@ -4,6 +4,7 @@ import "github.com/gogf/gf/v2/os/gtime"
 
 type telegramMediaItem struct {
 	Id                int64  `json:"id"`
+	AttachmentId      int64  `json:"attachmentId"`
 	MediaType         string `json:"mediaType"`
 	Purpose           string `json:"purpose"`
 	FileUrl           string `json:"fileUrl"`
@@ -14,6 +15,9 @@ type telegramMediaItem struct {
 	TgThumbFileId     string `json:"tgThumbFileId"`
 	AssetHash         string `json:"assetHash"`
 	SortIndex         int    `json:"sortIndex"`
+	VideoWidth        int    `json:"videoWidth"`
+	VideoHeight       int    `json:"videoHeight"`
+	VideoDuration     int    `json:"videoDuration"`
 }
 
 type telegramSentMessage struct {

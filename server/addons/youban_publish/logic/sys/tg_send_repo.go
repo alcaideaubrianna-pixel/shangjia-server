@@ -83,6 +83,7 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 		asset := media.EffectiveAsset()
 		rows = append(rows, &telegramMediaItem{
 			Id:                record["id"].Int64(),
+			AttachmentId:      asset.AttachmentId,
 			MediaType:         record["media_type"].String(),
 			Purpose:           record["purpose"].String(),
 			FileUrl:           normalizeMediaFileURL(asset.FileUrl, asset.StoragePath),
