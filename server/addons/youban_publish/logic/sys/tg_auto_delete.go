@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -243,11 +244,51 @@ func (s *sSysPublish) deleteMatchedTelegramMessageByChat(ctx context.Context, bo
 	if err != nil {
 		return err
 	}
-	_, err = bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{
-		ChatID:    normalizeTelegramChannelChatID(chatId),
-		MessageID: messageId,
-	})
-	return err
+	chatId = normalizeTelegramChannelChatID(chatId)
+	var lastErr error
+	for attempt := 0; attempt < 4; attempt++ {
+		_, lastErr = bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{
+			ChatID:    chatId,
+			MessageID: messageId,
+		})
+		if lastErr == nil || isTelegramMessageAlreadyDeletedError(lastErr) || !isTelegramAutoDeleteRetryableError(lastErr) {
+			return lastErr
+		}
+		delay := time.Duration(attempt+1) * 300 * time.Millisecond
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return lastErr
+}
+
+func isTelegramAutoDeleteRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	retryableParts := []string{
+		"goaway",
+		"connection reset",
+		"connection refused",
+		"connection closed",
+		"server closed idle connection",
+		"unexpected eof",
+		"eof",
+		"timeout",
+		"temporarily unavailable",
+		"too many idle connections",
+	}
+	for _, part := range retryableParts {
+		if strings.Contains(message, part) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *sSysPublish) appendAutoDeleteLog(ctx context.Context, channel *autoDeleteChannel, botId int64, msg *models.Message, keyword string, status string, message string) {
