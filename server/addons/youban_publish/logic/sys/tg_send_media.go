@@ -52,7 +52,7 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 	if ref, ok := telegramCopyMediaRefFromFileId(media.TgFileId); ok {
 		return s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media, ref)
 	}
-	input, closer, err := telegramInputFile(media)
+	input, closer, err := telegramInputFile(ctx, media)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +221,7 @@ func (s *sSysPublish) telegramInputMediaGroup(ctx context.Context, media []*tele
 	assetHashes := make([]string, 0, len(media))
 	closers := make([]io.Closer, 0, len(media))
 	for _, item := range media {
-		source, attachment, closer, err := telegramInputMediaSource(item)
+		source, attachment, closer, err := telegramInputMediaSource(ctx, item)
 		if err != nil {
 			closeTelegramMediaFiles(closers)
 			return nil, nil, nil, nil, err
@@ -257,32 +257,28 @@ func telegramMediaParseMode(caption string) models.ParseMode {
 	return models.ParseModeHTML
 }
 
-func telegramInputFile(media *telegramMediaItem) (models.InputFile, io.Closer, error) {
+func telegramInputFile(ctx context.Context, media *telegramMediaItem) (models.InputFile, io.Closer, error) {
 	if media == nil {
 		return nil, nil, gerror.New("媒体文件为空")
 	}
 	if source := strings.TrimSpace(media.TgFileId); source != "" {
 		return &models.InputFileString{Data: source}, nil, nil
 	}
-	path := strings.TrimSpace(media.StoragePath)
-	if path != "" {
-		localPath := resolveTelegramLocalPath(path)
-		file, err := os.Open(localPath)
-		if err == nil {
-			return &models.InputFileUpload{Filename: telegramUploadFilename(media, localPath), Data: file}, file, nil
-		}
-		if strings.TrimSpace(media.FileUrl) == "" || isLocalTelegramURL(media.FileUrl) {
-			return nil, nil, gerror.Wrapf(err, "打开本地媒体文件失败:%s", localPath)
-		}
+	path, cleanup, err := cachedTelegramMediaFile(ctx, media)
+	if err != nil {
+		return nil, nil, err
 	}
-	if source := strings.TrimSpace(media.FileUrl); source != "" {
-		file, err := downloadTelegramRemoteMedia(source)
-		if err != nil {
-			return nil, nil, err
-		}
-		return &models.InputFileUpload{Filename: telegramUploadFilename(media, file.Name()), Data: file}, file, nil
+	if strings.TrimSpace(path) == "" {
+		return nil, nil, gerror.New("媒体文件地址为空")
 	}
-	return nil, nil, gerror.New("媒体文件地址为空")
+	file, err := os.Open(path)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return nil, nil, gerror.Wrapf(err, "打开媒体文件失败:%s", path)
+	}
+	return &models.InputFileUpload{Filename: telegramUploadFilename(media, path), Data: file}, closeWithCleanup(file, cleanup), nil
 }
 
 func telegramMediaSetHasCopyRef(media []*telegramMediaItem) bool {
@@ -359,34 +355,55 @@ func telegramCopyMediaRefFromFileId(fileId string) (telegramCopyMediaRef, bool) 
 	return telegramCopyMediaRef{ChatId: chatId, MessageId: messageId}, true
 }
 
-func telegramInputMediaSource(media *telegramMediaItem) (string, io.Reader, io.Closer, error) {
+func telegramInputMediaSource(ctx context.Context, media *telegramMediaItem) (string, io.Reader, io.Closer, error) {
 	if media == nil {
 		return "", nil, nil, gerror.New("媒体文件为空")
 	}
 	if source := strings.TrimSpace(media.TgFileId); source != "" {
 		return source, nil, nil, nil
 	}
-	path := strings.TrimSpace(media.StoragePath)
-	if path != "" {
-		localPath := resolveTelegramLocalPath(path)
-		file, err := os.Open(localPath)
-		if err == nil {
-			attachName := fmt.Sprintf("media_%d_%s", media.Id, telegramUploadFilename(media, localPath))
-			return "attach://" + attachName, file, file, nil
-		}
-		if strings.TrimSpace(media.FileUrl) == "" || isLocalTelegramURL(media.FileUrl) {
-			return "", nil, nil, gerror.Wrapf(err, "打开本地媒体文件失败:%s", localPath)
-		}
+	path, cleanup, err := cachedTelegramMediaFile(ctx, media)
+	if err != nil {
+		return "", nil, nil, err
 	}
-	if source := strings.TrimSpace(media.FileUrl); source != "" {
-		file, err := downloadTelegramRemoteMedia(source)
-		if err != nil {
-			return "", nil, nil, err
-		}
-		attachName := fmt.Sprintf("media_%d_%s", media.Id, telegramUploadFilename(media, file.Name()))
-		return "attach://" + attachName, file, file, nil
+	if strings.TrimSpace(path) == "" {
+		return "", nil, nil, gerror.New("媒体文件地址为空")
 	}
-	return "", nil, nil, gerror.New("媒体文件地址为空")
+	file, err := os.Open(path)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return "", nil, nil, gerror.Wrapf(err, "打开媒体文件失败:%s", path)
+	}
+	attachName := fmt.Sprintf("media_%d_%s", media.Id, telegramUploadFilename(media, path))
+	return "attach://" + attachName, file, closeWithCleanup(file, cleanup), nil
+}
+
+type fileCleanupCloser struct {
+	*os.File
+	cleanup func()
+}
+
+func closeWithCleanup(file *os.File, cleanup func()) io.Closer {
+	if cleanup == nil {
+		return file
+	}
+	return &fileCleanupCloser{File: file, cleanup: cleanup}
+}
+
+func (c *fileCleanupCloser) Close() error {
+	if c == nil || c.File == nil {
+		if c != nil && c.cleanup != nil {
+			c.cleanup()
+		}
+		return nil
+	}
+	err := c.File.Close()
+	if c.cleanup != nil {
+		c.cleanup()
+	}
+	return err
 }
 
 type telegramRemoteMediaFile struct {

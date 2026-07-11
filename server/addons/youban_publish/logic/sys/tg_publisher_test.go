@@ -39,6 +39,13 @@ func TestApplyCollectTextDeletes(t *testing.T) {
 	}
 }
 
+func TestMatchedAutoDeleteKeywordNormalizesCommonTraditionalText(t *testing.T) {
+	got := matchedAutoDeleteKeyword("❌ 录入失败\n过滤原因：图片去重", []string{"录入失敗"})
+	if got != "录入失敗" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestCollectStringListSupportsObjects(t *testing.T) {
 	got := collectStringList(`[{"label":"A"},{"text":"B"},{"value":"A"}]`)
 	if len(got) != 2 || got[0] != "A" || got[1] != "B" {

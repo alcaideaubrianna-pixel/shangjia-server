@@ -24,12 +24,28 @@ func (w *accountCollectWorker) bindGotdHandlers(dispatcher tg.UpdateDispatcher) 
 		w.handleGotdMessage(ctx, msg)
 		return nil
 	})
+	dispatcher.OnEditChannelMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateEditChannelMessage) error {
+		msg, ok := update.Message.(*tg.Message)
+		if !ok {
+			return nil
+		}
+		w.handleGotdEditedMessage(ctx, msg)
+		return nil
+	})
 	dispatcher.OnNewMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateNewMessage) error {
 		msg, ok := update.Message.(*tg.Message)
 		if !ok {
 			return nil
 		}
 		w.handleGotdMessage(ctx, msg)
+		return nil
+	})
+	dispatcher.OnEditMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateEditMessage) error {
+		msg, ok := update.Message.(*tg.Message)
+		if !ok {
+			return nil
+		}
+		w.handleGotdEditedMessage(ctx, msg)
 		return nil
 	})
 }
@@ -58,6 +74,13 @@ func (w *accountCollectWorker) handleGotdMessage(ctx context.Context, msg *tg.Me
 			g.Log().Warningf(ctx, "账号采集消息队列已满，跳过消息 tgAccountId:%d source:%d msg:%d", w.tgAccountId, source.Id, msg.ID)
 		}
 	}
+}
+
+func (w *accountCollectWorker) handleGotdEditedMessage(ctx context.Context, msg *tg.Message) {
+	if w == nil || w.service == nil || msg == nil {
+		return
+	}
+	w.service.handleGotdAutoDelete(ctx, msg)
 }
 
 func (w *accountCollectWorker) ingestGotdMessage(ctx context.Context, source accountCollectSourceRuntime, msg *tg.Message, chatId string) {

@@ -138,20 +138,39 @@ func (s *sSysPublish) handleGotdAutoDelete(ctx context.Context, msg *tg.Message)
 }
 
 func matchedAutoDeleteKeyword(text string, keywords []string) string {
-	text = strings.ToLower(strings.TrimSpace(text))
+	text = normalizeAutoDeleteKeywordText(text)
 	if text == "" {
 		return ""
 	}
 	for _, keyword := range keywords {
-		keyword = strings.TrimSpace(keyword)
-		if keyword == "" {
+		rawKeyword := strings.TrimSpace(keyword)
+		if rawKeyword == "" {
 			continue
 		}
-		if strings.Contains(text, strings.ToLower(keyword)) {
-			return keyword
+		if strings.Contains(text, normalizeAutoDeleteKeywordText(rawKeyword)) {
+			return rawKeyword
 		}
 	}
 	return ""
+}
+
+func normalizeAutoDeleteKeywordText(text string) string {
+	text = strings.ToLower(strings.TrimSpace(text))
+	replacer := strings.NewReplacer(
+		"敗", "败",
+		"錄", "录",
+		"複", "复",
+		"週", "周",
+		"發", "发",
+		"現", "现",
+		"資", "资",
+		"視", "视",
+		"頻", "频",
+		"號", "号",
+		"檢", "检",
+		"測", "测",
+	)
+	return replacer.Replace(text)
 }
 
 func (s *sSysPublish) autoDeleteChannel(ctx context.Context, chat models.Chat) (*autoDeleteChannel, error) {

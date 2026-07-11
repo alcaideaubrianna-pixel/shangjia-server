@@ -66,7 +66,14 @@ func (s *sSysPublish) telegramVideoMeta(ctx context.Context, media *telegramMedi
 		media.VideoDuration = meta.Duration
 		return meta
 	}
-	localPath := resolveTelegramLocalPath(media.StoragePath)
+	localPath, cleanup, err := telegramVideoMetaProbePath(ctx, media)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		g.Log().Warningf(ctx, "准备读取视频元数据失败 mediaId:%d attachmentId:%d path:%s err:%+v", media.Id, media.AttachmentId, media.StoragePath, err)
+		return telegramVideoMeta{}
+	}
 	if strings.TrimSpace(localPath) == "" {
 		return telegramVideoMeta{}
 	}
@@ -85,6 +92,13 @@ func (s *sSysPublish) telegramVideoMeta(ctx context.Context, media *telegramMedi
 		g.Log().Warningf(ctx, "缓存视频元数据失败 mediaId:%d attachmentId:%d path:%s err:%+v", media.Id, media.AttachmentId, media.StoragePath, err)
 	}
 	return meta
+}
+
+func telegramVideoMetaProbePath(ctx context.Context, media *telegramMediaItem) (string, func(), error) {
+	if media == nil {
+		return "", nil, nil
+	}
+	return cachedTelegramMediaFile(ctx, media)
 }
 
 func applyTelegramSendVideoMeta(params *tgbot.SendVideoParams, meta telegramVideoMeta) {
