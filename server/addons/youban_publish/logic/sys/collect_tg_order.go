@@ -94,9 +94,15 @@ func (s *sSysPublish) collectTelegramJobHasPreviousActive(ctx context.Context, j
 	if job.CollectSourceId <= 0 || job.CollectSourceMessageId <= 0 || strings.TrimSpace(job.CollectSourceChatId) == "" {
 		return false, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	taskActive, err := s.collectTelegramJobHasPreviousActiveTask(ctx, job)
 	if err != nil || taskActive {
 		return taskActive, err
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
 	}
 	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
@@ -110,6 +116,9 @@ func (s *sSysPublish) collectTelegramJobHasPreviousActive(ctx context.Context, j
 		mod = mod.Where("j.channel_id", job.ChannelId)
 	} else {
 		mod = mod.Where("j.target_chat_id", job.TargetChatId)
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
 	}
 	count, err := mod.Count()
 	if err != nil {

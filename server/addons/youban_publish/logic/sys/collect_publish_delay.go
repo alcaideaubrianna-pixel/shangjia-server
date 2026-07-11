@@ -36,6 +36,9 @@ func (s *sSysPublish) collectTelegramJobHasPreviousActiveTask(ctx context.Contex
 	if job.CollectSourceId <= 0 || job.CollectSourceMessageId <= 0 || strings.TrimSpace(job.CollectSourceChatId) == "" {
 		return false, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
 		Where("id <> ?", job.TaskId).
 		Where("collect_source_id", job.CollectSourceId).
@@ -47,6 +50,9 @@ func (s *sSysPublish) collectTelegramJobHasPreviousActiveTask(ctx context.Contex
 	if since := collectEventOrderWindowSince(ctx); since != nil {
 		mod = mod.WhereGTE("submitted_at", since)
 	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	count, err := mod.Count()
 	if err != nil {
 		return false, gerror.Wrap(err, "检查采集TG前序上架任务失败")
@@ -57,6 +63,9 @@ func (s *sSysPublish) collectTelegramJobHasPreviousActiveTask(ctx context.Contex
 func (s *sSysPublish) collectTelegramJobHasPendingVerifyContinuation(ctx context.Context, job telegramJobRecord) (bool, error) {
 	if job.CollectSourceId <= 0 || job.CollectSourceMessageId <= 0 || strings.TrimSpace(job.CollectSourceChatId) == "" || job.TaskId <= 0 {
 		return false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
 	}
 	verifyCount, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("task_id", job.TaskId).
@@ -93,6 +102,9 @@ func (s *sSysPublish) collectTelegramJobHasPendingVerifyContinuation(ctx context
 	mediaTable := pdao.YoubanPublishCollectEventMedia.Table()
 	mod = mod.Where("EXISTS (SELECT 1 FROM " + mediaTable + " m WHERE m.event_id=e.id AND m.media_type='video')")
 	mod = mod.Where("NOT EXISTS (SELECT 1 FROM " + mediaTable + " m WHERE m.event_id=e.id AND m.media_type<>'video')")
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	count, err := mod.Count()
 	if err != nil {
 		return false, gerror.Wrap(err, "检查采集后续验证视频失败")

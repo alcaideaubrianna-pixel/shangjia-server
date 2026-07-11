@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +38,9 @@ func (s *sSysPublish) runTelegramChannelScheduler(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := s.dispatchTelegramDueJobs(ctx, g.Cfg().MustGet(ctx, "youbanPublish.queue.schedulerBatchSize", 50).Int()); err != nil {
+				if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+					return
+				}
 				g.Log().Warningf(ctx, "调度TG频道推送任务失败：%+v", err)
 			}
 		}
