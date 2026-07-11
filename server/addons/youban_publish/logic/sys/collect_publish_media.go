@@ -39,14 +39,17 @@ func (s *sSysPublish) rebuildCollectPublishMedia(ctx context.Context, event gdb.
 		Update(); err != nil {
 		return gerror.Wrap(err, "清理采集旧媒体失败")
 	}
-	displayItems, verifyItems := splitCollectPublishMediaItems(items)
+	displayItems, verifyItems := splitCollectPublishMediaItems(event, items)
 	if err := s.insertCollectPublishMediaRows(ctx, event, taskId, "display", displayItems); err != nil {
 		return err
 	}
 	return s.insertCollectPublishMediaRows(ctx, event, taskId, "verify", verifyItems)
 }
 
-func splitCollectPublishMediaItems(items []collectMediaItem) ([]collectMediaItem, []collectMediaItem) {
+func splitCollectPublishMediaItems(event gdb.Record, items []collectMediaItem) ([]collectMediaItem, []collectMediaItem) {
+	if !event.IsEmpty() && strings.TrimSpace(event["source_grouped_id"].String()) != "" {
+		return items, nil
+	}
 	if len(items) <= 1 {
 		return items, nil
 	}
