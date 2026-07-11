@@ -23,6 +23,21 @@ type AccountSettingViewRes struct {
 	*sysin.AccountSettingModel
 }
 
+type AccountSettingSaveReq struct {
+	g.Meta          `path:"/publish/account/setting/save" method:"post" tags:"上架插件" summary:"保存当前账号推送设置"`
+	EnableSuffix    int    `json:"enableSuffix" dc:"是否启用发送后缀"`
+	SuffixContent   string `json:"suffixContent" dc:"发送后缀内容"`
+	EnableTitleMark int    `json:"enableTitleMark" dc:"是否启用编号标识"`
+	MarkMode        string `json:"markMode" dc:"前缀模式：nickname/custom"`
+	NumberSource    string `json:"numberSource" dc:"编号来源：sequence/random"`
+	CustomMarkText  string `json:"customMarkText" dc:"自定义前缀"`
+	MarkPosition    string `json:"markPosition" dc:"显示位置：top/bottom/feeLine"`
+}
+
+type AccountSettingSaveRes struct {
+	*sysin.AccountSettingModel
+}
+
 type UpdateAccountPasswordReq struct {
 	g.Meta `path:"/publish/account/password" method:"post" tags:"上架插件" summary:"修改当前账号密码"`
 	sysin.UpdateAccountPasswordInp

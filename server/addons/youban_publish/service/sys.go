@@ -130,6 +130,7 @@ type ISysPublish interface {
 	AccountRegister(ctx context.Context, in *sysin.AccountRegisterInp) (res *sysin.AccountRegisterModel, err error)
 	CurrentAccount(ctx context.Context) (res *sysin.CurrentAccountModel, err error)
 	MyAccountSettingView(ctx context.Context) (res *sysin.AccountSettingModel, err error)
+	MyAccountSettingSave(ctx context.Context, in *sysin.AccountSettingSaveInp) (res *sysin.AccountSettingModel, err error)
 	MyDashboardOverview(ctx context.Context) (res *sysin.DashboardOverviewModel, err error)
 	MyDashboardTrend(ctx context.Context, in *sysin.TrendInp) (res *sysin.DashboardTrendModel, err error)
 	MyDashboardTodo(ctx context.Context) (res *sysin.DashboardTodoModel, err error)

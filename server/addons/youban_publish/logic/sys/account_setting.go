@@ -35,6 +35,24 @@ func (s *sSysPublish) MyAccountSettingView(ctx context.Context) (*sysin.AccountS
 	return s.accountSetting(ctx, account.TenantId, account.Id)
 }
 
+func (s *sSysPublish) MyAccountSettingSave(ctx context.Context, in *sysin.AccountSettingSaveInp) (*sysin.AccountSettingModel, error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil {
+		return nil, gerror.New("账号设置不能为空")
+	}
+	in.AccountId = account.Id
+	if err = in.Filter(ctx); err != nil {
+		return nil, err
+	}
+	if err = s.saveAccountSetting(ctx, account.TenantId, account.Id, in); err != nil {
+		return nil, err
+	}
+	return s.accountSetting(ctx, account.TenantId, account.Id)
+}
+
 func (s *sSysPublish) AdminAccountSettingSave(ctx context.Context, in *sysin.AccountSettingSaveInp) (*sysin.AccountSettingModel, error) {
 	admin, err := s.currentAdminAccount(ctx)
 	if err != nil {
@@ -114,17 +132,17 @@ func (s *sSysPublish) accountDisplayName(ctx context.Context, tenantId int64, ac
 func (s *sSysPublish) saveAccountSetting(ctx context.Context, tenantId int64, operatorId int64, in *sysin.AccountSettingSaveInp) error {
 	now := gtime.Now()
 	data := g.Map{
-		"tenant_id":             tenantId,
-		"account_id":            in.AccountId,
-		"enable_suffix":         in.EnableSuffix,
-		"suffix_content":        in.SuffixContent,
-		"enable_title_mark":     in.EnableTitleMark,
-		"mark_mode":             in.MarkMode,
-		"number_source":         in.NumberSource,
-		"custom_mark_text":      in.CustomMarkText,
-		"mark_position":         in.MarkPosition,
-		"updated_by":            operatorId,
-		"updated_at":            now,
+		"tenant_id":         tenantId,
+		"account_id":        in.AccountId,
+		"enable_suffix":     in.EnableSuffix,
+		"suffix_content":    in.SuffixContent,
+		"enable_title_mark": in.EnableTitleMark,
+		"mark_mode":         in.MarkMode,
+		"number_source":     in.NumberSource,
+		"custom_mark_text":  in.CustomMarkText,
+		"mark_position":     in.MarkPosition,
+		"updated_by":        operatorId,
+		"updated_at":        now,
 	}
 	count, err := g.DB().Model(publishAccountSettingTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).

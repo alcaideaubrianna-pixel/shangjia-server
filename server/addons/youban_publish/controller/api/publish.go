@@ -39,6 +39,25 @@ func (c *cPublish) AccountSettingView(ctx context.Context, req *publish.AccountS
 	return
 }
 
+func (c *cPublish) AccountSettingSave(ctx context.Context, req *publish.AccountSettingSaveReq) (res *publish.AccountSettingSaveRes, err error) {
+	in := sysin.AccountSettingSaveInp{
+		EnableSuffix:    req.EnableSuffix,
+		SuffixContent:   req.SuffixContent,
+		EnableTitleMark: req.EnableTitleMark,
+		MarkMode:        req.MarkMode,
+		NumberSource:    req.NumberSource,
+		CustomMarkText:  req.CustomMarkText,
+		MarkPosition:    req.MarkPosition,
+	}
+	fillAccountSettingSaveInpFromRequest(ctx, &in)
+	data, err := service.SysPublish().MyAccountSettingSave(ctx, &in)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AccountSettingSaveRes{AccountSettingModel: data}
+	return
+}
+
 func (c *cPublish) UpdateAccountPassword(ctx context.Context, req *publish.UpdateAccountPasswordReq) (res *publish.UpdateAccountPasswordRes, err error) {
 	if err = service.SysPublish().UpdateAccountPassword(ctx, &req.UpdateAccountPasswordInp); err != nil {
 		return nil, err
