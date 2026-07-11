@@ -2,6 +2,9 @@ package sys
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -81,18 +84,21 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 	for _, record := range records {
 		media := newProfileMediaFromRecord(record)
 		asset := media.EffectiveAsset()
+		posterUrl := normalizeMediaFileURL(record["poster_url"].String(), record["poster_storage_path"].String())
+		posterStoragePath := record["poster_storage_path"].String()
+		assetHash := telegramMediaCacheAssetHash(record["media_type"].String(), asset.Hash, posterUrl, posterStoragePath, record["tg_thumb_file_id"].String())
 		rows = append(rows, &telegramMediaItem{
 			Id:                record["id"].Int64(),
 			AttachmentId:      asset.AttachmentId,
 			MediaType:         record["media_type"].String(),
 			Purpose:           record["purpose"].String(),
 			FileUrl:           normalizeMediaFileURL(asset.FileUrl, asset.StoragePath),
-			PosterUrl:         normalizeMediaFileURL(record["poster_url"].String(), record["poster_storage_path"].String()),
+			PosterUrl:         posterUrl,
 			StoragePath:       asset.StoragePath,
-			PosterStoragePath: record["poster_storage_path"].String(),
-			TgFileId:          media.ValidTgFileId(asset),
+			PosterStoragePath: posterStoragePath,
+			TgFileId:          media.ValidTgFileIdForHash(assetHash),
 			TgThumbFileId:     "",
-			AssetHash:         asset.Hash,
+			AssetHash:         assetHash,
 			SortIndex:         record["sort_index"].Int(),
 		})
 		if rows[len(rows)-1].TgFileId != "" {
@@ -100,6 +106,23 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 		}
 	}
 	return rows, nil
+}
+
+func telegramMediaCacheAssetHash(mediaType string, assetHash string, posterUrl string, posterStoragePath string, tgThumbFileId string) string {
+	assetHash = strings.TrimSpace(assetHash)
+	if !strings.EqualFold(strings.TrimSpace(mediaType), "video") {
+		return assetHash
+	}
+	var builder strings.Builder
+	builder.WriteString(assetHash)
+	builder.WriteByte('|')
+	builder.WriteString(strings.TrimSpace(posterUrl))
+	builder.WriteByte('|')
+	builder.WriteString(strings.TrimSpace(posterStoragePath))
+	builder.WriteByte('|')
+	builder.WriteString(strings.TrimSpace(tgThumbFileId))
+	sum := sha256.Sum256([]byte(builder.String()))
+	return "video-thumb:" + hex.EncodeToString(sum[:])
 }
 
 func (s *sSysPublish) telegramJobTask(ctx context.Context, taskId int64) (gdb.Record, error) {
