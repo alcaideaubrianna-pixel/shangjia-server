@@ -18,7 +18,7 @@ import (
 
 var (
 	collectLinkPattern               = regexp.MustCompile(`(?i)(https?://|t\.me/|telegram\.me/)`)
-	collectUsernamePattern           = regexp.MustCompile(`(^|\s)@[A-Za-z0-9_]{4,}`)
+	collectUsernamePattern           = regexp.MustCompile(`@`)
 	collectStandaloneCodeCaptionRule = regexp.MustCompile(`^[A-Za-z]{1,4}\d{3,6}$`)
 )
 
