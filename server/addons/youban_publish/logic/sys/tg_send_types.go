@@ -59,4 +59,5 @@ type telegramJobRecord struct {
 	DispatchStatus         string      `json:"dispatchStatus"`
 	DispatchedAt           *gtime.Time `json:"dispatchedAt"`
 	DispatchCount          int         `json:"dispatchCount"`
+	CreatedAt              *gtime.Time `json:"createdAt"`
 }

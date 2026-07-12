@@ -1,0 +1,120 @@
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_bot` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `bot_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'Bot名称',
+  `bot_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'Bot用户名',
+  `bot_token` varchar(255) NOT NULL DEFAULT '' COMMENT 'Bot Token',
+  `is_official` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否官方Bot',
+  `is_default` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否默认官方Bot',
+  `run_mode` varchar(32) NOT NULL DEFAULT 'auto' COMMENT '运行模式',
+  `webhook_url` varchar(500) NOT NULL DEFAULT '' COMMENT 'Webhook地址',
+  `remark` varchar(500) NOT NULL DEFAULT '' COMMENT '备注',
+  `status` tinyint(4) NOT NULL DEFAULT '1' COMMENT '状态',
+  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
+  `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybb_bot_username` (`bot_username`),
+  KEY `idx_ybb_bot_official` (`is_official`,`is_default`,`status`,`id`),
+  KEY `idx_ybb_bot_status` (`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_feature` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `feature_key` varchar(64) NOT NULL DEFAULT '' COMMENT '功能Key',
+  `name` varchar(128) NOT NULL DEFAULT '' COMMENT '功能名称',
+  `command` varchar(64) NOT NULL DEFAULT '' COMMENT 'Telegram命令',
+  `description` varchar(255) NOT NULL DEFAULT '' COMMENT '功能描述',
+  `config_json` text COMMENT '配置JSON',
+  `sort` int(11) NOT NULL DEFAULT '0' COMMENT '排序',
+  `status` tinyint(4) NOT NULL DEFAULT '1' COMMENT '状态',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybbf_feature_key` (`feature_key`),
+  KEY `idx_ybbf_status_sort` (`status`,`sort`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot插件';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_auth_code` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `code` varchar(16) NOT NULL DEFAULT '' COMMENT '六位验证码',
+  `scene` varchar(32) NOT NULL DEFAULT '' COMMENT '场景：login/bind',
+  `app` varchar(32) NOT NULL DEFAULT '' COMMENT '应用：admin/api',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
+  `telegram_user_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户ID',
+  `telegram_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户名',
+  `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Bot ID',
+  `login_token` varchar(1024) NOT NULL DEFAULT '' COMMENT '登录Token',
+  `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '状态',
+  `error_message` text COMMENT '错误信息',
+  `expires_at` datetime DEFAULT NULL COMMENT '过期时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybbac_code` (`code`),
+  KEY `idx_ybbac_account` (`app`,`account_id`,`scene`,`status`,`id`),
+  KEY `idx_ybbac_status` (`scene`,`status`,`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot验证码';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_account_bind` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `app` varchar(32) NOT NULL DEFAULT '' COMMENT '应用：admin/api',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
+  `telegram_user_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户ID',
+  `telegram_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户名',
+  `telegram_first_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG名',
+  `telegram_last_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG姓',
+  `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '绑定Bot ID',
+  `status` tinyint(4) NOT NULL DEFAULT '1' COMMENT '状态',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybbab_account` (`app`,`account_id`),
+  UNIQUE KEY `uk_ybbab_telegram` (`app`,`telegram_user_id`),
+  KEY `idx_ybbab_status` (`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot账号绑定';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_user` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Bot ID',
+  `telegram_user_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户ID',
+  `telegram_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户名',
+  `telegram_first_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG名',
+  `telegram_last_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG姓',
+  `chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'Chat ID',
+  `chat_type` varchar(32) NOT NULL DEFAULT '' COMMENT 'Chat类型',
+  `chat_title` varchar(255) NOT NULL DEFAULT '' COMMENT 'Chat标题',
+  `message_count` int(11) NOT NULL DEFAULT '0' COMMENT '消息数',
+  `last_message_text` text COMMENT '最后消息',
+  `last_message_at` datetime DEFAULT NULL COMMENT '最后消息时间',
+  `status` tinyint(4) NOT NULL DEFAULT '1' COMMENT '状态',
+  `is_super_admin` tinyint(1) NOT NULL DEFAULT '0' COMMENT '超级管理员',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybbu_bot_user` (`bot_id`,`telegram_user_id`),
+  KEY `idx_ybbu_user` (`telegram_user_id`),
+  KEY `idx_ybbu_last` (`bot_id`,`last_message_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot用户';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_message` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Bot ID',
+  `telegram_user_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户ID',
+  `telegram_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户名',
+  `chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'Chat ID',
+  `chat_type` varchar(32) NOT NULL DEFAULT '' COMMENT 'Chat类型',
+  `message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG消息ID',
+  `message_type` varchar(32) NOT NULL DEFAULT '' COMMENT '消息类型',
+  `text` text COMMENT '消息内容',
+  `raw_json` longtext COMMENT '原始消息JSON',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybbm_bot` (`bot_id`,`id`),
+  KEY `idx_ybbm_user` (`telegram_user_id`,`id`),
+  KEY `idx_ybbm_message` (`bot_id`,`message_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot消息日志';

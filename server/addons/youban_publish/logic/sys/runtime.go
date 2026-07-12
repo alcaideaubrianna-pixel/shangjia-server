@@ -127,7 +127,7 @@ func (s *sSysPublish) runTelegramPolling(ctx context.Context) {
 					continue
 				}
 				if err = s.telegramDeleteWebhook(ctx, item.BotToken); err != nil {
-					g.Log().Warningf(ctx, "清理上架插件Bot webhook失败 bot:%d err:%+v", item.Id, err)
+					g.Log().Infof(ctx, "清理上架插件Bot webhook失败，继续启动Polling bot:%d err:%+v", item.Id, err)
 				}
 				runningBots[item.BotToken] = struct{}{}
 				go bot.Start(ctx)

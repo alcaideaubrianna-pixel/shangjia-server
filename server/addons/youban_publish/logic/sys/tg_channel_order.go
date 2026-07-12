@@ -14,15 +14,19 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	if job.Id <= 0 {
 		return false, nil
 	}
-	current, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Fields("created_at").
-		Where("id", job.Id).
-		One()
-	if err != nil {
-		return false, gerror.Wrap(err, "读取TG任务创建时间失败")
-	}
-	if current.IsEmpty() {
-		return false, nil
+	createdAt := job.CreatedAt
+	if createdAt == nil {
+		current, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Fields("created_at").
+			Where("id", job.Id).
+			One()
+		if err != nil {
+			return false, gerror.Wrap(err, "读取TG任务创建时间失败")
+		}
+		if current.IsEmpty() {
+			return false, nil
+		}
+		createdAt = current["created_at"].GTime()
 	}
 	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
@@ -35,7 +39,6 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	} else {
 		mod = mod.Where("j.target_chat_id", normalizeTelegramChannelChatID(job.TargetChatId))
 	}
-	createdAt := current["created_at"].GTime()
 	if job.CollectSourceId > 0 && job.CollectSourceMessageId > 0 && strings.TrimSpace(job.CollectSourceChatId) != "" {
 		mod = mod.Where(
 			`((j.collect_source_id = ? AND j.collect_source_chat_id = ? AND j.collect_source_message_id > 0 AND j.collect_source_message_id < ?) OR ((j.collect_source_id <> ? OR j.collect_source_chat_id <> ? OR j.collect_source_message_id = 0) AND (j.created_at < ? OR (j.created_at = ? AND j.id < ?))))`,
