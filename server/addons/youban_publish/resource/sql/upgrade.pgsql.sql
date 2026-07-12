@@ -1,3 +1,7 @@
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_log_tenant" ON "hg_youban_publish_tg_job_log" ("tenant_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_log_account" ON "hg_youban_publish_tg_job_log" ("tenant_id", "account_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_log_created" ON "hg_youban_publish_tg_job_log" ("created_at", "id");
+
 ALTER TABLE "hg_youban_publish_collect_rule"
   ADD COLUMN IF NOT EXISTS "full_match_enabled" smallint NOT NULL DEFAULT 0;
 

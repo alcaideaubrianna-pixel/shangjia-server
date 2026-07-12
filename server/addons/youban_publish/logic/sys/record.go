@@ -156,6 +156,9 @@ func (s *sSysPublish) MyPublishRecordClear(ctx context.Context, in *sysin.Publis
 }
 
 func (s *sSysPublish) publishRecordList(ctx context.Context, in *sysin.PublishRecordListInp, tenantId int64, accountId int64) (list []*sysin.PublishRecordModel, totalCount int, err error) {
+	if in.Keyword == "" && in.Action != "full_push" && in.Action != "collect_publish" {
+		return s.publishRecordListFast(ctx, in, tenantId, accountId)
+	}
 	base := s.publishRecordCountModel(ctx, in, tenantId, accountId)
 	totalCount, err = base.Clone().Count()
 	if err != nil {

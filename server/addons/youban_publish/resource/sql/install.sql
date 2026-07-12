@@ -985,6 +985,9 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job_log` (
   `status` varchar(32) NOT NULL DEFAULT '' COMMENT '状态', `message` text COMMENT '日志内容',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   PRIMARY KEY (`id`),
+  KEY `idx_ybp_tg_job_log_tenant` (`tenant_id`,`id`),
+  KEY `idx_ybp_tg_job_log_account` (`tenant_id`,`account_id`,`id`),
+  KEY `idx_ybp_tg_job_log_created` (`created_at`,`id`),
   KEY `idx_ybp_tg_job_log_job` (`job_id`,`id`),
   KEY `idx_ybp_tg_job_log_task` (`task_id`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG任务日志';

@@ -58,6 +58,7 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	go s.runTelegramObserveStatsRefresher(ctx)
 	go s.runTelegramJobRecovery(ctx)
 	go s.runCollectRecovery(ctx)
+	go s.runPublishRecordRetentionCleaner(ctx)
 	go s.runAccountCollectSupervisor(ctx)
 	go func() {
 		if err := s.repairCollectTgJobChannels(ctx, 1000); err != nil {

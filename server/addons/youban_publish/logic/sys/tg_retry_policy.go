@@ -29,7 +29,7 @@ func telegramJobErrorRetryPolicy(err error, retryCount int) telegramJobRetryPoli
 	if isTelegramPermanentSendError(err) {
 		return telegramJobRetryPolicy{
 			Permanent: true,
-			Message:   "Telegram 发送遇到不可恢复错误，已停止该任务并释放频道队列：" + err.Error(),
+			Message:   telegramPermanentSendErrorMessage(err),
 		}
 	}
 	if retryCount >= telegramRetryMaxCount {
@@ -83,6 +83,9 @@ func isTelegramPermanentSendError(err error) bool {
 		"bad request: there are no messages to forward",
 		"bad request: message identifiers must be in a strictly increasing order",
 		"bad request: chat not found",
+		"bad request: user banned in channel",
+		"bad request: user is banned in channel",
+		"user_banned_in_channel",
 		"bad request: bot was blocked by the user",
 		"bad request: not enough rights",
 		"bad request: have no rights",
@@ -104,6 +107,20 @@ func isTelegramPermanentSendError(err error) bool {
 		}
 	}
 	return false
+}
+
+func telegramPermanentSendErrorMessage(err error) string {
+	if err == nil {
+		return "Telegram 发送遇到不可恢复错误，已停止该任务并释放频道队列"
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "user_banned_in_channel") || strings.Contains(message, "user banned in channel") {
+		return "Telegram 发送失败：当前账号已被目标频道封禁或取消发言权限，已停止该任务并释放频道队列：" + err.Error()
+	}
+	if strings.Contains(message, "bot was blocked by the user") {
+		return "Telegram 发送失败：当前 Bot 被目标对象拉黑或封禁，已停止该任务并释放频道队列：" + err.Error()
+	}
+	return "Telegram 发送遇到不可恢复错误，已停止该任务并释放频道队列：" + err.Error()
 }
 
 func telegramJobFriendlyErrorMessage(err error, retryDelay time.Duration, retryCount int) string {

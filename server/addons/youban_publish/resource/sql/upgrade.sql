@@ -1,3 +1,8 @@
+ALTER TABLE `hg_youban_publish_tg_job_log`
+  ADD KEY `idx_ybp_tg_job_log_tenant` (`tenant_id`,`id`),
+  ADD KEY `idx_ybp_tg_job_log_account` (`tenant_id`,`account_id`,`id`),
+  ADD KEY `idx_ybp_tg_job_log_created` (`created_at`,`id`);
+
 ALTER TABLE `hg_youban_publish_collect_rule`
   ADD COLUMN `full_match_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '全量匹配' AFTER `dedupe_days`;
 
