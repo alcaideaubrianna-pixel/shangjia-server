@@ -133,6 +133,7 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 	if msg == nil || msg.From == nil {
 		return nil
 	}
+	ctx = context.WithValue(ctx, telegramUserIdCtxKey{}, fmt.Sprintf("%d", msg.From.ID))
 	g.Log().Infof(ctx, "收到Telegram Update botId:%d chatId:%d userId:%d text:%s", botId, msg.Chat.ID, msg.From.ID, strings.TrimSpace(firstNonEmpty(msg.Text, msg.Caption)))
 	if err := s.storeTelegramMessage(ctx, botId, msg); err != nil {
 		g.Log().Warningf(ctx, "保存Telegram消息日志失败 botId:%d err:%+v", botId, err)

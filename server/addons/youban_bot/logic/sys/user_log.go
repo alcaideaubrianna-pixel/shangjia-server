@@ -22,6 +22,9 @@ func (s *sSysBot) AdminUserList(ctx context.Context, in *sysin.UserListInp) (lis
 	if in.BotId > 0 {
 		mod = mod.Where("u.bot_id", in.BotId)
 	}
+	if len(in.BotIds) > 0 {
+		mod = mod.WhereIn("u.bot_id", in.BotIds)
+	}
 	if in.Status > 0 {
 		mod = mod.Where("u.status", in.Status)
 	}

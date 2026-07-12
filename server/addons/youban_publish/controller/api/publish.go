@@ -75,6 +75,36 @@ func (c *cPublish) UpdateAccountProfile(ctx context.Context, req *publish.Update
 	return
 }
 
+func (c *cPublish) InviteInfo(ctx context.Context, req *publish.InviteInfoReq) (res *publish.InviteInfoRes, err error) {
+	data, err := service.SysPublish().InviteInfo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.InviteInfoRes{InviteInfoModel: data}, nil
+}
+
+func (c *cPublish) InviteList(ctx context.Context, req *publish.InviteListReq) (res *publish.InviteListRes, err error) {
+	list, totalCount, err := service.SysPublish().InviteList(ctx, &req.InviteListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.InviteModel{}
+	}
+	res = new(publish.InviteListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublish) InviteGenerate(ctx context.Context, req *publish.InviteGenerateReq) (res *publish.InviteGenerateRes, err error) {
+	data, err := service.SysPublish().CreateInviteCode(ctx, &req.InviteCreateInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.InviteGenerateRes{InviteCreateModel: data}, nil
+}
+
 func (c *cPublishAuth) AccountLogin(ctx context.Context, req *publish.AccountLoginReq) (res *publish.AccountLoginRes, err error) {
 	data, err := service.SysPublish().AccountLogin(ctx, &req.AccountLoginInp)
 	if err != nil {

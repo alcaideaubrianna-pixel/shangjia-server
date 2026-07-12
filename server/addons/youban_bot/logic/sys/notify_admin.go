@@ -29,9 +29,19 @@ func (s *sSysBot) notifySuperAdmins(ctx context.Context, botId int64, scene stri
 	if len(telegramUserIds) == 0 {
 		return nil
 	}
-	row, err := s.botById(ctx, botId)
-	if err != nil {
-		return err
+	var row *sysin.BotModel
+	var err error
+	if botId > 0 {
+		row, err = s.botById(ctx, botId)
+		if err != nil {
+			return err
+		}
+	} else {
+		row, err = s.officialBot(ctx)
+		if err != nil {
+			return err
+		}
+		botId = row.Id
 	}
 	var users []*struct {
 		ChatId string `json:"chat_id"`
@@ -55,6 +65,10 @@ func (s *sSysBot) notifySuperAdmins(ctx context.Context, botId int64, scene stri
 		}
 	}
 	return nil
+}
+
+func (s *sSysBot) NotifySuperAdmins(ctx context.Context, botId int64, scene string, text string) error {
+	return s.notifySuperAdmins(ctx, botId, scene, text)
 }
 
 func (s *sSysBot) superNotifyEnabled(ctx context.Context, scene string) bool {

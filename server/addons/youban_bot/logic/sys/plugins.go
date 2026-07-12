@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"html"
 	"strings"
 
 	"github.com/go-telegram/bot/models"
@@ -88,7 +89,7 @@ func (superNotifyFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
 		{Field: "enableRegister", Label: "用户注册通知", Component: "switch", Default: 0},
 		{Field: "enableError", Label: "系统错误通知", Component: "switch", Default: 0},
 		{Field: "enableBind", Label: "用户绑定通知", Component: "switch", Default: 0},
-		{Field: "adminTelegramUserIds", Label: "通知管理员", Component: "bot_admin_user_select", Default: []string{}, Placeholder: "选择已关注机器人且已绑定后台账号的用户"},
+		{Field: "adminTelegramUserIds", Label: "通知管理员", Component: "bot_admin_user_select", Default: []string{}, Placeholder: "选择超级机器人关注用户（支持多选）"},
 	}
 }
 func (superNotifyFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFeatureContext) (bool, error) {
@@ -160,12 +161,44 @@ type inviteFeature struct{}
 
 func (inviteFeature) Key() string         { return "invite_code" }
 func (inviteFeature) Command() string     { return "invite" }
-func (inviteFeature) Description() string { return "生成注册邀请码" }
+func (inviteFeature) Description() string { return "注册邀请" }
 func (inviteFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
-	return simpleTextSchema("邀请码插件文案", "邀请码插件已启用，后续会接入上架端管理员的邀请码生成能力。")
+	return []*sysin.FeatureConfigSchema{
+		{Field: "replyText", Label: "回复文案", Component: "textarea", Default: "邀请码已生成，请复制下方内容到上架系统注册页使用。", Placeholder: "机器人生成邀请码后的回复文案"},
+		{Field: "publishDomain", Label: "上架端域名", Component: "input", Default: "", Placeholder: "例如：https://publish.example.com，留空则只返回相对路径"},
+		{Field: "expireDays", Label: "有效期天数", Component: "input", Default: 7, Placeholder: "默认 7 天"},
+		{Field: "codeLength", Label: "邀请码长度", Component: "input", Default: 6, Placeholder: "默认 6 位字母+数字"},
+		{Field: "unboundText", Label: "未绑定提示", Component: "textarea", Default: "请先在个人中心绑定系统账号后再使用。"},
+		{Field: "forbiddenText", Label: "无权限提示", Component: "textarea", Default: "仅管理员可生成好友邀请码。"},
+	}
 }
 func (inviteFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFeatureContext) (bool, error) {
-	return true, nil
+	item, err := bot.CreateInviteCode(ctx, &sysin.InviteCreateInp{Source: inviteSourceBot})
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "绑定") || strings.Contains(msg, "系统账号") {
+			msg = bot.featureConfigValue(ctx, inviteFeature{}.Key(), "unboundText")
+		}
+		if strings.Contains(err.Error(), "管理员") || strings.Contains(err.Error(), "权限") {
+			msg = bot.featureConfigValue(ctx, inviteFeature{}.Key(), "forbiddenText")
+		}
+		return true, bot.reply(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), msg)
+	}
+	text := bot.featureConfigValue(ctx, inviteFeature{}.Key(), "replyText")
+	if strings.TrimSpace(text) == "" {
+		text = "邀请码已生成，请复制下方内容到上架系统注册页使用。"
+	}
+	expireText := "-"
+	if item.ExpiresAt != nil {
+		expireText = item.ExpiresAt.String()
+	}
+	return true, bot.reply(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), fmt.Sprintf(
+		"%s\n\n邀请码：<code>%s</code>\n有效期至：%s\n注册链接：%s",
+		text,
+		html.EscapeString(item.Code),
+		html.EscapeString(expireText),
+		html.EscapeString(item.InviteUrl),
+	))
 }
 
 type profileFeature struct{}

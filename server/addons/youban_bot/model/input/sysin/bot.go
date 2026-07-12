@@ -121,11 +121,12 @@ type FeatureSaveInp struct {
 
 type UserListInp struct {
 	form.PageReq
-	BotId   int64  `json:"botId" dc:"Bot ID"`
-	Keyword string `json:"keyword" dc:"关键词"`
-	IsBound int    `json:"isBound" dc:"绑定状态：1已绑定 2未绑定"`
-	BindApp string `json:"bindApp" dc:"绑定应用：admin/api"`
-	Status  int    `json:"status" dc:"状态"`
+	BotId   int64   `json:"botId" dc:"Bot ID"`
+	BotIds  []int64 `json:"botIds" dc:"Bot ID列表"`
+	Keyword string  `json:"keyword" dc:"关键词"`
+	IsBound int     `json:"isBound" dc:"绑定状态：1已绑定 2未绑定"`
+	BindApp string  `json:"bindApp" dc:"绑定应用：admin/api"`
+	Status  int     `json:"status" dc:"状态"`
 }
 
 type UserModel struct {
@@ -228,6 +229,78 @@ type BindInfoModel struct {
 	TelegramUserId   string `json:"telegramUserId" dc:"TG用户ID"`
 	TelegramUsername string `json:"telegramUsername" dc:"TG用户名"`
 	BotUsername      string `json:"botUsername" dc:"官方Bot用户名"`
+}
+
+type InviteInfoModel struct {
+	Code           string      `json:"code" dc:"邀请码"`
+	Source         string      `json:"source" dc:"来源"`
+	ExpiresAt      *gtime.Time `json:"expiresAt" dc:"过期时间"`
+	InviteCount    int         `json:"inviteCount" dc:"已邀请数量"`
+	UsedCount      int         `json:"usedCount" dc:"已使用数量"`
+	ExpireDays     int         `json:"expireDays" dc:"有效期天数"`
+	InviteUrl      string      `json:"inviteUrl" dc:"注册链接"`
+	BotInviteHint  string      `json:"botInviteHint" dc:"机器人提示"`
+	WebInviteHint  string      `json:"webInviteHint" dc:"网页提示"`
+	CanGenerateBot bool        `json:"canGenerateBot" dc:"是否可通过机器人生成"`
+}
+
+type InviteListInp struct {
+	form.PageReq
+	PerPageAlias int    `json:"perPage" dc:"每页数量（兼容旧参数）"`
+	Keyword      string `json:"keyword" dc:"邀请码/账号/租户关键词"`
+	Source       string `json:"source" dc:"来源:web/bot"`
+	Status       string `json:"status" dc:"状态:active/used/expired"`
+}
+
+func (in *InviteListInp) GetPage() int {
+	if in == nil {
+		return 0
+	}
+	return in.PageReq.GetPage()
+}
+
+func (in *InviteListInp) GetPerPage() int {
+	if in == nil {
+		return 0
+	}
+	if in.PerPage > 0 {
+		return in.PerPage
+	}
+	if in.PerPageAlias > 0 {
+		return in.PerPageAlias
+	}
+	return in.PageReq.GetPerPage()
+}
+
+type InviteModel struct {
+	Id               int64       `json:"id" dc:"ID"`
+	Code             string      `json:"code" dc:"邀请码"`
+	Source           string      `json:"source" dc:"来源"`
+	InviterApp       string      `json:"inviterApp" dc:"邀请来源应用"`
+	InviterTenantId  int64       `json:"inviterTenantId" dc:"邀请人租户ID"`
+	InviterAccountId int64       `json:"inviterAccountId" dc:"邀请人账号ID"`
+	InviterUsername  string      `json:"inviterUsername" dc:"邀请人账号"`
+	InviterNickname  string      `json:"inviterNickname" dc:"邀请人昵称"`
+	UsedTenantId     int64       `json:"usedTenantId" dc:"注册租户ID"`
+	UsedTenantName   string      `json:"usedTenantName" dc:"注册租户名称"`
+	UsedAccountId    int64       `json:"usedAccountId" dc:"注册账号ID"`
+	UsedAccountName  string      `json:"usedAccountName" dc:"注册账号"`
+	Status           string      `json:"status" dc:"状态"`
+	ExpiresAt        *gtime.Time `json:"expiresAt" dc:"过期时间"`
+	UsedAt           *gtime.Time `json:"usedAt" dc:"使用时间"`
+	CreatedAt        *gtime.Time `json:"createdAt" dc:"创建时间"`
+}
+
+type InviteCreateInp struct {
+	Source   string `json:"source" dc:"来源:web/bot"`
+	ForceNew int    `json:"forceNew" dc:"是否强制生成新邀请码：1是 0否"`
+}
+
+type InviteCreateModel struct {
+	Code      string      `json:"code" dc:"邀请码"`
+	Source    string      `json:"source" dc:"来源"`
+	ExpiresAt *gtime.Time `json:"expiresAt" dc:"过期时间"`
+	InviteUrl string      `json:"inviteUrl" dc:"注册链接"`
 }
 
 type WebhookInp struct {

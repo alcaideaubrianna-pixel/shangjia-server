@@ -350,6 +350,13 @@ type AccountRegisterModel struct {
 	*AccountLoginModel
 }
 
+type InviteConsumeInp struct {
+	Code          string `json:"code" v:"required#邀请码不能为空" dc:"邀请码"`
+	InviterApp    string `json:"inviterApp" dc:"邀请人应用"`
+	UsedTenantId  int64  `json:"usedTenantId" dc:"注册租户ID"`
+	UsedAccountId int64  `json:"usedAccountId" dc:"注册账号ID"`
+}
+
 type TaskListInp struct {
 	form.PageReq
 	TenantId  int64  `json:"tenantId" dc:"租户ID"`

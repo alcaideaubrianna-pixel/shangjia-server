@@ -131,6 +131,9 @@ type ISysPublish interface {
 	CurrentAccount(ctx context.Context) (res *sysin.CurrentAccountModel, err error)
 	MyAccountSettingView(ctx context.Context) (res *sysin.AccountSettingModel, err error)
 	MyAccountSettingSave(ctx context.Context, in *sysin.AccountSettingSaveInp) (res *sysin.AccountSettingModel, err error)
+	InviteInfo(ctx context.Context) (res *sysin.InviteInfoModel, err error)
+	InviteList(ctx context.Context, in *sysin.InviteListInp) (list []*sysin.InviteModel, totalCount int, err error)
+	CreateInviteCode(ctx context.Context, in *sysin.InviteCreateInp) (res *sysin.InviteCreateModel, err error)
 	MyDashboardOverview(ctx context.Context) (res *sysin.DashboardOverviewModel, err error)
 	MyDashboardTrend(ctx context.Context, in *sysin.TrendInp) (res *sysin.DashboardTrendModel, err error)
 	MyDashboardTodo(ctx context.Context) (res *sysin.DashboardTodoModel, err error)
@@ -224,6 +227,7 @@ type ISysPublish interface {
 	TelegramLoginStart(ctx context.Context, in *sysin.TelegramLoginStartInp) (res *sysin.TelegramLoginModel, err error)
 	TelegramLoginStatus(ctx context.Context, in *sysin.TelegramLoginStatusInp) (res *sysin.TelegramLoginModel, err error)
 	TelegramLoginPassword(ctx context.Context, in *sysin.TelegramLoginPasswordInp) (res *sysin.TelegramLoginModel, err error)
+	AdminInviteList(ctx context.Context, in *sysin.InviteListInp) (list []*sysin.InviteModel, totalCount int, err error)
 }
 
 var localSysPublish ISysPublish

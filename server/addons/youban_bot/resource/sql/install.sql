@@ -118,3 +118,27 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_message` (
   KEY `idx_ybbm_user` (`telegram_user_id`,`id`),
   KEY `idx_ybbm_message` (`bot_id`,`message_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot消息日志';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_invite_code` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `code` varchar(16) NOT NULL DEFAULT '' COMMENT '邀请码',
+  `source` varchar(16) NOT NULL DEFAULT 'web' COMMENT '来源',
+  `inviter_app` varchar(32) NOT NULL DEFAULT 'api' COMMENT '邀请人应用',
+  `inviter_tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '邀请人租户ID',
+  `inviter_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '邀请人账号ID',
+  `inviter_username` varchar(128) NOT NULL DEFAULT '' COMMENT '邀请人账号',
+  `inviter_nickname` varchar(128) NOT NULL DEFAULT '' COMMENT '邀请人昵称',
+  `used_tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '使用邀请码注册租户ID',
+  `used_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '使用邀请码注册账号ID',
+  `used_username` varchar(128) NOT NULL DEFAULT '' COMMENT '使用邀请码注册账号',
+  `status` varchar(16) NOT NULL DEFAULT 'active' COMMENT '状态',
+  `expires_at` datetime DEFAULT NULL COMMENT '过期时间',
+  `used_at` datetime DEFAULT NULL COMMENT '使用时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybbic_code` (`code`),
+  KEY `idx_ybbic_inviter` (`inviter_app`,`inviter_account_id`,`source`,`status`,`id`),
+  KEY `idx_ybbic_status` (`status`,`expires_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot邀请码';

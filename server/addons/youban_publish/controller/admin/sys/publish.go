@@ -51,6 +51,20 @@ func (c *cPublishServer) TenantDelete(ctx context.Context, req *publish.TenantDe
 	return
 }
 
+func (c *cPublishServer) InviteList(ctx context.Context, req *publish.InviteListReq) (res *publish.InviteListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminInviteList(ctx, &req.InviteListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.InviteModel{}
+	}
+	res = new(publish.InviteListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
 func (c *cPublishServer) AccountList(ctx context.Context, req *publish.AccountListReq) (res *publish.AccountListRes, err error) {
 	list, totalCount, err := service.SysPublish().ServerAccountList(ctx, &req.AccountListInp)
 	if err != nil {
