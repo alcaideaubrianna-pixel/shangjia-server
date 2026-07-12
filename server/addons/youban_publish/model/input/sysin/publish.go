@@ -1034,6 +1034,16 @@ type ChannelCacheListInp struct {
 	form.PageReq
 	TgAccountId int64  `json:"tgAccountId" dc:"TG账号ID"`
 	Keyword     string `json:"keyword" dc:"关键词"`
+	DisplayType string `json:"displayType" dc:"显示类型: channel/group"`
+}
+
+func (in *ChannelCacheListInp) Filter(ctx context.Context) error {
+	_ = ctx
+	in.DisplayType = strings.TrimSpace(strings.ToLower(in.DisplayType))
+	if in.DisplayType != "" && in.DisplayType != "channel" && in.DisplayType != "group" {
+		return gerror.New("显示类型不合法")
+	}
+	return nil
 }
 
 type ChannelCacheModel struct {
@@ -1044,6 +1054,7 @@ type ChannelCacheModel struct {
 	AccessHash      string      `json:"accessHash" dc:"AccessHash"`
 	ChannelTitle    string      `json:"channelTitle" dc:"频道名称"`
 	ChannelUsername string      `json:"channelUsername" dc:"频道用户名"`
+	DisplayType     string      `json:"displayType" dc:"显示类型: channel/group"`
 	IsBroadcast     int         `json:"isBroadcast" dc:"是否频道"`
 	IsMegagroup     int         `json:"isMegagroup" dc:"是否群组"`
 	CanPostMessages int         `json:"canPostMessages" dc:"账号可发频道消息"`

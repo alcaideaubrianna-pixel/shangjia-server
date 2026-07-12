@@ -25,6 +25,9 @@ func (s *sSysPublish) AdminChannelCacheList(ctx context.Context, in *sysin.Chann
 	if in == nil {
 		in = &sysin.ChannelCacheListInp{}
 	}
+	if err = in.Filter(ctx); err != nil {
+		return nil, 0, err
+	}
 	if in.TgAccountId <= 0 {
 		return []*sysin.ChannelCacheModel{}, 0, nil
 	}
@@ -38,11 +41,23 @@ func (s *sSysPublish) AdminChannelCacheList(ctx context.Context, in *sysin.Chann
 		like := "%" + keyword + "%"
 		mod = mod.Where("(channel_title LIKE ? OR channel_username LIKE ? OR channel_id LIKE ?)", like, like, like)
 	}
+	switch in.DisplayType {
+	case "channel":
+		mod = mod.Where("channel_id NOT LIKE '-%'").Where("is_broadcast", 1)
+	case "group":
+		mod = mod.Where("(channel_id LIKE '-%' OR is_megagroup = 1)")
+	}
 	if err = mod.Page(in.Page, in.PerPage).OrderDesc("last_sync_at").OrderDesc("id").ScanAndCount(&list, &totalCount, false); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取频道缓存失败")
 	}
 	if list == nil {
 		list = []*sysin.ChannelCacheModel{}
+	}
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		item.DisplayType = resolveChannelCacheDisplayType(item)
 	}
 	return list, totalCount, nil
 }
@@ -191,6 +206,20 @@ func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.Chann
 		}
 	}
 	return res, nil
+}
+
+func resolveChannelCacheDisplayType(item *sysin.ChannelCacheModel) string {
+	if item == nil {
+		return ""
+	}
+	channelId := strings.TrimSpace(item.ChannelId)
+	if strings.HasPrefix(channelId, "-") || item.IsMegagroup == 1 {
+		return "group"
+	}
+	if item.IsBroadcast == 1 {
+		return "channel"
+	}
+	return ""
 }
 
 type tgDialogCache struct {

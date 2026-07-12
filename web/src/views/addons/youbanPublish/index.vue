@@ -284,6 +284,13 @@
               placeholder="TG账号"
               class="tenant-select"
             />
+            <n-select
+              v-model:value="channelCacheQuery.displayType"
+              :options="channelCacheDisplayOptions"
+              clearable
+              placeholder="频道 / 群聊"
+              class="status-select"
+            />
             <n-input
               v-model:value="channelCacheQuery.keyword"
               placeholder="频道名称 / 用户名 / Chat ID"
@@ -599,7 +606,7 @@
 </template>
 
 <script lang="ts" setup>
-  import { computed, h, onMounted, reactive, ref } from 'vue';
+  import { computed, h, onMounted, reactive, ref, watch } from 'vue';
   import { NButton, NPopover, NSpace, NTag, useDialog, useMessage } from 'naive-ui';
   import CloudResourceConfig from './components/cloud-resource-config.vue';
   import DashboardPanel from './components/dashboard-panel.vue';
@@ -706,6 +713,7 @@
   const channelCacheQuery = reactive({
     tgAccountId: null as number | null,
     keyword: '',
+    displayType: '',
   });
 
   const tenantPagination = createPagination(loadTenants);
@@ -758,6 +766,11 @@
     { label: '失败', value: 'failed' },
   ];
   const tgAccountStatusOptionsWithAll = [{ label: '全部', value: '' }, ...tgAccountStatusOptions];
+  const channelCacheDisplayOptions = [
+    { label: '全部', value: '' },
+    { label: '频道', value: 'channel' },
+    { label: '群聊', value: 'group' },
+  ];
   const channelCacheTgAccountOptions = computed(() =>
     tgAccounts.value.map((item) => ({
       label: `${item.displayName || item.telegramUsername || item.id} (${item.telegramUserId || '-'})`,
@@ -1084,14 +1097,10 @@
     },
     { title: 'Chat ID', key: 'channelId', width: 220, render: (row: any) => row.channelId || '-' },
     {
-      title: '类型',
+      title: '显示类型',
       key: 'type',
       width: 120,
-      render: (row: any) => {
-        if (row.isBroadcast === 1) return renderMiniTag('频道', 'success');
-        if (row.isMegagroup === 1) return renderMiniTag('群组', 'info');
-        return renderMiniTag('-', 'default');
-      },
+      render: (row: any) => renderMiniTag(channelCacheDisplayLabel(row.displayType, row), 'info'),
     },
     {
       title: '邀请权限',
@@ -1315,6 +1324,7 @@
       const res: any = await AdminChannelCacheList({
         tgAccountId: channelCacheQuery.tgAccountId,
         keyword: channelCacheQuery.keyword,
+        displayType: channelCacheQuery.displayType,
         page: channelCachePagination.page,
         perPage: channelCachePagination.pageSize,
       });
@@ -1324,6 +1334,15 @@
       channelCacheLoading.value = false;
     }
   }
+
+  watch(
+    () => [channelCacheQuery.tgAccountId, channelCacheQuery.displayType],
+    async () => {
+      if (activeTab.value !== 'channelCaches') return;
+      channelCachePagination.page = 1;
+      await loadChannelCaches();
+    }
+  );
 
   async function openChannelCaches(row: any) {
     channelCacheQuery.tgAccountId = row.id;
@@ -1644,6 +1663,17 @@
   function tgAccountLabel(id: number) {
     const row = tgAccounts.value.find((item) => item.id === id);
     return row ? `${row.displayName || row.telegramUsername || row.id}` : `TG账号 ${id || '-'}`;
+  }
+
+  function channelCacheDisplayLabel(displayType: string, row: any = null) {
+    if (displayType === 'group') return '群组';
+    if (displayType === 'channel') return '频道';
+    if (row) {
+      if (row.channelId && String(row.channelId).startsWith('-')) return '群组';
+      if (row.isMegagroup === 1) return '群组';
+      if (row.isBroadcast === 1) return '频道';
+    }
+    return '-';
   }
 
   function renderTaskStatus(status: string) {
