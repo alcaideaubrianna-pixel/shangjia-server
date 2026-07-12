@@ -365,6 +365,20 @@ func (c *cPublishServer) TgAccountList(ctx context.Context, req *publish.TgAccou
 	return
 }
 
+func (c *cPublishServer) ChannelCacheList(ctx context.Context, req *publish.ChannelCacheListReq) (res *publish.ChannelCacheListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminChannelCacheList(ctx, &req.ChannelCacheListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.ChannelCacheModel{}
+	}
+	res = new(publish.ChannelCacheListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
 func (c *cPublishServer) TgAccountStartLogin(ctx context.Context, req *publish.TgAccountStartLoginReq) (res *publish.TgAccountStartLoginRes, err error) {
 	return nil, gerror.New("请在上架端管理员账号中绑定TG账号")
 }

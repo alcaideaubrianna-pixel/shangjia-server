@@ -275,3 +275,23 @@ export function ConfigGet(params = {}) {
 export function ConfigUpdate(params = {}) {
   return http.request({ url: '/youban_publish/publish/config/update', method: 'POST', params });
 }
+
+export function AdminInviteList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/admin/invite/list', method: 'get', params });
+}
+
+export function AdminTgAccountList(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/admin/tgAccount/list',
+    method: 'get',
+    params,
+  });
+}
+
+export function AdminChannelCacheList(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/admin/channel/cache/list',
+    method: 'get',
+    params,
+  });
+}

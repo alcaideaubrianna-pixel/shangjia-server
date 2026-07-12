@@ -474,7 +474,7 @@ type BotRefreshRes struct {
 }
 
 type TgAccountListReq struct {
-	g.Meta `path:"/publish/tgAccount/list" method:"get" tags:"上架插件后台" summary:"TG账号列表"`
+	g.Meta `path:"/publish/admin/tgAccount/list" method:"get" tags:"上架插件后台" summary:"TG账号列表"`
 	sysin.TgAccountListInp
 }
 
@@ -524,6 +524,16 @@ type TgAccountRefreshReq struct {
 
 type TgAccountRefreshRes struct {
 	List []*sysin.TgAccountRefreshModel `json:"list" dc:"刷新结果"`
+}
+
+type ChannelCacheListReq struct {
+	g.Meta `path:"/publish/admin/channel/cache/list" method:"get" tags:"上架插件后台" summary:"TG账号频道缓存列表"`
+	sysin.ChannelCacheListInp
+}
+
+type ChannelCacheListRes struct {
+	form.PageRes
+	List []*sysin.ChannelCacheModel `json:"list" dc:"频道缓存列表"`
 }
 
 type ChannelListReq struct {

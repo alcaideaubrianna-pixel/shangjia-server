@@ -209,6 +209,101 @@
           />
         </n-tab-pane>
 
+        <n-tab-pane name="inviteRelations" tab="邀请关系">
+          <n-space class="toolbar" align="center">
+            <n-input
+              v-model:value="inviteQuery.keyword"
+              placeholder="邀请码 / 邀请人 / 使用账号"
+              clearable
+              @keyup.enter="loadInviteRelations"
+            />
+            <n-select
+              v-model:value="inviteQuery.source"
+              :options="inviteSourceOptionsWithAll"
+              clearable
+              placeholder="来源"
+              class="status-select"
+            />
+            <n-select
+              v-model:value="inviteQuery.status"
+              :options="inviteStatusOptionsWithAll"
+              clearable
+              placeholder="状态"
+              class="status-select"
+            />
+            <n-button @click="loadInviteRelations">查询</n-button>
+          </n-space>
+          <n-data-table
+            :columns="inviteColumns"
+            :data="inviteRelations"
+            :loading="inviteLoading"
+            :pagination="invitePagination"
+            :row-key="(row) => row.id"
+            :scroll-x="1680"
+            size="small"
+            remote
+          />
+        </n-tab-pane>
+
+        <n-tab-pane name="tgAccounts" tab="绑定的 TG 账号">
+          <n-space class="toolbar" align="center">
+            <n-input
+              v-model:value="tgAccountQuery.keyword"
+              placeholder="TG用户名 / 备注"
+              clearable
+              @keyup.enter="loadTgAccounts"
+            />
+            <n-select
+              v-model:value="tgAccountQuery.status"
+              :options="tgAccountStatusOptionsWithAll"
+              clearable
+              placeholder="状态"
+              class="status-select"
+            />
+            <n-button @click="loadTgAccounts">查询</n-button>
+          </n-space>
+          <n-data-table
+            :columns="tgAccountColumns"
+            :data="tgAccounts"
+            :loading="tgAccountLoading"
+            :pagination="tgAccountPagination"
+            :row-key="(row) => row.id"
+            :scroll-x="1600"
+            size="small"
+            remote
+          />
+        </n-tab-pane>
+
+        <n-tab-pane name="channelCaches" tab="群聊 / 频道">
+          <n-space class="toolbar" align="center">
+            <n-select
+              v-model:value="channelCacheQuery.tgAccountId"
+              :options="channelCacheTgAccountOptions"
+              clearable
+              filterable
+              placeholder="TG账号"
+              class="tenant-select"
+            />
+            <n-input
+              v-model:value="channelCacheQuery.keyword"
+              placeholder="频道名称 / 用户名 / Chat ID"
+              clearable
+              @keyup.enter="loadChannelCaches"
+            />
+            <n-button @click="loadChannelCaches">查询</n-button>
+          </n-space>
+          <n-data-table
+            :columns="channelCacheColumns"
+            :data="channelCaches"
+            :loading="channelCacheLoading"
+            :pagination="channelCachePagination"
+            :row-key="(row) => row.id"
+            :scroll-x="1500"
+            size="small"
+            remote
+          />
+        </n-tab-pane>
+
         <n-tab-pane name="config" tab="配置">
           <n-spin :show="configLoading">
             <n-space vertical class="config-section">
@@ -520,6 +615,9 @@
     BotDelete,
     BotList,
     BotSave,
+    AdminInviteList,
+    AdminTgAccountList,
+    AdminChannelCacheList,
     ConfigGet,
     ConfigUpdate,
     TenantDelete,
@@ -603,12 +701,21 @@
   const taskQuery = reactive({ tenantId: null as number | null, status: '', keyword: '' });
   const tagQuery = reactive({ keyword: '', reviewStatus: '', status: 0 });
   const botQuery = reactive({ tenantId: null as number | null, keyword: '', status: 0 });
+  const inviteQuery = reactive({ keyword: '', source: '', status: '' });
+  const tgAccountQuery = reactive({ keyword: '', status: '' });
+  const channelCacheQuery = reactive({
+    tgAccountId: null as number | null,
+    keyword: '',
+  });
 
   const tenantPagination = createPagination(loadTenants);
   const accountPagination = createPagination(loadAccounts);
   const taskPagination = createPagination(loadTasks);
   const tagPagination = createPagination(loadTags, 20);
   const botPagination = createPagination(loadBots);
+  const invitePagination = createPagination(loadInviteRelations, 20);
+  const tgAccountPagination = createPagination(loadTgAccounts, 20);
+  const channelCachePagination = createPagination(loadChannelCaches, 20);
   const systemDomain = ref('');
   const selectedTagRowKeys = ref<number[]>([]);
   const selectedTagRows = computed(() =>
@@ -631,6 +738,32 @@
     { label: '全局默认', value: 0 },
     ...tenantOptions.value,
   ]);
+  const inviteSourceOptions = [
+    { label: '网页', value: 'web' },
+    { label: '机器人', value: 'bot' },
+  ];
+  const inviteSourceOptionsWithAll = [{ label: '全部', value: '' }, ...inviteSourceOptions];
+  const inviteStatusOptions = [
+    { label: '有效', value: 'active' },
+    { label: '已使用', value: 'used' },
+    { label: '已过期', value: 'expired' },
+  ];
+  const inviteStatusOptionsWithAll = [{ label: '全部', value: '' }, ...inviteStatusOptions];
+  const tgAccountStatusOptions = [
+    { label: '待授权', value: 'pending' },
+    { label: '扫描中', value: 'scanning' },
+    { label: '需密码', value: 'password_required' },
+    { label: '已授权', value: 'authorized' },
+    { label: '已过期', value: 'expired' },
+    { label: '失败', value: 'failed' },
+  ];
+  const tgAccountStatusOptionsWithAll = [{ label: '全部', value: '' }, ...tgAccountStatusOptions];
+  const channelCacheTgAccountOptions = computed(() =>
+    tgAccounts.value.map((item) => ({
+      label: `${item.displayName || item.telegramUsername || item.id} (${item.telegramUserId || '-'})`,
+      value: item.id,
+    }))
+  );
   const adminAccountOptions = computed(() =>
     accounts.value
       .filter((item) => item.accountType === 'admin' && item.tenantId === accountForm.tenantId)
@@ -649,6 +782,12 @@
   const telegramConfig = reactive(newTelegramConfig());
   const collectConfig = reactive(newCollectConfig());
   const cloudResourceConfig = reactive(newCloudResourceConfig());
+  const inviteRelations = ref<any[]>([]);
+  const inviteLoading = ref(false);
+  const tgAccounts = ref<any[]>([]);
+  const tgAccountLoading = ref(false);
+  const channelCaches = ref<any[]>([]);
+  const channelCacheLoading = ref(false);
 
   function newTelegramConfig() {
     return {
@@ -815,6 +954,165 @@
     },
   ];
 
+  const inviteColumns = [
+    { title: 'ID', key: 'id', width: 80 },
+    { title: '邀请码', key: 'code', width: 140 },
+    {
+      title: '来源',
+      key: 'source',
+      width: 100,
+      render: (row: any) => renderMiniTag(inviteSourceLabel(row.source), 'default'),
+    },
+    {
+      title: '邀请人租户',
+      key: 'inviterTenantName',
+      width: 160,
+      render: (row: any) => row.inviterTenantName || row.inviterTenantId || '-',
+    },
+    {
+      title: '邀请人账号',
+      key: 'inviterUsername',
+      width: 160,
+      render: (row: any) => row.inviterUsername || '-',
+    },
+    {
+      title: '邀请人昵称',
+      key: 'inviterNickname',
+      width: 160,
+      render: (row: any) => row.inviterNickname || '-',
+    },
+    {
+      title: '使用租户',
+      key: 'usedTenantName',
+      width: 160,
+      render: (row: any) => row.usedTenantName || row.usedTenantId || '-',
+    },
+    {
+      title: '使用账号',
+      key: 'usedAccountName',
+      width: 160,
+      render: (row: any) => row.usedAccountName || '-',
+    },
+    {
+      title: '状态',
+      key: 'status',
+      width: 100,
+      render: (row: any) =>
+        renderMiniTag(inviteStatusLabel(row.status), inviteStatusType(row.status)),
+    },
+    { title: '过期时间', key: 'expiresAt', width: 180, render: (row: any) => row.expiresAt || '-' },
+    { title: '使用时间', key: 'usedAt', width: 180, render: (row: any) => row.usedAt || '-' },
+    { title: '创建时间', key: 'createdAt', width: 180, render: (row: any) => row.createdAt || '-' },
+  ];
+
+  const tgAccountColumns = [
+    { title: 'ID', key: 'id', width: 80 },
+    {
+      title: '账号归属',
+      key: 'tenantId',
+      width: 160,
+      render: (row: any) => tenantName(row.tenantId),
+    },
+    {
+      title: '显示名称',
+      key: 'displayName',
+      width: 180,
+      render: (row: any) => row.displayName || row.nickname || '-',
+    },
+    {
+      title: 'TG用户ID',
+      key: 'telegramUserId',
+      width: 180,
+      render: (row: any) => row.telegramUserId || '-',
+    },
+    {
+      title: 'TG用户名',
+      key: 'telegramUsername',
+      width: 180,
+      render: (row: any) => row.telegramUsername || '-',
+    },
+    {
+      title: '状态',
+      key: 'status',
+      width: 110,
+      render: (row: any) =>
+        renderMiniTag(tgAccountStatusLabel(row.status), tgAccountStatusType(row.status)),
+    },
+    {
+      title: '最后授权',
+      key: 'lastLoginAt',
+      width: 180,
+      render: (row: any) => row.lastLoginAt || '-',
+    },
+    { title: '更新时间', key: 'updatedAt', width: 180, render: (row: any) => row.updatedAt || '-' },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 180,
+      fixed: 'right',
+      render(row: any) {
+        return h(
+          NSpace,
+          {},
+          {
+            default: () => [actionButton('查看频道', () => openChannelCaches(row))],
+          }
+        );
+      },
+    },
+  ];
+
+  const channelCacheColumns = [
+    { title: 'ID', key: 'id', width: 80 },
+    {
+      title: 'TG账号',
+      key: 'tgAccountId',
+      width: 150,
+      render: (row: any) => tgAccountLabel(row.tgAccountId),
+    },
+    {
+      title: '频道名称',
+      key: 'channelTitle',
+      width: 220,
+      render: (row: any) => row.channelTitle || '-',
+    },
+    {
+      title: '频道用户名',
+      key: 'channelUsername',
+      width: 180,
+      render: (row: any) => row.channelUsername || '-',
+    },
+    { title: 'Chat ID', key: 'channelId', width: 220, render: (row: any) => row.channelId || '-' },
+    {
+      title: '类型',
+      key: 'type',
+      width: 120,
+      render: (row: any) => {
+        if (row.isBroadcast === 1) return renderMiniTag('频道', 'success');
+        if (row.isMegagroup === 1) return renderMiniTag('群组', 'info');
+        return renderMiniTag('-', 'default');
+      },
+    },
+    {
+      title: '邀请权限',
+      key: 'canInviteUsers',
+      width: 110,
+      render: (row: any) => (row.canInviteUsers === 1 ? '是' : '否'),
+    },
+    {
+      title: '发消息',
+      key: 'canPostMessages',
+      width: 100,
+      render: (row: any) => (row.canPostMessages === 1 ? '是' : '否'),
+    },
+    {
+      title: '最后同步',
+      key: 'lastSyncAt',
+      width: 180,
+      render: (row: any) => row.lastSyncAt || '-',
+    },
+  ];
+
   const tagColumns = [
     { type: 'selection' },
     { title: 'ID', key: 'id', width: 80 },
@@ -901,6 +1199,12 @@
     if (tab === 'tasks') await loadTasks();
     if (tab === 'tags') await loadTags();
     if (tab === 'bots') await loadBots();
+    if (tab === 'inviteRelations') await loadInviteRelations();
+    if (tab === 'tgAccounts') await loadTgAccounts();
+    if (tab === 'channelCaches') {
+      await loadTgAccounts();
+      await loadChannelCaches();
+    }
     if (tab === 'config') await loadConfigs();
     if (tab === 'tgObserve') return;
     if (tab === 'publishRecords') return;
@@ -970,6 +1274,63 @@
     } finally {
       botLoading.value = false;
     }
+  }
+
+  async function loadInviteRelations() {
+    inviteLoading.value = true;
+    try {
+      const res: any = await AdminInviteList({
+        ...inviteQuery,
+        page: invitePagination.page,
+        perPage: invitePagination.pageSize,
+      });
+      inviteRelations.value = res?.list || [];
+      invitePagination.itemCount = res?.totalCount || res?.total || 0;
+    } finally {
+      inviteLoading.value = false;
+    }
+  }
+
+  async function loadTgAccounts() {
+    tgAccountLoading.value = true;
+    try {
+      const res: any = await AdminTgAccountList({
+        ...tgAccountQuery,
+        page: tgAccountPagination.page,
+        perPage: tgAccountPagination.pageSize,
+      });
+      tgAccounts.value = res?.list || [];
+      tgAccountPagination.itemCount = res?.totalCount || res?.total || 0;
+      if (!channelCacheQuery.tgAccountId && tgAccounts.value.length > 0) {
+        channelCacheQuery.tgAccountId = tgAccounts.value[0].id;
+      }
+    } finally {
+      tgAccountLoading.value = false;
+    }
+  }
+
+  async function loadChannelCaches() {
+    channelCacheLoading.value = true;
+    try {
+      const res: any = await AdminChannelCacheList({
+        tgAccountId: channelCacheQuery.tgAccountId,
+        keyword: channelCacheQuery.keyword,
+        page: channelCachePagination.page,
+        perPage: channelCachePagination.pageSize,
+      });
+      channelCaches.value = res?.list || [];
+      channelCachePagination.itemCount = res?.totalCount || res?.total || 0;
+    } finally {
+      channelCacheLoading.value = false;
+    }
+  }
+
+  async function openChannelCaches(row: any) {
+    channelCacheQuery.tgAccountId = row.id;
+    channelCachePagination.page = 1;
+    activeTab.value = 'channelCaches';
+    rememberActiveTab('channelCaches');
+    await loadChannelCaches();
   }
 
   async function loadTags() {
@@ -1245,6 +1606,44 @@
       { type: status === 1 ? 'success' : 'warning', bordered: false },
       { default: () => (status === 1 ? '启用' : '停用') }
     );
+  }
+
+  function renderMiniTag(
+    label: string,
+    type: 'default' | 'success' | 'info' | 'warning' | 'error'
+  ) {
+    return h(NTag, { type, bordered: false, size: 'small' }, { default: () => label });
+  }
+
+  function inviteSourceLabel(source: string) {
+    return inviteSourceOptions.find((item) => item.value === source)?.label || source || '-';
+  }
+
+  function inviteStatusLabel(status: string) {
+    return inviteStatusOptions.find((item) => item.value === status)?.label || status || '-';
+  }
+
+  function inviteStatusType(status: string) {
+    if (status === 'active') return 'success';
+    if (status === 'used') return 'info';
+    return 'warning';
+  }
+
+  function tgAccountStatusLabel(status: string) {
+    return tgAccountStatusOptions.find((item) => item.value === status)?.label || status || '-';
+  }
+
+  function tgAccountStatusType(status: string) {
+    if (status === 'authorized') return 'success';
+    if (status === 'pending' || status === 'scanning') return 'info';
+    if (status === 'password_required') return 'warning';
+    if (status === 'expired' || status === 'failed') return 'error';
+    return 'default';
+  }
+
+  function tgAccountLabel(id: number) {
+    const row = tgAccounts.value.find((item) => item.id === id);
+    return row ? `${row.displayName || row.telegramUsername || row.id}` : `TG账号 ${id || '-'}`;
   }
 
   function renderTaskStatus(status: string) {
