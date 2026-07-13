@@ -109,7 +109,8 @@ CREATE TABLE IF NOT EXISTS hg_content_profile (
   deleted_at timestamp
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_content_profile_no ON hg_content_profile (profile_no);
-CREATE UNIQUE INDEX IF NOT EXISTS uk_content_profile_source_note ON hg_content_profile (source_type, source_note_id);
+CREATE INDEX IF NOT EXISTS idx_content_profile_source_note ON hg_content_profile (source_type, source_note_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_content_profile_source_key ON hg_content_profile (source_key) WHERE source_key IS NOT NULL AND source_key <> '';
 CREATE INDEX IF NOT EXISTS idx_content_profile_public ON hg_content_profile (status, visibility, review_status, published_at);
 CREATE INDEX IF NOT EXISTS idx_content_profile_city ON hg_content_profile (province, city);
 CREATE INDEX IF NOT EXISTS idx_content_profile_duplicate ON hg_content_profile (duplicate_of_id);

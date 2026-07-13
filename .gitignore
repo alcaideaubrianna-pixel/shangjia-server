@@ -8,3 +8,4 @@ pull.bat
 push.sh
 /dist
 /server/runtime/
+server/resource/public/storage/cache

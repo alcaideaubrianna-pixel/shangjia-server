@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS `hg_content_profile` (
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_content_profile_no` (`profile_no`),
-  UNIQUE KEY `uk_content_profile_source_note` (`source_type`, `source_note_id`),
+  UNIQUE KEY `uk_content_profile_source_key` (`source_key`),
+  KEY `idx_content_profile_source_note` (`source_type`, `source_note_id`),
   KEY `idx_content_profile_public` (`status`, `visibility`, `review_status`, `published_at`),
   KEY `idx_content_profile_city` (`province`, `city`),
   KEY `idx_content_profile_duplicate` (`duplicate_of_id`)

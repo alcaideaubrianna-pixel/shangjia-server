@@ -992,7 +992,10 @@ func ensureImportTaskLegacyColumns(ctx context.Context) error {
 	if err := ensureImportTaskServerIPColumn(ctx); err != nil {
 		return err
 	}
-	return ensureImportTaskCookieColumn(ctx)
+	if err := ensureImportTaskCookieColumn(ctx); err != nil {
+		return err
+	}
+	return ensureContentProfileSourceIndexes(ctx)
 }
 
 func ensureImportTaskServerIPColumn(ctx context.Context) error {
@@ -1031,6 +1034,45 @@ func isIgnorableImportTaskServerIPColumnError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "duplicate column") || strings.Contains(message, "already exists")
+}
+
+func ensureContentProfileSourceIndexes(ctx context.Context) error {
+	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
+		statements := []string{
+			`DROP INDEX IF EXISTS "uk_content_profile_source_note"`,
+			`CREATE INDEX IF NOT EXISTS "idx_content_profile_source_note" ON "hg_content_profile" ("source_type", "source_note_id")`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS "uk_content_profile_source_key" ON "hg_content_profile" ("source_key") WHERE "source_key" IS NOT NULL AND "source_key" <> ''`,
+		}
+		for _, statement := range statements {
+			if _, err := g.DB().Exec(ctx, statement); err != nil {
+				return gerror.Wrap(err, "检查资料来源唯一索引失败")
+			}
+		}
+		return nil
+	}
+	statements := []string{
+		"ALTER TABLE `hg_content_profile` DROP INDEX `uk_content_profile_source_note`",
+		"ALTER TABLE `hg_content_profile` ADD KEY `idx_content_profile_source_note` (`source_type`,`source_note_id`)",
+		"ALTER TABLE `hg_content_profile` ADD UNIQUE KEY `uk_content_profile_source_key` (`source_key`)",
+	}
+	for _, statement := range statements {
+		if _, err := g.DB().Exec(ctx, statement); err != nil && !isIgnorableContentProfileSourceIndexError(err) {
+			return gerror.Wrap(err, "检查资料来源唯一索引失败")
+		}
+	}
+	return nil
+}
+
+func isIgnorableContentProfileSourceIndexError(err error) bool {
+	if err == nil {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "can't drop") ||
+		strings.Contains(message, "check that column/key exists") ||
+		strings.Contains(message, "doesn't exist") ||
+		strings.Contains(message, "duplicate key name") ||
+		strings.Contains(message, "already exists")
 }
 
 func (s *sSysPublish) scanImportTaskSourceItem(ctx context.Context, row gdb.Record, sourceItem *legacyCMSListItem) (*sysin.ImportTaskScanItem, error) {
@@ -1362,6 +1404,7 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 		profileColumns.Title:           detail.Title,
 		profileColumns.Province:        detail.Province,
 		profileColumns.City:            detail.City,
+		profileColumns.SourceType:      publishProfileSourceType,
 		profileColumns.SourceNoteId:    sourceNoteId,
 		profileColumns.SourceKey:       sourceKey,
 		profileColumns.ImportStatus:    "imported",
