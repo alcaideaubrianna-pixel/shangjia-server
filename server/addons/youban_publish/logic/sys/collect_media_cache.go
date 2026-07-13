@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"mime"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -551,6 +553,135 @@ func (s *sSysPublish) downloadGotdCollectMedia(ctx context.Context, tenantId int
 	return result, nil
 }
 
+func (s *sSysPublish) cachedGotdCollectMediaFile(ctx context.Context, tenantId int64, tgAccountId int64, item collectMediaItem) (*collectDownloadedMedia, error) {
+	if tgAccountId <= 0 {
+		return nil, gerror.New("账号采集媒体缺少TG账号")
+	}
+	var meta gotdCollectMediaMeta
+	if err := json.Unmarshal([]byte(item.MetaJson), &meta); err != nil || meta.Id <= 0 {
+		return nil, gerror.New("账号采集媒体缺少下载元数据")
+	}
+	var result *collectDownloadedMedia
+	usedRuntime, err := s.executeAccountCollectOperation(ctx, tgAccountId, 10*time.Minute, func(runCtx context.Context, client *telegram.Client) error {
+		downloaded, err := s.cachedGotdCollectMediaFileWithClient(runCtx, tenantId, tgAccountId, item, meta, client)
+		if err != nil {
+			return err
+		}
+		result = downloaded
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if usedRuntime {
+		return result, nil
+	}
+	conf, err := NewSysConfig().GetTelegram(ctx)
+	if err != nil {
+		return nil, err
+	}
+	account, err := s.accountCollectTgAccount(ctx, tgAccountId)
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.newAccountCollectClient(ctx, conf, account, tg.NewUpdateDispatcher())
+	if err != nil {
+		return nil, err
+	}
+	err = client.Run(ctx, func(runCtx context.Context) error {
+		if _, err := client.Self(runCtx); err != nil {
+			return err
+		}
+		result, err = s.cachedGotdCollectMediaFileWithClient(runCtx, tenantId, tgAccountId, item, meta, client)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *sSysPublish) cachedGotdCollectMediaFileWithClient(ctx context.Context, tenantId int64, tgAccountId int64, item collectMediaItem, meta gotdCollectMediaMeta, client *telegram.Client) (*collectDownloadedMedia, error) {
+	if client == nil {
+		return nil, gerror.New("账号采集媒体下载客户端为空")
+	}
+	key := mediaFileCacheKey(&telegramMediaItem{
+		MediaType:   listenerTelegramMediaType(item.Type),
+		StoragePath: item.FileId,
+		AssetHash:   item.MetaJson,
+	}, fmt.Sprintf("gotd:%d:%s", tgAccountId, item.FileId))
+	dir := mediaFileCacheDir(ctx)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, gerror.Wrap(err, "创建媒体缓存目录失败")
+	}
+	filePath := mediaFileCachePath(dir, key, collectMediaExt(item.Type, meta.MimeType))
+	metaPath := filePath + ".json"
+	if fileExists(filePath) {
+		if err := touchMediaFileCacheMeta(metaPath, key, item.FileId, filePath); err != nil {
+			g.Log().Warningf(ctx, "更新TG媒体缓存访问时间失败 path:%s err:%+v", filePath, err)
+		}
+		return &collectDownloadedMedia{Path: filePath}, nil
+	}
+	value, err, _ := mediaFileCacheDownloadGroup.Do("gotd:"+key, func() (interface{}, error) {
+		if fileExists(filePath) {
+			if err := touchMediaFileCacheMeta(metaPath, key, item.FileId, filePath); err != nil {
+				g.Log().Warningf(ctx, "更新TG媒体缓存访问时间失败 path:%s err:%+v", filePath, err)
+			}
+			return filePath, nil
+		}
+		if err := s.downloadGotdCollectMediaToFile(ctx, tenantId, tgAccountId, item, meta, client, filePath); err != nil {
+			return "", err
+		}
+		if err := touchMediaFileCacheMeta(metaPath, key, item.FileId, filePath); err != nil {
+			return "", err
+		}
+		if err := pruneMediaFileCache(ctx); err != nil {
+			g.Log().Warningf(ctx, "清理媒体文件缓存失败: %+v", err)
+		}
+		return filePath, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &collectDownloadedMedia{Path: value.(string)}, nil
+}
+
+func (s *sSysPublish) downloadGotdCollectMediaToFile(ctx context.Context, tenantId int64, tgAccountId int64, item collectMediaItem, meta gotdCollectMediaMeta, client *telegram.Client, filePath string) error {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		return gerror.Wrap(err, "创建TG媒体缓存子目录失败")
+	}
+	partPath := filePath + ".part"
+	_ = os.Remove(partPath)
+	file, err := os.Create(partPath)
+	if err != nil {
+		return gerror.Wrap(err, "创建TG媒体缓存临时文件失败")
+	}
+	_, err = downloader.NewDownloader().Download(client.API(), gotdInputFileLocation(meta)).Stream(ctx, file)
+	if err != nil && collectMediaFileReferenceExpired(err) {
+		refreshed, refreshErr := s.refreshGotdCollectMediaMeta(ctx, tenantId, tgAccountId, item, client)
+		if refreshErr == nil {
+			_, _ = file.Seek(0, 0)
+			_ = file.Truncate(0)
+			meta = refreshed
+			_, err = downloader.NewDownloader().Download(client.API(), gotdInputFileLocation(meta)).Stream(ctx, file)
+		}
+	}
+	closeErr := file.Close()
+	if err != nil {
+		_ = os.Remove(partPath)
+		return gerror.Wrap(err, "下载TG媒体到缓存失败")
+	}
+	if closeErr != nil {
+		_ = os.Remove(partPath)
+		return gerror.Wrap(closeErr, "关闭TG媒体缓存临时文件失败")
+	}
+	if err = os.Rename(partPath, filePath); err != nil {
+		_ = os.Remove(partPath)
+		return gerror.Wrap(err, "写入TG媒体缓存文件失败")
+	}
+	return nil
+}
+
 func (s *sSysPublish) downloadGotdCollectMediaWithClient(ctx context.Context, tenantId int64, accountId int64, tgAccountId int64, item collectMediaItem, meta gotdCollectMediaMeta, client *telegram.Client) (*collectDownloadedMedia, error) {
 	if client == nil {
 		return nil, gerror.New("账号采集媒体下载客户端为空")
@@ -671,7 +802,7 @@ func uploadCollectDownloadedMedia(ctx context.Context, accountId int64, mediaTyp
 	if err != nil {
 		return nil, err
 	}
-	return &collectDownloadedMedia{FileUrl: attachment.FileUrl, Path: attachment.Path}, nil
+	return &collectDownloadedMedia{AttachmentId: attachment.Id, FileUrl: attachment.FileUrl, Path: attachment.Path}, nil
 }
 
 func collectMediaUploadContext(ctx context.Context, accountId int64) context.Context {
@@ -713,8 +844,9 @@ func collectMediaExt(mediaType string, mimeType string) string {
 }
 
 type collectDownloadedMedia struct {
-	FileUrl string
-	Path    string
+	AttachmentId int64
+	FileUrl      string
+	Path         string
 }
 
 func (s *sSysPublish) collectMediaAccountLock(tenantId int64, tgAccountId int64) *publishRuntimeMutex {

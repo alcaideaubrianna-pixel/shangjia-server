@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -41,10 +42,16 @@ type accountCollectWorker struct {
 	tgAccountId int64
 	signature   string
 	sources     []accountCollectSourceRuntime
+	listeners   []accountListenPlanRuntime
 	cancel      context.CancelFunc
 	done        chan struct{}
 	messages    chan accountCollectMessageTask
 	operations  chan accountCollectOperationTask
+
+	listenerGroupMu  sync.Mutex
+	listenerGroups   map[string]*listenerMessageGroup
+	listenerSenderMu sync.Mutex
+	listenerSenders  map[string]listenerMessageSenderInfo
 }
 
 type accountCollectMessageTask struct {
@@ -78,25 +85,25 @@ func (s *sSysPublish) runAccountCollectSupervisor(ctx context.Context) {
 }
 
 func (m *accountCollectSupervisor) sync(ctx context.Context, service *sSysPublish) {
-	groups, err := service.enabledAccountCollectSources(ctx)
+	groups, err := service.enabledAccountMonitorGroups(ctx)
 	if err != nil {
-		g.Log().Warningf(ctx, "读取账号采集源失败：%+v", err)
+		g.Log().Warningf(ctx, "读取账号监听源失败：%+v", err)
 		return
 	}
 	active := make(map[int64]struct{}, len(groups))
-	for tgAccountId, sources := range groups {
+	for tgAccountId, group := range groups {
 		if tgAccountId <= 0 {
 			continue
 		}
 		active[tgAccountId] = struct{}{}
-		signature := accountCollectSourceSignature(sources)
+		signature := accountMonitorGroupSignature(group.Sources, group.Listeners)
 		if worker := m.workers[tgAccountId]; worker != nil && worker.signature == signature && !worker.isDone() {
 			continue
 		}
 		if worker := m.workers[tgAccountId]; worker != nil {
 			worker.stop()
 		}
-		m.workers[tgAccountId] = startAccountCollectWorker(ctx, service, tgAccountId, signature, sources)
+		m.workers[tgAccountId] = startAccountCollectWorker(ctx, service, tgAccountId, signature, group.Sources, group.Listeners)
 	}
 	for tgAccountId, worker := range m.workers {
 		if _, ok := active[tgAccountId]; ok {
@@ -191,17 +198,20 @@ func (s *sSysPublish) authorizedTgAccountIds(ctx context.Context) ([]int64, erro
 	return ids, nil
 }
 
-func startAccountCollectWorker(ctx context.Context, service *sSysPublish, tgAccountId int64, signature string, sources []accountCollectSourceRuntime) *accountCollectWorker {
+func startAccountCollectWorker(ctx context.Context, service *sSysPublish, tgAccountId int64, signature string, sources []accountCollectSourceRuntime, listeners []accountListenPlanRuntime) *accountCollectWorker {
 	workerCtx, cancel := context.WithCancel(ctx)
 	worker := &accountCollectWorker{
-		service:     service,
-		tgAccountId: tgAccountId,
-		signature:   signature,
-		sources:     append([]accountCollectSourceRuntime(nil), sources...),
-		cancel:      cancel,
-		done:        make(chan struct{}),
-		messages:    make(chan accountCollectMessageTask, 4096),
-		operations:  make(chan accountCollectOperationTask, 256),
+		service:         service,
+		tgAccountId:     tgAccountId,
+		signature:       signature,
+		sources:         append([]accountCollectSourceRuntime(nil), sources...),
+		listeners:       append([]accountListenPlanRuntime(nil), listeners...),
+		cancel:          cancel,
+		done:            make(chan struct{}),
+		messages:        make(chan accountCollectMessageTask, 4096),
+		operations:      make(chan accountCollectOperationTask, 256),
+		listenerGroups:  make(map[string]*listenerMessageGroup),
+		listenerSenders: make(map[string]listenerMessageSenderInfo),
 	}
 	go worker.run(workerCtx)
 	return worker
@@ -209,7 +219,7 @@ func startAccountCollectWorker(ctx context.Context, service *sSysPublish, tgAcco
 
 func (w *accountCollectWorker) run(ctx context.Context) {
 	defer close(w.done)
-	g.Log().Infof(ctx, "账号采集 worker 启动 tgAccountId:%d sources:%d", w.tgAccountId, len(w.sources))
+	g.Log().Infof(ctx, "账号采集 worker 启动 tgAccountId:%d sources:%d listeners:%d listenerTargets:%d", w.tgAccountId, len(w.sources), len(w.listeners), accountListenerTargetCount(w.listeners))
 	defer g.Log().Infof(context.Background(), "账号采集 worker 停止 tgAccountId:%d", w.tgAccountId)
 	if err := w.runGotdDispatcher(ctx); err != nil && !isContextDone(ctx) {
 		if isTelegramAuthKeyUnregistered(err) {
@@ -219,6 +229,14 @@ func (w *accountCollectWorker) run(ctx context.Context) {
 		}
 		g.Log().Warningf(ctx, "账号采集 worker 异常 tgAccountId:%d err:%+v", w.tgAccountId, err)
 	}
+}
+
+func accountListenerTargetCount(listeners []accountListenPlanRuntime) int {
+	count := 0
+	for _, listener := range listeners {
+		count += len(listener.Targets)
+	}
+	return count
 }
 
 func (w *accountCollectWorker) runGotdDispatcher(ctx context.Context) error {
@@ -391,6 +409,7 @@ func accountCollectSourceSignature(sources []accountCollectSourceRuntime) string
 type accountCollectTgAccount struct {
 	Id         int64  `json:"id"`
 	TenantId   int64  `json:"tenantId"`
+	AccountId  int64  `json:"accountId"`
 	SessionKey string `json:"sessionKey"`
 	Status     string `json:"status"`
 }
@@ -398,7 +417,7 @@ type accountCollectTgAccount struct {
 func (s *sSysPublish) accountCollectTgAccount(ctx context.Context, tgAccountId int64) (*accountCollectTgAccount, error) {
 	var item *accountCollectTgAccount
 	err := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,session_key,status").
+		Fields("id,tenant_id,account_id,session_key,status").
 		Where("id", tgAccountId).
 		WhereNull("deleted_at").
 		Scan(&item)

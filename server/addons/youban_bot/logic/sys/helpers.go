@@ -162,6 +162,14 @@ func (s *sSysBot) officialBot(ctx context.Context) (*sysin.BotModel, error) {
 	return row, nil
 }
 
+func (s *sSysBot) OfficialBotToken(ctx context.Context) (string, error) {
+	row, err := s.officialBot(ctx)
+	if err != nil {
+		return "", err
+	}
+	return row.BotToken, nil
+}
+
 func (s *sSysBot) enabledBots(ctx context.Context) ([]*sysin.BotModel, error) {
 	var rows []*sysin.BotModel
 	if err := g.DB().Model(botTable).Safe().Ctx(ctx).Where("status", 1).WhereNull("deleted_at").OrderAsc("id").Scan(&rows); err != nil {
@@ -207,7 +215,7 @@ func (s *sSysBot) telegramBot(ctx context.Context, botToken string) (*tgbot.Bot,
 		}
 		client = proxyClient
 	}
-	bot, err := tgbot.New(botToken, tgbot.WithHTTPClient(21*time.Second, client), tgbot.WithSkipGetMe(), tgbot.WithAllowedUpdates([]string{"message", "edited_message"}), tgbot.WithErrorsHandler(func(err error) { g.Log().Warningf(ctx, "Telegram SDK错误：%+v", err) }))
+	bot, err := tgbot.New(botToken, tgbot.WithHTTPClient(21*time.Second, client), tgbot.WithSkipGetMe(), tgbot.WithAllowedUpdates([]string{"message", "edited_message"}), tgbot.WithErrorsHandler(func(err error) { logTelegramSDKError(ctx, err) }))
 	if err != nil {
 		return nil, err
 	}
@@ -500,7 +508,24 @@ func isIgnorableTelegramError(err error) bool {
 		return false
 	}
 	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "unexpected end of json input") || strings.Contains(text, "context canceled")
+	return strings.Contains(text, "unexpected eof") ||
+		strings.Contains(text, "unexpected end of json input") ||
+		strings.Contains(text, "eof") ||
+		strings.Contains(text, "connection reset") ||
+		strings.Contains(text, "context canceled") ||
+		strings.Contains(text, "context deadline exceeded") ||
+		strings.Contains(text, "timeout")
+}
+
+func logTelegramSDKError(ctx context.Context, err error) {
+	if err == nil {
+		return
+	}
+	if isIgnorableTelegramError(err) {
+		g.Log().Infof(ctx, "Telegram SDK瞬时错误，已忽略并继续重试：%+v", err)
+		return
+	}
+	g.Log().Warningf(ctx, "Telegram SDK错误：%+v", err)
 }
 
 func shouldMarkBotOffline(err error) bool {

@@ -21,7 +21,7 @@ func (w *accountCollectWorker) bindGotdHandlers(dispatcher tg.UpdateDispatcher) 
 		if !ok {
 			return nil
 		}
-		w.handleGotdMessage(ctx, msg)
+		w.handleGotdMessage(ctx, entities, msg)
 		return nil
 	})
 	dispatcher.OnEditChannelMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateEditChannelMessage) error {
@@ -37,7 +37,7 @@ func (w *accountCollectWorker) bindGotdHandlers(dispatcher tg.UpdateDispatcher) 
 		if !ok {
 			return nil
 		}
-		w.handleGotdMessage(ctx, msg)
+		w.handleGotdMessage(ctx, entities, msg)
 		return nil
 	})
 	dispatcher.OnEditMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateEditMessage) error {
@@ -50,7 +50,7 @@ func (w *accountCollectWorker) bindGotdHandlers(dispatcher tg.UpdateDispatcher) 
 	})
 }
 
-func (w *accountCollectWorker) handleGotdMessage(ctx context.Context, msg *tg.Message) {
+func (w *accountCollectWorker) handleGotdMessage(ctx context.Context, entities tg.Entities, msg *tg.Message) {
 	if w == nil || w.service == nil || msg == nil {
 		return
 	}
@@ -61,6 +61,11 @@ func (w *accountCollectWorker) handleGotdMessage(ctx context.Context, msg *tg.Me
 	chatIds := gotdMessageChatIds(msg)
 	if len(chatIds) == 0 {
 		return
+	}
+	if gotdMessageGroupedId(msg) != "" {
+		w.bufferListenerGroupedMessage(ctx, entities, msg, chatIds)
+	} else {
+		w.handleListenerMessage(ctx, entities, msg, chatIds)
 	}
 	sources := matchAccountCollectSources(w.sources, chatIds)
 	if len(sources) == 0 {
@@ -183,7 +188,7 @@ func gotdCollectMedia(msg *tg.Message, chatId string) []collectMediaItem {
 				Id:            photo.ID,
 				AccessHash:    photo.AccessHash,
 				FileReference: photo.FileReference,
-				ThumbSize:     "y",
+				ThumbSize:     gotdLargestPhotoSizeType(photo),
 			}
 		}
 	case *tg.MessageMediaDocument:
@@ -214,6 +219,49 @@ func gotdCollectMedia(msg *tg.Message, chatId string) []collectMediaItem {
 		FileId:   fmt.Sprintf("gotd:%s:%d", chatId, msg.ID),
 		MetaJson: metaJSON,
 	}}
+}
+
+func gotdLargestPhotoSizeType(photo *tg.Photo) string {
+	if photo == nil || len(photo.Sizes) == 0 {
+		return "y"
+	}
+	bestType := ""
+	bestScore := -1
+	for _, item := range photo.Sizes {
+		sizeType := ""
+		score := -1
+		switch size := item.(type) {
+		case *tg.PhotoSize:
+			sizeType = strings.TrimSpace(size.Type)
+			score = size.W * size.H
+			if size.Size > score {
+				score = size.Size
+			}
+		case *tg.PhotoSizeProgressive:
+			sizeType = strings.TrimSpace(size.Type)
+			score = size.W * size.H
+			for _, value := range size.Sizes {
+				if value > score {
+					score = value
+				}
+			}
+		case *tg.PhotoCachedSize:
+			sizeType = strings.TrimSpace(size.Type)
+			score = size.W * size.H
+			if len(size.Bytes) > score {
+				score = len(size.Bytes)
+			}
+		}
+		if sizeType == "" || score < bestScore {
+			continue
+		}
+		bestType = sizeType
+		bestScore = score
+	}
+	if bestType == "" {
+		return "y"
+	}
+	return bestType
 }
 
 type gotdCollectMediaMeta struct {

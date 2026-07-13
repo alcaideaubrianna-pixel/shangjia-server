@@ -1432,3 +1432,91 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_push_plan` (
   KEY `idx_ybp_msg_plan_due` (`status`,`next_run_at`,`id`),
   KEY `idx_ybp_msg_plan_owner` (`tenant_id`,`status`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息自动推送计划';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_listen_plan` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `name` varchar(128) NOT NULL DEFAULT '' COMMENT '计划名称',
+  `tg_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '监听TG账号ID',
+  `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '推送Bot ID',
+  `bind_code` varchar(32) NOT NULL DEFAULT '' COMMENT '通知目标绑定ID',
+  `notify_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '通知目标Chat ID',
+  `notify_chat_type` varchar(32) NOT NULL DEFAULT '' COMMENT '通知目标类型',
+  `notify_chat_title` varchar(255) NOT NULL DEFAULT '' COMMENT '通知目标标题',
+  `notify_bound_at` datetime DEFAULT NULL COMMENT '通知目标绑定时间',
+  `keywords_json` text COMMENT '关键字JSON',
+  `status` tinyint(4) NOT NULL DEFAULT '1' COMMENT '状态：1启用 2停用',
+  `last_trigger_at` datetime DEFAULT NULL COMMENT '最近触发时间',
+  `last_result` text COMMENT '最近执行结果',
+  `created_by` bigint(20) NOT NULL DEFAULT '0',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0',
+  `deleted_by` bigint(20) NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_msg_listen_plan_code` (`bind_code`),
+  KEY `idx_ybp_msg_listen_plan_owner` (`tenant_id`,`status`,`id`),
+  KEY `idx_ybp_msg_listen_plan_account` (`tg_account_id`,`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息监听计划';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_listen_target` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `plan_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '计划ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `target_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '目标Chat ID',
+  `target_chat_type` varchar(32) NOT NULL DEFAULT '' COMMENT '目标Chat类型',
+  `target_chat_title` varchar(255) NOT NULL DEFAULT '' COMMENT '目标Chat标题',
+  `target_chat_username` varchar(255) NOT NULL DEFAULT '' COMMENT '目标Chat用户名',
+  `last_matched_at` datetime DEFAULT NULL COMMENT '最近命中时间',
+  `last_matched_text` text COMMENT '最近命中文本',
+  `last_matched_user_id` varchar(128) NOT NULL DEFAULT '' COMMENT '最近命中用户ID',
+  `status` tinyint(4) NOT NULL DEFAULT '1' COMMENT '状态',
+  `created_by` bigint(20) NOT NULL DEFAULT '0',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0',
+  `deleted_by` bigint(20) NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_msg_listen_target_chat` (`plan_id`,`target_chat_id`),
+  KEY `idx_ybp_msg_listen_target_plan` (`plan_id`,`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息监听目标';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_listen_notice` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `plan_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '计划ID',
+  `target_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '目标ID',
+  `tg_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '监听TG账号ID',
+  `source_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '来源Chat ID',
+  `source_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '来源消息ID',
+  `sender_user_id` varchar(128) NOT NULL DEFAULT '' COMMENT '发送用户ID',
+  `sender_username` varchar(128) NOT NULL DEFAULT '' COMMENT '发送用户名',
+  `normalized_text_hash` varchar(128) NOT NULL DEFAULT '' COMMENT '文本Hash',
+  `media_hash` varchar(128) NOT NULL DEFAULT '' COMMENT '媒体Hash',
+  `dedupe_key` varchar(255) NOT NULL DEFAULT '' COMMENT '去重键',
+  `match_keywords_json` text COMMENT '命中关键字JSON',
+  `notify_result` text COMMENT '推送结果',
+  `created_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_msg_listen_notice_dedupe` (`dedupe_key`),
+  KEY `idx_ybp_msg_listen_notice_plan` (`plan_id`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息监听命中记录';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_listen_sender` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `tg_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '监听TG账号ID',
+  `telegram_user_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户ID',
+  `telegram_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户名',
+  `telegram_first_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG名',
+  `telegram_last_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG姓',
+  `display_name` varchar(255) NOT NULL DEFAULT '' COMMENT '显示名称',
+  `last_seen_at` datetime DEFAULT NULL COMMENT '最近出现时间',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_msg_listen_sender_user` (`tg_account_id`,`telegram_user_id`),
+  KEY `idx_ybp_msg_listen_sender_tenant` (`tenant_id`,`tg_account_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息监听发送者缓存';

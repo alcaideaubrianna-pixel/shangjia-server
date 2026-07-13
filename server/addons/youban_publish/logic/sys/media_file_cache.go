@@ -328,7 +328,16 @@ func mediaValue(media *telegramMediaItem, pick func(*telegramMediaItem) string) 
 func mediaFileCacheDir(ctx context.Context) string {
 	dir := strings.TrimSpace(g.Cfg().MustGet(ctx, "youbanPublish.mediaFileCache.dir", mediaFileCacheDefaultDir).String())
 	if dir == "" {
-		return mediaFileCacheDefaultDir
+		dir = mediaFileCacheDefaultDir
+	}
+	if filepath.IsAbs(dir) {
+		return dir
+	}
+	if root := strings.TrimSpace(g.Cfg().MustGet(ctx, "server.serverRoot").String()); root != "" {
+		return filepath.Join(root, dir)
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
 	}
 	return dir
 }
