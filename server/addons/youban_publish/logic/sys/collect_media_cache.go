@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime"
 	"strconv"
@@ -47,6 +48,36 @@ func newCollectMediaRetryError(message string, delay time.Duration) *collectMedi
 		delay = 15 * time.Second
 	}
 	return &collectMediaRetryError{message: message, delay: delay}
+}
+
+func collectMediaRetryErrorFrom(err error) *collectMediaRetryError {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return newCollectMediaRetryError("账号采集媒体下载临时中断，等待重试: "+err.Error(), 30*time.Second)
+	}
+	message := strings.ToLower(err.Error())
+	retryablePatterns := []string{
+		"context canceled",
+		"context deadline exceeded",
+		"deadline exceeded",
+		"timeout",
+		"connection reset",
+		"connection refused",
+		"connection closed",
+		"broken pipe",
+		"temporary",
+		"too many requests",
+		"flood_wait",
+		"eof",
+	}
+	for _, pattern := range retryablePatterns {
+		if strings.Contains(message, pattern) {
+			return newCollectMediaRetryError("账号采集媒体下载临时失败，等待重试: "+err.Error(), 30*time.Second)
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) prepareCollectMediaAsset(ctx context.Context, event gdb.Record, item collectMediaItem) (collectMediaItem, error) {
@@ -237,6 +268,14 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 		s.appendCollectEventLogForRecord(ctx, event, "media", "downloading", "开始下载账号采集媒体", row.SourceFileId)
 		cached, err := s.downloadGotdCollectMedia(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), event["tg_account_id"].Int64(), items[index])
 		if err != nil {
+			if retryErr := collectMediaRetryErrorFrom(err); retryErr != nil {
+				_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
+					"cache_status":  collectMediaCachePending,
+					"error_message": retryErr.message,
+					"updated_at":    gtime.Now(),
+				}).Update()
+				return changed, retryErr
+			}
 			_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
 				"cache_status":  collectMediaCacheFailed,
 				"error_message": err.Error(),

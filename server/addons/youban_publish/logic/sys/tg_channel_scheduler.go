@@ -108,6 +108,7 @@ func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) er
 		return err
 	}
 	usedChannels := make(map[string]struct{})
+	blockedChannels := make(map[string]struct{})
 	dispatched := 0
 	for _, job := range jobs {
 		if dispatched >= limit {
@@ -117,11 +118,17 @@ func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) er
 		if _, ok := usedChannels[channelKey]; ok {
 			continue
 		}
+		if _, ok := blockedChannels[channelKey]; ok {
+			continue
+		}
 		busy, err := s.telegramChannelHasActiveDispatch(ctx, job)
 		if err != nil {
 			return err
 		}
 		if busy {
+			if channelKey != "" {
+				blockedChannels[channelKey] = struct{}{}
+			}
 			continue
 		}
 		waitingChannelOrder, err := s.telegramChannelHasEarlierActiveJob(ctx, job)
@@ -129,6 +136,9 @@ func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) er
 			return err
 		}
 		if waitingChannelOrder {
+			if channelKey != "" {
+				blockedChannels[channelKey] = struct{}{}
+			}
 			continue
 		}
 		waitingPrevious, err := s.collectTelegramJobHasPreviousActive(ctx, job)
