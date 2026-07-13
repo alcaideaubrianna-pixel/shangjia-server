@@ -36,6 +36,7 @@ type botBindRow struct {
 	AccountId        int64  `json:"account_id"`
 	TelegramUserId   string `json:"telegram_user_id"`
 	TelegramUsername string `json:"telegram_username"`
+	BotId            int64  `json:"bot_id"`
 }
 
 type botLoginResult struct {
@@ -310,6 +311,79 @@ func (s *sSysBot) Notify(ctx context.Context, in *sysin.NotifyInp) error {
 	return err
 }
 
+func (s *sSysBot) NotifyAccount(ctx context.Context, in *sysin.NotifyAccountInp) error {
+	if in == nil {
+		return gerror.New("消息内容不能为空")
+	}
+	app := strings.TrimSpace(in.App)
+	if app == "" {
+		app = consts.AppApi
+	}
+	if in.AccountId <= 0 {
+		return gerror.New("系统账号ID不能为空")
+	}
+	if strings.TrimSpace(in.Text) == "" {
+		return gerror.New("消息内容不能为空")
+	}
+	if _, enabled := s.featureConfig(ctx, notifyFeature{}.Key()); !enabled {
+		return nil
+	}
+
+	var bind *botBindRow
+	if err := g.DB().Model(accountBindTbl).Safe().Ctx(ctx).
+		Where("app", app).
+		Where("account_id", in.AccountId).
+		Where("status", 1).
+		WhereNull("deleted_at").
+		Scan(&bind); err != nil {
+		return gerror.Wrap(err, "读取Telegram绑定失败")
+	}
+	if bind == nil || strings.TrimSpace(bind.TelegramUserId) == "" {
+		return nil
+	}
+
+	botId := in.BotId
+	if botId <= 0 {
+		botId = bind.BotId
+	}
+	var botToken string
+	if botId > 0 {
+		row, err := s.botById(ctx, botId)
+		if err != nil {
+			return err
+		}
+		botToken = row.BotToken
+	} else {
+		row, err := s.officialBot(ctx)
+		if err != nil {
+			return err
+		}
+		botId = row.Id
+		botToken = row.BotToken
+	}
+
+	var user struct {
+		ChatId string `json:"chat_id"`
+	}
+	if err := g.DB().Model(userTable).Safe().Ctx(ctx).
+		Fields("chat_id").
+		Where("bot_id", botId).
+		Where("telegram_user_id", bind.TelegramUserId).
+		Where("status", 1).
+		WhereNull("deleted_at").
+		Scan(&user); err != nil {
+		return gerror.Wrap(err, "读取Telegram用户失败")
+	}
+	if strings.TrimSpace(user.ChatId) == "" {
+		return nil
+	}
+	_, err := s.sendMessage(ctx, botToken, user.ChatId, in.Text, firstNonEmpty(in.ParseMode, "HTML"), in.DisableNotice)
+	if err != nil && botId > 0 && shouldMarkBotOffline(err) {
+		_ = s.markBotOffline(ctx, botId, err)
+	}
+	return err
+}
+
 func (s *sSysBot) sendMessage(ctx context.Context, botToken, chatId, text, parseMode string, disableNotice bool) (*models.Message, error) {
 	return s.sendMessageWithMarkup(ctx, botToken, chatId, text, parseMode, disableNotice, nil)
 }
@@ -448,7 +522,7 @@ func (s *sSysBot) shouldUseWebhookInAuto(ctx context.Context) bool {
 		return true
 	}
 	mode := strings.ToLower(strings.TrimSpace(g.Cfg().MustGet(ctx, "system.mode").String()))
-	return mode == "product" || mode == "staging"
+	return mode == "product" || mode == "production" || mode == "prod" || mode == "staging"
 }
 
 func (s *sSysBot) botWebhookURL(ctx context.Context, row *sysin.BotModel) string {
@@ -458,11 +532,12 @@ func (s *sSysBot) botWebhookURL(ctx context.Context, row *sysin.BotModel) string
 	if url := strings.TrimSpace(row.WebhookUrl); url != "" {
 		return url
 	}
-	base := strings.TrimRight(strings.TrimSpace(g.Cfg().MustGet(ctx, "youbanBot.telegram.webhookDomain").String()), "/")
+	base := ""
+	if basic, err := isc.SysConfig().GetBasic(ctx); err == nil && basic != nil {
+		base = strings.TrimRight(strings.TrimSpace(basic.Domain), "/")
+	}
 	if base == "" {
-		if basic, err := isc.SysConfig().GetBasic(ctx); err == nil && basic != nil {
-			base = strings.TrimRight(strings.TrimSpace(basic.Domain), "/")
-		}
+		base = strings.TrimRight(strings.TrimSpace(g.Cfg().MustGet(ctx, "youbanBot.telegram.webhookDomain").String()), "/")
 	}
 	if base == "" {
 		return ""

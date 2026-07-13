@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"html"
 	"image"
 	"image/jpeg"
 	"os"
@@ -24,7 +25,10 @@ import (
 	"github.com/gotd/td/tg"
 	_ "golang.org/x/image/webp"
 
+	botsysin "hotgo/addons/youban_bot/model/input/sysin"
+	botService "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 )
 
 type messagePushChannel struct {
@@ -36,6 +40,14 @@ type messagePushChannel struct {
 	BotIdJson    string `json:"botIdJson"`
 	IsBroadcast  int    `json:"isBroadcast"`
 	IsMegagroup  int    `json:"isMegagroup"`
+}
+
+type messagePushTgAccountOwner struct {
+	Id               int64  `json:"id"`
+	TenantId         int64  `json:"tenant_id"`
+	AccountId        int64  `json:"account_id"`
+	DisplayName      string `json:"display_name"`
+	TelegramUsername string `json:"telegram_username"`
 }
 
 type messageTemplateForwardSource struct {
@@ -757,7 +769,58 @@ func (s *sSysPublish) handleMessagePushQueuedJobError(ctx context.Context, job t
 		"updated_at":          gtime.Now(),
 	}).Update()
 	s.appendTelegramJobLog(ctx, job, "message_push", status, policy.Message)
+	if isTelegramAuthKeyUnregistered(err) {
+		s.handleMessagePushAuthKeyExpired(ctx, job, policy.Message)
+	}
 	return nil
+}
+
+func (s *sSysPublish) handleMessagePushAuthKeyExpired(ctx context.Context, job telegramJobRecord, message string) {
+	account, err := s.messagePushTgAccountOwner(ctx, job.AccountId, job.TenantId)
+	if err != nil {
+		g.Log().Warningf(ctx, "读取掉线TG账号失败 jobId:%d tgAccountId:%d err:%+v", job.Id, job.AccountId, err)
+		return
+	}
+	if account.Id <= 0 {
+		return
+	}
+	s.expireTgAccountSession(ctx, account.Id, account.TenantId, account.AccountId, tgAccountSessionExpiredMessage)
+	if account.AccountId <= 0 {
+		return
+	}
+	text := fmt.Sprintf("TG账号登录态已失效，请重新扫码登录。\n\nTG账号：%s", html.EscapeString(firstNonEmpty(account.DisplayName, account.TelegramUsername, fmt.Sprintf("ID:%d", account.Id))))
+	if strings.TrimSpace(message) != "" {
+		text += "\n掉线原因：" + html.EscapeString(message)
+	}
+	if notifyErr := botService.SysBot().NotifyAccount(ctx, &botsysin.NotifyAccountInp{
+		App:       consts.AppApi,
+		AccountId: account.AccountId,
+		Text:      text,
+		ParseMode: "HTML",
+	}); notifyErr != nil {
+		g.Log().Warningf(ctx, "发送TG账号掉线通知失败 tgAccountId:%d accountId:%d err:%+v", account.Id, account.AccountId, notifyErr)
+	}
+}
+
+func (s *sSysPublish) messagePushTgAccountOwner(ctx context.Context, tgAccountId int64, tenantId int64) (*messagePushTgAccountOwner, error) {
+	if tgAccountId <= 0 {
+		return &messagePushTgAccountOwner{}, nil
+	}
+	var account *messagePushTgAccountOwner
+	mod := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
+		Fields("id,tenant_id,account_id,display_name,telegram_username").
+		Where("id", tgAccountId).
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	if err := mod.Scan(&account); err != nil {
+		return nil, gerror.Wrap(err, "读取TG账号失败")
+	}
+	if account == nil {
+		return &messagePushTgAccountOwner{}, nil
+	}
+	return account, nil
 }
 
 func (s *sSysPublish) messagePushChannelFromJob(ctx context.Context, job telegramJobRecord) (*messagePushChannel, error) {

@@ -316,6 +316,15 @@ type NotifyInp struct {
 	DisableNotice bool   `json:"disableNotice" dc:"是否静默"`
 }
 
+type NotifyAccountInp struct {
+	BotId         int64  `json:"botId" dc:"Bot ID，为空优先使用绑定Bot"`
+	App           string `json:"app" dc:"应用：admin/api"`
+	AccountId     int64  `json:"accountId" dc:"系统账号ID"`
+	Text          string `json:"text" dc:"消息内容"`
+	ParseMode     string `json:"parseMode" dc:"解析模式"`
+	DisableNotice bool   `json:"disableNotice" dc:"是否静默"`
+}
+
 type NotifyRichInp struct {
 	BotId            int64  `json:"botId" dc:"Bot ID，为空使用官方Bot"`
 	ChatId           string `json:"chatId" dc:"目标Chat ID"`

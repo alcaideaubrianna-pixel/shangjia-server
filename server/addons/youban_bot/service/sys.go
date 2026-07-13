@@ -31,6 +31,7 @@ type ISysBot interface {
 	CreateInviteCode(ctx context.Context, in *sysin.InviteCreateInp) (res *sysin.InviteCreateModel, err error)
 	TelegramWebhookRaw(ctx context.Context, in *sysin.WebhookInp) (err error)
 	Notify(ctx context.Context, in *sysin.NotifyInp) (err error)
+	NotifyAccount(ctx context.Context, in *sysin.NotifyAccountInp) (err error)
 	NotifyRich(ctx context.Context, in *sysin.NotifyRichInp) (err error)
 	OfficialBotToken(ctx context.Context) (token string, err error)
 }
