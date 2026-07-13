@@ -815,6 +815,11 @@ func (s *sSysPublish) deleteMedia(ctx context.Context, id int64, accountId int64
 			Where(mediaColumns.SourceAssetId, sourceAssetId).
 			Data(g.Map{mediaColumns.DeletedAt: gtime.Now()}).
 			Update()
+		if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+			return s.syncTaskMediaToProfile(ctx, tx, row["task_id"].Int64(), row["profile_id"].Int64())
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -867,6 +872,11 @@ func (s *sSysPublish) deleteMediaByTenant(ctx context.Context, id int64, tenantI
 			Where(mediaColumns.SourceAssetId, sourceAssetId).
 			Data(g.Map{mediaColumns.DeletedAt: gtime.Now()}).
 			Update()
+		if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+			return s.syncTaskMediaToProfile(ctx, tx, row["task_id"].Int64(), row["profile_id"].Int64())
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -900,6 +910,16 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 		return gerror.Wrap(err, "读取任务媒体失败")
 	}
 	if len(list) == 0 {
+		now := gtime.Now()
+		profileColumns := dao.ContentProfile.Columns()
+		data := g.Map{
+			profileColumns.ImageCount: 0,
+			profileColumns.VideoCount:  0,
+			profileColumns.UpdatedAt:   now,
+		}
+		if _, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Where(profileColumns.Id, profileId).Data(data).Update(); err != nil {
+			return gerror.Wrap(err, "更新资料媒体数量失败")
+		}
 		return nil
 	}
 	mediaColumns := dao.ContentMedia.Columns()

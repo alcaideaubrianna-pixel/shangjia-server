@@ -19,7 +19,6 @@ func (s *sSysPublish) syncProfilePublishState(ctx context.Context, profileId int
 	data := g.Map{
 		columns.Status:     status,
 		columns.Visibility: visibility,
-		columns.UpdatedAt:  now,
 	}
 	if status == 1 {
 		if publishedAt == nil {

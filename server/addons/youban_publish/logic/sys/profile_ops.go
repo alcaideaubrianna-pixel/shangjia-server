@@ -1136,7 +1136,16 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	now := gtime.Now()
 	current, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).
 		Where(columns.Id, profileId).
-		Fields(columns.Status, columns.PublishedAt, columns.Visibility).
+		Fields(
+			columns.Status,
+			columns.PublishedAt,
+			columns.Visibility,
+			columns.Title,
+			columns.PlainText,
+			columns.Province,
+			columns.City,
+			columns.CupSize,
+		).
 		One()
 	if err != nil {
 		return gerror.Wrap(err, "读取资料当前状态失败")
@@ -1156,10 +1165,12 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		columns.CupSize:         in.Tag,
 		columns.Visibility:      nextVisibility,
 		columns.AdminRemark:     in.CustomerRemark,
-		columns.SourceUpdateBy:  strconv.FormatInt(accountId, 10),
-		columns.SourceUpdatedAt: now,
 		columns.Status:          nextStatus,
-		columns.UpdatedAt:       now,
+	}
+	if profileContentChanged(current, in) {
+		data[columns.SourceUpdateBy] = strconv.FormatInt(accountId, 10)
+		data[columns.SourceUpdatedAt] = now
+		data[columns.UpdatedAt] = now
 	}
 	if nextStatus == 1 && publishAt == nil {
 		publishAt = now
@@ -1186,6 +1197,17 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		return gerror.Wrap(err, "更新资料任务失败")
 	}
 	return nil
+}
+
+func profileContentChanged(current gdb.Record, in *sysin.ProfileSaveInp) bool {
+	if current.IsEmpty() || in == nil {
+		return false
+	}
+	return strings.TrimSpace(current["title"].String()) != strings.TrimSpace(in.Title) ||
+		strings.TrimSpace(current["plain_text"].String()) != strings.TrimSpace(in.PlainText) ||
+		strings.TrimSpace(current["province"].String()) != strings.TrimSpace(in.Province) ||
+		strings.TrimSpace(current["city"].String()) != strings.TrimSpace(in.City) ||
+		strings.TrimSpace(current["cup_size"].String()) != strings.TrimSpace(in.Tag)
 }
 
 func (s *sSysPublish) profileTask(ctx context.Context, tx gdb.TX, profileId int64, tenantId int64, accountId int64) (gdb.Record, error) {
