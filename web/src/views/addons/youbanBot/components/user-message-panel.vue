@@ -4,11 +4,12 @@
       <n-space class="mb-4" justify="space-between">
         <n-space>
           <n-select
-            v-model:value="userQuery.botId"
-            clearable
+            v-model:value="userQuery.botIds"
+            multiple
             filterable
+            clearable
             :options="botOptions"
-            placeholder="筛选 Bot"
+            placeholder="筛选超级机器人"
             class="youban-bot-user-panel__bot-select"
           />
           <n-input
@@ -115,7 +116,7 @@
   const userQuery = reactive({
     page: 1,
     perPage: 10,
-    botId: null as number | null,
+    botIds: [] as number[],
     keyword: '',
     isBound: null as number | null,
   });
@@ -132,6 +133,9 @@
       label: item.botUsername ? `@${item.botUsername}` : item.botName,
       value: item.id,
     }))
+  );
+  const selectedUserBotIds = computed(() =>
+    userQuery.botIds.length > 0 ? userQuery.botIds : botRows.value.map((item) => item.id)
   );
   const userPagination = reactive({
     page: 1,
@@ -153,7 +157,12 @@
       title: 'Bot',
       key: 'botUsername',
       width: 150,
-      render: (row: any) => (row.botUsername ? `@${row.botUsername}` : row.botId),
+      render: (row: any) =>
+        row.botUsernames?.length
+          ? row.botUsernames.map((item: string) => `@${item}`).join('、')
+          : row.botUsername
+            ? `@${row.botUsername}`
+            : row.botId,
     },
     { title: 'TG用户ID', key: 'telegramUserId', width: 150 },
     {
@@ -232,19 +241,66 @@
   }
 
   async function loadBots() {
-    const res: any = await BotList({ page: 1, perPage: 100, status: 1 });
+    const res: any = await BotList({ page: 1, perPage: 100, status: 1, isOfficial: 1 });
     botRows.value = res?.list || [];
+    if (userQuery.botIds.length === 0) {
+      userQuery.botIds = botRows.value.map((item) => item.id);
+    }
+  }
+
+  function mergeUsers(list: any[]) {
+    const map = new Map<string, any>();
+    for (const item of list || []) {
+      if (!item || !item.telegramUserId) continue;
+      const key = String(item.telegramUserId);
+      const exists = map.get(key);
+      if (!exists) {
+        map.set(key, {
+          ...item,
+          botIds: [item.botId].filter(Boolean),
+          botUsernames: item.botUsername ? [item.botUsername] : [],
+        });
+        continue;
+      }
+      exists.botIds = Array.from(new Set([...(exists.botIds || []), item.botId].filter(Boolean)));
+      exists.botUsernames = Array.from(
+        new Set([...(exists.botUsernames || []), item.botUsername].filter(Boolean))
+      );
+      const prevAt = new Date(exists.lastMessageAt || 0).getTime();
+      const nextAt = new Date(item.lastMessageAt || 0).getTime();
+      if (nextAt >= prevAt) {
+        exists.botId = item.botId;
+        exists.botUsername = item.botUsername || exists.botUsername;
+        exists.chatId = item.chatId || exists.chatId;
+        exists.chatType = item.chatType || exists.chatType;
+        exists.messageCount = Math.max(exists.messageCount || 0, item.messageCount || 0);
+        exists.lastMessageAt = item.lastMessageAt || exists.lastMessageAt;
+        exists.lastMessageText = item.lastMessageText || exists.lastMessageText;
+        exists.isBound = item.isBound || exists.isBound;
+        exists.bindApp = item.bindApp || exists.bindApp;
+        exists.bindAccountId = item.bindAccountId || exists.bindAccountId;
+        exists.bindTenantId = item.bindTenantId || exists.bindTenantId;
+        exists.bindAccountName = item.bindAccountName || exists.bindAccountName;
+      }
+    }
+    return Array.from(map.values());
   }
 
   async function loadUsers() {
+    if (botRows.value.length === 0) {
+      userRows.value = [];
+      userPagination.itemCount = 0;
+      return;
+    }
     userLoading.value = true;
     try {
       const res: any = await UserList({
         ...userQuery,
+        botIds: selectedUserBotIds.value,
         page: userPagination.page,
         perPage: userPagination.pageSize,
       });
-      userRows.value = res?.list || [];
+      userRows.value = mergeUsers(res?.list || []);
       userPagination.itemCount = res?.totalCount || res?.total || 0;
     } finally {
       userLoading.value = false;
@@ -309,8 +365,8 @@
     loadMessages();
   }
 
-  onMounted(() => {
-    loadBots();
+  onMounted(async () => {
+    await loadBots();
     loadUsers();
     loadMessages();
   });

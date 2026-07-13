@@ -84,6 +84,9 @@ func (s *sSysPublish) scheduleTelegramJob(ctx context.Context, jobId int64, dela
 }
 
 func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if limit <= 0 {
 		limit = 50
 	}
@@ -168,12 +171,15 @@ func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) er
 }
 
 func (s *sSysPublish) telegramSchedulerCandidates(ctx context.Context, limit int) ([]telegramJobRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 200
 	}
 	var jobs []telegramJobRecord
 	now := gtime.Now()
-	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
 		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
 		Fields("j.*").
 		WhereIn("j.status", []string{"pending", "failed_retry"}).
@@ -190,11 +196,14 @@ func (s *sSysPublish) telegramSchedulerCandidates(ctx context.Context, limit int
 }
 
 func (s *sSysPublish) telegramChannelHasActiveDispatch(ctx context.Context, job telegramJobRecord) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	channelKey := telegramSchedulerChannelKey(job)
 	if channelKey == "" {
 		return false, nil
 	}
-	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
 		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
 		Where("j.id <> ?", job.Id).
 		WhereIn("j.status", []string{"sending", "pending", "failed_retry"}).
@@ -204,6 +213,9 @@ func (s *sSysPublish) telegramChannelHasActiveDispatch(ctx context.Context, job 
 		mod = mod.Where("j.channel_id", job.ChannelId)
 	} else {
 		mod = mod.Where("j.target_chat_id", job.TargetChatId)
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
 	}
 	count, err := mod.Count()
 	if err != nil {

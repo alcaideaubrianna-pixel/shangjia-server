@@ -11,6 +11,9 @@ import (
 )
 
 func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, job telegramJobRecord) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if job.Id <= 0 {
 		return false, nil
 	}
@@ -28,7 +31,7 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		}
 		createdAt = current["created_at"].GTime()
 	}
-	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
 		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
 		Where("j.id <> ?", job.Id).
 		WhereIn("j.status", []string{"pending", "sending", "failed_retry"}).
@@ -53,6 +56,9 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 		)
 	} else {
 		mod = mod.Where(`(j.created_at < ? OR (j.created_at = ? AND j.id < ?))`, createdAt, createdAt, job.Id)
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
 	}
 	count, err := mod.Count()
 	if err != nil {

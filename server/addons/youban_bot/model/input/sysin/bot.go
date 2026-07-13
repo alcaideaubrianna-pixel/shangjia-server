@@ -316,6 +316,20 @@ type NotifyInp struct {
 	DisableNotice bool   `json:"disableNotice" dc:"是否静默"`
 }
 
+type NotifyRichInp struct {
+	BotId            int64  `json:"botId" dc:"Bot ID，为空使用官方Bot"`
+	ChatId           string `json:"chatId" dc:"目标Chat ID"`
+	Text             string `json:"text" dc:"消息内容"`
+	ParseMode        string `json:"parseMode" dc:"解析模式"`
+	DisableNotice    bool   `json:"disableNotice" dc:"是否静默"`
+	ButtonLabel      string `json:"buttonLabel" dc:"按钮文案"`
+	ButtonURL        string `json:"buttonUrl" dc:"按钮链接"`
+	SourceChatId     string `json:"sourceChatId" dc:"来源Chat ID"`
+	SourceMessageId  int    `json:"sourceMessageId" dc:"来源消息ID"`
+	SourceMessageIds []int  `json:"sourceMessageIds" dc:"来源消息ID列表"`
+	SourceHasMedia   bool   `json:"sourceHasMedia" dc:"是否包含媒体"`
+}
+
 func NormalizeApp(app string) string {
 	app = strings.TrimSpace(app)
 	if app == "" || app == BotAppApi {

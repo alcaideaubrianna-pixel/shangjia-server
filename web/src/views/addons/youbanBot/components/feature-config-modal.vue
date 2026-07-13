@@ -72,7 +72,17 @@
     negative-text="取消"
     @positive-click="confirmAdminSelect"
   >
-    <n-input v-model:value="adminKeyword" clearable placeholder="搜索 TG / 后台账号" class="mb-3" />
+    <n-space vertical class="mb-3" size="small">
+      <n-select
+        v-model:value="adminBotIds"
+        multiple
+        filterable
+        clearable
+        :options="superBotOptions"
+        placeholder="筛选超级机器人"
+      />
+      <n-input v-model:value="adminKeyword" clearable placeholder="搜索 TG / 后台账号" />
+    </n-space>
     <n-data-table
       :columns="adminColumns"
       :data="filteredAdminUsers"
@@ -87,18 +97,20 @@
 
 <script setup lang="ts">
   import { computed, onMounted, ref } from 'vue';
-  import { UserList } from '@/api/addons/youbanBot';
+  import { BotList, UserList } from '@/api/addons/youbanBot';
 
   const props = defineProps<{ show: boolean; form: Record<string, any>; statusOptions: any[] }>();
   const form = computed(() => props.form);
   const emit = defineEmits<{ (e: 'update:show', value: boolean): void; (e: 'save'): void }>();
 
   const adminUsers = ref<any[]>([]);
+  const superBots = ref<any[]>([]);
   const adminLoading = ref(false);
   const adminKeyword = ref('');
   const adminSelectVisible = ref(false);
   const adminSelectField = ref('');
   const checkedAdminIds = ref<any[]>([]);
+  const adminBotIds = ref<any[]>([]);
   const adminColumns = [
     { type: 'selection' },
     {
@@ -111,7 +123,12 @@
     {
       title: 'Bot',
       key: 'botUsername',
-      render: (row: any) => (row.botUsername ? `@${row.botUsername}` : row.botId),
+      render: (row: any) =>
+        row.botUsernames?.length
+          ? row.botUsernames.map((item: string) => `@${item}`).join('、')
+          : row.botUsername
+            ? `@${row.botUsername}`
+            : row.botId,
     },
   ];
 
@@ -121,24 +138,93 @@
   });
   const filteredAdminUsers = computed(() => {
     const keyword = adminKeyword.value.trim().toLowerCase();
-    if (!keyword) return adminUsers.value;
-    return adminUsers.value.filter((item) =>
-      [item.telegramUserId, item.telegramUsername, item.bindAccountName, item.botUsername].some(
+    const selectedBotIds = new Set(adminBotIds.value.map((item) => String(item)));
+    return adminUsers.value.filter((item) => {
+      const botIds = Array.isArray(item.botIds) && item.botIds.length > 0 ? item.botIds : [item.botId];
+      if (selectedBotIds.size > 0 && !botIds.some((botId) => selectedBotIds.has(String(botId)))) {
+        return false;
+      }
+      if (!keyword) return true;
+      return [item.telegramUserId, item.telegramUsername, item.bindAccountName, item.botUsername].some(
         (v) =>
           String(v || '')
             .toLowerCase()
             .includes(keyword)
-      )
-    );
+      );
+    });
   });
+  const superBotOptions = computed(() =>
+    superBots.value.map((item) => ({
+      label: item.botUsername ? `@${item.botUsername}` : item.botName,
+      value: item.id,
+    }))
+  );
+
+  function currentBotIds() {
+    return adminBotIds.value.length > 0 ? adminBotIds.value : superBots.value.map((item) => item.id);
+  }
+
+  function mergeUsers(list: any[]) {
+    const map = new Map<string, any>();
+    for (const item of list || []) {
+      if (!item || !item.telegramUserId) continue;
+      const key = String(item.telegramUserId);
+      const exists = map.get(key);
+      if (!exists) {
+        map.set(key, {
+          ...item,
+          botIds: [item.botId].filter(Boolean),
+          botUsernames: item.botUsername ? [item.botUsername] : [],
+        });
+        continue;
+      }
+      exists.botIds = Array.from(new Set([...(exists.botIds || []), item.botId].filter(Boolean)));
+      exists.botUsernames = Array.from(
+        new Set([...(exists.botUsernames || []), item.botUsername].filter(Boolean))
+      );
+      const prevAt = new Date(exists.lastMessageAt || 0).getTime();
+      const nextAt = new Date(item.lastMessageAt || 0).getTime();
+      if (nextAt >= prevAt) {
+        exists.botId = item.botId;
+        exists.botUsername = item.botUsername || exists.botUsername;
+        exists.chatId = item.chatId || exists.chatId;
+        exists.chatType = item.chatType || exists.chatType;
+        exists.messageCount = Math.max(exists.messageCount || 0, item.messageCount || 0);
+        exists.lastMessageAt = item.lastMessageAt || exists.lastMessageAt;
+        exists.lastMessageText = item.lastMessageText || exists.lastMessageText;
+        exists.isBound = item.isBound || exists.isBound;
+        exists.bindApp = item.bindApp || exists.bindApp;
+        exists.bindAccountId = item.bindAccountId || exists.bindAccountId;
+        exists.bindTenantId = item.bindTenantId || exists.bindTenantId;
+        exists.bindAccountName = item.bindAccountName || exists.bindAccountName;
+      }
+    }
+    return Array.from(map.values());
+  }
 
   async function loadAdminUsers() {
+    if (superBots.value.length === 0) {
+      adminUsers.value = [];
+      return;
+    }
     adminLoading.value = true;
     try {
-      const res: any = await UserList({ page: 1, perPage: 200, isBound: 1, bindApp: 'admin' });
-      adminUsers.value = res?.list || [];
+      const res: any = await UserList({
+        page: 1,
+        perPage: 200,
+        botIds: currentBotIds(),
+      });
+      adminUsers.value = mergeUsers(res?.list || []);
     } finally {
       adminLoading.value = false;
+    }
+  }
+
+  async function loadSuperBots() {
+    const res: any = await BotList({ page: 1, perPage: 200, status: 1, isOfficial: 1 });
+    superBots.value = res?.list || [];
+    if (adminBotIds.value.length === 0) {
+      adminBotIds.value = superBots.value.map((item) => item.id);
     }
   }
 
@@ -176,5 +262,8 @@
       );
   }
 
-  onMounted(loadAdminUsers);
+  onMounted(async () => {
+    await loadSuperBots();
+    await loadAdminUsers();
+  });
 </script>

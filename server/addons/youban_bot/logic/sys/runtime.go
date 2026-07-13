@@ -66,7 +66,7 @@ func (s *sSysBot) startBotRuntime(ctx context.Context, row *sysin.BotModel) {
 	mode := s.botRuntimeMode(ctx, row)
 	webhookUrl := s.botWebhookURL(ctx, row)
 	if mode == "webhook" || (mode == "auto" && s.shouldUseWebhookInAuto(ctx) && webhookUrl != "") {
-		_, err = bot.SetWebhook(ctx, &tgbot.SetWebhookParams{URL: webhookUrl, AllowedUpdates: []string{"message", "edited_message"}})
+		_, err = bot.SetWebhook(ctx, &tgbot.SetWebhookParams{URL: webhookUrl, AllowedUpdates: botAllowedUpdates()})
 		if err != nil {
 			g.Log().Warningf(ctx, "设置Telegram Webhook失败 botId:%d url:%s err:%+v", row.Id, webhookUrl, err)
 			if shouldMarkBotOffline(err) {
@@ -100,13 +100,13 @@ func (s *sSysBot) telegramBotWithHandler(ctx context.Context, row *sysin.BotMode
 	return tgbot.New(strings.TrimSpace(row.BotToken),
 		tgbot.WithHTTPClient(21*time.Second, client),
 		tgbot.WithSkipGetMe(),
-		tgbot.WithAllowedUpdates([]string{"message", "edited_message"}),
+		tgbot.WithAllowedUpdates(botAllowedUpdates()),
 		tgbot.WithDefaultHandler(func(updateCtx context.Context, _ *tgbot.Bot, update *models.Update) {
 			if err := s.handleUpdate(updateCtx, row.Id, update); err != nil {
 				g.Log().Warningf(updateCtx, "处理Telegram消息失败 botId:%d err:%+v", row.Id, err)
 			}
 		}),
-		tgbot.WithErrorsHandler(func(err error) { g.Log().Warningf(ctx, "Telegram SDK错误：%+v", err) }),
+		tgbot.WithErrorsHandler(func(err error) { logTelegramSDKError(ctx, err) }),
 	)
 }
 
@@ -126,15 +126,16 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 	if update == nil {
 		return nil
 	}
-	msg := update.Message
+	msg := botMessageFromUpdate(update)
 	if msg == nil {
-		msg = update.EditedMessage
-	}
-	if msg == nil || msg.From == nil {
 		return nil
 	}
-	ctx = context.WithValue(ctx, telegramUserIdCtxKey{}, fmt.Sprintf("%d", msg.From.ID))
-	g.Log().Infof(ctx, "收到Telegram Update botId:%d chatId:%d userId:%d text:%s", botId, msg.Chat.ID, msg.From.ID, strings.TrimSpace(firstNonEmpty(msg.Text, msg.Caption)))
+	userId := ""
+	if msg.From != nil {
+		userId = fmt.Sprintf("%d", msg.From.ID)
+		ctx = context.WithValue(ctx, telegramUserIdCtxKey{}, userId)
+	}
+	g.Log().Infof(ctx, "收到Telegram Update botId:%d chatId:%d userId:%s text:%s", botId, msg.Chat.ID, userId, strings.TrimSpace(firstNonEmpty(msg.Text, msg.Caption)))
 	if err := s.storeTelegramMessage(ctx, botId, msg); err != nil {
 		g.Log().Warningf(ctx, "保存Telegram消息日志失败 botId:%d err:%+v", botId, err)
 	}
@@ -142,23 +143,25 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 	if text == "" {
 		return nil
 	}
-	if handled, dispatchErr := s.dispatchFeature(ctx, botId, msg, text); handled || dispatchErr != nil {
-		return dispatchErr
-	}
-	code := sixDigitRegexp.FindString(text)
-	if code == "" {
-		return nil
-	}
-	return s.consumeCode(ctx, botId, msg, code)
+	_, err := s.dispatchBotMessage(ctx, &botMessageEvent{BotId: botId, Msg: msg, Text: text})
+	return err
 }
 
 func (s *sSysBot) storeTelegramMessage(ctx context.Context, botId int64, msg *models.Message) error {
-	if msg == nil || msg.From == nil {
+	if msg == nil {
 		return nil
 	}
 	now := gtime.Now()
-	telegramUserId := fmt.Sprintf("%d", msg.From.ID)
-	telegramUsername := strings.TrimPrefix(strings.TrimSpace(msg.From.Username), "@")
+	telegramUserId := ""
+	telegramUsername := ""
+	telegramFirstName := ""
+	telegramLastName := ""
+	if msg.From != nil {
+		telegramUserId = fmt.Sprintf("%d", msg.From.ID)
+		telegramUsername = strings.TrimPrefix(strings.TrimSpace(msg.From.Username), "@")
+		telegramFirstName = msg.From.FirstName
+		telegramLastName = msg.From.LastName
+	}
 	chatId := fmt.Sprintf("%d", msg.Chat.ID)
 	text := strings.TrimSpace(firstNonEmpty(msg.Text, msg.Caption))
 	messageType := telegramMessageType(msg)
@@ -167,36 +170,38 @@ func (s *sSysBot) storeTelegramMessage(ctx context.Context, botId int64, msg *mo
 	if msg.Date > 0 {
 		lastAt = gtime.NewFromTime(time.Unix(int64(msg.Date), 0))
 	}
-	userData := g.Map{
-		"bot_id":              botId,
-		"telegram_user_id":    telegramUserId,
-		"telegram_username":   telegramUsername,
-		"telegram_first_name": msg.From.FirstName,
-		"telegram_last_name":  msg.From.LastName,
-		"chat_id":             chatId,
-		"chat_type":           string(msg.Chat.Type),
-		"chat_title":          firstNonEmpty(msg.Chat.Title, strings.TrimSpace(msg.Chat.FirstName+" "+msg.Chat.LastName), msg.Chat.Username),
-		"last_message_text":   text,
-		"last_message_at":     lastAt,
-		"status":              1,
-		"updated_at":          now,
-	}
-	var exists struct {
-		Id int64 `json:"id"`
-	}
-	_ = g.DB().Model(userTable).Safe().Ctx(ctx).Fields("id").Where("bot_id", botId).Where("telegram_user_id", telegramUserId).Scan(&exists)
-	if exists.Id > 0 {
-		if _, err := g.DB().Model(userTable).Safe().Ctx(ctx).Where("id", exists.Id).Data(userData).Increment("message_count", 1); err != nil {
-			return gerror.Wrap(err, "更新Telegram用户失败")
+	if telegramUserId != "" {
+		userData := g.Map{
+			"bot_id":              botId,
+			"telegram_user_id":    telegramUserId,
+			"telegram_username":   telegramUsername,
+			"telegram_first_name": telegramFirstName,
+			"telegram_last_name":  telegramLastName,
+			"chat_id":             chatId,
+			"chat_type":           string(msg.Chat.Type),
+			"chat_title":          firstNonEmpty(msg.Chat.Title, strings.TrimSpace(msg.Chat.FirstName+" "+msg.Chat.LastName), msg.Chat.Username),
+			"last_message_text":   text,
+			"last_message_at":     lastAt,
+			"status":              1,
+			"updated_at":          now,
 		}
-	} else {
-		userData["message_count"] = 1
-		userData["created_at"] = now
-		if _, err := g.DB().Model(userTable).Safe().Ctx(ctx).Data(userData).Insert(); err != nil {
-			return gerror.Wrap(err, "写入Telegram用户失败")
+		var exists struct {
+			Id int64 `json:"id"`
 		}
+		_ = g.DB().Model(userTable).Safe().Ctx(ctx).Fields("id").Where("bot_id", botId).Where("telegram_user_id", telegramUserId).Scan(&exists)
+		if exists.Id > 0 {
+			if _, err := g.DB().Model(userTable).Safe().Ctx(ctx).Where("id", exists.Id).Data(userData).Increment("message_count", 1); err != nil {
+				return gerror.Wrap(err, "更新Telegram用户失败")
+			}
+		} else {
+			userData["message_count"] = 1
+			userData["created_at"] = now
+			if _, err := g.DB().Model(userTable).Safe().Ctx(ctx).Data(userData).Insert(); err != nil {
+				return gerror.Wrap(err, "写入Telegram用户失败")
+			}
+		}
+		g.Log().Infof(ctx, "已记录Telegram用户 botId:%d telegramUserId:%s chatId:%s", botId, telegramUserId, chatId)
 	}
-	g.Log().Infof(ctx, "已记录Telegram用户 botId:%d telegramUserId:%s chatId:%s", botId, telegramUserId, chatId)
 	_, err := g.DB().Model(messageTable).Safe().Ctx(ctx).Data(g.Map{
 		"bot_id":            botId,
 		"telegram_user_id":  telegramUserId,
