@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -14,6 +16,13 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
+	"hotgo/internal/library/cache"
+)
+
+const (
+	collectEventRulesCacheVersionKey = "youban_publish:collect:event_rules:version"
+	collectEventRulesCacheKeyPrefix  = "youban_publish:collect:event_rules"
+	collectEventRulesCacheTTL        = time.Minute
 )
 
 func (s *sSysPublish) CollectEventList(ctx context.Context, in *sysin.CollectEventListInp) (list []*sysin.CollectEventModel, totalCount int, err error) {
@@ -188,6 +197,10 @@ func collectEventAlreadyMatched(status string) bool {
 
 func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, tenantId int64, accountId int64) ([]gdb.Record, error) {
 	sourceId := event["source_id"].Int64()
+	cacheKey := s.collectEventRulesCacheKey(ctx, tenantId, accountId, sourceId)
+	if rows, ok := collectEventRulesCacheGet(ctx, cacheKey); ok {
+		return rows, nil
+	}
 	var bindRows []struct {
 		RuleId int64 `json:"ruleId"`
 	}
@@ -212,7 +225,56 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取采集规则失败")
 	}
+	collectEventRulesCacheSet(ctx, cacheKey, rows)
 	return rows, nil
+}
+
+func (s *sSysPublish) collectEventRulesCacheKey(ctx context.Context, tenantId int64, accountId int64, sourceId int64) string {
+	version := s.collectEventRulesCacheVersion(ctx)
+	return fmt.Sprintf("%s:%s:%d:%d:%d", collectEventRulesCacheKeyPrefix, version, tenantId, accountId, sourceId)
+}
+
+func (s *sSysPublish) collectEventRulesCacheVersion(ctx context.Context) string {
+	cacheVar, err := cache.Instance().Get(ctx, collectEventRulesCacheVersionKey)
+	if err == nil && !cacheVar.IsNil() {
+		version := strings.TrimSpace(cacheVar.String())
+		if version != "" {
+			return version
+		}
+	}
+	return "1"
+}
+
+func (s *sSysPublish) refreshCollectEventRulesCache(ctx context.Context) {
+	_ = cache.Instance().Set(ctx, collectEventRulesCacheVersionKey, fmt.Sprintf("%d", gtime.Now().TimestampNano()), 24*time.Hour)
+}
+
+func collectEventRulesCacheGet(ctx context.Context, key string) ([]gdb.Record, bool) {
+	cacheVar, err := cache.Instance().Get(ctx, key)
+	if err != nil || cacheVar.IsNil() {
+		return nil, false
+	}
+	var list []g.Map
+	if err = cacheVar.Scan(&list); err != nil {
+		return nil, false
+	}
+	return collectEventRuleMapsToRecords(list), true
+}
+
+func collectEventRulesCacheSet(ctx context.Context, key string, rows gdb.Result) {
+	_ = cache.Instance().Set(ctx, key, rows.List(), collectEventRulesCacheTTL)
+}
+
+func collectEventRuleMapsToRecords(list []g.Map) []gdb.Record {
+	rows := make([]gdb.Record, 0, len(list))
+	for _, item := range list {
+		record := gdb.Record{}
+		for key, value := range item {
+			record[key] = gvar.New(value)
+		}
+		rows = append(rows, record)
+	}
+	return rows
 }
 
 func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (bool, string, error) {

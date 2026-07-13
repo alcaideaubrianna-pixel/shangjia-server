@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -13,6 +14,7 @@ import (
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
+	"hotgo/internal/library/cache"
 	baseservice "hotgo/internal/service"
 )
 
@@ -22,6 +24,10 @@ const publishConfigGroupPublish = "publish"
 const publishConfigGroupAutoDelete = "autoDelete"
 const publishConfigGroupAntiScan = "antiScan"
 const publishConfigGroupCloudResource = "cloudResource"
+
+const autoDeleteConfigCacheKey = "youban_publish:auto_delete:config"
+
+const autoDeleteConfigCacheTTL = 10 * time.Minute
 
 type sSysConfig struct{}
 
@@ -114,7 +120,11 @@ func (s *sSysConfig) UpdateConfigByGroup(ctx context.Context, in *sysin.UpdateCo
 		return s.CloudResourceConfigSave(ctx, saveInp)
 	}
 	in.AddonName = global.GetSkeleton().Name
-	return baseservice.SysAddonsConfig().UpdateConfigByGroup(ctx, &in.UpdateAddonsConfigInp)
+	if err := baseservice.SysAddonsConfig().UpdateConfigByGroup(ctx, &in.UpdateAddonsConfigInp); err != nil {
+		return err
+	}
+	s.clearConfigCache(ctx, in.Group)
+	return nil
 }
 
 func (s *sSysConfig) PublishConfigView(ctx context.Context, in *sysin.PublishConfigViewInp) (res *sysin.PublishConfigViewModel, err error) {
@@ -137,11 +147,19 @@ func (s *sSysConfig) PublishConfigSave(ctx context.Context, in *sysin.PublishCon
 }
 
 func (s *sSysConfig) AutoDeleteConfigView(ctx context.Context, in *sysin.AutoDeleteConfigViewInp) (res *sysin.AutoDeleteConfigViewModel, err error) {
+	cacheVar, cacheErr := cache.Instance().Get(ctx, autoDeleteConfigCacheKey)
+	if cacheErr == nil && !cacheVar.IsNil() {
+		var cached sysin.AutoDeleteConfigViewModel
+		if cacheErr = cacheVar.Scan(&cached); cacheErr == nil && cached.AutoDeleteConfig != nil {
+			return &cached, nil
+		}
+	}
 	conf := defaultAutoDeleteConfig()
 	if err = s.scanConfigGroup(ctx, publishConfigGroupAutoDelete, conf); err != nil {
 		return nil, err
 	}
 	res = &sysin.AutoDeleteConfigViewModel{AutoDeleteConfig: conf}
+	_ = cache.Instance().Set(ctx, autoDeleteConfigCacheKey, res, autoDeleteConfigCacheTTL)
 	return
 }
 
@@ -255,7 +273,18 @@ func (s *sSysConfig) updateConfigGroup(ctx context.Context, group string, list g
 	in.AddonName = global.GetSkeleton().Name
 	in.Group = group
 	in.List = list
-	return baseservice.SysAddonsConfig().UpdateConfigByGroup(ctx, &in.UpdateAddonsConfigInp)
+	if err := baseservice.SysAddonsConfig().UpdateConfigByGroup(ctx, &in.UpdateAddonsConfigInp); err != nil {
+		return err
+	}
+	s.clearConfigCache(ctx, group)
+	return nil
+}
+
+func (s *sSysConfig) clearConfigCache(ctx context.Context, group string) {
+	if group != publishConfigGroupAutoDelete {
+		return
+	}
+	_, _ = cache.Instance().Remove(ctx, autoDeleteConfigCacheKey)
 }
 
 func defaultPublishConfig() *model.PublishConfig {

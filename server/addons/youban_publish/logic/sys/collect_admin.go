@@ -111,6 +111,9 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 	if err == nil && id > 0 && in.HistoryCollectEnabled == 1 {
 		go s.maybeCreateCollectHistoryTask(context.Background(), id, account.TenantId, account.Id)
 	}
+	if err == nil {
+		s.refreshCollectEventRulesCache(ctx)
+	}
 	return id, err
 }
 
@@ -128,6 +131,9 @@ func (s *sSysPublish) CollectSourceDelete(ctx context.Context, in *sysin.IdsInp)
 		Where("account_id", account.Id).
 		Data(g.Map{"deleted_at": gtime.Now(), "deleted_by": account.Id}).
 		Update()
+	if err == nil {
+		s.refreshCollectEventRulesCache(ctx)
+	}
 	return gerror.Wrap(err, "删除采集源失败")
 }
 

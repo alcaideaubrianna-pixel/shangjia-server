@@ -39,14 +39,15 @@ import (
 )
 
 type sSysChat struct {
-	runtimeCancel     context.CancelFunc
-	runtimeDone       chan struct{}
-	runtimeMu         sync.Mutex
-	telegramBotMu     sync.Mutex
-	telegramBots      map[string]*tgbot.Bot
-	telegramFeatureMu sync.RWMutex
-	telegramFeatures  map[string]*chatFeatureRow
-	telegramFeatureAt time.Time
+	runtimeCancel             context.CancelFunc
+	runtimeDone               chan struct{}
+	runtimeMu                 sync.Mutex
+	telegramBotMu             sync.Mutex
+	telegramBots              map[string]*tgbot.Bot
+	telegramFeatureMu         sync.RWMutex
+	telegramFeatures          map[string]*chatFeatureRow
+	telegramFeatureAt         time.Time
+	telegramFeatureDefaultsAt time.Time
 }
 
 const (

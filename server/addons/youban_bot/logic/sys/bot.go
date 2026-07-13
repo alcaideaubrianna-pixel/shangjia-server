@@ -35,13 +35,14 @@ const (
 var sixDigitRegexp = regexp.MustCompile(`\b\d{6}\b`)
 
 type sSysBot struct {
-	telegramBotMu sync.Mutex
-	telegramBots  map[string]*tgbot.Bot
-	runtimeMu     sync.Mutex
-	runtimeCancel context.CancelFunc
-	featureMu     sync.RWMutex
-	features      map[string]*botFeatureRow
-	featureAt     time.Time
+	telegramBotMu     sync.Mutex
+	telegramBots      map[string]*tgbot.Bot
+	runtimeMu         sync.Mutex
+	runtimeCancel     context.CancelFunc
+	featureMu         sync.RWMutex
+	features          map[string]*botFeatureRow
+	featureAt         time.Time
+	featureDefaultsAt time.Time
 }
 
 func init() {

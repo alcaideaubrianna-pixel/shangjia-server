@@ -156,24 +156,22 @@ func (s *sSysPublish) recoverCollectPublishTasks(ctx context.Context, limit int)
 	if err != nil {
 		return gerror.Wrap(err, "读取待恢复采集推送任务失败")
 	}
+	repairTasks := collectTgRepairTasksFromRows(rows)
+	needsRepairMap, err := s.collectTgJobChannelsNeedRepairMap(ctx, repairTasks)
+	if err != nil {
+		return err
+	}
 	repaired := 0
 	for _, row := range rows {
 		if row.IsEmpty() || row["id"].Int64() <= 0 {
 			continue
 		}
-		channelIds := decodeInt64JSON(row["channel_id_json"].String())
-		if len(channelIds) == 0 || strings.TrimSpace(row["tg_operation_no"].String()) == "" {
+		taskId := row["id"].Int64()
+		if !needsRepairMap[taskId] {
 			continue
 		}
-		needsRepair, err := s.collectTgJobChannelsNeedRepair(ctx, row["id"].Int64(), row["tg_operation_no"].String(), channelIds)
-		if err != nil {
-			return err
-		}
-		if !needsRepair {
-			continue
-		}
-		if err = s.ensureCollectTgJobs(ctx, row["id"].Int64()); err != nil {
-			g.Log().Warningf(ctx, "恢复采集推送TG任务失败 task:%d err:%+v", row["id"].Int64(), err)
+		if err = s.ensureCollectTgJobs(ctx, taskId); err != nil {
+			g.Log().Warningf(ctx, "恢复采集推送TG任务失败 task:%d err:%+v", taskId, err)
 			continue
 		}
 		repaired++

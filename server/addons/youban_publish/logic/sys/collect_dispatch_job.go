@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"strings"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -96,21 +97,19 @@ func (s *sSysPublish) repairCollectTgJobChannels(ctx context.Context, limit int)
 	if err != nil {
 		return gerror.Wrap(err, "读取采集TG频道修复任务失败")
 	}
+	repairTasks := collectTgRepairTasksFromRows(rows)
+	needsRepairMap, err := s.collectTgJobChannelsNeedRepairMap(ctx, repairTasks)
+	if err != nil {
+		return err
+	}
 	repaired := 0
 	for _, row := range rows {
-		channelIds := decodeInt64JSON(row["channel_id_json"].String())
-		if len(channelIds) == 0 {
+		taskId := row["id"].Int64()
+		if taskId <= 0 || !needsRepairMap[taskId] {
 			continue
 		}
-		needsRepair, err := s.collectTgJobChannelsNeedRepair(ctx, row["id"].Int64(), row["tg_operation_no"].String(), channelIds)
-		if err != nil {
-			return err
-		}
-		if !needsRepair {
-			continue
-		}
-		if err = s.ensureCollectTgJobs(ctx, row["id"].Int64()); err != nil {
-			g.Log().Warningf(ctx, "修复采集TG目标频道失败 task:%d err:%+v", row["id"].Int64(), err)
+		if err = s.ensureCollectTgJobs(ctx, taskId); err != nil {
+			g.Log().Warningf(ctx, "修复采集TG目标频道失败 task:%d err:%+v", taskId, err)
 			continue
 		}
 		repaired++
@@ -129,7 +128,7 @@ func (s *sSysPublish) supersedeMismatchedCollectTgJobs(ctx context.Context, limi
 		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
 		Fields("j.*,t.channel_id_json").
 		WhereLike("t.client_request_id", "collect:%").
-		WhereIn("j.status", []string{"pending", "sending", "failed_retry", "failed", "sent"}).
+		WhereIn("j.status", collectTgJobRepairStatuses()).
 		WhereNull("t.deleted_at").
 		OrderAsc("j.id").
 		Limit(limit).
@@ -169,20 +168,95 @@ func (s *sSysPublish) collectTgJobChannelsNeedRepair(ctx context.Context, taskId
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("task_id", taskId).
 		Where("operation_no", operationNo).
-		WhereIn("status", []string{"pending", "sending", "failed_retry", "failed", "sent"}).
+		WhereIn("status", collectTgJobRepairStatuses()).
 		Scan(&jobs)
 	if err != nil {
 		return false, gerror.Wrap(err, "读取采集TG任务频道失败")
 	}
+	return collectTgJobChannelsNeedRepairFromJobs(channelIds, jobs), nil
+}
+
+func (s *sSysPublish) collectTgJobChannelsNeedRepairMap(ctx context.Context, tasks []collectTgJobRepairTask) (map[int64]bool, error) {
+	res := make(map[int64]bool, len(tasks))
+	taskMap := make(map[int64]collectTgJobRepairTask, len(tasks))
+	taskIds := make([]int64, 0, len(tasks))
+	for _, task := range tasks {
+		if task.TaskId <= 0 || task.OperationNo == "" || len(task.ChannelIds) == 0 {
+			continue
+		}
+		taskIds = append(taskIds, task.TaskId)
+		taskMap[task.TaskId] = task
+	}
+	taskIds = uniqueIds(taskIds)
+	if len(taskIds) == 0 {
+		return res, nil
+	}
+	for _, taskId := range taskIds {
+		res[taskId] = true
+	}
+	var jobs []telegramResubmitJob
+	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("id,task_id,operation_no,tenant_id,account_id,profile_id,channel_id,bot_id,target_chat_id,status").
+		WhereIn("task_id", taskIds).
+		WhereIn("status", collectTgJobRepairStatuses()).
+		Scan(&jobs)
+	if err != nil {
+		return nil, gerror.Wrap(err, "批量读取采集TG任务频道失败")
+	}
+	jobMap := make(map[int64][]telegramResubmitJob, len(taskIds))
+	for _, job := range jobs {
+		task, ok := taskMap[job.TaskId]
+		if !ok || job.OperationNo != task.OperationNo {
+			continue
+		}
+		jobMap[job.TaskId] = append(jobMap[job.TaskId], job)
+	}
+	for _, task := range taskMap {
+		res[task.TaskId] = collectTgJobChannelsNeedRepairFromJobs(task.ChannelIds, jobMap[task.TaskId])
+	}
+	return res, nil
+}
+
+func collectTgJobChannelsNeedRepairFromJobs(channelIds []int64, jobs []telegramResubmitJob) bool {
 	hasSelected := false
 	for _, job := range jobs {
 		if containsInt64(channelIds, job.ChannelId) {
 			hasSelected = true
 			continue
 		}
-		return true, nil
+		return true
 	}
-	return !hasSelected, nil
+	return !hasSelected
+}
+
+func collectTgRepairTasksFromRows(rows gdb.Result) []collectTgJobRepairTask {
+	tasks := make([]collectTgJobRepairTask, 0, len(rows))
+	for _, row := range rows {
+		if row.IsEmpty() || row["id"].Int64() <= 0 {
+			continue
+		}
+		channelIds := decodeInt64JSON(row["channel_id_json"].String())
+		operationNo := strings.TrimSpace(row["tg_operation_no"].String())
+		if len(channelIds) == 0 || operationNo == "" {
+			continue
+		}
+		tasks = append(tasks, collectTgJobRepairTask{
+			TaskId:      row["id"].Int64(),
+			OperationNo: operationNo,
+			ChannelIds:  channelIds,
+		})
+	}
+	return tasks
+}
+
+func collectTgJobRepairStatuses() []string {
+	return []string{"pending", "sending", "failed_retry", "failed", "sent"}
+}
+
+type collectTgJobRepairTask struct {
+	TaskId      int64
+	OperationNo string
+	ChannelIds  []int64
 }
 
 func collectTelegramResubmitJob(row gdb.Record) telegramResubmitJob {

@@ -15,6 +15,7 @@ import (
 )
 
 const telegramFeatureCacheTTL = 30 * time.Second
+const telegramFeatureDefaultSyncTTL = 5 * time.Minute
 
 func (s *sSysChat) AdminFeatureList(ctx context.Context, in *sysin.AdminChatFeatureListInp) (list []*sysin.AdminChatFeatureModel, totalCount int, err error) {
 	if in == nil {
@@ -106,6 +107,9 @@ func (s *sSysChat) syncTelegramFeatureDefaults(ctx context.Context) error {
 	if err := s.ensureTelegramFeatureTable(ctx); err != nil {
 		return err
 	}
+	if s.telegramFeatureDefaultsSynced() {
+		return nil
+	}
 	changed := false
 	for index, feature := range telegramFeatures {
 		if feature == nil || strings.TrimSpace(feature.Key()) == "" {
@@ -142,7 +146,20 @@ func (s *sSysChat) syncTelegramFeatureDefaults(ctx context.Context) error {
 	if changed {
 		s.clearTelegramFeatureCache()
 	}
+	s.markTelegramFeatureDefaultsSynced()
 	return nil
+}
+
+func (s *sSysChat) telegramFeatureDefaultsSynced() bool {
+	s.telegramFeatureMu.RLock()
+	defer s.telegramFeatureMu.RUnlock()
+	return !s.telegramFeatureDefaultsAt.IsZero() && time.Since(s.telegramFeatureDefaultsAt) < telegramFeatureDefaultSyncTTL
+}
+
+func (s *sSysChat) markTelegramFeatureDefaultsSynced() {
+	s.telegramFeatureMu.Lock()
+	defer s.telegramFeatureMu.Unlock()
+	s.telegramFeatureDefaultsAt = time.Now()
 }
 
 func (s *sSysChat) telegramFeatureConfig(ctx context.Context, key string) (*chatFeatureRow, bool) {

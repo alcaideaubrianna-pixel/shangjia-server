@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,14 @@ import (
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
+	"hotgo/internal/library/cache"
+)
+
+const (
+	autoDeleteChannelCacheVersionKey = "youban_publish:auto_delete:channel:version"
+	autoDeleteChannelCacheKeyPrefix  = "youban_publish:auto_delete:channel"
+	autoDeleteChannelPositiveTTL     = 10 * time.Minute
+	autoDeleteChannelNegativeTTL     = 2 * time.Minute
 )
 
 func telegramAllowedUpdateNames() []string {
@@ -176,10 +185,16 @@ func normalizeAutoDeleteKeywordText(text string) string {
 func (s *sSysPublish) autoDeleteChannel(ctx context.Context, chat models.Chat) (*autoDeleteChannel, error) {
 	chatId := strconv.FormatInt(chat.ID, 10)
 	positiveChatId := strings.TrimPrefix(chatId, "-100")
+	username := strings.TrimPrefix(strings.TrimSpace(chat.Username), "@")
+	cacheKey := s.autoDeleteChannelCacheKey(ctx, "bot", uniqueStrings([]string{chatId, positiveChatId, username}))
+	if channel, hit := autoDeleteChannelCacheGet(ctx, cacheKey); hit {
+		return channel, nil
+	}
 	mod := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Where("status", 1).
+		Where("publish_direction", "up").
 		WhereNull("deleted_at")
-	if username := strings.TrimPrefix(strings.TrimSpace(chat.Username), "@"); username != "" {
+	if username != "" {
 		mod = mod.Where("(target_chat_id IN(?, ?) OR channel_username = ?)", chatId, positiveChatId, username)
 	} else {
 		mod = mod.Where("target_chat_id IN(?, ?)", chatId, positiveChatId)
@@ -188,6 +203,7 @@ func (s *sSysPublish) autoDeleteChannel(ctx context.Context, chat models.Chat) (
 	if err := mod.Fields("id,tenant_id,bot_id_json,channel_title,target_chat_id").OrderDesc("id").Scan(&channel); err != nil {
 		return nil, err
 	}
+	autoDeleteChannelCacheSet(ctx, cacheKey, channel)
 	return channel, nil
 }
 
@@ -207,9 +223,14 @@ func (s *sSysPublish) autoDeleteChannelByChatIds(ctx context.Context, chatIds []
 	if len(values) == 0 {
 		return nil, nil
 	}
+	cacheKey := s.autoDeleteChannelCacheKey(ctx, "gotd", values)
+	if channel, hit := autoDeleteChannelCacheGet(ctx, cacheKey); hit {
+		return channel, nil
+	}
 	var channel *autoDeleteChannel
 	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Where("status", 1).
+		Where("publish_direction", "up").
 		WhereNull("deleted_at").
 		WhereIn("target_chat_id", values).
 		Fields("id,tenant_id,bot_id_json,channel_title,target_chat_id").
@@ -217,7 +238,57 @@ func (s *sSysPublish) autoDeleteChannelByChatIds(ctx context.Context, chatIds []
 		Scan(&channel); err != nil {
 		return nil, err
 	}
+	autoDeleteChannelCacheSet(ctx, cacheKey, channel)
 	return channel, nil
+}
+
+func (s *sSysPublish) autoDeleteChannelCacheKey(ctx context.Context, source string, values []string) string {
+	values = uniqueStrings(values)
+	sort.Strings(values)
+	version := s.autoDeleteChannelCacheVersion(ctx)
+	return fmt.Sprintf("%s:%s:%s:%s", autoDeleteChannelCacheKeyPrefix, version, source, strings.Join(values, "|"))
+}
+
+func (s *sSysPublish) autoDeleteChannelCacheVersion(ctx context.Context) string {
+	cacheVar, err := cache.Instance().Get(ctx, autoDeleteChannelCacheVersionKey)
+	if err == nil && !cacheVar.IsNil() {
+		version := strings.TrimSpace(cacheVar.String())
+		if version != "" {
+			return version
+		}
+	}
+	return "1"
+}
+
+func (s *sSysPublish) refreshAutoDeleteChannelCache(ctx context.Context) {
+	_ = cache.Instance().Set(ctx, autoDeleteChannelCacheVersionKey, strconv.FormatInt(gtime.Now().TimestampNano(), 10), 24*time.Hour)
+}
+
+func autoDeleteChannelCacheGet(ctx context.Context, key string) (*autoDeleteChannel, bool) {
+	cacheVar, err := cache.Instance().Get(ctx, key)
+	if err != nil || cacheVar.IsNil() {
+		return nil, false
+	}
+	var item autoDeleteChannelCacheItem
+	if err = cacheVar.Scan(&item); err != nil {
+		return nil, false
+	}
+	if !item.Found {
+		return nil, true
+	}
+	return item.Channel, true
+}
+
+func autoDeleteChannelCacheSet(ctx context.Context, key string, channel *autoDeleteChannel) {
+	item := autoDeleteChannelCacheItem{
+		Found:   channel != nil && channel.Id > 0,
+		Channel: channel,
+	}
+	ttl := autoDeleteChannelNegativeTTL
+	if item.Found {
+		ttl = autoDeleteChannelPositiveTTL
+	}
+	_ = cache.Instance().Set(ctx, key, item, ttl)
 }
 
 func (s *sSysPublish) autoDeleteBot(ctx context.Context, botId int64, channel *autoDeleteChannel, conf *model.AutoDeleteConfig) (*sysin.BotModel, error) {
@@ -346,4 +417,9 @@ type autoDeleteChannel struct {
 	BotIdJson    string `json:"botIdJson"`
 	ChannelTitle string `json:"channelTitle"`
 	TargetChatId string `json:"targetChatId"`
+}
+
+type autoDeleteChannelCacheItem struct {
+	Found   bool               `json:"found"`
+	Channel *autoDeleteChannel `json:"channel"`
 }

@@ -103,12 +103,16 @@ func (s *sSysPublish) CollectRuleSave(ctx context.Context, in *sysin.CollectRule
 		if err != nil {
 			return 0, gerror.Wrap(err, "更新采集规则失败")
 		}
+		s.refreshCollectEventRulesCache(ctx)
 		s.refreshPendingCollectTasksForRuleAsync(in.Id, account.TenantId, account.Id)
 		return in.Id, nil
 	}
 	data["created_by"] = account.Id
 	data["created_at"] = now
 	id, err = pdao.YoubanPublishCollectRule.Ctx(ctx).Data(data).InsertAndGetId()
+	if err == nil {
+		s.refreshCollectEventRulesCache(ctx)
+	}
 	return id, gerror.Wrap(err, "创建采集规则失败")
 }
 
@@ -126,6 +130,9 @@ func (s *sSysPublish) CollectRuleDelete(ctx context.Context, in *sysin.IdsInp) e
 		Where("account_id", account.Id).
 		Data(g.Map{"deleted_at": gtime.Now(), "deleted_by": account.Id}).
 		Update()
+	if err == nil {
+		s.refreshCollectEventRulesCache(ctx)
+	}
 	return gerror.Wrap(err, "删除采集规则失败")
 }
 

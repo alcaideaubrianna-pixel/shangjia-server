@@ -17,6 +17,7 @@ import (
 )
 
 const featureCacheTTL = 30 * time.Second
+const featureDefaultSyncTTL = 5 * time.Minute
 
 func (s *sSysBot) AdminFeatureList(ctx context.Context, in *sysin.FeatureListInp) (list []*sysin.FeatureModel, totalCount int, err error) {
 	if in == nil {
@@ -90,6 +91,10 @@ func (s *sSysBot) AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp
 }
 
 func (s *sSysBot) syncFeatureDefaults(ctx context.Context) error {
+	if s.featureDefaultsSynced() {
+		return nil
+	}
+	changed := false
 	for index, feature := range botFeatures {
 		if feature == nil || strings.TrimSpace(feature.Key()) == "" {
 			continue
@@ -105,8 +110,26 @@ func (s *sSysBot) syncFeatureDefaults(ctx context.Context) error {
 		if err != nil {
 			return gerror.Wrap(err, "写入Bot插件默认配置失败")
 		}
+		changed = true
 	}
+	s.markFeatureDefaultsSynced(changed)
 	return nil
+}
+
+func (s *sSysBot) featureDefaultsSynced() bool {
+	s.featureMu.RLock()
+	defer s.featureMu.RUnlock()
+	return !s.featureDefaultsAt.IsZero() && time.Since(s.featureDefaultsAt) < featureDefaultSyncTTL
+}
+
+func (s *sSysBot) markFeatureDefaultsSynced(changed bool) {
+	s.featureMu.Lock()
+	defer s.featureMu.Unlock()
+	s.featureDefaultsAt = time.Now()
+	if changed {
+		s.features = nil
+		s.featureAt = time.Time{}
+	}
 }
 
 func (s *sSysBot) featureConfig(ctx context.Context, key string) (*botFeatureRow, bool) {

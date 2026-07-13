@@ -27,6 +27,9 @@ func (s *sSysPublish) appendCollectEventLog(ctx context.Context, eventId int64, 
 	if eventId <= 0 {
 		return
 	}
+	if skipCollectEventLog(stage, status, message) {
+		return
+	}
 	cols := pdao.YoubanPublishCollectEventLog.Columns()
 	eventCols := pdao.YoubanPublishCollectEvent.Columns()
 	tenantId := int64(0)
@@ -55,11 +58,17 @@ func (s *sSysPublish) appendCollectEventLogForRecord(ctx context.Context, event 
 	if event.IsEmpty() || event["id"].Int64() <= 0 {
 		return
 	}
+	if skipCollectEventLog(stage, status, message) {
+		return
+	}
 	s.appendCollectEventLogWithOwner(ctx, event["id"].Int64(), event["tenant_id"].Int64(), event["account_id"].Int64(), stage, status, message, meta)
 }
 
 func (s *sSysPublish) appendCollectEventLogWithOwner(ctx context.Context, eventId int64, tenantId int64, accountId int64, stage string, status string, message string, meta string) {
 	if eventId <= 0 {
+		return
+	}
+	if skipCollectEventLog(stage, status, message) {
 		return
 	}
 	cols := pdao.YoubanPublishCollectEventLog.Columns()
@@ -73,6 +82,31 @@ func (s *sSysPublish) appendCollectEventLogWithOwner(ctx context.Context, eventI
 		cols.MetaText:  strings.TrimSpace(meta),
 		cols.CreatedAt: gtime.Now(),
 	}).Insert()
+}
+
+func skipCollectEventLog(stage string, status string, message string) bool {
+	stage = strings.TrimSpace(stage)
+	status = strings.TrimSpace(status)
+	message = strings.TrimSpace(message)
+	if stage != "media" {
+		return false
+	}
+	switch status + ":" + message {
+	case
+		"pending:媒体等待缓存",
+		"running:媒体缓存任务开始执行",
+		"checking:开始检查媒体缓存方式",
+		"downloading:账号采集媒体使用下载缓存，保证带文案媒体组可原格式发送",
+		"downloading:开始下载账号采集媒体",
+		"ready:媒体缓存任务处理完成",
+		"ready:媒体已就绪",
+		"forwarded:媒体已转存到备份频道",
+		"forwarded:账号采集运行时已完成媒体转存",
+		"forwarded:下载媒体组已推送到备份频道":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *sSysPublish) upsertCollectEventMedia(ctx context.Context, event gdb.Record, media []collectMediaItem) error {

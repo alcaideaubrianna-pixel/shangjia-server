@@ -212,6 +212,7 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	if err = s.syncChannelCycleAfterSave(ctx, in.TenantId, in.Id, in.CyclePublishEnabled, in.CyclePublishDays, in.CyclePublishTime); err != nil {
 		return err
 	}
+	s.refreshAutoDeleteChannelCache(ctx)
 	return nil
 }
 
@@ -264,6 +265,7 @@ func (s *sSysPublish) AdminChannelDelete(ctx context.Context, in *sysin.ChannelD
 		Update(); err != nil {
 		return gerror.Wrap(err, "删除频道配置失败")
 	}
+	s.refreshAutoDeleteChannelCache(ctx)
 	return nil
 }
 
@@ -281,6 +283,7 @@ func (s *sSysPublish) ServerChannelDelete(ctx context.Context, in *sysin.Channel
 		Update(); err != nil {
 		return gerror.Wrap(err, "删除频道配置失败")
 	}
+	s.refreshAutoDeleteChannelCache(ctx)
 	return nil
 }
 
@@ -316,6 +319,7 @@ func (s *sSysPublish) AdminChannelBatchBots(ctx context.Context, in *sysin.Chann
 		Update(); err != nil {
 		return gerror.Wrap(err, "批量编辑频道Bot失败")
 	}
+	s.refreshAutoDeleteChannelCache(ctx)
 	return nil
 }
 
