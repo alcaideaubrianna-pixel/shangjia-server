@@ -195,6 +195,7 @@
               class="status-select"
             />
             <n-button @click="loadBots">查询</n-button>
+            <n-button :loading="botRefreshing" @click="refreshBots()">刷新状态</n-button>
             <n-button type="primary" @click="openBotModal()">新增Bot</n-button>
           </n-space>
           <n-data-table
@@ -203,7 +204,7 @@
             :loading="botLoading"
             :pagination="botPagination"
             :row-key="(row) => row.id"
-            :scroll-x="980"
+            :scroll-x="1500"
             size="small"
             remote
           />
@@ -621,6 +622,7 @@
     AccountSave,
     BotDelete,
     BotList,
+    BotRefresh,
     BotSave,
     AdminInviteList,
     AdminTgAccountList,
@@ -686,6 +688,7 @@
   const taskLoading = ref(false);
   const tagLoading = ref(false);
   const botLoading = ref(false);
+  const botRefreshing = ref(false);
   const configLoading = ref(false);
   const configSaving = ref(false);
   const cloudResourceLoading = ref(false);
@@ -725,6 +728,10 @@
   const tgAccountPagination = createPagination(loadTgAccounts, 20);
   const channelCachePagination = createPagination(loadChannelCaches, 20);
   const systemDomain = ref('');
+  const botWebhookConfigLoaded = ref(false);
+  const effectiveWebhookBaseUrl = computed(() =>
+    normalizeWebhookBaseUrl(telegramConfig.webhookBaseUrl || systemDomain.value)
+  );
   const selectedTagRowKeys = ref<number[]>([]);
   const selectedTagRows = computed(() =>
     tags.value.filter((item) => selectedTagRowKeys.value.includes(item.id))
@@ -946,11 +953,23 @@
     { title: 'Bot名称', key: 'botName', width: 180 },
     { title: '用户名', key: 'botUsername', width: 180 },
     { title: '状态', key: 'status', width: 100, render: (row) => renderStatus(row.status) },
+    {
+      title: 'Webhook',
+      key: 'webhookStatus',
+      width: 130,
+      render: (row) => renderMiniTag(botWebhookStatusLabel(row), botWebhookStatusType(row)),
+    },
+    {
+      title: 'Webhook地址',
+      key: 'webhookUrl',
+      width: 360,
+      render: (row) => renderWebhookUrl(row),
+    },
     { title: '更新时间', key: 'updatedAt', width: 170 },
     {
       title: '操作',
       key: 'actions',
-      width: 160,
+      width: 210,
       fixed: 'right',
       render(row) {
         return h(
@@ -959,6 +978,7 @@
           {
             default: () => [
               actionButton('编辑', () => openBotModal(row)),
+              actionButton('重启', () => refreshBots(row.id)),
               dangerButton('删除', () => deleteBot(row.id)),
             ],
           }
@@ -1273,6 +1293,7 @@
   async function loadBots() {
     botLoading.value = true;
     try {
+      await ensureBotWebhookConfig();
       const res: any = await BotList({
         ...botQuery,
         page: botPagination.page,
@@ -1378,11 +1399,29 @@
         ConfigGet({ group: 'collect' }),
         getSysConfig({ group: 'basic' }),
       ]);
-      systemDomain.value = basicConfig?.list?.basicDomain || '';
-      Object.assign(telegramConfig, newTelegramConfig(), telegramRes?.list || {});
+      applyTelegramConfig(telegramRes?.list || {}, basicConfig?.list?.basicDomain || '');
+      botWebhookConfigLoaded.value = true;
       Object.assign(collectConfig, newCollectConfig(), collectRes?.list || {});
     } finally {
       configLoading.value = false;
+    }
+  }
+
+  async function ensureBotWebhookConfig() {
+    if (botWebhookConfigLoaded.value) return;
+    const [telegramRes, basicConfig] = await Promise.all([
+      ConfigGet({ group: 'telegram' }),
+      getSysConfig({ group: 'basic' }),
+    ]);
+    applyTelegramConfig(telegramRes?.list || {}, basicConfig?.list?.basicDomain || '');
+    botWebhookConfigLoaded.value = true;
+  }
+
+  function applyTelegramConfig(config: any, basicDomain: string) {
+    systemDomain.value = normalizeWebhookBaseUrl(basicDomain || '');
+    Object.assign(telegramConfig, newTelegramConfig(), config || {});
+    if (!telegramConfig.webhookBaseUrl && systemDomain.value) {
+      telegramConfig.webhookBaseUrl = systemDomain.value;
     }
   }
 
@@ -1501,6 +1540,27 @@
     await reloadActiveTabData();
   }
 
+  async function refreshBots(id?: number) {
+    const ids = id ? [id] : bots.value.map((item) => item.id).filter(Boolean);
+    if (ids.length === 0) {
+      message.warning('暂无可刷新的Bot');
+      return;
+    }
+    botRefreshing.value = true;
+    try {
+      const res: any = await BotRefresh({ ids });
+      const failed = (res?.list || []).filter((item) => item.errorMessage);
+      if (failed.length > 0) {
+        message.warning(`刷新完成，失败 ${failed.length} 个`);
+      } else {
+        message.success('Bot状态已刷新');
+      }
+      await loadBots();
+    } finally {
+      botRefreshing.value = false;
+    }
+  }
+
   function openTagModal(row: any = null) {
     Object.assign(tagForm, newTagForm(), row || {});
     tagModalVisible.value = true;
@@ -1616,6 +1676,64 @@
       NButton,
       { size: 'small', quaternary: true, type: 'error', onClick },
       { default: () => label }
+    );
+  }
+
+  function normalizeWebhookBaseUrl(url: string) {
+    let value = String(url || '')
+      .trim()
+      .replace(/\/+$/, '');
+    if (!value) return '';
+    if (!/^https?:\/\//i.test(value)) {
+      value = `https://${value}`;
+    }
+    return value;
+  }
+
+  function buildBotWebhookUrl(row: any) {
+    if (row?.webhookUrl) return row.webhookUrl;
+    if (!row?.id || !effectiveWebhookBaseUrl.value) return '';
+    return `${effectiveWebhookBaseUrl.value}/api/youban_publish/telegram/webhook?botId=${row.id}`;
+  }
+
+  function botWebhookRuntimeEnabled() {
+    const mode = telegramConfig.botRuntimeMode || 'auto';
+    return mode === 'webhook' || mode === 'auto';
+  }
+
+  function botWebhookStatusLabel(row: any) {
+    if (row?.webhookStatusLabel) return row.webhookStatusLabel;
+    if (row?.webhookStatus === 'enabled') return '已启用';
+    if (row?.webhookStatus === 'disabled') return '未启用';
+    if (row?.webhookStatus === 'error') return '异常';
+    if (row?.webhookStatus === 'not_configured') return '未配置';
+    if (row?.status !== 1) return 'Bot停用';
+    if (!botWebhookRuntimeEnabled()) return 'Pull模式';
+    if (!effectiveWebhookBaseUrl.value) return '未配置';
+    return '已配置';
+  }
+
+  function botWebhookStatusType(row: any) {
+    if (row?.webhookStatus === 'enabled') return 'success';
+    if (row?.webhookStatus === 'disabled') return 'warning';
+    if (row?.webhookStatus === 'error') return 'error';
+    if (row?.webhookStatus === 'not_configured') return 'error';
+    if (row?.status !== 1) return 'warning';
+    if (!botWebhookRuntimeEnabled()) return 'info';
+    if (!effectiveWebhookBaseUrl.value) return 'error';
+    return 'success';
+  }
+
+  function renderWebhookUrl(row: any) {
+    const url = buildBotWebhookUrl(row);
+    if (!url) return '-';
+    return h(
+      NPopover,
+      { trigger: 'hover' },
+      {
+        trigger: () => h('span', { class: 'webhook-url-text' }, url),
+        default: () => url,
+      }
     );
   }
 
@@ -1763,6 +1881,15 @@
 
   .tenant-select {
     width: 180px;
+  }
+
+  .webhook-url-text {
+    display: inline-block;
+    max-width: 330px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
   }
 
   .config-section {

@@ -268,6 +268,10 @@ export function BotDelete(params = {}) {
   return http.request({ url: '/youban_publish/publish/bot/delete', method: 'POST', params });
 }
 
+export function BotRefresh(params = {}) {
+  return http.request({ url: '/youban_publish/publish/bot/refresh', method: 'POST', params });
+}
+
 export function ConfigGet(params = {}) {
   return http.request({ url: '/youban_publish/publish/config/get', method: 'get', params });
 }
