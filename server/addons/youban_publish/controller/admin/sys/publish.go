@@ -366,7 +366,7 @@ func (c *cPublishServer) TgAccountList(ctx context.Context, req *publish.TgAccou
 }
 
 func (c *cPublishServer) ChannelCacheList(ctx context.Context, req *publish.ChannelCacheListReq) (res *publish.ChannelCacheListRes, err error) {
-	list, totalCount, err := service.SysPublish().AdminChannelCacheList(ctx, &req.ChannelCacheListInp)
+	list, totalCount, err := service.SysPublish().ServerChannelCacheList(ctx, &req.ChannelCacheListInp)
 	if err != nil {
 		return nil, err
 	}

@@ -63,6 +63,7 @@ type ISysPublish interface {
 	ServerTgAccountList(ctx context.Context, in *sysin.TgAccountListInp) (list []*sysin.TgAccountModel, totalCount int, err error)
 	ServerTgAccountDelete(ctx context.Context, in *sysin.TgAccountDeleteInp) (err error)
 	ServerTgAccountRefresh(ctx context.Context, in *sysin.TgAccountRefreshInp) (list []*sysin.TgAccountRefreshModel, err error)
+	ServerChannelCacheList(ctx context.Context, in *sysin.ChannelCacheListInp) (list []*sysin.ChannelCacheModel, totalCount int, err error)
 	ServerChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error)
 	ServerChannelDelete(ctx context.Context, in *sysin.ChannelDeleteInp) (err error)
 	ServerChannelRefresh(ctx context.Context, in *sysin.ChannelRefreshInp) (list []*sysin.ChannelRefreshModel, err error)

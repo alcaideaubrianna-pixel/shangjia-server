@@ -34,8 +34,32 @@ func (s *sSysPublish) AdminChannelCacheList(ctx context.Context, in *sysin.Chann
 	if err = s.ensureTgAccountsBelongTenant(ctx, []int64{in.TgAccountId}, account.TenantId); err != nil {
 		return nil, 0, err
 	}
+	return s.channelCacheList(ctx, in, account.TenantId)
+}
+
+func (s *sSysPublish) ServerChannelCacheList(ctx context.Context, in *sysin.ChannelCacheListInp) (list []*sysin.ChannelCacheModel, totalCount int, err error) {
+	if err = s.requireSystemSuperAdmin(ctx); err != nil {
+		return nil, 0, err
+	}
+	if in == nil {
+		in = &sysin.ChannelCacheListInp{}
+	}
+	if err = in.Filter(ctx); err != nil {
+		return nil, 0, err
+	}
+	if in.TgAccountId <= 0 {
+		return []*sysin.ChannelCacheModel{}, 0, nil
+	}
+	tenantId, err := s.tenantIdForTgAccount(ctx, in.TgAccountId)
+	if err != nil {
+		return nil, 0, err
+	}
+	return s.channelCacheList(ctx, in, tenantId)
+}
+
+func (s *sSysPublish) channelCacheList(ctx context.Context, in *sysin.ChannelCacheListInp, tenantId int64) (list []*sysin.ChannelCacheModel, totalCount int, err error) {
 	mod := g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).
-		Where("tenant_id", account.TenantId).
+		Where("tenant_id", tenantId).
 		Where("tg_account_id", in.TgAccountId)
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
 		like := "%" + keyword + "%"

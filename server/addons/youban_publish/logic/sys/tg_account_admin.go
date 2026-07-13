@@ -41,6 +41,9 @@ func (s *sSysPublish) AdminTgAccountList(ctx context.Context, in *sysin.TgAccoun
 }
 
 func (s *sSysPublish) ServerTgAccountList(ctx context.Context, in *sysin.TgAccountListInp) (list []*sysin.TgAccountModel, totalCount int, err error) {
+	if err = s.requireSystemSuperAdmin(ctx); err != nil {
+		return nil, 0, err
+	}
 	if in == nil {
 		in = &sysin.TgAccountListInp{}
 	}
@@ -224,6 +227,9 @@ func (s *sSysPublish) AdminTgAccountDelete(ctx context.Context, in *sysin.TgAcco
 }
 
 func (s *sSysPublish) ServerTgAccountDelete(ctx context.Context, in *sysin.TgAccountDeleteInp) (err error) {
+	if err = s.requireSystemSuperAdmin(ctx); err != nil {
+		return err
+	}
 	if in == nil || len(in.Ids) == 0 {
 		return gerror.New("请选择要删除的TG账号")
 	}
@@ -265,6 +271,9 @@ func (s *sSysPublish) AdminTgAccountRefresh(ctx context.Context, in *sysin.TgAcc
 }
 
 func (s *sSysPublish) ServerTgAccountRefresh(ctx context.Context, in *sysin.TgAccountRefreshInp) (list []*sysin.TgAccountRefreshModel, err error) {
+	if err = s.requireSystemSuperAdmin(ctx); err != nil {
+		return nil, err
+	}
 	if in == nil || len(in.Ids) == 0 {
 		return nil, gerror.New("请选择要刷新的TG账号")
 	}

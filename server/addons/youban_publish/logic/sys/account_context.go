@@ -8,6 +8,7 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/contexts"
+	internalService "hotgo/internal/service"
 )
 
 func (s *sSysPublish) currentAccount(ctx context.Context) (*sysin.AccountModel, error) {
@@ -45,6 +46,28 @@ func (s *sSysPublish) currentAdminAccount(ctx context.Context) (*sysin.AccountMo
 		return nil, gerror.New("当前账号无管理权限")
 	}
 	return account, nil
+}
+
+func (s *sSysPublish) isSystemSuperAdmin(ctx context.Context) bool {
+	return internalService.AdminMember().VerifySuperId(ctx, contexts.GetUserId(ctx))
+}
+
+func (s *sSysPublish) requireSystemSuperAdmin(ctx context.Context) error {
+	if !s.isSystemSuperAdmin(ctx) {
+		return gerror.New("没有访问权限")
+	}
+	return nil
+}
+
+func (s *sSysPublish) tenantIdForTgAccount(ctx context.Context, tgAccountId int64) (int64, error) {
+	if tgAccountId <= 0 {
+		return 0, gerror.New("请选择TG账号")
+	}
+	item, err := s.adminTgAccountById(ctx, tgAccountId, 0)
+	if err != nil {
+		return 0, err
+	}
+	return item.TenantId, nil
 }
 
 func (s *sSysPublish) ensureTenant(ctx context.Context, tenantId int64) error {
