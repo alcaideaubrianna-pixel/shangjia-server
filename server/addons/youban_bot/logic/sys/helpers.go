@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -209,7 +210,7 @@ func (s *sSysBot) telegramBot(ctx context.Context, botToken string) (*tgbot.Bot,
 	}
 	s.telegramBotMu.Unlock()
 	client := &http.Client{Timeout: 35 * time.Second}
-	if proxyUrl := g.Cfg().MustGet(ctx, "youbanBot.telegram.proxyUrl").String(); strings.TrimSpace(proxyUrl) != "" {
+	if proxyUrl := telegramProxyUrl(ctx); proxyUrl != "" {
 		proxyClient, err := telegramHTTPClient(proxyUrl)
 		if err != nil {
 			return nil, err
@@ -233,6 +234,25 @@ func (s *sSysBot) clearTelegramBotCache() {
 	s.telegramBotMu.Lock()
 	defer s.telegramBotMu.Unlock()
 	s.telegramBots = nil
+}
+
+func telegramProxyUrl(ctx context.Context) string {
+	candidates := []string{
+		g.Cfg().MustGet(ctx, "youbanBot.telegram.proxyUrl").String(),
+		os.Getenv("https_proxy"),
+		os.Getenv("HTTPS_PROXY"),
+		os.Getenv("http_proxy"),
+		os.Getenv("HTTP_PROXY"),
+		os.Getenv("all_proxy"),
+		os.Getenv("ALL_PROXY"),
+	}
+	for _, item := range candidates {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			return item
+		}
+	}
+	return ""
 }
 
 func telegramHTTPClient(proxyUrl string) (*http.Client, error) {

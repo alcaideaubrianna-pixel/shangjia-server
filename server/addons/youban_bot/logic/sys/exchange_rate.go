@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"html"
 	"math"
+	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -16,6 +18,7 @@ import (
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/net/gclient"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_bot/model/input/sysin"
@@ -23,7 +26,7 @@ import (
 )
 
 const (
-	exchangeRateDefaultSource       = "binance"
+	exchangeRateDefaultSource       = "okx"
 	exchangeRateDefaultRows         = 10
 	exchangeRateDefaultCacheMinutes = 30
 	exchangeRateAsset               = "USDT"
@@ -39,7 +42,7 @@ func (exchangeRateFeature) Command() string     { return "rate" }
 func (exchangeRateFeature) Description() string { return "实时汇率" }
 func (exchangeRateFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
 	return []*sysin.FeatureConfigSchema{
-		{Field: "source", Label: "行情来源", Component: "select", Default: exchangeRateDefaultSource, Placeholder: "当前支持 Binance P2P", Options: []*sysin.FeatureConfigOption{{Label: "Binance P2P", Value: "binance"}}},
+		{Field: "source", Label: "行情来源", Component: "select", Default: exchangeRateDefaultSource, Placeholder: "默认 OKX C2C", Options: []*sysin.FeatureConfigOption{{Label: "OKX C2C", Value: "okx"}, {Label: "Binance P2P", Value: "binance"}}},
 		{Field: "rows", Label: "展示条数", Component: "input", Default: exchangeRateDefaultRows, Placeholder: "默认展示 10 条"},
 		{Field: "cacheMinutes", Label: "缓存分钟", Component: "input", Default: exchangeRateDefaultCacheMinutes, Placeholder: "默认 30 分钟"},
 		{Field: "aliases", Label: "触发别名", Component: "input", Default: "实时汇率,汇率,U价,u,z0,lk", Placeholder: "多个别名用英文逗号分隔"},
@@ -108,6 +111,18 @@ type binanceP2PResponse struct {
 			NickName string `json:"nickName"`
 		} `json:"advertiser"`
 	} `json:"data"`
+}
+
+type okxC2CResponse struct {
+	Code int `json:"code"`
+	Data struct {
+		Sell []struct {
+			Price          string   `json:"price"`
+			NickName       string   `json:"nickName"`
+			PaymentMethods []string `json:"paymentMethods"`
+		} `json:"sell"`
+	} `json:"data"`
+	Msg string `json:"msg"`
 }
 
 func (s *sSysBot) parseExchangeRateRequest(ctx context.Context, text string, args string) (*exchangeRateRequest, bool) {
@@ -311,10 +326,12 @@ func (s *sSysBot) exchangeRateQuote(ctx context.Context, payType string) (*excha
 	if source == "" {
 		source = exchangeRateDefaultSource
 	}
-	if source != "binance" {
-		return nil, gerror.New("当前仅支持 Binance P2P 行情源")
+	switch source {
+	case "okx", "binance":
+		return s.exchangeRateQuoteWithCache(ctx, source, payType)
+	default:
+		return nil, gerror.New("行情来源配置不支持")
 	}
-	return s.exchangeRateQuoteWithCache(ctx, source, payType)
 }
 
 func (s *sSysBot) exchangeRateQuoteWithCache(ctx context.Context, source string, payType string) (*exchangeRateQuote, error) {
@@ -325,7 +342,16 @@ func (s *sSysBot) exchangeRateQuoteWithCache(ctx context.Context, source string,
 			return &item, nil
 		}
 	}
-	quote, err := s.fetchBinanceExchangeRate(ctx, payType)
+	var quote *exchangeRateQuote
+	var err error
+	switch source {
+	case "okx":
+		quote, err = s.fetchOKXExchangeRate(ctx, payType)
+	case "binance":
+		quote, err = s.fetchBinanceExchangeRate(ctx, payType)
+	default:
+		err = gerror.New("行情来源配置不支持")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -356,6 +382,102 @@ func (s *sSysBot) exchangeRateRows(ctx context.Context) int {
 		}
 	}
 	return rows
+}
+
+func exchangeRateOKXPaymentMethod(payType string) string {
+	switch payType {
+	case "bank":
+		return "bank"
+	case "alipay":
+		return "aliPay"
+	case "wechat":
+		return "wxPay"
+	default:
+		return "all"
+	}
+}
+
+func (s *sSysBot) exchangeRateHTTPClient(ctx context.Context) *gclient.Client {
+	client := g.Client().SetTimeout(15 * time.Second)
+	if proxyUrl := s.exchangeRateProxyUrl(ctx); proxyUrl != "" {
+		client = client.Proxy(proxyUrl)
+	}
+	return client
+}
+
+func (s *sSysBot) exchangeRateProxyUrl(ctx context.Context) string {
+	candidates := []string{
+		g.Cfg().MustGet(ctx, "youbanBot.exchangeRate.proxyUrl").String(),
+		os.Getenv("https_proxy"),
+		os.Getenv("HTTPS_PROXY"),
+		os.Getenv("http_proxy"),
+		os.Getenv("HTTP_PROXY"),
+		os.Getenv("all_proxy"),
+		os.Getenv("ALL_PROXY"),
+		g.Cfg().MustGet(ctx, "youbanBot.telegram.proxyUrl").String(),
+	}
+	for _, item := range candidates {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			return item
+		}
+	}
+	return ""
+}
+
+func (s *sSysBot) fetchOKXExchangeRate(ctx context.Context, payType string) (*exchangeRateQuote, error) {
+	rows := s.exchangeRateRows(ctx)
+	query := url.Values{}
+	query.Set("quoteCurrency", strings.ToLower(exchangeRateFiat))
+	query.Set("baseCurrency", strings.ToLower(exchangeRateAsset))
+	query.Set("side", "sell")
+	query.Set("paymentMethod", exchangeRateOKXPaymentMethod(payType))
+	query.Set("userType", "all")
+	query.Set("showTrade", "false")
+	query.Set("showFollow", "false")
+	query.Set("showAlreadyTraded", "false")
+	query.Set("isAbleFilter", "false")
+	query.Set("urlId", "2")
+	client := g.Client().SetTimeout(15 * time.Second).SetHeaderMap(map[string]string{
+		"User-Agent": "Mozilla/5.0 (YoubanBot/1.0)",
+		"Referer":    "https://www.okx.com/p2p-markets/cny/buy-usdt",
+	})
+	resp, err := client.Get(ctx, "https://www.okx.com/v3/c2c/tradingOrders/books?"+query.Encode())
+	if err != nil {
+		return nil, gerror.Wrap(err, "获取OKX实时汇率失败")
+	}
+	defer resp.Close()
+	body := resp.ReadAll()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, gerror.Newf("获取OKX实时汇率失败，行情接口状态：%d", resp.StatusCode)
+	}
+	var apiRes okxC2CResponse
+	if err = json.Unmarshal(body, &apiRes); err != nil {
+		return nil, gerror.Wrap(err, "解析OKX实时汇率失败")
+	}
+	if apiRes.Code != 0 {
+		msg := strings.TrimSpace(apiRes.Msg)
+		if msg == "" {
+			msg = "OKX行情接口返回异常"
+		}
+		return nil, gerror.New(msg)
+	}
+	items := make([]*exchangeRateQuoteItem, 0, len(apiRes.Data.Sell))
+	for _, row := range apiRes.Data.Sell {
+		price, err := strconv.ParseFloat(strings.TrimSpace(row.Price), 64)
+		if err != nil || price <= 0 {
+			continue
+		}
+		items = append(items, &exchangeRateQuoteItem{Price: price, PriceText: row.Price, Merchant: row.NickName, PayMethods: row.PaymentMethods})
+	}
+	if len(items) == 0 {
+		return nil, gerror.New("暂未获取到OKX实时汇率")
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].Price < items[j].Price })
+	if rows < len(items) {
+		items = items[:rows]
+	}
+	return &exchangeRateQuote{Source: "OKX", Asset: exchangeRateAsset, Fiat: exchangeRateFiat, PayType: payType, FetchedAt: gtime.Now().Format("Y-m-d H:i:s"), Items: items}, nil
 }
 
 func (s *sSysBot) fetchBinanceExchangeRate(ctx context.Context, payType string) (*exchangeRateQuote, error) {
@@ -424,16 +546,21 @@ func (s *sSysBot) formatExchangeRateReply(ctx context.Context, req *exchangeRate
 	}
 	lowest := quote.Items[0].Price
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%s · %s · %s/%s %s\n\n", exchangeRatePayTypeLabel(req.PayType), html.EscapeString(quote.Source), quote.Asset, quote.Fiat, quote.FetchedAt))
+	b.WriteString(fmt.Sprintf("<b>%s ▪️ %s %s %s</b>\n\n", html.EscapeString(exchangeRatePayTypeLabel(req.PayType)), html.EscapeString(quote.Source), html.EscapeString(exchangeRatePayTypeLabel(req.PayType)), html.EscapeString(quote.FetchedAt)))
+	b.WriteString("<pre>")
 	limit := s.exchangeRateRows(ctx)
 	if limit > len(quote.Items) {
 		limit = len(quote.Items)
 	}
 	for i := 0; i < limit; i++ {
 		item := quote.Items[i]
-		merchant := html.EscapeString(firstNonEmpty(item.Merchant, "匿名商家"))
-		b.WriteString(fmt.Sprintf("%d) %s  %s\n", i+1, html.EscapeString(item.PriceText), merchant))
+		merchant := truncateDisplayText(firstNonEmpty(item.Merchant, "匿名商家"), 18)
+		b.WriteString(html.EscapeString(fmt.Sprintf("%-3s %-5s  %s", fmt.Sprintf("%d)", i+1), item.PriceText, merchant)))
+		if i < limit-1 {
+			b.WriteString("\n")
+		}
 	}
+	b.WriteString("</pre>")
 	amount := 0.0
 	amountText := "0"
 	if req.HasExpr {
@@ -444,12 +571,27 @@ func (s *sSysBot) formatExchangeRateReply(ctx context.Context, req *exchangeRate
 	if lowest > 0 {
 		uAmount = amount / lowest
 	}
-	b.WriteString(fmt.Sprintf("\n💰 %s / %s = %s U\n", html.EscapeString(amountText), html.EscapeString(quote.Items[0].PriceText), html.EscapeString(formatExchangeRateNumber(uAmount, 4))))
-	b.WriteString("\n帮助：\n")
+	b.WriteString(fmt.Sprintf("\n\n💰 <b>%s / %s = %s U</b>", html.EscapeString(amountText), html.EscapeString(quote.Items[0].PriceText), html.EscapeString(formatExchangeRateNumber(uAmount, 4))))
+	b.WriteString("\n\n<blockquote>帮助：\n")
 	b.WriteString("实时汇率 1000*0.95/5\n")
 	b.WriteString("z0 支付宝 1000\n")
-	b.WriteString("lk 微信 500")
+	b.WriteString("lk 微信 500</blockquote>")
 	return b.String()
+}
+
+func truncateDisplayText(text string, maxRunes int) string {
+	text = strings.TrimSpace(text)
+	if maxRunes <= 0 {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return text
+	}
+	if maxRunes <= 1 {
+		return string(runes[:maxRunes])
+	}
+	return string(runes[:maxRunes-1]) + "…"
 }
 
 func formatExchangeRateNumber(value float64, precision int) string {

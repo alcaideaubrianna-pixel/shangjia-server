@@ -114,7 +114,7 @@ func (s *sSysBot) telegramBotWithHandler(ctx context.Context, row *sysin.BotMode
 
 func telegramHTTPClientFromConfig(ctx context.Context) tgbot.HttpClient {
 	client := &http.Client{Timeout: 35 * time.Second}
-	if proxyUrl := g.Cfg().MustGet(ctx, "youbanBot.telegram.proxyUrl").String(); strings.TrimSpace(proxyUrl) != "" {
+	if proxyUrl := telegramProxyUrl(ctx); proxyUrl != "" {
 		proxyClient, err := telegramHTTPClient(proxyUrl)
 		if err == nil {
 			return proxyClient

@@ -360,3 +360,11 @@ hggen:
     srcPath: "./resource/generate/default/addon"                    # 生成模板路径
     webApiPath: "../web/src/api/addons/{$name}"                     # webApi生成路径
     webViewsPath: "../web/src/views/addons/{$name}"                 # web页面生成路径
+
+
+# 悦伴全局 Bot
+youbanBot:
+  telegram:
+    proxyUrl: ""                                  # Telegram API 代理，例如：http://127.0.0.1:6152 或 socks5://127.0.0.1:6153
+  exchangeRate:
+    proxyUrl: ""                                  # 实时汇率接口代理，例如：http://127.0.0.1:6152 或 socks5://127.0.0.1:6153
