@@ -37,6 +37,7 @@ func botAllowedUpdates() []string {
 		models.AllowedUpdateEditedMessage,
 		models.AllowedUpdateChannelPost,
 		models.AllowedUpdateEditedChannelPost,
+		models.AllowedUpdateCallbackQuery,
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/casbin/govaluate"
+	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -45,11 +46,14 @@ func (exchangeRateFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
 		{Field: "source", Label: "行情来源", Component: "select", Default: exchangeRateDefaultSource, Placeholder: "默认 OKX C2C", Options: []*sysin.FeatureConfigOption{{Label: "OKX C2C", Value: "okx"}, {Label: "Binance P2P", Value: "binance"}}},
 		{Field: "rows", Label: "展示条数", Component: "input", Default: exchangeRateDefaultRows, Placeholder: "默认展示 10 条"},
 		{Field: "cacheMinutes", Label: "缓存分钟", Component: "input", Default: exchangeRateDefaultCacheMinutes, Placeholder: "默认 30 分钟"},
-		{Field: "aliases", Label: "触发别名", Component: "input", Default: "实时汇率,汇率,U价,u,z0,lk", Placeholder: "多个别名用英文逗号分隔"},
+		{Field: "aliases", Label: "触发别名", Component: "input", Default: "实时汇率,汇率,U价,u,z0,lk,兑汇,dh,dz,dw,dy,zw,兑支,兑微,兑银", Placeholder: "多个别名用英文逗号分隔"},
 	}
 }
 func (exchangeRateFeature) Match(ctx context.Context, bot *sSysBot, row *botFeatureRow, text string) bool {
 	_, matched := bot.parseExchangeRateRequest(ctx, text, "")
+	if matched {
+		g.Log().Infof(ctx, "实时汇率插件匹配成功 text:%s", strings.TrimSpace(text))
+	}
 	return matched
 }
 func (exchangeRateFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFeatureContext) (bool, error) {
@@ -68,7 +72,7 @@ func (exchangeRateFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx 
 		return true, bot.reply(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), html.EscapeString(err.Error()))
 	}
 	text := bot.formatExchangeRateReply(ctx, req, res)
-	return true, bot.replyExchangeRate(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), text, req.PayType)
+	return true, bot.replyExchangeRate(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), text, req.PayType, req.Expr)
 }
 
 type exchangeRateRequest struct {
@@ -131,6 +135,7 @@ func (s *sSysBot) parseExchangeRateRequest(ctx context.Context, text string, arg
 	if text == "" {
 		return nil, false
 	}
+	req := &exchangeRateRequest{PayType: "all"}
 	content := args
 	if content == "" {
 		command, commandArgs := botCommandAndArgs(text)
@@ -144,11 +149,12 @@ func (s *sSysBot) parseExchangeRateRequest(ctx context.Context, text string, arg
 			if !ok {
 				return nil, false
 			}
-			_ = alias
+			if payType, ok := exchangeRateAliasPayType(alias); ok {
+				req.PayType = payType
+			}
 			content = rest
 		}
 	}
-	req := &exchangeRateRequest{PayType: "all"}
 	content = strings.TrimSpace(strings.TrimPrefix(content, ":"))
 	content = strings.TrimSpace(strings.TrimPrefix(content, "："))
 	parts := strings.Fields(content)
@@ -183,6 +189,22 @@ func (s *sSysBot) parseExchangeRateRequest(ctx context.Context, text string, arg
 	return req, true
 }
 
+func exchangeRateAliasPayType(alias string) (string, bool) {
+	alias = strings.TrimSpace(strings.ToLower(alias))
+	switch alias {
+	case "dz", "兑支":
+		return "alipay", true
+	case "dw", "zw", "兑微":
+		return "wechat", true
+	case "dy", "兑银":
+		return "bank", true
+	case "兑汇", "dh":
+		return "all", true
+	default:
+		return "", false
+	}
+}
+
 func (s *sSysBot) matchExchangeRateAlias(ctx context.Context, text string) (alias string, rest string, ok bool) {
 	clean := strings.TrimSpace(text)
 	if payType, matched := normalizeExchangeRatePayType(clean); matched {
@@ -213,17 +235,28 @@ func (s *sSysBot) matchExchangeRateAlias(ctx context.Context, text string) (alia
 }
 
 func (s *sSysBot) exchangeRateAliases(ctx context.Context) []string {
+	builtIns := []string{"实时汇率", "汇率", "U价", "u", "z0", "lk", "兑汇", "dh", "dz", "dw", "dy", "zw", "兑支", "兑微", "兑银"}
 	value := s.featureConfigValue(ctx, exchangeRateFeature{}.Key(), "aliases")
-	if value == "" {
-		value = "实时汇率,汇率,U价,u,z0,lk"
-	}
 	list := strings.Split(value, ",")
-	res := make([]string, 0, len(list))
-	for _, item := range list {
+	res := make([]string, 0, len(list)+len(builtIns))
+	seen := map[string]struct{}{}
+	appendAlias := func(item string) {
 		item = strings.TrimSpace(item)
-		if item != "" {
-			res = append(res, item)
+		if item == "" {
+			return
 		}
+		key := strings.ToLower(item)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		res = append(res, item)
+	}
+	for _, item := range list {
+		appendAlias(item)
+	}
+	for _, item := range builtIns {
+		appendAlias(item)
 	}
 	return res
 }
@@ -546,7 +579,7 @@ func (s *sSysBot) formatExchangeRateReply(ctx context.Context, req *exchangeRate
 	}
 	lowest := quote.Items[0].Price
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("<b>%s ▪️ %s %s %s</b>\n\n", html.EscapeString(exchangeRatePayTypeLabel(req.PayType)), html.EscapeString(quote.Source), html.EscapeString(exchangeRatePayTypeLabel(req.PayType)), html.EscapeString(quote.FetchedAt)))
+	b.WriteString(fmt.Sprintf("<b>%s 🏦%s %s %s</b>\n\n", html.EscapeString(exchangeRatePayTypeTitle(req.PayType)), html.EscapeString(quote.Source), html.EscapeString(exchangeRatePayTypeTitle(req.PayType)), html.EscapeString(exchangeRateDateText(quote.FetchedAt))))
 	b.WriteString("<pre>")
 	limit := s.exchangeRateRows(ctx)
 	if limit > len(quote.Items) {
@@ -562,21 +595,42 @@ func (s *sSysBot) formatExchangeRateReply(ctx context.Context, req *exchangeRate
 	}
 	b.WriteString("</pre>")
 	amount := 0.0
-	amountText := "0"
+	exprText := "0"
 	if req.HasExpr {
 		amount = req.Amount
-		amountText = formatExchangeRateNumber(amount, 4)
+		exprText = spacedExchangeRateExpression(req.Expr)
 	}
 	uAmount := 0.0
 	if lowest > 0 {
 		uAmount = amount / lowest
 	}
-	b.WriteString(fmt.Sprintf("\n\n💰 <b>%s / %s = %s U</b>", html.EscapeString(amountText), html.EscapeString(quote.Items[0].PriceText), html.EscapeString(formatExchangeRateNumber(uAmount, 4))))
-	b.WriteString("\n\n<blockquote>帮助：\n")
-	b.WriteString("实时汇率 1000*0.95/5\n")
-	b.WriteString("z0 支付宝 1000\n")
-	b.WriteString("lk 微信 500</blockquote>")
+	b.WriteString(fmt.Sprintf("\n\n💰 <b>%s / %s = %s U</b>", html.EscapeString(exprText), html.EscapeString(quote.Items[0].PriceText), html.EscapeString(formatExchangeRateNumber(uAmount, 4))))
+	b.WriteString("\n\n<blockquote>帮助：实时汇率/兑汇 1000*0.95，dz/兑支 支付宝，dw/兑微 微信，dy/兑银 银行卡，支持 dz 1000*0.95/5</blockquote>")
 	return b.String()
+}
+
+func exchangeRatePayTypeTitle(payType string) string {
+	if payType == "all" {
+		return "全部"
+	}
+	return exchangeRatePayTypeLabel(payType)
+}
+
+func exchangeRateDateText(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 10 {
+		return value[:10]
+	}
+	return value
+}
+
+func spacedExchangeRateExpression(expr string) string {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return "0"
+	}
+	replacer := strings.NewReplacer("+", " + ", "-", " - ", "*", " * ", "/", " / ")
+	return strings.Join(strings.Fields(replacer.Replace(expr)), " ")
 }
 
 func truncateDisplayText(text string, maxRunes int) string {
@@ -604,7 +658,7 @@ func formatExchangeRateNumber(value float64, precision int) string {
 	return text
 }
 
-func (s *sSysBot) replyExchangeRate(ctx context.Context, botId int64, chatId string, text string, payType string) error {
+func (s *sSysBot) replyExchangeRate(ctx context.Context, botId int64, chatId string, text string, payType string, expr string) error {
 	tokenText := ""
 	if botId > 0 {
 		if row, err := s.botById(ctx, botId); err == nil && row != nil {
@@ -619,24 +673,105 @@ func (s *sSysBot) replyExchangeRate(ctx context.Context, botId int64, chatId str
 	if tokenText == "" {
 		return nil
 	}
-	_, err := s.sendMessageWithMarkup(ctx, tokenText, chatId, text, "HTML", false, exchangeRateReplyKeyboard(payType))
+	_, err := s.sendMessageWithMarkup(ctx, tokenText, chatId, text, "HTML", false, exchangeRateInlineKeyboard(payType, expr))
 	if err != nil && botId > 0 && shouldMarkBotOffline(err) {
 		_ = s.markBotOffline(ctx, botId, err)
 	}
 	return err
 }
 
-func exchangeRateReplyKeyboard(payType string) *models.ReplyKeyboardMarkup {
+func exchangeRateInlineKeyboard(payType string, expr string) *models.InlineKeyboardMarkup {
 	label := func(current string, text string) string {
 		if payType == current {
 			return "✅" + text
 		}
 		return text
 	}
-	return &models.ReplyKeyboardMarkup{Keyboard: [][]models.KeyboardButton{{
-		{Text: label("all", "所有")},
-		{Text: label("bank", "银行卡")},
-		{Text: label("alipay", "支付宝")},
-		{Text: label("wechat", "微信")},
-	}}, IsPersistent: true, ResizeKeyboard: true, InputFieldPlaceholder: "实时汇率 1000*0.95/5"}
+	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{
+		{Text: label("all", "全部"), CallbackData: exchangeRateCallbackData("all", expr)},
+		{Text: label("bank", "银行卡"), CallbackData: exchangeRateCallbackData("bank", expr)},
+		{Text: label("alipay", "支付宝"), CallbackData: exchangeRateCallbackData("alipay", expr)},
+		{Text: label("wechat", "微信"), CallbackData: exchangeRateCallbackData("wechat", expr)},
+	}}}
+}
+
+func exchangeRateCallbackData(payType string, expr string) string {
+	expr = strings.TrimSpace(expr)
+	if len([]byte(expr)) > 40 {
+		expr = ""
+	}
+	return "yb_rate|" + payType + "|" + expr
+}
+
+func parseExchangeRateCallbackData(data string) (payType string, expr string, ok bool) {
+	parts := strings.SplitN(strings.TrimSpace(data), "|", 3)
+	if len(parts) < 2 || parts[0] != "yb_rate" {
+		return "", "", false
+	}
+	payType, matched := normalizeExchangeRatePayType(parts[1])
+	if !matched {
+		payType = "all"
+	}
+	if len(parts) >= 3 {
+		expr = strings.TrimSpace(parts[2])
+	}
+	return payType, expr, true
+}
+
+func (s *sSysBot) handleExchangeRateCallback(ctx context.Context, botId int64, query *models.CallbackQuery) error {
+	if query == nil {
+		return nil
+	}
+	payType, expr, ok := parseExchangeRateCallbackData(query.Data)
+	if !ok {
+		return nil
+	}
+	tokenText := ""
+	if botId > 0 {
+		if row, err := s.botById(ctx, botId); err == nil && row != nil {
+			tokenText = row.BotToken
+		}
+	}
+	if tokenText == "" {
+		if row, err := s.officialBot(ctx); err == nil && row != nil {
+			tokenText = row.BotToken
+		}
+	}
+	if tokenText == "" {
+		return nil
+	}
+	tgBot, err := s.telegramBot(ctx, tokenText)
+	if err != nil {
+		return err
+	}
+	callCtx, cancel := telegramAPICtx()
+	defer cancel()
+	_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
+	req := &exchangeRateRequest{PayType: payType, Expr: expr}
+	if expr != "" {
+		amount, evalErr := evaluateExchangeRateExpression(expr)
+		if evalErr != nil {
+			_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: evalErr.Error(), ShowAlert: false})
+			return nil
+		}
+		req.Amount = amount
+		req.HasExpr = true
+	}
+	quote, err := s.exchangeRateQuote(ctx, payType)
+	if err != nil {
+		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: err.Error(), ShowAlert: false})
+		return nil
+	}
+	text := s.formatExchangeRateReply(ctx, req, quote)
+	if query.Message.Message == nil {
+		return nil
+	}
+	_, err = tgBot.EditMessageText(callCtx, &tgbot.EditMessageTextParams{
+		ChatID:      fmt.Sprintf("%d", query.Message.Message.Chat.ID),
+		MessageID:   query.Message.Message.ID,
+		Text:        text,
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: exchangeRateInlineKeyboard(payType, expr),
+	})
+	return err
 }

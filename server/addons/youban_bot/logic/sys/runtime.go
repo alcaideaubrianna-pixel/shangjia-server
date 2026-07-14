@@ -128,6 +128,9 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 	if update == nil {
 		return nil
 	}
+	if update.CallbackQuery != nil {
+		return s.handleExchangeRateCallback(ctx, botId, update.CallbackQuery)
+	}
 	msg := botMessageFromUpdate(update)
 	if msg == nil {
 		return nil
