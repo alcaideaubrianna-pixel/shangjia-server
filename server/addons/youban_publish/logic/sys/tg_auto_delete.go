@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	tgbot "github.com/go-telegram/bot"
@@ -24,8 +25,25 @@ const (
 	autoDeleteChannelCacheVersionKey = "youban_publish:auto_delete:channel:version"
 	autoDeleteChannelCacheKeyPrefix  = "youban_publish:auto_delete:channel"
 	autoDeleteChannelPositiveTTL     = 10 * time.Minute
-	autoDeleteChannelNegativeTTL     = 2 * time.Minute
+	autoDeleteChannelNegativeTTL     = 30 * time.Minute
+	autoDeleteChannelLocalTTL        = 2 * time.Minute
+	autoDeleteChannelVersionLocalTTL = 10 * time.Second
+	autoDeleteBotLocalTTL            = 10 * time.Minute
+	autoDeleteWarnInterval           = time.Minute
 )
+
+var autoDeleteRuntimeCache = struct {
+	sync.RWMutex
+	channel         map[string]autoDeleteChannelLocalCacheItem
+	bot             map[string]autoDeleteBotLocalCacheItem
+	version         string
+	versionExpireAt time.Time
+	warned          map[string]time.Time
+}{
+	channel: make(map[string]autoDeleteChannelLocalCacheItem),
+	bot:     make(map[string]autoDeleteBotLocalCacheItem),
+	warned:  make(map[string]time.Time),
+}
 
 func telegramAllowedUpdateNames() []string {
 	return []string{
@@ -87,12 +105,16 @@ func (s *sSysPublish) handleTelegramAutoDelete(ctx context.Context, botId int64,
 	}
 	channel, err := s.autoDeleteChannel(ctx, msg.Chat)
 	if err != nil || channel == nil || channel.Id <= 0 {
-		g.Log().Debugf(ctx, "频道自动删除跳过，频道未配置 chat:%d err:%+v", msg.Chat.ID, err)
+		if err != nil {
+			autoDeleteWarn(ctx, "bot_channel_lookup", "频道自动删除查询频道失败 chat:%d err:%+v", msg.Chat.ID, err)
+		}
 		return
 	}
 	botItem, err := s.autoDeleteBot(ctx, botId, channel, conf.AutoDeleteConfig)
 	if err != nil || botItem == nil || botItem.Id <= 0 {
-		g.Log().Debugf(ctx, "频道自动删除跳过，Bot未配置 channel:%d bot:%d err:%+v", channel.Id, botId, err)
+		if err != nil {
+			autoDeleteWarn(ctx, "bot_lookup", "频道自动删除查询Bot失败 channel:%d bot:%d err:%+v", channel.Id, botId, err)
+		}
 		return
 	}
 	if err = s.deleteMatchedTelegramMessage(ctx, botItem.BotToken, msg.Chat.ID, msg.ID); err != nil {
@@ -126,12 +148,16 @@ func (s *sSysPublish) handleGotdAutoDelete(ctx context.Context, msg *tg.Message)
 	chatIds := gotdMessageChatIds(msg)
 	channel, err := s.autoDeleteChannelByChatIds(ctx, chatIds)
 	if err != nil || channel == nil || channel.Id <= 0 {
-		g.Log().Debugf(ctx, "频道自动删除跳过，账号监听频道未配置 chats:%s err:%+v", strings.Join(chatIds, ","), err)
+		if err != nil {
+			autoDeleteWarn(ctx, "gotd_channel_lookup", "频道自动删除账号监听查询频道失败 chats:%s err:%+v", strings.Join(chatIds, ","), err)
+		}
 		return
 	}
 	botItem, err := s.autoDeleteBot(ctx, 0, channel, conf.AutoDeleteConfig)
 	if err != nil || botItem == nil || botItem.Id <= 0 {
-		g.Log().Debugf(ctx, "频道自动删除跳过，Bot未配置 channel:%d err:%+v", channel.Id, err)
+		if err != nil {
+			autoDeleteWarn(ctx, "gotd_bot_lookup", "频道自动删除账号监听查询Bot失败 channel:%d err:%+v", channel.Id, err)
+		}
 		return
 	}
 	chatId := normalizeTelegramChannelChatID(channel.TargetChatId)
@@ -254,21 +280,48 @@ func (s *sSysPublish) autoDeleteChannelCacheKey(ctx context.Context, source stri
 }
 
 func (s *sSysPublish) autoDeleteChannelCacheVersion(ctx context.Context) string {
+	now := time.Now()
+	autoDeleteRuntimeCache.RLock()
+	if autoDeleteRuntimeCache.version != "" && now.Before(autoDeleteRuntimeCache.versionExpireAt) {
+		version := autoDeleteRuntimeCache.version
+		autoDeleteRuntimeCache.RUnlock()
+		return version
+	}
+	autoDeleteRuntimeCache.RUnlock()
+
 	cacheVar, err := cache.Instance().Get(ctx, autoDeleteChannelCacheVersionKey)
 	if err == nil && !cacheVar.IsNil() {
 		version := strings.TrimSpace(cacheVar.String())
 		if version != "" {
+			autoDeleteChannelLocalVersionSet(version)
 			return version
 		}
 	}
+	autoDeleteChannelLocalVersionSet("1")
 	return "1"
 }
 
 func (s *sSysPublish) refreshAutoDeleteChannelCache(ctx context.Context) {
-	_ = cache.Instance().Set(ctx, autoDeleteChannelCacheVersionKey, strconv.FormatInt(gtime.Now().TimestampNano(), 10), 24*time.Hour)
+	version := strconv.FormatInt(gtime.Now().TimestampNano(), 10)
+	autoDeleteRuntimeCache.Lock()
+	autoDeleteRuntimeCache.channel = make(map[string]autoDeleteChannelLocalCacheItem)
+	autoDeleteRuntimeCache.version = version
+	autoDeleteRuntimeCache.versionExpireAt = time.Now().Add(autoDeleteChannelVersionLocalTTL)
+	autoDeleteRuntimeCache.Unlock()
+	_ = cache.Instance().Set(ctx, autoDeleteChannelCacheVersionKey, version, 24*time.Hour)
+}
+
+func autoDeleteChannelLocalVersionSet(version string) {
+	autoDeleteRuntimeCache.Lock()
+	autoDeleteRuntimeCache.version = version
+	autoDeleteRuntimeCache.versionExpireAt = time.Now().Add(autoDeleteChannelVersionLocalTTL)
+	autoDeleteRuntimeCache.Unlock()
 }
 
 func autoDeleteChannelCacheGet(ctx context.Context, key string) (*autoDeleteChannel, bool) {
+	if channel, hit := autoDeleteChannelLocalCacheGet(key); hit {
+		return channel, true
+	}
 	cacheVar, err := cache.Instance().Get(ctx, key)
 	if err != nil || cacheVar.IsNil() {
 		return nil, false
@@ -277,6 +330,7 @@ func autoDeleteChannelCacheGet(ctx context.Context, key string) (*autoDeleteChan
 	if err = cacheVar.Scan(&item); err != nil {
 		return nil, false
 	}
+	autoDeleteChannelLocalCacheSet(key, &item, autoDeleteChannelLocalTTL)
 	if !item.Found {
 		return nil, true
 	}
@@ -292,7 +346,41 @@ func autoDeleteChannelCacheSet(ctx context.Context, key string, channel *autoDel
 	if item.Found {
 		ttl = autoDeleteChannelPositiveTTL
 	}
+	autoDeleteChannelLocalCacheSet(key, &item, autoDeleteChannelLocalTTL)
 	_ = cache.Instance().Set(ctx, key, item, ttl)
+}
+
+func autoDeleteChannelLocalCacheGet(key string) (*autoDeleteChannel, bool) {
+	now := time.Now()
+	autoDeleteRuntimeCache.RLock()
+	item, ok := autoDeleteRuntimeCache.channel[key]
+	autoDeleteRuntimeCache.RUnlock()
+	if !ok || now.After(item.ExpireAt) {
+		if ok {
+			autoDeleteRuntimeCache.Lock()
+			if latest, exists := autoDeleteRuntimeCache.channel[key]; exists && now.After(latest.ExpireAt) {
+				delete(autoDeleteRuntimeCache.channel, key)
+			}
+			autoDeleteRuntimeCache.Unlock()
+		}
+		return nil, false
+	}
+	if !item.Value.Found {
+		return nil, true
+	}
+	return item.Value.Channel, true
+}
+
+func autoDeleteChannelLocalCacheSet(key string, item *autoDeleteChannelCacheItem, ttl time.Duration) {
+	if key == "" || item == nil || ttl <= 0 {
+		return
+	}
+	autoDeleteRuntimeCache.Lock()
+	autoDeleteRuntimeCache.channel[key] = autoDeleteChannelLocalCacheItem{
+		Value:    *item,
+		ExpireAt: time.Now().Add(ttl),
+	}
+	autoDeleteRuntimeCache.Unlock()
 }
 
 func (s *sSysPublish) autoDeleteBot(ctx context.Context, botId int64, channel *autoDeleteChannel, conf *model.AutoDeleteConfig) (*sysin.BotModel, error) {
@@ -300,18 +388,53 @@ func (s *sSysPublish) autoDeleteBot(ctx context.Context, botId int64, channel *a
 		if !autoDeleteBotAllowed(botId, conf.BotIds) {
 			return nil, nil
 		}
-		return s.getBotById(ctx, botId, channel.TenantId)
+		return s.autoDeleteBotById(ctx, botId, channel.TenantId)
 	}
 	for _, id := range decodeBotIds(channel.BotIdJson) {
 		if !autoDeleteBotAllowed(id, conf.BotIds) {
 			continue
 		}
-		return s.getBotById(ctx, id, channel.TenantId)
+		return s.autoDeleteBotById(ctx, id, channel.TenantId)
 	}
 	for _, id := range conf.BotIds {
-		return s.getBotById(ctx, id, channel.TenantId)
+		return s.autoDeleteBotById(ctx, id, channel.TenantId)
 	}
 	return nil, nil
+}
+
+func (s *sSysPublish) autoDeleteBotById(ctx context.Context, id int64, tenantId int64) (*sysin.BotModel, error) {
+	key := fmt.Sprintf("%d:%d", tenantId, id)
+	now := time.Now()
+	autoDeleteRuntimeCache.RLock()
+	item, ok := autoDeleteRuntimeCache.bot[key]
+	autoDeleteRuntimeCache.RUnlock()
+	if ok && now.Before(item.ExpireAt) && item.Bot != nil && item.Bot.Id > 0 {
+		return item.Bot, nil
+	}
+	if ok && now.After(item.ExpireAt) {
+		autoDeleteRuntimeCache.Lock()
+		if latest, exists := autoDeleteRuntimeCache.bot[key]; exists && now.After(latest.ExpireAt) {
+			delete(autoDeleteRuntimeCache.bot, key)
+		}
+		autoDeleteRuntimeCache.Unlock()
+	}
+	bot, err := s.getBotById(ctx, id, tenantId)
+	if err != nil {
+		return nil, err
+	}
+	autoDeleteRuntimeCache.Lock()
+	autoDeleteRuntimeCache.bot[key] = autoDeleteBotLocalCacheItem{
+		Bot:      bot,
+		ExpireAt: time.Now().Add(autoDeleteBotLocalTTL),
+	}
+	autoDeleteRuntimeCache.Unlock()
+	return bot, nil
+}
+
+func clearAutoDeleteBotLocalCache() {
+	autoDeleteRuntimeCache.Lock()
+	autoDeleteRuntimeCache.bot = make(map[string]autoDeleteBotLocalCacheItem)
+	autoDeleteRuntimeCache.Unlock()
 }
 
 func autoDeleteBotAllowed(botId int64, allowed []int64) bool {
@@ -426,4 +549,32 @@ type autoDeleteChannel struct {
 type autoDeleteChannelCacheItem struct {
 	Found   bool               `json:"found"`
 	Channel *autoDeleteChannel `json:"channel"`
+}
+
+type autoDeleteChannelLocalCacheItem struct {
+	Value    autoDeleteChannelCacheItem
+	ExpireAt time.Time
+}
+
+type autoDeleteBotLocalCacheItem struct {
+	Bot      *sysin.BotModel
+	ExpireAt time.Time
+}
+
+func autoDeleteWarn(ctx context.Context, key string, format string, args ...interface{}) {
+	now := time.Now()
+	autoDeleteRuntimeCache.Lock()
+	lastAt, ok := autoDeleteRuntimeCache.warned[key]
+	if ok && now.Sub(lastAt) < autoDeleteWarnInterval {
+		autoDeleteRuntimeCache.Unlock()
+		return
+	}
+	autoDeleteRuntimeCache.warned[key] = now
+	for itemKey, itemAt := range autoDeleteRuntimeCache.warned {
+		if now.Sub(itemAt) > autoDeleteWarnInterval*10 {
+			delete(autoDeleteRuntimeCache.warned, itemKey)
+		}
+	}
+	autoDeleteRuntimeCache.Unlock()
+	g.Log().Warningf(ctx, format, args...)
 }

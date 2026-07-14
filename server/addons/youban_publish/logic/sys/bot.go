@@ -378,6 +378,7 @@ func (s *sSysPublish) clearTelegramBotCache() {
 	s.telegramBotMu.Lock()
 	defer s.telegramBotMu.Unlock()
 	s.telegramBots = nil
+	clearAutoDeleteBotLocalCache()
 }
 
 func telegramHTTPClient(proxyUrl string) (*http.Client, error) {
