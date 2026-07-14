@@ -86,6 +86,41 @@ func (s *sSysPublish) channelCacheList(ctx context.Context, in *sysin.ChannelCac
 	return list, totalCount, nil
 }
 
+func (s *sSysPublish) AdminChannelCacheResolve(ctx context.Context, in *sysin.ChannelCacheResolveInp) ([]*sysin.ChannelCacheResolveModel, error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil {
+		return nil, gerror.New("解析目标不能为空")
+	}
+	if err = in.Filter(ctx); err != nil {
+		return nil, err
+	}
+	if err = s.ensureMessagePushTgAccountBelongTenant(ctx, in.TgAccountId, account.TenantId); err != nil {
+		return nil, err
+	}
+	displays, err := s.resolveTelegramChannelDisplays(ctx, account.TenantId, in.TgAccountId, in.TargetChatIds)
+	if err != nil {
+		return nil, err
+	}
+	list := make([]*sysin.ChannelCacheResolveModel, 0, len(in.TargetChatIds))
+	for _, raw := range in.TargetChatIds {
+		channelId := normalizeTelegramChannelChatID(raw)
+		if channelId == "" {
+			continue
+		}
+		display := displays[channelId]
+		list = append(list, &sysin.ChannelCacheResolveModel{
+			TgAccountId:     in.TgAccountId,
+			ChannelId:       channelId,
+			ChannelTitle:    display.Title,
+			ChannelUsername: display.Username,
+		})
+	}
+	return list, nil
+}
+
 func (s *sSysPublish) AdminChannelCacheRefresh(ctx context.Context, in *sysin.ChannelCacheRefreshInp) (res *sysin.ChannelCacheRefreshModel, err error) {
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {

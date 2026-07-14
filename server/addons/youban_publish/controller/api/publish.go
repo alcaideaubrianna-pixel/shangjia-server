@@ -347,6 +347,18 @@ func (c *cPublishAdmin) ChannelCacheList(ctx context.Context, req *publish.Admin
 	return
 }
 
+func (c *cPublishAdmin) ChannelCacheResolve(ctx context.Context, req *publish.AdminChannelCacheResolveReq) (res *publish.AdminChannelCacheResolveRes, err error) {
+	list, err := service.SysPublish().AdminChannelCacheResolve(ctx, &req.ChannelCacheResolveInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.ChannelCacheResolveModel{}
+	}
+	res = &publish.AdminChannelCacheResolveRes{List: list}
+	return
+}
+
 func (c *cPublishAdmin) ChannelCacheRefresh(ctx context.Context, req *publish.AdminChannelCacheRefreshReq) (res *publish.AdminChannelCacheRefreshRes, err error) {
 	item, err := service.SysPublish().AdminChannelCacheRefresh(ctx, &req.ChannelCacheRefreshInp)
 	if err != nil {
@@ -501,6 +513,45 @@ func (c *cPublishAdmin) MessagePushPlanStatus(ctx context.Context, req *publish.
 		return nil, err
 	}
 	res = &publish.AdminMessagePushPlanStatusRes{}
+	return
+}
+
+func (c *cPublishAdmin) QuickPushPlanList(ctx context.Context, req *publish.AdminQuickPushPlanListReq) (res *publish.AdminQuickPushPlanListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminQuickPushPlanList(ctx, &req.QuickPushPlanListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.QuickPushPlanModel{}
+	}
+	res = new(publish.AdminQuickPushPlanListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishAdmin) QuickPushPlanSave(ctx context.Context, req *publish.AdminQuickPushPlanSaveReq) (res *publish.AdminQuickPushPlanSaveRes, err error) {
+	item, err := service.SysPublish().AdminQuickPushPlanSave(ctx, &req.QuickPushPlanSaveInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminQuickPushPlanSaveRes{QuickPushPlanSaveModel: item}
+	return
+}
+
+func (c *cPublishAdmin) QuickPushPlanDelete(ctx context.Context, req *publish.AdminQuickPushPlanDeleteReq) (res *publish.AdminQuickPushPlanDeleteRes, err error) {
+	if err = service.SysPublish().AdminQuickPushPlanDelete(ctx, &req.QuickPushPlanDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminQuickPushPlanDeleteRes{}
+	return
+}
+
+func (c *cPublishAdmin) QuickPushPlanStatus(ctx context.Context, req *publish.AdminQuickPushPlanStatusReq) (res *publish.AdminQuickPushPlanStatusRes, err error) {
+	if err = service.SysPublish().AdminQuickPushPlanStatus(ctx, &req.QuickPushPlanStatusInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminQuickPushPlanStatusRes{}
 	return
 }
 

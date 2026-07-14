@@ -304,3 +304,20 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_listen_sender` (
   UNIQUE KEY `uk_ybp_msg_listen_sender_user` (`tg_account_id`,`telegram_user_id`),
   KEY `idx_ybp_msg_listen_sender_tenant` (`tenant_id`,`tg_account_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息监听发送者缓存';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_quick_push_plan` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `name` varchar(128) NOT NULL DEFAULT '' COMMENT '计划名称',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG账号ID',
+  `target_chat_ids` text COMMENT '目标群聊或频道Chat ID JSON',
+  `status` tinyint(4) NOT NULL DEFAULT '1' COMMENT '状态',
+  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
+  `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_quick_plan_owner` (`tenant_id`,`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴快速推送计划';

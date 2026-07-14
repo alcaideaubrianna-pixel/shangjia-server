@@ -642,18 +642,26 @@ func (s *sSysBot) featureVisibleForTelegramUser(ctx context.Context, feature bot
 	if feature == nil {
 		return false
 	}
-	if feature.Key() != (adminFeature{}).Key() {
+	if feature.Key() != (adminFeature{}).Key() && feature.Key() != (quickPushFeature{}).Key() {
 		return true
 	}
 	if telegramUserId == "" {
 		return false
 	}
-	bind, err := s.bindingByTelegram(ctx, sysin.BotAppAdmin, telegramUserId)
+	if feature.Key() == (adminFeature{}).Key() {
+		bind, err := s.bindingByTelegram(ctx, sysin.BotAppAdmin, telegramUserId)
+		if err != nil {
+			g.Log().Warningf(ctx, "判断管理后台菜单可见失败 telegramUserId:%s err:%+v", telegramUserId, err)
+			return false
+		}
+		return bind != nil && bind.AccountId > 0
+	}
+	_, account, err := s.quickPushBoundAccount(ctx, telegramUserId)
 	if err != nil {
-		g.Log().Warningf(ctx, "判断管理后台菜单可见失败 telegramUserId:%s err:%+v", telegramUserId, err)
+		g.Log().Warningf(ctx, "判断快速推送菜单可见失败 telegramUserId:%s err:%+v", telegramUserId, err)
 		return false
 	}
-	return bind != nil && bind.AccountId > 0
+	return account != nil && account.AccountId > 0
 }
 
 func isSystemErrorRemark(remark string) bool {

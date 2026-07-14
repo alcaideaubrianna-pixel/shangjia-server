@@ -303,19 +303,27 @@ func (s *sSysPublish) executeMessagePushPlan(ctx context.Context, plan messagePu
 			messages = append(messages, err.Error())
 			continue
 		}
+		targets := make([]*messageTemplatePushTarget, 0, len(channels))
 		for channelIndex, channel := range channels {
 			delay := time.Duration(delayIndex*plan.IntervalSeconds) * time.Second
 			operationNo := messagePushPlanOperationNo(plan.Id, scheduledAt, template, channel.TargetChatId)
-			result := s.queueMessageTemplateToChannel(ctx, template, channel, plan.TenantId, plan.AccountId, operationNo, delay)
-			if result.Status == sysin.MessagePushStatusPending {
-				success++
-				queued++
-			} else {
-				failed++
-				messages = append(messages, result.Message)
-			}
+			targets = append(targets, &messageTemplatePushTarget{Channel: channel, AccountId: plan.AccountId, OperationNo: operationNo, Delay: delay, Priority: tgJobPriorityBulk, QueueName: tgQueueNameBulk})
 			if shouldWaitMessagePushPlan(templateIndex, channelIndex, len(templateIds), len(channels)) {
 				delayIndex++
+			}
+		}
+		batch := s.pushMessageTemplateTargetsWithSeed(ctx, template, targets, plan.TenantId, plan.AccountId)
+		success += batch.Success
+		failed += batch.Failed
+		for _, result := range batch.Results {
+			if result == nil {
+				continue
+			}
+			if result.Status == sysin.MessagePushStatusPending {
+				queued++
+			}
+			if result.Status == sysin.MessagePushStatusFailed && strings.TrimSpace(result.Message) != "" {
+				messages = append(messages, result.Message)
 			}
 		}
 	}

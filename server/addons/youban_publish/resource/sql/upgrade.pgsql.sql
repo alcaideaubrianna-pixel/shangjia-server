@@ -296,3 +296,19 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_listen_sender" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_msg_listen_sender_user" ON "hg_youban_publish_message_listen_sender" ("tg_account_id", "telegram_user_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_msg_listen_sender_tenant" ON "hg_youban_publish_message_listen_sender" ("tenant_id", "tg_account_id");
+
+CREATE TABLE IF NOT EXISTS hg_youban_publish_quick_push_plan (
+  id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL DEFAULT 0,
+  name varchar(128) NOT NULL DEFAULT '',
+  account_id bigint NOT NULL DEFAULT 0,
+  target_chat_ids text,
+  status smallint NOT NULL DEFAULT 1,
+  created_by bigint NOT NULL DEFAULT 0,
+  updated_by bigint NOT NULL DEFAULT 0,
+  deleted_by bigint NOT NULL DEFAULT 0,
+  created_at timestamp,
+  updated_at timestamp,
+  deleted_at timestamp
+);
+CREATE INDEX IF NOT EXISTS idx_ybp_quick_plan_owner ON hg_youban_publish_quick_push_plan (tenant_id,status,id);

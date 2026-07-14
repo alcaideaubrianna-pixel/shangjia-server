@@ -65,6 +65,56 @@ type messageTemplateForwardSourceMessage struct {
 	MessageId int64 `json:"messageId"`
 }
 
+type messageTemplatePushTarget struct {
+	Channel     *messagePushChannel
+	AccountId   int64
+	OperationNo string
+	Delay       time.Duration
+	Priority    int
+	QueueName   string
+}
+
+func (s *sSysPublish) pushMessageTemplateTargetsWithSeed(ctx context.Context, template *sysin.MessageTemplateModel, targets []*messageTemplatePushTarget, tenantId int64, accountId int64) *sysin.MessageTemplatePushModel {
+	res := &sysin.MessageTemplatePushModel{Total: len(targets), Results: make([]*sysin.MessageTemplatePushResultModel, 0, len(targets))}
+	seedSentByAccount := make(map[int64]bool)
+	for _, target := range targets {
+		if target == nil || target.Channel == nil {
+			result := &sysin.MessageTemplatePushResultModel{Status: sysin.MessagePushStatusFailed, Message: "目标群聊或频道未配置"}
+			res.Results = append(res.Results, result)
+			res.Failed++
+			continue
+		}
+		targetAccountId := target.AccountId
+		if targetAccountId <= 0 {
+			targetAccountId = accountId
+		}
+		var result *sysin.MessageTemplatePushResultModel
+		if !seedSentByAccount[targetAccountId] {
+			result = s.sendMessageTemplateToChannel(ctx, template, target.Channel, tenantId, targetAccountId)
+			if result.Status == sysin.MessagePushStatusSent {
+				seedSentByAccount[targetAccountId] = true
+			}
+		} else {
+			priority := target.Priority
+			if priority <= 0 {
+				priority = tgJobPriorityBulk
+			}
+			queueName := strings.TrimSpace(target.QueueName)
+			if queueName == "" {
+				queueName = tgQueueNameBulk
+			}
+			result = s.queueMessageTemplateToChannelWithPriority(ctx, template, target.Channel, tenantId, targetAccountId, target.OperationNo, target.Delay, priority, queueName)
+		}
+		res.Results = append(res.Results, result)
+		if result.Status == sysin.MessagePushStatusPending || result.Status == sysin.MessagePushStatusSent {
+			res.Success++
+		} else {
+			res.Failed++
+		}
+	}
+	return res
+}
+
 func (s *sSysPublish) AdminMessageTemplatePush(ctx context.Context, in *sysin.MessageTemplatePushInp) (res *sysin.MessageTemplatePushModel, err error) {
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
@@ -107,21 +157,11 @@ func (s *sSysPublish) AdminMessageTemplatePush(ctx context.Context, in *sysin.Me
 	if template.Status != 1 {
 		return nil, gerror.New("消息模板已停用")
 	}
-	res = &sysin.MessageTemplatePushModel{
-		Total:   len(channels),
-		Results: make([]*sysin.MessageTemplatePushResultModel, 0, len(channels)),
-	}
+	targets := make([]*messageTemplatePushTarget, 0, len(channels))
 	for _, channel := range channels {
-		operationNo := messagePushManualOperationNo(template, channel)
-		result := s.queueMessageTemplateToChannelWithPriority(ctx, template, channel, account.TenantId, in.AccountId, operationNo, 0, tgJobPriorityUrgent, tgQueueNameUrgent)
-		res.Results = append(res.Results, result)
-		if result.Status == sysin.MessagePushStatusPending {
-			res.Success++
-		} else {
-			res.Failed++
-		}
+		targets = append(targets, &messageTemplatePushTarget{Channel: channel, AccountId: in.AccountId, OperationNo: messagePushManualOperationNo(template, channel), Priority: tgJobPriorityUrgent, QueueName: tgQueueNameUrgent})
 	}
-	return res, nil
+	return s.pushMessageTemplateTargetsWithSeed(ctx, template, targets, account.TenantId, in.AccountId), nil
 }
 
 func (s *sSysPublish) sendMessageTemplateToChannel(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64) *sysin.MessageTemplatePushResultModel {
@@ -162,10 +202,6 @@ func (s *sSysPublish) sendMessageTemplateToChannel(ctx context.Context, template
 	result.Status = sysin.MessagePushStatusSent
 	result.Message = "推送成功"
 	return result
-}
-
-func (s *sSysPublish) queueMessageTemplateToChannel(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, operationNo string, delay time.Duration) *sysin.MessageTemplatePushResultModel {
-	return s.queueMessageTemplateToChannelWithPriority(ctx, template, channel, tenantId, accountId, operationNo, delay, tgJobPriorityBulk, tgQueueNameBulk)
 }
 
 func (s *sSysPublish) queueMessageTemplateToChannelWithPriority(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, operationNo string, delay time.Duration, priority int, queueName string) *sysin.MessageTemplatePushResultModel {
@@ -581,11 +617,12 @@ func forwardMessageTemplateWithGotd(ctx context.Context, client *telegram.Client
 		return nil, gerror.New("TG历史消息转发参数不完整")
 	}
 	updates, err := client.API().MessagesForwardMessages(ctx, &tg.MessagesForwardMessagesRequest{
-		FromPeer: fromPeer,
-		ToPeer:   toPeer,
-		ID:       messageIds,
-		RandomID: collectForwardRandomIds(messageIds),
-		Silent:   true,
+		FromPeer:   fromPeer,
+		ToPeer:     toPeer,
+		ID:         messageIds,
+		RandomID:   collectForwardRandomIds(messageIds),
+		Silent:     true,
+		DropAuthor: true,
 	})
 	if err != nil {
 		return nil, err
@@ -601,8 +638,7 @@ func (s *sSysPublish) messageTemplateForwardSource(ctx context.Context, tgAccoun
 	var jobs []*messageTemplateForwardSourceJob
 	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		Fields("j.id,j.tenant_id,j.target_chat_id").
-		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id").
-		Where("c.tg_account_id", tgAccountId).
+		Where("j.account_id", tgAccountId).
 		Where("j.status", sysin.MessagePushStatusSent).
 		Where("j.operation_no LIKE ?", "message_push%:"+templateHash).
 		OrderDesc("j.id").
@@ -945,6 +981,7 @@ func (s *sSysPublish) messagePushTargets(ctx context.Context, in *sysin.MessageT
 
 func (s *sSysPublish) messagePushCachedTargets(ctx context.Context, tgAccountId int64, targetChatIds []string, tenantId int64) ([]*messagePushChannel, error) {
 	var rows []struct {
+		Id           int64  `json:"id"`
 		ChannelId    string `json:"channelId"`
 		AccessHash   string `json:"accessHash"`
 		ChannelTitle string `json:"channelTitle"`
@@ -953,7 +990,7 @@ func (s *sSysPublish) messagePushCachedTargets(ctx context.Context, tgAccountId 
 	}
 	lookupIds := messagePushTargetLookupIds(targetChatIds)
 	err := g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).
-		Fields("channel_id,access_hash,channel_title,is_broadcast,is_megagroup").
+		Fields("id,channel_id,access_hash,channel_title,is_broadcast,is_megagroup").
 		Where("tenant_id", tenantId).
 		Where("tg_account_id", tgAccountId).
 		WhereIn("channel_id", lookupIds).
@@ -965,7 +1002,7 @@ func (s *sSysPublish) messagePushCachedTargets(ctx context.Context, tgAccountId 
 	rowMap := make(map[string]*messagePushChannel, len(rows))
 	for _, row := range rows {
 		channel := &messagePushChannel{
-			Id:           0,
+			Id:           row.Id,
 			TgAccountId:  tgAccountId,
 			AccessHash:   row.AccessHash,
 			ChannelTitle: row.ChannelTitle,

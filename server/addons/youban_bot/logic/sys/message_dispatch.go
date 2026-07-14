@@ -26,6 +26,7 @@ type botMessageHandler interface {
 }
 
 var botMessageHandlers = []botMessageHandler{
+	quickPushSessionMessageHandler{},
 	botFeatureMessageHandler{},
 	publishListenerBindMessageHandler{},
 	authCodeMessageHandler{},
@@ -58,7 +59,7 @@ func botMessageFromUpdate(update *models.Update) *models.Message {
 }
 
 func (s *sSysBot) dispatchBotMessage(ctx context.Context, event *botMessageEvent) (bool, error) {
-	if event == nil || event.Msg == nil || strings.TrimSpace(event.Text) == "" {
+	if event == nil || event.Msg == nil {
 		return false, nil
 	}
 	for _, handler := range botMessageHandlers {

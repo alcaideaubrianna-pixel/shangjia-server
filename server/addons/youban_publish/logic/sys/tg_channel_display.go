@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -14,6 +15,13 @@ import (
 )
 
 const telegramChannelDisplayCacheTTL = 10 * time.Minute
+
+var telegramChannelDisplayLocalCache sync.Map
+
+type telegramChannelDisplayLocalCacheItem struct {
+	Display  telegramChannelDisplay
+	ExpireAt time.Time
+}
 
 type telegramChannelDisplay struct {
 	Title    string `json:"title"`
@@ -79,11 +87,16 @@ func (s *sSysPublish) resolveTelegramChannelDisplays(ctx context.Context, tenant
 		}
 		seen[channelId] = struct{}{}
 		cacheKey := telegramChannelDisplayCacheKey(tenantId, tgAccountId, channelId)
+		if item, ok := telegramChannelDisplayLocalCacheGet(cacheKey); ok {
+			res[channelId] = item
+			continue
+		}
 		cacheVar, err := cache.Instance().Get(ctx, cacheKey)
 		if err == nil && !cacheVar.IsNil() {
 			var item telegramChannelDisplay
 			if scanErr := cacheVar.Scan(&item); scanErr == nil && !item.Empty() {
 				res[channelId] = item
+				telegramChannelDisplayLocalCacheSet(cacheKey, item)
 				continue
 			}
 		}
@@ -101,7 +114,9 @@ func (s *sSysPublish) resolveTelegramChannelDisplays(ctx context.Context, tenant
 			continue
 		}
 		res[channelId] = item
-		_ = cache.Instance().Set(ctx, telegramChannelDisplayCacheKey(tenantId, tgAccountId, channelId), item, telegramChannelDisplayCacheTTL)
+		cacheKey := telegramChannelDisplayCacheKey(tenantId, tgAccountId, channelId)
+		telegramChannelDisplayLocalCacheSet(cacheKey, item)
+		_ = cache.Instance().Set(ctx, cacheKey, item, telegramChannelDisplayCacheTTL)
 	}
 	return res, nil
 }
@@ -145,4 +160,24 @@ func (s *sSysPublish) loadTelegramChannelDisplays(ctx context.Context, tenantId 
 		}
 	}
 	return res, nil
+}
+
+func telegramChannelDisplayLocalCacheGet(key string) (telegramChannelDisplay, bool) {
+	value, ok := telegramChannelDisplayLocalCache.Load(key)
+	if !ok {
+		return telegramChannelDisplay{}, false
+	}
+	item, ok := value.(telegramChannelDisplayLocalCacheItem)
+	if !ok || time.Now().After(item.ExpireAt) || item.Display.Empty() {
+		telegramChannelDisplayLocalCache.Delete(key)
+		return telegramChannelDisplay{}, false
+	}
+	return item.Display, true
+}
+
+func telegramChannelDisplayLocalCacheSet(key string, display telegramChannelDisplay) {
+	if strings.TrimSpace(key) == "" || display.Empty() {
+		return
+	}
+	telegramChannelDisplayLocalCache.Store(key, telegramChannelDisplayLocalCacheItem{Display: display, ExpireAt: time.Now().Add(telegramChannelDisplayCacheTTL)})
 }

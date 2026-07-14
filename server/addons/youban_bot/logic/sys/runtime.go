@@ -129,6 +129,9 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 		return nil
 	}
 	if update.CallbackQuery != nil {
+		if handled, err := s.handleQuickPushCallback(ctx, botId, update.CallbackQuery); handled || err != nil {
+			return err
+		}
 		return s.handleExchangeRateCallback(ctx, botId, update.CallbackQuery)
 	}
 	msg := botMessageFromUpdate(update)
@@ -145,9 +148,6 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 		g.Log().Warningf(ctx, "保存Telegram消息日志失败 botId:%d err:%+v", botId, err)
 	}
 	text := strings.TrimSpace(firstNonEmpty(msg.Text, msg.Caption))
-	if text == "" {
-		return nil
-	}
 	_, err := s.dispatchBotMessage(ctx, &botMessageEvent{BotId: botId, Msg: msg, Text: text})
 	return err
 }

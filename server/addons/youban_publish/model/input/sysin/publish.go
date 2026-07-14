@@ -1063,6 +1063,33 @@ type ChannelCacheModel struct {
 	LastSyncAt      *gtime.Time `json:"lastSyncAt" dc:"最后同步时间"`
 }
 
+type ChannelCacheResolveInp struct {
+	TgAccountId   int64    `json:"tgAccountId" dc:"TG账号ID"`
+	TargetChatIds []string `json:"targetChatIds" dc:"目标群聊或频道Chat ID"`
+}
+
+type ChannelCacheResolveModel struct {
+	TgAccountId     int64  `json:"tgAccountId" dc:"TG账号ID"`
+	ChannelId       string `json:"channelId" dc:"频道ID"`
+	ChannelTitle    string `json:"channelTitle" dc:"频道名称"`
+	ChannelUsername string `json:"channelUsername" dc:"频道用户名"`
+}
+
+func (in *ChannelCacheResolveInp) Filter(ctx context.Context) error {
+	_ = ctx
+	in.TargetChatIds = uniqueStringInputs(in.TargetChatIds)
+	if in.TgAccountId <= 0 {
+		return gerror.New("请选择TG账号")
+	}
+	if len(in.TargetChatIds) == 0 {
+		return gerror.New("请选择目标群聊或频道")
+	}
+	if len(in.TargetChatIds) > 200 {
+		return gerror.New("一次最多解析200个目标")
+	}
+	return nil
+}
+
 type ChannelCacheRefreshInp struct {
 	TgAccountId int64 `json:"tgAccountId" v:"required|min:1#请选择TG账号|请选择TG账号" dc:"TG账号ID"`
 }

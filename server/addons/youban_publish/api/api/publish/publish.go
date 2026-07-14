@@ -238,6 +238,15 @@ type AdminChannelCacheListRes struct {
 	List []*sysin.ChannelCacheModel `json:"list" dc:"频道缓存列表"`
 }
 
+type AdminChannelCacheResolveReq struct {
+	g.Meta `path:"/publish/admin/channel/cache/resolve" method:"post" tags:"上架插件管理端" summary:"解析TG账号频道缓存显示信息"`
+	sysin.ChannelCacheResolveInp
+}
+
+type AdminChannelCacheResolveRes struct {
+	List []*sysin.ChannelCacheResolveModel `json:"list" dc:"频道缓存显示列表"`
+}
+
 type AdminChannelCacheRefreshReq struct {
 	g.Meta `path:"/publish/admin/channel/cache/refresh" method:"post" tags:"上架插件管理端" summary:"刷新TG账号频道缓存"`
 	sysin.ChannelCacheRefreshInp
@@ -382,6 +391,39 @@ type AdminMessagePushPlanStatusReq struct {
 }
 
 type AdminMessagePushPlanStatusRes struct{}
+
+type AdminQuickPushPlanListReq struct {
+	g.Meta `path:"/publish/admin/quickPushPlan/list" method:"get" tags:"上架插件管理端" summary:"快速推送计划列表"`
+	sysin.QuickPushPlanListInp
+}
+
+type AdminQuickPushPlanListRes struct {
+	form.PageRes
+	List []*sysin.QuickPushPlanModel `json:"list" dc:"计划列表"`
+}
+
+type AdminQuickPushPlanSaveReq struct {
+	g.Meta `path:"/publish/admin/quickPushPlan/save" method:"post" tags:"上架插件管理端" summary:"保存快速推送计划"`
+	sysin.QuickPushPlanSaveInp
+}
+
+type AdminQuickPushPlanSaveRes struct {
+	*sysin.QuickPushPlanSaveModel
+}
+
+type AdminQuickPushPlanDeleteReq struct {
+	g.Meta `path:"/publish/admin/quickPushPlan/delete" method:"post" tags:"上架插件管理端" summary:"删除快速推送计划"`
+	sysin.QuickPushPlanDeleteInp
+}
+
+type AdminQuickPushPlanDeleteRes struct{}
+
+type AdminQuickPushPlanStatusReq struct {
+	g.Meta `path:"/publish/admin/quickPushPlan/status" method:"post" tags:"上架插件管理端" summary:"切换快速推送计划状态"`
+	sysin.QuickPushPlanStatusInp
+}
+
+type AdminQuickPushPlanStatusRes struct{}
 
 type AdminUploadMediaReq struct {
 	g.Meta `path:"/publish/admin/media/upload" method:"post" mime:"multipart/form-data" tags:"上架插件管理端" summary:"上传资料媒体"`
