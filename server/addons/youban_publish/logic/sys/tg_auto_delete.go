@@ -96,6 +96,10 @@ func (s *sSysPublish) handleTelegramAutoDelete(ctx context.Context, botId int64,
 		return
 	}
 	if err = s.deleteMatchedTelegramMessage(ctx, botItem.BotToken, msg.Chat.ID, msg.ID); err != nil {
+		if isTelegramMessageAlreadyDeletedError(err) {
+			s.appendAutoDeleteLog(ctx, channel, botItem.Id, msg, keyword, "skipped", "频道消息命中关键词，但TG消息已不存在")
+			return
+		}
 		s.appendAutoDeleteLog(ctx, channel, botItem.Id, msg, keyword, "failed", err.Error())
 		g.Log().Warningf(ctx, "频道自动删除失败 channel:%d bot:%d message:%d err:%+v", channel.Id, botItem.Id, msg.ID, err)
 		return

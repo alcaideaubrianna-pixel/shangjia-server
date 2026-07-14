@@ -187,6 +187,10 @@ func (s *sSysPublish) cleanupTelegramSentMessages(ctx context.Context, bot *tgbo
 			continue
 		}
 		if _, err := bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{ChatID: chatId, MessageID: int(item.MessageId)}); err != nil {
+			if isTelegramMessageAlreadyDeletedError(err) {
+				g.Log().Infof(ctx, "清理TG半组消息跳过，消息已不存在 chat:%s message:%d reason:%s", chatId, item.MessageId, reason)
+				continue
+			}
 			g.Log().Warningf(ctx, "清理TG半组消息失败 chat:%s message:%d reason:%s err:%+v", chatId, item.MessageId, reason, err)
 		}
 	}
