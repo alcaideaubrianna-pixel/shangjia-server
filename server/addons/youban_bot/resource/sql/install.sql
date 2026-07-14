@@ -116,8 +116,28 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_message` (
   PRIMARY KEY (`id`),
   KEY `idx_ybbm_bot` (`bot_id`,`id`),
   KEY `idx_ybbm_user` (`telegram_user_id`,`id`),
-  KEY `idx_ybbm_message` (`bot_id`,`message_id`)
+  KEY `idx_ybbm_message` (`bot_id`,`message_id`),
+  UNIQUE KEY `uk_ybbm_chat_message` (`chat_id`,`message_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot消息日志';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_channel_cache` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Bot ID',
+  `chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'Chat ID',
+  `chat_type` varchar(32) NOT NULL DEFAULT '' COMMENT 'Chat类型',
+  `chat_title` varchar(255) NOT NULL DEFAULT '' COMMENT 'Chat标题',
+  `chat_username` varchar(128) NOT NULL DEFAULT '' COMMENT 'Chat用户名',
+  `is_broadcast` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否频道',
+  `is_megagroup` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否群聊',
+  `message_count` int(11) NOT NULL DEFAULT '0' COMMENT '消息数',
+  `last_message_text` text COMMENT '最后消息',
+  `last_message_at` datetime DEFAULT NULL COMMENT '最后消息时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybbcc_bot_chat` (`bot_id`,`chat_id`),
+  KEY `idx_ybbcc_last` (`bot_id`,`last_message_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot频道缓存';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_bot_invite_code` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',

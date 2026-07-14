@@ -22,6 +22,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 	if len(media) == 0 {
 		return nil, nil
 	}
+	s.prepareTelegramMediaItemsForSend(ctx, media)
 	if len(media) == 1 {
 		return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0])
 	}
@@ -50,6 +51,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 }
 
 func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem) ([]*telegramSentMessage, error) {
+	s.prepareTelegramMediaItemForSend(ctx, media)
 	if ref, ok := telegramCopyMediaRefFromFileId(media.TgFileId); ok {
 		return s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media, ref)
 	}

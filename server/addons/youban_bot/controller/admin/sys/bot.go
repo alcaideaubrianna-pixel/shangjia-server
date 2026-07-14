@@ -116,6 +116,20 @@ func (c *cBot) MessageList(ctx context.Context, req *bot.MessageListReq) (res *b
 	return
 }
 
+func (c *cBot) BotChannelCacheList(ctx context.Context, req *bot.BotChannelCacheListReq) (res *bot.BotChannelCacheListRes, err error) {
+	list, totalCount, err := service.SysBot().AdminBotChannelCacheList(ctx, &req.BotChannelCacheListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.BotChannelCacheModel{}
+	}
+	res = new(bot.BotChannelCacheListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
 func (c *cBot) UserSwitchSuperAdmin(ctx context.Context, req *bot.UserSwitchSuperAdminReq) (res *bot.UserSwitchSuperAdminRes, err error) {
 	if err = service.SysBot().AdminUserSwitchSuperAdmin(ctx, &req.UserSwitchSuperAdminInp); err != nil {
 		return

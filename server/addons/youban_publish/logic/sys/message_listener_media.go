@@ -87,6 +87,7 @@ func (s *sSysPublish) sendTelegramSingleMediaWithMarkup(ctx context.Context, bot
 	if media == nil {
 		return nil, nil
 	}
+	s.prepareTelegramMediaItemForSend(ctx, media)
 	input, closer, err := telegramInputFile(ctx, media)
 	if err != nil {
 		return nil, err

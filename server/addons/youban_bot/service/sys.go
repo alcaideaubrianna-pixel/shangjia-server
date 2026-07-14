@@ -18,6 +18,7 @@ type ISysBot interface {
 	AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp) (err error)
 	AdminUserList(ctx context.Context, in *sysin.UserListInp) (list []*sysin.UserModel, totalCount int, err error)
 	AdminMessageList(ctx context.Context, in *sysin.MessageListInp) (list []*sysin.MessageModel, totalCount int, err error)
+	AdminBotChannelCacheList(ctx context.Context, in *sysin.BotChannelCacheListInp) (list []*sysin.BotChannelCacheModel, totalCount int, err error)
 	AdminUserSwitchSuperAdmin(ctx context.Context, in *sysin.UserSwitchSuperAdminInp) (err error)
 	AdminSendMessage(ctx context.Context, in *sysin.SendMessageInp) (err error)
 	NotifySuperAdmins(ctx context.Context, botId int64, scene string, text string) (err error)

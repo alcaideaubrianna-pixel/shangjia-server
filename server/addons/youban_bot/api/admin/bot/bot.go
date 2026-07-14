@@ -85,6 +85,16 @@ type MessageListRes struct {
 	List []*sysin.MessageModel `json:"list" dc:"消息日志"`
 }
 
+type BotChannelCacheListReq struct {
+	g.Meta `path:"/bot/channel/cache/list" method:"get" tags:"全局机器人后台" summary:"Bot频道缓存列表"`
+	sysin.BotChannelCacheListInp
+}
+
+type BotChannelCacheListRes struct {
+	form.PageRes
+	List []*sysin.BotChannelCacheModel `json:"list" dc:"Bot频道缓存"`
+}
+
 type UserSwitchSuperAdminReq struct {
 	g.Meta `path:"/bot/user/superAdmin" method:"post" tags:"全局机器人后台" summary:"设置Bot超级管理员"`
 	sysin.UserSwitchSuperAdminInp

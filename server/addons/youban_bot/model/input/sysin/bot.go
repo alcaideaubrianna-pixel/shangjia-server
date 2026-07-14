@@ -189,6 +189,30 @@ type MessageModel struct {
 	CreatedAt        *gtime.Time `json:"createdAt" dc:"创建时间"`
 }
 
+type BotChannelCacheListInp struct {
+	form.PageReq
+	BotId   int64  `json:"botId" dc:"Bot ID"`
+	Keyword string `json:"keyword" dc:"关键词"`
+	Type    string `json:"type" dc:"类型：all/channel/group"`
+}
+
+type BotChannelCacheModel struct {
+	Id              int64       `json:"id" dc:"ID"`
+	BotId           int64       `json:"botId" dc:"Bot ID"`
+	BotUsername     string      `json:"botUsername" dc:"Bot用户名"`
+	ChannelId       string      `json:"channelId" dc:"频道/群聊ID"`
+	ChannelTitle    string      `json:"channelTitle" dc:"频道/群聊名称"`
+	ChannelUsername string      `json:"channelUsername" dc:"频道/群聊用户名"`
+	ChatType        string      `json:"chatType" dc:"聊天类型"`
+	IsBroadcast     int         `json:"isBroadcast" dc:"是否频道"`
+	IsMegagroup     int         `json:"isMegagroup" dc:"是否群聊"`
+	MessageCount    int         `json:"messageCount" dc:"消息数"`
+	LastMessageText string      `json:"lastMessageText" dc:"最后消息"`
+	LastMessageAt   *gtime.Time `json:"lastMessageAt" dc:"最后消息时间"`
+	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt       *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
 type CodeStartInp struct {
 	App string `json:"app" dc:"应用：admin/api"`
 }

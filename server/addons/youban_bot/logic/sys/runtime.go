@@ -170,6 +170,9 @@ func (s *sSysBot) storeTelegramMessage(ctx context.Context, botId int64, msg *mo
 	if msg.Date > 0 {
 		lastAt = gtime.NewFromTime(time.Unix(int64(msg.Date), 0))
 	}
+	if err := s.upsertTelegramChannelCache(ctx, botId, msg, text, lastAt); err != nil {
+		return err
+	}
 	if telegramUserId != "" {
 		userData := g.Map{
 			"bot_id":              botId,
@@ -202,6 +205,19 @@ func (s *sSysBot) storeTelegramMessage(ctx context.Context, botId int64, msg *mo
 		}
 		g.Log().Infof(ctx, "已记录Telegram用户 botId:%d telegramUserId:%s chatId:%s", botId, telegramUserId, chatId)
 	}
+	var exists struct {
+		Id int64 `json:"id"`
+	}
+	if err := g.DB().Model(messageTable).Safe().Ctx(ctx).
+		Fields("id").
+		Where("chat_id", chatId).
+		Where("message_id", msg.ID).
+		Scan(&exists); err != nil {
+		return gerror.Wrap(err, "读取Telegram消息失败")
+	}
+	if exists.Id > 0 {
+		return nil
+	}
 	_, err := g.DB().Model(messageTable).Safe().Ctx(ctx).Data(g.Map{
 		"bot_id":            botId,
 		"telegram_user_id":  telegramUserId,
@@ -214,7 +230,13 @@ func (s *sSysBot) storeTelegramMessage(ctx context.Context, botId int64, msg *mo
 		"raw_json":          string(rawBytes),
 		"created_at":        lastAt,
 	}).Insert()
-	return err
+	if err != nil && isDuplicateKeyError(err) {
+		return nil
+	}
+	if err != nil {
+		return gerror.Wrap(err, "保存Telegram消息失败")
+	}
+	return nil
 }
 
 func telegramMessageType(msg *models.Message) string {

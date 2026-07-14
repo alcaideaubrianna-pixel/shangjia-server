@@ -22,12 +22,13 @@ import (
 )
 
 const (
-	botTable       = "hg_youban_bot_bot"
-	featureTable   = "hg_youban_bot_feature"
-	authCodeTable  = "hg_youban_bot_auth_code"
-	accountBindTbl = "hg_youban_bot_account_bind"
-	userTable      = "hg_youban_bot_user"
-	messageTable   = "hg_youban_bot_message"
+	botTable          = "hg_youban_bot_bot"
+	featureTable      = "hg_youban_bot_feature"
+	authCodeTable     = "hg_youban_bot_auth_code"
+	accountBindTbl    = "hg_youban_bot_account_bind"
+	userTable         = "hg_youban_bot_user"
+	messageTable      = "hg_youban_bot_message"
+	channelCacheTable = "hg_youban_bot_channel_cache"
 
 	publishAccountTable = "hg_youban_publish_account"
 )
@@ -39,6 +40,8 @@ type sSysBot struct {
 	telegramBots      map[string]*tgbot.Bot
 	runtimeMu         sync.Mutex
 	runtimeCancel     context.CancelFunc
+	cleanupMu         sync.Mutex
+	cleanupCancel     context.CancelFunc
 	featureMu         sync.RWMutex
 	features          map[string]*botFeatureRow
 	featureAt         time.Time
@@ -54,9 +57,11 @@ func NewSysBot() *sSysBot { return &sSysBot{} }
 func (s *sSysBot) StartRuntime(ctx context.Context) {
 	_ = s.syncAllTelegramBotMenus(ctx)
 	s.startPolling(ctx)
+	s.startTelegramMessageCleanup(ctx)
 }
 func (s *sSysBot) StopRuntime() {
 	s.stopPolling()
+	s.stopTelegramMessageCleanup()
 	s.clearTelegramBotCache()
 }
 

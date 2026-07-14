@@ -86,11 +86,12 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 		asset := media.EffectiveAsset()
 		posterUrl := normalizeMediaFileURL(record["poster_url"].String(), record["poster_storage_path"].String())
 		posterStoragePath := record["poster_storage_path"].String()
-		assetHash := telegramMediaCacheAssetHash(record["media_type"].String(), asset.Hash, posterUrl, posterStoragePath, record["tg_thumb_file_id"].String())
+		mediaType := record["media_type"].String()
+		assetHash := telegramMediaCacheAssetHash(mediaType, asset.Hash, posterUrl, posterStoragePath, record["tg_thumb_file_id"].String())
 		rows = append(rows, &telegramMediaItem{
 			Id:                record["id"].Int64(),
 			AttachmentId:      asset.AttachmentId,
-			MediaType:         record["media_type"].String(),
+			MediaType:         mediaType,
 			Purpose:           record["purpose"].String(),
 			FileUrl:           normalizeMediaFileURL(asset.FileUrl, asset.StoragePath),
 			PosterUrl:         posterUrl,
@@ -114,6 +115,8 @@ func telegramMediaCacheAssetHash(mediaType string, assetHash string, posterUrl s
 		return assetHash
 	}
 	var builder strings.Builder
+	builder.WriteString("video-meta-v2")
+	builder.WriteByte('|')
 	builder.WriteString(assetHash)
 	builder.WriteByte('|')
 	builder.WriteString(strings.TrimSpace(posterUrl))

@@ -94,6 +94,23 @@ func (s *sSysPublish) telegramVideoMeta(ctx context.Context, media *telegramMedi
 	return meta
 }
 
+func (s *sSysPublish) prepareTelegramMediaItemsForSend(ctx context.Context, media []*telegramMediaItem) {
+	for _, item := range media {
+		s.prepareTelegramMediaItemForSend(ctx, item)
+	}
+}
+
+func (s *sSysPublish) prepareTelegramMediaItemForSend(ctx context.Context, media *telegramMediaItem) {
+	if media == nil || !strings.EqualFold(strings.TrimSpace(media.MediaType), "video") {
+		return
+	}
+	_ = s.telegramVideoMeta(ctx, media)
+	if _, ok := telegramCopyMediaRefFromFileId(media.TgFileId); ok {
+		media.TgFileId = ""
+		media.TgThumbFileId = ""
+	}
+}
+
 func telegramVideoMetaProbePath(ctx context.Context, media *telegramMediaItem) (string, func(), error) {
 	if media == nil {
 		return "", nil, nil
