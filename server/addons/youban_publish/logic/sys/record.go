@@ -177,6 +177,9 @@ func (s *sSysPublish) publishRecordList(ctx context.Context, in *sysin.PublishRe
 	if err = mod.Page(in.Page, in.PerPage).OrderDesc("l.id").Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取发送记录失败")
 	}
+	if err = s.enrichPublishRecordChannelDisplays(ctx, tenantId, list); err != nil {
+		return nil, 0, err
+	}
 	if err = s.enrichPublishRecordFullPushProgress(ctx, list); err != nil {
 		return nil, 0, err
 	}
@@ -236,9 +239,9 @@ func (s *sSysPublish) applyPublishRecordFilters(mod *gdb.Model, in *sysin.Publis
 	if in.Keyword != "" {
 		like := "%" + in.Keyword + "%"
 		if id, err := strconv.ParseInt(in.Keyword, 10, 64); err == nil && id > 0 {
-			mod = mod.Where("(p.title LIKE ? OR l.message LIKE ? OR c.channel_title LIKE ? OR b.bot_name LIKE ? OR b.bot_username LIKE ? OR a.nickname LIKE ? OR j.target_chat_id LIKE ? OR EXISTS (SELECT 1 FROM "+publishTgChannelTable+" tc WHERE tc.tenant_id=j.tenant_id AND tc.tg_account_id=j.account_id AND REPLACE(tc.channel_id, '-100', '')=REPLACE(j.target_chat_id, '-100', '') AND tc.channel_title LIKE ?) OR l.id=? OR l.job_id=? OR l.task_id=? OR l.profile_id=?)", like, like, like, like, like, like, like, like, id, id, id, id)
+			mod = mod.Where("(p.title LIKE ? OR l.message LIKE ? OR c.channel_title LIKE ? OR b.bot_name LIKE ? OR b.bot_username LIKE ? OR a.nickname LIKE ? OR j.target_chat_id LIKE ? OR EXISTS (SELECT 1 FROM "+publishTgChannelTable+" tc WHERE tc.tenant_id=j.tenant_id AND REPLACE(tc.channel_id, '-100', '')=REPLACE(j.target_chat_id, '-100', '') AND tc.channel_title LIKE ?) OR l.id=? OR l.job_id=? OR l.task_id=? OR l.profile_id=?)", like, like, like, like, like, like, like, like, id, id, id, id)
 		} else {
-			mod = mod.Where("(p.title LIKE ? OR l.message LIKE ? OR c.channel_title LIKE ? OR b.bot_name LIKE ? OR b.bot_username LIKE ? OR a.nickname LIKE ? OR j.target_chat_id LIKE ? OR EXISTS (SELECT 1 FROM "+publishTgChannelTable+" tc WHERE tc.tenant_id=j.tenant_id AND tc.tg_account_id=j.account_id AND REPLACE(tc.channel_id, '-100', '')=REPLACE(j.target_chat_id, '-100', '') AND tc.channel_title LIKE ?))", like, like, like, like, like, like, like, like)
+			mod = mod.Where("(p.title LIKE ? OR l.message LIKE ? OR c.channel_title LIKE ? OR b.bot_name LIKE ? OR b.bot_username LIKE ? OR a.nickname LIKE ? OR j.target_chat_id LIKE ? OR EXISTS (SELECT 1 FROM "+publishTgChannelTable+" tc WHERE tc.tenant_id=j.tenant_id AND REPLACE(tc.channel_id, '-100', '')=REPLACE(j.target_chat_id, '-100', '') AND tc.channel_title LIKE ?))", like, like, like, like, like, like, like, like)
 		}
 	}
 	return mod

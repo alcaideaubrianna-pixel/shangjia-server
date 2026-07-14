@@ -46,7 +46,7 @@ func (s *sSysPublish) publishRecordListFast(ctx context.Context, in *sysin.Publi
 	if len(list) == 0 {
 		return list, totalCount, nil
 	}
-	if err = s.enrichPublishRecordListFast(ctx, list); err != nil {
+	if err = s.enrichPublishRecordListFast(ctx, tenantId, list); err != nil {
 		return nil, 0, err
 	}
 	if err = s.enrichPublishRecordFullPushProgress(ctx, list); err != nil {
@@ -56,7 +56,7 @@ func (s *sSysPublish) publishRecordListFast(ctx context.Context, in *sysin.Publi
 	return
 }
 
-func (s *sSysPublish) enrichPublishRecordListFast(ctx context.Context, list []*sysin.PublishRecordModel) error {
+func (s *sSysPublish) enrichPublishRecordListFast(ctx context.Context, tenantId int64, list []*sysin.PublishRecordModel) error {
 	jobIds := uniquePositiveInt64sFromRecordList(list, func(item *sysin.PublishRecordModel) int64 { return item.JobId })
 	taskIds := uniquePositiveInt64sFromRecordList(list, func(item *sysin.PublishRecordModel) int64 { return item.TaskId })
 	accountIds := uniquePositiveInt64sFromRecordList(list, func(item *sysin.PublishRecordModel) int64 { return item.AccountId })
@@ -93,7 +93,6 @@ func (s *sSysPublish) enrichPublishRecordListFast(ctx context.Context, list []*s
 	if err != nil {
 		return err
 	}
-
 	for _, item := range list {
 		if item == nil {
 			continue
@@ -121,7 +120,7 @@ func (s *sSysPublish) enrichPublishRecordListFast(ctx context.Context, list []*s
 			item.ChannelUsername = channel.Username
 		}
 	}
-	return nil
+	return s.enrichPublishRecordChannelDisplays(ctx, tenantId, list)
 }
 
 type publishRecordJobSnapshot struct {
