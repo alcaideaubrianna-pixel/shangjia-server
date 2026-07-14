@@ -115,7 +115,7 @@ func telegramMediaCacheAssetHash(mediaType string, assetHash string, posterUrl s
 		return assetHash
 	}
 	var builder strings.Builder
-	builder.WriteString("video-meta-v2")
+	builder.WriteString("video-meta-v3")
 	builder.WriteByte('|')
 	builder.WriteString(assetHash)
 	builder.WriteByte('|')

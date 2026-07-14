@@ -241,7 +241,15 @@ func (s *sSysPublish) telegramInputMediaGroup(ctx context.Context, media []*tele
 			itemCaption = caption
 		}
 		if item.MediaType == "video" {
-			video := &models.InputMediaVideo{Media: source, Caption: itemCaption, ParseMode: telegramMediaParseMode(itemCaption), SupportsStreaming: true, MediaAttachment: attachment}
+			thumbnail, thumbnailCloser, err := telegramVideoThumbnail(ctx, item)
+			if err != nil {
+				closeTelegramMediaFiles(closers)
+				return nil, nil, nil, nil, err
+			}
+			if thumbnailCloser != nil {
+				closers = append(closers, thumbnailCloser)
+			}
+			video := &models.InputMediaVideo{Media: source, Thumbnail: thumbnail, Caption: itemCaption, ParseMode: telegramMediaParseMode(itemCaption), SupportsStreaming: true, MediaAttachment: attachment}
 			applyTelegramInputMediaVideoMeta(video, s.telegramVideoMeta(ctx, item))
 			group = append(group, video)
 		} else {
