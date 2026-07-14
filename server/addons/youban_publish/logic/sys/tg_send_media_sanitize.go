@@ -3,8 +3,10 @@ package sys
 import (
 	"context"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +20,8 @@ import (
 )
 
 const telegramPhotoMaxUploadBytes int64 = 10 * 1024 * 1024
+const telegramPhotoMaxDimensionsSum = 10000
+const telegramPhotoMaxDimensionRatio = 20.0
 
 func prepareTelegramMediaUploadFile(ctx context.Context, media *telegramMediaItem, path string, cleanup func()) (string, func(), error) {
 	path = strings.TrimSpace(path)
@@ -64,6 +68,7 @@ func stripTelegramPhotoMetadata(ctx context.Context, path string, ext string, qu
 	if err != nil {
 		return "", gerror.Wrap(err, "解析图片失败")
 	}
+	img = normalizeTelegramPhotoDimensions(img)
 	out, err := os.CreateTemp("", "ybp-tg-photo-*"+normalizedTelegramPhotoExt(ext))
 	if err != nil {
 		return "", gerror.Wrap(err, "创建图片临时文件失败")
@@ -106,6 +111,7 @@ func compressTelegramPhotoForUpload(ctx context.Context, path string) (string, e
 	if err != nil {
 		return "", gerror.Wrap(err, "解析图片失败")
 	}
+	img = normalizeTelegramPhotoDimensions(img)
 	for _, quality := range []int{95, 92, 90, 88, 85, 82, 80, 76, 72, 68, 64, 60} {
 		outPath, err := encodeTelegramJPEG(img, quality)
 		if err != nil {
@@ -194,6 +200,102 @@ func resizeImage(img image.Image, scale float64) image.Image {
 	dst := image.NewRGBA(image.Rect(0, 0, width, height))
 	xdraw.CatmullRom.Scale(dst, dst.Bounds(), img, bounds, xdraw.Over, nil)
 	return dst
+}
+
+func normalizeTelegramPhotoDimensions(img image.Image) image.Image {
+	if img == nil {
+		return img
+	}
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	if telegramPhotoDimensionsValid(width, height) {
+		return img
+	}
+	contentWidth, contentHeight, canvasWidth, canvasHeight := telegramPhotoTargetDimensions(width, height)
+	if contentWidth <= 0 || contentHeight <= 0 || canvasWidth <= 0 || canvasHeight <= 0 {
+		return img
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, canvasWidth, canvasHeight))
+	fillImage(dst, color.White)
+	offsetX := (canvasWidth - contentWidth) / 2
+	offsetY := (canvasHeight - contentHeight) / 2
+	target := image.Rect(offsetX, offsetY, offsetX+contentWidth, offsetY+contentHeight)
+	xdraw.CatmullRom.Scale(dst, target, img, bounds, xdraw.Over, nil)
+	return dst
+}
+
+func telegramPhotoTargetDimensions(width int, height int) (int, int, int, int) {
+	contentWidth := width
+	contentHeight := height
+	canvasWidth := width
+	canvasHeight := height
+	for i := 0; i < 6; i++ {
+		canvasWidth, canvasHeight = telegramPhotoCanvasDimensions(contentWidth, contentHeight)
+		if canvasWidth+canvasHeight <= telegramPhotoMaxDimensionsSum {
+			return contentWidth, contentHeight, canvasWidth, canvasHeight
+		}
+		scale := float64(telegramPhotoMaxDimensionsSum) / float64(canvasWidth+canvasHeight)
+		contentWidth = maxTelegramPhotoInt(1, int(math.Floor(float64(contentWidth)*scale)))
+		contentHeight = maxTelegramPhotoInt(1, int(math.Floor(float64(contentHeight)*scale)))
+	}
+	canvasWidth, canvasHeight = telegramPhotoCanvasDimensions(contentWidth, contentHeight)
+	for canvasWidth+canvasHeight > telegramPhotoMaxDimensionsSum && contentWidth+contentHeight > 2 {
+		if contentWidth >= contentHeight && contentWidth > 1 {
+			contentWidth--
+		} else if contentHeight > 1 {
+			contentHeight--
+		} else {
+			break
+		}
+		canvasWidth, canvasHeight = telegramPhotoCanvasDimensions(contentWidth, contentHeight)
+	}
+	return contentWidth, contentHeight, canvasWidth, canvasHeight
+}
+
+func telegramPhotoCanvasDimensions(width int, height int) (int, int) {
+	canvasWidth := maxTelegramPhotoInt(1, width)
+	canvasHeight := maxTelegramPhotoInt(1, height)
+	if float64(canvasWidth)/float64(canvasHeight) > telegramPhotoMaxDimensionRatio {
+		canvasHeight = int(math.Ceil(float64(canvasWidth) / telegramPhotoMaxDimensionRatio))
+	}
+	if float64(canvasHeight)/float64(canvasWidth) > telegramPhotoMaxDimensionRatio {
+		canvasWidth = int(math.Ceil(float64(canvasHeight) / telegramPhotoMaxDimensionRatio))
+	}
+	return canvasWidth, canvasHeight
+}
+
+func telegramPhotoDimensionsValid(width int, height int) bool {
+	if width <= 0 || height <= 0 {
+		return false
+	}
+	if width+height > telegramPhotoMaxDimensionsSum {
+		return false
+	}
+	ratio := float64(width) / float64(height)
+	if ratio < 1 {
+		ratio = 1 / ratio
+	}
+	return ratio <= telegramPhotoMaxDimensionRatio
+}
+
+func fillImage(img *image.RGBA, c color.Color) {
+	if img == nil {
+		return
+	}
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			img.Set(x, y, c)
+		}
+	}
+}
+
+func maxTelegramPhotoInt(a int, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func normalizedTelegramPhotoExt(ext string) string {
