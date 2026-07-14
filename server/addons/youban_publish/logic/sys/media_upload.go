@@ -5,6 +5,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -61,11 +62,17 @@ func (s *sSysPublish) AdminMessageTemplateMediaUpload(ctx context.Context, in *s
 	if in.MediaType == "video" {
 		uploadType = storager.KindVideo
 	}
-	attachment, err := service.CommonUpload().UploadFile(ctx, uploadType, file)
+	posterAttachment, err := uploadMediaPosterForType(ctx, in.MediaType, poster)
 	if err != nil {
 		return nil, err
 	}
-	posterAttachment, err := uploadMediaPosterForType(ctx, in.MediaType, poster)
+	if in.MediaType == "video" && posterAttachment == nil {
+		posterAttachment, err = uploadVideoPoster(ctx, file)
+		if err != nil {
+			g.Log().Warningf(ctx, "自动生成消息模板视频封面失败 mediaType:%s name:%s err:%+v", in.MediaType, file.Filename, err)
+		}
+	}
+	attachment, err := service.CommonUpload().UploadFile(ctx, uploadType, file)
 	if err != nil {
 		return nil, err
 	}
@@ -101,11 +108,17 @@ func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record
 			return nil, err
 		}
 	}
-	attachment, err := service.CommonUpload().UploadFile(ctx, uploadType, file)
+	posterAttachment, err := uploadMediaPosterForType(ctx, in.MediaType, poster)
 	if err != nil {
 		return nil, err
 	}
-	posterAttachment, err := uploadMediaPosterForType(ctx, in.MediaType, poster)
+	if in.MediaType == "video" && posterAttachment == nil {
+		posterAttachment, err = uploadVideoPoster(ctx, file)
+		if err != nil {
+			g.Log().Warningf(ctx, "自动生成视频封面失败 taskId:%d mediaType:%s name:%s err:%+v", in.TaskId, in.MediaType, file.Filename, err)
+		}
+	}
+	attachment, err := service.CommonUpload().UploadFile(ctx, uploadType, file)
 	if err != nil {
 		return nil, err
 	}
@@ -121,6 +134,9 @@ func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record
 
 func uploadMediaPosterForType(ctx context.Context, mediaType string, poster *ghttp.UploadFile) (*basesysin.AttachmentListModel, error) {
 	if mediaType != "video" {
+		return nil, nil
+	}
+	if poster == nil {
 		return nil, nil
 	}
 	return uploadMediaPoster(ctx, poster)

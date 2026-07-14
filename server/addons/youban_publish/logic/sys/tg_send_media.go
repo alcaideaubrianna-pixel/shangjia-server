@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -491,33 +490,7 @@ func telegramVideoThumbnail(ctx context.Context, media *telegramMediaItem) (mode
 }
 
 func generateTelegramVideoThumbnail(ctx context.Context, videoPath string) (string, error) {
-	ffmpegPath, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		return "", gerror.New("ffmpeg 未安装，无法生成TG视频缩略图")
-	}
-	output, err := os.CreateTemp("", "ybp-tg-video-thumb-*.jpg")
-	if err != nil {
-		return "", gerror.Wrap(err, "创建TG视频缩略图临时文件失败")
-	}
-	outputPath := output.Name()
-	_ = output.Close()
-	scaleFilter := `scale=if(gt(iw\,ih)\,320\,-2):if(gt(iw\,ih)\,-2\,320)`
-	attempts := [][]string{
-		{"-y", "-ss", "00:00:01", "-i", videoPath, "-frames:v", "1", "-vf", scaleFilter, "-q:v", "5", outputPath},
-		{"-y", "-i", videoPath, "-frames:v", "1", "-vf", scaleFilter, "-q:v", "5", outputPath},
-	}
-	var lastOutput []byte
-	var lastErr error
-	for _, args := range attempts {
-		cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		lastOutput, lastErr = exec.CommandContext(cmdCtx, ffmpegPath, args...).CombinedOutput()
-		cancel()
-		if lastErr == nil && fileNonEmpty(outputPath) {
-			return outputPath, nil
-		}
-	}
-	_ = os.Remove(outputPath)
-	return "", gerror.Wrapf(lastErr, "生成TG视频缩略图失败：%s", ellipsisString(strings.TrimSpace(string(lastOutput)), 500))
+	return generateVideoPosterPath(ctx, videoPath)
 }
 
 func fileNonEmpty(path string) bool {

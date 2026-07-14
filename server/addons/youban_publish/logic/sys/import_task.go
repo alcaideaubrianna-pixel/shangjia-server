@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path"
 	"regexp"
 	"strings"
@@ -1600,10 +1599,6 @@ func legacyCMSVideoPoster(ctx context.Context, videoName string, content []byte)
 	if len(content) == 0 {
 		return nil, nil
 	}
-	ffmpegPath, err := legacyCMSFFmpegPath(ctx)
-	if err != nil {
-		return nil, err
-	}
 	input, err := os.CreateTemp("", "ybp-legacy-video-*"+path.Ext(videoName))
 	if err != nil {
 		return nil, gerror.Wrap(err, "创建旧站视频临时文件失败")
@@ -1617,46 +1612,7 @@ func legacyCMSVideoPoster(ctx context.Context, videoName string, content []byte)
 	if err = input.Close(); err != nil {
 		return nil, gerror.Wrap(err, "关闭旧站视频临时文件失败")
 	}
-	output, err := os.CreateTemp("", "ybp-legacy-poster-*.jpg")
-	if err != nil {
-		return nil, gerror.Wrap(err, "创建旧站视频封面临时文件失败")
-	}
-	outputPath := output.Name()
-	_ = output.Close()
-	defer os.Remove(outputPath)
-	cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	outputBytes, err := exec.CommandContext(cmdCtx, ffmpegPath, "-y", "-ss", "00:00:01", "-i", inputPath, "-frames:v", "1", "-q:v", "2", outputPath).CombinedOutput()
-	if err != nil {
-		return nil, gerror.Wrapf(err, "生成旧站视频封面失败：%s", ellipsisString(strings.TrimSpace(string(outputBytes)), 500))
-	}
-	posterBytes, err := os.ReadFile(outputPath)
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取旧站视频封面失败")
-	}
-	if len(posterBytes) == 0 {
-		return nil, nil
-	}
-	posterName := strings.TrimSuffix(path.Base(videoName), path.Ext(videoName)) + ".jpg"
-	fileHeader, err := file.NewMultipartFileHeader(posterName, posterBytes)
-	if err != nil {
-		return nil, gerror.Wrap(err, "创建旧站视频封面上传文件失败")
-	}
-	return service.CommonUpload().UploadFile(ctx, storager.KindImg, &ghttp.UploadFile{FileHeader: fileHeader})
-}
-
-func legacyCMSFFmpegPath(ctx context.Context) (string, error) {
-	ffmpegPath, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		return "", gerror.New("ffmpeg 未安装，无法生成旧站视频封面")
-	}
-	cmdCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	outputBytes, err := exec.CommandContext(cmdCtx, ffmpegPath, "-version").CombinedOutput()
-	if err != nil {
-		return "", gerror.Wrapf(err, "ffmpeg 不可用，请检查本机或容器内 ffmpeg 依赖：%s", ellipsisString(strings.TrimSpace(string(outputBytes)), 500))
-	}
-	return ffmpegPath, nil
+	return generateVideoPosterAttachment(ctx, inputPath, videoName)
 }
 
 func legacyCMSClientRequestID(row gdb.Record, sourceNoteId int64) string {
