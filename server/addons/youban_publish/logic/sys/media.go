@@ -112,6 +112,14 @@ func (s *sSysPublish) MyMediaSort(ctx context.Context, in *sysin.MediaSortInp) (
 
 func (s *sSysPublish) sortTaskMedia(ctx context.Context, in *sysin.MediaSortInp, task gdb.Record, accountId int64) error {
 	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		profileId := task["profile_id"].Int64()
+		if profileId > 0 {
+			release, lockErr := s.lockTaskMediaSyncTx(ctx, tx, in.TaskId, profileId)
+			if lockErr != nil {
+				return lockErr
+			}
+			defer release()
+		}
 		for _, item := range in.Items {
 			mod := tx.Model(publishMediaTable).Ctx(ctx).
 				Where("id", item.Id).
@@ -135,8 +143,8 @@ func (s *sSysPublish) sortTaskMedia(ctx context.Context, in *sysin.MediaSortInp,
 				return gerror.New("媒体不存在或无权操作")
 			}
 		}
-		if task["profile_id"].Int64() > 0 {
-			if syncErr := s.syncTaskMediaToProfile(ctx, tx, in.TaskId, task["profile_id"].Int64()); syncErr != nil {
+		if profileId > 0 {
+			if syncErr := s.syncTaskMediaToProfile(ctx, tx, in.TaskId, profileId); syncErr != nil {
 				return syncErr
 			}
 		}
@@ -568,7 +576,7 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 		return nil, err
 	}
 	if task["profile_id"].Int64() > 0 {
-		if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err = s.withTaskMediaSyncLock(ctx, task["id"].Int64(), task["profile_id"].Int64(), func(ctx context.Context, tx gdb.TX) error {
 			return s.syncTaskMediaToProfile(ctx, tx, task["id"].Int64(), task["profile_id"].Int64())
 		}); err != nil {
 			return nil, err
@@ -899,6 +907,44 @@ func (s *sSysPublish) refreshTaskMediaCount(ctx context.Context, taskId int64) e
 	return nil
 }
 
+func taskMediaSyncLockKey(taskId int64, profileId int64) string {
+	return fmt.Sprintf("youban_publish:media_sync:%d:%d", taskId, profileId)
+}
+
+func (s *sSysPublish) withTaskMediaSyncLock(ctx context.Context, taskId int64, profileId int64, fn func(ctx context.Context, tx gdb.TX) error) error {
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		release, err := s.lockTaskMediaSyncTx(ctx, tx, taskId, profileId)
+		if err != nil {
+			return err
+		}
+		defer release()
+		return fn(ctx, tx)
+	})
+}
+
+func (s *sSysPublish) lockTaskMediaSyncTx(ctx context.Context, tx gdb.TX, taskId int64, profileId int64) (func(), error) {
+	key := taskMediaSyncLockKey(taskId, profileId)
+	dbType := strings.ToLower(g.DB().GetConfig().Type)
+	switch dbType {
+	case consts.DBPgsql:
+		if _, err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", key); err != nil {
+			return func() {}, gerror.Wrap(err, "获取资料媒体同步锁失败")
+		}
+		return func() {}, nil
+	default:
+		value, err := tx.GetValue("SELECT GET_LOCK(?, 60)", key)
+		if err != nil {
+			return func() {}, gerror.Wrap(err, "获取资料媒体同步锁失败")
+		}
+		if value.Int() != 1 {
+			return func() {}, gerror.New("获取资料媒体同步锁超时")
+		}
+		return func() {
+			_, _ = tx.Exec("SELECT RELEASE_LOCK(?)", key)
+		}, nil
+	}
+}
+
 func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, taskId int64, profileId int64) error {
 	var list []*sysin.MediaModel
 	if err := tx.Model(publishMediaTable).Ctx(ctx).
@@ -914,8 +960,8 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 		profileColumns := dao.ContentProfile.Columns()
 		data := g.Map{
 			profileColumns.ImageCount: 0,
-			profileColumns.VideoCount:  0,
-			profileColumns.UpdatedAt:   now,
+			profileColumns.VideoCount: 0,
+			profileColumns.UpdatedAt:  now,
 		}
 		if _, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Where(profileColumns.Id, profileId).Data(data).Update(); err != nil {
 			return gerror.Wrap(err, "更新资料媒体数量失败")
