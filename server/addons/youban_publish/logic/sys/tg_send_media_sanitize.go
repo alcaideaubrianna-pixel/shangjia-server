@@ -1,0 +1,226 @@
+package sys
+
+import (
+	"context"
+	"image"
+	"image/jpeg"
+	"image/png"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	xdraw "golang.org/x/image/draw"
+	_ "golang.org/x/image/webp"
+)
+
+const telegramPhotoMaxUploadBytes int64 = 10 * 1024 * 1024
+
+func prepareTelegramMediaUploadFile(ctx context.Context, media *telegramMediaItem, path string, cleanup func()) (string, func(), error) {
+	path = strings.TrimSpace(path)
+	if path == "" || media == nil {
+		return path, cleanup, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(media.MediaType)) {
+	case "video":
+		return prepareTelegramVideoUploadFile(ctx, path, cleanup)
+	default:
+		return prepareTelegramPhotoUploadFile(ctx, path, cleanup)
+	}
+}
+
+func prepareTelegramPhotoUploadFile(ctx context.Context, path string, cleanup func()) (string, func(), error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return path, cleanup, err
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	if info.Size() <= telegramPhotoMaxUploadBytes && ext == ".png" {
+		cleanPath, err := stripTelegramPhotoMetadata(ctx, path, ext, 0)
+		if err == nil && cleanPath != "" {
+			return cleanPath, chainCleanup(cleanup, func() { _ = os.Remove(cleanPath) }), nil
+		}
+	}
+	cleanPath, err := compressTelegramPhotoForUpload(ctx, path)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return "", nil, err
+	}
+	return cleanPath, chainCleanup(cleanup, func() { _ = os.Remove(cleanPath) }), nil
+}
+
+func stripTelegramPhotoMetadata(ctx context.Context, path string, ext string, quality int) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", gerror.Wrap(err, "打开图片失败")
+	}
+	defer file.Close()
+	img, _, err := image.Decode(file)
+	if err != nil {
+		return "", gerror.Wrap(err, "解析图片失败")
+	}
+	out, err := os.CreateTemp("", "ybp-tg-photo-*"+normalizedTelegramPhotoExt(ext))
+	if err != nil {
+		return "", gerror.Wrap(err, "创建图片临时文件失败")
+	}
+	defer out.Close()
+	if ext == ".png" && quality <= 0 {
+		encoder := png.Encoder{CompressionLevel: png.BestCompression}
+		if err = encoder.Encode(out, img); err != nil {
+			_ = os.Remove(out.Name())
+			return "", gerror.Wrap(err, "清理图片元数据失败")
+		}
+		return out.Name(), nil
+	}
+	if quality <= 0 {
+		quality = 95
+	}
+	if err = jpeg.Encode(out, img, &jpeg.Options{Quality: quality}); err != nil {
+		_ = os.Remove(out.Name())
+		return "", gerror.Wrap(err, "压缩图片失败")
+	}
+	return out.Name(), nil
+}
+
+func compressTelegramPhotoForUpload(ctx context.Context, path string) (string, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".png" {
+		if cleanPath, err := stripTelegramPhotoMetadata(ctx, path, ext, 0); err == nil {
+			if size, sizeErr := fileSize(cleanPath); sizeErr == nil && size <= telegramPhotoMaxUploadBytes {
+				return cleanPath, nil
+			}
+			_ = os.Remove(cleanPath)
+		}
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", gerror.Wrap(err, "打开图片失败")
+	}
+	img, _, err := image.Decode(file)
+	_ = file.Close()
+	if err != nil {
+		return "", gerror.Wrap(err, "解析图片失败")
+	}
+	for _, quality := range []int{95, 92, 90, 88, 85, 82, 80, 76, 72, 68, 64, 60} {
+		outPath, err := encodeTelegramJPEG(img, quality)
+		if err != nil {
+			return "", err
+		}
+		size, err := fileSize(outPath)
+		if err == nil && size <= telegramPhotoMaxUploadBytes {
+			return outPath, nil
+		}
+		_ = os.Remove(outPath)
+	}
+	current := img
+	for scale := 0.92; scale >= 0.50; scale -= 0.08 {
+		resized := resizeImage(current, scale)
+		if resized == nil {
+			break
+		}
+		for _, quality := range []int{88, 84, 80, 76, 72, 68, 64, 60} {
+			outPath, err := encodeTelegramJPEG(resized, quality)
+			if err != nil {
+				return "", err
+			}
+			size, err := fileSize(outPath)
+			if err == nil && size <= telegramPhotoMaxUploadBytes {
+				return outPath, nil
+			}
+			_ = os.Remove(outPath)
+		}
+		current = resized
+	}
+	return "", gerror.New("图片超过 Telegram photo 10MB 限制，压缩后仍无法满足发送要求")
+}
+
+func prepareTelegramVideoUploadFile(ctx context.Context, path string, cleanup func()) (string, func(), error) {
+	cleanPath, err := stripTelegramVideoMetadata(ctx, path)
+	if err != nil {
+		g.Log().Warningf(ctx, "清理视频元数据失败，使用原视频发送 path:%s err:%+v", path, err)
+		return path, cleanup, nil
+	}
+	return cleanPath, chainCleanup(cleanup, func() { _ = os.Remove(cleanPath) }), nil
+}
+
+func stripTelegramVideoMetadata(ctx context.Context, path string) (string, error) {
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return "", gerror.New("ffmpeg 未安装，无法清理视频元数据")
+	}
+	out, err := os.CreateTemp("", "ybp-tg-video-*"+filepath.Ext(path))
+	if err != nil {
+		return "", gerror.Wrap(err, "创建视频临时文件失败")
+	}
+	outPath := out.Name()
+	_ = out.Close()
+	_ = os.Remove(outPath)
+	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	args := []string{"-y", "-i", path, "-map_metadata", "-1", "-c", "copy", outPath}
+	output, err := exec.CommandContext(cmdCtx, ffmpegPath, args...).CombinedOutput()
+	if err != nil {
+		_ = os.Remove(outPath)
+		return "", gerror.Wrapf(err, "ffmpeg 清理视频元数据失败：%s", ellipsisString(strings.TrimSpace(string(output)), 500))
+	}
+	return outPath, nil
+}
+
+func encodeTelegramJPEG(img image.Image, quality int) (string, error) {
+	out, err := os.CreateTemp("", "ybp-tg-photo-*.jpg")
+	if err != nil {
+		return "", gerror.Wrap(err, "创建图片临时文件失败")
+	}
+	defer out.Close()
+	if err = jpeg.Encode(out, img, &jpeg.Options{Quality: quality}); err != nil {
+		_ = os.Remove(out.Name())
+		return "", gerror.Wrap(err, "压缩图片失败")
+	}
+	return out.Name(), nil
+}
+
+func resizeImage(img image.Image, scale float64) image.Image {
+	bounds := img.Bounds()
+	width := int(float64(bounds.Dx()) * scale)
+	height := int(float64(bounds.Dy()) * scale)
+	if width <= 0 || height <= 0 {
+		return nil
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, width, height))
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), img, bounds, xdraw.Over, nil)
+	return dst
+}
+
+func normalizedTelegramPhotoExt(ext string) string {
+	if strings.EqualFold(ext, ".png") {
+		return ".png"
+	}
+	return ".jpg"
+}
+
+func chainCleanup(first func(), second func()) func() {
+	if first == nil && second == nil {
+		return nil
+	}
+	return func() {
+		if first != nil {
+			first()
+		}
+		if second != nil {
+			second()
+		}
+	}
+}
+
+func fileSize(path string) (int64, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}

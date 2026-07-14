@@ -101,11 +101,14 @@ func (s *sSysPublish) prepareTelegramMediaItemsForSend(ctx context.Context, medi
 }
 
 func (s *sSysPublish) prepareTelegramMediaItemForSend(ctx context.Context, media *telegramMediaItem) {
-	if media == nil || !strings.EqualFold(strings.TrimSpace(media.MediaType), "video") {
+	if media == nil {
 		return
 	}
-	_ = s.telegramVideoMeta(ctx, media)
-	if _, ok := telegramCopyMediaRefFromFileId(media.TgFileId); ok {
+	mediaType := strings.ToLower(strings.TrimSpace(media.MediaType))
+	if mediaType == "video" {
+		_ = s.telegramVideoMeta(ctx, media)
+	}
+	if telegramMediaRequiresSanitizedUpload(media) {
 		media.TgFileId = ""
 		media.TgThumbFileId = ""
 	}

@@ -272,10 +272,14 @@ func telegramInputFile(ctx context.Context, media *telegramMediaItem) (models.In
 	if media == nil {
 		return nil, nil, gerror.New("媒体文件为空")
 	}
-	if source := strings.TrimSpace(media.TgFileId); source != "" {
+	if source := strings.TrimSpace(media.TgFileId); source != "" && !telegramMediaRequiresSanitizedUpload(media) {
 		return &models.InputFileString{Data: source}, nil, nil
 	}
 	path, cleanup, err := cachedTelegramMediaFile(ctx, media)
+	if err != nil {
+		return nil, nil, err
+	}
+	path, cleanup, err = prepareTelegramMediaUploadFile(ctx, media, path, cleanup)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -295,6 +299,9 @@ func telegramInputFile(ctx context.Context, media *telegramMediaItem) (models.In
 func telegramMediaSetHasCopyRef(media []*telegramMediaItem) bool {
 	for _, item := range media {
 		if item == nil {
+			continue
+		}
+		if telegramMediaRequiresSanitizedUpload(item) {
 			continue
 		}
 		if _, ok := telegramCopyMediaRefFromFileId(item.TgFileId); ok {
@@ -324,6 +331,9 @@ func telegramCopyMediaGroupRefs(media []*telegramMediaItem) (string, []int, bool
 	messageIds := make([]int, 0, len(media))
 	for _, item := range media {
 		if item == nil {
+			return "", nil, false
+		}
+		if telegramMediaRequiresSanitizedUpload(item) {
 			return "", nil, false
 		}
 		ref, ok := telegramCopyMediaRefFromFileId(item.TgFileId)
@@ -370,10 +380,14 @@ func telegramInputMediaSource(ctx context.Context, media *telegramMediaItem) (st
 	if media == nil {
 		return "", nil, nil, gerror.New("媒体文件为空")
 	}
-	if source := strings.TrimSpace(media.TgFileId); source != "" {
+	if source := strings.TrimSpace(media.TgFileId); source != "" && !telegramMediaRequiresSanitizedUpload(media) {
 		return source, nil, nil, nil
 	}
 	path, cleanup, err := cachedTelegramMediaFile(ctx, media)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	path, cleanup, err = prepareTelegramMediaUploadFile(ctx, media, path, cleanup)
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -389,6 +403,18 @@ func telegramInputMediaSource(ctx context.Context, media *telegramMediaItem) (st
 	}
 	attachName := fmt.Sprintf("media_%d_%s", media.Id, telegramUploadFilename(media, path))
 	return "attach://" + attachName, file, closeWithCleanup(file, cleanup), nil
+}
+
+func telegramMediaRequiresSanitizedUpload(media *telegramMediaItem) bool {
+	if media == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(media.MediaType)) {
+	case "image", "photo", "video":
+		return true
+	default:
+		return false
+	}
 }
 
 type fileCleanupCloser struct {

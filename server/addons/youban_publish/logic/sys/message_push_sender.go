@@ -426,11 +426,19 @@ func gotdMessageUploadOption(ctx context.Context, media *telegramMediaItem) (got
 func gotdMessageUploadOptionFromPath(ctx context.Context, media *telegramMediaItem, path string, cleanup func()) (gotdmessage.UploadOption, func(), error) {
 	uploadPath := path
 	finalCleanup := cleanup
-	if shouldConvertMessagePushImageToJPEG(media, path) {
-		jpegPath, err := convertMessagePushImageToJPEG(ctx, path)
+	var err error
+	uploadPath, finalCleanup, err = prepareTelegramMediaUploadFile(ctx, media, uploadPath, finalCleanup)
+	if err != nil {
+		if finalCleanup != nil {
+			finalCleanup()
+		}
+		return nil, nil, err
+	}
+	if shouldConvertMessagePushImageToJPEG(media, uploadPath) {
+		jpegPath, err := convertMessagePushImageToJPEG(ctx, uploadPath)
 		if err != nil {
-			if cleanup != nil {
-				cleanup()
+			if finalCleanup != nil {
+				finalCleanup()
 			}
 			return nil, nil, err
 		}
