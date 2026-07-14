@@ -200,6 +200,11 @@ func (s *sSysBot) dispatchFeature(ctx context.Context, botId int64, msg *models.
 		if command == "" && s.matchFeatureLabel(ctx, row, feature, labelText) {
 			return feature.Handle(ctx, s, &botFeatureContext{BotId: botId, Msg: msg, Text: text, Args: ""})
 		}
+		if command == "" {
+			if matcher, ok := feature.(botFeatureTextMatcher); ok && matcher.Match(ctx, s, row, labelText) {
+				return feature.Handle(ctx, s, &botFeatureContext{BotId: botId, Msg: msg, Text: text, Args: ""})
+			}
+		}
 	}
 	return false, nil
 }

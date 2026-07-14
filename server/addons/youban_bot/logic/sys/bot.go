@@ -76,6 +76,10 @@ type botFeatureConfigProvider interface {
 	ConfigSchema() []*sysin.FeatureConfigSchema
 }
 
+type botFeatureTextMatcher interface {
+	Match(ctx context.Context, bot *sSysBot, row *botFeatureRow, text string) bool
+}
+
 type botFeatureContext struct {
 	BotId int64
 	Msg   *models.Message
@@ -115,6 +119,7 @@ func init() {
 	registerBotFeature(adminFeature{})
 	registerBotFeature(inviteFeature{})
 	registerBotFeature(profileFeature{})
+	registerBotFeature(exchangeRateFeature{})
 }
 
 func (s *sSysBot) AdminBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error) {

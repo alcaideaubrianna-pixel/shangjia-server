@@ -123,15 +123,6 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	if in.TenantId <= 0 {
 		return gerror.New("当前账号未绑定账号归属")
 	}
-	if err = in.Filter(ctx); err != nil {
-		return err
-	}
-	if err = s.ensureTgAccountsBelongTenant(ctx, []int64{in.TgAccountId}, in.TenantId); err != nil {
-		return err
-	}
-	if err = s.ensureBotsBelongTenant(ctx, in.BotIds, in.TenantId); err != nil {
-		return err
-	}
 	isCreate := in.Id <= 0
 	var existing *sysin.ChannelModel
 	if !isCreate {
@@ -142,6 +133,29 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		if err != nil {
 			return err
 		}
+		if existing == nil || existing.Id <= 0 {
+			return gerror.New("频道不存在或无权操作")
+		}
+		// 编辑频道配置时，以登录态账号可操作的原频道为准，不信任前端提交的归属字段。
+		// 这里仅允许修改 Bot、默认选中、上架端可见、循环上架、备注和状态等配置。
+		if existing != nil {
+			in.TgAccountId = existing.TgAccountId
+			in.ChannelTitle = existing.ChannelTitle
+			in.ChannelUsername = existing.ChannelUsername
+			in.TargetChatId = existing.TargetChatId
+			in.PublishDirection = existing.PublishDirection
+		}
+	}
+	if err = in.Filter(ctx); err != nil {
+		return err
+	}
+	if isCreate {
+		if err = s.ensureTgAccountsBelongTenant(ctx, []int64{in.TgAccountId}, in.TenantId); err != nil {
+			return err
+		}
+	}
+	if err = s.ensureBotsBelongTenant(ctx, in.BotIds, in.TenantId); err != nil {
+		return err
 	}
 	// 新建时才做 TG 侧检测；编辑只落本地 DB，避免每次保存都触发远程校验。
 	if isCreate {
@@ -159,16 +173,6 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		in.ChannelTitle = checkRes.ChannelTitle
 		in.ChannelUsername = checkRes.ChannelUsername
 		in.TargetChatId = checkRes.TargetChatId
-	} else if existing != nil {
-		if strings.TrimSpace(in.ChannelTitle) == "" {
-			in.ChannelTitle = existing.ChannelTitle
-		}
-		if strings.TrimSpace(in.ChannelUsername) == "" {
-			in.ChannelUsername = existing.ChannelUsername
-		}
-		if strings.TrimSpace(in.TargetChatId) == "" {
-			in.TargetChatId = existing.TargetChatId
-		}
 	}
 	botJSON, err := encodeBotIds(in.BotIds)
 	if err != nil {

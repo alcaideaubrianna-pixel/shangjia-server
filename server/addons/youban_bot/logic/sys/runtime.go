@@ -2,7 +2,9 @@ package sys
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -213,7 +215,11 @@ func (s *sSysBot) storeTelegramMessage(ctx context.Context, botId int64, msg *mo
 		Where("chat_id", chatId).
 		Where("message_id", msg.ID).
 		Scan(&exists); err != nil {
-		return gerror.Wrap(err, "读取Telegram消息失败")
+		if errors.Is(err, sql.ErrNoRows) {
+			err = nil
+		} else {
+			return gerror.Wrap(err, "读取Telegram消息失败")
+		}
 	}
 	if exists.Id > 0 {
 		return nil
