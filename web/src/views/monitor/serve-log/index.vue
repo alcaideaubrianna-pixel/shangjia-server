@@ -47,6 +47,19 @@
             批量删除
           </n-button>
           <n-button
+            type="error"
+            @click="handleClear"
+            class="min-left-space"
+            v-if="hasPermission(['/serveLog/delete'])"
+          >
+            <template #icon>
+              <n-icon>
+                <DeleteOutlined />
+              </n-icon>
+            </template>
+            清空全部日志
+          </n-button>
+          <n-button
             type="primary"
             @click="handleExport"
             class="min-left-space"
@@ -105,7 +118,7 @@
   import { BasicTable, TableAction } from '@/components/Table';
   import { BasicForm, useForm } from '@/components/Form/index';
   import { usePermission } from '@/hooks/web/usePermission';
-  import { List, Export, Delete } from '@/api/serveLog';
+  import { List, Export, Delete, Clear } from '@/api/serveLog';
   import { columns, schemas } from './model';
   import { ExportOutlined, DeleteOutlined } from '@vicons/antd';
   import { useRouter } from 'vue-router';
@@ -213,6 +226,23 @@
           batchDeleteDisabled.value = true;
           checkedIds.value = [];
           message.success('删除成功');
+          reloadTable();
+        });
+      },
+    });
+  }
+
+  function handleClear() {
+    dialog.warning({
+      title: '危险操作',
+      content: '确定要清空全部服务日志吗？该操作不可恢复。',
+      positiveText: '确定清空',
+      negativeText: '取消',
+      onPositiveClick: () => {
+        Clear().then((_res) => {
+          batchDeleteDisabled.value = true;
+          checkedIds.value = [];
+          message.success('清空成功');
           reloadTable();
         });
       },

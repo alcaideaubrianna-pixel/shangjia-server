@@ -53,3 +53,9 @@ func (c *cServeLog) Delete(ctx context.Context, req *servelog.DeleteReq) (res *s
 	err = service.SysServeLog().Delete(ctx, &req.ServeLogDeleteInp)
 	return
 }
+
+// Clear 清空服务日志
+func (c *cServeLog) Clear(ctx context.Context, req *servelog.ClearReq) (res *servelog.ClearRes, err error) {
+	err = service.SysServeLog().Clear(ctx)
+	return
+}

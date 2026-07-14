@@ -47,3 +47,11 @@ type DeleteReq struct {
 }
 
 type DeleteRes struct{}
+
+// ClearReq 清空服务日志
+// 注意：该接口会删除全部服务日志，请谨慎操作。
+type ClearReq struct {
+	g.Meta `path:"/serveLog/clear" method:"post" tags:"服务日志" summary:"清空全部服务日志"`
+}
+
+type ClearRes struct{}

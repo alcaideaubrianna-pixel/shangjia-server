@@ -125,6 +125,12 @@ func (s *sSysServeLog) Delete(ctx context.Context, in *sysin.ServeLogDeleteInp) 
 	return
 }
 
+// Clear 清空服务日志
+func (s *sSysServeLog) Clear(ctx context.Context) (err error) {
+	_, err = dao.SysServeLog.Ctx(ctx).WhereGT(dao.SysServeLog.Columns().Id, 0).Delete()
+	return
+}
+
 // View 获取服务日志指定信息
 func (s *sSysServeLog) View(ctx context.Context, in *sysin.ServeLogViewInp) (res *sysin.ServeLogViewModel, err error) {
 	err = dao.SysServeLog.Ctx(ctx).Where(dao.SysServeLog.Columns().Id, in.Id).Scan(&res)

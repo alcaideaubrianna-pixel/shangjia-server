@@ -18,6 +18,14 @@ export function Delete(params) {
   });
 }
 
+// 清空全部服务日志
+export function Clear() {
+  return http.request({
+    url: '/serveLog/clear',
+    method: 'POST',
+  });
+}
+
 // 获取服务日志指定详情
 export function View(params) {
   return http.request({

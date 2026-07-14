@@ -462,6 +462,8 @@ type (
 		Export(ctx context.Context, in *sysin.ServeLogListInp) (err error)
 		// Delete 删除服务日志
 		Delete(ctx context.Context, in *sysin.ServeLogDeleteInp) (err error)
+		// Clear 清空服务日志
+		Clear(ctx context.Context) (err error)
 		// View 获取服务日志指定信息
 		View(ctx context.Context, in *sysin.ServeLogViewInp) (res *sysin.ServeLogViewModel, err error)
 		// RealWrite 真实写入
