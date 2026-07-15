@@ -28,6 +28,7 @@ type botMessageHandler interface {
 var botMessageHandlers = []botMessageHandler{
 	quickPushSessionMessageHandler{},
 	botFeatureMessageHandler{},
+	profileManageMessageHandler{},
 	publishListenerBindMessageHandler{},
 	authCodeMessageHandler{},
 }
@@ -39,6 +40,7 @@ func botAllowedUpdates() []string {
 		models.AllowedUpdateChannelPost,
 		models.AllowedUpdateEditedChannelPost,
 		models.AllowedUpdateCallbackQuery,
+		models.AllowedUpdateInlineQuery,
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	cryptorand "crypto/rand"
 	"fmt"
 	"math/big"
+	"regexp"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -14,31 +15,16 @@ import (
 	"hotgo/internal/dao"
 )
 
+var profileNoFormatRegexp = regexp.MustCompile(`^[A-Z][0-9]{5}$`)
+
 func (s *sSysPublish) nextAccountProfileNo(ctx context.Context, tx gdb.TX, tenantId int64, accountId int64) (string, error) {
-	setting, err := s.accountSetting(ctx, tenantId, accountId)
-	if err != nil {
-		return "", err
-	}
-	if setting.NumberSource == "random" {
-		return s.nextRandomProfileNo(ctx, tx, tenantId, accountId)
-	}
-	return s.nextSequenceProfileNo(ctx, tx, tenantId, accountId)
+	// 资料编号统一采用“随机大写字母 + 五位数字”，例如 A00001。
+	// 保留 tenantId/accountId 参数用于兼容旧调用链，唯一性检查仍保持全局唯一。
+	return s.nextRandomProfileNo(ctx, tx, tenantId, accountId)
 }
 
 func (s *sSysPublish) previewAccountProfileNo(ctx context.Context, tenantId int64, accountId int64, source string) (string, error) {
-	if source == "random" {
-		return randomProfileNo()
-	}
-	count, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Where("tenant_id", tenantId).
-		Where("account_id", accountId).
-		WhereGT("profile_id", 0).
-		WhereNull("deleted_at").
-		Count()
-	if err != nil {
-		return "", gerror.Wrap(err, "生成账号资料编号预览失败")
-	}
-	return fmt.Sprintf("%03d", count+1), nil
+	return randomProfileNo()
 }
 
 func accountSettingPreviewMark(setting *sysin.AccountSettingModel, accountName string, profileNo string) string {
@@ -59,18 +45,20 @@ func accountSettingPreviewMark(setting *sysin.AccountSettingModel, accountName s
 }
 
 func (s *sSysPublish) nextSequenceProfileNo(ctx context.Context, tx gdb.TX, tenantId int64, accountId int64) (string, error) {
-	count, err := tx.Model(publishTaskTable).Ctx(ctx).
-		Where("tenant_id", tenantId).
-		Where("account_id", accountId).
-		WhereGT("profile_id", 0).
-		WhereNull("deleted_at").
-		Count()
-	if err != nil {
-		return "", gerror.Wrap(err, "生成账号资料编号失败")
-	}
-	for i := count + 1; i <= count+1000; i++ {
-		code := fmt.Sprintf("%03d", i)
-		exists, existsErr := s.accountProfileNoExists(ctx, tx, tenantId, accountId, code)
+	_ = tenantId
+	_ = accountId
+	maxNumber := 26 * 99999
+	for i := 0; i < 1000; i++ {
+		count, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Unscoped().Count()
+		if err != nil {
+			return "", gerror.Wrap(err, "生成资料编号失败")
+		}
+		seq := count + i + 1
+		if seq > maxNumber {
+			return "", gerror.New("资料编号已用尽")
+		}
+		code := formatProfileNo(seq)
+		exists, existsErr := s.accountProfileNoExists(ctx, tx, 0, 0, code)
 		if existsErr != nil {
 			return "", existsErr
 		}
@@ -99,19 +87,77 @@ func (s *sSysPublish) nextRandomProfileNo(ctx context.Context, tx gdb.TX, tenant
 }
 
 func randomProfileNo() (string, error) {
-	letters := make([]byte, 2)
-	for i := range letters {
-		n, err := cryptorand.Int(cryptorand.Reader, big.NewInt(26))
-		if err != nil {
-			return "", gerror.Wrap(err, "生成随机资料编号失败")
-		}
-		letters[i] = byte('A' + n.Int64())
-	}
-	number, err := cryptorand.Int(cryptorand.Reader, big.NewInt(900))
+	letter, err := cryptorand.Int(cryptorand.Reader, big.NewInt(26))
 	if err != nil {
 		return "", gerror.Wrap(err, "生成随机资料编号失败")
 	}
-	return fmt.Sprintf("%s%03d", string(letters), number.Int64()+100), nil
+	number, err := cryptorand.Int(cryptorand.Reader, big.NewInt(99999))
+	if err != nil {
+		return "", gerror.Wrap(err, "生成随机资料编号失败")
+	}
+	return fmt.Sprintf("%c%05d", byte('A'+letter.Int64()), number.Int64()+1), nil
+}
+
+func formatProfileNo(seq int) string {
+	if seq <= 0 {
+		seq = 1
+	}
+	letterIndex := (seq - 1) / 99999
+	number := (seq-1)%99999 + 1
+	if letterIndex > 25 {
+		letterIndex = 25
+	}
+	return fmt.Sprintf("%c%05d", byte('A'+letterIndex), number)
+}
+
+func previewGlobalProfileNo(ctx context.Context) (string, error) {
+	count, err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Unscoped().Count()
+	if err != nil {
+		return "", gerror.Wrap(err, "生成资料编号预览失败")
+	}
+	return formatProfileNo(count + 1), nil
+}
+
+func (s *sSysPublish) ensureLegacyProfileNos(ctx context.Context, tx gdb.TX) error {
+	profileColumns := dao.ContentProfile.Columns()
+	rows, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).
+		Unscoped().
+		Fields(profileColumns.Id, profileColumns.ProfileNo).
+		OrderAsc(profileColumns.Id).
+		Limit(500).
+		All()
+	if err != nil {
+		return gerror.Wrap(err, "读取旧资料编号失败")
+	}
+	for _, row := range rows {
+		id := row[profileColumns.Id].Int64()
+		current := row[profileColumns.ProfileNo].String()
+		if id <= 0 || profileNoFormatRegexp.MatchString(current) {
+			continue
+		}
+		var next string
+		for i := 0; i < 20; i++ {
+			code, genErr := randomProfileNo()
+			if genErr != nil {
+				return genErr
+			}
+			exists, existsErr := s.accountProfileNoExists(ctx, tx, 0, 0, code)
+			if existsErr != nil {
+				return existsErr
+			}
+			if !exists {
+				next = code
+				break
+			}
+		}
+		if next == "" {
+			return gerror.New("迁移旧资料编号失败，请重试")
+		}
+		if _, err = tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Where(profileColumns.Id, id).Data(g.Map{profileColumns.ProfileNo: next}).Update(); err != nil {
+			return gerror.Wrap(err, "迁移旧资料编号失败")
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) accountProfileNoExists(ctx context.Context, tx gdb.TX, tenantId int64, accountId int64, profileNo string) (bool, error) {

@@ -598,6 +598,79 @@ func telegramAPICtx() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 35*time.Second)
 }
 
+func (s *sSysBot) resolveTelegramMessageMedia(ctx context.Context, botToken string, msg *models.Message) ([]*publishsysin.MessageTemplateMediaInp, error) {
+	if msg == nil {
+		return nil, nil
+	}
+	mediaType := ""
+	fileId := ""
+	name := ""
+	thumbFileId := ""
+	if len(msg.Photo) > 0 {
+		photo := msg.Photo[len(msg.Photo)-1]
+		mediaType = "image"
+		fileId = strings.TrimSpace(photo.FileID)
+		name = firstNonEmpty(photo.FileUniqueID, fmt.Sprintf("photo_%d", msg.ID))
+	} else if msg.Video != nil {
+		mediaType = "video"
+		fileId = strings.TrimSpace(msg.Video.FileID)
+		name = firstNonEmpty(msg.Video.FileName, msg.Video.FileUniqueID, fmt.Sprintf("video_%d", msg.ID))
+		if msg.Video.Thumbnail != nil {
+			thumbFileId = strings.TrimSpace(msg.Video.Thumbnail.FileID)
+		}
+	}
+	if fileId == "" {
+		return nil, nil
+	}
+	tgBot, err := s.telegramBot(ctx, botToken)
+	if err != nil {
+		return nil, err
+	}
+	fileURL, err := s.telegramFileDownloadURL(ctx, tgBot, botToken, fileId)
+	if err != nil {
+		return nil, err
+	}
+	posterURL := ""
+	if thumbFileId != "" {
+		if url, thumbErr := s.telegramFileDownloadURL(ctx, tgBot, botToken, thumbFileId); thumbErr == nil {
+			posterURL = url
+		} else {
+			g.Log().Warning(ctx, "读取Telegram媒体缩略图失败", g.Map{"chatId": msg.Chat.ID, "messageId": msg.ID, "thumbFileId": thumbFileId, "err": thumbErr})
+		}
+	}
+	return []*publishsysin.MessageTemplateMediaInp{{
+		MediaType:     mediaType,
+		Name:          name,
+		FileUrl:       fileURL,
+		PosterUrl:     posterURL,
+		TgFileId:      fmt.Sprintf("copy:%d:%d", msg.Chat.ID, msg.ID),
+		TgThumbFileId: thumbFileId,
+		SortIndex:     1,
+	}}, nil
+}
+
+func (s *sSysBot) telegramFileDownloadURL(ctx context.Context, tgBot *tgbot.Bot, botToken string, fileId string) (string, error) {
+	fileId = strings.TrimSpace(fileId)
+	if fileId == "" {
+		return "", nil
+	}
+	callCtx, cancel := telegramAPICtx()
+	defer cancel()
+	file, err := tgBot.GetFile(callCtx, &tgbot.GetFileParams{FileID: fileId})
+	if err != nil {
+		return "", err
+	}
+	if file == nil || strings.TrimSpace(file.FilePath) == "" {
+		return "", gerror.New("读取Telegram媒体文件地址失败")
+	}
+	return telegramFileURL(botToken, file.FilePath), nil
+}
+
+func telegramFileURL(botToken string, filePath string) string {
+	filePath = strings.ReplaceAll(url.PathEscape(strings.TrimSpace(filePath)), "%2F", "/")
+	return "https://api.telegram.org/file/bot" + strings.TrimSpace(botToken) + "/" + filePath
+}
+
 func isIgnorableTelegramError(err error) bool {
 	if err == nil {
 		return false
@@ -642,16 +715,25 @@ func (s *sSysBot) featureVisibleForTelegramUser(ctx context.Context, feature bot
 	if feature == nil {
 		return false
 	}
-	if feature.Key() != (adminFeature{}).Key() && feature.Key() != (quickPushFeature{}).Key() {
+	key := feature.Key()
+	if key != (adminFeature{}).Key() && key != (quickPushFeature{}).Key() && key != (profileFeature{}).Key() {
 		return true
 	}
 	if telegramUserId == "" {
 		return false
 	}
-	if feature.Key() == (adminFeature{}).Key() {
+	if key == (adminFeature{}).Key() {
 		bind, err := s.bindingByTelegram(ctx, sysin.BotAppAdmin, telegramUserId)
 		if err != nil {
 			g.Log().Warningf(ctx, "判断管理后台菜单可见失败 telegramUserId:%s err:%+v", telegramUserId, err)
+			return false
+		}
+		return bind != nil && bind.AccountId > 0
+	}
+	if key == (profileFeature{}).Key() {
+		bind, err := s.bindingByTelegram(ctx, sysin.BotAppApi, telegramUserId)
+		if err != nil {
+			g.Log().Warningf(ctx, "判断资料管理菜单可见失败 telegramUserId:%s err:%+v", telegramUserId, err)
 			return false
 		}
 		return bind != nil && bind.AccountId > 0

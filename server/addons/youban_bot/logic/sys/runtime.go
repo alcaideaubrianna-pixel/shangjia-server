@@ -128,11 +128,28 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 	if update == nil {
 		return nil
 	}
+	if update.InlineQuery != nil {
+		return s.handleProfileInlineQuery(ctx, botId, update.InlineQuery)
+	}
 	if update.CallbackQuery != nil {
+		g.Log().Infof(ctx, "收到Telegram Callback botId:%d chatId:%s userId:%s data:%s", botId, callbackQueryChatId(update.CallbackQuery), callbackQueryUserId(update.CallbackQuery), strings.TrimSpace(update.CallbackQuery.Data))
 		if handled, err := s.handleQuickPushCallback(ctx, botId, update.CallbackQuery); handled || err != nil {
+			if err != nil {
+				g.Log().Warningf(ctx, "Telegram Callback处理失败 handler:quick_push botId:%d chatId:%s userId:%s data:%s err:%+v", botId, callbackQueryChatId(update.CallbackQuery), callbackQueryUserId(update.CallbackQuery), strings.TrimSpace(update.CallbackQuery.Data), err)
+			}
 			return err
 		}
-		return s.handleExchangeRateCallback(ctx, botId, update.CallbackQuery)
+		if handled, err := s.handleProfileCallback(ctx, botId, update.CallbackQuery); handled || err != nil {
+			if err != nil {
+				g.Log().Warningf(ctx, "Telegram Callback处理失败 handler:profile botId:%d chatId:%s userId:%s data:%s err:%+v", botId, callbackQueryChatId(update.CallbackQuery), callbackQueryUserId(update.CallbackQuery), strings.TrimSpace(update.CallbackQuery.Data), err)
+			}
+			return err
+		}
+		if err := s.handleExchangeRateCallback(ctx, botId, update.CallbackQuery); err != nil {
+			g.Log().Warningf(ctx, "Telegram Callback处理失败 handler:exchange_rate botId:%d chatId:%s userId:%s data:%s err:%+v", botId, callbackQueryChatId(update.CallbackQuery), callbackQueryUserId(update.CallbackQuery), strings.TrimSpace(update.CallbackQuery.Data), err)
+			return err
+		}
+		return nil
 	}
 	msg := botMessageFromUpdate(update)
 	if msg == nil {
@@ -149,7 +166,24 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 	}
 	text := strings.TrimSpace(firstNonEmpty(msg.Text, msg.Caption))
 	_, err := s.dispatchBotMessage(ctx, &botMessageEvent{BotId: botId, Msg: msg, Text: text})
+	if err != nil {
+		g.Log().Warningf(ctx, "Telegram消息处理失败 botId:%d chatId:%d userId:%s text:%s err:%+v", botId, msg.Chat.ID, userId, text, err)
+	}
 	return err
+}
+
+func callbackQueryChatId(query *models.CallbackQuery) string {
+	if query == nil || query.Message.Message == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d", query.Message.Message.Chat.ID)
+}
+
+func callbackQueryUserId(query *models.CallbackQuery) string {
+	if query == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d", query.From.ID)
 }
 
 func (s *sSysBot) storeTelegramMessage(ctx context.Context, botId int64, msg *models.Message) error {

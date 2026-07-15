@@ -68,7 +68,10 @@ func (s *sSysPublish) createContentProfile(ctx context.Context, tx gdb.TX, task 
 	columns := dao.ContentProfile.Columns()
 	now := gtime.Now()
 	sourceKey := publishProfileSourceKey(task)
-	profileNo := publishProfileNo(task)
+	profileNo, err := s.nextAccountProfileNo(ctx, tx, task["tenant_id"].Int64(), task["account_id"].Int64())
+	if err != nil {
+		return 0, err
+	}
 	data := g.Map{
 		columns.ProfileNo:       profileNo,
 		columns.SourceType:      publishProfileSourceType,

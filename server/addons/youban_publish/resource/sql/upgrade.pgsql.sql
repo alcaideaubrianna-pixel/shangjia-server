@@ -312,3 +312,5 @@ CREATE TABLE IF NOT EXISTS hg_youban_publish_quick_push_plan (
   deleted_at timestamp
 );
 CREATE INDEX IF NOT EXISTS idx_ybp_quick_plan_owner ON hg_youban_publish_quick_push_plan (tenant_id,status,id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_content_profile_no ON hg_content_profile (profile_no);

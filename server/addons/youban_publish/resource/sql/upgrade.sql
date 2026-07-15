@@ -321,3 +321,5 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_quick_push_plan` (
   PRIMARY KEY (`id`),
   KEY `idx_ybp_quick_plan_owner` (`tenant_id`,`status`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴快速推送计划';
+
+ALTER TABLE `hg_content_profile` ADD UNIQUE KEY `uk_content_profile_no` (`profile_no`);

@@ -518,6 +518,8 @@ type MediaModel struct {
 	PerceptualHash       string      `json:"perceptualHash" dc:"图片感知哈希"`
 	EditConfigJson       string      `json:"editConfigJson" dc:"图片编辑配置"`
 	EditStatus           string      `json:"editStatus" dc:"编辑状态：raw/edited"`
+	TgFileId             string      `json:"tgFileId" dc:"TG文件ID"`
+	TgThumbFileId        string      `json:"tgThumbFileId" dc:"TG缩略图ID"`
 	TgCacheAssetHash     string      `json:"tgCacheAssetHash" dc:"TG缓存素材Hash"`
 	TgCacheStatus        string      `json:"tgCacheStatus" dc:"TG缓存状态"`
 	Size                 int64       `json:"size" dc:"大小"`
@@ -525,6 +527,14 @@ type MediaModel struct {
 	Status               int         `json:"status" dc:"状态"`
 	CreatedAt            *gtime.Time `json:"createdAt" dc:"创建时间"`
 	UpdatedAt            *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
+type BotMediaCacheFileInp struct {
+	Media *MediaModel `json:"media" dc:"媒体信息"`
+}
+
+type BotMediaCacheFileModel struct {
+	Path string `json:"path" dc:"本地缓存文件路径"`
 }
 
 type ProfileListInp struct {
@@ -592,6 +602,11 @@ type ProfileImageSearchInp struct {
 	Threshold int `json:"threshold" dc:"相似度阈值，越小越严格"`
 }
 
+type BotProfileImageSearchInp struct {
+	ProfileImageSearchInp
+	ImageUrl string `json:"imageUrl" dc:"图片地址"`
+}
+
 type ProfileSaveInp struct {
 	Id              int64   `json:"id" dc:"资料ID"`
 	Uuid            string  `json:"uuid" dc:"资料UUID"`
@@ -643,9 +658,10 @@ func (in *ProfileSaveInp) Filter(ctx context.Context) error {
 }
 
 type ProfileSaveModel struct {
-	Id     int64  `json:"id" dc:"资料ID"`
-	Uuid   string `json:"uuid" dc:"资料UUID"`
-	TaskId int64  `json:"taskId" dc:"任务ID"`
+	Id        int64  `json:"id" dc:"资料ID"`
+	Uuid      string `json:"uuid" dc:"资料UUID"`
+	TaskId    int64  `json:"taskId" dc:"任务ID"`
+	ProfileNo string `json:"profileNo" dc:"资料编号"`
 }
 
 type ProfileDeleteInp struct {
@@ -716,6 +732,87 @@ type NoteListInp struct {
 type NoteModel struct {
 	ProfileModel
 	Media []*MediaModel `json:"media" dc:"媒体列表"`
+}
+
+// BotProfileSearchInp is used by youban_bot to search profiles for a bound publish account.
+type BotProfileSearchInp struct {
+	form.PageReq
+	TenantId  int64  `json:"tenantId" dc:"租户ID"`
+	AccountId int64  `json:"accountId" dc:"上架账号ID"`
+	Keyword   string `json:"keyword" dc:"标题/编号/正文"`
+	ProfileNo string `json:"profileNo" dc:"资料编号"`
+	Status    int    `json:"status" dc:"状态：1上架 2下架"`
+}
+
+// BotProfileViewInp is used by youban_bot to view a profile by id or profile_no.
+type BotProfileViewInp struct {
+	TenantId   int64  `json:"tenantId" dc:"租户ID"`
+	AccountId  int64  `json:"accountId" dc:"上架账号ID"`
+	ProfileId  int64  `json:"profileId" dc:"资料ID"`
+	ProfileNo  string `json:"profileNo" dc:"资料编号"`
+	PublicOnly bool   `json:"publicOnly" dc:"是否只允许公开/上架资料"`
+}
+
+// BotProfileStatusInp is used by youban_bot to update profile status.
+type BotProfileStatusInp struct {
+	TenantId  int64    `json:"tenantId" dc:"租户ID"`
+	AccountId int64    `json:"accountId" dc:"上架账号ID"`
+	Ids       []int64  `json:"ids" dc:"资料ID列表"`
+	Nos       []string `json:"nos" dc:"资料编号列表"`
+	Status    int      `json:"status" dc:"状态：1上架 2下架"`
+}
+
+// BotProfileCreateInp is used by youban_bot to create a text profile quickly.
+type BotProfileCreateInp struct {
+	TenantId     int64                      `json:"tenantId" dc:"租户ID"`
+	AccountId    int64                      `json:"accountId" dc:"上架账号ID"`
+	Title        string                     `json:"title" dc:"标题"`
+	PlainText    string                     `json:"plainText" dc:"展示正文"`
+	DisplayMedia []*MessageTemplateMediaInp `json:"displayMedia" dc:"展示媒体"`
+	VerifyText   string                     `json:"verifyText" dc:"验证正文"`
+	VerifyMedia  []*MessageTemplateMediaInp `json:"verifyMedia" dc:"验证媒体"`
+	Status       int                        `json:"status" dc:"状态：1上架 2下架"`
+}
+
+// BotProfileEditInp is used by youban_bot to edit text fields and profile_no.
+type BotProfileEditInp struct {
+	TenantId     int64                      `json:"tenantId" dc:"租户ID"`
+	AccountId    int64                      `json:"accountId" dc:"上架账号ID"`
+	ProfileNo    string                     `json:"profileNo" dc:"资料编号"`
+	NewNo        string                     `json:"newNo" dc:"新资料编号"`
+	Title        string                     `json:"title" dc:"标题"`
+	PlainText    string                     `json:"plainText" dc:"正文"`
+	DisplayMedia []*MessageTemplateMediaInp `json:"displayMedia" dc:"展示媒体"`
+	VerifyText   string                     `json:"verifyText" dc:"验证正文"`
+	VerifyMedia  []*MessageTemplateMediaInp `json:"verifyMedia" dc:"验证媒体"`
+}
+
+// BotProfileQueueCancelInp cancels pending publish jobs for profiles.
+type BotProfileQueueCancelInp struct {
+	TenantId  int64    `json:"tenantId" dc:"租户ID"`
+	AccountId int64    `json:"accountId" dc:"上架账号ID"`
+	Nos       []string `json:"nos" dc:"资料编号列表，为空取消当前账号全部待推送"`
+}
+
+type BotProfileQueueCancelModel struct {
+	Cleared int `json:"cleared" dc:"取消数量"`
+}
+
+// BotChannelCycleSaveInp updates channel cycle publish settings.
+type BotChannelCycleSaveInp struct {
+	TenantId  int64  `json:"tenantId" dc:"租户ID"`
+	AccountId int64  `json:"accountId" dc:"账号ID"`
+	ChannelId int64  `json:"channelId" dc:"频道ID"`
+	Enabled   int    `json:"enabled" dc:"是否启用"`
+	Days      int    `json:"days" dc:"循环天数"`
+	Time      string `json:"time" dc:"循环时间 HH:mm"`
+}
+
+// BotChannelActionInp is used by youban_bot channel operations.
+type BotChannelActionInp struct {
+	TenantId  int64 `json:"tenantId" dc:"租户ID"`
+	AccountId int64 `json:"accountId" dc:"账号ID"`
+	ChannelId int64 `json:"channelId" dc:"频道ID"`
 }
 
 type TagListInp struct {
@@ -1144,8 +1241,9 @@ type ChannelFullPushInp struct {
 }
 
 type ChannelFullPushModel struct {
-	ChannelId int64 `json:"channelId" dc:"频道ID"`
-	Queued    int   `json:"queued" dc:"入队数量"`
+	ChannelId     int64 `json:"channelId" dc:"频道ID"`
+	Queued        int   `json:"queued" dc:"本次预计入队数量"`
+	ExistingQueue int   `json:"existingQueue" dc:"触发前频道未完成队列数量"`
 }
 
 type ChannelClearQueueInp struct {

@@ -86,3 +86,47 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_invite_code` (
   KEY `idx_ybbic_inviter` (`inviter_app`,`inviter_account_id`,`source`,`status`,`id`),
   KEY `idx_ybbic_status` (`status`,`expires_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot邀请码';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_profile_session` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Bot ID',
+  `telegram_user_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG用户ID',
+  `chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'Chat ID',
+  `app` varchar(32) NOT NULL DEFAULT 'api' COMMENT '应用',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `scene` varchar(32) NOT NULL DEFAULT '' COMMENT '场景',
+  `step` varchar(64) NOT NULL DEFAULT '' COMMENT '步骤',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
+  `profile_no` varchar(32) NOT NULL DEFAULT '' COMMENT '资料编号',
+  `payload_json` text COMMENT '会话数据',
+  `expires_at` datetime DEFAULT NULL COMMENT '过期时间',
+  `status` varchar(32) NOT NULL DEFAULT 'active' COMMENT '状态',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybbps_user` (`bot_id`,`telegram_user_id`,`chat_id`,`status`),
+  KEY `idx_ybbps_expire` (`status`,`expires_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴Bot资料管理会话';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_inline_share` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Bot ID',
+  `token` varchar(64) NOT NULL DEFAULT '' COMMENT '内联分享Token',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
+  `profile_no` varchar(32) NOT NULL DEFAULT '' COMMENT '资料编号',
+  `telegram_user_id` varchar(128) NOT NULL DEFAULT '' COMMENT '创建TG用户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `usage_count` int(11) NOT NULL DEFAULT '0' COMMENT '使用次数',
+  `expires_at` datetime DEFAULT NULL COMMENT '过期时间',
+  `status` tinyint(4) NOT NULL DEFAULT '1' COMMENT '状态',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybbis_token` (`token`),
+  KEY `idx_ybbis_profile` (`profile_no`,`status`,`id`),
+  KEY `idx_ybbis_owner` (`tenant_id`,`account_id`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴Bot资料内联分享';

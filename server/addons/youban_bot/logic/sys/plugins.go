@@ -210,5 +210,8 @@ func (profileFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
 	return simpleTextSchema("资料管理文案", "资料管理插件已启用，后续会接入快速上架和快速下架。")
 }
 func (profileFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFeatureContext) (bool, error) {
-	return true, nil
+	if featureCtx == nil || featureCtx.Msg == nil {
+		return true, nil
+	}
+	return true, bot.showProfileMenu(ctx, featureCtx.BotId, featureCtx.Msg)
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -108,7 +107,7 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 	if err != nil {
 		return true, err
 	}
-	media, err := bot.quickPushMediaFromMessage(ctx, row.BotToken, event.Msg)
+	media, err := bot.resolveTelegramMessageMedia(ctx, row.BotToken, event.Msg)
 	if err != nil {
 		return true, err
 	}
@@ -233,44 +232,6 @@ func (s *sSysBot) startQuickPushSelection(ctx context.Context, botToken string, 
 	}
 	_, err = s.sendMessageWithMarkup(ctx, botToken, chatId, quickPushSelectionText(session, plans), "HTML", false, quickPushPlanKeyboard(session, plans))
 	return err
-}
-
-func (s *sSysBot) quickPushMediaFromMessage(ctx context.Context, botToken string, msg *models.Message) ([]*publishsysin.MessageTemplateMediaInp, error) {
-	if msg == nil {
-		return nil, nil
-	}
-	mediaType := ""
-	fileId := ""
-	name := ""
-	if len(msg.Photo) > 0 {
-		photo := msg.Photo[len(msg.Photo)-1]
-		mediaType = "image"
-		fileId = photo.FileID
-		name = firstNonEmpty(photo.FileUniqueID, fmt.Sprintf("photo_%d", msg.ID))
-	} else if msg.Video != nil {
-		mediaType = "video"
-		fileId = msg.Video.FileID
-		name = firstNonEmpty(msg.Video.FileName, msg.Video.FileUniqueID, fmt.Sprintf("video_%d", msg.ID))
-	}
-	if strings.TrimSpace(fileId) == "" {
-		return nil, nil
-	}
-	tgBot, err := s.telegramBot(ctx, botToken)
-	if err != nil {
-		return nil, err
-	}
-	callCtx, cancel := telegramAPICtx()
-	defer cancel()
-	file, err := tgBot.GetFile(callCtx, &tgbot.GetFileParams{FileID: fileId})
-	if err != nil {
-		return nil, err
-	}
-	if file == nil || strings.TrimSpace(file.FilePath) == "" {
-		return nil, gerror.New("读取Telegram媒体文件地址失败")
-	}
-	filePath := strings.ReplaceAll(url.PathEscape(strings.TrimSpace(file.FilePath)), "%2F", "/")
-	fileURL := "https://api.telegram.org/file/bot" + strings.TrimSpace(botToken) + "/" + filePath
-	return []*publishsysin.MessageTemplateMediaInp{{MediaType: mediaType, Name: name, FileUrl: fileURL, TgFileId: "copy:" + fmt.Sprintf("%d", msg.Chat.ID) + ":" + strconv.Itoa(msg.ID), SortIndex: 1}}, nil
 }
 
 func (s *sSysBot) collectQuickPushMediaGroup(ctx context.Context, botToken string, session *quickPushSession, msg *models.Message, text string, media []*publishsysin.MessageTemplateMediaInp) error {

@@ -84,12 +84,13 @@ func (s *sSysPublish) AdminChannelClearQueue(ctx context.Context, in *sysin.Chan
 
 func (s *sSysPublish) channelClearQueueJobs(ctx context.Context, tenantId int64, channelId int64) ([]telegramResubmitJob, error) {
 	var jobs []telegramResubmitJob
-	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	mod := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
-		Where("channel_id", channelId).
-		WhereIn("status", channelQueueClearStatuses()).
-		OrderAsc("id").
-		Scan(&jobs)
+		WhereIn("status", channelQueueClearStatuses())
+	if channelId > 0 {
+		mod = mod.Where("channel_id", channelId)
+	}
+	err := mod.OrderAsc("id").Scan(&jobs)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取频道发送队列失败")
 	}

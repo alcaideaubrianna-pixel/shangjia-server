@@ -10,6 +10,7 @@ import (
 	"math"
 	"net"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -449,6 +450,27 @@ func uploadImagePHashValue(file *ghttp.UploadFile) (*goimagehash.ImageHash, erro
 	}
 	defer reader.Close()
 	img, _, err := image.Decode(reader)
+	if err != nil {
+		return nil, gerror.New("图片格式不支持，请上传 JPG、PNG 或 GIF")
+	}
+	hash, err := goimagehash.PerceptionHash(img)
+	if err != nil {
+		return nil, gerror.Wrap(err, "计算图片感知哈希失败")
+	}
+	return hash, nil
+}
+
+func imagePHashFromPath(path string) (*goimagehash.ImageHash, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, gerror.New("图片文件为空")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取图片文件失败")
+	}
+	defer file.Close()
+	img, _, err := image.Decode(file)
 	if err != nil {
 		return nil, gerror.New("图片格式不支持，请上传 JPG、PNG 或 GIF")
 	}

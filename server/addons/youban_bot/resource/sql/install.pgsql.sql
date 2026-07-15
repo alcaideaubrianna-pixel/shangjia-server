@@ -160,3 +160,45 @@ CREATE TABLE IF NOT EXISTS hg_youban_bot_invite_code (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_ybbic_code ON hg_youban_bot_invite_code (code);
 CREATE INDEX IF NOT EXISTS idx_ybbic_inviter ON hg_youban_bot_invite_code (inviter_app,inviter_account_id,source,status,id);
 CREATE INDEX IF NOT EXISTS idx_ybbic_status ON hg_youban_bot_invite_code (status,expires_at,id);
+
+CREATE TABLE IF NOT EXISTS hg_youban_bot_profile_session (
+  id bigserial PRIMARY KEY,
+  bot_id bigint NOT NULL DEFAULT 0,
+  telegram_user_id varchar(128) NOT NULL DEFAULT '',
+  chat_id varchar(128) NOT NULL DEFAULT '',
+  app varchar(32) NOT NULL DEFAULT 'api',
+  account_id bigint NOT NULL DEFAULT 0,
+  tenant_id bigint NOT NULL DEFAULT 0,
+  scene varchar(32) NOT NULL DEFAULT '',
+  step varchar(64) NOT NULL DEFAULT '',
+  profile_id bigint NOT NULL DEFAULT 0,
+  profile_no varchar(32) NOT NULL DEFAULT '',
+  payload_json text,
+  expires_at timestamp,
+  status varchar(32) NOT NULL DEFAULT 'active',
+  created_at timestamp,
+  updated_at timestamp,
+  deleted_at timestamp
+);
+CREATE INDEX IF NOT EXISTS idx_ybbps_user ON hg_youban_bot_profile_session (bot_id,telegram_user_id,chat_id,status);
+CREATE INDEX IF NOT EXISTS idx_ybbps_expire ON hg_youban_bot_profile_session (status,expires_at,id);
+
+CREATE TABLE IF NOT EXISTS hg_youban_bot_inline_share (
+  id bigserial PRIMARY KEY,
+  bot_id bigint NOT NULL DEFAULT 0,
+  token varchar(64) NOT NULL DEFAULT '',
+  profile_id bigint NOT NULL DEFAULT 0,
+  profile_no varchar(32) NOT NULL DEFAULT '',
+  telegram_user_id varchar(128) NOT NULL DEFAULT '',
+  account_id bigint NOT NULL DEFAULT 0,
+  tenant_id bigint NOT NULL DEFAULT 0,
+  usage_count integer NOT NULL DEFAULT 0,
+  expires_at timestamp,
+  status smallint NOT NULL DEFAULT 1,
+  created_at timestamp,
+  updated_at timestamp,
+  deleted_at timestamp
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_ybbis_token ON hg_youban_bot_inline_share (token);
+CREATE INDEX IF NOT EXISTS idx_ybbis_profile ON hg_youban_bot_inline_share (profile_no,status,id);
+CREATE INDEX IF NOT EXISTS idx_ybbis_owner ON hg_youban_bot_inline_share (tenant_id,account_id,id);

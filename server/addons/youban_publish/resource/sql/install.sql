@@ -1537,3 +1537,5 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_quick_push_plan` (
   PRIMARY KEY (`id`),
   KEY `idx_ybp_quick_plan_owner` (`tenant_id`,`status`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴快速推送计划';
+
+-- 资料编号统一为 A00001 格式，建议保持全局唯一；已存在索引时由数据库忽略或升级脚本处理。

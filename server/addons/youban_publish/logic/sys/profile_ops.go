@@ -360,6 +360,9 @@ func (s *sSysPublish) ServerProfileReview(ctx context.Context, in *sysin.Profile
 }
 
 func (s *sSysPublish) profileList(ctx context.Context, in *sysin.ProfileListInp) (list []*sysin.ProfileModel, totalCount int, err error) {
+	if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error { return s.ensureLegacyProfileNos(ctx, tx) }); err != nil {
+		return nil, 0, err
+	}
 	base, err := s.profileBaseModel(ctx, in.TenantId, in.AccountId)
 	if err != nil {
 		return nil, 0, err
@@ -411,6 +414,9 @@ func markNotesPermission(list []*sysin.NoteModel, permission string) {
 }
 
 func (s *sSysPublish) profileView(ctx context.Context, profileId int64, tenantId int64, accountId int64) (res *sysin.ProfileModel, err error) {
+	if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error { return s.ensureLegacyProfileNos(ctx, tx) }); err != nil {
+		return nil, err
+	}
 	if profileId <= 0 {
 		return nil, gerror.New("资料ID不能为空")
 	}
@@ -564,7 +570,7 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	if err != nil {
 		return nil, err
 	}
-	return &sysin.ProfileSaveModel{Id: profileId, Uuid: profile.Uuid, TaskId: taskId}, nil
+	return &sysin.ProfileSaveModel{Id: profileId, Uuid: profile.Uuid, TaskId: taskId, ProfileNo: profile.ProfileNo}, nil
 }
 
 func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDeleteInp, tenantId int64, accountId int64) (err error) {
@@ -658,8 +664,16 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 		"updated_at": gtime.Now(),
 	}
 	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).WhereIn("profile_id", ids).Data(taskData).Update()
+	profileAccountIds, err := s.profileAccountIdsByIds(ctx, ids, tenantId)
+	if err != nil {
+		return nil, err
+	}
 	for _, id := range ids {
-		if err = s.disableCyclePlanForProfile(ctx, tenantId, accountId, id, 0); err != nil {
+		ownerAccountId := accountId
+		if ownerAccountId <= 0 {
+			ownerAccountId = profileAccountIds[id]
+		}
+		if err = s.disableCyclePlanForProfile(ctx, tenantId, ownerAccountId, id, 0); err != nil {
 			return nil, err
 		}
 	}
@@ -668,6 +682,33 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 	}
 	iservice.SysContent().ClearHomeProfileCardsCache(ctx)
 	return &sysin.ProfileStatusModel{Message: "资料已下架，已有TG消息将在后台清理"}, nil
+}
+
+func (s *sSysPublish) profileAccountIdsByIds(ctx context.Context, ids []int64, tenantId int64) (map[int64]int64, error) {
+	res := make(map[int64]int64)
+	if len(ids) == 0 {
+		return res, nil
+	}
+	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Fields("profile_id,account_id").
+		WhereIn("profile_id", ids).
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	var rows []struct {
+		ProfileId int64 `json:"profile_id"`
+		AccountId int64 `json:"account_id"`
+	}
+	if err := mod.Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "读取资料归属账号失败")
+	}
+	for _, row := range rows {
+		if row.ProfileId > 0 && row.AccountId > 0 {
+			res[row.ProfileId] = row.AccountId
+		}
+	}
+	return res, nil
 }
 
 func (s *sSysPublish) submitProfilesByIds(ctx context.Context, ids []int64, tenantId int64, accountId int64) error {
@@ -961,15 +1002,15 @@ func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, i
 		like := "%" + keyword + "%"
 		tagIds := s.tagIdsByKeyword(ctx, keyword)
 		if len(tagIds) > 0 {
-			args := []interface{}{like, like, like, like, like}
-			conditions := []string{"p.profile_no LIKE ?", "p.title LIKE ?", "p.summary LIKE ?", "p.plain_text LIKE ?", "p.cup_size LIKE ?"}
+			args := []interface{}{like, like, like, like, like, like, like, like}
+			conditions := []string{"p.profile_no LIKE ?", "p.source_note_uuid LIKE ?", "p.title LIKE ?", "p.summary LIKE ?", "p.plain_text LIKE ?", "p.cup_size LIKE ?", "t.title LIKE ?", "t.plain_text LIKE ?"}
 			for _, tagId := range tagIds {
 				conditions = append(conditions, "p.cup_size = ?", "p.cup_size LIKE ?", "p.cup_size LIKE ?", "p.cup_size LIKE ?")
 				args = append(args, tagId, tagId+",%", "%,"+tagId, "%,"+tagId+",%")
 			}
 			mod = mod.Where("("+strings.Join(conditions, " OR ")+")", args...)
 		} else {
-			mod = mod.Where("(p.profile_no LIKE ? OR p.title LIKE ? OR p.summary LIKE ? OR p.plain_text LIKE ? OR p.cup_size LIKE ?)", like, like, like, like, like)
+			mod = mod.Where("(p.profile_no LIKE ? OR p.source_note_uuid LIKE ? OR p.title LIKE ? OR p.summary LIKE ? OR p.plain_text LIKE ? OR p.cup_size LIKE ? OR t.title LIKE ? OR t.plain_text LIKE ?)", like, like, like, like, like, like, like, like)
 		}
 	}
 	if in.Province != "" {
@@ -1157,15 +1198,15 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		nextVisibility = consts.ContentVisibilityPublic
 	}
 	data := g.Map{
-		columns.Title:           in.Title,
-		columns.Summary:         profileSummary(in.PlainText),
-		columns.PlainText:       in.PlainText,
-		columns.Province:        in.Province,
-		columns.City:            in.City,
-		columns.CupSize:         in.Tag,
-		columns.Visibility:      nextVisibility,
-		columns.AdminRemark:     in.CustomerRemark,
-		columns.Status:          nextStatus,
+		columns.Title:       in.Title,
+		columns.Summary:     profileSummary(in.PlainText),
+		columns.PlainText:   in.PlainText,
+		columns.Province:    in.Province,
+		columns.City:        in.City,
+		columns.CupSize:     in.Tag,
+		columns.Visibility:  nextVisibility,
+		columns.AdminRemark: in.CustomerRemark,
+		columns.Status:      nextStatus,
 	}
 	if profileContentChanged(current, in) {
 		data[columns.SourceUpdateBy] = strconv.FormatInt(accountId, 10)
