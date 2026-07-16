@@ -605,7 +605,7 @@ func (s *sSysBot) formatExchangeRateReply(ctx context.Context, req *exchangeRate
 		uAmount = amount / lowest
 	}
 	b.WriteString(fmt.Sprintf("\n\n💰 <b>%s / %s = %s U</b>", html.EscapeString(exprText), html.EscapeString(quote.Items[0].PriceText), html.EscapeString(formatExchangeRateNumber(uAmount, 4))))
-	b.WriteString("\n\n<blockquote>教程：<code>兑汇 1000*0.95</codex> 自动计算多少 U，dz/兑支 支付宝，dw/兑微 微信，dy/兑银 银行卡</blockquote>")
+	b.WriteString("\n\n<blockquote>教程：<code>兑汇 1000*0.95</code> 自动计算多少 U，dz/兑支 支付宝，dw/兑微 微信，dy/兑银 银行卡</blockquote>")
 	return b.String()
 }
 

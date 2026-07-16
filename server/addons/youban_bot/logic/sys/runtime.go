@@ -68,9 +68,13 @@ func (s *sSysBot) startBotRuntime(ctx context.Context, row *sysin.BotModel) {
 	mode := s.botRuntimeMode(ctx, row)
 	webhookUrl := s.botWebhookURL(ctx, row)
 	if mode == "webhook" || (mode == "auto" && s.shouldUseWebhookInAuto(ctx) && webhookUrl != "") {
-		_, err = bot.SetWebhook(ctx, &tgbot.SetWebhookParams{URL: webhookUrl, AllowedUpdates: botAllowedUpdates()})
+		err = s.ensureTelegramWebhook(ctx, bot, row, webhookUrl)
 		if err != nil {
 			g.Log().Warningf(ctx, "设置Telegram Webhook失败 botId:%d url:%s err:%+v", row.Id, webhookUrl, err)
+			if isTelegramTooManyRequests(err) {
+				g.Log().Infof(ctx, "Telegram Webhook设置触发限流，保持当前状态等待下次启动同步 botId:%d", row.Id)
+				return
+			}
 			if shouldMarkBotOffline(err) {
 				_ = s.markBotOffline(ctx, row.Id, err)
 			}
@@ -92,6 +96,33 @@ func (s *sSysBot) startBotRuntime(ctx context.Context, row *sysin.BotModel) {
 	}
 	g.Log().Infof(ctx, "Telegram Bot Polling已启动 botId:%d username:%s", row.Id, row.BotUsername)
 	bot.Start(ctx)
+}
+
+func (s *sSysBot) ensureTelegramWebhook(ctx context.Context, bot *tgbot.Bot, row *sysin.BotModel, webhookUrl string) error {
+	info, err := bot.GetWebhookInfo(ctx)
+	if err != nil {
+		if isTelegramTooManyRequests(err) {
+			return err
+		}
+		g.Log().Warningf(ctx, "读取Telegram Webhook信息失败，继续尝试设置 botId:%d err:%+v", row.Id, err)
+	}
+	if info != nil && strings.TrimSpace(info.URL) == strings.TrimSpace(webhookUrl) {
+		g.Log().Infof(ctx, "Telegram Bot Webhook已存在，跳过重复设置 botId:%d username:%s url:%s", row.Id, row.BotUsername, webhookUrl)
+		return nil
+	}
+	_, err = bot.SetWebhook(ctx, &tgbot.SetWebhookParams{URL: webhookUrl, AllowedUpdates: botAllowedUpdates()})
+	return err
+}
+
+func isTelegramTooManyRequests(err error) bool {
+	if err == nil {
+		return false
+	}
+	var tooMany *tgbot.TooManyRequestsError
+	if errors.As(err, &tooMany) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "too many requests")
 }
 
 func (s *sSysBot) telegramBotWithHandler(ctx context.Context, row *sysin.BotModel) (*tgbot.Bot, error) {
