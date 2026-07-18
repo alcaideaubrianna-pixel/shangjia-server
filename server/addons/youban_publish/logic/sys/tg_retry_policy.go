@@ -26,7 +26,7 @@ func telegramJobErrorRetryPolicy(err error, retryCount int) telegramJobRetryPoli
 	if err == nil {
 		return telegramJobRetryPolicy{Permanent: true, Message: "Telegram 发送失败：未知错误"}
 	}
-	if isTelegramAuthKeyUnregistered(err) || isTelegramPermanentSendError(err) {
+	if isTelegramPermanentAccountAuthError(err) || isTelegramPermanentSendError(err) {
 		return telegramJobRetryPolicy{
 			Permanent: true,
 			Message:   telegramPermanentSendErrorMessage(err),
@@ -113,8 +113,8 @@ func telegramPermanentSendErrorMessage(err error) string {
 	if err == nil {
 		return "Telegram 发送遇到不可恢复错误，已停止该任务并释放频道队列"
 	}
-	if isTelegramAuthKeyUnregistered(err) {
-		return "TG账号登录态已失效，请重新扫码登录后再推送，已停止该任务并释放频道队列：" + err.Error()
+	if isTelegramPermanentAccountAuthError(err) {
+		return telegramPermanentAccountAuthMessage(err) + "，已停止该任务并释放频道队列：" + err.Error()
 	}
 	message := strings.ToLower(err.Error())
 	if strings.Contains(message, "user_banned_in_channel") || strings.Contains(message, "user banned in channel") {

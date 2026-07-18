@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"html"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,7 +16,10 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
+	botsysin "hotgo/addons/youban_bot/model/input/sysin"
+	botService "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 )
 
 func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64, tenantId int64, operatorId int64) (status string, message string) {
@@ -68,6 +72,92 @@ func (s *sSysPublish) expireTgAccountSession(ctx context.Context, id int64, tena
 
 func isTelegramAuthKeyUnregistered(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "AUTH_KEY_UNREGISTERED")
+}
+
+func isTelegramPermanentAccountAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToUpper(err.Error())
+	permanentParts := []string{
+		"AUTH_KEY_UNREGISTERED",
+		"SESSION_REVOKED",
+		"USER_DEACTIVATED",
+		"USER_DEACTIVATED_BAN",
+	}
+	for _, part := range permanentParts {
+		if strings.Contains(message, part) {
+			return true
+		}
+	}
+	return false
+}
+
+func telegramPermanentAccountAuthMessage(err error) string {
+	if err == nil {
+		return tgAccountSessionExpiredMessage
+	}
+	message := strings.ToUpper(err.Error())
+	switch {
+	case strings.Contains(message, "USER_DEACTIVATED_BAN"):
+		return "TG账号已被 Telegram 封禁，已自动停用，请更换账号"
+	case strings.Contains(message, "USER_DEACTIVATED"):
+		return "TG账号已被 Telegram 停用或注销，已自动停用，请更换账号"
+	case strings.Contains(message, "SESSION_REVOKED"):
+		return "TG账号会话已被撤销，已自动停用，请重新扫码登录"
+	case strings.Contains(message, "AUTH_KEY_UNREGISTERED"):
+		return tgAccountSessionExpiredMessage
+	default:
+		return tgAccountSessionExpiredMessage
+	}
+}
+
+func (s *sSysPublish) handleTgAccountPermanentAuthError(ctx context.Context, tgAccountId int64, operatorId int64, message string, cause error) {
+	account, err := s.notifyTgAccountOwner(ctx, tgAccountId, 0)
+	if err != nil {
+		g.Log().Warningf(ctx, "读取失效TG账号失败 tgAccountId:%d err:%+v", tgAccountId, err)
+		return
+	}
+	if account.Id <= 0 {
+		return
+	}
+	if strings.TrimSpace(message) == "" {
+		message = telegramPermanentAccountAuthMessage(cause)
+	}
+	s.expireTgAccountSession(ctx, account.Id, account.TenantId, operatorId, message)
+	if account.AccountId <= 0 {
+		return
+	}
+	text := fmt.Sprintf("TG账号已自动停用。\n\nTG账号：%s\n原因：%s", html.EscapeString(firstNonEmpty(account.DisplayName, account.TelegramUsername, fmt.Sprintf("ID:%d", account.Id))), html.EscapeString(message))
+	if notifyErr := botService.SysBot().NotifyAccount(ctx, &botsysin.NotifyAccountInp{
+		App:       consts.AppApi,
+		AccountId: account.AccountId,
+		Text:      text,
+		ParseMode: "HTML",
+	}); notifyErr != nil {
+		g.Log().Warningf(ctx, "发送TG账号自动停用通知失败 tgAccountId:%d accountId:%d err:%+v", account.Id, account.AccountId, notifyErr)
+	}
+}
+
+func (s *sSysPublish) notifyTgAccountOwner(ctx context.Context, tgAccountId int64, tenantId int64) (*messagePushTgAccountOwner, error) {
+	if tgAccountId <= 0 {
+		return &messagePushTgAccountOwner{}, nil
+	}
+	var account *messagePushTgAccountOwner
+	mod := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
+		Fields("id,tenant_id,account_id,display_name,telegram_username").
+		Where("id", tgAccountId).
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	if err := mod.Scan(&account); err != nil {
+		return nil, gerror.Wrap(err, "读取TG账号失败")
+	}
+	if account == nil {
+		return &messagePushTgAccountOwner{}, nil
+	}
+	return account, nil
 }
 
 func (s *sSysPublish) readTelegramSelf(ctx context.Context, appId int, appHash string, options telegram.Options) (*tg.User, error) {

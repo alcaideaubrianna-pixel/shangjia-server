@@ -128,15 +128,19 @@ func (s *sSysPublish) enabledAccountCollectSources(ctx context.Context) (map[int
 			return nil, err
 		}
 		var rows []accountCollectSourceRuntime
-		err := pdao.YoubanPublishCollectSource.Ctx(ctx).
-			Fields("id,tenant_id,account_id,tg_account_id,source_chat_id,source_username,history_collect_enabled,history_collect_mode,history_collect_days").
-			Where("source_type", sysin.CollectSourceTypeAccount).
-			Where("collect_enabled", 1).
-			Where("status", 1).
-			WhereGT("tg_account_id", 0).
-			WhereNull("deleted_at").
-			OrderAsc("tg_account_id").
-			OrderAsc("id").
+		err := g.DB().Model(pdao.YoubanPublishCollectSource.Table()+" s").Safe().Ctx(ctx).
+			InnerJoin(publishTgAccountTable+" ta", "ta.id=s.tg_account_id").
+			Fields("s.id,s.tenant_id,s.account_id,s.tg_account_id,s.source_chat_id,s.source_username,s.history_collect_enabled,s.history_collect_mode,s.history_collect_days").
+			Where("s.source_type", sysin.CollectSourceTypeAccount).
+			Where("s.collect_enabled", 1).
+			Where("s.status", 1).
+			WhereGT("s.tg_account_id", 0).
+			Where("ta.status", sysin.PublishTgAccountStatusAuthorized).
+			WhereNot("ta.session_key", "").
+			WhereNull("s.deleted_at").
+			WhereNull("ta.deleted_at").
+			OrderAsc("s.tg_account_id").
+			OrderAsc("s.id").
 			Scan(&rows)
 		if err != nil {
 			return nil, err
@@ -222,10 +226,8 @@ func (w *accountCollectWorker) run(ctx context.Context) {
 	g.Log().Infof(ctx, "账号采集 worker 启动 tgAccountId:%d sources:%d listeners:%d listenerTargets:%d", w.tgAccountId, len(w.sources), len(w.listeners), accountListenerTargetCount(w.listeners))
 	defer g.Log().Infof(context.Background(), "账号采集 worker 停止 tgAccountId:%d", w.tgAccountId)
 	if err := w.runGotdDispatcher(ctx); err != nil && !isContextDone(ctx) {
-		if isTelegramAuthKeyUnregistered(err) {
-			if item, itemErr := w.service.accountCollectTgAccount(context.Background(), w.tgAccountId); itemErr == nil {
-				w.service.expireTgAccountSession(context.Background(), item.Id, item.TenantId, 0, tgAccountSessionExpiredMessage)
-			}
+		if isTelegramPermanentAccountAuthError(err) {
+			w.service.handleTgAccountPermanentAuthError(context.Background(), w.tgAccountId, 0, telegramPermanentAccountAuthMessage(err), err)
 		}
 		g.Log().Warningf(ctx, "账号采集 worker 异常 tgAccountId:%d err:%+v", w.tgAccountId, err)
 	}

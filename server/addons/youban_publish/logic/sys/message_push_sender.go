@@ -813,13 +813,13 @@ func (s *sSysPublish) handleMessagePushQueuedJobError(ctx context.Context, job t
 		"updated_at":          gtime.Now(),
 	}).Update()
 	s.appendTelegramJobLog(ctx, job, "message_push", status, policy.Message)
-	if isTelegramAuthKeyUnregistered(err) {
-		s.handleMessagePushAuthKeyExpired(ctx, job, policy.Message)
+	if isTelegramPermanentAccountAuthError(err) {
+		s.handleMessagePushPermanentAuthError(ctx, job, policy.Message, err)
 	}
 	return nil
 }
 
-func (s *sSysPublish) handleMessagePushAuthKeyExpired(ctx context.Context, job telegramJobRecord, message string) {
+func (s *sSysPublish) handleMessagePushPermanentAuthError(ctx context.Context, job telegramJobRecord, message string, cause error) {
 	account, err := s.messagePushTgAccountOwner(ctx, job.AccountId, job.TenantId)
 	if err != nil {
 		g.Log().Warningf(ctx, "读取掉线TG账号失败 jobId:%d tgAccountId:%d err:%+v", job.Id, job.AccountId, err)
@@ -828,13 +828,16 @@ func (s *sSysPublish) handleMessagePushAuthKeyExpired(ctx context.Context, job t
 	if account.Id <= 0 {
 		return
 	}
-	s.expireTgAccountSession(ctx, account.Id, account.TenantId, account.AccountId, tgAccountSessionExpiredMessage)
+	if strings.TrimSpace(message) == "" {
+		message = telegramPermanentAccountAuthMessage(cause)
+	}
+	s.expireTgAccountSession(ctx, account.Id, account.TenantId, account.AccountId, message)
 	if account.AccountId <= 0 {
 		return
 	}
-	text := fmt.Sprintf("TG账号登录态已失效，请重新扫码登录。\n\nTG账号：%s", html.EscapeString(firstNonEmpty(account.DisplayName, account.TelegramUsername, fmt.Sprintf("ID:%d", account.Id))))
+	text := fmt.Sprintf("TG账号已自动停用。\n\nTG账号：%s", html.EscapeString(firstNonEmpty(account.DisplayName, account.TelegramUsername, fmt.Sprintf("ID:%d", account.Id))))
 	if strings.TrimSpace(message) != "" {
-		text += "\n掉线原因：" + html.EscapeString(message)
+		text += "\n原因：" + html.EscapeString(message)
 	}
 	if notifyErr := botService.SysBot().NotifyAccount(ctx, &botsysin.NotifyAccountInp{
 		App:       consts.AppApi,
