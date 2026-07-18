@@ -4,8 +4,10 @@ import (
 	"context"
 	"strings"
 
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gfile"
+	"github.com/gogf/gf/v2/os/gres"
 	"github.com/gogf/gf/v2/text/gstr"
 )
 
@@ -23,19 +25,29 @@ func HasTable(ctx context.Context, table string) (bool, error) {
 }
 
 func ImportFile(ctx context.Context, path string) error {
-	content := gfile.GetContents(path)
+	content := readSQLFile(path)
 	if strings.TrimSpace(content) == "" {
-		return nil
+		return gerror.Newf("SQL初始化文件不存在或为空：%s", path)
 	}
-	for _, stmt := range SplitSQL(content) {
+	for index, stmt := range SplitSQL(content) {
 		if shouldSkipStatement(stmt) {
 			continue
 		}
 		if _, err := g.DB().Exec(ctx, stmt); err != nil {
-			return err
+			return gerror.Wrapf(err, "执行 SQL 失败：%s 第 %d 段", path, index+1)
 		}
 	}
 	return nil
+}
+
+func readSQLFile(path string) string {
+	if gfile.Exists(path) && gfile.IsFile(path) {
+		return gfile.GetContents(path)
+	}
+	if !gres.IsEmpty() && gres.Contains(path) {
+		return string(gres.GetContent(path))
+	}
+	return ""
 }
 
 func SplitSQL(content string) []string {

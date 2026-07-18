@@ -22,18 +22,8 @@ func (s *sLazySheepTGGo) ensureTables(ctx context.Context) error {
 	if err := s.ensureAddonsConfigValue(ctx); err != nil {
 		return err
 	}
-	ok, err := dbinit.HasTable(ctx, "hg_addon_lazysheep_tggo_bot")
-	if err != nil {
-		return gerror.Wrap(err, "检查懒羊羊TGGo数据表失败")
-	}
-	if !ok {
-		sqlPath, err := lazySheepSQLPath(ctx)
-		if err != nil {
-			return err
-		}
-		if err = dbinit.ImportFile(ctx, sqlPath); err != nil {
-			return gerror.Wrap(err, "初始化懒羊羊TGGo数据表失败")
-		}
+	if err := s.ensureBaseTables(ctx); err != nil {
+		return err
 	}
 	if err := s.ensureUserBotKey(ctx); err != nil {
 		return err
@@ -86,6 +76,31 @@ func (s *sLazySheepTGGo) ensureTables(ctx context.Context) error {
 	return nil
 }
 
+func (s *sLazySheepTGGo) ensureBaseTables(ctx context.Context) error {
+	missing, err := missingLazySheepBaseTables(ctx)
+	if err != nil {
+		return gerror.Wrap(err, "检查懒羊羊TGGo基础表失败")
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sqlPath, err := lazySheepSQLPath(ctx)
+	if err != nil {
+		return err
+	}
+	if err = dbinit.ImportFile(ctx, sqlPath); err != nil {
+		return gerror.Wrap(err, "初始化懒羊羊TGGo基础表失败")
+	}
+	missing, err = missingLazySheepBaseTables(ctx)
+	if err != nil {
+		return gerror.Wrap(err, "复查懒羊羊TGGo基础表失败")
+	}
+	if len(missing) > 0 {
+		return gerror.Newf("初始化懒羊羊TGGo基础表不完整，缺少数据表：%s", strings.Join(missing, ","))
+	}
+	return nil
+}
+
 func (s *sLazySheepTGGo) ensureBotRoleField(ctx context.Context) error {
 	if ok, err := dbinit.HasTable(ctx, "hg_addon_lazysheep_tggo_bot"); err != nil || !ok {
 		return err
@@ -118,13 +133,7 @@ func (s *sLazySheepTGGo) ensureNoteTables(ctx context.Context) error {
 	if ok, err := dbinit.HasTable(ctx, "hg_addon_lazysheep_tggo_note"); err != nil {
 		return err
 	} else if !ok {
-		sqlPath, err := lazySheepSQLPath(ctx)
-		if err != nil {
-			return err
-		}
-		if err = dbinit.ImportFile(ctx, sqlPath); err != nil {
-			return gerror.Wrap(err, "初始化笔记资源表失败")
-		}
+		return gerror.New("笔记主表不存在，请先初始化懒羊羊TGGo基础表")
 	}
 	if err := s.ensureNoteItemLongTextFields(ctx); err != nil {
 		return err
@@ -978,6 +987,28 @@ func grantAdminMenus(ctx context.Context, names []string) error {
 		}
 	}
 	return nil
+}
+
+func missingLazySheepBaseTables(ctx context.Context) ([]string, error) {
+	required := []string{
+		"hg_addon_lazysheep_tggo_bot",
+		"hg_addon_lazysheep_tggo_binding",
+		"hg_addon_lazysheep_tggo_user",
+		"hg_addon_lazysheep_tggo_note",
+		"hg_addon_lazysheep_tggo_note_item",
+		"hg_addon_lazysheep_tggo_note_asset",
+	}
+	missing := make([]string, 0)
+	for _, table := range required {
+		ok, err := dbinit.HasTable(ctx, table)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			missing = append(missing, table)
+		}
+	}
+	return missing, nil
 }
 
 func mysqlHasIndex(ctx context.Context, table, index string) (bool, error) {
