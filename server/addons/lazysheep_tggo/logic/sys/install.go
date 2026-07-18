@@ -22,6 +22,19 @@ func (s *sLazySheepTGGo) ensureTables(ctx context.Context) error {
 	if err := s.ensureAddonsConfigValue(ctx); err != nil {
 		return err
 	}
+	ok, err := dbinit.HasTable(ctx, "hg_addon_lazysheep_tggo_bot")
+	if err != nil {
+		return gerror.Wrap(err, "检查懒羊羊TGGo数据表失败")
+	}
+	if !ok {
+		sqlPath, err := lazySheepSQLPath(ctx)
+		if err != nil {
+			return err
+		}
+		if err = dbinit.ImportFile(ctx, sqlPath); err != nil {
+			return gerror.Wrap(err, "初始化懒羊羊TGGo数据表失败")
+		}
+	}
 	if err := s.ensureUserBotKey(ctx); err != nil {
 		return err
 	}
@@ -70,21 +83,7 @@ func (s *sLazySheepTGGo) ensureTables(ctx context.Context) error {
 	if err := s.ensureAdminMenus(ctx); err != nil {
 		return err
 	}
-	ok, err := dbinit.HasTable(ctx, "hg_addon_lazysheep_tggo_bot")
-	if err != nil {
-		return gerror.Wrap(err, "检查懒羊羊TGGo数据表失败")
-	}
-	if ok {
-		return nil
-	}
-	sqlPath, err := lazySheepSQLPath(ctx)
-	if err != nil {
-		return err
-	}
-	if err = dbinit.ImportFile(ctx, sqlPath); err != nil {
-		return gerror.Wrap(err, "初始化懒羊羊TGGo数据表失败")
-	}
-	return s.ensureNoteAssetPHashField(ctx)
+	return nil
 }
 
 func (s *sLazySheepTGGo) ensureBotRoleField(ctx context.Context) error {
@@ -116,8 +115,16 @@ func (s *sLazySheepTGGo) ensureBotRoleField(ctx context.Context) error {
 }
 
 func (s *sLazySheepTGGo) ensureNoteTables(ctx context.Context) error {
-	if ok, err := dbinit.HasTable(ctx, "hg_addon_lazysheep_tggo_note"); err != nil || !ok {
+	if ok, err := dbinit.HasTable(ctx, "hg_addon_lazysheep_tggo_note"); err != nil {
 		return err
+	} else if !ok {
+		sqlPath, err := lazySheepSQLPath(ctx)
+		if err != nil {
+			return err
+		}
+		if err = dbinit.ImportFile(ctx, sqlPath); err != nil {
+			return gerror.Wrap(err, "初始化笔记资源表失败")
+		}
 	}
 	if err := s.ensureNoteItemLongTextFields(ctx); err != nil {
 		return err
@@ -177,13 +184,6 @@ func (s *sLazySheepTGGo) ensureNoteTables(ctx context.Context) error {
 		}
 	default:
 		return nil
-	}
-	sqlPath, err := lazySheepSQLPath(ctx)
-	if err != nil {
-		return err
-	}
-	if err = dbinit.ImportFile(ctx, sqlPath); err != nil {
-		return gerror.Wrap(err, "初始化笔记资源表失败")
 	}
 	return nil
 }
@@ -304,12 +304,16 @@ func (s *sLazySheepTGGo) ensureNoteAssetPHashField(ctx context.Context) error {
 	case consts.DBPgsql:
 		_, err = g.DB().Exec(ctx, "ALTER TABLE hg_addon_lazysheep_tggo_note_asset ADD COLUMN IF NOT EXISTS media_phash varchar(32) DEFAULT ''")
 		if err == nil {
-			_, _ = g.DB().Exec(ctx, "CREATE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_note_asset_media_phash ON hg_addon_lazysheep_tggo_note_asset (media_phash)")
+			if _, err = g.DB().Exec(ctx, "CREATE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_note_asset_media_phash ON hg_addon_lazysheep_tggo_note_asset (media_phash)"); err != nil {
+				return gerror.Wrap(err, "创建笔记资源感知哈希索引失败")
+			}
 		}
 	case consts.DBMysql, "":
 		_, err = g.DB().Exec(ctx, "ALTER TABLE `hg_addon_lazysheep_tggo_note_asset` ADD COLUMN `media_phash` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '图片感知哈希' AFTER `source_url`")
 		if err == nil {
-			_, _ = g.DB().Exec(ctx, "ALTER TABLE `hg_addon_lazysheep_tggo_note_asset` ADD KEY `media_phash` (`media_phash`)")
+			if _, err = g.DB().Exec(ctx, "ALTER TABLE `hg_addon_lazysheep_tggo_note_asset` ADD KEY `media_phash` (`media_phash`)"); err != nil {
+				return gerror.Wrap(err, "创建笔记资源感知哈希索引失败")
+			}
 		}
 	default:
 		return nil
@@ -392,8 +396,12 @@ func (s *sLazySheepTGGo) ensurePushQueueTable(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		_, _ = g.DB().Exec(ctx, "CREATE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_push_queue_status_next ON hg_addon_lazysheep_tggo_push_queue (status, next_retry_at)")
-		_, _ = g.DB().Exec(ctx, "CREATE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_push_queue_binding ON hg_addon_lazysheep_tggo_push_queue (bot_key, binding_key)")
+		if _, err = g.DB().Exec(ctx, "CREATE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_push_queue_status_next ON hg_addon_lazysheep_tggo_push_queue (status, next_retry_at)"); err != nil {
+			return gerror.Wrap(err, "创建推送队列状态索引失败")
+		}
+		if _, err = g.DB().Exec(ctx, "CREATE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_push_queue_binding ON hg_addon_lazysheep_tggo_push_queue (bot_key, binding_key)"); err != nil {
+			return gerror.Wrap(err, "创建推送队列绑定索引失败")
+		}
 		return nil
 	case consts.DBMysql, "":
 		_, err := g.DB().Exec(ctx, "CREATE TABLE IF NOT EXISTS `hg_addon_lazysheep_tggo_push_queue` ("+
@@ -449,7 +457,9 @@ func (s *sLazySheepTGGo) ensurePushLogTable(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		_, _ = g.DB().Exec(ctx, "CREATE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_push_log_chat_time ON hg_addon_lazysheep_tggo_push_log (bot_key, chat_id, created_at)")
+		if _, err = g.DB().Exec(ctx, "CREATE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_push_log_chat_time ON hg_addon_lazysheep_tggo_push_log (bot_key, chat_id, created_at)"); err != nil {
+			return gerror.Wrap(err, "创建推送日志会话时间索引失败")
+		}
 		return nil
 	case consts.DBMysql, "":
 		_, err := g.DB().Exec(ctx, "CREATE TABLE IF NOT EXISTS `hg_addon_lazysheep_tggo_push_log` ("+
@@ -502,8 +512,12 @@ func (s *sLazySheepTGGo) ensurePushMessageTable(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		_, _ = g.DB().Exec(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_push_message_scope_msg ON hg_addon_lazysheep_tggo_push_message (bot_key, chat_id, message_id)")
-		_, _ = g.DB().Exec(ctx, "CREATE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_push_message_binding ON hg_addon_lazysheep_tggo_push_message (bot_key, binding_key, status)")
+		if _, err = g.DB().Exec(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_push_message_scope_msg ON hg_addon_lazysheep_tggo_push_message (bot_key, chat_id, message_id)"); err != nil {
+			return gerror.Wrap(err, "创建推送消息唯一索引失败")
+		}
+		if _, err = g.DB().Exec(ctx, "CREATE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_push_message_binding ON hg_addon_lazysheep_tggo_push_message (bot_key, binding_key, status)"); err != nil {
+			return gerror.Wrap(err, "创建推送消息绑定索引失败")
+		}
 		return nil
 	case consts.DBMysql, "":
 		_, err := g.DB().Exec(ctx, "CREATE TABLE IF NOT EXISTS `hg_addon_lazysheep_tggo_push_message` ("+
@@ -554,7 +568,9 @@ func (s *sLazySheepTGGo) ensurePushDedupTable(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		_, _ = g.DB().Exec(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_push_dedup_scope_fp ON hg_addon_lazysheep_tggo_push_dedup (bot_key, chat_id, fingerprint)")
+		if _, err = g.DB().Exec(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_push_dedup_scope_fp ON hg_addon_lazysheep_tggo_push_dedup (bot_key, chat_id, fingerprint)"); err != nil {
+			return gerror.Wrap(err, "创建推送去重唯一索引失败")
+		}
 		return nil
 	case consts.DBMysql, "":
 		_, err := g.DB().Exec(ctx, "CREATE TABLE IF NOT EXISTS `hg_addon_lazysheep_tggo_push_dedup` ("+
@@ -857,7 +873,9 @@ func (s *sLazySheepTGGo) ensureInviteLogTable(ctx context.Context) error {
 func (s *sLazySheepTGGo) ensureUserUniqueIndex(ctx context.Context) error {
 	switch g.DB().GetConfig().Type {
 	case consts.DBPgsql:
-		_, _ = g.DB().Exec(ctx, "DROP INDEX IF EXISTS hg_addon_lazysheep_tggo_user_telegram_id")
+		if _, err := g.DB().Exec(ctx, "DROP INDEX IF EXISTS hg_addon_lazysheep_tggo_user_telegram_id"); err != nil {
+			return gerror.Wrap(err, "删除TG用户旧索引失败")
+		}
 		_, err := g.DB().Exec(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS hg_addon_lazysheep_tggo_user_bot_telegram_id ON hg_addon_lazysheep_tggo_user (bot_key, telegram_id)")
 		return err
 	case consts.DBMysql, "":
