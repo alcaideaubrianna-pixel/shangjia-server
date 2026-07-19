@@ -1151,7 +1151,8 @@ func (s *sSysSync) upsertProfile(ctx context.Context, cfg gdb.Record, row gdb.Re
 		columns.SourceCreateBy: row["create_by"].String(), columns.SourceUpdateBy: row["update_by"].String(), columns.SourceCreatedAt: row["create_time"].GTime(), columns.SourceUpdatedAt: row["update_time"].GTime(), columns.SourceEditedAt: row["edited_at"].GTime(),
 		columns.Visibility: consts.ContentVisibilityPublic, columns.ReviewStatus: consts.ContentReviewApproved, columns.ImportStatus: "feiniu_sync", columns.AdminRemark: fmt.Sprintf("FeiNiu note:%d channel:%d", row["note_id"].Int64(), row["source_channel_id"].Int64()), columns.PublishedAt: publishedAt, columns.Status: 1, columns.DeletedAt: nil, columns.UpdatedAt: now,
 	}
-	existing, err := dao.ContentProfile.Ctx(ctx).
+	profileModel := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Unscoped()
+	existing, err := profileModel.Clone().
 		Where(columns.SourceType, "feiniu").
 		Where(columns.SourceNoteId, row["note_id"].Int64()).
 		One()
@@ -1161,22 +1162,22 @@ func (s *sSysSync) upsertProfile(ctx context.Context, cfg gdb.Record, row gdb.Re
 	profileId := existing[columns.Id].Int64()
 	if existing.IsEmpty() {
 		data[columns.CreatedAt] = now
-		profileId, err = dao.ContentProfile.Ctx(ctx).Data(data).InsertAndGetId()
+		profileId, err = profileModel.Clone().Data(data).InsertAndGetId()
 		if err != nil && strings.Contains(strings.ToLower(err.Error()), "duplicate") {
-			existing, err = dao.ContentProfile.Ctx(ctx).
+			existing, err = profileModel.Clone().
 				Where(columns.SourceType, "feiniu").
 				Where(columns.SourceNoteId, row["note_id"].Int64()).
 				One()
 			if err == nil && !existing.IsEmpty() {
 				profileId = existing[columns.Id].Int64()
-				_, err = dao.ContentProfile.Ctx(ctx).Where(columns.Id, profileId).Data(data).Update()
+				_, err = profileModel.Clone().Where(columns.Id, profileId).Data(data).Update()
 			}
 		}
 		if err == nil && profileId <= 0 {
 			profileId, err = s.profileIdBySourceNote(ctx, row["note_id"].Int64())
 		}
 	} else {
-		_, err = dao.ContentProfile.Ctx(ctx).Where(columns.Id, profileId).Data(data).Update()
+		_, err = profileModel.Clone().Where(columns.Id, profileId).Data(data).Update()
 	}
 	if err != nil {
 		return 0, 0, gerror.Wrap(err, "保存上架资料失败")
@@ -1196,7 +1197,7 @@ func (s *sSysSync) profileIdBySourceNote(ctx context.Context, noteId int64) (int
 		return 0, nil
 	}
 	columns := dao.ContentProfile.Columns()
-	row, err := dao.ContentProfile.Ctx(ctx).
+	row, err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Unscoped().
 		Where(columns.SourceType, "feiniu").
 		Where(columns.SourceNoteId, noteId).
 		OrderDesc(columns.Id).
@@ -1216,17 +1217,26 @@ func (s *sSysSync) upsertTask(ctx context.Context, cfg gdb.Record, row gdb.Recor
 	}
 	clientRequestId := noteRequestKey(row)
 	now := gtime.Now()
-	data := g.Map{"tenant_id": cfg["target_tenant_id"].Int64(), "merchant_id": cfg["target_tenant_id"].Int64(), "account_id": accountId, "profile_id": profileId, "client_request_id": clientRequestId, "title": title, "province": row["province"].String(), "city": row["city"].String(), "plain_text": plainText, "media_count": row["image_count"].Int() + row["video_count"].Int(), "channel_id_json": "[]", "customer_remark": "FeiNiu 自动同步", "anti_scan_enabled": 0, "tg_push_enabled": 0, "tg_status": "skipped", "status": psysin.PublishTaskStatusPublished, "submitted_at": publishedAt, "published_at": publishedAt, "updated_at": now}
-	existing, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("tenant_id", cfg["target_tenant_id"].Int64()).Where("client_request_id", clientRequestId).WhereNull("deleted_at").One()
+	data := g.Map{"tenant_id": cfg["target_tenant_id"].Int64(), "merchant_id": cfg["target_tenant_id"].Int64(), "account_id": accountId, "profile_id": profileId, "client_request_id": clientRequestId, "title": title, "province": row["province"].String(), "city": row["city"].String(), "plain_text": plainText, "media_count": row["image_count"].Int() + row["video_count"].Int(), "channel_id_json": "[]", "customer_remark": "FeiNiu 自动同步", "anti_scan_enabled": 0, "tg_push_enabled": 0, "tg_status": "skipped", "status": psysin.PublishTaskStatusPublished, "submitted_at": publishedAt, "published_at": publishedAt, "deleted_at": nil, "updated_at": now}
+	taskModel := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Unscoped()
+	existing, err := taskModel.Clone().Where("tenant_id", cfg["target_tenant_id"].Int64()).Where("client_request_id", clientRequestId).One()
 	if err != nil {
 		return 0, gerror.Wrap(err, "读取上架任务失败")
 	}
 	if existing.IsEmpty() {
 		data["created_at"] = now
-		id, e := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
+		id, e := taskModel.Clone().Data(data).InsertAndGetId()
+		if e != nil && strings.Contains(strings.ToLower(e.Error()), "duplicate") {
+			existing, err = taskModel.Clone().Where("tenant_id", cfg["target_tenant_id"].Int64()).Where("client_request_id", clientRequestId).One()
+			if err == nil && !existing.IsEmpty() {
+				id = existing["id"].Int64()
+				_, err = taskModel.Clone().Where("id", id).Data(data).Update()
+				return id, gerror.Wrap(err, "恢复上架任务失败")
+			}
+		}
 		return id, gerror.Wrap(e, "创建上架任务失败")
 	}
-	_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", existing["id"].Int64()).Data(data).Update()
+	_, err = taskModel.Clone().Where("id", existing["id"].Int64()).Data(data).Update()
 	if err != nil {
 		return 0, gerror.Wrap(err, "更新上架任务失败")
 	}
