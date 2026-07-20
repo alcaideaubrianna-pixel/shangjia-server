@@ -9,6 +9,9 @@ import (
 )
 
 const twoWayTopicCacheTTL = 24 * time.Hour
+const twoWayAdminCacheTTL = 5 * time.Minute
+const twoWayStateCacheTTL = 30 * 24 * time.Hour
+const twoWayMediaGroupCacheTTL = 30 * time.Second
 
 func topicUserCacheKey(botId int64, userId string) string {
 	return fmt.Sprintf("youban_two_way_bot:topic:user:%d:%s", botId, userId)
@@ -16,6 +19,22 @@ func topicUserCacheKey(botId int64, userId string) string {
 
 func topicThreadCacheKey(botId int64, threadId int64) string {
 	return fmt.Sprintf("youban_two_way_bot:topic:thread:%d:%d", botId, threadId)
+}
+
+func adminUserCacheKey(botId int64, userId int64) string {
+	return fmt.Sprintf("youban_two_way_bot:admin:%d:%d", botId, userId)
+}
+
+func bannedUserCacheKey(botId int64, userId string) string {
+	return fmt.Sprintf("youban_two_way_bot:banned:%d:%s", botId, userId)
+}
+
+func trustedUserCacheKey(botId int64, userId string) string {
+	return fmt.Sprintf("youban_two_way_bot:trusted:%d:%s", botId, userId)
+}
+
+func mediaGroupFlushCacheKey(botId int64, direction string, groupId string) string {
+	return fmt.Sprintf("youban_two_way_bot:media_group_flush:%d:%s:%s", botId, direction, groupId)
 }
 
 func cacheUserTopic(ctx context.Context, botId int64, userId string, threadId int64) {
@@ -46,4 +65,17 @@ func cachedThreadUser(ctx context.Context, botId int64, threadId int64) string {
 		return ""
 	}
 	return value.String()
+}
+
+func removeCachedUserTopic(ctx context.Context, botId int64, userId string, threadId int64) {
+	keys := make([]interface{}, 0, 2)
+	if userId != "" {
+		keys = append(keys, topicUserCacheKey(botId, userId))
+	}
+	if threadId > 0 {
+		keys = append(keys, topicThreadCacheKey(botId, threadId))
+	}
+	if len(keys) > 0 {
+		_, _ = cache.Instance().Remove(ctx, keys...)
+	}
 }
