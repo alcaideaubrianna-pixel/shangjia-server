@@ -44,15 +44,10 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	}
 	if job.CollectSourceId > 0 && job.CollectSourceMessageId > 0 && strings.TrimSpace(job.CollectSourceChatId) != "" {
 		mod = mod.Where(
-			`((j.collect_source_id = ? AND j.collect_source_chat_id = ? AND j.collect_source_message_id > 0 AND j.collect_source_message_id < ?) OR ((j.collect_source_id <> ? OR j.collect_source_chat_id <> ? OR j.collect_source_message_id = 0) AND (j.created_at < ? OR (j.created_at = ? AND j.id < ?))))`,
+			`j.collect_source_id = ? AND j.collect_source_chat_id = ? AND j.collect_source_message_id > 0 AND j.collect_source_message_id < ?`,
 			job.CollectSourceId,
 			strings.TrimSpace(job.CollectSourceChatId),
 			job.CollectSourceMessageId,
-			job.CollectSourceId,
-			strings.TrimSpace(job.CollectSourceChatId),
-			createdAt,
-			createdAt,
-			job.Id,
 		)
 	} else {
 		mod = mod.Where(`(j.created_at < ? OR (j.created_at = ? AND j.id < ?))`, createdAt, createdAt, job.Id)

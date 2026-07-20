@@ -1199,7 +1199,7 @@
       itemCount: 0,
       showSizePicker: true,
       pageSizes: [10, 20, 50],
-      onChange: (page) => {
+      onUpdatePage: (page) => {
         pagination.page = page;
         loader();
       },

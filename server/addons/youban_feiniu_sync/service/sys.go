@@ -8,6 +8,7 @@ import (
 type ISysSync interface {
 	TenantOptions(ctx context.Context, in *sysin.OptionListInp) (list []*sysin.TenantOptionModel, err error)
 	AdminAccountOptions(ctx context.Context, in *sysin.OptionListInp) (list []*sysin.AccountOptionModel, err error)
+	AccountOptions(ctx context.Context, in *sysin.OptionListInp) (list []*sysin.AccountOptionModel, err error)
 	ConfigList(ctx context.Context, in *sysin.ConfigListInp) (list []*sysin.ConfigModel, totalCount int, err error)
 	ConfigView(ctx context.Context, in *sysin.ConfigViewInp) (res *sysin.ConfigModel, err error)
 	ConfigSave(ctx context.Context, in *sysin.ConfigSaveInp) (res *sysin.ConfigModel, err error)
@@ -21,6 +22,8 @@ type ISysSync interface {
 	DashboardRecentRuns(ctx context.Context, in *sysin.DashboardInp, limit int) (list []*sysin.RunModel, err error)
 	ChannelMapList(ctx context.Context, in *sysin.ChannelMapListInp) (list []*sysin.ChannelMapModel, totalCount int, err error)
 	ChannelClear(ctx context.Context, in *sysin.ChannelClearInp) (res *sysin.ChannelClearModel, err error)
+	ChannelCopy(ctx context.Context, in *sysin.ChannelCopyInp) (res *sysin.ChannelCopyModel, err error)
+	ChannelDisable(ctx context.Context, in *sysin.ChannelDisableInp) (res *sysin.ChannelDisableModel, err error)
 	RunList(ctx context.Context, in *sysin.RunListInp) (list []*sysin.RunModel, totalCount int, err error)
 	RunView(ctx context.Context, in *sysin.RunViewInp) (res *sysin.RunModel, err error)
 	RunItemList(ctx context.Context, in *sysin.RunItemListInp) (list []*sysin.RunItemModel, totalCount int, err error)

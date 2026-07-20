@@ -65,7 +65,7 @@ type FollowNoteListReq struct {
 
 type FollowNoteListRes struct {
 	form.PageRes
-	List []*sysin.NoteModel `json:"list" dc:"笔记列表"`
+	List []*sysin.FollowNoteModel `json:"list" dc:"笔记列表"`
 }
 
 type FollowNoteViewReq struct {

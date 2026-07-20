@@ -125,7 +125,7 @@
     itemCount: 0,
     showSizePicker: true,
     pageSizes: [10, 20, 50],
-    onChange: (page: number) => {
+    onUpdatePage: (page: number) => {
       pagination.page = page;
       loadProfiles();
     },

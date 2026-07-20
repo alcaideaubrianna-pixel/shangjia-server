@@ -8,6 +8,9 @@ export function TenantOptions(params = {}) {
 export function AdminAccountOptions(params = {}) {
   return http.request({ url: `${prefix}/options/adminAccounts`, method: 'get', params });
 }
+export function AccountOptions(params = {}) {
+  return http.request({ url: `${prefix}/options/accounts`, method: 'get', params });
+}
 
 export function Dashboard(params = {}) {
   return http.request({ url: `${prefix}/dashboard`, method: 'get', params });
@@ -46,6 +49,12 @@ export function ChannelMapList(params = {}) {
 }
 export function ChannelClear(params = {}) {
   return http.request({ url: `${prefix}/channel/clear`, method: 'POST', params });
+}
+export function ChannelCopy(params = {}) {
+  return http.request({ url: `${prefix}/channel/copy`, method: 'POST', params });
+}
+export function ChannelDisable(params = {}) {
+  return http.request({ url: `${prefix}/channel/disable`, method: 'POST', params });
 }
 
 export function RunList(params = {}) {

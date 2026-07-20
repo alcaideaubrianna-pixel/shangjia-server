@@ -225,6 +225,120 @@ func (s *sSysPublish) AdminAccountDelete(ctx context.Context, in *sysin.AccountD
 	return nil
 }
 
+func (s *sSysPublish) AdminAccountTransferPreview(ctx context.Context, in *sysin.AccountTransferPreviewInp) (res *sysin.AccountTransferPreviewModel, err error) {
+	admin, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil || in.FromAccountId <= 0 {
+		return nil, gerror.New("原账号ID不能为空")
+	}
+	if in.FromAccountId == admin.Id {
+		return nil, gerror.New("不能转移当前管理员账号资料")
+	}
+	if err = s.ensureAdminManageableAccount(ctx, admin, in.FromAccountId); err != nil {
+		return nil, err
+	}
+	res = &sysin.AccountTransferPreviewModel{FromAccountId: in.FromAccountId}
+	res.TaskCount, err = pdao.YoubanPublishTask.Ctx(ctx).
+		Where(pdao.YoubanPublishTask.Columns().TenantId, admin.TenantId).
+		Where(pdao.YoubanPublishTask.Columns().AccountId, in.FromAccountId).
+		WhereNull(pdao.YoubanPublishTask.Columns().DeletedAt).
+		Count()
+	if err != nil {
+		return nil, gerror.Wrap(err, "统计待转移任务失败")
+	}
+	res.MediaCount, err = pdao.YoubanPublishMedia.Ctx(ctx).
+		Where(pdao.YoubanPublishMedia.Columns().TenantId, admin.TenantId).
+		Where(pdao.YoubanPublishMedia.Columns().AccountId, in.FromAccountId).
+		WhereNull(pdao.YoubanPublishMedia.Columns().DeletedAt).
+		Count()
+	if err != nil {
+		return nil, gerror.Wrap(err, "统计待转移媒体失败")
+	}
+	var profileRows []gdb.Record
+	if err = pdao.YoubanPublishTask.Ctx(ctx).
+		Fields("profile_id").
+		Where(pdao.YoubanPublishTask.Columns().TenantId, admin.TenantId).
+		Where(pdao.YoubanPublishTask.Columns().AccountId, in.FromAccountId).
+		WhereNull(pdao.YoubanPublishTask.Columns().DeletedAt).
+		Group("profile_id").
+		Scan(&profileRows); err != nil {
+		return nil, gerror.Wrap(err, "统计待转移资料失败")
+	}
+	for _, item := range profileRows {
+		if item["profile_id"].Int64() > 0 {
+			res.ProfileCount++
+		}
+	}
+	return res, nil
+}
+
+func (s *sSysPublish) AdminAccountTransferProfiles(ctx context.Context, in *sysin.AccountTransferProfilesInp) (res *sysin.AccountTransferProfilesModel, err error) {
+	admin, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil || in.FromAccountId <= 0 || in.ToAccountId <= 0 {
+		return nil, gerror.New("原账号和目标账号不能为空")
+	}
+	if in.FromAccountId == in.ToAccountId {
+		return nil, gerror.New("目标账号不能与原账号相同")
+	}
+	if in.FromAccountId == admin.Id {
+		return nil, gerror.New("不能转移当前管理员账号资料")
+	}
+	if err = s.ensureAdminManageableAccount(ctx, admin, in.FromAccountId); err != nil {
+		return nil, err
+	}
+	if err = s.ensureAdminManageableAccount(ctx, admin, in.ToAccountId); err != nil {
+		return nil, err
+	}
+	preview, err := s.AdminAccountTransferPreview(ctx, &sysin.AccountTransferPreviewInp{FromAccountId: in.FromAccountId})
+	if err != nil {
+		return nil, err
+	}
+	res = &sysin.AccountTransferProfilesModel{FromAccountId: in.FromAccountId, ToAccountId: in.ToAccountId, ProfileCount: preview.ProfileCount, TaskCount: preview.TaskCount, MediaCount: preview.MediaCount}
+	now := gtime.Now()
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		taskColumns := pdao.YoubanPublishTask.Columns()
+		mediaColumns := pdao.YoubanPublishMedia.Columns()
+		accountColumns := pdao.YoubanPublishAccount.Columns()
+		if _, e := tx.Model(pdao.YoubanPublishTask.Table()).Safe().Ctx(ctx).
+			Where(taskColumns.TenantId, admin.TenantId).
+			Where(taskColumns.AccountId, in.FromAccountId).
+			WhereNull(taskColumns.DeletedAt).
+			Data(g.Map{taskColumns.AccountId: in.ToAccountId, taskColumns.UpdatedBy: admin.Id, taskColumns.UpdatedAt: now}).
+			Update(); e != nil {
+			return gerror.Wrap(e, "转移上架任务失败")
+		}
+		if _, e := tx.Model(pdao.YoubanPublishMedia.Table()).Safe().Ctx(ctx).
+			Where(mediaColumns.TenantId, admin.TenantId).
+			Where(mediaColumns.AccountId, in.FromAccountId).
+			WhereNull(mediaColumns.DeletedAt).
+			Data(g.Map{mediaColumns.AccountId: in.ToAccountId, mediaColumns.UpdatedBy: admin.Id, mediaColumns.UpdatedAt: now}).
+			Update(); e != nil {
+			return gerror.Wrap(e, "转移上架媒体失败")
+		}
+		if in.DeleteAfterTransfer == 1 {
+			if _, e := tx.Model(pdao.YoubanPublishAccount.Table()).Safe().Ctx(ctx).
+				Where(accountColumns.Id, in.FromAccountId).
+				Where(accountColumns.TenantId, admin.TenantId).
+				WhereNull(accountColumns.DeletedAt).
+				Data(g.Map{accountColumns.DeletedBy: admin.Id, accountColumns.DeletedAt: now}).
+				Update(); e != nil {
+				return gerror.Wrap(e, "删除原上架账号失败")
+			}
+			res.DeletedSource = 1
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
 func (s *sSysPublish) savePublishAccount(ctx context.Context, tx gdb.TX, in *sysin.AccountSaveInp) (err error) {
 	if err = s.ensurePublishAccountUnique(ctx, in.Id, in.Username); err != nil {
 		return err

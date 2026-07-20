@@ -39,7 +39,7 @@ WITH parent AS (
   SELECT * FROM (VALUES
     ('大盘权限', 'youbanFeiniuSyncDashboardPerm', '/youban_feiniu_sync/sync/options/tenants,/youban_feiniu_sync/sync/options/adminAccounts,/youban_feiniu_sync/sync/dashboard,/youban_feiniu_sync/sync/dashboard/summary,/youban_feiniu_sync/sync/dashboard/trend,/youban_feiniu_sync/sync/dashboard/channelRank,/youban_feiniu_sync/sync/dashboard/recentRuns', 10, 'FeiNiu同步大盘权限'),
     ('配置权限', 'youbanFeiniuSyncConfigPerm', '/youban_feiniu_sync/sync/config/list,/youban_feiniu_sync/sync/config/view,/youban_feiniu_sync/sync/config/save,/youban_feiniu_sync/sync/config/delete,/youban_feiniu_sync/sync/config/autoSync,/youban_feiniu_sync/sync/config/test', 20, 'FeiNiu同步配置权限'),
-    ('频道权限', 'youbanFeiniuSyncChannelPerm', '/youban_feiniu_sync/sync/channel/list,/youban_feiniu_sync/sync/channel/clear', 30, 'FeiNiu同步频道权限'),
+    ('频道权限', 'youbanFeiniuSyncChannelPerm', '/youban_feiniu_sync/sync/options/tenants,/youban_feiniu_sync/sync/options/accounts,/youban_feiniu_sync/sync/channel/list,/youban_feiniu_sync/sync/channel/clear,/youban_feiniu_sync/sync/channel/copy,/youban_feiniu_sync/sync/channel/disable', 30, 'FeiNiu同步频道权限'),
     ('运行权限', 'youbanFeiniuSyncRunPerm', '/youban_feiniu_sync/sync/run/list,/youban_feiniu_sync/sync/run/view,/youban_feiniu_sync/sync/run/items,/youban_feiniu_sync/sync/run/start', 40, 'FeiNiu同步运行权限')
   ) AS t("title", "name", "permissions", "sort", "remark")
 )
@@ -63,7 +63,7 @@ WITH parent AS (
   SELECT * FROM (VALUES
     ('大盘权限', 'youbanFeiniuSyncDashboardPerm', '/youban_feiniu_sync/sync/options/tenants,/youban_feiniu_sync/sync/options/adminAccounts,/youban_feiniu_sync/sync/dashboard,/youban_feiniu_sync/sync/dashboard/summary,/youban_feiniu_sync/sync/dashboard/trend,/youban_feiniu_sync/sync/dashboard/channelRank,/youban_feiniu_sync/sync/dashboard/recentRuns', 10, 'FeiNiu同步大盘权限'),
     ('配置权限', 'youbanFeiniuSyncConfigPerm', '/youban_feiniu_sync/sync/config/list,/youban_feiniu_sync/sync/config/view,/youban_feiniu_sync/sync/config/save,/youban_feiniu_sync/sync/config/delete,/youban_feiniu_sync/sync/config/autoSync,/youban_feiniu_sync/sync/config/test', 20, 'FeiNiu同步配置权限'),
-    ('频道权限', 'youbanFeiniuSyncChannelPerm', '/youban_feiniu_sync/sync/channel/list,/youban_feiniu_sync/sync/channel/clear', 30, 'FeiNiu同步频道权限'),
+    ('频道权限', 'youbanFeiniuSyncChannelPerm', '/youban_feiniu_sync/sync/options/tenants,/youban_feiniu_sync/sync/options/accounts,/youban_feiniu_sync/sync/channel/list,/youban_feiniu_sync/sync/channel/clear,/youban_feiniu_sync/sync/channel/copy,/youban_feiniu_sync/sync/channel/disable', 30, 'FeiNiu同步频道权限'),
     ('运行权限', 'youbanFeiniuSyncRunPerm', '/youban_feiniu_sync/sync/run/list,/youban_feiniu_sync/sync/run/view,/youban_feiniu_sync/sync/run/items,/youban_feiniu_sync/sync/run/start', 40, 'FeiNiu同步运行权限'),
     ('同步管理', 'youbanFeiniuSyncManage', '/youban_feiniu_sync/sync/dashboard', 1, 'FeiNiu同步兼容权限')
   ) AS t("title", "name", "permissions", "sort", "remark")

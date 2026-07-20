@@ -328,16 +328,19 @@ func (s *sSysPublish) blockAccountFollow(ctx context.Context, account *sysin.Acc
 	return gerror.Wrap(err, "拉黑账号失败")
 }
 
-func (s *sSysPublish) FollowNoteList(ctx context.Context, in *sysin.FollowNoteListInp) (list []*sysin.NoteModel, totalCount int, err error) {
+func (s *sSysPublish) FollowNoteList(ctx context.Context, in *sysin.FollowNoteListInp) (list []*sysin.FollowNoteModel, totalCount int, err error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {
 		return nil, 0, err
+	}
+	if in == nil {
+		in = &sysin.FollowNoteListInp{}
 	}
 	accountIds, err := s.followNoteAccountIds(ctx, account, in)
 	if err != nil {
 		return nil, 0, err
 	}
-	return s.noteListByAccounts(ctx, &in.ProfileListInp, 0, accountIds, account)
+	return s.followNoteListByAccounts(ctx, &in.ProfileListInp, 0, accountIds, account)
 }
 
 func (s *sSysPublish) FollowNoteView(ctx context.Context, in *sysin.ProfileViewInp) (res *sysin.ProfileViewModel, err error) {

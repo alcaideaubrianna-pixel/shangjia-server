@@ -28,6 +28,10 @@ func (s *sSysPublish) deleteTelegramMessageSetLockedByChannel(ctx context.Contex
 	}
 	botToken, err := s.telegramJobBotToken(ctx, job.BotId, job.TenantId)
 	if err != nil {
+		if isTelegramBotConfigMissingError(err) {
+			s.appendTelegramJobLog(ctx, job, "delete", "skipped", reason+"，历史Bot配置已删除，跳过旧TG消息清理")
+			return nil
+		}
 		return err
 	}
 	bot, err := s.telegramBot(ctx, botToken)
@@ -61,6 +65,10 @@ func (s *sSysPublish) deleteTelegramMessageSetLockedByChannel(ctx context.Contex
 	}
 	s.appendTelegramJobLog(ctx, job, "delete", "success", reason+"，TG消息删除成功")
 	return nil
+}
+
+func isTelegramBotConfigMissingError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Bot配置不存在")
 }
 
 func isTelegramMessageAlreadyDeletedError(err error) bool {

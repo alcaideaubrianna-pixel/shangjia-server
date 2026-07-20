@@ -738,7 +738,7 @@
     itemCount: 0,
     showSizePicker: true,
     pageSizes: [10, 20, 50],
-    onChange: (page: number) => {
+    onUpdatePage: (page: number) => {
       taskPagination.page = page;
       loadTasks();
     },
@@ -754,7 +754,7 @@
     itemCount: 0,
     showSizePicker: true,
     pageSizes: [10, 20, 50],
-    onChange: (page: number) => {
+    onUpdatePage: (page: number) => {
       runPagination.page = page;
       loadRuns();
     },
@@ -776,7 +776,7 @@
     itemCount: 0,
     showSizePicker: true,
     pageSizes: [10, 20, 50],
-    onChange: (page: number) => {
+    onUpdatePage: (page: number) => {
       matchItemPagination.page = page;
       loadImportRunMatchItems();
     },

@@ -20,6 +20,13 @@ type AdminAccountOptionsReq struct {
 type AdminAccountOptionsRes struct {
 	List []*sysin.AccountOptionModel `json:"list" dc:"账号选项"`
 }
+type AccountOptionsReq struct {
+	g.Meta `path:"/sync/options/accounts" method:"get" tags:"FeiNiu同步" summary:"上架账号选项"`
+	sysin.OptionListInp
+}
+type AccountOptionsRes struct {
+	List []*sysin.AccountOptionModel `json:"list" dc:"账号选项"`
+}
 
 type ConfigListReq struct {
 	g.Meta `path:"/sync/config/list" method:"get" tags:"FeiNiu同步" summary:"配置列表"`
@@ -100,6 +107,16 @@ type ChannelClearReq struct {
 	sysin.ChannelClearInp
 }
 type ChannelClearRes struct{ *sysin.ChannelClearModel }
+type ChannelCopyReq struct {
+	g.Meta `path:"/sync/channel/copy" method:"post" tags:"FeiNiu同步" summary:"复制频道资料"`
+	sysin.ChannelCopyInp
+}
+type ChannelCopyRes struct{ *sysin.ChannelCopyModel }
+type ChannelDisableReq struct {
+	g.Meta `path:"/sync/channel/disable" method:"post" tags:"FeiNiu同步" summary:"停用频道账号"`
+	sysin.ChannelDisableInp
+}
+type ChannelDisableRes struct{ *sysin.ChannelDisableModel }
 type RunListReq struct {
 	g.Meta `path:"/sync/run/list" method:"get" tags:"FeiNiu同步" summary:"运行记录"`
 	sysin.RunListInp

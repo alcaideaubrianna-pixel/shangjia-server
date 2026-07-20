@@ -70,7 +70,7 @@ func (c *cPublish) FollowNoteList(ctx context.Context, req *publish.FollowNoteLi
 		return nil, err
 	}
 	if list == nil {
-		list = []*sysin.NoteModel{}
+		list = []*sysin.FollowNoteModel{}
 	}
 	res = new(publish.FollowNoteListRes)
 	res.List = list

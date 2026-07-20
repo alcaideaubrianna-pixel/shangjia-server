@@ -107,6 +107,24 @@ type AdminAccountDeleteReq struct {
 
 type AdminAccountDeleteRes struct{}
 
+type AdminAccountTransferPreviewReq struct {
+	g.Meta `path:"/publish/admin/account/transferPreview" method:"get" tags:"上架插件管理端" summary:"账号资料转移预览"`
+	sysin.AccountTransferPreviewInp
+}
+
+type AdminAccountTransferPreviewRes struct {
+	*sysin.AccountTransferPreviewModel
+}
+
+type AdminAccountTransferProfilesReq struct {
+	g.Meta `path:"/publish/admin/account/transferProfiles" method:"post" tags:"上架插件管理端" summary:"账号资料转移"`
+	sysin.AccountTransferProfilesInp
+}
+
+type AdminAccountTransferProfilesRes struct {
+	*sysin.AccountTransferProfilesModel
+}
+
 type AdminAccountSettingViewReq struct {
 	g.Meta `path:"/publish/admin/account/setting/view" method:"get" tags:"上架插件管理端" summary:"账号推送设置详情"`
 	sysin.AccountSettingViewInp

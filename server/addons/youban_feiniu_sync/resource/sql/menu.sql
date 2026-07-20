@@ -37,7 +37,7 @@ SELECT NULL, @syncId, '配置权限', 'youbanFeiniuSyncConfigPerm', '', '', '3',
 WHERE @syncId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanFeiniuSyncConfigPerm');
 
 INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type`, `redirect`, `permissions`, `permission_name`, `component`, `always_show`, `active_menu`, `is_root`, `is_frame`, `frame_src`, `keep_alive`, `hidden`, `affix`, `level`, `tree`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
-SELECT NULL, @syncId, '频道权限', 'youbanFeiniuSyncChannelPerm', '', '', '3', '', '/youban_feiniu_sync/sync/channel/list,/youban_feiniu_sync/sync/channel/clear', '', '', '0', 'youbanFeiniuSync', '0', '0', '', '0', '1', '0', '3', CONCAT(@syncTree, 'tr_', @syncId, ' '), '30', 'FeiNiu同步频道权限', '1', @now, @now
+SELECT NULL, @syncId, '频道权限', 'youbanFeiniuSyncChannelPerm', '', '', '3', '', '/youban_feiniu_sync/sync/options/tenants,/youban_feiniu_sync/sync/options/accounts,/youban_feiniu_sync/sync/channel/list,/youban_feiniu_sync/sync/channel/clear,/youban_feiniu_sync/sync/channel/copy,/youban_feiniu_sync/sync/channel/disable', '', '', '0', 'youbanFeiniuSync', '0', '0', '', '0', '1', '0', '3', CONCAT(@syncTree, 'tr_', @syncId, ' '), '30', 'FeiNiu同步频道权限', '1', @now, @now
 WHERE @syncId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `hg_admin_menu` WHERE `name` = 'youbanFeiniuSyncChannelPerm');
 
 INSERT INTO `hg_admin_menu` (`id`, `pid`, `title`, `name`, `path`, `icon`, `type`, `redirect`, `permissions`, `permission_name`, `component`, `always_show`, `active_menu`, `is_root`, `is_frame`, `frame_src`, `keep_alive`, `hidden`, `affix`, `level`, `tree`, `sort`, `remark`, `status`, `created_at`, `updated_at`)
@@ -64,7 +64,7 @@ SET `pid` = @syncId,
     `permissions` = CASE `name`
         WHEN 'youbanFeiniuSyncDashboardPerm' THEN '/youban_feiniu_sync/sync/options/tenants,/youban_feiniu_sync/sync/options/adminAccounts,/youban_feiniu_sync/sync/dashboard,/youban_feiniu_sync/sync/dashboard/summary,/youban_feiniu_sync/sync/dashboard/trend,/youban_feiniu_sync/sync/dashboard/channelRank,/youban_feiniu_sync/sync/dashboard/recentRuns'
         WHEN 'youbanFeiniuSyncConfigPerm' THEN '/youban_feiniu_sync/sync/config/list,/youban_feiniu_sync/sync/config/view,/youban_feiniu_sync/sync/config/save,/youban_feiniu_sync/sync/config/delete,/youban_feiniu_sync/sync/config/autoSync,/youban_feiniu_sync/sync/config/test'
-        WHEN 'youbanFeiniuSyncChannelPerm' THEN '/youban_feiniu_sync/sync/channel/list,/youban_feiniu_sync/sync/channel/clear'
+        WHEN 'youbanFeiniuSyncChannelPerm' THEN '/youban_feiniu_sync/sync/options/tenants,/youban_feiniu_sync/sync/options/accounts,/youban_feiniu_sync/sync/channel/list,/youban_feiniu_sync/sync/channel/clear,/youban_feiniu_sync/sync/channel/copy,/youban_feiniu_sync/sync/channel/disable'
         WHEN 'youbanFeiniuSyncRunPerm' THEN '/youban_feiniu_sync/sync/run/list,/youban_feiniu_sync/sync/run/view,/youban_feiniu_sync/sync/run/items,/youban_feiniu_sync/sync/run/start'
         WHEN 'youbanFeiniuSyncManage' THEN '/youban_feiniu_sync/sync/dashboard'
         ELSE `permissions`

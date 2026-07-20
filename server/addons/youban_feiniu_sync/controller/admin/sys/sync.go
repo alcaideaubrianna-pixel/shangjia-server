@@ -26,6 +26,14 @@ func (c *cSync) AdminAccountOptions(ctx context.Context, req *syncapi.AdminAccou
 	res = &syncapi.AdminAccountOptionsRes{List: list}
 	return
 }
+func (c *cSync) AccountOptions(ctx context.Context, req *syncapi.AccountOptionsReq) (res *syncapi.AccountOptionsRes, err error) {
+	list, err := service.SysSync().AccountOptions(ctx, &req.OptionListInp)
+	if err != nil {
+		return
+	}
+	res = &syncapi.AccountOptionsRes{List: list}
+	return
+}
 func (c *cSync) ConfigList(ctx context.Context, req *syncapi.ConfigListReq) (res *syncapi.ConfigListRes, err error) {
 	list, total, err := service.SysSync().ConfigList(ctx, &req.ConfigListInp)
 	if err != nil {
@@ -124,6 +132,22 @@ func (c *cSync) ChannelClear(ctx context.Context, req *syncapi.ChannelClearReq) 
 		return
 	}
 	res = &syncapi.ChannelClearRes{ChannelClearModel: data}
+	return
+}
+func (c *cSync) ChannelCopy(ctx context.Context, req *syncapi.ChannelCopyReq) (res *syncapi.ChannelCopyRes, err error) {
+	data, err := service.SysSync().ChannelCopy(ctx, &req.ChannelCopyInp)
+	if err != nil {
+		return
+	}
+	res = &syncapi.ChannelCopyRes{ChannelCopyModel: data}
+	return
+}
+func (c *cSync) ChannelDisable(ctx context.Context, req *syncapi.ChannelDisableReq) (res *syncapi.ChannelDisableRes, err error) {
+	data, err := service.SysSync().ChannelDisable(ctx, &req.ChannelDisableInp)
+	if err != nil {
+		return
+	}
+	res = &syncapi.ChannelDisableRes{ChannelDisableModel: data}
 	return
 }
 func (c *cSync) RunList(ctx context.Context, req *syncapi.RunListReq) (res *syncapi.RunListRes, err error) {

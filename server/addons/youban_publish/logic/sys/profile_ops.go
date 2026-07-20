@@ -428,21 +428,17 @@ func (s *sSysPublish) profileList(ctx context.Context, in *sysin.ProfileListInp)
 	if err != nil {
 		return nil, 0, err
 	}
-	base = s.applyProfileFilters(ctx, base, in)
-	totalCount, err = base.Clone().Count()
+	list, totalCount, err = s.searchProfilePage(ctx, base, in, profileListFields(), "统计资料失败", "获取资料列表失败")
 	if err != nil {
-		return nil, 0, gerror.Wrap(err, "统计资料失败")
-	}
-	if totalCount == 0 {
-		return []*sysin.ProfileModel{}, 0, nil
-	}
-	if err = base.Fields(profileListFields()).Page(in.Page, in.PerPage).OrderDesc("p.updated_at").OrderDesc("p.id").Scan(&list); err != nil {
-		return nil, 0, gerror.Wrap(err, "获取资料列表失败")
+		return nil, 0, err
 	}
 	if err = s.ensureProfileListUUID(ctx, list); err != nil {
 		return nil, 0, err
 	}
 	if err = s.applyProfileOwnerNames(ctx, list); err != nil {
+		return nil, 0, err
+	}
+	if err = s.applyProfileTagNames(ctx, list); err != nil {
 		return nil, 0, err
 	}
 	return
@@ -492,6 +488,9 @@ func (s *sSysPublish) profileView(ctx context.Context, profileId int64, tenantId
 		return nil, gerror.New("资料不存在或无权操作")
 	}
 	if err = s.ensureProfileModelUUID(ctx, res); err != nil {
+		return nil, err
+	}
+	if err = s.applyProfileTagNames(ctx, []*sysin.ProfileModel{res}); err != nil {
 		return nil, err
 	}
 	return res, nil
@@ -892,6 +891,7 @@ func (s *sSysPublish) saveOneTag(ctx context.Context, tx gdb.TX, name string, re
 	if err != nil {
 		return gerror.Wrap(err, "保存标签失败")
 	}
+	s.clearProfileTagNameCache(ctx)
 	return nil
 }
 
@@ -937,6 +937,7 @@ func (s *sSysPublish) deleteTags(ctx context.Context, in *sysin.TagDeleteInp, op
 	if affected == 0 {
 		return gerror.New("标签不存在或无权删除")
 	}
+	s.clearProfileTagNameCache(ctx)
 	return nil
 }
 
@@ -1056,23 +1057,28 @@ func profileListFields() string {
 }
 
 func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
+	mod = s.applyProfileNonKeywordFilters(ctx, mod, in)
 	if in == nil {
 		return mod
 	}
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
-		like := "%" + keyword + "%"
-		tagIds := s.tagIdsByKeyword(ctx, keyword)
-		if len(tagIds) > 0 {
-			args := []interface{}{like, like, like, like, like, like, like, like}
-			conditions := []string{"p.profile_no LIKE ?", "p.source_note_uuid LIKE ?", "p.title LIKE ?", "p.summary LIKE ?", "p.plain_text LIKE ?", "p.cup_size LIKE ?", "t.title LIKE ?", "t.plain_text LIKE ?"}
-			for _, tagId := range tagIds {
-				conditions = append(conditions, "p.cup_size = ?", "p.cup_size LIKE ?", "p.cup_size LIKE ?", "p.cup_size LIKE ?")
-				args = append(args, tagId, tagId+",%", "%,"+tagId, "%,"+tagId+",%")
-			}
-			mod = mod.Where("("+strings.Join(conditions, " OR ")+")", args...)
+		if profileNo, ok := normalizeProfileNoSearchKeyword(keyword); ok {
+			mod = mod.Where("p.profile_no", profileNo)
 		} else {
-			mod = mod.Where("(p.profile_no LIKE ? OR p.source_note_uuid LIKE ? OR p.title LIKE ? OR p.summary LIKE ? OR p.plain_text LIKE ? OR p.cup_size LIKE ? OR t.title LIKE ? OR t.plain_text LIKE ?)", like, like, like, like, like, like, like, like)
+			terms := splitProfileSearchTerms(keyword)
+			if len(terms) > 0 {
+				condition, args := segmentedLikeCondition([]string{"p.title", "t.title", "p.plain_text", "t.plain_text"}, terms)
+				mod = mod.Where(condition, args...)
+			}
 		}
+	}
+	return mod
+}
+
+func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
+	_ = ctx
+	if in == nil {
+		return mod
 	}
 	if in.Province != "" {
 		mod = mod.Where("p.province", strings.TrimSpace(in.Province))

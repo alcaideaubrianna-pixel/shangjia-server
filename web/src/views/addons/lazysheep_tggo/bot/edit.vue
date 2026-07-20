@@ -82,9 +82,9 @@
             closeModal();
           }
         });
-      } catch (e) {
+      } catch (e: any) {
         loading.value = false;
-        message.error('Bot Token 检测失败，请确认 Token 是否正确');
+        message.error(e?.message || 'Bot Token 检测失败，请确认 Token 是否正确');
       }
     });
   }

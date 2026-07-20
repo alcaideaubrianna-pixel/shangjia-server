@@ -25,6 +25,8 @@ CREATE INDEX IF NOT EXISTS idx_app_announcement_category ON hg_app_announcement 
 CREATE INDEX IF NOT EXISTS idx_app_announcement_public ON hg_app_announcement (status, publish_at, expire_at, sort, id);
 CREATE INDEX IF NOT EXISTS idx_app_announcement_banner ON hg_app_announcement (is_banner, status, publish_at, expire_at, sort, id);
 
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 CREATE TABLE IF NOT EXISTS hg_content_channel (
   id bigserial PRIMARY KEY,
   source_channel_id bigint NOT NULL,
@@ -140,6 +142,8 @@ CREATE INDEX IF NOT EXISTS idx_content_profile_admin_cost ON hg_content_profile 
 CREATE INDEX IF NOT EXISTS idx_content_profile_admin_flags ON hg_content_profile (can_fly_to_province, can_go_abroad, can_overnight, has_health_check, id);
 CREATE INDEX IF NOT EXISTS idx_content_profile_public_filters ON hg_content_profile (status, review_status, import_status, visibility, age, height, weight, cup_size, video_count, has_verification_video, id);
 CREATE INDEX IF NOT EXISTS idx_content_profile_keyword ON hg_content_profile USING gin (to_tsvector('simple', coalesce(profile_no,'') || ' ' || coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(plain_text,'') || ' ' || coalesce(province,'') || ' ' || coalesce(city,'') || ' ' || coalesce(cup_size,'')));
+CREATE INDEX IF NOT EXISTS idx_content_profile_title_trgm ON hg_content_profile USING gin (title gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_content_profile_plain_text_trgm ON hg_content_profile USING gin (plain_text gin_trgm_ops);
 
 ALTER TABLE hg_content_profile ADD COLUMN IF NOT EXISTS home_recommend smallint NOT NULL DEFAULT 0;
 ALTER TABLE hg_content_profile ADD COLUMN IF NOT EXISTS home_sort integer NOT NULL DEFAULT 0;

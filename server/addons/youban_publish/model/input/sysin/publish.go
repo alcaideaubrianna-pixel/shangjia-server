@@ -170,6 +170,32 @@ type AccountDeleteInp struct {
 	Ids []int64 `json:"ids" v:"required#请选择要删除的数据" dc:"ID列表"`
 }
 
+type AccountTransferPreviewInp struct {
+	FromAccountId int64 `json:"fromAccountId" v:"required|min:1#原账号ID不能为空|原账号ID不能为空" dc:"原账号ID"`
+}
+
+type AccountTransferPreviewModel struct {
+	FromAccountId int64 `json:"fromAccountId" dc:"原账号ID"`
+	ProfileCount  int   `json:"profileCount" dc:"资料数量"`
+	TaskCount     int   `json:"taskCount" dc:"任务数量"`
+	MediaCount    int   `json:"mediaCount" dc:"媒体数量"`
+}
+
+type AccountTransferProfilesInp struct {
+	FromAccountId       int64 `json:"fromAccountId" v:"required|min:1#原账号ID不能为空|原账号ID不能为空" dc:"原账号ID"`
+	ToAccountId         int64 `json:"toAccountId" v:"required|min:1#目标账号ID不能为空|目标账号ID不能为空" dc:"目标账号ID"`
+	DeleteAfterTransfer int   `json:"deleteAfterTransfer" dc:"转移后删除原账号：1是 0否"`
+}
+
+type AccountTransferProfilesModel struct {
+	FromAccountId int64 `json:"fromAccountId" dc:"原账号ID"`
+	ToAccountId   int64 `json:"toAccountId" dc:"目标账号ID"`
+	ProfileCount  int   `json:"profileCount" dc:"资料数量"`
+	TaskCount     int   `json:"taskCount" dc:"任务数量"`
+	MediaCount    int   `json:"mediaCount" dc:"媒体数量"`
+	DeletedSource int   `json:"deletedSource" dc:"是否已删除原账号"`
+}
+
 type AccountResetPasswordInp struct {
 	Id       int64  `json:"id" v:"required|min:1#账号ID不能为空|账号ID不能为空" dc:"上架账号ID"`
 	Password string `json:"password" dc:"新密码，为空自动生成"`
@@ -541,6 +567,7 @@ type ProfileListInp struct {
 	form.PageReq
 	TenantId     int64  `json:"tenantId" dc:"租户ID"`
 	AccountId    int64  `json:"accountId" dc:"上架账号ID"`
+	AccountScope string `json:"accountScope" dc:"账号范围：all/mine/following"`
 	Keyword      string `json:"keyword" dc:"标题/编号/正文"`
 	Province     string `json:"province" dc:"省份"`
 	City         string `json:"city" dc:"城市"`
@@ -562,7 +589,9 @@ type ProfileModel struct {
 	TenantId        int64       `json:"tenantId" dc:"租户ID"`
 	AccountId       int64       `json:"accountId" dc:"上架账号ID"`
 	TenantName      string      `json:"tenantName" dc:"账号归属"`
+	AccountName     string      `json:"accountName" dc:"上架账号昵称"`
 	Nickname        string      `json:"nickname" dc:"账号名称"`
+	Username        string      `json:"username" dc:"上架账号用户名"`
 	ChannelIdJson   string      `json:"channelIdJson" dc:"推送频道ID JSON"`
 	AntiScanEnabled int         `json:"antiScanEnabled" dc:"是否防扫图处理"`
 	CustomerRemark  string      `json:"customerRemark" dc:"客服备注"`
@@ -732,6 +761,50 @@ type NoteListInp struct {
 type NoteModel struct {
 	ProfileModel
 	Media []*MediaModel `json:"media" dc:"媒体列表"`
+}
+
+type FollowNoteMediaModel struct {
+	Id                int64  `json:"id" dc:"ID"`
+	ProfileId         int64  `json:"profileId" dc:"资料ID"`
+	MediaType         string `json:"mediaType" dc:"媒体类型"`
+	Purpose           string `json:"purpose" dc:"用途：display/verify"`
+	Name              string `json:"name" dc:"文件名"`
+	FileUrl           string `json:"fileUrl" dc:"访问地址"`
+	EditedFileUrl     string `json:"editedFileUrl" dc:"编辑后访问地址"`
+	PosterUrl         string `json:"posterUrl" dc:"视频封面"`
+	StoragePath       string `json:"storagePath" dc:"存储路径"`
+	EditedStoragePath string `json:"editedStoragePath" dc:"编辑后存储路径"`
+	PosterStoragePath string `json:"posterStoragePath" dc:"视频封面存储路径"`
+	SortIndex         int    `json:"sortIndex" dc:"排序"`
+}
+
+type FollowNoteModel struct {
+	Id            int64                   `json:"id" dc:"资料ID"`
+	Uuid          string                  `json:"uuid" dc:"资料UUID"`
+	TaskId        int64                   `json:"taskId" dc:"任务ID"`
+	AccountId     int64                   `json:"accountId" dc:"上架账号ID"`
+	AccountName   string                  `json:"accountName" dc:"上架账号昵称"`
+	Nickname      string                  `json:"nickname" dc:"账号名称"`
+	Username      string                  `json:"username" dc:"上架账号用户名"`
+	ProfileNo     string                  `json:"profileNo" dc:"资料编号"`
+	Title         string                  `json:"title" dc:"标题"`
+	Summary       string                  `json:"summary" dc:"摘要"`
+	Province      string                  `json:"province" dc:"省份"`
+	City          string                  `json:"city" dc:"城市"`
+	Tag           string                  `json:"tag" dc:"标签"`
+	ReviewStatus  string                  `json:"reviewStatus" dc:"审核状态"`
+	Status        int                     `json:"status" dc:"状态"`
+	ImageCount    int                     `json:"imageCount" dc:"图片数"`
+	VideoCount    int                     `json:"videoCount" dc:"视频数"`
+	TaskStatus    string                  `json:"taskStatus" dc:"上架任务状态"`
+	TgStatus      string                  `json:"tgStatus" dc:"TG推送状态"`
+	TgPushEnabled int                     `json:"tgPushEnabled" dc:"是否推送TG"`
+	CanEdit       bool                    `json:"canEdit" dc:"当前账号是否可编辑"`
+	Permission    string                  `json:"permission" dc:"当前账号权限：creator/admin/visitor"`
+	PublishedAt   *gtime.Time             `json:"publishedAt" dc:"发布时间"`
+	CreatedAt     *gtime.Time             `json:"createdAt" dc:"创建时间"`
+	UpdatedAt     *gtime.Time             `json:"updatedAt" dc:"更新时间"`
+	Media         []*FollowNoteMediaModel `json:"media" dc:"媒体列表"`
 }
 
 // BotProfileSearchInp is used by youban_bot to search profiles for a bound publish account.

@@ -41,6 +41,29 @@ type AccountOptionModel struct {
 	Label       string `json:"label"`
 	Value       int64  `json:"value"`
 }
+type ChannelCopyInp struct {
+	ChannelMapId    int64 `json:"channelMapId" dc:"频道映射ID"`
+	ConfigId        int64 `json:"configId" v:"required|min:1#配置ID不能为空|配置ID不能为空" dc:"配置ID"`
+	YoubanAccountId int64 `json:"youbanAccountId" v:"required|min:1#源上架账号不能为空|源上架账号不能为空" dc:"源上架账号ID"`
+	TargetTenantId  int64 `json:"targetTenantId" dc:"目标租户ID"`
+	TargetAccountId int64 `json:"targetAccountId" v:"required|min:1#目标上架账号不能为空|目标上架账号不能为空" dc:"目标上架账号ID"`
+}
+type ChannelCopyModel struct {
+	ProfileCount int `json:"profileCount" dc:"复制资料数"`
+	TaskCount    int `json:"taskCount" dc:"复制任务数"`
+	MediaCount   int `json:"mediaCount" dc:"复制媒体数"`
+}
+type ChannelDisableInp struct {
+	ChannelMapId    int64 `json:"channelMapId" dc:"频道映射ID"`
+	ConfigId        int64 `json:"configId" v:"required|min:1#配置ID不能为空|配置ID不能为空" dc:"配置ID"`
+	YoubanAccountId int64 `json:"youbanAccountId" v:"required|min:1#上架账号不能为空|上架账号不能为空" dc:"上架账号ID"`
+}
+type ChannelDisableModel struct {
+	ProfileCount int `json:"profileCount" dc:"停用资料数"`
+	TaskCount    int `json:"taskCount" dc:"停用任务数"`
+	MediaCount   int `json:"mediaCount" dc:"停用媒体数"`
+	AccountCount int `json:"accountCount" dc:"停用账号数"`
+}
 
 type ConfigListInp struct {
 	form.PageReq

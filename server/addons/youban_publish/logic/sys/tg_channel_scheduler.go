@@ -186,6 +186,7 @@ func (s *sSysPublish) telegramSchedulerCandidates(ctx context.Context, limit int
 		Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", now).
 		Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
 		Where("(j.task_id = 0 OR (t.id IS NOT NULL AND t.deleted_at IS NULL))").
+		Where(telegramSchedulerCollectPredecessorCondition()).
 		OrderAsc("j.priority").OrderAsc("j.created_at").OrderAsc("j.id").
 		Limit(limit).
 		Scan(&jobs)
@@ -193,6 +194,22 @@ func (s *sSysPublish) telegramSchedulerCandidates(ctx context.Context, limit int
 		return nil, gerror.Wrap(err, "读取TG待调度任务失败")
 	}
 	return jobs, nil
+}
+
+func telegramSchedulerCollectPredecessorCondition() string {
+	return `(j.collect_source_id <= 0 OR j.collect_source_message_id <= 0 OR j.collect_source_chat_id = '' OR NOT EXISTS (
+		SELECT 1
+		FROM ` + publishTgJobTable + ` pj
+		LEFT JOIN ` + publishTaskTable + ` pt ON pt.id = pj.task_id
+		WHERE pj.id <> j.id
+		  AND pj.collect_source_id = j.collect_source_id
+		  AND pj.collect_source_chat_id = j.collect_source_chat_id
+		  AND pj.collect_source_message_id > 0
+		  AND pj.collect_source_message_id < j.collect_source_message_id
+		  AND pj.status IN ('pending', 'sending', 'failed_retry')
+		  AND (pj.task_id = 0 OR (pt.id IS NOT NULL AND pt.deleted_at IS NULL))
+		  AND ((j.channel_id > 0 AND pj.channel_id = j.channel_id) OR (j.channel_id <= 0 AND pj.target_chat_id = j.target_chat_id))
+	))`
 }
 
 func (s *sSysPublish) telegramChannelHasActiveDispatch(ctx context.Context, job telegramJobRecord) (bool, error) {

@@ -295,7 +295,30 @@ func (s *sSysPublish) markTaskPublishFailed(ctx context.Context, id int64, tenan
 		"updated_by":    operatorId,
 		"updated_at":    gtime.Now(),
 	}).Update()
+	if err == nil {
+		s.appendPublishTaskFailureLog(ctx, id, tenantId, message)
+	}
 	return err
+}
+
+func (s *sSysPublish) appendPublishTaskFailureLog(ctx context.Context, taskId int64, tenantId int64, message string) {
+	if taskId <= 0 {
+		return
+	}
+	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).WhereNull("deleted_at")
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	task, err := mod.Fields("id,tenant_id,account_id,profile_id").One()
+	if err != nil || task.IsEmpty() {
+		return
+	}
+	s.appendTelegramJobLog(ctx, telegramJobRecord{
+		TaskId:    task["id"].Int64(),
+		TenantId:  task["tenant_id"].Int64(),
+		AccountId: task["account_id"].Int64(),
+		ProfileId: task["profile_id"].Int64(),
+	}, "publish", "failed", message)
 }
 
 func (s *sSysPublish) executePublishSubmitWorkflow(ctx context.Context, payload publishSubmitQueuePayload) error {

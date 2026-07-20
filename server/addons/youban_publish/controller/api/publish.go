@@ -166,6 +166,24 @@ func (c *cPublishAdmin) AccountDelete(ctx context.Context, req *publish.AdminAcc
 	return
 }
 
+func (c *cPublishAdmin) AccountTransferPreview(ctx context.Context, req *publish.AdminAccountTransferPreviewReq) (res *publish.AdminAccountTransferPreviewRes, err error) {
+	preview, err := service.SysPublish().AdminAccountTransferPreview(ctx, &req.AccountTransferPreviewInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminAccountTransferPreviewRes{AccountTransferPreviewModel: preview}
+	return
+}
+
+func (c *cPublishAdmin) AccountTransferProfiles(ctx context.Context, req *publish.AdminAccountTransferProfilesReq) (res *publish.AdminAccountTransferProfilesRes, err error) {
+	transfer, err := service.SysPublish().AdminAccountTransferProfiles(ctx, &req.AccountTransferProfilesInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminAccountTransferProfilesRes{AccountTransferProfilesModel: transfer}
+	return
+}
+
 func (c *cPublishAdmin) AccountSettingView(ctx context.Context, req *publish.AdminAccountSettingViewReq) (res *publish.AdminAccountSettingViewRes, err error) {
 	data, err := service.SysPublish().AdminAccountSettingView(ctx, &req.AccountSettingViewInp)
 	if err != nil {

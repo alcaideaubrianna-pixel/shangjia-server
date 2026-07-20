@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
@@ -207,16 +208,14 @@ func (s *sSysPublish) noteListByAccounts(ctx context.Context, in *sysin.ProfileL
 		return nil, 0, err
 	}
 	mod = mod.WhereIn("t.account_id", accountIds)
-	mod = s.applyProfileFilters(ctx, mod, in)
-	totalCount, err := mod.Count()
+	profiles, totalCount, err := s.searchProfilePage(ctx, mod, in, profileListFields(), "统计共享笔记失败", "获取共享笔记失败")
 	if err != nil {
-		return nil, 0, gerror.Wrap(err, "统计共享笔记失败")
-	}
-	var profiles []*sysin.ProfileModel
-	if err = mod.Fields(profileListFields()).Page(in.Page, in.PerPage).OrderDesc("p.updated_at").OrderDesc("p.id").Scan(&profiles); err != nil {
-		return nil, 0, gerror.Wrap(err, "获取共享笔记失败")
+		return nil, 0, err
 	}
 	if err = s.applyProfileOwnerNames(ctx, profiles); err != nil {
+		return nil, 0, err
+	}
+	if err = s.applyProfileTagNames(ctx, profiles); err != nil {
 		return nil, 0, err
 	}
 	list := make([]*sysin.NoteModel, 0, len(profiles))
@@ -230,6 +229,137 @@ func (s *sSysPublish) noteListByAccounts(ctx context.Context, in *sysin.ProfileL
 		list = append(list, note)
 	}
 	return list, totalCount, nil
+}
+
+func (s *sSysPublish) followNoteListByAccounts(ctx context.Context, in *sysin.ProfileListInp, tenantId int64, accountIds []int64, viewer *sysin.AccountModel) ([]*sysin.FollowNoteModel, int, error) {
+	if len(accountIds) == 0 {
+		return []*sysin.FollowNoteModel{}, 0, nil
+	}
+	mod, err := s.profileBaseModel(ctx, tenantId, 0)
+	if err != nil {
+		return nil, 0, err
+	}
+	mod = mod.WhereIn("t.account_id", accountIds)
+	profiles, totalCount, err := s.searchProfilePage(ctx, mod, in, followNoteListFields(), "统计共享笔记失败", "获取共享笔记失败")
+	if err != nil {
+		return nil, 0, err
+	}
+	if err = s.applyProfileOwnerNames(ctx, profiles); err != nil {
+		return nil, 0, err
+	}
+	if err = s.applyProfileTagNames(ctx, profiles); err != nil {
+		return nil, 0, err
+	}
+	mediaBuckets, err := s.mediaListByProfiles(ctx, profiles)
+	if err != nil {
+		return nil, 0, err
+	}
+	list := make([]*sysin.FollowNoteModel, 0, len(profiles))
+	for _, item := range profiles {
+		markProfilePermission(item, profilePermissionForViewer(viewer, item))
+		list = append(list, followNoteFromProfile(item, mediaBuckets[item.Id]))
+	}
+	return list, totalCount, nil
+}
+
+func followNoteListFields() string {
+	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.province,p.city,p.cup_size AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,a.nickname AS account_name,a.nickname,a.username,t.status AS task_status,t.tg_status,t.tg_push_enabled"
+}
+
+func followNoteFromProfile(profile *sysin.ProfileModel, media []*sysin.FollowNoteMediaModel) *sysin.FollowNoteModel {
+	if profile == nil {
+		return nil
+	}
+	if media == nil {
+		media = []*sysin.FollowNoteMediaModel{}
+	}
+	return &sysin.FollowNoteModel{
+		Id:            profile.Id,
+		Uuid:          profile.Uuid,
+		TaskId:        profile.TaskId,
+		AccountId:     profile.AccountId,
+		AccountName:   profile.AccountName,
+		Nickname:      profile.Nickname,
+		Username:      profile.Username,
+		ProfileNo:     profile.ProfileNo,
+		Title:         profile.Title,
+		Summary:       profile.Summary,
+		Province:      profile.Province,
+		City:          profile.City,
+		Tag:           profile.Tag,
+		ReviewStatus:  profile.ReviewStatus,
+		Status:        profile.Status,
+		ImageCount:    profile.ImageCount,
+		VideoCount:    profile.VideoCount,
+		TaskStatus:    profile.TaskStatus,
+		TgStatus:      profile.TgStatus,
+		TgPushEnabled: profile.TgPushEnabled,
+		CanEdit:       profile.CanEdit,
+		Permission:    profile.Permission,
+		PublishedAt:   profile.PublishedAt,
+		CreatedAt:     profile.CreatedAt,
+		UpdatedAt:     profile.UpdatedAt,
+		Media:         media,
+	}
+}
+
+func (s *sSysPublish) mediaListByProfiles(ctx context.Context, profiles []*sysin.ProfileModel) (map[int64][]*sysin.FollowNoteMediaModel, error) {
+	buckets := make(map[int64][]*sysin.FollowNoteMediaModel, len(profiles))
+	profileIds := make([]int64, 0, len(profiles))
+	for _, profile := range profiles {
+		if profile == nil || profile.Id <= 0 {
+			continue
+		}
+		profileIds = append(profileIds, profile.Id)
+		buckets[profile.Id] = []*sysin.FollowNoteMediaModel{}
+	}
+	profileIds = uniqueIds(profileIds)
+	if len(profileIds) == 0 {
+		return buckets, nil
+	}
+	if err := ensureMediaEditColumns(ctx); err != nil {
+		return nil, err
+	}
+	var media []*sysin.MediaModel
+	err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Fields("id,tenant_id,account_id,task_id,profile_id,attachment_id,original_attachment_id,edited_attachment_id,media_type,purpose,name,file_url,original_file_url,edited_file_url,poster_url,storage_path,original_storage_path,edited_storage_path,poster_storage_path,edit_status,sort_index,status,created_at,updated_at").
+		WhereIn("profile_id", profileIds).
+		WhereNull("deleted_at").
+		OrderAsc("profile_id").
+		OrderAsc("sort_index").
+		OrderAsc("id").
+		Scan(&media)
+	if err != nil {
+		return nil, gerror.Wrap(err, "获取笔记媒体失败")
+	}
+	normalizeMediaListFileURL(media)
+	for _, item := range media {
+		if item == nil {
+			continue
+		}
+		buckets[item.ProfileId] = append(buckets[item.ProfileId], followNoteMediaFromModel(item))
+	}
+	return buckets, nil
+}
+
+func followNoteMediaFromModel(item *sysin.MediaModel) *sysin.FollowNoteMediaModel {
+	if item == nil {
+		return nil
+	}
+	return &sysin.FollowNoteMediaModel{
+		Id:                item.Id,
+		ProfileId:         item.ProfileId,
+		MediaType:         item.MediaType,
+		Purpose:           item.Purpose,
+		Name:              item.Name,
+		FileUrl:           item.FileUrl,
+		EditedFileUrl:     item.EditedFileUrl,
+		PosterUrl:         item.PosterUrl,
+		StoragePath:       item.StoragePath,
+		EditedStoragePath: item.EditedStoragePath,
+		PosterStoragePath: item.PosterStoragePath,
+		SortIndex:         item.SortIndex,
+	}
 }
 
 func profilePermissionForViewer(viewer *sysin.AccountModel, profile *sysin.ProfileModel) string {
