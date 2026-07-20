@@ -53,7 +53,10 @@
 
       function getCurrentComponentName() {
         const currentMatched = router.currentRoute.value.matched;
-        const currentComponent = currentMatched[currentMatched.length - 1].components.default;
+        const currentComponent = currentMatched[currentMatched.length - 1]?.components?.default;
+        if (!currentComponent) {
+          return;
+        }
         return currentComponent.name || currentComponent.__name;
       }
 

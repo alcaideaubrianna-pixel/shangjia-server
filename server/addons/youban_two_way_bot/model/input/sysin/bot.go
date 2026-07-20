@@ -1,0 +1,95 @@
+package sysin
+
+import (
+	"strings"
+
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/os/gtime"
+
+	"hotgo/internal/model/input/form"
+)
+
+const (
+	TwoWayBotStatusEnabled  = 1
+	TwoWayBotStatusDisabled = 0
+
+	TwoWayBotSetupPending        = "pending"
+	TwoWayBotSetupManualRequired = "manual_required"
+	TwoWayBotSetupReady          = "ready"
+	TwoWayBotSetupFailed         = "failed"
+
+	TwoWayBotWebhookPending = "pending"
+	TwoWayBotWebhookPolling = "polling"
+	TwoWayBotWebhookReady   = "ready"
+	TwoWayBotWebhookFailed  = "failed"
+)
+
+type BotListInp struct {
+	form.PageReq
+	Keyword string `json:"keyword" dc:"关键词"`
+	Status  int    `json:"status" dc:"状态"`
+}
+
+type BotSaveInp struct {
+	Id              int64  `json:"id" dc:"ID"`
+	Name            string `json:"name" dc:"名称"`
+	BotToken        string `json:"botToken" dc:"Bot Token"`
+	ExistingGroupId string `json:"existingGroupId" dc:"已有管理群ID"`
+	TgAccountId     int64  `json:"tgAccountId" v:"required|min:1#请选择TG账号|请选择TG账号" dc:"TG协议号ID"`
+	SupergroupId    string `json:"supergroupId" dc:"管理群ID"`
+	SupergroupTitle string `json:"supergroupTitle" dc:"管理群名称"`
+	InviteLink      string `json:"inviteLink" dc:"邀请链接"`
+	Status          int    `json:"status" dc:"状态"`
+}
+
+func (in *BotSaveInp) Filter() error {
+	in.Name = strings.TrimSpace(in.Name)
+	in.BotToken = strings.TrimSpace(in.BotToken)
+	in.ExistingGroupId = strings.TrimSpace(in.ExistingGroupId)
+	in.SupergroupId = strings.TrimSpace(in.SupergroupId)
+	in.SupergroupTitle = strings.TrimSpace(in.SupergroupTitle)
+	in.InviteLink = strings.TrimSpace(in.InviteLink)
+	if in.Id <= 0 && in.BotToken == "" {
+		return gerror.New("请输入Bot Token")
+	}
+	if in.Status != TwoWayBotStatusDisabled {
+		in.Status = TwoWayBotStatusEnabled
+	}
+	return nil
+}
+
+type BotDeleteInp struct {
+	Ids []int64 `json:"ids" v:"required#请选择机器人" dc:"ID列表"`
+}
+
+type BotActionInp struct {
+	Id int64 `json:"id" v:"required|min:1#请选择机器人|请选择机器人" dc:"ID"`
+}
+
+type BotModel struct {
+	Id                   int64       `json:"id" dc:"ID"`
+	TenantId             int64       `json:"tenantId" dc:"租户ID"`
+	AccountId            int64       `json:"accountId" dc:"创建账号ID"`
+	TgAccountId          int64       `json:"tgAccountId" dc:"TG协议号ID"`
+	TgAccountName        string      `json:"tgAccountName" dc:"TG账号昵称"`
+	Name                 string      `json:"name" dc:"名称"`
+	BotUserId            string      `json:"botUserId" dc:"Bot用户ID"`
+	BotUsername          string      `json:"botUsername" dc:"Bot用户名"`
+	SupergroupId         string      `json:"supergroupId" dc:"管理群ID"`
+	SupergroupAccessHash string      `json:"supergroupAccessHash" dc:"管理群AccessHash"`
+	SupergroupTitle      string      `json:"supergroupTitle" dc:"管理群名称"`
+	InviteLink           string      `json:"inviteLink" dc:"邀请链接"`
+	SetupStatus          string      `json:"setupStatus" dc:"初始化状态"`
+	WebhookStatus        string      `json:"webhookStatus" dc:"Webhook状态"`
+	Status               int         `json:"status" dc:"状态"`
+	ErrorMessage         string      `json:"errorMessage" dc:"错误信息"`
+	LastSetupAt          *gtime.Time `json:"lastSetupAt" dc:"最后初始化时间"`
+	LastWebhookAt        *gtime.Time `json:"lastWebhookAt" dc:"最后Webhook时间"`
+	CreatedAt            *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt            *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
+type WebhookInp struct {
+	BotId int64
+	Body  []byte
+}
