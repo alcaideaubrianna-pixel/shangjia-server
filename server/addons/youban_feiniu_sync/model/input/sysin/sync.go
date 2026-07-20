@@ -251,6 +251,7 @@ type ChannelMapModel struct {
 	YoubanTenantId        int64       `json:"youbanTenantId"`
 	YoubanAccountId       int64       `json:"youbanAccountId"`
 	YoubanAccountUsername string      `json:"youbanAccountUsername"`
+	AccountNoteCount      int         `json:"accountNoteCount"`
 	LastSourceUpdateTime  *gtime.Time `json:"lastSourceUpdateTime"`
 	LastSourceNoteId      int64       `json:"lastSourceNoteId"`
 	SyncStatus            string      `json:"syncStatus"`

@@ -31,7 +31,7 @@
       :loading="loading"
       :pagination="pagination"
       :row-key="(row) => row.id"
-      :scroll-x="1160"
+      :scroll-x="1280"
       size="small"
       remote
     />
@@ -86,6 +86,7 @@
     { title: 'TG Chat ID', key: 'feiniuTgChatId', width: 140 },
     { title: '上架账号', key: 'youbanAccountUsername', width: 160 },
     { title: '上架账号ID', key: 'youbanAccountId', width: 120 },
+    { title: '账号笔记数', key: 'accountNoteCount', width: 120 },
     { title: '最后源时间', key: 'lastSourceUpdateTime', width: 170 },
     { title: '最后笔记ID', key: 'lastSourceNoteId', width: 120 },
     { title: '状态', key: 'syncStatus', width: 100, render: (row) => tag(row.syncStatus) },

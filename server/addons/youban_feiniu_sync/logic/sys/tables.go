@@ -2,17 +2,32 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"hotgo/addons/youban_feiniu_sync/model/input/sysin"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
+	"hotgo/internal/library/cron"
+	"hotgo/internal/model/entity"
+)
+
+var (
+	syncExistingConfigCronsMu   sync.Mutex
+	syncExistingConfigCronsDone bool
 )
 
 func ensureTables(ctx context.Context) error {
+	return ensureTablesWithCron(ctx, true)
+}
+
+func ensureTablesWithCron(ctx context.Context, syncCrons bool) error {
 	installSQL := mysqlInstallSQL
 	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
 		installSQL = pgsqlInstallSQL
@@ -29,30 +44,161 @@ func ensureTables(ctx context.Context) error {
 			return gerror.Wrap(err, "初始化 FeiNiu 同步表失败")
 		}
 	}
-	return ensureDefaultCron(ctx)
+	if err := ensureDefaultCron(ctx); err != nil {
+		return err
+	}
+	if syncCrons {
+		return syncExistingConfigCronsIfNeeded(ctx)
+	}
+	return nil
 }
 
 func ensureDefaultCron(ctx context.Context) error {
 	columns := dao.SysCron.Columns()
 	now := gtime.Now()
-	row, err := dao.SysCron.Ctx(ctx).Where(columns.Name, "youbanFeiniuSync").One()
+	row, err := dao.SysCron.Ctx(ctx).Where(columns.Name, "youbanFeiniuSync").Where(columns.Params, "").One()
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "does not exist") {
 			return nil
 		}
 		return gerror.Wrap(err, "读取 FeiNiu 同步定时任务失败")
 	}
-	data := g.Map{columns.GroupId: 1, columns.Title: "FeiNiu资料自动同步", columns.Name: "youbanFeiniuSync", columns.Params: "", columns.Pattern: "0 */1 * * * *", columns.Policy: consts.CronPolicySingle, columns.Count: 0, columns.Sort: 20, columns.Remark: "每分钟检查一次，到期配置按 FeiNiu 同步配置的间隔单独执行", columns.Status: consts.StatusEnabled, columns.UpdatedAt: now}
+
+	data := g.Map{
+		columns.GroupId:   1,
+		columns.Title:     "FeiNiu资料自动同步",
+		columns.Name:      "youbanFeiniuSync",
+		columns.Params:    "",
+		columns.Pattern:   "@every 1m",
+		columns.Policy:    consts.CronPolicySingle,
+		columns.Count:     0,
+		columns.Sort:      20,
+		columns.Remark:    "旧版全局轮询任务，已停用",
+		columns.Status:    consts.StatusDisable,
+		columns.UpdatedAt: now,
+	}
 	if row.IsEmpty() {
 		data[columns.CreatedAt] = now
 		_, err = dao.SysCron.Ctx(ctx).Data(data).Insert()
 	} else {
-		_, err = dao.SysCron.Ctx(ctx).Where(columns.Id, row[columns.Id].Int64()).Data(g.Map{columns.Pattern: data[columns.Pattern], columns.Remark: data[columns.Remark], columns.UpdatedAt: now}).Update()
+		_, err = dao.SysCron.Ctx(ctx).Where(columns.Id, row[columns.Id].Int64()).Data(data).Update()
 	}
 	if err != nil {
 		return gerror.Wrap(err, "初始化 FeiNiu 同步定时任务失败")
 	}
+
+	var cronRow *entity.SysCron
+	if err = dao.SysCron.Ctx(ctx).Where(columns.Name, "youbanFeiniuSync").Where(columns.Params, "").Scan(&cronRow); err != nil {
+		return gerror.Wrap(err, "读取 FeiNiu 同步定时任务失败")
+	}
+	return cron.RefreshStatus(cronRow)
+}
+
+func syncExistingConfigCronsIfNeeded(ctx context.Context) error {
+	syncExistingConfigCronsMu.Lock()
+	defer syncExistingConfigCronsMu.Unlock()
+	if syncExistingConfigCronsDone {
+		return nil
+	}
+	if err := syncExistingConfigCrons(ctx); err != nil {
+		return err
+	}
+	syncExistingConfigCronsDone = true
 	return nil
+}
+
+func syncExistingConfigCrons(ctx context.Context) error {
+	var configs []gdb.Record
+	if err := g.DB().Model(configTable).Safe().Ctx(ctx).WhereNull("deleted_at").OrderAsc("id").Scan(&configs); err != nil {
+		return gerror.Wrap(err, "同步 FeiNiu 配置定时任务失败")
+	}
+	for _, cfg := range configs {
+		if err := syncConfigCron(ctx, cfg, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func syncConfigCron(ctx context.Context, cfg gdb.Record, runNow bool) error {
+	columns := dao.SysCron.Columns()
+	now := gtime.Now()
+	configId := cfg["id"].Int64()
+	if configId <= 0 {
+		return gerror.New("同步配置ID不能为空")
+	}
+	params := fmt.Sprintf("%d", configId)
+	pattern := syncConfigCronPattern(cfg["sync_interval_minutes"].Int())
+	status := consts.StatusDisable
+	if cfg["status"].Int() == sysin.SyncStatusEnabled && cfg["auto_sync_enabled"].Int() == sysin.SyncStatusEnabled {
+		status = consts.StatusEnabled
+	}
+	data := g.Map{
+		columns.GroupId:   1,
+		columns.Title:     fmt.Sprintf("FeiNiu资料自动同步[%s]", cfg["name"].String()),
+		columns.Name:      "youbanFeiniuSync",
+		columns.Params:    params,
+		columns.Pattern:   pattern,
+		columns.Policy:    consts.CronPolicySingle,
+		columns.Count:     0,
+		columns.Sort:      20,
+		columns.Remark:    "FeiNiu 配置自动同步",
+		columns.Status:    status,
+		columns.UpdatedAt: now,
+	}
+	row, err := dao.SysCron.Ctx(ctx).Where(columns.Name, "youbanFeiniuSync").Where(columns.Params, params).One()
+	if err != nil {
+		return gerror.Wrap(err, "读取 FeiNiu 配置定时任务失败")
+	}
+	if row.IsEmpty() {
+		data[columns.CreatedAt] = now
+		_, err = dao.SysCron.Ctx(ctx).Data(data).Insert()
+	} else {
+		_, err = dao.SysCron.Ctx(ctx).Where(columns.Id, row[columns.Id].Int64()).Data(data).Update()
+	}
+	if err != nil {
+		return gerror.Wrap(err, "初始化 FeiNiu 配置定时任务失败")
+	}
+
+	var cronRow *entity.SysCron
+	if err = dao.SysCron.Ctx(ctx).Where(columns.Name, "youbanFeiniuSync").Where(columns.Params, params).Scan(&cronRow); err != nil {
+		return gerror.Wrap(err, "读取 FeiNiu 配置定时任务失败")
+	}
+	if err = cron.RefreshStatus(cronRow); err != nil {
+		return gerror.Wrap(err, "刷新 FeiNiu 配置定时任务失败")
+	}
+	if runNow && status == consts.StatusEnabled {
+		return cron.Once(ctx, cronRow)
+	}
+	return nil
+}
+
+func disableConfigCron(ctx context.Context, configId int64) error {
+	columns := dao.SysCron.Columns()
+	params := fmt.Sprintf("%d", configId)
+	row, err := dao.SysCron.Ctx(ctx).Where(columns.Name, "youbanFeiniuSync").Where(columns.Params, params).One()
+	if err != nil {
+		return gerror.Wrap(err, "读取 FeiNiu 配置定时任务失败")
+	}
+	if row.IsEmpty() {
+		return nil
+	}
+	_, err = dao.SysCron.Ctx(ctx).Where(columns.Id, row[columns.Id].Int64()).Data(g.Map{columns.Status: consts.StatusDisable, columns.UpdatedAt: gtime.Now()}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "停用 FeiNiu 配置定时任务失败")
+	}
+	var cronRow *entity.SysCron
+	if err = dao.SysCron.Ctx(ctx).Where(columns.Id, row[columns.Id].Int64()).Scan(&cronRow); err != nil {
+		return gerror.Wrap(err, "读取 FeiNiu 配置定时任务失败")
+	}
+	return cron.RefreshStatus(cronRow)
+}
+
+func syncConfigCronPattern(minutes int) string {
+	if minutes <= 0 {
+		minutes = 10
+	}
+	return fmt.Sprintf("@every %dm", minutes)
 }
 
 func splitSQL(content string) []string {

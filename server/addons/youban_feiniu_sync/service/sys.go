@@ -26,6 +26,7 @@ type ISysSync interface {
 	RunItemList(ctx context.Context, in *sysin.RunItemListInp) (list []*sysin.RunItemModel, totalCount int, err error)
 	StartRun(ctx context.Context, in *sysin.RunStartInp) (res *sysin.RunStartModel, err error)
 	CronRun(ctx context.Context) error
+	CronRunConfig(ctx context.Context, configId int64) error
 }
 
 var localSysSync ISysSync

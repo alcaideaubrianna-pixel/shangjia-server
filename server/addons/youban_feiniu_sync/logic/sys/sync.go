@@ -144,6 +144,13 @@ func (s *sSysSync) ConfigSave(ctx context.Context, in *sysin.ConfigSaveInp) (res
 		}
 		in.Id = id
 	}
+	cfg, err := s.configRecord(ctx, in.Id)
+	if err != nil {
+		return nil, err
+	}
+	if err = syncConfigCron(ctx, cfg, false); err != nil {
+		return nil, err
+	}
 	return s.ConfigView(ctx, &sysin.ConfigViewInp{Id: in.Id})
 }
 
@@ -157,6 +164,11 @@ func (s *sSysSync) ConfigDelete(ctx context.Context, in *sysin.ConfigDeleteInp) 
 	_, err := g.DB().Model(configTable).Safe().Ctx(ctx).WhereIn("id", in.Ids).Data(g.Map{"deleted_at": gtime.Now()}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "删除同步配置失败")
+	}
+	for _, id := range in.Ids {
+		if err = disableConfigCron(ctx, id); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -183,6 +195,13 @@ func (s *sSysSync) ConfigAutoSync(ctx context.Context, in *sysin.ConfigAutoSyncI
 	}
 	if rows, _ := result.RowsAffected(); rows == 0 {
 		return gerror.New("同步配置不存在")
+	}
+	cfg, err := s.configRecord(ctx, in.Id)
+	if err != nil {
+		return err
+	}
+	if err = syncConfigCron(ctx, cfg, in.AutoSyncEnabled == sysin.SyncStatusEnabled); err != nil {
+		return err
 	}
 	return nil
 }
@@ -220,15 +239,13 @@ func (s *sSysSync) Dashboard(ctx context.Context, in *sysin.DashboardInp) (res *
 		baseConfig = baseConfig.Where("id", in.ConfigId)
 	}
 	res.ConfigCount, _ = baseConfig.Clone().Count()
-	ch := g.DB().Model(channelMapTable).Safe().Ctx(ctx)
 	pm := g.DB().Model(profileMapTable).Safe().Ctx(ctx)
 	run := g.DB().Model(runTable).Safe().Ctx(ctx)
 	if in.ConfigId > 0 {
-		ch = ch.Where("config_id", in.ConfigId)
 		pm = pm.Where("config_id", in.ConfigId)
 		run = run.Where("config_id", in.ConfigId)
 	}
-	res.ChannelCount, _ = ch.Count()
+	res.ChannelCount = channelMapGroupCount(ctx, in.ConfigId)
 	res.ProfileCount, _ = pm.Count()
 	res.RunningCount, _ = run.Clone().Where("status", sysin.RunStatusRunning).Count()
 	res.FailedCount, _ = run.Clone().Where("status", sysin.RunStatusFailed).Count()
@@ -247,15 +264,13 @@ func (s *sSysSync) DashboardSummary(ctx context.Context, in *sysin.DashboardInp)
 		baseConfig = baseConfig.Where("id", in.ConfigId)
 	}
 	res.ConfigCount, _ = baseConfig.Clone().Count()
-	ch := g.DB().Model(channelMapTable).Safe().Ctx(ctx)
 	pm := g.DB().Model(profileMapTable).Safe().Ctx(ctx)
 	running := g.DB().Model(runTable).Safe().Ctx(ctx).Where("status", sysin.RunStatusRunning)
 	if in.ConfigId > 0 {
-		ch = ch.Where("config_id", in.ConfigId)
 		pm = pm.Where("config_id", in.ConfigId)
 		running = running.Where("config_id", in.ConfigId)
 	}
-	res.ChannelCount, _ = ch.Count()
+	res.ChannelCount = channelMapGroupCount(ctx, in.ConfigId)
 	res.ProfileCount, _ = pm.Count()
 	res.RunningCount, _ = running.Count()
 	stat := g.DB().Model(dailyStatTable).Safe().Ctx(ctx).WhereBetween("stat_date", startDate, endDate)
@@ -334,6 +349,29 @@ func (s *sSysSync) ChannelMapList(ctx context.Context, in *sysin.ChannelMapListI
 	if err = ensureTables(ctx); err != nil {
 		return
 	}
+	var rows []*sysin.ChannelMapModel
+	if err = channelMapListModel(ctx, in).OrderDesc("updated_at").OrderDesc("id").Scan(&rows); err != nil {
+		return nil, 0, gerror.Wrap(err, "读取频道映射失败")
+	}
+	grouped := groupChannelMapModels(rows)
+	if err = fillChannelMapAccountNoteCounts(ctx, grouped); err != nil {
+		return nil, 0, err
+	}
+	totalCount = len(grouped)
+
+	page, perPage, offset := form.CalPage(in.Page, in.PerPage)
+	in.Page, in.PerPage = page, perPage
+	if offset >= totalCount {
+		return []*sysin.ChannelMapModel{}, totalCount, nil
+	}
+	end := offset + perPage
+	if end > totalCount {
+		end = totalCount
+	}
+	return grouped[offset:end], totalCount, nil
+}
+
+func channelMapListModel(ctx context.Context, in *sysin.ChannelMapListInp) *gdb.Model {
 	mod := g.DB().Model(channelMapTable).Safe().Ctx(ctx)
 	if in.ConfigId > 0 {
 		mod = mod.Where("config_id", in.ConfigId)
@@ -344,16 +382,132 @@ func (s *sSysSync) ChannelMapList(ctx context.Context, in *sysin.ChannelMapListI
 	if strings.TrimSpace(in.SyncStatus) != "" {
 		mod = mod.Where("sync_status", strings.TrimSpace(in.SyncStatus))
 	}
-	if totalCount, err = mod.Clone().Count(); err != nil {
-		return nil, 0, gerror.Wrap(err, "读取频道映射数量失败")
+	return mod
+}
+
+func channelMapGroupKey(item *sysin.ChannelMapModel) string {
+	if item == nil {
+		return ""
 	}
-	page, perPage, offset := form.CalPage(in.Page, in.PerPage)
-	in.Page, in.PerPage = page, perPage
-	err = mod.OrderDesc("id").Limit(offset, perPage).Scan(&list)
-	if err != nil {
-		err = gerror.Wrap(err, "读取频道映射失败")
+	if item.FeiniuTgChatId > 0 {
+		return fmt.Sprintf("%d:chat:%d", item.ConfigId, item.FeiniuTgChatId)
 	}
-	return
+	if username := strings.ToLower(strings.TrimSpace(item.FeiniuUsername)); username != "" {
+		return fmt.Sprintf("%d:username:%s", item.ConfigId, username)
+	}
+	if title := strings.ToLower(strings.TrimSpace(item.FeiniuChannelTitle)); title != "" {
+		return fmt.Sprintf("%d:title:%s", item.ConfigId, title)
+	}
+	return fmt.Sprintf("%d:channel:%d", item.ConfigId, item.FeiniuChannelId)
+}
+
+func channelMapGroupCount(ctx context.Context, configId int64) int {
+	in := &sysin.ChannelMapListInp{ConfigId: configId}
+	var rows []*sysin.ChannelMapModel
+	if err := channelMapListModel(ctx, in).Scan(&rows); err != nil {
+		return 0
+	}
+	return len(groupChannelMapModels(rows))
+}
+
+func groupChannelMapModels(rows []*sysin.ChannelMapModel) []*sysin.ChannelMapModel {
+	groups := make(map[string]*sysin.ChannelMapModel)
+	keys := make([]string, 0, len(rows))
+	for _, row := range rows {
+		key := channelMapGroupKey(row)
+		if key == "" {
+			continue
+		}
+		if current, ok := groups[key]; ok {
+			mergeChannelMapModel(current, row)
+			continue
+		}
+		groups[key] = row
+		keys = append(keys, key)
+	}
+
+	list := make([]*sysin.ChannelMapModel, 0, len(keys))
+	for _, key := range keys {
+		list = append(list, groups[key])
+	}
+	return list
+}
+
+func fillChannelMapAccountNoteCounts(ctx context.Context, list []*sysin.ChannelMapModel) error {
+	accountIds := make([]int64, 0, len(list))
+	configIds := make([]int64, 0, len(list))
+	seenAccounts := make(map[int64]struct{})
+	seenConfigs := make(map[int64]struct{})
+	for _, item := range list {
+		if item == nil || item.YoubanAccountId <= 0 || item.ConfigId <= 0 {
+			continue
+		}
+		if _, ok := seenAccounts[item.YoubanAccountId]; !ok {
+			seenAccounts[item.YoubanAccountId] = struct{}{}
+			accountIds = append(accountIds, item.YoubanAccountId)
+		}
+		if _, ok := seenConfigs[item.ConfigId]; !ok {
+			seenConfigs[item.ConfigId] = struct{}{}
+			configIds = append(configIds, item.ConfigId)
+		}
+	}
+	if len(accountIds) == 0 || len(configIds) == 0 {
+		return nil
+	}
+
+	var rows []gdb.Record
+	if err := g.DB().Model(profileMapTable).Safe().Ctx(ctx).
+		Fields("config_id,youban_account_id,COUNT(1) AS note_count").
+		WhereIn("config_id", configIds).
+		WhereIn("youban_account_id", accountIds).
+		WhereGT("youban_account_id", 0).
+		Group("config_id,youban_account_id").
+		Scan(&rows); err != nil {
+		return gerror.Wrap(err, "读取账号笔记数量失败")
+	}
+	counts := make(map[string]int, len(rows))
+	for _, row := range rows {
+		key := fmt.Sprintf("%d:%d", row["config_id"].Int64(), row["youban_account_id"].Int64())
+		counts[key] = row["note_count"].Int()
+	}
+	for _, item := range list {
+		if item == nil || item.YoubanAccountId <= 0 || item.ConfigId <= 0 {
+			continue
+		}
+		item.AccountNoteCount = counts[fmt.Sprintf("%d:%d", item.ConfigId, item.YoubanAccountId)]
+	}
+	return nil
+}
+
+func mergeChannelMapModel(dst *sysin.ChannelMapModel, src *sysin.ChannelMapModel) {
+	if dst == nil || src == nil {
+		return
+	}
+	if dst.FeiniuTgChatId <= 0 && src.FeiniuTgChatId > 0 {
+		dst.FeiniuTgChatId = src.FeiniuTgChatId
+	}
+	if dst.FeiniuUsername == "" && src.FeiniuUsername != "" {
+		dst.FeiniuUsername = src.FeiniuUsername
+	}
+	if dst.FeiniuChannelId <= 0 || (src.FeiniuChannelId > 0 && src.FeiniuChannelId < dst.FeiniuChannelId) {
+		dst.FeiniuChannelId = src.FeiniuChannelId
+	}
+	if dst.YoubanAccountId <= 0 && src.YoubanAccountId > 0 {
+		dst.YoubanAccountId = src.YoubanAccountId
+		dst.YoubanAccountUsername = src.YoubanAccountUsername
+	}
+	if dst.LastSourceNoteId < src.LastSourceNoteId {
+		dst.LastSourceNoteId = src.LastSourceNoteId
+	}
+	if dst.LastSourceUpdateTime == nil && src.LastSourceUpdateTime != nil {
+		dst.LastSourceUpdateTime = src.LastSourceUpdateTime
+	}
+	if dst.SyncStatus != "failed" && src.SyncStatus == "failed" {
+		dst.SyncStatus = src.SyncStatus
+	}
+	if dst.ErrorMessage == "" && src.ErrorMessage != "" {
+		dst.ErrorMessage = src.ErrorMessage
+	}
 }
 
 func (s *sSysSync) ChannelClear(ctx context.Context, in *sysin.ChannelClearInp) (res *sysin.ChannelClearModel, err error) {
@@ -518,6 +672,14 @@ func (s *sSysSync) StartRun(ctx context.Context, in *sysin.RunStartInp) (res *sy
 	if in == nil || in.ConfigId <= 0 {
 		return nil, gerror.New("配置ID不能为空")
 	}
+	if err = s.cleanupStaleRunningRuns(ctx, in.ConfigId, 30*time.Minute); err != nil {
+		return nil, err
+	}
+	if running, checkErr := s.hasRunningRun(ctx, in.ConfigId); checkErr != nil {
+		return nil, checkErr
+	} else if running {
+		return nil, gerror.New("该配置正在同步中，请稍后再试")
+	}
 	runId, err := s.createRun(ctx, in.ConfigId, "manual")
 	if err != nil {
 		return nil, err
@@ -528,8 +690,40 @@ func (s *sSysSync) StartRun(ctx context.Context, in *sysin.RunStartInp) (res *sy
 	return &sysin.RunStartModel{RunId: runId}, nil
 }
 
+func (s *sSysSync) CronRunConfig(ctx context.Context, configId int64) error {
+	if err := ensureTablesWithCron(ctx, false); err != nil {
+		return err
+	}
+	if configId <= 0 {
+		return gerror.New("配置ID不能为空")
+	}
+	if err := s.cleanupStaleRunningRuns(ctx, configId, 30*time.Minute); err != nil {
+		return err
+	}
+	cfg, err := s.configRecord(ctx, configId)
+	if err != nil {
+		return err
+	}
+	if cfg["status"].Int() != sysin.SyncStatusEnabled || cfg["auto_sync_enabled"].Int() != sysin.SyncStatusEnabled {
+		return nil
+	}
+	if running, err := s.hasRunningRun(ctx, configId); err != nil {
+		return err
+	} else if running {
+		return nil
+	}
+	runId, err := s.createRun(ctx, configId, "cron")
+	if err != nil {
+		return err
+	}
+	if err = s.markCronRunStarted(ctx, configId); err != nil {
+		g.Log().Warning(ctx, err)
+	}
+	return s.executeRun(ctx, runId, configId, 0)
+}
+
 func (s *sSysSync) CronRun(ctx context.Context) error {
-	if err := ensureTables(ctx); err != nil {
+	if err := ensureTablesWithCron(ctx, false); err != nil {
 		return err
 	}
 	var configs []gdb.Record
@@ -538,6 +732,10 @@ func (s *sSysSync) CronRun(ctx context.Context) error {
 	}
 	for _, cfg := range configs {
 		if !cronConfigDue(cfg) {
+			continue
+		}
+		if err := s.cleanupStaleRunningRuns(ctx, cfg["id"].Int64(), cronRunStaleTimeout(cfg)); err != nil {
+			g.Log().Warning(ctx, err)
 			continue
 		}
 		if running, err := s.hasRunningRun(ctx, cfg["id"].Int64()); err != nil {
@@ -573,6 +771,18 @@ func cronConfigDue(cfg gdb.Record) bool {
 	return time.Since(lastRunAt.Time) >= time.Duration(interval)*time.Minute
 }
 
+func cronRunStaleTimeout(cfg gdb.Record) time.Duration {
+	interval := cfg["sync_interval_minutes"].Int()
+	if interval <= 0 {
+		interval = 10
+	}
+	timeout := time.Duration(interval*2) * time.Minute
+	if timeout < 30*time.Minute {
+		timeout = 30 * time.Minute
+	}
+	return timeout
+}
+
 func (s *sSysSync) hasRunningRun(ctx context.Context, configId int64) (bool, error) {
 	if configId <= 0 {
 		return false, nil
@@ -585,6 +795,23 @@ func (s *sSysSync) hasRunningRun(ctx context.Context, configId int64) (bool, err
 		return false, gerror.Wrap(err, "检查 FeiNiu 同步运行状态失败")
 	}
 	return count > 0, nil
+}
+
+func (s *sSysSync) cleanupStaleRunningRuns(ctx context.Context, configId int64, timeout time.Duration) error {
+	if configId <= 0 || timeout <= 0 {
+		return nil
+	}
+	cutoff := gtime.Now().Add(-timeout)
+	_, err := g.DB().Model(runTable).Safe().Ctx(ctx).
+		Where("config_id", configId).
+		Where("status", sysin.RunStatusRunning).
+		WhereLT("started_at", cutoff).
+		Data(g.Map{"status": sysin.RunStatusFailed, "finished_at": gtime.Now(), "error_message": "同步任务超时自动结束", "updated_at": gtime.Now()}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "清理过期运行记录失败")
+	}
+	return nil
 }
 
 func (s *sSysSync) markCronRunStarted(ctx context.Context, configId int64) error {
@@ -1023,13 +1250,7 @@ func (s *sSysSync) syncOneNote(ctx context.Context, source gdb.DB, cfg gdb.Recor
 		_ = s.syncMedia(ctx, source, cfg, row, profileId, taskId, accountId)
 	}
 	data := g.Map{"config_id": cfg["id"].Int64(), "feiniu_note_id": row["note_id"].Int64(), "feiniu_note_uuid": row["note_uuid"].String(), "feiniu_note_code": row["note_code"].String(), "feiniu_source_key": sourceKey(row), "feiniu_channel_id": row["source_channel_id"].Int64(), "feiniu_tg_chat_id": row["source_tg_chat_id"].Int64(), "youban_profile_id": profileId, "youban_task_id": taskId, "youban_account_id": accountId, "source_updated_at": sourceUpdatedAt, "content_hash": contentHash, "sync_status": "success", "error_message": "", "dedupe_key": "", "duplicate_profile_id": 0, "updated_at": gtime.Now()}
-	if existed.IsEmpty() {
-		data["created_at"] = gtime.Now()
-		_, err = g.DB().Model(profileMapTable).Safe().Ctx(ctx).Data(data).Insert()
-	} else {
-		_, err = g.DB().Model(profileMapTable).Safe().Ctx(ctx).Where("id", existed["id"].Int64()).Data(data).Update()
-	}
-	if err != nil {
+	if err = saveProfileMap(ctx, cfg["id"].Int64(), row["note_id"].Int64(), existed, data); err != nil {
 		return "", gerror.Wrap(err, "保存资料映射失败")
 	}
 	_ = s.touchChannelCursor(ctx, cfg, row, sourceUpdatedAt)
@@ -1093,6 +1314,14 @@ func (s *sSysSync) ensureChannelAccount(ctx context.Context, cfg gdb.Record, row
 	} else if channelId <= 0 {
 		username = fmt.Sprintf("feiniu_chat_%d", chatId)
 	}
+	if accountId, accountUsername, findErr := s.findExistingFeiniuAccount(ctx, cfg, title, username); findErr != nil {
+		return 0, "", findErr
+	} else if accountId > 0 {
+		if err = s.saveChannelMapping(ctx, cfg, row, current, accountId, accountUsername, title, sourceUpdatedAt); err != nil {
+			return 0, "", err
+		}
+		return accountId, accountUsername, nil
+	}
 	account, err := publishservice.SysPublish().ServerAccountSave(ctx, &psysin.AccountSaveInp{TenantId: cfg["target_tenant_id"].Int64(), ParentId: cfg["target_parent_account_id"].Int64(), AccountType: psysin.PublishAccountTypeUploader, Nickname: title, Username: username, Password: fmt.Sprintf("FN%d", time.Now().UnixNano()), DailyPublishLimit: 0, CanDirectPublish: 1, Status: 1, Remark: "FeiNiu 自动同步频道账号"})
 	if err != nil && strings.Contains(strings.ToLower(err.Error()), "存在") {
 		var rowAcc gdb.Record
@@ -1108,6 +1337,35 @@ func (s *sSysSync) ensureChannelAccount(ctx context.Context, cfg gdb.Record, row
 		return 0, "", err
 	}
 	return account.Id, username, nil
+}
+
+func (s *sSysSync) findExistingFeiniuAccount(ctx context.Context, cfg gdb.Record, title string, username string) (int64, string, error) {
+	base := g.DB().Model("hg_youban_publish_account").Safe().Ctx(ctx).
+		Where("tenant_id", cfg["target_tenant_id"].Int64()).
+		Where("account_type", psysin.PublishAccountTypeUploader).
+		WhereNull("deleted_at")
+
+	if strings.TrimSpace(username) != "" {
+		row, err := base.Clone().Where("username", username).Fields("id,username").One()
+		if err != nil {
+			return 0, "", gerror.Wrap(err, "读取 FeiNiu 上架账号失败")
+		}
+		if !row.IsEmpty() {
+			return row["id"].Int64(), row["username"].String(), nil
+		}
+	}
+
+	if strings.TrimSpace(title) == "" {
+		return 0, "", nil
+	}
+	row, err := base.Clone().Where("nickname", title).Where("remark", "FeiNiu 自动同步频道账号").Fields("id,username").OrderAsc("id").One()
+	if err != nil {
+		return 0, "", gerror.Wrap(err, "读取 FeiNiu 上架账号失败")
+	}
+	if row.IsEmpty() {
+		return 0, "", nil
+	}
+	return row["id"].Int64(), row["username"].String(), nil
 }
 
 func (s *sSysSync) saveChannelMapping(ctx context.Context, cfg gdb.Record, row gdb.Record, current gdb.Record, accountId int64, username string, title string, sourceUpdatedAt *gtime.Time) error {
@@ -1278,6 +1536,33 @@ func (s *sSysSync) syncMedia(ctx context.Context, source gdb.DB, cfg gdb.Record,
 	return nil
 }
 
+func saveProfileMap(ctx context.Context, configId int64, noteId int64, current gdb.Record, data g.Map) error {
+	var err error
+	if current.IsEmpty() {
+		data["created_at"] = gtime.Now()
+		_, err = g.DB().Model(profileMapTable).Safe().Ctx(ctx).Data(data).Insert()
+		if err == nil {
+			return nil
+		}
+		if !isUniqueConflictError(err) {
+			return err
+		}
+		delete(data, "created_at")
+		_, err = g.DB().Model(profileMapTable).Safe().Ctx(ctx).Where("config_id", configId).Where("feiniu_note_id", noteId).Data(data).Update()
+		return err
+	}
+	_, err = g.DB().Model(profileMapTable).Safe().Ctx(ctx).Where("id", current["id"].Int64()).Data(data).Update()
+	return err
+}
+
+func isUniqueConflictError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate key") || strings.Contains(msg, "unique constraint") || strings.Contains(msg, "duplicate entry")
+}
+
 func (s *sSysSync) upsertProfileMapSkipped(ctx context.Context, configId int64, row gdb.Record, msg string) error {
 	now := gtime.Now()
 	data := g.Map{"config_id": configId, "feiniu_note_id": row["note_id"].Int64(), "feiniu_note_uuid": row["note_uuid"].String(), "feiniu_note_code": row["note_code"].String(), "feiniu_source_key": sourceKey(row), "feiniu_channel_id": row["source_channel_id"].Int64(), "feiniu_tg_chat_id": row["source_tg_chat_id"].Int64(), "source_updated_at": sourceTime(row), "content_hash": noteHash(row), "sync_status": "skipped", "error_message": msg, "updated_at": now}
@@ -1285,13 +1570,7 @@ func (s *sSysSync) upsertProfileMapSkipped(ctx context.Context, configId int64, 
 	if err != nil {
 		return gerror.Wrap(err, "读取资料映射失败")
 	}
-	if current.IsEmpty() {
-		data["created_at"] = now
-		_, err = g.DB().Model(profileMapTable).Safe().Ctx(ctx).Data(data).Insert()
-	} else {
-		_, err = g.DB().Model(profileMapTable).Safe().Ctx(ctx).Where("id", current["id"].Int64()).Data(data).Update()
-	}
-	if err != nil {
+	if err = saveProfileMap(ctx, configId, row["note_id"].Int64(), current, data); err != nil {
 		return gerror.Wrap(err, "保存跳过资料映射失败")
 	}
 	return s.touchChannelCursor(ctx, gdb.Record{"id": gvar.New(configId)}, row, sourceTime(row))
@@ -1300,13 +1579,7 @@ func (s *sSysSync) upsertProfileMapSkipped(ctx context.Context, configId int64, 
 func (s *sSysSync) upsertProfileMapError(ctx context.Context, configId int64, row gdb.Record, msg string) error {
 	data := g.Map{"config_id": configId, "feiniu_note_id": row["note_id"].Int64(), "feiniu_note_uuid": row["note_uuid"].String(), "feiniu_note_code": row["note_code"].String(), "feiniu_source_key": sourceKey(row), "feiniu_channel_id": row["source_channel_id"].Int64(), "feiniu_tg_chat_id": row["source_tg_chat_id"].Int64(), "sync_status": "failed", "error_message": msg, "source_updated_at": sourceTime(row), "updated_at": gtime.Now()}
 	existing, _ := g.DB().Model(profileMapTable).Safe().Ctx(ctx).Where("config_id", configId).Where("feiniu_note_id", row["note_id"].Int64()).One()
-	if existing.IsEmpty() {
-		data["created_at"] = gtime.Now()
-		_, err := g.DB().Model(profileMapTable).Safe().Ctx(ctx).Data(data).Insert()
-		return err
-	}
-	_, err := g.DB().Model(profileMapTable).Safe().Ctx(ctx).Where("id", existing["id"].Int64()).Data(data).Update()
-	return err
+	return saveProfileMap(ctx, configId, row["note_id"].Int64(), existing, data)
 }
 
 type channelRunStat struct {
