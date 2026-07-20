@@ -396,6 +396,12 @@ func (s *sSysPublish) followNoteAccountIds(ctx context.Context, account *sysin.A
 	if scope == "mine" {
 		return []int64{account.Id}, nil
 	}
+	if account.AccountType == sysin.PublishAccountTypeAdmin && scope == "all" {
+		if in != nil && in.AccountId > 0 {
+			return s.adminFollowNoteSelectedAccountIds(ctx, account, in.AccountId)
+		}
+		return s.adminManagedAccountIds(ctx, account)
+	}
 	var rows []struct {
 		FollowingAccountId int64 `json:"followingAccountId"`
 	}
@@ -415,7 +421,51 @@ func (s *sSysPublish) followNoteAccountIds(ctx context.Context, account *sysin.A
 	for _, row := range rows {
 		ids = append(ids, row.FollowingAccountId)
 	}
-	return s.expandFollowNoteAccountIds(ctx, uniqueIds(ids))
+	accountIds, err := s.expandFollowNoteAccountIds(ctx, uniqueIds(ids))
+	if err != nil {
+		return nil, err
+	}
+	if in == nil || in.AccountId <= 0 {
+		return accountIds, nil
+	}
+	selectedIds, err := s.expandFollowNoteAccountIds(ctx, []int64{in.AccountId})
+	if err != nil {
+		return nil, err
+	}
+	return intersectInt64(accountIds, selectedIds), nil
+}
+
+func (s *sSysPublish) adminFollowNoteSelectedAccountIds(ctx context.Context, account *sysin.AccountModel, accountId int64) ([]int64, error) {
+	columns := pdao.YoubanPublishAccount.Columns()
+	var selected *sysin.AccountModel
+	if err := pdao.YoubanPublishAccount.Ctx(ctx).
+		Fields(columns.Id, columns.TenantId, columns.AccountType, columns.Status).
+		Where(columns.Id, accountId).
+		WhereNull(columns.DeletedAt).
+		Scan(&selected); err != nil {
+		return nil, gerror.Wrap(err, "读取筛选账号失败")
+	}
+	if selected == nil || selected.Id <= 0 || selected.Status != 1 {
+		return []int64{}, nil
+	}
+	if selected.TenantId == account.TenantId {
+		return []int64{selected.Id}, nil
+	}
+	var count int
+	var err error
+	if count, err = pdao.YoubanPublishAccountFollow.Ctx(ctx).
+		Where("tenant_id", account.TenantId).
+		Where("follower_account_id", account.Id).
+		Where("following_account_id", selected.Id).
+		Where("status", sysin.AccountFollowStatusApproved).
+		WhereNull("deleted_at").
+		Count(); err != nil {
+		return nil, gerror.Wrap(err, "检查关注账号权限失败")
+	}
+	if count == 0 {
+		return []int64{}, nil
+	}
+	return s.expandFollowNoteAccountIds(ctx, []int64{selected.Id})
 }
 
 func (s *sSysPublish) expandFollowNoteAccountIds(ctx context.Context, accountIds []int64) ([]int64, error) {
@@ -467,4 +517,21 @@ func (s *sSysPublish) expandFollowNoteAccountIds(ctx context.Context, accountIds
 		}
 	}
 	return uniqueIds(result), nil
+}
+
+func intersectInt64(left []int64, right []int64) []int64 {
+	if len(left) == 0 || len(right) == 0 {
+		return []int64{}
+	}
+	rightSet := make(map[int64]struct{}, len(right))
+	for _, id := range right {
+		rightSet[id] = struct{}{}
+	}
+	result := make([]int64, 0, len(left))
+	for _, id := range left {
+		if _, ok := rightSet[id]; ok {
+			result = append(result, id)
+		}
+	}
+	return uniqueIds(result)
 }

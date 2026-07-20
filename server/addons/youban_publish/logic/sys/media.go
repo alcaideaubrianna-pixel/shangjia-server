@@ -174,7 +174,15 @@ func (s *sSysPublish) AdminProfileImageSearch(ctx context.Context, in *sysin.Pro
 	if in == nil {
 		in = &sysin.ProfileImageSearchInp{}
 	}
-	in.TenantId = account.TenantId
+	accountIds, tenantId, err := s.adminNoteFilterScope(ctx, account, &in.ProfileListInp)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(accountIds) > 0 {
+		in.TenantId = tenantId
+		return s.profileImageSearchByAccountIds(ctx, in, file, accountIds, account)
+	}
+	in.TenantId = tenantId
 	in.AccountId = 0
 	return s.profileImageSearch(ctx, in, file, sysin.ProfilePermissionAdmin)
 }
@@ -787,10 +795,26 @@ func normalizeMediaFileURL(fileURL string, storagePath string) string {
 	if storagePath == "" {
 		return fileURL
 	}
-	if fileURL == "" || isLocalMediaURL(fileURL) {
+	if fileURL == "" || isLocalMediaURL(fileURL) || isTelegramFileURL(fileURL) {
+		if isAbsoluteMediaURL(storagePath) {
+			return storagePath
+		}
 		return "/" + strings.TrimLeft(storagePath, "/")
 	}
 	return fileURL
+}
+
+func isAbsoluteMediaURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && parsed.Scheme != "" && parsed.Hostname() != ""
+}
+
+func isTelegramFileURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Hostname(), "api.telegram.org") && strings.HasPrefix(parsed.Path, "/file/bot")
 }
 
 func isLocalMediaURL(raw string) bool {

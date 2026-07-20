@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
@@ -237,10 +238,70 @@ func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) 
 	if in == nil {
 		in = &sysin.NoteListInp{}
 	}
-	in.TenantId = account.TenantId
+	accountIds, tenantId, err := s.adminNoteFilterScope(ctx, account, &in.ProfileListInp)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(accountIds) > 0 {
+		list, totalCount, err = s.noteListByAccounts(ctx, &in.ProfileListInp, tenantId, accountIds, account)
+		return
+	}
+	in.TenantId = tenantId
 	list, totalCount, err = s.noteList(ctx, in)
 	markNotesPermission(list, sysin.ProfilePermissionAdmin)
 	return
+}
+
+func (s *sSysPublish) adminNoteFilterScope(ctx context.Context, account *sysin.AccountModel, in *sysin.ProfileListInp) (accountIds []int64, tenantId int64, err error) {
+	if account == nil || account.Id <= 0 || account.TenantId <= 0 {
+		return nil, 0, gerror.New("当前账号无管理权限")
+	}
+	scope := strings.TrimSpace(in.AccountScope)
+	if scope == "" || scope == "all" {
+		return nil, account.TenantId, nil
+	}
+	if scope == "mine" {
+		if in.AccountId > 0 {
+			if err = s.ensureAdminManageableAccount(ctx, account, in.AccountId); err != nil {
+				return nil, 0, err
+			}
+			return []int64{in.AccountId}, account.TenantId, nil
+		}
+		ids, e := s.adminManagedAccountIds(ctx, account)
+		return ids, account.TenantId, e
+	}
+	if scope == "following" {
+		if in.AccountId > 0 {
+			ids, e := s.expandFollowNoteAccountIds(ctx, []int64{in.AccountId})
+			return ids, 0, e
+		}
+		ids, e := s.followNoteAccountIds(ctx, account, &sysin.FollowNoteListInp{Scope: "following"})
+		return ids, 0, e
+	}
+	return nil, 0, gerror.New("账号筛选范围不合法")
+}
+
+func (s *sSysPublish) adminManagedAccountIds(ctx context.Context, account *sysin.AccountModel) ([]int64, error) {
+	columns := pdao.YoubanPublishAccount.Columns()
+	var rows []struct {
+		Id int64 `json:"id"`
+	}
+	err := pdao.YoubanPublishAccount.Ctx(ctx).
+		Fields(columns.Id).
+		Where(columns.TenantId, account.TenantId).
+		Where(columns.Status, 1).
+		WhereNull(columns.DeletedAt).
+		Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取上架账号失败")
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row.Id > 0 {
+			ids = append(ids, row.Id)
+		}
+	}
+	return uniqueIds(ids), nil
 }
 
 func (s *sSysPublish) AdminTagList(ctx context.Context, in *sysin.TagListInp) (list []*sysin.TagModel, totalCount int, err error) {
@@ -979,7 +1040,7 @@ func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, acco
 		LeftJoin(publishTaskTable+" t", "t.profile_id=p.id AND t.deleted_at IS NULL").
 		LeftJoin(publishTenantTable+" tenant", "tenant.id=t.tenant_id").
 		LeftJoin(publishAccountTable+" a", "a.id=t.account_id AND a.deleted_at IS NULL").
-		Where("p.source_type", publishProfileSourceType).
+		Where("(p.source_type = ? OR t.id IS NOT NULL)", publishProfileSourceType).
 		WhereNull("p.deleted_at")
 	if tenantId > 0 {
 		mod = mod.Where("t.tenant_id", tenantId)
@@ -991,7 +1052,7 @@ func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, acco
 }
 
 func profileListFields() string {
-	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city,p.cup_size AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.admin_remark AS customer_remark,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,tenant.name AS tenant_name,a.nickname,t.channel_id_json,t.anti_scan_enabled,t.status AS task_status,t.tg_status,t.tg_push_enabled"
+	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city,p.cup_size AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.admin_remark AS customer_remark,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,tenant.name AS tenant_name,a.nickname AS account_name,a.nickname,a.username,t.channel_id_json,t.anti_scan_enabled,t.status AS task_status,t.tg_status,t.tg_push_enabled"
 }
 
 func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
