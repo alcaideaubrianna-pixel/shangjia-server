@@ -54,6 +54,14 @@ func (s *sSysPublish) deleteTelegramMessageSetLockedByChannel(ctx context.Contex
 				s.appendTelegramJobLog(ctx, job, "delete", "skipped", fmt.Sprintf("%s，TG消息已不存在，已同步本地删除状态，频道:%s，消息:%d", reason, chatId, item.MessageId))
 				continue
 			}
+			if isTelegramMessagePermanentlyUndeletableError(err) {
+				_, _ = g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+					Where("id", item.Id).
+					Data(g.Map{"status": "undeletable", "updated_at": gtime.Now()}).
+					Update()
+				s.appendTelegramJobLog(ctx, job, "delete", "skipped", fmt.Sprintf("%s，TG消息已超过可删除时限，保留旧消息并继续处理，频道:%s，消息:%d", reason, chatId, item.MessageId))
+				continue
+			}
 			message := fmt.Sprintf("%s，删除TG消息失败，频道:%s，消息:%d，错误:%s", reason, chatId, item.MessageId, err.Error())
 			s.appendTelegramJobLog(ctx, job, "delete", "failed", message)
 			return gerror.New(message)
@@ -65,6 +73,15 @@ func (s *sSysPublish) deleteTelegramMessageSetLockedByChannel(ctx context.Contex
 	}
 	s.appendTelegramJobLog(ctx, job, "delete", "success", reason+"，TG消息删除成功")
 	return nil
+}
+
+func isTelegramMessagePermanentlyUndeletableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "message can't be deleted") ||
+		strings.Contains(message, "message can’t be deleted")
 }
 
 func isTelegramBotConfigMissingError(err error) bool {

@@ -383,12 +383,23 @@ func (s *sSysPublish) markTaskSavedWithoutPublish(ctx context.Context, task gdb.
 }
 
 func (s *sSysPublish) hasPublishChannels(ctx context.Context, task gdb.Record) (bool, error) {
+	channelIds := decodeInt64JSON(task["channel_id_json"].String())
+	if len(channelIds) > 0 {
+		migratedIds, err := s.migratePublishTaskChannelIds(ctx, task, channelIds)
+		if err != nil {
+			return false, err
+		}
+		if len(migratedIds) == 0 {
+			return false, gerror.New("所选上架频道已失效，请重新选择频道")
+		}
+		channelIds = migratedIds
+	}
 	mod := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Where("tenant_id", task["tenant_id"].Int64()).
 		Where("publish_direction", "up").
 		Where("status", 1).
 		WhereNull("deleted_at")
-	if channelIds := decodeInt64JSON(task["channel_id_json"].String()); len(channelIds) > 0 {
+	if len(channelIds) > 0 {
 		mod = mod.WhereIn("id", channelIds)
 	} else {
 		mod = mod.Where("is_default_selected", 1)
@@ -398,6 +409,66 @@ func (s *sSysPublish) hasPublishChannels(ctx context.Context, task gdb.Record) (
 		return false, gerror.Wrap(err, "检查上架频道失败")
 	}
 	return count > 0, nil
+}
+
+func (s *sSysPublish) migratePublishTaskChannelIds(ctx context.Context, task gdb.Record, channelIds []int64) ([]int64, error) {
+	var oldChannels []struct {
+		TargetChatId string `json:"targetChatId"`
+	}
+	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Unscoped().
+		Fields("target_chat_id").
+		Where("tenant_id", task["tenant_id"].Int64()).
+		WhereIn("id", channelIds).
+		Scan(&oldChannels); err != nil {
+		return nil, gerror.Wrap(err, "读取历史上架频道失败")
+	}
+	targetChatIds := make([]string, 0, len(oldChannels))
+	for _, channel := range oldChannels {
+		if targetChatId := strings.TrimSpace(channel.TargetChatId); targetChatId != "" {
+			targetChatIds = append(targetChatIds, targetChatId)
+		}
+	}
+	if len(targetChatIds) == 0 {
+		return nil, nil
+	}
+	var currentChannels []struct {
+		Id int64 `json:"id"`
+	}
+	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Fields("id").
+		Where("tenant_id", task["tenant_id"].Int64()).
+		Where("publish_direction", "up").
+		Where("status", 1).
+		WhereNull("deleted_at").
+		WhereIn("target_chat_id", targetChatIds).
+		OrderAsc("id").
+		Scan(&currentChannels); err != nil {
+		return nil, gerror.Wrap(err, "匹配当前上架频道失败")
+	}
+	migratedIds := make([]int64, 0, len(currentChannels))
+	for _, channel := range currentChannels {
+		if channel.Id > 0 {
+			migratedIds = append(migratedIds, channel.Id)
+		}
+	}
+	migratedIds = uniqueIds(migratedIds)
+	if len(migratedIds) == 0 {
+		return nil, nil
+	}
+	channelJSON, err := encodeBotIds(migratedIds)
+	if err != nil {
+		return nil, gerror.Wrap(err, "编码当前上架频道失败")
+	}
+	_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Where("id", task["id"].Int64()).
+		Where("tenant_id", task["tenant_id"].Int64()).
+		WhereNull("deleted_at").
+		Data(g.Map{"channel_id_json": channelJSON, "updated_at": gtime.Now()}).
+		Update()
+	if err != nil {
+		return nil, gerror.Wrap(err, "更新任务上架频道失败")
+	}
+	return migratedIds, nil
 }
 
 func canSubmitPublishTask(task gdb.Record) bool {
