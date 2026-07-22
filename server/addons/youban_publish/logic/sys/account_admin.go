@@ -379,6 +379,7 @@ func (s *sSysPublish) savePublishAccount(ctx context.Context, tx gdb.TX, in *sys
 	} else {
 		data[accountColumns.CreatedBy] = contexts.GetUserId(ctx)
 		data[accountColumns.CreatedAt] = gtime.Now()
+		data[accountColumns.PublicFollowEnabled] = 0
 		id, insertErr := mod.Data(data).InsertAndGetId()
 		err = insertErr
 		if err == nil {

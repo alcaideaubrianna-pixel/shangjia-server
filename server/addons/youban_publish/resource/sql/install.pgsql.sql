@@ -972,7 +972,7 @@ ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "contact_wechat
 ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "contact_phone" varchar(64) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "contact_other" text;
 ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "follow_approval_required" smallint NOT NULL DEFAULT 0;
-ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "public_follow_enabled" smallint NOT NULL DEFAULT 1;
+ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "public_follow_enabled" smallint NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_source" (
   "id" BIGSERIAL PRIMARY KEY,

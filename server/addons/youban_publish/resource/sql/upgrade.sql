@@ -34,6 +34,9 @@ ALTER TABLE `hg_youban_publish_tg_job`
 ALTER TABLE `hg_youban_publish_tg_job`
   ADD KEY `idx_ybp_tg_job_collect_order` (`channel_id`,`target_chat_id`,`collect_source_id`,`collect_source_chat_id`,`collect_source_message_id`,`status`,`id`);
 
+ALTER TABLE `hg_youban_publish_account`
+  MODIFY COLUMN `public_follow_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否公开关注';
+
 UPDATE `hg_youban_publish_task` t
 JOIN `hg_youban_publish_collect_event` e
   ON t.`tenant_id`=e.`tenant_id`

@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_account` (
   `contact_phone` varchar(64) NOT NULL DEFAULT '' COMMENT '联系电话',
   `contact_other` text COMMENT '其他联系方式',
   `follow_approval_required` tinyint(1) NOT NULL DEFAULT '0' COMMENT '关注我是否需要审批',
-  `public_follow_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否公开关注',
+  `public_follow_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否公开关注',
   `daily_publish_limit` int(11) NOT NULL DEFAULT '0' COMMENT '每日上架额度',
   `can_direct_publish` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否可直接发布',
   `allowed_channel_json` text COMMENT '可发布频道JSON',
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_account` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架账号';
 ALTER TABLE `hg_youban_publish_account` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `id`, ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
 ALTER TABLE `hg_youban_publish_account` ADD COLUMN `password_hash` varchar(128) NOT NULL DEFAULT '' COMMENT '密码hash' AFTER `username`, ADD COLUMN `salt` varchar(16) NOT NULL DEFAULT '' COMMENT '密码盐' AFTER `password_hash`;
-ALTER TABLE `hg_youban_publish_account` ADD COLUMN `avatar_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '头像地址' AFTER `telegram_username`, ADD COLUMN `contact_telegram` varchar(128) NOT NULL DEFAULT '' COMMENT '联系TG' AFTER `avatar_url`, ADD COLUMN `contact_wechat` varchar(128) NOT NULL DEFAULT '' COMMENT '联系微信' AFTER `contact_telegram`, ADD COLUMN `contact_phone` varchar(64) NOT NULL DEFAULT '' COMMENT '联系电话' AFTER `contact_wechat`, ADD COLUMN `contact_other` text COMMENT '其他联系方式' AFTER `contact_phone`, ADD COLUMN `follow_approval_required` tinyint(1) NOT NULL DEFAULT '0' COMMENT '关注我是否需要审批' AFTER `contact_other`, ADD COLUMN `public_follow_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否公开关注' AFTER `follow_approval_required`;
+ALTER TABLE `hg_youban_publish_account` ADD COLUMN `avatar_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '头像地址' AFTER `telegram_username`, ADD COLUMN `contact_telegram` varchar(128) NOT NULL DEFAULT '' COMMENT '联系TG' AFTER `avatar_url`, ADD COLUMN `contact_wechat` varchar(128) NOT NULL DEFAULT '' COMMENT '联系微信' AFTER `contact_telegram`, ADD COLUMN `contact_phone` varchar(64) NOT NULL DEFAULT '' COMMENT '联系电话' AFTER `contact_wechat`, ADD COLUMN `contact_other` text COMMENT '其他联系方式' AFTER `contact_phone`, ADD COLUMN `follow_approval_required` tinyint(1) NOT NULL DEFAULT '0' COMMENT '关注我是否需要审批' AFTER `contact_other`, ADD COLUMN `public_follow_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否公开关注' AFTER `follow_approval_required`;
 UPDATE `hg_youban_publish_account` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
 ALTER TABLE `hg_youban_publish_account` ADD KEY `idx_ybp_account_tenant` (`tenant_id`,`account_type`,`status`);
 
