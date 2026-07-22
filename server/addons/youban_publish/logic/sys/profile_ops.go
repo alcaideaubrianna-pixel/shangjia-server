@@ -230,7 +230,7 @@ func (s *sSysPublish) AdminProfileStatus(ctx context.Context, in *sysin.ProfileS
 	return s.updateProfileStatus(ctx, in, account.TenantId, 0)
 }
 
-func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) (list []*sysin.NoteModel, totalCount int, err error) {
+func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) (list []*sysin.AdminNoteListModel, totalCount int, err error) {
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -242,14 +242,7 @@ func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) 
 	if err != nil {
 		return nil, 0, err
 	}
-	if len(accountIds) > 0 {
-		list, totalCount, err = s.noteListByAccounts(ctx, &in.ProfileListInp, tenantId, accountIds, account)
-		return
-	}
-	in.TenantId = tenantId
-	list, totalCount, err = s.noteList(ctx, in)
-	markNotesPermission(list, sysin.ProfilePermissionAdmin)
-	return
+	return s.adminNoteList(ctx, &in.ProfileListInp, tenantId, accountIds, account)
 }
 
 func (s *sSysPublish) adminNoteFilterScope(ctx context.Context, account *sysin.AccountModel, in *sysin.ProfileListInp) (accountIds []int64, tenantId int64, err error) {
@@ -511,6 +504,119 @@ func (s *sSysPublish) noteList(ctx context.Context, in *sysin.NoteListInp) (list
 		list = append(list, note)
 	}
 	return
+}
+
+func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.ProfileListInp, tenantId int64, accountIds []int64, viewer *sysin.AccountModel) ([]*sysin.AdminNoteListModel, int, error) {
+	base, err := s.profileBaseModel(ctx, tenantId, 0)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(accountIds) > 0 {
+		base = base.WhereIn("t.account_id", accountIds)
+	} else if in != nil && in.AccountId > 0 {
+		base = base.Where("t.account_id", in.AccountId)
+	}
+	profiles, totalCount, err := s.searchProfilePage(ctx, base, in, adminNoteListFields(), "统计笔记失败", "获取笔记列表失败")
+	if err != nil {
+		return nil, 0, err
+	}
+	if err = s.ensureProfileListUUID(ctx, profiles); err != nil {
+		return nil, 0, err
+	}
+	mediaBuckets, err := s.adminNoteCoverMediaByProfiles(ctx, profiles)
+	if err != nil {
+		return nil, 0, err
+	}
+	list := make([]*sysin.AdminNoteListModel, 0, len(profiles))
+	for _, item := range profiles {
+		if item == nil {
+			continue
+		}
+		permission := sysin.ProfilePermissionAdmin
+		if len(accountIds) > 0 {
+			permission = profilePermissionForViewer(viewer, item)
+		}
+		markProfilePermission(item, permission)
+		list = append(list, adminNoteListFromProfile(item, mediaBuckets[item.Id]))
+	}
+	return list, totalCount, nil
+}
+
+func adminNoteListFields() string {
+	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.province,p.city,p.cup_size AS tag,p.status,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,a.nickname AS account_name,a.nickname,a.username,t.status AS task_status"
+}
+
+func adminNoteListFromProfile(profile *sysin.ProfileModel, media []*sysin.AdminNoteMediaModel) *sysin.AdminNoteListModel {
+	if profile == nil {
+		return nil
+	}
+	if media == nil {
+		media = []*sysin.AdminNoteMediaModel{}
+	}
+	return &sysin.AdminNoteListModel{
+		Id:          profile.Id,
+		Uuid:        profile.Uuid,
+		TaskId:      profile.TaskId,
+		AccountId:   profile.AccountId,
+		AccountName: profile.AccountName,
+		Nickname:    profile.Nickname,
+		Username:    profile.Username,
+		ProfileNo:   profile.ProfileNo,
+		Title:       profile.Title,
+		Province:    profile.Province,
+		City:        profile.City,
+		Tag:         profile.Tag,
+		Status:      profile.Status,
+		TaskStatus:  profile.TaskStatus,
+		CanEdit:     profile.CanEdit,
+		Permission:  profile.Permission,
+		CreatedAt:   profile.CreatedAt,
+		UpdatedAt:   profile.UpdatedAt,
+		Media:       media,
+	}
+}
+
+func (s *sSysPublish) adminNoteCoverMediaByProfiles(ctx context.Context, profiles []*sysin.ProfileModel) (map[int64][]*sysin.AdminNoteMediaModel, error) {
+	buckets := make(map[int64][]*sysin.AdminNoteMediaModel, len(profiles))
+	profileIds := make([]int64, 0, len(profiles))
+	for _, profile := range profiles {
+		if profile == nil || profile.Id <= 0 {
+			continue
+		}
+		profileIds = append(profileIds, profile.Id)
+		buckets[profile.Id] = []*sysin.AdminNoteMediaModel{}
+	}
+	profileIds = uniqueIds(profileIds)
+	if len(profileIds) == 0 {
+		return buckets, nil
+	}
+	var media []*sysin.MediaModel
+	err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Fields("id,profile_id,media_type,file_url,storage_path,sort_index").
+		WhereIn("profile_id", profileIds).
+		Where("(media_type IS NULL OR media_type = '' OR media_type <> ?)", "video").
+		WhereNull("deleted_at").
+		OrderAsc("profile_id").
+		OrderAsc("sort_index").
+		OrderAsc("id").
+		Scan(&media)
+	if err != nil {
+		return nil, gerror.Wrap(err, "获取笔记封面失败")
+	}
+	normalizeMediaListFileURL(media)
+	for _, item := range media {
+		if item == nil || item.ProfileId <= 0 || len(buckets[item.ProfileId]) > 0 {
+			continue
+		}
+		buckets[item.ProfileId] = append(buckets[item.ProfileId], &sysin.AdminNoteMediaModel{
+			Id:        item.Id,
+			ProfileId: item.ProfileId,
+			MediaType: item.MediaType,
+			FileUrl:   item.FileUrl,
+			SortIndex: item.SortIndex,
+		})
+	}
+	return buckets, nil
 }
 
 func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp, tenantId int64, accountId int64) (res *sysin.ProfileSaveModel, err error) {

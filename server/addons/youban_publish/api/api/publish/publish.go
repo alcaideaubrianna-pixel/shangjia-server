@@ -547,7 +547,7 @@ type AdminNoteListReq struct {
 
 type AdminNoteListRes struct {
 	form.PageRes
-	List []*sysin.NoteModel `json:"list" dc:"笔记列表"`
+	List []*sysin.AdminNoteListModel `json:"list" dc:"笔记列表"`
 }
 
 type AdminTagListReq struct {

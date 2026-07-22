@@ -700,7 +700,7 @@ func (c *cPublishAdmin) NoteList(ctx context.Context, req *publish.AdminNoteList
 		return nil, err
 	}
 	if list == nil {
-		list = []*sysin.NoteModel{}
+		list = []*sysin.AdminNoteListModel{}
 	}
 	res = new(publish.AdminNoteListRes)
 	res.List = list

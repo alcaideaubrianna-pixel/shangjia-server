@@ -763,6 +763,36 @@ type NoteModel struct {
 	Media []*MediaModel `json:"media" dc:"媒体列表"`
 }
 
+type AdminNoteMediaModel struct {
+	Id        int64  `json:"id" dc:"ID"`
+	ProfileId int64  `json:"profileId" dc:"资料ID"`
+	MediaType string `json:"mediaType" dc:"媒体类型"`
+	FileUrl   string `json:"fileUrl" dc:"访问地址"`
+	SortIndex int    `json:"sortIndex" dc:"排序"`
+}
+
+type AdminNoteListModel struct {
+	Id          int64                  `json:"id" dc:"资料ID"`
+	Uuid        string                 `json:"uuid" dc:"资料UUID"`
+	TaskId      int64                  `json:"taskId" dc:"任务ID"`
+	AccountId   int64                  `json:"accountId" dc:"上架账号ID"`
+	AccountName string                 `json:"accountName" dc:"上架账号昵称"`
+	Nickname    string                 `json:"nickname" dc:"账号名称"`
+	Username    string                 `json:"username" dc:"上架账号用户名"`
+	ProfileNo   string                 `json:"profileNo" dc:"资料编号"`
+	Title       string                 `json:"title" dc:"标题"`
+	Province    string                 `json:"province" dc:"省份"`
+	City        string                 `json:"city" dc:"城市"`
+	Tag         string                 `json:"tag" dc:"标签"`
+	Status      int                    `json:"status" dc:"状态"`
+	TaskStatus  string                 `json:"taskStatus" dc:"上架任务状态"`
+	CanEdit     bool                   `json:"canEdit" dc:"当前账号是否可编辑"`
+	Permission  string                 `json:"permission" dc:"当前账号权限：creator/admin/visitor"`
+	CreatedAt   *gtime.Time            `json:"createdAt" dc:"创建时间"`
+	UpdatedAt   *gtime.Time            `json:"updatedAt" dc:"更新时间"`
+	Media       []*AdminNoteMediaModel `json:"media" dc:"封面媒体"`
+}
+
 type FollowNoteMediaModel struct {
 	Id                int64  `json:"id" dc:"ID"`
 	ProfileId         int64  `json:"profileId" dc:"资料ID"`
