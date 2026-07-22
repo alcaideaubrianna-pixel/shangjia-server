@@ -51,6 +51,62 @@ func (c *cPublishServer) TenantDelete(ctx context.Context, req *publish.TenantDe
 	return
 }
 
+func (c *cPublishServer) VipConfigView(ctx context.Context, req *publish.VipConfigViewReq) (res *publish.VipConfigViewRes, err error) {
+	data, err := service.SysPublish().AdminTenantVipConfigView(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.VipConfigViewRes{TenantVipConfigModel: data}, nil
+}
+
+func (c *cPublishServer) VipConfigSave(ctx context.Context, req *publish.VipConfigSaveReq) (res *publish.VipConfigSaveRes, err error) {
+	err = service.SysPublish().AdminTenantVipConfigSave(ctx, &req.TenantVipConfigSaveInp)
+	return &publish.VipConfigSaveRes{}, err
+}
+
+func (c *cPublishServer) VipTenantSave(ctx context.Context, req *publish.VipTenantSaveReq) (res *publish.VipTenantSaveRes, err error) {
+	err = service.SysPublish().AdminTenantVipTenantSave(ctx, &req.TenantVipTenantSaveInp)
+	return &publish.VipTenantSaveRes{}, err
+}
+
+func (c *cPublishServer) VipOrderList(ctx context.Context, req *publish.VipOrderListReq) (res *publish.VipOrderListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminTenantVipOrderList(ctx, &req.TenantVipOrderListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.TenantVipOrderModel{}
+	}
+	res = new(publish.VipOrderListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) VipCouponList(ctx context.Context, req *publish.VipCouponListReq) (res *publish.VipCouponListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminTenantVipCouponList(ctx, &req.TenantVipCouponListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.TenantVipCouponModel{}
+	}
+	res = new(publish.VipCouponListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) VipCouponSave(ctx context.Context, req *publish.VipCouponSaveReq) (res *publish.VipCouponSaveRes, err error) {
+	err = service.SysPublish().AdminTenantVipCouponSave(ctx, &req.TenantVipCouponSaveInp)
+	return &publish.VipCouponSaveRes{}, err
+}
+
+func (c *cPublishServer) VipCouponStatus(ctx context.Context, req *publish.VipCouponStatusReq) (res *publish.VipCouponStatusRes, err error) {
+	err = service.SysPublish().AdminTenantVipCouponStatus(ctx, &req.TenantVipCouponStatusInp)
+	return &publish.VipCouponStatusRes{}, err
+}
+
 func (c *cPublishServer) InviteList(ctx context.Context, req *publish.InviteListReq) (res *publish.InviteListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminInviteList(ctx, &req.InviteListInp)
 	if err != nil {

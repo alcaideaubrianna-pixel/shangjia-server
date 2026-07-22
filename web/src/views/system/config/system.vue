@@ -28,6 +28,7 @@
           <GeoSetting v-if="type === 9" />
           <PaySetting v-if="type === 10" />
           <WechatSetting v-if="type === 11" />
+          <YoubanVipSetting v-if="type === 12" />
         </n-card>
       </n-grid-item>
     </n-grid>
@@ -70,6 +71,9 @@
     }),
     LoginSetting = defineAsyncComponent(() => {
       return import('./LoginSetting.vue');
+    }),
+    YoubanVipSetting = defineAsyncComponent(() => {
+      return import('./YoubanVipSetting.vue');
     });
   const typeTabList = [
     {
@@ -127,6 +131,11 @@
       desc: '公众号/开放平台/小程序配置等',
       key: 11,
     },
+    {
+      name: '上架VIP',
+      desc: '上架系统会员价格和活动',
+      key: 12,
+    },
   ];
   export default defineComponent({
     components: {
@@ -141,6 +150,7 @@
       PaySetting,
       WechatSetting,
       LoginSetting,
+      YoubanVipSetting,
     },
     setup() {
       const router = useRouter();

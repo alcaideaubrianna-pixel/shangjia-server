@@ -8,6 +8,7 @@ import (
 	"github.com/hibiken/asynq"
 
 	"hotgo/addons/youban_publish/service"
+	"hotgo/internal/library/payment"
 )
 
 type sSysPublish struct {
@@ -48,5 +49,7 @@ func NewSysPublish() *sSysPublish {
 }
 
 func init() {
-	service.RegisterSysPublish(NewSysPublish())
+	publish := NewSysPublish()
+	service.RegisterSysPublish(publish)
+	payment.RegisterNotifyCall(tenantVipOrderGroup, publish.TenantVipPayNotify)
 }

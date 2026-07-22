@@ -397,3 +397,6 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_material_import_group` (
   KEY `idx_ybp_material_import_group_task` (`task_id`,`status`,`id`),
   KEY `idx_ybp_material_import_group_profile` (`profile_id`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴资料导入分组';
+
+ALTER TABLE `hg_youban_publish_media` ADD KEY `idx_ybp_media_similar_tenant` (`tenant_id`,`media_type`,`account_id`,`profile_id`,`id`);
+ALTER TABLE `hg_youban_publish_media` ADD KEY `idx_ybp_media_similar_account` (`account_id`,`media_type`,`profile_id`,`id`);

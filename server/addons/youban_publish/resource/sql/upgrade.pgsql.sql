@@ -389,3 +389,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_material_import_group" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_material_import_group" ON "hg_youban_publish_material_import_group" ("tenant_id", "source_unique_key");
 CREATE INDEX IF NOT EXISTS "idx_ybp_material_import_group_task" ON "hg_youban_publish_material_import_group" ("task_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_material_import_group_profile" ON "hg_youban_publish_material_import_group" ("profile_id", "id");
+
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_similar_tenant" ON "hg_youban_publish_media" ("tenant_id", "media_type", "account_id", "profile_id", "id") WHERE "deleted_at" IS NULL AND "perceptual_hash" <> '';
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_similar_account" ON "hg_youban_publish_media" ("account_id", "media_type", "profile_id", "id") WHERE "deleted_at" IS NULL AND "perceptual_hash" <> '';

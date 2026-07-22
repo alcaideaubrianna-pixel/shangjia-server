@@ -9,3 +9,4 @@ push.sh
 /dist
 /server/runtime/
 server/resource/public/storage/cache
+server/.serena/cache

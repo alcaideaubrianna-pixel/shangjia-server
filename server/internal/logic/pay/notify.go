@@ -10,6 +10,7 @@ package pay
 import (
 	"context"
 	"database/sql"
+	"math"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/encoding/gjson"
@@ -51,9 +52,22 @@ func (s *sPay) Notify(ctx context.Context, in *payin.PayNotifyInp) (res *payin.P
 		return
 	}
 
+	if models.PayType != "" && models.PayType != in.PayType {
+		err = gerror.Newf("商户订单号[%v]支付方式不匹配", data.OutTradeNo)
+		return
+	}
+
 	originPayStatus := models.PayStatus
-	if originPayStatus != consts.PayStatusWait && originPayStatus != consts.PayStatusOk {
+	if originPayStatus == consts.PayStatusOk {
+		res = &payin.PayNotifyModel{PayType: in.PayType, Code: "SUCCESS", Message: "订单已支付"}
+		return
+	}
+	if originPayStatus != consts.PayStatusWait {
 		err = gerror.Newf("商户订单号[%v]已被处理，请勿重复操作", data.OutTradeNo)
+		return
+	}
+	if !isActualAmountEnough(data.ActualAmount, models.PayAmount) {
+		err = gerror.Newf("商户订单号[%v]实付金额不足，应付 %.2f，实付 %.2f", data.OutTradeNo, models.PayAmount, data.ActualAmount)
 		return
 	}
 
@@ -71,38 +85,45 @@ func (s *sPay) Notify(ctx context.Context, in *payin.PayNotifyInp) (res *payin.P
 	models.TraceIds = gjson.New(traceIds)
 
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) (err error) {
-		if originPayStatus == consts.PayStatusWait {
-			var result sql.Result
-			result, err = s.Model(ctx).
-				Fields(
-					dao.PayLog.Columns().TransactionId,
-					dao.PayLog.Columns().PayStatus,
-					dao.PayLog.Columns().PayAt,
-					dao.PayLog.Columns().PayIp,
-					dao.PayLog.Columns().TraceIds,
-					dao.PayLog.Columns().ActualAmount,
-				).
-				Where(dao.PayLog.Columns().Id, models.Id).
-				Where(dao.PayLog.Columns().PayStatus, consts.PayStatusWait).
-				OmitEmpty().
-				Data(models).Update()
-			if err != nil {
-				return
-			}
+		var result sql.Result
+		result, err = s.Model(ctx).
+			Fields(
+				dao.PayLog.Columns().TransactionId,
+				dao.PayLog.Columns().PayStatus,
+				dao.PayLog.Columns().PayAt,
+				dao.PayLog.Columns().PayIp,
+				dao.PayLog.Columns().TraceIds,
+				dao.PayLog.Columns().ActualAmount,
+			).
+			Where(dao.PayLog.Columns().Id, models.Id).
+			Where(dao.PayLog.Columns().PayStatus, consts.PayStatusWait).
+			OmitEmpty().
+			Data(models).Update()
+		if err != nil {
+			return
+		}
 
-			var ret int64
-			ret, err = result.RowsAffected()
-			if err != nil {
-				return
-			}
+		var ret int64
+		ret, err = result.RowsAffected()
+		if err != nil {
+			return
+		}
 
-			if ret == 0 {
-				g.Log().Warningf(ctx, "没有被更新的数据行")
-				return
-			}
+		if ret == 0 {
+			g.Log().Warningf(ctx, "没有被更新的数据行")
+			return
 		}
 
 		return payment.NotifyCall(ctx, &payin.NotifyCallFuncInp{Pay: models})
 	})
+	if err != nil {
+		return
+	}
+	res = &payin.PayNotifyModel{PayType: in.PayType, Code: "SUCCESS", Message: "支付成功"}
 	return
+}
+
+func isActualAmountEnough(actualAmount float64, payAmount float64) bool {
+	const amountTolerance = 0.000001
+	return actualAmount+amountTolerance >= math.Round(payAmount*100)/100
 }

@@ -299,3 +299,31 @@ export function AdminChannelCacheList(params = {}) {
     params,
   });
 }
+
+export function VipConfigView(params = {}) {
+  return http.request({ url: '/youban_publish/publish/vip/config/view', method: 'get', params });
+}
+
+export function VipConfigSave(params = {}) {
+  return http.request({ url: '/youban_publish/publish/vip/config/save', method: 'POST', params });
+}
+
+export function VipTenantSave(params = {}) {
+  return http.request({ url: '/youban_publish/publish/vip/tenant/save', method: 'POST', params });
+}
+
+export function VipOrderList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/vip/order/list', method: 'get', params });
+}
+
+export function VipCouponList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/vip/coupon/list', method: 'get', params });
+}
+
+export function VipCouponSave(params = {}) {
+  return http.request({ url: '/youban_publish/publish/vip/coupon/save', method: 'POST', params });
+}
+
+export function VipCouponStatus(params = {}) {
+  return http.request({ url: '/youban_publish/publish/vip/coupon/status', method: 'POST', params });
+}

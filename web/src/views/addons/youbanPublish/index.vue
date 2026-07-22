@@ -246,6 +246,10 @@
           />
         </n-tab-pane>
 
+        <n-tab-pane name="member" tab="会员">
+          <MemberPanel ref="memberPanelRef" :focus-tenant-id="memberFocusTenantId" />
+        </n-tab-pane>
+
         <n-tab-pane name="tgAccounts" tab="绑定的 TG 账号">
           <n-space class="toolbar" align="center">
             <n-input
@@ -612,6 +616,7 @@
   import CloudResourceConfig from './components/cloud-resource-config.vue';
   import DashboardPanel from './components/dashboard-panel.vue';
   import ImportTaskPanel from './components/import-task-panel.vue';
+  import MemberPanel from './components/member-panel.vue';
   import ProfilePanel from './components/profile-panel.vue';
   import PublishRecordPanel from './components/publish-record-panel.vue';
   import TgObservePanel from './components/tg-observe-panel.vue';
@@ -645,6 +650,8 @@
   const message = useMessage();
   const activeTabStorageKey = 'youban_publish_admin_active_tab';
   const activeTab = ref(sessionStorage.getItem(activeTabStorageKey) || 'dashboard');
+  const memberPanelRef = ref<InstanceType<typeof MemberPanel> | null>(null);
+  const memberFocusTenantId = ref(0);
 
   const statusOptions = [
     { label: '启用', value: 1 },
@@ -853,7 +860,7 @@
     {
       title: '操作',
       key: 'actions',
-      width: 160,
+      width: 220,
       fixed: 'right',
       render(row) {
         return h(
@@ -862,6 +869,7 @@
           {
             default: () => [
               actionButton('编辑', () => openTenantModal(row)),
+              actionButton('会员配置', () => openTenantVipConfig(row)),
               actionButton('重置密码', () => openTenantResetPassword(row)),
               dangerButton('删除', () => deleteTenant(row.id)),
             ],
@@ -1229,6 +1237,7 @@
     if (tab === 'tags') await loadTags();
     if (tab === 'bots') await loadBots();
     if (tab === 'inviteRelations') await loadInviteRelations();
+    if (tab === 'member') return;
     if (tab === 'tgAccounts') await loadTgAccounts();
     if (tab === 'channelCaches') {
       await loadTgAccounts();
@@ -1243,6 +1252,13 @@
   async function reloadActiveTabData() {
     rememberActiveTab();
     await loadCurrentTab(activeTab.value);
+  }
+
+  function openTenantVipConfig(row: any) {
+    memberFocusTenantId.value = row.id;
+    activeTab.value = 'member';
+    rememberActiveTab('member');
+    memberPanelRef.value?.openTenantVipModal(row.id);
   }
 
   async function loadTenants() {

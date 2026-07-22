@@ -87,6 +87,8 @@ type (
 		GetPay(ctx context.Context) (conf *model.PayConfig, err error)
 		// GetMemberVip 获取会员认证配置
 		GetMemberVip(ctx context.Context) (conf *model.MemberVipConfig, err error)
+		// GetYoubanPublishVip 获取上架VIP配置
+		GetYoubanPublishVip(ctx context.Context) (conf *model.YoubanPublishVipConfig, err error)
 		// GetSms 获取短信配置
 		GetSms(ctx context.Context) (conf *model.SmsConfig, err error)
 		// GetGeo 获取地理配置

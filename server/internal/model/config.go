@@ -171,6 +171,19 @@ type MemberVipConfig struct {
 	PayItems         []*MemberVipPayItem `json:"memberVipPayItems"`
 }
 
+type YoubanPublishVipConfig struct {
+	Enabled          bool    `json:"youbanPublishVipEnabled"`
+	MonthlyPrice     float64 `json:"youbanPublishVipMonthlyPrice"`
+	OriginalPrice    float64 `json:"youbanPublishVipOriginalPrice"`
+	DiscountText     string  `json:"youbanPublishVipDiscountText"`
+	CouponEnabled    bool    `json:"youbanPublishVipCouponEnabled"`
+	CouponCode       string  `json:"youbanPublishVipCouponCode"`
+	CouponAmount     float64 `json:"youbanPublishVipCouponAmount"`
+	InviteRewardDays int     `json:"youbanPublishVipInviteRewardDays"`
+	ActivityTitle    string  `json:"youbanPublishVipActivityTitle"`
+	ActivityText     string  `json:"youbanPublishVipActivityText"`
+}
+
 // WechatOfficialAccountConfig 微信公众号配置
 type WechatOfficialAccountConfig struct {
 	OfficialAppID          string `json:"officialAccountAppId"`          // appid

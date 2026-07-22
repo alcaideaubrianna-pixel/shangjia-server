@@ -93,9 +93,9 @@
           <template #feedback>API秘钥值</template>
         </n-form-item>
 
-        <n-divider title-placement="left">彩虹易支付</n-divider>
+        <n-divider title-placement="left">易支付兼容网关</n-divider>
         <n-alert :show-icon="false" type="info">
-          彩虹易支付使用 V1 MD5 签名方式，支付成功后异步回调地址为 /api/pay/notify/rainbow。
+          支持彩虹易支付、EPUSDT EPay 兼容接口。支付成功后异步回调地址为 /api/pay/notify/rainbow。
         </n-alert>
         <n-form-item label="网关地址" path="payRainbowGateway">
           <n-input
@@ -103,7 +103,9 @@
             placeholder="https://pay.v8jisu.cn"
             clearable
           />
-          <template #feedback>不填写时默认使用 https://pay.v8jisu.cn</template>
+          <template #feedback>
+            EPUSDT 可填写完整 submit.php 地址，或填写到 create-transaction 目录
+          </template>
         </n-form-item>
 
         <n-form-item label="商户ID" path="payRainbowPid">
@@ -112,7 +114,7 @@
 
         <n-form-item label="MD5密钥" path="payRainbowKey">
           <n-input v-model:value="formValue.payRainbowKey" placeholder="" clearable />
-          <template #feedback>彩虹易支付商户后台的 MD5 通讯密钥</template>
+          <template #feedback>易支付兼容网关的 MD5 通讯密钥</template>
         </n-form-item>
 
         <n-divider title-placement="left">会员认证</n-divider>
@@ -139,7 +141,9 @@
           >
             <template #suffix>元</template>
           </n-input-number>
-          <template #feedback>支付宝、微信、USDT 等支付类型统一走彩虹易支付，使用同一个认证价格</template>
+          <template #feedback>
+            支付宝、微信、USDT 等支付类型统一走易支付兼容网关，使用同一个认证价格
+          </template>
         </n-form-item>
 
         <div>
@@ -246,8 +250,14 @@
   function formSubmit() {
     formRef.value.validate((errors) => {
       if (!errors) {
-        const { memberVipEnabled, memberVipCustomerFallback, memberVipDays, memberVipMoney, memberVipPayItems, ...payConfig } =
-          formValue.value;
+        const {
+          memberVipEnabled,
+          memberVipCustomerFallback,
+          memberVipDays,
+          memberVipMoney,
+          memberVipPayItems,
+          ...payConfig
+        } = formValue.value;
         const memberVipConfig = {
           memberVipEnabled,
           memberVipCustomerFallback,

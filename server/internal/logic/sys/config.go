@@ -107,7 +107,7 @@ func (s *sSysConfig) GetWechat(ctx context.Context) (conf *model.WechatConfig, e
 
 // GetPay 获取支付配置
 func (s *sSysConfig) GetPay(ctx context.Context) (conf *model.PayConfig, err error) {
-	if err = s.ensureRainbowPayConfig(ctx); err != nil {
+	if err = s.ensureEpayConfig(ctx); err != nil {
 		return
 	}
 	models, err := s.GetConfigByGroup(ctx, &sysin.GetConfigInp{Group: "pay"})
@@ -118,7 +118,7 @@ func (s *sSysConfig) GetPay(ctx context.Context) (conf *model.PayConfig, err err
 	return
 }
 
-func (s *sSysConfig) ensureRainbowPayConfig(ctx context.Context) (err error) {
+func (s *sSysConfig) ensureEpayConfig(ctx context.Context) (err error) {
 	defaults := []struct {
 		key   string
 		name  string
@@ -127,10 +127,10 @@ func (s *sSysConfig) ensureRainbowPayConfig(ctx context.Context) (err error) {
 		sort  int
 		tip   string
 	}{
-		{key: "payRainbowGateway", name: "彩虹易支付网关地址", typ: consts.ConfigTypeString, value: "https://pay.v8jisu.cn", sort: 940, tip: "彩虹易支付网关地址"},
-		{key: "payRainbowPid", name: "彩虹易支付商户ID", typ: consts.ConfigTypeString, value: "", sort: 950, tip: "彩虹易支付商户ID"},
-		{key: "payRainbowKey", name: "彩虹易支付MD5密钥", typ: consts.ConfigTypeString, value: "", sort: 960, tip: "彩虹易支付 V1 接口 MD5 签名密钥"},
-		{key: "payRainbowMethod", name: "彩虹易支付接口类型", typ: consts.ConfigTypeString, value: "jump", sort: 970, tip: "兼容旧配置，V1接口固定使用跳转支付"},
+		{key: "payRainbowGateway", name: "易支付兼容网关地址", typ: consts.ConfigTypeString, value: "https://pay.v8jisu.cn", sort: 940, tip: "支持彩虹易支付、EPUSDT EPay 兼容接口"},
+		{key: "payRainbowPid", name: "易支付商户ID", typ: consts.ConfigTypeString, value: "", sort: 950, tip: "易支付兼容网关商户ID"},
+		{key: "payRainbowKey", name: "易支付MD5密钥", typ: consts.ConfigTypeString, value: "", sort: 960, tip: "易支付兼容网关 MD5 通讯密钥"},
+		{key: "payRainbowMethod", name: "易支付接口类型", typ: consts.ConfigTypeString, value: "jump", sort: 970, tip: "兼容旧配置，V1接口固定使用跳转支付"},
 	}
 
 	cols := dao.SysConfig.Columns()
@@ -276,6 +276,11 @@ func (s *sSysConfig) GetConfigByGroup(ctx context.Context, in *sysin.GetConfigIn
 	}
 	if in.Group == "member_vip" {
 		if err = s.ensureMemberVipConfig(ctx); err != nil {
+			return
+		}
+	}
+	if in.Group == "youban_publish_vip" {
+		if err = s.ensureYoubanPublishVipConfig(ctx); err != nil {
 			return
 		}
 	}

@@ -768,6 +768,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   KEY `idx_ybp_media_task_sort` (`task_id`,`sort_index`,`id`),
   KEY `idx_ybp_media_profile` (`profile_id`,`id`),
   KEY `idx_ybp_media_phash` (`perceptual_hash`),
+  KEY `idx_ybp_media_similar_tenant` (`tenant_id`,`media_type`,`account_id`,`profile_id`,`id`),
+  KEY `idx_ybp_media_similar_account` (`account_id`,`media_type`,`profile_id`,`id`),
   KEY `idx_ybp_media_purpose` (`task_id`,`purpose`,`sort_index`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架媒体';
 
