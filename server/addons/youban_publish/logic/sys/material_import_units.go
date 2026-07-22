@@ -27,7 +27,10 @@ type materialImportMessageUnit struct {
 }
 
 func (s *sSysPublish) upsertMaterialImportUnits(ctx context.Context, task *sysin.MaterialImportTaskModel, messages []*tg.Message) error {
-	units := materialImportBuildUnits(task, messages)
+	return s.upsertMaterialImportUnitBlocks(ctx, task, materialImportBuildUnits(task, messages))
+}
+
+func (s *sSysPublish) upsertMaterialImportUnitBlocks(ctx context.Context, task *sysin.MaterialImportTaskModel, units []*materialImportMessageUnit) error {
 	for _, unit := range units {
 		if len(unit.Media) == 0 && strings.TrimSpace(unit.RawText) == "" {
 			continue
@@ -45,6 +48,71 @@ func (s *sSysPublish) upsertMaterialImportUnits(ctx context.Context, task *sysin
 		}
 	}
 	return nil
+}
+
+func materialImportSplitLeadingUnits(units []*materialImportMessageUnit) (processable []*materialImportMessageUnit, pending []*materialImportMessageUnit) {
+	if len(units) == 0 {
+		return nil, nil
+	}
+	firstTextIndex := -1
+	for index, unit := range units {
+		if unit != nil && strings.TrimSpace(unit.RawText) != "" {
+			firstTextIndex = index
+			break
+		}
+	}
+	if firstTextIndex < 0 {
+		return nil, units
+	}
+	if firstTextIndex == 0 {
+		return units, nil
+	}
+	return units[firstTextIndex:], units[:firstTextIndex]
+}
+
+func materialImportMergeAdjacentUnits(units []*materialImportMessageUnit) []*materialImportMessageUnit {
+	if len(units) == 0 {
+		return nil
+	}
+	merged := make([]*materialImportMessageUnit, 0, len(units))
+	for _, unit := range units {
+		if unit == nil {
+			continue
+		}
+		if len(merged) > 0 {
+			prev := merged[len(merged)-1]
+			if prev != nil && prev.GroupedId != "" && prev.GroupedId == unit.GroupedId {
+				if strings.TrimSpace(prev.RawText) == "" {
+					prev.RawText = unit.RawText
+				}
+				if strings.TrimSpace(prev.UniqueKey) == "" {
+					prev.UniqueKey = unit.UniqueKey
+				}
+				if prev.MessageAt == nil || (unit.MessageAt != nil && unit.MessageAt.Before(prev.MessageAt)) {
+					prev.MessageAt = unit.MessageAt
+				}
+				prev.MessageId = materialImportMinMessageID(prev.MessageId, unit.MessageId)
+				prev.Messages = append(prev.Messages, unit.Messages...)
+				prev.Media = append(prev.Media, unit.Media...)
+				continue
+			}
+		}
+		merged = append(merged, unit)
+	}
+	return merged
+}
+
+func materialImportMinMessageID(left int, right int) int {
+	if left <= 0 {
+		return right
+	}
+	if right <= 0 {
+		return left
+	}
+	if right < left {
+		return right
+	}
+	return left
 }
 
 func materialImportBuildUnits(task *sysin.MaterialImportTaskModel, messages []*tg.Message) []*materialImportMessageUnit {

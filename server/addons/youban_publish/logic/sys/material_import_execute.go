@@ -101,6 +101,7 @@ func (s *sSysPublish) pullMaterialImportPages(ctx context.Context, client *teleg
 	}
 	cutoff := gtime.NewFromTime(time.Now().Add(-time.Duration(task.PullLimitDays) * 24 * time.Hour))
 	shouldFinish := false
+	pendingUnits := make([]*materialImportMessageUnit, 0, 16)
 	for page := 0; page < materialImportPagesPerRun; page++ {
 		if err := s.materialImportEnsureNotCanceled(ctx, task.Id); err != nil {
 			return err
@@ -116,13 +117,26 @@ func (s *sSysPublish) pullMaterialImportPages(ctx context.Context, client *teleg
 		if err = s.materialImportAddPulledMessages(ctx, task.Id, len(messages)); err != nil {
 			return err
 		}
-		nextOffset, stop, err := s.ingestMaterialImportMessages(ctx, task, messages, cutoff, cache, latestCachedMessageID)
+		nextOffset, stop, units, err := s.ingestMaterialImportMessages(ctx, task, messages, cutoff, cache, latestCachedMessageID)
 		if err != nil {
 			return err
 		}
 		if nextOffset > 0 {
 			offsetID = nextOffset
 		}
+		pageUnits, carryUnits := materialImportSplitLeadingUnits(units)
+		if len(pageUnits) > 0 || len(pendingUnits) > 0 {
+			pageUnits = materialImportMergeAdjacentUnits(append(pageUnits, pendingUnits...))
+			if len(pageUnits) > 0 {
+				if err := s.upsertMaterialImportUnitBlocks(ctx, task, pageUnits); err != nil {
+					return err
+				}
+				if err := s.refreshMaterialImportTaskStats(ctx, task.Id); err != nil {
+					return err
+				}
+			}
+		}
+		pendingUnits = carryUnits
 		if stop || len(messages) < materialImportPageLimit {
 			shouldFinish = true
 			break
@@ -172,7 +186,7 @@ func materialImportHistoryPage(ctx context.Context, client *telegram.Client, pee
 	return nil, nil
 }
 
-func (s *sSysPublish) ingestMaterialImportMessages(ctx context.Context, task *sysin.MaterialImportTaskModel, messages []*tg.Message, cutoff *gtime.Time, cache *sysin.ChannelCacheModel, latestCachedMessageID int64) (int, bool, error) {
+func (s *sSysPublish) ingestMaterialImportMessages(ctx context.Context, task *sysin.MaterialImportTaskModel, messages []*tg.Message, cutoff *gtime.Time, cache *sysin.ChannelCacheModel, latestCachedMessageID int64) (int, bool, []*materialImportMessageUnit, error) {
 	ordered := collectHistoryMessagesInSendOrder(messages)
 	nextOffset := int(task.PullOffsetId)
 	stop := false
@@ -197,17 +211,11 @@ func (s *sSysPublish) ingestMaterialImportMessages(ctx context.Context, task *sy
 				TgAccountId:  task.TgAccountId,
 				TargetChatId: cache.ChannelId,
 			}, msg); err != nil {
-				return nextOffset, stop, err
+				return nextOffset, stop, nil, err
 			}
 		}
 	}
-	if err := s.upsertMaterialImportUnits(ctx, task, validMessages); err != nil {
-		return nextOffset, stop, err
-	}
-	if err := s.refreshMaterialImportTaskStats(ctx, task.Id); err != nil {
-		return nextOffset, stop, err
-	}
-	return nextOffset, stop, nil
+	return nextOffset, stop, materialImportBuildUnits(task, validMessages), nil
 }
 
 func (s *sSysPublish) materialImportLatestCachedMessageID(ctx context.Context, tenantId int64, tgAccountId int64, cache *sysin.ChannelCacheModel) (int64, error) {
