@@ -247,6 +247,7 @@ func collectMediaRowsToItems(rows []*entity.YoubanPublishCollectEventMedia) []co
 
 func normalizeCollectMediaItem(item collectMediaItem) collectMediaItem {
 	item.Type = strings.TrimSpace(item.Type)
+	item.Purpose = strings.TrimSpace(item.Purpose)
 	item.FileId = strings.TrimSpace(item.FileId)
 	item.FileUrl = strings.TrimSpace(item.FileUrl)
 	item.StoragePath = strings.TrimSpace(item.StoragePath)

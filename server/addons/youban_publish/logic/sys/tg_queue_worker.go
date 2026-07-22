@@ -37,6 +37,7 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 	mux.HandleFunc(tgTaskTypeRepair, s.handleTgMessageRepairTask)
 	mux.HandleFunc(tgTaskTypeImportMatch, s.handleImportMatchTask)
 	mux.HandleFunc(tgTaskTypeImportSync, s.handleImportTgSyncTask)
+	mux.HandleFunc(tgTaskTypeMaterialImport, s.handleMaterialImportTask)
 	mux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
 	mux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
 	mux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
@@ -182,6 +183,14 @@ func (s *sSysPublish) handleImportTgSyncTask(ctx context.Context, task *asynq.Ta
 		return err
 	}
 	return s.ExecuteImportRunTgSync(ctx, payload.MatchRunId)
+}
+
+func (s *sSysPublish) handleMaterialImportTask(ctx context.Context, task *asynq.Task) error {
+	payload, err := decodeMaterialImportQueuePayload(task)
+	if err != nil {
+		return err
+	}
+	return s.ExecuteMaterialImportTask(ctx, payload.TaskId)
 }
 
 func (s *sSysPublish) handleProfileDownTask(ctx context.Context, task *asynq.Task) error {

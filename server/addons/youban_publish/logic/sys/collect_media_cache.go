@@ -38,6 +38,8 @@ type collectMediaRetryError struct {
 	delay   time.Duration
 }
 
+const collectMediaDownloadThreads = 2
+
 func (e *collectMediaRetryError) Error() string {
 	if e == nil {
 		return ""
@@ -118,7 +120,7 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 		if retryErr, ok := err.(*collectMediaRetryError); ok {
 			_ = s.markCollectEvent(ctx, payload.EventId, sysin.CollectEventStatusMediaPending, retryErr.message)
 			s.appendCollectEventLogForRecord(ctx, event, "media", "pending", retryErr.message, fmt.Sprintf("retryAfter=%s", retryErr.delay))
-			return s.enqueueCollectMediaCache(ctx, payload, retryErr.delay)
+			return retryErr
 		}
 		_ = s.markCollectEvent(ctx, payload.EventId, sysin.CollectEventStatusFailed, err.Error())
 		s.appendCollectEventLogForRecord(ctx, event, "media", "failed", err.Error(), "")
@@ -652,28 +654,24 @@ func (s *sSysPublish) downloadGotdCollectMediaToFile(ctx context.Context, tenant
 	}
 	partPath := filePath + ".part"
 	_ = os.Remove(partPath)
-	file, err := os.Create(partPath)
-	if err != nil {
-		return gerror.Wrap(err, "创建TG媒体缓存临时文件失败")
-	}
-	_, err = downloader.NewDownloader().Download(client.API(), gotdInputFileLocation(meta)).Stream(ctx, file)
+	_, err := downloader.NewDownloader().
+		Download(client.API(), gotdInputFileLocation(meta)).
+		WithThreads(collectMediaDownloadThreads).
+		ToPath(ctx, partPath)
 	if err != nil && collectMediaFileReferenceExpired(err) {
 		refreshed, refreshErr := s.refreshGotdCollectMediaMeta(ctx, tenantId, tgAccountId, item, client)
 		if refreshErr == nil {
-			_, _ = file.Seek(0, 0)
-			_ = file.Truncate(0)
+			_ = os.Remove(partPath)
 			meta = refreshed
-			_, err = downloader.NewDownloader().Download(client.API(), gotdInputFileLocation(meta)).Stream(ctx, file)
+			_, err = downloader.NewDownloader().
+				Download(client.API(), gotdInputFileLocation(meta)).
+				WithThreads(collectMediaDownloadThreads).
+				ToPath(ctx, partPath)
 		}
 	}
-	closeErr := file.Close()
 	if err != nil {
 		_ = os.Remove(partPath)
 		return gerror.Wrap(err, "下载TG媒体到缓存失败")
-	}
-	if closeErr != nil {
-		_ = os.Remove(partPath)
-		return gerror.Wrap(closeErr, "关闭TG媒体缓存临时文件失败")
 	}
 	if err = os.Rename(partPath, filePath); err != nil {
 		_ = os.Remove(partPath)

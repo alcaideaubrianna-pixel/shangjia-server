@@ -304,7 +304,7 @@ func collectMediaSignature(mediaJSON string) string {
 		if sourceKey == "" {
 			continue
 		}
-		keys = append(keys, strings.TrimSpace(item.Type)+":"+sourceKey)
+		keys = append(keys, strings.TrimSpace(item.Purpose)+":"+strings.TrimSpace(item.Type)+":"+sourceKey)
 	}
 	sort.Strings(keys)
 	return collectHash(strings.Join(keys, "|"))

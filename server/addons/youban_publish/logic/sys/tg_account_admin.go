@@ -25,6 +25,7 @@ func (s *sSysPublish) AdminTgAccountList(ctx context.Context, in *sysin.TgAccoun
 	}
 	base := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
 		Where("tenant_id", current.TenantId).
+		Where("account_id", current.Id).
 		WhereNull("deleted_at")
 	base = applyTgAccountFilters(base, in)
 	totalCount, err = base.Clone().Count()

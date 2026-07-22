@@ -413,6 +413,10 @@ func telegramQueueRetryDelay(n int, err error, task *asynq.Task) time.Duration {
 	if errors.As(err, &retryErr) && retryErr.after > 0 {
 		return retryErr.after + time.Duration(n)*time.Second
 	}
+	var collectRetryErr *collectMediaRetryError
+	if errors.As(err, &collectRetryErr) && collectRetryErr.delay > 0 {
+		return collectRetryErr.delay + time.Duration(n)*time.Second
+	}
 	return asynq.DefaultRetryDelayFunc(n, err, task)
 }
 

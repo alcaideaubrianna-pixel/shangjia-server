@@ -18,6 +18,9 @@ import (
 )
 
 func (s *sSysPublish) AdminChannelCacheList(ctx context.Context, in *sysin.ChannelCacheListInp) (list []*sysin.ChannelCacheModel, totalCount int, err error) {
+	if err = ensurePublishTgChannelColumns(ctx); err != nil {
+		return nil, 0, err
+	}
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -31,13 +34,16 @@ func (s *sSysPublish) AdminChannelCacheList(ctx context.Context, in *sysin.Chann
 	if in.TgAccountId <= 0 {
 		return []*sysin.ChannelCacheModel{}, 0, nil
 	}
-	if err = s.ensureTgAccountsBelongTenant(ctx, []int64{in.TgAccountId}, account.TenantId); err != nil {
+	if err = s.ensureTgAccountBelongsAccount(ctx, in.TgAccountId, account.TenantId, account.Id); err != nil {
 		return nil, 0, err
 	}
 	return s.channelCacheList(ctx, in, account.TenantId)
 }
 
 func (s *sSysPublish) ServerChannelCacheList(ctx context.Context, in *sysin.ChannelCacheListInp) (list []*sysin.ChannelCacheModel, totalCount int, err error) {
+	if err = ensurePublishTgChannelColumns(ctx); err != nil {
+		return nil, 0, err
+	}
 	if err = s.requireSystemSuperAdmin(ctx); err != nil {
 		return nil, 0, err
 	}
@@ -65,6 +71,18 @@ func (s *sSysPublish) channelCacheList(ctx context.Context, in *sysin.ChannelCac
 		like := "%" + keyword + "%"
 		mod = mod.Where("(channel_title LIKE ? OR channel_username LIKE ? OR channel_id LIKE ?)", like, like, like)
 	}
+	if len(in.ManagementRoles) > 0 {
+		mod = mod.WhereIn("management_role", in.ManagementRoles)
+	}
+	if in.CanPostMessages == 1 {
+		mod = mod.Where("can_post_messages", 1)
+	}
+	if in.CanInviteUsers == 1 {
+		mod = mod.Where("can_invite_users", 1)
+	}
+	if in.CanAddAdmins == 1 {
+		mod = mod.Where("can_add_admins", 1)
+	}
 	switch in.DisplayType {
 	case "channel":
 		mod = mod.Where("channel_id NOT LIKE '-%'").Where("is_broadcast", 1)
@@ -82,6 +100,7 @@ func (s *sSysPublish) channelCacheList(ctx context.Context, in *sysin.ChannelCac
 			continue
 		}
 		item.DisplayType = resolveChannelCacheDisplayType(item)
+		item.ManagementRole = normalizeChannelManagementRole(item.ManagementRole)
 	}
 	return list, totalCount, nil
 }
@@ -97,7 +116,7 @@ func (s *sSysPublish) AdminChannelCacheResolve(ctx context.Context, in *sysin.Ch
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
-	if err = s.ensureMessagePushTgAccountBelongTenant(ctx, in.TgAccountId, account.TenantId); err != nil {
+	if err = s.ensureTgAccountBelongsAccount(ctx, in.TgAccountId, account.TenantId, account.Id); err != nil {
 		return nil, err
 	}
 	displays, err := s.resolveTelegramChannelDisplays(ctx, account.TenantId, in.TgAccountId, in.TargetChatIds)
@@ -122,6 +141,9 @@ func (s *sSysPublish) AdminChannelCacheResolve(ctx context.Context, in *sysin.Ch
 }
 
 func (s *sSysPublish) AdminChannelCacheRefresh(ctx context.Context, in *sysin.ChannelCacheRefreshInp) (res *sysin.ChannelCacheRefreshModel, err error) {
+	if err = ensurePublishTgChannelColumns(ctx); err != nil {
+		return nil, err
+	}
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
@@ -129,7 +151,7 @@ func (s *sSysPublish) AdminChannelCacheRefresh(ctx context.Context, in *sysin.Ch
 	if in == nil || in.TgAccountId <= 0 {
 		return nil, gerror.New("请选择TG账号")
 	}
-	if err = s.ensureTgAccountsBelongTenant(ctx, []int64{in.TgAccountId}, account.TenantId); err != nil {
+	if err = s.ensureTgAccountBelongsAccount(ctx, in.TgAccountId, account.TenantId, account.Id); err != nil {
 		return nil, err
 	}
 	item, err := s.adminTgAccountById(ctx, in.TgAccountId, account.TenantId)
@@ -181,7 +203,11 @@ func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.Chann
 	if len(in.BotIds) == 0 {
 		return nil, gerror.New("请选择推送资料BOT")
 	}
-	if err := s.ensureTgAccountsBelongTenant(ctx, []int64{in.TgAccountId}, tenantId); err != nil {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureTgAccountBelongsAccount(ctx, in.TgAccountId, tenantId, account.Id); err != nil {
 		return nil, err
 	}
 	if err := s.ensureBotsBelongTenant(ctx, in.BotIds, tenantId); err != nil {
@@ -291,6 +317,7 @@ type tgDialogCache struct {
 	ChannelUsername string
 	IsBroadcast     int
 	IsMegagroup     int
+	ManagementRole  string
 }
 
 func (s *sSysPublish) fetchTgAccountChannelCaches(ctx context.Context, item *sysin.TgAccountModel) ([]*tgDialogCache, error) {
@@ -485,6 +512,7 @@ func tgChannelDialogCache(channel *tg.Channel) *tgDialogCache {
 		ChannelUsername: strings.TrimPrefix(username, "@"),
 		IsBroadcast:     boolToInt(channel.Broadcast),
 		IsMegagroup:     boolToInt(channel.Megagroup),
+		ManagementRole:  tgChannelManagementRole(channel.Creator, hasAdminRights),
 	}
 }
 
@@ -492,12 +520,33 @@ func tgBasicChatDialogCache(chat *tg.Chat) *tgDialogCache {
 	if chat == nil {
 		return nil
 	}
+	adminRights, hasAdminRights := chat.GetAdminRights()
 	return &tgDialogCache{
-		CanAddAdmins:    boolToInt(chat.Creator || chat.AdminRights.AddAdmins),
-		CanInviteUsers:  boolToInt(chat.Creator || chat.AdminRights.InviteUsers),
+		CanAddAdmins:    boolToInt(chat.Creator || (hasAdminRights && adminRights.AddAdmins)),
+		CanInviteUsers:  boolToInt(chat.Creator || (hasAdminRights && adminRights.InviteUsers)),
 		CanPostMessages: 1,
 		ChannelId:       "-" + strconv.FormatInt(chat.ID, 10),
 		ChannelTitle:    chat.Title,
+		ManagementRole:  tgChannelManagementRole(chat.Creator, hasAdminRights),
+	}
+}
+
+func tgChannelManagementRole(isCreator bool, hasAdminRights bool) string {
+	if isCreator {
+		return "owner"
+	}
+	if hasAdminRights {
+		return "admin"
+	}
+	return "member"
+}
+
+func normalizeChannelManagementRole(role string) string {
+	switch strings.TrimSpace(strings.ToLower(role)) {
+	case "owner", "admin", "member":
+		return strings.TrimSpace(strings.ToLower(role))
+	default:
+		return "member"
 	}
 }
 
@@ -519,6 +568,7 @@ func (s *sSysPublish) upsertTgDialogCache(ctx context.Context, tenantId int64, t
 		"channel_username":  strings.TrimPrefix(channel.ChannelUsername, "@"),
 		"is_broadcast":      channel.IsBroadcast,
 		"is_megagroup":      channel.IsMegagroup,
+		"management_role":   normalizeChannelManagementRole(channel.ManagementRole),
 		"can_post_messages": channel.CanPostMessages,
 		"can_invite_users":  channel.CanInviteUsers,
 		"can_add_admins":    channel.CanAddAdmins,

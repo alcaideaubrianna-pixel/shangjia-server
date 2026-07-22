@@ -1005,9 +1005,10 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 		now := gtime.Now()
 		profileColumns := dao.ContentProfile.Columns()
 		data := g.Map{
-			profileColumns.ImageCount: 0,
-			profileColumns.VideoCount: 0,
-			profileColumns.UpdatedAt:  now,
+			profileColumns.ImageCount:           0,
+			profileColumns.VideoCount:           0,
+			profileColumns.HasVerificationVideo: 0,
+			profileColumns.UpdatedAt:            now,
 		}
 		if _, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Where(profileColumns.Id, profileId).Data(data).Update(); err != nil {
 			return gerror.Wrap(err, "更新资料媒体数量失败")
@@ -1018,6 +1019,7 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 	now := gtime.Now()
 	imageCount := 0
 	videoCount := 0
+	hasVerificationVideo := 0
 	var coverMediaId int64
 	for _, item := range list {
 		mediaType := item.MediaType
@@ -1026,6 +1028,9 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 		}
 		if mediaType == "video" {
 			videoCount++
+			if strings.TrimSpace(item.Purpose) == "verify" {
+				hasVerificationVideo = 1
+			}
 		} else {
 			imageCount++
 		}
@@ -1093,9 +1098,10 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 	}
 	profileColumns := dao.ContentProfile.Columns()
 	data := g.Map{
-		profileColumns.ImageCount: imageCount,
-		profileColumns.VideoCount: videoCount,
-		profileColumns.UpdatedAt:  now,
+		profileColumns.ImageCount:           imageCount,
+		profileColumns.VideoCount:           videoCount,
+		profileColumns.HasVerificationVideo: hasVerificationVideo,
+		profileColumns.UpdatedAt:            now,
 	}
 	if coverMediaId > 0 {
 		data[profileColumns.CoverMediaId] = coverMediaId

@@ -1571,9 +1571,13 @@ func (s *sSysPublish) importLegacyCMSMedia(ctx context.Context, runId int64, sou
 		}
 		var posterAttachment *basesysin.AttachmentListModel
 		if item.MediaType == "video" {
-			posterAttachment, err = legacyCMSVideoPoster(ctx, name, content)
-			if err != nil {
-				_ = s.appendImportRunLog(ctx, runId, "warning", importStageMedia, "旧站视频封面生成失败，继续导入视频", g.Map{"sourceNoteId": sourceNoteId, "name": name, "error": err.Error(), "sortIndex": idx + 1})
+			posterResult, posterErr := legacyCMSVideoPoster(ctx, name, content)
+			if posterResult != nil {
+				posterAttachment = posterResult.Attachment
+				perceptualHash = posterResult.PerceptualHash
+			}
+			if posterErr != nil {
+				_ = s.appendImportRunLog(ctx, runId, "warning", importStageMedia, "旧站视频封面生成失败，继续导入视频", g.Map{"sourceNoteId": sourceNoteId, "name": name, "error": posterErr.Error(), "sortIndex": idx + 1})
 				posterAttachment = nil
 			}
 		}
@@ -1595,7 +1599,7 @@ func (s *sSysPublish) importLegacyCMSMedia(ctx context.Context, runId int64, sou
 	return imported, nil
 }
 
-func legacyCMSVideoPoster(ctx context.Context, videoName string, content []byte) (*basesysin.AttachmentListModel, error) {
+func legacyCMSVideoPoster(ctx context.Context, videoName string, content []byte) (*videoPosterResult, error) {
 	if len(content) == 0 {
 		return nil, nil
 	}
@@ -1612,7 +1616,7 @@ func legacyCMSVideoPoster(ctx context.Context, videoName string, content []byte)
 	if err = input.Close(); err != nil {
 		return nil, gerror.Wrap(err, "关闭旧站视频临时文件失败")
 	}
-	return generateVideoPosterAttachment(ctx, inputPath, videoName)
+	return generateVideoPosterAttachmentWithPHash(ctx, inputPath, videoName)
 }
 
 func legacyCMSClientRequestID(row gdb.Record, sourceNoteId int64) string {

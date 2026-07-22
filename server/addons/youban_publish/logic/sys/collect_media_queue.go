@@ -32,7 +32,7 @@ func (s *sSysPublish) enqueueCollectMediaCache(ctx context.Context, payload coll
 	task := asynq.NewTask(tgTaskTypeCollectMedia, body)
 	options := []asynq.Option{
 		asynq.Queue(tgQueueNameMedia),
-		asynq.Unique(30 * time.Second),
+		asynq.Unique(6 * time.Hour),
 		asynq.MaxRetry(10),
 		asynq.Timeout(30 * time.Minute),
 	}

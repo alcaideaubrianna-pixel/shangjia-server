@@ -605,6 +605,9 @@ func tgHistoryMessages(res tg.MessagesMessagesClass) []*tg.Message {
 
 func telegramHistoryMessageMediaType(message *tg.Message) string {
 	if message == nil || message.Media == nil {
+		if strings.TrimSpace(message.Message) != "" {
+			return "text"
+		}
 		return ""
 	}
 	switch media := message.Media.(type) {

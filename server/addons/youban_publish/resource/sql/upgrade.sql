@@ -34,6 +34,9 @@ ALTER TABLE `hg_youban_publish_tg_job`
 ALTER TABLE `hg_youban_publish_tg_job`
   ADD KEY `idx_ybp_tg_job_collect_order` (`channel_id`,`target_chat_id`,`collect_source_id`,`collect_source_chat_id`,`collect_source_message_id`,`status`,`id`);
 
+ALTER TABLE `hg_youban_publish_tg_channel`
+  ADD COLUMN `management_role` varchar(16) NOT NULL DEFAULT 'member' COMMENT '当前TG账号角色：owner/admin/member' AFTER `channel_username`;
+
 ALTER TABLE `hg_youban_publish_account`
   MODIFY COLUMN `public_follow_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否公开关注';
 
@@ -326,3 +329,71 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_quick_push_plan` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴快速推送计划';
 
 ALTER TABLE `hg_content_profile` ADD UNIQUE KEY `uk_content_profile_no` (`profile_no`);
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_material_import_task` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料归属账号ID',
+  `tg_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG协议账号ID',
+  `source_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '来源频道/群聊ID',
+  `source_title` varchar(255) NOT NULL DEFAULT '' COMMENT '来源频道/群聊名称',
+  `source_username` varchar(128) NOT NULL DEFAULT '' COMMENT '来源用户名',
+  `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '任务状态',
+  `stage` varchar(32) NOT NULL DEFAULT 'created' COMMENT '执行阶段',
+  `pull_offset_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '消息拉取偏移ID',
+  `pull_limit_days` int(11) NOT NULL DEFAULT '365' COMMENT '拉取天数',
+  `message_total` int(11) NOT NULL DEFAULT '0' COMMENT '消息总数',
+  `message_done` int(11) NOT NULL DEFAULT '0' COMMENT '已处理消息数',
+  `group_total` int(11) NOT NULL DEFAULT '0' COMMENT '分组总数',
+  `group_done` int(11) NOT NULL DEFAULT '0' COMMENT '已入库分组数',
+  `media_total` int(11) NOT NULL DEFAULT '0' COMMENT '媒体总数',
+  `media_done` int(11) NOT NULL DEFAULT '0' COMMENT '已下载媒体数',
+  `media_failed` int(11) NOT NULL DEFAULT '0' COMMENT '媒体失败数',
+  `imported` int(11) NOT NULL DEFAULT '0' COMMENT '导入资料数',
+  `duplicate` int(11) NOT NULL DEFAULT '0' COMMENT '重复资料数',
+  `error_message` text COMMENT '错误信息',
+  `next_run_at` datetime DEFAULT NULL COMMENT '下次执行时间',
+  `result_json` longtext COMMENT '结果JSON',
+  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
+  `started_at` datetime DEFAULT NULL COMMENT '开始时间',
+  `finished_at` datetime DEFAULT NULL COMMENT '结束时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_material_import_owner` (`tenant_id`,`account_id`,`status`,`id`),
+  KEY `idx_ybp_material_import_tg` (`tenant_id`,`tg_account_id`,`source_chat_id`,`id`),
+  KEY `idx_ybp_material_import_status` (`status`,`next_run_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴资料导入任务';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_material_import_group` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '导入任务ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料归属账号ID',
+  `source_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '来源频道/群聊ID',
+  `source_grouped_id` varchar(128) NOT NULL DEFAULT '' COMMENT '媒体组ID',
+  `source_message_ids` text COMMENT '来源消息ID JSON',
+  `source_unique_key` varchar(255) NOT NULL DEFAULT '' COMMENT '来源唯一键',
+  `title` varchar(255) NOT NULL DEFAULT '' COMMENT '标题',
+  `nickname` varchar(128) NOT NULL DEFAULT '' COMMENT '昵称',
+  `profile_no` varchar(64) NOT NULL DEFAULT '' COMMENT '编号',
+  `raw_text` text COMMENT '原始文本',
+  `profile_text` text COMMENT '资料正文',
+  `verify_text` text COMMENT '验证资料文本',
+  `media_json` longtext COMMENT '媒体JSON',
+  `media_total` int(11) NOT NULL DEFAULT '0' COMMENT '媒体总数',
+  `media_done` int(11) NOT NULL DEFAULT '0' COMMENT '已下载媒体数',
+  `media_failed` int(11) NOT NULL DEFAULT '0' COMMENT '媒体失败数',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
+  `task_profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架任务ID',
+  `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '状态',
+  `error_message` text COMMENT '错误信息',
+  `message_at` datetime DEFAULT NULL COMMENT 'TG消息时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_material_import_group` (`tenant_id`,`source_unique_key`),
+  KEY `idx_ybp_material_import_group_task` (`task_id`,`status`,`id`),
+  KEY `idx_ybp_material_import_group_profile` (`profile_id`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴资料导入分组';

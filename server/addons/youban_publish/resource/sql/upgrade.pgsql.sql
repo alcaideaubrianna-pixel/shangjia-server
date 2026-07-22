@@ -35,6 +35,7 @@ ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_source_
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_source_message_id" bigint NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_collect_order" ON "hg_youban_publish_tg_job" ("channel_id", "target_chat_id", "collect_source_id", "collect_source_chat_id", "collect_source_message_id", "status", "id");
 
+ALTER TABLE "hg_youban_publish_tg_channel" ADD COLUMN IF NOT EXISTS "management_role" varchar(16) NOT NULL DEFAULT 'member';
 ALTER TABLE "hg_youban_publish_account" ALTER COLUMN "public_follow_enabled" SET DEFAULT 0;
 
 UPDATE "hg_youban_publish_task" t SET
@@ -322,3 +323,69 @@ CREATE TABLE IF NOT EXISTS hg_youban_publish_quick_push_plan (
 CREATE INDEX IF NOT EXISTS idx_ybp_quick_plan_owner ON hg_youban_publish_quick_push_plan (tenant_id,status,id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_content_profile_no ON hg_content_profile (profile_no);
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_material_import_task" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "tg_account_id" bigint NOT NULL DEFAULT 0,
+  "source_chat_id" varchar(128) NOT NULL DEFAULT '',
+  "source_title" varchar(255) NOT NULL DEFAULT '',
+  "source_username" varchar(128) NOT NULL DEFAULT '',
+  "status" varchar(32) NOT NULL DEFAULT 'pending',
+  "stage" varchar(32) NOT NULL DEFAULT 'created',
+  "pull_offset_id" bigint NOT NULL DEFAULT 0,
+  "pull_limit_days" integer NOT NULL DEFAULT 365,
+  "message_total" integer NOT NULL DEFAULT 0,
+  "message_done" integer NOT NULL DEFAULT 0,
+  "group_total" integer NOT NULL DEFAULT 0,
+  "group_done" integer NOT NULL DEFAULT 0,
+  "media_total" integer NOT NULL DEFAULT 0,
+  "media_done" integer NOT NULL DEFAULT 0,
+  "media_failed" integer NOT NULL DEFAULT 0,
+  "imported" integer NOT NULL DEFAULT 0,
+  "duplicate" integer NOT NULL DEFAULT 0,
+  "error_message" text,
+  "next_run_at" timestamp DEFAULT NULL,
+  "result_json" text,
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "started_at" timestamp DEFAULT NULL,
+  "finished_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_material_import_owner" ON "hg_youban_publish_material_import_task" ("tenant_id", "account_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_material_import_tg" ON "hg_youban_publish_material_import_task" ("tenant_id", "tg_account_id", "source_chat_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_material_import_status" ON "hg_youban_publish_material_import_task" ("status", "next_run_at", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_material_import_group" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "task_id" bigint NOT NULL DEFAULT 0,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "source_chat_id" varchar(128) NOT NULL DEFAULT '',
+  "source_grouped_id" varchar(128) NOT NULL DEFAULT '',
+  "source_message_ids" text,
+  "source_unique_key" varchar(255) NOT NULL DEFAULT '',
+  "title" varchar(255) NOT NULL DEFAULT '',
+  "nickname" varchar(128) NOT NULL DEFAULT '',
+  "profile_no" varchar(64) NOT NULL DEFAULT '',
+  "raw_text" text,
+  "profile_text" text,
+  "verify_text" text,
+  "media_json" text,
+  "media_total" integer NOT NULL DEFAULT 0,
+  "media_done" integer NOT NULL DEFAULT 0,
+  "media_failed" integer NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "task_profile_id" bigint NOT NULL DEFAULT 0,
+  "status" varchar(32) NOT NULL DEFAULT 'pending',
+  "error_message" text,
+  "message_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_material_import_group" ON "hg_youban_publish_material_import_group" ("tenant_id", "source_unique_key");
+CREATE INDEX IF NOT EXISTS "idx_ybp_material_import_group_task" ON "hg_youban_publish_material_import_group" ("task_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_material_import_group_profile" ON "hg_youban_publish_material_import_group" ("profile_id", "id");

@@ -238,6 +238,30 @@ func (s *sSysPublish) ensureTgAccountsBelongTenant(ctx context.Context, ids []in
 	return nil
 }
 
+func (s *sSysPublish) ensureTgAccountsBelongAccount(ctx context.Context, ids []int64, tenantId int64, accountId int64) error {
+	ids = uniqueIds(ids)
+	if len(ids) == 0 {
+		return gerror.New("请选择TG账号")
+	}
+	count, err := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
+		WhereIn("id", ids).
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		WhereNull("deleted_at").
+		Count()
+	if err != nil {
+		return gerror.Wrap(err, "检查TG账号权限失败")
+	}
+	if count != len(ids) {
+		return gerror.New("存在无权操作的TG账号")
+	}
+	return nil
+}
+
+func (s *sSysPublish) ensureTgAccountBelongsAccount(ctx context.Context, id int64, tenantId int64, accountId int64) error {
+	return s.ensureTgAccountsBelongAccount(ctx, []int64{id}, tenantId, accountId)
+}
+
 func uniqueIds(ids []int64) []int64 {
 	if len(ids) == 0 {
 		return []int64{}

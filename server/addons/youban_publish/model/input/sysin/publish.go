@@ -1232,9 +1232,14 @@ type ChannelBatchBotsInp struct {
 
 type ChannelCacheListInp struct {
 	form.PageReq
-	TgAccountId int64  `json:"tgAccountId" dc:"TG账号ID"`
-	Keyword     string `json:"keyword" dc:"关键词"`
-	DisplayType string `json:"displayType" dc:"显示类型: channel/group"`
+	TgAccountId     int64    `json:"tgAccountId" dc:"TG账号ID"`
+	Keyword         string   `json:"keyword" dc:"关键词"`
+	DisplayType     string   `json:"displayType" dc:"显示类型: channel/group"`
+	ManagementRole  string   `json:"managementRole" dc:"当前TG账号角色: owner/admin/member，多个逗号分隔"`
+	ManagementRoles []string `json:"managementRoles" dc:"当前TG账号角色列表"`
+	CanPostMessages int      `json:"canPostMessages" dc:"筛选账号可发消息：1是"`
+	CanInviteUsers  int      `json:"canInviteUsers" dc:"筛选账号可邀请用户：1是"`
+	CanAddAdmins    int      `json:"canAddAdmins" dc:"筛选账号可添加管理员：1是"`
 }
 
 func (in *ChannelCacheListInp) Filter(ctx context.Context) error {
@@ -1243,7 +1248,25 @@ func (in *ChannelCacheListInp) Filter(ctx context.Context) error {
 	if in.DisplayType != "" && in.DisplayType != "channel" && in.DisplayType != "group" {
 		return gerror.New("显示类型不合法")
 	}
+	in.ManagementRoles = normalizeChannelCacheRoleInputs(append(in.ManagementRoles, strings.Split(in.ManagementRole, ",")...))
 	return nil
+}
+
+func normalizeChannelCacheRoleInputs(values []string) []string {
+	roles := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		role := strings.TrimSpace(strings.ToLower(value))
+		if role != "owner" && role != "admin" && role != "member" {
+			continue
+		}
+		if _, ok := seen[role]; ok {
+			continue
+		}
+		seen[role] = struct{}{}
+		roles = append(roles, role)
+	}
+	return roles
 }
 
 type ChannelCacheModel struct {
@@ -1255,6 +1278,7 @@ type ChannelCacheModel struct {
 	ChannelTitle    string      `json:"channelTitle" dc:"频道名称"`
 	ChannelUsername string      `json:"channelUsername" dc:"频道用户名"`
 	DisplayType     string      `json:"displayType" dc:"显示类型: channel/group"`
+	ManagementRole  string      `json:"managementRole" orm:"management_role" dc:"当前TG账号角色: owner/admin/member"`
 	IsBroadcast     int         `json:"isBroadcast" dc:"是否频道"`
 	IsMegagroup     int         `json:"isMegagroup" dc:"是否群组"`
 	CanPostMessages int         `json:"canPostMessages" dc:"账号可发频道消息"`

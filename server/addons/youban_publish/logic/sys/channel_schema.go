@@ -16,6 +16,13 @@ func ensurePublishChannelColumns(ctx context.Context) error {
 	return ensurePublishChannelMysqlColumns(ctx)
 }
 
+func ensurePublishTgChannelColumns(ctx context.Context) error {
+	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
+		return ensurePublishTgChannelPgsqlColumns(ctx)
+	}
+	return ensurePublishTgChannelMysqlColumns(ctx)
+}
+
 func ensurePublishChannelPgsqlColumns(ctx context.Context) error {
 	_, err := g.DB().Exec(ctx, `ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "publish_visible" smallint NOT NULL DEFAULT 1`)
 	return err
@@ -23,6 +30,19 @@ func ensurePublishChannelPgsqlColumns(ctx context.Context) error {
 
 func ensurePublishChannelMysqlColumns(ctx context.Context) error {
 	_, err := g.DB().Exec(ctx, "ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `publish_visible` tinyint(1) NOT NULL DEFAULT '1' COMMENT '上架端资料选择可见' AFTER `is_default_selected`")
+	if err != nil && isPublishChannelSchemaExistsError(err) {
+		return nil
+	}
+	return err
+}
+
+func ensurePublishTgChannelPgsqlColumns(ctx context.Context) error {
+	_, err := g.DB().Exec(ctx, `ALTER TABLE "hg_youban_publish_tg_channel" ADD COLUMN IF NOT EXISTS "management_role" varchar(16) NOT NULL DEFAULT 'member'`)
+	return err
+}
+
+func ensurePublishTgChannelMysqlColumns(ctx context.Context) error {
+	_, err := g.DB().Exec(ctx, "ALTER TABLE `hg_youban_publish_tg_channel` ADD COLUMN `management_role` varchar(16) NOT NULL DEFAULT 'member' COMMENT '当前TG账号角色：owner/admin/member' AFTER `channel_username`")
 	if err != nil && isPublishChannelSchemaExistsError(err) {
 		return nil
 	}

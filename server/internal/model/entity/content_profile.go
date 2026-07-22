@@ -62,7 +62,7 @@ type ContentProfile struct {
 	Visibility           string      `json:"visibility"           orm:"visibility"             description:"可见性"`
 	ReviewStatus         string      `json:"reviewStatus"         orm:"review_status"          description:"审核状态"`
 	ImportStatus         string      `json:"importStatus"         orm:"import_status"          description:"导入状态"`
-	AdminRemark          string      `json:"adminRemark"          orm:"admin_remark"            description:"后台备注"`
+	AdminRemark          string      `json:"adminRemark"          orm:"admin_remark"           description:"后台备注"`
 	PublishedAt          *gtime.Time `json:"publishedAt"          orm:"published_at"           description:"发布时间"`
 	Status               int         `json:"status"               orm:"status"                 description:"状态"`
 	CreatedAt            *gtime.Time `json:"createdAt"            orm:"created_at"             description:"创建时间"`

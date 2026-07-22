@@ -192,6 +192,7 @@ func collectMessageMediaJSON(media []collectMediaItem) (string, int) {
 	items := make([]collectMediaItem, 0, len(media))
 	for _, item := range media {
 		item.Type = strings.TrimSpace(item.Type)
+		item.Purpose = strings.TrimSpace(item.Purpose)
 		item.FileId = strings.TrimSpace(item.FileId)
 		item.FileUrl = strings.TrimSpace(item.FileUrl)
 		item.StoragePath = strings.TrimSpace(item.StoragePath)

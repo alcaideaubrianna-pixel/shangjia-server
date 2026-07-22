@@ -62,12 +62,12 @@ func (s *sSysPublish) AdminMessageTemplateMediaUpload(ctx context.Context, in *s
 	if in.MediaType == "video" {
 		uploadType = storager.KindVideo
 	}
-	posterAttachment, err := uploadMediaPosterForType(ctx, in.MediaType, poster)
+	posterResult, err := uploadMediaPosterForType(ctx, in.MediaType, poster)
 	if err != nil {
 		return nil, err
 	}
-	if in.MediaType == "video" && posterAttachment == nil {
-		posterAttachment, err = uploadVideoPoster(ctx, file)
+	if in.MediaType == "video" && posterResult == nil {
+		posterResult, err = uploadVideoPosterWithPHash(ctx, file)
 		if err != nil {
 			g.Log().Warningf(ctx, "自动生成消息模板视频封面失败 mediaType:%s name:%s err:%+v", in.MediaType, file.Filename, err)
 		}
@@ -82,8 +82,8 @@ func (s *sSysPublish) AdminMessageTemplateMediaUpload(ctx context.Context, in *s
 		Name:              attachment.Name,
 		FileUrl:           normalizeMediaFileURL(attachment.FileUrl, attachment.Path),
 		StoragePath:       attachment.Path,
-		PosterUrl:         normalizeMediaFileURL(posterFileUrl(posterAttachment), posterStoragePath(posterAttachment)),
-		PosterStoragePath: posterStoragePath(posterAttachment),
+		PosterUrl:         normalizeMediaFileURL(posterFileUrl(posterAttachment(posterResult)), posterStoragePath(posterAttachment(posterResult))),
+		PosterStoragePath: posterStoragePath(posterAttachment(posterResult)),
 		AssetHash:         attachment.Md5,
 		SortIndex:         in.SortIndex,
 	}, nil
@@ -108,15 +108,18 @@ func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record
 			return nil, err
 		}
 	}
-	posterAttachment, err := uploadMediaPosterForType(ctx, in.MediaType, poster)
+	posterResult, err := uploadMediaPosterForType(ctx, in.MediaType, poster)
 	if err != nil {
 		return nil, err
 	}
-	if in.MediaType == "video" && posterAttachment == nil {
-		posterAttachment, err = uploadVideoPoster(ctx, file)
+	if in.MediaType == "video" && posterResult == nil {
+		posterResult, err = uploadVideoPosterWithPHash(ctx, file)
 		if err != nil {
 			g.Log().Warningf(ctx, "自动生成视频封面失败 taskId:%d mediaType:%s name:%s err:%+v", in.TaskId, in.MediaType, file.Filename, err)
 		}
+	}
+	if in.MediaType == "video" && posterResult != nil {
+		perceptualHash = posterResult.PerceptualHash
 	}
 	attachment, err := service.CommonUpload().UploadFile(ctx, uploadType, file)
 	if err != nil {
@@ -129,15 +132,30 @@ func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record
 			return nil, err
 		}
 	}
-	return s.saveMediaAttachment(ctx, task, in, attachment, posterAttachment, originalAttachment, perceptualHash)
+	return s.saveMediaAttachment(ctx, task, in, attachment, posterAttachment(posterResult), originalAttachment, perceptualHash)
 }
 
-func uploadMediaPosterForType(ctx context.Context, mediaType string, poster *ghttp.UploadFile) (*basesysin.AttachmentListModel, error) {
+func uploadMediaPosterForType(ctx context.Context, mediaType string, poster *ghttp.UploadFile) (*videoPosterResult, error) {
 	if mediaType != "video" {
 		return nil, nil
 	}
 	if poster == nil {
 		return nil, nil
 	}
-	return uploadMediaPoster(ctx, poster)
+	perceptualHash, err := uploadImagePHash(poster)
+	if err != nil {
+		return nil, err
+	}
+	attachment, err := uploadMediaPoster(ctx, poster)
+	if err != nil {
+		return nil, err
+	}
+	return &videoPosterResult{Attachment: attachment, PerceptualHash: perceptualHash}, nil
+}
+
+func posterAttachment(res *videoPosterResult) *basesysin.AttachmentListModel {
+	if res == nil {
+		return nil
+	}
+	return res.Attachment
 }

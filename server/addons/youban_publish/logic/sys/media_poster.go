@@ -17,6 +17,11 @@ import (
 	"hotgo/utility/file"
 )
 
+type videoPosterResult struct {
+	Attachment     *basesysin.AttachmentListModel
+	PerceptualHash string
+}
+
 func uploadMediaPoster(ctx context.Context, file *ghttp.UploadFile) (*basesysin.AttachmentListModel, error) {
 	if file == nil {
 		return nil, nil
@@ -39,6 +44,14 @@ func posterStoragePath(attachment *basesysin.AttachmentListModel) string {
 }
 
 func uploadVideoPoster(ctx context.Context, upload *ghttp.UploadFile) (*basesysin.AttachmentListModel, error) {
+	res, err := uploadVideoPosterWithPHash(ctx, upload)
+	if err != nil || res == nil {
+		return nil, err
+	}
+	return res.Attachment, nil
+}
+
+func uploadVideoPosterWithPHash(ctx context.Context, upload *ghttp.UploadFile) (*videoPosterResult, error) {
 	if upload == nil {
 		return nil, nil
 	}
@@ -53,7 +66,7 @@ func uploadVideoPoster(ctx context.Context, upload *ghttp.UploadFile) (*basesysi
 		return nil, gerror.Wrap(err, "保存视频临时文件失败")
 	}
 	videoPath := filepath.Join(tempDir, fileName)
-	return generateVideoPosterAttachment(ctx, videoPath, fileName)
+	return generateVideoPosterAttachmentWithPHash(ctx, videoPath, fileName)
 }
 
 func generateVideoPosterAttachment(
@@ -61,6 +74,18 @@ func generateVideoPosterAttachment(
 	videoPath string,
 	videoName string,
 ) (*basesysin.AttachmentListModel, error) {
+	res, err := generateVideoPosterAttachmentWithPHash(ctx, videoPath, videoName)
+	if err != nil || res == nil {
+		return nil, err
+	}
+	return res.Attachment, nil
+}
+
+func generateVideoPosterAttachmentWithPHash(
+	ctx context.Context,
+	videoPath string,
+	videoName string,
+) (*videoPosterResult, error) {
 	posterPath, err := generateVideoPosterPath(ctx, videoPath)
 	if err != nil {
 		return nil, err
@@ -79,7 +104,16 @@ func generateVideoPosterAttachment(
 	if err != nil {
 		return nil, gerror.Wrap(err, "创建视频封面上传文件失败")
 	}
-	return service.CommonUpload().UploadFile(ctx, storager.KindImg, &ghttp.UploadFile{FileHeader: fileHeader})
+	upload := &ghttp.UploadFile{FileHeader: fileHeader}
+	perceptualHash, err := uploadImagePHash(upload)
+	if err != nil {
+		return nil, err
+	}
+	attachment, err := service.CommonUpload().UploadFile(ctx, storager.KindImg, upload)
+	if err != nil {
+		return nil, err
+	}
+	return &videoPosterResult{Attachment: attachment, PerceptualHash: perceptualHash}, nil
 }
 
 func generateVideoPosterPath(ctx context.Context, videoPath string) (string, error) {

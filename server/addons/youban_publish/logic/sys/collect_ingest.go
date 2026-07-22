@@ -171,6 +171,7 @@ func (s *sSysPublish) saveCollectBotEvent(ctx context.Context, source g.Map, bot
 
 type collectMediaItem struct {
 	Type        string `json:"type"`
+	Purpose     string `json:"purpose,omitempty"`
 	FileId      string `json:"fileId"`
 	FileUrl     string `json:"fileUrl,omitempty"`
 	StoragePath string `json:"storagePath,omitempty"`
@@ -211,7 +212,7 @@ func mergeCollectMediaJSON(existing string, next string) (string, int) {
 		if sourceKey == "" {
 			continue
 		}
-		key := item.Type + ":" + sourceKey
+		key := strings.TrimSpace(item.Purpose) + ":" + item.Type + ":" + sourceKey
 		if _, ok := seen[key]; ok {
 			continue
 		}
