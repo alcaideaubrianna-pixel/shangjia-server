@@ -68,6 +68,28 @@ type TenantVipOrderListInp struct {
 	TenantId int64 `json:"tenantId" dc:"租户ID"`
 }
 
+type TenantVipLogListInp struct {
+	form.PageReq
+	TenantId int64 `json:"tenantId" dc:"租户ID"`
+}
+
+type TenantVipLogModel struct {
+	Action          string      `json:"action" dc:"操作"`
+	AfterExpiredAt  *gtime.Time `json:"afterExpiredAt" dc:"变更后到期时间"`
+	AfterLevel      int         `json:"afterLevel" dc:"变更后等级"`
+	AfterStatus     int         `json:"afterStatus" dc:"变更后状态"`
+	BeforeExpiredAt *gtime.Time `json:"beforeExpiredAt" dc:"变更前到期时间"`
+	BeforeLevel     int         `json:"beforeLevel" dc:"变更前等级"`
+	BeforeStatus    int         `json:"beforeStatus" dc:"变更前状态"`
+	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
+	Id              int64       `json:"id" dc:"ID"`
+	OperatorId      int64       `json:"operatorId" dc:"操作人ID"`
+	Remark          string      `json:"remark" dc:"备注"`
+	Source          string      `json:"source" dc:"来源"`
+	TenantId        int64       `json:"tenantId" dc:"租户ID"`
+	TenantName      string      `json:"tenantName" dc:"租户名称"`
+}
+
 type TenantVipOrderPayInp struct {
 	Id        int64  `json:"id" dc:"订单ID"`
 	ReturnUrl string `json:"returnUrl" dc:"买家付款成功跳转地址"`

@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tenant` (
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
-  KEY `idx_ybp_tenant_status` (`status`,`id`)
+  KEY `idx_ybp_tenant_status` (`status`,`id`),
+  KEY `idx_ybp_tenant_remark` (`remark`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架租户';
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_merchant` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -66,13 +67,15 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_account` (
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
-  KEY `idx_ybp_account_tenant` (`tenant_id`,`account_type`,`status`)
+  KEY `idx_ybp_account_tenant` (`tenant_id`,`account_type`,`status`),
+  KEY `idx_ybp_account_username` (`account_type`,`username`,`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架账号';
 ALTER TABLE `hg_youban_publish_account` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `id`, ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
 ALTER TABLE `hg_youban_publish_account` ADD COLUMN `password_hash` varchar(128) NOT NULL DEFAULT '' COMMENT '密码hash' AFTER `username`, ADD COLUMN `salt` varchar(16) NOT NULL DEFAULT '' COMMENT '密码盐' AFTER `password_hash`;
 ALTER TABLE `hg_youban_publish_account` ADD COLUMN `avatar_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '头像地址' AFTER `telegram_username`, ADD COLUMN `contact_telegram` varchar(128) NOT NULL DEFAULT '' COMMENT '联系TG' AFTER `avatar_url`, ADD COLUMN `contact_wechat` varchar(128) NOT NULL DEFAULT '' COMMENT '联系微信' AFTER `contact_telegram`, ADD COLUMN `contact_phone` varchar(64) NOT NULL DEFAULT '' COMMENT '联系电话' AFTER `contact_wechat`, ADD COLUMN `contact_other` text COMMENT '其他联系方式' AFTER `contact_phone`, ADD COLUMN `follow_approval_required` tinyint(1) NOT NULL DEFAULT '0' COMMENT '关注我是否需要审批' AFTER `contact_other`, ADD COLUMN `public_follow_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否公开关注' AFTER `follow_approval_required`;
 UPDATE `hg_youban_publish_account` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
 ALTER TABLE `hg_youban_publish_account` ADD KEY `idx_ybp_account_tenant` (`tenant_id`,`account_type`,`status`);
+ALTER TABLE `hg_youban_publish_account` ADD KEY `idx_ybp_account_username` (`account_type`,`username`,`tenant_id`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_source` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -1610,3 +1613,21 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_quick_push_plan` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴快速推送计划';
 
 -- 资料编号统一为 A00001 格式，建议保持全局唯一；已存在索引时由数据库忽略或升级脚本处理。
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_media_phash_bucket` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
+  `media_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '媒体ID',
+  `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '任务ID',
+  `media_type` varchar(16) NOT NULL DEFAULT '' COMMENT '媒体类型',
+  `hash_value` varchar(64) NOT NULL DEFAULT '' COMMENT '感知哈希',
+  `bucket_pos` smallint(6) NOT NULL DEFAULT '0' COMMENT '分桶位置',
+  `bucket_value` varchar(1) NOT NULL DEFAULT '' COMMENT '分桶值',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_media_phash_bucket_media_pos` (`media_id`,`bucket_pos`),
+  KEY `idx_ybp_media_phash_bucket_lookup` (`tenant_id`,`media_type`,`bucket_pos`,`bucket_value`,`account_id`,`profile_id`,`task_id`,`media_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体感知哈希分桶';

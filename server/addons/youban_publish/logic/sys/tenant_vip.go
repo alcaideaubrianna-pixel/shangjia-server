@@ -368,11 +368,17 @@ func (s *sSysPublish) writeTenantVipLog(ctx context.Context, before *sysin.Tenan
 	if level > 0 && expiredAt != nil && expiredAt.After(gtime.Now()) {
 		afterStatus = consts.StatusEnabled
 	}
+	action := "open"
+	if afterStatus != consts.StatusEnabled {
+		action = "cancel"
+	} else if before.IsVip {
+		action = "adjust"
+	}
 	_, err := pdao.YoubanPublishTenantVipLog.Ctx(ctx).Data(do.YoubanPublishTenantVipLog{
 		TenantId:        tenantId,
 		OperatorId:      contexts.GetUserId(ctx),
 		Source:          source,
-		Action:          "open",
+		Action:          action,
 		BeforeStatus:    before.Status,
 		BeforeLevel:     before.Level,
 		BeforeExpiredAt: before.ExpiredAt,

@@ -316,6 +316,10 @@ export function VipOrderList(params = {}) {
   return http.request({ url: '/youban_publish/publish/vip/order/list', method: 'get', params });
 }
 
+export function VipLogList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/vip/log/list', method: 'get', params });
+}
+
 export function VipCouponList(params = {}) {
   return http.request({ url: '/youban_publish/publish/vip/coupon/list', method: 'get', params });
 }

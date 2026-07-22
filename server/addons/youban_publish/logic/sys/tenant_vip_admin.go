@@ -86,6 +86,43 @@ func (s *sSysPublish) AdminTenantVipOrderList(ctx context.Context, in *sysin.Ten
 	return s.adminTenantVipOrderModels(ctx, orders), total, nil
 }
 
+func (s *sSysPublish) AdminTenantVipLogList(ctx context.Context, in *sysin.TenantVipLogListInp) ([]*sysin.TenantVipLogModel, int, error) {
+	if err := ensureTenantVipTables(ctx); err != nil {
+		return nil, 0, err
+	}
+	if in.Page <= 0 {
+		in.Page = 1
+	}
+	if in.PerPage <= 0 || in.PerPage > 100 {
+		in.PerPage = 20
+	}
+	cols := pdao.YoubanPublishTenantVipLog.Columns()
+	mod := pdao.YoubanPublishTenantVipLog.Ctx(ctx)
+	if in.TenantId > 0 {
+		mod = mod.Where(cols.TenantId, in.TenantId)
+	}
+	total, err := mod.Clone().Count()
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "读取会员记录数量失败")
+	}
+	var list []*sysin.TenantVipLogModel
+	if err = mod.Page(in.Page, in.PerPage).OrderDesc(cols.Id).Scan(&list); err != nil {
+		return nil, 0, gerror.Wrap(err, "读取会员记录列表失败")
+	}
+	if len(list) == 0 {
+		return list, total, nil
+	}
+	tenantIds := make([]int64, 0, len(list))
+	for _, item := range list {
+		tenantIds = append(tenantIds, item.TenantId)
+	}
+	names := tenantNameMapByIds(ctx, tenantIds)
+	for _, item := range list {
+		item.TenantName = names[item.TenantId]
+	}
+	return list, total, nil
+}
+
 func (s *sSysPublish) AdminTenantVipCouponList(ctx context.Context, in *sysin.TenantVipCouponListInp) ([]*sysin.TenantVipCouponModel, int, error) {
 	if err := ensureTenantVipTables(ctx); err != nil {
 		return nil, 0, err
@@ -273,12 +310,24 @@ func tenantNameMap(ctx context.Context, orders []*baseentity.AdminOrder) map[int
 	for _, item := range orders {
 		ids = append(ids, item.ProductId)
 	}
-	rows, _ := pdao.YoubanPublishTenant.Ctx(ctx).WhereIn("id", ids).Fields("id,name,remark").All()
+	return tenantNameMapByIds(ctx, ids)
+}
+
+func tenantNameMapByIds(ctx context.Context, ids []int64) map[int64]string {
+	if len(ids) == 0 {
+		return map[int64]string{}
+	}
+	cols := pdao.YoubanPublishTenant.Columns()
+	rows, _ := pdao.YoubanPublishTenant.Ctx(ctx).
+		WhereIn(cols.Id, ids).
+		Fields(cols.Id, cols.Name, cols.Remark).
+		All()
 	res := map[int64]string{}
 	for _, row := range rows {
-		res[row["id"].Int64()] = row["name"].String()
-		if res[row["id"].Int64()] == "" {
-			res[row["id"].Int64()] = row["remark"].String()
+		id := row[cols.Id].Int64()
+		res[id] = row[cols.Name].String()
+		if res[id] == "" {
+			res[id] = row[cols.Remark].String()
 		}
 	}
 	return res

@@ -9,9 +9,9 @@
           filterable
           placeholder="账号归属"
           class="tenant-select"
-          @update:value="loadOrders"
+          @update:value="reloadCurrentPane"
         />
-        <n-button @click="loadOrders">查询订单</n-button>
+        <n-button @click="reloadCurrentPane">查询</n-button>
       </n-space>
       <n-space>
         <n-button @click="openConfigModal">会员配置</n-button>
@@ -32,6 +32,9 @@
           size="small"
           remote
         />
+      </n-tab-pane>
+      <n-tab-pane name="logs" tab="会员记录">
+        <VipLogTable ref="vipLogTableRef" :active="activePane === 'logs'" :tenant-id="query.tenantId" />
       </n-tab-pane>
       <n-tab-pane name="coupons" tab="优惠码">
         <n-data-table
@@ -71,15 +74,11 @@
             :precision="2"
             clearable
         /></n-form-item>
-        <n-form-item label="折扣文案"
-          ><n-input v-model:value="configForm.discountText" clearable
-        /></n-form-item>
+        <n-form-item label="折扣文案"><n-input v-model:value="configForm.discountText" clearable /></n-form-item>
         <n-form-item label="邀请奖励"
           ><n-input-number v-model:value="configForm.inviteRewardDays" :min="0" clearable
         /></n-form-item>
-        <n-form-item label="活动标题"
-          ><n-input v-model:value="configForm.activityTitle" clearable
-        /></n-form-item>
+        <n-form-item label="活动标题"><n-input v-model:value="configForm.activityTitle" clearable /></n-form-item>
         <n-form-item label="活动说明"
           ><n-input v-model:value="configForm.activityText" type="textarea" clearable
         /></n-form-item>
@@ -123,9 +122,6 @@
       v-model:show="tenantVipVisible"
       preset="dialog"
       title="账号会员配置"
-      positive-text="保存"
-      negative-text="取消"
-      @positive-click="saveTenantVip"
     >
       <n-form :model="tenantVipForm" label-placement="left" label-width="100">
         <n-form-item label="账号归属">
@@ -141,12 +137,26 @@
           ><n-input v-model:value="tenantVipForm.remark" type="textarea" clearable
         /></n-form-item>
       </n-form>
+      <template #action>
+        <n-space justify="end">
+          <n-button @click="tenantVipVisible = false">取消</n-button>
+          <n-button
+            v-if="tenantVipForm.level > 0"
+            :loading="tenantVipSaving"
+            type="warning"
+            @click="cancelTenantVip"
+          >
+            取消会员
+          </n-button>
+          <n-button :loading="tenantVipSaving" type="primary" @click="saveTenantVip">保存</n-button>
+        </n-space>
+      </template>
     </n-modal>
   </div>
 </template>
 
 <script lang="ts" setup>
-  import { computed, h, onMounted, reactive, ref, watch } from 'vue';
+  import { computed, h, onMounted, reactive, ref } from 'vue';
   import { NButton, NSpace, NTag, useMessage } from 'naive-ui';
   import {
     TenantList,
@@ -158,8 +168,8 @@
     VipOrderList,
     VipTenantSave,
   } from '@/api/addons/youbanPublish';
+  import VipLogTable from './VipLogTable.vue';
 
-  const props = defineProps<{ focusTenantId?: number }>();
   const message = useMessage();
   const activePane = ref('orders');
   const configVisible = ref(false);
@@ -167,6 +177,8 @@
   const tenantVipVisible = ref(false);
   const orderLoading = ref(false);
   const couponLoading = ref(false);
+  const tenantVipSaving = ref(false);
+  const vipLogTableRef = ref<{ load: (reset?: boolean) => Promise<void> }>();
   const tenants = ref<Recordable[]>([]);
   const orders = ref<Recordable[]>([]);
   const coupons = ref<Recordable[]>([]);
@@ -389,8 +401,20 @@
   }
 
   function openTenantVipModal(tenantId?: number) {
-    Object.assign(tenantVipForm, defaultTenantVip(), { tenantId: tenantId || query.tenantId });
+    const currentTenantId = tenantId || query.tenantId;
+    const tenant = tenants.value.find((item) => item.id === currentTenantId);
+    Object.assign(tenantVipForm, defaultTenantVip(), {
+      expiredAt: normalizeTimeMillis(tenant?.vipExpiredAt),
+      level: tenant?.vipLevel || 1,
+      tenantId: currentTenantId,
+    });
     tenantVipVisible.value = true;
+  }
+
+  async function openVipRecords(tenantId?: number) {
+    query.tenantId = tenantId || null;
+    activePane.value = 'logs';
+    await vipLogTableRef.value?.load(true);
   }
 
   async function saveConfig() {
@@ -405,10 +429,20 @@
   }
 
   async function saveTenantVip() {
-    await VipTenantSave(tenantVipForm);
-    message.success('账号会员已更新');
-    tenantVipVisible.value = false;
-    await loadOrders();
+    tenantVipSaving.value = true;
+    try {
+      await VipTenantSave(tenantVipForm);
+      message.success('账号会员已更新');
+      tenantVipVisible.value = false;
+      await refreshVipData();
+    } finally {
+      tenantVipSaving.value = false;
+    }
+  }
+
+  async function cancelTenantVip() {
+    Object.assign(tenantVipForm, { expiredAt: null, level: 0 });
+    await saveTenantVip();
   }
 
   async function toggleCoupon(row: Recordable) {
@@ -418,25 +452,33 @@
 
   async function handlePaneChange(tab: string) {
     if (tab === 'orders') await loadOrders();
+    if (tab === 'logs') await vipLogTableRef.value?.load(true);
     if (tab === 'coupons') await loadCoupons();
   }
 
-  watch(
-    () => props.focusTenantId,
-    (tenantId) => {
-      if (!tenantId) return;
-      query.tenantId = tenantId;
-      activePane.value = 'orders';
-      openTenantVipModal(tenantId);
-    }
-  );
+  async function reloadCurrentPane() {
+    await handlePaneChange(activePane.value);
+  }
+
+  async function refreshVipData() {
+    await loadTenants();
+    if (activePane.value === 'orders') await loadOrders();
+    if (activePane.value === 'logs') await vipLogTableRef.value?.load(true);
+  }
+
+  function normalizeTimeMillis(value?: number | string | null) {
+    if (!value) return null;
+    if (typeof value === 'number') return value;
+    const time = new Date(value).getTime();
+    return Number.isNaN(time) ? null : time;
+  }
 
   onMounted(async () => {
     await loadTenants();
     await loadOrders();
   });
 
-  defineExpose({ openTenantVipModal });
+  defineExpose({ openTenantVipModal, openVipRecords });
 </script>
 
 <style scoped>

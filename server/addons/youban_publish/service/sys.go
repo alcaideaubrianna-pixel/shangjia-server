@@ -159,6 +159,7 @@ type ISysPublish interface {
 	AdminTenantVipConfigSave(ctx context.Context, in *sysin.TenantVipConfigSaveInp) (err error)
 	AdminTenantVipTenantSave(ctx context.Context, in *sysin.TenantVipTenantSaveInp) (err error)
 	AdminTenantVipOrderList(ctx context.Context, in *sysin.TenantVipOrderListInp) (list []*sysin.TenantVipOrderModel, totalCount int, err error)
+	AdminTenantVipLogList(ctx context.Context, in *sysin.TenantVipLogListInp) (list []*sysin.TenantVipLogModel, totalCount int, err error)
 	AdminTenantVipCouponList(ctx context.Context, in *sysin.TenantVipCouponListInp) (list []*sysin.TenantVipCouponModel, totalCount int, err error)
 	AdminTenantVipCouponSave(ctx context.Context, in *sysin.TenantVipCouponSaveInp) (err error)
 	AdminTenantVipCouponStatus(ctx context.Context, in *sysin.TenantVipCouponStatusInp) (err error)

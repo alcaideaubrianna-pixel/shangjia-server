@@ -1533,6 +1533,7 @@ func (s *sSysPublish) clearImportTaskMedia(ctx context.Context, taskId int64, pr
 	if err != nil {
 		return gerror.Wrap(err, "清理旧站资料媒体失败")
 	}
+	_ = s.deleteMediaPHashBucketByProfileId(ctx, profileId)
 	return nil
 }
 

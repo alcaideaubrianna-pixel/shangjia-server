@@ -124,18 +124,18 @@ func (s *sSysPublish) cachedMediaSimilarCandidates(ctx context.Context, scope *m
 	if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
 		var cached []mediaSimilarCandidate
 		if scanErr := value.Scan(&cached); scanErr == nil {
-			return cached, nil
+			return filterMediaSimilarCandidates(source, cached), nil
 		}
 	}
 	queryHash, ok := parseUploadPHash(source.PerceptualHash)
 	if !ok {
 		return []mediaSimilarCandidate{}, nil
 	}
-	rows, err := s.mediaSimilarRows(ctx, scope, source, threshold)
+	items, err := s.mediaSimilarBucketCandidates(ctx, scope, source, queryHash, threshold)
 	if err != nil {
 		return nil, err
 	}
-	items := mediaSimilarCandidates(queryHash, rows, source.ProfileId, threshold)
+	items = filterMediaSimilarCandidates(source, items)
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Distance == items[j].Distance {
 			return items[i].ProfileId > items[j].ProfileId
@@ -218,24 +218,66 @@ func (s *sSysPublish) mediaSimilarVisibleScope(ctx context.Context, account *sys
 	}, nil
 }
 
-func (s *sSysPublish) mediaSimilarRows(ctx context.Context, scope *mediaSimilarScope, source *mediaSimilarSource, threshold int) (gdb.Result, error) {
-	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Fields("id,profile_id,account_id,perceptual_hash").
-		WhereNot("profile_id", source.ProfileId).
-		WhereNot("perceptual_hash", "").
-		WhereNull("deleted_at")
-	mod = applyMediaSimilarScope(mod, scope)
-	if source.MediaType != "" {
-		mod = mod.Where("media_type", source.MediaType)
+func (s *sSysPublish) mediaSimilarBucketCandidates(ctx context.Context, scope *mediaSimilarScope, source *mediaSimilarSource, queryHash *goimagehash.ImageHash, threshold int) ([]mediaSimilarCandidate, error) {
+	if queryHash == nil || source == nil {
+		return []mediaSimilarCandidate{}, nil
 	}
-	if condition, args := mediaSimilarNibbleFilter(source.PerceptualHash, threshold); condition != "" {
-		mod = mod.Where(condition, args...)
-	}
-	rows, err := mod.All()
+	rows, err := mediaPHashBucketCandidateRows(ctx, fmt.Sprintf("%016x", queryHash.GetHash()), threshold, scope.TenantId, scope.AccountIds, nil, source.MediaType, source.ProfileId)
 	if err != nil {
-		return nil, gerror.Wrap(err, "查询相似媒体失败")
+		return nil, err
 	}
-	return rows, nil
+	items := make([]mediaSimilarCandidate, 0, len(rows))
+	for _, row := range rows {
+		if row.ProfileId <= 0 || row.ProfileId == source.ProfileId {
+			continue
+		}
+		hash, ok := parseUploadPHash(row.HashValue)
+		if !ok {
+			continue
+		}
+		distance, distanceErr := queryHash.Distance(hash)
+		if distanceErr != nil || distance > threshold {
+			continue
+		}
+		items = append(items, mediaSimilarCandidate{ProfileId: row.ProfileId, Distance: distance})
+	}
+	return mediaSimilarDeduplicate(items), nil
+}
+
+func filterMediaSimilarCandidates(source *mediaSimilarSource, items []mediaSimilarCandidate) []mediaSimilarCandidate {
+	if len(items) == 0 {
+		return []mediaSimilarCandidate{}
+	}
+	excludeProfileId := int64(0)
+	if source != nil {
+		excludeProfileId = source.ProfileId
+	}
+	res := make([]mediaSimilarCandidate, 0, len(items))
+	for _, item := range items {
+		if item.ProfileId <= 0 || item.ProfileId == excludeProfileId {
+			continue
+		}
+		res = append(res, item)
+	}
+	return res
+}
+
+func mediaSimilarDeduplicate(items []mediaSimilarCandidate) []mediaSimilarCandidate {
+	distanceByProfile := map[int64]int{}
+	for _, item := range items {
+		if item.ProfileId <= 0 {
+			continue
+		}
+		current, exists := distanceByProfile[item.ProfileId]
+		if !exists || item.Distance < current {
+			distanceByProfile[item.ProfileId] = item.Distance
+		}
+	}
+	res := make([]mediaSimilarCandidate, 0, len(distanceByProfile))
+	for profileId, distance := range distanceByProfile {
+		res = append(res, mediaSimilarCandidate{ProfileId: profileId, Distance: distance})
+	}
+	return res
 }
 
 func applyMediaSimilarScope(mod *gdb.Model, scope *mediaSimilarScope) *gdb.Model {
@@ -248,68 +290,14 @@ func applyMediaSimilarScope(mod *gdb.Model, scope *mediaSimilarScope) *gdb.Model
 	return mod
 }
 
-func mediaSimilarNibbleFilter(phash string, threshold int) (string, []any) {
-	normalized := strings.TrimPrefix(strings.TrimSpace(strings.ToLower(phash)), "0x")
-	if len(normalized) != 16 || threshold <= 0 || threshold >= 16 {
-		return "", nil
-	}
-	minEqualNibbles := 16 - threshold
-	if minEqualNibbles <= 0 {
-		return "", nil
-	}
-	parts := make([]string, 0, len(normalized))
-	args := make([]any, 0, len(normalized)+1)
-	for i, value := range normalized {
-		parts = append(parts, fmt.Sprintf("CASE WHEN SUBSTRING(perceptual_hash, %d, 1)=? THEN 1 ELSE 0 END", i+1))
-		args = append(args, string(value))
-	}
-	args = append(args, minEqualNibbles)
-	return "(" + strings.Join(parts, " + ") + ") >= ?", args
-}
-
-func mediaSimilarCandidates(queryHash *goimagehash.ImageHash, rows gdb.Result, sourceProfileId int64, threshold int) []mediaSimilarCandidate {
-	distanceByProfile := map[int64]int{}
-	for _, row := range rows {
-		profileId := row["profile_id"].Int64()
-		if profileId <= 0 || profileId == sourceProfileId {
-			continue
-		}
-		hash, ok := parseUploadPHash(row["perceptual_hash"].String())
-		if !ok {
-			continue
-		}
-		distance, err := queryHash.Distance(hash)
-		if err != nil || distance > threshold {
-			continue
-		}
-		current, exists := distanceByProfile[profileId]
-		if !exists || distance < current {
-			distanceByProfile[profileId] = distance
-		}
-	}
-	items := make([]mediaSimilarCandidate, 0, len(distanceByProfile))
-	for profileId, distance := range distanceByProfile {
-		items = append(items, mediaSimilarCandidate{ProfileId: profileId, Distance: distance})
-	}
-	return items
-}
-
 func (s *sSysPublish) mediaSimilarNotes(ctx context.Context, viewer *sysin.AccountModel, items []mediaSimilarCandidate) ([]*sysin.NoteModel, error) {
-	list := make([]*sysin.NoteModel, 0, len(items))
+	profileIds := make([]int64, 0, len(items))
 	for _, item := range items {
-		profile, err := s.profileView(ctx, item.ProfileId, 0, 0)
-		if err != nil {
-			return nil, err
+		if item.ProfileId > 0 {
+			profileIds = append(profileIds, item.ProfileId)
 		}
-		markProfilePermission(profile, profilePermissionForViewer(viewer, profile))
-		note := &sysin.NoteModel{ProfileModel: *profile}
-		note.Media, err = s.mediaListByProfile(ctx, profile.Id, profile.TenantId, profile.AccountId)
-		if err != nil {
-			return nil, err
-		}
-		list = append(list, note)
 	}
-	return list, nil
+	return s.profileImageSearchNotesByProfileIds(ctx, profileIds, 0, nil, viewer, "")
 }
 
 func normalizeMediaSimilarListInput(in *sysin.MediaSimilarListInp) {

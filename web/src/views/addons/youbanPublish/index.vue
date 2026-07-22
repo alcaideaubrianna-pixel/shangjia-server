@@ -30,7 +30,7 @@
             :loading="tenantLoading"
             :pagination="tenantPagination"
             :row-key="(row) => row.id"
-            :scroll-x="980"
+            :scroll-x="1270"
             size="small"
             remote
           />
@@ -68,7 +68,7 @@
             :loading="accountLoading"
             :pagination="accountPagination"
             :row-key="(row) => row.id"
-            :scroll-x="1280"
+            :scroll-x="1380"
             size="small"
             remote
           />
@@ -246,8 +246,8 @@
           />
         </n-tab-pane>
 
-        <n-tab-pane name="member" tab="会员">
-          <MemberPanel ref="memberPanelRef" :focus-tenant-id="memberFocusTenantId" />
+        <n-tab-pane name="member" tab="会员" display-directive="show">
+          <MemberPanel ref="memberPanelRef" />
         </n-tab-pane>
 
         <n-tab-pane name="tgAccounts" tab="绑定的 TG 账号">
@@ -651,7 +651,6 @@
   const activeTabStorageKey = 'youban_publish_admin_active_tab';
   const activeTab = ref(sessionStorage.getItem(activeTabStorageKey) || 'dashboard');
   const memberPanelRef = ref<InstanceType<typeof MemberPanel> | null>(null);
-  const memberFocusTenantId = ref(0);
 
   const statusOptions = [
     { label: '启用', value: 1 },
@@ -854,6 +853,8 @@
   const tenantColumns = [
     { title: 'ID', key: 'id', width: 80 },
     { title: '管理员账号', key: 'username', width: 180, render: (row) => row.username || '-' },
+    { title: '会员等级', key: 'vipLevel', width: 120, render: (row) => renderVipLevel(row) },
+    { title: '会员到期', key: 'vipExpiredAt', width: 170, render: (row) => row.vipExpiredAt || '-' },
     { title: '状态', key: 'status', width: 100, render: (row) => renderStatus(row.status) },
     { title: '备注', key: 'remark', width: 260 },
     { title: '创建时间', key: 'createdAt', width: 170 },
@@ -902,7 +903,7 @@
     {
       title: '操作',
       key: 'actions',
-      width: 160,
+      width: 240,
       fixed: 'right',
       render(row) {
         return h(
@@ -911,6 +912,7 @@
           {
             default: () => [
               actionButton('编辑', () => openAccountModal(row)),
+              actionButton('会员记录', () => openAccountVipRecords(row)),
               actionButton('重置密码', () => openAccountResetPassword(row)),
               dangerButton('删除', () => deleteAccount(row.id)),
             ],
@@ -1255,10 +1257,13 @@
   }
 
   function openTenantVipConfig(row: any) {
-    memberFocusTenantId.value = row.id;
+    memberPanelRef.value?.openTenantVipModal(row.id);
+  }
+
+  function openAccountVipRecords(row: any) {
     activeTab.value = 'member';
     rememberActiveTab('member');
-    memberPanelRef.value?.openTenantVipModal(row.id);
+    memberPanelRef.value?.openVipRecords(row.tenantId || row.id || 0);
   }
 
   async function loadTenants() {
@@ -1758,6 +1763,18 @@
       NTag,
       { type: status === 1 ? 'success' : 'warning', bordered: false },
       { default: () => (status === 1 ? '启用' : '停用') }
+    );
+  }
+
+  function renderVipLevel(row: any) {
+    const level = Number(row.vipLevel || 0);
+    const expiredAt = row.vipExpiredAt ? new Date(row.vipExpiredAt).getTime() : 0;
+    const active = level > 0 && row.vipStatus === 1 && expiredAt > Date.now();
+    const label = level === 2 ? 'SVIP计划' : level === 1 ? 'VIP计划' : '免费计划';
+    return h(
+      NTag,
+      { type: active ? 'success' : 'default', bordered: false, size: 'small' },
+      { default: () => label }
     );
   }
 

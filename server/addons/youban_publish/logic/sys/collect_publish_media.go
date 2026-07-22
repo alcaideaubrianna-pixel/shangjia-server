@@ -39,6 +39,7 @@ func (s *sSysPublish) rebuildCollectPublishMedia(ctx context.Context, event gdb.
 		Update(); err != nil {
 		return gerror.Wrap(err, "清理采集旧媒体失败")
 	}
+	_ = s.deleteMediaPHashBucketByTaskId(ctx, taskId)
 	displayItems, verifyItems := splitCollectPublishMediaItems(event, items)
 	if err := s.insertCollectPublishMediaRows(ctx, event, taskId, "display", displayItems); err != nil {
 		return err

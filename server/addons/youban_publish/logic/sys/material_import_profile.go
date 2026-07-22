@@ -119,6 +119,7 @@ func (s *sSysPublish) replaceMaterialImportMedia(ctx context.Context, task *sysi
 	if err != nil {
 		return gerror.Wrap(err, "清理TG导入旧媒体失败")
 	}
+	_ = s.deleteMediaPHashBucketByProfileId(ctx, saved.Id)
 	var items []collectMediaItem
 	_ = json.Unmarshal([]byte(mediaJson), &items)
 	for index, item := range items {

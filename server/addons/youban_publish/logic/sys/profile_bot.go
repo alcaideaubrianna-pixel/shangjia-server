@@ -276,8 +276,12 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, taskId int64, pro
 				"created_at":             now,
 				"updated_at":             now,
 			}
-			if _, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(data).Insert(); err != nil {
+			mediaId, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
+			if err != nil {
 				return gerror.Wrap(err, "保存机器人资料媒体失败")
+			}
+			if err = s.syncMediaPHashBucketByMediaId(ctx, mediaId); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -305,6 +309,7 @@ func (s *sSysPublish) replaceBotProfileMedia(ctx context.Context, taskId int64, 
 		Update(); err != nil {
 		return gerror.Wrap(err, "清空原资料媒体失败")
 	}
+	_ = s.deleteMediaPHashBucketByProfileId(ctx, profileId)
 	return s.saveBotProfileMedia(ctx, taskId, profileId, tenantId, accountId, displayMedia, verifyMedia)
 }
 

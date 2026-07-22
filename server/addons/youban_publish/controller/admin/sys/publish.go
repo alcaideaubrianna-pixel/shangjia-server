@@ -83,6 +83,20 @@ func (c *cPublishServer) VipOrderList(ctx context.Context, req *publish.VipOrder
 	return
 }
 
+func (c *cPublishServer) VipLogList(ctx context.Context, req *publish.VipLogListReq) (res *publish.VipLogListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminTenantVipLogList(ctx, &req.TenantVipLogListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.TenantVipLogModel{}
+	}
+	res = new(publish.VipLogListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
 func (c *cPublishServer) VipCouponList(ctx context.Context, req *publish.VipCouponListReq) (res *publish.VipCouponListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminTenantVipCouponList(ctx, &req.TenantVipCouponListInp)
 	if err != nil {

@@ -39,6 +39,16 @@ type VipOrderListRes struct {
 	List []*sysin.TenantVipOrderModel `json:"list" dc:"订单列表"`
 }
 
+type VipLogListReq struct {
+	g.Meta `path:"/publish/vip/log/list" method:"get" tags:"上架插件后台" summary:"会员变更记录"`
+	sysin.TenantVipLogListInp
+}
+
+type VipLogListRes struct {
+	form.PageRes
+	List []*sysin.TenantVipLogModel `json:"list" dc:"会员记录列表"`
+}
+
 type VipCouponListReq struct {
 	g.Meta `path:"/publish/vip/coupon/list" method:"get" tags:"上架插件后台" summary:"优惠码列表"`
 	sysin.TenantVipCouponListInp

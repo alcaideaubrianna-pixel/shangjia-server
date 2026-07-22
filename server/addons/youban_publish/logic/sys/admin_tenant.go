@@ -18,20 +18,26 @@ import (
 func (s *sSysPublish) AdminTenantList(ctx context.Context, in *sysin.TenantListInp) (list []*sysin.TenantModel, totalCount int, err error) {
 	tenantColumns := pdao.YoubanPublishTenant.Columns()
 	accountColumns := pdao.YoubanPublishAccount.Columns()
+	kw := strings.TrimSpace(in.Keyword)
+	var keywordTenantIds []int64
+	if kw != "" {
+		keywordTenantIds, err = s.adminTenantIdsByKeyword(ctx, kw)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
 	base := pdao.YoubanPublishTenant.DB().Model(pdao.YoubanPublishTenant.Table() + " t").Safe().Ctx(ctx).
 		WhereNull("t." + tenantColumns.DeletedAt)
 	applyFilters := func(mod *gdb.Model) *gdb.Model {
 		if in.Status > 0 {
 			mod = mod.Where("t."+tenantColumns.Status, in.Status)
 		}
-		kw := strings.TrimSpace(in.Keyword)
 		if kw != "" {
-			mod = mod.Where(
-				"(t.remark LIKE ? OR EXISTS (SELECT 1 FROM "+publishAccountTable+" a WHERE a.tenant_id=t.id AND a.account_type=? AND a.deleted_at IS NULL AND a.username LIKE ?))",
-				"%"+kw+"%",
-				sysin.PublishAccountTypeAdmin,
-				"%"+kw+"%",
-			)
+			if len(keywordTenantIds) > 0 {
+				mod = mod.Where("(t."+tenantColumns.Remark+" LIKE ? OR t."+tenantColumns.Id+" IN(?))", "%"+kw+"%", keywordTenantIds)
+			} else {
+				mod = mod.WhereLike("t."+tenantColumns.Remark, "%"+kw+"%")
+			}
 		}
 		return mod
 	}
@@ -40,7 +46,14 @@ func (s *sSysPublish) AdminTenantList(ctx context.Context, in *sysin.TenantListI
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取租户总数失败")
 	}
-	mod = mod.Fields("t.*")
+	mod = mod.Fields(
+		"t."+tenantColumns.Id,
+		"t."+tenantColumns.Name,
+		"t."+tenantColumns.Remark,
+		"t."+tenantColumns.Status,
+		"t."+tenantColumns.CreatedAt,
+		"t."+tenantColumns.UpdatedAt,
+	)
 	if err = mod.Page(in.Page, in.PerPage).OrderDesc("t." + tenantColumns.Id).Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取租户列表失败")
 	}
@@ -65,6 +78,20 @@ func (s *sSysPublish) AdminTenantList(ctx context.Context, in *sysin.TenantListI
 		Scan(&accounts); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取租户账号失败")
 	}
+	var vipList []struct {
+		TenantId  int64       `json:"tenantId"`
+		Level     int         `json:"level"`
+		Status    int         `json:"status"`
+		ExpiredAt *gtime.Time `json:"expiredAt"`
+	}
+	vipColumns := pdao.YoubanPublishTenantVip.Columns()
+	if err = pdao.YoubanPublishTenantVip.Ctx(ctx).
+		Fields(vipColumns.TenantId, vipColumns.Level, vipColumns.Status, vipColumns.ExpiredAt).
+		WhereIn(vipColumns.TenantId, tenantIds).
+		WhereNull(vipColumns.DeletedAt).
+		Scan(&vipList); err != nil {
+		return nil, 0, gerror.Wrap(err, "获取租户会员失败")
+	}
 	accountIdMap := make(map[int64]int64, len(accounts))
 	accountNameMap := make(map[int64]string, len(accounts))
 	for _, account := range accounts {
@@ -73,11 +100,47 @@ func (s *sSysPublish) AdminTenantList(ctx context.Context, in *sysin.TenantListI
 			accountNameMap[account.TenantId] = account.Username
 		}
 	}
+	vipMap := make(map[int64]struct {
+		Level     int
+		Status    int
+		ExpiredAt *gtime.Time
+	}, len(vipList))
+	for _, vip := range vipList {
+		vipMap[vip.TenantId] = struct {
+			Level     int
+			Status    int
+			ExpiredAt *gtime.Time
+		}{Level: vip.Level, Status: vip.Status, ExpiredAt: vip.ExpiredAt}
+	}
 	for _, item := range list {
 		item.AdminAccountId = accountIdMap[item.Id]
 		item.Username = accountNameMap[item.Id]
+		if vip, ok := vipMap[item.Id]; ok {
+			item.VipLevel = vip.Level
+			item.VipStatus = vip.Status
+			item.VipExpiredAt = vip.ExpiredAt
+		}
 	}
 	return
+}
+
+func (s *sSysPublish) adminTenantIdsByKeyword(ctx context.Context, keyword string) ([]int64, error) {
+	accountColumns := pdao.YoubanPublishAccount.Columns()
+	rows, err := pdao.YoubanPublishAccount.Ctx(ctx).
+		Fields(accountColumns.TenantId).
+		Where(accountColumns.AccountType, sysin.PublishAccountTypeAdmin).
+		WhereLike(accountColumns.Username, "%"+keyword+"%").
+		WhereNull(accountColumns.DeletedAt).
+		Group(accountColumns.TenantId).
+		All()
+	if err != nil {
+		return nil, gerror.Wrap(err, "获取租户账号筛选失败")
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row[accountColumns.TenantId].Int64())
+	}
+	return ids, nil
 }
 
 func (s *sSysPublish) AdminTenantSave(ctx context.Context, in *sysin.TenantSaveInp) (res *sysin.TenantSaveModel, err error) {

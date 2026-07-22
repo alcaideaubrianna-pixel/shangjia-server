@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tenant" (
   "deleted_at" timestamp DEFAULT NULL
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_tenant_status" ON "hg_youban_publish_tenant" ("status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tenant_remark_trgm" ON "hg_youban_publish_tenant" USING gin ("remark" gin_trgm_ops);
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_merchant" (
   "id" BIGSERIAL PRIMARY KEY,
   "name" varchar(128) NOT NULL DEFAULT '',
@@ -66,6 +67,7 @@ ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "password_hash"
 ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "salt" varchar(16) NOT NULL DEFAULT '';
 UPDATE "hg_youban_publish_account" SET "tenant_id" = "merchant_id" WHERE "tenant_id" = 0 AND "merchant_id" > 0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_account_tenant" ON "hg_youban_publish_account" ("tenant_id", "account_type", "status");
+CREATE INDEX IF NOT EXISTS "idx_ybp_account_username_trgm" ON "hg_youban_publish_account" USING gin ("username" gin_trgm_ops);
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_task" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
@@ -1577,3 +1579,20 @@ CREATE TABLE IF NOT EXISTS hg_youban_publish_quick_push_plan (
   deleted_at timestamp
 );
 CREATE INDEX IF NOT EXISTS idx_ybp_quick_plan_owner ON hg_youban_publish_quick_push_plan (tenant_id,status,id);
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_bucket" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "media_id" bigint NOT NULL DEFAULT 0,
+  "task_id" bigint NOT NULL DEFAULT 0,
+  "media_type" varchar(16) NOT NULL DEFAULT '',
+  "hash_value" varchar(64) NOT NULL DEFAULT '',
+  "bucket_pos" smallint NOT NULL DEFAULT 0,
+  "bucket_value" varchar(1) NOT NULL DEFAULT '',
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_media_phash_bucket_media_pos" ON "hg_youban_publish_media_phash_bucket" ("media_id", "bucket_pos");
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_bucket_lookup" ON "hg_youban_publish_media_phash_bucket" ("tenant_id", "media_type", "bucket_pos", "bucket_value", "account_id", "profile_id", "task_id", "media_id");

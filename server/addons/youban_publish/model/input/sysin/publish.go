@@ -49,6 +49,9 @@ type TenantModel struct {
 	Name           string      `json:"name" dc:"内部归属名称"`
 	AdminAccountId int64       `json:"adminAccountId" dc:"管理员账号ID"`
 	Username       string      `json:"username" dc:"管理员登录账号"`
+	VipLevel       int         `json:"vipLevel" dc:"会员等级"`
+	VipStatus      int         `json:"vipStatus" dc:"会员状态"`
+	VipExpiredAt   *gtime.Time `json:"vipExpiredAt" dc:"会员到期时间"`
 	Remark         string      `json:"remark" dc:"备注"`
 	Status         int         `json:"status" dc:"状态"`
 	CreatedAt      *gtime.Time `json:"createdAt" dc:"创建时间"`
