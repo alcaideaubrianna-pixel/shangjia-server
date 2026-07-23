@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
 	"regexp"
 	"strings"
@@ -1572,7 +1571,7 @@ func (s *sSysPublish) importLegacyCMSMedia(ctx context.Context, runId int64, sou
 		}
 		var posterAttachment *basesysin.AttachmentListModel
 		if item.MediaType == "video" {
-			posterResult, posterErr := legacyCMSVideoPoster(ctx, name, content)
+			posterResult, posterErr := buildVideoPosterResultFromContent(ctx, name, content)
 			if posterResult != nil {
 				posterAttachment = posterResult.Attachment
 				perceptualHash = posterResult.PerceptualHash
@@ -1598,26 +1597,6 @@ func (s *sSysPublish) importLegacyCMSMedia(ctx context.Context, runId int64, sou
 		imported++
 	}
 	return imported, nil
-}
-
-func legacyCMSVideoPoster(ctx context.Context, videoName string, content []byte) (*videoPosterResult, error) {
-	if len(content) == 0 {
-		return nil, nil
-	}
-	input, err := os.CreateTemp("", "ybp-legacy-video-*"+path.Ext(videoName))
-	if err != nil {
-		return nil, gerror.Wrap(err, "创建旧站视频临时文件失败")
-	}
-	inputPath := input.Name()
-	defer os.Remove(inputPath)
-	if _, err = input.Write(content); err != nil {
-		_ = input.Close()
-		return nil, gerror.Wrap(err, "写入旧站视频临时文件失败")
-	}
-	if err = input.Close(); err != nil {
-		return nil, gerror.Wrap(err, "关闭旧站视频临时文件失败")
-	}
-	return generateVideoPosterAttachmentWithPHash(ctx, inputPath, videoName)
 }
 
 func legacyCMSClientRequestID(row gdb.Record, sourceNoteId int64) string {

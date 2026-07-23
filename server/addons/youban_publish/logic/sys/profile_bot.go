@@ -57,11 +57,7 @@ func (s *sSysPublish) BotProfileImageSearch(ctx context.Context, in *sysin.BotPr
 	if strings.TrimSpace(imageUrl) == "" {
 		return nil, 0, gerror.New("请发送要搜索的图片")
 	}
-	path, err := cachedRemoteMediaFile(ctx, mediaFileCacheKey(nil, imageUrl), imageUrl, mediaFileCacheExt(&telegramMediaItem{MediaType: "image", FileUrl: imageUrl}, imageUrl))
-	if err != nil {
-		return nil, 0, err
-	}
-	queryHash, err := imagePHashFromPath(path)
+	queryHash, err := cachedRemoteImagePHashValue(ctx, imageUrl)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -230,13 +226,10 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, taskId int64, pro
 			if strings.EqualFold(mediaType, "image") {
 				imageURL := normalizeBotMediaCacheURL(fileURL)
 				if imageURL != "" {
-					path, cacheErr := cachedRemoteMediaFile(ctx, mediaFileCacheKey(nil, imageURL), imageURL, mediaFileCacheExt(&telegramMediaItem{MediaType: "image", FileUrl: imageURL}, imageURL))
-					if cacheErr != nil {
-						g.Log().Warning(ctx, "计算机器人资料图片哈希下载缓存失败", g.Map{"profileId": profileId, "taskId": taskId, "url": imageURL, "err": cacheErr})
-					} else if hash, hashErr := imagePHashFromPath(path); hashErr != nil {
-						g.Log().Warning(ctx, "计算机器人资料图片哈希失败", g.Map{"profileId": profileId, "taskId": taskId, "path": path, "err": hashErr})
+					if hash, hashErr := cachedRemoteImagePHash(ctx, imageURL); hashErr != nil {
+						g.Log().Warning(ctx, "计算机器人资料图片哈希失败", g.Map{"profileId": profileId, "taskId": taskId, "url": imageURL, "err": hashErr})
 					} else {
-						perceptualHash = fmt.Sprintf("%016x", hash.GetHash())
+						perceptualHash = hash
 					}
 				}
 			}

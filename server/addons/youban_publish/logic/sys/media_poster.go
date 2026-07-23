@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,7 +13,6 @@ import (
 	"hotgo/internal/library/storager"
 	basesysin "hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
-	"hotgo/utility/file"
 )
 
 type videoPosterResult struct {
@@ -52,21 +50,7 @@ func uploadVideoPoster(ctx context.Context, upload *ghttp.UploadFile) (*basesysi
 }
 
 func uploadVideoPosterWithPHash(ctx context.Context, upload *ghttp.UploadFile) (*videoPosterResult, error) {
-	if upload == nil {
-		return nil, nil
-	}
-	tempDir, err := os.MkdirTemp("", "ybp-upload-video-*")
-	if err != nil {
-		return nil, gerror.Wrap(err, "创建视频封面临时目录失败")
-	}
-	defer os.RemoveAll(tempDir)
-
-	fileName, err := upload.Save(tempDir, true)
-	if err != nil {
-		return nil, gerror.Wrap(err, "保存视频临时文件失败")
-	}
-	videoPath := filepath.Join(tempDir, fileName)
-	return generateVideoPosterAttachmentWithPHash(ctx, videoPath, fileName)
+	return buildVideoPosterResultFromUpload(ctx, upload)
 }
 
 func generateVideoPosterAttachment(
@@ -74,7 +58,7 @@ func generateVideoPosterAttachment(
 	videoPath string,
 	videoName string,
 ) (*basesysin.AttachmentListModel, error) {
-	res, err := generateVideoPosterAttachmentWithPHash(ctx, videoPath, videoName)
+	res, err := buildVideoPosterResultFromPath(ctx, videoPath, videoName)
 	if err != nil || res == nil {
 		return nil, err
 	}
@@ -86,34 +70,7 @@ func generateVideoPosterAttachmentWithPHash(
 	videoPath string,
 	videoName string,
 ) (*videoPosterResult, error) {
-	posterPath, err := generateVideoPosterPath(ctx, videoPath)
-	if err != nil {
-		return nil, err
-	}
-	posterBytes, err := os.ReadFile(posterPath)
-	if err != nil {
-		_ = os.Remove(posterPath)
-		return nil, gerror.Wrap(err, "读取视频封面失败")
-	}
-	defer os.Remove(posterPath)
-	if len(posterBytes) == 0 {
-		return nil, nil
-	}
-	posterName := strings.TrimSuffix(filepath.Base(videoName), filepath.Ext(videoName)) + ".jpg"
-	fileHeader, err := file.NewMultipartFileHeader(posterName, posterBytes)
-	if err != nil {
-		return nil, gerror.Wrap(err, "创建视频封面上传文件失败")
-	}
-	upload := &ghttp.UploadFile{FileHeader: fileHeader}
-	perceptualHash, err := uploadImagePHash(upload)
-	if err != nil {
-		return nil, err
-	}
-	attachment, err := service.CommonUpload().UploadFile(ctx, storager.KindImg, upload)
-	if err != nil {
-		return nil, err
-	}
-	return &videoPosterResult{Attachment: attachment, PerceptualHash: perceptualHash}, nil
+	return buildVideoPosterResultFromPath(ctx, videoPath, videoName)
 }
 
 func generateVideoPosterPath(ctx context.Context, videoPath string) (string, error) {
