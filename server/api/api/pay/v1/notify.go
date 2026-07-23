@@ -40,9 +40,19 @@ type NotifyQQPayRes struct {
 	*payin.PayNotifyModel
 }
 
+// NotifyGMPayReq GMPay回调
+type NotifyGMPayReq struct {
+	g.Meta `path:"/pay/notify/gmpay" method:"all" tags:"支付异步通知" summary:"GMPay回调"`
+}
+
+type NotifyGMPayRes struct {
+	g.Meta `mime:"text/html" type:"string" example:"success"`
+	*payin.PayNotifyModel
+}
+
 // NotifyRainbowReq 彩虹易支付回调
 type NotifyRainbowReq struct {
-	g.Meta `path:"/pay/notify/rainbow" method:"all" tags:"支付异步通知" summary:"易支付兼容网关回调"`
+	g.Meta `path:"/pay/notify/rainbow" method:"all" tags:"支付异步通知" summary:"彩虹易支付回调"`
 }
 
 type NotifyRainbowRes struct {

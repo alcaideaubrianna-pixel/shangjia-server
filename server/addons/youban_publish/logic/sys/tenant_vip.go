@@ -46,7 +46,7 @@ func (s *sSysPublish) TenantVipPlans(ctx context.Context) ([]*sysin.TenantVipPla
 		return nil, err
 	}
 	return []*sysin.TenantVipPlanModel{
-		{Code: "free", Name: "免费计划", Level: 0, Days: 0, Price: 0, Currency: "U", Description: "适合日常上架资料管理", Features: tenantVipFreeFeatures()},
+		{Code: "free", Name: "免费计划", Level: 0, Days: 0, Price: 0, Currency: tenantVipCurrency(cfg), Description: "适合日常上架资料管理", Features: tenantVipFreeFeatures()},
 		tenantVipPlanByConfig(cfg),
 	}, nil
 }
@@ -70,6 +70,17 @@ func (s *sSysPublish) TenantVipOrderCreate(ctx context.Context, in *sysin.Tenant
 	amount, couponCode, couponDiscount, err := s.tenantVipOrderAmountWithCoupon(ctx, plan.Price, in.CouponCode, cfg)
 	if err != nil {
 		return nil, err
+	}
+	if in.PayType == "" || in.TradeType == "" {
+		payItem := tenantVipDefaultPayItem(cfg)
+		if payItem != nil {
+			if in.PayType == "" {
+				in.PayType = payItem.PayType
+			}
+			if in.TradeType == "" {
+				in.TradeType = payItem.TradeType
+			}
+		}
 	}
 	if strings.TrimSpace(in.PayType) == "" {
 		in.PayType = consts.PayTypeRainbow
@@ -112,6 +123,19 @@ func (s *sSysPublish) TenantVipOrderCreate(ctx context.Context, in *sysin.Tenant
 		if create.Order != nil {
 			res.PayUrl = create.Order.PayURL
 			res.TradeType = create.Order.TradeType
+		}
+		if amount <= 0 {
+			if err = s.openTenantVip(ctx, account.TenantId, plan.Level, plan.Days, subject, "free"); err != nil {
+				return err
+			}
+			if err = s.markTenantVipCouponUsed(ctx, gjson.New(g.Map{
+				"couponCode": couponCode,
+			})); err != nil {
+				return err
+			}
+			res.Status = consts.OrderStatusPay
+			res.StatusTxt = tenantVipOrderStatusText(consts.OrderStatusPay)
+			res.PaidAt = now
 		}
 		return nil
 	})
@@ -326,11 +350,7 @@ func (s *sSysPublish) openTenantVip(ctx context.Context, tenantId int64, level i
 	if err != nil {
 		return err
 	}
-	base := gtime.Now()
-	if before.IsVip && before.ExpiredAt != nil && before.ExpiredAt.After(base) {
-		base = before.ExpiredAt
-	}
-	expiredAt := base.AddDate(0, 0, days)
+	expiredAt := gtime.Now().AddDate(0, 0, days)
 	now := gtime.Now()
 	data := do.YoubanPublishTenantVip{
 		TenantId:  tenantId,
@@ -392,7 +412,7 @@ func (s *sSysPublish) writeTenantVipLog(ctx context.Context, before *sysin.Tenan
 }
 
 func (s *sSysPublish) rewardInviterVip(ctx context.Context, paidTenantId int64, cfg *model.YoubanPublishVipConfig) error {
-	if cfg == nil || cfg.InviteRewardDays <= 0 || paidTenantId <= 0 {
+	if cfg == nil || !cfg.InviteRewardEnabled || cfg.InviteRewardDays <= 0 || paidTenantId <= 0 {
 		return nil
 	}
 	var row *webInviteRow

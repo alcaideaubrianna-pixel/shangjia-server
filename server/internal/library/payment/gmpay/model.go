@@ -1,0 +1,42 @@
+// Package gmpay GMPay 推荐接入
+package gmpay
+
+type createTransactionRequest struct {
+	Pid         string  `json:"pid"`
+	OrderID     string  `json:"order_id"`
+	Amount      float64 `json:"amount"`
+	Currency    string  `json:"currency"`
+	NotifyURL   string  `json:"notify_url"`
+	RedirectURL string  `json:"redirect_url,omitempty"`
+	Name        string  `json:"name,omitempty"`
+	Token       string  `json:"token,omitempty"`
+	Network     string  `json:"network,omitempty"`
+	PaymentType string  `json:"payment_type,omitempty"`
+	Signature   string  `json:"signature"`
+}
+
+type createTransactionResponse struct {
+	StatusCode int    `json:"status_code"`
+	Code       int    `json:"code"`
+	Message    string `json:"message"`
+	Msg        string `json:"msg"`
+	Data       struct {
+		PaymentURL string `json:"payment_url"`
+		TradeID    string `json:"trade_id"`
+		OrderID    string `json:"order_id"`
+	} `json:"data"`
+	PaymentURL string `json:"payment_url"`
+	TradeID    string `json:"trade_id"`
+	OrderID    string `json:"order_id"`
+}
+
+type notifyRequest struct {
+	Code        int     `json:"code"`
+	OrderID     string  `json:"order_id"`
+	TradeID     string  `json:"trade_id"`
+	PaymentType string  `json:"payment_type"`
+	StatusCode  int     `json:"status_code"`
+	Message     string  `json:"message"`
+	Amount      float64 `json:"amount"`
+	Signature   string  `json:"signature"`
+}

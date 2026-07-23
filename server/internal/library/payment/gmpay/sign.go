@@ -1,9 +1,10 @@
-// Package epay 彩虹易支付
-package epay
+// Package gmpay GMPay 推荐接入
+package gmpay
 
 import (
-	"crypto/md5"
-	"fmt"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"sort"
 	"strings"
 
@@ -11,17 +12,21 @@ import (
 )
 
 func signParams(params map[string]string, key string) string {
-	sum := md5.Sum([]byte(buildSignContent(params) + strings.TrimSpace(key)))
-	return fmt.Sprintf("%x", sum)
+	mac := hmac.New(sha256.New, []byte(strings.TrimSpace(key)))
+	mac.Write([]byte(buildSignContent(params)))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func verifyParams(params map[string]string, key string) error {
-	sign := params["sign"]
+	sign := strings.TrimSpace(params["signature"])
 	if sign == "" {
-		return gerror.New("易支付回调缺少签名")
+		sign = strings.TrimSpace(params["sign"])
+	}
+	if sign == "" {
+		return gerror.New("GMPay 回调缺少签名")
 	}
 	if !strings.EqualFold(sign, signParams(params, key)) {
-		return gerror.New("易支付回调验签不通过")
+		return gerror.New("GMPay 验签不通过")
 	}
 	return nil
 }
@@ -29,7 +34,7 @@ func verifyParams(params map[string]string, key string) error {
 func buildSignContent(params map[string]string) string {
 	keys := make([]string, 0, len(params))
 	for key, value := range params {
-		if key == "sign" || key == "sign_type" || value == "" {
+		if key == "signature" || key == "sign" || value == "" {
 			continue
 		}
 		keys = append(keys, key)

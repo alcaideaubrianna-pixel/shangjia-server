@@ -149,15 +149,21 @@ type PayConfig struct {
 	QQPayAppId  string `json:"payQQPayAppId"`
 	QQPayMchId  string `json:"payQQPayMchId"`
 	QQPayApiKey string `json:"payQQPayApiKey"`
+	// GMPay
+	GMPayGateway string `json:"payGMPayGateway"`
+	GMPayPid     string `json:"payGMPayPid"`
+	GMPayKey     string `json:"payGMPayKey"`
+	GMPayToken   string `json:"payGMPayToken"`
+	GMPayNetwork string `json:"payGMPayNetwork"`
 	// 彩虹易支付
 	RainbowGateway string `json:"payRainbowGateway"`
 	RainbowPid     string `json:"payRainbowPid"`
 	RainbowKey     string `json:"payRainbowKey"`
-	RainbowMethod  string `json:"payRainbowMethod"`
 }
 
 type MemberVipPayItem struct {
 	Label     string  `json:"label"`
+	PayType   string  `json:"payType"`
 	TradeType string  `json:"tradeType"`
 	Enabled   bool    `json:"enabled"`
 	Money     float64 `json:"money"`
@@ -172,16 +178,19 @@ type MemberVipConfig struct {
 }
 
 type YoubanPublishVipConfig struct {
-	Enabled          bool    `json:"youbanPublishVipEnabled"`
-	MonthlyPrice     float64 `json:"youbanPublishVipMonthlyPrice"`
-	OriginalPrice    float64 `json:"youbanPublishVipOriginalPrice"`
-	DiscountText     string  `json:"youbanPublishVipDiscountText"`
-	CouponEnabled    bool    `json:"youbanPublishVipCouponEnabled"`
-	CouponCode       string  `json:"youbanPublishVipCouponCode"`
-	CouponAmount     float64 `json:"youbanPublishVipCouponAmount"`
-	InviteRewardDays int     `json:"youbanPublishVipInviteRewardDays"`
-	ActivityTitle    string  `json:"youbanPublishVipActivityTitle"`
-	ActivityText     string  `json:"youbanPublishVipActivityText"`
+	Enabled             bool    `json:"youbanPublishVipEnabled"`
+	InviteRewardEnabled bool    `json:"youbanPublishVipInviteRewardEnabled"`
+	MonthlyPrice        float64 `json:"youbanPublishVipMonthlyPrice"`
+	OriginalPrice       float64 `json:"youbanPublishVipOriginalPrice"`
+	DiscountText        string  `json:"youbanPublishVipDiscountText"`
+	CouponEnabled       bool    `json:"youbanPublishVipCouponEnabled"`
+	CouponCode          string  `json:"youbanPublishVipCouponCode"`
+	CouponAmount        float64 `json:"youbanPublishVipCouponAmount"`
+	PaymentGateway      string  `json:"youbanPublishVipPaymentGateway"`
+	Currency            string  `json:"youbanPublishVipCurrency"`
+	InviteRewardDays    int     `json:"youbanPublishVipInviteRewardDays"`
+	ActivityTitle       string  `json:"youbanPublishVipActivityTitle"`
+	ActivityText        string  `json:"youbanPublishVipActivityText"`
 }
 
 // WechatOfficialAccountConfig 微信公众号配置

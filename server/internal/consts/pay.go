@@ -22,12 +22,13 @@ const (
 	PayTypeWxPay   = "wxpay"   // 微信支付
 	PayTypeAliPay  = "alipay"  // 支付宝
 	PayTypeQQPay   = "qqpay"   // QQ支付
+	PayTypeGMPay   = "gmpay"   // GMPay
 	PayTypeRainbow = "rainbow" // 彩虹易支付
 )
 
 var (
 	PayTypeSlice = []string{
-		PayTypeWxPay, PayTypeAliPay, PayTypeQQPay, PayTypeRainbow,
+		PayTypeWxPay, PayTypeAliPay, PayTypeQQPay, PayTypeGMPay, PayTypeRainbow,
 	}
 
 	PayTypeNameMap = map[string]string{
@@ -35,6 +36,7 @@ var (
 		PayTypeWxPay:   "微信支付",
 		PayTypeAliPay:  "支付宝",
 		PayTypeQQPay:   "QQ支付",
+		PayTypeGMPay:   "GMPay",
 		PayTypeRainbow: "彩虹易支付",
 	}
 )
@@ -101,5 +103,6 @@ var PayTypeOptions = []*model.Option{
 	dict.GenSuccessOption(PayTypeWxPay, "微信支付"),
 	dict.GenInfoOption(PayTypeAliPay, "支付宝"),
 	dict.GenDefaultOption(PayTypeQQPay, "QQ支付"),
+	dict.GenWarningOption(PayTypeGMPay, "GMPay"),
 	dict.GenPrimaryOption(PayTypeRainbow, "彩虹易支付"),
 }

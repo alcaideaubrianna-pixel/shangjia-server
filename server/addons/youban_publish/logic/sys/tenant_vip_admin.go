@@ -3,6 +3,8 @@ package sys
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -35,13 +37,16 @@ func (s *sSysPublish) AdminTenantVipConfigView(ctx context.Context) (*sysin.Tena
 
 func (s *sSysPublish) AdminTenantVipConfigSave(ctx context.Context, in *sysin.TenantVipConfigSaveInp) error {
 	list := g.Map{
-		"youbanPublishVipActivityText":     in.ActivityText,
-		"youbanPublishVipActivityTitle":    in.ActivityTitle,
-		"youbanPublishVipDiscountText":     in.DiscountText,
-		"youbanPublishVipEnabled":          in.Enabled,
-		"youbanPublishVipInviteRewardDays": in.InviteRewardDays,
-		"youbanPublishVipMonthlyPrice":     in.MonthlyPrice,
-		"youbanPublishVipOriginalPrice":    in.OriginalPrice,
+		"youbanPublishVipActivityText":        in.ActivityText,
+		"youbanPublishVipActivityTitle":       in.ActivityTitle,
+		"youbanPublishVipCurrency":            strings.TrimSpace(in.Currency),
+		"youbanPublishVipDiscountText":        in.DiscountText,
+		"youbanPublishVipEnabled":             in.Enabled,
+		"youbanPublishVipInviteRewardEnabled": in.InviteRewardEnabled,
+		"youbanPublishVipInviteRewardDays":    in.InviteRewardDays,
+		"youbanPublishVipMonthlyPrice":        in.MonthlyPrice,
+		"youbanPublishVipOriginalPrice":       in.OriginalPrice,
+		"youbanPublishVipPaymentGateway":      strings.TrimSpace(in.PaymentGateway),
 	}
 	return service.SysConfig().UpdateConfigByGroup(ctx, &basesysin.UpdateConfigInp{Group: "youban_publish_vip", List: list})
 }
@@ -189,6 +194,35 @@ func (s *sSysPublish) AdminTenantVipCouponStatus(ctx context.Context, in *sysin.
 	return gerror.Wrap(err, "修改优惠码状态失败")
 }
 
+func (s *sSysPublish) TenantVipCouponCheck(ctx context.Context, in *sysin.TenantVipCouponCheckInp) (*sysin.TenantVipCouponCheckModel, error) {
+	code := strings.ToUpper(strings.TrimSpace(in.Code))
+	if code == "" {
+		return &sysin.TenantVipCouponCheckModel{Valid: false, Message: "请输入优惠码"}, nil
+	}
+	cfg, err := service.SysConfig().GetYoubanPublishVip(ctx)
+	if err != nil {
+		return nil, err
+	}
+	price := 0.0
+	if cfg != nil {
+		price = cfg.MonthlyPrice
+	}
+	amount, couponCode, discount, err := s.tenantVipOrderAmountWithCoupon(ctx, price, code, cfg)
+	if err != nil {
+		return &sysin.TenantVipCouponCheckModel{Code: code, Valid: false, Message: err.Error()}, nil
+	}
+	if couponCode == "" && discount <= 0 {
+		return &sysin.TenantVipCouponCheckModel{Code: code, Valid: false, Message: "优惠码无效"}, nil
+	}
+	return &sysin.TenantVipCouponCheckModel{
+		Amount:   amount,
+		Code:     couponCode,
+		Discount: discount,
+		Message:  "优惠码有效",
+		Valid:    true,
+	}, nil
+}
+
 func (s *sSysPublish) tenantVipOrderAmountWithCoupon(ctx context.Context, price float64, couponCode string, cfg *model.YoubanPublishVipConfig) (amount float64, code string, discount float64, err error) {
 	amount = price
 	couponCode = strings.ToUpper(strings.TrimSpace(couponCode))
@@ -220,6 +254,9 @@ func (s *sSysPublish) getTenantVipCouponByCode(ctx context.Context, code string)
 	}
 	var coupon sysin.TenantVipCouponModel
 	if err := g.DB().Model(tenantVipCouponTable).Safe().Ctx(ctx).Where("code", strings.ToUpper(strings.TrimSpace(code))).WhereNull("deleted_at").Scan(&coupon); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, gerror.Wrap(err, "读取优惠码失败")
 	}
 	if coupon.Id <= 0 {
@@ -302,7 +339,18 @@ func tenantVipConfigModel(cfg *model.YoubanPublishVipConfig) *sysin.TenantVipCon
 	if cfg == nil {
 		cfg = tenantVipDefaultConfig()
 	}
-	return &sysin.TenantVipConfigModel{ActivityText: cfg.ActivityText, ActivityTitle: cfg.ActivityTitle, DiscountText: cfg.DiscountText, Enabled: cfg.Enabled, InviteRewardDays: cfg.InviteRewardDays, MonthlyPrice: cfg.MonthlyPrice, OriginalPrice: cfg.OriginalPrice}
+	return &sysin.TenantVipConfigModel{
+		ActivityText:        cfg.ActivityText,
+		ActivityTitle:       cfg.ActivityTitle,
+		Currency:            tenantVipCurrency(cfg),
+		DiscountText:        cfg.DiscountText,
+		Enabled:             cfg.Enabled,
+		InviteRewardEnabled: cfg.InviteRewardEnabled,
+		InviteRewardDays:    cfg.InviteRewardDays,
+		MonthlyPrice:        cfg.MonthlyPrice,
+		OriginalPrice:       cfg.OriginalPrice,
+		PaymentGateway:      tenantVipPaymentGateway(cfg),
+	}
 }
 
 func tenantNameMap(ctx context.Context, orders []*baseentity.AdminOrder) map[int64]string {

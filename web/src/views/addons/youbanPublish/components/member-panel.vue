@@ -34,7 +34,11 @@
         />
       </n-tab-pane>
       <n-tab-pane name="logs" tab="会员记录">
-        <VipLogTable ref="vipLogTableRef" :active="activePane === 'logs'" :tenant-id="query.tenantId" />
+        <VipLogTable
+          ref="vipLogTableRef"
+          :active="activePane === 'logs'"
+          :tenant-id="query.tenantId"
+        />
       </n-tab-pane>
       <n-tab-pane name="coupons" tab="优惠码">
         <n-data-table
@@ -74,11 +78,21 @@
             :precision="2"
             clearable
         /></n-form-item>
-        <n-form-item label="折扣文案"><n-input v-model:value="configForm.discountText" clearable /></n-form-item>
+        <n-form-item label="支付网关">
+          <n-select v-model:value="configForm.paymentGateway" :options="paymentGatewayOptions" />
+        </n-form-item>
+        <n-form-item label="币种">
+          <n-select v-model:value="configForm.currency" :options="currencyOptions" />
+        </n-form-item>
+        <n-form-item label="折扣文案"
+          ><n-input v-model:value="configForm.discountText" clearable
+        /></n-form-item>
         <n-form-item label="邀请奖励"
           ><n-input-number v-model:value="configForm.inviteRewardDays" :min="0" clearable
         /></n-form-item>
-        <n-form-item label="活动标题"><n-input v-model:value="configForm.activityTitle" clearable /></n-form-item>
+        <n-form-item label="活动标题"
+          ><n-input v-model:value="configForm.activityTitle" clearable
+        /></n-form-item>
         <n-form-item label="活动说明"
           ><n-input v-model:value="configForm.activityText" type="textarea" clearable
         /></n-form-item>
@@ -118,11 +132,7 @@
       </n-form>
     </n-modal>
 
-    <n-modal
-      v-model:show="tenantVipVisible"
-      preset="dialog"
-      title="账号会员配置"
-    >
+    <n-modal v-model:show="tenantVipVisible" preset="dialog" title="账号会员配置">
       <n-form :model="tenantVipForm" label-placement="left" label-width="100">
         <n-form-item label="账号归属">
           <n-select v-model:value="tenantVipForm.tenantId" :options="tenantOptions" filterable />
@@ -169,6 +179,7 @@
     VipTenantSave,
   } from '@/api/addons/youbanPublish';
   import VipLogTable from './VipLogTable.vue';
+  import { currencyOptions, defaultConfig, paymentGatewayOptions } from './member-panel-config';
 
   const message = useMessage();
   const activePane = ref('orders');
@@ -297,18 +308,6 @@
       },
     },
   ];
-
-  function defaultConfig() {
-    return {
-      activityText: '',
-      activityTitle: '',
-      discountText: '限时半价',
-      enabled: true,
-      inviteRewardDays: 30,
-      monthlyPrice: 30,
-      originalPrice: 60,
-    };
-  }
 
   function defaultCoupon() {
     return {

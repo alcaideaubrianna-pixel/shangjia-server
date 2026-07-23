@@ -27,11 +27,12 @@ func tenantVipPlanByConfig(cfg *model.YoubanPublishVipConfig) *sysin.TenantVipPl
 		Code:          tenantVipPlanMonth,
 		CouponAmount:  cfg.CouponAmount,
 		CouponEnabled: cfg.CouponEnabled,
-		Currency:      "U",
+		Currency:      tenantVipCurrency(cfg),
 		Days:          30,
 		Description:   "适合需要相似查重、搜索和自动化采集的团队",
 		DiscountText:  cfg.DiscountText,
 		Features:      tenantVipPaidFeatures(),
+		PayItems:      []*sysin.TenantVipPayItemModel{tenantVipDefaultPayItem(cfg)},
 		Level:         1,
 		Name:          "VIP计划",
 		OriginalPrice: cfg.OriginalPrice,
@@ -75,7 +76,60 @@ func tenantVipOrderStatusText(status int) string {
 }
 
 func tenantVipDefaultConfig() *model.YoubanPublishVipConfig {
-	return &model.YoubanPublishVipConfig{Enabled: true, MonthlyPrice: 30, OriginalPrice: 60, DiscountText: "限时半价", InviteRewardDays: 30, ActivityTitle: "邀请返会员", ActivityText: "邀请好友注册并完成首月付款后，邀请人自动获得 1 个月 VIP，有效期可叠加。"}
+	return &model.YoubanPublishVipConfig{
+		Enabled:             true,
+		InviteRewardEnabled: true,
+		MonthlyPrice:        30,
+		OriginalPrice:       60,
+		DiscountText:        "限时半价",
+		InviteRewardDays:    30,
+		ActivityTitle:       "邀请返会员",
+		ActivityText:        "邀请好友注册并完成首月付款后，邀请人自动获得 1 个月 VIP，有效期可叠加。",
+		PaymentGateway:      consts.PayTypeGMPay,
+		Currency:            "USDT",
+	}
+}
+
+func tenantVipPaymentGateway(cfg *model.YoubanPublishVipConfig) string {
+	if cfg == nil {
+		return consts.PayTypeGMPay
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.PaymentGateway)) {
+	case consts.PayTypeRainbow, consts.PayTypeGMPay:
+		return strings.ToLower(strings.TrimSpace(cfg.PaymentGateway))
+	default:
+		return consts.PayTypeGMPay
+	}
+}
+
+func tenantVipCurrency(cfg *model.YoubanPublishVipConfig) string {
+	if cfg == nil {
+		return "USDT"
+	}
+	switch strings.ToUpper(strings.TrimSpace(cfg.Currency)) {
+	case "RMB", "USDT":
+		return strings.ToUpper(strings.TrimSpace(cfg.Currency))
+	default:
+		return "USDT"
+	}
+}
+
+func tenantVipDefaultPayItem(cfg *model.YoubanPublishVipConfig) *sysin.TenantVipPayItemModel {
+	if cfg == nil {
+		cfg = tenantVipDefaultConfig()
+	}
+	gateway := tenantVipPaymentGateway(cfg)
+	currency := tenantVipCurrency(cfg)
+	switch gateway {
+	case consts.PayTypeGMPay:
+		return &sysin.TenantVipPayItemModel{Label: "GMPay", PayType: consts.PayTypeGMPay, TradeType: consts.TradeTypeRainbowUSDT, Enabled: true, Money: cfg.MonthlyPrice}
+	default:
+		tradeType := consts.TradeTypeRainbowUSDT
+		if currency == "RMB" {
+			tradeType = ""
+		}
+		return &sysin.TenantVipPayItemModel{Label: "彩虹易支付", PayType: consts.PayTypeRainbow, TradeType: tradeType, Enabled: true, Money: cfg.MonthlyPrice}
+	}
 }
 
 func tenantVipFreeFeatures() []string {

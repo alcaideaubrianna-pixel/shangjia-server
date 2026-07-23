@@ -51,6 +51,15 @@ type TenantVipOrderPayRes struct {
 	*sysin.TenantVipOrderModel
 }
 
+type TenantVipCouponCheckReq struct {
+	g.Meta `path:"/publish/vip/coupon/check" method:"post" tags:"上架插件" summary:"检查租户会员优惠码"`
+	sysin.TenantVipCouponCheckInp
+}
+
+type TenantVipCouponCheckRes struct {
+	*sysin.TenantVipCouponCheckModel
+}
+
 type MediaSimilarCountReq struct {
 	g.Meta `path:"/publish/media/similar/count" method:"post" tags:"上架插件" summary:"媒体相似数量"`
 	sysin.MediaSimilarCountInp

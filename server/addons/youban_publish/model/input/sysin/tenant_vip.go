@@ -21,20 +21,29 @@ type TenantVipStatusModel struct {
 }
 
 type TenantVipPlanModel struct {
-	ActivityText  string   `json:"activityText" dc:"活动说明"`
-	ActivityTitle string   `json:"activityTitle" dc:"活动标题"`
-	Code          string   `json:"code" dc:"套餐编码"`
-	CouponAmount  float64  `json:"couponAmount" dc:"优惠券金额"`
-	CouponEnabled bool     `json:"couponEnabled" dc:"是否启用优惠券"`
-	Currency      string   `json:"currency" dc:"币种"`
-	Days          int      `json:"days" dc:"开通天数"`
-	Description   string   `json:"description" dc:"说明"`
-	DiscountText  string   `json:"discountText" dc:"折扣文案"`
-	Features      []string `json:"features" dc:"权益列表"`
-	Level         int      `json:"level" dc:"会员等级"`
-	Name          string   `json:"name" dc:"套餐名称"`
-	OriginalPrice float64  `json:"originalPrice" dc:"原价"`
-	Price         float64  `json:"price" dc:"价格"`
+	ActivityText  string                   `json:"activityText" dc:"活动说明"`
+	ActivityTitle string                   `json:"activityTitle" dc:"活动标题"`
+	Code          string                   `json:"code" dc:"套餐编码"`
+	CouponAmount  float64                  `json:"couponAmount" dc:"优惠券金额"`
+	CouponEnabled bool                     `json:"couponEnabled" dc:"是否启用优惠券"`
+	Currency      string                   `json:"currency" dc:"币种"`
+	Days          int                      `json:"days" dc:"开通天数"`
+	Description   string                   `json:"description" dc:"说明"`
+	DiscountText  string                   `json:"discountText" dc:"折扣文案"`
+	Features      []string                 `json:"features" dc:"权益列表"`
+	PayItems      []*TenantVipPayItemModel `json:"payItems" dc:"支付渠道"`
+	Level         int                      `json:"level" dc:"会员等级"`
+	Name          string                   `json:"name" dc:"套餐名称"`
+	OriginalPrice float64                  `json:"originalPrice" dc:"原价"`
+	Price         float64                  `json:"price" dc:"价格"`
+}
+
+type TenantVipPayItemModel struct {
+	Enabled   bool    `json:"enabled" dc:"是否启用"`
+	Label     string  `json:"label" dc:"名称"`
+	PayType   string  `json:"payType" dc:"支付方式"`
+	TradeType string  `json:"tradeType" dc:"交易类型"`
+	Money     float64 `json:"money" dc:"金额"`
 }
 
 type TenantVipOrderCreateInp struct {
@@ -95,14 +104,29 @@ type TenantVipOrderPayInp struct {
 	ReturnUrl string `json:"returnUrl" dc:"买家付款成功跳转地址"`
 }
 
+type TenantVipCouponCheckInp struct {
+	Code string `json:"code" dc:"优惠码"`
+}
+
+type TenantVipCouponCheckModel struct {
+	Amount   float64 `json:"amount" dc:"抵扣金额"`
+	Code     string  `json:"code" dc:"优惠码"`
+	Discount float64 `json:"discount" dc:"优惠金额"`
+	Message  string  `json:"message" dc:"提示信息"`
+	Valid    bool    `json:"valid" dc:"是否有效"`
+}
+
 type TenantVipConfigModel struct {
-	ActivityText     string  `json:"activityText" dc:"活动说明"`
-	ActivityTitle    string  `json:"activityTitle" dc:"活动标题"`
-	DiscountText     string  `json:"discountText" dc:"折扣文案"`
-	Enabled          bool    `json:"enabled" dc:"是否启用"`
-	InviteRewardDays int     `json:"inviteRewardDays" dc:"邀请奖励天数"`
-	MonthlyPrice     float64 `json:"monthlyPrice" dc:"会员月价"`
-	OriginalPrice    float64 `json:"originalPrice" dc:"展示原价"`
+	ActivityText        string  `json:"activityText" dc:"活动说明"`
+	ActivityTitle       string  `json:"activityTitle" dc:"活动标题"`
+	Currency            string  `json:"currency" dc:"币种"`
+	DiscountText        string  `json:"discountText" dc:"折扣文案"`
+	Enabled             bool    `json:"enabled" dc:"是否启用"`
+	InviteRewardEnabled bool    `json:"inviteRewardEnabled" dc:"邀请返会员开关"`
+	InviteRewardDays    int     `json:"inviteRewardDays" dc:"邀请奖励天数"`
+	MonthlyPrice        float64 `json:"monthlyPrice" dc:"会员月价"`
+	OriginalPrice       float64 `json:"originalPrice" dc:"展示原价"`
+	PaymentGateway      string  `json:"paymentGateway" dc:"支付网关"`
 }
 
 type TenantVipConfigSaveInp = TenantVipConfigModel

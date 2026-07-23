@@ -1,4 +1,4 @@
-// Package epay 易支付兼容网关
+// Package epay 彩虹易支付
 package epay
 
 type notifyRequest struct {

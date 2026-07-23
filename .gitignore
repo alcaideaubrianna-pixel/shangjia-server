@@ -10,3 +10,4 @@ push.sh
 /server/runtime/
 server/resource/public/storage/cache
 server/.serena/cache
+docker

@@ -19,12 +19,15 @@ import (
 	"hotgo/internal/model/input/payin"
 	"hotgo/internal/service"
 	"hotgo/utility/validate"
+	"net/url"
+	"strings"
 
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gctx"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/gmeta"
 )
 
@@ -66,6 +69,8 @@ func (s *sPay) Create(ctx context.Context, in payin.PayCreateInp) (res *payin.Pa
 		mchId = config.WxPayMchId
 	case consts.PayTypeQQPay:
 		mchId = config.QQPayMchId
+	case consts.PayTypeGMPay:
+		mchId = config.GMPayPid
 	case consts.PayTypeRainbow:
 		mchId = config.RainbowPid
 	}
@@ -95,7 +100,25 @@ func (s *sPay) Create(ctx context.Context, in payin.PayCreateInp) (res *payin.Pa
 	}
 
 	// 创建支付记录
+	if data.PayAmount <= 0 {
+		now := gtime.Now()
+		data.PayStatus = consts.PayStatusOk
+		data.PayAt = now
+		data.ActualAmount = 0
+		data.TransactionId = data.OutTradeNo
+	}
+
 	if _, err = s.Model(ctx).Data(data).OmitEmptyData().Insert(); err != nil {
+		return
+	}
+
+	if data.PayAmount <= 0 {
+		res = &payin.PayCreateModel{
+			Order: &payin.CreateOrderModel{
+				TradeType:  in.TradeType,
+				OutTradeNo: data.OutTradeNo,
+			},
+		}
 		return
 	}
 
@@ -127,6 +150,11 @@ func (s *sPay) GenNotifyURL(ctx context.Context, in payin.PayCreateInp) (notifyU
 		return
 	}
 
+	baseURL, err := validateNotifyBaseURL(basic.Domain)
+	if err != nil {
+		return
+	}
+
 	var object interface{}
 	switch in.PayType {
 	case consts.PayTypeAliPay:
@@ -135,6 +163,8 @@ func (s *sPay) GenNotifyURL(ctx context.Context, in payin.PayCreateInp) (notifyU
 		object = v1.NotifyWxPayReq{}
 	case consts.PayTypeQQPay:
 		object = v1.NotifyQQPayReq{}
+	case consts.PayTypeGMPay:
+		object = v1.NotifyGMPayReq{}
 	case consts.PayTypeRainbow:
 		object = v1.NotifyRainbowReq{}
 	default:
@@ -143,9 +173,32 @@ func (s *sPay) GenNotifyURL(ctx context.Context, in payin.PayCreateInp) (notifyU
 	}
 
 	notifyURL = fmt.Sprintf("%s%s%s",
-		basic.Domain,
+		baseURL,
 		g.Cfg().MustGet(ctx, "router.api.prefix", "/api").String(),
 		gmeta.Get(object, "path").String(),
 	)
 	return
+}
+
+func validateNotifyBaseURL(domain string) (string, error) {
+	base := strings.TrimRight(strings.TrimSpace(domain), "/")
+	if base == "" {
+		return "", gerror.New("请先到后台【系统设置】-【配置管理】中设置网站域名！")
+	}
+
+	parsed, err := url.Parse(base)
+	if err != nil || parsed == nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", gerror.New("网站域名格式有误，请检查！")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", gerror.New("网站域名必须以 http:// 或 https:// 开头")
+	}
+
+	host := strings.ToLower(parsed.Hostname())
+	switch host {
+	case "localhost", "127.0.0.1", "0.0.0.0":
+		return "", gerror.New("GMPay notify_url 必须使用可被网关访问的公网域名，不能使用 localhost 或 127.0.0.1")
+	}
+
+	return base, nil
 }

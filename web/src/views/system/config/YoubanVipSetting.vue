@@ -3,8 +3,7 @@
     <n-spin :show="show" description="请稍候...">
       <n-form ref="formRef" :label-width="120" :model="formValue">
         <n-alert :show-icon="false" type="info" class="mb-4">
-          这里配置上架系统 VIP
-          的前台售价、折扣活动和邀请奖励。支付通道仍使用“支付配置”里的彩虹易支付。
+          这里配置上架系统 VIP 的前台售价、折扣活动和邀请奖励。支付方式只保留 GMPay 和彩虹易支付。
         </n-alert>
 
         <n-form-item label="启用 VIP" path="youbanPublishVipEnabled">
@@ -32,6 +31,19 @@
             <template #suffix>U</template>
           </n-input-number>
           <template #feedback>用于价格卡片划线展示，不参与实际扣款。</template>
+        </n-form-item>
+
+        <n-form-item label="支付网关" path="youbanPublishVipPaymentGateway">
+          <n-select
+            v-model:value="formValue.youbanPublishVipPaymentGateway"
+            :options="paymentGatewayOptions"
+          />
+          <template #feedback>GMPay 对接本地 EPUSDT；彩虹易支付走跳转支付。</template>
+        </n-form-item>
+
+        <n-form-item label="币种" path="youbanPublishVipCurrency">
+          <n-select v-model:value="formValue.youbanPublishVipCurrency" :options="currencyOptions" />
+          <template #feedback>仅彩虹易支付网关会读取该配置，默认使用 USDT。</template>
         </n-form-item>
 
         <n-form-item label="折扣文案" path="youbanPublishVipDiscountText">
@@ -66,9 +78,7 @@
           >
             <template #suffix>天</template>
           </n-input-number>
-          <template #feedback
-            >B 邀请 A 注册，A 完成 VIP 付款后，B 获得对应天数 VIP，可叠加。</template
-          >
+          <template #feedback>邀请人和被邀请人按账号关系自动结算，奖励天数可叠加。</template>
         </n-form-item>
 
         <n-form-item label="活动标题" path="youbanPublishVipActivityTitle">
@@ -96,6 +106,16 @@
   import { useMessage } from 'naive-ui';
   import { getConfig, updateConfig } from '@/api/sys/config';
 
+  const paymentGatewayOptions = [
+    { label: 'GMPay', value: 'gmpay' },
+    { label: '彩虹易支付', value: 'rainbow' },
+  ];
+
+  const currencyOptions = [
+    { label: 'USDT', value: 'USDT' },
+    { label: 'RMB', value: 'RMB' },
+  ];
+
   const group = 'youban_publish_vip';
   const show = ref(false);
   const formRef = ref<any>();
@@ -109,6 +129,8 @@
     youbanPublishVipCouponEnabled: true,
     youbanPublishVipDiscountText: '限时半价',
     youbanPublishVipEnabled: true,
+    youbanPublishVipPaymentGateway: 'gmpay',
+    youbanPublishVipCurrency: 'USDT',
     youbanPublishVipInviteRewardDays: 30,
     youbanPublishVipMonthlyPrice: 30,
     youbanPublishVipOriginalPrice: 60,

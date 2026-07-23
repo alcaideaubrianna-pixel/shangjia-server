@@ -11,8 +11,9 @@ import (
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/payment/alipay"
+	"hotgo/internal/library/payment/epay"
+	"hotgo/internal/library/payment/gmpay"
 	"hotgo/internal/library/payment/qqpay"
-	"hotgo/internal/library/payment/rainbow"
 	"hotgo/internal/library/payment/wxpay"
 	"hotgo/internal/model/input/payin"
 	"hotgo/utility/validate"
@@ -48,8 +49,10 @@ func New(name ...string) PayClient {
 		client = wxpay.New(config)
 	case consts.PayTypeQQPay:
 		client = qqpay.New(config)
+	case consts.PayTypeGMPay:
+		client = gmpay.New(config)
 	case consts.PayTypeRainbow:
-		client = rainbow.New(config)
+		client = epay.New(config)
 	default:
 		panic(fmt.Sprintf("暂不支持的支付方式:%v", payType))
 	}

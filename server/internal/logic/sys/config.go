@@ -127,10 +127,14 @@ func (s *sSysConfig) ensureEpayConfig(ctx context.Context) (err error) {
 		sort  int
 		tip   string
 	}{
-		{key: "payRainbowGateway", name: "易支付兼容网关地址", typ: consts.ConfigTypeString, value: "https://pay.v8jisu.cn", sort: 940, tip: "支持彩虹易支付、EPUSDT EPay 兼容接口"},
-		{key: "payRainbowPid", name: "易支付商户ID", typ: consts.ConfigTypeString, value: "", sort: 950, tip: "易支付兼容网关商户ID"},
-		{key: "payRainbowKey", name: "易支付MD5密钥", typ: consts.ConfigTypeString, value: "", sort: 960, tip: "易支付兼容网关 MD5 通讯密钥"},
-		{key: "payRainbowMethod", name: "易支付接口类型", typ: consts.ConfigTypeString, value: "jump", sort: 970, tip: "兼容旧配置，V1接口固定使用跳转支付"},
+		{key: "payGMPayGateway", name: "GMPay 网关地址", typ: consts.ConfigTypeString, value: "http://127.0.0.1:18000", sort: 940, tip: "GMPay 网关地址"},
+		{key: "payGMPayPid", name: "GMPay 商户ID", typ: consts.ConfigTypeString, value: "", sort: 950, tip: "GMPay 商户PID"},
+		{key: "payGMPayKey", name: "GMPay 密钥", typ: consts.ConfigTypeString, value: "", sort: 960, tip: "GMPay HMAC-SHA256 通讯密钥"},
+		{key: "payGMPayToken", name: "GMPay 默认币种", typ: consts.ConfigTypeString, value: "usdt", sort: 970, tip: "GMPay 创建订单时的默认币种"},
+		{key: "payGMPayNetwork", name: "GMPay 默认网络", typ: consts.ConfigTypeString, value: "tron", sort: 980, tip: "GMPay 创建订单时的默认网络"},
+		{key: "payRainbowGateway", name: "彩虹易支付网关地址", typ: consts.ConfigTypeString, value: "https://pay.v8jisu.cn", sort: 990, tip: "彩虹易支付网关地址"},
+		{key: "payRainbowPid", name: "彩虹易支付商户ID", typ: consts.ConfigTypeString, value: "", sort: 1000, tip: "彩虹易支付商户ID"},
+		{key: "payRainbowKey", name: "彩虹易支付MD5密钥", typ: consts.ConfigTypeString, value: "", sort: 1010, tip: "彩虹易支付 MD5 通讯密钥"},
 	}
 
 	cols := dao.SysConfig.Columns()
@@ -323,6 +327,16 @@ func (s *sSysConfig) UpdateConfigByGroup(ctx context.Context, in *sysin.UpdateCo
 		err = gerror.New("分组不能为空")
 		return
 	}
+	if in.Group == "member_vip" {
+		if err = s.ensureMemberVipConfig(ctx); err != nil {
+			return
+		}
+	}
+	if in.Group == "youban_publish_vip" {
+		if err = s.ensureYoubanPublishVipConfig(ctx); err != nil {
+			return
+		}
+	}
 	var (
 		mod    = dao.SysConfig.Ctx(ctx)
 		models []*entity.SysConfig
@@ -438,9 +452,9 @@ func defaultMemberVipConfig() *model.MemberVipConfig {
 		Days:             30,
 		Money:            30,
 		PayItems: []*model.MemberVipPayItem{
-			{Label: "支付宝", TradeType: consts.TradeTypeRainbowAliPay, Enabled: true, Money: 30},
-			{Label: "微信", TradeType: consts.TradeTypeRainbowWxPay, Enabled: true, Money: 30},
-			{Label: "USDT", TradeType: consts.TradeTypeRainbowUSDT, Enabled: true, Money: 30},
+			{Label: "支付宝", PayType: consts.PayTypeRainbow, TradeType: consts.TradeTypeRainbowAliPay, Enabled: true, Money: 30},
+			{Label: "微信", PayType: consts.PayTypeRainbow, TradeType: consts.TradeTypeRainbowWxPay, Enabled: true, Money: 30},
+			{Label: "USDT", PayType: consts.PayTypeRainbow, TradeType: consts.TradeTypeRainbowUSDT, Enabled: true, Money: 30},
 		},
 	}
 }

@@ -1,4 +1,4 @@
-// Package epay 易支付兼容网关
+// Package epay 彩虹易支付
 package epay
 
 import (
@@ -30,7 +30,7 @@ type EPay struct {
 }
 
 func (h *EPay) Refund(ctx context.Context, in payin.RefundInp) (res *payin.RefundModel, err error) {
-	err = gerror.New("易支付兼容网关暂未接入退款，如有疑问请联系管理员")
+	err = gerror.New("彩虹易支付暂未接入退款，如有疑问请联系管理员")
 	return
 }
 

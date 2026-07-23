@@ -171,6 +171,7 @@ type ISysPublish interface {
 	TenantVipOrderCreate(ctx context.Context, in *sysin.TenantVipOrderCreateInp) (res *sysin.TenantVipOrderModel, err error)
 	TenantVipOrderList(ctx context.Context, in *sysin.TenantVipOrderListInp) (list []*sysin.TenantVipOrderModel, totalCount int, err error)
 	TenantVipOrderPay(ctx context.Context, in *sysin.TenantVipOrderPayInp) (res *sysin.TenantVipOrderModel, err error)
+	TenantVipCouponCheck(ctx context.Context, in *sysin.TenantVipCouponCheckInp) (res *sysin.TenantVipCouponCheckModel, err error)
 	MediaSimilarCount(ctx context.Context, in *sysin.MediaSimilarCountInp) (list []*sysin.MediaSimilarCountModel, err error)
 	MediaSimilarList(ctx context.Context, in *sysin.MediaSimilarListInp) (res *sysin.MediaSimilarListModel, totalCount int, err error)
 	MyAccountSettingView(ctx context.Context) (res *sysin.AccountSettingModel, err error)

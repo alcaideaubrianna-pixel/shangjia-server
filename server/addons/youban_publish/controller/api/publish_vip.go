@@ -61,6 +61,15 @@ func (c *cPublish) TenantVipOrderPay(ctx context.Context, req *publish.TenantVip
 	return
 }
 
+func (c *cPublish) TenantVipCouponCheck(ctx context.Context, req *publish.TenantVipCouponCheckReq) (res *publish.TenantVipCouponCheckRes, err error) {
+	data, err := service.SysPublish().TenantVipCouponCheck(ctx, &req.TenantVipCouponCheckInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.TenantVipCouponCheckRes{TenantVipCouponCheckModel: data}
+	return
+}
+
 func (c *cPublish) MediaSimilarCount(ctx context.Context, req *publish.MediaSimilarCountReq) (res *publish.MediaSimilarCountRes, err error) {
 	list, err := service.SysPublish().MediaSimilarCount(ctx, &req.MediaSimilarCountInp)
 	if err != nil {
