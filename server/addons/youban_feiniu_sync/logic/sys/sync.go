@@ -830,14 +830,7 @@ func (s *sSysSync) copyProfileBundle(ctx context.Context, tx gdb.TX, srcChannel 
 	if profileData[profileColumns.SourceUpdatedAt] == nil {
 		profileData[profileColumns.SourceUpdatedAt] = now
 	}
-	sourceRemark := strings.TrimSpace(sourceProfile[profileColumns.AdminRemark].String())
-	if remark := fmt.Sprintf("复制自 FeiNiu 资料#%d", sourceProfileId); remark != "" {
-		if sourceRemark != "" {
-			profileData[profileColumns.AdminRemark] = strings.TrimSpace(sourceRemark + "\n" + remark)
-		} else {
-			profileData[profileColumns.AdminRemark] = remark
-		}
-	}
+	profileData[profileColumns.AdminRemark] = ""
 	profileData[profileColumns.Status] = sourceProfile[profileColumns.Status].Int()
 	newProfileId, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Data(profileData).InsertAndGetId()
 	if err != nil {
@@ -1818,9 +1811,9 @@ func (s *sSysSync) upsertProfile(ctx context.Context, cfg gdb.Record, row gdb.Re
 		columns.SourceTextHash: contentHash, columns.ChannelId: row["source_channel_id"].Int64(), columns.Title: title, columns.Summary: summary(plainText), columns.PlainText: plainText, columns.HtmlText: row["html_text"].String(),
 		columns.SourceCategoryCode: row["category_code"].String(), columns.Province: row["province"].String(), columns.City: row["city"].String(), columns.Age: row["age"].Int(), columns.Height: row["height"].Int(), columns.Weight: row["weight"].Int(), columns.CupSize: row["cup_size"].String(),
 		columns.ExpectedLivingCost: row["expected_living_cost"].Int(), columns.HasVerificationVideo: yesNo(row["has_verification_video"].String()), columns.ImageCount: row["image_count"].Int(), columns.VideoCount: row["video_count"].Int(),
-		columns.GroupParams: row["group_params"].String(), columns.TagParams: row["tag_params"].String(), columns.TextBlockCount: row["text_block_count"].Int(), columns.StoragePolicy: row["storage_policy"].String(), columns.SourceRemark: row["remark"].String(),
+		columns.GroupParams: row["group_params"].String(), columns.TagParams: "", columns.TextBlockCount: row["text_block_count"].Int(), columns.StoragePolicy: row["storage_policy"].String(), columns.SourceRemark: row["remark"].String(),
 		columns.SourceCreateBy: row["create_by"].String(), columns.SourceUpdateBy: row["update_by"].String(), columns.SourceCreatedAt: row["create_time"].GTime(), columns.SourceUpdatedAt: row["update_time"].GTime(), columns.SourceEditedAt: row["edited_at"].GTime(),
-		columns.Visibility: consts.ContentVisibilityPublic, columns.ReviewStatus: consts.ContentReviewApproved, columns.ImportStatus: "feiniu_sync", columns.AdminRemark: fmt.Sprintf("FeiNiu note:%d channel:%d", row["note_id"].Int64(), row["source_channel_id"].Int64()), columns.PublishedAt: publishedAt, columns.Status: 1, columns.DeletedAt: nil, columns.UpdatedAt: now,
+		columns.Visibility: consts.ContentVisibilityPublic, columns.ReviewStatus: consts.ContentReviewApproved, columns.ImportStatus: "feiniu_sync", columns.AdminRemark: "", columns.PublishedAt: publishedAt, columns.Status: 1, columns.DeletedAt: nil, columns.UpdatedAt: now,
 	}
 	profileModel := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Unscoped()
 	existing, err := profileModel.Clone().
@@ -1942,7 +1935,8 @@ func (s *sSysSync) syncMedia(ctx context.Context, source gdb.DB, cfg gdb.Record,
 		}
 		fileURL := feiNiuImportedMediaURL(item)
 		storagePath := feiNiuImportedMediaStoragePath(item)
-		data := g.Map{"tenant_id": cfg["target_tenant_id"].Int64(), "merchant_id": cfg["target_tenant_id"].Int64(), "account_id": accountId, "task_id": taskId, "profile_id": profileId, "attachment_id": 0, "media_type": mediaType, "purpose": purpose, "name": mediaName(item), "file_url": fileURL, "original_file_url": fileURL, "storage_path": storagePath, "original_storage_path": storagePath, "mime_type": item["mime_type"].String(), "md5": item["binary_md5"].String(), "perceptual_hash": item["perceptual_hash"].String(), "tg_file_id": "", "tg_cache_status": "invalid", "size": item["file_size"].Int64(), "sort_index": i + 1, "status": 1, "created_at": now, "updated_at": now}
+		posterURL, posterStoragePath := feiNiuImportedVideoPoster(item, mediaType)
+		data := g.Map{"tenant_id": cfg["target_tenant_id"].Int64(), "merchant_id": cfg["target_tenant_id"].Int64(), "account_id": accountId, "task_id": taskId, "profile_id": profileId, "attachment_id": 0, "media_type": mediaType, "purpose": purpose, "name": mediaName(item), "file_url": fileURL, "original_file_url": fileURL, "poster_url": posterURL, "poster_storage_path": posterStoragePath, "storage_path": storagePath, "original_storage_path": storagePath, "mime_type": item["mime_type"].String(), "md5": item["binary_md5"].String(), "perceptual_hash": item["perceptual_hash"].String(), "tg_file_id": "", "tg_cache_status": "invalid", "size": item["file_size"].Int64(), "sort_index": i + 1, "status": 1, "created_at": now, "updated_at": now}
 		_, _ = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(data).Insert()
 	}
 	_, _ = dao.ContentProfile.Ctx(ctx).Where(dao.ContentProfile.Columns().Id, profileId).Data(g.Map{dao.ContentProfile.Columns().ImageCount: imageCount, dao.ContentProfile.Columns().VideoCount: videoCount, dao.ContentProfile.Columns().UpdatedAt: now}).Update()
