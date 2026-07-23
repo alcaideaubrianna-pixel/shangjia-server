@@ -2307,8 +2307,8 @@ ORDER BY b.sort_index ASC,b.block_id ASC`, sourceNoteId)
 			displayPath = firstNonEmpty(cosURL, originPath)
 			previewPath = firstNonEmpty(previewPath, feiNiuPosterURL(cosPath))
 		}
-		if !isFeiNiuMediaReady(mediaType, cosPath, displayPath) {
-			err = fmt.Errorf("%w: FeiNiu 媒体 COS 未就绪 note:%d asset:%d", errFeiNiuMediaPending, sourceNoteId, assetId)
+		if !isFeiNiuMediaReady(displayPath) {
+			err = fmt.Errorf("%w: FeiNiu 媒体未就绪 note:%d asset:%d", errFeiNiuMediaPending, sourceNoteId, assetId)
 			return
 		}
 		duplicateMedia, checkDuplicateErr := s.getDuplicateMediaByMD5(ctx, mediaType, row["binary_md5"].String())
@@ -3075,14 +3075,11 @@ func feiNiuPosterURL(cosPath string) string {
 	return feiNiuCosURL(cosPath + ".poster.jpg")
 }
 
-func isFeiNiuMediaReady(mediaType string, cosPath string, displayPath string) bool {
+func isFeiNiuMediaReady(displayPath string) bool {
 	if strings.TrimSpace(displayPath) == "" {
 		return false
 	}
-	if mediaType == consts.ContentMediaTypeVideo {
-		return strings.TrimSpace(cosPath) != ""
-	}
-	return strings.TrimSpace(cosPath) != ""
+	return true
 }
 
 func firstNonEmpty(values ...string) string {
