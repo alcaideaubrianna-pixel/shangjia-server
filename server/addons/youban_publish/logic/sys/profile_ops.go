@@ -250,28 +250,41 @@ func (s *sSysPublish) adminNoteFilterScope(ctx context.Context, account *sysin.A
 		return nil, 0, gerror.New("当前账号无管理权限")
 	}
 	scope := strings.TrimSpace(in.AccountScope)
-	if scope == "" || scope == "all" {
-		return nil, account.TenantId, nil
-	}
-	if scope == "mine" {
+	switch scope {
+	case "", "mine":
 		if in.AccountId > 0 {
 			if err = s.ensureAdminManageableAccount(ctx, account, in.AccountId); err != nil {
 				return nil, 0, err
 			}
-			return []int64{in.AccountId}, account.TenantId, nil
-		}
-		ids, e := s.adminManagedAccountIds(ctx, account)
-		return ids, account.TenantId, e
-	}
-	if scope == "following" {
-		if in.AccountId > 0 {
 			ids, e := s.expandFollowNoteAccountIds(ctx, []int64{in.AccountId})
+			return ids, account.TenantId, e
+		}
+		ids, e := s.expandFollowNoteAccountIds(ctx, []int64{account.Id})
+		return ids, account.TenantId, e
+	case "following":
+		if in.AccountId > 0 {
+			ids, e := s.adminFollowNoteSelectedAccountIds(ctx, account, in.AccountId)
 			return ids, 0, e
 		}
 		ids, e := s.followNoteAccountIds(ctx, account, &sysin.FollowNoteListInp{Scope: "following"})
 		return ids, 0, e
+	case "all":
+		if in.AccountId > 0 {
+			ids, e := s.adminFollowNoteSelectedAccountIds(ctx, account, in.AccountId)
+			return ids, 0, e
+		}
+		mineIds, e := s.expandFollowNoteAccountIds(ctx, []int64{account.Id})
+		if e != nil {
+			return nil, 0, e
+		}
+		followIds, e := s.followNoteAccountIds(ctx, account, &sysin.FollowNoteListInp{Scope: "following"})
+		if e != nil {
+			return nil, 0, e
+		}
+		return uniqueIds(append(mineIds, followIds...)), 0, nil
+	default:
+		return nil, 0, gerror.New("账号筛选范围不合法")
 	}
-	return nil, 0, gerror.New("账号筛选范围不合法")
 }
 
 func (s *sSysPublish) adminManagedAccountIds(ctx context.Context, account *sysin.AccountModel) ([]int64, error) {
