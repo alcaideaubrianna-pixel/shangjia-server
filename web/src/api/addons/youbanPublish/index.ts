@@ -300,6 +300,46 @@ export function AdminChannelCacheList(params = {}) {
   });
 }
 
+export function ChannelMemberSyncStart(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/admin/channel/member/sync/start',
+    method: 'post',
+    params,
+  });
+}
+
+export function ChannelMemberSyncView(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/admin/channel/member/sync/view',
+    method: 'get',
+    params,
+  });
+}
+
+export function ChannelMemberSyncCancel(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/admin/channel/member/sync/cancel',
+    method: 'post',
+    params,
+  });
+}
+
+export function ChannelMemberList(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/admin/channel/member/list',
+    method: 'get',
+    params,
+  });
+}
+
+export function ChannelMemberExport(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/admin/channel/member/export',
+    method: 'get',
+    params,
+  });
+}
+
 export function VipConfigView(params = {}) {
   return http.request({ url: '/youban_publish/publish/vip/config/view', method: 'get', params });
 }

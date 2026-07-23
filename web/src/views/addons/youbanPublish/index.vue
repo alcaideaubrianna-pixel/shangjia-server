@@ -280,40 +280,7 @@
         </n-tab-pane>
 
         <n-tab-pane name="channelCaches" tab="群聊 / 频道">
-          <n-space class="toolbar" align="center">
-            <n-select
-              v-model:value="channelCacheQuery.tgAccountId"
-              :options="channelCacheTgAccountOptions"
-              clearable
-              filterable
-              placeholder="TG账号"
-              class="tenant-select"
-            />
-            <n-select
-              v-model:value="channelCacheQuery.displayType"
-              :options="channelCacheDisplayOptions"
-              clearable
-              placeholder="频道 / 群聊"
-              class="status-select"
-            />
-            <n-input
-              v-model:value="channelCacheQuery.keyword"
-              placeholder="频道名称 / 用户名 / Chat ID"
-              clearable
-              @keyup.enter="loadChannelCaches"
-            />
-            <n-button @click="loadChannelCaches">查询</n-button>
-          </n-space>
-          <n-data-table
-            :columns="channelCacheColumns"
-            :data="channelCaches"
-            :loading="channelCacheLoading"
-            :pagination="channelCachePagination"
-            :row-key="(row) => row.id"
-            :scroll-x="1500"
-            size="small"
-            remote
-          />
+          <ChannelMemberPanel ref="channelCachePanelRef" />
         </n-tab-pane>
 
         <n-tab-pane name="config" tab="配置">
@@ -611,8 +578,9 @@
 </template>
 
 <script lang="ts" setup>
-  import { computed, h, onMounted, reactive, ref, watch } from 'vue';
+  import { computed, h, nextTick, onMounted, reactive, ref } from 'vue';
   import { NButton, NPopover, NSpace, NTag, useDialog, useMessage } from 'naive-ui';
+  import ChannelMemberPanel from './components/channel-member-panel.vue';
   import CloudResourceConfig from './components/cloud-resource-config.vue';
   import DashboardPanel from './components/dashboard-panel.vue';
   import ImportTaskPanel from './components/import-task-panel.vue';
@@ -631,7 +599,6 @@
     BotSave,
     AdminInviteList,
     AdminTgAccountList,
-    AdminChannelCacheList,
     ConfigGet,
     ConfigUpdate,
     TenantDelete,
@@ -651,6 +618,7 @@
   const activeTabStorageKey = 'youban_publish_admin_active_tab';
   const activeTab = ref(sessionStorage.getItem(activeTabStorageKey) || 'dashboard');
   const memberPanelRef = ref<InstanceType<typeof MemberPanel> | null>(null);
+  const channelCachePanelRef = ref<InstanceType<typeof ChannelMemberPanel> | null>(null);
 
   const statusOptions = [
     { label: '启用', value: 1 },
@@ -719,11 +687,6 @@
   const botQuery = reactive({ tenantId: null as number | null, keyword: '', status: 0 });
   const inviteQuery = reactive({ keyword: '', source: '', status: '' });
   const tgAccountQuery = reactive({ keyword: '', status: '' });
-  const channelCacheQuery = reactive({
-    tgAccountId: null as number | null,
-    keyword: '',
-    displayType: '',
-  });
 
   const tenantPagination = createPagination(loadTenants);
   const accountPagination = createPagination(loadAccounts);
@@ -732,7 +695,6 @@
   const botPagination = createPagination(loadBots);
   const invitePagination = createPagination(loadInviteRelations, 20);
   const tgAccountPagination = createPagination(loadTgAccounts, 20);
-  const channelCachePagination = createPagination(loadChannelCaches, 20);
   const systemDomain = ref('');
   const botWebhookConfigLoaded = ref(false);
   const effectiveWebhookBaseUrl = computed(() =>
@@ -779,17 +741,6 @@
     { label: '失败', value: 'failed' },
   ];
   const tgAccountStatusOptionsWithAll = [{ label: '全部', value: '' }, ...tgAccountStatusOptions];
-  const channelCacheDisplayOptions = [
-    { label: '全部', value: '' },
-    { label: '频道', value: 'channel' },
-    { label: '群聊', value: 'group' },
-  ];
-  const channelCacheTgAccountOptions = computed(() =>
-    tgAccounts.value.map((item) => ({
-      label: `${item.displayName || item.telegramUsername || item.id} (${item.telegramUserId || '-'})`,
-      value: item.id,
-    }))
-  );
   const adminAccountOptions = computed(() =>
     accounts.value
       .filter((item) => item.accountType === 'admin' && item.tenantId === accountForm.tenantId)
@@ -812,8 +763,6 @@
   const inviteLoading = ref(false);
   const tgAccounts = ref<any[]>([]);
   const tgAccountLoading = ref(false);
-  const channelCaches = ref<any[]>([]);
-  const channelCacheLoading = ref(false);
 
   function newTelegramConfig() {
     return {
@@ -854,7 +803,12 @@
     { title: 'ID', key: 'id', width: 80 },
     { title: '管理员账号', key: 'username', width: 180, render: (row) => row.username || '-' },
     { title: '会员等级', key: 'vipLevel', width: 120, render: (row) => renderVipLevel(row) },
-    { title: '会员到期', key: 'vipExpiredAt', width: 170, render: (row) => row.vipExpiredAt || '-' },
+    {
+      title: '会员到期',
+      key: 'vipExpiredAt',
+      width: 170,
+      render: (row) => row.vipExpiredAt || '-',
+    },
     { title: '状态', key: 'status', width: 100, render: (row) => renderStatus(row.status) },
     { title: '备注', key: 'remark', width: 260 },
     { title: '创建时间', key: 'createdAt', width: 170 },
@@ -1105,53 +1059,6 @@
     },
   ];
 
-  const channelCacheColumns = [
-    { title: 'ID', key: 'id', width: 80 },
-    {
-      title: 'TG账号',
-      key: 'tgAccountId',
-      width: 150,
-      render: (row: any) => tgAccountLabel(row.tgAccountId),
-    },
-    {
-      title: '频道名称',
-      key: 'channelTitle',
-      width: 220,
-      render: (row: any) => row.channelTitle || '-',
-    },
-    {
-      title: '频道用户名',
-      key: 'channelUsername',
-      width: 180,
-      render: (row: any) => row.channelUsername || '-',
-    },
-    { title: 'Chat ID', key: 'channelId', width: 220, render: (row: any) => row.channelId || '-' },
-    {
-      title: '显示类型',
-      key: 'type',
-      width: 120,
-      render: (row: any) => renderMiniTag(channelCacheDisplayLabel(row.displayType, row), 'info'),
-    },
-    {
-      title: '邀请权限',
-      key: 'canInviteUsers',
-      width: 110,
-      render: (row: any) => (row.canInviteUsers === 1 ? '是' : '否'),
-    },
-    {
-      title: '发消息',
-      key: 'canPostMessages',
-      width: 100,
-      render: (row: any) => (row.canPostMessages === 1 ? '是' : '否'),
-    },
-    {
-      title: '最后同步',
-      key: 'lastSyncAt',
-      width: 180,
-      render: (row: any) => row.lastSyncAt || '-',
-    },
-  ];
-
   const tagColumns = [
     { type: 'selection' },
     { title: 'ID', key: 'id', width: 80 },
@@ -1241,10 +1148,7 @@
     if (tab === 'inviteRelations') await loadInviteRelations();
     if (tab === 'member') return;
     if (tab === 'tgAccounts') await loadTgAccounts();
-    if (tab === 'channelCaches') {
-      await loadTgAccounts();
-      await loadChannelCaches();
-    }
+    if (tab === 'channelCaches') return;
     if (tab === 'config') await loadConfigs();
     if (tab === 'tgObserve') return;
     if (tab === 'publishRecords') return;
@@ -1352,46 +1256,16 @@
       });
       tgAccounts.value = res?.list || [];
       tgAccountPagination.itemCount = res?.totalCount || res?.total || 0;
-      if (!channelCacheQuery.tgAccountId && tgAccounts.value.length > 0) {
-        channelCacheQuery.tgAccountId = tgAccounts.value[0].id;
-      }
     } finally {
       tgAccountLoading.value = false;
     }
   }
 
-  async function loadChannelCaches() {
-    channelCacheLoading.value = true;
-    try {
-      const res: any = await AdminChannelCacheList({
-        tgAccountId: channelCacheQuery.tgAccountId,
-        keyword: channelCacheQuery.keyword,
-        displayType: channelCacheQuery.displayType,
-        page: channelCachePagination.page,
-        perPage: channelCachePagination.pageSize,
-      });
-      channelCaches.value = res?.list || [];
-      channelCachePagination.itemCount = res?.totalCount || res?.total || 0;
-    } finally {
-      channelCacheLoading.value = false;
-    }
-  }
-
-  watch(
-    () => [channelCacheQuery.tgAccountId, channelCacheQuery.displayType],
-    async () => {
-      if (activeTab.value !== 'channelCaches') return;
-      channelCachePagination.page = 1;
-      await loadChannelCaches();
-    }
-  );
-
   async function openChannelCaches(row: any) {
-    channelCacheQuery.tgAccountId = row.id;
-    channelCachePagination.page = 1;
     activeTab.value = 'channelCaches';
     rememberActiveTab('channelCaches');
-    await loadChannelCaches();
+    await nextTick();
+    await channelCachePanelRef.value?.openForTgAccount?.(row.id);
   }
 
   async function loadTags() {
@@ -1809,22 +1683,6 @@
     if (status === 'password_required') return 'warning';
     if (status === 'expired' || status === 'failed') return 'error';
     return 'default';
-  }
-
-  function tgAccountLabel(id: number) {
-    const row = tgAccounts.value.find((item) => item.id === id);
-    return row ? `${row.displayName || row.telegramUsername || row.id}` : `TG账号 ${id || '-'}`;
-  }
-
-  function channelCacheDisplayLabel(displayType: string, row: any = null) {
-    if (displayType === 'group') return '群组';
-    if (displayType === 'channel') return '频道';
-    if (row) {
-      if (row.channelId && String(row.channelId).startsWith('-')) return '群组';
-      if (row.isMegagroup === 1) return '群组';
-      if (row.isBroadcast === 1) return '频道';
-    }
-    return '-';
   }
 
   function renderTaskStatus(status: string) {

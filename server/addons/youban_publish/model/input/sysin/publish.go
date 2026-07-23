@@ -1260,6 +1260,9 @@ func normalizeChannelCacheRoleInputs(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
 		role := strings.TrimSpace(strings.ToLower(value))
+		if role == "creator" {
+			role = "owner"
+		}
 		if role != "owner" && role != "admin" && role != "member" {
 			continue
 		}
@@ -1273,21 +1276,22 @@ func normalizeChannelCacheRoleInputs(values []string) []string {
 }
 
 type ChannelCacheModel struct {
-	Id              int64       `json:"id" dc:"ID"`
-	TenantId        int64       `json:"tenantId" dc:"租户ID"`
-	TgAccountId     int64       `json:"tgAccountId" dc:"TG账号ID"`
-	ChannelId       string      `json:"channelId" dc:"频道ID"`
-	AccessHash      string      `json:"accessHash" dc:"AccessHash"`
-	ChannelTitle    string      `json:"channelTitle" dc:"频道名称"`
-	ChannelUsername string      `json:"channelUsername" dc:"频道用户名"`
-	DisplayType     string      `json:"displayType" dc:"显示类型: channel/group"`
-	ManagementRole  string      `json:"managementRole" orm:"management_role" dc:"当前TG账号角色: owner/admin/member"`
-	IsBroadcast     int         `json:"isBroadcast" dc:"是否频道"`
-	IsMegagroup     int         `json:"isMegagroup" dc:"是否群组"`
-	CanPostMessages int         `json:"canPostMessages" dc:"账号可发频道消息"`
-	CanInviteUsers  int         `json:"canInviteUsers" dc:"账号可邀请用户"`
-	CanAddAdmins    int         `json:"canAddAdmins" dc:"账号可添加管理员"`
-	LastSyncAt      *gtime.Time `json:"lastSyncAt" dc:"最后同步时间"`
+	Id                 int64       `json:"id" dc:"ID"`
+	TenantId           int64       `json:"tenantId" dc:"租户ID"`
+	TgAccountId        int64       `json:"tgAccountId" dc:"TG账号ID"`
+	ChannelId          string      `json:"channelId" dc:"频道ID"`
+	AccessHash         string      `json:"accessHash" dc:"AccessHash"`
+	ChannelTitle       string      `json:"channelTitle" dc:"频道名称"`
+	ChannelUsername    string      `json:"channelUsername" dc:"频道用户名"`
+	DisplayType        string      `json:"displayType" dc:"显示类型: channel/group"`
+	ManagementRole     string      `json:"managementRole" orm:"management_role" dc:"当前TG账号角色: owner/admin/member"`
+	IsBroadcast        int         `json:"isBroadcast" dc:"是否频道"`
+	IsMegagroup        int         `json:"isMegagroup" dc:"是否群组"`
+	CanPostMessages    int         `json:"canPostMessages" dc:"账号可发频道消息"`
+	CanInviteUsers     int         `json:"canInviteUsers" dc:"账号可邀请用户"`
+	CanAddAdmins       int         `json:"canAddAdmins" dc:"账号可添加管理员"`
+	LastSyncAt         *gtime.Time `json:"lastSyncAt" dc:"最后同步时间"`
+	ManagementRoleText string      `json:"managementRoleText" dc:"当前TG账号角色文本"`
 }
 
 type ChannelCacheResolveInp struct {

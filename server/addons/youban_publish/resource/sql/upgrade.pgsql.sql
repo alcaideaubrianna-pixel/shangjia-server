@@ -1,15 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE INDEX IF NOT EXISTS "idx_ybp_tenant_remark_trgm" ON "hg_youban_publish_tenant" USING gin ("remark" gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS "idx_ybp_account_username_trgm" ON "hg_youban_publish_account" USING gin ("username" gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS "idx_ybp_task_title_trgm" ON "hg_youban_publish_task" USING gin ("title" gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS "idx_ybp_task_plain_text_trgm" ON "hg_youban_publish_task" USING gin ("plain_text" gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS "idx_content_profile_title_trgm" ON "hg_content_profile" USING gin ("title" gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS "idx_content_profile_plain_text_trgm" ON "hg_content_profile" USING gin ("plain_text" gin_trgm_ops);
-
-CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_log_tenant" ON "hg_youban_publish_tg_job_log" ("tenant_id", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_log_account" ON "hg_youban_publish_tg_job_log" ("tenant_id", "account_id", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_log_created" ON "hg_youban_publish_tg_job_log" ("created_at", "id");
-
 ALTER TABLE "hg_youban_publish_collect_rule"
   ADD COLUMN IF NOT EXISTS "full_match_enabled" smallint NOT NULL DEFAULT 0;
 
@@ -29,35 +17,14 @@ ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_event_id"
 ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_source_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_source_chat_id" varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_source_message_id" bigint NOT NULL DEFAULT 0;
-CREATE INDEX IF NOT EXISTS "idx_ybp_task_collect_order" ON "hg_youban_publish_task" ("collect_source_id", "collect_source_chat_id", "collect_source_message_id", "id");
 
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_event_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_source_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_source_chat_id" varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_source_message_id" bigint NOT NULL DEFAULT 0;
-CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_collect_order" ON "hg_youban_publish_tg_job" ("channel_id", "target_chat_id", "collect_source_id", "collect_source_chat_id", "collect_source_message_id", "status", "id");
 
 ALTER TABLE "hg_youban_publish_tg_channel" ADD COLUMN IF NOT EXISTS "management_role" varchar(16) NOT NULL DEFAULT 'member';
 ALTER TABLE "hg_youban_publish_account" ALTER COLUMN "public_follow_enabled" SET DEFAULT 0;
-
-UPDATE "hg_youban_publish_task" t SET
-  "collect_event_id"=e."id",
-  "collect_source_id"=e."source_id",
-  "collect_source_chat_id"=e."source_chat_id",
-  "collect_source_message_id"=e."source_message_id"
-FROM "hg_youban_publish_collect_event" e
-WHERE t."tenant_id"=e."tenant_id"
-  AND t."account_id"=e."account_id"
-  AND t."collect_source_message_id"=0
-  AND t."client_request_id" LIKE ('collect:' || e."source_unique_key" || ':%');
-
-UPDATE "hg_youban_publish_tg_job" j SET
-  "collect_event_id"=t."collect_event_id",
-  "collect_source_id"=t."collect_source_id",
-  "collect_source_chat_id"=t."collect_source_chat_id",
-  "collect_source_message_id"=t."collect_source_message_id"
-FROM "hg_youban_publish_task" t
-WHERE j."task_id"=t."id" AND j."collect_source_message_id"=0 AND t."collect_source_message_id">0;
 
 INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
 SELECT 'youban_publish', 'collect', '采集总开关', 'int', 'collectEnabled', '1', '1', 10, '是否启用采集能力', 0, 1, NOW(), NOW()
@@ -89,8 +56,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_history_task" (
   "created_at" timestamp DEFAULT NULL,
   "updated_at" timestamp DEFAULT NULL
 );
-CREATE INDEX IF NOT EXISTS "idx_ybp_collect_history_owner" ON "hg_youban_publish_collect_history_task" ("tenant_id", "account_id", "status", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_collect_history_source" ON "hg_youban_publish_collect_history_task" ("source_id", "status", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_history_log" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -103,7 +68,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_history_log" (
   "meta_json" text,
   "created_at" timestamp DEFAULT NULL
 );
-CREATE INDEX IF NOT EXISTS "idx_ybp_collect_history_log_task" ON "hg_youban_publish_collect_history_log" ("task_id", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_event_media" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -140,11 +104,6 @@ ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "so
 ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "source_chat_id" varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "source_grouped_id" varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "meta_json" text;
-CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_media_event" ON "hg_youban_publish_collect_event_media" ("event_id", "sort_index", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_media_owner" ON "hg_youban_publish_collect_event_media" ("tenant_id", "source_id", "cache_status", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_media_source" ON "hg_youban_publish_collect_event_media" ("source_chat_id", "source_message_id", "source_media_key");
-CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_media_file" ON "hg_youban_publish_collect_event_media" ("source_file_id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_media_cache" ON "hg_youban_publish_collect_event_media" ("cache_status", "updated_at", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_event_log" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -161,9 +120,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_event_log" (
 ALTER TABLE "hg_youban_publish_collect_event_log" ADD COLUMN IF NOT EXISTS "tenant_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_collect_event_log" ADD COLUMN IF NOT EXISTS "account_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_collect_event_log" ADD COLUMN IF NOT EXISTS "dispatch_id" bigint NOT NULL DEFAULT 0;
-CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_log_event" ON "hg_youban_publish_collect_event_log" ("event_id", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_log_owner" ON "hg_youban_publish_collect_event_log" ("tenant_id", "account_id", "created_at");
-CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_log_stage" ON "hg_youban_publish_collect_event_log" ("event_id", "stage", "status");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_template" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -179,7 +135,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_template" (
   "updated_at" timestamp DEFAULT NULL,
   "deleted_at" timestamp DEFAULT NULL
 );
-CREATE INDEX IF NOT EXISTS "idx_ybp_msg_tpl_owner" ON "hg_youban_publish_message_template" ("tenant_id", "status", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_media" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -198,7 +153,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_media" (
   "created_at" timestamp DEFAULT NULL,
   "updated_at" timestamp DEFAULT NULL
 );
-CREATE INDEX IF NOT EXISTS "idx_ybp_msg_media_tpl" ON "hg_youban_publish_message_media" ("template_id", "sort_index", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_push_plan" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -221,8 +175,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_push_plan" (
   "updated_at" timestamp DEFAULT NULL,
   "deleted_at" timestamp DEFAULT NULL
 );
-CREATE INDEX IF NOT EXISTS "idx_ybp_msg_plan_due" ON "hg_youban_publish_message_push_plan" ("status", "next_run_at", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_msg_plan_owner" ON "hg_youban_publish_message_push_plan" ("tenant_id", "status", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_listen_plan" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -246,8 +198,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_listen_plan" (
   "updated_at" timestamp DEFAULT NULL,
   "deleted_at" timestamp DEFAULT NULL
 );
-CREATE INDEX IF NOT EXISTS "idx_ybp_msg_listen_plan_owner" ON "hg_youban_publish_message_listen_plan" ("tenant_id", "status", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_msg_listen_plan_account" ON "hg_youban_publish_message_listen_plan" ("tg_account_id", "status", "id");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_msg_listen_plan_code" ON "hg_youban_publish_message_listen_plan" ("bind_code");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_listen_target" (
@@ -270,7 +220,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_listen_target" (
   "deleted_at" timestamp DEFAULT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_msg_listen_target_chat" ON "hg_youban_publish_message_listen_target" ("plan_id", "target_chat_id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_msg_listen_target_plan" ON "hg_youban_publish_message_listen_target" ("plan_id", "status", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_listen_notice" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -290,7 +239,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_listen_notice" (
   "created_at" timestamp DEFAULT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_msg_listen_notice_dedupe" ON "hg_youban_publish_message_listen_notice" ("dedupe_key");
-CREATE INDEX IF NOT EXISTS "idx_ybp_msg_listen_notice_plan" ON "hg_youban_publish_message_listen_notice" ("plan_id", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_listen_sender" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -306,7 +254,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_listen_sender" (
   "updated_at" timestamp DEFAULT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_msg_listen_sender_user" ON "hg_youban_publish_message_listen_sender" ("tg_account_id", "telegram_user_id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_msg_listen_sender_tenant" ON "hg_youban_publish_message_listen_sender" ("tenant_id", "tg_account_id");
 
 CREATE TABLE IF NOT EXISTS hg_youban_publish_quick_push_plan (
   id bigserial PRIMARY KEY,
@@ -322,10 +269,6 @@ CREATE TABLE IF NOT EXISTS hg_youban_publish_quick_push_plan (
   updated_at timestamp,
   deleted_at timestamp
 );
-CREATE INDEX IF NOT EXISTS idx_ybp_quick_plan_owner ON hg_youban_publish_quick_push_plan (tenant_id,status,id);
-
-CREATE UNIQUE INDEX IF NOT EXISTS uk_content_profile_no ON hg_content_profile (profile_no);
-
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_material_import_task" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
@@ -357,9 +300,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_material_import_task" (
   "created_at" timestamp DEFAULT NULL,
   "updated_at" timestamp DEFAULT NULL
 );
-CREATE INDEX IF NOT EXISTS "idx_ybp_material_import_owner" ON "hg_youban_publish_material_import_task" ("tenant_id", "account_id", "status", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_material_import_tg" ON "hg_youban_publish_material_import_task" ("tenant_id", "tg_account_id", "source_chat_id", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_material_import_status" ON "hg_youban_publish_material_import_task" ("status", "next_run_at", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_material_import_group" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -389,11 +329,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_material_import_group" (
   "updated_at" timestamp DEFAULT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_material_import_group" ON "hg_youban_publish_material_import_group" ("tenant_id", "source_unique_key");
-CREATE INDEX IF NOT EXISTS "idx_ybp_material_import_group_task" ON "hg_youban_publish_material_import_group" ("task_id", "status", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_material_import_group_profile" ON "hg_youban_publish_material_import_group" ("profile_id", "id");
-
-CREATE INDEX IF NOT EXISTS "idx_ybp_media_similar_tenant" ON "hg_youban_publish_media" ("tenant_id", "media_type", "account_id", "profile_id", "id") WHERE "deleted_at" IS NULL AND "perceptual_hash" <> '';
-CREATE INDEX IF NOT EXISTS "idx_ybp_media_similar_account" ON "hg_youban_publish_media" ("account_id", "media_type", "profile_id", "id") WHERE "deleted_at" IS NULL AND "perceptual_hash" <> '';
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_bucket" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -410,4 +345,3 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_bucket" (
   "updated_at" timestamp DEFAULT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_media_phash_bucket_media_pos" ON "hg_youban_publish_media_phash_bucket" ("media_id", "bucket_pos");
-CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_bucket_lookup" ON "hg_youban_publish_media_phash_bucket" ("tenant_id", "media_type", "bucket_pos", "bucket_value", "account_id", "profile_id", "task_id", "media_id");

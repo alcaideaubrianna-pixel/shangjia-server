@@ -21,6 +21,8 @@ var (
 	publishTgAccountTable            = "hg_youban_publish_tg_account"
 	publishChannelTable              = "hg_youban_publish_channel"
 	publishTgChannelTable            = "hg_youban_publish_tg_channel"
+	publishTgChannelMemberTable      = "hg_youban_publish_tg_channel_member"
+	publishTgChannelMemberTaskTable  = "hg_youban_publish_tg_channel_member_sync_task"
 	publishTagTable                  = "hg_youban_publish_tag"
 	publishTgMessageTable            = "hg_youban_publish_tg_message"
 	publishTgMessageRepairRunTable   = pdao.YoubanPublishTgMessageRepairRun.Table()
