@@ -88,6 +88,7 @@ type ConfigModel struct {
 	SyncIntervalMinutes   int         `json:"syncIntervalMinutes" dc:"同步间隔分钟"`
 	BatchSize             int         `json:"batchSize" dc:"单批数量"`
 	Status                int         `json:"status" dc:"状态"`
+	LastSourceNoteId      int64       `json:"lastSourceNoteId" dc:"最后来源笔记ID"`
 	LastRunAt             *gtime.Time `json:"lastRunAt" dc:"最近运行时间"`
 	LastSuccessAt         *gtime.Time `json:"lastSuccessAt" dc:"最近成功时间"`
 	LastError             string      `json:"lastError" dc:"最近错误"`

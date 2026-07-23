@@ -1379,7 +1379,12 @@ func (s *sSysSync) executeRun(ctx context.Context, runId int64, configId int64, 
 	if limit > 0 && limit < batchSize {
 		batchSize = limit
 	}
-	rows, err := s.fetchSourceNotes(ctx, db, configId, batchSize)
+	cursorNoteId, err := s.bootstrapConfigCursor(ctx, cfg)
+	if err != nil {
+		_ = s.markConfigRunFailed(ctx, configId, err.Error())
+		return s.finishRun(ctx, runId, sysin.RunStatusFailed, g.Map{"error_message": err.Error()})
+	}
+	rows, err := s.fetchSourceNotes(ctx, db, configId, cursorNoteId, batchSize)
 	if err != nil {
 		_ = s.markConfigRunFailed(ctx, configId, err.Error())
 		return s.finishRun(ctx, runId, sysin.RunStatusFailed, g.Map{"error_message": err.Error()})
@@ -1389,6 +1394,7 @@ func (s *sSysSync) executeRun(ctx context.Context, runId int64, configId int64, 
 	created, updated, skipped, failed := 0, 0, 0, 0
 	logs := make([]string, 0, len(rows)+1)
 	channelStats := map[int64]*channelRunStat{}
+	cursorBlocked := false
 	for _, row := range rows {
 		itemStarted := time.Now()
 		result, e := "", error(nil)
@@ -1416,6 +1422,23 @@ func (s *sSysSync) executeRun(ctx context.Context, runId int64, configId int64, 
 			default:
 				skipped++
 			}
+			if !cursorBlocked {
+				noteId := row["note_id"].Int64()
+				if noteId > cursorNoteId {
+					cursorNoteId = noteId
+					if cursorErr := s.saveConfigCursor(ctx, configId, cursorNoteId); cursorErr != nil {
+						failed++
+						status = sysin.RunStatusFailed
+						result = "failed"
+						errMsg = cursorErr.Error()
+						logs = append(logs, fmt.Sprintf("note:%d failed:%s", noteId, cursorErr.Error()))
+						e = cursorErr
+					}
+				}
+			}
+		}
+		if e != nil {
+			cursorBlocked = true
 		}
 		_ = s.createRunItem(ctx, runId, configId, row, result, status, errMsg, time.Since(itemStarted).Milliseconds())
 		accumulateChannelStat(channelStats, row, result)
@@ -1466,12 +1489,7 @@ func (s *sSysSync) markConfigRunFailed(ctx context.Context, configId int64, mess
 	return nil
 }
 
-func (s *sSysSync) fetchSourceNotes(ctx context.Context, db gdb.DB, configId int64, limit int) ([]gdb.Record, error) {
-	cursor, _ := g.DB().Model(profileMapTable).Safe().Ctx(ctx).Where("config_id", configId).OrderDesc("feiniu_note_id").One()
-	lastNoteId := int64(0)
-	if !cursor.IsEmpty() {
-		lastNoteId = cursor["feiniu_note_id"].Int64()
-	}
+func (s *sSysSync) fetchSourceNotes(ctx context.Context, db gdb.DB, configId int64, lastNoteId int64, limit int) ([]gdb.Record, error) {
 	fields := strings.Join([]string{
 		"n.note_id", "n.note_uuid", "n.note_code", "n.title", "n.plain_text", "n.html_text",
 		"n.category_code", "n.province", "n.city", "n.age", "n.height", "n.weight", "n.cup_size",
@@ -1793,6 +1811,47 @@ func (s *sSysSync) saveChannelMapping(ctx context.Context, cfg gdb.Record, row g
 func (s *sSysSync) touchChannelCursor(ctx context.Context, cfg gdb.Record, row gdb.Record, sourceUpdatedAt *gtime.Time) error {
 	_, err := g.DB().Model(channelMapTable).Safe().Ctx(ctx).Where("config_id", cfg["id"].Int64()).Where("feiniu_channel_id", row["source_channel_id"].Int64()).Data(g.Map{"last_source_update_time": sourceUpdatedAt, "last_source_note_id": row["note_id"].Int64(), "updated_at": gtime.Now()}).Update()
 	return err
+}
+
+func (s *sSysSync) saveConfigCursor(ctx context.Context, configId int64, noteId int64) error {
+	if configId <= 0 || noteId <= 0 {
+		return nil
+	}
+	_, err := g.DB().Model(configTable).Safe().Ctx(ctx).Where("id", configId).Data(g.Map{"last_source_note_id": noteId, "updated_at": gtime.Now()}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "保存同步游标失败")
+	}
+	return nil
+}
+
+func (s *sSysSync) bootstrapConfigCursor(ctx context.Context, cfg gdb.Record) (int64, error) {
+	current := cfg["last_source_note_id"].Int64()
+	if current > 0 {
+		return current, nil
+	}
+	configId := cfg["id"].Int64()
+	if configId <= 0 {
+		return 0, nil
+	}
+	row, err := g.DB().Model(profileMapTable).Safe().Ctx(ctx).
+		Fields("MAX(feiniu_note_id) AS last_source_note_id").
+		Where("config_id", configId).
+		One()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取同步游标失败")
+	}
+	if row.IsEmpty() {
+		return 0, nil
+	}
+	cursor := row["last_source_note_id"].Int64()
+	if cursor <= 0 {
+		return 0, nil
+	}
+	if err = s.saveConfigCursor(ctx, configId, cursor); err != nil {
+		return 0, err
+	}
+	cfg["last_source_note_id"] = gvar.New(cursor)
+	return cursor, nil
 }
 
 func (s *sSysSync) upsertProfile(ctx context.Context, cfg gdb.Record, row gdb.Record, accountId int64, contentHash string, publishedAt *gtime.Time) (int64, int64, error) {
@@ -2164,7 +2223,7 @@ func configRecordToSave(row gdb.Record) *sysin.ConfigSaveInp {
 	return &sysin.ConfigSaveInp{Id: row["id"].Int64(), Name: row["name"].String(), DbType: row["db_type"].String(), DbHost: row["db_host"].String(), DbPort: row["db_port"].Int(), DbName: row["db_name"].String(), DbUser: row["db_user"].String(), DbPassword: decodePassword(row["db_password"].String()), TargetTenantId: row["target_tenant_id"].Int64(), TargetParentAccountId: row["target_parent_account_id"].Int64(), AutoCreateAccount: row["auto_create_account"].Int(), SyncMedia: row["sync_media"].Int(), SyncVerifyMedia: row["sync_verify_media"].Int(), AutoSyncEnabled: row["auto_sync_enabled"].Int(), SyncIntervalMinutes: row["sync_interval_minutes"].Int(), BatchSize: row["batch_size"].Int(), Status: row["status"].Int()}
 }
 func configFields() string {
-	return "id,name,db_type,db_host,db_port,db_name,db_user,target_tenant_id,target_parent_account_id,auto_create_account,sync_media,sync_verify_media,auto_sync_enabled,sync_interval_minutes,batch_size,status,last_run_at,last_success_at,last_error,created_at,updated_at"
+	return "id,name,db_type,db_host,db_port,db_name,db_user,target_tenant_id,target_parent_account_id,auto_create_account,sync_media,sync_verify_media,auto_sync_enabled,sync_interval_minutes,batch_size,last_source_note_id,status,last_run_at,last_success_at,last_error,created_at,updated_at"
 }
 func runFields() string {
 	return "id,config_id,run_type,status,total_count,created_count,updated_count,skipped_count,failed_count,started_at,finished_at,error_message,runtime_log,created_at"
