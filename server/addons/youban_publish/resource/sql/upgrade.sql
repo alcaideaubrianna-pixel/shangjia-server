@@ -424,14 +424,3 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media_phash_bucket` (
   UNIQUE KEY `uk_ybp_media_phash_bucket_media_pos` (`media_id`,`bucket_pos`),
   KEY `idx_ybp_media_phash_bucket_lookup` (`tenant_id`,`media_type`,`bucket_pos`,`bucket_value`,`account_id`,`profile_id`,`task_id`,`media_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体感知哈希分桶';
-
-INSERT IGNORE INTO `hg_youban_publish_media_phash_bucket` (`tenant_id`,`account_id`,`profile_id`,`media_id`,`task_id`,`media_type`,`hash_value`,`bucket_pos`,`bucket_value`,`created_at`,`updated_at`)
-SELECT m.`tenant_id`,m.`account_id`,m.`profile_id`,m.`id`,m.`task_id`,m.`media_type`,LOWER(m.`perceptual_hash`),n.`pos`,SUBSTRING(LOWER(m.`perceptual_hash`),n.`pos`,1),NOW(),NOW()
-FROM `hg_youban_publish_media` m
-JOIN (
-  SELECT 1 AS `pos` UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
-  UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8
-  UNION ALL SELECT 9 UNION ALL SELECT 10 UNION ALL SELECT 11 UNION ALL SELECT 12
-  UNION ALL SELECT 13 UNION ALL SELECT 14 UNION ALL SELECT 15 UNION ALL SELECT 16
-) n
-WHERE m.`deleted_at` IS NULL AND m.`perceptual_hash` <> '' AND CHAR_LENGTH(m.`perceptual_hash`) = 16;

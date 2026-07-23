@@ -58,6 +58,8 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 	switch a1 {
 	case "menuTree":
 		fix.UpdateAdminMenuTree(ctx)
+	case "mediaPHashBucket":
+		err = fix.BackfillYoubanPublishMediaPHashBucket(ctx)
 	default:
 		err = gerror.Newf("fix a1 is invalid, a1:%v", a1)
 	}

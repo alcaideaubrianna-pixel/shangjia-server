@@ -411,18 +411,3 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_bucket" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_media_phash_bucket_media_pos" ON "hg_youban_publish_media_phash_bucket" ("media_id", "bucket_pos");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_bucket_lookup" ON "hg_youban_publish_media_phash_bucket" ("tenant_id", "media_type", "bucket_pos", "bucket_value", "account_id", "profile_id", "task_id", "media_id");
-
-INSERT INTO "hg_youban_publish_media_phash_bucket" ("tenant_id","account_id","profile_id","media_id","task_id","media_type","hash_value","bucket_pos","bucket_value","created_at","updated_at")
-SELECT m."tenant_id",m."account_id",m."profile_id",m."id",m."task_id",m."media_type",lower(m."perceptual_hash"),gs."pos",substring(lower(m."perceptual_hash"),gs."pos",1),NOW(),NOW()
-FROM "hg_youban_publish_media" m
-CROSS JOIN generate_series(1,16) AS gs("pos")
-WHERE m."deleted_at" IS NULL AND m."perceptual_hash" <> '' AND length(m."perceptual_hash") = 16
-ON CONFLICT ("media_id","bucket_pos") DO UPDATE SET
-  "tenant_id" = EXCLUDED."tenant_id",
-  "account_id" = EXCLUDED."account_id",
-  "profile_id" = EXCLUDED."profile_id",
-  "task_id" = EXCLUDED."task_id",
-  "media_type" = EXCLUDED."media_type",
-  "hash_value" = EXCLUDED."hash_value",
-  "bucket_value" = EXCLUDED."bucket_value",
-  "updated_at" = NOW();
