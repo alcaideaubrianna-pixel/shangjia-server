@@ -2045,7 +2045,25 @@ func (s *sSysSync) syncMedia(ctx context.Context, source gdb.DB, cfg gdb.Record,
 		fileURL := feiNiuImportedMediaURL(item)
 		storagePath := feiNiuImportedMediaStoragePath(item)
 		posterURL, posterStoragePath := feiNiuImportedVideoPoster(item, mediaType)
-		data := g.Map{"tenant_id": cfg["target_tenant_id"].Int64(), "merchant_id": cfg["target_tenant_id"].Int64(), "account_id": accountId, "task_id": taskId, "profile_id": profileId, "attachment_id": 0, "media_type": mediaType, "purpose": purpose, "name": mediaName(item), "file_url": fileURL, "original_file_url": fileURL, "poster_url": posterURL, "poster_storage_path": posterStoragePath, "storage_path": storagePath, "original_storage_path": storagePath, "mime_type": item["mime_type"].String(), "md5": item["binary_md5"].String(), "perceptual_hash": item["perceptual_hash"].String(), "tg_file_id": "", "tg_cache_status": "invalid", "size": item["file_size"].Int64(), "sort_index": i + 1, "status": 1, "created_at": now, "updated_at": now}
+		perceptualHash := item["perceptual_hash"].String()
+		assetResult, processErr := publishservice.SysPublish().ProcessStoredMediaAssets(ctx, &psysin.StoredMediaAssetsInp{
+			MediaType: mediaType,
+			LocalPath: item["local_file_path"].String(),
+			FileName:  mediaName(item),
+		})
+		if processErr != nil {
+			return gerror.Wrap(processErr, "统一处理 FeiNiu 媒体失败")
+		}
+		if assetResult != nil && assetResult.Processed {
+			if assetResult.PerceptualHash != "" {
+				perceptualHash = assetResult.PerceptualHash
+			}
+			if assetResult.PosterUrl != "" {
+				posterURL = assetResult.PosterUrl
+				posterStoragePath = assetResult.PosterStoragePath
+			}
+		}
+		data := g.Map{"tenant_id": cfg["target_tenant_id"].Int64(), "merchant_id": cfg["target_tenant_id"].Int64(), "account_id": accountId, "task_id": taskId, "profile_id": profileId, "attachment_id": 0, "media_type": mediaType, "purpose": purpose, "name": mediaName(item), "file_url": fileURL, "original_file_url": fileURL, "poster_url": posterURL, "poster_storage_path": posterStoragePath, "storage_path": storagePath, "original_storage_path": storagePath, "mime_type": item["mime_type"].String(), "md5": item["binary_md5"].String(), "perceptual_hash": perceptualHash, "tg_file_id": "", "tg_cache_status": "invalid", "size": item["file_size"].Int64(), "sort_index": i + 1, "status": 1, "created_at": now, "updated_at": now}
 		mediaId, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
 		if err != nil {
 			return gerror.Wrap(err, "保存 FeiNiu 媒体失败")

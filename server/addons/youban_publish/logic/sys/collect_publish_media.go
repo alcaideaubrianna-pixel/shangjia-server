@@ -10,12 +10,11 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 func (s *sSysPublish) rebuildCollectPublishMedia(ctx context.Context, event gdb.Record, content *collectContentResult, taskId int64) error {
-	if err := ensureMediaEditColumns(ctx); err != nil {
-		return err
-	}
 	items := make([]collectMediaItem, 0)
 	if content != nil && strings.TrimSpace(content.MediaJSON) != "" {
 		_ = json.Unmarshal([]byte(content.MediaJSON), &items)
@@ -88,12 +87,27 @@ func (s *sSysPublish) insertCollectPublishMediaRow(ctx context.Context, event gd
 	}
 	storagePath := strings.TrimSpace(item.StoragePath)
 	fileUrl := strings.TrimSpace(item.FileUrl)
+	assets, err := s.ProcessStoredMediaAssets(ctx, &sysin.StoredMediaAssetsInp{
+		MediaType: mediaType,
+		LocalPath: storagePath,
+	})
+	if err != nil {
+		return err
+	}
 	cacheStatus := tgCacheStatusInvalid
 	if strings.TrimSpace(item.FileId) != "" {
 		cacheStatus = tgCacheStatusValid
 	}
 	now := gtime.Now()
-	_, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(g.Map{
+	posterURL := strings.TrimSpace(item.PosterUrl)
+	posterStoragePath := ""
+	perceptualHash := ""
+	if assets != nil && assets.Processed {
+		perceptualHash = assets.PerceptualHash
+		posterURL = firstNonEmpty(assets.PosterUrl, posterURL)
+		posterStoragePath = assets.PosterStoragePath
+	}
+	mediaId, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(g.Map{
 		"tenant_id":           event["tenant_id"].Int64(),
 		"merchant_id":         event["tenant_id"].Int64(),
 		"account_id":          event["account_id"].Int64(),
@@ -106,13 +120,18 @@ func (s *sSysPublish) insertCollectPublishMediaRow(ctx context.Context, event gd
 		"storage_path":        storagePath,
 		"tg_cache_asset_hash": mediaAssetHash(storagePath, fileUrl),
 		"tg_cache_status":     cacheStatus,
-		"poster_url":          strings.TrimSpace(item.PosterUrl),
+		"poster_url":          posterURL,
+		"poster_storage_path": posterStoragePath,
+		"perceptual_hash":     perceptualHash,
 		"sort_index":          sortIndex,
 		"status":              1,
 		"created_at":          now,
 		"updated_at":          now,
 		"created_by":          event["account_id"].Int64(),
 		"updated_by":          event["account_id"].Int64(),
-	}).Insert()
-	return gerror.Wrap(err, "创建采集媒体失败")
+	}).InsertAndGetId()
+	if err != nil {
+		return gerror.Wrap(err, "创建采集媒体失败")
+	}
+	return s.syncMediaPHashBucketByMediaId(ctx, mediaId)
 }

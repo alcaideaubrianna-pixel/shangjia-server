@@ -68,9 +68,6 @@ func (s *sSysPublish) telegramJobStillSending(ctx context.Context, jobId int64) 
 }
 
 func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecord, purpose string) ([]*telegramMediaItem, error) {
-	if err := ensureMediaEditColumns(ctx); err != nil {
-		return nil, err
-	}
 	records, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("task_id", job.TaskId).
 		Where("purpose", purpose).

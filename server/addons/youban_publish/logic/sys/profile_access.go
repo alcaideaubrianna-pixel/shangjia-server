@@ -139,9 +139,6 @@ func (s *sSysPublish) availableProfileChannelIds(ctx context.Context, ids []int6
 }
 
 func (s *sSysPublish) mediaListByProfile(ctx context.Context, profileId int64, tenantId int64, accountId int64) (list []*sysin.MediaModel, err error) {
-	if err = ensureMediaEditColumns(ctx); err != nil {
-		return nil, err
-	}
 	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("profile_id", profileId).WhereNull("deleted_at")
 	if tenantId > 0 {
 		mod = mod.Where("tenant_id", tenantId)

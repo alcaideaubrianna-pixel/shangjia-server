@@ -408,9 +408,6 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 	if attachment == nil || attachment.Id <= 0 {
 		return nil, gerror.New("附件上传失败")
 	}
-	if err = ensureMediaEditColumns(ctx); err != nil {
-		return nil, err
-	}
 	now := gtime.Now()
 	editStatus := strings.TrimSpace(in.EditStatus)
 	if editStatus == "" {
@@ -529,9 +526,6 @@ func (s *sSysPublish) mediaList(ctx context.Context, taskId int64, accountId int
 	if taskId <= 0 {
 		return nil, gerror.New("任务ID不能为空")
 	}
-	if err = ensureMediaEditColumns(ctx); err != nil {
-		return nil, err
-	}
 	if _, err = s.getTask(ctx, taskId, accountId); err != nil {
 		return nil, err
 	}
@@ -554,9 +548,6 @@ func (s *sSysPublish) mediaList(ctx context.Context, taskId int64, accountId int
 func (s *sSysPublish) mediaListByTenant(ctx context.Context, taskId int64, tenantId int64) (list []*sysin.MediaModel, err error) {
 	if taskId <= 0 {
 		return nil, gerror.New("任务ID不能为空")
-	}
-	if err = ensureMediaEditColumns(ctx); err != nil {
-		return nil, err
 	}
 	if _, err = s.getTaskByTenant(ctx, taskId, tenantId); err != nil {
 		return nil, err
@@ -612,86 +603,6 @@ func isLikelyEditedMedia(item *sysin.MediaModel) bool {
 	}
 	name := strings.ToLower(strings.TrimSpace(item.Name))
 	return strings.Contains(name, "-edited.") || strings.Contains(name, "_edited.")
-}
-
-func ensureMediaEditColumns(ctx context.Context) error {
-	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
-		_, err := g.DB().Exec(ctx, `
-ALTER TABLE "hg_youban_publish_media"
-  ADD COLUMN IF NOT EXISTS "original_attachment_id" bigint NOT NULL DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS "original_file_url" varchar(1024) NOT NULL DEFAULT '',
-  ADD COLUMN IF NOT EXISTS "original_storage_path" varchar(1024) NOT NULL DEFAULT '',
-  ADD COLUMN IF NOT EXISTS "edited_attachment_id" bigint NOT NULL DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS "edited_file_url" varchar(1024) NOT NULL DEFAULT '',
-  ADD COLUMN IF NOT EXISTS "edited_storage_path" varchar(1024) NOT NULL DEFAULT '',
-  ADD COLUMN IF NOT EXISTS "edit_config_json" text,
-  ADD COLUMN IF NOT EXISTS "edit_status" varchar(16) NOT NULL DEFAULT 'raw',
-  ADD COLUMN IF NOT EXISTS "tg_cache_asset_hash" varchar(1024) NOT NULL DEFAULT '',
-  ADD COLUMN IF NOT EXISTS "tg_cache_status" varchar(16) NOT NULL DEFAULT 'invalid'`)
-		if err != nil {
-			return gerror.Wrap(err, "检查任务媒体编辑字段失败")
-		}
-		_, err = g.DB().Exec(ctx, `ALTER TABLE "hg_youban_publish_media" ALTER COLUMN "tg_cache_asset_hash" TYPE varchar(1024)`)
-		if err != nil {
-			return gerror.Wrap(err, "检查TG媒体缓存字段长度失败")
-		}
-		_, err = g.DB().Exec(ctx, `
-UPDATE "hg_youban_publish_media"
-SET "original_attachment_id" = "attachment_id",
-    "original_file_url" = "file_url",
-    "original_storage_path" = "storage_path"
-WHERE "original_attachment_id" = 0 AND "attachment_id" > 0`)
-		if err != nil {
-			return gerror.Wrap(err, "补齐任务媒体原始素材字段失败")
-		}
-		_, err = g.DB().Exec(ctx, `
-UPDATE "hg_youban_publish_media"
-SET "edit_status" = 'edited'
-WHERE ("edit_status" = '' OR "edit_status" = 'raw' OR "edit_status" IS NULL)
-  AND ("edited_attachment_id" > 0 OR "edited_storage_path" <> '' OR "edited_file_url" <> '' OR lower("name") LIKE '%-edited.%' OR lower("name") LIKE '%_edited.%')`)
-		if err != nil {
-			return gerror.Wrap(err, "补齐任务媒体编辑状态失败")
-		}
-		_, err = g.DB().Exec(ctx, `
-UPDATE "hg_youban_publish_media"
-SET "tg_cache_status" = 'valid',
-    "tg_cache_asset_hash" = COALESCE(NULLIF("md5", ''), NULLIF("storage_path", ''), NULLIF("file_url", ''))
-WHERE "tg_file_id" <> ''
-  AND ("tg_cache_status" = '' OR "tg_cache_status" = 'invalid' OR "tg_cache_status" IS NULL)
-  AND "edit_status" = 'raw'`)
-		if err != nil {
-			return gerror.Wrap(err, "补齐TG媒体缓存状态失败")
-		}
-		return nil
-	}
-	statements := []string{
-		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `original_attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '原始HotGo附件ID' AFTER `attachment_id`",
-		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `original_file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始访问地址' AFTER `file_url`",
-		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `original_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始存储路径' AFTER `storage_path`",
-		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edited_attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '编辑后HotGo附件ID' AFTER `original_attachment_id`",
-		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edited_file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '编辑后访问地址' AFTER `original_file_url`",
-		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edited_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '编辑后存储路径' AFTER `original_storage_path`",
-		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edit_config_json` text COMMENT '图片编辑配置' AFTER `perceptual_hash`",
-		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `edit_status` varchar(16) NOT NULL DEFAULT 'raw' COMMENT '编辑状态：raw/edited' AFTER `edit_config_json`",
-		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tg_cache_asset_hash` varchar(1024) NOT NULL DEFAULT '' COMMENT 'TG缓存素材Hash' AFTER `tg_thumb_file_id`",
-		"ALTER TABLE `hg_youban_publish_media` ADD COLUMN `tg_cache_status` varchar(16) NOT NULL DEFAULT 'invalid' COMMENT 'TG缓存状态' AFTER `tg_cache_asset_hash`",
-		"ALTER TABLE `hg_youban_publish_media` MODIFY COLUMN `tg_cache_asset_hash` varchar(1024) NOT NULL DEFAULT '' COMMENT 'TG缓存素材Hash'",
-	}
-	for _, statement := range statements {
-		if _, err := g.DB().Exec(ctx, statement); err != nil && !isIgnorableImportTaskServerIPColumnError(err) {
-			return gerror.Wrap(err, "检查任务媒体编辑字段失败")
-		}
-	}
-	if _, err := g.DB().Exec(ctx, "UPDATE `hg_youban_publish_media` SET `original_attachment_id`=`attachment_id`, `original_file_url`=`file_url`, `original_storage_path`=`storage_path` WHERE `original_attachment_id`=0 AND `attachment_id`>0"); err != nil {
-		return gerror.Wrap(err, "补齐任务媒体原始素材字段失败")
-	}
-	if _, err := g.DB().Exec(ctx, "UPDATE `hg_youban_publish_media` SET `edit_status`='edited' WHERE (`edit_status`='' OR `edit_status`='raw' OR `edit_status` IS NULL) AND (`edited_attachment_id`>0 OR `edited_storage_path`<>'' OR `edited_file_url`<>'' OR lower(`name`) LIKE '%-edited.%' OR lower(`name`) LIKE '%_edited.%')"); err != nil {
-		return gerror.Wrap(err, "补齐任务媒体编辑状态失败")
-	}
-	if _, err := g.DB().Exec(ctx, "UPDATE `hg_youban_publish_media` SET `tg_cache_status`='valid', `tg_cache_asset_hash`=COALESCE(NULLIF(`md5`, ''), NULLIF(`storage_path`, ''), NULLIF(`file_url`, '')) WHERE `tg_file_id`<>'' AND (`tg_cache_status`='' OR `tg_cache_status`='invalid' OR `tg_cache_status` IS NULL) AND `edit_status`='raw'"); err != nil {
-		return gerror.Wrap(err, "补齐TG媒体缓存状态失败")
-	}
-	return nil
 }
 
 func normalizeMediaFileURL(fileURL string, storagePath string) string {
@@ -791,9 +702,6 @@ func (s *sSysPublish) deleteMedia(ctx context.Context, id int64, accountId int64
 	if id <= 0 {
 		return gerror.New("媒体ID不能为空")
 	}
-	if err = ensureMediaEditColumns(ctx); err != nil {
-		return err
-	}
 	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", id).WhereNull("deleted_at")
 	if accountId > 0 {
 		mod = mod.Where("account_id", accountId)
@@ -842,9 +750,6 @@ func (s *sSysPublish) deleteMedia(ctx context.Context, id int64, accountId int64
 func (s *sSysPublish) deleteMediaByTenant(ctx context.Context, id int64, tenantId int64, operatorId int64) (err error) {
 	if id <= 0 {
 		return gerror.New("媒体ID不能为空")
-	}
-	if err = ensureMediaEditColumns(ctx); err != nil {
-		return err
 	}
 	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("id", id).

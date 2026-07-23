@@ -202,9 +202,6 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, taskId int64, pro
 	if len(displayMedia) == 0 && len(verifyMedia) == 0 {
 		return nil
 	}
-	if err := ensureMediaEditColumns(ctx); err != nil {
-		return err
-	}
 	now := gtime.Now()
 	insertItems := func(purpose string, media []*sysin.MessageTemplateMediaInp) error {
 		for index, item := range media {
@@ -223,7 +220,16 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, taskId int64, pro
 			storagePath := strings.TrimSpace(item.StoragePath)
 			assetHash := mediaAssetHash(strings.TrimSpace(item.AssetHash), storagePath, fileURL)
 			perceptualHash := ""
-			if strings.EqualFold(mediaType, "image") {
+			posterURL := strings.TrimSpace(item.PosterUrl)
+			posterStoragePath := strings.TrimSpace(item.PosterStoragePath)
+			if storedAssets, assetErr := s.ProcessStoredMediaAssets(ctx, &sysin.StoredMediaAssetsInp{MediaType: mediaType, LocalPath: storagePath, FileName: item.Name}); assetErr != nil {
+				g.Log().Warning(ctx, "处理机器人资料媒体失败", g.Map{"profileId": profileId, "mediaType": mediaType, "path": storagePath, "err": assetErr})
+			} else if storedAssets != nil && storedAssets.Processed {
+				perceptualHash = storedAssets.PerceptualHash
+				posterURL = firstNonEmpty(storedAssets.PosterUrl, posterURL)
+				posterStoragePath = firstNonEmpty(storedAssets.PosterStoragePath, posterStoragePath)
+			}
+			if perceptualHash == "" && strings.EqualFold(mediaType, "image") {
 				imageURL := normalizeBotMediaCacheURL(fileURL)
 				if imageURL != "" {
 					if hash, hashErr := cachedRemoteImagePHash(ctx, imageURL); hashErr != nil {
@@ -248,8 +254,8 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, taskId int64, pro
 				"file_url":               fileURL,
 				"original_file_url":      fileURL,
 				"edited_file_url":        "",
-				"poster_url":             strings.TrimSpace(item.PosterUrl),
-				"poster_storage_path":    strings.TrimSpace(item.PosterStoragePath),
+				"poster_url":             posterURL,
+				"poster_storage_path":    posterStoragePath,
 				"tg_file_id":             strings.TrimSpace(item.TgFileId),
 				"tg_thumb_file_id":       strings.TrimSpace(item.TgThumbFileId),
 				"tg_cache_asset_hash":    assetHash,

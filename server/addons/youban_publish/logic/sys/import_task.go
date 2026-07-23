@@ -24,7 +24,6 @@ import (
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/library/storager"
 	"hotgo/internal/model"
-	basesysin "hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
 	"hotgo/utility/file"
 
@@ -1558,28 +1557,13 @@ func (s *sSysPublish) importLegacyCMSMedia(ctx context.Context, runId int64, sou
 		if item.MediaType == "video" {
 			uploadType = storager.KindVideo
 		}
-		perceptualHash := ""
-		if item.MediaType == "image" {
-			perceptualHash, err = uploadImagePHash(uploadFile)
-			if err != nil {
-				return imported, err
-			}
+		assets, err := requireMediaUploadAssets(ctx, item.MediaType, uploadFile, nil)
+		if err != nil {
+			return imported, err
 		}
 		attachment, err := service.CommonUpload().UploadFile(ctx, uploadType, uploadFile)
 		if err != nil {
 			return imported, err
-		}
-		var posterAttachment *basesysin.AttachmentListModel
-		if item.MediaType == "video" {
-			posterResult, posterErr := buildVideoPosterResultFromContent(ctx, name, content)
-			if posterResult != nil {
-				posterAttachment = posterResult.Attachment
-				perceptualHash = posterResult.PerceptualHash
-			}
-			if posterErr != nil {
-				_ = s.appendImportRunLog(ctx, runId, "warning", importStageMedia, "旧站视频封面生成失败，继续导入视频", g.Map{"sourceNoteId": sourceNoteId, "name": name, "error": posterErr.Error(), "sortIndex": idx + 1})
-				posterAttachment = nil
-			}
 		}
 		_ = s.appendImportRunLog(ctx, runId, "info", importStageMedia, "资源已写入当前存储", g.Map{"sourceNoteId": sourceNoteId, "attachmentId": attachment.Id, "path": attachment.Path, "purpose": purpose, "sortIndex": idx + 1})
 		sortIndex := item.SortIndex
@@ -1591,7 +1575,7 @@ func (s *sSysPublish) importLegacyCMSMedia(ctx context.Context, runId int64, sou
 			MediaType: item.MediaType,
 			Purpose:   purpose,
 			SortIndex: sortIndex,
-		}, attachment, posterAttachment, nil, perceptualHash); err != nil {
+		}, attachment, mediaPosterAttachment(assets.Poster), nil, assets.PerceptualHash); err != nil {
 			return imported, err
 		}
 		imported++

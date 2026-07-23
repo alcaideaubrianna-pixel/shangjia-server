@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/net/ghttp"
 
+	"hotgo/addons/youban_publish/model/input/sysin"
 	basesysin "hotgo/internal/model/input/sysin"
 	"hotgo/utility/file"
 )
@@ -18,6 +19,69 @@ import (
 type mediaUploadAssets struct {
 	PerceptualHash string
 	Poster         *videoPosterResult
+}
+
+// prepareStoredMediaAssets processes a media file that is already in local storage.
+// It is used by TG collection/import paths so they share the upload pipeline's
+// pHash and video poster behavior.
+func prepareStoredMediaAssets(ctx context.Context, mediaType string, storagePath string, fileName string) (*mediaUploadAssets, error) {
+	storagePath = strings.TrimSpace(storagePath)
+	if storagePath == "" {
+		return &mediaUploadAssets{}, nil
+	}
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	if fileName == "" {
+		fileName = filepath.Base(storagePath)
+	}
+	switch mediaType {
+	case "video":
+		poster, err := buildVideoPosterResultFromPath(ctx, storagePath, fileName)
+		if err != nil {
+			return nil, err
+		}
+		res := &mediaUploadAssets{Poster: poster}
+		if poster != nil {
+			res.PerceptualHash = poster.PerceptualHash
+		}
+		return res, nil
+	case "image":
+		hash, err := imagePHashFromPath(storagePath)
+		if err != nil {
+			return nil, err
+		}
+		return &mediaUploadAssets{PerceptualHash: fmt.Sprintf("%016x", hash.GetHash())}, nil
+	default:
+		return &mediaUploadAssets{}, nil
+	}
+}
+
+func (s *sSysPublish) ProcessStoredMediaAssets(ctx context.Context, in *sysin.StoredMediaAssetsInp) (res *sysin.StoredMediaAssetsModel, err error) {
+	res = &sysin.StoredMediaAssetsModel{}
+	if in == nil || strings.TrimSpace(in.LocalPath) == "" {
+		return res, nil
+	}
+	localPath := strings.TrimSpace(in.LocalPath)
+	if !filepath.IsAbs(localPath) {
+		localPath, err = filepath.Abs(localPath)
+		if err != nil {
+			return nil, gerror.Wrap(err, "解析媒体本地路径失败")
+		}
+	}
+	if !fileExists(localPath) {
+		return res, nil
+	}
+	assets, err := prepareStoredMediaAssets(ctx, in.MediaType, localPath, in.FileName)
+	if err != nil {
+		return nil, err
+	}
+	res.Processed = true
+	if assets == nil {
+		return res, nil
+	}
+	res.PerceptualHash = assets.PerceptualHash
+	res.PosterUrl = normalizeMediaFileURL(mediaPosterURL(assets.Poster), mediaPosterStoragePathValue(assets.Poster))
+	res.PosterStoragePath = mediaPosterStoragePathValue(assets.Poster)
+	return res, nil
 }
 
 func prepareMediaUploadAssets(

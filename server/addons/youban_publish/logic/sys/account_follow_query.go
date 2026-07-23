@@ -317,9 +317,6 @@ func (s *sSysPublish) mediaListByProfiles(ctx context.Context, profiles []*sysin
 	if len(profileIds) == 0 {
 		return buckets, nil
 	}
-	if err := ensureMediaEditColumns(ctx); err != nil {
-		return nil, err
-	}
 	var media []*sysin.MediaModel
 	err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Fields("id,tenant_id,account_id,task_id,profile_id,attachment_id,original_attachment_id,edited_attachment_id,media_type,purpose,name,file_url,original_file_url,edited_file_url,poster_url,storage_path,original_storage_path,edited_storage_path,poster_storage_path,edit_status,sort_index,status,created_at,updated_at").

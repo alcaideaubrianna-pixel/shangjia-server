@@ -147,8 +147,6 @@ func mediaPHashSearchCacheKey(ctx context.Context, queryHash uint64, in *sysin.P
 		fmt.Sprintf("tenant=%d", in.TenantId),
 		fmt.Sprintf("account=%d", in.AccountId),
 		fmt.Sprintf("threshold=%d", in.Threshold),
-		fmt.Sprintf("page=%d", in.Page),
-		fmt.Sprintf("perPage=%d", in.PerPage),
 		fmt.Sprintf("version=%s", mediaPHashBucketVersion(ctx)),
 	}
 	if len(accountIds) > 0 {
