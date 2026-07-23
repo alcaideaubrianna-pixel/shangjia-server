@@ -1720,12 +1720,7 @@ func (s *sSysSync) ensureChannelAccount(ctx context.Context, cfg gdb.Record, row
 	if cfg["auto_create_account"].Int() != 1 {
 		return 0, "", gerror.New("频道未映射上架账号")
 	}
-	username := fmt.Sprintf("feiniu_%d", channelId)
-	if chatId > 0 {
-		username = fmt.Sprintf("feiniu_chat_%d", chatId)
-	} else if channelId <= 0 {
-		username = fmt.Sprintf("feiniu_chat_%d", chatId)
-	}
+	username := feiNiuAccountUsername(title, channelId, chatId)
 	if accountId, accountUsername, findErr := s.findExistingFeiniuAccount(ctx, cfg, title, username); findErr != nil {
 		return 0, "", findErr
 	} else if accountId > 0 {
@@ -1734,7 +1729,7 @@ func (s *sSysSync) ensureChannelAccount(ctx context.Context, cfg gdb.Record, row
 		}
 		return accountId, accountUsername, nil
 	}
-	account, err := publishservice.SysPublish().ServerAccountSave(ctx, &psysin.AccountSaveInp{TenantId: cfg["target_tenant_id"].Int64(), ParentId: cfg["target_parent_account_id"].Int64(), AccountType: psysin.PublishAccountTypeUploader, Nickname: title, Username: username, Password: fmt.Sprintf("FN%d", time.Now().UnixNano()), DailyPublishLimit: 0, CanDirectPublish: 1, Status: 1, Remark: "FeiNiu 自动同步频道账号"})
+	account, err := publishservice.SysPublish().ServerAccountSave(ctx, &psysin.AccountSaveInp{TenantId: cfg["target_tenant_id"].Int64(), ParentId: cfg["target_parent_account_id"].Int64(), AccountType: psysin.PublishAccountTypeUploader, Nickname: title, Username: username, Password: fmt.Sprintf("FN%d", time.Now().UnixNano()), DailyPublishLimit: 0, CanDirectPublish: 1, Status: 1})
 	if err != nil && strings.Contains(strings.ToLower(err.Error()), "存在") {
 		var rowAcc gdb.Record
 		rowAcc, err = g.DB().Model("hg_youban_publish_account").Safe().Ctx(ctx).Where("tenant_id", cfg["target_tenant_id"].Int64()).Where("username", username).WhereNull("deleted_at").One()
@@ -1770,7 +1765,7 @@ func (s *sSysSync) findExistingFeiniuAccount(ctx context.Context, cfg gdb.Record
 	if strings.TrimSpace(title) == "" {
 		return 0, "", nil
 	}
-	row, err := base.Clone().Where("nickname", title).Where("remark", "FeiNiu 自动同步频道账号").Fields("id,username").OrderAsc("id").One()
+	row, err := base.Clone().Where("nickname", title).Fields("id,username").OrderAsc("id").One()
 	if err != nil {
 		return 0, "", gerror.Wrap(err, "读取 FeiNiu 上架账号失败")
 	}
