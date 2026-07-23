@@ -30,8 +30,7 @@ func (s *sSysPublish) AdminChannelMemberSyncStart(ctx context.Context, in *sysin
 	if err := ensureTgChannelMemberSchema(ctx); err != nil {
 		return nil, err
 	}
-	account, err := s.currentAdminAccount(ctx)
-	if err != nil {
+	if err := s.requireSystemSuperAdmin(ctx); err != nil {
 		return nil, err
 	}
 	if in == nil || in.TgAccountId <= 0 {
@@ -41,21 +40,22 @@ func (s *sSysPublish) AdminChannelMemberSyncStart(ctx context.Context, in *sysin
 	if in.ChannelId == "" {
 		return nil, gerror.New("请选择频道/群聊")
 	}
-	if err = s.ensureTgAccountBelongsAccount(ctx, in.TgAccountId, account.TenantId, account.Id); err != nil {
-		return nil, err
-	}
-	cache, err := s.tgChannelCacheByChannelId(ctx, account.TenantId, in.TgAccountId, in.ChannelId)
+	tenantId, err := s.tenantIdForTgAccount(ctx, in.TgAccountId)
 	if err != nil {
 		return nil, err
 	}
-	if running, err := s.channelMemberRunningTask(ctx, account.TenantId, in.TgAccountId, cache.ChannelId); err != nil {
+	cache, err := s.tgChannelCacheByChannelId(ctx, tenantId, in.TgAccountId, in.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	if running, err := s.channelMemberRunningTask(ctx, tenantId, in.TgAccountId, cache.ChannelId); err != nil {
 		return nil, err
 	} else if running != nil {
 		return s.AdminChannelMemberSyncView(ctx, &sysin.TgChannelMemberSyncViewInp{Id: running.Id})
 	}
 	now := gtime.Now()
 	id, err := g.DB().Model(publishTgChannelMemberTaskTable).Safe().Ctx(ctx).Data(g.Map{
-		"tenant_id":        account.TenantId,
+		"tenant_id":        tenantId,
 		"tg_account_id":    in.TgAccountId,
 		"channel_id":       cache.ChannelId,
 		"channel_title":    strings.TrimSpace(cache.ChannelTitle),
@@ -79,19 +79,17 @@ func (s *sSysPublish) AdminChannelMemberSyncStart(ctx context.Context, in *sysin
 }
 
 func (s *sSysPublish) AdminChannelMemberSyncView(ctx context.Context, in *sysin.TgChannelMemberSyncViewInp) (*sysin.TgChannelMemberSyncModel, error) {
-	account, err := s.currentAdminAccount(ctx)
-	if err != nil {
+	if err := s.requireSystemSuperAdmin(ctx); err != nil {
 		return nil, err
 	}
-	return s.channelMemberSyncTaskView(ctx, in.Id, account.TenantId)
+	return s.channelMemberSyncTaskView(ctx, in.Id, 0)
 }
 
 func (s *sSysPublish) AdminChannelMemberSyncCancel(ctx context.Context, in *sysin.TgChannelMemberSyncCancelInp) error {
-	account, err := s.currentAdminAccount(ctx)
-	if err != nil {
+	if err := s.requireSystemSuperAdmin(ctx); err != nil {
 		return err
 	}
-	task, err := s.channelMemberSyncTaskView(ctx, in.Id, account.TenantId)
+	task, err := s.channelMemberSyncTaskView(ctx, in.Id, 0)
 	if err != nil {
 		return err
 	}
@@ -128,10 +126,11 @@ func (s *sSysPublish) channelMemberSyncTaskView(ctx context.Context, id int64, t
 		return nil, gerror.New("任务ID不能为空")
 	}
 	var item *sysin.TgChannelMemberSyncModel
-	err := g.DB().Model(publishTgChannelMemberTaskTable).Safe().Ctx(ctx).
-		Where("id", id).
-		Where("tenant_id", tenantId).
-		Scan(&item)
+	mod := g.DB().Model(publishTgChannelMemberTaskTable).Safe().Ctx(ctx).Where("id", id)
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	err := mod.Scan(&item)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取频道成员同步任务失败")
 	}

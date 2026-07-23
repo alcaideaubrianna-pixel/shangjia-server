@@ -14,11 +14,11 @@ import (
 )
 
 func (s *sSysPublish) AdminChannelMemberList(ctx context.Context, in *sysin.TgChannelMemberListInp) ([]*sysin.TgChannelMemberModel, int, error) {
+	var err error
 	if err := ensureTgChannelMemberSchema(ctx); err != nil {
 		return nil, 0, err
 	}
-	account, err := s.currentAdminAccount(ctx)
-	if err != nil {
+	if err := s.requireSystemSuperAdmin(ctx); err != nil {
 		return nil, 0, err
 	}
 	if in == nil {
@@ -27,18 +27,19 @@ func (s *sSysPublish) AdminChannelMemberList(ctx context.Context, in *sysin.TgCh
 	if err = in.Filter(ctx); err != nil {
 		return nil, 0, err
 	}
-	if err = s.ensureTgAccountBelongsAccount(ctx, in.TgAccountId, account.TenantId, account.Id); err != nil {
+	tenantId, err := s.tenantIdForTgAccount(ctx, in.TgAccountId)
+	if err != nil {
 		return nil, 0, err
 	}
-	return s.channelMemberList(ctx, in, account.TenantId)
+	return s.channelMemberList(ctx, in, tenantId)
 }
 
 func (s *sSysPublish) AdminChannelMemberExport(ctx context.Context, in *sysin.TgChannelMemberListInp) error {
+	var err error
 	if err := ensureTgChannelMemberSchema(ctx); err != nil {
 		return err
 	}
-	account, err := s.currentAdminAccount(ctx)
-	if err != nil {
+	if err := s.requireSystemSuperAdmin(ctx); err != nil {
 		return err
 	}
 	if in == nil {
@@ -47,12 +48,13 @@ func (s *sSysPublish) AdminChannelMemberExport(ctx context.Context, in *sysin.Tg
 	if err = in.Filter(ctx); err != nil {
 		return err
 	}
-	if err = s.ensureTgAccountBelongsAccount(ctx, in.TgAccountId, account.TenantId, account.Id); err != nil {
+	tenantId, err := s.tenantIdForTgAccount(ctx, in.TgAccountId)
+	if err != nil {
 		return err
 	}
 	in.Page = 1
 	in.PerPage = 50000
-	rows, _, err := s.channelMemberList(ctx, in, account.TenantId)
+	rows, _, err := s.channelMemberList(ctx, in, tenantId)
 	if err != nil {
 		return err
 	}
