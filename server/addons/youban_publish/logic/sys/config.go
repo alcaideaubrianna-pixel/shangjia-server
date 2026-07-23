@@ -28,6 +28,7 @@ const publishConfigGroupCloudResource = "cloudResource"
 const autoDeleteConfigCacheKey = "youban_publish:auto_delete:config"
 
 const autoDeleteConfigCacheTTL = 10 * time.Minute
+const autoDeleteRuleSingleNumberLine = `single:^编号\s*[:：]\s*[A-Za-z0-9_-]+$`
 
 type sSysConfig struct{}
 
@@ -307,6 +308,7 @@ func defaultAutoDeleteConfig() *model.AutoDeleteConfig {
 		Enabled:  0,
 		BotIds:   []int64{},
 		Keywords: []string{},
+		Rules:    []string{autoDeleteRuleSingleNumberLine},
 	}
 }
 
@@ -374,6 +376,7 @@ func autoDeleteConfigMap(conf *model.AutoDeleteConfig) g.Map {
 		"autoDeleteEnabled": conf.Enabled,
 		"botIds":            mustConfigJSON(conf.BotIds),
 		"keywords":          mustConfigJSON(conf.Keywords),
+		"rules":             mustConfigJSON(conf.Rules),
 	}
 }
 

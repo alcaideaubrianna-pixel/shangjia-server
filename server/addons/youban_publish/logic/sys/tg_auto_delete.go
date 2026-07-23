@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -101,6 +102,9 @@ func (s *sSysPublish) handleTelegramAutoDelete(ctx context.Context, botId int64,
 	}
 	keyword := matchedAutoDeleteKeyword(text, conf.Keywords)
 	if keyword == "" {
+		keyword = matchedAutoDeleteRule(text, conf.Rules)
+	}
+	if keyword == "" {
 		return
 	}
 	channel, err := s.autoDeleteChannel(ctx, msg.Chat)
@@ -142,6 +146,9 @@ func (s *sSysPublish) handleGotdAutoDelete(ctx context.Context, msg *tg.Message)
 		return
 	}
 	keyword := matchedAutoDeleteKeyword(msg.Message, conf.Keywords)
+	if keyword == "" {
+		keyword = matchedAutoDeleteRule(msg.Message, conf.Rules)
+	}
 	if keyword == "" {
 		return
 	}
@@ -191,6 +198,68 @@ func matchedAutoDeleteKeyword(text string, keywords []string) string {
 		}
 	}
 	return ""
+}
+
+func matchedAutoDeleteRule(text string, rules []string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	lines := splitAutoDeleteRuleLines(text)
+	joined := strings.Join(lines, "\n")
+	for _, rule := range rules {
+		mode, pattern := parseAutoDeleteRulePattern(rule)
+		if pattern == "" {
+			continue
+		}
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			continue
+		}
+		switch mode {
+		case "single":
+			if len(lines) == 1 && re.MatchString(lines[0]) {
+				return strings.TrimSpace(rule)
+			}
+		case "text":
+			if re.MatchString(joined) {
+				return strings.TrimSpace(rule)
+			}
+		default:
+			if re.MatchString(joined) {
+				return strings.TrimSpace(rule)
+			}
+		}
+	}
+	return ""
+}
+
+func splitAutoDeleteRuleLines(text string) []string {
+	lines := strings.Split(strings.ReplaceAll(strings.TrimSpace(text), "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func parseAutoDeleteRulePattern(rule string) (mode string, pattern string) {
+	rule = strings.TrimSpace(rule)
+	if rule == "" {
+		return "", ""
+	}
+	if idx := strings.Index(rule, ":"); idx > 0 {
+		prefix := strings.ToLower(strings.TrimSpace(rule[:idx]))
+		if prefix == "single" || prefix == "text" {
+			mode = prefix
+			pattern = strings.TrimSpace(rule[idx+1:])
+			return mode, pattern
+		}
+	}
+	return "", rule
 }
 
 func normalizeAutoDeleteKeywordText(text string) string {

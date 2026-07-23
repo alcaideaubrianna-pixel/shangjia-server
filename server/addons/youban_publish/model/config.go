@@ -32,6 +32,7 @@ type AutoDeleteConfig struct {
 	Enabled  int      `json:"autoDeleteEnabled"`
 	BotIds   []int64  `json:"botIds"`
 	Keywords []string `json:"keywords"`
+	Rules    []string `json:"rules"`
 }
 
 type CloudResourceConfig struct {

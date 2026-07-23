@@ -93,6 +93,32 @@ func (in *AutoDeleteConfigSaveInp) Filter(ctx context.Context) error {
 	}
 	in.BotIds = uniquePositiveInt64Config(in.BotIds)
 	in.Keywords = uniqueStringsConfig(in.Keywords)
+	in.Rules = uniqueStringsConfig(in.Rules)
+	for _, rule := range in.Rules {
+		if err := validateAutoDeleteRule(rule); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateAutoDeleteRule(rule string) error {
+	rule = strings.TrimSpace(rule)
+	if rule == "" {
+		return gerror.New("自动删除规则不能为空")
+	}
+	if strings.HasPrefix(rule, "single:") {
+		rule = strings.TrimSpace(strings.TrimPrefix(rule, "single:"))
+	}
+	if strings.HasPrefix(rule, "text:") {
+		rule = strings.TrimSpace(strings.TrimPrefix(rule, "text:"))
+	}
+	if rule == "" {
+		return gerror.New("自动删除规则不能为空")
+	}
+	if _, err := regexp.Compile(rule); err != nil {
+		return gerror.Newf("自动删除规则格式不合法: %s", err.Error())
+	}
 	return nil
 }
 
