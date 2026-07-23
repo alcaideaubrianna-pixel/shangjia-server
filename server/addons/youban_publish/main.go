@@ -7,6 +7,7 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gctx"
 
+	_ "hotgo/addons/youban_publish/crons"
 	"hotgo/addons/youban_publish/global"
 	"hotgo/addons/youban_publish/install"
 	_ "hotgo/addons/youban_publish/logic"

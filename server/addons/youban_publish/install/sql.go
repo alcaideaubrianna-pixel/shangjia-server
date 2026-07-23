@@ -28,14 +28,20 @@ func Install(ctx context.Context) error {
 	if err := syncStaticResources(ctx); err != nil {
 		return gerror.Wrap(err, "同步默认静态资源失败")
 	}
-	return execBusinessSql(ctx)
+	if err := execBusinessSql(ctx); err != nil {
+		return err
+	}
+	return ensureVipOrderCloseCron(ctx)
 }
 
 func Upgrade(ctx context.Context) error {
 	if err := syncStaticResources(ctx); err != nil {
 		return gerror.Wrap(err, "同步默认静态资源失败")
 	}
-	return execBusinessSql(ctx)
+	if err := execBusinessSql(ctx); err != nil {
+		return err
+	}
+	return ensureVipOrderCloseCron(ctx)
 }
 
 func execBusinessSql(ctx context.Context) (err error) {
