@@ -33,58 +33,14 @@ func (s *sSysPublish) searchProfilePage(ctx context.Context, base *gdb.Model, in
 		return s.scanProfilePage(base, in, fields, countErrMessage, listErrMessage)
 	}
 
-	page, perPage, offset := form.CalPage(in.Page, in.PerPage)
-	in.Page = page
-	in.PerPage = perPage
-
-	titleCondition, titleArgs := segmentedLikeCondition([]string{"p.title", "t.title"}, terms)
-	titleExcludeCondition, titleExcludeArgs := segmentedLikeConditionNullSafe([]string{"p.title", "t.title"}, terms)
-	titleMod := base.Clone().Where(titleCondition, titleArgs...)
-	titleCount, err := titleMod.Clone().Count()
-	if err != nil {
-		return nil, 0, gerror.Wrap(err, countErrMessage)
-	}
-
-	bodyCondition, bodyArgs := segmentedLikeCondition([]string{"p.plain_text", "t.plain_text"}, terms)
-	bodyMod := base.Clone().
-		Where(bodyCondition, bodyArgs...).
-		Where("NOT ("+titleExcludeCondition+")", titleExcludeArgs...)
-	bodyCount, err := bodyMod.Clone().Count()
-	if err != nil {
-		return nil, 0, gerror.Wrap(err, countErrMessage)
-	}
-
-	totalCount := titleCount + bodyCount
-	if totalCount == 0 {
-		return []*sysin.ProfileModel{}, 0, nil
-	}
-
-	list := make([]*sysin.ProfileModel, 0, perPage)
-	if offset < titleCount {
-		limit := perPage
-		if remain := titleCount - offset; remain < limit {
-			limit = remain
-		}
-		titleList, err := scanProfileOffsetPage(titleMod, fields, offset, limit, listErrMessage)
-		if err != nil {
-			return nil, 0, err
-		}
-		list = append(list, titleList...)
-	}
-
-	if len(list) < perPage {
-		bodyOffset := 0
-		if offset > titleCount {
-			bodyOffset = offset - titleCount
-		}
-		bodyList, err := scanProfileOffsetPage(bodyMod, fields, bodyOffset, perPage-len(list), listErrMessage)
-		if err != nil {
-			return nil, 0, err
-		}
-		list = append(list, bodyList...)
-	}
-
-	return list, totalCount, nil
+	searchCondition, searchArgs := segmentedLikeCondition([]string{
+		"p.title",
+		"t.title",
+		"p.plain_text",
+		"t.plain_text",
+	}, terms)
+	mod := base.Clone().Where(searchCondition, searchArgs...)
+	return s.scanProfilePage(mod, in, fields, countErrMessage, listErrMessage)
 }
 
 func (s *sSysPublish) scanProfilePage(mod *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string) ([]*sysin.ProfileModel, int, error) {

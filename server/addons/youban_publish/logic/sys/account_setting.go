@@ -50,6 +50,7 @@ func (s *sSysPublish) MyAccountSettingSave(ctx context.Context, in *sysin.Accoun
 	if err = s.saveAccountSetting(ctx, account.TenantId, account.Id, in); err != nil {
 		return nil, err
 	}
+	_ = bumpAccountVisibilityVersion(ctx, account.TenantId)
 	return s.accountSetting(ctx, account.TenantId, account.Id)
 }
 
@@ -70,6 +71,7 @@ func (s *sSysPublish) AdminAccountSettingSave(ctx context.Context, in *sysin.Acc
 	if err = s.saveAccountSetting(ctx, admin.TenantId, admin.Id, in); err != nil {
 		return nil, err
 	}
+	_ = bumpAccountVisibilityVersion(ctx, admin.TenantId)
 	return s.accountSetting(ctx, admin.TenantId, in.AccountId)
 }
 

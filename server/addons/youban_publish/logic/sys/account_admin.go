@@ -86,6 +86,10 @@ func (s *sSysPublish) ServerAccountResetPassword(ctx context.Context, in *sysin.
 }
 
 func (s *sSysPublish) ServerAccountDelete(ctx context.Context, in *sysin.AccountDeleteInp) (err error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return err
+	}
 	if in == nil || len(in.Ids) == 0 {
 		return gerror.New("请选择要删除的数据")
 	}
@@ -100,6 +104,7 @@ func (s *sSysPublish) ServerAccountDelete(ctx context.Context, in *sysin.Account
 	if err != nil {
 		return gerror.Wrap(err, "删除上架账号失败")
 	}
+	_ = bumpAccountVisibilityVersion(ctx, account.TenantId)
 	return nil
 }
 
@@ -389,5 +394,6 @@ func (s *sSysPublish) savePublishAccount(ctx context.Context, tx gdb.TX, in *sys
 	if err != nil {
 		return gerror.Wrap(err, "保存上架账号失败")
 	}
+	_ = bumpAccountVisibilityVersion(ctx, in.TenantId)
 	return nil
 }

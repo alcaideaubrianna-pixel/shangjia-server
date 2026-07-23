@@ -30,7 +30,7 @@ func (s *sSysPublish) AdminAccountOptions(ctx context.Context, in *sysin.Account
 		return nil, err
 	}
 
-	cacheKey := publishAccountOptionsCacheKey(account.TenantId, account.Id, in.Scope)
+	cacheKey := publishAccountOptionsCacheKey(ctx, account.TenantId, account.Id, in.Scope)
 	if cacheVar, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !cacheVar.IsNil() {
 		if scanErr := cacheVar.Scan(&list); scanErr == nil && list != nil {
 			return list, nil
@@ -122,6 +122,6 @@ func buildAccountOptions(rows []accountOptionRow, prefix string) []*sysin.Accoun
 	return list
 }
 
-func publishAccountOptionsCacheKey(tenantId int64, accountId int64, scope string) string {
-	return fmt.Sprintf("youban_publish:account_options:%d:%d:%s", tenantId, accountId, scope)
+func publishAccountOptionsCacheKey(ctx context.Context, tenantId int64, accountId int64, scope string) string {
+	return fmt.Sprintf("youban_publish:account_options:%d:%d:%s:%s", tenantId, accountId, scope, accountVisibilityVersionValue(ctx, tenantId))
 }

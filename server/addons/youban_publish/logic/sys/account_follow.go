@@ -188,7 +188,10 @@ func (s *sSysPublish) AccountFollowApply(ctx context.Context, in *sysin.AccountF
 			Where("id", existing["id"].Int64()).
 			Data(data).
 			Update()
-		return gerror.Wrap(err, "提交关注失败")
+		if err != nil {
+			return gerror.Wrap(err, "提交关注失败")
+		}
+		return bumpAccountVisibilityVersion(ctx, account.TenantId)
 	}
 	data["created_at"] = now
 	_, err = pdao.YoubanPublishAccountFollow.Ctx(ctx).Data(g.Map{
@@ -202,7 +205,10 @@ func (s *sSysPublish) AccountFollowApply(ctx context.Context, in *sysin.AccountF
 		"created_at":                 now,
 		"updated_at":                 now,
 	}).Insert()
-	return gerror.Wrap(err, "提交关注失败")
+	if err != nil {
+		return gerror.Wrap(err, "提交关注失败")
+	}
+	return bumpAccountVisibilityVersion(ctx, account.TenantId)
 }
 
 func (s *sSysPublish) AccountFollowAction(ctx context.Context, in *sysin.AccountFollowActionInp) error {
@@ -276,7 +282,10 @@ func (s *sSysPublish) AccountFollowAction(ctx context.Context, in *sysin.Account
 		}
 	}
 	_, err = mod.Data(data).Update()
-	return gerror.Wrap(err, "处理关注失败")
+	if err != nil {
+		return gerror.Wrap(err, "处理关注失败")
+	}
+	return bumpAccountVisibilityVersion(ctx, account.TenantId)
 }
 
 func (s *sSysPublish) blockAccountFollow(ctx context.Context, account *sysin.AccountModel, targetAccountId int64, remark string) error {
@@ -325,7 +334,10 @@ func (s *sSysPublish) blockAccountFollow(ctx context.Context, account *sysin.Acc
 		"updated_at": now,
 		"deleted_at": nil,
 	}).Insert()
-	return gerror.Wrap(err, "拉黑账号失败")
+	if err != nil {
+		return gerror.Wrap(err, "拉黑账号失败")
+	}
+	return bumpAccountVisibilityVersion(ctx, account.TenantId)
 }
 
 func (s *sSysPublish) FollowNoteList(ctx context.Context, in *sysin.FollowNoteListInp) (list []*sysin.FollowNoteModel, totalCount int, err error) {
@@ -389,137 +401,6 @@ func (s *sSysPublish) FollowNoteImageSearch(ctx context.Context, in *sysin.Follo
 	return s.profileImageSearchByAccountIds(ctx, &sysin.ProfileImageSearchInp{
 		ProfileListInp: in.ProfileListInp,
 	}, file, accountIds, account)
-}
-
-func (s *sSysPublish) followNoteAccountIds(ctx context.Context, account *sysin.AccountModel, in *sysin.FollowNoteListInp) ([]int64, error) {
-	scope := "all"
-	if in != nil && strings.TrimSpace(in.Scope) != "" {
-		scope = strings.TrimSpace(in.Scope)
-	}
-	if scope == "mine" {
-		return []int64{account.Id}, nil
-	}
-	if account.AccountType == sysin.PublishAccountTypeAdmin && scope == "all" {
-		if in != nil && in.AccountId > 0 {
-			return s.adminFollowNoteSelectedAccountIds(ctx, account, in.AccountId)
-		}
-		return s.adminManagedAccountIds(ctx, account)
-	}
-	var rows []struct {
-		FollowingAccountId int64 `json:"followingAccountId"`
-	}
-	if err := pdao.YoubanPublishAccountFollow.Ctx(ctx).
-		Fields("following_account_id").
-		Where("tenant_id", account.TenantId).
-		Where("follower_account_id", account.Id).
-		Where("status", sysin.AccountFollowStatusApproved).
-		WhereNull("deleted_at").
-		Scan(&rows); err != nil {
-		return nil, gerror.Wrap(err, "读取关注账号失败")
-	}
-	ids := make([]int64, 0, len(rows)+1)
-	if scope != "following" {
-		ids = append(ids, account.Id)
-	}
-	for _, row := range rows {
-		ids = append(ids, row.FollowingAccountId)
-	}
-	accountIds, err := s.expandFollowNoteAccountIds(ctx, uniqueIds(ids))
-	if err != nil {
-		return nil, err
-	}
-	if in == nil || in.AccountId <= 0 {
-		return accountIds, nil
-	}
-	selectedIds, err := s.expandFollowNoteAccountIds(ctx, []int64{in.AccountId})
-	if err != nil {
-		return nil, err
-	}
-	return intersectInt64(accountIds, selectedIds), nil
-}
-
-func (s *sSysPublish) adminFollowNoteSelectedAccountIds(ctx context.Context, account *sysin.AccountModel, accountId int64) ([]int64, error) {
-	columns := pdao.YoubanPublishAccount.Columns()
-	var selected *sysin.AccountModel
-	if err := pdao.YoubanPublishAccount.Ctx(ctx).
-		Fields(columns.Id, columns.TenantId, columns.AccountType, columns.Status).
-		Where(columns.Id, accountId).
-		WhereNull(columns.DeletedAt).
-		Scan(&selected); err != nil {
-		return nil, gerror.Wrap(err, "读取筛选账号失败")
-	}
-	if selected == nil || selected.Id <= 0 || selected.Status != 1 {
-		return []int64{}, nil
-	}
-	if selected.TenantId == account.TenantId {
-		return []int64{selected.Id}, nil
-	}
-	var count int
-	var err error
-	if count, err = pdao.YoubanPublishAccountFollow.Ctx(ctx).
-		Where("tenant_id", account.TenantId).
-		Where("follower_account_id", account.Id).
-		Where("following_account_id", selected.Id).
-		Where("status", sysin.AccountFollowStatusApproved).
-		WhereNull("deleted_at").
-		Count(); err != nil {
-		return nil, gerror.Wrap(err, "检查关注账号权限失败")
-	}
-	if count == 0 {
-		return []int64{}, nil
-	}
-	return s.expandFollowNoteAccountIds(ctx, []int64{selected.Id})
-}
-
-func (s *sSysPublish) expandFollowNoteAccountIds(ctx context.Context, accountIds []int64) ([]int64, error) {
-	accountIds = uniqueIds(accountIds)
-	if len(accountIds) == 0 {
-		return []int64{}, nil
-	}
-	columns := pdao.YoubanPublishAccount.Columns()
-	var accounts []struct {
-		Id          int64  `json:"id"`
-		TenantId    int64  `json:"tenantId"`
-		AccountType string `json:"accountType"`
-	}
-	if err := pdao.YoubanPublishAccount.Ctx(ctx).
-		Fields(columns.Id, columns.TenantId, columns.AccountType).
-		WhereIn(columns.Id, accountIds).
-		WhereNull(columns.DeletedAt).
-		Scan(&accounts); err != nil {
-		return nil, gerror.Wrap(err, "读取关注账号失败")
-	}
-	tenantIds := make([]int64, 0, len(accounts))
-	result := make([]int64, 0, len(accounts))
-	for _, item := range accounts {
-		if item.Id > 0 {
-			result = append(result, item.Id)
-		}
-		if item.AccountType == sysin.PublishAccountTypeAdmin && item.TenantId > 0 {
-			tenantIds = append(tenantIds, item.TenantId)
-		}
-	}
-	tenantIds = uniqueIds(tenantIds)
-	if len(tenantIds) == 0 {
-		return uniqueIds(result), nil
-	}
-	var tenantAccounts []struct {
-		Id int64 `json:"id"`
-	}
-	if err := pdao.YoubanPublishAccount.Ctx(ctx).
-		Fields(columns.Id).
-		WhereIn(columns.TenantId, tenantIds).
-		Where(columns.Status, 1).
-		WhereNull(columns.DeletedAt).
-		Scan(&tenantAccounts); err != nil {
-		return nil, gerror.Wrap(err, "读取关注租户账号失败")
-	}
-	for _, item := range tenantAccounts {
-		if item.Id > 0 {
-			result = append(result, item.Id)
-		}
-	}
-	return uniqueIds(result), nil
 }
 
 func intersectInt64(left []int64, right []int64) []int64 {

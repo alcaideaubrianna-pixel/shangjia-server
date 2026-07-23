@@ -2,14 +2,13 @@ package sys
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/util/guid"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
-	"hotgo/internal/dao"
 )
 
 func newPublishProfileUUID() string {
@@ -20,25 +19,35 @@ func normalizeProfileUUID(uuid string) string {
 	return strings.TrimSpace(uuid)
 }
 
+func profileUUIDToID(uuid string) (int64, bool) {
+	uuid = normalizeProfileUUID(uuid)
+	if uuid == "" || !strings.HasPrefix(uuid, "id:") {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(strings.TrimPrefix(uuid, "id:"), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
+
+func profileTransientUUID(id int64) string {
+	if id <= 0 {
+		return ""
+	}
+	return "id:" + strconv.FormatInt(id, 10)
+}
+
 func hasProfileSelector(id int64, uuid string) bool {
 	return id > 0 || normalizeProfileUUID(uuid) != ""
 }
 
 func (s *sSysPublish) ensureProfileModelUUID(ctx context.Context, profile *sysin.ProfileModel) error {
+	_ = ctx
 	if profile == nil || profile.Id <= 0 || normalizeProfileUUID(profile.Uuid) != "" {
 		return nil
 	}
-	columns := dao.ContentProfile.Columns()
-	uuid := newPublishProfileUUID()
-	_, err := dao.ContentProfile.Ctx(ctx).
-		Where(columns.Id, profile.Id).
-		Where("(source_note_uuid IS NULL OR source_note_uuid = '')").
-		Data(g.Map{columns.SourceNoteUuid: uuid}).
-		Update()
-	if err != nil {
-		return gerror.Wrap(err, "补齐资料UUID失败")
-	}
-	profile.Uuid = uuid
+	profile.Uuid = profileTransientUUID(profile.Id)
 	return nil
 }
 
@@ -58,6 +67,9 @@ func (s *sSysPublish) resolveProfileId(ctx context.Context, id int64, uuid strin
 			return 0, gerror.New("资料UUID不能为空")
 		}
 		return id, nil
+	}
+	if transientId, ok := profileUUIDToID(uuid); ok {
+		return transientId, nil
 	}
 	base, err := s.profileBaseModel(ctx, tenantId, accountId)
 	if err != nil {
@@ -81,24 +93,44 @@ func (s *sSysPublish) allowedProfileTargetIds(ctx context.Context, ids []int64, 
 			targetIds = append(targetIds, id)
 		}
 	}
-	cleanUUIDs := make([]string, 0, len(uuids))
+	transientIds := make([]int64, 0, len(uuids))
+	realUUIDs := make([]string, 0, len(uuids))
 	for _, uuid := range uuids {
-		if uuid = normalizeProfileUUID(uuid); uuid != "" {
-			cleanUUIDs = append(cleanUUIDs, uuid)
+		uuid = normalizeProfileUUID(uuid)
+		if uuid == "" {
+			continue
 		}
+		if transientId, ok := profileUUIDToID(uuid); ok {
+			transientIds = append(transientIds, transientId)
+			continue
+		}
+		realUUIDs = append(realUUIDs, uuid)
 	}
-	if len(cleanUUIDs) > 0 {
+	if len(transientIds) > 0 || len(realUUIDs) > 0 {
 		base, err := s.profileBaseModel(ctx, tenantId, accountId)
 		if err != nil {
 			return nil, err
 		}
-		rows, err := base.Fields("p.id").WhereIn("p.source_note_uuid", cleanUUIDs).All()
-		if err != nil {
-			return nil, gerror.Wrap(err, "读取资料UUID失败")
+		if len(transientIds) > 0 {
+			rows, err := base.Fields("p.id").WhereIn("p.id", transientIds).All()
+			if err != nil {
+				return nil, gerror.Wrap(err, "读取资料UUID失败")
+			}
+			for _, row := range rows {
+				if id := row["id"].Int64(); id > 0 {
+					targetIds = append(targetIds, id)
+				}
+			}
 		}
-		for _, row := range rows {
-			if id := row["id"].Int64(); id > 0 {
-				targetIds = append(targetIds, id)
+		if len(realUUIDs) > 0 {
+			rows, err := base.Fields("p.id").WhereIn("p.source_note_uuid", realUUIDs).All()
+			if err != nil {
+				return nil, gerror.Wrap(err, "读取资料UUID失败")
+			}
+			for _, row := range rows {
+				if id := row["id"].Int64(); id > 0 {
+					targetIds = append(targetIds, id)
+				}
 			}
 		}
 	}

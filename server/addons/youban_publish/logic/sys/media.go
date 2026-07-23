@@ -173,15 +173,18 @@ func (s *sSysPublish) AdminProfileImageSearch(ctx context.Context, in *sysin.Pro
 	if in == nil {
 		in = &sysin.ProfileImageSearchInp{}
 	}
-	accountIds, tenantId, err := s.adminNoteFilterScope(ctx, account, &in.ProfileListInp)
+	scope, err := s.adminProfileVisibleScope(ctx, account, &in.ProfileListInp)
 	if err != nil {
 		return nil, 0, err
 	}
-	if len(accountIds) > 0 {
-		in.TenantId = tenantId
-		return s.profileImageSearchByAccountIds(ctx, in, file, accountIds, account)
+	if scope.Strict && len(scope.AccountIds) == 0 {
+		return []*sysin.NoteModel{}, 0, nil
 	}
-	in.TenantId = tenantId
+	if len(scope.AccountIds) > 0 {
+		in.TenantId = scope.TenantId
+		return s.profileImageSearchByAccountIds(ctx, in, file, scope.AccountIds, account)
+	}
+	in.TenantId = scope.TenantId
 	in.AccountId = 0
 	return s.profileImageSearch(ctx, in, file, sysin.ProfilePermissionAdmin)
 }

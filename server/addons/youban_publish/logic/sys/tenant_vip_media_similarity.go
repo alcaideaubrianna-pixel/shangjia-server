@@ -204,7 +204,7 @@ func (s *sSysPublish) mediaSimilarVisibleScope(ctx context.Context, account *sys
 	if err != nil {
 		return nil, err
 	}
-	followIds, err := s.followNoteAccountIds(ctx, account, &sysin.FollowNoteListInp{Scope: "following"})
+	followIds, err := s.followNoteDirectAccountIds(ctx, account, nil)
 	if err != nil {
 		return nil, err
 	}

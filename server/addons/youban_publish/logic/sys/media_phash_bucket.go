@@ -43,6 +43,10 @@ func (s *sSysPublish) syncMediaPHashBucketByMediaId(ctx context.Context, mediaId
 	return s.replaceMediaPHashBucketByMediaRow(ctx, row)
 }
 
+func (s *sSysPublish) SyncMediaPHashBucketByMediaId(ctx context.Context, mediaId int64) error {
+	return s.syncMediaPHashBucketByMediaId(ctx, mediaId)
+}
+
 func (s *sSysPublish) deleteMediaPHashBucketByMediaId(ctx context.Context, mediaId int64) error {
 	if mediaId <= 0 {
 		return nil
