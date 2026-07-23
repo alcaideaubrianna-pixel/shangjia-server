@@ -391,6 +391,10 @@ func materialImportTitle(text string) (title string, profileNo string, nickname 
 		if item == "" {
 			continue
 		}
+		if value, ok := materialImportPrefixedValue(item, "标题"); ok {
+			fallback = firstNonEmpty(fallback, materialImportTitleFallback(value))
+			continue
+		}
 		if value, ok := materialImportPrefixedValue(item, "编号"); ok {
 			profileNo = firstNonEmpty(profileNo, value)
 			continue
@@ -399,7 +403,7 @@ func materialImportTitle(text string) (title string, profileNo string, nickname 
 			nickname = firstNonEmpty(nickname, value)
 			continue
 		}
-		fallback = firstNonEmpty(fallback, item)
+		fallback = firstNonEmpty(fallback, materialImportTitleFallback(item))
 	}
 	title = firstNonEmpty(profileNo, nickname, fallback)
 	return strings.TrimSpace(title), strings.TrimSpace(profileNo), strings.TrimSpace(nickname)
@@ -421,6 +425,36 @@ func materialImportPrefixedValue(text string, prefix string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func materialImportTitleFallback(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	fieldPrefixes := []string{"标题", "编号", "昵称", "省份", "城市", "年龄", "身高", "体重", "星座", "地区", "地址", "微信", "电话", "手机"}
+	best := text
+	for _, prefix := range fieldPrefixes {
+		if idx := materialImportInlineFieldIndex(text, prefix); idx > 0 && idx < len(best) {
+			best = strings.TrimSpace(text[:idx])
+		}
+	}
+	return strings.TrimSpace(best)
+}
+
+func materialImportInlineFieldIndex(text string, prefix string) int {
+	text = strings.TrimSpace(text)
+	prefix = strings.TrimSpace(prefix)
+	if text == "" || prefix == "" {
+		return -1
+	}
+	for _, sep := range []string{":", "："} {
+		needle := prefix + sep
+		if idx := strings.Index(text, needle); idx >= 0 {
+			return idx
+		}
+	}
+	return -1
 }
 
 func materialImportNextStage(task *sysin.MaterialImportTaskModel) string {
