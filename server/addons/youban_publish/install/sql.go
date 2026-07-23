@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gfile"
@@ -23,6 +24,8 @@ var pgsqlBusinessSqlFiles = []string{
 	"addons/youban_publish/resource/sql/upgrade.pgsql.sql",
 	"addons/youban_publish/resource/sql/menu.pgsql.sql",
 }
+
+const publishInstallLockKey = "youban_publish:install"
 
 func Install(ctx context.Context) error {
 	if err := syncStaticResources(ctx); err != nil {
@@ -45,12 +48,22 @@ func Upgrade(ctx context.Context) error {
 }
 
 func execBusinessSql(ctx context.Context) (err error) {
-	for _, file := range businessSqlFiles() {
-		if err = execSqlFile(ctx, file); err != nil {
-			return gerror.Wrapf(err, "执行上架系统 SQL 失败：%s", file)
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if err := acquireInstallLock(tx); err != nil {
+			return err
 		}
-	}
-	return nil
+		if strings.ToLower(g.DB().GetConfig().Type) != consts.DBPgsql {
+			defer func() {
+				_, _ = tx.Exec("SELECT RELEASE_LOCK(?)", publishInstallLockKey)
+			}()
+		}
+		for _, file := range businessSqlFiles() {
+			if err = execSqlFile(ctx, tx, file); err != nil {
+				return gerror.Wrapf(err, "执行上架系统 SQL 失败：%s", file)
+			}
+		}
+		return nil
+	})
 }
 
 func businessSqlFiles() []string {
@@ -60,7 +73,7 @@ func businessSqlFiles() []string {
 	return mysqlBusinessSqlFiles
 }
 
-func execSqlFile(ctx context.Context, path string) (err error) {
+func execSqlFile(ctx context.Context, tx gdb.TX, path string) (err error) {
 	content := readSqlFile(path)
 	if strings.TrimSpace(content) == "" {
 		return gerror.Newf("SQL 文件不存在或为空：%s", path)
@@ -70,11 +83,30 @@ func execSqlFile(ctx context.Context, path string) (err error) {
 		if sql == "" {
 			continue
 		}
-		if _, err = g.DB().Exec(ctx, sql); err != nil {
+		if _, err = tx.Exec(sql); err != nil {
 			if isIgnorableSqlError(err) {
 				continue
 			}
 			return gerror.Wrapf(err, "执行 SQL 失败：%s 第 %d 段\n%s", path, index+1, sql)
+		}
+	}
+	return nil
+}
+
+func acquireInstallLock(tx gdb.TX) error {
+	dbType := strings.ToLower(g.DB().GetConfig().Type)
+	switch dbType {
+	case consts.DBPgsql:
+		if _, err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", publishInstallLockKey); err != nil {
+			return gerror.Wrap(err, "获取上架系统安装锁失败")
+		}
+	default:
+		value, err := tx.GetValue("SELECT GET_LOCK(?, 60)", publishInstallLockKey)
+		if err != nil {
+			return gerror.Wrap(err, "获取上架系统安装锁失败")
+		}
+		if value.Int() != 1 {
+			return gerror.New("获取上架系统安装锁超时")
 		}
 	}
 	return nil
