@@ -543,7 +543,7 @@ func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.ProfileListIn
 }
 
 func adminNoteListFields() string {
-	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.province,p.city,p.cup_size AS tag,p.status,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,a.nickname AS account_name,a.nickname,a.username,t.status AS task_status"
+	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.status,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,a.nickname AS account_name,a.nickname,a.username,t.status AS task_status"
 }
 
 func adminNoteListFromProfile(profile *sysin.ProfileModel, media []*sysin.AdminNoteMediaModel) *sysin.AdminNoteListModel {
@@ -1159,7 +1159,7 @@ func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, acco
 }
 
 func profileListFields() string {
-	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city,p.cup_size AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.admin_remark AS customer_remark,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,tenant.name AS tenant_name,a.nickname AS account_name,a.nickname,a.username,t.channel_id_json,t.anti_scan_enabled,t.status AS task_status,t.tg_status,t.tg_push_enabled"
+	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.admin_remark AS customer_remark,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,tenant.name AS tenant_name,a.nickname AS account_name,a.nickname,a.username,t.channel_id_json,t.anti_scan_enabled,t.status AS task_status,t.tg_status,t.tg_push_enabled"
 }
 
 func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
@@ -1196,7 +1196,8 @@ func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gd
 		tags := splitProfileTagValues(in.Tag)
 		if len(tags) == 1 {
 			tag := strings.TrimSpace(tags[0])
-			mod = mod.Where("(p.cup_size = ? OR p.cup_size LIKE ? OR p.cup_size LIKE ? OR p.cup_size LIKE ?)", tag, tag+",%", "%,"+tag, "%,"+tag+",%")
+			tagField := profileTagFieldExpr()
+			mod = mod.Where("("+tagField+" = ? OR "+tagField+" LIKE ? OR "+tagField+" LIKE ? OR "+tagField+" LIKE ?)", tag, tag+",%", "%,"+tag, "%,"+tag+",%")
 		} else if len(tags) > 1 {
 			conditions := make([]string, 0, len(tags)*4)
 			args := make([]interface{}, 0, len(tags)*4)
@@ -1205,7 +1206,8 @@ func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gd
 				if tag == "" {
 					continue
 				}
-				conditions = append(conditions, "(p.cup_size = ? OR p.cup_size LIKE ? OR p.cup_size LIKE ? OR p.cup_size LIKE ?)")
+				tagField := profileTagFieldExpr()
+				conditions = append(conditions, "("+tagField+" = ? OR "+tagField+" LIKE ? OR "+tagField+" LIKE ? OR "+tagField+" LIKE ?)")
 				args = append(args, tag, tag+",%", "%,"+tag, "%,"+tag+",%")
 			}
 			if len(conditions) > 0 {

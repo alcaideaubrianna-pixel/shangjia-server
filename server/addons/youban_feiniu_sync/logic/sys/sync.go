@@ -1625,6 +1625,9 @@ func (s *sSysSync) syncOneNote(ctx context.Context, source gdb.DB, cfg gdb.Recor
 		if err = s.syncPresentationFields(ctx, row, existed); err != nil {
 			return "", err
 		}
+		if err = s.syncSourceMessageLinks(ctx, cfg, row, existed["youban_profile_id"].Int64(), existed["youban_task_id"].Int64(), existed["youban_account_id"].Int64()); err != nil {
+			return "", err
+		}
 		return "skipped", s.touchChannelCursor(ctx, cfg, row, sourceUpdatedAt)
 	}
 	dupProfileId, dupMsg, err := s.findExistingPHashDuplicate(ctx, source, row)
@@ -1644,6 +1647,9 @@ func (s *sSysSync) syncOneNote(ctx context.Context, source gdb.DB, cfg gdb.Recor
 	}
 	if cfg["sync_media"].Int() == 1 {
 		_ = s.syncMedia(ctx, source, cfg, row, profileId, taskId, accountId)
+	}
+	if err = s.syncSourceMessageLinks(ctx, cfg, row, profileId, taskId, accountId); err != nil {
+		return "", err
 	}
 	data := g.Map{"config_id": cfg["id"].Int64(), "feiniu_note_id": row["note_id"].Int64(), "feiniu_note_uuid": row["note_uuid"].String(), "feiniu_note_code": row["note_code"].String(), "feiniu_source_key": sourceKey(row), "feiniu_channel_id": row["source_channel_id"].Int64(), "feiniu_tg_chat_id": row["source_tg_chat_id"].Int64(), "youban_profile_id": profileId, "youban_task_id": taskId, "youban_account_id": accountId, "source_updated_at": sourceUpdatedAt, "content_hash": contentHash, "sync_status": "success", "error_message": "", "dedupe_key": "", "duplicate_profile_id": 0, "updated_at": gtime.Now()}
 	if err = saveProfileMap(ctx, cfg["id"].Int64(), row["note_id"].Int64(), existed, data); err != nil {
@@ -1934,8 +1940,9 @@ func (s *sSysSync) syncMedia(ctx context.Context, source gdb.DB, cfg gdb.Record,
 		if purpose == "verify" && cfg["sync_verify_media"].Int() != 1 {
 			continue
 		}
-		fileURL := mediaURL(item)
-		data := g.Map{"tenant_id": cfg["target_tenant_id"].Int64(), "merchant_id": cfg["target_tenant_id"].Int64(), "account_id": accountId, "task_id": taskId, "profile_id": profileId, "attachment_id": 0, "media_type": mediaType, "purpose": purpose, "name": mediaName(item), "file_url": fileURL, "original_file_url": fileURL, "storage_path": item["cos_path"].String(), "original_storage_path": item["cos_path"].String(), "mime_type": item["mime_type"].String(), "md5": item["binary_md5"].String(), "perceptual_hash": item["perceptual_hash"].String(), "tg_file_id": "", "tg_cache_status": "invalid", "size": item["file_size"].Int64(), "sort_index": i + 1, "status": 1, "created_at": now, "updated_at": now}
+		fileURL := feiNiuImportedMediaURL(item)
+		storagePath := feiNiuImportedMediaStoragePath(item)
+		data := g.Map{"tenant_id": cfg["target_tenant_id"].Int64(), "merchant_id": cfg["target_tenant_id"].Int64(), "account_id": accountId, "task_id": taskId, "profile_id": profileId, "attachment_id": 0, "media_type": mediaType, "purpose": purpose, "name": mediaName(item), "file_url": fileURL, "original_file_url": fileURL, "storage_path": storagePath, "original_storage_path": storagePath, "mime_type": item["mime_type"].String(), "md5": item["binary_md5"].String(), "perceptual_hash": item["perceptual_hash"].String(), "tg_file_id": "", "tg_cache_status": "invalid", "size": item["file_size"].Int64(), "sort_index": i + 1, "status": 1, "created_at": now, "updated_at": now}
 		_, _ = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(data).Insert()
 	}
 	_, _ = dao.ContentProfile.Ctx(ctx).Where(dao.ContentProfile.Columns().Id, profileId).Data(g.Map{dao.ContentProfile.Columns().ImageCount: imageCount, dao.ContentProfile.Columns().VideoCount: videoCount, dao.ContentProfile.Columns().UpdatedAt: now}).Update()

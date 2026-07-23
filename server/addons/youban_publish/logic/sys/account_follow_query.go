@@ -263,7 +263,7 @@ func (s *sSysPublish) followNoteListByAccounts(ctx context.Context, in *sysin.Pr
 }
 
 func followNoteListFields() string {
-	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.province,p.city,p.cup_size AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,a.nickname AS account_name,a.nickname,a.username,t.status AS task_status,t.tg_status,t.tg_push_enabled"
+	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,a.nickname AS account_name,a.nickname,a.username,t.status AS task_status,t.tg_status,t.tg_push_enabled"
 }
 
 func followNoteFromProfile(profile *sysin.ProfileModel, media []*sysin.FollowNoteMediaModel) *sysin.FollowNoteModel {

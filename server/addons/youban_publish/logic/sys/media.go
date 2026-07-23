@@ -24,6 +24,7 @@ import (
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
+	"hotgo/internal/library/storager"
 	basesysin "hotgo/internal/model/input/sysin"
 )
 
@@ -693,8 +694,14 @@ WHERE "tg_file_id" <> ''
 func normalizeMediaFileURL(fileURL string, storagePath string) string {
 	fileURL = strings.TrimSpace(fileURL)
 	storagePath = strings.TrimSpace(storagePath)
+	if contentPath := normalizeTelegramContentStoragePath(fileURL); contentPath != "" {
+		return normalizeTelegramContentURL(contentPath)
+	}
 	if storagePath == "" {
 		return fileURL
+	}
+	if contentPath := normalizeTelegramContentStoragePath(storagePath); contentPath != "" {
+		return normalizeTelegramContentURL(contentPath)
 	}
 	if fileURL == "" || isLocalMediaURL(fileURL) || isTelegramFileURL(fileURL) {
 		if isAbsoluteMediaURL(storagePath) {
@@ -703,6 +710,55 @@ func normalizeMediaFileURL(fileURL string, storagePath string) string {
 		return "/" + strings.TrimLeft(storagePath, "/")
 	}
 	return fileURL
+}
+
+func normalizeTelegramContentURL(storagePath string) string {
+	storagePath = strings.TrimSpace(storagePath)
+	if storagePath == "" {
+		return ""
+	}
+	cdnBase := mediaContentCDNBaseURL()
+	if cdnBase != "" {
+		return cdnBase + "/" + strings.TrimLeft(storagePath, "/")
+	}
+	return "/" + strings.TrimLeft(storagePath, "/")
+}
+
+func normalizeTelegramContentStoragePath(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "telegram/content/") {
+		return strings.TrimLeft(raw, "/")
+	}
+	if strings.HasPrefix(raw, "/telegram/content/") {
+		return strings.TrimLeft(raw, "/")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	if parsed.Path == "" {
+		return ""
+	}
+	path := strings.TrimLeft(parsed.Path, "/")
+	if idx := strings.Index(path, "telegram/content/"); idx >= 0 {
+		return path[idx:]
+	}
+	return ""
+}
+
+func mediaContentCDNBaseURL() string {
+	cdnBase := strings.TrimRight(g.Cfg().MustGet(context.Background(), "content.cdnBaseUrl", "").String(), "/")
+	if cdnBase != "" {
+		return cdnBase
+	}
+	uploadConfig := storager.GetConfig()
+	if uploadConfig == nil {
+		return ""
+	}
+	return strings.TrimRight(uploadConfig.CosPublicURL, "/")
 }
 
 func isAbsoluteMediaURL(raw string) bool {

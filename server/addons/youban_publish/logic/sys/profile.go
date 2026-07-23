@@ -16,6 +16,10 @@ import (
 
 const publishProfileSourceType = "youban_publish"
 
+func profileTagFieldExpr() string {
+	return "CASE WHEN p.source_type = 'feiniu' THEN p.tag_params ELSE p.cup_size END"
+}
+
 func (s *sSysPublish) publishTaskToProfile(ctx context.Context, task gdb.Record) (profileId int64, err error) {
 	if task.IsEmpty() {
 		return 0, gerror.New("上架任务不存在")
