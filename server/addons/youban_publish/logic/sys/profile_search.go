@@ -17,20 +17,35 @@ func (s *sSysPublish) searchProfilePage(ctx context.Context, base *gdb.Model, in
 	if in == nil {
 		in = &sysin.ProfileListInp{}
 	}
+	mod := s.profileSearchModel(ctx, base, in)
+	return s.scanProfilePage(mod, in, fields, countErrMessage, listErrMessage)
+}
+
+func (s *sSysPublish) searchDistinctProfilePage(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string) ([]*sysin.ProfileModel, int, error) {
+	if in == nil {
+		in = &sysin.ProfileListInp{}
+	}
+	mod := s.profileSearchModel(ctx, base, in)
+	return s.scanDistinctProfilePage(mod, in, fields, countErrMessage, listErrMessage)
+}
+
+func (s *sSysPublish) profileSearchModel(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
+	if in == nil {
+		in = &sysin.ProfileListInp{}
+	}
 	keyword := strings.TrimSpace(in.Keyword)
 	base = s.applyProfileNonKeywordFilters(ctx, base, in)
 	if keyword == "" {
-		return s.scanProfilePage(base, in, fields, countErrMessage, listErrMessage)
+		return base
 	}
 
 	if profileNo, ok := normalizeProfileNoSearchKeyword(keyword); ok {
-		mod := base.Clone().Where("p.profile_no", profileNo)
-		return s.scanProfilePage(mod, in, fields, countErrMessage, listErrMessage)
+		return base.Clone().Where("p.profile_no", profileNo)
 	}
 
 	terms := splitProfileSearchTerms(keyword)
 	if len(terms) == 0 {
-		return s.scanProfilePage(base, in, fields, countErrMessage, listErrMessage)
+		return base
 	}
 
 	searchCondition, searchArgs := segmentedLikeCondition([]string{
@@ -39,8 +54,7 @@ func (s *sSysPublish) searchProfilePage(ctx context.Context, base *gdb.Model, in
 		"p.plain_text",
 		"t.plain_text",
 	}, terms)
-	mod := base.Clone().Where(searchCondition, searchArgs...)
-	return s.scanProfilePage(mod, in, fields, countErrMessage, listErrMessage)
+	return base.Clone().Where(searchCondition, searchArgs...)
 }
 
 func (s *sSysPublish) scanProfilePage(mod *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string) ([]*sysin.ProfileModel, int, error) {
@@ -56,6 +70,23 @@ func (s *sSysPublish) scanProfilePage(mod *gdb.Model, in *sysin.ProfileListInp, 
 	in.PerPage = perPage
 	list, err := scanProfileOffsetPage(mod, fields, (page-1)*perPage, perPage, listErrMessage)
 	return list, totalCount, err
+}
+
+func (s *sSysPublish) scanDistinctProfilePage(mod *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string) ([]*sysin.ProfileModel, int, error) {
+	var row struct {
+		Total int `orm:"total"`
+	}
+	if err := mod.Clone().Fields("COUNT(DISTINCT p.id) AS total").Scan(&row); err != nil {
+		return nil, 0, gerror.Wrap(err, countErrMessage)
+	}
+	if row.Total == 0 {
+		return []*sysin.ProfileModel{}, 0, nil
+	}
+	page, perPage, _ := form.CalPage(in.Page, in.PerPage)
+	in.Page = page
+	in.PerPage = perPage
+	list, err := scanProfileOffsetPage(mod, fields, (page-1)*perPage, perPage, listErrMessage)
+	return list, row.Total, err
 }
 
 func scanProfileOffsetPage(mod *gdb.Model, fields string, offset int, limit int, listErrMessage string) ([]*sysin.ProfileModel, error) {

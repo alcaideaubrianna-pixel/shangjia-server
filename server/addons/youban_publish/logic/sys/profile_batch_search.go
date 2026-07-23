@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/util/gconv"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -43,7 +42,7 @@ func (s *sSysPublish) profileImageSearchNotesByProfileIds(ctx context.Context, p
 	if err = s.applyProfileTagNames(ctx, profiles); err != nil {
 		return nil, err
 	}
-	mediaBuckets, err := s.mediaListByProfileModels(ctx, profiles)
+	mediaBuckets, err := s.mediaCoverListByProfileModels(ctx, profiles)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +69,7 @@ func (s *sSysPublish) profileImageSearchNotesByProfileIds(ctx context.Context, p
 	return list, nil
 }
 
-func (s *sSysPublish) mediaListByProfileModels(ctx context.Context, profiles []*sysin.ProfileModel) (map[int64][]*sysin.MediaModel, error) {
+func (s *sSysPublish) mediaCoverListByProfileModels(ctx context.Context, profiles []*sysin.ProfileModel) (map[int64][]*sysin.MediaModel, error) {
 	buckets := make(map[int64][]*sysin.MediaModel, len(profiles))
 	profileIds := make([]int64, 0, len(profiles))
 	for _, profile := range profiles {
@@ -80,21 +79,9 @@ func (s *sSysPublish) mediaListByProfileModels(ctx context.Context, profiles []*
 		profileIds = append(profileIds, profile.Id)
 		buckets[profile.Id] = []*sysin.MediaModel{}
 	}
-	profileIds = uniqueIds(profileIds)
-	if len(profileIds) == 0 {
-		return buckets, nil
-	}
-	var media []*sysin.MediaModel
-	err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,account_id,task_id,profile_id,attachment_id,original_attachment_id,edited_attachment_id,media_type,purpose,name,file_url,original_file_url,edited_file_url,poster_url,storage_path,original_storage_path,edited_storage_path,poster_storage_path,mime_type,md5,perceptual_hash,edit_config_json,edit_status,tg_file_id,tg_thumb_file_id,tg_cache_asset_hash,tg_cache_status,size,sort_index,status,created_at,updated_at").
-		WhereIn("profile_id", profileIds).
-		WhereNull("deleted_at").
-		OrderAsc("profile_id").
-		OrderAsc("sort_index").
-		OrderAsc("id").
-		Scan(&media)
+	media, err := firstProfileCoverMedia(ctx, profileIds)
 	if err != nil {
-		return nil, gerror.Wrap(err, "获取图片搜索媒体失败")
+		return nil, gerror.Wrap(err, "获取图片搜索封面失败")
 	}
 	normalizeMediaListFileURL(media)
 	for _, item := range media {

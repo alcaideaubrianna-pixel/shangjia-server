@@ -179,20 +179,25 @@ LIMIT %d
 }
 
 func mediaPHashBucketBranchSQL(bucketPos int, bucketValue string, tenantId int64, accountIds []int64, profileIds []int64, mediaType string, excludeProfileId int64) (string, []any) {
-	conds := []string{"bucket_pos = ?", "bucket_value = ?"}
+	conds := []string{
+		"b.bucket_pos = ?",
+		"b.bucket_value = ?",
+		"EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id = b.profile_id AND p.deleted_at IS NULL)",
+		"EXISTS (SELECT 1 FROM hg_youban_publish_task t WHERE t.profile_id = b.profile_id AND t.tenant_id = b.tenant_id AND t.account_id = b.account_id AND t.deleted_at IS NULL)",
+	}
 	args := []any{bucketPos, bucketValue}
 	if tenantId > 0 {
-		conds = append(conds, "tenant_id = ?")
+		conds = append(conds, "b.tenant_id = ?")
 		args = append(args, tenantId)
 	}
 	if mediaType != "" {
-		conds = append(conds, "media_type = ?")
+		conds = append(conds, "b.media_type = ?")
 		args = append(args, mediaType)
 	}
 	if len(accountIds) > 0 {
 		ids := uniqueIds(accountIds)
 		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-		conds = append(conds, "account_id IN ("+placeholders+")")
+		conds = append(conds, "b.account_id IN ("+placeholders+")")
 		for _, id := range ids {
 			args = append(args, id)
 		}
@@ -200,17 +205,17 @@ func mediaPHashBucketBranchSQL(bucketPos int, bucketValue string, tenantId int64
 	if len(profileIds) > 0 {
 		ids := uniqueIds(profileIds)
 		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-		conds = append(conds, "profile_id IN ("+placeholders+")")
+		conds = append(conds, "b.profile_id IN ("+placeholders+")")
 		for _, id := range ids {
 			args = append(args, id)
 		}
 	}
 	if excludeProfileId > 0 {
-		conds = append(conds, "profile_id <> ?")
+		conds = append(conds, "b.profile_id <> ?")
 		args = append(args, excludeProfileId)
 	}
 	sql := fmt.Sprintf(
-		`SELECT media_id, profile_id, account_id, tenant_id, media_type, hash_value FROM %s WHERE %s`,
+		`SELECT b.media_id, b.profile_id, b.account_id, b.tenant_id, b.media_type, b.hash_value FROM %s AS b WHERE %s`,
 		publishMediaPHashBucketTable,
 		strings.Join(conds, " AND "),
 	)

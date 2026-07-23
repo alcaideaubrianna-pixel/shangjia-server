@@ -26,6 +26,10 @@ type mediaPHashBucketCandidateRow struct {
 }
 
 func (s *sSysPublish) findSimilarProfileIdsByPHashBucket(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, accountIds []int64) ([]int64, int, error) {
+	accountIds = uniqueIds(accountIds)
+	if len(accountIds) == 0 && in.AccountId > 0 {
+		accountIds = []int64{in.AccountId}
+	}
 	candidateProfileIds, err := s.profileImageSearchCandidateProfileIds(ctx, &in.ProfileListInp, accountIds)
 	if err != nil {
 		return nil, 0, err
@@ -34,10 +38,6 @@ func (s *sSysPublish) findSimilarProfileIdsByPHashBucket(ctx context.Context, qu
 		return []int64{}, 0, nil
 	}
 	items, err := s.cachedProfilePHashSearchCandidates(ctx, queryHash, in, accountIds, candidateProfileIds)
-	if err != nil {
-		return nil, 0, err
-	}
-	items, err = s.filterVisibleProfilePHashItems(ctx, items, &in.ProfileListInp, accountIds)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -303,45 +303,6 @@ func hasProfileSearchFilters(in *sysin.ProfileListInp) bool {
 		in.Status > 0
 }
 
-func (s *sSysPublish) filterVisibleProfilePHashItems(ctx context.Context, items []publishProfilePHashDistance, in *sysin.ProfileListInp, accountIds []int64) ([]publishProfilePHashDistance, error) {
-	if len(items) == 0 {
-		return items, nil
-	}
-	profileIds := make([]int64, 0, len(items))
-	for _, item := range items {
-		profileIds = append(profileIds, item.ProfileId)
-	}
-	base, err := s.profileBaseModel(ctx, in.TenantId, in.AccountId)
-	if err != nil {
-		return nil, err
-	}
-	base = s.applyProfileFilters(ctx, base, in)
-	if len(accountIds) > 0 {
-		base = base.WhereIn("t.account_id", accountIds)
-	}
-	rows, err := base.Fields("p.id").WhereIn("p.id", profileIds).All()
-	if err != nil {
-		return nil, gerror.Wrap(err, "过滤图片相似资料失败")
-	}
-	visibleIds := make(map[int64]struct{}, len(rows))
-	for _, row := range rows {
-		id := row["id"].Int64()
-		if id > 0 {
-			visibleIds[id] = struct{}{}
-		}
-	}
-	if len(visibleIds) == len(items) {
-		return items, nil
-	}
-	filtered := make([]publishProfilePHashDistance, 0, len(visibleIds))
-	for _, item := range items {
-		if _, ok := visibleIds[item.ProfileId]; ok {
-			filtered = append(filtered, item)
-		}
-	}
-	return filtered, nil
-}
-
 func uploadImagePHash(file *ghttp.UploadFile) (string, error) {
 	hash, err := uploadImagePHashValue(file)
 	if err != nil {

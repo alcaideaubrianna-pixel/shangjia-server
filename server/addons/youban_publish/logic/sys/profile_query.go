@@ -81,16 +81,13 @@ func (s *sSysPublish) noteList(ctx context.Context, in *sysin.NoteListInp) (list
 }
 
 func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.ProfileListInp, tenantId int64, accountIds []int64, viewer *sysin.AccountModel) ([]*sysin.AdminNoteListModel, int, error) {
-	base, err := s.profileBaseModel(ctx, tenantId, 0)
-	if err != nil {
-		return nil, 0, err
-	}
+	base := s.adminNoteBaseModel(ctx, tenantId)
 	if len(accountIds) > 0 {
 		base = base.WhereIn("t.account_id", accountIds)
 	} else if in != nil && in.AccountId > 0 {
 		base = base.Where("t.account_id", in.AccountId)
 	}
-	profiles, totalCount, err := s.searchProfilePage(ctx, base, in, adminNoteListFields(), "统计笔记失败", "获取笔记列表失败")
+	profiles, totalCount, err := s.searchDistinctProfilePage(ctx, base, in, adminNoteListFields(), "统计笔记失败", "获取笔记列表失败")
 	if err != nil {
 		return nil, 0, err
 	}
@@ -114,6 +111,16 @@ func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.ProfileListIn
 		list = append(list, adminNoteListFromProfile(item, mediaBuckets[item.Id]))
 	}
 	return list, totalCount, nil
+}
+
+func (s *sSysPublish) adminNoteBaseModel(ctx context.Context, tenantId int64) *gdb.Model {
+	mod := dao.ContentProfile.Ctx(ctx).As("p").
+		InnerJoin(publishTaskTable+" t", "t.profile_id=p.id AND t.deleted_at IS NULL").
+		LeftJoin(publishTenantTable+" tenant", "tenant.id=t.tenant_id").
+		LeftJoin(publishAccountTable+" a", "a.id=t.account_id AND a.deleted_at IS NULL").
+		WhereNull("p.deleted_at").
+		Where("t.tenant_id", tenantId)
+	return mod
 }
 
 func adminNoteListFields() string {
@@ -164,16 +171,7 @@ func (s *sSysPublish) adminNoteCoverMediaByProfiles(ctx context.Context, profile
 	if len(profileIds) == 0 {
 		return buckets, nil
 	}
-	var media []*sysin.MediaModel
-	err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Fields("id,profile_id,media_type,file_url,storage_path,sort_index").
-		WhereIn("profile_id", profileIds).
-		Where("(media_type IS NULL OR media_type = '' OR media_type <> ?)", "video").
-		WhereNull("deleted_at").
-		OrderAsc("profile_id").
-		OrderAsc("sort_index").
-		OrderAsc("id").
-		Scan(&media)
+	media, err := firstProfileCoverMedia(ctx, profileIds)
 	if err != nil {
 		return nil, gerror.Wrap(err, "获取笔记封面失败")
 	}
@@ -191,6 +189,36 @@ func (s *sSysPublish) adminNoteCoverMediaByProfiles(ctx context.Context, profile
 		})
 	}
 	return buckets, nil
+}
+
+func firstProfileCoverMedia(ctx context.Context, profileIds []int64) ([]*sysin.MediaModel, error) {
+	ids := uniqueIds(profileIds)
+	if len(ids) == 0 {
+		return []*sysin.MediaModel{}, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids)+1)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	args = append(args, "video")
+	var media []*sysin.MediaModel
+	sql := fmt.Sprintf(`
+SELECT id, profile_id, media_type, file_url, storage_path, sort_index
+FROM (
+    SELECT id, profile_id, media_type, file_url, storage_path, sort_index,
+           ROW_NUMBER() OVER (PARTITION BY profile_id ORDER BY sort_index ASC, id ASC) AS row_number
+    FROM %s
+    WHERE profile_id IN (%s)
+      AND deleted_at IS NULL
+      AND (media_type IS NULL OR media_type = '' OR media_type <> ?)
+) AS profile_cover
+WHERE row_number = 1
+ORDER BY profile_id ASC`, publishMediaTable, placeholders)
+	if err := g.DB().Raw(sql, args...).Scan(&media); err != nil {
+		return nil, gerror.Wrap(err, "查询资料封面失败")
+	}
+	return media, nil
 }
 
 func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, accountId int64) (*gdb.Model, error) {

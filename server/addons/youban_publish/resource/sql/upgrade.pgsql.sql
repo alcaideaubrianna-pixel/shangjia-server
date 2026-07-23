@@ -26,6 +26,11 @@ ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_source_
 ALTER TABLE "hg_youban_publish_tg_channel" ADD COLUMN IF NOT EXISTS "management_role" varchar(16) NOT NULL DEFAULT 'member';
 ALTER TABLE "hg_youban_publish_account" ALTER COLUMN "public_follow_enabled" SET DEFAULT 0;
 
+CREATE INDEX IF NOT EXISTS "idx_ybp_task_note_scope" ON "hg_youban_publish_task" ("tenant_id", "account_id", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_task_profile_tenant" ON "hg_youban_publish_task" ("profile_id", "tenant_id") WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_content_profile_note_order" ON "hg_content_profile" ("updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_profile_cover" ON "hg_youban_publish_media" ("profile_id", "sort_index", "id") WHERE "deleted_at" IS NULL AND ("media_type" IS NULL OR "media_type" = '' OR "media_type" <> 'video');
+
 INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
 SELECT 'youban_publish', 'collect', '采集总开关', 'int', 'collectEnabled', '1', '1', 10, '是否启用采集能力', 0, 1, NOW(), NOW()
 WHERE NOT EXISTS (SELECT 1 FROM "hg_sys_addons_config" WHERE "addon_name"='youban_publish' AND "key"='collectEnabled');

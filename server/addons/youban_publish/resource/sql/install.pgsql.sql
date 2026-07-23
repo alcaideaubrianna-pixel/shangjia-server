@@ -119,6 +119,9 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_task_tg_operation" ON "hg_youban_publish_tas
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_collect_order" ON "hg_youban_publish_task" ("collect_source_id", "collect_source_chat_id", "collect_source_message_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_title_trgm" ON "hg_youban_publish_task" USING gin ("title" gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_plain_text_trgm" ON "hg_youban_publish_task" USING gin ("plain_text" gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS "idx_ybp_task_note_scope" ON "hg_youban_publish_task" ("tenant_id", "account_id", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_task_profile_tenant" ON "hg_youban_publish_task" ("profile_id", "tenant_id") WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_content_profile_note_order" ON "hg_content_profile" ("updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_import_task" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -458,6 +461,7 @@ UPDATE "hg_youban_publish_media" SET "tg_cache_status" = 'valid', "tg_cache_asse
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_task_attachment" ON "hg_youban_publish_media" ("task_id", "attachment_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_task_sort" ON "hg_youban_publish_media" ("task_id", "sort_index", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_profile" ON "hg_youban_publish_media" ("profile_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_profile_cover" ON "hg_youban_publish_media" ("profile_id", "sort_index", "id") WHERE "deleted_at" IS NULL AND ("media_type" IS NULL OR "media_type" = '' OR "media_type" <> 'video');
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash" ON "hg_youban_publish_media" ("perceptual_hash");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_similar_tenant" ON "hg_youban_publish_media" ("tenant_id", "media_type", "account_id", "profile_id", "id") WHERE "deleted_at" IS NULL AND "perceptual_hash" <> '';
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_similar_account" ON "hg_youban_publish_media" ("account_id", "media_type", "profile_id", "id") WHERE "deleted_at" IS NULL AND "perceptual_hash" <> '';
