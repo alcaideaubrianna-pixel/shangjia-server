@@ -3,6 +3,7 @@ package install
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -31,7 +32,7 @@ func Install(ctx context.Context) error {
 	if err := syncStaticResources(ctx); err != nil {
 		return gerror.Wrap(err, "同步默认静态资源失败")
 	}
-	if err := execBusinessSql(ctx); err != nil {
+	if err := execBusinessSql(ctx, businessSqlFiles(true)); err != nil {
 		return err
 	}
 	return ensureVipOrderCloseCron(ctx)
@@ -41,14 +42,36 @@ func Upgrade(ctx context.Context) error {
 	if err := syncStaticResources(ctx); err != nil {
 		return gerror.Wrap(err, "同步默认静态资源失败")
 	}
-	if err := execBusinessSql(ctx); err != nil {
+	if err := execBusinessSql(ctx, businessSqlFiles(false)); err != nil {
 		return err
 	}
 	return ensureVipOrderCloseCron(ctx)
 }
 
-func execBusinessSql(ctx context.Context) (err error) {
+func execBusinessSql(ctx context.Context, files []string) error {
+	const maxAttempts = 3
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err = execBusinessSqlOnce(ctx, files)
+		if err == nil || !isRetryableInstallError(err) || attempt == maxAttempts {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(attempt) * time.Second):
+		}
+	}
+	return err
+}
+
+func execBusinessSqlOnce(ctx context.Context, files []string) error {
 	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
+			if _, err := tx.Exec("SET LOCAL lock_timeout = '5s'"); err != nil {
+				return gerror.Wrap(err, "设置上架系统 SQL 锁等待超时失败")
+			}
+		}
 		if err := acquireInstallLock(tx); err != nil {
 			return err
 		}
@@ -57,8 +80,8 @@ func execBusinessSql(ctx context.Context) (err error) {
 				_, _ = tx.Exec("SELECT RELEASE_LOCK(?)", publishInstallLockKey)
 			}()
 		}
-		for _, file := range businessSqlFiles() {
-			if err = execSqlFile(ctx, tx, file); err != nil {
+		for _, file := range files {
+			if err := execSqlFile(ctx, tx, file); err != nil {
 				return gerror.Wrapf(err, "执行上架系统 SQL 失败：%s", file)
 			}
 		}
@@ -66,11 +89,34 @@ func execBusinessSql(ctx context.Context) (err error) {
 	})
 }
 
-func businessSqlFiles() []string {
+func businessSqlFiles(includeInstall bool) []string {
 	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
-		return pgsqlBusinessSqlFiles
+		if includeInstall {
+			return pgsqlBusinessSqlFiles
+		}
+		return []string{
+			"addons/youban_publish/resource/sql/upgrade.pgsql.sql",
+			"addons/youban_publish/resource/sql/menu.pgsql.sql",
+		}
 	}
-	return mysqlBusinessSqlFiles
+	if includeInstall {
+		return mysqlBusinessSqlFiles
+	}
+	return []string{
+		"addons/youban_publish/resource/sql/upgrade.sql",
+		"addons/youban_publish/resource/sql/menu.sql",
+	}
+}
+
+func isRetryableInstallError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "deadlock detected") ||
+		strings.Contains(message, "could not obtain lock") ||
+		strings.Contains(message, "lock timeout") ||
+		strings.Contains(message, "serialization failure")
 }
 
 func execSqlFile(ctx context.Context, tx gdb.TX, path string) (err error) {
