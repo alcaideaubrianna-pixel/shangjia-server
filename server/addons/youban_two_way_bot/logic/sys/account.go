@@ -60,10 +60,12 @@ func tgAccountById(ctx context.Context, tgAccountId int64, tenantId int64) (*pub
 		return nil, gerror.New("请选择TG账号")
 	}
 	var item *publishTgAccount
-	err := g.DB().Model("hg_youban_publish_tg_login").Safe().Ctx(ctx).
+	err := g.DB().Model("hg_youban_publish_tg_account").Safe().Ctx(ctx).
 		Where("id", tgAccountId).
 		Where("tenant_id", tenantId).
-		Where("status", "authorized").
+		Where("status", publishsysin.PublishTgAccountStatusAuthorized).
+		WhereNot("session_key", "").
+		WhereNull("deleted_at").
 		Scan(&item)
 	if err != nil {
 		return nil, gerror.Wrap(err, "检查TG账号失败")
