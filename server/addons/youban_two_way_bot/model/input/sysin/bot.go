@@ -28,7 +28,7 @@ type BotListInp struct {
 	form.PageReq
 	PerPageAlias int    `json:"perPage" dc:"每页数量（兼容旧参数）"`
 	Keyword      string `json:"keyword" dc:"关键词"`
-	Status       int    `json:"status" dc:"状态"`
+	Status       *int   `json:"status" dc:"状态"`
 }
 
 func (in *BotListInp) GetPerPage() int {
@@ -53,7 +53,7 @@ type BotSaveInp struct {
 	SupergroupId    string `json:"supergroupId" dc:"管理群ID"`
 	SupergroupTitle string `json:"supergroupTitle" dc:"管理群名称"`
 	InviteLink      string `json:"inviteLink" dc:"邀请链接"`
-	Status          int    `json:"status" dc:"状态"`
+	Status          *int   `json:"status" dc:"状态"`
 }
 
 func (in *BotSaveInp) Filter() error {
@@ -66,8 +66,13 @@ func (in *BotSaveInp) Filter() error {
 	if in.Id <= 0 && in.BotToken == "" {
 		return gerror.New("请输入Bot Token")
 	}
-	if in.Status != TwoWayBotStatusDisabled {
-		in.Status = TwoWayBotStatusEnabled
+	if in.Id <= 0 && in.Status == nil {
+		// 创建请求未传状态时默认启用；指针用于区分未传和明确停用。
+		status := TwoWayBotStatusEnabled
+		in.Status = &status
+	}
+	if in.Status != nil && *in.Status != TwoWayBotStatusEnabled && *in.Status != TwoWayBotStatusDisabled {
+		return gerror.New("状态参数无效")
 	}
 	return nil
 }

@@ -30,8 +30,9 @@ func (s *sSysTwoWayBot) AdminBotList(ctx context.Context, in *sysin.BotListInp) 
 		keyword := "%" + strings.TrimSpace(in.Keyword) + "%"
 		mod = mod.WhereLike(columns.Name, keyword).WhereOrLike(columns.BotUsername, keyword)
 	}
-	if in.Status == sysin.TwoWayBotStatusEnabled || in.Status == sysin.TwoWayBotStatusDisabled {
-		mod = mod.Where(columns.Status, in.Status)
+	if in.Status != nil &&
+		(*in.Status == sysin.TwoWayBotStatusEnabled || *in.Status == sysin.TwoWayBotStatusDisabled) {
+		mod = mod.Where(columns.Status, *in.Status)
 	}
 	var rows []*entity.YoubanTwoWayBotBot
 	if err = mod.Page(in.GetPage(), in.GetPerPage()).OrderDesc(columns.Id).ScanAndCount(&rows, &totalCount, false); err != nil {
@@ -94,8 +95,6 @@ func (s *sSysTwoWayBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) 
 	inviteLink := strings.TrimSpace(in.InviteLink)
 	supergroupAccessHash := ""
 	if in.Id <= 0 {
-		// 创建表单不传 status 时默认启用，避免 int 的零值被当成停用。
-		in.Status = sysin.TwoWayBotStatusEnabled
 		tgAccount, err := tgAccountById(ctx, in.TgAccountId, account.TenantId)
 		if err != nil {
 			return err
@@ -114,6 +113,10 @@ func (s *sSysTwoWayBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) 
 		supergroupTitle = setup.Title
 		inviteLink = setup.InviteLink
 	} else if old != nil {
+		if in.Status == nil {
+			status := old.Status
+			in.Status = &status
+		}
 		supergroupAccessHash = old.SupergroupAccessHash
 		if supergroupId == "" {
 			supergroupId = old.SupergroupId
@@ -124,6 +127,10 @@ func (s *sSysTwoWayBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) 
 		if inviteLink == "" {
 			inviteLink = old.InviteLink
 		}
+	}
+	status := sysin.TwoWayBotStatusEnabled
+	if in.Status != nil {
+		status = *in.Status
 	}
 	data := g.Map{
 		"tenant_id":              account.TenantId,
@@ -139,7 +146,7 @@ func (s *sSysTwoWayBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) 
 		"invite_link":            inviteLink,
 		"setup_status":           setupStatus,
 		"last_setup_at":          now,
-		"status":                 in.Status,
+		"status":                 status,
 		"error_message":          "",
 		"updated_at":             now,
 	}
