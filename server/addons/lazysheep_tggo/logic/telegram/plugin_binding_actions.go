@@ -71,6 +71,17 @@ func (h *bindingQuickConfigCommand) Handle(ctx context.Context, b *bot.Bot, upda
 	if !ok {
 		return nil
 	}
+	if action.Key == "close" {
+		sent, err := b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:      msg.Chat.ID,
+			Text:        "快捷配置已关闭。",
+			ReplyMarkup: &models.ReplyKeyboardRemove{RemoveKeyboard: true},
+		})
+		if err == nil && sent != nil {
+			deleteMessageLater(b, msg.Chat.ID, sent.ID)
+		}
+		return err
+	}
 	userID := userIDFromMessage(msg)
 	state, err := service.SysLazysheepTggo().GetState(ctx)
 	if err != nil {
@@ -296,6 +307,7 @@ func buildBindingQuickConfigKeyboard() *models.ReplyKeyboardMarkup {
 			{{Text: "机器人查看开"}, {Text: "机器人查看关"}},
 			{{Text: "页脚开"}, {Text: "页脚关"}},
 			{{Text: "自动拉取开"}, {Text: "自动拉取关"}},
+			{{Text: "关闭键盘"}},
 		},
 		ResizeKeyboard:        true,
 		InputFieldPlaceholder: "选择配置或直接输入：自动拉取开",
@@ -311,7 +323,8 @@ func buildBindingPluginKeyboard(state *model.State, binding *model.BindingRecord
 		plugins = botCfg.Plugins
 	}
 	rows := make([][]models.InlineKeyboardButton, 0)
-	for _, plugin := range plugins {
+	for _, key := range sortedAdminPluginKeys(plugins) {
+		plugin := plugins[key]
 		if plugin == nil || !plugin.Enabled || !plugin.VisibleInBinding || len(plugin.BindingActions) == 0 {
 			continue
 		}

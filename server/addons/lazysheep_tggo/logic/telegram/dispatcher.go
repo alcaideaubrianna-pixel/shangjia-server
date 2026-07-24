@@ -274,7 +274,8 @@ func buildReplyKeyboard(settings map[string]any, plugins map[string]*model.Plugi
 	rows := settingButtons(settings, role)
 	if settingBool(settings, "showPluginCommands", true) {
 		commandRow := make([]menuButton, 0)
-		for key, item := range plugins {
+		for _, key := range sortedAdminPluginKeys(plugins) {
+			item := plugins[key]
 			if key == "welcome" || key == "menu" || item == nil || !item.Enabled {
 				continue
 			}
