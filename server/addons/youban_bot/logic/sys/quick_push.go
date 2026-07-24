@@ -102,6 +102,12 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 		return false, err
 	}
 	text := strings.TrimSpace(firstNonEmpty(event.Msg.Text, event.Msg.Caption, event.Text))
+	// Navigation commands and menu labels always leave the current flow first.
+	// Without this guard, a stale waiting session consumes every later message.
+	if quickPushNavigationText(text) {
+		_ = bot.removeQuickPushSession(ctx, event.BotId, telegramUserId)
+		return false, nil
+	}
 	chatId := fmt.Sprintf("%d", event.Msg.Chat.ID)
 	row, err := bot.botById(ctx, event.BotId)
 	if err != nil {
@@ -215,9 +221,11 @@ type quickPushPendingMediaGroup struct {
 func (s *sSysBot) startQuickPushSelection(ctx context.Context, botToken string, session *quickPushSession, chatId string, sourceChatId string, sourceMessageId int, text string, media []*publishsysin.MessageTemplateMediaInp) error {
 	plans, err := publishService.SysPublish().QuickPushBotPlanList(ctx, session.OperatorAccountId)
 	if err != nil {
+		_ = s.removeQuickPushSession(ctx, session.BotId, session.TelegramUserId)
 		return err
 	}
 	if len(plans) == 0 {
+		_ = s.removeQuickPushSession(ctx, session.BotId, session.TelegramUserId)
 		return s.reply(ctx, session.BotId, chatId, "暂无已启用的快速推送计划，请先在上架后台创建。")
 	}
 	session.State = quickPushSessionStateSelecting
@@ -357,6 +365,24 @@ func (s *sSysBot) removeQuickPushSession(ctx context.Context, botId int64, teleg
 
 func quickPushSessionKey(botId int64, telegramUserId string) string {
 	return fmt.Sprintf("youban_bot:quick_push:session:%d:%s", botId, strings.TrimSpace(telegramUserId))
+}
+
+func quickPushNavigationText(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	if strings.HasPrefix(text, "/") {
+		return true
+	}
+	for _, label := range []string{
+		"开始使用", "联系客服", "注册邀请", "扫图搜索", "实时汇率", "快速推送",
+	} {
+		if text == label {
+			return true
+		}
+	}
+	return false
 }
 
 func quickPushPlanIds(plans []*publishsysin.QuickPushPlanModel) []int64 {
