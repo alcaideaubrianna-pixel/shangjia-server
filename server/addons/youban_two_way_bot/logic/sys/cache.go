@@ -37,6 +37,10 @@ func mediaGroupFlushCacheKey(botId int64, direction string, groupId string) stri
 	return fmt.Sprintf("youban_two_way_bot:media_group_flush:%d:%s:%s", botId, direction, groupId)
 }
 
+func mediaGroupMessageCacheKey(botId int64, direction string, groupId string, sourceChatId string, sourceMessageId int) string {
+	return fmt.Sprintf("youban_two_way_bot:media_group_message:%d:%s:%s:%s:%d", botId, direction, groupId, sourceChatId, sourceMessageId)
+}
+
 func cacheUserTopic(ctx context.Context, botId int64, userId string, threadId int64) {
 	if botId <= 0 || userId == "" || threadId <= 0 {
 		return

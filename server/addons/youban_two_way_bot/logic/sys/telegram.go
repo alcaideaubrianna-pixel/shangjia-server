@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
-	"time"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -19,22 +17,6 @@ import (
 	"hotgo/addons/youban_two_way_bot/model/input/sysin"
 	"hotgo/internal/library/cache"
 )
-
-const twoWayMediaGroupFlushDelay = 1200 * time.Millisecond
-
-type twoWayMediaGroupItem struct {
-	TenantId        int64  `json:"tenantId"`
-	BotId           int64  `json:"botId"`
-	Direction       string `json:"direction"`
-	TelegramUserId  string `json:"telegramUserId"`
-	ThreadId        int64  `json:"threadId"`
-	SourceChatId    string `json:"sourceChatId"`
-	SourceMessageId int    `json:"sourceMessageId"`
-	TargetChatId    string `json:"targetChatId"`
-	TargetThreadId  int    `json:"targetThreadId"`
-	MediaGroupId    string `json:"mediaGroupId"`
-	UseForward      bool   `json:"useForward"`
-}
 
 func (s *sSysTwoWayBot) TelegramWebhookRaw(ctx context.Context, in *sysin.WebhookInp) error {
 	if in == nil || len(in.Body) == 0 {
@@ -116,32 +98,13 @@ func (s *sSysTwoWayBot) handlePrivateMessage(ctx context.Context, bot *tgbot.Bot
 			SourceChatId:    fmt.Sprintf("%d", msg.Chat.ID),
 			SourceMessageId: msg.ID,
 			TargetChatId:    row.SupergroupId,
-			TargetThreadId:  int(topic.ThreadId),
 			MediaGroupId:    msg.MediaGroupID,
-			UseForward:      true,
-		})
+		}, msg)
 	}
-	target, err := bot.ForwardMessage(ctx, &tgbot.ForwardMessageParams{
-		ChatID:          row.SupergroupId,
-		MessageThreadID: int(topic.ThreadId),
-		FromChatID:      msg.Chat.ID,
-		MessageID:       msg.ID,
-	})
+	target, err := s.sendNewTelegramMessage(ctx, bot, row.SupergroupId, int(topic.ThreadId), msg, contactUserMarkup(userId))
 	targetMessageId := 0
 	if target != nil {
 		targetMessageId = target.ID
-	}
-	if err != nil {
-		copied, copyErr := bot.CopyMessage(ctx, &tgbot.CopyMessageParams{
-			ChatID:          row.SupergroupId,
-			MessageThreadID: int(topic.ThreadId),
-			FromChatID:      msg.Chat.ID,
-			MessageID:       msg.ID,
-		})
-		err = copyErr
-		if copied != nil {
-			targetMessageId = copied.ID
-		}
 	}
 	status, message := "sent", ""
 	if err != nil {
@@ -160,12 +123,6 @@ func (s *sSysTwoWayBot) handlePrivateMessage(ctx context.Context, bot *tgbot.Bot
 
 func (s *sSysTwoWayBot) handleTopicMessage(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, msg *models.Message) error {
 	if msg.MessageThreadID <= 0 || msg.From == nil || msg.From.IsBot {
-		return nil
-	}
-	if ok, err := s.isGroupAdmin(ctx, bot, row, msg.From.ID); err != nil || !ok {
-		if err != nil {
-			g.Log().Warningf(ctx, "校验双向机器人管理员失败 botId:%d userId:%d err:%+v", row.Id, msg.From.ID, err)
-		}
 		return nil
 	}
 	threadId := int64(msg.MessageThreadID)
@@ -190,6 +147,13 @@ func (s *sSysTwoWayBot) handleTopicMessage(ctx context.Context, bot *tgbot.Bot, 
 		}
 	}
 	if s.isAdminCommand(msg) {
+		ok, err := s.isGroupAdmin(ctx, bot, row, msg.From.ID)
+		if err != nil || !ok {
+			if err != nil {
+				g.Log().Warningf(ctx, "校验双向机器人管理员失败 botId:%d userId:%d err:%+v", row.Id, msg.From.ID, err)
+			}
+			return nil
+		}
 		return s.handleAdminCommand(ctx, bot, row, topic, msg, userId)
 	}
 	if topic != nil && topic.Closed == 1 {
@@ -206,13 +170,9 @@ func (s *sSysTwoWayBot) handleTopicMessage(ctx context.Context, bot *tgbot.Bot, 
 			SourceMessageId: msg.ID,
 			TargetChatId:    userId,
 			MediaGroupId:    msg.MediaGroupID,
-		})
+		}, msg)
 	}
-	target, err := bot.CopyMessage(ctx, &tgbot.CopyMessageParams{
-		ChatID:     userId,
-		FromChatID: row.SupergroupId,
-		MessageID:  msg.ID,
-	})
+	target, err := s.sendNewTelegramMessage(ctx, bot, userId, 0, msg, nil)
 	targetMessageId := 0
 	if target != nil {
 		targetMessageId = target.ID
@@ -252,7 +212,7 @@ func (s *sSysTwoWayBot) ensureUserTopic(ctx context.Context, bot *tgbot.Bot, row
 		cacheUserTopic(ctx, row.Id, userId, topic.ThreadId)
 		return topic, nil
 	}
-	title := truncateTopicTitle(fmt.Sprintf("%s %s", telegramUserTitle(user), userId))
+	title := truncateTopicTitle(telegramUserTitle(user))
 	created, err := bot.CreateForumTopic(ctx, &tgbot.CreateForumTopicParams{ChatID: row.SupergroupId, Name: title})
 	if err != nil {
 		return nil, gerror.Wrap(err, "创建Telegram话题失败")
@@ -405,134 +365,6 @@ func (s *sSysTwoWayBot) touchTopic(ctx context.Context, topicId int64) error {
 	now := gtime.Now()
 	_, err := twdao.YoubanTwoWayBotTopic.Ctx(ctx).WherePri(topicId).Data(g.Map{"last_message_at": now, "updated_at": now}).Update()
 	return err
-}
-
-func (s *sSysTwoWayBot) enqueueMediaGroup(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, item twoWayMediaGroupItem) error {
-	_ = s.recordMessage(ctx, row, item.Direction, item.TelegramUserId, item.ThreadId, item.SourceChatId, item.SourceMessageId, item.TargetChatId, 0, item.MediaGroupId, "queued", "")
-
-	flushKey := mediaGroupFlushCacheKey(row.Id, item.Direction, item.MediaGroupId)
-	ok, err := cache.Instance().SetIfNotExist(ctx, flushKey, 1, twoWayMediaGroupCacheTTL)
-	if err != nil || !ok {
-		return err
-	}
-	go func() {
-		flushCtx := context.WithoutCancel(ctx)
-		time.Sleep(twoWayMediaGroupFlushDelay)
-		if err := s.flushMediaGroup(flushCtx, bot, row, item.Direction, item.MediaGroupId); err != nil {
-			g.Log().Warningf(flushCtx, "发送双向机器人媒体组失败 botId:%d mediaGroupId:%s err:%+v", row.Id, item.MediaGroupId, err)
-		}
-	}()
-	return nil
-}
-
-func (s *sSysTwoWayBot) flushMediaGroup(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, direction string, groupId string) error {
-	_, _ = cache.Instance().Remove(ctx, mediaGroupFlushCacheKey(row.Id, direction, groupId))
-
-	var rows []*entity.YoubanTwoWayBotMessage
-	err := twdao.YoubanTwoWayBotMessage.Ctx(ctx).
-		Where("tenant_id", row.TenantId).
-		Where("bot_id", row.Id).
-		Where("direction", direction).
-		Where("media_group_id", groupId).
-		Where("status", "queued").
-		OrderAsc("source_message_id").
-		Scan(&rows)
-	if err != nil {
-		return err
-	}
-	if len(rows) == 0 {
-		return nil
-	}
-	sort.Slice(rows, func(i, j int) bool {
-		return rows[i].SourceMessageId < rows[j].SourceMessageId
-	})
-	messageIDs := make([]int, 0, len(rows))
-	for _, message := range rows {
-		messageIDs = append(messageIDs, message.SourceMessageId)
-	}
-
-	var targetIDs []models.MessageID
-	if direction == "in" {
-		targetIDs, err = bot.ForwardMessages(ctx, &tgbot.ForwardMessagesParams{
-			ChatID:          rows[0].TargetChatId,
-			MessageThreadID: int(rows[0].ThreadId),
-			FromChatID:      rows[0].SourceChatId,
-			MessageIDs:      messageIDs,
-		})
-		if err != nil {
-			targetIDs, err = bot.CopyMessages(ctx, &tgbot.CopyMessagesParams{
-				ChatID:          rows[0].TargetChatId,
-				MessageThreadID: int(rows[0].ThreadId),
-				FromChatID:      rows[0].SourceChatId,
-				MessageIDs:      messageIDs,
-			})
-		}
-	} else {
-		targetIDs, err = bot.CopyMessages(ctx, &tgbot.CopyMessagesParams{
-			ChatID:     rows[0].TargetChatId,
-			FromChatID: rows[0].SourceChatId,
-			MessageIDs: messageIDs,
-		})
-	}
-	status, message := "sent", ""
-	if err != nil {
-		status, message = "failed", err.Error()
-	}
-	for index, queued := range rows {
-		targetMessageId := 0
-		if index < len(targetIDs) {
-			targetMessageId = targetIDs[index].ID
-		}
-		_, _ = twdao.YoubanTwoWayBotMessage.Ctx(ctx).
-			WherePri(queued.Id).
-			Data(g.Map{
-				"target_message_id": targetMessageId,
-				"status":            status,
-				"error_message":     truncateText(message, 1000),
-				"updated_at":        gtime.Now(),
-			}).
-			Update()
-	}
-	if err != nil {
-		if direction == "in" && isTelegramTopicMissing(err) {
-			removeCachedUserTopic(ctx, row.Id, rows[0].TelegramUserId, rows[0].ThreadId)
-		}
-		return err
-	}
-	if direction == "in" {
-		if topic, topicErr := s.topicByThread(ctx, row, rows[0].ThreadId); topicErr == nil && topic != nil {
-			_ = s.touchTopic(ctx, topic.Id)
-		}
-	}
-	return nil
-}
-
-func (s *sSysTwoWayBot) topicByUser(ctx context.Context, row *entity.YoubanTwoWayBotBot, userId string) (*entity.YoubanTwoWayBotTopic, error) {
-	var topic *entity.YoubanTwoWayBotTopic
-	err := twdao.YoubanTwoWayBotTopic.Ctx(ctx).
-		Where("tenant_id", row.TenantId).
-		Where("bot_id", row.Id).
-		Where("telegram_user_id", userId).
-		WhereNull("deleted_at").
-		Scan(&topic)
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取用户话题失败")
-	}
-	return topic, nil
-}
-
-func (s *sSysTwoWayBot) topicByThread(ctx context.Context, row *entity.YoubanTwoWayBotBot, threadId int64) (*entity.YoubanTwoWayBotTopic, error) {
-	var topic *entity.YoubanTwoWayBotTopic
-	err := twdao.YoubanTwoWayBotTopic.Ctx(ctx).
-		Where("tenant_id", row.TenantId).
-		Where("bot_id", row.Id).
-		Where("thread_id", threadId).
-		WhereNull("deleted_at").
-		Scan(&topic)
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取话题用户失败")
-	}
-	return topic, nil
 }
 
 func (s *sSysTwoWayBot) recordMessage(ctx context.Context, row *entity.YoubanTwoWayBotBot, direction string, userId string, threadId int64, sourceChatId string, sourceMessageId int, targetChatId string, targetMessageId int, mediaGroupId string, status string, message string) error {
