@@ -23,6 +23,7 @@ import (
 const mediaSimilarResultCacheTTL = 10 * time.Minute
 
 type mediaSimilarCandidate struct {
+	MediaId   int64
 	ProfileId int64
 	Distance  int
 }
@@ -288,7 +289,7 @@ func mediaSimilarCandidatesFromRows(source *mediaSimilarSource, queryHash *goima
 		if distanceErr != nil || distance > threshold {
 			continue
 		}
-		items = append(items, mediaSimilarCandidate{ProfileId: row.ProfileId, Distance: distance})
+		items = append(items, mediaSimilarCandidate{MediaId: row.MediaId, ProfileId: row.ProfileId, Distance: distance})
 	}
 	items = mediaSimilarDeduplicate(items)
 	sort.Slice(items, func(i, j int) bool {
@@ -331,7 +332,12 @@ func mediaSimilarDeduplicate(items []mediaSimilarCandidate) []mediaSimilarCandid
 	}
 	res := make([]mediaSimilarCandidate, 0, len(distanceByProfile))
 	for profileId, distance := range distanceByProfile {
-		res = append(res, mediaSimilarCandidate{ProfileId: profileId, Distance: distance})
+		for _, item := range items {
+			if item.ProfileId == profileId && item.Distance == distance {
+				res = append(res, item)
+				break
+			}
+		}
 	}
 	return res
 }
@@ -346,14 +352,60 @@ func applyMediaSimilarScope(mod *gdb.Model, scope *mediaSimilarScope) *gdb.Model
 	return mod
 }
 
+func (s *sSysPublish) mediaByIds(ctx context.Context, mediaIds []int64) ([]*sysin.MediaModel, error) {
+	ids := uniqueIds(mediaIds)
+	if len(ids) == 0 {
+		return []*sysin.MediaModel{}, nil
+	}
+	var media []*sysin.MediaModel
+	err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		WhereIn("id", ids).
+		WhereNull("deleted_at").
+		OrderAsc("sort_index").
+		OrderAsc("id").
+		Scan(&media)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取相似媒体失败")
+	}
+	normalizeMediaListFileURL(media)
+	return media, nil
+}
+
 func (s *sSysPublish) mediaSimilarNotes(ctx context.Context, viewer *sysin.AccountModel, items []mediaSimilarCandidate) ([]*sysin.NoteModel, error) {
 	profileIds := make([]int64, 0, len(items))
+	mediaIds := make([]int64, 0, len(items))
 	for _, item := range items {
 		if item.ProfileId > 0 {
 			profileIds = append(profileIds, item.ProfileId)
 		}
+		if item.MediaId > 0 {
+			mediaIds = append(mediaIds, item.MediaId)
+		}
 	}
-	return s.profileImageSearchNotesByProfileIds(ctx, profileIds, 0, nil, viewer, "")
+	notes, err := s.profileImageSearchNotesByProfileIds(ctx, profileIds, 0, nil, viewer, "")
+	if err != nil || len(notes) == 0 || len(mediaIds) == 0 {
+		return notes, err
+	}
+	matchedMedia, err := s.mediaByIds(ctx, mediaIds)
+	if err != nil {
+		return nil, err
+	}
+	mediaByProfile := make(map[int64]*sysin.MediaModel, len(matchedMedia))
+	for _, media := range matchedMedia {
+		if media == nil || media.ProfileId <= 0 {
+			continue
+		}
+		mediaByProfile[media.ProfileId] = media
+	}
+	for _, note := range notes {
+		if note == nil {
+			continue
+		}
+		if media := mediaByProfile[note.Id]; media != nil {
+			note.Media = []*sysin.MediaModel{media}
+		}
+	}
+	return notes, nil
 }
 
 func normalizeMediaSimilarListInput(in *sysin.MediaSimilarListInp) {
@@ -377,7 +429,7 @@ func normalizeMediaSimilarListInput(in *sysin.MediaSimilarListInp) {
 func mediaSimilarResultCacheKey(scope *mediaSimilarScope, source *mediaSimilarSource, threshold int) string {
 	updatedAt := strings.TrimSpace(source.UpdatedAt)
 	return fmt.Sprintf(
-		"youban_publish:media_similar:v2:%s:%d:%d:%s",
+		"youban_publish:media_similar:v3:%s:%d:%d:%s",
 		scope.CacheKey,
 		source.Id,
 		threshold,
