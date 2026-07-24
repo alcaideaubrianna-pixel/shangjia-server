@@ -202,7 +202,11 @@ func (s *sSysPublish) profileImageSearch(ctx context.Context, in *sysin.ProfileI
 	if len(profileIds) == 0 {
 		return []*sysin.NoteModel{}, totalCount, nil
 	}
-	list, err = s.profileImageSearchNotesByProfileIds(ctx, profileIds, in.TenantId, []int64{}, nil, permission)
+	filterAccountIds := []int64{}
+	if in.AccountId > 0 {
+		filterAccountIds = []int64{in.AccountId}
+	}
+	list, err = s.profileImageSearchNotesByProfileIds(ctx, profileIds, in.TenantId, filterAccountIds, nil, permission)
 	if err != nil {
 		return nil, 0, err
 	}

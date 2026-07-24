@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	mediaPHashBucketCacheVersionKey = "youban_publish:media_phash_bucket:version"
+	mediaPHashBucketCacheVersionKey = "youban_publish:media_phash_bucket:version:v2"
 	mediaPHashBucketResultTTL       = 10 * time.Minute
 	mediaPHashBucketMaxCandidates   = 8000
+	mediaPHashBucketMaxScopedIds    = 32
 )
 
 func (s *sSysPublish) syncMediaPHashBucketByMediaId(ctx context.Context, mediaId int64) error {
@@ -45,12 +46,15 @@ func (s *sSysPublish) deleteMediaPHashBucketByMediaId(ctx context.Context, media
 	if mediaId <= 0 {
 		return nil
 	}
-	_, err := g.DB().Model(publishMediaPHashBucketTable).Safe().Ctx(ctx).Where("media_id", mediaId).Delete()
+	owners, err := mediaPHashBucketOwners(ctx, "media_id", mediaId)
+	if err != nil {
+		return err
+	}
+	_, err = g.DB().Model(publishMediaPHashBucketTable).Safe().Ctx(ctx).Where("media_id", mediaId).Delete()
 	if err != nil {
 		return gerror.Wrap(err, "删除媒体哈希索引失败")
 	}
-	_ = bumpMediaPHashBucketVersion(ctx)
-	return nil
+	return bumpMediaPHashBucketVersions(ctx, owners)
 }
 
 func (s *sSysPublish) replaceMediaPHashBucketByMediaRow(ctx context.Context, media gdb.Record) error {
@@ -61,7 +65,7 @@ func (s *sSysPublish) replaceMediaPHashBucketByMediaRow(ctx context.Context, med
 		return s.deleteMediaPHashBucketByMediaId(ctx, mediaId)
 	}
 	now := gtime.Now()
-	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if _, err := tx.Model(publishMediaPHashBucketTable).Safe().Ctx(ctx).Where("media_id", mediaId).Delete(); err != nil {
 			return gerror.Wrap(err, "清理媒体哈希索引失败")
 		}
@@ -87,7 +91,10 @@ func (s *sSysPublish) replaceMediaPHashBucketByMediaRow(ctx context.Context, med
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return bumpMediaPHashBucketVersion(ctx, media["tenant_id"].Int64(), media["account_id"].Int64())
 }
 
 func mediaPHashBucketValues(hash string) []mediaPHashBucketCell {
@@ -108,39 +115,104 @@ type mediaPHashBucketCell struct {
 	Value string
 }
 
-func mediaPHashBucketVersion(ctx context.Context) string {
-	value, err := cache.Instance().Get(ctx, mediaPHashBucketCacheVersionKey)
+func mediaPHashBucketVersion(ctx context.Context, tenantId int64, accountIds []int64) string {
+	ids := uniqueIds(accountIds)
+	if tenantId <= 0 || len(ids) == 0 || len(ids) > mediaPHashBucketMaxScopedIds {
+		return mediaPHashBucketVersionValue(ctx, mediaPHashBucketTenantVersionKey(tenantId))
+	}
+	parts := make([]string, 0, len(ids))
+	for _, accountId := range ids {
+		parts = append(parts, fmt.Sprintf("%d=%s", accountId, mediaPHashBucketVersionValue(ctx, mediaPHashBucketAccountVersionKey(tenantId, accountId))))
+	}
+	return mediaPHashHashKey(strings.Join(parts, ","))
+}
+
+func mediaPHashBucketVersionValue(ctx context.Context, key string) string {
+	value, err := cache.Instance().Get(ctx, key)
 	if err != nil || value.IsNil() {
 		return "0"
 	}
 	return value.String()
 }
 
-func bumpMediaPHashBucketVersion(ctx context.Context) error {
-	return cache.Instance().Set(ctx, mediaPHashBucketCacheVersionKey, gtime.Now().UnixNano(), 24*time.Hour)
+func mediaPHashBucketTenantVersionKey(tenantId int64) string {
+	return fmt.Sprintf("%s:tenant:%d", mediaPHashBucketCacheVersionKey, tenantId)
+}
+
+func mediaPHashBucketAccountVersionKey(tenantId int64, accountId int64) string {
+	return fmt.Sprintf("%s:account:%d:%d", mediaPHashBucketCacheVersionKey, tenantId, accountId)
+}
+
+func bumpMediaPHashBucketVersion(ctx context.Context, tenantId int64, accountId int64) error {
+	version := gtime.Now().UnixNano()
+	if tenantId <= 0 {
+		return nil
+	}
+	if err := cache.Instance().Set(ctx, mediaPHashBucketTenantVersionKey(tenantId), version, 24*time.Hour); err != nil {
+		return err
+	}
+	if accountId > 0 {
+		return cache.Instance().Set(ctx, mediaPHashBucketAccountVersionKey(tenantId, accountId), version, 24*time.Hour)
+	}
+	return nil
 }
 
 func (s *sSysPublish) deleteMediaPHashBucketByProfileId(ctx context.Context, profileId int64) error {
 	if profileId <= 0 {
 		return nil
 	}
-	_, err := g.DB().Model(publishMediaPHashBucketTable).Safe().Ctx(ctx).Where("profile_id", profileId).Delete()
+	owners, err := mediaPHashBucketOwners(ctx, "profile_id", profileId)
+	if err != nil {
+		return err
+	}
+	_, err = g.DB().Model(publishMediaPHashBucketTable).Safe().Ctx(ctx).Where("profile_id", profileId).Delete()
 	if err != nil {
 		return gerror.Wrap(err, "删除资料哈希索引失败")
 	}
-	_ = bumpMediaPHashBucketVersion(ctx)
-	return nil
+	return bumpMediaPHashBucketVersions(ctx, owners)
 }
 
 func (s *sSysPublish) deleteMediaPHashBucketByTaskId(ctx context.Context, taskId int64) error {
 	if taskId <= 0 {
 		return nil
 	}
-	_, err := g.DB().Model(publishMediaPHashBucketTable).Safe().Ctx(ctx).Where("task_id", taskId).Delete()
+	owners, err := mediaPHashBucketOwners(ctx, "task_id", taskId)
+	if err != nil {
+		return err
+	}
+	_, err = g.DB().Model(publishMediaPHashBucketTable).Safe().Ctx(ctx).Where("task_id", taskId).Delete()
 	if err != nil {
 		return gerror.Wrap(err, "删除任务哈希索引失败")
 	}
-	_ = bumpMediaPHashBucketVersion(ctx)
+	return bumpMediaPHashBucketVersions(ctx, owners)
+}
+
+type mediaPHashBucketOwner struct {
+	TenantId  int64 `orm:"tenant_id"`
+	AccountId int64 `orm:"account_id"`
+}
+
+func mediaPHashBucketOwners(ctx context.Context, field string, value int64) ([]mediaPHashBucketOwner, error) {
+	if field != "media_id" && field != "profile_id" && field != "task_id" {
+		return nil, gerror.New("媒体哈希索引字段不合法")
+	}
+	owners := make([]mediaPHashBucketOwner, 0)
+	if err := g.DB().Model(publishMediaPHashBucketTable).Safe().Ctx(ctx).
+		Fields("tenant_id,account_id").
+		Where(field, value).
+		Group("tenant_id,account_id").
+		Scan(&owners); err != nil {
+		return nil, gerror.Wrap(err, "读取媒体哈希索引归属失败")
+	}
+	return owners, nil
+}
+
+func bumpMediaPHashBucketVersions(ctx context.Context, owners []mediaPHashBucketOwner) error {
+	for _, owner := range owners {
+		if err := bumpMediaPHashBucketVersion(ctx, owner.TenantId, owner.AccountId); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -162,13 +234,32 @@ func mediaPHashBucketCandidateRows(ctx context.Context, normalizedHash string, t
 	}
 	rows := make([]mediaPHashBucketCandidateRow, 0)
 	sql := fmt.Sprintf(`
-SELECT media_id, profile_id, account_id, tenant_id, media_type, hash_value, COUNT(*) AS bucket_hits
-FROM (
+WITH bucket_match AS (
 %s
-) AS bucket_match
+), candidate AS (
+SELECT media_id, profile_id, account_id, tenant_id, media_type, hash_value, COUNT(*) AS bucket_hits
+FROM bucket_match
 GROUP BY media_id, profile_id, account_id, tenant_id, media_type, hash_value
 HAVING COUNT(*) >= ?
-ORDER BY bucket_hits DESC
+)
+SELECT candidate.media_id, candidate.profile_id, candidate.account_id,
+       candidate.tenant_id, candidate.media_type, candidate.hash_value,
+       candidate.bucket_hits
+FROM candidate
+WHERE EXISTS (
+    SELECT 1
+    FROM hg_content_profile p
+    WHERE p.id = candidate.profile_id AND p.deleted_at IS NULL
+)
+AND EXISTS (
+    SELECT 1
+    FROM hg_youban_publish_task t
+    WHERE t.profile_id = candidate.profile_id
+      AND t.tenant_id = candidate.tenant_id
+      AND t.account_id = candidate.account_id
+      AND t.deleted_at IS NULL
+)
+ORDER BY candidate.bucket_hits DESC
 LIMIT %d
 `, strings.Join(branches, " UNION ALL "), mediaPHashBucketMaxCandidates)
 	args = append(args, minEqualNibbles)
@@ -182,8 +273,6 @@ func mediaPHashBucketBranchSQL(bucketPos int, bucketValue string, tenantId int64
 	conds := []string{
 		"b.bucket_pos = ?",
 		"b.bucket_value = ?",
-		"EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id = b.profile_id AND p.deleted_at IS NULL)",
-		"EXISTS (SELECT 1 FROM hg_youban_publish_task t WHERE t.profile_id = b.profile_id AND t.tenant_id = b.tenant_id AND t.account_id = b.account_id AND t.deleted_at IS NULL)",
 	}
 	args := []any{bucketPos, bucketValue}
 	if tenantId > 0 {

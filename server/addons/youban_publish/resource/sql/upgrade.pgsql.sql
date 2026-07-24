@@ -350,3 +350,4 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_bucket" (
   "updated_at" timestamp DEFAULT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_media_phash_bucket_media_pos" ON "hg_youban_publish_media_phash_bucket" ("media_id", "bucket_pos");
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_bucket_search" ON "hg_youban_publish_media_phash_bucket" ("tenant_id", "media_type", "bucket_pos", "bucket_value") INCLUDE ("media_id", "profile_id", "account_id", "hash_value");
