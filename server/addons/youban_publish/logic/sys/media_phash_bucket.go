@@ -115,6 +115,17 @@ type mediaPHashBucketCell struct {
 	Value string
 }
 
+type mediaPHashBucketScopePart struct {
+	TenantId   int64
+	AccountIds []int64
+}
+
+type mediaPHashBucketSource struct {
+	Id        int64
+	MediaType string
+	HashValue string
+}
+
 func mediaPHashBucketVersion(ctx context.Context, tenantId int64, accountIds []int64) string {
 	ids := uniqueIds(accountIds)
 	if tenantId <= 0 || len(ids) == 0 || len(ids) > mediaPHashBucketMaxScopedIds {
@@ -217,6 +228,10 @@ func bumpMediaPHashBucketVersions(ctx context.Context, owners []mediaPHashBucket
 }
 
 func mediaPHashBucketCandidateRows(ctx context.Context, normalizedHash string, threshold int, tenantId int64, accountIds []int64, profileIds []int64, mediaType string, excludeProfileId int64) ([]mediaPHashBucketCandidateRow, error) {
+	return mediaPHashBucketCandidateRowsWithScopes(ctx, normalizedHash, threshold, []mediaPHashBucketScopePart{{TenantId: tenantId, AccountIds: accountIds}}, profileIds, mediaType, excludeProfileId)
+}
+
+func mediaPHashBucketCandidateRowsWithScopes(ctx context.Context, normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) ([]mediaPHashBucketCandidateRow, error) {
 	normalizedHash = strings.TrimSpace(strings.ToLower(normalizedHash))
 	if normalizedHash == "" {
 		return []mediaPHashBucketCandidateRow{}, nil
@@ -228,7 +243,7 @@ func mediaPHashBucketCandidateRows(ctx context.Context, normalizedHash string, t
 	branches := make([]string, 0, len(normalizedHash))
 	args := make([]any, 0, len(normalizedHash)*8)
 	for i, item := range normalizedHash {
-		branch, branchArgs := mediaPHashBucketBranchSQL(i+1, string(item), tenantId, accountIds, profileIds, mediaType, excludeProfileId)
+		branch, branchArgs := mediaPHashBucketBranchSQL(i+1, string(item), scopes, profileIds, mediaType, excludeProfileId)
 		branches = append(branches, branch)
 		args = append(args, branchArgs...)
 	}
@@ -269,27 +284,103 @@ LIMIT %d
 	return rows, nil
 }
 
-func mediaPHashBucketBranchSQL(bucketPos int, bucketValue string, tenantId int64, accountIds []int64, profileIds []int64, mediaType string, excludeProfileId int64) (string, []any) {
+func mediaPHashBucketBatchCandidateRows(ctx context.Context, sources []mediaPHashBucketSource, threshold int, scopes []mediaPHashBucketScopePart) (map[int64][]mediaPHashBucketCandidateRow, error) {
+	result := make(map[int64][]mediaPHashBucketCandidateRow)
+	if len(sources) == 0 || len(scopes) == 0 {
+		return result, nil
+	}
+	values := make([]string, 0, len(sources)*16)
+	args := make([]any, 0, len(sources)*64)
+	for _, source := range sources {
+		for _, bucket := range mediaPHashBucketValues(source.HashValue) {
+			values = append(values, "(CAST(? AS bigint), CAST(? AS text), CAST(? AS integer), CAST(? AS text))")
+			args = append(args, source.Id, source.MediaType, bucket.Pos, bucket.Value)
+		}
+	}
+	if len(values) == 0 {
+		return result, nil
+	}
+	scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("b", scopes)
+	args = append(args, scopeArgs...)
+	minEqualNibbles := mediaPHashMinEqualNibbles(threshold)
+	if minEqualNibbles <= 0 {
+		minEqualNibbles = 1
+	}
+	args = append(args, minEqualNibbles)
+	sql := fmt.Sprintf(`
+WITH source_bucket(source_media_id, media_type, bucket_pos, bucket_value) AS (
+    VALUES %s
+), bucket_match AS (
+    SELECT sb.source_media_id, b.media_id, b.profile_id, b.account_id,
+           b.tenant_id, b.media_type, b.hash_value, COUNT(*) AS bucket_hits
+    FROM source_bucket sb
+    JOIN %s b ON b.media_type = sb.media_type
+        AND b.bucket_pos = sb.bucket_pos
+        AND b.bucket_value = sb.bucket_value
+    WHERE %s
+    GROUP BY sb.source_media_id, b.media_id, b.profile_id, b.account_id,
+             b.tenant_id, b.media_type, b.hash_value
+    HAVING COUNT(*) >= ?
+), ranked AS (
+    SELECT bucket_match.*,
+           ROW_NUMBER() OVER (PARTITION BY source_media_id ORDER BY bucket_hits DESC) AS row_number
+    FROM bucket_match
+)
+SELECT source_media_id, media_id, profile_id, account_id, tenant_id,
+       media_type, hash_value, bucket_hits
+FROM ranked
+WHERE row_number <= %d
+AND EXISTS (
+    SELECT 1 FROM hg_content_profile p
+    WHERE p.id = ranked.profile_id AND p.deleted_at IS NULL
+)
+AND EXISTS (
+    SELECT 1 FROM hg_youban_publish_task t
+    WHERE t.profile_id = ranked.profile_id
+      AND t.tenant_id = ranked.tenant_id
+      AND t.account_id = ranked.account_id
+      AND t.deleted_at IS NULL
+)
+ORDER BY source_media_id, bucket_hits DESC
+`, strings.Join(values, ","), publishMediaPHashBucketTable, scopeSQL, mediaPHashBucketMaxCandidates)
+	var rows []struct {
+		SourceMediaId int64  `json:"sourceMediaId"`
+		MediaId       int64  `json:"mediaId" orm:"media_id"`
+		ProfileId     int64  `json:"profileId" orm:"profile_id"`
+		AccountId     int64  `json:"accountId" orm:"account_id"`
+		TenantId      int64  `json:"tenantId" orm:"tenant_id"`
+		MediaType     string `json:"mediaType" orm:"media_type"`
+		HashValue     string `json:"hashValue" orm:"hash_value"`
+		BucketHits    int    `json:"bucketHits" orm:"bucket_hits"`
+	}
+	if err := g.DB().Raw(sql, args...).Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "批量查询相似媒体分桶失败")
+	}
+	for _, row := range rows {
+		if row.SourceMediaId > 0 {
+			result[row.SourceMediaId] = append(result[row.SourceMediaId], mediaPHashBucketCandidateRow{
+				MediaId: row.MediaId, ProfileId: row.ProfileId, AccountId: row.AccountId,
+				TenantId: row.TenantId, MediaType: row.MediaType, HashValue: row.HashValue,
+				BucketHits: row.BucketHits,
+			})
+		}
+	}
+	return result, nil
+}
+
+func mediaPHashBucketBranchSQL(bucketPos int, bucketValue string, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) (string, []any) {
 	conds := []string{
 		"b.bucket_pos = ?",
 		"b.bucket_value = ?",
 	}
 	args := []any{bucketPos, bucketValue}
-	if tenantId > 0 {
-		conds = append(conds, "b.tenant_id = ?")
-		args = append(args, tenantId)
-	}
 	if mediaType != "" {
 		conds = append(conds, "b.media_type = ?")
 		args = append(args, mediaType)
 	}
-	if len(accountIds) > 0 {
-		ids := uniqueIds(accountIds)
-		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-		conds = append(conds, "b.account_id IN ("+placeholders+")")
-		for _, id := range ids {
-			args = append(args, id)
-		}
+	if scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("b", scopes); scopeSQL != "" {
+		conds = append(conds, "("+scopeSQL+")")
+		args = append(args, scopeArgs...)
 	}
 	if len(profileIds) > 0 {
 		ids := uniqueIds(profileIds)
@@ -309,4 +400,30 @@ func mediaPHashBucketBranchSQL(bucketPos int, bucketValue string, tenantId int64
 		strings.Join(conds, " AND "),
 	)
 	return sql, args
+}
+
+func mediaPHashBucketScopeSQL(alias string, scopes []mediaPHashBucketScopePart) (string, []any) {
+	conditions := make([]string, 0, len(scopes))
+	args := make([]any, 0)
+	for _, scope := range scopes {
+		if len(scope.AccountIds) == 0 {
+			continue
+		}
+		ids := uniqueIds(scope.AccountIds)
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+		fieldPrefix := alias
+		if fieldPrefix != "" {
+			fieldPrefix += "."
+		}
+		condition := fieldPrefix + "account_id IN (" + placeholders + ")"
+		if scope.TenantId > 0 {
+			condition = fieldPrefix + "tenant_id = ? AND " + condition
+			args = append(args, scope.TenantId)
+		}
+		conditions = append(conditions, condition)
+		for _, id := range ids {
+			args = append(args, id)
+		}
+	}
+	return strings.Join(conditions, " OR "), args
 }

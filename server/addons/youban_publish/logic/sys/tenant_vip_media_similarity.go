@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 
@@ -40,7 +41,7 @@ type mediaSimilarSource struct {
 type mediaSimilarScope struct {
 	AccountIds []int64
 	CacheKey   string
-	TenantId   int64
+	Partitions []mediaPHashBucketScopePart
 }
 
 func (s *sSysPublish) MediaSimilarCount(ctx context.Context, in *sysin.MediaSimilarCountInp) ([]*sysin.MediaSimilarCountModel, error) {
@@ -55,6 +56,9 @@ func (s *sSysPublish) MediaSimilarCount(ctx context.Context, in *sysin.MediaSimi
 	if len(mediaIds) == 0 {
 		return []*sysin.MediaSimilarCountModel{}, nil
 	}
+	if len(mediaIds) > 50 {
+		return nil, gerror.New("一次最多查询50个媒体")
+	}
 	scope, err := s.mediaSimilarVisibleScope(ctx, account)
 	if err != nil {
 		return nil, err
@@ -63,18 +67,18 @@ func (s *sSysPublish) MediaSimilarCount(ctx context.Context, in *sysin.MediaSimi
 	if err != nil {
 		return nil, err
 	}
+	itemsByMediaId, err := s.cachedMediaSimilarCandidatesBatch(ctx, scope, sources, mediaIds, 12)
+	if err != nil {
+		return nil, err
+	}
 	res := make([]*sysin.MediaSimilarCountModel, 0, len(mediaIds))
 	for _, mediaId := range mediaIds {
-		source, ok := sources[mediaId]
+		_, ok := sources[mediaId]
 		if !ok {
 			res = append(res, &sysin.MediaSimilarCountModel{MediaId: mediaId, Count: 0})
 			continue
 		}
-		items, countErr := s.cachedMediaSimilarCandidates(ctx, scope, source, 12)
-		if countErr != nil {
-			return nil, countErr
-		}
-		res = append(res, &sysin.MediaSimilarCountModel{MediaId: mediaId, Count: len(items)})
+		res = append(res, &sysin.MediaSimilarCountModel{MediaId: mediaId, Count: len(itemsByMediaId[mediaId])})
 	}
 	return res, nil
 }
@@ -146,6 +150,53 @@ func (s *sSysPublish) cachedMediaSimilarCandidates(ctx context.Context, scope *m
 	return items, nil
 }
 
+func (s *sSysPublish) cachedMediaSimilarCandidatesBatch(ctx context.Context, scope *mediaSimilarScope, sources map[int64]*mediaSimilarSource, mediaIds []int64, threshold int) (map[int64][]mediaSimilarCandidate, error) {
+	result := make(map[int64][]mediaSimilarCandidate, len(mediaIds))
+	misses := make([]*mediaSimilarSource, 0, len(mediaIds))
+	for _, mediaId := range mediaIds {
+		source, ok := sources[mediaId]
+		if !ok || source == nil {
+			continue
+		}
+		cacheKey := mediaSimilarResultCacheKey(scope, source, threshold)
+		if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
+			var cached []mediaSimilarCandidate
+			if scanErr := value.Scan(&cached); scanErr == nil {
+				result[mediaId] = filterMediaSimilarCandidates(source, cached)
+				continue
+			}
+		}
+		misses = append(misses, source)
+	}
+	if len(misses) == 0 {
+		return result, nil
+	}
+	batchSources := make([]mediaPHashBucketSource, 0, len(misses))
+	validSources := make(map[int64]*mediaSimilarSource, len(misses))
+	for _, source := range misses {
+		if _, ok := parseUploadPHash(source.PerceptualHash); !ok {
+			result[source.Id] = []mediaSimilarCandidate{}
+			continue
+		}
+		batchSources = append(batchSources, mediaPHashBucketSource{Id: source.Id, MediaType: source.MediaType, HashValue: source.PerceptualHash})
+		validSources[source.Id] = source
+	}
+	rowsByMediaId, err := mediaPHashBucketBatchCandidateRows(ctx, batchSources, threshold, scope.Partitions)
+	if err != nil {
+		return nil, err
+	}
+	for _, source := range validSources {
+		queryHash, ok := parseUploadPHash(source.PerceptualHash)
+		if !ok {
+			continue
+		}
+		items := mediaSimilarCandidatesFromRows(source, queryHash, rowsByMediaId[source.Id], threshold)
+		result[source.Id] = items
+		_ = cache.Instance().Set(ctx, mediaSimilarResultCacheKey(scope, source, threshold), items, mediaSimilarResultCacheTTL)
+	}
+	return result, nil
+}
+
 func (s *sSysPublish) visibleSourceMedia(ctx context.Context, scope *mediaSimilarScope, mediaId int64) (*mediaSimilarSource, error) {
 	rows, err := s.visibleSourceMediaMap(ctx, scope, []int64{mediaId})
 	if err != nil {
@@ -192,40 +243,77 @@ func (s *sSysPublish) visibleSourceMediaMap(ctx context.Context, scope *mediaSim
 }
 
 func (s *sSysPublish) mediaSimilarVisibleScope(ctx context.Context, account *sysin.AccountModel) (*mediaSimilarScope, error) {
+	var ids []int64
 	if account.AccountType != "admin" {
-		ids := []int64{account.Id}
-		return &mediaSimilarScope{
-			AccountIds: ids,
-			CacheKey:   mediaSimilarScopeCacheKey(account.TenantId, ids),
-			TenantId:   account.TenantId,
-		}, nil
+		ids = []int64{account.Id}
+	} else {
+		managedIds, err := s.adminManagedAccountIds(ctx, account)
+		if err != nil {
+			return nil, err
+		}
+		followIds, err := s.followNoteDirectAccountIds(ctx, account, nil)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, managedIds...)
+		ids = append(ids, account.Id)
+		ids = append(ids, followIds...)
 	}
-	ids, err := s.adminManagedAccountIds(ctx, account)
-	if err != nil {
-		return nil, err
-	}
-	followIds, err := s.followNoteDirectAccountIds(ctx, account, nil)
-	if err != nil {
-		return nil, err
-	}
-	ids = append(ids, account.Id)
-	ids = append(ids, followIds...)
 	ids = uniqueIds(ids)
+	partitions, err := s.mediaSimilarScopePartitions(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	return &mediaSimilarScope{
 		AccountIds: ids,
 		CacheKey:   mediaSimilarScopeCacheKey(account.TenantId, ids),
-		TenantId:   0,
+		Partitions: partitions,
 	}, nil
+}
+
+func (s *sSysPublish) mediaSimilarScopePartitions(ctx context.Context, accountIds []int64) ([]mediaPHashBucketScopePart, error) {
+	accountIds = uniqueIds(accountIds)
+	if len(accountIds) == 0 {
+		return []mediaPHashBucketScopePart{}, nil
+	}
+	columns := pdao.YoubanPublishAccount.Columns()
+	var rows []struct {
+		Id       int64 `json:"id"`
+		TenantId int64 `json:"tenantId"`
+	}
+	if err := pdao.YoubanPublishAccount.Ctx(ctx).
+		Fields(columns.Id, columns.TenantId).
+		WhereIn(columns.Id, accountIds).
+		Where(columns.Status, 1).
+		WhereNull(columns.DeletedAt).
+		Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "读取相似资料权限范围失败")
+	}
+	grouped := make(map[int64][]int64)
+	for _, row := range rows {
+		if row.Id > 0 && row.TenantId > 0 {
+			grouped[row.TenantId] = append(grouped[row.TenantId], row.Id)
+		}
+	}
+	partitions := make([]mediaPHashBucketScopePart, 0, len(grouped))
+	for tenantId, ids := range grouped {
+		partitions = append(partitions, mediaPHashBucketScopePart{TenantId: tenantId, AccountIds: uniqueIds(ids)})
+	}
+	return partitions, nil
 }
 
 func (s *sSysPublish) mediaSimilarBucketCandidates(ctx context.Context, scope *mediaSimilarScope, source *mediaSimilarSource, queryHash *goimagehash.ImageHash, threshold int) ([]mediaSimilarCandidate, error) {
 	if queryHash == nil || source == nil {
 		return []mediaSimilarCandidate{}, nil
 	}
-	rows, err := mediaPHashBucketCandidateRows(ctx, fmt.Sprintf("%016x", queryHash.GetHash()), threshold, scope.TenantId, scope.AccountIds, nil, source.MediaType, source.ProfileId)
+	rows, err := mediaPHashBucketCandidateRowsWithScopes(ctx, fmt.Sprintf("%016x", queryHash.GetHash()), threshold, scope.Partitions, nil, source.MediaType, source.ProfileId)
 	if err != nil {
 		return nil, err
 	}
+	return mediaSimilarCandidatesFromRows(source, queryHash, rows, threshold), nil
+}
+
+func mediaSimilarCandidatesFromRows(source *mediaSimilarSource, queryHash *goimagehash.ImageHash, rows []mediaPHashBucketCandidateRow, threshold int) []mediaSimilarCandidate {
 	items := make([]mediaSimilarCandidate, 0, len(rows))
 	for _, row := range rows {
 		if row.ProfileId <= 0 || row.ProfileId == source.ProfileId {
@@ -241,7 +329,14 @@ func (s *sSysPublish) mediaSimilarBucketCandidates(ctx context.Context, scope *m
 		}
 		items = append(items, mediaSimilarCandidate{ProfileId: row.ProfileId, Distance: distance})
 	}
-	return mediaSimilarDeduplicate(items), nil
+	items = mediaSimilarDeduplicate(items)
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Distance == items[j].Distance {
+			return items[i].ProfileId > items[j].ProfileId
+		}
+		return items[i].Distance < items[j].Distance
+	})
+	return items
 }
 
 func filterMediaSimilarCandidates(source *mediaSimilarSource, items []mediaSimilarCandidate) []mediaSimilarCandidate {
@@ -281,11 +376,11 @@ func mediaSimilarDeduplicate(items []mediaSimilarCandidate) []mediaSimilarCandid
 }
 
 func applyMediaSimilarScope(mod *gdb.Model, scope *mediaSimilarScope) *gdb.Model {
-	if scope.TenantId > 0 {
-		mod = mod.Where("tenant_id", scope.TenantId)
-	}
-	if len(scope.AccountIds) > 0 {
-		mod = mod.WhereIn("account_id", scope.AccountIds)
+	conditions, args := mediaPHashBucketScopeSQL("", scope.Partitions)
+	if conditions != "" {
+		conditions = strings.ReplaceAll(conditions, ".tenant_id", "tenant_id")
+		conditions = strings.ReplaceAll(conditions, ".account_id", "account_id")
+		mod = mod.Where("("+conditions+")", args...)
 	}
 	return mod
 }
