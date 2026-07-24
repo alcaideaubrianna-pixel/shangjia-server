@@ -55,7 +55,14 @@ func (s *sSysPublish) BotProfileView(ctx context.Context, in *sysin.BotProfileVi
 		in.AccountIds, err = s.botMediaSearchAccountIds(ctx, &sysin.BotMediaSearchInp{TenantId: in.TenantId, AccountId: in.AccountId, AccountType: in.AccountType})
 	}
 	if len(in.AccountIds) > 0 && profileId > 0 {
-		profile, err = s.botProfileViewByAccountIds(ctx, profileId, in.TenantId, in.AccountIds)
+		viewTenantId := in.TenantId
+		if strings.EqualFold(strings.TrimSpace(in.AccountType), sysin.PublishAccountTypeAdmin) {
+			// The admin scope may include followed accounts from other tenants.
+			// AccountIds is the permission boundary; applying the current tenant
+			// again would reject profiles already returned by image search.
+			viewTenantId = 0
+		}
+		profile, err = s.botProfileViewByAccountIds(ctx, profileId, viewTenantId, in.AccountIds)
 	} else if profileId <= 0 {
 		profileId, err = s.botResolveProfileId(ctx, in.TenantId, in.AccountId, in.ProfileNo, in.PublicOnly)
 	}
