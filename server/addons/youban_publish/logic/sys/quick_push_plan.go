@@ -60,7 +60,24 @@ func (s *sSysPublish) AdminQuickPushPlanList(ctx context.Context, in *sysin.Quic
 	if err = mod.Page(in.Page, in.PerPage).OrderDesc("id").Scan(&records); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取快速推送计划列表失败")
 	}
-	return quickPushPlanModels(records), totalCount, nil
+	models := quickPushPlanModels(records)
+	groups := make(map[int64][]string)
+	for _, item := range models {
+		if item == nil {
+			continue
+		}
+		groups[item.AccountId] = append(groups[item.AccountId], item.TargetChatIds...)
+	}
+	labels, err := s.resolveTargetChatLabels(ctx, account.TenantId, groups)
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "读取快速推送目标名称失败")
+	}
+	for _, item := range models {
+		if item != nil {
+			item.TargetChatLabels = labels[item.AccountId]
+		}
+	}
+	return models, totalCount, nil
 }
 
 func (s *sSysPublish) AdminQuickPushPlanSave(ctx context.Context, in *sysin.QuickPushPlanSaveInp) (res *sysin.QuickPushPlanSaveModel, err error) {

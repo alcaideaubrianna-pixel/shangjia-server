@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -69,7 +68,24 @@ func (s *sSysPublish) AdminMessagePushPlanList(ctx context.Context, in *sysin.Me
 	if err = mod.Page(in.Page, in.PerPage).OrderDesc("id").Scan(&records); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取消息推送计划列表失败")
 	}
-	return messagePushPlanModels(records), totalCount, nil
+	models := messagePushPlanModels(records)
+	groups := make(map[int64][]string)
+	for _, item := range models {
+		if item == nil {
+			continue
+		}
+		groups[item.AccountId] = append(groups[item.AccountId], item.TargetChatIds...)
+	}
+	labels, err := s.resolveTargetChatLabels(ctx, account.TenantId, groups)
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "读取消息推送目标名称失败")
+	}
+	for _, item := range models {
+		if item != nil {
+			item.TargetChatLabels = labels[item.AccountId]
+		}
+	}
+	return models, totalCount, nil
 }
 
 func (s *sSysPublish) AdminMessagePushPlanSave(ctx context.Context, in *sysin.MessagePushPlanSaveInp) (res *sysin.MessagePushPlanSaveModel, err error) {
@@ -456,30 +472,4 @@ func messagePushPlanOperationNo(planId int64, scheduledAt *gtime.Time, template 
 	}
 	targetKey := strings.NewReplacer("-", "", ":", "", "@", "").Replace(normalizeTelegramChannelChatID(targetChatId))
 	return "message_push_plan:" + strconv.FormatInt(planId, 10) + ":" + strconv.FormatInt(scheduled, 10) + ":" + strconv.FormatInt(templateId, 10) + ":" + targetKey + ":" + messageTemplateHash(template)
-}
-
-func mustJsonEncode(value any) string {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return "[]"
-	}
-	return string(data)
-}
-
-func decodeInt64Array(value string) []int64 {
-	var out []int64
-	_ = json.Unmarshal([]byte(value), &out)
-	if out == nil {
-		return []int64{}
-	}
-	return out
-}
-
-func decodeStringArray(value string) []string {
-	var out []string
-	_ = json.Unmarshal([]byte(value), &out)
-	if out == nil {
-		return []string{}
-	}
-	return out
 }

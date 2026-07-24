@@ -38,19 +38,20 @@ type QuickPushPlanSaveModel struct {
 }
 
 type QuickPushPlanModel struct {
-	Id            int64       `json:"id" dc:"ID"`
-	SerialNo      string      `json:"serialNo" dc:"唯一序号"`
-	TenantId      int64       `json:"tenantId" dc:"租户ID"`
-	Name          string      `json:"name" dc:"计划名称"`
-	AccountId     int64       `json:"accountId" dc:"TG账号ID"`
-	TargetChatIds []string    `json:"targetChatIds" dc:"目标群聊或频道Chat ID"`
-	Status        int         `json:"status" dc:"状态：1启用 2停用"`
-	CreatedBy     int64       `json:"createdBy" dc:"创建人"`
-	UpdatedBy     int64       `json:"updatedBy" dc:"更新人"`
-	DeletedBy     int64       `json:"deletedBy" dc:"删除人"`
-	CreatedAt     *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt     *gtime.Time `json:"updatedAt" dc:"更新时间"`
-	DeletedAt     *gtime.Time `json:"deletedAt" dc:"删除时间"`
+	Id               int64             `json:"id" dc:"ID"`
+	SerialNo         string            `json:"serialNo" dc:"唯一序号"`
+	TenantId         int64             `json:"tenantId" dc:"租户ID"`
+	Name             string            `json:"name" dc:"计划名称"`
+	AccountId        int64             `json:"accountId" dc:"TG账号ID"`
+	TargetChatIds    []string          `json:"targetChatIds" dc:"目标群聊或频道Chat ID"`
+	TargetChatLabels map[string]string `json:"targetChatLabels" dc:"目标群聊或频道名称"`
+	Status           int               `json:"status" dc:"状态：1启用 2停用"`
+	CreatedBy        int64             `json:"createdBy" dc:"创建人"`
+	UpdatedBy        int64             `json:"updatedBy" dc:"更新人"`
+	DeletedBy        int64             `json:"deletedBy" dc:"删除人"`
+	CreatedAt        *gtime.Time       `json:"createdAt" dc:"创建时间"`
+	UpdatedAt        *gtime.Time       `json:"updatedAt" dc:"更新时间"`
+	DeletedAt        *gtime.Time       `json:"deletedAt" dc:"删除时间"`
 }
 
 type QuickPushBotAccountModel struct {

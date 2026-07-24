@@ -111,24 +111,25 @@ type MessagePushPlanSaveModel struct {
 }
 
 type MessagePushPlanModel struct {
-	Id              int64       `json:"id" dc:"ID"`
-	TenantId        int64       `json:"tenantId" dc:"租户ID"`
-	Name            string      `json:"name" dc:"计划名称"`
-	AccountId       int64       `json:"accountId" dc:"TG账号ID"`
-	TemplateIds     []int64     `json:"templateIds" dc:"模板ID"`
-	TargetChatIds   []string    `json:"targetChatIds" dc:"目标群聊或频道Chat ID"`
-	Times           []string    `json:"times" dc:"每天推送时间"`
-	IntervalSeconds int         `json:"intervalSeconds" dc:"多次推送间隔秒数"`
-	Status          int         `json:"status" dc:"状态：1启用 2停用"`
-	NextRunAt       *gtime.Time `json:"nextRunAt" dc:"下次执行时间"`
-	LastRunAt       *gtime.Time `json:"lastRunAt" dc:"最后执行时间"`
-	LastResult      string      `json:"lastResult" dc:"最后执行结果"`
-	CreatedBy       int64       `json:"createdBy" dc:"创建人"`
-	UpdatedBy       int64       `json:"updatedBy" dc:"更新人"`
-	DeletedBy       int64       `json:"deletedBy" dc:"删除人"`
-	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt       *gtime.Time `json:"updatedAt" dc:"更新时间"`
-	DeletedAt       *gtime.Time `json:"deletedAt" dc:"删除时间"`
+	Id               int64             `json:"id" dc:"ID"`
+	TenantId         int64             `json:"tenantId" dc:"租户ID"`
+	Name             string            `json:"name" dc:"计划名称"`
+	AccountId        int64             `json:"accountId" dc:"TG账号ID"`
+	TemplateIds      []int64           `json:"templateIds" dc:"模板ID"`
+	TargetChatIds    []string          `json:"targetChatIds" dc:"目标群聊或频道Chat ID"`
+	TargetChatLabels map[string]string `json:"targetChatLabels" dc:"目标群聊或频道名称"`
+	Times            []string          `json:"times" dc:"每天推送时间"`
+	IntervalSeconds  int               `json:"intervalSeconds" dc:"多次推送间隔秒数"`
+	Status           int               `json:"status" dc:"状态：1启用 2停用"`
+	NextRunAt        *gtime.Time       `json:"nextRunAt" dc:"下次执行时间"`
+	LastRunAt        *gtime.Time       `json:"lastRunAt" dc:"最后执行时间"`
+	LastResult       string            `json:"lastResult" dc:"最后执行结果"`
+	CreatedBy        int64             `json:"createdBy" dc:"创建人"`
+	UpdatedBy        int64             `json:"updatedBy" dc:"更新人"`
+	DeletedBy        int64             `json:"deletedBy" dc:"删除人"`
+	CreatedAt        *gtime.Time       `json:"createdAt" dc:"创建时间"`
+	UpdatedAt        *gtime.Time       `json:"updatedAt" dc:"更新时间"`
+	DeletedAt        *gtime.Time       `json:"deletedAt" dc:"删除时间"`
 }
 
 type MessageTemplateModel struct {

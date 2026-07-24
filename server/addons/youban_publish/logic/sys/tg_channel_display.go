@@ -121,6 +121,28 @@ func (s *sSysPublish) resolveTelegramChannelDisplays(ctx context.Context, tenant
 	return res, nil
 }
 
+func (s *sSysPublish) resolveTargetChatLabels(ctx context.Context, tenantId int64, groups map[int64][]string) (map[int64]map[string]string, error) {
+	result := make(map[int64]map[string]string, len(groups))
+	for tgAccountId, channelIds := range groups {
+		displays, err := s.resolveTelegramChannelDisplays(ctx, tenantId, tgAccountId, channelIds)
+		if err != nil {
+			return nil, err
+		}
+		labels := make(map[string]string, len(displays))
+		for channelId, display := range displays {
+			label := strings.TrimSpace(display.Title)
+			if label == "" {
+				label = strings.TrimSpace(display.Username)
+			}
+			if label != "" {
+				labels[normalizeTelegramChannelChatID(channelId)] = label
+			}
+		}
+		result[tgAccountId] = labels
+	}
+	return result, nil
+}
+
 func (s *sSysPublish) loadTelegramChannelDisplays(ctx context.Context, tenantId int64, tgAccountId int64, channelIds []string) (map[string]telegramChannelDisplay, error) {
 	lookupIds := make([]string, 0, len(channelIds)*2)
 	seen := make(map[string]struct{}, len(channelIds)*2)
