@@ -138,14 +138,16 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, taskId int64, pro
 				posterURL = firstNonEmpty(storedAssets.PosterUrl, posterURL)
 				posterStoragePath = firstNonEmpty(storedAssets.PosterStoragePath, posterStoragePath)
 			}
-			if perceptualHash == "" && strings.EqualFold(mediaType, "image") {
-				imageURL := normalizeBotMediaCacheURL(fileURL)
-				if imageURL != "" {
-					if hash, hashErr := cachedRemoteImagePHash(ctx, imageURL); hashErr != nil {
-						g.Log().Warning(ctx, "计算机器人资料图片哈希失败", g.Map{"profileId": profileId, "taskId": taskId, "url": imageURL, "err": hashErr})
-					} else {
-						perceptualHash = hash
-					}
+			if perceptualHash == "" {
+				remoteAssets, remoteErr := s.ProcessRemoteMediaAssets(ctx, &sysin.RemoteMediaAssetsInp{
+					MediaType: mediaType,
+					FileURL:   fileURL,
+					PosterURL: posterURL,
+				})
+				if remoteErr != nil {
+					g.Log().Warning(ctx, "计算机器人资料媒体哈希失败", g.Map{"profileId": profileId, "taskId": taskId, "mediaType": mediaType, "err": remoteErr})
+				} else if remoteAssets != nil && remoteAssets.Processed {
+					perceptualHash = remoteAssets.PerceptualHash
 				}
 			}
 			data := g.Map{

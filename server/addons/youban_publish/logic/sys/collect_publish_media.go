@@ -107,6 +107,18 @@ func (s *sSysPublish) insertCollectPublishMediaRow(ctx context.Context, event gd
 		posterURL = firstNonEmpty(assets.PosterUrl, posterURL)
 		posterStoragePath = assets.PosterStoragePath
 	}
+	if perceptualHash == "" {
+		remoteAssets, remoteErr := s.ProcessRemoteMediaAssets(ctx, &sysin.RemoteMediaAssetsInp{
+			MediaType: mediaType,
+			FileURL:   fileUrl,
+			PosterURL: posterURL,
+		})
+		if remoteErr != nil {
+			g.Log().Warning(ctx, "计算采集媒体哈希失败", g.Map{"eventId": event["id"].Int64(), "mediaType": mediaType, "err": remoteErr})
+		} else if remoteAssets != nil && remoteAssets.Processed {
+			perceptualHash = remoteAssets.PerceptualHash
+		}
+	}
 	mediaId, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(g.Map{
 		"tenant_id":           event["tenant_id"].Int64(),
 		"merchant_id":         event["tenant_id"].Int64(),

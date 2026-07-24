@@ -37,8 +37,15 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	if len(accountIds) == 0 {
 		return []*sysin.NoteModel{}, 0, nil
 	}
+	searchTenantId := in.TenantId
+	if strings.EqualFold(strings.TrimSpace(in.AccountType), sysin.PublishAccountTypeAdmin) {
+		// accountIds already comes from the administrator's permission scope.
+		// Do not apply the viewer tenant again, otherwise followed accounts from
+		// another tenant are removed before the pHash match is evaluated.
+		searchTenantId = 0
+	}
 	searchIn := &sysin.ProfileImageSearchInp{
-		ProfileListInp: sysin.ProfileListInp{TenantId: in.TenantId, AccountId: in.AccountId},
+		ProfileListInp: sysin.ProfileListInp{TenantId: searchTenantId, AccountId: in.AccountId},
 		Threshold:      in.Threshold,
 	}
 	normalizeProfileImageSearchInput(searchIn)
@@ -104,7 +111,7 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	if len(profileIds) == 0 {
 		return []*sysin.NoteModel{}, total, nil
 	}
-	list, err := s.profileImageSearchNotesByProfileIds(ctx, profileIds, in.TenantId, accountIds, nil, "")
+	list, err := s.profileImageSearchNotesByProfileIds(ctx, profileIds, searchTenantId, accountIds, nil, "")
 	if err != nil {
 		return nil, 0, err
 	}
