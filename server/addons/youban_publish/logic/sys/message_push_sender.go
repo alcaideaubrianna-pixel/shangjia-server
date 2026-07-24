@@ -277,7 +277,23 @@ func (s *sSysPublish) SendMessagePushJob(ctx context.Context, jobId int64) error
 }
 
 func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRecord, template *sysin.MessageTemplateModel, channel *messagePushChannel, tgAccountId int64) error {
-	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusSending, "开始使用账号推送消息模板")
+	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusSending, "开始通过Inline机器人推送消息模板")
+	if strings.TrimSpace(template.SerialNo) != "" && channel != nil && channel.TgAccountId > 0 && job.BotId > 0 {
+		messages, inlineErr := s.sendInlineTemplateByAccount(ctx, channel.TgAccountId, job.BotId, channel, template.SerialNo)
+		if inlineErr == nil {
+			if err := s.saveTelegramSentMessages(ctx, job, messages); err != nil {
+				return err
+			}
+			_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{"status": sysin.MessagePushStatusSent, "dispatch_status": tgDispatchStatusDone, "error_message": "", "sent_at": gtime.Now(), "updated_at": gtime.Now()}).Update()
+			if err != nil {
+				return gerror.Wrap(err, "更新Inline消息推送任务状态失败")
+			}
+			s.appendTelegramJobLog(ctx, job, "inline_send", sysin.MessagePushStatusSent, "Inline机器人消息模板推送成功")
+			return nil
+		}
+		s.appendTelegramJobLog(ctx, job, "inline_send", "fallback", "Inline推送失败，回退账号直发："+inlineErr.Error())
+	}
+	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusSending, "开始使用账号直发消息模板")
 	media := messageTemplateTelegramMedia(template)
 	messages, err := s.sendMessageTemplateByTgAccount(ctx, tgAccountId, channel, telegramRichTextHTML(template.Text), media, messageTemplateHash(template))
 	if err != nil {

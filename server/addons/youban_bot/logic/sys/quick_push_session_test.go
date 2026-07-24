@@ -47,8 +47,8 @@ func TestTelegramChatRouting(t *testing.T) {
 	if !isTelegramSearchChat(group) || !isTelegramSearchChat(&models.Message{Chat: models.Chat{Type: "supergroup"}}) {
 		t.Fatal("group messages should route to note search")
 	}
-	if isTelegramSearchChat(private) || isTelegramSearchChat(channel) {
-		t.Fatal("private and channel messages should not use direct group search")
+	if isTelegramSearchChat(private) || !isTelegramSearchChat(channel) {
+		t.Fatal("private messages should not search, channel messages should support note search")
 	}
 }
 

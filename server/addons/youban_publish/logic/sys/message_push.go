@@ -69,9 +69,17 @@ func (s *sSysPublish) AdminMessageTemplateSave(ctx context.Context, in *sysin.Me
 		}
 	}
 	now := gtime.Now()
+	serialNo := ""
+	if in.Id <= 0 {
+		serialNo, err = s.ensureInlineTemplateSerial(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		data := g.Map{
 			"tenant_id":   account.TenantId,
+			"serial_no":   serialNo,
 			"name":        in.Name,
 			"text":        in.Text,
 			"media_count": len(in.Media),

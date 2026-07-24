@@ -193,8 +193,7 @@ func (s *sSysBot) dispatchFeature(ctx context.Context, botId int64, msg *models.
 		if !enabled {
 			continue
 		}
-		featureCommand := strings.ToLower(s.featureCommand(ctx, feature))
-		if command != "" && command == featureCommand {
+		if command != "" && s.featureCommandMatches(ctx, feature, command) {
 			return feature.Handle(ctx, s, &botFeatureContext{BotId: botId, Msg: msg, Text: text, Args: args})
 		}
 		if command == "" && s.matchFeatureLabel(ctx, row, feature, labelText) {
@@ -207,6 +206,13 @@ func (s *sSysBot) dispatchFeature(ctx context.Context, botId int64, msg *models.
 		}
 	}
 	return false, nil
+}
+
+func (s *sSysBot) featureCommandMatches(ctx context.Context, feature botFeature, command string) bool {
+	if feature == nil || strings.TrimSpace(command) == "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimPrefix(strings.TrimSpace(command), "/"), strings.TrimPrefix(s.featureCommand(ctx, feature), "/"))
 }
 
 func (s *sSysBot) matchFeatureLabel(ctx context.Context, row *botFeatureRow, feature botFeature, text string) bool {

@@ -1461,6 +1461,7 @@ DELETE FROM "hg_youban_publish_cycle_plan";
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_template" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
+  "serial_no" varchar(32) NOT NULL DEFAULT '',
   "name" varchar(128) NOT NULL DEFAULT '',
   "text" text,
   "media_count" integer NOT NULL DEFAULT 0,
@@ -1473,6 +1474,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_template" (
   "deleted_at" timestamp DEFAULT NULL
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_msg_tpl_owner" ON "hg_youban_publish_message_template" ("tenant_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_msg_tpl_serial" ON "hg_youban_publish_message_template" ("serial_no");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_media" (
   "id" BIGSERIAL PRIMARY KEY,

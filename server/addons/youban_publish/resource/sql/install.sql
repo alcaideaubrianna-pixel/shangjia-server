@@ -1481,6 +1481,7 @@ DELETE FROM `hg_youban_publish_cycle_plan`;
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_template` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `serial_no` varchar(32) NOT NULL DEFAULT '' COMMENT 'Inline模板编号',
   `name` varchar(128) NOT NULL DEFAULT '' COMMENT '模板名称',
   `text` text COMMENT '消息文本',
   `media_count` int(11) NOT NULL DEFAULT '0' COMMENT '媒体数量',
@@ -1493,6 +1494,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_template` (
   `deleted_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_ybp_msg_tpl_owner` (`tenant_id`,`status`,`id`)
+  ,KEY `idx_ybp_msg_tpl_serial` (`serial_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息推送模板';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_media` (

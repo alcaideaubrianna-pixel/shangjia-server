@@ -69,6 +69,9 @@ func (profileManageMessageHandler) Handle(ctx context.Context, bot *sSysBot, eve
 		}
 	}
 	if isTelegramSearchChat(event.Msg) && text != "" {
+		if !bot.isProfileSearchTrigger(ctx, text) {
+			return false, nil
+		}
 		account, err := bot.boundProfileAccount(ctx, event.Msg)
 		if err != nil {
 			return true, bot.reply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), err.Error())
@@ -90,11 +93,30 @@ func isTelegramSearchChat(msg *models.Message) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(string(msg.Chat.Type))) {
-	case "group", "supergroup":
+	case "group", "supergroup", "channel":
 		return true
 	default:
 		return false
 	}
+}
+
+func (s *sSysBot) isProfileSearchTrigger(ctx context.Context, text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	if nos := extractProfileNos(text); len(nos) == 1 && strings.EqualFold(text, nos[0]) {
+		return true
+	}
+	command, args := botCommandAndArgs(text)
+	if command == "" {
+		return false
+	}
+	profile := profileFeature{}
+	if !s.featureCommandMatches(ctx, profile, command) {
+		return false
+	}
+	return strings.TrimSpace(args) != ""
 }
 
 func isCancelProfileCommand(text string) bool {
@@ -328,8 +350,6 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 	case "backview":
 		_ = s.cancelProfileSessionByIdsSilent(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId)
 		return true, s.showProfileCard(ctx, botId, chatId, account, no)
-	case "share":
-		return true, s.replyInlineShareButton(ctx, botId, chatId, account, no)
 	case "edit":
 		return true, s.showProfileEditMenu(ctx, botId, chatId, account, no)
 	case "edtitle":
@@ -352,29 +372,64 @@ func (s *sSysBot) handleProfileInlineQuery(ctx context.Context, botId int64, que
 		return nil
 	}
 	q := strings.TrimSpace(query.Query)
-	if !strings.HasPrefix(strings.ToLower(q), "inline") {
-		return nil
+	if strings.HasPrefix(strings.ToUpper(q), "XX") {
+		return s.handleTemplateInlineQuery(ctx, botId, query, q)
 	}
-	share, err := s.inlineShareByToken(ctx, q)
-	if err != nil {
+	// Note inline sharing is intentionally disabled; Inline is reserved for
+	// quick-push templates identified by the XXxxxxxx serial.
+	return nil
+	/*
+		share, err := s.inlineShareByToken(ctx, q)
+		if err != nil {
+			return err
+		}
+		row, err := s.botById(ctx, botId)
+		if err != nil {
+			return err
+		}
+		bot, err := s.telegramBot(ctx, row.BotToken)
+		if err != nil {
+			return err
+		}
+		results := []models.InlineQueryResult{}
+		if share != nil && share.ProfileNo != "" {
+			note, viewErr := publishService.SysPublish().BotProfileView(ctx, &publishsysin.BotProfileViewInp{TenantId: share.TenantId, AccountId: share.AccountId, ProfileNo: share.ProfileNo, PublicOnly: true})
+			if viewErr == nil && note != nil {
+				text := profileShareText(note)
+				results = append(results, &models.InlineQueryResultArticle{ID: "profile_" + note.ProfileNo, Title: note.Title, Description: note.ProfileNo, InputMessageContent: &models.InputTextMessageContent{MessageText: text, ParseMode: models.ParseModeHTML}})
+				_ = s.incrementInlineShareUsage(ctx, share.Token)
+			}
+		}
+		callCtx, cancel := telegramAPICtx()
+		defer cancel()
+		_, err = bot.AnswerInlineQuery(callCtx, &tgbot.AnswerInlineQueryParams{InlineQueryID: query.ID, Results: results, CacheTime: 0, IsPersonal: false})
 		return err
+	*/
+}
+
+func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, query *models.InlineQuery, serial string) error {
+	var row struct {
+		Id       int64  `json:"id"`
+		SerialNo string `json:"serial_no"`
+		Name     string `json:"name"`
+		Text     string `json:"text"`
+		Status   int    `json:"status"`
 	}
-	row, err := s.botById(ctx, botId)
-	if err != nil {
-		return err
-	}
-	bot, err := s.telegramBot(ctx, row.BotToken)
-	if err != nil {
+	if err := g.DB().Model("hg_youban_publish_message_template").Safe().Ctx(ctx).
+		Where("serial_no", strings.ToUpper(strings.TrimSpace(serial))).Where("status", 1).WhereNull("deleted_at").Scan(&row); err != nil {
 		return err
 	}
 	results := []models.InlineQueryResult{}
-	if share != nil && share.ProfileNo != "" {
-		note, viewErr := publishService.SysPublish().BotProfileView(ctx, &publishsysin.BotProfileViewInp{TenantId: share.TenantId, AccountId: share.AccountId, ProfileNo: share.ProfileNo, PublicOnly: true})
-		if viewErr == nil && note != nil {
-			text := profileShareText(note)
-			results = append(results, &models.InlineQueryResultArticle{ID: "profile_" + note.ProfileNo, Title: note.Title, Description: note.ProfileNo, InputMessageContent: &models.InputTextMessageContent{MessageText: text, ParseMode: models.ParseModeHTML}})
-			_ = s.incrementInlineShareUsage(ctx, share.Token)
-		}
+	if row.Id > 0 {
+		results = append(results, &models.InlineQueryResultArticle{ID: row.SerialNo, Title: row.Name, Description: row.SerialNo, InputMessageContent: &models.InputTextMessageContent{MessageText: row.Text}})
+	}
+	botRow, err := s.botById(ctx, botId)
+	if err != nil {
+		return err
+	}
+	bot, err := s.telegramBot(ctx, botRow.BotToken)
+	if err != nil {
+		return err
 	}
 	callCtx, cancel := telegramAPICtx()
 	defer cancel()
@@ -644,9 +699,7 @@ func (s *sSysBot) sendProfileContent(ctx context.Context, botId int64, chatId st
 			return err
 		}
 	}
-	markup := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "查看详情", CallbackData: "pf:view:" + note.ProfileNo}, {Text: "内联分享", CallbackData: "pf:share:" + note.ProfileNo}}}}
-	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, "预览完成。", "HTML", false, markup)
-	return err
+	return s.sendMessageOnly(ctx, botId, chatId, "预览完成。")
 }
 
 func (s *sSysBot) sendProfileMediaPurpose(ctx context.Context, callCtx context.Context, bot *tgbot.Bot, chatId string, media []*publishsysin.MediaModel, purpose string, captionPrefix string) error {
@@ -919,7 +972,7 @@ func profileCardMarkup(profileNo string, purpose string) *models.InlineKeyboardM
 		}}
 	case "send":
 		return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
-			{{Text: "发送此笔记", CallbackData: "pf:send:" + profileNo}, {Text: "内联分享", CallbackData: "pf:share:" + profileNo}},
+			{{Text: "发送此笔记", CallbackData: "pf:send:" + profileNo}},
 			{{Text: "查看详情", CallbackData: "pf:view:" + profileNo}, {Text: "返回资料管理", CallbackData: "pf:menu"}},
 		}}
 	case "edit":
@@ -929,7 +982,7 @@ func profileCardMarkup(profileNo string, purpose string) *models.InlineKeyboardM
 		}}
 	default:
 		return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
-			{{Text: "预览", CallbackData: "pf:send:" + profileNo}, {Text: "内联分享", CallbackData: "pf:share:" + profileNo}},
+			{{Text: "预览", CallbackData: "pf:send:" + profileNo}},
 			{{Text: "编辑", CallbackData: "pf:edit:" + profileNo}, {Text: "返回列表", CallbackData: "pf:list:1"}},
 			{{Text: "上架", CallbackData: "pf:up:" + profileNo}, {Text: "下架", CallbackData: "pf:down:" + profileNo}},
 			{{Text: "返回资料管理", CallbackData: "pf:menu"}},

@@ -135,6 +135,7 @@ type MessagePushPlanModel struct {
 type MessageTemplateModel struct {
 	Id         int64                        `json:"id" dc:"ID"`
 	TenantId   int64                        `json:"tenantId" dc:"租户ID"`
+	SerialNo   string                       `json:"serialNo" dc:"Inline模板编号"`
 	Name       string                       `json:"name" dc:"模板名称"`
 	Text       string                       `json:"text" dc:"文案"`
 	MediaCount int                          `json:"mediaCount" dc:"媒体数"`
