@@ -137,7 +137,7 @@
   const syncStatusOptions = [
     { label: '成功', value: 'success' },
     { label: '失败', value: 'failed' },
-    { label: '待处理', value: 'pending' },
+    { label: '待补全', value: 'pending_media' },
   ];
   const tag = (value: string) =>
     h(
@@ -146,7 +146,7 @@
         type: value === 'success' ? 'success' : value === 'failed' ? 'error' : 'warning',
         bordered: false,
       },
-      { default: () => value || '-' }
+      { default: () => (value === 'pending_media' ? '待补全' : value || '-') }
     );
   const columns = [
     { title: 'FeiNiu频道', key: 'feiniuChannelTitle', width: 220 },

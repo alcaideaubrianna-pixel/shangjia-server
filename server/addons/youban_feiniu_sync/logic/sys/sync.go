@@ -42,6 +42,8 @@ const (
 	publishMediaTable   = "hg_youban_publish_media"
 	publishAccountTable = "hg_youban_publish_account"
 
+	syncStatusPendingMedia = "pending_media"
+
 	feiniuSyncNoteTimeout = 2 * time.Minute
 )
 
@@ -1408,18 +1410,41 @@ func (s *sSysSync) executeRun(ctx context.Context, runId int64, configId int64, 
 		_ = s.markConfigRunFailed(ctx, configId, err.Error())
 		return s.finishRun(ctx, runId, sysin.RunStatusFailed, g.Map{"error_message": err.Error()})
 	}
-	rows, err := s.fetchSourceNotes(ctx, db, configId, cursorNoteId, batchSize)
+	pendingLimit := batchSize / 2
+	if pendingLimit <= 0 {
+		pendingLimit = 1
+	}
+	pendingRows, err := s.fetchPendingSourceNotes(ctx, db, configId, pendingLimit)
 	if err != nil {
 		_ = s.markConfigRunFailed(ctx, configId, err.Error())
 		return s.finishRun(ctx, runId, sysin.RunStatusFailed, g.Map{"error_message": err.Error()})
 	}
-	batchSkip := s.markBatchPHashDuplicates(ctx, db, rows)
+	remaining := batchSize - len(pendingRows)
+	if remaining < 0 {
+		remaining = 0
+	}
+	rows, err := s.fetchSourceNotes(ctx, db, configId, cursorNoteId, remaining)
+	if err != nil {
+		_ = s.markConfigRunFailed(ctx, configId, err.Error())
+		return s.finishRun(ctx, runId, sysin.RunStatusFailed, g.Map{"error_message": err.Error()})
+	}
+	rows = append(pendingRows, rows...)
+	readyRows := make([]gdb.Record, 0, len(rows))
+	pendingMediaRows := make([]gdb.Record, 0)
+	for _, row := range rows {
+		if isSourceMediaPending(row) {
+			pendingMediaRows = append(pendingMediaRows, row)
+			continue
+		}
+		readyRows = append(readyRows, row)
+	}
+	batchSkip := s.markBatchPHashDuplicates(ctx, db, readyRows)
 	stats := g.Map{"total_count": len(rows)}
 	created, updated, skipped, failed := 0, 0, 0, 0
 	logs := make([]string, 0, len(rows)+1)
 	channelStats := map[int64]*channelRunStat{}
 	cursorBlocked := false
-	for _, row := range rows {
+	for _, row := range append(pendingMediaRows, readyRows...) {
 		itemStarted := time.Now()
 		result, e := "", error(nil)
 		if reason := batchSkip[row["note_id"].Int64()]; reason != "" {
@@ -1548,6 +1573,55 @@ func (s *sSysSync) fetchSourceNotes(ctx context.Context, db gdb.DB, configId int
 	return rows, nil
 }
 
+func (s *sSysSync) fetchPendingSourceNotes(ctx context.Context, db gdb.DB, configId int64, limit int) ([]gdb.Record, error) {
+	if configId <= 0 || limit <= 0 {
+		return nil, nil
+	}
+	var pending []gdb.Record
+	if err := g.DB().Model(profileMapTable).Safe().Ctx(ctx).
+		Fields("feiniu_note_id").
+		Where("config_id", configId).
+		Where("sync_status", syncStatusPendingMedia).
+		WhereGT("feiniu_note_id", 0).
+		OrderAsc("id").
+		Limit(limit).
+		Scan(&pending); err != nil {
+		return nil, gerror.Wrap(err, "读取待补全资料失败")
+	}
+	noteIds := make([]int64, 0, len(pending))
+	for _, row := range pending {
+		if id := row["feiniu_note_id"].Int64(); id > 0 {
+			noteIds = append(noteIds, id)
+		}
+	}
+	return s.fetchSourceNotesByIds(ctx, db, noteIds)
+}
+
+func (s *sSysSync) fetchSourceNotesByIds(ctx context.Context, db gdb.DB, noteIds []int64) ([]gdb.Record, error) {
+	if len(noteIds) == 0 {
+		return []gdb.Record{}, nil
+	}
+	fields := strings.Join([]string{
+		"n.note_id", "n.note_uuid", "n.note_code", "n.title", "n.plain_text", "n.html_text",
+		"n.category_code", "n.province", "n.city", "n.age", "n.height", "n.weight", "n.cup_size",
+		"n.expected_living_cost", "n.has_verification_video", "n.image_count", "n.video_count",
+		"n.text_block_count", "n.group_params", "n.tag_params", "n.storage_policy", "n.remark",
+		"n.create_by", "n.create_time", "n.update_by", "n.update_time", "n.edited_at",
+	}, ",")
+	mod := db.Model("tg_content_note n").Safe().Ctx(ctx).
+		Fields(fields).
+		WhereIn("n.note_id", noteIds).
+		Where("n.status", "0")
+	var rows []gdb.Record
+	if err := mod.OrderAsc("n.note_id").Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "读取 FeiNiu 资料失败")
+	}
+	if err := s.fillSourceNoteMeta(ctx, db, rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 func (s *sSysSync) fillSourceNoteMeta(ctx context.Context, db gdb.DB, rows []gdb.Record) error {
 	noteIds := sourceNoteIds(rows)
 	if len(noteIds) == 0 {
@@ -1579,6 +1653,19 @@ func (s *sSysSync) fillSourceNoteMeta(ctx context.Context, db gdb.DB, rows []gdb
 	if err != nil {
 		return err
 	}
+	var mediaRows []gdb.Record
+	if err := db.Model("tg_content_block b").Safe().Ctx(ctx).
+		Fields("b.note_id,COUNT(1) AS media_count").
+		WhereIn("b.note_id", noteIds).
+		WhereGT("b.asset_id", 0).
+		Group("b.note_id").
+		Scan(&mediaRows); err != nil {
+		return gerror.Wrap(err, "读取 FeiNiu 资料媒体数量失败")
+	}
+	mediaCounts := make(map[int64]int, len(mediaRows))
+	for _, row := range mediaRows {
+		mediaCounts[row["note_id"].Int64()] = row["media_count"].Int()
+	}
 	for _, row := range rows {
 		source := sourceByNote[row["note_id"].Int64()]
 		setRecordValue(row, "source_key", "")
@@ -1598,6 +1685,7 @@ func (s *sSysSync) fillSourceNoteMeta(ctx context.Context, db gdb.DB, rows []gdb
 		setRecordValue(row, "source_tg_chat_id", source["tg_chat_id"].Int64())
 		setRecordValue(row, "source_grouped_id", source["tg_grouped_id"].Int64())
 		setRecordValue(row, "source_message_id", source["tg_message_id"].Int64())
+		setRecordValue(row, "source_media_count", mediaCounts[row["note_id"].Int64()])
 		channel := channels[source["channel_id"].Int64()]
 		if channel == nil {
 			continue
@@ -1637,6 +1725,14 @@ func recordInt64s(rows []gdb.Record, field string) []int64 {
 	return ids
 }
 
+func isSourceMediaPending(row gdb.Record) bool {
+	expected := row["image_count"].Int() + row["video_count"].Int()
+	if expected <= 0 {
+		return false
+	}
+	return row["source_media_count"].Int() < expected
+}
+
 func (s *sSysSync) sourceChannelsById(ctx context.Context, db gdb.DB, channelIds []int64) (map[int64]gdb.Record, error) {
 	items := make(map[int64]gdb.Record)
 	if len(channelIds) == 0 {
@@ -1666,9 +1762,18 @@ func (s *sSysSync) syncOneNote(ctx context.Context, source gdb.DB, cfg gdb.Recor
 	if err != nil {
 		return "", gerror.Wrap(err, "检查资料映射失败")
 	}
+	expectedMediaCount := row["image_count"].Int() + row["video_count"].Int()
+	actualMediaCount := row["source_media_count"].Int()
+	if expectedMediaCount > 0 && actualMediaCount < expectedMediaCount {
+		msg := fmt.Sprintf("媒体未补齐 %d/%d", actualMediaCount, expectedMediaCount)
+		return "pending_media", s.upsertProfileMapPendingMedia(ctx, cfg["id"].Int64(), row, contentHash, msg)
+	}
 	forceSync := false
-	if !existed.IsEmpty() && existed["content_hash"].String() == contentHash {
-		needRepair, err := s.needMediaRepair(ctx, existed, row)
+	if !existed.IsEmpty() && existed["sync_status"].String() == syncStatusPendingMedia {
+		forceSync = true
+	}
+	if !forceSync && !existed.IsEmpty() && existed["content_hash"].String() == contentHash {
+		needRepair, err := s.needTargetMediaRepair(ctx, existed, row)
 		if err != nil {
 			return "", err
 		}
@@ -1720,21 +1825,13 @@ func (s *sSysSync) syncOneNote(ctx context.Context, source gdb.DB, cfg gdb.Recor
 	return "updated", nil
 }
 
-func (s *sSysSync) needMediaRepair(ctx context.Context, mapRow gdb.Record, row gdb.Record) (bool, error) {
+func (s *sSysSync) needTargetMediaRepair(ctx context.Context, mapRow gdb.Record, row gdb.Record) (bool, error) {
 	expectedMediaCount := row["image_count"].Int() + row["video_count"].Int()
-	profileId := mapRow["youban_profile_id"].Int64()
-	taskId := mapRow["youban_task_id"].Int64()
-	needRepair, err := needMediaRepairByCount(ctx, profileId, taskId, expectedMediaCount)
-	if err != nil || needRepair {
-		return needRepair, err
-	}
-	return needMediaPerceptualHashRepair(ctx, profileId, taskId)
-}
-
-func needMediaRepairByCount(ctx context.Context, profileId int64, taskId int64, expectedMediaCount int) (bool, error) {
 	if expectedMediaCount <= 0 {
 		return false, nil
 	}
+	profileId := mapRow["youban_profile_id"].Int64()
+	taskId := mapRow["youban_task_id"].Int64()
 	if profileId <= 0 || taskId <= 0 {
 		return true, nil
 	}
@@ -2157,6 +2254,34 @@ func (s *sSysSync) upsertProfileMapSkipped(ctx context.Context, configId int64, 
 	}
 	if err = saveProfileMap(ctx, configId, row["note_id"].Int64(), current, data); err != nil {
 		return gerror.Wrap(err, "保存跳过资料映射失败")
+	}
+	return s.touchChannelCursor(ctx, gdb.Record{"id": gvar.New(configId)}, row, sourceTime(row))
+}
+
+func (s *sSysSync) upsertProfileMapPendingMedia(ctx context.Context, configId int64, row gdb.Record, contentHash string, msg string) error {
+	now := gtime.Now()
+	data := g.Map{
+		"config_id":            configId,
+		"feiniu_note_id":       row["note_id"].Int64(),
+		"feiniu_note_uuid":     row["note_uuid"].String(),
+		"feiniu_note_code":     row["note_code"].String(),
+		"feiniu_source_key":    sourceKey(row),
+		"feiniu_channel_id":    row["source_channel_id"].Int64(),
+		"feiniu_tg_chat_id":    row["source_tg_chat_id"].Int64(),
+		"source_updated_at":    sourceTime(row),
+		"content_hash":         contentHash,
+		"sync_status":          syncStatusPendingMedia,
+		"error_message":        msg,
+		"dedupe_key":           "",
+		"duplicate_profile_id": 0,
+		"updated_at":           now,
+	}
+	current, err := g.DB().Model(profileMapTable).Safe().Ctx(ctx).Where("config_id", configId).Where("feiniu_note_id", row["note_id"].Int64()).One()
+	if err != nil {
+		return gerror.Wrap(err, "读取待补全资料失败")
+	}
+	if err = saveProfileMap(ctx, configId, row["note_id"].Int64(), current, data); err != nil {
+		return gerror.Wrap(err, "保存待补全资料失败")
 	}
 	return s.touchChannelCursor(ctx, gdb.Record{"id": gvar.New(configId)}, row, sourceTime(row))
 }

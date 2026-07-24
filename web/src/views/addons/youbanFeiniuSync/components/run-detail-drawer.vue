@@ -94,6 +94,7 @@
     { label: '更新', value: 'updated' },
     { label: '跳过', value: 'skipped' },
     { label: '失败', value: 'failed' },
+    { label: '待补全', value: 'pending_media' },
   ];
   const tagType = (status: string) =>
     status === 'success' ? 'success' : status === 'running' ? 'info' : 'error';
@@ -102,6 +103,7 @@
     updated: '更新',
     skipped: '跳过',
     failed: '失败',
+    pending_media: '待补全',
   };
   const columns = [
     { title: '笔记ID', key: 'feiniuNoteId', width: 110 },
