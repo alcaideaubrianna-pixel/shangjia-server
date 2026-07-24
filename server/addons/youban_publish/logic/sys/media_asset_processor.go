@@ -286,5 +286,30 @@ func cachedRemoteImagePHash(ctx context.Context, imageURL string) (string, error
 	if err != nil {
 		return "", err
 	}
-	return strings.ToLower(fmt.Sprintf("%016x", hash.GetHash())), nil
+	return remotePHashString(hash), nil
+}
+
+func cachedRemoteVideoPHashValue(ctx context.Context, videoURL string) (*goimagehash.ImageHash, error) {
+	videoURL = strings.TrimSpace(videoURL)
+	if videoURL == "" {
+		return nil, gerror.New("视频文件为空")
+	}
+	media := &telegramMediaItem{MediaType: "video", FileUrl: videoURL}
+	path, err := cachedRemoteMediaFile(ctx, mediaFileCacheKey(media, videoURL), videoURL, mediaFileCacheExt(media, videoURL))
+	if err != nil {
+		return nil, err
+	}
+	posterPath, err := generateVideoPosterPath(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(posterPath)
+	return imagePHashFromPath(posterPath)
+}
+
+func remotePHashString(hash *goimagehash.ImageHash) string {
+	if hash == nil {
+		return ""
+	}
+	return strings.ToLower(fmt.Sprintf("%016x", hash.GetHash()))
 }
