@@ -969,6 +969,7 @@ FROM (
     ('youban_publish', 'autoDelete', '频道自动删除开关', 'int', 'autoDeleteEnabled', '0', '0', 200, '是否启用频道自动删除'),
     ('youban_publish', 'autoDelete', '自动删除 Bot ID', '[]int64', 'botIds', '[]', '[]', 210, '执行自动删除的 Bot ID 列表'),
     ('youban_publish', 'autoDelete', '自动删除关键词', '[]string', 'keywords', '[]', '[]', 220, '命中后自动删除的关键词列表'),
+    ('youban_publish', 'autoDelete', '自动删除规则', '[]string', 'rules', '["single:^编号[[:space:]]*[:：][[:space:]]*[A-Za-z0-9_-]+$"]', '["single:^编号[[:space:]]*[:：][[:space:]]*[A-Za-z0-9_-]+$"]', 230, '仅匹配整条消息的自动删除规则'),
     ('youban_publish', 'antiScan', '防扫图总开关', 'int', 'antiScanEnabled', '0', '0', 300, '是否启用防扫图能力'),
     ('youban_publish', 'antiScan', '新笔记默认防扫图', 'int', 'defaultNewNoteEnabled', '0', '0', 310, '新笔记默认是否开启防扫图'),
     ('youban_publish', 'antiScan', '已有资料批量处理', 'int', 'existingBatchEnabled', '0', '0', 320, '是否对已有资料触发批量处理意图'),

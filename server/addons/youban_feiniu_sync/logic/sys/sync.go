@@ -1260,27 +1260,6 @@ func (s *sSysSync) markCronRunStarted(ctx context.Context, configId int64) error
 	return nil
 }
 
-func (s *sSysSync) ensureSourceIndexes(ctx context.Context, db gdb.DB, dbType string) {
-	dbType = normalizeDBType(dbType)
-	statements := []string{
-		"CREATE INDEX idx_yfs_src_note_status_id ON tg_content_note (status, note_id)",
-		"CREATE INDEX idx_yfs_src_source_note_id ON tg_content_source (note_id)",
-		"CREATE INDEX idx_yfs_src_channel_id ON tg_channel (channel_id)",
-	}
-	if dbType == "pgsql" {
-		statements = []string{
-			"CREATE INDEX IF NOT EXISTS idx_yfs_src_note_status_id ON tg_content_note (status, note_id)",
-			"CREATE INDEX IF NOT EXISTS idx_yfs_src_source_note_id ON tg_content_source (note_id)",
-			"CREATE INDEX IF NOT EXISTS idx_yfs_src_channel_id ON tg_channel (channel_id)",
-		}
-	}
-	for _, statement := range statements {
-		if _, err := db.Ctx(ctx).Exec(ctx, statement); err != nil && !isIgnorableSQLError(err) {
-			g.Log().Warningf(ctx, "创建 FeiNiu 源库索引失败，已跳过 sql:%s err:%+v", statement, err)
-		}
-	}
-}
-
 func (s *sSysSync) markBatchPHashDuplicates(ctx context.Context, source gdb.DB, rows []gdb.Record) map[int64]string {
 	skip := make(map[int64]string)
 	latest := make(map[string]gdb.Record)
@@ -1416,7 +1395,7 @@ func (s *sSysSync) executeRun(ctx context.Context, runId int64, configId int64, 
 		_ = s.markConfigRunFailed(ctx, configId, err.Error())
 		return s.finishRun(ctx, runId, sysin.RunStatusFailed, g.Map{"error_message": err.Error()})
 	}
-	s.ensureSourceIndexes(ctx, db, save.DbType)
+	s.ensureSourceIndexes(ctx, db, save.DbType, sourceIndexKey(save))
 	batchSize := cfg["batch_size"].Int()
 	if batchSize <= 0 {
 		batchSize = 100
@@ -1687,21 +1666,31 @@ func (s *sSysSync) syncOneNote(ctx context.Context, source gdb.DB, cfg gdb.Recor
 	if err != nil {
 		return "", gerror.Wrap(err, "检查资料映射失败")
 	}
+	forceSync := false
 	if !existed.IsEmpty() && existed["content_hash"].String() == contentHash {
-		if err = s.syncPresentationFields(ctx, row, existed); err != nil {
+		needRepair, err := s.needMediaRepair(ctx, existed, row)
+		if err != nil {
 			return "", err
 		}
-		if err = s.syncSourceMessageLinks(ctx, cfg, row, existed["youban_profile_id"].Int64(), existed["youban_task_id"].Int64(), existed["youban_account_id"].Int64()); err != nil {
+		if !needRepair {
+			if err = s.syncPresentationFields(ctx, row, existed); err != nil {
+				return "", err
+			}
+			if err = s.syncSourceMessageLinks(ctx, cfg, row, existed["youban_profile_id"].Int64(), existed["youban_task_id"].Int64(), existed["youban_account_id"].Int64()); err != nil {
+				return "", err
+			}
+			return "skipped", s.touchChannelCursor(ctx, cfg, row, sourceUpdatedAt)
+		}
+		forceSync = true
+	}
+	if !forceSync {
+		dupProfileId, dupMsg, err := s.findExistingPHashDuplicate(ctx, source, row)
+		if err != nil {
 			return "", err
 		}
-		return "skipped", s.touchChannelCursor(ctx, cfg, row, sourceUpdatedAt)
-	}
-	dupProfileId, dupMsg, err := s.findExistingPHashDuplicate(ctx, source, row)
-	if err != nil {
-		return "", err
-	}
-	if dupProfileId > 0 {
-		return "skipped", s.upsertProfileMapSkipped(ctx, cfg["id"].Int64(), row, dupMsg)
+		if dupProfileId > 0 {
+			return "skipped", s.upsertProfileMapSkipped(ctx, cfg["id"].Int64(), row, dupMsg)
+		}
 	}
 	accountId, username, err := s.ensureChannelAccount(ctx, cfg, row, sourceUpdatedAt)
 	if err != nil {
@@ -1729,6 +1718,38 @@ func (s *sSysSync) syncOneNote(ctx context.Context, source gdb.DB, cfg gdb.Recor
 		return "created", nil
 	}
 	return "updated", nil
+}
+
+func (s *sSysSync) needMediaRepair(ctx context.Context, mapRow gdb.Record, row gdb.Record) (bool, error) {
+	expectedMediaCount := row["image_count"].Int() + row["video_count"].Int()
+	profileId := mapRow["youban_profile_id"].Int64()
+	taskId := mapRow["youban_task_id"].Int64()
+	return needMediaRepairByCount(ctx, profileId, taskId, expectedMediaCount)
+}
+
+func needMediaRepairByCount(ctx context.Context, profileId int64, taskId int64, expectedMediaCount int) (bool, error) {
+	if expectedMediaCount <= 0 {
+		return false, nil
+	}
+	if profileId <= 0 || taskId <= 0 {
+		return true, nil
+	}
+	actualMediaCount, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).
+		Where("task_id", taskId).
+		WhereNull("deleted_at").
+		Count()
+	if err != nil {
+		return false, gerror.Wrap(err, "检查上架媒体状态失败")
+	}
+	return needMediaRepairCount(expectedMediaCount, actualMediaCount), nil
+}
+
+func needMediaRepairCount(expectedMediaCount int, actualMediaCount int) bool {
+	if expectedMediaCount <= 0 {
+		return false
+	}
+	return actualMediaCount != expectedMediaCount
 }
 
 func (s *sSysSync) syncPresentationFields(ctx context.Context, row gdb.Record, mapRow gdb.Record) error {
