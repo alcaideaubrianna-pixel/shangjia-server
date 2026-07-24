@@ -96,7 +96,7 @@ func (s *sSysTwoWayBot) createManagementGroup(ctx context.Context, account *publ
 			return gerror.New("TG管理群AccessHash缺失")
 		}
 		inputChannel := &tg.InputChannel{ChannelID: channel.ID, AccessHash: accessHash}
-		_, _ = api.ChannelsToggleForum(ctx, &tg.ChannelsToggleForumRequest{Channel: inputChannel, Enabled: true, Tabs: true})
+		_, _ = api.ChannelsToggleForum(ctx, &tg.ChannelsToggleForumRequest{Channel: inputChannel, Enabled: true, Tabs: false})
 		inputUser, err := resolveBotInputUser(ctx, api, botUsername)
 		if err != nil {
 			return err
@@ -117,7 +117,7 @@ func (s *sSysTwoWayBot) createManagementGroup(ctx context.Context, account *publ
 				DeleteMessages: true,
 				BanUsers:       false,
 				InviteUsers:    true,
-				PinMessages:    true,
+				PinMessages:    false,
 				AddAdmins:      false,
 				ManageCall:     true,
 				Other:          true,
@@ -190,7 +190,7 @@ func (s *sSysTwoWayBot) setupExistingManagementGroup(ctx context.Context, accoun
 	err = client.Run(runCtx, func(ctx context.Context) error {
 		api := client.API()
 		inputChannel := &tg.InputChannel{ChannelID: channel.ChannelId, AccessHash: channel.AccessHash}
-		if _, err = api.ChannelsToggleForum(ctx, &tg.ChannelsToggleForumRequest{Channel: inputChannel, Enabled: true, Tabs: true}); err != nil {
+		if _, err = api.ChannelsToggleForum(ctx, &tg.ChannelsToggleForumRequest{Channel: inputChannel, Enabled: true, Tabs: false}); err != nil {
 			return gerror.Wrap(err, "开启管理群话题失败")
 		}
 		inputUser, err := resolveBotInputUser(ctx, api, botUsername)
@@ -213,7 +213,7 @@ func (s *sSysTwoWayBot) setupExistingManagementGroup(ctx context.Context, accoun
 				DeleteMessages: true,
 				BanUsers:       false,
 				InviteUsers:    true,
-				PinMessages:    true,
+				PinMessages:    false,
 				AddAdmins:      false,
 				ManageCall:     true,
 				Other:          true,
