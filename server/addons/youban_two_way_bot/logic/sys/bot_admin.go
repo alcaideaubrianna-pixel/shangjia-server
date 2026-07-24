@@ -94,6 +94,8 @@ func (s *sSysTwoWayBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) 
 	inviteLink := strings.TrimSpace(in.InviteLink)
 	supergroupAccessHash := ""
 	if in.Id <= 0 {
+		// 创建表单不传 status 时默认启用，避免 int 的零值被当成停用。
+		in.Status = sysin.TwoWayBotStatusEnabled
 		tgAccount, err := tgAccountById(ctx, in.TgAccountId, account.TenantId)
 		if err != nil {
 			return err
