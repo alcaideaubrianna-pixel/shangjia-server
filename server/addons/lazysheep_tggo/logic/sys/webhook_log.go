@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/frame/g"
@@ -29,7 +30,7 @@ func (s *sLazySheepTGGo) saveWebhookLog(ctx context.Context, botKey string, payl
 		INSERT INTO hg_addon_lazysheep_tggo_webhook_log
 		(bot_key, update_id, update_type, chat_id, user_id, username, message_id, summary, payload, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, botKey, updateID(update), updateType, chatID, userID, username, messageID, summary, string(payload), gtime.Now(), gtime.Now())
+	`, botKey, updateID(update), updateType, chatID, userID, username, messageID, summary, strings.ToValidUTF8(string(payload), "�"), gtime.Now(), gtime.Now())
 	if err != nil {
 		g.Log().Warningf(ctx, "保存 webhook 原始日志失败 botKey:%s err:%+v", botKey, err)
 	}
@@ -255,12 +256,25 @@ func chatMemberTypeName(member models.ChatMember) string {
 }
 
 func truncateSummary(text string, max int) string {
-	text = strings.TrimSpace(text)
+	text = strings.ToValidUTF8(strings.TrimSpace(text), "�")
 	if max <= 0 || len(text) <= max {
 		return text
 	}
 	if max < 3 {
-		return text[:max]
+		return safeUTF8Prefix(text, max)
 	}
-	return text[:max-3] + "..."
+	return safeUTF8Prefix(text, max-3) + "..."
+}
+
+func safeUTF8Prefix(text string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(text) <= maxBytes {
+		return text
+	}
+	for maxBytes > 0 && !utf8.ValidString(text[:maxBytes]) {
+		maxBytes--
+	}
+	return text[:maxBytes]
 }
