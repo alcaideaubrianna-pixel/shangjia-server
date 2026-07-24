@@ -43,7 +43,7 @@ type mediaSimilarScope struct {
 	Partitions []mediaPHashBucketScopePart
 }
 
-func (s *sSysPublish) MediaSimilarCount(ctx context.Context, in *sysin.MediaSimilarCountInp) ([]*sysin.MediaSimilarCountModel, error) {
+func (s *sSysPublish) MediaSimilarCount(ctx context.Context, in *sysin.MediaSimilarCountInp) (*sysin.MediaSimilarCountModel, error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {
 		return nil, err
@@ -51,35 +51,32 @@ func (s *sSysPublish) MediaSimilarCount(ctx context.Context, in *sysin.MediaSimi
 	if err = s.ensureTenantVipFeature(ctx, account.TenantId, sysin.TenantVipFeatureSimilarMedia); err != nil {
 		return nil, err
 	}
-	mediaIds := uniqueIds(in.MediaIds)
-	if len(mediaIds) == 0 {
-		return []*sysin.MediaSimilarCountModel{}, nil
-	}
-	if len(mediaIds) > 50 {
-		return nil, gerror.New("一次最多查询50个媒体")
+	if in == nil || in.MediaId <= 0 {
+		return nil, gerror.New("媒体ID不能为空")
 	}
 	scope, err := s.mediaSimilarVisibleScope(ctx, account)
 	if err != nil {
 		return nil, err
 	}
-	sources, err := s.visibleSourceMediaMap(ctx, scope, mediaIds)
+	sources, err := s.visibleSourceMediaMap(ctx, scope, []int64{in.MediaId})
 	if err != nil {
 		return nil, err
 	}
-	itemsByMediaId, err := s.cachedMediaSimilarCandidatesBatch(ctx, scope, sources, mediaIds, 12)
+	source := sources[in.MediaId]
+	if source == nil {
+		return &sysin.MediaSimilarCountModel{MediaId: in.MediaId, Count: 0}, nil
+	}
+	cacheKey := mediaSimilarCountCacheKey(scope, source, 12)
+	if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {
+		return &sysin.MediaSimilarCountModel{MediaId: in.MediaId, Count: value.Int()}, nil
+	}
+	items, err := s.cachedMediaSimilarCandidates(ctx, scope, source, 12)
 	if err != nil {
 		return nil, err
 	}
-	res := make([]*sysin.MediaSimilarCountModel, 0, len(mediaIds))
-	for _, mediaId := range mediaIds {
-		_, ok := sources[mediaId]
-		if !ok {
-			res = append(res, &sysin.MediaSimilarCountModel{MediaId: mediaId, Count: 0})
-			continue
-		}
-		res = append(res, &sysin.MediaSimilarCountModel{MediaId: mediaId, Count: len(itemsByMediaId[mediaId])})
-	}
-	return res, nil
+	count := len(items)
+	_ = cache.Instance().Set(ctx, cacheKey, count, mediaSimilarResultCacheTTL)
+	return &sysin.MediaSimilarCountModel{MediaId: in.MediaId, Count: count}, nil
 }
 
 func (s *sSysPublish) MediaSimilarList(ctx context.Context, in *sysin.MediaSimilarListInp) (*sysin.MediaSimilarListModel, int, error) {
@@ -147,53 +144,6 @@ func (s *sSysPublish) cachedMediaSimilarCandidates(ctx context.Context, scope *m
 	})
 	_ = cache.Instance().Set(ctx, cacheKey, items, mediaSimilarResultCacheTTL)
 	return items, nil
-}
-
-func (s *sSysPublish) cachedMediaSimilarCandidatesBatch(ctx context.Context, scope *mediaSimilarScope, sources map[int64]*mediaSimilarSource, mediaIds []int64, threshold int) (map[int64][]mediaSimilarCandidate, error) {
-	result := make(map[int64][]mediaSimilarCandidate, len(mediaIds))
-	misses := make([]*mediaSimilarSource, 0, len(mediaIds))
-	for _, mediaId := range mediaIds {
-		source, ok := sources[mediaId]
-		if !ok || source == nil {
-			continue
-		}
-		cacheKey := mediaSimilarResultCacheKey(scope, source, threshold)
-		if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
-			var cached []mediaSimilarCandidate
-			if scanErr := value.Scan(&cached); scanErr == nil {
-				result[mediaId] = filterMediaSimilarCandidates(source, cached)
-				continue
-			}
-		}
-		misses = append(misses, source)
-	}
-	if len(misses) == 0 {
-		return result, nil
-	}
-	batchSources := make([]mediaPHashBucketSource, 0, len(misses))
-	validSources := make(map[int64]*mediaSimilarSource, len(misses))
-	for _, source := range misses {
-		if _, ok := parseUploadPHash(source.PerceptualHash); !ok {
-			result[source.Id] = []mediaSimilarCandidate{}
-			continue
-		}
-		batchSources = append(batchSources, mediaPHashBucketSource{Id: source.Id, MediaType: source.MediaType, HashValue: source.PerceptualHash})
-		validSources[source.Id] = source
-	}
-	rowsByMediaId, err := mediaPHashBucketBatchCandidateRows(ctx, batchSources, threshold, scope.Partitions)
-	if err != nil {
-		return nil, err
-	}
-	for _, source := range validSources {
-		queryHash, ok := parseUploadPHash(source.PerceptualHash)
-		if !ok {
-			continue
-		}
-		items := mediaSimilarCandidatesFromRows(source, queryHash, rowsByMediaId[source.Id], threshold)
-		result[source.Id] = items
-		_ = cache.Instance().Set(ctx, mediaSimilarResultCacheKey(scope, source, threshold), items, mediaSimilarResultCacheTTL)
-	}
-	return result, nil
 }
 
 func (s *sSysPublish) visibleSourceMedia(ctx context.Context, scope *mediaSimilarScope, mediaId int64) (*mediaSimilarSource, error) {
@@ -433,6 +383,10 @@ func mediaSimilarResultCacheKey(scope *mediaSimilarScope, source *mediaSimilarSo
 		threshold,
 		mediaSimilarHashKey(firstNonEmpty(source.PerceptualHash, "-")+":"+updatedAt),
 	)
+}
+
+func mediaSimilarCountCacheKey(scope *mediaSimilarScope, source *mediaSimilarSource, threshold int) string {
+	return "youban_publish:media_similar:count:" + mediaSimilarResultCacheKey(scope, source, threshold)
 }
 
 func mediaSimilarScopeCacheKey(ctx context.Context, tenantId int64, accountId int64) string {

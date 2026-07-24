@@ -173,7 +173,7 @@ type TenantVipCouponModel struct {
 }
 
 type MediaSimilarCountInp struct {
-	MediaIds []int64 `json:"mediaIds" dc:"媒体ID列表"`
+	MediaId int64 `json:"mediaId" dc:"媒体ID"`
 }
 
 type MediaSimilarCountModel struct {

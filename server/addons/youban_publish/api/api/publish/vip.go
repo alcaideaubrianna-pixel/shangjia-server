@@ -61,12 +61,12 @@ type TenantVipCouponCheckRes struct {
 }
 
 type MediaSimilarCountReq struct {
-	g.Meta `path:"/publish/media/similar/count" method:"post" tags:"上架插件" summary:"媒体相似数量"`
+	g.Meta `path:"/publish/media/similar/count" method:"get" tags:"上架插件" summary:"单个媒体相似数量"`
 	sysin.MediaSimilarCountInp
 }
 
 type MediaSimilarCountRes struct {
-	List []*sysin.MediaSimilarCountModel `json:"list" dc:"相似数量列表"`
+	*sysin.MediaSimilarCountModel
 }
 
 type MediaSimilarListReq struct {

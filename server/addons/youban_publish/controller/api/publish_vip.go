@@ -71,14 +71,11 @@ func (c *cPublish) TenantVipCouponCheck(ctx context.Context, req *publish.Tenant
 }
 
 func (c *cPublish) MediaSimilarCount(ctx context.Context, req *publish.MediaSimilarCountReq) (res *publish.MediaSimilarCountRes, err error) {
-	list, err := service.SysPublish().MediaSimilarCount(ctx, &req.MediaSimilarCountInp)
+	data, err := service.SysPublish().MediaSimilarCount(ctx, &req.MediaSimilarCountInp)
 	if err != nil {
 		return nil, err
 	}
-	if list == nil {
-		list = []*sysin.MediaSimilarCountModel{}
-	}
-	res = &publish.MediaSimilarCountRes{List: list}
+	res = &publish.MediaSimilarCountRes{MediaSimilarCountModel: data}
 	return
 }
 
