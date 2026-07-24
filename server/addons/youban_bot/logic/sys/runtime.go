@@ -176,6 +176,12 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 			}
 			return err
 		}
+		if handled, err := s.handleScanCallback(ctx, botId, update.CallbackQuery); handled || err != nil {
+			if err != nil {
+				g.Log().Warningf(ctx, "Telegram Callback处理失败 handler:scan botId:%d chatId:%s userId:%s data:%s err:%+v", botId, callbackQueryChatId(update.CallbackQuery), callbackQueryUserId(update.CallbackQuery), strings.TrimSpace(update.CallbackQuery.Data), err)
+			}
+			return err
+		}
 		if err := s.handleExchangeRateCallback(ctx, botId, update.CallbackQuery); err != nil {
 			g.Log().Warningf(ctx, "Telegram Callback处理失败 handler:exchange_rate botId:%d chatId:%s userId:%s data:%s err:%+v", botId, callbackQueryChatId(update.CallbackQuery), callbackQueryUserId(update.CallbackQuery), strings.TrimSpace(update.CallbackQuery.Data), err)
 			return err

@@ -513,8 +513,10 @@ func (s *sSysBot) consumeProfileSearchImageMessage(ctx context.Context, botId in
 			},
 			Threshold: 12,
 		},
-		ImageUrl: media[0].FileUrl,
+		ImageUrl:    media[0].FileUrl,
+		AccountType: account.AccountType,
 	}
+	in.AccountId = account.AccountId
 	in.Page = 1
 	in.PerPage = 5
 	list, _, err := publishService.SysPublish().BotProfileImageSearch(ctx, in)

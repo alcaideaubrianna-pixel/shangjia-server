@@ -636,7 +636,21 @@ type ProfileImageSearchInp struct {
 
 type BotProfileImageSearchInp struct {
 	ProfileImageSearchInp
-	ImageUrl string `json:"imageUrl" dc:"图片地址"`
+	ImageUrl    string `json:"imageUrl" dc:"图片地址"`
+	AccountType string `json:"accountType" dc:"账号类型：admin/uploader"`
+}
+
+type BotMediaSearchItem struct {
+	FileUrl   string `json:"fileUrl" dc:"图片或视频预览图地址"`
+	MediaType string `json:"mediaType" dc:"媒体类型：image/video"`
+}
+
+type BotMediaSearchInp struct {
+	TenantId    int64                 `json:"tenantId" dc:"租户ID"`
+	AccountId   int64                 `json:"accountId" dc:"绑定账号ID"`
+	AccountType string                `json:"accountType" dc:"账号类型：admin/uploader"`
+	Items       []*BotMediaSearchItem `json:"items" dc:"待搜索媒体"`
+	Threshold   int                   `json:"threshold" dc:"相似度阈值"`
 }
 
 type ProfileSaveInp struct {
@@ -852,11 +866,13 @@ type BotProfileSearchInp struct {
 
 // BotProfileViewInp is used by youban_bot to view a profile by id or profile_no.
 type BotProfileViewInp struct {
-	TenantId   int64  `json:"tenantId" dc:"租户ID"`
-	AccountId  int64  `json:"accountId" dc:"上架账号ID"`
-	ProfileId  int64  `json:"profileId" dc:"资料ID"`
-	ProfileNo  string `json:"profileNo" dc:"资料编号"`
-	PublicOnly bool   `json:"publicOnly" dc:"是否只允许公开/上架资料"`
+	TenantId    int64   `json:"tenantId" dc:"租户ID"`
+	AccountId   int64   `json:"accountId" dc:"上架账号ID"`
+	AccountIds  []int64 `json:"accountIds" dc:"可见上架账号ID列表"`
+	AccountType string  `json:"accountType" dc:"账号类型：admin/uploader"`
+	ProfileId   int64   `json:"profileId" dc:"资料ID"`
+	ProfileNo   string  `json:"profileNo" dc:"资料编号"`
+	PublicOnly  bool    `json:"publicOnly" dc:"是否只允许公开/上架资料"`
 }
 
 // BotProfileStatusInp is used by youban_bot to update profile status.

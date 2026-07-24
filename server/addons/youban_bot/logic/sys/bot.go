@@ -119,6 +119,7 @@ func init() {
 	registerBotFeature(adminFeature{})
 	registerBotFeature(inviteFeature{})
 	registerBotFeature(profileFeature{})
+	registerBotFeature(scanFeature{})
 	registerBotFeature(quickPushFeature{})
 	registerBotFeature(exchangeRateFeature{})
 }

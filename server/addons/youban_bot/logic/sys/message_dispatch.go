@@ -29,6 +29,7 @@ var botMessageHandlers = []botMessageHandler{
 	quickPushSessionMessageHandler{},
 	botFeatureMessageHandler{},
 	profileManageMessageHandler{},
+	scanMediaMessageHandler{},
 	publishListenerBindMessageHandler{},
 	authCodeMessageHandler{},
 }

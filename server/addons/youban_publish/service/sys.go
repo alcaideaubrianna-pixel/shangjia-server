@@ -206,6 +206,8 @@ type ISysPublish interface {
 	MyProfileStats(ctx context.Context, in *sysin.TrendInp) (res *sysin.ProfileStatsModel, err error)
 	BotProfileSearch(ctx context.Context, in *sysin.BotProfileSearchInp) (list []*sysin.NoteModel, totalCount int, err error)
 	BotProfileImageSearch(ctx context.Context, in *sysin.BotProfileImageSearchInp) (list []*sysin.NoteModel, totalCount int, err error)
+	EnsureBotMediaSearchAccess(ctx context.Context, tenantId int64) error
+	BotProfileMediaSearch(ctx context.Context, in *sysin.BotMediaSearchInp) (list []*sysin.NoteModel, totalCount int, err error)
 	BotProfileView(ctx context.Context, in *sysin.BotProfileViewInp) (res *sysin.NoteModel, err error)
 	BotProfileStatus(ctx context.Context, in *sysin.BotProfileStatusInp) (res *sysin.ProfileStatusModel, err error)
 	BotProfileCreate(ctx context.Context, in *sysin.BotProfileCreateInp) (res *sysin.ProfileSaveModel, err error)
