@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +44,25 @@ func resolveChannelCacheDisplayType(item *sysin.ChannelCacheModel) string {
 }
 
 func (s *sSysPublish) fetchTgAccountChannelCaches(ctx context.Context, item *sysin.TgAccountModel) ([]*tgDialogCache, error) {
+	if item == nil || item.Id <= 0 {
+		return nil, gerror.New("TG账号不存在")
+	}
+	var channels []*tgDialogCache
+	usedRuntime, err := s.executeAccountCollectOperation(ctx, item.Id, 90*time.Second, func(runCtx context.Context, client *telegram.Client) error {
+		var fetchErr error
+		channels, fetchErr = fetchTgAccountChannelCachesWithClient(runCtx, client)
+		return fetchErr
+	})
+	if err != nil {
+		return nil, gerror.Wrap(err, "通过账号运行时读取频道失败")
+	}
+	if usedRuntime {
+		return channels, nil
+	}
+	return s.fetchTgAccountChannelCachesStandalone(ctx, item)
+}
+
+func (s *sSysPublish) fetchTgAccountChannelCachesStandalone(ctx context.Context, item *sysin.TgAccountModel) ([]*tgDialogCache, error) {
 	conf, err := NewSysConfig().GetTelegram(ctx)
 	if err != nil {
 		return nil, err
@@ -62,48 +82,64 @@ func (s *sSysPublish) fetchTgAccountChannelCaches(ctx context.Context, item *sys
 	defer cancel()
 
 	channels := make([]*tgDialogCache, 0)
-	seen := make(map[string]struct{})
 	err = client.Run(runCtx, func(ctx context.Context) error {
-		const pageLimit = 100
-		offsetDate := 0
-		offsetID := 0
-		offsetPeer := tg.InputPeerClass(&tg.InputPeerEmpty{})
-		for {
-			dialogs, err := client.API().MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
-				Limit:      pageLimit,
-				OffsetDate: offsetDate,
-				OffsetID:   offsetID,
-				OffsetPeer: offsetPeer,
-			})
-			if err != nil {
-				return err
-			}
-			pageChats := tgDialogsChats(dialogs)
-			for _, chat := range pageChats {
-				cache := tgDialogCacheFromChat(chat)
-				if cache == nil || strings.TrimSpace(cache.ChannelId) == "" {
-					continue
-				}
-				if _, ok := seen[cache.ChannelId]; ok {
-					continue
-				}
-				seen[cache.ChannelId] = struct{}{}
-				channels = append(channels, cache)
-			}
-			nextDate, nextID, nextPeer, ok := tgDialogsNextOffset(dialogs)
-			if !ok {
-				break
-			}
-			offsetDate = nextDate
-			offsetID = nextID
-			offsetPeer = nextPeer
-		}
-		return nil
+		var fetchErr error
+		channels, fetchErr = fetchTgAccountChannelCachesWithClient(ctx, client)
+		return fetchErr
 	})
 	if err != nil {
-		return nil, err
+		return nil, gerror.Wrap(err, "Telegram读取频道对话失败")
 	}
 	return channels, nil
+}
+
+func fetchTgAccountChannelCachesWithClient(ctx context.Context, client *telegram.Client) ([]*tgDialogCache, error) {
+	if client == nil {
+		return nil, gerror.New("Telegram客户端未初始化")
+	}
+	const pageLimit = 100
+	const maxPages = 1000
+	channels := make([]*tgDialogCache, 0)
+	seenChannels := make(map[string]struct{})
+	seenOffsets := make(map[string]struct{})
+	offsetDate := 0
+	offsetID := 0
+	offsetPeer := tg.InputPeerClass(&tg.InputPeerEmpty{})
+	for page := 0; page < maxPages; page++ {
+		offsetKey := fmt.Sprintf("%d:%d:%T", offsetDate, offsetID, offsetPeer)
+		if _, exists := seenOffsets[offsetKey]; exists {
+			return nil, gerror.New("Telegram频道分页游标未推进")
+		}
+		seenOffsets[offsetKey] = struct{}{}
+		dialogs, err := client.API().MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
+			Limit:      pageLimit,
+			OffsetDate: offsetDate,
+			OffsetID:   offsetID,
+			OffsetPeer: offsetPeer,
+		})
+		if err != nil {
+			return nil, gerror.Wrapf(err, "读取Telegram频道对话失败 page:%d", page+1)
+		}
+		for _, chat := range tgDialogsChats(dialogs) {
+			cache := tgDialogCacheFromChat(chat)
+			if cache == nil || strings.TrimSpace(cache.ChannelId) == "" {
+				continue
+			}
+			if _, exists := seenChannels[cache.ChannelId]; exists {
+				continue
+			}
+			seenChannels[cache.ChannelId] = struct{}{}
+			channels = append(channels, cache)
+		}
+		nextDate, nextID, nextPeer, ok := tgDialogsNextOffset(dialogs)
+		if !ok {
+			return channels, nil
+		}
+		offsetDate = nextDate
+		offsetID = nextID
+		offsetPeer = nextPeer
+	}
+	return nil, gerror.New("Telegram频道对话超过最大分页数量")
 }
 
 func tgDialogsChats(dialogs tg.MessagesDialogsClass) []tg.ChatClass {
