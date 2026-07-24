@@ -34,6 +34,9 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 	if event == nil || event.Msg == nil || event.Msg.From == nil || !hasScanMedia(event.Msg) {
 		return false, nil
 	}
+	if !isTelegramPrivateChat(event.Msg) {
+		return false, nil
+	}
 	if _, enabled := bot.featureConfig(ctx, scanFeature{}.Key()); !enabled {
 		return false, nil
 	}
@@ -57,6 +60,10 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 		return true, bot.collectScanMediaGroup(ctx, event.BotId, userId, event.Msg, items)
 	}
 	return true, bot.searchScanMediaAndReply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), account, items)
+}
+
+func isTelegramPrivateChat(msg *models.Message) bool {
+	return msg != nil && strings.EqualFold(strings.TrimSpace(string(msg.Chat.Type)), "private")
 }
 
 func hasScanMedia(msg *models.Message) bool {

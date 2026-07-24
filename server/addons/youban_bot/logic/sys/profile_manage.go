@@ -68,10 +68,29 @@ func (profileManageMessageHandler) Handle(ctx context.Context, bot *sSysBot, eve
 			return true, bot.consumeProfileSessionText(ctx, event.BotId, event.Msg, account, session, text, extractProfileNos(text))
 		}
 	}
+	if isTelegramSearchChat(event.Msg) && text != "" {
+		account, err := bot.boundProfileAccount(ctx, event.Msg)
+		if err != nil {
+			return true, bot.reply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), err.Error())
+		}
+		return true, bot.searchProfilesAndReply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), account, text, "view")
+	}
 	if text == "" || !looksLikeProfileCommand(text) {
 		return false, nil
 	}
 	return bot.handleProfileTextCommand(ctx, event.BotId, event.Msg, text)
+}
+
+func isTelegramSearchChat(msg *models.Message) bool {
+	if msg == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(string(msg.Chat.Type))) {
+	case "group", "supergroup":
+		return true
+	default:
+		return false
+	}
 }
 
 func isCancelProfileCommand(text string) bool {

@@ -411,7 +411,7 @@ func quickPushSelectionText(session *quickPushSession, plans []*publishsysin.Qui
 		if _, ok := selected[item.Id]; !ok {
 			mark = "⬜️"
 		}
-		lines = append(lines, fmt.Sprintf("%s %s %s", mark, html.EscapeString(item.SerialNo), html.EscapeString(item.Name)))
+		lines = append(lines, fmt.Sprintf("%s %s", mark, html.EscapeString(quickPushPlanDisplayName(item))))
 	}
 	lines = append(lines, "", "默认已全选，点击计划按钮可取消选择。")
 	return strings.Join(lines, "\n")
@@ -434,7 +434,7 @@ func quickPushPlanKeyboard(session *quickPushSession, plans []*publishsysin.Quic
 		if _, ok := selected[item.Id]; !ok {
 			prefix = "⬜"
 		}
-		label := prefix + item.SerialNo
+		label := prefix + quickPushPlanDisplayName(item)
 		row = append(row, models.InlineKeyboardButton{Text: label, CallbackData: quickPushCallbackData("toggle", session.SessionId, item.Id)})
 		if len(row) == 2 {
 			rows = append(rows, row)
@@ -447,6 +447,17 @@ func quickPushPlanKeyboard(session *quickPushSession, plans []*publishsysin.Quic
 	rows = append(rows, []models.InlineKeyboardButton{{Text: "全选", CallbackData: quickPushCallbackData("all", session.SessionId, 0)}, {Text: "取消全选", CallbackData: quickPushCallbackData("none", session.SessionId, 0)}})
 	rows = append(rows, []models.InlineKeyboardButton{{Text: "返回", CallbackData: quickPushCallbackData("cancel", session.SessionId, 0)}, {Text: "发送", CallbackData: quickPushCallbackData("send", session.SessionId, 0)}})
 	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func quickPushPlanDisplayName(item *publishsysin.QuickPushPlanModel) string {
+	if item == nil {
+		return ""
+	}
+	name := strings.TrimSpace(item.Name)
+	if name != "" {
+		return name
+	}
+	return strings.TrimSpace(item.SerialNo)
 }
 
 func quickPushCallbackData(action string, sessionId string, planId int64) string {
