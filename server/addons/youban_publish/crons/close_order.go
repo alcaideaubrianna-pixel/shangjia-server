@@ -35,6 +35,7 @@ func (c *cVipOrderClose) Execute(ctx context.Context, parser *cron.Parser) (err 
 	_, err = service.AdminOrder().Model(ctx).
 		Where(cols.OrderType, "youban_tenant_vip").
 		Where(cols.Status, consts.OrderStatusNotPay).
+		Where("NOT EXISTS (SELECT 1 FROM hg_pay_log p WHERE p.order_sn = hg_admin_order.order_sn AND p.pay_status = ?)", consts.PayStatusOk).
 		WhereLTE(cols.CreatedAt, gtime.Now().Add(-tenantVipOrderCloseTimeout)).
 		Data(g.Map{
 			cols.Status:    consts.OrderStatusClose,

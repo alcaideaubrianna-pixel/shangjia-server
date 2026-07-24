@@ -254,7 +254,7 @@ func (s *sSysPublish) TenantVipPayNotify(ctx context.Context, in *payin.NotifyCa
 	if order == nil {
 		return gerror.Newf("会员订单[%s]不存在", in.Pay.OrderSn)
 	}
-	if order.Status != consts.OrderStatusNotPay {
+	if order.Status != consts.OrderStatusNotPay && order.Status != consts.OrderStatusClose {
 		return nil
 	}
 	shouldReward, err := s.shouldRewardInviterVip(ctx, order.ProductId)
@@ -268,7 +268,7 @@ func (s *sSysPublish) TenantVipPayNotify(ctx context.Context, in *payin.NotifyCa
 	plan := tenantVipPlanByCode(tenantVipPlanMonth, cfg)
 	_, err = dao.AdminOrder.Ctx(ctx).
 		Where(cols.Id, order.Id).
-		Where(cols.Status, consts.OrderStatusNotPay).
+		WhereIn(cols.Status, []int{consts.OrderStatusNotPay, consts.OrderStatusClose}).
 		Data(g.Map{cols.Status: consts.OrderStatusPay, cols.UpdatedAt: gtime.Now()}).
 		Update()
 	if err != nil {
