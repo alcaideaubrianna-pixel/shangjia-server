@@ -34,7 +34,7 @@ func (s *sSysTwoWayBot) AdminBotList(ctx context.Context, in *sysin.BotListInp) 
 		mod = mod.Where(columns.Status, in.Status)
 	}
 	var rows []*entity.YoubanTwoWayBotBot
-	if err = mod.Page(in.Page, in.PerPage).OrderDesc(columns.Id).ScanAndCount(&rows, &totalCount, false); err != nil {
+	if err = mod.Page(in.GetPage(), in.GetPerPage()).OrderDesc(columns.Id).ScanAndCount(&rows, &totalCount, false); err != nil {
 		return nil, 0, gerror.Wrap(err, "读取双向机器人失败")
 	}
 	tgAccountNames, err := loadTgAccountNames(ctx, rows)

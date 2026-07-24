@@ -26,8 +26,22 @@ const (
 
 type BotListInp struct {
 	form.PageReq
-	Keyword string `json:"keyword" dc:"关键词"`
-	Status  int    `json:"status" dc:"状态"`
+	PerPageAlias int    `json:"perPage" dc:"每页数量（兼容旧参数）"`
+	Keyword      string `json:"keyword" dc:"关键词"`
+	Status       int    `json:"status" dc:"状态"`
+}
+
+func (in *BotListInp) GetPerPage() int {
+	if in == nil {
+		return 0
+	}
+	if in.PerPage > 0 {
+		return in.PerPage
+	}
+	if in.PerPageAlias > 0 {
+		return in.PerPageAlias
+	}
+	return in.PageReq.GetPerPage()
 }
 
 type BotSaveInp struct {
