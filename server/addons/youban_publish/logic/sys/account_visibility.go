@@ -17,6 +17,7 @@ type adminProfileVisibleScope struct {
 	AccountIds []int64
 	Strict     bool
 	TenantId   int64
+	TenantIds  []int64
 }
 
 const accountVisibilityCacheTTL = 10 * time.Minute
@@ -90,6 +91,38 @@ func (s *sSysPublish) adminProfileVisibleScope(ctx context.Context, account *sys
 	default:
 		return nil, gerror.New("账号筛选范围不合法")
 	}
+}
+
+func (s *sSysPublish) ensureAdminProfileScopeTenants(ctx context.Context, scope *adminProfileVisibleScope) error {
+	if scope == nil || len(scope.AccountIds) == 0 {
+		return nil
+	}
+	if len(scope.TenantIds) > 0 {
+		return nil
+	}
+	columns := pdao.YoubanPublishAccount.Columns()
+	var rows []struct {
+		TenantId int64 `json:"tenantId"`
+	}
+	if err := pdao.YoubanPublishAccount.Ctx(ctx).
+		Fields(columns.TenantId).
+		WhereIn(columns.Id, scope.AccountIds).
+		Where(columns.Status, 1).
+		WhereNull(columns.DeletedAt).
+		Group(columns.TenantId).
+		Scan(&rows); err != nil {
+		return gerror.Wrap(err, "读取资料租户范围失败")
+	}
+	for _, row := range rows {
+		if row.TenantId > 0 {
+			scope.TenantIds = append(scope.TenantIds, row.TenantId)
+		}
+	}
+	scope.TenantIds = uniqueIds(scope.TenantIds)
+	if len(scope.TenantIds) == 0 && scope.TenantId > 0 {
+		scope.TenantIds = []int64{scope.TenantId}
+	}
+	return nil
 }
 
 func (s *sSysPublish) adminManagedAccountIds(ctx context.Context, account *sysin.AccountModel) ([]int64, error) {

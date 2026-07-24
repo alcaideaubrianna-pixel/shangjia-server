@@ -80,8 +80,8 @@ func (s *sSysPublish) noteList(ctx context.Context, in *sysin.NoteListInp) (list
 	return
 }
 
-func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.ProfileListInp, tenantId int64, accountIds []int64, viewer *sysin.AccountModel) ([]*sysin.AdminNoteListModel, int, error) {
-	base := s.adminNoteBaseModel(ctx, tenantId)
+func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.ProfileListInp, tenantId int64, tenantIds []int64, accountIds []int64, viewer *sysin.AccountModel) ([]*sysin.AdminNoteListModel, int, error) {
+	base := s.adminNoteBaseModel(ctx, tenantId, tenantIds)
 	if len(accountIds) > 0 {
 		base = base.WhereIn("t.account_id", accountIds)
 	} else if in != nil && in.AccountId > 0 {
@@ -113,13 +113,17 @@ func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.ProfileListIn
 	return list, totalCount, nil
 }
 
-func (s *sSysPublish) adminNoteBaseModel(ctx context.Context, tenantId int64) *gdb.Model {
+func (s *sSysPublish) adminNoteBaseModel(ctx context.Context, tenantId int64, tenantIds []int64) *gdb.Model {
 	mod := dao.ContentProfile.Ctx(ctx).As("p").
 		InnerJoin(publishTaskTable+" t", "t.profile_id=p.id AND t.deleted_at IS NULL").
 		LeftJoin(publishTenantTable+" tenant", "tenant.id=t.tenant_id").
 		LeftJoin(publishAccountTable+" a", "a.id=t.account_id AND a.deleted_at IS NULL").
-		WhereNull("p.deleted_at").
-		Where("t.tenant_id", tenantId)
+		WhereNull("p.deleted_at")
+	if len(tenantIds) > 0 {
+		mod = mod.WhereIn("t.tenant_id", tenantIds)
+	} else if tenantId > 0 {
+		mod = mod.Where("t.tenant_id", tenantId)
+	}
 	return mod
 }
 

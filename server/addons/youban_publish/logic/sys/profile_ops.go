@@ -234,10 +234,13 @@ func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) 
 	if err != nil {
 		return nil, 0, err
 	}
+	if err = s.ensureAdminProfileScopeTenants(ctx, scope); err != nil {
+		return nil, 0, err
+	}
 	if scope.Strict && len(scope.AccountIds) == 0 {
 		return []*sysin.AdminNoteListModel{}, 0, nil
 	}
-	return s.adminNoteList(ctx, &in.ProfileListInp, scope.TenantId, scope.AccountIds, account)
+	return s.adminNoteList(ctx, &in.ProfileListInp, scope.TenantId, scope.TenantIds, scope.AccountIds, account)
 }
 
 func (s *sSysPublish) AdminTagList(ctx context.Context, in *sysin.TagListInp) (list []*sysin.TagModel, totalCount int, err error) {
