@@ -249,14 +249,18 @@ func (s *sSysPublish) followNoteDirectAccountIds(ctx context.Context, account *s
 		ids = append(ids, row.FollowingAccountId)
 	}
 	ids = uniqueIds(ids)
+	expandedIds, err := s.expandFollowNoteAccountIds(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	if in == nil || in.AccountId <= 0 {
-		return ids, nil
+		return expandedIds, nil
 	}
 	selectedIds, err := s.directFollowNoteAccountIds(ctx, []int64{in.AccountId})
 	if err != nil {
 		return nil, err
 	}
-	return intersectInt64(ids, selectedIds), nil
+	return intersectInt64(expandedIds, selectedIds), nil
 }
 
 func (s *sSysPublish) directFollowNoteAccountIds(ctx context.Context, accountIds []int64) ([]int64, error) {

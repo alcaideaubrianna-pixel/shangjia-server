@@ -63,6 +63,37 @@ func (s *sSysPublish) profileView(ctx context.Context, profileId int64, tenantId
 	return res, nil
 }
 
+func (s *sSysPublish) profileViewBySelector(ctx context.Context, in *sysin.ProfileViewInp, tenantId int64, accountId int64) (res *sysin.ProfileModel, err error) {
+	if err = s.ensureLegacyProfileNosOnce(ctx); err != nil {
+		return nil, err
+	}
+	if in == nil || !hasProfileSelector(in.Id, in.Uuid) {
+		return nil, gerror.New("资料UUID不能为空")
+	}
+	base, err := s.profileBaseModel(ctx, tenantId, accountId)
+	if err != nil {
+		return nil, err
+	}
+	if in.Id > 0 {
+		base = base.Where("p.id", in.Id)
+	} else {
+		base = base.Where("p.source_note_uuid", normalizeProfileUUID(in.Uuid))
+	}
+	if err = base.Fields(profileListFields()).Scan(&res); err != nil {
+		return nil, gerror.Wrap(err, "获取资料详情失败")
+	}
+	if res == nil || res.Id <= 0 {
+		return nil, gerror.New("资料不存在或无权操作")
+	}
+	if err = s.ensureProfileModelUUID(ctx, res); err != nil {
+		return nil, err
+	}
+	if err = s.applyProfileTagNames(ctx, []*sysin.ProfileModel{res}); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
 func (s *sSysPublish) noteList(ctx context.Context, in *sysin.NoteListInp) (list []*sysin.NoteModel, totalCount int, err error) {
 	profiles, totalCount, err := s.profileList(ctx, &in.ProfileListInp)
 	if err != nil {

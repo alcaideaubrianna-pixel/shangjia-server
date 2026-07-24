@@ -91,16 +91,20 @@ func (s *sSysPublish) allAccountOptions(ctx context.Context, account *sysin.Acco
 
 func (s *sSysPublish) followAccountOptions(ctx context.Context, account *sysin.AccountModel) ([]*sysin.AccountOptionModel, error) {
 	rows := make([]accountOptionRow, 0, 32)
-	if err := pdao.YoubanPublishAccountFollow.Ctx(ctx).
-		As("f").
-		LeftJoin(pdao.YoubanPublishAccount.Table()+" a", "a.id=f.following_account_id").
-		Where("f.tenant_id", account.TenantId).
-		Where("f.follower_account_id", account.Id).
-		Where("f.status", sysin.AccountFollowStatusApproved).
-		WhereNull("f.deleted_at").
-		WhereNull("a.deleted_at").
-		Fields("a.id", "a.nickname").
-		OrderDesc("f.id").
+	ids, err := s.followNoteDirectAccountIds(ctx, account, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return []*sysin.AccountOptionModel{}, nil
+	}
+	accountColumns := pdao.YoubanPublishAccount.Columns()
+	if err = pdao.YoubanPublishAccount.Ctx(ctx).
+		WhereIn(accountColumns.Id, ids).
+		Where(accountColumns.Status, 1).
+		WhereNull(accountColumns.DeletedAt).
+		Fields(accountColumns.Id, accountColumns.Nickname).
+		OrderAsc(accountColumns.Id).
 		Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "获取关注账号筛选选项失败")
 	}

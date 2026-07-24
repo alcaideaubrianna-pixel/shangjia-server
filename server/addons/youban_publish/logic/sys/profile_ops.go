@@ -177,16 +177,22 @@ func (s *sSysPublish) AdminProfileView(ctx context.Context, in *sysin.ProfileVie
 	if in == nil || !hasProfileSelector(in.Id, in.Uuid) {
 		return nil, gerror.New("资料UUID不能为空")
 	}
-	profileId, err := s.resolveProfileId(ctx, in.Id, in.Uuid, account.TenantId, 0)
+	scope, err := s.adminProfileVisibleScope(ctx, account, &sysin.ProfileListInp{AccountScope: "all"})
 	if err != nil {
 		return nil, err
 	}
-	profile, err := s.profileView(ctx, profileId, account.TenantId, 0)
+	if err = s.ensureAdminProfileScopeTenants(ctx, scope); err != nil {
+		return nil, err
+	}
+	profile, err := s.profileViewBySelector(ctx, in, 0, 0)
 	if err != nil {
 		return nil, err
 	}
-	markProfilePermission(profile, sysin.ProfilePermissionAdmin)
-	media, err := s.mediaListByProfile(ctx, profile.Id, account.TenantId, 0)
+	if !containsInt64(scope.AccountIds, profile.AccountId) {
+		return nil, gerror.New("资料不存在或无权操作")
+	}
+	markProfilePermission(profile, profilePermissionForViewer(account, profile))
+	media, err := s.mediaListByProfile(ctx, profile.Id, profile.TenantId, profile.AccountId)
 	if err != nil {
 		return nil, err
 	}
