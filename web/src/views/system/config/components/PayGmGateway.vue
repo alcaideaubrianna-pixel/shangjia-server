@@ -9,10 +9,10 @@
     <n-form-item label="商户ID" path="payGMPayPid">
       <n-input v-model:value="formValue.payGMPayPid" clearable />
     </n-form-item>
-    <n-form-item label="HMAC密钥" path="payGMPayKey">
+    <n-form-item label="Secret Key" path="payGMPayKey">
       <n-input v-model:value="formValue.payGMPayKey" clearable />
     </n-form-item>
-    <n-form-item label="默认币种" path="payGMPayToken">
+    <n-form-item label="默认代币" path="payGMPayToken">
       <n-input v-model:value="formValue.payGMPayToken" clearable />
     </n-form-item>
     <n-form-item label="默认网络" path="payGMPayNetwork">

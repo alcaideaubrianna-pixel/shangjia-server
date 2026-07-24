@@ -2,9 +2,8 @@
 package gmpay
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
+	"crypto/md5"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -12,9 +11,8 @@ import (
 )
 
 func signParams(params map[string]string, key string) string {
-	mac := hmac.New(sha256.New, []byte(strings.TrimSpace(key)))
-	mac.Write([]byte(buildSignContent(params)))
-	return hex.EncodeToString(mac.Sum(nil))
+	sum := md5.Sum([]byte(buildSignContent(params) + strings.TrimSpace(key)))
+	return fmt.Sprintf("%x", sum)
 }
 
 func verifyParams(params map[string]string, key string) error {

@@ -17,6 +17,6 @@ func (c *ControllerV1) NotifyGMPay(ctx context.Context, req *v1.NotifyGMPayReq) 
 		return nil, err
 	}
 
-	response.RText(g.RequestFromCtx(ctx), "success")
+	response.RText(g.RequestFromCtx(ctx), "ok")
 	return
 }
