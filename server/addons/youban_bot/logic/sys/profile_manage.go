@@ -37,7 +37,7 @@ const (
 	profileCreateMaxMediaBytes  = 100 * 1024 * 1024
 )
 
-var profileNoFindRegexp = regexp.MustCompile(`(?i)\b[A-Z][0-9]{5}\b`)
+var profileNoFindRegexp = regexp.MustCompile(`(?i)\b[A-Z][A-Z0-9]{4,}\b`)
 
 type botProfileAccount struct {
 	TenantId    int64
@@ -73,7 +73,11 @@ func (profileManageMessageHandler) Handle(ctx context.Context, bot *sSysBot, eve
 		if err != nil {
 			return true, bot.reply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), err.Error())
 		}
-		return true, bot.searchProfilesAndReply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), account, text, "view")
+		chatID := fmt.Sprintf("%d", event.Msg.Chat.ID)
+		if nos := extractProfileNos(text); len(nos) == 1 && strings.EqualFold(strings.TrimSpace(text), nos[0]) {
+			return true, bot.showProfileCard(ctx, event.BotId, chatID, account, nos[0])
+		}
+		return true, bot.searchProfilesAndReply(ctx, event.BotId, chatID, account, text, "view")
 	}
 	if text == "" || !looksLikeProfileCommand(text) {
 		return false, nil

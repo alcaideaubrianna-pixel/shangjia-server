@@ -51,3 +51,10 @@ func TestTelegramChatRouting(t *testing.T) {
 		t.Fatal("private and channel messages should not use direct group search")
 	}
 }
+
+func TestExtractProfileNosSupportsImportedIds(t *testing.T) {
+	nos := extractProfileNos("FNUR8829266")
+	if len(nos) != 1 || nos[0] != "FNUR8829266" {
+		t.Fatalf("expected imported profile id, got %#v", nos)
+	}
+}
