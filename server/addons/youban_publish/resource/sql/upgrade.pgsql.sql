@@ -355,3 +355,34 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_bucket" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_media_phash_bucket_media_pos" ON "hg_youban_publish_media_phash_bucket" ("media_id", "bucket_pos");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_bucket_search" ON "hg_youban_publish_media_phash_bucket" ("tenant_id", "media_type", "bucket_pos", "bucket_value") INCLUDE ("media_id", "profile_id", "account_id", "hash_value");
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_note_index" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "task_id" bigint NOT NULL DEFAULT 0,
+  "uuid" varchar(128) NOT NULL DEFAULT '',
+  "profile_no" varchar(64) NOT NULL DEFAULT '',
+  "title" varchar(255) NOT NULL DEFAULT '',
+  "summary" text,
+  "plain_text" text,
+  "tag" text,
+  "province" varchar(64) NOT NULL DEFAULT '',
+  "city" varchar(64) NOT NULL DEFAULT '',
+  "status" smallint NOT NULL DEFAULT 1,
+  "visibility" varchar(32) NOT NULL DEFAULT '',
+  "review_status" varchar(32) NOT NULL DEFAULT '',
+  "task_status" varchar(32) NOT NULL DEFAULT '',
+  "cover_media_id" bigint NOT NULL DEFAULT 0,
+  "published_at" timestamp DEFAULT NULL,
+  "source_updated_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL,
+  CONSTRAINT "uk_ybp_note_index_scope_profile" UNIQUE ("tenant_id", "account_id", "profile_id")
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_updated" ON "hg_youban_publish_note_index" ("tenant_id", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_updated" ON "hg_youban_publish_note_index" ("account_id", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_profile" ON "hg_youban_publish_note_index" ("profile_id") WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_title_trgm" ON "hg_youban_publish_note_index" USING gin ("title" gin_trgm_ops) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_plain_text_trgm" ON "hg_youban_publish_note_index" USING gin ("plain_text" gin_trgm_ops) WHERE "deleted_at" IS NULL;

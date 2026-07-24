@@ -379,6 +379,9 @@ func (s *sSysPublish) markTaskSavedWithoutPublish(ctx context.Context, task gdb.
 	if err != nil {
 		return gerror.Wrap(err, "同步未上架资料状态失败")
 	}
+	if err = s.syncProfileNoteIndex(ctx, profileId); err != nil {
+		return err
+	}
 	return nil
 }
 

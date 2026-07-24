@@ -65,6 +65,9 @@ func (s *sSysPublish) publishTaskToProfile(ctx context.Context, task gdb.Record)
 	if err != nil {
 		return 0, err
 	}
+	if err = s.syncProfileNoteIndex(ctx, profileId); err != nil {
+		return 0, err
+	}
 	return profileId, nil
 }
 

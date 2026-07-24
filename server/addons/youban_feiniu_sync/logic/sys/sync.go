@@ -1784,6 +1784,9 @@ func (s *sSysSync) syncOneNote(ctx context.Context, source gdb.DB, cfg gdb.Recor
 			if err = s.syncSourceMessageLinks(ctx, cfg, row, existed["youban_profile_id"].Int64(), existed["youban_task_id"].Int64(), existed["youban_account_id"].Int64()); err != nil {
 				return "", err
 			}
+			if err = publishservice.SysPublish().RefreshNoteIndex(ctx, existed["youban_profile_id"].Int64()); err != nil {
+				return "", err
+			}
 			return "skipped", s.touchChannelCursor(ctx, cfg, row, sourceUpdatedAt)
 		}
 		forceSync = true
@@ -1807,6 +1810,9 @@ func (s *sSysSync) syncOneNote(ctx context.Context, source gdb.DB, cfg gdb.Recor
 	}
 	if cfg["sync_media"].Int() == 1 {
 		_ = s.syncMedia(ctx, source, cfg, row, profileId, taskId, accountId)
+	}
+	if err = publishservice.SysPublish().RefreshNoteIndex(ctx, profileId); err != nil {
+		return "", err
 	}
 	if err = s.syncSourceMessageLinks(ctx, cfg, row, profileId, taskId, accountId); err != nil {
 		return "", err

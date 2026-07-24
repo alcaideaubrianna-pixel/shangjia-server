@@ -935,6 +935,9 @@ func (s *sSysPublish) finishProfileDownAfterRepair(ctx context.Context, task gdb
 		"status":     sysin.PublishTaskStatusCanceled,
 		"updated_at": gtime.Now(),
 	}).Update()
+	if err := s.syncProfileNoteIndex(ctx, profileId); err != nil {
+		return err
+	}
 	if err := s.handleProfilesDown(ctx, []int64{profileId}, tenantId); err != nil {
 		return err
 	}
@@ -951,6 +954,9 @@ func (s *sSysPublish) finishProfileDownWithoutRepair(ctx context.Context, task g
 		"status":     sysin.PublishTaskStatusCanceled,
 		"updated_at": gtime.Now(),
 	}).Update()
+	if err := s.syncProfileNoteIndex(ctx, profileId); err != nil {
+		return err
+	}
 	iservice.SysContent().ClearHomeProfileCardsCache(ctx)
 	return nil
 }

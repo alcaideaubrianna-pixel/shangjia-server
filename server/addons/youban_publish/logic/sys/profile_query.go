@@ -3,7 +3,9 @@ package sys
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -12,6 +14,8 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/dao"
 )
+
+const adminNoteCountCacheTTL = 5 * time.Second
 
 func (s *sSysPublish) profileList(ctx context.Context, in *sysin.ProfileListInp) (list []*sysin.ProfileModel, totalCount int, err error) {
 	if err = s.ensureLegacyProfileNosOnce(ctx); err != nil {
@@ -132,23 +136,34 @@ func (s *sSysPublish) noteList(ctx context.Context, in *sysin.NoteListInp) (list
 }
 
 func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.ProfileListInp, tenantId int64, tenantIds []int64, accountIds []int64, viewer *sysin.AccountModel) ([]*sysin.AdminNoteListModel, int, error) {
-	base := s.adminNoteBaseModel(ctx, tenantId, tenantIds)
-	if len(accountIds) > 0 {
-		base = base.WhereIn("t.account_id", accountIds)
-	} else if in != nil && in.AccountId > 0 {
-		base = base.Where("t.account_id", in.AccountId)
-	}
-	profiles, totalCount, err := s.searchDistinctProfilePage(ctx, base, in, adminNoteListFields(), "统计笔记失败", "获取笔记列表失败")
+	startedAt := time.Now()
+	profiles, totalCount, indexed, err := s.adminNoteIndexList(ctx, in, tenantId, tenantIds, accountIds)
 	if err != nil {
 		return nil, 0, err
 	}
+	if !indexed {
+		base := s.adminNoteBaseModel(ctx, tenantId, tenantIds)
+		if len(accountIds) > 0 {
+			base = base.WhereIn("t.account_id", accountIds)
+		} else if in != nil && in.AccountId > 0 {
+			base = base.Where("t.account_id", in.AccountId)
+		}
+		countCacheKey := adminNoteCountCacheKey(ctx, in, tenantId, tenantIds, accountIds)
+		profiles, totalCount, err = s.searchDistinctProfilePage(ctx, base, in, adminNoteListFields(), "统计笔记失败", "获取笔记列表失败", countCacheKey)
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+	logSlowAdminNoteListStage(ctx, "profile_query", startedAt, len(profiles), totalCount)
 	if err = s.ensureProfileListUUID(ctx, profiles); err != nil {
 		return nil, 0, err
 	}
+	stageStartedAt := time.Now()
 	mediaBuckets, err := s.adminNoteCoverMediaByProfiles(ctx, profiles)
 	if err != nil {
 		return nil, 0, err
 	}
+	logSlowAdminNoteListStage(ctx, "cover_media", stageStartedAt, len(profiles), len(mediaBuckets))
 	list := make([]*sysin.AdminNoteListModel, 0, len(profiles))
 	for _, item := range profiles {
 		if item == nil {
@@ -162,6 +177,36 @@ func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.ProfileListIn
 		list = append(list, adminNoteListFromProfile(item, mediaBuckets[item.Id]))
 	}
 	return list, totalCount, nil
+}
+
+func adminNoteCountCacheKey(ctx context.Context, in *sysin.ProfileListInp, tenantId int64, tenantIds []int64, accountIds []int64) string {
+	tenantIds = sortedUniqueIds(tenantIds)
+	accountIds = sortedUniqueIds(accountIds)
+	parts := []string{
+		"youban_publish:admin_note_count:v1",
+		fmt.Sprintf("tenant=%d", tenantId),
+		fmt.Sprintf("tenants=%v", tenantIds),
+		fmt.Sprintf("accounts=%v", accountIds),
+	}
+	if in != nil {
+		parts = append(parts,
+			fmt.Sprintf("account=%d", in.AccountId),
+			"keyword="+strings.TrimSpace(in.Keyword),
+			"province="+strings.TrimSpace(in.Province),
+			"city="+strings.TrimSpace(in.City),
+			"tag="+strings.TrimSpace(in.Tag),
+			"review="+strings.TrimSpace(in.ReviewStatus),
+			"visibility="+strings.TrimSpace(in.Visibility),
+			fmt.Sprintf("status=%d", in.Status),
+		)
+	}
+	return mediaPHashHashKey(strings.Join(parts, "|"))
+}
+
+func sortedUniqueIds(ids []int64) []int64 {
+	result := uniqueIds(ids)
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
 }
 
 func (s *sSysPublish) adminNoteBaseModel(ctx context.Context, tenantId int64, tenantIds []int64) *gdb.Model {

@@ -104,6 +104,7 @@ type ISysPublish interface {
 	ProcessStoredMediaAssets(ctx context.Context, in *sysin.StoredMediaAssetsInp) (res *sysin.StoredMediaAssetsModel, err error)
 	ProcessRemoteMediaAssets(ctx context.Context, in *sysin.RemoteMediaAssetsInp) (res *sysin.RemoteMediaAssetsModel, err error)
 	SyncMediaPHashBucketByMediaId(ctx context.Context, mediaId int64) (err error)
+	RefreshNoteIndex(ctx context.Context, profileId int64) (err error)
 	AdminAntiScanPreview(ctx context.Context, in *sysin.AntiScanPreviewInp, file *ghttp.UploadFile) (res *sysin.AntiScanPreviewModel, err error)
 	AdminAntiScanMaterialList(ctx context.Context, in *sysin.AntiScanMaterialListInp) (list []*sysin.AntiScanMaterialModel, err error)
 	AdminAntiScanMaterialUpload(ctx context.Context, in *sysin.AntiScanMaterialUploadInp, file *ghttp.UploadFile) (res *sysin.AntiScanMaterialModel, err error)

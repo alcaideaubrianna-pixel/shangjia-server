@@ -130,6 +130,9 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	if err != nil {
 		return nil, err
 	}
+	if err = s.syncProfileNoteIndex(ctx, profileId); err != nil {
+		return nil, err
+	}
 	service.SysContent().ClearHomeProfileCardsCache(ctx)
 	profile, err := s.profileView(ctx, profileId, tenantId, 0)
 	if err != nil {
@@ -166,6 +169,9 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 		return gerror.Wrap(err, "删除资料失败")
 	}
 	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).WhereIn("profile_id", ids).Data(g.Map{"deleted_by": contexts.GetUserId(ctx), "deleted_at": gtime.Now()}).Update()
+	if err = s.deleteProfileNoteIndex(ctx, ids); err != nil {
+		return err
+	}
 	service.SysContent().ClearHomeProfileCardsCache(ctx)
 	return nil
 }
@@ -229,6 +235,9 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 		"updated_at": gtime.Now(),
 	}
 	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).WhereIn("profile_id", ids).Data(taskData).Update()
+	if err = s.deleteProfileNoteIndex(ctx, ids); err != nil {
+		return nil, err
+	}
 	profileAccountIds, err := s.profileAccountIdsByIds(ctx, ids, tenantId)
 	if err != nil {
 		return nil, err
@@ -281,7 +290,7 @@ func (s *sSysPublish) submitProfilesByIds(ctx context.Context, ids []int64, tena
 		return nil
 	}
 	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("id").
+		Fields("id,profile_id").
 		WhereIn("profile_id", ids).
 		WhereNull("deleted_at")
 	if tenantId > 0 {
@@ -291,7 +300,8 @@ func (s *sSysPublish) submitProfilesByIds(ctx context.Context, ids []int64, tena
 		mod = mod.Where("account_id", accountId)
 	}
 	var rows []struct {
-		Id int64 `orm:"id"`
+		Id        int64 `orm:"id"`
+		ProfileId int64 `orm:"profile_id"`
 	}
 	if err := mod.Scan(&rows); err != nil {
 		return gerror.Wrap(err, "读取资料上架任务失败")
@@ -304,6 +314,9 @@ func (s *sSysPublish) submitProfilesByIds(ctx context.Context, ids []int64, tena
 			continue
 		}
 		if err := s.submitTaskByTenant(ctx, row.Id, tenantId, contexts.GetUserId(ctx)); err != nil {
+			return err
+		}
+		if err := s.syncProfileNoteIndex(ctx, row.ProfileId); err != nil {
 			return err
 		}
 	}

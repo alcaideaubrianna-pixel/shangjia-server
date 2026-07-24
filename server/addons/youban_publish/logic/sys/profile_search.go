@@ -4,11 +4,13 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 	"hotgo/internal/model/input/form"
 )
 
@@ -22,12 +24,12 @@ func (s *sSysPublish) searchProfilePage(ctx context.Context, base *gdb.Model, in
 	return s.scanProfilePage(mod, in, fields, countErrMessage, listErrMessage)
 }
 
-func (s *sSysPublish) searchDistinctProfilePage(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string) ([]*sysin.ProfileModel, int, error) {
+func (s *sSysPublish) searchDistinctProfilePage(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string, countCacheKeys ...string) ([]*sysin.ProfileModel, int, error) {
 	if in == nil {
 		in = &sysin.ProfileListInp{}
 	}
 	mod := s.profileSearchModel(ctx, base, in)
-	return s.scanDistinctProfilePage(mod, in, fields, countErrMessage, listErrMessage)
+	return s.scanDistinctProfilePage(ctx, mod, in, fields, countErrMessage, listErrMessage, countCacheKeys...)
 }
 
 func (s *sSysPublish) profileSearchModel(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
@@ -73,20 +75,41 @@ func (s *sSysPublish) scanProfilePage(mod *gdb.Model, in *sysin.ProfileListInp, 
 	return list, totalCount, err
 }
 
-func (s *sSysPublish) scanDistinctProfilePage(mod *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string) ([]*sysin.ProfileModel, int, error) {
+func (s *sSysPublish) scanDistinctProfilePage(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string, countCacheKeys ...string) ([]*sysin.ProfileModel, int, error) {
 	var row struct {
 		Total int `orm:"total"`
 	}
-	if err := mod.Clone().Fields("COUNT(DISTINCT p.id) AS total").Scan(&row); err != nil {
-		return nil, 0, gerror.Wrap(err, countErrMessage)
+	countStartedAt := time.Now()
+	countCacheKey := ""
+	if len(countCacheKeys) > 0 {
+		countCacheKey = countCacheKeys[0]
 	}
+	countCached := false
+	if countCacheKey != "" {
+		if cached, err := cache.Instance().Get(ctx, countCacheKey); err == nil && !cached.IsNil() {
+			if scanErr := cached.Scan(&row.Total); scanErr == nil {
+				countCached = true
+			}
+		}
+	}
+	if !countCached {
+		if err := mod.Clone().Fields("COUNT(DISTINCT p.id) AS total").Scan(&row); err != nil {
+			return nil, 0, gerror.Wrap(err, countErrMessage)
+		}
+		if countCacheKey != "" {
+			_ = cache.Instance().Set(ctx, countCacheKey, row.Total, adminNoteCountCacheTTL)
+		}
+	}
+	logSlowAdminNoteListStage(ctx, "count", countStartedAt, row.Total, 0)
 	if row.Total == 0 {
 		return []*sysin.ProfileModel{}, 0, nil
 	}
 	page, perPage, _ := form.CalPage(in.Page, in.PerPage)
 	in.Page = page
 	in.PerPage = perPage
+	pageStartedAt := time.Now()
 	list, err := scanProfileOffsetPage(mod, fields, (page-1)*perPage, perPage, listErrMessage)
+	logSlowAdminNoteListStage(ctx, "page", pageStartedAt, len(list), perPage)
 	return list, row.Total, err
 }
 

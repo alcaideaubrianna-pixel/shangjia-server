@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -237,6 +238,7 @@ func (s *sSysPublish) AdminProfileStatus(ctx context.Context, in *sysin.ProfileS
 }
 
 func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) (list []*sysin.AdminNoteListModel, totalCount int, err error) {
+	startedAt := time.Now()
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -248,13 +250,26 @@ func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) 
 	if err != nil {
 		return nil, 0, err
 	}
+	logSlowAdminNoteListStage(ctx, "scope", startedAt, len(scope.AccountIds), len(scope.TenantIds))
+	stageStartedAt := time.Now()
 	if err = s.ensureAdminProfileScopeTenants(ctx, scope); err != nil {
 		return nil, 0, err
 	}
+	logSlowAdminNoteListStage(ctx, "scope_tenants", stageStartedAt, len(scope.AccountIds), len(scope.TenantIds))
 	if scope.Strict && len(scope.AccountIds) == 0 {
 		return []*sysin.AdminNoteListModel{}, 0, nil
 	}
-	return s.adminNoteList(ctx, &in.ProfileListInp, scope.TenantId, scope.TenantIds, scope.AccountIds, account)
+	list, totalCount, err = s.adminNoteList(ctx, &in.ProfileListInp, scope.TenantId, scope.TenantIds, scope.AccountIds, account)
+	logSlowAdminNoteListStage(ctx, "total", startedAt, len(list), totalCount)
+	return list, totalCount, err
+}
+
+func logSlowAdminNoteListStage(ctx context.Context, stage string, startedAt time.Time, first int, second int) {
+	duration := time.Since(startedAt)
+	if duration < 100*time.Millisecond {
+		return
+	}
+	g.Log().Infof(ctx, "上架笔记列表慢阶段 stage:%s duration_ms:%d first:%d second:%d", stage, duration.Milliseconds(), first, second)
 }
 
 func (s *sSysPublish) AdminTagList(ctx context.Context, in *sysin.TagListInp) (list []*sysin.TagModel, totalCount int, err error) {

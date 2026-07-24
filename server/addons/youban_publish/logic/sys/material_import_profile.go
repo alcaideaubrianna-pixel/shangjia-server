@@ -58,6 +58,9 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 	if err = s.ensureMaterialImportTelegramIndex(ctx, task, group, saved.Id, saved.TaskId); err != nil {
 		return 0, 0, err
 	}
+	if err = s.syncProfileNoteIndex(ctx, saved.Id); err != nil {
+		return 0, 0, err
+	}
 	_ = s.appendMaterialImportPublishLog(ctx, task, saved.Id, "imported", fmt.Sprintf("资料导入完成：%s", strings.TrimSpace(title)))
 	return saved.Id, saved.TaskId, nil
 }

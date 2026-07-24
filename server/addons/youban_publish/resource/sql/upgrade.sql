@@ -31,6 +31,38 @@ ALTER TABLE `hg_youban_publish_tg_channel`
 ALTER TABLE `hg_youban_publish_account`
   MODIFY COLUMN `public_follow_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否公开关注';
 
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_note_index` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0',
+  `task_id` bigint(20) NOT NULL DEFAULT '0',
+  `uuid` varchar(128) NOT NULL DEFAULT '',
+  `profile_no` varchar(64) NOT NULL DEFAULT '',
+  `title` varchar(255) NOT NULL DEFAULT '',
+  `summary` text,
+  `plain_text` text,
+  `tag` text,
+  `province` varchar(64) NOT NULL DEFAULT '',
+  `city` varchar(64) NOT NULL DEFAULT '',
+  `status` smallint NOT NULL DEFAULT '1',
+  `visibility` varchar(32) NOT NULL DEFAULT '',
+  `review_status` varchar(32) NOT NULL DEFAULT '',
+  `task_status` varchar(32) NOT NULL DEFAULT '',
+  `cover_media_id` bigint(20) NOT NULL DEFAULT '0',
+  `published_at` datetime DEFAULT NULL,
+  `source_updated_at` datetime DEFAULT NULL,
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_note_index_scope_profile` (`tenant_id`,`account_id`,`profile_id`),
+  KEY `idx_ybp_note_index_tenant_updated` (`tenant_id`,`updated_at`,`id`),
+  KEY `idx_ybp_note_index_account_updated` (`account_id`,`updated_at`,`id`),
+  KEY `idx_ybp_note_index_profile` (`profile_id`),
+  KEY `idx_ybp_note_index_title` (`title`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='资料列表读模型';
+
 INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
 SELECT 'youban_publish', 'collect', '采集总开关', 'int', 'collectEnabled', '1', '1', 10, '是否启用采集能力', 0, 1, NOW(), NOW()
 WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_addons_config` WHERE `addon_name`='youban_publish' AND `key`='collectEnabled');

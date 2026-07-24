@@ -121,6 +121,9 @@ func (s *sSysPublish) markTaskPublishedAfterTelegram(ctx context.Context, taskId
 		if err != nil {
 			return false, gerror.Wrap(err, "同步资料上架状态失败")
 		}
+		if err = s.syncProfileNoteIndex(ctx, profileId); err != nil {
+			return false, err
+		}
 		iservice.SysContent().ClearHomeProfileCardsCache(ctx)
 	}
 	if err = s.collectFollowProfilePublished(ctx, task); err != nil {
