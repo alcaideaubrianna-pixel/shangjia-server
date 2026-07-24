@@ -162,7 +162,7 @@ func (s *sSysPublish) MyProfileImageSearch(ctx context.Context, in *sysin.Profil
 	}
 	in.TenantId = account.TenantId
 	in.AccountId = account.Id
-	return s.profileImageSearch(ctx, in, file, sysin.ProfilePermissionCreator)
+	return s.profileImageSearchByAccountIds(ctx, in, file, []int64{account.Id}, account)
 }
 
 func (s *sSysPublish) AdminProfileImageSearch(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile) (list []*sysin.NoteModel, totalCount int, err error) {
@@ -177,40 +177,16 @@ func (s *sSysPublish) AdminProfileImageSearch(ctx context.Context, in *sysin.Pro
 	if err != nil {
 		return nil, 0, err
 	}
-	if scope.Strict && len(scope.AccountIds) == 0 {
+	if len(scope.AccountIds) == 0 {
 		return []*sysin.NoteModel{}, 0, nil
 	}
-	if len(scope.AccountIds) > 0 {
-		in.TenantId = scope.TenantId
-		return s.profileImageSearchByAccountIds(ctx, in, file, scope.AccountIds, account)
-	}
-	in.TenantId = scope.TenantId
-	in.AccountId = 0
-	return s.profileImageSearch(ctx, in, file, sysin.ProfilePermissionAdmin)
-}
-
-func (s *sSysPublish) profileImageSearch(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile, permission string) (list []*sysin.NoteModel, totalCount int, err error) {
-	normalizeProfileImageSearchInput(in)
-	queryHash, err := uploadImagePHashValue(file)
-	if err != nil {
+	if err = s.ensureAdminProfileScopeTenants(ctx, scope); err != nil {
 		return nil, 0, err
 	}
-	profileIds, totalCount, err := s.findSimilarProfileIdsByPHash(ctx, queryHash, in, nil)
-	if err != nil {
-		return nil, 0, err
-	}
-	if len(profileIds) == 0 {
-		return []*sysin.NoteModel{}, totalCount, nil
-	}
-	filterAccountIds := []int64{}
-	if in.AccountId > 0 {
-		filterAccountIds = []int64{in.AccountId}
-	}
-	list, err = s.profileImageSearchNotesByProfileIds(ctx, profileIds, in.TenantId, filterAccountIds, nil, permission)
-	if err != nil {
-		return nil, 0, err
-	}
-	return list, totalCount, nil
+	// The account list is already permission-scoped. Keep tenant unset here so
+	// followed accounts from another tenant are not discarded by the result query.
+	in.TenantId = 0
+	return s.profileImageSearchByAccountIds(ctx, in, file, scope.AccountIds, account)
 }
 
 func (s *sSysPublish) profileImageSearchByAccountIds(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile, accountIds []int64, viewer *sysin.AccountModel) (list []*sysin.NoteModel, totalCount int, err error) {

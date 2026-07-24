@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -243,6 +242,16 @@ func (s *sSysPublish) visibleSourceMediaMap(ctx context.Context, scope *mediaSim
 }
 
 func (s *sSysPublish) mediaSimilarVisibleScope(ctx context.Context, account *sysin.AccountModel) (*mediaSimilarScope, error) {
+	if account == nil || account.Id <= 0 || account.TenantId <= 0 {
+		return nil, gerror.New("当前账号无相似查询权限")
+	}
+	cacheKey := mediaSimilarScopeCacheKey(ctx, account.TenantId, account.Id)
+	if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
+		var cached mediaSimilarScope
+		if scanErr := value.Scan(&cached); scanErr == nil {
+			return &cached, nil
+		}
+	}
 	var ids []int64
 	if account.AccountType != "admin" {
 		ids = []int64{account.Id}
@@ -264,11 +273,13 @@ func (s *sSysPublish) mediaSimilarVisibleScope(ctx context.Context, account *sys
 	if err != nil {
 		return nil, err
 	}
-	return &mediaSimilarScope{
+	scope := &mediaSimilarScope{
 		AccountIds: ids,
-		CacheKey:   mediaSimilarScopeCacheKey(account.TenantId, ids),
+		CacheKey:   mediaSimilarScopeCacheKey(ctx, account.TenantId, account.Id),
 		Partitions: partitions,
-	}, nil
+	}
+	_ = cache.Instance().Set(ctx, cacheKey, scope, accountVisibilityCacheTTL)
+	return scope, nil
 }
 
 func (s *sSysPublish) mediaSimilarScopePartitions(ctx context.Context, accountIds []int64) ([]mediaPHashBucketScopePart, error) {
@@ -424,15 +435,13 @@ func mediaSimilarResultCacheKey(scope *mediaSimilarScope, source *mediaSimilarSo
 	)
 }
 
-func mediaSimilarScopeCacheKey(tenantId int64, accountIds []int64) string {
-	ids := uniqueIds(accountIds)
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	parts := make([]string, 0, len(ids)+1)
-	parts = append(parts, strconv.FormatInt(tenantId, 10))
-	for _, id := range ids {
-		parts = append(parts, strconv.FormatInt(id, 10))
-	}
-	return mediaSimilarHashKey(strings.Join(parts, ","))
+func mediaSimilarScopeCacheKey(ctx context.Context, tenantId int64, accountId int64) string {
+	return fmt.Sprintf(
+		"youban_publish:media_similar:scope:%d:%d:%s",
+		tenantId,
+		accountId,
+		accountVisibilityVersionValue(ctx, tenantId),
+	)
 }
 
 func mediaSimilarHashKey(value string) string {

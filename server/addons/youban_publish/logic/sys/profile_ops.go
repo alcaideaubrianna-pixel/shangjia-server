@@ -163,9 +163,17 @@ func (s *sSysPublish) AdminProfileList(ctx context.Context, in *sysin.ProfileLis
 	if in == nil {
 		in = &sysin.ProfileListInp{}
 	}
-	in.TenantId = account.TenantId
-	list, totalCount, err = s.profileList(ctx, in)
-	markProfilesPermission(list, sysin.ProfilePermissionAdmin)
+	scope, err := s.adminProfileVisibleScope(ctx, account, in)
+	if err != nil {
+		return nil, 0, err
+	}
+	if scope.Strict && len(scope.AccountIds) == 0 {
+		return []*sysin.ProfileModel{}, 0, nil
+	}
+	list, totalCount, err = s.profileListByAccountIds(ctx, in, 0, scope.AccountIds)
+	for _, item := range list {
+		markProfilePermission(item, profilePermissionForViewer(account, item))
+	}
 	return
 }
 

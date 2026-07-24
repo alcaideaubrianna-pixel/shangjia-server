@@ -314,7 +314,7 @@ WITH source_bucket(source_media_id, media_type, bucket_pos, bucket_value) AS (
     SELECT sb.source_media_id, b.media_id, b.profile_id, b.account_id,
            b.tenant_id, b.media_type, b.hash_value, COUNT(*) AS bucket_hits
     FROM source_bucket sb
-    JOIN %s b ON b.media_type = sb.media_type
+	JOIN %s b ON %s
         AND b.bucket_pos = sb.bucket_pos
         AND b.bucket_value = sb.bucket_value
     WHERE %s
@@ -342,7 +342,7 @@ AND EXISTS (
       AND t.deleted_at IS NULL
 )
 ORDER BY source_media_id, bucket_hits DESC
-`, strings.Join(values, ","), publishMediaPHashBucketTable, scopeSQL, mediaPHashBucketMaxCandidates)
+	`, strings.Join(values, ","), publishMediaPHashBucketTable, mediaPHashBucketJoinCondition(), scopeSQL, mediaPHashBucketMaxCandidates)
 	var rows []struct {
 		SourceMediaId int64  `json:"sourceMediaId"`
 		MediaId       int64  `json:"mediaId" orm:"media_id"`
@@ -375,8 +375,9 @@ func mediaPHashBucketBranchSQL(bucketPos int, bucketValue string, scopes []media
 	}
 	args := []any{bucketPos, bucketValue}
 	if mediaType != "" {
-		conds = append(conds, "b.media_type = ?")
-		args = append(args, mediaType)
+		condition, conditionArgs := mediaPHashBucketMediaTypeCondition("b.media_type", mediaType)
+		conds = append(conds, condition)
+		args = append(args, conditionArgs...)
 	}
 	if scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("b", scopes); scopeSQL != "" {
 		conds = append(conds, "("+scopeSQL+")")
@@ -400,6 +401,18 @@ func mediaPHashBucketBranchSQL(bucketPos int, bucketValue string, scopes []media
 		strings.Join(conds, " AND "),
 	)
 	return sql, args
+}
+
+func mediaPHashBucketMediaTypeCondition(field string, mediaType string) (string, []any) {
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	if mediaType == "image" || mediaType == "video" {
+		return field + " IN ('image', 'video')", nil
+	}
+	return field + " = ?", []any{mediaType}
+}
+
+func mediaPHashBucketJoinCondition() string {
+	return "b.media_type IN ('image', 'video') AND sb.media_type IN ('image', 'video') AND b.bucket_pos = sb.bucket_pos AND b.bucket_value = sb.bucket_value"
 }
 
 func mediaPHashBucketScopeSQL(alias string, scopes []mediaPHashBucketScopePart) (string, []any) {

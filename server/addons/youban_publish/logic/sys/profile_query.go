@@ -21,6 +21,26 @@ func (s *sSysPublish) profileList(ctx context.Context, in *sysin.ProfileListInp)
 	if err != nil {
 		return nil, 0, err
 	}
+	return s.profileListByModel(ctx, base, in)
+}
+
+func (s *sSysPublish) profileListByAccountIds(ctx context.Context, in *sysin.ProfileListInp, tenantId int64, accountIds []int64) (list []*sysin.ProfileModel, totalCount int, err error) {
+	if err = s.ensureLegacyProfileNosOnce(ctx); err != nil {
+		return nil, 0, err
+	}
+	accountIds = uniqueIds(accountIds)
+	if len(accountIds) == 0 {
+		return []*sysin.ProfileModel{}, 0, nil
+	}
+	base, err := s.profileBaseModel(ctx, tenantId, 0)
+	if err != nil {
+		return nil, 0, err
+	}
+	base = base.WhereIn("t.account_id", accountIds)
+	return s.profileListByModel(ctx, base, in)
+}
+
+func (s *sSysPublish) profileListByModel(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp) (list []*sysin.ProfileModel, totalCount int, err error) {
 	list, totalCount, err = s.searchProfilePage(ctx, base, in, profileListFields(), "统计资料失败", "获取资料列表失败")
 	if err != nil {
 		return nil, 0, err
