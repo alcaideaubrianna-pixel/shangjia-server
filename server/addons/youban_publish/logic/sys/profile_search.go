@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"regexp"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -11,7 +12,7 @@ import (
 	"hotgo/internal/model/input/form"
 )
 
-var profileSearchProfileNoRegexp = botProfileNoRegexp
+var profileSearchProfileNoRegexp = regexp.MustCompile(`^[A-Z][A-Z0-9]{4,}$`)
 
 func (s *sSysPublish) searchProfilePage(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string) ([]*sysin.ProfileModel, int, error) {
 	if in == nil {
@@ -110,7 +111,15 @@ func scanProfileOffsetPage(mod *gdb.Model, fields string, offset int, limit int,
 
 func normalizeProfileNoSearchKeyword(keyword string) (string, bool) {
 	profileNo := normalizeBotProfileNo(keyword)
-	return profileNo, profileSearchProfileNoRegexp.MatchString(profileNo)
+	if !profileSearchProfileNoRegexp.MatchString(profileNo) {
+		return profileNo, false
+	}
+	for _, char := range profileNo {
+		if char >= '0' && char <= '9' {
+			return profileNo, true
+		}
+	}
+	return profileNo, false
 }
 
 func splitProfileSearchTerms(keyword string) []string {
