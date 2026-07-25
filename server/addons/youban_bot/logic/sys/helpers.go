@@ -58,6 +58,26 @@ func (s *sSysBot) bindingByTelegram(ctx context.Context, app, telegramUserId str
 	return row, nil
 }
 
+func (s *sSysBot) adminAccessByTelegram(ctx context.Context, telegramUserId string) (bool, error) {
+	if bind, err := s.bindingByTelegram(ctx, sysin.BotAppAdmin, telegramUserId); err != nil {
+		return false, err
+	} else if bind != nil && bind.AccountId > 0 {
+		return true, nil
+	}
+	bind, err := s.bindingByTelegram(ctx, sysin.BotAppApi, telegramUserId)
+	if err != nil || bind == nil || bind.AccountId <= 0 {
+		return false, err
+	}
+	var account struct {
+		AccountType string `json:"account_type"`
+	}
+	if err = g.DB().Model(publishAccountTable).Safe().Ctx(ctx).
+		Fields("account_type").Where("id", bind.AccountId).Where("status", 1).WhereNull("deleted_at").Scan(&account); err != nil {
+		return false, gerror.Wrap(err, "读取资料账号权限失败")
+	}
+	return account.AccountType == publishsysin.PublishAccountTypeAdmin, nil
+}
+
 func (s *sSysBot) loginBoundAccount(ctx context.Context, app string, accountId int64) (*botLoginResult, error) {
 	if app == sysin.BotAppAdmin {
 		return s.loginAdminAccount(ctx, accountId)
@@ -723,12 +743,12 @@ func (s *sSysBot) featureVisibleForTelegramUser(ctx context.Context, feature bot
 		return false
 	}
 	if key == (adminFeature{}).Key() {
-		bind, err := s.bindingByTelegram(ctx, sysin.BotAppAdmin, telegramUserId)
+		allowed, err := s.adminAccessByTelegram(ctx, telegramUserId)
 		if err != nil {
 			g.Log().Warningf(ctx, "判断管理后台菜单可见失败 telegramUserId:%s err:%+v", telegramUserId, err)
 			return false
 		}
-		return bind != nil && bind.AccountId > 0
+		return allowed
 	}
 	if key == (profileFeature{}).Key() {
 		bind, err := s.bindingByTelegram(ctx, sysin.BotAppApi, telegramUserId)

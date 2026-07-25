@@ -113,6 +113,7 @@ func init() {
 	registerBotFeature(startFeature{})
 	registerBotFeature(loginFeature{})
 	registerBotFeature(bindFeature{})
+	registerBotFeature(infoFeature{})
 	registerBotFeature(notifyFeature{})
 	registerBotFeature(superNotifyFeature{})
 	registerBotFeature(contactFeature{})

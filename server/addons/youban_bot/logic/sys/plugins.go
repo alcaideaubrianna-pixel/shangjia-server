@@ -65,6 +65,54 @@ func (bindFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFeat
 	return true, bot.consumeCode(ctx, featureCtx.BotId, featureCtx.Msg, code)
 }
 
+type infoFeature struct{}
+
+func (infoFeature) Key() string                                { return "info" }
+func (infoFeature) Command() string                            { return "info" }
+func (infoFeature) Description() string                        { return "查看当前聊天信息" }
+func (infoFeature) ConfigSchema() []*sysin.FeatureConfigSchema { return nil }
+func (infoFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFeatureContext) (bool, error) {
+	if featureCtx.Msg == nil || featureCtx.Msg.Chat.Type != "private" || featureCtx.Msg.From == nil {
+		return true, nil
+	}
+	user := featureCtx.Msg.From
+	username := "未设置"
+	if strings.TrimSpace(user.Username) != "" {
+		username = "@" + user.Username
+	}
+	nickname := strings.TrimSpace(strings.TrimSpace(user.FirstName) + " " + strings.TrimSpace(user.LastName))
+	if nickname == "" {
+		nickname = "未设置"
+	}
+	text := fmt.Sprintf("当前为私聊\nChat ID：%d\nUser ID：%d\n用户名：%s\n昵称：%s", featureCtx.Msg.Chat.ID, user.ID, username, nickname)
+	telegramUserId := fmt.Sprintf("%d", user.ID)
+	for _, app := range []string{sysin.BotAppAdmin, sysin.BotAppApi} {
+		bind, err := bot.bindingByTelegram(ctx, app, telegramUserId)
+		if err != nil || bind == nil || bind.AccountId <= 0 {
+			continue
+		}
+		account, accountErr := bot.loginBoundAccount(ctx, app, bind.AccountId)
+		if accountErr != nil || account == nil {
+			continue
+		}
+		label := "资料账号"
+		if app == sysin.BotAppAdmin {
+			label = "后台账号"
+		}
+		text += fmt.Sprintf("\n%s：%s", label, firstInfoValue(account.Username, account.Nickname))
+	}
+	return true, bot.reply(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), text)
+}
+
+func firstInfoValue(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return "未设置"
+}
+
 type notifyFeature struct{}
 
 func (notifyFeature) Key() string         { return "notify" }
@@ -112,11 +160,14 @@ func (adminFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFea
 		return true, nil
 	}
 	telegramUserId := fmt.Sprintf("%d", featureCtx.Msg.From.ID)
-	bind, err := bot.bindingByTelegram(ctx, "admin", telegramUserId)
+	allowed, err := bot.adminAccessByTelegram(ctx, telegramUserId)
 	if err != nil {
 		return true, err
 	}
-	if bind == nil || bind.AccountId <= 0 {
+	if !allowed {
+		if featureCtx.Msg.Chat.Type != "private" {
+			return true, bot.reply(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), "无权限")
+		}
 		return true, bot.reply(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), bot.featureConfigValue(ctx, adminFeature{}.Key(), "unboundText"))
 	}
 	url := strings.TrimSpace(bot.featureConfigValue(ctx, adminFeature{}.Key(), "adminUrl"))

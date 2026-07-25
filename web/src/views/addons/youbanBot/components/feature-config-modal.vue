@@ -2,12 +2,13 @@
   <n-modal
     v-model:show="visible"
     preset="dialog"
+    class="feature-config-modal"
     title="插件配置"
     positive-text="保存"
     negative-text="取消"
     @positive-click="emit('save')"
   >
-    <n-form :model="form" label-placement="left" label-width="100">
+    <n-form :model="form" label-placement="left" label-width="110" class="feature-config-form">
       <n-form-item label="插件 Key"
         ><n-input v-model:value="form.featureKey" disabled
       /></n-form-item>
@@ -46,20 +47,20 @@
           v-model:value="form.configValues[item.field]"
           :type="item.component === 'textarea' ? 'textarea' : 'text'"
           :placeholder="item.placeholder"
-          :autosize="{ minRows: 3, maxRows: 8 }"
+          :autosize="item.component === 'textarea' ? { minRows: 3, maxRows: 8 } : undefined"
         />
       </n-form-item>
       <n-form-item label="配置 JSON"
         ><n-input
           v-model:value="form.configJson"
           type="textarea"
-          :autosize="{ minRows: 3, maxRows: 6 }"
+          :autosize="{ minRows: 4, maxRows: 12 }"
       /></n-form-item>
       <n-form-item label="说明"
         ><n-input
           v-model:value="form.description"
           type="textarea"
-          :autosize="{ minRows: 2, maxRows: 4 }"
+          :autosize="{ minRows: 2, maxRows: 6 }"
       /></n-form-item>
     </n-form>
   </n-modal>
@@ -94,6 +95,24 @@
     />
   </n-modal>
 </template>
+
+<style scoped>
+.feature-config-modal :deep(.n-dialog) {
+  width: 720px;
+  max-width: calc(100vw - 32px);
+}
+
+.feature-config-form :deep(.n-form-item-blank),
+.feature-config-form :deep(.n-form-item-blank > *) {
+  width: 100%;
+}
+
+.feature-config-form :deep(.n-input),
+.feature-config-form :deep(.n-input-number),
+.feature-config-form :deep(.n-select) {
+  width: 100%;
+}
+</style>
 
 <script setup lang="ts">
   import { computed, onMounted, ref } from 'vue';
