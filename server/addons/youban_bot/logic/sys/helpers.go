@@ -299,6 +299,10 @@ func telegramHTTPClient(proxyUrl string) (*http.Client, error) {
 }
 
 func (s *sSysBot) reply(ctx context.Context, botId int64, chatId string, text string) error {
+	return s.replyWithMarkup(ctx, botId, chatId, text, s.replyKeyboard(ctx))
+}
+
+func (s *sSysBot) replyWithMarkup(ctx context.Context, botId int64, chatId string, text string, replyMarkup models.ReplyMarkup) error {
 	tokenText := ""
 	if botId > 0 {
 		if row, err := s.botById(ctx, botId); err == nil && row != nil {
@@ -313,7 +317,7 @@ func (s *sSysBot) reply(ctx context.Context, botId int64, chatId string, text st
 	if tokenText == "" {
 		return nil
 	}
-	_, err := s.sendMessageWithMarkup(ctx, tokenText, chatId, text, "HTML", false, s.replyKeyboard(ctx))
+	_, err := s.sendMessageWithMarkup(ctx, tokenText, chatId, text, "HTML", false, replyMarkup)
 	if err != nil && botId > 0 && shouldMarkBotOffline(err) {
 		_ = s.markBotOffline(ctx, botId, err)
 	}
