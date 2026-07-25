@@ -77,10 +77,25 @@ func filterProfileOptionChannels(channels []*sysin.ChannelModel) []*sysin.Channe
 	return list
 }
 
-func (s *sSysPublish) MyProfileSave(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error) {
+func (s *sSysPublish) MyProfileCreate(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if in == nil {
+		return nil, gerror.New("资料信息不能为空")
+	}
+	in.Id, in.Uuid, in.TaskId = 0, "", 0
+	return s.saveProfile(ctx, in, account.TenantId, account.Id)
+}
+
+func (s *sSysPublish) MyProfileEdit(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil || (in.Id <= 0 && normalizeProfileUUID(in.Uuid) == "") {
+		return nil, gerror.New("资料UUID不能为空")
 	}
 	return s.saveProfile(ctx, in, account.TenantId, account.Id)
 }
@@ -208,10 +223,25 @@ func (s *sSysPublish) AdminProfileView(ctx context.Context, in *sysin.ProfileVie
 	return &sysin.ProfileViewModel{Profile: profile, Media: media}, nil
 }
 
-func (s *sSysPublish) AdminProfileSave(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error) {
+func (s *sSysPublish) AdminProfileCreate(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error) {
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if in == nil {
+		return nil, gerror.New("资料信息不能为空")
+	}
+	in.Id, in.Uuid, in.TaskId = 0, "", 0
+	return s.saveProfile(ctx, in, account.TenantId, account.Id)
+}
+
+func (s *sSysPublish) AdminProfileEdit(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil || (in.Id <= 0 && normalizeProfileUUID(in.Uuid) == "") {
+		return nil, gerror.New("资料UUID不能为空")
 	}
 	if in != nil && in.Id <= 0 && normalizeProfileUUID(in.Uuid) != "" {
 		if in.Id, err = s.resolveProfileId(ctx, 0, in.Uuid, account.TenantId, 0); err != nil {
@@ -342,7 +372,7 @@ func (s *sSysPublish) ServerProfileView(ctx context.Context, in *sysin.ProfileVi
 	return &sysin.ProfileViewModel{Profile: profile, Media: media}, nil
 }
 
-func (s *sSysPublish) ServerProfileSave(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error) {
+func (s *sSysPublish) ServerProfileEdit(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error) {
 	if in == nil || in.Id <= 0 {
 		return nil, gerror.New("资料ID不能为空")
 	}

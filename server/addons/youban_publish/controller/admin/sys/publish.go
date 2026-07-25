@@ -299,12 +299,12 @@ func (c *cPublishServer) ProfileView(ctx context.Context, req *publish.ProfileVi
 	return
 }
 
-func (c *cPublishServer) ProfileSave(ctx context.Context, req *publish.ProfileSaveReq) (res *publish.ProfileSaveRes, err error) {
-	data, err := service.SysPublish().ServerProfileSave(ctx, &req.ProfileSaveInp)
+func (c *cPublishServer) ProfileEdit(ctx context.Context, req *publish.ProfileEditReq) (res *publish.ProfileEditRes, err error) {
+	data, err := service.SysPublish().ServerProfileEdit(ctx, &req.ProfileSaveInp)
 	if err != nil {
 		return nil, err
 	}
-	res = &publish.ProfileSaveRes{}
+	res = &publish.ProfileEditRes{}
 	if data != nil {
 		res.Id = data.Id
 		res.Uuid = data.Uuid

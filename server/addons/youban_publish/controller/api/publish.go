@@ -588,20 +588,11 @@ func (c *cPublishAdmin) UploadMedia(ctx context.Context, req *publish.AdminUploa
 	return
 }
 
-func (c *cPublishAdmin) SortMedia(ctx context.Context, req *publish.AdminSortMediaReq) (res *publish.AdminSortMediaRes, err error) {
-	if err = service.SysPublish().AdminMediaSort(ctx, &req.MediaSortInp); err != nil {
+func (c *cPublishAdmin) ReconcileMedia(ctx context.Context, req *publish.AdminReconcileMediaReq) (res *publish.AdminReconcileMediaRes, err error) {
+	if err = service.SysPublish().AdminMediaReconcile(ctx, &req.MediaReconcileInp); err != nil {
 		return nil, err
 	}
-	res = &publish.AdminSortMediaRes{}
-	return
-}
-
-func (c *cPublishAdmin) DeleteMedia(ctx context.Context, req *publish.AdminDeleteMediaReq) (res *publish.AdminDeleteMediaRes, err error) {
-	if err = service.SysPublish().AdminMediaDelete(ctx, &req.MediaDeleteInp); err != nil {
-		return nil, err
-	}
-	res = &publish.AdminDeleteMediaRes{}
-	return
+	return &publish.AdminReconcileMediaRes{}, nil
 }
 
 func (c *cPublishAdmin) ProfileList(ctx context.Context, req *publish.AdminProfileListReq) (res *publish.AdminProfileListRes, err error) {
@@ -627,16 +618,28 @@ func (c *cPublishAdmin) ProfileView(ctx context.Context, req *publish.AdminProfi
 	return
 }
 
-func (c *cPublishAdmin) ProfileSave(ctx context.Context, req *publish.AdminProfileSaveReq) (res *publish.AdminProfileSaveRes, err error) {
-	data, err := service.SysPublish().AdminProfileSave(ctx, &req.ProfileSaveInp)
+func (c *cPublishAdmin) ProfileEdit(ctx context.Context, req *publish.AdminProfileEditReq) (res *publish.AdminProfileEditRes, err error) {
+	data, err := service.SysPublish().AdminProfileEdit(ctx, &req.ProfileSaveInp)
 	if err != nil {
 		return nil, err
 	}
-	res = &publish.AdminProfileSaveRes{}
+	res = &publish.AdminProfileEditRes{}
 	if data != nil {
 		res.Id = data.Id
 		res.Uuid = data.Uuid
 		res.TaskId = data.TaskId
+	}
+	return
+}
+
+func (c *cPublishAdmin) ProfileCreate(ctx context.Context, req *publish.AdminProfileCreateReq) (res *publish.AdminProfileCreateRes, err error) {
+	data, err := service.SysPublish().AdminProfileCreate(ctx, &req.ProfileSaveInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminProfileCreateRes{}
+	if data != nil {
+		res.Id, res.Uuid, res.TaskId = data.Id, data.Uuid, data.TaskId
 	}
 	return
 }
@@ -923,20 +926,11 @@ func (c *cPublish) MediaList(ctx context.Context, req *publish.MediaListReq) (re
 	return
 }
 
-func (c *cPublish) DeleteMedia(ctx context.Context, req *publish.DeleteMediaReq) (res *publish.DeleteMediaRes, err error) {
-	if err = service.SysPublish().MyMediaDelete(ctx, &req.MediaDeleteInp); err != nil {
+func (c *cPublish) ReconcileMedia(ctx context.Context, req *publish.ReconcileMediaReq) (res *publish.ReconcileMediaRes, err error) {
+	if err = service.SysPublish().MyMediaReconcile(ctx, &req.MediaReconcileInp); err != nil {
 		return nil, err
 	}
-	res = &publish.DeleteMediaRes{}
-	return
-}
-
-func (c *cPublish) SortMedia(ctx context.Context, req *publish.SortMediaReq) (res *publish.SortMediaRes, err error) {
-	if err = service.SysPublish().MyMediaSort(ctx, &req.MediaSortInp); err != nil {
-		return nil, err
-	}
-	res = &publish.SortMediaRes{}
-	return
+	return &publish.ReconcileMediaRes{}, nil
 }
 
 func (c *cPublish) MyProfileList(ctx context.Context, req *publish.MyProfileListReq) (res *publish.MyProfileListRes, err error) {
@@ -985,16 +979,28 @@ func (c *cPublish) MyProfileOptions(ctx context.Context, req *publish.MyProfileO
 	return
 }
 
-func (c *cPublish) MyProfileSave(ctx context.Context, req *publish.MyProfileSaveReq) (res *publish.MyProfileSaveRes, err error) {
-	data, err := service.SysPublish().MyProfileSave(ctx, &req.ProfileSaveInp)
+func (c *cPublish) MyProfileEdit(ctx context.Context, req *publish.MyProfileEditReq) (res *publish.MyProfileEditRes, err error) {
+	data, err := service.SysPublish().MyProfileEdit(ctx, &req.ProfileSaveInp)
 	if err != nil {
 		return nil, err
 	}
-	res = &publish.MyProfileSaveRes{}
+	res = &publish.MyProfileEditRes{}
 	if data != nil {
 		res.Id = data.Id
 		res.Uuid = data.Uuid
 		res.TaskId = data.TaskId
+	}
+	return
+}
+
+func (c *cPublish) MyProfileCreate(ctx context.Context, req *publish.MyProfileCreateReq) (res *publish.MyProfileCreateRes, err error) {
+	data, err := service.SysPublish().MyProfileCreate(ctx, &req.ProfileSaveInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.MyProfileCreateRes{}
+	if data != nil {
+		res.Id, res.Uuid, res.TaskId = data.Id, data.Uuid, data.TaskId
 	}
 	return
 }

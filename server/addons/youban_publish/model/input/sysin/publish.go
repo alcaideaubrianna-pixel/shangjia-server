@@ -500,6 +500,25 @@ type MediaSortInp struct {
 	Items  []*MediaSortItem `json:"items" dc:"排序列表"`
 }
 
+type MediaReconcileInp struct {
+	TaskId          int64            `json:"taskId" v:"required|min:1#任务ID不能为空|任务ID不能为空" dc:"任务ID"`
+	Items           []*MediaSortItem `json:"items" dc:"媒体清单"`
+	RemovedMediaIds []int64          `json:"removedMediaIds" dc:"待删除媒体ID"`
+}
+
+func (in *MediaReconcileInp) Filter(ctx context.Context) error {
+	if in.TaskId <= 0 {
+		return gerror.New("任务ID不能为空")
+	}
+	for _, id := range in.RemovedMediaIds {
+		if id <= 0 {
+			return gerror.New("待删除媒体ID不合法")
+		}
+	}
+	sortInput := &MediaSortInp{TaskId: in.TaskId, Items: in.Items}
+	return sortInput.Filter(ctx)
+}
+
 func (in *MediaSortInp) Filter(ctx context.Context) error {
 	if in.TaskId <= 0 {
 		return gerror.New("任务ID不能为空")

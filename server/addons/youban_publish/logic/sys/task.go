@@ -236,6 +236,14 @@ func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenan
 	if !hasChannels {
 		return s.markTaskSavedWithoutPublish(ctx, task, operatorId)
 	}
+	// hasPublishChannels 可能会将历史频道 ID 迁移为当前频道 ID，重新读取
+	// 任务，确保排队快照拿到迁移后的值。
+	if task, err = s.getPublishWorkflowTask(ctx, id, tenantId, accountId); err != nil {
+		return err
+	}
+	// 发布校验和队列执行必须使用同一份频道快照，不能让执行阶段退回
+	// 到默认频道，否则用户已选择频道但异步任务会误报未配置目标。
+	channelIds := decodeInt64JSON(task["channel_id_json"].String())
 	operationNo := newTelegramOperationNo("publish", id)
 	if err = s.markTaskPublishQueued(ctx, id, tenantId, operatorId, operationNo); err != nil {
 		return err
@@ -246,6 +254,7 @@ func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenan
 		AccountId:   accountId,
 		OperatorId:  operatorId,
 		OperationNo: operationNo,
+		ChannelIds:  channelIds,
 	}, 0); err != nil {
 		_ = s.markTaskPublishFailed(ctx, id, tenantId, operatorId, err)
 		return gerror.Wrap(err, "上架任务加入队列失败")
@@ -335,11 +344,14 @@ func (s *sSysPublish) executePublishSubmitWorkflow(ctx context.Context, payload 
 	if payload.OperationNo != "" && task["tg_operation_no"].String() != payload.OperationNo {
 		return nil
 	}
+	if len(payload.ChannelIds) == 0 {
+		payload.ChannelIds = decodeInt64JSON(task["channel_id_json"].String())
+	}
 	if _, err = s.publishTaskToProfile(ctx, task); err != nil {
 		_ = s.markTaskPublishFailed(ctx, payload.TaskId, payload.TenantId, payload.OperatorId, err)
 		return err
 	}
-	if err = s.ensureTgJob(ctx, payload.TaskId, payload.OperationNo, payload.ChannelIds, payload.OnlySelectedChannels); err != nil {
+	if err = s.ensureTgJob(ctx, payload.TaskId, payload.OperationNo, payload.ChannelIds, true); err != nil {
 		_ = s.markTaskPublishFailed(ctx, payload.TaskId, payload.TenantId, payload.OperatorId, err)
 		return err
 	}

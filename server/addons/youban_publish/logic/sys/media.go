@@ -44,13 +44,13 @@ func (s *sSysPublish) AdminMediaDelete(ctx context.Context, in *sysin.MediaDelet
 	return s.deleteMediaByTenant(ctx, in.Id, account.TenantId, account.Id)
 }
 
-func (s *sSysPublish) AdminMediaSort(ctx context.Context, in *sysin.MediaSortInp) (err error) {
+func (s *sSysPublish) AdminMediaReconcile(ctx context.Context, in *sysin.MediaReconcileInp) (err error) {
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return err
 	}
 	if in == nil {
-		return gerror.New("媒体排序不能为空")
+		return gerror.New("媒体清单不能为空")
 	}
 	if err = in.Filter(ctx); err != nil {
 		return err
@@ -59,7 +59,16 @@ func (s *sSysPublish) AdminMediaSort(ctx context.Context, in *sysin.MediaSortInp
 	if err != nil {
 		return err
 	}
-	return s.sortTaskMedia(ctx, in, task, 0)
+	for _, id := range in.RemovedMediaIds {
+		mediaId, resolveErr := s.resolveTaskMediaId(ctx, task, id, 0)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if err = s.deleteMediaByTenant(ctx, mediaId, account.TenantId, account.Id); err != nil {
+			return err
+		}
+	}
+	return s.sortTaskMedia(ctx, &sysin.MediaSortInp{TaskId: in.TaskId, Items: in.Items}, task, 0)
 }
 
 func (s *sSysPublish) ServerMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error) {
@@ -84,21 +93,13 @@ func (s *sSysPublish) MyMediaList(ctx context.Context, in *sysin.MediaListInp) (
 	return s.mediaList(ctx, in.TaskId, account.Id)
 }
 
-func (s *sSysPublish) MyMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error) {
-	account, err := s.currentAccount(ctx)
-	if err != nil {
-		return err
-	}
-	return s.deleteMedia(ctx, in.Id, account.Id)
-}
-
-func (s *sSysPublish) MyMediaSort(ctx context.Context, in *sysin.MediaSortInp) (err error) {
+func (s *sSysPublish) MyMediaReconcile(ctx context.Context, in *sysin.MediaReconcileInp) (err error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {
 		return err
 	}
 	if in == nil {
-		return gerror.New("媒体排序不能为空")
+		return gerror.New("媒体清单不能为空")
 	}
 	if err = in.Filter(ctx); err != nil {
 		return err
@@ -107,7 +108,16 @@ func (s *sSysPublish) MyMediaSort(ctx context.Context, in *sysin.MediaSortInp) (
 	if err != nil {
 		return err
 	}
-	return s.sortTaskMedia(ctx, in, task, account.Id)
+	for _, id := range in.RemovedMediaIds {
+		mediaId, resolveErr := s.resolveTaskMediaId(ctx, task, id, account.Id)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if err = s.deleteMedia(ctx, mediaId, account.Id); err != nil {
+			return err
+		}
+	}
+	return s.sortTaskMedia(ctx, &sysin.MediaSortInp{TaskId: in.TaskId, Items: in.Items}, task, account.Id)
 }
 
 func (s *sSysPublish) sortTaskMedia(ctx context.Context, in *sysin.MediaSortInp, task gdb.Record, accountId int64) error {
@@ -121,8 +131,12 @@ func (s *sSysPublish) sortTaskMedia(ctx context.Context, in *sysin.MediaSortInp,
 			defer release()
 		}
 		for _, item := range in.Items {
+			mediaId, resolveErr := s.resolveTaskMediaIdTx(ctx, tx, task, item.Id, accountId)
+			if resolveErr != nil {
+				return resolveErr
+			}
 			mod := tx.Model(publishMediaTable).Ctx(ctx).
-				Where("id", item.Id).
+				Where("id", mediaId).
 				Where("task_id", in.TaskId).
 				WhereNull("deleted_at")
 			if accountId > 0 {
@@ -150,6 +164,55 @@ func (s *sSysPublish) sortTaskMedia(ctx context.Context, in *sysin.MediaSortInp,
 		}
 		return nil
 	})
+}
+
+func (s *sSysPublish) resolveTaskMediaId(ctx context.Context, task gdb.Record, mediaId int64, accountId int64) (int64, error) {
+	var resolved int64
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var err error
+		resolved, err = s.resolveTaskMediaIdTx(ctx, tx, task, mediaId, accountId)
+		return err
+	})
+	return resolved, err
+}
+
+func (s *sSysPublish) resolveTaskMediaIdTx(ctx context.Context, tx gdb.TX, task gdb.Record, mediaId int64, accountId int64) (int64, error) {
+	if mediaId <= 0 || task.IsEmpty() {
+		return 0, gerror.New("媒体不存在或无权操作")
+	}
+	taskId := task["id"].Int64()
+	profileId := task["profile_id"].Int64()
+	mod := tx.Model(publishMediaTable).Ctx(ctx).Where("id", mediaId).WhereNull("deleted_at")
+	if accountId > 0 {
+		mod = mod.Where("account_id", accountId)
+	}
+	source, err := mod.One()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取媒体失败")
+	}
+	if source.IsEmpty() || source["profile_id"].Int64() != profileId {
+		return 0, gerror.New("媒体不存在或无权操作")
+	}
+	if source["task_id"].Int64() == taskId {
+		return mediaId, nil
+	}
+	targetMod := tx.Model(publishMediaTable).Ctx(ctx).
+		Where("task_id", taskId).
+		Where("profile_id", profileId).
+		Where("attachment_id", source["attachment_id"].Int64()).
+		Where("purpose", source["purpose"].String()).
+		WhereNull("deleted_at")
+	if accountId > 0 {
+		targetMod = targetMod.Where("account_id", accountId)
+	}
+	target, err := targetMod.OrderAsc(fmt.Sprintf("ABS(sort_index - %d)", source["sort_index"].Int())).OrderAsc("id").One()
+	if err != nil {
+		return 0, gerror.Wrap(err, "定位当前任务媒体失败")
+	}
+	if target.IsEmpty() {
+		return 0, gerror.New("媒体不存在或无权操作")
+	}
+	return target["id"].Int64(), nil
 }
 
 func (s *sSysPublish) MyProfileImageSearch(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile) (list []*sysin.NoteModel, totalCount int, err error) {
@@ -828,6 +891,9 @@ func (s *sSysPublish) refreshTaskMediaCount(ctx context.Context, taskId int64) e
 }
 
 func taskMediaSyncLockKey(taskId int64, profileId int64) string {
+	if profileId > 0 {
+		return fmt.Sprintf("youban_publish:media_sync:profile:%d", profileId)
+	}
 	return fmt.Sprintf("youban_publish:media_sync:%d:%d", taskId, profileId)
 }
 
@@ -937,7 +1003,7 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 			mediaColumns.DeletedAt:           nil,
 			mediaColumns.UpdatedAt:           now,
 		}
-		existing, err := tx.Model(dao.ContentMedia.Table()).Ctx(ctx).
+		existing, err := tx.Model(dao.ContentMedia.Table()).Ctx(ctx).Unscoped().
 			Where(mediaColumns.ProfileId, profileId).
 			Where(mediaColumns.SourceAssetId, sourceAssetId).
 			Fields(mediaColumns.Id).
@@ -946,7 +1012,7 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 			return gerror.Wrap(err, "检查资料媒体失败")
 		}
 		if existing.Int64() > 0 {
-			if _, err = tx.Model(dao.ContentMedia.Table()).Ctx(ctx).Where(mediaColumns.Id, existing.Int64()).Data(data).Update(); err != nil {
+			if _, err = tx.Model(dao.ContentMedia.Table()).Ctx(ctx).Unscoped().Where(mediaColumns.Id, existing.Int64()).Data(data).Update(); err != nil {
 				return gerror.Wrap(err, "更新资料媒体失败")
 			}
 			if coverMediaId == 0 && mediaType == "image" {

@@ -452,19 +452,12 @@ type AdminUploadMediaRes struct {
 	*sysin.MediaModel
 }
 
-type AdminSortMediaReq struct {
-	g.Meta `path:"/publish/admin/media/sort" method:"post" tags:"上架插件管理端" summary:"保存资料媒体排序"`
-	sysin.MediaSortInp
+type AdminReconcileMediaReq struct {
+	g.Meta `path:"/publish/admin/media/reconcile" method:"post" tags:"上架插件管理端" summary:"同步资料媒体"`
+	sysin.MediaReconcileInp
 }
 
-type AdminSortMediaRes struct{}
-
-type AdminDeleteMediaReq struct {
-	g.Meta `path:"/publish/admin/media/delete" method:"post" tags:"上架插件管理端" summary:"删除资料媒体"`
-	sysin.MediaDeleteInp
-}
-
-type AdminDeleteMediaRes struct{}
+type AdminReconcileMediaRes struct{}
 
 type AdminProfileListReq struct {
 	g.Meta `path:"/publish/admin/profile/list" method:"get" tags:"上架插件管理端" summary:"资料列表"`
@@ -485,12 +478,19 @@ type AdminProfileViewRes struct {
 	*sysin.ProfileViewModel
 }
 
-type AdminProfileSaveReq struct {
-	g.Meta `path:"/publish/admin/profile/save" method:"post" tags:"上架插件管理端" summary:"保存资料"`
+type AdminProfileEditReq struct {
+	g.Meta `path:"/publish/admin/profile/edit" method:"post" tags:"上架插件管理端" summary:"编辑资料"`
 	sysin.ProfileSaveInp
 }
 
-type AdminProfileSaveRes struct {
+type AdminProfileCreateReq struct {
+	g.Meta `path:"/publish/admin/profile/create" method:"post" tags:"上架插件管理端" summary:"新建资料"`
+	sysin.ProfileSaveInp
+}
+
+type AdminProfileCreateRes = AdminProfileEditRes
+
+type AdminProfileEditRes struct {
 	Id     int64  `json:"id" dc:"资料ID"`
 	Uuid   string `json:"uuid" dc:"资料UUID"`
 	TaskId int64  `json:"taskId" dc:"任务ID"`
@@ -730,19 +730,12 @@ type MediaListRes struct {
 	List []*sysin.MediaModel `json:"list" dc:"媒体列表"`
 }
 
-type DeleteMediaReq struct {
-	g.Meta `path:"/publish/media/delete" method:"post" tags:"上架插件" summary:"删除任务媒体"`
-	sysin.MediaDeleteInp
+type ReconcileMediaReq struct {
+	g.Meta `path:"/publish/media/reconcile" method:"post" tags:"上架插件" summary:"同步任务媒体"`
+	sysin.MediaReconcileInp
 }
 
-type DeleteMediaRes struct{}
-
-type SortMediaReq struct {
-	g.Meta `path:"/publish/media/sort" method:"post" tags:"上架插件" summary:"保存任务媒体排序"`
-	sysin.MediaSortInp
-}
-
-type SortMediaRes struct{}
+type ReconcileMediaRes struct{}
 
 type MyProfileListReq struct {
 	g.Meta `path:"/publish/profile/list" method:"get" tags:"上架插件" summary:"我的资料列表"`
@@ -781,12 +774,19 @@ type MyProfileOptionsRes struct {
 	*sysin.ProfileOptionsModel
 }
 
-type MyProfileSaveReq struct {
-	g.Meta `path:"/publish/profile/save" method:"post" tags:"上架插件" summary:"保存我的资料"`
+type MyProfileEditReq struct {
+	g.Meta `path:"/publish/profile/edit" method:"post" tags:"上架插件" summary:"编辑我的资料"`
 	sysin.ProfileSaveInp
 }
 
-type MyProfileSaveRes struct {
+type MyProfileCreateReq struct {
+	g.Meta `path:"/publish/profile/create" method:"post" tags:"上架插件" summary:"新建我的资料"`
+	sysin.ProfileSaveInp
+}
+
+type MyProfileCreateRes = MyProfileEditRes
+
+type MyProfileEditRes struct {
 	Id     int64  `json:"id" dc:"资料ID"`
 	Uuid   string `json:"uuid" dc:"资料UUID"`
 	TaskId int64  `json:"taskId" dc:"任务ID"`
