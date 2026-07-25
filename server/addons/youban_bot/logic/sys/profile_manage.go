@@ -273,6 +273,14 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 	if accErr != nil {
 		return true, s.replyBotError(ctx, botId, chatId, "资料管理账号绑定", accErr)
 	}
+	if msg.Chat.Type != "private" && account.AccountType != "admin" {
+		_, _ = bot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{
+			CallbackQueryID: query.ID,
+			Text:            "无权限",
+			ShowAlert:       false,
+		})
+		return true, nil
+	}
 	parts := strings.Split(query.Data, ":")
 	action := ""
 	if len(parts) > 1 {
