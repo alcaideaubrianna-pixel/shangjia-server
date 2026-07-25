@@ -8,11 +8,12 @@ import (
 	"time"
 
 	tgbot "github.com/go-telegram/bot"
+	"github.com/gotd/td/tgerr"
 )
 
 const (
 	telegramRetryMinDelay = 30 * time.Second
-	telegramRetryMaxDelay = 30 * time.Minute
+	telegramRetryMaxDelay = 2 * time.Hour
 	telegramRetryMaxCount = 5
 )
 
@@ -46,6 +47,12 @@ func telegramJobErrorRetryPolicy(err error, retryCount int) telegramJobRetryPoli
 }
 
 func telegramRecoverableRetryDelay(err error, retryCount int) time.Duration {
+	if delay, ok := tgerr.AsFloodWait(err); ok && delay > 0 {
+		if delay > telegramRetryMaxDelay {
+			return telegramRetryMaxDelay
+		}
+		return delay
+	}
 	var tooMany *tgbot.TooManyRequestsError
 	if errors.As(err, &tooMany) && tooMany.RetryAfter > 0 {
 		delay := time.Duration(tooMany.RetryAfter) * time.Second

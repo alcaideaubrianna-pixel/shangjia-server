@@ -381,6 +381,23 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_note_index" (
   "deleted_at" timestamp DEFAULT NULL,
   CONSTRAINT "uk_ybp_note_index_scope_profile" UNIQUE ("tenant_id", "account_id", "profile_id")
 );
+-- Repair installations created before the projection table migration. The
+-- application upsert uses the business unique key, but the generated model
+-- and pagination still require a stable primary key.
+ALTER TABLE "hg_youban_publish_note_index"
+  ADD COLUMN IF NOT EXISTS "id" BIGSERIAL;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'hg_youban_publish_note_index'::regclass
+      AND contype = 'p'
+  ) THEN
+    ALTER TABLE "hg_youban_publish_note_index"
+      ADD CONSTRAINT "pk_ybp_note_index" PRIMARY KEY ("id");
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_updated" ON "hg_youban_publish_note_index" ("tenant_id", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_updated" ON "hg_youban_publish_note_index" ("account_id", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_profile" ON "hg_youban_publish_note_index" ("profile_id") WHERE "deleted_at" IS NULL;

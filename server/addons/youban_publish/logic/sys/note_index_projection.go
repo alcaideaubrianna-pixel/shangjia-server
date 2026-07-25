@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -112,39 +111,12 @@ func upsertNoteIndex(ctx context.Context, row *noteIndexSource) error {
 		columns.DeletedAt:       row.DeletedAt,
 	}
 	mod := pdao.YoubanPublishNoteIndex.Ctx(ctx).Data(data)
-	updates := g.Map{
-		columns.TaskId:          row.TaskId,
-		columns.Uuid:            row.Uuid,
-		columns.ProfileNo:       row.ProfileNo,
-		columns.Title:           row.Title,
-		columns.Summary:         row.Summary,
-		columns.PlainText:       row.PlainText,
-		columns.Tag:             row.Tag,
-		columns.Province:        row.Province,
-		columns.City:            row.City,
-		columns.Status:          row.Status,
-		columns.Visibility:      row.Visibility,
-		columns.ReviewStatus:    row.ReviewStatus,
-		columns.TaskStatus:      row.TaskStatus,
-		columns.PublishedAt:     row.PublishedAt,
-		columns.SourceUpdatedAt: row.SourceUpdatedAt,
-		columns.CreatedAt:       row.CreatedAt,
-		columns.UpdatedAt:       row.UpdatedAt,
-		columns.DeletedAt:       row.DeletedAt,
-	}
-	if strings.EqualFold(pdao.YoubanPublishNoteIndex.DB().GetConfig().Type, "pgsql") {
-		mod = mod.OnDuplicate(gdb.Raw(`
-ON CONFLICT ("tenant_id", "account_id", "profile_id") DO UPDATE SET
-  "task_id"=EXCLUDED."task_id", "uuid"=EXCLUDED."uuid", "profile_no"=EXCLUDED."profile_no",
-  "title"=EXCLUDED."title", "summary"=EXCLUDED."summary", "plain_text"=EXCLUDED."plain_text",
-  "tag"=EXCLUDED."tag", "province"=EXCLUDED."province", "city"=EXCLUDED."city",
-  "status"=EXCLUDED."status", "visibility"=EXCLUDED."visibility", "review_status"=EXCLUDED."review_status",
-  "task_status"=EXCLUDED."task_status", "published_at"=EXCLUDED."published_at",
-  "source_updated_at"=EXCLUDED."source_updated_at", "created_at"=EXCLUDED."created_at",
-	  "updated_at"=EXCLUDED."updated_at", "deleted_at"=EXCLUDED."deleted_at"`))
-	} else {
-		mod = mod.OnDuplicate(updates)
-	}
+	// The projection table may have been created by an older installation without
+	// a primary key. Declare the business unique key explicitly so Save does not
+	// depend on ORM primary-key metadata.
+	mod = mod.
+		OnConflict("tenant_id,account_id,profile_id").
+		OnDuplicateEx("id,tenant_id,account_id,profile_id,created_at")
 	_, err := mod.Save()
 	if err != nil {
 		return gerror.Wrap(err, "写入资料索引失败")
