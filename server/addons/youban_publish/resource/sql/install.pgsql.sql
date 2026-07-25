@@ -121,6 +121,7 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_task_title_trgm" ON "hg_youban_publish_task"
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_plain_text_trgm" ON "hg_youban_publish_task" USING gin ("plain_text" gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_note_scope" ON "hg_youban_publish_task" ("tenant_id", "account_id", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_profile_tenant" ON "hg_youban_publish_task" ("profile_id", "tenant_id") WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_task_search_scope" ON "hg_youban_publish_task" ("tenant_id", "account_id", "profile_id") WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_content_profile_note_order" ON "hg_content_profile" ("updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_note_index" (
