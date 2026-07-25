@@ -19,6 +19,7 @@ const (
 	mediaPHashBucketResultTTL       = 10 * time.Minute
 	mediaPHashBucketMaxCandidates   = 8000
 	mediaPHashBucketMaxScopedIds    = 32
+	mediaPHashCandidateWorkMem      = "64MB"
 )
 
 func (s *sSysPublish) syncMediaPHashBucketByMediaId(ctx context.Context, mediaId int64) error {
@@ -246,9 +247,10 @@ func mediaPHashBucketCandidateRowsWithScopes(ctx context.Context, normalizedHash
 WITH bucket_match AS (
 %s
 ), candidate AS (
-SELECT media_id, profile_id, account_id, tenant_id, media_type, hash_value, COUNT(*) AS bucket_hits
+SELECT media_id, profile_id, account_id, tenant_id, media_type,
+       MAX(hash_value) AS hash_value, COUNT(*) AS bucket_hits
 FROM bucket_match
-GROUP BY media_id, profile_id, account_id, tenant_id, media_type, hash_value
+GROUP BY media_id, profile_id, account_id, tenant_id, media_type
 HAVING COUNT(*) >= ?
 )
 SELECT candidate.media_id, candidate.profile_id, candidate.account_id,
@@ -272,8 +274,21 @@ ORDER BY candidate.bucket_hits DESC
 LIMIT %d
 `, strings.Join(branches, " UNION ALL "), mediaPHashBucketMaxCandidates)
 	args = append(args, minEqualNibbles)
-	if err := g.DB().Raw(sql, args...).Scan(&rows); err != nil {
-		return nil, gerror.Wrap(err, "查询相似媒体分桶失败")
+	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") {
+			if _, err := tx.Exec("SET LOCAL work_mem = '" + mediaPHashCandidateWorkMem + "'"); err != nil {
+				return gerror.Wrap(err, "设置相似媒体查询内存失败")
+			}
+			if _, err := tx.Exec("SET LOCAL jit = off"); err != nil {
+				return gerror.Wrap(err, "关闭相似媒体查询JIT失败")
+			}
+		}
+		if err := tx.Raw(sql, args...).Scan(&rows); err != nil {
+			return gerror.Wrap(err, "查询相似媒体分桶失败")
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return rows, nil
 }

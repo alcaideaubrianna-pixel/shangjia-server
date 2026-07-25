@@ -122,6 +122,17 @@ func (s *sSysPublish) runTelegramPolling(ctx context.Context) {
 				if _, ok := runningBots[item.BotToken]; ok {
 					continue
 				}
+				if _, err = s.telegramBotProfile(ctx, item.BotToken); err != nil {
+					if isTelegramBotUnauthorizedError(err) {
+						if disableErr := s.disableTelegramBot(ctx, item.Id); disableErr != nil {
+							g.Log().Warningf(ctx, "停用无效上架插件Bot失败 bot:%d err:%v", item.Id, disableErr)
+						}
+						g.Log().Warningf(ctx, "上架插件Bot Token无效，已停用 bot:%d err:%v", item.Id, err)
+						continue
+					}
+					g.Log().Warningf(ctx, "校验上架插件Bot失败 bot:%d err:%v", item.Id, err)
+					continue
+				}
 				bot, err := s.telegramBot(ctx, item.BotToken)
 				if err != nil {
 					g.Log().Warningf(ctx, "初始化上架插件Bot失败 bot:%d err:%+v", item.Id, err)

@@ -18,9 +18,12 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"golang.org/x/sync/singleflight"
 )
 
 const mediaSimilarResultCacheTTL = 10 * time.Minute
+
+var mediaSimilarCandidateGroup singleflight.Group
 
 type mediaSimilarCandidate struct {
 	MediaId   int64
@@ -128,6 +131,20 @@ func (s *sSysPublish) cachedMediaSimilarCandidates(ctx context.Context, scope *m
 			return filterMediaSimilarCandidates(source, cached), nil
 		}
 	}
+	result, err, _ := mediaSimilarCandidateGroup.Do(cacheKey, func() (any, error) {
+		return s.computeMediaSimilarCandidates(ctx, scope, source, threshold, cacheKey)
+	})
+	if err != nil {
+		return nil, err
+	}
+	items, ok := result.([]mediaSimilarCandidate)
+	if !ok {
+		return nil, gerror.New("解析相似媒体查询结果失败")
+	}
+	return items, nil
+}
+
+func (s *sSysPublish) computeMediaSimilarCandidates(ctx context.Context, scope *mediaSimilarScope, source *mediaSimilarSource, threshold int, cacheKey string) ([]mediaSimilarCandidate, error) {
 	queryHash, ok := parseUploadPHash(source.PerceptualHash)
 	if !ok {
 		return []mediaSimilarCandidate{}, nil
