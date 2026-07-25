@@ -50,6 +50,9 @@ func (s *sSysPublish) AdminAccountOptions(ctx context.Context, in *sysin.Account
 	if err != nil {
 		return nil, err
 	}
+	if in.Scope == sysin.AccountOptionsScopeMine {
+		return myOptions, nil
+	}
 	followOptions, err := s.followAccountOptions(ctx, account)
 	if err != nil {
 		return nil, err

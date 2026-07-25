@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	AccountOptionsScopeMine      = "mine"
 	AccountOptionsScopeAll       = "all"
 	AccountOptionsScopeFollowing = "following"
 )
@@ -21,7 +22,9 @@ func (in *AccountOptionsInp) Filter(ctx context.Context) error {
 	if in.Scope == "" {
 		in.Scope = AccountOptionsScopeAll
 	}
-	if in.Scope != AccountOptionsScopeAll && in.Scope != AccountOptionsScopeFollowing {
+	if in.Scope != AccountOptionsScopeMine &&
+		in.Scope != AccountOptionsScopeAll &&
+		in.Scope != AccountOptionsScopeFollowing {
 		return gerror.New("筛选范围不合法")
 	}
 	return nil
