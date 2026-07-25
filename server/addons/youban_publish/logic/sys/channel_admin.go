@@ -513,7 +513,6 @@ func fullPushPublishedTaskBaseModel(ctx context.Context, tenantId int64) *gdb.Mo
 		WhereIn("t.status", []string{sysin.PublishTaskStatusPublished, sysin.PublishTaskStatusPublishing}).
 		Where("t.deleted_at IS NULL").
 		Where("a.tenant_id", tenantId).
-		Where("a.account_type", sysin.PublishAccountTypeUploader).
 		Where("a.status", 1).
 		Where("p.status", 1).
 		Where("COALESCE(t.client_request_id, '') NOT LIKE ?", "collect:follow:%")
