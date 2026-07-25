@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -157,7 +158,34 @@ func (s *sSysPublish) setupTelegramWebhooks(ctx context.Context) {
 		}
 		webhookURL := fmt.Sprintf("%s/api/youban_publish/telegram/webhook?botId=%d", conf.WebhookBaseUrl, item.Id)
 		if err = s.telegramSetWebhook(ctx, item.BotToken, webhookURL); err != nil {
-			g.Log().Warningf(ctx, "设置上架插件Bot webhook失败 bot:%d err:%+v", item.Id, err)
+			if isTelegramBotUnauthorizedError(err) {
+				if disableErr := s.disableTelegramBot(ctx, item.Id); disableErr != nil {
+					g.Log().Warningf(ctx, "停用无效上架插件Bot失败 bot:%d err:%v", item.Id, disableErr)
+				}
+				g.Log().Warningf(ctx, "上架插件Bot Token无效，已停用 bot:%d err:%v", item.Id, err)
+				continue
+			}
+			g.Log().Warningf(ctx, "设置上架插件Bot webhook失败 bot:%d err:%v", item.Id, err)
 		}
 	}
+}
+
+func (s *sSysPublish) disableTelegramBot(ctx context.Context, botId int64) error {
+	if botId <= 0 {
+		return nil
+	}
+	_, err := g.DB().Model(publishBotTable).Safe().Ctx(ctx).
+		Where("id", botId).
+		WhereNull("deleted_at").
+		Data(g.Map{"status": 2, "updated_at": time.Now()}).
+		Update()
+	return err
+}
+
+func isTelegramBotUnauthorizedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unauthorized") || strings.Contains(message, "invalid token")
 }
