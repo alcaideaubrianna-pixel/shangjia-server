@@ -352,6 +352,7 @@ func (s *sSysPublish) telegramBot(ctx context.Context, botToken string) (*tgbot.
 	}
 	opts := []tgbot.Option{
 		tgbot.WithHTTPClient(21*time.Second, client),
+		tgbot.WithSkipGetMe(),
 		tgbot.WithAllowedUpdates(telegramAllowedUpdates()),
 		tgbot.WithErrorsHandler(func(err error) {
 			g.Log().Warningf(ctx, "Telegram SDK错误：%+v", err)

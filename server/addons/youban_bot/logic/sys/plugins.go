@@ -41,7 +41,10 @@ func (startFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
 }
 func (startFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFeatureContext) (bool, error) {
 	text := bot.featureConfigValue(ctx, startFeature{}.Key(), "replyText")
-	markup := startFeatureMarkup(bot, ctx)
+	var markup models.ReplyMarkup
+	if startMarkup := startFeatureMarkup(bot, ctx); startMarkup != nil {
+		markup = startMarkup
+	}
 	return true, bot.replyWithMarkup(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), text, markup)
 }
 

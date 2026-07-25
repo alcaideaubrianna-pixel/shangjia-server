@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -28,8 +29,39 @@ func (s *sSysPublish) telegramSetWebhook(ctx context.Context, botToken string, w
 	if conf.WebhookSecret != "" {
 		params.SecretToken = conf.WebhookSecret
 	}
-	_, err = bot.SetWebhook(ctx, params)
-	return err
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		_, err = bot.SetWebhook(ctx, params)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		var tooMany *tgbot.TooManyRequestsError
+		if errors.As(err, &tooMany) && tooMany.RetryAfter > 0 {
+			if err = telegramWebhookWait(ctx, time.Duration(tooMany.RetryAfter)*time.Second); err != nil {
+				return err
+			}
+			continue
+		}
+		if !isTelegramWebhookTransientError(err) {
+			return err
+		}
+		if err = telegramWebhookWait(ctx, time.Duration(attempt+1)*500*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	return lastErr
+}
+
+func telegramWebhookWait(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (s *sSysPublish) telegramDeleteWebhook(ctx context.Context, botToken string) error {

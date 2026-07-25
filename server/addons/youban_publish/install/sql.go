@@ -183,24 +183,45 @@ func splitSql(content string) []string {
 	var (
 		list    []string
 		builder strings.Builder
-		quote   rune
+		quote   byte
 		escape  bool
+		dollar  string
 	)
-	for _, r := range content {
-		builder.WriteRune(r)
+	for index := 0; index < len(content); index++ {
+		if dollar != "" {
+			if strings.HasPrefix(content[index:], dollar) {
+				builder.WriteString(dollar)
+				index += len(dollar) - 1
+				dollar = ""
+				continue
+			}
+			builder.WriteByte(content[index])
+			continue
+		}
+
+		if quote == 0 && content[index] == '$' {
+			if tag := sqlDollarQuoteTag(content[index:]); tag != "" {
+				builder.WriteString(tag)
+				index += len(tag) - 1
+				dollar = tag
+				continue
+			}
+		}
+
+		builder.WriteByte(content[index])
 		if escape {
 			escape = false
 			continue
 		}
-		if r == '\\' && quote != 0 {
+		if content[index] == '\\' && quote != 0 {
 			escape = true
 			continue
 		}
-		switch r {
+		switch content[index] {
 		case '\'', '"', '`':
 			if quote == 0 {
-				quote = r
-			} else if quote == r {
+				quote = content[index]
+			} else if quote == content[index] {
 				quote = 0
 			}
 		case ';':
@@ -214,4 +235,25 @@ func splitSql(content string) []string {
 		list = append(list, tail)
 	}
 	return list
+}
+
+func sqlDollarQuoteTag(value string) string {
+	if !strings.HasPrefix(value, "$") {
+		return ""
+	}
+	relativeEnd := strings.IndexByte(value[1:], '$')
+	if relativeEnd < 0 {
+		return ""
+	}
+	name := value[1 : relativeEnd+1]
+	if name == "" {
+		return "$$"
+	}
+	for index, char := range name {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || char == '_' || (index > 0 && char >= '0' && char <= '9') {
+			continue
+		}
+		return ""
+	}
+	return value[:relativeEnd+2]
 }
