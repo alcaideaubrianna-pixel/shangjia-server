@@ -420,6 +420,26 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 	if err != nil {
 		return nil, gerror.Wrap(err, "检查任务媒体失败")
 	}
+	// 编辑已发布资料时，前端仍持有历史媒体 ID。草稿复制后按原始
+	// 附件和位置定位草稿副本，避免新增一条重复媒体。
+	if existing.IsEmpty() && in.MediaId > 0 {
+		source, sourceErr := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+			Where("id", in.MediaId).WhereNull("deleted_at").One()
+		if sourceErr != nil {
+			return nil, gerror.Wrap(sourceErr, "读取原媒体失败")
+		}
+		if !source.IsEmpty() && source["profile_id"].Int64() == task["profile_id"].Int64() {
+			existing, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+				Where("task_id", task["id"].Int64()).
+				Where("attachment_id", source["attachment_id"].Int64()).
+				Where("purpose", source["purpose"].String()).
+				Where("sort_index", source["sort_index"].Int()).
+				WhereNull("deleted_at").One()
+			if err != nil {
+				return nil, gerror.Wrap(err, "定位草稿媒体失败")
+			}
+		}
+	}
 	mediaId := existing["id"].Int64()
 	if editStatus == "edited" {
 		data["edited_attachment_id"] = attachment.Id
@@ -665,6 +685,11 @@ func (s *sSysPublish) deleteMedia(ctx context.Context, id int64, accountId int64
 	if row.IsEmpty() {
 		return gerror.New("任务媒体不存在")
 	}
+	row, err = s.editableMediaRow(ctx, row, row["tenant_id"].Int64(), accountId)
+	if err != nil {
+		return err
+	}
+	id = row["id"].Int64()
 	if _, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", id).Data(g.Map{
 		"tg_file_id":          "",
 		"tg_thumb_file_id":    "",
@@ -716,6 +741,11 @@ func (s *sSysPublish) deleteMediaByTenant(ctx context.Context, id int64, tenantI
 	if row.IsEmpty() {
 		return gerror.New("任务媒体不存在")
 	}
+	row, err = s.editableMediaRow(ctx, row, tenantId, 0)
+	if err != nil {
+		return err
+	}
+	id = row["id"].Int64()
 	updateMod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", id)
 	if tenantId > 0 {
 		updateMod = updateMod.Where("tenant_id", tenantId)
@@ -752,6 +782,31 @@ func (s *sSysPublish) deleteMediaByTenant(ctx context.Context, id int64, tenantI
 		}
 	}
 	return nil
+}
+
+func (s *sSysPublish) editableMediaRow(ctx context.Context, row gdb.Record, tenantId int64, accountId int64) (gdb.Record, error) {
+	if row.IsEmpty() || row["profile_id"].Int64() <= 0 {
+		return row, nil
+	}
+	draft, err := s.editableProfileTask(ctx, row["profile_id"].Int64(), tenantId, accountId)
+	if err != nil {
+		return nil, err
+	}
+	if draft.IsEmpty() || draft["id"].Int64() == row["task_id"].Int64() {
+		return row, nil
+	}
+	target, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Where("task_id", draft["id"].Int64()).
+		Where("attachment_id", row["attachment_id"].Int64()).
+		Where("purpose", row["purpose"].String()).
+		WhereNull("deleted_at").OrderAsc("id").One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "定位草稿媒体失败")
+	}
+	if target.IsEmpty() {
+		return row, nil
+	}
+	return target, nil
 }
 
 func (s *sSysPublish) refreshTaskMediaCount(ctx context.Context, taskId int64) error {

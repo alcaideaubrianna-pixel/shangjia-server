@@ -68,6 +68,13 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			if taskId <= 0 {
 				return gerror.New("资料不属于上架端")
 			}
+			if task["status"].String() != sysin.PublishTaskStatusDraft {
+				task, taskErr = s.cloneEditableProfileTask(ctx, tx, task, contexts.GetUserId(ctx))
+				if taskErr != nil {
+					return taskErr
+				}
+				taskId = task["id"].Int64()
+			}
 		} else if in.TaskId > 0 {
 			task, taskErr := s.profileTaskByTaskId(ctx, tx, in.TaskId, tenantId, accountId)
 			if taskErr != nil {
@@ -75,6 +82,13 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			}
 			taskId = task["id"].Int64()
 			profileId = task["profile_id"].Int64()
+			if task["status"].String() != sysin.PublishTaskStatusDraft {
+				task, taskErr = s.cloneEditableProfileTask(ctx, tx, task, contexts.GetUserId(ctx))
+				if taskErr != nil {
+					return taskErr
+				}
+				taskId = task["id"].Int64()
+			}
 		}
 		if taskId == 0 {
 			newTaskId, taskErr := tx.Model(publishTaskTable).Ctx(ctx).Data(g.Map{

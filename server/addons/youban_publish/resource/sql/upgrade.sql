@@ -441,3 +441,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media_phash_lsh` (
   UNIQUE KEY `uk_ybp_media_phash_lsh_media_pos` (`media_id`,`bucket_pos`),
   KEY `idx_ybp_media_phash_lsh_search` (`tenant_id`,`media_type`,`bucket_pos`,`bucket_value`,`media_id`,`profile_id`,`account_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体感知哈希LSH索引';
+
+ALTER TABLE `hg_content_profile` ADD KEY `idx_content_profile_source_uuid` (`source_note_uuid`);
+ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_profile_status` (`profile_id`,`status`,`id`);
+ALTER TABLE `hg_youban_publish_media` ADD KEY `idx_ybp_media_task_active` (`task_id`,`deleted_at`,`sort_index`,`id`);

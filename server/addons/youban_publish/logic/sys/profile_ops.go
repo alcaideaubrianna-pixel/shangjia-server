@@ -46,7 +46,7 @@ func (s *sSysPublish) MyProfileView(ctx context.Context, in *sysin.ProfileViewIn
 		return nil, err
 	}
 	markProfilePermission(profile, sysin.ProfilePermissionCreator)
-	media, err := s.mediaListByProfile(ctx, profile.Id, account.TenantId, account.Id)
+	media, err := s.mediaListByEditableProfile(ctx, profile.Id, account.TenantId, account.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +201,7 @@ func (s *sSysPublish) AdminProfileView(ctx context.Context, in *sysin.ProfileVie
 		return nil, gerror.New("资料不存在或无权操作")
 	}
 	markProfilePermission(profile, profilePermissionForViewer(account, profile))
-	media, err := s.mediaListByProfile(ctx, profile.Id, profile.TenantId, profile.AccountId)
+	media, err := s.mediaListByEditableProfile(ctx, profile.Id, profile.TenantId, profile.AccountId)
 	if err != nil {
 		return nil, err
 	}

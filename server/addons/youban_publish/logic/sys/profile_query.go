@@ -62,9 +62,6 @@ func (s *sSysPublish) profileListByModel(ctx context.Context, base *gdb.Model, i
 }
 
 func (s *sSysPublish) profileView(ctx context.Context, profileId int64, tenantId int64, accountId int64) (res *sysin.ProfileModel, err error) {
-	if err = s.ensureLegacyProfileNosOnce(ctx); err != nil {
-		return nil, err
-	}
 	if profileId <= 0 {
 		return nil, gerror.New("资料ID不能为空")
 	}
@@ -78,6 +75,10 @@ func (s *sSysPublish) profileView(ctx context.Context, profileId int64, tenantId
 	if res == nil || res.Id <= 0 {
 		return nil, gerror.New("资料不存在或无权操作")
 	}
+	if draft, draftErr := s.editableProfileTask(ctx, res.Id, tenantId, accountId); draftErr == nil && !draft.IsEmpty() {
+		res.TaskId = draft["id"].Int64()
+		res.TaskStatus = draft["status"].String()
+	}
 	if err = s.ensureProfileModelUUID(ctx, res); err != nil {
 		return nil, err
 	}
@@ -88,9 +89,6 @@ func (s *sSysPublish) profileView(ctx context.Context, profileId int64, tenantId
 }
 
 func (s *sSysPublish) profileViewBySelector(ctx context.Context, in *sysin.ProfileViewInp, tenantId int64, accountId int64) (res *sysin.ProfileModel, err error) {
-	if err = s.ensureLegacyProfileNosOnce(ctx); err != nil {
-		return nil, err
-	}
 	if in == nil || !hasProfileSelector(in.Id, in.Uuid) {
 		return nil, gerror.New("资料UUID不能为空")
 	}
@@ -108,6 +106,10 @@ func (s *sSysPublish) profileViewBySelector(ctx context.Context, in *sysin.Profi
 	}
 	if res == nil || res.Id <= 0 {
 		return nil, gerror.New("资料不存在或无权操作")
+	}
+	if draft, draftErr := s.editableProfileTask(ctx, res.Id, tenantId, accountId); draftErr == nil && !draft.IsEmpty() {
+		res.TaskId = draft["id"].Int64()
+		res.TaskStatus = draft["status"].String()
 	}
 	if err = s.ensureProfileModelUUID(ctx, res); err != nil {
 		return nil, err
@@ -323,7 +325,7 @@ ORDER BY profile_id ASC`, publishMediaTable, placeholders)
 
 func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, accountId int64) (*gdb.Model, error) {
 	mod := dao.ContentProfile.Ctx(ctx).As("p").
-		LeftJoin(publishTaskTable+" t", "t.profile_id=p.id AND t.deleted_at IS NULL").
+		LeftJoin(publishTaskTable+" t", "t.id = (SELECT t2.id FROM "+publishTaskTable+" t2 WHERE t2.profile_id=p.id AND t2.deleted_at IS NULL ORDER BY CASE WHEN t2.status = 'draft' THEN 0 ELSE 1 END, t2.id DESC LIMIT 1)").
 		LeftJoin(publishTenantTable+" tenant", "tenant.id=t.tenant_id").
 		LeftJoin(publishAccountTable+" a", "a.id=t.account_id AND a.deleted_at IS NULL").
 		Where("(p.source_type = ? OR t.id IS NOT NULL)", publishProfileSourceType).
