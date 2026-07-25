@@ -2,20 +2,27 @@ package sys
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 	"hotgo/internal/model/input/form"
 )
+
+const adminNoteIndexCoverageTTL = 30 * time.Second
 
 func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.ProfileListInp, tenantId int64, tenantIds []int64, accountIds []int64) ([]*sysin.ProfileModel, int, bool, error) {
 	if in == nil {
 		in = &sysin.ProfileListInp{}
 	}
-	if !s.adminNoteIndexReady(ctx, tenantId, tenantIds) {
+	if !s.adminNoteIndexReady(ctx, tenantId, tenantIds, accountIds) {
 		return nil, 0, false, nil
 	}
 	mod := noteIndexModel(ctx).LeftJoin(publishAccountTable+" a", "a.id=i.account_id AND a.deleted_at IS NULL")
@@ -43,17 +50,66 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.ProfileL
 	return list, totalCount, true, nil
 }
 
-func (s *sSysPublish) adminNoteIndexReady(ctx context.Context, tenantId int64, tenantIds []int64) bool {
+func (s *sSysPublish) adminNoteIndexReady(ctx context.Context, tenantId int64, tenantIds []int64, accountIds []int64) bool {
+	key := adminNoteIndexCoverageKey(tenantId, tenantIds, accountIds)
+	if value, err := cache.Instance().Get(ctx, key); err == nil && !value.IsNil() {
+		return value.Int() == 1
+	}
+	sourceCount, err := adminNoteIndexSourceCount(ctx, tenantId, tenantIds, accountIds)
+	if err != nil {
+		return false
+	}
+	indexCount, err := adminNoteIndexCount(ctx, tenantId, tenantIds, accountIds)
+	if err != nil {
+		return false
+	}
+	ready := sourceCount == indexCount
+	value := 0
+	if ready {
+		value = 1
+	}
+	_ = cache.Instance().Set(ctx, key, value, adminNoteIndexCoverageTTL)
+	return ready
+}
+
+func adminNoteIndexSourceCount(ctx context.Context, tenantId int64, tenantIds []int64, accountIds []int64) (int, error) {
+	mod := gdbModel(ctx, "hg_content_profile p").
+		InnerJoin("hg_youban_publish_task t", "t.profile_id=p.id AND t.deleted_at IS NULL").
+		WhereNull("p.deleted_at")
+	if len(tenantIds) > 0 {
+		mod = mod.WhereIn("t.tenant_id", tenantIds)
+	} else if tenantId > 0 {
+		mod = mod.Where("t.tenant_id", tenantId)
+	}
+	if len(accountIds) > 0 {
+		mod = mod.WhereIn("t.account_id", accountIds)
+	}
+	return mod.Count()
+}
+
+func adminNoteIndexCount(ctx context.Context, tenantId int64, tenantIds []int64, accountIds []int64) (int, error) {
 	mod := noteIndexModel(ctx)
 	if len(tenantIds) > 0 {
 		mod = mod.WhereIn("i.tenant_id", tenantIds)
 	} else if tenantId > 0 {
 		mod = mod.Where("i.tenant_id", tenantId)
-	} else {
-		return false
 	}
-	row, err := mod.Fields("i.id").Limit(1).One()
-	return err == nil && !row.IsEmpty()
+	if len(accountIds) > 0 {
+		mod = mod.WhereIn("i.account_id", accountIds)
+	}
+	return mod.Count()
+}
+
+func gdbModel(ctx context.Context, table string) *gdb.Model {
+	return g.DB().Model(table).Safe().Ctx(ctx)
+}
+
+func adminNoteIndexCoverageKey(tenantId int64, tenantIds []int64, accountIds []int64) string {
+	tenantIds = append([]int64(nil), tenantIds...)
+	accountIds = append([]int64(nil), accountIds...)
+	sort.Slice(tenantIds, func(i, j int) bool { return tenantIds[i] < tenantIds[j] })
+	sort.Slice(accountIds, func(i, j int) bool { return accountIds[i] < accountIds[j] })
+	return fmt.Sprintf("youban_publish:note_index:coverage:%s", mediaPHashHashKey(fmt.Sprintf("%d:%v:%v", tenantId, tenantIds, accountIds)))
 }
 
 func applyNoteIndexScope(mod *gdb.Model, tenantId int64, tenantIds []int64, accountIds []int64, in *sysin.ProfileListInp) *gdb.Model {
