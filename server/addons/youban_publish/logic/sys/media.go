@@ -199,15 +199,22 @@ func (s *sSysPublish) profileImageSearchByAccountIds(ctx context.Context, in *sy
 	if err != nil {
 		return nil, 0, err
 	}
-	profileIds, totalCount, err := s.findSimilarProfileIdsByPHash(ctx, queryHash, in, accountIds)
+	matches, totalCount, err := s.findSimilarProfileMatchesByPHash(ctx, queryHash, in, accountIds)
 	if err != nil {
 		return nil, 0, err
+	}
+	profileIds := make([]int64, 0, len(matches))
+	for _, match := range matches {
+		profileIds = append(profileIds, match.ProfileId)
 	}
 	if len(profileIds) == 0 {
 		return []*sysin.NoteModel{}, totalCount, nil
 	}
 	list, err = s.profileImageSearchNotesByProfileIds(ctx, profileIds, in.TenantId, accountIds, viewer, "")
 	if err != nil {
+		return nil, 0, err
+	}
+	if err = s.attachProfileImageSearchMatches(ctx, list, matches); err != nil {
 		return nil, 0, err
 	}
 	return list, totalCount, nil
@@ -224,7 +231,9 @@ func normalizeProfileImageSearchInput(in *sysin.ProfileImageSearchInp) {
 		in.PerPage = 50
 	}
 	if in.Threshold <= 0 {
-		in.Threshold = 12
+		// Image search must be stricter than the detail-page similarity query.
+		// A 64-bit pHash threshold of 12 produces visible false positives.
+		in.Threshold = 8
 	}
 	if in.Threshold > 32 {
 		in.Threshold = 32
@@ -238,10 +247,12 @@ func normalizeProfileImageSearchInput(in *sysin.ProfileImageSearchInp) {
 type publishProfilePHashDistance struct {
 	Distance  int
 	ProfileId int64
+	MediaId   int64
+	MediaType string
 }
 
-func (s *sSysPublish) findSimilarProfileIdsByPHash(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, accountIds []int64) (profileIds []int64, totalCount int, err error) {
-	return s.findSimilarProfileIdsByPHashBucket(ctx, queryHash, in, accountIds)
+func (s *sSysPublish) findSimilarProfileMatchesByPHash(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, accountIds []int64) (matches []publishProfilePHashDistance, totalCount int, err error) {
+	return s.findSimilarProfileMatchesByPHashBucket(ctx, queryHash, in, accountIds)
 }
 
 func (s *sSysPublish) profileImageSearchCandidateProfileIds(ctx context.Context, in *sysin.ProfileListInp, accountIds []int64) ([]int64, error) {

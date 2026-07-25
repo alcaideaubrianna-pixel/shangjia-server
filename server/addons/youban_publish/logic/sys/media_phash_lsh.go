@@ -139,7 +139,8 @@ AND EXISTS (
       AND t.account_id = candidate.account_id
       AND t.deleted_at IS NULL
 )
-LIMIT %d`, strings.Join(branches, " UNION ALL "), mediaPHashBucketMaxCandidates*25)
+ORDER BY candidate.bucket_hits DESC
+LIMIT %d`, strings.Join(branches, " UNION ALL "), mediaPHashBucketMaxCandidates)
 	rows := make([]mediaPHashBucketCandidateRow, 0)
 	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") {

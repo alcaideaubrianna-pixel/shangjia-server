@@ -777,7 +777,8 @@ type NoteListInp struct {
 
 type NoteModel struct {
 	ProfileModel
-	Media []*MediaModel `json:"media" dc:"媒体列表"`
+	Media        []*MediaModel `json:"media" dc:"媒体列表"`
+	MatchedMedia *MediaModel   `json:"matchedMedia,omitempty" dc:"图片搜索实际命中的媒体"`
 }
 
 type AdminNoteMediaModel struct {

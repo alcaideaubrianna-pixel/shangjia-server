@@ -17,7 +17,7 @@ import (
 const (
 	mediaPHashBucketCacheVersionKey = "youban_publish:media_phash_bucket:version:v2"
 	mediaPHashBucketResultTTL       = 10 * time.Minute
-	mediaPHashBucketMaxCandidates   = 8000
+	mediaPHashBucketMaxCandidates   = 50000
 	mediaPHashBucketMaxScopedIds    = 32
 	mediaPHashCandidateWorkMem      = "64MB"
 )

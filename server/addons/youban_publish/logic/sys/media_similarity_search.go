@@ -25,7 +25,7 @@ type mediaPHashBucketCandidateRow struct {
 	TenantId   int64  `json:"tenantId" orm:"tenant_id"`
 }
 
-func (s *sSysPublish) findSimilarProfileIdsByPHashBucket(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, accountIds []int64) ([]int64, int, error) {
+func (s *sSysPublish) findSimilarProfileMatchesByPHashBucket(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, accountIds []int64) ([]publishProfilePHashDistance, int, error) {
 	accountIds = uniqueIds(accountIds)
 	if len(accountIds) == 0 && in.AccountId > 0 {
 		accountIds = []int64{in.AccountId}
@@ -35,7 +35,7 @@ func (s *sSysPublish) findSimilarProfileIdsByPHashBucket(ctx context.Context, qu
 		return nil, 0, err
 	}
 	if candidateProfileIds != nil && len(candidateProfileIds) == 0 {
-		return []int64{}, 0, nil
+		return []publishProfilePHashDistance{}, 0, nil
 	}
 	items, err := s.cachedProfilePHashSearchCandidates(ctx, queryHash, in, accountIds, candidateProfileIds)
 	if err != nil {
@@ -49,21 +49,17 @@ func (s *sSysPublish) findSimilarProfileIdsByPHashBucket(ctx context.Context, qu
 	})
 	totalCount := len(items)
 	if totalCount == 0 {
-		return []int64{}, 0, nil
+		return []publishProfilePHashDistance{}, 0, nil
 	}
 	start := (in.Page - 1) * in.PerPage
 	if start < 0 {
 		start = 0
 	}
 	if start >= totalCount {
-		return []int64{}, totalCount, nil
+		return []publishProfilePHashDistance{}, totalCount, nil
 	}
 	end := int(math.Min(float64(start+in.PerPage), float64(totalCount)))
-	profileIds := make([]int64, 0, end-start)
-	for _, item := range items[start:end] {
-		profileIds = append(profileIds, item.ProfileId)
-	}
-	return profileIds, totalCount, nil
+	return items[start:end], totalCount, nil
 }
 
 func (s *sSysPublish) cachedProfilePHashSearchCandidates(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, accountIds []int64, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
@@ -100,7 +96,12 @@ func (s *sSysPublish) profilePHashSearchCandidates(ctx context.Context, queryHas
 		if distanceErr != nil || distance > in.Threshold {
 			continue
 		}
-		items = append(items, publishProfilePHashDistance{ProfileId: row.ProfileId, Distance: distance})
+		items = append(items, publishProfilePHashDistance{
+			ProfileId: row.ProfileId,
+			Distance:  distance,
+			MediaId:   row.MediaId,
+			MediaType: row.MediaType,
+		})
 	}
 	return mediaPHashDeduplicateProfiles(items), nil
 }
@@ -110,16 +111,17 @@ func (s *sSysPublish) mediaPHashBucketCandidateRows(ctx context.Context, queryHa
 }
 
 func mediaPHashDeduplicateProfiles(items []publishProfilePHashDistance) []publishProfilePHashDistance {
-	distanceByProfile := map[int64]int{}
+	matchByProfile := map[int64]publishProfilePHashDistance{}
 	for _, item := range items {
-		current, exists := distanceByProfile[item.ProfileId]
-		if !exists || item.Distance < current {
-			distanceByProfile[item.ProfileId] = item.Distance
+		current, exists := matchByProfile[item.ProfileId]
+		if !exists || item.Distance < current.Distance ||
+			(item.Distance == current.Distance && item.MediaId < current.MediaId) {
+			matchByProfile[item.ProfileId] = item
 		}
 	}
-	res := make([]publishProfilePHashDistance, 0, len(distanceByProfile))
-	for profileId, distance := range distanceByProfile {
-		res = append(res, publishProfilePHashDistance{ProfileId: profileId, Distance: distance})
+	res := make([]publishProfilePHashDistance, 0, len(matchByProfile))
+	for _, item := range matchByProfile {
+		res = append(res, item)
 	}
 	return res
 }
@@ -143,7 +145,7 @@ func mediaPHashMinEqualNibbles(threshold int) int {
 
 func mediaPHashSearchCacheKey(ctx context.Context, queryHash uint64, in *sysin.ProfileImageSearchInp, accountIds []int64, candidateProfileIds []int64) string {
 	parts := []string{
-		fmt.Sprintf("youban_publish:profile_image_search:v3:%d", queryHash),
+		fmt.Sprintf("youban_publish:profile_image_search:v4:%d", queryHash),
 		fmt.Sprintf("tenant=%d", in.TenantId),
 		fmt.Sprintf("account=%d", in.AccountId),
 		fmt.Sprintf("threshold=%d", in.Threshold),
