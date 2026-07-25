@@ -299,11 +299,12 @@ func (s *sSysPublish) createQuickPushMessageTemplate(ctx context.Context, tenant
 	if err != nil {
 		return nil, err
 	}
-	template := &sysin.MessageTemplateModel{TenantId: tenantId, SerialNo: serialNo, Name: name, Text: text, MediaCount: len(media), Media: []*sysin.MessageTemplateMediaModel{}, Status: 1, CreatedBy: operatorAccountId, UpdatedBy: operatorAccountId, CreatedAt: now, UpdatedAt: now}
+	template := &sysin.MessageTemplateModel{TenantId: tenantId, SerialNo: serialNo, PushMode: sysin.MessageTemplatePushModeBot, Name: name, Text: text, MediaCount: len(media), Media: []*sysin.MessageTemplateMediaModel{}, Status: 1, CreatedBy: operatorAccountId, UpdatedBy: operatorAccountId, CreatedAt: now, UpdatedAt: now}
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		id, err := tx.Model(messageTemplateTable).Ctx(ctx).Data(g.Map{
 			"tenant_id":   tenantId,
 			"serial_no":   serialNo,
+			"push_mode":   sysin.MessageTemplatePushModeBot,
 			"name":        name,
 			"text":        text,
 			"media_count": len(media),

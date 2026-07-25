@@ -1482,6 +1482,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_template` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
   `serial_no` varchar(32) NOT NULL DEFAULT '' COMMENT 'Inline模板编号',
+  `push_mode` varchar(16) NOT NULL DEFAULT 'bot' COMMENT '推送方式：bot/account',
   `name` varchar(128) NOT NULL DEFAULT '' COMMENT '模板名称',
   `text` text COMMENT '消息文本',
   `media_count` int(11) NOT NULL DEFAULT '0' COMMENT '媒体数量',

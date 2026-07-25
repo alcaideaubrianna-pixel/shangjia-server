@@ -277,8 +277,11 @@ func (s *sSysPublish) SendMessagePushJob(ctx context.Context, jobId int64) error
 }
 
 func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRecord, template *sysin.MessageTemplateModel, channel *messagePushChannel, tgAccountId int64) error {
-	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusSending, "开始通过Inline机器人推送消息模板")
-	if strings.TrimSpace(template.SerialNo) != "" && channel != nil && channel.TgAccountId > 0 && job.BotId > 0 {
+	media := messageTemplateTelegramMedia(template)
+	// Inline results are single-message results. Any media must use the
+	// account sender so mixed media can be delivered as one Telegram group.
+	if messageTemplateUsesInline(template) && channel != nil && channel.TgAccountId > 0 && job.BotId > 0 {
+		s.appendTelegramJobLog(ctx, job, "inline_send", sysin.MessagePushStatusSending, fmt.Sprintf("尝试Inline推送 serial:%s botId:%d tgAccountId:%d", template.SerialNo, job.BotId, channel.TgAccountId))
 		messages, inlineErr := s.sendInlineTemplateByAccount(ctx, channel.TgAccountId, job.BotId, channel, template.SerialNo)
 		if inlineErr == nil {
 			if err := s.saveTelegramSentMessages(ctx, job, messages); err != nil {
@@ -292,9 +295,18 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 			return nil
 		}
 		s.appendTelegramJobLog(ctx, job, "inline_send", "fallback", "Inline推送失败，回退账号直发："+inlineErr.Error())
+	} else {
+		reason := "模板包含媒体"
+		if template == nil || strings.TrimSpace(template.SerialNo) == "" {
+			reason = "模板缺少Inline编号"
+		} else if channel == nil || channel.TgAccountId <= 0 {
+			reason = "目标缺少TG账号"
+		} else if job.BotId <= 0 {
+			reason = "目标缺少可用机器人"
+		}
+		s.appendTelegramJobLog(ctx, job, "inline_send", "skipped", "未执行Inline推送："+reason)
 	}
 	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusSending, "开始使用账号直发消息模板")
-	media := messageTemplateTelegramMedia(template)
 	messages, err := s.sendMessageTemplateByTgAccount(ctx, tgAccountId, channel, telegramRichTextHTML(template.Text), media, messageTemplateHash(template))
 	if err != nil {
 		return err
@@ -314,6 +326,10 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 	}
 	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusSent, "账号消息模板推送成功")
 	return nil
+}
+
+func messageTemplateUsesInline(template *sysin.MessageTemplateModel) bool {
+	return template != nil && len(messageTemplateTelegramMedia(template)) == 0 && strings.TrimSpace(template.SerialNo) != ""
 }
 
 func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAccountId int64, channel *messagePushChannel, caption string, media []*telegramMediaItem, templateHash string) ([]*telegramSentMessage, error) {
@@ -973,6 +989,13 @@ func (s *sSysPublish) messagePushChannels(ctx context.Context, ids []int64, tena
 		item.IsBroadcast = cache.IsBroadcast
 		item.IsMegagroup = cache.IsMegagroup
 	}
+	if botId, botErr := s.defaultMessagePushBotId(ctx); botErr == nil {
+		for _, item := range list {
+			if item != nil && firstMessagePushBotId(item) <= 0 {
+				item.BotIdJson = fmt.Sprintf("[%d]", botId)
+			}
+		}
+	}
 	return list, nil
 }
 
@@ -1019,6 +1042,7 @@ func (s *sSysPublish) messagePushCachedTargets(ctx context.Context, tgAccountId 
 		return nil, gerror.Wrap(err, "读取缓存推送目标失败")
 	}
 	rowMap := make(map[string]*messagePushChannel, len(rows))
+	botId, _ := s.defaultMessagePushBotId(ctx)
 	for _, row := range rows {
 		channel := &messagePushChannel{
 			Id:           row.Id,
@@ -1028,6 +1052,7 @@ func (s *sSysPublish) messagePushCachedTargets(ctx context.Context, tgAccountId 
 			IsBroadcast:  row.IsBroadcast,
 			IsMegagroup:  row.IsMegagroup,
 			TargetChatId: row.ChannelId,
+			BotIdJson:    fmt.Sprintf("[%d]", botId),
 		}
 		for _, id := range tgChannelCacheLookupIds(row.ChannelId) {
 			rowMap[id] = channel
@@ -1048,6 +1073,21 @@ func (s *sSysPublish) messagePushCachedTargets(ctx context.Context, tgAccountId 
 		channels = append(channels, channel)
 	}
 	return channels, nil
+}
+
+func (s *sSysPublish) defaultMessagePushBotId(ctx context.Context) (int64, error) {
+	var row struct {
+		Id int64 `json:"id"`
+	}
+	if err := g.DB().Model("hg_youban_bot_bot").Safe().Ctx(ctx).
+		Fields("id").Where("is_default", 1).Where("status", 1).WhereNull("deleted_at").
+		OrderAsc("id").Scan(&row); err != nil {
+		return 0, gerror.Wrap(err, "读取默认推送机器人失败")
+	}
+	if row.Id <= 0 {
+		return 0, gerror.New("未配置可用推送机器人")
+	}
+	return row.Id, nil
 }
 
 func (s *sSysPublish) ensureMessagePushTgAccountBelongTenant(ctx context.Context, accountId int64, tenantId int64) error {

@@ -421,7 +421,15 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 	}
 	results := []models.InlineQueryResult{}
 	if row.Id > 0 {
-		results = append(results, &models.InlineQueryResultArticle{ID: row.SerialNo, Title: row.Name, Description: row.SerialNo, InputMessageContent: &models.InputTextMessageContent{MessageText: row.Text}})
+		results = append(results, &models.InlineQueryResultArticle{
+			ID:          row.SerialNo,
+			Title:       row.Name,
+			Description: row.SerialNo,
+			InputMessageContent: &models.InputTextMessageContent{
+				MessageText: publishService.SysPublish().TelegramRichTextHTML(row.Text),
+				ParseMode:   models.ParseModeHTML,
+			},
+		})
 	}
 	botRow, err := s.botById(ctx, botId)
 	if err != nil {

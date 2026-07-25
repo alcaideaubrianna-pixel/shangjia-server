@@ -10,6 +10,7 @@ import (
 )
 
 type ISysPublish interface {
+	TelegramRichTextHTML(value string) string
 	StartRuntime(ctx context.Context)
 	StopRuntime()
 	AdminTenantList(ctx context.Context, in *sysin.TenantListInp) (list []*sysin.TenantModel, totalCount int, err error)

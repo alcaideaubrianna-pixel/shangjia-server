@@ -1462,6 +1462,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_template" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
   "serial_no" varchar(32) NOT NULL DEFAULT '',
+  "push_mode" varchar(16) NOT NULL DEFAULT 'bot',
   "name" varchar(128) NOT NULL DEFAULT '',
   "text" text,
   "media_count" integer NOT NULL DEFAULT 0,

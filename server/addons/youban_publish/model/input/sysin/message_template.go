@@ -17,6 +17,11 @@ const (
 	MessagePushStatusFailed  = "failed"
 )
 
+const (
+	MessageTemplatePushModeBot     = "bot"
+	MessageTemplatePushModeAccount = "account"
+)
+
 type MessageTemplateListInp struct {
 	form.PageReq
 	Keyword string `json:"keyword" dc:"关键词"`
@@ -43,11 +48,12 @@ type MessageTemplateMediaUploadInp struct {
 }
 
 type MessageTemplateSaveInp struct {
-	Id     int64                      `json:"id" dc:"ID"`
-	Name   string                     `json:"name" dc:"模板名称"`
-	Text   string                     `json:"text" dc:"文案"`
-	Media  []*MessageTemplateMediaInp `json:"media" dc:"媒体"`
-	Status int                        `json:"status" dc:"状态"`
+	Id       int64                      `json:"id" dc:"ID"`
+	Name     string                     `json:"name" dc:"模板名称"`
+	Text     string                     `json:"text" dc:"文案"`
+	Media    []*MessageTemplateMediaInp `json:"media" dc:"媒体"`
+	Status   int                        `json:"status" dc:"状态"`
+	PushMode string                     `json:"pushMode" dc:"推送方式：bot/account"`
 }
 
 type MessageTemplateDeleteInp struct {
@@ -141,6 +147,7 @@ type MessageTemplateModel struct {
 	MediaCount int                          `json:"mediaCount" dc:"媒体数"`
 	Media      []*MessageTemplateMediaModel `json:"media" dc:"媒体"`
 	Status     int                          `json:"status" dc:"状态"`
+	PushMode   string                       `json:"pushMode" dc:"推送方式：bot/account"`
 	CreatedBy  int64                        `json:"createdBy" dc:"创建人"`
 	UpdatedBy  int64                        `json:"updatedBy" dc:"更新人"`
 	DeletedBy  int64                        `json:"deletedBy" dc:"删除人"`
@@ -186,6 +193,12 @@ func (in *MessageTemplateSaveInp) Filter(ctx context.Context) error {
 	}
 	if in.Status != 1 && in.Status != 2 {
 		return gerror.New("模板状态不合法")
+	}
+	if in.PushMode == "" {
+		in.PushMode = MessageTemplatePushModeBot
+	}
+	if in.PushMode != MessageTemplatePushModeBot && in.PushMode != MessageTemplatePushModeAccount {
+		return gerror.New("推送方式不合法")
 	}
 	if len(in.Media) > 10 {
 		return gerror.New("每个模板最多上传10个媒体")

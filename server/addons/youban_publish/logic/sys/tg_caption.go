@@ -126,6 +126,12 @@ func telegramRichTextHTML(value string) string {
 	return strings.TrimSpace(builder.String())
 }
 
+// TelegramRichTextHTML exposes the canonical rich-text conversion to other
+// addons that produce Telegram messages.
+func (s *sSysPublish) TelegramRichTextHTML(value string) string {
+	return telegramRichTextHTML(value)
+}
+
 func writeTelegramHTMLNode(builder *strings.Builder, node *xhtml.Node) {
 	if node == nil {
 		return

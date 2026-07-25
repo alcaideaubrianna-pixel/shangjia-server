@@ -80,6 +80,7 @@ func (s *sSysPublish) AdminMessageTemplateSave(ctx context.Context, in *sysin.Me
 		data := g.Map{
 			"tenant_id":   account.TenantId,
 			"serial_no":   serialNo,
+			"push_mode":   in.PushMode,
 			"name":        in.Name,
 			"text":        in.Text,
 			"media_count": len(in.Media),
