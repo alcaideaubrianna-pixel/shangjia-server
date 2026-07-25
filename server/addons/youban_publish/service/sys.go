@@ -13,6 +13,7 @@ type ISysPublish interface {
 	TelegramRichTextHTML(value string) string
 	StartRuntime(ctx context.Context)
 	StopRuntime()
+	RunCyclePlanScheduler(ctx context.Context) error
 	AdminTenantList(ctx context.Context, in *sysin.TenantListInp) (list []*sysin.TenantModel, totalCount int, err error)
 	AdminTenantSave(ctx context.Context, in *sysin.TenantSaveInp) (res *sysin.TenantSaveModel, err error)
 	AdminTenantDelete(ctx context.Context, in *sysin.TenantDeleteInp) (err error)

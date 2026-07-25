@@ -59,23 +59,11 @@ type cycleRunRecord struct {
 	RetryCount   int         `json:"retryCount"`
 }
 
-func (s *sSysPublish) runCyclePlanScheduler(ctx context.Context) {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-	time.Sleep(3 * time.Second)
+func (s *sSysPublish) RunCyclePlanScheduler(ctx context.Context) error {
 	if err := s.bootstrapCyclePlans(ctx); err != nil {
-		g.Log().Warningf(ctx, "初始化循环上架计划失败：%+v", err)
+		return err
 	}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := s.scheduleDueCyclePlans(ctx, 100); err != nil {
-				g.Log().Warningf(ctx, "扫描循环上架计划失败：%+v", err)
-			}
-		}
-	}
+	return s.scheduleDueCyclePlans(ctx, 100)
 }
 
 func (s *sSysPublish) scheduleDueCyclePlans(ctx context.Context, limit int) error {
@@ -212,8 +200,11 @@ func (s *sSysPublish) executeLockedCycleRun(ctx context.Context, run cycleRunRec
 		return err
 	}
 	for _, job := range jobs {
-		if err = s.deleteTelegramMessageSet(ctx, job, "循环上架"); err != nil {
-			return err
+		if deleteErr := s.deleteTelegramMessageSet(ctx, job, "循环上架"); deleteErr != nil {
+			s.appendTelegramJobLog(ctx, job, "cycle_delete", "retry", "循环上架删除旧消息失败，已转入独立重试队列："+deleteErr.Error())
+			if retryErr := s.enqueueTelegramCleanupJob(ctx, job.Id, 0); retryErr != nil {
+				s.appendTelegramJobLog(ctx, job, "cycle_delete", "failed", "循环上架删除旧消息重试入队失败："+retryErr.Error())
+			}
 		}
 	}
 	if err = s.requeueCycleTaskTelegramJobs(ctx, plan); err != nil {

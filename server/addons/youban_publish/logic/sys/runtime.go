@@ -53,7 +53,6 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	s.startTelegramQueueWorker(ctx)
 	go s.runTelegramRuntime(ctx)
 	go s.runScheduledPublishRuntime(ctx)
-	go s.runCyclePlanScheduler(ctx)
 	go s.runMessagePushPlanScheduler(ctx)
 	go s.runTelegramChannelScheduler(ctx)
 	go s.runTelegramObserveStatsRefresher(ctx)

@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -13,13 +14,13 @@ import (
 
 func (s *sSysPublish) bootstrapCyclePlans(ctx context.Context) error {
 	var rows []struct {
-		TenantId           int64  `orm:"tenant_id" json:"tenantId"`
-		AccountId          int64  `orm:"account_id" json:"accountId"`
-		ProfileId          int64  `orm:"profile_id" json:"profileId"`
-		TaskId             int64  `orm:"task_id" json:"taskId"`
-		ChannelId          int64  `orm:"channel_id" json:"channelId"`
-		Days               int    `orm:"days" json:"days"`
-		PublishTime        string `orm:"publish_time" json:"publishTime"`
+		TenantId    int64  `orm:"tenant_id" json:"tenantId"`
+		AccountId   int64  `orm:"account_id" json:"accountId"`
+		ProfileId   int64  `orm:"profile_id" json:"profileId"`
+		TaskId      int64  `orm:"task_id" json:"taskId"`
+		ChannelId   int64  `orm:"channel_id" json:"channelId"`
+		Days        int    `orm:"days" json:"days"`
+		PublishTime string `orm:"publish_time" json:"publishTime"`
 	}
 	err := g.DB().Model(publishChannelTable+" c").Safe().Ctx(ctx).
 		Fields("c.tenant_id,j.account_id,j.profile_id,j.task_id,c.id AS channel_id,c.cycle_publish_days AS days,c.cycle_publish_time AS publish_time").
@@ -37,7 +38,7 @@ func (s *sSysPublish) bootstrapCyclePlans(ctx context.Context) error {
 		if row.TenantId <= 0 || row.AccountId <= 0 || row.ProfileId <= 0 || row.TaskId <= 0 || row.ChannelId <= 0 {
 			continue
 		}
-		if err = s.syncChannelCycleSettingToPlans(ctx, row.TenantId, row.AccountId, row.ProfileId, row.TaskId, row.ChannelId, cyclePlanSetting{
+		if err = s.ensureChannelCyclePlan(ctx, row.TenantId, row.AccountId, row.ProfileId, row.TaskId, row.ChannelId, cyclePlanSetting{
 			Enabled:     1,
 			Days:        row.Days,
 			PublishTime: row.PublishTime,
@@ -46,6 +47,30 @@ func (s *sSysPublish) bootstrapCyclePlans(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (s *sSysPublish) ensureChannelCyclePlan(ctx context.Context, tenantId int64, accountId int64, profileId int64, taskId int64, channelId int64, cycle cyclePlanSetting) error {
+	if tenantId <= 0 || accountId <= 0 || profileId <= 0 || taskId <= 0 || channelId <= 0 {
+		return nil
+	}
+	if cycle.Enabled != 1 {
+		return nil
+	}
+	intervalSeconds := s.cycleIntervalSeconds(ctx, cycle.Days)
+	data := g.Map{
+		"tenant_id":          tenantId,
+		"account_id":         accountId,
+		"profile_id":         profileId,
+		"channel_id":         channelId,
+		"task_id":            taskId,
+		"enabled":            1,
+		"interval_seconds":   intervalSeconds,
+		"publish_time":       cycle.PublishTime,
+		"status":             cyclePlanStatusActive,
+		"source":             "channel",
+		"last_error_message": "",
+	}
+	return s.upsertCyclePlan(ctx, data)
 }
 
 func (s *sSysPublish) syncChannelCycleAfterSave(ctx context.Context, tenantId int64, channelId int64, enabled int, days int, publishTime string) error {
@@ -226,6 +251,7 @@ func (s *sSysPublish) upsertCyclePlan(ctx context.Context, data g.Map) error {
 		return gerror.Wrap(err, "检查循环上架计划失败")
 	}
 	if count > 0 {
+		delete(data, "next_run_at")
 		_, err = g.DB().Model(publishCyclePlanTable).Safe().Ctx(ctx).
 			Where("tenant_id", data["tenant_id"]).
 			Where("account_id", data["account_id"]).
@@ -235,6 +261,21 @@ func (s *sSysPublish) upsertCyclePlan(ctx context.Context, data g.Map) error {
 			Data(data).
 			Update()
 	} else {
+		if _, ok := data["next_run_at"]; !ok {
+			intervalSeconds := 0
+			switch value := data["interval_seconds"].(type) {
+			case int:
+				intervalSeconds = value
+			case int64:
+				intervalSeconds = int(value)
+			case float64:
+				intervalSeconds = int(value)
+			}
+			data["next_run_at"] = s.nextCycleRunAt(ctx, cyclePlanRecord{
+				IntervalSeconds: intervalSeconds,
+				PublishTime:     fmt.Sprint(data["publish_time"]),
+			}, now)
+		}
 		data["created_at"] = now
 		_, err = g.DB().Model(publishCyclePlanTable).Safe().Ctx(ctx).Data(data).Insert()
 	}
