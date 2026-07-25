@@ -235,8 +235,10 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 		"updated_at": gtime.Now(),
 	}
 	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).WhereIn("profile_id", ids).Data(taskData).Update()
-	if err = s.deleteProfileNoteIndex(ctx, ids); err != nil {
-		return nil, err
+	for _, id := range ids {
+		if err = s.syncProfileNoteIndex(ctx, id); err != nil {
+			return nil, err
+		}
 	}
 	profileAccountIds, err := s.profileAccountIdsByIds(ctx, ids, tenantId)
 	if err != nil {
