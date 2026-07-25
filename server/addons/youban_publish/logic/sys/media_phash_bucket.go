@@ -55,6 +55,9 @@ func (s *sSysPublish) deleteMediaPHashBucketByMediaId(ctx context.Context, media
 	if err != nil {
 		return gerror.Wrap(err, "删除媒体哈希索引失败")
 	}
+	if _, err = g.DB().Model(publishMediaPHashLshTable).Safe().Ctx(ctx).Where("media_id", mediaId).Delete(); err != nil {
+		return gerror.Wrap(err, "删除媒体LSH索引失败")
+	}
 	return bumpMediaPHashBucketVersions(ctx, owners)
 }
 
@@ -69,6 +72,9 @@ func (s *sSysPublish) replaceMediaPHashBucketByMediaRow(ctx context.Context, med
 	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if _, err := tx.Model(publishMediaPHashBucketTable).Safe().Ctx(ctx).Where("media_id", mediaId).Delete(); err != nil {
 			return gerror.Wrap(err, "清理媒体哈希索引失败")
+		}
+		if _, err := tx.Model(publishMediaPHashLshTable).Safe().Ctx(ctx).Where("media_id", mediaId).Delete(); err != nil {
+			return gerror.Wrap(err, "清理媒体LSH索引失败")
 		}
 		rows := make([]g.Map, 0, len(buckets))
 		for _, bucket := range buckets {
@@ -89,6 +95,12 @@ func (s *sSysPublish) replaceMediaPHashBucketByMediaRow(ctx context.Context, med
 		for _, row := range rows {
 			if _, err := tx.Model(publishMediaPHashBucketTable).Safe().Ctx(ctx).Data(row).Insert(); err != nil {
 				return gerror.Wrap(err, "写入媒体哈希索引失败")
+			}
+		}
+		lshRows := mediaPHashLshRowsForMedia(media, hash, now)
+		if len(lshRows) > 0 {
+			if _, err := tx.Model(publishMediaPHashLshTable).Safe().Ctx(ctx).Data(lshRows).Insert(); err != nil {
+				return gerror.Wrap(err, "写入媒体LSH索引失败")
 			}
 		}
 		return nil
@@ -175,6 +187,9 @@ func (s *sSysPublish) deleteMediaPHashBucketByProfileId(ctx context.Context, pro
 	if err != nil {
 		return gerror.Wrap(err, "删除资料哈希索引失败")
 	}
+	if _, err = g.DB().Model(publishMediaPHashLshTable).Safe().Ctx(ctx).Where("profile_id", profileId).Delete(); err != nil {
+		return gerror.Wrap(err, "删除资料LSH索引失败")
+	}
 	return bumpMediaPHashBucketVersions(ctx, owners)
 }
 
@@ -189,6 +204,9 @@ func (s *sSysPublish) deleteMediaPHashBucketByTaskId(ctx context.Context, taskId
 	_, err = g.DB().Model(publishMediaPHashBucketTable).Safe().Ctx(ctx).Where("task_id", taskId).Delete()
 	if err != nil {
 		return gerror.Wrap(err, "删除任务哈希索引失败")
+	}
+	if _, err = g.DB().Model(publishMediaPHashLshTable).Safe().Ctx(ctx).Where("task_id", taskId).Delete(); err != nil {
+		return gerror.Wrap(err, "删除任务LSH索引失败")
 	}
 	return bumpMediaPHashBucketVersions(ctx, owners)
 }
@@ -227,6 +245,13 @@ func mediaPHashBucketCandidateRows(ctx context.Context, normalizedHash string, t
 }
 
 func mediaPHashBucketCandidateRowsWithScopes(ctx context.Context, normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) ([]mediaPHashBucketCandidateRow, error) {
+	if mediaPHashLshReady(ctx) && threshold <= 12 {
+		rows, err := mediaPHashLshCandidateRowsWithScopes(ctx, normalizedHash, threshold, scopes, profileIds, mediaType, excludeProfileId)
+		if err == nil {
+			return rows, nil
+		}
+		g.Log().Warningf(ctx, "pHash LSH查询失败，回退旧分桶查询：%v", err)
+	}
 	normalizedHash = strings.TrimSpace(strings.ToLower(normalizedHash))
 	if normalizedHash == "" {
 		return []mediaPHashBucketCandidateRow{}, nil

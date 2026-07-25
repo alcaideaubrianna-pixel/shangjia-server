@@ -1668,3 +1668,21 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media_phash_bucket` (
   UNIQUE KEY `uk_ybp_media_phash_bucket_media_pos` (`media_id`,`bucket_pos`),
   KEY `idx_ybp_media_phash_bucket_lookup` (`tenant_id`,`media_type`,`bucket_pos`,`bucket_value`,`account_id`,`profile_id`,`task_id`,`media_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体感知哈希分桶';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_media_phash_lsh` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0',
+  `media_id` bigint(20) NOT NULL DEFAULT '0',
+  `task_id` bigint(20) NOT NULL DEFAULT '0',
+  `media_type` varchar(16) NOT NULL DEFAULT '',
+  `hash_value` varchar(64) NOT NULL DEFAULT '',
+  `bucket_pos` smallint(6) NOT NULL DEFAULT '0',
+  `bucket_value` int(11) NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_media_phash_lsh_media_pos` (`media_id`,`bucket_pos`),
+  KEY `idx_ybp_media_phash_lsh_search` (`tenant_id`,`media_type`,`bucket_pos`,`bucket_value`,`media_id`,`profile_id`,`account_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体感知哈希LSH索引';

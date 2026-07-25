@@ -11,8 +11,9 @@ var (
 	publishImportMatchItemTable      = pdao.YoubanPublishImportMatchItem.Table()
 	publishImportMatchCandidateTable = pdao.YoubanPublishImportMatchCandidate.Table()
 	publishMediaTable                = pdao.YoubanPublishMedia.Table()
-	publishNoteIndexTable             = pdao.YoubanPublishNoteIndex.Table()
+	publishNoteIndexTable            = pdao.YoubanPublishNoteIndex.Table()
 	publishMediaPHashBucketTable     = "hg_youban_publish_media_phash_bucket"
+	publishMediaPHashLshTable        = "hg_youban_publish_media_phash_lsh"
 	publishTgJobTable                = pdao.YoubanPublishTgJob.Table()
 	publishTgQueueStatTable          = pdao.YoubanPublishTgQueueStat.Table()
 	publishTgChannelStatTable        = pdao.YoubanPublishTgChannelStat.Table()

@@ -2,17 +2,22 @@ package fix
 
 import (
 	"context"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	"hotgo/internal/library/cache"
 )
 
 const (
 	youbanPublishMediaTable            = "hg_youban_publish_media"
 	youbanPublishMediaPHashBucketTable = "hg_youban_publish_media_phash_bucket"
+	youbanPublishMediaPHashLshTable    = "hg_youban_publish_media_phash_lsh"
 	mediaPHashBackfillBatchSize        = 300
 )
 
@@ -52,6 +57,7 @@ func BackfillYoubanPublishMediaPHashBucket(ctx context.Context) error {
 		g.Log().Infof(ctx, "上架媒体感知哈希分桶回填进度：lastId=%d media=%d buckets=%d", lastId, totalMedia, totalBucket)
 	}
 	g.Log().Infof(ctx, "上架媒体感知哈希分桶回填完成：media=%d buckets=%d", totalMedia, totalBucket)
+	_ = cache.Instance().Set(ctx, "youban_publish:media_phash_lsh:ready", 1, 365*24*time.Hour)
 	return nil
 }
 
@@ -73,6 +79,7 @@ func mediaPHashBackfillRows(ctx context.Context, lastId int64, limit int) ([]med
 
 func insertMediaPHashBackfillBuckets(ctx context.Context, rows []mediaPHashBackfillRow) (int, error) {
 	data := make([]g.Map, 0, len(rows)*16)
+	lshData := make([]g.Map, 0, len(rows)*4)
 	mediaIds := make([]int64, 0, len(rows))
 	now := gtime.Now()
 	for _, row := range rows {
@@ -96,6 +103,19 @@ func insertMediaPHashBackfillBuckets(ctx context.Context, rows []mediaPHashBackf
 				"updated_at":   now,
 			})
 		}
+		value, err := strconv.ParseUint(hash, 16, 64)
+		if err != nil {
+			continue
+		}
+		for pos := 0; pos < 4; pos++ {
+			block := int((value >> uint((3-pos)*16)) & 0xffff)
+			lshData = append(lshData, g.Map{
+				"tenant_id": row.TenantId, "account_id": row.AccountId, "profile_id": row.ProfileId,
+				"media_id": row.Id, "task_id": row.TaskId, "media_type": strings.TrimSpace(row.MediaType),
+				"hash_value": hash, "bucket_pos": pos + 1, "bucket_value": block,
+				"created_at": now, "updated_at": now,
+			})
+		}
 	}
 	if len(data) == 0 {
 		return 0, nil
@@ -104,8 +124,14 @@ func insertMediaPHashBackfillBuckets(ctx context.Context, rows []mediaPHashBackf
 		if _, err := tx.Model(youbanPublishMediaPHashBucketTable).Safe().Ctx(ctx).WhereIn("media_id", mediaIds).Delete(); err != nil {
 			return gerror.Wrap(err, "清理媒体感知哈希分桶失败")
 		}
+		if _, err := tx.Model(youbanPublishMediaPHashLshTable).Safe().Ctx(ctx).WhereIn("media_id", mediaIds).Delete(); err != nil {
+			return gerror.Wrap(err, "清理媒体感知哈希LSH索引失败")
+		}
 		if _, err := tx.Model(youbanPublishMediaPHashBucketTable).Safe().Ctx(ctx).Data(data).Insert(); err != nil {
 			return gerror.Wrap(err, "写入媒体感知哈希分桶失败")
+		}
+		if _, err := tx.Model(youbanPublishMediaPHashLshTable).Safe().Ctx(ctx).Data(lshData).Insert(); err != nil {
+			return gerror.Wrap(err, "写入媒体感知哈希LSH索引失败")
 		}
 		return nil
 	})
@@ -134,6 +160,22 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_bucket" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_media_phash_bucket_media_pos" ON "hg_youban_publish_media_phash_bucket" ("media_id", "bucket_pos");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_bucket_lookup" ON "hg_youban_publish_media_phash_bucket" ("tenant_id", "media_type", "bucket_pos", "bucket_value", "account_id", "profile_id", "task_id", "media_id");
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_lsh" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "media_id" bigint NOT NULL DEFAULT 0,
+  "task_id" bigint NOT NULL DEFAULT 0,
+  "media_type" varchar(16) NOT NULL DEFAULT '',
+  "hash_value" varchar(64) NOT NULL DEFAULT '',
+  "bucket_pos" smallint NOT NULL DEFAULT 0,
+  "bucket_value" integer NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_media_phash_lsh_media_pos" ON "hg_youban_publish_media_phash_lsh" ("media_id", "bucket_pos");
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_lsh_search" ON "hg_youban_publish_media_phash_lsh" ("tenant_id", "media_type", "bucket_pos", "bucket_value") INCLUDE ("media_id", "profile_id", "account_id", "hash_value");
 `)
 		return gerror.Wrap(err, "初始化媒体感知哈希分桶表失败")
 	}
@@ -153,6 +195,21 @@ CREATE TABLE IF NOT EXISTS `+"`hg_youban_publish_media_phash_bucket`"+` (
   `+"`updated_at` datetime DEFAULT NULL COMMENT '更新时间',"+`
   PRIMARY KEY (`+"`id`"+`), UNIQUE KEY `+"`uk_ybp_media_phash_bucket_media_pos`"+` (`+"`media_id`,`bucket_pos`"+`), KEY `+"`idx_ybp_media_phash_bucket_lookup`"+` (`+"`tenant_id`,`media_type`,`bucket_pos`,`bucket_value`,`account_id`,`profile_id`,`task_id`,`media_id`"+`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体感知哈希分桶';
+CREATE TABLE IF NOT EXISTS `+"`hg_youban_publish_media_phash_lsh`"+` (
+  `+"`id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,"+`
+  `+"`tenant_id` bigint(20) NOT NULL DEFAULT '0',"+`
+  `+"`account_id` bigint(20) NOT NULL DEFAULT '0',"+`
+  `+"`profile_id` bigint(20) NOT NULL DEFAULT '0',"+`
+  `+"`media_id` bigint(20) NOT NULL DEFAULT '0',"+`
+  `+"`task_id` bigint(20) NOT NULL DEFAULT '0',"+`
+  `+"`media_type` varchar(16) NOT NULL DEFAULT '',"+`
+  `+"`hash_value` varchar(64) NOT NULL DEFAULT '',"+`
+  `+"`bucket_pos` smallint(6) NOT NULL DEFAULT '0',"+`
+  `+"`bucket_value` int(11) NOT NULL DEFAULT '0',"+`
+  `+"`created_at` datetime DEFAULT NULL,"+`
+  `+"`updated_at` datetime DEFAULT NULL,"+`
+  PRIMARY KEY (`+"`id`"+`), UNIQUE KEY `+"`uk_ybp_media_phash_lsh_media_pos`"+` (`+"`media_id`,`bucket_pos`"+`), KEY `+"`idx_ybp_media_phash_lsh_search`"+` (`+"`tenant_id`,`media_type`,`bucket_pos`,`bucket_value`,`media_id`,`profile_id`,`account_id`"+`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体感知哈希LSH索引';
 `)
 	return gerror.Wrap(err, "初始化媒体感知哈希分桶表失败")
 }
