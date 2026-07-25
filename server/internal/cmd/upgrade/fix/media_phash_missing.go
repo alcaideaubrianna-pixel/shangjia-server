@@ -2,6 +2,7 @@ package fix
 
 import (
 	"context"
+	"net/url"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -23,6 +24,13 @@ type mediaPHashMissingRow struct {
 	StoragePath       string `orm:"storage_path"`
 	PosterURL         string `orm:"poster_url"`
 	PosterStoragePath string `orm:"poster_storage_path"`
+}
+
+type mediaPHashCandidate struct {
+	mediaType string
+	localPath string
+	fileURL   string
+	posterURL string
 }
 
 // BackfillYoubanPublishMediaMissingPHash calculates missing media pHash values
@@ -100,28 +108,67 @@ func backfillMediaPHash(ctx context.Context, row mediaPHashMissingRow) error {
 
 func processMissingMediaPHash(ctx context.Context, row mediaPHashMissingRow) (*sysin.RemoteMediaAssetsModel, error) {
 	mediaType := strings.ToLower(strings.TrimSpace(row.MediaType))
-	fileURL := strings.TrimSpace(row.FileURL)
-	storagePath := strings.TrimSpace(row.StoragePath)
-	posterURL := strings.TrimSpace(row.PosterURL)
-	posterStoragePath := strings.TrimSpace(row.PosterStoragePath)
-	if mediaType == "video" && posterStoragePath != "" && !isRemoteMediaSource(posterStoragePath) {
-		return processStoredMissingPoster(ctx, posterStoragePath)
+	candidates := make([]mediaPHashCandidate, 0, 4)
+	if mediaType == "video" {
+		if path := strings.TrimSpace(row.PosterStoragePath); path != "" && !isRemoteMediaSource(path) {
+			candidates = append(candidates, mediaPHashCandidate{mediaType: "image", localPath: path})
+		}
+		if url := downloadableMediaSource(row.PosterURL); url != "" {
+			candidates = append(candidates, mediaPHashCandidate{mediaType: "image", fileURL: url})
+		}
 	}
-	if fileURL != "" && isRemoteMediaSource(fileURL) {
-		return service.SysPublish().ProcessRemoteMediaAssets(ctx, &sysin.RemoteMediaAssetsInp{
-			MediaType: mediaType, FileURL: fileURL, PosterURL: posterURL,
-		})
+	if path := strings.TrimSpace(row.StoragePath); path != "" && !isRemoteMediaSource(path) {
+		candidates = append(candidates, mediaPHashCandidate{mediaType: mediaType, localPath: path})
 	}
-	if storagePath != "" {
+	if fileURL := downloadableMediaSource(row.FileURL); fileURL != "" {
+		candidates = append(candidates, mediaPHashCandidate{mediaType: mediaType, fileURL: fileURL, posterURL: downloadableMediaSource(row.PosterURL)})
+	}
+	var lastErr error
+	for _, item := range candidates {
+		assets, err := processMissingMediaCandidate(ctx, item)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if assets != nil && len(strings.TrimSpace(assets.PerceptualHash)) == 16 {
+			return assets, nil
+		}
+		lastErr = gerror.New("候选媒体未返回合法感知哈希")
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, gerror.New("媒体没有可用的远程地址或本地路径")
+}
+
+func processMissingMediaCandidate(ctx context.Context, item mediaPHashCandidate) (*sysin.RemoteMediaAssetsModel, error) {
+	if item.localPath != "" {
 		stored, err := service.SysPublish().ProcessStoredMediaAssets(ctx, &sysin.StoredMediaAssetsInp{
-			MediaType: mediaType, LocalPath: storagePath,
+			MediaType: item.mediaType, LocalPath: item.localPath,
 		})
 		if err != nil {
 			return nil, err
 		}
 		return &sysin.RemoteMediaAssetsModel{Processed: stored.Processed, PerceptualHash: stored.PerceptualHash}, nil
 	}
-	return nil, gerror.New("媒体没有可用的远程地址或本地路径")
+	if item.fileURL == "" {
+		return nil, gerror.New("媒体候选地址为空")
+	}
+	return service.SysPublish().ProcessRemoteMediaAssets(ctx, &sysin.RemoteMediaAssetsInp{
+		MediaType: item.mediaType, FileURL: item.fileURL, PosterURL: item.posterURL,
+	})
+}
+
+func downloadableMediaSource(value string) string {
+	value = strings.TrimSpace(value)
+	if !isRemoteMediaSource(value) {
+		return ""
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || strings.Contains(strings.ToLower(parsed.Path), "/telegram/resource/") {
+		return ""
+	}
+	return value
 }
 
 func processStoredMissingPoster(ctx context.Context, posterPath string) (*sysin.RemoteMediaAssetsModel, error) {
