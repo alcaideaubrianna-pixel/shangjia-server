@@ -190,14 +190,6 @@ func feiNiuImportedMediaStoragePath(row gdb.Record) string {
 func feiNiuImportedMediaURL(row gdb.Record) string {
 	storagePath := feiNiuImportedMediaStoragePath(row)
 	if storagePath == "" {
-		for _, field := range []string{"origin_uri", "preview_uri", "local_file_path"} {
-			if path := strings.TrimSpace(row[field].String()); path != "" {
-				storagePath = path
-				break
-			}
-		}
-	}
-	if storagePath == "" {
 		return ""
 	}
 	cdnBase := feiniuMediaContentCDNBaseURL()

@@ -21,7 +21,7 @@ func feiNiuImportedVideoPoster(row gdb.Record, mediaType string) (string, string
 	}
 	storagePath := normalizeTelegramContentStoragePathLocal(previewURL)
 	if storagePath == "" {
-		return previewURL, ""
+		return "", ""
 	}
 	return feiNiuImportedMediaURLByStoragePath(storagePath), storagePath
 }
