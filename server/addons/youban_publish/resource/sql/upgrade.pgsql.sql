@@ -248,6 +248,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_listen_notice" (
   "created_at" timestamp DEFAULT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_msg_listen_notice_dedupe" ON "hg_youban_publish_message_listen_notice" ("dedupe_key");
+CREATE INDEX IF NOT EXISTS "idx_ybp_msg_listen_notice_cooldown" ON "hg_youban_publish_message_listen_notice" ("plan_id", "sender_user_id", "normalized_text_hash", "created_at");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_listen_sender" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -386,18 +387,8 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_note_index" (
 -- and pagination still require a stable primary key.
 ALTER TABLE "hg_youban_publish_note_index"
   ADD COLUMN IF NOT EXISTS "id" BIGSERIAL;
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conrelid = 'hg_youban_publish_note_index'::regclass
-      AND contype = 'p'
-  ) THEN
-    ALTER TABLE "hg_youban_publish_note_index"
-      ADD CONSTRAINT "pk_ybp_note_index" PRIMARY KEY ("id");
-  END IF;
-END $$;
+ALTER TABLE "hg_youban_publish_note_index"
+  ADD CONSTRAINT "pk_ybp_note_index" PRIMARY KEY ("id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_updated" ON "hg_youban_publish_note_index" ("tenant_id", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_updated" ON "hg_youban_publish_note_index" ("account_id", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_profile" ON "hg_youban_publish_note_index" ("profile_id") WHERE "deleted_at" IS NULL;

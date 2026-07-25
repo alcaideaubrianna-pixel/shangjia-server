@@ -353,7 +353,11 @@ func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAcco
 				return nil
 			}
 			if forwardErr != nil {
-				g.Log().Warningf(runCtx, "复用TG历史消息转发失败，回退上传 tgAccountId:%d templateHash:%s err:%+v", tgAccountId, templateHash, forwardErr)
+				if delay, ok := collectMediaFloodWaitDelay(forwardErr); ok {
+					g.Log().Warningf(runCtx, "复用TG历史消息触发Telegram限流，交给队列等待重试 tgAccountId:%d templateHash:%s wait:%s err:%v", tgAccountId, templateHash, delay, forwardErr)
+					return forwardErr
+				}
+				g.Log().Warningf(runCtx, "复用TG历史消息转发失败，回退上传 tgAccountId:%d templateHash:%s err:%v", tgAccountId, templateHash, forwardErr)
 			}
 		}
 		sender := gotdmessage.NewSender(client.API())
@@ -673,6 +677,7 @@ func (s *sSysPublish) messageTemplateForwardSource(ctx context.Context, tgAccoun
 		Where("j.account_id", tgAccountId).
 		Where("j.status", sysin.MessagePushStatusSent).
 		Where("j.operation_no LIKE ?", "message_push%:"+templateHash).
+		Where("EXISTS (SELECT 1 FROM "+publishTgJobLogTable+" l WHERE l.job_id=j.id AND l.action=? AND l.status=?)", "message_push", sysin.MessagePushStatusSent).
 		OrderDesc("j.id").
 		Limit(10).
 		Scan(&jobs)

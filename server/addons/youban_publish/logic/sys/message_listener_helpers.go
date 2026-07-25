@@ -361,7 +361,7 @@ func listenerHashText(value string) string {
 }
 
 func listenerDedupeKey(planId int64, senderUserId string, normalizedText string, mediaHash string) string {
-	bucket := gtime.Now().Unix() / 300
+	bucket := gtime.Now().Unix() / 600
 	parts := []string{
 		fmt.Sprintf("%d", planId),
 		senderUserId,
@@ -370,6 +370,24 @@ func listenerDedupeKey(planId int64, senderUserId string, normalizedText string,
 		fmt.Sprintf("%d", bucket),
 	}
 	return strings.Join(parts, ":")
+}
+
+func listenerMessageURL(entities tg.Entities, sourceChatId string, msg *tg.Message) string {
+	if msg == nil || msg.ID <= 0 {
+		return ""
+	}
+	if peer, ok := msg.PeerID.(*tg.PeerChannel); ok {
+		if channel := entities.Channels[peer.ChannelID]; channel != nil {
+			if username := strings.TrimPrefix(strings.TrimSpace(channel.Username), "@"); username != "" {
+				return fmt.Sprintf("https://t.me/%s/%d", username, msg.ID)
+			}
+		}
+	}
+	chatId := strings.TrimSpace(normalizeTelegramChannelChatID(sourceChatId))
+	if strings.HasPrefix(chatId, "-100") {
+		return fmt.Sprintf("https://t.me/c/%s/%d", strings.TrimPrefix(chatId, "-100"), msg.ID)
+	}
+	return ""
 }
 
 func listenerUserButton(sender listenerMessageSenderInfo) (string, string) {

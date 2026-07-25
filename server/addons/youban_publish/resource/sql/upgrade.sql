@@ -300,7 +300,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_listen_notice` (
   `created_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ybp_msg_listen_notice_dedupe` (`dedupe_key`),
-  KEY `idx_ybp_msg_listen_notice_plan` (`plan_id`,`id`)
+  KEY `idx_ybp_msg_listen_notice_plan` (`plan_id`,`id`),
+  KEY `idx_ybp_msg_listen_notice_cooldown` (`plan_id`,`sender_user_id`,`normalized_text_hash`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息监听命中记录';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_listen_sender` (

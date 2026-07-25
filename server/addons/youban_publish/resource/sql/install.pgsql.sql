@@ -1587,6 +1587,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_listen_notice" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_msg_listen_notice_dedupe" ON "hg_youban_publish_message_listen_notice" ("dedupe_key");
 CREATE INDEX IF NOT EXISTS "idx_ybp_msg_listen_notice_plan" ON "hg_youban_publish_message_listen_notice" ("plan_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_msg_listen_notice_cooldown" ON "hg_youban_publish_message_listen_notice" ("plan_id", "sender_user_id", "normalized_text_hash", "created_at");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_listen_sender" (
   "id" BIGSERIAL PRIMARY KEY,

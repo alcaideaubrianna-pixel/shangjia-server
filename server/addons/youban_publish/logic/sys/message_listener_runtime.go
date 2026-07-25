@@ -262,7 +262,7 @@ func (w *accountCollectWorker) handleListenerMessage(ctx context.Context, entiti
 				continue
 			}
 			g.Log().Infof(ctx, "监听计划命中 tgAccountId:%d plan:%d target:%d chat:%s keywords:%s out:%t", plan.TgAccountId, plan.Id, target.Id, sourceChatId, strings.Join(matchedKeywords, ","), msg.Out)
-			if err := w.service.listenerNotifyMatch(ctx, plan, target, []*tg.Message{msg}, sourceChatId, target.TargetChatTitle, sender, text, matchedKeywords, nil, listenerMessagesMediaHash([]*tg.Message{msg})); err != nil {
+			if err := w.service.listenerNotifyMatch(ctx, plan, target, entities, []*tg.Message{msg}, sourceChatId, target.TargetChatTitle, sender, text, matchedKeywords, nil, listenerMessagesMediaHash([]*tg.Message{msg})); err != nil {
 				g.Log().Warningf(ctx, "推送监听命中消息失败 plan:%d target:%d err:%+v", plan.Id, target.Id, err)
 			}
 		}
@@ -307,7 +307,7 @@ func (w *accountCollectWorker) handleListenerMessageGroup(ctx context.Context, g
 				continue
 			}
 			g.Log().Infof(ctx, "监听计划命中媒体组 tgAccountId:%d plan:%d target:%d chat:%s messages:%d keywords:%s", plan.TgAccountId, plan.Id, target.Id, sourceChatId, len(sourceMessageIds), strings.Join(matchedKeywords, ","))
-			if err := w.service.listenerNotifyMatch(ctx, plan, target, group.messages, sourceChatId, target.TargetChatTitle, sender, text, matchedKeywords, sourceMessageIds, mediaHash); err != nil {
+			if err := w.service.listenerNotifyMatch(ctx, plan, target, group.entities, group.messages, sourceChatId, target.TargetChatTitle, sender, text, matchedKeywords, sourceMessageIds, mediaHash); err != nil {
 				g.Log().Warningf(ctx, "推送监听命中媒体组失败 plan:%d target:%d err:%+v", plan.Id, target.Id, err)
 			}
 		}
@@ -323,7 +323,7 @@ func listenerLooksLikeNotifyMessage(text string) bool {
 		strings.Contains(text, "来源：")
 }
 
-func (s *sSysPublish) listenerNotifyMatch(ctx context.Context, plan accountListenPlanRuntime, target accountListenTargetRuntime, sourceMessages []*tg.Message, sourceChatId string, sourceChatTitle string, sender listenerMessageSenderInfo, normalizedText string, matchedKeywords []string, sourceMessageIds []int, mediaHash string) error {
+func (s *sSysPublish) listenerNotifyMatch(ctx context.Context, plan accountListenPlanRuntime, target accountListenTargetRuntime, entities tg.Entities, sourceMessages []*tg.Message, sourceChatId string, sourceChatTitle string, sender listenerMessageSenderInfo, normalizedText string, matchedKeywords []string, sourceMessageIds []int, mediaHash string) error {
 	sourceMessages = listenerNonNilMessages(sourceMessages)
 	if len(sourceMessages) == 0 {
 		return nil
@@ -348,6 +348,9 @@ func (s *sSysPublish) listenerNotifyMatch(ctx context.Context, plan accountListe
 	sender = s.resolveListenerSender(ctx, plan, sourceChatId, msg, sender)
 	dedupeKey := listenerDedupeKey(plan.Id, sender.UserId, normalizedText, mediaHash)
 	now := gtime.Now()
+	if s.listenerNoticeInCooldown(ctx, plan.Id, sender, normalizedText, now) {
+		return nil
+	}
 	notice := g.Map{
 		"tenant_id":            plan.TenantId,
 		"plan_id":              plan.Id,
@@ -369,7 +372,8 @@ func (s *sSysPublish) listenerNotifyMatch(ctx context.Context, plan accountListe
 		}
 		return gerror.Wrap(err, "写入监听去重记录失败")
 	}
-	text := buildListenerNotifyText(plan, target, sourceChatTitle, normalizedText)
+	messageURL := listenerMessageURL(entities, sourceChatId, msg)
+	text := buildListenerNotifyText(plan, target, sourceChatTitle, normalizedText, messageURL)
 	buttonLabel, buttonURL := listenerUserButton(sender)
 	mediaSent, notifyErr := s.listenerNotifyMedia(ctx, plan, notifyChatId, sourceChatId, sourceMessages, text, buttonLabel, buttonURL)
 	if notifyErr != nil {
@@ -419,7 +423,24 @@ func (s *sSysPublish) listenerNotifyMatch(ctx context.Context, plan accountListe
 	return notifyErr
 }
 
-func buildListenerNotifyText(plan accountListenPlanRuntime, target accountListenTargetRuntime, sourceChatTitle string, normalizedText string) string {
+func (s *sSysPublish) listenerNoticeInCooldown(ctx context.Context, planId int64, sender listenerMessageSenderInfo, normalizedText string, now *gtime.Time) bool {
+	if planId <= 0 || (strings.TrimSpace(sender.UserId) == "" && strings.TrimSpace(sender.Username) == "") {
+		return false
+	}
+	query := g.DB().Model(messageListenNoticeTable).Safe().Ctx(ctx).
+		Where("plan_id", planId).
+		Where("normalized_text_hash", listenerHashText(normalizedText)).
+		WhereGTE("created_at", now.Add(-10*time.Minute)).
+		Where("(sender_user_id = ? OR sender_username = ?)", sender.UserId, sender.Username)
+	count, err := query.Count()
+	if err != nil {
+		g.Log().Warningf(ctx, "读取监听通知去重窗口失败 plan:%d err:%+v", planId, err)
+		return false
+	}
+	return count > 0
+}
+
+func buildListenerNotifyText(plan accountListenPlanRuntime, target accountListenTargetRuntime, sourceChatTitle string, normalizedText string, messageURL string) string {
 	parts := make([]string, 0, 8)
 	parts = append(parts, "<b>关键字命中</b>")
 	if strings.TrimSpace(plan.Name) != "" {
@@ -427,6 +448,9 @@ func buildListenerNotifyText(plan accountListenPlanRuntime, target accountListen
 	}
 	if title := strings.TrimSpace(sourceChatTitle); title != "" {
 		parts = append(parts, "来源："+telegramEscapeText(title))
+	}
+	if strings.TrimSpace(messageURL) != "" {
+		parts = append(parts, `消息地址：<a href="`+telegramEscapeText(messageURL)+`">消息来源</a>`)
 	}
 	if normalizedText != "" {
 		parts = append(parts, "")
