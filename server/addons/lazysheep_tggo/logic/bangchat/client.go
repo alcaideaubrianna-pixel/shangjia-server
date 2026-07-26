@@ -205,7 +205,7 @@ func OpenSession(ctx context.Context, sourceURL string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	client, err := NewClient(ctx)
+	client, err := NewClientWithBase(ctx, apiBaseFromSourceURL(sourceURL))
 	if err != nil {
 		return nil, err
 	}
@@ -214,6 +214,18 @@ func OpenSession(ctx context.Context, sourceURL string) (*Session, error) {
 		return nil, err
 	}
 	return &Session{Client: client, PairID: pairID}, nil
+}
+
+func apiBaseFromSourceURL(sourceURL string) string {
+	u, err := url.Parse(strings.TrimSpace(sourceURL))
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return apiBaseURL
+	}
+	return (&url.URL{
+		Scheme: u.Scheme,
+		Host:   u.Host,
+		Path:   "/api",
+	}).String()
 }
 
 func ResolveToken(ctx context.Context, input string) (string, error) {
