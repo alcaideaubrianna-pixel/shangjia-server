@@ -47,42 +47,6 @@ type mediaSimilarScope struct {
 	Partitions []mediaPHashBucketScopePart
 }
 
-func (s *sSysPublish) MediaSimilarCount(ctx context.Context, in *sysin.MediaSimilarCountInp) (*sysin.MediaSimilarCountModel, error) {
-	account, err := s.currentAccount(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err = s.ensureTenantVipFeature(ctx, account.TenantId, sysin.TenantVipFeatureSimilarMedia); err != nil {
-		return nil, err
-	}
-	if in == nil || in.MediaId <= 0 {
-		return nil, gerror.New("媒体ID不能为空")
-	}
-	scope, err := s.mediaSimilarVisibleScope(ctx, account)
-	if err != nil {
-		return nil, err
-	}
-	sources, err := s.visibleSourceMediaMap(ctx, scope, []int64{in.MediaId})
-	if err != nil {
-		return nil, err
-	}
-	source := sources[in.MediaId]
-	if source == nil {
-		return &sysin.MediaSimilarCountModel{MediaId: in.MediaId, Count: 0}, nil
-	}
-	cacheKey := mediaSimilarCountCacheKey(scope, source, 12)
-	if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {
-		return &sysin.MediaSimilarCountModel{MediaId: in.MediaId, Count: value.Int()}, nil
-	}
-	items, err := s.cachedMediaSimilarCandidates(ctx, scope, source, 12)
-	if err != nil {
-		return nil, err
-	}
-	count := len(items)
-	_ = cache.Instance().Set(ctx, cacheKey, count, mediaSimilarResultCacheTTL)
-	return &sysin.MediaSimilarCountModel{MediaId: in.MediaId, Count: count}, nil
-}
-
 func (s *sSysPublish) MediaSimilarList(ctx context.Context, in *sysin.MediaSimilarListInp) (*sysin.MediaSimilarListModel, int, error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {
@@ -124,7 +88,7 @@ func (s *sSysPublish) cachedMediaSimilarCandidates(ctx context.Context, scope *m
 	if source == nil {
 		return []mediaSimilarCandidate{}, nil
 	}
-	cacheKey := mediaSimilarResultCacheKey(scope, source, threshold)
+	cacheKey := mediaSimilarResultCacheKey(ctx, scope, source, threshold)
 	if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
 		var cached []mediaSimilarCandidate
 		if scanErr := value.Scan(&cached); scanErr == nil {
@@ -436,26 +400,39 @@ func normalizeMediaSimilarListInput(in *sysin.MediaSimilarListInp) {
 		in.PerPage = 50
 	}
 	if in.Threshold <= 0 {
-		in.Threshold = 12
+		in.Threshold = mediaSimilarDefaultThreshold
 	}
 	if in.Threshold > 32 {
 		in.Threshold = 32
 	}
 }
 
-func mediaSimilarResultCacheKey(scope *mediaSimilarScope, source *mediaSimilarSource, threshold int) string {
+func mediaSimilarResultCacheKey(ctx context.Context, scope *mediaSimilarScope, source *mediaSimilarSource, threshold int) string {
 	updatedAt := strings.TrimSpace(source.UpdatedAt)
 	return fmt.Sprintf(
-		"youban_publish:media_similar:v3:%s:%d:%d:%s",
+		"youban_publish:media_similar:v4:%s:%s:%d:%d:%s",
 		scope.CacheKey,
+		mediaSimilarScopeIndexVersion(ctx, scope),
 		source.Id,
 		threshold,
 		mediaSimilarHashKey(firstNonEmpty(source.PerceptualHash, "-")+":"+updatedAt),
 	)
 }
 
-func mediaSimilarCountCacheKey(scope *mediaSimilarScope, source *mediaSimilarSource, threshold int) string {
-	return "youban_publish:media_similar:count:" + mediaSimilarResultCacheKey(scope, source, threshold)
+func mediaSimilarCountCacheKey(ctx context.Context, scope *mediaSimilarScope, source *mediaSimilarSource, threshold int) string {
+	return "youban_publish:media_similar:count:" + mediaSimilarResultCacheKey(ctx, scope, source, threshold)
+}
+
+func mediaSimilarScopeIndexVersion(ctx context.Context, scope *mediaSimilarScope) string {
+	if scope == nil || len(scope.Partitions) == 0 {
+		return "0"
+	}
+	parts := make([]string, 0, len(scope.Partitions))
+	for _, partition := range scope.Partitions {
+		parts = append(parts, fmt.Sprintf("%d=%s", partition.TenantId, mediaPHashBucketVersion(ctx, partition.TenantId, partition.AccountIds)))
+	}
+	sort.Strings(parts)
+	return mediaSimilarHashKey(strings.Join(parts, ","))
 }
 
 func mediaSimilarScopeCacheKey(ctx context.Context, tenantId int64, accountId int64) string {
