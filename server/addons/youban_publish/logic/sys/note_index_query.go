@@ -15,7 +15,7 @@ import (
 )
 
 type adminNoteCursor struct {
-	Id        int64  `json:"id"`
+	IndexId   int64  `json:"indexId"`
 	UpdatedAt string `json:"updatedAt"`
 }
 
@@ -131,7 +131,7 @@ func applyNoteIndexCursor(mod *gdb.Model, raw string) error {
 	if err != nil {
 		return gerror.New("笔记列表游标不合法")
 	}
-	mod.Where("(i.updated_at < ? OR (i.updated_at = ? AND i.id < ?))", updatedAt, updatedAt, cursor.Id)
+	mod.Where("(i.updated_at < ? OR (i.updated_at = ? AND i.id < ?))", updatedAt, updatedAt, cursor.IndexId)
 	return nil
 }
 
@@ -139,7 +139,10 @@ func encodeAdminNoteCursor(item *sysin.ProfileModel) string {
 	if item == nil || item.Id <= 0 || item.UpdatedAt == nil {
 		return ""
 	}
-	payload, err := json.Marshal(adminNoteCursor{Id: item.Id, UpdatedAt: item.UpdatedAt.Time.Format(time.RFC3339Nano)})
+	if item.NoteIndexId <= 0 {
+		return ""
+	}
+	payload, err := json.Marshal(adminNoteCursor{IndexId: item.NoteIndexId, UpdatedAt: item.UpdatedAt.Time.Format(time.RFC3339Nano)})
 	if err != nil {
 		return ""
 	}
@@ -156,12 +159,12 @@ func decodeAdminNoteCursor(raw string) (*adminNoteCursor, error) {
 		return nil, gerror.New("笔记列表游标不合法")
 	}
 	var cursor adminNoteCursor
-	if err = json.Unmarshal(payload, &cursor); err != nil || cursor.Id <= 0 || cursor.UpdatedAt == "" {
+	if err = json.Unmarshal(payload, &cursor); err != nil || cursor.IndexId <= 0 || cursor.UpdatedAt == "" {
 		return nil, gerror.New("笔记列表游标不合法")
 	}
 	return &cursor, nil
 }
 
 func adminNoteIndexFields() string {
-	return "i.profile_id AS id,i.uuid,i.task_id,i.tenant_id,i.account_id,i.profile_no,i.title,i.summary,i.plain_text,i.province,i.city,i.tag,i.visibility,i.review_status,i.status,i.published_at,i.created_at,i.updated_at,i.task_status,a.nickname AS account_name,a.nickname,a.username"
+	return "i.id AS note_index_id,i.profile_id AS id,i.uuid,i.task_id,i.tenant_id,i.account_id,i.profile_no,i.title,i.summary,i.plain_text,i.province,i.city,i.tag,i.visibility,i.review_status,i.status,i.published_at,i.created_at,i.updated_at,i.task_status,a.nickname AS account_name,a.nickname,a.username"
 }

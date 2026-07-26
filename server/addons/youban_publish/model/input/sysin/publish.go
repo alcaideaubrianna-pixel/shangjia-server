@@ -606,6 +606,7 @@ type ProfileViewInp struct {
 
 type ProfileModel struct {
 	Id              int64       `json:"id" dc:"资料ID"`
+	NoteIndexId     int64       `json:"-" dc:"资料索引ID"`
 	Uuid            string      `json:"uuid" dc:"资料UUID"`
 	TaskId          int64       `json:"taskId" dc:"任务ID"`
 	TenantId        int64       `json:"tenantId" dc:"租户ID"`
