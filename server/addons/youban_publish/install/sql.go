@@ -54,6 +54,22 @@ func Upgrade(ctx context.Context) error {
 	return ensureCycleSchedulerCron(ctx)
 }
 
+func HeavyIndexSqlFiles() []string {
+	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
+		return []string{"addons/youban_publish/resource/sql/heavy_indexes.pgsql.sql"}
+	}
+	return []string{"addons/youban_publish/resource/sql/heavy_indexes.sql"}
+}
+
+func ExecMaintenanceSql(ctx context.Context, files []string) error {
+	for _, file := range files {
+		if err := execMaintenanceSqlFile(ctx, file); err != nil {
+			return gerror.Wrapf(err, "执行上架系统维护 SQL 失败：%s", file)
+		}
+	}
+	return nil
+}
+
 func execBusinessSql(ctx context.Context, files []string) error {
 	const maxAttempts = 3
 	var err error
@@ -76,6 +92,9 @@ func execBusinessSqlOnce(ctx context.Context, files []string) error {
 		if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
 			if _, err := tx.Exec("SET LOCAL lock_timeout = '5s'"); err != nil {
 				return gerror.Wrap(err, "设置上架系统 SQL 锁等待超时失败")
+			}
+			if _, err := tx.Exec("SET LOCAL statement_timeout = '30s'"); err != nil {
+				return gerror.Wrap(err, "设置上架系统 SQL 执行超时失败")
 			}
 		}
 		if err := acquireInstallLock(tx); err != nil {
@@ -145,12 +164,36 @@ func execSqlFile(ctx context.Context, tx gdb.TX, path string) (err error) {
 	return nil
 }
 
+func execMaintenanceSqlFile(ctx context.Context, path string) (err error) {
+	content := readSqlFile(path)
+	if strings.TrimSpace(content) == "" {
+		return gerror.Newf("SQL 文件不存在或为空：%s", path)
+	}
+	for index, sql := range splitSql(content) {
+		sql = strings.TrimSpace(sql)
+		if sql == "" {
+			continue
+		}
+		if _, err = g.DB().Exec(ctx, sql); err != nil {
+			if isIgnorableSqlError(err) {
+				continue
+			}
+			return gerror.Wrapf(err, "执行 SQL 失败：%s 第 %d 段\n%s", path, index+1, sql)
+		}
+	}
+	return nil
+}
+
 func acquireInstallLock(tx gdb.TX) error {
 	dbType := strings.ToLower(g.DB().GetConfig().Type)
 	switch dbType {
 	case consts.DBPgsql:
-		if _, err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", publishInstallLockKey); err != nil {
+		value, err := tx.GetValue("SELECT pg_try_advisory_xact_lock(hashtext(?))", publishInstallLockKey)
+		if err != nil {
 			return gerror.Wrap(err, "获取上架系统安装锁失败")
+		}
+		if !value.Bool() {
+			return gerror.New("上架系统配置更新正在执行，请稍后重试")
 		}
 	default:
 		value, err := tx.GetValue("SELECT GET_LOCK(?, 60)", publishInstallLockKey)

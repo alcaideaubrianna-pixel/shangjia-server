@@ -64,6 +64,8 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.BackfillYoubanPublishMediaMissingPHash(ctx)
 	case "noteIndex":
 		err = fix.BackfillYoubanPublishNoteIndex(ctx)
+	case "publishHeavyIndexes":
+		err = fix.ApplyYoubanPublishHeavyIndexes(ctx)
 	default:
 		err = gerror.Newf("fix a1 is invalid, a1:%v", a1)
 	}
