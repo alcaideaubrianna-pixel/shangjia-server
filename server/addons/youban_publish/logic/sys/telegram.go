@@ -105,26 +105,29 @@ func (s *sSysPublish) TelegramWebhookRaw(ctx context.Context, botId int64, body 
 	if err := json.Unmarshal(body, &update); err != nil {
 		return gerror.Wrap(err, "解析Telegram webhook失败")
 	}
+	tenantId := int64(0)
 	if botId > 0 {
-		if _, err := s.getBotById(ctx, botId, 0); err != nil {
+		bot, err := s.getBotById(ctx, botId, 0)
+		if err != nil {
 			return err
 		}
+		tenantId = bot.TenantId
 	}
-	s.handleTelegramUpdate(ctx, botId, &update)
+	s.handleTelegramUpdate(ctx, botId, tenantId, &update)
 	return nil
 }
 
 func (s *sSysPublish) telegramUpdateHandler(ctx context.Context, currentBot *tgbot.Bot, update *models.Update) {
-	s.handleTelegramUpdate(ctx, 0, update)
+	s.handleTelegramUpdate(ctx, 0, 0, update)
 }
 
-func (s *sSysPublish) handleTelegramUpdate(ctx context.Context, botId int64, update *models.Update) {
+func (s *sSysPublish) handleTelegramUpdate(ctx context.Context, botId int64, tenantId int64, update *models.Update) {
 	msg, updateType := telegramUpdateMessage(update)
 	if msg == nil {
 		return
 	}
 	text := telegramMessageText(msg)
 	g.Log().Infof(ctx, "收到上架插件Telegram消息 bot:%d type:%s chat:%d message:%d text:%s", botId, updateType, msg.Chat.ID, msg.ID, text)
-	s.handleTelegramAutoDelete(ctx, botId, msg, text)
+	s.handleTelegramAutoDelete(ctx, botId, tenantId, msg, text)
 	s.collectBotMessage(ctx, botId, msg)
 }

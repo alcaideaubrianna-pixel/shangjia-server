@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -14,7 +13,6 @@ import (
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
-	"hotgo/internal/library/cache"
 	baseservice "hotgo/internal/service"
 )
 
@@ -24,11 +22,6 @@ const publishConfigGroupPublish = "publish"
 const publishConfigGroupAutoDelete = "autoDelete"
 const publishConfigGroupAntiScan = "antiScan"
 const publishConfigGroupCloudResource = "cloudResource"
-
-const autoDeleteConfigCacheKey = "youban_publish:auto_delete:config"
-
-const autoDeleteConfigCacheTTL = 10 * time.Minute
-const autoDeleteRuleSingleNumberLine = `single:^编号\s*[:：]\s*[A-Za-z0-9_-]+$`
 
 type sSysConfig struct{}
 
@@ -147,33 +140,6 @@ func (s *sSysConfig) PublishConfigSave(ctx context.Context, in *sysin.PublishCon
 	return s.updateConfigGroup(ctx, publishConfigGroupPublish, publishConfigMap(&in.PublishConfig))
 }
 
-func (s *sSysConfig) AutoDeleteConfigView(ctx context.Context, in *sysin.AutoDeleteConfigViewInp) (res *sysin.AutoDeleteConfigViewModel, err error) {
-	cacheVar, cacheErr := cache.Instance().Get(ctx, autoDeleteConfigCacheKey)
-	if cacheErr == nil && !cacheVar.IsNil() {
-		var cached sysin.AutoDeleteConfigViewModel
-		if cacheErr = cacheVar.Scan(&cached); cacheErr == nil && cached.AutoDeleteConfig != nil {
-			return &cached, nil
-		}
-	}
-	conf := defaultAutoDeleteConfig()
-	if err = s.scanConfigGroup(ctx, publishConfigGroupAutoDelete, conf); err != nil {
-		return nil, err
-	}
-	res = &sysin.AutoDeleteConfigViewModel{AutoDeleteConfig: conf}
-	_ = cache.Instance().Set(ctx, autoDeleteConfigCacheKey, res, autoDeleteConfigCacheTTL)
-	return
-}
-
-func (s *sSysConfig) AutoDeleteConfigSave(ctx context.Context, in *sysin.AutoDeleteConfigSaveInp) error {
-	if in == nil {
-		return gerror.New("频道自动删除配置不能为空")
-	}
-	if err := in.Filter(ctx); err != nil {
-		return err
-	}
-	return s.updateConfigGroup(ctx, publishConfigGroupAutoDelete, autoDeleteConfigMap(&in.AutoDeleteConfig))
-}
-
 func (s *sSysConfig) CloudResourceConfigView(ctx context.Context, in *sysin.CloudResourceConfigViewInp) (res *sysin.CloudResourceConfigViewModel, err error) {
 	conf := defaultCloudResourceConfig()
 	if err = s.scanConfigGroup(ctx, publishConfigGroupCloudResource, conf); err != nil {
@@ -282,10 +248,9 @@ func (s *sSysConfig) updateConfigGroup(ctx context.Context, group string, list g
 }
 
 func (s *sSysConfig) clearConfigCache(ctx context.Context, group string) {
-	if group != publishConfigGroupAutoDelete {
-		return
+	if group == publishConfigGroupAutoDelete {
+		clearAutoDeleteDefaultConfigCache(ctx)
 	}
-	_, _ = cache.Instance().Remove(ctx, autoDeleteConfigCacheKey)
 }
 
 func defaultPublishConfig() *model.PublishConfig {
@@ -300,15 +265,6 @@ func defaultPublishConfig() *model.PublishConfig {
 		MaxRetryCount:          3,
 		RetryIntervalMinutes:   5,
 		DefaultAntiScanEnabled: 0,
-	}
-}
-
-func defaultAutoDeleteConfig() *model.AutoDeleteConfig {
-	return &model.AutoDeleteConfig{
-		Enabled:  0,
-		BotIds:   []int64{},
-		Keywords: []string{},
-		Rules:    []string{autoDeleteRuleSingleNumberLine},
 	}
 }
 
@@ -368,15 +324,6 @@ func publishConfigMap(conf *model.PublishConfig) g.Map {
 		"maxRetryCount":          conf.MaxRetryCount,
 		"retryIntervalMinutes":   conf.RetryIntervalMinutes,
 		"defaultAntiScanEnabled": conf.DefaultAntiScanEnabled,
-	}
-}
-
-func autoDeleteConfigMap(conf *model.AutoDeleteConfig) g.Map {
-	return g.Map{
-		"autoDeleteEnabled": conf.Enabled,
-		"botIds":            mustConfigJSON(conf.BotIds),
-		"keywords":          mustConfigJSON(conf.Keywords),
-		"rules":             mustConfigJSON(conf.Rules),
 	}
 }
 

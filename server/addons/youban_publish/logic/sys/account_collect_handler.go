@@ -54,7 +54,7 @@ func (w *accountCollectWorker) handleGotdMessage(ctx context.Context, entities t
 	if w == nil || w.service == nil || msg == nil {
 		return
 	}
-	w.service.handleGotdAutoDelete(ctx, msg)
+	w.service.handleGotdAutoDelete(ctx, w.tenantId, msg)
 	if msg.Out {
 		return
 	}
@@ -85,7 +85,7 @@ func (w *accountCollectWorker) handleGotdEditedMessage(ctx context.Context, msg 
 	if w == nil || w.service == nil || msg == nil {
 		return
 	}
-	w.service.handleGotdAutoDelete(ctx, msg)
+	w.service.handleGotdAutoDelete(ctx, w.tenantId, msg)
 }
 
 func (w *accountCollectWorker) ingestGotdMessage(ctx context.Context, source accountCollectSourceRuntime, msg *tg.Message, chatId string) {

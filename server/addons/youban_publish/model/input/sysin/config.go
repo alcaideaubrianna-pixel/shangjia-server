@@ -92,9 +92,9 @@ func (in *AutoDeleteConfigSaveInp) Filter(ctx context.Context) error {
 		return err
 	}
 	in.BotIds = uniquePositiveInt64Config(in.BotIds)
-	in.Keywords = uniqueStringsConfig(in.Keywords)
-	in.Rules = uniqueStringsConfig(in.Rules)
-	for _, rule := range in.Rules {
+	in.CustomKeywords = uniqueStringsConfig(in.CustomKeywords)
+	in.CustomRules = uniqueStringsConfig(in.CustomRules)
+	for _, rule := range in.CustomRules {
 		if err := validateAutoDeleteRule(rule); err != nil {
 			return err
 		}

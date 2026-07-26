@@ -759,6 +759,21 @@ ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN `cycle_publish_enable
 ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN `cycle_publish_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环上架天数' AFTER `cycle_publish_enabled`;
 ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环上架时间' AFTER `cycle_publish_days`;
 
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tenant_auto_delete_config` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否启用',
+  `bot_ids_json` text COMMENT '租户Bot ID JSON',
+  `custom_keywords_json` text COMMENT '租户自定义关键词JSON',
+  `custom_rules_json` text COMMENT '租户自定义规则JSON',
+  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_tenant_auto_delete_config_tenant` (`tenant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='租户消息自动删除配置';
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
@@ -1329,9 +1344,7 @@ FROM (
   SELECT 'youban_publish', 'publish', '最大重试次数', 'int', 'maxRetryCount', '3', '3', 200, '发送失败最大重试次数' UNION ALL
   SELECT 'youban_publish', 'publish', '重试间隔分钟', 'int', 'retryIntervalMinutes', '5', '5', 210, '发送失败重试间隔' UNION ALL
   SELECT 'youban_publish', 'publish', '默认防扫图开关', 'int', 'defaultAntiScanEnabled', '0', '0', 220, '新发布内容默认是否启用防扫图' UNION ALL
-  SELECT 'youban_publish', 'autoDelete', '频道自动删除开关', 'int', 'autoDeleteEnabled', '0', '0', 200, '是否启用频道自动删除' UNION ALL
-  SELECT 'youban_publish', 'autoDelete', '自动删除 Bot ID', '[]int64', 'botIds', '[]', '[]', 210, '执行自动删除的 Bot ID 列表' UNION ALL
-  SELECT 'youban_publish', 'autoDelete', '自动删除关键词', '[]string', 'keywords', '[]', '[]', 220, '命中后自动删除的关键词列表' UNION ALL
+  SELECT 'youban_publish', 'autoDelete', '自动删除关键词', '[]string', 'keywords', '["发现重复资料","验证视频","资料近期已上架","信息已推送成功","视频已推送成功","视频已自动转发到视频频道","小时内已提交过相同内容","内容已自动转发到发布频道","提交成功！","信息视频验证保存成功","收录失败！","处理媒体组失败:","推送媒体组到群","信息投稿推送","推送视频失败","收录成功","本频道弃用，订阅如下新频道","投稿已自动审核通过","重复投稿","重复提交","信息已存在请勿重复提交","采集失败","检测到重复资料","正在分析中","已被人脸过滤","提交成功","去重阶段","重复帖子已拦截","提交失败"]', '["发现重复资料","验证视频","资料近期已上架","信息已推送成功","视频已推送成功","视频已自动转发到视频频道","小时内已提交过相同内容","内容已自动转发到发布频道","提交成功！","信息视频验证保存成功","收录失败！","处理媒体组失败:","推送媒体组到群","信息投稿推送","推送视频失败","收录成功","本频道弃用，订阅如下新频道","投稿已自动审核通过","重复投稿","重复提交","信息已存在请勿重复提交","采集失败","检测到重复资料","正在分析中","已被人脸过滤","提交成功","去重阶段","重复帖子已拦截","提交失败"]', 220, '所有租户继承的默认自动删除关键词' UNION ALL
   SELECT 'youban_publish', 'autoDelete', '自动删除规则', '[]string', 'rules', '["single:^编号[[:space:]]*[:：][[:space:]]*[A-Za-z0-9_-]+$"]', '["single:^编号[[:space:]]*[:：][[:space:]]*[A-Za-z0-9_-]+$"]', 230, '仅匹配整条消息的自动删除规则' UNION ALL
   SELECT 'youban_publish', 'antiScan', '防扫图总开关', 'int', 'antiScanEnabled', '0', '0', 300, '是否启用防扫图能力' UNION ALL
   SELECT 'youban_publish', 'antiScan', '新笔记默认防扫图', 'int', 'defaultNewNoteEnabled', '0', '0', 310, '新笔记默认是否开启防扫图' UNION ALL
@@ -1403,7 +1416,7 @@ SET `status` = 2,
     `updated_at` = NOW()
 WHERE `addon_name` = 'youban_publish'
   AND `group` = 'autoDelete'
-  AND `key` = 'enabled';
+  AND `key` IN ('enabled', 'autoDeleteEnabled', 'botIds');
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_cycle_plan` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,

@@ -16,6 +16,7 @@ type ISysConfig interface {
 	PublishConfigView(ctx context.Context, in *sysin.PublishConfigViewInp) (res *sysin.PublishConfigViewModel, err error)
 	PublishConfigSave(ctx context.Context, in *sysin.PublishConfigSaveInp) error
 	AutoDeleteConfigView(ctx context.Context, in *sysin.AutoDeleteConfigViewInp) (res *sysin.AutoDeleteConfigViewModel, err error)
+	AutoDeleteConfigForTenant(ctx context.Context, tenantId int64) (res *sysin.AutoDeleteConfigViewModel, err error)
 	AutoDeleteConfigSave(ctx context.Context, in *sysin.AutoDeleteConfigSaveInp) error
 	CloudResourceConfigView(ctx context.Context, in *sysin.CloudResourceConfigViewInp) (res *sysin.CloudResourceConfigViewModel, err error)
 	CloudResourceConfigSave(ctx context.Context, in *sysin.CloudResourceConfigSaveInp) error
