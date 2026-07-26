@@ -26,7 +26,8 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 	mod := noteIndexModel(ctx).LeftJoin(publishAccountTable+" a", "a.id=i.account_id AND a.deleted_at IS NULL")
 	mod = applyNoteIndexScope(mod, tenantId, tenantIds, accountIds, &in.ProfileListInp)
 	mod = applyNoteIndexFilters(mod, &in.ProfileListInp)
-	if err := applyNoteIndexCursor(mod, in.Cursor); err != nil {
+	var err error
+	if mod, err = applyNoteIndexCursor(mod, in.Cursor); err != nil {
 		return nil, false, "", err
 	}
 	_, perPage, _ := form.CalPage(1, in.PerPage)
@@ -119,20 +120,19 @@ func applyNoteIndexTagFilter(mod *gdb.Model, tags []string) *gdb.Model {
 	return mod.Where("("+strings.Join(conditions, " OR ")+")", args...)
 }
 
-func applyNoteIndexCursor(mod *gdb.Model, raw string) error {
+func applyNoteIndexCursor(mod *gdb.Model, raw string) (*gdb.Model, error) {
 	cursor, err := decodeAdminNoteCursor(raw)
 	if err != nil {
-		return err
+		return mod, err
 	}
 	if cursor == nil {
-		return nil
+		return mod, nil
 	}
 	updatedAt, err := time.Parse(time.RFC3339Nano, cursor.UpdatedAt)
 	if err != nil {
-		return gerror.New("笔记列表游标不合法")
+		return mod, gerror.New("笔记列表游标不合法")
 	}
-	mod.Where("(i.updated_at < ? OR (i.updated_at = ? AND i.id < ?))", updatedAt, updatedAt, cursor.IndexId)
-	return nil
+	return mod.Where("(i.updated_at < ? OR (i.updated_at = ? AND i.id < ?))", updatedAt, updatedAt, cursor.IndexId), nil
 }
 
 func encodeAdminNoteCursor(item *sysin.ProfileModel) string {
