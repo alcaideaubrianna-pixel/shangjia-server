@@ -34,3 +34,4 @@ FROM "hg_youban_publish_task" t
 WHERE j."task_id"=t."id" AND j."collect_source_message_id"=0 AND t."collect_source_message_id">0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_similar_tenant" ON "hg_youban_publish_media" ("tenant_id", "media_type", "account_id", "profile_id", "id") WHERE "deleted_at" IS NULL AND "perceptual_hash" <> '';
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_similar_account" ON "hg_youban_publish_media" ("account_id", "media_type", "profile_id", "id") WHERE "deleted_at" IS NULL AND "perceptual_hash" <> '';
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_md5_scope" ON "hg_youban_publish_media" ("account_id", "md5", "tenant_id", "profile_id", "id") WHERE "deleted_at" IS NULL AND "md5" <> '';

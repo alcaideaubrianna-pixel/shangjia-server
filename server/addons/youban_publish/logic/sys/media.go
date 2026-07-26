@@ -258,11 +258,11 @@ func (s *sSysPublish) profileImageSearchByAccountIds(ctx context.Context, in *sy
 	if len(accountIds) == 0 {
 		return []*sysin.NoteModel{}, 0, nil
 	}
-	queryHash, err := uploadImagePHashValue(file)
+	fingerprint, err := uploadImageFingerprint(file)
 	if err != nil {
 		return nil, 0, err
 	}
-	matches, totalCount, err := s.findSimilarProfileMatchesByPHash(ctx, queryHash, in, accountIds)
+	matches, totalCount, err := s.findSimilarProfileMatchesByFingerprint(ctx, fingerprint, in, accountIds)
 	if err != nil {
 		return nil, 0, err
 	}

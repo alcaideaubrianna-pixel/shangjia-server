@@ -62,16 +62,16 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		if url == "" {
 			continue
 		}
-		hash, hashErr := cachedRemoteImagePHashValue(ctx, url)
+		fingerprint, hashErr := cachedRemoteImageFingerprint(ctx, url)
 		if hashErr != nil {
 			return nil, 0, hashErr
 		}
-		hashKey := fmt.Sprintf("%016x", hash.GetHash())
+		hashKey := fmt.Sprintf("%s:%016x", fingerprint.MD5, fingerprint.PHash.GetHash())
 		if _, exists := seenHashes[hashKey]; exists {
 			continue
 		}
 		seenHashes[hashKey] = struct{}{}
-		items, searchErr := s.cachedProfilePHashSearchCandidates(ctx, hash, searchIn, accountIds, nil)
+		items, searchErr := s.cachedProfileFingerprintSearchCandidates(ctx, fingerprint, searchIn, accountIds, nil)
 		if searchErr != nil {
 			return nil, 0, searchErr
 		}
