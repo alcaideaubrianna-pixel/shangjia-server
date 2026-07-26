@@ -243,6 +243,9 @@ func (s *sSysPublish) skipPendingCollectDispatchAfterRuleRefresh(ctx context.Con
 			"updated_at":    now,
 		}).
 		Update()
+	if err := s.refreshTaskNoteIndexes(ctx, []int64{dispatch["task_id"].Int64()}); err != nil {
+		return err
+	}
 	eventId := dispatch["event_id"].Int64()
 	if event != nil && !event.IsEmpty() {
 		eventId = event["id"].Int64()

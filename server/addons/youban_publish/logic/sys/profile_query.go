@@ -3,7 +3,6 @@ package sys
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -137,33 +136,20 @@ func (s *sSysPublish) noteList(ctx context.Context, in *sysin.NoteListInp) (list
 	return
 }
 
-func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.ProfileListInp, tenantId int64, tenantIds []int64, accountIds []int64, viewer *sysin.AccountModel) ([]*sysin.AdminNoteListModel, int, error) {
+func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.NoteListInp, tenantId int64, tenantIds []int64, accountIds []int64, viewer *sysin.AccountModel) (*sysin.AdminNotePageModel, error) {
 	startedAt := time.Now()
-	profiles, totalCount, indexed, err := s.adminNoteIndexList(ctx, in, tenantId, tenantIds, accountIds)
+	profiles, hasMore, nextCursor, err := s.adminNoteIndexList(ctx, in, tenantId, tenantIds, accountIds)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-	if !indexed {
-		base := s.adminNoteBaseModel(ctx, tenantId, tenantIds)
-		if len(accountIds) > 0 {
-			base = base.WhereIn("t.account_id", accountIds)
-		} else if in != nil && in.AccountId > 0 {
-			base = base.Where("t.account_id", in.AccountId)
-		}
-		countCacheKey := adminNoteCountCacheKey(ctx, in, tenantId, tenantIds, accountIds)
-		profiles, totalCount, err = s.searchDistinctProfilePage(ctx, base, in, adminNoteListFields(), "统计笔记失败", "获取笔记列表失败", countCacheKey)
-	}
-	if err != nil {
-		return nil, 0, err
-	}
-	logSlowAdminNoteListStage(ctx, "profile_query", startedAt, len(profiles), totalCount)
+	logSlowAdminNoteListStage(ctx, "profile_query", startedAt, len(profiles), boolToInt(hasMore))
 	if err = s.ensureProfileListUUID(ctx, profiles); err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	stageStartedAt := time.Now()
 	mediaBuckets, err := s.adminNoteCoverMediaByProfiles(ctx, profiles)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	logSlowAdminNoteListStage(ctx, "cover_media", stageStartedAt, len(profiles), len(mediaBuckets))
 	list := make([]*sysin.AdminNoteListModel, 0, len(profiles))
@@ -178,55 +164,7 @@ func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.ProfileListIn
 		markProfilePermission(item, permission)
 		list = append(list, adminNoteListFromProfile(item, mediaBuckets[item.Id]))
 	}
-	return list, totalCount, nil
-}
-
-func adminNoteCountCacheKey(ctx context.Context, in *sysin.ProfileListInp, tenantId int64, tenantIds []int64, accountIds []int64) string {
-	tenantIds = sortedUniqueIds(tenantIds)
-	accountIds = sortedUniqueIds(accountIds)
-	parts := []string{
-		"youban_publish:admin_note_count:v1",
-		fmt.Sprintf("tenant=%d", tenantId),
-		fmt.Sprintf("tenants=%v", tenantIds),
-		fmt.Sprintf("accounts=%v", accountIds),
-	}
-	if in != nil {
-		parts = append(parts,
-			fmt.Sprintf("account=%d", in.AccountId),
-			"keyword="+strings.TrimSpace(in.Keyword),
-			"province="+strings.TrimSpace(in.Province),
-			"city="+strings.TrimSpace(in.City),
-			"tag="+strings.TrimSpace(in.Tag),
-			"review="+strings.TrimSpace(in.ReviewStatus),
-			"visibility="+strings.TrimSpace(in.Visibility),
-			fmt.Sprintf("status=%d", in.Status),
-		)
-	}
-	return mediaPHashHashKey(strings.Join(parts, "|"))
-}
-
-func sortedUniqueIds(ids []int64) []int64 {
-	result := uniqueIds(ids)
-	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
-	return result
-}
-
-func (s *sSysPublish) adminNoteBaseModel(ctx context.Context, tenantId int64, tenantIds []int64) *gdb.Model {
-	mod := dao.ContentProfile.Ctx(ctx).As("p").
-		InnerJoin(publishTaskTable+" t", "t.profile_id=p.id AND t.deleted_at IS NULL").
-		LeftJoin(publishTenantTable+" tenant", "tenant.id=t.tenant_id").
-		LeftJoin(publishAccountTable+" a", "a.id=t.account_id AND a.deleted_at IS NULL").
-		WhereNull("p.deleted_at")
-	if len(tenantIds) > 0 {
-		mod = mod.WhereIn("t.tenant_id", tenantIds)
-	} else if tenantId > 0 {
-		mod = mod.Where("t.tenant_id", tenantId)
-	}
-	return mod
-}
-
-func adminNoteListFields() string {
-	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.status,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,a.nickname AS account_name,a.nickname,a.username,t.status AS task_status"
+	return &sysin.AdminNotePageModel{List: list, HasMore: hasMore, NextCursor: nextCursor}, nil
 }
 
 func adminNoteListFromProfile(profile *sysin.ProfileModel, media []*sysin.AdminNoteMediaModel) *sysin.AdminNoteListModel {

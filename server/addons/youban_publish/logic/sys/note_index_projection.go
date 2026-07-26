@@ -40,6 +40,26 @@ func (s *sSysPublish) RefreshNoteIndex(ctx context.Context, profileId int64) err
 	return s.syncProfileNoteIndex(ctx, profileId)
 }
 
+func (s *sSysPublish) refreshTaskNoteIndexes(ctx context.Context, taskIds []int64) error {
+	taskIds = uniqueIds(taskIds)
+	if len(taskIds) == 0 {
+		return nil
+	}
+	var rows []struct {
+		ProfileId int64 `orm:"profile_id"`
+	}
+	if err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Fields("profile_id").WhereIn("id", taskIds).Distinct().Scan(&rows); err != nil {
+		return gerror.Wrap(err, "读取资料索引刷新范围失败")
+	}
+	for _, row := range rows {
+		if err := s.syncProfileNoteIndex(ctx, row.ProfileId); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // syncProfileNoteIndex refreshes every active tenant/account projection for a profile.
 // It is called after the source transaction commits so the read model never exposes
 // a task that the source transaction rolled back.

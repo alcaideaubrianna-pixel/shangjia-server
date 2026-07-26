@@ -792,6 +792,7 @@ func (in *ProfileReviewInp) Filter(ctx context.Context) error {
 
 type NoteListInp struct {
 	ProfileListInp
+	Cursor string `json:"cursor" dc:"下一页游标"`
 }
 
 type NoteModel struct {
@@ -828,6 +829,12 @@ type AdminNoteListModel struct {
 	CreatedAt   *gtime.Time            `json:"createdAt" dc:"创建时间"`
 	UpdatedAt   *gtime.Time            `json:"updatedAt" dc:"更新时间"`
 	Media       []*AdminNoteMediaModel `json:"media" dc:"封面媒体"`
+}
+
+type AdminNotePageModel struct {
+	List       []*AdminNoteListModel `json:"list" dc:"笔记列表"`
+	HasMore    bool                  `json:"hasMore" dc:"是否还有下一页"`
+	NextCursor string                `json:"nextCursor" dc:"下一页游标"`
 }
 
 type FollowNoteMediaModel struct {

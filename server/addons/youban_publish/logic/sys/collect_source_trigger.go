@@ -278,7 +278,10 @@ func (s *sSysPublish) resetCollectSourceTasksForDev(ctx context.Context, taskIds
 			"updated_at":    gtime.Now(),
 		}).
 		Update()
-	return gerror.Wrap(err, "重置采集源上架任务失败")
+	if err = gerror.Wrap(err, "重置采集源上架任务失败"); err != nil {
+		return err
+	}
+	return s.refreshTaskNoteIndexes(ctx, taskIds)
 }
 
 func (s *sSysPublish) collectSourceResetEventCount(ctx context.Context, sourceId int64, tenantId int64, accountId int64) (int, error) {

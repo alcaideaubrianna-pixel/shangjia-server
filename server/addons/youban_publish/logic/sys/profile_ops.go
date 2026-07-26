@@ -267,31 +267,40 @@ func (s *sSysPublish) AdminProfileStatus(ctx context.Context, in *sysin.ProfileS
 	return s.updateProfileStatus(ctx, in, account.TenantId, 0)
 }
 
-func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) (list []*sysin.AdminNoteListModel, totalCount int, err error) {
+func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) (res *sysin.AdminNotePageModel, err error) {
 	startedAt := time.Now()
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	if in == nil {
 		in = &sysin.NoteListInp{}
 	}
 	scope, err := s.adminProfileVisibleScope(ctx, account, &in.ProfileListInp)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	logSlowAdminNoteListStage(ctx, "scope", startedAt, len(scope.AccountIds), len(scope.TenantIds))
 	stageStartedAt := time.Now()
 	if err = s.ensureAdminProfileScopeTenants(ctx, scope); err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	logSlowAdminNoteListStage(ctx, "scope_tenants", stageStartedAt, len(scope.AccountIds), len(scope.TenantIds))
 	if scope.Strict && len(scope.AccountIds) == 0 {
-		return []*sysin.AdminNoteListModel{}, 0, nil
+		return &sysin.AdminNotePageModel{List: []*sysin.AdminNoteListModel{}}, nil
 	}
-	list, totalCount, err = s.adminNoteList(ctx, &in.ProfileListInp, scope.TenantId, scope.TenantIds, scope.AccountIds, account)
-	logSlowAdminNoteListStage(ctx, "total", startedAt, len(list), totalCount)
-	return list, totalCount, err
+	res, err = s.adminNoteList(ctx, in, scope.TenantId, scope.TenantIds, scope.AccountIds, account)
+	if res != nil {
+		logSlowAdminNoteListStage(ctx, "total", startedAt, len(res.List), adminNoteBoolValue(res.HasMore))
+	}
+	return res, err
+}
+
+func adminNoteBoolValue(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func logSlowAdminNoteListStage(ctx context.Context, stage string, startedAt time.Time, first int, second int) {

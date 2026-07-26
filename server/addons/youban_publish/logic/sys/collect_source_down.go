@@ -227,7 +227,10 @@ func (s *sSysPublish) finishCollectSourceDownTasks(ctx context.Context, taskIds 
 			"updated_at":    gtime.Now(),
 		}).
 		Update()
-	return gerror.Wrap(err, "更新采集源任务下架状态失败")
+	if err = gerror.Wrap(err, "更新采集源任务下架状态失败"); err != nil {
+		return err
+	}
+	return s.refreshTaskNoteIndexes(ctx, taskIds)
 }
 
 func (s *sSysPublish) finishCollectSourceDownDispatch(ctx context.Context, sourceId int64, taskIds []int64, tenantId int64, accountId int64) error {

@@ -231,7 +231,7 @@ type ISysPublish interface {
 	AdminProfileImageSearch(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile) (list []*sysin.NoteModel, totalCount int, err error)
 	AdminTgMessageRepairStart(ctx context.Context, in *sysin.TgMessageRepairStartInp) (res *sysin.TgMessageRepairModel, err error)
 	AdminTgMessageRepairView(ctx context.Context, in *sysin.TgMessageRepairViewInp) (res *sysin.TgMessageRepairModel, err error)
-	AdminNoteList(ctx context.Context, in *sysin.NoteListInp) (list []*sysin.AdminNoteListModel, totalCount int, err error)
+	AdminNoteList(ctx context.Context, in *sysin.NoteListInp) (res *sysin.AdminNotePageModel, err error)
 	AdminTagList(ctx context.Context, in *sysin.TagListInp) (list []*sysin.TagModel, totalCount int, err error)
 	AdminTagSave(ctx context.Context, in *sysin.TagSaveInp) (err error)
 	AdminTagDelete(ctx context.Context, in *sysin.TagDeleteInp) (err error)

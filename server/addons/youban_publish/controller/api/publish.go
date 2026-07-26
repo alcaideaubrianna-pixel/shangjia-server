@@ -698,17 +698,16 @@ func (c *cPublishAdmin) TgMessageRepairView(ctx context.Context, req *publish.Ad
 }
 
 func (c *cPublishAdmin) NoteList(ctx context.Context, req *publish.AdminNoteListReq) (res *publish.AdminNoteListRes, err error) {
-	list, totalCount, err := service.SysPublish().AdminNoteList(ctx, &req.NoteListInp)
+	data, err := service.SysPublish().AdminNoteList(ctx, &req.NoteListInp)
 	if err != nil {
 		return nil, err
 	}
-	if list == nil {
-		list = []*sysin.AdminNoteListModel{}
+	if data == nil {
+		data = &sysin.AdminNotePageModel{List: []*sysin.AdminNoteListModel{}}
+	} else if data.List == nil {
+		data.List = []*sysin.AdminNoteListModel{}
 	}
-	res = new(publish.AdminNoteListRes)
-	res.List = list
-	res.PageRes.Pack(req, totalCount)
-	return
+	return &publish.AdminNoteListRes{AdminNotePageModel: data}, nil
 }
 
 func (c *cPublishAdmin) TagList(ctx context.Context, req *publish.AdminTagListReq) (res *publish.AdminTagListRes, err error) {

@@ -259,7 +259,7 @@ func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenan
 		_ = s.markTaskPublishFailed(ctx, id, tenantId, operatorId, err)
 		return gerror.Wrap(err, "上架任务加入队列失败")
 	}
-	return nil
+	return s.syncProfileNoteIndex(ctx, task["profile_id"].Int64())
 }
 
 func (s *sSysPublish) markTaskPublishQueued(ctx context.Context, id int64, tenantId int64, operatorId int64, operationNo string) error {
@@ -510,11 +510,12 @@ func (s *sSysPublish) cancelTask(ctx context.Context, id int64, accountId int64)
 	if err != nil {
 		return gerror.Wrap(err, "取消上架任务失败")
 	}
-	return nil
+	return s.syncProfileNoteIndex(ctx, task["profile_id"].Int64())
 }
 
 func (s *sSysPublish) cancelTaskByTenant(ctx context.Context, id int64, tenantId int64, operatorId int64) (err error) {
-	if _, err = s.getTaskByTenant(ctx, id, tenantId); err != nil {
+	task, err := s.getTaskByTenant(ctx, id, tenantId)
+	if err != nil {
 		return err
 	}
 	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
@@ -531,7 +532,7 @@ func (s *sSysPublish) cancelTaskByTenant(ctx context.Context, id int64, tenantId
 	if err != nil {
 		return gerror.Wrap(err, "取消上架任务失败")
 	}
-	return nil
+	return s.syncProfileNoteIndex(ctx, task["profile_id"].Int64())
 }
 
 func (s *sSysPublish) ensureTgJob(ctx context.Context, taskId int64, operationNo string, channelIds []int64, onlySelectedChannels bool) error {

@@ -44,6 +44,7 @@ var (
 		>> 修复菜单关系树  [go run main.go up -m=fix -a1=menuTree]
 		>> 回填上架媒体感知哈希分桶  [go run main.go up -m=fix -a1=mediaPHashBucket]
 		>> 补全上架媒体缺失感知哈希  [go run main.go up -m=fix -a1=mediaPHashMissing]
+		>> 回填上架资料索引  [go run main.go up -m=fix -a1=noteIndex]
 		---------------------------------------------------------------------------------
 		更多
        	github地址：https://github.com/bufanyun/hotgo

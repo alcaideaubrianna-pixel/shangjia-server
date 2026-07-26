@@ -2,114 +2,54 @@ package sys
 
 import (
 	"context"
-	"fmt"
-	"sort"
+	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
-	"hotgo/internal/library/cache"
 	"hotgo/internal/model/input/form"
 )
 
-const adminNoteIndexCoverageTTL = 30 * time.Second
+type adminNoteCursor struct {
+	Id        int64  `json:"id"`
+	UpdatedAt string `json:"updatedAt"`
+}
 
-func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.ProfileListInp, tenantId int64, tenantIds []int64, accountIds []int64) ([]*sysin.ProfileModel, int, bool, error) {
+func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteListInp, tenantId int64, tenantIds []int64, accountIds []int64) ([]*sysin.ProfileModel, bool, string, error) {
 	if in == nil {
-		in = &sysin.ProfileListInp{}
-	}
-	if !s.adminNoteIndexReady(ctx, tenantId, tenantIds, accountIds) {
-		return nil, 0, false, nil
+		in = &sysin.NoteListInp{}
 	}
 	mod := noteIndexModel(ctx).LeftJoin(publishAccountTable+" a", "a.id=i.account_id AND a.deleted_at IS NULL")
-	mod = applyNoteIndexScope(mod, tenantId, tenantIds, accountIds, in)
-	mod = applyNoteIndexFilters(mod, in)
-	totalCount, err := mod.Clone().Count()
-	if err != nil {
-		return nil, 0, true, gerror.Wrap(err, "统计资料索引失败")
+	mod = applyNoteIndexScope(mod, tenantId, tenantIds, accountIds, &in.ProfileListInp)
+	mod = applyNoteIndexFilters(mod, &in.ProfileListInp)
+	if err := applyNoteIndexCursor(mod, in.Cursor); err != nil {
+		return nil, false, "", err
 	}
-	if totalCount == 0 {
-		return []*sysin.ProfileModel{}, 0, true, nil
-	}
-	page, perPage, _ := form.CalPage(in.Page, in.PerPage)
-	in.Page = page
+	_, perPage, _ := form.CalPage(1, in.PerPage)
+	in.Page = 1
 	in.PerPage = perPage
 	var list []*sysin.ProfileModel
-	if err = mod.Clone().Fields(adminNoteIndexFields()).
+	if err := mod.Clone().Fields(adminNoteIndexFields()).
 		OrderDesc("i.updated_at").OrderDesc("i.id").
-		Limit((page-1)*perPage, perPage).Scan(&list); err != nil {
-		return nil, 0, true, gerror.Wrap(err, "获取资料索引列表失败")
+		Limit(perPage + 1).Scan(&list); err != nil {
+		return nil, false, "", gerror.Wrap(err, "获取资料索引列表失败")
 	}
 	if list == nil {
 		list = []*sysin.ProfileModel{}
 	}
-	return list, totalCount, true, nil
-}
-
-func (s *sSysPublish) adminNoteIndexReady(ctx context.Context, tenantId int64, tenantIds []int64, accountIds []int64) bool {
-	key := adminNoteIndexCoverageKey(tenantId, tenantIds, accountIds)
-	if value, err := cache.Instance().Get(ctx, key); err == nil && !value.IsNil() {
-		return value.Int() == 1
+	hasMore := len(list) > perPage
+	if hasMore {
+		list = list[:perPage]
 	}
-	sourceCount, err := adminNoteIndexSourceCount(ctx, tenantId, tenantIds, accountIds)
-	if err != nil {
-		return false
+	nextCursor := ""
+	if hasMore && len(list) > 0 {
+		nextCursor = encodeAdminNoteCursor(list[len(list)-1])
 	}
-	indexCount, err := adminNoteIndexCount(ctx, tenantId, tenantIds, accountIds)
-	if err != nil {
-		return false
-	}
-	ready := sourceCount == indexCount
-	value := 0
-	if ready {
-		value = 1
-	}
-	_ = cache.Instance().Set(ctx, key, value, adminNoteIndexCoverageTTL)
-	return ready
-}
-
-func adminNoteIndexSourceCount(ctx context.Context, tenantId int64, tenantIds []int64, accountIds []int64) (int, error) {
-	mod := gdbModel(ctx, "hg_content_profile p").
-		InnerJoin("hg_youban_publish_task t", "t.profile_id=p.id AND t.deleted_at IS NULL").
-		WhereNull("p.deleted_at")
-	if len(tenantIds) > 0 {
-		mod = mod.WhereIn("t.tenant_id", tenantIds)
-	} else if tenantId > 0 {
-		mod = mod.Where("t.tenant_id", tenantId)
-	}
-	if len(accountIds) > 0 {
-		mod = mod.WhereIn("t.account_id", accountIds)
-	}
-	return mod.Count()
-}
-
-func adminNoteIndexCount(ctx context.Context, tenantId int64, tenantIds []int64, accountIds []int64) (int, error) {
-	mod := noteIndexModel(ctx)
-	if len(tenantIds) > 0 {
-		mod = mod.WhereIn("i.tenant_id", tenantIds)
-	} else if tenantId > 0 {
-		mod = mod.Where("i.tenant_id", tenantId)
-	}
-	if len(accountIds) > 0 {
-		mod = mod.WhereIn("i.account_id", accountIds)
-	}
-	return mod.Count()
-}
-
-func gdbModel(ctx context.Context, table string) *gdb.Model {
-	return g.DB().Model(table).Safe().Ctx(ctx)
-}
-
-func adminNoteIndexCoverageKey(tenantId int64, tenantIds []int64, accountIds []int64) string {
-	tenantIds = append([]int64(nil), tenantIds...)
-	accountIds = append([]int64(nil), accountIds...)
-	sort.Slice(tenantIds, func(i, j int) bool { return tenantIds[i] < tenantIds[j] })
-	sort.Slice(accountIds, func(i, j int) bool { return accountIds[i] < accountIds[j] })
-	return fmt.Sprintf("youban_publish:note_index:coverage:%s", mediaPHashHashKey(fmt.Sprintf("%d:%v:%v", tenantId, tenantIds, accountIds)))
+	return list, hasMore, nextCursor, nil
 }
 
 func applyNoteIndexScope(mod *gdb.Model, tenantId int64, tenantIds []int64, accountIds []int64, in *sysin.ProfileListInp) *gdb.Model {
@@ -177,6 +117,49 @@ func applyNoteIndexTagFilter(mod *gdb.Model, tags []string) *gdb.Model {
 		return mod
 	}
 	return mod.Where("("+strings.Join(conditions, " OR ")+")", args...)
+}
+
+func applyNoteIndexCursor(mod *gdb.Model, raw string) error {
+	cursor, err := decodeAdminNoteCursor(raw)
+	if err != nil {
+		return err
+	}
+	if cursor == nil {
+		return nil
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, cursor.UpdatedAt)
+	if err != nil {
+		return gerror.New("笔记列表游标不合法")
+	}
+	mod.Where("(i.updated_at < ? OR (i.updated_at = ? AND i.id < ?))", updatedAt, updatedAt, cursor.Id)
+	return nil
+}
+
+func encodeAdminNoteCursor(item *sysin.ProfileModel) string {
+	if item == nil || item.Id <= 0 || item.UpdatedAt == nil {
+		return ""
+	}
+	payload, err := json.Marshal(adminNoteCursor{Id: item.Id, UpdatedAt: item.UpdatedAt.Time.Format(time.RFC3339Nano)})
+	if err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(payload)
+}
+
+func decodeAdminNoteCursor(raw string) (*adminNoteCursor, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, gerror.New("笔记列表游标不合法")
+	}
+	var cursor adminNoteCursor
+	if err = json.Unmarshal(payload, &cursor); err != nil || cursor.Id <= 0 || cursor.UpdatedAt == "" {
+		return nil, gerror.New("笔记列表游标不合法")
+	}
+	return &cursor, nil
 }
 
 func adminNoteIndexFields() string {
