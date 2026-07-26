@@ -1410,6 +1410,11 @@ func (s *sSysSync) executeRun(ctx context.Context, runId int64, configId int64, 
 		_ = s.markConfigRunFailed(ctx, configId, err.Error())
 		return s.finishRun(ctx, runId, sysin.RunStatusFailed, g.Map{"error_message": err.Error()})
 	}
+	updateCursorTime, updateCursorNoteID, err := s.bootstrapConfigUpdateCursor(ctx, cfg)
+	if err != nil {
+		_ = s.markConfigRunFailed(ctx, configId, err.Error())
+		return s.finishRun(ctx, runId, sysin.RunStatusFailed, g.Map{"error_message": err.Error()})
+	}
 	pendingLimit := batchSize / 2
 	if pendingLimit <= 0 {
 		pendingLimit = 1
@@ -1428,7 +1433,13 @@ func (s *sSysSync) executeRun(ctx context.Context, runId int64, configId int64, 
 		_ = s.markConfigRunFailed(ctx, configId, err.Error())
 		return s.finishRun(ctx, runId, sysin.RunStatusFailed, g.Map{"error_message": err.Error()})
 	}
-	rows = append(pendingRows, rows...)
+	newRows := rows
+	updatedRows, err := s.fetchUpdatedSourceNotes(ctx, db, updateCursorTime, updateCursorNoteID, batchSize)
+	if err != nil {
+		_ = s.markConfigRunFailed(ctx, configId, err.Error())
+		return s.finishRun(ctx, runId, sysin.RunStatusFailed, g.Map{"error_message": err.Error()})
+	}
+	rows = mergeSourceNoteRows(pendingRows, updatedRows, newRows)
 	readyRows := make([]gdb.Record, 0, len(rows))
 	pendingMediaRows := make([]gdb.Record, 0)
 	for _, row := range rows {
@@ -1443,7 +1454,6 @@ func (s *sSysSync) executeRun(ctx context.Context, runId int64, configId int64, 
 	created, updated, skipped, failed := 0, 0, 0, 0
 	logs := make([]string, 0, len(rows)+1)
 	channelStats := map[int64]*channelRunStat{}
-	cursorBlocked := false
 	for _, row := range append(pendingMediaRows, readyRows...) {
 		itemStarted := time.Now()
 		result, e := "", error(nil)
@@ -1478,28 +1488,31 @@ func (s *sSysSync) executeRun(ctx context.Context, runId int64, configId int64, 
 			default:
 				skipped++
 			}
-			if !cursorBlocked {
-				noteId := row["note_id"].Int64()
-				if noteId > cursorNoteId {
-					cursorNoteId = noteId
-					if cursorErr := s.saveConfigCursor(ctx, configId, cursorNoteId); cursorErr != nil {
-						failed++
-						status = sysin.RunStatusFailed
-						result = "failed"
-						errMsg = cursorErr.Error()
-						logs = append(logs, fmt.Sprintf("note:%d failed:%s", noteId, cursorErr.Error()))
-						e = cursorErr
-					}
-				}
-			}
-		}
-		if e != nil {
-			cursorBlocked = true
 		}
 		_ = s.createRunItem(ctx, runId, configId, row, result, status, errMsg, time.Since(itemStarted).Milliseconds())
 		accumulateChannelStat(channelStats, row, result)
 		if (created+updated+skipped+failed)%50 == 0 {
 			g.Log().Infof(ctx, "FeiNiu 同步进度 runId:%d configId:%d total:%d created:%d updated:%d skipped:%d failed:%d", runId, configId, created+updated+skipped+failed, created, updated, skipped, failed)
+		}
+	}
+	maxNewNoteID := cursorNoteId
+	for _, row := range newRows {
+		if noteID := row["note_id"].Int64(); noteID > maxNewNoteID {
+			maxNewNoteID = noteID
+		}
+	}
+	if maxNewNoteID > cursorNoteId {
+		if cursorErr := s.saveConfigCursor(ctx, configId, maxNewNoteID); cursorErr != nil {
+			failed++
+			logs = append(logs, fmt.Sprintf("cursor:%d failed:%s", maxNewNoteID, cursorErr.Error()))
+		} else {
+			cursorNoteId = maxNewNoteID
+		}
+	}
+	if nextTime, nextNoteID := latestSourceUpdateCursor(updatedRows, updateCursorTime, updateCursorNoteID); nextTime != nil {
+		if cursorErr := s.saveConfigUpdateCursor(ctx, configId, nextTime, nextNoteID); cursorErr != nil {
+			failed++
+			logs = append(logs, fmt.Sprintf("update-cursor:%s:%d failed:%s", nextTime.String(), nextNoteID, cursorErr.Error()))
 		}
 	}
 	status := sysin.RunStatusSuccess
@@ -1552,7 +1565,7 @@ func (s *sSysSync) fetchSourceNotes(ctx context.Context, db gdb.DB, configId int
 	fields := strings.Join([]string{
 		"n.note_id", "n.note_uuid", "n.note_code", "n.title", "n.plain_text", "n.html_text",
 		"n.category_code", "n.province", "n.city", "n.age", "n.height", "n.weight", "n.cup_size",
-		"n.expected_living_cost", "n.has_verification_video", "n.image_count", "n.video_count",
+		"n.expected_living_cost", "n.has_verification_video", "n.image_count", "n.video_count", "n.ingest_status",
 		"n.text_block_count", "n.group_params", "n.tag_params", "n.storage_policy", "n.remark",
 		"n.create_by", "n.create_time", "n.update_by", "n.update_time", "n.edited_at",
 	}, ",")
@@ -1581,12 +1594,12 @@ func (s *sSysSync) fetchPendingSourceNotes(ctx context.Context, db gdb.DB, confi
 	if err := g.DB().Model(profileMapTable).Safe().Ctx(ctx).
 		Fields("feiniu_note_id").
 		Where("config_id", configId).
-		Where("sync_status", syncStatusPendingMedia).
+		WhereIn("sync_status", []string{syncStatusPendingMedia, sysin.RunStatusFailed}).
 		WhereGT("feiniu_note_id", 0).
-		OrderAsc("id").
+		OrderAsc("updated_at").OrderAsc("id").
 		Limit(limit).
 		Scan(&pending); err != nil {
-		return nil, gerror.Wrap(err, "读取待补全资料失败")
+		return nil, gerror.Wrap(err, "读取待补全和重试资料失败")
 	}
 	noteIds := make([]int64, 0, len(pending))
 	for _, row := range pending {
@@ -1597,6 +1610,72 @@ func (s *sSysSync) fetchPendingSourceNotes(ctx context.Context, db gdb.DB, confi
 	return s.fetchSourceNotesByIds(ctx, db, noteIds)
 }
 
+func (s *sSysSync) fetchUpdatedSourceNotes(ctx context.Context, db gdb.DB, cursorTime *gtime.Time, cursorNoteID int64, limit int) ([]gdb.Record, error) {
+	if cursorTime == nil || limit <= 0 {
+		return nil, nil
+	}
+	fields := strings.Join([]string{
+		"n.note_id", "n.note_uuid", "n.note_code", "n.title", "n.plain_text", "n.html_text",
+		"n.category_code", "n.province", "n.city", "n.age", "n.height", "n.weight", "n.cup_size",
+		"n.expected_living_cost", "n.has_verification_video", "n.image_count", "n.video_count", "n.ingest_status",
+		"n.text_block_count", "n.group_params", "n.tag_params", "n.storage_policy", "n.remark",
+		"n.create_by", "n.create_time", "n.update_by", "n.update_time", "n.edited_at",
+	}, ",")
+	changeTimeExpr := "n.update_time"
+	var rows []gdb.Record
+	err := db.Model("tg_content_note n").Safe().Ctx(ctx).
+		Fields(fields).
+		Where("n.status", "0").
+		Where("("+changeTimeExpr+" > ?) OR ("+changeTimeExpr+" = ? AND n.note_id > ?)", cursorTime, cursorTime, cursorNoteID).
+		OrderAsc(changeTimeExpr).OrderAsc("n.note_id").Limit(limit).Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取 FeiNiu 最近更新资料失败")
+	}
+	if err = s.fillSourceNoteMeta(ctx, db, rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func latestSourceUpdateCursor(rows []gdb.Record, currentTime *gtime.Time, currentNoteID int64) (*gtime.Time, int64) {
+	latestTime := currentTime
+	latestNoteID := currentNoteID
+	for _, row := range rows {
+		changedAt := row["update_time"].GTime()
+		if changedAt == nil {
+			continue
+		}
+		noteID := row["note_id"].Int64()
+		if latestTime == nil || changedAt.Time.After(latestTime.Time) || (changedAt.Time.Equal(latestTime.Time) && noteID > latestNoteID) {
+			latestTime = changedAt
+			latestNoteID = noteID
+		}
+	}
+	return latestTime, latestNoteID
+}
+
+func mergeSourceNoteRows(groups ...[]gdb.Record) []gdb.Record {
+	seen := make(map[int64]struct{})
+	rows := make([]gdb.Record, 0)
+	for _, group := range groups {
+		for _, row := range group {
+			if row == nil {
+				continue
+			}
+			id := row["note_id"].Int64()
+			if id <= 0 {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
+
 func (s *sSysSync) fetchSourceNotesByIds(ctx context.Context, db gdb.DB, noteIds []int64) ([]gdb.Record, error) {
 	if len(noteIds) == 0 {
 		return []gdb.Record{}, nil
@@ -1604,7 +1683,7 @@ func (s *sSysSync) fetchSourceNotesByIds(ctx context.Context, db gdb.DB, noteIds
 	fields := strings.Join([]string{
 		"n.note_id", "n.note_uuid", "n.note_code", "n.title", "n.plain_text", "n.html_text",
 		"n.category_code", "n.province", "n.city", "n.age", "n.height", "n.weight", "n.cup_size",
-		"n.expected_living_cost", "n.has_verification_video", "n.image_count", "n.video_count",
+		"n.expected_living_cost", "n.has_verification_video", "n.image_count", "n.video_count", "n.ingest_status",
 		"n.text_block_count", "n.group_params", "n.tag_params", "n.storage_policy", "n.remark",
 		"n.create_by", "n.create_time", "n.update_by", "n.update_time", "n.edited_at",
 	}, ",")
@@ -1654,17 +1733,24 @@ func (s *sSysSync) fillSourceNoteMeta(ctx context.Context, db gdb.DB, rows []gdb
 		return err
 	}
 	var mediaRows []gdb.Record
+	readyMediaExpr := "COUNT(DISTINCT CASE WHEN a.local_file_path IS NOT NULL AND a.local_file_path <> '' AND a.binary_md5 IS NOT NULL AND a.binary_md5 <> '' AND a.perceptual_hash IS NOT NULL AND a.perceptual_hash <> '' AND ac.status = 'success' THEN b.asset_id END) AS ready_media_count"
 	if err := db.Model("tg_content_block b").Safe().Ctx(ctx).
-		Fields("b.note_id,COUNT(1) AS media_count").
+		LeftJoin("tg_content_asset a", "a.asset_id=b.asset_id").
+		LeftJoin("tg_content_asset_cos ac", "ac.asset_id=a.asset_id").
+		Fields("b.note_id,COUNT(DISTINCT b.asset_id) AS media_count,"+readyMediaExpr).
 		WhereIn("b.note_id", noteIds).
 		WhereGT("b.asset_id", 0).
+		WhereIn("b.block_type", []string{"image", "video"}).
 		Group("b.note_id").
 		Scan(&mediaRows); err != nil {
 		return gerror.Wrap(err, "读取 FeiNiu 资料媒体数量失败")
 	}
 	mediaCounts := make(map[int64]int, len(mediaRows))
+	readyMediaCounts := make(map[int64]int, len(mediaRows))
 	for _, row := range mediaRows {
-		mediaCounts[row["note_id"].Int64()] = row["media_count"].Int()
+		noteID := row["note_id"].Int64()
+		mediaCounts[noteID] = row["media_count"].Int()
+		readyMediaCounts[noteID] = row["ready_media_count"].Int()
 	}
 	for _, row := range rows {
 		source := sourceByNote[row["note_id"].Int64()]
@@ -1673,6 +1759,8 @@ func (s *sSysSync) fillSourceNoteMeta(ctx context.Context, db gdb.DB, rows []gdb
 		setRecordValue(row, "source_tg_chat_id", 0)
 		setRecordValue(row, "source_grouped_id", 0)
 		setRecordValue(row, "source_message_id", 0)
+		setRecordValue(row, "source_media_count", mediaCounts[row["note_id"].Int64()])
+		setRecordValue(row, "source_ready_media_count", readyMediaCounts[row["note_id"].Int64()])
 		setRecordValue(row, "channel_title", "")
 		setRecordValue(row, "channel_username", "")
 		setRecordValue(row, "channel_invite_link", "")
@@ -1685,7 +1773,6 @@ func (s *sSysSync) fillSourceNoteMeta(ctx context.Context, db gdb.DB, rows []gdb
 		setRecordValue(row, "source_tg_chat_id", source["tg_chat_id"].Int64())
 		setRecordValue(row, "source_grouped_id", source["tg_grouped_id"].Int64())
 		setRecordValue(row, "source_message_id", source["tg_message_id"].Int64())
-		setRecordValue(row, "source_media_count", mediaCounts[row["note_id"].Int64()])
 		channel := channels[source["channel_id"].Int64()]
 		if channel == nil {
 			continue
@@ -1726,11 +1813,16 @@ func recordInt64s(rows []gdb.Record, field string) []int64 {
 }
 
 func isSourceMediaPending(row gdb.Record) bool {
-	expected := row["image_count"].Int() + row["video_count"].Int()
-	if expected <= 0 {
-		return false
+	if !strings.EqualFold(strings.TrimSpace(row["ingest_status"].String()), "done") {
+		return true
 	}
-	return row["source_media_count"].Int() < expected
+	expected := row["image_count"].Int() + row["video_count"].Int()
+	actual := row["source_media_count"].Int()
+	ready := row["source_ready_media_count"].Int()
+	if expected > 0 && actual < expected {
+		return true
+	}
+	return ready < actual
 }
 
 func (s *sSysSync) sourceChannelsById(ctx context.Context, db gdb.DB, channelIds []int64) (map[int64]gdb.Record, error) {
@@ -1764,8 +1856,9 @@ func (s *sSysSync) syncOneNote(ctx context.Context, source gdb.DB, cfg gdb.Recor
 	}
 	expectedMediaCount := row["image_count"].Int() + row["video_count"].Int()
 	actualMediaCount := row["source_media_count"].Int()
-	if expectedMediaCount > 0 && actualMediaCount < expectedMediaCount {
-		msg := fmt.Sprintf("媒体未补齐 %d/%d", actualMediaCount, expectedMediaCount)
+	readyMediaCount := row["source_ready_media_count"].Int()
+	if isSourceMediaPending(row) {
+		msg := fmt.Sprintf("资料或媒体未就绪 ingest:%s media:%d/%d ready:%d", row["ingest_status"].String(), actualMediaCount, expectedMediaCount, readyMediaCount)
 		return "pending_media", s.upsertProfileMapPendingMedia(ctx, cfg["id"].Int64(), row, contentHash, msg)
 	}
 	forceSync := false
@@ -2035,6 +2128,51 @@ func (s *sSysSync) bootstrapConfigCursor(ctx context.Context, cfg gdb.Record) (i
 	}
 	cfg["last_source_note_id"] = gvar.New(cursor)
 	return cursor, nil
+}
+
+func (s *sSysSync) saveConfigUpdateCursor(ctx context.Context, configId int64, cursorTime *gtime.Time, noteID int64) error {
+	if configId <= 0 || cursorTime == nil {
+		return nil
+	}
+	_, err := g.DB().Model(configTable).Safe().Ctx(ctx).Where("id", configId).Data(g.Map{
+		"last_source_update_time":    cursorTime,
+		"last_source_update_note_id": noteID,
+		"updated_at":                 gtime.Now(),
+	}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "保存来源更新游标失败")
+	}
+	return nil
+}
+
+func (s *sSysSync) bootstrapConfigUpdateCursor(ctx context.Context, cfg gdb.Record) (*gtime.Time, int64, error) {
+	if current := cfg["last_source_update_time"].GTime(); current != nil {
+		return current, cfg["last_source_update_note_id"].Int64(), nil
+	}
+	configId := cfg["id"].Int64()
+	if configId <= 0 {
+		return gtime.Now(), 0, nil
+	}
+	row, err := g.DB().Model(profileMapTable).Safe().Ctx(ctx).
+		Fields("source_updated_at,feiniu_note_id").
+		Where("config_id", configId).
+		WhereNotNull("source_updated_at").
+		OrderDesc("source_updated_at").OrderDesc("feiniu_note_id").One()
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "读取来源更新游标失败")
+	}
+	cursorTime := gtime.Now()
+	cursorNoteID := int64(0)
+	if !row.IsEmpty() && row["source_updated_at"].GTime() != nil {
+		cursorTime = row["source_updated_at"].GTime()
+		cursorNoteID = row["feiniu_note_id"].Int64()
+	}
+	if err = s.saveConfigUpdateCursor(ctx, configId, cursorTime, cursorNoteID); err != nil {
+		return nil, 0, err
+	}
+	cfg["last_source_update_time"] = gvar.New(cursorTime)
+	cfg["last_source_update_note_id"] = gvar.New(cursorNoteID)
+	return cursorTime, cursorNoteID, nil
 }
 
 func (s *sSysSync) upsertProfile(ctx context.Context, cfg gdb.Record, row gdb.Record, accountId int64, contentHash string, publishedAt *gtime.Time) (int64, int64, error) {
@@ -2477,7 +2615,7 @@ func configRecordToSave(row gdb.Record) *sysin.ConfigSaveInp {
 	return &sysin.ConfigSaveInp{Id: row["id"].Int64(), Name: row["name"].String(), DbType: row["db_type"].String(), DbHost: row["db_host"].String(), DbPort: row["db_port"].Int(), DbName: row["db_name"].String(), DbUser: row["db_user"].String(), DbPassword: decodePassword(row["db_password"].String()), TargetTenantId: row["target_tenant_id"].Int64(), TargetParentAccountId: row["target_parent_account_id"].Int64(), AutoCreateAccount: row["auto_create_account"].Int(), SyncMedia: row["sync_media"].Int(), SyncVerifyMedia: row["sync_verify_media"].Int(), AutoSyncEnabled: row["auto_sync_enabled"].Int(), SyncIntervalMinutes: row["sync_interval_minutes"].Int(), BatchSize: row["batch_size"].Int(), Status: row["status"].Int()}
 }
 func configFields() string {
-	return "id,name,db_type,db_host,db_port,db_name,db_user,target_tenant_id,target_parent_account_id,auto_create_account,sync_media,sync_verify_media,auto_sync_enabled,sync_interval_minutes,batch_size,last_source_note_id,status,last_run_at,last_success_at,last_error,created_at,updated_at"
+	return "id,name,db_type,db_host,db_port,db_name,db_user,target_tenant_id,target_parent_account_id,auto_create_account,sync_media,sync_verify_media,auto_sync_enabled,sync_interval_minutes,batch_size,last_source_note_id,last_source_update_time,last_source_update_note_id,status,last_run_at,last_success_at,last_error,created_at,updated_at"
 }
 func runFields() string {
 	return "id,config_id,run_type,status,total_count,created_count,updated_count,skipped_count,failed_count,started_at,finished_at,error_message,runtime_log,created_at"
@@ -2519,10 +2657,10 @@ func sourceKey(row gdb.Record) string {
 	return fmt.Sprintf("feiniu:note:%d", row["note_id"].Int64())
 }
 func sourceTime(row gdb.Record) *gtime.Time {
-	if t := row["edited_at"].GTime(); t != nil {
+	if t := row["update_time"].GTime(); t != nil {
 		return t
 	}
-	if t := row["update_time"].GTime(); t != nil {
+	if t := row["edited_at"].GTime(); t != nil {
 		return t
 	}
 	if t := row["create_time"].GTime(); t != nil {

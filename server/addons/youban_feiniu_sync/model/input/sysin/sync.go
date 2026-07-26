@@ -72,28 +72,30 @@ type ConfigListInp struct {
 }
 
 type ConfigModel struct {
-	Id                    int64       `json:"id" dc:"ID"`
-	Name                  string      `json:"name" dc:"配置名称"`
-	DbType                string      `json:"dbType" dc:"数据库类型"`
-	DbHost                string      `json:"dbHost" dc:"数据库地址"`
-	DbPort                int         `json:"dbPort" dc:"端口"`
-	DbName                string      `json:"dbName" dc:"数据库名"`
-	DbUser                string      `json:"dbUser" dc:"账号"`
-	TargetTenantId        int64       `json:"targetTenantId" dc:"目标租户ID"`
-	TargetParentAccountId int64       `json:"targetParentAccountId" dc:"目标父账号ID"`
-	AutoCreateAccount     int         `json:"autoCreateAccount" dc:"自动创建账号"`
-	SyncMedia             int         `json:"syncMedia" dc:"同步媒体"`
-	SyncVerifyMedia       int         `json:"syncVerifyMedia" dc:"同步验证资料"`
-	AutoSyncEnabled       int         `json:"autoSyncEnabled" dc:"自动同步开关"`
-	SyncIntervalMinutes   int         `json:"syncIntervalMinutes" dc:"同步间隔分钟"`
-	BatchSize             int         `json:"batchSize" dc:"单批数量"`
-	Status                int         `json:"status" dc:"状态"`
-	LastSourceNoteId      int64       `json:"lastSourceNoteId" dc:"最后来源笔记ID"`
-	LastRunAt             *gtime.Time `json:"lastRunAt" dc:"最近运行时间"`
-	LastSuccessAt         *gtime.Time `json:"lastSuccessAt" dc:"最近成功时间"`
-	LastError             string      `json:"lastError" dc:"最近错误"`
-	CreatedAt             *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt             *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id                     int64       `json:"id" dc:"ID"`
+	Name                   string      `json:"name" dc:"配置名称"`
+	DbType                 string      `json:"dbType" dc:"数据库类型"`
+	DbHost                 string      `json:"dbHost" dc:"数据库地址"`
+	DbPort                 int         `json:"dbPort" dc:"端口"`
+	DbName                 string      `json:"dbName" dc:"数据库名"`
+	DbUser                 string      `json:"dbUser" dc:"账号"`
+	TargetTenantId         int64       `json:"targetTenantId" dc:"目标租户ID"`
+	TargetParentAccountId  int64       `json:"targetParentAccountId" dc:"目标父账号ID"`
+	AutoCreateAccount      int         `json:"autoCreateAccount" dc:"自动创建账号"`
+	SyncMedia              int         `json:"syncMedia" dc:"同步媒体"`
+	SyncVerifyMedia        int         `json:"syncVerifyMedia" dc:"同步验证资料"`
+	AutoSyncEnabled        int         `json:"autoSyncEnabled" dc:"自动同步开关"`
+	SyncIntervalMinutes    int         `json:"syncIntervalMinutes" dc:"同步间隔分钟"`
+	BatchSize              int         `json:"batchSize" dc:"单批数量"`
+	Status                 int         `json:"status" dc:"状态"`
+	LastSourceNoteId       int64       `json:"lastSourceNoteId" dc:"最后来源笔记ID"`
+	LastSourceUpdateTime   *gtime.Time `json:"lastSourceUpdateTime" dc:"最后来源更新时间"`
+	LastSourceUpdateNoteId int64       `json:"lastSourceUpdateNoteId" dc:"最后来源更新笔记ID"`
+	LastRunAt              *gtime.Time `json:"lastRunAt" dc:"最近运行时间"`
+	LastSuccessAt          *gtime.Time `json:"lastSuccessAt" dc:"最近成功时间"`
+	LastError              string      `json:"lastError" dc:"最近错误"`
+	CreatedAt              *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt              *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type ConfigSaveInp struct {

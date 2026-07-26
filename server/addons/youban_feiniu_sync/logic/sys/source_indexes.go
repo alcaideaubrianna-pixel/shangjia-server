@@ -65,6 +65,7 @@ func (s *sSysSync) ensureSourceIndexes(ctx context.Context, db gdb.DB, dbType, s
 func sourceIndexStatements(dbType string) []string {
 	statements := []string{
 		"CREATE INDEX idx_yfs_src_note_status_id ON tg_content_note (status, note_id)",
+		"CREATE INDEX idx_yfs_src_note_status_update_id ON tg_content_note (status, update_time, note_id)",
 		"CREATE INDEX idx_yfs_src_source_note_id ON tg_content_source (note_id)",
 		"CREATE INDEX idx_yfs_src_channel_id ON tg_channel (channel_id)",
 	}
@@ -73,6 +74,7 @@ func sourceIndexStatements(dbType string) []string {
 	}
 	return []string{
 		"CREATE INDEX IF NOT EXISTS idx_yfs_src_note_status_id ON tg_content_note (status, note_id)",
+		"CREATE INDEX IF NOT EXISTS idx_yfs_src_note_status_update_id ON tg_content_note (status, update_time, note_id)",
 		"CREATE INDEX IF NOT EXISTS idx_yfs_src_source_note_id ON tg_content_source (note_id)",
 		"CREATE INDEX IF NOT EXISTS idx_yfs_src_channel_id ON tg_channel (channel_id)",
 	}
