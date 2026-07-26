@@ -253,6 +253,9 @@ CREATE TABLE IF NOT EXISTS hg_youban_feiniu_sync_config (
   last_source_note_id bigint(20) NOT NULL DEFAULT '0',
   last_source_update_time datetime DEFAULT NULL,
   last_source_update_note_id bigint(20) NOT NULL DEFAULT '0',
+  backfill_source_note_id bigint(20) NOT NULL DEFAULT '0',
+  backfill_target_note_id bigint(20) NOT NULL DEFAULT '0',
+  backfill_completed_at datetime DEFAULT NULL,
   status tinyint(1) NOT NULL DEFAULT '1',
   last_run_at datetime DEFAULT NULL,
   last_success_at datetime DEFAULT NULL,
@@ -268,6 +271,9 @@ ALTER TABLE hg_youban_feiniu_sync_config ADD COLUMN sync_interval_minutes int(11
 ALTER TABLE hg_youban_feiniu_sync_config ADD COLUMN last_source_note_id bigint(20) NOT NULL DEFAULT '0';
 ALTER TABLE hg_youban_feiniu_sync_config ADD COLUMN last_source_update_time datetime DEFAULT NULL;
 ALTER TABLE hg_youban_feiniu_sync_config ADD COLUMN last_source_update_note_id bigint(20) NOT NULL DEFAULT '0';
+ALTER TABLE hg_youban_feiniu_sync_config ADD COLUMN backfill_source_note_id bigint(20) NOT NULL DEFAULT '0';
+ALTER TABLE hg_youban_feiniu_sync_config ADD COLUMN backfill_target_note_id bigint(20) NOT NULL DEFAULT '0';
+ALTER TABLE hg_youban_feiniu_sync_config ADD COLUMN backfill_completed_at datetime DEFAULT NULL;
 CREATE TABLE IF NOT EXISTS hg_youban_feiniu_sync_channel_map (
   id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   config_id bigint(20) NOT NULL DEFAULT '0',
@@ -426,6 +432,9 @@ CREATE TABLE IF NOT EXISTS hg_youban_feiniu_sync_config (
   last_source_note_id bigint NOT NULL DEFAULT 0,
   last_source_update_time timestamp DEFAULT NULL,
   last_source_update_note_id bigint NOT NULL DEFAULT 0,
+  backfill_source_note_id bigint NOT NULL DEFAULT 0,
+  backfill_target_note_id bigint NOT NULL DEFAULT 0,
+  backfill_completed_at timestamp DEFAULT NULL,
   status smallint NOT NULL DEFAULT 1,
   last_run_at timestamp DEFAULT NULL,
   last_success_at timestamp DEFAULT NULL,
@@ -440,6 +449,9 @@ ALTER TABLE hg_youban_feiniu_sync_config ADD COLUMN IF NOT EXISTS sync_interval_
 ALTER TABLE hg_youban_feiniu_sync_config ADD COLUMN IF NOT EXISTS last_source_note_id bigint NOT NULL DEFAULT 0;
 ALTER TABLE hg_youban_feiniu_sync_config ADD COLUMN IF NOT EXISTS last_source_update_time timestamp DEFAULT NULL;
 ALTER TABLE hg_youban_feiniu_sync_config ADD COLUMN IF NOT EXISTS last_source_update_note_id bigint NOT NULL DEFAULT 0;
+ALTER TABLE hg_youban_feiniu_sync_config ADD COLUMN IF NOT EXISTS backfill_source_note_id bigint NOT NULL DEFAULT 0;
+ALTER TABLE hg_youban_feiniu_sync_config ADD COLUMN IF NOT EXISTS backfill_target_note_id bigint NOT NULL DEFAULT 0;
+ALTER TABLE hg_youban_feiniu_sync_config ADD COLUMN IF NOT EXISTS backfill_completed_at timestamp DEFAULT NULL;
 CREATE TABLE IF NOT EXISTS hg_youban_feiniu_sync_channel_map (
   id bigserial PRIMARY KEY,
   config_id bigint NOT NULL DEFAULT 0,

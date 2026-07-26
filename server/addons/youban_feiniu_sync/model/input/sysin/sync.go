@@ -91,6 +91,9 @@ type ConfigModel struct {
 	LastSourceNoteId       int64       `json:"lastSourceNoteId" dc:"最后来源笔记ID"`
 	LastSourceUpdateTime   *gtime.Time `json:"lastSourceUpdateTime" dc:"最后来源更新时间"`
 	LastSourceUpdateNoteId int64       `json:"lastSourceUpdateNoteId" dc:"最后来源更新笔记ID"`
+	BackfillSourceNoteId   int64       `json:"backfillSourceNoteId" dc:"历史回填游标"`
+	BackfillTargetNoteId   int64       `json:"backfillTargetNoteId" dc:"历史回填目标ID"`
+	BackfillCompletedAt    *gtime.Time `json:"backfillCompletedAt" dc:"历史回填完成时间"`
 	LastRunAt              *gtime.Time `json:"lastRunAt" dc:"最近运行时间"`
 	LastSuccessAt          *gtime.Time `json:"lastSuccessAt" dc:"最近成功时间"`
 	LastError              string      `json:"lastError" dc:"最近错误"`

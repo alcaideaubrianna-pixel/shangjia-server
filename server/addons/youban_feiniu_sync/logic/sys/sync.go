@@ -1415,6 +1415,11 @@ func (s *sSysSync) executeRun(ctx context.Context, runId int64, configId int64, 
 		_ = s.markConfigRunFailed(ctx, configId, err.Error())
 		return s.finishRun(ctx, runId, sysin.RunStatusFailed, g.Map{"error_message": err.Error()})
 	}
+	backfillCursor, backfillTarget, backfillCompleted, err := s.bootstrapConfigBackfill(ctx, cfg)
+	if err != nil {
+		_ = s.markConfigRunFailed(ctx, configId, err.Error())
+		return s.finishRun(ctx, runId, sysin.RunStatusFailed, g.Map{"error_message": err.Error()})
+	}
 	pendingLimit := batchSize / 2
 	if pendingLimit <= 0 {
 		pendingLimit = 1
@@ -1439,7 +1444,15 @@ func (s *sSysSync) executeRun(ctx context.Context, runId int64, configId int64, 
 		_ = s.markConfigRunFailed(ctx, configId, err.Error())
 		return s.finishRun(ctx, runId, sysin.RunStatusFailed, g.Map{"error_message": err.Error()})
 	}
-	rows = mergeSourceNoteRows(pendingRows, updatedRows, newRows)
+	var backfillRows []gdb.Record
+	if !backfillCompleted {
+		backfillRows, err = s.fetchBackfillSourceNotes(ctx, db, backfillCursor, backfillTarget, batchSize)
+		if err != nil {
+			_ = s.markConfigRunFailed(ctx, configId, err.Error())
+			return s.finishRun(ctx, runId, sysin.RunStatusFailed, g.Map{"error_message": err.Error()})
+		}
+	}
+	rows = mergeSourceNoteRows(pendingRows, updatedRows, backfillRows, newRows)
 	readyRows := make([]gdb.Record, 0, len(rows))
 	pendingMediaRows := make([]gdb.Record, 0)
 	for _, row := range rows {
@@ -1513,6 +1526,12 @@ func (s *sSysSync) executeRun(ctx context.Context, runId int64, configId int64, 
 		if cursorErr := s.saveConfigUpdateCursor(ctx, configId, nextTime, nextNoteID); cursorErr != nil {
 			failed++
 			logs = append(logs, fmt.Sprintf("update-cursor:%s:%d failed:%s", nextTime.String(), nextNoteID, cursorErr.Error()))
+		}
+	}
+	if !backfillCompleted {
+		if cursorErr := s.advanceConfigBackfill(ctx, configId, backfillRows, backfillCursor, backfillTarget, batchSize); cursorErr != nil {
+			failed++
+			logs = append(logs, fmt.Sprintf("backfill-cursor:%d/%d failed:%s", backfillCursor, backfillTarget, cursorErr.Error()))
 		}
 	}
 	status := sysin.RunStatusSuccess
@@ -1630,6 +1649,33 @@ func (s *sSysSync) fetchUpdatedSourceNotes(ctx context.Context, db gdb.DB, curso
 		OrderAsc(changeTimeExpr).OrderAsc("n.note_id").Limit(limit).Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取 FeiNiu 最近更新资料失败")
+	}
+	if err = s.fillSourceNoteMeta(ctx, db, rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *sSysSync) fetchBackfillSourceNotes(ctx context.Context, db gdb.DB, cursorNoteID, targetNoteID int64, limit int) ([]gdb.Record, error) {
+	if targetNoteID <= 0 || cursorNoteID >= targetNoteID || limit <= 0 {
+		return nil, nil
+	}
+	fields := strings.Join([]string{
+		"n.note_id", "n.note_uuid", "n.note_code", "n.title", "n.plain_text", "n.html_text",
+		"n.category_code", "n.province", "n.city", "n.age", "n.height", "n.weight", "n.cup_size",
+		"n.expected_living_cost", "n.has_verification_video", "n.image_count", "n.video_count", "n.ingest_status",
+		"n.text_block_count", "n.group_params", "n.tag_params", "n.storage_policy", "n.remark",
+		"n.create_by", "n.create_time", "n.update_by", "n.update_time", "n.edited_at",
+	}, ",")
+	var rows []gdb.Record
+	err := db.Model("tg_content_note n").Safe().Ctx(ctx).
+		Fields(fields).
+		Where("n.status", "0").
+		WhereGT("n.note_id", cursorNoteID).
+		WhereLTE("n.note_id", targetNoteID).
+		OrderAsc("n.note_id").Limit(limit).Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取 FeiNiu 历史回填资料失败")
 	}
 	if err = s.fillSourceNoteMeta(ctx, db, rows); err != nil {
 		return nil, err
@@ -2175,6 +2221,69 @@ func (s *sSysSync) bootstrapConfigUpdateCursor(ctx context.Context, cfg gdb.Reco
 	return cursorTime, cursorNoteID, nil
 }
 
+func (s *sSysSync) bootstrapConfigBackfill(ctx context.Context, cfg gdb.Record) (cursor, target int64, completed bool, err error) {
+	if cfg["backfill_completed_at"].GTime() != nil {
+		return cfg["backfill_source_note_id"].Int64(), cfg["backfill_target_note_id"].Int64(), true, nil
+	}
+	cursor = cfg["backfill_source_note_id"].Int64()
+	target = cfg["backfill_target_note_id"].Int64()
+	if target > 0 {
+		return cursor, target, false, nil
+	}
+	configID := cfg["id"].Int64()
+	if configID <= 0 {
+		return 0, 0, true, nil
+	}
+	row, queryErr := g.DB().Model(profileMapTable).Safe().Ctx(ctx).
+		Fields("MIN(feiniu_note_id) AS first_source_note_id").
+		Where("config_id", configID).
+		WhereGT("feiniu_note_id", 0).
+		One()
+	if queryErr != nil {
+		return 0, 0, false, gerror.Wrap(queryErr, "读取历史回填范围失败")
+	}
+	firstMappedID := row["first_source_note_id"].Int64()
+	if firstMappedID <= 1 {
+		now := gtime.Now()
+		_, err = g.DB().Model(configTable).Safe().Ctx(ctx).Where("id", configID).Data(g.Map{
+			"backfill_completed_at": now,
+			"updated_at":            now,
+		}).Update()
+		return 0, 0, true, err
+	}
+	target = firstMappedID - 1
+	_, err = g.DB().Model(configTable).Safe().Ctx(ctx).Where("id", configID).Data(g.Map{
+		"backfill_target_note_id": target,
+		"updated_at":              gtime.Now(),
+	}).Update()
+	if err != nil {
+		return 0, 0, false, gerror.Wrap(err, "初始化历史回填范围失败")
+	}
+	return cursor, target, false, nil
+}
+
+func (s *sSysSync) advanceConfigBackfill(ctx context.Context, configID int64, rows []gdb.Record, cursor, target int64, limit int) error {
+	if configID <= 0 || target <= 0 {
+		return nil
+	}
+	nextCursor := cursor
+	for _, row := range rows {
+		if noteID := row["note_id"].Int64(); noteID > nextCursor {
+			nextCursor = noteID
+		}
+	}
+	data := g.Map{"backfill_source_note_id": nextCursor, "updated_at": gtime.Now()}
+	if nextCursor >= target || len(rows) < limit {
+		data["backfill_source_note_id"] = target
+		data["backfill_completed_at"] = gtime.Now()
+	}
+	_, err := g.DB().Model(configTable).Safe().Ctx(ctx).Where("id", configID).Data(data).Update()
+	if err != nil {
+		return gerror.Wrap(err, "保存历史回填游标失败")
+	}
+	return nil
+}
+
 func (s *sSysSync) upsertProfile(ctx context.Context, cfg gdb.Record, row gdb.Record, accountId int64, contentHash string, publishedAt *gtime.Time) (int64, int64, error) {
 	columns := dao.ContentProfile.Columns()
 	sourceKey := sourceKey(row)
@@ -2615,7 +2724,7 @@ func configRecordToSave(row gdb.Record) *sysin.ConfigSaveInp {
 	return &sysin.ConfigSaveInp{Id: row["id"].Int64(), Name: row["name"].String(), DbType: row["db_type"].String(), DbHost: row["db_host"].String(), DbPort: row["db_port"].Int(), DbName: row["db_name"].String(), DbUser: row["db_user"].String(), DbPassword: decodePassword(row["db_password"].String()), TargetTenantId: row["target_tenant_id"].Int64(), TargetParentAccountId: row["target_parent_account_id"].Int64(), AutoCreateAccount: row["auto_create_account"].Int(), SyncMedia: row["sync_media"].Int(), SyncVerifyMedia: row["sync_verify_media"].Int(), AutoSyncEnabled: row["auto_sync_enabled"].Int(), SyncIntervalMinutes: row["sync_interval_minutes"].Int(), BatchSize: row["batch_size"].Int(), Status: row["status"].Int()}
 }
 func configFields() string {
-	return "id,name,db_type,db_host,db_port,db_name,db_user,target_tenant_id,target_parent_account_id,auto_create_account,sync_media,sync_verify_media,auto_sync_enabled,sync_interval_minutes,batch_size,last_source_note_id,last_source_update_time,last_source_update_note_id,status,last_run_at,last_success_at,last_error,created_at,updated_at"
+	return "id,name,db_type,db_host,db_port,db_name,db_user,target_tenant_id,target_parent_account_id,auto_create_account,sync_media,sync_verify_media,auto_sync_enabled,sync_interval_minutes,batch_size,last_source_note_id,last_source_update_time,last_source_update_note_id,backfill_source_note_id,backfill_target_note_id,backfill_completed_at,status,last_run_at,last_success_at,last_error,created_at,updated_at"
 }
 func runFields() string {
 	return "id,config_id,run_type,status,total_count,created_count,updated_count,skipped_count,failed_count,started_at,finished_at,error_message,runtime_log,created_at"
