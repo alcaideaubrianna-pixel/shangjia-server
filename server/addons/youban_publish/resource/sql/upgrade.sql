@@ -508,8 +508,6 @@ UPDATE `hg_youban_publish_full_push_batch` SET `snapshot_max_profile_id`=`snapsh
 UPDATE `hg_youban_publish_full_push_batch` SET `cursor_profile_id`=`cursor_task_id` WHERE `cursor_profile_id`=0 AND `cursor_task_id`>0;
 ALTER TABLE `hg_youban_publish_full_push_batch` DROP COLUMN IF EXISTS `snapshot_max_task_id`;
 ALTER TABLE `hg_youban_publish_full_push_batch` DROP COLUMN IF EXISTS `cursor_task_id`;
-ALTER TABLE `hg_youban_publish_media` MODIFY COLUMN `task_id` bigint(20) DEFAULT NULL COMMENT '采集任务ID，普通资料媒体为空';
-UPDATE `hg_youban_publish_media` SET `task_id`=NULL WHERE `profile_id`>0 AND `task_id`=0;
 ALTER TABLE `hg_youban_publish_tg_job` MODIFY COLUMN `task_id` bigint(20) DEFAULT NULL COMMENT '采集任务ID，普通资料推送为空';
 ALTER TABLE `hg_youban_publish_channel_profile` DROP COLUMN IF EXISTS `task_id`;
 DELETE FROM `hg_admin_menu` WHERE `name` = 'youbanPublishTask';
