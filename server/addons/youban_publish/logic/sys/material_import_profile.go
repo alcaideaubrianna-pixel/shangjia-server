@@ -108,13 +108,12 @@ func (s *sSysPublish) bindMaterialImportGroupProfile(ctx context.Context, group 
 	}
 	_, err := g.DB().Model(pdao.YoubanPublishMaterialImportGroup.Table()).Safe().Ctx(ctx).
 		Where("id", group.Id).
-		Data(g.Map{"profile_id": saved.Id, "task_profile_id": saved.TaskId, "updated_at": gtime.Now()}).
+		Data(g.Map{"profile_id": saved.Id, "updated_at": gtime.Now()}).
 		Update()
 	if err != nil {
 		return gerror.Wrap(err, "记录TG导入资料关联失败")
 	}
 	group.ProfileId = saved.Id
-	group.TaskProfileId = saved.TaskId
 	return nil
 }
 
