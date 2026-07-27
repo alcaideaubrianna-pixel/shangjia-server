@@ -43,3 +43,23 @@ func TestTelegramJobPriorityManualProfilePublishIsUrgent(t *testing.T) {
 		})
 	}
 }
+
+func TestIsManualProfilePublishOperation(t *testing.T) {
+	tests := map[string]struct {
+		operationNo string
+		want        bool
+	}{
+		"manual profile":   {operationNo: "profile:12:345", want: true},
+		"case insensitive": {operationNo: " PROFILE:12:345 ", want: true},
+		"cycle":            {operationNo: "cycle_batch:12:345", want: false},
+		"full push":        {operationNo: "full_push:12:345", want: false},
+		"down":             {operationNo: "down:12:345", want: false},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := isManualProfilePublishOperation(test.operationNo); got != test.want {
+				t.Fatalf("unexpected manual publish flag: got=%t want=%t", got, test.want)
+			}
+		})
+	}
+}
