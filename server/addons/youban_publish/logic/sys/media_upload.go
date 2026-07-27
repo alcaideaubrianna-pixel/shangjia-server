@@ -2,9 +2,12 @@ package sys
 
 import (
 	"context"
+	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -79,7 +82,11 @@ func (s *sSysPublish) AdminMessageTemplateMediaUpload(ctx context.Context, in *s
 	}, nil
 }
 
-func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile, originalFile *ghttp.UploadFile) (*sysin.MediaModel, error) {
+func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile, originalFile *ghttp.UploadFile) (res *sysin.MediaModel, err error) {
+	totalStartedAt := time.Now()
+	defer func() {
+		logMediaUploadStage(ctx, "total", totalStartedAt, in, file, err)
+	}()
 	if task["status"].String() != sysin.PublishTaskStatusDraft {
 		return nil, gerror.New("仅草稿任务可以上传媒体")
 	}
@@ -90,20 +97,53 @@ func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record
 	if in.MediaType == "video" {
 		uploadType = storager.KindVideo
 	}
+	assetsStartedAt := time.Now()
 	assets, err := requireMediaUploadAssets(ctx, in.MediaType, file, poster)
+	logMediaUploadStage(ctx, "prepare_assets", assetsStartedAt, in, file, err)
 	if err != nil {
 		return nil, err
 	}
+	attachmentStartedAt := time.Now()
 	attachment, err := service.CommonUpload().UploadFile(ctx, uploadType, file)
+	logMediaUploadStage(ctx, "upload_main", attachmentStartedAt, in, file, err)
 	if err != nil {
 		return nil, err
 	}
 	var originalAttachment *basesysin.AttachmentListModel
 	if originalFile != nil && in.MediaType == "image" {
+		originalStartedAt := time.Now()
 		originalAttachment, err = service.CommonUpload().UploadFile(ctx, storager.KindImg, originalFile)
+		logMediaUploadStage(ctx, "upload_original", originalStartedAt, in, originalFile, err)
 		if err != nil {
 			return nil, err
 		}
 	}
-	return s.saveMediaAttachment(ctx, task, in, attachment, mediaPosterAttachment(assets.Poster), originalAttachment, assets.PerceptualHash)
+	saveStartedAt := time.Now()
+	res, err = s.saveMediaAttachment(ctx, task, in, attachment, mediaPosterAttachment(assets.Poster), originalAttachment, assets.PerceptualHash)
+	logMediaUploadStage(ctx, "save_media", saveStartedAt, in, file, err)
+	return res, err
+}
+
+func logMediaUploadStage(ctx context.Context, stage string, startedAt time.Time, in *sysin.MediaUploadInp, file *ghttp.UploadFile, err error) {
+	duration := time.Since(startedAt)
+	mediaType := ""
+	taskId := int64(0)
+	if in != nil {
+		mediaType = strings.TrimSpace(in.MediaType)
+		taskId = in.TaskId
+	}
+	if err == nil && mediaType != "video" && duration < 500*time.Millisecond {
+		return
+	}
+	fileName := ""
+	fileSize := int64(0)
+	if file != nil {
+		fileName = file.Filename
+		fileSize = file.Size
+	}
+	if err != nil {
+		g.Log().Warningf(ctx, "上架媒体上传阶段失败 stage:%s duration_ms:%d task_id:%d media_type:%s file_size:%d file_name:%s err:%+v", stage, duration.Milliseconds(), taskId, mediaType, fileSize, fileName, err)
+		return
+	}
+	g.Log().Infof(ctx, "上架媒体上传阶段 stage:%s duration_ms:%d task_id:%d media_type:%s file_size:%d file_name:%s", stage, duration.Milliseconds(), taskId, mediaType, fileSize, fileName)
 }
