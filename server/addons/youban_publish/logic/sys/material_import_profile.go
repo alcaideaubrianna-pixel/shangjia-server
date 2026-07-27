@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -28,9 +29,9 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 	if title == "" {
 		title = fmt.Sprintf("%dTG%d", task.AccountId, group.Id)
 	}
+	var err error
 	channelIds := append([]int64(nil), task.ChannelIds...)
 	if len(channelIds) == 0 {
-		var err error
 		channelIds, err = s.materialImportTargetChannelIds(ctx, nil, task.TenantId)
 		if err != nil {
 			return 0, err
@@ -43,6 +44,14 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 		PlainText:  strings.TrimSpace(firstNonEmpty(group.ProfileText, group.RawText)),
 		Visibility: consts.ContentVisibilityPrivate,
 		Status:     1,
+	}
+	input.Province, input.City, err = materialImportRegionCodes(ctx, input.PlainText)
+	if err != nil {
+		return 0, err
+	}
+	input.Tag, err = s.materialImportMatchedTags(ctx, input.PlainText)
+	if err != nil {
+		return 0, err
 	}
 	if group.ProfileId <= 0 {
 		profileId, err := s.materialImportExistingProfile(ctx, group)
@@ -83,6 +92,85 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 	}
 	_ = s.appendMaterialImportPublishLog(ctx, task, saved.Id, "imported", fmt.Sprintf("资料导入完成：%s", strings.TrimSpace(title)))
 	return saved.Id, nil
+}
+
+func materialImportRegionCodes(ctx context.Context, text string) (string, string, error) {
+	index, err := getLegacyCMSRegionIndex(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	normalizedText := normalizeMaterialImportMatchText(text)
+	provinceIDs := make(map[int64]struct{})
+	cityIDs := make(map[int64]struct{})
+	for name, province := range index.provincesByName {
+		if province != nil && strings.Contains(normalizedText, normalizeMaterialImportMatchText(name)) {
+			provinceIDs[province.Id] = struct{}{}
+		}
+	}
+	for name, cities := range index.citiesByName {
+		if !strings.Contains(normalizedText, normalizeMaterialImportMatchText(name)) {
+			continue
+		}
+		for _, city := range cities {
+			if city == nil {
+				continue
+			}
+			cityIDs[city.Id] = struct{}{}
+			if city.Pid > 0 {
+				provinceIDs[city.Pid] = struct{}{}
+			}
+		}
+	}
+	return joinMaterialImportRegionIDs(provinceIDs), joinMaterialImportRegionIDs(cityIDs), nil
+}
+
+func (s *sSysPublish) materialImportMatchedTags(ctx context.Context, text string) (string, error) {
+	names, err := s.materialImportTagNames(ctx)
+	if err != nil {
+		return "", err
+	}
+	return materialImportMatchedTagNames(text, names), nil
+}
+
+func materialImportMatchedTagNames(text string, names []string) string {
+	names = sortMaterialImportTagNames(names)
+	normalizedText := normalizeMaterialImportMatchText(text)
+	matched := make([]string, 0, len(names))
+	for _, name := range names {
+		normalizedName := normalizeMaterialImportMatchText(name)
+		if normalizedName == "" || !strings.Contains(normalizedText, normalizedName) {
+			continue
+		}
+		matched = append(matched, name)
+	}
+	return strings.Join(matched, ",")
+}
+
+func joinMaterialImportRegionIDs(ids map[int64]struct{}) string {
+	values := make([]int64, 0, len(ids))
+	for id := range ids {
+		if id > 0 {
+			values = append(values, id)
+		}
+	}
+	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+	parts := make([]string, 0, len(values))
+	for _, id := range values {
+		parts = append(parts, fmt.Sprintf("%d", id))
+	}
+	return strings.Join(parts, ",")
+}
+
+func normalizeMaterialImportMatchText(value string) string {
+	return strings.ToLower(strings.NewReplacer(" ", "", "\t", "", "\r", "", "\n", "", "\u00a0", "", "　", "", "，", ",").Replace(strings.TrimSpace(value)))
+}
+
+func sortMaterialImportTagNames(names []string) []string {
+	result := append([]string(nil), names...)
+	sort.SliceStable(result, func(i, j int) bool {
+		return len([]rune(result[i])) > len([]rune(result[j]))
+	})
+	return result
 }
 
 func (s *sSysPublish) materialImportExistingProfile(ctx context.Context, group *sysin.MaterialImportGroupModel) (int64, error) {

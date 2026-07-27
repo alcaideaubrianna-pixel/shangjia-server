@@ -196,6 +196,20 @@ func TestMaterialImportProfileText(t *testing.T) {
 	}
 }
 
+func TestMaterialImportMatchedTagNames(t *testing.T) {
+	got := materialImportMatchedTagNames("昵称：小安\n职业：老师/演员\n城市：北京", []string{"演员", "老师", "学生"})
+	if got != "演员,老师" {
+		t.Fatalf("matched tags = %q, want %q", got, "演员,老师")
+	}
+}
+
+func TestJoinMaterialImportRegionIDs(t *testing.T) {
+	got := joinMaterialImportRegionIDs(map[int64]struct{}{110000: {}, 310000: {}, 440000: {}})
+	if got != "110000,310000,440000" {
+		t.Fatalf("region ids = %q, want %q", got, "110000,310000,440000")
+	}
+}
+
 func TestParseMaterialImportChannelReference(t *testing.T) {
 	tests := []struct {
 		name     string
