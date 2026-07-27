@@ -97,13 +97,30 @@
 
   const columns = [
     { title: '时间', key: 'createdAt', width: 170 },
-    { title: '账号', key: 'accountName', width: 150, render: (row) => row.accountName || row.accountId || '-' },
+    {
+      title: '账号归属',
+      key: 'tenantName',
+      width: 160,
+      render: (row) => row.tenantName || '-',
+    },
+    {
+      title: '上架账号',
+      key: 'accountName',
+      width: 150,
+      render: (row) => row.accountName || row.accountId || '-',
+    },
     { title: '资料', key: 'title', width: 180, render: (row) => row.title || recordTarget(row) },
     { title: '动作', key: 'action', width: 130, render: (row) => actionLabel(row.action) },
     { title: '执行方', key: 'actor', width: 160, render: (row) => recordActor(row) },
     { title: '结果', key: 'status', width: 110, render: (row) => renderStatus(row.status) },
     { title: '目标', key: 'channelTitle', width: 220, render: (row) => recordChannel(row) },
-    { title: '详情', key: 'message', width: 520, ellipsis: { tooltip: true }, render: (row) => recordMessage(row) },
+    {
+      title: '详情',
+      key: 'message',
+      width: 520,
+      ellipsis: { tooltip: true },
+      render: (row) => recordMessage(row),
+    },
     { title: '任务ID', key: 'jobId', width: 90 },
     { title: '资料ID', key: 'profileId', width: 90 },
   ];
@@ -158,7 +175,8 @@
       });
       records.value = res?.list || [];
       pagination.itemCount = res?.totalCount || res?.total || 0;
-      pagination.pageCount = res?.pageCount || Math.max(1, Math.ceil(pagination.itemCount / pagination.pageSize));
+      pagination.pageCount =
+        res?.pageCount || Math.max(1, Math.ceil(pagination.itemCount / pagination.pageSize));
     } finally {
       loading.value = false;
     }
@@ -192,7 +210,12 @@
   }
 
   function recordChannel(row: any) {
-    return row.channelTitle || row.channelUsername || row.targetChatId || (row.channelId ? `频道 ${row.channelId}` : '-');
+    return (
+      row.channelTitle ||
+      row.channelUsername ||
+      row.targetChatId ||
+      (row.channelId ? `频道 ${row.channelId}` : '-')
+    );
   }
 
   function recordMessage(row: any) {

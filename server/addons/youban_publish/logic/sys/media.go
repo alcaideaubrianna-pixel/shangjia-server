@@ -59,10 +59,14 @@ func (s *sSysPublish) AdminMediaReconcile(ctx context.Context, in *sysin.MediaRe
 	if err != nil {
 		return err
 	}
+	retainedMediaIds := retainedMediaIDSet(in.Items)
 	for _, id := range in.RemovedMediaIds {
 		mediaId, resolveErr := s.resolveTaskMediaId(ctx, task, id, 0)
 		if resolveErr != nil {
 			return resolveErr
+		}
+		if _, retained := retainedMediaIds[mediaId]; retained {
+			continue
 		}
 		if err = s.deleteMediaByTenant(ctx, mediaId, account.TenantId, account.Id); err != nil {
 			return err
@@ -108,10 +112,14 @@ func (s *sSysPublish) MyMediaReconcile(ctx context.Context, in *sysin.MediaRecon
 	if err != nil {
 		return err
 	}
+	retainedMediaIds := retainedMediaIDSet(in.Items)
 	for _, id := range in.RemovedMediaIds {
 		mediaId, resolveErr := s.resolveTaskMediaId(ctx, task, id, account.Id)
 		if resolveErr != nil {
 			return resolveErr
+		}
+		if _, retained := retainedMediaIds[mediaId]; retained {
+			continue
 		}
 		if err = s.deleteMedia(ctx, mediaId, account.Id); err != nil {
 			return err
@@ -164,6 +172,17 @@ func (s *sSysPublish) sortTaskMedia(ctx context.Context, in *sysin.MediaSortInp,
 		}
 		return nil
 	})
+}
+
+func retainedMediaIDSet(items []*sysin.MediaSortItem) map[int64]struct{} {
+	retained := make(map[int64]struct{}, len(items))
+	for _, item := range items {
+		if item == nil || item.Id <= 0 {
+			continue
+		}
+		retained[item.Id] = struct{}{}
+	}
+	return retained
 }
 
 func (s *sSysPublish) resolveTaskMediaId(ctx context.Context, task gdb.Record, mediaId int64, accountId int64) (int64, error) {

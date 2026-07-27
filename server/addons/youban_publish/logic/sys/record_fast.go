@@ -60,6 +60,7 @@ func (s *sSysPublish) enrichPublishRecordListFast(ctx context.Context, tenantId 
 	jobIds := uniquePositiveInt64sFromRecordList(list, func(item *sysin.PublishRecordModel) int64 { return item.JobId })
 	taskIds := uniquePositiveInt64sFromRecordList(list, func(item *sysin.PublishRecordModel) int64 { return item.TaskId })
 	accountIds := uniquePositiveInt64sFromRecordList(list, func(item *sysin.PublishRecordModel) int64 { return item.AccountId })
+	tenantIds := uniquePositiveInt64sFromRecordList(list, func(item *sysin.PublishRecordModel) int64 { return item.TenantId })
 	profileIds := uniquePositiveInt64sFromRecordList(list, func(item *sysin.PublishRecordModel) int64 { return item.ProfileId })
 	botIds := uniquePositiveInt64sFromRecordList(list, func(item *sysin.PublishRecordModel) int64 { return item.BotId })
 
@@ -72,6 +73,10 @@ func (s *sSysPublish) enrichPublishRecordListFast(ctx context.Context, tenantId 
 		return err
 	}
 	accountMap, err := s.publishRecordAccountNameMap(ctx, accountIds)
+	if err != nil {
+		return err
+	}
+	tenantMap, err := s.publishRecordTenantNameMap(ctx, tenantIds)
 	if err != nil {
 		return err
 	}
@@ -111,6 +116,9 @@ func (s *sSysPublish) enrichPublishRecordListFast(ctx context.Context, tenantId 
 		if name, ok := accountMap[item.AccountId]; ok {
 			item.AccountName = name
 		}
+		if name, ok := tenantMap[item.TenantId]; ok {
+			item.TenantName = name
+		}
 		if bot, ok := botMap[item.BotId]; ok {
 			item.BotName = bot.Name
 			item.BotUsername = bot.Username
@@ -121,6 +129,30 @@ func (s *sSysPublish) enrichPublishRecordListFast(ctx context.Context, tenantId 
 		}
 	}
 	return s.enrichPublishRecordChannelDisplays(ctx, tenantId, list)
+}
+
+func (s *sSysPublish) publishRecordTenantNameMap(ctx context.Context, ids []int64) (map[int64]string, error) {
+	if len(ids) == 0 {
+		return map[int64]string{}, nil
+	}
+	type row struct {
+		Id   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	var rows []row
+	if err := g.DB().Model(publishTenantTable+" t").Safe().Ctx(ctx).
+		LeftJoin(publishAccountTable+" owner", "owner.tenant_id=t.id AND owner.account_type='admin' AND owner.deleted_at IS NULL").
+		Fields("t.id,COALESCE(NULLIF(owner.username, ''), NULLIF(t.name, '')) AS name").
+		WhereIn("t.id", ids).
+		WhereNull("t.deleted_at").
+		Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "读取发送记录账号归属失败")
+	}
+	res := make(map[int64]string, len(rows))
+	for _, item := range rows {
+		res[item.Id] = strings.TrimSpace(item.Name)
+	}
+	return res, nil
 }
 
 type publishRecordJobSnapshot struct {

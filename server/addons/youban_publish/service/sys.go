@@ -58,6 +58,7 @@ type ISysPublish interface {
 	ServerImportRunMatchUnbind(ctx context.Context, in *sysin.ImportRunMatchUnbindInp) (err error)
 	AdminMaterialImportTaskList(ctx context.Context, in *sysin.MaterialImportListInp) (list []*sysin.MaterialImportTaskModel, totalCount int, err error)
 	AdminMaterialImportTaskCreate(ctx context.Context, in *sysin.MaterialImportTaskSaveInp) (id int64, err error)
+	ServerMaterialImportTaskCreate(ctx context.Context, in *sysin.MaterialImportTaskServerCreateInp) (id int64, err error)
 	AdminMaterialImportTaskView(ctx context.Context, in *sysin.MaterialImportTaskViewInp) (res *sysin.MaterialImportTaskModel, err error)
 	AdminMaterialImportTaskStart(ctx context.Context, in *sysin.MaterialImportTaskActionInp) (err error)
 	AdminMaterialImportTaskCancel(ctx context.Context, in *sysin.MaterialImportTaskActionInp) (err error)

@@ -35,6 +35,14 @@ func (c *cMaterialImportAdmin) TaskCreate(ctx context.Context, req *publish.Mate
 	return
 }
 
+func (c *cMaterialImportAdmin) TaskCreateForAccount(ctx context.Context, req *publish.MaterialImportTaskServerCreateReq) (res *publish.MaterialImportTaskServerCreateRes, err error) {
+	id, err := service.SysPublish().ServerMaterialImportTaskCreate(ctx, &req.MaterialImportTaskServerCreateInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.MaterialImportTaskServerCreateRes{Id: id}, nil
+}
+
 func (c *cMaterialImportAdmin) TaskView(ctx context.Context, req *publish.MaterialImportTaskViewReq) (res *publish.MaterialImportTaskViewRes, err error) {
 	data, err := service.SysPublish().AdminMaterialImportTaskView(ctx, &req.MaterialImportTaskViewInp)
 	if err != nil {

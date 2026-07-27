@@ -26,6 +26,15 @@ type MaterialImportTaskCreateRes struct {
 	Id int64 `json:"id" dc:"任务ID"`
 }
 
+type MaterialImportTaskServerCreateReq struct {
+	g.Meta `path:"/publish/materialImport/createForAccount" method:"post" tags:"上架插件后台" summary:"超级管理员为账号创建TG资料导入任务"`
+	sysin.MaterialImportTaskServerCreateInp
+}
+
+type MaterialImportTaskServerCreateRes struct {
+	Id int64 `json:"id" dc:"任务ID"`
+}
+
 type MaterialImportTaskViewReq struct {
 	g.Meta `path:"/publish/materialImport/view" method:"get" tags:"上架插件后台" summary:"资料导入任务详情"`
 	sysin.MaterialImportTaskViewInp

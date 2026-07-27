@@ -167,3 +167,28 @@ func TestMaterialImportIgnoredNotice(t *testing.T) {
 		t.Fatal("valid material was incorrectly classified as a notice")
 	}
 }
+
+func TestParseMaterialImportChannelReference(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      string
+		channel  string
+		username string
+	}{
+		{name: "public channel url", raw: "https://t.me/TestChannel/16313?single", username: "testchannel"},
+		{name: "private channel url", raw: "https://t.me/c/123456/16313", channel: "-100123456"},
+		{name: "username", raw: "@TestChannel", username: "testchannel"},
+		{name: "numeric id", raw: "-100123456", channel: "-100123456"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			channel, username, err := parseMaterialImportChannelReference(test.raw)
+			if err != nil {
+				t.Fatalf("parseMaterialImportChannelReference(%q) error: %v", test.raw, err)
+			}
+			if channel != test.channel || username != test.username {
+				t.Fatalf("parseMaterialImportChannelReference(%q) = (%q, %q), want (%q, %q)", test.raw, channel, username, test.channel, test.username)
+			}
+		})
+	}
+}

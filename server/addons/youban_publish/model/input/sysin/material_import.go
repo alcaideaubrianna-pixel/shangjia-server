@@ -42,6 +42,29 @@ type MaterialImportTaskSaveInp struct {
 	PullLimitDays int    `json:"pullLimitDays" dc:"最多拉取天数"`
 }
 
+// MaterialImportTaskServerCreateInp 是超级管理员为任意上架账号创建TG资料导入任务的参数。
+type MaterialImportTaskServerCreateInp struct {
+	AccountId     int64  `json:"accountId" v:"required|min:1#请选择归属账号|请选择归属账号" dc:"资料归属账号"`
+	TgAccountId   int64  `json:"tgAccountId" v:"required|min:1#请选择TG账号|请选择TG账号" dc:"TG账号"`
+	ChannelUrl    string `json:"channelUrl" v:"required#请输入TG频道连接" dc:"TG频道连接"`
+	PullLimitDays int    `json:"pullLimitDays" dc:"最多拉取天数"`
+}
+
+func (in *MaterialImportTaskServerCreateInp) Filter(ctx context.Context) error {
+	_ = ctx
+	in.ChannelUrl = strings.TrimSpace(in.ChannelUrl)
+	if in.ChannelUrl == "" {
+		return gerror.New("请输入TG频道连接")
+	}
+	if in.PullLimitDays <= 0 {
+		in.PullLimitDays = 365
+	}
+	if in.PullLimitDays > 365 {
+		in.PullLimitDays = 365
+	}
+	return nil
+}
+
 func (in *MaterialImportTaskSaveInp) Filter(ctx context.Context) error {
 	in.SourceChatId = strings.TrimSpace(in.SourceChatId)
 	if in.SourceChatId == "" {

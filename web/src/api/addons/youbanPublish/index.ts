@@ -96,6 +96,22 @@ export function ImportTaskCreate(params = {}) {
   return http.request({ url: '/youban_publish/publish/importTask/create', method: 'POST', params });
 }
 
+export function ImportTaskCreateForAccount(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/materialImport/createForAccount',
+    method: 'POST',
+    params,
+  });
+}
+
+export function ServerTgAccountList(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/admin/tgAccount/list',
+    method: 'get',
+    params,
+  });
+}
+
 export function ImportTaskView(params = {}) {
   return http.request({ url: '/youban_publish/publish/importTask/view', method: 'get', params });
 }

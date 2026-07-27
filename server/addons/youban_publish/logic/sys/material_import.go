@@ -3,6 +3,8 @@ package sys
 import (
 	"context"
 	"math"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/internal/model/entity"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/contexts"
 )
 
 const (
@@ -100,7 +103,179 @@ func (s *sSysPublish) AdminMaterialImportTaskCreate(ctx context.Context, in *sys
 	if err != nil {
 		return 0, gerror.Wrap(err, "创建资料导入任务失败")
 	}
+	if err = s.materialImportMarkRunning(ctx, id, contexts.GetUserId(ctx), sysin.MaterialImportStagePulling); err != nil {
+		return 0, err
+	}
+	if err = s.enqueueMaterialImportTask(ctx, id, 0); err != nil {
+		return 0, gerror.Wrap(err, "启动资料导入任务失败")
+	}
 	return id, nil
+}
+
+func (s *sSysPublish) ServerMaterialImportTaskCreate(ctx context.Context, in *sysin.MaterialImportTaskServerCreateInp) (id int64, err error) {
+	if err = s.requireSystemSuperAdmin(ctx); err != nil {
+		return 0, err
+	}
+	if in == nil {
+		return 0, gerror.New("资料导入参数不能为空")
+	}
+	if err = in.Filter(ctx); err != nil {
+		return 0, err
+	}
+
+	target, err := s.publishAccountById(ctx, in.AccountId)
+	if err != nil {
+		return 0, err
+	}
+	if target.Status != 1 {
+		return 0, gerror.New("目标上架账号已停用")
+	}
+	tgAccount, err := s.adminTgAccountById(ctx, in.TgAccountId, target.TenantId)
+	if err != nil {
+		return 0, err
+	}
+	if strings.TrimSpace(tgAccount.SessionKey) == "" || tgAccount.Status != sysin.PublishTgAccountStatusAuthorized {
+		return 0, gerror.New("请选择已登录的TG账号")
+	}
+	cache, err := s.materialImportChannelCacheByReference(ctx, target.TenantId, tgAccount, in.ChannelUrl)
+	if err != nil {
+		return 0, err
+	}
+
+	now := gtime.Now()
+	data := g.Map{
+		"tenant_id":       target.TenantId,
+		"account_id":      target.Id,
+		"tg_account_id":   tgAccount.Id,
+		"source_chat_id":  cache.ChannelId,
+		"source_title":    strings.TrimSpace(cache.ChannelTitle),
+		"source_username": strings.TrimSpace(cache.ChannelUsername),
+		"pull_limit_days": in.PullLimitDays,
+		"status":          sysin.MaterialImportStatusPending,
+		"stage":           sysin.MaterialImportStageCreated,
+		"updated_by":      contexts.GetUserId(ctx),
+		"created_by":      contexts.GetUserId(ctx),
+		"created_at":      now,
+		"updated_at":      now,
+		"error_message":   "",
+		"result_json":     "",
+		"next_run_at":     nil,
+	}
+	id, err = g.DB().Model(pdao.YoubanPublishMaterialImportTask.Table()).Safe().Ctx(ctx).Data(data).InsertAndGetId()
+	if err != nil {
+		return 0, gerror.Wrap(err, "创建资料导入任务失败")
+	}
+	return id, nil
+}
+
+func (s *sSysPublish) publishAccountById(ctx context.Context, id int64) (*sysin.AccountModel, error) {
+	if id <= 0 {
+		return nil, gerror.New("请选择归属账号")
+	}
+	var account *sysin.AccountModel
+	columns := pdao.YoubanPublishAccount.Columns()
+	err := pdao.YoubanPublishAccount.Ctx(ctx).
+		Where(columns.Id, id).
+		WhereNull(columns.DeletedAt).
+		Scan(&account)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取归属账号失败")
+	}
+	if account == nil || account.Id <= 0 {
+		return nil, gerror.New("归属账号不存在")
+	}
+	return account, nil
+}
+
+func (s *sSysPublish) materialImportChannelCacheByReference(ctx context.Context, tenantId int64, tgAccount *sysin.TgAccountModel, raw string) (*sysin.ChannelCacheModel, error) {
+	channelId, username, err := parseMaterialImportChannelReference(raw)
+	if err != nil {
+		return nil, err
+	}
+	find := func() (*sysin.ChannelCacheModel, error) {
+		var cache *sysin.ChannelCacheModel
+		mod := g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).
+			Where("tenant_id", tenantId).
+			Where("tg_account_id", tgAccount.Id)
+		if channelId != "" {
+			mod = mod.WhereIn("channel_id", tgChannelCacheLookupIds(channelId))
+		} else {
+			mod = mod.Where("(LOWER(channel_username)=? OR LOWER(channel_username)=?)", username, "@"+username)
+		}
+		if err := mod.Scan(&cache); err != nil {
+			return nil, gerror.Wrap(err, "读取频道缓存失败")
+		}
+		return cache, nil
+	}
+	cache, err := find()
+	if err != nil {
+		return nil, err
+	}
+	if cache != nil && cache.Id > 0 {
+		return cache, nil
+	}
+
+	channels, err := s.fetchTgAccountChannelCaches(ctx, tgAccount)
+	if err != nil {
+		return nil, gerror.Wrap(err, "刷新TG频道缓存失败")
+	}
+	now := gtime.Now()
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		if err = s.upsertTgDialogCache(ctx, tenantId, tgAccount.Id, channel, now); err != nil {
+			return nil, err
+		}
+	}
+	cache, err = find()
+	if err != nil {
+		return nil, err
+	}
+	if cache == nil || cache.Id <= 0 {
+		return nil, gerror.New("TG频道不存在，或当前TG账号未加入该频道")
+	}
+	return cache, nil
+}
+
+func parseMaterialImportChannelReference(raw string) (channelId string, username string, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", gerror.New("请输入TG频道连接")
+	}
+	if strings.HasPrefix(raw, "@") {
+		username = strings.TrimPrefix(raw, "@")
+		return "", strings.ToLower(username), nil
+	}
+	if value, convErr := strconv.ParseInt(raw, 10, 64); convErr == nil && value != 0 {
+		return raw, "", nil
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	parsed, parseErr := url.Parse(raw)
+	if parseErr != nil || parsed.Host == "" {
+		return "", "", gerror.New("TG频道连接格式不正确")
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		return "", "", gerror.New("TG频道连接格式不正确")
+	}
+	if strings.EqualFold(parts[0], "c") {
+		if len(parts) < 2 {
+			return "", "", gerror.New("TG频道连接格式不正确")
+		}
+		value, convErr := strconv.ParseInt(parts[1], 10, 64)
+		if convErr != nil || value <= 0 {
+			return "", "", gerror.New("TG频道连接格式不正确")
+		}
+		return "-100" + strconv.FormatInt(value, 10), "", nil
+	}
+	username = strings.TrimPrefix(strings.TrimSpace(parts[0]), "@")
+	if username == "" || strings.HasPrefix(username, "+") {
+		return "", "", gerror.New("暂不支持私密邀请链接，请输入公开频道链接或频道ID")
+	}
+	return "", strings.ToLower(username), nil
 }
 
 func (s *sSysPublish) AdminMaterialImportTaskView(ctx context.Context, in *sysin.MaterialImportTaskViewInp) (res *sysin.MaterialImportTaskModel, err error) {

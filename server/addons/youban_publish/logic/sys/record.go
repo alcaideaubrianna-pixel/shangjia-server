@@ -170,6 +170,7 @@ func (s *sSysPublish) publishRecordList(ctx context.Context, in *sysin.PublishRe
 		"t.client_request_id",
 		"p.title",
 		"a.nickname AS account_name",
+		"COALESCE(NULLIF(owner.username, ''), NULLIF(tn.name, '')) AS tenant_name",
 		"b.bot_name,b.bot_username",
 		"COALESCE(NULLIF(c.channel_title, ''), NULLIF(tc.channel_title, '')) AS channel_title",
 		"c.channel_username",
@@ -193,6 +194,8 @@ func (s *sSysPublish) publishRecordCountModel(ctx context.Context, in *sysin.Pub
 		LeftJoin(publishTaskTable+" t", "t.id=l.task_id").
 		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=l.profile_id").
 		LeftJoin(publishAccountTable+" a", "a.id=l.account_id").
+		LeftJoin(publishTenantTable+" tn", "tn.id=l.tenant_id").
+		LeftJoin(publishAccountTable+" owner", "owner.tenant_id=l.tenant_id AND owner.account_type='admin' AND owner.deleted_at IS NULL").
 		LeftJoin(publishBotTable+" b", "b.id=l.bot_id").
 		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id").
 		Where("l.tenant_id", tenantId)

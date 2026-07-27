@@ -67,6 +67,8 @@ func (in *TgObserveBotListInp) Filter(ctx context.Context) error {
 type PublishRecordModel struct {
 	AccountId       int64       `json:"accountId" dc:"账号ID"`
 	AccountName     string      `json:"accountName" dc:"账号名称"`
+	TenantId        int64       `json:"tenantId" dc:"账号归属ID"`
+	TenantName      string      `json:"tenantName" dc:"账号归属"`
 	Action          string      `json:"action" dc:"动作"`
 	BotId           int64       `json:"botId" dc:"Bot ID"`
 	BotName         string      `json:"botName" dc:"Bot名称"`
