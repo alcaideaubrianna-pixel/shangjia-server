@@ -164,7 +164,7 @@ func mediaMD5CandidateMatches(ctx context.Context, md5Value string, in *sysin.Pr
 		mod = mod.WhereIn("m.profile_id", uniqueIds(candidateProfileIds))
 	}
 	mod = mod.Where("EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id=m.profile_id AND p.deleted_at IS NULL)")
-	mod = mod.Where("EXISTS (SELECT 1 FROM hg_youban_publish_task t WHERE t.profile_id=m.profile_id AND t.account_id=m.account_id AND t.tenant_id=m.tenant_id AND t.deleted_at IS NULL)")
+	mod = mod.Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=m.profile_id AND ps.account_id=m.account_id AND ps.tenant_id=m.tenant_id AND ps.deleted_at IS NULL)")
 	rows := make([]mediaPHashBucketCandidateRow, 0)
 	if err := mod.Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "查询媒体MD5精确匹配失败")
@@ -240,7 +240,7 @@ func mediaPHashMinEqualNibbles(threshold int) int {
 
 func mediaPHashSearchCacheKey(ctx context.Context, queryHash uint64, md5Value string, in *sysin.ProfileImageSearchInp, accountIds []int64, candidateProfileIds []int64) string {
 	parts := []string{
-		fmt.Sprintf("youban_publish:profile_image_search:v5:%d", queryHash),
+		fmt.Sprintf("youban_publish:profile_image_search:v6:%d", queryHash),
 		"md5=" + strings.TrimSpace(strings.ToLower(md5Value)),
 		fmt.Sprintf("tenant=%d", in.TenantId),
 		fmt.Sprintf("account=%d", in.AccountId),
