@@ -24,9 +24,6 @@ func (s *sSysPublish) MyProfilePublish(ctx context.Context, in *sysin.ProfileVie
 	if err != nil {
 		return err
 	}
-	if err = s.cleanupProfileDownMessagesBeforePublish(ctx, profileId, account.TenantId); err != nil {
-		return err
-	}
 	return s.submitProfilePublish(ctx, profileId, account.TenantId, account.Id, contexts.GetUserId(ctx), "", nil, false)
 }
 
@@ -44,9 +41,6 @@ func (s *sSysPublish) AdminProfilePublish(ctx context.Context, in *sysin.Profile
 	}
 	if view == nil || view.Profile == nil {
 		return gerror.New("资料不存在或无权操作")
-	}
-	if err = s.cleanupProfileDownMessagesBeforePublish(ctx, view.Profile.Id, view.Profile.TenantId); err != nil {
-		return err
 	}
 	return s.submitProfilePublish(ctx, view.Profile.Id, view.Profile.TenantId, view.Profile.AccountId, account.Id, "", nil, false)
 }

@@ -12,7 +12,7 @@ func isManualProfilePublishOperation(operationNo string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(operationNo)), "profile:")
 }
 
-func (s *sSysPublish) replaceManualProfileChannelMessages(ctx context.Context, current telegramJobRecord) error {
+func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current telegramJobRecord) error {
 	if !isManualProfilePublishOperation(current.OperationNo) || current.Id <= 0 || current.TenantId <= 0 || current.ProfileId <= 0 || current.ChannelId <= 0 {
 		return nil
 	}

@@ -72,6 +72,11 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 	if operationNo == "" {
 		operationNo = newTelegramOperationNo("profile", profileId)
 	}
+	if isManualProfilePublishOperation(operationNo) {
+		if err = s.cleanupProfileDownMessagesBeforePublish(ctx, profileId, tenantId); err != nil {
+			return err
+		}
+	}
 	jobIds := make([]int64, 0, len(channels))
 	for _, channel := range channels {
 		jobId, createErr := s.ensureTelegramProfileJobWithMeta(ctx, source, channel, operationNo, meta)

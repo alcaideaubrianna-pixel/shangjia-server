@@ -209,9 +209,6 @@ func (s *sSysPublish) submitProfilesByIds(ctx context.Context, ids []int64, tena
 		return nil
 	}
 	for _, profileId := range uniqueIds(ids) {
-		if err := s.cleanupProfileDownMessagesBeforePublish(ctx, profileId, tenantId); err != nil {
-			return err
-		}
 		if err := s.submitProfilePublish(ctx, profileId, tenantId, accountId, contexts.GetUserId(ctx), "", nil, false); err != nil {
 			return err
 		}
