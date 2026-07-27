@@ -83,11 +83,17 @@ func (s *sSysPublish) enabledAccountListenPlans(ctx context.Context) (map[int64]
 		return nil, err
 	}
 	var plans []*listenerPlanRecord
-	if err := g.DB().Model(messageListenPlanTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,name,tg_account_id,bot_id,bind_code,notify_chat_id,notify_chat_title,notify_bound_at,keywords_json,status").
-		WhereNull("deleted_at").
-		OrderAsc("tg_account_id").
-		OrderAsc("id").
+	if err := g.DB().Model(messageListenPlanTable+" p").Safe().Ctx(ctx).
+		InnerJoin(publishTgAccountTable+" ta", "ta.id=p.tg_account_id").
+		Fields("p.id,p.tenant_id,p.name,p.tg_account_id,p.bot_id,p.bind_code,p.notify_chat_id,p.notify_chat_title,p.notify_bound_at,p.keywords_json,p.status").
+		Where("p.status", publishsysin.MessageListenerStatusEnabled).
+		WhereGT("p.tg_account_id", 0).
+		Where("ta.status", publishsysin.PublishTgAccountStatusAuthorized).
+		WhereNot("ta.session_key", "").
+		WhereNull("p.deleted_at").
+		WhereNull("ta.deleted_at").
+		OrderAsc("p.tg_account_id").
+		OrderAsc("p.id").
 		Scan(&plans); err != nil {
 		return nil, gerror.Wrap(err, "读取监听计划失败")
 	}
@@ -109,7 +115,7 @@ func (s *sSysPublish) enabledAccountListenPlans(ctx context.Context) (map[int64]
 		targets := targetMap[plan.Id]
 		listenerTargets := make([]accountListenTargetRuntime, 0, len(targets))
 		for _, target := range targets {
-			if target == nil {
+			if target == nil || target.Status != publishsysin.MessageListenerStatusEnabled || strings.TrimSpace(target.TargetChatId) == "" {
 				continue
 			}
 			listenerTargets = append(listenerTargets, accountListenTargetRuntime{
@@ -122,6 +128,9 @@ func (s *sSysPublish) enabledAccountListenPlans(ctx context.Context) (map[int64]
 				TargetChatUsername: target.TargetChatUsername,
 				Status:             target.Status,
 			})
+		}
+		if len(listenerTargets) == 0 {
+			continue
 		}
 		group := accountListenPlanRuntime{
 			Id:            plan.Id,

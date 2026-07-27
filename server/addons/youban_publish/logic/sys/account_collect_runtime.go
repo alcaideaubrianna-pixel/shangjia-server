@@ -427,13 +427,23 @@ func (s *sSysPublish) accountCollectTgAccount(ctx context.Context, tgAccountId i
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取账号采集TG账号失败")
 	}
-	if item == nil || item.Id <= 0 {
-		return nil, gerror.New("账号采集TG账号不存在或已被删除")
-	}
-	if strings.TrimSpace(item.SessionKey) == "" {
-		return nil, gerror.New("账号采集TG账号未登录")
+	if err = validateAccountCollectTgAccount(item); err != nil {
+		return nil, err
 	}
 	return item, nil
+}
+
+func validateAccountCollectTgAccount(item *accountCollectTgAccount) error {
+	if item == nil || item.Id <= 0 {
+		return gerror.New("账号采集TG账号不存在或已被删除")
+	}
+	if strings.TrimSpace(item.Status) != sysin.PublishTgAccountStatusAuthorized {
+		return gerror.New("账号采集TG账号未授权或已失效")
+	}
+	if strings.TrimSpace(item.SessionKey) == "" {
+		return gerror.New("账号采集TG账号未登录")
+	}
+	return nil
 }
 
 func (s *sSysPublish) newAccountCollectClient(ctx context.Context, conf *model.TelegramConfig, item *accountCollectTgAccount, dispatcher tg.UpdateDispatcher) (*telegram.Client, error) {
