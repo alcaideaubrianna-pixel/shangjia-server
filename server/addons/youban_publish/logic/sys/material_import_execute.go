@@ -33,6 +33,9 @@ func (s *sSysPublish) ExecuteMaterialImportTask(ctx context.Context, taskId int6
 		return err
 	}
 	if err = s.executeMaterialImport(ctx, task); err != nil {
+		if isTelegramPermanentAccountAuthError(err) {
+			s.handleTgAccountPermanentAuthError(context.Background(), task.TgAccountId, task.UpdatedBy, telegramPermanentAccountAuthMessage(err), err)
+		}
 		if pause, ok := err.(*collectHistoryPauseError); ok {
 			delay := int(pause.delay.Seconds())
 			if delay <= 0 {
@@ -71,6 +74,16 @@ func (s *sSysPublish) executeMaterialImportPull(ctx context.Context, task *sysin
 	if err != nil {
 		return err
 	}
+	run := func(runCtx context.Context, client *telegram.Client) error {
+		if _, selfErr := client.Self(runCtx); selfErr != nil {
+			return selfErr
+		}
+		return s.pullMaterialImportPages(runCtx, client, task, peer, cache)
+	}
+	usedRuntime, err := s.executeAccountCollectOperation(ctx, task.TgAccountId, 50*time.Minute, run)
+	if err != nil || usedRuntime {
+		return err
+	}
 	tgAccount, err := s.accountCollectTgAccount(ctx, task.TgAccountId)
 	if err != nil {
 		return err
@@ -85,11 +98,8 @@ func (s *sSysPublish) executeMaterialImportPull(ctx context.Context, task *sysin
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 50*time.Minute)
 	defer cancel()
-	return client.Run(runCtx, func(runCtx context.Context) error {
-		if _, err = client.Self(runCtx); err != nil {
-			return err
-		}
-		return s.pullMaterialImportPages(runCtx, client, task, peer, cache)
+	return client.Run(runCtx, func(clientCtx context.Context) error {
+		return run(clientCtx, client)
 	})
 }
 
@@ -465,7 +475,7 @@ func materialImportKnownFieldLine(text string) bool {
 }
 
 func materialImportFieldPrefixes() []string {
-	return []string{"标题", "编号", "昵称", "省份", "城市", "城 市", "年龄", "身高", "体重", "星座", "地区", "地址", "微信", "电话", "手机"}
+	return []string{"标题", "编号", "昵称", "所在省份", "所在城市", "省份", "城市", "城 市", "年龄", "身高", "体重", "星座", "地区", "地址", "微信", "电话", "手机"}
 }
 
 func materialImportInlineFieldIndex(text string, prefix string) int {

@@ -597,6 +597,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_material_import_task` (
   `source_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '来源频道/群聊ID',
   `source_title` varchar(255) NOT NULL DEFAULT '' COMMENT '来源频道/群聊名称',
   `source_username` varchar(128) NOT NULL DEFAULT '' COMMENT '来源用户名',
+  `channel_id_json` text COMMENT '导入资料默认上架频道ID JSON',
   `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '任务状态',
   `stage` varchar(32) NOT NULL DEFAULT 'created' COMMENT '执行阶段',
   `pull_offset_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '消息拉取偏移ID',

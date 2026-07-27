@@ -29,8 +29,17 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 	if title == "" {
 		title = firstNonEmpty(group.ProfileNo, group.Nickname, fmt.Sprintf("TG资料%d", group.Id))
 	}
+	channelIds := append([]int64(nil), task.ChannelIds...)
+	if len(channelIds) == 0 {
+		var err error
+		channelIds, err = s.materialImportTargetChannelIds(ctx, nil, task.TenantId)
+		if err != nil {
+			return 0, 0, err
+		}
+	}
 	input := &sysin.ProfileSaveInp{
 		Id:         group.ProfileId,
+		ChannelIds: channelIds,
 		Title:      title,
 		PlainText:  strings.TrimSpace(firstNonEmpty(group.ProfileText, group.RawText)),
 		Visibility: consts.ContentVisibilityPrivate,

@@ -95,6 +95,13 @@ func TestMaterialImportTitleFallbackLeadingText(t *testing.T) {
 			nickname:  "朴朴芙蓉",
 		},
 		{
+			name:      "nickname with located province and city",
+			text:      "昵称:\u00a0B133\n所在省份:江苏\n所在城市:南京\n年龄:21",
+			title:     "B133",
+			profileNo: "",
+			nickname:  "B133",
+		},
+		{
 			name:      "nickname separated by whitespace",
 			text:      "昵称 A26\n省份: 山西\n城市: 山西",
 			title:     "A26",

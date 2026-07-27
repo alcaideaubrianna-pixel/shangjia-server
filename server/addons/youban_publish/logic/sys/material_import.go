@@ -17,12 +17,58 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/internal/model/entity"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 	"hotgo/internal/library/contexts"
 )
 
 const (
 	materialImportPageLimit = 100
 )
+
+func ensureMaterialImportTaskChannelColumn(ctx context.Context) error {
+	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
+		_, err := g.DB().Exec(ctx, `ALTER TABLE "hg_youban_publish_material_import_task" ADD COLUMN IF NOT EXISTS "channel_id_json" text`)
+		return gerror.Wrap(err, "检查资料导入上架频道字段失败")
+	}
+	_, err := g.DB().Exec(ctx, "ALTER TABLE `hg_youban_publish_material_import_task` ADD COLUMN `channel_id_json` text COMMENT '导入资料默认上架频道ID JSON' AFTER `source_username`")
+	if err != nil && !isIgnorableImportTaskServerIPColumnError(err) {
+		return gerror.Wrap(err, "检查资料导入上架频道字段失败")
+	}
+	return nil
+}
+
+func (s *sSysPublish) materialImportTargetChannelIds(ctx context.Context, requested []int64, tenantId int64) ([]int64, error) {
+	channelIds := uniqueIds(requested)
+	if len(channelIds) == 0 {
+		var rows []struct {
+			Id int64 `json:"id"`
+		}
+		if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+			Fields("id").
+			Where("tenant_id", tenantId).
+			Where("publish_direction", "up").
+			Where("publish_visible", 1).
+			Where("is_default_selected", 1).
+			Where("status", 1).
+			WhereNull("deleted_at").
+			OrderAsc("id").
+			Scan(&rows); err != nil {
+			return nil, gerror.Wrap(err, "读取默认上架频道失败")
+		}
+		for _, row := range rows {
+			if row.Id > 0 {
+				channelIds = append(channelIds, row.Id)
+			}
+		}
+	}
+	if len(channelIds) == 0 {
+		return nil, gerror.New("请至少选择一个上架频道")
+	}
+	if err := s.ensureProfileChannels(ctx, channelIds, tenantId); err != nil {
+		return nil, err
+	}
+	return channelIds, nil
+}
 
 func (s *sSysPublish) AdminMaterialImportTaskList(ctx context.Context, in *sysin.MaterialImportListInp) (list []*sysin.MaterialImportTaskModel, totalCount int, err error) {
 	account, err := s.currentAdminAccount(ctx)
@@ -46,6 +92,9 @@ func (s *sSysPublish) AdminMaterialImportTaskCreate(ctx context.Context, in *sys
 	if err = in.Filter(ctx); err != nil {
 		return 0, err
 	}
+	if err = ensureMaterialImportTaskChannelColumn(ctx); err != nil {
+		return 0, err
+	}
 	tgAccount, err := s.adminTgAccountById(ctx, in.TgAccountId, account.TenantId)
 	if err != nil {
 		return 0, err
@@ -63,6 +112,14 @@ func (s *sSysPublish) AdminMaterialImportTaskCreate(ctx context.Context, in *sys
 	if err = s.ensureEditableAccount(ctx, in.AccountId, account.TenantId); err != nil {
 		return 0, err
 	}
+	channelIds, err := s.materialImportTargetChannelIds(ctx, in.ChannelIds, account.TenantId)
+	if err != nil {
+		return 0, err
+	}
+	channelIdJSON, err := encodeBotIds(channelIds)
+	if err != nil {
+		return 0, err
+	}
 	now := gtime.Now()
 	data := g.Map{
 		"tenant_id":       account.TenantId,
@@ -71,6 +128,7 @@ func (s *sSysPublish) AdminMaterialImportTaskCreate(ctx context.Context, in *sys
 		"source_chat_id":  cache.ChannelId,
 		"source_title":    strings.TrimSpace(cache.ChannelTitle),
 		"source_username": strings.TrimSpace(cache.ChannelUsername),
+		"channel_id_json": channelIdJSON,
 		"pull_limit_days": in.PullLimitDays,
 		"status":          sysin.MaterialImportStatusPending,
 		"stage":           sysin.MaterialImportStageCreated,
@@ -122,6 +180,9 @@ func (s *sSysPublish) ServerMaterialImportTaskCreate(ctx context.Context, in *sy
 	if err = in.Filter(ctx); err != nil {
 		return 0, err
 	}
+	if err = ensureMaterialImportTaskChannelColumn(ctx); err != nil {
+		return 0, err
+	}
 
 	target, err := s.publishAccountById(ctx, in.AccountId)
 	if err != nil {
@@ -135,9 +196,17 @@ func (s *sSysPublish) ServerMaterialImportTaskCreate(ctx context.Context, in *sy
 		return 0, err
 	}
 	if strings.TrimSpace(tgAccount.SessionKey) == "" || tgAccount.Status != sysin.PublishTgAccountStatusAuthorized {
-		return 0, gerror.New("请选择已登录的TG账号")
+		return 0, gerror.New("请选择已登录且授权有效的TG账号")
 	}
 	cache, err := s.materialImportChannelCacheByReference(ctx, target.TenantId, tgAccount, in.ChannelUrl)
+	if err != nil {
+		return 0, err
+	}
+	channelIds, err := s.materialImportTargetChannelIds(ctx, in.ChannelIds, target.TenantId)
+	if err != nil {
+		return 0, err
+	}
+	channelIdJSON, err := encodeBotIds(channelIds)
 	if err != nil {
 		return 0, err
 	}
@@ -150,6 +219,7 @@ func (s *sSysPublish) ServerMaterialImportTaskCreate(ctx context.Context, in *sy
 		"source_chat_id":  cache.ChannelId,
 		"source_title":    strings.TrimSpace(cache.ChannelTitle),
 		"source_username": strings.TrimSpace(cache.ChannelUsername),
+		"channel_id_json": channelIdJSON,
 		"pull_limit_days": in.PullLimitDays,
 		"status":          sysin.MaterialImportStatusPending,
 		"stage":           sysin.MaterialImportStageCreated,
@@ -342,6 +412,9 @@ func (s *sSysPublish) AdminMaterialImportTaskRetry(ctx context.Context, in *sysi
 }
 
 func (s *sSysPublish) materialImportTaskList(ctx context.Context, tenantId int64, in *sysin.MaterialImportListInp) (list []*sysin.MaterialImportTaskModel, totalCount int, err error) {
+	if err = ensureMaterialImportTaskChannelColumn(ctx); err != nil {
+		return nil, 0, err
+	}
 	mod := s.materialImportTaskBaseQuery(ctx, tenantId, in)
 	totalCount, err = mod.Clone().Count()
 	if err != nil {
@@ -406,6 +479,9 @@ func (s *sSysPublish) materialImportTaskBaseQuery(ctx context.Context, tenantId 
 }
 
 func (s *sSysPublish) materialImportTaskRecord(ctx context.Context, id int64, tenantId int64) (gdb.Record, error) {
+	if err := ensureMaterialImportTaskChannelColumn(ctx); err != nil {
+		return nil, err
+	}
 	mod := s.materialImportTaskBaseQuery(ctx, tenantId, nil).Where("t.id", id).Limit(1)
 	row, err := mod.One()
 	if err != nil {
@@ -457,6 +533,8 @@ func materialImportTaskModelFromRecord(row gdb.Record) *sysin.MaterialImportTask
 	}
 	item := &sysin.MaterialImportTaskModel{
 		YoubanPublishMaterialImportTask: entityItem,
+		ChannelIdJson:                   row["channel_id_json"].String(),
+		ChannelIds:                      decodeInt64JSON(row["channel_id_json"].String()),
 		TenantName:                      row["tenant_name"].String(),
 		AccountName:                     row["account_name"].String(),
 		TgAccountNickname:               row["tg_account_nickname"].String(),

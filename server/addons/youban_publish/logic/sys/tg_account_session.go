@@ -27,24 +27,37 @@ func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64
 	if err != nil {
 		return sysin.PublishTgAccountStatusFailed, err.Error()
 	}
-	conf, err := NewSysConfig().GetTelegram(ctx)
-	if err != nil {
-		return s.failTgAccountRefresh(ctx, id, tenantId, operatorId, err.Error())
+	var user *tg.User
+	usedRuntime, err := s.executeAccountCollectOperation(ctx, item.Id, 30*time.Second, func(runCtx context.Context, client *telegram.Client) error {
+		user, err = client.Self(runCtx)
+		return err
+	})
+	if !usedRuntime {
+		conf, confErr := NewSysConfig().GetTelegram(ctx)
+		if confErr != nil {
+			return s.failTgAccountRefresh(ctx, id, tenantId, operatorId, confErr.Error())
+		}
+		storage, storageErr := s.telegramSessionStorage(item.SessionKey)
+		if storageErr != nil {
+			return s.failTgAccountRefresh(ctx, id, tenantId, operatorId, storageErr.Error())
+		}
+		options := telegram.Options{SessionStorage: storage}
+		if resolver, resolverErr := telegramMTProtoResolver(conf.ProxyUrl); resolverErr != nil {
+			return s.failTgAccountRefresh(ctx, id, tenantId, operatorId, resolverErr.Error())
+		} else if resolver != nil {
+			options.Resolver = resolver
+		}
+		user, err = s.readTelegramSelf(ctx, conf.AppId, conf.AppHash, options)
 	}
-	storage, err := s.telegramSessionStorage(item.SessionKey)
 	if err != nil {
-		return s.failTgAccountRefresh(ctx, id, tenantId, operatorId, err.Error())
-	}
-	options := telegram.Options{SessionStorage: storage}
-	if resolver, err := telegramMTProtoResolver(conf.ProxyUrl); err != nil {
-		return s.failTgAccountRefresh(ctx, id, tenantId, operatorId, err.Error())
-	} else if resolver != nil {
-		options.Resolver = resolver
-	}
-	user, err := s.readTelegramSelf(ctx, conf.AppId, conf.AppHash, options)
-	if err != nil {
-		if isTelegramAuthKeyUnregistered(err) {
-			return s.expireTgAccountSession(context.Background(), id, tenantId, operatorId, tgAccountSessionExpiredMessage)
+		if isTelegramPermanentAccountAuthError(err) {
+			return s.expireTgAccountSession(
+				context.Background(),
+				id,
+				tenantId,
+				operatorId,
+				telegramPermanentAccountAuthMessage(err),
+			)
 		}
 		return s.failTgAccountRefresh(context.Background(), id, tenantId, operatorId, err.Error())
 	}
@@ -80,6 +93,7 @@ func isTelegramPermanentAccountAuthError(err error) bool {
 	}
 	message := strings.ToUpper(err.Error())
 	permanentParts := []string{
+		"AUTH_KEY_DUPLICATED",
 		"AUTH_KEY_UNREGISTERED",
 		"SESSION_REVOKED",
 		"USER_DEACTIVATED",
@@ -99,6 +113,8 @@ func telegramPermanentAccountAuthMessage(err error) string {
 	}
 	message := strings.ToUpper(err.Error())
 	switch {
+	case strings.Contains(message, "AUTH_KEY_DUPLICATED"):
+		return "TG账号授权密钥被重复使用，Telegram 已作废该登录态，请重新扫码登录"
 	case strings.Contains(message, "USER_DEACTIVATED_BAN"):
 		return "TG账号已被 Telegram 封禁，已自动停用，请更换账号"
 	case strings.Contains(message, "USER_DEACTIVATED"):

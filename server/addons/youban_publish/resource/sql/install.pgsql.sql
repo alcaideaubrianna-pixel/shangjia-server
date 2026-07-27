@@ -274,6 +274,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_material_import_task" (
   "source_chat_id" varchar(128) NOT NULL DEFAULT '',
   "source_title" varchar(255) NOT NULL DEFAULT '',
   "source_username" varchar(128) NOT NULL DEFAULT '',
+  "channel_id_json" text,
   "status" varchar(32) NOT NULL DEFAULT 'pending',
   "stage" varchar(32) NOT NULL DEFAULT 'created',
   "pull_offset_id" bigint NOT NULL DEFAULT 0,

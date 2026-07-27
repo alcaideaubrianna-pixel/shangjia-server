@@ -640,6 +640,7 @@ func (s *sSysPublish) upsertTgMessageCache(ctx context.Context, tenantId int64, 
 	if groupedId, ok := message.GetGroupedID(); ok && groupedId != 0 {
 		mediaGroupId = strconv.FormatInt(groupedId, 10)
 	}
+	now := gtime.Now()
 	data := g.Map{
 		"tenant_id":      tenantId,
 		"tg_account_id":  channel.TgAccountId,
@@ -650,22 +651,14 @@ func (s *sSysPublish) upsertTgMessageCache(ctx context.Context, tenantId int64, 
 		"media_type":     mediaType,
 		"message_date":   messageDate,
 		"media_group_id": mediaGroupId,
-		"updated_at":     gtime.Now(),
+		"created_at":     now,
+		"updated_at":     now,
 	}
-	result, err := g.DB().Model(publishTgMessageCacheTable).Safe().Ctx(ctx).
-		Where("tenant_id", tenantId).
-		Where("channel_id", channel.Id).
-		Where("tg_message_id", message.ID).
+	if _, err := g.DB().Model(publishTgMessageCacheTable).Safe().Ctx(ctx).
 		Data(data).
-		Update()
-	if err != nil {
-		return gerror.Wrap(err, "更新TG消息缓存失败")
-	}
-	if affected, _ := result.RowsAffected(); affected > 0 {
-		return nil
-	}
-	data["created_at"] = gtime.Now()
-	if _, err = g.DB().Model(publishTgMessageCacheTable).Safe().Ctx(ctx).Data(data).Insert(); err != nil {
+		OnConflict("tenant_id,channel_id,tg_message_id").
+		OnDuplicateEx("id,tenant_id,channel_id,tg_message_id,created_at").
+		Save(); err != nil {
 		return gerror.Wrap(err, "写入TG消息缓存失败")
 	}
 	return nil

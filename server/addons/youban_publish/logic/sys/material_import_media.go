@@ -29,6 +29,16 @@ func (s *sSysPublish) executeMaterialImportMedia(ctx context.Context, taskId int
 	if err = s.materialImportEnsureNotCanceled(ctx, task.Id); err != nil {
 		return err
 	}
+	run := func(runCtx context.Context, client *telegram.Client) error {
+		if _, selfErr := client.Self(runCtx); selfErr != nil {
+			return selfErr
+		}
+		return s.materialImportDownloadGroups(runCtx, task, client)
+	}
+	usedRuntime, err := s.executeAccountCollectOperation(ctx, task.TgAccountId, 5*time.Hour, run)
+	if err != nil || usedRuntime {
+		return err
+	}
 	tgAccount, err := s.accountCollectTgAccount(ctx, task.TgAccountId)
 	if err != nil {
 		return err
@@ -43,11 +53,8 @@ func (s *sSysPublish) executeMaterialImportMedia(ctx context.Context, taskId int
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Hour)
 	defer cancel()
-	return client.Run(runCtx, func(runCtx context.Context) error {
-		if _, err = client.Self(runCtx); err != nil {
-			return err
-		}
-		return s.materialImportDownloadGroups(runCtx, task, client)
+	return client.Run(runCtx, func(clientCtx context.Context) error {
+		return run(clientCtx, client)
 	})
 }
 
