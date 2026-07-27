@@ -129,72 +129,86 @@ func retainedMediaIDSet(items []*sysin.MediaSortItem) map[int64]struct{} {
 	return retained
 }
 
-func mediaTaskScope(mod *gdb.Model, taskId int64) *gdb.Model {
-	if taskId > 0 {
-		return mod.Where("task_id", taskId)
+func mediaOwnerScope(mod *gdb.Model, owner gdb.Record) *gdb.Model {
+	if owner["profile_media"].Bool() {
+		return mod.WhereNull("task_id")
 	}
-	return mod.WhereNull("task_id")
+	return mod.Where("task_id", owner["id"].Int64())
 }
 
-func mediaTaskValue(task gdb.Record) any {
-	if task["profile_media"].Bool() {
+func mediaOwnerTaskValue(owner gdb.Record) any {
+	if owner["profile_media"].Bool() {
 		return nil
 	}
-	return task["id"].Int64()
+	return owner["id"].Int64()
+}
+
+func (s *sSysPublish) syncProfileMediaFromInput(ctx context.Context, tx gdb.TX, profileId int64, tenantId int64, accountId int64, items []*sysin.ProfileMediaSaveItem) ([]int64, error) {
+	if profileId <= 0 {
+		return nil, gerror.New("资料媒体归属信息不完整")
+	}
+	release, err := s.lockProfileMediaSyncTx(ctx, tx, profileId)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	stateMod := tx.Model(publishProfileStateTable).Ctx(ctx).
+		Where("profile_id", profileId).
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		stateMod = stateMod.Where("tenant_id", tenantId)
+	}
+	if accountId > 0 {
+		stateMod = stateMod.Where("account_id", accountId)
+	}
+	state, err := stateMod.One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取资料归属配置失败")
+	}
+	if state.IsEmpty() {
+		return nil, gerror.New("资料不存在或无权操作")
+	}
+	return s.syncOwnedMediaFromInput(ctx, tx, profileMediaOwner(state), profileId, tenantId, accountId, items)
 }
 
 func (s *sSysPublish) syncTaskMediaFromProfileInput(ctx context.Context, tx gdb.TX, taskId int64, profileId int64, tenantId int64, accountId int64, items []*sysin.ProfileMediaSaveItem) ([]int64, error) {
-	if taskId < 0 || profileId <= 0 {
-		return nil, gerror.New("资料媒体归属信息不完整")
+	if taskId <= 0 || profileId <= 0 {
+		return nil, gerror.New("发布任务媒体归属信息不完整")
 	}
 	release, err := s.lockTaskMediaSyncTx(ctx, tx, taskId, profileId)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	var task gdb.Record
-	if taskId == 0 {
-		stateMod := tx.Model(publishProfileStateTable).Ctx(ctx).
-			Where("profile_id", profileId).
-			WhereNull("deleted_at")
-		if tenantId > 0 {
-			stateMod = stateMod.Where("tenant_id", tenantId)
-		}
-		if accountId > 0 {
-			stateMod = stateMod.Where("account_id", accountId)
-		}
-		state, stateErr := stateMod.One()
-		if stateErr != nil {
-			return nil, gerror.Wrap(stateErr, "读取资料归属配置失败")
-		}
-		task = profileMediaOwner(state)
-	} else {
-		taskMod := tx.Model(publishTaskTable).Ctx(ctx).
-			Where("id", taskId).
-			Where("profile_id", profileId).
-			WhereNull("deleted_at")
-		if tenantId > 0 {
-			taskMod = taskMod.Where("tenant_id", tenantId)
-		}
-		if accountId > 0 {
-			taskMod = taskMod.Where("account_id", accountId)
-		}
-		var taskErr error
-		task, taskErr = taskMod.One()
-		if taskErr != nil {
-			return nil, gerror.Wrap(taskErr, "读取发布事件媒体失败")
-		}
+	taskMod := tx.Model(publishTaskTable).Ctx(ctx).
+		Where("id", taskId).
+		Where("profile_id", profileId).
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		taskMod = taskMod.Where("tenant_id", tenantId)
+	}
+	if accountId > 0 {
+		taskMod = taskMod.Where("account_id", accountId)
+	}
+	task, err := taskMod.One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取发布事件媒体失败")
 	}
 	if task.IsEmpty() {
-		return nil, gerror.New("资料不存在或无权操作")
+		return nil, gerror.New("发布任务不存在或无权操作")
 	}
+	return s.syncOwnedMediaFromInput(ctx, tx, task, profileId, tenantId, accountId, items)
+}
+
+func (s *sSysPublish) syncOwnedMediaFromInput(ctx context.Context, tx gdb.TX, owner gdb.Record, profileId int64, tenantId int64, accountId int64, items []*sysin.ProfileMediaSaveItem) ([]int64, error) {
+	var err error
 
 	keep := make(map[int64]*sysin.ProfileMediaSaveItem, len(items))
 	for _, item := range items {
 		if item == nil || item.MediaId <= 0 {
 			return nil, gerror.New("资料媒体ID不能为空")
 		}
-		mediaId, resolveErr := s.resolveTaskMediaIdTx(ctx, tx, task, item.MediaId, accountId)
+		mediaId, resolveErr := s.resolveTaskMediaIdTx(ctx, tx, owner, item.MediaId, accountId)
 		if resolveErr != nil {
 			isHistorical, checkErr := s.isHistoricalProfileMediaTx(ctx, tx, item.MediaId, profileId, tenantId, accountId)
 			if checkErr != nil {
@@ -211,7 +225,7 @@ func (s *sSysPublish) syncTaskMediaFromProfileInput(ctx context.Context, tx gdb.
 	}
 
 	var current []gdb.Record
-	mediaMod := mediaTaskScope(tx.Model(publishMediaTable).Ctx(ctx), taskId).
+	mediaMod := mediaOwnerScope(tx.Model(publishMediaTable).Ctx(ctx), owner).
 		Where("profile_id", profileId).
 		WhereNull("deleted_at")
 	if tenantId > 0 {
@@ -230,7 +244,7 @@ func (s *sSysPublish) syncTaskMediaFromProfileInput(ctx context.Context, tx gdb.
 		mediaId := row["id"].Int64()
 		item, retained := keep[mediaId]
 		if !retained {
-			if _, err = mediaTaskScope(tx.Model(publishMediaTable).Ctx(ctx), taskId).
+			if _, err = mediaOwnerScope(tx.Model(publishMediaTable).Ctx(ctx), owner).
 				Where("id", mediaId).
 				WhereNull("deleted_at").
 				Data(g.Map{
@@ -246,7 +260,7 @@ func (s *sSysPublish) syncTaskMediaFromProfileInput(ctx context.Context, tx gdb.
 			removed = append(removed, mediaId)
 			continue
 		}
-		if _, err = mediaTaskScope(tx.Model(publishMediaTable).Ctx(ctx), taskId).
+		if _, err = mediaOwnerScope(tx.Model(publishMediaTable).Ctx(ctx), owner).
 			Where("id", mediaId).
 			WhereNull("deleted_at").
 			Data(g.Map{"purpose": item.Purpose, "sort_index": item.SortIndex, "updated_at": now, "updated_by": contexts.GetUserId(ctx)}).
@@ -260,10 +274,10 @@ func (s *sSysPublish) syncTaskMediaFromProfileInput(ctx context.Context, tx gdb.
 		for mediaId := range keep {
 			ids = append(ids, mediaId)
 		}
-		return nil, gerror.Newf("媒体不存在或不属于当前资料: mediaIds=%v taskId=%d profileId=%d", ids, taskId, profileId)
+		return nil, gerror.Newf("媒体不存在或不属于当前资料: mediaIds=%v profileId=%d", ids, profileId)
 	}
 
-	if err = s.syncTaskMediaToProfile(ctx, tx, taskId, profileId); err != nil {
+	if err = s.syncOwnedMediaToProfile(ctx, tx, owner, profileId); err != nil {
 		return nil, err
 	}
 	return removed, nil
@@ -300,8 +314,7 @@ func (s *sSysPublish) resolveTaskMediaIdTx(ctx context.Context, tx gdb.TX, task 
 	if mediaId <= 0 || task.IsEmpty() {
 		return 0, gerror.New("媒体不存在或无权操作")
 	}
-	taskId := task["id"].Int64()
-	currentMod := mediaTaskScope(tx.Model(publishMediaTable).Ctx(ctx), taskId).
+	currentMod := mediaOwnerScope(tx.Model(publishMediaTable).Ctx(ctx), task).
 		Where("id", mediaId).
 		WhereNull("deleted_at")
 	if accountId > 0 {
@@ -358,7 +371,7 @@ func (s *sSysPublish) resolveTaskMediaIdTx(ctx context.Context, tx gdb.TX, task 
 		return 0, gerror.Newf("媒体不存在或不属于当前资料: mediaId=%d profileId=%d", mediaId, profileId)
 	}
 
-	targetMod := mediaTaskScope(tx.Model(publishMediaTable).Ctx(ctx), taskId).
+	targetMod := mediaOwnerScope(tx.Model(publishMediaTable).Ctx(ctx), task).
 		Where("profile_id", profileId).
 		Where("(original_attachment_id = ? OR attachment_id = ?)", assetId, assetId).
 		WhereNull("deleted_at")
@@ -601,7 +614,7 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 		"tenant_id":            task["tenant_id"].Int64(),
 		"merchant_id":          task["tenant_id"].Int64(),
 		"account_id":           task["account_id"].Int64(),
-		"task_id":              mediaTaskValue(task),
+		"task_id":              mediaOwnerTaskValue(task),
 		"profile_id":           task["profile_id"].Int64(),
 		"attachment_id":        attachment.Id,
 		"edited_attachment_id": 0,
@@ -631,14 +644,13 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 	}
 	var existing gdb.Record
 	if in.MediaId > 0 {
-		existingMod := mediaTaskScope(g.DB().Model(publishMediaTable).Safe().Ctx(ctx), task["id"].Int64())
-		existing, err = existingMod.
+		existing, err = mediaOwnerScope(g.DB().Model(publishMediaTable).Safe().Ctx(ctx), task).
 			Where("id", in.MediaId).
 			Where("profile_id", task["profile_id"].Int64()).
 			WhereNull("deleted_at").
 			One()
 	} else {
-		existing, err = mediaTaskScope(g.DB().Model(publishMediaTable).Safe().Ctx(ctx), task["id"].Int64()).
+		existing, err = mediaOwnerScope(g.DB().Model(publishMediaTable).Safe().Ctx(ctx), task).
 			Where("profile_id", task["profile_id"].Int64()).
 			Where("attachment_id", attachment.Id).
 			WhereNull("deleted_at").
@@ -656,7 +668,7 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 			return nil, gerror.Wrap(sourceErr, "读取原媒体失败")
 		}
 		if !source.IsEmpty() && source["profile_id"].Int64() == task["profile_id"].Int64() {
-			existing, err = mediaTaskScope(g.DB().Model(publishMediaTable).Safe().Ctx(ctx), task["id"].Int64()).
+			existing, err = mediaOwnerScope(g.DB().Model(publishMediaTable).Safe().Ctx(ctx), task).
 				Where("attachment_id", source["attachment_id"].Int64()).
 				Where("purpose", source["purpose"].String()).
 				Where("sort_index", source["sort_index"].Int()).
@@ -702,15 +714,22 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 	if err = s.syncMediaPHashBucketByMediaId(ctx, mediaId); err != nil {
 		return nil, err
 	}
-	if task["id"].Int64() > 0 {
+	if !task["profile_media"].Bool() && task["id"].Int64() > 0 {
 		if err = s.refreshTaskMediaCount(ctx, task["id"].Int64()); err != nil {
 			return nil, err
 		}
 	}
 	if task["profile_id"].Int64() > 0 {
-		if err = s.withTaskMediaSyncLock(ctx, task["id"].Int64(), task["profile_id"].Int64(), func(ctx context.Context, tx gdb.TX) error {
-			return s.syncTaskMediaToProfile(ctx, tx, task["id"].Int64(), task["profile_id"].Int64())
-		}); err != nil {
+		if task["profile_media"].Bool() {
+			err = s.withProfileMediaSyncLock(ctx, task["profile_id"].Int64(), func(ctx context.Context, tx gdb.TX) error {
+				return s.syncOwnedMediaToProfile(ctx, tx, task, task["profile_id"].Int64())
+			})
+		} else {
+			err = s.withTaskMediaSyncLock(ctx, task["id"].Int64(), task["profile_id"].Int64(), func(ctx context.Context, tx gdb.TX) error {
+				return s.syncTaskMediaToProfile(ctx, tx, task["id"].Int64(), task["profile_id"].Int64())
+			})
+		}
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -1059,11 +1078,8 @@ func (s *sSysPublish) refreshTaskMediaCount(ctx context.Context, taskId int64) e
 	return nil
 }
 
-func taskMediaSyncLockKey(taskId int64, profileId int64) string {
-	if profileId > 0 {
-		return fmt.Sprintf("youban_publish:media_sync:profile:%d", profileId)
-	}
-	return fmt.Sprintf("youban_publish:media_sync:%d:%d", taskId, profileId)
+func profileMediaSyncLockKey(profileId int64) string {
+	return fmt.Sprintf("youban_publish:media_sync:profile:%d", profileId)
 }
 
 func (s *sSysPublish) withTaskMediaSyncLock(ctx context.Context, taskId int64, profileId int64, fn func(ctx context.Context, tx gdb.TX) error) error {
@@ -1077,8 +1093,29 @@ func (s *sSysPublish) withTaskMediaSyncLock(ctx context.Context, taskId int64, p
 	})
 }
 
+func (s *sSysPublish) withProfileMediaSyncLock(ctx context.Context, profileId int64, fn func(ctx context.Context, tx gdb.TX) error) error {
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		release, err := s.lockProfileMediaSyncTx(ctx, tx, profileId)
+		if err != nil {
+			return err
+		}
+		defer release()
+		return fn(ctx, tx)
+	})
+}
+
 func (s *sSysPublish) lockTaskMediaSyncTx(ctx context.Context, tx gdb.TX, taskId int64, profileId int64) (func(), error) {
-	key := taskMediaSyncLockKey(taskId, profileId)
+	if taskId <= 0 {
+		return func() {}, gerror.New("发布任务ID不能为空")
+	}
+	return s.lockProfileMediaSyncTx(ctx, tx, profileId)
+}
+
+func (s *sSysPublish) lockProfileMediaSyncTx(ctx context.Context, tx gdb.TX, profileId int64) (func(), error) {
+	if profileId <= 0 {
+		return func() {}, gerror.New("资料ID不能为空")
+	}
+	key := profileMediaSyncLockKey(profileId)
 	dbType := strings.ToLower(g.DB().GetConfig().Type)
 	switch dbType {
 	case consts.DBPgsql:
@@ -1101,8 +1138,15 @@ func (s *sSysPublish) lockTaskMediaSyncTx(ctx context.Context, tx gdb.TX, taskId
 }
 
 func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, taskId int64, profileId int64) error {
+	if taskId <= 0 {
+		return gerror.New("发布任务ID不能为空")
+	}
+	return s.syncOwnedMediaToProfile(ctx, tx, publishTaskMediaOwner(taskId), profileId)
+}
+
+func (s *sSysPublish) syncOwnedMediaToProfile(ctx context.Context, tx gdb.TX, owner gdb.Record, profileId int64) error {
 	var list []*sysin.MediaModel
-	if err := mediaTaskScope(tx.Model(publishMediaTable).Ctx(ctx), taskId).
+	if err := mediaOwnerScope(tx.Model(publishMediaTable).Ctx(ctx), owner).
 		Where("profile_id", profileId).
 		WhereNull("deleted_at").
 		OrderAsc("sort_index").
@@ -1214,8 +1258,7 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 	}).Update(); err != nil {
 		return gerror.Wrap(err, "清理资料历史媒体失败")
 	}
-	if _, err := tx.Model(publishMediaTable).Ctx(ctx).
-		Where("task_id", taskId).
+	if _, err := mediaOwnerScope(tx.Model(publishMediaTable).Ctx(ctx), owner).
 		Where("profile_id", profileId).
 		WhereNull("deleted_at").
 		Data(g.Map{"profile_id": profileId, "updated_at": now}).

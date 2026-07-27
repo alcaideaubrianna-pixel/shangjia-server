@@ -80,7 +80,7 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			return err
 		}
 		if in.Media != nil {
-			removedMediaIds, err = s.syncTaskMediaFromProfileInput(ctx, tx, 0, profileId, tenantId, accountId, in.Media)
+			removedMediaIds, err = s.syncProfileMediaFromInput(ctx, tx, profileId, tenantId, accountId, in.Media)
 			return err
 		}
 		return nil
