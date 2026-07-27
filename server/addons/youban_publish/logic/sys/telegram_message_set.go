@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -93,6 +94,13 @@ func isTelegramMessageAlreadyDeletedError(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "message to delete not found") ||
+	messageMissing := strings.Contains(message, "message to delete not found") ||
 		strings.Contains(message, "message not found")
+	if !messageMissing {
+		return false
+	}
+	return errors.Is(err, tgbot.ErrorBadRequest) ||
+		errors.Is(err, tgbot.ErrorNotFound) ||
+		strings.Contains(message, "bad request") ||
+		strings.Contains(message, "not found")
 }

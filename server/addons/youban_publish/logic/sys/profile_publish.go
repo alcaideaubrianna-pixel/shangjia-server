@@ -62,6 +62,9 @@ func (s *sSysPublish) AdminProfilePublish(ctx context.Context, in *sysin.Profile
 // PublishTask. Profile and task_id=0 media are the editable source; the task is
 // an immutable snapshot for one publish operation.
 func (s *sSysPublish) createProfilePublishEvent(ctx context.Context, profileId int64, tenantId int64, accountId int64) (taskId int64, alreadyPublished bool, err error) {
+	if err = s.cleanupProfileDownMessagesBeforePublish(ctx, profileId, tenantId); err != nil {
+		return 0, false, err
+	}
 	return s.createProfilePublishSnapshot(ctx, profileId, tenantId, accountId, profilePublishSnapshotOptions{ReuseActive: true, SkipIfOnline: true})
 }
 

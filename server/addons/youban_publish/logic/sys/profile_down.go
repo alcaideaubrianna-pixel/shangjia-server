@@ -135,6 +135,33 @@ func (s *sSysPublish) deleteProfilesTelegramMessages(ctx context.Context, ids []
 	return nil
 }
 
+func (s *sSysPublish) cleanupProfileDownMessagesBeforePublish(ctx context.Context, profileId int64, tenantId int64) error {
+	if profileId <= 0 || tenantId <= 0 {
+		return nil
+	}
+	var jobs []telegramResubmitJob
+	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("profile_id", profileId).
+		Where("status", "sent").
+		WhereLike("operation_no", "down:%").
+		OrderAsc("id").
+		Scan(&jobs)
+	if err != nil {
+		return gerror.Wrap(err, "读取下架频道历史消息失败")
+	}
+	for _, job := range jobs {
+		if err = s.deleteTelegramMessageSet(ctx, job.telegramJobRecord(), "资料重新上架"); err != nil {
+			return gerror.Wrap(err, "清理下架频道历史消息失败")
+		}
+		if err = s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
+			return err
+		}
+		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "republish", "deleted", "资料重新上架，下架频道历史消息已删除或不存在")
+	}
+	return nil
+}
+
 func (s *sSysPublish) notifyProfilesDown(ctx context.Context, ids []int64, tenantId int64, channels []telegramJobChannel, operationNo string, cutoffAt string) error {
 	rows, err := s.profileDownRows(ctx, ids, tenantId)
 	if err != nil {
