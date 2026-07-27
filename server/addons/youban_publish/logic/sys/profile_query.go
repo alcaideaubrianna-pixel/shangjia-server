@@ -138,6 +138,9 @@ func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.NoteListInp, 
 	if err = s.ensureProfileListUUID(ctx, profiles); err != nil {
 		return nil, err
 	}
+	if err = s.applyProfileTagNames(ctx, profiles); err != nil {
+		return nil, err
+	}
 	stageStartedAt := time.Now()
 	mediaBuckets, err := s.adminNoteCoverMediaByProfiles(ctx, profiles)
 	if err != nil {
