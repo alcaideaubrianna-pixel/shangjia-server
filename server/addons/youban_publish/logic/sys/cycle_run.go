@@ -12,6 +12,8 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 const (
@@ -100,6 +102,60 @@ func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (s *sSysPublish) AdminChannelCycleRun(ctx context.Context, in *sysin.ChannelCycleRunInp) (*sysin.ChannelFullPushModel, error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil || in.ChannelId <= 0 {
+		return nil, gerror.New("请选择频道")
+	}
+	channel, err := s.fullPushChannel(ctx, account.TenantId, in.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	var runId int64
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		now := gtime.Now()
+		locked, lockErr := tx.Model(publishChannelTable).Safe().Ctx(ctx).
+			Where("id", channel.Id).Where("tenant_id", account.TenantId).
+			Where("cycle_active_run_id", 0).WhereNull("deleted_at").
+			Data(g.Map{"cycle_active_run_id": -1, "updated_at": now}).Update()
+		if lockErr != nil {
+			return gerror.Wrap(lockErr, "锁定频道循环配置失败")
+		}
+		affected, _ := locked.RowsAffected()
+		if affected == 0 {
+			return gerror.New("该频道已有循环曝光正在执行")
+		}
+		count, countErr := tx.Model(publishChannelProfileTable).Safe().Ctx(ctx).
+			Where("channel_id", channel.Id).Where("status", "active").Count()
+		if countErr != nil {
+			return gerror.Wrap(countErr, "统计频道循环资料失败")
+		}
+		runId, err = tx.Model(publishCycleRunTable).Ctx(ctx).Data(g.Map{
+			"plan_id": 0, "tenant_id": account.TenantId, "account_id": 0, "profile_id": 0,
+			"channel_id": channel.Id, "status": cycleRunStatusPending, "stage": "manual",
+			"cursor_id": 0, "total_count": count, "queued_count": 0,
+			"scheduled_at": nil, "created_at": now, "updated_at": now,
+		}).InsertAndGetId()
+		if err != nil {
+			return gerror.Wrap(err, "创建手动循环批次失败")
+		}
+		_, err = tx.Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channel.Id).
+			Data(g.Map{"cycle_active_run_id": runId, "updated_at": now}).Update()
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err = s.enqueueCycleRun(ctx, runId, 0); err != nil {
+		s.failChannelCycleRun(ctx, runId, channel.Id, err)
+		return nil, gerror.Wrap(err, "手动循环批次入队失败")
+	}
+	return &sysin.ChannelFullPushModel{ChannelId: channel.Id, Queued: 0, BatchNo: fmt.Sprintf("cycle_batch:%d", runId), Status: cycleRunStatusPending}, nil
 }
 
 func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context) error {

@@ -432,6 +432,14 @@ func (c *cPublishAdmin) ChannelFullPush(ctx context.Context, req *publish.AdminC
 	return
 }
 
+func (c *cPublishAdmin) ChannelCycleRun(ctx context.Context, req *publish.AdminChannelCycleRunReq) (res *publish.AdminChannelCycleRunRes, err error) {
+	item, err := service.SysPublish().AdminChannelCycleRun(ctx, &req.ChannelCycleRunInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminChannelCycleRunRes{ChannelFullPushModel: item}, nil
+}
+
 func (c *cPublishAdmin) ChannelBackupCreate(ctx context.Context, req *publish.AdminChannelBackupCreateReq) (res *publish.AdminChannelBackupCreateRes, err error) {
 	item, err := service.SysPublish().AdminChannelBackupCreate(ctx, &req.ChannelBackupCreateInp)
 	if err != nil {

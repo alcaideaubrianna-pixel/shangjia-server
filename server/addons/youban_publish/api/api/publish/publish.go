@@ -315,6 +315,15 @@ type AdminChannelFullPushRes struct {
 	*sysin.ChannelFullPushModel
 }
 
+type AdminChannelCycleRunReq struct {
+	g.Meta `path:"/publish/admin/channel/cycleRun" method:"post" tags:"上架插件管理端" summary:"手动执行频道循环曝光"`
+	sysin.ChannelCycleRunInp
+}
+
+type AdminChannelCycleRunRes struct {
+	*sysin.ChannelFullPushModel
+}
+
 type AdminChannelClearQueueReq struct {
 	g.Meta `path:"/publish/admin/channel/clearQueue" method:"post" tags:"上架插件管理端" summary:"清空频道待发送队列"`
 	sysin.ChannelClearQueueInp

@@ -1340,6 +1340,10 @@ type ChannelFullPushModel struct {
 	Status        string `json:"status" dc:"批次状态"`
 }
 
+type ChannelCycleRunInp struct {
+	ChannelId int64 `json:"channelId" v:"required|min:1#请选择频道|请选择频道" dc:"频道ID"`
+}
+
 type ChannelClearQueueInp struct {
 	ChannelId int64 `json:"channelId" v:"required|min:1#请选择频道|请选择频道" dc:"频道ID"`
 }
