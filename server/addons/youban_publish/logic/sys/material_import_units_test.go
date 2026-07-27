@@ -210,6 +210,46 @@ func TestJoinMaterialImportRegionIDs(t *testing.T) {
 	}
 }
 
+func TestMaterialImportRegionCodesFromIndex(t *testing.T) {
+	province := &legacyCMSRegionOption{Id: 610000, Level: 1, Title: "陕西省"}
+	city := &legacyCMSRegionOption{Id: 610100, Pid: province.Id, Level: 2, Title: "西安市"}
+	district := &legacyCMSRegionOption{Id: 610122, Pid: city.Id, Level: 3, Title: "蓝田县"}
+	index := &legacyCMSRegionIndex{
+		provincesByName: map[string]*legacyCMSRegionOption{"陕西": province},
+		citiesByName:    map[string][]*legacyCMSRegionOption{"西安": {city}},
+		districtsByName: map[string][]*legacyCMSRegionOption{"蓝田": {district}},
+		optionsById:     map[int64]*legacyCMSRegionOption{province.Id: province, city.Id: city, district.Id: district},
+	}
+	tests := []struct {
+		name         string
+		text         string
+		wantProvince string
+		wantCity     string
+	}{
+		{name: "city without suffix", text: "所在城市：西安", wantProvince: "610000", wantCity: "610100"},
+		{name: "city with suffix", text: "所在城市：西安市", wantProvince: "610000", wantCity: "610100"},
+		{name: "county without suffix", text: "地区：蓝田", wantProvince: "610000", wantCity: "610100"},
+		{name: "county with suffix", text: "地区：蓝田县", wantProvince: "610000", wantCity: "610100"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			provinceCode, cityCode := materialImportRegionCodesFromIndex(test.text, index)
+			if provinceCode != test.wantProvince || cityCode != test.wantCity {
+				t.Fatalf("codes = (%q, %q), want (%q, %q)", provinceCode, cityCode, test.wantProvince, test.wantCity)
+			}
+		})
+	}
+}
+
+func TestNormalizeLegacyRegionNameSupportsCountySuffix(t *testing.T) {
+	if got := normalizeLegacyRegionName("西安市"); got != "西安" {
+		t.Fatalf("normalize city = %q, want %q", got, "西安")
+	}
+	if got := normalizeLegacyRegionName("蓝田县"); got != "蓝田" {
+		t.Fatalf("normalize county = %q, want %q", got, "蓝田")
+	}
+}
+
 func TestParseMaterialImportChannelReference(t *testing.T) {
 	tests := []struct {
 		name     string

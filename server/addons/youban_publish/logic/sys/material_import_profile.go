@@ -99,6 +99,14 @@ func materialImportRegionCodes(ctx context.Context, text string) (string, string
 	if err != nil {
 		return "", "", err
 	}
+	province, city := materialImportRegionCodesFromIndex(text, index)
+	return province, city, nil
+}
+
+func materialImportRegionCodesFromIndex(text string, index *legacyCMSRegionIndex) (string, string) {
+	if index == nil {
+		return "", ""
+	}
 	normalizedText := normalizeMaterialImportMatchText(text)
 	provinceIDs := make(map[int64]struct{})
 	cityIDs := make(map[int64]struct{})
@@ -121,7 +129,25 @@ func materialImportRegionCodes(ctx context.Context, text string) (string, string
 			}
 		}
 	}
-	return joinMaterialImportRegionIDs(provinceIDs), joinMaterialImportRegionIDs(cityIDs), nil
+	for name, districts := range index.districtsByName {
+		if !strings.Contains(normalizedText, normalizeMaterialImportMatchText(name)) {
+			continue
+		}
+		for _, district := range districts {
+			if district == nil || district.Pid <= 0 {
+				continue
+			}
+			city := index.optionsById[district.Pid]
+			if city == nil || city.Level != 2 {
+				continue
+			}
+			cityIDs[city.Id] = struct{}{}
+			if city.Pid > 0 {
+				provinceIDs[city.Pid] = struct{}{}
+			}
+		}
+	}
+	return joinMaterialImportRegionIDs(provinceIDs), joinMaterialImportRegionIDs(cityIDs)
 }
 
 func (s *sSysPublish) materialImportMatchedTags(ctx context.Context, text string) (string, error) {

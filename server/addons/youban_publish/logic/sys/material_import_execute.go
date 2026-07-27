@@ -41,6 +41,9 @@ func (s *sSysPublish) ExecuteMaterialImportTask(ctx context.Context, taskId int6
 	if err = s.materialImportMarkRunning(ctx, task.Id, task.UpdatedBy, materialImportNextStage(task)); err != nil {
 		return err
 	}
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	defer stopHeartbeat()
+	go s.runMaterialImportTaskHeartbeat(heartbeatCtx, task.Id)
 	if err = s.executeMaterialImport(ctx, task); err != nil {
 		if isTelegramPermanentAccountAuthError(err) {
 			s.handleTgAccountPermanentAuthError(context.Background(), task.TgAccountId, task.UpdatedBy, telegramPermanentAccountAuthMessage(err), err)

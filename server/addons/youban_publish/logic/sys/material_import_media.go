@@ -78,13 +78,16 @@ func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sy
 					materialImportSendErr(errCh, err)
 					return
 				}
-				if err := s.materialImportDownloadGroup(ctx, task, group, client); err != nil {
-					if retryErr := collectMediaRetryErrorFrom(err); retryErr != nil {
+				groupErr := s.materialImportDownloadGroup(ctx, task, group, client)
+				if groupErr != nil {
+					if retryErr := collectMediaRetryErrorFrom(groupErr); retryErr != nil {
+						_ = s.refreshMaterialImportTaskStats(ctx, task.Id)
 						materialImportSendErr(errCh, retryErr)
 						return
 					}
-					_ = s.materialImportMarkGroupFailed(ctx, group.Id, err.Error())
+					_ = s.materialImportMarkGroupFailed(ctx, group.Id, groupErr.Error())
 				}
+				_ = s.refreshMaterialImportTaskStats(ctx, task.Id)
 			}
 		}()
 	}
