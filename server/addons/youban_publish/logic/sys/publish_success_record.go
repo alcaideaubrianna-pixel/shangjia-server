@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -18,7 +19,19 @@ const (
 	publishSuccessTypeProfile = "profile_publish"
 )
 
+var (
+	publishRecordSchemaOnce sync.Once
+	publishRecordSchemaErr  error
+)
+
 func ensurePublishSuccessRecordSchema(ctx context.Context) error {
+	publishRecordSchemaOnce.Do(func() {
+		publishRecordSchemaErr = initializePublishRecordSchema(ctx)
+	})
+	return publishRecordSchemaErr
+}
+
+func initializePublishRecordSchema(ctx context.Context) error {
 	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
 		statements := []string{
 			`CREATE TABLE IF NOT EXISTS "hg_youban_publish_success_record" (
@@ -60,10 +73,24 @@ func ensurePublishSuccessRecordSchema(ctx context.Context) error {
 }
 
 func (s *sSysPublish) appendPublishSuccessRecord(ctx context.Context, job telegramJobRecord) error {
+	return s.upsertPublishJobRecord(ctx, job, "success", publishSuccessRecordMessage(publishSuccessRecordAction(job.OperationNo)))
+}
+
+func (s *sSysPublish) upsertPublishJobRecord(ctx context.Context, job telegramJobRecord, status string, message string) error {
+	if job.Id <= 0 {
+		return nil
+	}
 	if err := ensurePublishSuccessRecordSchema(ctx); err != nil {
 		return err
 	}
 	action := publishSuccessRecordAction(job.OperationNo)
+	status = strings.TrimSpace(status)
+	if status == "" {
+		status = "pending"
+	}
+	if strings.TrimSpace(message) == "" {
+		message = publishJobRecordMessage(action, status)
+	}
 	_, err := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).Data(g.Map{
 		"job_id":         job.Id,
 		"task_id":        job.TaskId,
@@ -75,12 +102,12 @@ func (s *sSysPublish) appendPublishSuccessRecord(ctx context.Context, job telegr
 		"operation_no":   job.OperationNo,
 		"target_chat_id": job.TargetChatId,
 		"action":         action,
-		"status":         "success",
-		"message":        publishSuccessRecordMessage(action),
+		"status":         status,
+		"message":        message,
 		"created_at":     gtime.Now(),
 	}).OnConflict("job_id").OnDuplicateEx("id", "created_at").Save()
 	if err != nil {
-		return gerror.Wrap(err, "保存成功发布记录失败")
+		return gerror.Wrap(err, "保存发布记录失败")
 	}
 	return nil
 }
@@ -131,5 +158,20 @@ func publishSuccessRecordMessage(action string) string {
 		return "采集推送成功"
 	default:
 		return "上架推送成功"
+	}
+}
+
+func publishJobRecordMessage(action string, status string) string {
+	switch status {
+	case "sending":
+		return "TG资料正在发送"
+	case "failed_retry":
+		return "TG资料发送失败，等待重试"
+	case "failed":
+		return "TG资料发送失败"
+	case "success", "sent":
+		return publishSuccessRecordMessage(action)
+	default:
+		return "TG资料等待发送"
 	}
 }

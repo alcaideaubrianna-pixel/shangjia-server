@@ -178,6 +178,15 @@ type ProfileDeleteReq struct {
 
 type ProfileDeleteRes struct{}
 
+type ProfilePurgeDeletedReq struct {
+	g.Meta `path:"/publish/profile/purgeDeleted" method:"post" tags:"上架插件后台" summary:"清空账号软删除资料"`
+	sysin.ProfilePurgeDeletedInp
+}
+
+type ProfilePurgeDeletedRes struct {
+	*sysin.ProfilePurgeDeletedModel
+}
+
 type ProfileReviewReq struct {
 	g.Meta `path:"/publish/profile/review" method:"post" tags:"上架插件后台" summary:"审核笔记资料"`
 	sysin.ProfileReviewInp

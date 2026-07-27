@@ -116,7 +116,8 @@ func (s *sSysPublish) markTaskPublishedAfterTelegram(ctx context.Context, taskId
 	if affected == 0 {
 		return false, nil
 	}
-	if profileId > 0 {
+	isCycle := isCycleBatchOperation(operationNo)
+	if profileId > 0 && !isCycle {
 		_, err = s.syncProfilePublishState(ctx, profileId, 1, consts.ContentVisibilityPublic, now)
 		if err != nil {
 			return false, gerror.Wrap(err, "同步资料上架状态失败")
@@ -126,8 +127,10 @@ func (s *sSysPublish) markTaskPublishedAfterTelegram(ctx context.Context, taskId
 		}
 		iservice.SysContent().ClearHomeProfileCardsCache(ctx)
 	}
-	if err = s.collectFollowProfilePublished(ctx, task); err != nil {
-		g.Log().Warningf(ctx, "关注采集发布资料失败 task:%d profile:%d err:%+v", taskId, profileId, err)
+	if !isCycle {
+		if err = s.collectFollowProfilePublished(ctx, task); err != nil {
+			g.Log().Warningf(ctx, "关注采集发布资料失败 task:%d profile:%d err:%+v", taskId, profileId, err)
+		}
 	}
 	return true, nil
 }

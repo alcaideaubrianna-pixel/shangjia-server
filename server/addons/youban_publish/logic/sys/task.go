@@ -195,7 +195,7 @@ func (s *sSysPublish) saveTask(ctx context.Context, in *sysin.TaskSaveInp) (id i
 			Update()
 		id = in.Id
 	} else {
-		data[taskColumns.Status] = sysin.PublishTaskStatusDraft
+		data[taskColumns.Status] = sysin.PublishTaskStatusPending
 		data[taskColumns.TgStatus] = "pending"
 		data[taskColumns.MediaCount] = 0
 		data[taskColumns.CreatedBy] = contexts.GetUserId(ctx)
@@ -209,14 +209,18 @@ func (s *sSysPublish) saveTask(ctx context.Context, in *sysin.TaskSaveInp) (id i
 }
 
 func (s *sSysPublish) submitTask(ctx context.Context, id int64, accountId int64) (err error) {
-	return s.submitPublishWorkflow(ctx, id, 0, accountId, contexts.GetUserId(ctx))
+	return s.submitPublishWorkflow(ctx, id, 0, accountId, contexts.GetUserId(ctx), "")
 }
 
 func (s *sSysPublish) submitTaskByTenant(ctx context.Context, id int64, tenantId int64, operatorId int64) (err error) {
-	return s.submitPublishWorkflow(ctx, id, tenantId, 0, operatorId)
+	return s.submitPublishWorkflow(ctx, id, tenantId, 0, operatorId, "")
 }
 
-func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenantId int64, accountId int64, operatorId int64) (err error) {
+func (s *sSysPublish) submitPublishEvent(ctx context.Context, id int64, tenantId int64, operatorId int64, operationNo string) error {
+	return s.submitPublishWorkflow(ctx, id, tenantId, 0, operatorId, operationNo)
+}
+
+func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenantId int64, accountId int64, operatorId int64, requestedOperationNo string) (err error) {
 	if err = ensureTelegramOperationColumns(ctx); err != nil {
 		return err
 	}
@@ -224,7 +228,7 @@ func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenan
 	if err != nil {
 		return err
 	}
-	if task["status"].String() == sysin.PublishTaskStatusPublishing {
+	if task["status"].String() == sysin.PublishTaskStatusPublished {
 		return nil
 	}
 	if !canSubmitPublishTask(task) {
@@ -244,27 +248,84 @@ func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenan
 	}
 	// 发布校验和队列执行必须使用同一份频道快照，不能让执行阶段退回
 	// 到默认频道，否则用户已选择频道但异步任务会误报未配置目标。
-	channelIds := decodeInt64JSON(task["channel_id_json"].String())
-	operationNo := newTelegramOperationNo("publish", id)
-	if err = s.markTaskPublishQueued(ctx, id, tenantId, operatorId, operationNo); err != nil {
+	task, operationNo, shouldSubmit, err := s.claimPublishTask(ctx, id, tenantId, accountId, operatorId, requestedOperationNo)
+	if err != nil {
 		return err
 	}
+	if !shouldSubmit {
+		return nil
+	}
+	channelIds := decodeInt64JSON(task["channel_id_json"].String())
 	delay := time.Duration(0)
 	if publishAt := task["published_at"].GTime(); publishAt != nil && publishAt.Time.After(time.Now()) {
 		delay = time.Until(publishAt.Time)
 	}
-	if err = s.enqueuePublishSubmitTask(ctx, publishSubmitQueuePayload{
+	payload := publishSubmitQueuePayload{
 		TaskId:      id,
 		TenantId:    tenantId,
 		AccountId:   accountId,
 		OperatorId:  operatorId,
 		OperationNo: operationNo,
 		ChannelIds:  channelIds,
-	}, delay); err != nil {
-		_ = s.markTaskPublishFailed(ctx, id, tenantId, operatorId, err)
-		return gerror.Wrap(err, "上架任务加入队列失败")
+	}
+	if delay > 0 {
+		if err = s.enqueuePublishSubmitTask(ctx, payload, delay); err != nil {
+			_ = s.markTaskPublishFailed(ctx, id, tenantId, operatorId, err)
+			return gerror.Wrap(err, "定时上架任务加入队列失败")
+		}
+	} else if err = s.executePublishSubmitWorkflow(ctx, payload); err != nil {
+		return gerror.Wrap(err, "创建上架频道任务失败")
 	}
 	return s.syncProfileNoteIndex(ctx, task["profile_id"].Int64())
+}
+
+func (s *sSysPublish) claimPublishTask(ctx context.Context, id int64, tenantId int64, accountId int64, operatorId int64, requestedOperationNo string) (task gdb.Record, operationNo string, shouldSubmit bool, err error) {
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		mod := tx.Model(publishTaskTable).Ctx(ctx).Where("id", id).WhereNull("deleted_at")
+		if tenantId > 0 {
+			mod = mod.Where("tenant_id", tenantId)
+		}
+		if accountId > 0 {
+			mod = mod.Where("account_id", accountId)
+		}
+		task, err = mod.LockUpdate().One()
+		if err != nil {
+			return gerror.Wrap(err, "锁定上架任务失败")
+		}
+		if task.IsEmpty() {
+			return gerror.New("上架任务不存在")
+		}
+		if task["status"].String() == sysin.PublishTaskStatusPublished {
+			return nil
+		}
+		operationNo = task["tg_operation_no"].String()
+		if task["status"].String() == sysin.PublishTaskStatusPublishing && operationNo != "" {
+			shouldSubmit = true
+			return nil
+		}
+		if !canSubmitPublishTask(task) {
+			return gerror.New("已取消的任务不能提交")
+		}
+		operationNo = strings.TrimSpace(requestedOperationNo)
+		if operationNo == "" {
+			operationNo = newTelegramOperationNo("publish", id)
+		}
+		_, err = tx.Model(publishTaskTable).Ctx(ctx).Where("id", id).Data(g.Map{
+			"status": sysin.PublishTaskStatusPublishing, "tg_status": "pending",
+			"tg_operation_no": operationNo, "tg_push_enabled": 1, "error_message": "",
+			"submitted_at": gtime.Now(), "updated_by": operatorId, "updated_at": gtime.Now(),
+		}).Update()
+		if err != nil {
+			return gerror.Wrap(err, "认领上架任务失败")
+		}
+		shouldSubmit = true
+		return nil
+	})
+	if err != nil || !shouldSubmit {
+		return task, operationNo, shouldSubmit, err
+	}
+	task, err = s.getPublishWorkflowTask(ctx, id, tenantId, accountId)
+	return task, operationNo, shouldSubmit, err
 }
 
 func (s *sSysPublish) markTaskPublishQueued(ctx context.Context, id int64, tenantId int64, operatorId int64, operationNo string) error {
@@ -378,7 +439,7 @@ func (s *sSysPublish) markTaskSavedWithoutPublish(ctx context.Context, task gdb.
 		Where("id", task["id"].Int64()).
 		WhereNull("deleted_at").
 		Data(g.Map{
-			"status":          sysin.PublishTaskStatusDraft,
+			"status":          sysin.PublishTaskStatusCanceled,
 			"tg_status":       "skipped",
 			"tg_operation_no": "",
 			"error_message":   "",

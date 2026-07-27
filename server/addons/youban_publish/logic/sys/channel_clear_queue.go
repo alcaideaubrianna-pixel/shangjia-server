@@ -62,7 +62,6 @@ func (s *sSysPublish) AdminChannelClearQueue(ctx context.Context, in *sysin.Chan
 			"status":              "superseded",
 			"dispatch_status":     tgDispatchStatusDone,
 			"next_retry_at":       nil,
-			"next_cycle_at":       nil,
 			"error_message":       channelQueueClearMessage,
 			"last_dispatch_error": channelQueueClearMessage,
 			"updated_at":          now,

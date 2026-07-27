@@ -320,7 +320,7 @@ func (s *sSysPublish) ServerImportRunMatchSaveDraft(ctx context.Context, in *sys
 		}).
 		Update()
 	if err != nil {
-		return gerror.Wrap(err, "保存导入TG匹配草稿失败")
+		return gerror.Wrap(err, "保存导入TG匹配结果失败")
 	}
 	return s.refreshImportMatchRunCounters(ctx, item.MatchRunId)
 }

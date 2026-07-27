@@ -260,7 +260,6 @@ func (s *sSysPublish) resetCollectSourceTasksForDev(ctx context.Context, taskIds
 			"status":          "superseded",
 			"dispatch_status": tgDispatchStatusDone,
 			"next_retry_at":   nil,
-			"next_cycle_at":   nil,
 			"error_message":   "开发模式重置采集源推送状态",
 			"updated_at":      gtime.Now(),
 		}).

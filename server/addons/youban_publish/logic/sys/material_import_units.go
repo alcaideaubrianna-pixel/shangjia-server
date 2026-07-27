@@ -181,11 +181,12 @@ func (s *sSysPublish) upsertMaterialImportDisplayUnit(ctx context.Context, task 
 		"updated_at":         now,
 		"source_message_ids": materialImportUnitMessageIds(existing["source_message_ids"].String(), unit.Messages),
 	}
+	parsedText := firstNonEmpty(unit.RawText, existing["raw_text"].String())
+	title, profileNo, nickname := materialImportTitle(parsedText)
+	data["title"] = title
+	data["profile_no"] = profileNo
+	data["nickname"] = nickname
 	if existing.IsEmpty() {
-		title, profileNo, nickname := materialImportTitle(unit.RawText)
-		data["title"] = title
-		data["profile_no"] = profileNo
-		data["nickname"] = nickname
 		data["created_at"] = now
 		_, err = pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Data(data).Insert()
 		return gerror.Wrap(err, "创建资料导入分组失败")

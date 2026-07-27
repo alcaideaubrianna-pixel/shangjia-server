@@ -53,7 +53,11 @@ func (s *sSysPublish) resolveMediaEditTask(ctx context.Context, in *sysin.MediaU
 	if in == nil {
 		return nil, gerror.New("媒体上传参数不能为空")
 	}
-	return s.mediaEditTask(ctx, in.ProfileId, tenantId, accountId)
+	state, err := s.profileState(ctx, in.ProfileId, tenantId, accountId)
+	if err != nil {
+		return nil, err
+	}
+	return profileMediaOwner(state), nil
 }
 
 func (s *sSysPublish) AdminMessageTemplateMediaUpload(ctx context.Context, in *sysin.MessageTemplateMediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile) (*sysin.MessageTemplateMediaModel, error) {
@@ -97,9 +101,6 @@ func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record
 	defer func() {
 		logMediaUploadStage(ctx, "total", totalStartedAt, in, file, err)
 	}()
-	if task["status"].String() != sysin.PublishTaskStatusDraft {
-		return nil, gerror.New("仅草稿任务可以上传媒体")
-	}
 	if file == nil {
 		return nil, gerror.New("没有找到上传的文件")
 	}

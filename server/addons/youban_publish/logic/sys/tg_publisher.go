@@ -50,36 +50,67 @@ func (s *sSysPublish) submitTelegramPublish(ctx context.Context, req telegramPub
 	if err = s.prepareTelegramTaskForResubmit(ctx, task, channels, operationNo, req.OnlySelectedChannels); err != nil {
 		return err
 	}
-	pushDelay := s.collectRealtimePushDelay(ctx, task)
+	jobIds := make([]int64, 0, len(channels))
 	for _, channel := range channels {
-		jobId, err := s.ensureTelegramPublishChannelJob(ctx, task, channel, operationNo)
-		if err != nil {
-			return err
+		jobId, createErr := s.ensureTelegramPublishChannelJob(ctx, task, channel, operationNo)
+		if createErr != nil {
+			return createErr
 		}
+		jobIds = append(jobIds, jobId)
+	}
+
+	// The database jobs are the durable source of truth. Redis only wakes the
+	// workers; a failed enqueue is recovered by the database scheduler.
+	pushDelay := s.collectRealtimePushDelay(ctx, task)
+	for _, jobId := range jobIds {
 		if err = s.enqueueTelegramJob(ctx, jobId, pushDelay); err != nil {
-			return gerror.Wrap(err, "TG任务入队失败")
+			message := "Redis调度失败，等待数据库调度器恢复：" + err.Error()
+			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
+				"dispatch_status":     tgDispatchStatusIdle,
+				"last_dispatch_error": message,
+				"updated_at":          gtime.Now(),
+			}).Update()
+			g.Log().Warningf(ctx, "TG任务入队失败，等待数据库调度器恢复 jobId:%d err:%+v", jobId, err)
 		}
 	}
 	return nil
 }
 
 func (s *sSysPublish) ensureTelegramPublishChannelJob(ctx context.Context, task gdb.Record, channel telegramJobChannel, operationNo string) (int64, error) {
-	value, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	existing, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("task_id", task["id"].Int64()).
 		Where("operation_no", operationNo).
 		Where("channel_id", channel.Id).
-		Fields("id").
-		Value()
+		Fields("id,status,bot_id,target_chat_id").
+		One()
 	if err != nil {
 		return 0, gerror.Wrap(err, "读取TG频道任务失败")
 	}
-	if jobId := value.Int64(); jobId > 0 {
+	if jobId := existing["id"].Int64(); jobId > 0 {
 		_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("id", jobId).
 			Data(collectTelegramOrderDataFromTask(task)).
 			Update()
 		if err != nil {
 			return 0, gerror.Wrap(err, "更新TG频道任务采集顺序失败")
+		}
+		status := existing["status"].String()
+		if status == "sent" {
+			status = "success"
+		}
+		if recordErr := s.upsertPublishJobRecord(ctx, telegramJobRecord{
+			Id:           jobId,
+			TaskId:       task["id"].Int64(),
+			OperationNo:  operationNo,
+			TenantId:     task["tenant_id"].Int64(),
+			AccountId:    task["account_id"].Int64(),
+			ProfileId:    task["profile_id"].Int64(),
+			ChannelId:    channel.Id,
+			BotId:        existing["bot_id"].Int64(),
+			Status:       status,
+			TargetChatId: existing["target_chat_id"].String(),
+		}, status, ""); recordErr != nil {
+			g.Log().Warningf(ctx, "补写发布记录失败 jobId:%d err:%+v", jobId, recordErr)
 		}
 		return jobId, nil
 	}
@@ -111,6 +142,21 @@ func (s *sSysPublish) ensureTelegramPublishChannelJob(ctx context.Context, task 
 	}).InsertAndGetId()
 	if err != nil {
 		return 0, gerror.Wrap(err, "创建TG频道任务失败")
+	}
+	job := telegramJobRecord{
+		Id:           jobId,
+		TaskId:       task["id"].Int64(),
+		OperationNo:  operationNo,
+		TenantId:     task["tenant_id"].Int64(),
+		AccountId:    task["account_id"].Int64(),
+		ProfileId:    task["profile_id"].Int64(),
+		ChannelId:    channel.Id,
+		BotId:        botId,
+		Status:       "pending",
+		TargetChatId: normalizeTelegramChannelChatID(channel.TargetChatId),
+	}
+	if recordErr := s.upsertPublishJobRecord(ctx, job, "pending", ""); recordErr != nil {
+		g.Log().Warningf(ctx, "保存待发送发布记录失败 jobId:%d err:%+v", jobId, recordErr)
 	}
 	return jobId, nil
 }

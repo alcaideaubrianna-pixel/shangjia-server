@@ -3,7 +3,6 @@ package sys
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -390,40 +389,16 @@ func (s *sSysPublish) AdminChannelFullPush(ctx context.Context, in *sysin.Channe
 	if err != nil {
 		return nil, err
 	}
-	batchNo := fmt.Sprintf("full_push:%d:%d", channel.Id, gtime.Now().TimestampNano())
-	queued, err := s.fullPushPublishedTaskCount(ctx, account.TenantId)
+	batch, err := s.createFullPushBatch(ctx, account.TenantId, channel.Id, account.Id)
 	if err != nil {
 		return nil, err
 	}
-	go s.runChannelFullPush(context.WithoutCancel(ctx), account.TenantId, channel.Id, batchNo)
-	return &sysin.ChannelFullPushModel{ChannelId: channel.Id, Queued: queued}, nil
-}
-
-func (s *sSysPublish) runChannelFullPush(ctx context.Context, tenantId int64, channelId int64, batchNo string) {
-	lastId := int64(0)
-	queued := 0
-	for {
-		ids, err := s.fullPushPublishedTaskIds(ctx, tenantId, lastId, 500)
-		if err != nil {
-			g.Log().Warningf(ctx, "全量推送读取资料失败 channelId:%d batchNo:%s err:%+v", channelId, batchNo, err)
-			return
-		}
-		if len(ids) == 0 {
-			break
-		}
-		for _, taskId := range ids {
-			if taskId > lastId {
-				lastId = taskId
-			}
-			operationNo := fmt.Sprintf("%s:%d", batchNo, taskId)
-			if err = s.enqueueFullPushTelegramJob(ctx, taskId, channelId, operationNo); err != nil {
-				g.Log().Warningf(ctx, "全量推送任务入队失败 channelId:%d taskId:%d batchNo:%s err:%+v", channelId, taskId, batchNo, err)
-				continue
-			}
-			queued++
-		}
-	}
-	g.Log().Infof(ctx, "全量推送后台入队完成 channelId:%d batchNo:%s queued:%d", channelId, batchNo, queued)
+	return &sysin.ChannelFullPushModel{
+		ChannelId: channel.Id,
+		Queued:    batch.TotalCount,
+		BatchNo:   batch.BatchNo,
+		Status:    batch.Status,
+	}, nil
 }
 
 func (s *sSysPublish) enqueueFullPushTelegramJob(ctx context.Context, taskId int64, channelId int64, operationNo string) error {
@@ -471,7 +446,7 @@ func (s *sSysPublish) fullPushChannel(ctx context.Context, tenantId int64, chann
 	return &channel, nil
 }
 
-func (s *sSysPublish) fullPushPublishedTaskIds(ctx context.Context, tenantId int64, lastId int64, limit int) ([]int64, error) {
+func (s *sSysPublish) fullPushPublishedTaskIds(ctx context.Context, tenantId, lastId, snapshotMaxTaskId int64, limit int) ([]int64, error) {
 	if limit <= 0 {
 		limit = 500
 	}
@@ -481,6 +456,7 @@ func (s *sSysPublish) fullPushPublishedTaskIds(ctx context.Context, tenantId int
 	mod := fullPushPublishedTaskBaseModel(ctx, tenantId).
 		Fields("t.id").
 		Where("t.id > ?", lastId).
+		Where("t.id <= ?", snapshotMaxTaskId).
 		OrderAsc("t.id").
 		Limit(limit)
 	err := mod.Scan(&rows)
@@ -496,15 +472,6 @@ func (s *sSysPublish) fullPushPublishedTaskIds(ctx context.Context, tenantId int
 	return ids, nil
 }
 
-func (s *sSysPublish) fullPushPublishedTaskCount(ctx context.Context, tenantId int64) (int, error) {
-	count, err := fullPushPublishedTaskBaseModel(ctx, tenantId).
-		Count()
-	if err != nil {
-		return 0, gerror.Wrap(err, "统计全量推送资料失败")
-	}
-	return count, nil
-}
-
 func fullPushPublishedTaskBaseModel(ctx context.Context, tenantId int64) *gdb.Model {
 	return g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
 		InnerJoin(publishAccountTable+" a", "a.id=t.account_id AND a.deleted_at IS NULL").
@@ -515,6 +482,7 @@ func fullPushPublishedTaskBaseModel(ctx context.Context, tenantId int64) *gdb.Mo
 		Where("a.tenant_id", tenantId).
 		Where("a.status", 1).
 		Where("p.status", 1).
+		Where("NOT EXISTS (SELECT 1 FROM "+publishTaskTable+" t2 WHERE t2.tenant_id=t.tenant_id AND t2.profile_id=t.profile_id AND t2.deleted_at IS NULL AND t2.status IN (?, ?) AND t2.id>t.id)", sysin.PublishTaskStatusPublished, sysin.PublishTaskStatusPublishing).
 		Where("COALESCE(t.client_request_id, '') NOT LIKE ?", "collect:follow:%")
 }
 

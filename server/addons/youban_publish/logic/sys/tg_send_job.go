@@ -65,6 +65,9 @@ func (s *sSysPublish) handleTelegramPreSendRefreshError(ctx context.Context, job
 		"last_dispatch_error": message,
 		"updated_at":          gtime.Now(),
 	}).Update()
+	if recordErr := s.upsertPublishJobRecord(ctx, job, "failed_retry", message); recordErr != nil {
+		g.Log().Warningf(ctx, "更新发布重试记录失败 jobId:%d err:%+v", job.Id, recordErr)
+	}
 	s.appendTelegramJobLog(ctx, job, "publish", "failed_retry", message)
 	return nil
 }
@@ -93,6 +96,9 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 	}
 	if err = s.markTaskPublishingStarted(ctx, job.TaskId, job.OperationNo); err != nil {
 		return err
+	}
+	if recordErr := s.upsertPublishJobRecord(ctx, job, "sending", ""); recordErr != nil {
+		g.Log().Warningf(ctx, "更新发布发送中记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
 	s.appendTelegramJobLog(ctx, job, "publish", "started", s.telegramJobPublishMessage(job, "开始推送TG资料"))
 	if err = s.sendLockedTelegramJob(ctx, job); err != nil {
@@ -257,6 +263,9 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 		"error_message":   message,
 		"updated_at":      gtime.Now(),
 	}).Update()
+	if recordErr := s.upsertPublishJobRecord(ctx, job, status, message); recordErr != nil {
+		g.Log().Warningf(ctx, "更新发布失败记录失败 jobId:%d status:%s err:%+v", job.Id, status, recordErr)
+	}
 	s.appendTelegramJobLog(ctx, job, "publish", status, message)
 	if status == "failed" {
 		failMod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", job.TaskId)
@@ -305,6 +314,10 @@ func (s *sSysPublish) switchTelegramJobToNextBot(ctx context.Context, job telegr
 	if err != nil {
 		return false, gerror.Wrap(err, "切换备用BOT失败")
 	}
+	job.BotId = nextBotId
+	if recordErr := s.upsertPublishJobRecord(ctx, job, "pending", "已切换备用BOT，等待重新发送"); recordErr != nil {
+		g.Log().Warningf(ctx, "更新发布待发送记录失败 jobId:%d err:%+v", job.Id, recordErr)
+	}
 	s.appendTelegramJobLog(ctx, job, "publish", "bot_switched", fmt.Sprintf("当前BOT限流，已切换备用BOT：%d，原因：%s", nextBotId, cause.Error()))
 	return true, nil
 }
@@ -352,10 +365,7 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 	if indexErr := s.upsertChannelProfileFromJob(ctx, job); indexErr != nil {
 		g.Log().Warningf(ctx, "更新频道资料索引失败 jobId:%d err:%+v", job.Id, indexErr)
 	}
-	if isCycleBatchOperation(job.OperationNo) {
-		s.cleanupPreviousCycleMessages(ctx, job)
-		return nil
-	}
+	isCycle := isCycleBatchOperation(job.OperationNo)
 	allSent, err := s.allTelegramTaskJobsSent(ctx, job.TaskId, job.OperationNo)
 	if err != nil || !allSent {
 		return err
@@ -370,8 +380,10 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 		}
 	}
 	if updated {
-		if err = s.syncPublishedTaskChannelProfiles(ctx, job.TaskId); err != nil {
-			return err
+		if !isCycle {
+			if err = s.syncPublishedTaskChannelProfiles(ctx, job.TaskId); err != nil {
+				return err
+			}
 		}
 		if err = s.incrementDailyPublishStat(ctx, job); err != nil {
 			return err
@@ -379,6 +391,9 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 		if err = s.markCollectDispatchSentByTask(ctx, job.TaskId); err != nil {
 			return err
 		}
+	}
+	if isCycle {
+		s.cleanupPreviousCycleMessages(ctx, job)
 	}
 	return nil
 }

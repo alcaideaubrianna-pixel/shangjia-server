@@ -188,8 +188,11 @@ func (s *sSysPublish) ServerMaterialImportTaskCreate(ctx context.Context, in *sy
 	if err != nil {
 		return 0, err
 	}
+	if target.TenantId != in.TenantId {
+		return 0, gerror.New("归属账号不属于所选账号归属")
+	}
 	if target.Status != 1 {
-		return 0, gerror.New("目标上架账号已停用")
+		return 0, gerror.New("目标账号已停用")
 	}
 	tgAccount, err := s.adminTgAccountById(ctx, in.TgAccountId, target.TenantId)
 	if err != nil {

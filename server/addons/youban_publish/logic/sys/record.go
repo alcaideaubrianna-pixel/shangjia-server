@@ -232,10 +232,10 @@ func (s *sSysPublish) applyPublishRecordFilters(mod *gdb.Model, in *sysin.Publis
 	if in.Action != "" {
 		mod = mod.Where("l.action", in.Action)
 	}
-	if in.Status != "" && in.Status != "success" && in.Status != "sent" {
-		mod = mod.Where("1", 0)
-	} else {
+	if in.Status == "success" || in.Status == "sent" {
 		mod = mod.Where("l.status", "success")
+	} else if in.Status != "" {
+		mod = mod.Where("l.status", in.Status)
 	}
 	if in.Keyword != "" {
 		like := "%" + in.Keyword + "%"

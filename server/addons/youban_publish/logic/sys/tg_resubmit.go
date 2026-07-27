@@ -72,7 +72,6 @@ func (s *sSysPublish) resetTelegramJobForResubmit(ctx context.Context, jobId int
 			"dispatch_status":     tgDispatchStatusIdle,
 			"retry_count":         0,
 			"next_retry_at":       nil,
-			"next_cycle_at":       nil,
 			"error_message":       "",
 			"sent_at":             nil,
 			"last_dispatch_error": "",
@@ -92,7 +91,6 @@ func (s *sSysPublish) markTelegramJobSuperseded(ctx context.Context, jobId int64
 			"status":          "superseded",
 			"dispatch_status": tgDispatchStatusDone,
 			"next_retry_at":   nil,
-			"next_cycle_at":   nil,
 			"updated_at":      gtime.Now(),
 		}).
 		Update()

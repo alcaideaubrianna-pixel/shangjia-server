@@ -187,7 +187,6 @@ func (s *sSysPublish) supersedeCollectSourcePendingJobs(ctx context.Context, tas
 			"status":              "superseded",
 			"dispatch_status":     tgDispatchStatusDone,
 			"next_retry_at":       nil,
-			"next_cycle_at":       nil,
 			"error_message":       collectSourceDownMessage,
 			"last_dispatch_error": collectSourceDownMessage,
 			"updated_at":          gtime.Now(),

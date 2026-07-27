@@ -47,10 +47,9 @@ func (s *sSysPublish) adminProfileVisibleScope(ctx context.Context, account *sys
 			if err := s.ensureAdminManageableAccount(ctx, account, in.AccountId); err != nil {
 				return nil, err
 			}
-			ids, err := s.expandFollowNoteAccountIds(ctx, []int64{in.AccountId})
-			res := &adminProfileVisibleScope{AccountIds: ids, TenantId: account.TenantId}
+			res := &adminProfileVisibleScope{AccountIds: []int64{in.AccountId}, TenantId: account.TenantId}
 			_ = cache.Instance().Set(ctx, cacheKey, res, accountVisibilityCacheTTL)
-			return res, err
+			return res, nil
 		}
 		ids, err := s.expandFollowNoteAccountIds(ctx, []int64{account.Id})
 		res := &adminProfileVisibleScope{AccountIds: ids, TenantId: account.TenantId}
@@ -298,7 +297,7 @@ func followNoteAccountIdsCacheKey(ctx context.Context, tenantId int64, accountId
 }
 
 func accountVisibilityScopeCacheKey(ctx context.Context, tenantId int64, accountId int64, scope string, selectedAccountId int64) string {
-	return fmt.Sprintf("youban_publish:account_visibility:scope:%d:%d:%s:%d:%s", tenantId, accountId, scope, selectedAccountId, accountVisibilityVersionValue(ctx, tenantId))
+	return fmt.Sprintf("youban_publish:account_visibility:scope:v2:%d:%d:%s:%d:%s", tenantId, accountId, scope, selectedAccountId, accountVisibilityVersionValue(ctx, tenantId))
 }
 
 func accountVisibilityVersionValue(ctx context.Context, tenantId int64) string {

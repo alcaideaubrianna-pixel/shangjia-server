@@ -467,3 +467,37 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media_phash_lsh` (
   UNIQUE KEY `uk_ybp_media_phash_lsh_media_pos` (`media_id`,`bucket_pos`),
   KEY `idx_ybp_media_phash_lsh_search` (`tenant_id`,`media_type`,`bucket_pos`,`bucket_value`,`media_id`,`profile_id`,`account_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体感知哈希LSH索引';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_state` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0',
+  `channel_id_json` text,
+  `customer_remark` text,
+  `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0',
+  `publish_at` datetime DEFAULT NULL,
+  `created_by` bigint(20) NOT NULL DEFAULT '0',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_profile_state_profile` (`profile_id`),
+  KEY `idx_ybp_profile_state_owner` (`tenant_id`,`account_id`,`profile_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架资料归属和发布配置';
+INSERT INTO `hg_youban_publish_profile_state` (
+  `tenant_id`,`account_id`,`profile_id`,`channel_id_json`,`customer_remark`,
+  `anti_scan_enabled`,`publish_at`,`created_by`,`updated_by`,`created_at`,`updated_at`
+)
+SELECT t.`tenant_id`,t.`account_id`,t.`profile_id`,t.`channel_id_json`,t.`customer_remark`,
+  t.`anti_scan_enabled`,t.`published_at`,t.`created_by`,t.`updated_by`,COALESCE(t.`created_at`,NOW()),COALESCE(t.`updated_at`,NOW())
+FROM `hg_youban_publish_task` t
+INNER JOIN (
+  SELECT `profile_id`,MAX(`id`) AS `id`
+  FROM `hg_youban_publish_task`
+  WHERE `profile_id` > 0 AND `deleted_at` IS NULL
+  GROUP BY `profile_id`
+) latest ON latest.`id`=t.`id`
+ON DUPLICATE KEY UPDATE `profile_id`=VALUES(`profile_id`);
+UPDATE `hg_youban_publish_task` SET `status`='canceled', `tg_status`='skipped' WHERE `status`='draft';

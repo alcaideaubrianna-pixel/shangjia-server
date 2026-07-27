@@ -2586,7 +2586,7 @@ func legacyCMSPublishTaskStatus(status string) string {
 	case "down":
 		return sysin.PublishTaskStatusCanceled
 	default:
-		return sysin.PublishTaskStatusDraft
+		return sysin.PublishTaskStatusCanceled
 	}
 }
 

@@ -11,78 +11,10 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
-func (s *sSysPublish) profileTask(ctx context.Context, tx gdb.TX, profileId int64, tenantId int64, accountId int64) (gdb.Record, error) {
-	mod := tx.Model(publishTaskTable).Ctx(ctx).Where("profile_id", profileId).Where("status", sysin.PublishTaskStatusDraft).WhereNull("deleted_at").OrderDesc("id")
-	if tenantId > 0 {
-		mod = mod.Where("tenant_id", tenantId)
-	}
-	if accountId > 0 {
-		mod = mod.Where("account_id", accountId)
-	}
-	row, err := mod.One()
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取资料任务失败")
-	}
-	if row.IsEmpty() {
-		mod = tx.Model(publishTaskTable).Ctx(ctx).Where("profile_id", profileId).WhereNull("deleted_at").OrderDesc("id")
-		if tenantId > 0 {
-			mod = mod.Where("tenant_id", tenantId)
-		}
-		if accountId > 0 {
-			mod = mod.Where("account_id", accountId)
-		}
-		row, err = mod.One()
-		if err != nil {
-			return nil, gerror.Wrap(err, "读取资料任务失败")
-		}
-	}
-	if row.IsEmpty() {
-		return nil, gerror.New("资料不存在或无权操作")
-	}
-	return row, nil
-}
-
-// editableProfileTask returns the task used by the editor. Published tasks are
-// immutable; callers must clone them before changing content or media.
-func (s *sSysPublish) editableProfileTask(ctx context.Context, profileId int64, tenantId int64, accountId int64) (gdb.Record, error) {
-	mod := g.DB().Model(publishTaskTable).Ctx(ctx).
-		Where("profile_id", profileId).
-		Where("status", sysin.PublishTaskStatusDraft).
-		WhereNull("deleted_at").OrderDesc("id")
-	if tenantId > 0 {
-		mod = mod.Where("tenant_id", tenantId)
-	}
-	if accountId > 0 {
-		mod = mod.Where("account_id", accountId)
-	}
-	row, err := mod.One()
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取资料草稿失败")
-	}
-	return row, nil
-}
-
-// mediaEditTask resolves the internal editing snapshot for a profile. The
-// public media APIs use profileId; taskId remains an internal publishing
-// implementation detail.
-func (s *sSysPublish) mediaEditTask(ctx context.Context, profileId int64, tenantId int64, accountId int64) (gdb.Record, error) {
-	if profileId <= 0 {
-		return nil, gerror.New("资料ID不能为空")
-	}
-	task, err := s.editableProfileTask(ctx, profileId, tenantId, accountId)
-	if err != nil {
-		return nil, err
-	}
-	if task.IsEmpty() {
-		return nil, gerror.New("资料当前没有可编辑版本，请先保存资料")
-	}
-	return task, nil
-}
-
 func (s *sSysPublish) cloneProfileTaskMedia(ctx context.Context, tx gdb.TX, sourceTaskId int64, targetTaskId int64, profileId int64, tenantId int64, accountId int64, operatorId int64) error {
 	var rows []gdb.Record
 	if err := tx.Model(publishMediaTable).Ctx(ctx).
-		Where("task_id", sourceTaskId).WhereNull("deleted_at").Scan(&rows); err != nil {
+		Where("task_id", sourceTaskId).Where("profile_id", profileId).WhereNull("deleted_at").Scan(&rows); err != nil {
 		return gerror.Wrap(err, "读取原任务媒体失败")
 	}
 	now := gtime.Now()
@@ -104,39 +36,17 @@ func (s *sSysPublish) cloneProfileTaskMedia(ctx context.Context, tx gdb.TX, sour
 			"created_by": operatorId, "updated_by": operatorId, "created_at": now, "updated_at": now,
 		}
 		if _, err := tx.Model(publishMediaTable).Ctx(ctx).Data(data).Insert(); err != nil {
-			return gerror.Wrap(err, "复制草稿媒体失败")
+			return gerror.Wrap(err, "创建发布媒体快照失败")
 		}
 	}
 	return nil
-}
-
-func (s *sSysPublish) cloneEditableProfileTask(ctx context.Context, tx gdb.TX, source gdb.Record, operatorId int64) (gdb.Record, error) {
-	now := gtime.Now()
-	data := g.Map{
-		"tenant_id": source["tenant_id"].Int64(), "merchant_id": source["tenant_id"].Int64(),
-		"account_id": source["account_id"].Int64(), "profile_id": source["profile_id"].Int64(),
-		"title": source["title"].String(), "province": source["province"].String(), "city": source["city"].String(),
-		"plain_text": source["plain_text"].String(), "media_count": source["media_count"].Int(),
-		"channel_id_json": source["channel_id_json"].String(), "customer_remark": source["customer_remark"].String(),
-		"anti_scan_enabled": source["anti_scan_enabled"].Int(), "tg_push_enabled": source["tg_push_enabled"].Int(),
-		"tg_status": "pending", "status": sysin.PublishTaskStatusDraft, "published_at": nil,
-		"created_by": operatorId, "updated_by": operatorId, "created_at": now, "updated_at": now,
-	}
-	id, err := tx.Model(publishTaskTable).Ctx(ctx).Data(data).InsertAndGetId()
-	if err != nil {
-		return nil, gerror.Wrap(err, "创建编辑草稿失败")
-	}
-	if err = s.cloneProfileTaskMedia(ctx, tx, source["id"].Int64(), id, source["profile_id"].Int64(), source["tenant_id"].Int64(), source["account_id"].Int64(), operatorId); err != nil {
-		return nil, err
-	}
-	return tx.Model(publishTaskTable).Ctx(ctx).Where("id", id).One()
 }
 
 func (s *sSysPublish) allowedProfileIds(ctx context.Context, ids []int64, tenantId int64, accountId int64) ([]int64, error) {
 	if len(ids) == 0 {
 		return []int64{}, nil
 	}
-	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+	mod := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 		WhereIn("profile_id", ids).
 		WhereGT("profile_id", 0).
 		WhereNull("deleted_at")
@@ -257,12 +167,17 @@ func (s *sSysPublish) mediaListByProfile(ctx context.Context, profileId int64, t
 }
 
 func (s *sSysPublish) mediaListByEditableProfile(ctx context.Context, profileId int64, tenantId int64, accountId int64) (list []*sysin.MediaModel, err error) {
-	task, err := s.editableProfileTask(ctx, profileId, tenantId, accountId)
-	if err != nil {
+	if _, err = s.profileState(ctx, profileId, tenantId, accountId); err != nil {
 		return nil, err
 	}
-	if task.IsEmpty() {
-		return s.mediaListByProfile(ctx, profileId, tenantId, accountId)
+	err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).
+		Where("task_id", 0).
+		WhereNull("deleted_at").
+		OrderAsc("sort_index").OrderAsc("id").Scan(&list)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取资料媒体失败")
 	}
-	return s.mediaListByTenant(ctx, task["id"].Int64(), tenantId)
+	normalizeMediaListFileURL(list)
+	return list, nil
 }

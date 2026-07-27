@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -56,14 +57,13 @@ type channelProfileRecord struct {
 	AccountId int64 `orm:"account_id"`
 	ChannelId int64 `orm:"channel_id"`
 	ProfileId int64 `orm:"profile_id"`
-	TaskId    int64 `orm:"task_id"`
 }
 
 func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
-	if err := ensureChannelCycleSchema(ctx); err != nil {
+	if err := s.initializeChannelCycleSchedules(ctx); err != nil {
 		return err
 	}
-	if err := s.initializeChannelCycleSchedules(ctx); err != nil {
+	if err := s.recoverChannelCycleRuns(ctx); err != nil {
 		return err
 	}
 	if err := s.backfillChannelProfiles(ctx, 5000); err != nil {
@@ -102,6 +102,60 @@ func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
 		if err = s.enqueueCycleRun(ctx, runId, 0); err != nil {
 			s.failChannelCycleRun(ctx, runId, channel.Id, err)
 			return gerror.Wrap(err, "频道循环批次入队失败")
+		}
+	}
+	return nil
+}
+
+func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context) error {
+	now := gtime.Now()
+	staleRunningBefore := now.Add(-35 * time.Minute)
+	var staleRunning []cycleRunRecord
+	if err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
+		Fields("id,channel_id").
+		Where("status", cycleRunStatusRunning).
+		WhereLTE("updated_at", staleRunningBefore).
+		OrderAsc("id").
+		Limit(20).
+		Scan(&staleRunning); err != nil {
+		return gerror.Wrap(err, "读取超时频道循环批次失败")
+	}
+	for _, run := range staleRunning {
+		result, err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
+			Where("id", run.Id).
+			Where("status", cycleRunStatusRunning).
+			WhereLTE("updated_at", staleRunningBefore).
+			Data(g.Map{
+				"status":        cycleRunStatusFailed,
+				"stage":         "recovering",
+				"error_message": "循环批次执行超时，已由定时调度恢复",
+				"updated_at":    now,
+			}).
+			Update()
+		if err != nil {
+			return gerror.Wrap(err, "恢复超时频道循环批次失败")
+		}
+		affected, _ := result.RowsAffected()
+		if affected > 0 {
+			if err = s.enqueueCycleRun(ctx, run.Id, 0); err != nil {
+				return gerror.Wrap(err, "恢复超时频道循环批次入队失败")
+			}
+		}
+	}
+
+	var waiting []cycleRunRecord
+	if err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
+		Fields("id,channel_id").
+		WhereIn("status", []string{cycleRunStatusPending, cycleRunStatusFailed}).
+		WhereLTE("updated_at", now.Add(-90*time.Second)).
+		OrderAsc("id").
+		Limit(50).
+		Scan(&waiting); err != nil {
+		return gerror.Wrap(err, "读取滞留频道循环批次失败")
+	}
+	for _, run := range waiting {
+		if err := s.enqueueCycleRun(ctx, run.Id, 0); err != nil {
+			return gerror.Wrap(err, "恢复滞留频道循环批次入队失败")
 		}
 	}
 	return nil
@@ -183,9 +237,6 @@ func (s *sSysPublish) createChannelCycleRun(ctx context.Context, channel channel
 }
 
 func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
-	if err := ensureChannelCycleSchema(ctx); err != nil {
-		return err
-	}
 	run, err := s.lockChannelCycleRun(ctx, runId)
 	if err != nil || run.Id <= 0 {
 		return err
@@ -275,7 +326,7 @@ func (s *sSysPublish) channelCycleById(ctx context.Context, channelId int64) (ch
 func (s *sSysPublish) channelCyclePage(ctx context.Context, channelId int64, cursorId int64, limit int) ([]channelProfileRecord, error) {
 	var items []channelProfileRecord
 	err := g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,account_id,channel_id,profile_id,task_id").
+		Fields("id,tenant_id,account_id,channel_id,profile_id").
 		Where("channel_id", channelId).
 		Where("status", "active").
 		WhereGT("id", cursorId).
@@ -297,29 +348,34 @@ func (s *sSysPublish) channelCycleBacklog(ctx context.Context, channelId int64) 
 }
 
 func (s *sSysPublish) enqueueChannelCycleProfile(ctx context.Context, runId int64, item channelProfileRecord) (bool, error) {
-	task, err := s.telegramJobTask(ctx, item.TaskId)
+	clientRequestId := cyclePublishClientRequestID(runId, item.ProfileId, item.ChannelId)
+	taskId, skipSubmit, err := s.createProfilePublishSnapshot(ctx, item.ProfileId, item.TenantId, item.AccountId, profilePublishSnapshotOptions{
+		ChannelIds:      []int64{item.ChannelId},
+		ClientRequestId: clientRequestId,
+		RequireOnline:   true,
+	})
 	if err != nil {
+		if errors.Is(err, errPublishProfileUnavailable) {
+			return false, s.deactivateChannelProfile(ctx, item.ChannelId, item.ProfileId)
+		}
 		return false, err
 	}
-	if task.IsEmpty() || task["status"].String() != "published" {
-		return false, s.deactivateChannelProfile(ctx, item.ChannelId, item.ProfileId)
-	}
-	channels, err := s.telegramJobChannels(ctx, task, []int64{item.ChannelId})
-	if err != nil {
-		return false, err
-	}
-	if len(channels) == 0 {
+	if skipSubmit || taskId <= 0 {
 		return false, nil
 	}
-	operationNo := fmt.Sprintf("cycle_batch:%d:%d", runId, item.TaskId)
-	jobId, err := s.ensureTelegramPublishChannelJob(ctx, task, channels[0], operationNo)
-	if err != nil {
-		return false, err
-	}
-	if err = s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
+	operationNo := cyclePublishOperationNo(runId, item.ProfileId, item.ChannelId)
+	if err = s.submitPublishEvent(ctx, taskId, item.TenantId, 0, operationNo); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+func cyclePublishClientRequestID(runId int64, profileId int64, channelId int64) string {
+	return fmt.Sprintf("cycle:%d:%d:%d", runId, profileId, channelId)
+}
+
+func cyclePublishOperationNo(runId int64, profileId int64, channelId int64) string {
+	return fmt.Sprintf("cycle_batch:%d:%d:%d", runId, profileId, channelId)
 }
 
 func (s *sSysPublish) continueChannelCycleRun(ctx context.Context, run cycleRunRecord, delay time.Duration) error {

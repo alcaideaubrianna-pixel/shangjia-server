@@ -15,6 +15,7 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
@@ -27,7 +28,7 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 	}
 	title := strings.TrimSpace(group.Title)
 	if title == "" {
-		title = firstNonEmpty(group.ProfileNo, group.Nickname, fmt.Sprintf("TG资料%d", group.Id))
+		title = fmt.Sprintf("%dTG%d", task.AccountId, group.Id)
 	}
 	channelIds := append([]int64(nil), task.ChannelIds...)
 	if len(channelIds) == 0 {
@@ -55,6 +56,13 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 	saved, err := s.saveProfile(ctx, input, task.TenantId, task.AccountId)
 	if err != nil {
 		return 0, 0, err
+	}
+	if err = s.bindMaterialImportGroupProfile(ctx, group, saved); err != nil {
+		return 0, 0, err
+	}
+	if strings.TrimSpace(group.Title) == "" {
+		title = fmt.Sprintf("%d%s", task.AccountId, saved.ProfileNo)
+		group.Title = title
 	}
 	if err = s.updateMaterialImportProfileSource(ctx, saved.Id, group, task, title); err != nil {
 		return 0, 0, err
@@ -86,15 +94,32 @@ func (s *sSysPublish) materialImportExistingProfile(ctx context.Context, group *
 	if profile.IsEmpty() {
 		return 0, 0, nil
 	}
+	profileId := profile[profileCols.Id].Int64()
 	task, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
 		Fields("id").
-		Where("profile_id", profile["id"].Int64()).
+		Where("profile_id", profileId).
 		WhereNull("deleted_at").
 		One()
 	if err != nil {
 		return 0, 0, gerror.Wrap(err, "读取TG导入资料任务失败")
 	}
-	return profile["id"].Int64(), task["id"].Int64(), nil
+	return profileId, task["id"].Int64(), nil
+}
+
+func (s *sSysPublish) bindMaterialImportGroupProfile(ctx context.Context, group *sysin.MaterialImportGroupModel, saved *sysin.ProfileSaveModel) error {
+	if group == nil || group.Id <= 0 || saved == nil || saved.Id <= 0 {
+		return nil
+	}
+	_, err := g.DB().Model(pdao.YoubanPublishMaterialImportGroup.Table()).Safe().Ctx(ctx).
+		Where("id", group.Id).
+		Data(g.Map{"profile_id": saved.Id, "task_profile_id": saved.TaskId, "updated_at": gtime.Now()}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "记录TG导入资料关联失败")
+	}
+	group.ProfileId = saved.Id
+	group.TaskProfileId = saved.TaskId
+	return nil
 }
 
 func (s *sSysPublish) updateMaterialImportProfileSource(ctx context.Context, profileId int64, group *sysin.MaterialImportGroupModel, task *sysin.MaterialImportTaskModel, title string) error {
@@ -149,7 +174,7 @@ func (s *sSysPublish) replaceMaterialImportMedia(ctx context.Context, task *sysi
 			"tenant_id":  gvar.New(task.TenantId),
 			"account_id": gvar.New(task.AccountId),
 			"profile_id": gvar.New(saved.Id),
-			"status":     gvar.New(sysin.PublishTaskStatusDraft),
+			"status":     gvar.New(sysin.PublishTaskStatusPending),
 		}, &sysin.MediaUploadInp{
 			ProfileId: saved.Id,
 			MediaType: mediaType,

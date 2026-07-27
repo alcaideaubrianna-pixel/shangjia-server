@@ -84,6 +84,14 @@ export function ProfileDelete(params = {}) {
   return http.request({ url: '/youban_publish/publish/profile/delete', method: 'POST', params });
 }
 
+export function ProfilePurgeDeleted(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/profile/purgeDeleted',
+    method: 'POST',
+    params,
+  });
+}
+
 export function ProfileReview(params = {}) {
   return http.request({ url: '/youban_publish/publish/profile/review', method: 'POST', params });
 }

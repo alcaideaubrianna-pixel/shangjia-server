@@ -13,9 +13,10 @@
       <n-select
         v-model:value="query.accountId"
         :options="accountOptionsWithAll"
+        :disabled="!query.tenantId"
         clearable
         filterable
-        placeholder="上架账号"
+        placeholder="管理员 / 上架账号"
         class="tenant-select"
       />
       <n-select
@@ -50,6 +51,14 @@
         </template>
         确认删除选中的笔记资料？
       </n-popconfirm>
+      <n-popconfirm @positive-click="purgeDeletedProfiles">
+        <template #trigger>
+          <n-button type="error" secondary :disabled="!query.tenantId || !query.accountId">
+            清空资料
+          </n-button>
+        </template>
+        将永久删除当前账号下所有历史软删除资料及其媒体、索引和归属数据，且无法恢复。确认继续？
+      </n-popconfirm>
     </n-space>
 
     <n-data-table
@@ -75,13 +84,24 @@
       @positive-click="createTgImportTask"
     >
       <n-form :model="tgImportForm" label-placement="left" label-width="100">
+        <n-form-item label="账号归属">
+          <n-select
+            v-model:value="tgImportForm.tenantId"
+            :options="tenantOptions"
+            filterable
+            clearable
+            placeholder="先选择租户"
+            @update:value="handleImportTenantChange"
+          />
+        </n-form-item>
         <n-form-item label="归属账号">
           <n-select
             v-model:value="tgImportForm.accountId"
             :options="tgImportAccountOptions"
+            :disabled="!tgImportForm.tenantId"
             filterable
             clearable
-            placeholder="选择导入后的上架账号"
+            placeholder="选择管理员或上架账号"
             @update:value="handleImportAccountChange"
           />
         </n-form-item>
@@ -172,6 +192,7 @@
     ImportTaskCreateForAccount,
     ProfileDelete,
     ProfileList,
+    ProfilePurgeDeleted,
     ProfileReview,
     ProfileSave,
     ProfileView,
@@ -189,6 +210,7 @@
   const checkedRowKeys = ref<Array<number | string>>([]);
   const tenants = ref<Recordable[]>([]);
   const accounts = ref<Recordable[]>([]);
+  const tgImportAccounts = ref<Recordable[]>([]);
   const tags = ref<Recordable[]>([]);
   const tgAccounts = ref<Recordable[]>([]);
   const editForm = reactive({
@@ -204,6 +226,7 @@
     status: 1,
   });
   const tgImportForm = reactive({
+    tenantId: null as number | null,
     accountId: null as number | null,
     tgAccountId: null as number | null,
     channelUrl: '',
@@ -240,15 +263,13 @@
     ...tenantOptions.value,
   ]);
   const accountOptions = computed(() =>
-    accounts.value
-      .filter((item) => !query.tenantId || item.tenantId === query.tenantId)
-      .map((item) => ({
-        label: `${item.nickname || item.username} (${item.username})`,
-        value: item.id,
-      }))
+    accounts.value.map((item) => ({
+      label: `${item.nickname || item.username} (${item.username}) · ${item.accountType === 'admin' ? '管理员' : '上架账号'}`,
+      value: item.id,
+    }))
   );
   const accountOptionsWithAll = computed(() => [
-    { label: '全部上架账号', value: null },
+    { label: '全部账号', value: null },
     ...accountOptions.value,
   ]);
   const tagOptions = computed(() =>
@@ -256,15 +277,14 @@
   );
   const tagOptionsWithAll = computed(() => [{ label: '全部标签', value: '' }, ...tagOptions.value]);
   const tgImportAccountOptions = computed(() =>
-    accounts.value.map((item) => ({
-      label: `${item.nickname || item.username || `账号#${item.id}`} (${item.username || item.id})`,
+    tgImportAccounts.value.map((item) => ({
+      label: `${item.nickname || item.username || `账号#${item.id}`} (${item.username || item.id}) · ${item.accountType === 'admin' ? '管理员' : '上架账号'}`,
       value: item.id,
     }))
   );
   const tgImportTgAccountOptions = computed(() => {
-    const account = accounts.value.find((item) => item.id === tgImportForm.accountId);
     return tgAccounts.value
-      .filter((item) => !account || item.tenantId === account.tenantId)
+      .filter((item) => !tgImportForm.tenantId || item.tenantId === tgImportForm.tenantId)
       .map((item) => ({
         label: `${item.displayName || item.telegramUsername || `TG账号#${item.id}`} · ${item.status === 'authorized' ? '已登录' : item.status || '未知状态'}`,
         value: item.id,
@@ -364,7 +384,7 @@
   ];
 
   onMounted(async () => {
-    await Promise.all([loadTenants(), loadAccounts(), loadTags(), loadTgAccounts()]);
+    await Promise.all([loadTenants(), loadTags(), loadTgAccounts()]);
     await loadProfiles();
   });
 
@@ -373,14 +393,32 @@
     tenants.value = res?.list || [];
   }
 
-  async function loadAccounts() {
+  async function loadAccounts(tenantId: number | null) {
+    if (!tenantId) {
+      accounts.value = [];
+      return;
+    }
     const res: any = await AccountList({
       page: 1,
-      perPage: 200,
-      accountType: 'uploader',
+      perPage: 500,
       status: 1,
+      tenantId,
     });
     accounts.value = res?.list || [];
+  }
+
+  async function loadTgImportAccounts(tenantId: number | null) {
+    if (!tenantId) {
+      tgImportAccounts.value = [];
+      return;
+    }
+    const res: any = await AccountList({
+      page: 1,
+      perPage: 500,
+      status: 1,
+      tenantId,
+    });
+    tgImportAccounts.value = res?.list || [];
   }
 
   async function loadTags() {
@@ -409,16 +447,25 @@
     }
   }
 
-  function handleTenantChange() {
+  async function handleTenantChange() {
     query.accountId = null;
+    await loadAccounts(query.tenantId);
   }
 
   function openTgImportModal() {
+    tgImportForm.tenantId = null;
     tgImportForm.accountId = null;
     tgImportForm.tgAccountId = null;
+    tgImportAccounts.value = [];
     tgImportForm.channelUrl = '';
     tgImportForm.pullLimitDays = 365;
     tgImportVisible.value = true;
+  }
+
+  async function handleImportTenantChange() {
+    tgImportForm.accountId = null;
+    tgImportForm.tgAccountId = null;
+    await loadTgImportAccounts(tgImportForm.tenantId);
   }
 
   function handleImportAccountChange() {
@@ -426,8 +473,13 @@
   }
 
   async function createTgImportTask() {
-    if (!tgImportForm.accountId || !tgImportForm.tgAccountId || !tgImportForm.channelUrl.trim()) {
-      message.warning('请选择归属账号、TG账号并输入频道连接');
+    if (
+      !tgImportForm.tenantId ||
+      !tgImportForm.accountId ||
+      !tgImportForm.tgAccountId ||
+      !tgImportForm.channelUrl.trim()
+    ) {
+      message.warning('请选择账号归属、归属账号、TG账号并输入频道连接');
       return false;
     }
     tgImportLoading.value = true;
@@ -503,6 +555,19 @@
     }
     await ProfileDelete({ ids });
     message.success('已批量删除笔记资料');
+    await loadProfiles();
+  }
+
+  async function purgeDeletedProfiles() {
+    if (!query.tenantId || !query.accountId) {
+      message.warning('请先选择账号归属和账号');
+      return;
+    }
+    const result: any = await ProfilePurgeDeleted({
+      tenantId: query.tenantId,
+      accountId: query.accountId,
+    });
+    message.success(`清理完成，共永久删除 ${result?.deletedCount || 0} 条软删除资料`);
     await loadProfiles();
   }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -290,11 +291,12 @@ func (s *sSysPublish) upsertMaterialImportGroup(ctx context.Context, task *sysin
 		"updated_at":         now,
 		"source_message_ids": materialImportMessageIds(existing["source_message_ids"].String(), msg.ID),
 	}
+	parsedText := firstNonEmpty(rawText, existing["raw_text"].String())
+	title, profileNo, nickname := materialImportTitle(parsedText)
+	data["title"] = title
+	data["profile_no"] = profileNo
+	data["nickname"] = nickname
 	if existing.IsEmpty() {
-		title, profileNo, nickname := materialImportTitle(rawText)
-		data["title"] = title
-		data["profile_no"] = profileNo
-		data["nickname"] = nickname
 		data["created_at"] = now
 		_, err = pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Data(data).Insert()
 		return gerror.Wrap(err, "创建资料导入分组失败")
@@ -393,8 +395,11 @@ func materialImportMessageIds(existing string, id int) string {
 	return strings.Join(parts, ",")
 }
 
+var materialImportUserIdRegexp = regexp.MustCompile(`[A-Za-z][A-Za-z0-9_-]*[0-9][A-Za-z0-9_-]*`)
+
 func materialImportTitle(text string) (title string, profileNo string, nickname string) {
-	fallback := ""
+	explicitTitle := ""
+	userId := ""
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 	for _, line := range lines {
 		item := strings.TrimSpace(line)
@@ -402,7 +407,7 @@ func materialImportTitle(text string) (title string, profileNo string, nickname 
 			continue
 		}
 		if value, ok := materialImportPrefixedValue(item, "标题"); ok {
-			fallback = firstNonEmpty(fallback, materialImportTitleFallback(value))
+			explicitTitle = firstNonEmpty(explicitTitle, value)
 			continue
 		}
 		if value, ok := materialImportPrefixedValue(item, "编号"); ok {
@@ -414,18 +419,15 @@ func materialImportTitle(text string) (title string, profileNo string, nickname 
 			continue
 		}
 		if idx := materialImportInlineFieldIndex(item, "昵称"); idx > 0 {
-			fallback = firstNonEmpty(fallback, strings.TrimSpace(item[:idx]))
+			userId = firstNonEmpty(userId, materialImportUserId(item[:idx]))
 			if value, ok := materialImportPrefixedValue(item[idx:], "昵称"); ok {
 				nickname = firstNonEmpty(nickname, value)
 			}
 			continue
 		}
-		if materialImportKnownFieldLine(item) {
-			continue
-		}
-		fallback = firstNonEmpty(fallback, materialImportTitleFallback(item))
+		userId = firstNonEmpty(userId, materialImportUserId(item))
 	}
-	title = firstNonEmpty(profileNo, fallback, nickname)
+	title = firstNonEmpty(profileNo, explicitTitle, nickname, userId)
 	return strings.TrimSpace(title), strings.TrimSpace(profileNo), strings.TrimSpace(nickname)
 }
 
@@ -450,32 +452,8 @@ func materialImportPrefixedValue(text string, prefix string) (string, bool) {
 	return "", false
 }
 
-func materialImportTitleFallback(text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return ""
-	}
-	fieldPrefixes := materialImportFieldPrefixes()
-	best := text
-	for _, prefix := range fieldPrefixes {
-		if idx := materialImportInlineFieldIndex(text, prefix); idx > 0 && idx < len(best) {
-			best = strings.TrimSpace(text[:idx])
-		}
-	}
-	return strings.TrimSpace(best)
-}
-
-func materialImportKnownFieldLine(text string) bool {
-	for _, prefix := range materialImportFieldPrefixes() {
-		if _, ok := materialImportPrefixedValue(text, prefix); ok {
-			return true
-		}
-	}
-	return false
-}
-
-func materialImportFieldPrefixes() []string {
-	return []string{"标题", "编号", "昵称", "所在省份", "所在城市", "省份", "城市", "城 市", "年龄", "身高", "体重", "星座", "地区", "地址", "微信", "电话", "手机"}
+func materialImportUserId(text string) string {
+	return materialImportUserIdRegexp.FindString(strings.TrimSpace(text))
 }
 
 func materialImportInlineFieldIndex(text string, prefix string) int {

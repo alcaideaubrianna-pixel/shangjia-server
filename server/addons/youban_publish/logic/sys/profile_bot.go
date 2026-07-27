@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"fmt"
 	"regexp"
 	"strings"
 
@@ -350,7 +349,6 @@ func (s *sSysPublish) BotProfileCancelQueue(ctx context.Context, in *sysin.BotPr
 		"status":              "superseded",
 		"dispatch_status":     tgDispatchStatusDone,
 		"next_retry_at":       nil,
-		"next_cycle_at":       nil,
 		"error_message":       "Bot取消资料推送队列",
 		"last_dispatch_error": "Bot取消资料推送队列",
 		"updated_at":          gtime.Now(),
@@ -439,17 +437,21 @@ func (s *sSysPublish) BotChannelFullPush(ctx context.Context, in *sysin.BotChann
 	if err != nil {
 		return nil, err
 	}
-	batchNo := "bot_full_push:" + fmt.Sprintf("%d:%d", channel.Id, gtime.Now().TimestampNano())
-	queued, err := s.fullPushPublishedTaskCount(ctx, in.TenantId)
-	if err != nil {
-		return nil, err
-	}
 	existingJobs, err := s.channelClearQueueJobs(ctx, in.TenantId, channel.Id)
 	if err != nil {
 		return nil, err
 	}
-	go s.runChannelFullPush(context.WithoutCancel(ctx), in.TenantId, channel.Id, batchNo)
-	return &sysin.ChannelFullPushModel{ChannelId: channel.Id, Queued: queued, ExistingQueue: len(existingJobs)}, nil
+	batch, err := s.createFullPushBatch(ctx, in.TenantId, channel.Id, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &sysin.ChannelFullPushModel{
+		ChannelId:     channel.Id,
+		Queued:        batch.TotalCount,
+		ExistingQueue: len(existingJobs),
+		BatchNo:       batch.BatchNo,
+		Status:        batch.Status,
+	}, nil
 }
 
 func (s *sSysPublish) BotChannelClearQueue(ctx context.Context, in *sysin.BotChannelActionInp) (res *sysin.ChannelClearQueueModel, err error) {
@@ -491,7 +493,7 @@ func (s *sSysPublish) BotChannelClearQueue(ctx context.Context, in *sysin.BotCha
 	if in.ChannelId > 0 {
 		mod = mod.Where("channel_id", in.ChannelId)
 	}
-	result, err := mod.Data(g.Map{"status": "superseded", "dispatch_status": tgDispatchStatusDone, "next_retry_at": nil, "next_cycle_at": nil, "error_message": channelQueueClearMessage, "last_dispatch_error": channelQueueClearMessage, "updated_at": gtime.Now()}).Update()
+	result, err := mod.Data(g.Map{"status": "superseded", "dispatch_status": tgDispatchStatusDone, "next_retry_at": nil, "error_message": channelQueueClearMessage, "last_dispatch_error": channelQueueClearMessage, "updated_at": gtime.Now()}).Update()
 	if err != nil {
 		return nil, gerror.Wrap(err, "清空频道发送队列失败")
 	}

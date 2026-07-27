@@ -418,7 +418,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_task` (
   `tg_push_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否推送TG',
   `tg_status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT 'TG状态',
   `tg_operation_no` varchar(128) NOT NULL DEFAULT '' COMMENT '当前TG操作号',
-  `status` varchar(32) NOT NULL DEFAULT 'draft' COMMENT '任务状态',
+  `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '任务状态',
   `error_message` text COMMENT '错误信息',
   `submitted_at` datetime DEFAULT NULL COMMENT '提交时间',
   `published_at` datetime DEFAULT NULL COMMENT '发布时间',
@@ -444,6 +444,25 @@ UPDATE `hg_youban_publish_task` SET `tenant_id` = `merchant_id` WHERE `tenant_id
 ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_tenant_client_request` (`tenant_id`,`client_request_id`);
 ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_tenant_status` (`tenant_id`,`status`,`id`);
 ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_tg_operation` (`tg_operation_no`);
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_state` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0',
+  `channel_id_json` text,
+  `customer_remark` text,
+  `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0',
+  `publish_at` datetime DEFAULT NULL,
+  `created_by` bigint(20) NOT NULL DEFAULT '0',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_profile_state_profile` (`profile_id`),
+  KEY `idx_ybp_profile_state_owner` (`tenant_id`,`account_id`,`profile_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架资料归属和发布配置';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_note_index` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,

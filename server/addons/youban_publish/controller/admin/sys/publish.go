@@ -321,6 +321,15 @@ func (c *cPublishServer) ProfileDelete(ctx context.Context, req *publish.Profile
 	return
 }
 
+func (c *cPublishServer) ProfilePurgeDeleted(ctx context.Context, req *publish.ProfilePurgeDeletedReq) (res *publish.ProfilePurgeDeletedRes, err error) {
+	data, err := service.SysPublish().ServerProfilePurgeDeleted(ctx, &req.ProfilePurgeDeletedInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.ProfilePurgeDeletedRes{ProfilePurgeDeletedModel: data}
+	return
+}
+
 func (c *cPublishServer) ProfileReview(ctx context.Context, req *publish.ProfileReviewReq) (res *publish.ProfileReviewRes, err error) {
 	if err = service.SysPublish().ServerProfileReview(ctx, &req.ProfileReviewInp); err != nil {
 		return nil, err

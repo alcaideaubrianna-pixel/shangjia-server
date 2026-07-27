@@ -436,3 +436,33 @@ BEGIN
       ADD CONSTRAINT "pk_ybp_note_index" PRIMARY KEY ("id");
   END IF;
 END $$;
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_state" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "channel_id_json" text,
+  "customer_remark" text,
+  "anti_scan_enabled" smallint NOT NULL DEFAULT 0,
+  "publish_at" timestamp DEFAULT NULL,
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_profile_state_profile" ON "hg_youban_publish_profile_state" ("profile_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_state_owner" ON "hg_youban_publish_profile_state" ("tenant_id", "account_id", "profile_id") WHERE "deleted_at" IS NULL;
+INSERT INTO "hg_youban_publish_profile_state" (
+  "tenant_id","account_id","profile_id","channel_id_json","customer_remark",
+  "anti_scan_enabled","publish_at","created_by","updated_by","created_at","updated_at"
+)
+SELECT DISTINCT ON ("profile_id")
+  "tenant_id","account_id","profile_id","channel_id_json","customer_remark",
+  "anti_scan_enabled","published_at","created_by","updated_by",COALESCE("created_at",NOW()),COALESCE("updated_at",NOW())
+FROM "hg_youban_publish_task"
+WHERE "profile_id" > 0 AND "deleted_at" IS NULL
+ORDER BY "profile_id", "id" DESC
+ON CONFLICT ("profile_id") DO NOTHING;
+UPDATE "hg_youban_publish_task" SET "status"='canceled', "tg_status"='skipped' WHERE "status"='draft';

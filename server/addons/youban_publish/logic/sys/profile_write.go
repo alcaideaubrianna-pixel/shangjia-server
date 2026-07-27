@@ -41,12 +41,6 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	if err != nil {
 		return nil, err
 	}
-	tgPushEnabled := 0
-	tgStatus := "skipped"
-	if len(in.ChannelIds) > 0 {
-		tgPushEnabled = 1
-		tgStatus = "pending"
-	}
 	var publishAt *gtime.Time
 	if in.PublishAt != "" {
 		publishAt = gtime.NewFromStr(in.PublishAt)
@@ -54,80 +48,39 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			return nil, gerror.New("定时上架时间不合法")
 		}
 	}
-	now := gtime.Now()
 	var profileId int64
-	var taskId int64
 	var removedMediaIds []int64
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if in.Id > 0 {
-			task, taskErr := s.profileTask(ctx, tx, in.Id, tenantId, 0)
-			if taskErr != nil {
-				return taskErr
-			}
 			profileId = in.Id
-			taskId = task["id"].Int64()
-			if taskId <= 0 {
-				return gerror.New("资料不属于上架端")
+			stateMod := tx.Model(publishProfileStateTable).Ctx(ctx).
+				Where("profile_id", profileId).
+				Where("tenant_id", tenantId).
+				WhereNull("deleted_at")
+			if accountId > 0 {
+				stateMod = stateMod.Where("account_id", accountId)
 			}
-			if task["status"].String() != sysin.PublishTaskStatusDraft {
-				task, taskErr = s.cloneEditableProfileTask(ctx, tx, task, contexts.GetUserId(ctx))
-				if taskErr != nil {
-					return taskErr
-				}
-				taskId = task["id"].Int64()
+			if count, checkErr := stateMod.Count(); checkErr != nil {
+				return gerror.Wrap(checkErr, "检查资料归属失败")
+			} else if count == 0 {
+				return gerror.New("资料不存在或无权操作")
 			}
-		}
-		if taskId == 0 {
-			newTaskId, taskErr := tx.Model(publishTaskTable).Ctx(ctx).Data(g.Map{
-				"tenant_id":         tenantId,
-				"merchant_id":       tenantId,
-				"account_id":        accountId,
-				"title":             in.Title,
-				"province":          in.Province,
-				"city":              in.City,
-				"plain_text":        in.PlainText,
-				"media_count":       0,
-				"channel_id_json":   channelJSON,
-				"customer_remark":   in.CustomerRemark,
-				"anti_scan_enabled": in.AntiScanEnabled,
-				"tg_push_enabled":   tgPushEnabled,
-				"tg_status":         tgStatus,
-				"status":            sysin.PublishTaskStatusDraft,
-				"published_at":      publishAt,
-				"created_by":        contexts.GetUserId(ctx),
-				"updated_by":        contexts.GetUserId(ctx),
-				"created_at":        now,
-				"updated_at":        now,
-			}).InsertAndGetId()
-			if taskErr != nil {
-				return gerror.Wrap(taskErr, "创建资料任务失败")
-			}
-			taskId = newTaskId
 		}
 		if profileId == 0 {
-			profileId, err = s.createProfileFromInput(ctx, tx, in, tenantId, accountId, taskId)
+			profileId, err = s.createProfileFromInput(ctx, tx, in, tenantId, accountId)
 			if err != nil {
 				return err
 			}
-			if _, err = tx.Model(publishTaskTable).Ctx(ctx).Where("id", taskId).Data(g.Map{
-				"profile_id":        profileId,
-				"channel_id_json":   channelJSON,
-				"customer_remark":   in.CustomerRemark,
-				"anti_scan_enabled": in.AntiScanEnabled,
-				"tg_push_enabled":   tgPushEnabled,
-				"tg_status":         tgStatus,
-				"published_at":      publishAt,
-				"updated_at":        now,
-			}).Update(); err != nil {
-				return gerror.Wrap(err, "回写资料任务失败")
-			}
 		} else {
-			if err = s.updateProfileFromInput(ctx, tx, in, profileId, taskId, tenantId, accountId, channelJSON, tgPushEnabled, tgStatus, publishAt); err != nil {
+			if err = s.updateProfileFromInput(ctx, tx, in, profileId, accountId, publishAt); err != nil {
 				return err
 			}
 		}
+		if err = s.upsertProfileStateTx(ctx, tx, profileId, tenantId, accountId, channelJSON, in.CustomerRemark, in.AntiScanEnabled, publishAt); err != nil {
+			return err
+		}
 		if in.Media != nil {
-			removedMediaIds, err = s.syncTaskMediaFromProfileInput(ctx, tx, taskId, profileId, tenantId, accountId, in.Media)
+			removedMediaIds, err = s.syncTaskMediaFromProfileInput(ctx, tx, 0, profileId, tenantId, accountId, in.Media)
 			return err
 		}
 		return nil
@@ -148,7 +101,7 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	if err != nil {
 		return nil, err
 	}
-	return &sysin.ProfileSaveModel{Id: profileId, Uuid: profile.Uuid, TaskId: taskId, ProfileNo: profile.ProfileNo}, nil
+	return &sysin.ProfileSaveModel{Id: profileId, Uuid: profile.Uuid, TaskId: 0, ProfileNo: profile.ProfileNo}, nil
 }
 
 func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDeleteInp, tenantId int64, accountId int64) (err error) {
@@ -173,7 +126,7 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 		return err
 	}
 	columns := dao.ContentProfile.Columns()
-	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).Data(g.Map{columns.DeletedAt: gtime.Now()}).Unscoped().Update(); err != nil {
+	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).Unscoped().Delete(); err != nil {
 		return gerror.Wrap(err, "删除资料失败")
 	}
 	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).WhereIn("profile_id", ids).Data(g.Map{"deleted_by": contexts.GetUserId(ctx), "deleted_at": gtime.Now()}).Update()
@@ -262,34 +215,17 @@ func (s *sSysPublish) submitProfilesByIds(ctx context.Context, ids []int64, tena
 	if len(ids) == 0 {
 		return nil
 	}
-	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("id,profile_id").
-		WhereIn("profile_id", ids).
-		WhereNull("deleted_at")
-	if tenantId > 0 {
-		mod = mod.Where("tenant_id", tenantId)
-	}
-	if accountId > 0 {
-		mod = mod.Where("account_id", accountId)
-	}
-	var rows []struct {
-		Id        int64 `orm:"id"`
-		ProfileId int64 `orm:"profile_id"`
-	}
-	if err := mod.Scan(&rows); err != nil {
-		return gerror.Wrap(err, "读取资料上架任务失败")
-	}
-	if len(rows) == 0 {
-		return gerror.New("资料缺少上架任务")
-	}
-	for _, row := range rows {
-		if row.Id <= 0 {
-			continue
-		}
-		if err := s.submitTaskByTenant(ctx, row.Id, tenantId, contexts.GetUserId(ctx)); err != nil {
+	for _, profileId := range uniqueIds(ids) {
+		taskId, alreadyPublished, err := s.createProfilePublishEvent(ctx, profileId, tenantId, accountId)
+		if err != nil {
 			return err
 		}
-		if err := s.syncProfileNoteIndex(ctx, row.ProfileId); err != nil {
+		if !alreadyPublished {
+			if err = s.submitTaskByTenant(ctx, taskId, tenantId, contexts.GetUserId(ctx)); err != nil {
+				return err
+			}
+		}
+		if err = s.syncProfileNoteIndex(ctx, profileId); err != nil {
 			return err
 		}
 	}
@@ -297,13 +233,13 @@ func (s *sSysPublish) submitProfilesByIds(ctx context.Context, ids []int64, tena
 	return nil
 }
 
-func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, tenantId int64, accountId int64, taskId int64) (int64, error) {
+func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, tenantId int64, accountId int64) (int64, error) {
 	columns := dao.ContentProfile.Columns()
 	now := gtime.Now()
 	data := g.Map{
 		columns.SourceType:      publishProfileSourceType,
 		columns.SourceNoteUuid:  newPublishProfileUUID(),
-		columns.SourceKey:       fmt.Sprintf("youban_publish:profile:%d", taskId),
+		columns.SourceKey:       fmt.Sprintf("youban_publish:profile:%s", newPublishProfileUUID()),
 		columns.Title:           in.Title,
 		columns.Summary:         profileSummary(in.PlainText),
 		columns.PlainText:       in.PlainText,
@@ -346,7 +282,7 @@ func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	return 0, gerror.Wrap(lastErr, "创建资料失败，资料编号重复")
 }
 
-func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, profileId int64, taskId int64, tenantId int64, accountId int64, channelJSON string, tgPushEnabled int, tgStatus string, publishAt *gtime.Time) error {
+func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, profileId int64, accountId int64, publishAt *gtime.Time) error {
 	columns := dao.ContentProfile.Columns()
 	now := gtime.Now()
 	current, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).
@@ -372,7 +308,7 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		nextStatus = current[columns.Status].Int()
 		nextVisibility = current[columns.Visibility].String()
 		profilePublishedAt = current[columns.PublishedAt].GTime()
-	} else if current[columns.Status].Int() == 1 && tgPushEnabled == 1 {
+	} else if current[columns.Status].Int() == 1 {
 		nextStatus = 1
 		nextVisibility = consts.ContentVisibilityPublic
 	}
@@ -398,23 +334,6 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	data[columns.PublishedAt] = profilePublishedAt
 	if _, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Where(columns.Id, profileId).Data(data).Update(); err != nil {
 		return gerror.Wrap(err, "更新资料失败")
-	}
-	if _, err := tx.Model(publishTaskTable).Ctx(ctx).Where("id", taskId).Data(g.Map{
-		"title":             in.Title,
-		"province":          in.Province,
-		"city":              in.City,
-		"plain_text":        in.PlainText,
-		"channel_id_json":   channelJSON,
-		"customer_remark":   in.CustomerRemark,
-		"anti_scan_enabled": in.AntiScanEnabled,
-		"tg_push_enabled":   tgPushEnabled,
-		"tg_status":         tgStatus,
-		"status":            sysin.PublishTaskStatusDraft,
-		"published_at":      publishAt,
-		"updated_by":        contexts.GetUserId(ctx),
-		"updated_at":        now,
-	}).Update(); err != nil {
-		return gerror.Wrap(err, "更新资料任务失败")
 	}
 	return nil
 }

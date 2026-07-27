@@ -46,6 +46,7 @@ var (
 		>> 补全上架媒体缺失感知哈希  [go run main.go up -m=fix -a1=mediaPHashMissing]
 		>> 回填上架资料索引  [go run main.go up -m=fix -a1=noteIndex]
 		>> 创建上架系统大表索引  [go run main.go up -m=fix -a1=publishHeavyIndexes]
+		>> 回填上架资料当前媒体  [go run main.go up -m=fix -a1=publishProfileMedia]
 		---------------------------------------------------------------------------------
 		更多
        	github地址：https://github.com/bufanyun/hotgo

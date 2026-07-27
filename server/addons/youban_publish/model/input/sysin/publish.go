@@ -19,7 +19,6 @@ const (
 	ProfilePermissionAdmin   = "admin"
 	ProfilePermissionVisitor = "visitor"
 
-	PublishTaskStatusDraft      = "draft"
 	PublishTaskStatusPending    = "pending"
 	PublishTaskStatusPublishing = "publishing"
 	PublishTaskStatusPublished  = "published"
@@ -1437,9 +1436,11 @@ type ChannelFullPushInp struct {
 }
 
 type ChannelFullPushModel struct {
-	ChannelId     int64 `json:"channelId" dc:"频道ID"`
-	Queued        int   `json:"queued" dc:"本次预计入队数量"`
-	ExistingQueue int   `json:"existingQueue" dc:"触发前频道未完成队列数量"`
+	ChannelId     int64  `json:"channelId" dc:"频道ID"`
+	Queued        int    `json:"queued" dc:"本次预计入队数量"`
+	ExistingQueue int    `json:"existingQueue" dc:"触发前频道未完成队列数量"`
+	BatchNo       string `json:"batchNo" dc:"全量推送批次号"`
+	Status        string `json:"status" dc:"批次状态"`
 }
 
 type ChannelClearQueueInp struct {

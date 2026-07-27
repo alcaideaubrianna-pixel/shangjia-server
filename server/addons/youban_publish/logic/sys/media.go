@@ -130,7 +130,7 @@ func retainedMediaIDSet(items []*sysin.MediaSortItem) map[int64]struct{} {
 }
 
 func (s *sSysPublish) syncTaskMediaFromProfileInput(ctx context.Context, tx gdb.TX, taskId int64, profileId int64, tenantId int64, accountId int64, items []*sysin.ProfileMediaSaveItem) ([]int64, error) {
-	if taskId <= 0 || profileId <= 0 {
+	if taskId < 0 || profileId <= 0 {
 		return nil, gerror.New("资料媒体归属信息不完整")
 	}
 	release, err := s.lockTaskMediaSyncTx(ctx, tx, taskId, profileId)
@@ -138,19 +138,38 @@ func (s *sSysPublish) syncTaskMediaFromProfileInput(ctx context.Context, tx gdb.
 		return nil, err
 	}
 	defer release()
-	taskMod := tx.Model(publishTaskTable).Ctx(ctx).
-		Where("id", taskId).
-		Where("profile_id", profileId).
-		WhereNull("deleted_at")
-	if tenantId > 0 {
-		taskMod = taskMod.Where("tenant_id", tenantId)
-	}
-	if accountId > 0 {
-		taskMod = taskMod.Where("account_id", accountId)
-	}
-	task, err := taskMod.One()
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取资料编辑快照失败")
+	var task gdb.Record
+	if taskId == 0 {
+		stateMod := tx.Model(publishProfileStateTable).Ctx(ctx).
+			Where("profile_id", profileId).
+			WhereNull("deleted_at")
+		if tenantId > 0 {
+			stateMod = stateMod.Where("tenant_id", tenantId)
+		}
+		if accountId > 0 {
+			stateMod = stateMod.Where("account_id", accountId)
+		}
+		state, stateErr := stateMod.One()
+		if stateErr != nil {
+			return nil, gerror.Wrap(stateErr, "读取资料归属配置失败")
+		}
+		task = profileMediaOwner(state)
+	} else {
+		taskMod := tx.Model(publishTaskTable).Ctx(ctx).
+			Where("id", taskId).
+			Where("profile_id", profileId).
+			WhereNull("deleted_at")
+		if tenantId > 0 {
+			taskMod = taskMod.Where("tenant_id", tenantId)
+		}
+		if accountId > 0 {
+			taskMod = taskMod.Where("account_id", accountId)
+		}
+		var taskErr error
+		task, taskErr = taskMod.One()
+		if taskErr != nil {
+			return nil, gerror.Wrap(taskErr, "读取发布事件媒体失败")
+		}
 	}
 	if task.IsEmpty() {
 		return nil, gerror.New("资料不存在或无权操作")
@@ -618,8 +637,8 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 	if err != nil {
 		return nil, gerror.Wrap(err, "检查任务媒体失败")
 	}
-	// 编辑已发布资料时，前端仍持有历史媒体 ID。草稿复制后按原始
-	// 附件和位置定位草稿副本，避免新增一条重复媒体。
+	// 前端可能仍持有历史发布媒体 ID，按原始附件和位置定位当前
+	// 资料媒体，避免新增重复记录。
 	if existing.IsEmpty() && in.MediaId > 0 {
 		source, sourceErr := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 			Where("id", in.MediaId).WhereNull("deleted_at").One()
@@ -634,7 +653,7 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 				Where("sort_index", source["sort_index"].Int()).
 				WhereNull("deleted_at").One()
 			if err != nil {
-				return nil, gerror.Wrap(err, "定位草稿媒体失败")
+				return nil, gerror.Wrap(err, "定位资料当前媒体失败")
 			}
 		}
 	}
@@ -674,8 +693,10 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 	if err = s.syncMediaPHashBucketByMediaId(ctx, mediaId); err != nil {
 		return nil, err
 	}
-	if err = s.refreshTaskMediaCount(ctx, task["id"].Int64()); err != nil {
-		return nil, err
+	if task["id"].Int64() > 0 {
+		if err = s.refreshTaskMediaCount(ctx, task["id"].Int64()); err != nil {
+			return nil, err
+		}
 	}
 	if task["profile_id"].Int64() > 0 {
 		if err = s.withTaskMediaSyncLock(ctx, task["id"].Int64(), task["profile_id"].Int64(), func(ctx context.Context, tx gdb.TX) error {
@@ -986,20 +1007,20 @@ func (s *sSysPublish) editableMediaRow(ctx context.Context, row gdb.Record, tena
 	if row.IsEmpty() || row["profile_id"].Int64() <= 0 {
 		return row, nil
 	}
-	draft, err := s.editableProfileTask(ctx, row["profile_id"].Int64(), tenantId, accountId)
-	if err != nil {
-		return nil, err
-	}
-	if draft.IsEmpty() || draft["id"].Int64() == row["task_id"].Int64() {
+	if row["task_id"].Int64() == 0 {
 		return row, nil
 	}
+	if _, err := s.profileState(ctx, row["profile_id"].Int64(), tenantId, accountId); err != nil {
+		return nil, err
+	}
 	target, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("task_id", draft["id"].Int64()).
+		Where("task_id", 0).
+		Where("profile_id", row["profile_id"].Int64()).
 		Where("attachment_id", row["attachment_id"].Int64()).
 		Where("purpose", row["purpose"].String()).
 		WhereNull("deleted_at").OrderAsc("id").One()
 	if err != nil {
-		return nil, gerror.Wrap(err, "定位草稿媒体失败")
+		return nil, gerror.Wrap(err, "定位资料当前媒体失败")
 	}
 	if target.IsEmpty() {
 		return row, nil

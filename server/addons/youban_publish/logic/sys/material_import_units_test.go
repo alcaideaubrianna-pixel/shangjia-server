@@ -69,7 +69,7 @@ func TestMaterialImportTitleFallbackLeadingText(t *testing.T) {
 		{
 			name:      "leading title line",
 			text:      "朴朴芙蓉B3054\n省份: 郑州\n城市：开封\n年龄：18",
-			title:     "朴朴芙蓉B3054",
+			title:     "B3054",
 			profileNo: "",
 			nickname:  "",
 		},
@@ -96,10 +96,10 @@ func TestMaterialImportTitleFallbackLeadingText(t *testing.T) {
 		},
 		{
 			name:      "nickname with located province and city",
-			text:      "昵称:\u00a0B133\n所在省份:江苏\n所在城市:南京\n年龄:21",
-			title:     "B133",
+			text:      "昵称:\u00a0B182\n所在省份:江苏\n所在城市:南京\n年龄:21\n罩杯:C",
+			title:     "B182",
 			profileNo: "",
-			nickname:  "B133",
+			nickname:  "B182",
 		},
 		{
 			name:      "nickname separated by whitespace",
@@ -118,21 +118,21 @@ func TestMaterialImportTitleFallbackLeadingText(t *testing.T) {
 		{
 			name:      "leading number before inline nickname",
 			text:      "JJ14 昵称: 小安\n省份：浙江",
-			title:     "JJ14",
+			title:     "小安",
 			profileNo: "",
 			nickname:  "小安",
 		},
 		{
 			name:      "mixed same line",
 			text:      "朴朴芙蓉B3054 省份: 郑州 城市：开封 年龄：18",
-			title:     "朴朴芙蓉B3054",
+			title:     "B3054",
 			profileNo: "",
 			nickname:  "",
 		},
 		{
 			name:      "title contains field word",
 			text:      "开封城市女孩B3054\n年龄：18",
-			title:     "开封城市女孩B3054",
+			title:     "B3054",
 			profileNo: "",
 			nickname:  "",
 		},

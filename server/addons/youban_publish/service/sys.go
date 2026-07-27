@@ -29,6 +29,7 @@ type ISysPublish interface {
 	ServerProfileView(ctx context.Context, in *sysin.ProfileViewInp) (res *sysin.ProfileViewModel, err error)
 	ServerProfileEdit(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error)
 	ServerProfileDelete(ctx context.Context, in *sysin.ProfileDeleteInp) (err error)
+	ServerProfilePurgeDeleted(ctx context.Context, in *sysin.ProfilePurgeDeletedInp) (res *sysin.ProfilePurgeDeletedModel, err error)
 	ServerProfileReview(ctx context.Context, in *sysin.ProfileReviewInp) (err error)
 	ServerImportTaskList(ctx context.Context, in *sysin.ImportTaskListInp) (list []*sysin.ImportTaskModel, totalCount int, err error)
 	ServerImportTaskCreate(ctx context.Context, in *sysin.ImportTaskCreateInp) (id int64, err error)

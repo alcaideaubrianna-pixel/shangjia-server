@@ -41,7 +41,7 @@ func (s *sSysPublish) submitDuePublishTasks(ctx context.Context) error {
 	var list []*scheduledPublishTask
 	err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
 		Fields("id,tenant_id,account_id").
-		Where("status", sysin.PublishTaskStatusDraft).
+		Where("status", sysin.PublishTaskStatusPending).
 		Where("tg_push_enabled", 1).
 		Where("published_at IS NOT NULL").
 		Where("published_at <= ?", gtime.Now()).

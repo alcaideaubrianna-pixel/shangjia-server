@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_task" (
   "tg_push_enabled" smallint NOT NULL DEFAULT 1,
   "tg_status" varchar(32) NOT NULL DEFAULT 'pending',
   "tg_operation_no" varchar(128) NOT NULL DEFAULT '',
-  "status" varchar(32) NOT NULL DEFAULT 'draft',
+  "status" varchar(32) NOT NULL DEFAULT 'pending',
   "error_message" text,
   "submitted_at" timestamp DEFAULT NULL,
   "published_at" timestamp DEFAULT NULL,
@@ -123,6 +123,24 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_task_note_scope" ON "hg_youban_publish_task"
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_profile_tenant" ON "hg_youban_publish_task" ("profile_id", "tenant_id") WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_task_search_scope" ON "hg_youban_publish_task" ("tenant_id", "account_id", "profile_id") WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_content_profile_note_order" ON "hg_content_profile" ("updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_state" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "channel_id_json" text,
+  "customer_remark" text,
+  "anti_scan_enabled" smallint NOT NULL DEFAULT 0,
+  "publish_at" timestamp DEFAULT NULL,
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_profile_state_profile" ON "hg_youban_publish_profile_state" ("profile_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_state_owner" ON "hg_youban_publish_profile_state" ("tenant_id", "account_id", "profile_id") WHERE "deleted_at" IS NULL;
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_note_index" (
   "id" BIGSERIAL PRIMARY KEY,
