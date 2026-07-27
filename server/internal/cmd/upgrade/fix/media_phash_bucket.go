@@ -27,7 +27,6 @@ type mediaPHashBackfillRow struct {
 	MediaType      string `orm:"media_type"`
 	PerceptualHash string `orm:"perceptual_hash"`
 	ProfileId      int64  `orm:"profile_id"`
-	TaskId         int64  `orm:"task_id"`
 	TenantId       int64  `orm:"tenant_id"`
 }
 
@@ -64,7 +63,7 @@ func BackfillYoubanPublishMediaPHashBucket(ctx context.Context) error {
 func mediaPHashBackfillRows(ctx context.Context, lastId int64, limit int) ([]mediaPHashBackfillRow, error) {
 	rows := make([]mediaPHashBackfillRow, 0)
 	err := g.DB().Model(youbanPublishMediaTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,account_id,profile_id,task_id,media_type,perceptual_hash").
+		Fields("id,tenant_id,account_id,profile_id,media_type,perceptual_hash").
 		WhereGT("id", lastId).
 		WhereNot("perceptual_hash", "").
 		WhereNull("deleted_at").
@@ -94,7 +93,6 @@ func insertMediaPHashBackfillBuckets(ctx context.Context, rows []mediaPHashBackf
 				"account_id":   row.AccountId,
 				"profile_id":   row.ProfileId,
 				"media_id":     row.Id,
-				"task_id":      row.TaskId,
 				"media_type":   strings.TrimSpace(row.MediaType),
 				"hash_value":   hash,
 				"bucket_pos":   pos,
@@ -111,7 +109,7 @@ func insertMediaPHashBackfillBuckets(ctx context.Context, rows []mediaPHashBackf
 			block := int((value >> uint((3-pos)*16)) & 0xffff)
 			lshData = append(lshData, g.Map{
 				"tenant_id": row.TenantId, "account_id": row.AccountId, "profile_id": row.ProfileId,
-				"media_id": row.Id, "task_id": row.TaskId, "media_type": strings.TrimSpace(row.MediaType),
+				"media_id": row.Id, "media_type": strings.TrimSpace(row.MediaType),
 				"hash_value": hash, "bucket_pos": pos + 1, "bucket_value": block,
 				"created_at": now, "updated_at": now,
 			})
@@ -150,7 +148,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_bucket" (
   "account_id" bigint NOT NULL DEFAULT 0,
   "profile_id" bigint NOT NULL DEFAULT 0,
   "media_id" bigint NOT NULL DEFAULT 0,
-  "task_id" bigint NOT NULL DEFAULT 0,
   "media_type" varchar(16) NOT NULL DEFAULT '',
   "hash_value" varchar(64) NOT NULL DEFAULT '',
   "bucket_pos" smallint NOT NULL DEFAULT 0,
@@ -159,14 +156,13 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_bucket" (
   "updated_at" timestamp DEFAULT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_media_phash_bucket_media_pos" ON "hg_youban_publish_media_phash_bucket" ("media_id", "bucket_pos");
-CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_bucket_lookup" ON "hg_youban_publish_media_phash_bucket" ("tenant_id", "media_type", "bucket_pos", "bucket_value", "account_id", "profile_id", "task_id", "media_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_bucket_lookup" ON "hg_youban_publish_media_phash_bucket" ("tenant_id", "media_type", "bucket_pos", "bucket_value", "account_id", "profile_id", "media_id");
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_lsh" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
   "account_id" bigint NOT NULL DEFAULT 0,
   "profile_id" bigint NOT NULL DEFAULT 0,
   "media_id" bigint NOT NULL DEFAULT 0,
-  "task_id" bigint NOT NULL DEFAULT 0,
   "media_type" varchar(16) NOT NULL DEFAULT '',
   "hash_value" varchar(64) NOT NULL DEFAULT '',
   "bucket_pos" smallint NOT NULL DEFAULT 0,
@@ -186,14 +182,13 @@ CREATE TABLE IF NOT EXISTS `+"`hg_youban_publish_media_phash_bucket`"+` (
   `+"`account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',"+`
   `+"`profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',"+`
   `+"`media_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '媒体ID',"+`
-  `+"`task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '任务ID',"+`
   `+"`media_type` varchar(16) NOT NULL DEFAULT '' COMMENT '媒体类型',"+`
   `+"`hash_value` varchar(64) NOT NULL DEFAULT '' COMMENT '感知哈希',"+`
   `+"`bucket_pos` smallint(6) NOT NULL DEFAULT '0' COMMENT '分桶位置',"+`
   `+"`bucket_value` varchar(1) NOT NULL DEFAULT '' COMMENT '分桶值',"+`
   `+"`created_at` datetime DEFAULT NULL COMMENT '创建时间',"+`
   `+"`updated_at` datetime DEFAULT NULL COMMENT '更新时间',"+`
-  PRIMARY KEY (`+"`id`"+`), UNIQUE KEY `+"`uk_ybp_media_phash_bucket_media_pos`"+` (`+"`media_id`,`bucket_pos`"+`), KEY `+"`idx_ybp_media_phash_bucket_lookup`"+` (`+"`tenant_id`,`media_type`,`bucket_pos`,`bucket_value`,`account_id`,`profile_id`,`task_id`,`media_id`"+`)
+  PRIMARY KEY (`+"`id`"+`), UNIQUE KEY `+"`uk_ybp_media_phash_bucket_media_pos`"+` (`+"`media_id`,`bucket_pos`"+`), KEY `+"`idx_ybp_media_phash_bucket_lookup`"+` (`+"`tenant_id`,`media_type`,`bucket_pos`,`bucket_value`,`account_id`,`profile_id`,`media_id`"+`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体感知哈希分桶';
 CREATE TABLE IF NOT EXISTS `+"`hg_youban_publish_media_phash_lsh`"+` (
   `+"`id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,"+`
@@ -201,7 +196,6 @@ CREATE TABLE IF NOT EXISTS `+"`hg_youban_publish_media_phash_lsh`"+` (
   `+"`account_id` bigint(20) NOT NULL DEFAULT '0',"+`
   `+"`profile_id` bigint(20) NOT NULL DEFAULT '0',"+`
   `+"`media_id` bigint(20) NOT NULL DEFAULT '0',"+`
-  `+"`task_id` bigint(20) NOT NULL DEFAULT '0',"+`
   `+"`media_type` varchar(16) NOT NULL DEFAULT '',"+`
   `+"`hash_value` varchar(64) NOT NULL DEFAULT '',"+`
   `+"`bucket_pos` smallint(6) NOT NULL DEFAULT '0',"+`
