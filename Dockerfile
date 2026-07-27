@@ -41,7 +41,7 @@ ENV VITE_PUBLIC_PATH=${VITE_PUBLIC_PATH} \
 RUN pnpm run build
 
 
-FROM golang:1.24.6-bookworm AS server-builder
+FROM golang:1.25.0-bookworm AS server-builder
 
 WORKDIR /src/server
 
