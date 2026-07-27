@@ -458,6 +458,8 @@ type MediaUploadInp struct {
 	SortIndex      int    `json:"sortIndex" dc:"排序"`
 	EditConfigJson string `json:"editConfigJson" dc:"图片编辑配置"`
 	EditStatus     string `json:"editStatus" dc:"编辑状态：raw/edited"`
+	UploadTraceId  string `json:"uploadTraceId" dc:"前端上传链路ID"`
+	UploadUid      string `json:"uploadUid" dc:"前端上传文件ID"`
 }
 
 func (in *MediaUploadInp) Filter(ctx context.Context) error {

@@ -9,12 +9,15 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
+	"github.com/gogf/gf/v2/net/gtrace"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/storager"
 	basesysin "hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
 )
+
+const maxPublishVideoSize int64 = 500 * 1024 * 1024
 
 func (s *sSysPublish) AdminMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile, originalFile *ghttp.UploadFile) (res *sysin.MediaModel, err error) {
 	account, err := s.currentAdminAccount(ctx)
@@ -93,6 +96,9 @@ func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record
 	if file == nil {
 		return nil, gerror.New("没有找到上传的文件")
 	}
+	if err = validatePublishMediaSize(in.MediaType, file); err != nil {
+		return nil, err
+	}
 	uploadType := storager.KindImg
 	if in.MediaType == "video" {
 		uploadType = storager.KindVideo
@@ -124,6 +130,16 @@ func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record
 	return res, err
 }
 
+func validatePublishMediaSize(mediaType string, file *ghttp.UploadFile) error {
+	if file == nil || mediaType != "video" {
+		return nil
+	}
+	if file.Size > maxPublishVideoSize {
+		return gerror.New("视频文件不能超过500MB")
+	}
+	return nil
+}
+
 func logMediaUploadStage(ctx context.Context, stage string, startedAt time.Time, in *sysin.MediaUploadInp, file *ghttp.UploadFile, err error) {
 	duration := time.Since(startedAt)
 	mediaType := ""
@@ -141,9 +157,16 @@ func logMediaUploadStage(ctx context.Context, stage string, startedAt time.Time,
 		fileName = file.Filename
 		fileSize = file.Size
 	}
+	uploadTraceId := ""
+	uploadUid := ""
+	if in != nil {
+		uploadTraceId = strings.TrimSpace(in.UploadTraceId)
+		uploadUid = strings.TrimSpace(in.UploadUid)
+	}
+	traceId := gtrace.GetTraceID(ctx)
 	if err != nil {
-		g.Log().Warningf(ctx, "上架媒体上传阶段失败 stage:%s duration_ms:%d task_id:%d media_type:%s file_size:%d file_name:%s err:%+v", stage, duration.Milliseconds(), taskId, mediaType, fileSize, fileName, err)
+		g.Log().Warningf(ctx, "上架媒体上传阶段失败 stage:%s duration_ms:%d task_id:%d uid:%s upload_trace_id:%s trace_id:%s media_type:%s file_size:%d file_name:%s err:%+v", stage, duration.Milliseconds(), taskId, uploadUid, uploadTraceId, traceId, mediaType, fileSize, fileName, err)
 		return
 	}
-	g.Log().Infof(ctx, "上架媒体上传阶段 stage:%s duration_ms:%d task_id:%d media_type:%s file_size:%d file_name:%s", stage, duration.Milliseconds(), taskId, mediaType, fileSize, fileName)
+	g.Log().Infof(ctx, "上架媒体上传阶段 stage:%s duration_ms:%d task_id:%d uid:%s upload_trace_id:%s trace_id:%s media_type:%s file_size:%d file_name:%s", stage, duration.Milliseconds(), taskId, uploadUid, uploadTraceId, traceId, mediaType, fileSize, fileName)
 }
