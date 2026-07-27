@@ -27,7 +27,7 @@ func (s *sSysPublish) syncMediaPHashBucketByMediaId(ctx context.Context, mediaId
 		return nil
 	}
 	row, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,account_id,profile_id,task_id,media_type,perceptual_hash,deleted_at").
+		Fields("id,tenant_id,account_id,profile_id,media_type,perceptual_hash,deleted_at").
 		Where("id", mediaId).
 		One()
 	if err != nil {
@@ -83,7 +83,6 @@ func (s *sSysPublish) replaceMediaPHashBucketByMediaRow(ctx context.Context, med
 				"account_id":   media["account_id"].Int64(),
 				"profile_id":   media["profile_id"].Int64(),
 				"media_id":     mediaId,
-				"task_id":      media["task_id"].Int64(),
 				"media_type":   strings.TrimSpace(media["media_type"].String()),
 				"hash_value":   hash,
 				"bucket_pos":   bucket.Pos,
@@ -193,31 +192,13 @@ func (s *sSysPublish) deleteMediaPHashBucketByProfileId(ctx context.Context, pro
 	return bumpMediaPHashBucketVersions(ctx, owners)
 }
 
-func (s *sSysPublish) deleteMediaPHashBucketByTaskId(ctx context.Context, taskId int64) error {
-	if taskId <= 0 {
-		return nil
-	}
-	owners, err := mediaPHashBucketOwners(ctx, "task_id", taskId)
-	if err != nil {
-		return err
-	}
-	_, err = g.DB().Model(publishMediaPHashBucketTable).Safe().Ctx(ctx).Where("task_id", taskId).Delete()
-	if err != nil {
-		return gerror.Wrap(err, "删除任务哈希索引失败")
-	}
-	if _, err = g.DB().Model(publishMediaPHashLshTable).Safe().Ctx(ctx).Where("task_id", taskId).Delete(); err != nil {
-		return gerror.Wrap(err, "删除任务LSH索引失败")
-	}
-	return bumpMediaPHashBucketVersions(ctx, owners)
-}
-
 type mediaPHashBucketOwner struct {
 	TenantId  int64 `orm:"tenant_id"`
 	AccountId int64 `orm:"account_id"`
 }
 
 func mediaPHashBucketOwners(ctx context.Context, field string, value int64) ([]mediaPHashBucketOwner, error) {
-	if field != "media_id" && field != "profile_id" && field != "task_id" {
+	if field != "media_id" && field != "profile_id" {
 		return nil, gerror.New("媒体哈希索引字段不合法")
 	}
 	owners := make([]mediaPHashBucketOwner, 0)

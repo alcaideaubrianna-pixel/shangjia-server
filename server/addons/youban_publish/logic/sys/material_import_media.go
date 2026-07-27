@@ -209,7 +209,7 @@ func (s *sSysPublish) materialImportProfileHasMedia(ctx context.Context, profile
 		return false
 	}
 	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("profile_id", profileId).WhereNull("task_id").WhereNull("deleted_at")
+		Where("profile_id", profileId).WhereNull("deleted_at")
 	count, err := mod.Count()
 	return err == nil && count > 0
 }

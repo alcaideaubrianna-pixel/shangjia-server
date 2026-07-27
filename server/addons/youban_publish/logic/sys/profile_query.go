@@ -242,7 +242,6 @@ FROM (
            ROW_NUMBER() OVER (PARTITION BY profile_id ORDER BY sort_index ASC, id ASC) AS row_number
     FROM %s
     WHERE profile_id IN (%s)
-      AND task_id IS NULL
       AND deleted_at IS NULL
       AND (media_type IS NULL OR media_type = '' OR media_type <> ?)
 ) AS profile_cover

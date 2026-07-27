@@ -199,7 +199,7 @@ func mediaPHashLshRowsForMedia(media gdb.Record, hash string, now *gtime.Time) [
 		rows = append(rows, g.Map{
 			"tenant_id": media["tenant_id"].Int64(), "account_id": media["account_id"].Int64(),
 			"profile_id": media["profile_id"].Int64(), "media_id": media["id"].Int64(),
-			"task_id": media["task_id"].Int64(), "media_type": strings.TrimSpace(media["media_type"].String()),
+			"media_type": strings.TrimSpace(media["media_type"].String()),
 			"hash_value": hash, "bucket_pos": cell.Pos, "bucket_value": cell.Value,
 			"created_at": now, "updated_at": now,
 		})

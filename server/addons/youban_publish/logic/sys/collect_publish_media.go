@@ -27,8 +27,16 @@ func (s *sSysPublish) rebuildCollectPublishMedia(ctx context.Context, event gdb.
 		items = collectMediaRowsToItems(rows)
 	}
 	now := gtime.Now()
+	task, err := s.getTaskByTenant(ctx, taskId, event["tenant_id"].Int64())
+	if err != nil {
+		return err
+	}
+	profileId := task["profile_id"].Int64()
+	if profileId <= 0 {
+		return gerror.New("采集发布资料不存在")
+	}
 	if _, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("task_id", taskId).
+		Where("profile_id", profileId).
 		WhereNull("deleted_at").
 		Data(g.Map{
 			"deleted_at": now,
@@ -38,7 +46,7 @@ func (s *sSysPublish) rebuildCollectPublishMedia(ctx context.Context, event gdb.
 		Update(); err != nil {
 		return gerror.Wrap(err, "清理采集旧媒体失败")
 	}
-	_ = s.deleteMediaPHashBucketByTaskId(ctx, taskId)
+	_ = s.deleteMediaPHashBucketByProfileId(ctx, profileId)
 	displayItems, verifyItems := splitCollectPublishMediaItems(event, items)
 	if err := s.insertCollectPublishMediaRows(ctx, event, taskId, "display", displayItems); err != nil {
 		return err
@@ -77,7 +85,15 @@ func (s *sSysPublish) insertCollectPublishMediaRows(ctx context.Context, event g
 }
 
 func (s *sSysPublish) insertCollectPublishMediaRow(ctx context.Context, event gdb.Record, taskId int64, purpose string, sortIndex int, item collectMediaItem) error {
-	item, err := s.prepareCollectMediaAsset(ctx, event, item)
+	task, err := s.getTaskByTenant(ctx, taskId, event["tenant_id"].Int64())
+	if err != nil {
+		return err
+	}
+	profileId := task["profile_id"].Int64()
+	if profileId <= 0 {
+		return gerror.New("采集发布资料不存在")
+	}
+	item, err = s.prepareCollectMediaAsset(ctx, event, item)
 	if err != nil {
 		return err
 	}
@@ -123,7 +139,7 @@ func (s *sSysPublish) insertCollectPublishMediaRow(ctx context.Context, event gd
 		"tenant_id":           event["tenant_id"].Int64(),
 		"merchant_id":         event["tenant_id"].Int64(),
 		"account_id":          event["account_id"].Int64(),
-		"task_id":             taskId,
+		"profile_id":          profileId,
 		"media_type":          mediaType,
 		"purpose":             purpose,
 		"name":                fmt.Sprintf("collect-%d-%s-%d", event["id"].Int64(), purpose, sortIndex),

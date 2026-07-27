@@ -108,24 +108,28 @@ func (s *sSysPublish) mediaListByProfile(ctx context.Context, profileId int64, t
 	if _, err = s.profileState(ctx, profileId, tenantId, accountId); err != nil {
 		return nil, err
 	}
-	return s.mediaListByEditableProfile(ctx, profileId, tenantId, accountId)
+	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).
+		WhereNull("deleted_at")
+	if tenantId > 0 {
+		mod = mod.Where("tenant_id", tenantId)
+	}
+	if accountId > 0 {
+		mod = mod.Where("account_id", accountId)
+	}
+	if err = mod.OrderAsc("sort_index").OrderAsc("id").Scan(&list); err != nil {
+		return nil, gerror.Wrap(err, "读取资料媒体失败")
+	}
+	if list == nil {
+		list = []*sysin.MediaModel{}
+	}
+	normalizeMediaListFileURL(list)
+	return list, nil
 }
 
 func (s *sSysPublish) mediaListByEditableProfile(ctx context.Context, profileId int64, tenantId int64, accountId int64) (list []*sysin.MediaModel, err error) {
 	if _, err = s.profileState(ctx, profileId, tenantId, accountId); err != nil {
 		return nil, err
 	}
-	err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("profile_id", profileId).
-		WhereNull("task_id").
-		WhereNull("deleted_at").
-		OrderAsc("sort_index").OrderAsc("id").Scan(&list)
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取资料媒体失败")
-	}
-	if len(list) == 0 {
-		return s.mediaListByProfile(ctx, profileId, tenantId, accountId)
-	}
-	normalizeMediaListFileURL(list)
-	return list, nil
+	return s.mediaListByProfile(ctx, profileId, tenantId, accountId)
 }

@@ -92,7 +92,7 @@ func collectContinuationVideoMediaSQL() string {
 	return `
 SELECT 1
 FROM ` + publishMediaTable + ` m
-WHERE m.task_id = j.task_id
+WHERE m.profile_id = t.profile_id
   AND m.purpose = 'display'
   AND m.media_type = 'video'
   AND m.deleted_at IS NULL

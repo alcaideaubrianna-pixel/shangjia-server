@@ -66,13 +66,9 @@ func (s *sSysPublish) telegramJobStillSending(ctx context.Context, jobId int64) 
 
 func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecord, purpose string) ([]*telegramMediaItem, error) {
 	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Where("profile_id", job.ProfileId).
 		Where("purpose", purpose).
 		WhereNull("deleted_at")
-	if job.TaskId > 0 {
-		mod = mod.Where("task_id", job.TaskId)
-	} else {
-		mod = mod.WhereNull("task_id").Where("profile_id", job.ProfileId)
-	}
 	records, err := mod.
 		OrderAsc("sort_index").OrderAsc("id").
 		All()
