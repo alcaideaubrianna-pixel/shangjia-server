@@ -75,29 +75,26 @@ func telegramCaptionMark(row gdb.Record, setting *sysin.AccountSettingModel) str
 	if setting == nil || setting.EnableTitleMark != 1 {
 		return ""
 	}
-	if title := strings.TrimSpace(row["title"].String()); title != "" {
-		return title
-	}
-	number := telegramCaptionNumber(row)
+	number := telegramCaptionNumber(row, setting.NumberSource)
 	if number == "" {
 		return ""
 	}
 	if setting.NumberSource == "random" {
 		return number
 	}
-	prefix := strings.TrimSpace(setting.CustomMarkText)
-	if setting.MarkMode != "custom" || prefix == "" {
-		prefix = strings.TrimSpace(row["account_nickname"].String())
-	}
+	prefix := markPrefix(setting, row["account_nickname"].String())
 	if prefix == "" {
 		return number
 	}
 	return fmt.Sprintf("%s%s", prefix, number)
 }
 
-func telegramCaptionNumber(row gdb.Record) string {
-	if profileNo := strings.TrimSpace(row["profile_no"].String()); profileNo != "" {
-		return profileNo
+func telegramCaptionNumber(row gdb.Record, numberSource string) string {
+	if numberSource == "random" {
+		return strings.TrimSpace(row["profile_no"].String())
+	}
+	if sequence := row["account_sequence"].Int64(); sequence > 0 {
+		return fmt.Sprintf("%03d", sequence)
 	}
 	return ""
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"regexp"
+	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -24,6 +25,9 @@ func (s *sSysPublish) nextAccountProfileNo(ctx context.Context, tx gdb.TX, tenan
 }
 
 func (s *sSysPublish) previewAccountProfileNo(ctx context.Context, tenantId int64, accountId int64, source string) (string, error) {
+	if source != "random" {
+		return "001", nil
+	}
 	return randomProfileNo()
 }
 
@@ -34,14 +38,18 @@ func accountSettingPreviewMark(setting *sysin.AccountSettingModel, accountName s
 	if setting.NumberSource == "random" {
 		return profileNo
 	}
+	if sequence := strings.TrimSpace(profileNo); sequence != "" {
+		return markPrefix(setting, accountName) + sequence
+	}
+	return ""
+}
+
+func markPrefix(setting *sysin.AccountSettingModel, accountName string) string {
 	prefix := setting.CustomMarkText
 	if setting.MarkMode != "custom" || prefix == "" {
 		prefix = accountName
 	}
-	if prefix == "" {
-		return profileNo
-	}
-	return prefix + profileNo
+	return strings.TrimSpace(prefix)
 }
 
 func (s *sSysPublish) nextSequenceProfileNo(ctx context.Context, tx gdb.TX, tenantId int64, accountId int64) (string, error) {

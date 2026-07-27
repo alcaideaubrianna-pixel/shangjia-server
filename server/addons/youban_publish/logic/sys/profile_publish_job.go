@@ -23,7 +23,10 @@ func (s *sSysPublish) profilePublishSource(ctx context.Context, profileId, tenan
 		LeftJoin(publishAccountTable+" a", "a.id=ps.account_id AND a.deleted_at IS NULL").
 		Fields("p.id AS profile_id,p.profile_no,p.title,p.province,p.city,p.plain_text,p.status,p.visibility,"+
 			"ps.tenant_id,ps.account_id,ps.channel_id_json,ps.customer_remark,ps.anti_scan_enabled,"+
-			"a.nickname AS account_nickname").
+			"a.nickname AS account_nickname,"+
+			"(SELECT COUNT(1) FROM "+publishProfileStateTable+" ps_seq "+
+			"WHERE ps_seq.tenant_id=ps.tenant_id AND ps_seq.account_id=ps.account_id "+
+			"AND ps_seq.id<=ps.id AND ps_seq.deleted_at IS NULL) AS account_sequence").
 		Where("p.id", profileId).
 		WhereNull("p.deleted_at")
 	if tenantId > 0 {
