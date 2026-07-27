@@ -337,6 +337,13 @@ func (s *sSysPublish) appendMaterialImportVerifyMediaToPreviousGroup(ctx context
 	if row.IsEmpty() {
 		return nil
 	}
+	lastMessageID := materialImportLatestSourceMessageID(row["source_message_ids"].String())
+	if lastMessageID <= 0 || messageId != lastMessageID+1 {
+		return nil
+	}
+	if materialImportHasVerifyMedia(row["media_json"].String()) {
+		return nil
+	}
 	nextMediaJson, nextMediaCount := mergeCollectMediaJSON(row["media_json"].String(), materialImportMediaJSONWithPurpose(mediaJson, "verify"))
 	_, err = pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("id", row["id"].Int64()).Data(g.Map{
 		"media_json":         nextMediaJson,
@@ -401,6 +408,30 @@ func materialImportMessageIds(existing string, id int) string {
 		parts = append(parts, gconv.String(item))
 	}
 	return strings.Join(parts, ",")
+}
+
+func materialImportLatestSourceMessageID(value string) int {
+	latest := 0
+	for _, item := range strings.Split(value, ",") {
+		messageID := gconv.Int(strings.TrimSpace(item))
+		if messageID > latest {
+			latest = messageID
+		}
+	}
+	return latest
+}
+
+func materialImportHasVerifyMedia(mediaJSON string) bool {
+	items := make([]collectMediaItem, 0)
+	if err := json.Unmarshal([]byte(mediaJSON), &items); err != nil {
+		return false
+	}
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item.Purpose), "verify") {
+			return true
+		}
+	}
+	return false
 }
 
 var materialImportUserIdRegexp = regexp.MustCompile(`[A-Za-z][A-Za-z0-9_-]*[0-9][A-Za-z0-9_-]*`)
