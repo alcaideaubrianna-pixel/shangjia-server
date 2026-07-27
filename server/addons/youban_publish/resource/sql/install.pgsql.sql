@@ -925,6 +925,10 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_channel_chat" ON "hg_youban_publish_channel"
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_days" integer NOT NULL DEFAULT 4;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_time" varchar(16) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_next_run_at" timestamp DEFAULT NULL;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_last_run_at" timestamp DEFAULT NULL;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_active_run_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_last_error_message" text;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "is_default_selected" smallint NOT NULL DEFAULT 1;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "publish_visible" smallint NOT NULL DEFAULT 1;
 
@@ -1404,33 +1408,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_account_follow_pair" ON "hg_youban_pub
 CREATE INDEX IF NOT EXISTS "idx_ybp_account_follow_follower" ON "hg_youban_publish_account_follow" ("tenant_id", "follower_account_id", "status");
 CREATE INDEX IF NOT EXISTS "idx_ybp_account_follow_following" ON "hg_youban_publish_account_follow" ("tenant_id", "following_account_id", "status");
 
-CREATE TABLE IF NOT EXISTS "hg_youban_publish_cycle_plan" (
-  "id" BIGSERIAL PRIMARY KEY,
-  "tenant_id" bigint NOT NULL DEFAULT 0,
-  "account_id" bigint NOT NULL DEFAULT 0,
-  "profile_id" bigint NOT NULL DEFAULT 0,
-  "channel_id" bigint NOT NULL DEFAULT 0,
-  "task_id" bigint NOT NULL DEFAULT 0,
-  "enabled" smallint NOT NULL DEFAULT 0,
-  "interval_seconds" integer NOT NULL DEFAULT 345600,
-  "publish_time" varchar(16) NOT NULL DEFAULT '',
-  "next_run_at" timestamp DEFAULT NULL,
-  "last_run_at" timestamp DEFAULT NULL,
-  "last_run_id" bigint NOT NULL DEFAULT 0,
-  "status" varchar(32) NOT NULL DEFAULT 'active',
-  "source" varchar(32) NOT NULL DEFAULT '',
-  "locked_at" timestamp DEFAULT NULL,
-  "last_error_message" text,
-  "created_at" timestamp DEFAULT NULL,
-  "updated_at" timestamp DEFAULT NULL,
-  "deleted_at" timestamp DEFAULT NULL
-);
-ALTER TABLE IF EXISTS "hg_youban_publish_cycle_plan" ADD COLUMN IF NOT EXISTS "channel_id" bigint NOT NULL DEFAULT 0;
-DROP INDEX IF EXISTS "uk_ybp_cycle_plan_profile";
-CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_cycle_plan_profile" ON "hg_youban_publish_cycle_plan" ("tenant_id", "account_id", "profile_id", "channel_id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_plan_due" ON "hg_youban_publish_cycle_plan" ("enabled", "status", "next_run_at", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_plan_account" ON "hg_youban_publish_cycle_plan" ("tenant_id", "account_id", "status");
-
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_cycle_run" (
   "id" BIGSERIAL PRIMARY KEY,
   "plan_id" bigint NOT NULL DEFAULT 0,
@@ -1450,6 +1427,24 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_cycle_run" (
   "updated_at" timestamp DEFAULT NULL
 );
 ALTER TABLE IF EXISTS "hg_youban_publish_cycle_run" ADD COLUMN IF NOT EXISTS "channel_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS "hg_youban_publish_cycle_run" ADD COLUMN IF NOT EXISTS "cursor_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS "hg_youban_publish_cycle_run" ADD COLUMN IF NOT EXISTS "total_count" integer NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS "hg_youban_publish_cycle_run" ADD COLUMN IF NOT EXISTS "queued_count" integer NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel_profile" (
+  "id" bigserial PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "task_id" bigint NOT NULL DEFAULT 0,
+  "last_job_id" bigint NOT NULL DEFAULT 0,
+  "status" varchar(16) NOT NULL DEFAULT 'active',
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_channel_profile" ON "hg_youban_publish_channel_profile" ("channel_id", "profile_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_channel_profile_scan" ON "hg_youban_publish_channel_profile" ("channel_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_run_plan" ON "hg_youban_publish_cycle_run" ("plan_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_run_owner" ON "hg_youban_publish_cycle_run" ("tenant_id", "account_id", "status", "id");
 
@@ -1471,7 +1466,7 @@ ALTER TABLE IF EXISTS "hg_youban_publish_cycle_run_log" ADD COLUMN IF NOT EXISTS
 CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_run_log_run" ON "hg_youban_publish_cycle_run_log" ("run_id", "id");
 DELETE FROM "hg_youban_publish_cycle_run_log";
 DELETE FROM "hg_youban_publish_cycle_run";
-DELETE FROM "hg_youban_publish_cycle_plan";
+DROP TABLE IF EXISTS "hg_youban_publish_cycle_plan";
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_template" (
   "id" BIGSERIAL PRIMARY KEY,

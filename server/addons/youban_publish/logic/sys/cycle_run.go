@@ -3,392 +3,385 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
-
-	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 const (
-	cyclePlanStatusActive   = "active"
-	cyclePlanStatusDisabled = "disabled"
-	cycleRunStatusPending   = "pending"
-	cycleRunStatusRunning   = "running"
-	cycleRunStatusSuccess   = "success"
-	cycleRunStatusFailed    = "failed"
-	cycleRunStatusSkipped   = "skipped"
+	cycleRunStatusPending  = "pending"
+	cycleRunStatusRunning  = "running"
+	cycleRunStatusFinished = "finished"
+	cycleRunStatusFailed   = "failed"
+	cycleRunStatusSkipped  = "skipped"
+	cycleBatchPageSize     = 200
+	cycleBatchBacklogLimit = 1000
 )
 
-type cyclePlanRecord struct {
-	Id              int64       `orm:"id" json:"id"`
-	TenantId        int64       `orm:"tenant_id" json:"tenantId"`
-	AccountId       int64       `orm:"account_id" json:"accountId"`
-	ProfileId       int64       `orm:"profile_id" json:"profileId"`
-	ChannelId       int64       `orm:"channel_id" json:"channelId"`
-	TaskId          int64       `orm:"task_id" json:"taskId"`
-	Enabled         int         `orm:"enabled" json:"enabled"`
-	IntervalSeconds int         `orm:"interval_seconds" json:"intervalSeconds"`
-	PublishTime     string      `orm:"publish_time" json:"publishTime"`
-	NextRunAt       *gtime.Time `orm:"next_run_at" json:"nextRunAt"`
-	Status          string      `orm:"status" json:"status"`
-	LastRunId       int64       `orm:"last_run_id" json:"lastRunId"`
-	LastRunAt       *gtime.Time `orm:"last_run_at" json:"lastRunAt"`
-	LockedAt        *gtime.Time `orm:"locked_at" json:"lockedAt"`
-	CreatedAt       *gtime.Time `orm:"created_at" json:"createdAt"`
-	UpdatedAt       *gtime.Time `orm:"updated_at" json:"updatedAt"`
+type channelCycleRecord struct {
+	Id               int64       `orm:"id"`
+	TenantId         int64       `orm:"tenant_id"`
+	Enabled          int         `orm:"cycle_publish_enabled"`
+	Days             int         `orm:"cycle_publish_days"`
+	PublishTime      string      `orm:"cycle_publish_time"`
+	NextRunAt        *gtime.Time `orm:"cycle_next_run_at"`
+	ActiveRunId      int64       `orm:"cycle_active_run_id"`
+	Status           int         `orm:"status"`
+	PublishDirection string      `orm:"publish_direction"`
 }
 
 type cycleRunRecord struct {
-	Id           int64       `json:"id"`
-	PlanId       int64       `json:"planId"`
-	TenantId     int64       `json:"tenantId"`
-	AccountId    int64       `json:"accountId"`
-	ProfileId    int64       `json:"profileId"`
-	ChannelId    int64       `json:"channelId"`
-	TaskId       int64       `json:"taskId"`
-	Status       string      `json:"status"`
-	Stage        string      `json:"stage"`
-	ScheduledAt  *gtime.Time `json:"scheduledAt"`
-	StartedAt    *gtime.Time `json:"startedAt"`
-	FinishedAt   *gtime.Time `json:"finishedAt"`
-	ErrorMessage string      `json:"errorMessage"`
-	RetryCount   int         `json:"retryCount"`
+	Id           int64       `orm:"id"`
+	TenantId     int64       `orm:"tenant_id"`
+	ChannelId    int64       `orm:"channel_id"`
+	Status       string      `orm:"status"`
+	Stage        string      `orm:"stage"`
+	CursorId     int64       `orm:"cursor_id"`
+	TotalCount   int         `orm:"total_count"`
+	QueuedCount  int         `orm:"queued_count"`
+	ScheduledAt  *gtime.Time `orm:"scheduled_at"`
+	StartedAt    *gtime.Time `orm:"started_at"`
+	FinishedAt   *gtime.Time `orm:"finished_at"`
+	ErrorMessage string      `orm:"error_message"`
 }
 
-func (s *sSysPublish) RunCyclePlanScheduler(ctx context.Context) error {
-	if err := s.bootstrapCyclePlans(ctx); err != nil {
+type channelProfileRecord struct {
+	Id        int64 `orm:"id"`
+	TenantId  int64 `orm:"tenant_id"`
+	AccountId int64 `orm:"account_id"`
+	ChannelId int64 `orm:"channel_id"`
+	ProfileId int64 `orm:"profile_id"`
+	TaskId    int64 `orm:"task_id"`
+}
+
+func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
+	if err := ensureChannelCycleSchema(ctx); err != nil {
 		return err
 	}
-	return s.scheduleDueCyclePlans(ctx, 100)
-}
-
-func (s *sSysPublish) scheduleDueCyclePlans(ctx context.Context, limit int) error {
-	if limit <= 0 {
-		limit = 100
+	if err := s.initializeChannelCycleSchedules(ctx); err != nil {
+		return err
 	}
-	now := gtime.Now()
-	lockExpiredAt := now.Add(-5 * time.Minute)
-	var plans []cyclePlanRecord
-	err := g.DB().Model(publishCyclePlanTable).Safe().Ctx(ctx).
-		Where("enabled", 1).
-		Where("status", cyclePlanStatusActive).
-		WhereLTE("next_run_at", now).
-		Wheref("(locked_at IS NULL OR locked_at < ?)", lockExpiredAt).
-		WhereNull("deleted_at").
-		OrderAsc("next_run_at").
-		Limit(limit).
-		Scan(&plans)
+	if err := s.backfillChannelProfiles(ctx, 5000); err != nil {
+		return err
+	}
+	pending, err := s.channelProfileBackfillPending(ctx)
 	if err != nil {
-		return gerror.Wrap(err, "读取到期循环上架计划失败")
+		return err
 	}
-	for _, plan := range plans {
-		runId, err := s.createCycleRunForPlan(ctx, plan, now)
+	if pending {
+		return nil
+	}
+	var channels []channelCycleRecord
+	if err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Fields("id,tenant_id,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,cycle_next_run_at,cycle_active_run_id,status,publish_direction").
+		Where("cycle_publish_enabled", 1).
+		Where("status", 1).
+		Where("publish_direction", "up").
+		Where("cycle_active_run_id", 0).
+		WhereLTE("cycle_next_run_at", gtime.Now()).
+		WhereNull("deleted_at").
+		OrderAsc("cycle_next_run_at").
+		Limit(20).
+		Scan(&channels); err != nil {
+		return gerror.Wrap(err, "读取到期频道循环任务失败")
+	}
+	for _, channel := range channels {
+		runId, err := s.createChannelCycleRun(ctx, channel)
 		if err != nil {
-			g.Log().Warningf(ctx, "创建循环上架执行记录失败 plan:%d err:%+v", plan.Id, err)
+			g.Log().Warningf(ctx, "创建频道循环批次失败 channel:%d err:%+v", channel.Id, err)
 			continue
 		}
-		if runId > 0 {
-			if err = s.enqueueCycleRun(ctx, runId, 0); err != nil {
-				_, _ = g.DB().Model(publishCyclePlanTable).Safe().Ctx(ctx).
-					Where("id", plan.Id).
-					Data(g.Map{"locked_at": nil, "last_error_message": err.Error(), "updated_at": gtime.Now()}).
-					Update()
-				return gerror.Wrap(err, "循环上架执行记录入队失败")
-			}
+		if runId <= 0 {
+			continue
+		}
+		if err = s.enqueueCycleRun(ctx, runId, 0); err != nil {
+			s.failChannelCycleRun(ctx, runId, channel.Id, err)
+			return gerror.Wrap(err, "频道循环批次入队失败")
 		}
 	}
 	return nil
 }
 
-func (s *sSysPublish) createCycleRunForPlan(ctx context.Context, plan cyclePlanRecord, now *gtime.Time) (int64, error) {
-	result, err := g.DB().Model(publishCyclePlanTable).Safe().Ctx(ctx).
-		Where("id", plan.Id).
-		Where("enabled", 1).
-		Where("status", cyclePlanStatusActive).
-		WhereLTE("next_run_at", now).
-		Wheref("(locked_at IS NULL OR locked_at < ?)", now.Add(-5*time.Minute)).
-		Data(g.Map{"locked_at": now, "updated_at": now}).
-		Update()
-	if err != nil {
-		return 0, gerror.Wrap(err, "锁定循环上架计划失败")
+func (s *sSysPublish) initializeChannelCycleSchedules(ctx context.Context) error {
+	var channels []channelCycleRecord
+	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Fields("id,tenant_id,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,cycle_next_run_at,cycle_active_run_id,status,publish_direction").
+		Where("cycle_publish_enabled", 1).
+		Where("status", 1).
+		Where("publish_direction", "up").
+		WhereNull("cycle_next_run_at").
+		WhereNull("deleted_at").
+		Limit(100).
+		Scan(&channels); err != nil {
+		return gerror.Wrap(err, "读取待初始化频道循环时间失败")
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	for _, channel := range channels {
+		nextRunAt := s.nextChannelCycleRunAt(ctx, channel.Days, channel.PublishTime, gtime.Now())
+		if _, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+			Where("id", channel.Id).
+			WhereNull("cycle_next_run_at").
+			Data(g.Map{"cycle_next_run_at": nextRunAt, "updated_at": gtime.Now()}).
+			Update(); err != nil {
+			return gerror.Wrap(err, "初始化频道循环时间失败")
+		}
+	}
+	return nil
+}
+
+func (s *sSysPublish) createChannelCycleRun(ctx context.Context, channel channelCycleRecord) (runId int64, err error) {
+	if channel.Id <= 0 || channel.NextRunAt == nil {
 		return 0, nil
 	}
-	runId, err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Data(g.Map{
-		"plan_id":      plan.Id,
-		"tenant_id":    plan.TenantId,
-		"account_id":   plan.AccountId,
-		"profile_id":   plan.ProfileId,
-		"channel_id":   plan.ChannelId,
-		"task_id":      plan.TaskId,
-		"status":       cycleRunStatusPending,
-		"stage":        "created",
-		"scheduled_at": plan.NextRunAt,
-		"created_at":   now,
-		"updated_at":   now,
-	}).InsertAndGetId()
-	if err != nil {
-		return 0, gerror.Wrap(err, "创建循环上架执行记录失败")
-	}
-	_, _ = g.DB().Model(publishCyclePlanTable).Safe().Ctx(ctx).
-		Where("id", plan.Id).
-		Data(g.Map{"last_run_id": runId, "updated_at": now}).
-		Update()
-	return runId, nil
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		now := gtime.Now()
+		result, updateErr := tx.Model(publishChannelTable).Ctx(ctx).
+			Where("id", channel.Id).
+			Where("cycle_publish_enabled", 1).
+			Where("cycle_active_run_id", 0).
+			WhereLTE("cycle_next_run_at", now).
+			WhereNull("deleted_at").
+			Data(g.Map{"cycle_active_run_id": -1, "updated_at": now}).
+			Update()
+		if updateErr != nil {
+			return gerror.Wrap(updateErr, "锁定频道循环配置失败")
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			return nil
+		}
+		totalCount, countErr := tx.Model(publishChannelProfileTable).Ctx(ctx).
+			Where("channel_id", channel.Id).
+			Where("status", "active").
+			Count()
+		if countErr != nil {
+			return gerror.Wrap(countErr, "统计频道循环资料失败")
+		}
+		runId, updateErr = tx.Model(publishCycleRunTable).Ctx(ctx).Data(g.Map{
+			"plan_id": 0, "tenant_id": channel.TenantId, "account_id": 0,
+			"profile_id": 0, "channel_id": channel.Id, "task_id": 0,
+			"status": cycleRunStatusPending, "stage": "created",
+			"cursor_id": 0, "total_count": totalCount, "queued_count": 0,
+			"scheduled_at": channel.NextRunAt, "created_at": now, "updated_at": now,
+		}).InsertAndGetId()
+		if updateErr != nil {
+			return gerror.Wrap(updateErr, "创建频道循环批次失败")
+		}
+		nextRunAt := s.nextChannelCycleRunAt(ctx, channel.Days, channel.PublishTime, channel.NextRunAt)
+		_, updateErr = tx.Model(publishChannelTable).Ctx(ctx).Where("id", channel.Id).Data(g.Map{
+			"cycle_active_run_id": runId,
+			"cycle_next_run_at":   nextRunAt,
+			"updated_at":          now,
+		}).Update()
+		return updateErr
+	})
+	return runId, err
 }
 
 func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
-	run, err := s.lockCycleRun(ctx, runId)
-	if err != nil {
+	if err := ensureChannelCycleSchema(ctx); err != nil {
 		return err
 	}
-	if run.Id <= 0 {
+	run, err := s.lockChannelCycleRun(ctx, runId)
+	if err != nil || run.Id <= 0 {
+		return err
+	}
+	channel, err := s.channelCycleById(ctx, run.ChannelId)
+	if err != nil {
+		s.failChannelCycleRun(ctx, run.Id, run.ChannelId, err)
+		return err
+	}
+	if channel.Id <= 0 || channel.Enabled != 1 || channel.Status != 1 || channel.PublishDirection != "up" {
+		s.finishChannelCycleRun(ctx, run, cycleRunStatusSkipped, "频道循环配置已关闭")
 		return nil
 	}
-	s.appendCycleRunLog(ctx, run, "info", "running", "循环上架开始执行", nil)
-	if err = s.executeLockedCycleRun(ctx, run); err != nil {
-		s.finishCycleRun(ctx, run, cycleRunStatusFailed, "failed", err.Error())
-		s.appendCycleRunLog(ctx, run, "error", "failed", err.Error(), nil)
+	backlog, err := s.channelCycleBacklog(ctx, run.ChannelId)
+	if err != nil {
+		s.failChannelCycleRun(ctx, run.Id, run.ChannelId, err)
 		return err
 	}
-	return nil
+	if backlog >= cycleBatchBacklogLimit {
+		return s.continueChannelCycleRun(ctx, run, 30*time.Second)
+	}
+	items, err := s.channelCyclePage(ctx, run.ChannelId, run.CursorId, cycleBatchPageSize)
+	if err != nil {
+		s.failChannelCycleRun(ctx, run.Id, run.ChannelId, err)
+		return err
+	}
+	if len(items) == 0 {
+		s.finishChannelCycleRun(ctx, run, cycleRunStatusFinished, "")
+		return nil
+	}
+	lastCursor := run.CursorId
+	queued := 0
+	for _, item := range items {
+		if item.Id > lastCursor {
+			lastCursor = item.Id
+		}
+		created, enqueueErr := s.enqueueChannelCycleProfile(ctx, run.Id, item)
+		if enqueueErr != nil {
+			err = enqueueErr
+			s.failChannelCycleRun(ctx, run.Id, run.ChannelId, err)
+			return err
+		}
+		if created {
+			queued++
+		}
+	}
+	_, err = g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", run.Id).Data(g.Map{
+		"cursor_id": lastCursor, "queued_count": run.QueuedCount + queued,
+		"status": cycleRunStatusPending, "stage": "producing", "error_message": "", "updated_at": gtime.Now(),
+	}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "更新频道循环批次游标失败")
+	}
+	return s.enqueueCycleRun(ctx, run.Id, time.Second)
 }
 
-func (s *sSysPublish) lockCycleRun(ctx context.Context, runId int64) (cycleRunRecord, error) {
+func (s *sSysPublish) lockChannelCycleRun(ctx context.Context, runId int64) (cycleRunRecord, error) {
 	var run cycleRunRecord
-	if runId <= 0 {
-		return run, nil
-	}
-	now := gtime.Now()
 	result, err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
 		Where("id", runId).
 		WhereIn("status", []string{cycleRunStatusPending, cycleRunStatusFailed}).
-		Data(g.Map{"status": cycleRunStatusRunning, "stage": "running", "started_at": now, "updated_at": now}).
+		Data(g.Map{"status": cycleRunStatusRunning, "stage": "producing", "started_at": gtime.Now(), "updated_at": gtime.Now()}).
 		Update()
 	if err != nil {
-		return run, gerror.Wrap(err, "锁定循环上架执行记录失败")
+		return run, gerror.Wrap(err, "锁定频道循环批次失败")
 	}
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
 		return run, nil
 	}
 	if err = g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", runId).Scan(&run); err != nil {
-		return run, gerror.Wrap(err, "读取循环上架执行记录失败")
+		return run, gerror.Wrap(err, "读取频道循环批次失败")
 	}
 	return run, nil
 }
 
-func (s *sSysPublish) executeLockedCycleRun(ctx context.Context, run cycleRunRecord) error {
-	plan, err := s.cyclePlanById(ctx, run.PlanId)
-	if err != nil {
-		return err
-	}
-	task, err := s.cycleTaskForPlan(ctx, plan)
-	if err != nil {
-		return err
-	}
-	if plan.Id <= 0 || plan.Enabled != 1 || plan.Status != cyclePlanStatusActive || task.IsEmpty() {
-		_ = s.disableCyclePlanForProfile(ctx, run.TenantId, run.AccountId, run.ProfileId, run.ChannelId)
-		s.finishCycleRun(ctx, run, cycleRunStatusSkipped, "skipped", "循环计划或上架任务已失效")
-		s.appendCycleRunLog(ctx, run, "info", "skipped", "循环计划或上架任务已失效", nil)
-		return nil
-	}
-	jobs, err := s.cycleSentJobs(ctx, plan)
-	if err != nil {
-		return err
-	}
-	for _, job := range jobs {
-		if deleteErr := s.deleteTelegramMessageSet(ctx, job, "循环上架"); deleteErr != nil {
-			s.appendTelegramJobLog(ctx, job, "cycle_delete", "retry", "循环上架删除旧消息失败，已转入独立重试队列："+deleteErr.Error())
-			if retryErr := s.enqueueTelegramCleanupJob(ctx, job.Id, 0); retryErr != nil {
-				s.appendTelegramJobLog(ctx, job, "cycle_delete", "failed", "循环上架删除旧消息重试入队失败："+retryErr.Error())
-			}
-		}
-	}
-	if err = s.requeueCycleTaskTelegramJobs(ctx, plan); err != nil {
-		return err
-	}
-	nextRunAt := s.nextCycleRunAt(ctx, plan, gtime.Now())
-	now := gtime.Now()
-	_, err = g.DB().Model(publishCyclePlanTable).Safe().Ctx(ctx).
-		Where("id", plan.Id).
-		Data(g.Map{"next_run_at": nextRunAt, "last_run_at": now, "locked_at": nil, "updated_at": now}).
-		Update()
-	if err != nil {
-		return gerror.Wrap(err, "更新下次循环上架时间失败")
-	}
-	s.finishCycleRun(ctx, run, cycleRunStatusSuccess, "finished", "")
-	s.appendCycleRunLog(ctx, run, "info", "finished", "循环上架已重新投递", g.Map{"nextRunAt": nextRunAt})
-	return nil
-}
-
-func (s *sSysPublish) cyclePlanById(ctx context.Context, planId int64) (cyclePlanRecord, error) {
-	var plan cyclePlanRecord
-	if planId <= 0 {
-		return plan, nil
-	}
-	err := g.DB().Model(publishCyclePlanTable).Safe().Ctx(ctx).
-		Where("id", planId).
+func (s *sSysPublish) channelCycleById(ctx context.Context, channelId int64) (channelCycleRecord, error) {
+	var channel channelCycleRecord
+	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Fields("id,tenant_id,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,cycle_next_run_at,cycle_active_run_id,status,publish_direction").
+		Where("id", channelId).
 		WhereNull("deleted_at").
-		Scan(&plan)
-	if err != nil {
-		return plan, gerror.Wrap(err, "读取循环上架计划失败")
-	}
-	return plan, nil
+		Scan(&channel)
+	return channel, err
 }
 
-func (s *sSysPublish) cycleTaskForPlan(ctx context.Context, plan cyclePlanRecord) (gdb.Record, error) {
-	if plan.TaskId <= 0 {
-		return nil, nil
-	}
-	row, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("id,status,tg_status,deleted_at").
-		Where("id", plan.TaskId).
-		Where("profile_id", plan.ProfileId).
-		Where("account_id", plan.AccountId).
-		Where("status", sysin.PublishTaskStatusPublished).
-		WhereNull("deleted_at").
-		One()
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取循环上架任务失败")
-	}
-	return row, nil
-}
-
-func (s *sSysPublish) cycleSentJobs(ctx context.Context, plan cyclePlanRecord) ([]telegramJobRecord, error) {
-	var jobs []telegramJobRecord
-	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("task_id", plan.TaskId).
-		Where("profile_id", plan.ProfileId).
-		Where("account_id", plan.AccountId).
-		Where("channel_id", plan.ChannelId).
-		Where("status", "sent").
+func (s *sSysPublish) channelCyclePage(ctx context.Context, channelId int64, cursorId int64, limit int) ([]channelProfileRecord, error) {
+	var items []channelProfileRecord
+	err := g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).
+		Fields("id,tenant_id,account_id,channel_id,profile_id,task_id").
+		Where("channel_id", channelId).
+		Where("status", "active").
+		WhereGT("id", cursorId).
 		OrderAsc("id").
-		Scan(&jobs)
+		Limit(limit).
+		Scan(&items)
 	if err != nil {
-		return nil, gerror.Wrap(err, "读取循环上架TG任务失败")
+		return nil, gerror.Wrap(err, "分页读取频道循环资料失败")
 	}
-	return jobs, nil
+	return items, nil
 }
 
-func (s *sSysPublish) requeueCycleTaskTelegramJobs(ctx context.Context, plan cyclePlanRecord) error {
-	if err := ensureTelegramOperationColumns(ctx); err != nil {
+func (s *sSysPublish) channelCycleBacklog(ctx context.Context, channelId int64) (int, error) {
+	return g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("channel_id", channelId).
+		WhereLike("operation_no", "cycle_batch:%").
+		WhereIn("status", []string{"pending", "sending", "failed_retry"}).
+		Count()
+}
+
+func (s *sSysPublish) enqueueChannelCycleProfile(ctx context.Context, runId int64, item channelProfileRecord) (bool, error) {
+	task, err := s.telegramJobTask(ctx, item.TaskId)
+	if err != nil {
+		return false, err
+	}
+	if task.IsEmpty() || task["status"].String() != "published" {
+		return false, s.deactivateChannelProfile(ctx, item.ChannelId, item.ProfileId)
+	}
+	channels, err := s.telegramJobChannels(ctx, task, []int64{item.ChannelId})
+	if err != nil {
+		return false, err
+	}
+	if len(channels) == 0 {
+		return false, nil
+	}
+	operationNo := fmt.Sprintf("cycle_batch:%d:%d", runId, item.TaskId)
+	jobId, err := s.ensureTelegramPublishChannelJob(ctx, task, channels[0], operationNo)
+	if err != nil {
+		return false, err
+	}
+	if err = s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *sSysPublish) continueChannelCycleRun(ctx context.Context, run cycleRunRecord, delay time.Duration) error {
+	_, err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", run.Id).Data(g.Map{
+		"status": cycleRunStatusPending, "stage": "backpressure", "updated_at": gtime.Now(),
+	}).Update()
+	if err != nil {
 		return err
 	}
-	var jobs []telegramJobRecord
-	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("task_id", plan.TaskId).
-		Where("profile_id", plan.ProfileId).
-		Where("account_id", plan.AccountId).
-		Where("channel_id", plan.ChannelId).
-		WhereIn("status", []string{"sent", "failed", "failed_retry"}).
-		OrderAsc("id").
-		Scan(&jobs)
-	if err != nil {
-		return gerror.Wrap(err, "读取循环上架待重投TG任务失败")
-	}
+	return s.enqueueCycleRun(ctx, run.Id, delay)
+}
+
+func (s *sSysPublish) finishChannelCycleRun(ctx context.Context, run cycleRunRecord, status string, message string) {
 	now := gtime.Now()
-	operationNo := newTelegramOperationNo("cycle", plan.TaskId)
-	_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Where("id", plan.TaskId).
-		Where("profile_id", plan.ProfileId).
-		Where("account_id", plan.AccountId).
-		Where("status", sysin.PublishTaskStatusPublished).
-		WhereNull("deleted_at").
-		Data(g.Map{"tg_operation_no": operationNo, "tg_status": "pending", "updated_at": now}).
-		Update()
-	if err != nil {
-		return gerror.Wrap(err, "更新循环上架操作号失败")
-	}
-	for _, job := range jobs {
-		jobId, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
-			"task_id":            job.TaskId,
-			"operation_no":       operationNo,
-			"tenant_id":          job.TenantId,
-			"merchant_id":        job.TenantId,
-			"account_id":         job.AccountId,
-			"profile_id":         job.ProfileId,
-			"channel_id":         job.ChannelId,
-			"bot_id":             job.BotId,
-			"target_chat_id":     normalizeTelegramChannelChatID(job.TargetChatId),
-			"status":             "pending",
-			"priority":           tgJobPriorityBulk,
-			"queue_name":         tgQueueNameBulk,
-			"dispatch_status":    tgDispatchStatusIdle,
-			"cycle_enabled":      job.CycleEnabled,
-			"cycle_days":         defaultCycleDays(job.CycleDays),
-			"cycle_publish_time": job.CyclePublishTime,
-			"created_at":         now,
-			"updated_at":         now,
-		}).InsertAndGetId()
-		if err != nil {
-			return gerror.Wrap(err, "创建循环上架TG任务失败")
-		}
-		_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-			Where("id", job.Id).
-			Data(g.Map{
-				"status":          "superseded",
-				"dispatch_status": tgDispatchStatusDone,
-				"next_retry_at":   nil,
-				"next_cycle_at":   nil,
-				"updated_at":      now,
-			}).
-			Update()
-		if err != nil {
-			return gerror.Wrap(err, "废弃旧循环上架TG任务失败")
-		}
-		newJob := job
-		newJob.Id = jobId
-		newJob.OperationNo = operationNo
-		s.appendTelegramJobLog(ctx, newJob, "cycle_publish", "queued", "循环上架发布已加入队列")
-		if err = s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
-			return gerror.Wrap(err, "循环上架TG任务入队失败")
-		}
-	}
-	return nil
+	_, _ = g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", run.Id).Data(g.Map{
+		"status": status, "stage": "finished", "error_message": message, "finished_at": now, "updated_at": now,
+	}).Update()
+	_, _ = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Where("id", run.ChannelId).Where("cycle_active_run_id", run.Id).Data(g.Map{
+		"cycle_active_run_id": 0, "cycle_last_run_at": now, "cycle_last_error_message": message, "updated_at": now,
+	}).Update()
+	s.appendChannelCycleRunLog(ctx, run, "info", "finished", message, nil)
 }
 
-func (s *sSysPublish) finishCycleRun(ctx context.Context, run cycleRunRecord, status string, stage string, errMessage string) {
-	data := g.Map{
-		"status":        status,
-		"stage":         stage,
-		"error_message": errMessage,
-		"finished_at":   gtime.Now(),
-		"updated_at":    gtime.Now(),
+func (s *sSysPublish) failChannelCycleRun(ctx context.Context, runId int64, channelId int64, cause error) {
+	message := ""
+	if cause != nil {
+		message = cause.Error()
 	}
-	_, _ = g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", run.Id).Data(data).Update()
-	if status == cycleRunStatusFailed {
-		_, _ = g.DB().Model(publishCyclePlanTable).Safe().Ctx(ctx).
-			Where("id", run.PlanId).
-			Data(g.Map{"locked_at": nil, "updated_at": gtime.Now()}).
-			Update()
-	}
+	_, _ = g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", runId).Data(g.Map{
+		"status": cycleRunStatusFailed, "stage": "failed", "error_message": message, "updated_at": gtime.Now(),
+	}).Update()
+	_, _ = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channelId).Data(g.Map{
+		"cycle_last_error_message": message, "updated_at": gtime.Now(),
+	}).Update()
 }
 
-func (s *sSysPublish) appendCycleRunLog(ctx context.Context, run cycleRunRecord, level string, stage string, message string, contextMap g.Map) {
-	var contextJSON interface{}
+func (s *sSysPublish) appendChannelCycleRunLog(ctx context.Context, run cycleRunRecord, level string, stage string, message string, contextMap g.Map) {
+	var contextJSON any
 	if len(contextMap) > 0 {
 		if data, err := json.Marshal(contextMap); err == nil {
 			contextJSON = string(data)
 		}
 	}
 	_, _ = g.DB().Model(publishCycleRunLogTable).Safe().Ctx(ctx).Data(g.Map{
-		"run_id":       run.Id,
-		"plan_id":      run.PlanId,
-		"tenant_id":    run.TenantId,
-		"account_id":   run.AccountId,
-		"profile_id":   run.ProfileId,
-		"channel_id":   run.ChannelId,
-		"level":        level,
-		"stage":        stage,
-		"message":      message,
-		"context_json": contextJSON,
-		"created_at":   gtime.Now(),
+		"run_id": run.Id, "plan_id": 0, "tenant_id": run.TenantId, "account_id": 0,
+		"profile_id": 0, "channel_id": run.ChannelId, "level": level, "stage": stage,
+		"message": strings.TrimSpace(message), "context_json": contextJSON, "created_at": gtime.Now(),
 	}).Insert()
+}
+
+func (s *sSysPublish) nextChannelCycleRunAt(ctx context.Context, days int, publishTime string, base *gtime.Time) *gtime.Time {
+	if base == nil {
+		base = gtime.Now()
+	}
+	if isDevelopMode(ctx) {
+		return base.Add(time.Duration(defaultCycleDays(days)) * time.Second)
+	}
+	next := base.AddDate(0, 0, defaultCycleDays(days))
+	hour, minute, ok := parseCycleClock(publishTime)
+	if !ok {
+		return next
+	}
+	value := next.Time
+	return gtime.New(time.Date(value.Year(), value.Month(), value.Day(), hour, minute, 0, 0, value.Location()))
 }

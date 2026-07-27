@@ -126,7 +126,7 @@ func telegramMediaCacheAssetHash(mediaType string, assetHash string, posterUrl s
 }
 
 func (s *sSysPublish) telegramJobTask(ctx context.Context, taskId int64) (gdb.Record, error) {
-	fields := "t.id,t.tenant_id,t.account_id,t.profile_id,t.client_request_id,t.title,t.province,t.city,t.plain_text,t.tg_push_enabled,t.tg_operation_no,t.channel_id_json,t.collect_event_id,t.collect_source_id,t.collect_source_chat_id,t.collect_source_message_id,a.nickname AS account_nickname,p.profile_no"
+	fields := "t.id,t.tenant_id,t.account_id,t.profile_id,t.client_request_id,t.title,t.province,t.city,t.plain_text,t.status,t.tg_push_enabled,t.tg_operation_no,t.channel_id_json,t.collect_event_id,t.collect_source_id,t.collect_source_chat_id,t.collect_source_message_id,a.nickname AS account_nickname,p.profile_no"
 	row, err := g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
 		LeftJoin(publishAccountTable+" a", "a.id=t.account_id AND a.deleted_at IS NULL").
 		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=t.profile_id AND p.deleted_at IS NULL").

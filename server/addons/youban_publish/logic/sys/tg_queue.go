@@ -19,7 +19,6 @@ const (
 	tgQueueNameMedia            = "youban_publish_media"
 	tgTaskTypeSubmit            = "youban_publish:tg:submit"
 	tgTaskTypePublish           = "youban_publish:tg:publish"
-	tgTaskTypeDelete            = "youban_publish:tg:delete"
 	tgTaskTypeCleanup           = "youban_publish:tg:cleanup"
 	tgTaskTypeImport            = "youban_publish:import:legacy"
 	tgTaskTypeRepair            = "youban_publish:tg:message_repair"
@@ -108,10 +107,6 @@ func (s *sSysPublish) enqueueTelegramJob(ctx context.Context, jobId int64, delay
 		}
 	}
 	return s.scheduleTelegramJob(ctx, jobId, delay)
-}
-
-func (s *sSysPublish) enqueueTelegramDeleteJob(ctx context.Context, jobId int64, delay time.Duration) error {
-	return s.enqueueTelegramTask(ctx, tgTaskTypeDelete, jobId, delay, true)
 }
 
 func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64, delay time.Duration) error {
@@ -328,7 +323,6 @@ func (s *sSysPublish) enqueueCycleRun(ctx context.Context, runId int64, delay ti
 		asynq.Queue(tgQueueNameBulk),
 		asynq.MaxRetry(3),
 		asynq.Timeout(30 * time.Minute),
-		asynq.Unique(30 * time.Second),
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))

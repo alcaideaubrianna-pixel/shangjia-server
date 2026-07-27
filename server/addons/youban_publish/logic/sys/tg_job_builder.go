@@ -33,7 +33,7 @@ func (s *sSysPublish) telegramJobChannels(ctx context.Context, task gdb.Record, 
 		mod = mod.Where("is_default_selected", 1)
 	}
 	var channels []telegramJobChannel
-	if err := mod.Fields("id,target_chat_id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time").OrderAsc("id").Scan(&channels); err != nil {
+	if err := mod.Fields("id,target_chat_id,bot_id_json").OrderAsc("id").Scan(&channels); err != nil {
 		return nil, gerror.Wrap(err, "读取TG推送频道失败")
 	}
 	if len(channels) == 0 {
@@ -65,10 +65,7 @@ func defaultCycleDays(days int) int {
 }
 
 type telegramJobChannel struct {
-	Id                  int64  `json:"id"`
-	TargetChatId        string `json:"targetChatId"`
-	BotIdJson           string `json:"botIdJson"`
-	CyclePublishEnabled int    `json:"cyclePublishEnabled"`
-	CyclePublishDays    int    `json:"cyclePublishDays"`
-	CyclePublishTime    string `json:"cyclePublishTime"`
+	Id           int64  `json:"id"`
+	TargetChatId string `json:"targetChatId"`
+	BotIdJson    string `json:"botIdJson"`
 }

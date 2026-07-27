@@ -169,10 +169,8 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 	if err = s.enqueueProfilesTelegramCleanupBeforeDelete(ctx, ids, tenantId); err != nil {
 		return err
 	}
-	for _, id := range ids {
-		if err = s.disableCyclePlanForProfile(ctx, tenantId, accountId, id, 0); err != nil {
-			return err
-		}
+	if err = s.deactivateChannelProfiles(ctx, tenantId, ids); err != nil {
+		return err
 	}
 	columns := dao.ContentProfile.Columns()
 	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).Data(g.Map{columns.DeletedAt: gtime.Now()}).Unscoped().Update(); err != nil {
@@ -250,51 +248,14 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 			return nil, err
 		}
 	}
-	profileAccountIds, err := s.profileAccountIdsByIds(ctx, ids, tenantId)
-	if err != nil {
+	if err = s.deactivateChannelProfiles(ctx, tenantId, ids); err != nil {
 		return nil, err
-	}
-	for _, id := range ids {
-		ownerAccountId := accountId
-		if ownerAccountId <= 0 {
-			ownerAccountId = profileAccountIds[id]
-		}
-		if err = s.disableCyclePlanForProfile(ctx, tenantId, ownerAccountId, id, 0); err != nil {
-			return nil, err
-		}
 	}
 	if err = s.enqueueProfileDownRun(ctx, tenantId, ids, 0); err != nil {
 		return nil, gerror.Wrap(err, "加入资料下架队列失败")
 	}
 	service.SysContent().ClearHomeProfileCardsCache(ctx)
 	return &sysin.ProfileStatusModel{Message: "资料已下架，已有TG消息将在后台清理"}, nil
-}
-
-func (s *sSysPublish) profileAccountIdsByIds(ctx context.Context, ids []int64, tenantId int64) (map[int64]int64, error) {
-	res := make(map[int64]int64)
-	if len(ids) == 0 {
-		return res, nil
-	}
-	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("profile_id,account_id").
-		WhereIn("profile_id", ids).
-		WhereNull("deleted_at")
-	if tenantId > 0 {
-		mod = mod.Where("tenant_id", tenantId)
-	}
-	var rows []struct {
-		ProfileId int64 `json:"profile_id"`
-		AccountId int64 `json:"account_id"`
-	}
-	if err := mod.Scan(&rows); err != nil {
-		return nil, gerror.Wrap(err, "读取资料归属账号失败")
-	}
-	for _, row := range rows {
-		if row.ProfileId > 0 && row.AccountId > 0 {
-			res[row.ProfileId] = row.AccountId
-		}
-	}
-	return res, nil
 }
 
 func (s *sSysPublish) submitProfilesByIds(ctx context.Context, ids []int64, tenantId int64, accountId int64) error {

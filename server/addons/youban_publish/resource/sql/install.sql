@@ -1248,6 +1248,10 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_channel` (
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否循环上架' AFTER `publish_direction`;
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环上架天数' AFTER `cycle_publish_enabled`;
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环上架时间' AFTER `cycle_publish_days`;
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_next_run_at` datetime DEFAULT NULL COMMENT '下次循环上架时间';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_last_run_at` datetime DEFAULT NULL COMMENT '上次循环上架时间';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_active_run_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '当前循环批次ID';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_last_error_message` text COMMENT '循环上架最近错误';
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `is_default_selected` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否默认选中' AFTER `cycle_publish_time`;
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `publish_visible` tinyint(1) NOT NULL DEFAULT '1' COMMENT '上架端资料选择可见' AFTER `is_default_selected`;
 ALTER TABLE `hg_youban_publish_channel` ADD KEY `idx_ybp_channel_tenant_direction` (`tenant_id`,`publish_direction`,`status`,`id`);
@@ -1418,35 +1422,6 @@ WHERE `addon_name` = 'youban_publish'
   AND `group` = 'autoDelete'
   AND `key` IN ('enabled', 'autoDeleteEnabled', 'botIds');
 
-CREATE TABLE IF NOT EXISTS `hg_youban_publish_cycle_plan` (
-  `id` bigint(20) NOT NULL AUTO_INCREMENT,
-  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
-  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架账号ID',
-  `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
-  `channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '频道ID',
-  `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架任务ID',
-  `enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否启用',
-  `interval_seconds` int(11) NOT NULL DEFAULT '345600' COMMENT '循环间隔秒',
-  `publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '指定发布时间',
-  `next_run_at` datetime DEFAULT NULL COMMENT '下次执行时间',
-  `last_run_at` datetime DEFAULT NULL COMMENT '上次执行时间',
-  `last_run_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '最近执行ID',
-  `status` varchar(32) NOT NULL DEFAULT 'active' COMMENT '状态',
-  `source` varchar(32) NOT NULL DEFAULT '' COMMENT '来源',
-  `locked_at` datetime DEFAULT NULL COMMENT '锁定时间',
-  `last_error_message` text COMMENT '最近错误',
-  `created_at` datetime DEFAULT NULL,
-  `updated_at` datetime DEFAULT NULL,
-  `deleted_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_ybp_cycle_plan_profile` (`tenant_id`,`account_id`,`profile_id`,`channel_id`),
-  KEY `idx_ybp_cycle_plan_due` (`enabled`,`status`,`next_run_at`,`id`),
-  KEY `idx_ybp_cycle_plan_account` (`tenant_id`,`account_id`,`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架循环计划';
-ALTER TABLE `hg_youban_publish_cycle_plan` ADD COLUMN IF NOT EXISTS `channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '频道ID' AFTER `profile_id`;
-ALTER TABLE `hg_youban_publish_cycle_plan` DROP INDEX `uk_ybp_cycle_plan_profile`;
-ALTER TABLE `hg_youban_publish_cycle_plan` ADD UNIQUE KEY `uk_ybp_cycle_plan_profile` (`tenant_id`,`account_id`,`profile_id`,`channel_id`);
-
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_cycle_run` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
   `plan_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '循环计划ID',
@@ -1469,6 +1444,25 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_cycle_run` (
   KEY `idx_ybp_cycle_run_owner` (`tenant_id`,`account_id`,`status`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架循环执行记录';
 ALTER TABLE `hg_youban_publish_cycle_run` ADD COLUMN IF NOT EXISTS `channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '频道ID' AFTER `profile_id`;
+ALTER TABLE `hg_youban_publish_cycle_run` ADD COLUMN IF NOT EXISTS `cursor_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料索引游标';
+ALTER TABLE `hg_youban_publish_cycle_run` ADD COLUMN IF NOT EXISTS `total_count` int(11) NOT NULL DEFAULT '0' COMMENT '资料总数';
+ALTER TABLE `hg_youban_publish_cycle_run` ADD COLUMN IF NOT EXISTS `queued_count` int(11) NOT NULL DEFAULT '0' COMMENT '已生成任务数';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_channel_profile` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `channel_id` bigint(20) NOT NULL DEFAULT '0',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0',
+  `task_id` bigint(20) NOT NULL DEFAULT '0',
+  `last_job_id` bigint(20) NOT NULL DEFAULT '0',
+  `status` varchar(16) NOT NULL DEFAULT 'active',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_channel_profile` (`channel_id`,`profile_id`),
+  KEY `idx_ybp_channel_profile_scan` (`channel_id`,`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='频道当前上架资料索引';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_cycle_run_log` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -1489,7 +1483,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_cycle_run_log` (
 ALTER TABLE `hg_youban_publish_cycle_run_log` ADD COLUMN IF NOT EXISTS `channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '频道ID' AFTER `profile_id`;
 DELETE FROM `hg_youban_publish_cycle_run_log`;
 DELETE FROM `hg_youban_publish_cycle_run`;
-DELETE FROM `hg_youban_publish_cycle_plan`;
+DROP TABLE IF EXISTS `hg_youban_publish_cycle_plan`;
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_template` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',

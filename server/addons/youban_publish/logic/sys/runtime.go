@@ -50,6 +50,11 @@ func (s *sSysPublish) StopRuntime() {
 }
 
 func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
+	if err := ensureChannelCycleSchema(ctx); err != nil {
+		g.Log().Warningf(ctx, "初始化频道循环上架结构失败：%+v", err)
+	} else if err := s.backfillChannelProfiles(ctx, 5000); err != nil {
+		g.Log().Warningf(ctx, "迁移历史频道上架资料索引失败：%+v", err)
+	}
 	if err := ensurePublishSuccessRecordSchema(ctx); err != nil {
 		g.Log().Warningf(ctx, "初始化成功发布记录表失败：%+v", err)
 	} else if err := s.backfillPublishSuccessRecords(ctx, 5000); err != nil {

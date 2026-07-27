@@ -74,9 +74,6 @@ func (s *sSysPublish) ensureTelegramPublishChannelJob(ctx context.Context, task 
 		return 0, gerror.Wrap(err, "读取TG频道任务失败")
 	}
 	if jobId := value.Int64(); jobId > 0 {
-		if err = s.updateTelegramJobCycleSetting(ctx, jobId, channel); err != nil {
-			return 0, err
-		}
 		_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("id", jobId).
 			Data(collectTelegramOrderDataFromTask(task)).
@@ -106,12 +103,9 @@ func (s *sSysPublish) ensureTelegramPublishChannelJob(ctx context.Context, task 
 		"collect_source_chat_id":    strings.TrimSpace(task["collect_source_chat_id"].String()),
 		"collect_source_message_id": task["collect_source_message_id"].Int64(),
 		"status":                    "pending",
-		"priority":                  s.telegramJobPriority(telegramJobRecord{OperationNo: operationNo, CycleEnabled: channel.CyclePublishEnabled}),
-		"queue_name":                telegramQueueNameByPriority(s.telegramJobPriority(telegramJobRecord{OperationNo: operationNo, CycleEnabled: channel.CyclePublishEnabled})),
+		"priority":                  s.telegramJobPriority(telegramJobRecord{OperationNo: operationNo}),
+		"queue_name":                telegramQueueNameByPriority(s.telegramJobPriority(telegramJobRecord{OperationNo: operationNo})),
 		"dispatch_status":           tgDispatchStatusIdle,
-		"cycle_enabled":             channel.CyclePublishEnabled,
-		"cycle_days":                defaultCycleDays(channel.CyclePublishDays),
-		"cycle_publish_time":        channel.CyclePublishTime,
 		"created_at":                now,
 		"updated_at":                now,
 	}).InsertAndGetId()
@@ -119,23 +113,4 @@ func (s *sSysPublish) ensureTelegramPublishChannelJob(ctx context.Context, task 
 		return 0, gerror.Wrap(err, "创建TG频道任务失败")
 	}
 	return jobId, nil
-}
-
-func (s *sSysPublish) updateTelegramJobCycleSetting(ctx context.Context, jobId int64, channel telegramJobChannel) error {
-	if jobId <= 0 {
-		return nil
-	}
-	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", jobId).
-		Data(g.Map{
-			"cycle_enabled":      channel.CyclePublishEnabled,
-			"cycle_days":         defaultCycleDays(channel.CyclePublishDays),
-			"cycle_publish_time": channel.CyclePublishTime,
-			"updated_at":         gtime.Now(),
-		}).
-		Update()
-	if err != nil {
-		return gerror.Wrap(err, "更新TG任务循环设置失败")
-	}
-	return nil
 }

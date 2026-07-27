@@ -302,10 +302,7 @@ func (s *sSysPublish) telegramJobPriority(job telegramJobRecord) int {
 		return job.Priority
 	}
 	operationNo := strings.ToLower(strings.TrimSpace(job.OperationNo))
-	if strings.HasPrefix(operationNo, "full_push:") {
-		return tgJobPriorityBulk
-	}
-	if job.CycleEnabled == 1 && job.NextCycleAt != nil {
+	if strings.HasPrefix(operationNo, "full_push:") || strings.HasPrefix(operationNo, "cycle_batch:") {
 		return tgJobPriorityBulk
 	}
 	return tgJobPriorityDefault

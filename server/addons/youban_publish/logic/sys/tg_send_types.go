@@ -44,15 +44,11 @@ type telegramJobRecord struct {
 	ChannelId              int64       `json:"channelId"`
 	BotId                  int64       `json:"botId"`
 	Status                 string      `json:"status"`
-	CycleDays              int         `json:"cycleDays"`
-	CycleEnabled           int         `json:"cycleEnabled"`
-	CyclePublishTime       string      `json:"cyclePublishTime"`
 	TargetChatId           string      `json:"targetChatId"`
 	CollectEventId         int64       `json:"collectEventId"`
 	CollectSourceId        int64       `json:"collectSourceId"`
 	CollectSourceChatId    string      `json:"collectSourceChatId"`
 	CollectSourceMessageId int64       `json:"collectSourceMessageId"`
-	NextCycleAt            *gtime.Time `json:"nextCycleAt"`
 	RetryCount             int         `json:"retryCount"`
 	Priority               int         `json:"priority"`
 	QueueName              string      `json:"queueName"`
