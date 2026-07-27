@@ -406,6 +406,12 @@ func (s *sSysPublish) telegramJobPublishMessage(job telegramJobRecord, message s
 }
 
 func (s *sSysPublish) canSendTelegramJob(ctx context.Context, job telegramJobRecord) (bool, error) {
+	if job.CollectSourceId > 0 {
+		enabled, err := s.collectSourcePushEnabled(ctx, job.CollectSourceId, job.TenantId, job.AccountId)
+		if err != nil || !enabled {
+			return false, err
+		}
+	}
 	task, err := s.telegramTaskForJob(ctx, job)
 	if err != nil {
 		return false, err

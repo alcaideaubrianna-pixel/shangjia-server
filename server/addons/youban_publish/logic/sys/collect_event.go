@@ -101,6 +101,11 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if collectEventAlreadyMatched(event["status"].String()) {
 		return nil
 	}
+	if enabled, enabledErr := s.collectSourcePushEnabled(ctx, event["source_id"].Int64(), tenantId, accountId); enabledErr != nil {
+		return enabledErr
+	} else if !enabled {
+		return s.ignoreCollectEvent(ctx, eventId, collectSourceDisabledMessage, "source")
+	}
 	if waiting, err := s.waitCollectGroupedEventReady(ctx, event); err != nil {
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
 		return err

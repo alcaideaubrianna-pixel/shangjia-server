@@ -161,6 +161,9 @@ func (s *sSysPublish) CollectSourceStatus(ctx context.Context, in *sysin.Collect
 		WhereNull("deleted_at").
 		Data(data).
 		Update()
+	if err == nil && in.Enabled != 1 {
+		err = s.stopDisabledCollectSourcePipeline(ctx, in.Id, account.TenantId, account.Id)
+	}
 	return gerror.Wrap(err, "更新采集源状态失败")
 }
 
