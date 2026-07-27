@@ -262,8 +262,16 @@ func (s *sSysPublish) AdminProfileEdit(ctx context.Context, in *sysin.ProfileSav
 			return nil, err
 		}
 	}
+	state, err := s.profileState(ctx, in.Id, account.TenantId, 0)
+	if err != nil {
+		return nil, err
+	}
+	ownerAccountId := state["account_id"].Int64()
+	if ownerAccountId <= 0 {
+		return nil, gerror.New("资料归属账号不存在")
+	}
 	in.KeepPublishState = true
-	return s.saveProfile(ctx, in, account.TenantId, account.Id)
+	return s.saveProfile(ctx, in, account.TenantId, ownerAccountId)
 }
 
 func (s *sSysPublish) AdminProfileDelete(ctx context.Context, in *sysin.ProfileDeleteInp) (err error) {
