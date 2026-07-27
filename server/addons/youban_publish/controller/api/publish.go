@@ -240,6 +240,22 @@ func (c *cPublishAdmin) BotList(ctx context.Context, req *publish.AdminBotListRe
 	return
 }
 
+func (c *cPublishAdmin) BotCreate(ctx context.Context, req *publish.AdminBotCreateReq) (res *publish.AdminBotCreateRes, err error) {
+	data, err := service.SysPublish().AdminBotCreate(ctx, &req.BotCreateInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminBotCreateRes{BotModel: data}, nil
+}
+
+func (c *cPublishAdmin) BotUsernameCheck(ctx context.Context, req *publish.AdminBotUsernameCheckReq) (res *publish.AdminBotUsernameCheckRes, err error) {
+	data, err := service.SysPublish().AdminBotUsernameCheck(ctx, &req.BotUsernameCheckInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminBotUsernameCheckRes{BotUsernameCheckModel: data}, nil
+}
+
 func (c *cPublishAdmin) BotSave(ctx context.Context, req *publish.AdminBotSaveReq) (res *publish.AdminBotSaveRes, err error) {
 	if err = service.SysPublish().AdminBotSave(ctx, &req.BotSaveInp); err != nil {
 		return nil, err

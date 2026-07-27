@@ -153,6 +153,24 @@ type AdminBotListRes struct {
 	List []*sysin.BotModel `json:"list" dc:"Bot列表"`
 }
 
+type AdminBotCreateReq struct {
+	g.Meta `path:"/publish/admin/bot/create" method:"post" tags:"上架插件管理端" summary:"创建Bot"`
+	sysin.BotCreateInp
+}
+
+type AdminBotCreateRes struct {
+	*sysin.BotModel
+}
+
+type AdminBotUsernameCheckReq struct {
+	g.Meta `path:"/publish/admin/bot/checkUsername" method:"post" tags:"上架插件管理端" summary:"检查Bot用户名"`
+	sysin.BotUsernameCheckInp
+}
+
+type AdminBotUsernameCheckRes struct {
+	*sysin.BotUsernameCheckModel
+}
+
 type AdminBotSaveReq struct {
 	g.Meta `path:"/publish/admin/bot/save" method:"post" tags:"上架插件管理端" summary:"保存Bot"`
 	sysin.BotSaveInp

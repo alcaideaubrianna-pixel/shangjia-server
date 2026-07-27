@@ -106,6 +106,8 @@ type ISysPublish interface {
 	ServerTagSave(ctx context.Context, in *sysin.TagSaveInp) (err error)
 	ServerTagDelete(ctx context.Context, in *sysin.TagDeleteInp) (err error)
 	AdminBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error)
+	AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp) (res *sysin.BotModel, err error)
+	AdminBotUsernameCheck(ctx context.Context, in *sysin.BotUsernameCheckInp) (res *sysin.BotUsernameCheckModel, err error)
 	AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) (err error)
 	AdminBotDelete(ctx context.Context, in *sysin.BotDeleteInp) (err error)
 	AdminBotRefresh(ctx context.Context, in *sysin.BotRefreshInp) (list []*sysin.BotRefreshModel, err error)

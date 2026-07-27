@@ -428,7 +428,7 @@ func (s *sSysPublish) accountCollectTgAccount(ctx context.Context, tgAccountId i
 		return nil, gerror.Wrap(err, "读取账号采集TG账号失败")
 	}
 	if item == nil || item.Id <= 0 {
-		return nil, gerror.New("账号采集TG账号不存在")
+		return nil, gerror.New("账号采集TG账号不存在或已被删除")
 	}
 	if strings.TrimSpace(item.SessionKey) == "" {
 		return nil, gerror.New("账号采集TG账号未登录")

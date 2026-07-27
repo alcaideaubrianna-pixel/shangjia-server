@@ -999,6 +999,25 @@ type BotSaveInp struct {
 	Status      int    `json:"status" dc:"状态：1启用 2停用"`
 }
 
+type BotCreateInp struct {
+	BotName     string `json:"botName" v:"required#Bot名称不能为空" dc:"Bot名称"`
+	BotUsername string `json:"botUsername" v:"required#Bot用户名不能为空" dc:"Bot用户名"`
+	Remark      string `json:"remark" dc:"备注"`
+	Status      int    `json:"status" dc:"状态：1启用 2停用"`
+	TgAccountId int64  `json:"tgAccountId" v:"required#请选择TG账号" dc:"TG账号ID"`
+}
+
+type BotUsernameCheckInp struct {
+	BotUsername string `json:"botUsername" v:"required#Bot用户名不能为空" dc:"Bot用户名"`
+	TgAccountId int64  `json:"tgAccountId" v:"required#请选择TG账号" dc:"TG账号ID"`
+}
+
+type BotUsernameCheckModel struct {
+	Available   bool   `json:"available" dc:"是否可用"`
+	BotUsername string `json:"botUsername" dc:"Bot用户名"`
+	Message     string `json:"message" dc:"提示信息"`
+}
+
 type BotDeleteInp struct {
 	Ids []int64 `json:"ids" v:"required#请选择要删除的数据" dc:"ID列表"`
 }
