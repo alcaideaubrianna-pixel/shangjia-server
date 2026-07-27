@@ -366,7 +366,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_history_task` (
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_history_log` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '任务ID',
+  `task_id` bigint(20) DEFAULT NULL COMMENT '发布任务ID，正式资料媒体为空',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
   `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '所属账号ID',
   `level` varchar(16) NOT NULL DEFAULT 'info' COMMENT '日志等级',

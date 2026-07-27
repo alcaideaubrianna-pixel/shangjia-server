@@ -155,19 +155,19 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 	items := make([]collectMediaItem, 0)
 	_ = json.Unmarshal([]byte(group.MediaJson), &items)
 	if len(items) == 0 {
-		profileId, taskProfileId, err := s.saveMaterialImportGroupProfile(ctx, task, group, "[]")
+		profileId, err := s.saveMaterialImportGroupProfile(ctx, task, group, "[]")
 		if err != nil {
 			return err
 		}
-		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, taskProfileId, "[]")
+		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, "[]")
 	}
-	profileId, taskProfileId, err := s.materialImportExistingProfile(ctx, group)
+	profileId, err := s.materialImportExistingProfile(ctx, group)
 	if err != nil {
 		return err
 	}
-	if profileId > 0 && (group.MediaTotal == 0 || s.materialImportProfileHasMedia(ctx, profileId, taskProfileId)) {
+	if profileId > 0 && (group.MediaTotal == 0 || s.materialImportProfileHasMedia(ctx, profileId)) {
 		_ = s.appendMaterialImportPublishLog(ctx, task, profileId, "reused", fmt.Sprintf("资料已存在，跳过重复导入：%s", strings.TrimSpace(group.Title)))
-		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, taskProfileId, group.MediaJson)
+		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, group.MediaJson)
 	}
 	_ = s.materialImportMarkGroupRunning(ctx, group.Id)
 	done := 0
@@ -194,23 +194,19 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 		_ = s.materialImportUpdateGroupProgress(ctx, group.Id, done, failed)
 	}
 	data, _ := json.Marshal(items)
-	profileId, taskProfileId, err = s.saveMaterialImportGroupProfile(ctx, task, group, string(data))
+	profileId, err = s.saveMaterialImportGroupProfile(ctx, task, group, string(data))
 	if err != nil {
 		return err
 	}
-	return s.materialImportMarkGroupDone(ctx, group.Id, profileId, taskProfileId, string(data))
+	return s.materialImportMarkGroupDone(ctx, group.Id, profileId, string(data))
 }
 
-func (s *sSysPublish) materialImportProfileHasMedia(ctx context.Context, profileId int64, taskProfileId int64) bool {
+func (s *sSysPublish) materialImportProfileHasMedia(ctx context.Context, profileId int64) bool {
 	if profileId <= 0 {
 		return false
 	}
-	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).WhereNull("deleted_at")
-	if taskProfileId > 0 {
-		mod = mod.Where("task_id", taskProfileId)
-	} else {
-		mod = mod.Where("profile_id", profileId)
-	}
+	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).WhereNull("task_id").WhereNull("deleted_at")
 	count, err := mod.Count()
 	return err == nil && count > 0
 }
@@ -261,15 +257,14 @@ func (s *sSysPublish) materialImportMarkGroupFailed(ctx context.Context, id int6
 	return err
 }
 
-func (s *sSysPublish) materialImportMarkGroupDone(ctx context.Context, id int64, profileId int64, taskProfileId int64, mediaJson string) error {
+func (s *sSysPublish) materialImportMarkGroupDone(ctx context.Context, id int64, profileId int64, mediaJson string) error {
 	_, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("id", id).Data(g.Map{
-		"status":          sysin.MaterialImportStatusSuccess,
-		"media_json":      strings.TrimSpace(mediaJson),
-		"media_done":      gdb.Raw("media_total"),
-		"media_failed":    0,
-		"profile_id":      profileId,
-		"task_profile_id": taskProfileId,
-		"updated_at":      gtime.Now(),
+		"status":       sysin.MaterialImportStatusSuccess,
+		"media_json":   strings.TrimSpace(mediaJson),
+		"media_done":   gdb.Raw("media_total"),
+		"media_failed": 0,
+		"profile_id":   profileId,
+		"updated_at":   gtime.Now(),
 	}).Update()
 	return err
 }

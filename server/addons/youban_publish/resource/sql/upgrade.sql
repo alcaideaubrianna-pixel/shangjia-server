@@ -501,3 +501,6 @@ INNER JOIN (
 ) latest ON latest.`id`=t.`id`
 ON DUPLICATE KEY UPDATE `profile_id`=VALUES(`profile_id`);
 UPDATE `hg_youban_publish_task` SET `status`='canceled', `tg_status`='skipped' WHERE `status`='draft';
+
+ALTER TABLE `hg_youban_publish_media` MODIFY COLUMN `task_id` bigint(20) DEFAULT NULL COMMENT '发布任务ID，正式资料媒体为空';
+UPDATE `hg_youban_publish_media` SET `task_id`=NULL WHERE `profile_id`>0 AND `task_id`=0;

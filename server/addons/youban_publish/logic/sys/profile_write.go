@@ -101,7 +101,7 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	if err != nil {
 		return nil, err
 	}
-	return &sysin.ProfileSaveModel{Id: profileId, Uuid: profile.Uuid, TaskId: 0, ProfileNo: profile.ProfileNo}, nil
+	return &sysin.ProfileSaveModel{Id: profileId, Uuid: profile.Uuid, ProfileNo: profile.ProfileNo}, nil
 }
 
 func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDeleteInp, tenantId int64, accountId int64) (err error) {

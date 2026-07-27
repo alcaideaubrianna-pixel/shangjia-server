@@ -52,10 +52,11 @@ func (s *sSysPublish) upsertProfileStateTx(ctx context.Context, tx gdb.TX, profi
 
 func profileMediaOwner(state gdb.Record) gdb.Record {
 	return gdb.Record{
-		"id":         gvar.New(0),
-		"tenant_id":  gvar.New(state["tenant_id"].Int64()),
-		"account_id": gvar.New(state["account_id"].Int64()),
-		"profile_id": gvar.New(state["profile_id"].Int64()),
+		"id":            gvar.New(nil),
+		"tenant_id":     gvar.New(state["tenant_id"].Int64()),
+		"account_id":    gvar.New(state["account_id"].Int64()),
+		"profile_id":    gvar.New(state["profile_id"].Int64()),
+		"profile_media": gvar.New(true),
 	}
 }
 

@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gogf/gf/v2/container/gvar"
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -22,9 +20,9 @@ import (
 	"hotgo/utility/file"
 )
 
-func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, mediaJson string) (int64, int64, error) {
+func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, mediaJson string) (int64, error) {
 	if task == nil || group == nil {
-		return 0, 0, gerror.New("资料导入分组不存在")
+		return 0, gerror.New("资料导入分组不存在")
 	}
 	title := strings.TrimSpace(group.Title)
 	if title == "" {
@@ -35,7 +33,7 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 		var err error
 		channelIds, err = s.materialImportTargetChannelIds(ctx, nil, task.TenantId)
 		if err != nil {
-			return 0, 0, err
+			return 0, err
 		}
 	}
 	input := &sysin.ProfileSaveInp{
@@ -47,40 +45,44 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 		Status:     1,
 	}
 	if group.ProfileId <= 0 {
-		profileId, _, err := s.materialImportExistingProfile(ctx, group)
+		profileId, err := s.materialImportExistingProfile(ctx, group)
 		if err != nil {
-			return 0, 0, err
+			return 0, err
 		}
 		input.Id = profileId
 	}
 	saved, err := s.saveProfile(ctx, input, task.TenantId, task.AccountId)
 	if err != nil {
-		return 0, 0, err
+		return 0, err
+	}
+	media, err := s.saveMaterialImportProfileMedia(ctx, task, group, saved.Id, mediaJson)
+	if err != nil {
+		return 0, err
+	}
+	input.Id = saved.Id
+	input.Media = media
+	saved, err = s.saveProfile(ctx, input, task.TenantId, task.AccountId)
+	if err != nil {
+		return 0, err
 	}
 	if err = s.bindMaterialImportGroupProfile(ctx, group, saved); err != nil {
-		return 0, 0, err
+		return 0, err
 	}
 	if strings.TrimSpace(group.Title) == "" {
 		title = fmt.Sprintf("%d%s", task.AccountId, saved.ProfileNo)
 		group.Title = title
 	}
 	if err = s.updateMaterialImportProfileSource(ctx, saved.Id, group, task, title); err != nil {
-		return 0, 0, err
-	}
-	if err = s.replaceMaterialImportMedia(ctx, task, saved, group, mediaJson); err != nil {
-		return 0, 0, err
-	}
-	if err = s.ensureMaterialImportTelegramIndex(ctx, task, group, saved.Id, saved.TaskId); err != nil {
-		return 0, 0, err
+		return 0, err
 	}
 	if err = s.syncProfileNoteIndex(ctx, saved.Id); err != nil {
-		return 0, 0, err
+		return 0, err
 	}
 	_ = s.appendMaterialImportPublishLog(ctx, task, saved.Id, "imported", fmt.Sprintf("资料导入完成：%s", strings.TrimSpace(title)))
-	return saved.Id, saved.TaskId, nil
+	return saved.Id, nil
 }
 
-func (s *sSysPublish) materialImportExistingProfile(ctx context.Context, group *sysin.MaterialImportGroupModel) (int64, int64, error) {
+func (s *sSysPublish) materialImportExistingProfile(ctx context.Context, group *sysin.MaterialImportGroupModel) (int64, error) {
 	sourceKey := materialImportProfileSourceKey(group)
 	profileCols := dao.ContentProfile.Columns()
 	profile, err := dao.ContentProfile.Ctx(ctx).
@@ -89,21 +91,12 @@ func (s *sSysPublish) materialImportExistingProfile(ctx context.Context, group *
 		WhereNull(profileCols.DeletedAt).
 		One()
 	if err != nil {
-		return 0, 0, gerror.Wrap(err, "读取TG导入资料失败")
+		return 0, gerror.Wrap(err, "读取TG导入资料失败")
 	}
 	if profile.IsEmpty() {
-		return 0, 0, nil
+		return 0, nil
 	}
-	profileId := profile[profileCols.Id].Int64()
-	task, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("id").
-		Where("profile_id", profileId).
-		WhereNull("deleted_at").
-		One()
-	if err != nil {
-		return 0, 0, gerror.Wrap(err, "读取TG导入资料任务失败")
-	}
-	return profileId, task["id"].Int64(), nil
+	return profile[profileCols.Id].Int64(), nil
 }
 
 func (s *sSysPublish) bindMaterialImportGroupProfile(ctx context.Context, group *sysin.MaterialImportGroupModel, saved *sysin.ProfileSaveModel) error {
@@ -112,13 +105,12 @@ func (s *sSysPublish) bindMaterialImportGroupProfile(ctx context.Context, group 
 	}
 	_, err := g.DB().Model(pdao.YoubanPublishMaterialImportGroup.Table()).Safe().Ctx(ctx).
 		Where("id", group.Id).
-		Data(g.Map{"profile_id": saved.Id, "task_profile_id": saved.TaskId, "updated_at": gtime.Now()}).
+		Data(g.Map{"profile_id": saved.Id, "updated_at": gtime.Now()}).
 		Update()
 	if err != nil {
 		return gerror.Wrap(err, "记录TG导入资料关联失败")
 	}
 	group.ProfileId = saved.Id
-	group.TaskProfileId = saved.TaskId
 	return nil
 }
 
@@ -140,23 +132,17 @@ func (s *sSysPublish) updateMaterialImportProfileSource(ctx context.Context, pro
 	return gerror.Wrap(err, "更新TG导入资料来源失败")
 }
 
-func (s *sSysPublish) replaceMaterialImportMedia(ctx context.Context, task *sysin.MaterialImportTaskModel, saved *sysin.ProfileSaveModel, group *sysin.MaterialImportGroupModel, mediaJson string) error {
-	if saved == nil || saved.TaskId <= 0 {
-		return nil
-	}
+func (s *sSysPublish) saveMaterialImportProfileMedia(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, profileId int64, mediaJson string) ([]*sysin.ProfileMediaSaveItem, error) {
 	ctx = importRuntimeContext(ctx, firstPositiveInt64(task.UpdatedBy, task.AccountId))
-	now := gtime.Now()
-	_, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("task_id", saved.TaskId).
-		WhereNull("deleted_at").
-		Data(g.Map{"deleted_at": now, "updated_at": now}).
-		Update()
+	owner, err := s.resolveMediaEditTask(ctx, &sysin.MediaUploadInp{ProfileId: profileId}, task.TenantId, task.AccountId)
 	if err != nil {
-		return gerror.Wrap(err, "清理TG导入旧媒体失败")
+		return nil, err
 	}
-	_ = s.deleteMediaPHashBucketByProfileId(ctx, saved.Id)
 	var items []collectMediaItem
-	_ = json.Unmarshal([]byte(mediaJson), &items)
+	if err = json.Unmarshal([]byte(mediaJson), &items); err != nil {
+		return nil, gerror.Wrap(err, "解析TG导入媒体失败")
+	}
+	result := make([]*sysin.ProfileMediaSaveItem, 0, len(items))
 	for index, item := range items {
 		item = normalizeCollectMediaItem(item)
 		mediaType := collectPublishMediaType(item.Type)
@@ -167,29 +153,20 @@ func (s *sSysPublish) replaceMaterialImportMedia(ctx context.Context, task *sysi
 		purpose := materialImportMediaPurpose(item)
 		upload, err := materialImportUploadFileFromPath(path, fmt.Sprintf("material-import-%d-%d%s", group.Id, index+1, filepath.Ext(path)))
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if _, err = s.saveUploadedTaskMedia(ctx, gdb.Record{
-			"id":         gvar.New(saved.TaskId),
-			"tenant_id":  gvar.New(task.TenantId),
-			"account_id": gvar.New(task.AccountId),
-			"profile_id": gvar.New(saved.Id),
-			"status":     gvar.New(sysin.PublishTaskStatusPending),
-		}, &sysin.MediaUploadInp{
-			ProfileId: saved.Id,
+		media, uploadErr := s.saveUploadedTaskMedia(ctx, owner, &sysin.MediaUploadInp{
+			ProfileId: profileId,
 			MediaType: mediaType,
 			Purpose:   purpose,
 			SortIndex: index + 1,
-		}, upload, nil, nil); err != nil {
-			return err
+		}, upload, nil, nil)
+		if uploadErr != nil {
+			return nil, uploadErr
 		}
+		result = append(result, &sysin.ProfileMediaSaveItem{MediaId: media.Id, Purpose: purpose, SortIndex: index + 1})
 	}
-	if err := s.refreshTaskMediaCount(ctx, saved.TaskId); err != nil {
-		return err
-	}
-	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		return s.syncTaskMediaToProfile(ctx, tx, saved.TaskId, saved.Id)
-	})
+	return result, nil
 }
 
 func materialImportMediaPurpose(item collectMediaItem) string {

@@ -147,7 +147,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_note_index" (
   "tenant_id" bigint NOT NULL DEFAULT 0,
   "account_id" bigint NOT NULL DEFAULT 0,
   "profile_id" bigint NOT NULL DEFAULT 0,
-  "task_id" bigint NOT NULL DEFAULT 0,
+  "task_id" bigint DEFAULT NULL,
   "uuid" varchar(128) NOT NULL DEFAULT '',
   "profile_no" varchar(64) NOT NULL DEFAULT '',
   "title" varchar(255) NOT NULL DEFAULT '',
