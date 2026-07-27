@@ -113,6 +113,6 @@ func publishJobRecordMessage(action string, status string) string {
 	case "success", "sent":
 		return publishSuccessRecordMessage(action)
 	default:
-		return "TG资料等待发送"
+		return "TG资料等待推送"
 	}
 }
