@@ -172,11 +172,14 @@ func (s *sSysPublish) mediaListByEditableProfile(ctx context.Context, profileId 
 	}
 	err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", profileId).
-		Where("task_id", 0).
+		WhereNull("task_id").
 		WhereNull("deleted_at").
 		OrderAsc("sort_index").OrderAsc("id").Scan(&list)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取资料媒体失败")
+	}
+	if len(list) == 0 {
+		return s.mediaListByProfile(ctx, profileId, tenantId, accountId)
 	}
 	normalizeMediaListFileURL(list)
 	return list, nil
