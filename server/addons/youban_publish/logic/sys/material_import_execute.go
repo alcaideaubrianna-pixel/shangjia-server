@@ -18,11 +18,19 @@ import (
 	"github.com/gogf/gf/v2/util/gconv"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	hglock "hotgo/internal/library/hgrds/lock"
 )
 
 const materialImportPagesPerRun = 10
 
 func (s *sSysPublish) ExecuteMaterialImportTask(ctx context.Context, taskId int64) error {
+	lock := hglock.NewConfig(5*time.Minute, 200*time.Millisecond).
+		Mutex(fmt.Sprintf("youban_publish:material_import:%d", taskId))
+	if err := lock.Lock(ctx); err != nil {
+		return gerror.Wrap(err, "获取资料导入任务锁失败")
+	}
+	defer s.releaseTelegramChannelLease(context.Background(), lock)
+
 	task, err := s.materialImportTaskByPrimary(ctx, taskId)
 	if err != nil {
 		return err

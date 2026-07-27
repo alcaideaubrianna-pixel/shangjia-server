@@ -423,7 +423,11 @@ func (s *sSysPublish) materialImportTaskList(ctx context.Context, tenantId int64
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取资料导入任务总数失败")
 	}
-	rows, err := mod.Page(in.Page, in.PerPage).OrderDesc("t.id").All()
+	rows, err := mod.
+		Fields("t.*,ta.display_name AS tg_account_nickname,ta.telegram_username AS tg_account_username,a.nickname AS account_name,tn.name AS tenant_name").
+		Page(in.Page, in.PerPage).
+		OrderDesc("t.id").
+		All()
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取资料导入任务列表失败")
 	}
@@ -460,8 +464,7 @@ func (s *sSysPublish) materialImportTaskBaseQuery(ctx context.Context, tenantId 
 	mod := g.DB().Model(pdao.YoubanPublishMaterialImportTask.Table()+" t").Safe().Ctx(ctx).
 		LeftJoin(publishTgAccountTable+" ta", "ta.id=t.tg_account_id AND ta.deleted_at IS NULL").
 		LeftJoin(publishAccountTable+" a", "a.id=t.account_id AND a.deleted_at IS NULL").
-		LeftJoin(publishTenantTable+" tn", "tn.id=t.tenant_id AND tn.deleted_at IS NULL").
-		Fields("t.*,ta.display_name AS tg_account_nickname,ta.telegram_username AS tg_account_username,a.nickname AS account_name,tn.name AS tenant_name")
+		LeftJoin(publishTenantTable+" tn", "tn.id=t.tenant_id AND tn.deleted_at IS NULL")
 	if tenantId > 0 {
 		mod = mod.Where("t.tenant_id", tenantId)
 	}
@@ -485,7 +488,10 @@ func (s *sSysPublish) materialImportTaskRecord(ctx context.Context, id int64, te
 	if err := ensureMaterialImportTaskChannelColumn(ctx); err != nil {
 		return nil, err
 	}
-	mod := s.materialImportTaskBaseQuery(ctx, tenantId, nil).Where("t.id", id).Limit(1)
+	mod := s.materialImportTaskBaseQuery(ctx, tenantId, nil).
+		Fields("t.*,ta.display_name AS tg_account_nickname,ta.telegram_username AS tg_account_username,a.nickname AS account_name,tn.name AS tenant_name").
+		Where("t.id", id).
+		Limit(1)
 	row, err := mod.One()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取资料导入任务失败")

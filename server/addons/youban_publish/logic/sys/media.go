@@ -625,11 +625,13 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 		existing, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 			Where("id", in.MediaId).
 			Where("task_id", task["id"].Int64()).
+			Where("profile_id", task["profile_id"].Int64()).
 			WhereNull("deleted_at").
 			One()
 	} else {
 		existing, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 			Where("task_id", task["id"].Int64()).
+			Where("profile_id", task["profile_id"].Int64()).
 			Where("attachment_id", attachment.Id).
 			WhereNull("deleted_at").
 			One()
@@ -1091,6 +1093,7 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 	var list []*sysin.MediaModel
 	if err := tx.Model(publishMediaTable).Ctx(ctx).
 		Where("task_id", taskId).
+		Where("profile_id", profileId).
 		WhereNull("deleted_at").
 		OrderAsc("sort_index").
 		OrderAsc("id").
@@ -1117,6 +1120,7 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 	videoCount := 0
 	hasVerificationVideo := 0
 	var coverMediaId int64
+	sourceAssetIds := make([]int64, 0, len(list))
 	for _, item := range list {
 		mediaType := item.MediaType
 		if mediaType == "" {
@@ -1138,6 +1142,9 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 		sourceAssetId := item.OriginalAttachmentId
 		if sourceAssetId <= 0 {
 			sourceAssetId = item.AttachmentId
+		}
+		if sourceAssetId > 0 {
+			sourceAssetIds = append(sourceAssetIds, sourceAssetId)
 		}
 		originalStoragePath := strings.TrimSpace(item.OriginalStoragePath)
 		if originalStoragePath == "" {
@@ -1185,8 +1192,21 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 			coverMediaId = id
 		}
 	}
+	staleMediaMod := tx.Model(dao.ContentMedia.Table()).Ctx(ctx).Unscoped().
+		Where(mediaColumns.ProfileId, profileId).
+		WhereNull(mediaColumns.DeletedAt)
+	if len(sourceAssetIds) > 0 {
+		staleMediaMod = staleMediaMod.WhereNotIn(mediaColumns.SourceAssetId, sourceAssetIds)
+	}
+	if _, err := staleMediaMod.Data(g.Map{
+		mediaColumns.DeletedAt: now,
+		mediaColumns.UpdatedAt: now,
+	}).Update(); err != nil {
+		return gerror.Wrap(err, "清理资料历史媒体失败")
+	}
 	if _, err := tx.Model(publishMediaTable).Ctx(ctx).
 		Where("task_id", taskId).
+		Where("profile_id", profileId).
 		WhereNull("deleted_at").
 		Data(g.Map{"profile_id": profileId, "updated_at": now}).
 		Update(); err != nil {
@@ -1197,6 +1217,7 @@ func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, tas
 		profileColumns.ImageCount:           imageCount,
 		profileColumns.VideoCount:           videoCount,
 		profileColumns.HasVerificationVideo: hasVerificationVideo,
+		profileColumns.CoverMediaId:         nil,
 		profileColumns.UpdatedAt:            now,
 	}
 	if coverMediaId > 0 {
