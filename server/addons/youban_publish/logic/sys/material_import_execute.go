@@ -403,9 +403,19 @@ func materialImportTitle(text string) (title string, profileNo string, nickname 
 			nickname = firstNonEmpty(nickname, value)
 			continue
 		}
+		if idx := materialImportInlineFieldIndex(item, "昵称"); idx > 0 {
+			fallback = firstNonEmpty(fallback, strings.TrimSpace(item[:idx]))
+			if value, ok := materialImportPrefixedValue(item[idx:], "昵称"); ok {
+				nickname = firstNonEmpty(nickname, value)
+			}
+			continue
+		}
+		if materialImportKnownFieldLine(item) {
+			continue
+		}
 		fallback = firstNonEmpty(fallback, materialImportTitleFallback(item))
 	}
-	title = firstNonEmpty(profileNo, nickname, fallback)
+	title = firstNonEmpty(profileNo, fallback, nickname)
 	return strings.TrimSpace(title), strings.TrimSpace(profileNo), strings.TrimSpace(nickname)
 }
 
@@ -424,6 +434,9 @@ func materialImportPrefixedValue(text string, prefix string) (string, bool) {
 			return strings.TrimSpace(strings.TrimPrefix(rest, sep)), true
 		}
 	}
+	if len(text) > len(prefix) && strings.TrimSpace(text[len(prefix):]) != text[len(prefix):] {
+		return rest, rest != ""
+	}
 	return "", false
 }
 
@@ -432,7 +445,7 @@ func materialImportTitleFallback(text string) string {
 	if text == "" {
 		return ""
 	}
-	fieldPrefixes := []string{"标题", "编号", "昵称", "省份", "城市", "年龄", "身高", "体重", "星座", "地区", "地址", "微信", "电话", "手机"}
+	fieldPrefixes := materialImportFieldPrefixes()
 	best := text
 	for _, prefix := range fieldPrefixes {
 		if idx := materialImportInlineFieldIndex(text, prefix); idx > 0 && idx < len(best) {
@@ -440,6 +453,19 @@ func materialImportTitleFallback(text string) string {
 		}
 	}
 	return strings.TrimSpace(best)
+}
+
+func materialImportKnownFieldLine(text string) bool {
+	for _, prefix := range materialImportFieldPrefixes() {
+		if _, ok := materialImportPrefixedValue(text, prefix); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func materialImportFieldPrefixes() []string {
+	return []string{"标题", "编号", "昵称", "省份", "城市", "城 市", "年龄", "身高", "体重", "星座", "地区", "地址", "微信", "电话", "手机"}
 }
 
 func materialImportInlineFieldIndex(text string, prefix string) int {

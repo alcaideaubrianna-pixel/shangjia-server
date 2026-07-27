@@ -95,6 +95,27 @@ func TestMaterialImportTitleFallbackLeadingText(t *testing.T) {
 			nickname:  "朴朴芙蓉",
 		},
 		{
+			name:      "nickname separated by whitespace",
+			text:      "昵称 A26\n省份: 山西\n城市: 山西",
+			title:     "A26",
+			profileNo: "",
+			nickname:  "A26",
+		},
+		{
+			name:      "field label contains whitespace",
+			text:      "昵称 A26\n省份: 山西\n城 市: 山西",
+			title:     "A26",
+			profileNo: "",
+			nickname:  "A26",
+		},
+		{
+			name:      "leading number before inline nickname",
+			text:      "JJ14 昵称: 小安\n省份：浙江",
+			title:     "JJ14",
+			profileNo: "",
+			nickname:  "小安",
+		},
+		{
 			name:      "mixed same line",
 			text:      "朴朴芙蓉B3054 省份: 郑州 城市：开封 年龄：18",
 			title:     "朴朴芙蓉B3054",
@@ -123,5 +144,26 @@ func TestMaterialImportTitleFallbackLeadingText(t *testing.T) {
 				t.Fatalf("unexpected nickname: %q", nickname)
 			}
 		})
+	}
+}
+
+func TestMaterialImportIgnoredNotice(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+	}{
+		{name: "duplicate notice", text: "❌ 重复投稿\n168 小时内已提交过高度相似资料\n编号：2607212921"},
+		{name: "success notice", text: "✅ 提交成功！ 📋 编号：qwby0723613 投稿已自动审核通过并成功分发到 7 个频道。"},
+		{name: "failed notice", text: "收录失败！此信息已存在，无需重复收录 编号：65772177"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if !materialImportIgnoredNotice(test.text) {
+				t.Fatalf("expected notice to be ignored: %q", test.text)
+			}
+		})
+	}
+	if materialImportIgnoredNotice("昵称：A26\n省份：山西\n城市：山西") {
+		t.Fatal("valid material was incorrectly classified as a notice")
 	}
 }

@@ -32,6 +32,9 @@ func (s *sSysPublish) upsertMaterialImportUnits(ctx context.Context, task *sysin
 
 func (s *sSysPublish) upsertMaterialImportUnitBlocks(ctx context.Context, task *sysin.MaterialImportTaskModel, units []*materialImportMessageUnit) error {
 	for _, unit := range units {
+		if unit == nil || materialImportIgnoredNotice(unit.RawText) {
+			continue
+		}
 		if len(unit.Media) == 0 && strings.TrimSpace(unit.RawText) == "" {
 			continue
 		}
