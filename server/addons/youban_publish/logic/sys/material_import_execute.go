@@ -265,102 +265,6 @@ func materialImportCacheChannelID(cache *sysin.ChannelCacheModel) (int64, error)
 	return channelID, nil
 }
 
-func (s *sSysPublish) upsertMaterialImportGroup(ctx context.Context, task *sysin.MaterialImportTaskModel, msg *tg.Message, messageAt *gtime.Time) error {
-	groupedId := gotdMessageGroupedId(msg)
-	uniqueKey := fmt.Sprintf("task:%d:%d:%s:%d", task.Id, task.TgAccountId, task.SourceChatId, msg.ID)
-	if groupedId != "" {
-		uniqueKey = fmt.Sprintf("task:%d:%d:%s:group:%s", task.Id, task.TgAccountId, task.SourceChatId, groupedId)
-	}
-	items := gotdCollectMedia(msg, task.SourceChatId)
-	items = materialImportMediaItemsWithPurpose(items, "display")
-	mediaJson, mediaCount := collectMessageMediaJSON(items)
-	rawText := strings.TrimSpace(msg.Message)
-	if rawText == "" && mediaCount > 0 && materialImportAllMediaType(items, "video") {
-		return s.appendMaterialImportVerifyMediaToPreviousGroup(ctx, task, msg.ID, messageAt, mediaJson)
-	}
-	existing, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("source_unique_key", uniqueKey).One()
-	if err != nil {
-		return gerror.Wrap(err, "读取资料导入分组失败")
-	}
-	now := gtime.Now()
-	data := g.Map{
-		"task_id":            task.Id,
-		"tenant_id":          task.TenantId,
-		"account_id":         task.AccountId,
-		"source_chat_id":     task.SourceChatId,
-		"source_grouped_id":  groupedId,
-		"source_unique_key":  uniqueKey,
-		"raw_text":           firstNonEmpty(rawText, existing["raw_text"].String()),
-		"profile_text":       firstNonEmpty(rawText, existing["profile_text"].String()),
-		"media_json":         mediaJson,
-		"media_total":        mediaCount,
-		"status":             sysin.MaterialImportStatusPending,
-		"message_at":         messageAt,
-		"updated_at":         now,
-		"source_message_ids": materialImportMessageIds(existing["source_message_ids"].String(), msg.ID),
-	}
-	parsedText := firstNonEmpty(rawText, existing["raw_text"].String())
-	title, profileNo, nickname := materialImportTitle(parsedText)
-	data["title"] = title
-	data["profile_no"] = profileNo
-	data["nickname"] = nickname
-	if existing.IsEmpty() {
-		data["created_at"] = now
-		_, err = pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Data(data).Insert()
-		return gerror.Wrap(err, "创建资料导入分组失败")
-	}
-	if strings.TrimSpace(existing["media_json"].String()) != "" {
-		data["media_json"], data["media_total"] = mergeCollectMediaJSON(existing["media_json"].String(), mediaJson)
-	}
-	_, err = pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("id", existing["id"].Int64()).Data(data).Update()
-	return gerror.Wrap(err, "更新资料导入分组失败")
-}
-
-func (s *sSysPublish) appendMaterialImportVerifyMediaToPreviousGroup(ctx context.Context, task *sysin.MaterialImportTaskModel, messageId int, messageAt *gtime.Time, mediaJson string) error {
-	if task == nil || strings.TrimSpace(mediaJson) == "" || strings.TrimSpace(mediaJson) == "[]" {
-		return nil
-	}
-	if messageAt == nil {
-		messageAt = gtime.Now()
-	}
-	row, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).
-		Where("task_id", task.Id).
-		Where("source_chat_id", task.SourceChatId).
-		Where("COALESCE(raw_text,'') <> ''").
-		WhereLTE("message_at", messageAt).
-		OrderDesc("message_at").
-		OrderDesc("id").
-		One()
-	if err != nil {
-		return gerror.Wrap(err, "读取验证视频归属资料失败")
-	}
-	if row.IsEmpty() {
-		return nil
-	}
-	lastMessageID := materialImportLatestSourceMessageID(row["source_message_ids"].String())
-	if lastMessageID <= 0 || messageId != lastMessageID+1 {
-		return nil
-	}
-	if materialImportHasVerifyMedia(row["media_json"].String()) {
-		return nil
-	}
-	nextMediaJson, nextMediaCount := mergeCollectMediaJSON(row["media_json"].String(), materialImportMediaJSONWithPurpose(mediaJson, "verify"))
-	_, err = pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("id", row["id"].Int64()).Data(g.Map{
-		"media_json":         nextMediaJson,
-		"media_total":        nextMediaCount,
-		"media_done":         0,
-		"media_failed":       0,
-		"source_message_ids": materialImportMessageIds(row["source_message_ids"].String(), messageId),
-		"source_grouped_id":  firstNonEmpty(row["source_grouped_id"].String(), fmt.Sprintf("verify:%d", messageId)),
-		"status":             sysin.MaterialImportStatusPending,
-		"profile_id":         0,
-		"task_profile_id":    0,
-		"error_message":      "",
-		"updated_at":         gtime.Now(),
-	}).Update()
-	return gerror.Wrap(err, "合并验证视频到导入资料失败")
-}
-
 func materialImportMediaItemsWithPurpose(items []collectMediaItem, purpose string) []collectMediaItem {
 	purpose = strings.TrimSpace(purpose)
 	if purpose == "" {
@@ -372,13 +276,6 @@ func materialImportMediaItemsWithPurpose(items []collectMediaItem, purpose strin
 		}
 	}
 	return items
-}
-
-func materialImportMediaJSONWithPurpose(mediaJson string, purpose string) string {
-	items := make([]collectMediaItem, 0)
-	_ = json.Unmarshal([]byte(mediaJson), &items)
-	data, _ := json.Marshal(materialImportMediaItemsWithPurpose(items, purpose))
-	return string(data)
 }
 
 func materialImportAllMediaType(items []collectMediaItem, mediaType string) bool {

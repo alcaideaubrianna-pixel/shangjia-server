@@ -26,10 +26,6 @@ type materialImportMessageUnit struct {
 	Media     []collectMediaItem
 }
 
-func (s *sSysPublish) upsertMaterialImportUnits(ctx context.Context, task *sysin.MaterialImportTaskModel, messages []*tg.Message) error {
-	return s.upsertMaterialImportUnitBlocks(ctx, task, materialImportBuildUnits(task, messages))
-}
-
 func (s *sSysPublish) upsertMaterialImportUnitBlocks(ctx context.Context, task *sysin.MaterialImportTaskModel, units []*materialImportMessageUnit) error {
 	for _, unit := range units {
 		if unit == nil || materialImportIgnoredNotice(unit.RawText) {
@@ -234,6 +230,12 @@ func (s *sSysPublish) appendMaterialImportVerifyUnit(ctx context.Context, task *
 	if row.IsEmpty() {
 		return nil
 	}
+	if !materialImportVerifyUnitIsContinuous(row["source_message_ids"].String(), unit.Messages) {
+		return nil
+	}
+	if materialImportHasVerifyMedia(row["media_json"].String()) {
+		return nil
+	}
 	nextMediaJson, nextMediaCount := mergeCollectMediaJSON(row["media_json"].String(), mediaJson)
 	_, err = pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("id", row["id"].Int64()).Data(g.Map{
 		"media_json":         nextMediaJson,
@@ -248,6 +250,14 @@ func (s *sSysPublish) appendMaterialImportVerifyUnit(ctx context.Context, task *
 		"updated_at":         gtime.Now(),
 	}).Update()
 	return gerror.Wrap(err, "合并验证视频到导入资料失败")
+}
+
+func materialImportVerifyUnitIsContinuous(existingMessageIDs string, messageIDs []int) bool {
+	if len(messageIDs) != 1 {
+		return false
+	}
+	lastMessageID := materialImportLatestSourceMessageID(existingMessageIDs)
+	return lastMessageID > 0 && messageIDs[0] == lastMessageID+1
 }
 
 func materialImportUnitMessageIds(existing string, ids []int) string {

@@ -4,9 +4,9 @@ import "testing"
 
 func TestMaterialImportLatestSourceMessageID(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		value string
-		want int
+		want  int
 	}{
 		{name: "sorted ids", value: "151,152,153,154,155", want: 155},
 		{name: "unsorted ids", value: "155,151,154", want: 155},
@@ -36,5 +36,17 @@ func TestMaterialImportHasVerifyMedia(t *testing.T) {
 	}
 	if materialImportHasVerifyMedia(`[{"type":"video","purpose":"display"}]`) {
 		t.Fatal("display media must not be treated as verify media")
+	}
+}
+
+func TestMaterialImportVerifyUnitIsContinuous(t *testing.T) {
+	if !materialImportVerifyUnitIsContinuous("151,152,153,154,155", []int{156}) {
+		t.Fatal("message 156 should be accepted as the continuous verify message")
+	}
+	if materialImportVerifyUnitIsContinuous("151,152,153,154,155", []int{125}) {
+		t.Fatal("message 125 must not be attached to the profile group")
+	}
+	if materialImportVerifyUnitIsContinuous("151,152,153,154,155", []int{156, 157}) {
+		t.Fatal("a grouped verify unit must not attach multiple messages")
 	}
 }
