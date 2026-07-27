@@ -5,9 +5,12 @@ import (
 	"time"
 
 	tgbot "github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/hibiken/asynq"
 
 	"hotgo/addons/youban_publish/service"
+	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/payment"
 )
 
@@ -52,5 +55,50 @@ func NewSysPublish() *sSysPublish {
 func init() {
 	publish := NewSysPublish()
 	service.RegisterSysPublish(publish)
+	gatewayservice.RegisterProvider(&publishBotGatewayProvider{publish: publish})
+	gatewayservice.RegisterConfigProvider(func(ctx context.Context) (*gatewayservice.RuntimeConfig, error) {
+		conf, err := NewSysConfig().GetTelegram(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &gatewayservice.RuntimeConfig{
+			Mode:           conf.BotRuntimeMode,
+			ProxyURL:       conf.ProxyUrl,
+			WebhookBaseURL: conf.WebhookBaseUrl,
+			WebhookSecret:  conf.WebhookSecret,
+		}, nil
+	})
 	payment.RegisterNotifyCall(tenantVipOrderGroup, publish.TenantVipPayNotify)
+}
+
+type publishBotGatewayProvider struct{ publish *sSysPublish }
+
+func (p *publishBotGatewayProvider) Name() string { return "youban_publish" }
+
+func (p *publishBotGatewayProvider) ListEnabledBots(ctx context.Context) ([]gatewayservice.BotBinding, error) {
+	var rows []*struct {
+		Id       int64  `json:"id"`
+		TenantId int64  `json:"tenantId"`
+		BotToken string `json:"botToken"`
+	}
+	if err := g.DB().Model(publishBotTable).Safe().Ctx(ctx).
+		Fields("id", "tenant_id", "bot_token").
+		Where("status", 1).
+		WhereNull("deleted_at").
+		Scan(&rows); err != nil {
+		return nil, err
+	}
+	items := make([]gatewayservice.BotBinding, 0, len(rows))
+	for _, row := range rows {
+		if row == nil || row.BotToken == "" {
+			continue
+		}
+		items = append(items, gatewayservice.BotBinding{Owner: p.Name(), ReferenceID: row.Id, TenantID: row.TenantId, Token: row.BotToken})
+	}
+	return items, nil
+}
+
+func (p *publishBotGatewayProvider) HandleUpdate(ctx context.Context, binding gatewayservice.BotBinding, update *models.Update) error {
+	p.publish.handleTelegramUpdate(ctx, binding.ReferenceID, binding.TenantID, update)
+	return nil
 }

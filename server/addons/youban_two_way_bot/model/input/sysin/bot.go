@@ -2,6 +2,7 @@ package sysin
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -47,6 +48,7 @@ func (in *BotListInp) GetPerPage() int {
 type BotSaveInp struct {
 	Id              int64  `json:"id" dc:"ID"`
 	Name            string `json:"name" dc:"名称"`
+	WelcomeMessage  string `json:"welcomeMessage" dc:"欢迎语"`
 	BotToken        string `json:"botToken" dc:"Bot Token"`
 	ExistingGroupId string `json:"existingGroupId" dc:"已有管理群ID"`
 	TgAccountId     int64  `json:"tgAccountId" v:"required|min:1#请选择TG账号|请选择TG账号" dc:"TG协议号ID"`
@@ -58,6 +60,7 @@ type BotSaveInp struct {
 
 func (in *BotSaveInp) Filter() error {
 	in.Name = strings.TrimSpace(in.Name)
+	in.WelcomeMessage = strings.TrimSpace(in.WelcomeMessage)
 	in.BotToken = strings.TrimSpace(in.BotToken)
 	in.ExistingGroupId = strings.TrimSpace(in.ExistingGroupId)
 	in.SupergroupId = strings.TrimSpace(in.SupergroupId)
@@ -81,6 +84,30 @@ type BotDeleteInp struct {
 	Ids []int64 `json:"ids" v:"required#请选择机器人" dc:"ID列表"`
 }
 
+type BotSettingsInp struct {
+	Id             int64  `json:"id" v:"required|min:1#请选择机器人|请选择机器人" dc:"ID"`
+	Name           string `json:"name" dc:"名称"`
+	WelcomeMessage string `json:"welcomeMessage" dc:"欢迎语"`
+}
+
+func (in *BotSettingsInp) Filter() error {
+	if in == nil || in.Id <= 0 {
+		return gerror.New("请选择机器人")
+	}
+	in.Name = strings.TrimSpace(in.Name)
+	in.WelcomeMessage = strings.TrimSpace(in.WelcomeMessage)
+	if in.Name == "" {
+		return gerror.New("请输入机器人名称")
+	}
+	if utf8.RuneCountInString(in.Name) > 128 {
+		return gerror.New("机器人名称不能超过128个字符")
+	}
+	if utf8.RuneCountInString(in.WelcomeMessage) > 1000 {
+		return gerror.New("欢迎语不能超过1000个字符")
+	}
+	return nil
+}
+
 type BotActionInp struct {
 	Id int64 `json:"id" v:"required|min:1#请选择机器人|请选择机器人" dc:"ID"`
 }
@@ -92,6 +119,7 @@ type BotModel struct {
 	TgAccountId          int64       `json:"tgAccountId" dc:"TG协议号ID"`
 	TgAccountName        string      `json:"tgAccountName" dc:"TG账号昵称"`
 	Name                 string      `json:"name" dc:"名称"`
+	WelcomeMessage       string      `json:"welcomeMessage" dc:"欢迎语"`
 	BotUserId            string      `json:"botUserId" dc:"Bot用户ID"`
 	BotUsername          string      `json:"botUsername" dc:"Bot用户名"`
 	SupergroupId         string      `json:"supergroupId" dc:"管理群ID"`

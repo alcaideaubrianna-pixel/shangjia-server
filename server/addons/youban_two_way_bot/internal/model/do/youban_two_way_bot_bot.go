@@ -33,4 +33,5 @@ type YoubanTwoWayBotBot struct {
 	CreatedAt            *gtime.Time //
 	UpdatedAt            *gtime.Time //
 	DeletedAt            *gtime.Time //
+	WelcomeMessage       any         //
 }

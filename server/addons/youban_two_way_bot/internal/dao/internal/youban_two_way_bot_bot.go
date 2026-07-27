@@ -42,6 +42,7 @@ type YoubanTwoWayBotBotColumns struct {
 	CreatedAt            string //
 	UpdatedAt            string //
 	DeletedAt            string //
+	WelcomeMessage       string //
 }
 
 // youbanTwoWayBotBotColumns holds the columns for the table hg_youban_two_way_bot_bot.
@@ -67,6 +68,7 @@ var youbanTwoWayBotBotColumns = YoubanTwoWayBotBotColumns{
 	CreatedAt:            "created_at",
 	UpdatedAt:            "updated_at",
 	DeletedAt:            "deleted_at",
+	WelcomeMessage:       "welcome_message",
 }
 
 // NewYoubanTwoWayBotBotDao creates and returns a new DAO object for table data access.

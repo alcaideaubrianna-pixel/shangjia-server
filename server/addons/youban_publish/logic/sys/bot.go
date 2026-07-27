@@ -17,6 +17,7 @@ import (
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
+	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/contexts"
 )
 
@@ -76,6 +77,9 @@ func (s *sSysPublish) ServerBotDelete(ctx context.Context, in *sysin.BotDeleteIn
 		return gerror.Wrap(err, "删除Bot配置失败")
 	}
 	s.clearTelegramBotCache()
+	if refreshErr := gatewayservice.Gateway().Refresh(ctx); refreshErr != nil {
+		g.Log().Warningf(ctx, "刷新TG Bot Gateway失败：%+v", refreshErr)
+	}
 	return nil
 }
 

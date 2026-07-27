@@ -47,6 +47,9 @@ func (s *sSysTwoWayBot) handleTelegramUpdate(ctx context.Context, bot *tgbot.Bot
 	if row == nil || update == nil {
 		return nil
 	}
+	if handled, err := s.handleCooperationCallback(ctx, bot, row, update.CallbackQuery); handled || err != nil {
+		return err
+	}
 	msg := update.Message
 	if msg == nil {
 		msg = update.EditedMessage
@@ -72,6 +75,9 @@ func (s *sSysTwoWayBot) handleTelegramUpdate(ctx context.Context, bot *tgbot.Bot
 func (s *sSysTwoWayBot) handlePrivateMessage(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, msg *models.Message) error {
 	if msg.From == nil || msg.From.ID <= 0 {
 		return nil
+	}
+	if handled, err := s.handleCooperationPrivateMessage(ctx, bot, row, msg); handled || err != nil {
+		return err
 	}
 	if strings.TrimSpace(row.SupergroupId) == "" {
 		return gerror.New("双向机器人未配置管理群")
@@ -327,14 +333,40 @@ func (s *sSysTwoWayBot) isGroupAdmin(ctx context.Context, bot *tgbot.Bot, row *e
 	}
 	key := adminUserCacheKey(row.Id, userId)
 	if value, err := cache.Instance().Get(ctx, key); err == nil && value != nil {
-		return value.Bool(), nil
+		if value.Bool() {
+			return true, nil
+		}
+		_, _ = cache.Instance().Remove(ctx, key)
 	}
-	member, err := bot.GetChatMember(ctx, &tgbot.GetChatMemberParams{ChatID: row.SupergroupId, UserID: userId})
-	if err != nil {
-		return false, err
+	member, memberErr := bot.GetChatMember(ctx, &tgbot.GetChatMemberParams{ChatID: row.SupergroupId, UserID: userId})
+	ok := memberErr == nil && member != nil && (member.Type == models.ChatMemberTypeOwner || member.Type == models.ChatMemberTypeAdministrator)
+	if !ok {
+		administrators, administratorsErr := bot.GetChatAdministrators(ctx, &tgbot.GetChatAdministratorsParams{ChatID: row.SupergroupId})
+		if administratorsErr == nil {
+			for _, administrator := range administrators {
+				administratorUserId := int64(0)
+				switch administrator.Type {
+				case models.ChatMemberTypeOwner:
+					if administrator.Owner != nil && administrator.Owner.User != nil {
+						administratorUserId = administrator.Owner.User.ID
+					}
+				case models.ChatMemberTypeAdministrator:
+					if administrator.Administrator != nil {
+						administratorUserId = administrator.Administrator.User.ID
+					}
+				}
+				if administratorUserId == userId {
+					ok = true
+					break
+				}
+			}
+		} else if memberErr != nil {
+			return false, gerror.Wrapf(administratorsErr, "读取管理群管理员失败，GetChatMember错误：%v", memberErr)
+		}
 	}
-	ok := member != nil && (member.Type == models.ChatMemberTypeOwner || member.Type == models.ChatMemberTypeAdministrator)
-	_ = cache.Instance().Set(ctx, key, ok, twoWayAdminCacheTTL)
+	if ok {
+		_ = cache.Instance().Set(ctx, key, true, twoWayAdminCacheTTL)
+	}
 	return ok, nil
 }
 

@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	twdao "hotgo/addons/youban_two_way_bot/internal/dao"
 	"hotgo/addons/youban_two_way_bot/internal/model/entity"
 	"hotgo/addons/youban_two_way_bot/model/input/sysin"
@@ -137,6 +138,7 @@ func (s *sSysTwoWayBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) 
 		"account_id":             account.Id,
 		"tg_account_id":          in.TgAccountId,
 		"name":                   name,
+		"welcome_message":        in.WelcomeMessage,
 		"bot_token":              token,
 		"bot_user_id":            botUserId,
 		"bot_username":           botUsername,
@@ -162,6 +164,34 @@ func (s *sSysTwoWayBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) 
 	}
 	if supergroupId != "" {
 		return s.syncRuntimeById(ctx, in.Id, account.TenantId)
+	}
+	return nil
+}
+
+func (s *sSysTwoWayBot) AdminBotSettings(ctx context.Context, in *sysin.BotSettingsInp) error {
+	if err := in.Filter(); err != nil {
+		return err
+	}
+	account, err := currentAdminAccount(ctx)
+	if err != nil {
+		return err
+	}
+	columns := twdao.YoubanTwoWayBotBot.Columns()
+	result, err := twdao.YoubanTwoWayBotBot.Ctx(ctx).
+		Where(columns.Id, in.Id).
+		Where(columns.TenantId, account.TenantId).
+		WhereNull(columns.DeletedAt).
+		Data(g.Map{
+			columns.Name:           in.Name,
+			columns.WelcomeMessage: in.WelcomeMessage,
+			columns.UpdatedAt:      gtime.Now(),
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "保存双向机器人设置失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return gerror.New("双向机器人不存在")
 	}
 	return nil
 }
@@ -217,14 +247,10 @@ func (s *sSysTwoWayBot) syncRuntimeById(ctx context.Context, id int64, tenantId 
 	if strings.TrimSpace(row.SupergroupId) == "" {
 		return gerror.New("请先配置管理群ID")
 	}
-	mode, conf, err := s.twoWayBotRuntimeMode(ctx)
-	if err != nil {
-		return err
+	if err = gatewayservice.Gateway().Refresh(ctx); err != nil {
+		return gerror.Wrap(err, "刷新TG Bot Gateway失败")
 	}
-	if mode == "pull" || mode == "polling" {
-		return s.enablePollingForBot(ctx, row)
-	}
-	return s.enableWebhookForBot(ctx, row, conf)
+	return s.updateWebhookStatus(ctx, row.Id, sysin.TwoWayBotWebhookReady, "")
 }
 
 func (s *sSysTwoWayBot) validateBotToken(ctx context.Context, token string) (userId string, username string, displayName string, err error) {
@@ -321,6 +347,7 @@ func botModel(row *entity.YoubanTwoWayBotBot, tgAccountName string) *sysin.BotMo
 		TgAccountId:          row.TgAccountId,
 		TgAccountName:        strings.TrimSpace(tgAccountName),
 		Name:                 row.Name,
+		WelcomeMessage:       row.WelcomeMessage,
 		BotUserId:            row.BotUserId,
 		BotUsername:          row.BotUsername,
 		SupergroupId:         row.SupergroupId,

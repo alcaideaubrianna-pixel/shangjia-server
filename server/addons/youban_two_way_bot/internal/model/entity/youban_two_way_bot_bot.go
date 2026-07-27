@@ -31,4 +31,5 @@ type YoubanTwoWayBotBot struct {
 	CreatedAt            *gtime.Time `json:"createdAt"            orm:"created_at"             description:""`
 	UpdatedAt            *gtime.Time `json:"updatedAt"            orm:"updated_at"             description:""`
 	DeletedAt            *gtime.Time `json:"deletedAt"            orm:"deleted_at"             description:""`
+	WelcomeMessage       string      `json:"welcomeMessage"       orm:"welcome_message"        description:""`
 }

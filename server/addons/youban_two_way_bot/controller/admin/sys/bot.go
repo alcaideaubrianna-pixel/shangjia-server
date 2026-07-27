@@ -26,6 +26,13 @@ func (c *cBot) Save(ctx context.Context, req *bot.SaveReq) (res *bot.SaveRes, er
 	return &bot.SaveRes{}, nil
 }
 
+func (c *cBot) Settings(ctx context.Context, req *bot.SettingsReq) (res *bot.SettingsRes, err error) {
+	if err = service.SysTwoWayBot().AdminBotSettings(ctx, &req.BotSettingsInp); err != nil {
+		return nil, err
+	}
+	return &bot.SettingsRes{}, nil
+}
+
 func (c *cBot) Delete(ctx context.Context, req *bot.DeleteReq) (res *bot.DeleteRes, err error) {
 	if err = service.SysTwoWayBot().AdminBotDelete(ctx, &req.BotDeleteInp); err != nil {
 		return nil, err

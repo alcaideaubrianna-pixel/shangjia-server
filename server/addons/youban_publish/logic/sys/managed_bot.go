@@ -8,6 +8,7 @@ import (
 
 	botService "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -180,6 +181,9 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 		return nil, gerror.Wrap(err, "保存Bot配置失败")
 	}
 	s.clearTelegramBotCache()
+	if err = gatewayservice.Gateway().Refresh(ctx); err != nil {
+		g.Log().Warningf(ctx, "刷新TG Bot Gateway失败 bot:%d err:%+v", id, err)
+	}
 	return &sysin.BotModel{
 		Id:          id,
 		TenantId:    current.TenantId,

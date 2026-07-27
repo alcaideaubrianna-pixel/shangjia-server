@@ -18,6 +18,7 @@ func Api(ctx context.Context, group *ghttp.RouterGroup) {
 		group.Bind(api.Webhook)
 		withPublishAdminAuth(group, func(group *ghttp.RouterGroup) {
 			group.Bind(adminsys.Bot)
+			group.Bind(adminsys.Cooperation)
 		})
 	})
 }

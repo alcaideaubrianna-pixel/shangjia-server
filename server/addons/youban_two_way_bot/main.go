@@ -11,7 +11,6 @@ import (
 	"hotgo/addons/youban_two_way_bot/install"
 	_ "hotgo/addons/youban_two_way_bot/logic"
 	"hotgo/addons/youban_two_way_bot/router"
-	twservice "hotgo/addons/youban_two_way_bot/service"
 	"hotgo/internal/library/addons"
 	internalservice "hotgo/internal/service"
 )
@@ -47,12 +46,10 @@ func (m *module) Start(option *addons.Option) (err error) {
 		router.Api(m.ctx, group)
 		router.Admin(m.ctx, group)
 	})
-	twservice.SysTwoWayBot().StartRuntime(m.ctx)
 	return
 }
 
 func (m *module) Stop() (err error) {
-	twservice.SysTwoWayBot().StopRuntime()
 	return
 }
 

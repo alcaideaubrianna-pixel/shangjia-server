@@ -23,6 +23,13 @@ type SaveReq struct {
 
 type SaveRes struct{}
 
+type SettingsReq struct {
+	g.Meta `path:"/twoWayBot/settings" method:"post" tags:"双向机器人" summary:"保存双向机器人设置"`
+	sysin.BotSettingsInp
+}
+
+type SettingsRes struct{}
+
 type DeleteReq struct {
 	g.Meta `path:"/twoWayBot/delete" method:"post" tags:"双向机器人" summary:"删除双向机器人"`
 	sysin.BotDeleteInp
