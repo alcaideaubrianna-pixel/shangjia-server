@@ -252,7 +252,7 @@ func (s *sSysPublish) enqueueProfileDownRun(ctx context.Context, tenantId int64,
 	}
 	task := asynq.NewTask(tgTaskTypeDown, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBackground),
+		asynq.Queue(tgQueueNameUrgent),
 		asynq.MaxRetry(10),
 		asynq.Timeout(30 * time.Minute),
 		asynq.Unique(30 * time.Second),

@@ -50,6 +50,9 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	} else {
 		mod = mod.Where(`(j.created_at < ? OR (j.created_at = ? AND j.id < ?))`, createdAt, createdAt, job.Id)
 	}
+	if isTelegramUrgentJob(job) {
+		mod = mod.Where("j.priority <= ?", tgJobPriorityUrgent)
+	}
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}

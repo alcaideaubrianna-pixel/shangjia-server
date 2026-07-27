@@ -217,6 +217,9 @@ func (s *sSysPublish) telegramChannelHasActiveDispatch(ctx context.Context, job 
 		Where("j.id <> ?", job.Id).
 		WhereIn("j.status", []string{"sending", "pending", "failed_retry"}).
 		Where("(j.dispatch_status IN (?, ?) OR j.status = ?)", tgDispatchStatusQueued, tgDispatchStatusProcessing, "sending")
+	if isTelegramUrgentJob(job) {
+		mod = mod.Where("(j.status = ? OR j.dispatch_status = ? OR (j.dispatch_status = ? AND j.priority <= ?))", "sending", tgDispatchStatusProcessing, tgDispatchStatusQueued, tgJobPriorityUrgent)
+	}
 	if job.ChannelId > 0 {
 		mod = mod.Where("j.channel_id", job.ChannelId)
 	} else {
@@ -289,10 +292,21 @@ func (s *sSysPublish) resetStaleTelegramDispatchJobs(ctx context.Context) error 
 }
 
 func (s *sSysPublish) telegramJobPriority(job telegramJobRecord) int {
+	return telegramJobPriorityValue(job)
+}
+
+func isTelegramUrgentJob(job telegramJobRecord) bool {
+	return telegramJobPriorityValue(job) <= tgJobPriorityUrgent
+}
+
+func telegramJobPriorityValue(job telegramJobRecord) int {
+	operationNo := strings.ToLower(strings.TrimSpace(job.OperationNo))
+	if strings.HasPrefix(operationNo, "profile:") {
+		return tgJobPriorityUrgent
+	}
 	if job.Priority > 0 && job.Priority != 100 {
 		return job.Priority
 	}
-	operationNo := strings.ToLower(strings.TrimSpace(job.OperationNo))
 	if strings.HasPrefix(operationNo, "full_push:") || strings.HasPrefix(operationNo, "cycle_batch:") {
 		return tgJobPriorityBulk
 	}
