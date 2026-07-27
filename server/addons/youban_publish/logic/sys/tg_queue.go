@@ -17,6 +17,7 @@ const (
 	tgQueueNameDefault          = "youban_publish_tg"
 	tgQueueNameBulk             = "youban_publish_tg_bulk"
 	tgQueueNameMedia            = "youban_publish_media"
+	tgQueueNameBackground       = "youban_publish_background"
 	tgTaskTypePublish           = "youban_publish:tg:publish"
 	tgTaskTypeCleanup           = "youban_publish:tg:cleanup"
 	tgTaskTypeImport            = "youban_publish:import:legacy"
@@ -123,7 +124,7 @@ func (s *sSysPublish) enqueueImportTask(ctx context.Context, id int64, delay tim
 	}
 	task := asynq.NewTask(tgTaskTypeImport, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBulk),
+		asynq.Queue(tgQueueNameBackground),
 		asynq.MaxRetry(0),
 		asynq.Timeout(2 * time.Hour),
 		asynq.Unique(30 * time.Second),
@@ -152,7 +153,7 @@ func (s *sSysPublish) enqueueImportRun(ctx context.Context, runId int64, delay t
 	}
 	task := asynq.NewTask(tgTaskTypeImport, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBulk),
+		asynq.Queue(tgQueueNameBackground),
 		asynq.MaxRetry(0),
 		asynq.Timeout(2 * time.Hour),
 		asynq.Unique(30 * time.Second),
@@ -181,7 +182,7 @@ func (s *sSysPublish) enqueueTgMessageRepairRun(ctx context.Context, runId int64
 	}
 	task := asynq.NewTask(tgTaskTypeRepair, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBulk),
+		asynq.Queue(tgQueueNameBackground),
 		asynq.MaxRetry(0),
 		asynq.Timeout(2 * time.Hour),
 		asynq.Unique(30 * time.Second),
@@ -218,7 +219,7 @@ func (s *sSysPublish) enqueueImportRunMatchTask(ctx context.Context, taskType st
 	}
 	task := asynq.NewTask(taskType, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBulk),
+		asynq.Queue(tgQueueNameBackground),
 		asynq.MaxRetry(0),
 		asynq.Timeout(2 * time.Hour),
 		asynq.Unique(30 * time.Second),
@@ -251,7 +252,7 @@ func (s *sSysPublish) enqueueProfileDownRun(ctx context.Context, tenantId int64,
 	}
 	task := asynq.NewTask(tgTaskTypeDown, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameUrgent),
+		asynq.Queue(tgQueueNameBackground),
 		asynq.MaxRetry(10),
 		asynq.Timeout(30 * time.Minute),
 		asynq.Unique(30 * time.Second),
@@ -280,7 +281,7 @@ func (s *sSysPublish) enqueueCycleRun(ctx context.Context, runId int64, delay ti
 	}
 	task := asynq.NewTask(tgTaskTypeCycleRun, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBulk),
+		asynq.Queue(tgQueueNameBackground),
 		asynq.MaxRetry(3),
 		asynq.Timeout(30 * time.Minute),
 	}

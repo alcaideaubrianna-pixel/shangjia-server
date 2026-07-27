@@ -32,7 +32,7 @@ func (s *sSysPublish) enqueueCollectSourceDown(ctx context.Context, payload coll
 	}
 	task := asynq.NewTask(tgTaskTypeCollectSourceDown, body)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameUrgent),
+		asynq.Queue(tgQueueNameBackground),
 		asynq.MaxRetry(10),
 		asynq.Timeout(30 * time.Minute),
 		asynq.Unique(30 * time.Second),

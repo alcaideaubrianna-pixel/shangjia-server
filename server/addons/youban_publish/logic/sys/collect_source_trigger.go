@@ -306,7 +306,7 @@ func (s *sSysPublish) enqueueCollectSourceTrigger(ctx context.Context, payload c
 	}
 	task := asynq.NewTask(tgTaskTypeCollectTrigger, body)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBulk),
+		asynq.Queue(tgQueueNameBackground),
 		asynq.MaxRetry(0),
 		asynq.Timeout(30 * time.Minute),
 		asynq.Unique(30 * time.Second),

@@ -28,7 +28,7 @@ func (s *sSysPublish) enqueueChannelMemberSyncTask(ctx context.Context, taskId i
 	}
 	task := asynq.NewTask(tgTaskTypeChannelMemberSync, body)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBulk),
+		asynq.Queue(tgQueueNameBackground),
 		asynq.MaxRetry(0),
 		asynq.Timeout(2 * time.Hour),
 		asynq.Unique(30 * time.Second),

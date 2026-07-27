@@ -30,7 +30,7 @@ func (s *sSysPublish) enqueueMaterialImportTask(ctx context.Context, taskId int6
 	}
 	task := asynq.NewTask(tgTaskTypeMaterialImport, body)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBulk),
+		asynq.Queue(tgQueueNameBackground),
 		asynq.MaxRetry(0),
 		asynq.Timeout(6 * time.Hour),
 	}

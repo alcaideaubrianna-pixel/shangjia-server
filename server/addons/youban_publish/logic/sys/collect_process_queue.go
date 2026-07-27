@@ -30,7 +30,7 @@ func (s *sSysPublish) enqueueCollectProcess(ctx context.Context, payload collect
 	}
 	task := asynq.NewTask(tgTaskTypeCollectProcess, body)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameDefault),
+		asynq.Queue(tgQueueNameBackground),
 		asynq.Unique(10 * time.Second),
 		asynq.MaxRetry(10),
 		asynq.Timeout(10 * time.Minute),

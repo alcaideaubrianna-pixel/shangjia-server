@@ -24,13 +24,22 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 		Queues:         map[string]int{tgQueueNameMedia: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
+	backgroundServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.backgroundConcurrency", 4).Int(),
+		Queues:         map[string]int{tgQueueNameBackground: 1},
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
 	s.tgQueueServer = server
 	s.mediaQueueServer = mediaServer
+	s.backgroundQueueServer = backgroundServer
 	s.tgQueueMu.Unlock()
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tgTaskTypePublish, s.handleTelegramPublishTask)
 	mux.HandleFunc(tgTaskTypeCleanup, s.handleTelegramCleanupTask)
+	// Tasks enqueued before the queue split still live in the original TG
+	// queues. Keep their handlers here until those Redis queues drain; all new
+	// background work is routed exclusively to tgQueueNameBackground.
 	mux.HandleFunc(tgTaskTypeImport, s.handleImportTask)
 	mux.HandleFunc(tgTaskTypeRepair, s.handleTgMessageRepairTask)
 	mux.HandleFunc(tgTaskTypeImportMatch, s.handleImportMatchTask)
@@ -47,7 +56,26 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 
 	go func() {
 		if err := server.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-			g.Log().Errorf(ctx, "启动上架插件TG队列失败：%+v", err)
+			g.Log().Errorf(ctx, "启动上架插件TG发送队列失败：%+v", err)
+		}
+	}()
+
+	backgroundMux := asynq.NewServeMux()
+	backgroundMux.HandleFunc(tgTaskTypeImport, s.handleImportTask)
+	backgroundMux.HandleFunc(tgTaskTypeRepair, s.handleTgMessageRepairTask)
+	backgroundMux.HandleFunc(tgTaskTypeImportMatch, s.handleImportMatchTask)
+	backgroundMux.HandleFunc(tgTaskTypeImportSync, s.handleImportTgSyncTask)
+	backgroundMux.HandleFunc(tgTaskTypeMaterialImport, s.handleMaterialImportTask)
+	backgroundMux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
+	backgroundMux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
+	backgroundMux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
+	backgroundMux.HandleFunc(tgTaskTypeCollectHistory, s.handleCollectHistoryTask)
+	backgroundMux.HandleFunc(tgTaskTypeCollectTrigger, s.handleCollectTriggerTask)
+	backgroundMux.HandleFunc(tgTaskTypeChannelMemberSync, s.handleChannelMemberSyncTask)
+	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDown, s.handleCollectSourceDownTask)
+	go func() {
+		if err := backgroundServer.Run(backgroundMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动上架插件后台队列失败：%+v", err)
 		}
 	}()
 
@@ -64,9 +92,11 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.tgQueueMu.Lock()
 	server := s.tgQueueServer
 	mediaServer := s.mediaQueueServer
+	backgroundServer := s.backgroundQueueServer
 	client := s.tgQueueClient
 	s.tgQueueServer = nil
 	s.mediaQueueServer = nil
+	s.backgroundQueueServer = nil
 	s.tgQueueClient = nil
 	s.tgQueueMu.Unlock()
 	if server != nil {
@@ -74,6 +104,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	if mediaServer != nil {
 		mediaServer.Shutdown()
+	}
+	if backgroundServer != nil {
+		backgroundServer.Shutdown()
 	}
 	if client != nil {
 		_ = client.Close()
