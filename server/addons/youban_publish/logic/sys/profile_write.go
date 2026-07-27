@@ -129,7 +129,6 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).Unscoped().Delete(); err != nil {
 		return gerror.Wrap(err, "删除资料失败")
 	}
-	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).WhereIn("profile_id", ids).Data(g.Map{"deleted_by": contexts.GetUserId(ctx), "deleted_at": gtime.Now()}).Update()
 	if err = s.deleteProfileNoteIndex(ctx, ids); err != nil {
 		return err
 	}
@@ -190,12 +189,6 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 			return nil, gerror.Wrap(err, "更新资料状态失败")
 		}
 	}
-	taskData := g.Map{
-		"status":     sysin.PublishTaskStatusCanceled,
-		"updated_by": contexts.GetUserId(ctx),
-		"updated_at": gtime.Now(),
-	}
-	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).WhereIn("profile_id", ids).Data(taskData).Update()
 	for _, id := range ids {
 		if err = s.syncProfileNoteIndex(ctx, id); err != nil {
 			return nil, err
@@ -216,16 +209,13 @@ func (s *sSysPublish) submitProfilesByIds(ctx context.Context, ids []int64, tena
 		return nil
 	}
 	for _, profileId := range uniqueIds(ids) {
-		taskId, alreadyPublished, err := s.createProfilePublishEvent(ctx, profileId, tenantId, accountId)
-		if err != nil {
+		if err := s.cleanupProfileDownMessagesBeforePublish(ctx, profileId, tenantId); err != nil {
 			return err
 		}
-		if !alreadyPublished {
-			if err = s.submitTaskByTenant(ctx, taskId, tenantId, contexts.GetUserId(ctx)); err != nil {
-				return err
-			}
+		if err := s.submitProfilePublish(ctx, profileId, tenantId, accountId, contexts.GetUserId(ctx), "", nil, false); err != nil {
+			return err
 		}
-		if err = s.syncProfileNoteIndex(ctx, profileId); err != nil {
+		if err := s.syncProfileNoteIndex(ctx, profileId); err != nil {
 			return err
 		}
 	}

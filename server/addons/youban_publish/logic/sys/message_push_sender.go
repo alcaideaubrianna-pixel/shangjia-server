@@ -762,9 +762,6 @@ func (s *sSysPublish) createQueuedMessagePushJobWithPriority(ctx context.Context
 }
 
 func (s *sSysPublish) createMessagePushJobWithOperation(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, botId int64, operationNo string, priority int, queueName string, dispatchStatus string, now *gtime.Time) (telegramJobRecord, error) {
-	if err := ensureTelegramOperationColumns(ctx); err != nil {
-		return telegramJobRecord{}, err
-	}
 	if strings.TrimSpace(operationNo) == "" {
 		return telegramJobRecord{}, gerror.New("消息推送操作号不能为空")
 	}

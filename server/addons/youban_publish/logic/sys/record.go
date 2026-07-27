@@ -156,9 +156,6 @@ func (s *sSysPublish) MyPublishRecordClear(ctx context.Context, in *sysin.Publis
 }
 
 func (s *sSysPublish) publishRecordList(ctx context.Context, in *sysin.PublishRecordListInp, tenantId int64, accountId int64) (list []*sysin.PublishRecordModel, totalCount int, err error) {
-	if err = ensurePublishSuccessRecordSchema(ctx); err != nil {
-		return nil, 0, err
-	}
 	if in.Keyword == "" {
 		return s.publishRecordListFast(ctx, in, tenantId, accountId)
 	}
@@ -249,9 +246,6 @@ func (s *sSysPublish) applyPublishRecordFilters(mod *gdb.Model, in *sysin.Publis
 }
 
 func (s *sSysPublish) publishRecordClear(ctx context.Context, tenantId int64, accountId int64) error {
-	if err := ensurePublishSuccessRecordSchema(ctx); err != nil {
-		return err
-	}
 	mod := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).Where("tenant_id", tenantId)
 	if accountId > 0 {
 		mod = mod.Where("account_id", accountId)

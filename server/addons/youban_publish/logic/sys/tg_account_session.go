@@ -254,6 +254,43 @@ func (s *sSysPublish) ensureTgAccountsBelongTenant(ctx context.Context, ids []in
 	return nil
 }
 
+func (s *sSysPublish) resolveTenantTgAccountId(ctx context.Context, id int64, tenantId int64) (int64, error) {
+	if id <= 0 || tenantId <= 0 {
+		return 0, gerror.New("请选择TG账号")
+	}
+	account, err := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).Unscoped().
+		Where("id", id).
+		Where("tenant_id", tenantId).
+		One()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取TG账号失败")
+	}
+	if account.IsEmpty() {
+		return 0, gerror.New("TG账号不存在或不属于当前租户")
+	}
+	if account["deleted_at"].IsNil() && account["status"].String() == sysin.PublishTgAccountStatusAuthorized {
+		return id, nil
+	}
+	telegramUserId := strings.TrimSpace(account["telegram_user_id"].String())
+	if telegramUserId == "" {
+		return 0, gerror.New("TG账号已失效，请重新选择账号")
+	}
+	replacement, err := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("telegram_user_id", telegramUserId).
+		Where("status", sysin.PublishTgAccountStatusAuthorized).
+		WhereNull("deleted_at").
+		OrderDesc("id").
+		One()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取TG账号最新授权失败")
+	}
+	if replacement.IsEmpty() {
+		return 0, gerror.New("TG账号已失效，请重新扫码登录")
+	}
+	return replacement["id"].Int64(), nil
+}
+
 func (s *sSysPublish) ensureTgAccountsBelongAccount(ctx context.Context, ids []int64, tenantId int64, accountId int64) error {
 	ids = uniqueIds(ids)
 	if len(ids) == 0 {

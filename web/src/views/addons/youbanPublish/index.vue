@@ -74,43 +74,6 @@
           />
         </n-tab-pane>
 
-        <n-tab-pane name="tasks" tab="任务">
-          <n-space class="toolbar" align="center">
-            <n-select
-              v-model:value="taskQuery.tenantId"
-              :options="tenantOptionsWithAll"
-              clearable
-              filterable
-              placeholder="账号归属"
-              class="tenant-select"
-            />
-            <n-select
-              v-model:value="taskQuery.status"
-              :options="taskStatusOptionsWithAll"
-              clearable
-              placeholder="任务状态"
-              class="status-select"
-            />
-            <n-input
-              v-model:value="taskQuery.keyword"
-              placeholder="标题 / 请求ID"
-              clearable
-              @keyup.enter="loadTasks"
-            />
-            <n-button @click="loadTasks">查询</n-button>
-          </n-space>
-          <n-data-table
-            :columns="taskColumns"
-            :data="tasks"
-            :loading="taskLoading"
-            :pagination="taskPagination"
-            :row-key="(row) => row.id"
-            :scroll-x="1320"
-            size="small"
-            remote
-          />
-        </n-tab-pane>
-
         <n-tab-pane name="profiles" tab="笔记资料">
           <ProfilePanel />
         </n-tab-pane>
@@ -604,9 +567,6 @@
     TenantDelete,
     TenantList,
     TenantSave,
-    TaskCancel,
-    TaskList,
-    TaskSubmit,
     TagDelete,
     TagList,
     TagSave,
@@ -616,7 +576,8 @@
   const dialog = useDialog();
   const message = useMessage();
   const activeTabStorageKey = 'youban_publish_admin_active_tab';
-  const activeTab = ref(sessionStorage.getItem(activeTabStorageKey) || 'dashboard');
+  const storedActiveTab = sessionStorage.getItem(activeTabStorageKey);
+  const activeTab = ref(storedActiveTab === 'tasks' ? 'profiles' : storedActiveTab || 'dashboard');
   const memberPanelRef = ref<InstanceType<typeof MemberPanel> | null>(null);
   const channelCachePanelRef = ref<InstanceType<typeof ChannelMemberPanel> | null>(null);
 
@@ -630,15 +591,6 @@
     { label: '上架账号', value: 'uploader' },
   ];
   const accountTypeOptionsWithAll = [{ label: '全部', value: '' }, ...accountTypeOptions];
-  const taskStatusOptions = [
-    { label: '草稿', value: 'draft' },
-    { label: '待发布', value: 'pending' },
-    { label: '发布中', value: 'publishing' },
-    { label: '已发布', value: 'published' },
-    { label: '失败', value: 'failed' },
-    { label: '已取消', value: 'canceled' },
-  ];
-  const taskStatusOptionsWithAll = [{ label: '全部', value: '' }, ...taskStatusOptions];
   const reviewStatusOptions = [
     { label: '待审核', value: 'pending' },
     { label: '已通过', value: 'approved' },
@@ -653,13 +605,11 @@
 
   const tenants = ref<any[]>([]);
   const accounts = ref<any[]>([]);
-  const tasks = ref<any[]>([]);
   const tags = ref<any[]>([]);
   const bots = ref<any[]>([]);
 
   const tenantLoading = ref(false);
   const accountLoading = ref(false);
-  const taskLoading = ref(false);
   const tagLoading = ref(false);
   const botLoading = ref(false);
   const botRefreshing = ref(false);
@@ -682,7 +632,6 @@
     keyword: '',
     status: 0,
   });
-  const taskQuery = reactive({ tenantId: null as number | null, status: '', keyword: '' });
   const tagQuery = reactive({ keyword: '', reviewStatus: '', status: 0 });
   const botQuery = reactive({ tenantId: null as number | null, keyword: '', status: 0 });
   const inviteQuery = reactive({ keyword: '', source: '', status: '' });
@@ -690,7 +639,6 @@
 
   const tenantPagination = createPagination(loadTenants);
   const accountPagination = createPagination(loadAccounts);
-  const taskPagination = createPagination(loadTasks);
   const tagPagination = createPagination(loadTags, 20);
   const botPagination = createPagination(loadBots);
   const invitePagination = createPagination(loadInviteRelations, 20);
@@ -869,41 +817,6 @@
               actionButton('会员记录', () => openAccountVipRecords(row)),
               actionButton('重置密码', () => openAccountResetPassword(row)),
               dangerButton('删除', () => deleteAccount(row.id)),
-            ],
-          }
-        );
-      },
-    },
-  ];
-
-  const taskColumns = [
-    { title: 'ID', key: 'id', width: 80 },
-    { title: '账号归属', key: 'tenantId', width: 150, render: (row) => tenantName(row.tenantId) },
-    { title: '账号', key: 'accountUsername', width: 150 },
-    { title: '标题', key: 'title', width: 220 },
-    {
-      title: '地区',
-      key: 'city',
-      width: 140,
-      render: (row) => [row.province, row.city].filter(Boolean).join(' / ') || '-',
-    },
-    { title: '媒体', key: 'mediaCount', width: 80 },
-    { title: '任务状态', key: 'status', width: 110, render: (row) => renderTaskStatus(row.status) },
-    { title: 'TG状态', key: 'tgStatus', width: 100 },
-    { title: '提交时间', key: 'submittedAt', width: 170 },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 170,
-      fixed: 'right',
-      render(row) {
-        return h(
-          NSpace,
-          {},
-          {
-            default: () => [
-              actionButton('提交', () => submitTask(row.id)),
-              dangerButton('取消', () => cancelTask(row.id)),
             ],
           }
         );
@@ -1142,7 +1055,6 @@
     if (tab === 'dashboard') return;
     if (tab === 'importTasks') return;
     if (tab === 'accounts') await loadAccounts();
-    if (tab === 'tasks') await loadTasks();
     if (tab === 'tags') await loadTags();
     if (tab === 'bots') await loadBots();
     if (tab === 'inviteRelations') await loadInviteRelations();
@@ -1197,21 +1109,6 @@
       accountPagination.itemCount = res?.totalCount || res?.total || 0;
     } finally {
       accountLoading.value = false;
-    }
-  }
-
-  async function loadTasks() {
-    taskLoading.value = true;
-    try {
-      const res: any = await TaskList({
-        ...taskQuery,
-        page: taskPagination.page,
-        perPage: taskPagination.pageSize,
-      });
-      tasks.value = res?.list || [];
-      taskPagination.itemCount = res?.totalCount || res?.total || 0;
-    } finally {
-      taskLoading.value = false;
     }
   }
 
@@ -1533,18 +1430,6 @@
     await reloadActiveTabData();
   }
 
-  async function submitTask(id: number) {
-    await TaskSubmit({ id });
-    message.success('任务已提交');
-    await reloadActiveTabData();
-  }
-
-  async function cancelTask(id: number) {
-    await TaskCancel({ id });
-    message.success('任务已取消');
-    await reloadActiveTabData();
-  }
-
   function confirmDelete(content: string, onConfirm: () => Promise<void>) {
     dialog.warning({
       title: '确认操作',
@@ -1683,19 +1568,6 @@
     if (status === 'password_required') return 'warning';
     if (status === 'expired' || status === 'failed') return 'error';
     return 'default';
-  }
-
-  function renderTaskStatus(status: string) {
-    const option = taskStatusOptions.find((item) => item.value === status);
-    const type =
-      status === 'published'
-        ? 'success'
-        : status === 'failed'
-          ? 'error'
-          : status === 'pending'
-            ? 'warning'
-            : 'default';
-    return h(NTag, { type, bordered: false }, { default: () => option?.label || status || '-' });
   }
 
   function renderReviewStatus(status: string) {

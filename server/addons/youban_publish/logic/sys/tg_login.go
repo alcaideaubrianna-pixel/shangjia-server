@@ -333,14 +333,28 @@ func (s *sSysPublish) finishAdminTgAccountLogin(ctx context.Context, runtime *te
 			"updated_by":          accountId,
 			"created_at":          now,
 			"updated_at":          now,
+			"deleted_by":          0,
+			"deleted_at":          nil,
 		}
-		if runtime.tgAccountId > 0 {
+		tgAccountId := runtime.tgAccountId
+		if tgAccountId <= 0 {
+			existing, findErr := tx.Model(publishTgAccountTable).Safe().Ctx(ctx).Unscoped().
+				Where("tenant_id", tenantId).
+				Where("telegram_user_id", strconv.FormatInt(user.ID, 10)).
+				OrderDesc("id").
+				LockUpdate().
+				One()
+			if findErr != nil {
+				return gerror.Wrap(findErr, "读取TG账号历史授权失败")
+			}
+			tgAccountId = existing["id"].Int64()
+		}
+		if tgAccountId > 0 {
 			delete(data, "created_by")
 			delete(data, "created_at")
-			if _, err := tx.Model(publishTgAccountTable).Safe().Ctx(ctx).
-				Where("id", runtime.tgAccountId).
+			if _, err := tx.Model(publishTgAccountTable).Safe().Ctx(ctx).Unscoped().
+				Where("id", tgAccountId).
 				Where("tenant_id", tenantId).
-				WhereNull("deleted_at").
 				Data(data).
 				Update(); err != nil {
 				return gerror.Wrap(err, "更新TG账号授权信息失败")

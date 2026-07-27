@@ -400,17 +400,11 @@ func (s *sSysPublish) ServerProfileEdit(ctx context.Context, in *sysin.ProfileSa
 	if in == nil || in.Id <= 0 {
 		return nil, gerror.New("资料ID不能为空")
 	}
-	task, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Where("profile_id", in.Id).
-		WhereNull("deleted_at").
-		One()
+	state, err := s.profileState(ctx, in.Id, 0, 0)
 	if err != nil {
-		return nil, gerror.Wrap(err, "读取资料任务失败")
+		return nil, err
 	}
-	if task.IsEmpty() {
-		return nil, gerror.New("资料不属于上架端")
-	}
-	return s.saveProfile(ctx, in, task["tenant_id"].Int64(), task["account_id"].Int64())
+	return s.saveProfile(ctx, in, state["tenant_id"].Int64(), state["account_id"].Int64())
 }
 
 func (s *sSysPublish) ServerProfileDelete(ctx context.Context, in *sysin.ProfileDeleteInp) (err error) {

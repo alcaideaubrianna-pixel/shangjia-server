@@ -2,8 +2,8 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -11,6 +11,8 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"hotgo/internal/consts"
+	"hotgo/internal/dao"
 	hglock "hotgo/internal/library/hgrds/lock"
 )
 
@@ -18,90 +20,58 @@ const (
 	publishFullPushBatchTable = "hg_youban_publish_full_push_batch"
 	fullPushBatchPending      = "pending"
 	fullPushBatchRunning      = "running"
+	fullPushBatchDispatching  = "dispatching"
 	fullPushBatchCompleted    = "completed"
+	fullPushBatchPartial      = "partial_failed"
 	fullPushBatchFailed       = "failed"
 )
 
 type fullPushBatchRecord struct {
-	Id                int64       `json:"id"`
-	BatchNo           string      `json:"batchNo"`
-	TenantId          int64       `json:"tenantId"`
-	ChannelId         int64       `json:"channelId"`
-	RequestedBy       int64       `json:"requestedBy"`
-	SnapshotMaxTaskId int64       `json:"snapshotMaxTaskId"`
-	CursorTaskId      int64       `json:"cursorTaskId"`
-	TotalCount        int         `json:"totalCount"`
-	QueuedCount       int         `json:"queuedCount"`
-	RetryCount        int         `json:"retryCount"`
-	Status            string      `json:"status"`
-	ActiveKey         string      `json:"activeKey"`
-	ErrorMessage      string      `json:"errorMessage"`
-	FinishedAt        *gtime.Time `json:"finishedAt"`
+	Id                   int64       `json:"id"`
+	BatchNo              string      `json:"batchNo"`
+	TenantId             int64       `json:"tenantId"`
+	ChannelId            int64       `json:"channelId"`
+	RequestedBy          int64       `json:"requestedBy"`
+	SnapshotMaxProfileId int64       `json:"snapshotMaxProfileId" orm:"snapshot_max_profile_id"`
+	CursorProfileId      int64       `json:"cursorProfileId" orm:"cursor_profile_id"`
+	TotalCount           int         `json:"totalCount"`
+	QueuedCount          int         `json:"queuedCount"`
+	RetryCount           int         `json:"retryCount"`
+	Status               string      `json:"status"`
+	ActiveKey            string      `json:"activeKey"`
+	ErrorMessage         string      `json:"errorMessage"`
+	FinishedAt           *gtime.Time `json:"finishedAt"`
 }
 
 type fullPushSnapshot struct {
-	SnapshotMaxTaskId int64 `json:"snapshotMaxTaskId"`
-	TotalCount        int   `json:"totalCount"`
+	SnapshotMaxProfileId int64 `json:"snapshotMaxProfileId" orm:"snapshot_max_profile_id"`
+	TotalCount           int   `json:"totalCount" orm:"total_count"`
 }
 
-func ensureFullPushBatchSchema(ctx context.Context) error {
-	isPgsql := strings.EqualFold(g.DB().GetConfig().Type, "pgsql")
-	statement := ""
-	if isPgsql {
-		statement = `CREATE TABLE IF NOT EXISTS "hg_youban_publish_full_push_batch" (
-			"id" bigserial PRIMARY KEY,
-			"batch_no" varchar(128) NOT NULL,
-			"tenant_id" bigint NOT NULL DEFAULT 0,
-			"channel_id" bigint NOT NULL DEFAULT 0,
-			"requested_by" bigint NOT NULL DEFAULT 0,
-			"snapshot_max_task_id" bigint NOT NULL DEFAULT 0,
-			"cursor_task_id" bigint NOT NULL DEFAULT 0,
-			"total_count" integer NOT NULL DEFAULT 0,
-			"queued_count" integer NOT NULL DEFAULT 0,
-			"retry_count" integer NOT NULL DEFAULT 0,
-			"status" varchar(16) NOT NULL DEFAULT 'pending',
-			"active_key" varchar(64) DEFAULT NULL,
-			"error_message" text,
-			"created_at" timestamp DEFAULT NULL,
-			"updated_at" timestamp DEFAULT NULL,
-			"finished_at" timestamp DEFAULT NULL
-		)`
-	} else {
-		statement = "CREATE TABLE IF NOT EXISTS `hg_youban_publish_full_push_batch` (`id` bigint(20) NOT NULL AUTO_INCREMENT,`batch_no` varchar(128) NOT NULL,`tenant_id` bigint(20) NOT NULL DEFAULT '0',`channel_id` bigint(20) NOT NULL DEFAULT '0',`requested_by` bigint(20) NOT NULL DEFAULT '0',`snapshot_max_task_id` bigint(20) NOT NULL DEFAULT '0',`cursor_task_id` bigint(20) NOT NULL DEFAULT '0',`total_count` int(11) NOT NULL DEFAULT '0',`queued_count` int(11) NOT NULL DEFAULT '0',`retry_count` int(11) NOT NULL DEFAULT '0',`status` varchar(16) NOT NULL DEFAULT 'pending',`active_key` varchar(64) DEFAULT NULL,`error_message` text,`created_at` datetime DEFAULT NULL,`updated_at` datetime DEFAULT NULL,`finished_at` datetime DEFAULT NULL,PRIMARY KEY (`id`),UNIQUE KEY `uk_ybp_full_push_batch_no` (`batch_no`),UNIQUE KEY `uk_ybp_full_push_active` (`active_key`),KEY `idx_ybp_full_push_schedule` (`status`,`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='频道全量推送批次'"
-	}
-	if _, err := g.DB().Exec(ctx, statement); err != nil {
-		return gerror.Wrap(err, "初始化全量推送批次表失败")
-	}
-	if !isPgsql {
-		return nil
-	}
-	for _, indexSQL := range []string{
-		`CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_full_push_batch_no" ON "hg_youban_publish_full_push_batch" ("batch_no")`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_full_push_active" ON "hg_youban_publish_full_push_batch" ("active_key")`,
-		`CREATE INDEX IF NOT EXISTS "idx_ybp_full_push_schedule" ON "hg_youban_publish_full_push_batch" ("status", "id")`,
-	} {
-		if _, err := g.DB().Exec(ctx, indexSQL); err != nil {
-			return gerror.Wrap(err, "初始化全量推送批次索引失败")
-		}
-	}
-	return nil
+type fullPushProfile struct {
+	TenantId  int64 `orm:"tenant_id"`
+	AccountId int64 `orm:"account_id"`
+	ProfileId int64 `orm:"profile_id"`
 }
 
 func (s *sSysPublish) createFullPushBatch(ctx context.Context, tenantId, channelId, requestedBy int64) (*fullPushBatchRecord, error) {
-	if err := ensureFullPushBatchSchema(ctx); err != nil {
-		return nil, err
-	}
 	activeKey := fmt.Sprintf("%d:%d", tenantId, channelId)
-	var active fullPushBatchRecord
-	if err := g.DB().Model(publishFullPushBatchTable).Safe().Ctx(ctx).
+	activeRow, err := g.DB().Model(publishFullPushBatchTable).Safe().Ctx(ctx).
 		Where("active_key", activeKey).
-		WhereIn("status", []string{fullPushBatchPending, fullPushBatchRunning}).
+		WhereIn("status", []string{fullPushBatchPending, fullPushBatchRunning, fullPushBatchDispatching}).
 		OrderDesc("id").
-		Scan(&active); err != nil {
+		One()
+	if err != nil {
 		return nil, gerror.Wrap(err, "读取进行中的全量推送批次失败")
 	}
-	if active.Id > 0 {
-		return &active, nil
+	if !activeRow.IsEmpty() {
+		var active fullPushBatchRecord
+		if err = activeRow.Struct(&active); err != nil {
+			return nil, gerror.Wrap(err, "解析进行中的全量推送批次失败")
+		}
+		if active.Id > 0 {
+			return &active, nil
+		}
 	}
 	snapshot, err := s.fullPushSnapshot(ctx, tenantId)
 	if err != nil {
@@ -110,48 +80,52 @@ func (s *sSysPublish) createFullPushBatch(ctx context.Context, tenantId, channel
 	now := gtime.Now()
 	batchNo := newFullPushBatchNo(channelId, now.TimestampNano())
 	id, err := g.DB().Model(publishFullPushBatchTable).Safe().Ctx(ctx).Data(g.Map{
-		"batch_no":             batchNo,
-		"tenant_id":            tenantId,
-		"channel_id":           channelId,
-		"requested_by":         requestedBy,
-		"snapshot_max_task_id": snapshot.SnapshotMaxTaskId,
-		"cursor_task_id":       0,
-		"total_count":          snapshot.TotalCount,
-		"queued_count":         0,
-		"retry_count":          0,
-		"status":               fullPushBatchPending,
-		"active_key":           activeKey,
-		"error_message":        "",
-		"created_at":           now,
-		"updated_at":           now,
+		"batch_no":                batchNo,
+		"tenant_id":               tenantId,
+		"channel_id":              channelId,
+		"requested_by":            requestedBy,
+		"snapshot_max_profile_id": snapshot.SnapshotMaxProfileId,
+		"cursor_profile_id":       0,
+		"total_count":             snapshot.TotalCount,
+		"queued_count":            0,
+		"retry_count":             0,
+		"status":                  fullPushBatchPending,
+		"active_key":              activeKey,
+		"error_message":           "",
+		"created_at":              now,
+		"updated_at":              now,
 	}).InsertAndGetId()
 	if err != nil {
 		if isDuplicateKeyError(err) {
-			if scanErr := g.DB().Model(publishFullPushBatchTable).Safe().Ctx(ctx).
+			existing, scanErr := g.DB().Model(publishFullPushBatchTable).Safe().Ctx(ctx).
 				Where("active_key", activeKey).
-				Scan(&active); scanErr == nil && active.Id > 0 {
-				return &active, nil
+				One()
+			if scanErr == nil && !existing.IsEmpty() {
+				var active fullPushBatchRecord
+				if structErr := existing.Struct(&active); structErr == nil && active.Id > 0 {
+					return &active, nil
+				}
 			}
 		}
 		return nil, gerror.Wrap(err, "创建全量推送批次失败")
 	}
 	return &fullPushBatchRecord{
-		Id:                id,
-		BatchNo:           batchNo,
-		TenantId:          tenantId,
-		ChannelId:         channelId,
-		RequestedBy:       requestedBy,
-		SnapshotMaxTaskId: snapshot.SnapshotMaxTaskId,
-		TotalCount:        snapshot.TotalCount,
-		Status:            fullPushBatchPending,
-		ActiveKey:         activeKey,
+		Id:                   id,
+		BatchNo:              batchNo,
+		TenantId:             tenantId,
+		ChannelId:            channelId,
+		RequestedBy:          requestedBy,
+		SnapshotMaxProfileId: snapshot.SnapshotMaxProfileId,
+		TotalCount:           snapshot.TotalCount,
+		Status:               fullPushBatchPending,
+		ActiveKey:            activeKey,
 	}, nil
 }
 
 func (s *sSysPublish) fullPushSnapshot(ctx context.Context, tenantId int64) (*fullPushSnapshot, error) {
 	var snapshot fullPushSnapshot
-	err := fullPushPublishedTaskBaseModel(ctx, tenantId).
-		Fields("COALESCE(MAX(t.id), 0) AS snapshot_max_task_id, COUNT(*) AS total_count").
+	err := fullPushOnlineProfileBaseModel(ctx, tenantId).
+		Fields("COALESCE(MAX(p.id), 0) AS snapshot_max_profile_id, COUNT(*) AS total_count").
 		Scan(&snapshot)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取全量推送资料快照失败")
@@ -176,9 +150,6 @@ func (s *sSysPublish) runFullPushBatchScheduler(ctx context.Context) {
 }
 
 func (s *sSysPublish) dispatchFullPushBatches(ctx context.Context, limit int) error {
-	if err := ensureFullPushBatchSchema(ctx); err != nil {
-		return err
-	}
 	lockCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	lock := hglock.NewConfig(15*time.Second, 100*time.Millisecond).Mutex("youban_publish:full_push_batch")
@@ -191,7 +162,7 @@ func (s *sSysPublish) dispatchFullPushBatches(ctx context.Context, limit int) er
 	defer s.releaseTelegramChannelLease(context.Background(), lock)
 	var batches []fullPushBatchRecord
 	if err := g.DB().Model(publishFullPushBatchTable).Safe().Ctx(ctx).
-		WhereIn("status", []string{fullPushBatchPending, fullPushBatchRunning}).
+		WhereIn("status", []string{fullPushBatchPending, fullPushBatchRunning, fullPushBatchDispatching}).
 		OrderAsc("id").
 		Limit(limit).
 		Scan(&batches); err != nil {
@@ -209,6 +180,9 @@ func (s *sSysPublish) advanceFullPushBatch(ctx context.Context, batch fullPushBa
 	if _, err := s.fullPushChannel(ctx, batch.TenantId, batch.ChannelId); err != nil {
 		return s.failFullPushBatch(ctx, batch, err)
 	}
+	if batch.Status == fullPushBatchDispatching {
+		return s.finalizeFullPushBatch(ctx, batch)
+	}
 	_, err := g.DB().Model(publishFullPushBatchTable).Safe().Ctx(ctx).
 		Where("id", batch.Id).
 		WhereIn("status", []string{fullPushBatchPending, fullPushBatchRunning}).
@@ -217,19 +191,18 @@ func (s *sSysPublish) advanceFullPushBatch(ctx context.Context, batch fullPushBa
 	if err != nil {
 		return gerror.Wrap(err, "更新全量推送批次状态失败")
 	}
-	ids, err := s.fullPushPublishedTaskIds(ctx, batch.TenantId, batch.CursorTaskId, batch.SnapshotMaxTaskId, limit)
+	profiles, err := s.fullPushProfiles(ctx, batch.TenantId, batch.CursorProfileId, batch.SnapshotMaxProfileId, limit)
 	if err != nil {
 		return s.retryFullPushBatch(ctx, batch, err)
 	}
-	if len(ids) == 0 {
-		return s.completeFullPushBatch(ctx, batch.Id)
+	if len(profiles) == 0 {
+		return s.beginFullPushDispatch(ctx, batch)
 	}
-	lastTaskId := batch.CursorTaskId
+	lastProfileId := batch.CursorProfileId
 	queued := 0
-	for _, taskId := range ids {
-		operationNo := fullPushTaskOperationNo(batch.BatchNo, taskId)
-		if err = s.enqueueFullPushTelegramJob(ctx, taskId, batch.ChannelId, operationNo); err != nil {
-			if updateErr := s.checkpointFullPushBatch(ctx, batch.Id, lastTaskId, queued); updateErr != nil {
+	for _, profile := range profiles {
+		if err = s.enqueueFullPushProfile(ctx, batch, profile); err != nil {
+			if updateErr := s.checkpointFullPushBatch(ctx, batch.Id, lastProfileId, queued); updateErr != nil {
 				return updateErr
 			}
 			if queued > 0 {
@@ -237,14 +210,16 @@ func (s *sSysPublish) advanceFullPushBatch(ctx context.Context, batch fullPushBa
 			}
 			return s.retryFullPushBatch(ctx, batch, err)
 		}
-		lastTaskId = taskId
+		lastProfileId = profile.ProfileId
 		queued++
 	}
-	if err = s.checkpointFullPushBatch(ctx, batch.Id, lastTaskId, queued); err != nil {
+	if err = s.checkpointFullPushBatch(ctx, batch.Id, lastProfileId, queued); err != nil {
 		return err
 	}
-	if len(ids) < limit || lastTaskId >= batch.SnapshotMaxTaskId {
-		return s.completeFullPushBatch(ctx, batch.Id)
+	batch.CursorProfileId = lastProfileId
+	batch.QueuedCount += queued
+	if len(profiles) < limit || lastProfileId >= batch.SnapshotMaxProfileId {
+		return s.beginFullPushDispatch(ctx, batch)
 	}
 	return nil
 }
@@ -253,12 +228,12 @@ func newFullPushBatchNo(channelId, timestampNano int64) string {
 	return fmt.Sprintf("full_push:%d:%d", channelId, timestampNano)
 }
 
-func fullPushTaskOperationNo(batchNo string, taskId int64) string {
-	return fmt.Sprintf("%s:%d", batchNo, taskId)
+func fullPushProfileOperationNo(batchNo string, profileId int64) string {
+	return fmt.Sprintf("%s:%d", batchNo, profileId)
 }
 
 func (s *sSysPublish) checkpointFullPushBatch(ctx context.Context, batchId, cursorTaskId int64, queued int) error {
-	data := g.Map{"cursor_task_id": cursorTaskId, "retry_count": 0, "error_message": "", "updated_at": gtime.Now()}
+	data := g.Map{"cursor_profile_id": cursorTaskId, "retry_count": 0, "error_message": "", "updated_at": gtime.Now()}
 	if queued > 0 {
 		data["queued_count"] = gdb.Raw(fmt.Sprintf("queued_count + %d", queued))
 	}
@@ -303,16 +278,67 @@ func (s *sSysPublish) failFullPushBatch(ctx context.Context, batch fullPushBatch
 	return cause
 }
 
-func (s *sSysPublish) completeFullPushBatch(ctx context.Context, batchId int64) error {
-	_, err := g.DB().Model(publishFullPushBatchTable).Safe().Ctx(ctx).Where("id", batchId).Data(g.Map{
-		"status":        fullPushBatchCompleted,
-		"active_key":    nil,
-		"error_message": "",
-		"finished_at":   gtime.Now(),
-		"updated_at":    gtime.Now(),
+func (s *sSysPublish) beginFullPushDispatch(ctx context.Context, batch fullPushBatchRecord) error {
+	_, err := g.DB().Model(publishFullPushBatchTable).Safe().Ctx(ctx).Where("id", batch.Id).Data(g.Map{
+		"status": fullPushBatchDispatching, "updated_at": gtime.Now(),
+	}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "更新全量推送等待发送状态失败")
+	}
+	batch.Status = fullPushBatchDispatching
+	return s.finalizeFullPushBatch(ctx, batch)
+}
+
+func (s *sSysPublish) finalizeFullPushBatch(ctx context.Context, batch fullPushBatchRecord) error {
+	done, status, message, err := publishBatchTerminalState(ctx, batch.BatchNo+":")
+	if err != nil || !done {
+		return err
+	}
+	_, err = g.DB().Model(publishFullPushBatchTable).Safe().Ctx(ctx).Where("id", batch.Id).Data(g.Map{
+		"status": status, "active_key": nil, "error_message": message,
+		"finished_at": gtime.Now(), "updated_at": gtime.Now(),
 	}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "完成全量推送批次失败")
 	}
 	return nil
+}
+
+func (s *sSysPublish) fullPushProfiles(ctx context.Context, tenantId, lastId, maxProfileId int64, limit int) ([]fullPushProfile, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	var profiles []fullPushProfile
+	err := fullPushOnlineProfileBaseModel(ctx, tenantId).
+		Fields("ps.tenant_id,ps.account_id,p.id AS profile_id").
+		WhereGT("p.id", lastId).
+		WhereLTE("p.id", maxProfileId).
+		OrderAsc("p.id").
+		Limit(limit).
+		Scan(&profiles)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取全量推送当前资料失败")
+	}
+	return profiles, nil
+}
+
+func fullPushOnlineProfileBaseModel(ctx context.Context, tenantId int64) *gdb.Model {
+	return g.DB().Model(publishProfileStateTable+" ps").Safe().Ctx(ctx).
+		InnerJoin(dao.ContentProfile.Table()+" p", "p.id=ps.profile_id AND p.deleted_at IS NULL").
+		InnerJoin(publishAccountTable+" a", "a.id=ps.account_id AND a.deleted_at IS NULL").
+		Where("ps.tenant_id", tenantId).
+		WhereNull("ps.deleted_at").
+		Where("a.tenant_id", tenantId).
+		Where("a.status", 1).
+		Where("p.status", 1).
+		Where("p.visibility", consts.ContentVisibilityPublic)
+}
+
+func (s *sSysPublish) enqueueFullPushProfile(ctx context.Context, batch fullPushBatchRecord, profile fullPushProfile) error {
+	err := s.submitProfilePublish(ctx, profile.ProfileId, profile.TenantId, profile.AccountId, batch.RequestedBy,
+		fullPushProfileOperationNo(batch.BatchNo, profile.ProfileId), []int64{batch.ChannelId}, true)
+	if errors.Is(err, errPublishProfileUnavailable) {
+		return nil
+	}
+	return err
 }

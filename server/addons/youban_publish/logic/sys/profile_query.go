@@ -242,6 +242,7 @@ FROM (
            ROW_NUMBER() OVER (PARTITION BY profile_id ORDER BY sort_index ASC, id ASC) AS row_number
     FROM %s
     WHERE profile_id IN (%s)
+      AND task_id IS NULL
       AND deleted_at IS NULL
       AND (media_type IS NULL OR media_type = '' OR media_type <> ?)
 ) AS profile_cover
@@ -255,23 +256,21 @@ ORDER BY profile_id ASC`, publishMediaTable, placeholders)
 
 func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, accountId int64) (*gdb.Model, error) {
 	mod := dao.ContentProfile.Ctx(ctx).As("p").
-		LeftJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
-		LeftJoin(publishTaskTable+" t", "t.id = (SELECT t2.id FROM "+publishTaskTable+" t2 WHERE t2.profile_id=p.id AND t2.deleted_at IS NULL ORDER BY t2.id DESC LIMIT 1)").
-		LeftJoin(publishTenantTable+" tenant", "tenant.id=COALESCE(ps.tenant_id,t.tenant_id)").
-		LeftJoin(publishAccountTable+" a", "a.id=COALESCE(ps.account_id,t.account_id) AND a.deleted_at IS NULL").
-		Where("(ps.id IS NOT NULL OR t.id IS NOT NULL)").
+		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
+		LeftJoin(publishTenantTable+" tenant", "tenant.id=ps.tenant_id").
+		LeftJoin(publishAccountTable+" a", "a.id=ps.account_id AND a.deleted_at IS NULL").
 		WhereNull("p.deleted_at")
 	if tenantId > 0 {
-		mod = mod.Where("COALESCE(ps.tenant_id,t.tenant_id) = ?", tenantId)
+		mod = mod.Where("ps.tenant_id", tenantId)
 	}
 	if accountId > 0 {
-		mod = mod.Where("COALESCE(ps.account_id,t.account_id) = ?", accountId)
+		mod = mod.Where("ps.account_id", accountId)
 	}
 	return mod, nil
 }
 
 func profileListFields() string {
-	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,COALESCE(ps.customer_remark,t.customer_remark,p.admin_remark) AS customer_remark,p.published_at,p.created_at,p.updated_at,COALESCE(t.id,0) AS task_id,COALESCE(ps.tenant_id,t.tenant_id) AS tenant_id,COALESCE(ps.account_id,t.account_id) AS account_id,tenant.name AS tenant_name,a.nickname AS account_name,a.nickname,a.username,COALESCE(ps.channel_id_json,t.channel_id_json) AS channel_id_json,COALESCE(ps.anti_scan_enabled,t.anti_scan_enabled,0) AS anti_scan_enabled,COALESCE(t.status,'') AS task_status,COALESCE(t.tg_status,'') AS tg_status,CASE WHEN COALESCE(ps.channel_id_json,t.channel_id_json) IS NULL OR COALESCE(ps.channel_id_json,t.channel_id_json)='' OR COALESCE(ps.channel_id_json,t.channel_id_json)='[]' THEN 0 ELSE 1 END AS tg_push_enabled"
+	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,COALESCE(ps.customer_remark,p.admin_remark) AS customer_remark,p.published_at,p.created_at,p.updated_at,0 AS task_id,ps.tenant_id,ps.account_id,tenant.name AS tenant_name,a.nickname AS account_name,a.nickname,a.username,ps.channel_id_json,COALESCE(ps.anti_scan_enabled,0) AS anti_scan_enabled,'' AS task_status,'' AS tg_status,CASE WHEN ps.channel_id_json IS NULL OR ps.channel_id_json='' OR ps.channel_id_json='[]' THEN 0 ELSE 1 END AS tg_push_enabled"
 }
 
 func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {

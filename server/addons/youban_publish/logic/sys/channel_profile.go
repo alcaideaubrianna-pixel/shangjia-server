@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -11,7 +10,7 @@ import (
 )
 
 func (s *sSysPublish) upsertChannelProfileFromJob(ctx context.Context, job telegramJobRecord) error {
-	if job.TenantId <= 0 || job.AccountId <= 0 || job.ChannelId <= 0 || job.ProfileId <= 0 || job.TaskId <= 0 {
+	if job.TenantId <= 0 || job.AccountId <= 0 || job.ChannelId <= 0 || job.ProfileId <= 0 {
 		return nil
 	}
 	if strings.HasPrefix(strings.ToLower(job.OperationNo), "down:") {
@@ -20,12 +19,13 @@ func (s *sSysPublish) upsertChannelProfileFromJob(ctx context.Context, job teleg
 	now := gtime.Now()
 	data := g.Map{
 		"tenant_id": job.TenantId, "account_id": job.AccountId, "channel_id": job.ChannelId,
-		"profile_id": job.ProfileId, "task_id": job.TaskId, "last_job_id": job.Id,
+		"profile_id": job.ProfileId, "last_job_id": job.Id,
 		"status": "active", "updated_at": now,
 	}
 	result, err := g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).
 		Where("channel_id", job.ChannelId).
 		Where("profile_id", job.ProfileId).
+		Where("last_job_id <= ?", job.Id).
 		Data(data).
 		Update()
 	if err != nil {
@@ -37,56 +37,20 @@ func (s *sSysPublish) upsertChannelProfileFromJob(ctx context.Context, job teleg
 	}
 	data["created_at"] = now
 	if _, err = g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).Data(data).Insert(); err != nil {
-		return gerror.Wrap(err, "创建频道当前上架资料索引失败")
-	}
-	return nil
-}
-
-func (s *sSysPublish) backfillChannelProfiles(ctx context.Context, limit int) error {
-	if limit <= 0 {
-		limit = 2000
-	}
-	var jobs []telegramJobRecord
-	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
-		InnerJoin(publishTaskTable+" t", "t.id=j.task_id AND t.deleted_at IS NULL").
-		Fields("j.id,j.task_id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.operation_no").
-		Where("j.status", "sent").
-		Where("t.status", "published").
-		Where("j.profile_id > 0").
-		Where("NOT EXISTS (SELECT 1 FROM " + publishChannelProfileTable + " cp WHERE cp.channel_id=j.channel_id AND cp.profile_id=j.profile_id AND cp.status='active')").
-		OrderDesc("j.id").
-		Limit(limit).
-		Scan(&jobs)
-	if err != nil {
-		return gerror.Wrap(err, "读取历史频道上架资料失败")
-	}
-	seen := make(map[string]struct{}, len(jobs))
-	for _, job := range jobs {
-		key := fmt.Sprintf("%d:%d", job.ChannelId, job.ProfileId)
-		if _, exists := seen[key]; exists {
-			continue
+		if !isDuplicateKeyError(err) {
+			return gerror.Wrap(err, "创建频道当前上架资料索引失败")
 		}
-		seen[key] = struct{}{}
-		if err = s.upsertChannelProfileFromJob(ctx, job); err != nil {
-			return err
+		_, err = g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).
+			Where("channel_id", job.ChannelId).
+			Where("profile_id", job.ProfileId).
+			Where("last_job_id <= ?", job.Id).
+			Data(data).
+			Update()
+		if err != nil {
+			return gerror.Wrap(err, "并发更新频道当前上架资料索引失败")
 		}
 	}
 	return nil
-}
-
-func (s *sSysPublish) channelProfileBackfillPending(ctx context.Context) (bool, error) {
-	count, err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
-		InnerJoin(publishTaskTable+" t", "t.id=j.task_id AND t.deleted_at IS NULL").
-		Where("j.status", "sent").
-		Where("t.status", "published").
-		Where("j.profile_id > 0").
-		Where("NOT EXISTS (SELECT 1 FROM " + publishChannelProfileTable + " cp WHERE cp.channel_id=j.channel_id AND cp.profile_id=j.profile_id AND cp.status='active')").
-		Limit(1).
-		Count()
-	if err != nil {
-		return false, gerror.Wrap(err, "检查历史频道资料迁移进度失败")
-	}
-	return count > 0, nil
 }
 
 func (s *sSysPublish) syncPublishedTaskChannelProfiles(ctx context.Context, taskId int64) error {
@@ -142,13 +106,26 @@ func (s *sSysPublish) deactivateChannelProfiles(ctx context.Context, tenantId in
 }
 
 func (s *sSysPublish) cleanupPreviousCycleMessages(ctx context.Context, current telegramJobRecord) {
+	latest, err := g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).
+		Fields("last_job_id").
+		Where("channel_id", current.ChannelId).
+		Where("profile_id", current.ProfileId).
+		Where("status", "active").
+		One()
+	if err != nil {
+		g.Log().Warningf(ctx, "读取循环上架最新频道索引失败 job:%d err:%+v", current.Id, err)
+		return
+	}
+	if latest["last_job_id"].Int64() != current.Id {
+		return
+	}
 	var jobs []telegramJobRecord
-	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", current.TenantId).
 		Where("profile_id", current.ProfileId).
 		Where("channel_id", current.ChannelId).
 		Where("status", "sent").
-		WhereNot("id", current.Id).
+		WhereLT("id", current.Id).
 		OrderAsc("id").
 		Scan(&jobs)
 	if err != nil {

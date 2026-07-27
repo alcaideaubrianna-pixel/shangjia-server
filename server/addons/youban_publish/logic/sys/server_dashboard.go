@@ -185,8 +185,8 @@ func (s *sSysPublish) serverDashboardTaskTrend(ctx context.Context, days int) ([
 }
 
 func (s *sSysPublish) serverDashboardTodos(ctx context.Context) ([]*sysin.ServerDashboardTodo, error) {
-	var rows []*sysin.TaskModel
-	err := s.taskListModel(ctx).
+	var rows []*collectTaskSummary
+	err := s.collectTaskSummaryModel(ctx).
 		WhereIn("t.status", []string{sysin.PublishTaskStatusFailed, sysin.PublishTaskStatusPending, sysin.PublishTaskStatusPublishing}).
 		WhereNull("t.deleted_at").
 		OrderDesc("t.updated_at").
@@ -268,7 +268,7 @@ func (s *sSysPublish) serverDashboardErrorRank(ctx context.Context) ([]*sysin.Se
 	return list, nil
 }
 
-func serverDashboardTodoDesc(row *sysin.TaskModel) string {
+func serverDashboardTodoDesc(row *collectTaskSummary) string {
 	parts := []string{
 		dashboardText(row.TenantName, "未知归属"),
 		dashboardText(row.AccountNickname, row.AccountUsername),

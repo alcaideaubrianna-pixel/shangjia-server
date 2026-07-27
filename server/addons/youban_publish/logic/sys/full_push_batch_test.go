@@ -7,7 +7,7 @@ func TestFullPushOperationUsesUnifiedPrefix(t *testing.T) {
 	if batchNo != "full_push:12:345" {
 		t.Fatalf("unexpected batch no: %s", batchNo)
 	}
-	operationNo := fullPushTaskOperationNo(batchNo, 678)
+	operationNo := fullPushProfileOperationNo(batchNo, 678)
 	if operationNo != "full_push:12:345:678" {
 		t.Fatalf("unexpected operation no: %s", operationNo)
 	}

@@ -175,6 +175,27 @@ func TestMaterialImportIgnoredNotice(t *testing.T) {
 	}
 }
 
+func TestMaterialImportProfileText(t *testing.T) {
+	valid := []string{
+		"昵称：B182\n年龄：21",
+		"昵称：B182\n身高：165",
+		"昵称：B182\n体重：45kg",
+		"昵称：B182\n所在城市：南京",
+		"昵称：B182\n城 市：南京",
+	}
+	for _, text := range valid {
+		if !materialImportProfileText(text) {
+			t.Fatalf("expected profile text: %q", text)
+		}
+	}
+	invalid := []string{"哇发我", "P31225", "随手拍了一张照片", "自拍视频"}
+	for _, text := range invalid {
+		if materialImportProfileText(text) {
+			t.Fatalf("expected ordinary media text: %q", text)
+		}
+	}
+}
+
 func TestParseMaterialImportChannelReference(t *testing.T) {
 	tests := []struct {
 		name     string

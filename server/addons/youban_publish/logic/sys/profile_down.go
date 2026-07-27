@@ -93,10 +93,9 @@ func (s *sSysPublish) activeDownProfileIds(ctx context.Context, ids []int64, ten
 	}
 	err := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
 		Fields("p."+columns.Id+" AS id").
-		LeftJoin(publishTaskTable+" t", "t.profile_id=p.id AND t.deleted_at IS NULL").
+		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
 		WhereIn("p."+columns.Id, ids).
-		Where("t.tenant_id", tenantId).
-		Where("t.status", sysin.PublishTaskStatusCanceled).
+		Where("ps.tenant_id", tenantId).
 		Where("p."+columns.Status, 2).
 		Where("p."+columns.Visibility, consts.ContentVisibilityPrivate).
 		WhereNull("p." + columns.DeletedAt).
@@ -181,14 +180,12 @@ func (s *sSysPublish) notifyProfilesDown(ctx context.Context, ids []int64, tenan
 }
 
 func (s *sSysPublish) sendDownChannelProfile(ctx context.Context, tenantId int64, channel telegramJobChannel, row gdb.Record, operationNo string, cutoffAt string) error {
-	taskId := row["id"].Int64()
 	profileId := row["profile_id"].Int64()
 	accountId := row["account_id"].Int64()
-	if taskId <= 0 || profileId <= 0 {
+	if profileId <= 0 {
 		return nil
 	}
 	job := telegramJobRecord{
-		TaskId:       taskId,
 		TenantId:     tenantId,
 		AccountId:    accountId,
 		ProfileId:    profileId,
@@ -208,13 +205,14 @@ func (s *sSysPublish) sendDownChannelProfile(ctx context.Context, tenantId int64
 			return nil
 		}
 		job.Id = jobId
-		return s.sendDownChannelProfileLockedByChannel(ctx, job, taskId, channel.Id)
+		return s.sendDownChannelProfileLockedByChannel(ctx, job, channel.Id)
 	})
 }
 
 func (s *sSysPublish) createDownChannelTelegramJob(ctx context.Context, job telegramJobRecord, operationNo string, cutoffAt string) (int64, bool, error) {
 	existingMod := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("task_id", job.TaskId).
+		WhereNull("task_id").
+		Where("profile_id", job.ProfileId).
 		Where("operation_no", operationNo).
 		Where("channel_id", job.ChannelId)
 	existing, err := existingMod.One()
@@ -248,7 +246,7 @@ func (s *sSysPublish) createDownChannelTelegramJob(ctx context.Context, job tele
 	}
 	now := gtime.Now()
 	id, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
-		"task_id":         job.TaskId,
+		"task_id":         nil,
 		"operation_no":    operationNo,
 		"tenant_id":       job.TenantId,
 		"account_id":      job.AccountId,
@@ -271,7 +269,7 @@ func (s *sSysPublish) createDownChannelTelegramJob(ctx context.Context, job tele
 	return id, true, nil
 }
 
-func (s *sSysPublish) sendDownChannelProfileLockedByChannel(ctx context.Context, job telegramJobRecord, taskId int64, channelId int64) error {
+func (s *sSysPublish) sendDownChannelProfileLockedByChannel(ctx context.Context, job telegramJobRecord, channelId int64) error {
 	activeIds, err := s.activeDownProfileIds(ctx, []int64{job.ProfileId}, job.TenantId)
 	if err != nil {
 		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
@@ -292,7 +290,7 @@ func (s *sSysPublish) sendDownChannelProfileLockedByChannel(ctx context.Context,
 		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
 		return err
 	}
-	caption, err := s.telegramJobText(ctx, taskId)
+	caption, err := s.telegramJobCaption(ctx, job)
 	if err != nil {
 		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
 		return err
@@ -310,12 +308,12 @@ func (s *sSysPublish) sendDownChannelProfileLockedByChannel(ctx context.Context,
 	messages, err := s.sendTelegramDisplayPart(ctx, bot, job.TargetChatId, caption, displayMedia)
 	if err != nil {
 		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
-		return gerror.Wrapf(err, "推送下架频道展示资料失败，task:%d，channel:%d", taskId, channelId)
+		return gerror.Wrapf(err, "推送下架频道展示资料失败，profile:%d，channel:%d", job.ProfileId, channelId)
 	}
 	verifyMessages, err := s.sendTelegramVerifyPart(ctx, bot, job.TargetChatId, verifyMedia)
 	if err != nil {
 		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
-		return gerror.Wrapf(err, "推送下架频道验证资料失败，task:%d，channel:%d", taskId, channelId)
+		return gerror.Wrapf(err, "推送下架频道验证资料失败，profile:%d，channel:%d", job.ProfileId, channelId)
 	}
 	messages = append(messages, verifyMessages...)
 	if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
@@ -367,28 +365,16 @@ func (s *sSysPublish) telegramDownChannels(ctx context.Context, tenantId int64) 
 }
 
 func (s *sSysPublish) profileDownRows(ctx context.Context, ids []int64, tenantId int64) ([]gdb.Record, error) {
-	rows, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,account_id,profile_id,title,province,city").
-		Where("tenant_id", tenantId).
-		WhereIn("profile_id", ids).
-		WhereNull("deleted_at").
-		OrderDesc("id").
+	rows, err := g.DB().Model(publishProfileStateTable+" ps").Safe().Ctx(ctx).
+		InnerJoin(dao.ContentProfile.Table()+" p", "p.id=ps.profile_id AND p.deleted_at IS NULL").
+		Fields("ps.tenant_id,ps.account_id,p.id AS profile_id,p.title,p.province,p.city").
+		Where("ps.tenant_id", tenantId).
+		WhereIn("ps.profile_id", ids).
+		WhereNull("ps.deleted_at").
+		OrderAsc("p.id").
 		All()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取下架资料失败")
 	}
-	latest := make([]gdb.Record, 0, len(ids))
-	seen := make(map[int64]struct{}, len(ids))
-	for _, row := range rows {
-		profileId := row["profile_id"].Int64()
-		if profileId <= 0 {
-			continue
-		}
-		if _, exists := seen[profileId]; exists {
-			continue
-		}
-		seen[profileId] = struct{}{}
-		latest = append(latest, row)
-	}
-	return latest, nil
+	return rows, nil
 }

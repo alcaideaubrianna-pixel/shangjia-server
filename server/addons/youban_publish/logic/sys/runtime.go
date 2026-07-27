@@ -50,16 +50,11 @@ func (s *sSysPublish) StopRuntime() {
 }
 
 func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
-	if err := s.backfillChannelProfiles(ctx, 5000); err != nil {
-		g.Log().Warningf(ctx, "迁移历史频道上架资料索引失败：%+v", err)
+	if err := ensurePublishChannelColumns(ctx); err != nil {
+		g.Log().Errorf(ctx, "检查频道循环上架字段失败：%+v", err)
 	}
-	if err := ensurePublishSuccessRecordSchema(ctx); err != nil {
-		g.Log().Warningf(ctx, "初始化成功发布记录表失败：%+v", err)
-	} else if err := s.backfillPublishSuccessRecords(ctx, 5000); err != nil {
+	if err := s.backfillPublishSuccessRecords(ctx, 5000); err != nil {
 		g.Log().Warningf(ctx, "补写成功发布记录失败：%+v", err)
-	}
-	if err := ensureFullPushBatchSchema(ctx); err != nil {
-		g.Log().Warningf(ctx, "初始化全量推送批次表失败：%+v", err)
 	}
 	s.startTelegramQueueWorker(ctx)
 	go s.runTelegramRuntime(ctx)

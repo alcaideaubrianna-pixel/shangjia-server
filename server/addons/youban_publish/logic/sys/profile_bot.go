@@ -94,17 +94,17 @@ func (s *sSysPublish) BotProfileCreate(ctx context.Context, in *sysin.BotProfile
 	if err != nil {
 		return nil, err
 	}
-	if err = s.saveBotProfileMedia(ctx, res.TaskId, res.Id, in.TenantId, in.AccountId, in.DisplayMedia, in.VerifyMedia); err != nil {
+	if err = s.saveBotProfileMedia(ctx, res.Id, in.TenantId, in.AccountId, in.DisplayMedia, in.VerifyMedia); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(in.VerifyText) != "" {
-		_ = s.saveBotProfileVerifyText(ctx, res.TaskId, strings.TrimSpace(in.VerifyText))
+		_ = s.saveBotProfileVerifyText(ctx, res.Id, strings.TrimSpace(in.VerifyText))
 	}
 	return res, nil
 }
 
-func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, taskId int64, profileId int64, tenantId int64, accountId int64, displayMedia []*sysin.MessageTemplateMediaInp, verifyMedia []*sysin.MessageTemplateMediaInp) error {
-	if taskId <= 0 || profileId <= 0 {
+func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, tenantId int64, accountId int64, displayMedia []*sysin.MessageTemplateMediaInp, verifyMedia []*sysin.MessageTemplateMediaInp) error {
+	if profileId <= 0 {
 		return nil
 	}
 	if len(displayMedia) == 0 && len(verifyMedia) == 0 {
@@ -144,7 +144,7 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, taskId int64, pro
 					PosterURL: posterURL,
 				})
 				if remoteErr != nil {
-					g.Log().Warning(ctx, "计算机器人资料媒体哈希失败", g.Map{"profileId": profileId, "taskId": taskId, "mediaType": mediaType, "err": remoteErr})
+					g.Log().Warning(ctx, "计算机器人资料媒体哈希失败", g.Map{"profileId": profileId, "mediaType": mediaType, "err": remoteErr})
 				} else if remoteAssets != nil && remoteAssets.Processed {
 					perceptualHash = remoteAssets.PerceptualHash
 				}
@@ -153,7 +153,7 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, taskId int64, pro
 				"tenant_id":              tenantId,
 				"merchant_id":            tenantId,
 				"account_id":             accountId,
-				"task_id":                taskId,
+				"task_id":                nil,
 				"profile_id":             profileId,
 				"attachment_id":          0,
 				"original_attachment_id": 0,
@@ -201,12 +201,11 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, taskId int64, pro
 	if err := insertItems("verify", verifyMedia); err != nil {
 		return err
 	}
-	_ = s.refreshTaskMediaCount(ctx, taskId)
 	return nil
 }
 
-func (s *sSysPublish) replaceBotProfileMedia(ctx context.Context, taskId int64, profileId int64, tenantId int64, accountId int64, displayMedia []*sysin.MessageTemplateMediaInp, verifyMedia []*sysin.MessageTemplateMediaInp) error {
-	if taskId <= 0 || profileId <= 0 {
+func (s *sSysPublish) replaceBotProfileMedia(ctx context.Context, profileId int64, tenantId int64, accountId int64, displayMedia []*sysin.MessageTemplateMediaInp, verifyMedia []*sysin.MessageTemplateMediaInp) error {
+	if profileId <= 0 {
 		return nil
 	}
 	if _, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
@@ -219,12 +218,15 @@ func (s *sSysPublish) replaceBotProfileMedia(ctx context.Context, taskId int64, 
 		return gerror.Wrap(err, "清空原资料媒体失败")
 	}
 	_ = s.deleteMediaPHashBucketByProfileId(ctx, profileId)
-	return s.saveBotProfileMedia(ctx, taskId, profileId, tenantId, accountId, displayMedia, verifyMedia)
+	return s.saveBotProfileMedia(ctx, profileId, tenantId, accountId, displayMedia, verifyMedia)
 }
 
-func (s *sSysPublish) saveBotProfileVerifyText(ctx context.Context, taskId int64, verifyText string) error {
-	// 当前资料表只有展示正文；验证资料文本先落到任务备注，避免丢失，后续后台可按媒体 purpose=verify 展示。
-	_, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).Data(g.Map{"customer_remark": verifyText, "updated_at": gtime.Now()}).Update()
+func (s *sSysPublish) saveBotProfileVerifyText(ctx context.Context, profileId int64, verifyText string) error {
+	_, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).
+		WhereNull("deleted_at").
+		Data(g.Map{"customer_remark": verifyText, "updated_at": gtime.Now()}).
+		Update()
 	return err
 }
 
@@ -297,11 +299,11 @@ func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEd
 		return nil, err
 	}
 	if len(in.DisplayMedia) > 0 || len(in.VerifyMedia) > 0 || strings.TrimSpace(in.VerifyText) != "" {
-		if err = s.replaceBotProfileMedia(ctx, current.TaskId, profileId, in.TenantId, ownerAccountId, in.DisplayMedia, in.VerifyMedia); err != nil {
+		if err = s.replaceBotProfileMedia(ctx, profileId, in.TenantId, ownerAccountId, in.DisplayMedia, in.VerifyMedia); err != nil {
 			return nil, err
 		}
 		if strings.TrimSpace(in.VerifyText) != "" {
-			_ = s.saveBotProfileVerifyText(ctx, current.TaskId, strings.TrimSpace(in.VerifyText))
+			_ = s.saveBotProfileVerifyText(ctx, current.Id, strings.TrimSpace(in.VerifyText))
 		}
 	}
 	newNo := normalizeBotProfileNo(in.NewNo)

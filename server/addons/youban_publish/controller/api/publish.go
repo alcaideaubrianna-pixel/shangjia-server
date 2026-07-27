@@ -808,47 +808,6 @@ func (c *cPublishAdmin) AntiScanConfigSave(ctx context.Context, req *publish.Adm
 	return
 }
 
-func (c *cPublish) MyTaskList(ctx context.Context, req *publish.MyTaskListReq) (res *publish.MyTaskListRes, err error) {
-	list, totalCount, err := service.SysPublish().MyTaskList(ctx, &req.TaskListInp)
-	if err != nil {
-		return
-	}
-	if list == nil {
-		list = []*sysin.TaskModel{}
-	}
-	res = new(publish.MyTaskListRes)
-	res.List = list
-	res.PageRes.Pack(req, totalCount)
-	return
-}
-
-func (c *cPublish) SaveTask(ctx context.Context, req *publish.SaveTaskReq) (res *publish.SaveTaskRes, err error) {
-	id, err := service.SysPublish().MyTaskSave(ctx, &req.TaskSaveInp)
-	if err != nil {
-		return
-	}
-	res = &publish.SaveTaskRes{Id: id}
-	return
-}
-
-func (c *cPublish) SubmitTask(ctx context.Context, req *publish.SubmitTaskReq) (res *publish.SubmitTaskRes, err error) {
-	err = service.SysPublish().MyTaskSubmit(ctx, &req.TaskSubmitInp)
-	if err != nil {
-		return
-	}
-	res = &publish.SubmitTaskRes{}
-	return
-}
-
-func (c *cPublish) CancelTask(ctx context.Context, req *publish.CancelTaskReq) (res *publish.CancelTaskRes, err error) {
-	err = service.SysPublish().MyTaskCancel(ctx, &req.TaskCancelInp)
-	if err != nil {
-		return
-	}
-	res = &publish.CancelTaskRes{}
-	return
-}
-
 func (c *cPublish) MyImportTaskList(ctx context.Context, req *publish.MyImportTaskListReq) (res *publish.MyImportTaskListRes, err error) {
 	list, totalCount, err := service.SysPublish().MyImportTaskList(ctx, &req.ImportTaskListInp)
 	if err != nil {

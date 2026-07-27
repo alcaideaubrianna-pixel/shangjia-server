@@ -91,12 +91,10 @@ func (s *sSysPublish) noteIndexSources(ctx context.Context, profileId int64) ([]
 	tag := profileTagFieldExpr()
 	var rows []noteIndexSource
 	err := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
-		LeftJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
-		LeftJoin(publishTaskTable+" t", "t.profile_id=p.id AND t.deleted_at IS NULL AND t.id=(SELECT t2.id FROM "+publishTaskTable+" t2 WHERE t2.profile_id=p.id AND t2.deleted_at IS NULL ORDER BY t2.id DESC LIMIT 1)").
+		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
 		Where("p.id", profileId).
 		WhereNull("p.deleted_at").
-		Where("(ps.id IS NOT NULL OR t.id IS NOT NULL)").
-		Fields("COALESCE(ps.tenant_id,t.tenant_id) AS tenant_id,COALESCE(ps.account_id,t.account_id) AS account_id,p.id AS profile_id,COALESCE(t.id,0) AS task_id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text," + tag + " AS tag,p.province,p.city,p.status,p.visibility,p.review_status,COALESCE(t.status,'') AS task_status,p.published_at,COALESCE(p.updated_at,t.updated_at) AS source_updated_at,p.created_at,p.updated_at,p.deleted_at").
+		Fields("ps.tenant_id,ps.account_id,p.id AS profile_id,0 AS task_id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text," + tag + " AS tag,p.province,p.city,p.status,p.visibility,p.review_status,'' AS task_status,p.published_at,p.updated_at AS source_updated_at,p.created_at,p.updated_at,p.deleted_at").
 		Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取资料索引源数据失败")

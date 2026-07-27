@@ -11,8 +11,8 @@ import (
 
 const publishProfileMediaBackfillBatchSize = 200
 
-// BackfillYoubanPublishProfileMedia creates the task_id=0 editable media set.
-// Published task media remains immutable and is never updated in place.
+// BackfillYoubanPublishProfileMedia creates the profile-owned media set.
+// Collection task media remains unchanged.
 func BackfillYoubanPublishProfileMedia(ctx context.Context) error {
 	lastProfileId := int64(0)
 	processed := 0
@@ -45,12 +45,17 @@ func BackfillYoubanPublishProfileMedia(ctx context.Context) error {
 func backfillOnePublishProfileMedia(ctx context.Context, profileId int64) error {
 	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		count, err := tx.Model("hg_youban_publish_media").Ctx(ctx).
-			Where("profile_id", profileId).Where("task_id", 0).WhereNull("deleted_at").Count()
+			Where("profile_id", profileId).WhereNull("task_id").WhereNull("deleted_at").Count()
 		if err != nil || count > 0 {
 			return err
 		}
-		latestTaskId, err := tx.Model("hg_youban_publish_task").Ctx(ctx).
-			Where("profile_id", profileId).WhereNull("deleted_at").OrderDesc("id").Fields("id").Value()
+		latestTaskId, err := tx.Model("hg_youban_publish_task t").Ctx(ctx).
+			Where("t.profile_id", profileId).
+			WhereNull("t.deleted_at").
+			Where("EXISTS (SELECT 1 FROM hg_youban_publish_media tm WHERE tm.task_id=t.id AND tm.deleted_at IS NULL)").
+			OrderDesc("t.id").
+			Fields("t.id").
+			Value()
 		if err != nil {
 			return gerror.Wrap(err, "读取资料最新发布事件失败")
 		}
@@ -67,7 +72,7 @@ func backfillOnePublishProfileMedia(ctx context.Context, profileId int64) error 
 		for _, row := range rows {
 			data := row.Map()
 			delete(data, "id")
-			data["task_id"] = 0
+			data["task_id"] = nil
 			data["tg_file_id"] = ""
 			data["tg_thumb_file_id"] = ""
 			data["tg_cache_asset_hash"] = ""

@@ -502,5 +502,36 @@ INNER JOIN (
 ON DUPLICATE KEY UPDATE `profile_id`=VALUES(`profile_id`);
 UPDATE `hg_youban_publish_task` SET `status`='canceled', `tg_status`='skipped' WHERE `status`='draft';
 
-ALTER TABLE `hg_youban_publish_media` MODIFY COLUMN `task_id` bigint(20) DEFAULT NULL COMMENT '发布任务ID，正式资料媒体为空';
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_success_record` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT, `job_id` bigint(20) NOT NULL DEFAULT '0', `task_id` bigint(20) NOT NULL DEFAULT '0',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0', `account_id` bigint(20) NOT NULL DEFAULT '0', `profile_id` bigint(20) NOT NULL DEFAULT '0',
+  `channel_id` bigint(20) NOT NULL DEFAULT '0', `bot_id` bigint(20) NOT NULL DEFAULT '0', `operation_no` varchar(128) NOT NULL DEFAULT '',
+  `target_chat_id` varchar(128) NOT NULL DEFAULT '', `action` varchar(32) NOT NULL DEFAULT 'profile_publish',
+  `status` varchar(16) NOT NULL DEFAULT 'success', `message` varchar(255) NOT NULL DEFAULT '', `created_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_success_record_job` (`job_id`),
+  KEY `idx_ybp_success_record_owner` (`tenant_id`,`account_id`,`id`), KEY `idx_ybp_success_record_profile` (`profile_id`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架成功发布记录';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_full_push_batch` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT, `batch_no` varchar(128) NOT NULL,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0', `channel_id` bigint(20) NOT NULL DEFAULT '0', `requested_by` bigint(20) NOT NULL DEFAULT '0',
+  `snapshot_max_profile_id` bigint(20) NOT NULL DEFAULT '0', `cursor_profile_id` bigint(20) NOT NULL DEFAULT '0',
+  `total_count` int(11) NOT NULL DEFAULT '0', `queued_count` int(11) NOT NULL DEFAULT '0', `retry_count` int(11) NOT NULL DEFAULT '0',
+  `status` varchar(16) NOT NULL DEFAULT 'pending', `active_key` varchar(64) DEFAULT NULL, `error_message` text,
+  `created_at` datetime DEFAULT NULL, `updated_at` datetime DEFAULT NULL, `finished_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_full_push_batch_no` (`batch_no`), UNIQUE KEY `uk_ybp_full_push_active` (`active_key`),
+  KEY `idx_ybp_full_push_schedule` (`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='频道全量推送批次';
+ALTER TABLE `hg_youban_publish_full_push_batch` ADD COLUMN IF NOT EXISTS `snapshot_max_profile_id` bigint(20) NOT NULL DEFAULT '0';
+ALTER TABLE `hg_youban_publish_full_push_batch` ADD COLUMN IF NOT EXISTS `cursor_profile_id` bigint(20) NOT NULL DEFAULT '0';
+ALTER TABLE `hg_youban_publish_full_push_batch` ADD COLUMN IF NOT EXISTS `snapshot_max_task_id` bigint(20) NOT NULL DEFAULT '0';
+ALTER TABLE `hg_youban_publish_full_push_batch` ADD COLUMN IF NOT EXISTS `cursor_task_id` bigint(20) NOT NULL DEFAULT '0';
+UPDATE `hg_youban_publish_full_push_batch` SET `snapshot_max_profile_id`=`snapshot_max_task_id` WHERE `snapshot_max_profile_id`=0 AND `snapshot_max_task_id`>0;
+UPDATE `hg_youban_publish_full_push_batch` SET `cursor_profile_id`=`cursor_task_id` WHERE `cursor_profile_id`=0 AND `cursor_task_id`>0;
+ALTER TABLE `hg_youban_publish_full_push_batch` DROP COLUMN IF EXISTS `snapshot_max_task_id`;
+ALTER TABLE `hg_youban_publish_full_push_batch` DROP COLUMN IF EXISTS `cursor_task_id`;
+ALTER TABLE `hg_youban_publish_media` MODIFY COLUMN `task_id` bigint(20) DEFAULT NULL COMMENT '采集任务ID，普通资料媒体为空';
 UPDATE `hg_youban_publish_media` SET `task_id`=NULL WHERE `profile_id`>0 AND `task_id`=0;
+ALTER TABLE `hg_youban_publish_tg_job` MODIFY COLUMN `task_id` bigint(20) DEFAULT NULL COMMENT '采集任务ID，普通资料推送为空';
+ALTER TABLE `hg_youban_publish_channel_profile` DROP COLUMN IF EXISTS `task_id`;
+DELETE FROM `hg_admin_menu` WHERE `name` = 'youbanPublishTask';

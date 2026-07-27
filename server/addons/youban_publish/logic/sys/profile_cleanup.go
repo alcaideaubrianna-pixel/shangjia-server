@@ -81,7 +81,7 @@ func (s *sSysPublish) deletedProfileIdsByAccount(ctx context.Context, tenantId i
 	rows, err := g.DB().Model(profileTable+" p").Safe().Ctx(ctx).
 		Fields("p.id").
 		WhereNotNull("p.deleted_at").
-		Where("(EXISTS (SELECT 1 FROM "+publishProfileStateTable+" ps WHERE ps.profile_id=p.id AND ps.tenant_id=? AND ps.account_id=?) OR EXISTS (SELECT 1 FROM "+publishTaskTable+" t WHERE t.profile_id=p.id AND t.tenant_id=? AND t.account_id=?))", tenantId, accountId, tenantId, accountId).
+		Where("EXISTS (SELECT 1 FROM "+publishProfileStateTable+" ps WHERE ps.profile_id=p.id AND ps.tenant_id=? AND ps.account_id=?)", tenantId, accountId).
 		All()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取账号软删除资料失败")

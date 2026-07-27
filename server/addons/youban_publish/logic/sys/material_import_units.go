@@ -46,11 +46,24 @@ func (s *sSysPublish) upsertMaterialImportUnitBlocks(ctx context.Context, task *
 			}
 			continue
 		}
+		if !materialImportProfileText(unit.RawText) {
+			continue
+		}
 		if err := s.upsertMaterialImportDisplayUnit(ctx, task, unit); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func materialImportProfileText(text string) bool {
+	normalized := strings.NewReplacer(" ", "", "\t", "", "\r", "", "\n", "", "\u00a0", "").Replace(text)
+	for _, keyword := range []string{"身高", "体重", "年龄", "城市"} {
+		if strings.Contains(normalized, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func materialImportSplitLeadingUnits(units []*materialImportMessageUnit) (processable []*materialImportMessageUnit, pending []*materialImportMessageUnit) {

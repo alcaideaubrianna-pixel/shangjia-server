@@ -17,6 +17,9 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 	if len(channelIds) == 0 {
 		return []*sysin.ProfilePushChannelModel{}, nil
 	}
+	if err := ensurePublishChannelColumns(ctx); err != nil {
+		return nil, err
+	}
 	var channels []*sysin.ProfilePushChannelModel
 	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Fields("id AS channel_id,channel_title,channel_username,status,cycle_publish_enabled,cycle_publish_days,cycle_next_run_at AS next_push_at").
@@ -27,11 +30,8 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 		Scan(&channels); err != nil {
 		return nil, err
 	}
-	if len(channels) == 0 || profile.TaskId <= 0 {
+	if len(channels) == 0 {
 		return channels, nil
-	}
-	if err := ensurePublishSuccessRecordSchema(ctx); err != nil {
-		return nil, err
 	}
 	type firstPushRow struct {
 		ChannelId   int64       `orm:"channel_id"`
@@ -41,7 +41,6 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 	if err := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).
 		Fields("channel_id,MIN(created_at) AS first_push_at").
 		Where("tenant_id", profile.TenantId).
-		Where("task_id", profile.TaskId).
 		Where("profile_id", profile.Id).
 		Where("status", "success").
 		WhereIn("channel_id", channelIds).

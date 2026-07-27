@@ -15,13 +15,15 @@ import (
 )
 
 const (
-	cycleRunStatusPending  = "pending"
-	cycleRunStatusRunning  = "running"
-	cycleRunStatusFinished = "finished"
-	cycleRunStatusFailed   = "failed"
-	cycleRunStatusSkipped  = "skipped"
-	cycleBatchPageSize     = 200
-	cycleBatchBacklogLimit = 1000
+	cycleRunStatusPending     = "pending"
+	cycleRunStatusRunning     = "running"
+	cycleRunStatusDispatching = "dispatching"
+	cycleRunStatusFinished    = "finished"
+	cycleRunStatusPartial     = "partial_failed"
+	cycleRunStatusFailed      = "failed"
+	cycleRunStatusSkipped     = "skipped"
+	cycleBatchPageSize        = 200
+	cycleBatchBacklogLimit    = 1000
 )
 
 type channelCycleRecord struct {
@@ -66,18 +68,11 @@ func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
 	if err := s.recoverChannelCycleRuns(ctx); err != nil {
 		return err
 	}
-	if err := s.backfillChannelProfiles(ctx, 5000); err != nil {
+	if err := s.finalizeDispatchingChannelCycleRuns(ctx, 20); err != nil {
 		return err
-	}
-	pending, err := s.channelProfileBackfillPending(ctx)
-	if err != nil {
-		return err
-	}
-	if pending {
-		return nil
 	}
 	var channels []channelCycleRecord
-	if err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Fields("id,tenant_id,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,cycle_next_run_at,cycle_active_run_id,status,publish_direction").
 		Where("cycle_publish_enabled", 1).
 		Where("status", 1).
@@ -264,8 +259,7 @@ func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
 		return err
 	}
 	if len(items) == 0 {
-		s.finishChannelCycleRun(ctx, run, cycleRunStatusFinished, "")
-		return nil
+		return s.beginChannelCycleDispatch(ctx, run)
 	}
 	lastCursor := run.CursorId
 	queued := 0
@@ -291,6 +285,47 @@ func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
 		return gerror.Wrap(err, "更新频道循环批次游标失败")
 	}
 	return s.enqueueCycleRun(ctx, run.Id, time.Second)
+}
+
+func (s *sSysPublish) beginChannelCycleDispatch(ctx context.Context, run cycleRunRecord) error {
+	_, err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", run.Id).Data(g.Map{
+		"status": cycleRunStatusDispatching, "stage": "dispatching", "error_message": "", "updated_at": gtime.Now(),
+	}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "更新频道循环等待发送状态失败")
+	}
+	run.Status = cycleRunStatusDispatching
+	return s.finalizeChannelCycleDelivery(ctx, run)
+}
+
+func (s *sSysPublish) finalizeDispatchingChannelCycleRuns(ctx context.Context, limit int) error {
+	var runs []cycleRunRecord
+	if err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
+		Where("status", cycleRunStatusDispatching).
+		OrderAsc("id").Limit(limit).Scan(&runs); err != nil {
+		return gerror.Wrap(err, "读取等待发送完成的循环批次失败")
+	}
+	for _, run := range runs {
+		if err := s.finalizeChannelCycleDelivery(ctx, run); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *sSysPublish) finalizeChannelCycleDelivery(ctx context.Context, run cycleRunRecord) error {
+	done, status, message, err := publishBatchTerminalState(ctx, fmt.Sprintf("cycle_batch:%d:", run.Id))
+	if err != nil || !done {
+		return err
+	}
+	cycleStatus := cycleRunStatusFinished
+	if status == "failed" {
+		cycleStatus = cycleRunStatusFailed
+	} else if status == "partial_failed" {
+		cycleStatus = cycleRunStatusPartial
+	}
+	s.finishChannelCycleRun(ctx, run, cycleStatus, message)
+	return nil
 }
 
 func (s *sSysPublish) lockChannelCycleRun(ctx context.Context, runId int64) (cycleRunRecord, error) {
@@ -348,30 +383,15 @@ func (s *sSysPublish) channelCycleBacklog(ctx context.Context, channelId int64) 
 }
 
 func (s *sSysPublish) enqueueChannelCycleProfile(ctx context.Context, runId int64, item channelProfileRecord) (bool, error) {
-	clientRequestId := cyclePublishClientRequestID(runId, item.ProfileId, item.ChannelId)
-	taskId, skipSubmit, err := s.createProfilePublishSnapshot(ctx, item.ProfileId, item.TenantId, item.AccountId, profilePublishSnapshotOptions{
-		ChannelIds:      []int64{item.ChannelId},
-		ClientRequestId: clientRequestId,
-		RequireOnline:   true,
-	})
+	operationNo := cyclePublishOperationNo(runId, item.ProfileId, item.ChannelId)
+	err := s.submitProfilePublish(ctx, item.ProfileId, item.TenantId, item.AccountId, 0, operationNo, []int64{item.ChannelId}, true)
 	if err != nil {
 		if errors.Is(err, errPublishProfileUnavailable) {
 			return false, s.deactivateChannelProfile(ctx, item.ChannelId, item.ProfileId)
 		}
 		return false, err
 	}
-	if skipSubmit || taskId <= 0 {
-		return false, nil
-	}
-	operationNo := cyclePublishOperationNo(runId, item.ProfileId, item.ChannelId)
-	if err = s.submitPublishEvent(ctx, taskId, item.TenantId, 0, operationNo); err != nil {
-		return false, err
-	}
 	return true, nil
-}
-
-func cyclePublishClientRequestID(runId int64, profileId int64, channelId int64) string {
-	return fmt.Sprintf("cycle:%d:%d:%d", runId, profileId, channelId)
 }
 
 func cyclePublishOperationNo(runId int64, profileId int64, channelId int64) string {

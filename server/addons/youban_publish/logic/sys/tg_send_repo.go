@@ -16,9 +16,6 @@ import (
 
 func (s *sSysPublish) lockTelegramJob(ctx context.Context, jobId int64) (telegramJobRecord, bool, error) {
 	var job telegramJobRecord
-	if err := ensureTelegramOperationColumns(ctx); err != nil {
-		return job, false, err
-	}
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", jobId).
 		WhereIn("status", []string{"pending", "failed_retry"}).
@@ -68,10 +65,15 @@ func (s *sSysPublish) telegramJobStillSending(ctx context.Context, jobId int64) 
 }
 
 func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecord, purpose string) ([]*telegramMediaItem, error) {
-	records, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("task_id", job.TaskId).
+	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("purpose", purpose).
-		WhereNull("deleted_at").
+		WhereNull("deleted_at")
+	if job.TaskId > 0 {
+		mod = mod.Where("task_id", job.TaskId)
+	} else {
+		mod = mod.WhereNull("task_id").Where("profile_id", job.ProfileId)
+	}
+	records, err := mod.
 		OrderAsc("sort_index").OrderAsc("id").
 		All()
 	if err != nil {

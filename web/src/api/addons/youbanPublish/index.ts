@@ -36,18 +36,6 @@ export function AccountDelete(params = {}) {
   return http.request({ url: '/youban_publish/publish/account/delete', method: 'POST', params });
 }
 
-export function TaskList(params = {}) {
-  return http.request({ url: '/youban_publish/publish/task/list', method: 'get', params });
-}
-
-export function TaskSubmit(params = {}) {
-  return http.request({ url: '/youban_publish/publish/task/submit', method: 'POST', params });
-}
-
-export function TaskCancel(params = {}) {
-  return http.request({ url: '/youban_publish/publish/task/cancel', method: 'POST', params });
-}
-
 export function PublishRecordList(params = {}) {
   return http.request({ url: '/youban_publish/publish/record/list', method: 'get', params });
 }

@@ -631,7 +631,8 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 	}
 	var existing gdb.Record
 	if in.MediaId > 0 {
-		existing, err = mediaTaskScope(g.DB().Model(publishMediaTable).Safe().Ctx(ctx), task["id"].Int64()).
+		existingMod := mediaTaskScope(g.DB().Model(publishMediaTable).Safe().Ctx(ctx), task["id"].Int64())
+		existing, err = existingMod.
 			Where("id", in.MediaId).
 			Where("profile_id", task["profile_id"].Int64()).
 			WhereNull("deleted_at").
@@ -928,8 +929,10 @@ func (s *sSysPublish) deleteMedia(ctx context.Context, id int64, accountId int64
 		return gerror.Wrap(err, "删除任务媒体失败")
 	}
 	_ = s.deleteMediaPHashBucketByMediaId(ctx, id)
-	if err = s.refreshTaskMediaCount(ctx, row["task_id"].Int64()); err != nil {
-		return err
+	if row["task_id"].Int64() > 0 {
+		if err = s.refreshTaskMediaCount(ctx, row["task_id"].Int64()); err != nil {
+			return err
+		}
 	}
 	if row["profile_id"].Int64() > 0 {
 		mediaColumns := dao.ContentMedia.Columns()
@@ -988,8 +991,10 @@ func (s *sSysPublish) deleteMediaByTenant(ctx context.Context, id int64, tenantI
 		return gerror.Wrap(err, "删除任务媒体失败")
 	}
 	_ = s.deleteMediaPHashBucketByMediaId(ctx, id)
-	if err = s.refreshTaskMediaCount(ctx, row["task_id"].Int64()); err != nil {
-		return err
+	if row["task_id"].Int64() > 0 {
+		if err = s.refreshTaskMediaCount(ctx, row["task_id"].Int64()); err != nil {
+			return err
+		}
 	}
 	if row["profile_id"].Int64() > 0 {
 		mediaColumns := dao.ContentMedia.Columns()
@@ -1015,14 +1020,14 @@ func (s *sSysPublish) editableMediaRow(ctx context.Context, row gdb.Record, tena
 	if row.IsEmpty() || row["profile_id"].Int64() <= 0 {
 		return row, nil
 	}
-	if row["task_id"].Int64() == 0 {
+	if row["task_id"].IsNil() {
 		return row, nil
 	}
 	if _, err := s.profileState(ctx, row["profile_id"].Int64(), tenantId, accountId); err != nil {
 		return nil, err
 	}
 	target, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("task_id", 0).
+		WhereNull("task_id").
 		Where("profile_id", row["profile_id"].Int64()).
 		Where("attachment_id", row["attachment_id"].Int64()).
 		Where("purpose", row["purpose"].String()).
@@ -1097,8 +1102,7 @@ func (s *sSysPublish) lockTaskMediaSyncTx(ctx context.Context, tx gdb.TX, taskId
 
 func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, taskId int64, profileId int64) error {
 	var list []*sysin.MediaModel
-	if err := tx.Model(publishMediaTable).Ctx(ctx).
-		Where("task_id", taskId).
+	if err := mediaTaskScope(tx.Model(publishMediaTable).Ctx(ctx), taskId).
 		Where("profile_id", profileId).
 		WhereNull("deleted_at").
 		OrderAsc("sort_index").

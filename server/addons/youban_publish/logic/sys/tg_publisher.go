@@ -11,9 +11,6 @@ import (
 )
 
 func (s *sSysPublish) submitTelegramPublish(ctx context.Context, req telegramPublishRequest) error {
-	if err := ensureTelegramOperationColumns(ctx); err != nil {
-		return err
-	}
 	if err := ensureCollectTelegramOrderColumns(ctx); err != nil {
 		return err
 	}

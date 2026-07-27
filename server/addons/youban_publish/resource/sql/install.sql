@@ -366,7 +366,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_history_task` (
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_history_log` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `task_id` bigint(20) DEFAULT NULL COMMENT '发布任务ID，正式资料媒体为空',
+  `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '任务ID',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
   `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '所属账号ID',
   `level` varchar(16) NOT NULL DEFAULT 'info' COMMENT '日志等级',
@@ -463,6 +463,50 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_state` (
   UNIQUE KEY `uk_ybp_profile_state_profile` (`profile_id`),
   KEY `idx_ybp_profile_state_owner` (`tenant_id`,`account_id`,`profile_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架资料归属和发布配置';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_success_record` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `job_id` bigint(20) NOT NULL DEFAULT '0',
+  `task_id` bigint(20) NOT NULL DEFAULT '0',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0',
+  `channel_id` bigint(20) NOT NULL DEFAULT '0',
+  `bot_id` bigint(20) NOT NULL DEFAULT '0',
+  `operation_no` varchar(128) NOT NULL DEFAULT '',
+  `target_chat_id` varchar(128) NOT NULL DEFAULT '',
+  `action` varchar(32) NOT NULL DEFAULT 'profile_publish',
+  `status` varchar(16) NOT NULL DEFAULT 'success',
+  `message` varchar(255) NOT NULL DEFAULT '',
+  `created_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_success_record_job` (`job_id`),
+  KEY `idx_ybp_success_record_owner` (`tenant_id`,`account_id`,`id`),
+  KEY `idx_ybp_success_record_profile` (`profile_id`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架成功发布记录';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_full_push_batch` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `batch_no` varchar(128) NOT NULL,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `channel_id` bigint(20) NOT NULL DEFAULT '0',
+  `requested_by` bigint(20) NOT NULL DEFAULT '0',
+  `snapshot_max_profile_id` bigint(20) NOT NULL DEFAULT '0',
+  `cursor_profile_id` bigint(20) NOT NULL DEFAULT '0',
+  `total_count` int(11) NOT NULL DEFAULT '0',
+  `queued_count` int(11) NOT NULL DEFAULT '0',
+  `retry_count` int(11) NOT NULL DEFAULT '0',
+  `status` varchar(16) NOT NULL DEFAULT 'pending',
+  `active_key` varchar(64) DEFAULT NULL,
+  `error_message` text,
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  `finished_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_full_push_batch_no` (`batch_no`),
+  UNIQUE KEY `uk_ybp_full_push_active` (`active_key`),
+  KEY `idx_ybp_full_push_schedule` (`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='频道全量推送批次';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_note_index` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -799,7 +843,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
   `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID',
   `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
-  `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '任务ID',
+  `task_id` bigint(20) DEFAULT NULL COMMENT '采集任务ID，普通资料媒体为空',
   `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
   `attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'HotGo附件ID',
   `original_attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '原始HotGo附件ID',
@@ -837,6 +881,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   KEY `idx_ybp_media_task_attachment` (`task_id`,`attachment_id`),
   KEY `idx_ybp_media_task_sort` (`task_id`,`sort_index`,`id`),
   KEY `idx_ybp_media_profile` (`profile_id`,`id`),
+  KEY `idx_ybp_media_profile_current` (`profile_id`,`task_id`,`purpose`,`sort_index`,`id`),
   KEY `idx_ybp_media_phash` (`perceptual_hash`),
   KEY `idx_ybp_media_similar_tenant` (`tenant_id`,`media_type`,`account_id`,`profile_id`,`id`),
   KEY `idx_ybp_media_similar_account` (`account_id`,`media_type`,`profile_id`,`id`),
@@ -953,7 +998,7 @@ FROM (
 WHERE NOT EXISTS (SELECT 1 FROM `hg_youban_publish_tag`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
-  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键', `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '任务ID',
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键', `task_id` bigint(20) DEFAULT NULL COMMENT '采集任务ID，普通资料推送为空',
   `operation_no` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG操作号',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID', `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID',
   `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID', `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
@@ -972,9 +1017,11 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
   `created_at` datetime DEFAULT NULL COMMENT '创建时间', `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ybp_tg_job_operation_channel` (`task_id`,`operation_no`,`channel_id`),
+  UNIQUE KEY `uk_ybp_tg_job_profile_operation_channel` (`profile_id`,`operation_no`,`channel_id`),
   KEY `idx_ybp_tg_job_task_channel` (`task_id`,`channel_id`,`id`),
   KEY `idx_ybp_tg_job_status_retry` (`status`,`next_retry_at`,`id`),
   KEY `idx_ybp_tg_job_task` (`task_id`),
+  KEY `idx_ybp_tg_job_profile_operation` (`profile_id`,`task_id`,`operation_no`,`status`,`id`),
   KEY `idx_ybp_tg_job_cycle` (`cycle_enabled`,`next_cycle_at`,`id`),
   KEY `idx_ybp_tg_job_operation` (`operation_no`,`status`,`id`),
   KEY `idx_ybp_tg_job_scheduler` (`dispatch_status`,`status`,`priority`,`next_retry_at`,`id`),
@@ -1474,7 +1521,6 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_channel_profile` (
   `account_id` bigint(20) NOT NULL DEFAULT '0',
   `channel_id` bigint(20) NOT NULL DEFAULT '0',
   `profile_id` bigint(20) NOT NULL DEFAULT '0',
-  `task_id` bigint(20) NOT NULL DEFAULT '0',
   `last_job_id` bigint(20) NOT NULL DEFAULT '0',
   `status` varchar(16) NOT NULL DEFAULT 'active',
   `created_at` datetime DEFAULT NULL,

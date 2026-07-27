@@ -8,14 +8,6 @@ import (
 	"hotgo/addons/youban_publish/service"
 )
 
-func (c *cPublishAdmin) SubmitTask(ctx context.Context, req *publish.AdminSubmitTaskReq) (res *publish.AdminSubmitTaskRes, err error) {
-	if err = service.SysPublish().AdminTaskSubmit(ctx, &req.TaskSubmitInp); err != nil {
-		return nil, err
-	}
-	res = &publish.AdminSubmitTaskRes{}
-	return
-}
-
 func (c *cPublishAdmin) PublishRecordList(ctx context.Context, req *publish.AdminPublishRecordListReq) (res *publish.AdminPublishRecordListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminPublishRecordList(ctx, &req.PublishRecordListInp)
 	if err != nil {

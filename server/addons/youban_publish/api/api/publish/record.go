@@ -7,13 +7,6 @@ import (
 	"hotgo/internal/model/input/form"
 )
 
-type AdminSubmitTaskReq struct {
-	g.Meta `path:"/publish/admin/task/submit" method:"post" tags:"上架插件管理端" summary:"提交上架任务"`
-	sysin.TaskSubmitInp
-}
-
-type AdminSubmitTaskRes struct{}
-
 type AdminPublishRecordListReq struct {
 	g.Meta `path:"/publish/admin/record/list" method:"get" tags:"上架插件管理端" summary:"发送记录列表"`
 	sysin.PublishRecordListInp

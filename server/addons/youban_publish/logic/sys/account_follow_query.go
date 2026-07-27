@@ -207,7 +207,7 @@ func (s *sSysPublish) noteListByAccounts(ctx context.Context, in *sysin.ProfileL
 	if err != nil {
 		return nil, 0, err
 	}
-	mod = mod.WhereIn("t.account_id", accountIds)
+	mod = mod.WhereIn("ps.account_id", accountIds)
 	profiles, totalCount, err := s.searchProfilePage(ctx, mod, in, profileListFields(), "统计共享笔记失败", "获取共享笔记失败")
 	if err != nil {
 		return nil, 0, err
@@ -239,7 +239,7 @@ func (s *sSysPublish) followNoteListByAccounts(ctx context.Context, in *sysin.Pr
 	if err != nil {
 		return nil, 0, err
 	}
-	mod = mod.WhereIn("t.account_id", accountIds)
+	mod = mod.WhereIn("ps.account_id", accountIds)
 	profiles, totalCount, err := s.searchProfilePage(ctx, mod, in, followNoteListFields(), "统计共享笔记失败", "获取共享笔记失败")
 	if err != nil {
 		return nil, 0, err
@@ -263,7 +263,7 @@ func (s *sSysPublish) followNoteListByAccounts(ctx context.Context, in *sysin.Pr
 }
 
 func followNoteListFields() string {
-	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,a.nickname AS account_name,a.nickname,a.username,t.status AS task_status,t.tg_status,t.tg_push_enabled"
+	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,0 AS task_id,ps.tenant_id,ps.account_id,a.nickname AS account_name,a.nickname,a.username,'' AS task_status,'' AS tg_status,CASE WHEN ps.channel_id_json IS NULL OR ps.channel_id_json='' OR ps.channel_id_json='[]' THEN 0 ELSE 1 END AS tg_push_enabled"
 }
 
 func followNoteFromProfile(profile *sysin.ProfileModel, media []*sysin.FollowNoteMediaModel) *sysin.FollowNoteModel {
@@ -321,6 +321,7 @@ func (s *sSysPublish) mediaListByProfiles(ctx context.Context, profiles []*sysin
 	err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Fields("id,tenant_id,account_id,task_id,profile_id,attachment_id,original_attachment_id,edited_attachment_id,media_type,purpose,name,file_url,original_file_url,edited_file_url,poster_url,storage_path,original_storage_path,edited_storage_path,poster_storage_path,edit_status,sort_index,status,created_at,updated_at").
 		WhereIn("profile_id", profileIds).
+		WhereNull("task_id").
 		WhereNull("deleted_at").
 		OrderAsc("profile_id").
 		OrderAsc("sort_index").

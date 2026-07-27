@@ -24,16 +24,41 @@ func ensurePublishTgChannelColumns(ctx context.Context) error {
 }
 
 func ensurePublishChannelPgsqlColumns(ctx context.Context) error {
-	_, err := g.DB().Exec(ctx, `ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "publish_visible" smallint NOT NULL DEFAULT 1`)
-	return err
+	statements := []string{
+		`ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_enabled" smallint NOT NULL DEFAULT 0`,
+		`ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_days" integer NOT NULL DEFAULT 4`,
+		`ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_time" varchar(16) NOT NULL DEFAULT ''`,
+		`ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_next_run_at" timestamp DEFAULT NULL`,
+		`ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_last_run_at" timestamp DEFAULT NULL`,
+		`ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_active_run_id" bigint NOT NULL DEFAULT 0`,
+		`ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_last_error_message" text`,
+		`ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "publish_visible" smallint NOT NULL DEFAULT 1`,
+	}
+	for _, statement := range statements {
+		if _, err := g.DB().Exec(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ensurePublishChannelMysqlColumns(ctx context.Context) error {
-	_, err := g.DB().Exec(ctx, "ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `publish_visible` tinyint(1) NOT NULL DEFAULT '1' COMMENT '上架端资料选择可见' AFTER `is_default_selected`")
-	if err != nil && isPublishChannelSchemaExistsError(err) {
-		return nil
+	statements := []string{
+		"ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否循环上架' AFTER `publish_direction`",
+		"ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环上架天数' AFTER `cycle_publish_enabled`",
+		"ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环上架时间' AFTER `cycle_publish_days`",
+		"ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_next_run_at` datetime DEFAULT NULL COMMENT '下次循环上架时间' AFTER `cycle_publish_time`",
+		"ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_last_run_at` datetime DEFAULT NULL COMMENT '上次循环上架时间' AFTER `cycle_next_run_at`",
+		"ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_active_run_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '当前循环批次ID' AFTER `cycle_last_run_at`",
+		"ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_last_error_message` text COMMENT '循环上架最近错误' AFTER `cycle_active_run_id`",
+		"ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `publish_visible` tinyint(1) NOT NULL DEFAULT '1' COMMENT '上架端资料选择可见' AFTER `is_default_selected`",
 	}
-	return err
+	for _, statement := range statements {
+		if _, err := g.DB().Exec(ctx, statement); err != nil && !isPublishChannelSchemaExistsError(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func ensurePublishTgChannelPgsqlColumns(ctx context.Context) error {

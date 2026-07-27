@@ -142,7 +142,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if err != nil {
 		return err
 	}
-	caption, err := s.telegramJobText(ctx, job.TaskId)
+	caption, err := s.telegramJobCaption(ctx, job)
 	if err != nil {
 		return err
 	}
@@ -366,6 +366,9 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 		g.Log().Warningf(ctx, "更新频道资料索引失败 jobId:%d err:%+v", job.Id, indexErr)
 	}
 	isCycle := isCycleBatchOperation(job.OperationNo)
+	if job.TaskId <= 0 {
+		return s.completeProfileTelegramOperation(ctx, job, isCycle)
+	}
 	allSent, err := s.allTelegramTaskJobsSent(ctx, job.TaskId, job.OperationNo)
 	if err != nil || !allSent {
 		return err
@@ -411,6 +414,14 @@ func (s *sSysPublish) canSendTelegramJob(ctx context.Context, job telegramJobRec
 		if err != nil || !enabled {
 			return false, err
 		}
+	}
+	if job.TaskId <= 0 {
+		requireOnline := strings.HasPrefix(job.OperationNo, "full_push:") || isCycleBatchOperation(job.OperationNo)
+		_, err := s.profilePublishSource(ctx, job.ProfileId, job.TenantId, job.AccountId, requireOnline)
+		if errors.Is(err, errPublishProfileUnavailable) {
+			return false, nil
+		}
+		return err == nil, err
 	}
 	task, err := s.telegramTaskForJob(ctx, job)
 	if err != nil {

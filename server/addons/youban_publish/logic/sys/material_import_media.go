@@ -152,6 +152,9 @@ func (s *sSysPublish) materialImportFailedGroupCount(ctx context.Context, taskId
 }
 
 func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, client *telegram.Client) error {
+	if !materialImportProfileText(firstNonEmpty(group.ProfileText, group.RawText)) {
+		return s.materialImportMarkGroupDone(ctx, group.Id, 0, 0, group.MediaJson)
+	}
 	items := make([]collectMediaItem, 0)
 	_ = json.Unmarshal([]byte(group.MediaJson), &items)
 	if len(items) == 0 {
@@ -159,7 +162,7 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 		if err != nil {
 			return err
 		}
-		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, "[]")
+		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0, "[]")
 	}
 	profileId, err := s.materialImportExistingProfile(ctx, group)
 	if err != nil {
@@ -167,7 +170,7 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 	}
 	if profileId > 0 && (group.MediaTotal == 0 || s.materialImportProfileHasMedia(ctx, profileId)) {
 		_ = s.appendMaterialImportPublishLog(ctx, task, profileId, "reused", fmt.Sprintf("资料已存在，跳过重复导入：%s", strings.TrimSpace(group.Title)))
-		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, group.MediaJson)
+		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0, group.MediaJson)
 	}
 	_ = s.materialImportMarkGroupRunning(ctx, group.Id)
 	done := 0
@@ -198,7 +201,7 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 	if err != nil {
 		return err
 	}
-	return s.materialImportMarkGroupDone(ctx, group.Id, profileId, string(data))
+	return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0, string(data))
 }
 
 func (s *sSysPublish) materialImportProfileHasMedia(ctx context.Context, profileId int64) bool {
@@ -257,14 +260,15 @@ func (s *sSysPublish) materialImportMarkGroupFailed(ctx context.Context, id int6
 	return err
 }
 
-func (s *sSysPublish) materialImportMarkGroupDone(ctx context.Context, id int64, profileId int64, mediaJson string) error {
+func (s *sSysPublish) materialImportMarkGroupDone(ctx context.Context, id int64, profileId int64, taskProfileId int64, mediaJson string) error {
 	_, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("id", id).Data(g.Map{
-		"status":       sysin.MaterialImportStatusSuccess,
-		"media_json":   strings.TrimSpace(mediaJson),
-		"media_done":   gdb.Raw("media_total"),
-		"media_failed": 0,
-		"profile_id":   profileId,
-		"updated_at":   gtime.Now(),
+		"status":          sysin.MaterialImportStatusSuccess,
+		"media_json":      strings.TrimSpace(mediaJson),
+		"media_done":      gdb.Raw("media_total"),
+		"media_failed":    0,
+		"profile_id":      profileId,
+		"task_profile_id": taskProfileId,
+		"updated_at":      gtime.Now(),
 	}).Update()
 	return err
 }

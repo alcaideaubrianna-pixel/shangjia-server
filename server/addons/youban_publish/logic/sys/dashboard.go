@@ -149,8 +149,8 @@ func (s *sSysPublish) dashboardTodo(ctx context.Context, tenantId int64, account
 }
 
 func (s *sSysPublish) dashboardTaskTodos(ctx context.Context, tenantId int64, accountId int64, admin bool) ([]*sysin.DashboardTodoItemModel, error) {
-	var rows []*sysin.TaskModel
-	mod := s.taskListModel(ctx).
+	var rows []*collectTaskSummary
+	mod := s.collectTaskSummaryModel(ctx).
 		Where("t.tenant_id", tenantId).
 		WhereIn("t.status", []string{sysin.PublishTaskStatusFailed, sysin.PublishTaskStatusPending}).
 		WhereNull("t.deleted_at")
@@ -359,7 +359,7 @@ func (s *sSysPublish) dashboardErrorRank(ctx context.Context, tenantId int64) ([
 	return items, nil
 }
 
-func dashboardTaskDesc(row *sysin.TaskModel) string {
+func dashboardTaskDesc(row *collectTaskSummary) string {
 	owner := dashboardText(row.AccountNickname, row.AccountUsername)
 	if owner == "" {
 		return row.City

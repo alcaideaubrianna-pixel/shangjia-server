@@ -3,13 +3,10 @@ package sys
 import (
 	"context"
 	"strings"
-	"sync"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
-
-	"hotgo/internal/consts"
 )
 
 const (
@@ -19,59 +16,6 @@ const (
 	publishSuccessTypeProfile = "profile_publish"
 )
 
-var (
-	publishRecordSchemaOnce sync.Once
-	publishRecordSchemaErr  error
-)
-
-func ensurePublishSuccessRecordSchema(ctx context.Context) error {
-	publishRecordSchemaOnce.Do(func() {
-		publishRecordSchemaErr = initializePublishRecordSchema(ctx)
-	})
-	return publishRecordSchemaErr
-}
-
-func initializePublishRecordSchema(ctx context.Context) error {
-	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
-		statements := []string{
-			`CREATE TABLE IF NOT EXISTS "hg_youban_publish_success_record" (
-				"id" bigserial PRIMARY KEY,
-				"job_id" bigint NOT NULL DEFAULT 0,
-				"task_id" bigint NOT NULL DEFAULT 0,
-				"tenant_id" bigint NOT NULL DEFAULT 0,
-				"account_id" bigint NOT NULL DEFAULT 0,
-				"profile_id" bigint NOT NULL DEFAULT 0,
-				"channel_id" bigint NOT NULL DEFAULT 0,
-				"bot_id" bigint NOT NULL DEFAULT 0,
-				"operation_no" varchar(128) NOT NULL DEFAULT '',
-				"target_chat_id" varchar(128) NOT NULL DEFAULT '',
-				"action" varchar(32) NOT NULL DEFAULT 'profile_publish',
-				"status" varchar(16) NOT NULL DEFAULT 'success',
-				"message" varchar(255) NOT NULL DEFAULT '',
-				"created_at" timestamp DEFAULT NULL
-			)`,
-			`CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_success_record_job" ON "hg_youban_publish_success_record" ("job_id")`,
-			`CREATE INDEX IF NOT EXISTS "idx_ybp_success_record_owner" ON "hg_youban_publish_success_record" ("tenant_id", "account_id", "id")`,
-			`CREATE INDEX IF NOT EXISTS "idx_ybp_success_record_profile" ON "hg_youban_publish_success_record" ("profile_id", "id")`,
-		}
-		for _, statement := range statements {
-			if _, err := g.DB().Exec(ctx, statement); err != nil {
-				return gerror.Wrap(err, "初始化成功发布记录表失败")
-			}
-		}
-		return nil
-	}
-	statements := []string{
-		"CREATE TABLE IF NOT EXISTS `hg_youban_publish_success_record` (`id` bigint unsigned NOT NULL AUTO_INCREMENT,`job_id` bigint NOT NULL DEFAULT 0,`task_id` bigint NOT NULL DEFAULT 0,`tenant_id` bigint NOT NULL DEFAULT 0,`account_id` bigint NOT NULL DEFAULT 0,`profile_id` bigint NOT NULL DEFAULT 0,`channel_id` bigint NOT NULL DEFAULT 0,`bot_id` bigint NOT NULL DEFAULT 0,`operation_no` varchar(128) NOT NULL DEFAULT '',`target_chat_id` varchar(128) NOT NULL DEFAULT '',`action` varchar(32) NOT NULL DEFAULT 'profile_publish',`status` varchar(16) NOT NULL DEFAULT 'success',`message` varchar(255) NOT NULL DEFAULT '',`created_at` datetime DEFAULT NULL,PRIMARY KEY (`id`),UNIQUE KEY `uk_ybp_success_record_job` (`job_id`),KEY `idx_ybp_success_record_owner` (`tenant_id`,`account_id`,`id`),KEY `idx_ybp_success_record_profile` (`profile_id`,`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-	}
-	for _, statement := range statements {
-		if _, err := g.DB().Exec(ctx, statement); err != nil {
-			return gerror.Wrap(err, "初始化成功发布记录表失败")
-		}
-	}
-	return nil
-}
-
 func (s *sSysPublish) appendPublishSuccessRecord(ctx context.Context, job telegramJobRecord) error {
 	return s.upsertPublishJobRecord(ctx, job, "success", publishSuccessRecordMessage(publishSuccessRecordAction(job.OperationNo)))
 }
@@ -79,9 +23,6 @@ func (s *sSysPublish) appendPublishSuccessRecord(ctx context.Context, job telegr
 func (s *sSysPublish) upsertPublishJobRecord(ctx context.Context, job telegramJobRecord, status string, message string) error {
 	if job.Id <= 0 {
 		return nil
-	}
-	if err := ensurePublishSuccessRecordSchema(ctx); err != nil {
-		return err
 	}
 	action := publishSuccessRecordAction(job.OperationNo)
 	status = strings.TrimSpace(status)

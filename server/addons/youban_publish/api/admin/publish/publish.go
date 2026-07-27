@@ -68,39 +68,6 @@ type AccountDeleteReq struct {
 
 type AccountDeleteRes struct{}
 
-type TaskListReq struct {
-	g.Meta `path:"/publish/task/list" method:"get" tags:"上架插件后台" summary:"上架任务列表"`
-	sysin.TaskListInp
-}
-
-type TaskListRes struct {
-	form.PageRes
-	List []*sysin.TaskModel `json:"list" dc:"任务列表"`
-}
-
-type TaskSaveReq struct {
-	g.Meta `path:"/publish/task/save" method:"post" tags:"上架插件后台" summary:"新增或编辑上架任务"`
-	sysin.TaskSaveInp
-}
-
-type TaskSaveRes struct {
-	Id int64 `json:"id" dc:"任务ID"`
-}
-
-type TaskSubmitReq struct {
-	g.Meta `path:"/publish/task/submit" method:"post" tags:"上架插件后台" summary:"提交上架任务"`
-	sysin.TaskSubmitInp
-}
-
-type TaskSubmitRes struct{}
-
-type TaskCancelReq struct {
-	g.Meta `path:"/publish/task/cancel" method:"post" tags:"上架插件后台" summary:"取消上架任务"`
-	sysin.TaskCancelInp
-}
-
-type TaskCancelRes struct{}
-
 type PublishRecordListReq struct {
 	g.Meta `path:"/publish/record/list" method:"get" tags:"上架插件后台" summary:"发送记录列表"`
 	sysin.PublishRecordListInp

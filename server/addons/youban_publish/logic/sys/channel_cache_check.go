@@ -36,13 +36,11 @@ func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.Chann
 	if len(in.BotIds) == 0 {
 		return nil, gerror.New("请选择推送资料BOT")
 	}
-	account, err := s.currentAdminAccount(ctx)
+	resolvedTgAccountId, err := s.resolveTenantTgAccountId(ctx, in.TgAccountId, tenantId)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.ensureTgAccountBelongsAccount(ctx, in.TgAccountId, tenantId, account.Id); err != nil {
-		return nil, err
-	}
+	in.TgAccountId = resolvedTgAccountId
 	if err := s.ensureBotsBelongTenant(ctx, in.BotIds, tenantId); err != nil {
 		return nil, err
 	}

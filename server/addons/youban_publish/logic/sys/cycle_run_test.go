@@ -3,11 +3,6 @@ package sys
 import "testing"
 
 func TestCyclePublishIdentifiers(t *testing.T) {
-	clientRequestID := cyclePublishClientRequestID(12, 34, 56)
-	if clientRequestID != "cycle:12:34:56" {
-		t.Fatalf("unexpected client request id: %s", clientRequestID)
-	}
-
 	operationNo := cyclePublishOperationNo(12, 34, 56)
 	if operationNo != "cycle_batch:12:34:56" {
 		t.Fatalf("unexpected operation number: %s", operationNo)

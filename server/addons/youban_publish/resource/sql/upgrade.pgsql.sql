@@ -467,7 +467,78 @@ ORDER BY "profile_id", "id" DESC
 ON CONFLICT ("profile_id") DO NOTHING;
 UPDATE "hg_youban_publish_task" SET "status"='canceled', "tg_status"='skipped' WHERE "status"='draft';
 
+ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "tg_operation_no" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "operation_no" varchar(128) NOT NULL DEFAULT '';
+DROP INDEX IF EXISTS "uk_ybp_tg_job_task_channel";
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_task_channel" ON "hg_youban_publish_tg_job" ("task_id", "channel_id", "id");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_job_operation_channel" ON "hg_youban_publish_tg_job" ("task_id", "operation_no", "channel_id") WHERE "operation_no" <> '';
+CREATE INDEX IF NOT EXISTS "idx_ybp_task_tg_operation" ON "hg_youban_publish_task" ("tg_operation_no");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_operation" ON "hg_youban_publish_tg_job" ("operation_no", "status", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_success_record" (
+  "id" BIGSERIAL PRIMARY KEY, "job_id" bigint NOT NULL DEFAULT 0, "task_id" bigint NOT NULL DEFAULT 0,
+  "tenant_id" bigint NOT NULL DEFAULT 0, "account_id" bigint NOT NULL DEFAULT 0, "profile_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0, "bot_id" bigint NOT NULL DEFAULT 0, "operation_no" varchar(128) NOT NULL DEFAULT '',
+  "target_chat_id" varchar(128) NOT NULL DEFAULT '', "action" varchar(32) NOT NULL DEFAULT 'profile_publish',
+  "status" varchar(16) NOT NULL DEFAULT 'success', "message" varchar(255) NOT NULL DEFAULT '', "created_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_success_record_job" ON "hg_youban_publish_success_record" ("job_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_success_record_owner" ON "hg_youban_publish_success_record" ("tenant_id", "account_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_success_record_profile" ON "hg_youban_publish_success_record" ("profile_id", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_full_push_batch" (
+  "id" BIGSERIAL PRIMARY KEY, "batch_no" varchar(128) NOT NULL, "tenant_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0, "requested_by" bigint NOT NULL DEFAULT 0,
+  "snapshot_max_profile_id" bigint NOT NULL DEFAULT 0, "cursor_profile_id" bigint NOT NULL DEFAULT 0,
+  "total_count" integer NOT NULL DEFAULT 0, "queued_count" integer NOT NULL DEFAULT 0, "retry_count" integer NOT NULL DEFAULT 0,
+  "status" varchar(16) NOT NULL DEFAULT 'pending', "active_key" varchar(64) DEFAULT NULL, "error_message" text,
+  "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL, "finished_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_full_push_batch_no" ON "hg_youban_publish_full_push_batch" ("batch_no");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_full_push_active" ON "hg_youban_publish_full_push_batch" ("active_key");
+CREATE INDEX IF NOT EXISTS "idx_ybp_full_push_schedule" ON "hg_youban_publish_full_push_batch" ("status", "id");
+ALTER TABLE "hg_youban_publish_full_push_batch" ADD COLUMN IF NOT EXISTS "snapshot_max_profile_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_full_push_batch" ADD COLUMN IF NOT EXISTS "cursor_profile_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_full_push_batch" ADD COLUMN IF NOT EXISTS "snapshot_max_task_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_full_push_batch" ADD COLUMN IF NOT EXISTS "cursor_task_id" bigint NOT NULL DEFAULT 0;
+UPDATE "hg_youban_publish_full_push_batch" SET "snapshot_max_profile_id"="snapshot_max_task_id" WHERE "snapshot_max_profile_id"=0 AND "snapshot_max_task_id">0;
+UPDATE "hg_youban_publish_full_push_batch" SET "cursor_profile_id"="cursor_task_id" WHERE "cursor_profile_id"=0 AND "cursor_task_id">0;
+ALTER TABLE "hg_youban_publish_full_push_batch" DROP COLUMN IF EXISTS "snapshot_max_task_id";
+ALTER TABLE "hg_youban_publish_full_push_batch" DROP COLUMN IF EXISTS "cursor_task_id";
 ALTER TABLE "hg_youban_publish_media" ALTER COLUMN "task_id" DROP NOT NULL;
 ALTER TABLE "hg_youban_publish_media" ALTER COLUMN "task_id" DROP DEFAULT;
 UPDATE "hg_youban_publish_media" SET "task_id"=NULL WHERE "profile_id">0 AND "task_id"=0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_profile_current" ON "hg_youban_publish_media" ("profile_id", "purpose", "sort_index", "id") WHERE "task_id" IS NULL AND "deleted_at" IS NULL;
+ALTER TABLE "hg_youban_publish_tg_job" ALTER COLUMN "task_id" DROP NOT NULL;
+ALTER TABLE "hg_youban_publish_tg_job" ALTER COLUMN "task_id" DROP DEFAULT;
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_job_profile_operation_channel" ON "hg_youban_publish_tg_job" ("profile_id", "operation_no", "channel_id") WHERE "task_id" IS NULL AND "profile_id" > 0 AND "operation_no" <> '';
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_profile_operation" ON "hg_youban_publish_tg_job" ("profile_id", "operation_no", "status", "id") WHERE "task_id" IS NULL;
+DROP INDEX IF EXISTS "idx_ybp_profile_state_current_task";
+ALTER TABLE "hg_youban_publish_profile_state" DROP COLUMN IF EXISTS "current_task_id";
+ALTER TABLE "hg_youban_publish_channel_profile" DROP COLUMN IF EXISTS "task_id";
+DELETE FROM "hg_admin_menu" WHERE "name" = 'youbanPublishTask';
+
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_days" integer NOT NULL DEFAULT 4;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_time" varchar(16) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_next_run_at" timestamp DEFAULT NULL;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_last_run_at" timestamp DEFAULT NULL;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_active_run_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_last_error_message" text;
+ALTER TABLE IF EXISTS "hg_youban_publish_cycle_run" ADD COLUMN IF NOT EXISTS "cursor_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS "hg_youban_publish_cycle_run" ADD COLUMN IF NOT EXISTS "total_count" integer NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS "hg_youban_publish_cycle_run" ADD COLUMN IF NOT EXISTS "queued_count" integer NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel_profile" (
+  "id" bigserial PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "task_id" bigint NOT NULL DEFAULT 0,
+  "last_job_id" bigint NOT NULL DEFAULT 0,
+  "status" varchar(16) NOT NULL DEFAULT 'active',
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_channel_profile" ON "hg_youban_publish_channel_profile" ("channel_id", "profile_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_channel_profile_scan" ON "hg_youban_publish_channel_profile" ("channel_id", "status", "id");

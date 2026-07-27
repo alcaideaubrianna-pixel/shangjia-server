@@ -2,19 +2,21 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
-	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/dao"
 )
 
-type scheduledPublishTask struct {
-	AccountId int64 `json:"accountId"`
-	Id        int64 `json:"id"`
-	TenantId  int64 `json:"tenantId"`
+type scheduledPublishProfile struct {
+	AccountId int64       `json:"accountId"`
+	ProfileId int64       `json:"profileId"`
+	PublishAt *gtime.Time `json:"publishAt"`
+	TenantId  int64       `json:"tenantId"`
 }
 
 func (s *sSysPublish) runScheduledPublishRuntime(ctx context.Context) {
@@ -38,27 +40,33 @@ func (s *sSysPublish) runScheduledPublishRuntime(ctx context.Context) {
 }
 
 func (s *sSysPublish) submitDuePublishTasks(ctx context.Context) error {
-	var list []*scheduledPublishTask
-	err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,account_id").
-		Where("status", sysin.PublishTaskStatusPending).
-		Where("tg_push_enabled", 1).
-		Where("published_at IS NOT NULL").
-		Where("published_at <= ?", gtime.Now()).
-		WhereNull("deleted_at").
-		OrderAsc("published_at").
+	var list []*scheduledPublishProfile
+	err := g.DB().Model(publishProfileStateTable+" ps").Safe().Ctx(ctx).
+		InnerJoin(dao.ContentProfile.Table()+" p", "p.id=ps.profile_id AND p.deleted_at IS NULL").
+		InnerJoin(publishAccountTable+" a", "a.id=ps.account_id AND a.deleted_at IS NULL AND a.status=1").
+		Fields("ps.profile_id,ps.tenant_id,ps.account_id,ps.publish_at").
+		WhereNotNull("ps.publish_at").
+		WhereLTE("ps.publish_at", gtime.Now()).
+		WhereNull("ps.deleted_at").
+		OrderAsc("ps.publish_at").
 		Limit(50).
 		Scan(&list)
 	if err != nil {
-		return gerror.Wrap(err, "读取到期上架任务失败")
+		return gerror.Wrap(err, "读取到期上架资料失败")
 	}
 	for _, item := range list {
-		if item == nil || item.Id <= 0 || item.TenantId <= 0 || item.AccountId <= 0 {
+		if item == nil || item.ProfileId <= 0 || item.TenantId <= 0 || item.AccountId <= 0 || item.PublishAt == nil {
 			continue
 		}
-		if err = s.submitTaskByTenant(ctx, item.Id, item.TenantId, item.AccountId); err != nil {
-			g.Log().Warningf(ctx, "提交到期上架任务失败 task:%d err:%+v", item.Id, err)
+		operationNo := fmt.Sprintf("scheduled:%d:%d", item.ProfileId, item.PublishAt.TimestampNano())
+		if err = s.submitProfilePublish(ctx, item.ProfileId, item.TenantId, item.AccountId, item.AccountId, operationNo, nil, false); err != nil {
+			g.Log().Warningf(ctx, "提交到期上架资料失败 profile:%d err:%+v", item.ProfileId, err)
+			continue
 		}
+		_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+			Where("profile_id", item.ProfileId).
+			Where("publish_at", item.PublishAt).
+			Data(g.Map{"publish_at": nil, "updated_at": gtime.Now()}).Update()
 	}
 	return nil
 }

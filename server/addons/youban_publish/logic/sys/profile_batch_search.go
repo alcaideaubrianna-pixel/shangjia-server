@@ -33,7 +33,7 @@ func (s *sSysPublish) profileImageSearchNotesByProfileIds(ctx context.Context, p
 		return nil, err
 	}
 	if len(filterAccountIds) > 0 {
-		base = base.WhereIn("t.account_id", uniqueIds(filterAccountIds))
+		base = base.WhereIn("ps.account_id", uniqueIds(filterAccountIds))
 	}
 	rows, err := base.Fields(profileImageSearchListFields()).WhereIn("p.id", profileIds).All()
 	if err != nil {
@@ -85,7 +85,7 @@ func (s *sSysPublish) profileImageSearchNotesByProfileIds(ctx context.Context, p
 }
 
 func profileImageSearchListFields() string {
-	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,t.id AS task_id,t.tenant_id,t.account_id,a.nickname AS account_name,a.nickname,a.username,t.status AS task_status"
+	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,0 AS task_id,ps.tenant_id,ps.account_id,a.nickname AS account_name,a.nickname,a.username,'' AS task_status"
 }
 
 func profileImageSearchResultCacheKey(ctx context.Context, profileIds []int64, tenantId int64, filterAccountIds []int64, viewer *sysin.AccountModel, permission string) string {

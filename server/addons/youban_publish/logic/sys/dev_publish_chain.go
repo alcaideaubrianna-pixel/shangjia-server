@@ -109,12 +109,12 @@ func (s *sSysPublish) createDevPublishTestItem(ctx context.Context, account *sys
 	if err != nil {
 		return nil, err
 	}
-	mediaIds, err := s.attachDevTestFiles(ctx, saved.TaskId, account.Id, files)
+	mediaIds, err := s.attachDevTestFiles(ctx, saved.Id, account.TenantId, account.Id, files)
 	if err != nil {
 		return nil, err
 	}
 	if shouldSubmit {
-		if err = s.submitTask(ctx, saved.TaskId, account.Id); err != nil {
+		if err = s.submitProfilePublish(ctx, saved.Id, account.TenantId, account.Id, contexts.GetUserId(ctx), "", channelIds, false); err != nil {
 			return nil, err
 		}
 	}
@@ -123,16 +123,17 @@ func (s *sSysPublish) createDevPublishTestItem(ctx context.Context, account *sys
 		ProfileId: saved.Id,
 		PublishAt: publishAt,
 		Submitted: shouldSubmit,
-		TaskId:    saved.TaskId,
+		TaskId:    0,
 		Title:     title,
 	}, nil
 }
 
-func (s *sSysPublish) attachDevTestFiles(ctx context.Context, taskId int64, accountId int64, files []string) ([]int64, error) {
-	task, err := s.getTask(ctx, taskId, accountId)
+func (s *sSysPublish) attachDevTestFiles(ctx context.Context, profileId int64, tenantId int64, accountId int64, files []string) ([]int64, error) {
+	state, err := s.profileState(ctx, profileId, tenantId, accountId)
 	if err != nil {
 		return nil, err
 	}
+	owner := profileMediaOwner(state)
 	ids := make([]int64, 0, len(files))
 	for i, path := range files {
 		mediaType := devMediaType(path)
@@ -147,8 +148,8 @@ func (s *sSysPublish) attachDevTestFiles(ctx context.Context, taskId int64, acco
 				return nil, err
 			}
 		}
-		media, err := s.saveMediaAttachment(ctx, task, &sysin.MediaUploadInp{
-			ProfileId: task["profile_id"].Int64(),
+		media, err := s.saveMediaAttachment(ctx, owner, &sysin.MediaUploadInp{
+			ProfileId: profileId,
 			MediaType: mediaType,
 			Purpose:   devMediaPurpose(mediaType),
 			SortIndex: i + 1,

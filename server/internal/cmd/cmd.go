@@ -47,6 +47,8 @@ var (
 		>> 回填上架资料索引  [go run main.go up -m=fix -a1=noteIndex]
 		>> 创建上架系统大表索引  [go run main.go up -m=fix -a1=publishHeavyIndexes]
 		>> 回填上架资料当前媒体  [go run main.go up -m=fix -a1=publishProfileMedia]
+		>> 回填频道当前上架资料索引  [go run main.go up -m=fix -a1=publishChannelProfile]
+		>> 清理普通资料历史Task  [go run main.go up -m=fix -a1=publishProfileTaskCleanup]
 		---------------------------------------------------------------------------------
 		更多
        	github地址：https://github.com/bufanyun/hotgo

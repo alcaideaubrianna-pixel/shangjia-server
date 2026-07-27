@@ -39,7 +39,6 @@ WITH parent AS (
   FROM (VALUES
     ('租户管理', 'youbanPublishTenant', '/youban_publish/publish/tenant/list,/youban_publish/publish/tenant/save,/youban_publish/publish/tenant/delete', 10),
     ('账号管理', 'youbanPublishAccount', '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/resetPwd,/youban_publish/publish/account/delete', 20),
-    ('上架任务', 'youbanPublishTask', '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel', 30),
     ('笔记资料', 'youbanPublishProfile', '/youban_publish/publish/profile/list,/youban_publish/publish/profile/view,/youban_publish/publish/profile/edit,/youban_publish/publish/profile/delete,/youban_publish/publish/profile/review', 34),
     ('导入任务', 'youbanPublishImportTask', '/youban_publish/publish/importTask/list,/youban_publish/publish/importTask/create,/youban_publish/publish/importTask/view,/youban_publish/publish/importTask/start,/youban_publish/publish/importTask/cancel,/youban_publish/publish/importTask/retry,/youban_publish/publish/importTask/scan,/youban_publish/publish/importTask/repair', 35),
     ('导入记录', 'youbanPublishImportRun', '/youban_publish/publish/importRun/list,/youban_publish/publish/importRun/create,/youban_publish/publish/importRun/delete,/youban_publish/publish/importRun/cancel,/youban_publish/publish/importRun/logs,/youban_publish/publish/importRun/clearLogs', 36),
@@ -71,7 +70,6 @@ WITH parent AS (
   FROM (VALUES
     ('租户管理', 'youbanPublishTenant', '/youban_publish/publish/tenant/list,/youban_publish/publish/tenant/save,/youban_publish/publish/tenant/delete', 10),
     ('账号管理', 'youbanPublishAccount', '/youban_publish/publish/account/list,/youban_publish/publish/account/save,/youban_publish/publish/account/resetPwd,/youban_publish/publish/account/delete', 20),
-    ('上架任务', 'youbanPublishTask', '/youban_publish/publish/task/list,/youban_publish/publish/task/save,/youban_publish/publish/task/submit,/youban_publish/publish/task/cancel', 30),
     ('笔记资料', 'youbanPublishProfile', '/youban_publish/publish/profile/list,/youban_publish/publish/profile/view,/youban_publish/publish/profile/edit,/youban_publish/publish/profile/delete,/youban_publish/publish/profile/review', 34),
     ('导入任务', 'youbanPublishImportTask', '/youban_publish/publish/importTask/list,/youban_publish/publish/importTask/create,/youban_publish/publish/importTask/view,/youban_publish/publish/importTask/start,/youban_publish/publish/importTask/cancel,/youban_publish/publish/importTask/retry,/youban_publish/publish/importTask/scan,/youban_publish/publish/importTask/repair', 35),
     ('导入记录', 'youbanPublishImportRun', '/youban_publish/publish/importRun/list,/youban_publish/publish/importRun/create,/youban_publish/publish/importRun/delete,/youban_publish/publish/importRun/cancel,/youban_publish/publish/importRun/logs,/youban_publish/publish/importRun/clearLogs', 36),
@@ -103,7 +101,6 @@ JOIN "hg_admin_menu" m ON m."name" IN (
   'youbanPublish',
   'youbanPublishTenant',
   'youbanPublishAccount',
-  'youbanPublishTask',
   'youbanPublishProfile',
   'youbanPublishImportTask',
   'youbanPublishImportRun',

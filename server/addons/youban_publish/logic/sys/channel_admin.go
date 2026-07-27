@@ -11,7 +11,6 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
-	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
 )
 
@@ -145,6 +144,11 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 			in.PublishDirection = existing.PublishDirection
 		}
 	}
+	resolvedTgAccountId, err := s.resolveTenantTgAccountId(ctx, in.TgAccountId, in.TenantId)
+	if err != nil {
+		return err
+	}
+	in.TgAccountId = resolvedTgAccountId
 	if err = in.Filter(ctx); err != nil {
 		return err
 	}
@@ -401,30 +405,6 @@ func (s *sSysPublish) AdminChannelFullPush(ctx context.Context, in *sysin.Channe
 	}, nil
 }
 
-func (s *sSysPublish) enqueueFullPushTelegramJob(ctx context.Context, taskId int64, channelId int64, operationNo string) error {
-	task, err := s.telegramJobTask(ctx, taskId)
-	if err != nil {
-		return err
-	}
-	channels, err := s.telegramJobChannels(ctx, task, []int64{channelId})
-	if err != nil {
-		return err
-	}
-	if len(channels) == 0 {
-		return gerror.New("全量推送目标频道不存在")
-	}
-	for _, channel := range channels {
-		jobId, err := s.ensureTelegramPublishChannelJob(ctx, task, channel, operationNo)
-		if err != nil {
-			return err
-		}
-		if err = s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
-			return gerror.Wrap(err, "TG任务入队失败")
-		}
-	}
-	return nil
-}
-
 func (s *sSysPublish) fullPushChannel(ctx context.Context, tenantId int64, channelId int64) (*sysin.ChannelModel, error) {
 	var channel sysin.ChannelModel
 	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
@@ -444,46 +424,6 @@ func (s *sSysPublish) fullPushChannel(ctx context.Context, tenantId int64, chann
 		return nil, gerror.New("目标频道未配置可用推送BOT")
 	}
 	return &channel, nil
-}
-
-func (s *sSysPublish) fullPushPublishedTaskIds(ctx context.Context, tenantId, lastId, snapshotMaxTaskId int64, limit int) ([]int64, error) {
-	if limit <= 0 {
-		limit = 500
-	}
-	var rows []struct {
-		Id int64 `json:"id"`
-	}
-	mod := fullPushPublishedTaskBaseModel(ctx, tenantId).
-		Fields("t.id").
-		Where("t.id > ?", lastId).
-		Where("t.id <= ?", snapshotMaxTaskId).
-		OrderAsc("t.id").
-		Limit(limit)
-	err := mod.Scan(&rows)
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取全量推送资料失败")
-	}
-	ids := make([]int64, 0, len(rows))
-	for _, row := range rows {
-		if row.Id > 0 {
-			ids = append(ids, row.Id)
-		}
-	}
-	return ids, nil
-}
-
-func fullPushPublishedTaskBaseModel(ctx context.Context, tenantId int64) *gdb.Model {
-	return g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
-		InnerJoin(publishAccountTable+" a", "a.id=t.account_id AND a.deleted_at IS NULL").
-		InnerJoin(dao.ContentProfile.Table()+" p", "p.id=t.profile_id AND p.deleted_at IS NULL").
-		Where("t.tenant_id", tenantId).
-		WhereIn("t.status", []string{sysin.PublishTaskStatusPublished, sysin.PublishTaskStatusPublishing}).
-		Where("t.deleted_at IS NULL").
-		Where("a.tenant_id", tenantId).
-		Where("a.status", 1).
-		Where("p.status", 1).
-		Where("NOT EXISTS (SELECT 1 FROM "+publishTaskTable+" t2 WHERE t2.tenant_id=t.tenant_id AND t2.profile_id=t.profile_id AND t2.deleted_at IS NULL AND t2.status IN (?, ?) AND t2.id>t.id)", sysin.PublishTaskStatusPublished, sysin.PublishTaskStatusPublishing).
-		Where("COALESCE(t.client_request_id, '') NOT LIKE ?", "collect:follow:%")
 }
 
 func (s *sSysPublish) ServerChannelRefresh(ctx context.Context, in *sysin.ChannelRefreshInp) (list []*sysin.ChannelRefreshModel, err error) {

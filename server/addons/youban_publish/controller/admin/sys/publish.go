@@ -179,47 +179,6 @@ func (c *cPublishServer) AccountDelete(ctx context.Context, req *publish.Account
 	return
 }
 
-func (c *cPublishServer) TaskList(ctx context.Context, req *publish.TaskListReq) (res *publish.TaskListRes, err error) {
-	list, totalCount, err := service.SysPublish().ServerTaskList(ctx, &req.TaskListInp)
-	if err != nil {
-		return
-	}
-	if list == nil {
-		list = []*sysin.TaskModel{}
-	}
-	res = new(publish.TaskListRes)
-	res.List = list
-	res.PageRes.Pack(req, totalCount)
-	return
-}
-
-func (c *cPublishServer) TaskSave(ctx context.Context, req *publish.TaskSaveReq) (res *publish.TaskSaveRes, err error) {
-	id, err := service.SysPublish().ServerTaskSave(ctx, &req.TaskSaveInp)
-	if err != nil {
-		return
-	}
-	res = &publish.TaskSaveRes{Id: id}
-	return
-}
-
-func (c *cPublishServer) TaskSubmit(ctx context.Context, req *publish.TaskSubmitReq) (res *publish.TaskSubmitRes, err error) {
-	err = service.SysPublish().ServerTaskSubmit(ctx, &req.TaskSubmitInp)
-	if err != nil {
-		return
-	}
-	res = &publish.TaskSubmitRes{}
-	return
-}
-
-func (c *cPublishServer) TaskCancel(ctx context.Context, req *publish.TaskCancelReq) (res *publish.TaskCancelRes, err error) {
-	err = service.SysPublish().ServerTaskCancel(ctx, &req.TaskCancelInp)
-	if err != nil {
-		return
-	}
-	res = &publish.TaskCancelRes{}
-	return
-}
-
 func (c *cPublishServer) PublishRecordList(ctx context.Context, req *publish.PublishRecordListReq) (res *publish.PublishRecordListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminPublishRecordList(ctx, &req.PublishRecordListInp)
 	if err != nil {
@@ -573,47 +532,6 @@ func (c *cPublishAdmin) AccountDelete(ctx context.Context, req *publish.AccountD
 		return
 	}
 	res = &publish.AccountDeleteRes{}
-	return
-}
-
-func (c *cPublishAdmin) TaskList(ctx context.Context, req *publish.TaskListReq) (res *publish.TaskListRes, err error) {
-	list, totalCount, err := service.SysPublish().AdminTaskList(ctx, &req.TaskListInp)
-	if err != nil {
-		return
-	}
-	if list == nil {
-		list = []*sysin.TaskModel{}
-	}
-	res = new(publish.TaskListRes)
-	res.List = list
-	res.PageRes.Pack(req, totalCount)
-	return
-}
-
-func (c *cPublishAdmin) TaskSave(ctx context.Context, req *publish.TaskSaveReq) (res *publish.TaskSaveRes, err error) {
-	id, err := service.SysPublish().AdminTaskSave(ctx, &req.TaskSaveInp)
-	if err != nil {
-		return
-	}
-	res = &publish.TaskSaveRes{Id: id}
-	return
-}
-
-func (c *cPublishAdmin) TaskSubmit(ctx context.Context, req *publish.TaskSubmitReq) (res *publish.TaskSubmitRes, err error) {
-	err = service.SysPublish().AdminTaskSubmit(ctx, &req.TaskSubmitInp)
-	if err != nil {
-		return
-	}
-	res = &publish.TaskSubmitRes{}
-	return
-}
-
-func (c *cPublishAdmin) TaskCancel(ctx context.Context, req *publish.TaskCancelReq) (res *publish.TaskCancelRes, err error) {
-	err = service.SysPublish().AdminTaskCancel(ctx, &req.TaskCancelInp)
-	if err != nil {
-		return
-	}
-	res = &publish.TaskCancelRes{}
 	return
 }
 

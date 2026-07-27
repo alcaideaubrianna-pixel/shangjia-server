@@ -68,6 +68,10 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.ApplyYoubanPublishHeavyIndexes(ctx)
 	case "publishProfileMedia":
 		err = fix.BackfillYoubanPublishProfileMedia(ctx)
+	case "publishChannelProfile":
+		err = fix.BackfillYoubanPublishChannelProfiles(ctx)
+	case "publishProfileTaskCleanup":
+		err = fix.CleanupYoubanPublishProfileTasks(ctx)
 	default:
 		err = gerror.Newf("fix a1 is invalid, a1:%v", a1)
 	}

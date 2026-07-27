@@ -80,6 +80,18 @@ func ensureCollectTelegramOrderColumnsLocked(ctx context.Context) error {
 	return nil
 }
 
+func isIgnorableTelegramOperationSchemaError(err error) bool {
+	if isIgnorableImportTaskServerIPColumnError(err) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "duplicate key") ||
+		strings.Contains(message, "duplicate key name") ||
+		strings.Contains(message, "can't drop") ||
+		strings.Contains(message, "check that column/key exists") ||
+		strings.Contains(message, "doesn't exist")
+}
+
 func collectTelegramOrderDataFromTask(task gdb.Record) g.Map {
 	return g.Map{
 		"collect_event_id":          task["collect_event_id"].Int64(),
