@@ -25,7 +25,6 @@ type YoubanPublishMediaColumns struct {
 	TenantId             string //
 	MerchantId           string //
 	AccountId            string //
-	TaskId               string //
 	ProfileId            string //
 	AttachmentId         string //
 	MediaType            string //
@@ -67,7 +66,6 @@ var youbanPublishMediaColumns = YoubanPublishMediaColumns{
 	TenantId:             "tenant_id",
 	MerchantId:           "merchant_id",
 	AccountId:            "account_id",
-	TaskId:               "task_id",
 	ProfileId:            "profile_id",
 	AttachmentId:         "attachment_id",
 	MediaType:            "media_type",

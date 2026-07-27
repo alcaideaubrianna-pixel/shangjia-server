@@ -16,7 +16,6 @@ type YoubanPublishMedia struct {
 	TenantId             any         //
 	MerchantId           any         //
 	AccountId            any         //
-	TaskId               any         //
 	ProfileId            any         //
 	AttachmentId         any         //
 	MediaType            any         //

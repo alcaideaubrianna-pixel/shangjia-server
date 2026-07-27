@@ -14,7 +14,6 @@ type YoubanPublishMedia struct {
 	TenantId             int64       `json:"tenantId"             orm:"tenant_id"              description:""`
 	MerchantId           int64       `json:"merchantId"           orm:"merchant_id"            description:""`
 	AccountId            int64       `json:"accountId"            orm:"account_id"             description:""`
-	TaskId               int64       `json:"taskId"               orm:"task_id"                description:""`
 	ProfileId            int64       `json:"profileId"            orm:"profile_id"             description:""`
 	AttachmentId         int64       `json:"attachmentId"         orm:"attachment_id"          description:""`
 	MediaType            string      `json:"mediaType"            orm:"media_type"             description:""`

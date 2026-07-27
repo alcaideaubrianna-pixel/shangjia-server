@@ -464,7 +464,6 @@ type MediaModel struct {
 	Id                   int64       `json:"id" dc:"ID"`
 	TenantId             int64       `json:"tenantId" dc:"租户ID"`
 	AccountId            int64       `json:"accountId" dc:"账号ID"`
-	TaskId               int64       `json:"taskId" dc:"任务ID"`
 	ProfileId            int64       `json:"profileId" dc:"资料ID"`
 	AttachmentId         int64       `json:"attachmentId" dc:"附件ID"`
 	OriginalAttachmentId int64       `json:"originalAttachmentId" dc:"原始附件ID"`
