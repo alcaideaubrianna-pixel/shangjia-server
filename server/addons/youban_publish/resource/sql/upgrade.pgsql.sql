@@ -13,11 +13,6 @@ ALTER TABLE "hg_youban_publish_collect_source"
 ALTER TABLE "hg_youban_publish_collect_source"
   ADD COLUMN IF NOT EXISTS "history_collect_days" integer NOT NULL DEFAULT 30;
 
-ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_event_id" bigint NOT NULL DEFAULT 0;
-ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_source_id" bigint NOT NULL DEFAULT 0;
-ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_source_chat_id" varchar(128) NOT NULL DEFAULT '';
-ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_source_message_id" bigint NOT NULL DEFAULT 0;
-
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_event_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_source_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_source_chat_id" varchar(128) NOT NULL DEFAULT '';
@@ -454,25 +449,10 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_state" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_profile_state_profile" ON "hg_youban_publish_profile_state" ("profile_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_profile_state_owner" ON "hg_youban_publish_profile_state" ("tenant_id", "account_id", "profile_id") WHERE "deleted_at" IS NULL;
-INSERT INTO "hg_youban_publish_profile_state" (
-  "tenant_id","account_id","profile_id","channel_id_json","customer_remark",
-  "anti_scan_enabled","publish_at","created_by","updated_by","created_at","updated_at"
-)
-SELECT DISTINCT ON ("profile_id")
-  "tenant_id","account_id","profile_id","channel_id_json","customer_remark",
-  "anti_scan_enabled","published_at","created_by","updated_by",COALESCE("created_at",NOW()),COALESCE("updated_at",NOW())
-FROM "hg_youban_publish_task"
-WHERE "profile_id" > 0 AND "deleted_at" IS NULL
-ORDER BY "profile_id", "id" DESC
-ON CONFLICT ("profile_id") DO NOTHING;
-UPDATE "hg_youban_publish_task" SET "status"='canceled', "tg_status"='skipped' WHERE "status"='draft';
-
-ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "tg_operation_no" varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "operation_no" varchar(128) NOT NULL DEFAULT '';
 DROP INDEX IF EXISTS "uk_ybp_tg_job_task_channel";
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_task_channel" ON "hg_youban_publish_tg_job" ("task_id", "channel_id", "id");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_job_operation_channel" ON "hg_youban_publish_tg_job" ("task_id", "operation_no", "channel_id") WHERE "operation_no" <> '';
-CREATE INDEX IF NOT EXISTS "idx_ybp_task_tg_operation" ON "hg_youban_publish_task" ("tg_operation_no");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_operation" ON "hg_youban_publish_tg_job" ("operation_no", "status", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_success_record" (

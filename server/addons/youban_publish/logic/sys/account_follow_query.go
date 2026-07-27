@@ -10,6 +10,7 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/dao"
 )
 
 func (s *sSysPublish) accountProfile(ctx context.Context, current *sysin.AccountModel, accountId int64, username string) (*sysin.AccountProfileModel, error) {
@@ -36,7 +37,7 @@ func (s *sSysPublish) accountProfile(ctx context.Context, current *sysin.Account
 }
 
 func (s *sSysPublish) accountNoteCount(ctx context.Context, tenantId int64, accountId int64) int {
-	count, _ := pdao.YoubanPublishTask.Ctx(ctx).
+	count, _ := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
 		WhereNull("deleted_at").
@@ -146,11 +147,12 @@ func (s *sSysPublish) accountNoteStats(ctx context.Context, accountIds []int64) 
 		NoteCount  int         `json:"noteCount"`
 		LastNoteAt *gtime.Time `json:"lastNoteAt"`
 	}
-	err := pdao.YoubanPublishTask.Ctx(ctx).
-		Fields("account_id,COUNT(*) AS note_count,MAX(published_at) AS last_note_at").
-		WhereIn("account_id", accountIds).
-		WhereNull("deleted_at").
-		Group("account_id").
+	err := g.DB().Model(publishProfileStateTable+" ps").Safe().Ctx(ctx).
+		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=ps.profile_id AND p.deleted_at IS NULL").
+		Fields("ps.account_id,COUNT(*) AS note_count,MAX(p.published_at) AS last_note_at").
+		WhereIn("ps.account_id", accountIds).
+		WhereNull("ps.deleted_at").
+		Group("ps.account_id").
 		Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "统计账号笔记失败")

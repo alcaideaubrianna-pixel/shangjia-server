@@ -68,60 +68,6 @@ ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "salt" varchar(
 UPDATE "hg_youban_publish_account" SET "tenant_id" = "merchant_id" WHERE "tenant_id" = 0 AND "merchant_id" > 0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_account_tenant" ON "hg_youban_publish_account" ("tenant_id", "account_type", "status");
 CREATE INDEX IF NOT EXISTS "idx_ybp_account_username_trgm" ON "hg_youban_publish_account" USING gin ("username" gin_trgm_ops);
-CREATE TABLE IF NOT EXISTS "hg_youban_publish_task" (
-  "id" BIGSERIAL PRIMARY KEY,
-  "tenant_id" bigint NOT NULL DEFAULT 0,
-  "merchant_id" bigint NOT NULL DEFAULT 0,
-  "account_id" bigint NOT NULL DEFAULT 0,
-  "profile_id" bigint NOT NULL DEFAULT 0,
-  "client_request_id" varchar(128) NOT NULL DEFAULT '',
-  "title" varchar(255) NOT NULL DEFAULT '',
-  "province" varchar(64) NOT NULL DEFAULT '',
-  "city" varchar(64) NOT NULL DEFAULT '',
-  "plain_text" text,
-  "media_count" integer NOT NULL DEFAULT 0,
-  "channel_id_json" text,
-  "collect_event_id" bigint NOT NULL DEFAULT 0,
-  "collect_source_id" bigint NOT NULL DEFAULT 0,
-  "collect_source_chat_id" varchar(128) NOT NULL DEFAULT '',
-  "collect_source_message_id" bigint NOT NULL DEFAULT 0,
-  "customer_remark" text,
-  "anti_scan_enabled" smallint NOT NULL DEFAULT 0,
-  "tg_push_enabled" smallint NOT NULL DEFAULT 1,
-  "tg_status" varchar(32) NOT NULL DEFAULT 'pending',
-  "tg_operation_no" varchar(128) NOT NULL DEFAULT '',
-  "status" varchar(32) NOT NULL DEFAULT 'pending',
-  "error_message" text,
-  "submitted_at" timestamp DEFAULT NULL,
-  "published_at" timestamp DEFAULT NULL,
-  "created_by" bigint NOT NULL DEFAULT 0,
-  "updated_by" bigint NOT NULL DEFAULT 0,
-  "deleted_by" bigint NOT NULL DEFAULT 0,
-  "created_at" timestamp DEFAULT NULL,
-  "updated_at" timestamp DEFAULT NULL,
-  "deleted_at" timestamp DEFAULT NULL
-);
-ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "tenant_id" bigint NOT NULL DEFAULT 0;
-ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "merchant_id" bigint NOT NULL DEFAULT 0;
-ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "channel_id_json" text;
-ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_event_id" bigint NOT NULL DEFAULT 0;
-ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_source_id" bigint NOT NULL DEFAULT 0;
-ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_source_chat_id" varchar(128) NOT NULL DEFAULT '';
-ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "collect_source_message_id" bigint NOT NULL DEFAULT 0;
-ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "customer_remark" text;
-ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "anti_scan_enabled" smallint NOT NULL DEFAULT 0;
-ALTER TABLE "hg_youban_publish_task" ADD COLUMN IF NOT EXISTS "tg_operation_no" varchar(128) NOT NULL DEFAULT '';
-UPDATE "hg_youban_publish_task" SET "tenant_id" = "merchant_id" WHERE "tenant_id" = 0 AND "merchant_id" > 0;
-CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_task_tenant_client_request" ON "hg_youban_publish_task" ("tenant_id", "client_request_id") WHERE "client_request_id" <> '';
-CREATE INDEX IF NOT EXISTS "idx_ybp_task_tenant_status" ON "hg_youban_publish_task" ("tenant_id", "status", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_task_account_status" ON "hg_youban_publish_task" ("account_id", "status", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_task_tg_operation" ON "hg_youban_publish_task" ("tg_operation_no");
-CREATE INDEX IF NOT EXISTS "idx_ybp_task_collect_order" ON "hg_youban_publish_task" ("collect_source_id", "collect_source_chat_id", "collect_source_message_id", "id");
-CREATE INDEX IF NOT EXISTS "idx_ybp_task_title_trgm" ON "hg_youban_publish_task" USING gin ("title" gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS "idx_ybp_task_plain_text_trgm" ON "hg_youban_publish_task" USING gin ("plain_text" gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS "idx_ybp_task_note_scope" ON "hg_youban_publish_task" ("tenant_id", "account_id", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
-CREATE INDEX IF NOT EXISTS "idx_ybp_task_profile_tenant" ON "hg_youban_publish_task" ("profile_id", "tenant_id") WHERE "deleted_at" IS NULL;
-CREATE INDEX IF NOT EXISTS "idx_ybp_task_search_scope" ON "hg_youban_publish_task" ("tenant_id", "account_id", "profile_id") WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_content_profile_note_order" ON "hg_content_profile" ("updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_state" (

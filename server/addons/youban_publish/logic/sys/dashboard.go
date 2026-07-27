@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/dao"
 )
 
 const dashboardTodoLimit = 6
@@ -272,13 +273,14 @@ func (s *sSysPublish) dashboardPublisherRank(ctx context.Context, tenantId int64
 		Username  string `json:"username"`
 		Count     int    `json:"count"`
 	}
-	err := g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
-		LeftJoin(publishAccountTable+" a", "a.id=t.account_id").
-		Fields("t.account_id,a.nickname,a.username,COUNT(*) AS count").
-		Where("t.tenant_id", tenantId).
-		Where("t.status", sysin.PublishTaskStatusPublished).
-		WhereNull("t.deleted_at").
-		Group("t.account_id,a.nickname,a.username").
+	err := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
+		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
+		LeftJoin(publishAccountTable+" a", "a.id=ps.account_id").
+		Fields("ps.account_id,a.nickname,a.username,COUNT(*) AS count").
+		Where("ps.tenant_id", tenantId).
+		Where("p.status", 1).
+		WhereNull("p.deleted_at").
+		Group("ps.account_id,a.nickname,a.username").
 		OrderDesc("count").
 		Limit(5).
 		Scan(&rows)

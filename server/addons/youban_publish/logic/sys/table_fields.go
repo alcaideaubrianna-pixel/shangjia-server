@@ -5,7 +5,6 @@ import pdao "hotgo/addons/youban_publish/internal/dao"
 var (
 	publishTenantTable               = pdao.YoubanPublishTenant.Table()
 	publishAccountTable              = pdao.YoubanPublishAccount.Table()
-	publishTaskTable                 = pdao.YoubanPublishTask.Table()
 	publishProfileStateTable         = "hg_youban_publish_profile_state"
 	publishImportTaskTable           = pdao.YoubanPublishImportTask.Table()
 	publishImportMatchRunTable       = pdao.YoubanPublishImportMatchRun.Table()

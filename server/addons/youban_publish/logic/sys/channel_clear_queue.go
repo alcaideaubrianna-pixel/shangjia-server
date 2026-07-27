@@ -36,7 +36,6 @@ func (s *sSysPublish) AdminChannelClearQueue(ctx context.Context, in *sysin.Chan
 		return res, nil
 	}
 	jobIds := make([]int64, 0, len(jobs))
-	taskIds := make([]int64, 0, len(jobs))
 	for _, job := range jobs {
 		if job.Id <= 0 {
 			continue
@@ -44,9 +43,6 @@ func (s *sSysPublish) AdminChannelClearQueue(ctx context.Context, in *sysin.Chan
 		jobIds = append(jobIds, job.Id)
 		if job.Status == "sending" {
 			res.Sending++
-		}
-		if job.TaskId > 0 {
-			taskIds = append(taskIds, job.TaskId)
 		}
 	}
 	if len(jobIds) == 0 {
@@ -75,9 +71,6 @@ func (s *sSysPublish) AdminChannelClearQueue(ctx context.Context, in *sysin.Chan
 	for _, job := range jobs {
 		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "cleanup", "superseded", channelQueueClearMessage)
 	}
-	if err = s.markChannelQueueTasksSuperseded(ctx, account.TenantId, uniqueIds(taskIds)); err != nil {
-		return nil, err
-	}
 	return res, nil
 }
 
@@ -94,26 +87,6 @@ func (s *sSysPublish) channelClearQueueJobs(ctx context.Context, tenantId int64,
 		return nil, gerror.Wrap(err, "读取频道发送队列失败")
 	}
 	return jobs, nil
-}
-
-func (s *sSysPublish) markChannelQueueTasksSuperseded(ctx context.Context, tenantId int64, taskIds []int64) error {
-	if len(taskIds) == 0 {
-		return nil
-	}
-	_, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Where("tenant_id", tenantId).
-		WhereIn("id", taskIds).
-		WhereIn("tg_status", []string{"pending", "sending", "failed_retry"}).
-		Data(g.Map{
-			"tg_status":     "superseded",
-			"error_message": channelQueueClearMessage,
-			"updated_at":    gtime.Now(),
-		}).
-		Update()
-	if err != nil {
-		return gerror.Wrap(err, "同步资料推送状态失败")
-	}
-	return nil
 }
 
 func channelQueueClearStatuses() []string {

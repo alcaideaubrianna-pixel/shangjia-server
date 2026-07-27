@@ -16,7 +16,6 @@ type noteIndexSource struct {
 	TenantId        int64       `orm:"tenant_id"`
 	AccountId       int64       `orm:"account_id"`
 	ProfileId       int64       `orm:"profile_id"`
-	TaskId          int64       `orm:"task_id"`
 	Uuid            string      `orm:"uuid"`
 	ProfileNo       string      `orm:"profile_no"`
 	Title           string      `orm:"title"`
@@ -40,20 +39,13 @@ func (s *sSysPublish) RefreshNoteIndex(ctx context.Context, profileId int64) err
 	return s.syncProfileNoteIndex(ctx, profileId)
 }
 
-func (s *sSysPublish) refreshTaskNoteIndexes(ctx context.Context, taskIds []int64) error {
-	taskIds = uniqueIds(taskIds)
-	if len(taskIds) == 0 {
+func (s *sSysPublish) refreshProfileNoteIndexes(ctx context.Context, profileIds []int64) error {
+	profileIds = uniqueIds(profileIds)
+	if len(profileIds) == 0 {
 		return nil
 	}
-	var rows []struct {
-		ProfileId int64 `orm:"profile_id"`
-	}
-	if err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("profile_id").WhereIn("id", taskIds).Distinct().Scan(&rows); err != nil {
-		return gerror.Wrap(err, "读取资料索引刷新范围失败")
-	}
-	for _, row := range rows {
-		if err := s.syncProfileNoteIndex(ctx, row.ProfileId); err != nil {
+	for _, profileId := range profileIds {
+		if err := s.syncProfileNoteIndex(ctx, profileId); err != nil {
 			return err
 		}
 	}
@@ -94,7 +86,7 @@ func (s *sSysPublish) noteIndexSources(ctx context.Context, profileId int64) ([]
 		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
 		Where("p.id", profileId).
 		WhereNull("p.deleted_at").
-		Fields("ps.tenant_id,ps.account_id,p.id AS profile_id,0 AS task_id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text," + tag + " AS tag,p.province,p.city,p.status,p.visibility,p.review_status,'' AS task_status,p.published_at,p.updated_at AS source_updated_at,p.created_at,p.updated_at,p.deleted_at").
+		Fields("ps.tenant_id,ps.account_id,p.id AS profile_id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text," + tag + " AS tag,p.province,p.city,p.status,p.visibility,p.review_status,p.published_at,p.updated_at AS source_updated_at,p.created_at,p.updated_at,p.deleted_at").
 		Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取资料索引源数据失败")
@@ -111,7 +103,6 @@ func upsertNoteIndex(ctx context.Context, row *noteIndexSource) error {
 		columns.TenantId:        row.TenantId,
 		columns.AccountId:       row.AccountId,
 		columns.ProfileId:       row.ProfileId,
-		columns.TaskId:          row.TaskId,
 		columns.Uuid:            row.Uuid,
 		columns.ProfileNo:       row.ProfileNo,
 		columns.Title:           row.Title,

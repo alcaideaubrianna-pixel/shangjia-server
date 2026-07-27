@@ -53,30 +53,6 @@ func (s *sSysPublish) upsertChannelProfileFromJob(ctx context.Context, job teleg
 	return nil
 }
 
-func (s *sSysPublish) syncPublishedTaskChannelProfiles(ctx context.Context, taskId int64) error {
-	task, err := s.telegramJobTask(ctx, taskId)
-	if err != nil {
-		return err
-	}
-	profileId := task["profile_id"].Int64()
-	if profileId <= 0 {
-		return nil
-	}
-	channelIds := decodeInt64JSON(task["channel_id_json"].String())
-	mod := g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).
-		Where("tenant_id", task["tenant_id"].Int64()).
-		Where("profile_id", profileId).
-		Where("status", "active")
-	if len(channelIds) > 0 {
-		mod = mod.WhereNotIn("channel_id", channelIds)
-	}
-	_, err = mod.Data(g.Map{"status": "inactive", "updated_at": gtime.Now()}).Update()
-	if err != nil {
-		return gerror.Wrap(err, "同步资料当前上架频道失败")
-	}
-	return nil
-}
-
 func (s *sSysPublish) deactivateChannelProfile(ctx context.Context, channelId int64, profileId int64) error {
 	if channelId <= 0 || profileId <= 0 {
 		return nil

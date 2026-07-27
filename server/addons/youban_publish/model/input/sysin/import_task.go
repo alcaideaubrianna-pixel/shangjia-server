@@ -200,7 +200,6 @@ type ImportTaskScanItem struct {
 	SourceStatusLabel   string `json:"sourceStatusLabel" dc:"旧站状态文本"`
 	ClientRequestId     string `json:"clientRequestId" dc:"幂等ID"`
 	Status              string `json:"status" dc:"状态：missing existing"`
-	TaskId              int64  `json:"taskId" dc:"本地任务ID"`
 	ProfileId           int64  `json:"profileId" dc:"本地资料ID"`
 	MediaTotal          int    `json:"mediaTotal" dc:"本地媒体数"`
 	MediaMissingStorage int    `json:"mediaMissingStorage" dc:"未迁移到当前存储媒体数"`

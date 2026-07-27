@@ -20,8 +20,8 @@ func TestUniqueInt64s(t *testing.T) {
 
 func TestChannelClearSQLUsesSubquery(t *testing.T) {
 	sqls := []string{
-		channelClearTaskMediaSQL(),
-		channelClearTaskSQL(),
+		channelClearProfileMediaSQL("hg_youban_publish_media", "deleted_at"),
+		channelClearProfileStateSQL(),
 		channelClearProfileMediaSQL("hg_content_media", "deleted_at"),
 		channelClearProfileSQL("hg_content_profile", "deleted_at", "updated_at"),
 		channelClearAccountSQL(),

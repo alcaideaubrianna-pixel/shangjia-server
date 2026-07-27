@@ -212,7 +212,7 @@ func (s *sSysPublish) createChannelCycleRun(ctx context.Context, channel channel
 		}
 		runId, updateErr = tx.Model(publishCycleRunTable).Ctx(ctx).Data(g.Map{
 			"plan_id": 0, "tenant_id": channel.TenantId, "account_id": 0,
-			"profile_id": 0, "channel_id": channel.Id, "task_id": 0,
+			"profile_id": 0, "channel_id": channel.Id,
 			"status": cycleRunStatusPending, "stage": "created",
 			"cursor_id": 0, "total_count": totalCount, "queued_count": 0,
 			"scheduled_at": channel.NextRunAt, "created_at": now, "updated_at": now,

@@ -6,6 +6,10 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	pdao "hotgo/addons/youban_publish/internal/dao"
+	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/dao"
 )
 
 type collectTaskSummary struct {
@@ -22,10 +26,11 @@ type collectTaskSummary struct {
 }
 
 func (s *sSysPublish) collectTaskSummaryModel(ctx context.Context) *gdb.Model {
-	return g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
-		LeftJoin(publishTenantTable+" m", "m.id=t.tenant_id").
-		LeftJoin(publishAccountTable+" a", "a.id=t.account_id").
-		Fields("t.id,t.tenant_id,t.account_id,t.title,t.city,t.status,t.updated_at,m.name AS tenant_name,a.nickname AS account_nickname,a.username AS account_username").
-		Where("(t.collect_source_id > 0 OR t.collect_event_id > 0 OR t.client_request_id LIKE ?)", "collect:%").
-		WhereNull("t.deleted_at")
+	return g.DB().Model(pdao.YoubanPublishCollectDispatch.Table()+" t").Safe().Ctx(ctx).
+		InnerJoin(dao.ContentProfile.Table()+" p", "p.id=t.profile_id AND p.deleted_at IS NULL").
+		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
+		LeftJoin(publishTenantTable+" m", "m.id=ps.tenant_id").
+		LeftJoin(publishAccountTable+" a", "a.id=ps.account_id").
+		Fields("t.id,ps.tenant_id,ps.account_id,p.title,p.city,CASE WHEN t.status = 'failed' THEN 'failed' ELSE 'pending' END AS status,t.updated_at,m.name AS tenant_name,a.nickname AS account_nickname,a.username AS account_username").
+		WhereIn("t.status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing, sysin.CollectDispatchStatusFailed})
 }

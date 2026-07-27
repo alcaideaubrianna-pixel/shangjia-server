@@ -46,6 +46,17 @@ func (s *sSysPublish) profilePublishSource(ctx context.Context, profileId, tenan
 }
 
 func (s *sSysPublish) submitProfilePublish(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool) error {
+	return s.submitProfilePublishWithMeta(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, telegramProfilePublishMeta{})
+}
+
+type telegramProfilePublishMeta struct {
+	CollectEventId         int64
+	CollectSourceId        int64
+	CollectSourceChatId    string
+	CollectSourceMessageId int64
+}
+
+func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta) error {
 	source, err := s.profilePublishSource(ctx, profileId, tenantId, accountId, requireOnline)
 	if err != nil {
 		return err
@@ -60,7 +71,7 @@ func (s *sSysPublish) submitProfilePublish(ctx context.Context, profileId, tenan
 	}
 	jobIds := make([]int64, 0, len(channels))
 	for _, channel := range channels {
-		jobId, createErr := s.ensureTelegramProfileJob(ctx, source, channel, operationNo)
+		jobId, createErr := s.ensureTelegramProfileJobWithMeta(ctx, source, channel, operationNo, meta)
 		if createErr != nil {
 			return createErr
 		}
@@ -79,8 +90,11 @@ func (s *sSysPublish) submitProfilePublish(ctx context.Context, profileId, tenan
 }
 
 func (s *sSysPublish) ensureTelegramProfileJob(ctx context.Context, source gdb.Record, channel telegramJobChannel, operationNo string) (int64, error) {
+	return s.ensureTelegramProfileJobWithMeta(ctx, source, channel, operationNo, telegramProfilePublishMeta{})
+}
+
+func (s *sSysPublish) ensureTelegramProfileJobWithMeta(ctx context.Context, source gdb.Record, channel telegramJobChannel, operationNo string, meta telegramProfilePublishMeta) (int64, error) {
 	existing, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereNull("task_id").
 		Where("profile_id", source["profile_id"].Int64()).
 		Where("operation_no", operationNo).
 		Where("channel_id", channel.Id).
@@ -100,19 +114,23 @@ func (s *sSysPublish) ensureTelegramProfileJob(ctx context.Context, source gdb.R
 		OperationNo: operationNo, TenantId: source["tenant_id"].Int64(), AccountId: source["account_id"].Int64(),
 		ProfileId: source["profile_id"].Int64(), ChannelId: channel.Id, BotId: botId,
 		TargetChatId: normalizeTelegramChannelChatID(channel.TargetChatId), Status: "pending",
+		CollectEventId: meta.CollectEventId, CollectSourceId: meta.CollectSourceId,
+		CollectSourceChatId: strings.TrimSpace(meta.CollectSourceChatId), CollectSourceMessageId: meta.CollectSourceMessageId,
 	}
 	jobId, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
-		"task_id": nil, "operation_no": operationNo,
-		"tenant_id": job.TenantId, "merchant_id": job.TenantId, "account_id": job.AccountId,
+		"operation_no": operationNo,
+		"tenant_id":    job.TenantId, "merchant_id": job.TenantId, "account_id": job.AccountId,
 		"profile_id": job.ProfileId, "channel_id": job.ChannelId, "bot_id": job.BotId,
 		"target_chat_id": job.TargetChatId, "status": "pending",
+		"collect_event_id": job.CollectEventId, "collect_source_id": job.CollectSourceId,
+		"collect_source_chat_id": job.CollectSourceChatId, "collect_source_message_id": job.CollectSourceMessageId,
 		"priority": s.telegramJobPriority(job), "queue_name": telegramQueueNameByPriority(s.telegramJobPriority(job)),
 		"dispatch_status": tgDispatchStatusIdle, "created_at": now, "updated_at": now,
 	}).InsertAndGetId()
 	if err != nil {
 		if isDuplicateKeyError(err) {
 			value, readErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-				WhereNull("task_id").Where("profile_id", job.ProfileId).
+				Where("profile_id", job.ProfileId).
 				Where("operation_no", operationNo).Where("channel_id", channel.Id).Fields("id").Value()
 			if readErr == nil && value.Int64() > 0 {
 				return value.Int64(), nil
@@ -129,7 +147,7 @@ func (s *sSysPublish) ensureTelegramProfileJob(ctx context.Context, source gdb.R
 
 func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job telegramJobRecord, isCycle bool) error {
 	total, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereNull("task_id").Where("profile_id", job.ProfileId).
+		Where("profile_id", job.ProfileId).
 		Where("operation_no", job.OperationNo).Count()
 	if err != nil {
 		return gerror.Wrap(err, "统计资料TG任务失败")
@@ -138,7 +156,7 @@ func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job 
 		return nil
 	}
 	pending, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereNull("task_id").Where("profile_id", job.ProfileId).
+		Where("profile_id", job.ProfileId).
 		Where("operation_no", job.OperationNo).
 		WhereNotIn("status", []string{"sent", "superseded"}).Count()
 	if err != nil {

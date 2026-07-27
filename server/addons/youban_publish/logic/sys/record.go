@@ -166,7 +166,6 @@ func (s *sSysPublish) publishRecordList(ctx context.Context, in *sysin.PublishRe
 	}
 	mod := s.publishRecordBaseModel(ctx, in, tenantId, accountId).Fields(
 		"l.id,l.job_id,l.task_id,l.tenant_id,l.account_id,l.profile_id,l.channel_id,l.bot_id,l.operation_no,l.target_chat_id,l.action,l.status,l.message,l.created_at",
-		"t.client_request_id",
 		"p.title",
 		"a.nickname AS account_name",
 		"COALESCE(NULLIF(owner.username, ''), NULLIF(tn.name, '')) AS tenant_name",
@@ -190,7 +189,6 @@ func (s *sSysPublish) publishRecordList(ctx context.Context, in *sysin.PublishRe
 func (s *sSysPublish) publishRecordCountModel(ctx context.Context, in *sysin.PublishRecordListInp, tenantId int64, accountId int64) *gdb.Model {
 	mod := g.DB().Model(publishSuccessRecordTable+" l").Safe().Ctx(ctx).
 		LeftJoin(publishTgJobTable+" j", "j.id=l.job_id").
-		LeftJoin(publishTaskTable+" t", "t.id=l.task_id").
 		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=l.profile_id").
 		LeftJoin(publishAccountTable+" a", "a.id=l.account_id").
 		LeftJoin(publishTenantTable+" tn", "tn.id=l.tenant_id").
@@ -204,7 +202,6 @@ func (s *sSysPublish) publishRecordCountModel(ctx context.Context, in *sysin.Pub
 func (s *sSysPublish) publishRecordBaseModel(ctx context.Context, in *sysin.PublishRecordListInp, tenantId int64, accountId int64) *gdb.Model {
 	mod := g.DB().Model(publishSuccessRecordTable+" l").Safe().Ctx(ctx).
 		LeftJoin(publishTgJobTable+" j", "j.id=l.job_id").
-		LeftJoin(publishTaskTable+" t", "t.id=l.task_id").
 		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=l.profile_id").
 		LeftJoin(publishAccountTable+" a", "a.id=l.account_id").
 		LeftJoin(publishBotTable+" b", "b.id=l.bot_id").

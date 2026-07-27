@@ -18,7 +18,7 @@ func TestMediaPHashLshProfileCountSQLUsesDatabaseDistanceAndDistinctProfile(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"COUNT(DISTINCT candidate.profile_id)", "bit_count(", "candidate.profile_id", "t.deleted_at IS NULL"} {
+	for _, expected := range []string{"COUNT(DISTINCT candidate.profile_id)", "bit_count(", "candidate.profile_id", "ps.deleted_at IS NULL"} {
 		if !strings.Contains(query, expected) {
 			t.Fatalf("count query missing %q", expected)
 		}

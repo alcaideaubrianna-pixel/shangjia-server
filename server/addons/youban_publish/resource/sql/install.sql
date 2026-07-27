@@ -396,55 +396,6 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_account_follow` (
   KEY `idx_ybp_account_follow_follower` (`tenant_id`,`follower_account_id`,`status`),
   KEY `idx_ybp_account_follow_following` (`tenant_id`,`following_account_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴账号关注';
-CREATE TABLE IF NOT EXISTS `hg_youban_publish_task` (
-  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
-  `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID',
-  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
-  `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
-  `client_request_id` varchar(128) NOT NULL DEFAULT '' COMMENT '客户端幂等ID',
-  `title` varchar(255) NOT NULL DEFAULT '' COMMENT '标题',
-  `province` varchar(64) NOT NULL DEFAULT '' COMMENT '省份',
-  `city` varchar(64) NOT NULL DEFAULT '' COMMENT '城市',
-  `plain_text` text COMMENT '正文',
-  `media_count` int(11) NOT NULL DEFAULT '0' COMMENT '媒体数量',
-  `channel_id_json` text COMMENT '推送频道ID JSON',
-  `collect_event_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集事件ID',
-  `collect_source_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集源ID',
-  `collect_source_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '采集来源Chat ID',
-  `collect_source_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集来源消息ID',
-  `customer_remark` text COMMENT '客服备注',
-  `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否防扫图处理',
-  `tg_push_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否推送TG',
-  `tg_status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT 'TG状态',
-  `tg_operation_no` varchar(128) NOT NULL DEFAULT '' COMMENT '当前TG操作号',
-  `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '任务状态',
-  `error_message` text COMMENT '错误信息',
-  `submitted_at` datetime DEFAULT NULL COMMENT '提交时间',
-  `published_at` datetime DEFAULT NULL COMMENT '发布时间',
-  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
-  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
-  `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人',
-  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
-  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
-  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
-  PRIMARY KEY (`id`),
-  KEY `idx_ybp_task_tenant_client_request` (`tenant_id`,`client_request_id`),
-  KEY `idx_ybp_task_tenant_status` (`tenant_id`,`status`,`id`),
-  KEY `idx_ybp_task_account_status` (`account_id`,`status`,`id`),
-  KEY `idx_ybp_task_collect_order` (`collect_source_id`,`collect_source_chat_id`,`collect_source_message_id`,`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架任务';
-
-ALTER TABLE `hg_youban_publish_task` ADD COLUMN `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID' AFTER `id`, ADD COLUMN `merchant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '兼容旧版本商家ID' AFTER `tenant_id`;
-ALTER TABLE `hg_youban_publish_task` ADD COLUMN `channel_id_json` text COMMENT '推送频道ID JSON' AFTER `media_count`, ADD COLUMN `customer_remark` text COMMENT '客服备注' AFTER `channel_id_json`, ADD COLUMN `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否防扫图处理' AFTER `customer_remark`;
-ALTER TABLE `hg_youban_publish_task` ADD COLUMN `collect_event_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集事件ID' AFTER `channel_id_json`, ADD COLUMN `collect_source_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集源ID' AFTER `collect_event_id`, ADD COLUMN `collect_source_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '采集来源Chat ID' AFTER `collect_source_id`, ADD COLUMN `collect_source_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集来源消息ID' AFTER `collect_source_chat_id`;
-ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_collect_order` (`collect_source_id`,`collect_source_chat_id`,`collect_source_message_id`,`id`);
-ALTER TABLE `hg_youban_publish_task` ADD COLUMN `tg_operation_no` varchar(128) NOT NULL DEFAULT '' COMMENT '当前TG操作号' AFTER `tg_status`;
-UPDATE `hg_youban_publish_task` SET `tenant_id` = `merchant_id` WHERE `tenant_id` = 0 AND `merchant_id` > 0;
-ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_tenant_client_request` (`tenant_id`,`client_request_id`);
-ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_tenant_status` (`tenant_id`,`status`,`id`);
-ALTER TABLE `hg_youban_publish_task` ADD KEY `idx_ybp_task_tg_operation` (`tg_operation_no`);
-
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_state` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) NOT NULL DEFAULT '0',

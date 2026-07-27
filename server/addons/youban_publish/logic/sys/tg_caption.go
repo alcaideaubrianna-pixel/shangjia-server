@@ -13,22 +13,7 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
-func (s *sSysPublish) telegramJobText(ctx context.Context, taskId int64) (string, error) {
-	row, err := s.telegramJobTask(ctx, taskId)
-	if err != nil {
-		return "", err
-	}
-	setting, err := s.accountSetting(ctx, row["tenant_id"].Int64(), row["account_id"].Int64())
-	if err != nil {
-		return "", err
-	}
-	return buildTelegramTaskCaption(row, setting), nil
-}
-
 func (s *sSysPublish) telegramJobCaption(ctx context.Context, job telegramJobRecord) (string, error) {
-	if job.TaskId > 0 {
-		return s.telegramJobText(ctx, job.TaskId)
-	}
 	row, err := s.profilePublishSource(ctx, job.ProfileId, job.TenantId, job.AccountId, false)
 	if err != nil {
 		return "", err

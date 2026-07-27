@@ -31,9 +31,8 @@ func (s *sSysPublish) telegramChannelHasPendingCollectContinuation(ctx context.C
 func (s *sSysPublish) telegramChannelPendingCollectContinuation(ctx context.Context, current telegramJobRecord) (gdb.Record, error) {
 	now := gtime.Now()
 	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
-		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
-		LeftJoin(pdaoCollectEventTable()+" e", "e.id=t.collect_event_id").
-		Fields("j.id,j.task_id,j.collect_source_id,j.collect_source_chat_id,j.collect_source_message_id").
+		LeftJoin(pdaoCollectEventTable()+" e", "e.id=j.collect_event_id").
+		Fields("j.id,j.profile_id,j.collect_source_id,j.collect_source_chat_id,j.collect_source_message_id").
 		Where("j.id <> 0").
 		WhereIn("j.status", []string{"pending", "failed_retry"}).
 		Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
@@ -92,7 +91,7 @@ func collectContinuationVideoMediaSQL() string {
 	return `
 SELECT 1
 FROM ` + publishMediaTable + ` m
-WHERE m.profile_id = t.profile_id
+WHERE m.profile_id = j.profile_id
   AND m.purpose = 'display'
   AND m.media_type = 'video'
   AND m.deleted_at IS NULL

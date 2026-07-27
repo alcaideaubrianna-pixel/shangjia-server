@@ -245,14 +245,15 @@ func (s *sSysPublish) AdminAccountTransferPreview(ctx context.Context, in *sysin
 		return nil, err
 	}
 	res = &sysin.AccountTransferPreviewModel{FromAccountId: in.FromAccountId}
-	res.TaskCount, err = pdao.YoubanPublishTask.Ctx(ctx).
-		Where(pdao.YoubanPublishTask.Columns().TenantId, admin.TenantId).
-		Where(pdao.YoubanPublishTask.Columns().AccountId, in.FromAccountId).
-		WhereNull(pdao.YoubanPublishTask.Columns().DeletedAt).
+	res.ProfileCount, err = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Where("tenant_id", admin.TenantId).
+		Where("account_id", in.FromAccountId).
+		WhereNull("deleted_at").
 		Count()
 	if err != nil {
-		return nil, gerror.Wrap(err, "统计待转移任务失败")
+		return nil, gerror.Wrap(err, "统计待转移资料失败")
 	}
+	res.TaskCount = res.ProfileCount
 	res.MediaCount, err = pdao.YoubanPublishMedia.Ctx(ctx).
 		Where(pdao.YoubanPublishMedia.Columns().TenantId, admin.TenantId).
 		Where(pdao.YoubanPublishMedia.Columns().AccountId, in.FromAccountId).
@@ -260,21 +261,6 @@ func (s *sSysPublish) AdminAccountTransferPreview(ctx context.Context, in *sysin
 		Count()
 	if err != nil {
 		return nil, gerror.Wrap(err, "统计待转移媒体失败")
-	}
-	var profileRows []gdb.Record
-	if err = pdao.YoubanPublishTask.Ctx(ctx).
-		Fields("profile_id").
-		Where(pdao.YoubanPublishTask.Columns().TenantId, admin.TenantId).
-		Where(pdao.YoubanPublishTask.Columns().AccountId, in.FromAccountId).
-		WhereNull(pdao.YoubanPublishTask.Columns().DeletedAt).
-		Group("profile_id").
-		Scan(&profileRows); err != nil {
-		return nil, gerror.Wrap(err, "统计待转移资料失败")
-	}
-	for _, item := range profileRows {
-		if item["profile_id"].Int64() > 0 {
-			res.ProfileCount++
-		}
 	}
 	return res, nil
 }
@@ -306,16 +292,15 @@ func (s *sSysPublish) AdminAccountTransferProfiles(ctx context.Context, in *sysi
 	res = &sysin.AccountTransferProfilesModel{FromAccountId: in.FromAccountId, ToAccountId: in.ToAccountId, ProfileCount: preview.ProfileCount, TaskCount: preview.TaskCount, MediaCount: preview.MediaCount}
 	now := gtime.Now()
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		taskColumns := pdao.YoubanPublishTask.Columns()
 		mediaColumns := pdao.YoubanPublishMedia.Columns()
 		accountColumns := pdao.YoubanPublishAccount.Columns()
-		if _, e := tx.Model(pdao.YoubanPublishTask.Table()).Safe().Ctx(ctx).
-			Where(taskColumns.TenantId, admin.TenantId).
-			Where(taskColumns.AccountId, in.FromAccountId).
-			WhereNull(taskColumns.DeletedAt).
-			Data(g.Map{taskColumns.AccountId: in.ToAccountId, taskColumns.UpdatedBy: admin.Id, taskColumns.UpdatedAt: now}).
+		if _, e := tx.Model(publishProfileStateTable).Safe().Ctx(ctx).
+			Where("tenant_id", admin.TenantId).
+			Where("account_id", in.FromAccountId).
+			WhereNull("deleted_at").
+			Data(g.Map{"account_id": in.ToAccountId, "updated_by": admin.Id, "updated_at": now}).
 			Update(); e != nil {
-			return gerror.Wrap(e, "转移上架任务失败")
+			return gerror.Wrap(e, "转移资料归属失败")
 		}
 		if _, e := tx.Model(pdao.YoubanPublishMedia.Table()).Safe().Ctx(ctx).
 			Where(mediaColumns.TenantId, admin.TenantId).

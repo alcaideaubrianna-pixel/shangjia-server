@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/dao"
 )
 
 func (s *sSysPublish) ServerDashboard(ctx context.Context, in *sysin.TrendInp) (*sysin.ServerDashboardModel, error) {
@@ -93,10 +94,11 @@ func (s *sSysPublish) serverDashboardTaskCounts(ctx context.Context) (map[string
 		Status string `json:"status"`
 		Count  int    `json:"count"`
 	}
-	err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("status", "COUNT(*) AS count").
-		WhereNull("deleted_at").
-		Group("status").
+	err := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
+		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
+		Fields("CASE WHEN p.status = 1 THEN 'published' ELSE 'pending' END AS status", "COUNT(*) AS count").
+		WhereNull("p.deleted_at").
+		Group("CASE WHEN p.status = 1 THEN 'published' ELSE 'pending' END").
 		Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "统计后台任务状态失败")
@@ -112,7 +114,7 @@ func (s *sSysPublish) serverDashboardBasicCounts(ctx context.Context) (map[strin
 	tables := map[string]string{
 		"tenants":  publishTenantTable,
 		"accounts": publishAccountTable,
-		"tasks":    publishTaskTable,
+		"profiles": dao.ContentProfile.Table(),
 		"channels": publishChannelTable,
 		"bots":     publishBotTable,
 	}
@@ -149,11 +151,11 @@ func (s *sSysPublish) serverDashboardTaskTrend(ctx context.Context, days int) ([
 		Status string `json:"status"`
 		Count  int    `json:"count"`
 	}
-	err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("DATE(created_at) AS date", "status", "COUNT(*) AS count").
-		WhereGTE("created_at", start+" 00:00:00").
-		WhereNull("deleted_at").
-		Group("DATE(created_at),status").
+	err := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
+		Fields("DATE(p.created_at) AS date", "CASE WHEN p.status = 1 THEN 'published' ELSE 'pending' END AS status", "COUNT(*) AS count").
+		WhereGTE("p.created_at", start+" 00:00:00").
+		WhereNull("p.deleted_at").
+		Group("DATE(p.created_at),CASE WHEN p.status = 1 THEN 'published' ELSE 'pending' END").
 		Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "统计后台任务趋势失败")
@@ -187,8 +189,7 @@ func (s *sSysPublish) serverDashboardTaskTrend(ctx context.Context, days int) ([
 func (s *sSysPublish) serverDashboardTodos(ctx context.Context) ([]*sysin.ServerDashboardTodo, error) {
 	var rows []*collectTaskSummary
 	err := s.collectTaskSummaryModel(ctx).
-		WhereIn("t.status", []string{sysin.PublishTaskStatusFailed, sysin.PublishTaskStatusPending, sysin.PublishTaskStatusPublishing}).
-		WhereNull("t.deleted_at").
+		WhereIn("t.status", []string{sysin.CollectDispatchStatusFailed, sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing}).
 		OrderDesc("t.updated_at").
 		Limit(dashboardTodoLimit).
 		Scan(&rows)
@@ -214,12 +215,13 @@ func (s *sSysPublish) serverDashboardTenantRank(ctx context.Context) ([]*sysin.S
 		Name     string `json:"name"`
 		Count    int    `json:"count"`
 	}
-	err := g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
-		LeftJoin(publishTenantTable+" m", "m.id=t.tenant_id").
-		Fields("t.tenant_id,m.name,COUNT(*) AS count").
-		Where("t.status", sysin.PublishTaskStatusPublished).
-		WhereNull("t.deleted_at").
-		Group("t.tenant_id,m.name").
+	err := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
+		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
+		LeftJoin(publishTenantTable+" m", "m.id=ps.tenant_id").
+		Fields("ps.tenant_id,m.name,COUNT(*) AS count").
+		Where("p.status", 1).
+		WhereNull("p.deleted_at").
+		Group("ps.tenant_id,m.name").
 		OrderDesc("count").
 		Limit(8).
 		Scan(&rows)

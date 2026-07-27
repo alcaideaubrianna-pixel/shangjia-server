@@ -143,41 +143,32 @@ func (s *sSysPublish) recoverCollectPublishTasks(ctx context.Context, limit int)
 		limit = 100
 	}
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
-	rows, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,account_id,channel_id_json,tg_operation_no").
-		Where("collect_source_id > 0").
-		WhereIn("status", []string{sysin.PublishTaskStatusPending, sysin.PublishTaskStatusPublishing}).
-		WhereIn("tg_status", []string{"pending", "failed_retry"}).
+	rows, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Where("profile_id > 0").
+		Where("status", sysin.CollectDispatchStatusPending).
 		WhereLTE("updated_at", deadline).
-		WhereNull("deleted_at").
-		OrderAsc("updated_at").
-		Limit(limit).
-		All()
+		OrderAsc("updated_at").Limit(limit).All()
 	if err != nil {
-		return gerror.Wrap(err, "读取待恢复采集推送任务失败")
-	}
-	repairTasks := collectTgRepairTasksFromRows(rows)
-	needsRepairMap, err := s.collectTgJobChannelsNeedRepairMap(ctx, repairTasks)
-	if err != nil {
-		return err
+		return gerror.Wrap(err, "读取待恢复采集资料分发失败")
 	}
 	repaired := 0
 	for _, row := range rows {
-		if row.IsEmpty() || row["id"].Int64() <= 0 {
+		event, eventErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", row["event_id"].Int64()).One()
+		if eventErr != nil || event.IsEmpty() {
 			continue
 		}
-		taskId := row["id"].Int64()
-		if !needsRepairMap[taskId] {
+		rule, ruleErr := pdao.YoubanPublishCollectRule.Ctx(ctx).Where("id", row["rule_id"].Int64()).WhereNull("deleted_at").One()
+		if ruleErr != nil || rule.IsEmpty() {
 			continue
 		}
-		if err = s.ensureCollectTgJobs(ctx, taskId); err != nil {
-			g.Log().Warningf(ctx, "恢复采集推送TG任务失败 task:%d err:%+v", taskId, err)
+		if err = s.submitCollectProfileDispatch(ctx, row["id"].Int64(), row["profile_id"].Int64(), event, rule); err != nil {
+			g.Log().Warningf(ctx, "恢复采集资料TG任务失败 dispatch:%d err:%+v", row["id"].Int64(), err)
 			continue
 		}
 		repaired++
 	}
 	if repaired > 0 {
-		g.Log().Infof(ctx, "已恢复采集推送任务：%d条", repaired)
+		g.Log().Infof(ctx, "已恢复采集资料推送：%d条", repaired)
 	}
 	return nil
 }

@@ -9,14 +9,6 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
-func (s *sSysPublish) ensureTgJobs(ctx context.Context, taskId int64, operationNo string) error {
-	return s.submitTelegramPublish(ctx, telegramPublishRequest{
-		TaskId:          taskId,
-		OperationNo:     operationNo,
-		OperationPrefix: telegramPublishBizProfile,
-	})
-}
-
 func (s *sSysPublish) telegramJobChannels(ctx context.Context, task gdb.Record, targetChannelIds ...[]int64) ([]telegramJobChannel, error) {
 	channelIds := decodeInt64JSON(task["channel_id_json"].String())
 	if len(targetChannelIds) > 0 {

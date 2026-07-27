@@ -771,7 +771,6 @@ func (s *sSysPublish) createMessagePushJobWithOperation(ctx context.Context, tem
 		return existing, nil
 	}
 	data := g.Map{
-		"task_id":         0,
 		"tenant_id":       tenantId,
 		"merchant_id":     tenantId,
 		"account_id":      accountId,
@@ -813,7 +812,6 @@ func (s *sSysPublish) createMessagePushJobWithOperation(ctx context.Context, tem
 func (s *sSysPublish) messagePushJobByOperation(ctx context.Context, operationNo string, channelId int64) (telegramJobRecord, error) {
 	var job telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("task_id", 0).
 		Where("operation_no", operationNo).
 		Where("channel_id", channelId).
 		Scan(&job)

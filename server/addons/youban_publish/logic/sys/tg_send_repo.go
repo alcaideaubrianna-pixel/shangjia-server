@@ -6,12 +6,9 @@ import (
 	"encoding/hex"
 	"strings"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
-
-	"hotgo/internal/dao"
 )
 
 func (s *sSysPublish) lockTelegramJob(ctx context.Context, jobId int64) (telegramJobRecord, bool, error) {
@@ -123,24 +120,6 @@ func telegramMediaCacheAssetHash(mediaType string, assetHash string, posterUrl s
 	return "video-thumb:" + hex.EncodeToString(sum[:])
 }
 
-func (s *sSysPublish) telegramJobTask(ctx context.Context, taskId int64) (gdb.Record, error) {
-	fields := "t.id,t.tenant_id,t.account_id,t.profile_id,t.client_request_id,t.title,t.province,t.city,t.plain_text,t.status,t.tg_push_enabled,t.tg_operation_no,t.channel_id_json,t.collect_event_id,t.collect_source_id,t.collect_source_chat_id,t.collect_source_message_id,a.nickname AS account_nickname,p.profile_no"
-	row, err := g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
-		LeftJoin(publishAccountTable+" a", "a.id=t.account_id AND a.deleted_at IS NULL").
-		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=t.profile_id AND p.deleted_at IS NULL").
-		Fields(fields).
-		Where("t.id", taskId).
-		WhereNull("t.deleted_at").
-		One()
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取上架任务失败")
-	}
-	if row.IsEmpty() {
-		return nil, gerror.New("上架任务不存在")
-	}
-	return row, nil
-}
-
 func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegramJobRecord, messages []*telegramSentMessage) error {
 	now := gtime.Now()
 	for _, item := range messages {
@@ -149,7 +128,6 @@ func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegram
 		}
 		_, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).Data(g.Map{
 			"job_id":         job.Id,
-			"task_id":        job.TaskId,
 			"tenant_id":      job.TenantId,
 			"account_id":     job.AccountId,
 			"profile_id":     job.ProfileId,
@@ -175,7 +153,6 @@ func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegram
 func (s *sSysPublish) appendTelegramJobLog(ctx context.Context, job telegramJobRecord, action string, status string, message string) {
 	_, _ = g.DB().Model(publishTgJobLogTable).Safe().Ctx(ctx).Data(g.Map{
 		"job_id":     job.Id,
-		"task_id":    job.TaskId,
 		"tenant_id":  job.TenantId,
 		"account_id": job.AccountId,
 		"profile_id": job.ProfileId,

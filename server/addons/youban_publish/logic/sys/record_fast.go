@@ -58,17 +58,12 @@ func (s *sSysPublish) publishRecordListFast(ctx context.Context, in *sysin.Publi
 
 func (s *sSysPublish) enrichPublishRecordListFast(ctx context.Context, tenantId int64, list []*sysin.PublishRecordModel) error {
 	jobIds := uniquePositiveInt64sFromRecordList(list, func(item *sysin.PublishRecordModel) int64 { return item.JobId })
-	taskIds := uniquePositiveInt64sFromRecordList(list, func(item *sysin.PublishRecordModel) int64 { return item.TaskId })
 	accountIds := uniquePositiveInt64sFromRecordList(list, func(item *sysin.PublishRecordModel) int64 { return item.AccountId })
 	tenantIds := uniquePositiveInt64sFromRecordList(list, func(item *sysin.PublishRecordModel) int64 { return item.TenantId })
 	profileIds := uniquePositiveInt64sFromRecordList(list, func(item *sysin.PublishRecordModel) int64 { return item.ProfileId })
 	botIds := uniquePositiveInt64sFromRecordList(list, func(item *sysin.PublishRecordModel) int64 { return item.BotId })
 
 	jobMap, err := s.publishRecordJobSnapshotMap(ctx, jobIds)
-	if err != nil {
-		return err
-	}
-	taskMap, err := s.publishRecordTaskSnapshotMap(ctx, taskIds)
 	if err != nil {
 		return err
 	}
@@ -106,9 +101,6 @@ func (s *sSysPublish) enrichPublishRecordListFast(ctx context.Context, tenantId 
 			item.ChannelId = job.ChannelId
 			item.TargetChatId = job.TargetChatId
 			item.OperationNo = job.OperationNo
-		}
-		if task, ok := taskMap[item.TaskId]; ok {
-			item.ClientRequestId = task.ClientRequestId
 		}
 		if title, ok := profileMap[item.ProfileId]; ok {
 			item.Title = title
@@ -161,10 +153,6 @@ type publishRecordJobSnapshot struct {
 	TargetChatId string `json:"targetChatId"`
 }
 
-type publishRecordTaskSnapshot struct {
-	ClientRequestId string `json:"clientRequestId"`
-}
-
 type publishRecordNameSnapshot struct {
 	Name     string `json:"name"`
 	Username string `json:"username"`
@@ -195,28 +183,6 @@ func (s *sSysPublish) publishRecordJobSnapshotMap(ctx context.Context, ids []int
 			OperationNo:  item.OperationNo,
 			TargetChatId: item.TargetChatId,
 		}
-	}
-	return res, nil
-}
-
-func (s *sSysPublish) publishRecordTaskSnapshotMap(ctx context.Context, ids []int64) (map[int64]publishRecordTaskSnapshot, error) {
-	if len(ids) == 0 {
-		return map[int64]publishRecordTaskSnapshot{}, nil
-	}
-	type row struct {
-		Id              int64  `json:"id"`
-		ClientRequestId string `json:"clientRequestId"`
-	}
-	var rows []row
-	if err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("id,client_request_id").
-		WhereIn("id", ids).
-		Scan(&rows); err != nil {
-		return nil, gerror.Wrap(err, "读取发送记录任务来源失败")
-	}
-	res := make(map[int64]publishRecordTaskSnapshot, len(rows))
-	for _, item := range rows {
-		res[item.Id] = publishRecordTaskSnapshot{ClientRequestId: item.ClientRequestId}
 	}
 	return res, nil
 }

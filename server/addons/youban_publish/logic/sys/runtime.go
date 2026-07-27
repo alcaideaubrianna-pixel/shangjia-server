@@ -68,11 +68,6 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	go s.runPublishRecordRetentionCleaner(ctx)
 	go s.runAccountCollectSupervisor(ctx)
 	go func() {
-		if err := s.repairCollectTgJobChannels(ctx, 1000); err != nil {
-			g.Log().Warningf(ctx, "修复采集TG目标频道失败：%+v", err)
-		}
-	}()
-	go func() {
 		if err := s.recoverInterruptedTelegramJobs(ctx, 200); err != nil {
 			g.Log().Warningf(ctx, "恢复中断的TG推送任务失败：%+v", err)
 		}

@@ -60,10 +60,6 @@ func profileMediaOwner(state gdb.Record) gdb.Record {
 	}
 }
 
-func publishTaskMediaOwner(taskId int64) gdb.Record {
-	return gdb.Record{"id": gvar.New(taskId)}
-}
-
 func profileStatePublishAt(state gdb.Record) *gtime.Time {
 	if state.IsEmpty() || state["publish_at"].IsNil() {
 		return nil

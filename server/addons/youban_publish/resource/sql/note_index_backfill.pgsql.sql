@@ -7,23 +7,15 @@ INSERT INTO "hg_youban_publish_note_index" (
   "created_at", "updated_at", "deleted_at"
 )
 SELECT
-  t."tenant_id", t."account_id", p."id", t."id", p."source_note_uuid", p."profile_no",
+  ps."tenant_id", ps."account_id", p."id", 0, p."source_note_uuid", p."profile_no",
   p."title", p."summary", p."plain_text",
   CASE WHEN p."source_type" = 'feiniu' THEN p."tag_params" ELSE p."cup_size" END,
-  p."province", p."city", p."status", p."visibility", p."review_status", t."status",
-  p."published_at", COALESCE(p."updated_at", t."updated_at"), p."created_at", p."updated_at", p."deleted_at"
+  p."province", p."city", p."status", p."visibility", p."review_status", '',
+  p."published_at", p."updated_at", p."created_at", p."updated_at", p."deleted_at"
 FROM "hg_content_profile" p
-JOIN "hg_youban_publish_task" t
-  ON t."profile_id" = p."id"
- AND t."deleted_at" IS NULL
- AND t."id" = (
-   SELECT t2."id"
-   FROM "hg_youban_publish_task" t2
-   WHERE t2."profile_id" = p."id"
-     AND t2."deleted_at" IS NULL
-   ORDER BY t2."id" DESC
-   LIMIT 1
- )
+JOIN "hg_youban_publish_profile_state" ps
+  ON ps."profile_id" = p."id"
+ AND ps."deleted_at" IS NULL
 WHERE p."deleted_at" IS NULL
 ON CONFLICT ("tenant_id", "account_id", "profile_id") DO UPDATE SET
   "task_id" = EXCLUDED."task_id",

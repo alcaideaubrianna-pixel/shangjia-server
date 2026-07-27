@@ -13,12 +13,6 @@ ALTER TABLE `hg_youban_publish_collect_source`
 ALTER TABLE `hg_youban_publish_collect_source`
   ADD COLUMN `history_collect_days` int(11) NOT NULL DEFAULT '30' COMMENT '账号历史采集天数' AFTER `history_collect_mode`;
 
-ALTER TABLE `hg_youban_publish_task`
-  ADD COLUMN `collect_event_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集事件ID' AFTER `channel_id_json`,
-  ADD COLUMN `collect_source_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集源ID' AFTER `collect_event_id`,
-  ADD COLUMN `collect_source_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '采集来源Chat ID' AFTER `collect_source_id`,
-  ADD COLUMN `collect_source_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集来源消息ID' AFTER `collect_source_chat_id`;
-
 ALTER TABLE `hg_youban_publish_tg_job`
   ADD COLUMN `collect_event_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集事件ID' AFTER `target_chat_id`,
   ADD COLUMN `collect_source_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集源ID' AFTER `collect_event_id`,
@@ -486,22 +480,6 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_state` (
   UNIQUE KEY `uk_ybp_profile_state_profile` (`profile_id`),
   KEY `idx_ybp_profile_state_owner` (`tenant_id`,`account_id`,`profile_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架资料归属和发布配置';
-INSERT INTO `hg_youban_publish_profile_state` (
-  `tenant_id`,`account_id`,`profile_id`,`channel_id_json`,`customer_remark`,
-  `anti_scan_enabled`,`publish_at`,`created_by`,`updated_by`,`created_at`,`updated_at`
-)
-SELECT t.`tenant_id`,t.`account_id`,t.`profile_id`,t.`channel_id_json`,t.`customer_remark`,
-  t.`anti_scan_enabled`,t.`published_at`,t.`created_by`,t.`updated_by`,COALESCE(t.`created_at`,NOW()),COALESCE(t.`updated_at`,NOW())
-FROM `hg_youban_publish_task` t
-INNER JOIN (
-  SELECT `profile_id`,MAX(`id`) AS `id`
-  FROM `hg_youban_publish_task`
-  WHERE `profile_id` > 0 AND `deleted_at` IS NULL
-  GROUP BY `profile_id`
-) latest ON latest.`id`=t.`id`
-ON DUPLICATE KEY UPDATE `profile_id`=VALUES(`profile_id`);
-UPDATE `hg_youban_publish_task` SET `status`='canceled', `tg_status`='skipped' WHERE `status`='draft';
-
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_success_record` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT, `job_id` bigint(20) NOT NULL DEFAULT '0', `task_id` bigint(20) NOT NULL DEFAULT '0',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0', `account_id` bigint(20) NOT NULL DEFAULT '0', `profile_id` bigint(20) NOT NULL DEFAULT '0',

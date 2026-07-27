@@ -14,6 +14,7 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 )
 
 func (s *sSysPublish) CollectSourceTrigger(ctx context.Context, in *sysin.CollectSourceTriggerInp) (*sysin.CollectSourceTriggerModel, error) {
@@ -201,11 +202,11 @@ func (s *sSysPublish) resetCollectSourceForDev(ctx context.Context, sourceId int
 	if eventCount == 0 {
 		return res, nil
 	}
-	taskIds, err := s.collectSourceTaskIds(ctx, sourceId, tenantId, accountId)
+	profileIds, err := s.collectSourceProfileIds(ctx, sourceId, tenantId, accountId)
 	if err != nil {
 		return nil, err
 	}
-	if err = s.resetCollectSourceTasksForDev(ctx, taskIds, tenantId); err != nil {
+	if err = s.resetCollectSourceProfilesForDev(ctx, profileIds, tenantId); err != nil {
 		return nil, err
 	}
 	reviewCount, err := pdao.YoubanPublishCollectReview.Ctx(ctx).
@@ -247,14 +248,14 @@ func (s *sSysPublish) resetCollectSourceForDev(ctx context.Context, sourceId int
 	return res, nil
 }
 
-func (s *sSysPublish) resetCollectSourceTasksForDev(ctx context.Context, taskIds []int64, tenantId int64) error {
-	taskIds = uniqueIds(taskIds)
-	if len(taskIds) == 0 {
+func (s *sSysPublish) resetCollectSourceProfilesForDev(ctx context.Context, profileIds []int64, tenantId int64) error {
+	profileIds = uniqueIds(profileIds)
+	if len(profileIds) == 0 {
 		return nil
 	}
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
-		WhereIn("task_id", taskIds).
+		WhereIn("profile_id", profileIds).
 		WhereIn("status", []string{"pending", "sending", "failed_retry", "failed", "sent"}).
 		Data(g.Map{
 			"status":          "superseded",
@@ -267,20 +268,15 @@ func (s *sSysPublish) resetCollectSourceTasksForDev(ctx context.Context, taskIds
 	if err != nil {
 		return gerror.Wrap(err, "废弃采集源TG任务失败")
 	}
-	_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Where("tenant_id", tenantId).
-		WhereIn("id", taskIds).
-		Data(g.Map{
-			"status":        sysin.PublishTaskStatusCanceled,
-			"tg_status":     sysin.PublishTaskStatusCanceled,
-			"error_message": "开发模式重置采集源推送状态",
-			"updated_at":    gtime.Now(),
-		}).
-		Update()
-	if err = gerror.Wrap(err, "重置采集源上架任务失败"); err != nil {
+	for _, profileId := range profileIds {
+		if _, err = s.syncProfilePublishState(ctx, profileId, 0, consts.ContentVisibilityPrivate, nil); err != nil {
+			return err
+		}
+	}
+	if err = s.deactivateChannelProfiles(ctx, tenantId, profileIds); err != nil {
 		return err
 	}
-	return s.refreshTaskNoteIndexes(ctx, taskIds)
+	return s.refreshProfileNoteIndexes(ctx, profileIds)
 }
 
 func (s *sSysPublish) collectSourceResetEventCount(ctx context.Context, sourceId int64, tenantId int64, accountId int64) (int, error) {

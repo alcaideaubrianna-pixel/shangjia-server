@@ -169,11 +169,11 @@ AND EXISTS (
     WHERE p.id = candidate.profile_id AND p.deleted_at IS NULL
 )
 AND EXISTS (
-    SELECT 1 FROM hg_youban_publish_task t
-    WHERE t.profile_id = candidate.profile_id
-      AND t.tenant_id = candidate.tenant_id
-      AND t.account_id = candidate.account_id
-      AND t.deleted_at IS NULL
+    SELECT 1 FROM hg_youban_publish_profile_state ps
+    WHERE ps.profile_id = candidate.profile_id
+      AND ps.tenant_id = candidate.tenant_id
+      AND ps.account_id = candidate.account_id
+      AND ps.deleted_at IS NULL
 )`, strings.Join(branches, " UNION ALL "))
 	return query, args, nil
 }

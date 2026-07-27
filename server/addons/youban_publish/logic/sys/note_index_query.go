@@ -166,5 +166,5 @@ func decodeAdminNoteCursor(raw string) (*adminNoteCursor, error) {
 }
 
 func adminNoteIndexFields() string {
-	return "i.id AS note_index_id,i.profile_id AS id,i.uuid,i.task_id,i.tenant_id,i.account_id,i.profile_no,i.title,i.summary,i.plain_text,i.province,i.city,i.tag,i.visibility,i.review_status,i.status,i.published_at,i.created_at,i.updated_at,i.task_status,a.nickname AS account_name,a.nickname,a.username"
+	return "i.id AS note_index_id,i.profile_id AS id,i.uuid,i.tenant_id,i.account_id,i.profile_no,i.title,i.summary,i.plain_text,i.province,i.city,i.tag,i.visibility,i.review_status,i.status,i.published_at,i.created_at,i.updated_at,i.task_status,a.nickname AS account_name,a.nickname,a.username"
 }

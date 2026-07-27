@@ -110,7 +110,7 @@ func (s *sSysPublish) collectFollowProfile(ctx context.Context, tenantId int64, 
 	if row.IsEmpty() {
 		return row, nil
 	}
-	taskCount, err := pdao.YoubanPublishTask.Ctx(ctx).
+	ownerCount, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
 		Where("profile_id", profileId).
@@ -119,7 +119,7 @@ func (s *sSysPublish) collectFollowProfile(ctx context.Context, tenantId int64, 
 	if err != nil {
 		return nil, gerror.Wrap(err, "检查关注资料归属失败")
 	}
-	if taskCount == 0 {
+	if ownerCount == 0 {
 		return gdb.Record{}, nil
 	}
 	return row, nil

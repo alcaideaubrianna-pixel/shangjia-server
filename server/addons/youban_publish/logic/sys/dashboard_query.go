@@ -7,6 +7,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/dao"
 )
 
 type dashboardTrendRow struct {
@@ -32,13 +33,14 @@ func (s *sSysPublish) dashboardTaskCounts(ctx context.Context, tenantId int64, a
 		Status string `json:"status"`
 		Count  int    `json:"count"`
 	}
-	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("status", "COUNT(*) AS count").
-		Where("tenant_id", tenantId).
-		WhereNull("deleted_at").
-		Group("status")
+	mod := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
+		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
+		Fields("CASE WHEN p.status = 1 THEN 'published' ELSE 'pending' END AS status", "COUNT(*) AS count").
+		Where("ps.tenant_id", tenantId).
+		WhereNull("p.deleted_at").
+		Group("CASE WHEN p.status = 1 THEN 'published' ELSE 'pending' END")
 	if accountId > 0 {
-		mod = mod.Where("account_id", accountId)
+		mod = mod.Where("ps.account_id", accountId)
 	}
 	if err := mod.Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "统计任务状态失败")
@@ -88,15 +90,16 @@ func (s *sSysPublish) dashboardPublishTrend(ctx context.Context, in *sysin.Trend
 		return nil, err
 	}
 	var rows []dashboardTrendRow
-	mod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("DATE(created_at) AS date", "status", "COUNT(*) AS count").
-		Where("tenant_id", tenantId).
-		WhereGTE("created_at", dateRange.Start+" 00:00:00").
-		WhereLTE("created_at", dateRange.End+" 23:59:59").
-		WhereNull("deleted_at").
-		Group("DATE(created_at),status")
+	mod := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
+		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
+		Fields("DATE(p.created_at) AS date", "CASE WHEN p.status = 1 THEN 'published' ELSE 'pending' END AS status", "COUNT(*) AS count").
+		Where("ps.tenant_id", tenantId).
+		WhereGTE("p.created_at", dateRange.Start+" 00:00:00").
+		WhereLTE("p.created_at", dateRange.End+" 23:59:59").
+		WhereNull("p.deleted_at").
+		Group("DATE(p.created_at),CASE WHEN p.status = 1 THEN 'published' ELSE 'pending' END")
 	if accountId > 0 {
-		mod = mod.Where("account_id", accountId)
+		mod = mod.Where("ps.account_id", accountId)
 	}
 	if err := mod.Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "统计发布趋势失败")

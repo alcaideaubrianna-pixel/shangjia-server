@@ -211,7 +211,6 @@ func (s *sSysPublish) sendDownChannelProfile(ctx context.Context, tenantId int64
 
 func (s *sSysPublish) createDownChannelTelegramJob(ctx context.Context, job telegramJobRecord, operationNo string, cutoffAt string) (int64, bool, error) {
 	existingMod := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereNull("task_id").
 		Where("profile_id", job.ProfileId).
 		Where("operation_no", operationNo).
 		Where("channel_id", job.ChannelId)
@@ -246,7 +245,6 @@ func (s *sSysPublish) createDownChannelTelegramJob(ctx context.Context, job tele
 	}
 	now := gtime.Now()
 	id, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
-		"task_id":         nil,
 		"operation_no":    operationNo,
 		"tenant_id":       job.TenantId,
 		"account_id":      job.AccountId,

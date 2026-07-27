@@ -90,9 +90,6 @@ func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) er
 	if limit <= 0 {
 		limit = 50
 	}
-	if err := ensureCollectTelegramOrderColumns(ctx); err != nil {
-		return err
-	}
 	lockCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	lock := hglock.NewConfig(5*time.Second, 100*time.Millisecond).Mutex("youban_publish:tg_scheduler")
@@ -180,12 +177,10 @@ func (s *sSysPublish) telegramSchedulerCandidates(ctx context.Context, limit int
 	var jobs []telegramJobRecord
 	now := gtime.Now()
 	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
-		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
 		Fields("j.*").
 		WhereIn("j.status", []string{"pending", "failed_retry"}).
 		Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", now).
 		Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
-		Where("(j.task_id = 0 OR (t.id IS NOT NULL AND t.deleted_at IS NULL))").
 		Where(telegramSchedulerCollectPredecessorCondition()).
 		OrderAsc("j.priority").OrderAsc("j.created_at").OrderAsc("j.id").
 		Limit(limit).
@@ -200,14 +195,12 @@ func telegramSchedulerCollectPredecessorCondition() string {
 	return `(j.collect_source_id <= 0 OR j.collect_source_message_id <= 0 OR j.collect_source_chat_id = '' OR NOT EXISTS (
 		SELECT 1
 		FROM ` + publishTgJobTable + ` pj
-		LEFT JOIN ` + publishTaskTable + ` pt ON pt.id = pj.task_id
 		WHERE pj.id <> j.id
 		  AND pj.collect_source_id = j.collect_source_id
 		  AND pj.collect_source_chat_id = j.collect_source_chat_id
 		  AND pj.collect_source_message_id > 0
 		  AND pj.collect_source_message_id < j.collect_source_message_id
 		  AND pj.status IN ('pending', 'sending', 'failed_retry')
-		  AND (pj.task_id = 0 OR (pt.id IS NOT NULL AND pt.deleted_at IS NULL))
 		  AND ((j.channel_id > 0 AND pj.channel_id = j.channel_id) OR (j.channel_id <= 0 AND pj.target_chat_id = j.target_chat_id))
 	))`
 }
@@ -221,11 +214,9 @@ func (s *sSysPublish) telegramChannelHasActiveDispatch(ctx context.Context, job 
 		return false, nil
 	}
 	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
-		LeftJoin(publishTaskTable+" t", "t.id=j.task_id").
 		Where("j.id <> ?", job.Id).
 		WhereIn("j.status", []string{"sending", "pending", "failed_retry"}).
-		Where("(j.dispatch_status IN (?, ?) OR j.status = ?)", tgDispatchStatusQueued, tgDispatchStatusProcessing, "sending").
-		Where("(j.task_id = 0 OR (t.id IS NOT NULL AND t.deleted_at IS NULL))")
+		Where("(j.dispatch_status IN (?, ?) OR j.status = ?)", tgDispatchStatusQueued, tgDispatchStatusProcessing, "sending")
 	if job.ChannelId > 0 {
 		mod = mod.Where("j.channel_id", job.ChannelId)
 	} else {

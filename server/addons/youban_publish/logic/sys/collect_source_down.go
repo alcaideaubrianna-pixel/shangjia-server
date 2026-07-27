@@ -9,6 +9,7 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 )
 
 const collectSourceDownMessage = "采集源一键下架"
@@ -41,18 +42,18 @@ func (s *sSysPublish) CollectSourceDown(ctx context.Context, in *sysin.CollectSo
 	if err != nil {
 		return nil, gerror.Wrap(err, "停止采集源失败")
 	}
-	taskIds, err := s.collectSourceTaskIds(ctx, in.Id, account.TenantId, account.Id)
+	profileIds, err := s.collectSourceProfileIds(ctx, in.Id, account.TenantId, account.Id)
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.collectSourceDownPreview(ctx, in.Id, account.TenantId, account.Id, taskIds)
+	res, err := s.collectSourceDownPreview(ctx, in.Id, account.TenantId, account.Id, profileIds)
 	if err != nil {
 		return nil, err
 	}
-	if len(taskIds) == 0 {
+	if len(profileIds) == 0 {
 		return res, nil
 	}
-	if err = s.supersedeCollectSourcePendingJobs(ctx, taskIds, account.TenantId); err != nil {
+	if err = s.supersedeCollectSourcePendingJobs(ctx, profileIds, account.TenantId); err != nil {
 		return nil, err
 	}
 	if err = s.enqueueCollectSourceDown(ctx, collectSourceDownQueuePayload{
@@ -67,18 +68,18 @@ func (s *sSysPublish) CollectSourceDown(ctx context.Context, in *sysin.CollectSo
 }
 
 func (s *sSysPublish) ExecuteCollectSourceDown(ctx context.Context, sourceId int64, tenantId int64, accountId int64) (*sysin.CollectSourceDownModel, error) {
-	taskIds, err := s.collectSourceTaskIds(ctx, sourceId, tenantId, accountId)
+	profileIds, err := s.collectSourceProfileIds(ctx, sourceId, tenantId, accountId)
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.collectSourceDownPreview(ctx, sourceId, tenantId, accountId, taskIds)
+	res, err := s.collectSourceDownPreview(ctx, sourceId, tenantId, accountId, profileIds)
 	if err != nil {
 		return nil, err
 	}
-	if len(taskIds) == 0 {
+	if len(profileIds) == 0 {
 		return res, nil
 	}
-	jobs, err := s.collectSourceDownJobs(ctx, taskIds, tenantId)
+	jobs, err := s.collectSourceDownJobs(ctx, profileIds, tenantId)
 	if err != nil {
 		return nil, err
 	}
@@ -93,32 +94,32 @@ func (s *sSysPublish) ExecuteCollectSourceDown(ctx context.Context, sourceId int
 		}
 		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "down", "deleted", "采集源一键下架，目标频道消息已删除或任务已废弃")
 	}
-	if err = s.finishCollectSourceDownTasks(ctx, taskIds, tenantId); err != nil {
+	if err = s.finishCollectSourceDownProfiles(ctx, profileIds, tenantId); err != nil {
 		return nil, err
 	}
-	if err = s.finishCollectSourceDownDispatch(ctx, sourceId, taskIds, tenantId, accountId); err != nil {
+	if err = s.finishCollectSourceDownDispatch(ctx, sourceId, profileIds, tenantId, accountId); err != nil {
 		return nil, err
 	}
 	return res, nil
 }
 
-func (s *sSysPublish) collectSourceTaskIds(ctx context.Context, sourceId int64, tenantId int64, accountId int64) ([]int64, error) {
+func (s *sSysPublish) collectSourceProfileIds(ctx context.Context, sourceId int64, tenantId int64, accountId int64) ([]int64, error) {
 	var rows []struct {
-		TaskId int64 `json:"taskId"`
+		ProfileId int64 `json:"profileId"`
 	}
 	err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
-		Fields("DISTINCT task_id").
+		Fields("DISTINCT profile_id").
 		Where("source_id", sourceId).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
-		WhereGT("task_id", 0).
+		WhereGT("profile_id", 0).
 		Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取采集源任务失败")
 	}
 	ids := make([]int64, 0, len(rows))
 	for _, row := range rows {
-		ids = append(ids, row.TaskId)
+		ids = append(ids, row.ProfileId)
 	}
 	return uniqueIds(ids), nil
 }
@@ -131,7 +132,7 @@ func (s *sSysPublish) collectSourceDownPreview(ctx context.Context, sourceId int
 	jobCount, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
-		WhereIn("task_id", taskIds).
+		WhereIn("profile_id", taskIds).
 		WhereIn("status", collectSourceDownJobStatuses()).
 		Count()
 	if err != nil {
@@ -141,7 +142,7 @@ func (s *sSysPublish) collectSourceDownPreview(ctx context.Context, sourceId int
 		LeftJoin(publishTgJobTable+" j", "j.id=m.job_id").
 		Where("j.tenant_id", tenantId).
 		Where("j.account_id", accountId).
-		WhereIn("j.task_id", taskIds).
+		WhereIn("j.profile_id", taskIds).
 		Where("m.status", "sent").
 		Count()
 	if err != nil {
@@ -156,7 +157,7 @@ func (s *sSysPublish) collectSourceDownJobs(ctx context.Context, taskIds []int64
 	var jobs []telegramResubmitJob
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
-		WhereIn("task_id", taskIds).
+		WhereIn("profile_id", taskIds).
 		WhereIn("status", collectSourceDownJobStatuses()).
 		OrderAsc("id").
 		Scan(&jobs)
@@ -205,7 +206,7 @@ func (s *sSysPublish) collectSourcePendingDownJobs(ctx context.Context, taskIds 
 	var jobs []telegramResubmitJob
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
-		WhereIn("task_id", taskIds).
+		WhereIn("profile_id", taskIds).
 		WhereIn("status", []string{"pending", "failed_retry", "sending"}).
 		OrderAsc("id").
 		Scan(&jobs)
@@ -215,29 +216,24 @@ func (s *sSysPublish) collectSourcePendingDownJobs(ctx context.Context, taskIds 
 	return jobs, nil
 }
 
-func (s *sSysPublish) finishCollectSourceDownTasks(ctx context.Context, taskIds []int64, tenantId int64) error {
-	_, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Where("tenant_id", tenantId).
-		WhereIn("id", taskIds).
-		Data(g.Map{
-			"status":        sysin.PublishTaskStatusCanceled,
-			"tg_status":     sysin.PublishTaskStatusCanceled,
-			"error_message": collectSourceDownMessage,
-			"updated_at":    gtime.Now(),
-		}).
-		Update()
-	if err = gerror.Wrap(err, "更新采集源任务下架状态失败"); err != nil {
+func (s *sSysPublish) finishCollectSourceDownProfiles(ctx context.Context, profileIds []int64, tenantId int64) error {
+	for _, profileId := range uniqueIds(profileIds) {
+		if _, err := s.syncProfilePublishState(ctx, profileId, 0, consts.ContentVisibilityPrivate, nil); err != nil {
+			return err
+		}
+	}
+	if err := s.deactivateChannelProfiles(ctx, tenantId, profileIds); err != nil {
 		return err
 	}
-	return s.refreshTaskNoteIndexes(ctx, taskIds)
+	return s.refreshProfileNoteIndexes(ctx, profileIds)
 }
 
-func (s *sSysPublish) finishCollectSourceDownDispatch(ctx context.Context, sourceId int64, taskIds []int64, tenantId int64, accountId int64) error {
+func (s *sSysPublish) finishCollectSourceDownDispatch(ctx context.Context, sourceId int64, profileIds []int64, tenantId int64, accountId int64) error {
 	_, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
 		Where("source_id", sourceId).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
-		WhereIn("task_id", taskIds).
+		WhereIn("profile_id", profileIds).
 		Data(g.Map{
 			"status":        sysin.CollectDispatchStatusSkipped,
 			"error_message": collectSourceDownMessage,

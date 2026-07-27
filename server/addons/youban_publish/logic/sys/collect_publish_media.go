@@ -12,9 +12,38 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/dao"
 )
 
-func (s *sSysPublish) rebuildCollectPublishMedia(ctx context.Context, event gdb.Record, content *collectContentResult, taskId int64) error {
+type collectPublishMediaOwner struct {
+	ProfileId int64
+}
+
+func (s *sSysPublish) rebuildCollectProfileMedia(ctx context.Context, event gdb.Record, content *collectContentResult, profileId int64) error {
+	if err := s.rebuildCollectOwnedMedia(ctx, event, content, collectPublishMediaOwner{ProfileId: profileId}); err != nil {
+		return err
+	}
+	columns := dao.ContentProfile.Columns()
+	imageCount, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).Where("media_type", "image").WhereNull("deleted_at").Count()
+	if err != nil {
+		return gerror.Wrap(err, "统计采集图片失败")
+	}
+	videoCount, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).Where("media_type", "video").WhereNull("deleted_at").Count()
+	if err != nil {
+		return gerror.Wrap(err, "统计采集视频失败")
+	}
+	_, err = dao.ContentProfile.Ctx(ctx).Where(columns.Id, profileId).Data(g.Map{
+		columns.ImageCount: imageCount, columns.VideoCount: videoCount, columns.UpdatedAt: gtime.Now(),
+	}).Update()
+	return gerror.Wrap(err, "更新采集媒体数量失败")
+}
+
+func (s *sSysPublish) rebuildCollectOwnedMedia(ctx context.Context, event gdb.Record, content *collectContentResult, owner collectPublishMediaOwner) error {
+	if owner.ProfileId <= 0 {
+		return gerror.New("采集发布资料不存在")
+	}
 	items := make([]collectMediaItem, 0)
 	if content != nil && strings.TrimSpace(content.MediaJSON) != "" {
 		_ = json.Unmarshal([]byte(content.MediaJSON), &items)
@@ -27,16 +56,8 @@ func (s *sSysPublish) rebuildCollectPublishMedia(ctx context.Context, event gdb.
 		items = collectMediaRowsToItems(rows)
 	}
 	now := gtime.Now()
-	task, err := s.getTaskByTenant(ctx, taskId, event["tenant_id"].Int64())
-	if err != nil {
-		return err
-	}
-	profileId := task["profile_id"].Int64()
-	if profileId <= 0 {
-		return gerror.New("采集发布资料不存在")
-	}
 	if _, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("profile_id", profileId).
+		Where("profile_id", owner.ProfileId).
 		WhereNull("deleted_at").
 		Data(g.Map{
 			"deleted_at": now,
@@ -46,12 +67,12 @@ func (s *sSysPublish) rebuildCollectPublishMedia(ctx context.Context, event gdb.
 		Update(); err != nil {
 		return gerror.Wrap(err, "清理采集旧媒体失败")
 	}
-	_ = s.deleteMediaPHashBucketByProfileId(ctx, profileId)
+	_ = s.deleteMediaPHashBucketByProfileId(ctx, owner.ProfileId)
 	displayItems, verifyItems := splitCollectPublishMediaItems(event, items)
-	if err := s.insertCollectPublishMediaRows(ctx, event, taskId, "display", displayItems); err != nil {
+	if err := s.insertCollectOwnedMediaRows(ctx, event, owner, "display", displayItems); err != nil {
 		return err
 	}
-	return s.insertCollectPublishMediaRows(ctx, event, taskId, "verify", verifyItems)
+	return s.insertCollectOwnedMediaRows(ctx, event, owner, "verify", verifyItems)
 }
 
 func splitCollectPublishMediaItems(event gdb.Record, items []collectMediaItem) ([]collectMediaItem, []collectMediaItem) {
@@ -70,13 +91,13 @@ func splitCollectPublishMediaItems(event gdb.Record, items []collectMediaItem) (
 	return display, []collectMediaItem{last}
 }
 
-func (s *sSysPublish) insertCollectPublishMediaRows(ctx context.Context, event gdb.Record, taskId int64, purpose string, items []collectMediaItem) error {
+func (s *sSysPublish) insertCollectOwnedMediaRows(ctx context.Context, event gdb.Record, owner collectPublishMediaOwner, purpose string, items []collectMediaItem) error {
 	sortIndex := 1
 	for _, item := range items {
 		if collectMediaSourceKey(item) == "" {
 			continue
 		}
-		if err := s.insertCollectPublishMediaRow(ctx, event, taskId, purpose, sortIndex, item); err != nil {
+		if err := s.insertCollectOwnedMediaRow(ctx, event, owner, purpose, sortIndex, item); err != nil {
 			return err
 		}
 		sortIndex++
@@ -84,16 +105,11 @@ func (s *sSysPublish) insertCollectPublishMediaRows(ctx context.Context, event g
 	return nil
 }
 
-func (s *sSysPublish) insertCollectPublishMediaRow(ctx context.Context, event gdb.Record, taskId int64, purpose string, sortIndex int, item collectMediaItem) error {
-	task, err := s.getTaskByTenant(ctx, taskId, event["tenant_id"].Int64())
-	if err != nil {
-		return err
-	}
-	profileId := task["profile_id"].Int64()
-	if profileId <= 0 {
+func (s *sSysPublish) insertCollectOwnedMediaRow(ctx context.Context, event gdb.Record, owner collectPublishMediaOwner, purpose string, sortIndex int, item collectMediaItem) error {
+	if owner.ProfileId <= 0 {
 		return gerror.New("采集发布资料不存在")
 	}
-	item, err = s.prepareCollectMediaAsset(ctx, event, item)
+	item, err := s.prepareCollectMediaAsset(ctx, event, item)
 	if err != nil {
 		return err
 	}
@@ -139,7 +155,7 @@ func (s *sSysPublish) insertCollectPublishMediaRow(ctx context.Context, event gd
 		"tenant_id":           event["tenant_id"].Int64(),
 		"merchant_id":         event["tenant_id"].Int64(),
 		"account_id":          event["account_id"].Int64(),
-		"profile_id":          profileId,
+		"profile_id":          owner.ProfileId,
 		"media_type":          mediaType,
 		"purpose":             purpose,
 		"name":                fmt.Sprintf("collect-%d-%s-%d", event["id"].Int64(), purpose, sortIndex),

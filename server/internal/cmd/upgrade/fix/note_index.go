@@ -11,8 +11,8 @@ import (
 
 const noteIndexBackfillBatchSize = 200
 
-// BackfillYoubanPublishNoteIndex rebuilds the note read model from task/profile
-// source data. It is intentionally a standalone maintenance command so normal
+// BackfillYoubanPublishNoteIndex rebuilds the note read model from profile
+// state. It is intentionally a standalone maintenance command so normal
 // plugin upgrades never perform a large write transaction.
 func BackfillYoubanPublishNoteIndex(ctx context.Context) error {
 	lastProfileId := int64(0)
@@ -21,9 +21,9 @@ func BackfillYoubanPublishNoteIndex(ctx context.Context) error {
 		var rows []struct {
 			ProfileId int64 `orm:"profile_id"`
 		}
-		if err := g.DB().Model("hg_youban_publish_task").Safe().Ctx(ctx).
+		if err := g.DB().Model("hg_youban_publish_profile_state").Safe().Ctx(ctx).
 			Fields("profile_id").WhereGT("profile_id", lastProfileId).
-			Where("profile_id > 0").Distinct().OrderAsc("profile_id").
+			Where("profile_id > 0").WhereNull("deleted_at").Distinct().OrderAsc("profile_id").
 			Limit(noteIndexBackfillBatchSize).Scan(&rows); err != nil {
 			return gerror.Wrap(err, "读取资料索引回填范围失败")
 		}

@@ -20,8 +20,8 @@ const (
 	feiniuPublishTgMessageCacheTable = "hg_youban_publish_tg_message_cache"
 )
 
-func (s *sSysSync) syncSourceMessageLinks(ctx context.Context, cfg gdb.Record, row gdb.Record, profileId, taskId, accountId int64) error {
-	if profileId <= 0 || taskId <= 0 || accountId <= 0 {
+func (s *sSysSync) syncSourceMessageLinks(ctx context.Context, cfg gdb.Record, row gdb.Record, profileId, accountId int64) error {
+	if profileId <= 0 || accountId <= 0 {
 		return nil
 	}
 	chatId := row["source_tg_chat_id"].Int64()
@@ -32,7 +32,7 @@ func (s *sSysSync) syncSourceMessageLinks(ctx context.Context, cfg gdb.Record, r
 	if err := s.upsertFeiNiuTgMessageCache(ctx, cfg, row); err != nil {
 		return err
 	}
-	if err := s.upsertFeiNiuTgMessageRelation(ctx, cfg, row, profileId, taskId, accountId); err != nil {
+	if err := s.upsertFeiNiuTgMessageRelation(ctx, cfg, row, profileId, accountId); err != nil {
 		return err
 	}
 	return nil
@@ -94,7 +94,7 @@ func (s *sSysSync) upsertFeiNiuTgMessageCache(ctx context.Context, cfg gdb.Recor
 	return nil
 }
 
-func (s *sSysSync) upsertFeiNiuTgMessageRelation(ctx context.Context, cfg gdb.Record, row gdb.Record, profileId, taskId, accountId int64) error {
+func (s *sSysSync) upsertFeiNiuTgMessageRelation(ctx context.Context, cfg gdb.Record, row gdb.Record, profileId, accountId int64) error {
 	chatId := row["source_tg_chat_id"].Int64()
 	messageId := row["source_message_id"].Int64()
 	if chatId <= 0 || messageId <= 0 {
@@ -104,7 +104,6 @@ func (s *sSysSync) upsertFeiNiuTgMessageRelation(ctx context.Context, cfg gdb.Re
 	targetChatId := normalizeTelegramChannelChatIDLocal(strconv.FormatInt(chatId, 10))
 	data := g.Map{
 		"job_id":         0,
-		"task_id":        taskId,
 		"tenant_id":      cfg["target_tenant_id"].Int64(),
 		"account_id":     accountId,
 		"profile_id":     profileId,
@@ -120,9 +119,10 @@ func (s *sSysSync) upsertFeiNiuTgMessageRelation(ctx context.Context, cfg gdb.Re
 		"updated_at":     now,
 	}
 	mod := g.DB().Model(feiniuPublishTgMessageTable).Safe().Ctx(ctx).
-		Where("task_id", taskId).
 		Where("profile_id", profileId).
-		Where("tg_message_id", messageId)
+		Where("target_chat_id", targetChatId).
+		Where("tg_message_id", messageId).
+		Where("purpose", "import")
 	existing, err := mod.One()
 	if err != nil {
 		return gerror.Wrap(err, "读取 FeiNiu 资料消息关联失败")

@@ -107,11 +107,6 @@ func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job te
 	if affected == 0 {
 		return nil
 	}
-	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Where("id", job.TaskId).
-		Where("status", "publishing").
-		Data(g.Map{"tg_status": "pending", "updated_at": now}).
-		Update()
 	s.appendTelegramJobLog(ctx, job, "publish", "requeued", "TG推送任务长时间处于发送中，已自动重新投递")
 	return s.enqueueTelegramJob(ctx, job.Id, 0)
 }

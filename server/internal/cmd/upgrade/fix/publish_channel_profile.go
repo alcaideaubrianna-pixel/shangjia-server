@@ -54,10 +54,8 @@ func BackfillYoubanPublishChannelProfiles(ctx context.Context) error {
 func pendingPublishChannelProfileJobs(ctx context.Context, limit int) ([]publishChannelProfileJob, error) {
 	var jobs []publishChannelProfileJob
 	err := g.DB().Model("hg_youban_publish_tg_job j").Safe().Ctx(ctx).
-		LeftJoin("hg_youban_publish_task t", "t.id=j.task_id AND t.deleted_at IS NULL").
 		Fields("j.id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.operation_no").
 		Where("j.status", "sent").
-		Where("(j.task_id IS NULL OR t.status='published')").
 		Where("j.profile_id > 0").
 		Where("LOWER(j.operation_no) NOT LIKE 'down:%'").
 		Where("NOT EXISTS (SELECT 1 FROM hg_youban_publish_channel_profile cp WHERE cp.channel_id=j.channel_id AND cp.profile_id=j.profile_id AND cp.status='active')").

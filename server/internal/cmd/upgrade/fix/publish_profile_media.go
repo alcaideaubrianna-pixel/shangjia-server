@@ -11,8 +11,7 @@ import (
 
 const publishProfileMediaBackfillBatchSize = 200
 
-// BackfillYoubanPublishProfileMedia creates the profile-owned media set.
-// Collection task media remains unchanged.
+// BackfillYoubanPublishProfileMedia normalizes media ownership from profile state.
 func BackfillYoubanPublishProfileMedia(ctx context.Context) error {
 	lastProfileId := int64(0)
 	processed := 0
@@ -44,45 +43,19 @@ func BackfillYoubanPublishProfileMedia(ctx context.Context) error {
 
 func backfillOnePublishProfileMedia(ctx context.Context, profileId int64) error {
 	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		count, err := tx.Model("hg_youban_publish_media").Ctx(ctx).
-			Where("profile_id", profileId).WhereNull("task_id").WhereNull("deleted_at").Count()
-		if err != nil || count > 0 {
-			return err
-		}
-		latestTaskId, err := tx.Model("hg_youban_publish_task t").Ctx(ctx).
-			Where("t.profile_id", profileId).
-			WhereNull("t.deleted_at").
-			Where("EXISTS (SELECT 1 FROM hg_youban_publish_media tm WHERE tm.task_id=t.id AND tm.deleted_at IS NULL)").
-			OrderDesc("t.id").
-			Fields("t.id").
-			Value()
+		state, err := tx.Model("hg_youban_publish_profile_state").Ctx(ctx).
+			Fields("tenant_id,account_id").Where("profile_id", profileId).WhereNull("deleted_at").One()
 		if err != nil {
-			return gerror.Wrap(err, "读取资料最新发布事件失败")
+			return gerror.Wrap(err, "读取资料归属失败")
 		}
-		if latestTaskId.Int64() <= 0 {
+		if state.IsEmpty() {
 			return nil
 		}
-		var rows []gdb.Record
-		if err = tx.Model("hg_youban_publish_media").Ctx(ctx).
-			Where("task_id", latestTaskId.Int64()).Where("profile_id", profileId).
-			WhereNull("deleted_at").OrderAsc("sort_index").OrderAsc("id").Scan(&rows); err != nil {
-			return gerror.Wrap(err, "读取发布事件媒体失败")
-		}
-		now := gtime.Now()
-		for _, row := range rows {
-			data := row.Map()
-			delete(data, "id")
-			data["task_id"] = nil
-			data["tg_file_id"] = ""
-			data["tg_thumb_file_id"] = ""
-			data["tg_cache_asset_hash"] = ""
-			data["tg_cache_status"] = "invalid"
-			data["created_at"] = now
-			data["updated_at"] = now
-			data["deleted_at"] = nil
-			if _, err = tx.Model("hg_youban_publish_media").Ctx(ctx).Data(data).Insert(); err != nil {
-				return gerror.Wrap(err, "创建资料当前媒体失败")
-			}
+		_, err = tx.Model("hg_youban_publish_media").Ctx(ctx).
+			Where("profile_id", profileId).WhereNull("deleted_at").
+			Data(g.Map{"tenant_id": state["tenant_id"].Int64(), "merchant_id": state["tenant_id"].Int64(), "account_id": state["account_id"].Int64(), "task_id": nil, "updated_at": gtime.Now()}).Update()
+		if err != nil {
+			return gerror.Wrap(err, "归一化资料媒体归属失败")
 		}
 		return nil
 	})

@@ -123,16 +123,12 @@ func (s *sSysPublish) approveCollectReview(ctx context.Context, reviewId int64, 
 	content.MediaCount = review["media_count"].Int()
 	content.TextHash = collectHash(content.NormalizedText)
 	content.DedupeKey = collectHash(content.NormalizedText + ":" + collectMediaSignature(content.MediaJSON))
-	taskId, err := s.createCollectPublishTask(ctx, event, content, rule, review["raw_text"].String())
+	profileId, err := s.upsertCollectProfile(ctx, event, content, rule, review["raw_text"].String())
 	if err != nil {
 		_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())
 		return err
 	}
-	if err = s.ensureCollectTgJobs(ctx, taskId); err != nil {
-		_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())
-		return err
-	}
-	return s.markCollectDispatchQueued(ctx, review["dispatch_id"].Int64(), taskId)
+	return s.submitCollectProfileDispatch(ctx, review["dispatch_id"].Int64(), profileId, event, rule)
 }
 
 func (s *sSysPublish) rejectCollectReviews(ctx context.Context, reviewIds []int64, tenantId int64, accountId int64, reason string) error {

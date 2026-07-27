@@ -18,10 +18,6 @@ func collectPublishClientRequestId(event gdb.Record, rule gdb.Record) string {
 	return fmt.Sprintf("collect:%s:%d", event["source_unique_key"].String(), rule["id"].Int64())
 }
 
-func (s *sSysPublish) createCollectPublishMedia(ctx context.Context, event gdb.Record, content *collectContentResult, taskId int64) error {
-	return s.rebuildCollectPublishMedia(ctx, event, content, taskId)
-}
-
 func (s *sSysPublish) markCollectEvent(ctx context.Context, id int64, status string, message string) error {
 	_, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", id).Data(g.Map{
 		"status":        status,

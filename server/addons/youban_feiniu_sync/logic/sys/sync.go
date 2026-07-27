@@ -31,16 +31,16 @@ import (
 )
 
 const (
-	configTable         = "hg_youban_feiniu_sync_config"
-	channelMapTable     = "hg_youban_feiniu_sync_channel_map"
-	profileMapTable     = "hg_youban_feiniu_sync_profile_map"
-	runTable            = "hg_youban_feiniu_sync_run"
-	dailyStatTable      = "hg_youban_feiniu_sync_daily_stat"
-	channelStatTable    = "hg_youban_feiniu_sync_channel_daily_stat"
-	runItemTable        = "hg_youban_feiniu_sync_run_item"
-	publishTaskTable    = "hg_youban_publish_task"
-	publishMediaTable   = "hg_youban_publish_media"
-	publishAccountTable = "hg_youban_publish_account"
+	configTable              = "hg_youban_feiniu_sync_config"
+	channelMapTable          = "hg_youban_feiniu_sync_channel_map"
+	profileMapTable          = "hg_youban_feiniu_sync_profile_map"
+	runTable                 = "hg_youban_feiniu_sync_run"
+	dailyStatTable           = "hg_youban_feiniu_sync_daily_stat"
+	channelStatTable         = "hg_youban_feiniu_sync_channel_daily_stat"
+	runItemTable             = "hg_youban_feiniu_sync_run_item"
+	publishMediaTable        = "hg_youban_publish_media"
+	publishAccountTable      = "hg_youban_publish_account"
+	publishProfileStateTable = "hg_youban_publish_profile_state"
 
 	syncStatusPendingMedia = "pending_media"
 
@@ -564,14 +564,6 @@ func (s *sSysSync) ChannelClear(ctx context.Context, in *sysin.ChannelClearInp) 
 		if err != nil {
 			return gerror.Wrap(err, "读取同步资料数量失败")
 		}
-		taskCount, err := tx.Model(profileMapTable).Safe().Ctx(ctx).
-			Where("config_id", in.ConfigId).
-			WhereGT("youban_task_id", 0).
-			Fields("COUNT(DISTINCT youban_task_id)").
-			Value()
-		if err != nil {
-			return gerror.Wrap(err, "读取同步任务数量失败")
-		}
 		accountCount, err := tx.Model(channelMapTable).Safe().Ctx(ctx).
 			Where("config_id", in.ConfigId).
 			WhereGT("youban_account_id", 0).
@@ -580,11 +572,11 @@ func (s *sSysSync) ChannelClear(ctx context.Context, in *sysin.ChannelClearInp) 
 		if err != nil {
 			return gerror.Wrap(err, "读取自动账号数量失败")
 		}
-		if _, err = tx.Exec(channelClearTaskMediaSQL(), now, in.ConfigId); err != nil {
+		if _, err = tx.Exec(channelClearProfileMediaSQL(publishMediaTable, "deleted_at"), now, in.ConfigId); err != nil {
 			return gerror.Wrap(err, "清理上架媒体失败")
 		}
-		if _, err = tx.Exec(channelClearTaskSQL(), now, now, in.ConfigId); err != nil {
-			return gerror.Wrap(err, "清理上架任务失败")
+		if _, err = tx.Exec(channelClearProfileStateSQL(), now, now, in.ConfigId); err != nil {
+			return gerror.Wrap(err, "清理资料归属失败")
 		}
 		if _, err = tx.Exec(channelClearProfileMediaSQL(dao.ContentMedia.Table(), dao.ContentMedia.Columns().DeletedAt), now, in.ConfigId); err != nil {
 			return gerror.Wrap(err, "清理资料媒体失败")
@@ -618,25 +610,17 @@ func (s *sSysSync) ChannelClear(ctx context.Context, in *sysin.ChannelClearInp) 
 			return gerror.Wrap(err, "重置同步配置状态失败")
 		}
 		res.ProfileCount = profileCount.Int()
-		res.TaskCount = taskCount.Int()
+		res.TaskCount = profileCount.Int()
 		res.AccountCount = accountCount.Int()
 		return nil
 	})
 	return
 }
 
-func channelClearTaskMediaSQL() string {
+func channelClearProfileStateSQL() string {
 	return fmt.Sprintf(
-		`UPDATE "%s" SET "deleted_at" = ? WHERE "deleted_at" IS NULL AND "task_id" IN (SELECT DISTINCT "youban_task_id" FROM "%s" WHERE "config_id" = ? AND "youban_task_id" > 0)`,
-		publishMediaTable,
-		profileMapTable,
-	)
-}
-
-func channelClearTaskSQL() string {
-	return fmt.Sprintf(
-		`UPDATE "%s" SET "deleted_at" = ?, "updated_at" = ? WHERE "deleted_at" IS NULL AND "id" IN (SELECT DISTINCT "youban_task_id" FROM "%s" WHERE "config_id" = ? AND "youban_task_id" > 0)`,
-		publishTaskTable,
+		`UPDATE "%s" SET "deleted_at" = ?, "updated_at" = ? WHERE "deleted_at" IS NULL AND "profile_id" IN (SELECT DISTINCT "youban_profile_id" FROM "%s" WHERE "config_id" = ? AND "youban_profile_id" > 0)`,
+		publishProfileStateTable,
 		profileMapTable,
 	)
 }
@@ -707,8 +691,7 @@ func (s *sSysSync) ChannelCopy(ctx context.Context, in *sysin.ChannelCopyInp) (r
 		}
 		for _, mapRow := range profileRows {
 			profileId := mapRow["youban_profile_id"].Int64()
-			taskId := mapRow["youban_task_id"].Int64()
-			if profileId <= 0 || taskId <= 0 {
+			if profileId <= 0 {
 				continue
 			}
 			mediaCount, err := s.copyProfileBundle(ctx, tx, srcRow, targetAccount, mapRow)
@@ -756,27 +739,20 @@ func (s *sSysSync) ChannelDisable(ctx context.Context, in *sysin.ChannelDisableI
 			return gerror.Wrap(err, "读取待停用资料失败")
 		}
 		profileIds := make([]int64, 0, len(profileRows))
-		taskIds := make([]int64, 0, len(profileRows))
 		for _, mapRow := range profileRows {
 			if id := mapRow["youban_profile_id"].Int64(); id > 0 {
 				profileIds = append(profileIds, id)
 			}
-			if id := mapRow["youban_task_id"].Int64(); id > 0 {
-				taskIds = append(taskIds, id)
-			}
 		}
 		profileIds = uniqueInt64s(profileIds)
-		taskIds = uniqueInt64s(taskIds)
-		if len(taskIds) > 0 {
-			res.MediaCount, _ = tx.Model(publishMediaTable).Safe().Ctx(ctx).WhereIn("task_id", taskIds).WhereNull("deleted_at").Count()
-			if _, err = tx.Model(publishMediaTable).Safe().Ctx(ctx).WhereIn("task_id", taskIds).WhereNull("deleted_at").Data(g.Map{"deleted_at": now, "updated_at": now, "updated_by": contexts.GetUserId(ctx)}).Update(); err != nil {
+		if len(profileIds) > 0 {
+			res.MediaCount, _ = tx.Model(publishMediaTable).Safe().Ctx(ctx).WhereIn("profile_id", profileIds).WhereNull("deleted_at").Count()
+			if _, err = tx.Model(publishMediaTable).Safe().Ctx(ctx).WhereIn("profile_id", profileIds).WhereNull("deleted_at").Data(g.Map{"deleted_at": now, "updated_at": now, "updated_by": contexts.GetUserId(ctx)}).Update(); err != nil {
 				return gerror.Wrap(err, "停用上架媒体失败")
 			}
-			if _, err = tx.Model(publishTaskTable).Safe().Ctx(ctx).WhereIn("id", taskIds).WhereNull("deleted_at").Data(g.Map{"deleted_at": now, "updated_at": now, "updated_by": contexts.GetUserId(ctx)}).Update(); err != nil {
-				return gerror.Wrap(err, "停用上架任务失败")
+			if _, err = tx.Model(publishProfileStateTable).Safe().Ctx(ctx).WhereIn("profile_id", profileIds).WhereNull("deleted_at").Data(g.Map{"deleted_at": now, "updated_at": now, "updated_by": contexts.GetUserId(ctx)}).Update(); err != nil {
+				return gerror.Wrap(err, "停用资料归属失败")
 			}
-		}
-		if len(profileIds) > 0 {
 			mediaColumns := dao.ContentMedia.Columns()
 			if _, err = tx.Model(dao.ContentMedia.Table()).Safe().Ctx(ctx).WhereIn(mediaColumns.ProfileId, profileIds).WhereNull(mediaColumns.DeletedAt).Data(g.Map{mediaColumns.DeletedAt: now, mediaColumns.UpdatedAt: now}).Update(); err != nil {
 				return gerror.Wrap(err, "停用资料媒体失败")
@@ -793,7 +769,7 @@ func (s *sSysSync) ChannelDisable(ctx context.Context, in *sysin.ChannelDisableI
 			return gerror.Wrap(err, "更新频道映射失败")
 		}
 		res.ProfileCount = len(profileIds)
-		res.TaskCount = len(taskIds)
+		res.TaskCount = len(profileIds)
 		res.AccountCount = 1
 		return nil
 	})
@@ -833,10 +809,9 @@ func (s *sSysSync) publishAccountRecord(ctx context.Context, accountId int64) (g
 	return row, nil
 }
 
-func (s *sSysSync) copyProfileBundle(ctx context.Context, tx gdb.TX, srcChannel gdb.Record, targetAccount gdb.Record, mapRow gdb.Record) (mediaCount int, err error) {
+func (s *sSysSync) copyProfileBundle(ctx context.Context, tx gdb.TX, _ gdb.Record, targetAccount gdb.Record, mapRow gdb.Record) (mediaCount int, err error) {
 	sourceProfileId := mapRow["youban_profile_id"].Int64()
-	sourceTaskId := mapRow["youban_task_id"].Int64()
-	if sourceProfileId <= 0 || sourceTaskId <= 0 {
+	if sourceProfileId <= 0 {
 		return 0, nil
 	}
 	profileColumns := dao.ContentProfile.Columns()
@@ -847,12 +822,9 @@ func (s *sSysSync) copyProfileBundle(ctx context.Context, tx gdb.TX, srcChannel 
 	if sourceProfile.IsEmpty() {
 		return 0, gerror.New("源资料不存在")
 	}
-	sourceTask, err := tx.Model(publishTaskTable).Safe().Ctx(ctx).Where("id", sourceTaskId).WhereNull("deleted_at").One()
+	sourceState, err := tx.Model(publishProfileStateTable).Safe().Ctx(ctx).Where("profile_id", sourceProfileId).WhereNull("deleted_at").One()
 	if err != nil {
-		return 0, gerror.Wrap(err, "读取上架任务失败")
-	}
-	if sourceTask.IsEmpty() {
-		return 0, gerror.New("源任务不存在")
+		return 0, gerror.Wrap(err, "读取资料归属失败")
 	}
 	now := gtime.Now()
 	newProfileNo, err := s.newCopyProfileNo(ctx, tx)
@@ -886,33 +858,10 @@ func (s *sSysSync) copyProfileBundle(ctx context.Context, tx gdb.TX, srcChannel 
 	if newProfileId <= 0 {
 		return 0, gerror.New("复制资料失败：未获取新资料ID")
 	}
-	taskData := sourceTask.Map()
-	delete(taskData, "id")
-	taskData["tenant_id"] = targetAccount["tenant_id"].Int64()
-	taskData["merchant_id"] = targetAccount["tenant_id"].Int64()
-	taskData["account_id"] = targetAccount["id"].Int64()
-	taskData["profile_id"] = newProfileId
-	taskData["client_request_id"] = fmt.Sprintf("feiniu-copy:%d:%d:%d", sourceTaskId, targetAccount["id"].Int64(), now.UnixNano())
-	taskData["created_by"] = contexts.GetUserId(ctx)
-	taskData["updated_by"] = contexts.GetUserId(ctx)
-	taskData["created_at"] = now
-	taskData["updated_at"] = now
-	taskData["deleted_at"] = nil
-	if taskData["submitted_at"] == nil {
-		taskData["submitted_at"] = sourceTask["submitted_at"]
+	if err = s.copyProfileState(ctx, tx, sourceState, newProfileId, targetAccount["tenant_id"].Int64(), targetAccount["id"].Int64()); err != nil {
+		return 0, err
 	}
-	if taskData["published_at"] == nil {
-		taskData["published_at"] = sourceTask["published_at"]
-	}
-	taskData["media_count"] = 0
-	newTaskId, err := tx.Model(publishTaskTable).Ctx(ctx).Data(taskData).InsertAndGetId()
-	if err != nil {
-		return 0, gerror.Wrap(err, "复制上架任务失败")
-	}
-	if newTaskId <= 0 {
-		return 0, gerror.New("复制任务失败：未获取新任务ID")
-	}
-	copyMediaCount, copyImageCount, copyVideoCount, err := s.copyPublishMediaRows(ctx, tx, sourceTaskId, newTaskId, newProfileId, targetAccount["tenant_id"].Int64(), targetAccount["id"].Int64())
+	copyMediaCount, copyImageCount, copyVideoCount, err := s.copyPublishMediaRows(ctx, tx, sourceProfileId, newProfileId, targetAccount["tenant_id"].Int64(), targetAccount["id"].Int64())
 	if err != nil {
 		return 0, err
 	}
@@ -920,12 +869,31 @@ func (s *sSysSync) copyProfileBundle(ctx context.Context, tx gdb.TX, srcChannel 
 		return 0, err
 	}
 	_, _ = tx.Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Where(profileColumns.Id, newProfileId).Data(g.Map{profileColumns.ImageCount: copyImageCount, profileColumns.VideoCount: copyVideoCount, profileColumns.UpdatedAt: now}).Update()
-	_, _ = tx.Model(publishTaskTable).Safe().Ctx(ctx).Where("id", newTaskId).Data(g.Map{"media_count": copyMediaCount, "updated_at": now}).Update()
 	return copyMediaCount, nil
 }
 
-func (s *sSysSync) copyPublishMediaRows(ctx context.Context, tx gdb.TX, sourceTaskId, newTaskId, newProfileId, tenantId, accountId int64) (mediaCount int, imageCount int, videoCount int, err error) {
-	rows, err := tx.Model(publishMediaTable).Safe().Ctx(ctx).Where("task_id", sourceTaskId).WhereNull("deleted_at").OrderAsc("sort_index").OrderAsc("id").All()
+func (s *sSysSync) copyProfileState(ctx context.Context, tx gdb.TX, source gdb.Record, profileId, tenantId, accountId int64) error {
+	now := gtime.Now()
+	data := g.Map{
+		"tenant_id": tenantId, "account_id": accountId, "profile_id": profileId,
+		"channel_id_json": "[]", "customer_remark": "", "anti_scan_enabled": 0,
+		"created_by": contexts.GetUserId(ctx), "updated_by": contexts.GetUserId(ctx),
+		"created_at": now, "updated_at": now, "deleted_at": nil,
+	}
+	if !source.IsEmpty() {
+		data["channel_id_json"] = source["channel_id_json"].String()
+		data["customer_remark"] = source["customer_remark"].String()
+		data["anti_scan_enabled"] = source["anti_scan_enabled"].Int()
+		data["publish_at"] = source["publish_at"]
+	}
+	if _, err := tx.Model(publishProfileStateTable).Ctx(ctx).Data(data).Insert(); err != nil {
+		return gerror.Wrap(err, "复制资料归属失败")
+	}
+	return nil
+}
+
+func (s *sSysSync) copyPublishMediaRows(ctx context.Context, tx gdb.TX, sourceProfileId, newProfileId, tenantId, accountId int64) (mediaCount int, imageCount int, videoCount int, err error) {
+	rows, err := tx.Model(publishMediaTable).Safe().Ctx(ctx).Where("profile_id", sourceProfileId).WhereNull("deleted_at").OrderAsc("sort_index").OrderAsc("id").All()
 	if err != nil {
 		return 0, 0, 0, gerror.Wrap(err, "读取上架媒体失败")
 	}
@@ -936,7 +904,7 @@ func (s *sSysSync) copyPublishMediaRows(ctx context.Context, tx gdb.TX, sourceTa
 		mediaData["tenant_id"] = tenantId
 		mediaData["merchant_id"] = tenantId
 		mediaData["account_id"] = accountId
-		mediaData["task_id"] = newTaskId
+		delete(mediaData, "task_id")
 		mediaData["profile_id"] = newProfileId
 		mediaData["created_by"] = contexts.GetUserId(ctx)
 		mediaData["updated_by"] = contexts.GetUserId(ctx)
@@ -1920,7 +1888,7 @@ func (s *sSysSync) syncOneNote(ctx context.Context, source gdb.DB, cfg gdb.Recor
 			if err = s.syncPresentationFields(ctx, row, existed); err != nil {
 				return "", err
 			}
-			if err = s.syncSourceMessageLinks(ctx, cfg, row, existed["youban_profile_id"].Int64(), existed["youban_task_id"].Int64(), existed["youban_account_id"].Int64()); err != nil {
+			if err = s.syncSourceMessageLinks(ctx, cfg, row, existed["youban_profile_id"].Int64(), existed["youban_account_id"].Int64()); err != nil {
 				return "", err
 			}
 			if err = publishservice.SysPublish().RefreshNoteIndex(ctx, existed["youban_profile_id"].Int64()); err != nil {
@@ -1943,20 +1911,20 @@ func (s *sSysSync) syncOneNote(ctx context.Context, source gdb.DB, cfg gdb.Recor
 	if err != nil {
 		return "", err
 	}
-	profileId, taskId, err := s.upsertProfile(ctx, cfg, row, accountId, contentHash, sourceUpdatedAt)
+	profileId, err := s.upsertProfile(ctx, cfg, row, accountId, contentHash, sourceUpdatedAt)
 	if err != nil {
 		return "", err
 	}
 	if cfg["sync_media"].Int() == 1 {
-		_ = s.syncMedia(ctx, source, cfg, row, profileId, taskId, accountId)
+		_ = s.syncMedia(ctx, source, cfg, row, profileId, accountId)
 	}
 	if err = publishservice.SysPublish().RefreshNoteIndex(ctx, profileId); err != nil {
 		return "", err
 	}
-	if err = s.syncSourceMessageLinks(ctx, cfg, row, profileId, taskId, accountId); err != nil {
+	if err = s.syncSourceMessageLinks(ctx, cfg, row, profileId, accountId); err != nil {
 		return "", err
 	}
-	data := g.Map{"config_id": cfg["id"].Int64(), "feiniu_note_id": row["note_id"].Int64(), "feiniu_note_uuid": row["note_uuid"].String(), "feiniu_note_code": row["note_code"].String(), "feiniu_source_key": sourceKey(row), "feiniu_channel_id": row["source_channel_id"].Int64(), "feiniu_tg_chat_id": row["source_tg_chat_id"].Int64(), "youban_profile_id": profileId, "youban_task_id": taskId, "youban_account_id": accountId, "source_updated_at": sourceUpdatedAt, "content_hash": contentHash, "sync_status": "success", "error_message": "", "dedupe_key": "", "duplicate_profile_id": 0, "updated_at": gtime.Now()}
+	data := g.Map{"config_id": cfg["id"].Int64(), "feiniu_note_id": row["note_id"].Int64(), "feiniu_note_uuid": row["note_uuid"].String(), "feiniu_note_code": row["note_code"].String(), "feiniu_source_key": sourceKey(row), "feiniu_channel_id": row["source_channel_id"].Int64(), "feiniu_tg_chat_id": row["source_tg_chat_id"].Int64(), "youban_profile_id": profileId, "youban_account_id": accountId, "source_updated_at": sourceUpdatedAt, "content_hash": contentHash, "sync_status": "success", "error_message": "", "dedupe_key": "", "duplicate_profile_id": 0, "updated_at": gtime.Now()}
 	if err = saveProfileMap(ctx, cfg["id"].Int64(), row["note_id"].Int64(), existed, data); err != nil {
 		return "", gerror.Wrap(err, "保存资料映射失败")
 	}
@@ -1976,13 +1944,11 @@ func (s *sSysSync) needTargetMediaRepair(ctx context.Context, mapRow gdb.Record,
 		return false, nil
 	}
 	profileId := mapRow["youban_profile_id"].Int64()
-	taskId := mapRow["youban_task_id"].Int64()
-	if profileId <= 0 || taskId <= 0 {
+	if profileId <= 0 {
 		return true, nil
 	}
 	actualMediaCount, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", profileId).
-		Where("task_id", taskId).
 		WhereNull("deleted_at").
 		Count()
 	if err != nil {
@@ -2005,11 +1971,6 @@ func (s *sSysSync) syncPresentationFields(ctx context.Context, row gdb.Record, m
 		columns := dao.ContentProfile.Columns()
 		if _, err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Where(columns.Id, profileId).Data(g.Map{columns.Title: title, columns.UpdatedAt: now}).Update(); err != nil {
 			return gerror.Wrap(err, "更新同步资料标题失败")
-		}
-	}
-	if taskId := mapRow["youban_task_id"].Int64(); taskId > 0 {
-		if _, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).Data(g.Map{"title": title, "customer_remark": "", "updated_at": now}).Update(); err != nil {
-			return gerror.Wrap(err, "更新同步任务标题失败")
 		}
 	}
 	return nil
@@ -2284,7 +2245,7 @@ func (s *sSysSync) advanceConfigBackfill(ctx context.Context, configID int64, ro
 	return nil
 }
 
-func (s *sSysSync) upsertProfile(ctx context.Context, cfg gdb.Record, row gdb.Record, accountId int64, contentHash string, publishedAt *gtime.Time) (int64, int64, error) {
+func (s *sSysSync) upsertProfile(ctx context.Context, cfg gdb.Record, row gdb.Record, accountId int64, contentHash string, publishedAt *gtime.Time) (int64, error) {
 	columns := dao.ContentProfile.Columns()
 	sourceKey := sourceKey(row)
 	now := gtime.Now()
@@ -2305,7 +2266,7 @@ func (s *sSysSync) upsertProfile(ctx context.Context, cfg gdb.Record, row gdb.Re
 		Where(columns.SourceNoteId, row["note_id"].Int64()).
 		One()
 	if err != nil {
-		return 0, 0, gerror.Wrap(err, "读取上架资料失败")
+		return 0, gerror.Wrap(err, "读取上架资料失败")
 	}
 	profileId := existing[columns.Id].Int64()
 	if existing.IsEmpty() {
@@ -2328,16 +2289,15 @@ func (s *sSysSync) upsertProfile(ctx context.Context, cfg gdb.Record, row gdb.Re
 		_, err = profileModel.Clone().Where(columns.Id, profileId).Data(data).Update()
 	}
 	if err != nil {
-		return 0, 0, gerror.Wrap(err, "保存上架资料失败")
+		return 0, gerror.Wrap(err, "保存上架资料失败")
 	}
 	if profileId <= 0 {
-		return 0, 0, gerror.New("保存上架资料失败：未获取资料ID")
+		return 0, gerror.New("保存上架资料失败：未获取资料ID")
 	}
-	taskId, err := s.upsertTask(ctx, cfg, row, accountId, profileId, title, plainText, publishedAt)
-	if err != nil {
-		return 0, 0, err
+	if err = s.upsertProfileState(ctx, profileId, cfg["target_tenant_id"].Int64(), accountId, publishedAt); err != nil {
+		return 0, err
 	}
-	return profileId, taskId, nil
+	return profileId, nil
 }
 
 func (s *sSysSync) profileIdBySourceNote(ctx context.Context, noteId int64) (int64, error) {
@@ -2356,42 +2316,26 @@ func (s *sSysSync) profileIdBySourceNote(ctx context.Context, noteId int64) (int
 	return row[columns.Id].Int64(), nil
 }
 
-func (s *sSysSync) upsertTask(ctx context.Context, cfg gdb.Record, row gdb.Record, accountId, profileId int64, title, plainText string, publishedAt *gtime.Time) (int64, error) {
-	if profileId <= 0 {
-		return 0, gerror.New("创建上架任务失败：资料ID不能为空")
+func (s *sSysSync) upsertProfileState(ctx context.Context, profileId, tenantId, accountId int64, publishedAt *gtime.Time) error {
+	if profileId <= 0 || tenantId <= 0 || accountId <= 0 {
+		return gerror.New("保存资料归属失败：资料或账号信息不完整")
 	}
-	if accountId <= 0 {
-		return 0, gerror.New("创建上架任务失败：上架账号不能为空")
-	}
-	clientRequestId := noteRequestKey(row)
 	now := gtime.Now()
-	data := g.Map{"tenant_id": cfg["target_tenant_id"].Int64(), "merchant_id": cfg["target_tenant_id"].Int64(), "account_id": accountId, "profile_id": profileId, "client_request_id": clientRequestId, "title": title, "province": row["province"].String(), "city": row["city"].String(), "plain_text": plainText, "media_count": row["image_count"].Int() + row["video_count"].Int(), "channel_id_json": "[]", "customer_remark": "", "anti_scan_enabled": 0, "tg_push_enabled": 0, "tg_status": "skipped", "status": psysin.PublishTaskStatusPublished, "submitted_at": publishedAt, "published_at": publishedAt, "deleted_at": nil, "updated_at": now}
-	taskModel := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Unscoped()
-	existing, err := taskModel.Clone().Where("tenant_id", cfg["target_tenant_id"].Int64()).Where("client_request_id", clientRequestId).One()
+	data := g.Map{
+		"tenant_id": tenantId, "account_id": accountId, "profile_id": profileId,
+		"channel_id_json": "[]", "customer_remark": "", "anti_scan_enabled": 0,
+		"publish_at": publishedAt, "created_by": contexts.GetUserId(ctx),
+		"updated_by": contexts.GetUserId(ctx), "created_at": now, "updated_at": now, "deleted_at": nil,
+	}
+	_, err := g.DB().Model(publishProfileStateTable).Ctx(ctx).Data(data).
+		OnConflict("profile_id").OnDuplicateEx("id", "created_by", "created_at").Save()
 	if err != nil {
-		return 0, gerror.Wrap(err, "读取上架任务失败")
+		return gerror.Wrap(err, "保存资料归属失败")
 	}
-	if existing.IsEmpty() {
-		data["created_at"] = now
-		id, e := taskModel.Clone().Data(data).InsertAndGetId()
-		if e != nil && strings.Contains(strings.ToLower(e.Error()), "duplicate") {
-			existing, err = taskModel.Clone().Where("tenant_id", cfg["target_tenant_id"].Int64()).Where("client_request_id", clientRequestId).One()
-			if err == nil && !existing.IsEmpty() {
-				id = existing["id"].Int64()
-				_, err = taskModel.Clone().Where("id", id).Data(data).Update()
-				return id, gerror.Wrap(err, "恢复上架任务失败")
-			}
-		}
-		return id, gerror.Wrap(e, "创建上架任务失败")
-	}
-	_, err = taskModel.Clone().Where("id", existing["id"].Int64()).Data(data).Update()
-	if err != nil {
-		return 0, gerror.Wrap(err, "更新上架任务失败")
-	}
-	return existing["id"].Int64(), nil
+	return nil
 }
 
-func (s *sSysSync) syncMedia(ctx context.Context, source gdb.DB, cfg gdb.Record, row gdb.Record, profileId, taskId, accountId int64) error {
+func (s *sSysSync) syncMedia(ctx context.Context, source gdb.DB, cfg gdb.Record, row gdb.Record, profileId, accountId int64) error {
 	var blocks []gdb.Record
 	err := source.Model("tg_content_block b").Safe().Ctx(ctx).LeftJoin("tg_content_asset a", "a.asset_id=b.asset_id").LeftJoin("tg_content_asset_cos ac", "ac.asset_id=a.asset_id").Fields("b.block_id,b.block_type,b.sort_index,b.meta_json,a.asset_id,a.asset_type,a.mime_type,a.file_name,a.file_size,a.origin_uri,a.preview_uri,a.local_file_path,a.archive_chat_id,a.archive_message_id,a.binary_md5,a.perceptual_hash,a.width,a.height,a.duration,ac.cos_path").Where("b.note_id", row["note_id"].Int64()).Where("b.asset_id > 0").OrderAsc("b.sort_index").Scan(&blocks)
 	if err != nil {
@@ -2400,7 +2344,7 @@ func (s *sSysSync) syncMedia(ctx context.Context, source gdb.DB, cfg gdb.Record,
 	if len(blocks) == 0 {
 		return nil
 	}
-	_, _ = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("task_id", taskId).Where("profile_id", profileId).Data(g.Map{"deleted_at": gtime.Now()}).Update()
+	_, _ = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("profile_id", profileId).WhereNull("deleted_at").Data(g.Map{"deleted_at": gtime.Now(), "updated_at": gtime.Now()}).Update()
 	now := gtime.Now()
 	imageCount, videoCount := 0, 0
 	for i, item := range blocks {
@@ -2455,7 +2399,7 @@ func (s *sSysSync) syncMedia(ctx context.Context, source gdb.DB, cfg gdb.Record,
 				perceptualHash = remoteAssets.PerceptualHash
 			}
 		}
-		data := g.Map{"tenant_id": cfg["target_tenant_id"].Int64(), "merchant_id": cfg["target_tenant_id"].Int64(), "account_id": accountId, "task_id": taskId, "profile_id": profileId, "attachment_id": 0, "media_type": mediaType, "purpose": purpose, "name": mediaName(item), "file_url": fileURL, "original_file_url": fileURL, "poster_url": posterURL, "poster_storage_path": posterStoragePath, "storage_path": storagePath, "original_storage_path": storagePath, "mime_type": item["mime_type"].String(), "md5": item["binary_md5"].String(), "perceptual_hash": perceptualHash, "tg_file_id": "", "tg_cache_status": "invalid", "size": item["file_size"].Int64(), "sort_index": i + 1, "status": 1, "created_at": now, "updated_at": now}
+		data := g.Map{"tenant_id": cfg["target_tenant_id"].Int64(), "merchant_id": cfg["target_tenant_id"].Int64(), "account_id": accountId, "profile_id": profileId, "attachment_id": 0, "media_type": mediaType, "purpose": purpose, "name": mediaName(item), "file_url": fileURL, "original_file_url": fileURL, "poster_url": posterURL, "poster_storage_path": posterStoragePath, "storage_path": storagePath, "original_storage_path": storagePath, "mime_type": item["mime_type"].String(), "md5": item["binary_md5"].String(), "perceptual_hash": perceptualHash, "tg_file_id": "", "tg_cache_status": "invalid", "size": item["file_size"].Int64(), "sort_index": i + 1, "status": 1, "created_at": now, "updated_at": now}
 		mediaId, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
 		if err != nil {
 			return gerror.Wrap(err, "保存 FeiNiu 媒体失败")
@@ -2467,7 +2411,6 @@ func (s *sSysSync) syncMedia(ctx context.Context, source gdb.DB, cfg gdb.Record,
 		}
 	}
 	_, _ = dao.ContentProfile.Ctx(ctx).Where(dao.ContentProfile.Columns().Id, profileId).Data(g.Map{dao.ContentProfile.Columns().ImageCount: imageCount, dao.ContentProfile.Columns().VideoCount: videoCount, dao.ContentProfile.Columns().UpdatedAt: now}).Update()
-	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).Data(g.Map{"media_count": imageCount + videoCount, "updated_at": now}).Update()
 	return nil
 }
 
@@ -2596,7 +2539,6 @@ func (s *sSysSync) createRunItem(ctx context.Context, runId, configId int64, row
 	}
 	if !profileMap.IsEmpty() {
 		data["youban_profile_id"] = profileMap["youban_profile_id"].Int64()
-		data["youban_task_id"] = profileMap["youban_task_id"].Int64()
 	}
 	_, err := g.DB().Model(runItemTable).Safe().Ctx(ctx).Data(data).Insert()
 	return err
@@ -2746,10 +2688,6 @@ func decodePassword(p string) string {
 		return p
 	}
 	return string(b)
-}
-
-func noteRequestKey(row gdb.Record) string {
-	return fmt.Sprintf("feiniu:note:%d", row["note_id"].Int64())
 }
 
 func feiNiuSyncTitle(row gdb.Record) string {

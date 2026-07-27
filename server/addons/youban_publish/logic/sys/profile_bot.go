@@ -153,7 +153,6 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 				"tenant_id":              tenantId,
 				"merchant_id":            tenantId,
 				"account_id":             accountId,
-				"task_id":                nil,
 				"profile_id":             profileId,
 				"attachment_id":          0,
 				"original_attachment_id": 0,
@@ -478,14 +477,10 @@ func (s *sSysPublish) BotChannelClearQueue(ctx context.Context, in *sysin.BotCha
 		return res, nil
 	}
 	jobIds := make([]int64, 0, len(jobs))
-	taskIds := make([]int64, 0, len(jobs))
 	for _, job := range jobs {
 		jobIds = append(jobIds, job.Id)
 		if job.Status == "sending" {
 			res.Sending++
-		}
-		if job.TaskId > 0 {
-			taskIds = append(taskIds, job.TaskId)
 		}
 	}
 	mod := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
@@ -501,5 +496,5 @@ func (s *sSysPublish) BotChannelClearQueue(ctx context.Context, in *sysin.BotCha
 	}
 	affected, _ := result.RowsAffected()
 	res.Cleared = int(affected)
-	return res, s.markChannelQueueTasksSuperseded(ctx, in.TenantId, uniqueIds(taskIds))
+	return res, nil
 }

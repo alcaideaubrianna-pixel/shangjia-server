@@ -129,7 +129,7 @@ func (s *sSysPublish) appendAutoDeleteLog(ctx context.Context, channel *autoDele
 
 func (s *sSysPublish) appendAutoDeleteLogByValues(ctx context.Context, channel *autoDeleteChannel, botId int64, messageId int, keyword string, status string, message string) {
 	_, _ = g.DB().Model(publishTgJobLogTable).Safe().Ctx(ctx).Data(g.Map{
-		"job_id": 0, "task_id": 0, "tenant_id": channel.TenantId, "account_id": 0, "profile_id": 0,
+		"job_id": 0, "tenant_id": channel.TenantId, "account_id": 0, "profile_id": 0,
 		"bot_id": botId, "action": "auto_delete", "status": status,
 		"message":    fmt.Sprintf("%s；频道:%s(%s)；消息:%d；关键词:%s", message, channel.ChannelTitle, channel.TargetChatId, messageId, keyword),
 		"created_at": gtime.Now(),

@@ -173,7 +173,6 @@ func (s *sSysPublish) ServerImportRunMatchItemList(ctx context.Context, in *sysi
 	}
 	mod := g.DB().Model(publishImportMatchItemTable+" i").Safe().Ctx(ctx).
 		LeftJoin(publishChannelTable+" c", "c.id=i.channel_id").
-		LeftJoin(publishTaskTable+" t", "t.id=i.task_id AND t.deleted_at IS NULL").
 		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=i.profile_id AND p.deleted_at IS NULL").
 		Where("i.match_run_id", in.MatchRunId).
 		WhereNull("i.deleted_at")
@@ -185,7 +184,7 @@ func (s *sSysPublish) ServerImportRunMatchItemList(ctx context.Context, in *sysi
 	}
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
-		mod = mod.Where("(t.title LIKE ? OR p.profile_no LIKE ? OR p.source_key LIKE ? OR t.plain_text LIKE ?)", like, like, like, like)
+		mod = mod.Where("(p.title LIKE ? OR p.profile_no LIKE ? OR p.source_key LIKE ? OR p.plain_text LIKE ?)", like, like, like, like)
 	}
 	total, err := mod.Clone().Count()
 	if err != nil {
@@ -195,7 +194,7 @@ func (s *sSysPublish) ServerImportRunMatchItemList(ctx context.Context, in *sysi
 		return []*sysin.ImportRunMatchItemModel{}, 0, nil
 	}
 	var list []*sysin.ImportRunMatchItemModel
-	err = mod.Fields("i.*,c.channel_title AS channel_name,t.title,t.plain_text,p.profile_no,p.source_key").
+	err = mod.Fields("i.*,c.channel_title AS channel_name,p.title,p.plain_text,p.profile_no,p.source_key").
 		Page(in.Page, in.PerPage).
 		OrderDesc("i.total_score").
 		OrderAsc("i.id").
@@ -214,7 +213,7 @@ func (s *sSysPublish) ServerImportRunMatchCandidateList(ctx context.Context, in 
 	if err != nil {
 		return nil, err
 	}
-	taskText, err := s.importMatchTaskText(ctx, item.TaskId)
+	taskText, err := s.importMatchTaskText(ctx, item.ProfileId)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +260,7 @@ func (s *sSysPublish) ServerImportRunMatchCandidateSearch(ctx context.Context, i
 	if err != nil {
 		return nil, 0, err
 	}
-	taskText, err := s.importMatchTaskText(ctx, item.TaskId)
+	taskText, err := s.importMatchTaskText(ctx, item.ProfileId)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -668,14 +667,16 @@ func (s *sSysPublish) importRunMatchFallbackTasks(ctx context.Context, importRun
 	var rows []struct {
 		ProfileId int64 `json:"profileId"`
 	}
-	err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Fields("profile_id").
-		Where("tenant_id", importRun["tenant_id"].Int64()).
-		Where("account_id", importRun["account_id"].Int64()).
-		Where("client_request_id LIKE ?", like).
-		Where("profile_id >", 0).
-		WhereNull("deleted_at").
-		OrderDesc("id").
+	profileColumns := dao.ContentProfile.Columns()
+	err = g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
+		Fields("p.id AS profile_id").
+		LeftJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
+		Where("ps.tenant_id", importRun["tenant_id"].Int64()).
+		Where("ps.account_id", importRun["account_id"].Int64()).
+		WhereLike("p."+profileColumns.SourceKey, "youban_publish:"+like).
+		Where("p.id >", 0).
+		WhereNull("p.deleted_at").
+		OrderDesc("p.id").
 		Limit(limit).
 		Scan(&rows)
 	if err != nil {
@@ -701,14 +702,14 @@ func (s *sSysPublish) importRunMatchTasksByProfileIds(ctx context.Context, impor
 		SourceKey string `json:"sourceKey"`
 		PlainText string `json:"plainText"`
 	}
-	err := g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
-		Fields("t.id AS task_id,t.profile_id,t.title,p.profile_no,p.source_key,t.plain_text").
-		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=t.profile_id AND p.deleted_at IS NULL").
-		Where("t.tenant_id", importRun["tenant_id"].Int64()).
-		Where("t.account_id", importRun["account_id"].Int64()).
-		WhereIn("t.profile_id", profileIds).
-		WhereNull("t.deleted_at").
-		OrderAsc("t.id").
+	err := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
+		Fields("0 AS task_id,p.id AS profile_id,p.title,p.profile_no,p.source_key,p.plain_text").
+		LeftJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
+		Where("ps.tenant_id", importRun["tenant_id"].Int64()).
+		Where("ps.account_id", importRun["account_id"].Int64()).
+		WhereIn("p.id", profileIds).
+		WhereNull("p.deleted_at").
+		OrderAsc("p.id").
 		Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取导入资料任务失败")
@@ -936,18 +937,17 @@ func (s *sSysPublish) importRunMatchItem(ctx context.Context, itemId int64) (*sy
 	return &item, nil
 }
 
-func (s *sSysPublish) importMatchTaskText(ctx context.Context, taskId int64) (importMatchTaskText, error) {
+func (s *sSysPublish) importMatchTaskText(ctx context.Context, profileId int64) (importMatchTaskText, error) {
 	var row importMatchTaskText
-	err := g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
-		Fields("t.id AS task_id,t.profile_id,t.title,p.profile_no,p.source_key,t.plain_text").
-		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=t.profile_id AND p.deleted_at IS NULL").
-		Where("t.id", taskId).
-		WhereNull("t.deleted_at").
+	err := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
+		Fields("0 AS task_id,p.id AS profile_id,p.title,p.profile_no,p.source_key,p.plain_text").
+		Where("p.id", profileId).
+		WhereNull("p.deleted_at").
 		Scan(&row)
 	if err != nil {
 		return row, gerror.Wrap(err, "读取匹配资料失败")
 	}
-	if row.TaskId <= 0 {
+	if row.ProfileId <= 0 {
 		return row, gerror.New("匹配资料不存在")
 	}
 	return row, nil
@@ -997,11 +997,6 @@ func (s *sSysPublish) saveImportRunMatchMessages(ctx context.Context, item *sysi
 	if err = s.saveImportMatchGroupMessages(ctx, item, task, jobId, strings.TrimSpace(item.VerifyGroupKey), "verify"); err != nil {
 		return err
 	}
-	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", item.TaskId).Data(g.Map{
-		"tg_status":  "published",
-		"status":     sysin.PublishTaskStatusPublished,
-		"updated_at": gtime.Now(),
-	}).Update()
 	return nil
 }
 

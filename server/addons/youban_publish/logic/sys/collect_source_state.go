@@ -9,6 +9,7 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 )
 
 const collectSourceDisabledMessage = "采集源已关闭"
@@ -36,29 +37,22 @@ func (s *sSysPublish) collectSourcePushEnabled(ctx context.Context, sourceId int
 }
 
 func (s *sSysPublish) stopDisabledCollectSourcePipeline(ctx context.Context, sourceId int64, tenantId int64, accountId int64) error {
-	taskIds, err := s.collectSourceTaskIds(ctx, sourceId, tenantId, accountId)
+	profileIds, err := s.collectSourceProfileIds(ctx, sourceId, tenantId, accountId)
 	if err != nil {
 		return err
 	}
-	if err = s.supersedeCollectSourcePendingJobs(ctx, taskIds, tenantId); err != nil {
+	if err = s.supersedeCollectSourcePendingJobs(ctx, profileIds, tenantId); err != nil {
 		return err
 	}
 	now := gtime.Now()
-	if len(taskIds) > 0 {
-		_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-			Where("tenant_id", tenantId).
-			Where("account_id", accountId).
-			WhereIn("id", taskIds).
-			WhereIn("status", []string{sysin.PublishTaskStatusPending, sysin.PublishTaskStatusPublishing}).
-			Data(g.Map{
-				"status":        sysin.PublishTaskStatusCanceled,
-				"tg_status":     sysin.PublishTaskStatusCanceled,
-				"error_message": collectSourceDisabledMessage,
-				"updated_at":    now,
-			}).
-			Update()
-		if err != nil {
-			return gerror.Wrap(err, "取消采集源待推送任务失败")
+	if len(profileIds) > 0 {
+		for _, profileId := range profileIds {
+			if _, err = s.syncProfilePublishState(ctx, profileId, 0, consts.ContentVisibilityPrivate, nil); err != nil {
+				return err
+			}
+		}
+		if err = s.deactivateChannelProfiles(ctx, tenantId, profileIds); err != nil {
+			return err
 		}
 	}
 	_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).

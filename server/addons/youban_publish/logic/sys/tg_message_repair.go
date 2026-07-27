@@ -188,7 +188,7 @@ func (s *sSysPublish) profileNeedsTgMessageRepair(ctx context.Context, profileId
 	if err != nil {
 		return false, err
 	}
-	if task.IsEmpty() || task["status"].String() != sysin.PublishTaskStatusPublished {
+	if task.IsEmpty() || task["status"].Int() != 1 || task["visibility"].String() != consts.ContentVisibilityPublic {
 		return false, nil
 	}
 	count, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
@@ -208,7 +208,7 @@ func (s *sSysPublish) createTgMessageRepairRun(ctx context.Context, profileId in
 		return 0, err
 	}
 	if task.IsEmpty() {
-		return 0, gerror.New("资料缺少上架任务，无法修复TG消息")
+		return 0, gerror.New("资料不存在，无法修复TG消息")
 	}
 	var existing tgMessageRepairRun
 	if err = g.DB().Model(publishTgMessageRepairRunTable).Safe().Ctx(ctx).
@@ -231,7 +231,6 @@ func (s *sSysPublish) createTgMessageRepairRun(ctx context.Context, profileId in
 		"tenant_id":     tenantId,
 		"account_id":    task["account_id"].Int64(),
 		"profile_id":    profileId,
-		"task_id":       task["id"].Int64(),
 		"status":        tgMessageRepairStatusPending,
 		"stage":         "created",
 		"progress":      0,
@@ -373,15 +372,14 @@ func (s *sSysPublish) updateTgMessageRepairRun(ctx context.Context, runId int64,
 }
 
 func (s *sSysPublish) tgMessageRepairTask(ctx context.Context, profileId int64, tenantId int64, accountId int64) (gdb.Record, error) {
-	mod := g.DB().Model(publishTaskTable+" t").Safe().Ctx(ctx).
-		Fields("t.id,t.tenant_id,t.account_id,t.profile_id,t.title,p.profile_no,t.plain_text,t.channel_id_json,t.status,t.tg_status,t.published_at,t.created_at,t.updated_at,p.source_type,p.source_key,p.source_created_at,p.source_updated_at").
-		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=t.profile_id AND p.deleted_at IS NULL").
-		Where("t.tenant_id", tenantId).
-		Where("t.profile_id", profileId).
-		WhereNull("t.deleted_at").
-		OrderDesc("t.id")
+	mod := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
+		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
+		Fields("0 AS id,ps.tenant_id,ps.account_id,p.id AS profile_id,p.title,p.profile_no,p.plain_text,ps.channel_id_json,p.status,p.visibility,p.published_at,p.created_at,p.updated_at,p.source_type,p.source_key,p.source_created_at,p.source_updated_at").
+		Where("ps.tenant_id", tenantId).
+		Where("p.id", profileId).
+		WhereNull("p.deleted_at")
 	if accountId > 0 {
-		mod = mod.Where("t.account_id", accountId)
+		mod = mod.Where("ps.account_id", accountId)
 	}
 	row, err := mod.One()
 	if err != nil {
@@ -836,7 +834,7 @@ func (s *sSysPublish) ensureTgRepairJob(ctx context.Context, task gdb.Record, ch
 	}
 	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Fields("id").
-		Where("task_id", task["id"].Int64()).
+		Where("profile_id", task["profile_id"].Int64()).
 		Where("channel_id", channel.Id).
 		Scan(&existing); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -860,7 +858,6 @@ func (s *sSysPublish) ensureTgRepairJob(ctx context.Context, task gdb.Record, ch
 	}
 	now := gtime.Now()
 	return g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
-		"task_id":        task["id"].Int64(),
 		"tenant_id":      task["tenant_id"].Int64(),
 		"merchant_id":    task["tenant_id"].Int64(),
 		"account_id":     task["account_id"].Int64(),
@@ -896,7 +893,6 @@ func (s *sSysPublish) ensureTgRepairMessage(ctx context.Context, task gdb.Record
 	now := gtime.Now()
 	_, err = g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).Data(g.Map{
 		"job_id":         jobId,
-		"task_id":        task["id"].Int64(),
 		"tenant_id":      task["tenant_id"].Int64(),
 		"account_id":     task["account_id"].Int64(),
 		"profile_id":     task["profile_id"].Int64(),
@@ -924,10 +920,6 @@ func (s *sSysPublish) finishProfileDownAfterRepair(ctx context.Context, task gdb
 	if _, err := s.syncProfilePublishState(ctx, profileId, 2, consts.ContentVisibilityPrivate, nil); err != nil {
 		return gerror.Wrap(err, "更新资料下架状态失败")
 	}
-	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", task["id"].Int64()).Data(g.Map{
-		"status":     sysin.PublishTaskStatusCanceled,
-		"updated_at": gtime.Now(),
-	}).Update()
 	if err := s.syncProfileNoteIndex(ctx, profileId); err != nil {
 		return err
 	}
@@ -944,10 +936,6 @@ func (s *sSysPublish) finishProfileDownWithoutRepair(ctx context.Context, task g
 	if _, err := s.syncProfilePublishState(ctx, profileId, 2, consts.ContentVisibilityPrivate, nil); err != nil {
 		return gerror.Wrap(err, "更新资料下架状态失败")
 	}
-	_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", task["id"].Int64()).Data(g.Map{
-		"status":     sysin.PublishTaskStatusCanceled,
-		"updated_at": gtime.Now(),
-	}).Update()
 	if err := s.syncProfileNoteIndex(ctx, profileId); err != nil {
 		return err
 	}
