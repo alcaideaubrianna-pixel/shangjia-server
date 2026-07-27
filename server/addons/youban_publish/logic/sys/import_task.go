@@ -746,7 +746,6 @@ func (s *sSysPublish) ExecuteImportRun(ctx context.Context, runId int64) (err er
 			}
 			mediaImported += importRes.MediaImported
 			item.Status = "existing"
-			item.TaskId = importRes.TaskId
 			item.ProfileId = importRes.ProfileId
 			item.MediaTotal = importRes.MediaTotal
 			item.MediaMissingStorage = 0
@@ -755,7 +754,7 @@ func (s *sSysPublish) ExecuteImportRun(ctx context.Context, runId int64) (err er
 			if scan.MediaMissingStorage < 0 {
 				scan.MediaMissingStorage = 0
 			}
-			_ = s.appendImportRunLog(ctx, runId, "info", importStageDetail, importRes.Message, g.Map{"sourceNoteId": sourceItem.SourceNoteId, "sourceStatus": sourceItem.StatusLabel, "profileId": importRes.ProfileId, "taskId": importRes.TaskId})
+			_ = s.appendImportRunLog(ctx, runId, "info", importStageDetail, importRes.Message, g.Map{"sourceNoteId": sourceItem.SourceNoteId, "sourceStatus": sourceItem.StatusLabel, "profileId": importRes.ProfileId})
 		}
 		_ = s.updateImportRunProgress(ctx, runId, g.Map{
 			"item_done":             idx + 1,
@@ -863,7 +862,7 @@ func (s *sSysPublish) matchImportRunTelegramMessages(ctx context.Context, runId 
 	_ = s.appendImportRunLog(ctx, runId, "info", importStageTgMatch, "开始按标题匹配TG媒体消息", g.Map{"scanned": scanned})
 	matched := 0
 	for index, item := range items {
-		if item == nil || item.TaskId <= 0 || item.ProfileId <= 0 {
+		if item == nil || item.ProfileId <= 0 {
 			continue
 		}
 		taskRow, err := s.tgMessageRepairTask(ctx, item.ProfileId, task["tenant_id"].Int64(), task["account_id"].Int64())
@@ -882,7 +881,7 @@ func (s *sSysPublish) matchImportRunTelegramMessages(ctx context.Context, runId 
 				return matched, err
 			}
 			matched++
-			_ = s.appendImportRunLog(ctx, runId, "info", importStageTgMatch, "TG消息匹配成功", g.Map{"sourceNoteId": item.SourceNoteId, "profileId": item.ProfileId, "taskId": item.TaskId, "messages": len(matches)})
+			_ = s.appendImportRunLog(ctx, runId, "info", importStageTgMatch, "TG消息匹配成功", g.Map{"sourceNoteId": item.SourceNoteId, "profileId": item.ProfileId, "messages": len(matches)})
 		}
 		_ = s.updateImportRunProgress(ctx, runId, g.Map{"tg_done": index + 1, "tg_matched": matched, "updated_at": gtime.Now()})
 	}
@@ -1084,43 +1083,24 @@ func (s *sSysPublish) scanImportTaskSourceItem(ctx context.Context, row gdb.Reco
 		ClientRequestId:   clientRequestId,
 		Status:            "missing",
 	}
-	task, err := pdao.YoubanPublishTask.Ctx(ctx).
-		Where("tenant_id", row["tenant_id"].Int64()).
-		Where("account_id", row["account_id"].Int64()).
-		Where("client_request_id", clientRequestId).
-		WhereNull("deleted_at").
+	profile, err := dao.ContentProfile.Ctx(ctx).
+		Fields(dao.ContentProfile.Columns().Id).
+		Where(dao.ContentProfile.Columns().SourceKey, legacyCMSProfileSourceKey(row, sourceItem.SourceNoteId)).
+		WhereNull(dao.ContentProfile.Columns().DeletedAt).
 		One()
 	if err != nil {
-		return nil, gerror.Wrap(err, "扫描本地资料任务失败")
+		return nil, gerror.Wrap(err, "扫描本地资料失败")
 	}
-	if task.IsEmpty() {
-		profile, profileErr := dao.ContentProfile.Ctx(ctx).
-			Fields(dao.ContentProfile.Columns().Id).
-			Where(dao.ContentProfile.Columns().SourceKey, legacyCMSProfileSourceKey(row, sourceItem.SourceNoteId)).
-			WhereNull(dao.ContentProfile.Columns().DeletedAt).
-			One()
-		if profileErr != nil {
-			return nil, gerror.Wrap(profileErr, "扫描本地资料失败")
-		}
-		if profile.IsEmpty() {
-			return item, nil
-		}
+	if !profile.IsEmpty() {
 		item.Status = "existing"
 		item.ProfileId = profile["id"].Int64()
-	} else {
-		item.Status = "existing"
-		item.TaskId = task["id"].Int64()
-		item.ProfileId = task["profile_id"].Int64()
 	}
 	mediaMod := pdao.YoubanPublishMedia.Ctx(ctx).
 		Where("tenant_id", row["tenant_id"].Int64()).
 		Where("account_id", row["account_id"].Int64()).
+		Where("profile_id", item.ProfileId).
 		WhereNull("deleted_at")
-	if item.TaskId > 0 {
-		mediaMod = mediaMod.Where("task_id", item.TaskId)
-	} else if item.ProfileId > 0 {
-		mediaMod = mediaMod.Where("profile_id", item.ProfileId)
-	} else {
+	if item.ProfileId <= 0 {
 		return item, nil
 	}
 	total, err := mediaMod.Clone().Count()
@@ -1136,39 +1116,7 @@ func (s *sSysPublish) scanImportTaskSourceItem(ctx context.Context, row gdb.Reco
 	return item, nil
 }
 
-func (s *sSysPublish) restoreLegacyCMSImportedLocal(ctx context.Context, row gdb.Record, sourceNoteId int64, now *gtime.Time) (taskId int64, profileId int64, err error) {
-	clientRequestId := legacyCMSClientRequestID(row, sourceNoteId)
-	task, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Unscoped().
-		Where("tenant_id", row["tenant_id"].Int64()).
-		Where("client_request_id", clientRequestId).
-		One()
-	if err != nil {
-		return 0, 0, gerror.Wrap(err, "读取旧站导入幂等任务失败")
-	}
-	if !task.IsEmpty() {
-		taskId = task["id"].Int64()
-		profileId = task["profile_id"].Int64()
-		restoreTaskData := g.Map{
-			"account_id": row["account_id"].Int64(),
-			"deleted_at": nil,
-			"deleted_by": 0,
-			"updated_at": now,
-		}
-		if _, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Unscoped().Where("id", taskId).Data(restoreTaskData).Update(); err != nil {
-			return 0, 0, gerror.Wrap(err, "恢复旧站导入任务失败")
-		}
-		if profileId > 0 {
-			profileColumns := dao.ContentProfile.Columns()
-			if _, err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Unscoped().Where(profileColumns.Id, profileId).Data(g.Map{
-				profileColumns.DeletedAt: nil,
-				profileColumns.UpdatedAt: now,
-			}).Update(); err != nil {
-				return 0, 0, gerror.Wrap(err, "恢复旧站导入资料失败")
-			}
-		}
-		return taskId, profileId, nil
-	}
+func (s *sSysPublish) restoreLegacyCMSImportedLocal(ctx context.Context, row gdb.Record, sourceNoteId int64, now *gtime.Time) (profileId int64, err error) {
 	sourceKey := legacyCMSProfileSourceKey(row, sourceNoteId)
 	profileColumns := dao.ContentProfile.Columns()
 	profile, err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
@@ -1176,118 +1124,19 @@ func (s *sSysPublish) restoreLegacyCMSImportedLocal(ctx context.Context, row gdb
 		Where(profileColumns.SourceKey, sourceKey).
 		One()
 	if err != nil {
-		return 0, 0, gerror.Wrap(err, "读取旧站导入资料失败")
+		return 0, gerror.Wrap(err, "读取旧站导入资料失败")
 	}
 	if profile.IsEmpty() {
-		return 0, 0, nil
+		return 0, nil
 	}
 	profileId = profile["id"].Int64()
 	if _, err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Unscoped().Where(profileColumns.Id, profileId).Data(g.Map{
 		profileColumns.DeletedAt: nil,
 		profileColumns.UpdatedAt: now,
 	}).Update(); err != nil {
-		return 0, 0, gerror.Wrap(err, "恢复旧站导入资料失败")
+		return 0, gerror.Wrap(err, "恢复旧站导入资料失败")
 	}
-	task, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Unscoped().Where("profile_id", profileId).One()
-	if err != nil {
-		return 0, 0, gerror.Wrap(err, "读取旧站导入资料任务失败")
-	}
-	if task.IsEmpty() {
-		return 0, profileId, nil
-	}
-	taskId = task["id"].Int64()
-	if _, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Unscoped().Where("id", taskId).Data(g.Map{
-		"tenant_id":         row["tenant_id"].Int64(),
-		"merchant_id":       row["tenant_id"].Int64(),
-		"account_id":        row["account_id"].Int64(),
-		"client_request_id": clientRequestId,
-		"deleted_at":        nil,
-		"deleted_by":        0,
-		"updated_at":        now,
-	}).Update(); err != nil {
-		return 0, 0, gerror.Wrap(err, "恢复旧站导入资料任务失败")
-	}
-	return taskId, profileId, nil
-}
-
-func (s *sSysPublish) preferLegacyCMSIdempotentTask(ctx context.Context, row gdb.Record, currentTaskId int64, currentProfileId int64, clientRequestId string, now *gtime.Time) (taskId int64, profileId int64, err error) {
-	taskId = currentTaskId
-	profileId = currentProfileId
-	if strings.TrimSpace(clientRequestId) == "" {
-		return taskId, profileId, nil
-	}
-	exists, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
-		Unscoped().
-		Where("tenant_id", row["tenant_id"].Int64()).
-		Where("client_request_id", clientRequestId).
-		One()
-	if err != nil {
-		return 0, 0, gerror.Wrap(err, "读取旧站导入幂等任务失败")
-	}
-	if exists.IsEmpty() || exists["id"].Int64() == currentTaskId {
-		return taskId, profileId, nil
-	}
-	taskId = exists["id"].Int64()
-	profileId = exists["profile_id"].Int64()
-	if profileId <= 0 {
-		profileId = currentProfileId
-	}
-	if _, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Unscoped().Where("id", taskId).Data(g.Map{
-		"account_id": row["account_id"].Int64(),
-		"profile_id": profileId,
-		"deleted_at": nil,
-		"deleted_by": 0,
-		"updated_at": now,
-	}).Update(); err != nil {
-		return 0, 0, gerror.Wrap(err, "恢复旧站导入幂等任务失败")
-	}
-	if profileId > 0 {
-		profileColumns := dao.ContentProfile.Columns()
-		if _, err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Unscoped().Where(profileColumns.Id, profileId).Data(g.Map{
-			profileColumns.DeletedAt: nil,
-			profileColumns.UpdatedAt: now,
-		}).Update(); err != nil {
-			return 0, 0, gerror.Wrap(err, "恢复旧站导入幂等资料失败")
-		}
-	}
-	if currentTaskId > 0 && currentTaskId != taskId {
-		_, _ = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Unscoped().Where("id", currentTaskId).Data(g.Map{
-			"deleted_at": now,
-			"updated_at": now,
-		}).Update()
-	}
-	if currentProfileId > 0 && currentProfileId != profileId {
-		profileColumns := dao.ContentProfile.Columns()
-		_, _ = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).Unscoped().Where(profileColumns.Id, currentProfileId).Data(g.Map{
-			profileColumns.DeletedAt: now,
-			profileColumns.UpdatedAt: now,
-		}).Update()
-	}
-	return taskId, profileId, nil
-}
-
-func (s *sSysPublish) bindLegacyCMSClientRequestID(ctx context.Context, row gdb.Record, taskId int64, profileId int64, clientRequestId string, now *gtime.Time) (int64, int64, error) {
-	if strings.TrimSpace(clientRequestId) == "" || taskId <= 0 {
-		return taskId, profileId, nil
-	}
-	if _, err := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).Data(g.Map{
-		"client_request_id": clientRequestId,
-		"updated_at":        now,
-	}).Update(); err != nil {
-		if !isUniqueConstraintError(err) {
-			return 0, 0, gerror.Wrap(err, "更新旧站导入任务幂等键失败")
-		}
-		nextTaskId, nextProfileId, restoreErr := s.preferLegacyCMSIdempotentTask(ctx, row, taskId, profileId, clientRequestId, now)
-		if restoreErr != nil {
-			return 0, 0, restoreErr
-		}
-		if nextTaskId == taskId {
-			return 0, 0, gerror.Wrap(err, "更新旧站导入任务幂等键失败")
-		}
-		taskId = nextTaskId
-		profileId = nextProfileId
-	}
-	return taskId, profileId, nil
+	return profileId, nil
 }
 
 func isUniqueConstraintError(err error) bool {
@@ -1301,7 +1150,6 @@ func isUniqueConstraintError(err error) bool {
 }
 
 type legacyCMSImportResult struct {
-	TaskId        int64
 	ProfileId     int64
 	Imported      bool
 	MediaTotal    int
@@ -1356,7 +1204,7 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 	now := gtime.Now()
 	sourceCreatedAt := legacyCMSTimeOrDefault(detail.CreatedAt, now)
 	sourceUpdatedAt := legacyCMSTimeOrDefault(detail.UpdatedAt, sourceCreatedAt)
-	_, restoredProfileId, err := s.restoreLegacyCMSImportedLocal(ctx, taskRow, sourceNoteId, now)
+	restoredProfileId, err := s.restoreLegacyCMSImportedLocal(ctx, taskRow, sourceNoteId, now)
 	if err != nil {
 		return nil, err
 	}
@@ -1377,17 +1225,6 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 		input.Id = restoredProfileId
 	}
 	saved, err := s.saveProfile(ctx, input, taskRow["tenant_id"].Int64(), taskRow["account_id"].Int64())
-	if err != nil {
-		return nil, err
-	}
-	clientRequestId := legacyCMSClientRequestID(taskRow, sourceNoteId)
-	if saved.TaskId, saved.Id, err = s.preferLegacyCMSIdempotentTask(ctx, taskRow, saved.TaskId, saved.Id, clientRequestId, now); err != nil {
-		return nil, err
-	}
-	if saved.TaskId, saved.Id, err = s.bindLegacyCMSClientRequestID(ctx, taskRow, saved.TaskId, saved.Id, clientRequestId, now); err != nil {
-		return nil, err
-	}
-	channelJSON, err := encodeBotIds(channelIds)
 	if err != nil {
 		return nil, err
 	}
@@ -1412,40 +1249,25 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 	}).Update(); err != nil {
 		return nil, gerror.Wrap(err, "更新旧站资料来源信息失败")
 	}
-	if _, err = pdao.YoubanPublishTask.Ctx(ctx).Where("id", saved.TaskId).Data(g.Map{
-		"title":             detail.Title,
-		"province":          detail.Province,
-		"city":              detail.City,
-		"customer_remark":   "",
-		"client_request_id": clientRequestId,
-		"status":            legacyCMSPublishTaskStatus(sourceItem.Status),
-		"tg_status":         legacyCMSPublishTaskTgStatus(sourceItem.Status),
-		"tg_push_enabled":   legacyCMSPublishTaskTgPushEnabled(sourceItem.Status, channelIds),
-		"channel_id_json":   channelJSON,
-		"created_at":        sourceCreatedAt,
-		"updated_at":        sourceUpdatedAt,
-	}).Update(); err != nil {
-		return nil, gerror.Wrap(err, "更新旧站导入任务标题失败")
-	}
-	task, err := s.getTaskByTenant(ctx, saved.TaskId, taskRow["tenant_id"].Int64())
-	if err != nil {
-		return nil, err
-	}
 	if importMode == sysin.ImportTaskModeOverwrite {
-		if err = s.clearImportTaskMedia(ctx, saved.TaskId, saved.Id); err != nil {
+		if err = s.clearImportProfileMedia(ctx, saved.Id); err != nil {
 			return nil, err
 		}
 	}
 	mediaImported := 0
 	if importMode == sysin.ImportTaskModeOverwrite || scanItem == nil || scanItem.MediaTotal == 0 || scanItem.MediaMissingStorage > 0 {
 		_ = s.appendImportRunLog(ctx, runId, "info", importStageMedia, "开始采集笔记资源", g.Map{"sourceNoteId": sourceNoteId, "profileId": saved.Id, "mediaTotal": len(detail.Media)})
-		mediaImported, err = s.importLegacyCMSMedia(ctx, runId, sourceNoteId, importer, task, detail.Media)
+		owner, ownerErr := s.profileState(ctx, saved.Id, taskRow["tenant_id"].Int64(), taskRow["account_id"].Int64())
+		if ownerErr != nil {
+			return nil, ownerErr
+		}
+		mediaImported, err = s.importLegacyCMSMedia(ctx, runId, sourceNoteId, importer, profileMediaOwner(owner), detail.Media)
 		if err != nil {
 			return nil, err
 		}
 		if mediaImported > 0 {
 			if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-				return s.syncTaskMediaToProfile(ctx, tx, saved.TaskId, saved.Id)
+				return s.syncOwnedMediaToProfile(ctx, tx, owner, saved.Id)
 			}); err != nil {
 				return nil, err
 			}
@@ -1457,7 +1279,6 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 		message = "资料已更新"
 	}
 	return &legacyCMSImportResult{
-		TaskId:        saved.TaskId,
 		ProfileId:     saved.Id,
 		Imported:      true,
 		MediaTotal:    len(detail.Media),
@@ -1513,9 +1334,8 @@ func (s *sSysPublish) defaultImportTaskChannelIds(ctx context.Context, tenantId 
 	return uniqueIds(ids), nil
 }
 
-func (s *sSysPublish) clearImportTaskMedia(ctx context.Context, taskId int64, profileId int64) error {
+func (s *sSysPublish) clearImportProfileMedia(ctx context.Context, profileId int64) error {
 	_, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("task_id", taskId).
 		Where("profile_id", profileId).
 		WhereNull("deleted_at").
 		Data(g.Map{
@@ -1531,7 +1351,7 @@ func (s *sSysPublish) clearImportTaskMedia(ctx context.Context, taskId int64, pr
 	return nil
 }
 
-func (s *sSysPublish) importLegacyCMSMedia(ctx context.Context, runId int64, sourceNoteId int64, importer *legacyCMSImporter, task gdb.Record, media []*legacyCMSMedia) (int, error) {
+func (s *sSysPublish) importLegacyCMSMedia(ctx context.Context, runId int64, sourceNoteId int64, importer *legacyCMSImporter, owner gdb.Record, media []*legacyCMSMedia) (int, error) {
 	imported := 0
 	for idx, item := range media {
 		if item == nil || strings.TrimSpace(item.URL) == "" {
@@ -1566,8 +1386,8 @@ func (s *sSysPublish) importLegacyCMSMedia(ctx context.Context, runId int64, sou
 		if sortIndex <= 0 {
 			sortIndex = idx + 1
 		}
-		if _, err = s.saveMediaAttachment(ctx, task, &sysin.MediaUploadInp{
-			ProfileId: task["profile_id"].Int64(),
+		if _, err = s.saveMediaAttachment(ctx, owner, &sysin.MediaUploadInp{
+			ProfileId: owner["profile_id"].Int64(),
 			MediaType: item.MediaType,
 			Purpose:   purpose,
 			SortIndex: sortIndex,
@@ -2577,35 +2397,6 @@ func legacyCMSProfileStatus(status string) int {
 		return 1
 	}
 	return 2
-}
-
-func legacyCMSPublishTaskStatus(status string) string {
-	switch strings.TrimSpace(status) {
-	case "published":
-		return sysin.PublishTaskStatusPublished
-	case "down":
-		return sysin.PublishTaskStatusCanceled
-	default:
-		return sysin.PublishTaskStatusCanceled
-	}
-}
-
-func legacyCMSPublishTaskTgStatus(status string) string {
-	switch strings.TrimSpace(status) {
-	case "published":
-		return "sent"
-	case "down":
-		return sysin.PublishTaskStatusCanceled
-	default:
-		return "skipped"
-	}
-}
-
-func legacyCMSPublishTaskTgPushEnabled(status string, channelIds []int64) int {
-	if strings.TrimSpace(status) == "published" && len(channelIds) > 0 {
-		return 1
-	}
-	return 0
 }
 
 func legacyCMSTimeOrDefault(value *gtime.Time, fallback *gtime.Time) *gtime.Time {

@@ -133,9 +133,8 @@ type ProfileEditReq struct {
 }
 
 type ProfileEditRes struct {
-	Id     int64  `json:"id" dc:"资料ID"`
-	Uuid   string `json:"uuid" dc:"资料UUID"`
-	TaskId int64  `json:"taskId" dc:"任务ID"`
+	Id   int64  `json:"id" dc:"资料ID"`
+	Uuid string `json:"uuid" dc:"资料UUID"`
 }
 
 type ProfileDeleteReq struct {

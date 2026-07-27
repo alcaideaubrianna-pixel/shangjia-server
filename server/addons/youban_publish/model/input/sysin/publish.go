@@ -420,44 +420,10 @@ func (in *MediaUploadInp) Filter(ctx context.Context) error {
 
 type MediaListInp struct {
 	ProfileId int64 `json:"profileId" dc:"资料ID"`
-	TaskId    int64 `json:"taskId" dc:"任务ID"`
 }
 
 type MediaDeleteInp struct {
 	Id int64 `json:"id" v:"required|min:1#媒体ID不能为空|媒体ID不能为空" dc:"媒体ID"`
-}
-
-type MediaSortItem struct {
-	Id        int64  `json:"id" dc:"媒体ID"`
-	Purpose   string `json:"purpose" dc:"用途：display/verify"`
-	SortIndex int    `json:"sortIndex" dc:"排序"`
-}
-
-type MediaSortInp struct {
-	TaskId int64            `json:"taskId" v:"required|min:1#任务ID不能为空|任务ID不能为空" dc:"任务ID"`
-	Items  []*MediaSortItem `json:"items" dc:"排序列表"`
-}
-
-func (in *MediaSortInp) Filter(ctx context.Context) error {
-	if in.TaskId <= 0 {
-		return gerror.New("任务ID不能为空")
-	}
-	for _, item := range in.Items {
-		if item == nil || item.Id <= 0 {
-			return gerror.New("媒体ID不能为空")
-		}
-		item.Purpose = strings.TrimSpace(item.Purpose)
-		if item.Purpose == "" {
-			item.Purpose = "display"
-		}
-		if item.Purpose != "display" && item.Purpose != "verify" {
-			return gerror.New("媒体用途不合法")
-		}
-		if item.SortIndex <= 0 {
-			return gerror.New("媒体排序不能为空")
-		}
-	}
-	return nil
 }
 
 type MediaModel struct {
@@ -526,7 +492,6 @@ type ProfileModel struct {
 	Id              int64       `json:"id" dc:"资料ID"`
 	NoteIndexId     int64       `json:"-" dc:"资料索引ID"`
 	Uuid            string      `json:"uuid" dc:"资料UUID"`
-	TaskId          int64       `json:"taskId" dc:"任务ID"`
 	TenantId        int64       `json:"tenantId" dc:"租户ID"`
 	AccountId       int64       `json:"accountId" dc:"上架账号ID"`
 	TenantName      string      `json:"tenantName" dc:"账号归属"`
@@ -678,7 +643,6 @@ func (in *ProfileSaveInp) Filter(ctx context.Context) error {
 type ProfileSaveModel struct {
 	Id        int64  `json:"id" dc:"资料ID"`
 	Uuid      string `json:"uuid" dc:"资料UUID"`
-	TaskId    int64  `json:"taskId" dc:"任务ID"`
 	ProfileNo string `json:"profileNo" dc:"资料编号"`
 }
 
@@ -765,7 +729,6 @@ type AdminNoteMediaModel struct {
 type AdminNoteListModel struct {
 	Id          int64                  `json:"id" dc:"资料ID"`
 	Uuid        string                 `json:"uuid" dc:"资料UUID"`
-	TaskId      int64                  `json:"taskId" dc:"任务ID"`
 	AccountId   int64                  `json:"accountId" dc:"上架账号ID"`
 	AccountName string                 `json:"accountName" dc:"上架账号昵称"`
 	Nickname    string                 `json:"nickname" dc:"账号名称"`
@@ -808,7 +771,6 @@ type FollowNoteMediaModel struct {
 type FollowNoteModel struct {
 	Id            int64                   `json:"id" dc:"资料ID"`
 	Uuid          string                  `json:"uuid" dc:"资料UUID"`
-	TaskId        int64                   `json:"taskId" dc:"任务ID"`
 	AccountId     int64                   `json:"accountId" dc:"上架账号ID"`
 	AccountName   string                  `json:"accountName" dc:"上架账号昵称"`
 	Nickname      string                  `json:"nickname" dc:"账号名称"`

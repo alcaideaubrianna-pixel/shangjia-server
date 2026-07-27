@@ -267,7 +267,6 @@ func (c *cPublishServer) ProfileEdit(ctx context.Context, req *publish.ProfileEd
 	if data != nil {
 		res.Id = data.Id
 		res.Uuid = data.Uuid
-		res.TaskId = data.TaskId
 	}
 	return
 }

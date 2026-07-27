@@ -36,7 +36,10 @@ func (s *sSysPublish) AdminMediaList(ctx context.Context, in *sysin.MediaListInp
 	if in != nil && in.ProfileId > 0 {
 		return s.mediaListByEditableProfile(ctx, in.ProfileId, account.TenantId, 0)
 	}
-	return s.mediaListByTenant(ctx, in.TaskId, account.TenantId)
+	if in == nil || in.ProfileId <= 0 {
+		return nil, gerror.New("资料ID不能为空")
+	}
+	return s.mediaListByProfile(ctx, in.ProfileId, account.TenantId, 0)
 }
 
 func (s *sSysPublish) AdminMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error) {
@@ -70,63 +73,6 @@ func (s *sSysPublish) MyMediaList(ctx context.Context, in *sysin.MediaListInp) (
 		return nil, err
 	}
 	return s.mediaListByProfile(ctx, in.ProfileId, account.TenantId, account.Id)
-}
-
-func (s *sSysPublish) sortTaskMedia(ctx context.Context, in *sysin.MediaSortInp, task gdb.Record, accountId int64) error {
-	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		profileId := task["profile_id"].Int64()
-		if profileId > 0 {
-			release, lockErr := s.lockTaskMediaSyncTx(ctx, tx, in.TaskId, profileId)
-			if lockErr != nil {
-				return lockErr
-			}
-			defer release()
-		}
-		for _, item := range in.Items {
-			mediaId, resolveErr := s.resolveTaskMediaIdTx(ctx, tx, task, item.Id, accountId)
-			if resolveErr != nil {
-				return resolveErr
-			}
-			mod := tx.Model(publishMediaTable).Ctx(ctx).
-				Where("id", mediaId).
-				Where("profile_id", profileId).
-				WhereNull("deleted_at")
-			if accountId > 0 {
-				mod = mod.Where("account_id", accountId)
-			}
-			result, updateErr := mod.Data(g.Map{
-				"purpose":    item.Purpose,
-				"sort_index": item.SortIndex,
-				"updated_by": contexts.GetUserId(ctx),
-				"updated_at": gtime.Now(),
-			}).
-				Update()
-			if updateErr != nil {
-				return gerror.Wrap(updateErr, "更新媒体排序失败")
-			}
-			affected, _ := result.RowsAffected()
-			if affected == 0 {
-				return gerror.New("媒体不存在或无权操作")
-			}
-		}
-		if profileId > 0 {
-			if syncErr := s.syncOwnedMediaToProfile(ctx, tx, task, profileId); syncErr != nil {
-				return syncErr
-			}
-		}
-		return nil
-	})
-}
-
-func retainedMediaIDSet(items []*sysin.MediaSortItem) map[int64]struct{} {
-	retained := make(map[int64]struct{}, len(items))
-	for _, item := range items {
-		if item == nil || item.Id <= 0 {
-			continue
-		}
-		retained[item.Id] = struct{}{}
-	}
-	return retained
 }
 
 func mediaOwnerScope(mod *gdb.Model, owner gdb.Record) *gdb.Model {
@@ -164,35 +110,6 @@ func (s *sSysPublish) syncProfileMediaFromInput(ctx context.Context, tx gdb.TX, 
 	return s.syncOwnedMediaFromInput(ctx, tx, profileMediaOwner(state), profileId, tenantId, accountId, items)
 }
 
-func (s *sSysPublish) syncTaskMediaFromProfileInput(ctx context.Context, tx gdb.TX, taskId int64, profileId int64, tenantId int64, accountId int64, items []*sysin.ProfileMediaSaveItem) ([]int64, error) {
-	if taskId <= 0 || profileId <= 0 {
-		return nil, gerror.New("发布任务媒体归属信息不完整")
-	}
-	release, err := s.lockTaskMediaSyncTx(ctx, tx, taskId, profileId)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	taskMod := tx.Model(publishTaskTable).Ctx(ctx).
-		Where("id", taskId).
-		Where("profile_id", profileId).
-		WhereNull("deleted_at")
-	if tenantId > 0 {
-		taskMod = taskMod.Where("tenant_id", tenantId)
-	}
-	if accountId > 0 {
-		taskMod = taskMod.Where("account_id", accountId)
-	}
-	task, err := taskMod.One()
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取发布事件媒体失败")
-	}
-	if task.IsEmpty() {
-		return nil, gerror.New("发布任务不存在或无权操作")
-	}
-	return s.syncOwnedMediaFromInput(ctx, tx, task, profileId, tenantId, accountId, items)
-}
-
 func (s *sSysPublish) syncOwnedMediaFromInput(ctx context.Context, tx gdb.TX, owner gdb.Record, profileId int64, tenantId int64, accountId int64, items []*sysin.ProfileMediaSaveItem) ([]int64, error) {
 	var err error
 
@@ -201,7 +118,7 @@ func (s *sSysPublish) syncOwnedMediaFromInput(ctx context.Context, tx gdb.TX, ow
 		if item == nil || item.MediaId <= 0 {
 			return nil, gerror.New("资料媒体ID不能为空")
 		}
-		mediaId, resolveErr := s.resolveTaskMediaIdTx(ctx, tx, owner, item.MediaId, accountId)
+		mediaId, resolveErr := s.resolveProfileMediaIdTx(ctx, tx, owner, item.MediaId, accountId)
 		if resolveErr != nil {
 			isHistorical, checkErr := s.isHistoricalProfileMediaTx(ctx, tx, item.MediaId, profileId, tenantId, accountId)
 			if checkErr != nil {
@@ -293,17 +210,7 @@ func (s *sSysPublish) isHistoricalProfileMediaTx(ctx context.Context, tx gdb.TX,
 	return count > 0, nil
 }
 
-func (s *sSysPublish) resolveTaskMediaId(ctx context.Context, task gdb.Record, mediaId int64, accountId int64) (int64, error) {
-	var resolved int64
-	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		var err error
-		resolved, err = s.resolveTaskMediaIdTx(ctx, tx, task, mediaId, accountId)
-		return err
-	})
-	return resolved, err
-}
-
-func (s *sSysPublish) resolveTaskMediaIdTx(ctx context.Context, tx gdb.TX, task gdb.Record, mediaId int64, accountId int64) (int64, error) {
+func (s *sSysPublish) resolveProfileMediaIdTx(ctx context.Context, tx gdb.TX, task gdb.Record, mediaId int64, accountId int64) (int64, error) {
 	if mediaId <= 0 || task.IsEmpty() {
 		return 0, gerror.New("媒体不存在或无权操作")
 	}
@@ -722,28 +629,6 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 	return media, nil
 }
 
-func (s *sSysPublish) mediaList(ctx context.Context, taskId int64, accountId int64) (list []*sysin.MediaModel, err error) {
-	if taskId <= 0 {
-		return nil, gerror.New("任务ID不能为空")
-	}
-	task, err := s.getTask(ctx, taskId, accountId)
-	if err != nil {
-		return nil, err
-	}
-	return s.mediaListByProfile(ctx, task["profile_id"].Int64(), task["tenant_id"].Int64(), accountId)
-}
-
-func (s *sSysPublish) mediaListByTenant(ctx context.Context, taskId int64, tenantId int64) (list []*sysin.MediaModel, err error) {
-	if taskId <= 0 {
-		return nil, gerror.New("任务ID不能为空")
-	}
-	task, err := s.getTaskByTenant(ctx, taskId, tenantId)
-	if err != nil {
-		return nil, err
-	}
-	return s.mediaListByProfile(ctx, task["profile_id"].Int64(), tenantId, 0)
-}
-
 func normalizeMediaListFileURL(list []*sysin.MediaModel) {
 	for _, item := range list {
 		if item == nil {
@@ -988,41 +873,8 @@ func (s *sSysPublish) editableMediaRow(ctx context.Context, row gdb.Record, tena
 	return row, nil
 }
 
-func (s *sSysPublish) refreshTaskMediaCount(ctx context.Context, taskId int64) error {
-	task, err := s.getTaskByTenant(ctx, taskId, 0)
-	if err != nil {
-		return err
-	}
-	count, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("profile_id", task["profile_id"].Int64()).
-		WhereNull("deleted_at").
-		Count()
-	if err != nil {
-		return gerror.Wrap(err, "统计任务媒体失败")
-	}
-	_, err = g.DB().Model(publishTaskTable).Safe().Ctx(ctx).Where("id", taskId).Data(g.Map{
-		"media_count": count,
-		"updated_at":  gtime.Now(),
-	}).Update()
-	if err != nil {
-		return gerror.Wrap(err, "更新任务媒体数量失败")
-	}
-	return nil
-}
-
 func profileMediaSyncLockKey(profileId int64) string {
 	return fmt.Sprintf("youban_publish:media_sync:profile:%d", profileId)
-}
-
-func (s *sSysPublish) withTaskMediaSyncLock(ctx context.Context, taskId int64, profileId int64, fn func(ctx context.Context, tx gdb.TX) error) error {
-	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		release, err := s.lockTaskMediaSyncTx(ctx, tx, taskId, profileId)
-		if err != nil {
-			return err
-		}
-		defer release()
-		return fn(ctx, tx)
-	})
 }
 
 func (s *sSysPublish) withProfileMediaSyncLock(ctx context.Context, profileId int64, fn func(ctx context.Context, tx gdb.TX) error) error {
@@ -1034,13 +886,6 @@ func (s *sSysPublish) withProfileMediaSyncLock(ctx context.Context, profileId in
 		defer release()
 		return fn(ctx, tx)
 	})
-}
-
-func (s *sSysPublish) lockTaskMediaSyncTx(ctx context.Context, tx gdb.TX, taskId int64, profileId int64) (func(), error) {
-	if taskId <= 0 {
-		return func() {}, gerror.New("发布任务ID不能为空")
-	}
-	return s.lockProfileMediaSyncTx(ctx, tx, profileId)
 }
 
 func (s *sSysPublish) lockProfileMediaSyncTx(ctx context.Context, tx gdb.TX, profileId int64) (func(), error) {
@@ -1067,13 +912,6 @@ func (s *sSysPublish) lockProfileMediaSyncTx(ctx context.Context, tx gdb.TX, pro
 			_, _ = tx.Exec("SELECT RELEASE_LOCK(?)", key)
 		}, nil
 	}
-}
-
-func (s *sSysPublish) syncTaskMediaToProfile(ctx context.Context, tx gdb.TX, taskId int64, profileId int64) error {
-	if taskId <= 0 {
-		return gerror.New("发布任务ID不能为空")
-	}
-	return s.syncOwnedMediaToProfile(ctx, tx, publishTaskMediaOwner(taskId), profileId)
 }
 
 func (s *sSysPublish) syncOwnedMediaToProfile(ctx context.Context, tx gdb.TX, owner gdb.Record, profileId int64) error {
