@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -234,7 +235,7 @@ func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenan
 		return err
 	}
 	if !hasChannels {
-		return s.markTaskSavedWithoutPublish(ctx, task, operatorId)
+		return gerror.New("请选择至少一个有效的上架频道")
 	}
 	// hasPublishChannels 可能会将历史频道 ID 迁移为当前频道 ID，重新读取
 	// 任务，确保排队快照拿到迁移后的值。
@@ -248,6 +249,10 @@ func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenan
 	if err = s.markTaskPublishQueued(ctx, id, tenantId, operatorId, operationNo); err != nil {
 		return err
 	}
+	delay := time.Duration(0)
+	if publishAt := task["published_at"].GTime(); publishAt != nil && publishAt.Time.After(time.Now()) {
+		delay = time.Until(publishAt.Time)
+	}
 	if err = s.enqueuePublishSubmitTask(ctx, publishSubmitQueuePayload{
 		TaskId:      id,
 		TenantId:    tenantId,
@@ -255,7 +260,7 @@ func (s *sSysPublish) submitPublishWorkflow(ctx context.Context, id int64, tenan
 		OperatorId:  operatorId,
 		OperationNo: operationNo,
 		ChannelIds:  channelIds,
-	}, 0); err != nil {
+	}, delay); err != nil {
 		_ = s.markTaskPublishFailed(ctx, id, tenantId, operatorId, err)
 		return gerror.Wrap(err, "上架任务加入队列失败")
 	}

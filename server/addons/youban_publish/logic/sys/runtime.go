@@ -50,6 +50,11 @@ func (s *sSysPublish) StopRuntime() {
 }
 
 func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
+	if err := ensurePublishSuccessRecordSchema(ctx); err != nil {
+		g.Log().Warningf(ctx, "初始化成功发布记录表失败：%+v", err)
+	} else if err := s.backfillPublishSuccessRecords(ctx, 5000); err != nil {
+		g.Log().Warningf(ctx, "补写成功发布记录失败：%+v", err)
+	}
 	s.startTelegramQueueWorker(ctx)
 	go s.runTelegramRuntime(ctx)
 	go s.runScheduledPublishRuntime(ctx)

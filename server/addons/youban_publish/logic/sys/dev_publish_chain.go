@@ -148,7 +148,7 @@ func (s *sSysPublish) attachDevTestFiles(ctx context.Context, taskId int64, acco
 			}
 		}
 		media, err := s.saveMediaAttachment(ctx, task, &sysin.MediaUploadInp{
-			TaskId:    taskId,
+			ProfileId: task["profile_id"].Int64(),
 			MediaType: mediaType,
 			Purpose:   devMediaPurpose(mediaType),
 			SortIndex: i + 1,

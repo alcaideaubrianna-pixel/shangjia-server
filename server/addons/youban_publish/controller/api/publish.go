@@ -588,13 +588,6 @@ func (c *cPublishAdmin) UploadMedia(ctx context.Context, req *publish.AdminUploa
 	return
 }
 
-func (c *cPublishAdmin) ReconcileMedia(ctx context.Context, req *publish.AdminReconcileMediaReq) (res *publish.AdminReconcileMediaRes, err error) {
-	if err = service.SysPublish().AdminMediaReconcile(ctx, &req.MediaReconcileInp); err != nil {
-		return nil, err
-	}
-	return &publish.AdminReconcileMediaRes{}, nil
-}
-
 func (c *cPublishAdmin) ProfileList(ctx context.Context, req *publish.AdminProfileListReq) (res *publish.AdminProfileListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminProfileList(ctx, &req.ProfileListInp)
 	if err != nil {
@@ -627,7 +620,6 @@ func (c *cPublishAdmin) ProfileEdit(ctx context.Context, req *publish.AdminProfi
 	if data != nil {
 		res.Id = data.Id
 		res.Uuid = data.Uuid
-		res.TaskId = data.TaskId
 	}
 	return
 }
@@ -639,9 +631,16 @@ func (c *cPublishAdmin) ProfileCreate(ctx context.Context, req *publish.AdminPro
 	}
 	res = &publish.AdminProfileCreateRes{}
 	if data != nil {
-		res.Id, res.Uuid, res.TaskId = data.Id, data.Uuid, data.TaskId
+		res.Id, res.Uuid = data.Id, data.Uuid
 	}
 	return
+}
+
+func (c *cPublishAdmin) ProfilePublish(ctx context.Context, req *publish.AdminProfilePublishReq) (res *publish.AdminProfilePublishRes, err error) {
+	if err = service.SysPublish().AdminProfilePublish(ctx, &req.ProfileViewInp); err != nil {
+		return nil, err
+	}
+	return &publish.AdminProfilePublishRes{}, nil
 }
 
 func (c *cPublishAdmin) ProfileDelete(ctx context.Context, req *publish.AdminProfileDeleteReq) (res *publish.AdminProfileDeleteRes, err error) {
@@ -925,13 +924,6 @@ func (c *cPublish) MediaList(ctx context.Context, req *publish.MediaListReq) (re
 	return
 }
 
-func (c *cPublish) ReconcileMedia(ctx context.Context, req *publish.ReconcileMediaReq) (res *publish.ReconcileMediaRes, err error) {
-	if err = service.SysPublish().MyMediaReconcile(ctx, &req.MediaReconcileInp); err != nil {
-		return nil, err
-	}
-	return &publish.ReconcileMediaRes{}, nil
-}
-
 func (c *cPublish) MyProfileList(ctx context.Context, req *publish.MyProfileListReq) (res *publish.MyProfileListRes, err error) {
 	list, totalCount, err := service.SysPublish().MyProfileList(ctx, &req.ProfileListInp)
 	if err != nil {
@@ -987,7 +979,6 @@ func (c *cPublish) MyProfileEdit(ctx context.Context, req *publish.MyProfileEdit
 	if data != nil {
 		res.Id = data.Id
 		res.Uuid = data.Uuid
-		res.TaskId = data.TaskId
 	}
 	return
 }
@@ -999,9 +990,16 @@ func (c *cPublish) MyProfileCreate(ctx context.Context, req *publish.MyProfileCr
 	}
 	res = &publish.MyProfileCreateRes{}
 	if data != nil {
-		res.Id, res.Uuid, res.TaskId = data.Id, data.Uuid, data.TaskId
+		res.Id, res.Uuid = data.Id, data.Uuid
 	}
 	return
+}
+
+func (c *cPublish) MyProfilePublish(ctx context.Context, req *publish.MyProfilePublishReq) (res *publish.MyProfilePublishRes, err error) {
+	if err = service.SysPublish().MyProfilePublish(ctx, &req.ProfileViewInp); err != nil {
+		return nil, err
+	}
+	return &publish.MyProfilePublishRes{}, nil
 }
 
 func (c *cPublish) MyProfileDelete(ctx context.Context, req *publish.MyProfileDeleteReq) (res *publish.MyProfileDeleteRes, err error) {

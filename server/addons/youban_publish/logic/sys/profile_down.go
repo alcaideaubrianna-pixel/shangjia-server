@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -41,7 +42,7 @@ func (s *sSysPublish) prepareProfileDownPlan(ctx context.Context, tenantId int64
 	return plan, nil
 }
 
-func (s *sSysPublish) handleProfilesDown(ctx context.Context, ids []int64, tenantId int64, downAt ...string) error {
+func (s *sSysPublish) handleProfilesDown(ctx context.Context, ids []int64, tenantId int64, downAt string, operationNo string) error {
 	ids, err := s.activeDownProfileIds(ctx, ids, tenantId)
 	if err != nil {
 		return err
@@ -49,9 +50,10 @@ func (s *sSysPublish) handleProfilesDown(ctx context.Context, ids []int64, tenan
 	if len(ids) == 0 {
 		return nil
 	}
-	cutoffAt := ""
-	if len(downAt) > 0 {
-		cutoffAt = downAt[0]
+	cutoffAt := strings.TrimSpace(downAt)
+	operationNo = strings.TrimSpace(operationNo)
+	if operationNo == "" {
+		operationNo = fmt.Sprintf("down:%d:%s", tenantId, strings.NewReplacer(" ", "-", ":", "", ".", "").Replace(cutoffAt))
 	}
 	if err := s.deleteProfilesTelegramMessages(ctx, ids, tenantId, cutoffAt); err != nil {
 		return err
@@ -77,7 +79,7 @@ func (s *sSysPublish) handleProfilesDown(ctx context.Context, ids []int64, tenan
 	if len(ids) == 0 {
 		return nil
 	}
-	return s.notifyProfilesDown(ctx, ids, tenantId, plan.Channels)
+	return s.notifyProfilesDown(ctx, ids, tenantId, plan.Channels, operationNo, cutoffAt)
 }
 
 func (s *sSysPublish) activeDownProfileIds(ctx context.Context, ids []int64, tenantId int64) ([]int64, error) {
@@ -133,7 +135,7 @@ func (s *sSysPublish) deleteProfilesTelegramMessages(ctx context.Context, ids []
 	return nil
 }
 
-func (s *sSysPublish) notifyProfilesDown(ctx context.Context, ids []int64, tenantId int64, channels []telegramJobChannel) error {
+func (s *sSysPublish) notifyProfilesDown(ctx context.Context, ids []int64, tenantId int64, channels []telegramJobChannel, operationNo string, cutoffAt string) error {
 	rows, err := s.profileDownRows(ctx, ids, tenantId)
 	if err != nil {
 		return err
@@ -143,7 +145,7 @@ func (s *sSysPublish) notifyProfilesDown(ctx context.Context, ids []int64, tenan
 	}
 	for _, row := range rows {
 		for _, channel := range channels {
-			if err = s.sendDownChannelProfile(ctx, tenantId, channel, row); err != nil {
+			if err = s.sendDownChannelProfile(ctx, tenantId, channel, row, operationNo, cutoffAt); err != nil {
 				return err
 			}
 		}
@@ -151,7 +153,7 @@ func (s *sSysPublish) notifyProfilesDown(ctx context.Context, ids []int64, tenan
 	return nil
 }
 
-func (s *sSysPublish) sendDownChannelProfile(ctx context.Context, tenantId int64, channel telegramJobChannel, row gdb.Record) error {
+func (s *sSysPublish) sendDownChannelProfile(ctx context.Context, tenantId int64, channel telegramJobChannel, row gdb.Record, operationNo string, cutoffAt string) error {
 	taskId := row["id"].Int64()
 	profileId := row["profile_id"].Int64()
 	accountId := row["account_id"].Int64()
@@ -170,19 +172,54 @@ func (s *sSysPublish) sendDownChannelProfile(ctx context.Context, tenantId int64
 	if job.TargetChatId == "" {
 		return gerror.New("下架频道Chat ID未配置")
 	}
-	jobId, err := s.createDownChannelTelegramJob(ctx, job)
-	if err != nil {
-		return err
-	}
-	job.Id = jobId
 	return s.withTelegramChannelLock(ctx, job.TargetChatId, func() error {
+		jobId, shouldSend, err := s.createDownChannelTelegramJob(ctx, job, operationNo, cutoffAt)
+		if err != nil {
+			return err
+		}
+		if !shouldSend {
+			return nil
+		}
+		job.Id = jobId
 		return s.sendDownChannelProfileLockedByChannel(ctx, job, taskId, channel.Id)
 	})
 }
 
-func (s *sSysPublish) createDownChannelTelegramJob(ctx context.Context, job telegramJobRecord) (int64, error) {
+func (s *sSysPublish) createDownChannelTelegramJob(ctx context.Context, job telegramJobRecord, operationNo string, cutoffAt string) (int64, bool, error) {
+	existingMod := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("task_id", job.TaskId).
+		Where("operation_no", operationNo).
+		Where("channel_id", job.ChannelId)
+	existing, err := existingMod.One()
+	if err != nil {
+		return 0, false, gerror.Wrap(err, "读取下架频道TG任务失败")
+	}
+	if existing.IsEmpty() && cutoffAt != "" {
+		existing, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("profile_id", job.ProfileId).
+			Where("channel_id", job.ChannelId).
+			Where("status", "sent").
+			WhereLike("operation_no", "down:%").
+			WhereGTE("created_at", cutoffAt).
+			OrderDesc("id").One()
+		if err != nil {
+			return 0, false, gerror.Wrap(err, "检查下架频道已发送任务失败")
+		}
+	}
+	if !existing.IsEmpty() {
+		if existing["status"].String() == "sent" {
+			return existing["id"].Int64(), false, nil
+		}
+		_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", existing["id"].Int64()).Data(g.Map{
+			"status": "sending", "dispatch_status": tgDispatchStatusProcessing,
+			"error_message": "", "updated_at": gtime.Now(),
+		}).Update()
+		if err != nil {
+			return 0, false, gerror.Wrap(err, "重置下架频道TG任务失败")
+		}
+		return existing["id"].Int64(), true, nil
+	}
 	now := gtime.Now()
-	operationNo := fmt.Sprintf("down:%d:%d", job.TaskId, now.TimestampNano())
 	id, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
 		"task_id":         job.TaskId,
 		"operation_no":    operationNo,
@@ -202,9 +239,9 @@ func (s *sSysPublish) createDownChannelTelegramJob(ctx context.Context, job tele
 		"updated_at":      now,
 	}).InsertAndGetId()
 	if err != nil {
-		return 0, gerror.Wrap(err, "创建下架频道TG任务失败")
+		return 0, false, gerror.Wrap(err, "创建下架频道TG任务失败")
 	}
-	return id, nil
+	return id, true, nil
 }
 
 func (s *sSysPublish) sendDownChannelProfileLockedByChannel(ctx context.Context, job telegramJobRecord, taskId int64, channelId int64) error {
@@ -313,5 +350,18 @@ func (s *sSysPublish) profileDownRows(ctx context.Context, ids []int64, tenantId
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取下架资料失败")
 	}
-	return rows, nil
+	latest := make([]gdb.Record, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, row := range rows {
+		profileId := row["profile_id"].Int64()
+		if profileId <= 0 {
+			continue
+		}
+		if _, exists := seen[profileId]; exists {
+			continue
+		}
+		seen[profileId] = struct{}{}
+		latest = append(latest, row)
+	}
+	return latest, nil
 }

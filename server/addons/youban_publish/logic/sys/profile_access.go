@@ -62,6 +62,23 @@ func (s *sSysPublish) editableProfileTask(ctx context.Context, profileId int64, 
 	return row, nil
 }
 
+// mediaEditTask resolves the internal editing snapshot for a profile. The
+// public media APIs use profileId; taskId remains an internal publishing
+// implementation detail.
+func (s *sSysPublish) mediaEditTask(ctx context.Context, profileId int64, tenantId int64, accountId int64) (gdb.Record, error) {
+	if profileId <= 0 {
+		return nil, gerror.New("资料ID不能为空")
+	}
+	task, err := s.editableProfileTask(ctx, profileId, tenantId, accountId)
+	if err != nil {
+		return nil, err
+	}
+	if task.IsEmpty() {
+		return nil, gerror.New("资料当前没有可编辑版本，请先保存资料")
+	}
+	return task, nil
+}
+
 func (s *sSysPublish) cloneProfileTaskMedia(ctx context.Context, tx gdb.TX, sourceTaskId int64, targetTaskId int64, profileId int64, tenantId int64, accountId int64, operatorId int64) error {
 	var rows []gdb.Record
 	if err := tx.Model(publishMediaTable).Ctx(ctx).
@@ -113,24 +130,6 @@ func (s *sSysPublish) cloneEditableProfileTask(ctx context.Context, tx gdb.TX, s
 		return nil, err
 	}
 	return tx.Model(publishTaskTable).Ctx(ctx).Where("id", id).One()
-}
-
-func (s *sSysPublish) profileTaskByTaskId(ctx context.Context, tx gdb.TX, taskId int64, tenantId int64, accountId int64) (gdb.Record, error) {
-	mod := tx.Model(publishTaskTable).Ctx(ctx).Where("id", taskId).WhereNull("deleted_at")
-	if tenantId > 0 {
-		mod = mod.Where("tenant_id", tenantId)
-	}
-	if accountId > 0 {
-		mod = mod.Where("account_id", accountId)
-	}
-	row, err := mod.One()
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取资料任务失败")
-	}
-	if row.IsEmpty() {
-		return nil, gerror.New("资料任务不存在或无权操作")
-	}
-	return row, nil
 }
 
 func (s *sSysPublish) allowedProfileIds(ctx context.Context, ids []int64, tenantId int64, accountId int64) ([]int64, error) {
@@ -226,21 +225,35 @@ func (s *sSysPublish) availableProfileChannelIds(ctx context.Context, ids []int6
 }
 
 func (s *sSysPublish) mediaListByProfile(ctx context.Context, profileId int64, tenantId int64, accountId int64) (list []*sysin.MediaModel, err error) {
-	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("profile_id", profileId).WhereNull("deleted_at")
+	if profileId <= 0 {
+		return []*sysin.MediaModel{}, nil
+	}
+	taskMod := g.DB().Model(publishTaskTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).
+		WhereNull("deleted_at")
 	if tenantId > 0 {
-		mod = mod.Where("tenant_id", tenantId)
+		taskMod = taskMod.Where("tenant_id", tenantId)
 	}
 	if accountId > 0 {
-		mod = mod.Where("account_id", accountId)
+		taskMod = taskMod.Where("account_id", accountId)
 	}
-	if err = mod.OrderAsc("sort_index").OrderAsc("id").Scan(&list); err != nil {
-		return nil, gerror.Wrap(err, "获取笔记媒体失败")
+	task, err := taskMod.Clone().
+		Where("status", sysin.PublishTaskStatusPublished).
+		OrderDesc("id").
+		One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取资料当前版本失败")
 	}
-	if list == nil {
-		list = []*sysin.MediaModel{}
+	if task.IsEmpty() {
+		task, err = taskMod.OrderDesc("id").One()
+		if err != nil {
+			return nil, gerror.Wrap(err, "读取资料当前版本失败")
+		}
 	}
-	normalizeMediaListFileURL(list)
-	return list, nil
+	if task.IsEmpty() {
+		return []*sysin.MediaModel{}, nil
+	}
+	return s.mediaListByTenant(ctx, task["id"].Int64(), tenantId)
 }
 
 func (s *sSysPublish) mediaListByEditableProfile(ctx context.Context, profileId int64, tenantId int64, accountId int64) (list []*sysin.MediaModel, err error) {

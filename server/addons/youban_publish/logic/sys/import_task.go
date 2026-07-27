@@ -1356,12 +1356,11 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 	now := gtime.Now()
 	sourceCreatedAt := legacyCMSTimeOrDefault(detail.CreatedAt, now)
 	sourceUpdatedAt := legacyCMSTimeOrDefault(detail.UpdatedAt, sourceCreatedAt)
-	restoredTaskId, restoredProfileId, err := s.restoreLegacyCMSImportedLocal(ctx, taskRow, sourceNoteId, now)
+	_, restoredProfileId, err := s.restoreLegacyCMSImportedLocal(ctx, taskRow, sourceNoteId, now)
 	if err != nil {
 		return nil, err
 	}
 	input := &sysin.ProfileSaveInp{
-		TaskId:         scanItem.TaskId,
 		Title:          detail.Title,
 		Province:       detail.Province,
 		City:           detail.City,
@@ -1370,9 +1369,6 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 		CustomerRemark: "",
 		Visibility:     consts.ContentVisibilityPrivate,
 		Status:         legacyCMSProfileStatus(sourceItem.Status),
-	}
-	if restoredTaskId > 0 {
-		input.TaskId = restoredTaskId
 	}
 	if scanItem.ProfileId > 0 {
 		input.Id = scanItem.ProfileId
@@ -1571,7 +1567,7 @@ func (s *sSysPublish) importLegacyCMSMedia(ctx context.Context, runId int64, sou
 			sortIndex = idx + 1
 		}
 		if _, err = s.saveMediaAttachment(ctx, task, &sysin.MediaUploadInp{
-			TaskId:    task["id"].Int64(),
+			ProfileId: task["profile_id"].Int64(),
 			MediaType: item.MediaType,
 			Purpose:   purpose,
 			SortIndex: sortIndex,

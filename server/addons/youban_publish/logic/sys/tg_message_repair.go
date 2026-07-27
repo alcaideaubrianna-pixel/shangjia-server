@@ -938,7 +938,8 @@ func (s *sSysPublish) finishProfileDownAfterRepair(ctx context.Context, task gdb
 	if err := s.syncProfileNoteIndex(ctx, profileId); err != nil {
 		return err
 	}
-	if err := s.handleProfilesDown(ctx, []int64{profileId}, tenantId); err != nil {
+	downAt := gtime.Now().String()
+	if err := s.handleProfilesDown(ctx, []int64{profileId}, tenantId, downAt, newTelegramOperationNo("down", profileId)); err != nil {
 		return err
 	}
 	iservice.SysContent().ClearHomeProfileCardsCache(ctx)

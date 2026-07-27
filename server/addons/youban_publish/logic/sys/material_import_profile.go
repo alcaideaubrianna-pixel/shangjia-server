@@ -31,19 +31,17 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 	}
 	input := &sysin.ProfileSaveInp{
 		Id:         group.ProfileId,
-		TaskId:     group.TaskProfileId,
 		Title:      title,
 		PlainText:  strings.TrimSpace(firstNonEmpty(group.ProfileText, group.RawText)),
 		Visibility: consts.ContentVisibilityPrivate,
 		Status:     1,
 	}
 	if group.ProfileId <= 0 {
-		profileId, taskId, err := s.materialImportExistingProfile(ctx, group)
+		profileId, _, err := s.materialImportExistingProfile(ctx, group)
 		if err != nil {
 			return 0, 0, err
 		}
 		input.Id = profileId
-		input.TaskId = taskId
 	}
 	saved, err := s.saveProfile(ctx, input, task.TenantId, task.AccountId)
 	if err != nil {
@@ -144,7 +142,7 @@ func (s *sSysPublish) replaceMaterialImportMedia(ctx context.Context, task *sysi
 			"profile_id": gvar.New(saved.Id),
 			"status":     gvar.New(sysin.PublishTaskStatusDraft),
 		}, &sysin.MediaUploadInp{
-			TaskId:    saved.TaskId,
+			ProfileId: saved.Id,
 			MediaType: mediaType,
 			Purpose:   purpose,
 			SortIndex: index + 1,

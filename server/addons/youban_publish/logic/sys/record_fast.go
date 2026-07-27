@@ -12,7 +12,7 @@ import (
 )
 
 func (s *sSysPublish) publishRecordListFast(ctx context.Context, in *sysin.PublishRecordListInp, tenantId int64, accountId int64) (list []*sysin.PublishRecordModel, totalCount int, err error) {
-	mod := g.DB().Model(publishTgJobLogTable+" l").Safe().Ctx(ctx).Where("l.tenant_id", tenantId)
+	mod := g.DB().Model(publishSuccessRecordTable+" l").Safe().Ctx(ctx).Where("l.tenant_id", tenantId)
 	if accountId > 0 {
 		mod = mod.Where("l.account_id", accountId)
 	} else if in.AccountId > 0 {
@@ -27,17 +27,17 @@ func (s *sSysPublish) publishRecordListFast(ctx context.Context, in *sysin.Publi
 	if in.Action != "" {
 		mod = mod.Where("l.action", in.Action)
 	}
-	if in.Status == "error" {
-		mod = mod.WhereIn("l.status", []string{"failed", "failed_retry"})
-	} else if in.Status != "" {
-		mod = mod.Where("l.status", in.Status)
+	if in.Status != "" && in.Status != "success" && in.Status != "sent" {
+		mod = mod.Where("1", 0)
+	} else {
+		mod = mod.Where("l.status", "success")
 	}
 
 	totalCount, err = mod.Clone().Count()
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取发送记录总数失败")
 	}
-	if err = mod.Fields("l.id,l.job_id,l.task_id,l.tenant_id,l.account_id,l.profile_id,l.bot_id,l.action,l.status,l.message,l.created_at").
+	if err = mod.Fields("l.id,l.job_id,l.task_id,l.tenant_id,l.account_id,l.profile_id,l.channel_id,l.bot_id,l.operation_no,l.target_chat_id,l.action,l.status,l.message,l.created_at").
 		Page(in.Page, in.PerPage).
 		OrderDesc("l.id").
 		Scan(&list); err != nil {

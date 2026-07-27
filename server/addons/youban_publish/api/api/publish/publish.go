@@ -452,13 +452,6 @@ type AdminUploadMediaRes struct {
 	*sysin.MediaModel
 }
 
-type AdminReconcileMediaReq struct {
-	g.Meta `path:"/publish/admin/media/reconcile" method:"post" tags:"上架插件管理端" summary:"同步资料媒体"`
-	sysin.MediaReconcileInp
-}
-
-type AdminReconcileMediaRes struct{}
-
 type AdminProfileListReq struct {
 	g.Meta `path:"/publish/admin/profile/list" method:"get" tags:"上架插件管理端" summary:"资料列表"`
 	sysin.ProfileListInp
@@ -491,10 +484,16 @@ type AdminProfileCreateReq struct {
 type AdminProfileCreateRes = AdminProfileEditRes
 
 type AdminProfileEditRes struct {
-	Id     int64  `json:"id" dc:"资料ID"`
-	Uuid   string `json:"uuid" dc:"资料UUID"`
-	TaskId int64  `json:"taskId" dc:"任务ID"`
+	Id   int64  `json:"id" dc:"资料ID"`
+	Uuid string `json:"uuid" dc:"资料UUID"`
 }
+
+type AdminProfilePublishReq struct {
+	g.Meta `path:"/publish/admin/profile/publish" method:"post" tags:"上架插件管理端" summary:"发布资料"`
+	sysin.ProfileViewInp
+}
+
+type AdminProfilePublishRes struct{}
 
 type AdminProfileDeleteReq struct {
 	g.Meta `path:"/publish/admin/profile/delete" method:"post" tags:"上架插件管理端" summary:"删除资料"`
@@ -721,20 +720,13 @@ type UploadMediaRes struct {
 }
 
 type MediaListReq struct {
-	g.Meta `path:"/publish/media/list" method:"get" tags:"上架插件" summary:"任务媒体列表"`
+	g.Meta `path:"/publish/media/list" method:"get" tags:"上架插件" summary:"资料媒体列表"`
 	sysin.MediaListInp
 }
 
 type MediaListRes struct {
 	List []*sysin.MediaModel `json:"list" dc:"媒体列表"`
 }
-
-type ReconcileMediaReq struct {
-	g.Meta `path:"/publish/media/reconcile" method:"post" tags:"上架插件" summary:"同步任务媒体"`
-	sysin.MediaReconcileInp
-}
-
-type ReconcileMediaRes struct{}
 
 type MyProfileListReq struct {
 	g.Meta `path:"/publish/profile/list" method:"get" tags:"上架插件" summary:"我的资料列表"`
@@ -786,10 +778,16 @@ type MyProfileCreateReq struct {
 type MyProfileCreateRes = MyProfileEditRes
 
 type MyProfileEditRes struct {
-	Id     int64  `json:"id" dc:"资料ID"`
-	Uuid   string `json:"uuid" dc:"资料UUID"`
-	TaskId int64  `json:"taskId" dc:"任务ID"`
+	Id   int64  `json:"id" dc:"资料ID"`
+	Uuid string `json:"uuid" dc:"资料UUID"`
 }
+
+type MyProfilePublishReq struct {
+	g.Meta `path:"/publish/profile/publish" method:"post" tags:"上架插件" summary:"发布我的资料"`
+	sysin.ProfileViewInp
+}
+
+type MyProfilePublishRes struct{}
 
 type MyProfileDeleteReq struct {
 	g.Meta `path:"/publish/profile/delete" method:"post" tags:"上架插件" summary:"删除我的资料"`

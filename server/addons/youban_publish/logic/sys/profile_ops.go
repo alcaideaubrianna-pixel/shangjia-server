@@ -8,6 +8,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/model/input/form"
@@ -50,7 +51,11 @@ func (s *sSysPublish) MyProfileView(ctx context.Context, in *sysin.ProfileViewIn
 	if err != nil {
 		return nil, err
 	}
-	return &sysin.ProfileViewModel{Profile: profile, Media: media}, nil
+	pushChannels, err := s.profilePushChannels(ctx, profile)
+	if err != nil {
+		return nil, err
+	}
+	return &sysin.ProfileViewModel{Profile: profile, Media: media, PushChannels: pushChannels}, nil
 }
 
 func (s *sSysPublish) MyProfileOptions(ctx context.Context) (res *sysin.ProfileOptionsModel, err error) {
@@ -85,7 +90,9 @@ func (s *sSysPublish) MyProfileCreate(ctx context.Context, in *sysin.ProfileSave
 	if in == nil {
 		return nil, gerror.New("资料信息不能为空")
 	}
-	in.Id, in.Uuid, in.TaskId = 0, "", 0
+	in.Id, in.Uuid = 0, ""
+	in.Status = 2
+	in.Visibility = consts.ContentVisibilityPrivate
 	return s.saveProfile(ctx, in, account.TenantId, account.Id)
 }
 
@@ -97,6 +104,7 @@ func (s *sSysPublish) MyProfileEdit(ctx context.Context, in *sysin.ProfileSaveIn
 	if in == nil || (in.Id <= 0 && normalizeProfileUUID(in.Uuid) == "") {
 		return nil, gerror.New("资料UUID不能为空")
 	}
+	in.KeepPublishState = true
 	return s.saveProfile(ctx, in, account.TenantId, account.Id)
 }
 
@@ -220,7 +228,11 @@ func (s *sSysPublish) AdminProfileView(ctx context.Context, in *sysin.ProfileVie
 	if err != nil {
 		return nil, err
 	}
-	return &sysin.ProfileViewModel{Profile: profile, Media: media}, nil
+	pushChannels, err := s.profilePushChannels(ctx, profile)
+	if err != nil {
+		return nil, err
+	}
+	return &sysin.ProfileViewModel{Profile: profile, Media: media, PushChannels: pushChannels}, nil
 }
 
 func (s *sSysPublish) AdminProfileCreate(ctx context.Context, in *sysin.ProfileSaveInp) (res *sysin.ProfileSaveModel, err error) {
@@ -231,7 +243,9 @@ func (s *sSysPublish) AdminProfileCreate(ctx context.Context, in *sysin.ProfileS
 	if in == nil {
 		return nil, gerror.New("资料信息不能为空")
 	}
-	in.Id, in.Uuid, in.TaskId = 0, "", 0
+	in.Id, in.Uuid = 0, ""
+	in.Status = 2
+	in.Visibility = consts.ContentVisibilityPrivate
 	return s.saveProfile(ctx, in, account.TenantId, account.Id)
 }
 
@@ -248,6 +262,7 @@ func (s *sSysPublish) AdminProfileEdit(ctx context.Context, in *sysin.ProfileSav
 			return nil, err
 		}
 	}
+	in.KeepPublishState = true
 	return s.saveProfile(ctx, in, account.TenantId, account.Id)
 }
 

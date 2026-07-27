@@ -13,7 +13,7 @@ import (
 )
 
 func (s *sSysPublish) bootstrapCyclePlans(ctx context.Context) error {
-	var rows []struct {
+	type cycleBootstrapRow struct {
 		TenantId    int64  `orm:"tenant_id" json:"tenantId"`
 		AccountId   int64  `orm:"account_id" json:"accountId"`
 		ProfileId   int64  `orm:"profile_id" json:"profileId"`
@@ -22,6 +22,7 @@ func (s *sSysPublish) bootstrapCyclePlans(ctx context.Context) error {
 		Days        int    `orm:"days" json:"days"`
 		PublishTime string `orm:"publish_time" json:"publishTime"`
 	}
+	var rows []cycleBootstrapRow
 	err := g.DB().Model(publishChannelTable+" c").Safe().Ctx(ctx).
 		Fields("c.tenant_id,j.account_id,j.profile_id,j.task_id,c.id AS channel_id,c.cycle_publish_days AS days,c.cycle_publish_time AS publish_time").
 		LeftJoin(publishTgJobTable+" j", "j.channel_id=c.id AND j.status='sent'").
@@ -34,7 +35,20 @@ func (s *sSysPublish) bootstrapCyclePlans(ctx context.Context) error {
 	if err != nil {
 		return gerror.Wrap(err, "读取已开启循环上架频道失败")
 	}
+	type cyclePlanKey struct {
+		TenantId  int64
+		ProfileId int64
+		ChannelId int64
+	}
+	latestRows := make(map[cyclePlanKey]cycleBootstrapRow)
 	for _, row := range rows {
+		key := cyclePlanKey{TenantId: row.TenantId, ProfileId: row.ProfileId, ChannelId: row.ChannelId}
+		current, exists := latestRows[key]
+		if !exists || row.TaskId > current.TaskId {
+			latestRows[key] = row
+		}
+	}
+	for _, row := range latestRows {
 		if row.TenantId <= 0 || row.AccountId <= 0 || row.ProfileId <= 0 || row.TaskId <= 0 || row.ChannelId <= 0 {
 			continue
 		}
@@ -163,7 +177,6 @@ func (s *sSysPublish) ensureCyclePlanForJob(ctx context.Context, job telegramJob
 		"enabled":            1,
 		"interval_seconds":   s.cycleIntervalSeconds(ctx, channel.CyclePublishDays),
 		"publish_time":       channel.CyclePublishTime,
-		"next_run_at":        s.nextCycleRunAt(ctx, cyclePlanRecord{IntervalSeconds: s.cycleIntervalSeconds(ctx, channel.CyclePublishDays), PublishTime: channel.CyclePublishTime}, gtime.Now()),
 		"status":             cyclePlanStatusActive,
 		"source":             "channel",
 		"last_error_message": "",
@@ -245,18 +258,19 @@ func (s *sSysPublish) upsertCyclePlan(ctx context.Context, data g.Map) error {
 		Where("account_id", data["account_id"]).
 		Where("profile_id", data["profile_id"]).
 		Where("channel_id", data["channel_id"]).
+		Where("task_id", data["task_id"]).
 		WhereNull("deleted_at").
 		Count()
 	if err != nil {
 		return gerror.Wrap(err, "检查循环上架计划失败")
 	}
 	if count > 0 {
-		delete(data, "next_run_at")
 		_, err = g.DB().Model(publishCyclePlanTable).Safe().Ctx(ctx).
 			Where("tenant_id", data["tenant_id"]).
 			Where("account_id", data["account_id"]).
 			Where("profile_id", data["profile_id"]).
 			Where("channel_id", data["channel_id"]).
+			Where("task_id", data["task_id"]).
 			WhereNull("deleted_at").
 			Data(data).
 			Update()

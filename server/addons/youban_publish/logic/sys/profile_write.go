@@ -57,6 +57,7 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	now := gtime.Now()
 	var profileId int64
 	var taskId int64
+	var removedMediaIds []int64
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if in.Id > 0 {
 			task, taskErr := s.profileTask(ctx, tx, in.Id, tenantId, 0)
@@ -68,20 +69,6 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			if taskId <= 0 {
 				return gerror.New("资料不属于上架端")
 			}
-			if task["status"].String() != sysin.PublishTaskStatusDraft {
-				task, taskErr = s.cloneEditableProfileTask(ctx, tx, task, contexts.GetUserId(ctx))
-				if taskErr != nil {
-					return taskErr
-				}
-				taskId = task["id"].Int64()
-			}
-		} else if in.TaskId > 0 {
-			task, taskErr := s.profileTaskByTaskId(ctx, tx, in.TaskId, tenantId, accountId)
-			if taskErr != nil {
-				return taskErr
-			}
-			taskId = task["id"].Int64()
-			profileId = task["profile_id"].Int64()
 			if task["status"].String() != sysin.PublishTaskStatusDraft {
 				task, taskErr = s.cloneEditableProfileTask(ctx, tx, task, contexts.GetUserId(ctx))
 				if taskErr != nil {
@@ -139,10 +126,19 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 				return err
 			}
 		}
+		if in.Media != nil {
+			removedMediaIds, err = s.syncTaskMediaFromProfileInput(ctx, tx, taskId, profileId, tenantId, accountId, in.Media)
+			return err
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	for _, mediaId := range removedMediaIds {
+		if deleteErr := s.deleteMediaPHashBucketByMediaId(ctx, mediaId); deleteErr != nil {
+			g.Log().Warningf(ctx, "清理已删除资料索引失败 mediaId:%d err:%v", mediaId, deleteErr)
+		}
 	}
 	if err = s.syncProfileNoteIndex(ctx, profileId); err != nil {
 		return nil, err
@@ -410,7 +406,12 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	}
 	nextStatus := in.Status
 	nextVisibility := in.Visibility
-	if current[columns.Status].Int() == 1 && tgPushEnabled == 1 {
+	profilePublishedAt := publishAt
+	if in.KeepPublishState {
+		nextStatus = current[columns.Status].Int()
+		nextVisibility = current[columns.Visibility].String()
+		profilePublishedAt = current[columns.PublishedAt].GTime()
+	} else if current[columns.Status].Int() == 1 && tgPushEnabled == 1 {
 		nextStatus = 1
 		nextVisibility = consts.ContentVisibilityPublic
 	}
@@ -430,10 +431,10 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		data[columns.SourceUpdatedAt] = now
 		data[columns.UpdatedAt] = now
 	}
-	if nextStatus == 1 && publishAt == nil {
-		publishAt = now
+	if nextStatus == 1 && profilePublishedAt == nil {
+		profilePublishedAt = now
 	}
-	data[columns.PublishedAt] = publishAt
+	data[columns.PublishedAt] = profilePublishedAt
 	if _, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Where(columns.Id, profileId).Data(data).Update(); err != nil {
 		return gerror.Wrap(err, "更新资料失败")
 	}

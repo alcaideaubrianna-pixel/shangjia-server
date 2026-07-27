@@ -68,9 +68,10 @@ type importMatchQueuePayload struct {
 }
 
 type profileDownQueuePayload struct {
-	TenantId   int64   `json:"tenantId"`
-	ProfileIds []int64 `json:"profileIds"`
-	DownAt     string  `json:"downAt"`
+	TenantId    int64   `json:"tenantId"`
+	ProfileIds  []int64 `json:"profileIds"`
+	DownAt      string  `json:"downAt"`
+	OperationNo string  `json:"operationNo"`
 }
 
 type cycleRunQueuePayload struct {
@@ -286,7 +287,10 @@ func (s *sSysPublish) enqueueProfileDownRun(ctx context.Context, tenantId int64,
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(profileDownQueuePayload{TenantId: tenantId, ProfileIds: profileIds, DownAt: gtime.Now().String()})
+	payload, err := json.Marshal(profileDownQueuePayload{
+		TenantId: tenantId, ProfileIds: profileIds, DownAt: gtime.Now().String(),
+		OperationNo: newTelegramOperationNo("down", profileIds[0]),
+	})
 	if err != nil {
 		return err
 	}

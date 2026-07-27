@@ -25,10 +25,11 @@ func (s *sSysPublish) AdminMediaUpload(ctx context.Context, in *sysin.MediaUploa
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
-	task, err := s.getTaskByTenant(ctx, in.TaskId, account.TenantId)
+	task, err := s.resolveMediaEditTask(ctx, in, account.TenantId, 0)
 	if err != nil {
 		return nil, err
 	}
+	in.ProfileId = task["profile_id"].Int64()
 	return s.saveUploadedTaskMedia(ctx, task, in, file, poster, originalFile)
 }
 
@@ -40,11 +41,19 @@ func (s *sSysPublish) MyMediaUpload(ctx context.Context, in *sysin.MediaUploadIn
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
-	task, err := s.getTask(ctx, in.TaskId, account.Id)
+	task, err := s.resolveMediaEditTask(ctx, in, account.TenantId, account.Id)
 	if err != nil {
 		return nil, err
 	}
+	in.ProfileId = task["profile_id"].Int64()
 	return s.saveUploadedTaskMedia(ctx, task, in, file, poster, originalFile)
+}
+
+func (s *sSysPublish) resolveMediaEditTask(ctx context.Context, in *sysin.MediaUploadInp, tenantId int64, accountId int64) (gdb.Record, error) {
+	if in == nil {
+		return nil, gerror.New("媒体上传参数不能为空")
+	}
+	return s.mediaEditTask(ctx, in.ProfileId, tenantId, accountId)
 }
 
 func (s *sSysPublish) AdminMessageTemplateMediaUpload(ctx context.Context, in *sysin.MessageTemplateMediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile) (*sysin.MessageTemplateMediaModel, error) {
@@ -142,10 +151,10 @@ func validatePublishMediaSize(mediaType string, file *ghttp.UploadFile) error {
 func logMediaUploadStage(ctx context.Context, stage string, startedAt time.Time, in *sysin.MediaUploadInp, file *ghttp.UploadFile, err error) {
 	duration := time.Since(startedAt)
 	mediaType := ""
-	taskId := int64(0)
+	profileId := int64(0)
 	if in != nil {
 		mediaType = strings.TrimSpace(in.MediaType)
-		taskId = in.TaskId
+		profileId = in.ProfileId
 	}
 	if err == nil && mediaType != "video" && duration < 500*time.Millisecond {
 		return
@@ -164,8 +173,8 @@ func logMediaUploadStage(ctx context.Context, stage string, startedAt time.Time,
 	}
 	traceId := gtrace.GetTraceID(ctx)
 	if err != nil {
-		g.Log().Warningf(ctx, "上架媒体上传阶段失败 stage:%s duration_ms:%d task_id:%d uid:%s upload_trace_id:%s trace_id:%s media_type:%s file_size:%d file_name:%s err:%+v", stage, duration.Milliseconds(), taskId, uploadUid, uploadTraceId, traceId, mediaType, fileSize, fileName, err)
+		g.Log().Warningf(ctx, "上架媒体上传阶段失败 stage:%s duration_ms:%d profile_id:%d uid:%s upload_trace_id:%s trace_id:%s media_type:%s file_size:%d file_name:%s err:%+v", stage, duration.Milliseconds(), profileId, uploadUid, uploadTraceId, traceId, mediaType, fileSize, fileName, err)
 		return
 	}
-	g.Log().Infof(ctx, "上架媒体上传阶段 stage:%s duration_ms:%d task_id:%d uid:%s upload_trace_id:%s trace_id:%s media_type:%s file_size:%d file_name:%s", stage, duration.Milliseconds(), taskId, uploadUid, uploadTraceId, traceId, mediaType, fileSize, fileName)
+	g.Log().Infof(ctx, "上架媒体上传阶段 stage:%s duration_ms:%d profile_id:%d uid:%s upload_trace_id:%s trace_id:%s media_type:%s file_size:%d file_name:%s", stage, duration.Milliseconds(), profileId, uploadUid, uploadTraceId, traceId, mediaType, fileSize, fileName)
 }

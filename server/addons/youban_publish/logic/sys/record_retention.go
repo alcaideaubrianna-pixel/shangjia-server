@@ -9,7 +9,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
-const publishRecordRetentionDays = 7
+const publishRecordRetentionDays = 3
 
 func (s *sSysPublish) runPublishRecordRetentionCleaner(ctx context.Context) {
 	if err := s.cleanupPublishRecordsOlderThan(ctx, publishRecordRetentionDays); err != nil {

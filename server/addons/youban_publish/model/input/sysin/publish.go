@@ -451,7 +451,7 @@ type TaskCancelInp struct {
 }
 
 type MediaUploadInp struct {
-	TaskId         int64  `json:"taskId" dc:"任务ID"`
+	ProfileId      int64  `json:"profileId" dc:"资料ID"`
 	MediaId        int64  `json:"mediaId" dc:"媒体ID，编辑已有媒体时传入"`
 	MediaType      string `json:"mediaType" dc:"媒体类型：image/video"`
 	Purpose        string `json:"purpose" dc:"用途：display/verify"`
@@ -463,8 +463,8 @@ type MediaUploadInp struct {
 }
 
 func (in *MediaUploadInp) Filter(ctx context.Context) error {
-	if in.TaskId <= 0 {
-		return gerror.New("任务ID不能为空")
+	if in.ProfileId <= 0 {
+		return gerror.New("资料ID不能为空")
 	}
 	in.MediaType = strings.TrimSpace(in.MediaType)
 	if in.MediaType == "" {
@@ -484,7 +484,8 @@ func (in *MediaUploadInp) Filter(ctx context.Context) error {
 }
 
 type MediaListInp struct {
-	TaskId int64 `json:"taskId" v:"required|min:1#任务ID不能为空|任务ID不能为空" dc:"任务ID"`
+	ProfileId int64 `json:"profileId" dc:"资料ID"`
+	TaskId    int64 `json:"taskId" dc:"任务ID"`
 }
 
 type MediaDeleteInp struct {
@@ -500,25 +501,6 @@ type MediaSortItem struct {
 type MediaSortInp struct {
 	TaskId int64            `json:"taskId" v:"required|min:1#任务ID不能为空|任务ID不能为空" dc:"任务ID"`
 	Items  []*MediaSortItem `json:"items" dc:"排序列表"`
-}
-
-type MediaReconcileInp struct {
-	TaskId          int64            `json:"taskId" v:"required|min:1#任务ID不能为空|任务ID不能为空" dc:"任务ID"`
-	Items           []*MediaSortItem `json:"items" dc:"媒体清单"`
-	RemovedMediaIds []int64          `json:"removedMediaIds" dc:"待删除媒体ID"`
-}
-
-func (in *MediaReconcileInp) Filter(ctx context.Context) error {
-	if in.TaskId <= 0 {
-		return gerror.New("任务ID不能为空")
-	}
-	for _, id := range in.RemovedMediaIds {
-		if id <= 0 {
-			return gerror.New("待删除媒体ID不合法")
-		}
-	}
-	sortInput := &MediaSortInp{TaskId: in.TaskId, Items: in.Items}
-	return sortInput.Filter(ctx)
 }
 
 func (in *MediaSortInp) Filter(ctx context.Context) error {
@@ -643,8 +625,20 @@ type ProfileModel struct {
 }
 
 type ProfileViewModel struct {
-	Profile *ProfileModel `json:"profile" dc:"资料详情"`
-	Media   []*MediaModel `json:"media" dc:"媒体列表"`
+	Profile      *ProfileModel              `json:"profile" dc:"资料详情"`
+	Media        []*MediaModel              `json:"media" dc:"媒体列表"`
+	PushChannels []*ProfilePushChannelModel `json:"pushChannels" dc:"资料推送频道"`
+}
+
+type ProfilePushChannelModel struct {
+	ChannelId           int64       `json:"channelId" dc:"频道ID"`
+	ChannelTitle        string      `json:"channelTitle" dc:"频道名称"`
+	ChannelUsername     string      `json:"channelUsername" dc:"频道用户名"`
+	Status              int         `json:"status" dc:"频道状态"`
+	CyclePublishEnabled int         `json:"cyclePublishEnabled" dc:"是否循环推送"`
+	CyclePublishDays    int         `json:"cyclePublishDays" dc:"循环推送天数"`
+	FirstPushAt         *gtime.Time `json:"firstPushAt" dc:"首次推送时间"`
+	NextPushAt          *gtime.Time `json:"nextPushAt" dc:"下次推送时间"`
 }
 
 type ProfileOptionsModel struct {
@@ -676,20 +670,27 @@ type BotMediaSearchInp struct {
 }
 
 type ProfileSaveInp struct {
-	Id              int64   `json:"id" dc:"资料ID"`
-	Uuid            string  `json:"uuid" dc:"资料UUID"`
-	TaskId          int64   `json:"taskId" dc:"任务ID"`
-	ChannelIds      []int64 `json:"channelIds" dc:"推送频道ID列表"`
-	Title           string  `json:"title" v:"required#标题不能为空" dc:"标题"`
-	Province        string  `json:"province" dc:"省份"`
-	City            string  `json:"city" dc:"城市"`
-	PlainText       string  `json:"plainText" dc:"正文"`
-	Tag             string  `json:"tag" dc:"标签"`
-	CustomerRemark  string  `json:"customerRemark" dc:"客服备注"`
-	AntiScanEnabled int     `json:"antiScanEnabled" dc:"是否防扫图处理"`
-	PublishAt       string  `json:"publishAt" dc:"定时上架时间"`
-	Visibility      string  `json:"visibility" dc:"可见性：private/public/member_only"`
-	Status          int     `json:"status" dc:"状态：1上架 2下架"`
+	Id               int64                   `json:"id" dc:"资料ID"`
+	Uuid             string                  `json:"uuid" dc:"资料UUID"`
+	ChannelIds       []int64                 `json:"channelIds" dc:"推送频道ID列表"`
+	Title            string                  `json:"title" v:"required#标题不能为空" dc:"标题"`
+	Province         string                  `json:"province" dc:"省份"`
+	City             string                  `json:"city" dc:"城市"`
+	PlainText        string                  `json:"plainText" dc:"正文"`
+	Tag              string                  `json:"tag" dc:"标签"`
+	CustomerRemark   string                  `json:"customerRemark" dc:"客服备注"`
+	AntiScanEnabled  int                     `json:"antiScanEnabled" dc:"是否防扫图处理"`
+	PublishAt        string                  `json:"publishAt" dc:"定时上架时间"`
+	Visibility       string                  `json:"visibility" dc:"可见性：private/public/member_only"`
+	Status           int                     `json:"status" dc:"状态：1上架 2下架"`
+	Media            []*ProfileMediaSaveItem `json:"media" dc:"资料媒体清单"`
+	KeepPublishState bool                    `json:"-"`
+}
+
+type ProfileMediaSaveItem struct {
+	MediaId   int64  `json:"mediaId" dc:"媒体ID"`
+	Purpose   string `json:"purpose" dc:"用途：display/verify"`
+	SortIndex int    `json:"sortIndex" dc:"排序"`
 }
 
 func (in *ProfileSaveInp) Filter(ctx context.Context) error {
@@ -721,6 +722,21 @@ func (in *ProfileSaveInp) Filter(ctx context.Context) error {
 	}
 	if in.PublishAt != "" && gtime.NewFromStr(in.PublishAt) == nil {
 		return gerror.New("定时上架时间不合法")
+	}
+	for _, item := range in.Media {
+		if item == nil || item.MediaId <= 0 {
+			return gerror.New("资料媒体ID不能为空")
+		}
+		item.Purpose = strings.TrimSpace(item.Purpose)
+		if item.Purpose == "" {
+			item.Purpose = "display"
+		}
+		if item.Purpose != "display" && item.Purpose != "verify" {
+			return gerror.New("资料媒体用途不合法")
+		}
+		if item.SortIndex <= 0 {
+			return gerror.New("资料媒体排序不能为空")
+		}
 	}
 	return nil
 }

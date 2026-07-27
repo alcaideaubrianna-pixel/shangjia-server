@@ -24,22 +24,22 @@ const (
 )
 
 type cyclePlanRecord struct {
-	Id              int64       `json:"id"`
-	TenantId        int64       `json:"tenantId"`
-	AccountId       int64       `json:"accountId"`
-	ProfileId       int64       `json:"profileId"`
-	ChannelId       int64       `json:"channelId"`
-	TaskId          int64       `json:"taskId"`
-	Enabled         int         `json:"enabled"`
-	IntervalSeconds int         `json:"intervalSeconds"`
-	PublishTime     string      `json:"publishTime"`
-	NextRunAt       *gtime.Time `json:"nextRunAt"`
-	Status          string      `json:"status"`
-	LastRunId       int64       `json:"lastRunId"`
-	LastRunAt       *gtime.Time `json:"lastRunAt"`
-	LockedAt        *gtime.Time `json:"lockedAt"`
-	CreatedAt       *gtime.Time `json:"createdAt"`
-	UpdatedAt       *gtime.Time `json:"updatedAt"`
+	Id              int64       `orm:"id" json:"id"`
+	TenantId        int64       `orm:"tenant_id" json:"tenantId"`
+	AccountId       int64       `orm:"account_id" json:"accountId"`
+	ProfileId       int64       `orm:"profile_id" json:"profileId"`
+	ChannelId       int64       `orm:"channel_id" json:"channelId"`
+	TaskId          int64       `orm:"task_id" json:"taskId"`
+	Enabled         int         `orm:"enabled" json:"enabled"`
+	IntervalSeconds int         `orm:"interval_seconds" json:"intervalSeconds"`
+	PublishTime     string      `orm:"publish_time" json:"publishTime"`
+	NextRunAt       *gtime.Time `orm:"next_run_at" json:"nextRunAt"`
+	Status          string      `orm:"status" json:"status"`
+	LastRunId       int64       `orm:"last_run_id" json:"lastRunId"`
+	LastRunAt       *gtime.Time `orm:"last_run_at" json:"lastRunAt"`
+	LockedAt        *gtime.Time `orm:"locked_at" json:"lockedAt"`
+	CreatedAt       *gtime.Time `orm:"created_at" json:"createdAt"`
+	UpdatedAt       *gtime.Time `orm:"updated_at" json:"updatedAt"`
 }
 
 type cycleRunRecord struct {
@@ -93,6 +93,10 @@ func (s *sSysPublish) scheduleDueCyclePlans(ctx context.Context, limit int) erro
 		}
 		if runId > 0 {
 			if err = s.enqueueCycleRun(ctx, runId, 0); err != nil {
+				_, _ = g.DB().Model(publishCyclePlanTable).Safe().Ctx(ctx).
+					Where("id", plan.Id).
+					Data(g.Map{"locked_at": nil, "last_error_message": err.Error(), "updated_at": gtime.Now()}).
+					Update()
 				return gerror.Wrap(err, "循环上架执行记录入队失败")
 			}
 		}

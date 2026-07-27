@@ -207,7 +207,7 @@ func (s *sSysPublish) handleProfileDownTask(ctx context.Context, task *asynq.Tas
 	if err != nil {
 		return err
 	}
-	return s.handleProfilesDown(ctx, payload.ProfileIds, payload.TenantId, payload.DownAt)
+	return s.handleProfilesDown(ctx, payload.ProfileIds, payload.TenantId, payload.DownAt, payload.OperationNo)
 }
 
 func (s *sSysPublish) handleCycleRunTask(ctx context.Context, task *asynq.Task) error {

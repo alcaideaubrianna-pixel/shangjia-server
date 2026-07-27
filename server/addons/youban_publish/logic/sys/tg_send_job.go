@@ -345,6 +345,9 @@ func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRe
 		return nil
 	}
 	s.appendTelegramJobLog(ctx, job, "publish", "sent", s.telegramJobPublishMessage(job, "TG资料推送成功"))
+	if recordErr := s.appendPublishSuccessRecord(ctx, job); recordErr != nil {
+		g.Log().Warningf(ctx, "保存成功发布记录失败 jobId:%d err:%+v", job.Id, recordErr)
+	}
 	allSent, err := s.allTelegramTaskJobsSent(ctx, job.TaskId, job.OperationNo)
 	if err != nil || !allSent {
 		return err
