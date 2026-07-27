@@ -17,8 +17,6 @@ import (
 	"hotgo/internal/service"
 )
 
-const maxPublishVideoSize int64 = 500 * 1024 * 1024
-
 func (s *sSysPublish) AdminMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile, originalFile *ghttp.UploadFile) (res *sysin.MediaModel, err error) {
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
@@ -134,8 +132,9 @@ func validatePublishMediaSize(mediaType string, file *ghttp.UploadFile) error {
 	if file == nil || mediaType != "video" {
 		return nil
 	}
-	if file.Size > maxPublishVideoSize {
-		return gerror.New("视频文件不能超过500MB")
+	uploadConfig := storager.GetConfig()
+	if uploadConfig != nil && uploadConfig.FileSize > 0 && file.Size > uploadConfig.FileSize*1024*1024 {
+		return gerror.Newf("视频大小不能超过%vMB", uploadConfig.FileSize)
 	}
 	return nil
 }

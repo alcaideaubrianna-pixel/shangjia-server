@@ -135,6 +135,10 @@ func ValidateFileMeta(typ string, meta *FileMeta) (err error) {
 			err = gerror.New("上传的文件不是视频")
 			return
 		}
+		if config.FileSize > 0 && meta.Size > config.FileSize*1024*1024 {
+			err = gerror.Newf("视频大小不能超过%vMB", config.FileSize)
+			return
+		}
 	case KindZip:
 		if !IsZipType(meta.Ext) {
 			err = gerror.New("上传的文件不是压缩文件")
