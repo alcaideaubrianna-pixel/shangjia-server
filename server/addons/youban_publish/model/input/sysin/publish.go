@@ -723,6 +723,7 @@ type AdminNoteMediaModel struct {
 	ProfileId int64  `json:"profileId" dc:"资料ID"`
 	MediaType string `json:"mediaType" dc:"媒体类型"`
 	FileUrl   string `json:"fileUrl" dc:"访问地址"`
+	PosterUrl string `json:"posterUrl" dc:"视频封面地址"`
 	SortIndex int    `json:"sortIndex" dc:"排序"`
 }
 

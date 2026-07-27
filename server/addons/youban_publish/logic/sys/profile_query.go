@@ -209,6 +209,9 @@ func (s *sSysPublish) adminNoteCoverMediaByProfiles(ctx context.Context, profile
 	if err != nil {
 		return nil, gerror.Wrap(err, "获取笔记封面失败")
 	}
+	for _, item := range media {
+		applyProfileCoverAsset(item)
+	}
 	normalizeMediaListFileURL(media)
 	for _, item := range media {
 		if item == nil || item.ProfileId <= 0 || len(buckets[item.ProfileId]) > 0 {
@@ -219,6 +222,7 @@ func (s *sSysPublish) adminNoteCoverMediaByProfiles(ctx context.Context, profile
 			ProfileId: item.ProfileId,
 			MediaType: item.MediaType,
 			FileUrl:   item.FileUrl,
+			PosterUrl: item.PosterUrl,
 			SortIndex: item.SortIndex,
 		})
 	}
@@ -231,21 +235,21 @@ func firstProfileCoverMedia(ctx context.Context, profileIds []int64) ([]*sysin.M
 		return []*sysin.MediaModel{}, nil
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-	args := make([]any, 0, len(ids)+1)
+	args := make([]any, 0, len(ids))
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	args = append(args, "video")
 	var media []*sysin.MediaModel
 	sql := fmt.Sprintf(`
-SELECT id, profile_id, media_type, file_url, storage_path, sort_index
+SELECT id, profile_id, media_type, file_url, storage_path, poster_url, poster_storage_path, sort_index
 FROM (
-    SELECT id, profile_id, media_type, file_url, storage_path, sort_index,
+    SELECT id, profile_id, media_type, file_url, storage_path, poster_url, poster_storage_path, sort_index,
            ROW_NUMBER() OVER (PARTITION BY profile_id ORDER BY sort_index ASC, id ASC) AS row_number
     FROM %s
     WHERE profile_id IN (%s)
       AND deleted_at IS NULL
-      AND (media_type IS NULL OR media_type = '' OR media_type <> ?)
+      AND status = 1
+      AND (purpose IS NULL OR purpose = '' OR purpose = 'display')
 ) AS profile_cover
 WHERE row_number = 1
 ORDER BY profile_id ASC`, publishMediaTable, placeholders)
@@ -253,6 +257,20 @@ ORDER BY profile_id ASC`, publishMediaTable, placeholders)
 		return nil, gerror.Wrap(err, "查询资料封面失败")
 	}
 	return media, nil
+}
+
+func applyProfileCoverAsset(media *sysin.MediaModel) {
+	if media == nil || !strings.EqualFold(strings.TrimSpace(media.MediaType), "video") {
+		return
+	}
+	posterURL := strings.TrimSpace(media.PosterUrl)
+	posterStoragePath := strings.TrimSpace(media.PosterStoragePath)
+	if posterURL == "" && posterStoragePath == "" {
+		return
+	}
+	media.MediaType = "image"
+	media.FileUrl = posterURL
+	media.StoragePath = posterStoragePath
 }
 
 func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, accountId int64) (*gdb.Model, error) {
