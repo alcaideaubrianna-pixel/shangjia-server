@@ -91,8 +91,13 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "上架任务已下架或不可发布，跳过TG推送")
 		return s.markTelegramJobSuperseded(ctx, job.Id)
 	}
-	if err = s.prepareProfileChannelPublish(ctx, job); err != nil {
+	allowed, err = s.prepareProfileChannelPublish(ctx, job)
+	if err != nil {
 		return s.handleTelegramJobError(ctx, job, err)
+	}
+	if !allowed {
+		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "频道已有同资料有效消息，跳过重复TG推送")
+		return s.markTelegramJobSuperseded(ctx, job.Id)
 	}
 	if recordErr := s.upsertPublishJobRecord(ctx, job, "sending", ""); recordErr != nil {
 		g.Log().Warningf(ctx, "更新发布发送中记录失败 jobId:%d err:%+v", job.Id, recordErr)

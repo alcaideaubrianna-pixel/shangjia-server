@@ -73,7 +73,7 @@ func (s *sSysPublish) createFullPushBatch(ctx context.Context, tenantId, channel
 			return &active, nil
 		}
 	}
-	snapshot, err := s.fullPushSnapshot(ctx, tenantId)
+	snapshot, err := s.fullPushSnapshot(ctx, tenantId, channelId)
 	if err != nil {
 		return nil, err
 	}
@@ -122,9 +122,9 @@ func (s *sSysPublish) createFullPushBatch(ctx context.Context, tenantId, channel
 	}, nil
 }
 
-func (s *sSysPublish) fullPushSnapshot(ctx context.Context, tenantId int64) (*fullPushSnapshot, error) {
+func (s *sSysPublish) fullPushSnapshot(ctx context.Context, tenantId, channelId int64) (*fullPushSnapshot, error) {
 	var snapshot fullPushSnapshot
-	err := fullPushOnlineProfileBaseModel(ctx, tenantId).
+	err := fullPushOnlineProfileBaseModel(ctx, tenantId, channelId).
 		Fields("COALESCE(MAX(p.id), 0) AS snapshot_max_profile_id, COUNT(*) AS total_count").
 		Scan(&snapshot)
 	if err != nil {
@@ -191,7 +191,7 @@ func (s *sSysPublish) advanceFullPushBatch(ctx context.Context, batch fullPushBa
 	if err != nil {
 		return gerror.Wrap(err, "更新全量推送批次状态失败")
 	}
-	profiles, err := s.fullPushProfiles(ctx, batch.TenantId, batch.CursorProfileId, batch.SnapshotMaxProfileId, limit)
+	profiles, err := s.fullPushProfiles(ctx, batch.TenantId, batch.ChannelId, batch.CursorProfileId, batch.SnapshotMaxProfileId, limit)
 	if err != nil {
 		return s.retryFullPushBatch(ctx, batch, err)
 	}
@@ -304,12 +304,12 @@ func (s *sSysPublish) finalizeFullPushBatch(ctx context.Context, batch fullPushB
 	return nil
 }
 
-func (s *sSysPublish) fullPushProfiles(ctx context.Context, tenantId, lastId, maxProfileId int64, limit int) ([]fullPushProfile, error) {
+func (s *sSysPublish) fullPushProfiles(ctx context.Context, tenantId, channelId, lastId, maxProfileId int64, limit int) ([]fullPushProfile, error) {
 	if limit <= 0 {
 		limit = 500
 	}
 	var profiles []fullPushProfile
-	err := fullPushOnlineProfileBaseModel(ctx, tenantId).
+	err := fullPushOnlineProfileBaseModel(ctx, tenantId, channelId).
 		Fields("ps.tenant_id,ps.account_id,p.id AS profile_id").
 		WhereGT("p.id", lastId).
 		WhereLTE("p.id", maxProfileId).
@@ -322,8 +322,8 @@ func (s *sSysPublish) fullPushProfiles(ctx context.Context, tenantId, lastId, ma
 	return profiles, nil
 }
 
-func fullPushOnlineProfileBaseModel(ctx context.Context, tenantId int64) *gdb.Model {
-	return g.DB().Model(publishProfileStateTable+" ps").Safe().Ctx(ctx).
+func fullPushOnlineProfileBaseModel(ctx context.Context, tenantId, channelId int64) *gdb.Model {
+	mod := g.DB().Model(publishProfileStateTable+" ps").Safe().Ctx(ctx).
 		InnerJoin(dao.ContentProfile.Table()+" p", "p.id=ps.profile_id AND p.deleted_at IS NULL").
 		InnerJoin(publishAccountTable+" a", "a.id=ps.account_id AND a.deleted_at IS NULL").
 		Where("ps.tenant_id", tenantId).
@@ -332,6 +332,22 @@ func fullPushOnlineProfileBaseModel(ctx context.Context, tenantId int64) *gdb.Mo
 		Where("a.status", 1).
 		Where("p.status", 1).
 		Where("p.visibility", consts.ContentVisibilityPublic)
+	if channelId <= 0 {
+		return mod
+	}
+	return mod.Where(`NOT EXISTS (
+		SELECT 1
+		FROM `+publishChannelProfileTable+` cp
+		JOIN `+publishTgJobTable+` cj ON cj.id = cp.last_job_id
+		WHERE cp.channel_id = ?
+		  AND cp.profile_id = p.id
+		  AND cp.status = 'active'
+		  AND cj.status = 'sent'
+		  AND EXISTS (
+			SELECT 1 FROM `+publishTgMessageTable+` cm
+			WHERE cm.job_id = cj.id AND cm.status IN ('sent', 'undeletable')
+		  )
+	)`, channelId)
 }
 
 func (s *sSysPublish) enqueueFullPushProfile(ctx context.Context, batch fullPushBatchRecord, profile fullPushProfile) error {
