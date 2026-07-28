@@ -429,15 +429,58 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 	}
 	results := []models.InlineQueryResult{}
 	if row.Id > 0 {
-		results = append(results, &models.InlineQueryResultArticle{
-			ID:          row.SerialNo,
-			Title:       row.Name,
-			Description: row.SerialNo,
-			InputMessageContent: &models.InputTextMessageContent{
-				MessageText: publishService.SysPublish().TelegramRichTextHTML(row.Text),
-				ParseMode:   models.ParseModeHTML,
-			},
-		})
+		var mediaRows []struct {
+			MediaType         string `json:"media_type"`
+			FileURL           string `json:"file_url"`
+			StoragePath       string `json:"storage_path"`
+			PosterURL         string `json:"poster_url"`
+			PosterStoragePath string `json:"poster_storage_path"`
+		}
+		mediaErr := g.DB().Model("hg_youban_publish_message_media").Safe().Ctx(ctx).
+			Where("template_id", row.Id).
+			OrderAsc("sort_index").
+			Limit(2).
+			Scan(&mediaRows)
+		if mediaErr != nil {
+			return mediaErr
+		}
+		mediaCount := len(mediaRows)
+		var media struct {
+			MediaType         string `json:"media_type"`
+			FileURL           string `json:"file_url"`
+			StoragePath       string `json:"storage_path"`
+			PosterURL         string `json:"poster_url"`
+			PosterStoragePath string `json:"poster_storage_path"`
+		}
+		if mediaCount == 1 {
+			media = mediaRows[0]
+		}
+		caption := publishService.SysPublish().TelegramRichTextHTML(row.Text)
+		if mediaCount == 1 && strings.EqualFold(strings.TrimSpace(media.MediaType), "image") {
+			photoURL := normalizePreviewMediaURL(s.absoluteMediaURL(ctx, firstNonEmpty(media.FileURL, media.StoragePath)))
+			thumbnailURL := normalizePreviewMediaURL(s.absoluteMediaURL(ctx, firstNonEmpty(media.PosterURL, media.PosterStoragePath, media.FileURL, media.StoragePath)))
+			if photoURL != "" && thumbnailURL != "" {
+				results = append(results, &models.InlineQueryResultPhoto{
+					ID:           row.SerialNo,
+					PhotoURL:     photoURL,
+					ThumbnailURL: thumbnailURL,
+					Title:        row.Name,
+					Description:  row.SerialNo,
+					Caption:      caption,
+					ParseMode:    models.ParseModeHTML,
+				})
+			}
+		} else {
+			results = append(results, &models.InlineQueryResultArticle{
+				ID:          row.SerialNo,
+				Title:       row.Name,
+				Description: row.SerialNo,
+				InputMessageContent: &models.InputTextMessageContent{
+					MessageText: caption,
+					ParseMode:   models.ParseModeHTML,
+				},
+			})
+		}
 	}
 	botRow, err := s.botById(ctx, botId)
 	if err != nil {

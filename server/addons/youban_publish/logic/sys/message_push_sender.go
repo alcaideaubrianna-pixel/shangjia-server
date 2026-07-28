@@ -329,7 +329,14 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 }
 
 func messageTemplateUsesInline(template *sysin.MessageTemplateModel) bool {
-	return template != nil && len(messageTemplateTelegramMedia(template)) == 0 && strings.TrimSpace(template.SerialNo) != ""
+	if template == nil || strings.TrimSpace(template.SerialNo) == "" {
+		return false
+	}
+	media := messageTemplateTelegramMedia(template)
+	if len(media) == 0 {
+		return true
+	}
+	return len(media) == 1 && media[0].MediaType == "image"
 }
 
 func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAccountId int64, channel *messagePushChannel, caption string, media []*telegramMediaItem, templateHash string) ([]*telegramSentMessage, error) {
