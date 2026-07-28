@@ -103,7 +103,7 @@ func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) er
 	if err := s.resetStaleTelegramDispatchJobs(ctx); err != nil {
 		return err
 	}
-	jobs, err := s.telegramSchedulerCandidates(ctx, limit*6)
+	jobs, err := s.telegramSchedulerCandidates(ctx, telegramSchedulerCandidateLimit(limit))
 	if err != nil {
 		return err
 	}
@@ -165,6 +165,20 @@ func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) er
 		}
 	}
 	return nil
+}
+
+func telegramSchedulerCandidateLimit(limit int) int {
+	if limit <= 0 {
+		limit = 50
+	}
+	candidateLimit := limit * 100
+	if candidateLimit < 1000 {
+		candidateLimit = 1000
+	}
+	if candidateLimit > 10000 {
+		candidateLimit = 10000
+	}
+	return candidateLimit
 }
 
 func (s *sSysPublish) telegramSchedulerCandidates(ctx context.Context, limit int) ([]telegramJobRecord, error) {

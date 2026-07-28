@@ -44,6 +44,25 @@ func TestTelegramJobPriorityManualProfilePublishIsUrgent(t *testing.T) {
 	}
 }
 
+func TestTelegramSchedulerCandidateLimitPreventsChannelStarvation(t *testing.T) {
+	tests := []struct {
+		name  string
+		limit int
+		want  int
+	}{
+		{name: "default batch", limit: 50, want: 5000},
+		{name: "small batch minimum", limit: 1, want: 1000},
+		{name: "large batch cap", limit: 200, want: 10000},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := telegramSchedulerCandidateLimit(test.limit); got != test.want {
+				t.Fatalf("candidate limit = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
 func TestIsManualProfilePublishOperation(t *testing.T) {
 	tests := map[string]struct {
 		operationNo string
