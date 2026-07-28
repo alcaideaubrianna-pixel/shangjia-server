@@ -488,6 +488,8 @@ ALTER TABLE "hg_youban_publish_full_push_batch" DROP COLUMN IF EXISTS "cursor_ta
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_profile_current" ON "hg_youban_publish_media" ("profile_id", "purpose", "sort_index", "id") WHERE "deleted_at" IS NULL;
 ALTER TABLE "hg_youban_publish_tg_job" ALTER COLUMN "task_id" DROP NOT NULL;
 ALTER TABLE "hg_youban_publish_tg_job" ALTER COLUMN "task_id" DROP DEFAULT;
+ALTER TABLE "hg_youban_publish_tg_message" ALTER COLUMN "task_id" DROP NOT NULL;
+ALTER TABLE "hg_youban_publish_tg_message" ALTER COLUMN "task_id" DROP DEFAULT;
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_job_profile_operation_channel" ON "hg_youban_publish_tg_job" ("profile_id", "operation_no", "channel_id") WHERE "task_id" IS NULL AND "profile_id" > 0 AND "operation_no" <> '';
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_profile_operation" ON "hg_youban_publish_tg_job" ("profile_id", "operation_no", "status", "id") WHERE "task_id" IS NULL;
 DROP INDEX IF EXISTS "idx_ybp_profile_state_current_task";

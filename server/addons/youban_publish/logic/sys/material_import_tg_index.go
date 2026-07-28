@@ -13,8 +13,8 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
-func (s *sSysPublish) ensureMaterialImportTelegramIndex(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, profileId int64, taskProfileId int64) error {
-	if task == nil || group == nil || profileId <= 0 || taskProfileId <= 0 {
+func (s *sSysPublish) ensureMaterialImportTelegramIndex(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, profileId int64) error {
+	if task == nil || group == nil || profileId <= 0 {
 		return nil
 	}
 	ids := materialImportSourceMessageIds(group.SourceMessageIds)
@@ -31,7 +31,7 @@ func (s *sSysPublish) ensureMaterialImportTelegramIndex(ctx context.Context, tas
 		_ = s.appendMaterialImportPublishLog(ctx, task, profileId, "index_skipped", "导入源频道未绑定Bot，无法建立下架删除索引")
 		return nil
 	}
-	jobId, err := s.ensureMaterialImportTelegramJob(ctx, task, group, channel, profileId, taskProfileId, botId)
+	jobId, err := s.ensureMaterialImportTelegramJob(ctx, task, group, channel, profileId, botId)
 	if err != nil {
 		return err
 	}
@@ -40,7 +40,7 @@ func (s *sSysPublish) ensureMaterialImportTelegramIndex(ctx context.Context, tas
 		return err
 	}
 	for _, row := range rows {
-		if err = s.ensureMaterialImportTelegramMessage(ctx, task, row, jobId, channel, profileId, taskProfileId, botId); err != nil {
+		if err = s.ensureMaterialImportTelegramMessage(ctx, task, row, jobId, channel, profileId, botId); err != nil {
 			return err
 		}
 	}
@@ -171,14 +171,14 @@ func (s *sSysPublish) materialImportBotHasSourceChannel(ctx context.Context, bot
 	return count > 0, nil
 }
 
-func (s *sSysPublish) ensureMaterialImportTelegramJob(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, channel tgMessageRepairChannel, profileId int64, taskProfileId int64, botId int64) (int64, error) {
+func (s *sSysPublish) ensureMaterialImportTelegramJob(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, channel tgMessageRepairChannel, profileId int64, botId int64) (int64, error) {
 	operationNo := "material_import:" + gconv.String(group.Id)
 	var existing struct {
 		Id int64 `json:"id"`
 	}
 	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Fields("id").
-		Where("task_id", taskProfileId).
+		Where("profile_id", profileId).
 		Where("operation_no", operationNo).
 		Where("channel_id", channel.Id).
 		Scan(&existing); err != nil {
@@ -186,6 +186,7 @@ func (s *sSysPublish) ensureMaterialImportTelegramJob(ctx context.Context, task 
 	}
 	now := gtime.Now()
 	data := g.Map{
+		"task_id":        nil,
 		"tenant_id":      task.TenantId,
 		"merchant_id":    task.TenantId,
 		"account_id":     task.AccountId,
@@ -202,7 +203,6 @@ func (s *sSysPublish) ensureMaterialImportTelegramJob(ctx context.Context, task 
 		_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", existing.Id).Data(data).Update()
 		return existing.Id, gerror.Wrap(err, "更新导入TG消息索引任务失败")
 	}
-	data["task_id"] = taskProfileId
 	data["operation_no"] = operationNo
 	data["retry_count"] = 0
 	data["created_at"] = now
@@ -227,7 +227,7 @@ func (s *sSysPublish) materialImportCachedMessages(ctx context.Context, task *sy
 	return rows, nil
 }
 
-func (s *sSysPublish) ensureMaterialImportTelegramMessage(ctx context.Context, task *sysin.MaterialImportTaskModel, row tgMessageRepairCacheRow, jobId int64, channel tgMessageRepairChannel, profileId int64, taskProfileId int64, botId int64) error {
+func (s *sSysPublish) ensureMaterialImportTelegramMessage(ctx context.Context, task *sysin.MaterialImportTaskModel, row tgMessageRepairCacheRow, jobId int64, channel tgMessageRepairChannel, profileId int64, botId int64) error {
 	if row.TgMessageId <= 0 {
 		return nil
 	}
@@ -241,7 +241,7 @@ func (s *sSysPublish) ensureMaterialImportTelegramMessage(ctx context.Context, t
 	}
 	now := gtime.Now()
 	data := g.Map{
-		"task_id":        taskProfileId,
+		"task_id":        nil,
 		"tenant_id":      task.TenantId,
 		"account_id":     task.AccountId,
 		"profile_id":     profileId,

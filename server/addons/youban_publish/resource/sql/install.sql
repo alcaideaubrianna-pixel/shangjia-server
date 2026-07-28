@@ -1062,7 +1062,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_bot_stat` (
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_message` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键', `job_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG任务ID',
-  `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '任务ID', `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `task_id` bigint(20) DEFAULT NULL COMMENT '旧任务ID，资料索引为空', `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
   `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID', `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
   `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Bot ID', `target_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '目标Chat ID',
   `tg_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG消息ID', `media_group_id` varchar(128) NOT NULL DEFAULT '' COMMENT '媒体组ID',

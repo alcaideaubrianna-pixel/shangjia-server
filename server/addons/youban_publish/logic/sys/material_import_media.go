@@ -172,6 +172,12 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 		return err
 	}
 	if profileId > 0 && (group.MediaTotal == 0 || s.materialImportProfileHasMedia(ctx, profileId)) {
+		if err = s.ensureMaterialImportTelegramIndex(ctx, task, group, profileId); err != nil {
+			return err
+		}
+		if err = s.syncProfileNoteIndex(ctx, profileId); err != nil {
+			return err
+		}
 		_ = s.appendMaterialImportPublishLog(ctx, task, profileId, "reused", fmt.Sprintf("资料已存在，跳过重复导入：%s", strings.TrimSpace(group.Title)))
 		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0, group.MediaJson)
 	}

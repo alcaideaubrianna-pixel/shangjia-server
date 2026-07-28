@@ -87,7 +87,7 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 	if err = s.updateMaterialImportProfileSource(ctx, saved.Id, group, task, title); err != nil {
 		return 0, err
 	}
-	if err = s.ensureMaterialImportTelegramIndex(ctx, task, group, saved.Id, 0); err != nil {
+	if err = s.ensureMaterialImportTelegramIndex(ctx, task, group, saved.Id); err != nil {
 		return 0, err
 	}
 	if err = s.syncProfileNoteIndex(ctx, saved.Id); err != nil {
