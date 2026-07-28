@@ -159,7 +159,11 @@ func (s *sSysPublish) pullMaterialImportPages(ctx context.Context, client *teleg
 			}
 		}
 		pendingUnits = carryUnits
-		if stop || len(messages) < materialImportPageLimit {
+		if stop {
+			shouldFinish = true
+			break
+		}
+		if nextOffset <= 0 || (offsetID > 0 && nextOffset >= offsetID) {
 			shouldFinish = true
 			break
 		}
