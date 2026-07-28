@@ -16,9 +16,10 @@ func TestMaterialImportRecoveryCandidate(t *testing.T) {
 		{name: "running pulling", status: sysin.MaterialImportStatusRunning, stage: sysin.MaterialImportStagePulling, want: true},
 		{name: "running media", status: sysin.MaterialImportStatusRunning, stage: sysin.MaterialImportStageMedia, want: true},
 		{name: "waiting media", status: sysin.MaterialImportStatusWaiting, stage: sysin.MaterialImportStageMedia, want: true},
+		{name: "pending created", status: sysin.MaterialImportStatusPending, stage: sysin.MaterialImportStageCreated, want: true},
 		{name: "success", status: sysin.MaterialImportStatusSuccess, stage: sysin.MaterialImportStageFinished},
 		{name: "canceled", status: sysin.MaterialImportStatusCanceled, stage: sysin.MaterialImportStageCancelled},
-		{name: "created", status: sysin.MaterialImportStatusPending, stage: sysin.MaterialImportStageCreated},
+		{name: "pending media", status: sysin.MaterialImportStatusPending, stage: sysin.MaterialImportStageMedia},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

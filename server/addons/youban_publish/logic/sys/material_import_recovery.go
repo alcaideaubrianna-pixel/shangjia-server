@@ -56,7 +56,10 @@ func (s *sSysPublish) recoverMaterialImportTasks(ctx context.Context, limit int)
 	now := gtime.Now()
 	staleBefore := now.Add(-materialImportRecoverAfter)
 	condition := fmt.Sprintf(
-		"(%s=? AND %s IN(?,?) AND %s<=?) OR (%s=? AND %s IS NOT NULL AND %s<=?)",
+		"(%s=? AND %s=? AND %s<=?) OR (%s=? AND %s IN(?,?) AND %s<=?) OR (%s=? AND %s IS NOT NULL AND %s<=?)",
+		cols.Status,
+		cols.Stage,
+		cols.UpdatedAt,
 		cols.Status,
 		cols.Stage,
 		cols.UpdatedAt,
@@ -67,6 +70,9 @@ func (s *sSysPublish) recoverMaterialImportTasks(ctx context.Context, limit int)
 	rows, err := pdao.YoubanPublishMaterialImportTask.Ctx(ctx).
 		Where(
 			condition,
+			sysin.MaterialImportStatusPending,
+			sysin.MaterialImportStageCreated,
+			staleBefore,
 			sysin.MaterialImportStatusRunning,
 			sysin.MaterialImportStagePulling,
 			sysin.MaterialImportStageMedia,
@@ -102,17 +108,22 @@ func (s *sSysPublish) recoverMaterialImportTask(ctx context.Context, row gdb.Rec
 	mod := pdao.YoubanPublishMaterialImportTask.Ctx(ctx).
 		Where(cols.Id, taskId).
 		Where(cols.Status, status)
-	if status == sysin.MaterialImportStatusRunning {
+	switch status {
+	case sysin.MaterialImportStatusPending, sysin.MaterialImportStatusRunning:
 		mod = mod.WhereLTE(cols.UpdatedAt, staleBefore)
-	} else {
+	case sysin.MaterialImportStatusWaiting:
 		mod = mod.WhereNotNull(cols.NextRunAt).WhereLTE(cols.NextRunAt, now)
 	}
-	result, err := mod.Data(g.Map{
+	data := g.Map{
 		cols.Status:       sysin.MaterialImportStatusRunning,
 		cols.ErrorMessage: "",
 		cols.NextRunAt:    nil,
 		cols.UpdatedAt:    now,
-	}).Update()
+	}
+	if status == sysin.MaterialImportStatusPending {
+		data[cols.Stage] = sysin.MaterialImportStagePulling
+	}
+	result, err := mod.Data(data).Update()
 	if err != nil {
 		return gerror.Wrap(err, "认领滞留资料导入任务失败")
 	}
@@ -131,6 +142,9 @@ func (s *sSysPublish) recoverMaterialImportTask(ctx context.Context, row gdb.Rec
 }
 
 func materialImportRecoveryCandidate(status string, stage string) bool {
+	if status == sysin.MaterialImportStatusPending {
+		return stage == sysin.MaterialImportStageCreated
+	}
 	if stage != sysin.MaterialImportStagePulling && stage != sysin.MaterialImportStageMedia {
 		return false
 	}
