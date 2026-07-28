@@ -18,8 +18,6 @@ import (
 	fileutil "hotgo/utility/file"
 )
 
-const quickPushMediaDownloadLimit = 100 << 20
-
 func (s *sSysBot) persistQuickPushMedia(ctx context.Context, media []*publishsysin.MessageTemplateMediaInp) []*publishsysin.MessageTemplateMediaInp {
 	if len(media) == 0 {
 		return media
@@ -77,15 +75,12 @@ func persistQuickPushMediaFile(ctx context.Context, mediaType string, name strin
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return "", "", gerror.Newf("下载Telegram媒体失败，状态码:%d", response.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, quickPushMediaDownloadLimit+1))
+	data, err := io.ReadAll(response.Body)
 	if err != nil {
 		return "", "", err
 	}
 	if len(data) == 0 {
 		return "", "", gerror.New("Telegram媒体内容为空")
-	}
-	if len(data) > quickPushMediaDownloadLimit {
-		return "", "", gerror.New("快速推送媒体超过100MB限制")
 	}
 	filename := quickPushMediaFilename(name, mediaType)
 	header, err := fileutil.NewMultipartFileHeader(filename, data)
