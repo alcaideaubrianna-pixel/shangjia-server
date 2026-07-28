@@ -269,6 +269,211 @@ func TestMaterialImportRegionNameMatchesRejectsSingleCharacterAlias(t *testing.T
 	}
 }
 
+func TestMaterialImportRegionCodesSupportsMunicipality(t *testing.T) {
+	chongqing := &legacyCMSRegionOption{Id: 500000, Level: 1, Title: "重庆市"}
+	city := &legacyCMSRegionOption{Id: 500100, Pid: chongqing.Id, Level: 2, Title: "市辖区"}
+	index := &legacyCMSRegionIndex{
+		provincesByName: map[string]*legacyCMSRegionOption{"重庆": chongqing},
+		citiesByName:    map[string][]*legacyCMSRegionOption{"辖区": {city}},
+		childrenByPid:   map[int64][]*legacyCMSRegionOption{chongqing.Id: {city}},
+		optionsById:     map[int64]*legacyCMSRegionOption{chongqing.Id: chongqing, city.Id: city},
+	}
+	provinceCode, cityCode := materialImportRegionCodesFromIndex("所在省份:重庆\n所在城市:重庆市", index)
+	if provinceCode != "500000" || cityCode != "500100" {
+		t.Fatalf("codes = (%q, %q), want (%q, %q)", provinceCode, cityCode, "500000", "500100")
+	}
+}
+
+func TestMaterialImportRegionCodesSupportsMunicipalityDistrict(t *testing.T) {
+	shanghai := &legacyCMSRegionOption{Id: 310000, Level: 1, Title: "上海市"}
+	city := &legacyCMSRegionOption{Id: 310100, Pid: shanghai.Id, Level: 2, Title: "市辖区"}
+	minhang := &legacyCMSRegionOption{Id: 310112, Pid: city.Id, Level: 3, Title: "闵行区"}
+	index := &legacyCMSRegionIndex{
+		provincesByName: map[string]*legacyCMSRegionOption{"上海": shanghai},
+		citiesByName:    map[string][]*legacyCMSRegionOption{"辖区": {city}},
+		districtsByName: map[string][]*legacyCMSRegionOption{"闵行区": {minhang}},
+		childrenByPid:   map[int64][]*legacyCMSRegionOption{shanghai.Id: {city}, city.Id: {minhang}},
+		optionsById:     map[int64]*legacyCMSRegionOption{shanghai.Id: shanghai, city.Id: city, minhang.Id: minhang},
+	}
+	provinceCode, cityCode := materialImportRegionCodesFromIndex("所在省份:上海\n所在城市:闵行区", index)
+	if provinceCode != "310000" || cityCode != "310100" {
+		t.Fatalf("codes = (%q, %q), want (%q, %q)", provinceCode, cityCode, "310000", "310100")
+	}
+}
+
+func TestMaterialImportRegionCodesSupportsMunicipalityFromCityField(t *testing.T) {
+	beijing := &legacyCMSRegionOption{Id: 110000, Level: 1, Title: "北京市"}
+	city := &legacyCMSRegionOption{Id: 110100, Pid: beijing.Id, Level: 2, Title: "市辖区"}
+	index := &legacyCMSRegionIndex{
+		provincesByName: map[string]*legacyCMSRegionOption{"北京": beijing},
+		childrenByPid:   map[int64][]*legacyCMSRegionOption{beijing.Id: {city}},
+		optionsById:     map[int64]*legacyCMSRegionOption{beijing.Id: beijing, city.Id: city},
+	}
+	provinceCode, cityCode := materialImportRegionCodesFromIndex("所在城市：北京", index)
+	if provinceCode != "110000" || cityCode != "110100" {
+		t.Fatalf("codes = (%q, %q), want (%q, %q)", provinceCode, cityCode, "110000", "110100")
+	}
+}
+
+func TestMaterialImportRegionCodesPrefersLongestDistrictName(t *testing.T) {
+	chongqing := &legacyCMSRegionOption{Id: 500000, Level: 1, Title: "重庆市"}
+	city := &legacyCMSRegionOption{Id: 500100, Pid: chongqing.Id, Level: 2, Title: "市辖区"}
+	yuzhong := &legacyCMSRegionOption{Id: 500103, Pid: city.Id, Level: 3, Title: "渝中区"}
+	otherCity := &legacyCMSRegionOption{Id: 370100, Pid: 370000, Level: 2, Title: "济南市"}
+	shortAlias := &legacyCMSRegionOption{Id: 370103, Pid: otherCity.Id, Level: 3, Title: "市中区"}
+	index := &legacyCMSRegionIndex{
+		provincesByName: map[string]*legacyCMSRegionOption{"重庆": chongqing},
+		districtsByName: map[string][]*legacyCMSRegionOption{"渝中区": {yuzhong}, "中区": {shortAlias}},
+		childrenByPid:   map[int64][]*legacyCMSRegionOption{chongqing.Id: {city}},
+		optionsById: map[int64]*legacyCMSRegionOption{
+			chongqing.Id:  chongqing,
+			city.Id:       city,
+			yuzhong.Id:    yuzhong,
+			otherCity.Id:  otherCity,
+			shortAlias.Id: shortAlias,
+		},
+	}
+	provinceCode, cityCode := materialImportRegionCodesFromIndex("所在省：渝中区\n所在城市：重庆市", index)
+	if provinceCode != "500000" || cityCode != "500100" {
+		t.Fatalf("codes = (%q, %q), want (%q, %q)", provinceCode, cityCode, "500000", "500100")
+	}
+}
+
+func TestMaterialImportRegionCodesSeparatesProvinceAndCityFields(t *testing.T) {
+	heilongjiang := &legacyCMSRegionOption{Id: 230000, Level: 1, Title: "黑龙江省"}
+	harbin := &legacyCMSRegionOption{Id: 230100, Pid: heilongjiang.Id, Level: 2, Title: "哈尔滨市"}
+	qiqihar := &legacyCMSRegionOption{Id: 230200, Pid: heilongjiang.Id, Level: 2, Title: "齐齐哈尔市"}
+	longjiang := &legacyCMSRegionOption{Id: 230221, Pid: qiqihar.Id, Level: 3, Title: "龙江县"}
+	qinhuangdao := &legacyCMSRegionOption{Id: 130300, Pid: 130000, Level: 2, Title: "秦皇岛市"}
+	taiyuan := &legacyCMSRegionOption{Id: 140100, Pid: 140000, Level: 2, Title: "太原市"}
+	index := &legacyCMSRegionIndex{
+		provincesByName: map[string]*legacyCMSRegionOption{"黑龙江": heilongjiang},
+		citiesByName: map[string][]*legacyCMSRegionOption{
+			"哈尔滨": {harbin},
+			"秦皇岛": {qinhuangdao},
+			"太原":  {taiyuan},
+		},
+		districtsByName: map[string][]*legacyCMSRegionOption{"龙江": {longjiang}},
+		optionsById: map[int64]*legacyCMSRegionOption{
+			heilongjiang.Id: heilongjiang,
+			harbin.Id:       harbin,
+			qiqihar.Id:      qiqihar,
+			longjiang.Id:    longjiang,
+			qinhuangdao.Id:  qinhuangdao,
+			taiyuan.Id:      taiyuan,
+		},
+	}
+	text := "所在省份：黑龙江\n所在城市：哈尔滨\n能否飞往其他城市：太原\n介绍人：秦皇岛"
+	provinceCode, cityCode := materialImportRegionCodesFromIndex(text, index)
+	if provinceCode != "230000" || cityCode != "230100" {
+		t.Fatalf("codes = (%q, %q), want (%q, %q)", provinceCode, cityCode, "230000", "230100")
+	}
+}
+
+func TestMaterialImportRegionCodesSupportsLegacyLocationLines(t *testing.T) {
+	shandong := &legacyCMSRegionOption{Id: 370000, Level: 1, Title: "山东省"}
+	binzhou := &legacyCMSRegionOption{Id: 371600, Pid: shandong.Id, Level: 2, Title: "滨州市"}
+	index := &legacyCMSRegionIndex{
+		provincesByName: map[string]*legacyCMSRegionOption{"山东": shandong},
+		citiesByName:    map[string][]*legacyCMSRegionOption{"滨州": {binzhou}},
+		optionsById:     map[int64]*legacyCMSRegionOption{shandong.Id: shandong, binzhou.Id: binzhou},
+	}
+	provinceCode, cityCode := materialImportRegionCodesFromIndex("所在省；山东\n所在市滨州\n介绍人：秦皇岛", index)
+	if provinceCode != "370000" || cityCode != "371600" {
+		t.Fatalf("codes = (%q, %q), want (%q, %q)", provinceCode, cityCode, "370000", "371600")
+	}
+}
+
+func TestMaterialImportRegionCodesSupportsMultipleCities(t *testing.T) {
+	sichuan := &legacyCMSRegionOption{Id: 510000, Level: 1, Title: "四川省"}
+	chengdu := &legacyCMSRegionOption{Id: 510100, Pid: sichuan.Id, Level: 2, Title: "成都市"}
+	deyang := &legacyCMSRegionOption{Id: 510600, Pid: sichuan.Id, Level: 2, Title: "德阳市"}
+	index := &legacyCMSRegionIndex{
+		provincesByName: map[string]*legacyCMSRegionOption{"四川": sichuan},
+		citiesByName: map[string][]*legacyCMSRegionOption{
+			"成都": {chengdu},
+			"德阳": {deyang},
+		},
+		optionsById: map[int64]*legacyCMSRegionOption{sichuan.Id: sichuan, chengdu.Id: chengdu, deyang.Id: deyang},
+	}
+	provinceCode, cityCode := materialImportRegionCodesFromIndex("所在省份：四川\n所在城市：德阳/成都", index)
+	if provinceCode != "510000" || cityCode != "510100,510600" {
+		t.Fatalf("codes = (%q, %q), want (%q, %q)", provinceCode, cityCode, "510000", "510100,510600")
+	}
+}
+
+func TestMaterialImportRegionCodesSupportsRegionAliases(t *testing.T) {
+	guangdong := &legacyCMSRegionOption{Id: 440000, Level: 1, Title: "广东省"}
+	guangzhou := &legacyCMSRegionOption{Id: 440100, Pid: guangdong.Id, Level: 2, Title: "广州市"}
+	baiyun := &legacyCMSRegionOption{Id: 440111, Pid: guangzhou.Id, Level: 3, Title: "白云区"}
+	yunnan := &legacyCMSRegionOption{Id: 530000, Level: 1, Title: "云南省"}
+	dehong := &legacyCMSRegionOption{Id: 533100, Pid: yunnan.Id, Level: 2, Title: "德宏傣族景颇族自治州"}
+	mangshi := &legacyCMSRegionOption{Id: 533103, Pid: dehong.Id, Level: 3, Title: "芒市"}
+	guizhou := &legacyCMSRegionOption{Id: 520000, Level: 1, Title: "贵州省"}
+	qiannan := &legacyCMSRegionOption{Id: 522700, Pid: guizhou.Id, Level: 2, Title: "黔南布依族苗族自治州"}
+	index := &legacyCMSRegionIndex{
+		provincesByName: map[string]*legacyCMSRegionOption{"广东": guangdong, "云南": yunnan, "贵州": guizhou},
+		citiesByName: map[string][]*legacyCMSRegionOption{
+			"广州":         {guangzhou},
+			"德宏傣族景颇族自治州": {dehong},
+			"黔南布依族苗族自治州": {qiannan},
+		},
+		districtsByName: map[string][]*legacyCMSRegionOption{"白云区": {baiyun}, "芒": {mangshi}},
+		optionsById: map[int64]*legacyCMSRegionOption{
+			guangdong.Id: guangdong,
+			guangzhou.Id: guangzhou,
+			baiyun.Id:    baiyun,
+			yunnan.Id:    yunnan,
+			dehong.Id:    dehong,
+			mangshi.Id:   mangshi,
+			guizhou.Id:   guizhou,
+			qiannan.Id:   qiannan,
+		},
+	}
+	tests := []struct {
+		name         string
+		text         string
+		wantProvince string
+		wantCity     string
+	}{
+		{name: "district without suffix", text: "所在省份：广东\n所在城市：白云", wantProvince: "440000", wantCity: "440100"},
+		{name: "single character city name", text: "所在省份：云南\n所在城市：芒市", wantProvince: "530000", wantCity: "533100"},
+		{name: "autonomous prefecture short name", text: "所在省份：贵州\n所在城市：黔南", wantProvince: "520000", wantCity: "522700"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			provinceCode, cityCode := materialImportRegionCodesFromIndex(test.text, index)
+			if provinceCode != test.wantProvince || cityCode != test.wantCity {
+				t.Fatalf("codes = (%q, %q), want (%q, %q)", provinceCode, cityCode, test.wantProvince, test.wantCity)
+			}
+		})
+	}
+}
+
+func TestMaterialImportRegionCodesPrefersCityOverDistrictSuffixAlias(t *testing.T) {
+	shaanxi := &legacyCMSRegionOption{Id: 610000, Level: 1, Title: "陕西省"}
+	xian := &legacyCMSRegionOption{Id: 610100, Pid: shaanxi.Id, Level: 2, Title: "西安市"}
+	jilin := &legacyCMSRegionOption{Id: 220000, Level: 1, Title: "吉林省"}
+	liaoyuan := &legacyCMSRegionOption{Id: 220400, Pid: jilin.Id, Level: 2, Title: "辽源市"}
+	xianDistrict := &legacyCMSRegionOption{Id: 220403, Pid: liaoyuan.Id, Level: 3, Title: "西安区"}
+	index := &legacyCMSRegionIndex{
+		provincesByName: map[string]*legacyCMSRegionOption{"陕西": shaanxi, "吉林": jilin},
+		citiesByName:    map[string][]*legacyCMSRegionOption{"西安": {xian}, "辽源": {liaoyuan}},
+		districtsByName: map[string][]*legacyCMSRegionOption{"西安区": {xianDistrict}},
+		optionsById: map[int64]*legacyCMSRegionOption{
+			shaanxi.Id:      shaanxi,
+			xian.Id:         xian,
+			jilin.Id:        jilin,
+			liaoyuan.Id:     liaoyuan,
+			xianDistrict.Id: xianDistrict,
+		},
+	}
+	provinceCode, cityCode := materialImportRegionCodesFromIndex("所在省：西安\n所在城市：西安", index)
+	if provinceCode != "610000" || cityCode != "610100" {
+		t.Fatalf("codes = (%q, %q), want (%q, %q)", provinceCode, cityCode, "610000", "610100")
+	}
+}
+
 func TestNormalizeLegacyRegionNameSupportsCountySuffix(t *testing.T) {
 	if got := normalizeLegacyRegionName("西安市"); got != "西安" {
 		t.Fatalf("normalize city = %q, want %q", got, "西安")
