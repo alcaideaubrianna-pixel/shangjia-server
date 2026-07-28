@@ -468,6 +468,7 @@ func (s *sSysPublish) scanTgChannelMessagesSince(ctx context.Context, tenantId i
 	err = client.Run(runCtx, func(ctx context.Context) error {
 		offsetID := 0
 		for {
+			previousOffset := offsetID
 			var res tg.MessagesMessagesClass
 			var pageErr error
 			for attempt := 0; attempt < 4; attempt++ {
@@ -512,7 +513,7 @@ func (s *sSysPublish) scanTgChannelMessagesSince(ctx context.Context, tenantId i
 					offsetID = message.ID
 				}
 			}
-			if stop || offsetID <= 0 || len(messages) < 100 {
+			if stop || offsetID <= 0 || (previousOffset > 0 && offsetID >= previousOffset) {
 				return nil
 			}
 			time.Sleep(600 * time.Millisecond)
