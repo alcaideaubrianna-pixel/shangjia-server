@@ -255,7 +255,7 @@ func (s *sLazySheepTGGo) deleteBot(ctx context.Context, in *lsysin.BotDeleteInp)
 	s.stopRuntimeBot(in.Key, target.BotKey)
 	if strings.TrimSpace(target.Token) != "" {
 		if err := s.cleanupDeletedTelegramBotState(ctx, target.BotKey, target.Token); err != nil {
-			g.Log().Warningf(ctx, "同步清理 Telegram 机器人状态失败 bot:%s err:%+v", target.BotKey, err)
+			g.Log().Warningf(ctx, "同步清理 Telegram 机器人状态失败 bot:%s err:%+v", target.BotKey, sanitizeTelegramBotError(err))
 		}
 	}
 	if err := dao.AddonLazysheepTggoBot.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
@@ -276,7 +276,7 @@ func (s *sLazySheepTGGo) deleteBot(ctx context.Context, in *lsysin.BotDeleteInp)
 	}
 	if target.MemberId > 0 && strings.TrimSpace(target.Token) != "" {
 		if err := s.sendTelegramTextRemoveKeyboard(ctx, target.Token, target.MemberId, formatBotDeleteNotice(target.BotName, target.Username)); err != nil {
-			g.Log().Warningf(ctx, "删除机器人后通知创建者失败 bot:%s memberID:%d err:%+v", in.Key, target.MemberId, err)
+			g.Log().Warningf(ctx, "删除机器人后通知创建者失败 bot:%s memberID:%d err:%+v", in.Key, target.MemberId, sanitizeTelegramBotError(err))
 		}
 	}
 	return nil
@@ -307,7 +307,7 @@ func (s *sLazySheepTGGo) cleanupDeletedTelegramBotState(ctx context.Context, bot
 		return err
 	}
 	if _, err = client.DeleteWebhook(ctx, &bot.DeleteWebhookParams{DropPendingUpdates: true}); err != nil {
-		g.Log().Warningf(ctx, "删除 Telegram webhook 失败 bot:%s err:%+v", botKey, err)
+		g.Log().Warningf(ctx, "删除 Telegram webhook 失败 bot:%s err:%+v", botKey, sanitizeTelegramBotError(err))
 	}
 	scopes := []models.BotCommandScope{
 		nil,
@@ -318,13 +318,13 @@ func (s *sLazySheepTGGo) cleanupDeletedTelegramBotState(ctx context.Context, bot
 	}
 	for _, scope := range scopes {
 		if _, err = client.DeleteMyCommands(ctx, &bot.DeleteMyCommandsParams{Scope: scope}); err != nil {
-			g.Log().Warningf(ctx, "清理 Telegram 命令菜单失败 bot:%s err:%+v", botKey, err)
+			g.Log().Warningf(ctx, "清理 Telegram 命令菜单失败 bot:%s err:%+v", botKey, sanitizeTelegramBotError(err))
 		}
 	}
 	if _, err = client.SetChatMenuButton(ctx, &bot.SetChatMenuButtonParams{
 		MenuButton: &models.MenuButtonDefault{Type: models.MenuButtonTypeDefault},
 	}); err != nil {
-		g.Log().Warningf(ctx, "恢复 Telegram 菜单按钮默认状态失败 bot:%s err:%+v", botKey, err)
+		g.Log().Warningf(ctx, "恢复 Telegram 菜单按钮默认状态失败 bot:%s err:%+v", botKey, sanitizeTelegramBotError(err))
 	}
 	return nil
 }

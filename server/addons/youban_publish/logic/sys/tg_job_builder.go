@@ -3,11 +3,14 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 )
+
+var errNoTelegramPublishChannels = errors.New("未配置可推送频道")
 
 func (s *sSysPublish) telegramJobChannels(ctx context.Context, task gdb.Record, targetChannelIds ...[]int64) ([]telegramJobChannel, error) {
 	channelIds := decodeInt64JSON(task["channel_id_json"].String())
@@ -29,7 +32,7 @@ func (s *sSysPublish) telegramJobChannels(ctx context.Context, task gdb.Record, 
 		return nil, gerror.Wrap(err, "读取TG推送频道失败")
 	}
 	if len(channels) == 0 {
-		return nil, gerror.New("未配置可推送频道")
+		return nil, errNoTelegramPublishChannels
 	}
 	return channels, nil
 }

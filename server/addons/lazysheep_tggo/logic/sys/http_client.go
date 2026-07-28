@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,7 +21,13 @@ import (
 	lsysin "hotgo/addons/lazysheep_tggo/model/input/sysin"
 )
 
-const telegramHTTPTimeout = 30 * time.Second
+const (
+	telegramHTTPTimeout                      = 30 * time.Second
+	telegramMediaUploadHTTPTimeout           = 2 * time.Minute
+	telegramMediaUploadResponseHeaderTimeout = 90 * time.Second
+)
+
+var telegramBotTokenPattern = regexp.MustCompile(`([0-9]{5,}):[A-Za-z0-9_-]{20,}`)
 
 func (s *sLazySheepTGGo) telegramHTTPClient(ctx context.Context) (*http.Client, error) {
 	state, err := s.GetState(ctx)
@@ -32,6 +39,42 @@ func (s *sLazySheepTGGo) telegramHTTPClient(ctx context.Context) (*http.Client, 
 		proxyURL = strings.TrimSpace(state.Global.TelegramProxy)
 	}
 	return buildTelegramHTTPClient(proxyURL)
+}
+
+func (s *sLazySheepTGGo) telegramMediaUploadHTTPClient(ctx context.Context) (*http.Client, error) {
+	client, err := s.telegramHTTPClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return configureTelegramMediaUploadHTTPClient(client), nil
+}
+
+func configureTelegramMediaUploadHTTPClient(client *http.Client) *http.Client {
+	if client == nil {
+		return nil
+	}
+	client.Timeout = telegramMediaUploadHTTPTimeout
+	if transport, ok := client.Transport.(*http.Transport); ok {
+		cloned := transport.Clone()
+		cloned.ResponseHeaderTimeout = telegramMediaUploadResponseHeaderTimeout
+		client.Transport = cloned
+	}
+	return client
+}
+
+func sanitizeTelegramBotError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return gerror.New(telegramBotTokenPattern.ReplaceAllString(err.Error(), "$1:***"))
+}
+
+func telegramBotIDFromToken(token string) string {
+	token = strings.TrimSpace(token)
+	if index := strings.IndexByte(token, ':'); index > 0 {
+		return token[:index]
+	}
+	return "unknown"
 }
 
 func buildTelegramHTTPClient(proxyRaw string) (*http.Client, error) {

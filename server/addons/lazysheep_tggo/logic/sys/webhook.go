@@ -104,17 +104,17 @@ func (s *sLazySheepTGGo) bootBots(ctx context.Context) error {
 		if baseURL != "" {
 			webhookURL := baseURL + cfg.WebhookPath
 			if err = s.SetWebhook(ctx, key, webhookURL); err != nil {
-				g.Log().Warningf(ctx, "注册 Telegram webhook 失败 bot:%s err:%+v", key, err)
+				g.Log().Warningf(ctx, "注册 Telegram webhook 失败 bot:%s err:%+v", key, sanitizeTelegramBotError(err))
 			} else if err = s.VerifyWebhook(ctx, key, webhookURL); err != nil {
-				g.Log().Warningf(ctx, "验证 Telegram webhook 失败 bot:%s err:%+v", key, err)
+				g.Log().Warningf(ctx, "验证 Telegram webhook 失败 bot:%s err:%+v", key, sanitizeTelegramBotError(err))
 			}
 			if err = s.SyncBot(ctx, key); err != nil {
-				g.Log().Warningf(ctx, "初始化 Telegram bot runtime 失败 bot:%s err:%+v", key, err)
+				g.Log().Warningf(ctx, "初始化 Telegram bot runtime 失败 bot:%s err:%+v", key, sanitizeTelegramBotError(err))
 			}
 			continue
 		}
 		if err = s.startPollingBot(ctx, key); err != nil {
-			g.Log().Warningf(ctx, "启动 Telegram bot polling 失败 bot:%s err:%+v", key, err)
+			g.Log().Warningf(ctx, "启动 Telegram bot polling 失败 bot:%s err:%+v", key, sanitizeTelegramBotError(err))
 		}
 	}
 	return nil
@@ -162,7 +162,7 @@ func (s *sLazySheepTGGo) VerifyWebhook(ctx context.Context, botKey, expectedURL 
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return sanitizeTelegramBotError(err)
 	}
 	defer resp.Body.Close()
 	out, _ := io.ReadAll(resp.Body)

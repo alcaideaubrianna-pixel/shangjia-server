@@ -698,6 +698,7 @@ func sendQuickMediaChunk(ctx context.Context, client *bot.Bot, chatID int64, ass
 	started := time.Now()
 	msgs, err := client.SendMediaGroup(ctx, params)
 	if err != nil {
+		err = sanitizeTelegramBotError(err)
 		g.Log().Warningf(ctx, "%s TG 媒体组发送失败 items:%d elapsed:%s err:%+v", pullTraceTag(ctx), len(assets), time.Since(started).Round(time.Millisecond), err)
 		return nil, err
 	}
@@ -753,7 +754,7 @@ func (s *sLazySheepTGGo) sendQuickMediaAssetsWithMode(ctx context.Context, clien
 				return messages, err
 			}
 		}
-		if mergeGroup && strings.TrimSpace(token) != "" {
+		if strings.TrimSpace(token) != "" {
 			msgs, err = s.sendQuickMediaGroupMultipart(ctx, token, chatID, part, partCaption, reply)
 		} else {
 			msgs, err = sendQuickMediaChunk(ctx, client, chatID, part, partCaption, reply)
@@ -772,7 +773,7 @@ func (s *sLazySheepTGGo) sendQuickMediaAssetsWithMode(ctx context.Context, clien
 				}
 			}
 			part = reload
-			if mergeGroup && strings.TrimSpace(token) != "" {
+			if strings.TrimSpace(token) != "" {
 				msgs, err = s.sendQuickMediaGroupMultipart(ctx, token, chatID, part, partCaption, reply)
 			} else {
 				msgs, err = sendQuickMediaChunk(ctx, client, chatID, part, partCaption, reply)
@@ -964,6 +965,7 @@ func sendQuickPhotoAsset(ctx context.Context, client *bot.Bot, chatID int64, ass
 	started := time.Now()
 	msg, err := client.SendPhoto(ctx, params)
 	if err != nil {
+		err = sanitizeTelegramBotError(err)
 		g.Log().Warningf(ctx, "%s TG 图片发送失败 elapsed:%s err:%+v", pullTraceTag(ctx), time.Since(started).Round(time.Millisecond), err)
 		return nil, err
 	}
@@ -996,6 +998,7 @@ func sendQuickVideoAsset(ctx context.Context, client *bot.Bot, chatID int64, ass
 	started := time.Now()
 	msg, err := client.SendVideo(ctx, params)
 	if err != nil {
+		err = sanitizeTelegramBotError(err)
 		g.Log().Warningf(ctx, "%s TG 视频发送失败 elapsed:%s err:%+v", pullTraceTag(ctx), time.Since(started).Round(time.Millisecond), err)
 		return nil, err
 	}
@@ -1017,6 +1020,7 @@ func sendQuickDocumentAsset(ctx context.Context, client *bot.Bot, chatID int64, 
 	started := time.Now()
 	msg, err := client.SendDocument(ctx, params)
 	if err != nil {
+		err = sanitizeTelegramBotError(err)
 		g.Log().Warningf(ctx, "%s TG 文件发送失败 elapsed:%s err:%+v", pullTraceTag(ctx), time.Since(started).Round(time.Millisecond), err)
 		return nil, err
 	}
@@ -1105,7 +1109,7 @@ func (s *sLazySheepTGGo) sendQuickMediaGroupMultipart(ctx context.Context, token
 	if err := writer.Close(); err != nil {
 		return nil, err
 	}
-	httpClient, err := s.telegramHTTPClient(ctx)
+	httpClient, err := s.telegramMediaUploadHTTPClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1117,7 +1121,8 @@ func (s *sLazySheepTGGo) sendQuickMediaGroupMultipart(ctx context.Context, token
 	started := time.Now()
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		g.Log().Warningf(ctx, "%s TG 媒体组 multipart 发送失败 items:%d elapsed:%s err:%+v", pullTraceTag(ctx), len(assets), time.Since(started).Round(time.Millisecond), err)
+		err = sanitizeTelegramBotError(err)
+		g.Log().Warningf(ctx, "%s TG 媒体组 multipart 发送失败 botId:%s chatId:%d items:%d elapsed:%s err:%+v", pullTraceTag(ctx), telegramBotIDFromToken(token), chatID, len(assets), time.Since(started).Round(time.Millisecond), err)
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -1134,7 +1139,7 @@ func (s *sLazySheepTGGo) sendQuickMediaGroupMultipart(ctx context.Context, token
 		if out.Parameters != nil && out.Parameters.RetryAfter > 0 {
 			errText = fmt.Sprintf("%s: retry_after %d", errText, out.Parameters.RetryAfter)
 		}
-		g.Log().Warningf(ctx, "%s TG 媒体组 multipart 发送失败 items:%d elapsed:%s err:%s", pullTraceTag(ctx), len(assets), time.Since(started).Round(time.Millisecond), errText)
+		g.Log().Warningf(ctx, "%s TG 媒体组 multipart 发送失败 botId:%s chatId:%d items:%d elapsed:%s err:%s", pullTraceTag(ctx), telegramBotIDFromToken(token), chatID, len(assets), time.Since(started).Round(time.Millisecond), errText)
 		return nil, gerror.New(errText)
 	}
 	g.Log().Debugf(ctx, "%s TG 媒体组 multipart 发送成功 items:%d elapsed:%s", pullTraceTag(ctx), len(assets), time.Since(started).Round(time.Millisecond))

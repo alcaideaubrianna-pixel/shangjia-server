@@ -1439,6 +1439,7 @@ func (s *sLazySheepTGGo) HandlePushNoteTask(ctx context.Context, task *lsysin.Pu
 		recordPushQueueMonitorEvent(ctx, task, true, "", elapsed)
 		return err
 	}
+	pushErr = sanitizeTelegramBotError(pushErr)
 	errText := strings.TrimSpace(pushErr.Error())
 	recordPushChatError(task.BotKey, task.ChatID, pushErr)
 	if isAmbiguousTelegramSendError(pushErr) {

@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -60,6 +61,14 @@ func (s *sSysPublish) submitDuePublishTasks(ctx context.Context) error {
 		}
 		operationNo := fmt.Sprintf("scheduled:%d:%d", item.ProfileId, item.PublishAt.TimestampNano())
 		if err = s.submitProfilePublish(ctx, item.ProfileId, item.TenantId, item.AccountId, item.AccountId, operationNo, nil, false); err != nil {
+			if errors.Is(err, errNoTelegramPublishChannels) {
+				if clearErr := s.clearInvalidScheduledPublish(ctx, item); clearErr != nil {
+					g.Log().Warningf(ctx, "清除无频道定时上架计划失败 tenantId:%d accountId:%d profileId:%d publishAt:%s err:%+v", item.TenantId, item.AccountId, item.ProfileId, item.PublishAt.String(), clearErr)
+				} else {
+					g.Log().Warningf(ctx, "定时上架资料未配置可推送频道，已终止本次计划 tenantId:%d accountId:%d profileId:%d publishAt:%s", item.TenantId, item.AccountId, item.ProfileId, item.PublishAt.String())
+				}
+				continue
+			}
 			g.Log().Warningf(ctx, "提交到期上架资料失败 profile:%d err:%+v", item.ProfileId, err)
 			continue
 		}
@@ -69,4 +78,15 @@ func (s *sSysPublish) submitDuePublishTasks(ctx context.Context) error {
 			Data(g.Map{"publish_at": nil, "updated_at": gtime.Now()}).Update()
 	}
 	return nil
+}
+
+func (s *sSysPublish) clearInvalidScheduledPublish(ctx context.Context, item *scheduledPublishProfile) error {
+	_, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
+		Where("profile_id", item.ProfileId).
+		Where("tenant_id", item.TenantId).
+		Where("account_id", item.AccountId).
+		Where("publish_at", item.PublishAt).
+		WhereNull("deleted_at").
+		Data(g.Map{"publish_at": nil, "updated_at": gtime.Now()}).Update()
+	return err
 }

@@ -236,7 +236,7 @@ func (s *sLazySheepTGGo) SetWebhook(ctx context.Context, botKey, webhookURL stri
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return sanitizeTelegramBotError(err)
 	}
 	defer resp.Body.Close()
 	out, _ := io.ReadAll(resp.Body)
@@ -361,43 +361,43 @@ func (s *sLazySheepTGGo) registerBotCommands(ctx context.Context, client *bot.Bo
 		Commands: privateCommands,
 		Scope:    &models.BotCommandScopeAllPrivateChats{},
 	}); err != nil {
-		g.Log().Warningf(ctx, "注册 Telegram 私聊命令菜单失败 bot:%s err:%+v", cfg.Key, err)
+		g.Log().Warningf(ctx, "注册 Telegram 私聊命令菜单失败 bot:%s err:%+v", cfg.Key, sanitizeTelegramBotError(err))
 	}
 	if len(groupCommands) > 0 {
 		if _, err := client.SetMyCommands(ctx, &bot.SetMyCommandsParams{
 			Commands: groupCommands,
 			Scope:    &models.BotCommandScopeDefault{},
 		}); err != nil {
-			g.Log().Warningf(ctx, "注册 Telegram 默认命令菜单失败 bot:%s err:%+v", cfg.Key, err)
+			g.Log().Warningf(ctx, "注册 Telegram 默认命令菜单失败 bot:%s err:%+v", cfg.Key, sanitizeTelegramBotError(err))
 		}
 		if _, err := client.SetMyCommands(ctx, &bot.SetMyCommandsParams{
 			Commands: groupCommands,
 			Scope:    &models.BotCommandScopeAllGroupChats{},
 		}); err != nil {
-			g.Log().Warningf(ctx, "注册 Telegram 群聊命令菜单失败 bot:%s err:%+v", cfg.Key, err)
+			g.Log().Warningf(ctx, "注册 Telegram 群聊命令菜单失败 bot:%s err:%+v", cfg.Key, sanitizeTelegramBotError(err))
 		}
 		if _, err := client.SetMyCommands(ctx, &bot.SetMyCommandsParams{
 			Commands: groupCommands,
 			Scope:    &models.BotCommandScopeAllChatAdministrators{},
 		}); err != nil {
-			g.Log().Warningf(ctx, "注册 Telegram 管理员命令菜单失败 bot:%s err:%+v", cfg.Key, err)
+			g.Log().Warningf(ctx, "注册 Telegram 管理员命令菜单失败 bot:%s err:%+v", cfg.Key, sanitizeTelegramBotError(err))
 		}
 		g.Log().Infof(ctx, "Telegram 群聊命令菜单已注册 bot:%s commands:%v", cfg.Key, botCommandNames(groupCommands))
 	} else {
 		if _, err := client.DeleteMyCommands(ctx, &bot.DeleteMyCommandsParams{Scope: &models.BotCommandScopeDefault{}}); err != nil {
-			g.Log().Warningf(ctx, "清理 Telegram 默认命令菜单失败 bot:%s err:%+v", cfg.Key, err)
+			g.Log().Warningf(ctx, "清理 Telegram 默认命令菜单失败 bot:%s err:%+v", cfg.Key, sanitizeTelegramBotError(err))
 		}
 		if _, err := client.DeleteMyCommands(ctx, &bot.DeleteMyCommandsParams{Scope: &models.BotCommandScopeAllGroupChats{}}); err != nil {
-			g.Log().Warningf(ctx, "清理 Telegram 群聊命令菜单失败 bot:%s err:%+v", cfg.Key, err)
+			g.Log().Warningf(ctx, "清理 Telegram 群聊命令菜单失败 bot:%s err:%+v", cfg.Key, sanitizeTelegramBotError(err))
 		}
 		if _, err := client.DeleteMyCommands(ctx, &bot.DeleteMyCommandsParams{Scope: &models.BotCommandScopeAllChatAdministrators{}}); err != nil {
-			g.Log().Warningf(ctx, "清理 Telegram 管理员命令菜单失败 bot:%s err:%+v", cfg.Key, err)
+			g.Log().Warningf(ctx, "清理 Telegram 管理员命令菜单失败 bot:%s err:%+v", cfg.Key, sanitizeTelegramBotError(err))
 		}
 	}
 	if _, err := client.SetChatMenuButton(ctx, &bot.SetChatMenuButtonParams{
 		MenuButton: &models.MenuButtonCommands{Type: models.MenuButtonTypeCommands},
 	}); err != nil {
-		g.Log().Warningf(ctx, "注册 Telegram 菜单按钮失败 bot:%s err:%+v", cfg.Key, err)
+		g.Log().Warningf(ctx, "注册 Telegram 菜单按钮失败 bot:%s err:%+v", cfg.Key, sanitizeTelegramBotError(err))
 	}
 }
 
