@@ -165,12 +165,12 @@ func TestMaterialImportIgnoredNotice(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if !materialImportIgnoredNotice(test.text) {
+			if !profileMessageIgnoredNotice(test.text) {
 				t.Fatalf("expected notice to be ignored: %q", test.text)
 			}
 		})
 	}
-	if materialImportIgnoredNotice("昵称：A26\n省份：山西\n城市：山西") {
+	if profileMessageIgnoredNotice("昵称：A26\n省份：山西\n城市：山西") {
 		t.Fatal("valid material was incorrectly classified as a notice")
 	}
 }
@@ -184,13 +184,13 @@ func TestMaterialImportProfileText(t *testing.T) {
 		"昵称：B182\n城 市：南京",
 	}
 	for _, text := range valid {
-		if !materialImportProfileText(text) {
+		if !profileMessageHasProfileText(text) {
 			t.Fatalf("expected profile text: %q", text)
 		}
 	}
 	invalid := []string{"哇发我", "P31225", "随手拍了一张照片", "自拍视频"}
 	for _, text := range invalid {
-		if materialImportProfileText(text) {
+		if profileMessageHasProfileText(text) {
 			t.Fatalf("expected ordinary media text: %q", text)
 		}
 	}

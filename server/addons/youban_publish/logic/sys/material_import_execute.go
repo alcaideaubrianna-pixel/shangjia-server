@@ -286,18 +286,6 @@ func materialImportMediaItemsWithPurpose(items []collectMediaItem, purpose strin
 	return items
 }
 
-func materialImportAllMediaType(items []collectMediaItem, mediaType string) bool {
-	if len(items) == 0 {
-		return false
-	}
-	for _, item := range items {
-		if strings.TrimSpace(item.Type) != mediaType {
-			return false
-		}
-	}
-	return true
-}
-
 func materialImportMessageIds(existing string, id int) string {
 	ids := make([]int, 0)
 	for _, item := range strings.Split(existing, ",") {

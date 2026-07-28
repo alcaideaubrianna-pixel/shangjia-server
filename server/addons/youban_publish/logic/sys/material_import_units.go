@@ -28,38 +28,23 @@ type materialImportMessageUnit struct {
 
 func (s *sSysPublish) upsertMaterialImportUnitBlocks(ctx context.Context, task *sysin.MaterialImportTaskModel, units []*materialImportMessageUnit) error {
 	for _, unit := range units {
-		if unit == nil || materialImportIgnoredNotice(unit.RawText) {
+		if unit == nil {
 			continue
 		}
-		if len(unit.Media) == 0 && strings.TrimSpace(unit.RawText) == "" {
-			continue
-		}
-		if strings.TrimSpace(unit.RawText) == "" {
-			if materialImportAllMediaType(unit.Media, "video") {
-				if err := s.appendMaterialImportVerifyUnit(ctx, task, unit); err != nil {
-					return err
-				}
+		classification := classifyProfileMessage(unit.RawText, unit.Media)
+		switch classification.Kind {
+		case profileMessageKindVerify:
+			if err := s.appendMaterialImportVerifyUnit(ctx, task, unit); err != nil {
+				return err
 			}
-			continue
-		}
-		if !materialImportProfileText(unit.RawText) {
-			continue
-		}
-		if err := s.upsertMaterialImportDisplayUnit(ctx, task, unit); err != nil {
-			return err
+		case profileMessageKindDisplay:
+			unit.RawText = classification.Text
+			if err := s.upsertMaterialImportDisplayUnit(ctx, task, unit); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
-}
-
-func materialImportProfileText(text string) bool {
-	normalized := strings.NewReplacer(" ", "", "\t", "", "\r", "", "\n", "", "\u00a0", "").Replace(text)
-	for _, keyword := range []string{"身高", "体重", "年龄", "城市"} {
-		if strings.Contains(normalized, keyword) {
-			return true
-		}
-	}
-	return false
 }
 
 func materialImportSplitLeadingUnits(units []*materialImportMessageUnit) (processable []*materialImportMessageUnit, pending []*materialImportMessageUnit) {

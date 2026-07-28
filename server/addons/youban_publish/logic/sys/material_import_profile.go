@@ -45,14 +45,13 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 		Visibility: consts.ContentVisibilityPublic,
 		Status:     1,
 	}
-	input.Province, input.City, err = materialImportRegionCodes(ctx, input.PlainText)
+	metadata, err := s.enrichProfileMetadata(ctx, input.PlainText)
 	if err != nil {
 		return 0, err
 	}
-	input.Tag, err = s.materialImportMatchedTags(ctx, input.PlainText)
-	if err != nil {
-		return 0, err
-	}
+	input.Province = metadata.Province
+	input.City = metadata.City
+	input.Tag = metadata.Tag
 	if group.ProfileId <= 0 {
 		profileId, err := s.materialImportExistingProfile(ctx, group)
 		if err != nil {
@@ -339,11 +338,7 @@ func (s *sSysPublish) refreshMaterialImportProfileMetadata(ctx context.Context, 
 		return nil
 	}
 	plainText := strings.TrimSpace(firstNonEmpty(group.ProfileText, group.RawText))
-	province, city, err := materialImportRegionCodes(ctx, plainText)
-	if err != nil {
-		return err
-	}
-	tag, err := s.materialImportMatchedTags(ctx, plainText)
+	metadata, err := s.enrichProfileMetadata(ctx, plainText)
 	if err != nil {
 		return err
 	}
@@ -352,9 +347,9 @@ func (s *sSysPublish) refreshMaterialImportProfileMetadata(ctx context.Context, 
 		Where(columns.Id, profileId).
 		WhereNull(columns.DeletedAt).
 		Data(g.Map{
-			columns.Province:        province,
-			columns.City:            city,
-			columns.CupSize:         tag,
+			columns.Province:        metadata.Province,
+			columns.City:            metadata.City,
+			columns.CupSize:         metadata.Tag,
 			columns.SourceUpdateBy:  task.SourceTitle,
 			columns.SourceUpdatedAt: gtime.Now(),
 			columns.UpdatedAt:       gtime.Now(),

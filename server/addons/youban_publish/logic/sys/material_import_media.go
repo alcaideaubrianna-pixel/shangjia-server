@@ -155,7 +155,7 @@ func (s *sSysPublish) materialImportFailedGroupCount(ctx context.Context, taskId
 }
 
 func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, client *telegram.Client) error {
-	if !materialImportProfileText(firstNonEmpty(group.ProfileText, group.RawText)) {
+	if !profileMessageHasProfileText(firstNonEmpty(group.ProfileText, group.RawText)) {
 		return s.materialImportMarkGroupDone(ctx, group.Id, 0, 0, group.MediaJson)
 	}
 	items := make([]collectMediaItem, 0)

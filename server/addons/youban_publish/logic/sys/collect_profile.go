@@ -28,11 +28,15 @@ func (s *sSysPublish) upsertCollectProfile(ctx context.Context, event gdb.Record
 	if tenantId <= 0 || accountId <= 0 {
 		return 0, gerror.New("采集资料归属不完整")
 	}
+	metadata, err := s.enrichProfileMetadata(ctx, text)
+	if err != nil {
+		return 0, err
+	}
 	sourceKey := collectPublishClientRequestId(event, rule)
 	channelJSON := rule["target_channel_id_json"].String()
 	now := gtime.Now()
 	var profileId int64
-	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		columns := dao.ContentProfile.Columns()
 		existing, err := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).
 			Fields(columns.Id).
@@ -49,6 +53,9 @@ func (s *sSysPublish) upsertCollectProfile(ctx context.Context, event gdb.Record
 			columns.Title:           title,
 			columns.Summary:         profileSummary(text),
 			columns.PlainText:       text,
+			columns.Province:        metadata.Province,
+			columns.City:            metadata.City,
+			columns.CupSize:         metadata.Tag,
 			columns.Visibility:      consts.ContentVisibilityPublic,
 			columns.ReviewStatus:    consts.ContentReviewApproved,
 			columns.ImportStatus:    "collect",

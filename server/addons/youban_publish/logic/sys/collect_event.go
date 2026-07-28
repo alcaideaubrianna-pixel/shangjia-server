@@ -333,12 +333,25 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 }
 
 func (s *sSysPublish) attachCollectVerifyEventToPreviousTask(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (bool, error) {
-	items, ok, err := s.collectVerifyOnlyEventItems(ctx, event, content)
-	if err != nil || !ok {
+	rows, err := s.collectEventMediaRows(ctx, event["id"].Int64())
+	if err != nil {
 		return false, err
+	}
+	items := collectMediaRowsToItems(rows)
+	text := strings.TrimSpace(event["raw_text"].String())
+	if text == "" && content != nil {
+		text = strings.TrimSpace(content.RawText)
+	}
+	classification := classifyProfileMessage(text, items)
+	if classification.Kind != profileMessageKindVerify || strings.TrimSpace(event["source_grouped_id"].String()) != "" {
+		return false, nil
 	}
 	previous, err := s.previousCollectProfileForVerify(ctx, event, rule)
 	if err != nil || previous.IsEmpty() {
+		return false, err
+	}
+	continuous, err := s.collectVerifyEventIsContinuous(ctx, event, previous)
+	if err != nil || !continuous {
 		return false, err
 	}
 	profileId := previous["profile_id"].Int64()
@@ -362,30 +375,20 @@ func (s *sSysPublish) attachCollectVerifyEventToPreviousTask(ctx context.Context
 	return true, nil
 }
 
-func (s *sSysPublish) collectVerifyOnlyEventItems(ctx context.Context, event gdb.Record, content *collectContentResult) ([]collectMediaItem, bool, error) {
-	if strings.TrimSpace(event["raw_text"].String()) != "" {
-		return nil, false, nil
+func (s *sSysPublish) collectVerifyEventIsContinuous(ctx context.Context, event gdb.Record, previous gdb.Record) (bool, error) {
+	if event.IsEmpty() || previous.IsEmpty() {
+		return false, nil
 	}
-	if content != nil && strings.TrimSpace(content.RawText) != "" {
-		return nil, false, nil
-	}
-	if event["media_count"].Int() <= 0 {
-		return nil, false, nil
-	}
-	rows, err := s.collectEventMediaRows(ctx, event["id"].Int64())
+	lastSourceMessageId, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Where("event_id", previous["event_id"].Int64()).
+		Fields("MAX(source_message_id)").
+		Value()
 	if err != nil {
-		return nil, false, err
+		return false, gerror.Wrap(err, "读取采集资料最后消息失败")
 	}
-	items := collectMediaRowsToItems(rows)
-	if len(items) == 0 {
-		return nil, false, nil
-	}
-	for _, item := range items {
-		if strings.TrimSpace(item.Type) != "video" {
-			return nil, false, nil
-		}
-	}
-	return items, true, nil
+	lastMessageId := lastSourceMessageId.Int64()
+	currentMessageId := event["source_message_id"].Int64()
+	return lastMessageId > 0 && currentMessageId == lastMessageId+1, nil
 }
 
 func (s *sSysPublish) previousCollectProfileForVerify(ctx context.Context, event gdb.Record, rule gdb.Record) (gdb.Record, error) {

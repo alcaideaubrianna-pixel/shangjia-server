@@ -68,27 +68,23 @@ func (s *sSysPublish) rebuildCollectOwnedMedia(ctx context.Context, event gdb.Re
 		return gerror.Wrap(err, "清理采集旧媒体失败")
 	}
 	_ = s.deleteMediaPHashBucketByProfileId(ctx, owner.ProfileId)
-	displayItems, verifyItems := splitCollectPublishMediaItems(event, items)
+	displayItems, verifyItems := classifyCollectPublishMedia(event, items)
 	if err := s.insertCollectOwnedMediaRows(ctx, event, owner, "display", displayItems); err != nil {
 		return err
 	}
 	return s.insertCollectOwnedMediaRows(ctx, event, owner, "verify", verifyItems)
 }
 
-func splitCollectPublishMediaItems(event gdb.Record, items []collectMediaItem) ([]collectMediaItem, []collectMediaItem) {
-	if !event.IsEmpty() && strings.TrimSpace(event["source_grouped_id"].String()) != "" {
-		return items, nil
+func classifyCollectPublishMedia(event gdb.Record, items []collectMediaItem) ([]collectMediaItem, []collectMediaItem) {
+	text := ""
+	if !event.IsEmpty() {
+		text = event["raw_text"].String()
 	}
-	if len(items) <= 1 {
-		return items, nil
+	classification := classifyProfileMessage(text, items)
+	if classification.Kind == profileMessageKindVerify {
+		return nil, items
 	}
-	last := items[len(items)-1]
-	if strings.TrimSpace(last.Type) != "video" {
-		return items, nil
-	}
-	display := make([]collectMediaItem, len(items)-1)
-	copy(display, items[:len(items)-1])
-	return display, []collectMediaItem{last}
+	return items, nil
 }
 
 func (s *sSysPublish) insertCollectOwnedMediaRows(ctx context.Context, event gdb.Record, owner collectPublishMediaOwner, purpose string, items []collectMediaItem) error {
