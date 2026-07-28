@@ -44,22 +44,12 @@ func TestTelegramJobPriorityManualProfilePublishIsUrgent(t *testing.T) {
 	}
 }
 
-func TestTelegramSchedulerCandidateLimitPreventsChannelStarvation(t *testing.T) {
-	tests := []struct {
-		name  string
-		limit int
-		want  int
-	}{
-		{name: "default batch", limit: 50, want: 5000},
-		{name: "small batch minimum", limit: 1, want: 1000},
-		{name: "large batch cap", limit: 200, want: 10000},
+func TestTelegramSchedulerChannelCacheKey(t *testing.T) {
+	if got := telegramSchedulerChannelCacheKey(telegramSchedulerChannel{ChannelId: 24}); got != "youban_publish:tg_scheduler:candidates:channel:24" {
+		t.Fatalf("channel cache key = %q", got)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := telegramSchedulerCandidateLimit(test.limit); got != test.want {
-				t.Fatalf("candidate limit = %d, want %d", got, test.want)
-			}
-		})
+	if got := telegramSchedulerChannelCacheKey(telegramSchedulerChannel{TargetChatId: "-100123"}); got != "youban_publish:tg_scheduler:candidates:chat:-100123" {
+		t.Fatalf("chat cache key = %q", got)
 	}
 }
 
