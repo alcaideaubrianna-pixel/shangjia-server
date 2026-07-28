@@ -36,6 +36,8 @@ func TestManagedBotErrorMessage(t *testing.T) {
 		want string
 	}{
 		{name: "occupied", err: errors.New("USERNAME_OCCUPIED"), want: "该 Bot 用户名已被占用"},
+		{name: "create blocked", err: errors.New("CREATE_BOT_BLOCKED"), want: "当前TG账号已被Telegram限制创建机器人，请切换其他TG账号后重试"},
+		{name: "create limit", err: errors.New("BOT_CREATE_LIMIT_EXCEEDED"), want: "当前TG账号创建的机器人数量已达上限，请切换其他TG账号后重试"},
 		{name: "manager permission", err: errors.New("MANAGER_PERMISSION_MISSING"), want: "官方Bot尚未开启Bot Management Mode"},
 	}
 	for _, tt := range tests {

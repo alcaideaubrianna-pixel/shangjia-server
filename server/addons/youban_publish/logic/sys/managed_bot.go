@@ -286,6 +286,10 @@ func managedBotErrorMessage(err error) string {
 		return "Bot 用户名格式不合法"
 	case strings.Contains(message, "USERNAME_PURCHASE_AVAILABLE"):
 		return "该 Bot 用户名需要购买后才能使用"
+	case strings.Contains(message, "CREATE_BOT_BLOCKED"):
+		return "当前TG账号已被Telegram限制创建机器人，请切换其他TG账号后重试"
+	case strings.Contains(message, "BOT_CREATE_LIMIT_EXCEEDED"):
+		return "当前TG账号创建的机器人数量已达上限，请切换其他TG账号后重试"
 	case strings.Contains(message, "MANAGER_PERMISSION_MISSING"):
 		return "官方Bot尚未开启Bot Management Mode"
 	case strings.Contains(message, "官方BOT尚未开启BOT MANAGEMENT MODE"):
