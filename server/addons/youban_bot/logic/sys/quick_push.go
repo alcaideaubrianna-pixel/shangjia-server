@@ -117,6 +117,7 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 	if err != nil {
 		return true, err
 	}
+	media = bot.persistQuickPushMedia(ctx, media)
 	if strings.TrimSpace(event.Msg.MediaGroupID) != "" && len(media) > 0 {
 		return true, bot.collectQuickPushMediaGroup(ctx, row.BotToken, session, event.Msg, text, media)
 	}
