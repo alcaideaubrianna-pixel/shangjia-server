@@ -241,6 +241,34 @@ func TestMaterialImportRegionCodesFromIndex(t *testing.T) {
 	}
 }
 
+func TestMaterialImportRegionCodesPreferLocationFields(t *testing.T) {
+	henan := &legacyCMSRegionOption{Id: 410000, Level: 1, Title: "河南省"}
+	zhengzhou := &legacyCMSRegionOption{Id: 410100, Pid: henan.Id, Level: 2, Title: "郑州市"}
+	yichang := &legacyCMSRegionOption{Id: 420500, Pid: 420000, Level: 2, Title: "宜昌市"}
+	index := &legacyCMSRegionIndex{
+		provincesByName: map[string]*legacyCMSRegionOption{"河南": henan},
+		citiesByName: map[string][]*legacyCMSRegionOption{
+			"宜昌": {yichang},
+			"郑州": {zhengzhou},
+		},
+		optionsById: map[int64]*legacyCMSRegionOption{henan.Id: henan, zhengzhou.Id: zhengzhou, yichang.Id: yichang},
+	}
+	text := "省份:河南\n城市:郑州\n介绍人说可以去宜昌\n能否飞往其他城市:可以"
+	provinceCode, cityCode := materialImportRegionCodesFromIndex(text, index)
+	if provinceCode != "410000" || cityCode != "410100" {
+		t.Fatalf("codes = (%q, %q), want (%q, %q)", provinceCode, cityCode, "410000", "410100")
+	}
+}
+
+func TestMaterialImportRegionNameMatchesRejectsSingleCharacterAlias(t *testing.T) {
+	if materialImportRegionNameMatches("河南安阳", "安") {
+		t.Fatal("single-character region alias must not match full text")
+	}
+	if !materialImportRegionNameMatches("河南安阳", "安阳") {
+		t.Fatal("two-character region alias should match full text")
+	}
+}
+
 func TestNormalizeLegacyRegionNameSupportsCountySuffix(t *testing.T) {
 	if got := normalizeLegacyRegionName("西安市"); got != "西安" {
 		t.Fatalf("normalize city = %q, want %q", got, "西安")

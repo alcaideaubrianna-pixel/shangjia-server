@@ -107,16 +107,16 @@ func materialImportRegionCodesFromIndex(text string, index *legacyCMSRegionIndex
 	if index == nil {
 		return "", ""
 	}
-	normalizedText := normalizeMaterialImportMatchText(text)
+	normalizedText := normalizeMaterialImportMatchText(materialImportRegionMatchText(text))
 	provinceIDs := make(map[int64]struct{})
 	cityIDs := make(map[int64]struct{})
 	for name, province := range index.provincesByName {
-		if province != nil && strings.Contains(normalizedText, normalizeMaterialImportMatchText(name)) {
+		if province != nil && materialImportRegionNameMatches(normalizedText, name) {
 			provinceIDs[province.Id] = struct{}{}
 		}
 	}
 	for name, cities := range index.citiesByName {
-		if !strings.Contains(normalizedText, normalizeMaterialImportMatchText(name)) {
+		if !materialImportRegionNameMatches(normalizedText, name) {
 			continue
 		}
 		for _, city := range cities {
@@ -130,7 +130,7 @@ func materialImportRegionCodesFromIndex(text string, index *legacyCMSRegionIndex
 		}
 	}
 	for name, districts := range index.districtsByName {
-		if !strings.Contains(normalizedText, normalizeMaterialImportMatchText(name)) {
+		if !materialImportRegionNameMatches(normalizedText, name) {
 			continue
 		}
 		for _, district := range districts {
@@ -148,6 +148,39 @@ func materialImportRegionCodesFromIndex(text string, index *legacyCMSRegionIndex
 		}
 	}
 	return joinMaterialImportRegionIDs(provinceIDs), joinMaterialImportRegionIDs(cityIDs)
+}
+
+func materialImportRegionMatchText(text string) string {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	values := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		separator := strings.IndexAny(line, ":：")
+		if separator < 0 {
+			continue
+		}
+		label := normalizeMaterialImportMatchText(line[:separator])
+		if !strings.Contains(label, "省份") &&
+			!strings.Contains(label, "城市") &&
+			label != "地区" &&
+			label != "所在地" &&
+			label != "位置" {
+			continue
+		}
+		values = append(values, line[separator+1:])
+	}
+	if len(values) == 0 {
+		return text
+	}
+	return strings.Join(values, "\n")
+}
+
+func materialImportRegionNameMatches(normalizedText string, name string) bool {
+	normalizedName := normalizeMaterialImportMatchText(name)
+	return len([]rune(normalizedName)) >= 2 && strings.Contains(normalizedText, normalizedName)
 }
 
 func (s *sSysPublish) materialImportMatchedTags(ctx context.Context, text string) (string, error) {
@@ -182,7 +215,11 @@ func joinMaterialImportRegionIDs(ids map[int64]struct{}) string {
 	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
 	parts := make([]string, 0, len(values))
 	for _, id := range values {
-		parts = append(parts, fmt.Sprintf("%d", id))
+		part := fmt.Sprintf("%d", id)
+		if len(strings.Join(append(parts, part), ",")) > 64 {
+			break
+		}
+		parts = append(parts, part)
 	}
 	return strings.Join(parts, ",")
 }
