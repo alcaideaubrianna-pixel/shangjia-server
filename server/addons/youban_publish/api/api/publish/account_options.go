@@ -14,3 +14,11 @@ type AdminAccountOptionsReq struct {
 type AdminAccountOptionsRes struct {
 	List []*sysin.AccountOptionModel `json:"list" dc:"账号筛选选项"`
 }
+
+type AdminCollectSourceOptionsReq struct {
+	g.Meta `path:"/publish/admin/collect/source/options" method:"get" tags:"上架插件管理端" summary:"采集源筛选选项"`
+}
+
+type AdminCollectSourceOptionsRes struct {
+	List []*sysin.CollectSourceOptionModel `json:"list" dc:"采集源筛选选项"`
+}

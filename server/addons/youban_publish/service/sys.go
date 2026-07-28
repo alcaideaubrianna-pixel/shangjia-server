@@ -76,6 +76,7 @@ type ISysPublish interface {
 	ServerDashboard(ctx context.Context, in *sysin.TrendInp) (res *sysin.ServerDashboardModel, err error)
 	AdminAccountList(ctx context.Context, in *sysin.AccountListInp) (list []*sysin.AccountModel, totalCount int, err error)
 	AdminAccountOptions(ctx context.Context, in *sysin.AccountOptionsInp) (list []*sysin.AccountOptionModel, err error)
+	AdminCollectSourceOptions(ctx context.Context) (list []*sysin.CollectSourceOptionModel, err error)
 	AdminAccountSave(ctx context.Context, in *sysin.AccountSaveInp) (res *sysin.AccountSaveModel, err error)
 	AdminAccountResetPassword(ctx context.Context, in *sysin.AccountResetPasswordInp) (res *sysin.AccountSaveModel, err error)
 	AdminAccountDelete(ctx context.Context, in *sysin.AccountDeleteInp) (err error)

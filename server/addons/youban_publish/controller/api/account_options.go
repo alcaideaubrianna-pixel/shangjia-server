@@ -19,3 +19,14 @@ func (c *cPublishAdmin) AccountOptions(ctx context.Context, req *publish.AdminAc
 	res = &publish.AdminAccountOptionsRes{List: list}
 	return
 }
+
+func (c *cPublishAdmin) CollectSourceOptions(ctx context.Context, req *publish.AdminCollectSourceOptionsReq) (res *publish.AdminCollectSourceOptionsRes, err error) {
+	list, err := service.SysPublish().AdminCollectSourceOptions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.CollectSourceOptionModel{}
+	}
+	return &publish.AdminCollectSourceOptionsRes{List: list}, nil
+}

@@ -57,6 +57,9 @@ func (s *sSysPublish) profileListByModel(ctx context.Context, base *gdb.Model, i
 	if err = s.applyProfileTagNames(ctx, list); err != nil {
 		return nil, 0, err
 	}
+	if err = s.applyProfileCollectionMetadata(ctx, list); err != nil {
+		return nil, 0, err
+	}
 	return
 }
 
@@ -78,6 +81,9 @@ func (s *sSysPublish) profileView(ctx context.Context, profileId int64, tenantId
 		return nil, err
 	}
 	if err = s.applyProfileTagNames(ctx, []*sysin.ProfileModel{res}); err != nil {
+		return nil, err
+	}
+	if err = s.applyProfileCollectionMetadata(ctx, []*sysin.ProfileModel{res}); err != nil {
 		return nil, err
 	}
 	return res, nil
@@ -141,6 +147,9 @@ func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.NoteListInp, 
 	if err = s.applyProfileTagNames(ctx, profiles); err != nil {
 		return nil, err
 	}
+	if err = s.applyProfileCollectionMetadata(ctx, profiles); err != nil {
+		return nil, err
+	}
 	stageStartedAt := time.Now()
 	mediaBuckets, err := s.adminNoteCoverMediaByProfiles(ctx, profiles)
 	if err != nil {
@@ -170,24 +179,29 @@ func adminNoteListFromProfile(profile *sysin.ProfileModel, media []*sysin.AdminN
 		media = []*sysin.AdminNoteMediaModel{}
 	}
 	return &sysin.AdminNoteListModel{
-		Id:          profile.Id,
-		Uuid:        profile.Uuid,
-		AccountId:   profile.AccountId,
-		AccountName: profile.AccountName,
-		Nickname:    profile.Nickname,
-		Username:    profile.Username,
-		ProfileNo:   profile.ProfileNo,
-		Title:       profile.Title,
-		Province:    profile.Province,
-		City:        profile.City,
-		Tag:         profile.Tag,
-		Status:      profile.Status,
-		TaskStatus:  profile.TaskStatus,
-		CanEdit:     profile.CanEdit,
-		Permission:  profile.Permission,
-		CreatedAt:   profile.CreatedAt,
-		UpdatedAt:   profile.UpdatedAt,
-		Media:       media,
+		Id:                    profile.Id,
+		Uuid:                  profile.Uuid,
+		AccountId:             profile.AccountId,
+		SourceType:            profile.SourceType,
+		IsCollected:           profile.IsCollected,
+		CollectSourceId:       profile.CollectSourceId,
+		CollectSourceName:     profile.CollectSourceName,
+		CollectSourceUsername: profile.CollectSourceUsername,
+		AccountName:           profile.AccountName,
+		Nickname:              profile.Nickname,
+		Username:              profile.Username,
+		ProfileNo:             profile.ProfileNo,
+		Title:                 profile.Title,
+		Province:              profile.Province,
+		City:                  profile.City,
+		Tag:                   profile.Tag,
+		Status:                profile.Status,
+		TaskStatus:            profile.TaskStatus,
+		CanEdit:               profile.CanEdit,
+		Permission:            profile.Permission,
+		CreatedAt:             profile.CreatedAt,
+		UpdatedAt:             profile.UpdatedAt,
+		Media:                 media,
 	}
 }
 
@@ -289,7 +303,7 @@ func (s *sSysPublish) profileBaseModel(ctx context.Context, tenantId int64, acco
 }
 
 func profileListFields() string {
-	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,COALESCE(ps.customer_remark,p.admin_remark) AS customer_remark,p.published_at,p.created_at,p.updated_at,ps.tenant_id,ps.account_id,tenant.name AS tenant_name,a.nickname AS account_name,a.nickname,a.username,ps.channel_id_json,COALESCE(ps.anti_scan_enabled,0) AS anti_scan_enabled,'' AS task_status,'' AS tg_status,CASE WHEN ps.channel_id_json IS NULL OR ps.channel_id_json='' OR ps.channel_id_json='[]' THEN 0 ELSE 1 END AS tg_push_enabled"
+	return "p.id,p.source_note_uuid AS uuid,p.source_type,p.profile_no,p.title,p.summary,p.plain_text,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,COALESCE(ps.customer_remark,p.admin_remark) AS customer_remark,p.published_at,p.created_at,p.updated_at,ps.tenant_id,ps.account_id,tenant.name AS tenant_name,a.nickname AS account_name,a.nickname,a.username,ps.channel_id_json,COALESCE(ps.anti_scan_enabled,0) AS anti_scan_enabled,'' AS task_status,'' AS tg_status,CASE WHEN ps.channel_id_json IS NULL OR ps.channel_id_json='' OR ps.channel_id_json='[]' THEN 0 ELSE 1 END AS tg_push_enabled"
 }
 
 func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model {
@@ -354,7 +368,59 @@ func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gd
 	if in.Status > 0 {
 		mod = mod.Where("p.status", in.Status)
 	}
+	if in.CollectSourceId > 0 {
+		mod = mod.Where("EXISTS (SELECT 1 FROM "+publishCollectDispatchTable+" d WHERE d.profile_id=p.id AND d.source_id=?)", in.CollectSourceId)
+	}
 	return mod
+}
+
+type profileCollectionMetadataRow struct {
+	ProfileId      int64  `orm:"profile_id"`
+	SourceId       int64  `orm:"source_id"`
+	SourceName     string `orm:"source_name"`
+	SourceUsername string `orm:"source_username"`
+}
+
+func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list []*sysin.ProfileModel) error {
+	profileIds := make([]int64, 0, len(list))
+	for _, item := range list {
+		if item != nil && item.Id > 0 {
+			profileIds = append(profileIds, item.Id)
+		}
+	}
+	profileIds = uniqueIds(profileIds)
+	if len(profileIds) == 0 {
+		return nil
+	}
+	var rows []profileCollectionMetadataRow
+	err := g.DB().Model(publishCollectDispatchTable+" d").Safe().Ctx(ctx).
+		InnerJoin(publishCollectSourceTable+" s", "s.id=d.source_id AND s.deleted_at IS NULL").
+		WhereIn("d.profile_id", profileIds).
+		Fields("d.profile_id,d.source_id,s.title AS source_name,s.source_username").
+		OrderAsc("d.profile_id").OrderDesc("d.id").Scan(&rows)
+	if err != nil {
+		return gerror.Wrap(err, "读取资料采集来源失败")
+	}
+	metadata := make(map[int64]profileCollectionMetadataRow, len(rows))
+	for _, row := range rows {
+		if _, ok := metadata[row.ProfileId]; !ok {
+			metadata[row.ProfileId] = row
+		}
+	}
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		row, ok := metadata[item.Id]
+		item.IsCollected = item.IsCollected || item.SourceType == collectProfileSourceType || ok
+		if !ok {
+			continue
+		}
+		item.CollectSourceId = row.SourceId
+		item.CollectSourceName = strings.TrimSpace(row.SourceName)
+		item.CollectSourceUsername = strings.TrimSpace(row.SourceUsername)
+	}
+	return nil
 }
 
 func splitProfileTagValues(value string) []string {

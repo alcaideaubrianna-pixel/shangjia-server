@@ -39,4 +39,6 @@ var (
 	publishCollectContentMediaTable  = pdao.YoubanPublishCollectContentMedia.Table()
 	publishCollectHistoryTaskTable   = pdao.YoubanPublishCollectHistoryTask.Table()
 	publishCollectHistoryLogTable    = pdao.YoubanPublishCollectHistoryLog.Table()
+	publishCollectSourceTable        = pdao.YoubanPublishCollectSource.Table()
+	publishCollectDispatchTable      = pdao.YoubanPublishCollectDispatch.Table()
 )

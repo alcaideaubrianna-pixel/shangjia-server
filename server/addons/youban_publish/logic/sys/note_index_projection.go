@@ -151,5 +151,7 @@ func (s *sSysPublish) deleteProfileNoteIndex(ctx context.Context, profileIds []i
 }
 
 func noteIndexModel(ctx context.Context) *gdb.Model {
-	return pdao.YoubanPublishNoteIndex.Ctx(ctx).As("i").WhereNull("i.deleted_at")
+	return pdao.YoubanPublishNoteIndex.Ctx(ctx).As("i").
+		InnerJoin(dao.ContentProfile.Table()+" p", "p.id=i.profile_id AND p.deleted_at IS NULL").
+		WhereNull("i.deleted_at")
 }
