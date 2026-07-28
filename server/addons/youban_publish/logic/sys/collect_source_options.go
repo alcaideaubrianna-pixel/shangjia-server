@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 )
 
 type collectSourceOptionRow struct {
@@ -21,6 +23,13 @@ func (s *sSysPublish) AdminCollectSourceOptions(ctx context.Context) ([]*sysin.C
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
+	}
+	cacheKey := fmt.Sprintf("youban_publish:collect_source_options:%d", account.TenantId)
+	if cached, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !cached.IsNil() {
+		var list []*sysin.CollectSourceOptionModel
+		if scanErr := cached.Scan(&list); scanErr == nil && list != nil {
+			return list, nil
+		}
 	}
 	var rows []collectSourceOptionRow
 	columns := pdao.YoubanPublishCollectSource.Columns()
@@ -38,9 +47,10 @@ func (s *sSysPublish) AdminCollectSourceOptions(ctx context.Context) ([]*sysin.C
 			label = "@" + strings.TrimPrefix(strings.TrimSpace(row.SourceUsername), "@")
 		}
 		if label == "" {
-			label = fmt.Sprintf("采集源 %d", row.Id)
+			label = fmt.Sprintf("频道 #%d", row.Id)
 		}
 		list = append(list, &sysin.CollectSourceOptionModel{Id: row.Id, Label: label, Username: row.SourceUsername})
 	}
+	_ = cache.Instance().Set(ctx, cacheKey, list, 5*time.Minute)
 	return list, nil
 }

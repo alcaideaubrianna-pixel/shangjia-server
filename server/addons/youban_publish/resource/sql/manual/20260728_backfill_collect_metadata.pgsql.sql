@@ -6,6 +6,9 @@
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_collect_dispatch_profile"
 ON "hg_youban_publish_collect_dispatch" ("profile_id", "id");
 
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_collect_dispatch_source_profile"
+ON "hg_youban_publish_collect_dispatch" ("source_id", "profile_id");
+
 UPDATE "hg_content_profile" p
 SET "source_type" = 'youban_collect',
     "updated_at" = NOW()
