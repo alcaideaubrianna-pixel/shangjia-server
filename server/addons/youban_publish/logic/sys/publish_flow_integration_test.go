@@ -105,7 +105,7 @@ type integrationProfileFixture struct {
 func integrationPublishFixture(t *testing.T, ctx context.Context) (integrationProfileFixture, int64) {
 	t.Helper()
 	var profile integrationProfileFixture
-	err := fullPushOnlineProfileBaseModel(ctx, 2, 0).
+	err := fullPushOnlineProfileBaseModel(ctx, 2).
 		Fields("ps.tenant_id,ps.account_id,p.id AS profile_id").
 		Where("EXISTS (SELECT 1 FROM " + publishMediaTable + " m WHERE m.profile_id=p.id AND m.task_id IS NULL AND m.deleted_at IS NULL)").
 		OrderAsc("p.id").Limit(1).Scan(&profile)

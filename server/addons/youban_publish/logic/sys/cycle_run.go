@@ -14,8 +14,6 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
-	"hotgo/internal/consts"
-	"hotgo/internal/dao"
 )
 
 const (
@@ -261,7 +259,7 @@ func (s *sSysPublish) createChannelCycleRun(ctx context.Context, channel channel
 		if affected == 0 {
 			return nil
 		}
-		totalCount, countErr := channelCycleOnlineProfileBaseModel(tx.Model(publishChannelProfileTable).Ctx(ctx), channel.Id).Count()
+		totalCount, countErr := fullPushOnlineProfileBaseModel(ctx, channel.TenantId).Count()
 		if countErr != nil {
 			return gerror.Wrap(countErr, "统计频道循环资料失败")
 		}
@@ -308,7 +306,7 @@ func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
 	if backlog >= cycleBatchBacklogLimit {
 		return s.continueChannelCycleRun(ctx, run, 30*time.Second)
 	}
-	items, err := s.channelCyclePage(ctx, run.ChannelId, run.CursorId, cycleBatchPageSize)
+	items, err := s.channelCyclePage(ctx, channel.TenantId, run.ChannelId, run.CursorId, cycleBatchPageSize)
 	if err != nil {
 		s.failChannelCycleRun(ctx, run.Id, run.ChannelId, err)
 		return err
@@ -413,29 +411,21 @@ func (s *sSysPublish) channelCycleById(ctx context.Context, channelId int64) (ch
 	return channel, err
 }
 
-func (s *sSysPublish) channelCyclePage(ctx context.Context, channelId int64, cursorId int64, limit int) ([]channelProfileRecord, error) {
+func (s *sSysPublish) channelCyclePage(ctx context.Context, tenantId, channelId int64, cursorId int64, limit int) ([]channelProfileRecord, error) {
 	var items []channelProfileRecord
-	err := channelCycleOnlineProfileBaseModel(g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx), channelId).
-		Fields("id,tenant_id,account_id,channel_id,profile_id").
-		WhereGT("id", cursorId).
-		OrderAsc("id").
+	err := fullPushOnlineProfileBaseModel(ctx, tenantId).
+		Fields("p.id AS id,ps.tenant_id,ps.account_id,p.id AS profile_id").
+		WhereGT("p.id", cursorId).
+		OrderAsc("p.id").
 		Limit(limit).
 		Scan(&items)
 	if err != nil {
 		return nil, gerror.Wrap(err, "分页读取频道循环资料失败")
 	}
+	for i := range items {
+		items[i].ChannelId = channelId
+	}
 	return items, nil
-}
-
-func channelCycleOnlineProfileBaseModel(model *gdb.Model, channelId int64) *gdb.Model {
-	return model.As("cp").
-		InnerJoin(dao.ContentProfile.Table()+" p", "p.id=cp.profile_id AND p.deleted_at IS NULL").
-		InnerJoin(publishAccountTable+" a", "a.id=cp.account_id AND a.deleted_at IS NULL").
-		Where("cp.channel_id", channelId).
-		Where("cp.status", "active").
-		Where("p.status", 1).
-		Where("p.visibility", consts.ContentVisibilityPublic).
-		Where("a.status", 1)
 }
 
 func (s *sSysPublish) channelCycleBacklog(ctx context.Context, channelId int64) (int, error) {
