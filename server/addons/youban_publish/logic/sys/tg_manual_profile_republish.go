@@ -36,8 +36,9 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 		if hasUndeletable, checkErr := s.telegramJobHasUndeletableMessages(ctx, job.Id); checkErr != nil {
 			return false, checkErr
 		} else if hasUndeletable {
-			s.appendTelegramJobLog(ctx, current, "republish", "skipped", "频道中已有同资料消息且已超过Telegram可删除时限，跳过重复推送")
-			return false, nil
+			message := "频道中存在已超过Telegram删除时限的同资料旧消息，无法删除，将继续推送最新资料，频道内可能暂时保留历史消息"
+			s.appendTelegramJobLog(ctx, current, "republish", "warning", message)
+			g.Log().Warningf(ctx, "资料上架保留Telegram不可删除旧消息，继续推送新消息 profileId:%d channelId:%d oldJobId:%d currentJobId:%d", current.ProfileId, current.ChannelId, job.Id, current.Id)
 		}
 		if err = s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
 			return false, err

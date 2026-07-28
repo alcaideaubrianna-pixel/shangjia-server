@@ -345,7 +345,7 @@ func fullPushOnlineProfileBaseModel(ctx context.Context, tenantId, channelId int
 		  AND cj.status = 'sent'
 		  AND EXISTS (
 			SELECT 1 FROM `+publishTgMessageTable+` cm
-			WHERE cm.job_id = cj.id AND cm.status IN ('sent', 'undeletable')
+			WHERE cm.job_id = cj.id AND cm.status = 'sent'
 		  )
 	)`, channelId)
 }
