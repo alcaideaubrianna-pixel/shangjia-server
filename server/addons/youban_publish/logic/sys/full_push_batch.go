@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	hglock "hotgo/internal/library/hgrds/lock"
 )
@@ -329,7 +330,8 @@ func fullPushOnlineProfileBaseModel(ctx context.Context, tenantId int64) *gdb.Mo
 		WhereNull("ps.deleted_at").
 		Where("a.tenant_id", tenantId).
 		Where("a.status", 1).
-		Where("p.status", 1)
+		Where("p.status", 1).
+		Where("p.visibility", consts.ContentVisibilityPublic)
 }
 
 func (s *sSysPublish) enqueueFullPushProfile(ctx context.Context, batch fullPushBatchRecord, profile fullPushProfile) error {
