@@ -53,18 +53,28 @@ func (s *sSysPublish) telegramJobActiveMessages(ctx context.Context, job telegra
 	return rows, nil
 }
 
-func (s *sSysPublish) telegramJobHasUndeletableMessages(ctx context.Context, jobId int64) (bool, error) {
-	if jobId <= 0 {
-		return false, nil
+func (s *sSysPublish) telegramJobsWithUndeletableMessages(ctx context.Context, jobIds []int64) (map[int64]bool, error) {
+	jobIds = uniqueIds(jobIds)
+	result := make(map[int64]bool, len(jobIds))
+	if len(jobIds) == 0 {
+		return result, nil
 	}
-	count, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
-		Where("job_id", jobId).
+	var rows []struct {
+		JobId int64 `orm:"job_id"`
+	}
+	err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+		Fields("job_id").
+		WhereIn("job_id", jobIds).
 		Where("status", "undeletable").
-		Count()
+		Group("job_id").
+		Scan(&rows)
 	if err != nil {
-		return false, gerror.Wrap(err, "检查TG历史消息删除状态失败")
+		return nil, gerror.Wrap(err, "批量检查TG历史消息删除状态失败")
 	}
-	return count > 0, nil
+	for _, row := range rows {
+		result[row.JobId] = true
+	}
+	return result, nil
 }
 
 func (s *sSysPublish) telegramJobsWithActiveMessages(ctx context.Context, tenantId int64, profileIds []int64, cutoffAt string) ([]telegramResubmitJob, error) {

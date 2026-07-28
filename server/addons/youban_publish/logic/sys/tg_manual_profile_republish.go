@@ -29,13 +29,19 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 	if err != nil {
 		return false, gerror.Wrap(err, "读取频道历史上架任务失败")
 	}
+	previousJobIds := make([]int64, 0, len(previous))
 	for _, job := range previous {
 		if err = s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料重新上架"); err != nil {
 			return false, gerror.Wrap(err, "删除频道历史上架消息失败")
 		}
-		if hasUndeletable, checkErr := s.telegramJobHasUndeletableMessages(ctx, job.Id); checkErr != nil {
-			return false, checkErr
-		} else if hasUndeletable {
+		previousJobIds = append(previousJobIds, job.Id)
+	}
+	undeletableJobs, err := s.telegramJobsWithUndeletableMessages(ctx, previousJobIds)
+	if err != nil {
+		return false, err
+	}
+	for _, job := range previous {
+		if undeletableJobs[job.Id] {
 			message := "频道中存在已超过Telegram删除时限的同资料旧消息，无法删除，将继续推送最新资料，频道内可能暂时保留历史消息"
 			s.appendTelegramJobLog(ctx, current, "republish", "warning", message)
 			g.Log().Warningf(ctx, "资料上架保留Telegram不可删除旧消息，继续推送新消息 profileId:%d channelId:%d oldJobId:%d currentJobId:%d", current.ProfileId, current.ChannelId, job.Id, current.Id)

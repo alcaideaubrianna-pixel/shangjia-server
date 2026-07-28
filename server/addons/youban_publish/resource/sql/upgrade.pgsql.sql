@@ -454,6 +454,8 @@ DROP INDEX IF EXISTS "uk_ybp_tg_job_task_channel";
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_task_channel" ON "hg_youban_publish_tg_job" ("task_id", "channel_id", "id");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_job_operation_channel" ON "hg_youban_publish_tg_job" ("task_id", "operation_no", "channel_id") WHERE "operation_no" <> '';
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_operation" ON "hg_youban_publish_tg_job" ("operation_no", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_cycle_channel_status_op" ON "hg_youban_publish_tg_job" ("channel_id", "status", "operation_no", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_profile_channel_chat" ON "hg_youban_publish_tg_job" ("tenant_id", "profile_id", "target_chat_id", "status", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_success_record" (
   "id" BIGSERIAL PRIMARY KEY, "job_id" bigint NOT NULL DEFAULT 0, "task_id" bigint NOT NULL DEFAULT 0,

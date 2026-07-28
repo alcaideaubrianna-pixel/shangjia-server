@@ -621,6 +621,8 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_operation" ON "hg_youban_publish_tg_j
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_scheduler" ON "hg_youban_publish_tg_job" ("dispatch_status", "status", "priority", "next_retry_at", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_channel_dispatch" ON "hg_youban_publish_tg_job" ("target_chat_id", "dispatch_status", "status", "updated_at");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_collect_order" ON "hg_youban_publish_tg_job" ("channel_id", "target_chat_id", "collect_source_id", "collect_source_chat_id", "collect_source_message_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_cycle_channel_status_op" ON "hg_youban_publish_tg_job" ("channel_id", "status", "operation_no", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_profile_channel_chat" ON "hg_youban_publish_tg_job" ("tenant_id", "profile_id", "target_chat_id", "status", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_queue_stat" (
   "id" BIGSERIAL PRIMARY KEY,
