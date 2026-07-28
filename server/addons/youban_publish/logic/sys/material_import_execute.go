@@ -128,6 +128,7 @@ func (s *sSysPublish) pullMaterialImportPages(ctx context.Context, client *teleg
 		if err := s.materialImportEnsureNotCanceled(ctx, task.Id); err != nil {
 			return err
 		}
+		previousOffset := offsetID
 		messages, err := materialImportHistoryPage(ctx, client, peer, offsetID)
 		if err != nil {
 			return err
@@ -163,7 +164,7 @@ func (s *sSysPublish) pullMaterialImportPages(ctx context.Context, client *teleg
 			shouldFinish = true
 			break
 		}
-		if nextOffset <= 0 || (offsetID > 0 && nextOffset >= offsetID) {
+		if nextOffset <= 0 || (previousOffset > 0 && nextOffset >= previousOffset) {
 			shouldFinish = true
 			break
 		}
