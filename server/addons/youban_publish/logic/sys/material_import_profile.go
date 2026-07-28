@@ -64,6 +64,12 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 	if err != nil {
 		return 0, err
 	}
+	if err = s.bindMaterialImportGroupProfile(ctx, group, saved); err != nil {
+		return 0, err
+	}
+	if err = s.updateMaterialImportProfileSource(ctx, saved.Id, group, task, title); err != nil {
+		return 0, err
+	}
 	media, err := s.saveMaterialImportProfileMedia(ctx, task, group, saved.Id, mediaJson)
 	if err != nil {
 		return 0, err
@@ -72,9 +78,6 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 	input.Media = media
 	saved, err = s.saveProfile(ctx, input, task.TenantId, task.AccountId)
 	if err != nil {
-		return 0, err
-	}
-	if err = s.bindMaterialImportGroupProfile(ctx, group, saved); err != nil {
 		return 0, err
 	}
 	if strings.TrimSpace(group.Title) == "" {
