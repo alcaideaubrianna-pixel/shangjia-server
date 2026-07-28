@@ -140,13 +140,9 @@ func (s *sSysPublish) enqueueProfilesTelegramCleanupBeforeDelete(ctx context.Con
 	if len(ids) == 0 {
 		return nil
 	}
-	var jobs []telegramResubmitJob
-	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("tenant_id", tenantId).
-		WhereIn("profile_id", ids).
-		Where("status", "sent").
-		Scan(&jobs); err != nil {
-		return gerror.Wrap(err, "读取资料TG清理任务失败")
+	jobs, err := s.telegramJobsWithActiveMessages(ctx, tenantId, ids, "")
+	if err != nil {
+		return err
 	}
 	for _, job := range jobs {
 		if job.Id <= 0 {
@@ -185,7 +181,10 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 		return &sysin.ProfileStatusModel{Message: "资料已提交上架"}, nil
 	}
 	for _, id := range ids {
-		if _, err = s.syncProfilePublishState(ctx, id, in.Status, consts.ContentVisibilityPrivate, nil); err != nil {
+		if err = s.withProfileLifecycleLock(ctx, tenantId, id, func() error {
+			_, lockErr := s.syncProfilePublishState(ctx, id, in.Status, consts.ContentVisibilityPrivate, nil)
+			return lockErr
+		}); err != nil {
 			return nil, gerror.Wrap(err, "更新资料状态失败")
 		}
 	}
@@ -233,7 +232,7 @@ func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		columns.Province:        in.Province,
 		columns.City:            in.City,
 		columns.CupSize:         in.Tag,
-		columns.Visibility:      in.Visibility,
+		columns.Visibility:      consts.ContentVisibilityPublic,
 		columns.ReviewStatus:    consts.ContentReviewPending,
 		columns.ImportStatus:    "manual",
 		columns.SourceCreateBy:  strconv.FormatInt(accountId, 10),

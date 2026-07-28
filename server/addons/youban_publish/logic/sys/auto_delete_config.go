@@ -157,6 +157,7 @@ func (s *sSysConfig) loadAutoDeleteDefaults(ctx context.Context) (*model.AutoDel
 	if cacheErr == nil && !cacheVar.IsNil() {
 		var cached model.AutoDeleteConfig
 		if cacheErr = cacheVar.Scan(&cached); cacheErr == nil {
+			ensureAutoDeleteDefaultRules(&cached)
 			return &cached, nil
 		}
 	}
@@ -168,7 +169,7 @@ func (s *sSysConfig) loadAutoDeleteDefaults(ctx context.Context) (*model.AutoDel
 		return nil, err
 	}
 	conf.Keywords = mergeAutoDeleteStrings(conf.Keywords)
-	conf.Rules = mergeAutoDeleteStrings(conf.Rules)
+	ensureAutoDeleteDefaultRules(conf)
 	_ = cache.Instance().Set(ctx, autoDeleteDefaultConfigCacheKey, conf, autoDeleteConfigCacheTTL)
 	return conf, nil
 }
@@ -335,6 +336,13 @@ func defaultAutoDeleteConfig() *model.AutoDeleteConfig {
 		Keywords: []string{},
 		Rules:    []string{autoDeleteRuleSingleNumberLine},
 	}
+}
+
+func ensureAutoDeleteDefaultRules(conf *model.AutoDeleteConfig) {
+	if conf == nil {
+		return
+	}
+	conf.Rules = mergeAutoDeleteStrings([]string{autoDeleteRuleSingleNumberLine}, conf.Rules)
 }
 
 func mergeAutoDeleteStrings(groups ...[]string) []string {

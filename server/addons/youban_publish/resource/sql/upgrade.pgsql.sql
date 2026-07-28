@@ -492,6 +492,7 @@ ALTER TABLE "hg_youban_publish_tg_message" ALTER COLUMN "task_id" DROP NOT NULL;
 ALTER TABLE "hg_youban_publish_tg_message" ALTER COLUMN "task_id" DROP DEFAULT;
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_job_profile_operation_channel" ON "hg_youban_publish_tg_job" ("profile_id", "operation_no", "channel_id") WHERE "task_id" IS NULL AND "profile_id" > 0 AND "operation_no" <> '';
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_profile_operation" ON "hg_youban_publish_tg_job" ("profile_id", "operation_no", "status", "id") WHERE "task_id" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_profile_cleanup" ON "hg_youban_publish_tg_job" ("profile_id", "tenant_id", "created_at", "id");
 DROP INDEX IF EXISTS "idx_ybp_profile_state_current_task";
 ALTER TABLE "hg_youban_publish_profile_state" DROP COLUMN IF EXISTS "current_task_id";
 ALTER TABLE "hg_youban_publish_channel_profile" DROP COLUMN IF EXISTS "task_id";

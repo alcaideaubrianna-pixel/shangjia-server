@@ -113,23 +113,15 @@ func (s *sSysPublish) activeDownProfileIds(ctx context.Context, ids []int64, ten
 }
 
 func (s *sSysPublish) deleteProfilesTelegramMessages(ctx context.Context, ids []int64, tenantId int64, cutoffAt string) error {
-	var jobs []telegramResubmitJob
-	mod := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("tenant_id", tenantId).
-		WhereIn("profile_id", ids).
-		Where("status", "sent")
-	if cutoffAt != "" {
-		mod = mod.WhereLTE("created_at", cutoffAt)
-	}
-	err := mod.Scan(&jobs)
+	jobs, err := s.telegramJobsWithActiveMessages(ctx, tenantId, ids, cutoffAt)
 	if err != nil {
-		return gerror.Wrap(err, "读取TG下架消息失败")
+		return err
 	}
 	for _, job := range jobs {
-		if err = s.deleteTelegramJobMessagesForResubmit(ctx, job); err != nil {
-			return err
+		if err = s.enqueueTelegramCleanupJob(ctx, job.Id, 0); err != nil {
+			return gerror.Wrap(err, "加入TG下架清理队列失败")
 		}
-		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "down", "deleted", "资料下架，TG历史消息已删除")
+		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "down", "queued", "资料下架，TG历史消息已加入Redis清理队列")
 	}
 	return nil
 }

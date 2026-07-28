@@ -92,7 +92,7 @@ func (s *sSysPublish) MyProfileCreate(ctx context.Context, in *sysin.ProfileSave
 	}
 	in.Id, in.Uuid = 0, ""
 	in.Status = 2
-	in.Visibility = consts.ContentVisibilityPrivate
+	in.Visibility = consts.ContentVisibilityPublic
 	return s.saveProfile(ctx, in, account.TenantId, account.Id)
 }
 
@@ -245,7 +245,7 @@ func (s *sSysPublish) AdminProfileCreate(ctx context.Context, in *sysin.ProfileS
 	}
 	in.Id, in.Uuid = 0, ""
 	in.Status = 2
-	in.Visibility = consts.ContentVisibilityPrivate
+	in.Visibility = consts.ContentVisibilityPublic
 	return s.saveProfile(ctx, in, account.TenantId, account.Id)
 }
 

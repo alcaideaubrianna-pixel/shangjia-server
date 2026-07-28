@@ -278,6 +278,12 @@ func (s *sSysPublish) switchTelegramJobToNextBot(ctx context.Context, job telegr
 }
 
 func (s *sSysPublish) completeTelegramJob(ctx context.Context, job telegramJobRecord) error {
+	return s.withProfileLifecycleLock(ctx, job.TenantId, job.ProfileId, func() error {
+		return s.completeTelegramJobLockedByProfile(ctx, job)
+	})
+}
+
+func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, job telegramJobRecord) error {
 	if status, err := s.telegramJobCurrentStatus(ctx, job.Id); err != nil {
 		return err
 	} else if status != "sending" {

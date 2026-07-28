@@ -99,8 +99,9 @@ func (s *sSysPublish) cleanupPreviousCycleMessages(ctx context.Context, current 
 	err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", current.TenantId).
 		Where("profile_id", current.ProfileId).
-		Where("channel_id", current.ChannelId).
-		Where("status", "sent").
+		Where("target_chat_id", normalizeTelegramChannelChatID(current.TargetChatId)).
+		WhereIn("status", []string{"sent", "superseded"}).
+		Where("EXISTS (SELECT 1 FROM "+publishTgMessageTable+" m WHERE m.job_id="+publishTgJobTable+".id AND m.status='sent')").
 		WhereLT("id", current.Id).
 		OrderAsc("id").
 		Scan(&jobs)

@@ -1215,7 +1215,7 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 		PlainText:      detail.PlainText,
 		ChannelIds:     channelIds,
 		CustomerRemark: "",
-		Visibility:     consts.ContentVisibilityPrivate,
+		Visibility:     consts.ContentVisibilityPublic,
 		Status:         legacyCMSProfileStatus(sourceItem.Status),
 	}
 	if scanItem.ProfileId > 0 {

@@ -42,7 +42,7 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 		ChannelIds: channelIds,
 		Title:      title,
 		PlainText:  strings.TrimSpace(firstNonEmpty(group.ProfileText, group.RawText)),
-		Visibility: consts.ContentVisibilityPrivate,
+		Visibility: consts.ContentVisibilityPublic,
 		Status:     1,
 	}
 	input.Province, input.City, err = materialImportRegionCodes(ctx, input.PlainText)

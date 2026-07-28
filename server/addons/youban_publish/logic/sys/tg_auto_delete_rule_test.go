@@ -1,6 +1,10 @@
 package sys
 
-import "testing"
+import (
+	"testing"
+
+	"hotgo/addons/youban_publish/model"
+)
 
 func TestMatchedAutoDeleteRule(t *testing.T) {
 	tests := []struct {
@@ -41,5 +45,18 @@ func TestMatchedAutoDeleteRule(t *testing.T) {
 				t.Fatalf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestEnsureAutoDeleteDefaultRules(t *testing.T) {
+	conf := &model.AutoDeleteConfig{Rules: []string{}}
+	ensureAutoDeleteDefaultRules(conf)
+	if len(conf.Rules) != 1 || conf.Rules[0] != autoDeleteRuleSingleNumberLine {
+		t.Fatalf("unexpected default rules: %#v", conf.Rules)
+	}
+	conf.Rules = []string{`single:^仅测试$`}
+	ensureAutoDeleteDefaultRules(conf)
+	if len(conf.Rules) != 2 || conf.Rules[0] != autoDeleteRuleSingleNumberLine {
+		t.Fatalf("unexpected merged rules: %#v", conf.Rules)
 	}
 }

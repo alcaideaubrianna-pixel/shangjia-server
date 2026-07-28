@@ -26,9 +26,14 @@ func (s *sSysPublish) syncProfilePublishState(ctx context.Context, profileId int
 		}
 		data[columns.PublishedAt] = publishedAt
 	}
+	condition := "(" + columns.Status + " <> ? OR " + columns.Visibility + " <> ?)"
+	args := []interface{}{status, visibility}
+	if status == 1 {
+		condition = "(" + columns.Status + " <> ? OR " + columns.Visibility + " <> ? OR " + columns.PublishedAt + " IS NULL)"
+	}
 	result, err := dao.ContentProfile.Ctx(ctx).
 		Where(columns.Id, profileId).
-		WhereNot(columns.Status, status).
+		Where(condition, args...).
 		Data(data).
 		Update()
 	if err != nil {

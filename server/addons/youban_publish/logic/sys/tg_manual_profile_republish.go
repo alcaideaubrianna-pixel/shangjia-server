@@ -21,17 +21,17 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 		Fields("id,task_id,operation_no,tenant_id,account_id,profile_id,channel_id,bot_id,target_chat_id,status").
 		Where("tenant_id", current.TenantId).
 		Where("profile_id", current.ProfileId).
-		Where("channel_id", current.ChannelId).
+		Where("target_chat_id", normalizeTelegramChannelChatID(current.TargetChatId)).
 		WhereLT("id", current.Id).
 		Where("operation_no NOT LIKE ?", "down:%").
-		WhereIn("status", []string{"pending", "failed_retry", "sent"}).
+		Where("(status IN('pending','failed_retry') OR (status IN('sent','superseded') AND EXISTS (SELECT 1 FROM " + publishTgMessageTable + " m WHERE m.job_id=" + publishTgJobTable + ".id AND m.status='sent')))").
 		OrderAsc("id").
 		Scan(&previous)
 	if err != nil {
 		return gerror.Wrap(err, "读取频道历史上架任务失败")
 	}
 	for _, job := range previous {
-		if job.Status == "sent" {
+		if job.Status == "sent" || job.Status == "superseded" {
 			if err = s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料重新上架"); err != nil {
 				return gerror.Wrap(err, "删除频道历史上架消息失败")
 			}

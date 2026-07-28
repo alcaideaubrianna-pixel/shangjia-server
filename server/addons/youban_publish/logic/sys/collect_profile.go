@@ -49,7 +49,7 @@ func (s *sSysPublish) upsertCollectProfile(ctx context.Context, event gdb.Record
 			columns.Title:           title,
 			columns.Summary:         profileSummary(text),
 			columns.PlainText:       text,
-			columns.Visibility:      consts.ContentVisibilityPrivate,
+			columns.Visibility:      consts.ContentVisibilityPublic,
 			columns.ReviewStatus:    consts.ContentReviewApproved,
 			columns.ImportStatus:    "collect",
 			columns.SourceUpdateBy:  strconv.FormatInt(accountId, 10),

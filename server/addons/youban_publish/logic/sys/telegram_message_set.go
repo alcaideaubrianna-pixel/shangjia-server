@@ -27,7 +27,7 @@ func (s *sSysPublish) deleteTelegramMessageSetLockedByChannel(ctx context.Contex
 		s.appendTelegramJobLog(ctx, job, "delete", "skipped", reason+"，未找到可删除的TG消息")
 		return nil
 	}
-	botToken, err := s.telegramJobBotToken(ctx, job.BotId, job.TenantId)
+	botToken, err := s.telegramCleanupJobBotToken(ctx, job.BotId, job.TenantId)
 	if err != nil {
 		if isTelegramBotConfigMissingError(err) {
 			s.appendTelegramJobLog(ctx, job, "delete", "skipped", reason+"，历史Bot配置已删除，跳过旧TG消息清理")

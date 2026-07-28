@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -50,6 +51,26 @@ func (s *sSysPublish) telegramJobActiveMessages(ctx context.Context, job telegra
 		return nil, gerror.Wrap(err, "读取TG消息记录失败")
 	}
 	return rows, nil
+}
+
+func (s *sSysPublish) telegramJobsWithActiveMessages(ctx context.Context, tenantId int64, profileIds []int64, cutoffAt string) ([]telegramResubmitJob, error) {
+	profileIds = uniqueIds(profileIds)
+	if tenantId <= 0 || len(profileIds) == 0 {
+		return []telegramResubmitJob{}, nil
+	}
+	var jobs []telegramResubmitJob
+	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		Fields("j.*").
+		Where("j.tenant_id", tenantId).
+		WhereIn("j.profile_id", profileIds).
+		Where("EXISTS (SELECT 1 FROM " + publishTgMessageTable + " m WHERE m.job_id=j.id AND m.status='sent')")
+	if strings.TrimSpace(cutoffAt) != "" {
+		mod = mod.WhereLTE("j.created_at", cutoffAt)
+	}
+	if err := mod.OrderAsc("j.id").Scan(&jobs); err != nil {
+		return nil, gerror.Wrap(err, "读取待清理TG历史消息失败")
+	}
+	return jobs, nil
 }
 
 type telegramDeleteMessage struct {

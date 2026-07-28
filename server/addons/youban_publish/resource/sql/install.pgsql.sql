@@ -615,6 +615,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_job_profile_operation_channel" ON "
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_status_retry" ON "hg_youban_publish_tg_job" ("status", "next_retry_at", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_task" ON "hg_youban_publish_tg_job" ("task_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_profile_operation" ON "hg_youban_publish_tg_job" ("profile_id", "operation_no", "status", "id") WHERE "task_id" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_profile_cleanup" ON "hg_youban_publish_tg_job" ("profile_id", "tenant_id", "created_at", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_cycle" ON "hg_youban_publish_tg_job" ("cycle_enabled", "next_cycle_at", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_operation" ON "hg_youban_publish_tg_job" ("operation_no", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_scheduler" ON "hg_youban_publish_tg_job" ("dispatch_status", "status", "priority", "next_retry_at", "id");
