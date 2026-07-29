@@ -401,6 +401,20 @@ func (s *sSysPublish) executeAccountCollectMediaOperation(ctx context.Context, t
 	return s.executeAccountCollectOperationMode(ctx, tgAccountId, timeout, run, true)
 }
 
+func (s *sSysPublish) restartAccountCollectWorker(ctx context.Context, tgAccountId int64, reason error) {
+	if tgAccountId <= 0 {
+		return
+	}
+	s.accountRuntimeMu.Lock()
+	worker := s.accountRuntimes[tgAccountId]
+	s.accountRuntimeMu.Unlock()
+	if worker == nil || worker.cancel == nil {
+		return
+	}
+	g.Log().Warningf(ctx, "账号采集连接需要重建 tgAccountId:%d err:%+v", tgAccountId, reason)
+	worker.cancel()
+}
+
 func (s *sSysPublish) executeAccountCollectOperationMode(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation, parallel bool) (bool, error) {
 	if tgAccountId <= 0 || run == nil {
 		return false, nil

@@ -345,6 +345,9 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			cached, err := s.downloadTelegramMedia(ctx, event["tenant_id"].Int64(), event["tg_account_id"].Int64(), items[index])
 			if err != nil {
 				g.Log().Errorf(ctx, "账号采集媒体下载失败 eventId:%d mediaId:%d sourceMessageId:%d duration:%s err:%+v", event["id"].Int64(), row.Id, row.SourceMessageId, time.Since(startedAt).Round(time.Millisecond), err)
+				if collectMediaAuthBytesInvalid(err) {
+					s.restartAccountCollectWorker(ctx, event["tg_account_id"].Int64(), err)
+				}
 				if retryErr := collectMediaRetryErrorFrom(err); retryErr != nil {
 					_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
 						"cache_status":  collectMediaCachePending,
@@ -654,6 +657,13 @@ func collectMediaErrorIsRateLimited(message string) bool {
 	return strings.Contains(message, "限流") ||
 		strings.Contains(message, "too many requests") ||
 		strings.Contains(message, "flood_wait")
+}
+
+func collectMediaAuthBytesInvalid(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "auth_bytes_invalid")
 }
 
 func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64, tgAccountId int64, item collectMediaItem) (*collectDownloadedMedia, error) {
