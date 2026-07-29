@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -12,16 +11,12 @@ import (
 )
 
 type collectSourceQueueWorker struct {
-	process *asynq.Server
-	media   *asynq.Server
+	media *asynq.Server
 }
 
 func (w *collectSourceQueueWorker) shutdown() {
 	if w == nil {
 		return
-	}
-	if w.process != nil {
-		w.process.Shutdown()
 	}
 	if w.media != nil {
 		w.media.Shutdown()
@@ -78,32 +73,19 @@ func (s *sSysPublish) syncCollectSourceQueueWorkers(ctx context.Context) {
 }
 
 func (s *sSysPublish) startCollectSourceQueueWorker(ctx context.Context, sourceId int64) *collectSourceQueueWorker {
-	processQueue := collectSourceQueueName(tgQueueNameCollect, sourceId)
 	mediaQueue := collectSourceQueueName(tgQueueNameCollectMedia, sourceId)
-	processServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    1,
-		Queues:         map[string]int{processQueue: 1},
-		RetryDelayFunc: telegramQueueRetryDelay,
-	})
 	mediaServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    1,
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 8).Int(),
 		Queues:         map[string]int{mediaQueue: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
-	processMux := asynq.NewServeMux()
-	processMux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
 	mediaMux := asynq.NewServeMux()
 	mediaMux.HandleFunc(tgTaskTypeCollectMedia, s.handleCollectMediaCacheTask)
 	go func() {
-		if err := processServer.Run(processMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
-			g.Log().Errorf(ctx, "启动采集源处理队列失败 sourceId:%d err:%+v", sourceId, err)
-		}
-	}()
-	go func() {
-		if err := mediaServer.Run(mediaMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+		if err := mediaServer.Run(mediaMux); err != nil {
 			g.Log().Errorf(ctx, "启动采集源媒体队列失败 sourceId:%d err:%+v", sourceId, err)
 		}
 	}()
-	g.Log().Infof(ctx, "启动采集源独立队列 sourceId:%d process:%s media:%s", sourceId, processQueue, mediaQueue)
-	return &collectSourceQueueWorker{process: processServer, media: mediaServer}
+	g.Log().Infof(ctx, "启动采集源媒体队列 sourceId:%d media:%s concurrency:%d", sourceId, mediaQueue, g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 8).Int())
+	return &collectSourceQueueWorker{media: mediaServer}
 }
