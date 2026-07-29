@@ -2,7 +2,9 @@ package sys
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -133,9 +135,25 @@ func (s *sSysPublish) persistChannelBotPermission(ctx context.Context, tenantId,
 		WhereNull("deleted_at")
 	targetChatId = strings.TrimSpace(targetChatId)
 	if targetChatId != "" {
-		query = query.Where("(target_chat_id = ? OR channel_username = ?)", targetChatId, strings.TrimPrefix(targetChatId, "@"))
+		lookupIds := tgChannelCacheLookupIds(targetChatId)
+		conditions := make([]string, 0, len(lookupIds)+1)
+		args := make([]interface{}, 0, len(lookupIds)+1)
+		for _, lookupId := range lookupIds {
+			conditions = append(conditions, "target_chat_id = ?")
+			args = append(args, lookupId)
+		}
+		if username := strings.TrimPrefix(targetChatId, "@"); username != "" {
+			conditions = append(conditions, "channel_username = ?")
+			args = append(args, username)
+		}
+		if len(conditions) > 0 {
+			query = query.Where("("+strings.Join(conditions, " OR ")+")", args...)
+		}
 	}
 	if err := query.OrderDesc("id").Scan(&channel); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
 		return err
 	}
 	if channel.Id <= 0 {
