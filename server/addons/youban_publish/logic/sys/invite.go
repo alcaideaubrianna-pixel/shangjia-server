@@ -93,7 +93,8 @@ func (s *sSysPublish) AdminInviteList(ctx context.Context, in *sysin.InviteListI
 	mod := g.DB().Model(webInviteTable+" i").Safe().Ctx(ctx).
 		LeftJoin(publishTenantTable+" it", "it.id=i.inviter_tenant_id AND it.deleted_at IS NULL").
 		LeftJoin(publishTenantTable+" ut", "ut.id=i.used_tenant_id AND ut.deleted_at IS NULL").
-		Fields("i.*, it.name as inviter_tenant_name, ut.name as used_tenant_name").
+		LeftJoin(publishAccountTable+" ua", "ua.id=i.used_account_id AND ua.deleted_at IS NULL").
+		Fields("i.*, it.name as inviter_tenant_name, ut.name as used_tenant_name, ua.username as used_account_username, ua.nickname as used_account_nickname").
 		WhereNull("i.deleted_at").
 		Where("i.inviter_tenant_id", account.TenantId)
 	if source := normalizeWebInviteSource(in.Source); source != "" {
@@ -104,7 +105,7 @@ func (s *sSysPublish) AdminInviteList(ctx context.Context, in *sysin.InviteListI
 	}
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
-		mod = mod.Where("(i.code LIKE ? OR i.inviter_username LIKE ? OR i.inviter_nickname LIKE ? OR i.used_username LIKE ? OR it.name LIKE ? OR ut.name LIKE ?)", like, like, like, like, like, like)
+		mod = mod.Where("(i.code LIKE ? OR i.inviter_username LIKE ? OR i.inviter_nickname LIKE ? OR i.used_username LIKE ? OR ua.username LIKE ? OR ua.nickname LIKE ? OR it.name LIKE ? OR ut.name LIKE ?)", like, like, like, like, like, like, like, like)
 	}
 	var rows []*webInviteRow
 	if err = mod.Page(in.Page, in.PerPage).OrderDesc("i.id").ScanAndCount(&rows, &totalCount, false); err != nil {
@@ -293,23 +294,25 @@ func normalizeWebInviteSource(source string) string {
 }
 
 type webInviteRow struct {
-	Id                int64       `json:"id"`
-	Code              string      `json:"code"`
-	Source            string      `json:"source"`
-	InviterApp        string      `json:"inviter_app"`
-	InviterTenantId   int64       `json:"inviter_tenant_id"`
-	InviterTenantName string      `json:"inviter_tenant_name"`
-	InviterAccountId  int64       `json:"inviter_account_id"`
-	InviterUsername   string      `json:"inviter_username"`
-	InviterNickname   string      `json:"inviter_nickname"`
-	UsedTenantId      int64       `json:"used_tenant_id"`
-	UsedAccountId     int64       `json:"used_account_id"`
-	UsedUsername      string      `json:"used_username"`
-	Status            string      `json:"status"`
-	ExpiresAt         *gtime.Time `json:"expires_at"`
-	UsedAt            *gtime.Time `json:"used_at"`
-	CreatedAt         *gtime.Time `json:"created_at"`
-	UsedTenantName    string      `json:"used_tenant_name"`
+	Id                  int64       `json:"id"`
+	Code                string      `json:"code"`
+	Source              string      `json:"source"`
+	InviterApp          string      `json:"inviter_app"`
+	InviterTenantId     int64       `json:"inviter_tenant_id"`
+	InviterTenantName   string      `json:"inviter_tenant_name"`
+	InviterAccountId    int64       `json:"inviter_account_id"`
+	InviterUsername     string      `json:"inviter_username"`
+	InviterNickname     string      `json:"inviter_nickname"`
+	UsedTenantId        int64       `json:"used_tenant_id"`
+	UsedAccountId       int64       `json:"used_account_id"`
+	UsedUsername        string      `json:"used_username"`
+	UsedAccountUsername string      `json:"used_account_username"`
+	UsedAccountNickname string      `json:"used_account_nickname"`
+	Status              string      `json:"status"`
+	ExpiresAt           *gtime.Time `json:"expires_at"`
+	UsedAt              *gtime.Time `json:"used_at"`
+	CreatedAt           *gtime.Time `json:"created_at"`
+	UsedTenantName      string      `json:"used_tenant_name"`
 }
 
 func (r *webInviteRow) toModel() *sysin.InviteModel {
@@ -329,7 +332,7 @@ func (r *webInviteRow) toModel() *sysin.InviteModel {
 		UsedTenantId:      r.UsedTenantId,
 		UsedTenantName:    r.UsedTenantName,
 		UsedAccountId:     r.UsedAccountId,
-		UsedAccountName:   r.UsedUsername,
+		UsedAccountName:   firstNonEmpty(r.UsedUsername, r.UsedAccountUsername, r.UsedAccountNickname),
 		Status:            r.Status,
 		ExpiresAt:         r.ExpiresAt,
 		UsedAt:            r.UsedAt,

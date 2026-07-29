@@ -51,7 +51,7 @@ func (s *sSysPublish) markRegisterInviteUsed(ctx context.Context, code string, t
 	if code == "" {
 		return nil
 	}
-	_, err := g.DB().Model(botInviteCodeTable).Safe().Ctx(ctx).
+	result, err := g.DB().Model(botInviteCodeTable).Safe().Ctx(ctx).
 		Where("code", code).
 		Where("status", registerInviteStatusActive).
 		WhereNull("deleted_at").
@@ -63,7 +63,17 @@ func (s *sSysPublish) markRegisterInviteUsed(ctx context.Context, code string, t
 			"used_at":         gtime.Now(),
 			"updated_at":      gtime.Now(),
 		}).Update()
-	return err
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return gerror.New("邀请码状态已变化，未记录使用关系")
+	}
+	return nil
 }
 
 func normalizeRegisterInviteCode(code string) string {
