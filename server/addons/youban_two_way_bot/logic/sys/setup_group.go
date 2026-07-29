@@ -96,6 +96,9 @@ func (s *sSysTwoWayBot) createManagementGroup(ctx context.Context, account *publ
 			return gerror.New("TG管理群AccessHash缺失")
 		}
 		inputChannel := &tg.InputChannel{ChannelID: channel.ID, AccessHash: accessHash}
+		if err = enableManagementGroupNotifications(ctx, api, channel.ID, accessHash); err != nil {
+			return gerror.Wrap(err, "恢复TG管理群通知失败")
+		}
 		_, _ = api.ChannelsToggleForum(ctx, &tg.ChannelsToggleForumRequest{Channel: inputChannel, Enabled: true, Tabs: false})
 		inputUser, err := resolveBotInputUser(ctx, api, botUsername)
 		if err != nil {
@@ -159,6 +162,19 @@ func (s *sSysTwoWayBot) createManagementGroup(ctx context.Context, account *publ
 		result.Title = title
 	}
 	return result, nil
+}
+
+func enableManagementGroupNotifications(ctx context.Context, api *tg.Client, channelID int64, accessHash int64) error {
+	settings := tg.InputPeerNotifySettings{}
+	settings.SetSilent(false)
+	settings.SetMuteUntil(0)
+	_, err := api.AccountUpdateNotifySettings(ctx, &tg.AccountUpdateNotifySettingsRequest{
+		Peer: &tg.InputNotifyPeer{
+			Peer: &tg.InputPeerChannel{ChannelID: channelID, AccessHash: accessHash},
+		},
+		Settings: settings,
+	})
+	return err
 }
 
 func (s *sSysTwoWayBot) setupExistingManagementGroup(ctx context.Context, account *publishAccount, tgAccount *publishTgAccount, groupId string, botUsername string) (*setupGroupResult, error) {
