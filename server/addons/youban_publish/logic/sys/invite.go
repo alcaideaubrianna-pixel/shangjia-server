@@ -79,8 +79,7 @@ func (s *sSysPublish) InviteList(ctx context.Context, in *sysin.InviteListInp) (
 }
 
 func (s *sSysPublish) AdminInviteList(ctx context.Context, in *sysin.InviteListInp) (list []*sysin.InviteModel, totalCount int, err error) {
-	account, err := s.currentAdminAccount(ctx)
-	if err != nil {
+	if _, err = s.currentAdminAccount(ctx); err != nil {
 		return nil, 0, err
 	}
 	if in == nil {
@@ -89,14 +88,13 @@ func (s *sSysPublish) AdminInviteList(ctx context.Context, in *sysin.InviteListI
 	if err = in.Filter(ctx); err != nil {
 		return nil, 0, err
 	}
-	_ = s.refreshWebExpiredInviteCodesByTenant(ctx, account.TenantId)
+	_ = s.refreshWebExpiredInviteCodesByTenant(ctx, 0)
 	mod := g.DB().Model(webInviteTable+" i").Safe().Ctx(ctx).
 		LeftJoin(publishTenantTable+" it", "it.id=i.inviter_tenant_id AND it.deleted_at IS NULL").
 		LeftJoin(publishTenantTable+" ut", "ut.id=i.used_tenant_id AND ut.deleted_at IS NULL").
 		LeftJoin(publishAccountTable+" ua", "ua.id=i.used_account_id AND ua.deleted_at IS NULL").
 		Fields("i.*, it.name as inviter_tenant_name, ut.name as used_tenant_name, ua.username as used_account_username, ua.nickname as used_account_nickname").
-		WhereNull("i.deleted_at").
-		Where("i.inviter_tenant_id", account.TenantId)
+		WhereNull("i.deleted_at")
 	if source := normalizeWebInviteSource(in.Source); source != "" {
 		mod = mod.Where("i.source", source)
 	}
@@ -268,13 +266,15 @@ func (s *sSysPublish) refreshWebExpiredInviteCodes(ctx context.Context, accountI
 }
 
 func (s *sSysPublish) refreshWebExpiredInviteCodesByTenant(ctx context.Context, tenantId int64) error {
-	_, err := g.DB().Model(webInviteTable).Safe().Ctx(ctx).
+	mod := g.DB().Model(webInviteTable).Safe().Ctx(ctx).
 		Where("inviter_app", "api").
-		Where("inviter_tenant_id", tenantId).
 		Where("status", webInviteStatusActive).
 		Where("expires_at IS NOT NULL").
-		Where("expires_at < ?", gtime.Now()).
-		Data(g.Map{"status": webInviteStatusExpired, "updated_at": gtime.Now()}).Update()
+		Where("expires_at < ?", gtime.Now())
+	if tenantId > 0 {
+		mod = mod.Where("inviter_tenant_id", tenantId)
+	}
+	_, err := mod.Data(g.Map{"status": webInviteStatusExpired, "updated_at": gtime.Now()}).Update()
 	return err
 }
 
