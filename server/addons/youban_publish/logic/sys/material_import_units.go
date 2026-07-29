@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -238,11 +239,26 @@ func (s *sSysPublish) appendMaterialImportVerifyUnit(ctx context.Context, task *
 }
 
 func materialImportVerifyUnitIsContinuous(existingMessageIDs string, messageIDs []int) bool {
-	if len(messageIDs) != 1 {
+	if len(messageIDs) == 0 {
 		return false
 	}
 	lastMessageID := materialImportLatestSourceMessageID(existingMessageIDs)
-	return lastMessageID > 0 && messageIDs[0] == lastMessageID+1
+	ids := make([]int, 0, len(messageIDs))
+	for _, messageID := range messageIDs {
+		if messageID > 0 {
+			ids = append(ids, messageID)
+		}
+	}
+	if len(ids) == 0 {
+		return false
+	}
+	sort.Ints(ids)
+	for index := 1; index < len(ids); index++ {
+		if ids[index] != ids[index-1]+1 {
+			return false
+		}
+	}
+	return lastMessageID > 0 && ids[0] == lastMessageID+1
 }
 
 func materialImportUnitMessageIds(existing string, ids []int) string {

@@ -46,7 +46,10 @@ func TestMaterialImportVerifyUnitIsContinuous(t *testing.T) {
 	if materialImportVerifyUnitIsContinuous("151,152,153,154,155", []int{125}) {
 		t.Fatal("message 125 must not be attached to the profile group")
 	}
-	if materialImportVerifyUnitIsContinuous("151,152,153,154,155", []int{156, 157}) {
-		t.Fatal("a grouped verify unit must not attach multiple messages")
+	if !materialImportVerifyUnitIsContinuous("151,152,153,154,155", []int{156, 157}) {
+		t.Fatal("a grouped verify unit should attach as one continuous group")
+	}
+	if materialImportVerifyUnitIsContinuous("151,152,153,154,155", []int{156, 158}) {
+		t.Fatal("a grouped verify unit with a gap must not attach")
 	}
 }

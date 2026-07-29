@@ -11,7 +11,6 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
-	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/dao"
 )
 
@@ -80,11 +79,28 @@ func classifyCollectPublishMedia(event gdb.Record, items []collectMediaItem) ([]
 	if !event.IsEmpty() {
 		text = event["raw_text"].String()
 	}
-	classification := classifyProfileMessage(text, items)
-	if classification.Kind == profileMessageKindVerify {
-		return nil, items
+	displayItems := make([]collectMediaItem, 0, len(items))
+	verifyItems := make([]collectMediaItem, 0)
+	unknownItems := make([]collectMediaItem, 0)
+	for _, item := range items {
+		switch strings.ToLower(strings.TrimSpace(item.Purpose)) {
+		case "verify":
+			verifyItems = append(verifyItems, item)
+		case "display":
+			displayItems = append(displayItems, item)
+		default:
+			unknownItems = append(unknownItems, item)
+		}
 	}
-	return items, nil
+	if len(verifyItems) > 0 {
+		displayItems = append(displayItems, unknownItems...)
+		return displayItems, verifyItems
+	}
+	classification := classifyProfileMessage(text, unknownItems)
+	if classification.Kind == profileMessageKindVerify {
+		return displayItems, append(verifyItems, unknownItems...)
+	}
+	return append(displayItems, unknownItems...), nil
 }
 
 func (s *sSysPublish) insertCollectOwnedMediaRows(ctx context.Context, event gdb.Record, owner collectPublishMediaOwner, purpose string, items []collectMediaItem) error {
@@ -113,41 +129,26 @@ func (s *sSysPublish) insertCollectOwnedMediaRow(ctx context.Context, event gdb.
 	if mediaType == "" {
 		return nil
 	}
-	storagePath := strings.TrimSpace(item.StoragePath)
+	storagePath := normalizeStoredMediaPath(item.StoragePath)
 	fileUrl := strings.TrimSpace(item.FileUrl)
-	assets, err := s.ProcessStoredMediaAssets(ctx, &sysin.StoredMediaAssetsInp{
-		MediaType: mediaType,
-		LocalPath: storagePath,
-	})
-	if err != nil {
-		return err
-	}
 	cacheStatus := tgCacheStatusInvalid
 	if strings.TrimSpace(item.FileId) != "" {
 		cacheStatus = tgCacheStatusValid
 	}
 	now := gtime.Now()
+	assets, err := processMediaAssetMetadata(ctx, mediaType, storagePath, fileUrl, item.PosterUrl, "")
+	if err != nil {
+		g.Log().Warning(ctx, "计算采集媒体哈希失败", g.Map{"eventId": event["id"].Int64(), "mediaType": mediaType, "err": err})
+	}
 	posterURL := strings.TrimSpace(item.PosterUrl)
 	posterStoragePath := ""
 	perceptualHash := ""
-	if assets != nil && assets.Processed {
+	if assets != nil {
 		perceptualHash = assets.PerceptualHash
-		posterURL = firstNonEmpty(assets.PosterUrl, posterURL)
+		posterURL = firstNonEmpty(assets.PosterURL, posterURL)
 		posterStoragePath = assets.PosterStoragePath
 	}
-	if perceptualHash == "" {
-		remoteAssets, remoteErr := s.ProcessRemoteMediaAssets(ctx, &sysin.RemoteMediaAssetsInp{
-			MediaType: mediaType,
-			FileURL:   fileUrl,
-			PosterURL: posterURL,
-		})
-		if remoteErr != nil {
-			g.Log().Warning(ctx, "计算采集媒体哈希失败", g.Map{"eventId": event["id"].Int64(), "mediaType": mediaType, "err": remoteErr})
-		} else if remoteAssets != nil && remoteAssets.Processed {
-			perceptualHash = remoteAssets.PerceptualHash
-		}
-	}
-	mediaId, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(g.Map{
+	_, err = s.saveMediaRecordAndIndex(ctx, g.Map{
 		"tenant_id":           event["tenant_id"].Int64(),
 		"merchant_id":         event["tenant_id"].Int64(),
 		"account_id":          event["account_id"].Int64(),
@@ -169,9 +170,6 @@ func (s *sSysPublish) insertCollectOwnedMediaRow(ctx context.Context, event gdb.
 		"updated_at":          now,
 		"created_by":          event["account_id"].Int64(),
 		"updated_by":          event["account_id"].Int64(),
-	}).InsertAndGetId()
-	if err != nil {
-		return gerror.Wrap(err, "创建采集媒体失败")
-	}
-	return s.syncMediaPHashBucketByMediaId(ctx, mediaId)
+	}, "创建采集媒体失败")
+	return err
 }

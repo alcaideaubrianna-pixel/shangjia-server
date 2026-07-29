@@ -47,16 +47,16 @@ func classifyProfileMessage(text string, media []collectMediaItem) profileMessag
 	if profileMessageIgnoredNotice(text) {
 		return profileMessageClassification{Kind: profileMessageKindIgnore}
 	}
+	if len(media) > 0 && profileMessageAllMediaType(media, "video") && !profileMessageHasProfileText(text) {
+		return profileMessageClassification{
+			Kind:  profileMessageKindVerify,
+			Media: media,
+		}
+	}
 	if text != "" && profileMessageHasProfileText(text) {
 		return profileMessageClassification{
 			Kind:  profileMessageKindDisplay,
 			Text:  text,
-			Media: media,
-		}
-	}
-	if text == "" && len(media) > 0 && profileMessageAllMediaType(media, "video") {
-		return profileMessageClassification{
-			Kind:  profileMessageKindVerify,
 			Media: media,
 		}
 	}

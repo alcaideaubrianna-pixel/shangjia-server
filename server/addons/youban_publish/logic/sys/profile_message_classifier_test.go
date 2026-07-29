@@ -44,6 +44,13 @@ func TestClassifyProfileMessage(t *testing.T) {
 			wantMedia: 1,
 		},
 		{
+			name:      "verify video with caption",
+			text:      "验证资料",
+			media:     []collectMediaItem{{Type: "video", FileId: "video-1"}},
+			wantKind:  profileMessageKindVerify,
+			wantMedia: 1,
+		},
+		{
 			name:      "mixed media without text",
 			media:     []collectMediaItem{{Type: "image", FileId: "image-1"}, {Type: "video", FileId: "video-1"}},
 			wantKind:  profileMessageKindIgnore,
