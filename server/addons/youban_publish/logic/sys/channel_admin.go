@@ -135,6 +135,7 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	}
 	isCreate := in.Id <= 0
 	var existing *sysin.ChannelModel
+	var existingBotIds []int64
 	if !isCreate {
 		if err = s.ensureChannelsBelongTenant(ctx, []int64{in.Id}, in.TenantId); err != nil {
 			return err
@@ -146,6 +147,7 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		if existing == nil || existing.Id <= 0 {
 			return gerror.New("频道不存在或无权操作")
 		}
+		existingBotIds = decodeBotIds(existing.BotIdJson)
 		// 编辑频道配置时，以登录态账号可操作的原频道为准，不信任前端提交的归属字段。
 		// 这里仅允许修改 Bot、默认选中、上架端可见、循环上架、备注和状态等配置。
 		if existing != nil {
@@ -173,6 +175,9 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		return err
 	}
 	permissionStatusJSON := "[]"
+	if !isCreate && strings.TrimSpace(existing.BotPermissionStatusJson) != "" {
+		permissionStatusJSON = existing.BotPermissionStatusJson
+	}
 	// 新建时才做 TG 侧检测；编辑只落本地 DB，避免每次保存都触发远程校验。
 	if isCreate {
 		checkRes, err := s.checkAdminChannelBots(ctx, &sysin.ChannelCheckInp{
@@ -194,6 +199,9 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	botJSON, err := encodeBotIds(in.BotIds)
 	if err != nil {
 		return err
+	}
+	if !isCreate && !sameInt64Slice(existingBotIds, in.BotIds) {
+		permissionStatusJSON = "[]"
 	}
 	now := gtime.Now()
 	data := g.Map{
