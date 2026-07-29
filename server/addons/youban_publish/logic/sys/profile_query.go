@@ -39,7 +39,7 @@ func (s *sSysPublish) profileListByAccountIds(ctx context.Context, in *sysin.Pro
 	if err != nil {
 		return nil, 0, err
 	}
-	base = base.WhereIn("COALESCE(ps.account_id,t.account_id)", accountIds)
+	base = base.WhereIn("ps.account_id", accountIds)
 	return s.profileListByModel(ctx, base, in)
 }
 

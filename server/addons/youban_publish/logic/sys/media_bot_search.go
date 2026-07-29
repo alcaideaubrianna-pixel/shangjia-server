@@ -153,7 +153,7 @@ func (s *sSysPublish) botProfileViewByAccountIds(ctx context.Context, profileId 
 	}
 	var profile *sysin.ProfileModel
 	err = base.Where("p.id", profileId).
-		WhereIn("t.account_id", uniqueIds(accountIds)).
+		WhereIn("ps.account_id", uniqueIds(accountIds)).
 		Fields(profileListFields()).
 		Scan(&profile)
 	if err != nil {

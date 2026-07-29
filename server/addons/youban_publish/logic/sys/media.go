@@ -404,7 +404,7 @@ func (s *sSysPublish) profileImageSearchCandidateProfileIds(ctx context.Context,
 	}
 	base = s.applyProfileFilters(ctx, base, in)
 	if len(accountIds) > 0 {
-		base = base.WhereIn("t.account_id", accountIds)
+		base = base.WhereIn("ps.account_id", accountIds)
 	}
 	rows, err := base.Fields("p.id").All()
 	if err != nil {
