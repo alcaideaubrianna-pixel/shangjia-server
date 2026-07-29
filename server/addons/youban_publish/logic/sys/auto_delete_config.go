@@ -29,7 +29,6 @@ const (
 )
 
 type tenantAutoDeleteConfig struct {
-	BotIds         []int64  `json:"botIds"`
 	CustomKeywords []string `json:"customKeywords"`
 	CustomRules    []string `json:"customRules"`
 	Enabled        int      `json:"enabled"`
@@ -44,14 +43,6 @@ func (s *sSysConfig) AutoDeleteConfigView(ctx context.Context, _ *sysin.AutoDele
 	res, err := s.AutoDeleteConfigForTenant(ctx, tenantId)
 	if err != nil {
 		return nil, err
-	}
-	res.BotOptions, err = autoDeleteBotOptions(ctx, tenantId, res.BotIds)
-	if err != nil {
-		return nil, err
-	}
-	res.BotIds = make([]int64, 0, len(res.BotOptions))
-	for _, option := range res.BotOptions {
-		res.BotIds = append(res.BotIds, option.Id)
 	}
 	return res, nil
 }
@@ -70,7 +61,6 @@ func (s *sSysConfig) AutoDeleteConfigForTenant(ctx context.Context, tenantId int
 	}
 	conf := &model.AutoDeleteConfig{
 		Enabled:         tenant.Enabled,
-		BotIds:          append([]int64(nil), tenant.BotIds...),
 		DefaultKeywords: append([]string(nil), defaults.Keywords...),
 		CustomKeywords:  append([]string(nil), tenant.CustomKeywords...),
 		DefaultRules:    append([]string(nil), defaults.Rules...),
@@ -92,22 +82,11 @@ func (s *sSysConfig) AutoDeleteConfigSave(ctx context.Context, in *sysin.AutoDel
 	if err != nil {
 		return err
 	}
-	botIds, err := validTenantAutoDeleteBotIds(ctx, tenantId, in.BotIds)
-	if err != nil {
-		return err
-	}
-	if len(botIds) != len(in.BotIds) {
-		return gerror.New("存在不属于当前账号、已停用或已删除的 Bot")
-	}
-	if in.Enabled == 1 && len(botIds) == 0 {
-		return gerror.New("启用消息自动删除前请选择 Bot")
-	}
 	columns := pdao.YoubanPublishTenantAutoDeleteConfig.Columns()
 	now := gtime.Now()
 	data := g.Map{
 		columns.TenantId:           tenantId,
 		columns.Enabled:            in.Enabled,
-		columns.BotIdsJson:         mustConfigJSON(botIds),
 		columns.CustomKeywordsJson: mustConfigJSON(in.CustomKeywords),
 		columns.CustomRulesJson:    mustConfigJSON(in.CustomRules),
 		columns.UpdatedBy:          contexts.GetUserId(ctx),
@@ -184,7 +163,7 @@ func loadLegacyAutoDeleteFields(ctx context.Context, conf *model.AutoDeleteConfi
 		Fields(columns.Key, columns.Value).
 		Where(columns.AddonName, "youban_publish").
 		Where(columns.Group, publishConfigGroupAutoDelete).
-		WhereIn(columns.Key, []string{"enabled", "autoDeleteEnabled", "botIds"}).
+		WhereIn(columns.Key, []string{"enabled", "autoDeleteEnabled"}).
 		Scan(&rows)
 	if err != nil {
 		return gerror.Wrap(err, "读取旧消息自动删除配置失败")
@@ -197,8 +176,6 @@ func loadLegacyAutoDeleteFields(ctx context.Context, conf *model.AutoDeleteConfi
 			}
 		case "autoDeleteEnabled":
 			conf.Enabled, _ = strconv.Atoi(strings.TrimSpace(row.Value))
-		case "botIds":
-			conf.BotIds = decodeAutoDeleteInt64JSON(row.Value)
 		}
 	}
 	return nil
@@ -225,36 +202,21 @@ func (s *sSysConfig) loadTenantAutoDeleteConfig(ctx context.Context, tenantId in
 	}
 	conf := tenantAutoDeleteConfig{
 		Enabled:        row.Enabled,
-		BotIds:         decodeAutoDeleteInt64JSON(row.BotIdsJson),
 		CustomKeywords: decodeAutoDeleteStringJSON(row.CustomKeywordsJson),
 		CustomRules:    decodeAutoDeleteStringJSON(row.CustomRulesJson),
 		LegacyMigrated: true,
 	}
-	validBotIds, err := validTenantAutoDeleteBotIds(ctx, tenantId, conf.BotIds)
-	if err != nil {
-		return nil, err
-	}
-	conf.BotIds = validBotIds
 	_ = cache.Instance().Set(ctx, key, conf, autoDeleteConfigCacheTTL)
 	return &conf, nil
 }
 
 func (s *sSysConfig) migrateLegacyAutoDeleteConfig(ctx context.Context, tenantId int64, legacy *model.AutoDeleteConfig) (*tenantAutoDeleteConfig, error) {
-	legacyBotIds := []int64{}
-	if legacy != nil {
-		legacyBotIds = legacy.BotIds
-	}
-	validBotIds, err := validTenantAutoDeleteBotIds(ctx, tenantId, legacyBotIds)
-	if err != nil {
-		return nil, err
-	}
-	conf := tenantAutoDeleteConfigFromLegacy(legacy, validBotIds)
+	conf := tenantAutoDeleteConfigFromLegacy(legacy)
 	columns := pdao.YoubanPublishTenantAutoDeleteConfig.Columns()
 	now := gtime.Now()
-	_, err = pdao.YoubanPublishTenantAutoDeleteConfig.Ctx(ctx).Data(g.Map{
+	_, err := pdao.YoubanPublishTenantAutoDeleteConfig.Ctx(ctx).Data(g.Map{
 		columns.TenantId:           tenantId,
 		columns.Enabled:            conf.Enabled,
-		columns.BotIdsJson:         mustConfigJSON(conf.BotIds),
 		columns.CustomKeywordsJson: "[]",
 		columns.CustomRulesJson:    "[]",
 		columns.CreatedAt:          now,
@@ -267,72 +229,20 @@ func (s *sSysConfig) migrateLegacyAutoDeleteConfig(ctx context.Context, tenantId
 	return conf, nil
 }
 
-func tenantAutoDeleteConfigFromLegacy(legacy *model.AutoDeleteConfig, validBotIds []int64) *tenantAutoDeleteConfig {
+func tenantAutoDeleteConfigFromLegacy(legacy *model.AutoDeleteConfig) *tenantAutoDeleteConfig {
 	conf := &tenantAutoDeleteConfig{
-		BotIds:         append([]int64(nil), validBotIds...),
+		Enabled:        1,
 		LegacyMigrated: true,
 	}
-	if legacy != nil && legacy.Enabled == 1 && len(conf.BotIds) > 0 {
-		conf.Enabled = 1
+	if legacy != nil && legacy.Enabled == 0 {
+		conf.Enabled = 0
 	}
 	return conf
 }
 
-func validTenantAutoDeleteBotIds(ctx context.Context, tenantId int64, ids []int64) ([]int64, error) {
-	ids = uniqueAutoDeleteIds(ids)
-	if len(ids) == 0 {
-		return []int64{}, nil
-	}
-	columns := pdao.YoubanPublishBot.Columns()
-	var rows []struct {
-		Id int64 `json:"id"`
-	}
-	err := pdao.YoubanPublishBot.Ctx(ctx).
-		Fields(columns.Id).
-		Where(columns.TenantId, tenantId).
-		Where(columns.Status, 1).
-		WhereNull(columns.DeletedAt).
-		WhereIn(columns.Id, ids).
-		Scan(&rows)
-	if err != nil {
-		return nil, gerror.Wrap(err, "校验消息自动删除 Bot 失败")
-	}
-	allowed := make(map[int64]struct{}, len(rows))
-	for _, row := range rows {
-		allowed[row.Id] = struct{}{}
-	}
-	result := make([]int64, 0, len(ids))
-	for _, id := range ids {
-		if _, ok := allowed[id]; ok {
-			result = append(result, id)
-		}
-	}
-	return result, nil
-}
-
-func autoDeleteBotOptions(ctx context.Context, tenantId int64, ids []int64) ([]*model.AutoDeleteBotOption, error) {
-	if len(ids) == 0 {
-		return []*model.AutoDeleteBotOption{}, nil
-	}
-	columns := pdao.YoubanPublishBot.Columns()
-	var options []*model.AutoDeleteBotOption
-	err := pdao.YoubanPublishBot.Ctx(ctx).
-		Fields(columns.Id, columns.BotName, columns.BotUsername).
-		Where(columns.TenantId, tenantId).
-		Where(columns.Status, 1).
-		WhereNull(columns.DeletedAt).
-		WhereIn(columns.Id, ids).
-		OrderAsc(columns.Id).
-		Scan(&options)
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取消息自动删除 Bot 选项失败")
-	}
-	return options, nil
-}
-
 func defaultAutoDeleteConfig() *model.AutoDeleteConfig {
 	return &model.AutoDeleteConfig{
-		BotIds:   []int64{},
+		Enabled:  1,
 		Keywords: []string{},
 		Rules:    []string{autoDeleteRuleSingleNumberLine},
 	}
@@ -361,30 +271,6 @@ func mergeAutoDeleteStrings(groups ...[]string) []string {
 			seen[key] = struct{}{}
 			result = append(result, value)
 		}
-	}
-	return result
-}
-
-func decodeAutoDeleteInt64JSON(raw string) []int64 {
-	var values []int64
-	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &values); err != nil {
-		return []int64{}
-	}
-	return uniqueAutoDeleteIds(values)
-}
-
-func uniqueAutoDeleteIds(values []int64) []int64 {
-	seen := make(map[int64]struct{}, len(values))
-	result := make([]int64, 0, len(values))
-	for _, value := range values {
-		if value <= 0 {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		result = append(result, value)
 	}
 	return result
 }

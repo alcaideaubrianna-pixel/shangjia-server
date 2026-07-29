@@ -29,21 +29,13 @@ type PublishConfig struct {
 }
 
 type AutoDeleteConfig struct {
-	Enabled         int                    `json:"autoDeleteEnabled"`
-	BotIds          []int64                `json:"botIds"`
-	Keywords        []string               `json:"keywords"`
-	Rules           []string               `json:"rules"`
-	DefaultKeywords []string               `json:"defaultKeywords"`
-	CustomKeywords  []string               `json:"customKeywords"`
-	DefaultRules    []string               `json:"defaultRules"`
-	CustomRules     []string               `json:"customRules"`
-	BotOptions      []*AutoDeleteBotOption `json:"botOptions"`
-}
-
-type AutoDeleteBotOption struct {
-	Id          int64  `json:"id"`
-	BotName     string `json:"botName"`
-	BotUsername string `json:"botUsername"`
+	Enabled         int      `json:"autoDeleteEnabled"`
+	Keywords        []string `json:"keywords"`
+	Rules           []string `json:"rules"`
+	DefaultKeywords []string `json:"defaultKeywords"`
+	CustomKeywords  []string `json:"customKeywords"`
+	DefaultRules    []string `json:"defaultRules"`
+	CustomRules     []string `json:"customRules"`
 }
 
 type CloudResourceConfig struct {

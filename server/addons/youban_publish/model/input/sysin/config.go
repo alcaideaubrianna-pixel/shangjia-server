@@ -91,7 +91,6 @@ func (in *AutoDeleteConfigSaveInp) Filter(ctx context.Context) error {
 	if err := checkSwitch(in.Enabled, "频道自动删除开关"); err != nil {
 		return err
 	}
-	in.BotIds = uniquePositiveInt64Config(in.BotIds)
 	in.CustomKeywords = uniqueStringsConfig(in.CustomKeywords)
 	in.CustomRules = uniqueStringsConfig(in.CustomRules)
 	for _, rule := range in.CustomRules {

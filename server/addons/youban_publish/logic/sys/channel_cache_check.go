@@ -21,7 +21,15 @@ func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCh
 	if err != nil {
 		return nil, err
 	}
-	return s.checkAdminChannelBots(ctx, in, account.TenantId, true)
+	res, err = s.checkAdminChannelBots(ctx, in, account.TenantId, true)
+	if err != nil || res == nil {
+		return res, err
+	}
+	if err = s.persistChannelBotPermission(ctx, account.TenantId, in.ChannelId, in.TgAccountId, res.TargetChatId, res.BotResults); err != nil {
+		return nil, gerror.Wrap(err, "保存频道 Bot 权限检测结果失败")
+	}
+	s.refreshAutoDeleteChannelCache(ctx)
+	return res, nil
 }
 
 func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.ChannelCheckInp, tenantId int64, tryAttachBot bool) (*sysin.ChannelCheckModel, error) {
@@ -73,11 +81,12 @@ func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.Chann
 			Status:      "success",
 			Message:     "Bot 可发送消息",
 		}
-		canSend, inChannel, message := s.checkBotChannelMember(ctx, botItem, chatID)
+		canSend, canDelete, inChannel, message := s.checkBotChannelMember(ctx, botItem, chatID)
 		result.CanSendMessage = boolToInt(canSend)
+		result.CanDeleteMessages = boolToInt(canDelete)
 		result.InChannel = boolToInt(inChannel)
 		result.Message = message
-		if !canSend {
+		if !canSend || !canDelete {
 			needAttach = true
 			result.Status = "warning"
 		}
@@ -106,15 +115,16 @@ func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.Chann
 	}
 	for _, item := range res.BotResults {
 		if item.CanSendMessage != 1 && tryAttachBot {
-			canSend, inChannel, message := s.checkBotChannelMember(ctx, botMap[item.BotId], chatID)
+			canSend, canDelete, inChannel, message := s.checkBotChannelMember(ctx, botMap[item.BotId], chatID)
 			item.CanSendMessage = boolToInt(canSend)
+			item.CanDeleteMessages = boolToInt(canDelete)
 			item.InChannel = boolToInt(inChannel)
 			item.Message = message
 			if canSend {
 				item.Status = "success"
 			}
 		}
-		if item.CanSendMessage != 1 {
+		if item.CanSendMessage != 1 || item.CanDeleteMessages != 1 {
 			res.Allowed = 0
 			if res.Message == "检测通过" || res.Message == "已尝试设置 Bot 为频道管理员，请稍后刷新状态确认" {
 				res.Message = "Bot 仍未具备发送消息权限，请确认频道管理员权限后重试"
@@ -141,28 +151,35 @@ func (s *sSysPublish) channelCheckBots(ctx context.Context, ids []int64, tenantI
 	return bots, nil
 }
 
-func (s *sSysPublish) checkBotChannelMember(ctx context.Context, botItem *sysin.BotModel, chatID any) (canSend bool, inChannel bool, message string) {
+func (s *sSysPublish) checkBotChannelMember(ctx context.Context, botItem *sysin.BotModel, chatID any) (canSend bool, canDelete bool, inChannel bool, message string) {
 	bot, err := s.telegramBot(ctx, botItem.BotToken)
 	if err != nil {
-		return false, false, err.Error()
+		return false, false, false, err.Error()
 	}
 	profile, err := bot.GetMe(ctx)
 	if err != nil {
-		return false, false, err.Error()
+		return false, false, false, err.Error()
 	}
 	member, err := bot.GetChatMember(ctx, &tgbot.GetChatMemberParams{
 		ChatID: chatID,
 		UserID: profile.ID,
 	})
 	if err != nil {
-		return false, false, "Bot 未加入频道或无法读取频道成员状态：" + err.Error()
+		return false, false, false, "Bot 未加入频道或无法读取频道成员状态：" + err.Error()
 	}
 	canSend = telegramBotCanSendMessage(member)
+	canDelete = telegramBotCanDeleteMessage(member)
 	inChannel = member.Type != models.ChatMemberTypeLeft && member.Type != models.ChatMemberTypeBanned
-	if canSend {
-		return true, inChannel, "Bot 可发送消息"
+	if canSend && canDelete {
+		return true, true, inChannel, "Bot 可发送和删除消息"
 	}
-	return false, inChannel, "Bot 已加入频道但没有发送消息权限"
+	if !canSend && !canDelete {
+		return false, false, inChannel, "Bot 已加入频道但没有发送和删除消息权限"
+	}
+	if !canSend {
+		return false, canDelete, inChannel, "Bot 已加入频道但没有发送消息权限"
+	}
+	return canSend, false, inChannel, "Bot 已加入频道但没有删除消息权限"
 }
 
 func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgAccountId int64, channel *sysin.ChannelCacheModel, bots []*sysin.BotModel) error {
@@ -258,6 +275,20 @@ func telegramBotCanSendMessage(member *models.ChatMember) bool {
 		return member.Administrator == nil || member.Administrator.CanPostMessages || member.Administrator.CanManageChat
 	case models.ChatMemberTypeRestricted:
 		return member.Restricted != nil && member.Restricted.IsMember && member.Restricted.CanSendMessages
+	default:
+		return false
+	}
+}
+
+func telegramBotCanDeleteMessage(member *models.ChatMember) bool {
+	if member == nil {
+		return false
+	}
+	switch member.Type {
+	case models.ChatMemberTypeOwner:
+		return true
+	case models.ChatMemberTypeAdministrator:
+		return member.Administrator != nil && member.Administrator.CanDeleteMessages
 	default:
 		return false
 	}

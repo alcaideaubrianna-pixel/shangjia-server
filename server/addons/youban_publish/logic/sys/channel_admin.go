@@ -45,6 +45,7 @@ func (s *sSysPublish) AdminChannelList(ctx context.Context, in *sysin.ChannelLis
 		return nil, 0, err
 	}
 	applyChannelBotIds(list)
+	applyChannelBotPermissionSummary(list)
 	return list, totalCount, nil
 }
 
@@ -83,6 +84,7 @@ func (s *sSysPublish) MyChannelList(ctx context.Context, in *sysin.ChannelListIn
 		return nil, 0, err
 	}
 	applyChannelBotIds(list)
+	applyChannelBotPermissionSummary(list)
 	return list, totalCount, nil
 }
 
@@ -112,6 +114,7 @@ func (s *sSysPublish) ServerChannelList(ctx context.Context, in *sysin.ChannelLi
 		return nil, 0, err
 	}
 	applyChannelBotIds(list)
+	applyChannelBotPermissionSummary(list)
 	return list, totalCount, nil
 }
 
@@ -169,6 +172,7 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	if err = s.ensureBotsBelongTenant(ctx, in.BotIds, in.TenantId); err != nil {
 		return err
 	}
+	permissionStatusJSON := "[]"
 	// 新建时才做 TG 侧检测；编辑只落本地 DB，避免每次保存都触发远程校验。
 	if isCreate {
 		checkRes, err := s.checkAdminChannelBots(ctx, &sysin.ChannelCheckInp{
@@ -185,6 +189,7 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		in.ChannelTitle = checkRes.ChannelTitle
 		in.ChannelUsername = checkRes.ChannelUsername
 		in.TargetChatId = checkRes.TargetChatId
+		permissionStatusJSON = encodeChannelBotPermissionStates(checkRes.BotResults)
 	}
 	botJSON, err := encodeBotIds(in.BotIds)
 	if err != nil {
@@ -192,23 +197,24 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	}
 	now := gtime.Now()
 	data := g.Map{
-		"tenant_id":             in.TenantId,
-		"merchant_id":           in.TenantId,
-		"tg_account_id":         in.TgAccountId,
-		"channel_title":         in.ChannelTitle,
-		"channel_username":      in.ChannelUsername,
-		"target_chat_id":        in.TargetChatId,
-		"publish_direction":     in.PublishDirection,
-		"cycle_publish_enabled": in.CyclePublishEnabled,
-		"cycle_publish_days":    in.CyclePublishDays,
-		"cycle_publish_time":    in.CyclePublishTime,
-		"is_default_selected":   in.IsDefaultSelected,
-		"publish_visible":       in.PublishVisible,
-		"bot_id_json":           botJSON,
-		"remark":                in.Remark,
-		"status":                in.Status,
-		"updated_by":            account.Id,
-		"updated_at":            now,
+		"tenant_id":                  in.TenantId,
+		"merchant_id":                in.TenantId,
+		"tg_account_id":              in.TgAccountId,
+		"channel_title":              in.ChannelTitle,
+		"channel_username":           in.ChannelUsername,
+		"target_chat_id":             in.TargetChatId,
+		"publish_direction":          in.PublishDirection,
+		"cycle_publish_enabled":      in.CyclePublishEnabled,
+		"cycle_publish_days":         in.CyclePublishDays,
+		"cycle_publish_time":         in.CyclePublishTime,
+		"is_default_selected":        in.IsDefaultSelected,
+		"publish_visible":            in.PublishVisible,
+		"bot_id_json":                botJSON,
+		"bot_permission_status_json": permissionStatusJSON,
+		"remark":                     in.Remark,
+		"status":                     in.Status,
+		"updated_by":                 account.Id,
+		"updated_at":                 now,
 	}
 	if in.Id > 0 {
 		_, err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
@@ -328,9 +334,10 @@ func (s *sSysPublish) AdminChannelBatchBots(ctx context.Context, in *sysin.Chann
 		Where("tenant_id", account.TenantId).
 		WhereNull("deleted_at").
 		Data(g.Map{
-			"bot_id_json": botJSON,
-			"updated_by":  account.Id,
-			"updated_at":  gtime.Now(),
+			"bot_id_json":                botJSON,
+			"bot_permission_status_json": "[]",
+			"updated_by":                 account.Id,
+			"updated_at":                 gtime.Now(),
 		}).
 		Update(); err != nil {
 		return gerror.Wrap(err, "批量编辑频道Bot失败")

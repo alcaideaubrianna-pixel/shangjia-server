@@ -1121,29 +1121,32 @@ type ChannelListInp struct {
 }
 
 type ChannelModel struct {
-	Id                  int64       `json:"id" dc:"ID"`
-	TenantId            int64       `json:"tenantId" dc:"租户ID"`
-	TenantUsername      string      `json:"tenantUsername" dc:"归属租户账号"`
-	TgAccountId         int64       `json:"tgAccountId" dc:"TG账号ID"`
-	TgAccountName       string      `json:"tgAccountName" dc:"TG账号名称"`
-	ChannelTitle        string      `json:"channelTitle" dc:"频道名称"`
-	ChannelUsername     string      `json:"channelUsername" dc:"频道用户名"`
-	TargetChatId        string      `json:"targetChatId" dc:"目标Chat ID"`
-	PublishDirection    string      `json:"publishDirection" dc:"上架/下架/备份频道：up/down/backup"`
-	CyclePublishEnabled int         `json:"cyclePublishEnabled" dc:"是否循环上架"`
-	CyclePublishDays    int         `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
-	CyclePublishTime    string      `json:"cyclePublishTime" dc:"循环上架时间"`
-	IsDefaultSelected   int         `json:"isDefaultSelected" dc:"是否默认选中"`
-	PublishVisible      int         `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
-	BotIds              []int64     `json:"botIds" dc:"绑定Bot ID列表"`
-	BotIdJson           string      `json:"botIdJson" dc:"绑定Bot ID JSON"`
-	Remark              string      `json:"remark" dc:"备注"`
-	Status              int         `json:"status" dc:"状态"`
-	LastRefreshStatus   string      `json:"lastRefreshStatus" dc:"最近刷新状态"`
-	LastRefreshMessage  string      `json:"lastRefreshMessage" dc:"最近刷新信息"`
-	LastRefreshAt       *gtime.Time `json:"lastRefreshAt" dc:"最近刷新时间"`
-	CreatedAt           *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt           *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id                      int64       `json:"id" dc:"ID"`
+	TenantId                int64       `json:"tenantId" dc:"租户ID"`
+	TenantUsername          string      `json:"tenantUsername" dc:"归属租户账号"`
+	TgAccountId             int64       `json:"tgAccountId" dc:"TG账号ID"`
+	TgAccountName           string      `json:"tgAccountName" dc:"TG账号名称"`
+	ChannelTitle            string      `json:"channelTitle" dc:"频道名称"`
+	ChannelUsername         string      `json:"channelUsername" dc:"频道用户名"`
+	TargetChatId            string      `json:"targetChatId" dc:"目标Chat ID"`
+	PublishDirection        string      `json:"publishDirection" dc:"上架/下架/备份频道：up/down/backup"`
+	CyclePublishEnabled     int         `json:"cyclePublishEnabled" dc:"是否循环上架"`
+	CyclePublishDays        int         `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
+	CyclePublishTime        string      `json:"cyclePublishTime" dc:"循环上架时间"`
+	IsDefaultSelected       int         `json:"isDefaultSelected" dc:"是否默认选中"`
+	PublishVisible          int         `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
+	BotIds                  []int64     `json:"botIds" dc:"绑定Bot ID列表"`
+	BotIdJson               string      `json:"botIdJson" dc:"绑定Bot ID JSON"`
+	BotPermissionStatusJson string      `json:"botPermissionStatusJson" dc:"Bot权限检测结果JSON"`
+	BotPermissionStatus     string      `json:"botPermissionStatus" dc:"Bot权限状态"`
+	BotPermissionMessage    string      `json:"botPermissionMessage" dc:"Bot权限提示"`
+	Remark                  string      `json:"remark" dc:"备注"`
+	Status                  int         `json:"status" dc:"状态"`
+	LastRefreshStatus       string      `json:"lastRefreshStatus" dc:"最近刷新状态"`
+	LastRefreshMessage      string      `json:"lastRefreshMessage" dc:"最近刷新信息"`
+	LastRefreshAt           *gtime.Time `json:"lastRefreshAt" dc:"最近刷新时间"`
+	CreatedAt               *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt               *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type ChannelSaveInp struct {
@@ -1323,19 +1326,21 @@ type ChannelCacheRefreshModel struct {
 }
 
 type ChannelCheckInp struct {
+	ChannelId    int64   `json:"channelId" dc:"已有频道配置ID"`
 	TgAccountId  int64   `json:"tgAccountId" v:"required|min:1#请选择TG账号|请选择TG账号" dc:"TG账号ID"`
 	TargetChatId string  `json:"targetChatId" v:"required#请选择频道" dc:"频道ID"`
 	BotIds       []int64 `json:"botIds" dc:"Bot ID列表"`
 }
 
 type ChannelCheckBotModel struct {
-	BotId          int64  `json:"botId" dc:"Bot ID"`
-	BotName        string `json:"botName" dc:"Bot名称"`
-	BotUsername    string `json:"botUsername" dc:"Bot用户名"`
-	CanSendMessage int    `json:"canSendMessage" dc:"是否可发送消息"`
-	InChannel      int    `json:"inChannel" dc:"是否在频道中"`
-	Status         string `json:"status" dc:"检测状态"`
-	Message        string `json:"message" dc:"检测信息"`
+	BotId             int64  `json:"botId" dc:"Bot ID"`
+	BotName           string `json:"botName" dc:"Bot名称"`
+	BotUsername       string `json:"botUsername" dc:"Bot用户名"`
+	CanSendMessage    int    `json:"canSendMessage" dc:"是否可发送消息"`
+	CanDeleteMessages int    `json:"canDeleteMessages" dc:"是否可删除消息"`
+	InChannel         int    `json:"inChannel" dc:"是否在频道中"`
+	Status            string `json:"status" dc:"检测状态"`
+	Message           string `json:"message" dc:"检测信息"`
 }
 
 type ChannelCheckModel struct {

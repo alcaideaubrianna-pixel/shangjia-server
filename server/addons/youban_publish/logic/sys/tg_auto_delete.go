@@ -112,14 +112,14 @@ func (s *sSysPublish) handleTelegramAutoDelete(ctx context.Context, botId int64,
 	if keyword == "" {
 		return
 	}
-	botItem, err := s.autoDeleteBot(ctx, botId, channel, conf.AutoDeleteConfig)
-	if err != nil || botItem == nil || botItem.Id <= 0 {
+	botItem, err := s.deleteMatchedTelegramMessageWithChannelBots(ctx, botId, channel, strconv.FormatInt(msg.Chat.ID, 10), msg.ID)
+	if botItem == nil || botItem.Id <= 0 || (err != nil && !isTelegramMessageAlreadyDeletedError(err)) {
 		if err != nil {
 			autoDeleteWarn(ctx, "bot_lookup", "频道自动删除查询Bot失败 channel:%d bot:%d err:%+v", channel.Id, botId, err)
 		}
 		return
 	}
-	if err = s.deleteMatchedTelegramMessage(ctx, botItem.BotToken, msg.Chat.ID, msg.ID); err != nil {
+	if err != nil {
 		if isTelegramMessageAlreadyDeletedError(err) {
 			s.appendAutoDeleteLog(ctx, channel, botItem.Id, msg, keyword, "skipped", "频道消息命中关键词，但TG消息已不存在")
 			return
@@ -158,18 +158,18 @@ func (s *sSysPublish) handleGotdAutoDelete(ctx context.Context, tenantId int64, 
 	if keyword == "" {
 		return
 	}
-	botItem, err := s.autoDeleteBot(ctx, 0, channel, conf.AutoDeleteConfig)
-	if err != nil || botItem == nil || botItem.Id <= 0 {
+	chatId := normalizeTelegramChannelChatID(channel.TargetChatId)
+	if chatId == "" && len(chatIds) > 0 {
+		chatId = normalizeTelegramChannelChatID(chatIds[0])
+	}
+	botItem, err := s.deleteMatchedTelegramMessageWithChannelBots(ctx, 0, channel, chatId, msg.ID)
+	if botItem == nil || botItem.Id <= 0 || (err != nil && !isTelegramMessageAlreadyDeletedError(err)) {
 		if err != nil {
 			autoDeleteWarn(ctx, "gotd_bot_lookup", "频道自动删除账号监听查询Bot失败 channel:%d err:%+v", channel.Id, err)
 		}
 		return
 	}
-	chatId := normalizeTelegramChannelChatID(channel.TargetChatId)
-	if chatId == "" && len(chatIds) > 0 {
-		chatId = normalizeTelegramChannelChatID(chatIds[0])
-	}
-	if err = s.deleteMatchedTelegramMessageByChat(ctx, botItem.BotToken, chatId, msg.ID); err != nil {
+	if err != nil {
 		if isTelegramMessageAlreadyDeletedError(err) {
 			s.appendAutoDeleteLogByValues(ctx, channel, botItem.Id, msg.ID, keyword, "skipped", "频道消息命中关键词，TG消息已不存在")
 			return
@@ -300,7 +300,7 @@ func (s *sSysPublish) autoDeleteChannel(ctx context.Context, chat models.Chat, t
 		mod = mod.Where("target_chat_id IN(?, ?)", chatId, positiveChatId)
 	}
 	var channel *autoDeleteChannel
-	if err := mod.Fields("id,tenant_id,bot_id_json,channel_title,target_chat_id").OrderDesc("id").Scan(&channel); err != nil {
+	if err := mod.Fields("id,tenant_id,bot_id_json,bot_permission_status_json,channel_title,target_chat_id").OrderDesc("id").Scan(&channel); err != nil {
 		return nil, err
 	}
 	autoDeleteChannelCacheSet(ctx, cacheKey, channel)

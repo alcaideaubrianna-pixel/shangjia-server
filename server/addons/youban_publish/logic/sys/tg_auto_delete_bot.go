@@ -14,26 +14,56 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
-	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
-func (s *sSysPublish) autoDeleteBot(ctx context.Context, botId int64, channel *autoDeleteChannel, conf *model.AutoDeleteConfig) (*sysin.BotModel, error) {
-	if botId > 0 {
-		if !autoDeleteBotAllowed(botId, conf.BotIds) {
-			return nil, nil
+func (s *sSysPublish) deleteMatchedTelegramMessageWithChannelBots(ctx context.Context, incomingBotId int64, channel *autoDeleteChannel, chatId string, messageId int) (*sysin.BotModel, error) {
+	if channel == nil {
+		return nil, gerror.New("消息自动删除频道不能为空")
+	}
+	botIds := channelAutoDeleteBotIds(channel.BotIdJson, incomingBotId)
+	if len(botIds) == 0 {
+		return nil, gerror.New("频道未配置上架 Bot，无法自动删除消息")
+	}
+	chatId = normalizeTelegramChannelChatID(chatId)
+	var failures []string
+	for _, botId := range botIds {
+		botItem, err := s.autoDeleteBotById(ctx, botId, channel.TenantId)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("bot:%d %v", botId, err))
+			continue
 		}
-		return s.autoDeleteBotById(ctx, botId, channel.TenantId)
+		if err = ensureStoredTelegramBotCanDeleteMessages(channel, botItem.Id); err != nil {
+			failures = append(failures, fmt.Sprintf("bot:%d %v", botId, err))
+			autoDeleteWarn(ctx, fmt.Sprintf("permission:%d:%s", botId, chatId), "频道自动删除 Bot 无删除权限 channel:%d bot:%d chat:%s err:%+v", channel.Id, botId, chatId, err)
+			continue
+		}
+		err = s.deleteMatchedTelegramMessageByChat(ctx, botItem.BotToken, chatId, messageId)
+		if err == nil || isTelegramMessageAlreadyDeletedError(err) {
+			return botItem, err
+		}
+		failures = append(failures, fmt.Sprintf("bot:%d %v", botId, err))
+		autoDeleteWarn(ctx, fmt.Sprintf("delete:%d:%s", botId, chatId), "频道自动删除 Bot 删除消息失败，尝试下一个 Bot channel:%d bot:%d chat:%s message:%d err:%+v", channel.Id, botId, chatId, messageId, err)
 	}
-	for _, id := range decodeBotIds(channel.BotIdJson) {
-		if autoDeleteBotAllowed(id, conf.BotIds) {
-			return s.autoDeleteBotById(ctx, id, channel.TenantId)
+	if len(failures) == 0 {
+		return nil, gerror.New("频道没有可用的上架 Bot")
+	}
+	return nil, gerror.Newf("频道自动删除失败，已尝试频道配置中的全部 Bot：%s", strings.Join(failures, "；"))
+}
+
+func channelAutoDeleteBotIds(raw string, incomingBotId int64) []int64 {
+	configured := decodeBotIds(raw)
+	if incomingBotId <= 0 || !autoDeleteBotAllowed(incomingBotId, configured) {
+		return configured
+	}
+	result := make([]int64, 0, len(configured))
+	result = append(result, incomingBotId)
+	for _, id := range configured {
+		if id != incomingBotId {
+			result = append(result, id)
 		}
 	}
-	for _, id := range conf.BotIds {
-		return s.autoDeleteBotById(ctx, id, channel.TenantId)
-	}
-	return nil, nil
+	return result
 }
 
 func (s *sSysPublish) autoDeleteBotById(ctx context.Context, id int64, tenantId int64) (*sysin.BotModel, error) {
@@ -81,6 +111,23 @@ func autoDeleteBotAllowed(botId int64, allowed []int64) bool {
 		}
 	}
 	return false
+}
+
+func ensureStoredTelegramBotCanDeleteMessages(channel *autoDeleteChannel, botId int64) error {
+	if channel == nil || botId <= 0 {
+		return gerror.New("频道 Bot 权限状态不存在，请先检测频道")
+	}
+	state := channelBotPermissionStateForBot(channel.BotPermissionStatusJson, botId)
+	if state == nil {
+		return gerror.New("频道 Bot 尚未完成权限检测，请先点击频道检测")
+	}
+	if state.CanSendMessages != 1 || state.CanDeleteMessages != 1 {
+		if strings.TrimSpace(state.Message) != "" {
+			return gerror.New(state.Message)
+		}
+		return gerror.New("频道 Bot 没有发送或删除消息权限，请先点击频道检测")
+	}
+	return nil
 }
 
 func (s *sSysPublish) deleteMatchedTelegramMessage(ctx context.Context, botToken string, chatId int64, messageId int) error {
@@ -137,11 +184,12 @@ func (s *sSysPublish) appendAutoDeleteLogByValues(ctx context.Context, channel *
 }
 
 type autoDeleteChannel struct {
-	Id           int64  `json:"id"`
-	TenantId     int64  `json:"tenantId"`
-	BotIdJson    string `json:"botIdJson"`
-	ChannelTitle string `json:"channelTitle"`
-	TargetChatId string `json:"targetChatId"`
+	Id                      int64  `json:"id"`
+	TenantId                int64  `json:"tenantId"`
+	BotIdJson               string `json:"botIdJson"`
+	BotPermissionStatusJson string `json:"botPermissionStatusJson"`
+	ChannelTitle            string `json:"channelTitle"`
+	TargetChatId            string `json:"targetChatId"`
 }
 
 type autoDeleteChannelCacheItem struct {

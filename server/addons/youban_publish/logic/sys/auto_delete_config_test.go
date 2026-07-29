@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"hotgo/addons/youban_publish/model"
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 func TestMergeAutoDeleteStrings(t *testing.T) {
@@ -18,38 +19,41 @@ func TestMergeAutoDeleteStrings(t *testing.T) {
 	}
 }
 
-func TestDecodeAutoDeleteInt64JSON(t *testing.T) {
-	got := decodeAutoDeleteInt64JSON(`[8,6,8,0,-1]`)
-	want := []int64{8, 6}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("decodeAutoDeleteInt64JSON() = %#v, want %#v", got, want)
+func TestDefaultAutoDeleteConfigIsEnabled(t *testing.T) {
+	if defaultAutoDeleteConfig().Enabled != 1 {
+		t.Fatal("automatic deletion should be enabled by default")
 	}
 }
 
-func TestAutoDeleteBotAllowedRequiresExplicitTenantConfig(t *testing.T) {
-	if autoDeleteBotAllowed(8, nil) {
-		t.Fatal("empty tenant Bot configuration must not authorize a Bot")
-	}
-	if autoDeleteBotAllowed(8, []int64{6}) {
-		t.Fatal("foreign Bot must not be authorized")
-	}
-	if !autoDeleteBotAllowed(6, []int64{6}) {
-		t.Fatal("configured Bot should be authorized")
+func TestTenantAutoDeleteConfigFromLegacyIsEnabledByDefault(t *testing.T) {
+	conf := tenantAutoDeleteConfigFromLegacy(&model.AutoDeleteConfig{Enabled: 1})
+	if conf.Enabled != 1 || !conf.LegacyMigrated {
+		t.Fatalf("legacy migration = %#v", conf)
 	}
 }
 
-func TestTenantAutoDeleteConfigFromLegacyKeepsOnlyTenantBots(t *testing.T) {
-	legacy := &model.AutoDeleteConfig{Enabled: 1, BotIds: []int64{8, 6}}
-	tenantTwo := tenantAutoDeleteConfigFromLegacy(legacy, []int64{6})
-	tenantNine := tenantAutoDeleteConfigFromLegacy(legacy, []int64{8})
-	if !reflect.DeepEqual(tenantTwo.BotIds, []int64{6}) || tenantTwo.Enabled != 1 {
-		t.Fatalf("tenant 2 migration = %#v", tenantTwo)
+func TestChannelAutoDeleteBotIdsPrioritizesIncomingConfiguredBot(t *testing.T) {
+	got := channelAutoDeleteBotIds(`[6,8,10]`, 8)
+	if !reflect.DeepEqual(got, []int64{8, 6, 10}) {
+		t.Fatalf("channelAutoDeleteBotIds() = %#v", got)
 	}
-	if !reflect.DeepEqual(tenantNine.BotIds, []int64{8}) || tenantNine.Enabled != 1 {
-		t.Fatalf("tenant 9 migration = %#v", tenantNine)
+}
+
+func TestChannelBotPermissionSummaryRequiresSendAndDelete(t *testing.T) {
+	raw := encodeChannelBotPermissionStates([]*sysin.ChannelCheckBotModel{{
+		BotId:             1,
+		BotName:           "上架 Bot",
+		CanSendMessage:    1,
+		CanDeleteMessages: 0,
+		Status:            "warning",
+		Message:           "Bot 已加入频道但没有删除消息权限",
+	}})
+	status, message := channelBotPermissionSummary(raw)
+	if status != "error" || message == "" {
+		t.Fatalf("channelBotPermissionSummary() = %q, %q", status, message)
 	}
-	emptyTenant := tenantAutoDeleteConfigFromLegacy(legacy, nil)
-	if emptyTenant.Enabled != 0 || len(emptyTenant.BotIds) != 0 {
-		t.Fatalf("tenant without owned Bots must stay disabled: %#v", emptyTenant)
+	state := channelBotPermissionStateForBot(raw, 1)
+	if state == nil || state.CanDeleteMessages != 0 {
+		t.Fatalf("channelBotPermissionStateForBot() = %#v", state)
 	}
 }

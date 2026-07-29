@@ -21,58 +21,60 @@ type YoubanPublishChannelDao struct {
 
 // YoubanPublishChannelColumns defines and stores column names for the table hg_youban_publish_channel.
 type YoubanPublishChannelColumns struct {
-	Id                  string // 主键
-	TenantId            string // 租户ID
-	MerchantId          string // 兼容旧版本商家ID
-	TgAccountId         string // TG账号ID
-	ChannelTitle        string // 频道名称
-	ChannelUsername     string // 频道用户名
-	TargetChatId        string // 目标Chat ID
-	PublishDirection    string // 上架/下架频道
-	CyclePublishEnabled string // 是否循环上架
-	CyclePublishDays    string // 循环上架天数
-	CyclePublishTime    string // 循环上架时间
-	IsDefaultSelected   string // 是否默认选中
-	BotIdJson           string // 绑定Bot ID JSON
-	Remark              string // 备注
-	Status              string // 状态
-	LastRefreshStatus   string // 最近刷新状态
-	LastRefreshMessage  string // 最近刷新信息
-	LastRefreshAt       string // 最近刷新时间
-	CreatedBy           string // 创建人
-	UpdatedBy           string // 更新人
-	DeletedBy           string // 删除人
-	CreatedAt           string // 创建时间
-	UpdatedAt           string // 更新时间
-	DeletedAt           string // 删除时间
+	Id                      string // 主键
+	TenantId                string // 租户ID
+	MerchantId              string // 兼容旧版本商家ID
+	TgAccountId             string // TG账号ID
+	ChannelTitle            string // 频道名称
+	ChannelUsername         string // 频道用户名
+	TargetChatId            string // 目标Chat ID
+	PublishDirection        string // 上架/下架频道
+	CyclePublishEnabled     string // 是否循环上架
+	CyclePublishDays        string // 循环上架天数
+	CyclePublishTime        string // 循环上架时间
+	IsDefaultSelected       string // 是否默认选中
+	BotIdJson               string // 绑定Bot ID JSON
+	BotPermissionStatusJson string // Bot权限检测结果JSON
+	Remark                  string // 备注
+	Status                  string // 状态
+	LastRefreshStatus       string // 最近刷新状态
+	LastRefreshMessage      string // 最近刷新信息
+	LastRefreshAt           string // 最近刷新时间
+	CreatedBy               string // 创建人
+	UpdatedBy               string // 更新人
+	DeletedBy               string // 删除人
+	CreatedAt               string // 创建时间
+	UpdatedAt               string // 更新时间
+	DeletedAt               string // 删除时间
 }
 
 // youbanPublishChannelColumns holds the columns for the table hg_youban_publish_channel.
 var youbanPublishChannelColumns = YoubanPublishChannelColumns{
-	Id:                  "id",
-	TenantId:            "tenant_id",
-	MerchantId:          "merchant_id",
-	TgAccountId:         "tg_account_id",
-	ChannelTitle:        "channel_title",
-	ChannelUsername:     "channel_username",
-	TargetChatId:        "target_chat_id",
-	PublishDirection:    "publish_direction",
-	CyclePublishEnabled: "cycle_publish_enabled",
-	CyclePublishDays:    "cycle_publish_days",
-	CyclePublishTime:    "cycle_publish_time",
-	IsDefaultSelected:   "is_default_selected",
-	BotIdJson:           "bot_id_json",
-	Remark:              "remark",
-	Status:              "status",
-	LastRefreshStatus:   "last_refresh_status",
-	LastRefreshMessage:  "last_refresh_message",
-	LastRefreshAt:       "last_refresh_at",
-	CreatedBy:           "created_by",
-	UpdatedBy:           "updated_by",
-	DeletedBy:           "deleted_by",
-	CreatedAt:           "created_at",
-	UpdatedAt:           "updated_at",
-	DeletedAt:           "deleted_at",
+	Id:                      "id",
+	TenantId:                "tenant_id",
+	MerchantId:              "merchant_id",
+	TgAccountId:             "tg_account_id",
+	ChannelTitle:            "channel_title",
+	ChannelUsername:         "channel_username",
+	TargetChatId:            "target_chat_id",
+	PublishDirection:        "publish_direction",
+	CyclePublishEnabled:     "cycle_publish_enabled",
+	CyclePublishDays:        "cycle_publish_days",
+	CyclePublishTime:        "cycle_publish_time",
+	IsDefaultSelected:       "is_default_selected",
+	BotIdJson:               "bot_id_json",
+	BotPermissionStatusJson: "bot_permission_status_json",
+	Remark:                  "remark",
+	Status:                  "status",
+	LastRefreshStatus:       "last_refresh_status",
+	LastRefreshMessage:      "last_refresh_message",
+	LastRefreshAt:           "last_refresh_at",
+	CreatedBy:               "created_by",
+	UpdatedBy:               "updated_by",
+	DeletedBy:               "deleted_by",
+	CreatedAt:               "created_at",
+	UpdatedAt:               "updated_at",
+	DeletedAt:               "deleted_at",
 }
 
 // NewYoubanPublishChannelDao creates and returns a new DAO object for table data access.
