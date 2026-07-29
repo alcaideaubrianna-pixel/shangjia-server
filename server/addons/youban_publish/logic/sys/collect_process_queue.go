@@ -10,11 +10,33 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+type collectProcessRetryError struct {
+	delay   time.Duration
+	message string
+}
+
+func (e *collectProcessRetryError) Error() string {
+	if e.message == "" {
+		return "采集事件等待后重试"
+	}
+	return e.message
+}
+
+func newCollectProcessRetryError(delay time.Duration, message string) error {
+	if delay <= 0 {
+		delay = collectOrderRetryDelay
+	}
+	return &collectProcessRetryError{delay: delay, message: message}
+}
+
 type collectProcessQueuePayload struct {
 	AccountId int64 `json:"accountId"`
 	EventId   int64 `json:"eventId"`
+	SourceId  int64 `json:"sourceId"`
 	TenantId  int64 `json:"tenantId"`
 }
+
+const collectProcessTaskUniqueTTL = 10 * time.Minute
 
 func (s *sSysPublish) enqueueCollectProcess(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration) error {
 	if payload.EventId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 {
@@ -30,8 +52,8 @@ func (s *sSysPublish) enqueueCollectProcess(ctx context.Context, payload collect
 	}
 	task := asynq.NewTask(tgTaskTypeCollectProcess, body)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBackground),
-		asynq.Unique(10 * time.Second),
+		asynq.Queue(collectSourceQueueName(tgQueueNameCollect, payload.SourceId)),
+		asynq.Unique(collectProcessTaskUniqueTTL),
 		asynq.MaxRetry(10),
 		asynq.Timeout(10 * time.Minute),
 	}

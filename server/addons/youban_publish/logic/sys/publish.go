@@ -15,18 +15,19 @@ import (
 )
 
 type sSysPublish struct {
-	runtimeCancel         context.CancelFunc
-	runtimeDone           chan struct{}
-	runtimeMu             publishRuntimeMutex
-	telegramBotMu         publishRuntimeMutex
-	telegramBots          map[string]*tgbot.Bot
-	tgLoginMu             publishRuntimeMutex
-	tgLogins              map[string]*telegramLoginRuntime
-	tgQueueMu             publishRuntimeMutex
-	tgQueueClient         *asynq.Client
-	tgQueueServer         *asynq.Server
-	mediaQueueServer      *asynq.Server
-	backgroundQueueServer *asynq.Server
+	runtimeCancel           context.CancelFunc
+	runtimeDone             chan struct{}
+	runtimeMu               publishRuntimeMutex
+	telegramBotMu           publishRuntimeMutex
+	telegramBots            map[string]*tgbot.Bot
+	tgLoginMu               publishRuntimeMutex
+	tgLogins                map[string]*telegramLoginRuntime
+	tgQueueMu               publishRuntimeMutex
+	tgQueueClient           *asynq.Client
+	tgQueueServer           *asynq.Server
+	mediaQueueServer        *asynq.Server
+	backgroundQueueServer   *asynq.Server
+	collectQueueWorkers     map[int64]*collectSourceQueueWorker
 
 	telegramChannelMu    publishRuntimeMutex
 	telegramChannelLocks map[string]*publishRuntimeMutex
@@ -34,7 +35,6 @@ type sSysPublish struct {
 	collectGroupMu        publishRuntimeMutex
 	collectGroupTimers    map[int64]*time.Timer
 	collectMediaMu        publishRuntimeMutex
-	collectMediaLocks     map[string]*publishRuntimeMutex
 	collectMediaLastTouch map[string]time.Time
 
 	accountRuntimeMu publishRuntimeMutex
@@ -46,9 +46,9 @@ func NewSysPublish() *sSysPublish {
 		tgLogins:              make(map[string]*telegramLoginRuntime),
 		telegramChannelLocks:  make(map[string]*publishRuntimeMutex),
 		collectGroupTimers:    make(map[int64]*time.Timer),
-		collectMediaLocks:     make(map[string]*publishRuntimeMutex),
 		collectMediaLastTouch: make(map[string]time.Time),
 		accountRuntimes:       make(map[int64]*accountCollectWorker),
+		collectQueueWorkers:   make(map[int64]*collectSourceQueueWorker),
 	}
 }
 

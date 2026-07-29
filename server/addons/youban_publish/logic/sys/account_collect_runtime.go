@@ -17,6 +17,7 @@ import (
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
+	"hotgo/internal/library/hgrds/lock"
 )
 
 const accountCollectSupervisorInterval = 15 * time.Second
@@ -48,6 +49,8 @@ type accountCollectWorker struct {
 	done        chan struct{}
 	messages    chan accountCollectMessageTask
 	operations  chan accountCollectOperationTask
+	mediaSlots  chan struct{}
+	operationMu sync.RWMutex
 
 	listenerGroupMu  sync.Mutex
 	listenerGroups   map[string]*listenerMessageGroup
@@ -62,9 +65,10 @@ type accountCollectMessageTask struct {
 }
 
 type accountCollectOperationTask struct {
-	ctx  context.Context
-	run  accountCollectOperation
-	done chan error
+	ctx      context.Context
+	run      accountCollectOperation
+	done     chan error
+	parallel bool
 }
 
 type accountCollectOperation func(context.Context, *telegram.Client) error
@@ -214,6 +218,7 @@ func startAccountCollectWorker(ctx context.Context, service *sSysPublish, tgAcco
 		done:            make(chan struct{}),
 		messages:        make(chan accountCollectMessageTask, 4096),
 		operations:      make(chan accountCollectOperationTask, 256),
+		mediaSlots:      make(chan struct{}, accountCollectMediaConcurrency(ctx)),
 		listenerGroups:  make(map[string]*listenerMessageGroup),
 		listenerSenders: make(map[string]listenerMessageSenderInfo),
 	}
@@ -223,6 +228,13 @@ func startAccountCollectWorker(ctx context.Context, service *sSysPublish, tgAcco
 
 func (w *accountCollectWorker) run(ctx context.Context) {
 	defer close(w.done)
+	defer w.clearListenerGroups()
+	accountLock := lock.NewConfig(2*time.Minute, time.Second).Mutex(fmt.Sprintf("youban_publish:collect:listener:%d", w.tgAccountId))
+	if err := accountLock.Lock(ctx); err != nil {
+		g.Log().Infof(ctx, "账号采集 worker 等待集群租约结束 tgAccountId:%d err:%+v", w.tgAccountId, err)
+		return
+	}
+	defer func() { _ = accountLock.Unlock(context.Background()) }()
 	g.Log().Infof(ctx, "账号采集 worker 启动 tgAccountId:%d sources:%d listeners:%d listenerTargets:%d", w.tgAccountId, len(w.sources), len(w.listeners), accountListenerTargetCount(w.listeners))
 	defer g.Log().Infof(context.Background(), "账号采集 worker 停止 tgAccountId:%d", w.tgAccountId)
 	if err := w.runGotdDispatcher(ctx); err != nil && !isContextDone(ctx) {
@@ -230,6 +242,20 @@ func (w *accountCollectWorker) run(ctx context.Context) {
 			w.service.handleTgAccountPermanentAuthError(context.Background(), w.tgAccountId, 0, telegramPermanentAccountAuthMessage(err), err)
 		}
 		g.Log().Warningf(ctx, "账号采集 worker 异常 tgAccountId:%d err:%+v", w.tgAccountId, err)
+	}
+}
+
+func (w *accountCollectWorker) clearListenerGroups() {
+	if w == nil {
+		return
+	}
+	w.listenerGroupMu.Lock()
+	defer w.listenerGroupMu.Unlock()
+	for key, group := range w.listenerGroups {
+		if group != nil && group.timer != nil {
+			group.timer.Stop()
+		}
+		delete(w.listenerGroups, key)
 	}
 }
 
@@ -291,7 +317,19 @@ func (w *accountCollectWorker) runOperationLoop(ctx context.Context, client *tel
 		case <-ctx.Done():
 			return
 		case task := <-w.operations:
-			task.done <- w.runOperation(ctx, client, task)
+			if !task.parallel {
+				task.done <- w.runOperation(ctx, client, task)
+				continue
+			}
+			select {
+			case w.mediaSlots <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			go func() {
+				defer func() { <-w.mediaSlots }()
+				task.done <- w.runOperation(ctx, client, task)
+			}()
 		}
 	}
 }
@@ -299,6 +337,13 @@ func (w *accountCollectWorker) runOperationLoop(ctx context.Context, client *tel
 func (w *accountCollectWorker) runOperation(ctx context.Context, client *telegram.Client, task accountCollectOperationTask) error {
 	if task.run == nil {
 		return nil
+	}
+	if task.parallel {
+		w.operationMu.RLock()
+		defer w.operationMu.RUnlock()
+	} else {
+		w.operationMu.Lock()
+		defer w.operationMu.Unlock()
 	}
 	runCtx := ctx
 	if task.ctx != nil {
@@ -313,7 +358,19 @@ func (w *accountCollectWorker) runOperation(ctx context.Context, client *telegra
 			}
 		}()
 	}
-	return task.run(runCtx, client)
+	result := make(chan error, 1)
+	go func() {
+		result <- task.run(runCtx, client)
+	}()
+	if task.ctx == nil {
+		return <-result
+	}
+	select {
+	case err := <-result:
+		return err
+	case <-task.ctx.Done():
+		return task.ctx.Err()
+	}
 }
 
 func (s *sSysPublish) registerAccountCollectWorker(worker *accountCollectWorker) {
@@ -337,6 +394,14 @@ func (s *sSysPublish) unregisterAccountCollectWorker(worker *accountCollectWorke
 }
 
 func (s *sSysPublish) executeAccountCollectOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) (bool, error) {
+	return s.executeAccountCollectOperationMode(ctx, tgAccountId, timeout, run, false)
+}
+
+func (s *sSysPublish) executeAccountCollectMediaOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) (bool, error) {
+	return s.executeAccountCollectOperationMode(ctx, tgAccountId, timeout, run, true)
+}
+
+func (s *sSysPublish) executeAccountCollectOperationMode(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation, parallel bool) (bool, error) {
 	if tgAccountId <= 0 || run == nil {
 		return false, nil
 	}
@@ -352,9 +417,10 @@ func (s *sSysPublish) executeAccountCollectOperation(ctx context.Context, tgAcco
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	task := accountCollectOperationTask{
-		ctx:  runCtx,
-		run:  run,
-		done: make(chan error, 1),
+		ctx:      runCtx,
+		run:      run,
+		done:     make(chan error, 1),
+		parallel: parallel,
 	}
 	select {
 	case worker.operations <- task:
@@ -365,9 +431,23 @@ func (s *sSysPublish) executeAccountCollectOperation(ctx context.Context, tgAcco
 	case err := <-task.done:
 		return true, err
 	case <-runCtx.Done():
-		worker.stop()
+		// A single media download timing out must not stop the account's
+		// dispatcher. The operation receives the canceled task context and
+		// will release its media slot when it returns; other downloads can
+		// continue using the same Telegram client.
 		return true, runCtx.Err()
 	}
+}
+
+func accountCollectMediaConcurrency(ctx context.Context) int {
+	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.collect.mediaFileConcurrency", 4).Int()
+	if concurrency < 1 {
+		return 1
+	}
+	if concurrency > 16 {
+		return 16
+	}
+	return concurrency
 }
 
 func (w *accountCollectWorker) stop() {
@@ -455,6 +535,7 @@ func (s *sSysPublish) newAccountCollectClient(ctx context.Context, conf *model.T
 		return nil, err
 	}
 	options := telegram.Options{
+		AllowCDN:       true,
 		SessionStorage: storage,
 		UpdateHandler:  dispatcher,
 	}

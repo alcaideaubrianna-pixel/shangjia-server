@@ -3,9 +3,14 @@ package sys
 import (
 	"context"
 	"errors"
+	"fmt"
+	"time"
 
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/hibiken/asynq"
+
+	"hotgo/internal/library/hgrds/lock"
 )
 
 func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
@@ -20,7 +25,7 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	mediaServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 2).Int(),
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 8).Int(),
 		Queues:         map[string]int{tgQueueNameMedia: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
@@ -29,6 +34,7 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 		Queues:         map[string]int{tgQueueNameBackground: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
+	g.Log().Infof(ctx, "启动TG队列；采集任务按 source_id 独立消费")
 	s.tgQueueServer = server
 	s.mediaQueueServer = mediaServer
 	s.backgroundQueueServer = backgroundServer
@@ -37,9 +43,6 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tgTaskTypePublish, s.handleTelegramPublishTask)
 	mux.HandleFunc(tgTaskTypeCleanup, s.handleTelegramCleanupTask)
-	// Tasks enqueued before the queue split still live in the original TG
-	// queues. Keep their handlers here until those Redis queues drain; all new
-	// background work is routed exclusively to tgQueueNameBackground.
 	mux.HandleFunc(tgTaskTypeImport, s.handleImportTask)
 	mux.HandleFunc(tgTaskTypeRepair, s.handleTgMessageRepairTask)
 	mux.HandleFunc(tgTaskTypeImportMatch, s.handleImportMatchTask)
@@ -47,8 +50,6 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 	mux.HandleFunc(tgTaskTypeMaterialImport, s.handleMaterialImportTask)
 	mux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
 	mux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
-	mux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
-	mux.HandleFunc(tgTaskTypeCollectMedia, s.handleCollectMediaCacheTask)
 	mux.HandleFunc(tgTaskTypeCollectHistory, s.handleCollectHistoryTask)
 	mux.HandleFunc(tgTaskTypeCollectTrigger, s.handleCollectTriggerTask)
 	mux.HandleFunc(tgTaskTypeChannelMemberSync, s.handleChannelMemberSyncTask)
@@ -68,7 +69,6 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 	backgroundMux.HandleFunc(tgTaskTypeMaterialImport, s.handleMaterialImportTask)
 	backgroundMux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
 	backgroundMux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
-	backgroundMux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
 	backgroundMux.HandleFunc(tgTaskTypeCollectHistory, s.handleCollectHistoryTask)
 	backgroundMux.HandleFunc(tgTaskTypeCollectTrigger, s.handleCollectTriggerTask)
 	backgroundMux.HandleFunc(tgTaskTypeChannelMemberSync, s.handleChannelMemberSyncTask)
@@ -86,6 +86,8 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 			g.Log().Errorf(ctx, "启动上架插件媒体缓存队列失败：%+v", err)
 		}
 	}()
+
+	go s.runCollectSourceQueueSupervisor(ctx)
 }
 
 func (s *sSysPublish) stopTelegramQueueWorker() {
@@ -93,10 +95,12 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	server := s.tgQueueServer
 	mediaServer := s.mediaQueueServer
 	backgroundServer := s.backgroundQueueServer
+	collectWorkers := s.collectQueueWorkers
 	client := s.tgQueueClient
 	s.tgQueueServer = nil
 	s.mediaQueueServer = nil
 	s.backgroundQueueServer = nil
+	s.collectQueueWorkers = make(map[int64]*collectSourceQueueWorker)
 	s.tgQueueClient = nil
 	s.tgQueueMu.Unlock()
 	if server != nil {
@@ -107,6 +111,10 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	if backgroundServer != nil {
 		backgroundServer.Shutdown()
+	}
+	for sourceId, worker := range collectWorkers {
+		worker.shutdown()
+		g.Log().Infof(context.Background(), "停止采集源独立队列 sourceId:%d", sourceId)
 	}
 	if client != nil {
 		_ = client.Close()
@@ -182,6 +190,19 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 	if err != nil {
 		return err
 	}
+	if queue, ok := asynq.GetQueueName(ctx); ok && queue != collectSourceQueueName(tgQueueNameCollect, payload.SourceId) {
+		return s.enqueueCollectProcess(ctx, payload, 0)
+	}
+	if payload.SourceId > 0 {
+		distributedLock := lock.NewConfig(15*time.Minute, time.Second).Mutex(fmt.Sprintf("youban_publish:collect:source:%d:%d:%d", payload.TenantId, payload.AccountId, payload.SourceId))
+		if err := distributedLock.TryLock(ctx); err != nil {
+			if gerror.Is(err, lock.ErrLockFailed) {
+				return err
+			}
+			return gerror.Wrap(err, "获取采集源处理锁失败")
+		}
+		defer func() { _ = distributedLock.Unlock(context.Background()) }()
+	}
 	return s.processCollectEvent(ctx, payload.EventId, payload.TenantId, payload.AccountId)
 }
 
@@ -238,7 +259,7 @@ func (s *sSysPublish) handleCollectMediaCacheTask(ctx context.Context, task *asy
 	if err != nil {
 		return err
 	}
-	if queue, ok := asynq.GetQueueName(ctx); ok && queue != tgQueueNameMedia {
+	if queue, ok := asynq.GetQueueName(ctx); ok && queue != collectSourceQueueName(tgQueueNameCollectMedia, payload.SourceId) {
 		return s.enqueueCollectMediaCache(ctx, payload, 0)
 	}
 	return s.ExecuteCollectMediaCache(ctx, payload)

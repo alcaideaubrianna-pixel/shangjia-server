@@ -14,8 +14,11 @@ type collectMediaQueuePayload struct {
 	EventId     int64 `json:"eventId"`
 	TenantId    int64 `json:"tenantId"`
 	AccountId   int64 `json:"accountId"`
+	SourceId    int64 `json:"sourceId"`
 	TgAccountId int64 `json:"tgAccountId"`
 }
+
+const collectMediaTaskUniqueTTL = 30 * time.Minute
 
 func (s *sSysPublish) enqueueCollectMediaCache(ctx context.Context, payload collectMediaQueuePayload, delay time.Duration) error {
 	if payload.EventId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 {
@@ -31,8 +34,8 @@ func (s *sSysPublish) enqueueCollectMediaCache(ctx context.Context, payload coll
 	}
 	task := asynq.NewTask(tgTaskTypeCollectMedia, body)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameMedia),
-		asynq.Unique(6 * time.Hour),
+		asynq.Queue(collectSourceQueueName(tgQueueNameCollectMedia, payload.SourceId)),
+		asynq.Unique(collectMediaTaskUniqueTTL),
 		asynq.MaxRetry(10),
 		asynq.Timeout(30 * time.Minute),
 	}

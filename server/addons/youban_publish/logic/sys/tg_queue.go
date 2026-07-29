@@ -17,7 +17,9 @@ const (
 	tgQueueNameDefault          = "youban_publish_tg"
 	tgQueueNameBulk             = "youban_publish_tg_bulk"
 	tgQueueNameMedia            = "youban_publish_media"
+	tgQueueNameCollectMedia     = "youban_publish_collect_media_source"
 	tgQueueNameBackground       = "youban_publish_background"
+	tgQueueNameCollect          = "youban_publish_collect_source"
 	tgTaskTypePublish           = "youban_publish:tg:publish"
 	tgTaskTypeCleanup           = "youban_publish:tg:cleanup"
 	tgTaskTypeImport            = "youban_publish:import:legacy"
@@ -32,6 +34,13 @@ const (
 	tgTaskTypeCollectTrigger    = "youban_publish:collect:trigger"
 	tgTaskTypeChannelMemberSync = "youban_publish:tg:channel_member_sync"
 )
+
+func collectSourceQueueName(prefix string, sourceId int64) string {
+	if sourceId <= 0 {
+		return prefix
+	}
+	return fmt.Sprintf("%s_%d", prefix, sourceId)
+}
 
 const (
 	tgJobPriorityUrgent  = 10
@@ -376,6 +385,10 @@ func telegramQueueRetryDelay(n int, err error, task *asynq.Task) time.Duration {
 	var collectRetryErr *collectMediaRetryError
 	if errors.As(err, &collectRetryErr) && collectRetryErr.delay > 0 {
 		return collectRetryErr.delay + time.Duration(n)*time.Second
+	}
+	var collectProcessRetryErr *collectProcessRetryError
+	if errors.As(err, &collectProcessRetryErr) && collectProcessRetryErr.delay > 0 {
+		return collectProcessRetryErr.delay + time.Duration(n)*time.Second
 	}
 	return asynq.DefaultRetryDelayFunc(n, err, task)
 }
