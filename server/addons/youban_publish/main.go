@@ -31,7 +31,7 @@ func newModule() {
 	m := &module{
 		skeleton: &addons.Skeleton{
 			Label:       "上架系统",
-			Name:        "youban_publish",
+			Name:        global.AddonName,
 			Group:       1,
 			Brief:       "悦伴租户资料上架插件",
 			Description: "提供 SaaS 租户账号、上架子账号、资料上架任务和 Telegram 发布能力",

@@ -35,7 +35,7 @@ func init() {
 
 func (s *sSysConfig) GetTelegram(ctx context.Context) (conf *model.TelegramConfig, err error) {
 	in := &sysin.GetConfigInp{}
-	in.AddonName = global.GetSkeleton().Name
+	in.AddonName = global.GetAddonName()
 	in.Group = publishConfigGroupTelegram
 	res, err := baseservice.SysAddonsConfig().GetConfigByGroup(ctx, &in.GetAddonsConfigInp)
 	if err != nil {
@@ -60,7 +60,7 @@ func (s *sSysConfig) GetTelegram(ctx context.Context) (conf *model.TelegramConfi
 
 func (s *sSysConfig) GetAccount(ctx context.Context) (conf *model.AccountConfig, err error) {
 	in := &sysin.GetConfigInp{}
-	in.AddonName = global.GetSkeleton().Name
+	in.AddonName = global.GetAddonName()
 	in.Group = publishConfigGroupAccount
 	res, err := baseservice.SysAddonsConfig().GetConfigByGroup(ctx, &in.GetAddonsConfigInp)
 	if err != nil {
@@ -93,7 +93,7 @@ func (s *sSysConfig) GetConfigByGroup(ctx context.Context, in *sysin.GetConfigIn
 		}
 		return &sysin.GetConfigModel{List: gconv.Map(cloudRes.CloudResourceConfig)}, nil
 	}
-	in.AddonName = global.GetSkeleton().Name
+	in.AddonName = global.GetAddonName()
 	models, err := baseservice.SysAddonsConfig().GetConfigByGroup(ctx, &in.GetAddonsConfigInp)
 	if err != nil {
 		return nil, err
@@ -113,7 +113,7 @@ func (s *sSysConfig) UpdateConfigByGroup(ctx context.Context, in *sysin.UpdateCo
 		}
 		return s.CloudResourceConfigSave(ctx, saveInp)
 	}
-	in.AddonName = global.GetSkeleton().Name
+	in.AddonName = global.GetAddonName()
 	if err := baseservice.SysAddonsConfig().UpdateConfigByGroup(ctx, &in.UpdateAddonsConfigInp); err != nil {
 		return err
 	}
@@ -223,7 +223,7 @@ func (s *sSysConfig) AntiScanConfigSaveTab(ctx context.Context, in *sysin.AntiSc
 
 func (s *sSysConfig) scanConfigGroup(ctx context.Context, group string, dst interface{}) error {
 	in := &sysin.GetConfigInp{}
-	in.AddonName = global.GetSkeleton().Name
+	in.AddonName = global.GetAddonName()
 	in.Group = group
 	res, err := baseservice.SysAddonsConfig().GetConfigByGroup(ctx, &in.GetAddonsConfigInp)
 	if err != nil {
@@ -237,7 +237,7 @@ func (s *sSysConfig) scanConfigGroup(ctx context.Context, group string, dst inte
 
 func (s *sSysConfig) updateConfigGroup(ctx context.Context, group string, list g.Map) error {
 	in := &sysin.UpdateConfigInp{}
-	in.AddonName = global.GetSkeleton().Name
+	in.AddonName = global.GetAddonName()
 	in.Group = group
 	in.List = list
 	if err := baseservice.SysAddonsConfig().UpdateConfigByGroup(ctx, &in.UpdateAddonsConfigInp); err != nil {

@@ -17,6 +17,9 @@ import (
 )
 
 func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCheckInp) (res *sysin.ChannelCheckModel, err error) {
+	if err = ensurePublishChannelColumns(ctx); err != nil {
+		return nil, gerror.Wrap(err, "检查频道表结构失败")
+	}
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
