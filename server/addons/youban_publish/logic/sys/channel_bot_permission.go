@@ -49,6 +49,45 @@ func encodeChannelBotPermissionStates(results []*sysin.ChannelCheckBotModel) str
 	return string(data)
 }
 
+func mergeChannelBotPermissionState(raw string, result *sysin.ChannelCheckBotModel) string {
+	if result == nil || result.BotId <= 0 {
+		return raw
+	}
+	states := decodeChannelBotPermissionStates(raw)
+	updated := false
+	for _, state := range states {
+		if state == nil || state.BotId != result.BotId {
+			continue
+		}
+		state.BotName = result.BotName
+		state.BotUsername = result.BotUsername
+		state.CanSendMessages = result.CanSendMessage
+		state.CanDeleteMessages = result.CanDeleteMessages
+		state.InChannel = result.InChannel
+		state.Status = result.Status
+		state.Message = result.Message
+		updated = true
+		break
+	}
+	if !updated {
+		states = append(states, &channelBotPermissionState{
+			BotId:             result.BotId,
+			BotName:           result.BotName,
+			BotUsername:       result.BotUsername,
+			CanSendMessages:   result.CanSendMessage,
+			CanDeleteMessages: result.CanDeleteMessages,
+			InChannel:         result.InChannel,
+			Status:            result.Status,
+			Message:           result.Message,
+		})
+	}
+	data, err := json.Marshal(states)
+	if err != nil {
+		return raw
+	}
+	return string(data)
+}
+
 func decodeChannelBotPermissionStates(raw string) []*channelBotPermissionState {
 	var states []*channelBotPermissionState
 	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &states); err != nil || states == nil {

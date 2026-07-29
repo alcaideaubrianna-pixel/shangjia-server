@@ -33,7 +33,7 @@ func (s *sSysPublish) deleteMatchedTelegramMessageWithChannelBots(ctx context.Co
 			failures = append(failures, fmt.Sprintf("bot:%d %v", botId, err))
 			continue
 		}
-		if err = ensureStoredTelegramBotCanDeleteMessages(channel, botItem.Id); err != nil {
+		if err = s.ensureTelegramBotCanDeleteMessages(ctx, channel, botItem, chatId); err != nil {
 			failures = append(failures, fmt.Sprintf("bot:%d %v", botId, err))
 			autoDeleteWarn(ctx, fmt.Sprintf("permission:%d:%s", botId, chatId), "频道自动删除 Bot 无删除权限 channel:%d bot:%d chat:%s err:%+v", channel.Id, botId, chatId, err)
 			continue
@@ -113,13 +113,41 @@ func autoDeleteBotAllowed(botId int64, allowed []int64) bool {
 	return false
 }
 
-func ensureStoredTelegramBotCanDeleteMessages(channel *autoDeleteChannel, botId int64) error {
-	if channel == nil || botId <= 0 {
+func (s *sSysPublish) ensureTelegramBotCanDeleteMessages(ctx context.Context, channel *autoDeleteChannel, botItem *sysin.BotModel, chatId string) error {
+	if channel == nil || botItem == nil || botItem.Id <= 0 {
 		return gerror.New("频道 Bot 权限状态不存在，请先检测频道")
 	}
-	state := channelBotPermissionStateForBot(channel.BotPermissionStatusJson, botId)
+	state := channelBotPermissionStateForBot(channel.BotPermissionStatusJson, botItem.Id)
 	if state == nil {
-		return gerror.New("频道 Bot 尚未完成权限检测，请先点击频道检测")
+		canSend, canDelete, inChannel, message := s.checkBotChannelMember(ctx, botItem, chatId)
+		result := &sysin.ChannelCheckBotModel{
+			BotId:             botItem.Id,
+			BotName:           botItem.BotName,
+			BotUsername:       strings.TrimPrefix(botItem.BotUsername, "@"),
+			CanSendMessage:    boolToInt(canSend),
+			CanDeleteMessages: boolToInt(canDelete),
+			InChannel:         boolToInt(inChannel),
+			Status:            "success",
+			Message:           message,
+		}
+		if !canSend || !canDelete {
+			result.Status = "warning"
+		}
+		channel.BotPermissionStatusJson = mergeChannelBotPermissionState(channel.BotPermissionStatusJson, result)
+		if err := s.persistChannelBotPermissionState(ctx, channel.TenantId, channel.Id, []*sysin.ChannelCheckBotModel{result}); err != nil {
+			autoDeleteWarn(ctx, fmt.Sprintf("permission_cache:%d:%s", botItem.Id, chatId), "回填频道 Bot 权限检测结果失败 channel:%d bot:%d chat:%s err:%+v", channel.Id, botItem.Id, chatId, err)
+		}
+		if !canSend || !canDelete {
+			return gerror.New(message)
+		}
+		return nil
+	}
+	return ensureStoredTelegramBotPermissionState(state)
+}
+
+func ensureStoredTelegramBotPermissionState(state *channelBotPermissionState) error {
+	if state == nil {
+		return gerror.New("频道 Bot 权限状态不存在，请先检测频道")
 	}
 	if state.CanSendMessages != 1 || state.CanDeleteMessages != 1 {
 		if strings.TrimSpace(state.Message) != "" {
