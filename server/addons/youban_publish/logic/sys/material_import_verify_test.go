@@ -39,17 +39,17 @@ func TestMaterialImportHasVerifyMedia(t *testing.T) {
 	}
 }
 
-func TestMaterialImportVerifyUnitIsContinuous(t *testing.T) {
-	if !materialImportVerifyUnitIsContinuous("151,152,153,154,155", []int{156}) {
-		t.Fatal("message 156 should be accepted as the continuous verify message")
+func TestCollectMaterialUnitsPairDisplayAndVerify(t *testing.T) {
+	units := []*collectMaterialUnit{
+		{RawText: "昵称：A100", MessageId: 151, Messages: []int{151}, Media: []collectMediaItem{{Type: "photo", FileId: "photo-1"}}},
+		{MessageId: 152, Messages: []int{152}, Media: []collectMediaItem{{Type: "video", FileId: "video-1"}}},
+		{RawText: "昵称：A101", MessageId: 153, Messages: []int{153}, Media: []collectMediaItem{{Type: "photo", FileId: "photo-2"}}},
 	}
-	if materialImportVerifyUnitIsContinuous("151,152,153,154,155", []int{125}) {
-		t.Fatal("message 125 must not be attached to the profile group")
+	paired := pairCollectMaterialUnits(units)
+	if len(paired) != 2 {
+		t.Fatalf("paired units=%d, want 2", len(paired))
 	}
-	if !materialImportVerifyUnitIsContinuous("151,152,153,154,155", []int{156, 157}) {
-		t.Fatal("a grouped verify unit should attach as one continuous group")
-	}
-	if materialImportVerifyUnitIsContinuous("151,152,153,154,155", []int{156, 158}) {
-		t.Fatal("a grouped verify unit with a gap must not attach")
+	if len(paired[0].Media) != 2 || paired[0].Media[1].Purpose != "verify" {
+		t.Fatalf("first display unit did not receive one verify group: %#v", paired[0].Media)
 	}
 }

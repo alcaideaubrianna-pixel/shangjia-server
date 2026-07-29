@@ -4,6 +4,47 @@ ALTER TABLE "hg_youban_publish_collect_rule"
 ALTER TABLE "hg_youban_publish_collect_rule"
   ADD COLUMN IF NOT EXISTS "delete_text_json" text;
 
+ALTER TABLE "hg_youban_publish_collect_event_media"
+  ADD COLUMN IF NOT EXISTS "download_duration_ms" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_collect_event_media"
+  ADD COLUMN IF NOT EXISTS "download_bytes" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_collect_event_media"
+  ADD COLUMN IF NOT EXISTS "download_attempts" integer NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_collect_event_media"
+  ADD COLUMN IF NOT EXISTS "cache_hit" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_collect_event_media"
+  ADD COLUMN IF NOT EXISTS "download_error_type" varchar(64) NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_media_stat" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "tg_account_id" bigint NOT NULL DEFAULT 0,
+  "source_id" bigint NOT NULL DEFAULT 0,
+  "event_id" bigint NOT NULL DEFAULT 0,
+  "status" varchar(32) NOT NULL DEFAULT '',
+  "media_total" integer NOT NULL DEFAULT 0,
+  "success_count" integer NOT NULL DEFAULT 0,
+  "failed_count" integer NOT NULL DEFAULT 0,
+  "pending_count" integer NOT NULL DEFAULT 0,
+  "cache_hit_count" integer NOT NULL DEFAULT 0,
+  "retry_count" integer NOT NULL DEFAULT 0,
+  "bytes" bigint NOT NULL DEFAULT 0,
+  "duration_ms" bigint NOT NULL DEFAULT 0,
+  "p50_ms" bigint NOT NULL DEFAULT 0,
+  "p95_ms" bigint NOT NULL DEFAULT 0,
+  "throughput_mbps" numeric(18,4) NOT NULL DEFAULT 0,
+  "success_rate" numeric(8,5) NOT NULL DEFAULT 0,
+  "failure_rate" numeric(8,5) NOT NULL DEFAULT 0,
+  "error_summary_json" text,
+  "started_at" timestamp DEFAULT NULL,
+  "finished_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  CONSTRAINT "uk_ybp_collect_media_stat_event" UNIQUE ("event_id")
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_media_stat_owner" ON "hg_youban_publish_collect_media_stat" ("tenant_id", "account_id", "tg_account_id", "created_at");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_media_stat_source" ON "hg_youban_publish_collect_media_stat" ("source_id", "created_at");
+
 ALTER TABLE "hg_youban_publish_collect_source"
   ADD COLUMN IF NOT EXISTS "history_collect_enabled" smallint NOT NULL DEFAULT 0;
 
@@ -19,11 +60,16 @@ ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_source_
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_source_message_id" bigint NOT NULL DEFAULT 0;
 
 ALTER TABLE "hg_youban_publish_tg_channel" ADD COLUMN IF NOT EXISTS "management_role" varchar(16) NOT NULL DEFAULT 'member';
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "bot_permission_status_json" text NOT NULL DEFAULT '[]';
 ALTER TABLE "hg_youban_publish_account" ALTER COLUMN "public_follow_enabled" SET DEFAULT 0;
 
 INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
 SELECT 'youban_publish', 'collect', '采集总开关', 'int', 'collectEnabled', '1', '1', 10, '是否启用采集能力', 0, 1, NOW(), NOW()
 WHERE NOT EXISTS (SELECT 1 FROM "hg_sys_addons_config" WHERE "addon_name"='youban_publish' AND "key"='collectEnabled');
+
+INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
+SELECT 'youban_publish', 'collect', '采集推送总开关', 'int', 'collectPushEnabled', '1', '1', 15, '是否允许采集资料推送到 Telegram 频道', 0, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM "hg_sys_addons_config" WHERE "addon_name"='youban_publish' AND "key"='collectPushEnabled');
 
 INSERT INTO "hg_sys_addons_config" ("addon_name", "group", "name", "type", "key", "value", "default_value", "sort", "tip", "is_default", "status", "created_at", "updated_at")
 SELECT 'youban_publish', 'collect', '实时采集推送延迟', 'int', 'realtimePushDelaySec', '600', '600', 20, '实时采集命中规则后延迟推送的秒数，用于等待媒体组和保持来源顺序', 0, 1, NOW(), NOW()
@@ -128,6 +174,11 @@ ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "so
 ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "source_chat_id" varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "source_grouped_id" varchar(128) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "meta_json" text;
+ALTER TABLE "hg_youban_publish_collect_event" ADD COLUMN IF NOT EXISTS "material_role" varchar(16) NOT NULL DEFAULT 'pending';
+ALTER TABLE "hg_youban_publish_collect_event" ADD COLUMN IF NOT EXISTS "material_parent_event_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_collect_event" ADD COLUMN IF NOT EXISTS "material_group_status" varchar(32) NOT NULL DEFAULT 'pending';
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_material" ON "hg_youban_publish_collect_event" ("source_id", "source_chat_id", "material_role", "material_parent_event_id", "source_message_id");
+ALTER TABLE "hg_youban_publish_collect_review" DROP COLUMN IF EXISTS "media_json";
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_event_log" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -524,3 +575,32 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel_profile" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_channel_profile" ON "hg_youban_publish_channel_profile" ("channel_id", "profile_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_channel_profile_scan" ON "hg_youban_publish_channel_profile" ("channel_id", "status", "id");
+
+-- 规范化本地媒体存储路径，避免把静态根目录写入业务字段。
+UPDATE "hg_youban_publish_media"
+SET "storage_path" = regexp_replace("storage_path", '^/?resource/public/', ''),
+    "updated_at" = NOW()
+WHERE "storage_path" ~ '^/?resource/public/';
+
+UPDATE "hg_youban_publish_media"
+SET "poster_storage_path" = regexp_replace("poster_storage_path", '^/?resource/public/', ''),
+    "updated_at" = NOW()
+WHERE "poster_storage_path" ~ '^/?resource/public/';
+
+UPDATE "hg_youban_publish_media"
+SET "original_storage_path" = regexp_replace("original_storage_path", '^/?resource/public/', ''),
+    "updated_at" = NOW()
+WHERE "original_storage_path" ~ '^/?resource/public/';
+
+UPDATE "hg_youban_publish_media"
+SET "edited_storage_path" = regexp_replace("edited_storage_path", '^/?resource/public/', ''),
+    "updated_at" = NOW()
+WHERE "edited_storage_path" ~ '^/?resource/public/';
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_text_hash" ON "hg_youban_publish_collect_event" ("tenant_id", "account_id", "text_hash", "received_at", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_order" ON "hg_youban_publish_collect_event" ("tenant_id", "account_id", "source_id", "source_chat_id", "source_message_id");
+
+-- 采集媒体统一收敛到事件媒体快照和正式媒体表
+ALTER TABLE IF EXISTS "hg_youban_publish_collect_content" DROP COLUMN IF EXISTS "media_signature";
+DROP TABLE IF EXISTS "hg_youban_publish_collect_content_media";
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_queue" ON "hg_youban_publish_collect_event" ("tenant_id", "account_id", "source_id", "status", "processed_at", "source_chat_id", "source_message_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dispatch_dedupe" ON "hg_youban_publish_collect_dispatch" ("tenant_id", "account_id", "event_id", "status", "id");

@@ -14,12 +14,11 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
+	"golang.org/x/sync/errgroup"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
-
-const materialImportMediaConcurrency = 3
 
 func (s *sSysPublish) executeMaterialImportMedia(ctx context.Context, taskId int64) error {
 	task, err := s.materialImportTaskById(ctx, taskId, 0)
@@ -69,7 +68,7 @@ func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sy
 	jobs := make(chan *sysin.MaterialImportGroupModel)
 	errCh := make(chan error, 1)
 	var wg sync.WaitGroup
-	for i := 0; i < materialImportMediaConcurrency; i++ {
+	for i := 0; i < accountCollectMediaConcurrency(ctx); i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -182,28 +181,9 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0, group.MediaJson)
 	}
 	_ = s.materialImportMarkGroupRunning(ctx, group.Id)
-	done := 0
-	failed := 0
-	for index, item := range items {
-		item = normalizeCollectMediaItem(item)
-		if strings.TrimSpace(item.StoragePath) != "" || strings.TrimSpace(item.FileUrl) != "" {
-			done++
-			continue
-		}
-		meta, ok := gotdCollectMediaMetaFromItem(item)
-		if !ok {
-			failed++
-			continue
-		}
-		down, err := s.cachedGotdCollectMediaFileWithClient(ctx, task.TenantId, task.TgAccountId, item, meta, client)
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(down.Path) != "" {
-			items[index].StoragePath = down.Path
-		}
-		done++
-		_ = s.materialImportUpdateGroupProgress(ctx, group.Id, done, failed)
+	_, _, err = s.downloadMaterialImportItems(ctx, task, group.Id, items, client)
+	if err != nil {
+		return err
 	}
 	data, _ := json.Marshal(items)
 	profileId, err = s.saveMaterialImportGroupProfile(ctx, task, group, string(data))
@@ -211,6 +191,70 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 		return err
 	}
 	return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0, string(data))
+}
+
+func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sysin.MaterialImportTaskModel, groupID int64, items []collectMediaItem, client *telegram.Client) (int, int, error) {
+	if len(items) == 0 {
+		return 0, 0, nil
+	}
+	concurrency := accountCollectMediaConcurrency(ctx)
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if concurrency > 4 {
+		concurrency = 4
+	}
+	sem := make(chan struct{}, concurrency)
+	var mu sync.Mutex
+	done := 0
+	failed := 0
+	group, groupCtx := errgroup.WithContext(ctx)
+	for index := range items {
+		index := index
+		group.Go(func() error {
+			select {
+			case sem <- struct{}{}:
+			case <-groupCtx.Done():
+				return groupCtx.Err()
+			}
+			defer func() { <-sem }()
+
+			item := normalizeCollectMediaItem(items[index])
+			if strings.TrimSpace(item.StoragePath) != "" || strings.TrimSpace(item.FileUrl) != "" {
+				mu.Lock()
+				done++
+				mu.Unlock()
+				return nil
+			}
+			meta, ok := gotdCollectMediaMetaFromItem(item)
+			if !ok {
+				mu.Lock()
+				failed++
+				mu.Unlock()
+				return nil
+			}
+			down, err := s.downloadTelegramMediaWithClient(groupCtx, task.TenantId, task.TgAccountId, item, meta, client)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(down.Path) != "" {
+				mu.Lock()
+				items[index].StoragePath = down.Path
+				mu.Unlock()
+			}
+			mu.Lock()
+			done++
+			mu.Unlock()
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return 0, 0, err
+	}
+	if err := s.materialImportUpdateGroupProgress(ctx, groupID, done, failed); err != nil {
+		return 0, 0, err
+	}
+	return done, failed, nil
 }
 
 func (s *sSysPublish) materialImportProfileHasMedia(ctx context.Context, profileId int64) bool {

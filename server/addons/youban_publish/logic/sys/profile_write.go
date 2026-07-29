@@ -125,6 +125,9 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 	if err = s.deactivateChannelProfiles(ctx, tenantId, ids); err != nil {
 		return err
 	}
+	if err = s.supersedeProfilePendingTelegramJobs(ctx, ids, tenantId); err != nil {
+		return err
+	}
 	columns := dao.ContentProfile.Columns()
 	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).Unscoped().Delete(); err != nil {
 		return gerror.Wrap(err, "删除资料失败")
@@ -133,6 +136,28 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 		return err
 	}
 	service.SysContent().ClearHomeProfileCardsCache(ctx)
+	return nil
+}
+
+func (s *sSysPublish) supersedeProfilePendingTelegramJobs(ctx context.Context, profileIds []int64, tenantId int64) error {
+	profileIds = uniqueIds(profileIds)
+	if tenantId <= 0 || len(profileIds) == 0 {
+		return nil
+	}
+	var jobs []telegramResubmitJob
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		WhereIn("profile_id", profileIds).
+		WhereIn("status", []string{"pending", "sending", "failed_retry"}).
+		OrderAsc("id").Scan(&jobs); err != nil {
+		return gerror.Wrap(err, "读取资料待发送TG任务失败")
+	}
+	for _, job := range jobs {
+		if err := s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
+			return gerror.Wrap(err, "废弃资料待发送TG任务失败")
+		}
+		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "down", "superseded", "资料下架，停止待发送TG任务")
+	}
 	return nil
 }
 

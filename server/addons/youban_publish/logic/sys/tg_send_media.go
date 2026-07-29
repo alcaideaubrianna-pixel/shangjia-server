@@ -18,6 +18,8 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
+const telegramMediaGroupMaxItems = 10
+
 func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
 	if len(media) == 0 {
 		return nil, nil
@@ -32,22 +34,30 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		}
 		media = telegramMediaSetWithoutTgFileId(media)
 	}
-	group, mediaIds, assetHashes, closers, err := s.telegramInputMediaGroup(ctx, media, caption)
-	defer closeTelegramMediaFiles(closers)
-	if err != nil {
-		return nil, err
+	allMessages := make([]*telegramSentMessage, 0, len(media))
+	for chunkIndex, chunk := range splitTelegramMediaItems(media, telegramMediaGroupMaxItems) {
+		chunkCaption := ""
+		if chunkIndex == 0 {
+			chunkCaption = caption
+		}
+		group, mediaIds, assetHashes, closers, err := s.telegramInputMediaGroup(ctx, chunk, chunkCaption)
+		if err != nil {
+			return allMessages, err
+		}
+		if len(group) == 0 {
+			continue
+		}
+		msgs, err := bot.SendMediaGroup(ctx, &tgbot.SendMediaGroupParams{
+			ChatID: chatId,
+			Media:  group,
+		})
+		closeTelegramMediaFiles(closers)
+		if err != nil {
+			return allMessages, err
+		}
+		allMessages = append(allMessages, telegramSentMessagesFromGroup(msgs, purpose, mediaIds, assetHashes)...)
 	}
-	if len(group) == 0 {
-		return nil, nil
-	}
-	msgs, err := bot.SendMediaGroup(ctx, &tgbot.SendMediaGroupParams{
-		ChatID: chatId,
-		Media:  group,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return telegramSentMessagesFromGroup(msgs, purpose, mediaIds, assetHashes), nil
+	return allMessages, nil
 }
 
 func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem) ([]*telegramSentMessage, error) {
@@ -113,7 +123,7 @@ func (s *sSysPublish) copyTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 	}
 	copied, ok, err := s.copyTelegramMediaGroup(ctx, bot, chatId, purpose, caption, media)
 	if err != nil {
-		return nil, err
+		return copied, err
 	}
 	if !ok {
 		return nil, gerror.New("多媒体组备份引用不完整，禁止逐条发送以避免打散原消息组")
@@ -128,25 +138,44 @@ func (s *sSysPublish) copyTelegramMediaGroup(ctx context.Context, bot *tgbot.Bot
 	if strings.TrimSpace(caption) != "" {
 		return nil, false, nil
 	}
-	fromChatId, messageIds, ok := telegramCopyMediaGroupRefs(media)
-	if !ok {
-		return nil, false, nil
+	allMessages := make([]*telegramSentMessage, 0, len(media))
+	for _, chunk := range splitTelegramMediaItems(media, telegramMediaGroupMaxItems) {
+		fromChatId, messageIds, ok := telegramCopyMediaGroupRefs(chunk)
+		if !ok {
+			return nil, false, nil
+		}
+		copied, err := bot.CopyMessages(ctx, &tgbot.CopyMessagesParams{
+			ChatID:        chatId,
+			FromChatID:    fromChatId,
+			MessageIDs:    messageIds,
+			RemoveCaption: true,
+		})
+		if err != nil {
+			return nil, true, err
+		}
+		messages := telegramSentMessagesFromCopiedIDs(copied, purpose, chunk)
+		if len(messages) != len(chunk) {
+			s.cleanupTelegramSentMessages(ctx, bot, chatId, append(allMessages, messages...), "复制媒体组返回数量不完整")
+			return nil, true, gerror.Newf("复制媒体组返回数量不完整，期望:%d 实际:%d", len(chunk), len(messages))
+		}
+		allMessages = append(allMessages, messages...)
 	}
-	copied, err := bot.CopyMessages(ctx, &tgbot.CopyMessagesParams{
-		ChatID:        chatId,
-		FromChatID:    fromChatId,
-		MessageIDs:    messageIds,
-		RemoveCaption: true,
-	})
-	if err != nil {
-		return nil, true, err
+	return allMessages, true, nil
+}
+
+func splitTelegramMediaItems(media []*telegramMediaItem, maxItems int) [][]*telegramMediaItem {
+	if maxItems <= 0 {
+		maxItems = telegramMediaGroupMaxItems
 	}
-	messages := telegramSentMessagesFromCopiedIDs(copied, purpose, media)
-	if len(messages) != len(media) {
-		s.cleanupTelegramSentMessages(ctx, bot, chatId, messages, "复制媒体组返回数量不完整")
-		return nil, true, gerror.Newf("复制媒体组返回数量不完整，期望:%d 实际:%d", len(media), len(messages))
+	chunks := make([][]*telegramMediaItem, 0, (len(media)+maxItems-1)/maxItems)
+	for start := 0; start < len(media); start += maxItems {
+		end := start + maxItems
+		if end > len(media) {
+			end = len(media)
+		}
+		chunks = append(chunks, media[start:end])
 	}
-	return messages, true, nil
+	return chunks
 }
 
 func telegramSentMessagesFromCopiedIDs(copied []models.MessageID, purpose string, media []*telegramMediaItem) []*telegramSentMessage {

@@ -24,6 +24,9 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 	if isMessagePushOperationNo(targetJob.OperationNo) {
 		return s.SendMessagePushJob(ctx, jobId)
 	}
+	if targetJob.CollectSourceId > 0 && !s.collectPushEnabled(ctx) {
+		return s.postponeTelegramJobForCollectPushPause(ctx, targetJob)
+	}
 	lease, ok, err := s.tryTelegramChannelLease(ctx, targetJob.TargetChatId)
 	if err != nil {
 		return err
@@ -142,6 +145,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	}
 	messages, err := s.sendTelegramDisplayPart(ctx, bot, job.TargetChatId, caption, displayMedia)
 	if err != nil {
+		s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "展示资料分片推送失败")
 		return gerror.Wrapf(err, "TG展示资料推送失败，job:%d，channel:%d，chat:%s", job.Id, job.ChannelId, job.TargetChatId)
 	}
 	if stillSending, err := s.telegramJobStillSending(ctx, job.Id); err != nil {
@@ -349,12 +353,6 @@ func (s *sSysPublish) telegramJobPublishMessage(job telegramJobRecord, message s
 }
 
 func (s *sSysPublish) canSendTelegramJob(ctx context.Context, job telegramJobRecord) (bool, error) {
-	if job.CollectSourceId > 0 {
-		enabled, err := s.collectSourcePushEnabled(ctx, job.CollectSourceId, job.TenantId, job.AccountId)
-		if err != nil || !enabled {
-			return false, err
-		}
-	}
 	requireOnline := strings.HasPrefix(job.OperationNo, "full_push:") || isCycleBatchOperation(job.OperationNo)
 	_, err := s.profilePublishSource(ctx, job.ProfileId, job.TenantId, job.AccountId, requireOnline)
 	if err != nil {

@@ -30,7 +30,6 @@ type YoubanPublishCollectReviewColumns struct {
 	DispatchId          string // 分发记录ID
 	RawText             string // 原始文本
 	MediaCount          string // 媒体数量
-	MediaJson           string // 媒体JSON
 	TargetChannelIdJson string // 目标频道ID JSON
 	BotIdJson           string // 推送BOT ID JSON
 	Status              string // 审核状态
@@ -52,7 +51,6 @@ var youbanPublishCollectReviewColumns = YoubanPublishCollectReviewColumns{
 	DispatchId:          "dispatch_id",
 	RawText:             "raw_text",
 	MediaCount:          "media_count",
-	MediaJson:           "media_json",
 	TargetChannelIdJson: "target_channel_id_json",
 	BotIdJson:           "bot_id_json",
 	Status:              "status",

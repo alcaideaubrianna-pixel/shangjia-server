@@ -5,6 +5,17 @@ import (
 	"testing"
 )
 
+func TestSplitTelegramMediaItems(t *testing.T) {
+	media := make([]*telegramMediaItem, 23)
+	chunks := splitTelegramMediaItems(media, telegramMediaGroupMaxItems)
+	if len(chunks) != 3 {
+		t.Fatalf("chunks=%d, want 3", len(chunks))
+	}
+	if len(chunks[0]) != 10 || len(chunks[1]) != 10 || len(chunks[2]) != 3 {
+		t.Fatalf("chunk sizes=%d,%d,%d, want 10,10,3", len(chunks[0]), len(chunks[1]), len(chunks[2]))
+	}
+}
+
 func TestNormalizeTelegramPhotoDimensions(t *testing.T) {
 	tests := []struct {
 		name   string

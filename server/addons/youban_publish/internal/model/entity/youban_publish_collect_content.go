@@ -19,7 +19,6 @@ type YoubanPublishCollectContent struct {
 	RawText        string      `json:"rawText"        orm:"raw_text"         description:""`
 	NormalizedText string      `json:"normalizedText" orm:"normalized_text"  description:""`
 	MediaCount     int         `json:"mediaCount"     orm:"media_count"      description:""`
-	MediaSignature string      `json:"mediaSignature" orm:"media_signature"  description:""`
 	MediaJson      string      `json:"mediaJson"      orm:"media_json"       description:""`
 	TextHash       string      `json:"textHash"       orm:"text_hash"        description:""`
 	DedupeKey      string      `json:"dedupeKey"      orm:"dedupe_key"       description:""`

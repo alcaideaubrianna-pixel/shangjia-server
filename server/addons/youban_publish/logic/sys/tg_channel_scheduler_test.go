@@ -13,6 +13,7 @@ func TestTelegramSchedulerCollectPredecessorCondition(t *testing.T) {
 		"pj.collect_source_chat_id = j.collect_source_chat_id",
 		"pj.collect_source_message_id < j.collect_source_message_id",
 		"pj.channel_id = j.channel_id",
+		"pj.next_retry_at <= NOW()",
 	}
 	for _, check := range checks {
 		if !strings.Contains(condition, check) {

@@ -17,7 +17,11 @@ import (
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 )
 
-const listenerGroupFlushDelay = 1200 * time.Millisecond
+const (
+	listenerGroupFlushDelay = 1200 * time.Millisecond
+	listenerMaxGroups       = 1024
+	listenerMaxMessages     = 32
+)
 
 type listenerMessageGroup struct {
 	entities tg.Entities
@@ -206,9 +210,29 @@ func (w *accountCollectWorker) bufferListenerGroupedMessage(ctx context.Context,
 		sourceChatId = listenerMessageChatID(msg)
 	}
 	key := sourceChatId + ":" + groupedId
+	var flushGroup *listenerMessageGroup
 	w.listenerGroupMu.Lock()
 	group := w.listenerGroups[key]
 	if group == nil {
+		if len(w.listenerGroups) >= listenerMaxGroups {
+			for oldKey, oldGroup := range w.listenerGroups {
+				delete(w.listenerGroups, oldKey)
+				if oldGroup != nil && oldGroup.timer != nil {
+					oldGroup.timer.Stop()
+				}
+				flushGroup = oldGroup
+				break
+			}
+		}
+		group = &listenerMessageGroup{}
+		w.listenerGroups[key] = group
+	}
+	if len(group.messages) >= listenerMaxMessages {
+		delete(w.listenerGroups, key)
+		if group.timer != nil {
+			group.timer.Stop()
+		}
+		flushGroup = group
 		group = &listenerMessageGroup{}
 		w.listenerGroups[key] = group
 	}
@@ -222,6 +246,9 @@ func (w *accountCollectWorker) bufferListenerGroupedMessage(ctx context.Context,
 		w.flushListenerMessageGroup(key)
 	})
 	w.listenerGroupMu.Unlock()
+	if flushGroup != nil && len(flushGroup.messages) > 0 {
+		w.handleListenerMessageGroup(ctx, flushGroup)
+	}
 }
 
 func (w *accountCollectWorker) flushListenerMessageGroup(key string) {

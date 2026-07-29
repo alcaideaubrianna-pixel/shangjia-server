@@ -119,9 +119,16 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 		if err != nil {
 			return err
 		}
+		g.Log().Infof(ctx, "采集消息分组分类 eventId:%d sourceId:%d chat:%s messageId:%d groupedId:%s role:%s kind:%s media:%d text:%s", event["id"].Int64(), payload.SourceId, chatID, event["source_message_id"].Int64(), event["source_grouped_id"].String(), role, classification.Kind, event["media_count"].Int(), truncateCollectDiagnosticText(event["raw_text"].String(), 80))
 		switch classification.Kind {
 		case profileMessageKindDisplay:
 			verifyIndex := s.findCollectVerifyEvent(rows, index)
+			if verifyIndex >= 0 {
+				verify := rows[verifyIndex]
+				g.Log().Infof(ctx, "采集消息匹配验证组 eventId:%d verifyEventId:%d displayMessageId:%d verifyMessageId:%d verifyGroupedId:%s verifyMedia:%d", event["id"].Int64(), verify["id"].Int64(), event["source_message_id"].Int64(), verify["source_message_id"].Int64(), verify["source_grouped_id"].String(), verify["media_count"].Int())
+			} else {
+				g.Log().Warningf(ctx, "采集消息未匹配验证组 eventId:%d sourceMessageId:%d media:%d age:%s", event["id"].Int64(), event["source_message_id"].Int64(), event["media_count"].Int(), collectMaterialEventTime(event))
+			}
 			if verifyIndex >= 0 {
 				if err = s.bindCollectMaterialPair(ctx, event, rows[verifyIndex]); err != nil {
 					return err
@@ -147,6 +154,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				g.Log().Infof(ctx, "采集资料组等待异步依赖，继续处理后续资料 eventId:%d err:%s", event["id"].Int64(), err.Error())
 			}
 		case profileMessageKindVerify:
+			g.Log().Infof(ctx, "采集消息识别为验证组 eventId:%d sourceMessageId:%d groupedId:%s media:%d role:%s", event["id"].Int64(), event["source_message_id"].Int64(), event["source_grouped_id"].String(), event["media_count"].Int(), role)
 			if !collectMaterialEventOlderThan(event, collectMaterialVerifyWindow) {
 				continue
 			}
@@ -191,6 +199,14 @@ func (s *sSysPublish) findCollectVerifyEvent(rows []gdb.Record, displayIndex int
 		return pair.VerifyIndex
 	}
 	return -1
+}
+
+func truncateCollectDiagnosticText(value string, limit int) string {
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "..."
 }
 
 func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.Record, verify gdb.Record) error {

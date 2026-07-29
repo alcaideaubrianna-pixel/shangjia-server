@@ -127,27 +127,17 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 			fileURL := strings.TrimSpace(item.FileUrl)
 			storagePath := strings.TrimSpace(item.StoragePath)
 			assetHash := mediaAssetHash(strings.TrimSpace(item.AssetHash), storagePath, fileURL)
+			assets, assetErr := processMediaAssetMetadata(ctx, mediaType, storagePath, fileURL, item.PosterUrl, item.Name)
+			if assetErr != nil {
+				g.Log().Warning(ctx, "处理机器人资料媒体失败", g.Map{"profileId": profileId, "mediaType": mediaType, "path": storagePath, "err": assetErr})
+			}
 			perceptualHash := ""
 			posterURL := strings.TrimSpace(item.PosterUrl)
 			posterStoragePath := strings.TrimSpace(item.PosterStoragePath)
-			if storedAssets, assetErr := s.ProcessStoredMediaAssets(ctx, &sysin.StoredMediaAssetsInp{MediaType: mediaType, LocalPath: storagePath, FileName: item.Name}); assetErr != nil {
-				g.Log().Warning(ctx, "处理机器人资料媒体失败", g.Map{"profileId": profileId, "mediaType": mediaType, "path": storagePath, "err": assetErr})
-			} else if storedAssets != nil && storedAssets.Processed {
-				perceptualHash = storedAssets.PerceptualHash
-				posterURL = firstNonEmpty(storedAssets.PosterUrl, posterURL)
-				posterStoragePath = firstNonEmpty(storedAssets.PosterStoragePath, posterStoragePath)
-			}
-			if perceptualHash == "" {
-				remoteAssets, remoteErr := s.ProcessRemoteMediaAssets(ctx, &sysin.RemoteMediaAssetsInp{
-					MediaType: mediaType,
-					FileURL:   fileURL,
-					PosterURL: posterURL,
-				})
-				if remoteErr != nil {
-					g.Log().Warning(ctx, "计算机器人资料媒体哈希失败", g.Map{"profileId": profileId, "mediaType": mediaType, "err": remoteErr})
-				} else if remoteAssets != nil && remoteAssets.Processed {
-					perceptualHash = remoteAssets.PerceptualHash
-				}
+			if assets != nil {
+				perceptualHash = assets.PerceptualHash
+				posterURL = firstNonEmpty(assets.PosterURL, posterURL)
+				posterStoragePath = firstNonEmpty(assets.PosterStoragePath, posterStoragePath)
 			}
 			data := g.Map{
 				"tenant_id":              tenantId,
@@ -184,11 +174,8 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 				"created_at":             now,
 				"updated_at":             now,
 			}
-			mediaId, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
+			_, err := s.saveMediaRecordAndIndex(ctx, data, "保存机器人资料媒体失败")
 			if err != nil {
-				return gerror.Wrap(err, "保存机器人资料媒体失败")
-			}
-			if err = s.syncMediaPHashBucketByMediaId(ctx, mediaId); err != nil {
 				return err
 			}
 		}

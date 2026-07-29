@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -523,8 +524,8 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 		"file_url":             normalizeMediaFileURL(attachment.FileUrl, attachment.Path),
 		"edited_file_url":      "",
 		"poster_url":           normalizeMediaFileURL(posterFileUrl(poster), posterStoragePath(poster)),
-		"poster_storage_path":  posterStoragePath(poster),
-		"storage_path":         attachment.Path,
+		"poster_storage_path":  normalizeStoredMediaPath(posterStoragePath(poster)),
+		"storage_path":         normalizeStoredMediaPath(attachment.Path),
 		"edited_storage_path":  "",
 		"mime_type":            attachment.MimeType,
 		"md5":                  attachment.Md5,
@@ -581,24 +582,24 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 	if editStatus == "edited" {
 		data["edited_attachment_id"] = attachment.Id
 		data["edited_file_url"] = normalizeMediaFileURL(attachment.FileUrl, attachment.Path)
-		data["edited_storage_path"] = attachment.Path
+		data["edited_storage_path"] = normalizeStoredMediaPath(attachment.Path)
 	}
 	if editStatus == mediaEditStatusRaw {
 		data["original_attachment_id"] = attachment.Id
 		data["original_file_url"] = normalizeMediaFileURL(attachment.FileUrl, attachment.Path)
-		data["original_storage_path"] = attachment.Path
+		data["original_storage_path"] = normalizeStoredMediaPath(attachment.Path)
 	} else if originalAttachment != nil && originalAttachment.Id > 0 {
 		data["original_attachment_id"] = originalAttachment.Id
 		data["original_file_url"] = normalizeMediaFileURL(originalAttachment.FileUrl, originalAttachment.Path)
-		data["original_storage_path"] = originalAttachment.Path
+		data["original_storage_path"] = normalizeStoredMediaPath(originalAttachment.Path)
 	} else if mediaId == 0 {
 		data["original_attachment_id"] = attachment.Id
 		data["original_file_url"] = normalizeMediaFileURL(attachment.FileUrl, attachment.Path)
-		data["original_storage_path"] = attachment.Path
+		data["original_storage_path"] = normalizeStoredMediaPath(attachment.Path)
 	} else if mediaId > 0 && existing["original_attachment_id"].Int64() <= 0 {
 		data["original_attachment_id"] = existing["attachment_id"].Int64()
 		data["original_file_url"] = normalizeMediaFileURL(existing["file_url"].String(), existing["storage_path"].String())
-		data["original_storage_path"] = existing["storage_path"].String()
+		data["original_storage_path"] = normalizeStoredMediaPath(existing["storage_path"].String())
 	}
 	if mediaId > 0 {
 		_, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", mediaId).Data(data).Update()
@@ -637,6 +638,10 @@ func normalizeMediaListFileURL(list []*sysin.MediaModel) {
 		if (item.EditStatus == "" || item.EditStatus == "raw") && isLikelyEditedMedia(item) {
 			item.EditStatus = "edited"
 		}
+		item.StoragePath = normalizeStoredMediaPath(item.StoragePath)
+		item.OriginalStoragePath = normalizeStoredMediaPath(item.OriginalStoragePath)
+		item.EditedStoragePath = normalizeStoredMediaPath(item.EditedStoragePath)
+		item.PosterStoragePath = normalizeStoredMediaPath(item.PosterStoragePath)
 		item.FileUrl = normalizeMediaFileURL(item.FileUrl, item.StoragePath)
 		item.OriginalFileUrl = normalizeMediaFileURL(item.OriginalFileUrl, item.OriginalStoragePath)
 		item.EditedFileUrl = normalizeMediaFileURL(item.EditedFileUrl, item.EditedStoragePath)
@@ -664,7 +669,7 @@ func isLikelyEditedMedia(item *sysin.MediaModel) bool {
 
 func normalizeMediaFileURL(fileURL string, storagePath string) string {
 	fileURL = strings.TrimSpace(fileURL)
-	storagePath = strings.TrimSpace(storagePath)
+	storagePath = normalizeStoredMediaPath(storagePath)
 	if contentPath := normalizeTelegramContentStoragePath(fileURL); contentPath != "" {
 		return normalizeTelegramContentURL(contentPath)
 	}
@@ -681,6 +686,35 @@ func normalizeMediaFileURL(fileURL string, storagePath string) string {
 		return "/" + strings.TrimLeft(storagePath, "/")
 	}
 	return fileURL
+}
+
+func normalizeStoredMediaPath(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.Contains(raw, "://") {
+		return raw
+	}
+	raw = filepath.ToSlash(raw)
+	root := filepath.ToSlash(strings.TrimSpace(g.Cfg().MustGet(context.Background(), "server.serverRoot", "").String()))
+	root = strings.Trim(root, "/")
+	if root != "" {
+		if absoluteRoot, err := filepath.Abs(filepath.FromSlash(root)); err == nil {
+			absoluteRoot = filepath.ToSlash(absoluteRoot)
+			if relative, err := filepath.Rel(absoluteRoot, filepath.FromSlash(raw)); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				raw = filepath.ToSlash(relative)
+			}
+		}
+		trimmed := strings.TrimLeft(raw, "/")
+		if strings.HasPrefix(trimmed, root+"/") {
+			raw = strings.TrimPrefix(trimmed, root+"/")
+		}
+	}
+	for _, prefix := range []string{"resource/public/", "public/"} {
+		trimmed := strings.TrimLeft(raw, "/")
+		if strings.HasPrefix(trimmed, prefix) {
+			raw = strings.TrimPrefix(trimmed, prefix)
+		}
+	}
+	return strings.TrimLeft(raw, "/")
 }
 
 func normalizeTelegramContentURL(storagePath string) string {

@@ -19,7 +19,6 @@ type YoubanPublishCollectReview struct {
 	DispatchId          int64       `json:"dispatchId"          orm:"dispatch_id"            description:"分发记录ID"`
 	RawText             string      `json:"rawText"             orm:"raw_text"               description:"原始文本"`
 	MediaCount          int         `json:"mediaCount"          orm:"media_count"            description:"媒体数量"`
-	MediaJson           string      `json:"mediaJson"           orm:"media_json"             description:"媒体JSON"`
 	TargetChannelIdJson string      `json:"targetChannelIdJson" orm:"target_channel_id_json" description:"目标频道ID JSON"`
 	BotIdJson           string      `json:"botIdJson"           orm:"bot_id_json"            description:"推送BOT ID JSON"`
 	Status              string      `json:"status"              orm:"status"                 description:"审核状态"`

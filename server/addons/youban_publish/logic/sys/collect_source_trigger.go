@@ -17,31 +17,6 @@ import (
 	"hotgo/internal/consts"
 )
 
-func (s *sSysPublish) CollectSourceTrigger(ctx context.Context, in *sysin.CollectSourceTriggerInp) (*sysin.CollectSourceTriggerModel, error) {
-	account, err := s.currentAccount(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if in == nil || in.Id <= 0 {
-		return nil, gerror.New("采集源ID不能为空")
-	}
-	if err = s.ensureCollectSourceExists(ctx, in.Id, account.TenantId, account.Id); err != nil {
-		return nil, err
-	}
-	if err = s.enqueueCollectSourceTrigger(ctx, collectTriggerQueuePayload{
-		AccountId: account.Id,
-		SourceId:  in.Id,
-		TenantId:  account.TenantId,
-	}, 0); err != nil {
-		return nil, err
-	}
-	count, err := s.collectSourceTriggerEventCount(ctx, in.Id, account.TenantId, account.Id)
-	if err != nil {
-		return nil, err
-	}
-	return &sysin.CollectSourceTriggerModel{QueuedCount: count}, nil
-}
-
 func (s *sSysPublish) ExecuteCollectSourceTrigger(ctx context.Context, sourceId int64, tenantId int64, accountId int64) (*sysin.CollectSourceTriggerModel, error) {
 	if sourceId <= 0 || tenantId <= 0 || accountId <= 0 {
 		return nil, gerror.New("采集源重试参数不完整")
@@ -55,6 +30,11 @@ func (s *sSysPublish) ExecuteCollectSourceTrigger(ctx context.Context, sourceId 
 	}
 	res := &sysin.CollectSourceTriggerModel{}
 	for _, eventId := range eventIds {
+		if err = s.clearCollectEventTelegramJobs(ctx, eventId, tenantId); err != nil {
+			res.FailedCount++
+			s.appendCollectEventLog(ctx, eventId, "manual", "failed", "重试前清理旧TG消息失败", err.Error())
+			continue
+		}
 		if err = s.syncCollectEventMediaSnapshot(ctx, eventId); err != nil {
 			res.FailedCount++
 			s.appendCollectEventLog(ctx, eventId, "manual", "failed", "重试前刷新媒体快照失败", err.Error())
@@ -65,15 +45,45 @@ func (s *sSysPublish) ExecuteCollectSourceTrigger(ctx context.Context, sourceId 
 			s.appendCollectEventLog(ctx, eventId, "manual", "failed", "重试前重置事件失败", err.Error())
 			continue
 		}
-		if err = s.processCollectEvent(ctx, eventId, tenantId, accountId); err != nil {
+		if err = s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
+			EventId:   eventId,
+			SourceId:  sourceId,
+			TenantId:  tenantId,
+			AccountId: accountId,
+		}, 0); err != nil {
 			res.FailedCount++
-			s.appendCollectEventLog(ctx, eventId, "manual", "failed", "重试采集推送失败", err.Error())
+			s.appendCollectEventLog(ctx, eventId, "manual", "failed", "重试采集事件投递失败", err.Error())
 			continue
 		}
 		res.ProcessedCount++
-		s.appendCollectEventLog(ctx, eventId, "manual", "triggered", "重试采集推送完成", "")
+		s.appendCollectEventLog(ctx, eventId, "manual", "triggered", "重试采集事件已投递队列", "")
 	}
 	return res, nil
+}
+
+func (s *sSysPublish) clearCollectEventTelegramJobs(ctx context.Context, eventId, tenantId int64) error {
+	if eventId <= 0 || tenantId <= 0 {
+		return nil
+	}
+	var jobs []telegramResubmitJob
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("collect_event_id", eventId).
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "failed", "sent"}).
+		OrderAsc("id").Scan(&jobs); err != nil {
+		return gerror.Wrap(err, "读取采集事件TG任务失败")
+	}
+	for _, job := range jobs {
+		if job.Status == "sent" || job.Status == "sending" {
+			if err := s.deleteTelegramMessageSet(ctx, job.telegramJobRecord(), "采集事件重试"); err != nil {
+				return gerror.Wrap(err, "清理采集事件历史TG消息失败")
+			}
+		}
+		if err := s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
+			return gerror.Wrap(err, "废弃采集事件旧TG任务失败")
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) CollectSourceReset(ctx context.Context, in *sysin.CollectSourceResetInp) (*sysin.CollectSourceResetModel, error) {
@@ -91,6 +101,43 @@ func (s *sSysPublish) CollectSourceReset(ctx context.Context, in *sysin.CollectS
 		return nil, err
 	}
 	return s.resetCollectSourceForDev(ctx, in.Id, account.TenantId, account.Id)
+}
+
+func (s *sSysPublish) CollectEventReprocess(ctx context.Context, in *sysin.CollectEventReprocessInp) (*sysin.CollectEventReprocessModel, error) {
+	if !collectSourceResetAllowed(ctx) {
+		return nil, gerror.New("仅开发模式允许重算采集事件")
+	}
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil || in.EventId <= 0 {
+		return nil, gerror.New("事件ID不能为空")
+	}
+	event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Where("id", in.EventId).
+		Where("tenant_id", account.TenantId).
+		Where("account_id", account.Id).
+		One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取采集事件失败")
+	}
+	if event.IsEmpty() {
+		return nil, gerror.New("采集事件不存在")
+	}
+	if err = s.resetCollectEventForTrigger(ctx, in.EventId); err != nil {
+		return nil, err
+	}
+	if err = s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
+		EventId:   in.EventId,
+		SourceId:  event["source_id"].Int64(),
+		TenantId:  account.TenantId,
+		AccountId: account.Id,
+	}, 0); err != nil {
+		return nil, gerror.Wrap(err, "投递采集事件重算任务失败")
+	}
+	s.appendCollectEventLogForRecord(ctx, event, "manual", "reprocess", "采集事件已投递统一链路重算", "")
+	return &sysin.CollectEventReprocessModel{EventId: in.EventId}, nil
 }
 
 func collectSourceResetAllowed(ctx context.Context) bool {
@@ -113,16 +160,6 @@ func (s *sSysPublish) ensureCollectSourceExists(ctx context.Context, sourceId in
 		return gerror.New("采集源不存在")
 	}
 	return nil
-}
-
-func (s *sSysPublish) collectSourceTriggerEventCount(ctx context.Context, sourceId int64, tenantId int64, accountId int64) (int, error) {
-	count, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Where("source_id", sourceId).
-		Where("tenant_id", tenantId).
-		Where("account_id", accountId).
-		WhereIn("status", collectSourceTriggerStatuses()).
-		Count()
-	return count, gerror.Wrap(err, "统计待重试采集事件失败")
 }
 
 func (s *sSysPublish) collectSourceTriggerEventIds(ctx context.Context, sourceId int64, tenantId int64, accountId int64) ([]int64, error) {
@@ -209,6 +246,9 @@ func (s *sSysPublish) resetCollectSourceForDev(ctx context.Context, sourceId int
 	if err = s.resetCollectSourceProfilesForDev(ctx, profileIds, tenantId); err != nil {
 		return nil, err
 	}
+	if err = s.clearCollectSourceTelegramJobs(ctx, sourceId, tenantId); err != nil {
+		return nil, err
+	}
 	reviewCount, err := pdao.YoubanPublishCollectReview.Ctx(ctx).
 		Where("source_id", sourceId).
 		Where("tenant_id", tenantId).
@@ -246,6 +286,31 @@ func (s *sSysPublish) resetCollectSourceForDev(ctx context.Context, sourceId int
 		res.DispatchCount = int(affected)
 	}
 	return res, nil
+}
+
+func (s *sSysPublish) clearCollectSourceTelegramJobs(ctx context.Context, sourceId, tenantId int64) error {
+	if sourceId <= 0 || tenantId <= 0 {
+		return nil
+	}
+	var jobs []telegramResubmitJob
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("collect_source_id", sourceId).
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "failed", "sent"}).
+		OrderAsc("id").Scan(&jobs); err != nil {
+		return gerror.Wrap(err, "读取采集源TG任务失败")
+	}
+	for _, job := range jobs {
+		if job.Status == "sent" || job.Status == "sending" {
+			if err := s.deleteTelegramMessageSet(ctx, job.telegramJobRecord(), "采集源状态重置"); err != nil {
+				return gerror.Wrap(err, "清理采集源历史TG消息失败")
+			}
+		}
+		if err := s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
+			return gerror.Wrap(err, "废弃采集源TG任务失败")
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) resetCollectSourceProfilesForDev(ctx context.Context, profileIds []int64, tenantId int64) error {
@@ -303,8 +368,8 @@ func (s *sSysPublish) enqueueCollectSourceTrigger(ctx context.Context, payload c
 	task := asynq.NewTask(tgTaskTypeCollectTrigger, body)
 	options := []asynq.Option{
 		asynq.Queue(tgQueueNameBackground),
-		asynq.MaxRetry(0),
-		asynq.Timeout(30 * time.Minute),
+		asynq.MaxRetry(10),
+		asynq.Timeout(10 * time.Minute),
 		asynq.Unique(30 * time.Second),
 	}
 	if delay > 0 {

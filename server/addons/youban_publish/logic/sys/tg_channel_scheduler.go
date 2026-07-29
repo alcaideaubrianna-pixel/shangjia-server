@@ -153,13 +153,6 @@ func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) er
 		if waitingPrevious {
 			continue
 		}
-		waitingVerify, err := s.collectTelegramJobHasPendingVerifyContinuation(ctx, job)
-		if err != nil {
-			return err
-		}
-		if waitingVerify {
-			continue
-		}
 		queued, err := s.dispatchTelegramJob(ctx, job)
 		if err != nil {
 			return err
@@ -261,7 +254,10 @@ func telegramSchedulerCollectPredecessorCondition() string {
 		  AND pj.collect_source_chat_id = j.collect_source_chat_id
 		  AND pj.collect_source_message_id > 0
 		  AND pj.collect_source_message_id < j.collect_source_message_id
-		  AND pj.status IN ('pending', 'sending', 'failed_retry')
+		  AND (
+			pj.status IN ('pending', 'sending')
+			OR (pj.status = 'failed_retry' AND (pj.next_retry_at IS NULL OR pj.next_retry_at <= NOW()))
+		  )
 		  AND ((j.channel_id > 0 AND pj.channel_id = j.channel_id) OR (j.channel_id <= 0 AND pj.target_chat_id = j.target_chat_id))
 	))`
 }

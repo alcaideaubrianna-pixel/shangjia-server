@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,13 +16,18 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
+	"hotgo/addons/youban_publish/internal/model/entity"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
-func (s *sSysPublish) CollectReviewList(ctx context.Context, in *sysin.CollectReviewListInp) (list []*sysin.CollectReviewModel, totalCount int, err error) {
+type collectReviewCursor struct {
+	Id int64 `json:"id"`
+}
+
+func (s *sSysPublish) CollectReviewList(ctx context.Context, in *sysin.CollectReviewListInp) (res *sysin.CollectReviewPageModel, err error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	if in == nil {
 		in = &sysin.CollectReviewListInp{}
@@ -46,18 +52,148 @@ func (s *sSysPublish) CollectReviewList(ctx context.Context, in *sysin.CollectRe
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
 		mod = mod.WhereLike("r.raw_text", "%"+keyword+"%")
 	}
-	if totalCount, err = mod.Count(); err != nil {
-		return nil, 0, gerror.Wrap(err, "统计采集审核失败")
+	if cursor, cursorErr := decodeCollectReviewCursor(in.Cursor); cursorErr != nil {
+		return nil, cursorErr
+	} else if cursor != nil {
+		mod = mod.Where("r.id < ?", cursor.Id)
+	}
+	perPage := in.PerPage
+	if perPage <= 0 {
+		perPage = 20
+	}
+	if perPage > 100 {
+		perPage = 100
 	}
 	fields := "r.*,s.title AS source_title,s.source_type,s.source_username,rule.name AS rule_name," +
 		"CASE s.source_type WHEN 'account' THEN COALESCE(NULLIF(ta.display_name,''),NULLIF(ta.telegram_username,''),NULLIF(s.source_username,''),s.source_chat_id) WHEN 'bot' THEN COALESCE(NULLIF(b.bot_name,''),NULLIF(b.bot_username,''),NULLIF(s.source_username,''),s.source_chat_id) WHEN 'follow' THEN COALESCE(NULLIF(fa.nickname,''),NULLIF(fa.username,''),NULLIF(s.source_username,''),s.source_chat_id) ELSE COALESCE(NULLIF(s.title,''),s.source_chat_id) END AS source_display_name"
-	if err = mod.Fields(fields).Page(in.Page, in.PerPage).OrderDesc("r.id").Scan(&list); err != nil {
-		return nil, 0, gerror.Wrap(err, "获取采集审核失败")
+	list := make([]*sysin.CollectReviewModel, 0, perPage+1)
+	if err = mod.Fields(fields).OrderDesc("r.id").Limit(perPage + 1).Scan(&list); err != nil {
+		return nil, gerror.Wrap(err, "获取采集审核失败")
+	}
+	hasMore := len(list) > perPage
+	if hasMore {
+		list = list[:perPage]
 	}
 	if err = s.fillCollectReviewTargetChannelNames(ctx, list, account.TenantId); err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-	return
+	if err = s.fillCollectReviewMediaFromEvents(ctx, list); err != nil {
+		return nil, err
+	}
+	nextCursor := ""
+	if hasMore && len(list) > 0 {
+		nextCursor = encodeCollectReviewCursor(list[len(list)-1].Id)
+	}
+	return &sysin.CollectReviewPageModel{List: list, HasMore: hasMore, NextCursor: nextCursor}, nil
+}
+
+func encodeCollectReviewCursor(id int64) string {
+	if id <= 0 {
+		return ""
+	}
+	payload, err := json.Marshal(collectReviewCursor{Id: id})
+	if err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(payload)
+}
+
+func decodeCollectReviewCursor(raw string) (*collectReviewCursor, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, gerror.New("采集审核游标不合法")
+	}
+	var cursor collectReviewCursor
+	if err = json.Unmarshal(payload, &cursor); err != nil || cursor.Id <= 0 {
+		return nil, gerror.New("采集审核游标不合法")
+	}
+	return &cursor, nil
+}
+
+func (s *sSysPublish) fillCollectReviewMediaFromEvents(ctx context.Context, list []*sysin.CollectReviewModel) error {
+	eventIDs := make([]int64, 0, len(list))
+	for _, review := range list {
+		if review != nil && review.EventId > 0 {
+			eventIDs = append(eventIDs, review.EventId)
+		}
+	}
+	eventIDs = uniqueIds(eventIDs)
+	if len(eventIDs) == 0 {
+		return nil
+	}
+	var events []struct {
+		Id                  int64  `json:"id"`
+		MaterialRole        string `json:"materialRole"`
+		MaterialParentEvent int64  `json:"materialParentEventId"`
+	}
+	if err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Fields("id,material_role,material_parent_event_id").
+		WhereIn("id", eventIDs).
+		Scan(&events); err != nil {
+		return gerror.Wrap(err, "读取审核资料角色失败")
+	}
+	eventRoles := make(map[int64]string, len(events))
+	verifyEventIDs := make([]int64, 0)
+	verifyEventByParent := make(map[int64]int64)
+	for _, event := range events {
+		eventRoles[event.Id] = strings.TrimSpace(event.MaterialRole)
+	}
+	var verifyEvents []struct {
+		Id                  int64 `json:"id"`
+		MaterialParentEvent int64 `json:"materialParentEventId"`
+	}
+	if err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Fields("id,material_parent_event_id").
+		Where("material_role", collectMaterialRoleVerify).
+		WhereIn("material_parent_event_id", eventIDs).
+		Scan(&verifyEvents); err != nil {
+		return gerror.Wrap(err, "读取审核验证资料事件失败")
+	}
+	for _, event := range verifyEvents {
+		verifyEventIDs = append(verifyEventIDs, event.Id)
+		verifyEventByParent[event.MaterialParentEvent] = event.Id
+	}
+	allEventIDs := append(append([]int64{}, eventIDs...), verifyEventIDs...)
+	var mediaRows []*entity.YoubanPublishCollectEventMedia
+	if err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		WhereIn("event_id", uniqueIds(allEventIDs)).
+		OrderAsc("sort_index").OrderAsc("id").Scan(&mediaRows); err != nil {
+		return gerror.Wrap(err, "读取审核媒体失败")
+	}
+	mediaByEvent := make(map[int64][]*entity.YoubanPublishCollectEventMedia)
+	for _, row := range mediaRows {
+		if row != nil {
+			mediaByEvent[row.EventId] = append(mediaByEvent[row.EventId], row)
+		}
+	}
+	for _, review := range list {
+		if review == nil {
+			continue
+		}
+		items := make([]collectMediaItem, 0)
+		role := eventRoles[review.EventId]
+		if role != collectMaterialRoleVerify {
+			role = collectMaterialRoleDisplay
+		}
+		items = append(items, collectMediaRowsToItems(mediaByEvent[review.EventId], role)...)
+		if verifyEventID := verifyEventByParent[review.EventId]; verifyEventID > 0 {
+			items = append(items, collectMediaRowsToItems(mediaByEvent[verifyEventID], collectMaterialRoleVerify)...)
+		}
+		review.Media = make([]*sysin.CollectReviewMediaModel, 0, len(items))
+		for _, item := range items {
+			review.Media = append(review.Media, &sysin.CollectReviewMediaModel{
+				Type: item.Type, Purpose: item.Purpose, FileId: item.FileId,
+				FileUrl: item.FileUrl, StoragePath: item.StoragePath,
+				PosterUrl: item.PosterUrl, MetaJson: item.MetaJson,
+			})
+		}
+		review.MediaCount = len(items)
+	}
+	return nil
 }
 
 func (s *sSysPublish) fillCollectReviewTargetChannelNames(ctx context.Context, list []*sysin.CollectReviewModel, tenantId int64) error {
@@ -320,10 +456,12 @@ func (s *sSysPublish) approveCollectReview(ctx context.Context, reviewId int64, 
 	}
 	content.RawText = strings.TrimSpace(review["raw_text"].String())
 	content.NormalizedText = normalizeCollectText(content.RawText)
-	content.MediaJSON = review["media_json"].String()
-	content.MediaCount = review["media_count"].Int()
 	content.TextHash = collectHash(content.NormalizedText)
-	content.DedupeKey = collectHash(content.NormalizedText + ":" + collectMediaSignature(content.MediaJSON))
+	content, err = s.canonicalCollectProfileMedia(ctx, event, content)
+	if err != nil {
+		_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())
+		return gerror.Wrap(err, "整理审核通过媒体失败")
+	}
 	profileId := dispatch["profile_id"].Int64()
 	if profileId <= 0 {
 		profileId, err = s.upsertCollectProfile(ctx, event, content, rule, review["raw_text"].String())

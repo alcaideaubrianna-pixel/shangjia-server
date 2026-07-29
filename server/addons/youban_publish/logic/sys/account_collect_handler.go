@@ -90,25 +90,18 @@ func (w *accountCollectWorker) handleGotdEditedMessage(ctx context.Context, msg 
 
 func (w *accountCollectWorker) ingestGotdMessage(ctx context.Context, source accountCollectSourceRuntime, msg *tg.Message, chatId string) {
 	message := gotdCollectMessage(w.tgAccountId, source, msg, chatId)
-	eventId, err := w.service.ingestCollectMessage(ctx, message)
+	_, err := w.service.ingestAndProcessCollectMessage(ctx, message)
 	if err != nil {
-		g.Log().Warningf(ctx, "保存账号采集事件失败 source:%d msg:%d err:%+v", source.Id, msg.ID, err)
+		g.Log().Errorf(ctx, "处理账号采集事件失败 source:%d msg:%d err:%+v", source.Id, msg.ID, err)
 		return
-	}
-	if message.SourceGroupedId != "" {
-		w.service.scheduleCollectGroupedEvent(eventId, source.TenantId, source.AccountId)
-		return
-	}
-	if err = w.service.processCollectEvent(ctx, eventId, source.TenantId, source.AccountId); err != nil {
-		g.Log().Warningf(ctx, "处理账号采集事件失败 event:%d source:%d err:%+v", eventId, source.Id, err)
 	}
 }
 
 func gotdCollectMessage(tgAccountId int64, source accountCollectSourceRuntime, msg *tg.Message, chatId string) *CollectMessage {
 	groupedId := gotdMessageGroupedId(msg)
-	uniqueKey := fmt.Sprintf("account:%d:%s:%d", tgAccountId, chatId, msg.ID)
+	uniqueKey := fmt.Sprintf("account:%d:source:%d:%s:%d", tgAccountId, source.Id, chatId, msg.ID)
 	if groupedId != "" {
-		uniqueKey = fmt.Sprintf("account:%d:%s:group:%s", tgAccountId, chatId, groupedId)
+		uniqueKey = fmt.Sprintf("account:%d:source:%d:%s:group:%s", tgAccountId, source.Id, chatId, groupedId)
 	}
 	return &CollectMessage{
 		TenantId:        source.TenantId,
@@ -189,6 +182,7 @@ func gotdCollectMedia(msg *tg.Message, chatId string) []collectMediaItem {
 				AccessHash:    photo.AccessHash,
 				FileReference: photo.FileReference,
 				ThumbSize:     gotdLargestPhotoSizeType(photo),
+				DCID:          photo.DCID,
 			}
 		}
 	case *tg.MessageMediaDocument:
@@ -204,6 +198,8 @@ func gotdCollectMedia(msg *tg.Message, chatId string) []collectMediaItem {
 				AccessHash:    doc.AccessHash,
 				FileReference: doc.FileReference,
 				MimeType:      doc.MimeType,
+				DCID:          doc.DCID,
+				Size:          doc.Size,
 			}
 		}
 	default:
@@ -271,6 +267,8 @@ type gotdCollectMediaMeta struct {
 	FileReference []byte `json:"fileReference"`
 	ThumbSize     string `json:"thumbSize,omitempty"`
 	MimeType      string `json:"mimeType,omitempty"`
+	DCID          int    `json:"dcId,omitempty"`
+	Size          int64  `json:"size,omitempty"`
 }
 
 func collectMessageHasGotdMedia(message *CollectMessage) bool {

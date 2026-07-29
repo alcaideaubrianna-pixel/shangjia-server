@@ -263,7 +263,20 @@ func (s *sSysChat) runTelegramPolling(ctx context.Context) {
 				}
 				tgBot, botErr := s.telegramBot(ctx, botToken)
 				if botErr != nil {
-					g.Log().Warningf(ctx, "初始化Telegram Bot失败 bot:%d err:%+v", bot.Id, botErr)
+					if strings.Contains(strings.ToLower(botErr.Error()), "unauthorized") {
+						_, disableErr := g.DB().Model(chatBotTable).Ctx(ctx).
+							Where("id", bot.Id).
+							Where("status", 1).
+							Data(g.Map{"status": 0, "updated_at": gtime.Now()}).
+							Update()
+						if disableErr != nil {
+							g.Log().Errorf(ctx, "初始化Telegram Bot失败，Token无效且自动禁用失败 bot:%d err:%+v disableErr:%+v", bot.Id, botErr, disableErr)
+						} else {
+							g.Log().Errorf(ctx, "初始化Telegram Bot失败，Token无效或已被撤销，已自动禁用 bot:%d err:%+v", bot.Id, botErr)
+						}
+					} else {
+						g.Log().Warningf(ctx, "初始化Telegram Bot失败 bot:%d err:%+v", bot.Id, botErr)
+					}
 					continue
 				}
 				if err = s.telegramDeleteWebhook(ctx, botToken); err != nil {

@@ -2,8 +2,6 @@ package sys
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -64,6 +62,7 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	go s.runTelegramObserveStatsRefresher(ctx)
 	go s.runTelegramJobRecovery(ctx)
 	go s.runCollectRecovery(ctx)
+	go s.runCollectProcessDispatcher(ctx)
 	go s.runMaterialImportRecovery(ctx)
 	go s.runPublishRecordRetentionCleaner(ctx)
 	go s.runAccountCollectSupervisor(ctx)
@@ -73,131 +72,4 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 		}
 	}()
 	<-ctx.Done()
-}
-
-func (s *sSysPublish) runTelegramRuntime(ctx context.Context) {
-	time.Sleep(2 * time.Second)
-	conf, err := NewSysConfig().GetTelegram(ctx)
-	if err != nil {
-		g.Log().Warningf(ctx, "读取上架插件Telegram配置失败：%+v", err)
-		return
-	}
-	mode := conf.BotRuntimeMode
-	if mode == "" || mode == "auto" {
-		systemMode := g.Cfg().MustGet(ctx, "system.mode", "").String()
-		if systemMode == "" || systemMode == "develop" || systemMode == "testing" || systemMode == "not-set" {
-			mode = "pull"
-		} else {
-			mode = "webhook"
-		}
-	}
-	switch mode {
-	case "pull", "polling":
-		s.runTelegramPolling(ctx)
-	case "webhook":
-		s.setupTelegramWebhooks(ctx)
-		<-ctx.Done()
-	default:
-		g.Log().Warningf(ctx, "未知上架插件Bot运行模式：%s", mode)
-	}
-}
-
-func (s *sSysPublish) runTelegramPolling(ctx context.Context) {
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
-	runningBots := map[string]struct{}{}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			bots, err := s.enabledBots(ctx, -1)
-			if err != nil {
-				g.Log().Warningf(ctx, "读取上架插件Bot失败：%+v", err)
-				continue
-			}
-			for _, item := range bots {
-				if item == nil || item.BotToken == "" {
-					continue
-				}
-				if _, ok := runningBots[item.BotToken]; ok {
-					continue
-				}
-				if _, err = s.telegramBotProfile(ctx, item.BotToken); err != nil {
-					if isTelegramBotUnauthorizedError(err) {
-						if disableErr := s.disableTelegramBot(ctx, item.Id); disableErr != nil {
-							g.Log().Warningf(ctx, "停用无效上架插件Bot失败 bot:%d err:%v", item.Id, disableErr)
-						}
-						g.Log().Warningf(ctx, "上架插件Bot Token无效，已停用 bot:%d err:%v", item.Id, err)
-						continue
-					}
-					g.Log().Warningf(ctx, "校验上架插件Bot失败 bot:%d err:%v", item.Id, err)
-					continue
-				}
-				bot, err := s.telegramBot(ctx, item.BotToken)
-				if err != nil {
-					g.Log().Warningf(ctx, "初始化上架插件Bot失败 bot:%d err:%+v", item.Id, err)
-					continue
-				}
-				if err = s.telegramDeleteWebhook(ctx, item.BotToken); err != nil {
-					g.Log().Infof(ctx, "清理上架插件Bot webhook失败，继续启动Polling bot:%d err:%+v", item.Id, err)
-				}
-				runningBots[item.BotToken] = struct{}{}
-				go bot.Start(ctx)
-			}
-		}
-	}
-}
-
-func (s *sSysPublish) setupTelegramWebhooks(ctx context.Context) {
-	conf, err := NewSysConfig().GetTelegram(ctx)
-	if err != nil {
-		g.Log().Warningf(ctx, "读取上架插件Telegram配置失败：%+v", err)
-		return
-	}
-	if conf.WebhookBaseUrl == "" {
-		g.Log().Warning(ctx, "上架插件Webhook Base URL未配置，跳过自动setWebhook")
-		return
-	}
-	bots, err := s.enabledBots(ctx, -1)
-	if err != nil {
-		g.Log().Warningf(ctx, "读取上架插件Bot失败：%+v", err)
-		return
-	}
-	for _, item := range bots {
-		if item == nil || item.BotToken == "" {
-			continue
-		}
-		webhookURL := fmt.Sprintf("%s/api/youban_publish/telegram/webhook?botId=%d", conf.WebhookBaseUrl, item.Id)
-		if err = s.telegramSetWebhook(ctx, item.BotToken, webhookURL); err != nil {
-			if isTelegramBotUnauthorizedError(err) {
-				if disableErr := s.disableTelegramBot(ctx, item.Id); disableErr != nil {
-					g.Log().Warningf(ctx, "停用无效上架插件Bot失败 bot:%d err:%v", item.Id, disableErr)
-				}
-				g.Log().Warningf(ctx, "上架插件Bot Token无效，已停用 bot:%d err:%v", item.Id, err)
-				continue
-			}
-			g.Log().Warningf(ctx, "设置上架插件Bot webhook失败 bot:%d err:%v", item.Id, err)
-		}
-	}
-}
-
-func (s *sSysPublish) disableTelegramBot(ctx context.Context, botId int64) error {
-	if botId <= 0 {
-		return nil
-	}
-	_, err := g.DB().Model(publishBotTable).Safe().Ctx(ctx).
-		Where("id", botId).
-		WhereNull("deleted_at").
-		Data(g.Map{"status": 2, "updated_at": time.Now()}).
-		Update()
-	return err
-}
-
-func isTelegramBotUnauthorizedError(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "unauthorized") || strings.Contains(message, "invalid token")
 }

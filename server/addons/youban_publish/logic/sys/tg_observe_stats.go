@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"strings"
 	"time"
 
@@ -14,12 +16,23 @@ import (
 )
 
 func (s *sSysPublish) runTelegramObserveStatsRefresher(ctx context.Context) {
-	time.Sleep(5 * time.Second)
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return
+	case <-timer.C:
+	}
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		if err := s.refreshTelegramObserveStats(ctx); err != nil {
-			g.Log().Warningf(ctx, "刷新TG推送观测统计失败：%+v", err)
+			if ctx.Err() == nil && !isExpectedTelegramObserveShutdownError(err) {
+				g.Log().Warningf(ctx, "刷新TG推送观测统计失败：%+v", err)
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -27,6 +40,18 @@ func (s *sSysPublish) runTelegramObserveStatsRefresher(ctx context.Context) {
 		case <-ticker.C:
 		}
 	}
+}
+
+func isExpectedTelegramObserveShutdownError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, sql.ErrTxDone) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "transaction has already been committed or rolled back") ||
+		strings.Contains(message, "context canceled")
 }
 
 func (s *sSysPublish) refreshTelegramObserveStats(ctx context.Context) error {

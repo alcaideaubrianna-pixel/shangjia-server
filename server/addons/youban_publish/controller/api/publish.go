@@ -240,6 +240,20 @@ func (c *cPublishAdmin) BotList(ctx context.Context, req *publish.AdminBotListRe
 	return
 }
 
+func (c *cPublishAdmin) BotChannelCacheList(ctx context.Context, req *publish.AdminBotChannelCacheListReq) (res *publish.AdminBotChannelCacheListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminBotChannelCacheList(ctx, &req.BotChannelCacheListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.BotChannelCacheModel{}
+	}
+	res = new(publish.AdminBotChannelCacheListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
 func (c *cPublishAdmin) BotCreate(ctx context.Context, req *publish.AdminBotCreateReq) (res *publish.AdminBotCreateRes, err error) {
 	data, err := service.SysPublish().AdminBotCreate(ctx, &req.BotCreateInp)
 	if err != nil {

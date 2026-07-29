@@ -83,14 +83,6 @@ func (c *cPublish) CollectSourceHistoryStart(ctx context.Context, req *publish.C
 	return &publish.CollectSourceHistoryStartRes{CollectHistoryTaskModel: data}, nil
 }
 
-func (c *cPublish) CollectSourceTrigger(ctx context.Context, req *publish.CollectSourceTriggerReq) (res *publish.CollectSourceTriggerRes, err error) {
-	data, err := service.SysPublish().CollectSourceTrigger(ctx, &req.CollectSourceTriggerInp)
-	if err != nil {
-		return nil, err
-	}
-	return &publish.CollectSourceTriggerRes{CollectSourceTriggerModel: data}, nil
-}
-
 func (c *cPublish) CollectSourceReset(ctx context.Context, req *publish.CollectSourceResetReq) (res *publish.CollectSourceResetRes, err error) {
 	data, err := service.SysPublish().CollectSourceReset(ctx, &req.CollectSourceResetInp)
 	if err != nil {
@@ -177,11 +169,28 @@ func (c *cPublish) CollectEventClear(ctx context.Context, req *publish.CollectEv
 	return &publish.CollectEventClearRes{}, nil
 }
 
-func (c *cPublish) CollectEventProcess(ctx context.Context, req *publish.CollectEventProcessReq) (res *publish.CollectEventProcessRes, err error) {
-	if err = service.SysPublish().CollectEventProcess(ctx, &req.CollectEventProcessInp); err != nil {
+func (c *cPublish) CollectEventReprocess(ctx context.Context, req *publish.CollectEventReprocessReq) (res *publish.CollectEventReprocessRes, err error) {
+	data, err := service.SysPublish().CollectEventReprocess(ctx, &req.CollectEventReprocessInp)
+	if err != nil {
 		return nil, err
 	}
-	return &publish.CollectEventProcessRes{}, nil
+	return &publish.CollectEventReprocessRes{CollectEventReprocessModel: data}, nil
+}
+
+func (c *cPublish) CollectMaterialDiagnose(ctx context.Context, req *publish.CollectMaterialDiagnoseReq) (res *publish.CollectMaterialDiagnoseRes, err error) {
+	data, err := service.SysPublish().CollectMaterialDiagnose(ctx, &req.CollectMaterialDiagnoseInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.CollectMaterialDiagnoseRes{CollectMaterialDiagnoseModel: data}, nil
+}
+
+func (c *cPublish) CollectMediaBenchmark(ctx context.Context, req *publish.CollectMediaBenchmarkReq) (res *publish.CollectMediaBenchmarkRes, err error) {
+	data, err := service.SysPublish().CollectMediaBenchmark(ctx, &req.CollectMediaBenchmarkInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.CollectMediaBenchmarkRes{CollectMediaBenchmarkModel: data}, nil
 }
 
 func (c *cPublish) CollectContentList(ctx context.Context, req *publish.CollectContentListReq) (res *publish.CollectContentListRes, err error) {
@@ -207,17 +216,17 @@ func (c *cPublish) CollectContentView(ctx context.Context, req *publish.CollectC
 }
 
 func (c *cPublish) CollectReviewList(ctx context.Context, req *publish.CollectReviewListReq) (res *publish.CollectReviewListRes, err error) {
-	list, totalCount, err := service.SysPublish().CollectReviewList(ctx, &req.CollectReviewListInp)
+	data, err := service.SysPublish().CollectReviewList(ctx, &req.CollectReviewListInp)
 	if err != nil {
 		return nil, err
 	}
-	if list == nil {
-		list = []*sysin.CollectReviewModel{}
+	if data == nil {
+		data = &sysin.CollectReviewPageModel{}
 	}
-	res = new(publish.CollectReviewListRes)
-	res.List = list
-	res.PageRes.Pack(req, totalCount)
-	return
+	if data.List == nil {
+		data.List = []*sysin.CollectReviewModel{}
+	}
+	return &publish.CollectReviewListRes{CollectReviewPageModel: data}, nil
 }
 
 func (c *cPublish) CollectReviewAction(ctx context.Context, req *publish.CollectReviewActionReq) (res *publish.CollectReviewActionRes, err error) {
@@ -225,4 +234,18 @@ func (c *cPublish) CollectReviewAction(ctx context.Context, req *publish.Collect
 		return nil, err
 	}
 	return &publish.CollectReviewActionRes{}, nil
+}
+
+func (c *cPublish) CollectReviewEdit(ctx context.Context, req *publish.CollectReviewEditReq) (res *publish.CollectReviewEditRes, err error) {
+	if err = service.SysPublish().CollectReviewEdit(ctx, &req.CollectReviewEditInp); err != nil {
+		return nil, err
+	}
+	return &publish.CollectReviewEditRes{}, nil
+}
+
+func (c *cPublish) CollectReviewDelete(ctx context.Context, req *publish.CollectReviewDeleteReq) (res *publish.CollectReviewDeleteRes, err error) {
+	if err = service.SysPublish().CollectReviewDelete(ctx, &req.IdsInp); err != nil {
+		return nil, err
+	}
+	return &publish.CollectReviewDeleteRes{}, nil
 }

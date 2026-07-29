@@ -31,6 +31,28 @@ type CollectMessage struct {
 	ReceivedAt      *gtime.Time
 }
 
+func (s *sSysPublish) ingestAndProcessCollectMessage(ctx context.Context, message *CollectMessage) (int64, error) {
+	eventId, err := s.ingestCollectMessage(ctx, message)
+	if err != nil {
+		return 0, err
+	}
+	if strings.TrimSpace(message.SourceGroupedId) != "" {
+		g.Log().Infof(ctx, "采集消息已入库，等待媒体组聚合 eventId:%d sourceId:%d sourceMessageId:%d groupedId:%s media:%d", eventId, message.SourceId, message.SourceMessageId, message.SourceGroupedId, len(message.Media))
+		s.scheduleCollectGroupedEvent(eventId, message.SourceId, message.TenantId, message.AccountId)
+		return eventId, nil
+	}
+	if err = s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
+		EventId:   eventId,
+		SourceId:  message.SourceId,
+		TenantId:  message.TenantId,
+		AccountId: message.AccountId,
+	}, collectMaterialGroupingDelay); err != nil {
+		return eventId, err
+	}
+	g.Log().Infof(ctx, "采集消息已入库并投递处理 eventId:%d sourceId:%d sourceMessageId:%d media:%d", eventId, message.SourceId, message.SourceMessageId, len(message.Media))
+	return eventId, nil
+}
+
 func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *CollectMessage) (int64, error) {
 	if message == nil {
 		return 0, gerror.New("采集消息不能为空")
@@ -197,6 +219,8 @@ func collectMessageMediaJSON(media []collectMediaItem) (string, int) {
 		item.FileUrl = strings.TrimSpace(item.FileUrl)
 		item.StoragePath = strings.TrimSpace(item.StoragePath)
 		item.PosterUrl = strings.TrimSpace(item.PosterUrl)
+		item.FileMd5 = strings.TrimSpace(item.FileMd5)
+		item.FilePhash = strings.TrimSpace(item.FilePhash)
 		item.MetaJson = strings.TrimSpace(item.MetaJson)
 		if item.Type == "" || collectMediaSourceKey(item) == "" {
 			continue

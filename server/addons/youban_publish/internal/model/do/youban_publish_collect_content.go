@@ -21,7 +21,6 @@ type YoubanPublishCollectContent struct {
 	RawText        any         //
 	NormalizedText any         //
 	MediaCount     any         //
-	MediaSignature any         //
 	MediaJson      any         //
 	TextHash       any         //
 	DedupeKey      any         //

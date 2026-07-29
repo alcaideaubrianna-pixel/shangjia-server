@@ -30,14 +30,6 @@ func TestCollectQueueShardSeparatesSources(t *testing.T) {
 	}
 }
 
-func TestCollectEventOrderDoesNotBlockOnDispatched(t *testing.T) {
-	for _, status := range collectEventOrderBlockingStatuses() {
-		if status == "dispatched" {
-			t.Fatal("dispatched events must not block later collection events")
-		}
-	}
-}
-
 func TestExpectedTelegramObserveShutdownError(t *testing.T) {
 	if !isExpectedTelegramObserveShutdownError(context.Canceled) {
 		t.Fatal("context cancellation should be treated as an expected shutdown")

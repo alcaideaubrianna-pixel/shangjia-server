@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	collectGroupedEventDelay     = 3 * time.Second
+	collectGroupedEventDelay     = collectMaterialGroupingDelay
 	collectSourceCacheVersionKey = "youban_publish:collect:sources:version"
 	collectSourceCacheTTL        = 30 * time.Second
 )
@@ -146,6 +146,8 @@ type collectMediaItem struct {
 	FileUrl     string `json:"fileUrl,omitempty"`
 	StoragePath string `json:"storagePath,omitempty"`
 	PosterUrl   string `json:"posterUrl,omitempty"`
+	FileMd5     string `json:"fileMd5,omitempty"`
+	FilePhash   string `json:"filePhash,omitempty"`
 	MetaJson    string `json:"metaJson,omitempty"`
 }
 
@@ -196,12 +198,18 @@ func collectMediaJSONWithPurpose(mediaJSON string, purpose string) string {
 	if err := json.Unmarshal([]byte(mediaJSON), &items); err != nil {
 		return mediaJSON
 	}
+	filtered := make([]collectMediaItem, 0, len(items))
 	for index := range items {
-		if strings.TrimSpace(items[index].Purpose) == "" {
+		itemPurpose := strings.TrimSpace(items[index].Purpose)
+		if itemPurpose != "" && !strings.EqualFold(itemPurpose, purpose) {
+			continue
+		}
+		if itemPurpose == "" {
 			items[index].Purpose = purpose
 		}
+		filtered = append(filtered, items[index])
 	}
-	data, err := json.Marshal(items)
+	data, err := json.Marshal(filtered)
 	if err != nil {
 		return mediaJSON
 	}

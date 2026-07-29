@@ -2365,9 +2365,11 @@ func (s *sSysSync) syncMedia(ctx context.Context, source gdb.DB, cfg gdb.Record,
 		storagePath := feiNiuImportedMediaStoragePath(item)
 		posterURL, posterStoragePath := feiNiuImportedVideoPoster(item, mediaType)
 		perceptualHash := item["perceptual_hash"].String()
-		assetResult, processErr := publishservice.SysPublish().ProcessStoredMediaAssets(ctx, &psysin.StoredMediaAssetsInp{
+		assetResult, processErr := publishservice.SysPublish().ProcessMediaAssets(ctx, &psysin.MediaAssetsInp{
 			MediaType: mediaType,
 			LocalPath: item["local_file_path"].String(),
+			FileURL:   fileURL,
+			PosterURL: posterURL,
 			FileName:  mediaName(item),
 		})
 		if processErr != nil {
@@ -2380,23 +2382,6 @@ func (s *sSysSync) syncMedia(ctx context.Context, source gdb.DB, cfg gdb.Record,
 			if assetResult.PosterUrl != "" {
 				posterURL = assetResult.PosterUrl
 				posterStoragePath = assetResult.PosterStoragePath
-			}
-		}
-		if perceptualHash == "" {
-			remoteAssets, remoteErr := publishservice.SysPublish().ProcessRemoteMediaAssets(ctx, &psysin.RemoteMediaAssetsInp{
-				MediaType: mediaType,
-				FileURL:   fileURL,
-				PosterURL: posterURL,
-			})
-			if remoteErr != nil {
-				logURL := fileURL
-				if logURL == "" {
-					logURL = posterURL
-				}
-				g.Log().Warningf(ctx, "远程处理 FeiNiu 媒体感知哈希失败 media:%s url:%s err:%+v", mediaType, logURL, remoteErr)
-			}
-			if remoteAssets != nil && remoteAssets.Processed {
-				perceptualHash = remoteAssets.PerceptualHash
 			}
 		}
 		data := g.Map{"tenant_id": cfg["target_tenant_id"].Int64(), "merchant_id": cfg["target_tenant_id"].Int64(), "account_id": accountId, "profile_id": profileId, "attachment_id": 0, "media_type": mediaType, "purpose": purpose, "name": mediaName(item), "file_url": fileURL, "original_file_url": fileURL, "poster_url": posterURL, "poster_storage_path": posterStoragePath, "storage_path": storagePath, "original_storage_path": storagePath, "mime_type": item["mime_type"].String(), "md5": item["binary_md5"].String(), "perceptual_hash": perceptualHash, "tg_file_id": "", "tg_cache_status": "invalid", "size": item["file_size"].Int64(), "sort_index": i + 1, "status": 1, "created_at": now, "updated_at": now}

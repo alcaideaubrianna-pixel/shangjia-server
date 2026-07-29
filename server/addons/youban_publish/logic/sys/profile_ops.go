@@ -440,6 +440,11 @@ func (s *sSysPublish) ServerProfileReview(ctx context.Context, in *sysin.Profile
 	}).Update(); err != nil {
 		return gerror.Wrap(err, "审核资料失败")
 	}
+	for _, id := range ids {
+		if err = s.syncProfileNoteIndex(ctx, id); err != nil {
+			return err
+		}
+	}
 	iservice.SysContent().ClearHomeProfileCardsCache(ctx)
 	return nil
 }

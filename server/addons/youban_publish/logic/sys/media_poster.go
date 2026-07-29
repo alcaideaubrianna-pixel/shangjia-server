@@ -38,7 +38,7 @@ func posterStoragePath(attachment *basesysin.AttachmentListModel) string {
 	if attachment == nil {
 		return ""
 	}
-	return attachment.Path
+	return normalizeStoredMediaPath(attachment.Path)
 }
 
 func uploadVideoPoster(ctx context.Context, upload *ghttp.UploadFile) (*basesysin.AttachmentListModel, error) {

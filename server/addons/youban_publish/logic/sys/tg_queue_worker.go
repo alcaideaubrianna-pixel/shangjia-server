@@ -203,7 +203,7 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 		}
 		defer func() { _ = distributedLock.Unlock(context.Background()) }()
 	}
-	return s.processCollectEvent(ctx, payload.EventId, payload.TenantId, payload.AccountId)
+	return s.processCollectSourceWindow(ctx, payload)
 }
 
 func (s *sSysPublish) handleImportMatchTask(ctx context.Context, task *asynq.Task) error {

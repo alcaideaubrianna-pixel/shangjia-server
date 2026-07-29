@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -12,6 +13,7 @@ import (
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/contexts"
+	"hotgo/internal/model/input/form"
 )
 
 func (s *sSysPublish) AdminChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error) {
@@ -28,18 +30,37 @@ func (s *sSysPublish) AdminChannelList(ctx context.Context, in *sysin.ChannelLis
 	in.TenantId = account.TenantId
 	base := s.channelBaseModel(ctx)
 	base = applyChannelFilters(base, in)
-	totalCount, err = base.Clone().Count()
-	if err != nil {
-		return nil, 0, gerror.Wrap(err, "获取频道总数失败")
-	}
-	if err = base.Fields("c.*,ta.display_name AS tg_account_name").
-		Page(in.Page, in.PerPage).
-		OrderDesc("c.id").
-		Scan(&list); err != nil {
-		return nil, 0, gerror.Wrap(err, "获取频道列表失败")
-	}
-	if list == nil {
-		list = []*sysin.ChannelModel{}
+	if in.TgAccountId <= 0 && strings.TrimSpace(in.PublishDirection) == "" {
+		if err = base.Fields("c.*,ta.display_name AS tg_account_name").
+			OrderDesc("c.id").Scan(&list); err != nil {
+			return nil, 0, gerror.Wrap(err, "获取频道列表失败")
+		}
+		list = deduplicateChannelsByTargetChatId(list)
+		totalCount = len(list)
+		_, perPage, offset := form.CalPage(in.Page, in.PerPage)
+		if offset >= len(list) {
+			list = []*sysin.ChannelModel{}
+		} else {
+			end := offset + perPage
+			if end > len(list) {
+				end = len(list)
+			}
+			list = list[offset:end]
+		}
+	} else {
+		totalCount, err = base.Clone().Count()
+		if err != nil {
+			return nil, 0, gerror.Wrap(err, "获取频道总数失败")
+		}
+		if err = base.Fields("c.*,ta.display_name AS tg_account_name").
+			Page(in.Page, in.PerPage).
+			OrderDesc("c.id").
+			Scan(&list); err != nil {
+			return nil, 0, gerror.Wrap(err, "获取频道列表失败")
+		}
+		if list == nil {
+			list = []*sysin.ChannelModel{}
+		}
 	}
 	if err = s.applyChannelTenantUsernames(ctx, list); err != nil {
 		return nil, 0, err
@@ -47,6 +68,31 @@ func (s *sSysPublish) AdminChannelList(ctx context.Context, in *sysin.ChannelLis
 	applyChannelBotIds(list)
 	applyChannelBotPermissionSummary(list)
 	return list, totalCount, nil
+}
+
+func deduplicateChannelsByTargetChatId(list []*sysin.ChannelModel) []*sysin.ChannelModel {
+	seen := make(map[string]int, len(list))
+	result := make([]*sysin.ChannelModel, 0, len(list))
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		key := strings.TrimSpace(item.TargetChatId)
+		if key == "" {
+			key = fmt.Sprintf("id:%d", item.Id)
+		}
+		index, exists := seen[key]
+		if exists {
+			current := result[index]
+			if current.Status != 1 && item.Status == 1 {
+				result[index] = item
+			}
+			continue
+		}
+		seen[key] = len(result)
+		result = append(result, item)
+	}
+	return result
 }
 
 func (s *sSysPublish) MyChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error) {

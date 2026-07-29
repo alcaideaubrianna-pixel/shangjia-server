@@ -106,7 +106,7 @@ func backfillMediaPHash(ctx context.Context, row mediaPHashMissingRow) error {
 	return nil
 }
 
-func processMissingMediaPHash(ctx context.Context, row mediaPHashMissingRow) (*sysin.RemoteMediaAssetsModel, error) {
+func processMissingMediaPHash(ctx context.Context, row mediaPHashMissingRow) (*sysin.MediaAssetsModel, error) {
 	mediaType := strings.ToLower(strings.TrimSpace(row.MediaType))
 	candidates := make([]mediaPHashCandidate, 0, 4)
 	if mediaType == "video" {
@@ -141,21 +141,12 @@ func processMissingMediaPHash(ctx context.Context, row mediaPHashMissingRow) (*s
 	return nil, gerror.New("媒体没有可用的远程地址或本地路径")
 }
 
-func processMissingMediaCandidate(ctx context.Context, item mediaPHashCandidate) (*sysin.RemoteMediaAssetsModel, error) {
-	if item.localPath != "" {
-		stored, err := service.SysPublish().ProcessStoredMediaAssets(ctx, &sysin.StoredMediaAssetsInp{
-			MediaType: item.mediaType, LocalPath: item.localPath,
-		})
-		if err != nil {
-			return nil, err
-		}
-		return &sysin.RemoteMediaAssetsModel{Processed: stored.Processed, PerceptualHash: stored.PerceptualHash}, nil
-	}
-	if item.fileURL == "" {
+func processMissingMediaCandidate(ctx context.Context, item mediaPHashCandidate) (*sysin.MediaAssetsModel, error) {
+	if item.localPath == "" && item.fileURL == "" {
 		return nil, gerror.New("媒体候选地址为空")
 	}
-	return service.SysPublish().ProcessRemoteMediaAssets(ctx, &sysin.RemoteMediaAssetsInp{
-		MediaType: item.mediaType, FileURL: item.fileURL, PosterURL: item.posterURL,
+	return service.SysPublish().ProcessMediaAssets(ctx, &sysin.MediaAssetsInp{
+		MediaType: item.mediaType, LocalPath: item.localPath, FileURL: item.fileURL, PosterURL: item.posterURL,
 	})
 }
 
@@ -171,14 +162,10 @@ func downloadableMediaSource(value string) string {
 	return value
 }
 
-func processStoredMissingPoster(ctx context.Context, posterPath string) (*sysin.RemoteMediaAssetsModel, error) {
-	stored, err := service.SysPublish().ProcessStoredMediaAssets(ctx, &sysin.StoredMediaAssetsInp{
+func processStoredMissingPoster(ctx context.Context, posterPath string) (*sysin.MediaAssetsModel, error) {
+	return service.SysPublish().ProcessMediaAssets(ctx, &sysin.MediaAssetsInp{
 		MediaType: "image", LocalPath: posterPath,
 	})
-	if err != nil {
-		return nil, err
-	}
-	return &sysin.RemoteMediaAssetsModel{Processed: stored.Processed, PerceptualHash: stored.PerceptualHash}, nil
 }
 
 func isRemoteMediaSource(value string) bool {

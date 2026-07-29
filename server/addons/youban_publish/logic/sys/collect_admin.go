@@ -113,6 +113,7 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 	}
 	if err == nil {
 		s.refreshCollectEventRulesCache(ctx)
+		s.refreshCollectSourceCache(ctx)
 	}
 	return id, err
 }
@@ -125,14 +126,21 @@ func (s *sSysPublish) CollectSourceDelete(ctx context.Context, in *sysin.IdsInp)
 	if in == nil || len(in.Ids) == 0 {
 		return gerror.New("请选择采集源")
 	}
+	ids := uniqueIds(in.Ids)
+	for _, sourceId := range ids {
+		if _, err = s.CollectSourceDown(ctx, &sysin.CollectSourceDownInp{Id: sourceId}); err != nil {
+			return gerror.Wrap(err, "删除采集源前下架资料失败")
+		}
+	}
 	_, err = pdao.YoubanPublishCollectSource.Ctx(ctx).
-		WhereIn("id", uniqueIds(in.Ids)).
+		WhereIn("id", ids).
 		Where("tenant_id", account.TenantId).
 		Where("account_id", account.Id).
 		Data(g.Map{"deleted_at": gtime.Now(), "deleted_by": account.Id}).
 		Update()
 	if err == nil {
 		s.refreshCollectEventRulesCache(ctx)
+		s.refreshCollectSourceCache(ctx)
 	}
 	return gerror.Wrap(err, "删除采集源失败")
 }
@@ -161,8 +169,8 @@ func (s *sSysPublish) CollectSourceStatus(ctx context.Context, in *sysin.Collect
 		WhereNull("deleted_at").
 		Data(data).
 		Update()
-	if err == nil && in.Enabled != 1 {
-		err = s.stopDisabledCollectSourcePipeline(ctx, in.Id, account.TenantId, account.Id)
+	if err == nil {
+		s.refreshCollectSourceCache(ctx)
 	}
 	return gerror.Wrap(err, "更新采集源状态失败")
 }

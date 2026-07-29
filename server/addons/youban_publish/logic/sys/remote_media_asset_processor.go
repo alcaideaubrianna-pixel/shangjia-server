@@ -9,17 +9,15 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
-// ProcessRemoteMediaAssets handles remote media that cannot be opened as a
-// local file. Video similarity uses the remote poster as its visual asset.
-func (s *sSysPublish) ProcessRemoteMediaAssets(ctx context.Context, in *sysin.RemoteMediaAssetsInp) (*sysin.RemoteMediaAssetsModel, error) {
-	res := &sysin.RemoteMediaAssetsModel{}
+func processRemoteMediaAssets(ctx context.Context, in *sysin.MediaAssetsInp) (*sysin.MediaAssetsModel, error) {
+	res := &sysin.MediaAssetsModel{}
 	if in == nil {
 		return res, nil
 	}
 	mediaType := strings.ToLower(strings.TrimSpace(in.MediaType))
 	source := strings.TrimSpace(in.FileURL)
 	if mediaType == "video" {
-		return s.processRemoteVideoAssets(ctx, source, strings.TrimSpace(in.PosterURL))
+		return processRemoteVideoAssets(ctx, source, strings.TrimSpace(in.PosterURL))
 	}
 	if source == "" {
 		return res, nil
@@ -36,8 +34,8 @@ func (s *sSysPublish) ProcessRemoteMediaAssets(ctx context.Context, in *sysin.Re
 	return res, nil
 }
 
-func (s *sSysPublish) processRemoteVideoAssets(ctx context.Context, videoURL string, posterURL string) (*sysin.RemoteMediaAssetsModel, error) {
-	res := &sysin.RemoteMediaAssetsModel{}
+func processRemoteVideoAssets(ctx context.Context, videoURL string, posterURL string) (*sysin.MediaAssetsModel, error) {
+	res := &sysin.MediaAssetsModel{}
 	videoURL = strings.TrimSpace(videoURL)
 	posterURL = strings.TrimSpace(posterURL)
 	if posterURL != "" && !remoteMediaURLIsVideo(posterURL) {

@@ -21,7 +21,6 @@ type YoubanPublishCollectReview struct {
 	DispatchId          any         // 分发记录ID
 	RawText             any         // 原始文本
 	MediaCount          any         // 媒体数量
-	MediaJson           any         // 媒体JSON
 	TargetChannelIdJson any         // 目标频道ID JSON
 	BotIdJson           any         // 推送BOT ID JSON
 	Status              any         // 审核状态

@@ -2,8 +2,8 @@ package sys
 
 import "testing"
 
-func TestMaterialImportMergeCrossPageLeadingUnits(t *testing.T) {
-	newerPage := []*materialImportMessageUnit{
+func TestCollectMaterialUnitsMergeCrossPageLeadingUnits(t *testing.T) {
+	newerPage := []*collectMaterialUnit{
 		{
 			GroupedId: "14277572021261444",
 			MessageId: 96,
@@ -17,7 +17,7 @@ func TestMaterialImportMergeCrossPageLeadingUnits(t *testing.T) {
 		},
 	}
 
-	processable, pending := materialImportSplitLeadingUnits(newerPage)
+	processable, pending := splitCollectMaterialUnits(newerPage)
 	if len(processable) != 0 {
 		t.Fatalf("expected no processable units from newer page, got %d", len(processable))
 	}
@@ -25,7 +25,7 @@ func TestMaterialImportMergeCrossPageLeadingUnits(t *testing.T) {
 		t.Fatalf("expected two pending units from newer page, got %d", len(pending))
 	}
 
-	olderPage := []*materialImportMessageUnit{
+	olderPage := []*collectMaterialUnit{
 		{
 			GroupedId: "14277572021261444",
 			RawText:   "昵称：八方来财324",
@@ -38,12 +38,12 @@ func TestMaterialImportMergeCrossPageLeadingUnits(t *testing.T) {
 			},
 		},
 	}
-	processable, carry := materialImportSplitLeadingUnits(olderPage)
+	processable, carry := splitCollectMaterialUnits(olderPage)
 	if len(carry) != 0 {
 		t.Fatalf("expected no carry units from older page, got %d", len(carry))
 	}
 
-	merged := materialImportMergeAdjacentUnits(append(processable, pending...))
+	merged := mergeCollectMaterialUnits(append(processable, pending...))
 	if len(merged) != 2 {
 		t.Fatalf("expected display unit and verify unit, got %d", len(merged))
 	}

@@ -57,17 +57,22 @@ type CollectSourceListInp struct {
 
 type CollectConfigModel struct {
 	Enabled              int `json:"enabled" dc:"采集总开关"`
+	PushEnabled          int `json:"pushEnabled" dc:"采集推送总开关"`
 	RealtimePushDelaySec int `json:"realtimePushDelaySec" dc:"实时采集推送延迟秒数"`
 }
 
 type CollectConfigSaveInp struct {
-	Enabled              int `json:"enabled" dc:"采集总开关"`
-	RealtimePushDelaySec int `json:"realtimePushDelaySec" dc:"实时采集推送延迟秒数"`
+	Enabled              int  `json:"enabled" dc:"采集总开关"`
+	PushEnabled          *int `json:"pushEnabled" dc:"采集推送总开关"`
+	RealtimePushDelaySec int  `json:"realtimePushDelaySec" dc:"实时采集推送延迟秒数"`
 }
 
 func (in *CollectConfigSaveInp) Filter(ctx context.Context) error {
 	if in.Enabled != 0 {
 		in.Enabled = 1
+	}
+	if in.PushEnabled != nil && *in.PushEnabled != 0 {
+		*in.PushEnabled = 1
 	}
 	if in.RealtimePushDelaySec < 0 {
 		in.RealtimePushDelaySec = 0
@@ -139,10 +144,6 @@ type CollectSourceSaveInp struct {
 
 type CollectSourceHistoryStartInp struct {
 	Id int64 `json:"id" dc:"采集源ID"`
-}
-
-type CollectSourceTriggerInp struct {
-	Id int64 `json:"id" v:"required|min:1#采集源ID不能为空|采集源ID不能为空" dc:"采集源ID"`
 }
 
 type CollectSourceTriggerModel struct {
@@ -347,8 +348,11 @@ func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
 	if len(backupIds) > 0 {
 		in.BackupChannelId = backupIds[0]
 	}
-	if in.DedupeDays <= 0 || in.DedupeDays > 7 {
-		in.DedupeDays = 7
+	if in.DedupeDays < 0 {
+		in.DedupeDays = 0
+	}
+	if in.DedupeDays > 3650 {
+		in.DedupeDays = 3650
 	}
 	if in.Status == 0 {
 		in.Status = 1

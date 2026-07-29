@@ -18,6 +18,9 @@ func RequeueYoubanPublishCollectEvents(ctx context.Context) error {
 	if err := clearLegacyYoubanPublishCollectQueues(ctx); err != nil {
 		return err
 	}
+	if err := RebuildYoubanPublishCollectMaterialGroups(ctx); err != nil {
+		return err
+	}
 	mediaResult, err := g.DB().Model("hg_youban_publish_collect_event_media").Safe().Ctx(ctx).
 		Where("cache_status", "downloading").
 		Data(g.Map{
@@ -30,7 +33,16 @@ func RequeueYoubanPublishCollectEvents(ctx context.Context) error {
 	}
 	result, err := g.DB().Model("hg_youban_publish_collect_event").Safe().Ctx(ctx).
 		Where("status IN (" + collectEventRecoveryStatuses + ")").
-		Data(g.Map{"updated_at": gtime.Now().Add(-time.Minute)}).
+		WhereNull("processed_at").
+		Data(g.Map{
+			"material_role":            "pending",
+			"material_parent_event_id": 0,
+			"material_group_status":    "pending",
+			"status":                   "pending",
+			"error_message":            "",
+			"processed_at":             nil,
+			"updated_at":               gtime.Now().Add(-time.Minute),
+		}).
 		Update()
 	if err != nil {
 		return gerror.Wrap(err, "标记采集事件待恢复失败")
@@ -42,6 +54,61 @@ func RequeueYoubanPublishCollectEvents(ctx context.Context) error {
 	g.Log().Infof(ctx, "采集事件待恢复标记完成 count=%d", rows)
 	mediaRows, _ := mediaResult.RowsAffected()
 	g.Log().Infof(ctx, "采集媒体队列迁移完成 reset=%d", mediaRows)
+	return nil
+}
+
+// RebuildYoubanPublishCollectMaterialGroups retires reviews created by the old
+// realtime verification flow and lets the new delayed grouping flow rebuild them.
+func RebuildYoubanPublishCollectMaterialGroups(ctx context.Context) error {
+	rows, err := g.DB().Model("hg_youban_publish_collect_review").Safe().Ctx(ctx).
+		Fields("id,dispatch_id").
+		Where("status", "pending").
+		All()
+	if err != nil {
+		return gerror.Wrap(err, "读取旧采集审核失败")
+	}
+	now := gtime.Now()
+	for _, row := range rows {
+		if _, err = g.DB().Model("hg_youban_publish_collect_review").Safe().Ctx(ctx).
+			Where("id", row["id"].Int64()).
+			Data(g.Map{
+				"status":        "rejected",
+				"review_reason": "采集分组链路升级，等待重新处理",
+				"reviewed_at":   now,
+				"updated_at":    now,
+			}).Update(); err != nil {
+			return gerror.Wrap(err, "关闭旧采集审核失败")
+		}
+		if dispatchID := row["dispatch_id"].Int64(); dispatchID > 0 {
+			if _, err = g.DB().Model("hg_youban_publish_collect_dispatch").Safe().Ctx(ctx).
+				Where("id", dispatchID).
+				Where("status", "reviewing").
+				Data(g.Map{
+					"status":        "skipped",
+					"error_message": "旧采集分组审核已关闭，等待重新分组",
+					"updated_at":    now,
+				}).Update(); err != nil {
+				return gerror.Wrap(err, "关闭旧采集审核分发失败")
+			}
+		}
+	}
+	result, err := g.DB().Model("hg_youban_publish_collect_event").Safe().Ctx(ctx).
+		Where("status IN (" + collectEventRecoveryStatuses + ")").
+		WhereNull("processed_at").
+		Data(g.Map{
+			"material_role":            "pending",
+			"material_parent_event_id": 0,
+			"material_group_status":    "pending",
+			"status":                   "pending",
+			"error_message":            "",
+			"processed_at":             nil,
+			"updated_at":               now.Add(-time.Minute),
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "重置采集资料组失败")
+	}
+	count, _ := result.RowsAffected()
+	g.Log().Infof(ctx, "采集资料组重建准备完成 reviews=%d events=%d", len(rows), count)
 	return nil
 }
 

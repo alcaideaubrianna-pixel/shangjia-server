@@ -1,9 +1,12 @@
 package sys
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/frame/g"
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 func TestClassifyCollectPublishMediaKeepsVerifyMediaSeparate(t *testing.T) {
@@ -22,13 +25,38 @@ func TestClassifyCollectPublishMediaKeepsVerifyMediaSeparate(t *testing.T) {
 }
 
 func TestCollectMediaJSONWithPurpose(t *testing.T) {
-	mediaJSON := `[{"type":"video","fileId":"video-1"}]`
+	mediaJSON := `[{"type":"photo","purpose":"display","fileId":"photo-1"},{"type":"video","purpose":"verify","fileId":"video-2"}]`
 	got := collectMediaJSONWithPurpose(mediaJSON, "verify")
 
-	if got == mediaJSON {
-		t.Fatal("expected media purpose to be added")
+	if strings.Contains(got, "photo-1") {
+		t.Fatalf("display media must not be included in verify snapshot: %s", got)
 	}
 	if !materialImportHasVerifyMedia(got) {
 		t.Fatalf("media json=%s, expected verify media", got)
+	}
+}
+
+func TestCollectMediaJSONHasPurposeVideo(t *testing.T) {
+	mediaJSON := `[{"type":"video","purpose":"display"},{"type":"video","purpose":"verify"}]`
+
+	if !collectMediaJSONHasVideo(mediaJSON) {
+		t.Fatal("expected any video to be detected")
+	}
+	if !collectMediaJSONHasPurposeVideo(mediaJSON, "verify") {
+		t.Fatal("expected verify video to be detected")
+	}
+	if collectMediaJSONHasPurposeVideo(`[{"type":"video","purpose":"display"}]`, "verify") {
+		t.Fatal("display video must not be treated as verify video")
+	}
+}
+
+func TestShouldRecoverCollectEventWithUnmatchedVerifyVideo(t *testing.T) {
+	row := gdb.Record{
+		"status":        g.NewVar(sysin.CollectEventStatusFailed),
+		"error_message": g.NewVar("验证视频暂未匹配到前序资料，等待前序资料完成处理"),
+	}
+
+	if !shouldRecoverCollectEvent(row) {
+		t.Fatal("expected unmatched verify video event to be recoverable")
 	}
 }

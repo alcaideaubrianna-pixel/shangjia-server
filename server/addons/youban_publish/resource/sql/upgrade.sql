@@ -22,6 +22,9 @@ ALTER TABLE `hg_youban_publish_tg_job`
 ALTER TABLE `hg_youban_publish_tg_channel`
   ADD COLUMN `management_role` varchar(16) NOT NULL DEFAULT 'member' COMMENT '当前TG账号角色：owner/admin/member' AFTER `channel_username`;
 
+ALTER TABLE `hg_youban_publish_channel`
+  ADD COLUMN `bot_permission_status_json` text NOT NULL COMMENT '频道Bot权限检测结果JSON' AFTER `bot_id_json`;
+
 ALTER TABLE `hg_youban_publish_account`
   MODIFY COLUMN `public_follow_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否公开关注';
 
@@ -60,6 +63,10 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_note_index` (
 INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
 SELECT 'youban_publish', 'collect', '采集总开关', 'int', 'collectEnabled', '1', '1', 10, '是否启用采集能力', 0, 1, NOW(), NOW()
 WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_addons_config` WHERE `addon_name`='youban_publish' AND `key`='collectEnabled');
+
+INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
+SELECT 'youban_publish', 'collect', '采集推送总开关', 'int', 'collectPushEnabled', '1', '1', 15, '是否允许采集资料推送到 Telegram 频道', 0, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `hg_sys_addons_config` WHERE `addon_name`='youban_publish' AND `key`='collectPushEnabled');
 
 INSERT INTO `hg_sys_addons_config` (`addon_name`, `group`, `name`, `type`, `key`, `value`, `default_value`, `sort`, `tip`, `is_default`, `status`, `created_at`, `updated_at`)
 SELECT 'youban_publish', 'collect', '实时采集推送延迟', 'int', 'realtimePushDelaySec', '600', '600', 20, '实时采集命中规则后延迟推送的秒数，用于等待媒体组和保持来源顺序', 0, 1, NOW(), NOW()
@@ -512,3 +519,74 @@ ALTER TABLE `hg_youban_publish_tg_job` MODIFY COLUMN `task_id` bigint(20) DEFAUL
 ALTER TABLE `hg_youban_publish_tg_message` MODIFY COLUMN `task_id` bigint(20) DEFAULT NULL COMMENT '旧任务ID，资料索引为空';
 ALTER TABLE `hg_youban_publish_channel_profile` DROP COLUMN IF EXISTS `task_id`;
 DELETE FROM `hg_admin_menu` WHERE `name` = 'youbanPublishTask';
+
+-- 规范化本地媒体存储路径，避免把静态根目录写入业务字段。
+UPDATE `hg_youban_publish_media`
+SET `storage_path` = CASE WHEN `storage_path` LIKE 'resource/public/%' THEN SUBSTRING(`storage_path`, CHAR_LENGTH('resource/public/') + 1) ELSE `storage_path` END,
+    `updated_at` = NOW()
+WHERE `storage_path` LIKE 'resource/public/%';
+
+UPDATE `hg_youban_publish_media`
+SET `poster_storage_path` = CASE WHEN `poster_storage_path` LIKE 'resource/public/%' THEN SUBSTRING(`poster_storage_path`, CHAR_LENGTH('resource/public/') + 1) ELSE `poster_storage_path` END,
+    `updated_at` = NOW()
+WHERE `poster_storage_path` LIKE 'resource/public/%';
+
+UPDATE `hg_youban_publish_media`
+SET `original_storage_path` = CASE WHEN `original_storage_path` LIKE 'resource/public/%' THEN SUBSTRING(`original_storage_path`, CHAR_LENGTH('resource/public/') + 1) ELSE `original_storage_path` END,
+    `updated_at` = NOW()
+WHERE `original_storage_path` LIKE 'resource/public/%';
+
+UPDATE `hg_youban_publish_media`
+SET `edited_storage_path` = CASE WHEN `edited_storage_path` LIKE 'resource/public/%' THEN SUBSTRING(`edited_storage_path`, CHAR_LENGTH('resource/public/') + 1) ELSE `edited_storage_path` END,
+    `updated_at` = NOW()
+WHERE `edited_storage_path` LIKE 'resource/public/%';
+ALTER TABLE `hg_youban_publish_collect_event` ADD KEY `idx_ybp_collect_event_text_hash` (`tenant_id`,`account_id`,`text_hash`,`received_at`,`id`);
+ALTER TABLE `hg_youban_publish_collect_event` ADD KEY `idx_ybp_collect_event_order` (`tenant_id`,`account_id`,`source_id`,`source_chat_id`,`source_message_id`);
+ALTER TABLE `hg_youban_publish_collect_event` ADD COLUMN `material_role` varchar(16) NOT NULL DEFAULT 'pending' COMMENT '资料组角色：pending/display/verify' AFTER `source_unique_key`;
+ALTER TABLE `hg_youban_publish_collect_event` ADD COLUMN `material_parent_event_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '验证资料所属展示事件ID' AFTER `material_role`;
+ALTER TABLE `hg_youban_publish_collect_event` ADD COLUMN `material_group_status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '资料组状态' AFTER `material_parent_event_id`;
+ALTER TABLE `hg_youban_publish_collect_event` ADD KEY `idx_ybp_collect_event_material` (`source_id`,`source_chat_id`,`material_role`,`material_parent_event_id`,`source_message_id`);
+ALTER TABLE `hg_youban_publish_collect_review` DROP COLUMN IF EXISTS `media_json`;
+
+ALTER TABLE `hg_youban_publish_collect_event_media` ADD COLUMN IF NOT EXISTS `download_duration_ms` bigint(20) NOT NULL DEFAULT '0' COMMENT '下载耗时毫秒';
+ALTER TABLE `hg_youban_publish_collect_event_media` ADD COLUMN IF NOT EXISTS `download_bytes` bigint(20) NOT NULL DEFAULT '0' COMMENT '下载字节数';
+ALTER TABLE `hg_youban_publish_collect_event_media` ADD COLUMN IF NOT EXISTS `download_attempts` int(11) NOT NULL DEFAULT '0' COMMENT '下载尝试次数';
+ALTER TABLE `hg_youban_publish_collect_event_media` ADD COLUMN IF NOT EXISTS `cache_hit` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否命中缓存';
+ALTER TABLE `hg_youban_publish_collect_event_media` ADD COLUMN IF NOT EXISTS `download_error_type` varchar(64) NOT NULL DEFAULT '' COMMENT '下载错误分类';
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_media_stat` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架账号ID',
+  `tg_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG账号ID',
+  `source_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集源ID',
+  `event_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '采集事件ID',
+  `status` varchar(32) NOT NULL DEFAULT '' COMMENT '任务状态',
+  `media_total` int(11) NOT NULL DEFAULT '0' COMMENT '媒体总数',
+  `success_count` int(11) NOT NULL DEFAULT '0' COMMENT '成功数',
+  `failed_count` int(11) NOT NULL DEFAULT '0' COMMENT '失败数',
+  `pending_count` int(11) NOT NULL DEFAULT '0' COMMENT '等待重试数',
+  `cache_hit_count` int(11) NOT NULL DEFAULT '0' COMMENT '缓存命中数',
+  `retry_count` int(11) NOT NULL DEFAULT '0' COMMENT '重试次数',
+  `bytes` bigint(20) NOT NULL DEFAULT '0' COMMENT '字节数',
+  `duration_ms` bigint(20) NOT NULL DEFAULT '0' COMMENT '任务耗时毫秒',
+  `p50_ms` bigint(20) NOT NULL DEFAULT '0' COMMENT '媒体P50耗时毫秒',
+  `p95_ms` bigint(20) NOT NULL DEFAULT '0' COMMENT '媒体P95耗时毫秒',
+  `throughput_mbps` decimal(18,4) NOT NULL DEFAULT '0' COMMENT '吞吐Mbps',
+  `success_rate` decimal(8,5) NOT NULL DEFAULT '0' COMMENT '成功率',
+  `failure_rate` decimal(8,5) NOT NULL DEFAULT '0' COMMENT '失败率',
+  `error_summary_json` text COMMENT '错误分类JSON',
+  `started_at` datetime DEFAULT NULL COMMENT '开始时间',
+  `finished_at` datetime DEFAULT NULL COMMENT '结束时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_collect_media_stat_event` (`event_id`),
+  KEY `idx_ybp_collect_media_stat_owner` (`tenant_id`,`account_id`,`tg_account_id`,`created_at`),
+  KEY `idx_ybp_collect_media_stat_source` (`source_id`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集媒体性能统计';
+
+-- 采集媒体统一收敛到事件媒体快照和正式媒体表
+ALTER TABLE `hg_youban_publish_collect_content` DROP COLUMN IF EXISTS `media_signature`;
+DROP TABLE IF EXISTS `hg_youban_publish_collect_content_media`;
+ALTER TABLE `hg_youban_publish_collect_event` ADD KEY `idx_ybp_collect_event_queue` (`tenant_id`,`account_id`,`source_id`,`status`,`processed_at`,`source_chat_id`,`source_message_id`,`id`);
+ALTER TABLE `hg_youban_publish_collect_dispatch` ADD KEY `idx_ybp_collect_dispatch_dedupe` (`tenant_id`,`account_id`,`event_id`,`status`,`id`);

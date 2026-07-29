@@ -30,7 +30,6 @@ type YoubanPublishCollectContentColumns struct {
 	RawText        string //
 	NormalizedText string //
 	MediaCount     string //
-	MediaSignature string //
 	MediaJson      string //
 	TextHash       string //
 	DedupeKey      string //
@@ -54,7 +53,6 @@ var youbanPublishCollectContentColumns = YoubanPublishCollectContentColumns{
 	RawText:        "raw_text",
 	NormalizedText: "normalized_text",
 	MediaCount:     "media_count",
-	MediaSignature: "media_signature",
 	MediaJson:      "media_json",
 	TextHash:       "text_hash",
 	DedupeKey:      "dedupe_key",

@@ -39,21 +39,83 @@ func (s *sSysPublish) rebuildCollectProfileMedia(ctx context.Context, event gdb.
 	return gerror.Wrap(err, "更新采集媒体数量失败")
 }
 
+func (s *sSysPublish) canonicalCollectProfileMedia(ctx context.Context, event gdb.Record, content *collectContentResult) (*collectContentResult, error) {
+	if content == nil {
+		content = &collectContentResult{}
+	}
+	resolved := *content
+	contentItems := collectMediaRowsToItemsFromJSON(content.MediaJSON)
+	displayItems := make([]collectMediaItem, 0, len(contentItems))
+	for _, item := range contentItems {
+		if strings.EqualFold(strings.TrimSpace(item.Purpose), collectMaterialRoleVerify) {
+			continue
+		}
+		item.Purpose = collectMaterialRoleDisplay
+		displayItems = append(displayItems, item)
+	}
+
+	if eventID := event["id"].Int64(); eventID > 0 {
+		rows, err := s.collectEventMediaRows(ctx, eventID)
+		if err != nil {
+			return nil, err
+		}
+		if len(rows) > 0 {
+			displayItems = collectMediaRowsToItems(rows, collectMaterialRoleDisplay)
+		}
+	}
+
+	verifyItems := make([]collectMediaItem, 0)
+	verify, err := s.pairedCollectVerifyEvent(ctx, event["id"].Int64())
+	if err != nil {
+		return nil, err
+	}
+	if !verify.IsEmpty() {
+		rows, rowErr := s.collectEventMediaRows(ctx, verify["id"].Int64())
+		if rowErr != nil {
+			return nil, rowErr
+		}
+		if len(rows) > 0 {
+			verifyItems = collectMediaRowsToItems(rows, collectMaterialRoleVerify)
+		} else {
+			verifyItems = collectMediaJSONWithPurposeItems(verify["media_json"].String(), collectMaterialRoleVerify)
+		}
+	}
+	if len(verifyItems) == 0 {
+		verifyItems = collectMediaJSONWithPurposeItems(content.MediaJSON, collectMaterialRoleVerify)
+	}
+
+	mediaJSON, mediaCount := mergeCollectMediaJSON(
+		collectMediaItemsJSON(displayItems),
+		collectMediaItemsJSON(verifyItems),
+	)
+	resolved.MediaJSON = mediaJSON
+	resolved.MediaCount = mediaCount
+	resolved.DedupeKey = collectHash(resolved.NormalizedText + ":" + collectMediaSignature(mediaJSON))
+	return &resolved, nil
+}
+
+func collectMediaJSONWithPurposeItems(mediaJSON string, purpose string) []collectMediaItem {
+	data := collectMediaJSONWithPurpose(mediaJSON, purpose)
+	return collectMediaRowsToItemsFromJSON(data)
+}
+
+func collectMediaItemsJSON(items []collectMediaItem) string {
+	data, err := json.Marshal(items)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
 func (s *sSysPublish) rebuildCollectOwnedMedia(ctx context.Context, event gdb.Record, content *collectContentResult, owner collectPublishMediaOwner) error {
 	if owner.ProfileId <= 0 {
 		return gerror.New("采集发布资料不存在")
 	}
-	items := make([]collectMediaItem, 0)
-	if content != nil && strings.TrimSpace(content.MediaJSON) != "" {
-		_ = json.Unmarshal([]byte(content.MediaJSON), &items)
+	canonical, err := s.canonicalCollectProfileMedia(ctx, event, content)
+	if err != nil {
+		return err
 	}
-	if len(items) == 0 {
-		rows, err := s.collectEventMediaRows(ctx, event["id"].Int64())
-		if err != nil {
-			return err
-		}
-		items = collectMediaRowsToItems(rows)
-	}
+	items := collectMediaRowsToItemsFromJSON(canonical.MediaJSON)
 	now := gtime.Now()
 	if _, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", owner.ProfileId).

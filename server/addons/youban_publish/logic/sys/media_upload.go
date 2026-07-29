@@ -88,9 +88,9 @@ func (s *sSysPublish) AdminMessageTemplateMediaUpload(ctx context.Context, in *s
 		MediaType:         in.MediaType,
 		Name:              attachment.Name,
 		FileUrl:           normalizeMediaFileURL(attachment.FileUrl, attachment.Path),
-		StoragePath:       attachment.Path,
+		StoragePath:       normalizeStoredMediaPath(attachment.Path),
 		PosterUrl:         normalizeMediaFileURL(mediaPosterURL(assets.Poster), mediaPosterStoragePathValue(assets.Poster)),
-		PosterStoragePath: mediaPosterStoragePathValue(assets.Poster),
+		PosterStoragePath: normalizeStoredMediaPath(mediaPosterStoragePathValue(assets.Poster)),
 		AssetHash:         attachment.Md5,
 		SortIndex:         in.SortIndex,
 	}, nil

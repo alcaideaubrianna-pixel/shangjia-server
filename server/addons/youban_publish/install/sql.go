@@ -16,13 +16,11 @@ import (
 
 var mysqlBusinessSqlFiles = []string{
 	"addons/youban_publish/resource/sql/install.sql",
-	"addons/youban_publish/resource/sql/upgrade.sql",
 	"addons/youban_publish/resource/sql/menu.sql",
 }
 
 var pgsqlBusinessSqlFiles = []string{
 	"addons/youban_publish/resource/sql/install.pgsql.sql",
-	"addons/youban_publish/resource/sql/upgrade.pgsql.sql",
 	"addons/youban_publish/resource/sql/menu.pgsql.sql",
 }
 
@@ -120,7 +118,6 @@ func businessSqlFiles(includeInstall bool) []string {
 			return pgsqlBusinessSqlFiles
 		}
 		return []string{
-			"addons/youban_publish/resource/sql/upgrade.pgsql.sql",
 			"addons/youban_publish/resource/sql/menu.pgsql.sql",
 		}
 	}
@@ -128,9 +125,19 @@ func businessSqlFiles(includeInstall bool) []string {
 		return mysqlBusinessSqlFiles
 	}
 	return []string{
-		"addons/youban_publish/resource/sql/upgrade.sql",
 		"addons/youban_publish/resource/sql/menu.sql",
 	}
+}
+
+// MigrationSqlFiles returns the addon migration files that must be executed
+// outside the interactive addon upgrade request. These files may contain
+// table alterations, index builds, or data backfills and must not run inside
+// the short upgrade transaction.
+func MigrationSqlFiles() []string {
+	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
+		return []string{"addons/youban_publish/resource/sql/upgrade.pgsql.sql"}
+	}
+	return []string{"addons/youban_publish/resource/sql/upgrade.sql"}
 }
 
 func isRetryableInstallError(err error) bool {

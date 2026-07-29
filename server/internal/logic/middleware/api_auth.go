@@ -6,6 +6,8 @@
 package middleware
 
 import (
+	"strings"
+
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/text/gstr"
@@ -33,7 +35,9 @@ func (s *sMiddleware) ApiAuth(r *ghttp.Request) {
 		response.JsonExit(r, gcode.CodeNotAuthorized.Code(), err.Error())
 		return
 	}
-	if user := contexts.GetUser(ctx); user == nil || user.App != consts.AppApi {
+	user := contexts.GetUser(ctx)
+	benchmarkAdmin := user != nil && user.App == consts.AppAdmin && user.RoleKey == "super" && strings.Contains(path, "/collect/material/benchmark")
+	if user == nil || (user.App != consts.AppApi && !benchmarkAdmin) {
 		response.JsonExit(r, gcode.CodeNotAuthorized.Code(), "API接口需要商家账号登录")
 		return
 	}

@@ -97,7 +97,6 @@ func skipCollectEventLog(stage string, status string, message string) bool {
 		"running:媒体缓存任务开始执行",
 		"checking:开始检查媒体缓存方式",
 		"downloading:账号采集媒体使用下载缓存，保证带文案媒体组可原格式发送",
-		"downloading:开始下载账号采集媒体",
 		"ready:媒体缓存任务处理完成",
 		"ready:媒体已就绪",
 		"forwarded:媒体已转存到备份频道",
@@ -112,9 +111,6 @@ func skipCollectEventLog(stage string, status string, message string) bool {
 func (s *sSysPublish) upsertCollectEventMedia(ctx context.Context, event gdb.Record, media []collectMediaItem) error {
 	if event.IsEmpty() || event["id"].Int64() <= 0 {
 		return nil
-	}
-	if err := ensureCollectEventStructuredSchema(ctx); err != nil {
-		return err
 	}
 	eventId := event["id"].Int64()
 	sortIndex := 1
@@ -152,7 +148,7 @@ func (s *sSysPublish) upsertCollectEventMedia(ctx context.Context, event gdb.Rec
 			mediaCols.SourceFileId:     strings.TrimSpace(item.FileId),
 			mediaCols.SourceMessageRef: collectMediaMessageRef(item),
 			mediaCols.FileUrl:          strings.TrimSpace(item.FileUrl),
-			mediaCols.StoragePath:      strings.TrimSpace(item.StoragePath),
+			mediaCols.StoragePath:      normalizeStoredMediaPath(item.StoragePath),
 			mediaCols.PosterUrl:        strings.TrimSpace(item.PosterUrl),
 			mediaCols.MetaJson:         strings.TrimSpace(item.MetaJson),
 			mediaCols.UpdatedAt:        gtime.Now(),
@@ -186,9 +182,6 @@ func (s *sSysPublish) collectEventMediaRows(ctx context.Context, eventId int64) 
 	if eventId <= 0 {
 		return rows, nil
 	}
-	if err := ensureCollectEventStructuredSchema(ctx); err != nil {
-		return nil, err
-	}
 	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
 	err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
 		Where(mediaCols.EventId, eventId).
@@ -207,12 +200,12 @@ func (s *sSysPublish) syncCollectEventMediaSnapshot(ctx context.Context, eventId
 	if err != nil {
 		return err
 	}
-	items := collectMediaRowsToItems(rows)
-	mediaJSON, mediaCount := collectMessageMediaJSON(items)
 	event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", eventId).One()
 	if err != nil || event.IsEmpty() {
 		return err
 	}
+	items := collectMediaRowsToItems(rows, event["material_role"].String())
+	mediaJSON, mediaCount := collectMessageMediaJSON(items)
 	eventCols := pdao.YoubanPublishCollectEvent.Columns()
 	_, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).Where(eventCols.Id, eventId).Data(g.Map{
 		eventCols.MediaCount: mediaCount,
@@ -223,8 +216,9 @@ func (s *sSysPublish) syncCollectEventMediaSnapshot(ctx context.Context, eventId
 	return gerror.Wrap(err, "同步采集事件媒体快照失败")
 }
 
-func collectMediaRowsToItems(rows []*entity.YoubanPublishCollectEventMedia) []collectMediaItem {
+func collectMediaRowsToItems(rows []*entity.YoubanPublishCollectEventMedia, purpose string) []collectMediaItem {
 	items := make([]collectMediaItem, 0, len(rows))
+	purpose = strings.TrimSpace(purpose)
 	for _, row := range rows {
 		if row == nil {
 			continue
@@ -235,6 +229,7 @@ func collectMediaRowsToItems(rows []*entity.YoubanPublishCollectEventMedia) []co
 		}
 		items = append(items, collectMediaItem{
 			Type:        row.MediaType,
+			Purpose:     purpose,
 			FileId:      fileId,
 			FileUrl:     row.FileUrl,
 			StoragePath: row.StoragePath,
@@ -252,6 +247,8 @@ func normalizeCollectMediaItem(item collectMediaItem) collectMediaItem {
 	item.FileUrl = strings.TrimSpace(item.FileUrl)
 	item.StoragePath = strings.TrimSpace(item.StoragePath)
 	item.PosterUrl = strings.TrimSpace(item.PosterUrl)
+	item.FileMd5 = strings.TrimSpace(item.FileMd5)
+	item.FilePhash = strings.TrimSpace(item.FilePhash)
 	item.MetaJson = strings.TrimSpace(item.MetaJson)
 	return item
 }

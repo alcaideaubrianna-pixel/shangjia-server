@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -50,28 +51,66 @@ func (s *sSysPublish) listenerNotifyMedia(ctx context.Context, plan accountListe
 }
 
 func (s *sSysPublish) listenerMessageMediaItems(ctx context.Context, plan accountListenPlanRuntime, sourceChatId string, messages []*tg.Message) ([]*telegramMediaItem, error) {
-	media := make([]*telegramMediaItem, 0, len(messages))
-	for _, msg := range messages {
-		items := gotdCollectMedia(msg, sourceChatId)
-		if len(items) == 0 {
-			g.Log().Debugf(ctx, "监听消息不包含可下载媒体 plan:%d message:%d", plan.Id, msg.ID)
+	type mediaResult struct {
+		index int
+		item  *telegramMediaItem
+		err   error
+	}
+	results := make([]mediaResult, len(messages))
+	slots := make(chan struct{}, accountCollectMediaConcurrency(ctx))
+	var wait sync.WaitGroup
+	for index, msg := range messages {
+		if msg == nil {
 			continue
 		}
-		item := items[0]
-		downloaded, err := s.cachedGotdCollectMediaFile(ctx, plan.TenantId, plan.TgAccountId, item)
-		if err != nil {
-			g.Log().Warningf(ctx, "下载监听媒体失败 plan:%d sourceChat:%s message:%d type:%s fileId:%s err:%+v", plan.Id, sourceChatId, msg.ID, item.Type, item.FileId, err)
-			return nil, gerror.Wrapf(err, "下载监听媒体失败 message:%d", msg.ID)
+		wait.Add(1)
+		go func(index int, msg *tg.Message) {
+			defer wait.Done()
+			result := mediaResult{index: index}
+			items := gotdCollectMedia(msg, sourceChatId)
+			if len(items) == 0 {
+				g.Log().Debugf(ctx, "监听消息不包含可下载媒体 plan:%d message:%d", plan.Id, msg.ID)
+				results[index] = result
+				return
+			}
+			select {
+			case slots <- struct{}{}:
+			case <-ctx.Done():
+				result.err = ctx.Err()
+				results[index] = result
+				return
+			}
+			defer func() { <-slots }()
+			item := items[0]
+			downloaded, err := s.downloadTelegramMedia(ctx, plan.TenantId, plan.TgAccountId, item)
+			if err != nil {
+				g.Log().Warningf(ctx, "下载监听媒体失败 plan:%d sourceChat:%s message:%d type:%s fileId:%s err:%+v", plan.Id, sourceChatId, msg.ID, item.Type, item.FileId, err)
+				result.err = gerror.Wrapf(err, "下载监听媒体失败 message:%d", msg.ID)
+				results[index] = result
+				return
+			}
+			g.Log().Debugf(ctx, "监听媒体缓存完成 plan:%d message:%d type:%s path:%s", plan.Id, msg.ID, item.Type, downloaded.Path)
+			result.item = &telegramMediaItem{
+				Id:          int64(msg.ID),
+				MediaType:   listenerTelegramMediaType(item.Type),
+				Purpose:     "message_listen",
+				StoragePath: downloaded.Path,
+				SortIndex:   index,
+				AssetHash:   fmt.Sprintf("listen:%d:%s", msg.ID, strings.TrimSpace(item.Type)),
+			}
+			results[index] = result
+		}(index, msg)
+	}
+	wait.Wait()
+	media := make([]*telegramMediaItem, 0, len(messages))
+	for _, result := range results {
+		if result.err != nil {
+			return nil, result.err
 		}
-		g.Log().Debugf(ctx, "监听媒体缓存完成 plan:%d message:%d type:%s path:%s", plan.Id, msg.ID, item.Type, downloaded.Path)
-		media = append(media, &telegramMediaItem{
-			Id:          int64(msg.ID),
-			MediaType:   listenerTelegramMediaType(item.Type),
-			Purpose:     "message_listen",
-			StoragePath: downloaded.Path,
-			SortIndex:   len(media),
-			AssetHash:   fmt.Sprintf("listen:%d:%s", msg.ID, strings.TrimSpace(item.Type)),
-		})
+		if result.item != nil {
+			result.item.SortIndex = len(media)
+			media = append(media, result.item)
+		}
 	}
 	return media, nil
 }

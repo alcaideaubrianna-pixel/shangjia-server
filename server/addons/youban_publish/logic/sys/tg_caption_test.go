@@ -3,11 +3,11 @@ package sys
 import (
 	"testing"
 
+	"github.com/gogf/gf/v2/container/gvar"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gotd/td/telegram/message/entity"
 	gotdhtml "github.com/gotd/td/telegram/message/html"
 	"github.com/gotd/td/telegram/message/styling"
-	"github.com/gogf/gf/v2/container/gvar"
-	"github.com/gogf/gf/v2/database/gdb"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 )

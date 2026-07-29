@@ -81,15 +81,6 @@ type CollectSourceHistoryStartRes struct {
 	*sysin.CollectHistoryTaskModel
 }
 
-type CollectSourceTriggerReq struct {
-	g.Meta `path:"/publish/collect/source/trigger" method:"post" tags:"上架插件" summary:"手动触发采集源推送"`
-	sysin.CollectSourceTriggerInp
-}
-
-type CollectSourceTriggerRes struct {
-	*sysin.CollectSourceTriggerModel
-}
-
 type CollectSourceResetReq struct {
 	g.Meta `path:"/publish/collect/source/reset" method:"post" tags:"上架插件" summary:"开发模式重置采集源推送状态"`
 	sysin.CollectSourceResetInp
@@ -162,12 +153,32 @@ type CollectEventClearReq struct {
 
 type CollectEventClearRes struct{}
 
-type CollectEventProcessReq struct {
-	g.Meta `path:"/publish/collect/event/process" method:"post" tags:"上架插件" summary:"手动处理采集事件"`
-	sysin.CollectEventProcessInp
+type CollectEventReprocessReq struct {
+	g.Meta `path:"/publish/collect/event/reprocess" method:"post" tags:"上架插件" summary:"开发模式重算采集事件"`
+	sysin.CollectEventReprocessInp
 }
 
-type CollectEventProcessRes struct{}
+type CollectEventReprocessRes struct {
+	*sysin.CollectEventReprocessModel
+}
+
+type CollectMaterialDiagnoseReq struct {
+	g.Meta `path:"/publish/collect/material/diagnose" method:"get" tags:"上架插件" summary:"诊断采集资料分组链路"`
+	sysin.CollectMaterialDiagnoseInp
+}
+
+type CollectMaterialDiagnoseRes struct {
+	*sysin.CollectMaterialDiagnoseModel
+}
+
+type CollectMediaBenchmarkReq struct {
+	g.Meta `path:"/publish/collect/material/benchmark" method:"get" tags:"上架插件" summary:"压测TG媒体下载"`
+	sysin.CollectMediaBenchmarkInp
+}
+
+type CollectMediaBenchmarkRes struct {
+	*sysin.CollectMediaBenchmarkModel
+}
 
 type CollectContentListReq struct {
 	g.Meta `path:"/publish/collect/content/list" method:"get" tags:"上架插件" summary:"采集内容池列表"`
@@ -194,8 +205,7 @@ type CollectReviewListReq struct {
 }
 
 type CollectReviewListRes struct {
-	form.PageRes
-	List []*sysin.CollectReviewModel `json:"list" dc:"审核列表"`
+	*sysin.CollectReviewPageModel
 }
 
 type CollectReviewActionReq struct {
@@ -204,3 +214,17 @@ type CollectReviewActionReq struct {
 }
 
 type CollectReviewActionRes struct{}
+
+type CollectReviewEditReq struct {
+	g.Meta `path:"/publish/collect/review/edit" method:"post" tags:"上架插件" summary:"编辑采集审核"`
+	sysin.CollectReviewEditInp
+}
+
+type CollectReviewEditRes struct{}
+
+type CollectReviewDeleteReq struct {
+	g.Meta `path:"/publish/collect/review/delete" method:"post" tags:"上架插件" summary:"删除采集审核"`
+	sysin.IdsInp
+}
+
+type CollectReviewDeleteRes struct{}

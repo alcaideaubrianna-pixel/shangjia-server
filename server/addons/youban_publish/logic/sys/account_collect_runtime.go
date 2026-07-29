@@ -47,6 +47,8 @@ type accountCollectWorker struct {
 	listeners   []accountListenPlanRuntime
 	cancel      context.CancelFunc
 	done        chan struct{}
+	clientMu    sync.RWMutex
+	client      *telegram.Client
 	messages    chan accountCollectMessageTask
 	operations  chan accountCollectOperationTask
 	mediaSlots  chan struct{}
@@ -290,6 +292,16 @@ func (w *accountCollectWorker) runGotdDispatcher(ctx context.Context) error {
 		if _, err := client.Self(runCtx); err != nil {
 			return err
 		}
+		w.clientMu.Lock()
+		w.client = client
+		w.clientMu.Unlock()
+		defer func() {
+			w.clientMu.Lock()
+			if w.client == client {
+				w.client = nil
+			}
+			w.clientMu.Unlock()
+		}()
 		w.service.registerAccountCollectWorker(w)
 		defer w.service.unregisterAccountCollectWorker(w)
 		go w.runMessageLoop(runCtx)
@@ -298,6 +310,15 @@ func (w *accountCollectWorker) runGotdDispatcher(ctx context.Context) error {
 		<-runCtx.Done()
 		return runCtx.Err()
 	})
+}
+
+func (w *accountCollectWorker) runtimeClient() *telegram.Client {
+	if w == nil {
+		return nil
+	}
+	w.clientMu.RLock()
+	defer w.clientMu.RUnlock()
+	return w.client
 }
 
 func (w *accountCollectWorker) runMessageLoop(ctx context.Context) {
@@ -399,6 +420,23 @@ func (s *sSysPublish) executeAccountCollectOperation(ctx context.Context, tgAcco
 
 func (s *sSysPublish) executeAccountCollectMediaOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) (bool, error) {
 	return s.executeAccountCollectOperationMode(ctx, tgAccountId, timeout, run, true)
+}
+
+func (s *sSysPublish) accountCollectRuntimeClient(tgAccountId int64) (*telegram.Client, error) {
+	if tgAccountId <= 0 {
+		return nil, gerror.New("账号采集缺少TG账号")
+	}
+	s.accountRuntimeMu.Lock()
+	worker := s.accountRuntimes[tgAccountId]
+	s.accountRuntimeMu.Unlock()
+	if worker == nil {
+		return nil, gerror.New("账号采集客户端尚未连接")
+	}
+	client := worker.runtimeClient()
+	if client == nil {
+		return nil, gerror.New("账号采集客户端正在重连")
+	}
+	return client, nil
 }
 
 func (s *sSysPublish) restartAccountCollectWorker(ctx context.Context, tgAccountId int64, reason error) {

@@ -14,6 +14,9 @@ func (s *sSysBot) AdminBotChannelCacheList(ctx context.Context, in *sysin.BotCha
 	if in == nil {
 		in = &sysin.BotChannelCacheListInp{}
 	}
+	if in.BotId <= 0 {
+		return []*sysin.BotChannelCacheModel{}, 0, nil
+	}
 	mod := g.DB().Model(channelCacheTable+" c").Safe().Ctx(ctx).
 		LeftJoin(botTable+" b", "b.id=c.bot_id").
 		Fields("c.id,c.bot_id,b.bot_username,c.chat_id AS channel_id,c.chat_title AS channel_title,c.chat_username AS channel_username,c.chat_type AS chat_type,c.is_broadcast,c.is_megagroup,c.message_count,c.last_message_text,c.last_message_at,c.created_at,c.updated_at")

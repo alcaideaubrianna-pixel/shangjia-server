@@ -96,3 +96,22 @@ func (s *sSysPublish) postponeTelegramJobForChannelContinuation(ctx context.Cont
 	}
 	return nil
 }
+
+func (s *sSysPublish) postponeTelegramJobForCollectPushPause(ctx context.Context, job telegramJobRecord) error {
+	nextRetryAt := gtime.Now().Add(30 * time.Second)
+	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", job.Id).
+		WhereIn("status", []string{"pending", "failed_retry"}).
+		Data(g.Map{
+			"dispatch_status":     tgDispatchStatusIdle,
+			"next_retry_at":       nextRetryAt,
+			"last_dispatch_error": "采集推送已暂停，等待重新开启",
+			"updated_at":          gtime.Now(),
+		}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "延后采集推送任务失败")
+	}
+	s.appendTelegramJobLog(ctx, job, "publish", "paused", "采集推送已暂停，任务保留等待恢复")
+	return nil
+}

@@ -11,3 +11,4 @@ push.sh
 server/resource/public/storage/cache
 server/.serena/cache
 docker
+logs

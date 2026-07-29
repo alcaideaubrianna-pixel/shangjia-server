@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -123,7 +122,7 @@ func (s *sSysPublish) pullMaterialImportPages(ctx context.Context, client *teleg
 	}
 	cutoff := gtime.NewFromTime(time.Now().Add(-time.Duration(task.PullLimitDays) * 24 * time.Hour))
 	shouldFinish := false
-	pendingUnits := make([]*materialImportMessageUnit, 0, 16)
+	pendingUnits := make([]*collectMaterialUnit, 0, 16)
 	for page := 0; page < materialImportPagesPerRun; page++ {
 		if err := s.materialImportEnsureNotCanceled(ctx, task.Id); err != nil {
 			return err
@@ -147,9 +146,9 @@ func (s *sSysPublish) pullMaterialImportPages(ctx context.Context, client *teleg
 		if nextOffset > 0 {
 			offsetID = nextOffset
 		}
-		pageUnits, carryUnits := materialImportSplitLeadingUnits(units)
+		pageUnits, carryUnits := splitCollectMaterialUnits(units)
 		if len(pageUnits) > 0 || len(pendingUnits) > 0 {
-			pageUnits = materialImportMergeAdjacentUnits(append(pageUnits, pendingUnits...))
+			pageUnits = mergeCollectMaterialUnits(append(pageUnits, pendingUnits...))
 			if len(pageUnits) > 0 {
 				if err := s.upsertMaterialImportUnitBlocks(ctx, task, pageUnits); err != nil {
 					return err
@@ -213,7 +212,7 @@ func materialImportHistoryPage(ctx context.Context, client *telegram.Client, pee
 	return nil, nil
 }
 
-func (s *sSysPublish) ingestMaterialImportMessages(ctx context.Context, task *sysin.MaterialImportTaskModel, messages []*tg.Message, cutoff *gtime.Time, cache *sysin.ChannelCacheModel, latestCachedMessageID int64) (int, bool, []*materialImportMessageUnit, error) {
+func (s *sSysPublish) ingestMaterialImportMessages(ctx context.Context, task *sysin.MaterialImportTaskModel, messages []*tg.Message, cutoff *gtime.Time, cache *sysin.ChannelCacheModel, latestCachedMessageID int64) (int, bool, []*collectMaterialUnit, error) {
 	ordered := collectHistoryMessagesInSendOrder(messages)
 	nextOffset := int(task.PullOffsetId)
 	stop := false
@@ -242,7 +241,7 @@ func (s *sSysPublish) ingestMaterialImportMessages(ctx context.Context, task *sy
 			}
 		}
 	}
-	return nextOffset, stop, materialImportBuildUnits(task, validMessages), nil
+	return nextOffset, stop, buildCollectMaterialUnits(task, validMessages), nil
 }
 
 func (s *sSysPublish) materialImportLatestCachedMessageID(ctx context.Context, tenantId int64, tgAccountId int64, cache *sysin.ChannelCacheModel) (int64, error) {
@@ -271,36 +270,6 @@ func materialImportCacheChannelID(cache *sysin.ChannelCacheModel) (int64, error)
 		return 0, gerror.New("频道ID无效，请刷新频道缓存")
 	}
 	return channelID, nil
-}
-
-func materialImportMediaItemsWithPurpose(items []collectMediaItem, purpose string) []collectMediaItem {
-	purpose = strings.TrimSpace(purpose)
-	if purpose == "" {
-		purpose = "display"
-	}
-	for i := range items {
-		if strings.TrimSpace(items[i].Purpose) == "" {
-			items[i].Purpose = purpose
-		}
-	}
-	return items
-}
-
-func materialImportMessageIds(existing string, id int) string {
-	ids := make([]int, 0)
-	for _, item := range strings.Split(existing, ",") {
-		if value := gconv.Int(strings.TrimSpace(item)); value > 0 {
-			ids = append(ids, value)
-		}
-	}
-	ids = append(ids, id)
-	ids = positiveUniqueInts(ids)
-	sort.Ints(ids)
-	parts := make([]string, 0, len(ids))
-	for _, item := range ids {
-		parts = append(parts, gconv.String(item))
-	}
-	return strings.Join(parts, ",")
 }
 
 func materialImportLatestSourceMessageID(value string) int {

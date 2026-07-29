@@ -268,14 +268,49 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if collectEventAlreadyMatched(event["status"].String()) {
 		return nil
 	}
-	if waiting, err := s.waitCollectGroupedEventReady(ctx, event); err != nil {
-		if _, ok := err.(*collectProcessRetryError); ok {
-			return err
+	materialRole := strings.TrimSpace(event["material_role"].String())
+	if materialRole == "" || materialRole == collectMaterialRolePending {
+		return newCollectProcessRetryError(30*time.Second, "等待资料组窗口完成")
+	}
+	if materialRole == collectMaterialRoleVerify {
+		if s.collectEventNeedsMediaCache(ctx, event) {
+			_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaPending, "验证媒体缓存中")
+			return s.enqueueCollectMediaCache(ctx, collectMediaQueuePayload{
+				EventId: eventId, TenantId: tenantId, AccountId: accountId,
+				SourceId: event["source_id"].Int64(), TgAccountId: event["tg_account_id"].Int64(),
+			}, 0)
 		}
-		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
-		return err
-	} else if waiting {
+		_, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", eventId).Data(g.Map{
+			"status":                sysin.CollectEventStatusProcessed,
+			"material_group_status": "ready",
+			"error_message":         "",
+			"processed_at":          gtime.Now(),
+			"updated_at":            gtime.Now(),
+		}).Update()
+		if err != nil {
+			return gerror.Wrap(err, "完成验证资料组处理失败")
+		}
+		parentEventId := event["material_parent_event_id"].Int64()
+		if parentEventId <= 0 {
+			g.Log().Warningf(ctx, "验证资料已完成但没有父展示事件 eventId:%d", eventId)
+			return nil
+		}
+		g.Log().Infof(ctx, "验证资料媒体已完成，回流处理父展示事件 verifyEventId:%d parentEventId:%d", eventId, parentEventId)
+		if err = s.processCollectEvent(ctx, parentEventId, tenantId, accountId); err != nil {
+			g.Log().Warningf(ctx, "验证资料回流父展示事件失败，将重新排队 verifyEventId:%d parentEventId:%d err:%+v", eventId, parentEventId, err)
+			if enqueueErr := s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
+				EventId: parentEventId, TenantId: tenantId, AccountId: accountId,
+				SourceId: event["source_id"].Int64(),
+			}, 30*time.Second); enqueueErr != nil {
+				return enqueueErr
+			}
+		}
 		return nil
+	}
+	if ready, readyErr := s.ensureCollectPairedVerifyReady(ctx, event); readyErr != nil {
+		return readyErr
+	} else if !ready {
+		return newCollectProcessRetryError(30*time.Second, "等待验证资料媒体缓存完成")
 	}
 	rules, err := s.collectEventRules(ctx, event, tenantId, accountId)
 	if err != nil {
@@ -295,14 +330,17 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		}
 		return s.ignoreCollectEvent(ctx, eventId, message, "precheck")
 	}
-	if waiting, err := s.waitCollectEventSourceOrder(ctx, event); err != nil {
-		if _, ok := err.(*collectProcessRetryError); ok {
-			return err
-		}
-		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
+	var earlyDedupeReasons []string
+	candidateRules, earlyDedupeReasons, err = s.filterCollectRulesByEarlyDedupe(ctx, event, candidateRules)
+	if err != nil {
 		return err
-	} else if waiting {
-		return nil
+	}
+	if len(candidateRules) == 0 {
+		message := "图文重复"
+		if len(earlyDedupeReasons) > 0 {
+			message = strings.Join(earlyDedupeReasons, "；")
+		}
+		return s.ignoreCollectEvent(ctx, eventId, message, "dedupe")
 	}
 	_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusPrechecked, "")
 	if s.collectEventNeedsMediaCache(ctx, event) {
@@ -324,6 +362,11 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		s.appendCollectEventLogForRecord(ctx, event, "media", "ready", "媒体已就绪", "")
 	}
 	content, err := s.ensureCollectContent(ctx, event)
+	if err != nil {
+		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
+		return err
+	}
+	content, err = s.mergeCollectMaterialContent(ctx, event, content)
 	if err != nil {
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
 		return err
@@ -472,32 +515,8 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		s.appendCollectEventLogForRecord(ctx, event, "classifier", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
 		return false, reason, nil
 	}
-	if rule["review_enabled"].Int() == 1 && classification.Kind == profileMessageKindVerify {
-		if merged, err := s.mergeCollectEventIntoPendingReview(ctx, event, content, rule, decision.Text); err != nil {
-			return false, "", err
-		} else if merged {
-			return true, "", nil
-		}
-	}
-	if attached, err := s.attachCollectVerifyEventToPreviousTask(ctx, event, content, rule); err != nil {
-		return false, "", err
-	} else if attached {
-		return true, "", nil
-	}
 	if classification.Kind == profileMessageKindVerify {
-		if !s.collectVerifyEventTimedOut(ctx, event) {
-			const message = "验证视频暂未匹配到前序资料，等待前序资料完成处理"
-			if _, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", event["id"].Int64()).Data(g.Map{
-				"status":        sysin.CollectEventStatusWaitingOrder,
-				"error_message": message,
-				"updated_at":    gtime.Now(),
-			}).Update(); err != nil {
-				return false, "", gerror.Wrap(err, "标记验证视频等待前序资料失败")
-			}
-			s.appendCollectEventLogForRecord(ctx, event, "verify", "waiting", message, "auto_retry=true")
-			return false, message, newCollectProcessRetryError(collectOrderRetryDelay, message)
-		}
-		const reason = "验证视频未匹配到连续的前序资料，已忽略"
+		const reason = "验证资料组不能独立创建资料"
 		s.appendCollectEventLogForRecord(ctx, event, "classifier", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
 		return false, reason, nil
 	}
@@ -549,173 +568,72 @@ func (s *sSysPublish) classifyCollectEvent(ctx context.Context, event gdb.Record
 		if err != nil {
 			return profileMessageClassification{}, err
 		}
-		items = collectMediaRowsToItems(rows)
-	}
-	return classifyProfileMessage(text, items), nil
-}
-
-func (s *sSysPublish) attachCollectVerifyEventToPreviousTask(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (bool, error) {
-	rows, err := s.collectEventMediaRows(ctx, event["id"].Int64())
-	if err != nil {
-		return false, err
-	}
-	items := collectMediaRowsToItems(rows)
-	text := strings.TrimSpace(event["raw_text"].String())
-	if text == "" && content != nil {
-		text = strings.TrimSpace(content.RawText)
+		items = collectMediaRowsToItems(rows, event["material_role"].String())
 	}
 	classification := classifyProfileMessage(text, items)
-	if classification.Kind != profileMessageKindVerify {
-		return false, nil
+	verifyCount := 0
+	displayCount := 0
+	for _, item := range items {
+		switch strings.ToLower(strings.TrimSpace(item.Purpose)) {
+		case collectMaterialRoleVerify:
+			verifyCount++
+		case collectMaterialRoleDisplay:
+			displayCount++
+		}
 	}
-	previous, err := s.previousCollectProfileForVerify(ctx, event, rule)
-	if err != nil || previous.IsEmpty() {
-		return false, err
-	}
-	continuous, err := s.collectVerifyEventIsContinuous(ctx, event, previous)
-	if err != nil || !continuous {
-		return false, err
-	}
-	profileId := previous["profile_id"].Int64()
-	if err = s.insertCollectOwnedMediaRows(ctx, event, collectPublishMediaOwner{ProfileId: profileId}, "verify", items); err != nil {
-		return false, err
-	}
-	now := gtime.Now()
-	if _, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("profile_id", profileId).WhereNull("deleted_at").Data(g.Map{"updated_at": now}).Update(); err != nil {
-		return false, gerror.Wrap(err, "绑定采集验证视频到资料失败")
-	}
-	if _, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("profile_id", profileId).Where("collect_event_id", previous["event_id"].Int64()).WhereIn("status", []string{"pending", "failed_retry"}).Data(g.Map{
-		"status":          "pending",
-		"dispatch_status": tgDispatchStatusIdle,
-		"next_retry_at":   nil,
-		"error_message":   "",
-		"updated_at":      now,
-	}).Update(); err != nil {
-		return false, gerror.Wrap(err, "重置绑定验证视频TG任务失败")
-	}
-	s.appendCollectEventLogForRecord(ctx, event, "dispatch", "attached", "验证视频已绑定到前一个采集资料", fmt.Sprintf("profile=%d", profileId))
-	return true, nil
+	g.Log().Debugf(ctx, "采集事件分类完成 eventId:%d kind:%s textBytes:%d media:%d displayMedia:%d verifyMedia:%d status:%s", event["id"].Int64(), classification.Kind, len(text), len(items), displayCount, verifyCount, event["status"].String())
+	return classification, nil
 }
 
-func (s *sSysPublish) collectVerifyEventIsContinuous(ctx context.Context, event gdb.Record, previous gdb.Record) (bool, error) {
-	if event.IsEmpty() || previous.IsEmpty() {
+func (s *sSysPublish) collectEventMediaReady(ctx context.Context, eventId int64) (bool, error) {
+	if eventId <= 0 {
 		return false, nil
 	}
-	lastSourceMessageId, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
-		Where("event_id", previous["event_id"].Int64()).
-		Fields("MAX(source_message_id)").
-		Value()
+	rows, err := s.collectEventMediaRows(ctx, eventId)
 	if err != nil {
-		return false, gerror.Wrap(err, "读取采集资料最后消息失败")
+		return false, err
 	}
-	lastMessageId := lastSourceMessageId.Int64()
-	currentMessageId := event["source_message_id"].Int64()
-	return lastMessageId > 0 && currentMessageId == lastMessageId+1, nil
-}
-
-func (s *sSysPublish) previousCollectProfileForVerify(ctx context.Context, event gdb.Record, rule gdb.Record) (gdb.Record, error) {
-	row, err := g.DB().Model(pdao.YoubanPublishCollectDispatch.Table()+" d").Safe().Ctx(ctx).
-		InnerJoin(pdaoCollectEventTable()+" e", "e.id=d.event_id").
-		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=d.profile_id AND ps.deleted_at IS NULL").
-		Fields("d.profile_id,d.event_id,e.source_message_id").
-		Where("d.tenant_id", event["tenant_id"].Int64()).
-		Where("d.account_id", event["account_id"].Int64()).
-		Where("d.source_id", event["source_id"].Int64()).
-		Where("e.source_chat_id", strings.TrimSpace(event["source_chat_id"].String())).
-		Where("e.source_message_id > 0").
-		Where("e.source_message_id < ?", event["source_message_id"].Int64()).
-		Where("ps.channel_id_json", rule["target_channel_id_json"].String()).
-		Where("e.media_count > 0").
-		Where("COALESCE(e.raw_text, '') <> ''").
-		Where("NOT EXISTS (SELECT 1 FROM "+pdaoCollectEventTable()+" mid WHERE mid.tenant_id=e.tenant_id AND mid.account_id=e.account_id AND mid.source_id=e.source_id AND mid.source_chat_id=e.source_chat_id AND mid.source_message_id > e.source_message_id AND mid.source_message_id < ? AND mid.media_count > 0 AND COALESCE(mid.raw_text, '') <> '')", event["source_message_id"].Int64()).
-		OrderDesc("e.source_message_id").
-		OrderDesc("d.id").
-		Limit(1).
-		One()
-	if err != nil {
-		return nil, gerror.Wrap(err, "查找验证视频所属采集资料失败")
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		if collectMediaRowNeedsCache(row.SourceFileId, row.StoragePath, row.FileUrl, row.BackupChatId, row.BackupMessageId) {
+			return false, nil
+		}
 	}
-	return row, nil
-}
-
-func (s *sSysPublish) mergeCollectEventIntoPendingReview(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (bool, error) {
-	if content == nil || !collectMediaJSONHasVideo(content.MediaJSON) {
-		return false, nil
-	}
-	currentMessageId := event["source_message_id"].Int64()
-	if currentMessageId <= 0 || strings.TrimSpace(event["source_chat_id"].String()) == "" {
-		return false, nil
-	}
-	review, err := pdao.YoubanPublishCollectReview.DB().Model(pdao.YoubanPublishCollectReview.Table()+" r").Safe().Ctx(ctx).
-		LeftJoin(pdao.YoubanPublishCollectEvent.Table()+" e", "e.id=r.event_id").
-		Fields("r.id,r.dispatch_id,r.raw_text,r.media_json,r.media_count,e.id AS source_event_id,e.source_message_id").
-		Where("r.tenant_id", event["tenant_id"].Int64()).
-		Where("r.account_id", event["account_id"].Int64()).
-		Where("r.source_id", event["source_id"].Int64()).
-		Where("r.rule_id", rule["id"].Int64()).
-		Where("r.status", sysin.CollectReviewStatusPending).
-		Where("e.source_chat_id", strings.TrimSpace(event["source_chat_id"].String())).
-		Where("e.source_message_id > 0").
-		Where("e.source_message_id < ?", currentMessageId).
-		Where("e.source_message_id >= ?", currentMessageId-20).
-		OrderDesc("e.source_message_id").
-		Limit(1).
-		One()
-	if err != nil {
-		return false, gerror.Wrap(err, "读取待合并采集审核失败")
-	}
-	if review.IsEmpty() || collectMediaJSONHasVideo(review["media_json"].String()) {
-		return false, nil
-	}
-	verifyMediaJSON := collectMediaJSONWithPurpose(content.MediaJSON, "verify")
-	mediaJSON, mediaCount := mergeCollectMediaJSON(review["media_json"].String(), verifyMediaJSON)
-	mergedText := mergeCollectReviewText(review["raw_text"].String(), text)
-	now := gtime.Now()
-	if _, err = pdao.YoubanPublishCollectReview.Ctx(ctx).Where("id", review["id"].Int64()).Data(g.Map{
-		"raw_text":    mergedText,
-		"media_count": mediaCount,
-		"media_json":  mediaJSON,
-		"updated_at":  now,
-	}).Update(); err != nil {
-		return false, gerror.Wrap(err, "合并采集审核失败")
-	}
-	s.appendCollectEventLogForRecord(ctx, event, "review", "merged", "已合并到上一组采集审核", fmt.Sprintf("review=%d", review["id"].Int64()))
-	return true, nil
+	return len(rows) > 0, nil
 }
 
 func collectMediaJSONHasVideo(mediaJSON string) bool {
+	return collectMediaJSONHasPurposeVideo(mediaJSON, "")
+}
+
+func collectMediaJSONHasPurposeVideo(mediaJSON string, purpose string) bool {
 	var items []collectMediaItem
 	if err := json.Unmarshal([]byte(mediaJSON), &items); err != nil {
 		return false
 	}
 	for _, item := range items {
-		if strings.EqualFold(strings.TrimSpace(item.Type), "video") {
+		if !strings.EqualFold(strings.TrimSpace(item.Type), "video") {
+			continue
+		}
+		if purpose != "" && !strings.EqualFold(strings.TrimSpace(item.Purpose), purpose) {
+			continue
+		}
+		if purpose == "" || strings.EqualFold(strings.TrimSpace(item.Purpose), purpose) {
 			return true
 		}
 	}
 	return false
 }
 
-func mergeCollectReviewText(existing string, next string) string {
-	existing = strings.TrimSpace(existing)
-	next = strings.TrimSpace(next)
-	if existing == "" {
-		return next
-	}
-	if next == "" || existing == next {
-		return existing
-	}
-	return existing + "\n" + next
-}
-
 func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, dispatchId int64, text string) error {
 	now := gtime.Now()
-	mediaCount := event["media_count"].Int()
-	mediaJSON := collectMediaJSONWithPurpose(event["media_json"].String(), "display")
-	if content != nil {
-		mediaCount = content.MediaCount
-		mediaJSON = collectMediaJSONWithPurpose(content.MediaJSON, "display")
+	canonical, err := s.canonicalCollectProfileMedia(ctx, event, content)
+	if err != nil {
+		return gerror.Wrap(err, "整理采集审核媒体失败")
 	}
+	mediaCount := canonical.MediaCount
 	reviewId, err := pdao.YoubanPublishCollectReview.Ctx(ctx).Data(g.Map{
 		"tenant_id":              event["tenant_id"].Int64(),
 		"account_id":             event["account_id"].Int64(),
@@ -725,7 +643,6 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 		"dispatch_id":            dispatchId,
 		"raw_text":               text,
 		"media_count":            mediaCount,
-		"media_json":             mediaJSON,
 		"target_channel_id_json": rule["target_channel_id_json"].String(),
 		"bot_id_json":            rule["bot_id_json"].String(),
 		"status":                 sysin.CollectReviewStatusPending,
@@ -736,80 +653,10 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 		return gerror.Wrap(err, "创建采集审核失败")
 	}
 	g.Log().Infof(ctx, "采集审核已创建 reviewId:%d eventId:%d dispatchId:%d ruleId:%d media:%d", reviewId, event["id"].Int64(), dispatchId, rule["id"].Int64(), mediaCount)
-	if err = s.backfillCollectVerifyEventIntoReview(ctx, event, reviewId); err != nil {
-		return err
-	}
 	_, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
 		"review_id":  reviewId,
 		"status":     sysin.CollectDispatchStatusReviewing,
 		"updated_at": now,
 	}).Update()
 	return gerror.Wrap(err, "更新采集审核分发失败")
-}
-
-func (s *sSysPublish) backfillCollectVerifyEventIntoReview(ctx context.Context, event gdb.Record, reviewId int64) error {
-	if event.IsEmpty() || reviewId <= 0 || strings.TrimSpace(event["source_chat_id"].String()) == "" {
-		return nil
-	}
-	lastMessageValue, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
-		Where("event_id", event["id"].Int64()).
-		Fields("MAX(source_message_id)").
-		Value()
-	if err != nil {
-		return gerror.Wrap(err, "读取审核资料最后消息失败")
-	}
-	lastMessageId := lastMessageValue.Int64()
-	if lastMessageId <= 0 {
-		lastMessageId = event["source_message_id"].Int64()
-	}
-	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Where("tenant_id", event["tenant_id"].Int64()).
-		Where("account_id", event["account_id"].Int64()).
-		Where("source_id", event["source_id"].Int64()).
-		Where("source_chat_id", strings.TrimSpace(event["source_chat_id"].String())).
-		WhereGT("source_message_id", lastMessageId).
-		WhereLTE("source_message_id", lastMessageId+20).
-		WhereGT("media_count", 0).
-		Where("COALESCE(raw_text, '') = ''").
-		WhereIn("status", []string{
-			sysin.CollectEventStatusIgnored,
-			sysin.CollectEventStatusPending,
-			sysin.CollectEventStatusWaitingOrder,
-			sysin.CollectEventStatusFailed,
-		}).
-		OrderAsc("source_message_id").
-		Limit(10).
-		All()
-	if err != nil {
-		return gerror.Wrap(err, "读取待补回验证视频失败")
-	}
-	for _, candidate := range rows {
-		classification, classifyErr := s.classifyCollectEvent(ctx, candidate, nil)
-		if classifyErr != nil {
-			return classifyErr
-		}
-		if classification.Kind != profileMessageKindVerify || candidate["source_message_id"].Int64() != lastMessageId+1 {
-			continue
-		}
-		verifyMediaJSON := collectMediaJSONWithPurpose(candidate["media_json"].String(), "verify")
-		mediaJSON, mediaCount := mergeCollectMediaJSON(event["media_json"].String(), verifyMediaJSON)
-		if _, err = pdao.YoubanPublishCollectReview.Ctx(ctx).Where("id", reviewId).Data(g.Map{
-			"media_json":  mediaJSON,
-			"media_count": mediaCount,
-			"updated_at":  gtime.Now(),
-		}).Update(); err != nil {
-			return gerror.Wrap(err, "补回验证视频到审核失败")
-		}
-		if _, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", candidate["id"].Int64()).Data(g.Map{
-			"status":        sysin.CollectEventStatusProcessed,
-			"error_message": "",
-			"processed_at":  gtime.Now(),
-			"updated_at":    gtime.Now(),
-		}).Update(); err != nil {
-			return gerror.Wrap(err, "更新补回验证视频事件失败")
-		}
-		s.appendCollectEventLogForRecord(ctx, candidate, "verify", "attached", "验证视频已补回到审核资料", fmt.Sprintf("review=%d", reviewId))
-		break
-	}
-	return nil
 }
