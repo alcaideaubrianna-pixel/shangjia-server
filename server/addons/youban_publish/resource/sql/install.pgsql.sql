@@ -1643,6 +1643,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_bucket" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_media_phash_bucket_media_pos" ON "hg_youban_publish_media_phash_bucket" ("media_id", "bucket_pos");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_bucket_lookup" ON "hg_youban_publish_media_phash_bucket" ("tenant_id", "media_type", "bucket_pos", "bucket_value", "account_id", "profile_id", "task_id", "media_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_bucket_search" ON "hg_youban_publish_media_phash_bucket" ("tenant_id", "media_type", "bucket_pos", "bucket_value") INCLUDE ("media_id", "profile_id", "account_id", "hash_value");
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_bucket_profile_id" ON "hg_youban_publish_media_phash_bucket" ("profile_id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_lsh" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -1660,6 +1661,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_lsh" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_media_phash_lsh_media_pos" ON "hg_youban_publish_media_phash_lsh" ("media_id", "bucket_pos");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_lsh_search" ON "hg_youban_publish_media_phash_lsh" ("tenant_id", "media_type", "bucket_pos", "bucket_value") INCLUDE ("media_id", "profile_id", "account_id", "hash_value");
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_lsh_profile_id" ON "hg_youban_publish_media_phash_lsh" ("profile_id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_success_record" (
   "id" BIGSERIAL PRIMARY KEY, "job_id" bigint NOT NULL DEFAULT 0, "task_id" bigint NOT NULL DEFAULT 0,

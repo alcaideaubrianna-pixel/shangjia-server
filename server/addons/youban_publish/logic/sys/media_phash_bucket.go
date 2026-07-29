@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -11,16 +12,20 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"golang.org/x/sync/singleflight"
 	"hotgo/internal/library/cache"
 )
 
 const (
-	mediaPHashBucketCacheVersionKey = "youban_publish:media_phash_bucket:version:v2"
-	mediaPHashBucketResultTTL       = 10 * time.Minute
-	mediaPHashBucketMaxCandidates   = 50000
-	mediaPHashBucketMaxScopedIds    = 32
-	mediaPHashCandidateWorkMem      = "64MB"
+	mediaPHashBucketCacheVersionKey  = "youban_publish:media_phash_bucket:version:v3"
+	mediaPHashBucketResultTTL        = 365 * 24 * time.Hour
+	mediaPHashBucketMaxCandidates    = 50000
+	mediaPHashBucketMaxScopedIds     = 32
+	mediaPHashCandidateWorkMem       = "64MB"
+	mediaPHashProfileDeleteBatchSize = 500
 )
+
+var mediaPHashBucketCandidateGroup singleflight.Group
 
 func (s *sSysPublish) syncMediaPHashBucketByMediaId(ctx context.Context, mediaId int64) error {
 	if mediaId <= 0 {
@@ -165,11 +170,11 @@ func bumpMediaPHashBucketVersion(ctx context.Context, tenantId int64, accountId 
 	if tenantId <= 0 {
 		return nil
 	}
-	if err := cache.Instance().Set(ctx, mediaPHashBucketTenantVersionKey(tenantId), version, 24*time.Hour); err != nil {
+	if err := cache.Instance().Set(ctx, mediaPHashBucketTenantVersionKey(tenantId), version, mediaPHashBucketResultTTL); err != nil {
 		return err
 	}
 	if accountId > 0 {
-		return cache.Instance().Set(ctx, mediaPHashBucketAccountVersionKey(tenantId, accountId), version, 24*time.Hour)
+		return cache.Instance().Set(ctx, mediaPHashBucketAccountVersionKey(tenantId, accountId), version, mediaPHashBucketResultTTL)
 	}
 	return nil
 }
@@ -182,14 +187,36 @@ func (s *sSysPublish) deleteMediaPHashBucketByProfileId(ctx context.Context, pro
 	if err != nil {
 		return err
 	}
-	_, err = g.DB().Model(publishMediaPHashBucketTable).Safe().Ctx(ctx).Where("profile_id", profileId).Delete()
-	if err != nil {
+	if err = deleteMediaPHashRowsByProfileId(ctx, publishMediaPHashBucketTable, profileId); err != nil {
 		return gerror.Wrap(err, "删除资料哈希索引失败")
 	}
-	if _, err = g.DB().Model(publishMediaPHashLshTable).Safe().Ctx(ctx).Where("profile_id", profileId).Delete(); err != nil {
+	if err = deleteMediaPHashRowsByProfileId(ctx, publishMediaPHashLshTable, profileId); err != nil {
 		return gerror.Wrap(err, "删除资料LSH索引失败")
 	}
 	return bumpMediaPHashBucketVersions(ctx, owners)
+}
+
+func deleteMediaPHashRowsByProfileId(ctx context.Context, table string, profileId int64) error {
+	for {
+		result, err := g.DB().Exec(ctx, fmt.Sprintf(`
+DELETE FROM %s
+WHERE id IN (
+    SELECT id FROM %s
+    WHERE profile_id = ?
+    ORDER BY id
+    LIMIT ?
+)`, table, table), profileId, mediaPHashProfileDeleteBatchSize)
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected < mediaPHashProfileDeleteBatchSize {
+			return nil
+		}
+	}
 }
 
 type mediaPHashBucketOwner struct {
@@ -226,16 +253,48 @@ func mediaPHashBucketCandidateRows(ctx context.Context, normalizedHash string, t
 }
 
 func mediaPHashBucketCandidateRowsWithScopes(ctx context.Context, normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) ([]mediaPHashBucketCandidateRow, error) {
+	normalizedHash = strings.TrimSpace(strings.ToLower(normalizedHash))
+	if normalizedHash == "" {
+		return []mediaPHashBucketCandidateRow{}, nil
+	}
+	cacheKey := mediaPHashBucketCandidateCacheKey(ctx, normalizedHash, threshold, scopes, profileIds, mediaType, excludeProfileId)
+	if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
+		var cached []mediaPHashBucketCandidateRow
+		if scanErr := value.Scan(&cached); scanErr == nil {
+			return cached, nil
+		}
+	}
+	result, err, _ := mediaPHashBucketCandidateGroup.Do(cacheKey, func() (any, error) {
+		if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {
+			var cached []mediaPHashBucketCandidateRow
+			if scanErr := value.Scan(&cached); scanErr == nil {
+				return cached, nil
+			}
+		}
+		rows, queryErr := mediaPHashBucketCandidateRowsWithScopesUncached(ctx, normalizedHash, threshold, scopes, profileIds, mediaType, excludeProfileId)
+		if queryErr != nil {
+			return nil, queryErr
+		}
+		_ = cache.Instance().Set(ctx, cacheKey, rows, mediaPHashBucketResultTTL)
+		return rows, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	rows, ok := result.([]mediaPHashBucketCandidateRow)
+	if !ok {
+		return nil, gerror.New("解析媒体哈希候选结果失败")
+	}
+	return rows, nil
+}
+
+func mediaPHashBucketCandidateRowsWithScopesUncached(ctx context.Context, normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) ([]mediaPHashBucketCandidateRow, error) {
 	if mediaPHashLshReady(ctx) && threshold <= 12 {
 		rows, err := mediaPHashLshCandidateRowsWithScopes(ctx, normalizedHash, threshold, scopes, profileIds, mediaType, excludeProfileId)
 		if err == nil {
 			return rows, nil
 		}
 		g.Log().Warningf(ctx, "pHash LSH查询失败，回退旧分桶查询：%v", err)
-	}
-	normalizedHash = strings.TrimSpace(strings.ToLower(normalizedHash))
-	if normalizedHash == "" {
-		return []mediaPHashBucketCandidateRow{}, nil
 	}
 	minEqualNibbles := mediaPHashMinEqualNibbles(threshold)
 	if minEqualNibbles <= 0 {
@@ -297,6 +356,19 @@ LIMIT %d
 		return nil, err
 	}
 	return rows, nil
+}
+
+func mediaPHashBucketCandidateCacheKey(ctx context.Context, normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) string {
+	scopeParts := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		accountIds := uniqueIds(scope.AccountIds)
+		sort.Slice(accountIds, func(i, j int) bool { return accountIds[i] < accountIds[j] })
+		scopeParts = append(scopeParts, fmt.Sprintf("tenant=%d;accounts=%v;version=%s", scope.TenantId, accountIds, mediaPHashBucketVersion(ctx, scope.TenantId, accountIds)))
+	}
+	sort.Strings(scopeParts)
+	ids := uniqueIds(profileIds)
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return "youban_publish:media_phash_bucket:candidates:v3:" + mediaPHashHashKey(fmt.Sprintf("hash=%s|threshold=%d|scopes=%v|profiles=%v|type=%s|exclude=%d", normalizedHash, threshold, scopeParts, ids, strings.ToLower(strings.TrimSpace(mediaType)), excludeProfileId))
 }
 
 func mediaPHashBucketBranchSQL(bucketPos int, bucketValue string, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) (string, []any) {
