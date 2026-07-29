@@ -48,6 +48,7 @@
             :options="botOptions"
             placeholder="筛选 Bot"
             class="youban-bot-user-panel__bot-select"
+            @update:value="handleMessageBotChange"
           />
           <n-input v-model:value="messageQuery.keyword" clearable placeholder="搜索内容/TG 用户" />
           <n-input v-model:value="messageQuery.telegramUserId" clearable placeholder="TG 用户 ID" />
@@ -124,6 +125,7 @@
     page: 1,
     perPage: 10,
     botId: null as number | null,
+    botIds: [] as number[],
     keyword: '',
     telegramUserId: '',
   });
@@ -185,10 +187,10 @@
       render: (row: any) => row.bindAccountName || '-',
     },
     {
-      title: '租户ID',
-      key: 'bindTenantId',
-      width: 100,
-      render: (row: any) => row.bindTenantId || '-',
+      title: '租户账号',
+      key: 'bindTenantUsername',
+      width: 140,
+      render: (row: any) => row.bindTenantUsername || '-',
     },
     { title: '消息数', key: 'messageCount', width: 90 },
     { title: '最后消息', key: 'lastMessageText', minWidth: 220, ellipsis: { tooltip: true } },
@@ -273,13 +275,14 @@
         exists.botUsername = item.botUsername || exists.botUsername;
         exists.chatId = item.chatId || exists.chatId;
         exists.chatType = item.chatType || exists.chatType;
-        exists.messageCount = Math.max(exists.messageCount || 0, item.messageCount || 0);
+        exists.messageCount = (exists.messageCount || 0) + (item.messageCount || 0);
         exists.lastMessageAt = item.lastMessageAt || exists.lastMessageAt;
         exists.lastMessageText = item.lastMessageText || exists.lastMessageText;
         exists.isBound = item.isBound || exists.isBound;
         exists.bindApp = item.bindApp || exists.bindApp;
         exists.bindAccountId = item.bindAccountId || exists.bindAccountId;
         exists.bindTenantId = item.bindTenantId || exists.bindTenantId;
+        exists.bindTenantUsername = item.bindTenantUsername || exists.bindTenantUsername;
         exists.bindAccountName = item.bindAccountName || exists.bindAccountName;
       }
     }
@@ -358,9 +361,16 @@
     loadMessages();
   }
 
+  function handleMessageBotChange() {
+    messageQuery.botIds = [];
+    messagePagination.page = 1;
+  }
+
   function filterMessages(row: any) {
     messageQuery.telegramUserId = row.telegramUserId;
-    messageQuery.botId = row.botId;
+    messageQuery.botId = null;
+    messageQuery.botIds = row.botIds || (row.botId ? [row.botId] : []);
+    messagePagination.page = 1;
     activeTab.value = 'message';
     loadMessages();
   }

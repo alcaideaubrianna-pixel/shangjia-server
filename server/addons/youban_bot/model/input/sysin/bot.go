@@ -130,36 +130,38 @@ type UserListInp struct {
 }
 
 type UserModel struct {
-	Id                int64       `json:"id" dc:"ID"`
-	BotId             int64       `json:"botId" dc:"Bot ID"`
-	BotUsername       string      `json:"botUsername" dc:"Bot用户名"`
-	TelegramUserId    string      `json:"telegramUserId" dc:"TG用户ID"`
-	TelegramUsername  string      `json:"telegramUsername" dc:"TG用户名"`
-	TelegramFirstName string      `json:"telegramFirstName" dc:"TG名"`
-	TelegramLastName  string      `json:"telegramLastName" dc:"TG姓"`
-	ChatId            string      `json:"chatId" dc:"Chat ID"`
-	ChatType          string      `json:"chatType" dc:"Chat类型"`
-	ChatTitle         string      `json:"chatTitle" dc:"Chat标题"`
-	MessageCount      int         `json:"messageCount" dc:"消息数"`
-	LastMessageText   string      `json:"lastMessageText" dc:"最后消息"`
-	LastMessageAt     *gtime.Time `json:"lastMessageAt" dc:"最后消息时间"`
-	IsBound           bool        `json:"isBound" dc:"是否已绑定"`
-	BindApp           string      `json:"bindApp" dc:"绑定应用"`
-	BindAccountId     int64       `json:"bindAccountId" dc:"绑定账号ID"`
-	BindTenantId      int64       `json:"bindTenantId" dc:"绑定租户ID"`
-	BindAccountName   string      `json:"bindAccountName" dc:"绑定账号"`
-	Status            int         `json:"status" dc:"状态"`
-	IsSuperAdmin      int         `json:"isSuperAdmin" dc:"是否超级管理员"`
-	CreatedAt         *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt         *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id                 int64       `json:"id" dc:"ID"`
+	BotId              int64       `json:"botId" dc:"Bot ID"`
+	BotUsername        string      `json:"botUsername" dc:"Bot用户名"`
+	TelegramUserId     string      `json:"telegramUserId" dc:"TG用户ID"`
+	TelegramUsername   string      `json:"telegramUsername" dc:"TG用户名"`
+	TelegramFirstName  string      `json:"telegramFirstName" dc:"TG名"`
+	TelegramLastName   string      `json:"telegramLastName" dc:"TG姓"`
+	ChatId             string      `json:"chatId" dc:"Chat ID"`
+	ChatType           string      `json:"chatType" dc:"Chat类型"`
+	ChatTitle          string      `json:"chatTitle" dc:"Chat标题"`
+	MessageCount       int         `json:"messageCount" dc:"消息数"`
+	LastMessageText    string      `json:"lastMessageText" dc:"最后消息"`
+	LastMessageAt      *gtime.Time `json:"lastMessageAt" dc:"最后消息时间"`
+	IsBound            bool        `json:"isBound" dc:"是否已绑定"`
+	BindApp            string      `json:"bindApp" dc:"绑定应用"`
+	BindAccountId      int64       `json:"bindAccountId" dc:"绑定账号ID"`
+	BindTenantId       int64       `json:"bindTenantId" dc:"绑定租户ID"`
+	BindTenantUsername string      `json:"bindTenantUsername" dc:"绑定租户用户名"`
+	BindAccountName    string      `json:"bindAccountName" dc:"绑定账号"`
+	Status             int         `json:"status" dc:"状态"`
+	IsSuperAdmin       int         `json:"isSuperAdmin" dc:"是否超级管理员"`
+	CreatedAt          *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt          *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type MessageListInp struct {
 	form.PageReq
-	BotId          int64  `json:"botId" dc:"Bot ID"`
-	TelegramUserId string `json:"telegramUserId" dc:"TG用户ID"`
-	Keyword        string `json:"keyword" dc:"关键词"`
-	MessageType    string `json:"messageType" dc:"消息类型"`
+	BotId          int64   `json:"botId" dc:"Bot ID"`
+	BotIds         []int64 `json:"botIds" dc:"Bot ID列表"`
+	TelegramUserId string  `json:"telegramUserId" dc:"TG用户ID"`
+	Keyword        string  `json:"keyword" dc:"关键词"`
+	MessageType    string  `json:"messageType" dc:"消息类型"`
 }
 
 type UserSwitchSuperAdminInp struct {

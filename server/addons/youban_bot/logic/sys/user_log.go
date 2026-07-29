@@ -18,7 +18,11 @@ func (s *sSysBot) AdminUserList(ctx context.Context, in *sysin.UserListInp) (lis
 	if in == nil {
 		in = &sysin.UserListInp{}
 	}
-	mod := g.DB().Model(userTable+" u").Safe().Ctx(ctx).LeftJoin(botTable+" b", "b.id=u.bot_id").Fields("u.*,b.bot_username")
+	messageCounts := "(SELECT bot_id,telegram_user_id,COUNT(*) AS message_count FROM " + messageTable + " GROUP BY bot_id,telegram_user_id) mc"
+	mod := g.DB().Model(userTable+" u").Safe().Ctx(ctx).
+		LeftJoin(botTable+" b", "b.id=u.bot_id").
+		LeftJoin(messageCounts, "mc.bot_id=u.bot_id AND mc.telegram_user_id=u.telegram_user_id").
+		Fields("u.id,u.bot_id,b.bot_username,u.telegram_user_id,u.telegram_username,u.telegram_first_name,u.telegram_last_name,u.chat_id,u.chat_type,u.chat_title,COALESCE(mc.message_count,0) AS message_count,u.last_message_text,u.last_message_at,u.status,u.is_super_admin,u.created_at,u.updated_at")
 	if in.BotId > 0 {
 		mod = mod.Where("u.bot_id", in.BotId)
 	}
@@ -59,6 +63,8 @@ func (s *sSysBot) AdminMessageList(ctx context.Context, in *sysin.MessageListInp
 	mod := g.DB().Model(messageTable+" m").Safe().Ctx(ctx).LeftJoin(botTable+" b", "b.id=m.bot_id").Fields("m.*,b.bot_username")
 	if in.BotId > 0 {
 		mod = mod.Where("m.bot_id", in.BotId)
+	} else if len(in.BotIds) > 0 {
+		mod = mod.WhereIn("m.bot_id", in.BotIds)
 	}
 	if telegramUserId := strings.TrimSpace(in.TelegramUserId); telegramUserId != "" {
 		mod = mod.Where("m.telegram_user_id", telegramUserId)
@@ -107,6 +113,7 @@ func (s *sSysBot) packUserBinding(ctx context.Context, item *sysin.UserModel, pr
 		return err
 	}
 	item.BindTenantId = account.TenantId
+	item.BindTenantUsername = account.Username
 	item.BindAccountName = firstNonEmpty(account.Nickname, account.Username)
 	if item.BindApp == "" {
 		item.BindApp = consts.AppApi

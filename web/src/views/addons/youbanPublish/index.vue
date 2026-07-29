@@ -74,6 +74,43 @@
           />
         </n-tab-pane>
 
+        <n-tab-pane name="channels" tab="上架频道">
+          <n-space class="toolbar" align="center">
+            <n-select
+              v-model:value="channelQuery.tenantId"
+              :options="tenantOptionsWithAll"
+              clearable
+              filterable
+              placeholder="归属租户账号"
+              class="tenant-select"
+            />
+            <n-input
+              v-model:value="channelQuery.keyword"
+              placeholder="频道名称 / 用户名 / Chat ID"
+              clearable
+              @keyup.enter="loadChannels"
+            />
+            <n-select
+              v-model:value="channelQuery.status"
+              :options="statusOptionsWithAll"
+              clearable
+              placeholder="状态"
+              class="status-select"
+            />
+            <n-button @click="loadChannels">查询</n-button>
+          </n-space>
+          <n-data-table
+            :columns="channelColumns"
+            :data="channels"
+            :loading="channelLoading"
+            :pagination="channelPagination"
+            :row-key="(row) => row.id"
+            :scroll-x="1480"
+            size="small"
+            remote
+          />
+        </n-tab-pane>
+
         <n-tab-pane name="profiles" tab="笔记资料">
           <ProfilePanel />
         </n-tab-pane>
@@ -564,6 +601,7 @@
     AdminTgAccountList,
     ConfigGet,
     ConfigUpdate,
+    ChannelList,
     TenantDelete,
     TenantList,
     TenantSave,
@@ -605,11 +643,13 @@
 
   const tenants = ref<any[]>([]);
   const accounts = ref<any[]>([]);
+  const channels = ref<any[]>([]);
   const tags = ref<any[]>([]);
   const bots = ref<any[]>([]);
 
   const tenantLoading = ref(false);
   const accountLoading = ref(false);
+  const channelLoading = ref(false);
   const tagLoading = ref(false);
   const botLoading = ref(false);
   const botRefreshing = ref(false);
@@ -632,6 +672,12 @@
     keyword: '',
     status: 0,
   });
+  const channelQuery = reactive({
+    tenantId: null as number | null,
+    keyword: '',
+    status: 0,
+    publishDirection: 'up',
+  });
   const tagQuery = reactive({ keyword: '', reviewStatus: '', status: 0 });
   const botQuery = reactive({ tenantId: null as number | null, keyword: '', status: 0 });
   const inviteQuery = reactive({ keyword: '', source: '', status: '' });
@@ -639,6 +685,7 @@
 
   const tenantPagination = createPagination(loadTenants);
   const accountPagination = createPagination(loadAccounts);
+  const channelPagination = createPagination(loadChannels, 20);
   const tagPagination = createPagination(loadTags, 20);
   const botPagination = createPagination(loadBots);
   const invitePagination = createPagination(loadInviteRelations, 20);
@@ -822,6 +869,39 @@
         );
       },
     },
+  ];
+
+  const channelColumns = [
+    { title: 'ID', key: 'id', width: 80 },
+    {
+      title: '归属租户账号',
+      key: 'tenantUsername',
+      width: 170,
+      render: (row) => row.tenantUsername || tenantName(row.tenantId),
+    },
+    { title: '频道名称', key: 'channelTitle', width: 220 },
+    {
+      title: '频道用户名',
+      key: 'channelUsername',
+      width: 180,
+      render: (row) => (row.channelUsername ? `@${row.channelUsername}` : '-'),
+    },
+    { title: '目标 Chat ID', key: 'targetChatId', width: 180 },
+    {
+      title: 'TG账号',
+      key: 'tgAccountName',
+      width: 180,
+      render: (row) => row.tgAccountName || row.tgAccountId || '-',
+    },
+    {
+      title: '循环上架',
+      key: 'cyclePublishEnabled',
+      width: 100,
+      render: (row) => (row.cyclePublishEnabled === 1 ? '开启' : '关闭'),
+    },
+    { title: '循环天数', key: 'cyclePublishDays', width: 100 },
+    { title: '状态', key: 'status', width: 100, render: (row) => renderStatus(row.status) },
+    { title: '更新时间', key: 'updatedAt', width: 180 },
   ];
 
   const botColumns = [
@@ -1023,7 +1103,7 @@
   });
 
   function createPagination(loader: () => void, pageSize = 10) {
-    const pagination: any = {
+    const pagination: any = reactive({
       page: 1,
       pageSize,
       itemCount: 0,
@@ -1038,7 +1118,7 @@
         pagination.page = 1;
         loader();
       },
-    };
+    });
     return pagination;
   }
 
@@ -1055,6 +1135,7 @@
     if (tab === 'dashboard') return;
     if (tab === 'importTasks') return;
     if (tab === 'accounts') await loadAccounts();
+    if (tab === 'channels') await loadChannels();
     if (tab === 'tags') await loadTags();
     if (tab === 'bots') await loadBots();
     if (tab === 'inviteRelations') await loadInviteRelations();
@@ -1109,6 +1190,21 @@
       accountPagination.itemCount = res?.totalCount || res?.total || 0;
     } finally {
       accountLoading.value = false;
+    }
+  }
+
+  async function loadChannels() {
+    channelLoading.value = true;
+    try {
+      const res: any = await ChannelList({
+        ...channelQuery,
+        page: channelPagination.page,
+        perPage: channelPagination.pageSize,
+      });
+      channels.value = res?.list || [];
+      channelPagination.itemCount = res?.totalCount || res?.total || 0;
+    } finally {
+      channelLoading.value = false;
     }
   }
 

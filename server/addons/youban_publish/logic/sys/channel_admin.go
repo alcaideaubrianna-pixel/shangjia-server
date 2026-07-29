@@ -41,6 +41,9 @@ func (s *sSysPublish) AdminChannelList(ctx context.Context, in *sysin.ChannelLis
 	if list == nil {
 		list = []*sysin.ChannelModel{}
 	}
+	if err = s.applyChannelTenantUsernames(ctx, list); err != nil {
+		return nil, 0, err
+	}
 	applyChannelBotIds(list)
 	return list, totalCount, nil
 }
@@ -76,6 +79,9 @@ func (s *sSysPublish) MyChannelList(ctx context.Context, in *sysin.ChannelListIn
 	if list == nil {
 		list = []*sysin.ChannelModel{}
 	}
+	if err = s.applyChannelTenantUsernames(ctx, list); err != nil {
+		return nil, 0, err
+	}
 	applyChannelBotIds(list)
 	return list, totalCount, nil
 }
@@ -101,6 +107,9 @@ func (s *sSysPublish) ServerChannelList(ctx context.Context, in *sysin.ChannelLi
 	}
 	if list == nil {
 		list = []*sysin.ChannelModel{}
+	}
+	if err = s.applyChannelTenantUsernames(ctx, list); err != nil {
+		return nil, 0, err
 	}
 	applyChannelBotIds(list)
 	return list, totalCount, nil
@@ -472,6 +481,25 @@ func (s *sSysPublish) channelBaseModel(ctx context.Context) *gdb.Model {
 	return g.DB().Model(publishChannelTable+" c").Safe().Ctx(ctx).
 		LeftJoin(publishTgAccountTable+" ta", "ta.id=c.tg_account_id AND ta.deleted_at IS NULL").
 		WhereNull("c.deleted_at")
+}
+
+func (s *sSysPublish) applyChannelTenantUsernames(ctx context.Context, list []*sysin.ChannelModel) error {
+	tenantIds := make([]int64, 0, len(list))
+	for _, item := range list {
+		if item != nil && item.TenantId > 0 {
+			tenantIds = append(tenantIds, item.TenantId)
+		}
+	}
+	names, err := s.tenantOwnerNames(ctx, tenantIds)
+	if err != nil {
+		return err
+	}
+	for _, item := range list {
+		if item != nil {
+			item.TenantUsername = names[item.TenantId]
+		}
+	}
+	return nil
 }
 
 func applyChannelFilters(mod *gdb.Model, in *sysin.ChannelListInp) *gdb.Model {

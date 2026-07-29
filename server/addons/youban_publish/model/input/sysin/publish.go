@@ -1123,6 +1123,7 @@ type ChannelListInp struct {
 type ChannelModel struct {
 	Id                  int64       `json:"id" dc:"ID"`
 	TenantId            int64       `json:"tenantId" dc:"租户ID"`
+	TenantUsername      string      `json:"tenantUsername" dc:"归属租户账号"`
 	TgAccountId         int64       `json:"tgAccountId" dc:"TG账号ID"`
 	TgAccountName       string      `json:"tgAccountName" dc:"TG账号名称"`
 	ChannelTitle        string      `json:"channelTitle" dc:"频道名称"`
