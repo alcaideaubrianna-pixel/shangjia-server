@@ -74,8 +74,9 @@ func (s *sSysPublish) syncCollectSourceQueueWorkers(ctx context.Context) {
 
 func (s *sSysPublish) startCollectSourceQueueWorker(ctx context.Context, sourceId int64) *collectSourceQueueWorker {
 	mediaQueue := collectSourceQueueName(tgQueueNameCollectMedia, sourceId)
+	concurrency := collectMediaQueueConcurrency(ctx)
 	mediaServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 8).Int(),
+		Concurrency:    concurrency,
 		Queues:         map[string]int{mediaQueue: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
@@ -86,6 +87,17 @@ func (s *sSysPublish) startCollectSourceQueueWorker(ctx context.Context, sourceI
 			g.Log().Errorf(ctx, "启动采集源媒体队列失败 sourceId:%d err:%+v", sourceId, err)
 		}
 	}()
-	g.Log().Infof(ctx, "启动采集源媒体队列 sourceId:%d media:%s concurrency:%d", sourceId, mediaQueue, g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 8).Int())
+	g.Log().Infof(ctx, "启动采集源媒体队列 sourceId:%d media:%s concurrency:%d", sourceId, mediaQueue, concurrency)
 	return &collectSourceQueueWorker{media: mediaServer}
+}
+
+func collectMediaQueueConcurrency(ctx context.Context) int {
+	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 2).Int()
+	if concurrency < 1 {
+		return 1
+	}
+	if concurrency > 4 {
+		return 4
+	}
+	return concurrency
 }

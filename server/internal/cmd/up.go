@@ -83,6 +83,8 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.CleanupYoubanPublishProfileTasks(ctx)
 	case "collectEventRequeue":
 		err = fix.RequeueYoubanPublishCollectEvents(ctx)
+	case "collectQueueMigrate":
+		err = fix.MigrateYoubanPublishCollectQueue(ctx)
 	case "collectMaterialRebuild":
 		err = fix.RebuildYoubanPublishCollectMaterialGroups(ctx)
 	default:

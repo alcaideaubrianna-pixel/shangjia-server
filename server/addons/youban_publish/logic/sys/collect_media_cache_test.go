@@ -1,6 +1,28 @@
 package sys
 
-import "testing"
+import (
+	"errors"
+	"testing"
+	"time"
+)
+
+func TestCollectMediaFileReferenceExpiredIsDelayed(t *testing.T) {
+	retry := collectMediaRetryErrorFrom(errors.New("rpc error: FILE_REFERENCE_EXPIRED"))
+	if retry == nil {
+		t.Fatal("expected expired file reference to be retryable")
+	}
+	if retry.delay != 2*time.Minute {
+		t.Fatalf("retry delay = %s, want 2m", retry.delay)
+	}
+}
+
+func TestGotdMediaCacheAssetKeyIgnoresFileReference(t *testing.T) {
+	first := gotdMediaCacheAssetKey(gotdCollectMediaMeta{Kind: "photo", Id: 1, AccessHash: 2, FileReference: []byte("old"), Size: 3})
+	second := gotdMediaCacheAssetKey(gotdCollectMediaMeta{Kind: "photo", Id: 1, AccessHash: 2, FileReference: []byte("new"), Size: 3})
+	if first != second {
+		t.Fatalf("cache asset key changed with file reference: %q != %q", first, second)
+	}
+}
 
 func TestCollectMediaErrorIsRateLimited(t *testing.T) {
 	tests := []struct {

@@ -25,7 +25,7 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	mediaServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 8).Int(),
+		Concurrency:    collectMediaQueueConcurrency(ctx),
 		Queues:         map[string]int{tgQueueNameMedia: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
