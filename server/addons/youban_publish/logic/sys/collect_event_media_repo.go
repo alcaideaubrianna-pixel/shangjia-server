@@ -236,6 +236,9 @@ func collectMediaRowsToItems(rows []*entity.YoubanPublishCollectEventMedia, purp
 			continue
 		}
 		fileId := strings.TrimSpace(row.SourceFileId)
+		if fileId == "" {
+			fileId = strings.TrimSpace(row.SourceMessageRef)
+		}
 		if row.BackupChatId != "" && row.BackupMessageId > 0 {
 			fileId = telegramCopyMediaFileId(row.BackupChatId, int(row.BackupMessageId))
 		}

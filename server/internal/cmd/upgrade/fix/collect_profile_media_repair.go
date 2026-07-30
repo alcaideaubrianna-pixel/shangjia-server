@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -40,13 +41,13 @@ type collectProfileMediaRepairMedia struct {
 // whose stored media is missing. Recoverable notes are sent back through the
 // normal collection media pipeline; notes without any source reference are
 // soft-deleted together with their derived media and indexes.
-func RepairYoubanPublishCollectProfileMedia(ctx context.Context) error {
+func RepairYoubanPublishCollectProfileMedia(ctx context.Context, profileIds []int64) error {
 	lastId := int64(0)
 	repaired := 0
 	deleted := 0
 	scanned := 0
 	for {
-		profiles, err := collectProfileMediaRepairProfiles(ctx, lastId, collectProfileMediaRepairBatchSize)
+		profiles, err := collectProfileMediaRepairProfiles(ctx, lastId, collectProfileMediaRepairBatchSize, profileIds)
 		if err != nil {
 			return err
 		}
@@ -94,14 +95,19 @@ func RepairYoubanPublishCollectProfileMedia(ctx context.Context) error {
 	return nil
 }
 
-func collectProfileMediaRepairProfiles(ctx context.Context, lastId int64, limit int) ([]collectProfileMediaRepairProfile, error) {
+func collectProfileMediaRepairProfiles(ctx context.Context, lastId int64, limit int, profileIds []int64) ([]collectProfileMediaRepairProfile, error) {
 	rows := make([]collectProfileMediaRepairProfile, 0)
-	err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
-		Fields("id,tenant_id,source_key").
-		Where("source_type", "youban_collect").
-		WhereNull("deleted_at").
-		WhereGT("id", lastId).
-		OrderAsc("id").
+	mod := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
+		Fields("p.id,ps.tenant_id,p.source_key").
+		InnerJoin("hg_youban_publish_profile_state ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
+		Where("p.source_type", "youban_collect").
+		WhereNull("p.deleted_at").
+		WhereGT("p.id", lastId)
+	if len(profileIds) > 0 {
+		mod = mod.WhereIn("p.id", profileIds)
+	}
+	err := mod.
+		OrderAsc("p.id").
 		Limit(limit).
 		Scan(&rows)
 	if err != nil {
@@ -240,17 +246,22 @@ func repairCollectProfileMediaSource(ctx context.Context, profile collectProfile
 		return 0, false, nil
 	}
 	now := gtime.Now()
+	recoveryUpdatedAt := now.Add(-3*time.Minute - time.Second)
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if _, txErr := tx.Model("hg_youban_publish_collect_event_media").Safe().Ctx(ctx).
 			Where("event_id", event.Id).
 			Data(g.Map{
-				"cache_status":  "pending",
-				"file_url":      "",
-				"storage_path":  "",
-				"poster_url":    "",
-				"next_retry_at": nil,
-				"error_message": "历史资料媒体缺失，已重新排队补下载",
-				"updated_at":    now,
+				"cache_status":         "pending",
+				"cache_hit":            0,
+				"download_duration_ms": 0,
+				"download_bytes":       0,
+				"download_error_type":  "",
+				"file_url":             "",
+				"storage_path":         "",
+				"poster_url":           "",
+				"next_retry_at":        nil,
+				"error_message":        "历史资料媒体缺失，已重新排队补下载",
+				"updated_at":           recoveryUpdatedAt,
 			}).Update(); txErr != nil {
 			return gerror.Wrap(txErr, "重置历史采集媒体失败")
 		}
@@ -260,7 +271,7 @@ func repairCollectProfileMediaSource(ctx context.Context, profile collectProfile
 				"status":        "media_pending",
 				"processed_at":  nil,
 				"error_message": "历史资料媒体缺失，已重新排队补下载",
-				"updated_at":    now,
+				"updated_at":    recoveryUpdatedAt,
 			}).Update()
 		return txErr
 	})

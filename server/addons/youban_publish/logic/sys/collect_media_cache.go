@@ -359,7 +359,7 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 	fileSlots := make(chan struct{}, accountCollectMediaConcurrency(ctx))
 	var downloadWait sync.WaitGroup
 	for index, row := range rows {
-		if row == nil || !collectMediaRowNeedsCache(row.SourceFileId, row.StoragePath, row.FileUrl, row.BackupChatId, row.BackupMessageId) {
+		if row == nil || !collectMediaRowNeedsCache(row.SourceFileId, row.SourceMessageRef, row.StoragePath, row.FileUrl, row.BackupChatId, row.BackupMessageId) {
 			continue
 		}
 		reuseStartedAt := time.Now()
@@ -733,15 +733,19 @@ func (s *sSysPublish) collectEventNeedsMediaCache(ctx context.Context, event gdb
 		if row == nil {
 			continue
 		}
-		if collectMediaRowNeedsCache(row.SourceFileId, row.StoragePath, row.FileUrl, row.BackupChatId, row.BackupMessageId) {
+		if collectMediaRowNeedsCache(row.SourceFileId, row.SourceMessageRef, row.StoragePath, row.FileUrl, row.BackupChatId, row.BackupMessageId) {
 			return true
 		}
 	}
 	return false
 }
 
-func collectMediaRowNeedsCache(sourceFileId string, storagePath string, fileUrl string, backupChatId string, backupMessageId int64) bool {
-	return strings.HasPrefix(strings.TrimSpace(sourceFileId), "gotd:") &&
+func collectMediaRowNeedsCache(sourceFileId string, sourceMessageRef string, storagePath string, fileUrl string, backupChatId string, backupMessageId int64) bool {
+	sourceRef := strings.TrimSpace(sourceFileId)
+	if sourceRef == "" {
+		sourceRef = strings.TrimSpace(sourceMessageRef)
+	}
+	return strings.HasPrefix(sourceRef, "gotd:") &&
 		strings.TrimSpace(storagePath) == "" &&
 		strings.TrimSpace(fileUrl) == "" &&
 		!(strings.TrimSpace(backupChatId) != "" && backupMessageId > 0)

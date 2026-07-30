@@ -91,7 +91,11 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 	case "collectMediaRetryState":
 		err = fix.ApplyYoubanPublishCollectMediaRetryState(ctx)
 	case "collectProfileMediaRepair":
-		err = fix.RepairYoubanPublishCollectProfileMedia(ctx)
+		profileIds, parseErr := fix.ParseMaterialImportRepairGroupIDs(args["a2"])
+		if parseErr != nil {
+			return gerror.New("collectProfileMediaRepair 的 a2 必须是逗号分隔的有效资料ID")
+		}
+		err = fix.RepairYoubanPublishCollectProfileMedia(ctx, profileIds)
 	case "collectProfileMediaDedupe":
 		err = fix.DedupeYoubanPublishCollectProfileMedia(ctx)
 	case "collectMediaCDNRepair":

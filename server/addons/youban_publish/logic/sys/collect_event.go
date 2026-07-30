@@ -625,7 +625,7 @@ func (s *sSysPublish) collectEventMediaReady(ctx context.Context, eventId int64)
 		if row == nil {
 			continue
 		}
-		if collectMediaRowNeedsCache(row.SourceFileId, row.StoragePath, row.FileUrl, row.BackupChatId, row.BackupMessageId) {
+		if collectMediaRowNeedsCache(row.SourceFileId, row.SourceMessageRef, row.StoragePath, row.FileUrl, row.BackupChatId, row.BackupMessageId) {
 			return false, nil
 		}
 	}

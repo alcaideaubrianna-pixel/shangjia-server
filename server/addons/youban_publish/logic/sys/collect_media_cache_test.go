@@ -3,6 +3,8 @@ package sys
 import (
 	"errors"
 	"testing"
+
+	"hotgo/addons/youban_publish/internal/model/entity"
 )
 
 func TestCollectMediaFileReferenceExpiredIsTerminal(t *testing.T) {
@@ -56,5 +58,24 @@ func TestCollectTelegramMediaCacheSource(t *testing.T) {
 	item.FileId = "bot-file-id"
 	if got := collectTelegramMediaCacheSource(item, 7); got != "gotd:account:7:bot-file-id" {
 		t.Fatalf("collectTelegramMediaCacheSource() fallback = %q", got)
+	}
+}
+
+func TestCollectMediaRowNeedsCacheSupportsMessageReference(t *testing.T) {
+	if !collectMediaRowNeedsCache("", "gotd:-100123:456", "", "", "", 0) {
+		t.Fatal("expected source message reference to trigger media cache")
+	}
+	if collectMediaRowNeedsCache("", "gotd:-100123:456", "storage/cache/media.jpg", "", "", 0) {
+		t.Fatal("did not expect an existing storage path to trigger media cache")
+	}
+}
+
+func TestCollectMediaRowsToItemsUsesMessageReference(t *testing.T) {
+	items := collectMediaRowsToItems([]*entity.YoubanPublishCollectEventMedia{{
+		SourceMessageRef: "gotd:-100123:456",
+		MediaType:        "photo",
+	}}, "display")
+	if len(items) != 1 || items[0].FileId != "gotd:-100123:456" {
+		t.Fatalf("unexpected media items: %+v", items)
 	}
 }
