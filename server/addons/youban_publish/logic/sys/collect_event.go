@@ -546,6 +546,11 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		if rule["review_enabled"].Int() == 1 && existingDispatch["review_id"].Int64() <= 0 {
 			return true, "", s.createCollectReview(ctx, event, content, rule, existingDispatch["id"].Int64(), decision.Text)
 		}
+		if profileId := existingDispatch["profile_id"].Int64(); profileId > 0 {
+			if _, err = s.upsertCollectProfile(ctx, event, content, rule, decision.Text); err != nil {
+				return false, "", err
+			}
+		}
 		return true, "", nil
 	}
 	now := gtime.Now()
