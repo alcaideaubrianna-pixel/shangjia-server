@@ -61,7 +61,8 @@ func (s *sSysPublish) RepairMaterialImportMissingMedia(ctx context.Context, acco
 			}
 			continue
 		}
-		if group.Status != sysin.MaterialImportStatusSuccess && group.Status != sysin.MaterialImportStatusPending {
+		explicitFailedRetry := group.Status == sysin.MaterialImportStatusFailed && len(selectedGroups) > 0
+		if group.Status != sysin.MaterialImportStatusSuccess && group.Status != sysin.MaterialImportStatusPending && !explicitFailedRetry {
 			continue
 		}
 		var items []collectMediaItem
@@ -138,11 +139,22 @@ func (s *sSysPublish) deleteMaterialImportExpiredProfile(ctx context.Context, gr
 	now := gtime.Now()
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if group.ProfileId > 0 {
-			profile, err := tx.Model("hg_content_profile").Safe().Ctx(ctx).
-				Fields("id,tenant_id,account_id").
-				Where("id", group.ProfileId).
+			state, err := tx.Model("hg_youban_publish_profile_state").Safe().Ctx(ctx).
+				Fields("profile_id").
+				Where("profile_id", group.ProfileId).
 				Where("tenant_id", group.TenantId).
 				Where("account_id", group.AccountId).
+				WhereNull("deleted_at").
+				One()
+			if err != nil {
+				return gerror.Wrap(err, "校验待删除TG导入资料归属失败")
+			}
+			if state.IsEmpty() {
+				return gerror.Newf("待删除TG导入资料不存在或归属不匹配 profileId:%d", group.ProfileId)
+			}
+			profile, err := tx.Model("hg_content_profile").Safe().Ctx(ctx).
+				Fields("id").
+				Where("id", group.ProfileId).
 				WhereNull("deleted_at").
 				One()
 			if err != nil {
