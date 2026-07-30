@@ -364,6 +364,10 @@ func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAcco
 					g.Log().Warningf(runCtx, "复用TG历史消息触发Telegram限流，交给队列等待重试 tgAccountId:%d templateHash:%s wait:%s err:%v", tgAccountId, templateHash, delay, forwardErr)
 					return forwardErr
 				}
+				if isTelegramChannelPermissionError(forwardErr) {
+					g.Log().Errorf(runCtx, "TG目标频道权限异常，停止历史消息回退上传 tgAccountId:%d templateHash:%s err:%v", tgAccountId, templateHash, forwardErr)
+					return forwardErr
+				}
 				g.Log().Warningf(runCtx, "复用TG历史消息转发失败，回退上传 tgAccountId:%d templateHash:%s err:%v", tgAccountId, templateHash, forwardErr)
 			}
 		}

@@ -116,6 +116,27 @@ func isTelegramPermanentSendError(err error) bool {
 	return false
 }
 
+func isTelegramChannelPermissionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, part := range []string{
+		"user_banned_in_channel",
+		"user banned in channel",
+		"chat_write_forbidden",
+		"channel_private",
+		"not enough rights",
+		"have no rights",
+		"restricted in this chat",
+	} {
+		if strings.Contains(message, part) {
+			return true
+		}
+	}
+	return false
+}
+
 func telegramPermanentSendErrorMessage(err error) string {
 	if err == nil {
 		return "Telegram 发送遇到不可恢复错误，已停止该任务并释放频道队列"

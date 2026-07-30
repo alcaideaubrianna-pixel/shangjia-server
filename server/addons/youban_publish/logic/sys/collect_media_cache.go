@@ -427,11 +427,16 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			if err != nil {
 				downloadDuration := time.Since(startedAt).Milliseconds()
 				errorType := collectMediaErrorType(err.Error())
-				g.Log().Errorf(ctx, "账号采集媒体下载失败 eventId:%d mediaId:%d sourceMessageId:%d duration:%s err:%+v", event["id"].Int64(), row.Id, row.SourceMessageId, time.Since(startedAt).Round(time.Millisecond), err)
+				retryErr := collectMediaRetryErrorFrom(err)
+				if retryErr != nil {
+					g.Log().Warningf(ctx, "账号采集媒体下载暂不可用，等待自动重试 eventId:%d mediaId:%d sourceMessageId:%d duration:%s err:%+v", event["id"].Int64(), row.Id, row.SourceMessageId, time.Since(startedAt).Round(time.Millisecond), err)
+				} else {
+					g.Log().Errorf(ctx, "账号采集媒体下载失败 eventId:%d mediaId:%d sourceMessageId:%d duration:%s err:%+v", event["id"].Int64(), row.Id, row.SourceMessageId, time.Since(startedAt).Round(time.Millisecond), err)
+				}
 				if collectMediaAuthBytesInvalid(err) {
 					s.restartAccountCollectWorker(ctx, event["tg_account_id"].Int64(), err)
 				}
-				if retryErr := collectMediaRetryErrorFrom(err); retryErr != nil {
+				if retryErr != nil {
 					_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
 						"cache_status":          collectMediaCachePending,
 						"download_duration_ms":  downloadDuration,

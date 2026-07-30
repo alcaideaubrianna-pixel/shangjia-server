@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -28,6 +29,46 @@ type accountCollectCircuit struct {
 	updatedAt    time.Time
 	recoveredAt  time.Time
 	recoveries   int
+}
+
+type accountCollectCircuitSnapshot struct {
+	Failures     int       `json:"failures"`
+	BlockedUntil time.Time `json:"blockedUntil"`
+	Permanent    bool      `json:"permanent"`
+	Status       string    `json:"status"`
+	LastMessage  string    `json:"lastMessage"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+	RecoveredAt  time.Time `json:"recoveredAt"`
+	Recoveries   int       `json:"recoveries"`
+}
+
+func (state accountCollectCircuit) MarshalJSON() ([]byte, error) {
+	return json.Marshal(accountCollectCircuitSnapshot{
+		Failures:     state.failures,
+		BlockedUntil: state.blockedUntil,
+		Permanent:    state.permanent,
+		Status:       state.status,
+		LastMessage:  state.lastMessage,
+		UpdatedAt:    state.updatedAt,
+		RecoveredAt:  state.recoveredAt,
+		Recoveries:   state.recoveries,
+	})
+}
+
+func (state *accountCollectCircuit) UnmarshalJSON(data []byte) error {
+	var snapshot accountCollectCircuitSnapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return err
+	}
+	state.failures = snapshot.Failures
+	state.blockedUntil = snapshot.BlockedUntil
+	state.permanent = snapshot.Permanent
+	state.status = snapshot.Status
+	state.lastMessage = snapshot.LastMessage
+	state.updatedAt = snapshot.UpdatedAt
+	state.recoveredAt = snapshot.RecoveredAt
+	state.recoveries = snapshot.Recoveries
+	return nil
 }
 
 func accountCollectCircuitCacheKey(tgAccountId int64) string {

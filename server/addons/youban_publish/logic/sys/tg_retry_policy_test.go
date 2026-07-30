@@ -19,6 +19,15 @@ func TestTelegramJobErrorRetryPolicyPermanentForBannedInChannel(t *testing.T) {
 	}
 }
 
+func TestTelegramChannelPermissionError(t *testing.T) {
+	if !isTelegramChannelPermissionError(assertError("rpcDoRequest: USER_BANNED_IN_CHANNEL")) {
+		t.Fatal("USER_BANNED_IN_CHANNEL must be treated as a channel permission error")
+	}
+	if isTelegramChannelPermissionError(assertError("rpc error: DC is closed")) {
+		t.Fatal("DC is closed must remain a transient connection error")
+	}
+}
+
 func assertError(message string) error {
 	return simpleError(message)
 }

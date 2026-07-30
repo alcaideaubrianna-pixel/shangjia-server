@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -24,6 +25,30 @@ func TestAccountCollectCircuitBackoff(t *testing.T) {
 	service.closeAccountCollectCircuit(7)
 	if _, blocked := service.accountCollectCircuitBlocked(7); blocked {
 		t.Fatal("account circuit should be closed after a successful connection")
+	}
+}
+
+func TestAccountCollectCircuitJSONRoundTrip(t *testing.T) {
+	original := accountCollectCircuit{
+		failures:     3,
+		blockedUntil: time.Now().Add(time.Minute).Round(time.Millisecond),
+		status:       "reconnecting",
+		lastMessage:  "DC is closed",
+		recoveries:   2,
+	}
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) == "{}" {
+		t.Fatal("circuit state must not serialize to an empty object")
+	}
+	var restored accountCollectCircuit
+	if err = json.Unmarshal(data, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored.failures != original.failures || restored.status != original.status || restored.lastMessage != original.lastMessage || restored.recoveries != original.recoveries {
+		t.Fatalf("restored circuit state mismatch: %#v", restored)
 	}
 }
 
