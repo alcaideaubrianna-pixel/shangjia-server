@@ -7,6 +7,7 @@ package cmd
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -99,6 +100,12 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.RemoveYoubanPublishCollectRuleUniqueNo(ctx)
 	case "collectMaterialRebuild":
 		err = fix.RebuildYoubanPublishCollectMaterialGroups(ctx)
+	case "materialImportMediaRepair":
+		accountId, parseErr := strconv.ParseInt(args["a2"], 10, 64)
+		if parseErr != nil || accountId <= 0 {
+			return gerror.New("materialImportMediaRepair 需要通过 a2 传入有效的上架账号ID")
+		}
+		err = fix.RepairYoubanPublishMaterialImportMissingMedia(ctx, accountId)
 	default:
 		err = gerror.Newf("fix a1 is invalid, a1:%v", a1)
 	}
