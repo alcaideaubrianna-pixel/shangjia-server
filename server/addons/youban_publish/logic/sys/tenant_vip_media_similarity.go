@@ -92,7 +92,7 @@ func (s *sSysPublish) cachedMediaSimilarCandidates(ctx context.Context, scope *m
 	if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
 		var cached []mediaSimilarCandidate
 		if scanErr := value.Scan(&cached); scanErr == nil {
-			return filterMediaSimilarCandidates(source, cached), nil
+			return s.filterLiveMediaSimilarCandidates(ctx, source, cached)
 		}
 	}
 	result, err, _ := mediaSimilarCandidateGroup.Do(cacheKey, func() (any, error) {
@@ -105,7 +105,7 @@ func (s *sSysPublish) cachedMediaSimilarCandidates(ctx context.Context, scope *m
 	if !ok {
 		return nil, gerror.New("解析相似媒体查询结果失败")
 	}
-	return items, nil
+	return s.filterLiveMediaSimilarCandidates(ctx, source, items)
 }
 
 func (s *sSysPublish) computeMediaSimilarCandidates(ctx context.Context, scope *mediaSimilarScope, source *mediaSimilarSource, threshold int, cacheKey string) ([]mediaSimilarCandidate, error) {
@@ -126,6 +126,45 @@ func (s *sSysPublish) computeMediaSimilarCandidates(ctx context.Context, scope *
 	})
 	_ = cache.Instance().Set(ctx, cacheKey, items, mediaSimilarResultCacheTTL)
 	return items, nil
+}
+
+func (s *sSysPublish) filterLiveMediaSimilarCandidates(ctx context.Context, source *mediaSimilarSource, items []mediaSimilarCandidate) ([]mediaSimilarCandidate, error) {
+	items = filterMediaSimilarCandidates(source, items)
+	if len(items) == 0 {
+		return []mediaSimilarCandidate{}, nil
+	}
+	mediaIds := make([]int64, 0, len(items))
+	for _, item := range items {
+		if item.MediaId > 0 {
+			mediaIds = append(mediaIds, item.MediaId)
+		}
+	}
+	if len(mediaIds) == 0 {
+		return []mediaSimilarCandidate{}, nil
+	}
+	rows, err := g.DB().Model(publishMediaTable+" m").Safe().Ctx(ctx).
+		Fields("m.id,m.profile_id,m.tenant_id,m.account_id").
+		WhereIn("m.id", uniqueIds(mediaIds)).
+		WhereNull("m.deleted_at").
+		Where("m.perceptual_hash IS NOT NULL").
+		Where("m.perceptual_hash <> ''").
+		Where("EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id=m.profile_id AND p.deleted_at IS NULL)").
+		Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=m.profile_id AND ps.tenant_id=m.tenant_id AND ps.account_id=m.account_id AND ps.deleted_at IS NULL)").
+		All()
+	if err != nil {
+		return nil, gerror.Wrap(err, "校验相似媒体有效性失败")
+	}
+	valid := make(map[int64]struct{}, len(rows))
+	for _, row := range rows {
+		valid[row["id"].Int64()] = struct{}{}
+	}
+	filtered := make([]mediaSimilarCandidate, 0, len(items))
+	for _, item := range items {
+		if _, ok := valid[item.MediaId]; ok {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered, nil
 }
 
 func (s *sSysPublish) visibleSourceMedia(ctx context.Context, scope *mediaSimilarScope, mediaId int64) (*mediaSimilarSource, error) {
@@ -410,7 +449,7 @@ func normalizeMediaSimilarListInput(in *sysin.MediaSimilarListInp) {
 func mediaSimilarResultCacheKey(ctx context.Context, scope *mediaSimilarScope, source *mediaSimilarSource, threshold int) string {
 	updatedAt := strings.TrimSpace(source.UpdatedAt)
 	return fmt.Sprintf(
-		"youban_publish:media_similar:v4:%s:%s:%d:%d:%s",
+		"youban_publish:media_similar:v5:%s:%s:%d:%d:%s",
 		scope.CacheKey,
 		mediaSimilarScopeIndexVersion(ctx, scope),
 		source.Id,
@@ -420,7 +459,7 @@ func mediaSimilarResultCacheKey(ctx context.Context, scope *mediaSimilarScope, s
 }
 
 func mediaSimilarCountCacheKey(ctx context.Context, scope *mediaSimilarScope, source *mediaSimilarSource, threshold int) string {
-	return "youban_publish:media_similar:count:" + mediaSimilarResultCacheKey(ctx, scope, source, threshold)
+	return "youban_publish:media_similar:count:v2:" + mediaSimilarResultCacheKey(ctx, scope, source, threshold)
 }
 
 func mediaSimilarScopeIndexVersion(ctx context.Context, scope *mediaSimilarScope) string {

@@ -174,6 +174,16 @@ AND EXISTS (
       AND ps.tenant_id = candidate.tenant_id
       AND ps.account_id = candidate.account_id
       AND ps.deleted_at IS NULL
+)
+AND EXISTS (
+    SELECT 1 FROM hg_youban_publish_media m
+    WHERE m.id = candidate.media_id
+      AND m.profile_id = candidate.profile_id
+      AND m.tenant_id = candidate.tenant_id
+      AND m.account_id = candidate.account_id
+      AND m.deleted_at IS NULL
+      AND m.perceptual_hash IS NOT NULL
+      AND m.perceptual_hash <> ''
 )`, strings.Join(branches, " UNION ALL "))
 	return query, args, nil
 }
