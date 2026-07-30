@@ -52,6 +52,7 @@ var (
 		>> 清理普通资料历史Task  [go run main.go up -m=fix -a1=publishProfileTaskCleanup]
 		>> 补全历史采集资料媒体，无法恢复的资料会被删除  [go run main.go up -m=fix -a1=collectProfileMediaRepair]
 		>> 清理历史采集资料重复媒体  [go run main.go up -m=fix -a1=collectProfileMediaDedupe]
+		>> 回填历史采集媒体 CDN 地址  [go run main.go up -m=fix -a1=collectMediaCDNRepair]
 		>> 删除采集规则唯一编号字段  [go run main.go up -m=fix -a1=collectRuleRemoveUniqueNo]
 		---------------------------------------------------------------------------------
 		更多

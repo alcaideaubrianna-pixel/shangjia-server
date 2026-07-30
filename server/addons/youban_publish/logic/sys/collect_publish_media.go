@@ -212,6 +212,20 @@ func (s *sSysPublish) insertCollectOwnedMediaRow(ctx context.Context, event gdb.
 		posterURL = firstNonEmpty(assets.PosterURL, posterURL)
 		posterStoragePath = assets.PosterStoragePath
 	}
+	mediaSize := int64(0)
+	mediaMD5 := ""
+	if fileUrl == "" && storagePath != "" {
+		attachment, uploadErr := s.uploadCollectMediaToStorage(ctx, mediaType, storagePath)
+		if uploadErr != nil {
+			return gerror.Wrap(uploadErr, "保存采集媒体 CDN 资源失败")
+		}
+		fileUrl = strings.TrimSpace(attachment.FileUrl)
+		if attachment.Path != "" {
+			storagePath = normalizeStoredMediaPath(attachment.Path)
+		}
+		mediaSize = attachment.Size
+		mediaMD5 = strings.TrimSpace(attachment.Md5)
+	}
 	_, err = s.saveMediaRecordAndIndex(ctx, g.Map{
 		"tenant_id":           event["tenant_id"].Int64(),
 		"merchant_id":         event["tenant_id"].Int64(),
@@ -223,6 +237,8 @@ func (s *sSysPublish) insertCollectOwnedMediaRow(ctx context.Context, event gdb.
 		"tg_file_id":          strings.TrimSpace(item.FileId),
 		"file_url":            fileUrl,
 		"storage_path":        storagePath,
+		"size":                mediaSize,
+		"md5":                 mediaMD5,
 		"tg_cache_asset_hash": mediaAssetHash(storagePath, fileUrl),
 		"tg_cache_status":     cacheStatus,
 		"poster_url":          posterURL,
