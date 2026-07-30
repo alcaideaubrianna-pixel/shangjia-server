@@ -226,6 +226,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_event_media` (
   `download_attempts` int(11) NOT NULL DEFAULT '0' COMMENT '下载尝试次数',
   `cache_hit` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否命中缓存',
   `download_error_type` varchar(64) NOT NULL DEFAULT '' COMMENT '下载错误分类',
+  `next_retry_at` datetime DEFAULT NULL COMMENT '下次重试时间',
   `error_message` text COMMENT '错误信息',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
@@ -234,7 +235,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_event_media` (
   KEY `idx_ybp_collect_event_media_owner` (`tenant_id`,`source_id`,`cache_status`,`id`),
   KEY `idx_ybp_collect_event_media_source` (`source_chat_id`,`source_message_id`,`source_media_key`),
   KEY `idx_ybp_collect_event_media_file` (`source_file_id`),
-  KEY `idx_ybp_collect_event_media_cache` (`cache_status`,`updated_at`,`id`)
+  KEY `idx_ybp_collect_event_media_cache` (`cache_status`,`updated_at`,`id`),
+  KEY `idx_ybp_collect_event_media_event_retry` (`event_id`,`cache_status`,`next_retry_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集事件媒体';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_media_stat` (

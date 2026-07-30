@@ -88,9 +88,10 @@ func (s *sSysPublish) recoverStaleCollectMediaRows(ctx context.Context, limit in
 		Where(mediaCols.CacheStatus, collectMediaCacheDownloading).
 		WhereLTE(mediaCols.UpdatedAt, deadline).
 		Data(g.Map{
-			mediaCols.CacheStatus:  collectMediaCachePending,
-			mediaCols.ErrorMessage: "媒体缓存任务超时，已自动恢复重试",
-			mediaCols.UpdatedAt:    gtime.Now(),
+			mediaCols.CacheStatus:   collectMediaCachePending,
+			collectMediaNextRetryAt: nil,
+			mediaCols.ErrorMessage:  "媒体缓存任务超时，已自动恢复重试",
+			mediaCols.UpdatedAt:     gtime.Now(),
 		}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "重置超时采集媒体失败")
@@ -183,6 +184,9 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 			if row.IsEmpty() || row["id"].Int64() <= 0 || !shouldRecoverCollectEvent(row) {
 				continue
 			}
+			if row["status"].String() == sysin.CollectEventStatusMediaPending && !s.collectEventHasDueMedia(ctx, row["id"].Int64()) {
+				continue
+			}
 			remaining--
 			if processErr := s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
 				EventId:   row["id"].Int64(),
@@ -202,6 +206,21 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		}
 	}
 	return nil
+}
+
+func (s *sSysPublish) collectEventHasDueMedia(ctx context.Context, eventId int64) bool {
+	if eventId <= 0 {
+		return false
+	}
+	cols := pdao.YoubanPublishCollectEventMedia.Columns()
+	row, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Fields(cols.Id).
+		Where(cols.EventId, eventId).
+		Where(cols.CacheStatus, collectMediaCachePending).
+		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", gtime.Now()).
+		Limit(1).
+		One()
+	return err == nil && !row.IsEmpty()
 }
 
 func (s *sSysPublish) collectRecoveryEventRows(ctx context.Context, sourceId int64, statuses []string, deadline *gtime.Time, limit int) (gdb.Result, error) {
@@ -241,6 +260,16 @@ func shouldRecoverCollectEvent(row gdb.Record) bool {
 		return false
 	}
 	message := strings.ToLower(row["error_message"].String())
+	for _, terminal := range []string{
+		"未找到原消息",
+		"无法刷新文件引用",
+		"缺少原消息引用",
+		"缺少下载元数据",
+	} {
+		if strings.Contains(message, strings.ToLower(terminal)) {
+			return false
+		}
+	}
 	return strings.Contains(message, "app_id") ||
 		strings.Contains(message, "账号采集媒体") ||
 		strings.Contains(message, "媒体") ||

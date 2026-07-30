@@ -3,16 +3,17 @@ package sys
 import (
 	"errors"
 	"testing"
-	"time"
 )
 
-func TestCollectMediaFileReferenceExpiredIsDelayed(t *testing.T) {
-	retry := collectMediaRetryErrorFrom(errors.New("rpc error: FILE_REFERENCE_EXPIRED"))
-	if retry == nil {
-		t.Fatal("expected expired file reference to be retryable")
+func TestCollectMediaFileReferenceExpiredIsTerminal(t *testing.T) {
+	if !collectMediaFileReferenceExpired(errors.New("rpc error: FILE_REFERENCE_EXPIRED")) {
+		t.Fatal("expected expired file reference to be terminal")
 	}
-	if retry.delay != 2*time.Minute {
-		t.Fatalf("retry delay = %s, want 2m", retry.delay)
+	if !collectMediaFileReferenceExpired(errors.New("rpc error: file_reference_expired")) {
+		t.Fatal("expected lowercase expired file reference to be terminal")
+	}
+	if collectMediaFileReferenceExpired(errors.New("rpc error: FILE_MIGRATE")) {
+		t.Fatal("did not expect FILE_MIGRATE to be terminal")
 	}
 }
 

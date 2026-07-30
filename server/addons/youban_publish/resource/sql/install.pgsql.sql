@@ -1221,6 +1221,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_event_media" (
   "download_attempts" integer NOT NULL DEFAULT 0,
   "cache_hit" smallint NOT NULL DEFAULT 0,
   "download_error_type" varchar(64) NOT NULL DEFAULT '',
+  "next_retry_at" timestamp DEFAULT NULL,
   "error_message" text,
   "created_at" timestamp DEFAULT NULL,
   "updated_at" timestamp DEFAULT NULL
@@ -1230,6 +1231,7 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_media_owner" ON "hg_youban_pub
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_media_source" ON "hg_youban_publish_collect_event_media" ("source_chat_id", "source_message_id", "source_media_key");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_media_file" ON "hg_youban_publish_collect_event_media" ("source_file_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_media_cache" ON "hg_youban_publish_collect_event_media" ("cache_status", "updated_at", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_media_event_retry" ON "hg_youban_publish_collect_event_media" ("event_id", "cache_status", "next_retry_at", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_media_stat" (
   "id" BIGSERIAL PRIMARY KEY,

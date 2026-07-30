@@ -21,6 +21,7 @@ const (
 	collectMediaCacheDownloading = "downloading"
 	collectMediaCacheReady       = "ready"
 	collectMediaCacheFailed      = "failed"
+	collectMediaNextRetryAt      = "next_retry_at"
 )
 
 func (s *sSysPublish) appendCollectEventLog(ctx context.Context, eventId int64, stage string, status string, message string, meta string) {
