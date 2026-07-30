@@ -45,7 +45,7 @@ func RepairYoubanPublishCollectMediaCDN(ctx context.Context) error {
 			Where("p.source_type", "youban_collect").
 			WhereNull("p.deleted_at").
 			WhereNull("m.deleted_at").
-			Where("(m.storage_path LIKE 'storage/cache/%' OR m.poster_storage_path LIKE 'storage/cache/%')").
+			Where("(m.storage_path LIKE 'storage/cache/%' OR m.poster_storage_path LIKE 'storage/cache/%' OR (m.storage_path LIKE 'hotgo/file/%' AND m.file_url = '') OR (m.poster_storage_path LIKE 'hotgo/file/%' AND m.poster_url = ''))").
 			WhereGT("m.id", lastId).
 			OrderAsc("m.id").
 			Limit(collectMediaCDNRepairBatchSize).
@@ -60,11 +60,13 @@ func RepairYoubanPublishCollectMediaCDN(ctx context.Context) error {
 			lastId = row.Id
 			mainPath := collectMediaCDNRepairPath(row.StoragePath)
 			posterPath := collectMediaCDNRepairPath(row.PosterStoragePath)
-			if mainPath == "" && posterPath == "" {
+			mainCloudURL := collectMediaCDNRepairCloudURL(ctx, row.StoragePath, row.FileURL)
+			posterCloudURL := collectMediaCDNRepairCloudURL(ctx, row.PosterStoragePath, row.PosterURL)
+			if mainPath == "" && posterPath == "" && mainCloudURL == "" && posterCloudURL == "" {
 				skipped++
 				continue
 			}
-			if err = migrateCollectMediaCDN(ctx, row, mainPath, posterPath); err != nil {
+			if err = migrateCollectMediaCDN(ctx, row, mainPath, posterPath, mainCloudURL, posterCloudURL); err != nil {
 				return err
 			}
 			if mainPath != "" || posterPath != "" {
@@ -78,7 +80,7 @@ func RepairYoubanPublishCollectMediaCDN(ctx context.Context) error {
 	return nil
 }
 
-func migrateCollectMediaCDN(ctx context.Context, row collectMediaCDNRepairRow, mainPath, posterPath string) error {
+func migrateCollectMediaCDN(ctx context.Context, row collectMediaCDNRepairRow, mainPath, posterPath, mainCloudURL, posterCloudURL string) error {
 	data := g.Map{}
 	if mainPath != "" {
 		if strings.TrimSpace(row.FileURL) == "" {
@@ -93,6 +95,8 @@ func migrateCollectMediaCDN(ctx context.Context, row collectMediaCDNRepairRow, m
 		} else {
 			data["storage_path"] = ""
 		}
+	} else if mainCloudURL != "" {
+		data["file_url"] = mainCloudURL
 	}
 	if posterPath != "" {
 		if strings.TrimSpace(row.PosterURL) == "" {
@@ -105,6 +109,8 @@ func migrateCollectMediaCDN(ctx context.Context, row collectMediaCDNRepairRow, m
 		} else {
 			data["poster_storage_path"] = ""
 		}
+	} else if posterCloudURL != "" {
+		data["poster_url"] = posterCloudURL
 	}
 	if len(data) == 0 {
 		return nil
@@ -123,6 +129,17 @@ func migrateCollectMediaCDN(ctx context.Context, row collectMediaCDNRepairRow, m
 		removeCollectMediaCDNLocalFile(ctx, row.Id, "预览图", posterPath)
 	}
 	return nil
+}
+
+func collectMediaCDNRepairCloudURL(ctx context.Context, rawPath, existingURL string) string {
+	if strings.TrimSpace(existingURL) != "" || !strings.HasPrefix(strings.TrimSpace(rawPath), "hotgo/file/") {
+		return ""
+	}
+	config := storager.GetConfig()
+	if config == nil || strings.TrimSpace(config.Drive) == "" {
+		return ""
+	}
+	return strings.TrimSpace(storager.LastUrl(ctx, strings.TrimSpace(rawPath), config.Drive))
 }
 
 func uploadCollectMediaCDNFile(ctx context.Context, mediaId int64, mediaType, path string) (*basesysin.AttachmentListModel, error) {
