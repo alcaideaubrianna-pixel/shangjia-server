@@ -272,11 +272,14 @@ func (s *sSysPublish) collectGroupedMediaCacheDelay(ctx context.Context, event g
 	if event.IsEmpty() || strings.TrimSpace(event["source_grouped_id"].String()) == "" {
 		return 0
 	}
-	updatedAt := s.collectGroupedMediaLastIngestAt(ctx, event)
-	if updatedAt == nil {
+	ingestedAt := event["received_at"].GTime()
+	if ingestedAt == nil {
+		ingestedAt = event["created_at"].GTime()
+	}
+	if ingestedAt == nil {
 		return 0
 	}
-	elapsed := collectLocalElapsedSince(updatedAt)
+	elapsed := collectLocalElapsedSince(ingestedAt)
 	if elapsed < 0 {
 		return 0
 	}
@@ -284,23 +287,6 @@ func (s *sSysPublish) collectGroupedMediaCacheDelay(ctx context.Context, event g
 		return 0
 	}
 	return collectGroupedEventDelay - elapsed + 500*time.Millisecond
-}
-
-func (s *sSysPublish) collectGroupedMediaLastIngestAt(ctx context.Context, event gdb.Record) *gtime.Time {
-	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
-	row, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
-		Fields("MAX("+mediaCols.UpdatedAt+") AS updated_at").
-		Where(mediaCols.EventId, event["id"].Int64()).
-		One()
-	if err == nil && !row.IsEmpty() {
-		if value := row["updated_at"].GTime(); value != nil {
-			return value
-		}
-	}
-	if value := event["created_at"].GTime(); value != nil {
-		return value
-	}
-	return event["updated_at"].GTime()
 }
 
 func collectLocalElapsedSince(value *gtime.Time) time.Duration {
