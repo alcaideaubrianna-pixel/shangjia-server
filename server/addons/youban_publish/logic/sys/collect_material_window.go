@@ -25,36 +25,6 @@ const (
 	collectMaterialRoleVerify    = "verify"
 )
 
-type collectMaterialMessageView struct {
-	RawText string
-	Media   []collectMediaItem
-}
-
-type collectMaterialPair struct {
-	DisplayIndex int
-	VerifyIndex  int
-}
-
-func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collectMaterialPair {
-	pairs := make([]collectMaterialPair, 0)
-	for index, message := range messages {
-		if classifyProfileMessage(message.RawText, message.Media).Kind != profileMessageKindDisplay {
-			continue
-		}
-		for nextIndex := index + 1; nextIndex < len(messages); nextIndex++ {
-			next := messages[nextIndex]
-			switch classifyProfileMessage(next.RawText, next.Media).Kind {
-			case profileMessageKindDisplay:
-				nextIndex = len(messages)
-			case profileMessageKindVerify:
-				pairs = append(pairs, collectMaterialPair{DisplayIndex: index, VerifyIndex: nextIndex})
-				nextIndex = len(messages)
-			}
-		}
-	}
-	return pairs
-}
-
 func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload collectProcessQueuePayload) error {
 	if payload.SourceId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 {
 		return gerror.New("采集源窗口参数不完整")
@@ -178,14 +148,7 @@ func isCollectProcessRetryError(err error) bool {
 }
 
 func (s *sSysPublish) findCollectVerifyEvent(rows []gdb.Record, displayIndex int) int {
-	views := make([]collectMaterialMessageView, 0, len(rows))
-	for _, row := range rows {
-		views = append(views, collectMaterialMessageView{
-			RawText: row["raw_text"].String(),
-			Media:   collectMediaRowsToItemsFromJSON(row["media_json"].String()),
-		})
-	}
-	for _, pair := range pairCollectMaterialMessages(views) {
+	for _, pair := range pairCollectMaterialMessages(collectMaterialEventViews(rows)) {
 		if pair.DisplayIndex != displayIndex {
 			continue
 		}

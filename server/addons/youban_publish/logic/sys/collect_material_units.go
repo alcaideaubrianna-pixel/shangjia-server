@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/gconv"
 	"github.com/gotd/td/tg"
@@ -21,6 +22,47 @@ type collectMaterialUnit struct {
 	MessageId int
 	Messages  []int
 	Media     []collectMediaItem
+}
+
+type collectMaterialMessageView struct {
+	RawText string
+	Media   []collectMediaItem
+}
+
+type collectMaterialPair struct {
+	DisplayIndex int
+	VerifyIndex  int
+}
+
+func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collectMaterialPair {
+	pairs := make([]collectMaterialPair, 0)
+	for index, message := range messages {
+		if classifyProfileMessage(message.RawText, message.Media).Kind != profileMessageKindDisplay {
+			continue
+		}
+		for nextIndex := index + 1; nextIndex < len(messages); nextIndex++ {
+			next := messages[nextIndex]
+			switch classifyProfileMessage(next.RawText, next.Media).Kind {
+			case profileMessageKindDisplay:
+				nextIndex = len(messages)
+			case profileMessageKindVerify:
+				pairs = append(pairs, collectMaterialPair{DisplayIndex: index, VerifyIndex: nextIndex})
+				nextIndex = len(messages)
+			}
+		}
+	}
+	return pairs
+}
+
+func collectMaterialEventViews(rows []gdb.Record) []collectMaterialMessageView {
+	views := make([]collectMaterialMessageView, 0, len(rows))
+	for _, row := range rows {
+		views = append(views, collectMaterialMessageView{
+			RawText: row["raw_text"].String(),
+			Media:   collectMediaRowsToItemsFromJSON(row["media_json"].String()),
+		})
+	}
+	return views
 }
 
 func buildCollectMaterialUnits(task *sysin.MaterialImportTaskModel, messages []*tg.Message) []*collectMaterialUnit {

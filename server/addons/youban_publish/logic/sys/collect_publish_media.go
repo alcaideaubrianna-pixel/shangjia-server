@@ -115,25 +115,27 @@ func (s *sSysPublish) rebuildCollectOwnedMedia(ctx context.Context, event gdb.Re
 	if err != nil {
 		return err
 	}
-	items := collectMediaRowsToItemsFromJSON(canonical.MediaJSON)
-	now := gtime.Now()
-	if _, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("profile_id", owner.ProfileId).
-		WhereNull("deleted_at").
-		Data(g.Map{
-			"deleted_at": now,
-			"deleted_by": event["account_id"].Int64(),
-			"updated_at": now,
-		}).
-		Update(); err != nil {
-		return gerror.Wrap(err, "清理采集旧媒体失败")
-	}
-	_ = s.deleteMediaPHashBucketByProfileId(ctx, owner.ProfileId)
-	displayItems, verifyItems := classifyCollectPublishMedia(event, items)
-	if err := s.insertCollectOwnedMediaRows(ctx, event, owner, "display", displayItems); err != nil {
-		return err
-	}
-	return s.insertCollectOwnedMediaRows(ctx, event, owner, "verify", verifyItems)
+	return s.withProfileMediaSyncLock(ctx, owner.ProfileId, func(ctx context.Context, _ gdb.TX) error {
+		items := collectMediaRowsToItemsFromJSON(canonical.MediaJSON)
+		now := gtime.Now()
+		if _, deleteErr := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+			Where("profile_id", owner.ProfileId).
+			WhereNull("deleted_at").
+			Data(g.Map{
+				"deleted_at": now,
+				"deleted_by": event["account_id"].Int64(),
+				"updated_at": now,
+			}).
+			Update(); deleteErr != nil {
+			return gerror.Wrap(deleteErr, "清理采集旧媒体失败")
+		}
+		_ = s.deleteMediaPHashBucketByProfileId(ctx, owner.ProfileId)
+		displayItems, verifyItems := classifyCollectPublishMedia(event, items)
+		if insertErr := s.insertCollectOwnedMediaRows(ctx, event, owner, "display", displayItems); insertErr != nil {
+			return insertErr
+		}
+		return s.insertCollectOwnedMediaRows(ctx, event, owner, "verify", verifyItems)
+	})
 }
 
 func classifyCollectPublishMedia(event gdb.Record, items []collectMediaItem) ([]collectMediaItem, []collectMediaItem) {

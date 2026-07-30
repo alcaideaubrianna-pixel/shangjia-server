@@ -53,3 +53,28 @@ func TestCollectMaterialUnitsPairDisplayAndVerify(t *testing.T) {
 		t.Fatalf("first display unit did not receive one verify group: %#v", paired[0].Media)
 	}
 }
+
+func TestCollectMaterialUnitsPairAcrossIgnoredMessages(t *testing.T) {
+	units := []*collectMaterialUnit{
+		{RawText: "昵称：A200\n城市：北京", MessageId: 200, Media: []collectMediaItem{{Type: "image", FileId: "photo-1"}}},
+		{RawText: "随手发的一条干扰消息", MessageId: 201},
+		{MessageId: 202, Media: []collectMediaItem{{Type: "video", FileId: "verify-1"}}},
+		{RawText: "昵称：A201\n城市：上海", MessageId: 203, Media: []collectMediaItem{{Type: "image", FileId: "photo-2"}}},
+		{MessageId: 204, Media: []collectMediaItem{{Type: "video", FileId: "verify-2"}}},
+	}
+	paired := pairCollectMaterialUnits(units)
+	if len(paired) != 2 {
+		t.Fatalf("paired units=%d, want 2", len(paired))
+	}
+	for index, unit := range paired {
+		verifyCount := 0
+		for _, media := range unit.Media {
+			if media.Purpose == collectMaterialRoleVerify {
+				verifyCount++
+			}
+		}
+		if verifyCount != 1 {
+			t.Fatalf("paired unit %d verify count=%d, want 1", index, verifyCount)
+		}
+	}
+}
