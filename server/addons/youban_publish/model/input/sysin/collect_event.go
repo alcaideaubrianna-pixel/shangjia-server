@@ -110,6 +110,7 @@ type CollectEventModel struct {
 	TextHash           string      `json:"textHash" dc:"文本哈希"`
 	DedupeKey          string      `json:"dedupeKey" dc:"去重键"`
 	Status             string      `json:"status" dc:"状态"`
+	IgnoreType         string      `json:"ignoreType" dc:"忽略类型"`
 	ErrorMessage       string      `json:"errorMessage" dc:"错误信息"`
 	TargetChannelIds   []int64     `json:"targetChannelIds" dc:"目标频道ID"`
 	TargetChannelNames []string    `json:"targetChannelNames" dc:"目标频道名称"`

@@ -31,6 +31,9 @@ const (
 	CollectEventStatusIgnored      = "ignored"
 	CollectEventStatusFailed       = "failed"
 
+	CollectEventIgnoreTypeDedupe = "dedupe"
+	CollectEventIgnoreTypeMatch  = "match"
+
 	CollectReviewStatusPending  = "pending"
 	CollectReviewStatusApproved = "approved"
 	CollectReviewStatusRejected = "rejected"

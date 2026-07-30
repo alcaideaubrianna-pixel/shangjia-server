@@ -60,8 +60,19 @@ func (s *sSysPublish) CollectEventList(ctx context.Context, in *sysin.CollectEve
 	}
 	for _, item := range list {
 		item.MediaCacheStatus, item.MediaCacheMessage = collectEventMediaCacheView(item.MediaJson, item.MediaCount, item.Status, item.ErrorMessage)
+		item.IgnoreType = collectEventIgnoreType(item.Status, item.ErrorMessage)
 	}
 	return
+}
+
+func collectEventIgnoreType(status, message string) string {
+	if status != sysin.CollectEventStatusIgnored {
+		return ""
+	}
+	if strings.Contains(message, "重复") {
+		return sysin.CollectEventIgnoreTypeDedupe
+	}
+	return sysin.CollectEventIgnoreTypeMatch
 }
 
 func (s *sSysPublish) fillCollectEventRouting(ctx context.Context, list []*sysin.CollectEventModel, tenantId, accountId int64) error {
