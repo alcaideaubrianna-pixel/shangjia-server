@@ -1127,7 +1127,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_rule" (
   "block_link" smallint NOT NULL DEFAULT 1,
   "block_username" smallint NOT NULL DEFAULT 1,
   "block_plain_text" smallint NOT NULL DEFAULT 1,
-  "show_unique_no" smallint NOT NULL DEFAULT 0,
   "header_enabled" smallint NOT NULL DEFAULT 0,
   "header_markdown" text,
   "footer_enabled" smallint NOT NULL DEFAULT 0,

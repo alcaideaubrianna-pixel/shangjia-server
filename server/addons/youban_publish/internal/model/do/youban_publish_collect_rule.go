@@ -32,7 +32,6 @@ type YoubanPublishCollectRule struct {
 	BlockPlainText       any         // 屏蔽纯文本
 	MinMediaCountEnabled any         // 是否限制媒体数量
 	MinMediaCount        any         // 最少媒体数
-	ShowUniqueNo         any         // 是否显示唯一编号
 	HeaderEnabled        any         // 是否启用前置文案
 	HeaderMarkdown       any         // 前置Markdown文案
 	FooterEnabled        any         // 是否启用后置文案

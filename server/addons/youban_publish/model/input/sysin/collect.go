@@ -290,7 +290,6 @@ type CollectRuleModel struct {
 	BlockLink           int         `json:"blockLink" dc:"屏蔽链接"`
 	BlockUsername       int         `json:"blockUsername" dc:"屏蔽用户名"`
 	BlockPlainText      int         `json:"blockPlainText" dc:"屏蔽纯文本"`
-	ShowUniqueNo        int         `json:"showUniqueNo" dc:"显示唯一编号"`
 	HeaderEnabled       int         `json:"headerEnabled" dc:"前置文案开关"`
 	HeaderMarkdown      string      `json:"headerMarkdown" dc:"前置文案"`
 	FooterEnabled       int         `json:"footerEnabled" dc:"后置文案开关"`
@@ -322,7 +321,6 @@ type CollectRuleSaveInp struct {
 	BlockLink           int    `json:"blockLink" dc:"屏蔽链接"`
 	BlockUsername       int    `json:"blockUsername" dc:"屏蔽用户名"`
 	BlockPlainText      int    `json:"blockPlainText" dc:"屏蔽纯文本"`
-	ShowUniqueNo        int    `json:"showUniqueNo" dc:"显示唯一编号"`
 	HeaderEnabled       int    `json:"headerEnabled" dc:"前置文案开关"`
 	HeaderMarkdown      string `json:"headerMarkdown" dc:"前置文案"`
 	FooterEnabled       int    `json:"footerEnabled" dc:"后置文案开关"`

@@ -129,7 +129,6 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_rule` (
   `block_link` tinyint(1) NOT NULL DEFAULT '1' COMMENT '屏蔽链接',
   `block_username` tinyint(1) NOT NULL DEFAULT '1' COMMENT '屏蔽用户名',
   `block_plain_text` tinyint(1) NOT NULL DEFAULT '1' COMMENT '屏蔽纯文本',
-  `show_unique_no` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否显示唯一编号',
   `header_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否启用前置文案',
   `header_markdown` text COMMENT '前置Markdown文案',
   `footer_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否启用后置文案',

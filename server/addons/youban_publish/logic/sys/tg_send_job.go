@@ -42,9 +42,6 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 		return nil
 	}
 	defer s.releaseTelegramChannelLease(ctx, lease)
-	if err = s.refreshCollectProfileBeforeTelegramSend(ctx, targetJob); err != nil {
-		return s.handleTelegramPreSendRefreshError(ctx, targetJob, err)
-	}
 	waitingOrder, err := s.telegramChannelHasEarlierActiveJob(ctx, targetJob)
 	if err != nil {
 		return err
@@ -53,23 +50,6 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 		return s.postponeTelegramJobForChannelOrder(ctx, targetJob)
 	}
 	return s.sendTelegramJobLockedByChannel(ctx, jobId)
-}
-
-func (s *sSysPublish) handleTelegramPreSendRefreshError(ctx context.Context, job telegramJobRecord, err error) error {
-	message := "发送前刷新采集规则失败：" + err.Error()
-	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
-		"status":              "failed_retry",
-		"dispatch_status":     tgDispatchStatusIdle,
-		"next_retry_at":       gtime.Now().Add(10 * time.Second),
-		"error_message":       message,
-		"last_dispatch_error": message,
-		"updated_at":          gtime.Now(),
-	}).Update()
-	if recordErr := s.upsertPublishJobRecord(ctx, job, "failed_retry", message); recordErr != nil {
-		g.Log().Warningf(ctx, "更新发布重试记录失败 jobId:%d err:%+v", job.Id, recordErr)
-	}
-	s.appendTelegramJobLog(ctx, job, "publish", "failed_retry", message)
-	return nil
 }
 
 func (s *sSysPublish) telegramChannelBusyDelay(ctx context.Context, jobId int64) time.Duration {

@@ -30,7 +30,6 @@ type YoubanPublishCollectRule struct {
 	BlockPlainText       int         `json:"blockPlainText"       orm:"block_plain_text"        description:"屏蔽纯文本"`
 	MinMediaCountEnabled int         `json:"minMediaCountEnabled" orm:"min_media_count_enabled" description:"是否限制媒体数量"`
 	MinMediaCount        int         `json:"minMediaCount"        orm:"min_media_count"         description:"最少媒体数"`
-	ShowUniqueNo         int         `json:"showUniqueNo"         orm:"show_unique_no"          description:"是否显示唯一编号"`
 	HeaderEnabled        int         `json:"headerEnabled"        orm:"header_enabled"          description:"是否启用前置文案"`
 	HeaderMarkdown       string      `json:"headerMarkdown"       orm:"header_markdown"         description:"前置Markdown文案"`
 	FooterEnabled        int         `json:"footerEnabled"        orm:"footer_enabled"          description:"是否启用后置文案"`

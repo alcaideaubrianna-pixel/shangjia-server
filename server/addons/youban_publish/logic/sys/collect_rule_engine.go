@@ -83,9 +83,6 @@ func (s *sSysPublish) evaluateCollectRule(ctx context.Context, event gdb.Record,
 	if rule["footer_enabled"].Int() == 1 && strings.TrimSpace(rule["footer_markdown"].String()) != "" {
 		text = strings.TrimSpace(text + "\n\n" + strings.TrimSpace(rule["footer_markdown"].String()))
 	}
-	if rule["show_unique_no"].Int() == 1 {
-		text = fmt.Sprintf("编号: C%010d\n\n%s", event["id"].Int64(), strings.TrimSpace(text))
-	}
 	return &collectRuleDecision{
 		Matched:   true,
 		Text:      strings.TrimSpace(text),

@@ -82,7 +82,6 @@ func (s *sSysPublish) CollectRuleSave(ctx context.Context, in *sysin.CollectRule
 		"block_link":             switchDefaultOn(in.BlockLink),
 		"block_username":         switchDefaultOn(in.BlockUsername),
 		"block_plain_text":       switchDefaultOn(in.BlockPlainText),
-		"show_unique_no":         switchInt(in.ShowUniqueNo),
 		"header_enabled":         switchInt(in.HeaderEnabled),
 		"header_markdown":        in.HeaderMarkdown,
 		"footer_enabled":         switchInt(in.FooterEnabled),
@@ -104,7 +103,6 @@ func (s *sSysPublish) CollectRuleSave(ctx context.Context, in *sysin.CollectRule
 			return 0, gerror.Wrap(err, "更新采集规则失败")
 		}
 		s.refreshCollectEventRulesCache(ctx)
-		s.refreshPendingCollectTasksForRuleAsync(in.Id, account.TenantId, account.Id)
 		return in.Id, nil
 	}
 	data["created_by"] = account.Id

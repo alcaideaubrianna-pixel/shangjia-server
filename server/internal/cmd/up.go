@@ -93,6 +93,8 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.RepairYoubanPublishCollectProfileMedia(ctx)
 	case "collectProfileMediaDedupe":
 		err = fix.DedupeYoubanPublishCollectProfileMedia(ctx)
+	case "collectRuleRemoveUniqueNo":
+		err = fix.RemoveYoubanPublishCollectRuleUniqueNo(ctx)
 	case "collectMaterialRebuild":
 		err = fix.RebuildYoubanPublishCollectMaterialGroups(ctx)
 	default:

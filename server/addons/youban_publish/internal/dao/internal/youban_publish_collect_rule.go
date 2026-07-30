@@ -41,7 +41,6 @@ type YoubanPublishCollectRuleColumns struct {
 	BlockPlainText       string // 屏蔽纯文本
 	MinMediaCountEnabled string // 是否限制媒体数量
 	MinMediaCount        string // 最少媒体数
-	ShowUniqueNo         string // 是否显示唯一编号
 	HeaderEnabled        string // 是否启用前置文案
 	HeaderMarkdown       string // 前置Markdown文案
 	FooterEnabled        string // 是否启用后置文案
@@ -78,7 +77,6 @@ var youbanPublishCollectRuleColumns = YoubanPublishCollectRuleColumns{
 	BlockPlainText:       "block_plain_text",
 	MinMediaCountEnabled: "min_media_count_enabled",
 	MinMediaCount:        "min_media_count",
-	ShowUniqueNo:         "show_unique_no",
 	HeaderEnabled:        "header_enabled",
 	HeaderMarkdown:       "header_markdown",
 	FooterEnabled:        "footer_enabled",
