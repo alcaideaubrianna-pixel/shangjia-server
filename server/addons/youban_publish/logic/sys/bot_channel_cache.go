@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -114,7 +116,7 @@ func (s *sSysPublish) cacheBotMessage(ctx context.Context, tenantId, botId int64
 	var exists struct {
 		Id int64 `json:"id"`
 	}
-	if err := g.DB().Model(publishBotChannelCacheTable).Safe().Ctx(ctx).Fields("id").Where("tenant_id", tenantId).Where("bot_id", botId).Where("chat_id", chatId).Scan(&exists); err != nil {
+	if err := g.DB().Model(publishBotChannelCacheTable).Safe().Ctx(ctx).Fields("id").Where("tenant_id", tenantId).Where("bot_id", botId).Where("chat_id", chatId).Scan(&exists); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if exists.Id > 0 {
