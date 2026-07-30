@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/frame/g"
 	xhtml "golang.org/x/net/html"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -22,12 +23,16 @@ func (s *sSysPublish) telegramJobCaption(ctx context.Context, job telegramJobRec
 	if err != nil {
 		return "", err
 	}
-	return buildTelegramTaskCaption(row, setting), nil
+	caption := buildTelegramTaskCaption(row, setting)
+	if strings.TrimSpace(caption) == "" {
+		g.Log().Warningf(ctx, "TG推送文案为空 profileId:%d sourceType:%s operationNo:%s plainTextBytes:%d summaryBytes:%d titleBytes:%d", job.ProfileId, row["source_type"].String(), job.OperationNo, len(strings.TrimSpace(row["plain_text"].String())), len(strings.TrimSpace(row["summary"].String())), len(strings.TrimSpace(row["title"].String())))
+	}
+	return caption, nil
 }
 
 func buildTelegramTaskCaption(row gdb.Record, setting *sysin.AccountSettingModel) string {
 	if isCollectPublishTask(row) {
-		return telegramEscapeText(row["plain_text"].String())
+		return telegramEscapeText(profileTelegramText(row))
 	}
 	lines := make([]string, 0, 6)
 	mark := telegramCaptionMark(row, setting)
@@ -49,6 +54,15 @@ func buildTelegramTaskCaption(row gdb.Record, setting *sysin.AccountSettingModel
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func profileTelegramText(row gdb.Record) string {
+	for _, key := range []string{"plain_text", "summary", "title"} {
+		if text := strings.TrimSpace(row[key].String()); text != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 func isCollectPublishTask(row gdb.Record) bool {
