@@ -16,6 +16,7 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/dao"
 	"hotgo/internal/library/cache"
 	"hotgo/internal/library/hgrds/lock"
 )
@@ -546,9 +547,25 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		if rule["review_enabled"].Int() == 1 && existingDispatch["review_id"].Int64() <= 0 {
 			return true, "", s.createCollectReview(ctx, event, content, rule, existingDispatch["id"].Int64(), decision.Text)
 		}
-		if profileId := existingDispatch["profile_id"].Int64(); profileId > 0 {
-			if _, err = s.upsertCollectProfile(ctx, event, content, rule, decision.Text); err != nil {
+		profileId := existingDispatch["profile_id"].Int64()
+		if profileId <= 0 {
+			profileId, err = s.existingCollectProfileId(ctx, event, rule)
+			if err != nil {
 				return false, "", err
+			}
+		}
+		if profileId > 0 {
+			updatedProfileId, upsertErr := s.upsertCollectProfile(ctx, event, content, rule, decision.Text)
+			if upsertErr != nil {
+				return false, "", upsertErr
+			}
+			if existingDispatch["profile_id"].Int64() <= 0 && updatedProfileId > 0 {
+				if _, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+					Where("id", existingDispatch["id"].Int64()).
+					Data(g.Map{"profile_id": updatedProfileId, "updated_at": gtime.Now()}).Update(); err != nil {
+					return false, "", gerror.Wrap(err, "回填采集分发资料失败")
+				}
+				g.Log().Infof(ctx, "采集分发记录已回填资料 profileId:%d eventId:%d dispatchId:%d", updatedProfileId, event["id"].Int64(), existingDispatch["id"].Int64())
 			}
 		}
 		return true, "", nil
@@ -581,6 +598,27 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		return false, "", err
 	}
 	return true, "", nil
+}
+
+func (s *sSysPublish) existingCollectProfileId(ctx context.Context, event gdb.Record, rule gdb.Record) (int64, error) {
+	sourceKey := collectPublishClientRequestId(event, rule)
+	if sourceKey == "" {
+		return 0, nil
+	}
+	columns := dao.ContentProfile.Columns()
+	row, err := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
+		Fields("p."+columns.Id).
+		Where("p."+columns.SourceKey, sourceKey).
+		WhereNull("p."+columns.DeletedAt).
+		Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=p.id AND ps.tenant_id=? AND ps.account_id=? AND ps.deleted_at IS NULL)", event["tenant_id"].Int64(), event["account_id"].Int64()).
+		One()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取已有采集资料失败")
+	}
+	if row.IsEmpty() {
+		return 0, nil
+	}
+	return row[columns.Id].Int64(), nil
 }
 
 func (s *sSysPublish) classifyCollectEvent(ctx context.Context, event gdb.Record, content *collectContentResult) (profileMessageClassification, error) {

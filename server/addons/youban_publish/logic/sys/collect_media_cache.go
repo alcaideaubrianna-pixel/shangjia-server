@@ -1008,7 +1008,34 @@ func (s *sSysPublish) discardCollectEventGroup(ctx context.Context, eventId int6
 	if eventId <= 0 {
 		return nil
 	}
+	profileIds, err := s.collectEventProfileIds(ctx, eventId)
+	if err != nil {
+		return err
+	}
+	for _, profileId := range profileIds {
+		if err = s.deleteMediaPHashBucketByProfileId(ctx, profileId); err != nil {
+			return gerror.Wrapf(err, "清理不可恢复采集资料PHash失败 profileId:%d", profileId)
+		}
+	}
 	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		for _, profileId := range profileIds {
+			for _, table := range []string{
+				"hg_content_media",
+				"hg_youban_publish_media",
+				"hg_youban_publish_note_index",
+				"hg_youban_publish_channel_profile",
+				"hg_content_source_map",
+				"hg_youban_publish_profile_state",
+			} {
+				if _, deleteErr := tx.Model(table).Safe().Ctx(ctx).Where("profile_id", profileId).Delete(); deleteErr != nil {
+					return gerror.Wrapf(deleteErr, "清理不可恢复采集资料关联失败 table:%s profileId:%d", table, profileId)
+				}
+			}
+			if _, deleteErr := tx.Model("hg_content_profile").Safe().Ctx(ctx).Where("id", profileId).Delete(); deleteErr != nil {
+				return gerror.Wrapf(deleteErr, "删除不可恢复采集资料失败 profileId:%d", profileId)
+			}
+			g.Log().Warningf(ctx, "FILE_REFERENCE_EXPIRED，整组资料不可恢复，已删除 profileId:%d eventId:%d", profileId, eventId)
+		}
 		for _, table := range []string{
 			pdao.YoubanPublishCollectEventMedia.Table(),
 			pdao.YoubanPublishCollectEventLog.Table(),
@@ -1026,6 +1053,47 @@ func (s *sSysPublish) discardCollectEventGroup(ctx context.Context, eventId int6
 		g.Log().Warningf(ctx, "采集资料组已丢弃 eventId:%d reason:%s", eventId, reason)
 		return nil
 	})
+}
+
+func (s *sSysPublish) collectEventProfileIds(ctx context.Context, eventId int64) ([]int64, error) {
+	event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Fields("tenant_id", "account_id").
+		Where("id", eventId).
+		One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取不可恢复采集事件归属失败")
+	}
+	if event.IsEmpty() {
+		return nil, nil
+	}
+	dispatches, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Fields("profile_id").
+		Where("event_id", eventId).
+		Where("profile_id > 0").
+		All()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取不可恢复采集资料失败")
+	}
+	profileIds := make([]int64, 0, len(dispatches))
+	for _, dispatch := range dispatches {
+		profileId := dispatch["profile_id"].Int64()
+		if profileId <= 0 {
+			continue
+		}
+		state, stateErr := g.DB().Model("hg_youban_publish_profile_state").Safe().Ctx(ctx).
+			Where("profile_id", profileId).
+			Where("tenant_id", event["tenant_id"].Int64()).
+			Where("account_id", event["account_id"].Int64()).
+			WhereNull("deleted_at").
+			One()
+		if stateErr != nil {
+			return nil, gerror.Wrapf(stateErr, "校验不可恢复采集资料归属失败 profileId:%d", profileId)
+		}
+		if !state.IsEmpty() {
+			profileIds = append(profileIds, profileId)
+		}
+	}
+	return uniqueIds(profileIds), nil
 }
 
 func (s *sSysPublish) collectMediaInputPeer(ctx context.Context, tenantId int64, tgAccountId int64, client *telegram.Client, chatId string) (tg.InputPeerClass, error) {
