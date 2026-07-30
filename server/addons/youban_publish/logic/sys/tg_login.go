@@ -297,6 +297,7 @@ func (s *sSysPublish) finishAdminTgAccountLogin(ctx context.Context, runtime *te
 		displayName = runtime.tgAccountName
 	}
 	now := gtime.Now()
+	authorizedTgAccountId := runtime.tgAccountId
 	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if _, err := tx.Model(publishTgLoginTable).Safe().Ctx(ctx).
 			Where("login_token", runtime.loginToken).
@@ -350,6 +351,9 @@ func (s *sSysPublish) finishAdminTgAccountLogin(ctx context.Context, runtime *te
 			tgAccountId = existing["id"].Int64()
 		}
 		if tgAccountId > 0 {
+			authorizedTgAccountId = tgAccountId
+		}
+		if tgAccountId > 0 {
 			delete(data, "created_by")
 			delete(data, "created_at")
 			if _, err := tx.Model(publishTgAccountTable).Safe().Ctx(ctx).Unscoped().
@@ -366,6 +370,7 @@ func (s *sSysPublish) finishAdminTgAccountLogin(ctx context.Context, runtime *te
 	}); err != nil {
 		return err
 	}
+	s.closeAccountCollectCircuit(authorizedTgAccountId)
 	return nil
 }
 

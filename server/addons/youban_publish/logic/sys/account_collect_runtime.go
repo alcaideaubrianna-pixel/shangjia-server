@@ -110,6 +110,9 @@ func (m *accountCollectSupervisor) sync(ctx context.Context, service *sSysPublis
 		if worker := m.workers[tgAccountId]; worker != nil {
 			worker.stop()
 		}
+		if !service.accountCollectCircuitShouldStart(tgAccountId) {
+			continue
+		}
 		m.workers[tgAccountId] = startAccountCollectWorker(ctx, service, tgAccountId, signature, group.Sources, group.Listeners)
 	}
 	for tgAccountId, worker := range m.workers {
@@ -240,6 +243,7 @@ func (w *accountCollectWorker) run(ctx context.Context) {
 	g.Log().Infof(ctx, "账号采集 worker 启动 tgAccountId:%d sources:%d listeners:%d listenerTargets:%d", w.tgAccountId, len(w.sources), len(w.listeners), accountListenerTargetCount(w.listeners))
 	defer g.Log().Infof(context.Background(), "账号采集 worker 停止 tgAccountId:%d", w.tgAccountId)
 	if err := w.runGotdDispatcher(ctx); err != nil && !isContextDone(ctx) {
+		w.service.openAccountCollectCircuit(ctx, w.tgAccountId, err)
 		if isTelegramPermanentAccountAuthError(err) {
 			w.service.handleTgAccountPermanentAuthError(context.Background(), w.tgAccountId, 0, telegramPermanentAccountAuthMessage(err), err)
 		}
@@ -295,6 +299,7 @@ func (w *accountCollectWorker) runGotdDispatcher(ctx context.Context) error {
 		w.clientMu.Lock()
 		w.client = client
 		w.clientMu.Unlock()
+		w.service.closeAccountCollectCircuit(w.tgAccountId)
 		defer func() {
 			w.clientMu.Lock()
 			if w.client == client {
@@ -426,15 +431,21 @@ func (s *sSysPublish) accountCollectRuntimeClient(tgAccountId int64) (*telegram.
 	if tgAccountId <= 0 {
 		return nil, gerror.New("账号采集缺少TG账号")
 	}
+	s.restoreAccountCollectCircuit(context.Background(), tgAccountId)
+	if err := s.accountCollectCircuitError(tgAccountId); err != nil {
+		return nil, err
+	}
 	s.accountRuntimeMu.Lock()
 	worker := s.accountRuntimes[tgAccountId]
 	s.accountRuntimeMu.Unlock()
 	if worker == nil {
-		return nil, gerror.New("账号采集客户端尚未连接")
+		delay := s.openAccountCollectCircuit(context.Background(), tgAccountId, gerror.New("账号采集客户端尚未连接"))
+		return nil, newCollectMediaRetryError(fmt.Sprintf("账号采集客户端尚未连接，账号级熔断等待%s后自动恢复", delay.Round(time.Second)), delay)
 	}
 	client := worker.runtimeClient()
 	if client == nil {
-		return nil, gerror.New("账号采集客户端正在重连")
+		delay := s.openAccountCollectCircuit(context.Background(), tgAccountId, gerror.New("账号采集客户端正在重连"))
+		return nil, newCollectMediaRetryError(fmt.Sprintf("账号采集客户端正在重连，账号级熔断等待%s后自动恢复", delay.Round(time.Second)), delay)
 	}
 	return client, nil
 }

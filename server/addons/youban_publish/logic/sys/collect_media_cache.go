@@ -808,6 +808,10 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 	client, err := s.accountCollectRuntimeClient(tgAccountId)
 	if err != nil {
 		g.Log().Warningf(ctx, "TG媒体下载获取账号客户端失败 tgAccountId:%d fileId:%s lookupDuration:%s total:%s err:%+v", tgAccountId, item.FileId, time.Since(clientStartedAt).Round(time.Millisecond), time.Since(startedAt).Round(time.Millisecond), err)
+		var retryErr *collectMediaRetryError
+		if errors.As(err, &retryErr) {
+			return nil, retryErr
+		}
 		return nil, newCollectMediaRetryError("账号采集客户端暂不可用，等待重试: "+err.Error(), 30*time.Second)
 	}
 	g.Log().Debugf(ctx, "TG媒体下载获取账号客户端完成 tgAccountId:%d fileId:%s duration:%s", tgAccountId, item.FileId, time.Since(clientStartedAt).Round(time.Millisecond))
@@ -815,6 +819,17 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 	result, err := s.downloadTelegramMediaWithClient(downloadCtx, tenantId, tgAccountId, item, meta, client)
 	if err != nil {
 		g.Log().Warningf(ctx, "TG媒体下载传输失败 tgAccountId:%d fileId:%s size:%d dc:%d duration:%s total:%s err:%+v", tgAccountId, item.FileId, meta.Size, meta.DCID, time.Since(transferStartedAt).Round(time.Millisecond), time.Since(startedAt).Round(time.Millisecond), err)
+		if collectMediaShouldReconnectAccount(err) {
+			delay := s.openAccountCollectCircuit(ctx, tgAccountId, err)
+			s.restartAccountCollectWorker(ctx, tgAccountId, err)
+			if retryErr := collectMediaRetryErrorFrom(err); retryErr != nil {
+				if delay > retryErr.delay {
+					retryErr.delay = delay
+				}
+				retryErr.message = fmt.Sprintf("TG账号连接异常，账号级熔断等待%s后自动恢复：%v", retryErr.delay.Round(time.Second), err)
+				return nil, retryErr
+			}
+		}
 		return nil, err
 	}
 	if result == nil || strings.TrimSpace(result.Path) == "" {
