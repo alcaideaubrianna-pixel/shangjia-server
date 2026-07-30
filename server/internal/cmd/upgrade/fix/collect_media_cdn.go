@@ -80,6 +80,9 @@ func RepairYoubanPublishCollectMediaCDN(ctx context.Context, mediaIds []int64) e
 			cleaned += boolToInt(mainPath != "") + boolToInt(posterPath != "")
 		}
 		g.Log().Infof(ctx, "历史采集媒体 CDN 修复进度 batch:%d repaired:%d cleaned:%d skipped:%d lastId:%d", len(rows), repaired, cleaned, skipped, lastId)
+		if len(mediaIds) > 0 {
+			break
+		}
 	}
 	g.Log().Infof(ctx, "历史采集媒体 CDN 修复完成 repaired:%d cleaned:%d skipped:%d", repaired, cleaned, skipped)
 	return nil
