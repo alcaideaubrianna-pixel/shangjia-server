@@ -12,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/internal/library/storager"
+	basesysin "hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
 	fileutil "hotgo/utility/file"
 )
@@ -19,28 +20,32 @@ import (
 const collectMediaCDNRepairBatchSize = 50
 
 type collectMediaCDNRepairRow struct {
-	Id          int64  `orm:"id"`
-	MediaType   string `orm:"media_type"`
-	StoragePath string `orm:"storage_path"`
+	Id                int64  `orm:"id"`
+	MediaType         string `orm:"media_type"`
+	FileURL           string `orm:"file_url"`
+	StoragePath       string `orm:"storage_path"`
+	PosterURL         string `orm:"poster_url"`
+	PosterStoragePath string `orm:"poster_storage_path"`
 }
 
 // RepairYoubanPublishCollectMediaCDN uploads historical collection media that
-// already exists locally but has no CDN URL. It never re-downloads from TG or
-// deletes a profile; unrecoverable files are only logged for follow-up.
+// already exists locally but has no CDN URL, then removes the migrated local
+// files. It never re-downloads from TG or deletes a profile. Hashes, media
+// purpose/order and note indexes are deliberately not modified.
 func RepairYoubanPublishCollectMediaCDN(ctx context.Context) error {
 	lastId := int64(0)
 	repaired := 0
+	cleaned := 0
 	skipped := 0
 	for {
 		rows := make([]collectMediaCDNRepairRow, 0, collectMediaCDNRepairBatchSize)
 		err := g.DB().Model("hg_youban_publish_media m").Safe().Ctx(ctx).
-			Fields("m.id,m.media_type,m.storage_path").
+			Fields("m.id,m.media_type,m.file_url,m.storage_path,m.poster_url,m.poster_storage_path").
 			InnerJoin("hg_content_profile p", "p.id=m.profile_id").
 			Where("p.source_type", "youban_collect").
 			WhereNull("p.deleted_at").
 			WhereNull("m.deleted_at").
-			Where("m.file_url", "").
-			WhereNot("m.storage_path", "").
+			Where("(m.storage_path <> '' OR m.poster_storage_path <> '')").
 			WhereGT("m.id", lastId).
 			OrderAsc("m.id").
 			Limit(collectMediaCDNRepairBatchSize).
@@ -53,52 +58,109 @@ func RepairYoubanPublishCollectMediaCDN(ctx context.Context) error {
 		}
 		for _, row := range rows {
 			lastId = row.Id
-			path := collectMediaCDNRepairPath(row.StoragePath)
-			if path == "" {
+			mainPath := collectMediaCDNRepairPath(row.StoragePath)
+			posterPath := collectMediaCDNRepairPath(row.PosterStoragePath)
+			if mainPath == "" && posterPath == "" {
 				skipped++
-				g.Log().Warningf(ctx, "历史采集媒体本地文件不存在 mediaId:%d storagePath:%s", row.Id, row.StoragePath)
+				g.Log().Warningf(ctx, "历史采集媒体本地文件不存在 mediaId:%d storagePath:%s posterStoragePath:%s", row.Id, row.StoragePath, row.PosterStoragePath)
 				continue
 			}
-			if err = uploadCollectMediaCDN(ctx, row); err != nil {
+			if err = migrateCollectMediaCDN(ctx, row, mainPath, posterPath); err != nil {
 				return err
 			}
-			repaired++
+			if mainPath != "" || posterPath != "" {
+				repaired++
+			}
+			cleaned += boolToInt(mainPath != "") + boolToInt(posterPath != "")
 		}
-		g.Log().Infof(ctx, "历史采集媒体 CDN 修复进度 batch:%d repaired:%d skipped:%d lastId:%d", len(rows), repaired, skipped, lastId)
+		g.Log().Infof(ctx, "历史采集媒体 CDN 修复进度 batch:%d repaired:%d cleaned:%d skipped:%d lastId:%d", len(rows), repaired, cleaned, skipped, lastId)
 	}
-	g.Log().Infof(ctx, "历史采集媒体 CDN 修复完成 repaired:%d skipped:%d", repaired, skipped)
+	g.Log().Infof(ctx, "历史采集媒体 CDN 修复完成 repaired:%d cleaned:%d skipped:%d", repaired, cleaned, skipped)
 	return nil
 }
 
-func uploadCollectMediaCDN(ctx context.Context, row collectMediaCDNRepairRow) error {
-	path := collectMediaCDNRepairPath(row.StoragePath)
+func migrateCollectMediaCDN(ctx context.Context, row collectMediaCDNRepairRow, mainPath, posterPath string) error {
+	data := g.Map{}
+	if mainPath != "" {
+		if strings.TrimSpace(row.FileURL) == "" {
+			attachment, err := uploadCollectMediaCDNFile(ctx, row.Id, row.MediaType, mainPath)
+			if err != nil {
+				return err
+			}
+			data["file_url"] = strings.TrimSpace(attachment.FileUrl)
+			data["storage_path"] = strings.TrimSpace(attachment.Path)
+			data["size"] = attachment.Size
+			data["md5"] = strings.TrimSpace(attachment.Md5)
+		} else {
+			data["storage_path"] = ""
+		}
+	}
+	if posterPath != "" {
+		if strings.TrimSpace(row.PosterURL) == "" {
+			attachment, err := uploadCollectMediaCDNFile(ctx, row.Id, "image", posterPath)
+			if err != nil {
+				return err
+			}
+			data["poster_url"] = strings.TrimSpace(attachment.FileUrl)
+			data["poster_storage_path"] = strings.TrimSpace(attachment.Path)
+		} else {
+			data["poster_storage_path"] = ""
+		}
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	data["updated_at"] = gtime.Now()
+	if _, err := g.DB().Model("hg_youban_publish_media").Safe().Ctx(ctx).
+		Where("id", row.Id).
+		WhereNull("deleted_at").
+		Data(data).Update(); err != nil {
+		return gerror.Wrapf(err, "回填历史采集媒体 CDN 地址失败 mediaId:%d", row.Id)
+	}
+	if mainPath != "" {
+		removeCollectMediaCDNLocalFile(ctx, row.Id, "媒体", mainPath)
+	}
+	if posterPath != "" {
+		removeCollectMediaCDNLocalFile(ctx, row.Id, "预览图", posterPath)
+	}
+	return nil
+}
+
+func uploadCollectMediaCDNFile(ctx context.Context, mediaId int64, mediaType, path string) (*basesysin.AttachmentListModel, error) {
 	header, cleanup, err := fileutil.NewMultipartFileHeaderFromPath(path, filepath.Base(path))
 	if err != nil {
-		return gerror.Wrapf(err, "准备历史采集媒体上传文件失败 mediaId:%d", row.Id)
+		return nil, gerror.Wrapf(err, "准备历史采集媒体上传文件失败 mediaId:%d", mediaId)
 	}
 	defer cleanup()
 	uploadType := storager.KindImg
-	if strings.EqualFold(strings.TrimSpace(row.MediaType), "video") {
+	if strings.EqualFold(strings.TrimSpace(mediaType), "video") {
 		uploadType = storager.KindVideo
 	}
 	attachment, err := service.CommonUpload().UploadFile(ctx, uploadType, &ghttp.UploadFile{FileHeader: header})
 	if err != nil {
-		return gerror.Wrapf(err, "上传历史采集媒体到 CDN 失败 mediaId:%d", row.Id)
+		return nil, gerror.Wrapf(err, "上传历史采集媒体到 CDN 失败 mediaId:%d", mediaId)
 	}
 	if attachment == nil || strings.TrimSpace(attachment.FileUrl) == "" {
-		return gerror.Newf("上传历史采集媒体未返回 CDN 地址 mediaId:%d", row.Id)
+		return nil, gerror.Newf("上传历史采集媒体未返回 CDN 地址 mediaId:%d", mediaId)
 	}
-	_, err = g.DB().Model("hg_youban_publish_media").Safe().Ctx(ctx).
-		Where("id", row.Id).
-		WhereNull("deleted_at").
-		Data(g.Map{
-			"file_url":     strings.TrimSpace(attachment.FileUrl),
-			"storage_path": strings.TrimSpace(attachment.Path),
-			"size":         attachment.Size,
-			"md5":          strings.TrimSpace(attachment.Md5),
-			"updated_at":   gtime.Now(),
-		}).Update()
-	return gerror.Wrapf(err, "回填历史采集媒体 CDN 地址失败 mediaId:%d", row.Id)
+	return attachment, nil
+}
+
+func removeCollectMediaCDNLocalFile(ctx context.Context, mediaId int64, kind, path string) {
+	if err := os.Remove(path); err != nil {
+		if !os.IsNotExist(err) {
+			g.Log().Warningf(ctx, "删除历史采集媒体本地%s失败 mediaId:%d path:%s err:%+v", kind, mediaId, path, err)
+		}
+		return
+	}
+	g.Log().Debugf(ctx, "删除历史采集媒体本地%s成功 mediaId:%d path:%s", kind, mediaId, path)
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func collectMediaCDNRepairPath(raw string) string {
