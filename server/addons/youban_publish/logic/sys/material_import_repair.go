@@ -28,7 +28,11 @@ func (s *sSysPublish) RepairMaterialImportMissingMedia(ctx context.Context, acco
 	}
 	rows, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).
 		Where("account_id", accountId).
-		WhereIn("status", []string{sysin.MaterialImportStatusSuccess, sysin.MaterialImportStatusFailed}).
+		WhereIn("status", []string{
+			sysin.MaterialImportStatusSuccess,
+			sysin.MaterialImportStatusPending,
+			sysin.MaterialImportStatusFailed,
+		}).
 		OrderAsc("id").
 		All()
 	if err != nil {
@@ -57,7 +61,7 @@ func (s *sSysPublish) RepairMaterialImportMissingMedia(ctx context.Context, acco
 			}
 			continue
 		}
-		if group.Status != sysin.MaterialImportStatusSuccess {
+		if group.Status != sysin.MaterialImportStatusSuccess && group.Status != sysin.MaterialImportStatusPending {
 			continue
 		}
 		var items []collectMediaItem
@@ -97,7 +101,7 @@ func (s *sSysPublish) RepairMaterialImportMissingMedia(ctx context.Context, acco
 		taskCols := pdao.YoubanPublishMaterialImportTask.Columns()
 		result, updateErr := pdao.YoubanPublishMaterialImportTask.Ctx(ctx).
 			Where(taskCols.Id, taskId).
-			Where(taskCols.Status, sysin.MaterialImportStatusSuccess).
+			WhereIn(taskCols.Status, []string{sysin.MaterialImportStatusSuccess, sysin.MaterialImportStatusFailed}).
 			Data(g.Map{
 				taskCols.Status:       sysin.MaterialImportStatusRunning,
 				taskCols.Stage:        sysin.MaterialImportStageMedia,
