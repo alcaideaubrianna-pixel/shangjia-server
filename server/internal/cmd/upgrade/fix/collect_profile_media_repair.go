@@ -73,11 +73,11 @@ func RepairYoubanPublishCollectProfileMedia(ctx context.Context) error {
 			if !missing || len(media) == 0 {
 				continue
 			}
-			eventId, err := repairCollectProfileMediaSource(ctx, profile, media)
+			eventId, unrecoverable, err := repairCollectProfileMediaSource(ctx, profile, media)
 			if err != nil {
 				return err
 			}
-			if eventId > 0 {
+			if eventId > 0 && !unrecoverable {
 				repaired++
 				g.Log().Infof(ctx, "历史采集资料媒体已重新排队 profileId:%d eventId:%d", profile.Id, eventId)
 				continue
@@ -175,19 +175,19 @@ func collectProfileMediaRepairURLUsable(value string) bool {
 	return collectProfileMediaRepairPathExists(value)
 }
 
-func repairCollectProfileMediaSource(ctx context.Context, profile collectProfileMediaRepairProfile, media []collectProfileMediaRepairMedia) (int64, error) {
+func repairCollectProfileMediaSource(ctx context.Context, profile collectProfileMediaRepairProfile, media []collectProfileMediaRepairMedia) (int64, bool, error) {
 	prefix := "collect:"
 	if !strings.HasPrefix(profile.SourceKey, prefix) {
-		return 0, nil
+		return 0, false, nil
 	}
 	value := strings.TrimPrefix(profile.SourceKey, prefix)
 	separator := strings.LastIndex(value, ":")
 	if separator <= 0 {
-		return 0, nil
+		return 0, false, nil
 	}
 	uniqueKey := value[:separator]
 	if uniqueKey == "" {
-		return 0, nil
+		return 0, false, nil
 	}
 	var event struct {
 		Id        int64 `orm:"id"`
@@ -199,23 +199,26 @@ func repairCollectProfileMediaSource(ctx context.Context, profile collectProfile
 		Where("source_unique_key", uniqueKey).
 		Where("tenant_id", profile.TenantId).
 		OrderDesc("id").Limit(1).Scan(&event); err != nil {
-		return 0, gerror.Wrapf(err, "读取采集源事件失败 profileId:%d", profile.Id)
+		return 0, false, gerror.Wrapf(err, "读取采集源事件失败 profileId:%d", profile.Id)
 	}
 	if event.Id <= 0 {
-		return 0, nil
+		return 0, false, nil
 	}
 	rows, err := g.DB().Model("hg_youban_publish_collect_event_media").Safe().Ctx(ctx).
-		Fields("id,source_file_id,source_message_ref,backup_message_id,meta_json").
+		Fields("id,source_file_id,source_message_ref,backup_message_id,meta_json,error_message").
 		Where("event_id", event.Id).
 		All()
 	if err != nil {
-		return 0, gerror.Wrapf(err, "读取采集源媒体失败 eventId:%d", event.Id)
+		return 0, false, gerror.Wrapf(err, "读取采集源媒体失败 eventId:%d", event.Id)
 	}
 	if len(rows) == 0 {
-		return 0, nil
+		return 0, false, nil
 	}
 	recoverable := false
 	for _, row := range rows {
+		if strings.Contains(strings.ToUpper(row["error_message"].String()), "FILE_REFERENCE_EXPIRED") {
+			return event.Id, true, nil
+		}
 		if strings.TrimSpace(row["source_file_id"].String()) != "" ||
 			strings.TrimSpace(row["source_message_ref"].String()) != "" ||
 			row["backup_message_id"].Int64() > 0 ||
@@ -225,7 +228,7 @@ func repairCollectProfileMediaSource(ctx context.Context, profile collectProfile
 		}
 	}
 	if !recoverable {
-		return 0, nil
+		return 0, false, nil
 	}
 	mediaIds := make([]int64, 0, len(media))
 	for _, row := range media {
@@ -234,7 +237,7 @@ func repairCollectProfileMediaSource(ctx context.Context, profile collectProfile
 		}
 	}
 	if len(mediaIds) == 0 {
-		return 0, nil
+		return 0, false, nil
 	}
 	now := gtime.Now()
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
@@ -262,9 +265,9 @@ func repairCollectProfileMediaSource(ctx context.Context, profile collectProfile
 		return txErr
 	})
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return event.Id, nil
+	return event.Id, false, nil
 }
 
 func deleteUnrecoverableCollectProfile(ctx context.Context, profileId int64) error {
