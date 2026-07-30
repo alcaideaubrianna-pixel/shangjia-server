@@ -825,7 +825,20 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 	}
 	g.Log().Debugf(ctx, "TG媒体下载获取账号客户端完成 tgAccountId:%d fileId:%s duration:%s", tgAccountId, item.FileId, time.Since(clientStartedAt).Round(time.Millisecond))
 	transferStartedAt := time.Now()
-	result, err := s.downloadTelegramMediaWithClient(downloadCtx, tenantId, tgAccountId, item, meta, client)
+	downloadItem := item
+	result, err := s.downloadTelegramMediaWithClient(downloadCtx, tenantId, tgAccountId, downloadItem, meta, client)
+	if collectMediaFileReferenceExpired(err) {
+		refreshStartedAt := time.Now()
+		refreshedItem, refreshErr := s.refreshGotdCollectMediaItem(downloadCtx, tenantId, tgAccountId, client, item)
+		if refreshErr != nil {
+			g.Log().Warningf(ctx, "TG媒体文件引用刷新失败 tgAccountId:%d fileId:%s duration:%s err:%+v", tgAccountId, item.FileId, time.Since(refreshStartedAt).Round(time.Millisecond), refreshErr)
+		} else {
+			downloadItem = refreshedItem
+			meta, _ = gotdCollectMediaMetaFromItem(downloadItem)
+			g.Log().Infof(ctx, "TG媒体文件引用已刷新，重试下载 tgAccountId:%d fileId:%s duration:%s", tgAccountId, item.FileId, time.Since(refreshStartedAt).Round(time.Millisecond))
+			result, err = s.downloadTelegramMediaWithClient(downloadCtx, tenantId, tgAccountId, downloadItem, meta, client)
+		}
+	}
 	if err != nil {
 		g.Log().Warningf(ctx, "TG媒体下载传输失败 tgAccountId:%d fileId:%s size:%d dc:%d duration:%s total:%s err:%+v", tgAccountId, item.FileId, meta.Size, meta.DCID, time.Since(transferStartedAt).Round(time.Millisecond), time.Since(startedAt).Round(time.Millisecond), err)
 		if collectMediaShouldReconnectAccount(err) {
@@ -846,6 +859,49 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 	}
 	g.Log().Infof(ctx, "TG媒体下载链路完成 tgAccountId:%d fileId:%s size:%d dc:%d transfer:%s total:%s path:%s", tgAccountId, item.FileId, meta.Size, meta.DCID, time.Since(transferStartedAt).Round(time.Millisecond), time.Since(startedAt).Round(time.Millisecond), result.Path)
 	return result, nil
+}
+
+func (s *sSysPublish) refreshGotdCollectMediaItem(ctx context.Context, tenantId int64, tgAccountId int64, client *telegram.Client, item collectMediaItem) (collectMediaItem, error) {
+	chatId, messageId, ok := parseGotdCollectFileId(item.FileId)
+	if !ok {
+		return item, gerror.New("TG媒体缺少可刷新的原消息引用")
+	}
+	peer, err := s.collectMediaInputPeer(ctx, tenantId, tgAccountId, client, chatId)
+	if err != nil {
+		return item, err
+	}
+	var result tg.MessagesMessagesClass
+	if channelPeer, ok := peer.(*tg.InputPeerChannel); ok {
+		result, err = client.API().ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
+			Channel: &tg.InputChannel{ChannelID: channelPeer.ChannelID, AccessHash: channelPeer.AccessHash},
+			ID:      []tg.InputMessageClass{&tg.InputMessageID{ID: messageId}},
+		})
+	} else {
+		result, err = client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
+			Peer:      peer,
+			OffsetID:  messageId + 1,
+			AddOffset: -1,
+			Limit:     1,
+			MaxID:     messageId,
+			MinID:     messageId,
+		})
+	}
+	if err != nil {
+		return item, gerror.Wrap(err, "重新读取TG原消息失败")
+	}
+	for _, message := range tgHistoryMessages(result) {
+		if message == nil || message.ID != messageId {
+			continue
+		}
+		refreshed := gotdCollectMedia(message, chatId)
+		if len(refreshed) == 0 {
+			return item, gerror.New("TG原消息已不存在媒体")
+		}
+		refreshed[0].FileId = item.FileId
+		refreshed[0].Purpose = item.Purpose
+		return refreshed[0], nil
+	}
+	return item, gerror.New("TG原消息不存在或无权读取")
 }
 
 func (s *sSysPublish) downloadTelegramMediaWithClient(ctx context.Context, _ int64, tgAccountId int64, item collectMediaItem, meta gotdCollectMediaMeta, client *telegram.Client) (*collectDownloadedMedia, error) {
