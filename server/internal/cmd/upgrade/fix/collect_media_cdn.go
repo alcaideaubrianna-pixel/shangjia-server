@@ -45,7 +45,7 @@ func RepairYoubanPublishCollectMediaCDN(ctx context.Context) error {
 			Where("p.source_type", "youban_collect").
 			WhereNull("p.deleted_at").
 			WhereNull("m.deleted_at").
-			Where("(m.storage_path <> '' OR m.poster_storage_path <> '')").
+			Where("(m.storage_path LIKE 'storage/cache/%' OR m.poster_storage_path LIKE 'storage/cache/%')").
 			WhereGT("m.id", lastId).
 			OrderAsc("m.id").
 			Limit(collectMediaCDNRepairBatchSize).
@@ -62,7 +62,6 @@ func RepairYoubanPublishCollectMediaCDN(ctx context.Context) error {
 			posterPath := collectMediaCDNRepairPath(row.PosterStoragePath)
 			if mainPath == "" && posterPath == "" {
 				skipped++
-				g.Log().Warningf(ctx, "历史采集媒体本地文件不存在 mediaId:%d storagePath:%s posterStoragePath:%s", row.Id, row.StoragePath, row.PosterStoragePath)
 				continue
 			}
 			if err = migrateCollectMediaCDN(ctx, row, mainPath, posterPath); err != nil {
@@ -173,6 +172,8 @@ func collectMediaCDNRepairPath(raw string) string {
 		return existingCollectMediaCDNRepairPath(raw)
 	}
 	for _, root := range []string{
+		"/app",
+		g.Cfg().MustGet(context.Background(), "server.root", ".").String(),
 		g.Cfg().MustGet(context.Background(), "server.serverRoot", "resource/public").String(),
 		"/app/resource/public",
 		"/app/storage",

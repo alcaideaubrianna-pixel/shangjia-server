@@ -69,3 +69,10 @@ func TestTelegramCopyMediaRefFromInvalidFileId(t *testing.T) {
 		t.Fatal("gotd file id should not be treated as copy ref")
 	}
 }
+
+func TestProfileMediaKeepsCopyReferenceWithoutCacheStatus(t *testing.T) {
+	media := profileMedia{TgFileId: "copy:-1004478800787:281"}
+	if got := media.ValidTgFileIdForHash(""); got != media.TgFileId {
+		t.Fatalf("copy reference should not require tg cache status, got %q", got)
+	}
+}

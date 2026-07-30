@@ -104,10 +104,13 @@ func (m profileMedia) ValidTgFileId(asset mediaAsset) string {
 }
 
 func (m profileMedia) ValidTgFileIdForHash(assetHash string) string {
+	tgFileId := strings.TrimSpace(m.TgFileId)
+	if _, ok := telegramCopyMediaRefFromFileId(tgFileId); ok {
+		return tgFileId
+	}
 	if strings.TrimSpace(m.TgCacheStatus) != tgCacheStatusValid {
 		return ""
 	}
-	tgFileId := strings.TrimSpace(m.TgFileId)
 	if strings.TrimSpace(m.TgCacheAssetHash) == "" || strings.TrimSpace(m.TgCacheAssetHash) != strings.TrimSpace(assetHash) {
 		return ""
 	}
