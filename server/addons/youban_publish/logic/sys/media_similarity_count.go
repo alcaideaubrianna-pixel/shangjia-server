@@ -184,6 +184,13 @@ AND EXISTS (
       AND m.deleted_at IS NULL
       AND m.perceptual_hash IS NOT NULL
       AND m.perceptual_hash <> ''
+)
+AND EXISTS (
+    SELECT 1 FROM hg_youban_publish_note_index i
+    WHERE i.profile_id = candidate.profile_id
+      AND i.tenant_id = candidate.tenant_id
+      AND i.account_id = candidate.account_id
+      AND i.deleted_at IS NULL
 )`, strings.Join(branches, " UNION ALL "))
 	return query, args, nil
 }

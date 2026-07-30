@@ -150,6 +150,7 @@ func (s *sSysPublish) filterLiveMediaSimilarCandidates(ctx context.Context, sour
 		Where("m.perceptual_hash <> ''").
 		Where("EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id=m.profile_id AND p.deleted_at IS NULL)").
 		Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=m.profile_id AND ps.tenant_id=m.tenant_id AND ps.account_id=m.account_id AND ps.deleted_at IS NULL)").
+		Where("EXISTS (SELECT 1 FROM hg_youban_publish_note_index i WHERE i.profile_id=m.profile_id AND i.tenant_id=m.tenant_id AND i.account_id=m.account_id AND i.deleted_at IS NULL)").
 		All()
 	if err != nil {
 		return nil, gerror.Wrap(err, "校验相似媒体有效性失败")
@@ -449,7 +450,7 @@ func normalizeMediaSimilarListInput(in *sysin.MediaSimilarListInp) {
 func mediaSimilarResultCacheKey(ctx context.Context, scope *mediaSimilarScope, source *mediaSimilarSource, threshold int) string {
 	updatedAt := strings.TrimSpace(source.UpdatedAt)
 	return fmt.Sprintf(
-		"youban_publish:media_similar:v5:%s:%s:%d:%d:%s",
+		"youban_publish:media_similar:v6:%s:%s:%d:%d:%s",
 		scope.CacheKey,
 		mediaSimilarScopeIndexVersion(ctx, scope),
 		source.Id,
@@ -459,7 +460,7 @@ func mediaSimilarResultCacheKey(ctx context.Context, scope *mediaSimilarScope, s
 }
 
 func mediaSimilarCountCacheKey(ctx context.Context, scope *mediaSimilarScope, source *mediaSimilarSource, threshold int) string {
-	return "youban_publish:media_similar:count:v2:" + mediaSimilarResultCacheKey(ctx, scope, source, threshold)
+	return "youban_publish:media_similar:count:v3:" + mediaSimilarResultCacheKey(ctx, scope, source, threshold)
 }
 
 func mediaSimilarScopeIndexVersion(ctx context.Context, scope *mediaSimilarScope) string {
