@@ -53,6 +53,13 @@ func classifyProfileMessage(text string, media []collectMediaItem) profileMessag
 			Media: media,
 		}
 	}
+	if text != "" && len(media) > 0 && !profileMessageAllMediaType(media, "video") && !profileMessageOnlyIndexText(text) {
+		return profileMessageClassification{
+			Kind:  profileMessageKindDisplay,
+			Text:  text,
+			Media: media,
+		}
+	}
 	if text != "" && profileMessageHasProfileText(text) {
 		return profileMessageClassification{
 			Kind:  profileMessageKindDisplay,
@@ -69,6 +76,11 @@ func profileMessageHasProfileText(text string) bool {
 		return false
 	}
 	return (profileMessageFieldPattern.MatchString(normalized) && profileMessageNonIndexFieldPattern.MatchString(normalized)) || profileMessageCompactValuePattern.MatchString(normalized)
+}
+
+func profileMessageOnlyIndexText(text string) bool {
+	normalized := strings.TrimSpace(strings.ReplaceAll(text, "\u00a0", " "))
+	return normalized != "" && profileMessageFieldPattern.MatchString(normalized) && !profileMessageNonIndexFieldPattern.MatchString(normalized)
 }
 
 func profileMessageAllMediaType(items []collectMediaItem, mediaType string) bool {

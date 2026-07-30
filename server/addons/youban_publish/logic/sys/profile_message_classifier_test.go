@@ -31,6 +31,13 @@ func TestClassifyProfileMessage(t *testing.T) {
 			wantMedia: 1,
 		},
 		{
+			name:      "tianmei natural profile copy",
+			text:      "深圳单雨童🏠#南山区 硬5️⃣ 安安\n硕士研究生 洋气高挑 自然大气\n医学硕士，学信网可查\n裸足175 超长腿",
+			media:     []collectMediaItem{{Type: "image", FileId: "image-1"}, {Type: "video", FileId: "video-1"}},
+			wantKind:  profileMessageKindDisplay,
+			wantMedia: 2,
+		},
+		{
 			name:      "a1430 chinese fields",
 			text:      "🌷编号：N43983\n昵称：霆霆\n省份：江苏\n城市：南京\n年龄：18\n身高：170\n体重：63",
 			media:     []collectMediaItem{{Type: "image", FileId: "image-1"}},
