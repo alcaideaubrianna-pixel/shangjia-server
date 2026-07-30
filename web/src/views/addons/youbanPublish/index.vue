@@ -74,6 +74,10 @@
           />
         </n-tab-pane>
 
+        <n-tab-pane name="notice" tab="通知公告">
+          <NoticePage />
+        </n-tab-pane>
+
         <n-tab-pane name="channels" tab="上架频道">
           <n-space class="toolbar" align="center">
             <n-select
@@ -587,6 +591,7 @@
   import MemberPanel from './components/member-panel.vue';
   import ProfilePanel from './components/profile-panel.vue';
   import PublishRecordPanel from './components/publish-record-panel.vue';
+  import NoticePage from '@/views/apply/notice/index.vue';
   import TgObservePanel from './components/tg-observe-panel.vue';
   import {
     AccountDelete,

@@ -1739,3 +1739,38 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media_phash_lsh` (
   KEY `idx_ybp_media_phash_lsh_search` (`tenant_id`,`media_type`,`bucket_pos`,`bucket_value`,`media_id`,`profile_id`,`account_id`),
   KEY `idx_ybp_media_phash_lsh_profile_id` (`profile_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体感知哈希LSH索引';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_notice` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `type` tinyint(4) NOT NULL DEFAULT '1' COMMENT '消息类型：1通知，2公告，3私信',
+  `title` varchar(255) NOT NULL DEFAULT '' COMMENT '消息标题',
+  `content` text COMMENT '消息内容',
+  `tag` bigint(20) NOT NULL DEFAULT '0' COMMENT '消息标签',
+  `receiver` text COMMENT '私信接收账号ID JSON',
+  `remark` varchar(500) NOT NULL DEFAULT '' COMMENT '备注',
+  `sort` bigint(20) NOT NULL DEFAULT '0' COMMENT '排序',
+  `status` tinyint(4) NOT NULL DEFAULT '1' COMMENT '状态',
+  `publish_at` datetime DEFAULT NULL COMMENT '发布时间',
+  `expire_at` datetime DEFAULT NULL COMMENT '过期时间',
+  `created_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '创建人',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '更新人',
+  `deleted_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '删除人',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_notice_list` (`status`,`type`,`sort`,`id`),
+  KEY `idx_ybp_notice_time` (`status`,`publish_at`,`expire_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架通知公告';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_notice_read` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `notice_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '公告ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架账号ID',
+  `clicks` int(11) NOT NULL DEFAULT '0' COMMENT '阅读次数',
+  `created_at` datetime DEFAULT NULL COMMENT '首次阅读时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '最近阅读时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_notice_read_account` (`notice_id`,`account_id`),
+  KEY `idx_ybp_notice_read_account` (`account_id`,`notice_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架通知公告已读记录';

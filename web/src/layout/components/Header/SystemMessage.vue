@@ -52,10 +52,11 @@
   function handleRead(index: number) {
     loading.value = true;
     const message = notificationStore.getMessages[currentTab.value].list[index];
+    const wasUnread = !message.isRead;
     UpRead({ id: message.id })
       .then(() => {
         message.isRead = true;
-        if (!message.isRead) {
+        if (wasUnread) {
           switch (message.type) {
             case 1:
               notificationStore.notifyUnread--;

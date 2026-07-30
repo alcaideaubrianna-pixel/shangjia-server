@@ -4,12 +4,23 @@ import (
 	"context"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	adminin "hotgo/internal/model/input/adminin"
 	basesysin "hotgo/internal/model/input/sysin"
 
 	"github.com/gogf/gf/v2/net/ghttp"
 )
 
 type ISysPublish interface {
+	NoticeList(ctx context.Context, in *sysin.NoticeListInp) (list []*adminin.NoticeListModel, totalCount int, err error)
+	NoticeView(ctx context.Context, in *sysin.NoticeViewInp) (res *adminin.NoticeViewModel, err error)
+	NoticeEdit(ctx context.Context, in *sysin.NoticeEditInp) (err error)
+	NoticeDelete(ctx context.Context, in *sysin.NoticeDeleteInp) (err error)
+	NoticeMaxSort(ctx context.Context, in *sysin.NoticeMaxSortInp) (res *adminin.NoticeMaxSortModel, err error)
+	NoticeStatus(ctx context.Context, in *sysin.NoticeStatusInp) (err error)
+	NoticePullMessages(ctx context.Context, in *sysin.PullMessagesInp) (res *adminin.PullMessagesModel, err error)
+	NoticeUpRead(ctx context.Context, id int64) (err error)
+	NoticeReadAll(ctx context.Context, in *sysin.NoticeReadAllInp) (err error)
+	NoticeMessageList(ctx context.Context, in *sysin.NoticeMessageListInp) (list []*adminin.NoticeMessageListModel, totalCount int, err error)
 	TelegramRichTextHTML(value string) string
 	StartRuntime(ctx context.Context)
 	StopRuntime()

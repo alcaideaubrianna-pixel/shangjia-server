@@ -143,7 +143,7 @@
   import { personOption, renderLabel, renderMultipleSelectTag } from '@/enums/systemMessageEnum';
   import Editor from '@/components/Editor/editor.vue';
   import { statusOptions } from '@/enums/optionsiEnum';
-  import { GetMemberOption } from '@/api/org/user';
+  import { AccountList } from '@/api/addons/youbanPublish';
   import { MaxSort, EditLetter, EditNotice, EditNotify } from '@/api/apply/notice';
   import { renderTag } from '@/utils';
   import { adaModalWidth } from '@/utils/hotgo';
@@ -203,8 +203,13 @@
   }
 
   function getMemberOption() {
-    GetMemberOption().then((res) => {
-      options.value = res;
+    AccountList({ page: 1, pageSize: 500 }).then((res) => {
+      options.value = (res?.list || []).map((item) => ({
+        value: item.id,
+        label: item.nickname || item.username,
+        username: item.username,
+        avatar: item.avatarUrl || '',
+      }));
     });
   }
 

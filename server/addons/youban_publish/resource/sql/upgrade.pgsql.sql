@@ -604,3 +604,36 @@ ALTER TABLE IF EXISTS "hg_youban_publish_collect_content" DROP COLUMN IF EXISTS 
 DROP TABLE IF EXISTS "hg_youban_publish_collect_content_media";
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_queue" ON "hg_youban_publish_collect_event" ("tenant_id", "account_id", "source_id", "status", "processed_at", "source_chat_id", "source_message_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dispatch_dedupe" ON "hg_youban_publish_collect_dispatch" ("tenant_id", "account_id", "event_id", "status", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_notice" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "type" smallint NOT NULL DEFAULT 1,
+  "title" varchar(255) NOT NULL DEFAULT '',
+  "content" text,
+  "tag" bigint NOT NULL DEFAULT 0,
+  "receiver" text,
+  "remark" varchar(500) NOT NULL DEFAULT '',
+  "sort" bigint NOT NULL DEFAULT 0,
+  "status" smallint NOT NULL DEFAULT 1,
+  "publish_at" timestamp DEFAULT NULL,
+  "expire_at" timestamp DEFAULT NULL,
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "deleted_by" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_notice_list" ON "hg_youban_publish_notice" ("status","type","sort","id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_notice_time" ON "hg_youban_publish_notice" ("status","publish_at","expire_at");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_notice_read" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "notice_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "clicks" integer NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  CONSTRAINT "uk_ybp_notice_read_account" UNIQUE ("notice_id","account_id")
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_notice_read_account" ON "hg_youban_publish_notice_read" ("account_id","notice_id");
