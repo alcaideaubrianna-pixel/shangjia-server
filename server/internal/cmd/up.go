@@ -89,6 +89,8 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.MigrateYoubanPublishCollectQueue(ctx)
 	case "collectMediaRetryState":
 		err = fix.ApplyYoubanPublishCollectMediaRetryState(ctx)
+	case "collectProfileMediaRepair":
+		err = fix.RepairYoubanPublishCollectProfileMedia(ctx)
 	case "collectMaterialRebuild":
 		err = fix.RebuildYoubanPublishCollectMaterialGroups(ctx)
 	default:
