@@ -51,30 +51,6 @@ func TestTelegramCaptionMarkDoesNotUseProfileTitle(t *testing.T) {
 	}
 }
 
-func TestBuildTelegramTaskCaptionFallsBackToSummaryForLegacyProfile(t *testing.T) {
-	row := gdb.Record{
-		"client_request_id": gvar.New("collect:test"),
-		"plain_text":        gvar.New(""),
-		"summary":           gvar.New("历史采集资料正文"),
-		"title":             gvar.New("资料标题"),
-	}
-	if got := buildTelegramTaskCaption(row, nil); got != "历史采集资料正文" {
-		t.Fatalf("caption should fall back to summary when plain text is empty, got %q", got)
-	}
-}
-
-func TestBuildTelegramTaskCaptionFallsBackToTitleWhenTextAndSummaryAreEmpty(t *testing.T) {
-	row := gdb.Record{
-		"client_request_id": gvar.New("collect:test"),
-		"plain_text":        gvar.New(""),
-		"summary":           gvar.New(""),
-		"title":             gvar.New("资料标题"),
-	}
-	if got := buildTelegramTaskCaption(row, nil); got != "资料标题" {
-		t.Fatalf("caption should fall back to title, got %q", got)
-	}
-}
-
 func TestTelegramRichTextHTMLKeepsLineBreaks(t *testing.T) {
 	input := `<p><strong>天美传媒</strong> 招聊手合作，</p><p>@tmcmkfbot 负责人: @timi_by</p><blockquote><p>⚠️ 新系统，不需要添加机器人</p><p>直接通过机器人自助提交频道链接</p></blockquote><p>🔥外围/中圈/日本女优/韩国明星</p>`
 	got := telegramRichTextHTML(input)

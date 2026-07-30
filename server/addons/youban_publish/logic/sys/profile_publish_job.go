@@ -21,7 +21,7 @@ func (s *sSysPublish) profilePublishSource(ctx context.Context, profileId, tenan
 	mod := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
 		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
 		LeftJoin(publishAccountTable+" a", "a.id=ps.account_id AND a.deleted_at IS NULL").
-		Fields("p.id AS profile_id,p.profile_no,p.title,p.summary,p.plain_text,p.source_type,p.status,p.visibility,"+
+		Fields("p.id AS profile_id,p.profile_no,p.title,p.province,p.city,p.plain_text,p.status,p.visibility,"+
 			"ps.tenant_id,ps.account_id,ps.channel_id_json,ps.customer_remark,ps.anti_scan_enabled,"+
 			"a.nickname AS account_nickname,"+
 			"(SELECT COUNT(1) FROM "+publishProfileStateTable+" ps_seq "+
