@@ -492,6 +492,16 @@ func (s *sSysPublish) saveMaterialImportProfileMedia(ctx context.Context, task *
 	return result, nil
 }
 
+func (s *sSysPublish) saveMaterialImportProfileMissingMedia(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, profileId int64, mediaJson string) error {
+	if profileId <= 0 {
+		return gerror.New("资料不存在，无法补齐TG媒体")
+	}
+	if _, err := s.saveMaterialImportProfileMedia(ctx, task, group, profileId, mediaJson); err != nil {
+		return gerror.Wrap(err, "补齐TG导入资料媒体失败")
+	}
+	return nil
+}
+
 func materialImportMediaPurpose(item collectMediaItem) string {
 	purpose := strings.TrimSpace(item.Purpose)
 	if purpose == "verify" {

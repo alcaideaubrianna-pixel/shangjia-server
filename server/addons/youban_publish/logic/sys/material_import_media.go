@@ -172,7 +172,7 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 	if err != nil {
 		return err
 	}
-	if profileId > 0 && (group.MediaTotal == 0 || s.materialImportProfileHasMedia(ctx, profileId)) {
+	if profileId > 0 && group.MediaTotal == 0 {
 		if err = s.refreshMaterialImportProfileMetadata(ctx, task, group, profileId); err != nil {
 			return err
 		}
@@ -182,12 +182,56 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 		_ = s.appendMaterialImportPublishLog(ctx, task, profileId, "reused", fmt.Sprintf("资料已存在，跳过重复导入：%s", strings.TrimSpace(group.Title)))
 		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0, group.MediaJson)
 	}
+	missingItems := items
+	missingIndexes := make([]int, len(items))
+	for index := range items {
+		missingIndexes[index] = index
+	}
+	if profileId > 0 {
+		counts, countErr := s.materialImportProfileMediaCounts(ctx, profileId)
+		if countErr != nil {
+			return countErr
+		}
+		missingItems, missingIndexes = materialImportMissingMediaItems(items, counts)
+		if len(missingItems) == 0 {
+			if err = s.refreshMaterialImportProfileMetadata(ctx, task, group, profileId); err != nil {
+				return err
+			}
+			if err = s.ensureMaterialImportTelegramIndex(ctx, task, group, profileId); err != nil {
+				return err
+			}
+			_ = s.appendMaterialImportPublishLog(ctx, task, profileId, "reused", fmt.Sprintf("资料媒体已完整，跳过重复导入：%s", strings.TrimSpace(group.Title)))
+			return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0, group.MediaJson)
+		}
+	}
 	_ = s.materialImportMarkGroupRunning(ctx, group.Id)
-	_, _, err = s.downloadMaterialImportItems(ctx, task, group.Id, items, client)
+	_, _, err = s.downloadMaterialImportItems(ctx, task, group.Id, missingItems, client)
 	if err != nil {
 		return err
 	}
+	for index, itemIndex := range missingIndexes {
+		items[itemIndex] = missingItems[index]
+	}
 	data, _ := json.Marshal(items)
+	if profileId > 0 {
+		missingData, marshalErr := json.Marshal(missingItems)
+		if marshalErr != nil {
+			return gerror.Wrap(marshalErr, "序列化待补齐TG媒体失败")
+		}
+		if err = s.saveMaterialImportProfileMissingMedia(ctx, task, group, profileId, string(missingData)); err != nil {
+			return err
+		}
+		if err = s.refreshMaterialImportProfileMetadata(ctx, task, group, profileId); err != nil {
+			return err
+		}
+		if err = s.ensureMaterialImportTelegramIndex(ctx, task, group, profileId); err != nil {
+			return err
+		}
+		if err = s.syncProfileNoteIndex(ctx, profileId); err != nil {
+			return err
+		}
+		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0, string(data))
+	}
 	profileId, err = s.saveMaterialImportGroupProfile(ctx, task, group, string(data))
 	if err != nil {
 		return err
@@ -261,14 +305,60 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 	return done, failed, nil
 }
 
-func (s *sSysPublish) materialImportProfileHasMedia(ctx context.Context, profileId int64) bool {
+type materialImportProfileMediaCounts struct {
+	Display int
+	Verify  int
+}
+
+func (s *sSysPublish) materialImportProfileMediaCounts(ctx context.Context, profileId int64) (materialImportProfileMediaCounts, error) {
 	if profileId <= 0 {
-		return false
+		return materialImportProfileMediaCounts{}, nil
 	}
 	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", profileId).WhereNull("deleted_at")
-	count, err := mod.Count()
-	return err == nil && count > 0
+	display, err := mod.Where("purpose", "display").Count()
+	if err != nil {
+		return materialImportProfileMediaCounts{}, gerror.Wrap(err, "统计资料展示媒体失败")
+	}
+	verify, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).Where("purpose", "verify").WhereNull("deleted_at").Count()
+	if err != nil {
+		return materialImportProfileMediaCounts{}, gerror.Wrap(err, "统计资料验证媒体失败")
+	}
+	return materialImportProfileMediaCounts{Display: display, Verify: verify}, nil
+}
+
+func materialImportMissingMediaItems(items []collectMediaItem, counts materialImportProfileMediaCounts) ([]collectMediaItem, []int) {
+	needed := map[string]int{
+		"display": counts.Display,
+		"verify":  counts.Verify,
+	}
+	incoming := map[string]int{"display": 0, "verify": 0}
+	for _, item := range items {
+		incoming[materialImportMediaPurpose(item)]++
+	}
+	missing := make(map[string]int, 2)
+	for purpose, total := range incoming {
+		missing[purpose] = total - needed[purpose]
+		if missing[purpose] < 0 {
+			missing[purpose] = 0
+		}
+	}
+	selected := make([]collectMediaItem, 0)
+	indexes := make([]int, 0)
+	seen := map[string]int{"display": 0, "verify": 0}
+	for index, item := range items {
+		purpose := materialImportMediaPurpose(item)
+		position := seen[purpose]
+		seen[purpose] = position + 1
+		if position < needed[purpose] || missing[purpose] <= 0 {
+			continue
+		}
+		selected = append(selected, item)
+		indexes = append(indexes, index)
+		missing[purpose]--
+	}
+	return selected, indexes
 }
 
 func materialImportSendErr(ch chan error, err error) {
