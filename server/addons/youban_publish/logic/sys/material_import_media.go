@@ -20,6 +20,8 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
+const materialImportMediaItemTimeout = 10 * time.Minute
+
 func (s *sSysPublish) executeMaterialImportMedia(ctx context.Context, taskId int64) error {
 	task, err := s.materialImportTaskById(ctx, taskId, 0)
 	if err != nil {
@@ -233,7 +235,9 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 				mu.Unlock()
 				return nil
 			}
-			down, err := s.downloadTelegramMediaWithClient(groupCtx, task.TenantId, task.TgAccountId, item, meta, client)
+			itemCtx, cancel := context.WithTimeout(groupCtx, materialImportMediaItemTimeout)
+			down, err := s.downloadTelegramMediaWithClient(itemCtx, task.TenantId, task.TgAccountId, item, meta, client)
+			cancel()
 			if err != nil {
 				return err
 			}
@@ -244,7 +248,11 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 			}
 			mu.Lock()
 			done++
+			currentDone, currentFailed := done, failed
 			mu.Unlock()
+			if progressErr := s.materialImportUpdateGroupProgress(ctx, groupID, currentDone, currentFailed); progressErr != nil {
+				return progressErr
+			}
 			return nil
 		})
 	}
