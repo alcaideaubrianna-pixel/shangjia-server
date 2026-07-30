@@ -39,6 +39,9 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverStaleCollectMediaRows(ctx, 1000); err != nil {
 		g.Log().Warningf(ctx, "恢复超时采集媒体失败：%+v", err)
 	}
+	if err := s.recoverPendingCollectMedia(ctx, 1000); err != nil {
+		g.Log().Warningf(ctx, "恢复待处理采集媒体任务失败：%+v", err)
+	}
 	if err := s.recoverCollectHistoryTasks(ctx, 20); err != nil {
 		g.Log().Warningf(ctx, "恢复历史采集任务失败：%+v", err)
 	}
@@ -97,6 +100,61 @@ func (s *sSysPublish) recoverStaleCollectMediaRows(ctx context.Context, limit in
 		return gerror.Wrap(err, "重置超时采集媒体失败")
 	}
 	g.Log().Warningf(ctx, "已恢复超时采集媒体 count:%d", len(mediaIds))
+	return nil
+}
+
+func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 1000
+	}
+	now := gtime.Now()
+	eventCols := pdao.YoubanPublishCollectEvent.Columns()
+	mediaTable := pdao.YoubanPublishCollectEventMedia.Table()
+	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+		Where("e."+eventCols.Status, sysin.CollectEventStatusMediaPending).
+		WhereNull("e."+eventCols.ProcessedAt).
+		Where("EXISTS (SELECT 1 FROM "+mediaTable+" m WHERE m.event_id=e."+eventCols.Id+" AND m.cache_status=? AND (m.next_retry_at IS NULL OR m.next_retry_at<=?))", collectMediaCachePending, now).
+		OrderAsc("e." + eventCols.UpdatedAt).
+		Limit(limit).
+		All()
+	if err != nil {
+		return gerror.Wrap(err, "读取待恢复采集媒体事件失败")
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	recovered := 0
+	for _, row := range rows {
+		if row.IsEmpty() {
+			continue
+		}
+		payload := collectMediaQueuePayload{
+			EventId:     row[eventCols.Id].Int64(),
+			TenantId:    row[eventCols.TenantId].Int64(),
+			AccountId:   row[eventCols.AccountId].Int64(),
+			SourceId:    row[eventCols.SourceId].Int64(),
+			TgAccountId: row[eventCols.TgAccountId].Int64(),
+		}
+		if payload.EventId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 || payload.SourceId <= 0 {
+			continue
+		}
+		if err = s.enqueueCollectMediaCache(ctx, payload, 0); err != nil {
+			g.Log().Warningf(ctx, "恢复待处理采集媒体任务投递失败 eventId:%d sourceId:%d err:%+v", payload.EventId, payload.SourceId, err)
+			continue
+		}
+		if _, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+			Where(eventCols.Id, payload.EventId).
+			Where(eventCols.Status, sysin.CollectEventStatusMediaPending).
+			Data(g.Map{eventCols.UpdatedAt: now}).Update(); updateErr != nil {
+			g.Log().Warningf(ctx, "更新待处理采集媒体恢复心跳失败 eventId:%d err:%+v", payload.EventId, updateErr)
+			continue
+		}
+		recovered++
+	}
+	if recovered > 0 {
+		g.Log().Infof(ctx, "已重新投递待处理采集媒体任务 count:%d", recovered)
+	}
 	return nil
 }
 
