@@ -248,11 +248,7 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 			}
 			mu.Lock()
 			done++
-			currentDone, currentFailed := done, failed
 			mu.Unlock()
-			if progressErr := s.materialImportUpdateGroupProgress(ctx, groupID, currentDone, currentFailed); progressErr != nil {
-				return progressErr
-			}
 			return nil
 		})
 	}
