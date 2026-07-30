@@ -402,6 +402,21 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusFailed, err.Error())
 		return err
 	}
+	canonical, err := s.canonicalCollectProfileMedia(ctx, event, content)
+	if err != nil {
+		return err
+	}
+	if err = validateCollectMaterialMedia(canonical); err != nil {
+		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaPending, err.Error())
+		if enqueueErr := s.enqueueCollectMediaCache(ctx, collectMediaQueuePayload{
+			EventId: eventId, TenantId: tenantId, AccountId: accountId,
+			SourceId: event["source_id"].Int64(), TgAccountId: event["tg_account_id"].Int64(),
+		}, 0); enqueueErr != nil {
+			return enqueueErr
+		}
+		return newCollectProcessRetryError(30*time.Second, err.Error())
+	}
+	content = canonical
 	matched := false
 	reasons := make([]string, 0, len(candidateRules))
 	for _, rule := range candidateRules {
@@ -743,6 +758,9 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 	canonical, err := s.canonicalCollectProfileMedia(ctx, event, content)
 	if err != nil {
 		return gerror.Wrap(err, "整理采集审核媒体失败")
+	}
+	if err = validateCollectMaterialMedia(canonical); err != nil {
+		return newCollectProcessRetryError(30*time.Second, err.Error())
 	}
 	mediaCount := canonical.MediaCount
 	reviewId, err := pdao.YoubanPublishCollectReview.Ctx(ctx).Data(g.Map{
