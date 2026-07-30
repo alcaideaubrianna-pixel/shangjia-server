@@ -51,3 +51,17 @@ func TestMaterialImportFileReferenceExpired(t *testing.T) {
 		t.Fatal("did not expect unrelated download error to be detected")
 	}
 }
+
+func TestMaterialImportMediaItemReadyRejectsMissingLocalFile(t *testing.T) {
+	item := collectMediaItem{StoragePath: "storage/cache/youban_publish/media/missing-file.jpg"}
+	if materialImportMediaItemReady(item) {
+		t.Fatal("expected missing local cache file to require redownload")
+	}
+}
+
+func TestMaterialImportMediaItemReadyAcceptsCloudURL(t *testing.T) {
+	item := collectMediaItem{FileUrl: "https://img.example.com/a.jpg", StoragePath: "missing.jpg"}
+	if !materialImportMediaItemReady(item) {
+		t.Fatal("expected cloud URL to be reusable")
+	}
+}

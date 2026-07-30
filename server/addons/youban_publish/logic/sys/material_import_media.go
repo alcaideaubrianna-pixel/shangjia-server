@@ -266,11 +266,15 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 			defer func() { <-sem }()
 
 			item := normalizeCollectMediaItem(items[index])
-			if strings.TrimSpace(item.StoragePath) != "" || strings.TrimSpace(item.FileUrl) != "" {
+			if materialImportMediaItemReady(item) {
 				mu.Lock()
 				done++
 				mu.Unlock()
 				return nil
+			}
+			if strings.TrimSpace(item.StoragePath) != "" {
+				item.StoragePath = ""
+				items[index].StoragePath = ""
 			}
 			meta, ok := gotdCollectMediaMetaFromItem(item)
 			if !ok {
@@ -303,6 +307,14 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 		return 0, 0, err
 	}
 	return done, failed, nil
+}
+
+func materialImportMediaItemReady(item collectMediaItem) bool {
+	if strings.TrimSpace(item.FileUrl) != "" {
+		return true
+	}
+	path := strings.TrimSpace(item.StoragePath)
+	return path != "" && fileNonEmpty(resolveTelegramLocalPath(path))
 }
 
 type materialImportProfileMediaCounts struct {
