@@ -71,7 +71,7 @@ type ISysPublish interface {
 	AdminMaterialImportTaskStart(ctx context.Context, in *sysin.MaterialImportTaskActionInp) (err error)
 	AdminMaterialImportTaskCancel(ctx context.Context, in *sysin.MaterialImportTaskActionInp) (err error)
 	AdminMaterialImportTaskRetry(ctx context.Context, in *sysin.MaterialImportTaskActionInp) (err error)
-	RepairMaterialImportMissingMedia(ctx context.Context, accountId int64) error
+	RepairMaterialImportMissingMedia(ctx context.Context, accountId int64, groupIds []int64) error
 	ServerMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error)
 	ServerMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error)
 	ServerBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error)

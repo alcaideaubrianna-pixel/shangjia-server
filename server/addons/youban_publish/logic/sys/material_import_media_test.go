@@ -42,3 +42,12 @@ func TestMaterialImportMissingMediaItemsDefaultsPurposeToDisplay(t *testing.T) {
 		t.Fatalf("selected=%+v indexes=%v, want second display media", selected, indexes)
 	}
 }
+
+func TestMaterialImportFileReferenceExpired(t *testing.T) {
+	if !materialImportFileReferenceExpired("下载失败: rpc error FILE_REFERENCE_EXPIRED") {
+		t.Fatal("expected FILE_REFERENCE_EXPIRED to be detected")
+	}
+	if materialImportFileReferenceExpired("下载失败: DC is closed") {
+		t.Fatal("did not expect unrelated download error to be detected")
+	}
+}

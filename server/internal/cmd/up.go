@@ -105,7 +105,11 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		if parseErr != nil || accountId <= 0 {
 			return gerror.New("materialImportMediaRepair 需要通过 a2 传入有效的上架账号ID")
 		}
-		err = fix.RepairYoubanPublishMaterialImportMissingMedia(ctx, accountId)
+		groupIds, parseErr := fix.ParseMaterialImportRepairGroupIDs(args["a3"])
+		if parseErr != nil {
+			return gerror.New("materialImportMediaRepair 的 a3 必须是逗号分隔的有效分组ID")
+		}
+		err = fix.RepairYoubanPublishMaterialImportMissingMedia(ctx, accountId, groupIds)
 	default:
 		err = gerror.Newf("fix a1 is invalid, a1:%v", a1)
 	}
