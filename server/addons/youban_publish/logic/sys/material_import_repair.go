@@ -29,7 +29,6 @@ func (s *sSysPublish) RepairMaterialImportMissingMedia(ctx context.Context, acco
 	rows, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).
 		Where("account_id", accountId).
 		WhereIn("status", []string{sysin.MaterialImportStatusSuccess, sysin.MaterialImportStatusFailed}).
-		WhereGT("profile_id", 0).
 		OrderAsc("id").
 		All()
 	if err != nil {
@@ -40,7 +39,7 @@ func (s *sSysPublish) RepairMaterialImportMissingMedia(ctx context.Context, acco
 	requeuedGroups := 0
 	for _, row := range rows {
 		group := materialImportGroupModelFromRecord(row)
-		if group == nil || group.Id <= 0 || group.ProfileId <= 0 {
+		if group == nil || group.Id <= 0 {
 			continue
 		}
 		if len(selectedGroups) > 0 {
@@ -129,44 +128,46 @@ func materialImportFileReferenceExpired(message string) bool {
 }
 
 func (s *sSysPublish) deleteMaterialImportExpiredProfile(ctx context.Context, group *sysin.MaterialImportGroupModel) error {
-	if group == nil || group.Id <= 0 || group.ProfileId <= 0 {
+	if group == nil || group.Id <= 0 {
 		return nil
 	}
 	now := gtime.Now()
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		profile, err := tx.Model("hg_content_profile").Safe().Ctx(ctx).
-			Fields("id,tenant_id,account_id").
-			Where("id", group.ProfileId).
-			Where("tenant_id", group.TenantId).
-			Where("account_id", group.AccountId).
-			WhereNull("deleted_at").
-			One()
-		if err != nil {
-			return gerror.Wrap(err, "校验待删除TG导入资料归属失败")
-		}
-		if profile.IsEmpty() {
-			return gerror.Newf("待删除TG导入资料不存在或归属不匹配 profileId:%d", group.ProfileId)
-		}
-		for _, table := range []string{
-			"hg_content_media",
-			"hg_youban_publish_media_phash_bucket",
-			"hg_youban_publish_media_phash_lsh",
-			"hg_youban_publish_media",
-			"hg_youban_publish_note_index",
-			"hg_youban_publish_profile_state",
-			"hg_youban_publish_channel_profile",
-			"hg_content_source_map",
-		} {
-			if _, err = tx.Model(table).Safe().Ctx(ctx).Where("profile_id", group.ProfileId).Delete(); err != nil {
-				return gerror.Wrapf(err, "清理FILE_REFERENCE_EXPIRED资料关联失败 table:%s", table)
+		if group.ProfileId > 0 {
+			profile, err := tx.Model("hg_content_profile").Safe().Ctx(ctx).
+				Fields("id,tenant_id,account_id").
+				Where("id", group.ProfileId).
+				Where("tenant_id", group.TenantId).
+				Where("account_id", group.AccountId).
+				WhereNull("deleted_at").
+				One()
+			if err != nil {
+				return gerror.Wrap(err, "校验待删除TG导入资料归属失败")
+			}
+			if profile.IsEmpty() {
+				return gerror.Newf("待删除TG导入资料不存在或归属不匹配 profileId:%d", group.ProfileId)
+			}
+			for _, table := range []string{
+				"hg_content_media",
+				"hg_youban_publish_media_phash_bucket",
+				"hg_youban_publish_media_phash_lsh",
+				"hg_youban_publish_media",
+				"hg_youban_publish_note_index",
+				"hg_youban_publish_profile_state",
+				"hg_youban_publish_channel_profile",
+				"hg_content_source_map",
+			} {
+				if _, err = tx.Model(table).Safe().Ctx(ctx).Where("profile_id", group.ProfileId).Delete(); err != nil {
+					return gerror.Wrapf(err, "清理FILE_REFERENCE_EXPIRED资料关联失败 table:%s", table)
+				}
+			}
+			if _, err = tx.Model("hg_content_profile").Safe().Ctx(ctx).
+				Where("id", group.ProfileId).
+				Data(g.Map{"status": 0, "deleted_at": now, "updated_at": now}).Update(); err != nil {
+				return gerror.Wrap(err, "删除FILE_REFERENCE_EXPIRED资料失败")
 			}
 		}
-		if _, err = tx.Model("hg_content_profile").Safe().Ctx(ctx).
-			Where("id", group.ProfileId).
-			Data(g.Map{"status": 0, "deleted_at": now, "updated_at": now}).Update(); err != nil {
-			return gerror.Wrap(err, "删除FILE_REFERENCE_EXPIRED资料失败")
-		}
-		_, err = pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).
+		_, err := tx.Model(pdao.YoubanPublishMaterialImportGroup.Table()).Safe().Ctx(ctx).
 			Where("id", group.Id).
 			Data(g.Map{
 				"status":        sysin.MaterialImportStatusFailed,
@@ -178,6 +179,13 @@ func (s *sSysPublish) deleteMaterialImportExpiredProfile(ctx context.Context, gr
 	if err != nil {
 		return err
 	}
-	g.Log().Warningf(ctx, "恢复脚本已删除FILE_REFERENCE_EXPIRED资料 groupId:%d profileId:%d tenantId:%d accountId:%d", group.Id, group.ProfileId, group.TenantId, group.AccountId)
+	g.Log().Warningf(ctx, "恢复脚本已处理FILE_REFERENCE_EXPIRED分组 groupId:%d profileId:%d tenantId:%d accountId:%d action:%s", group.Id, group.ProfileId, group.TenantId, group.AccountId, materialImportExpiredAction(group.ProfileId))
 	return nil
+}
+
+func materialImportExpiredAction(profileId int64) string {
+	if profileId > 0 {
+		return "delete_profile"
+	}
+	return "discard_group_without_profile"
 }
