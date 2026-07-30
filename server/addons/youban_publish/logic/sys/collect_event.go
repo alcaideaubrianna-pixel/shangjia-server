@@ -279,7 +279,14 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		}, 30*time.Second)
 	}
 	if collectEventAlreadyMatched(event["status"].String()) {
-		return nil
+		needsRepair, repairErr := s.collectEventNeedsProfileRepair(ctx, eventId)
+		if repairErr != nil {
+			return repairErr
+		}
+		if !needsRepair {
+			return nil
+		}
+		g.Log().Infof(ctx, "采集事件存在未回写资料，重新进入分发回写 eventId:%d", eventId)
 	}
 	materialRole := strings.TrimSpace(event["material_role"].String())
 	if materialRole == "" || materialRole == collectMaterialRolePending {
@@ -426,6 +433,18 @@ func (s *sSysPublish) ignoreCollectEvent(ctx context.Context, eventId int64, mes
 func collectEventAlreadyMatched(status string) bool {
 	status = strings.TrimSpace(status)
 	return status == sysin.CollectEventStatusProcessed || status == sysin.CollectEventStatusDispatched || status == "matched"
+}
+
+func (s *sSysPublish) collectEventNeedsProfileRepair(ctx context.Context, eventId int64) (bool, error) {
+	row, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Fields("id").
+		Where("event_id", eventId).
+		Where("profile_id <= 0").
+		One()
+	if err != nil {
+		return false, gerror.Wrap(err, "检查采集资料回写状态失败")
+	}
+	return !row.IsEmpty(), nil
 }
 
 func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, tenantId int64, accountId int64) ([]gdb.Record, error) {
