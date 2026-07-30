@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
+	"hotgo/internal/library/hgrds/lock"
 )
 
 const (
@@ -234,6 +236,16 @@ func (s *sSysPublish) CollectEventClear(ctx context.Context, in *sysin.CollectEv
 }
 
 func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, tenantId int64, accountId int64) error {
+	eventLock := lock.NewConfig(15*time.Minute, time.Second).Mutex(fmt.Sprintf("youban_publish:collect:event:%d", eventId))
+	if lockErr := eventLock.TryLock(ctx); lockErr != nil {
+		if errors.Is(lockErr, lock.ErrLockFailed) {
+			g.Log().Debugf(ctx, "采集事件已有实例处理，跳过本次执行 eventId:%d", eventId)
+			return nil
+		}
+		return gerror.Wrap(lockErr, "获取采集事件处理锁失败")
+	}
+	defer func() { _ = eventLock.Unlock(context.Background()) }()
+
 	event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Where("id", eventId).
 		Where("tenant_id", tenantId).
@@ -520,6 +532,22 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		s.appendCollectEventLogForRecord(ctx, event, "classifier", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
 		return false, reason, nil
 	}
+	existingDispatch, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+		Where("tenant_id", event["tenant_id"].Int64()).
+		Where("account_id", event["account_id"].Int64()).
+		Where("event_id", event["id"].Int64()).
+		Where("rule_id", rule["id"].Int64()).
+		OrderDesc("id").
+		One()
+	if err != nil {
+		return false, "", gerror.Wrap(err, "读取采集分发幂等记录失败")
+	}
+	if !existingDispatch.IsEmpty() {
+		if rule["review_enabled"].Int() == 1 && existingDispatch["review_id"].Int64() <= 0 {
+			return true, "", s.createCollectReview(ctx, event, content, rule, existingDispatch["id"].Int64(), decision.Text)
+		}
+		return true, "", nil
+	}
 	now := gtime.Now()
 	dispatchId, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Data(g.Map{
 		"tenant_id":              event["tenant_id"].Int64(),
@@ -628,6 +656,16 @@ func collectMediaJSONHasPurposeVideo(mediaJSON string, purpose string) bool {
 }
 
 func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, dispatchId int64, text string) error {
+	existingReview, err := pdao.YoubanPublishCollectReview.Ctx(ctx).
+		Where("dispatch_id", dispatchId).
+		OrderDesc("id").
+		One()
+	if err != nil {
+		return gerror.Wrap(err, "读取采集审核幂等记录失败")
+	}
+	if !existingReview.IsEmpty() {
+		return nil
+	}
 	now := gtime.Now()
 	canonical, err := s.canonicalCollectProfileMedia(ctx, event, content)
 	if err != nil {

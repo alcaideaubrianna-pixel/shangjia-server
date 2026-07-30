@@ -154,6 +154,17 @@ func (s *sSysPublish) upsertCollectEventMedia(ctx context.Context, event gdb.Rec
 			mediaCols.MetaJson:         strings.TrimSpace(item.MetaJson),
 			mediaCols.UpdatedAt:        gtime.Now(),
 		}
+		if !existing.IsEmpty() && existing[mediaCols.CacheStatus].String() == collectMediaCacheReady {
+			if strings.TrimSpace(item.FileUrl) == "" {
+				delete(data, mediaCols.FileUrl)
+			}
+			if strings.TrimSpace(item.StoragePath) == "" {
+				delete(data, mediaCols.StoragePath)
+			}
+			if strings.TrimSpace(item.PosterUrl) == "" {
+				delete(data, mediaCols.PosterUrl)
+			}
+		}
 		if existing.IsEmpty() {
 			data[mediaCols.EventId] = eventId
 			data[mediaCols.SortIndex] = collectMediaSortIndex(item, sortIndex)
