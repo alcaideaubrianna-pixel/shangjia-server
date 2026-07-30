@@ -2,6 +2,8 @@ package fix
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -102,6 +104,7 @@ func collectProfileMediaRepairProfiles(ctx context.Context, lastId int64, limit 
 		InnerJoin("hg_youban_publish_profile_state ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
 		Where("p.source_type", "youban_collect").
 		WhereNull("p.deleted_at").
+		Where("EXISTS (SELECT 1 FROM hg_youban_publish_media m WHERE m.profile_id=p.id AND m.deleted_at IS NULL AND (COALESCE(m.file_url,'')='' OR COALESCE(m.storage_path,'') LIKE '%storage/cache/%'))").
 		WhereGT("p.id", lastId)
 	if len(profileIds) > 0 {
 		mod = mod.WhereIn("p.id", profileIds)
@@ -205,6 +208,10 @@ func repairCollectProfileMediaSource(ctx context.Context, profile collectProfile
 		Where("source_unique_key", uniqueKey).
 		Where("tenant_id", profile.TenantId).
 		OrderDesc("id").Limit(1).Scan(&event); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			g.Log().Warningf(ctx, "历史采集资料没有对应事件，跳过 profileId:%d sourceKey:%s", profile.Id, profile.SourceKey)
+			return 0, false, nil
+		}
 		return 0, false, gerror.Wrapf(err, "读取采集源事件失败 profileId:%d", profile.Id)
 	}
 	if event.Id <= 0 {
