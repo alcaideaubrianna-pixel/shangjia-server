@@ -96,7 +96,7 @@ func collectMediaRetryErrorFrom(err error) *collectMediaRetryError {
 	}
 	message := strings.ToLower(err.Error())
 	if strings.Contains(message, "file_reference_expired") {
-		return newCollectMediaRetryError("TG媒体引用已过期，等待重新获取媒体引用后重试: "+err.Error(), 2*time.Minute)
+		return nil
 	}
 	if _, ok := tgerr.AsFloodWait(err); ok || strings.Contains(message, "too many requests") || strings.Contains(message, "flood_wait") {
 		return newCollectMediaRateLimitError(err)

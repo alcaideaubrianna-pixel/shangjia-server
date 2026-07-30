@@ -15,6 +15,9 @@ func TestCollectMediaFileReferenceExpiredIsTerminal(t *testing.T) {
 	if collectMediaFileReferenceExpired(errors.New("rpc error: FILE_MIGRATE")) {
 		t.Fatal("did not expect FILE_MIGRATE to be terminal")
 	}
+	if retryErr := collectMediaRetryErrorFrom(errors.New("rpc error: FILE_REFERENCE_EXPIRED")); retryErr != nil {
+		t.Fatalf("expired file reference must not be retried: %+v", retryErr)
+	}
 }
 
 func TestGotdMediaCacheAssetKeyIgnoresFileReference(t *testing.T) {
