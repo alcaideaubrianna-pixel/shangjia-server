@@ -32,21 +32,26 @@ type collectMediaCDNRepairRow struct {
 // already exists locally but has no CDN URL, then removes the migrated local
 // files. It never re-downloads from TG or deletes a profile. Hashes, media
 // purpose/order and note indexes are deliberately not modified.
-func RepairYoubanPublishCollectMediaCDN(ctx context.Context) error {
+func RepairYoubanPublishCollectMediaCDN(ctx context.Context, mediaIds []int64) error {
 	lastId := int64(0)
 	repaired := 0
 	cleaned := 0
 	skipped := 0
 	for {
-		rows := make([]collectMediaCDNRepairRow, 0, collectMediaCDNRepairBatchSize)
-		err := g.DB().Model("hg_youban_publish_media m").Safe().Ctx(ctx).
+		mod := g.DB().Model("hg_youban_publish_media m").Safe().Ctx(ctx).
 			Fields("m.id,m.media_type,m.file_url,m.storage_path,m.poster_url,m.poster_storage_path").
 			InnerJoin("hg_content_profile p", "p.id=m.profile_id").
 			Where("p.source_type", "youban_collect").
 			WhereNull("p.deleted_at").
 			WhereNull("m.deleted_at").
-			Where("(m.storage_path LIKE 'storage/cache/%' OR m.poster_storage_path LIKE 'storage/cache/%' OR (m.storage_path LIKE 'hotgo/file/%' AND m.file_url = '') OR (m.poster_storage_path LIKE 'hotgo/file/%' AND m.poster_url = ''))").
-			WhereGT("m.id", lastId).
+			Where("(m.storage_path LIKE 'storage/cache/%' OR m.poster_storage_path LIKE 'storage/cache/%' OR (m.storage_path LIKE 'hotgo/file/%' AND m.file_url = '') OR (m.poster_storage_path LIKE 'hotgo/file/%' AND m.poster_url = ''))")
+		if len(mediaIds) > 0 {
+			mod = mod.WhereIn("m.id", mediaIds)
+		} else {
+			mod = mod.WhereGT("m.id", lastId)
+		}
+		rows := make([]collectMediaCDNRepairRow, 0, collectMediaCDNRepairBatchSize)
+		err := mod.
 			OrderAsc("m.id").
 			Limit(collectMediaCDNRepairBatchSize).
 			Scan(&rows)
