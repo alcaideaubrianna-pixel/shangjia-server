@@ -2,7 +2,9 @@ package sys
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -347,7 +349,7 @@ func (s *sSysPublish) channelByStableIdentity(ctx context.Context, tenantId int6
 		OrderDesc("id").
 		Limit(1).
 		Scan(&channel)
-	if err != nil {
+	if !channelStableIdentityScanSucceeded(err) {
 		return nil, gerror.Wrap(err, "读取频道稳定标识失败")
 	}
 	if channel.Id <= 0 {
@@ -357,7 +359,7 @@ func (s *sSysPublish) channelByStableIdentity(ctx context.Context, tenantId int6
 			OrderDesc("id").
 			Limit(1).
 			Scan(&channel)
-		if err != nil {
+		if !channelStableIdentityScanSucceeded(err) {
 			return nil, gerror.Wrap(err, "读取已删除频道稳定标识失败")
 		}
 	}
@@ -365,6 +367,10 @@ func (s *sSysPublish) channelByStableIdentity(ctx context.Context, tenantId int6
 		return nil, nil
 	}
 	return &channel, nil
+}
+
+func channelStableIdentityScanSucceeded(err error) bool {
+	return err == nil || errors.Is(err, sql.ErrNoRows)
 }
 
 func sameInt64Slice(a []int64, b []int64) bool {
