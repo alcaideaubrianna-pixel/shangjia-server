@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"sort"
 	"sync"
 	"time"
@@ -89,17 +88,15 @@ func (s *sSysPublish) CollectMediaBenchmark(ctx context.Context, in *sysin.Colle
 					TgAccountId: row["tg_account_id"].Int64(),
 					MediaType:   row["media_type"].String(),
 				}
-				var meta gotdCollectMediaMeta
-				_ = json.Unmarshal([]byte(row["meta_json"].String()), &meta)
-				item.ExpectedSize = meta.Size
+				item.ExpectedSize = row["source_size"].Int64()
 				start := time.Now()
 				downloaded, downloadErr := s.downloadTelegramMedia(ctx, account.TenantId, item.TgAccountId, collectMediaItem{
-					Type:        row["media_type"].String(),
-					FileId:      row["source_file_id"].String(),
-					FileUrl:     row["file_url"].String(),
-					StoragePath: row["storage_path"].String(),
-					PosterUrl:   row["poster_url"].String(),
-					MetaJson:    row["meta_json"].String(),
+					Type: row["media_type"].String(), FileId: row["source_file_id"].String(),
+					FileUrl: row["file_url"].String(), StoragePath: row["storage_path"].String(), PosterUrl: row["poster_url"].String(),
+					SourceKind: row["source_kind"].String(), SourceMediaId: row["source_media_id"].Int64(),
+					SourceAccessHash: row["source_access_hash"].Int64(), SourceFileReference: row["source_file_reference"].Bytes(),
+					SourceThumbSize: row["source_thumb_size"].String(), SourceMimeType: row["source_mime_type"].String(),
+					SourceDCId: row["source_dc_id"].Int(), SourceSize: row["source_size"].Int64(),
 				})
 				item.DurationMs = time.Since(start).Milliseconds()
 				item.Success = downloadErr == nil

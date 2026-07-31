@@ -1,6 +1,31 @@
 ALTER TABLE `hg_youban_publish_collect_rule`
   ADD COLUMN `full_match_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '全量匹配' AFTER `dedupe_days`;
 
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_material_import_group_media` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT, `task_id` bigint(20) NOT NULL DEFAULT '0', `group_id` bigint(20) NOT NULL DEFAULT '0',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0', `account_id` bigint(20) NOT NULL DEFAULT '0', `purpose` varchar(16) NOT NULL DEFAULT 'display',
+  `media_type` varchar(32) NOT NULL DEFAULT '', `sort_index` int(11) NOT NULL DEFAULT '0', `source_file_id` varchar(255) NOT NULL DEFAULT '',
+  `file_url` varchar(1024) NOT NULL DEFAULT '', `storage_path` varchar(1024) NOT NULL DEFAULT '', `poster_url` varchar(1024) NOT NULL DEFAULT '',
+  `source_kind` varchar(32) NOT NULL DEFAULT '', `source_media_id` bigint(20) NOT NULL DEFAULT '0', `source_access_hash` bigint(20) NOT NULL DEFAULT '0',
+  `source_file_reference` blob, `source_thumb_size` varchar(32) NOT NULL DEFAULT '', `source_mime_type` varchar(128) NOT NULL DEFAULT '',
+  `source_dc_id` int(11) NOT NULL DEFAULT '0', `source_size` bigint(20) NOT NULL DEFAULT '0', `file_md5` varchar(64) NOT NULL DEFAULT '',
+  `file_phash` varchar(128) NOT NULL DEFAULT '', `created_at` datetime DEFAULT NULL, `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), KEY `idx_ybp_material_import_group_media_group` (`group_id`,`sort_index`,`id`),
+  KEY `idx_ybp_material_import_group_media_task` (`task_id`,`group_id`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG资料导入分组媒体';
+
+ALTER TABLE `hg_youban_publish_collect_event_media`
+  ADD COLUMN `source_kind` varchar(32) NOT NULL DEFAULT '' COMMENT 'TG来源媒体类型' AFTER `poster_url`,
+  ADD COLUMN `source_media_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG媒体ID' AFTER `source_kind`,
+  ADD COLUMN `source_access_hash` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG媒体访问哈希' AFTER `source_media_id`,
+  ADD COLUMN `source_file_reference` blob COMMENT 'TG文件引用' AFTER `source_access_hash`,
+  ADD COLUMN `source_thumb_size` varchar(32) NOT NULL DEFAULT '' COMMENT 'TG缩略图规格' AFTER `source_file_reference`,
+  ADD COLUMN `source_mime_type` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG媒体MIME' AFTER `source_thumb_size`,
+  ADD COLUMN `source_dc_id` int(11) NOT NULL DEFAULT '0' COMMENT 'TG数据中心ID' AFTER `source_mime_type`,
+  ADD COLUMN `source_size` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG媒体大小' AFTER `source_dc_id`,
+  ADD COLUMN `file_md5` varchar(64) NOT NULL DEFAULT '' COMMENT '文件MD5' AFTER `source_size`,
+  ADD COLUMN `file_phash` varchar(128) NOT NULL DEFAULT '' COMMENT '图片感知哈希' AFTER `file_md5`;
+
 ALTER TABLE `hg_youban_publish_collect_rule`
   ADD COLUMN `delete_text_json` text COMMENT '删除文本JSON' AFTER `replace_json`;
 
@@ -585,8 +610,48 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_media_stat` (
   KEY `idx_ybp_collect_media_stat_source` (`source_id`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集媒体性能统计';
 
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_rule_channel` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `rule_id` bigint(20) NOT NULL DEFAULT '0',
+  `channel_id` bigint(20) NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_collect_rule_channel` (`rule_id`,`channel_id`),
+  KEY `idx_ybp_collect_rule_channel_owner` (`tenant_id`,`account_id`,`rule_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集规则频道';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_rule_item` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `rule_id` bigint(20) NOT NULL DEFAULT '0',
+  `item_type` varchar(32) NOT NULL DEFAULT '',
+  `value` text,
+  `replacement` text,
+  `sort` int(11) NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_collect_rule_item_rule` (`rule_id`,`item_type`,`sort`,`id`),
+  KEY `idx_ybp_collect_rule_item_owner` (`tenant_id`,`account_id`,`rule_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集规则项';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_dispatch_channel` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `dispatch_id` bigint(20) NOT NULL DEFAULT '0',
+  `channel_id` bigint(20) NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_collect_dispatch_channel` (`dispatch_id`,`channel_id`),
+  KEY `idx_ybp_collect_dispatch_channel_owner` (`tenant_id`,`account_id`,`dispatch_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集分发频道';
+
 -- 采集媒体统一收敛到事件媒体快照和正式媒体表
 ALTER TABLE `hg_youban_publish_collect_content` DROP COLUMN IF EXISTS `media_signature`;
+ALTER TABLE `hg_youban_publish_collect_content` DROP COLUMN IF EXISTS `media_json`;
 DROP TABLE IF EXISTS `hg_youban_publish_collect_content_media`;
 ALTER TABLE `hg_youban_publish_collect_event` ADD KEY `idx_ybp_collect_event_queue` (`tenant_id`,`account_id`,`source_id`,`status`,`processed_at`,`source_chat_id`,`source_message_id`,`id`);
 ALTER TABLE `hg_youban_publish_collect_dispatch` ADD KEY `idx_ybp_collect_dispatch_dedupe` (`tenant_id`,`account_id`,`event_id`,`status`,`id`);
@@ -625,3 +690,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_notice_read` (
   UNIQUE KEY `uk_ybp_notice_read_account` (`notice_id`,`account_id`),
   KEY `idx_ybp_notice_read_account` (`account_id`,`notice_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架通知公告已读记录';
+
+ALTER TABLE `hg_youban_publish_profile_state` ADD COLUMN IF NOT EXISTS `publish_operation_no` varchar(128) NOT NULL DEFAULT '' COMMENT '当前上架操作号';
+ALTER TABLE `hg_youban_publish_profile_state` ADD COLUMN IF NOT EXISTS `publish_task_status` varchar(32) NOT NULL DEFAULT '' COMMENT '当前上架任务状态';
+ALTER TABLE `hg_youban_publish_profile_state` ADD COLUMN IF NOT EXISTS `publish_task_updated_at` datetime DEFAULT NULL COMMENT '上架任务状态更新时间';
+ALTER TABLE `hg_youban_publish_profile_state` ADD INDEX `idx_ybp_profile_state_publish_active` (`publish_task_status`,`publish_task_updated_at`,`profile_id`);

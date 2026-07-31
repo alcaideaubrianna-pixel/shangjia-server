@@ -86,8 +86,6 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.CleanupYoubanPublishProfileTasks(ctx)
 	case "collectEventRequeue":
 		err = fix.RequeueYoubanPublishCollectEvents(ctx)
-	case "collectQueueMigrate":
-		err = fix.MigrateYoubanPublishCollectQueue(ctx)
 	case "collectMediaRetryState":
 		err = fix.ApplyYoubanPublishCollectMediaRetryState(ctx)
 	case "collectProfileMediaRepair":
@@ -110,6 +108,12 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.ApplyYoubanPublishCollectDedupeIndexes(ctx)
 	case "collectMaterialRebuild":
 		err = fix.RebuildYoubanPublishCollectMaterialGroups(ctx)
+	case "collectRelationNormalize":
+		err = fix.NormalizeYoubanPublishCollectRelations(ctx)
+	case "collectMediaMetaNormalize":
+		err = fix.NormalizeYoubanPublishCollectMediaMeta(ctx)
+	case "materialImportMediaNormalize":
+		err = fix.NormalizeYoubanPublishMaterialImportMedia(ctx)
 	case "materialImportMediaRepair":
 		accountId, parseErr := strconv.ParseInt(args["a2"], 10, 64)
 		if parseErr != nil || accountId <= 0 {

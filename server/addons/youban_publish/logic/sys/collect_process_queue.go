@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
@@ -146,10 +147,12 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 			return nil
 		}
 		if delay > time.Second {
-			return newCollectProcessRetryError(delay, "采集源仍有等待分组的消息")
+			g.Log().Debugf(ctx, "采集源等待分组窗口 sourceId:%d retryAfter:%s", payload.SourceId, delay.Round(time.Second))
+			return nil
 		}
 	}
-	return newCollectProcessRetryError(time.Second, "采集源仍有待处理消息")
+	g.Log().Debugf(ctx, "采集源本轮批处理已完成，剩余事件由后续消息或恢复器继续 sourceId:%d", payload.SourceId)
+	return nil
 }
 
 func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePayload) (time.Duration, bool, error) {
@@ -209,22 +212,38 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 	if err != nil {
 		return 0, false, gerror.Wrap(err, "读取采集源验证等待任务失败")
 	}
-	var nextReadyAt time.Time
+	var nextDelay time.Duration
+	hasNextDelay := false
 	if !normal.IsEmpty() && normal["ready_from"].GTime() != nil {
-		nextReadyAt = normal["ready_from"].GTime().Add(collectMaterialGroupingDelay).Time
+		nextDelay = collectLocalWindowRemaining(normal["ready_from"].GTime(), collectMaterialGroupingDelay)
+		hasNextDelay = true
 	}
 	if !verify.IsEmpty() && verify["ready_from"].GTime() != nil {
-		verifyReadyAt := verify["ready_from"].GTime().Add(collectMaterialVerifyRetryDelay).Time
-		if nextReadyAt.IsZero() || verifyReadyAt.Before(nextReadyAt) {
-			nextReadyAt = verifyReadyAt
+		verifyDelay := collectLocalWindowRemaining(verify["ready_from"].GTime(), collectMaterialVerifyRetryDelay)
+		if !hasNextDelay || verifyDelay < nextDelay {
+			nextDelay = verifyDelay
+			hasNextDelay = true
 		}
 	}
-	if nextReadyAt.IsZero() {
+	if !hasNextDelay {
 		return 0, false, nil
 	}
-	wait := time.Until(nextReadyAt)
-	if wait <= 0 {
+	if nextDelay <= 0 {
 		return 0, true, nil
 	}
-	return wait, true, nil
+	return nextDelay, true, nil
+}
+
+func collectLocalWindowRemaining(value *gtime.Time, window time.Duration) time.Duration {
+	if value == nil || window <= 0 {
+		return 0
+	}
+	elapsed := collectLocalElapsedSince(value)
+	if elapsed >= window {
+		return 0
+	}
+	if elapsed < 0 {
+		return window
+	}
+	return window - elapsed
 }

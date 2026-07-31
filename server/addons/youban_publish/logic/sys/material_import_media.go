@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -13,7 +12,6 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/telegram"
-	"github.com/gotd/td/tg"
 	"golang.org/x/sync/errgroup"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
@@ -36,27 +34,7 @@ func (s *sSysPublish) executeMaterialImportMedia(ctx context.Context, taskId int
 		}
 		return s.materialImportDownloadGroups(runCtx, task, client)
 	}
-	usedRuntime, err := s.executeAccountCollectOperation(ctx, task.TgAccountId, 5*time.Hour, run)
-	if err != nil || usedRuntime {
-		return err
-	}
-	tgAccount, err := s.accountCollectTgAccount(ctx, task.TgAccountId)
-	if err != nil {
-		return err
-	}
-	conf, err := NewSysConfig().GetTelegram(ctx)
-	if err != nil {
-		return err
-	}
-	client, err := s.newAccountCollectClient(ctx, conf, tgAccount, tg.NewUpdateDispatcher())
-	if err != nil {
-		return err
-	}
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Hour)
-	defer cancel()
-	return s.runTelegramClientWithAccountLease(runCtx, task.TgAccountId, client, func(clientCtx context.Context) error {
-		return run(clientCtx, client)
-	})
+	return s.executeTelegramAccountMediaOperation(ctx, task.TgAccountId, 5*time.Hour, run)
 }
 
 func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sysin.MaterialImportTaskModel, client *telegram.Client) error {
@@ -157,16 +135,18 @@ func (s *sSysPublish) materialImportFailedGroupCount(ctx context.Context, taskId
 
 func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, client *telegram.Client) error {
 	if !profileMessageHasProfileText(firstNonEmpty(group.ProfileText, group.RawText)) {
-		return s.materialImportMarkGroupDone(ctx, group.Id, 0, 0, group.MediaJson)
+		return s.materialImportMarkGroupDone(ctx, group.Id, 0, 0)
 	}
-	items := make([]collectMediaItem, 0)
-	_ = json.Unmarshal([]byte(group.MediaJson), &items)
+	items, err := s.materialImportGroupMediaItems(ctx, group.Id)
+	if err != nil {
+		return err
+	}
 	if len(items) == 0 {
-		profileId, err := s.saveMaterialImportGroupProfile(ctx, task, group, "[]")
+		profileId, err := s.saveMaterialImportGroupProfile(ctx, task, group, nil)
 		if err != nil {
 			return err
 		}
-		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0, "[]")
+		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0)
 	}
 	profileId, err := s.materialImportExistingProfile(ctx, group)
 	if err != nil {
@@ -180,7 +160,7 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 			return err
 		}
 		_ = s.appendMaterialImportPublishLog(ctx, task, profileId, "reused", fmt.Sprintf("资料已存在，跳过重复导入：%s", strings.TrimSpace(group.Title)))
-		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0, group.MediaJson)
+		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0)
 	}
 	missingItems := items
 	missingIndexes := make([]int, len(items))
@@ -201,7 +181,7 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 				return err
 			}
 			_ = s.appendMaterialImportPublishLog(ctx, task, profileId, "reused", fmt.Sprintf("资料媒体已完整，跳过重复导入：%s", strings.TrimSpace(group.Title)))
-			return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0, group.MediaJson)
+			return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0)
 		}
 	}
 	_ = s.materialImportMarkGroupRunning(ctx, group.Id)
@@ -212,13 +192,11 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 	for index, itemIndex := range missingIndexes {
 		items[itemIndex] = missingItems[index]
 	}
-	data, _ := json.Marshal(items)
+	if err = s.replaceMaterialImportGroupMedia(ctx, group.Id, task.Id, task.TenantId, task.AccountId, items); err != nil {
+		return err
+	}
 	if profileId > 0 {
-		missingData, marshalErr := json.Marshal(missingItems)
-		if marshalErr != nil {
-			return gerror.Wrap(marshalErr, "序列化待补齐TG媒体失败")
-		}
-		if err = s.saveMaterialImportProfileMissingMedia(ctx, task, group, profileId, string(missingData)); err != nil {
+		if err = s.saveMaterialImportProfileMissingMedia(ctx, task, group, profileId, missingItems); err != nil {
 			return err
 		}
 		if err = s.refreshMaterialImportProfileMetadata(ctx, task, group, profileId); err != nil {
@@ -230,13 +208,13 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 		if err = s.syncProfileNoteIndex(ctx, profileId); err != nil {
 			return err
 		}
-		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0, string(data))
+		return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0)
 	}
-	profileId, err = s.saveMaterialImportGroupProfile(ctx, task, group, string(data))
+	profileId, err = s.saveMaterialImportGroupProfile(ctx, task, group, items)
 	if err != nil {
 		return err
 	}
-	return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0, string(data))
+	return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0)
 }
 
 func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sysin.MaterialImportTaskModel, groupID int64, items []collectMediaItem, client *telegram.Client) (int, int, error) {
@@ -419,10 +397,9 @@ func (s *sSysPublish) materialImportMarkGroupFailed(ctx context.Context, id int6
 	return err
 }
 
-func (s *sSysPublish) materialImportMarkGroupDone(ctx context.Context, id int64, profileId int64, taskProfileId int64, mediaJson string) error {
+func (s *sSysPublish) materialImportMarkGroupDone(ctx context.Context, id int64, profileId int64, taskProfileId int64) error {
 	_, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("id", id).Data(g.Map{
 		"status":          sysin.MaterialImportStatusSuccess,
-		"media_json":      strings.TrimSpace(mediaJson),
 		"media_done":      gdb.Raw("media_total"),
 		"media_failed":    0,
 		"profile_id":      profileId,
@@ -524,11 +501,17 @@ func (s *sSysPublish) refreshMaterialImportTaskStats(ctx context.Context, taskId
 }
 
 func gotdCollectMediaMetaFromItem(item collectMediaItem) (gotdCollectMediaMeta, bool) {
-	var meta gotdCollectMediaMeta
-	if strings.TrimSpace(item.MetaJson) == "" {
-		return meta, false
+	meta := gotdCollectMediaMeta{
+		Kind:          strings.TrimSpace(item.SourceKind),
+		Id:            item.SourceMediaId,
+		AccessHash:    item.SourceAccessHash,
+		FileReference: append([]byte(nil), item.SourceFileReference...),
+		ThumbSize:     strings.TrimSpace(item.SourceThumbSize),
+		MimeType:      strings.TrimSpace(item.SourceMimeType),
+		DCID:          item.SourceDCId,
+		Size:          item.SourceSize,
 	}
-	if err := json.Unmarshal([]byte(item.MetaJson), &meta); err != nil || meta.Id <= 0 {
+	if meta.Id <= 0 {
 		return gotdCollectMediaMeta{}, false
 	}
 	return meta, true

@@ -3,14 +3,12 @@ package sys
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
@@ -50,9 +48,9 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 			MatchJSON: matchJSON,
 		}
 	}
-	text := applyCollectLineDeletes(rawText, collectStringList(rule["delete_line_text_json"].String()))
-	text = applyCollectTextDeletes(text, collectStringList(rule["delete_text_json"].String()))
-	text = applyCollectReplacements(text, collectReplaceList(rule["replace_json"].String()))
+	text := applyCollectLineDeletes(rawText, collectRuleStrings(rule, "delete_lines"))
+	text = applyCollectTextDeletes(text, collectRuleStrings(rule, "delete_texts"))
+	text = applyCollectReplacements(text, collectRuleReplacements(rule))
 	if shouldDropCollectStandaloneCodeCaption(text, mediaCount) {
 		text = ""
 	}
@@ -88,41 +86,6 @@ const (
 	collectDedupePhasePHash collectDedupePhase = "phash"
 )
 
-func (s *sSysPublish) collectDedupeContentByKey(ctx context.Context, event gdb.Record, eventRows gdb.Result) (map[string]gdb.Record, error) {
-	keys := make([]string, 0, len(eventRows))
-	seen := make(map[string]struct{}, len(eventRows))
-	for _, row := range eventRows {
-		key := strings.TrimSpace(row["dedupe_key"].String())
-		if key == "" {
-			continue
-		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		keys = append(keys, key)
-	}
-	if len(keys) == 0 {
-		return map[string]gdb.Record{}, nil
-	}
-	rows, err := pdao.YoubanPublishCollectContent.Ctx(ctx).
-		Fields("dedupe_key,text_hash,media_json").
-		Where("tenant_id", event["tenant_id"].Int64()).
-		Where("account_id", event["account_id"].Int64()).
-		WhereIn("dedupe_key", keys).
-		All()
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取采集内容PHash快照失败")
-	}
-	contentByKey := make(map[string]gdb.Record, len(rows))
-	for _, row := range rows {
-		if key := strings.TrimSpace(row["dedupe_key"].String()); key != "" {
-			contentByKey[key] = row
-		}
-	}
-	return contentByKey, nil
-}
-
 func (s *sSysPublish) collectDedupeCandidateEvents(ctx context.Context, event gdb.Record, current collectDedupeMaterial, days int) (gdb.Result, error) {
 	newModel := func() *gdb.Model {
 		model := pdao.YoubanPublishCollectEvent.Ctx(ctx).
@@ -142,7 +105,7 @@ func (s *sSysPublish) collectDedupeCandidateEvents(ctx context.Context, event gd
 		}
 		exactRows, err := newModel().
 			Where(field, signature).
-			Fields("id,text_hash,dedupe_key,media_json,received_at").
+			Fields("id,text_hash,dedupe_key,received_at").
 			OrderDesc("id").
 			All()
 		if err != nil {
@@ -161,7 +124,7 @@ func (s *sSysPublish) collectDedupeCandidateEvents(ctx context.Context, event gd
 	}
 	if current.mediaKey != "" || current.imagePHashKey != "" {
 		recentRows, err := newModel().
-			Fields("id,text_hash,dedupe_key,media_json,received_at").
+			Fields("id,text_hash,dedupe_key,received_at").
 			OrderDesc("id").
 			Limit(500).
 			All()
@@ -191,12 +154,12 @@ type collectDedupeMaterial struct {
 }
 
 func collectDedupeMaterialFromEvent(event gdb.Record, content *collectContentResult) collectDedupeMaterial {
-	mediaJSON := event["media_json"].String()
+	items := make([]collectMediaItem, 0)
 	textHash := strings.TrimSpace(event["text_hash"].String())
 	dedupeKey := strings.TrimSpace(event["dedupe_key"].String())
 	if content != nil {
-		if strings.TrimSpace(content.MediaJSON) != "" {
-			mediaJSON = content.MediaJSON
+		if len(content.Media) > 0 {
+			items = content.Media
 		}
 		if strings.TrimSpace(content.TextHash) != "" {
 			textHash = content.TextHash
@@ -205,7 +168,7 @@ func collectDedupeMaterialFromEvent(event gdb.Record, content *collectContentRes
 			dedupeKey = content.DedupeKey
 		}
 	}
-	material := collectDedupeMaterialFromValues(textHash, mediaJSON)
+	material := collectDedupeMaterialFromItems(textHash, items)
 	material.dedupeKey = dedupeKey
 	if content == nil {
 		material.imagePHashKey = ""
@@ -213,24 +176,13 @@ func collectDedupeMaterialFromEvent(event gdb.Record, content *collectContentRes
 	return material
 }
 
-func collectDedupeMaterialFromEventRecord(row gdb.Record) collectDedupeMaterial {
-	material := collectDedupeMaterialFromValues(row["text_hash"].String(), row["media_json"].String())
-	material.dedupeKey = strings.TrimSpace(row["dedupe_key"].String())
-	material.imagePHashKey = ""
-	return material
-}
-
-func collectDedupeMaterialFromContentRecord(row gdb.Record) collectDedupeMaterial {
-	material := collectDedupeMaterialFromValues(row["text_hash"].String(), row["media_json"].String())
+func collectDedupeMaterialFromEventRecord(row gdb.Record, items []collectMediaItem) collectDedupeMaterial {
+	material := collectDedupeMaterialFromItems(row["text_hash"].String(), items)
 	material.dedupeKey = strings.TrimSpace(row["dedupe_key"].String())
 	return material
 }
 
-func collectDedupeMaterialFromValues(textHash string, mediaJSON string) collectDedupeMaterial {
-	items := make([]collectMediaItem, 0)
-	if err := json.Unmarshal([]byte(mediaJSON), &items); err != nil {
-		items = nil
-	}
+func collectDedupeMaterialFromItems(textHash string, items []collectMediaItem) collectDedupeMaterial {
 	mediaKey := collectMediaFingerprintSetKey(items)
 	imagePHashKey, _ := collectImagePHashSetKey(items)
 	textHash = strings.TrimSpace(textHash)
@@ -314,31 +266,6 @@ func firstOverlappingInt64(left []int64, right []int64) int64 {
 	return 0
 }
 
-func collectStringList(raw string) []string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "null" {
-		return nil
-	}
-	var values []string
-	if err := json.Unmarshal([]byte(raw), &values); err == nil {
-		return trimCollectValues(values)
-	}
-	var rows []map[string]any
-	if err := json.Unmarshal([]byte(raw), &rows); err == nil {
-		values = make([]string, 0, len(rows))
-		for _, row := range rows {
-			for _, key := range []string{"value", "label", "text", "keyword", "tag"} {
-				if value := strings.TrimSpace(fmt.Sprint(row[key])); value != "" && value != "<nil>" {
-					values = append(values, value)
-					break
-				}
-			}
-		}
-		return trimCollectValues(values)
-	}
-	return trimCollectValues(strings.Split(raw, ","))
-}
-
 func trimCollectValues(values []string) []string {
 	list := make([]string, 0, len(values))
 	seen := map[string]struct{}{}
@@ -355,38 +282,6 @@ func trimCollectValues(values []string) []string {
 		list = append(list, value)
 	}
 	return list
-}
-
-func collectReplaceList(raw string) []collectReplaceRule {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "null" {
-		return nil
-	}
-	var rows []collectReplaceRule
-	if err := json.Unmarshal([]byte(raw), &rows); err == nil {
-		return rows
-	}
-	var maps []map[string]string
-	if err := json.Unmarshal([]byte(raw), &maps); err != nil {
-		return nil
-	}
-	rows = make([]collectReplaceRule, 0, len(maps))
-	for _, row := range maps {
-		rows = append(rows, collectReplaceRule{
-			From: firstCollectValue(row, "from", "source", "match", "old"),
-			To:   firstCollectValue(row, "to", "target", "replace", "new"),
-		})
-	}
-	return rows
-}
-
-func firstCollectValue(row map[string]string, keys ...string) string {
-	for _, key := range keys {
-		if value := strings.TrimSpace(row[key]); value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func matchCollectTerms(text string, terms []string) string {

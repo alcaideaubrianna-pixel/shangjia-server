@@ -68,12 +68,6 @@ type tgMessageRepairCacheRow struct {
 	MediaGroupId string      `json:"mediaGroupId"`
 }
 
-type tgMessageRepairAccount struct {
-	Id         int64  `json:"id"`
-	SessionKey string `json:"sessionKey"`
-	Status     string `json:"status"`
-}
-
 func (s *sSysPublish) MyTgMessageRepairStart(ctx context.Context, in *sysin.TgMessageRepairStartInp) (*sysin.TgMessageRepairModel, error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {
@@ -431,41 +425,12 @@ func (s *sSysPublish) scanTgChannelMessagesSince(ctx context.Context, tenantId i
 	if err != nil {
 		return 0, gerror.New("频道AccessHash无效，请刷新频道缓存")
 	}
-	var account tgMessageRepairAccount
-	if err = g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
-		Fields("id,session_key,status").
-		Where("id", channel.TgAccountId).
-		Where("tenant_id", tenantId).
-		WhereNull("deleted_at").
-		Scan(&account); err != nil {
-		return 0, gerror.Wrap(err, "读取TG协议号失败")
-	}
-	if account.Id <= 0 || strings.TrimSpace(account.SessionKey) == "" {
-		return 0, gerror.New("TG协议号不存在或未授权")
-	}
-	conf, err := NewSysConfig().GetTelegram(ctx)
-	if err != nil {
-		return 0, err
-	}
-	storage, err := s.telegramSessionStorage(account.SessionKey)
-	if err != nil {
-		return 0, err
-	}
-	options := telegram.Options{SessionStorage: storage}
-	if resolver, err := telegramMTProtoResolver(conf.ProxyUrl); err != nil {
-		return 0, err
-	} else if resolver != nil {
-		options.Resolver = resolver
-	}
-	client := telegram.NewClient(conf.AppId, conf.AppHash, options)
-	runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
 	latestCachedMessageId, err := s.latestTgMessageCacheId(ctx, tenantId, channel.Id)
 	if err != nil {
 		return 0, err
 	}
 	scanned := 0
-	err = s.runTelegramClientWithAccountLease(runCtx, account.Id, client, func(ctx context.Context) error {
+	err = s.executeTelegramAccountOperation(ctx, channel.TgAccountId, 2*time.Minute, func(ctx context.Context, client *telegram.Client) error {
 		offsetID := 0
 		for {
 			previousOffset := offsetID

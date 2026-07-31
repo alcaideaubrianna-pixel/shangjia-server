@@ -64,7 +64,7 @@ func (s *sSysPublish) fetchListenerSenderFromTelegram(ctx context.Context, plan 
 		return listenerMessageSenderInfo{}, nil
 	}
 	var out listenerMessageSenderInfo
-	usedRuntime, err := s.executeAccountCollectOperation(ctx, plan.TgAccountId, 30*time.Second, func(runCtx context.Context, client *telegram.Client) error {
+	err = s.executeTelegramAccountOperation(ctx, plan.TgAccountId, 30*time.Second, func(runCtx context.Context, client *telegram.Client) error {
 		sender, fetchErr := s.fetchListenerSenderWithClient(runCtx, plan, sourceChatId, msg, uid, client)
 		if fetchErr != nil {
 			return fetchErr
@@ -75,29 +75,7 @@ func (s *sSysPublish) fetchListenerSenderFromTelegram(ctx context.Context, plan 
 	if err != nil {
 		return listenerMessageSenderInfo{}, err
 	}
-	if usedRuntime {
-		return out, nil
-	}
-	conf, err := NewSysConfig().GetTelegram(ctx)
-	if err != nil {
-		return listenerMessageSenderInfo{}, err
-	}
-	account, err := s.accountCollectTgAccount(ctx, plan.TgAccountId)
-	if err != nil {
-		return listenerMessageSenderInfo{}, err
-	}
-	client, err := s.newAccountCollectClient(ctx, conf, account, tg.NewUpdateDispatcher())
-	if err != nil {
-		return listenerMessageSenderInfo{}, err
-	}
-	err = s.runTelegramClientWithAccountLease(ctx, plan.TgAccountId, client, func(runCtx context.Context) error {
-		if _, err := client.Self(runCtx); err != nil {
-			return err
-		}
-		out, err = s.fetchListenerSenderWithClient(runCtx, plan, sourceChatId, msg, uid, client)
-		return err
-	})
-	return out, err
+	return out, nil
 }
 
 func (s *sSysPublish) fetchListenerSenderWithClient(ctx context.Context, plan accountListenPlanRuntime, sourceChatId string, msg *tg.Message, userId int64, client *telegram.Client) (listenerMessageSenderInfo, error) {

@@ -14,16 +14,20 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
-func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatchId, profileId int64, event gdb.Record, rule gdb.Record) error {
-	if dispatchId <= 0 || profileId <= 0 || event.IsEmpty() || rule.IsEmpty() {
+func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatchId, profileId int64, event gdb.Record) error {
+	if dispatchId <= 0 || profileId <= 0 || event.IsEmpty() {
 		return gerror.New("采集分发参数不完整")
 	}
-	channelIds := decodeInt64JSON(rule["target_channel_id_json"].String())
+	channelMap, err := collectDispatchChannelMap(ctx, []int64{dispatchId})
+	if err != nil {
+		return err
+	}
+	channelIds := channelMap[dispatchId]
 	if len(channelIds) == 0 {
 		return gerror.New("采集规则未配置目标频道")
 	}
 	operationNo := fmt.Sprintf("collect:%d", dispatchId)
-	if _, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
+	if _, err = pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
 		"profile_id": profileId,
 		"status":     sysin.CollectDispatchStatusPending, "error_message": "", "updated_at": gtime.Now(),
 	}).Update(); err != nil {
@@ -47,7 +51,7 @@ func (s *sSysPublish) markCollectDispatchSentByProfile(ctx context.Context, prof
 		return nil
 	}
 	rows, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
-		Fields("event_id,target_channel_id_json").Where("profile_id", profileId).Where("event_id", eventId).
+		Fields("id,event_id").Where("profile_id", profileId).Where("event_id", eventId).
 		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing}).All()
 	if err != nil {
 		return gerror.Wrap(err, "读取采集分发事件失败")

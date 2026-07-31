@@ -140,15 +140,23 @@ func botCollectMessage(botId int64, source g.Map, msg *models.Message) *CollectM
 }
 
 type collectMediaItem struct {
-	Type        string `json:"type"`
-	Purpose     string `json:"purpose,omitempty"`
-	FileId      string `json:"fileId"`
-	FileUrl     string `json:"fileUrl,omitempty"`
-	StoragePath string `json:"storagePath,omitempty"`
-	PosterUrl   string `json:"posterUrl,omitempty"`
-	FileMd5     string `json:"fileMd5,omitempty"`
-	FilePhash   string `json:"filePhash,omitempty"`
-	MetaJson    string `json:"metaJson,omitempty"`
+	Type                string `json:"type"`
+	Purpose             string `json:"purpose,omitempty"`
+	FileId              string `json:"fileId"`
+	FileUrl             string `json:"fileUrl,omitempty"`
+	StoragePath         string `json:"storagePath,omitempty"`
+	PosterUrl           string `json:"posterUrl,omitempty"`
+	FileMd5             string `json:"fileMd5,omitempty"`
+	FilePhash           string `json:"filePhash,omitempty"`
+	SourceKind          string `json:"sourceKind,omitempty"`
+	SourceMediaId       int64  `json:"sourceMediaId,omitempty"`
+	SourceAccessHash    int64  `json:"sourceAccessHash,omitempty"`
+	SourceFileReference []byte `json:"sourceFileReference,omitempty"`
+	SourceThumbSize     string `json:"sourceThumbSize,omitempty"`
+	SourceMimeType      string `json:"sourceMimeType,omitempty"`
+	SourceDCId          int    `json:"sourceDcId,omitempty"`
+	SourceSize          int64  `json:"sourceSize,omitempty"`
+	DebugMetaJson       string `json:"debugMetaJson,omitempty"`
 }
 
 func collectTelegramMediaItems(msg *models.Message) []collectMediaItem {
@@ -164,56 +172,6 @@ func collectTelegramMediaItems(msg *models.Message) []collectMediaItem {
 		items = append(items, collectMediaItem{Type: "document", FileId: msg.Document.FileID})
 	}
 	return items
-}
-
-func mergeCollectMediaJSON(existing string, next string) (string, int) {
-	items := make([]collectMediaItem, 0)
-	_ = json.Unmarshal([]byte(existing), &items)
-	var nextItems []collectMediaItem
-	_ = json.Unmarshal([]byte(next), &nextItems)
-	seen := map[string]struct{}{}
-	merged := make([]collectMediaItem, 0, len(items)+len(nextItems))
-	for _, item := range append(items, nextItems...) {
-		sourceKey := collectMediaSourceKey(item)
-		if sourceKey == "" {
-			continue
-		}
-		key := strings.TrimSpace(item.Purpose) + ":" + item.Type + ":" + sourceKey
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		merged = append(merged, item)
-	}
-	data, _ := json.Marshal(merged)
-	return string(data), len(merged)
-}
-
-func collectMediaJSONWithPurpose(mediaJSON string, purpose string) string {
-	purpose = strings.TrimSpace(purpose)
-	if purpose == "" {
-		return mediaJSON
-	}
-	var items []collectMediaItem
-	if err := json.Unmarshal([]byte(mediaJSON), &items); err != nil {
-		return mediaJSON
-	}
-	filtered := make([]collectMediaItem, 0, len(items))
-	for index := range items {
-		itemPurpose := strings.TrimSpace(items[index].Purpose)
-		if itemPurpose != "" && !strings.EqualFold(itemPurpose, purpose) {
-			continue
-		}
-		if itemPurpose == "" {
-			items[index].Purpose = purpose
-		}
-		filtered = append(filtered, items[index])
-	}
-	data, err := json.Marshal(filtered)
-	if err != nil {
-		return mediaJSON
-	}
-	return string(data)
 }
 
 func (s *sSysPublish) scheduleCollectGroupedEvent(eventId int64, sourceId int64, tenantId int64, accountId int64) {

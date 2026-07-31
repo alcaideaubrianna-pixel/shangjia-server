@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -26,7 +25,7 @@ func (s *sSysPublish) upsertMaterialImportUnitBlocks(ctx context.Context, task *
 
 func (s *sSysPublish) upsertMaterialImportDisplayUnit(ctx context.Context, task *sysin.MaterialImportTaskModel, unit *collectMaterialUnit) error {
 	items := collectMediaItemsWithPurpose(unit.Media, collectMaterialRoleDisplay)
-	mediaJSON, mediaCount := collectMessageMediaJSON(items)
+	mediaCount := len(normalizeCollectMediaItems(items))
 	existing, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("source_unique_key", unit.UniqueKey).One()
 	if err != nil {
 		return gerror.Wrap(err, "读取资料导入分组失败")
@@ -41,7 +40,6 @@ func (s *sSysPublish) upsertMaterialImportDisplayUnit(ctx context.Context, task 
 		"source_unique_key":  unit.UniqueKey,
 		"raw_text":           firstNonEmpty(unit.RawText, existing["raw_text"].String()),
 		"profile_text":       firstNonEmpty(unit.RawText, existing["profile_text"].String()),
-		"media_json":         mediaJSON,
 		"media_total":        mediaCount,
 		"status":             sysin.MaterialImportStatusPending,
 		"message_at":         unit.MessageAt,
@@ -55,12 +53,21 @@ func (s *sSysPublish) upsertMaterialImportDisplayUnit(ctx context.Context, task 
 	data["nickname"] = nickname
 	if existing.IsEmpty() {
 		data["created_at"] = now
-		_, err = pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Data(data).Insert()
-		return gerror.Wrap(err, "创建资料导入分组失败")
+		groupId, insertErr := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Data(data).InsertAndGetId()
+		if insertErr != nil {
+			return gerror.Wrap(insertErr, "创建资料导入分组失败")
+		}
+		return s.replaceMaterialImportGroupMedia(ctx, groupId, task.Id, task.TenantId, task.AccountId, items)
 	}
-	if strings.TrimSpace(existing["media_json"].String()) != "" {
-		data["media_json"], data["media_total"] = mergeCollectMediaJSON(existing["media_json"].String(), mediaJSON)
+	existingItems, err := s.materialImportGroupMediaItems(ctx, existing["id"].Int64())
+	if err != nil {
+		return err
 	}
+	items = mergeCollectMediaItems(existingItems, items)
+	data["media_total"] = len(items)
 	_, err = pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("id", existing["id"].Int64()).Data(data).Update()
-	return gerror.Wrap(err, "更新资料导入分组失败")
+	if err != nil {
+		return gerror.Wrap(err, "更新资料导入分组失败")
+	}
+	return s.replaceMaterialImportGroupMedia(ctx, existing["id"].Int64(), task.Id, task.TenantId, task.AccountId, items)
 }

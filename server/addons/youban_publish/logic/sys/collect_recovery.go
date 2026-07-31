@@ -144,8 +144,12 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 		if payload.EventId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 || payload.SourceId <= 0 {
 			continue
 		}
-		if err = s.enqueueCollectMediaCache(ctx, payload, 0); err != nil {
-			g.Log().Warningf(ctx, "恢复待处理采集媒体任务投递失败 eventId:%d sourceId:%d err:%+v", payload.EventId, payload.SourceId, err)
+		enqueued, enqueueErr := s.enqueueCollectMediaCacheTask(ctx, payload, 0)
+		if enqueueErr != nil {
+			g.Log().Warningf(ctx, "恢复待处理采集媒体任务投递失败 eventId:%d sourceId:%d err:%+v", payload.EventId, payload.SourceId, enqueueErr)
+			continue
+		}
+		if !enqueued {
 			continue
 		}
 		if _, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
@@ -374,7 +378,7 @@ func (s *sSysPublish) recoverCollectPublishTasks(ctx context.Context, limit int)
 		if ruleErr != nil || rule.IsEmpty() {
 			continue
 		}
-		if err = s.submitCollectProfileDispatch(ctx, row["id"].Int64(), row["profile_id"].Int64(), event, rule); err != nil {
+		if err = s.submitCollectProfileDispatch(ctx, row["id"].Int64(), row["profile_id"].Int64(), event); err != nil {
 			g.Log().Warningf(ctx, "恢复采集资料TG任务失败 dispatch:%d err:%+v", row["id"].Int64(), err)
 			continue
 		}

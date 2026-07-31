@@ -55,23 +55,9 @@ func (s *sSysPublish) executeChannelMemberSync(ctx context.Context, task *sysin.
 	if err != nil {
 		return err
 	}
-	account, err := s.accountCollectTgAccount(ctx, task.TgAccountId)
-	if err != nil {
-		return err
-	}
-	conf, err := NewSysConfig().GetTelegram(ctx)
-	if err != nil {
-		return err
-	}
-	client, err := s.newAccountCollectClient(ctx, conf, account, tg.NewUpdateDispatcher())
-	if err != nil {
-		return err
-	}
 	startAt := gtime.Now()
 	seen := map[int64]string{}
-	runCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
-	defer cancel()
-	err = s.runTelegramClientWithAccountLease(runCtx, task.TgAccountId, client, func(runCtx context.Context) error {
+	err = s.executeTelegramAccountOperation(ctx, task.TgAccountId, 2*time.Hour, func(runCtx context.Context, client *telegram.Client) error {
 		if _, err = client.Self(runCtx); err != nil {
 			return err
 		}

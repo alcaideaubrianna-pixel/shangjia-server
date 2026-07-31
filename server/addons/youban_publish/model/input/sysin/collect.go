@@ -2,7 +2,6 @@ package sysin
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -91,7 +90,6 @@ func (in *CollectConfigSaveInp) Filter(ctx context.Context) error {
 }
 
 type CollectStatsModel struct {
-	BackupChannelCount  int `json:"backupChannelCount" dc:"备份群数量"`
 	BlockedCount        int `json:"blockedCount" dc:"已屏蔽数量"`
 	CollectingCount     int `json:"collectingCount" dc:"采集中数量"`
 	EventCount          int `json:"eventCount" dc:"采集事件数"`
@@ -272,83 +270,78 @@ type CollectRuleListInp struct {
 }
 
 type CollectRuleModel struct {
-	Id                  int64       `json:"id" dc:"ID"`
-	TenantId            int64       `json:"tenantId" dc:"租户ID"`
-	AccountId           int64       `json:"accountId" dc:"账号ID"`
-	Name                string      `json:"name" dc:"名称"`
-	GlobalEnabled       int         `json:"globalEnabled" dc:"全局应用"`
-	TargetChannelIdJson string      `json:"targetChannelIdJson" dc:"目标频道JSON"`
-	BotIdJson           string      `json:"botIdJson" dc:"BOT JSON"`
-	BackupChannelId     int64       `json:"backupChannelId" dc:"备份频道ID"`
-	BackupChannelIdJson string      `json:"backupChannelIdJson" dc:"备份频道JSON"`
-	ReviewEnabled       int         `json:"reviewEnabled" dc:"审核开关"`
-	DedupeEnabled       int         `json:"dedupeEnabled" dc:"去重开关"`
-	DedupeDays          int         `json:"dedupeDays" dc:"去重天数"`
-	FullMatchEnabled    int         `json:"fullMatchEnabled" dc:"全量匹配"`
-	KeywordJson         string      `json:"keywordJson" dc:"关键词JSON"`
-	TagJson             string      `json:"tagJson" dc:"标签JSON"`
-	ReplaceJson         string      `json:"replaceJson" dc:"替换JSON"`
-	DeleteLineTextJson  string      `json:"deleteLineTextJson" dc:"整行删除文本JSON"`
-	DeleteTextJson      string      `json:"deleteTextJson" dc:"删除文本JSON"`
-	BlockTextJson       string      `json:"blockTextJson" dc:"屏蔽文本JSON"`
-	BlockLink           int         `json:"blockLink" dc:"屏蔽链接"`
-	BlockUsername       int         `json:"blockUsername" dc:"屏蔽用户名"`
-	BlockPlainText      int         `json:"blockPlainText" dc:"屏蔽纯文本"`
-	HeaderEnabled       int         `json:"headerEnabled" dc:"前置文案开关"`
-	HeaderMarkdown      string      `json:"headerMarkdown" dc:"前置文案"`
-	FooterEnabled       int         `json:"footerEnabled" dc:"后置文案开关"`
-	FooterMarkdown      string      `json:"footerMarkdown" dc:"后置文案"`
-	Sort                int         `json:"sort" dc:"排序"`
-	Status              int         `json:"status" dc:"状态"`
-	CreatedAt           *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt           *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id               int64                     `json:"id" dc:"ID"`
+	TenantId         int64                     `json:"tenantId" dc:"租户ID"`
+	AccountId        int64                     `json:"accountId" dc:"账号ID"`
+	Name             string                    `json:"name" dc:"名称"`
+	GlobalEnabled    int                       `json:"globalEnabled" dc:"全局应用"`
+	TargetChannelIds []int64                   `json:"targetChannelIds" dc:"目标频道ID"`
+	ReviewEnabled    int                       `json:"reviewEnabled" dc:"审核开关"`
+	DedupeEnabled    int                       `json:"dedupeEnabled" dc:"去重开关"`
+	DedupeDays       int                       `json:"dedupeDays" dc:"去重天数"`
+	FullMatchEnabled int                       `json:"fullMatchEnabled" dc:"全量匹配"`
+	Keywords         []string                  `json:"keywords" dc:"关键词"`
+	Tags             []string                  `json:"tags" dc:"标签"`
+	Replacements     []CollectRuleReplaceModel `json:"replacements" dc:"文本替换"`
+	DeleteLineTexts  []string                  `json:"deleteLineTexts" dc:"整行删除文本"`
+	DeleteTexts      []string                  `json:"deleteTexts" dc:"删除文本"`
+	BlockTexts       []string                  `json:"blockTexts" dc:"屏蔽文本"`
+	BlockLink        int                       `json:"blockLink" dc:"屏蔽链接"`
+	BlockUsername    int                       `json:"blockUsername" dc:"屏蔽用户名"`
+	BlockPlainText   int                       `json:"blockPlainText" dc:"屏蔽纯文本"`
+	HeaderEnabled    int                       `json:"headerEnabled" dc:"前置文案开关"`
+	HeaderMarkdown   string                    `json:"headerMarkdown" dc:"前置文案"`
+	FooterEnabled    int                       `json:"footerEnabled" dc:"后置文案开关"`
+	FooterMarkdown   string                    `json:"footerMarkdown" dc:"后置文案"`
+	Sort             int                       `json:"sort" dc:"排序"`
+	Status           int                       `json:"status" dc:"状态"`
+	CreatedAt        *gtime.Time               `json:"createdAt" dc:"创建时间"`
+	UpdatedAt        *gtime.Time               `json:"updatedAt" dc:"更新时间"`
 }
 
 type CollectRuleSaveInp struct {
-	Id                  int64  `json:"id" dc:"ID"`
-	Name                string `json:"name" dc:"名称"`
-	GlobalEnabled       int    `json:"globalEnabled" dc:"全局应用"`
-	TargetChannelIdJson string `json:"targetChannelIdJson" dc:"目标频道JSON"`
-	BotIdJson           string `json:"botIdJson" dc:"BOT JSON"`
-	BackupChannelId     int64  `json:"backupChannelId" dc:"备份群ID"`
-	BackupChannelIdJson string `json:"backupChannelIdJson" dc:"备份频道JSON"`
-	ReviewEnabled       int    `json:"reviewEnabled" dc:"审核开关"`
-	DedupeEnabled       int    `json:"dedupeEnabled" dc:"去重开关"`
-	DedupeDays          int    `json:"dedupeDays" dc:"去重天数"`
-	FullMatchEnabled    int    `json:"fullMatchEnabled" dc:"全量匹配"`
-	KeywordJson         string `json:"keywordJson" dc:"关键词JSON"`
-	TagJson             string `json:"tagJson" dc:"标签JSON"`
-	ReplaceJson         string `json:"replaceJson" dc:"替换JSON"`
-	DeleteLineTextJson  string `json:"deleteLineTextJson" dc:"整行删除文本JSON"`
-	DeleteTextJson      string `json:"deleteTextJson" dc:"删除文本JSON"`
-	BlockTextJson       string `json:"blockTextJson" dc:"屏蔽文本JSON"`
-	BlockLink           int    `json:"blockLink" dc:"屏蔽链接"`
-	BlockUsername       int    `json:"blockUsername" dc:"屏蔽用户名"`
-	BlockPlainText      int    `json:"blockPlainText" dc:"屏蔽纯文本"`
-	HeaderEnabled       int    `json:"headerEnabled" dc:"前置文案开关"`
-	HeaderMarkdown      string `json:"headerMarkdown" dc:"前置文案"`
-	FooterEnabled       int    `json:"footerEnabled" dc:"后置文案开关"`
-	FooterMarkdown      string `json:"footerMarkdown" dc:"后置文案"`
-	Sort                int    `json:"sort" dc:"排序"`
-	Status              int    `json:"status" dc:"状态"`
+	Id               int64                     `json:"id" dc:"ID"`
+	Name             string                    `json:"name" dc:"名称"`
+	GlobalEnabled    int                       `json:"globalEnabled" dc:"全局应用"`
+	TargetChannelIds []int64                   `json:"targetChannelIds" dc:"目标频道ID"`
+	ReviewEnabled    int                       `json:"reviewEnabled" dc:"审核开关"`
+	DedupeEnabled    int                       `json:"dedupeEnabled" dc:"去重开关"`
+	DedupeDays       int                       `json:"dedupeDays" dc:"去重天数"`
+	FullMatchEnabled int                       `json:"fullMatchEnabled" dc:"全量匹配"`
+	Keywords         []string                  `json:"keywords" dc:"关键词"`
+	Tags             []string                  `json:"tags" dc:"标签"`
+	Replacements     []CollectRuleReplaceModel `json:"replacements" dc:"文本替换"`
+	DeleteLineTexts  []string                  `json:"deleteLineTexts" dc:"整行删除文本"`
+	DeleteTexts      []string                  `json:"deleteTexts" dc:"删除文本"`
+	BlockTexts       []string                  `json:"blockTexts" dc:"屏蔽文本"`
+	BlockLink        int                       `json:"blockLink" dc:"屏蔽链接"`
+	BlockUsername    int                       `json:"blockUsername" dc:"屏蔽用户名"`
+	BlockPlainText   int                       `json:"blockPlainText" dc:"屏蔽纯文本"`
+	HeaderEnabled    int                       `json:"headerEnabled" dc:"前置文案开关"`
+	HeaderMarkdown   string                    `json:"headerMarkdown" dc:"前置文案"`
+	FooterEnabled    int                       `json:"footerEnabled" dc:"后置文案开关"`
+	FooterMarkdown   string                    `json:"footerMarkdown" dc:"后置文案"`
+	Sort             int                       `json:"sort" dc:"排序"`
+	Status           int                       `json:"status" dc:"状态"`
 }
 
 func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
 	in.Name = strings.TrimSpace(in.Name)
-	in.TargetChannelIdJson = strings.TrimSpace(in.TargetChannelIdJson)
-	in.BotIdJson = strings.TrimSpace(in.BotIdJson)
-	in.BackupChannelIdJson = strings.TrimSpace(in.BackupChannelIdJson)
-	in.DeleteTextJson = strings.TrimSpace(in.DeleteTextJson)
+	in.TargetChannelIds = uniquePositiveInt64(in.TargetChannelIds)
+	in.Keywords = trimCollectInputValues(in.Keywords)
+	in.Tags = trimCollectInputValues(in.Tags)
+	in.DeleteLineTexts = trimCollectInputValues(in.DeleteLineTexts)
+	in.DeleteTexts = trimCollectInputValues(in.DeleteTexts)
+	in.BlockTexts = trimCollectInputValues(in.BlockTexts)
+	for index := range in.Replacements {
+		in.Replacements[index].From = strings.TrimSpace(in.Replacements[index].From)
+		in.Replacements[index].To = strings.TrimSpace(in.Replacements[index].To)
+	}
 	if in.Name == "" {
 		return gerror.New("规则名称不能为空")
 	}
-	if emptyCollectJSON(in.TargetChannelIdJson) {
+	if len(in.TargetChannelIds) == 0 {
 		return gerror.New("目标频道不能为空")
-	}
-	in.BackupChannelIdJson = normalizeCollectIdJSON(in.BackupChannelIdJson, in.BackupChannelId)
-	backupIds := collectPositiveIdsFromJSON(in.BackupChannelIdJson)
-	if len(backupIds) > 0 {
-		in.BackupChannelId = backupIds[0]
 	}
 	if in.DedupeDays < 0 {
 		in.DedupeDays = 0
@@ -362,33 +355,27 @@ func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
 	return nil
 }
 
-func normalizeCollectIdJSON(raw string, fallback int64) string {
-	ids := collectPositiveIdsFromJSON(raw)
-	if len(ids) == 0 && fallback > 0 {
-		ids = []int64{fallback}
-	}
-	if len(ids) == 0 {
-		return "[]"
-	}
-	data, _ := json.Marshal(uniquePositiveInt64(ids))
-	return string(data)
+type CollectRuleReplaceModel struct {
+	From string `json:"from" dc:"原文本"`
+	To   string `json:"to" dc:"替换文本"`
 }
 
-func collectPositiveIdsFromJSON(raw string) []int64 {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "null" {
-		return nil
+func trimCollectInputValues(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, value)
 	}
-	var ids []int64
-	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
-		return nil
-	}
-	return uniquePositiveInt64(ids)
-}
-
-func emptyCollectJSON(value string) bool {
-	value = strings.TrimSpace(value)
-	return value == "" || value == "[]" || value == "{}" || value == "null"
+	return result
 }
 
 type IdsInp struct {

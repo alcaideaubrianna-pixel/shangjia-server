@@ -1,9 +1,6 @@
 package sys
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestValidateCollectMaterialMediaRequiresEveryMediaAsset(t *testing.T) {
 	tests := []struct {
@@ -15,14 +12,20 @@ func TestValidateCollectMaterialMediaRequiresEveryMediaAsset(t *testing.T) {
 			name: "all assets prepared",
 			content: &collectContentResult{
 				MediaCount: 2,
-				MediaJSON:  `[{"type":"photo","storagePath":"cache/a.jpg"},{"type":"video","fileUrl":"https://cdn.test/a.mp4"}]`,
+				Media: []collectMediaItem{
+					{Type: "photo", StoragePath: "cache/a.jpg"},
+					{Type: "video", FileUrl: "https://cdn.test/a.mp4"},
+				},
 			},
 		},
 		{
 			name: "missing asset path",
 			content: &collectContentResult{
 				MediaCount: 2,
-				MediaJSON:  `[{"type":"photo","storagePath":"cache/a.jpg"},{"type":"video"}]`,
+				Media: []collectMediaItem{
+					{Type: "photo", StoragePath: "cache/a.jpg"},
+					{Type: "video"},
+				},
 			},
 			wantErr: true,
 		},
@@ -30,7 +33,7 @@ func TestValidateCollectMaterialMediaRequiresEveryMediaAsset(t *testing.T) {
 			name: "media count mismatch",
 			content: &collectContentResult{
 				MediaCount: 2,
-				MediaJSON:  `[{"type":"photo","storagePath":"cache/a.jpg"}]`,
+				Media:      []collectMediaItem{{Type: "photo", StoragePath: "cache/a.jpg"}},
 			},
 			wantErr: true,
 		},
@@ -49,7 +52,10 @@ func TestValidateCollectMaterialMediaRequiresEveryMediaAsset(t *testing.T) {
 func TestValidateCollectMaterialMediaKeepsVerifyAssetInGate(t *testing.T) {
 	content := &collectContentResult{
 		MediaCount: 2,
-		MediaJSON:  `[{"type":"photo","storagePath":"cache/a.jpg","purpose":"display"},{"type":"video","purpose":"verify"}]`,
+		Media: []collectMediaItem{
+			{Type: "photo", StoragePath: "cache/a.jpg", Purpose: "display"},
+			{Type: "video", Purpose: "verify"},
+		},
 	}
 
 	if err := validateCollectMaterialMedia(content); err == nil {
@@ -89,10 +95,11 @@ func TestCollectPreparedContentSnapshotAlignsReviewAndProfilePayload(t *testing.
 	if snapshot == nil || snapshot.MediaCount != 2 {
 		t.Fatalf("snapshot=%#v, want two media items", snapshot)
 	}
-	for _, expected := range []string{"abcdef0123456789", `"purpose":"verify"`, "https://cdn.test/photo.jpg"} {
-		if !strings.Contains(snapshot.MediaJSON, expected) {
-			t.Fatalf("media snapshot missing %q: %s", expected, snapshot.MediaJSON)
-		}
+	if snapshot.Media[0].FilePhash != "abcdef0123456789" || snapshot.Media[0].FileUrl != "https://cdn.test/photo.jpg" {
+		t.Fatalf("display media snapshot mismatch: %#v", snapshot.Media[0])
+	}
+	if snapshot.Media[1].Purpose != collectMaterialRoleVerify {
+		t.Fatalf("verify media purpose mismatch: %#v", snapshot.Media[1])
 	}
 	if snapshot.DedupeKey == "" {
 		t.Fatal("prepared snapshot must contain dedupe key")

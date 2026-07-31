@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"sort"
 	"strings"
 
@@ -137,14 +136,6 @@ func (s *sSysPublish) CollectMaterialDiagnose(ctx context.Context, in *sysin.Col
 }
 
 func (s *sSysPublish) collectDiagnoseEventMedia(ctx context.Context, event gdb.Record) ([]collectMediaItem, error) {
-	mediaJSON := strings.TrimSpace(event["media_json"].String())
-	if mediaJSON != "" {
-		var items []collectMediaItem
-		if err := json.Unmarshal([]byte(mediaJSON), &items); err != nil {
-			return nil, gerror.Wrapf(err, "解析诊断事件媒体失败 eventId:%d", event["id"].Int64())
-		}
-		return items, nil
-	}
 	if event["media_count"].Int() <= 0 {
 		return nil, nil
 	}

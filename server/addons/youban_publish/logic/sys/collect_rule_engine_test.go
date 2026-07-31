@@ -1,9 +1,16 @@
 package sys
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
+
+func collectDedupeMaterialFromValues(textHash string, mediaJSON string) collectDedupeMaterial {
+	items := make([]collectMediaItem, 0)
+	_ = json.Unmarshal([]byte(mediaJSON), &items)
+	return collectDedupeMaterialFromItems(textHash, items)
+}
 
 func TestCollectMediaFingerprintSetKeyIsOrderIndependent(t *testing.T) {
 	left := []collectMediaItem{
@@ -91,8 +98,8 @@ func TestCollectImagePHashSetIgnoresOrderAndVideos(t *testing.T) {
 
 func TestCollectMediaPHashReadsMetadata(t *testing.T) {
 	item := collectMediaItem{
-		Type:     "photo",
-		MetaJson: `{"perceptual_hash":"ABC123"}`,
+		Type:      "photo",
+		FilePhash: "ABC123",
 	}
 	if got := collectMediaPHash(item); got != "abc123" {
 		t.Fatalf("media phash = %q, want %q", got, "abc123")

@@ -77,7 +77,9 @@ func (s *sSysPublish) CollectReviewList(ctx context.Context, in *sysin.CollectRe
 	if err = s.fillCollectReviewTargetChannelNames(ctx, list, account.TenantId); err != nil {
 		return nil, err
 	}
-	fillCollectReviewMedia(list)
+	if err = s.fillCollectReviewMedia(ctx, list); err != nil {
+		return nil, err
+	}
 	nextCursor := ""
 	if hasMore && len(list) > 0 {
 		nextCursor = encodeCollectReviewCursor(list[len(list)-1].Id)
@@ -112,34 +114,64 @@ func decodeCollectReviewCursor(raw string) (*collectReviewCursor, error) {
 	return &cursor, nil
 }
 
-func fillCollectReviewMedia(list []*sysin.CollectReviewModel) {
+func (s *sSysPublish) fillCollectReviewMedia(ctx context.Context, list []*sysin.CollectReviewModel) error {
+	eventIds := make([]int64, 0, len(list))
+	reviewByEvent := make(map[int64]*sysin.CollectReviewModel, len(list))
 	for _, review := range list {
+		if review == nil || review.EventId <= 0 {
+			continue
+		}
+		review.Media = make([]*sysin.CollectReviewMediaModel, 0)
+		eventIds = append(eventIds, review.EventId)
+		reviewByEvent[review.EventId] = review
+	}
+	if len(eventIds) == 0 {
+		return nil
+	}
+	rows, err := pdao.YoubanPublishCollectEventMedia.DB().Model(pdao.YoubanPublishCollectEventMedia.Table()+" m").Safe().Ctx(ctx).
+		InnerJoin(pdao.YoubanPublishCollectEvent.Table()+" e", "e.id=m.event_id").
+		Fields("m.media_type,m.source_file_id,m.file_url,m.storage_path,m.poster_url,m.sort_index,e.id AS event_id,e.material_role,e.material_parent_event_id").
+		Where("e.id IN (?) OR e.material_parent_event_id IN (?)", eventIds, eventIds).
+		OrderAsc("CASE WHEN e.material_role='verify' THEN 1 ELSE 0 END").
+		OrderAsc("m.sort_index").OrderAsc("m.id").All()
+	if err != nil {
+		return gerror.Wrap(err, "读取采集审核媒体失败")
+	}
+	for _, row := range rows {
+		eventId := row["event_id"].Int64()
+		if row["material_role"].String() == collectMaterialRoleVerify && row["material_parent_event_id"].Int64() > 0 {
+			eventId = row["material_parent_event_id"].Int64()
+		}
+		review := reviewByEvent[eventId]
 		if review == nil {
 			continue
 		}
-		items := collectMediaRowsToItemsFromJSON(review.MediaJson)
-		review.Media = make([]*sysin.CollectReviewMediaModel, 0, len(items))
-		for _, item := range items {
-			review.Media = append(review.Media, &sysin.CollectReviewMediaModel{
-				Type: item.Type, Purpose: item.Purpose, FileId: item.FileId,
-				FileUrl: item.FileUrl, StoragePath: item.StoragePath,
-				PosterUrl: item.PosterUrl, MetaJson: item.MetaJson,
-			})
-		}
-		review.MediaCount = len(items)
+		review.Media = append(review.Media, &sysin.CollectReviewMediaModel{
+			Type: row["media_type"].String(), Purpose: row["material_role"].String(), FileId: row["source_file_id"].String(),
+			FileUrl: row["file_url"].String(), StoragePath: row["storage_path"].String(), PosterUrl: row["poster_url"].String(),
+		})
 	}
+	for _, review := range list {
+		if review != nil {
+			review.MediaCount = len(review.Media)
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) fillCollectReviewTargetChannelNames(ctx context.Context, list []*sysin.CollectReviewModel, tenantId int64) error {
-	ids := make([]int64, 0)
+	dispatchIds := make([]int64, 0, len(list))
 	for _, review := range list {
-		if review == nil {
-			continue
+		if review != nil && review.DispatchId > 0 {
+			dispatchIds = append(dispatchIds, review.DispatchId)
 		}
-		var channelIds []int64
-		if err := json.Unmarshal([]byte(review.TargetChannelIdJson), &channelIds); err != nil {
-			continue
-		}
+	}
+	dispatchChannels, err := collectDispatchChannelMap(ctx, dispatchIds)
+	if err != nil {
+		return err
+	}
+	ids := make([]int64, 0)
+	for _, channelIds := range dispatchChannels {
 		ids = append(ids, channelIds...)
 	}
 	ids = uniqueIds(ids)
@@ -152,7 +184,7 @@ func (s *sSysPublish) fillCollectReviewTargetChannelNames(ctx context.Context, l
 		Username string `json:"username"`
 		Target   string `json:"target"`
 	}
-	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+	if err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Fields("id,channel_title AS title,channel_username AS username,target_chat_id AS target").
 		Where("tenant_id", tenantId).WhereIn("id", ids).WhereNull("deleted_at").Scan(&rows); err != nil {
 		return gerror.Wrap(err, "读取审核目标频道失败")
@@ -165,9 +197,8 @@ func (s *sSysPublish) fillCollectReviewTargetChannelNames(ctx context.Context, l
 		if review == nil {
 			continue
 		}
-		var channelIds []int64
-		_ = json.Unmarshal([]byte(review.TargetChannelIdJson), &channelIds)
-		for _, id := range channelIds {
+		review.TargetChannelIds = dispatchChannels[review.DispatchId]
+		for _, id := range review.TargetChannelIds {
 			if name := strings.TrimSpace(names[id]); name != "" {
 				review.TargetChannelNames = append(review.TargetChannelNames, name)
 			}
@@ -391,26 +422,24 @@ func (s *sSysPublish) approveCollectReview(ctx context.Context, reviewId int64, 
 		return gerror.New("采集审核关联数据不存在或规则已停用")
 	}
 	text := strings.TrimSpace(review["raw_text"].String())
-	content := &collectContentResult{
-		RawText: text, NormalizedText: normalizeCollectText(text),
-		MediaCount: review["media_count"].Int(), MediaJSON: review["media_json"].String(),
-	}
-	content.TextHash = collectHash(content.NormalizedText)
-	content.DedupeKey = collectHash(content.NormalizedText + ":" + collectMediaSignature(content.MediaJSON))
-	prepared, err := s.prepareCollectMaterialSnapshot(ctx, event, content)
+	content, err := s.collectContentSnapshot(ctx, event)
 	if err != nil {
 		_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())
-		return gerror.Wrap(err, "准备审核通过资料失败")
+		return gerror.Wrap(err, "读取审核通过资料失败")
 	}
+	content.RawText = text
+	content.NormalizedText = normalizeCollectText(text)
+	content.TextHash = collectHash(content.NormalizedText)
+	content.DedupeKey = collectHash(content.NormalizedText + ":" + collectMediaSignature(content.Media))
 	profileId := dispatch["profile_id"].Int64()
 	if profileId <= 0 {
-		profileId, err = s.commitCollectPreparedProfile(ctx, event, prepared, rule, text)
+		profileId, err = s.commitCollectMaterial(ctx, event, content, rule, text)
 		if err != nil {
 			_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())
 			return err
 		}
 	}
-	if err = s.submitCollectProfileDispatch(ctx, review["dispatch_id"].Int64(), profileId, event, rule); err != nil {
+	if err = s.submitCollectProfileDispatch(ctx, review["dispatch_id"].Int64(), profileId, event); err != nil {
 		return err
 	}
 	return s.markCollectReviewApproved(ctx, reviewId, tenantId, accountId, reason)

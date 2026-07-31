@@ -99,6 +99,7 @@ func (s *sSysPublish) warmCollectDedupeCacheForSentDispatches(ctx context.Contex
 	}
 	channelsByEvent := make(map[int64][]int64, len(dispatchRows))
 	eventIDs := make([]int64, 0, len(dispatchRows))
+	dispatchIds := make([]int64, 0, len(dispatchRows))
 	for _, row := range dispatchRows {
 		eventID := row["event_id"].Int64()
 		if eventID <= 0 {
@@ -107,36 +108,29 @@ func (s *sSysPublish) warmCollectDedupeCacheForSentDispatches(ctx context.Contex
 		if _, ok := channelsByEvent[eventID]; !ok {
 			eventIDs = append(eventIDs, eventID)
 		}
-		channelsByEvent[eventID] = append(channelsByEvent[eventID], decodeInt64JSON(row["target_channel_id_json"].String())...)
+		dispatchIds = append(dispatchIds, row["id"].Int64())
+	}
+	dispatchChannels, err := collectDispatchChannelMap(ctx, dispatchIds)
+	if err != nil {
+		return err
+	}
+	for _, row := range dispatchRows {
+		eventID := row["event_id"].Int64()
+		channelsByEvent[eventID] = append(channelsByEvent[eventID], dispatchChannels[row["id"].Int64()]...)
 	}
 	if len(eventIDs) == 0 {
 		return nil
 	}
 	events, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Fields("id,tenant_id,account_id,text_hash,dedupe_key,media_json,received_at").
+		Fields("id,tenant_id,account_id,text_hash,dedupe_key,received_at").
 		WhereIn("id", eventIDs).
 		All()
 	if err != nil {
 		return err
 	}
-	contentByEvent := make(map[int64]gdb.Record, len(eventIDs))
-	contents, err := pdao.YoubanPublishCollectContent.Ctx(ctx).
-		Fields("first_event_id,last_event_id,text_hash,media_json").
-		WhereIn("first_event_id", eventIDs).
-		WhereOrIn("last_event_id", eventIDs).
-		All()
+	mediaByEvent, err := s.collectEventMediaItemsByEvent(ctx, eventIDs)
 	if err != nil {
 		return err
-	}
-	for _, row := range contents {
-		if eventID := row["last_event_id"].Int64(); eventID > 0 {
-			contentByEvent[eventID] = row
-		}
-		if eventID := row["first_event_id"].Int64(); eventID > 0 {
-			if _, ok := contentByEvent[eventID]; !ok {
-				contentByEvent[eventID] = row
-			}
-		}
 	}
 	values := make(map[string]collectDedupeCacheEntry)
 	for _, event := range events {
@@ -145,11 +139,7 @@ func (s *sSysPublish) warmCollectDedupeCacheForSentDispatches(ctx context.Contex
 		if eventID <= 0 || receivedAt == nil {
 			continue
 		}
-		material := collectDedupeMaterialFromEventRecord(event)
-		if content := contentByEvent[eventID]; content != nil {
-			contentMaterial := collectDedupeMaterialFromContentRecord(content)
-			material.imagePHashKey = contentMaterial.imagePHashKey
-		}
+		material := collectDedupeMaterialFromEventRecord(event, mediaByEvent[eventID])
 		entry := collectDedupeCacheEntry{EventID: eventID, ReceivedAt: receivedAt.Timestamp()}
 		for _, channelID := range uniqueIds(channelsByEvent[eventID]) {
 			for _, item := range []struct{ layer, signature string }{

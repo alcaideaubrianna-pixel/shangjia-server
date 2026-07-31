@@ -85,24 +85,13 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 	if account.Status != sysin.PublishTgAccountStatusAuthorized {
 		return nil, gerror.New("TG账号尚未授权，请先完成登录")
 	}
-	conf, err := NewSysConfig().GetTelegram(ctx)
-	if err != nil {
-		return nil, err
-	}
 	managerUsername, err := s.officialManagerUsername(ctx)
 	if err != nil {
 		return nil, err
 	}
-	client, err := s.backupChannelClient(ctx, conf, account)
-	if err != nil {
-		return nil, err
-	}
-
-	runCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
 	var created *tg.User
 	var token string
-	err = s.runTelegramClientWithAccountLease(runCtx, account.Id, client, func(clientCtx context.Context) error {
+	err = s.executeTelegramAccountOperation(ctx, account.Id, 90*time.Second, func(clientCtx context.Context, client *telegram.Client) error {
 		manager, resolveErr := resolveManagedBotUser(clientCtx, client, managerUsername)
 		if resolveErr != nil {
 			return resolveErr
@@ -198,18 +187,8 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 }
 
 func (s *sSysPublish) checkManagedBotUsername(ctx context.Context, account *sysin.TgAccountModel, username string) (available bool, err error) {
-	conf, err := NewSysConfig().GetTelegram(ctx)
-	if err != nil {
-		return false, err
-	}
-	client, err := s.backupChannelClient(ctx, conf, account)
-	if err != nil {
-		return false, err
-	}
-	runCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
 	returnValue := false
-	err = s.runTelegramClientWithAccountLease(runCtx, account.Id, client, func(clientCtx context.Context) error {
+	err = s.executeTelegramAccountOperation(ctx, account.Id, 45*time.Second, func(clientCtx context.Context, client *telegram.Client) error {
 		returnValue, err = client.API().BotsCheckUsername(clientCtx, username)
 		return err
 	})

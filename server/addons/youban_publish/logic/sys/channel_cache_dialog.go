@@ -48,47 +48,13 @@ func (s *sSysPublish) fetchTgAccountChannelCaches(ctx context.Context, item *sys
 		return nil, gerror.New("TG账号不存在")
 	}
 	var channels []*tgDialogCache
-	usedRuntime, err := s.executeAccountCollectOperation(ctx, item.Id, 90*time.Second, func(runCtx context.Context, client *telegram.Client) error {
+	err := s.executeTelegramAccountOperation(ctx, item.Id, 90*time.Second, func(runCtx context.Context, client *telegram.Client) error {
 		var fetchErr error
 		channels, fetchErr = fetchTgAccountChannelCachesWithClient(runCtx, client)
 		return fetchErr
 	})
 	if err != nil {
-		return nil, gerror.Wrap(err, "通过账号运行时读取频道失败")
-	}
-	if usedRuntime {
-		return channels, nil
-	}
-	return s.fetchTgAccountChannelCachesStandalone(ctx, item)
-}
-
-func (s *sSysPublish) fetchTgAccountChannelCachesStandalone(ctx context.Context, item *sysin.TgAccountModel) ([]*tgDialogCache, error) {
-	conf, err := NewSysConfig().GetTelegram(ctx)
-	if err != nil {
-		return nil, err
-	}
-	storage, err := s.telegramSessionStorage(item.SessionKey)
-	if err != nil {
-		return nil, err
-	}
-	options := telegram.Options{SessionStorage: storage}
-	if resolver, err := telegramMTProtoResolver(conf.ProxyUrl); err != nil {
-		return nil, err
-	} else if resolver != nil {
-		options.Resolver = resolver
-	}
-	client := telegram.NewClient(conf.AppId, conf.AppHash, options)
-	runCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-
-	channels := make([]*tgDialogCache, 0)
-	err = s.runTelegramClientWithAccountLease(runCtx, item.Id, client, func(ctx context.Context) error {
-		var fetchErr error
-		channels, fetchErr = fetchTgAccountChannelCachesWithClient(ctx, client)
-		return fetchErr
-	})
-	if err != nil {
-		return nil, gerror.Wrap(err, "Telegram读取频道对话失败")
+		return nil, gerror.Wrap(err, "读取TG频道对话失败")
 	}
 	return channels, nil
 }

@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -68,9 +67,10 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 	if message.SourceUniqueKey == "" {
 		return 0, gerror.New("采集消息唯一键不能为空")
 	}
-	mediaJSON, mediaCount := collectMessageMediaJSON(message.Media)
+	media := normalizeCollectMediaItems(message.Media)
+	mediaCount := len(media)
 	rawText := strings.TrimSpace(message.RawText)
-	dedupeKey := collectHash(fmt.Sprintf("%s:%s:%d", rawText, mediaJSON, mediaCount))
+	dedupeKey := collectHash(fmt.Sprintf("%s:%s", normalizeCollectText(rawText), collectMediaSignature(media)))
 	now := gtime.Now()
 	receivedAt := message.ReceivedAt
 	if receivedAt == nil {
@@ -85,7 +85,8 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 		return 0, gerror.Wrap(err, "读取采集事件失败")
 	}
 	if !event.IsEmpty() {
-		return s.mergeCollectMessageEvent(ctx, event, message, mediaJSON, rawText, now)
+		message.Media = media
+		return s.mergeCollectMessageEvent(ctx, event, message, rawText, now)
 	}
 	status := sysin.CollectEventStatusPending
 	if strings.TrimSpace(message.SourceGroupedId) != "" {
@@ -104,7 +105,6 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 		eventCols.SourceUniqueKey: message.SourceUniqueKey,
 		eventCols.RawText:         rawText,
 		eventCols.MediaCount:      mediaCount,
-		eventCols.MediaJson:       mediaJSON,
 		eventCols.TextHash:        collectHash(rawText),
 		eventCols.DedupeKey:       dedupeKey,
 		eventCols.Status:          status,
@@ -119,7 +119,8 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 				return 0, gerror.Wrap(readErr, "读取冲突采集事件失败")
 			}
 			if !event.IsEmpty() {
-				return s.mergeCollectMessageEvent(ctx, event, message, mediaJSON, rawText, now)
+				message.Media = media
+				return s.mergeCollectMessageEvent(ctx, event, message, rawText, now)
 			}
 		}
 		return 0, gerror.Wrap(err, "创建采集事件失败")
@@ -140,11 +141,11 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 	return eventId, nil
 }
 
-func (s *sSysPublish) mergeCollectMessageEvent(ctx context.Context, event gdb.Record, message *CollectMessage, mediaJSON string, rawText string, now *gtime.Time) (int64, error) {
+func (s *sSysPublish) mergeCollectMessageEvent(ctx context.Context, event gdb.Record, message *CollectMessage, rawText string, now *gtime.Time) (int64, error) {
 	eventDao := pdao.YoubanPublishCollectEvent
 	eventCols := eventDao.Columns()
 	eventId := event[eventCols.Id].Int64()
-	shouldMerge := collectExistingEventShouldMerge(event, mediaJSON)
+	shouldMerge := collectExistingEventShouldMerge(event, message.Media)
 	if collectEventAlreadyMatched(event[eventCols.Status].String()) && !shouldMerge {
 		return eventId, nil
 	}
@@ -152,18 +153,14 @@ func (s *sSysPublish) mergeCollectMessageEvent(ctx context.Context, event gdb.Re
 	if nextText == "" {
 		nextText = rawText
 	}
-	nextMediaJSON, nextMediaCount := mergeCollectMediaJSON(event[eventCols.MediaJson].String(), mediaJSON)
 	nextSourceMessageId := event[eventCols.SourceMessageId].Int64()
 	if message.SourceMessageId > 0 && (nextSourceMessageId <= 0 || message.SourceMessageId < nextSourceMessageId) {
 		nextSourceMessageId = message.SourceMessageId
 	}
 	_, err := eventDao.Ctx(ctx).Where(eventCols.Id, eventId).Data(g.Map{
 		eventCols.RawText:         nextText,
-		eventCols.MediaCount:      nextMediaCount,
-		eventCols.MediaJson:       nextMediaJSON,
 		eventCols.SourceMessageId: nextSourceMessageId,
 		eventCols.TextHash:        collectHash(nextText),
-		eventCols.DedupeKey:       collectHash(fmt.Sprintf("%s:%s:%d", nextText, nextMediaJSON, nextMediaCount)),
 		eventCols.Status:          collectMergedEventStatus(event, message),
 		eventCols.ErrorMessage:    "",
 		eventCols.UpdatedAt:       now,
@@ -202,31 +199,18 @@ func isCollectEventUniqueConflict(err error) bool {
 		strings.Contains(message, "duplicate key value")
 }
 
-func collectExistingEventShouldMerge(event gdb.Record, mediaJSON string) bool {
-	if strings.TrimSpace(event["source_grouped_id"].String()) == "" || strings.TrimSpace(mediaJSON) == "" || strings.TrimSpace(mediaJSON) == "[]" {
-		return false
-	}
-	nextMediaJSON, nextMediaCount := mergeCollectMediaJSON(event["media_json"].String(), mediaJSON)
-	return nextMediaCount > event["media_count"].Int() || collectMediaSignature(nextMediaJSON) != collectMediaSignature(event["media_json"].String())
+func collectExistingEventShouldMerge(event gdb.Record, media []collectMediaItem) bool {
+	return strings.TrimSpace(event["source_grouped_id"].String()) != "" && len(normalizeCollectMediaItems(media)) > 0
 }
 
-func collectMessageMediaJSON(media []collectMediaItem) (string, int) {
+func normalizeCollectMediaItems(media []collectMediaItem) []collectMediaItem {
 	items := make([]collectMediaItem, 0, len(media))
 	for _, item := range media {
-		item.Type = strings.TrimSpace(item.Type)
-		item.Purpose = strings.TrimSpace(item.Purpose)
-		item.FileId = strings.TrimSpace(item.FileId)
-		item.FileUrl = strings.TrimSpace(item.FileUrl)
-		item.StoragePath = strings.TrimSpace(item.StoragePath)
-		item.PosterUrl = strings.TrimSpace(item.PosterUrl)
-		item.FileMd5 = strings.TrimSpace(item.FileMd5)
-		item.FilePhash = strings.TrimSpace(item.FilePhash)
-		item.MetaJson = strings.TrimSpace(item.MetaJson)
+		item = normalizeCollectMediaItem(item)
 		if item.Type == "" || collectMediaSourceKey(item) == "" {
 			continue
 		}
 		items = append(items, item)
 	}
-	data, _ := json.Marshal(items)
-	return string(data), len(items)
+	return items
 }

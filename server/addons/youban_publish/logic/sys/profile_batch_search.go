@@ -85,7 +85,7 @@ func (s *sSysPublish) profileImageSearchNotesByProfileIds(ctx context.Context, p
 }
 
 func profileImageSearchListFields() string {
-	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,ps.tenant_id,ps.account_id,a.nickname AS account_name,a.nickname,a.username,'' AS task_status"
+	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,ps.tenant_id,ps.account_id,a.nickname AS account_name,a.nickname,a.username,COALESCE(ps.publish_task_status,'') AS task_status"
 }
 
 func profileImageSearchResultCacheKey(ctx context.Context, profileIds []int64, tenantId int64, filterAccountIds []int64, viewer *sysin.AccountModel, permission string) string {

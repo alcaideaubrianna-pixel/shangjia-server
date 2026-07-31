@@ -180,6 +180,9 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		return gerror.New("当前账号未绑定账号归属")
 	}
 	isCreate := in.Id <= 0
+	remoteChecked := false
+	reusedStableIdentity := false
+	restoredDeleted := false
 	var existing *sysin.ChannelModel
 	var existingBotIds []int64
 	if !isCreate {
@@ -241,12 +244,32 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		in.ChannelUsername = checkRes.ChannelUsername
 		in.TargetChatId = checkRes.TargetChatId
 		permissionStatusJSON = encodeChannelBotPermissionStates(checkRes.BotResults)
+		remoteChecked = true
+		identity, identityErr := s.channelByStableIdentity(ctx, in.TenantId, in.TargetChatId, in.PublishDirection)
+		if identityErr != nil {
+			return identityErr
+		}
+		if identity != nil && identity.Id > 0 {
+			in.Id = identity.Id
+			isCreate = false
+			reusedStableIdentity = true
+			restoredDeleted = identity.Deleted
+			existingBotIds = decodeBotIds(identity.BotIdJson)
+			in.CyclePublishEnabled = identity.CyclePublishEnabled
+			in.CyclePublishDays = identity.CyclePublishDays
+			in.CyclePublishTime = identity.CyclePublishTime
+			in.IsDefaultSelected = identity.IsDefaultSelected
+			in.PublishVisible = identity.PublishVisible
+			if len(in.BotIds) == 0 {
+				in.BotIds = existingBotIds
+			}
+		}
 	}
 	botJSON, err := encodeBotIds(in.BotIds)
 	if err != nil {
 		return err
 	}
-	if !isCreate && !sameInt64Slice(existingBotIds, in.BotIds) {
+	if !isCreate && !remoteChecked && !sameInt64Slice(existingBotIds, in.BotIds) {
 		permissionStatusJSON = "[]"
 	}
 	now := gtime.Now()
@@ -271,10 +294,13 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		"updated_at":                 now,
 	}
 	if in.Id > 0 {
+		if restoredDeleted {
+			data["deleted_by"] = 0
+			data["deleted_at"] = nil
+		}
 		_, err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 			Where("id", in.Id).
 			Where("tenant_id", account.TenantId).
-			WhereNull("deleted_at").
 			Data(data).
 			Update()
 	} else {
@@ -285,11 +311,49 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	if err != nil {
 		return gerror.Wrap(err, "保存频道配置失败")
 	}
-	if err = s.syncChannelCycleAfterSave(ctx, in.TenantId, in.Id, in.CyclePublishEnabled, in.CyclePublishDays, in.CyclePublishTime); err != nil {
-		return err
+	if !reusedStableIdentity {
+		if err = s.syncChannelCycleAfterSave(ctx, in.TenantId, in.Id, in.CyclePublishEnabled, in.CyclePublishDays, in.CyclePublishTime); err != nil {
+			return err
+		}
 	}
 	s.refreshAutoDeleteChannelCache(ctx)
 	return nil
+}
+
+type channelStableIdentity struct {
+	Id                  int64  `orm:"id"`
+	BotIdJson           string `orm:"bot_id_json"`
+	CyclePublishEnabled int    `orm:"cycle_publish_enabled"`
+	CyclePublishDays    int    `orm:"cycle_publish_days"`
+	CyclePublishTime    string `orm:"cycle_publish_time"`
+	IsDefaultSelected   int    `orm:"is_default_selected"`
+	PublishVisible      int    `orm:"publish_visible"`
+	Deleted             bool   `orm:"deleted"`
+}
+
+func (s *sSysPublish) channelByStableIdentity(ctx context.Context, tenantId int64, targetChatId string, publishDirection string) (*channelStableIdentity, error) {
+	targetChatId = strings.TrimSpace(targetChatId)
+	publishDirection = strings.TrimSpace(publishDirection)
+	if tenantId <= 0 || targetChatId == "" || publishDirection == "" {
+		return nil, nil
+	}
+	var channel channelStableIdentity
+	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Fields("id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,is_default_selected,publish_visible,(deleted_at IS NOT NULL) AS deleted").
+		Where("tenant_id", tenantId).
+		Where("target_chat_id", targetChatId).
+		Where("publish_direction", publishDirection).
+		Order("CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END ASC").
+		OrderDesc("id").
+		Limit(1).
+		Scan(&channel)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取频道稳定标识失败")
+	}
+	if channel.Id <= 0 {
+		return nil, nil
+	}
+	return &channel, nil
 }
 
 func sameInt64Slice(a []int64, b []int64) bool {

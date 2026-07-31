@@ -85,6 +85,9 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 		}
 		jobIds = append(jobIds, jobId)
 	}
+	if err = s.beginProfilePublishOperation(ctx, source["tenant_id"].Int64(), source["account_id"].Int64(), profileId, operationNo); err != nil {
+		return err
+	}
 	for _, jobId := range jobIds {
 		if err = s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
 			message := "Redis调度失败，等待数据库调度器恢复：" + err.Error()
@@ -173,13 +176,17 @@ func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job 
 	if pending > 0 {
 		return false, nil
 	}
+	isCurrent, err := s.profilePublishOperationIsCurrent(ctx, job)
+	if err != nil {
+		return false, err
+	}
+	if !isCurrent {
+		return false, nil
+	}
 	if !isCycle {
 		now := gtime.Now()
 		if _, err = s.syncProfilePublishState(ctx, job.ProfileId, 1, consts.ContentVisibilityPublic, now); err != nil {
 			return false, gerror.Wrap(err, "同步资料上架状态失败")
-		}
-		if err = s.syncProfileNoteIndex(ctx, job.ProfileId); err != nil {
-			return false, err
 		}
 		iservice.SysContent().ClearHomeProfileCardsCache(ctx)
 		if err = s.incrementDailyPublishStat(ctx, job); err != nil {
@@ -188,6 +195,12 @@ func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job 
 	}
 	if isCycle {
 		s.cleanupPreviousCycleMessages(ctx, job)
+	}
+	if err = s.clearProfilePublishOperationState(ctx, job); err != nil {
+		return false, err
+	}
+	if err = s.syncProfileNoteIndex(ctx, job.ProfileId); err != nil {
+		return false, err
 	}
 	return true, nil
 }

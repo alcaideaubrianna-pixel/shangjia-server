@@ -38,7 +38,11 @@ func (s *sSysPublish) preflightCollectMaterialGroup(ctx context.Context, event g
 		result.Rules = candidateRules
 		return result, nil
 	}
-	filtered, err := s.filterCollectRulesByEarlyDedupeBatch(ctx, event, collectContentFromEvent(event), candidateRules)
+	content, err := s.collectContentFromEvent(ctx, event)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取资料组媒体失败")
+	}
+	filtered, err := s.filterCollectRulesByEarlyDedupeBatch(ctx, event, content, candidateRules)
 	if err != nil {
 		return nil, gerror.Wrap(err, "资料组前置去重失败")
 	}
@@ -91,7 +95,7 @@ func (s *sSysPublish) filterCollectRulesByEarlyDedupeBatch(ctx context.Context, 
 			filtered = append(filtered, rule)
 			continue
 		}
-		targetIDs := decodeInt64JSON(rule["target_channel_id_json"].String())
+		targetIDs := collectRuleTargetChannelIds(rule)
 		layer, previousEventID, channelID, cacheable, receivedAt := matchCollectEarlyDedupeCandidate(current, candidates, targetIDs, rule["dedupe_days"].Int(), time.Now())
 		if layer == "" {
 			filtered = append(filtered, rule)
@@ -123,18 +127,26 @@ func (s *sSysPublish) buildCollectDedupeCandidates(ctx context.Context, event gd
 		}
 	}
 	dispatchRows, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
-		Fields("event_id,target_channel_id_json,status").
+		Fields("id,event_id,status").
 		WhereIn("event_id", eventIDs).
 		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing, sysin.CollectDispatchStatusSent}).
 		All()
 	if err != nil {
 		return nil, gerror.Wrap(err, "批量读取采集去重分发记录失败")
 	}
+	dispatchIds := make([]int64, 0, len(dispatchRows))
+	for _, row := range dispatchRows {
+		dispatchIds = append(dispatchIds, row["id"].Int64())
+	}
+	dispatchChannels, err := collectDispatchChannelMap(ctx, dispatchIds)
+	if err != nil {
+		return nil, err
+	}
 	channelsByEvent := make(map[int64][]int64, len(dispatchRows))
 	sentByEvent := make(map[int64]map[int64]bool, len(dispatchRows))
 	for _, row := range dispatchRows {
 		eventID := row["event_id"].Int64()
-		channelIDs := decodeInt64JSON(row["target_channel_id_json"].String())
+		channelIDs := dispatchChannels[row["id"].Int64()]
 		channelsByEvent[eventID] = append(channelsByEvent[eventID], channelIDs...)
 		if row["status"].String() == sysin.CollectDispatchStatusSent {
 			if sentByEvent[eventID] == nil {
@@ -145,12 +157,9 @@ func (s *sSysPublish) buildCollectDedupeCandidates(ctx context.Context, event gd
 			}
 		}
 	}
-	contentByKey := map[string]gdb.Record{}
-	if includePHash {
-		contentByKey, err = s.collectDedupeContentByKey(ctx, event, rows)
-		if err != nil {
-			return nil, err
-		}
+	mediaByEvent, err := s.collectEventMediaItemsByEvent(ctx, eventIDs)
+	if err != nil {
+		return nil, err
 	}
 	candidates := make([]collectEarlyDedupeCandidate, 0, len(rows))
 	for _, row := range rows {
@@ -158,9 +167,9 @@ func (s *sSysPublish) buildCollectDedupeCandidates(ctx context.Context, event gd
 		if eventID <= 0 || len(channelsByEvent[eventID]) == 0 {
 			continue
 		}
-		material := collectDedupeMaterialFromEventRecord(row)
-		if contentRow := contentByKey[strings.TrimSpace(row["dedupe_key"].String())]; contentRow != nil {
-			material.imagePHashKey = collectDedupeMaterialFromContentRecord(contentRow).imagePHashKey
+		material := collectDedupeMaterialFromEventRecord(row, mediaByEvent[eventID])
+		if !includePHash {
+			material.imagePHashKey = ""
 		}
 		candidates = append(candidates, collectEarlyDedupeCandidate{
 			eventID:    eventID,
@@ -194,7 +203,7 @@ func (s *sSysPublish) filterCollectRulesByFinalDedupeBatch(ctx context.Context, 
 			filtered = append(filtered, rule)
 			continue
 		}
-		targetIDs := decodeInt64JSON(rule["target_channel_id_json"].String())
+		targetIDs := collectRuleTargetChannelIds(rule)
 		layer, previousEventID, channelID := matchCollectFinalDedupeCandidate(current, candidates, targetIDs, rule["dedupe_days"].Int(), now)
 		if layer == "" {
 			filtered = append(filtered, rule)
@@ -291,7 +300,7 @@ func filterCollectRulesByEarlyDedupeCache(ctx context.Context, event gdb.Record,
 		if rule["dedupe_enabled"].Int() != 1 {
 			continue
 		}
-		for _, channelID := range decodeInt64JSON(rule["target_channel_id_json"].String()) {
+		for _, channelID := range collectRuleTargetChannelIds(rule) {
 			for _, item := range []struct{ layer, signature string }{{"media_fingerprint", current.mediaKey}, {"text_hash", current.textHash}} {
 				if item.signature == "" {
 					continue

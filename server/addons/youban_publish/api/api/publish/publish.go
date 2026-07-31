@@ -361,15 +361,6 @@ type AdminChannelClearQueueRes struct {
 	*sysin.ChannelClearQueueModel
 }
 
-type AdminChannelBackupCreateReq struct {
-	g.Meta `path:"/publish/admin/channel/backup/create" method:"post" tags:"上架插件管理端" summary:"创建备份频道"`
-	sysin.ChannelBackupCreateInp
-}
-
-type AdminChannelBackupCreateRes struct {
-	*sysin.ChannelBackupCreateModel
-}
-
 type AdminMessageTemplateListReq struct {
 	g.Meta `path:"/publish/admin/messageTemplate/list" method:"get" tags:"上架插件管理端" summary:"消息推送模板列表"`
 	sysin.MessageTemplateListInp

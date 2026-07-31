@@ -1,6 +1,20 @@
 ALTER TABLE "hg_youban_publish_collect_rule"
   ADD COLUMN IF NOT EXISTS "full_match_enabled" smallint NOT NULL DEFAULT 0;
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_material_import_group_media" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "task_id" bigint NOT NULL DEFAULT 0, "group_id" bigint NOT NULL DEFAULT 0,
+  "tenant_id" bigint NOT NULL DEFAULT 0, "account_id" bigint NOT NULL DEFAULT 0,
+  "purpose" varchar(16) NOT NULL DEFAULT 'display', "media_type" varchar(32) NOT NULL DEFAULT '', "sort_index" integer NOT NULL DEFAULT 0,
+  "source_file_id" varchar(255) NOT NULL DEFAULT '', "file_url" varchar(1024) NOT NULL DEFAULT '', "storage_path" varchar(1024) NOT NULL DEFAULT '', "poster_url" varchar(1024) NOT NULL DEFAULT '',
+  "source_kind" varchar(32) NOT NULL DEFAULT '', "source_media_id" bigint NOT NULL DEFAULT 0, "source_access_hash" bigint NOT NULL DEFAULT 0,
+  "source_file_reference" bytea, "source_thumb_size" varchar(32) NOT NULL DEFAULT '', "source_mime_type" varchar(128) NOT NULL DEFAULT '',
+  "source_dc_id" integer NOT NULL DEFAULT 0, "source_size" bigint NOT NULL DEFAULT 0, "file_md5" varchar(64) NOT NULL DEFAULT '', "file_phash" varchar(128) NOT NULL DEFAULT '',
+  "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_material_import_group_media_group" ON "hg_youban_publish_material_import_group_media" ("group_id", "sort_index", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_material_import_group_media_task" ON "hg_youban_publish_material_import_group_media" ("task_id", "group_id", "id");
+
 ALTER TABLE "hg_youban_publish_collect_rule"
   ADD COLUMN IF NOT EXISTS "delete_text_json" text;
 
@@ -14,6 +28,16 @@ ALTER TABLE "hg_youban_publish_collect_event_media"
   ADD COLUMN IF NOT EXISTS "cache_hit" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_collect_event_media"
   ADD COLUMN IF NOT EXISTS "download_error_type" varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "source_kind" varchar(32) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "source_media_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "source_access_hash" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "source_file_reference" bytea;
+ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "source_thumb_size" varchar(32) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "source_mime_type" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "source_dc_id" integer NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "source_size" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "file_md5" varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_event_media" ADD COLUMN IF NOT EXISTS "file_phash" varchar(128) NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_media_stat" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
@@ -599,8 +623,45 @@ WHERE "edited_storage_path" ~ '^/?resource/public/';
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_text_hash" ON "hg_youban_publish_collect_event" ("tenant_id", "account_id", "text_hash", "received_at", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_order" ON "hg_youban_publish_collect_event" ("tenant_id", "account_id", "source_id", "source_chat_id", "source_message_id");
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_rule_channel" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "rule_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_rule_channel" ON "hg_youban_publish_collect_rule_channel" ("rule_id", "channel_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_rule_channel_owner" ON "hg_youban_publish_collect_rule_channel" ("tenant_id", "account_id", "rule_id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_rule_item" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "rule_id" bigint NOT NULL DEFAULT 0,
+  "item_type" varchar(32) NOT NULL DEFAULT '',
+  "value" text,
+  "replacement" text,
+  "sort" integer NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_rule_item_rule" ON "hg_youban_publish_collect_rule_item" ("rule_id", "item_type", "sort", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_rule_item_owner" ON "hg_youban_publish_collect_rule_item" ("tenant_id", "account_id", "rule_id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_dispatch_channel" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "dispatch_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_dispatch_channel" ON "hg_youban_publish_collect_dispatch_channel" ("dispatch_id", "channel_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dispatch_channel_owner" ON "hg_youban_publish_collect_dispatch_channel" ("tenant_id", "account_id", "dispatch_id");
+
 -- 采集媒体统一收敛到事件媒体快照和正式媒体表
 ALTER TABLE IF EXISTS "hg_youban_publish_collect_content" DROP COLUMN IF EXISTS "media_signature";
+ALTER TABLE IF EXISTS "hg_youban_publish_collect_content" DROP COLUMN IF EXISTS "media_json";
 DROP TABLE IF EXISTS "hg_youban_publish_collect_content_media";
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_queue" ON "hg_youban_publish_collect_event" ("tenant_id", "account_id", "source_id", "status", "processed_at", "source_chat_id", "source_message_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dispatch_dedupe" ON "hg_youban_publish_collect_dispatch" ("tenant_id", "account_id", "event_id", "status", "id");
@@ -637,3 +698,8 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_notice_read" (
   CONSTRAINT "uk_ybp_notice_read_account" UNIQUE ("notice_id","account_id")
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_notice_read_account" ON "hg_youban_publish_notice_read" ("account_id","notice_id");
+
+ALTER TABLE "hg_youban_publish_profile_state" ADD COLUMN IF NOT EXISTS "publish_operation_no" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_profile_state" ADD COLUMN IF NOT EXISTS "publish_task_status" varchar(32) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_profile_state" ADD COLUMN IF NOT EXISTS "publish_task_updated_at" timestamp DEFAULT NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_state_publish_active" ON "hg_youban_publish_profile_state" ("publish_task_status", "publish_task_updated_at", "profile_id") WHERE "deleted_at" IS NULL AND "publish_task_status" <> '';

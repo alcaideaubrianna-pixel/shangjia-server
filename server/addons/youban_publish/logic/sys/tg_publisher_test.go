@@ -46,13 +46,6 @@ func TestMatchedAutoDeleteKeywordNormalizesCommonTraditionalText(t *testing.T) {
 	}
 }
 
-func TestCollectStringListSupportsObjects(t *testing.T) {
-	got := collectStringList(`[{"label":"A"},{"text":"B"},{"value":"A"}]`)
-	if len(got) != 2 || got[0] != "A" || got[1] != "B" {
-		t.Fatalf("unexpected list: %#v", got)
-	}
-}
-
 func TestTelegramCopyMediaRefFromFileId(t *testing.T) {
 	fileId := telegramCopyMediaFileId("4369206706", 123)
 	got, ok := telegramCopyMediaRefFromFileId(fileId)

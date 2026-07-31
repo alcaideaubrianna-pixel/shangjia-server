@@ -379,33 +379,7 @@ func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAcco
 		sent = messages
 		return nil
 	}
-	usedRuntime, err := s.executeAccountCollectOperation(ctx, tgAccountId, 2*time.Minute, send)
-	if err != nil {
-		return nil, err
-	}
-	if usedRuntime {
-		if len(sent) == 0 {
-			return nil, gerror.New("账号推送已调用，但未读取到TG消息结果")
-		}
-		return sent, nil
-	}
-	account, err := s.accountCollectTgAccount(ctx, tgAccountId)
-	if err != nil {
-		return nil, err
-	}
-	conf, err := NewSysConfig().GetTelegram(ctx)
-	if err != nil {
-		return nil, err
-	}
-	client, err := s.newAccountCollectClient(ctx, conf, account, tg.NewUpdateDispatcher())
-	if err != nil {
-		return nil, err
-	}
-	runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	err = s.runTelegramClientWithAccountLease(runCtx, tgAccountId, client, func(runCtx context.Context) error {
-		return send(runCtx, client)
-	})
+	err = s.executeTelegramAccountOperation(ctx, tgAccountId, 2*time.Minute, send)
 	if err != nil {
 		return nil, err
 	}

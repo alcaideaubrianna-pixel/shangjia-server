@@ -40,5 +40,10 @@ func (s *sSysPublish) syncProfilePublishState(ctx context.Context, profileId int
 		return false, gerror.Wrap(err, "同步资料状态失败")
 	}
 	affected, _ := result.RowsAffected()
+	if status != 1 {
+		if err = s.cancelProfilePublishOperation(ctx, profileId); err != nil {
+			return false, err
+		}
+	}
 	return affected > 0, nil
 }

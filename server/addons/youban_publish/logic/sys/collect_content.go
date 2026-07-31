@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -21,7 +20,7 @@ type collectContentResult struct {
 	RawText        string
 	NormalizedText string
 	MediaCount     int
-	MediaJSON      string
+	Media          []collectMediaItem
 	TextHash       string
 	DedupeKey      string
 	PreviousSeenAt *gtime.Time
@@ -90,12 +89,19 @@ func (s *sSysPublish) CollectContentView(ctx context.Context, in *sysin.CollectC
 	if res == nil || res.Id <= 0 {
 		return nil, gerror.New("采集内容不存在")
 	}
-	res.MediaList = collectContentMediaModels(res.MediaJson, account.TenantId, account.Id, in.Id)
+	rows, err := s.collectEventMediaRows(ctx, res.LastEventId)
+	if err != nil {
+		return nil, err
+	}
+	res.MediaList = collectContentMediaModels(collectMediaRowsToItems(rows, ""), account.TenantId, account.Id, in.Id)
 	return res, nil
 }
 
 func (s *sSysPublish) ensureCollectContent(ctx context.Context, event gdb.Record) (*collectContentResult, error) {
-	result := collectContentFromEvent(event)
+	result, err := s.collectContentFromEvent(ctx, event)
+	if err != nil {
+		return nil, err
+	}
 	s.enrichCollectContentMediaMetadata(ctx, result)
 	now := gtime.Now()
 	seenAt := event["received_at"].GTime()
@@ -122,7 +128,6 @@ func (s *sSysPublish) ensureCollectContent(ctx context.Context, event gdb.Record
 			contentCols.RawText:        result.RawText,
 			contentCols.NormalizedText: result.NormalizedText,
 			contentCols.MediaCount:     result.MediaCount,
-			contentCols.MediaJson:      result.MediaJSON,
 			contentCols.TextHash:       result.TextHash,
 			contentCols.DedupeKey:      result.DedupeKey,
 			contentCols.DuplicateTotal: 0,
@@ -140,12 +145,6 @@ func (s *sSysPublish) ensureCollectContent(ctx context.Context, event gdb.Record
 	}
 	result.Id = content["id"].Int64()
 	result.PreviousSeenAt = content["last_seen_at"].GTime()
-	mediaJSON, mediaCount := mergeCollectMediaJSON(content["media_json"].String(), result.MediaJSON)
-	if mediaCount > result.MediaCount {
-		result.MediaCount = mediaCount
-		result.MediaJSON = mediaJSON
-	}
-	s.enrichCollectContentMediaMetadata(ctx, result)
 	_, err = contentDao.Ctx(ctx).
 		Where(contentCols.Id, result.Id).
 		Data(g.Map{
@@ -153,7 +152,6 @@ func (s *sSysPublish) ensureCollectContent(ctx context.Context, event gdb.Record
 			contentCols.RawText:        result.RawText,
 			contentCols.NormalizedText: result.NormalizedText,
 			contentCols.MediaCount:     result.MediaCount,
-			contentCols.MediaJson:      result.MediaJSON,
 			contentCols.TextHash:       result.TextHash,
 			contentCols.PreviousSeenAt: result.PreviousSeenAt,
 			contentCols.LastSeenAt:     seenAt,
@@ -167,7 +165,10 @@ func (s *sSysPublish) ensureCollectContent(ctx context.Context, event gdb.Record
 }
 
 func (s *sSysPublish) collectContentSnapshot(ctx context.Context, event gdb.Record) (*collectContentResult, error) {
-	result := collectContentFromEvent(event)
+	result, err := s.collectContentFromEvent(ctx, event)
+	if err != nil {
+		return nil, err
+	}
 	s.enrichCollectContentMediaMetadata(ctx, result)
 	contentDao := pdao.YoubanPublishCollectContent
 	content, err := contentDao.Ctx(ctx).
@@ -184,8 +185,6 @@ func (s *sSysPublish) collectContentSnapshot(ctx context.Context, event gdb.Reco
 	result.Id = content["id"].Int64()
 	result.RawText = strings.TrimSpace(content["raw_text"].String())
 	result.NormalizedText = strings.TrimSpace(content["normalized_text"].String())
-	result.MediaCount = content["media_count"].Int()
-	result.MediaJSON = content["media_json"].String()
 	result.TextHash = strings.TrimSpace(content["text_hash"].String())
 	result.DedupeKey = strings.TrimSpace(content["dedupe_key"].String())
 	result.PreviousSeenAt = content["previous_seen_at"].GTime()
@@ -194,16 +193,12 @@ func (s *sSysPublish) collectContentSnapshot(ctx context.Context, event gdb.Reco
 }
 
 func (s *sSysPublish) enrichCollectContentMediaMetadata(ctx context.Context, result *collectContentResult) {
-	if result == nil || strings.TrimSpace(result.MediaJSON) == "" {
-		return
-	}
-	var items []collectMediaItem
-	if err := json.Unmarshal([]byte(result.MediaJSON), &items); err != nil {
+	if result == nil || len(result.Media) == 0 {
 		return
 	}
 	changed := false
-	for index := range items {
-		item := &items[index]
+	for index := range result.Media {
+		item := &result.Media[index]
 		mediaType := collectPublishMediaType(item.Type)
 		if mediaType == "" || strings.TrimSpace(item.FilePhash) != "" {
 			continue
@@ -228,43 +223,36 @@ func (s *sSysPublish) enrichCollectContentMediaMetadata(ctx context.Context, res
 	if !changed {
 		return
 	}
-	data, err := json.Marshal(items)
-	if err == nil {
-		result.MediaJSON = string(data)
-	}
+	result.DedupeKey = collectHash(result.NormalizedText + ":" + collectMediaSignature(result.Media))
 }
 
-func collectContentFromEvent(event gdb.Record) *collectContentResult {
+func (s *sSysPublish) collectContentFromEvent(ctx context.Context, event gdb.Record) (*collectContentResult, error) {
 	rawText := strings.TrimSpace(event["raw_text"].String())
 	normalizedText := normalizeCollectText(rawText)
-	mediaJSON := event["media_json"].String()
-	mediaCount := event["media_count"].Int()
-	if mediaCount <= 0 {
-		_, mediaCount = mergeCollectMediaJSON("", mediaJSON)
+	rows, err := s.collectEventMediaRows(ctx, event["id"].Int64())
+	if err != nil {
+		return nil, err
 	}
+	media := collectMediaRowsToItems(rows, event["material_role"].String())
 	textHash := strings.TrimSpace(event["text_hash"].String())
 	if textHash == "" {
 		textHash = collectHash(normalizedText)
 	}
 	dedupeKey := strings.TrimSpace(event["dedupe_key"].String())
 	if dedupeKey == "" {
-		dedupeKey = collectHash(normalizedText + ":" + collectMediaSignature(mediaJSON))
+		dedupeKey = collectHash(normalizedText + ":" + collectMediaSignature(media))
 	}
 	return &collectContentResult{
 		RawText:        rawText,
 		NormalizedText: normalizedText,
-		MediaCount:     mediaCount,
-		MediaJSON:      mediaJSON,
+		MediaCount:     len(media),
+		Media:          media,
 		TextHash:       textHash,
 		DedupeKey:      dedupeKey,
-	}
+	}, nil
 }
 
-func collectContentMediaModels(mediaJSON string, tenantId, accountId, contentId int64) []*sysin.CollectContentMediaModel {
-	var items []collectMediaItem
-	if err := json.Unmarshal([]byte(mediaJSON), &items); err != nil {
-		return []*sysin.CollectContentMediaModel{}
-	}
+func collectContentMediaModels(items []collectMediaItem, tenantId, accountId, contentId int64) []*sysin.CollectContentMediaModel {
 	list := make([]*sysin.CollectContentMediaModel, 0, len(items))
 	for index, item := range items {
 		mediaType := collectPublishMediaType(item.Type)
@@ -286,11 +274,7 @@ func normalizeCollectText(text string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
 }
 
-func collectMediaSignature(mediaJSON string) string {
-	var items []collectMediaItem
-	if err := json.Unmarshal([]byte(mediaJSON), &items); err != nil {
-		return ""
-	}
+func collectMediaSignature(items []collectMediaItem) string {
 	keys := make([]string, 0, len(items))
 	for _, item := range items {
 		sourceKey := collectMediaFingerprint(item)
@@ -311,53 +295,20 @@ func collectMediaFingerprint(item collectMediaItem) string {
 }
 
 func collectMediaPHash(item collectMediaItem) string {
-	if hash := strings.TrimSpace(item.FilePhash); hash != "" {
-		return strings.ToLower(hash)
-	}
-	metaRaw := strings.TrimSpace(item.MetaJson)
-	if metaRaw == "" {
-		return ""
-	}
-	var meta map[string]any
-	if err := json.Unmarshal([]byte(metaRaw), &meta); err != nil {
-		return ""
-	}
-	for key, value := range meta {
-		switch strings.ToLower(strings.ReplaceAll(strings.TrimSpace(key), "_", "")) {
-		case "phash", "filephash", "perceptualhash":
-			if hash := strings.TrimSpace(fmt.Sprint(value)); hash != "" && hash != "<nil>" {
-				return strings.ToLower(hash)
-			}
-		}
-	}
-	return ""
+	return strings.ToLower(strings.TrimSpace(item.FilePhash))
 }
 
 func collectTelegramMediaFingerprint(item collectMediaItem) string {
-	metaRaw := strings.TrimSpace(item.MetaJson)
-	if metaRaw == "" {
-		return ""
-	}
-	var meta struct {
-		AccessHash int64  `json:"accessHash"`
-		Id         int64  `json:"id"`
-		Kind       string `json:"kind"`
-		MimeType   string `json:"mimeType"`
-		ThumbSize  string `json:"thumbSize"`
-	}
-	if err := json.Unmarshal([]byte(metaRaw), &meta); err != nil {
-		return ""
-	}
-	if meta.Id == 0 {
+	if item.SourceMediaId == 0 {
 		return ""
 	}
 	parts := []string{
 		strings.TrimSpace(item.Type),
-		strings.TrimSpace(meta.Kind),
-		strings.TrimSpace(meta.MimeType),
-		strings.TrimSpace(meta.ThumbSize),
+		strings.TrimSpace(item.SourceKind),
+		strings.TrimSpace(item.SourceMimeType),
+		strings.TrimSpace(item.SourceThumbSize),
 	}
-	return strings.Join(parts, ":") + ":" + collectHash(fmt.Sprintf("%d:%d", meta.Id, meta.AccessHash))
+	return strings.Join(parts, ":") + ":" + collectHash(fmt.Sprintf("%d:%d", item.SourceMediaId, item.SourceAccessHash))
 }
 
 func collectMediaSourceKey(item collectMediaItem) string {

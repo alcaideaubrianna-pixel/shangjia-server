@@ -112,20 +112,10 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_rule` (
   `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '所属账号ID',
   `name` varchar(128) NOT NULL DEFAULT '' COMMENT '规则名称',
   `global_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否全局应用',
-  `target_channel_id_json` text COMMENT '目标频道ID JSON',
-  `bot_id_json` text COMMENT '推送BOT ID JSON',
-  `backup_channel_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '备份频道ID',
-  `backup_channel_id_json` text COMMENT '备份频道ID JSON',
   `review_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否需要审核',
   `dedupe_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否图文去重',
   `dedupe_days` int(11) NOT NULL DEFAULT '7' COMMENT '去重天数',
   `full_match_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '全量匹配',
-  `keyword_json` text COMMENT '关键词JSON',
-  `tag_json` text COMMENT '标签JSON',
-  `replace_json` text COMMENT '替换规则JSON',
-  `delete_text_json` text COMMENT '删除文本JSON',
-  `delete_line_text_json` text COMMENT '整行删除文本JSON',
-  `block_text_json` text COMMENT '屏蔽文本JSON',
   `block_link` tinyint(1) NOT NULL DEFAULT '1' COMMENT '屏蔽链接',
   `block_username` tinyint(1) NOT NULL DEFAULT '1' COMMENT '屏蔽用户名',
   `block_plain_text` tinyint(1) NOT NULL DEFAULT '1' COMMENT '屏蔽纯文本',
@@ -145,6 +135,33 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_rule` (
   KEY `idx_ybp_collect_rule_owner` (`tenant_id`,`account_id`,`status`),
   KEY `idx_ybp_collect_rule_global` (`tenant_id`,`global_enabled`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集规则';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_rule_channel` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `rule_id` bigint(20) NOT NULL DEFAULT '0',
+  `channel_id` bigint(20) NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_collect_rule_channel` (`rule_id`,`channel_id`),
+  KEY `idx_ybp_collect_rule_channel_owner` (`tenant_id`,`account_id`,`rule_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集规则频道';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_rule_item` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `rule_id` bigint(20) NOT NULL DEFAULT '0',
+  `item_type` varchar(32) NOT NULL DEFAULT '',
+  `value` text,
+  `replacement` text,
+  `sort` int(11) NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_collect_rule_item_rule` (`rule_id`,`item_type`,`sort`,`id`),
+  KEY `idx_ybp_collect_rule_item_owner` (`tenant_id`,`account_id`,`rule_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集规则项';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_source_rule` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -177,7 +194,6 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_event` (
   `material_group_status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '资料组状态',
   `raw_text` text COMMENT '原始文本',
   `media_count` int(11) NOT NULL DEFAULT '0' COMMENT '媒体数量',
-  `media_json` longtext COMMENT '媒体JSON',
   `text_hash` varchar(64) NOT NULL DEFAULT '' COMMENT '文本哈希',
   `dedupe_key` varchar(128) NOT NULL DEFAULT '' COMMENT '去重键',
   `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '状态',
@@ -217,7 +233,17 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_event_media` (
   `file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '文件访问地址',
   `storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '存储路径',
   `poster_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '封面地址',
-  `meta_json` text COMMENT '媒体元数据',
+  `source_kind` varchar(32) NOT NULL DEFAULT '' COMMENT 'TG来源媒体类型',
+  `source_media_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG媒体ID',
+  `source_access_hash` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG媒体访问哈希',
+  `source_file_reference` blob COMMENT 'TG文件引用',
+  `source_thumb_size` varchar(32) NOT NULL DEFAULT '' COMMENT 'TG缩略图规格',
+  `source_mime_type` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG媒体MIME',
+  `source_dc_id` int(11) NOT NULL DEFAULT '0' COMMENT 'TG数据中心ID',
+  `source_size` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG媒体大小',
+  `file_md5` varchar(64) NOT NULL DEFAULT '' COMMENT '文件MD5',
+  `file_phash` varchar(128) NOT NULL DEFAULT '' COMMENT '图片感知哈希',
+  `meta_json` text COMMENT '仅用于调试的媒体元数据',
   `sort_index` int(11) NOT NULL DEFAULT '0' COMMENT '排序',
   `cache_status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '缓存状态',
   `download_duration_ms` bigint(20) NOT NULL DEFAULT '0' COMMENT '下载耗时毫秒',
@@ -297,7 +323,6 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_content` (
   `raw_text` text COMMENT '原始文本',
   `normalized_text` text COMMENT '归一化文本',
   `media_count` int(11) NOT NULL DEFAULT '0' COMMENT '媒体数量',
-  `media_json` longtext COMMENT '媒体JSON',
   `text_hash` varchar(64) NOT NULL DEFAULT '' COMMENT '文本哈希',
   `dedupe_key` varchar(128) NOT NULL DEFAULT '' COMMENT '去重键',
   `duplicate_total` int(11) NOT NULL DEFAULT '0' COMMENT '重复命中数',
@@ -324,8 +349,6 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_review` (
   `dispatch_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '分发记录ID',
   `raw_text` text COMMENT '原始文本',
   `media_count` int(11) NOT NULL DEFAULT '0' COMMENT '媒体数量',
-  `target_channel_id_json` text COMMENT '目标频道ID JSON',
-  `bot_id_json` text COMMENT '推送BOT ID JSON',
   `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '审核状态',
   `review_reason` varchar(500) NOT NULL DEFAULT '' COMMENT '审核原因',
   `reviewed_by` bigint(20) NOT NULL DEFAULT '0' COMMENT '审核人',
@@ -347,8 +370,6 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_dispatch` (
   `review_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '审核ID',
   `profile_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '资料ID',
   `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架任务ID',
-  `target_channel_id_json` text COMMENT '目标频道ID JSON',
-  `bot_id_json` text COMMENT '推送BOT ID JSON',
   `match_json` longtext COMMENT '命中详情JSON',
   `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT '状态',
   `error_message` text COMMENT '错误信息',
@@ -359,6 +380,18 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_dispatch` (
   KEY `idx_ybp_collect_dispatch_event` (`event_id`,`rule_id`),
   KEY `idx_ybp_collect_dispatch_owner` (`tenant_id`,`account_id`,`status`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集分发';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_dispatch_channel` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `dispatch_id` bigint(20) NOT NULL DEFAULT '0',
+  `channel_id` bigint(20) NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_collect_dispatch_channel` (`dispatch_id`,`channel_id`),
+  KEY `idx_ybp_collect_dispatch_channel_owner` (`tenant_id`,`account_id`,`dispatch_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集分发频道';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_history_task` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -427,6 +460,9 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_state` (
   `customer_remark` text,
   `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0',
   `publish_at` datetime DEFAULT NULL,
+  `publish_operation_no` varchar(128) NOT NULL DEFAULT '' COMMENT '当前上架操作号',
+  `publish_task_status` varchar(32) NOT NULL DEFAULT '' COMMENT '当前上架任务状态',
+  `publish_task_updated_at` datetime DEFAULT NULL COMMENT '上架任务状态更新时间',
   `created_by` bigint(20) NOT NULL DEFAULT '0',
   `updated_by` bigint(20) NOT NULL DEFAULT '0',
   `created_at` datetime DEFAULT NULL,
@@ -434,7 +470,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_state` (
   `deleted_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ybp_profile_state_profile` (`profile_id`),
-  KEY `idx_ybp_profile_state_owner` (`tenant_id`,`account_id`,`profile_id`)
+  KEY `idx_ybp_profile_state_owner` (`tenant_id`,`account_id`,`profile_id`),
+  KEY `idx_ybp_profile_state_publish_active` (`publish_task_status`,`publish_task_updated_at`,`profile_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架资料归属和发布配置';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_success_record` (
@@ -677,7 +714,6 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_material_import_group` (
   `raw_text` text COMMENT '原始文本',
   `profile_text` text COMMENT '资料正文',
   `verify_text` text COMMENT '验证资料文本',
-  `media_json` longtext COMMENT '媒体JSON',
   `media_total` int(11) NOT NULL DEFAULT '0' COMMENT '媒体总数',
   `media_done` int(11) NOT NULL DEFAULT '0' COMMENT '已下载媒体数',
   `media_failed` int(11) NOT NULL DEFAULT '0' COMMENT '媒体失败数',
@@ -693,6 +729,36 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_material_import_group` (
   KEY `idx_ybp_material_import_group_task` (`task_id`,`status`,`id`),
   KEY `idx_ybp_material_import_group_profile` (`profile_id`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴资料导入分组';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_material_import_group_media` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `task_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '导入任务ID',
+  `group_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '导入分组ID',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '账号ID',
+  `purpose` varchar(16) NOT NULL DEFAULT 'display' COMMENT '媒体用途',
+  `media_type` varchar(32) NOT NULL DEFAULT '' COMMENT '媒体类型',
+  `sort_index` int(11) NOT NULL DEFAULT '0' COMMENT '排序',
+  `source_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'TG来源文件ID',
+  `file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '访问地址',
+  `storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '存储路径',
+  `poster_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '封面地址',
+  `source_kind` varchar(32) NOT NULL DEFAULT '' COMMENT 'TG来源媒体类型',
+  `source_media_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG媒体ID',
+  `source_access_hash` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG访问哈希',
+  `source_file_reference` blob COMMENT 'TG文件引用',
+  `source_thumb_size` varchar(32) NOT NULL DEFAULT '' COMMENT 'TG缩略图规格',
+  `source_mime_type` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG媒体MIME',
+  `source_dc_id` int(11) NOT NULL DEFAULT '0' COMMENT 'TG数据中心ID',
+  `source_size` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG媒体大小',
+  `file_md5` varchar(64) NOT NULL DEFAULT '' COMMENT '文件MD5',
+  `file_phash` varchar(128) NOT NULL DEFAULT '' COMMENT '图片感知哈希',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ybp_material_import_group_media_group` (`group_id`,`sort_index`,`id`),
+  KEY `idx_ybp_material_import_group_media_task` (`task_id`,`group_id`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG资料导入分组媒体';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_import_match_run` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',

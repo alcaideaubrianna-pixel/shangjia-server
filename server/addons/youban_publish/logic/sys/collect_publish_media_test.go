@@ -1,7 +1,6 @@
 package sys
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -21,18 +20,6 @@ func TestClassifyCollectPublishMediaKeepsVerifyMediaSeparate(t *testing.T) {
 	}
 	if verify[0].Purpose != "verify" {
 		t.Fatalf("verify purpose=%q, want verify", verify[0].Purpose)
-	}
-}
-
-func TestCollectMediaJSONWithPurpose(t *testing.T) {
-	mediaJSON := `[{"type":"photo","purpose":"display","fileId":"photo-1"},{"type":"video","purpose":"verify","fileId":"video-2"}]`
-	got := collectMediaJSONWithPurpose(mediaJSON, "verify")
-
-	if strings.Contains(got, "photo-1") {
-		t.Fatalf("display media must not be included in verify snapshot: %s", got)
-	}
-	if !materialImportHasVerifyMedia(got) {
-		t.Fatalf("media json=%s, expected verify media", got)
 	}
 }
 
@@ -67,7 +54,7 @@ func TestMergeCollectMediaEnrichmentKeepsCanonicalPathAndPHash(t *testing.T) {
 		Purpose:     "display",
 		FileId:      "copy:-1001:10",
 		StoragePath: "cache/current.jpg",
-		MetaJson:    `{"kind":"photo","id":100,"accessHash":200,"thumbSize":"w"}`,
+		SourceKind:  "photo", SourceMediaId: 100, SourceAccessHash: 200, SourceThumbSize: "w",
 	}}
 	enriched := []collectMediaItem{{
 		Type:        "photo",
@@ -76,7 +63,7 @@ func TestMergeCollectMediaEnrichmentKeepsCanonicalPathAndPHash(t *testing.T) {
 		StoragePath: "cache/old.jpg",
 		FilePhash:   "abcdef0123456789",
 		FileMd5:     "media-md5",
-		MetaJson:    `{"kind":"photo","id":100,"accessHash":200,"thumbSize":"w"}`,
+		SourceKind:  "photo", SourceMediaId: 100, SourceAccessHash: 200, SourceThumbSize: "w",
 	}}
 
 	merged := mergeCollectMediaEnrichment(base, enriched)

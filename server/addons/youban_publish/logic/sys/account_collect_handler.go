@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -206,16 +205,18 @@ func gotdCollectMedia(msg *tg.Message, chatId string) []collectMediaItem {
 	default:
 		return nil
 	}
-	metaJSON := ""
+	result := collectMediaItem{Type: mediaType, FileId: fmt.Sprintf("gotd:%s:%d", chatId, msg.ID)}
 	if meta != nil {
-		data, _ := json.Marshal(meta)
-		metaJSON = string(data)
+		result.SourceKind = meta.Kind
+		result.SourceMediaId = meta.Id
+		result.SourceAccessHash = meta.AccessHash
+		result.SourceFileReference = append([]byte(nil), meta.FileReference...)
+		result.SourceThumbSize = meta.ThumbSize
+		result.SourceMimeType = meta.MimeType
+		result.SourceDCId = meta.DCID
+		result.SourceSize = meta.Size
 	}
-	return []collectMediaItem{{
-		Type:     mediaType,
-		FileId:   fmt.Sprintf("gotd:%s:%d", chatId, msg.ID),
-		MetaJson: metaJSON,
-	}}
+	return []collectMediaItem{result}
 }
 
 func gotdLargestPhotoSizeType(photo *tg.Photo) string {

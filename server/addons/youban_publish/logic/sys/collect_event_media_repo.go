@@ -25,6 +25,20 @@ const (
 	collectMediaNextRetryAt      = "next_retry_at"
 )
 
+type collectEventMediaRow struct {
+	*entity.YoubanPublishCollectEventMedia
+	SourceKind          string
+	SourceMediaId       int64
+	SourceAccessHash    int64
+	SourceFileReference []byte
+	SourceThumbSize     string
+	SourceMimeType      string
+	SourceDCId          int
+	SourceSize          int64
+	FileMd5             string
+	FilePhash           string
+}
+
 func (s *sSysPublish) appendCollectEventLog(ctx context.Context, eventId int64, stage string, status string, message string, meta string) {
 	if eventId <= 0 {
 		return
@@ -100,10 +114,7 @@ func skipCollectEventLog(stage string, status string, message string) bool {
 		"checking:开始检查媒体缓存方式",
 		"downloading:账号采集媒体使用下载缓存，保证带文案媒体组可原格式发送",
 		"ready:媒体缓存任务处理完成",
-		"ready:媒体已就绪",
-		"forwarded:媒体已转存到备份频道",
-		"forwarded:账号采集运行时已完成媒体转存",
-		"forwarded:下载媒体组已推送到备份频道":
+		"ready:媒体已就绪":
 		return true
 	default:
 		return false
@@ -152,7 +163,17 @@ func (s *sSysPublish) upsertCollectEventMedia(ctx context.Context, event gdb.Rec
 			mediaCols.FileUrl:          strings.TrimSpace(item.FileUrl),
 			mediaCols.StoragePath:      normalizeStoredMediaPath(item.StoragePath),
 			mediaCols.PosterUrl:        strings.TrimSpace(item.PosterUrl),
-			mediaCols.MetaJson:         strings.TrimSpace(item.MetaJson),
+			mediaCols.MetaJson:         strings.TrimSpace(item.DebugMetaJson),
+			"source_kind":              strings.TrimSpace(item.SourceKind),
+			"source_media_id":          item.SourceMediaId,
+			"source_access_hash":       item.SourceAccessHash,
+			"source_file_reference":    item.SourceFileReference,
+			"source_thumb_size":        strings.TrimSpace(item.SourceThumbSize),
+			"source_mime_type":         strings.TrimSpace(item.SourceMimeType),
+			"source_dc_id":             item.SourceDCId,
+			"source_size":              item.SourceSize,
+			"file_md5":                 strings.TrimSpace(item.FileMd5),
+			"file_phash":               strings.TrimSpace(item.FilePhash),
 			mediaCols.UpdatedAt:        gtime.Now(),
 		}
 		if !existing.IsEmpty() && existing[mediaCols.CacheStatus].String() == collectMediaCacheReady {
@@ -190,22 +211,53 @@ func (s *sSysPublish) upsertCollectEventMedia(ctx context.Context, event gdb.Rec
 	return s.syncCollectEventMediaSnapshot(ctx, eventId)
 }
 
-func (s *sSysPublish) collectEventMediaRows(ctx context.Context, eventId int64) ([]*entity.YoubanPublishCollectEventMedia, error) {
-	rows := make([]*entity.YoubanPublishCollectEventMedia, 0)
+func (s *sSysPublish) collectEventMediaRows(ctx context.Context, eventId int64) ([]*collectEventMediaRow, error) {
+	rows := make([]*collectEventMediaRow, 0)
 	if eventId <= 0 {
 		return rows, nil
 	}
 	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
-	err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+	records, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
 		Where(mediaCols.EventId, eventId).
 		OrderAsc(mediaCols.SortIndex).
 		OrderAsc(mediaCols.Id).
-		Scan(&rows)
+		All()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取采集事件媒体失败")
 	}
+	rows = collectEventMediaRecords(records)
 	sortCollectEventMediaRows(rows)
 	return rows, nil
+}
+
+func (s *sSysPublish) collectEventMediaItemsByEvent(ctx context.Context, eventIds []int64) (map[int64][]collectMediaItem, error) {
+	result := make(map[int64][]collectMediaItem, len(eventIds))
+	eventIds = uniqueIds(eventIds)
+	if len(eventIds) == 0 {
+		return result, nil
+	}
+	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
+	records, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		WhereIn(mediaCols.EventId, eventIds).
+		OrderAsc(mediaCols.EventId).
+		OrderAsc(mediaCols.SortIndex).
+		OrderAsc(mediaCols.Id).
+		All()
+	if err != nil {
+		return nil, gerror.Wrap(err, "批量读取采集事件媒体失败")
+	}
+	rowsByEvent := make(map[int64][]*collectEventMediaRow, len(eventIds))
+	rows := collectEventMediaRecords(records)
+	for _, row := range rows {
+		if row == nil || row.EventId <= 0 {
+			continue
+		}
+		rowsByEvent[row.EventId] = append(rowsByEvent[row.EventId], row)
+	}
+	for eventId, eventRows := range rowsByEvent {
+		result[eventId] = collectMediaRowsToItems(eventRows, "")
+	}
+	return result, nil
 }
 
 func (s *sSysPublish) syncCollectEventMediaSnapshot(ctx context.Context, eventId int64) error {
@@ -218,18 +270,16 @@ func (s *sSysPublish) syncCollectEventMediaSnapshot(ctx context.Context, eventId
 		return err
 	}
 	items := collectMediaRowsToItems(rows, event["material_role"].String())
-	mediaJSON, mediaCount := collectMessageMediaJSON(items)
 	eventCols := pdao.YoubanPublishCollectEvent.Columns()
 	_, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).Where(eventCols.Id, eventId).Data(g.Map{
-		eventCols.MediaCount: mediaCount,
-		eventCols.MediaJson:  mediaJSON,
-		eventCols.DedupeKey:  collectHash(fmt.Sprintf("%s:%s", normalizeCollectText(event[eventCols.RawText].String()), collectMediaSignature(mediaJSON))),
+		eventCols.MediaCount: len(items),
+		eventCols.DedupeKey:  collectHash(fmt.Sprintf("%s:%s", normalizeCollectText(event[eventCols.RawText].String()), collectMediaSignature(items))),
 		eventCols.UpdatedAt:  gtime.Now(),
 	}).Update()
 	return gerror.Wrap(err, "同步采集事件媒体快照失败")
 }
 
-func collectMediaRowsToItems(rows []*entity.YoubanPublishCollectEventMedia, purpose string) []collectMediaItem {
+func collectMediaRowsToItems(rows []*collectEventMediaRow, purpose string) []collectMediaItem {
 	items := make([]collectMediaItem, 0, len(rows))
 	purpose = strings.TrimSpace(purpose)
 	for _, row := range rows {
@@ -244,16 +294,35 @@ func collectMediaRowsToItems(rows []*entity.YoubanPublishCollectEventMedia, purp
 			fileId = telegramCopyMediaFileId(row.BackupChatId, int(row.BackupMessageId))
 		}
 		items = append(items, collectMediaItem{
-			Type:        row.MediaType,
-			Purpose:     purpose,
-			FileId:      fileId,
-			FileUrl:     row.FileUrl,
-			StoragePath: row.StoragePath,
-			PosterUrl:   row.PosterUrl,
-			MetaJson:    row.MetaJson,
+			Type: row.MediaType, Purpose: purpose, FileId: fileId,
+			FileUrl: row.FileUrl, StoragePath: row.StoragePath, PosterUrl: row.PosterUrl,
+			FileMd5: row.FileMd5, FilePhash: row.FilePhash, DebugMetaJson: row.MetaJson,
+			SourceKind: row.SourceKind, SourceMediaId: row.SourceMediaId,
+			SourceAccessHash: row.SourceAccessHash, SourceFileReference: append([]byte(nil), row.SourceFileReference...),
+			SourceThumbSize: row.SourceThumbSize, SourceMimeType: row.SourceMimeType,
+			SourceDCId: row.SourceDCId, SourceSize: row.SourceSize,
 		})
 	}
 	return items
+}
+
+func collectEventMediaRecords(records gdb.Result) []*collectEventMediaRow {
+	rows := make([]*collectEventMediaRow, 0, len(records))
+	for _, record := range records {
+		base := new(entity.YoubanPublishCollectEventMedia)
+		if err := record.Struct(base); err != nil {
+			continue
+		}
+		rows = append(rows, &collectEventMediaRow{
+			YoubanPublishCollectEventMedia: base,
+			SourceKind:                     record["source_kind"].String(), SourceMediaId: record["source_media_id"].Int64(),
+			SourceAccessHash: record["source_access_hash"].Int64(), SourceFileReference: record["source_file_reference"].Bytes(),
+			SourceThumbSize: record["source_thumb_size"].String(), SourceMimeType: record["source_mime_type"].String(),
+			SourceDCId: record["source_dc_id"].Int(), SourceSize: record["source_size"].Int64(),
+			FileMd5: record["file_md5"].String(), FilePhash: record["file_phash"].String(),
+		})
+	}
+	return rows
 }
 
 func normalizeCollectMediaItem(item collectMediaItem) collectMediaItem {
@@ -265,7 +334,10 @@ func normalizeCollectMediaItem(item collectMediaItem) collectMediaItem {
 	item.PosterUrl = strings.TrimSpace(item.PosterUrl)
 	item.FileMd5 = strings.TrimSpace(item.FileMd5)
 	item.FilePhash = strings.TrimSpace(item.FilePhash)
-	item.MetaJson = strings.TrimSpace(item.MetaJson)
+	item.SourceKind = strings.TrimSpace(item.SourceKind)
+	item.SourceThumbSize = strings.TrimSpace(item.SourceThumbSize)
+	item.SourceMimeType = strings.TrimSpace(item.SourceMimeType)
+	item.DebugMetaJson = strings.TrimSpace(item.DebugMetaJson)
 	return item
 }
 
@@ -312,7 +384,7 @@ func collectMediaSortIndex(item collectMediaItem, fallback int) int {
 	return 1
 }
 
-func sortCollectEventMediaRows(rows []*entity.YoubanPublishCollectEventMedia) {
+func sortCollectEventMediaRows(rows []*collectEventMediaRow) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		left := collectMediaRowOrder(rows[i])
 		right := collectMediaRowOrder(rows[j])
@@ -326,7 +398,7 @@ func sortCollectEventMediaRows(rows []*entity.YoubanPublishCollectEventMedia) {
 	})
 }
 
-func collectMediaRowOrder(row *entity.YoubanPublishCollectEventMedia) int {
+func collectMediaRowOrder(row *collectEventMediaRow) int {
 	if row == nil {
 		return 0
 	}

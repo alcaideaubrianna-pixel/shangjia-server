@@ -3,9 +3,29 @@ package sys
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"hotgo/addons/youban_publish/internal/model/entity"
 )
+
+func TestDefaultCollectMediaFileDownloadTimeout(t *testing.T) {
+	tests := []struct {
+		name string
+		size int64
+		want time.Duration
+	}{
+		{name: "small image", size: 2 << 20, want: time.Minute},
+		{name: "medium video", size: 20 << 20, want: 2 * time.Minute},
+		{name: "large video", size: 80 << 20, want: 3 * time.Minute},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := defaultCollectMediaFileDownloadTimeout(test.size); got != test.want {
+				t.Fatalf("defaultCollectMediaFileDownloadTimeout(%d) = %s, want %s", test.size, got, test.want)
+			}
+		})
+	}
+}
 
 func TestCollectMediaFileReferenceExpiredIsTerminal(t *testing.T) {
 	if !collectMediaFileReferenceExpired(errors.New("rpc error: FILE_REFERENCE_EXPIRED")) {
@@ -71,10 +91,9 @@ func TestCollectMediaRowNeedsCacheSupportsMessageReference(t *testing.T) {
 }
 
 func TestCollectMediaRowsToItemsUsesMessageReference(t *testing.T) {
-	items := collectMediaRowsToItems([]*entity.YoubanPublishCollectEventMedia{{
-		SourceMessageRef: "gotd:-100123:456",
-		MediaType:        "photo",
-	}}, "display")
+	items := collectMediaRowsToItems([]*collectEventMediaRow{{YoubanPublishCollectEventMedia: &entity.YoubanPublishCollectEventMedia{
+		SourceMessageRef: "gotd:-100123:456", MediaType: "photo",
+	}}}, "display")
 	if len(items) != 1 || items[0].FileId != "gotd:-100123:456" {
 		t.Fatalf("unexpected media items: %+v", items)
 	}

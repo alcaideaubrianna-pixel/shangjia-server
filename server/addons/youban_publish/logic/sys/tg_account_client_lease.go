@@ -8,6 +8,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/tg"
 
 	"hotgo/internal/library/hgrds/lock"
 )
@@ -98,4 +99,55 @@ func (s *sSysPublish) runTelegramClientWithAccountLease(ctx context.Context, tgA
 		}
 	}()
 	return client.Run(ctx, run)
+}
+
+func (s *sSysPublish) executeTelegramAccountOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) error {
+	return s.executeTelegramAccountOperationMode(ctx, tgAccountId, timeout, run, false)
+}
+
+func (s *sSysPublish) executeTelegramAccountMediaOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) error {
+	return s.executeTelegramAccountOperationMode(ctx, tgAccountId, timeout, run, true)
+}
+
+func (s *sSysPublish) executeTelegramAccountOperationMode(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation, parallel bool) error {
+	if tgAccountId <= 0 || run == nil {
+		return gerror.New("TG账号操作参数无效")
+	}
+	var usedRuntime bool
+	var err error
+	if parallel {
+		usedRuntime, err = s.executeAccountCollectMediaOperation(ctx, tgAccountId, timeout, run)
+	} else {
+		usedRuntime, err = s.executeAccountCollectOperation(ctx, tgAccountId, timeout, run)
+	}
+	if err != nil || usedRuntime {
+		return err
+	}
+	return s.executeTelegramAccountStandaloneOperation(ctx, tgAccountId, timeout, run)
+}
+
+func (s *sSysPublish) executeTelegramAccountStandaloneOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) error {
+	if tgAccountId <= 0 || run == nil {
+		return gerror.New("TG账号操作参数无效")
+	}
+	account, err := s.accountCollectTgAccount(ctx, tgAccountId)
+	if err != nil {
+		return err
+	}
+	conf, err := NewSysConfig().GetTelegram(ctx)
+	if err != nil {
+		return err
+	}
+	client, err := s.newAccountCollectClient(ctx, conf, account, tg.NewUpdateDispatcher())
+	if err != nil {
+		return err
+	}
+	if timeout <= 0 {
+		timeout = 90 * time.Second
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return s.runTelegramClientWithAccountLease(runCtx, tgAccountId, client, func(runCtx context.Context) error {
+		return run(runCtx, client)
+	})
 }

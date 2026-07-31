@@ -51,12 +51,12 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 	return pairs
 }
 
-func collectMaterialEventViews(rows []gdb.Record) []collectMaterialMessageView {
+func collectMaterialEventViews(rows []gdb.Record, mediaByEvent map[int64][]collectMediaItem) []collectMaterialMessageView {
 	views := make([]collectMaterialMessageView, 0, len(rows))
 	for _, row := range rows {
 		views = append(views, collectMaterialMessageView{
 			RawText: row["raw_text"].String(),
-			Media:   collectMediaRowsToItemsFromJSON(row["media_json"].String()),
+			Media:   mediaByEvent[row["id"].Int64()],
 		})
 	}
 	return views

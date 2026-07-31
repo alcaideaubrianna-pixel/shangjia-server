@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -79,6 +78,15 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 		}
 		return left < right
 	})
+	eventIds := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		eventIds = append(eventIds, row["id"].Int64())
+	}
+	mediaByEvent, err := s.collectEventMediaItemsByEvent(ctx, eventIds)
+	if err != nil {
+		return err
+	}
+	messageViews := collectMaterialEventViews(rows, mediaByEvent)
 	for index := 0; index < len(rows); index++ {
 		event := rows[index]
 		role := strings.TrimSpace(event["material_role"].String())
@@ -97,7 +105,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 		g.Log().Infof(ctx, "采集消息分组分类 eventId:%d sourceId:%d chat:%s messageId:%d groupedId:%s role:%s kind:%s media:%d text:%s", event["id"].Int64(), payload.SourceId, chatID, event["source_message_id"].Int64(), event["source_grouped_id"].String(), role, classification.Kind, event["media_count"].Int(), truncateCollectDiagnosticText(event["raw_text"].String(), 80))
 		switch classification.Kind {
 		case profileMessageKindDisplay:
-			verifyIndex := s.findCollectVerifyEvent(rows, index)
+			verifyIndex := s.findCollectVerifyEvent(rows, messageViews, index)
 			if verifyIndex >= 0 {
 				verify := rows[verifyIndex]
 				g.Log().Infof(ctx, "采集消息匹配验证组 eventId:%d verifyEventId:%d displayMessageId:%d verifyMessageId:%d verifyGroupedId:%s verifyMedia:%d", event["id"].Int64(), verify["id"].Int64(), event["source_message_id"].Int64(), verify["source_message_id"].Int64(), verify["source_grouped_id"].String(), verify["media_count"].Int())
@@ -130,7 +138,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 			}
 		case profileMessageKindVerify:
 			g.Log().Infof(ctx, "采集消息识别为验证组 eventId:%d sourceMessageId:%d groupedId:%s media:%d role:%s", event["id"].Int64(), event["source_message_id"].Int64(), event["source_grouped_id"].String(), event["media_count"].Int(), role)
-			displayIndex := s.findCollectDisplayEvent(rows, index)
+			displayIndex := s.findCollectDisplayEvent(rows, messageViews, index)
 			if displayIndex >= 0 {
 				display := rows[displayIndex]
 				if err = s.bindCollectMaterialPair(ctx, display, event); err != nil {
@@ -169,8 +177,8 @@ func isCollectProcessRetryError(err error) bool {
 	return errors.As(err, &retryErr)
 }
 
-func (s *sSysPublish) findCollectVerifyEvent(rows []gdb.Record, displayIndex int) int {
-	for _, pair := range pairCollectMaterialMessages(collectMaterialEventViews(rows)) {
+func (s *sSysPublish) findCollectVerifyEvent(rows []gdb.Record, views []collectMaterialMessageView, displayIndex int) int {
+	for _, pair := range pairCollectMaterialMessages(views) {
 		if pair.DisplayIndex != displayIndex {
 			continue
 		}
@@ -186,7 +194,7 @@ func (s *sSysPublish) findCollectVerifyEvent(rows []gdb.Record, displayIndex int
 	return -1
 }
 
-func (s *sSysPublish) findCollectDisplayEvent(rows []gdb.Record, verifyIndex int) int {
+func (s *sSysPublish) findCollectDisplayEvent(rows []gdb.Record, views []collectMaterialMessageView, verifyIndex int) int {
 	if verifyIndex < 0 || verifyIndex >= len(rows) {
 		return -1
 	}
@@ -199,7 +207,7 @@ func (s *sSysPublish) findCollectDisplayEvent(rows []gdb.Record, verifyIndex int
 			}
 		}
 	}
-	for _, pair := range pairCollectMaterialMessages(collectMaterialEventViews(rows)) {
+	for _, pair := range pairCollectMaterialMessages(views) {
 		if pair.VerifyIndex == verifyIndex {
 			return pair.DisplayIndex
 		}
@@ -313,12 +321,16 @@ func (s *sSysPublish) mergeCollectMaterialContent(ctx context.Context, display g
 	if !ready {
 		return nil, newCollectProcessRetryError(30*time.Second, "验证资料媒体尚未就绪")
 	}
-	displayJSON := collectMediaJSONWithPurpose(content.MediaJSON, collectMaterialRoleDisplay)
-	verifyJSON := collectMediaJSONWithPurpose(verify["media_json"].String(), collectMaterialRoleVerify)
-	mediaJSON, mediaCount := mergeCollectMediaJSON(displayJSON, verifyJSON)
-	content.MediaJSON = mediaJSON
-	content.MediaCount = mediaCount
-	content.DedupeKey = collectHash(content.NormalizedText + ":" + collectMediaSignature(mediaJSON))
+	verifyRows, err := s.collectEventMediaRows(ctx, verify["id"].Int64())
+	if err != nil {
+		return nil, err
+	}
+	content.Media = mergeCollectMediaItems(
+		collectMediaWithPurpose(content.Media, collectMaterialRoleDisplay),
+		collectMediaRowsToItems(verifyRows, collectMaterialRoleVerify),
+	)
+	content.MediaCount = len(content.Media)
+	content.DedupeKey = collectHash(content.NormalizedText + ":" + collectMediaSignature(content.Media))
 	return content, nil
 }
 
@@ -354,10 +366,4 @@ func collectMaterialEventAt(event gdb.Record) time.Time {
 		wallClock.Hour(), wallClock.Minute(), wallClock.Second(),
 		wallClock.Nanosecond(), time.Local,
 	)
-}
-
-func collectMediaRowsToItemsFromJSON(mediaJSON string) []collectMediaItem {
-	items := make([]collectMediaItem, 0)
-	_ = json.Unmarshal([]byte(mediaJSON), &items)
-	return items
 }

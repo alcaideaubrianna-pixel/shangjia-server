@@ -60,11 +60,56 @@ func (s *sSysPublish) CollectEventList(ctx context.Context, in *sysin.CollectEve
 	if err = s.fillCollectEventRouting(ctx, list, account.TenantId, account.Id); err != nil {
 		return nil, 0, err
 	}
+	if err = s.fillCollectEventMediaCache(ctx, list); err != nil {
+		return nil, 0, err
+	}
 	for _, item := range list {
-		item.MediaCacheStatus, item.MediaCacheMessage = collectEventMediaCacheView(item.MediaJson, item.MediaCount, item.Status, item.ErrorMessage)
 		item.IgnoreType = collectEventIgnoreType(item.Status, item.ErrorMessage)
 	}
 	return
+}
+
+func (s *sSysPublish) fillCollectEventMediaCache(ctx context.Context, list []*sysin.CollectEventModel) error {
+	eventIds := make([]int64, 0, len(list))
+	byId := make(map[int64]*sysin.CollectEventModel, len(list))
+	for _, item := range list {
+		if item != nil && item.Id > 0 {
+			eventIds = append(eventIds, item.Id)
+			byId[item.Id] = item
+		}
+	}
+	if len(eventIds) == 0 {
+		return nil
+	}
+	rows, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Fields("event_id,cache_status,COUNT(*) AS total").
+		WhereIn("event_id", eventIds).
+		Group("event_id,cache_status").All()
+	if err != nil {
+		return gerror.Wrap(err, "统计采集事件媒体状态失败")
+	}
+	summaries := make(map[int64]collectEventMediaCacheSummary, len(eventIds))
+	for _, row := range rows {
+		eventId := row["event_id"].Int64()
+		summary := summaries[eventId]
+		count := row["total"].Int()
+		summary.Total += count
+		switch row["cache_status"].String() {
+		case collectMediaCacheReady:
+			summary.Ready += count
+		case collectMediaCacheFailed:
+			summary.Failed += count
+		case collectMediaCacheForwarding, collectMediaCacheDownloading:
+			summary.Downloading += count
+		default:
+			summary.Pending += count
+		}
+		summaries[eventId] = summary
+	}
+	for eventId, item := range byId {
+		item.MediaCacheStatus, item.MediaCacheMessage = collectEventMediaCacheView(summaries[eventId], item.Status, item.ErrorMessage)
+	}
+	return nil
 }
 
 func collectEventIgnoreType(status, message string) string {
@@ -105,18 +150,26 @@ func (s *sSysPublish) fillCollectEventRouting(ctx context.Context, list []*sysin
 		routes[id] = &route{}
 	}
 	var dispatches []struct {
-		EventId             int64  `json:"eventId"`
-		TargetChannelIdJson string `json:"targetChannelIdJson"`
-		ReviewId            int64  `json:"reviewId"`
-		Status              string `json:"status"`
+		Id       int64  `json:"id"`
+		EventId  int64  `json:"eventId"`
+		ReviewId int64  `json:"reviewId"`
+		Status   string `json:"status"`
 	}
 	if err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
 		WhereIn("event_id", eventIds).
-		Fields("event_id,target_channel_id_json,review_id,status").
+		Fields("id,event_id,review_id,status").
 		Scan(&dispatches); err != nil {
 		return gerror.Wrap(err, "读取采集事件分发信息失败")
+	}
+	dispatchIds := make([]int64, 0, len(dispatches))
+	for _, item := range dispatches {
+		dispatchIds = append(dispatchIds, item.Id)
+	}
+	dispatchChannels, err := collectDispatchChannelMap(ctx, dispatchIds)
+	if err != nil {
+		return err
 	}
 	channelIds := make([]int64, 0)
 	for _, item := range dispatches {
@@ -124,7 +177,7 @@ func (s *sSysPublish) fillCollectEventRouting(ctx context.Context, list []*sysin
 		if r == nil {
 			continue
 		}
-		r.ChannelIds = append(r.ChannelIds, decodeInt64JSON(item.TargetChannelIdJson)...)
+		r.ChannelIds = append(r.ChannelIds, dispatchChannels[item.Id]...)
 		r.Dispatch = item.Status
 		if item.ReviewId > r.ReviewId {
 			r.ReviewId = item.ReviewId
@@ -170,20 +223,23 @@ func (s *sSysPublish) fillCollectEventRouting(ctx context.Context, list []*sysin
 		ruleIds = append(ruleIds, binding.RuleId)
 	}
 	var rules []struct {
-		Id                  int64  `json:"id"`
-		TargetChannelIdJson string `json:"targetChannelIdJson"`
+		Id int64 `json:"id"`
 	}
 	if len(ruleIds) > 0 {
 		if err := pdao.YoubanPublishCollectRule.Ctx(ctx).
 			Where("tenant_id", tenantId).Where("account_id", accountId).
 			WhereIn("id", ruleIds).Where("status", 1).WhereNull("deleted_at").
-			Fields("id,target_channel_id_json").Scan(&rules); err != nil {
+			Fields("id").Scan(&rules); err != nil {
 			return gerror.Wrap(err, "读取采集规则目标失败")
 		}
 	}
-	ruleTargets := make(map[int64][]int64, len(rules))
+	ruleTargetIds := make([]int64, 0, len(rules))
 	for _, rule := range rules {
-		ruleTargets[rule.Id] = decodeInt64JSON(rule.TargetChannelIdJson)
+		ruleTargetIds = append(ruleTargetIds, rule.Id)
+	}
+	ruleTargets, err := collectRuleChannelMap(ctx, ruleTargetIds)
+	if err != nil {
+		return err
 	}
 	sourceTargets := make(map[int64][]int64)
 	for _, binding := range bindings {
@@ -569,6 +625,12 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	sourceId := event["source_id"].Int64()
 	cacheKey := s.collectEventRulesCacheKey(ctx, tenantId, accountId, sourceId)
 	if rows, ok := collectEventRulesCacheGet(ctx, cacheKey); ok {
+		if err := attachCollectRuleChannels(ctx, rows); err != nil {
+			return nil, err
+		}
+		if err := attachCollectRuleItems(ctx, rows); err != nil {
+			return nil, err
+		}
 		return rows, nil
 	}
 	var bindRows []struct {
@@ -594,6 +656,12 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	rows, err := mod.OrderAsc("sort").OrderAsc("id").All()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取采集规则失败")
+	}
+	if err = attachCollectRuleChannels(ctx, rows); err != nil {
+		return nil, err
+	}
+	if err = attachCollectRuleItems(ctx, rows); err != nil {
+		return nil, err
 	}
 	collectEventRulesCacheSet(ctx, cacheKey, rows)
 	return rows, nil
@@ -689,7 +757,7 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 			}
 		}
 		if profileId > 0 {
-			updatedProfileId, upsertErr := s.upsertCollectProfile(ctx, event, content, rule, decision.Text)
+			updatedProfileId, upsertErr := s.commitCollectMaterial(ctx, event, content, rule, decision.Text)
 			if upsertErr != nil {
 				return false, "", upsertErr
 			}
@@ -705,30 +773,35 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		return true, "", nil
 	}
 	now := gtime.Now()
-	dispatchId, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).Data(g.Map{
-		"tenant_id":              event["tenant_id"].Int64(),
-		"account_id":             event["account_id"].Int64(),
-		"source_id":              event["source_id"].Int64(),
-		"rule_id":                rule["id"].Int64(),
-		"event_id":               event["id"].Int64(),
-		"target_channel_id_json": rule["target_channel_id_json"].String(),
-		"bot_id_json":            rule["bot_id_json"].String(),
-		"match_json":             decision.MatchJSON,
-		"status":                 sysin.CollectDispatchStatusPending,
-		"created_at":             now,
-		"updated_at":             now,
-	}).InsertAndGetId()
+	channelIds := collectRuleTargetChannelIds(rule)
+	if len(channelIds) == 0 {
+		return false, "", gerror.New("采集规则未配置目标频道")
+	}
+	var dispatchId int64
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var txErr error
+		dispatchId, txErr = tx.Model(pdao.YoubanPublishCollectDispatch.Table()).Ctx(ctx).Data(g.Map{
+			"tenant_id": event["tenant_id"].Int64(), "account_id": event["account_id"].Int64(),
+			"source_id": event["source_id"].Int64(), "rule_id": rule["id"].Int64(), "event_id": event["id"].Int64(),
+			"match_json": decision.MatchJSON, "status": sysin.CollectDispatchStatusPending,
+			"created_at": now, "updated_at": now,
+		}).InsertAndGetId()
+		if txErr != nil {
+			return gerror.Wrap(txErr, "创建采集分发记录失败")
+		}
+		return createCollectDispatchChannelsTx(ctx, tx, event["tenant_id"].Int64(), event["account_id"].Int64(), dispatchId, channelIds)
+	})
 	if err != nil {
-		return false, "", gerror.Wrap(err, "创建采集分发记录失败")
+		return false, "", err
 	}
 	if rule["review_enabled"].Int() == 1 {
 		return true, "", s.createCollectReview(ctx, event, content, rule, dispatchId, decision.Text)
 	}
-	profileId, err := s.upsertCollectProfile(ctx, event, content, rule, decision.Text)
+	profileId, err := s.commitCollectMaterial(ctx, event, content, rule, decision.Text)
 	if err != nil {
 		return false, "", err
 	}
-	if err = s.submitCollectProfileDispatch(ctx, dispatchId, profileId, event, rule); err != nil {
+	if err = s.submitCollectProfileDispatch(ctx, dispatchId, profileId, event); err != nil {
 		return false, "", err
 	}
 	return true, "", nil
@@ -757,18 +830,12 @@ func (s *sSysPublish) existingCollectProfileId(ctx context.Context, event gdb.Re
 
 func (s *sSysPublish) classifyCollectEvent(ctx context.Context, event gdb.Record, content *collectContentResult) (profileMessageClassification, error) {
 	text := strings.TrimSpace(event["raw_text"].String())
-	mediaJSON := strings.TrimSpace(event["media_json"].String())
+	var items []collectMediaItem
 	if content != nil {
 		text = strings.TrimSpace(content.RawText)
-		mediaJSON = strings.TrimSpace(content.MediaJSON)
+		items = content.Media
 	}
-	var items []collectMediaItem
-	if mediaJSON != "" {
-		if err := json.Unmarshal([]byte(mediaJSON), &items); err != nil {
-			return profileMessageClassification{}, gerror.Wrap(err, "解析采集媒体失败")
-		}
-	}
-	if len(items) == 0 && event["media_count"].Int() > 0 {
+	if len(items) == 0 {
 		rows, err := s.collectEventMediaRows(ctx, event["id"].Int64())
 		if err != nil {
 			return profileMessageClassification{}, err
@@ -853,20 +920,17 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 	}
 	mediaCount := prepared.Content.MediaCount
 	reviewId, err := pdao.YoubanPublishCollectReview.Ctx(ctx).Data(g.Map{
-		"tenant_id":              event["tenant_id"].Int64(),
-		"account_id":             event["account_id"].Int64(),
-		"source_id":              event["source_id"].Int64(),
-		"rule_id":                rule["id"].Int64(),
-		"event_id":               event["id"].Int64(),
-		"dispatch_id":            dispatchId,
-		"raw_text":               text,
-		"media_count":            mediaCount,
-		"media_json":             prepared.Content.MediaJSON,
-		"target_channel_id_json": rule["target_channel_id_json"].String(),
-		"bot_id_json":            rule["bot_id_json"].String(),
-		"status":                 sysin.CollectReviewStatusPending,
-		"created_at":             now,
-		"updated_at":             now,
+		"tenant_id":   event["tenant_id"].Int64(),
+		"account_id":  event["account_id"].Int64(),
+		"source_id":   event["source_id"].Int64(),
+		"rule_id":     rule["id"].Int64(),
+		"event_id":    event["id"].Int64(),
+		"dispatch_id": dispatchId,
+		"raw_text":    text,
+		"media_count": mediaCount,
+		"status":      sysin.CollectReviewStatusPending,
+		"created_at":  now,
+		"updated_at":  now,
 	}).InsertAndGetId()
 	if err != nil {
 		return gerror.Wrap(err, "创建采集审核失败")

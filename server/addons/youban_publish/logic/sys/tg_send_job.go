@@ -12,6 +12,8 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 var errTelegramJobSuperseded = errors.New("TG推送任务已废弃")
@@ -72,7 +74,7 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 	}
 	if !allowed {
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "上架任务已下架或不可发布，跳过TG推送")
-		return s.markTelegramJobSuperseded(ctx, job.Id)
+		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
 	}
 	allowed, err = s.prepareProfileChannelPublish(ctx, job)
 	if err != nil {
@@ -80,7 +82,10 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 	}
 	if !allowed {
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "频道已有同资料有效消息，跳过重复TG推送")
-		return s.markTelegramJobSuperseded(ctx, job.Id)
+		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
+	}
+	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPublishing); err != nil {
+		return err
 	}
 	if recordErr := s.upsertPublishJobRecord(ctx, job, "sending", ""); recordErr != nil {
 		g.Log().Warningf(ctx, "更新发布发送中记录失败 jobId:%d err:%+v", job.Id, recordErr)
@@ -198,7 +203,7 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	allowed, allowedErr := s.canSendTelegramJob(ctx, job)
 	if allowedErr == nil && !allowed {
 		s.appendTelegramJobLog(ctx, job, "publish", "superseded", "TG推送失败时任务已被新操作覆盖，旧任务已废弃")
-		return s.markTelegramJobSuperseded(ctx, job.Id)
+		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
 	}
 	var tooMany *tgbot.TooManyRequestsError
 	if errors.As(err, &tooMany) {
@@ -234,6 +239,13 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	if status == "failed" && job.CollectEventId > 0 {
 		_ = s.markCollectDispatchFailedByProfile(ctx, job.ProfileId, job.CollectEventId, message)
 	}
+	projectedStatus := sysin.PublishTaskStatusPending
+	if status == "failed" {
+		projectedStatus = sysin.PublishTaskStatusFailed
+	}
+	if stateErr := s.updateProfilePublishOperationState(ctx, job, projectedStatus); stateErr != nil {
+		return stateErr
+	}
 	return nil
 }
 
@@ -259,6 +271,9 @@ func (s *sSysPublish) switchTelegramJobToNextBot(ctx context.Context, job telegr
 		return false, gerror.Wrap(err, "切换备用BOT失败")
 	}
 	job.BotId = nextBotId
+	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPending); err != nil {
+		return false, err
+	}
 	if recordErr := s.upsertPublishJobRecord(ctx, job, "pending", "已切换备用BOT，等待重新发送"); recordErr != nil {
 		g.Log().Warningf(ctx, "更新发布待发送记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
@@ -288,7 +303,7 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		if err = s.deleteTelegramMessageSetLockedByChannel(ctx, job, "任务已下架"); err != nil {
 			return err
 		}
-		return s.markTelegramJobSuperseded(ctx, job.Id)
+		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
 	}
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).

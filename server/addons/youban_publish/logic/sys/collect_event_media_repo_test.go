@@ -7,11 +7,9 @@ import (
 )
 
 func TestCollectMediaRowsToItemsPreservesPurpose(t *testing.T) {
-	items := collectMediaRowsToItems([]*entity.YoubanPublishCollectEventMedia{{
-		MediaType:    "video",
-		SourceFileId: "gotd:-100:42",
-		MetaJson:     `{"kind":"document"}`,
-	}}, collectMaterialRoleVerify)
+	items := collectMediaRowsToItems([]*collectEventMediaRow{{YoubanPublishCollectEventMedia: &entity.YoubanPublishCollectEventMedia{
+		MediaType: "video", SourceFileId: "gotd:-100:42", MetaJson: `{"kind":"document"}`,
+	}}}, collectMaterialRoleVerify)
 	if len(items) != 1 {
 		t.Fatalf("items length = %d, want 1", len(items))
 	}

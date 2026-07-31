@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -13,7 +12,7 @@ func (s *sSysPublish) canonicalCollectProfileMedia(ctx context.Context, event gd
 		content = &collectContentResult{}
 	}
 	resolved := *content
-	contentItems := collectMediaRowsToItemsFromJSON(content.MediaJSON)
+	contentItems := content.Media
 	displayItems := make([]collectMediaItem, 0, len(contentItems))
 	for _, item := range contentItems {
 		if strings.EqualFold(strings.TrimSpace(item.Purpose), collectMaterialRoleVerify) {
@@ -49,23 +48,17 @@ func (s *sSysPublish) canonicalCollectProfileMedia(ctx context.Context, event gd
 		if len(rows) > 0 {
 			verifyItems = mergeCollectMediaEnrichment(
 				collectMediaRowsToItems(rows, collectMaterialRoleVerify),
-				collectMediaJSONWithPurposeItems(content.MediaJSON, collectMaterialRoleVerify),
+				collectMediaWithPurpose(content.Media, collectMaterialRoleVerify),
 			)
-		} else {
-			verifyItems = collectMediaJSONWithPurposeItems(verify["media_json"].String(), collectMaterialRoleVerify)
 		}
 	}
 	if len(verifyItems) == 0 {
-		verifyItems = collectMediaJSONWithPurposeItems(content.MediaJSON, collectMaterialRoleVerify)
+		verifyItems = collectMediaWithPurpose(content.Media, collectMaterialRoleVerify)
 	}
 
-	mediaJSON, mediaCount := mergeCollectMediaJSON(
-		collectMediaItemsJSON(displayItems),
-		collectMediaItemsJSON(verifyItems),
-	)
-	resolved.MediaJSON = mediaJSON
-	resolved.MediaCount = mediaCount
-	resolved.DedupeKey = collectHash(resolved.NormalizedText + ":" + collectMediaSignature(mediaJSON))
+	resolved.Media = mergeCollectMediaItems(displayItems, verifyItems)
+	resolved.MediaCount = len(resolved.Media)
+	resolved.DedupeKey = collectHash(resolved.NormalizedText + ":" + collectMediaSignature(resolved.Media))
 	return &resolved, nil
 }
 
@@ -111,17 +104,33 @@ func collectMediaMatchKeys(item collectMediaItem) []string {
 	return keys
 }
 
-func collectMediaJSONWithPurposeItems(mediaJSON string, purpose string) []collectMediaItem {
-	data := collectMediaJSONWithPurpose(mediaJSON, purpose)
-	return collectMediaRowsToItemsFromJSON(data)
+func collectMediaWithPurpose(items []collectMediaItem, purpose string) []collectMediaItem {
+	filtered := make([]collectMediaItem, 0, len(items))
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item.Purpose), purpose) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
 }
 
-func collectMediaItemsJSON(items []collectMediaItem) string {
-	data, err := json.Marshal(items)
-	if err != nil {
-		return "[]"
+func mergeCollectMediaItems(groups ...[]collectMediaItem) []collectMediaItem {
+	merged := make([]collectMediaItem, 0)
+	seen := make(map[string]struct{})
+	for _, items := range groups {
+		for _, item := range items {
+			key := strings.TrimSpace(item.Purpose) + ":" + strings.TrimSpace(item.Type) + ":" + collectMediaSourceKey(item)
+			if key == "::" {
+				continue
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			merged = append(merged, item)
+		}
 	}
-	return string(data)
+	return merged
 }
 
 func classifyCollectPublishMedia(event gdb.Record, items []collectMediaItem) ([]collectMediaItem, []collectMediaItem) {

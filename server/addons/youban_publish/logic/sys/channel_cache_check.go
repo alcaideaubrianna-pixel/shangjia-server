@@ -186,23 +186,8 @@ func (s *sSysPublish) checkBotChannelMember(ctx context.Context, botItem *sysin.
 }
 
 func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgAccountId int64, channel *sysin.ChannelCacheModel, bots []*sysin.BotModel) error {
-	account, err := s.adminTgAccountById(ctx, tgAccountId, tenantId)
-	if err != nil {
+	if _, err := s.adminTgAccountById(ctx, tgAccountId, tenantId); err != nil {
 		return err
-	}
-	conf, err := NewSysConfig().GetTelegram(ctx)
-	if err != nil {
-		return err
-	}
-	storage, err := s.telegramSessionStorage(account.SessionKey)
-	if err != nil {
-		return err
-	}
-	options := telegram.Options{SessionStorage: storage}
-	if resolver, err := telegramMTProtoResolver(conf.ProxyUrl); err != nil {
-		return err
-	} else if resolver != nil {
-		options.Resolver = resolver
 	}
 	channelID, err := strconv.ParseInt(channel.ChannelId, 10, 64)
 	if err != nil {
@@ -212,10 +197,7 @@ func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgA
 	if err != nil {
 		return gerror.New("频道AccessHash无效，请刷新频道缓存")
 	}
-	client := telegram.NewClient(conf.AppId, conf.AppHash, options)
-	runCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
-	defer cancel()
-	return s.runTelegramClientWithAccountLease(runCtx, tgAccountId, client, func(ctx context.Context) error {
+	return s.executeTelegramAccountOperation(ctx, tgAccountId, 35*time.Second, func(ctx context.Context, client *telegram.Client) error {
 		api := client.API()
 		inputChannel := &tg.InputChannel{ChannelID: channelID, AccessHash: accessHash}
 		for _, botItem := range bots {

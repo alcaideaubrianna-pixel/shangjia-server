@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -91,27 +90,7 @@ func (s *sSysPublish) executeMaterialImportPull(ctx context.Context, task *sysin
 		}
 		return s.pullMaterialImportPages(runCtx, client, task, peer, cache)
 	}
-	usedRuntime, err := s.executeAccountCollectOperation(ctx, task.TgAccountId, 50*time.Minute, run)
-	if err != nil || usedRuntime {
-		return err
-	}
-	tgAccount, err := s.accountCollectTgAccount(ctx, task.TgAccountId)
-	if err != nil {
-		return err
-	}
-	conf, err := NewSysConfig().GetTelegram(ctx)
-	if err != nil {
-		return err
-	}
-	client, err := s.newAccountCollectClient(ctx, conf, tgAccount, tg.NewUpdateDispatcher())
-	if err != nil {
-		return err
-	}
-	runCtx, cancel := context.WithTimeout(ctx, 50*time.Minute)
-	defer cancel()
-	return s.runTelegramClientWithAccountLease(runCtx, task.TgAccountId, client, func(clientCtx context.Context) error {
-		return run(clientCtx, client)
-	})
+	return s.executeTelegramAccountOperation(ctx, task.TgAccountId, 50*time.Minute, run)
 }
 
 func (s *sSysPublish) pullMaterialImportPages(ctx context.Context, client *telegram.Client, task *sysin.MaterialImportTaskModel, peer *tg.InputPeerChannel, cache *sysin.ChannelCacheModel) error {
@@ -283,11 +262,7 @@ func materialImportLatestSourceMessageID(value string) int {
 	return latest
 }
 
-func materialImportHasVerifyMedia(mediaJSON string) bool {
-	items := make([]collectMediaItem, 0)
-	if err := json.Unmarshal([]byte(mediaJSON), &items); err != nil {
-		return false
-	}
+func materialImportHasVerifyMedia(items []collectMediaItem) bool {
 	for _, item := range items {
 		if strings.EqualFold(strings.TrimSpace(item.Purpose), "verify") {
 			return true

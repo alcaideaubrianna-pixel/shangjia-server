@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -65,10 +64,9 @@ func (s *sSysPublish) RepairMaterialImportMissingMedia(ctx context.Context, acco
 		if group.Status != sysin.MaterialImportStatusSuccess && group.Status != sysin.MaterialImportStatusPending && !explicitFailedRetry {
 			continue
 		}
-		var items []collectMediaItem
-		if err = json.Unmarshal([]byte(group.MediaJson), &items); err != nil {
-			g.Log().Warningf(ctx, "解析TG导入媒体失败 groupId:%d err:%+v", group.Id, err)
-			continue
+		items, mediaErr := s.materialImportGroupMediaItems(ctx, group.Id)
+		if mediaErr != nil {
+			return mediaErr
 		}
 		counts, countErr := s.materialImportProfileMediaCounts(ctx, group.ProfileId)
 		if countErr != nil {

@@ -1139,7 +1139,7 @@ type ChannelListInp struct {
 	form.PageReq
 	TenantId         int64  `json:"tenantId" dc:"租户ID"`
 	TgAccountId      int64  `json:"tgAccountId" dc:"TG账号ID"`
-	PublishDirection string `json:"publishDirection" dc:"上架/下架/备份频道：up/down/backup"`
+	PublishDirection string `json:"publishDirection" dc:"上架/下架频道：up/down"`
 	Keyword          string `json:"keyword" dc:"频道名称/Chat ID"`
 	Status           int    `json:"status" dc:"状态：1启用 2停用"`
 }
@@ -1153,7 +1153,7 @@ type ChannelModel struct {
 	ChannelTitle            string      `json:"channelTitle" dc:"频道名称"`
 	ChannelUsername         string      `json:"channelUsername" dc:"频道用户名"`
 	TargetChatId            string      `json:"targetChatId" dc:"目标Chat ID"`
-	PublishDirection        string      `json:"publishDirection" dc:"上架/下架/备份频道：up/down/backup"`
+	PublishDirection        string      `json:"publishDirection" dc:"上架/下架频道：up/down"`
 	CyclePublishEnabled     int         `json:"cyclePublishEnabled" dc:"是否循环上架"`
 	CyclePublishDays        int         `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
 	CyclePublishTime        string      `json:"cyclePublishTime" dc:"循环上架时间"`
@@ -1180,7 +1180,7 @@ type ChannelSaveInp struct {
 	ChannelTitle        string  `json:"channelTitle" dc:"频道名称"`
 	ChannelUsername     string  `json:"channelUsername" dc:"频道用户名"`
 	TargetChatId        string  `json:"targetChatId" dc:"目标Chat ID"`
-	PublishDirection    string  `json:"publishDirection" dc:"上架/下架/备份频道：up/down/backup"`
+	PublishDirection    string  `json:"publishDirection" dc:"上架/下架频道：up/down"`
 	CyclePublishEnabled int     `json:"cyclePublishEnabled" dc:"是否循环上架"`
 	CyclePublishDays    int     `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
 	CyclePublishTime    string  `json:"cyclePublishTime" dc:"循环上架时间"`
@@ -1202,7 +1202,7 @@ func (in *ChannelSaveInp) Filter(ctx context.Context) error {
 	if in.PublishDirection == "" {
 		in.PublishDirection = "up"
 	}
-	if in.PublishDirection != "up" && in.PublishDirection != "down" && in.PublishDirection != "backup" {
+	if in.PublishDirection != "up" && in.PublishDirection != "down" {
 		return gerror.New("频道类型不合法")
 	}
 	if in.ChannelTitle == "" && in.ChannelUsername == "" && in.TargetChatId == "" {
@@ -1413,33 +1413,6 @@ type ChannelClearQueueModel struct {
 	ChannelId int64 `json:"channelId" dc:"频道ID"`
 	Cleared   int   `json:"cleared" dc:"清空数量"`
 	Sending   int   `json:"sending" dc:"发送中数量"`
-}
-
-type ChannelBackupCreateInp struct {
-	TgAccountId int64   `json:"tgAccountId" v:"required|min:1#请选择TG账号|请选择TG账号" dc:"TG账号ID"`
-	Title       string  `json:"title" v:"required#请输入备份频道昵称" dc:"频道昵称"`
-	BotIds      []int64 `json:"botIds" dc:"绑定Bot ID列表"`
-}
-
-func (in *ChannelBackupCreateInp) Filter(ctx context.Context) error {
-	if in == nil {
-		return gerror.New("备份频道参数不能为空")
-	}
-	in.Title = strings.TrimSpace(in.Title)
-	if in.Title == "" {
-		return gerror.New("请输入备份频道昵称")
-	}
-	if len([]rune(in.Title)) > 128 {
-		return gerror.New("备份频道昵称不能超过128个字符")
-	}
-	in.BotIds = uniquePositiveInt64(in.BotIds)
-	return nil
-}
-
-type ChannelBackupCreateModel struct {
-	ChannelId    int64  `json:"channelId" dc:"频道配置ID"`
-	ChannelTitle string `json:"channelTitle" dc:"频道名称"`
-	TargetChatId string `json:"targetChatId" dc:"频道ID"`
 }
 
 func uniquePositiveInt64(values []int64) []int64 {

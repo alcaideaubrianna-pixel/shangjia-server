@@ -31,10 +31,10 @@ func TestMaterialImportVerifyMessageMustBeContinuous(t *testing.T) {
 }
 
 func TestMaterialImportHasVerifyMedia(t *testing.T) {
-	if !materialImportHasVerifyMedia(`[{"type":"video","purpose":"verify"}]`) {
+	if !materialImportHasVerifyMedia([]collectMediaItem{{Type: "video", Purpose: "verify"}}) {
 		t.Fatal("expected verify media to be detected")
 	}
-	if materialImportHasVerifyMedia(`[{"type":"video","purpose":"display"}]`) {
+	if materialImportHasVerifyMedia([]collectMediaItem{{Type: "video", Purpose: "display"}}) {
 		t.Fatal("display media must not be treated as verify media")
 	}
 }

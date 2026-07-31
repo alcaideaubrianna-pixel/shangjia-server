@@ -147,7 +147,6 @@ type ISysPublish interface {
 	AdminChannelFullPush(ctx context.Context, in *sysin.ChannelFullPushInp) (res *sysin.ChannelFullPushModel, err error)
 	AdminChannelCycleRun(ctx context.Context, in *sysin.ChannelCycleRunInp) (res *sysin.ChannelFullPushModel, err error)
 	AdminChannelClearQueue(ctx context.Context, in *sysin.ChannelClearQueueInp) (res *sysin.ChannelClearQueueModel, err error)
-	AdminChannelBackupCreate(ctx context.Context, in *sysin.ChannelBackupCreateInp) (res *sysin.ChannelBackupCreateModel, err error)
 	AdminMessageTemplateList(ctx context.Context, in *sysin.MessageTemplateListInp) (list []*sysin.MessageTemplateModel, totalCount int, err error)
 	AdminMessageTemplateSave(ctx context.Context, in *sysin.MessageTemplateSaveInp) (res *sysin.MessageTemplateSaveModel, err error)
 	AdminMessageTemplateDelete(ctx context.Context, in *sysin.MessageTemplateDeleteInp) (err error)

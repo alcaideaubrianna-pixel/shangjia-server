@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,7 +20,7 @@ import (
 	"hotgo/utility/file"
 )
 
-func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, mediaJson string) (int64, error) {
+func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, items []collectMediaItem) (int64, error) {
 	if task == nil || group == nil {
 		return 0, gerror.New("资料导入分组不存在")
 	}
@@ -69,7 +68,7 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 	if err = s.updateMaterialImportProfileSource(ctx, saved.Id, group, task, title); err != nil {
 		return 0, err
 	}
-	media, err := s.saveMaterialImportProfileMedia(ctx, task, group, saved.Id, mediaJson)
+	media, err := s.saveMaterialImportProfileMedia(ctx, task, group, saved.Id, items)
 	if err != nil {
 		return 0, err
 	}
@@ -455,15 +454,11 @@ func (s *sSysPublish) updateMaterialImportProfileSource(ctx context.Context, pro
 	return gerror.Wrap(err, "更新TG导入资料来源失败")
 }
 
-func (s *sSysPublish) saveMaterialImportProfileMedia(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, profileId int64, mediaJson string) ([]*sysin.ProfileMediaSaveItem, error) {
+func (s *sSysPublish) saveMaterialImportProfileMedia(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, profileId int64, items []collectMediaItem) ([]*sysin.ProfileMediaSaveItem, error) {
 	ctx = importRuntimeContext(ctx, firstPositiveInt64(task.UpdatedBy, task.AccountId))
 	owner, err := s.resolveMediaEditTask(ctx, &sysin.MediaUploadInp{ProfileId: profileId}, task.TenantId, task.AccountId)
 	if err != nil {
 		return nil, err
-	}
-	var items []collectMediaItem
-	if err = json.Unmarshal([]byte(mediaJson), &items); err != nil {
-		return nil, gerror.Wrap(err, "解析TG导入媒体失败")
 	}
 	result := make([]*sysin.ProfileMediaSaveItem, 0, len(items))
 	for index, item := range items {
@@ -492,11 +487,11 @@ func (s *sSysPublish) saveMaterialImportProfileMedia(ctx context.Context, task *
 	return result, nil
 }
 
-func (s *sSysPublish) saveMaterialImportProfileMissingMedia(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, profileId int64, mediaJson string) error {
+func (s *sSysPublish) saveMaterialImportProfileMissingMedia(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, profileId int64, items []collectMediaItem) error {
 	if profileId <= 0 {
 		return gerror.New("资料不存在，无法补齐TG媒体")
 	}
-	if _, err := s.saveMaterialImportProfileMedia(ctx, task, group, profileId, mediaJson); err != nil {
+	if _, err := s.saveMaterialImportProfileMedia(ctx, task, group, profileId, items); err != nil {
 		return gerror.Wrap(err, "补齐TG导入资料媒体失败")
 	}
 	return nil

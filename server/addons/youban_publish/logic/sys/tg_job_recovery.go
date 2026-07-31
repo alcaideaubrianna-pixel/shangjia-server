@@ -7,6 +7,8 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 const telegramSendingJobRecoverAfter = 2 * time.Minute
@@ -42,6 +44,12 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
 	}
+	if err := s.recoverMissingProfilePublishOperationStates(ctx, 100); err != nil {
+		g.Log().Warningf(ctx, "补建资料上架状态失败：%+v", err)
+	}
+	if err := s.recoverProfilePublishOperationStates(ctx, 100); err != nil {
+		g.Log().Warningf(ctx, "恢复资料上架状态失败：%+v", err)
+	}
 	if err := s.dispatchTelegramDueJobs(ctx, g.Cfg().MustGet(ctx, "youbanPublish.queue.schedulerBatchSize", 50).Int()); err != nil {
 		g.Log().Warningf(ctx, "调度待恢复TG推送任务失败：%+v", err)
 	}
@@ -52,6 +60,12 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 		case <-ticker.C:
 			if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
 				g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
+			}
+			if err := s.recoverMissingProfilePublishOperationStates(ctx, 100); err != nil {
+				g.Log().Warningf(ctx, "补建资料上架状态失败：%+v", err)
+			}
+			if err := s.recoverProfilePublishOperationStates(ctx, 100); err != nil {
+				g.Log().Warningf(ctx, "恢复资料上架状态失败：%+v", err)
 			}
 			if err := s.dispatchTelegramDueJobs(ctx, g.Cfg().MustGet(ctx, "youbanPublish.queue.schedulerBatchSize", 50).Int()); err != nil {
 				g.Log().Warningf(ctx, "调度待恢复TG推送任务失败：%+v", err)
@@ -108,5 +122,8 @@ func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job te
 		return nil
 	}
 	s.appendTelegramJobLog(ctx, job, "publish", "requeued", "TG推送任务长时间处于发送中，已自动重新投递")
+	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPending); err != nil {
+		return err
+	}
 	return s.enqueueTelegramJob(ctx, job.Id, 0)
 }

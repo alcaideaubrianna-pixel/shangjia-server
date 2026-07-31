@@ -16,6 +16,8 @@ import (
 	iservice "hotgo/internal/service"
 )
 
+const collectProfileSourceType = "youban_collect"
+
 type collectPreparedMedia struct {
 	Purpose           string
 	SortIndex         int
@@ -36,6 +38,14 @@ type collectPreparedMaterial struct {
 	Media   []collectPreparedMedia
 }
 
+func (s *sSysPublish) commitCollectMaterial(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (int64, error) {
+	prepared, err := s.prepareCollectMaterial(ctx, event, content)
+	if err != nil {
+		return 0, err
+	}
+	return s.commitCollectPreparedProfile(ctx, event, prepared, rule, text)
+}
+
 func (s *sSysPublish) prepareCollectMaterial(ctx context.Context, event gdb.Record, content *collectContentResult) (*collectPreparedMaterial, error) {
 	canonical, err := s.canonicalCollectProfileMedia(ctx, event, content)
 	if err != nil {
@@ -48,7 +58,7 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 	if err := validateCollectMaterialMedia(snapshot); err != nil {
 		return nil, err
 	}
-	items := collectMediaRowsToItemsFromJSON(snapshot.MediaJSON)
+	items := snapshot.Media
 	prepared := &collectPreparedMaterial{Content: snapshot, Media: make([]collectPreparedMedia, 0, len(items))}
 	displayItems, verifyItems := classifyCollectPublishMedia(event, items)
 	for _, group := range []struct {
@@ -108,7 +118,7 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 				PerceptualHash:    assetPerceptualHash(assets),
 				Size:              mediaSize,
 				MD5:               mediaMD5,
-				MetaJSON:          strings.TrimSpace(item.MetaJson),
+				MetaJSON:          strings.TrimSpace(item.DebugMetaJson),
 			})
 		}
 	}
@@ -134,12 +144,12 @@ func collectPreparedContentSnapshot(prepared *collectPreparedMaterial) *collectC
 			Type: mediaType, Purpose: media.Purpose, FileId: media.FileId,
 			FileUrl: media.FileURL, StoragePath: media.StoragePath,
 			PosterUrl: media.PosterURL, FileMd5: media.MD5,
-			FilePhash: media.PerceptualHash, MetaJson: media.MetaJSON,
+			FilePhash: media.PerceptualHash, DebugMetaJson: media.MetaJSON,
 		})
 	}
-	content.MediaJSON = collectMediaItemsJSON(items)
+	content.Media = items
 	content.MediaCount = len(items)
-	content.DedupeKey = collectHash(content.NormalizedText + ":" + collectMediaSignature(content.MediaJSON))
+	content.DedupeKey = collectHash(content.NormalizedText + ":" + collectMediaSignature(content.Media))
 	return &content
 }
 
@@ -147,11 +157,10 @@ func validateCollectMaterialMedia(content *collectContentResult) error {
 	if content == nil || content.MediaCount <= 0 {
 		return nil
 	}
-	items := collectMediaRowsToItemsFromJSON(content.MediaJSON)
-	if len(items) != content.MediaCount {
+	if len(content.Media) != content.MediaCount {
 		return gerror.New("采集资料媒体快照数量不完整，等待媒体准备完成")
 	}
-	for _, item := range items {
+	for _, item := range content.Media {
 		if collectPublishMediaType(item.Type) == "" {
 			return gerror.New("采集资料包含无效媒体，等待重新处理")
 		}
@@ -206,7 +215,6 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 		return 0, err
 	}
 	sourceKey := collectPublishClientRequestId(event, rule)
-	channelJSON := rule["target_channel_id_json"].String()
 	now := gtime.Now()
 	imageCount, videoCount, hasVerificationVideo := collectPreparedMediaCounts(content.Media)
 	var profileId int64
@@ -260,7 +268,7 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 				return gerror.Wrap(txErr, "更新采集资料失败")
 			}
 		}
-		if txErr = s.upsertProfileStateTx(ctx, tx, profileId, tenantId, accountId, channelJSON, "", 0, nil); txErr != nil {
+		if txErr = s.upsertProfileStateTx(ctx, tx, profileId, tenantId, accountId, "", "", 0, nil); txErr != nil {
 			return txErr
 		}
 		if _, txErr = tx.Model(publishMediaTable).Safe().Ctx(ctx).Where("profile_id", profileId).WhereNull("deleted_at").Data(g.Map{"deleted_at": now, "deleted_by": accountId, "updated_at": now}).Update(); txErr != nil {

@@ -43,7 +43,7 @@ func precheckCollectRuleText(rawText string, mediaCount int, rule gdb.Record) co
 	if rule["block_username"].Int() == 1 && collectUsernamePattern.MatchString(rawText) {
 		return skippedCollectRulePrecheck("用户名")
 	}
-	if blockedText := matchCollectTerms(rawText, collectStringList(rule["block_text_json"].String())); blockedText != "" {
+	if blockedText := matchCollectTerms(rawText, collectRuleStrings(rule, "blocked_texts")); blockedText != "" {
 		return skippedCollectRulePrecheck("屏蔽文本:" + blockedText)
 	}
 	if rawText == "" && mediaCount > 0 {
@@ -55,12 +55,12 @@ func precheckCollectRuleText(rawText string, mediaCount int, rule gdb.Record) co
 	matchedKeywords := []string(nil)
 	matchedTags := []string(nil)
 	if rule["full_match_enabled"].Int() != 1 {
-		keywords := collectStringList(rule["keyword_json"].String())
+		keywords := collectRuleStrings(rule, "keywords")
 		matchedKeywords = matchedCollectTerms(rawText, keywords)
 		if len(keywords) > 0 && len(matchedKeywords) == 0 {
 			return skippedCollectRulePrecheck("未命中关键词")
 		}
-		tags := collectStringList(rule["tag_json"].String())
+		tags := collectRuleStrings(rule, "tags")
 		matchedTags = matchedCollectTags(rawText, tags)
 		if len(tags) > 0 && len(matchedTags) == 0 {
 			return skippedCollectRulePrecheck("未命中标签")

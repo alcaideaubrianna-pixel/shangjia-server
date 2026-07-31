@@ -21,7 +21,6 @@ import (
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 	pdao "hotgo/addons/youban_publish/internal/dao"
-	"hotgo/addons/youban_publish/internal/model/entity"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
@@ -34,6 +33,14 @@ type collectMediaRetryError struct {
 	message     string
 	delay       time.Duration
 	rateLimited bool
+}
+
+type collectEventMediaCacheSummary struct {
+	Total       int
+	Ready       int
+	Pending     int
+	Downloading int
+	Failed      int
 }
 
 type collectMediaDiscardedError struct {
@@ -368,27 +375,10 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 	g.Log().Infof(ctx, "采集媒体阶段读取媒体完成 eventId:%d sourceType:%s mediaCount:%d duration:%s", event["id"].Int64(), event["source_type"].String(), len(rows), time.Since(stageStartedAt).Round(time.Millisecond))
 	s.appendCollectEventLogForRecord(ctx, event, "media", "checking", "开始检查媒体缓存方式", fmt.Sprintf("media=%d", len(items)))
 	changed := false
-	if event["source_type"].String() == sysin.CollectSourceTypeAccount {
-		s.appendCollectEventLogForRecord(ctx, event, "media", "downloading", "账号采集媒体使用下载缓存，保证带文案媒体组可原格式发送", "")
-	} else {
-		forwarded, forwardChanged, err := s.forwardCollectMediaToBackup(ctx, event, items)
-		if err != nil {
-			if retryErr, ok := err.(*collectMediaRetryError); ok {
-				s.appendCollectEventLogForRecord(ctx, event, "media", "downloading", "备份频道转存暂不可用，改用下载兜底", retryErr.Error())
-			} else {
-				return false, err
-			}
-		}
-		if forwardChanged {
-			s.appendCollectEventLogForRecord(ctx, event, "media", "forwarded", "媒体已转存到备份频道", "")
-			return s.updateCollectEventMediaItems(ctx, rows, forwarded)
-		}
-	}
-	downloadRows := make([]*entity.YoubanPublishCollectEventMedia, 0, len(rows))
-	downloadedItems := make([]collectMediaItem, 0, len(rows))
+	s.appendCollectEventLogForRecord(ctx, event, "media", "downloading", "采集媒体使用统一下载与云存储缓存", "")
 	type downloadResult struct {
 		index int
-		row   *entity.YoubanPublishCollectEventMedia
+		row   *collectEventMediaRow
 		item  collectMediaItem
 		err   error
 	}
@@ -421,7 +411,7 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			continue
 		}
 		downloadWait.Add(1)
-		go func(index int, row *entity.YoubanPublishCollectEventMedia) {
+		go func(index int, row *collectEventMediaRow) {
 			defer downloadWait.Done()
 			startedAt := time.Now()
 			result := downloadResult{index: index, row: row}
@@ -519,17 +509,48 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 				"updated_at":           gtime.Now(),
 			}).Update()
 			g.Log().Infof(ctx, "账号采集媒体下载完成 eventId:%d mediaId:%d sourceMessageId:%d duration:%s size:%d", event["id"].Int64(), row.Id, row.SourceMessageId, time.Since(startedAt).Round(time.Millisecond), cachedSize)
-			result.item = collectMediaItem{
-				Type:        items[index].Type,
-				FileUrl:     cached.FileUrl,
-				StoragePath: cached.Path,
-				PosterUrl:   items[index].PosterUrl,
-				MetaJson:    strings.TrimSpace(cached.MetaJson),
+			result.item = cached.Item
+			if strings.TrimSpace(result.item.FileId) == "" {
+				result.item = items[index]
 			}
-			if result.item.MetaJson == "" {
-				result.item.MetaJson = items[index].MetaJson
+			result.item.FileUrl = cached.FileUrl
+			result.item.StoragePath = cached.Path
+			if strings.TrimSpace(result.item.PosterUrl) == "" {
+				result.item.PosterUrl = items[index].PosterUrl
 			}
-			g.Log().Debugf(ctx, "采集媒体下载结果准备写回 eventId:%d mediaId:%d duration:%s size:%d", event["id"].Int64(), row.Id, time.Since(startedAt).Round(time.Millisecond), cachedSize)
+			result.item.DebugMetaJson = strings.TrimSpace(cached.MetaJson)
+			if result.item.DebugMetaJson == "" {
+				result.item.DebugMetaJson = items[index].DebugMetaJson
+			}
+			_, updateErr := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
+				"source_file_id":        result.item.FileId,
+				"source_ref_type":       collectMediaRefType(result.item),
+				"source_kind":           result.item.SourceKind,
+				"source_media_id":       result.item.SourceMediaId,
+				"source_access_hash":    result.item.SourceAccessHash,
+				"source_file_reference": result.item.SourceFileReference,
+				"source_thumb_size":     result.item.SourceThumbSize,
+				"source_mime_type":      result.item.SourceMimeType,
+				"source_dc_id":          result.item.SourceDCId,
+				"source_size":           result.item.SourceSize,
+				"file_url":              result.item.FileUrl,
+				"storage_path":          result.item.StoragePath,
+				"backup_chat_id":        "",
+				"backup_message_id":     0,
+				"cache_status":          collectMediaCacheReady,
+				"download_duration_ms":  downloadDuration,
+				"download_bytes":        cachedSize,
+				"download_error_type":   "",
+				"error_message":         "",
+				collectMediaNextRetryAt: nil,
+				"updated_at":            gtime.Now(),
+			}).Update()
+			if updateErr != nil {
+				result.err = gerror.Wrap(updateErr, "更新采集媒体下载结果失败")
+				results[index] = result
+				return
+			}
+			g.Log().Debugf(ctx, "采集媒体下载结果已写回 eventId:%d mediaId:%d duration:%s size:%d", event["id"].Int64(), row.Id, time.Since(startedAt).Round(time.Millisecond), cachedSize)
 			results[index] = result
 		}(index, row)
 	}
@@ -550,41 +571,12 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 		if result.err != nil {
 			return changed, result.err
 		}
-		downloadRows = append(downloadRows, result.row)
-		downloadedItems = append(downloadedItems, result.item)
-	}
-	if len(downloadRows) == 0 {
-		return changed, nil
-	}
-	backupItems, uploadedToBackup, backupErr := s.cacheDownloadedCollectMediaGroupToBackup(ctx, event, downloadedItems)
-	if backupErr != nil {
-		s.appendCollectEventLogForRecord(ctx, event, "media", "retry", "下载媒体组推送备份频道失败，改用目标频道直接上传", backupErr.Error())
-	}
-	if uploadedToBackup {
-		downloadedItems = backupItems
-	}
-	for index, row := range downloadRows {
-		cachedItem := downloadedItems[index]
-		_, err = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("id", row.Id).Data(g.Map{
-			"source_file_id":    cachedItem.FileId,
-			"source_ref_type":   collectMediaRefType(cachedItem),
-			"file_url":          cachedItem.FileUrl,
-			"storage_path":      cachedItem.StoragePath,
-			"backup_chat_id":    collectMediaBackupChatId(cachedItem),
-			"backup_message_id": collectMediaBackupMessageId(cachedItem),
-			"cache_status":      collectMediaCacheReady,
-			"error_message":     "",
-			"updated_at":        gtime.Now(),
-		}).Update()
-		if err != nil {
-			return changed, gerror.Wrap(err, "更新采集媒体下载结果失败")
-		}
 		changed = true
 	}
 	return changed, nil
 }
 
-func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *entity.YoubanPublishCollectEventMedia) (bool, error) {
+func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEventMediaRow) (bool, error) {
 	if row == nil || strings.TrimSpace(row.SourceChatId) == "" || row.SourceMessageId <= 0 || strings.TrimSpace(row.SourceMediaKey) == "" {
 		return false, nil
 	}
@@ -633,101 +625,7 @@ func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *entity.Yo
 	return false, nil
 }
 
-func (s *sSysPublish) cacheDownloadedCollectMediaGroupToBackup(ctx context.Context, event gdb.Record, items []collectMediaItem) ([]collectMediaItem, bool, error) {
-	if len(items) == 0 {
-		return items, false, nil
-	}
-	channels, err := s.collectEventBackupChannels(ctx, event)
-	if err != nil {
-		return items, false, err
-	}
-	if len(channels) == 0 {
-		return items, false, nil
-	}
-	for _, backup := range rotateCollectBackupChannels(channels, event["id"].Int64()) {
-		if backup == nil || strings.TrimSpace(backup.ChannelId) == "" {
-			continue
-		}
-		botIds, err := s.collectBackupCopyValidationBotIds(ctx, event, backup.ChannelId)
-		if err != nil {
-			return items, false, err
-		}
-		if len(botIds) == 0 {
-			continue
-		}
-		botToken, err := s.telegramJobBotToken(ctx, botIds[0], event["tenant_id"].Int64())
-		if err != nil {
-			return items, false, err
-		}
-		bot, err := s.telegramBot(ctx, botToken)
-		if err != nil {
-			return items, false, err
-		}
-		chatId := normalizeTelegramChannelChatID(backup.ChannelId)
-		media := make([]*telegramMediaItem, 0, len(items))
-		for index, item := range items {
-			media = append(media, &telegramMediaItem{
-				Id:          int64(index + 1),
-				MediaType:   collectPublishMediaType(item.Type),
-				FileUrl:     item.FileUrl,
-				StoragePath: item.StoragePath,
-				PosterUrl:   item.PosterUrl,
-			})
-		}
-		messages, err := s.sendTelegramMediaSet(ctx, bot, chatId, "collect_backup", "", media)
-		if err != nil {
-			s.appendCollectEventLogForRecord(ctx, event, "media", "retry", "下载媒体组推送备份频道失败，尝试下一个备份频道", backup.ChannelId+": "+err.Error())
-			continue
-		}
-		if len(messages) != len(items) {
-			s.cleanupTelegramSentMessages(ctx, bot, chatId, messages, "下载媒体组推送备份频道返回数量不完整")
-			s.appendCollectEventLogForRecord(ctx, event, "media", "retry", "下载媒体组推送备份频道返回数量不完整，尝试下一个备份频道", backup.ChannelId)
-			continue
-		}
-		messageIds := make([]int, 0, len(messages))
-		for _, message := range messages {
-			if message == nil || message.MessageId <= 0 {
-				continue
-			}
-			messageIds = append(messageIds, int(message.MessageId))
-		}
-		if len(messageIds) != len(items) {
-			s.cleanupTelegramSentMessages(ctx, bot, chatId, messages, "下载媒体组推送备份频道缺少消息ID")
-			s.appendCollectEventLogForRecord(ctx, event, "media", "retry", "下载媒体组推送备份频道缺少消息ID，尝试下一个备份频道", backup.ChannelId)
-			continue
-		}
-		if err = s.validateCollectBackupCopyRefs(ctx, event, backup.ChannelId, messageIds); err != nil {
-			s.appendCollectEventLogForRecord(ctx, event, "media", "retry", "下载媒体组备份消息不可复制，尝试下一个备份频道", backup.ChannelId+": "+err.Error())
-			continue
-		}
-		cached := make([]collectMediaItem, len(items))
-		for index, item := range items {
-			cached[index] = item
-			cached[index].FileId = telegramCopyMediaFileId(backup.ChannelId, messageIds[index])
-		}
-		s.appendCollectEventLogForRecord(ctx, event, "media", "forwarded", "下载媒体组已推送到备份频道", fmt.Sprintf("channel=%s messages=%v", backup.ChannelId, messageIds))
-		return cached, true, nil
-	}
-	return items, false, gerror.New("下载媒体组推送所有备份频道失败")
-}
-
-func collectMediaBackupChatId(item collectMediaItem) string {
-	ref, ok := telegramCopyMediaRefFromFileId(item.FileId)
-	if !ok {
-		return ""
-	}
-	return ref.ChatId
-}
-
-func collectMediaBackupMessageId(item collectMediaItem) int {
-	ref, ok := telegramCopyMediaRefFromFileId(item.FileId)
-	if !ok {
-		return 0
-	}
-	return ref.MessageId
-}
-
-func (s *sSysPublish) updateCollectEventMediaItems(ctx context.Context, rows []*entity.YoubanPublishCollectEventMedia, items []collectMediaItem) (bool, error) {
+func (s *sSysPublish) updateCollectEventMediaItems(ctx context.Context, rows []*collectEventMediaRow, items []collectMediaItem) (bool, error) {
 	changed := false
 	cols := pdao.YoubanPublishCollectEventMedia.Columns()
 	for index, row := range rows {
@@ -741,13 +639,23 @@ func (s *sSysPublish) updateCollectEventMediaItems(ctx context.Context, rows []*
 			cols.FileUrl:            item.FileUrl,
 			cols.StoragePath:        item.StoragePath,
 			cols.PosterUrl:          item.PosterUrl,
+			"source_kind":           item.SourceKind,
+			"source_media_id":       item.SourceMediaId,
+			"source_access_hash":    item.SourceAccessHash,
+			"source_file_reference": item.SourceFileReference,
+			"source_thumb_size":     item.SourceThumbSize,
+			"source_mime_type":      item.SourceMimeType,
+			"source_dc_id":          item.SourceDCId,
+			"source_size":           item.SourceSize,
+			"file_md5":              item.FileMd5,
+			"file_phash":            item.FilePhash,
 			cols.CacheStatus:        collectMediaCacheReady,
 			cols.ErrorMessage:       "",
 			collectMediaNextRetryAt: nil,
 			cols.UpdatedAt:          gtime.Now(),
 		}
-		if strings.TrimSpace(item.MetaJson) != "" {
-			data[cols.MetaJson] = item.MetaJson
+		if strings.TrimSpace(item.DebugMetaJson) != "" {
+			data[cols.MetaJson] = item.DebugMetaJson
 		}
 		if ref, ok := telegramCopyMediaRefFromFileId(item.FileId); ok {
 			data[cols.BackupChatId] = ref.ChatId
@@ -788,38 +696,27 @@ func collectMediaRowNeedsCache(sourceFileId string, sourceMessageRef string, sto
 		!(strings.TrimSpace(backupChatId) != "" && backupMessageId > 0)
 }
 
-func collectEventMediaCacheView(mediaJSON string, mediaCount int, status string, errorMessage string) (string, string) {
-	if mediaCount <= 0 || strings.TrimSpace(mediaJSON) == "" || strings.TrimSpace(mediaJSON) == "[]" {
+func collectEventMediaCacheView(summary collectEventMediaCacheSummary, status string, errorMessage string) (string, string) {
+	if summary.Total <= 0 {
 		return "none", "无媒体"
 	}
 	if collectMediaErrorIsRateLimited(errorMessage) {
 		return "rate_limited", errorMessage
 	}
-	var items []collectMediaItem
-	if err := json.Unmarshal([]byte(mediaJSON), &items); err != nil {
-		return "failed", "媒体数据异常"
+	if summary.Failed > 0 && strings.TrimSpace(errorMessage) != "" {
+		return "failed", errorMessage
 	}
-	pending := 0
-	cached := 0
-	for _, item := range items {
-		if strings.HasPrefix(strings.TrimSpace(item.FileId), "gotd:") &&
-			strings.TrimSpace(item.StoragePath) == "" &&
-			strings.TrimSpace(item.FileUrl) == "" {
-			pending++
-			continue
-		}
-		if strings.TrimSpace(item.StoragePath) != "" || strings.TrimSpace(item.FileUrl) != "" || strings.TrimSpace(item.FileId) != "" {
-			cached++
-		}
+	if summary.Downloading > 0 {
+		return "caching", fmt.Sprintf("%d 个媒体下载中", summary.Downloading)
 	}
-	if pending > 0 {
+	if summary.Pending > 0 {
 		if strings.TrimSpace(status) == sysin.CollectEventStatusFailed && strings.TrimSpace(errorMessage) != "" {
 			return "failed", errorMessage
 		}
-		return "caching", fmt.Sprintf("%d 个媒体等待缓存", pending)
+		return "caching", fmt.Sprintf("%d 个媒体待缓存", summary.Pending)
 	}
-	if cached > 0 {
-		return "cached", fmt.Sprintf("%d 个媒体已缓存", cached)
+	if summary.Ready > 0 {
+		return "cached", fmt.Sprintf("%d 个媒体已缓存", summary.Ready)
 	}
 	return "none", "无可缓存媒体"
 }
@@ -843,11 +740,7 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 	if tgAccountId <= 0 {
 		return nil, gerror.New("账号采集媒体缺少TG账号")
 	}
-	var meta gotdCollectMediaMeta
-	if err := json.Unmarshal([]byte(item.MetaJson), &meta); err != nil || meta.Id <= 0 {
-		return nil, gerror.New("账号采集媒体缺少下载元数据")
-	}
-	const downloadTimeout = 10 * time.Minute
+	downloadTimeout := collectMediaFileDownloadTimeout(ctx, item.SourceSize)
 	downloadCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
 	clientStartedAt := time.Now()
@@ -861,8 +754,25 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 		return nil, newCollectMediaRetryError("账号采集客户端暂不可用，等待重试: "+err.Error(), 30*time.Second)
 	}
 	g.Log().Debugf(ctx, "TG媒体下载获取账号客户端完成 tgAccountId:%d fileId:%s duration:%s", tgAccountId, item.FileId, time.Since(clientStartedAt).Round(time.Millisecond))
-	transferStartedAt := time.Now()
 	downloadItem := item
+	meta, ok := gotdCollectMediaMetaFromItem(downloadItem)
+	if !ok {
+		refreshStartedAt := time.Now()
+		refreshedItem, refreshErr := s.refreshGotdCollectMediaItem(downloadCtx, tenantId, tgAccountId, client, downloadItem)
+		if refreshErr != nil {
+			if retryErr := collectMediaRetryErrorFrom(refreshErr); retryErr != nil {
+				return nil, retryErr
+			}
+			return nil, gerror.Wrap(refreshErr, "账号采集媒体下载元数据恢复失败")
+		}
+		downloadItem = refreshedItem
+		meta, ok = gotdCollectMediaMetaFromItem(downloadItem)
+		if !ok {
+			return nil, gerror.New("账号采集媒体原消息缺少有效下载元数据")
+		}
+		g.Log().Infof(ctx, "TG媒体下载元数据已从原消息恢复 tgAccountId:%d fileId:%s duration:%s", tgAccountId, item.FileId, time.Since(refreshStartedAt).Round(time.Millisecond))
+	}
+	transferStartedAt := time.Now()
 	result, err := s.downloadTelegramMediaWithClient(downloadCtx, tenantId, tgAccountId, downloadItem, meta, client)
 	if collectMediaFileReferenceExpired(err) {
 		refreshStartedAt := time.Now()
@@ -896,8 +806,34 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 	if result == nil || strings.TrimSpace(result.Path) == "" {
 		return nil, gerror.New("账号采集媒体下载完成但未返回缓存文件")
 	}
+	result.Item = downloadItem
 	g.Log().Infof(ctx, "TG媒体下载链路完成 tgAccountId:%d fileId:%s size:%d dc:%d transfer:%s total:%s path:%s", tgAccountId, item.FileId, meta.Size, meta.DCID, time.Since(transferStartedAt).Round(time.Millisecond), time.Since(startedAt).Round(time.Millisecond), result.Path)
 	return result, nil
+}
+
+func collectMediaFileDownloadTimeout(ctx context.Context, size int64) time.Duration {
+	configured := g.Cfg().MustGet(ctx, "youbanPublish.collect.mediaFileTimeoutSeconds", 0).Int()
+	if configured > 0 {
+		if configured < 30 {
+			configured = 30
+		}
+		if configured > 600 {
+			configured = 600
+		}
+		return time.Duration(configured) * time.Second
+	}
+	return defaultCollectMediaFileDownloadTimeout(size)
+}
+
+func defaultCollectMediaFileDownloadTimeout(size int64) time.Duration {
+	switch {
+	case size > 50<<20:
+		return 3 * time.Minute
+	case size > 10<<20:
+		return 2 * time.Minute
+	default:
+		return time.Minute
+	}
 }
 
 func (s *sSysPublish) refreshGotdCollectMediaItem(ctx context.Context, tenantId int64, tgAccountId int64, client *telegram.Client, item collectMediaItem) (collectMediaItem, error) {
@@ -973,7 +909,7 @@ func (s *sSysPublish) downloadTelegramMediaWithClient(ctx context.Context, _ int
 			if err := touchMediaFileCacheMeta(metaPath, key, item.FileId, filePath); err != nil {
 				g.Log().Warningf(ctx, "更新TG媒体缓存访问时间失败 path:%s err:%+v", filePath, err)
 			}
-			return collectMediaCacheResult{path: filePath, metaJSON: item.MetaJson}, nil
+			return collectMediaCacheResult{path: filePath, metaJSON: item.DebugMetaJson}, nil
 		}
 		cachedMeta, err := s.downloadGotdCollectMediaToFile(ctx, tgAccountId, item, meta, client, filePath)
 		if err != nil {
@@ -1229,6 +1165,7 @@ type collectDownloadedMedia struct {
 	FileUrl      string
 	Path         string
 	MetaJson     string
+	Item         collectMediaItem
 }
 
 type collectMediaCacheResult struct {

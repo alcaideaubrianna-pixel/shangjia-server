@@ -87,12 +87,9 @@ func (s *sSysPublish) sendInlineTemplateByAccount(ctx context.Context, tgAccount
 		sent = gotdSentMessagesFromUpdates(updates, nil)
 		return nil
 	}
-	usedRuntime, err := s.executeAccountCollectOperation(ctx, tgAccountId, 2*time.Minute, run)
+	err = s.executeTelegramAccountOperation(ctx, tgAccountId, 2*time.Minute, run)
 	if err != nil {
 		return nil, gerror.Wrap(err, fmt.Sprintf("Inline推送失败 serial:%s", serialNo))
-	}
-	if !usedRuntime {
-		return nil, gerror.New("推送账号会话运行中不可用")
 	}
 	return sent, nil
 }

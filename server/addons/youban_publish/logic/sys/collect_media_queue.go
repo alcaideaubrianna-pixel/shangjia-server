@@ -19,19 +19,24 @@ type collectMediaQueuePayload struct {
 	TgAccountId int64 `json:"tgAccountId"`
 }
 
-const collectMediaTaskUniqueTTL = 30 * time.Minute
+const collectMediaTaskUniqueTTL = 24 * time.Hour
 
 func (s *sSysPublish) enqueueCollectMediaCache(ctx context.Context, payload collectMediaQueuePayload, delay time.Duration) error {
+	_, err := s.enqueueCollectMediaCacheTask(ctx, payload, delay)
+	return err
+}
+
+func (s *sSysPublish) enqueueCollectMediaCacheTask(ctx context.Context, payload collectMediaQueuePayload, delay time.Duration) (bool, error) {
 	if payload.EventId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 {
-		return nil
+		return false, nil
 	}
 	client, err := s.telegramQueueClient(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return false, err
 	}
 	task := asynq.NewTask(tgTaskTypeCollectMedia, body)
 	options := []asynq.Option{
@@ -45,9 +50,9 @@ func (s *sSysPublish) enqueueCollectMediaCache(ctx context.Context, payload coll
 	}
 	_, err = client.EnqueueContext(ctx, task, options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
-		return nil
+		return false, nil
 	}
-	return err
+	return err == nil, err
 }
 
 func decodeCollectMediaQueuePayload(task *asynq.Task) (collectMediaQueuePayload, error) {
@@ -62,12 +67,12 @@ func decodeCollectMediaQueuePayload(task *asynq.Task) (collectMediaQueuePayload,
 }
 
 func collectMediaQueueConcurrency(ctx context.Context) int {
-	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 2).Int()
+	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 4).Int()
 	if concurrency < 1 {
 		return 1
 	}
-	if concurrency > 4 {
-		return 4
+	if concurrency > 8 {
+		return 8
 	}
 	return concurrency
 }

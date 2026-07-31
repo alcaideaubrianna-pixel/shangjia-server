@@ -27,6 +27,14 @@ func (s *sSysPublish) markTelegramJobSuperseded(ctx context.Context, jobId int64
 	return nil
 }
 
+func (s *sSysPublish) supersedeTelegramJobAndCompleteOperation(ctx context.Context, job telegramJobRecord) error {
+	if err := s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
+		return err
+	}
+	_, err := s.completeProfileTelegramOperation(ctx, job, isCycleBatchOperation(job.OperationNo))
+	return err
+}
+
 type telegramResubmitJob struct {
 	Id           int64  `json:"id"`
 	TaskId       int64  `json:"taskId"`

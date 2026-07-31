@@ -122,7 +122,6 @@ type CollectEventModel struct {
 	SourceUniqueKey    string      `json:"sourceUniqueKey" dc:"来源唯一键"`
 	RawText            string      `json:"rawText" dc:"原始文本"`
 	MediaCount         int         `json:"mediaCount" dc:"媒体数"`
-	MediaJson          string      `json:"mediaJson" dc:"媒体JSON"`
 	MediaCacheStatus   string      `json:"mediaCacheStatus" dc:"媒体缓存状态"`
 	MediaCacheMessage  string      `json:"mediaCacheMessage" dc:"媒体缓存说明"`
 	TextHash           string      `json:"textHash" dc:"文本哈希"`
@@ -173,7 +172,6 @@ type CollectContentModel struct {
 	RawText        string                      `json:"rawText" dc:"原始文本"`
 	NormalizedText string                      `json:"normalizedText" dc:"归一化文本"`
 	MediaCount     int                         `json:"mediaCount" dc:"媒体数"`
-	MediaJson      string                      `json:"mediaJson" dc:"媒体JSON"`
 	TextHash       string                      `json:"textHash" dc:"文本哈希"`
 	DedupeKey      string                      `json:"dedupeKey" dc:"去重键"`
 	DuplicateTotal int                         `json:"duplicateTotal" dc:"重复次数"`
@@ -212,31 +210,29 @@ type CollectReviewListInp struct {
 }
 
 type CollectReviewModel struct {
-	Id                  int64                      `json:"id" dc:"ID"`
-	TenantId            int64                      `json:"tenantId" dc:"租户ID"`
-	AccountId           int64                      `json:"accountId" dc:"账号ID"`
-	SourceId            int64                      `json:"sourceId" dc:"采集源ID"`
-	SourceTitle         string                     `json:"sourceTitle" dc:"采集源名称"`
-	SourceType          string                     `json:"sourceType" dc:"采集源类型"`
-	SourceDisplayName   string                     `json:"sourceDisplayName" dc:"采集来源显示名称"`
-	SourceUsername      string                     `json:"sourceUsername" dc:"采集来源用户名"`
-	RuleId              int64                      `json:"ruleId" dc:"规则ID"`
-	RuleName            string                     `json:"ruleName" dc:"规则名称"`
-	EventId             int64                      `json:"eventId" dc:"事件ID"`
-	DispatchId          int64                      `json:"dispatchId" dc:"分发ID"`
-	RawText             string                     `json:"rawText" dc:"原始文本"`
-	MediaCount          int                        `json:"mediaCount" dc:"媒体数"`
-	MediaJson           string                     `json:"mediaJson" dc:"审核媒体快照"`
-	Media               []*CollectReviewMediaModel `json:"media" dc:"审核媒体"`
-	TargetChannelIdJson string                     `json:"targetChannelIdJson" dc:"目标频道JSON"`
-	TargetChannelNames  []string                   `json:"targetChannelNames" dc:"目标频道名称"`
-	BotIdJson           string                     `json:"botIdJson" dc:"BOT JSON"`
-	Status              string                     `json:"status" dc:"审核状态"`
-	ReviewReason        string                     `json:"reviewReason" dc:"审核原因"`
-	ReviewedBy          int64                      `json:"reviewedBy" dc:"审核人"`
-	ReviewedAt          *gtime.Time                `json:"reviewedAt" dc:"审核时间"`
-	CreatedAt           *gtime.Time                `json:"createdAt" dc:"创建时间"`
-	UpdatedAt           *gtime.Time                `json:"updatedAt" dc:"更新时间"`
+	Id                 int64                      `json:"id" dc:"ID"`
+	TenantId           int64                      `json:"tenantId" dc:"租户ID"`
+	AccountId          int64                      `json:"accountId" dc:"账号ID"`
+	SourceId           int64                      `json:"sourceId" dc:"采集源ID"`
+	SourceTitle        string                     `json:"sourceTitle" dc:"采集源名称"`
+	SourceType         string                     `json:"sourceType" dc:"采集源类型"`
+	SourceDisplayName  string                     `json:"sourceDisplayName" dc:"采集来源显示名称"`
+	SourceUsername     string                     `json:"sourceUsername" dc:"采集来源用户名"`
+	RuleId             int64                      `json:"ruleId" dc:"规则ID"`
+	RuleName           string                     `json:"ruleName" dc:"规则名称"`
+	EventId            int64                      `json:"eventId" dc:"事件ID"`
+	DispatchId         int64                      `json:"dispatchId" dc:"分发ID"`
+	RawText            string                     `json:"rawText" dc:"原始文本"`
+	MediaCount         int                        `json:"mediaCount" dc:"媒体数"`
+	Media              []*CollectReviewMediaModel `json:"media" dc:"审核媒体"`
+	TargetChannelIds   []int64                    `json:"targetChannelIds" dc:"目标频道ID"`
+	TargetChannelNames []string                   `json:"targetChannelNames" dc:"目标频道名称"`
+	Status             string                     `json:"status" dc:"审核状态"`
+	ReviewReason       string                     `json:"reviewReason" dc:"审核原因"`
+	ReviewedBy         int64                      `json:"reviewedBy" dc:"审核人"`
+	ReviewedAt         *gtime.Time                `json:"reviewedAt" dc:"审核时间"`
+	CreatedAt          *gtime.Time                `json:"createdAt" dc:"创建时间"`
+	UpdatedAt          *gtime.Time                `json:"updatedAt" dc:"更新时间"`
 }
 
 type CollectReviewMediaModel struct {
@@ -246,7 +242,6 @@ type CollectReviewMediaModel struct {
 	FileUrl     string `json:"fileUrl" dc:"文件地址"`
 	StoragePath string `json:"storagePath" dc:"存储路径"`
 	PosterUrl   string `json:"posterUrl" dc:"预览图地址"`
-	MetaJson    string `json:"metaJson" dc:"媒体元数据"`
 }
 
 type CollectReviewPageModel struct {

@@ -86,7 +86,7 @@ func (s *sSysPublish) noteIndexSources(ctx context.Context, profileId int64) ([]
 		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
 		Where("p.id", profileId).
 		WhereNull("p.deleted_at").
-		Fields("ps.tenant_id,ps.account_id,p.id AS profile_id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text," + tag + " AS tag,p.province,p.city,p.status,p.visibility,p.review_status,p.published_at,p.updated_at AS source_updated_at,p.created_at,p.updated_at,p.deleted_at").
+		Fields("ps.tenant_id,ps.account_id,p.id AS profile_id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.plain_text," + tag + " AS tag,p.province,p.city,p.status,p.visibility,p.review_status,COALESCE(ps.publish_task_status,'') AS task_status,p.published_at,p.updated_at AS source_updated_at,p.created_at,p.updated_at,p.deleted_at").
 		Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取资料索引源数据失败")
