@@ -45,6 +45,8 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 	mux.HandleFunc(tgTaskTypeMaterialImport, s.handleMaterialImportTask)
 	mux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
 	mux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
+	mux.HandleFunc(tgTaskTypeCycleReschedule, s.handleCycleRescheduleTask)
+	mux.HandleFunc(tgTaskTypeCycleRefresh, s.handleCycleRefreshTask)
 	mux.HandleFunc(tgTaskTypeCollectHistory, s.handleCollectHistoryTask)
 	mux.HandleFunc(tgTaskTypeCollectTrigger, s.handleCollectTriggerTask)
 	mux.HandleFunc(tgTaskTypeChannelMemberSync, s.handleChannelMemberSyncTask)
@@ -64,6 +66,8 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 	backgroundMux.HandleFunc(tgTaskTypeMaterialImport, s.handleMaterialImportTask)
 	backgroundMux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
 	backgroundMux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
+	backgroundMux.HandleFunc(tgTaskTypeCycleReschedule, s.handleCycleRescheduleTask)
+	backgroundMux.HandleFunc(tgTaskTypeCycleRefresh, s.handleCycleRefreshTask)
 	backgroundMux.HandleFunc(tgTaskTypeCollectHistory, s.handleCollectHistoryTask)
 	backgroundMux.HandleFunc(tgTaskTypeCollectProcess, s.handleCollectProcessTask)
 	backgroundMux.HandleFunc(tgTaskTypeCollectTrigger, s.handleCollectTriggerTask)
@@ -127,6 +131,22 @@ func (s *sSysPublish) handleTelegramCleanupTask(ctx context.Context, task *asynq
 		return err
 	}
 	return s.CleanupTelegramJobMessages(ctx, payload.JobId)
+}
+
+func (s *sSysPublish) handleCycleRescheduleTask(ctx context.Context, task *asynq.Task) error {
+	payload, err := decodeCycleRescheduleQueuePayload(task)
+	if err != nil {
+		return err
+	}
+	return s.rescheduleChannelProfileCycles(ctx, payload.ChannelId)
+}
+
+func (s *sSysPublish) handleCycleRefreshTask(ctx context.Context, task *asynq.Task) error {
+	payload, err := decodeCycleRefreshQueuePayload(task)
+	if err != nil {
+		return err
+	}
+	return s.refreshChannelProfileCycleNextAt(ctx, payload.ChannelId)
 }
 
 func (s *sSysPublish) handleImportTask(ctx context.Context, task *asynq.Task) error {

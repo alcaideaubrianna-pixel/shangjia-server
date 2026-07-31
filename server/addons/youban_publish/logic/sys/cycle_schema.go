@@ -21,11 +21,7 @@ func (s *sSysPublish) syncChannelCycleAfterSave(ctx context.Context, tenantId in
 		"cycle_last_error_message": "",
 		"updated_at":               gtime.Now(),
 	}
-	if enabled == 1 {
-		data["cycle_next_run_at"] = s.nextChannelCycleRunAt(ctx, days, publishTime, gtime.Now())
-	} else {
-		data["cycle_next_run_at"] = nil
-	}
+	data["cycle_next_run_at"] = nil
 	_, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Where("id", channelId).
 		Where("tenant_id", tenantId).
@@ -34,6 +30,9 @@ func (s *sSysPublish) syncChannelCycleAfterSave(ctx context.Context, tenantId in
 		Update()
 	if err != nil {
 		return gerror.Wrap(err, "更新频道循环上架时间失败")
+	}
+	if err = s.enqueueCycleReschedule(ctx, channelId, 0); err != nil {
+		g.Log().Warningf(ctx, "提交频道循环重算任务失败，定时调度将自动恢复 channel:%d err:%+v", channelId, err)
 	}
 	return nil
 }

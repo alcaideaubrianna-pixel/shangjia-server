@@ -305,6 +305,7 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		}
 		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
 	}
+	sentAt := gtime.Now()
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
 		Where("status", "sending").
@@ -312,8 +313,8 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 			"status":          "sent",
 			"dispatch_status": tgDispatchStatusDone,
 			"error_message":   "",
-			"sent_at":         gtime.Now(),
-			"updated_at":      gtime.Now(),
+			"sent_at":         sentAt,
+			"updated_at":      sentAt,
 		}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "更新TG任务状态失败")
@@ -323,12 +324,15 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "TG发送完成时任务已不再发送中，跳过成功标记")
 		return nil
 	}
+	job.SentAt = sentAt
 	s.appendTelegramJobLog(ctx, job, "publish", "sent", s.telegramJobPublishMessage(job, "TG资料推送成功"))
 	if recordErr := s.appendPublishSuccessRecord(ctx, job); recordErr != nil {
 		g.Log().Warningf(ctx, "保存成功发布记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
 	if indexErr := s.upsertChannelProfileFromJob(ctx, job); indexErr != nil {
 		g.Log().Warningf(ctx, "更新频道资料索引失败 jobId:%d err:%+v", job.Id, indexErr)
+	} else if cycleErr := s.syncTelegramJobCycleSchedule(ctx, job); cycleErr != nil {
+		g.Log().Warningf(ctx, "更新资料循环计划失败 jobId:%d err:%+v", job.Id, cycleErr)
 	}
 	isCycle := isCycleBatchOperation(job.OperationNo)
 	operationCompleted, completeErr := s.completeProfileTelegramOperation(ctx, job, isCycle)

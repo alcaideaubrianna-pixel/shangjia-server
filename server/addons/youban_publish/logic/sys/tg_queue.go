@@ -28,6 +28,8 @@ const (
 	tgTaskTypeImportSync        = "youban_publish:import:tg_sync"
 	tgTaskTypeDown              = "youban_publish:profile:down"
 	tgTaskTypeCycleRun          = "youban_publish:cycle:run"
+	tgTaskTypeCycleReschedule   = "youban_publish:cycle:reschedule"
+	tgTaskTypeCycleRefresh      = "youban_publish:cycle:refresh"
 	tgTaskTypeCollectMedia      = "youban_publish:collect:media_cache"
 	tgTaskTypeCollectProcess    = "youban_publish:collect:process"
 	tgTaskTypeCollectHistory    = "youban_publish:collect:history"
@@ -84,6 +86,14 @@ type profileDownQueuePayload struct {
 
 type cycleRunQueuePayload struct {
 	RunId int64 `json:"runId"`
+}
+
+type cycleRescheduleQueuePayload struct {
+	ChannelId int64 `json:"channelId"`
+}
+
+type cycleRefreshQueuePayload struct {
+	ChannelId int64 `json:"channelId"`
 }
 
 type collectHistoryQueuePayload struct {
@@ -314,8 +324,78 @@ func (s *sSysPublish) enqueueCycleRun(ctx context.Context, runId int64, delay ti
 	return err
 }
 
+func (s *sSysPublish) enqueueCycleReschedule(ctx context.Context, channelId int64, delay time.Duration) error {
+	if channelId <= 0 {
+		return nil
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(cycleRescheduleQueuePayload{ChannelId: channelId})
+	if err != nil {
+		return err
+	}
+	task := asynq.NewTask(tgTaskTypeCycleReschedule, payload)
+	options := []asynq.Option{
+		asynq.Queue(tgQueueNameBackground),
+		asynq.MaxRetry(5),
+		asynq.Timeout(2 * time.Hour),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err = client.EnqueueContext(ctx, task, options...)
+	return err
+}
+
+func (s *sSysPublish) enqueueCycleSummaryRefresh(ctx context.Context, channelId int64, delay time.Duration) error {
+	if channelId <= 0 {
+		return nil
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(cycleRefreshQueuePayload{ChannelId: channelId})
+	if err != nil {
+		return err
+	}
+	task := asynq.NewTask(tgTaskTypeCycleRefresh, payload)
+	options := []asynq.Option{
+		asynq.Queue(tgQueueNameBackground),
+		asynq.MaxRetry(5),
+		asynq.Timeout(time.Minute),
+		asynq.Unique(2 * time.Minute),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err = client.EnqueueContext(ctx, task, options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	return err
+}
+
 func decodeCycleRunQueuePayload(task *asynq.Task) (cycleRunQueuePayload, error) {
 	var payload cycleRunQueuePayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return payload, err
+	}
+	return payload, nil
+}
+
+func decodeCycleRescheduleQueuePayload(task *asynq.Task) (cycleRescheduleQueuePayload, error) {
+	var payload cycleRescheduleQueuePayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return payload, err
+	}
+	return payload, nil
+}
+
+func decodeCycleRefreshQueuePayload(task *asynq.Task) (cycleRefreshQueuePayload, error) {
+	var payload cycleRefreshQueuePayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return payload, err
 	}

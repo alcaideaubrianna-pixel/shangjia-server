@@ -1063,6 +1063,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
   KEY `idx_ybp_tg_job_profile_operation` (`profile_id`,`task_id`,`operation_no`,`status`,`id`),
   KEY `idx_ybp_tg_job_profile_cleanup` (`profile_id`,`tenant_id`,`created_at`,`id`),
   KEY `idx_ybp_tg_job_cycle` (`cycle_enabled`,`next_cycle_at`,`id`),
+  KEY `idx_ybp_tg_job_cycle_due` (`cycle_enabled`,`status`,`next_cycle_at`,`id`),
   KEY `idx_ybp_tg_job_operation` (`operation_no`,`status`,`id`),
   KEY `idx_ybp_tg_job_scheduler` (`dispatch_status`,`status`,`priority`,`next_retry_at`,`id`),
   KEY `idx_ybp_tg_job_channel_dispatch` (`target_chat_id`,`dispatch_status`,`status`,`updated_at`),

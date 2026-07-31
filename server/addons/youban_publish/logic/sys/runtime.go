@@ -55,6 +55,7 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 		g.Log().Warningf(ctx, "补写成功发布记录失败：%+v", err)
 	}
 	s.startTelegramQueueWorker(ctx)
+	go s.runProfileCycleStartupRecovery(ctx)
 	go s.runScheduledPublishRuntime(ctx)
 	go s.runMessagePushPlanScheduler(ctx)
 	go s.runTelegramChannelScheduler(ctx)

@@ -543,7 +543,7 @@ type ProfilePushChannelModel struct {
 	CyclePublishEnabled int         `json:"cyclePublishEnabled" dc:"是否循环推送"`
 	CyclePublishDays    int         `json:"cyclePublishDays" dc:"循环推送天数"`
 	FirstPushAt         *gtime.Time `json:"firstPushAt" dc:"首次推送时间"`
-	NextPushAt          *gtime.Time `json:"nextPushAt" dc:"下次推送时间"`
+	NextPushAt          *gtime.Time `json:"nextPushAt" dc:"循环到期时间"`
 }
 
 type ProfileOptionsModel struct {

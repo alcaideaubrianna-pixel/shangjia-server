@@ -49,3 +49,20 @@ func TestUpgradeSafeSqlIncludesCollectMediaRetryColumn(t *testing.T) {
 		})
 	}
 }
+
+func TestUpgradeSafeSqlIncludesProfileCycleDueIndex(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "mysql", path: "addons/youban_publish/resource/sql/upgrade_safe.sql"},
+		{name: "pgsql", path: "addons/youban_publish/resource/sql/upgrade_safe.pgsql.sql"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if sql := readSqlFile(test.path); !strings.Contains(sql, "idx_ybp_tg_job_cycle_due") {
+				t.Fatalf("upgrade SQL does not add profile cycle due index: %s", sql)
+			}
+		})
+	}
+}

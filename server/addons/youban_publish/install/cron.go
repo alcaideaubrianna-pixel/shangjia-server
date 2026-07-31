@@ -15,11 +15,21 @@ import (
 )
 
 const (
-	tenantVipCloseOrderCronName    = "youbanPublishVipCloseOrder"
-	tenantVipCloseOrderCronPattern = "@every 1m"
-	cycleSchedulerCronName         = "youbanPublishCycleScheduler"
-	cycleSchedulerCronPattern      = "@every 1m"
+	tenantVipCloseOrderCronName      = "youbanPublishVipCloseOrder"
+	tenantVipCloseOrderCronPattern   = "@every 1m"
+	cycleSchedulerCronName           = "youbanPublishCycleScheduler"
+	cycleSchedulerDevelopCronPattern = "@every 10m"
+	cycleSchedulerProductCronPattern = "@every 1h"
 )
+
+func cycleSchedulerCronPattern(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "not-set", "develop", "testing":
+		return cycleSchedulerDevelopCronPattern
+	default:
+		return cycleSchedulerProductCronPattern
+	}
+}
 
 func ensureVipOrderCloseCron(ctx context.Context) error {
 	columns := dao.SysCron.Columns()
@@ -77,7 +87,7 @@ func ensureCycleSchedulerCron(ctx context.Context) error {
 		columns.Title:     "上架频道循环调度",
 		columns.Name:      cycleSchedulerCronName,
 		columns.Params:    "",
-		columns.Pattern:   cycleSchedulerCronPattern,
+		columns.Pattern:   cycleSchedulerCronPattern(g.Cfg().MustGet(ctx, "system.mode", "develop").String()),
 		columns.Policy:    consts.CronPolicySingle,
 		columns.Count:     0,
 		columns.Sort:      21,

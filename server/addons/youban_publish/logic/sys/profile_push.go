@@ -55,7 +55,7 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 	}
 	var channels []*sysin.ProfilePushChannelModel
 	mod := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Fields("id AS channel_id,channel_title,channel_username,status,cycle_publish_enabled,cycle_publish_days,cycle_next_run_at AS next_push_at").
+		Fields("id AS channel_id,channel_title,channel_username,status,cycle_publish_enabled,cycle_publish_days").
 		Where("tenant_id", profile.TenantId).
 		Where("publish_direction", "up").
 		WhereNull("deleted_at")
@@ -77,13 +77,14 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 		FirstPushAt *gtime.Time `orm:"first_push_at"`
 	}
 	var firstPushes []*firstPushRow
-	if err := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).
-		Fields("channel_id,MIN(created_at) AS first_push_at").
-		Where("tenant_id", profile.TenantId).
-		Where("profile_id", profile.Id).
-		Where("status", "success").
-		WhereIn("channel_id", channelIds).
-		Group("channel_id").
+	if err := g.DB().Model(publishSuccessRecordTable+" r").Safe().Ctx(ctx).
+		InnerJoin(publishTgJobTable+" j", "j.id=r.job_id AND j.sent_at IS NOT NULL").
+		Fields("r.channel_id,MIN(j.sent_at) AS first_push_at").
+		Where("r.tenant_id", profile.TenantId).
+		Where("r.profile_id", profile.Id).
+		Where("r.status", "success").
+		WhereIn("r.channel_id", channelIds).
+		Group("r.channel_id").
 		Scan(&firstPushes); err != nil {
 		return nil, err
 	}
@@ -93,6 +94,26 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 			firstPushByChannel[item.ChannelId] = item.FirstPushAt
 		}
 	}
+	type cycleDueRow struct {
+		ChannelId  int64       `orm:"channel_id"`
+		CycleDueAt *gtime.Time `orm:"cycle_due_at"`
+	}
+	var cycleDueRows []*cycleDueRow
+	if err := g.DB().Model(publishChannelProfileTable+" cp").Safe().Ctx(ctx).
+		InnerJoin(publishTgJobTable+" j", "j.id=cp.last_job_id AND j.status IN ('sent','superseded') AND j.cycle_enabled=1").
+		Fields("cp.channel_id,j.next_cycle_at AS cycle_due_at").
+		Where("cp.profile_id", profile.Id).
+		Where("cp.status", "active").
+		WhereIn("cp.channel_id", channelIds).
+		Scan(&cycleDueRows); err != nil {
+		return nil, err
+	}
+	cycleDueByChannel := make(map[int64]*gtime.Time, len(cycleDueRows))
+	for _, item := range cycleDueRows {
+		if item != nil {
+			cycleDueByChannel[item.ChannelId] = item.CycleDueAt
+		}
+	}
 	for _, channel := range channels {
 		if channel == nil {
 			continue
@@ -100,6 +121,8 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 		channel.FirstPushAt = firstPushByChannel[channel.ChannelId]
 		if channel.CyclePublishEnabled != 1 {
 			channel.NextPushAt = nil
+		} else {
+			channel.NextPushAt = cycleDueByChannel[channel.ChannelId]
 		}
 	}
 	return channels, nil
