@@ -96,10 +96,19 @@ func (s *sSysPublish) repairCollectReviewEventMedia(ctx context.Context, rootEve
 		}
 		missing := false
 		for _, row := range rows {
-			if row == nil || strings.TrimSpace(row.FileUrl) != "" || !isCollectMediaCachePath(row.StoragePath) {
+			if row == nil || strings.TrimSpace(row.FileUrl) != "" {
 				continue
 			}
-			if _, pathErr := resolveMediaLocalPath(row.StoragePath); pathErr == nil {
+			storagePath := strings.TrimSpace(row.StoragePath)
+			if storagePath != "" && !isCollectMediaCachePath(storagePath) {
+				continue
+			}
+			if storagePath != "" {
+				localPath, pathErr := resolveMediaLocalPath(storagePath)
+				if pathErr == nil && fileExists(localPath) {
+					continue
+				}
+			} else if strings.TrimSpace(row.SourceFileId) == "" && strings.TrimSpace(row.SourceMessageRef) == "" {
 				continue
 			}
 			missing = true
