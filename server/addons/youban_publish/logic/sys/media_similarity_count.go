@@ -164,10 +164,7 @@ FROM candidate
 WHERE bit_count(
     (('x' || candidate.hash_value)::bit(64)) # (('x' || ?)::bit(64))
 ) <= ?
-AND EXISTS (
-    SELECT 1 FROM hg_content_profile p
-    WHERE p.id = candidate.profile_id AND p.deleted_at IS NULL
-)
+AND %s
 AND EXISTS (
     SELECT 1 FROM hg_youban_publish_profile_state ps
     WHERE ps.profile_id = candidate.profile_id
@@ -185,12 +182,6 @@ AND EXISTS (
       AND m.perceptual_hash IS NOT NULL
       AND m.perceptual_hash <> ''
 )
-AND EXISTS (
-    SELECT 1 FROM hg_youban_publish_note_index i
-    WHERE i.profile_id = candidate.profile_id
-      AND i.tenant_id = candidate.tenant_id
-      AND i.account_id = candidate.account_id
-      AND i.deleted_at IS NULL
-)`, strings.Join(branches, " UNION ALL "))
+`, strings.Join(branches, " UNION ALL "), mediaSimilarLiveProfileIndexExistsSQL("candidate.profile_id", "candidate.tenant_id", "candidate.account_id"))
 	return query, args, nil
 }

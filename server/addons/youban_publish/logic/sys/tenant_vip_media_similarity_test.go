@@ -21,7 +21,30 @@ func TestMediaSimilarCountSQLRequiresLiveNoteIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mediaPHashLshProfileCountSQL() error = %v", err)
 	}
-	if !strings.Contains(query, "hg_youban_publish_note_index") || !strings.Contains(query, "i.deleted_at IS NULL") {
-		t.Fatalf("count SQL does not require an active note index: %s", query)
+	for _, expected := range []string{
+		"hg_youban_publish_note_index",
+		"i.deleted_at IS NULL",
+		"p.status IN (1, 2)",
+		"i.status = p.status",
+		"i.visibility = p.visibility",
+	} {
+		if !strings.Contains(query, expected) {
+			t.Fatalf("count SQL missing valid note condition %q: %s", expected, query)
+		}
+	}
+}
+
+func TestMediaSimilarLiveProfileIndexRequiresValidConsistentStatus(t *testing.T) {
+	query := mediaSimilarLiveProfileIndexExistsSQL("m.profile_id", "m.tenant_id", "m.account_id")
+	for _, expected := range []string{
+		"p.status IN (1, 2)",
+		"i.status = p.status",
+		"i.visibility = p.visibility",
+		"i.deleted_at IS NULL",
+		"p.deleted_at IS NULL",
+	} {
+		if !strings.Contains(query, expected) {
+			t.Fatalf("live profile SQL missing %q: %s", expected, query)
+		}
 	}
 }
