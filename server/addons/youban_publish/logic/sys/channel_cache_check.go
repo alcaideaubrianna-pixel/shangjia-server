@@ -215,7 +215,7 @@ func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgA
 	client := telegram.NewClient(conf.AppId, conf.AppHash, options)
 	runCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
 	defer cancel()
-	return client.Run(runCtx, func(ctx context.Context) error {
+	return s.runTelegramClientWithAccountLease(runCtx, tgAccountId, client, func(ctx context.Context) error {
 		api := client.API()
 		inputChannel := &tg.InputChannel{ChannelID: channelID, AccessHash: accessHash}
 		for _, botItem := range bots {

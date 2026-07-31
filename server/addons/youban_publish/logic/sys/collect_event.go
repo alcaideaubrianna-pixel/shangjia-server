@@ -25,6 +25,7 @@ const (
 	collectEventRulesCacheVersionKey = "youban_publish:collect:event_rules:version"
 	collectEventRulesCacheKeyPrefix  = "youban_publish:collect:event_rules"
 	collectEventRulesCacheTTL        = time.Minute
+	collectEventRetentionDays        = 3
 )
 
 func (s *sSysPublish) CollectEventList(ctx context.Context, in *sysin.CollectEventListInp) (list []*sysin.CollectEventModel, totalCount int, err error) {
@@ -38,7 +39,8 @@ func (s *sSysPublish) CollectEventList(ctx context.Context, in *sysin.CollectEve
 	mod := pdao.YoubanPublishCollectEvent.DB().Model(pdao.YoubanPublishCollectEvent.Table()+" e").Safe().Ctx(ctx).
 		LeftJoin(pdao.YoubanPublishCollectSource.Table()+" s", "s.id=e.source_id").
 		Where("e.tenant_id", account.TenantId).
-		Where("e.account_id", account.Id)
+		Where("e.account_id", account.Id).
+		WhereGTE("e.created_at", gtime.Now().Add(-time.Duration(collectEventRetentionDays)*24*time.Hour))
 	if in.SourceId > 0 {
 		mod = mod.Where("e.source_id", in.SourceId)
 	}
@@ -556,6 +558,18 @@ func collectEventRuleMapsToRecords(list []g.Map) []gdb.Record {
 }
 
 func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (bool, string, error) {
+	if rule["dedupe_enabled"].Int() == 1 {
+		dedupeLock := lock.NewConfig(30*time.Second, 20*time.Millisecond).Mutex(fmt.Sprintf(
+			"youban_publish:collect:dedupe:%d:%d:%d",
+			event["tenant_id"].Int64(),
+			event["account_id"].Int64(),
+			rule["id"].Int64(),
+		))
+		if err := dedupeLock.Lock(ctx); err != nil {
+			return false, "", gerror.Wrap(err, "获取采集规则去重锁失败")
+		}
+		defer func() { _ = dedupeLock.Unlock(context.Background()) }()
+	}
 	decision, err := s.evaluateCollectRule(ctx, event, content, rule)
 	if err != nil {
 		return false, "", err
@@ -755,14 +769,14 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 		return nil
 	}
 	now := gtime.Now()
-	canonical, err := s.canonicalCollectProfileMedia(ctx, event, content)
+	prepared, err := s.prepareCollectMaterial(ctx, event, content)
 	if err != nil {
-		return gerror.Wrap(err, "整理采集审核媒体失败")
+		return gerror.Wrap(err, "准备采集审核资料失败")
 	}
-	if err = validateCollectMaterialMedia(canonical); err != nil {
-		return newCollectProcessRetryError(30*time.Second, err.Error())
+	if prepared == nil || prepared.Content == nil {
+		return newCollectProcessRetryError(30*time.Second, "采集审核资料尚未准备完成")
 	}
-	mediaCount := canonical.MediaCount
+	mediaCount := prepared.Content.MediaCount
 	reviewId, err := pdao.YoubanPublishCollectReview.Ctx(ctx).Data(g.Map{
 		"tenant_id":              event["tenant_id"].Int64(),
 		"account_id":             event["account_id"].Int64(),
@@ -772,6 +786,7 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 		"dispatch_id":            dispatchId,
 		"raw_text":               text,
 		"media_count":            mediaCount,
+		"media_json":             prepared.Content.MediaJSON,
 		"target_channel_id_json": rule["target_channel_id_json"].String(),
 		"bot_id_json":            rule["bot_id_json"].String(),
 		"status":                 sysin.CollectReviewStatusPending,

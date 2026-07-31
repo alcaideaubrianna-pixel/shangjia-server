@@ -14,10 +14,11 @@ import (
 )
 
 const (
-	accountCollectCircuitInitialDelay = 5 * time.Second
-	accountCollectCircuitMaxDelay     = 5 * time.Minute
-	accountCollectCircuitCacheTTL     = 24 * time.Hour
-	accountCollectCircuitCachePrefix  = "youban_publish:collect:account_circuit:"
+	accountCollectCircuitInitialDelay  = 5 * time.Second
+	accountCollectCircuitMaxDelay      = 5 * time.Minute
+	accountCollectConnectionRetryDelay = 5 * time.Second
+	accountCollectCircuitCacheTTL      = 24 * time.Hour
+	accountCollectCircuitCachePrefix   = "youban_publish:collect:account_circuit:"
 )
 
 type accountCollectCircuit struct {
@@ -193,7 +194,7 @@ func (s *sSysPublish) openAccountCollectCircuit(ctx context.Context, tgAccountId
 		delay = time.Second
 	}
 	if previous.blockedUntil.Before(time.Now()) || previous.failures == 0 {
-		g.Log().Warningf(ctx, "TG账号连接进入熔断等待 tgAccountId:%d retryAfter:%s failures:%d err:%s", tgAccountId, delay.Round(time.Second), state.failures, message)
+		g.Log().Warningf(ctx, "TG账号连接暂时不可用，记录重连退避 tgAccountId:%d retryAfter:%s failures:%d err:%s", tgAccountId, delay.Round(time.Second), state.failures, message)
 	}
 	return delay
 }
@@ -221,24 +222,17 @@ func (s *sSysPublish) closeAccountCollectCircuit(tgAccountId int64) {
 }
 
 func (s *sSysPublish) accountCollectCircuitError(tgAccountId int64) error {
-	delay, blocked := s.accountCollectCircuitBlocked(tgAccountId)
-	if !blocked {
-		return nil
-	}
 	state, _ := s.accountCollectCircuitState(tgAccountId)
 	if state.permanent {
 		return fmt.Errorf("TG账号需要重新授权，已暂停媒体任务 tgAccountId:%d", tgAccountId)
 	}
-	return &collectMediaRetryError{
-		message: fmt.Sprintf("TG账号暂不可用，账号级熔断等待%s后自动恢复 tgAccountId:%d", delay.Round(time.Second), tgAccountId),
-		delay:   delay,
-	}
+	return nil
 }
 
 func (s *sSysPublish) accountCollectCircuitShouldStart(tgAccountId int64) bool {
 	s.restoreAccountCollectCircuit(context.Background(), tgAccountId)
-	_, blocked := s.accountCollectCircuitBlocked(tgAccountId)
-	return !blocked
+	state, _ := s.accountCollectCircuitState(tgAccountId)
+	return !state.permanent
 }
 
 func collectMediaShouldReconnectAccount(err error) bool {
@@ -254,7 +248,6 @@ func collectMediaShouldReconnectAccount(err error) bool {
 		"connection closed",
 		"broken pipe",
 		"eof",
-		"file_migrate",
 	} {
 		if strings.Contains(message, pattern) {
 			return true

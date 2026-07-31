@@ -146,6 +146,16 @@ type CollectEventListRes struct {
 	List []*sysin.CollectEventModel `json:"list" dc:"事件列表"`
 }
 
+type CollectEventLogListReq struct {
+	g.Meta `path:"/publish/collect/event/log/list" method:"get" tags:"上架插件" summary:"采集事件日志"`
+	sysin.CollectEventLogListInp
+}
+
+type CollectEventLogListRes struct {
+	form.PageRes
+	List []*sysin.CollectEventLogModel `json:"list" dc:"采集事件日志"`
+}
+
 type CollectEventClearReq struct {
 	g.Meta `path:"/publish/collect/event/clear" method:"post" tags:"上架插件" summary:"清空采集源事件"`
 	sysin.CollectEventClearInp

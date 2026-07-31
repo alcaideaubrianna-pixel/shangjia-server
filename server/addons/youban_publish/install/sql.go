@@ -19,9 +19,19 @@ var mysqlBusinessSqlFiles = []string{
 	"addons/youban_publish/resource/sql/menu.sql",
 }
 
+var mysqlUpgradeSafeSqlFiles = []string{
+	"addons/youban_publish/resource/sql/menu.sql",
+	"addons/youban_publish/resource/sql/upgrade_safe.sql",
+}
+
 var pgsqlBusinessSqlFiles = []string{
 	"addons/youban_publish/resource/sql/install.pgsql.sql",
 	"addons/youban_publish/resource/sql/menu.pgsql.sql",
+}
+
+var pgsqlUpgradeSafeSqlFiles = []string{
+	"addons/youban_publish/resource/sql/menu.pgsql.sql",
+	"addons/youban_publish/resource/sql/upgrade_safe.pgsql.sql",
 }
 
 const publishInstallLockKey = "youban_publish:install"
@@ -117,16 +127,12 @@ func businessSqlFiles(includeInstall bool) []string {
 		if includeInstall {
 			return pgsqlBusinessSqlFiles
 		}
-		return []string{
-			"addons/youban_publish/resource/sql/menu.pgsql.sql",
-		}
+		return pgsqlUpgradeSafeSqlFiles
 	}
 	if includeInstall {
 		return mysqlBusinessSqlFiles
 	}
-	return []string{
-		"addons/youban_publish/resource/sql/menu.sql",
-	}
+	return mysqlUpgradeSafeSqlFiles
 }
 
 // MigrationSqlFiles returns the addon migration files that must be executed

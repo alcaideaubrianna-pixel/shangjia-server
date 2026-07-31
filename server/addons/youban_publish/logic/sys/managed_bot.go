@@ -102,7 +102,7 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 	defer cancel()
 	var created *tg.User
 	var token string
-	err = client.Run(runCtx, func(clientCtx context.Context) error {
+	err = s.runTelegramClientWithAccountLease(runCtx, account.Id, client, func(clientCtx context.Context) error {
 		manager, resolveErr := resolveManagedBotUser(clientCtx, client, managerUsername)
 		if resolveErr != nil {
 			return resolveErr
@@ -209,7 +209,7 @@ func (s *sSysPublish) checkManagedBotUsername(ctx context.Context, account *sysi
 	runCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	returnValue := false
-	err = client.Run(runCtx, func(clientCtx context.Context) error {
+	err = s.runTelegramClientWithAccountLease(runCtx, account.Id, client, func(clientCtx context.Context) error {
 		returnValue, err = client.API().BotsCheckUsername(clientCtx, username)
 		return err
 	})

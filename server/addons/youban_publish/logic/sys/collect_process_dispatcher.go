@@ -31,8 +31,13 @@ func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 }
 
 func (s *sSysPublish) dispatchCollectProcessOnce(ctx context.Context) {
+	activeHistorySourceIDs, err := activeCollectHistorySourceIDs(ctx)
+	if err != nil {
+		g.Log().Warningf(ctx, "读取历史采集中的来源失败：%+v", err)
+		return
+	}
 	deadline := gtime.Now().Add(-collectMaterialGroupingDelay)
-	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+	mod := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Fields("source_id,tenant_id,account_id").
 		WhereIn("status", []string{
 			sysin.CollectEventStatusPending,
@@ -41,9 +46,14 @@ func (s *sSysPublish) dispatchCollectProcessOnce(ctx context.Context) {
 			sysin.CollectEventStatusPrechecked,
 			sysin.CollectEventStatusMediaPending,
 			sysin.CollectEventStatusMediaReady,
+			sysin.CollectEventStatusIgnored,
 		}).
-		WhereNull("processed_at").
-		Where("(received_at <= ? OR (received_at IS NULL AND created_at <= ?))", deadline, deadline).
+		Where("processed_at IS NULL OR (status = ? AND material_role = ? AND material_parent_event_id > 0 AND error_message = ?)", sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
+		Where("(received_at <= ? OR (received_at IS NULL AND created_at <= ?))", deadline, deadline)
+	if len(activeHistorySourceIDs) > 0 {
+		mod = mod.WhereNotIn("source_id", activeHistorySourceIDs)
+	}
+	rows, err := mod.
 		Group("source_id,tenant_id,account_id").
 		Limit(1000).
 		All()
@@ -78,4 +88,26 @@ func (s *sSysPublish) dispatchCollectProcessOnce(ctx context.Context) {
 		}(payload)
 	}
 	wg.Wait()
+}
+
+func activeCollectHistorySourceIDs(ctx context.Context) ([]int64, error) {
+	values, err := pdao.YoubanPublishCollectHistoryTask.Ctx(ctx).
+		Fields("source_id").
+		WhereIn("status", []string{
+			sysin.CollectHistoryTaskStatusPending,
+			sysin.CollectHistoryTaskStatusRunning,
+			sysin.CollectHistoryTaskStatusPaused,
+		}).
+		Group("source_id").
+		Array()
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0, len(values))
+	for _, value := range values {
+		if id := value.Int64(); id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	return uniqueIds(ids), nil
 }

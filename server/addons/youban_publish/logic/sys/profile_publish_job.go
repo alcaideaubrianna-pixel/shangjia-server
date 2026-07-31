@@ -153,41 +153,41 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMeta(ctx context.Context, sour
 	return jobId, nil
 }
 
-func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job telegramJobRecord, isCycle bool) error {
+func (s *sSysPublish) completeProfileTelegramOperation(ctx context.Context, job telegramJobRecord, isCycle bool) (bool, error) {
 	total, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("profile_id", job.ProfileId).
 		Where("operation_no", job.OperationNo).Count()
 	if err != nil {
-		return gerror.Wrap(err, "统计资料TG任务失败")
+		return false, gerror.Wrap(err, "统计资料TG任务失败")
 	}
 	if total == 0 {
-		return nil
+		return false, nil
 	}
 	pending, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("profile_id", job.ProfileId).
 		Where("operation_no", job.OperationNo).
 		WhereNotIn("status", []string{"sent", "superseded"}).Count()
 	if err != nil {
-		return gerror.Wrap(err, "统计资料未完成TG任务失败")
+		return false, gerror.Wrap(err, "统计资料未完成TG任务失败")
 	}
 	if pending > 0 {
-		return nil
+		return false, nil
 	}
 	if !isCycle {
 		now := gtime.Now()
 		if _, err = s.syncProfilePublishState(ctx, job.ProfileId, 1, consts.ContentVisibilityPublic, now); err != nil {
-			return gerror.Wrap(err, "同步资料上架状态失败")
+			return false, gerror.Wrap(err, "同步资料上架状态失败")
 		}
 		if err = s.syncProfileNoteIndex(ctx, job.ProfileId); err != nil {
-			return err
+			return false, err
 		}
 		iservice.SysContent().ClearHomeProfileCardsCache(ctx)
 		if err = s.incrementDailyPublishStat(ctx, job); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if isCycle {
 		s.cleanupPreviousCycleMessages(ctx, job)
 	}
-	return nil
+	return true, nil
 }

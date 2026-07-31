@@ -54,7 +54,7 @@ func (s *sSysPublish) executeMaterialImportMedia(ctx context.Context, taskId int
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Hour)
 	defer cancel()
-	return client.Run(runCtx, func(clientCtx context.Context) error {
+	return s.runTelegramClientWithAccountLease(runCtx, task.TgAccountId, client, func(clientCtx context.Context) error {
 		return run(clientCtx, client)
 	})
 }

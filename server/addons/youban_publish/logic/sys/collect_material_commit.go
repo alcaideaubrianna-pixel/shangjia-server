@@ -28,6 +28,7 @@ type collectPreparedMedia struct {
 	PerceptualHash    string
 	Size              int64
 	MD5               string
+	MetaJSON          string
 }
 
 type collectPreparedMaterial struct {
@@ -40,11 +41,15 @@ func (s *sSysPublish) prepareCollectMaterial(ctx context.Context, event gdb.Reco
 	if err != nil {
 		return nil, gerror.Wrap(err, "整理采集资料媒体失败")
 	}
-	if err = validateCollectMaterialMedia(canonical); err != nil {
+	return s.prepareCollectMaterialSnapshot(ctx, event, canonical)
+}
+
+func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event gdb.Record, snapshot *collectContentResult) (*collectPreparedMaterial, error) {
+	if err := validateCollectMaterialMedia(snapshot); err != nil {
 		return nil, err
 	}
-	items := collectMediaRowsToItemsFromJSON(canonical.MediaJSON)
-	prepared := &collectPreparedMaterial{Content: canonical, Media: make([]collectPreparedMedia, 0, len(items))}
+	items := collectMediaRowsToItemsFromJSON(snapshot.MediaJSON)
+	prepared := &collectPreparedMaterial{Content: snapshot, Media: make([]collectPreparedMedia, 0, len(items))}
 	displayItems, verifyItems := classifyCollectPublishMedia(event, items)
 	for _, group := range []struct {
 		purpose string
@@ -56,7 +61,7 @@ func (s *sSysPublish) prepareCollectMaterial(ctx context.Context, event gdb.Reco
 		purpose := group.purpose
 		purposeItems := group.items
 		for index, item := range purposeItems {
-			item, err = s.prepareCollectMediaAsset(ctx, event, item)
+			item, err := s.prepareCollectMediaAsset(ctx, event, item)
 			if err != nil {
 				return nil, gerror.Wrap(err, "准备采集媒体失败")
 			}
@@ -103,13 +108,39 @@ func (s *sSysPublish) prepareCollectMaterial(ctx context.Context, event gdb.Reco
 				PerceptualHash:    assetPerceptualHash(assets),
 				Size:              mediaSize,
 				MD5:               mediaMD5,
+				MetaJSON:          strings.TrimSpace(item.MetaJson),
 			})
 		}
 	}
-	if len(prepared.Media) != canonical.MediaCount {
+	if len(prepared.Media) != snapshot.MediaCount {
 		return nil, gerror.New("采集资料媒体准备数量不完整")
 	}
+	prepared.Content = collectPreparedContentSnapshot(prepared)
 	return prepared, nil
+}
+
+func collectPreparedContentSnapshot(prepared *collectPreparedMaterial) *collectContentResult {
+	if prepared == nil || prepared.Content == nil {
+		return nil
+	}
+	content := *prepared.Content
+	items := make([]collectMediaItem, 0, len(prepared.Media))
+	for _, media := range prepared.Media {
+		mediaType := strings.ToLower(strings.TrimSpace(media.MediaType))
+		if mediaType == "image" {
+			mediaType = "photo"
+		}
+		items = append(items, collectMediaItem{
+			Type: mediaType, Purpose: media.Purpose, FileId: media.FileId,
+			FileUrl: media.FileURL, StoragePath: media.StoragePath,
+			PosterUrl: media.PosterURL, FileMd5: media.MD5,
+			FilePhash: media.PerceptualHash, MetaJson: media.MetaJSON,
+		})
+	}
+	content.MediaJSON = collectMediaItemsJSON(items)
+	content.MediaCount = len(items)
+	content.DedupeKey = collectHash(content.NormalizedText + ":" + collectMediaSignature(content.MediaJSON))
+	return &content
 }
 
 func validateCollectMaterialMedia(content *collectContentResult) error {

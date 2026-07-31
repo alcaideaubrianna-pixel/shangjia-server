@@ -29,7 +29,10 @@ func (s *sSysPublish) canonicalCollectProfileMedia(ctx context.Context, event gd
 			return nil, err
 		}
 		if len(rows) > 0 {
-			displayItems = collectMediaRowsToItems(rows, collectMaterialRoleDisplay)
+			displayItems = mergeCollectMediaEnrichment(
+				collectMediaRowsToItems(rows, collectMaterialRoleDisplay),
+				displayItems,
+			)
 		}
 	}
 
@@ -44,7 +47,10 @@ func (s *sSysPublish) canonicalCollectProfileMedia(ctx context.Context, event gd
 			return nil, rowErr
 		}
 		if len(rows) > 0 {
-			verifyItems = collectMediaRowsToItems(rows, collectMaterialRoleVerify)
+			verifyItems = mergeCollectMediaEnrichment(
+				collectMediaRowsToItems(rows, collectMaterialRoleVerify),
+				collectMediaJSONWithPurposeItems(content.MediaJSON, collectMaterialRoleVerify),
+			)
 		} else {
 			verifyItems = collectMediaJSONWithPurposeItems(verify["media_json"].String(), collectMaterialRoleVerify)
 		}
@@ -61,6 +67,48 @@ func (s *sSysPublish) canonicalCollectProfileMedia(ctx context.Context, event gd
 	resolved.MediaCount = mediaCount
 	resolved.DedupeKey = collectHash(resolved.NormalizedText + ":" + collectMediaSignature(mediaJSON))
 	return &resolved, nil
+}
+
+func mergeCollectMediaEnrichment(baseItems []collectMediaItem, enrichedItems []collectMediaItem) []collectMediaItem {
+	if len(baseItems) == 0 || len(enrichedItems) == 0 {
+		return baseItems
+	}
+	enrichedByKey := make(map[string]collectMediaItem, len(enrichedItems)*2)
+	for _, item := range enrichedItems {
+		for _, key := range collectMediaMatchKeys(item) {
+			enrichedByKey[key] = item
+		}
+	}
+	for index := range baseItems {
+		var enriched collectMediaItem
+		for _, key := range collectMediaMatchKeys(baseItems[index]) {
+			if item, ok := enrichedByKey[key]; ok {
+				enriched = item
+				break
+			}
+		}
+		if strings.TrimSpace(enriched.FilePhash) != "" {
+			baseItems[index].FilePhash = strings.TrimSpace(enriched.FilePhash)
+		}
+		if strings.TrimSpace(enriched.FileMd5) != "" {
+			baseItems[index].FileMd5 = strings.TrimSpace(enriched.FileMd5)
+		}
+		if strings.TrimSpace(baseItems[index].PosterUrl) == "" {
+			baseItems[index].PosterUrl = strings.TrimSpace(enriched.PosterUrl)
+		}
+	}
+	return baseItems
+}
+
+func collectMediaMatchKeys(item collectMediaItem) []string {
+	keys := make([]string, 0, 2)
+	if fingerprint := strings.TrimSpace(collectMediaFingerprint(item)); fingerprint != "" {
+		keys = append(keys, "fingerprint:"+fingerprint)
+	}
+	if sourceKey := strings.TrimSpace(collectMediaSourceKey(item)); sourceKey != "" {
+		keys = append(keys, "source:"+sourceKey)
+	}
+	return keys
 }
 
 func collectMediaJSONWithPurposeItems(mediaJSON string, purpose string) []collectMediaItem {

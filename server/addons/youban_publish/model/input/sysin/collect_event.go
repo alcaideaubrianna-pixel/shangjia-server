@@ -17,6 +17,24 @@ type CollectEventListInp struct {
 	Keyword  string `json:"keyword" dc:"关键词"`
 }
 
+type CollectEventLogListInp struct {
+	form.PageReq
+	SourceId int64 `json:"sourceId" dc:"采集源ID"`
+}
+
+type CollectEventLogModel struct {
+	Id         int64       `json:"id" dc:"日志ID"`
+	TenantId   int64       `json:"tenantId" dc:"租户ID"`
+	AccountId  int64       `json:"accountId" dc:"账号ID"`
+	EventId    int64       `json:"eventId" dc:"事件ID"`
+	DispatchId int64       `json:"dispatchId" dc:"分发ID"`
+	Stage      string      `json:"stage" dc:"阶段"`
+	Status     string      `json:"status" dc:"状态"`
+	Message    string      `json:"message" dc:"消息"`
+	MetaText   string      `json:"metaText" dc:"元数据"`
+	CreatedAt  *gtime.Time `json:"createdAt" dc:"创建时间"`
+}
+
 type CollectMaterialDiagnoseInp struct {
 	SourceId int64 `json:"sourceId" dc:"采集源ID，0表示全部"`
 	Limit    int   `json:"limit" dc:"诊断数量，默认30"`
@@ -208,6 +226,7 @@ type CollectReviewModel struct {
 	DispatchId          int64                      `json:"dispatchId" dc:"分发ID"`
 	RawText             string                     `json:"rawText" dc:"原始文本"`
 	MediaCount          int                        `json:"mediaCount" dc:"媒体数"`
+	MediaJson           string                     `json:"mediaJson" dc:"审核媒体快照"`
 	Media               []*CollectReviewMediaModel `json:"media" dc:"审核媒体"`
 	TargetChannelIdJson string                     `json:"targetChannelIdJson" dc:"目标频道JSON"`
 	TargetChannelNames  []string                   `json:"targetChannelNames" dc:"目标频道名称"`

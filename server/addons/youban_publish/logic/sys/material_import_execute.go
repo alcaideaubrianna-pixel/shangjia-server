@@ -109,7 +109,7 @@ func (s *sSysPublish) executeMaterialImportPull(ctx context.Context, task *sysin
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 50*time.Minute)
 	defer cancel()
-	return client.Run(runCtx, func(clientCtx context.Context) error {
+	return s.runTelegramClientWithAccountLease(runCtx, task.TgAccountId, client, func(clientCtx context.Context) error {
 		return run(clientCtx, client)
 	})
 }

@@ -90,7 +90,7 @@ func (s *sSysPublish) fetchListenerSenderFromTelegram(ctx context.Context, plan 
 	if err != nil {
 		return listenerMessageSenderInfo{}, err
 	}
-	err = client.Run(ctx, func(runCtx context.Context) error {
+	err = s.runTelegramClientWithAccountLease(ctx, plan.TgAccountId, client, func(runCtx context.Context) error {
 		if _, err := client.Self(runCtx); err != nil {
 			return err
 		}

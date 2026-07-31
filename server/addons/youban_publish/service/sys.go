@@ -277,6 +277,7 @@ type ISysPublish interface {
 	CollectRuleSave(ctx context.Context, in *sysin.CollectRuleSaveInp) (id int64, err error)
 	CollectRuleDelete(ctx context.Context, in *sysin.IdsInp) (err error)
 	CollectEventList(ctx context.Context, in *sysin.CollectEventListInp) (list []*sysin.CollectEventModel, totalCount int, err error)
+	CollectEventLogList(ctx context.Context, in *sysin.CollectEventLogListInp) (list []*sysin.CollectEventLogModel, totalCount int, err error)
 	CollectMaterialDiagnose(ctx context.Context, in *sysin.CollectMaterialDiagnoseInp) (res *sysin.CollectMaterialDiagnoseModel, err error)
 	CollectMediaBenchmark(ctx context.Context, in *sysin.CollectMediaBenchmarkInp) (res *sysin.CollectMediaBenchmarkModel, err error)
 	CollectEventClear(ctx context.Context, in *sysin.CollectEventClearInp) (err error)

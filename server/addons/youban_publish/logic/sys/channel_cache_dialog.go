@@ -82,7 +82,7 @@ func (s *sSysPublish) fetchTgAccountChannelCachesStandalone(ctx context.Context,
 	defer cancel()
 
 	channels := make([]*tgDialogCache, 0)
-	err = client.Run(runCtx, func(ctx context.Context) error {
+	err = s.runTelegramClientWithAccountLease(runCtx, item.Id, client, func(ctx context.Context) error {
 		var fetchErr error
 		channels, fetchErr = fetchTgAccountChannelCachesWithClient(ctx, client)
 		return fetchErr

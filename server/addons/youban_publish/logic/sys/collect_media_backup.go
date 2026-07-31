@@ -294,7 +294,7 @@ func (s *sSysPublish) forwardCollectMediaWithStandaloneClient(ctx context.Contex
 	defer cancel()
 	forwarded := make([]int, 0, len(ids))
 	err = runCollectBackupForwardWithTimeout(runCtx, 90*time.Second, func(runCtx context.Context) error {
-		return client.Run(runCtx, func(runCtx context.Context) error {
+		return s.runTelegramClientWithAccountLease(runCtx, event["tg_account_id"].Int64(), client, func(runCtx context.Context) error {
 			updates, err := invokeCollectForwardWithoutUpdates(runCtx, client, sourcePeer, backupPeer, ids)
 			if err != nil {
 				return gerror.Wrap(err, "转发采集媒体到备份频道失败")

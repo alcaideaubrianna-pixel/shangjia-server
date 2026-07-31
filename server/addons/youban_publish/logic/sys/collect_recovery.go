@@ -36,6 +36,9 @@ func (s *sSysPublish) runCollectRecovery(ctx context.Context) {
 }
 
 func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
+	if err := s.cleanupCollectEventsOlderThan(ctx, collectEventRetentionDays, 1000); err != nil {
+		g.Log().Warningf(ctx, "清理过期采集事件失败：%+v", err)
+	}
 	if err := s.recoverStaleCollectMediaRows(ctx, 1000); err != nil {
 		g.Log().Warningf(ctx, "恢复超时采集媒体失败：%+v", err)
 	}

@@ -80,23 +80,6 @@ func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, jo
 	return nil
 }
 
-func (s *sSysPublish) postponeTelegramJobForChannelContinuation(ctx context.Context, job telegramJobRecord) error {
-	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", job.Id).
-		WhereIn("status", []string{"pending", "failed_retry"}).
-		Data(g.Map{
-			"dispatch_status":     tgDispatchStatusIdle,
-			"next_retry_at":       gtime.Now().Add(3 * time.Second),
-			"last_dispatch_error": "等待同频道采集绑定视频优先推送",
-			"updated_at":          gtime.Now(),
-		}).
-		Update()
-	if err != nil {
-		return gerror.Wrap(err, "延后TG采集绑定顺序任务失败")
-	}
-	return nil
-}
-
 func (s *sSysPublish) postponeTelegramJobForCollectPushPause(ctx context.Context, job telegramJobRecord) error {
 	nextRetryAt := gtime.Now().Add(30 * time.Second)
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).

@@ -40,8 +40,9 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 			sysin.CollectEventStatusPrechecked,
 			sysin.CollectEventStatusMediaPending,
 			sysin.CollectEventStatusMediaReady,
+			sysin.CollectEventStatusIgnored,
 		}).
-		WhereNull("processed_at").
+		Where("processed_at IS NULL OR (status = ? AND error_message = ?)", sysin.CollectEventStatusIgnored, collectMaterialVerifyUnmatchedMessage).
 		OrderAsc("source_chat_id").
 		OrderAsc("source_message_id").
 		OrderAsc("id").
@@ -77,7 +78,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 	for index := 0; index < len(rows); index++ {
 		event := rows[index]
 		role := strings.TrimSpace(event["material_role"].String())
-		if role != "" && role != collectMaterialRolePending {
+		if role != "" && role != collectMaterialRolePending && !collectMaterialEventNeedsPairRepair(event) {
 			continue
 		}
 		if !collectMaterialEventOlderThan(event, collectMaterialGroupingDelay) {
@@ -125,14 +126,29 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 			}
 		case profileMessageKindVerify:
 			g.Log().Infof(ctx, "采集消息识别为验证组 eventId:%d sourceMessageId:%d groupedId:%s media:%d role:%s", event["id"].Int64(), event["source_message_id"].Int64(), event["source_grouped_id"].String(), event["media_count"].Int(), role)
+			displayIndex := s.findCollectDisplayEvent(rows, index)
+			if displayIndex >= 0 {
+				display := rows[displayIndex]
+				if err = s.bindCollectMaterialPair(ctx, display, event); err != nil {
+					return err
+				}
+				if err = s.processCollectEvent(ctx, display["id"].Int64(), payload.TenantId, payload.AccountId); err != nil && !isCollectProcessRetryError(err) {
+					return err
+				}
+				continue
+			}
 			if !collectMaterialEventOlderThan(event, collectMaterialVerifyWindow) {
 				continue
 			}
-			if strings.TrimSpace(event["material_role"].String()) == collectMaterialRolePending {
-				if err = s.ignoreCollectEvent(ctx, event["id"].Int64(), "验证资料未匹配到前序资料组", "group"); err != nil {
-					return err
-				}
+			if err = s.markCollectEvent(ctx, event["id"].Int64(), sysin.CollectEventStatusPending, "等待前序资料组处理"); err != nil {
+				return err
 			}
+			if _, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).
+				Where("id", event["id"].Int64()).
+				Data(g.Map{"processed_at": nil, "updated_at": gtime.Now()}).Update(); err != nil {
+				return gerror.Wrap(err, "重置验证资料等待状态失败")
+			}
+			g.Log().Infof(ctx, "验证资料暂未找到前序展示组，保留等待并在下一轮重试 eventId:%d sourceMessageId:%d", event["id"].Int64(), event["source_message_id"].Int64())
 		default:
 			if err = s.ignoreCollectEvent(ctx, event["id"].Int64(), "消息不是资料组或验证组", "group"); err != nil {
 				return err
@@ -140,6 +156,13 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 		}
 	}
 	return nil
+}
+
+const collectMaterialVerifyUnmatchedMessage = "验证资料未匹配到前序资料组"
+
+func collectMaterialEventNeedsPairRepair(event gdb.Record) bool {
+	return event["status"].String() == sysin.CollectEventStatusIgnored &&
+		strings.TrimSpace(event["error_message"].String()) == collectMaterialVerifyUnmatchedMessage
 }
 
 func isCollectProcessRetryError(err error) bool {
@@ -160,6 +183,27 @@ func (s *sSysPublish) findCollectVerifyEvent(rows []gdb.Record, displayIndex int
 			return -1
 		}
 		return pair.VerifyIndex
+	}
+	return -1
+}
+
+func (s *sSysPublish) findCollectDisplayEvent(rows []gdb.Record, verifyIndex int) int {
+	if verifyIndex < 0 || verifyIndex >= len(rows) {
+		return -1
+	}
+	verify := rows[verifyIndex]
+	parentID := verify["material_parent_event_id"].Int64()
+	if parentID > 0 {
+		for index, row := range rows {
+			if row["id"].Int64() == parentID {
+				return index
+			}
+		}
+	}
+	for _, pair := range pairCollectMaterialMessages(collectMaterialEventViews(rows)) {
+		if pair.VerifyIndex == verifyIndex {
+			return pair.DisplayIndex
+		}
 	}
 	return -1
 }
@@ -189,11 +233,14 @@ func (s *sSysPublish) bindCollectMaterialPair(ctx context.Context, display gdb.R
 	}
 	if _, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Where("id", verify["id"].Int64()).
-		Where("material_role", collectMaterialRolePending).
+		Where("material_role = ? OR (status = ? AND error_message = ?)", collectMaterialRolePending, sysin.CollectEventStatusIgnored, collectMaterialVerifyUnmatchedMessage).
 		Data(g.Map{
+			"status":                   sysin.CollectEventStatusGroupCollect,
 			"material_role":            collectMaterialRoleVerify,
 			"material_parent_event_id": display["id"].Int64(),
 			"material_group_status":    "paired",
+			"error_message":            "",
+			"processed_at":             nil,
 			"updated_at":               now,
 		}).Update(); err != nil {
 		return gerror.Wrap(err, "绑定资料验证组失败")

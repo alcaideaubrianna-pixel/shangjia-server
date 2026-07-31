@@ -84,7 +84,7 @@ func (s *sSysPublish) executeCollectHistoryTask(ctx context.Context, task *sysin
 	if err != nil {
 		return err
 	}
-	return client.Run(ctx, func(runCtx context.Context) error {
+	return s.runTelegramClientWithAccountLease(ctx, task.TgAccountId, client, func(runCtx context.Context) error {
 		if _, err = client.Self(runCtx); err != nil {
 			return err
 		}
@@ -222,7 +222,7 @@ func (s *sSysPublish) ingestCollectHistoryMessages(ctx context.Context, task *sy
 		if err != nil {
 			return stats, nextOffset, stop, err
 		}
-		eventId, err := s.ingestCollectMessage(ctx, message)
+		_, err = s.ingestCollectMessage(ctx, message)
 		if err != nil {
 			stats.failed++
 			s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "warn", "event", "历史消息写入事件失败", g.Map{"messageId": msg.ID, "error": err.Error()})
@@ -232,14 +232,6 @@ func (s *sSysPublish) ingestCollectHistoryMessages(ctx context.Context, task *sy
 			stats.duplicates++
 		} else {
 			stats.events++
-		}
-		err = s.processCollectEvent(ctx, eventId, source.TenantId, source.AccountId)
-		if err == nil && !exists {
-			s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "process", "历史采集事件已处理", g.Map{"eventId": eventId, "messageId": msg.ID})
-		}
-		if err != nil {
-			stats.failed++
-			s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "warn", "event", "历史采集事件处理失败", g.Map{"eventId": eventId, "messageId": msg.ID, "error": err.Error()})
 		}
 	}
 	return stats, nextOffset, stop, nil

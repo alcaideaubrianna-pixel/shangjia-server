@@ -60,3 +60,33 @@ func TestShouldRecoverCollectEventWithUnmatchedVerifyVideo(t *testing.T) {
 		t.Fatal("expected unmatched verify video event to be recoverable")
 	}
 }
+
+func TestMergeCollectMediaEnrichmentKeepsCanonicalPathAndPHash(t *testing.T) {
+	base := []collectMediaItem{{
+		Type:        "photo",
+		Purpose:     "display",
+		FileId:      "copy:-1001:10",
+		StoragePath: "cache/current.jpg",
+		MetaJson:    `{"kind":"photo","id":100,"accessHash":200,"thumbSize":"w"}`,
+	}}
+	enriched := []collectMediaItem{{
+		Type:        "photo",
+		Purpose:     "display",
+		FileId:      "copy:-1001:10",
+		StoragePath: "cache/old.jpg",
+		FilePhash:   "abcdef0123456789",
+		FileMd5:     "media-md5",
+		MetaJson:    `{"kind":"photo","id":100,"accessHash":200,"thumbSize":"w"}`,
+	}}
+
+	merged := mergeCollectMediaEnrichment(base, enriched)
+	if len(merged) != 1 {
+		t.Fatalf("merged media=%d, want 1", len(merged))
+	}
+	if merged[0].StoragePath != "cache/current.jpg" {
+		t.Fatalf("storage path=%q, want canonical current path", merged[0].StoragePath)
+	}
+	if merged[0].FilePhash != "abcdef0123456789" || merged[0].FileMd5 != "media-md5" {
+		t.Fatalf("metadata not preserved: %#v", merged[0])
+	}
+}

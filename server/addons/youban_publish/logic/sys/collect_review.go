@@ -16,8 +16,8 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
-	"hotgo/addons/youban_publish/internal/model/entity"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/hgrds/lock"
 )
 
 type collectReviewCursor struct {
@@ -77,9 +77,7 @@ func (s *sSysPublish) CollectReviewList(ctx context.Context, in *sysin.CollectRe
 	if err = s.fillCollectReviewTargetChannelNames(ctx, list, account.TenantId); err != nil {
 		return nil, err
 	}
-	if err = s.fillCollectReviewMediaFromEvents(ctx, list); err != nil {
-		return nil, err
-	}
+	fillCollectReviewMedia(list)
 	nextCursor := ""
 	if hasMore && len(list) > 0 {
 		nextCursor = encodeCollectReviewCursor(list[len(list)-1].Id)
@@ -114,75 +112,12 @@ func decodeCollectReviewCursor(raw string) (*collectReviewCursor, error) {
 	return &cursor, nil
 }
 
-func (s *sSysPublish) fillCollectReviewMediaFromEvents(ctx context.Context, list []*sysin.CollectReviewModel) error {
-	eventIDs := make([]int64, 0, len(list))
-	for _, review := range list {
-		if review != nil && review.EventId > 0 {
-			eventIDs = append(eventIDs, review.EventId)
-		}
-	}
-	eventIDs = uniqueIds(eventIDs)
-	if len(eventIDs) == 0 {
-		return nil
-	}
-	var events []struct {
-		Id                  int64  `json:"id"`
-		MaterialRole        string `json:"materialRole"`
-		MaterialParentEvent int64  `json:"materialParentEventId"`
-	}
-	if err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Fields("id,material_role,material_parent_event_id").
-		WhereIn("id", eventIDs).
-		Scan(&events); err != nil {
-		return gerror.Wrap(err, "读取审核资料角色失败")
-	}
-	eventRoles := make(map[int64]string, len(events))
-	verifyEventIDs := make([]int64, 0)
-	verifyEventByParent := make(map[int64]int64)
-	for _, event := range events {
-		eventRoles[event.Id] = strings.TrimSpace(event.MaterialRole)
-	}
-	var verifyEvents []struct {
-		Id                  int64 `json:"id"`
-		MaterialParentEvent int64 `json:"materialParentEventId"`
-	}
-	if err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Fields("id,material_parent_event_id").
-		Where("material_role", collectMaterialRoleVerify).
-		WhereIn("material_parent_event_id", eventIDs).
-		Scan(&verifyEvents); err != nil {
-		return gerror.Wrap(err, "读取审核验证资料事件失败")
-	}
-	for _, event := range verifyEvents {
-		verifyEventIDs = append(verifyEventIDs, event.Id)
-		verifyEventByParent[event.MaterialParentEvent] = event.Id
-	}
-	allEventIDs := append(append([]int64{}, eventIDs...), verifyEventIDs...)
-	var mediaRows []*entity.YoubanPublishCollectEventMedia
-	if err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
-		WhereIn("event_id", uniqueIds(allEventIDs)).
-		OrderAsc("sort_index").OrderAsc("id").Scan(&mediaRows); err != nil {
-		return gerror.Wrap(err, "读取审核媒体失败")
-	}
-	mediaByEvent := make(map[int64][]*entity.YoubanPublishCollectEventMedia)
-	for _, row := range mediaRows {
-		if row != nil {
-			mediaByEvent[row.EventId] = append(mediaByEvent[row.EventId], row)
-		}
-	}
+func fillCollectReviewMedia(list []*sysin.CollectReviewModel) {
 	for _, review := range list {
 		if review == nil {
 			continue
 		}
-		items := make([]collectMediaItem, 0)
-		role := eventRoles[review.EventId]
-		if role != collectMaterialRoleVerify {
-			role = collectMaterialRoleDisplay
-		}
-		items = append(items, collectMediaRowsToItems(mediaByEvent[review.EventId], role)...)
-		if verifyEventID := verifyEventByParent[review.EventId]; verifyEventID > 0 {
-			items = append(items, collectMediaRowsToItems(mediaByEvent[verifyEventID], collectMaterialRoleVerify)...)
-		}
+		items := collectMediaRowsToItemsFromJSON(review.MediaJson)
 		review.Media = make([]*sysin.CollectReviewMediaModel, 0, len(items))
 		for _, item := range items {
 			review.Media = append(review.Media, &sysin.CollectReviewMediaModel{
@@ -193,7 +128,6 @@ func (s *sSysPublish) fillCollectReviewMediaFromEvents(ctx context.Context, list
 		}
 		review.MediaCount = len(items)
 	}
-	return nil
 }
 
 func (s *sSysPublish) fillCollectReviewTargetChannelNames(ctx context.Context, list []*sysin.CollectReviewModel, tenantId int64) error {
@@ -284,34 +218,31 @@ func (s *sSysPublish) CollectReviewAction(ctx context.Context, in *sysin.Collect
 		return err
 	}
 	ids := uniqueIds(in.Ids)
-	now := gtime.Now()
-	_, err = pdao.YoubanPublishCollectReview.Ctx(ctx).
-		WhereIn("id", ids).
-		Where("tenant_id", account.TenantId).
-		Where("account_id", account.Id).
-		Where("status", sysin.CollectReviewStatusPending).
-		Data(g.Map{
-			"status":        in.Status,
-			"review_reason": in.Reason,
-			"reviewed_by":   account.Id,
-			"reviewed_at":   now,
-			"updated_at":    now,
-		}).
-		Update()
-	if err != nil {
-		return gerror.Wrap(err, "更新采集审核失败")
-	}
 	if in.Status == sysin.CollectReviewStatusApproved {
-		return s.approveCollectReviews(ctx, ids, account.TenantId, account.Id)
-	} else if in.Status == sysin.CollectReviewStatusRejected {
+		return s.approveCollectReviews(ctx, ids, account.TenantId, account.Id, in.Reason)
+	}
+	if in.Status == sysin.CollectReviewStatusRejected {
+		now := gtime.Now()
+		if _, err = pdao.YoubanPublishCollectReview.Ctx(ctx).
+			WhereIn("id", ids).
+			Where("tenant_id", account.TenantId).
+			Where("account_id", account.Id).
+			Where("status", sysin.CollectReviewStatusPending).
+			Data(g.Map{
+				"status": in.Status, "review_reason": in.Reason,
+				"reviewed_by": account.Id, "reviewed_at": now, "updated_at": now,
+			}).Update(); err != nil {
+			return gerror.Wrap(err, "更新采集审核失败")
+		}
 		if err = s.rejectCollectReviews(ctx, ids, account.TenantId, account.Id, in.Reason); err != nil {
 			return err
 		}
+		return nil
 	}
-	return nil
+	return gerror.New("不支持的审核状态")
 }
 
-func (s *sSysPublish) approveCollectReviews(ctx context.Context, reviewIds []int64, tenantId int64, accountId int64) error {
+func (s *sSysPublish) approveCollectReviews(ctx context.Context, reviewIds []int64, tenantId int64, accountId int64, reason string) error {
 	if len(reviewIds) == 0 {
 		return nil
 	}
@@ -330,7 +261,7 @@ func (s *sSysPublish) approveCollectReviews(ctx context.Context, reviewIds []int
 			defer func() { <-semaphore }()
 
 			itemStartedAt := time.Now()
-			results[index] = s.approveCollectReview(ctx, reviewId, tenantId, accountId)
+			results[index] = s.approveCollectReview(ctx, reviewId, tenantId, accountId, reason)
 			if results[index] != nil {
 				g.Log().Errorf(ctx, "批量通过采集审核失败 review_id:%d duration_ms:%d err:%+v", reviewId, time.Since(itemStartedAt).Milliseconds(), results[index])
 				return
@@ -407,7 +338,13 @@ func (s *sSysPublish) CollectReviewDelete(ctx context.Context, in *sysin.IdsInp)
 	})
 }
 
-func (s *sSysPublish) approveCollectReview(ctx context.Context, reviewId int64, tenantId int64, accountId int64) error {
+func (s *sSysPublish) approveCollectReview(ctx context.Context, reviewId int64, tenantId int64, accountId int64, reason string) error {
+	reviewLock := lock.NewConfig(5*time.Minute, 50*time.Millisecond).Mutex(fmt.Sprintf("youban_publish:collect:review:%d", reviewId))
+	if err := reviewLock.Lock(ctx); err != nil {
+		return gerror.Wrap(err, "获取采集审核处理锁失败")
+	}
+	defer func() { _ = reviewLock.Unlock(context.Background()) }()
+
 	review, err := pdao.YoubanPublishCollectReview.Ctx(ctx).
 		Where("id", reviewId).
 		Where("tenant_id", tenantId).
@@ -416,7 +353,11 @@ func (s *sSysPublish) approveCollectReview(ctx context.Context, reviewId int64, 
 	if err != nil {
 		return gerror.Wrap(err, "读取采集审核失败")
 	}
-	if review.IsEmpty() || review["status"].String() != sysin.CollectReviewStatusApproved {
+	if review.IsEmpty() {
+		return nil
+	}
+	reviewStatus := review["status"].String()
+	if reviewStatus != sysin.CollectReviewStatusPending && reviewStatus != sysin.CollectReviewStatusApproved {
 		return nil
 	}
 	dispatch, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
@@ -431,7 +372,7 @@ func (s *sSysPublish) approveCollectReview(ctx context.Context, reviewId int64, 
 		return gerror.New("采集审核分发不存在")
 	}
 	if dispatch["status"].String() == sysin.CollectDispatchStatusSent || dispatch["status"].String() == sysin.CollectDispatchStatusSkipped {
-		return nil
+		return s.markCollectReviewApproved(ctx, reviewId, tenantId, accountId, reason)
 	}
 	event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", review["event_id"].Int64()).One()
 	if err != nil {
@@ -449,28 +390,44 @@ func (s *sSysPublish) approveCollectReview(ctx context.Context, reviewId int64, 
 	if event.IsEmpty() || rule.IsEmpty() {
 		return gerror.New("采集审核关联数据不存在或规则已停用")
 	}
-	content, err := s.collectContentSnapshot(ctx, event)
-	if err != nil {
-		_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())
-		return err
+	text := strings.TrimSpace(review["raw_text"].String())
+	content := &collectContentResult{
+		RawText: text, NormalizedText: normalizeCollectText(text),
+		MediaCount: review["media_count"].Int(), MediaJSON: review["media_json"].String(),
 	}
-	content.RawText = strings.TrimSpace(review["raw_text"].String())
-	content.NormalizedText = normalizeCollectText(content.RawText)
 	content.TextHash = collectHash(content.NormalizedText)
-	content, err = s.canonicalCollectProfileMedia(ctx, event, content)
+	content.DedupeKey = collectHash(content.NormalizedText + ":" + collectMediaSignature(content.MediaJSON))
+	prepared, err := s.prepareCollectMaterialSnapshot(ctx, event, content)
 	if err != nil {
 		_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())
-		return gerror.Wrap(err, "整理审核通过媒体失败")
+		return gerror.Wrap(err, "准备审核通过资料失败")
 	}
 	profileId := dispatch["profile_id"].Int64()
 	if profileId <= 0 {
-		profileId, err = s.upsertCollectProfile(ctx, event, content, rule, review["raw_text"].String())
+		profileId, err = s.commitCollectPreparedProfile(ctx, event, prepared, rule, text)
 		if err != nil {
 			_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())
 			return err
 		}
 	}
-	return s.submitCollectProfileDispatch(ctx, review["dispatch_id"].Int64(), profileId, event, rule)
+	if err = s.submitCollectProfileDispatch(ctx, review["dispatch_id"].Int64(), profileId, event, rule); err != nil {
+		return err
+	}
+	return s.markCollectReviewApproved(ctx, reviewId, tenantId, accountId, reason)
+}
+
+func (s *sSysPublish) markCollectReviewApproved(ctx context.Context, reviewId int64, tenantId int64, accountId int64, reason string) error {
+	now := gtime.Now()
+	_, err := pdao.YoubanPublishCollectReview.Ctx(ctx).
+		Where("id", reviewId).
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		WhereIn("status", []string{sysin.CollectReviewStatusPending, sysin.CollectReviewStatusApproved}).
+		Data(g.Map{
+			"status": sysin.CollectReviewStatusApproved, "review_reason": reason,
+			"reviewed_by": accountId, "reviewed_at": now, "updated_at": now,
+		}).Update()
+	return gerror.Wrap(err, "完成采集审核状态失败")
 }
 
 func (s *sSysPublish) rejectCollectReviews(ctx context.Context, reviewIds []int64, tenantId int64, accountId int64, reason string) error {

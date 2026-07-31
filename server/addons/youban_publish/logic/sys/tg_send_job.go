@@ -316,8 +316,12 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		g.Log().Warningf(ctx, "更新频道资料索引失败 jobId:%d err:%+v", job.Id, indexErr)
 	}
 	isCycle := isCycleBatchOperation(job.OperationNo)
-	if err = s.completeProfileTelegramOperation(ctx, job, isCycle); err != nil {
-		return err
+	operationCompleted, completeErr := s.completeProfileTelegramOperation(ctx, job, isCycle)
+	if completeErr != nil {
+		return completeErr
+	}
+	if !operationCompleted {
+		return nil
 	}
 	if job.CollectEventId > 0 {
 		return s.markCollectDispatchSentByProfile(ctx, job.ProfileId, job.CollectEventId)

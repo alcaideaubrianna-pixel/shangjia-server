@@ -28,6 +28,18 @@ func TestAccountCollectCircuitBackoff(t *testing.T) {
 	}
 }
 
+func TestAccountCollectCircuitTransientStateDoesNotStopWorkerStart(t *testing.T) {
+	service := NewSysPublish()
+	service.openAccountCollectCircuit(nil, 8, errors.New("DC is closed"))
+	if !service.accountCollectCircuitShouldStart(8) {
+		t.Fatal("transient connection state should allow worker restart")
+	}
+	service.openAccountCollectCircuit(nil, 8, errors.New("AUTH_BYTES_INVALID"))
+	if service.accountCollectCircuitShouldStart(8) {
+		t.Fatal("permanent auth state should stop worker start")
+	}
+}
+
 func TestAccountCollectCircuitJSONRoundTrip(t *testing.T) {
 	original := accountCollectCircuit{
 		failures:     3,
@@ -57,7 +69,7 @@ func TestCollectMediaShouldReconnectAccount(t *testing.T) {
 		message string
 		want    bool
 	}{
-		{message: "rpc error: FILE_MIGRATE", want: true},
+		{message: "rpc error: FILE_MIGRATE", want: false},
 		{message: "get next chunk: DC is closed", want: true},
 		{message: "file_reference_expired", want: false},
 		{message: "unsupported media", want: false},

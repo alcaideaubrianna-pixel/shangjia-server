@@ -403,7 +403,7 @@ func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAcco
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	err = client.Run(runCtx, func(runCtx context.Context) error {
+	err = s.runTelegramClientWithAccountLease(runCtx, tgAccountId, client, func(runCtx context.Context) error {
 		return send(runCtx, client)
 	})
 	if err != nil {

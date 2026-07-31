@@ -34,6 +34,20 @@ func TestFindCollectVerifyEventDoesNotCrossNextDisplayGroup(t *testing.T) {
 	}
 }
 
+func TestFindCollectDisplayEventRepairsAlreadyPairedVerify(t *testing.T) {
+	receivedAt := gtime.NewFromTime(time.Now().Add(-4 * time.Minute))
+	rows := []gdb.Record{
+		{"id": gvar.New(10), "source_message_id": gvar.New(200), "material_role": gvar.New("display"), "material_parent_event_id": gvar.New(0), "raw_text": gvar.New("昵称：A200"), "media_json": gvar.New(`[{"type":"photo","fileId":"photo-200"}]`), "received_at": gvar.New(receivedAt)},
+		{"id": gvar.New(11), "source_message_id": gvar.New(201), "material_role": gvar.New("verify"), "material_parent_event_id": gvar.New(10), "status": gvar.New("ignored"), "error_message": gvar.New(collectMaterialVerifyUnmatchedMessage), "raw_text": gvar.New(""), "media_json": gvar.New(`[{"type":"video","fileId":"video-201"}]`), "received_at": gvar.New(receivedAt)},
+	}
+	if got := (&sSysPublish{}).findCollectDisplayEvent(rows, 1); got != 0 {
+		t.Fatalf("display event index=%d, want 0", got)
+	}
+	if !collectMaterialEventNeedsPairRepair(rows[1]) {
+		t.Fatal("already ignored unmatched verify event should be repairable")
+	}
+}
+
 func TestCollectMaterialEventOlderThanUsesDatabaseWallClock(t *testing.T) {
 	databaseTime := time.Now().Add(-4 * time.Minute).UTC()
 	event := gdb.Record{"received_at": gvar.New(databaseTime)}

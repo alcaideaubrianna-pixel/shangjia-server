@@ -89,7 +89,7 @@ func (s *sSysPublish) createTelegramBackupChannel(ctx context.Context, tenantId 
 	runCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	var channel *tg.Channel
-	err = client.Run(runCtx, func(ctx context.Context) error {
+	err = s.runTelegramClientWithAccountLease(runCtx, account.Id, client, func(ctx context.Context) error {
 		updates, err := client.API().ChannelsCreateChannel(ctx, &tg.ChannelsCreateChannelRequest{
 			Broadcast: true,
 			Title:     strings.TrimSpace(title),

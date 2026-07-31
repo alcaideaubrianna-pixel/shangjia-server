@@ -1,6 +1,10 @@
 package install
 
-import "testing"
+import (
+	"slices"
+	"strings"
+	"testing"
+)
 
 func TestSplitSqlKeepsDollarQuotedBlock(t *testing.T) {
 	statements := splitSql(`DO $$
@@ -22,5 +26,26 @@ func TestSqlDollarQuoteTag(t *testing.T) {
 	}
 	if got := sqlDollarQuoteTag("$1"); got != "" {
 		t.Fatalf("numeric dollar prefix must not be treated as a quote: %q", got)
+	}
+}
+
+func TestUpgradeSafeSqlIncludesCollectMediaRetryColumn(t *testing.T) {
+	tests := []struct {
+		name  string
+		files []string
+		path  string
+	}{
+		{name: "mysql", files: mysqlUpgradeSafeSqlFiles, path: "addons/youban_publish/resource/sql/upgrade_safe.sql"},
+		{name: "pgsql", files: pgsqlUpgradeSafeSqlFiles, path: "addons/youban_publish/resource/sql/upgrade_safe.pgsql.sql"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if !slices.Contains(test.files, test.path) {
+				t.Fatalf("upgrade SQL files do not contain %s: %#v", test.path, test.files)
+			}
+			if sql := readSqlFile(test.path); !strings.Contains(sql, "next_retry_at") {
+				t.Fatalf("upgrade SQL does not add next_retry_at: %s", sql)
+			}
+		})
 	}
 }

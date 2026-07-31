@@ -465,7 +465,7 @@ func (s *sSysPublish) scanTgChannelMessagesSince(ctx context.Context, tenantId i
 		return 0, err
 	}
 	scanned := 0
-	err = client.Run(runCtx, func(ctx context.Context) error {
+	err = s.runTelegramClientWithAccountLease(runCtx, account.Id, client, func(ctx context.Context) error {
 		offsetID := 0
 		for {
 			previousOffset := offsetID

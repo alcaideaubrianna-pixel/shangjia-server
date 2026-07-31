@@ -130,33 +130,23 @@ func skippedCollectRule(reason string) *collectRuleDecision {
 }
 
 func (s *sSysPublish) collectDuplicated(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, days int) (bool, error) {
-	return s.collectDuplicatedWithPHash(ctx, event, content, rule, days, true)
+	return s.collectDuplicatedAgainstHistory(ctx, event, content, rule, days)
 }
 
 func (s *sSysPublish) collectDuplicatedAtQueueFront(ctx context.Context, event gdb.Record, rule gdb.Record, days int) (bool, error) {
-	return s.collectDuplicatedWithPHash(ctx, event, nil, rule, days, false)
+	return s.collectDuplicatedAgainstHistory(ctx, event, nil, rule, days)
 }
 
-func (s *sSysPublish) collectDuplicatedWithPHash(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, days int, includePHash bool) (bool, error) {
+func (s *sSysPublish) collectDuplicatedAgainstHistory(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, days int) (bool, error) {
 	targetIds := decodeInt64JSON(rule["target_channel_id_json"].String())
 	if len(targetIds) == 0 {
 		return false, nil
 	}
 	current := collectDedupeMaterialFromEvent(event, content)
-	if !includePHash {
-		current.imagePHashKey = ""
-	}
 	if current.mediaKey == "" && current.textHash == "" && current.imagePHashKey == "" {
 		return false, nil
 	}
-	mod := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Where("tenant_id", event["tenant_id"].Int64()).
-		Where("account_id", event["account_id"].Int64()).
-		WhereLT("id", event["id"].Int64())
-	if days > 0 {
-		mod = mod.WhereGTE("received_at", gtime.NewFromTime(time.Now().AddDate(0, 0, -days)))
-	}
-	rows, err := mod.Fields("id,text_hash,media_json").OrderDesc("id").Limit(500).All()
+	rows, err := s.collectDedupeCandidateEvents(ctx, event, current, days)
 	if err != nil {
 		return false, gerror.Wrap(err, "采集去重判断失败")
 	}
@@ -185,15 +175,20 @@ func (s *sSysPublish) collectDuplicatedWithPHash(ctx context.Context, event gdb.
 		}
 		channelsByEvent[eventId] = append(channelsByEvent[eventId], decodeInt64JSON(row["target_channel_id_json"].String())...)
 	}
+	contentByDedupeKey, err := s.collectDedupeContentByKey(ctx, event, rows)
+	if err != nil {
+		return false, err
+	}
 	for _, row := range rows {
 		previousEventId := row["id"].Int64()
 		channelId := firstOverlappingInt64(targetIds, channelsByEvent[previousEventId])
 		if channelId <= 0 {
 			continue
 		}
-		previous := collectDedupeMaterialFromRecord(row)
-		if !includePHash {
-			previous.imagePHashKey = ""
+		previous := collectDedupeMaterialFromEventRecord(row)
+		if contentRow := contentByDedupeKey[strings.TrimSpace(row["dedupe_key"].String())]; contentRow != nil {
+			contentMaterial := collectDedupeMaterialFromContentRecord(contentRow)
+			previous.imagePHashKey = contentMaterial.imagePHashKey
 		}
 		layer := current.matchLayer(previous)
 		if layer == "" {
@@ -205,17 +200,102 @@ func (s *sSysPublish) collectDuplicatedWithPHash(ctx context.Context, event gdb.
 	return false, nil
 }
 
+func (s *sSysPublish) collectDedupeContentByKey(ctx context.Context, event gdb.Record, eventRows gdb.Result) (map[string]gdb.Record, error) {
+	keys := make([]string, 0, len(eventRows))
+	seen := make(map[string]struct{}, len(eventRows))
+	for _, row := range eventRows {
+		key := strings.TrimSpace(row["dedupe_key"].String())
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		return map[string]gdb.Record{}, nil
+	}
+	rows, err := pdao.YoubanPublishCollectContent.Ctx(ctx).
+		Fields("dedupe_key,text_hash,media_json").
+		Where("tenant_id", event["tenant_id"].Int64()).
+		Where("account_id", event["account_id"].Int64()).
+		WhereIn("dedupe_key", keys).
+		All()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取采集内容PHash快照失败")
+	}
+	contentByKey := make(map[string]gdb.Record, len(rows))
+	for _, row := range rows {
+		if key := strings.TrimSpace(row["dedupe_key"].String()); key != "" {
+			contentByKey[key] = row
+		}
+	}
+	return contentByKey, nil
+}
+
+func (s *sSysPublish) collectDedupeCandidateEvents(ctx context.Context, event gdb.Record, current collectDedupeMaterial, days int) (gdb.Result, error) {
+	newModel := func() *gdb.Model {
+		model := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+			Where("tenant_id", event["tenant_id"].Int64()).
+			Where("account_id", event["account_id"].Int64()).
+			WhereLT("id", event["id"].Int64())
+		if days > 0 {
+			model = model.WhereGTE("received_at", gtime.NewFromTime(time.Now().AddDate(0, 0, -days)))
+		}
+		return model
+	}
+
+	rowsByID := make(map[int64]gdb.Record)
+	if current.dedupeKey != "" || current.textHash != "" {
+		exactRows, err := newModel().
+			Where("(dedupe_key = ? OR text_hash = ?)", current.dedupeKey, current.textHash).
+			Fields("id,text_hash,dedupe_key,media_json").
+			OrderDesc("id").
+			All()
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range exactRows {
+			rowsByID[row["id"].Int64()] = row
+		}
+	}
+	if current.mediaKey != "" || current.imagePHashKey != "" {
+		recentRows, err := newModel().
+			Fields("id,text_hash,dedupe_key,media_json").
+			OrderDesc("id").
+			Limit(500).
+			All()
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range recentRows {
+			rowsByID[row["id"].Int64()] = row
+		}
+	}
+	rows := make(gdb.Result, 0, len(rowsByID))
+	for _, row := range rowsByID {
+		rows = append(rows, row)
+	}
+	sort.Slice(rows, func(left, right int) bool {
+		return rows[left]["id"].Int64() > rows[right]["id"].Int64()
+	})
+	return rows, nil
+}
+
 type collectDedupeMaterial struct {
-	mediaKey        string
-	textHash        string
-	imagePHashKey   string
-	mediaCount      int
-	imagePHashCount int
+	dedupeKey     string
+	mediaKey      string
+	textHash      string
+	imagePHashKey string
+	mediaCount    int
 }
 
 func collectDedupeMaterialFromEvent(event gdb.Record, content *collectContentResult) collectDedupeMaterial {
 	mediaJSON := event["media_json"].String()
 	textHash := strings.TrimSpace(event["text_hash"].String())
+	dedupeKey := strings.TrimSpace(event["dedupe_key"].String())
 	if content != nil {
 		if strings.TrimSpace(content.MediaJSON) != "" {
 			mediaJSON = content.MediaJSON
@@ -223,12 +303,29 @@ func collectDedupeMaterialFromEvent(event gdb.Record, content *collectContentRes
 		if strings.TrimSpace(content.TextHash) != "" {
 			textHash = content.TextHash
 		}
+		if strings.TrimSpace(content.DedupeKey) != "" {
+			dedupeKey = content.DedupeKey
+		}
 	}
-	return collectDedupeMaterialFromValues(textHash, mediaJSON)
+	material := collectDedupeMaterialFromValues(textHash, mediaJSON)
+	material.dedupeKey = dedupeKey
+	if content == nil {
+		material.imagePHashKey = ""
+	}
+	return material
 }
 
-func collectDedupeMaterialFromRecord(row gdb.Record) collectDedupeMaterial {
-	return collectDedupeMaterialFromValues(row["text_hash"].String(), row["media_json"].String())
+func collectDedupeMaterialFromEventRecord(row gdb.Record) collectDedupeMaterial {
+	material := collectDedupeMaterialFromValues(row["text_hash"].String(), row["media_json"].String())
+	material.dedupeKey = strings.TrimSpace(row["dedupe_key"].String())
+	material.imagePHashKey = ""
+	return material
+}
+
+func collectDedupeMaterialFromContentRecord(row gdb.Record) collectDedupeMaterial {
+	material := collectDedupeMaterialFromValues(row["text_hash"].String(), row["media_json"].String())
+	material.dedupeKey = strings.TrimSpace(row["dedupe_key"].String())
+	return material
 }
 
 func collectDedupeMaterialFromValues(textHash string, mediaJSON string) collectDedupeMaterial {
@@ -237,17 +334,16 @@ func collectDedupeMaterialFromValues(textHash string, mediaJSON string) collectD
 		items = nil
 	}
 	mediaKey := collectMediaFingerprintSetKey(items)
-	imagePHashKey, imagePHashCount := collectImagePHashSetKey(items)
+	imagePHashKey, _ := collectImagePHashSetKey(items)
 	textHash = strings.TrimSpace(textHash)
 	if textHash == collectHash("") {
 		textHash = ""
 	}
 	return collectDedupeMaterial{
-		mediaKey:        mediaKey,
-		textHash:        textHash,
-		imagePHashKey:   imagePHashKey,
-		mediaCount:      len(collectMediaFingerprintValues(items)),
-		imagePHashCount: imagePHashCount,
+		mediaKey:      mediaKey,
+		textHash:      textHash,
+		imagePHashKey: imagePHashKey,
+		mediaCount:    len(collectMediaFingerprintValues(items)),
 	}
 }
 

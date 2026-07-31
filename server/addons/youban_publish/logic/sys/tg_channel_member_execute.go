@@ -71,7 +71,7 @@ func (s *sSysPublish) executeChannelMemberSync(ctx context.Context, task *sysin.
 	seen := map[int64]string{}
 	runCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
 	defer cancel()
-	err = client.Run(runCtx, func(runCtx context.Context) error {
+	err = s.runTelegramClientWithAccountLease(runCtx, task.TgAccountId, client, func(runCtx context.Context) error {
 		if _, err = client.Self(runCtx); err != nil {
 			return err
 		}

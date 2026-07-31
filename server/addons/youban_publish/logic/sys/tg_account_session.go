@@ -47,7 +47,7 @@ func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64
 		} else if resolver != nil {
 			options.Resolver = resolver
 		}
-		user, err = s.readTelegramSelf(ctx, conf.AppId, conf.AppHash, options)
+		user, err = s.readTelegramSelf(ctx, item.Id, conf.AppId, conf.AppHash, options)
 	}
 	if err != nil {
 		if isTelegramPermanentAccountAuthError(err) {
@@ -176,12 +176,12 @@ func (s *sSysPublish) notifyTgAccountOwner(ctx context.Context, tgAccountId int6
 	return account, nil
 }
 
-func (s *sSysPublish) readTelegramSelf(ctx context.Context, appId int, appHash string, options telegram.Options) (*tg.User, error) {
+func (s *sSysPublish) readTelegramSelf(ctx context.Context, tgAccountId int64, appId int, appHash string, options telegram.Options) (*tg.User, error) {
 	client := telegram.NewClient(appId, appHash, options)
 	var self *tg.User
 	runCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	err := client.Run(runCtx, func(ctx context.Context) error {
+	err := s.runTelegramClientWithAccountLease(runCtx, tgAccountId, client, func(ctx context.Context) error {
 		user, err := client.Self(ctx)
 		if err != nil {
 			return err

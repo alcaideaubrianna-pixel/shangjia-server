@@ -17,7 +17,6 @@ import (
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
-	"hotgo/internal/library/hgrds/lock"
 )
 
 const accountCollectSupervisorInterval = 15 * time.Second
@@ -234,8 +233,8 @@ func startAccountCollectWorker(ctx context.Context, service *sSysPublish, tgAcco
 func (w *accountCollectWorker) run(ctx context.Context) {
 	defer close(w.done)
 	defer w.clearListenerGroups()
-	accountLock := lock.NewConfig(2*time.Minute, time.Second).Mutex(fmt.Sprintf("youban_publish:collect:listener:%d", w.tgAccountId))
-	if err := accountLock.Lock(ctx); err != nil {
+	accountLock, err := acquireTelegramAccountClientLease(ctx, w.tgAccountId)
+	if err != nil {
 		g.Log().Infof(ctx, "账号采集 worker 等待集群租约结束 tgAccountId:%d err:%+v", w.tgAccountId, err)
 		return
 	}
@@ -439,13 +438,11 @@ func (s *sSysPublish) accountCollectRuntimeClient(tgAccountId int64) (*telegram.
 	worker := s.accountRuntimes[tgAccountId]
 	s.accountRuntimeMu.Unlock()
 	if worker == nil {
-		delay := s.openAccountCollectCircuit(context.Background(), tgAccountId, gerror.New("账号采集客户端尚未连接"))
-		return nil, newCollectMediaRetryError(fmt.Sprintf("账号采集客户端尚未连接，账号级熔断等待%s后自动恢复", delay.Round(time.Second)), delay)
+		return nil, newCollectMediaRetryError("TG账号采集客户端暂不可用，等待连接恢复后重试", accountCollectConnectionRetryDelay)
 	}
 	client := worker.runtimeClient()
 	if client == nil {
-		delay := s.openAccountCollectCircuit(context.Background(), tgAccountId, gerror.New("账号采集客户端正在重连"))
-		return nil, newCollectMediaRetryError(fmt.Sprintf("账号采集客户端正在重连，账号级熔断等待%s后自动恢复", delay.Round(time.Second)), delay)
+		return nil, newCollectMediaRetryError("TG账号采集客户端正在重连，当前媒体等待连接恢复", accountCollectConnectionRetryDelay)
 	}
 	return client, nil
 }

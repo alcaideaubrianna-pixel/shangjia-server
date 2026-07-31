@@ -162,6 +162,20 @@ func (c *cPublish) CollectEventList(ctx context.Context, req *publish.CollectEve
 	return
 }
 
+func (c *cPublish) CollectEventLogList(ctx context.Context, req *publish.CollectEventLogListReq) (res *publish.CollectEventLogListRes, err error) {
+	list, totalCount, err := service.SysPublish().CollectEventLogList(ctx, &req.CollectEventLogListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.CollectEventLogModel{}
+	}
+	res = new(publish.CollectEventLogListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
 func (c *cPublish) CollectEventClear(ctx context.Context, req *publish.CollectEventClearReq) (res *publish.CollectEventClearRes, err error) {
 	if err = service.SysPublish().CollectEventClear(ctx, &req.CollectEventClearInp); err != nil {
 		return nil, err
