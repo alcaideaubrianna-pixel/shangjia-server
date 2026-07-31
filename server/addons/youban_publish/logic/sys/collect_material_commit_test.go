@@ -75,6 +75,21 @@ func TestCollectPreparedMediaCounts(t *testing.T) {
 	}
 }
 
+func TestValidatePreparedCollectMediaRequiresVideoPoster(t *testing.T) {
+	if err := validatePreparedCollectMedia(collectPreparedMedia{MediaType: "image"}); err != nil {
+		t.Fatalf("image should not require poster: %v", err)
+	}
+	if err := validatePreparedCollectMedia(collectPreparedMedia{MediaType: "video", PosterURL: "/attachment/poster.jpg"}); err != nil {
+		t.Fatalf("video poster URL should pass: %v", err)
+	}
+	if err := validatePreparedCollectMedia(collectPreparedMedia{MediaType: "video", PosterStoragePath: "attachment/poster.jpg"}); err != nil {
+		t.Fatalf("video poster storage path should pass: %v", err)
+	}
+	if err := validatePreparedCollectMedia(collectPreparedMedia{MediaType: "video"}); err == nil {
+		t.Fatal("video without poster should block material commit")
+	}
+}
+
 func TestIsCollectMediaCachePath(t *testing.T) {
 	for _, path := range []string{
 		"storage/cache/youban_publish/media/a.jpg",

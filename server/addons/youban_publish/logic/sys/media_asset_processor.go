@@ -172,6 +172,8 @@ func processMediaPipeline(ctx context.Context, source mediaPipelineSource) (*med
 		} else if remote != nil && remote.Processed {
 			result.Processed = true
 			result.PerceptualHash = remote.PerceptualHash
+			result.PosterURL = firstNonEmpty(result.PosterURL, remote.PosterUrl)
+			result.PosterPath = firstNonEmpty(result.PosterPath, remote.PosterStoragePath)
 		}
 	}
 	if result.PerceptualHash == "" && lastErr != nil {
@@ -241,7 +243,7 @@ func mediaPipelineCacheKey(source mediaPipelineSource) string {
 		}
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
-	return "youban_publish:media_pipeline:v1:" + hex.EncodeToString(sum[:])
+	return "youban_publish:media_pipeline:v2:" + hex.EncodeToString(sum[:])
 }
 
 // prepareStoredMediaAssets processes a media file that is already in local storage.
@@ -492,24 +494,6 @@ func cachedRemoteImagePHash(ctx context.Context, imageURL string) (string, error
 		return "", err
 	}
 	return remotePHashString(hash), nil
-}
-
-func cachedRemoteVideoPHashValue(ctx context.Context, videoURL string) (*goimagehash.ImageHash, error) {
-	videoURL = strings.TrimSpace(videoURL)
-	if videoURL == "" {
-		return nil, gerror.New("视频文件为空")
-	}
-	media := &telegramMediaItem{MediaType: "video", FileUrl: videoURL}
-	path, err := cachedRemoteMediaFile(ctx, mediaFileCacheKey(media, videoURL), videoURL, mediaFileCacheExt(media, videoURL))
-	if err != nil {
-		return nil, err
-	}
-	posterPath, err := generateVideoPosterPath(ctx, path)
-	if err != nil {
-		return nil, err
-	}
-	defer os.Remove(posterPath)
-	return imagePHashFromPath(posterPath)
 }
 
 func remotePHashString(hash *goimagehash.ImageHash) string {

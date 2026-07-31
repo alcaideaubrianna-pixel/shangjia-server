@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gogf/gf/v2/errors/gerror"
+
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -43,6 +45,7 @@ func processRemoteVideoAssets(ctx context.Context, videoURL string, posterURL st
 		if err == nil {
 			res.Processed = true
 			res.PerceptualHash = remotePHashString(hash)
+			res.PosterUrl = posterURL
 			return res, nil
 		}
 		if videoURL == "" {
@@ -52,13 +55,27 @@ func processRemoteVideoAssets(ctx context.Context, videoURL string, posterURL st
 	if videoURL == "" {
 		return res, nil
 	}
-	hash, err := cachedRemoteVideoPHashValue(ctx, videoURL)
+	poster, err := cachedRemoteVideoPoster(ctx, videoURL)
 	if err != nil {
 		return nil, err
 	}
+	if poster == nil || mediaPosterAttachment(poster) == nil {
+		return nil, gerror.New("远端视频预览图生成完成但未返回存储结果")
+	}
 	res.Processed = true
-	res.PerceptualHash = remotePHashString(hash)
+	res.PerceptualHash = poster.PerceptualHash
+	res.PosterUrl = mediaPosterURL(poster)
+	res.PosterStoragePath = mediaPosterStoragePathValue(poster)
 	return res, nil
+}
+
+func cachedRemoteVideoPoster(ctx context.Context, videoURL string) (*videoPosterResult, error) {
+	media := &telegramMediaItem{MediaType: "video", FileUrl: videoURL}
+	path, err := cachedRemoteMediaFile(ctx, mediaFileCacheKey(media, videoURL), videoURL, mediaFileCacheExt(media, videoURL))
+	if err != nil {
+		return nil, err
+	}
+	return buildVideoPosterResultFromPath(ctx, path, filepath.Base(path))
 }
 
 func remoteMediaURLIsVideo(value string) bool {

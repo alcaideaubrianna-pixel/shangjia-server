@@ -108,7 +108,7 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 			if assetErr != nil {
 				return nil, gerror.Wrap(assetErr, "处理采集媒体指纹失败")
 			}
-			prepared.Media = append(prepared.Media, collectPreparedMedia{
+			preparedMedia := collectPreparedMedia{
 				EventMediaId:      item.EventMediaId,
 				Purpose:           purpose,
 				SortIndex:         index + 1,
@@ -122,7 +122,11 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 				Size:              mediaSize,
 				MD5:               mediaMD5,
 				MetaJSON:          strings.TrimSpace(item.DebugMetaJson),
-			})
+			}
+			if err = validatePreparedCollectMedia(preparedMedia); err != nil {
+				return nil, err
+			}
+			prepared.Media = append(prepared.Media, preparedMedia)
 		}
 	}
 	if len(prepared.Media) != snapshot.MediaCount {
@@ -133,6 +137,16 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 	}
 	prepared.Content = collectPreparedContentSnapshot(prepared)
 	return prepared, nil
+}
+
+func validatePreparedCollectMedia(media collectPreparedMedia) error {
+	if !strings.EqualFold(strings.TrimSpace(media.MediaType), "video") {
+		return nil
+	}
+	if strings.TrimSpace(media.PosterURL) == "" && strings.TrimSpace(media.PosterStoragePath) == "" {
+		return gerror.New("采集视频预览图尚未生成，等待媒体处理完成")
+	}
+	return nil
 }
 
 func collectPreparedContentSnapshot(prepared *collectPreparedMaterial) *collectContentResult {
