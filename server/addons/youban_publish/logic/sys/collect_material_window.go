@@ -18,11 +18,12 @@ import (
 )
 
 const (
-	collectMaterialGroupingDelay = 3 * time.Minute
-	collectMaterialVerifyWindow  = 10 * time.Minute
-	collectMaterialRolePending   = "pending"
-	collectMaterialRoleDisplay   = "display"
-	collectMaterialRoleVerify    = "verify"
+	collectMaterialGroupingDelay   = 3 * time.Minute
+	collectMaterialVerifyWindow    = 10 * time.Minute
+	collectMaterialWindowBatchSize = 500
+	collectMaterialRolePending     = "pending"
+	collectMaterialRoleDisplay     = "display"
+	collectMaterialRoleVerify      = "verify"
 )
 
 func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload collectProcessQueuePayload) error {
@@ -46,6 +47,7 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 		OrderAsc("source_chat_id").
 		OrderAsc("source_message_id").
 		OrderAsc("id").
+		Limit(collectMaterialWindowBatchSize).
 		All()
 	if err != nil {
 		return gerror.Wrap(err, "读取采集源消息窗口失败")

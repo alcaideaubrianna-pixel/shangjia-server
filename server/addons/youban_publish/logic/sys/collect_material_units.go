@@ -36,18 +36,15 @@ type collectMaterialPair struct {
 
 func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collectMaterialPair {
 	pairs := make([]collectMaterialPair, 0)
+	lastDisplayIndex := -1
 	for index, message := range messages {
-		if classifyProfileMessage(message.RawText, message.Media).Kind != profileMessageKindDisplay {
-			continue
-		}
-		for nextIndex := index + 1; nextIndex < len(messages); nextIndex++ {
-			next := messages[nextIndex]
-			switch classifyProfileMessage(next.RawText, next.Media).Kind {
-			case profileMessageKindDisplay:
-				nextIndex = len(messages)
-			case profileMessageKindVerify:
-				pairs = append(pairs, collectMaterialPair{DisplayIndex: index, VerifyIndex: nextIndex})
-				nextIndex = len(messages)
+		switch classifyProfileMessage(message.RawText, message.Media).Kind {
+		case profileMessageKindDisplay:
+			lastDisplayIndex = index
+		case profileMessageKindVerify:
+			if lastDisplayIndex >= 0 {
+				pairs = append(pairs, collectMaterialPair{DisplayIndex: lastDisplayIndex, VerifyIndex: index})
+				lastDisplayIndex = -1
 			}
 		}
 	}
