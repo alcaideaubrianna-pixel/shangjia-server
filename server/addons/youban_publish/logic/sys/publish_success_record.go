@@ -17,7 +17,33 @@ const (
 )
 
 func (s *sSysPublish) appendPublishSuccessRecord(ctx context.Context, job telegramJobRecord) error {
-	return s.upsertPublishJobRecord(ctx, job, "success", publishSuccessRecordMessage(publishSuccessRecordAction(job.OperationNo)))
+	message := s.publishSuccessRecordMessage(ctx, job)
+	if err := s.upsertPublishJobRecord(ctx, job, "success", message); err != nil {
+		return err
+	}
+	_, err := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).
+		Where("job_id", job.Id).
+		Data(g.Map{"message": message}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "更新发布记录提示失败")
+	}
+	return nil
+}
+
+func (s *sSysPublish) publishSuccessRecordMessage(ctx context.Context, job telegramJobRecord) string {
+	message := publishSuccessRecordMessage(publishSuccessRecordAction(job.OperationNo))
+	policy, err := s.telegramChannelSendPolicy(ctx, job)
+	if err != nil {
+		return message
+	}
+	if policy.AntiScanEnabled {
+		message += " [防扫图: 开启]"
+	}
+	if policy.TextObfuscationEnabled {
+		message += " [图片混淆: 开启]"
+	}
+	return message
 }
 
 func (s *sSysPublish) upsertPublishJobRecord(ctx context.Context, job telegramJobRecord, status string, message string) error {

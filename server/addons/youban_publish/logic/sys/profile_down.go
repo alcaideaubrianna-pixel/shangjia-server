@@ -325,7 +325,7 @@ func (s *sSysPublish) sendDownChannelProfileLockedByChannel(ctx context.Context,
 		"sent_at":         gtime.Now(),
 		"updated_at":      gtime.Now(),
 	}).Update()
-	s.appendTelegramJobLog(ctx, job, "down_notify", "sent", fmt.Sprintf("资料下架通知已推送到下架频道，频道:%d", channelId))
+	s.appendTelegramJobLog(ctx, job, "down_notify", "sent", s.telegramJobPublishMessage(ctx, job, fmt.Sprintf("资料下架通知已推送到下架频道，频道:%d", channelId)))
 	return nil
 }
 

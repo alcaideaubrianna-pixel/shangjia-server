@@ -90,7 +90,7 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 	if recordErr := s.upsertPublishJobRecord(ctx, job, "sending", ""); recordErr != nil {
 		g.Log().Warningf(ctx, "更新发布发送中记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
-	s.appendTelegramJobLog(ctx, job, "publish", "started", s.telegramJobPublishMessage(job, "开始推送TG资料"))
+	s.appendTelegramJobLog(ctx, job, "publish", "started", s.telegramJobPublishMessage(ctx, job, "开始推送TG资料"))
 	if err = s.sendLockedTelegramJob(ctx, job); err != nil {
 		return s.handleTelegramJobError(ctx, job, err)
 	}
@@ -329,7 +329,7 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		return nil
 	}
 	job.SentAt = sentAt
-	s.appendTelegramJobLog(ctx, job, "publish", "sent", s.telegramJobPublishMessage(job, "TG资料推送成功"))
+	s.appendTelegramJobLog(ctx, job, "publish", "sent", s.telegramJobPublishMessage(ctx, job, "TG资料推送成功"))
 	if recordErr := s.appendPublishSuccessRecord(ctx, job); recordErr != nil {
 		g.Log().Warningf(ctx, "保存成功发布记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
@@ -352,9 +352,19 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 	return nil
 }
 
-func (s *sSysPublish) telegramJobPublishMessage(job telegramJobRecord, message string) string {
+func (s *sSysPublish) telegramJobPublishMessage(ctx context.Context, job telegramJobRecord, message string) string {
 	if isCycleBatchOperation(job.OperationNo) {
-		return "循环上架发布：" + message
+		message = "循环上架发布：" + message
+	}
+	policy, err := s.telegramChannelSendPolicy(ctx, job)
+	if err != nil {
+		return message
+	}
+	if policy.AntiScanEnabled {
+		message += " [防扫图: 开启]"
+	}
+	if policy.TextObfuscationEnabled {
+		message += " [图片混淆: 开启]"
 	}
 	return message
 }
