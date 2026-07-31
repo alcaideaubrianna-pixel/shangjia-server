@@ -338,17 +338,28 @@ func (s *sSysPublish) channelByStableIdentity(ctx context.Context, tenantId int6
 		return nil, nil
 	}
 	var channel channelStableIdentity
-	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Fields("id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,is_default_selected,publish_visible,(deleted_at IS NOT NULL) AS deleted").
+	base := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("target_chat_id", targetChatId).
-		Where("publish_direction", publishDirection).
-		Order("CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END ASC").
+		Where("publish_direction", publishDirection)
+	err := base.Clone().
+		Fields("id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,is_default_selected,publish_visible,0 AS deleted").
 		OrderDesc("id").
 		Limit(1).
 		Scan(&channel)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取频道稳定标识失败")
+	}
+	if channel.Id <= 0 {
+		err = base.Clone().Unscoped().
+			Fields("id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,is_default_selected,publish_visible,1 AS deleted").
+			WhereNotNull("deleted_at").
+			OrderDesc("id").
+			Limit(1).
+			Scan(&channel)
+		if err != nil {
+			return nil, gerror.Wrap(err, "读取已删除频道稳定标识失败")
+		}
 	}
 	if channel.Id <= 0 {
 		return nil, nil
