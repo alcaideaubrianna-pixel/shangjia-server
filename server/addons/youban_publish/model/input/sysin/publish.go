@@ -1159,6 +1159,8 @@ type ChannelModel struct {
 	CyclePublishTime        string      `json:"cyclePublishTime" dc:"循环上架时间"`
 	IsDefaultSelected       int         `json:"isDefaultSelected" dc:"是否默认选中"`
 	PublishVisible          int         `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
+	AntiScanEnabled         int         `json:"antiScanEnabled" dc:"频道防扫图开关"`
+	TextObfuscationEnabled  int         `json:"textObfuscationEnabled" dc:"频道文本混淆开关"`
 	BotIds                  []int64     `json:"botIds" dc:"绑定Bot ID列表"`
 	BotIdJson               string      `json:"botIdJson" dc:"绑定Bot ID JSON"`
 	BotPermissionStatusJson string      `json:"botPermissionStatusJson" dc:"Bot权限检测结果JSON"`
@@ -1174,21 +1176,23 @@ type ChannelModel struct {
 }
 
 type ChannelSaveInp struct {
-	Id                  int64   `json:"id" dc:"ID"`
-	TenantId            int64   `json:"tenantId" dc:"租户ID"`
-	TgAccountId         int64   `json:"tgAccountId" dc:"TG账号ID"`
-	ChannelTitle        string  `json:"channelTitle" dc:"频道名称"`
-	ChannelUsername     string  `json:"channelUsername" dc:"频道用户名"`
-	TargetChatId        string  `json:"targetChatId" dc:"目标Chat ID"`
-	PublishDirection    string  `json:"publishDirection" dc:"上架/下架频道：up/down"`
-	CyclePublishEnabled int     `json:"cyclePublishEnabled" dc:"是否循环上架"`
-	CyclePublishDays    int     `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
-	CyclePublishTime    string  `json:"cyclePublishTime" dc:"循环上架时间"`
-	IsDefaultSelected   int     `json:"isDefaultSelected" dc:"是否默认选中"`
-	PublishVisible      int     `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
-	BotIds              []int64 `json:"botIds" dc:"绑定Bot ID列表"`
-	Remark              string  `json:"remark" dc:"备注"`
-	Status              int     `json:"status" dc:"状态：1启用 2停用"`
+	Id                     int64   `json:"id" dc:"ID"`
+	TenantId               int64   `json:"tenantId" dc:"租户ID"`
+	TgAccountId            int64   `json:"tgAccountId" dc:"TG账号ID"`
+	ChannelTitle           string  `json:"channelTitle" dc:"频道名称"`
+	ChannelUsername        string  `json:"channelUsername" dc:"频道用户名"`
+	TargetChatId           string  `json:"targetChatId" dc:"目标Chat ID"`
+	PublishDirection       string  `json:"publishDirection" dc:"上架/下架频道：up/down"`
+	CyclePublishEnabled    int     `json:"cyclePublishEnabled" dc:"是否循环上架"`
+	CyclePublishDays       int     `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
+	CyclePublishTime       string  `json:"cyclePublishTime" dc:"循环上架时间"`
+	IsDefaultSelected      int     `json:"isDefaultSelected" dc:"是否默认选中"`
+	PublishVisible         int     `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
+	AntiScanEnabled        int     `json:"antiScanEnabled" dc:"频道防扫图开关"`
+	TextObfuscationEnabled int     `json:"textObfuscationEnabled" dc:"频道文本混淆开关"`
+	BotIds                 []int64 `json:"botIds" dc:"绑定Bot ID列表"`
+	Remark                 string  `json:"remark" dc:"备注"`
+	Status                 int     `json:"status" dc:"状态：1启用 2停用"`
 }
 
 func (in *ChannelSaveInp) Filter(ctx context.Context) error {
@@ -1228,6 +1232,12 @@ func (in *ChannelSaveInp) Filter(ctx context.Context) error {
 	}
 	if in.CyclePublishEnabled != 0 && in.CyclePublishEnabled != 1 {
 		return gerror.New("循环上架开关不合法")
+	}
+	if in.AntiScanEnabled != 0 && in.AntiScanEnabled != 1 {
+		return gerror.New("频道防扫图开关不合法")
+	}
+	if in.TextObfuscationEnabled != 0 && in.TextObfuscationEnabled != 1 {
+		return gerror.New("频道文本混淆开关不合法")
 	}
 	if in.CyclePublishEnabled == 1 && in.CyclePublishDays <= 0 {
 		in.CyclePublishDays = 4

@@ -8,16 +8,40 @@ import (
 )
 
 const (
-	TenantVipFeatureSimilarMedia = "similar_media"
+	TenantVipFeatureSimilarMedia    = "similar_media"
+	TenantVipFeatureAntiScan        = "anti_scan"
+	TenantVipFeatureTextObfuscation = "text_obfuscation"
 )
 
 type TenantVipStatusModel struct {
-	TenantId  int64       `json:"tenantId" dc:"租户ID"`
-	IsVip     bool        `json:"isVip" dc:"是否会员"`
-	Level     int         `json:"level" dc:"会员等级"`
-	Status    int         `json:"status" dc:"会员状态"`
-	ExpiredAt *gtime.Time `json:"expiredAt" dc:"到期时间"`
-	Features  []string    `json:"features" dc:"会员权益"`
+	TenantId          int64       `json:"tenantId" dc:"租户ID"`
+	IsVip             bool        `json:"isVip" dc:"是否会员"`
+	Level             int         `json:"level" dc:"会员等级"`
+	Status            int         `json:"status" dc:"会员状态"`
+	ExpiredAt         *gtime.Time `json:"expiredAt" dc:"到期时间"`
+	Features          []string    `json:"features" dc:"会员权益"`
+	AvailableFeatures []string    `json:"availableFeatures" dc:"用户端可见功能"`
+}
+
+type TenantFeaturePermissionViewInp struct {
+	TenantId int64 `json:"tenantId" dc:"租户ID"`
+}
+
+type TenantFeaturePermissionItem struct {
+	Code        string `json:"code" dc:"功能编码"`
+	Name        string `json:"name" dc:"功能名称"`
+	Description string `json:"description" dc:"功能说明"`
+	Enabled     bool   `json:"enabled" dc:"是否开放"`
+}
+
+type TenantFeaturePermissionViewModel struct {
+	TenantId int64                          `json:"tenantId" dc:"租户ID"`
+	List     []*TenantFeaturePermissionItem `json:"list" dc:"功能列表"`
+}
+
+type TenantFeaturePermissionSaveInp struct {
+	TenantId int64    `json:"tenantId" dc:"租户ID"`
+	Features []string `json:"features" dc:"开放功能编码"`
 }
 
 type TenantVipPlanModel struct {

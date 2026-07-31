@@ -27,6 +27,13 @@ func prepareTelegramMediaUploadFile(ctx context.Context, media *telegramMediaIte
 	if path == "" || media == nil {
 		return path, cleanup, nil
 	}
+	if media.AntiScanEnabled && isTelegramImageMedia(media.MediaType) {
+		protectedPath, err := prepareTelegramAntiScanFile(ctx, media, path)
+		if err != nil {
+			return "", cleanup, err
+		}
+		path = protectedPath
+	}
 	switch strings.ToLower(strings.TrimSpace(media.MediaType)) {
 	case "video":
 		return prepareTelegramVideoUploadFile(ctx, path, cleanup)

@@ -1336,6 +1336,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_channel` (
   `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环上架时间',
   `is_default_selected` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否默认选中',
   `publish_visible` tinyint(1) NOT NULL DEFAULT '1' COMMENT '上架端资料选择可见',
+  `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '频道防扫图开关',
+  `text_obfuscation_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '频道文本混淆开关',
   `bot_id_json` text COMMENT '绑定Bot ID JSON',
   `bot_permission_status_json` text NOT NULL COMMENT '频道Bot权限检测结果JSON',
   `remark` varchar(500) NOT NULL DEFAULT '' COMMENT '备注',
@@ -1354,6 +1356,18 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_channel` (
   KEY `idx_ybp_channel_tenant_direction` (`tenant_id`,`publish_direction`,`status`,`id`),
   KEY `idx_ybp_channel_chat` (`tenant_id`,`target_chat_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴上架频道配置';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tenant_feature_permission` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint NOT NULL DEFAULT '0',
+  `feature_code` varchar(64) NOT NULL DEFAULT '',
+  `status` tinyint NOT NULL DEFAULT '2',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_tenant_feature` (`tenant_id`,`feature_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴租户功能权限';
+
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否循环上架' AFTER `publish_direction`;
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环上架天数' AFTER `cycle_publish_enabled`;
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环上架时间' AFTER `cycle_publish_days`;
@@ -1363,6 +1377,8 @@ ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_active_run_id` bigint(
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_last_error_message` text COMMENT '循环上架最近错误';
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `is_default_selected` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否默认选中' AFTER `cycle_publish_time`;
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `publish_visible` tinyint(1) NOT NULL DEFAULT '1' COMMENT '上架端资料选择可见' AFTER `is_default_selected`;
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '频道防扫图开关' AFTER `publish_visible`;
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `text_obfuscation_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '频道文本混淆开关' AFTER `anti_scan_enabled`;
 ALTER TABLE `hg_youban_publish_channel` ADD KEY `idx_ybp_channel_tenant_direction` (`tenant_id`,`publish_direction`,`status`,`id`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_channel` (

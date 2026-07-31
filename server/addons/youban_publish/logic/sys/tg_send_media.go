@@ -567,12 +567,28 @@ func telegramVideoThumbnail(ctx context.Context, media *telegramMediaItem) (mode
 		g.Log().Warningf(ctx, "生成TG视频缩略图失败，跳过自定义缩略图 mediaId:%d path:%s err:%+v", media.Id, videoPath, err)
 		return nil, nil, nil
 	}
+	removeAfterSend := true
+	if media.AntiScanEnabled {
+		protectedPath, protectErr := prepareTelegramAntiScanThumbnailFile(ctx, media, thumbPath)
+		_ = os.Remove(thumbPath)
+		if protectErr != nil {
+			return nil, nil, gerror.Wrap(protectErr, "处理TG视频缩略图防扫图失败")
+		}
+		thumbPath = protectedPath
+		removeAfterSend = false
+	}
 	file, err := os.Open(thumbPath)
 	if err != nil {
-		_ = os.Remove(thumbPath)
+		if removeAfterSend {
+			_ = os.Remove(thumbPath)
+		}
 		return nil, nil, gerror.Wrap(err, "打开TG视频缩略图失败")
 	}
-	closer := closeWithCleanup(file, func() { _ = os.Remove(thumbPath) })
+	var cleanupThumb func()
+	if removeAfterSend {
+		cleanupThumb = func() { _ = os.Remove(thumbPath) }
+	}
+	closer := closeWithCleanup(file, cleanupThumb)
 	return &models.InputFileUpload{Filename: filepath.Base(thumbPath), Data: file}, closer, nil
 }
 

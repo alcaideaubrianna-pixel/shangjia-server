@@ -178,6 +178,8 @@ type ISysPublish interface {
 	AdminTenantVipConfigView(ctx context.Context) (res *sysin.TenantVipConfigModel, err error)
 	AdminTenantVipConfigSave(ctx context.Context, in *sysin.TenantVipConfigSaveInp) (err error)
 	AdminTenantVipTenantSave(ctx context.Context, in *sysin.TenantVipTenantSaveInp) (err error)
+	AdminTenantFeaturePermissionView(ctx context.Context, in *sysin.TenantFeaturePermissionViewInp) (res *sysin.TenantFeaturePermissionViewModel, err error)
+	AdminTenantFeaturePermissionSave(ctx context.Context, in *sysin.TenantFeaturePermissionSaveInp) (err error)
 	AdminTenantVipOrderList(ctx context.Context, in *sysin.TenantVipOrderListInp) (list []*sysin.TenantVipOrderModel, totalCount int, err error)
 	AdminTenantVipLogList(ctx context.Context, in *sysin.TenantVipLogListInp) (list []*sysin.TenantVipLogModel, totalCount int, err error)
 	AdminTenantVipCouponList(ctx context.Context, in *sysin.TenantVipCouponListInp) (list []*sysin.TenantVipCouponModel, totalCount int, err error)

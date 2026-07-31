@@ -943,6 +943,8 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel" (
   "cycle_publish_time" varchar(16) NOT NULL DEFAULT '',
   "is_default_selected" smallint NOT NULL DEFAULT 1,
   "publish_visible" smallint NOT NULL DEFAULT 1,
+  "anti_scan_enabled" smallint NOT NULL DEFAULT 0,
+  "text_obfuscation_enabled" smallint NOT NULL DEFAULT 0,
   "bot_id_json" text,
   "bot_permission_status_json" text NOT NULL DEFAULT '[]',
   "remark" varchar(500) NOT NULL DEFAULT '',
@@ -960,6 +962,17 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel" (
 CREATE INDEX IF NOT EXISTS "idx_ybp_channel_tenant_account" ON "hg_youban_publish_channel" ("tenant_id", "tg_account_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_channel_tenant_direction" ON "hg_youban_publish_channel" ("tenant_id", "publish_direction", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_channel_chat" ON "hg_youban_publish_channel" ("tenant_id", "target_chat_id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tenant_feature_permission" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "feature_code" varchar(64) NOT NULL DEFAULT '',
+  "status" smallint NOT NULL DEFAULT 2,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  UNIQUE("tenant_id", "feature_code")
+);
+
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_days" integer NOT NULL DEFAULT 4;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_time" varchar(16) NOT NULL DEFAULT '';
@@ -969,6 +982,8 @@ ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_active_r
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_last_error_message" text;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "is_default_selected" smallint NOT NULL DEFAULT 1;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "publish_visible" smallint NOT NULL DEFAULT 1;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_obfuscation_enabled" smallint NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_channel" (
   "id" BIGSERIAL PRIMARY KEY,

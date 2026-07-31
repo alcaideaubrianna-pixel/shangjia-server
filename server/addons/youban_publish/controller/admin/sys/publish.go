@@ -69,6 +69,19 @@ func (c *cPublishServer) VipTenantSave(ctx context.Context, req *publish.VipTena
 	return &publish.VipTenantSaveRes{}, err
 }
 
+func (c *cPublishServer) VipFeatureView(ctx context.Context, req *publish.VipFeatureViewReq) (res *publish.VipFeatureViewRes, err error) {
+	data, err := service.SysPublish().AdminTenantFeaturePermissionView(ctx, &req.TenantFeaturePermissionViewInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.VipFeatureViewRes{TenantFeaturePermissionViewModel: data}, nil
+}
+
+func (c *cPublishServer) VipFeatureSave(ctx context.Context, req *publish.VipFeatureSaveReq) (res *publish.VipFeatureSaveRes, err error) {
+	err = service.SysPublish().AdminTenantFeaturePermissionSave(ctx, &req.TenantFeaturePermissionSaveInp)
+	return &publish.VipFeatureSaveRes{}, err
+}
+
 func (c *cPublishServer) VipOrderList(ctx context.Context, req *publish.VipOrderListReq) (res *publish.VipOrderListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminTenantVipOrderList(ctx, &req.TenantVipOrderListInp)
 	if err != nil {

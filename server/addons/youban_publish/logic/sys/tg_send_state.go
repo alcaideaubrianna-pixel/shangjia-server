@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -11,7 +12,7 @@ import (
 func (s *sSysPublish) updateTelegramMediaFileIds(ctx context.Context, messages []*telegramSentMessage) error {
 	now := gtime.Now()
 	for _, item := range messages {
-		if item == nil || item.MediaId <= 0 || item.TgFileId == "" {
+		if item == nil || item.MediaId <= 0 || item.TgFileId == "" || strings.HasPrefix(item.AssetHash, "anti-scan:") {
 			continue
 		}
 		_, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).

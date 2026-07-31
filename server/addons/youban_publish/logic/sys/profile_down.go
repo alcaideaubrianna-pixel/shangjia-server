@@ -295,6 +295,11 @@ func (s *sSysPublish) sendDownChannelProfileLockedByChannel(ctx context.Context,
 		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
 		return err
 	}
+	caption, err = s.applyTelegramJobContentProtection(ctx, job, caption, displayMedia, verifyMedia)
+	if err != nil {
+		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
+		return err
+	}
 	messages, err := s.sendTelegramDisplayPart(ctx, bot, job.TargetChatId, caption, displayMedia)
 	if err != nil {
 		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)

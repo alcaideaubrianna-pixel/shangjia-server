@@ -329,6 +329,14 @@ func (s *sSysPublish) loadTenantVipStatus(ctx context.Context, tenantId int64) (
 		return nil, gerror.Wrap(err, "读取租户会员失败")
 	}
 	res := &sysin.TenantVipStatusModel{TenantId: tenantId, Status: consts.StatusDisable}
+	permissions, err := s.tenantFeaturePermissions(ctx, tenantId)
+	if err != nil {
+		return nil, err
+	}
+	res.AvailableFeatures = []string{sysin.TenantVipFeatureAntiScan}
+	if permissions[sysin.TenantVipFeatureTextObfuscation] {
+		res.AvailableFeatures = append(res.AvailableFeatures, sysin.TenantVipFeatureTextObfuscation)
+	}
 	if vip == nil {
 		return res, nil
 	}
@@ -337,7 +345,10 @@ func (s *sSysPublish) loadTenantVipStatus(ctx context.Context, tenantId int64) (
 	res.ExpiredAt = vip.ExpiredAt
 	res.IsVip = vip.Status == consts.StatusEnabled && vip.Level > 0 && (vip.ExpiredAt == nil || vip.ExpiredAt.After(gtime.Now()))
 	if res.IsVip {
-		res.Features = []string{sysin.TenantVipFeatureSimilarMedia}
+		res.Features = []string{sysin.TenantVipFeatureSimilarMedia, sysin.TenantVipFeatureAntiScan}
+		if permissions[sysin.TenantVipFeatureTextObfuscation] {
+			res.Features = append(res.Features, sysin.TenantVipFeatureTextObfuscation)
+		}
 	}
 	return res, nil
 }

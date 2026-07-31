@@ -18,6 +18,8 @@ type telegramMediaItem struct {
 	VideoWidth        int    `json:"videoWidth"`
 	VideoHeight       int    `json:"videoHeight"`
 	VideoDuration     int    `json:"videoDuration"`
+	AntiScanEnabled   bool   `json:"antiScanEnabled"`
+	AntiScanSeed      int64  `json:"antiScanSeed"`
 }
 
 type telegramSentMessage struct {

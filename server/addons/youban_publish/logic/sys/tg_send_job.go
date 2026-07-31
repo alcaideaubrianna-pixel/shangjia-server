@@ -122,6 +122,10 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if err != nil {
 		return err
 	}
+	caption, err = s.applyTelegramJobContentProtection(ctx, job, caption, displayMedia, verifyMedia)
+	if err != nil {
+		return err
+	}
 	if stillSending, err := s.telegramJobStillSending(ctx, job.Id); err != nil {
 		return err
 	} else if !stillSending {

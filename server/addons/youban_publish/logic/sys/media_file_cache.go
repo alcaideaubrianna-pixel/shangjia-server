@@ -29,6 +29,7 @@ const (
 )
 
 var mediaFileCacheDownloadGroup singleflight.Group
+var mediaFileCacheGenerateGroup singleflight.Group
 
 type mediaFileCacheMeta struct {
 	Key          string `json:"key"`
@@ -124,6 +125,53 @@ func cachedRemoteMediaFile(ctx context.Context, key string, source string, ext s
 			return filePath, nil
 		}
 		if err := downloadMediaFileCache(ctx, source, filePath); err != nil {
+			return "", err
+		}
+		if err := touchMediaFileCacheMeta(metaPath, key, source, filePath); err != nil {
+			return "", err
+		}
+		if err := pruneMediaFileCache(ctx); err != nil {
+			g.Log().Warningf(ctx, "清理媒体文件缓存失败: %+v", err)
+		}
+		return filePath, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return value.(string), nil
+}
+
+func cachedGeneratedMediaFile(ctx context.Context, key string, source string, ext string, generate func(string) error) (string, error) {
+	key = strings.TrimSpace(key)
+	if key == "" || generate == nil {
+		return "", gerror.New("生成媒体缓存参数不完整")
+	}
+	dir := mediaFileCacheDir(ctx)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", gerror.Wrap(err, "创建媒体缓存目录失败")
+	}
+	filePath := mediaFileCachePath(dir, key, ext)
+	metaPath := filePath + ".json"
+	if fileExists(filePath) {
+		_ = touchMediaFileCacheMeta(metaPath, key, source, filePath)
+		return filePath, nil
+	}
+	value, err, _ := mediaFileCacheGenerateGroup.Do(key, func() (interface{}, error) {
+		if fileExists(filePath) {
+			_ = touchMediaFileCacheMeta(metaPath, key, source, filePath)
+			return filePath, nil
+		}
+		if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+			return "", err
+		}
+		partPath := filePath + ".part"
+		_ = os.Remove(partPath)
+		if err := generate(partPath); err != nil {
+			_ = os.Remove(partPath)
+			return "", err
+		}
+		if err := os.Rename(partPath, filePath); err != nil {
+			_ = os.Remove(partPath)
 			return "", err
 		}
 		if err := touchMediaFileCacheMeta(metaPath, key, source, filePath); err != nil {

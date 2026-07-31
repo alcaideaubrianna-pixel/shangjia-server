@@ -695,3 +695,7 @@ ALTER TABLE `hg_youban_publish_profile_state` ADD COLUMN IF NOT EXISTS `publish_
 ALTER TABLE `hg_youban_publish_profile_state` ADD COLUMN IF NOT EXISTS `publish_task_status` varchar(32) NOT NULL DEFAULT '' COMMENT '当前上架任务状态';
 ALTER TABLE `hg_youban_publish_profile_state` ADD COLUMN IF NOT EXISTS `publish_task_updated_at` datetime DEFAULT NULL COMMENT '上架任务状态更新时间';
 ALTER TABLE `hg_youban_publish_profile_state` ADD INDEX `idx_ybp_profile_state_publish_active` (`publish_task_status`,`publish_task_updated_at`,`profile_id`);
+
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '频道防扫图开关';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `text_obfuscation_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '频道文本混淆开关';
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_tenant_feature_permission` (`id` bigint unsigned NOT NULL AUTO_INCREMENT,`tenant_id` bigint NOT NULL DEFAULT '0',`feature_code` varchar(64) NOT NULL DEFAULT '',`status` tinyint NOT NULL DEFAULT '2',`created_at` datetime DEFAULT NULL,`updated_at` datetime DEFAULT NULL,PRIMARY KEY (`id`),UNIQUE KEY `uk_ybp_tenant_feature` (`tenant_id`,`feature_code`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

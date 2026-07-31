@@ -133,11 +133,11 @@ func tenantVipDefaultPayItem(cfg *model.YoubanPublishVipConfig) *sysin.TenantVip
 }
 
 func tenantVipFreeFeatures() []string {
-	return []string{"基础资料管理", "频道全量推送", "频道自动删除关键字", "群聊消息推送", "防扫图", "资料管理搜索", "双向机器人", "汇率机器人", "机器人管理资料", "频道资料循环", "多账号管理"}
+	return []string{"基础资料管理", "频道全量推送", "频道自动删除关键字", "群聊消息推送", "资料管理搜索", "双向机器人", "汇率机器人", "机器人管理资料", "频道资料循环", "多账号管理"}
 }
 
 func tenantVipPaidFeatures() []string {
-	return []string{"资料相似查询", "图片搜索", "采集代理", "群聊关键字监听", "可联系管理员开启独立访问域名"}
+	return []string{"防扫图", "资料相似查询", "图片搜索", "采集代理", "群聊关键字监听", "可联系管理员开启独立访问域名"}
 }
 
 func tenantVipCacheKey(tenantId int64) string {

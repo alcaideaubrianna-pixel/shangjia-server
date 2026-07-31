@@ -703,3 +703,7 @@ ALTER TABLE "hg_youban_publish_profile_state" ADD COLUMN IF NOT EXISTS "publish_
 ALTER TABLE "hg_youban_publish_profile_state" ADD COLUMN IF NOT EXISTS "publish_task_status" varchar(32) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_profile_state" ADD COLUMN IF NOT EXISTS "publish_task_updated_at" timestamp DEFAULT NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_profile_state_publish_active" ON "hg_youban_publish_profile_state" ("publish_task_status", "publish_task_updated_at", "profile_id") WHERE "deleted_at" IS NULL AND "publish_task_status" <> '';
+
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_obfuscation_enabled" smallint NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tenant_feature_permission" ("id" BIGSERIAL PRIMARY KEY,"tenant_id" bigint NOT NULL DEFAULT 0,"feature_code" varchar(64) NOT NULL DEFAULT '',"status" smallint NOT NULL DEFAULT 2,"created_at" timestamp DEFAULT NULL,"updated_at" timestamp DEFAULT NULL,UNIQUE("tenant_id","feature_code"));

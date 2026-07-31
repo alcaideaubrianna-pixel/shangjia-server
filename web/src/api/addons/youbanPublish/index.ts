@@ -364,6 +364,14 @@ export function VipTenantSave(params = {}) {
   return http.request({ url: '/youban_publish/publish/vip/tenant/save', method: 'POST', params });
 }
 
+export function VipFeatureView(params = {}) {
+  return http.request({ url: '/youban_publish/publish/vip/feature/view', method: 'get', params });
+}
+
+export function VipFeatureSave(params = {}) {
+  return http.request({ url: '/youban_publish/publish/vip/feature/save', method: 'POST', params });
+}
+
 export function VipOrderList(params = {}) {
   return http.request({ url: '/youban_publish/publish/vip/order/list', method: 'get', params });
 }

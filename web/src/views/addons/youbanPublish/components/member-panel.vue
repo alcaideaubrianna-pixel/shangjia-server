@@ -15,6 +15,7 @@
       </n-space>
       <n-space>
         <n-button @click="openConfigModal">会员配置</n-button>
+        <n-button @click="openFeatureModal">权限管理</n-button>
         <n-button @click="openTenantVipModal()">账号会员</n-button>
         <n-button type="primary" @click="openCouponModal()">创建优惠码</n-button>
       </n-space>
@@ -100,6 +101,33 @@
     </n-modal>
 
     <n-modal
+      v-model:show="featureVisible"
+      preset="dialog"
+      title="功能权限管理"
+      positive-text="保存"
+      negative-text="取消"
+      :loading="featureSaving"
+      @positive-click="saveFeatures"
+    >
+      <n-form label-placement="top">
+        <n-form-item label="账号归属">
+          <n-select v-model:value="featureTenantId" :options="tenantOptions" disabled />
+        </n-form-item>
+        <n-space vertical size="large">
+          <div v-for="item in featureOptions" :key="item.code">
+            <n-space align="center" justify="space-between">
+              <div>
+                <div>{{ item.name }}</div>
+                <n-text depth="3">{{ item.description }}</n-text>
+              </div>
+              <n-switch v-model:value="item.enabled" />
+            </n-space>
+          </div>
+        </n-space>
+      </n-form>
+    </n-modal>
+
+    <n-modal
       v-model:show="couponVisible"
       preset="dialog"
       title="优惠码"
@@ -175,6 +203,8 @@
     VipCouponList,
     VipCouponSave,
     VipCouponStatus,
+    VipFeatureSave,
+    VipFeatureView,
     VipOrderList,
     VipTenantSave,
   } from '@/api/addons/youbanPublish';
@@ -186,6 +216,10 @@
   const configVisible = ref(false);
   const couponVisible = ref(false);
   const tenantVipVisible = ref(false);
+  const featureVisible = ref(false);
+  const featureSaving = ref(false);
+  const featureTenantId = ref<number | null>(null);
+  const featureOptions = ref<Recordable[]>([]);
   const orderLoading = ref(false);
   const couponLoading = ref(false);
   const tenantVipSaving = ref(false);
@@ -392,6 +426,33 @@
   async function openConfigModal() {
     await loadConfig();
     configVisible.value = true;
+  }
+
+  async function openFeatureModal() {
+    if (!query.tenantId) {
+      message.warning('请先选择账号归属');
+      return;
+    }
+    featureTenantId.value = query.tenantId;
+    const res = await VipFeatureView({ tenantId: query.tenantId });
+    featureOptions.value = (res?.list || []).map((item: Recordable) => ({ ...item }));
+    featureVisible.value = true;
+  }
+
+  async function saveFeatures() {
+    if (!featureTenantId.value) return false;
+    featureSaving.value = true;
+    try {
+      await VipFeatureSave({
+        tenantId: featureTenantId.value,
+        features: featureOptions.value.filter((item) => item.enabled).map((item) => item.code),
+      });
+      message.success('功能权限已保存');
+      featureVisible.value = false;
+      return true;
+    } finally {
+      featureSaving.value = false;
+    }
   }
 
   function openCouponModal(row?: Recordable) {

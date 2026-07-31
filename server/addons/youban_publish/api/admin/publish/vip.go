@@ -29,6 +29,22 @@ type VipTenantSaveReq struct {
 
 type VipTenantSaveRes struct{}
 
+type VipFeatureViewReq struct {
+	g.Meta `path:"/publish/vip/feature/view" method:"get" tags:"上架插件后台" summary:"账号归属功能权限"`
+	sysin.TenantFeaturePermissionViewInp
+}
+
+type VipFeatureViewRes struct {
+	*sysin.TenantFeaturePermissionViewModel
+}
+
+type VipFeatureSaveReq struct {
+	g.Meta `path:"/publish/vip/feature/save" method:"post" tags:"上架插件后台" summary:"保存账号归属功能权限"`
+	sysin.TenantFeaturePermissionSaveInp
+}
+
+type VipFeatureSaveRes struct{}
+
 type VipOrderListReq struct {
 	g.Meta `path:"/publish/vip/order/list" method:"get" tags:"上架插件后台" summary:"会员订单列表"`
 	sysin.TenantVipOrderListInp
