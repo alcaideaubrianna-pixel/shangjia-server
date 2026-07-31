@@ -306,6 +306,32 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		return newCollectProcessRetryError(30*time.Second, "等待资料组窗口完成")
 	}
 	if materialRole == collectMaterialRoleVerify {
+		parentEventId := event["material_parent_event_id"].Int64()
+		if parentEventId > 0 {
+			parent, parentErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+				Fields("id,status,error_message").
+				Where("id", parentEventId).
+				Where("tenant_id", tenantId).
+				Where("account_id", accountId).
+				One()
+			if parentErr != nil {
+				return gerror.Wrap(parentErr, "读取验证资料父展示事件失败")
+			}
+			if parent.IsEmpty() {
+				return newCollectProcessRetryError(30*time.Second, "等待父展示资料进入处理链路")
+			}
+			parentStatus := strings.TrimSpace(parent["status"].String())
+			if parentStatus == sysin.CollectEventStatusIgnored || parentStatus == sysin.CollectEventStatusFailed {
+				message := strings.TrimSpace(parent["error_message"].String())
+				if message == "" {
+					message = "父展示资料已忽略"
+				}
+				return s.ignoreCollectEvent(ctx, eventId, message, "group")
+			}
+			if !collectDisplayEventPassedEarlyCheck(parentStatus) {
+				return newCollectProcessRetryError(5*time.Second, "等待父展示资料完成规则和去重预检")
+			}
+		}
 		if s.collectEventNeedsMediaCache(ctx, event) {
 			_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaPending, "验证媒体缓存中")
 			return s.enqueueCollectMediaCache(ctx, collectMediaQueuePayload{
@@ -323,7 +349,6 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		if err != nil {
 			return gerror.Wrap(err, "完成验证资料组处理失败")
 		}
-		parentEventId := event["material_parent_event_id"].Int64()
 		if parentEventId <= 0 {
 			g.Log().Warningf(ctx, "验证资料已完成但没有父展示事件 eventId:%d", eventId)
 			return nil
@@ -340,42 +365,23 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		}
 		return nil
 	}
-	if ready, readyErr := s.ensureCollectPairedVerifyReady(ctx, event); readyErr != nil {
-		return readyErr
-	} else if !ready {
-		return newCollectProcessRetryError(30*time.Second, "等待验证资料媒体缓存完成")
-	}
 	rules, err := s.collectEventRules(ctx, event, tenantId, accountId)
 	if err != nil {
 		return err
 	}
-	if len(rules) == 0 {
-		g.Log().Infof(ctx, "采集事件无可用规则 eventId:%d sourceId:%d", eventId, event["source_id"].Int64())
-		return s.ignoreCollectEvent(ctx, eventId, "未命中可用规则", "precheck")
-	}
-	candidateRules := rules
-	var precheckReasons []string
-	candidateRules, precheckReasons = s.precheckCollectEventRules(event, rules)
-	if len(candidateRules) == 0 {
-		message := "未命中规则或被屏蔽"
-		if len(precheckReasons) > 0 {
-			message = strings.Join(uniqueStrings(precheckReasons), "；")
-		}
-		return s.ignoreCollectEvent(ctx, eventId, message, "precheck")
-	}
-	var earlyDedupeReasons []string
-	candidateRules, earlyDedupeReasons, err = s.filterCollectRulesByEarlyDedupe(ctx, event, candidateRules)
+	preflight, err := s.preflightCollectMaterialGroup(ctx, event, rules)
 	if err != nil {
 		return err
 	}
-	if len(candidateRules) == 0 {
-		message := "图文重复"
-		if len(earlyDedupeReasons) > 0 {
-			message = strings.Join(earlyDedupeReasons, "；")
-		}
-		return s.ignoreCollectEvent(ctx, eventId, message, "dedupe")
+	if len(preflight.Rules) == 0 {
+		return s.ignoreCollectEvent(ctx, eventId, preflight.Reason, preflight.Stage)
 	}
+	candidateRules := preflight.Rules
 	_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusPrechecked, "")
+	verifyReady, verifyErr := s.ensureCollectPairedVerifyReady(ctx, event)
+	if verifyErr != nil {
+		return verifyErr
+	}
 	if s.collectEventNeedsMediaCache(ctx, event) {
 		g.Log().Infof(ctx, "采集事件进入媒体缓存 eventId:%d media:%d", eventId, event["media_count"].Int())
 		if err = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaPending, "媒体缓存中"); err != nil {
@@ -389,6 +395,9 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 			SourceId:    event["source_id"].Int64(),
 			TgAccountId: event["tg_account_id"].Int64(),
 		}, 0)
+	}
+	if !verifyReady {
+		return newCollectProcessRetryError(30*time.Second, "等待验证资料媒体缓存完成")
 	}
 	if event["media_count"].Int() > 0 {
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaReady, "")
@@ -419,6 +428,22 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		return newCollectProcessRetryError(30*time.Second, err.Error())
 	}
 	content = canonical
+	dedupeLock := lock.NewConfig(2*time.Minute, 20*time.Millisecond).Mutex(fmt.Sprintf(
+		"youban_publish:collect:dedupe-commit:%d:%d",
+		event["tenant_id"].Int64(),
+		event["account_id"].Int64(),
+	))
+	if err = dedupeLock.Lock(ctx); err != nil {
+		return gerror.Wrap(err, "获取采集资料提交锁失败")
+	}
+	defer func() { _ = dedupeLock.Unlock(context.Background()) }()
+	candidateRules, err = s.filterCollectRulesByFinalDedupeBatch(ctx, event, content, candidateRules)
+	if err != nil {
+		return err
+	}
+	if len(candidateRules) == 0 {
+		return s.ignoreCollectEvent(ctx, eventId, "图文重复", "dedupe")
+	}
 	matched := false
 	reasons := make([]string, 0, len(candidateRules))
 	for _, rule := range candidateRules {
@@ -455,7 +480,72 @@ func (s *sSysPublish) ignoreCollectEvent(ctx context.Context, eventId int64, mes
 		stage = "precheck"
 	}
 	s.appendCollectEventLog(ctx, eventId, stage, "ignored", message, "")
-	return s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusIgnored, message)
+	if err := s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusIgnored, message); err != nil {
+		return err
+	}
+	return s.ignorePairedCollectVerifyEvents(ctx, eventId, message)
+}
+
+func collectDisplayEventPassedEarlyCheck(status string) bool {
+	switch strings.TrimSpace(status) {
+	case sysin.CollectEventStatusPrechecked,
+		sysin.CollectEventStatusMediaPending,
+		sysin.CollectEventStatusMediaReady,
+		sysin.CollectEventStatusProcessed,
+		sysin.CollectEventStatusDispatched:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *sSysPublish) ignorePairedCollectVerifyEvents(ctx context.Context, displayEventId int64, message string) error {
+	if displayEventId <= 0 {
+		return nil
+	}
+	eventCols := pdao.YoubanPublishCollectEvent.Columns()
+	verifyIds, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Fields(eventCols.Id).
+		Where("material_parent_event_id", displayEventId).
+		Where("material_role", collectMaterialRoleVerify).
+		WhereNotIn(eventCols.Status, []string{sysin.CollectEventStatusProcessed, sysin.CollectEventStatusDispatched, sysin.CollectEventStatusIgnored}).
+		Array()
+	if err != nil {
+		return gerror.Wrap(err, "读取配对验证资料失败")
+	}
+	ids := make([]int64, 0, len(verifyIds))
+	for _, value := range verifyIds {
+		if id := value.Int64(); id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	now := gtime.Now()
+	if _, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		WhereIn(eventCols.Id, ids).
+		Data(g.Map{
+			eventCols.Status:       sysin.CollectEventStatusIgnored,
+			eventCols.ErrorMessage: message,
+			eventCols.ProcessedAt:  now,
+			eventCols.UpdatedAt:    now,
+		}).Update(); err != nil {
+		return gerror.Wrap(err, "忽略配对验证资料失败")
+	}
+	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
+	_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		WhereIn(mediaCols.EventId, ids).
+		WhereIn(mediaCols.CacheStatus, []string{collectMediaCachePending, collectMediaCacheDownloading}).
+		Data(g.Map{
+			mediaCols.CacheStatus:  collectMediaCacheCanceled,
+			mediaCols.ErrorMessage: message,
+			mediaCols.UpdatedAt:    now,
+		}).Update()
+	for _, id := range ids {
+		s.appendCollectEventLog(ctx, id, "group", "ignored", message, fmt.Sprintf("parentEventId=%d", displayEventId))
+	}
+	return nil
 }
 
 func collectEventAlreadyMatched(status string) bool {
@@ -558,22 +648,7 @@ func collectEventRuleMapsToRecords(list []g.Map) []gdb.Record {
 }
 
 func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (bool, string, error) {
-	if rule["dedupe_enabled"].Int() == 1 {
-		dedupeLock := lock.NewConfig(30*time.Second, 20*time.Millisecond).Mutex(fmt.Sprintf(
-			"youban_publish:collect:dedupe:%d:%d:%d",
-			event["tenant_id"].Int64(),
-			event["account_id"].Int64(),
-			rule["id"].Int64(),
-		))
-		if err := dedupeLock.Lock(ctx); err != nil {
-			return false, "", gerror.Wrap(err, "获取采集规则去重锁失败")
-		}
-		defer func() { _ = dedupeLock.Unlock(context.Background()) }()
-	}
-	decision, err := s.evaluateCollectRule(ctx, event, content, rule)
-	if err != nil {
-		return false, "", err
-	}
+	decision := buildCollectRuleDecision(event, content, rule)
 	if decision.Skipped || !decision.Matched {
 		s.appendCollectEventLogForRecord(ctx, event, "rule", "skipped", decision.Reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
 		return false, decision.Reason, nil

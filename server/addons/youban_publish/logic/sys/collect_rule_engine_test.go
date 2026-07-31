@@ -1,6 +1,9 @@
 package sys
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestCollectMediaFingerprintSetKeyIsOrderIndependent(t *testing.T) {
 	left := []collectMediaItem{
@@ -18,7 +21,7 @@ func TestCollectMediaFingerprintSetKeyIsOrderIndependent(t *testing.T) {
 	}
 }
 
-func TestCollectDedupeMaterialMatchesAnyLayer(t *testing.T) {
+func TestCollectDedupeMaterialMatchesByPhase(t *testing.T) {
 	current := collectDedupeMaterialFromValues("text-current", `[
 		{"type":"photo","fileId":"photo-current","filePhash":"phash-current"}
 	]`)
@@ -26,27 +29,43 @@ func TestCollectDedupeMaterialMatchesAnyLayer(t *testing.T) {
 	cases := []struct {
 		name     string
 		previous collectDedupeMaterial
+		phase    collectDedupePhase
 		want     string
 	}{
 		{
 			name:     "media fingerprint",
 			previous: collectDedupeMaterialFromValues("different-text", `[{"type":"photo","fileId":"photo-current","filePhash":"different-phash"}]`),
+			phase:    collectDedupePhaseEarly,
 			want:     "media_fingerprint",
 		},
 		{
 			name:     "text hash",
 			previous: collectDedupeMaterialFromValues("text-current", `[{"type":"photo","fileId":"different-photo","filePhash":"different-phash"}]`),
+			phase:    collectDedupePhaseEarly,
 			want:     "text_hash",
 		},
 		{
 			name:     "image phash",
 			previous: collectDedupeMaterialFromValues("different-text", `[{"type":"photo","fileId":"different-photo","filePhash":"phash-current"}]`),
+			phase:    collectDedupePhasePHash,
 			want:     "image_phash",
+		},
+		{
+			name:     "early phase ignores phash",
+			previous: collectDedupeMaterialFromValues("different-text", `[{"type":"photo","fileId":"different-photo","filePhash":"phash-current"}]`),
+			phase:    collectDedupePhaseEarly,
+			want:     "",
+		},
+		{
+			name:     "phash phase ignores text",
+			previous: collectDedupeMaterialFromValues("text-current", `[{"type":"photo","fileId":"different-photo","filePhash":"different-phash"}]`),
+			phase:    collectDedupePhasePHash,
+			want:     "",
 		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			if got := current.matchLayer(testCase.previous); got != testCase.want {
+			if got := current.matchLayer(testCase.previous, testCase.phase); got != testCase.want {
 				t.Fatalf("match layer = %q, want %q", got, testCase.want)
 			}
 		})
@@ -77,5 +96,31 @@ func TestCollectMediaPHashReadsMetadata(t *testing.T) {
 	}
 	if got := collectMediaPHash(item); got != "abc123" {
 		t.Fatalf("media phash = %q, want %q", got, "abc123")
+	}
+}
+
+func TestCollectDedupeCacheValue(t *testing.T) {
+	wantTime := time.Unix(1_785_000_000, 0)
+	value := collectDedupeCacheValue(123, wantTime)
+	entry, ok := parseCollectDedupeCacheValue(value)
+	if !ok || entry.EventID != 123 || entry.ReceivedAt != wantTime.Unix() {
+		t.Fatalf("entry = %+v ok=%v", entry, ok)
+	}
+	if parseEntry, parseOK := parseCollectDedupeCacheValue("invalid"); parseOK || parseEntry.EventID != 0 {
+		t.Fatalf("invalid cache value must be rejected: %+v %v", parseEntry, parseOK)
+	}
+}
+
+func TestCollectDedupeCacheEntryValid(t *testing.T) {
+	now := time.Unix(1_785_000_000, 0)
+	recent := collectDedupeCacheEntry{EventID: 1, ReceivedAt: now.AddDate(0, 0, -2).Unix()}
+	if !collectDedupeCacheEntryValid(recent, 3, now) {
+		t.Fatal("recent entry must be valid inside the time window")
+	}
+	if collectDedupeCacheEntryValid(recent, 1, now) {
+		t.Fatal("old entry must be invalid outside the time window")
+	}
+	if !collectDedupeCacheEntryValid(recent, 0, now) {
+		t.Fatal("zero-day window must have no expiration")
 	}
 }

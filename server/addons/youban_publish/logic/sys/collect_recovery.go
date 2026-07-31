@@ -169,12 +169,17 @@ func (s *sSysPublish) recoverCollectHistoryTasks(ctx context.Context, limit int)
 	stale := now.Add(-collectHistoryRecoverAfter)
 	rows, err := pdao.YoubanPublishCollectHistoryTask.Ctx(ctx).
 		Where(
-			"(status=? OR (status=? AND updated_at<=?) OR (status=? AND (next_run_at IS NULL OR next_run_at<=?)))",
+			"(status=? OR (status=? AND updated_at<=?) OR (status=? AND (next_run_at IS NULL OR next_run_at<=?)) OR (status=? AND (error_message LIKE ? OR error_message LIKE ? OR error_message LIKE ? OR error_message LIKE ?)))",
 			sysin.CollectHistoryTaskStatusPending,
 			sysin.CollectHistoryTaskStatusRunning,
 			stale,
 			sysin.CollectHistoryTaskStatusPaused,
 			now,
+			sysin.CollectHistoryTaskStatusFailed,
+			"%TG账号连接正在使用，拒绝创建第二个客户端%",
+			"%client closed%context canceled%",
+			"%DC is closed%",
+			"%engine forcibly closed%",
 		).
 		OrderAsc("updated_at").
 		Limit(limit).

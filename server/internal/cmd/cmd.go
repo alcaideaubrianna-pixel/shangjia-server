@@ -55,6 +55,7 @@ var (
 		>> 清理历史采集资料重复媒体  [go run main.go up -m=fix -a1=collectProfileMediaDedupe]
 		>> 回填历史采集媒体 CDN 地址  [go run main.go up -m=fix -a1=collectMediaCDNRepair]
 		>> 删除采集规则唯一编号字段  [go run main.go up -m=fix -a1=collectRuleRemoveUniqueNo]
+		>> 创建采集去重查询索引  [go run main.go up -m=fix -a1=collectDedupeIndexes]
 		---------------------------------------------------------------------------------
 		更多
        	github地址：https://github.com/bufanyun/hotgo

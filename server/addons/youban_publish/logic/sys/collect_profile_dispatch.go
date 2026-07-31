@@ -47,7 +47,7 @@ func (s *sSysPublish) markCollectDispatchSentByProfile(ctx context.Context, prof
 		return nil
 	}
 	rows, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
-		Fields("event_id").Where("profile_id", profileId).Where("event_id", eventId).
+		Fields("event_id,target_channel_id_json").Where("profile_id", profileId).Where("event_id", eventId).
 		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing}).All()
 	if err != nil {
 		return gerror.Wrap(err, "读取采集分发事件失败")
@@ -66,6 +66,9 @@ func (s *sSysPublish) markCollectDispatchSentByProfile(ctx context.Context, prof
 		if err != nil {
 			return gerror.Wrap(err, "更新采集事件完成状态失败")
 		}
+	}
+	if err = s.warmCollectDedupeCacheForSentDispatches(ctx, rows); err != nil {
+		g.Log().Warningf(ctx, "采集分发成功后写入去重缓存失败 profileId:%d eventId:%d err:%+v", profileId, eventId, err)
 	}
 	return nil
 }

@@ -136,6 +136,17 @@ func (s *sSysPublish) prepareCollectMediaAsset(ctx context.Context, event gdb.Re
 }
 
 func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload collectMediaQueuePayload) (retErr error) {
+	enabled, err := collectProcessSourceEnabled(ctx, collectProcessQueuePayload{
+		TenantId:  payload.TenantId,
+		AccountId: payload.AccountId,
+		SourceId:  payload.SourceId,
+	})
+	if err != nil {
+		return gerror.Wrap(err, "检查采集源媒体任务状态失败")
+	}
+	if !enabled {
+		return nil
+	}
 	taskStartedAt := time.Now()
 	var statEvent gdb.Record
 	defer func() {
@@ -174,6 +185,42 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 	if collectEventAlreadyMatched(event["status"].String()) {
 		g.Log().Infof(ctx, "采集媒体任务对应事件已完成，跳过重复任务 eventId:%d status:%s", payload.EventId, event["status"].String())
 		return nil
+	}
+	if event["status"].String() == sysin.CollectEventStatusIgnored {
+		g.Log().Infof(ctx, "采集媒体任务对应事件已忽略，取消媒体下载 eventId:%d", payload.EventId)
+		return nil
+	}
+	if event["material_role"].String() == collectMaterialRoleVerify && event["material_parent_event_id"].Int64() > 0 {
+		parent, parentErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+			Fields("status,error_message").
+			Where("id", event["material_parent_event_id"].Int64()).
+			One()
+		if parentErr != nil {
+			return gerror.Wrap(parentErr, "检查验证媒体父展示事件失败")
+		}
+		if !parent.IsEmpty() && (parent["status"].String() == sysin.CollectEventStatusIgnored || parent["status"].String() == sysin.CollectEventStatusFailed) {
+			message := strings.TrimSpace(parent["error_message"].String())
+			if message == "" {
+				message = "父展示资料已忽略"
+			}
+			g.Log().Infof(ctx, "验证媒体父展示资料已忽略，取消媒体下载 eventId:%d parentEventId:%d", payload.EventId, event["material_parent_event_id"].Int64())
+			return s.ignoreCollectEvent(ctx, payload.EventId, message, "group")
+		}
+		if !parent.IsEmpty() && !collectDisplayEventPassedEarlyCheck(parent["status"].String()) {
+			g.Log().Infof(
+				ctx,
+				"验证媒体等待父展示资料预检，取消旧媒体任务 eventId:%d parentEventId:%d parentStatus:%s",
+				payload.EventId,
+				event["material_parent_event_id"].Int64(),
+				parent["status"].String(),
+			)
+			return s.markCollectEvent(
+				ctx,
+				payload.EventId,
+				sysin.CollectEventStatusGroupCollect,
+				"等待父展示资料完成规则和去重预检",
+			)
+		}
 	}
 	s.appendCollectEventLogForRecord(ctx, event, "media", "running", "媒体缓存任务开始执行", "")
 	if delay := s.collectGroupedMediaCacheDelay(ctx, event); delay > 0 {
@@ -219,6 +266,10 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 	g.Log().Infof(ctx, "采集媒体缓存任务完成 eventId:%d changed:%t total:%s", payload.EventId, changed, time.Since(taskStartedAt).Round(time.Millisecond))
 	s.appendCollectEventLogForRecord(ctx, event, "media", "ready", "媒体缓存任务处理完成", "")
 	if err := s.processCollectEvent(ctx, payload.EventId, payload.TenantId, payload.AccountId); err != nil {
+		if isCollectProcessRetryError(err) {
+			g.Log().Infof(ctx, "媒体缓存完成后等待采集事件依赖 eventId:%d err:%s", payload.EventId, err.Error())
+			return nil
+		}
 		g.Log().Errorf(ctx, "媒体缓存完成后继续处理采集事件失败 eventId:%d err:%+v", payload.EventId, err)
 		return err
 	}

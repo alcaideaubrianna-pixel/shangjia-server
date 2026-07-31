@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -40,14 +41,34 @@ func (s *sSysPublish) ExecuteCollectHistoryTask(ctx context.Context, taskId int6
 	if err != nil {
 		return err
 	}
-	if task.Status == sysin.CollectHistoryTaskStatusSuccess || task.Status == sysin.CollectHistoryTaskStatusFailed {
+	if task.Status == sysin.CollectHistoryTaskStatusSuccess || task.Status == sysin.CollectHistoryTaskStatusFailed || task.Status == sysin.CollectHistoryTaskStatusCanceled {
 		return nil
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 25*time.Minute)
 	defer cancel()
 	err = s.executeCollectHistoryTask(runCtx, task)
-	if pauseErr, ok := err.(*collectHistoryPauseError); ok {
+	if canceled, cancelErr := collectHistoryTaskCanceled(ctx, task.Id); cancelErr != nil {
+		return cancelErr
+	} else if canceled {
+		return nil
+	}
+	var pauseErr *collectHistoryPauseError
+	if errors.As(err, &pauseErr) {
 		return s.pauseCollectHistoryTask(ctx, task, pauseErr)
+	}
+	var retryErr *collectMediaRetryError
+	if errors.As(err, &retryErr) {
+		delay := retryErr.delay
+		if delay <= 0 {
+			delay = 5 * time.Second
+		}
+		return s.pauseCollectHistoryTask(ctx, task, &collectHistoryPauseError{delay: delay, err: retryErr})
+	}
+	if collectHistoryTransientClientError(err) {
+		return s.pauseCollectHistoryTask(ctx, task, &collectHistoryPauseError{
+			delay: 5 * time.Second,
+			err:   gerror.Wrap(err, "TG历史采集连接暂时中断，等待共享连接恢复"),
+		})
 	}
 	if err != nil {
 		s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "error", "failed", err.Error(), nil)
@@ -58,6 +79,28 @@ func (s *sSysPublish) ExecuteCollectHistoryTask(ctx context.Context, taskId int6
 		})
 	}
 	return nil
+}
+
+func collectHistoryTransientClientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	for _, keyword := range []string{
+		"client closed",
+		"context canceled",
+		"dc is closed",
+		"engine forcibly closed",
+		"use of closed network connection",
+	} {
+		if strings.Contains(message, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *sSysPublish) executeCollectHistoryTask(ctx context.Context, task *sysin.CollectHistoryTaskModel) error {
@@ -72,24 +115,34 @@ func (s *sSysPublish) executeCollectHistoryTask(ctx context.Context, task *sysin
 	if err != nil {
 		return err
 	}
-	conf, tgAccount, err := s.collectHistoryTelegram(ctx, task.TgAccountId)
-	if err != nil {
-		return err
-	}
 	task.SourceChatId = cache.ChannelId
 	if err = s.markCollectHistoryRunning(ctx, task); err != nil {
 		return err
 	}
-	client, err := s.collectHistoryClient(ctx, conf, tgAccount)
+	run := func(runCtx context.Context, client *telegram.Client) error {
+		if _, selfErr := client.Self(runCtx); selfErr != nil {
+			return selfErr
+		}
+		return s.scanCollectHistory(runCtx, client, task, source, channelID, accessHash)
+	}
+	usedRuntime, err := s.executeAccountCollectOperation(ctx, task.TgAccountId, 25*time.Minute, run)
 	if err != nil {
 		return err
 	}
-	return s.runTelegramClientWithAccountLease(ctx, task.TgAccountId, client, func(runCtx context.Context) error {
-		if _, err = client.Self(runCtx); err != nil {
-			return err
-		}
-		return s.scanCollectHistory(runCtx, client, task, source, channelID, accessHash)
-	})
+	if usedRuntime {
+		return nil
+	}
+	if circuitErr := s.accountCollectCircuitError(task.TgAccountId); circuitErr != nil {
+		return circuitErr
+	}
+	return newCollectHistoryRuntimeWaitError(task.TgAccountId)
+}
+
+func newCollectHistoryRuntimeWaitError(tgAccountId int64) *collectHistoryPauseError {
+	return &collectHistoryPauseError{
+		delay: 5 * time.Second,
+		err:   gerror.Newf("TG账号共享连接正在建立，历史采集等待后自动重试 tgAccountId:%d", tgAccountId),
+	}
 }
 
 func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.Client, task *sysin.CollectHistoryTaskModel, source *sysin.CollectSourceModel, channelID int64, accessHash int64) error {
@@ -99,6 +152,11 @@ func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.C
 	fetchedPages := 0
 	shouldFinish := false
 	for page := 0; page < collectHistoryPagesPerRun; page++ {
+		if canceled, cancelErr := collectHistoryTaskCanceled(ctx, task.Id); cancelErr != nil {
+			return cancelErr
+		} else if canceled {
+			return nil
+		}
 		messages, err := collectHistoryPage(ctx, client, channelID, accessHash, offsetID)
 		if err != nil {
 			return err
@@ -142,10 +200,31 @@ func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.C
 		"duplicate": stats.duplicates,
 		"failed":    stats.failed,
 	})
+	processPayload := collectProcessQueuePayload{
+		SourceId:  task.SourceId,
+		TenantId:  task.TenantId,
+		AccountId: task.AccountId,
+	}
+	if processErr := s.processCollectSourceWindowWithLock(ctx, processPayload); processErr != nil {
+		s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "warn", "process", "历史消息批次已落库，资料处理将在下一轮继续", g.Map{"error": processErr.Error()})
+	} else {
+		s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "process", "历史消息批次已进入资料处理链路", g.Map{"offsetId": offsetID})
+	}
 	if stop || shouldFinish {
 		return s.finishCollectHistoryTask(ctx, task, "历史消息已拉取完成")
 	}
 	return s.rescheduleCollectHistoryTask(ctx, task, offsetID)
+}
+
+func collectHistoryTaskCanceled(ctx context.Context, taskId int64) (bool, error) {
+	if taskId <= 0 {
+		return true, nil
+	}
+	status, err := pdao.YoubanPublishCollectHistoryTask.Ctx(ctx).Where("id", taskId).Fields("status").Value()
+	if err != nil {
+		return false, err
+	}
+	return status.String() == sysin.CollectHistoryTaskStatusCanceled, nil
 }
 
 func collectHistoryNextOffset(current int, messages []*tg.Message) int {

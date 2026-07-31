@@ -11,11 +11,9 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
-	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 var (
@@ -37,32 +35,20 @@ type collectReplaceRule struct {
 	To   string `json:"to"`
 }
 
-func (s *sSysPublish) evaluateCollectRule(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (*collectRuleDecision, error) {
+func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, rule gdb.Record) *collectRuleDecision {
 	rawText := strings.TrimSpace(event["raw_text"].String())
 	mediaCount := event["media_count"].Int()
 	if content != nil {
 		rawText = content.RawText
 		mediaCount = content.MediaCount
 	}
-	precheck := precheckCollectRuleText(rawText, mediaCount, rule)
-	if !precheck.Matched {
-		return skippedCollectRule(precheck.Reason), nil
-	}
-	if rule["dedupe_enabled"].Int() == 1 {
-		duplicated, err := s.collectDuplicated(ctx, event, content, rule, rule["dedupe_days"].Int())
-		if err != nil {
-			return nil, err
-		}
-		if duplicated {
-			return skippedCollectRule("图文重复"), nil
-		}
-	}
+	matchJSON := precheckCollectRuleText(rawText, mediaCount, rule).MatchJSON
 	if strings.TrimSpace(rawText) == "" {
 		return &collectRuleDecision{
 			Matched:   true,
 			Text:      "",
-			MatchJSON: precheck.MatchJSON,
-		}, nil
+			MatchJSON: matchJSON,
+		}
 	}
 	text := applyCollectLineDeletes(rawText, collectStringList(rule["delete_line_text_json"].String()))
 	text = applyCollectTextDeletes(text, collectStringList(rule["delete_text_json"].String()))
@@ -74,8 +60,8 @@ func (s *sSysPublish) evaluateCollectRule(ctx context.Context, event gdb.Record,
 		return &collectRuleDecision{
 			Matched:   true,
 			Text:      "",
-			MatchJSON: precheck.MatchJSON,
-		}, nil
+			MatchJSON: matchJSON,
+		}
 	}
 	if rule["header_enabled"].Int() == 1 && strings.TrimSpace(rule["header_markdown"].String()) != "" {
 		text = strings.TrimSpace(rule["header_markdown"].String()) + "\n\n" + text
@@ -86,33 +72,8 @@ func (s *sSysPublish) evaluateCollectRule(ctx context.Context, event gdb.Record,
 	return &collectRuleDecision{
 		Matched:   true,
 		Text:      strings.TrimSpace(text),
-		MatchJSON: precheck.MatchJSON,
-	}, nil
-}
-
-func (s *sSysPublish) filterCollectRulesByEarlyDedupe(ctx context.Context, event gdb.Record, rules []gdb.Record) ([]gdb.Record, []string, error) {
-	if len(rules) == 0 {
-		return nil, nil, nil
+		MatchJSON: matchJSON,
 	}
-	filtered := make([]gdb.Record, 0, len(rules))
-	reasons := make([]string, 0)
-	for _, rule := range rules {
-		if rule["dedupe_enabled"].Int() != 1 {
-			filtered = append(filtered, rule)
-			continue
-		}
-		duplicated, err := s.collectDuplicatedAtQueueFront(ctx, event, rule, rule["dedupe_days"].Int())
-		if err != nil {
-			return nil, nil, err
-		}
-		if duplicated {
-			reasons = append(reasons, "图文重复")
-			g.Log().Infof(ctx, "采集队列入口去重跳过 eventId:%d ruleId:%d", event["id"].Int64(), rule["id"].Int64())
-			continue
-		}
-		filtered = append(filtered, rule)
-	}
-	return filtered, uniqueStrings(reasons), nil
 }
 
 func shouldDropCollectStandaloneCodeCaption(text string, mediaCount int) bool {
@@ -120,85 +81,12 @@ func shouldDropCollectStandaloneCodeCaption(text string, mediaCount int) bool {
 	return mediaCount == 1 && collectStandaloneCodeCaptionRule.MatchString(text)
 }
 
-func skippedCollectRule(reason string) *collectRuleDecision {
-	return &collectRuleDecision{
-		Matched:   false,
-		Skipped:   true,
-		Reason:    reason,
-		MatchJSON: collectMatchJSON(nil, nil),
-	}
-}
+type collectDedupePhase string
 
-func (s *sSysPublish) collectDuplicated(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, days int) (bool, error) {
-	return s.collectDuplicatedAgainstHistory(ctx, event, content, rule, days)
-}
-
-func (s *sSysPublish) collectDuplicatedAtQueueFront(ctx context.Context, event gdb.Record, rule gdb.Record, days int) (bool, error) {
-	return s.collectDuplicatedAgainstHistory(ctx, event, nil, rule, days)
-}
-
-func (s *sSysPublish) collectDuplicatedAgainstHistory(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, days int) (bool, error) {
-	targetIds := decodeInt64JSON(rule["target_channel_id_json"].String())
-	if len(targetIds) == 0 {
-		return false, nil
-	}
-	current := collectDedupeMaterialFromEvent(event, content)
-	if current.mediaKey == "" && current.textHash == "" && current.imagePHashKey == "" {
-		return false, nil
-	}
-	rows, err := s.collectDedupeCandidateEvents(ctx, event, current, days)
-	if err != nil {
-		return false, gerror.Wrap(err, "采集去重判断失败")
-	}
-	if len(rows) == 0 {
-		return false, nil
-	}
-	eventIds := make([]int64, 0, len(rows))
-	for _, row := range rows {
-		if id := row["id"].Int64(); id > 0 {
-			eventIds = append(eventIds, id)
-		}
-	}
-	dispatchRows, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
-		Fields("event_id,target_channel_id_json").
-		WhereIn("event_id", eventIds).
-		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing, sysin.CollectDispatchStatusSent}).
-		All()
-	if err != nil {
-		return false, gerror.Wrap(err, "读取采集去重分发记录失败")
-	}
-	channelsByEvent := make(map[int64][]int64, len(dispatchRows))
-	for _, row := range dispatchRows {
-		eventId := row["event_id"].Int64()
-		if eventId <= 0 {
-			continue
-		}
-		channelsByEvent[eventId] = append(channelsByEvent[eventId], decodeInt64JSON(row["target_channel_id_json"].String())...)
-	}
-	contentByDedupeKey, err := s.collectDedupeContentByKey(ctx, event, rows)
-	if err != nil {
-		return false, err
-	}
-	for _, row := range rows {
-		previousEventId := row["id"].Int64()
-		channelId := firstOverlappingInt64(targetIds, channelsByEvent[previousEventId])
-		if channelId <= 0 {
-			continue
-		}
-		previous := collectDedupeMaterialFromEventRecord(row)
-		if contentRow := contentByDedupeKey[strings.TrimSpace(row["dedupe_key"].String())]; contentRow != nil {
-			contentMaterial := collectDedupeMaterialFromContentRecord(contentRow)
-			previous.imagePHashKey = contentMaterial.imagePHashKey
-		}
-		layer := current.matchLayer(previous)
-		if layer == "" {
-			continue
-		}
-		g.Log().Infof(ctx, "采集去重命中 eventId:%d previousEventId:%d channelId:%d layer:%s currentMedia:%d previousMedia:%d", event["id"].Int64(), previousEventId, channelId, layer, current.mediaCount, previous.mediaCount)
-		return true, nil
-	}
-	return false, nil
-}
+const (
+	collectDedupePhaseEarly collectDedupePhase = "early"
+	collectDedupePhasePHash collectDedupePhase = "phash"
+)
 
 func (s *sSysPublish) collectDedupeContentByKey(ctx context.Context, event gdb.Record, eventRows gdb.Result) (map[string]gdb.Record, error) {
 	keys := make([]string, 0, len(eventRows))
@@ -248,22 +136,32 @@ func (s *sSysPublish) collectDedupeCandidateEvents(ctx context.Context, event gd
 	}
 
 	rowsByID := make(map[int64]gdb.Record)
-	if current.dedupeKey != "" || current.textHash != "" {
+	appendExactRows := func(field, signature string) error {
+		if signature == "" {
+			return nil
+		}
 		exactRows, err := newModel().
-			Where("(dedupe_key = ? OR text_hash = ?)", current.dedupeKey, current.textHash).
-			Fields("id,text_hash,dedupe_key,media_json").
+			Where(field, signature).
+			Fields("id,text_hash,dedupe_key,media_json,received_at").
 			OrderDesc("id").
 			All()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		for _, row := range exactRows {
 			rowsByID[row["id"].Int64()] = row
 		}
+		return nil
+	}
+	if err := appendExactRows("dedupe_key", current.dedupeKey); err != nil {
+		return nil, err
+	}
+	if err := appendExactRows("text_hash", current.textHash); err != nil {
+		return nil, err
 	}
 	if current.mediaKey != "" || current.imagePHashKey != "" {
 		recentRows, err := newModel().
-			Fields("id,text_hash,dedupe_key,media_json").
+			Fields("id,text_hash,dedupe_key,media_json,received_at").
 			OrderDesc("id").
 			Limit(500).
 			All()
@@ -347,14 +245,16 @@ func collectDedupeMaterialFromValues(textHash string, mediaJSON string) collectD
 	}
 }
 
-func (material collectDedupeMaterial) matchLayer(previous collectDedupeMaterial) string {
-	if material.mediaKey != "" && material.mediaKey == previous.mediaKey {
-		return "media_fingerprint"
+func (material collectDedupeMaterial) matchLayer(previous collectDedupeMaterial, phase collectDedupePhase) string {
+	if phase == collectDedupePhaseEarly {
+		if material.mediaKey != "" && material.mediaKey == previous.mediaKey {
+			return "media_fingerprint"
+		}
+		if material.textHash != "" && material.textHash == previous.textHash {
+			return "text_hash"
+		}
 	}
-	if material.textHash != "" && material.textHash == previous.textHash {
-		return "text_hash"
-	}
-	if material.imagePHashKey != "" && material.imagePHashKey == previous.imagePHashKey {
+	if phase == collectDedupePhasePHash && material.imagePHashKey != "" && material.imagePHashKey == previous.imagePHashKey {
 		return "image_phash"
 	}
 	return ""

@@ -67,7 +67,8 @@ func (w *accountCollectWorker) handleGotdMessage(ctx context.Context, entities t
 	} else {
 		w.handleListenerMessage(ctx, entities, msg, chatIds)
 	}
-	sources := matchAccountCollectSources(w.sources, chatIds)
+	sources, _ := w.configSnapshot()
+	sources = matchAccountCollectSources(sources, chatIds)
 	if len(sources) == 0 {
 		return
 	}

@@ -21,6 +21,7 @@ const (
 	collectMediaCacheDownloading = "downloading"
 	collectMediaCacheReady       = "ready"
 	collectMediaCacheFailed      = "failed"
+	collectMediaCacheCanceled    = "canceled"
 	collectMediaNextRetryAt      = "next_retry_at"
 )
 

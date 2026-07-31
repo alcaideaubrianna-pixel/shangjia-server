@@ -266,7 +266,11 @@ func (w *accountCollectWorker) flushListenerMessageGroup(key string) {
 }
 
 func (w *accountCollectWorker) handleListenerMessage(ctx context.Context, entities tg.Entities, msg *tg.Message, chatIds []string) {
-	if w == nil || msg == nil || len(w.listeners) == 0 {
+	if w == nil || msg == nil {
+		return
+	}
+	_, listeners := w.configSnapshot()
+	if len(listeners) == 0 {
 		return
 	}
 	w.rememberListenerEntities(entities)
@@ -282,7 +286,7 @@ func (w *accountCollectWorker) handleListenerMessage(ctx context.Context, entiti
 	if sourceChatId == "" {
 		sourceChatId = listenerMessageChatID(msg)
 	}
-	for _, plan := range w.listeners {
+	for _, plan := range listeners {
 		if len(plan.Targets) == 0 {
 			continue
 		}
@@ -306,7 +310,11 @@ func (w *accountCollectWorker) handleListenerMessage(ctx context.Context, entiti
 }
 
 func (w *accountCollectWorker) handleListenerMessageGroup(ctx context.Context, group *listenerMessageGroup) {
-	if w == nil || group == nil || len(group.messages) == 0 || len(w.listeners) == 0 {
+	if w == nil || group == nil || len(group.messages) == 0 {
+		return
+	}
+	_, listeners := w.configSnapshot()
+	if len(listeners) == 0 {
 		return
 	}
 	sort.Slice(group.messages, func(i, j int) bool {
@@ -327,7 +335,7 @@ func (w *accountCollectWorker) handleListenerMessageGroup(ctx context.Context, g
 	}
 	sourceMessageIds := listenerGroupedMessageIDs(group.messages)
 	mediaHash := listenerMessagesMediaHash(group.messages)
-	for _, plan := range w.listeners {
+	for _, plan := range listeners {
 		if len(plan.Targets) == 0 {
 			continue
 		}

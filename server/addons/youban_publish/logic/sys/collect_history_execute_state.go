@@ -10,11 +10,8 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gotd/td/telegram"
-	"github.com/gotd/td/tg"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
-	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -89,7 +86,7 @@ func (s *sSysPublish) pauseCollectHistoryTask(ctx context.Context, task *sysin.C
 		delay = time.Minute
 	}
 	nextRunAt := gtime.NewFromTime(time.Now().Add(delay))
-	s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "warn", "limited", "TG历史消息拉取触发限流，任务已暂停等待", g.Map{
+	s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "warn", "waiting", "TG历史采集暂不可执行，任务将在等待后自动重试", g.Map{
 		"delaySeconds": int(delay.Seconds()),
 		"error":        pauseErr.Error(),
 	})
@@ -117,22 +114,6 @@ func (s *sSysPublish) collectHistoryChannel(ctx context.Context, source *sysin.C
 		return nil, 0, 0, gerror.New("频道AccessHash无效，请刷新频道缓存")
 	}
 	return cache, channelID, accessHash, nil
-}
-
-func (s *sSysPublish) collectHistoryTelegram(ctx context.Context, tgAccountId int64) (*model.TelegramConfig, *accountCollectTgAccount, error) {
-	conf, err := NewSysConfig().GetTelegram(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	account, err := s.accountCollectTgAccount(ctx, tgAccountId)
-	if err != nil {
-		return nil, nil, err
-	}
-	return conf, account, nil
-}
-
-func (s *sSysPublish) collectHistoryClient(ctx context.Context, conf *model.TelegramConfig, account *accountCollectTgAccount) (*telegram.Client, error) {
-	return s.newAccountCollectClient(ctx, conf, account, tg.NewUpdateDispatcher())
 }
 
 func collectHistoryCutoff(task *sysin.CollectHistoryTaskModel) *gtime.Time {

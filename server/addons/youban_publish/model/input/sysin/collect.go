@@ -44,11 +44,12 @@ const (
 	CollectDispatchStatusSkipped   = "skipped"
 	CollectDispatchStatusFailed    = "failed"
 
-	CollectHistoryTaskStatusPending = "pending"
-	CollectHistoryTaskStatusRunning = "running"
-	CollectHistoryTaskStatusPaused  = "paused"
-	CollectHistoryTaskStatusSuccess = "success"
-	CollectHistoryTaskStatusFailed  = "failed"
+	CollectHistoryTaskStatusPending  = "pending"
+	CollectHistoryTaskStatusRunning  = "running"
+	CollectHistoryTaskStatusPaused   = "paused"
+	CollectHistoryTaskStatusSuccess  = "success"
+	CollectHistoryTaskStatusFailed   = "failed"
+	CollectHistoryTaskStatusCanceled = "canceled"
 )
 
 type CollectSourceListInp struct {

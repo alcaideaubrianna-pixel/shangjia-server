@@ -128,8 +128,8 @@ func (s *sSysPublish) CollectSourceDelete(ctx context.Context, in *sysin.IdsInp)
 	}
 	ids := uniqueIds(in.Ids)
 	for _, sourceId := range ids {
-		if _, err = s.CollectSourceDown(ctx, &sysin.CollectSourceDownInp{Id: sourceId}); err != nil {
-			return gerror.Wrap(err, "删除采集源前下架资料失败")
+		if err = s.cancelCollectSourceRuntime(ctx, sourceId, account.TenantId, account.Id); err != nil {
+			return gerror.Wrap(err, "取消采集源任务失败")
 		}
 	}
 	_, err = pdao.YoubanPublishCollectSource.Ctx(ctx).
@@ -141,6 +141,7 @@ func (s *sSysPublish) CollectSourceDelete(ctx context.Context, in *sysin.IdsInp)
 	if err == nil {
 		s.refreshCollectEventRulesCache(ctx)
 		s.refreshCollectSourceCache(ctx)
+		s.refreshAccountCollectSupervisor()
 	}
 	return gerror.Wrap(err, "删除采集源失败")
 }
@@ -171,6 +172,10 @@ func (s *sSysPublish) CollectSourceStatus(ctx context.Context, in *sysin.Collect
 		Update()
 	if err == nil {
 		s.refreshCollectSourceCache(ctx)
+		s.refreshAccountCollectSupervisor()
+		if in.Enabled == 1 {
+			go s.retryCollectSourceAfterEnabled(context.Background(), in.Id, account.TenantId, account.Id)
+		}
 	}
 	return gerror.Wrap(err, "更新采集源状态失败")
 }

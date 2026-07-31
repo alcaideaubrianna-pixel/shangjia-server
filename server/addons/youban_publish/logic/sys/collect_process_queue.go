@@ -41,6 +41,13 @@ func (s *sSysPublish) enqueueCollectProcess(ctx context.Context, payload collect
 	if payload.TenantId <= 0 || payload.AccountId <= 0 || payload.SourceId <= 0 {
 		return nil
 	}
+	if s == nil || s.collectProcessRefresh == nil {
+		return nil
+	}
+	select {
+	case s.collectProcessRefresh <- struct{}{}:
+	default:
+	}
 	return nil
 }
 

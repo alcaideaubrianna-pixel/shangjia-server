@@ -41,6 +41,7 @@ type accountCollectWorker struct {
 	service     *sSysPublish
 	tgAccountId int64
 	tenantId    int64
+	configMu    sync.RWMutex
 	signature   string
 	sources     []accountCollectSourceRuntime
 	listeners   []accountListenPlanRuntime
@@ -84,9 +85,21 @@ func (s *sSysPublish) runAccountCollectSupervisor(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.accountRuntimeRefresh:
+			supervisor.sync(ctx, s)
 		case <-ticker.C:
 			supervisor.sync(ctx, s)
 		}
+	}
+}
+
+func (s *sSysPublish) refreshAccountCollectSupervisor() {
+	if s == nil || s.accountRuntimeRefresh == nil {
+		return
+	}
+	select {
+	case s.accountRuntimeRefresh <- struct{}{}:
+	default:
 	}
 }
 
@@ -103,7 +116,10 @@ func (m *accountCollectSupervisor) sync(ctx context.Context, service *sSysPublis
 		}
 		active[tgAccountId] = struct{}{}
 		signature := accountMonitorGroupSignature(group.Sources, group.Listeners)
-		if worker := m.workers[tgAccountId]; worker != nil && worker.signature == signature && !worker.isDone() {
+		if worker := m.workers[tgAccountId]; worker != nil && !worker.isDone() {
+			if worker.updateConfig(signature, group.Sources, group.Listeners) {
+				g.Log().Infof(ctx, "账号采集配置已热更新 tgAccountId:%d sources:%d listeners:%d listenerTargets:%d", tgAccountId, len(group.Sources), len(group.Listeners), accountListenerTargetCount(group.Listeners))
+			}
 			continue
 		}
 		if worker := m.workers[tgAccountId]; worker != nil {
@@ -226,20 +242,31 @@ func startAccountCollectWorker(ctx context.Context, service *sSysPublish, tgAcco
 		listenerGroups:  make(map[string]*listenerMessageGroup),
 		listenerSenders: make(map[string]listenerMessageSenderInfo),
 	}
+	service.registerAccountCollectWorker(worker)
 	go worker.run(workerCtx)
 	return worker
 }
 
 func (w *accountCollectWorker) run(ctx context.Context) {
-	defer close(w.done)
+	defer func() {
+		w.service.unregisterAccountCollectWorker(w)
+		w.failPendingOperations(newCollectMediaRetryError("TG账号共享连接启动中断，等待自动重试", accountCollectConnectionRetryDelay))
+		close(w.done)
+	}()
 	defer w.clearListenerGroups()
-	accountLock, err := acquireTelegramAccountClientLease(ctx, w.tgAccountId)
+	accountLock, err := acquireTelegramAccountClientLeaseWait(ctx, w.tgAccountId, func(waitErr error) {
+		g.Log().Infof(ctx, "账号采集 worker 等待旧实例连接租约释放 tgAccountId:%d err:%+v", w.tgAccountId, waitErr)
+	})
 	if err != nil {
-		g.Log().Infof(ctx, "账号采集 worker 等待集群租约结束 tgAccountId:%d err:%+v", w.tgAccountId, err)
+		if !isContextDone(ctx) {
+			g.Log().Warningf(ctx, "账号采集 worker 获取集群连接租约失败 tgAccountId:%d err:%+v", w.tgAccountId, err)
+		}
 		return
 	}
+	g.Log().Infof(ctx, "账号采集 worker 已取得集群连接租约 tgAccountId:%d", w.tgAccountId)
 	defer func() { _ = accountLock.Unlock(context.Background()) }()
-	g.Log().Infof(ctx, "账号采集 worker 启动 tgAccountId:%d sources:%d listeners:%d listenerTargets:%d", w.tgAccountId, len(w.sources), len(w.listeners), accountListenerTargetCount(w.listeners))
+	sources, listeners := w.configSnapshot()
+	g.Log().Infof(ctx, "账号采集 worker 启动 tgAccountId:%d sources:%d listeners:%d listenerTargets:%d", w.tgAccountId, len(sources), len(listeners), accountListenerTargetCount(listeners))
 	defer g.Log().Infof(context.Background(), "账号采集 worker 停止 tgAccountId:%d", w.tgAccountId)
 	if err := w.runGotdDispatcher(ctx); err != nil && !isContextDone(ctx) {
 		w.service.openAccountCollectCircuit(ctx, w.tgAccountId, err)
@@ -248,6 +275,30 @@ func (w *accountCollectWorker) run(ctx context.Context) {
 		}
 		g.Log().Warningf(ctx, "账号采集 worker 异常 tgAccountId:%d err:%+v", w.tgAccountId, err)
 	}
+}
+
+func (w *accountCollectWorker) updateConfig(signature string, sources []accountCollectSourceRuntime, listeners []accountListenPlanRuntime) bool {
+	if w == nil {
+		return false
+	}
+	w.configMu.Lock()
+	defer w.configMu.Unlock()
+	if w.signature == signature {
+		return false
+	}
+	w.signature = signature
+	w.sources = append([]accountCollectSourceRuntime(nil), sources...)
+	w.listeners = append([]accountListenPlanRuntime(nil), listeners...)
+	return true
+}
+
+func (w *accountCollectWorker) configSnapshot() ([]accountCollectSourceRuntime, []accountListenPlanRuntime) {
+	if w == nil {
+		return nil, nil
+	}
+	w.configMu.RLock()
+	defer w.configMu.RUnlock()
+	return append([]accountCollectSourceRuntime(nil), w.sources...), append([]accountListenPlanRuntime(nil), w.listeners...)
 }
 
 func (w *accountCollectWorker) clearListenerGroups() {
@@ -306,14 +357,31 @@ func (w *accountCollectWorker) runGotdDispatcher(ctx context.Context) error {
 			}
 			w.clientMu.Unlock()
 		}()
-		w.service.registerAccountCollectWorker(w)
-		defer w.service.unregisterAccountCollectWorker(w)
 		go w.runMessageLoop(runCtx)
 		go w.runOperationLoop(runCtx, client)
 		g.Log().Infof(runCtx, "账号采集 dispatcher 已连接 tgAccountId:%d", w.tgAccountId)
 		<-runCtx.Done()
 		return runCtx.Err()
 	})
+}
+
+func (w *accountCollectWorker) failPendingOperations(err error) {
+	if w == nil || w.operations == nil {
+		return
+	}
+	for {
+		select {
+		case task := <-w.operations:
+			if task.done != nil {
+				select {
+				case task.done <- err:
+				default:
+				}
+			}
+		default:
+			return
+		}
+	}
 }
 
 func (w *accountCollectWorker) runtimeClient() *telegram.Client {
@@ -459,6 +527,14 @@ func (s *sSysPublish) restartAccountCollectWorker(ctx context.Context, tgAccount
 	}
 	g.Log().Warningf(ctx, "账号采集连接需要重建 tgAccountId:%d err:%+v", tgAccountId, reason)
 	worker.cancel()
+	go func() {
+		select {
+		case <-worker.done:
+			s.refreshAccountCollectSupervisor()
+		case <-time.After(5 * time.Second):
+			s.refreshAccountCollectSupervisor()
+		}
+	}()
 }
 
 func (s *sSysPublish) executeAccountCollectOperationMode(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation, parallel bool) (bool, error) {

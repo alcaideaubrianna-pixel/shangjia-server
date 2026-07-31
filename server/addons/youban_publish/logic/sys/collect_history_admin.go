@@ -212,12 +212,20 @@ func (s *sSysPublish) appendCollectHistoryLog(ctx context.Context, taskId int64,
 
 func updateCollectHistoryTask(ctx context.Context, taskId int64, data g.Map) error {
 	data["updated_at"] = gtime.Now()
-	_, err := pdao.YoubanPublishCollectHistoryTask.Ctx(ctx).Where("id", taskId).Data(data).Update()
+	_, err := pdao.YoubanPublishCollectHistoryTask.Ctx(ctx).
+		Where("id", taskId).
+		WhereNot("status", sysin.CollectHistoryTaskStatusCanceled).
+		Data(data).
+		Update()
 	return gerror.Wrap(err, "更新历史采集任务失败")
 }
 
 func updateCollectHistoryTaskTx(ctx context.Context, tx gdb.TX, taskId int64, data g.Map) error {
 	data["updated_at"] = gtime.Now()
-	_, err := tx.Model(pdao.YoubanPublishCollectHistoryTask.Table()).Ctx(ctx).Where("id", taskId).Data(data).Update()
+	_, err := tx.Model(pdao.YoubanPublishCollectHistoryTask.Table()).Ctx(ctx).
+		Where("id", taskId).
+		WhereNot("status", sysin.CollectHistoryTaskStatusCanceled).
+		Data(data).
+		Update()
 	return gerror.Wrap(err, "更新历史采集任务失败")
 }

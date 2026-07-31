@@ -29,6 +29,57 @@ func acquireTelegramAccountClientLease(ctx context.Context, tgAccountId int64) (
 	return lease, nil
 }
 
+func waitTelegramAccountClientLease(
+	ctx context.Context,
+	retryInterval time.Duration,
+	acquire func() (*lock.Lock, error),
+	onWait func(error),
+) (*lock.Lock, error) {
+	if acquire == nil {
+		return nil, gerror.New("TG账号连接租约获取函数不能为空")
+	}
+	if retryInterval <= 0 {
+		retryInterval = time.Second
+	}
+	waitingLogged := false
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		lease, err := acquire()
+		if err == nil {
+			return lease, nil
+		}
+		if !gerror.Is(err, lock.ErrLockFailed) {
+			return nil, err
+		}
+		if !waitingLogged && onWait != nil {
+			onWait(err)
+			waitingLogged = true
+		}
+		timer := time.NewTimer(retryInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func acquireTelegramAccountClientLeaseWait(ctx context.Context, tgAccountId int64, onWait func(error)) (*lock.Lock, error) {
+	if tgAccountId <= 0 {
+		return nil, gerror.New("TG账号无效")
+	}
+	return waitTelegramAccountClientLease(ctx, time.Second, func() (*lock.Lock, error) {
+		lease := lock.NewConfig(2*time.Minute, time.Second).Mutex(telegramAccountClientLeaseKey(tgAccountId))
+		if err := lease.TryLock(ctx); err != nil {
+			return nil, err
+		}
+		return lease, nil
+	}, onWait)
+}
+
 func (s *sSysPublish) runTelegramClientWithAccountLease(ctx context.Context, tgAccountId int64, client *telegram.Client, run func(context.Context) error) error {
 	if client == nil {
 		return gerror.New("Telegram客户端未初始化")

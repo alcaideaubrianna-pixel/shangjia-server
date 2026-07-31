@@ -106,6 +106,8 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.RepairYoubanPublishCollectMediaCDN(ctx, mediaIds)
 	case "collectRuleRemoveUniqueNo":
 		err = fix.RemoveYoubanPublishCollectRuleUniqueNo(ctx)
+	case "collectDedupeIndexes":
+		err = fix.ApplyYoubanPublishCollectDedupeIndexes(ctx)
 	case "collectMaterialRebuild":
 		err = fix.RebuildYoubanPublishCollectMaterialGroups(ctx)
 	case "materialImportMediaRepair":

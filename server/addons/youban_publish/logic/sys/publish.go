@@ -38,11 +38,13 @@ type sSysPublish struct {
 	collectMediaLastTouch map[string]time.Time
 	collectMediaSlots     chan struct{}
 	collectMediaAccounts  map[string]chan struct{}
+	collectProcessRefresh chan struct{}
 
-	accountRuntimeMu publishRuntimeMutex
-	accountRuntimes  map[int64]*accountCollectWorker
-	accountCircuitMu publishRuntimeMutex
-	accountCircuits  map[int64]accountCollectCircuit
+	accountRuntimeMu      publishRuntimeMutex
+	accountRuntimes       map[int64]*accountCollectWorker
+	accountRuntimeRefresh chan struct{}
+	accountCircuitMu      publishRuntimeMutex
+	accountCircuits       map[int64]accountCollectCircuit
 }
 
 func NewSysPublish() *sSysPublish {
@@ -52,7 +54,9 @@ func NewSysPublish() *sSysPublish {
 		collectGroupTimers:    make(map[int64]*time.Timer),
 		collectMediaLastTouch: make(map[string]time.Time),
 		collectMediaAccounts:  make(map[string]chan struct{}),
+		collectProcessRefresh: make(chan struct{}, 1),
 		accountRuntimes:       make(map[int64]*accountCollectWorker),
+		accountRuntimeRefresh: make(chan struct{}, 1),
 		accountCircuits:       make(map[int64]accountCollectCircuit),
 		collectQueueWorkers:   make(map[int64]*collectSourceQueueWorker),
 	}
