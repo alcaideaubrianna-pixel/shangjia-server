@@ -14,7 +14,10 @@ import (
 	"hotgo/internal/library/hgrds/lock"
 )
 
-const collectProcessDispatchInterval = 10 * time.Second
+const (
+	collectProcessDispatchInterval   = 10 * time.Second
+	collectProcessRefreshMinInterval = 2 * time.Second
+)
 
 func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 	s.dispatchCollectProcessOnce(ctx)
@@ -25,6 +28,23 @@ func (s *sSysPublish) runCollectProcessDispatcher(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-s.collectProcessRefresh:
+			timer := time.NewTimer(collectProcessRefreshMinInterval)
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return
+			case <-timer.C:
+			}
+		drainRefresh:
+			for {
+				select {
+				case <-s.collectProcessRefresh:
+				default:
+					break drainRefresh
+				}
+			}
 			s.dispatchCollectProcessOnce(ctx)
 		case <-ticker.C:
 			s.dispatchCollectProcessOnce(ctx)
