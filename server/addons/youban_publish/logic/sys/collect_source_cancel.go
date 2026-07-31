@@ -151,7 +151,12 @@ func clearCollectSourceTasks(inspector *asynq.Inspector, sourceId int64) error {
 		label string
 	}{
 		{name: tgQueueNameBackground, label: "采集处理"},
-		{name: tgQueueNameMedia, label: "媒体缓存"},
+		{name: tgQueueNameMediaRealtime, label: "实时媒体缓存"},
+		{name: tgQueueNameMedia, label: "旧媒体缓存"},
+		{name: tgQueueNameMediaBulk0, label: "历史媒体缓存0"},
+		{name: tgQueueNameMediaBulk1, label: "历史媒体缓存1"},
+		{name: tgQueueNameMediaBulk2, label: "历史媒体缓存2"},
+		{name: tgQueueNameMediaBulk3, label: "历史媒体缓存3"},
 	} {
 		for _, item := range lists {
 			matched, err := listCollectSourceTasks(item.list, queue.name, sourceId)

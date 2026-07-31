@@ -20,8 +20,15 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	mediaServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    collectMediaQueueConcurrency(ctx),
-		Queues:         map[string]int{tgQueueNameMedia: 1},
+		Concurrency: collectMediaQueueConcurrency(ctx),
+		Queues: map[string]int{
+			tgQueueNameMediaRealtime: 8,
+			tgQueueNameMedia:         1,
+			tgQueueNameMediaBulk0:    2,
+			tgQueueNameMediaBulk1:    2,
+			tgQueueNameMediaBulk2:    2,
+			tgQueueNameMediaBulk3:    2,
+		},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	backgroundServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
@@ -29,7 +36,7 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 		Queues:         map[string]int{tgQueueNameBackground: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
-	g.Log().Infof(ctx, "启动TG队列；采集处理与媒体缓存使用共享后台队列")
+	g.Log().Infof(ctx, "启动TG队列；采集媒体按实时、历史账号分片和旧队列公平消费")
 	s.tgQueueServer = server
 	s.mediaQueueServer = mediaServer
 	s.backgroundQueueServer = backgroundServer

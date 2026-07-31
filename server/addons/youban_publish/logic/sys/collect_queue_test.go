@@ -12,8 +12,26 @@ import (
 )
 
 func TestCollectQueuesUseSharedWorkers(t *testing.T) {
-	if tgQueueNameBackground == tgQueueNameMedia {
+	if tgQueueNameBackground == tgQueueNameMediaRealtime {
 		t.Fatal("collect processing and media downloading must use separate shared queues")
+	}
+}
+
+func TestCollectMediaQueueNamePrioritizesRealtime(t *testing.T) {
+	if got := collectMediaQueueName(collectMediaQueuePayload{TgAccountId: 13}); got != tgQueueNameMediaRealtime {
+		t.Fatalf("realtime queue = %s", got)
+	}
+	cases := map[int64]string{
+		12: tgQueueNameMediaBulk0,
+		13: tgQueueNameMediaBulk1,
+		14: tgQueueNameMediaBulk2,
+		15: tgQueueNameMediaBulk3,
+		17: tgQueueNameMediaBulk1,
+	}
+	for accountID, want := range cases {
+		if got := collectMediaQueueName(collectMediaQueuePayload{TgAccountId: accountID, Bulk: true}); got != want {
+			t.Fatalf("account %d queue = %s, want %s", accountID, got, want)
+		}
 	}
 }
 

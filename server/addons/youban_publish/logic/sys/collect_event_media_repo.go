@@ -237,22 +237,27 @@ func (s *sSysPublish) collectEventMediaItemsByEvent(ctx context.Context, eventId
 		return result, nil
 	}
 	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
-	records, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
-		WhereIn(mediaCols.EventId, eventIds).
-		OrderAsc(mediaCols.EventId).
-		OrderAsc(mediaCols.SortIndex).
-		OrderAsc(mediaCols.Id).
-		All()
-	if err != nil {
-		return nil, gerror.Wrap(err, "批量读取采集事件媒体失败")
-	}
 	rowsByEvent := make(map[int64][]*collectEventMediaRow, len(eventIds))
-	rows := collectEventMediaRecords(records)
-	for _, row := range rows {
-		if row == nil || row.EventId <= 0 {
-			continue
+	for start := 0; start < len(eventIds); start += 200 {
+		end := start + 200
+		if end > len(eventIds) {
+			end = len(eventIds)
 		}
-		rowsByEvent[row.EventId] = append(rowsByEvent[row.EventId], row)
+		records, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+			WhereIn(mediaCols.EventId, eventIds[start:end]).
+			OrderAsc(mediaCols.EventId).
+			OrderAsc(mediaCols.SortIndex).
+			OrderAsc(mediaCols.Id).
+			All()
+		if err != nil {
+			return nil, gerror.Wrap(err, "批量读取采集事件媒体失败")
+		}
+		for _, row := range collectEventMediaRecords(records) {
+			if row == nil || row.EventId <= 0 {
+				continue
+			}
+			rowsByEvent[row.EventId] = append(rowsByEvent[row.EventId], row)
+		}
 	}
 	for eventId, eventRows := range rowsByEvent {
 		result[eventId] = collectMediaRowsToItems(eventRows, "")

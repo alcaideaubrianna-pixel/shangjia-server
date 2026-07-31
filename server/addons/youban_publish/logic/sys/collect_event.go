@@ -390,10 +390,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		}
 		if s.collectEventNeedsMediaCache(ctx, event) {
 			_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaPending, "验证媒体缓存中")
-			return s.enqueueCollectMediaCache(ctx, collectMediaQueuePayload{
-				EventId: eventId, TenantId: tenantId, AccountId: accountId,
-				SourceId: event["source_id"].Int64(), TgAccountId: event["tg_account_id"].Int64(),
-			}, 0)
+			return s.enqueueCollectMediaCache(ctx, collectMediaQueuePayloadFromEvent(event), 0)
 		}
 		_, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", eventId).Data(g.Map{
 			"status":                sysin.CollectEventStatusProcessed,
@@ -444,13 +441,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 			return err
 		}
 		s.appendCollectEventLogForRecord(ctx, event, "media", "pending", "媒体等待缓存", "")
-		return s.enqueueCollectMediaCache(ctx, collectMediaQueuePayload{
-			EventId:     eventId,
-			TenantId:    tenantId,
-			AccountId:   accountId,
-			SourceId:    event["source_id"].Int64(),
-			TgAccountId: event["tg_account_id"].Int64(),
-		}, 0)
+		return s.enqueueCollectMediaCache(ctx, collectMediaQueuePayloadFromEvent(event), 0)
 	}
 	if !verifyReady {
 		return newCollectProcessRetryError(30*time.Second, "等待验证资料媒体缓存完成")
@@ -475,10 +466,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	}
 	if err = validateCollectMaterialMedia(canonical); err != nil {
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaPending, err.Error())
-		if enqueueErr := s.enqueueCollectMediaCache(ctx, collectMediaQueuePayload{
-			EventId: eventId, TenantId: tenantId, AccountId: accountId,
-			SourceId: event["source_id"].Int64(), TgAccountId: event["tg_account_id"].Int64(),
-		}, 0); enqueueErr != nil {
+		if enqueueErr := s.enqueueCollectMediaCache(ctx, collectMediaQueuePayloadFromEvent(event), 0); enqueueErr != nil {
 			return enqueueErr
 		}
 		return newCollectProcessRetryError(30*time.Second, err.Error())

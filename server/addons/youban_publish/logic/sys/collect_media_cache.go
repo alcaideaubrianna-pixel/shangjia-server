@@ -1178,7 +1178,7 @@ func (s *sSysPublish) acquireCollectMediaDownloadSlots(ctx context.Context, tena
 		return func() {}, gerror.New("采集媒体下载缺少租户或TG账号")
 	}
 	accountKey := collectMediaAccountKey(tenantId, tgAccountId)
-	globalLimit := g.Cfg().MustGet(ctx, "youbanPublish.collect.globalMediaConcurrency", 16).Int()
+	globalLimit := g.Cfg().MustGet(ctx, "youbanPublish.collect.globalMediaConcurrency", 8).Int()
 	if globalLimit < 1 {
 		globalLimit = 1
 	}

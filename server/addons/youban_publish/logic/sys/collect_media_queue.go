@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/hibiken/asynq"
 )
@@ -17,9 +18,47 @@ type collectMediaQueuePayload struct {
 	AccountId   int64 `json:"accountId"`
 	SourceId    int64 `json:"sourceId"`
 	TgAccountId int64 `json:"tgAccountId"`
+	Bulk        bool  `json:"bulk,omitempty"`
 }
 
-const collectMediaTaskUniqueTTL = 24 * time.Hour
+const (
+	collectMediaTaskUniqueTTL      = 24 * time.Hour
+	collectMediaRealtimeWindow     = 10 * time.Minute
+	collectMediaBulkQueueShardSize = 4
+)
+
+func collectMediaQueuePayloadFromEvent(event gdb.Record) collectMediaQueuePayload {
+	payload := collectMediaQueuePayload{
+		EventId:     event["id"].Int64(),
+		TenantId:    event["tenant_id"].Int64(),
+		AccountId:   event["account_id"].Int64(),
+		SourceId:    event["source_id"].Int64(),
+		TgAccountId: event["tg_account_id"].Int64(),
+	}
+	eventAt := collectMaterialEventAt(event)
+	payload.Bulk = !eventAt.IsZero() && time.Since(eventAt) > collectMediaRealtimeWindow
+	return payload
+}
+
+func collectMediaQueueName(payload collectMediaQueuePayload) string {
+	if !payload.Bulk {
+		return tgQueueNameMediaRealtime
+	}
+	shard := payload.TgAccountId % collectMediaBulkQueueShardSize
+	if shard < 0 {
+		shard = -shard
+	}
+	switch shard {
+	case 1:
+		return tgQueueNameMediaBulk1
+	case 2:
+		return tgQueueNameMediaBulk2
+	case 3:
+		return tgQueueNameMediaBulk3
+	default:
+		return tgQueueNameMediaBulk0
+	}
+}
 
 func (s *sSysPublish) enqueueCollectMediaCache(ctx context.Context, payload collectMediaQueuePayload, delay time.Duration) error {
 	_, err := s.enqueueCollectMediaCacheTask(ctx, payload, delay)
@@ -40,7 +79,7 @@ func (s *sSysPublish) enqueueCollectMediaCacheTask(ctx context.Context, payload 
 	}
 	task := asynq.NewTask(tgTaskTypeCollectMedia, body)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameMedia),
+		asynq.Queue(collectMediaQueueName(payload)),
 		asynq.Unique(collectMediaTaskUniqueTTL),
 		asynq.MaxRetry(10),
 		asynq.Timeout(30 * time.Minute),
@@ -67,7 +106,7 @@ func decodeCollectMediaQueuePayload(task *asynq.Task) (collectMediaQueuePayload,
 }
 
 func collectMediaQueueConcurrency(ctx context.Context) int {
-	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 4).Int()
+	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 3).Int()
 	if concurrency < 1 {
 		return 1
 	}

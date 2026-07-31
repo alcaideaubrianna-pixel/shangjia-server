@@ -36,13 +36,14 @@ func (s *sSysPublish) runCollectRecovery(ctx context.Context) {
 }
 
 func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
+	mediaBatchSize := collectMediaRecoveryBatchSize(ctx)
 	if err := s.cleanupCollectEventsOlderThan(ctx, collectEventRetentionDays, 1000); err != nil {
 		g.Log().Warningf(ctx, "清理过期采集事件失败：%+v", err)
 	}
-	if err := s.recoverStaleCollectMediaRows(ctx, 1000); err != nil {
+	if err := s.recoverStaleCollectMediaRows(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复超时采集媒体失败：%+v", err)
 	}
-	if err := s.recoverPendingCollectMedia(ctx, 1000); err != nil {
+	if err := s.recoverPendingCollectMedia(ctx, mediaBatchSize); err != nil {
 		g.Log().Warningf(ctx, "恢复待处理采集媒体任务失败：%+v", err)
 	}
 	if err := s.recoverCollectHistoryTasks(ctx, 20); err != nil {
@@ -134,13 +135,7 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 		if row.IsEmpty() {
 			continue
 		}
-		payload := collectMediaQueuePayload{
-			EventId:     row[eventCols.Id].Int64(),
-			TenantId:    row[eventCols.TenantId].Int64(),
-			AccountId:   row[eventCols.AccountId].Int64(),
-			SourceId:    row[eventCols.SourceId].Int64(),
-			TgAccountId: row[eventCols.TgAccountId].Int64(),
-		}
+		payload := collectMediaQueuePayloadFromEvent(row)
 		if payload.EventId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 || payload.SourceId <= 0 {
 			continue
 		}
@@ -165,6 +160,17 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 		g.Log().Infof(ctx, "已重新投递待处理采集媒体任务 count:%d", recovered)
 	}
 	return nil
+}
+
+func collectMediaRecoveryBatchSize(ctx context.Context) int {
+	batchSize := g.Cfg().MustGet(ctx, "youbanPublish.collect.mediaRecoveryBatchSize", 200).Int()
+	if batchSize < 20 {
+		return 20
+	}
+	if batchSize > 500 {
+		return 500
+	}
+	return batchSize
 }
 
 func (s *sSysPublish) recoverCollectHistoryTasks(ctx context.Context, limit int) error {

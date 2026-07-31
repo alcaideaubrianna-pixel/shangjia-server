@@ -20,7 +20,6 @@ const (
 	collectMaterialGroupingDelay    = 3 * time.Minute
 	collectMaterialVerifyWindow     = 10 * time.Minute
 	collectMaterialVerifyRetryDelay = time.Minute
-	collectMaterialWindowBatchSize  = 500
 	collectMaterialRolePending      = "pending"
 	collectMaterialRoleDisplay      = "display"
 	collectMaterialRoleVerify       = "verify"
@@ -48,7 +47,7 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 		OrderAsc("source_chat_id").
 		OrderAsc("source_message_id").
 		OrderAsc("id").
-		Limit(collectMaterialWindowBatchSize).
+		Limit(collectMaterialWindowBatchSize(ctx)).
 		All()
 	if err != nil {
 		return gerror.Wrap(err, "读取采集源消息窗口失败")
@@ -294,16 +293,21 @@ func (s *sSysPublish) ensureCollectPairedVerifyReady(ctx context.Context, displa
 	if err = s.markCollectEvent(ctx, verify["id"].Int64(), sysin.CollectEventStatusMediaPending, "验证媒体缓存中"); err != nil {
 		return false, err
 	}
-	if err = s.enqueueCollectMediaCache(ctx, collectMediaQueuePayload{
-		EventId:     verify["id"].Int64(),
-		TenantId:    verify["tenant_id"].Int64(),
-		AccountId:   verify["account_id"].Int64(),
-		SourceId:    verify["source_id"].Int64(),
-		TgAccountId: verify["tg_account_id"].Int64(),
-	}, 0); err != nil {
+	if err = s.enqueueCollectMediaCache(ctx, collectMediaQueuePayloadFromEvent(verify), 0); err != nil {
 		return false, err
 	}
 	return false, nil
+}
+
+func collectMaterialWindowBatchSize(ctx context.Context) int {
+	batchSize := g.Cfg().MustGet(ctx, "youbanPublish.collect.materialWindowBatchSize", 100).Int()
+	if batchSize < 20 {
+		return 20
+	}
+	if batchSize > 200 {
+		return 200
+	}
+	return batchSize
 }
 
 func (s *sSysPublish) mergeCollectMaterialContent(ctx context.Context, display gdb.Record, content *collectContentResult) (*collectContentResult, error) {

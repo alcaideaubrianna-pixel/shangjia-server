@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -159,22 +158,7 @@ func stripTelegramVideoMetadata(ctx context.Context, path string) (string, error
 	if err != nil {
 		return "", gerror.New("ffmpeg 未安装，无法清理视频元数据")
 	}
-	out, err := os.CreateTemp("", "ybp-tg-video-*"+filepath.Ext(path))
-	if err != nil {
-		return "", gerror.Wrap(err, "创建视频临时文件失败")
-	}
-	outPath := out.Name()
-	_ = out.Close()
-	_ = os.Remove(outPath)
-	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-	defer cancel()
-	args := []string{"-y", "-i", path, "-map_metadata", "-1", "-c", "copy", outPath}
-	output, err := exec.CommandContext(cmdCtx, ffmpegPath, args...).CombinedOutput()
-	if err != nil {
-		_ = os.Remove(outPath)
-		return "", gerror.Wrapf(err, "ffmpeg 清理视频元数据失败：%s", ellipsisString(strings.TrimSpace(string(output)), 500))
-	}
-	return outPath, nil
+	return cachedTelegramVideoSanitize(ctx, ffmpegPath, path)
 }
 
 func encodeTelegramJPEG(img image.Image, quality int) (string, error) {
