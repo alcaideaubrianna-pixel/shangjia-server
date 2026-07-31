@@ -218,7 +218,7 @@ func (s *sSysPublish) collectSourcePendingDownJobs(ctx context.Context, taskIds 
 
 func (s *sSysPublish) finishCollectSourceDownProfiles(ctx context.Context, profileIds []int64, tenantId int64) error {
 	for _, profileId := range uniqueIds(profileIds) {
-		if _, err := s.syncProfilePublishState(ctx, profileId, 0, consts.ContentVisibilityPrivate, nil); err != nil {
+		if _, err := s.syncProfilePublishState(ctx, profileId, 2, consts.ContentVisibilityPrivate, nil); err != nil {
 			return err
 		}
 	}

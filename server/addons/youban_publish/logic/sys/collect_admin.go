@@ -132,12 +132,23 @@ func (s *sSysPublish) CollectSourceDelete(ctx context.Context, in *sysin.IdsInp)
 			return gerror.Wrap(err, "取消采集源任务失败")
 		}
 	}
-	_, err = pdao.YoubanPublishCollectSource.Ctx(ctx).
-		WhereIn("id", ids).
-		Where("tenant_id", account.TenantId).
-		Where("account_id", account.Id).
-		Data(g.Map{"deleted_at": gtime.Now(), "deleted_by": account.Id}).
-		Update()
+	err = pdao.YoubanPublishCollectSource.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if _, deleteErr := tx.Model(pdao.YoubanPublishCollectSourceRule.Table()).Ctx(ctx).
+			WhereIn("source_id", ids).
+			Where("tenant_id", account.TenantId).
+			Delete(); deleteErr != nil {
+			return gerror.Wrap(deleteErr, "删除采集源规则绑定失败")
+		}
+		if _, deleteErr := tx.Model(pdao.YoubanPublishCollectSource.Table()).Ctx(ctx).
+			WhereIn("id", ids).
+			Where("tenant_id", account.TenantId).
+			Where("account_id", account.Id).
+			Unscoped().
+			Delete(); deleteErr != nil {
+			return gerror.Wrap(deleteErr, "物理删除采集源失败")
+		}
+		return nil
+	})
 	if err == nil {
 		s.refreshCollectEventRulesCache(ctx)
 		s.refreshCollectSourceCache(ctx)

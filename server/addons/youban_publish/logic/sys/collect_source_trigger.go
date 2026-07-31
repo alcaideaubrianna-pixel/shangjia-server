@@ -334,7 +334,7 @@ func (s *sSysPublish) resetCollectSourceProfilesForDev(ctx context.Context, prof
 		return gerror.Wrap(err, "废弃采集源TG任务失败")
 	}
 	for _, profileId := range profileIds {
-		if _, err = s.syncProfilePublishState(ctx, profileId, 0, consts.ContentVisibilityPrivate, nil); err != nil {
+		if _, err = s.syncProfilePublishState(ctx, profileId, 2, consts.ContentVisibilityPrivate, nil); err != nil {
 			return err
 		}
 	}

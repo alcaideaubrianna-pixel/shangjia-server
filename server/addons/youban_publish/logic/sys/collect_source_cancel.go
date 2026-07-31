@@ -97,10 +97,14 @@ func (s *sSysPublish) cancelCollectSourceHistoryTasks(ctx context.Context, sourc
 }
 
 func (s *sSysPublish) cancelCollectSourceEvents(ctx context.Context, sourceId int64, tenantId int64, accountId int64, now *gtime.Time) error {
+	eventTable := pdao.YoubanPublishCollectEvent.Table()
+	reviewTable := pdao.YoubanPublishCollectReview.Table()
 	_, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Where("source_id", sourceId).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
+		Where("NOT EXISTS (SELECT 1 FROM "+reviewTable+" r WHERE r.event_id="+eventTable+".id AND r.tenant_id=? AND r.account_id=? AND r.status=?)",
+			tenantId, accountId, sysin.CollectReviewStatusPending).
 		WhereIn("status", []string{
 			sysin.CollectEventStatusPending,
 			sysin.CollectEventStatusGroupCollect,

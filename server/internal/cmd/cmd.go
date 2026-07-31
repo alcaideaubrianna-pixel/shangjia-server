@@ -57,6 +57,7 @@ var (
 		>> 修复指定采集审核媒体地址  [go run main.go up -m=fix -a1=collectReviewMediaRepair -a2=<审核ID>]
 		>> 删除采集规则唯一编号字段  [go run main.go up -m=fix -a1=collectRuleRemoveUniqueNo]
 		>> 创建采集去重查询索引  [go run main.go up -m=fix -a1=collectDedupeIndexes]
+		>> 统一采集资料未上架状态  [go run main.go up -m=fix -a1=collectProfileOfflineState]
 		---------------------------------------------------------------------------------
 		更多
        	github地址：https://github.com/bufanyun/hotgo

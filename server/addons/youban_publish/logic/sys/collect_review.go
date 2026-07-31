@@ -32,11 +32,14 @@ func (s *sSysPublish) CollectReviewList(ctx context.Context, in *sysin.CollectRe
 	if in == nil {
 		in = &sysin.CollectReviewListInp{}
 	}
+	sourceTypeExpr := "COALESCE(NULLIF(s.source_type,''),NULLIF(e.source_type,''))"
+	sourceTitleExpr := "COALESCE(NULLIF(s.title,''),NULLIF(e.source_chat_id,''),'已删除采集源')"
 	mod := pdao.YoubanPublishCollectReview.DB().Model(pdao.YoubanPublishCollectReview.Table()+" r").Safe().Ctx(ctx).
 		LeftJoin(pdao.YoubanPublishCollectSource.Table()+" s", "s.id=r.source_id").
+		LeftJoin(pdao.YoubanPublishCollectEvent.Table()+" e", "e.id=r.event_id").
 		LeftJoin(pdao.YoubanPublishCollectRule.Table()+" rule", "rule.id=r.rule_id").
-		LeftJoin(publishTgAccountTable+" ta", "ta.id=s.tg_account_id AND ta.deleted_at IS NULL").
-		LeftJoin(publishBotTable+" b", "b.id=s.bot_id AND b.deleted_at IS NULL").
+		LeftJoin(publishTgAccountTable+" ta", "ta.id=COALESCE(NULLIF(s.tg_account_id,0),e.tg_account_id) AND ta.deleted_at IS NULL").
+		LeftJoin(publishBotTable+" b", "b.id=COALESCE(NULLIF(s.bot_id,0),e.bot_id) AND b.deleted_at IS NULL").
 		LeftJoin(publishAccountTable+" fa", "fa.id=s.follow_account_id AND fa.deleted_at IS NULL").
 		Where("r.tenant_id", account.TenantId).
 		Where("r.account_id", account.Id)
@@ -64,8 +67,8 @@ func (s *sSysPublish) CollectReviewList(ctx context.Context, in *sysin.CollectRe
 	if perPage > 100 {
 		perPage = 100
 	}
-	fields := "r.*,s.title AS source_title,s.source_type,s.source_username,rule.name AS rule_name," +
-		"CASE s.source_type WHEN 'account' THEN COALESCE(NULLIF(ta.display_name,''),NULLIF(ta.telegram_username,''),NULLIF(s.source_username,''),s.source_chat_id) WHEN 'bot' THEN COALESCE(NULLIF(b.bot_name,''),NULLIF(b.bot_username,''),NULLIF(s.source_username,''),s.source_chat_id) WHEN 'follow' THEN COALESCE(NULLIF(fa.nickname,''),NULLIF(fa.username,''),NULLIF(s.source_username,''),s.source_chat_id) ELSE COALESCE(NULLIF(s.title,''),s.source_chat_id) END AS source_display_name"
+	fields := "r.*," + sourceTitleExpr + " AS source_title," + sourceTypeExpr + " AS source_type,s.source_username,rule.name AS rule_name," +
+		"CASE " + sourceTypeExpr + " WHEN 'account' THEN COALESCE(NULLIF(ta.display_name,''),NULLIF(ta.telegram_username,''),NULLIF(s.source_username,''),NULLIF(s.source_chat_id,''),e.source_chat_id) WHEN 'bot' THEN COALESCE(NULLIF(b.bot_name,''),NULLIF(b.bot_username,''),NULLIF(s.source_username,''),NULLIF(s.source_chat_id,''),e.source_chat_id) WHEN 'follow' THEN COALESCE(NULLIF(fa.nickname,''),NULLIF(fa.username,''),NULLIF(s.source_username,''),NULLIF(s.source_chat_id,''),e.source_chat_id) ELSE " + sourceTitleExpr + " END AS source_display_name"
 	list := make([]*sysin.CollectReviewModel, 0, perPage+1)
 	if err = mod.Fields(fields).OrderDesc("r.id").Limit(perPage + 1).Scan(&list); err != nil {
 		return nil, gerror.Wrap(err, "获取采集审核失败")

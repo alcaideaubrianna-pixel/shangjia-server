@@ -115,6 +115,8 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.RemoveYoubanPublishCollectRuleUniqueNo(ctx)
 	case "collectDedupeIndexes":
 		err = fix.ApplyYoubanPublishCollectDedupeIndexes(ctx)
+	case "collectProfileOfflineState":
+		err = fix.NormalizeYoubanPublishCollectProfileOfflineState(ctx)
 	case "collectMaterialRebuild":
 		err = fix.RebuildYoubanPublishCollectMaterialGroups(ctx)
 	case "collectRelationNormalize":
