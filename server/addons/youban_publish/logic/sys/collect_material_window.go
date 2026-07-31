@@ -44,6 +44,7 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 			sysin.CollectEventStatusMediaReady,
 			sysin.CollectEventStatusIgnored,
 		}).
+		Where("material_role IS NULL OR material_role = '' OR material_role = ? OR (status = ? AND material_role = ? AND error_message = ?)", collectMaterialRolePending, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
 		Where("processed_at IS NULL OR (status = ? AND material_role = ? AND error_message = ? AND updated_at <= ?)", sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, gtime.Now().Add(-collectMaterialVerifyRetryDelay)).
 		OrderAsc("source_chat_id").
 		OrderAsc("source_message_id").

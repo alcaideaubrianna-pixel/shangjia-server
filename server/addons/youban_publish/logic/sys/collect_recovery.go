@@ -65,11 +65,12 @@ func (s *sSysPublish) recoverStaleCollectMediaRows(ctx context.Context, limit in
 	}
 	deadline := gtime.Now().Add(-collectMediaRecoverAfter)
 	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
-	rows, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
-		Fields(mediaCols.Id, mediaCols.EventId).
-		Where(mediaCols.CacheStatus, collectMediaCacheDownloading).
-		WhereLTE(mediaCols.UpdatedAt, deadline).
-		OrderAsc(mediaCols.UpdatedAt).
+	rows, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).As("m").
+		Fields("m."+mediaCols.Id, "m."+mediaCols.EventId).
+		Where("m."+mediaCols.CacheStatus, collectMediaCacheDownloading).
+		WhereLTE("m."+mediaCols.UpdatedAt, deadline).
+		Where(enabledCollectSourceExistsSQL("m")).
+		OrderAsc("m." + mediaCols.UpdatedAt).
 		Limit(limit).
 		All()
 	if err != nil {
@@ -116,6 +117,7 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
 		Where("e."+eventCols.Status, sysin.CollectEventStatusMediaPending).
 		WhereNull("e."+eventCols.ProcessedAt).
+		Where(enabledCollectSourceExistsSQL("e")).
 		Where("EXISTS (SELECT 1 FROM "+mediaTable+" m WHERE m.event_id=e."+eventCols.Id+" AND m.cache_status=? AND (m.next_retry_at IS NULL OR m.next_retry_at<=?))", collectMediaCachePending, now).
 		OrderAsc("e." + eventCols.UpdatedAt).
 		Limit(limit).
@@ -167,7 +169,8 @@ func (s *sSysPublish) recoverCollectHistoryTasks(ctx context.Context, limit int)
 	}
 	now := gtime.Now()
 	stale := now.Add(-collectHistoryRecoverAfter)
-	rows, err := pdao.YoubanPublishCollectHistoryTask.Ctx(ctx).
+	rows, err := pdao.YoubanPublishCollectHistoryTask.Ctx(ctx).As("h").
+		Where(enabledCollectSourceExistsSQL("h")).
 		Where(
 			"(status=? OR (status=? AND updated_at<=?) OR (status=? AND (next_run_at IS NULL OR next_run_at<=?)) OR (status=? AND (error_message LIKE ? OR error_message LIKE ? OR error_message LIKE ? OR error_message LIKE ?)))",
 			sysin.CollectHistoryTaskStatusPending,
@@ -181,7 +184,7 @@ func (s *sSysPublish) recoverCollectHistoryTasks(ctx context.Context, limit int)
 			"%DC is closed%",
 			"%engine forcibly closed%",
 		).
-		OrderAsc("updated_at").
+		OrderAsc("h.updated_at").
 		Limit(limit).
 		All()
 	if err != nil {
@@ -221,11 +224,12 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 	}
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
 	statuses := []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusFailed}
-	sourceRows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Fields("source_id,MIN(updated_at) AS oldest_at").
-		WhereIn("status", statuses).
-		WhereLTE("updated_at", deadline).
-		Group("source_id").
+	sourceRows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+		Fields("e.source_id,MIN(e.updated_at) AS oldest_at").
+		WhereIn("e.status", statuses).
+		WhereLTE("e.updated_at", deadline).
+		Where(enabledCollectSourceExistsSQL("e")).
+		Group("e.source_id").
 		OrderAsc("oldest_at").
 		Limit(limit).
 		All()
@@ -272,6 +276,10 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		}
 	}
 	return nil
+}
+
+func enabledCollectSourceExistsSQL(ownerAlias string) string {
+	return "EXISTS (SELECT 1 FROM " + pdao.YoubanPublishCollectSource.Table() + " s WHERE s.id=" + ownerAlias + ".source_id AND s.tenant_id=" + ownerAlias + ".tenant_id AND s.account_id=" + ownerAlias + ".account_id AND s.collect_enabled=1 AND s.status=1 AND s.deleted_at IS NULL)"
 }
 
 func (s *sSysPublish) collectEventHasDueMedia(ctx context.Context, eventId int64) bool {

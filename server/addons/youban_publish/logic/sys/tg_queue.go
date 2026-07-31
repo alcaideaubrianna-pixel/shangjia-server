@@ -17,9 +17,7 @@ const (
 	tgQueueNameDefault          = "youban_publish_tg"
 	tgQueueNameBulk             = "youban_publish_tg_bulk"
 	tgQueueNameMedia            = "youban_publish_media"
-	tgQueueNameCollectMedia     = "youban_publish_collect_media_source"
 	tgQueueNameBackground       = "youban_publish_background"
-	tgQueueNameCollect          = "youban_publish_collect_source"
 	tgTaskTypePublish           = "youban_publish:tg:publish"
 	tgTaskTypeCleanup           = "youban_publish:tg:cleanup"
 	tgTaskTypeImport            = "youban_publish:import:legacy"
@@ -34,13 +32,6 @@ const (
 	tgTaskTypeCollectTrigger    = "youban_publish:collect:trigger"
 	tgTaskTypeChannelMemberSync = "youban_publish:tg:channel_member_sync"
 )
-
-func collectSourceQueueName(prefix string, sourceId int64) string {
-	if sourceId <= 0 {
-		return prefix
-	}
-	return fmt.Sprintf("%s_%d", prefix, sourceId)
-}
 
 const (
 	tgJobPriorityUrgent  = 10

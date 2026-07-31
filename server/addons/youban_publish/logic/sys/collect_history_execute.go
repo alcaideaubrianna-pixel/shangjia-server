@@ -205,10 +205,10 @@ func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.C
 		TenantId:  task.TenantId,
 		AccountId: task.AccountId,
 	}
-	if processErr := s.processCollectSourceWindowWithLock(ctx, processPayload); processErr != nil {
+	if processErr := s.enqueueCollectProcess(ctx, processPayload, 0); processErr != nil {
 		s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "warn", "process", "历史消息批次已落库，资料处理将在下一轮继续", g.Map{"error": processErr.Error()})
 	} else {
-		s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "process", "历史消息批次已进入资料处理链路", g.Map{"offsetId": offsetID})
+		s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "process", "历史消息批次已投递资料处理队列", g.Map{"offsetId": offsetID})
 	}
 	if stop || shouldFinish {
 		return s.finishCollectHistoryTask(ctx, task, "历史消息已拉取完成")

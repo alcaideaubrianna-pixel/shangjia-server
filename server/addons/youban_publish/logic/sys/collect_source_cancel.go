@@ -46,13 +46,11 @@ func (s *sSysPublish) cancelCollectSourceRuntime(ctx context.Context, sourceId i
 	if err = s.cancelCollectSourceEvents(ctx, sourceId, tenantId, accountId, now); err != nil {
 		return err
 	}
-	s.stopCollectSourceQueueWorker(sourceId)
 	if err = s.clearCollectSourceAsynqTasks(ctx, sourceId, taskIDs); err != nil {
 		return err
 	}
 	s.refreshCollectSourceCache(ctx)
 	s.refreshAccountCollectSupervisor()
-	s.refreshCollectProcessDispatcher()
 	g.Log().Infof(ctx, "采集源未完成任务已取消 sourceId:%d historyTasks:%d", sourceId, len(taskIDs))
 	return nil
 }
@@ -121,31 +119,93 @@ func (s *sSysPublish) cancelCollectSourceEvents(ctx context.Context, sourceId in
 	return gerror.Wrap(err, "取消采集源未完成事件失败")
 }
 
-func (s *sSysPublish) stopCollectSourceQueueWorker(sourceId int64) {
-	if s == nil || sourceId <= 0 {
-		return
-	}
-	s.tgQueueMu.Lock()
-	worker := s.collectQueueWorkers[sourceId]
-	delete(s.collectQueueWorkers, sourceId)
-	s.tgQueueMu.Unlock()
-	if worker != nil {
-		worker.shutdown()
-	}
-}
-
 func (s *sSysPublish) clearCollectSourceAsynqTasks(ctx context.Context, sourceId int64, historyTaskIDs []int64) error {
 	inspector := asynq.NewInspector(telegramQueueRedisOpt(ctx))
 	defer func() { _ = inspector.Close() }()
 	if err := clearCollectHistoryAsynqTasks(inspector, historyTaskIDs); err != nil {
 		return err
 	}
-	for _, queueName := range []string{
-		collectSourceQueueName(tgQueueNameCollect, sourceId),
-		collectSourceQueueName(tgQueueNameCollectMedia, sourceId),
+	if err := clearCollectSourceTasks(inspector, sourceId); err != nil {
+		return err
+	}
+	return nil
+}
+
+func clearCollectSourceTasks(inspector *asynq.Inspector, sourceId int64) error {
+	if inspector == nil || sourceId <= 0 {
+		return nil
+	}
+	type taskListFunc func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error)
+	lists := []struct {
+		active bool
+		list   taskListFunc
+	}{
+		{list: inspector.ListPendingTasks},
+		{list: inspector.ListScheduledTasks},
+		{list: inspector.ListRetryTasks},
+		{list: inspector.ListArchivedTasks},
+		{active: true, list: inspector.ListActiveTasks},
+	}
+	for _, queue := range []struct {
+		name  string
+		label string
+	}{
+		{name: tgQueueNameBackground, label: "采集处理"},
+		{name: tgQueueNameMedia, label: "媒体缓存"},
 	} {
-		if err := inspector.DeleteQueue(queueName, true); err != nil && !errors.Is(err, asynq.ErrQueueNotFound) {
-			return gerror.Wrapf(err, "清理采集源队列失败 queue:%s", queueName)
+		for _, item := range lists {
+			matched, err := listCollectSourceTasks(item.list, queue.name, sourceId)
+			if err != nil && !errors.Is(err, asynq.ErrQueueNotFound) {
+				return gerror.Wrapf(err, "读取%s队列失败", queue.label)
+			}
+			if err == nil {
+				if err = deleteCollectSourceTasks(inspector, matched, item.active); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func listCollectSourceTasks(list func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error), queue string, sourceId int64) ([]*asynq.TaskInfo, error) {
+	const pageSize = 1000
+	matched := make([]*asynq.TaskInfo, 0)
+	for page := 1; ; page++ {
+		tasks, err := list(queue, asynq.Page(page), asynq.PageSize(pageSize))
+		if err != nil {
+			return nil, err
+		}
+		for _, task := range tasks {
+			if task == nil || (task.Type != tgTaskTypeCollectProcess && task.Type != tgTaskTypeCollectMedia) {
+				continue
+			}
+			var payload struct {
+				SourceId int64 `json:"sourceId"`
+			}
+			if json.Unmarshal(task.Payload, &payload) == nil && payload.SourceId == sourceId {
+				matched = append(matched, task)
+			}
+		}
+		if len(tasks) < pageSize {
+			return matched, nil
+		}
+	}
+}
+
+func deleteCollectSourceTasks(inspector *asynq.Inspector, tasks []*asynq.TaskInfo, active bool) error {
+	for _, task := range tasks {
+		if task == nil || (task.Type != tgTaskTypeCollectProcess && task.Type != tgTaskTypeCollectMedia) {
+			continue
+		}
+		if active {
+			if err := inspector.CancelProcessing(task.ID); err != nil && !errors.Is(err, asynq.ErrTaskNotFound) {
+				return gerror.Wrap(err, "取消采集运行中任务失败")
+			}
+			continue
+		}
+		if err := inspector.DeleteTask(task.Queue, task.ID); err != nil && !errors.Is(err, asynq.ErrTaskNotFound) {
+			return gerror.Wrap(err, "删除采集排队任务失败")
 		}
 	}
 	return nil
@@ -203,14 +263,4 @@ func clearCollectHistoryAsynqTasks(inspector *asynq.Inspector, taskIDs []int64) 
 		}
 	}
 	return nil
-}
-
-func (s *sSysPublish) refreshCollectProcessDispatcher() {
-	if s == nil || s.collectProcessRefresh == nil {
-		return
-	}
-	select {
-	case s.collectProcessRefresh <- struct{}{}:
-	default:
-	}
 }

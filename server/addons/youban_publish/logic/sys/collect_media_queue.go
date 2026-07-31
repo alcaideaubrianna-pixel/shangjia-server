@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/hibiken/asynq"
 )
 
@@ -34,7 +35,7 @@ func (s *sSysPublish) enqueueCollectMediaCache(ctx context.Context, payload coll
 	}
 	task := asynq.NewTask(tgTaskTypeCollectMedia, body)
 	options := []asynq.Option{
-		asynq.Queue(collectSourceQueueName(tgQueueNameCollectMedia, payload.SourceId)),
+		asynq.Queue(tgQueueNameMedia),
 		asynq.Unique(collectMediaTaskUniqueTTL),
 		asynq.MaxRetry(10),
 		asynq.Timeout(30 * time.Minute),
@@ -58,4 +59,15 @@ func decodeCollectMediaQueuePayload(task *asynq.Task) (collectMediaQueuePayload,
 		return payload, fmt.Errorf("采集媒体缓存任务缺少eventId")
 	}
 	return payload, nil
+}
+
+func collectMediaQueueConcurrency(ctx context.Context) int {
+	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 2).Int()
+	if concurrency < 1 {
+		return 1
+	}
+	if concurrency > 4 {
+		return 4
+	}
+	return concurrency
 }

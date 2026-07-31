@@ -139,21 +139,6 @@ func TestAccountCollectWorkerFailsPendingOperationsOnExit(t *testing.T) {
 	}
 }
 
-func TestEnqueueCollectProcessWakesDispatcher(t *testing.T) {
-	service := NewSysPublish()
-	err := service.enqueueCollectProcess(context.Background(), collectProcessQueuePayload{
-		TenantId:  2,
-		AccountId: 1,
-		SourceId:  19,
-	}, 0)
-	if err != nil {
-		t.Fatalf("enqueue collect process failed: %v", err)
-	}
-	if got := len(service.collectProcessRefresh); got != 1 {
-		t.Fatalf("dispatcher signals = %d, want 1", got)
-	}
-}
-
 func TestAccountCollectWorkerConfigHotUpdate(t *testing.T) {
 	worker := &accountCollectWorker{
 		signature: "old",

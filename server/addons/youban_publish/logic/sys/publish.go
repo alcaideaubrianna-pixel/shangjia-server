@@ -27,7 +27,6 @@ type sSysPublish struct {
 	tgQueueServer         *asynq.Server
 	mediaQueueServer      *asynq.Server
 	backgroundQueueServer *asynq.Server
-	collectQueueWorkers   map[int64]*collectSourceQueueWorker
 
 	telegramChannelMu    publishRuntimeMutex
 	telegramChannelLocks map[string]*publishRuntimeMutex
@@ -38,7 +37,6 @@ type sSysPublish struct {
 	collectMediaLastTouch map[string]time.Time
 	collectMediaSlots     chan struct{}
 	collectMediaAccounts  map[string]chan struct{}
-	collectProcessRefresh chan struct{}
 
 	accountRuntimeMu      publishRuntimeMutex
 	accountRuntimes       map[int64]*accountCollectWorker
@@ -54,11 +52,9 @@ func NewSysPublish() *sSysPublish {
 		collectGroupTimers:    make(map[int64]*time.Timer),
 		collectMediaLastTouch: make(map[string]time.Time),
 		collectMediaAccounts:  make(map[string]chan struct{}),
-		collectProcessRefresh: make(chan struct{}, 1),
 		accountRuntimes:       make(map[int64]*accountCollectWorker),
 		accountRuntimeRefresh: make(chan struct{}, 1),
 		accountCircuits:       make(map[int64]accountCollectCircuit),
-		collectQueueWorkers:   make(map[int64]*collectSourceQueueWorker),
 	}
 }
 
