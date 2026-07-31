@@ -148,9 +148,6 @@ func newCollectHistoryRuntimeWaitError(tgAccountId int64) *collectHistoryPauseEr
 func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.Client, task *sysin.CollectHistoryTaskModel, source *sysin.CollectSourceModel, channelID int64, accessHash int64) error {
 	offsetID := task.OffsetId
 	cutoff := collectHistoryCutoff(task)
-	pages := make([]*tg.Message, 0, collectHistoryPageLimit)
-	fetchedPages := 0
-	shouldFinish := false
 	for page := 0; page < collectHistoryPagesPerRun; page++ {
 		if canceled, cancelErr := collectHistoryTaskCanceled(ctx, task.Id); cancelErr != nil {
 			return cancelErr
@@ -162,56 +159,41 @@ func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.C
 			return err
 		}
 		if len(messages) == 0 {
-			shouldFinish = true
-			break
+			return s.finishCollectHistoryTask(ctx, task, "历史消息已拉取完成")
 		}
-		fetchedPages++
-		pages = append(pages, messages...)
-		offsetID = collectHistoryNextOffset(offsetID, messages)
+		stats, nextOffset, stop, err := s.ingestCollectHistoryMessages(ctx, task, source, messages, cutoff)
+		if err != nil {
+			return err
+		}
+		if nextOffset > 0 {
+			offsetID = nextOffset
+		}
+		if err = s.updateCollectHistoryProgress(ctx, task, stats, offsetID); err != nil {
+			return err
+		}
 		s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "page", "历史消息分页处理完成", g.Map{
-			"page":     page + 1,
-			"offsetId": offsetID,
-			"fetched":  len(messages),
+			"page":      page + 1,
+			"offsetId":  offsetID,
+			"fetched":   len(messages),
+			"scanned":   stats.scanned,
+			"events":    stats.events,
+			"duplicate": stats.duplicates,
+			"failed":    stats.failed,
 		})
-		if len(messages) < collectHistoryPageLimit {
-			shouldFinish = true
-			break
+		processPayload := collectProcessQueuePayload{
+			SourceId:  task.SourceId,
+			TenantId:  task.TenantId,
+			AccountId: task.AccountId,
+		}
+		if processErr := s.enqueueCollectProcess(ctx, processPayload, 0); processErr != nil {
+			s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "warn", "process", "历史消息页已落库，资料处理将在下一轮继续", g.Map{"error": processErr.Error()})
+		} else {
+			s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "process", "历史消息页已投递资料处理队列", g.Map{"offsetId": offsetID})
+		}
+		if stop || len(messages) < collectHistoryPageLimit {
+			return s.finishCollectHistoryTask(ctx, task, "历史消息已拉取完成")
 		}
 		time.Sleep(collectHistoryPageInterval)
-	}
-	if len(pages) == 0 {
-		return s.finishCollectHistoryTask(ctx, task, "历史消息已拉取完成")
-	}
-	stats, nextOffset, stop, err := s.ingestCollectHistoryMessages(ctx, task, source, pages, cutoff)
-	if err != nil {
-		return err
-	}
-	if nextOffset > 0 {
-		offsetID = nextOffset
-	}
-	if err = s.updateCollectHistoryProgress(ctx, task, stats, offsetID); err != nil {
-		return err
-	}
-	s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "batch", "历史消息批次处理完成", g.Map{
-		"pages":     fetchedPages,
-		"offsetId":  offsetID,
-		"scanned":   stats.scanned,
-		"events":    stats.events,
-		"duplicate": stats.duplicates,
-		"failed":    stats.failed,
-	})
-	processPayload := collectProcessQueuePayload{
-		SourceId:  task.SourceId,
-		TenantId:  task.TenantId,
-		AccountId: task.AccountId,
-	}
-	if processErr := s.enqueueCollectProcess(ctx, processPayload, 0); processErr != nil {
-		s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "warn", "process", "历史消息批次已落库，资料处理将在下一轮继续", g.Map{"error": processErr.Error()})
-	} else {
-		s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "process", "历史消息批次已投递资料处理队列", g.Map{"offsetId": offsetID})
-	}
-	if stop || shouldFinish {
-		return s.finishCollectHistoryTask(ctx, task, "历史消息已拉取完成")
 	}
 	return s.rescheduleCollectHistoryTask(ctx, task, offsetID)
 }

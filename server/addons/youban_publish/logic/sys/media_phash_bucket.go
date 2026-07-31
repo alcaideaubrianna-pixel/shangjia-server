@@ -289,6 +289,12 @@ func mediaPHashBucketCandidateRowsWithScopes(ctx context.Context, normalizedHash
 }
 
 func mediaPHashBucketCandidateRowsWithScopesUncached(ctx context.Context, normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) ([]mediaPHashBucketCandidateRow, error) {
+	scopes = mediaPHashBucketValidScopes(scopes)
+	profileIds = uniqueIds(profileIds)
+	if len(scopes) == 0 && len(profileIds) == 0 {
+		g.Log().Warning(ctx, "跳过无租户、账号或资料范围的pHash候选查询")
+		return []mediaPHashBucketCandidateRow{}, nil
+	}
 	if mediaPHashLshReady(ctx) && threshold <= 12 {
 		rows, err := mediaPHashLshCandidateRowsWithScopes(ctx, normalizedHash, threshold, scopes, profileIds, mediaType, excludeProfileId)
 		if err == nil {
@@ -300,12 +306,24 @@ func mediaPHashBucketCandidateRowsWithScopesUncached(ctx context.Context, normal
 	if minEqualNibbles <= 0 {
 		minEqualNibbles = 1
 	}
-	branches := make([]string, 0, len(normalizedHash))
+	branchCapacity := len(normalizedHash)
+	if len(scopes) > 0 {
+		branchCapacity *= len(scopes)
+	}
+	branches := make([]string, 0, branchCapacity)
 	args := make([]any, 0, len(normalizedHash)*8)
 	for i, item := range normalizedHash {
-		branch, branchArgs := mediaPHashBucketBranchSQL(i+1, string(item), scopes, profileIds, mediaType, excludeProfileId)
-		branches = append(branches, branch)
-		args = append(args, branchArgs...)
+		if len(scopes) == 0 {
+			branch, branchArgs := mediaPHashBucketBranchSQL(i+1, string(item), nil, profileIds, mediaType, excludeProfileId)
+			branches = append(branches, branch)
+			args = append(args, branchArgs...)
+			continue
+		}
+		for _, scope := range scopes {
+			branch, branchArgs := mediaPHashBucketBranchSQL(i+1, string(item), []mediaPHashBucketScopePart{scope}, profileIds, mediaType, excludeProfileId)
+			branches = append(branches, branch)
+			args = append(args, branchArgs...)
+		}
 	}
 	rows := make([]mediaPHashBucketCandidateRow, 0)
 	sql := fmt.Sprintf(`
@@ -417,25 +435,36 @@ func mediaPHashBucketMediaTypeCondition(field string, mediaType string) (string,
 func mediaPHashBucketScopeSQL(alias string, scopes []mediaPHashBucketScopePart) (string, []any) {
 	conditions := make([]string, 0, len(scopes))
 	args := make([]any, 0)
-	for _, scope := range scopes {
-		if len(scope.AccountIds) == 0 {
-			continue
-		}
+	for _, scope := range mediaPHashBucketValidScopes(scopes) {
 		ids := uniqueIds(scope.AccountIds)
-		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
 		fieldPrefix := alias
 		if fieldPrefix != "" {
 			fieldPrefix += "."
 		}
-		condition := fieldPrefix + "account_id IN (" + placeholders + ")"
-		if scope.TenantId > 0 {
-			condition = fieldPrefix + "tenant_id = ? AND " + condition
-			args = append(args, scope.TenantId)
+		condition := fieldPrefix + "tenant_id = ?"
+		args = append(args, scope.TenantId)
+		if len(ids) > 0 {
+			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+			condition += " AND " + fieldPrefix + "account_id IN (" + placeholders + ")"
+			for _, id := range ids {
+				args = append(args, id)
+			}
 		}
 		conditions = append(conditions, condition)
-		for _, id := range ids {
-			args = append(args, id)
-		}
 	}
 	return strings.Join(conditions, " OR "), args
+}
+
+func mediaPHashBucketValidScopes(scopes []mediaPHashBucketScopePart) []mediaPHashBucketScopePart {
+	result := make([]mediaPHashBucketScopePart, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.TenantId <= 0 {
+			continue
+		}
+		result = append(result, mediaPHashBucketScopePart{
+			TenantId:   scope.TenantId,
+			AccountIds: uniqueIds(scope.AccountIds),
+		})
+	}
+	return result
 }

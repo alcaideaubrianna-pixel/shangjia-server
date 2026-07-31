@@ -1757,7 +1757,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_lsh" (
   "updated_at" timestamp DEFAULT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_media_phash_lsh_media_pos" ON "hg_youban_publish_media_phash_lsh" ("media_id", "bucket_pos");
-CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_lsh_search" ON "hg_youban_publish_media_phash_lsh" ("tenant_id", "media_type", "bucket_pos", "bucket_value") INCLUDE ("media_id", "profile_id", "account_id", "hash_value");
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_lsh_lookup" ON "hg_youban_publish_media_phash_lsh" ("tenant_id", "media_type", "bucket_pos", "bucket_value", "account_id", "profile_id", "media_id") INCLUDE ("hash_value");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_lsh_profile_id" ON "hg_youban_publish_media_phash_lsh" ("profile_id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_success_record" (

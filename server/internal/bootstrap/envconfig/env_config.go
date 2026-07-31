@@ -42,6 +42,7 @@ var items = []item{
 	{Key: "youbanPublish.collect.mediaDownloadThreads", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_DOWNLOAD_THREADS"}},
 	{Key: "youbanPublish.collect.mediaRecoveryBatchSize", EnvKeys: []string{"YOUBAN_PUBLISH_MEDIA_RECOVERY_BATCH_SIZE"}},
 	{Key: "youbanPublish.collect.materialWindowBatchSize", EnvKeys: []string{"YOUBAN_PUBLISH_MATERIAL_WINDOW_BATCH_SIZE"}},
+	{Key: "youbanPublish.collect.materialVerifyWindowSeconds", EnvKeys: []string{"YOUBAN_PUBLISH_MATERIAL_VERIFY_WINDOW_SECONDS"}},
 	{Key: "tcp.server.address", EnvKeys: []string{"GF_TCP_SERVER_ADDRESS", "YOUBAN_TCP_SERVER_ADDRESS", "TCP_SERVER_ADDRESS"}},
 	{Key: "tcp.client.cron.address", EnvKeys: []string{"GF_TCP_CLIENT_CRON_ADDRESS", "YOUBAN_TCP_CRON_ADDRESS", "TCP_CRON_ADDRESS"}},
 	{Key: "tcp.client.cron.group", EnvKeys: []string{"GF_TCP_CLIENT_CRON_GROUP", "YOUBAN_TCP_CRON_GROUP", "TCP_CRON_GROUP"}},

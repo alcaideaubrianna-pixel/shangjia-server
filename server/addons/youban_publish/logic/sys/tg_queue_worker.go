@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/hibiken/asynq"
@@ -199,7 +200,21 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 	if err != nil {
 		return err
 	}
-	return s.processCollectSourceTask(ctx, payload)
+	delay, pending, err := s.processCollectSourceTask(ctx, payload)
+	if err != nil || !pending {
+		return err
+	}
+	if delay <= time.Second {
+		delay = 0
+	}
+	enqueued, err := s.enqueueCollectProcessDeferred(ctx, payload, delay)
+	if err != nil {
+		return err
+	}
+	if enqueued {
+		g.Log().Debugf(ctx, "采集源单批处理完成并重新排队 sourceId:%d delay:%s", payload.SourceId, delay.Round(time.Second))
+	}
+	return nil
 }
 
 func (s *sSysPublish) handleImportMatchTask(ctx context.Context, task *asynq.Task) error {

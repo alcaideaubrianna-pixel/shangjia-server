@@ -71,3 +71,13 @@ func TestCollectMaterialEventOlderThanUsesDatabaseWallClock(t *testing.T) {
 		t.Fatalf("database wall-clock event should be considered older than grouping window")
 	}
 }
+
+func TestCollectMaterialEventIngestOlderThanUsesCreatedAt(t *testing.T) {
+	event := gdb.Record{
+		"received_at": gvar.New(time.Now().Add(-24 * time.Hour)),
+		"created_at":  gvar.New(time.Now().Add(-time.Minute)),
+	}
+	if collectMaterialEventIngestOlderThan(event, 3*time.Minute) {
+		t.Fatal("historical event should wait from ingestion time before finalizing an unmatched pair")
+	}
+}

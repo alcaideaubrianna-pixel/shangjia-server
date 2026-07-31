@@ -102,7 +102,16 @@ func mediaPHashLshCandidateRowsWithScopes(ctx context.Context, normalizedHash st
 	if len(cells) == 0 {
 		return nil, gerror.New("pHash LSH 查询参数无效")
 	}
-	branches := make([]string, 0, mediaPHashLshBlockCount)
+	scopes = mediaPHashBucketValidScopes(scopes)
+	profileIds = uniqueIds(profileIds)
+	if len(scopes) == 0 && len(profileIds) == 0 {
+		return []mediaPHashBucketCandidateRow{}, nil
+	}
+	branchCapacity := mediaPHashLshBlockCount
+	if len(scopes) > 0 {
+		branchCapacity *= len(scopes)
+	}
+	branches := make([]string, 0, branchCapacity)
 	args := make([]any, 0, len(cells)+mediaPHashLshBlockCount*8)
 	for pos := 1; pos <= mediaPHashLshBlockCount; pos++ {
 		values := make([]int, 0)
@@ -111,9 +120,17 @@ func mediaPHashLshCandidateRowsWithScopes(ctx context.Context, normalizedHash st
 				values = append(values, cell.Value)
 			}
 		}
-		branch, branchArgs := mediaPHashLshBranchSQL(pos, values, scopes, profileIds, mediaType, excludeProfileId)
-		branches = append(branches, branch)
-		args = append(args, branchArgs...)
+		if len(scopes) == 0 {
+			branch, branchArgs := mediaPHashLshBranchSQL(pos, values, nil, profileIds, mediaType, excludeProfileId)
+			branches = append(branches, branch)
+			args = append(args, branchArgs...)
+			continue
+		}
+		for _, scope := range scopes {
+			branch, branchArgs := mediaPHashLshBranchSQL(pos, values, []mediaPHashBucketScopePart{scope}, profileIds, mediaType, excludeProfileId)
+			branches = append(branches, branch)
+			args = append(args, branchArgs...)
+		}
 	}
 	query := fmt.Sprintf(`
 WITH bucket_match AS (

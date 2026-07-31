@@ -17,18 +17,25 @@ import (
 )
 
 const (
-	collectMaterialGroupingDelay    = 3 * time.Minute
-	collectMaterialVerifyWindow     = 10 * time.Minute
-	collectMaterialVerifyRetryDelay = time.Minute
-	collectMaterialRolePending      = "pending"
-	collectMaterialRoleDisplay      = "display"
-	collectMaterialRoleVerify       = "verify"
+	collectMaterialGroupingDelay           = 3 * time.Minute
+	collectMaterialVerifyWindowDefault     = 5 * time.Minute
+	collectMaterialVerifyWindowMin         = 3 * time.Minute
+	collectMaterialVerifyWindowMax         = 5 * time.Minute
+	collectMaterialVerifyRetryDelay        = time.Minute
+	collectMaterialWaitingVerifyRetryDelay = 10 * time.Second
+	collectMaterialWindowLookahead         = 32
+	collectMaterialRolePending             = "pending"
+	collectMaterialRoleDisplay             = "display"
+	collectMaterialRoleVerify              = "verify"
+	collectMaterialGroupWaitingVerify      = "waiting_verify"
 )
 
 func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload collectProcessQueuePayload) error {
 	if payload.SourceId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 {
 		return gerror.New("采集源窗口参数不完整")
 	}
+	batchSize := collectMaterialWindowBatchSize(ctx)
+	now := gtime.Now()
 	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Where("tenant_id", payload.TenantId).
 		Where("account_id", payload.AccountId).
@@ -43,11 +50,11 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 			sysin.CollectEventStatusIgnored,
 		}).
 		Where("material_role IS NULL OR material_role = '' OR material_role = ? OR (status = ? AND material_role = ? AND error_message = ?)", collectMaterialRolePending, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
-		Where("processed_at IS NULL OR (status = ? AND material_role = ? AND error_message = ? AND updated_at <= ?)", sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, gtime.Now().Add(-collectMaterialVerifyRetryDelay)).
+		Where("(processed_at IS NULL AND (material_group_status IS NULL OR material_group_status <> ? OR updated_at <= ?)) OR (status = ? AND material_role = ? AND error_message = ? AND updated_at <= ?)", collectMaterialGroupWaitingVerify, now.Add(-collectMaterialWaitingVerifyRetryDelay), sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, now.Add(-collectMaterialVerifyRetryDelay)).
 		OrderAsc("source_chat_id").
 		OrderAsc("source_message_id").
 		OrderAsc("id").
-		Limit(collectMaterialWindowBatchSize(ctx)).
+		Limit(batchSize + collectMaterialWindowLookahead).
 		All()
 	if err != nil {
 		return gerror.Wrap(err, "读取采集源消息窗口失败")
@@ -55,20 +62,24 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 	if len(rows) == 0 {
 		return nil
 	}
+	processEventIds := make(map[int64]struct{}, minInt(batchSize, len(rows)))
+	for _, row := range rows[:minInt(batchSize, len(rows))] {
+		processEventIds[row["id"].Int64()] = struct{}{}
+	}
 	byChat := make(map[string][]gdb.Record)
 	for _, row := range rows {
 		chatID := strings.TrimSpace(row["source_chat_id"].String())
 		byChat[chatID] = append(byChat[chatID], row)
 	}
 	for chatID, chatRows := range byChat {
-		if err := s.processCollectMessageWindow(ctx, payload, chatID, chatRows); err != nil {
+		if err := s.processCollectMessageWindow(ctx, payload, chatID, chatRows, processEventIds); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload collectProcessQueuePayload, chatID string, rows []gdb.Record) error {
+func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload collectProcessQueuePayload, chatID string, rows []gdb.Record, processEventIds map[int64]struct{}) error {
 	sort.SliceStable(rows, func(i, j int) bool {
 		left := rows[i]["source_message_id"].Int64()
 		right := rows[j]["source_message_id"].Int64()
@@ -88,6 +99,9 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 	messageViews := collectMaterialEventViews(rows, mediaByEvent)
 	for index := 0; index < len(rows); index++ {
 		event := rows[index]
+		if _, ok := processEventIds[event["id"].Int64()]; !ok {
+			continue
+		}
 		role := strings.TrimSpace(event["material_role"].String())
 		if role != "" && role != collectMaterialRolePending && !collectMaterialEventNeedsPairRepair(event) {
 			continue
@@ -123,7 +137,10 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				}
 				continue
 			}
-			if !collectMaterialEventOlderThan(event, collectMaterialVerifyWindow) {
+			if !collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindow(ctx)) {
+				if err = s.markCollectMaterialWaitingVerify(ctx, event["id"].Int64()); err != nil {
+					return err
+				}
 				continue
 			}
 			if err = s.markCollectMaterialRole(ctx, event["id"].Int64(), collectMaterialRoleDisplay, 0, "complete"); err != nil {
@@ -148,7 +165,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				}
 				continue
 			}
-			if !collectMaterialEventOlderThan(event, collectMaterialVerifyWindow) {
+			if !collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindow(ctx)) {
 				continue
 			}
 			if err = s.ignoreCollectEvent(ctx, event["id"].Int64(), collectMaterialVerifyUnmatchedMessage, "group"); err != nil {
@@ -265,6 +282,18 @@ func (s *sSysPublish) markCollectMaterialRole(ctx context.Context, eventID int64
 	return gerror.Wrap(err, "更新采集资料组角色失败")
 }
 
+func (s *sSysPublish) markCollectMaterialWaitingVerify(ctx context.Context, eventID int64) error {
+	_, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Where("id", eventID).
+		Where("material_role", collectMaterialRolePending).
+		Where("material_group_status IS NULL OR material_group_status = '' OR material_group_status = ?", collectMaterialGroupWaitingVerify).
+		Data(g.Map{
+			"material_group_status": collectMaterialGroupWaitingVerify,
+			"updated_at":            gtime.Now(),
+		}).Update()
+	return gerror.Wrap(err, "更新采集资料验证等待状态失败")
+}
+
 func (s *sSysPublish) pairedCollectVerifyEvent(ctx context.Context, displayEventID int64) (gdb.Record, error) {
 	if displayEventID <= 0 {
 		return nil, nil
@@ -310,6 +339,18 @@ func collectMaterialWindowBatchSize(ctx context.Context) int {
 	return batchSize
 }
 
+func collectMaterialVerifyWindow(ctx context.Context) time.Duration {
+	seconds := g.Cfg().MustGet(ctx, "youbanPublish.collect.materialVerifyWindowSeconds", int(collectMaterialVerifyWindowDefault/time.Second)).Int()
+	duration := time.Duration(seconds) * time.Second
+	if duration < collectMaterialVerifyWindowMin {
+		return collectMaterialVerifyWindowMin
+	}
+	if duration > collectMaterialVerifyWindowMax {
+		return collectMaterialVerifyWindowMax
+	}
+	return duration
+}
+
 func (s *sSysPublish) mergeCollectMaterialContent(ctx context.Context, display gdb.Record, content *collectContentResult) (*collectContentResult, error) {
 	if content == nil {
 		return content, nil
@@ -346,6 +387,14 @@ func collectMaterialEventOlderThan(event gdb.Record, age time.Duration) bool {
 	return time.Since(eventAt) >= age
 }
 
+func collectMaterialEventIngestOlderThan(event gdb.Record, age time.Duration) bool {
+	eventAt := collectMaterialEventCreatedAt(event)
+	if eventAt.IsZero() {
+		return false
+	}
+	return time.Since(eventAt) >= age
+}
+
 func collectMaterialEventTime(event gdb.Record) string {
 	if eventAt := collectMaterialEventAt(event); !eventAt.IsZero() {
 		return eventAt.Format("2006-01-02 15:04:05 -0700")
@@ -364,6 +413,26 @@ func collectMaterialEventAt(event gdb.Record) time.Time {
 	// PostgreSQL `timestamp` has no timezone. The pgx driver may return it with
 	// UTC attached, while the stored wall-clock value is local application time.
 	// Preserve the database wall-clock fields before comparing with time.Now().
+	wallClock := value.Time
+	return time.Date(
+		wallClock.Year(), wallClock.Month(), wallClock.Day(),
+		wallClock.Hour(), wallClock.Minute(), wallClock.Second(),
+		wallClock.Nanosecond(), time.Local,
+	)
+}
+
+func collectMaterialEventCreatedAt(event gdb.Record) time.Time {
+	value := event["created_at"].GTime()
+	if value == nil {
+		value = event["received_at"].GTime()
+	}
+	return collectMaterialDatabaseWallClock(value)
+}
+
+func collectMaterialDatabaseWallClock(value *gtime.Time) time.Time {
+	if value == nil || value.IsZero() {
+		return time.Time{}
+	}
 	wallClock := value.Time
 	return time.Date(
 		wallClock.Year(), wallClock.Month(), wallClock.Day(),

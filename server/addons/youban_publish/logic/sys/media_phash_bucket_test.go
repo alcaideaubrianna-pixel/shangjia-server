@@ -1,6 +1,9 @@
 package sys
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestMediaPHashBucketMediaTypeConditionUsesVisualMedia(t *testing.T) {
 	condition, args := mediaPHashBucketMediaTypeCondition("b.media_type", "video")
@@ -35,5 +38,34 @@ func TestMediaPHashDeduplicateProfilesKeepsBestMediaMatch(t *testing.T) {
 		if item.ProfileId == 9 && (item.MediaId != 101 || item.Distance != 4) {
 			t.Fatalf("profile 9 best match = %#v", item)
 		}
+	}
+}
+
+func TestMediaPHashBucketScopeSQLKeepsTenantScopeWithoutAccounts(t *testing.T) {
+	condition, args := mediaPHashBucketScopeSQL("b", []mediaPHashBucketScopePart{{TenantId: 2}})
+	if condition != "b.tenant_id = ?" {
+		t.Fatalf("unexpected condition: %s", condition)
+	}
+	if len(args) != 1 || args[0] != int64(2) {
+		t.Fatalf("unexpected args: %#v", args)
+	}
+}
+
+func TestMediaPHashBucketScopeSQLDropsUnscopedPartitions(t *testing.T) {
+	condition, args := mediaPHashBucketScopeSQL("b", []mediaPHashBucketScopePart{{AccountIds: []int64{9}}})
+	if condition != "" || len(args) != 0 {
+		t.Fatalf("unscoped partition must be rejected: condition=%q args=%#v", condition, args)
+	}
+}
+
+func TestMediaPHashBucketBranchSQLUsesIndexableScope(t *testing.T) {
+	query, args := mediaPHashBucketBranchSQL(1, "a", []mediaPHashBucketScopePart{{TenantId: 2, AccountIds: []int64{9, 10}}}, nil, "image", 0)
+	for _, fragment := range []string{"b.bucket_pos = ?", "b.bucket_value = ?", "b.tenant_id = ?", "b.account_id IN (?,?)"} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("query missing %q: %s", fragment, query)
+		}
+	}
+	if len(args) != 5 {
+		t.Fatalf("unexpected args: %#v", args)
 	}
 }

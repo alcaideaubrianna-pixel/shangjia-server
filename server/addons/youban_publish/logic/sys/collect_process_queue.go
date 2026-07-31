@@ -46,20 +46,28 @@ type collectProcessQueuePayload struct {
 const (
 	collectProcessTaskUniqueTTL = 30 * time.Minute
 	collectProcessTaskMaxRetry  = 1000
-	collectProcessTaskBatchRuns = 4
 )
 
 func (s *sSysPublish) enqueueCollectProcess(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration) error {
+	_, err := s.enqueueCollectProcessTask(ctx, payload, delay, true)
+	return err
+}
+
+func (s *sSysPublish) enqueueCollectProcessDeferred(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration) (bool, error) {
+	return s.enqueueCollectProcessTask(ctx, payload, delay, false)
+}
+
+func (s *sSysPublish) enqueueCollectProcessTask(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration, unique bool) (bool, error) {
 	if payload.TenantId <= 0 || payload.AccountId <= 0 || payload.SourceId <= 0 {
-		return nil
+		return false, nil
 	}
 	client, err := s.telegramQueueClient(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	body, err := collectProcessTaskBody(payload)
 	if err != nil {
-		return err
+		return false, err
 	}
 	task := asynq.NewTask(tgTaskTypeCollectProcess, body)
 	uniqueTTL := collectProcessTaskUniqueTTL
@@ -68,18 +76,20 @@ func (s *sSysPublish) enqueueCollectProcess(ctx context.Context, payload collect
 	}
 	options := []asynq.Option{
 		asynq.Queue(tgQueueNameBackground),
-		asynq.Unique(uniqueTTL),
 		asynq.MaxRetry(collectProcessTaskMaxRetry),
 		asynq.Timeout(30 * time.Minute),
+	}
+	if unique {
+		options = append(options, asynq.Unique(uniqueTTL))
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
 	_, err = client.EnqueueContext(ctx, task, options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
-		return nil
+		return false, nil
 	}
-	return err
+	return err == nil, err
 }
 
 func collectProcessTaskBody(payload collectProcessQueuePayload) ([]byte, error) {
@@ -101,25 +111,29 @@ func decodeCollectProcessQueuePayload(task *asynq.Task) (collectProcessQueuePayl
 	return payload, nil
 }
 
-func (s *sSysPublish) processCollectSourceWindowWithLock(ctx context.Context, payload collectProcessQueuePayload) error {
+func (s *sSysPublish) processCollectSourceWindowWithLock(ctx context.Context, payload collectProcessQueuePayload) (bool, error) {
 	enabled, err := collectProcessSourceEnabled(ctx, payload)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !enabled {
-		return nil
+		return false, nil
 	}
 	key := fmt.Sprintf("youban_publish:collect:source:%d:%d:%d", payload.TenantId, payload.AccountId, payload.SourceId)
 	distributedLock := lock.NewConfig(15*time.Minute, time.Second).Mutex(key)
 	if err = distributedLock.TryLock(ctx); err != nil {
-		return err
+		if errors.Is(err, lock.ErrLockFailed) {
+			g.Log().Debugf(ctx, "采集源已有任务执行，本任务主动让出 sourceId:%d", payload.SourceId)
+			return false, nil
+		}
+		return false, err
 	}
 	defer func() { _ = distributedLock.Unlock(context.Background()) }()
 	g.Log().Infof(ctx, "采集窗口开始执行 sourceId:%d tenantId:%d accountId:%d", payload.SourceId, payload.TenantId, payload.AccountId)
 	if err = s.processCollectSourceWindow(ctx, payload); err != nil {
-		return gerror.Wrapf(err, "采集窗口执行失败 sourceId:%d", payload.SourceId)
+		return false, gerror.Wrapf(err, "采集窗口执行失败 sourceId:%d", payload.SourceId)
 	}
-	return nil
+	return true, nil
 }
 
 func collectProcessSourceEnabled(ctx context.Context, payload collectProcessQueuePayload) (bool, error) {
@@ -134,25 +148,19 @@ func collectProcessSourceEnabled(ctx context.Context, payload collectProcessQueu
 	return count > 0, err
 }
 
-func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload collectProcessQueuePayload) error {
-	for run := 0; run < collectProcessTaskBatchRuns; run++ {
-		if err := s.processCollectSourceWindowWithLock(ctx, payload); err != nil {
-			return err
-		}
-		delay, pending, err := nextCollectProcessDelay(ctx, payload)
-		if err != nil {
-			return err
-		}
-		if !pending {
-			return nil
-		}
-		if delay > time.Second {
-			g.Log().Debugf(ctx, "采集源等待分组窗口 sourceId:%d retryAfter:%s", payload.SourceId, delay.Round(time.Second))
-			return nil
-		}
+func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload collectProcessQueuePayload) (time.Duration, bool, error) {
+	executed, err := s.processCollectSourceWindowWithLock(ctx, payload)
+	if err != nil {
+		return 0, false, err
 	}
-	g.Log().Debugf(ctx, "采集源本轮批处理已完成，剩余事件由后续消息或恢复器继续 sourceId:%d", payload.SourceId)
-	return nil
+	if !executed {
+		return 0, false, nil
+	}
+	delay, pending, err := nextCollectProcessDelay(ctx, payload)
+	if err != nil {
+		return 0, false, err
+	}
+	return delay, pending, nil
 }
 
 func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePayload) (time.Duration, bool, error) {
@@ -167,6 +175,7 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 	}
 	now := time.Now()
 	groupDeadline := now.Add(-collectMaterialGroupingDelay)
+	waitingVerifyDeadline := now.Add(-collectMaterialWaitingVerifyRetryDelay)
 	verifyDeadline := now.Add(-collectMaterialVerifyRetryDelay)
 	due, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Fields("id").
@@ -175,7 +184,7 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 		Where("source_id", payload.SourceId).
 		WhereIn("status", statuses).
 		Where("material_role IS NULL OR material_role = '' OR material_role = ? OR (status = ? AND material_role = ? AND error_message = ?)", collectMaterialRolePending, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
-		Where("(processed_at IS NULL AND (received_at <= ? OR (received_at IS NULL AND created_at <= ?))) OR (status = ? AND material_role = ? AND error_message = ? AND updated_at <= ?)", groupDeadline, groupDeadline, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, verifyDeadline).
+		Where("(processed_at IS NULL AND (material_group_status IS NULL OR material_group_status <> ?) AND (received_at <= ? OR (received_at IS NULL AND created_at <= ?))) OR (processed_at IS NULL AND material_group_status = ? AND updated_at <= ?) OR (status = ? AND material_role = ? AND error_message = ? AND updated_at <= ?)", collectMaterialGroupWaitingVerify, groupDeadline, groupDeadline, collectMaterialGroupWaitingVerify, waitingVerifyDeadline, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, verifyDeadline).
 		Limit(1).
 		One()
 	if err != nil {
@@ -191,12 +200,28 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 		Where("source_id", payload.SourceId).
 		WhereIn("status", statuses).
 		Where("material_role IS NULL OR material_role = '' OR material_role = ?", collectMaterialRolePending).
+		Where("material_group_status IS NULL OR material_group_status <> ?", collectMaterialGroupWaitingVerify).
 		WhereNull("processed_at").
 		OrderAsc("ready_from").
 		Limit(1).
 		One()
 	if err != nil {
 		return 0, false, gerror.Wrap(err, "读取采集源分组等待任务失败")
+	}
+	waitingVerify, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Fields("updated_at AS ready_from").
+		Where("tenant_id", payload.TenantId).
+		Where("account_id", payload.AccountId).
+		Where("source_id", payload.SourceId).
+		WhereIn("status", statuses).
+		Where("material_role", collectMaterialRolePending).
+		Where("material_group_status", collectMaterialGroupWaitingVerify).
+		WhereNull("processed_at").
+		OrderAsc("updated_at").
+		Limit(1).
+		One()
+	if err != nil {
+		return 0, false, gerror.Wrap(err, "读取采集源验证配对等待任务失败")
 	}
 	verify, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Fields("updated_at AS ready_from").
@@ -217,6 +242,13 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 	if !normal.IsEmpty() && normal["ready_from"].GTime() != nil {
 		nextDelay = collectLocalWindowRemaining(normal["ready_from"].GTime(), collectMaterialGroupingDelay)
 		hasNextDelay = true
+	}
+	if !waitingVerify.IsEmpty() && waitingVerify["ready_from"].GTime() != nil {
+		waitingDelay := collectLocalWindowRemaining(waitingVerify["ready_from"].GTime(), collectMaterialWaitingVerifyRetryDelay)
+		if !hasNextDelay || waitingDelay < nextDelay {
+			nextDelay = waitingDelay
+			hasNextDelay = true
+		}
 	}
 	if !verify.IsEmpty() && verify["ready_from"].GTime() != nil {
 		verifyDelay := collectLocalWindowRemaining(verify["ready_from"].GTime(), collectMaterialVerifyRetryDelay)

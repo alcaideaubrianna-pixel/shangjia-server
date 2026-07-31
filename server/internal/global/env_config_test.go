@@ -60,6 +60,7 @@ database:
 	t.Setenv("YOUBAN_PUBLISH_MEDIA_REALTIME_WEIGHT", "24")
 	t.Setenv("YOUBAN_PUBLISH_ACCOUNT_MEDIA_CONCURRENCY", "2")
 	t.Setenv("YOUBAN_PUBLISH_MEDIA_RECOVERY_BATCH_SIZE", "300")
+	t.Setenv("YOUBAN_PUBLISH_MATERIAL_VERIFY_WINDOW_SECONDS", "240")
 
 	envconfig.Apply(ctx)
 
@@ -86,4 +87,5 @@ database:
 	assertCfg("youbanPublish.queue.mediaRealtimeWeight", "24")
 	assertCfg("youbanPublish.collect.accountMediaConcurrency", "2")
 	assertCfg("youbanPublish.collect.mediaRecoveryBatchSize", "300")
+	assertCfg("youbanPublish.collect.materialVerifyWindowSeconds", "240")
 }
