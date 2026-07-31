@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	iservice "hotgo/internal/service"
@@ -19,6 +20,7 @@ import (
 const collectProfileSourceType = "youban_collect"
 
 type collectPreparedMedia struct {
+	EventMediaId      int64
 	Purpose           string
 	SortIndex         int
 	MediaType         string
@@ -107,6 +109,7 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 				return nil, gerror.Wrap(assetErr, "处理采集媒体指纹失败")
 			}
 			prepared.Media = append(prepared.Media, collectPreparedMedia{
+				EventMediaId:      item.EventMediaId,
 				Purpose:           purpose,
 				SortIndex:         index + 1,
 				MediaType:         mediaType,
@@ -125,6 +128,9 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 	if len(prepared.Media) != snapshot.MediaCount {
 		return nil, gerror.New("采集资料媒体准备数量不完整")
 	}
+	if err := s.persistPreparedCollectMedia(ctx, prepared.Media); err != nil {
+		return nil, err
+	}
 	prepared.Content = collectPreparedContentSnapshot(prepared)
 	return prepared, nil
 }
@@ -141,7 +147,8 @@ func collectPreparedContentSnapshot(prepared *collectPreparedMaterial) *collectC
 			mediaType = "photo"
 		}
 		items = append(items, collectMediaItem{
-			Type: mediaType, Purpose: media.Purpose, FileId: media.FileId,
+			EventMediaId: media.EventMediaId,
+			Type:         mediaType, Purpose: media.Purpose, FileId: media.FileId,
 			FileUrl: media.FileURL, StoragePath: media.StoragePath,
 			PosterUrl: media.PosterURL, FileMd5: media.MD5,
 			FilePhash: media.PerceptualHash, DebugMetaJson: media.MetaJSON,
@@ -151,6 +158,51 @@ func collectPreparedContentSnapshot(prepared *collectPreparedMaterial) *collectC
 	content.MediaCount = len(items)
 	content.DedupeKey = collectHash(content.NormalizedText + ":" + collectMediaSignature(content.Media))
 	return &content
+}
+
+func (s *sSysPublish) persistPreparedCollectMedia(ctx context.Context, media []collectPreparedMedia) error {
+	if len(media) == 0 {
+		return nil
+	}
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		for _, item := range media {
+			if item.EventMediaId <= 0 {
+				return gerror.New("采集媒体缺少稳定记录标识")
+			}
+			fileURL := normalizeMediaFileURL(item.FileURL, item.StoragePath)
+			if fileURL == "" || isCollectMediaCachePath(item.StoragePath) {
+				return gerror.Newf("采集媒体尚未持久化到统一存储 mediaId:%d", item.EventMediaId)
+			}
+			result, err := tx.Model(pdao.YoubanPublishCollectEventMedia.Table()).Ctx(ctx).
+				Where("id", item.EventMediaId).
+				Data(g.Map{
+					"file_url":      fileURL,
+					"storage_path":  normalizeStoredMediaPath(item.StoragePath),
+					"poster_url":    normalizeMediaFileURL(item.PosterURL, item.PosterStoragePath),
+					"file_md5":      strings.TrimSpace(item.MD5),
+					"file_phash":    strings.TrimSpace(item.PerceptualHash),
+					"cache_status":  collectMediaCacheReady,
+					"error_message": "",
+					"updated_at":    gtime.Now(),
+				}).Update()
+			if err != nil {
+				return gerror.Wrapf(err, "回写采集媒体持久化地址失败 mediaId:%d", item.EventMediaId)
+			}
+			affected, err := result.RowsAffected()
+			if err != nil {
+				return gerror.Wrapf(err, "读取采集媒体回写结果失败 mediaId:%d", item.EventMediaId)
+			}
+			if affected != 1 {
+				return gerror.Newf("采集媒体持久化回写记录不存在 mediaId:%d", item.EventMediaId)
+			}
+		}
+		return nil
+	})
+}
+
+func isCollectMediaCachePath(path string) bool {
+	path = strings.TrimLeft(normalizeStoredMediaPath(path), "/")
+	return strings.HasPrefix(path, "storage/cache/youban_publish/media/")
 }
 
 func validateCollectMaterialMedia(content *collectContentResult) error {

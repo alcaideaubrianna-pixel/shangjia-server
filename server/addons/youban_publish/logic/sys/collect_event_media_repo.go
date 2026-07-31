@@ -299,7 +299,8 @@ func collectMediaRowsToItems(rows []*collectEventMediaRow, purpose string) []col
 			fileId = telegramCopyMediaFileId(row.BackupChatId, int(row.BackupMessageId))
 		}
 		items = append(items, collectMediaItem{
-			Type: row.MediaType, Purpose: purpose, FileId: fileId,
+			EventMediaId: row.Id,
+			Type:         row.MediaType, Purpose: purpose, FileId: fileId,
 			FileUrl: row.FileUrl, StoragePath: row.StoragePath, PosterUrl: row.PosterUrl,
 			FileMd5: row.FileMd5, FilePhash: row.FilePhash, DebugMetaJson: row.MetaJson,
 			SourceKind: row.SourceKind, SourceMediaId: row.SourceMediaId,

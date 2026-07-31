@@ -75,17 +75,36 @@ func TestCollectPreparedMediaCounts(t *testing.T) {
 	}
 }
 
+func TestIsCollectMediaCachePath(t *testing.T) {
+	for _, path := range []string{
+		"storage/cache/youban_publish/media/a.jpg",
+		"resource/public/storage/cache/youban_publish/media/a.jpg",
+		"/resource/public/storage/cache/youban_publish/media/a.jpg",
+	} {
+		if !isCollectMediaCachePath(path) {
+			t.Fatalf("path %q should be recognized as local collection cache", path)
+		}
+	}
+	for _, path := range []string{"hotgo/file/2026/a.jpg", "https://cdn.test/a.jpg", ""} {
+		if isCollectMediaCachePath(path) {
+			t.Fatalf("path %q should not be recognized as local collection cache", path)
+		}
+	}
+}
+
 func TestCollectPreparedContentSnapshotAlignsReviewAndProfilePayload(t *testing.T) {
 	prepared := &collectPreparedMaterial{
 		Content: &collectContentResult{RawText: "北京 老师", NormalizedText: "北京 老师", TextHash: "text-hash"},
 		Media: []collectPreparedMedia{
 			{
-				Purpose: collectMaterialRoleDisplay, MediaType: "image", FileId: "photo-1",
+				EventMediaId: 11,
+				Purpose:      collectMaterialRoleDisplay, MediaType: "image", FileId: "photo-1",
 				FileURL: "https://cdn.test/photo.jpg", StoragePath: "storage/photo.jpg",
 				PerceptualHash: "abcdef0123456789", MD5: "photo-md5", MetaJSON: `{"id":1}`,
 			},
 			{
-				Purpose: collectMaterialRoleVerify, MediaType: "video", FileId: "video-1",
+				EventMediaId: 12,
+				Purpose:      collectMaterialRoleVerify, MediaType: "video", FileId: "video-1",
 				FileURL: "https://cdn.test/verify.mp4", StoragePath: "storage/verify.mp4",
 			},
 		},
@@ -97,6 +116,9 @@ func TestCollectPreparedContentSnapshotAlignsReviewAndProfilePayload(t *testing.
 	}
 	if snapshot.Media[0].FilePhash != "abcdef0123456789" || snapshot.Media[0].FileUrl != "https://cdn.test/photo.jpg" {
 		t.Fatalf("display media snapshot mismatch: %#v", snapshot.Media[0])
+	}
+	if snapshot.Media[0].EventMediaId != 11 || snapshot.Media[1].EventMediaId != 12 {
+		t.Fatalf("event media ids were not preserved: %#v", snapshot.Media)
 	}
 	if snapshot.Media[1].Purpose != collectMaterialRoleVerify {
 		t.Fatalf("verify media purpose mismatch: %#v", snapshot.Media[1])

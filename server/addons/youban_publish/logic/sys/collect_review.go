@@ -146,9 +146,19 @@ func (s *sSysPublish) fillCollectReviewMedia(ctx context.Context, list []*sysin.
 		if review == nil {
 			continue
 		}
+		storagePath := normalizeStoredMediaPath(row["storage_path"].String())
+		fileURL := normalizeMediaFileURL(row["file_url"].String(), storagePath)
+		posterURL := normalizeMediaFileURL(row["poster_url"].String(), "")
+		if isCollectMediaCachePath(storagePath) {
+			fileURL = ""
+			storagePath = ""
+		}
+		if isCollectMediaCachePath(posterURL) {
+			posterURL = ""
+		}
 		review.Media = append(review.Media, &sysin.CollectReviewMediaModel{
 			Type: row["media_type"].String(), Purpose: row["material_role"].String(), FileId: row["source_file_id"].String(),
-			FileUrl: row["file_url"].String(), StoragePath: row["storage_path"].String(), PosterUrl: row["poster_url"].String(),
+			FileUrl: fileURL, StoragePath: storagePath, PosterUrl: posterURL,
 		})
 	}
 	for _, review := range list {

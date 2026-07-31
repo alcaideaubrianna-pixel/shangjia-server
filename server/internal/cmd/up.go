@@ -105,6 +105,12 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 			return gerror.New("collectMediaCDNRepair 的 a2 必须是逗号分隔的有效媒体ID")
 		}
 		err = fix.RepairYoubanPublishCollectMediaCDN(ctx, mediaIds)
+	case "collectReviewMediaRepair":
+		reviewIds, parseErr := fix.ParseMaterialImportRepairGroupIDs(args["a2"])
+		if parseErr != nil || len(reviewIds) == 0 {
+			return gerror.New("collectReviewMediaRepair 需要通过 a2 传入逗号分隔的审核ID")
+		}
+		err = publishsys.RepairCollectReviewMedia(ctx, reviewIds)
 	case "collectRuleRemoveUniqueNo":
 		err = fix.RemoveYoubanPublishCollectRuleUniqueNo(ctx)
 	case "collectDedupeIndexes":

@@ -140,6 +140,7 @@ func botCollectMessage(botId int64, source g.Map, msg *models.Message) *CollectM
 }
 
 type collectMediaItem struct {
+	EventMediaId        int64  `json:"-"`
 	Type                string `json:"type"`
 	Purpose             string `json:"purpose,omitempty"`
 	FileId              string `json:"fileId"`

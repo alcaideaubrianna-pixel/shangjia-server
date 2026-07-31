@@ -896,7 +896,20 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 		return gerror.Wrap(err, "读取采集审核幂等记录失败")
 	}
 	if !existingReview.IsEmpty() {
-		return nil
+		prepared, prepareErr := s.prepareCollectMaterial(ctx, event, content)
+		if prepareErr != nil {
+			return gerror.Wrap(prepareErr, "刷新采集审核媒体失败")
+		}
+		if prepared == nil || prepared.Content == nil {
+			return newCollectProcessRetryError(30*time.Second, "采集审核资料尚未准备完成")
+		}
+		_, updateErr := pdao.YoubanPublishCollectReview.Ctx(ctx).
+			Where("id", existingReview["id"].Int64()).
+			Data(g.Map{
+				"media_count": prepared.Content.MediaCount,
+				"updated_at":  gtime.Now(),
+			}).Update()
+		return gerror.Wrap(updateErr, "刷新采集审核媒体数量失败")
 	}
 	now := gtime.Now()
 	prepared, err := s.prepareCollectMaterial(ctx, event, content)
