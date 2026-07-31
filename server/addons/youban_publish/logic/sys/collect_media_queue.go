@@ -22,9 +22,8 @@ type collectMediaQueuePayload struct {
 }
 
 const (
-	collectMediaTaskUniqueTTL      = 24 * time.Hour
-	collectMediaRealtimeWindow     = 10 * time.Minute
-	collectMediaBulkQueueShardSize = 4
+	collectMediaTaskUniqueTTL  = 24 * time.Hour
+	collectMediaRealtimeWindow = 10 * time.Minute
 )
 
 func collectMediaQueuePayloadFromEvent(event gdb.Record) collectMediaQueuePayload {
@@ -40,24 +39,11 @@ func collectMediaQueuePayloadFromEvent(event gdb.Record) collectMediaQueuePayloa
 	return payload
 }
 
-func collectMediaQueueName(payload collectMediaQueuePayload) string {
+func collectMediaQueueName(ctx context.Context, payload collectMediaQueuePayload) string {
 	if !payload.Bulk {
 		return tgQueueNameMediaRealtime
 	}
-	shard := payload.TgAccountId % collectMediaBulkQueueShardSize
-	if shard < 0 {
-		shard = -shard
-	}
-	switch shard {
-	case 1:
-		return tgQueueNameMediaBulk1
-	case 2:
-		return tgQueueNameMediaBulk2
-	case 3:
-		return tgQueueNameMediaBulk3
-	default:
-		return tgQueueNameMediaBulk0
-	}
+	return collectMediaBulkQueueName(int(payload.TgAccountId % int64(collectMediaBulkQueueShards(ctx))))
 }
 
 func (s *sSysPublish) enqueueCollectMediaCache(ctx context.Context, payload collectMediaQueuePayload, delay time.Duration) error {
@@ -66,6 +52,14 @@ func (s *sSysPublish) enqueueCollectMediaCache(ctx context.Context, payload coll
 }
 
 func (s *sSysPublish) enqueueCollectMediaCacheTask(ctx context.Context, payload collectMediaQueuePayload, delay time.Duration) (bool, error) {
+	return s.enqueueCollectMediaCacheTaskWithUnique(ctx, payload, delay, true)
+}
+
+func (s *sSysPublish) enqueueCollectMediaCacheDeferred(ctx context.Context, payload collectMediaQueuePayload, delay time.Duration) (bool, error) {
+	return s.enqueueCollectMediaCacheTaskWithUnique(ctx, payload, delay, false)
+}
+
+func (s *sSysPublish) enqueueCollectMediaCacheTaskWithUnique(ctx context.Context, payload collectMediaQueuePayload, delay time.Duration, unique bool) (bool, error) {
 	if payload.EventId <= 0 || payload.TenantId <= 0 || payload.AccountId <= 0 {
 		return false, nil
 	}
@@ -79,10 +73,12 @@ func (s *sSysPublish) enqueueCollectMediaCacheTask(ctx context.Context, payload 
 	}
 	task := asynq.NewTask(tgTaskTypeCollectMedia, body)
 	options := []asynq.Option{
-		asynq.Queue(collectMediaQueueName(payload)),
-		asynq.Unique(collectMediaTaskUniqueTTL),
+		asynq.Queue(collectMediaQueueName(ctx, payload)),
 		asynq.MaxRetry(10),
 		asynq.Timeout(30 * time.Minute),
+	}
+	if unique {
+		options = append(options, asynq.Unique(collectMediaTaskUniqueTTL))
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
@@ -114,4 +110,47 @@ func collectMediaQueueConcurrency(ctx context.Context) int {
 		return 8
 	}
 	return concurrency
+}
+
+func collectMediaBulkQueueShards(ctx context.Context) int {
+	shards := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaBulkShards", collectMediaMaxBulkQueueShards).Int()
+	if shards < 1 {
+		return 1
+	}
+	if shards > collectMediaMaxBulkQueueShards {
+		return collectMediaMaxBulkQueueShards
+	}
+	return shards
+}
+
+func collectMediaWorkerQueues(ctx context.Context) map[string]int {
+	realtimeWeight := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaRealtimeWeight", 32).Int()
+	bulkWeight := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaBulkWeight", 1).Int()
+	legacyWeight := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaLegacyWeight", 1).Int()
+	if realtimeWeight < 1 {
+		realtimeWeight = 1
+	}
+	if realtimeWeight > 100 {
+		realtimeWeight = 100
+	}
+	if bulkWeight < 1 {
+		bulkWeight = 1
+	}
+	if bulkWeight > 20 {
+		bulkWeight = 20
+	}
+	if legacyWeight < 1 {
+		legacyWeight = 1
+	}
+	if legacyWeight > 20 {
+		legacyWeight = 20
+	}
+	queues := map[string]int{
+		tgQueueNameMediaRealtime: realtimeWeight,
+		tgQueueNameMedia:         legacyWeight,
+	}
+	for _, queue := range collectMediaBulkQueueNames() {
+		queues[queue] = bulkWeight
+	}
+	return queues
 }

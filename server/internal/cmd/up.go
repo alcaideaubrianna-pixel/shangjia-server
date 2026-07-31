@@ -14,6 +14,7 @@ import (
 	"github.com/gogf/gf/v2/os/gcmd"
 
 	"hotgo/addons/youban_publish/install"
+	publishsys "hotgo/addons/youban_publish/logic/sys"
 	"hotgo/internal/cmd/upgrade/fix"
 )
 
@@ -88,6 +89,8 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.RequeueYoubanPublishCollectEvents(ctx)
 	case "collectMediaRetryState":
 		err = fix.ApplyYoubanPublishCollectMediaRetryState(ctx)
+	case "collectMediaQueueRebalance":
+		_, err = publishsys.RebalanceCollectMediaQueue(ctx)
 	case "collectProfileMediaRepair":
 		profileIds, parseErr := fix.ParseMaterialImportRepairGroupIDs(args["a2"])
 		if parseErr != nil {

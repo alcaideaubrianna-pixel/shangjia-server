@@ -18,10 +18,7 @@ const (
 	tgQueueNameBulk             = "youban_publish_tg_bulk"
 	tgQueueNameMedia            = "youban_publish_media"
 	tgQueueNameMediaRealtime    = "youban_publish_media_realtime"
-	tgQueueNameMediaBulk0       = "youban_publish_media_bulk_0"
-	tgQueueNameMediaBulk1       = "youban_publish_media_bulk_1"
-	tgQueueNameMediaBulk2       = "youban_publish_media_bulk_2"
-	tgQueueNameMediaBulk3       = "youban_publish_media_bulk_3"
+	tgQueueNameMediaBulkPrefix  = "youban_publish_media_bulk_"
 	tgQueueNameBackground       = "youban_publish_background"
 	tgTaskTypePublish           = "youban_publish:tg:publish"
 	tgTaskTypeCleanup           = "youban_publish:tg:cleanup"
@@ -37,6 +34,23 @@ const (
 	tgTaskTypeCollectTrigger    = "youban_publish:collect:trigger"
 	tgTaskTypeChannelMemberSync = "youban_publish:tg:channel_member_sync"
 )
+
+const collectMediaMaxBulkQueueShards = 16
+
+func collectMediaBulkQueueName(shard int) string {
+	if shard < 0 {
+		shard = -shard
+	}
+	return fmt.Sprintf("%s%d", tgQueueNameMediaBulkPrefix, shard%collectMediaMaxBulkQueueShards)
+}
+
+func collectMediaBulkQueueNames() []string {
+	queues := make([]string, 0, collectMediaMaxBulkQueueShards)
+	for shard := 0; shard < collectMediaMaxBulkQueueShards; shard++ {
+		queues = append(queues, collectMediaBulkQueueName(shard))
+	}
+	return queues
+}
 
 const (
 	tgJobPriorityUrgent  = 10

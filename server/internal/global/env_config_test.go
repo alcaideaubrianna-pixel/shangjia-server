@@ -55,6 +55,11 @@ database:
 	t.Setenv("YOUBAN_DB_USER", "user-test")
 	t.Setenv("YOUBAN_DB_PASSWORD", "db-pass")
 	t.Setenv("YOUBAN_DB_DEBUG", "false")
+	t.Setenv("YOUBAN_PUBLISH_MEDIA_WORKER_CONCURRENCY", "8")
+	t.Setenv("YOUBAN_PUBLISH_MEDIA_BULK_SHARDS", "16")
+	t.Setenv("YOUBAN_PUBLISH_MEDIA_REALTIME_WEIGHT", "24")
+	t.Setenv("YOUBAN_PUBLISH_ACCOUNT_MEDIA_CONCURRENCY", "2")
+	t.Setenv("YOUBAN_PUBLISH_MEDIA_RECOVERY_BATCH_SIZE", "300")
 
 	envconfig.Apply(ctx)
 
@@ -76,4 +81,9 @@ database:
 	assertCfg("redis.default.pass", "redis-pass")
 	assertCfg("database.default.link", "pgsql:user-test:db-pass@tcp(pg-test:5433)/db-test")
 	assertCfg("database.default.debug", "false")
+	assertCfg("youbanPublish.queue.mediaConcurrency", "8")
+	assertCfg("youbanPublish.queue.mediaBulkShards", "16")
+	assertCfg("youbanPublish.queue.mediaRealtimeWeight", "24")
+	assertCfg("youbanPublish.collect.accountMediaConcurrency", "2")
+	assertCfg("youbanPublish.collect.mediaRecoveryBatchSize", "300")
 }

@@ -115,13 +115,17 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 	now := gtime.Now()
 	eventCols := pdao.YoubanPublishCollectEvent.Columns()
 	mediaTable := pdao.YoubanPublishCollectEventMedia.Table()
+	candidateLimit := limit * 4
+	if candidateLimit > 2000 {
+		candidateLimit = 2000
+	}
 	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
 		Where("e."+eventCols.Status, sysin.CollectEventStatusMediaPending).
 		WhereNull("e."+eventCols.ProcessedAt).
 		Where(enabledCollectSourceExistsSQL("e")).
 		Where("EXISTS (SELECT 1 FROM "+mediaTable+" m WHERE m.event_id=e."+eventCols.Id+" AND m.cache_status=? AND (m.next_retry_at IS NULL OR m.next_retry_at<=?))", collectMediaCachePending, now).
 		OrderAsc("e." + eventCols.UpdatedAt).
-		Limit(limit).
+		Limit(candidateLimit).
 		All()
 	if err != nil {
 		return gerror.Wrap(err, "读取待恢复采集媒体事件失败")
@@ -131,7 +135,7 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 	}
 
 	recovered := 0
-	for _, row := range rows {
+	for _, row := range fairCollectMediaRecoveryRows(rows, limit) {
 		if row.IsEmpty() {
 			continue
 		}
@@ -160,6 +164,44 @@ func (s *sSysPublish) recoverPendingCollectMedia(ctx context.Context, limit int)
 		g.Log().Infof(ctx, "已重新投递待处理采集媒体任务 count:%d", recovered)
 	}
 	return nil
+}
+
+func fairCollectMediaRecoveryRows(rows gdb.Result, limit int) gdb.Result {
+	if limit <= 0 || len(rows) <= 1 {
+		return rows
+	}
+	accountOrder := make([]string, 0)
+	byAccount := make(map[string]gdb.Result)
+	for _, row := range rows {
+		if row.IsEmpty() {
+			continue
+		}
+		key := collectMediaAccountKey(row["tenant_id"].Int64(), row["tg_account_id"].Int64())
+		if _, exists := byAccount[key]; !exists {
+			accountOrder = append(accountOrder, key)
+		}
+		byAccount[key] = append(byAccount[key], row)
+	}
+	result := make(gdb.Result, 0, minInt(limit, len(rows)))
+	for len(result) < limit {
+		progressed := false
+		for _, key := range accountOrder {
+			accountRows := byAccount[key]
+			if len(accountRows) == 0 {
+				continue
+			}
+			result = append(result, accountRows[0])
+			byAccount[key] = accountRows[1:]
+			progressed = true
+			if len(result) >= limit {
+				break
+			}
+		}
+		if !progressed {
+			break
+		}
+	}
+	return result
 }
 
 func collectMediaRecoveryBatchSize(ctx context.Context) int {

@@ -20,15 +20,8 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	mediaServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency: collectMediaQueueConcurrency(ctx),
-		Queues: map[string]int{
-			tgQueueNameMediaRealtime: 8,
-			tgQueueNameMedia:         1,
-			tgQueueNameMediaBulk0:    2,
-			tgQueueNameMediaBulk1:    2,
-			tgQueueNameMediaBulk2:    2,
-			tgQueueNameMediaBulk3:    2,
-		},
+		Concurrency:    collectMediaQueueConcurrency(ctx),
+		Queues:         collectMediaWorkerQueues(ctx),
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	backgroundServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
@@ -242,5 +235,16 @@ func (s *sSysPublish) handleCollectMediaCacheTask(ctx context.Context, task *asy
 	if err != nil {
 		return err
 	}
-	return s.ExecuteCollectMediaCache(ctx, payload)
+	err = s.ExecuteCollectMediaCache(ctx, payload)
+	if retryErr := collectMediaRetryErrorFrom(err); retryErr != nil && retryErr.deferWithoutFailure {
+		enqueued, enqueueErr := s.enqueueCollectMediaCacheDeferred(ctx, payload, retryErr.delay)
+		if enqueueErr != nil {
+			return enqueueErr
+		}
+		if enqueued {
+			g.Log().Debugf(ctx, "采集媒体任务因账号公平调度延迟重新投递 eventId:%d delay:%s", payload.EventId, retryErr.delay)
+		}
+		return nil
+	}
+	return err
 }

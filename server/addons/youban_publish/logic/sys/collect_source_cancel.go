@@ -146,18 +146,21 @@ func clearCollectSourceTasks(inspector *asynq.Inspector, sourceId int64) error {
 		{list: inspector.ListArchivedTasks},
 		{active: true, list: inspector.ListActiveTasks},
 	}
-	for _, queue := range []struct {
+	queues := []struct {
 		name  string
 		label string
 	}{
 		{name: tgQueueNameBackground, label: "采集处理"},
 		{name: tgQueueNameMediaRealtime, label: "实时媒体缓存"},
 		{name: tgQueueNameMedia, label: "旧媒体缓存"},
-		{name: tgQueueNameMediaBulk0, label: "历史媒体缓存0"},
-		{name: tgQueueNameMediaBulk1, label: "历史媒体缓存1"},
-		{name: tgQueueNameMediaBulk2, label: "历史媒体缓存2"},
-		{name: tgQueueNameMediaBulk3, label: "历史媒体缓存3"},
-	} {
+	}
+	for _, name := range collectMediaBulkQueueNames() {
+		queues = append(queues, struct {
+			name  string
+			label string
+		}{name: name, label: "历史媒体缓存"})
+	}
+	for _, queue := range queues {
 		for _, item := range lists {
 			matched, err := listCollectSourceTasks(item.list, queue.name, sourceId)
 			if err != nil && !errors.Is(err, asynq.ErrQueueNotFound) {

@@ -91,6 +91,48 @@ database:
 
 如果日志里持续出现 `connect to 127.0.0.1:8099 error`，这是 HotGo 的 TCP 客户端在尝试连接主服务 TCP server。单容器只跑 HTTP 时可以忽略，或把启动命令固定为 `./main http`；后续拆出独立 cron 容器时，把 cron 容器的 `YOUBAN_TCP_CRON_ADDRESS` 设置为主服务容器地址，例如 `youban-server:8099`。
 
+## 采集媒体队列配置
+
+采集媒体使用实时优先队列、历史账号分片和账号级并发限制。Redis 只保存待执行任务，采集事件和媒体状态仍以 PostgreSQL 为准；容器重启后会根据数据库自动恢复未完成任务。
+
+4 核 8G 单实例建议先使用：
+
+```env
+YOUBAN_PUBLISH_MEDIA_WORKER_CONCURRENCY=6
+YOUBAN_PUBLISH_GLOBAL_MEDIA_CONCURRENCY=8
+YOUBAN_PUBLISH_ACCOUNT_MEDIA_CONCURRENCY=2
+YOUBAN_PUBLISH_MEDIA_FILE_CONCURRENCY=2
+YOUBAN_PUBLISH_MEDIA_DOWNLOAD_THREADS=1
+YOUBAN_PUBLISH_MEDIA_BULK_SHARDS=16
+YOUBAN_PUBLISH_MEDIA_REALTIME_WEIGHT=32
+YOUBAN_PUBLISH_MEDIA_BULK_WEIGHT=1
+YOUBAN_PUBLISH_MEDIA_RECOVERY_BATCH_SIZE=300
+YOUBAN_PUBLISH_MATERIAL_WINDOW_BATCH_SIZE=100
+```
+
+参数说明：
+
+- `YOUBAN_PUBLISH_MEDIA_WORKER_CONCURRENCY`：每个 HotGo 实例的媒体任务 Worker 数量。4 核机器建议先设为 `6`，观察稳定后可调整到 `8`。
+- `YOUBAN_PUBLISH_GLOBAL_MEDIA_CONCURRENCY`：单实例同时执行的媒体下载上限。
+- `YOUBAN_PUBLISH_ACCOUNT_MEDIA_CONCURRENCY`：同一 TG 账号在整个 Redis 集群中的媒体下载并发上限，使用分布式租约控制。
+- `YOUBAN_PUBLISH_MEDIA_FILE_CONCURRENCY`：单个账号采集运行时允许并行处理的媒体文件数量。
+- `YOUBAN_PUBLISH_MEDIA_DOWNLOAD_THREADS`：单个 TG 文件下载使用的分片线程数。优先增加 Worker，不建议盲目增加单文件线程。
+- `YOUBAN_PUBLISH_MEDIA_BULK_SHARDS`：历史媒体队列分片数，最大 `16`，按 TG 账号稳定分片。
+- `YOUBAN_PUBLISH_MEDIA_REALTIME_WEIGHT`：实时媒体队列调度权重。
+- `YOUBAN_PUBLISH_MEDIA_BULK_WEIGHT`：每个历史媒体分片的调度权重。
+- `YOUBAN_PUBLISH_MEDIA_RECOVERY_BATCH_SIZE`：每轮从数据库恢复的媒体任务数量。
+- `YOUBAN_PUBLISH_MATERIAL_WINDOW_BATCH_SIZE`：单次采集资料分组窗口处理数量。
+
+SAE 修改环境变量后会通过新 Revision 重启实例并生效。扩容多个 HotGo 实例时，媒体 Worker 数量是每实例配置，例如两个实例均配置为 `6` 时，媒体 Worker 总数为 `12`；同一 TG 账号仍受集群级 `ACCOUNT_MEDIA_CONCURRENCY` 限制。
+
+新队列版本首次部署后，可以执行一次队列重排：
+
+```bash
+/app/hotgo up -m=fix -a1=collectMediaQueueRebalance
+```
+
+该命令会清理媒体队列归档任务，将待执行任务按“实时优先、TG 账号轮询”重新投递，并跳过正在执行的任务。数据库中的采集业务状态不会被删除。
+
 ## GitHub Actions Secrets
 
 在 GitHub 私有仓库的 Settings -> Secrets and variables -> Actions 里配置：

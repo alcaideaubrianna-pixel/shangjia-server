@@ -31,6 +31,16 @@ docker compose up -d --force-recreate
 
 GitHub Actions 调 1Panel 容器升级接口时，只会替换容器镜像，容器环境变量继续来自 1Panel/Compose 当前配置。
 
+## 采集媒体并发
+
+`4 核 8G` 推荐参数已经写入 `.env.example`。首次使用新媒体队列版本时，部署完成后执行：
+
+```bash
+/app/hotgo up -m=fix -a1=collectMediaQueueRebalance
+```
+
+完整参数说明、SAE 多实例计算方式和调优建议见 [1Panel + HotGo 原生部署](../../docs/1panel-hotgo.md#采集媒体队列配置)。
+
 ## 备用渲染
 
 `render-config.sh` 只作为兼容旧部署的备用工具保留。新部署默认不需要使用它。

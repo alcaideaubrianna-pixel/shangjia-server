@@ -30,9 +30,10 @@ import (
 )
 
 type collectMediaRetryError struct {
-	message     string
-	delay       time.Duration
-	rateLimited bool
+	message             string
+	delay               time.Duration
+	rateLimited         bool
+	deferWithoutFailure bool
 }
 
 type collectEventMediaCacheSummary struct {
@@ -65,6 +66,12 @@ func newCollectMediaRetryError(message string, delay time.Duration) *collectMedi
 		delay = 15 * time.Second
 	}
 	return &collectMediaRetryError{message: message, delay: delay}
+}
+
+func newCollectMediaFairnessRetryError(message string, delay time.Duration) *collectMediaRetryError {
+	retryErr := newCollectMediaRetryError(message, delay)
+	retryErr.deferWithoutFailure = true
+	return retryErr
 }
 
 func newCollectMediaRateLimitError(err error) *collectMediaRetryError {
@@ -1213,14 +1220,26 @@ func (s *sSysPublish) acquireCollectMediaDownloadSlots(ctx context.Context, tena
 	}
 	select {
 	case globalSlots <- struct{}{}:
-		return func() {
-			<-globalSlots
-			<-accountSlots
-		}, nil
 	case <-ctx.Done():
 		<-accountSlots
 		return func() {}, ctx.Err()
 	}
+	lease, acquired, err := acquireCollectMediaAccountLease(ctx, tenantId, tgAccountId, accountLimit)
+	if err != nil {
+		<-globalSlots
+		<-accountSlots
+		return func() {}, gerror.Wrap(err, "获取TG账号媒体分布式并发租约失败")
+	}
+	if !acquired {
+		<-globalSlots
+		<-accountSlots
+		return func() {}, newCollectMediaFairnessRetryError("TG账号媒体并发已满，等待公平调度", 3*time.Second)
+	}
+	return func() {
+		lease.Release()
+		<-globalSlots
+		<-accountSlots
+	}, nil
 }
 
 func (s *sSysPublish) waitCollectMediaAccountInterval(ctx context.Context, tenantId int64, tgAccountId int64) {

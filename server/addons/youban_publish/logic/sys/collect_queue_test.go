@@ -18,19 +18,49 @@ func TestCollectQueuesUseSharedWorkers(t *testing.T) {
 }
 
 func TestCollectMediaQueueNamePrioritizesRealtime(t *testing.T) {
-	if got := collectMediaQueueName(collectMediaQueuePayload{TgAccountId: 13}); got != tgQueueNameMediaRealtime {
+	if got := collectMediaQueueName(context.Background(), collectMediaQueuePayload{TgAccountId: 13}); got != tgQueueNameMediaRealtime {
 		t.Fatalf("realtime queue = %s", got)
 	}
 	cases := map[int64]string{
-		12: tgQueueNameMediaBulk0,
-		13: tgQueueNameMediaBulk1,
-		14: tgQueueNameMediaBulk2,
-		15: tgQueueNameMediaBulk3,
-		17: tgQueueNameMediaBulk1,
+		12: collectMediaBulkQueueName(12),
+		13: collectMediaBulkQueueName(13),
+		14: collectMediaBulkQueueName(14),
+		15: collectMediaBulkQueueName(15),
+		17: collectMediaBulkQueueName(1),
 	}
 	for accountID, want := range cases {
-		if got := collectMediaQueueName(collectMediaQueuePayload{TgAccountId: accountID, Bulk: true}); got != want {
+		if got := collectMediaQueueName(context.Background(), collectMediaQueuePayload{TgAccountId: accountID, Bulk: true}); got != want {
 			t.Fatalf("account %d queue = %s, want %s", accountID, got, want)
+		}
+	}
+}
+
+func TestCollectMediaWorkerQueuesIncludeAllBulkShards(t *testing.T) {
+	queues := collectMediaWorkerQueues(context.Background())
+	if len(queues) != collectMediaMaxBulkQueueShards+2 {
+		t.Fatalf("queue count = %d", len(queues))
+	}
+	if queues[tgQueueNameMediaRealtime] <= queues[collectMediaBulkQueueName(0)] {
+		t.Fatal("realtime queue must have a higher default weight")
+	}
+}
+
+func TestFairCollectMediaQueuePayloadsRoundRobinsAccounts(t *testing.T) {
+	payloads := []collectMediaQueuePayload{
+		{EventId: 1, TenantId: 1, TgAccountId: 10, Bulk: true},
+		{EventId: 2, TenantId: 1, TgAccountId: 10, Bulk: true},
+		{EventId: 3, TenantId: 1, TgAccountId: 20, Bulk: true},
+		{EventId: 4, TenantId: 1, TgAccountId: 20, Bulk: true},
+		{EventId: 5, TenantId: 1, TgAccountId: 30},
+	}
+	ordered := fairCollectMediaQueuePayloads(payloads)
+	want := []int64{5, 1, 3, 2, 4}
+	if len(ordered) != len(want) {
+		t.Fatalf("ordered length = %d", len(ordered))
+	}
+	for index, eventID := range want {
+		if ordered[index].EventId != eventID {
+			t.Fatalf("ordered[%d] = %d, want %d", index, ordered[index].EventId, eventID)
 		}
 	}
 }
