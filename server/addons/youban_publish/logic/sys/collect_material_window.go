@@ -18,12 +18,13 @@ import (
 )
 
 const (
-	collectMaterialGroupingDelay   = 3 * time.Minute
-	collectMaterialVerifyWindow    = 10 * time.Minute
-	collectMaterialWindowBatchSize = 500
-	collectMaterialRolePending     = "pending"
-	collectMaterialRoleDisplay     = "display"
-	collectMaterialRoleVerify      = "verify"
+	collectMaterialGroupingDelay    = 3 * time.Minute
+	collectMaterialVerifyWindow     = 10 * time.Minute
+	collectMaterialVerifyRetryDelay = time.Minute
+	collectMaterialWindowBatchSize  = 500
+	collectMaterialRolePending      = "pending"
+	collectMaterialRoleDisplay      = "display"
+	collectMaterialRoleVerify       = "verify"
 )
 
 func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload collectProcessQueuePayload) error {
@@ -43,7 +44,7 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 			sysin.CollectEventStatusMediaReady,
 			sysin.CollectEventStatusIgnored,
 		}).
-		Where("processed_at IS NULL OR (status = ? AND error_message = ?)", sysin.CollectEventStatusIgnored, collectMaterialVerifyUnmatchedMessage).
+		Where("processed_at IS NULL OR (status = ? AND material_role = ? AND error_message = ? AND updated_at <= ?)", sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, gtime.Now().Add(-collectMaterialVerifyRetryDelay)).
 		OrderAsc("source_chat_id").
 		OrderAsc("source_message_id").
 		OrderAsc("id").
@@ -142,15 +143,10 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 			if !collectMaterialEventOlderThan(event, collectMaterialVerifyWindow) {
 				continue
 			}
-			if err = s.markCollectEvent(ctx, event["id"].Int64(), sysin.CollectEventStatusPending, "等待前序资料组处理"); err != nil {
+			if err = s.ignoreCollectEvent(ctx, event["id"].Int64(), collectMaterialVerifyUnmatchedMessage, "group"); err != nil {
 				return err
 			}
-			if _, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).
-				Where("id", event["id"].Int64()).
-				Data(g.Map{"processed_at": nil, "updated_at": gtime.Now()}).Update(); err != nil {
-				return gerror.Wrap(err, "重置验证资料等待状态失败")
-			}
-			g.Log().Infof(ctx, "验证资料暂未找到前序展示组，保留等待并在下一轮重试 eventId:%d sourceMessageId:%d", event["id"].Int64(), event["source_message_id"].Int64())
+			g.Log().Infof(ctx, "验证资料暂未找到前序展示组，延迟后重试 eventId:%d sourceMessageId:%d retryAfter:%s", event["id"].Int64(), event["source_message_id"].Int64(), collectMaterialVerifyRetryDelay)
 		default:
 			if err = s.ignoreCollectEvent(ctx, event["id"].Int64(), "消息不是资料组或验证组", "group"); err != nil {
 				return err

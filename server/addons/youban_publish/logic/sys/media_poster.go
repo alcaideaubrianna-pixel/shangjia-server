@@ -15,6 +15,8 @@ import (
 	"hotgo/internal/service"
 )
 
+var videoPosterProcessSlots = make(chan struct{}, 1)
+
 type videoPosterResult struct {
 	Attachment     *basesysin.AttachmentListModel
 	PerceptualHash string
@@ -77,6 +79,12 @@ func generateVideoPosterPath(ctx context.Context, videoPath string) (string, err
 	ffmpegPath, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		return "", gerror.New("ffmpeg 未安装，无法生成视频封面")
+	}
+	select {
+	case videoPosterProcessSlots <- struct{}{}:
+		defer func() { <-videoPosterProcessSlots }()
+	case <-ctx.Done():
+		return "", ctx.Err()
 	}
 	output, err := os.CreateTemp("", "ybp-video-poster-*.jpg")
 	if err != nil {

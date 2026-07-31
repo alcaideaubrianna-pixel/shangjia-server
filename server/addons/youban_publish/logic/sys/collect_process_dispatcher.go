@@ -59,7 +59,7 @@ func (s *sSysPublish) dispatchCollectProcessOnce(ctx context.Context) {
 			sysin.CollectEventStatusMediaReady,
 			sysin.CollectEventStatusIgnored,
 		}).
-		Where("processed_at IS NULL OR (status = ? AND material_role = ? AND material_parent_event_id > 0 AND error_message = ?)", sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
+		Where("processed_at IS NULL OR (status = ? AND material_role = ? AND error_message = ? AND updated_at <= ?)", sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, gtime.Now().Add(-collectMaterialVerifyRetryDelay)).
 		Where("(received_at <= ? OR (received_at IS NULL AND created_at <= ?))", deadline, deadline)
 	if len(activeHistorySourceIDs) > 0 {
 		mod = mod.WhereNotIn("source_id", activeHistorySourceIDs)
