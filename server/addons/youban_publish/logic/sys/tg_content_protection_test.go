@@ -62,8 +62,15 @@ func TestObfuscateTelegramCaptionKeepsHTMLAndLimitsNumberScope(t *testing.T) {
 	if !strings.Contains(first, "13800138000") || !strings.Contains(first, "G35535") {
 		t.Fatalf("unrelated numbers were modified: %s", first)
 	}
+	if strings.ContainsAny(first, "★☆✦✧▲▼●○◆◇■□➢➤◈▣✿❀") {
+		t.Fatalf("visible noise symbols were added: %s", first)
+	}
 	if strings.Contains(first, "身高：174") || strings.Contains(first, "体重：105kg") {
 		t.Fatalf("height or weight was not perturbed: %s", first)
+	}
+	if regexp.MustCompile(`身高[^0-9]{0,8}[\x{200B}\x{200C}\x{2060}\x{2063}]`).MatchString(first) ||
+		regexp.MustCompile(`体重[^0-9]{0,8}[\x{200B}\x{200C}\x{2060}\x{2063}]`).MatchString(first) {
+		t.Fatalf("invisible characters were inserted before height or weight: %s", first)
 	}
 	if !regexp.MustCompile(`身高[^0-9]{0,8}17[3-4]\.[0-9]`).MatchString(first) {
 		t.Fatalf("height perturbation exceeded expected range: %s", first)

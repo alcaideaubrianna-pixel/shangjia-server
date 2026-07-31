@@ -201,9 +201,9 @@ func obfuscateTelegramCaption(caption string, seed int64) string {
 			return caption
 		}
 	}
-	zeroWidth := []string{"\u200B", "\u200C", "\u200D", "\uFEFF"}
-	for index := 0; index < 3+random.Intn(6); index++ {
-		builder.WriteString(zeroWidth[random.Intn(len(zeroWidth))])
+	zeroWidth := []rune{'\u200B', '\u200C', '\u2060', '\u2063'}
+	for index := 0; index < 1+random.Intn(3); index++ {
+		builder.WriteRune(zeroWidth[random.Intn(len(zeroWidth))])
 	}
 	return builder.String()
 }
@@ -236,13 +236,5 @@ func obfuscateTelegramText(value string, random *rand.Rand) string {
 		}
 		return parts[1] + parts[2] + strconv.FormatFloat(number+delta, 'f', 1, 64)
 	})
-	symbols := []rune("★☆✦✧▲▼●○◆◇■□➢➤◈▣✿❀")
-	var builder strings.Builder
-	for _, char := range value {
-		builder.WriteRune(char)
-		if strings.ContainsRune("：:,，。！!", char) && random.Float64() < 0.28 {
-			builder.WriteRune(symbols[random.Intn(len(symbols))])
-		}
-	}
-	return builder.String()
+	return value
 }
