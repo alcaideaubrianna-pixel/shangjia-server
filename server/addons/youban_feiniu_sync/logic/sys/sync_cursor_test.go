@@ -74,3 +74,29 @@ func TestIsSourceMediaPending(t *testing.T) {
 		})
 	}
 }
+
+func TestSourceMediaReadyCondition(t *testing.T) {
+	tests := []struct {
+		name           string
+		blockType      string
+		localFilePath  string
+		binaryMD5      string
+		perceptualHash string
+		cosStatus      string
+		want           bool
+	}{
+		{name: "image requires perceptual hash", blockType: "image", localFilePath: "/tmp/image.jpg", binaryMD5: "md5", cosStatus: "success", want: false},
+		{name: "image ready", blockType: "image", localFilePath: "/tmp/image.jpg", binaryMD5: "md5", perceptualHash: "phash", cosStatus: "success", want: true},
+		{name: "video does not require perceptual hash", blockType: "video", localFilePath: "/tmp/video.mp4", binaryMD5: "md5", cosStatus: "success", want: true},
+		{name: "video requires local file", blockType: "video", binaryMD5: "md5", cosStatus: "success", want: false},
+		{name: "media requires COS success", blockType: "video", localFilePath: "/tmp/video.mp4", binaryMD5: "md5", cosStatus: "pending", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sourceMediaReady(tt.blockType, tt.localFilePath, tt.binaryMD5, tt.perceptualHash, tt.cosStatus)
+			if got != tt.want {
+				t.Fatalf("sourceMediaReady() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}

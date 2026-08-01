@@ -1747,7 +1747,7 @@ func (s *sSysSync) fillSourceNoteMeta(ctx context.Context, db gdb.DB, rows []gdb
 		return err
 	}
 	var mediaRows []gdb.Record
-	readyMediaExpr := "COUNT(DISTINCT CASE WHEN a.local_file_path IS NOT NULL AND a.local_file_path <> '' AND a.binary_md5 IS NOT NULL AND a.binary_md5 <> '' AND a.perceptual_hash IS NOT NULL AND a.perceptual_hash <> '' AND ac.status = 'success' THEN b.asset_id END) AS ready_media_count"
+	readyMediaExpr := "COUNT(DISTINCT CASE WHEN a.local_file_path IS NOT NULL AND a.local_file_path <> '' AND a.binary_md5 IS NOT NULL AND a.binary_md5 <> '' AND ac.status = 'success' AND (b.block_type <> 'image' OR (a.perceptual_hash IS NOT NULL AND a.perceptual_hash <> '')) THEN b.asset_id END) AS ready_media_count"
 	if err := db.Model("tg_content_block b").Safe().Ctx(ctx).
 		LeftJoin("tg_content_asset a", "a.asset_id=b.asset_id").
 		LeftJoin("tg_content_asset_cos ac", "ac.asset_id=a.asset_id").
@@ -1837,6 +1837,13 @@ func isSourceMediaPending(row gdb.Record) bool {
 		return true
 	}
 	return ready < actual
+}
+
+func sourceMediaReady(blockType, localFilePath, binaryMD5, perceptualHash, cosStatus string) bool {
+	if strings.TrimSpace(localFilePath) == "" || strings.TrimSpace(binaryMD5) == "" || !strings.EqualFold(strings.TrimSpace(cosStatus), "success") {
+		return false
+	}
+	return !strings.EqualFold(strings.TrimSpace(blockType), "image") || strings.TrimSpace(perceptualHash) != ""
 }
 
 func (s *sSysSync) sourceChannelsById(ctx context.Context, db gdb.DB, channelIds []int64) (map[int64]gdb.Record, error) {
