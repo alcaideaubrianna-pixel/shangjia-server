@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"sort"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -72,7 +73,7 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取TG媒体失败")
 	}
-	rows := make([]*telegramMediaItem, 0, len(records))
+	rowsBySlot := make(map[telegramMediaSlot]*telegramMediaItem, len(records))
 	for _, record := range records {
 		media := newProfileMediaFromRecord(record)
 		asset := media.EffectiveAsset()
@@ -80,7 +81,7 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 		posterStoragePath := record["poster_storage_path"].String()
 		mediaType := record["media_type"].String()
 		assetHash := telegramMediaCacheAssetHash(mediaType, asset.Hash, posterUrl, posterStoragePath, record["tg_thumb_file_id"].String())
-		rows = append(rows, &telegramMediaItem{
+		item := &telegramMediaItem{
 			Id:                record["id"].Int64(),
 			AttachmentId:      asset.AttachmentId,
 			MediaType:         mediaType,
@@ -93,12 +94,64 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 			TgThumbFileId:     "",
 			AssetHash:         assetHash,
 			SortIndex:         record["sort_index"].Int(),
-		})
-		if rows[len(rows)-1].TgFileId != "" {
-			rows[len(rows)-1].TgThumbFileId = record["tg_thumb_file_id"].String()
+		}
+		if item.TgFileId != "" {
+			item.TgThumbFileId = record["tg_thumb_file_id"].String()
+		}
+		if !telegramMediaItemHasSource(item) {
+			continue
+		}
+		slot := telegramMediaSlot{SortIndex: item.SortIndex, MediaType: item.MediaType}
+		existing, ok := rowsBySlot[slot]
+		if !ok || telegramMediaItemPriority(item) > telegramMediaItemPriority(existing) {
+			rowsBySlot[slot] = item
 		}
 	}
+	rows := make([]*telegramMediaItem, 0, len(rowsBySlot))
+	for _, item := range rowsBySlot {
+		rows = append(rows, item)
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].SortIndex != rows[j].SortIndex {
+			return rows[i].SortIndex < rows[j].SortIndex
+		}
+		return rows[i].Id < rows[j].Id
+	})
+	if len(records) > 0 && len(rows) == 0 {
+		return nil, gerror.New("媒体文件地址为空")
+	}
 	return rows, nil
+}
+
+type telegramMediaSlot struct {
+	SortIndex int
+	MediaType string
+}
+
+func telegramMediaItemHasSource(item *telegramMediaItem) bool {
+	if item == nil {
+		return false
+	}
+	return strings.TrimSpace(item.TgFileId) != "" ||
+		strings.TrimSpace(item.FileUrl) != "" ||
+		strings.TrimSpace(item.StoragePath) != ""
+}
+
+func telegramMediaItemPriority(item *telegramMediaItem) int {
+	if item == nil {
+		return 0
+	}
+	priority := 0
+	if strings.TrimSpace(item.StoragePath) != "" {
+		priority += 10
+	}
+	if strings.TrimSpace(item.FileUrl) != "" {
+		priority += 20
+	}
+	if strings.TrimSpace(item.TgFileId) != "" {
+		priority += 30
+	}
+	return priority
 }
 
 func telegramMediaCacheAssetHash(mediaType string, assetHash string, posterUrl string, posterStoragePath string, tgThumbFileId string) string {

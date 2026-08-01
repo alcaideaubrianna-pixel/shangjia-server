@@ -69,3 +69,20 @@ func TestProfileMediaKeepsCopyReferenceWithoutCacheStatus(t *testing.T) {
 		t.Fatalf("copy reference should not require tg cache status, got %q", got)
 	}
 }
+
+func TestTelegramMediaItemPriorityPrefersTelegramCache(t *testing.T) {
+	invalid := &telegramMediaItem{StoragePath: "storage/cache/missing.jpg"}
+	valid := &telegramMediaItem{TgFileId: "AgAC-valid"}
+	if telegramMediaItemPriority(valid) <= telegramMediaItemPriority(invalid) {
+		t.Fatal("telegram cached media should have higher priority than storage-only media")
+	}
+}
+
+func TestTelegramMediaItemHasSource(t *testing.T) {
+	if telegramMediaItemHasSource(&telegramMediaItem{}) {
+		t.Fatal("empty media should not be considered sendable")
+	}
+	if !telegramMediaItemHasSource(&telegramMediaItem{FileUrl: "https://cdn.example/image.jpg"}) {
+		t.Fatal("media URL should be considered sendable")
+	}
+}

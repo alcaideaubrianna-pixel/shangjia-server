@@ -59,6 +59,11 @@ func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sy
 				}
 				groupErr := s.materialImportDownloadGroup(ctx, task, group, client)
 				if groupErr != nil {
+					if collectMediaSourceGone(groupErr) {
+						_ = s.materialImportMarkGroupDiscarded(ctx, group.Id, group.MediaTotal, groupErr.Error())
+						_ = s.refreshMaterialImportTaskStats(ctx, task.Id)
+						continue
+					}
 					if retryErr := collectMediaRetryErrorFrom(groupErr); retryErr != nil {
 						_ = s.refreshMaterialImportTaskStats(ctx, task.Id)
 						materialImportSendErr(errCh, retryErr)
@@ -185,9 +190,12 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 		}
 	}
 	_ = s.materialImportMarkGroupRunning(ctx, group.Id)
-	_, _, err = s.downloadMaterialImportItems(ctx, task, group.Id, missingItems, client)
+	_, failed, err := s.downloadMaterialImportItems(ctx, task, group.Id, missingItems, client)
 	if err != nil {
 		return err
+	}
+	if failed > 0 {
+		return gerror.Newf("TG媒体下载失败：%d个媒体", failed)
 	}
 	for index, itemIndex := range missingIndexes {
 		items[itemIndex] = missingItems[index]
@@ -254,18 +262,17 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 				item.StoragePath = ""
 				items[index].StoragePath = ""
 			}
-			meta, ok := gotdCollectMediaMetaFromItem(item)
-			if !ok {
+			itemCtx, cancel := context.WithTimeout(groupCtx, materialImportMediaItemTimeout)
+			down, err := s.downloadTelegramMediaWithRefresh(itemCtx, task.TenantId, task.TgAccountId, item, client)
+			cancel()
+			if err != nil {
+				if collectMediaSourceGone(err) {
+					return err
+				}
 				mu.Lock()
 				failed++
 				mu.Unlock()
 				return nil
-			}
-			itemCtx, cancel := context.WithTimeout(groupCtx, materialImportMediaItemTimeout)
-			down, err := s.downloadTelegramMediaWithClient(itemCtx, task.TenantId, task.TgAccountId, item, meta, client)
-			cancel()
-			if err != nil {
-				return err
 			}
 			if strings.TrimSpace(down.Path) != "" {
 				mu.Lock()
@@ -404,6 +411,19 @@ func (s *sSysPublish) materialImportMarkGroupDone(ctx context.Context, id int64,
 		"media_failed":    0,
 		"profile_id":      profileId,
 		"task_profile_id": taskProfileId,
+		"updated_at":      gtime.Now(),
+	}).Update()
+	return err
+}
+
+func (s *sSysPublish) materialImportMarkGroupDiscarded(ctx context.Context, id int64, mediaTotal int, reason string) error {
+	_, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).Where("id", id).Data(g.Map{
+		"status":          sysin.MaterialImportStatusSuccess,
+		"media_done":      mediaTotal,
+		"media_failed":    0,
+		"profile_id":      0,
+		"task_profile_id": 0,
+		"error_message":   "已跳过：" + strings.TrimSpace(reason),
 		"updated_at":      gtime.Now(),
 	}).Update()
 	return err

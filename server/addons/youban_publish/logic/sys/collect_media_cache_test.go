@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogf/gf/v2/errors/gerror"
+
 	"hotgo/addons/youban_publish/internal/model/entity"
 )
 
@@ -27,18 +29,28 @@ func TestDefaultCollectMediaFileDownloadTimeout(t *testing.T) {
 	}
 }
 
-func TestCollectMediaFileReferenceExpiredIsTerminal(t *testing.T) {
-	if !collectMediaFileReferenceExpired(errors.New("rpc error: FILE_REFERENCE_EXPIRED")) {
-		t.Fatal("expected expired file reference to be terminal")
+func TestCollectMediaFileReferenceRefreshable(t *testing.T) {
+	if !collectMediaFileReferenceRefreshable(errors.New("rpc error: FILE_REFERENCE_EXPIRED")) {
+		t.Fatal("expected expired file reference to be refreshable")
 	}
-	if !collectMediaFileReferenceExpired(errors.New("rpc error: file_reference_expired")) {
-		t.Fatal("expected lowercase expired file reference to be terminal")
+	if !collectMediaFileReferenceRefreshable(errors.New("rpc error: file_reference_invalid")) {
+		t.Fatal("expected invalid file reference to be refreshable")
 	}
-	if collectMediaFileReferenceExpired(errors.New("rpc error: FILE_MIGRATE")) {
-		t.Fatal("did not expect FILE_MIGRATE to be terminal")
+	if collectMediaFileReferenceRefreshable(errors.New("rpc error: FILE_MIGRATE")) {
+		t.Fatal("did not expect FILE_MIGRATE to be refreshable")
 	}
 	if retryErr := collectMediaRetryErrorFrom(errors.New("rpc error: FILE_REFERENCE_EXPIRED")); retryErr != nil {
-		t.Fatalf("expired file reference must not be retried: %+v", retryErr)
+		t.Fatalf("expired file reference must not use account retry: %+v", retryErr)
+	}
+}
+
+func TestCollectMediaSourceGone(t *testing.T) {
+	err := gerror.Wrap(errCollectMediaSourceGone, "TG原消息不存在或无权读取")
+	if !collectMediaSourceGone(err) {
+		t.Fatal("expected source-gone error to be detected")
+	}
+	if collectMediaSourceGone(errors.New("FILE_REFERENCE_INVALID")) {
+		t.Fatal("file reference invalid should be refreshable, not source-gone")
 	}
 }
 
