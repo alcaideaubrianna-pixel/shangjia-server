@@ -229,16 +229,18 @@ func (s *sSysPublish) botResolveProfileId(ctx context.Context, tenantId int64, a
 	if publicOnly {
 		mod = mod.Where("p."+columns.Status, 1)
 	}
-	var row struct {
-		Id int64 `json:"id"`
-	}
-	if err = mod.Fields("p."+columns.Id).Where("p."+columns.ProfileNo, no).Scan(&row); err != nil {
+	row, err := mod.Fields("p."+columns.Id).Where("p."+columns.ProfileNo, no).One()
+	if err != nil {
 		return 0, gerror.Wrap(err, "读取资料失败")
 	}
-	if row.Id <= 0 {
+	if row.IsEmpty() {
 		return 0, gerror.New("资料不存在或无权操作")
 	}
-	return row.Id, nil
+	profileId := row[columns.Id].Int64()
+	if profileId <= 0 {
+		return 0, gerror.New("资料不存在或无权操作")
+	}
+	return profileId, nil
 }
 
 func firstLineForProfileTitle(text string) string {
