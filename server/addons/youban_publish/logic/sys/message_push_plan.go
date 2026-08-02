@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ type messagePushPlanRecord struct {
 	TemplateIds     string      `json:"templateIds"`
 	TargetChatIds   string      `json:"targetChatIds"`
 	Times           string      `json:"times"`
+	IntervalDays    int         `json:"intervalDays"`
 	IntervalSeconds int         `json:"intervalSeconds"`
 	Status          int         `json:"status"`
 	NextRunAt       *gtime.Time `json:"nextRunAt"`
@@ -117,7 +119,7 @@ func (s *sSysPublish) AdminMessagePushPlanSave(ctx context.Context, in *sysin.Me
 		return nil, err
 	}
 	now := gtime.Now()
-	nextRunAt := nextMessagePushPlanRunAt(in.Times, now)
+	nextRunAt := firstMessagePushPlanRunAt(in.Times, now)
 	data := g.Map{
 		"tenant_id":        account.TenantId,
 		"name":             in.Name,
@@ -125,6 +127,7 @@ func (s *sSysPublish) AdminMessagePushPlanSave(ctx context.Context, in *sysin.Me
 		"template_ids":     mustJsonEncode(in.TemplateIds),
 		"target_chat_ids":  mustJsonEncode(in.TargetChatIds),
 		"times":            mustJsonEncode(in.Times),
+		"interval_days":    in.IntervalDays,
 		"interval_seconds": in.IntervalSeconds,
 		"status":           in.Status,
 		"next_run_at":      nextRunAt,
@@ -212,7 +215,7 @@ func (s *sSysPublish) AdminMessagePushPlanStatus(ctx context.Context, in *sysin.
 		"locked_at":  nil,
 	}
 	if in.Status == 1 {
-		data["next_run_at"] = nextMessagePushPlanRunAt(decodeStringArray(plan.Times), gtime.Now())
+		data["next_run_at"] = firstMessagePushPlanRunAt(decodeStringArray(plan.Times), gtime.Now())
 	} else {
 		data["next_run_at"] = nil
 	}
@@ -304,7 +307,7 @@ func (s *sSysPublish) executeMessagePushPlan(ctx context.Context, plan messagePu
 	times := decodeStringArray(plan.Times)
 	channels, err := s.messagePushCachedTargets(ctx, plan.AccountId, targetChatIds, plan.TenantId)
 	if err != nil {
-		return s.finishMessagePushPlan(ctx, plan, now, times, err.Error())
+		return s.finishMessagePushPlan(ctx, plan, scheduledAt, now, times, err.Error())
 	}
 	success := 0
 	failed := 0
@@ -344,16 +347,16 @@ func (s *sSysPublish) executeMessagePushPlan(ctx context.Context, plan messagePu
 		}
 	}
 	lastResult := mustJsonEncode(g.Map{"total": total, "queued": queued, "success": success, "failed": failed, "messages": messages})
-	return s.finishMessagePushPlan(ctx, plan, now, times, lastResult)
+	return s.finishMessagePushPlan(ctx, plan, scheduledAt, now, times, lastResult)
 }
 
-func (s *sSysPublish) finishMessagePushPlan(ctx context.Context, plan messagePushPlanRecord, now *gtime.Time, times []string, lastResult string) error {
+func (s *sSysPublish) finishMessagePushPlan(ctx context.Context, plan messagePushPlanRecord, scheduledAt, now *gtime.Time, times []string, lastResult string) error {
 	_, err := publishdao.YoubanPublishMessagePushPlan.Ctx(ctx).
 		Where("id", plan.Id).
 		Data(g.Map{
 			"last_run_at": now,
 			"last_result": lastResult,
-			"next_run_at": nextMessagePushPlanRunAt(times, now),
+			"next_run_at": nextMessagePushPlanRunAt(times, plan.IntervalDays, scheduledAt, now),
 			"locked_at":   nil,
 			"updated_at":  now,
 		}).
@@ -413,6 +416,7 @@ func messagePushPlanModels(records []*messagePushPlanRecord) []*sysin.MessagePus
 			TemplateIds:     decodeInt64Array(item.TemplateIds),
 			TargetChatIds:   decodeStringArray(item.TargetChatIds),
 			Times:           decodeStringArray(item.Times),
+			IntervalDays:    normalizeMessagePushPlanIntervalDays(item.IntervalDays),
 			IntervalSeconds: item.IntervalSeconds,
 			Status:          item.Status,
 			NextRunAt:       item.NextRunAt,
@@ -429,32 +433,115 @@ func messagePushPlanModels(records []*messagePushPlanRecord) []*sysin.MessagePus
 	return list
 }
 
-func nextMessagePushPlanRunAt(times []string, now *gtime.Time) *gtime.Time {
+func firstMessagePushPlanRunAt(times []string, now *gtime.Time) *gtime.Time {
 	if now == nil {
 		now = gtime.Now()
 	}
-	base := now.Time
-	var next time.Time
-	for _, value := range times {
+	base := now.Time.In(time.Local)
+	parsedTimes := parseMessagePushPlanTimes(times)
+	if len(parsedTimes) == 0 {
+		return gtime.NewFromTime(base.AddDate(0, 0, 1))
+	}
+	day := messagePushPlanDay(base)
+	if next, ok := messagePushPlanTimeAfter(day, parsedTimes, base); ok {
+		return gtime.NewFromTime(next)
+	}
+	return gtime.NewFromTime(messagePushPlanTime(day.AddDate(0, 0, 1), parsedTimes[0]))
+}
+
+func nextMessagePushPlanRunAt(times []string, intervalDays int, scheduledAt, now *gtime.Time) *gtime.Time {
+	if now == nil {
+		now = gtime.Now()
+	}
+	if scheduledAt == nil {
+		scheduledAt = now
+	}
+	intervalDays = normalizeMessagePushPlanIntervalDays(intervalDays)
+	base := now.Time.In(time.Local)
+	scheduled := scheduledAt.Time.In(time.Local)
+	parsedTimes := parseMessagePushPlanTimes(times)
+	if len(parsedTimes) == 0 {
+		return gtime.NewFromTime(base.AddDate(0, 0, intervalDays))
+	}
+	scheduledDay := messagePushPlanDay(scheduled)
+	if scheduledDay.Equal(messagePushPlanDay(base)) {
+		threshold := base
+		if scheduled.After(threshold) {
+			threshold = scheduled
+		}
+		if next, ok := messagePushPlanTimeAfter(scheduledDay, parsedTimes, threshold); ok {
+			return gtime.NewFromTime(next)
+		}
+	}
+	activeDay := scheduledDay.AddDate(0, 0, intervalDays)
+	currentDay := messagePushPlanDay(base)
+	if activeDay.Before(currentDay) {
+		daysBehind := calendarDayDiff(activeDay, currentDay)
+		steps := daysBehind / intervalDays
+		activeDay = activeDay.AddDate(0, 0, steps*intervalDays)
+		if activeDay.Before(currentDay) {
+			activeDay = activeDay.AddDate(0, 0, intervalDays)
+		}
+	}
+	if activeDay.Equal(currentDay) {
+		if next, ok := messagePushPlanTimeAfter(activeDay, parsedTimes, base); ok {
+			return gtime.NewFromTime(next)
+		}
+		activeDay = activeDay.AddDate(0, 0, intervalDays)
+	}
+	return gtime.NewFromTime(messagePushPlanTime(activeDay, parsedTimes[0]))
+}
+
+func parseMessagePushPlanTimes(values []string) []time.Time {
+	parsed := make([]time.Time, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
 		value = strings.TrimSpace(value)
-		if value == "" {
+		if _, ok := seen[value]; ok || value == "" {
 			continue
 		}
-		candidate, err := time.ParseInLocation("2006-01-02 15:04:05", base.Format("2006-01-02")+" "+value, time.Local)
+		item, err := time.ParseInLocation("15:04:05", value, time.Local)
 		if err != nil {
 			continue
 		}
-		if !candidate.After(base) {
-			candidate = candidate.Add(24 * time.Hour)
-		}
-		if next.IsZero() || candidate.Before(next) {
-			next = candidate
+		seen[value] = struct{}{}
+		parsed = append(parsed, item)
+	}
+	sort.Slice(parsed, func(i, j int) bool {
+		return parsed[i].Format("15:04:05") < parsed[j].Format("15:04:05")
+	})
+	return parsed
+}
+
+func messagePushPlanDay(value time.Time) time.Time {
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.Local)
+}
+
+func messagePushPlanTime(day time.Time, value time.Time) time.Time {
+	return time.Date(day.Year(), day.Month(), day.Day(), value.Hour(), value.Minute(), value.Second(), 0, time.Local)
+}
+
+func messagePushPlanTimeAfter(day time.Time, times []time.Time, threshold time.Time) (time.Time, bool) {
+	for _, value := range times {
+		candidate := messagePushPlanTime(day, value)
+		if candidate.After(threshold) {
+			return candidate, true
 		}
 	}
-	if next.IsZero() {
-		next = base.Add(24 * time.Hour)
+	return time.Time{}, false
+}
+
+func calendarDayDiff(from, to time.Time) int {
+	fromUTC := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
+	toUTC := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, time.UTC)
+	return int(toUTC.Sub(fromUTC) / (24 * time.Hour))
+}
+
+func normalizeMessagePushPlanIntervalDays(intervalDays int) int {
+	if intervalDays <= 0 {
+		return 1
 	}
-	return gtime.NewFromTime(next)
+	return intervalDays
 }
 
 func shouldWaitMessagePushPlan(templateIndex int, channelIndex int, templateCount int, channelCount int) bool {

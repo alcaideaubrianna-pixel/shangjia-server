@@ -3,6 +3,7 @@ package sysin
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -79,7 +80,8 @@ type MessagePushPlanSaveInp struct {
 	AccountId       int64    `json:"accountId" dc:"TG账号ID"`
 	TemplateIds     []int64  `json:"templateIds" dc:"模板ID"`
 	TargetChatIds   []string `json:"targetChatIds" dc:"目标群聊或频道Chat ID"`
-	Times           []string `json:"times" dc:"每天推送时间"`
+	Times           []string `json:"times" dc:"执行日推送时间"`
+	IntervalDays    int      `json:"intervalDays" dc:"执行间隔天数"`
 	IntervalSeconds int      `json:"intervalSeconds" dc:"多次推送间隔秒数"`
 	Status          int      `json:"status" dc:"状态：1启用 2停用"`
 }
@@ -124,7 +126,8 @@ type MessagePushPlanModel struct {
 	TemplateIds      []int64           `json:"templateIds" dc:"模板ID"`
 	TargetChatIds    []string          `json:"targetChatIds" dc:"目标群聊或频道Chat ID"`
 	TargetChatLabels map[string]string `json:"targetChatLabels" dc:"目标群聊或频道名称"`
-	Times            []string          `json:"times" dc:"每天推送时间"`
+	Times            []string          `json:"times" dc:"执行日推送时间"`
+	IntervalDays     int               `json:"intervalDays" dc:"执行间隔天数"`
 	IntervalSeconds  int               `json:"intervalSeconds" dc:"多次推送间隔秒数"`
 	Status           int               `json:"status" dc:"状态：1启用 2停用"`
 	NextRunAt        *gtime.Time       `json:"nextRunAt" dc:"下次执行时间"`
@@ -278,9 +281,15 @@ func (in *MessagePushPlanSaveInp) Filter(ctx context.Context) error {
 		return gerror.New("请至少设置一个推送时间")
 	}
 	for _, value := range in.Times {
-		if len(value) != 8 {
+		if _, err := time.Parse("15:04:05", value); err != nil {
 			return gerror.New("推送时间格式必须为 HH:mm:ss")
 		}
+	}
+	if in.IntervalDays <= 0 {
+		in.IntervalDays = 1
+	}
+	if in.IntervalDays > 365 {
+		return gerror.New("执行间隔不能超过365天")
 	}
 	if in.IntervalSeconds <= 0 {
 		in.IntervalSeconds = 60

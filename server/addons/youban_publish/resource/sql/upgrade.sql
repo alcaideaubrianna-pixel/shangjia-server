@@ -266,7 +266,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_push_plan` (
   `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG账号ID',
   `template_ids` text COMMENT '模板ID列表JSON',
   `target_chat_ids` text COMMENT '目标群聊或频道Chat ID列表JSON',
-  `times` text COMMENT '每天推送时间JSON',
+  `times` text COMMENT '执行日推送时间JSON',
+  `interval_days` int(11) NOT NULL DEFAULT '1' COMMENT '执行间隔天数',
   `interval_seconds` int(11) NOT NULL DEFAULT '60' COMMENT '推送间隔秒数',
   `status` tinyint(4) NOT NULL DEFAULT '1' COMMENT '状态：1启用 2停用',
   `next_run_at` datetime DEFAULT NULL COMMENT '下次执行时间',
@@ -283,6 +284,9 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_push_plan` (
   KEY `idx_ybp_msg_plan_due` (`status`,`next_run_at`,`id`),
   KEY `idx_ybp_msg_plan_owner` (`tenant_id`,`status`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息自动推送计划';
+
+ALTER TABLE `hg_youban_publish_message_push_plan`
+  ADD COLUMN IF NOT EXISTS `interval_days` int(11) NOT NULL DEFAULT '1' COMMENT '执行间隔天数' AFTER `times`;
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_listen_plan` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
