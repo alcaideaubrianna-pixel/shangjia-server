@@ -28,12 +28,19 @@ import (
 const tenantVipEventTable = "hg_youban_publish_tenant_vip_event"
 
 const (
-	tenantVipEventBindGift       = "bind_gift"
-	tenantVipEventInviteBindGift = "invite_bind_gift"
-	tenantVipEventInviteFirstPay = "invite_first_pay_gift"
-	tenantVipEventPay            = "pay"
-	tenantVipEventAdminAdjust    = "admin_adjust"
-	tenantVipEventExpired        = "expired"
+	tenantVipEventBindGift        = "bind_gift"
+	tenantVipEventInviteBindGift  = "invite_bind_gift"
+	tenantVipEventInviteFirstPay  = "invite_first_pay_gift"
+	tenantVipEventPay             = "pay"
+	tenantVipEventAdminAdjust     = "admin_adjust"
+	tenantVipEventExpiringOneDay  = "expiring_1d"
+	tenantVipEventExpiringSixHour = "expiring_6h"
+	tenantVipEventExpired         = "expired"
+)
+
+const (
+	tenantVipReminderOneDay  = 24 * time.Hour
+	tenantVipReminderSixHour = 6 * time.Hour
 )
 
 func init() {
@@ -522,6 +529,20 @@ func (s *sSysPublish) notifyTenantVipEvent(ctx context.Context, eventId int64) e
 	if event == nil {
 		return nil
 	}
+	if tenantVipExpiryReminderEvent(event.EventType) {
+		valid, validateErr := s.tenantVipExpiryReminderValid(ctx, event)
+		if validateErr != nil {
+			return validateErr
+		}
+		if !valid {
+			_, _ = g.DB().Model(tenantVipEventTable).Safe().Ctx(ctx).Where("id", event.Id).Data(g.Map{
+				"notify_status": "skipped",
+				"error_message": "会员到期时间已变更或会员已到期",
+				"updated_at":    gtime.Now(),
+			}).Update()
+			return nil
+		}
+	}
 	cfg, err := service.SysConfig().GetYoubanPublishVipActivity(ctx)
 	if err != nil {
 		return err
@@ -582,7 +603,7 @@ func tenantVipEventNotifyEnabled(eventType string, cfg *model.YoubanPublishVipAc
 		return cfg.GiftNotifyEnabled
 	case tenantVipEventAdminAdjust:
 		return cfg.AdminAdjustNotifyEnabled
-	case tenantVipEventExpired:
+	case tenantVipEventExpiringOneDay, tenantVipEventExpiringSixHour, tenantVipEventExpired:
 		return cfg.ExpiredNotifyEnabled
 	default:
 		return false
@@ -596,20 +617,50 @@ func tenantVipEventNotifyText(event *tenantVipEventRow) string {
 	}
 	switch event.EventType {
 	case tenantVipEventBindGift:
-		return fmt.Sprintf("🎁 <b>Telegram 绑定成功</b>\n已赠送 %d 天 VIP，有效期至：%s", event.ChangeDays, expiredAt)
+		return fmt.Sprintf("🎁 <b>Telegram 绑定奖励已到账</b>\n会员时长已增加 %d 天。\n\n<b>到期时间：</b>%s", event.ChangeDays, expiredAt)
 	case tenantVipEventInviteBindGift:
-		return fmt.Sprintf("🎁 <b>邀请奖励到账</b>\n好友已完成 Telegram 绑定，奖励 %d 天 VIP，有效期至：%s", event.ChangeDays, expiredAt)
+		return fmt.Sprintf("🎁 <b>邀请奖励已到账</b>\n好友已完成 Telegram 绑定，会员时长增加 %d 天。\n\n<b>到期时间：</b>%s", event.ChangeDays, expiredAt)
 	case tenantVipEventInviteFirstPay:
-		return fmt.Sprintf("🎁 <b>邀请首付奖励到账</b>\n好友首次开通会员，奖励 %d 天 VIP，有效期至：%s", event.ChangeDays, expiredAt)
+		return fmt.Sprintf("🎁 <b>邀请开通奖励已到账</b>\n好友首次开通会员，会员时长增加 %d 天。\n\n<b>到期时间：</b>%s", event.ChangeDays, expiredAt)
 	case tenantVipEventPay:
-		return fmt.Sprintf("✅ <b>VIP 充值成功</b>\n已增加 %d 天，有效期至：%s", event.ChangeDays, expiredAt)
+		return fmt.Sprintf("✅ <b>VIP 会员已到账</b>\n本次会员时长增加 %d 天，会员权益已生效。\n\n<b>到期时间：</b>%s", event.ChangeDays, expiredAt)
 	case tenantVipEventAdminAdjust:
-		return fmt.Sprintf("ℹ️ <b>VIP 有效期已调整</b>\n当前有效期至：%s", expiredAt)
+		if event.AfterExpiredAt == nil || !event.AfterExpiredAt.After(gtime.Now()) {
+			return "ℹ️ <b>VIP 会员状态已调整</b>\n当前会员已关闭，相关会员功能将暂停使用。"
+		}
+		return fmt.Sprintf("ℹ️ <b>VIP 会员状态已调整</b>\n会员有效期已更新。\n\n<b>到期时间：</b>%s", expiredAt)
+	case tenantVipEventExpiringOneDay:
+		return fmt.Sprintf("⏳ <b>VIP 将在 1 天内到期</b>\n为避免会员功能中断，请及时续费。\n\n<b>到期时间：</b>%s", expiredAt)
+	case tenantVipEventExpiringSixHour:
+		return fmt.Sprintf("⚠️ <b>VIP 将在 6 小时内到期</b>\n会员即将到期，续费后可继续使用全部会员功能。\n\n<b>到期时间：</b>%s", expiredAt)
 	case tenantVipEventExpired:
-		return "⏰ <b>VIP 已到期</b>\n相关会员功能已暂停，可前往会员中心续费后继续使用。"
+		return fmt.Sprintf("⏰ <b>VIP 会员已到期</b>\n相关会员功能已暂停，续费成功后将自动恢复。\n\n<b>到期时间：</b>%s", expiredAt)
 	default:
 		return event.Remark
 	}
+}
+
+func tenantVipExpiryReminderEvent(eventType string) bool {
+	return eventType == tenantVipEventExpiringOneDay || eventType == tenantVipEventExpiringSixHour
+}
+
+func (s *sSysPublish) tenantVipExpiryReminderValid(ctx context.Context, event *tenantVipEventRow) (bool, error) {
+	if event == nil || event.TenantId <= 0 || event.AfterExpiredAt == nil {
+		return false, nil
+	}
+	columns := pdao.YoubanPublishTenantVip.Columns()
+	var vip *entity.YoubanPublishTenantVip
+	if err := pdao.YoubanPublishTenantVip.Ctx(ctx).
+		Where(columns.TenantId, event.TenantId).
+		Where(columns.Status, consts.StatusEnabled).
+		WhereNull(columns.DeletedAt).
+		Scan(&vip); err != nil {
+		return false, gerror.Wrap(err, "校验会员到期提醒失败")
+	}
+	if vip == nil || vip.ExpiredAt == nil || !vip.ExpiredAt.After(gtime.Now()) {
+		return false, nil
+	}
+	return vip.ExpiredAt.Timestamp() == event.AfterExpiredAt.Timestamp(), nil
 }
 
 func (s *sSysPublish) tenantVipNotifyAccountId(ctx context.Context, tenantId int64, preferredAccountId int64) (int64, error) {
@@ -650,10 +701,88 @@ func (s *sSysPublish) ProcessTenantVipLifecycle(ctx context.Context, limit int) 
 	if err := s.reconcilePaidTenantVipOrders(ctx, limit); err != nil {
 		return err
 	}
+	if err := s.processTenantVipExpiryReminders(ctx, limit); err != nil {
+		return err
+	}
 	if err := s.processExpiredTenantVips(ctx, limit); err != nil {
 		return err
 	}
 	return s.retryTenantVipNotifications(ctx, limit)
+}
+
+type tenantVipExpiryReminder struct {
+	EventType string
+	Lower     time.Duration
+	Upper     time.Duration
+}
+
+func tenantVipExpiryReminders() []tenantVipExpiryReminder {
+	return []tenantVipExpiryReminder{
+		{EventType: tenantVipEventExpiringOneDay, Lower: tenantVipReminderSixHour, Upper: tenantVipReminderOneDay},
+		{EventType: tenantVipEventExpiringSixHour, Upper: tenantVipReminderSixHour},
+	}
+}
+
+func (s *sSysPublish) processTenantVipExpiryReminders(ctx context.Context, limit int) error {
+	for _, reminder := range tenantVipExpiryReminders() {
+		if err := s.processTenantVipExpiryReminder(ctx, reminder, limit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *sSysPublish) processTenantVipExpiryReminder(ctx context.Context, reminder tenantVipExpiryReminder, limit int) error {
+	now := gtime.Now()
+	columns := pdao.YoubanPublishTenantVip.Columns()
+	joinCondition := fmt.Sprintf("reminder.event_type='%s' AND reminder.tenant_id=vip.tenant_id AND reminder.after_expired_at=vip.expired_at", reminder.EventType)
+	model := pdao.YoubanPublishTenantVip.Ctx(ctx).As("vip").
+		LeftJoin(tenantVipEventTable+" reminder", joinCondition).
+		Fields("vip.*").
+		Where("vip."+columns.Status, consts.StatusEnabled).
+		WhereGT("vip."+columns.ExpiredAt, now.Add(reminder.Lower)).
+		WhereLTE("vip."+columns.ExpiredAt, now.Add(reminder.Upper)).
+		WhereNull("vip." + columns.DeletedAt).
+		WhereNull("reminder.id").
+		OrderAsc("vip." + columns.ExpiredAt).
+		Limit(limit)
+	var rows []*entity.YoubanPublishTenantVip
+	if err := model.Scan(&rows); err != nil {
+		return gerror.Wrap(err, "扫描会员到期提醒失败")
+	}
+	for _, vip := range rows {
+		if err := s.createTenantVipExpiryReminder(ctx, vip, reminder.EventType); err != nil {
+			g.Log().Warningf(ctx, "创建会员到期提醒失败 tenantId:%d eventType:%s err:%+v", vip.TenantId, reminder.EventType, err)
+		}
+	}
+	return nil
+}
+
+func (s *sSysPublish) createTenantVipExpiryReminder(ctx context.Context, vip *entity.YoubanPublishTenantVip, eventType string) error {
+	if vip == nil || vip.TenantId <= 0 || vip.ExpiredAt == nil {
+		return nil
+	}
+	now := gtime.Now()
+	eventId, err := g.DB().Model(tenantVipEventTable).Safe().Ctx(ctx).Data(g.Map{
+		"event_key":        fmt.Sprintf("%s:%d:%d", eventType, vip.TenantId, vip.ExpiredAt.Timestamp()),
+		"event_type":       eventType,
+		"tenant_id":        vip.TenantId,
+		"after_expired_at": vip.ExpiredAt,
+		"notify_status":    "pending",
+		"remark":           "会员即将到期",
+		"created_at":       now,
+		"updated_at":       now,
+	}).InsertAndGetId()
+	if err != nil {
+		if tenantVipDuplicateError(err) {
+			return nil
+		}
+		return gerror.Wrap(err, "创建会员到期提醒事件失败")
+	}
+	if notifyErr := s.notifyTenantVipEvent(ctx, eventId); notifyErr != nil {
+		g.Log().Warningf(ctx, "会员到期提醒通知失败 eventId:%d err:%+v", eventId, notifyErr)
+	}
+	return nil
 }
 
 func (s *sSysPublish) reconcileTenantVipBindings(ctx context.Context, limit int) error {

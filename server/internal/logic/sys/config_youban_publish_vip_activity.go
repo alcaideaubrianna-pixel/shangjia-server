@@ -57,7 +57,7 @@ func (s *sSysConfig) ensureYoubanPublishVipActivityConfig(ctx context.Context) (
 		{key: "youbanPublishVipPayNotifyEnabled", name: "会员充值通知开关", typ: consts.ConfigTypeBool, value: defaultCfg.PayNotifyEnabled, sort: 9},
 		{key: "youbanPublishVipGiftNotifyEnabled", name: "会员赠送通知开关", typ: consts.ConfigTypeBool, value: defaultCfg.GiftNotifyEnabled, sort: 10},
 		{key: "youbanPublishVipAdminAdjustNotifyEnabled", name: "后台调整通知开关", typ: consts.ConfigTypeBool, value: defaultCfg.AdminAdjustNotifyEnabled, sort: 11},
-		{key: "youbanPublishVipExpiredNotifyEnabled", name: "会员到期通知开关", typ: consts.ConfigTypeBool, value: defaultCfg.ExpiredNotifyEnabled, sort: 12},
+		{key: "youbanPublishVipExpiredNotifyEnabled", name: "会员到期提醒与通知开关", typ: consts.ConfigTypeBool, value: defaultCfg.ExpiredNotifyEnabled, sort: 12},
 	}
 
 	cols := dao.SysConfig.Columns()
