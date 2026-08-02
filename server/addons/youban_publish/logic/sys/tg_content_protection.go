@@ -12,6 +12,7 @@ import (
 	"image/draw"
 	"image/jpeg"
 	"math"
+	"math/bits"
 	"math/rand"
 	"os"
 	"regexp"
@@ -37,7 +38,10 @@ type telegramChannelSendPolicy struct {
 	TextObfuscationEnabled bool
 }
 
-const telegramAntiScanHashDistanceTarget = 4
+const (
+	telegramAntiScanHashDistanceTarget = 4
+	telegramAntiScanCandidateAttempts  = 8
+)
 
 func (s *sSysPublish) telegramChannelSendPolicy(ctx context.Context, job telegramJobRecord) (telegramChannelSendPolicy, error) {
 	var policy telegramChannelSendPolicy
@@ -107,32 +111,40 @@ func telegramProtectionSeed(values ...interface{}) int64 {
 }
 
 func telegramAntiScanCacheKey(media *telegramMediaItem) string {
+	return telegramAntiScanAttemptCacheKey(media, 0)
+}
+
+func telegramAntiScanAttemptCacheKey(media *telegramMediaItem, attempt int) string {
 	assetHash := strings.TrimSpace(media.AssetHash)
-	if strings.HasPrefix(assetHash, "anti-scan:") {
+	if attempt == 0 && strings.HasPrefix(assetHash, "anti-scan:") {
 		return strings.TrimPrefix(assetHash, "anti-scan:")
 	}
 	sourceHash := assetHash
-	sum := sha256.Sum256([]byte(fmt.Sprintf("anti-scan-v3|%d|%d|%s|%s", media.AntiScanSeed, media.Id, media.Purpose, sourceHash)))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("anti-scan-v4|%d|%d|%s|%s|%d", media.AntiScanSeed, media.Id, media.Purpose, sourceHash, attempt)))
 	return hex.EncodeToString(sum[:])
 }
 
-func prepareTelegramAntiScanFile(ctx context.Context, media *telegramMediaItem, sourcePath string) (string, error) {
-	key := telegramAntiScanCacheKey(media)
+func prepareTelegramAntiScanFile(ctx context.Context, media *telegramMediaItem, sourcePath string, attempt int) (string, error) {
+	key := telegramAntiScanAttemptCacheKey(media, attempt)
 	return cachedGeneratedMediaFile(ctx, key, sourcePath, ".jpg", func(target string) error {
-		return renderTelegramAntiScanFile(sourcePath, target, media.AntiScanSeed)
+		return renderTelegramAntiScanCandidate(sourcePath, target, media.AntiScanSeed, attempt)
 	})
 }
 
-func prepareTelegramAntiScanThumbnailFile(ctx context.Context, media *telegramMediaItem, sourcePath string) (string, error) {
+func prepareTelegramAntiScanThumbnailFile(ctx context.Context, media *telegramMediaItem, sourcePath string, attempt int) (string, error) {
 	assetHash := strings.TrimSpace(media.AssetHash)
-	sum := sha256.Sum256([]byte(fmt.Sprintf("anti-scan-thumbnail-v3|%d|%d|%s|%s", media.AntiScanSeed, media.Id, media.Purpose, assetHash)))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("anti-scan-thumbnail-v4|%d|%d|%s|%s|%d", media.AntiScanSeed, media.Id, media.Purpose, assetHash, attempt)))
 	key := hex.EncodeToString(sum[:])
 	return cachedGeneratedMediaFile(ctx, key, sourcePath, ".jpg", func(target string) error {
-		return renderTelegramAntiScanFile(sourcePath, target, media.AntiScanSeed)
+		return renderTelegramAntiScanCandidate(sourcePath, target, media.AntiScanSeed, attempt)
 	})
 }
 
 func renderTelegramAntiScanFile(sourcePath string, targetPath string, seed int64) error {
+	return renderTelegramAntiScanCandidate(sourcePath, targetPath, seed, 0)
+}
+
+func renderTelegramAntiScanCandidate(sourcePath string, targetPath string, seed int64, attempt int) error {
 	file, err := os.Open(sourcePath)
 	if err != nil {
 		return gerror.Wrap(err, "打开防扫图源文件失败")
@@ -142,7 +154,7 @@ func renderTelegramAntiScanFile(sourcePath string, targetPath string, seed int64
 	if err != nil {
 		return gerror.Wrap(err, "解析防扫图源文件失败")
 	}
-	perturbation := buildTelegramAntiScanPerturbation(source)
+	perturbation := buildTelegramAntiScanPerturbation(source, seed, attempt)
 	scale := selectTelegramAntiScanScale(source, perturbation)
 	destination := applyTelegramAntiScanPerturbation(source, perturbation, scale)
 	if !telegramAntiScanHashDistancePassed(source, destination) {
@@ -155,8 +167,8 @@ func renderTelegramAntiScanFile(sourcePath string, targetPath string, seed int64
 			}
 		}
 	}
-	applyTelegramAntiScanSeedVariation(destination, seed)
-	random := rand.New(rand.NewSource(telegramProtectionSeed(seed, scale, "jpeg")))
+	applyTelegramAntiScanSeedVariation(destination, telegramProtectionSeed(seed, attempt))
+	random := rand.New(rand.NewSource(telegramProtectionSeed(seed, attempt, scale, "jpeg")))
 	out, err := os.Create(targetPath)
 	if err != nil {
 		return gerror.Wrap(err, "创建防扫图缓存文件失败")
@@ -168,6 +180,53 @@ func renderTelegramAntiScanFile(sourcePath string, targetPath string, seed int64
 		return gerror.Wrap(err, "编码防扫图缓存文件失败")
 	}
 	return closeErr
+}
+
+func telegramAntiScanFileHash(path string) (telegramAntiScanHash, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return telegramAntiScanHash{}, err
+	}
+	img, _, err := image.Decode(file)
+	_ = file.Close()
+	if err != nil {
+		return telegramAntiScanHash{}, err
+	}
+	return telegramAntiScanImageHash(img)
+}
+
+func telegramAntiScanImageHash(img image.Image) (telegramAntiScanHash, error) {
+	pHash, err := goimagehash.PerceptionHash(img)
+	if err != nil {
+		return telegramAntiScanHash{}, err
+	}
+	dHash, err := goimagehash.DifferenceHash(img)
+	if err != nil {
+		return telegramAntiScanHash{}, err
+	}
+	return telegramAntiScanHash{PHash: pHash.GetHash(), DHash: dHash.GetHash()}, nil
+}
+
+func telegramAntiScanHashDistance(left uint64, right uint64) int {
+	return bits.OnesCount64(left ^ right)
+}
+
+func telegramAntiScanCandidateScore(source telegramAntiScanHash, candidate telegramAntiScanHash, history []telegramAntiScanHash) (int, bool) {
+	pDistance := telegramAntiScanHashDistance(source.PHash, candidate.PHash)
+	dDistance := telegramAntiScanHashDistance(source.DHash, candidate.DHash)
+	passed := pDistance > telegramAntiScanHashDistanceTarget && dDistance > telegramAntiScanHashDistanceTarget
+	score := pDistance + dDistance
+	for _, previous := range history {
+		previousPDistance := telegramAntiScanHashDistance(previous.PHash, candidate.PHash)
+		previousDDistance := telegramAntiScanHashDistance(previous.DHash, candidate.DHash)
+		if previousPDistance <= telegramAntiScanHashDistanceTarget && previousDDistance <= telegramAntiScanHashDistanceTarget {
+			passed = false
+		}
+		if distance := previousPDistance + previousDDistance; distance < score {
+			score = distance
+		}
+	}
+	return score, passed
 }
 
 func selectTelegramAntiScanScale(source image.Image, perturbation [64][64]float64) float64 {
@@ -262,7 +321,8 @@ func resizeTelegramAntiScanImage(source image.Image, width int, height int) imag
 	return destination
 }
 
-func buildTelegramAntiScanPerturbation(source image.Image) [64][64]float64 {
+func buildTelegramAntiScanPerturbation(source image.Image, seed int64, attempt int) [64][64]float64 {
+	random := rand.New(rand.NewSource(telegramProtectionSeed(seed, attempt, "perturbation")))
 	gray := telegramAntiScanGray(resizeTelegramAntiScanImage(source, 64, 64))
 	dct := transforms.DCT2D(cloneTelegramAntiScanMatrix(gray), 64, 64)
 	values := make([]float64, 0, 64)
@@ -287,12 +347,16 @@ func buildTelegramAntiScanPerturbation(source image.Image) [64][64]float64 {
 		}
 	}
 	sort.Slice(coefficients, func(i, j int) bool { return coefficients[i].distance < coefficients[j].distance })
+	coefficientPoolSize := minTelegramAntiScanInt(len(coefficients), 32)
+	random.Shuffle(coefficientPoolSize, func(i, j int) {
+		coefficients[i], coefficients[j] = coefficients[j], coefficients[i]
+	})
 	var perturbation [64][64]float64
-	for index := 0; index < 12; index++ {
+	for index := 0; index < minTelegramAntiScanInt(14, coefficientPoolSize); index++ {
 		item := coefficients[index]
-		margin := math.Max(12, item.distance*0.35)
+		margin := math.Max(14+float64(random.Intn(7)), item.distance*(0.35+random.Float64()*0.2))
 		target := median + margin
-		if item.value > median {
+		if item.value > median || item.value == median && random.Intn(2) == 0 {
 			target = median - margin
 		}
 		telegramAntiScanAddDCT(&perturbation, item.x, item.y, target-item.value)
@@ -310,6 +374,10 @@ func buildTelegramAntiScanPerturbation(source image.Image) [64][64]float64 {
 		}
 	}
 	sort.Slice(edges, func(i, j int) bool { return math.Abs(edges[i].difference) < math.Abs(edges[j].difference) })
+	edgePoolSize := minTelegramAntiScanInt(len(edges), 36)
+	random.Shuffle(edgePoolSize, func(i, j int) {
+		edges[i], edges[j] = edges[j], edges[i]
+	})
 	var field [8][9]float64
 	used := map[[2]int]bool{}
 	selected := 0
@@ -319,7 +387,7 @@ func buildTelegramAntiScanPerturbation(source image.Image) [64][64]float64 {
 		if used[left] || used[right] {
 			continue
 		}
-		adjustment := (math.Abs(item.difference) + math.Max(2.5, math.Abs(item.difference)*0.2)) / 2
+		adjustment := (math.Abs(item.difference) + math.Max(3+random.Float64()*2, math.Abs(item.difference)*0.25)) / 2
 		if item.difference > 0 {
 			field[item.y][item.x] += adjustment
 			field[item.y][item.x+1] -= adjustment
@@ -329,7 +397,7 @@ func buildTelegramAntiScanPerturbation(source image.Image) [64][64]float64 {
 		}
 		used[left], used[right] = true, true
 		selected++
-		if selected == 12 {
+		if selected == 14 {
 			break
 		}
 	}
@@ -529,14 +597,20 @@ func obfuscateTelegramText(value string, random *rand.Rand, synonymReplacements 
 		if err != nil {
 			return match
 		}
-		delta := 2
-		if random.Intn(2) == 0 {
-			delta = -delta
-		}
-		result := int(math.Round(number)) + delta
+		rounded := int(math.Round(number))
 		minimum, maximum := telegramObfuscationNumberBounds(parts[1])
-		if result < minimum || result > maximum {
-			result = int(math.Round(number)) - delta
+		result := rounded + random.Intn(4)
+		if parts[1] != "身高" {
+			delta := 2
+			if random.Intn(2) == 0 {
+				delta = -delta
+			}
+			result = rounded + delta
+			if result < minimum || result > maximum {
+				result = rounded - delta
+			}
+		} else if result > maximum {
+			result = maximum
 		}
 		return parts[1] + parts[2] + strconv.Itoa(result) + parts[4]
 	})

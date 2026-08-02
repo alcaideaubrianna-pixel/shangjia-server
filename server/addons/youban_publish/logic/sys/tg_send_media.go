@@ -62,7 +62,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		if chunkIndex == 0 {
 			chunkCaption = caption
 		}
-		group, mediaIds, assetHashes, closers, err := s.telegramInputMediaGroup(ctx, chunk, chunkCaption)
+		group, closers, err := s.telegramInputMediaGroup(ctx, chunk, chunkCaption)
 		if err != nil {
 			return allMessages, err
 		}
@@ -77,7 +77,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		if err != nil {
 			return allMessages, err
 		}
-		allMessages = append(allMessages, telegramSentMessagesFromGroup(msgs, purpose, mediaIds, assetHashes)...)
+		allMessages = append(allMessages, telegramSentMessagesFromGroup(msgs, purpose, chunk)...)
 	}
 	return allMessages, nil
 }
@@ -117,7 +117,7 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		if err != nil {
 			return nil, err
 		}
-		return telegramSentMessagesFromSingle(msg, purpose, media.Id, media.AssetHash)
+		return telegramSentMessagesFromSingle(msg, purpose, media)
 	default:
 		msg, err := bot.SendPhoto(ctx, &tgbot.SendPhotoParams{
 			ChatID:    chatId,
@@ -128,7 +128,7 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		if err != nil {
 			return nil, err
 		}
-		return telegramSentMessagesFromSingle(msg, purpose, media.Id, media.AssetHash)
+		return telegramSentMessagesFromSingle(msg, purpose, media)
 	}
 }
 
@@ -211,11 +211,14 @@ func telegramSentMessagesFromCopiedIDs(copied []models.MessageID, purpose string
 		}
 		item := media[index]
 		messages = append(messages, &telegramSentMessage{
-			MessageId: int64(msg.ID),
-			Purpose:   purpose,
-			MediaId:   item.Id,
-			TgFileId:  item.TgFileId,
-			AssetHash: item.AssetHash,
+			MessageId:        int64(msg.ID),
+			Purpose:          purpose,
+			MediaId:          item.Id,
+			TgFileId:         item.TgFileId,
+			AssetHash:        item.AssetHash,
+			ProtectedHashKey: item.ProtectedHashKey,
+			ProtectedPHash:   item.ProtectedPHash,
+			ProtectedDHash:   item.ProtectedDHash,
 		})
 	}
 	return messages
@@ -269,20 +272,18 @@ func (s *sSysPublish) copyTelegramSingleMediaWithoutCaption(ctx context.Context,
 	}}, nil
 }
 
-func (s *sSysPublish) telegramInputMediaGroup(ctx context.Context, media []*telegramMediaItem, caption string) ([]models.InputMedia, []int64, []string, []io.Closer, error) {
+func (s *sSysPublish) telegramInputMediaGroup(ctx context.Context, media []*telegramMediaItem, caption string) ([]models.InputMedia, []io.Closer, error) {
 	group := make([]models.InputMedia, 0, len(media))
-	mediaIds := make([]int64, 0, len(media))
-	assetHashes := make([]string, 0, len(media))
 	closers := make([]io.Closer, 0, len(media))
 	for _, item := range media {
 		source, attachment, closer, err := telegramInputMediaSource(ctx, item)
 		if err != nil {
 			closeTelegramMediaFiles(closers)
-			return nil, nil, nil, nil, err
+			return nil, nil, err
 		}
 		if source == "" {
 			closeTelegramMediaFiles(closers)
-			return nil, nil, nil, nil, gerror.New("媒体文件地址为空")
+			return nil, nil, gerror.New("媒体文件地址为空")
 		}
 		if closer != nil {
 			closers = append(closers, closer)
@@ -295,7 +296,7 @@ func (s *sSysPublish) telegramInputMediaGroup(ctx context.Context, media []*tele
 			thumbnail, thumbnailCloser, err := telegramVideoThumbnail(ctx, item)
 			if err != nil {
 				closeTelegramMediaFiles(closers)
-				return nil, nil, nil, nil, err
+				return nil, nil, err
 			}
 			if thumbnailCloser != nil {
 				closers = append(closers, thumbnailCloser)
@@ -306,10 +307,8 @@ func (s *sSysPublish) telegramInputMediaGroup(ctx context.Context, media []*tele
 		} else {
 			group = append(group, &models.InputMediaPhoto{Media: source, Caption: itemCaption, ParseMode: telegramMediaParseMode(itemCaption), MediaAttachment: attachment})
 		}
-		mediaIds = append(mediaIds, item.Id)
-		assetHashes = append(assetHashes, item.AssetHash)
 	}
-	return group, mediaIds, assetHashes, closers, nil
+	return group, closers, nil
 }
 
 func telegramMediaParseMode(caption string) models.ParseMode {
@@ -567,26 +566,21 @@ func telegramVideoThumbnail(ctx context.Context, media *telegramMediaItem) (mode
 		g.Log().Warningf(ctx, "生成TG视频缩略图失败，跳过自定义缩略图 mediaId:%d path:%s err:%+v", media.Id, videoPath, err)
 		return nil, nil, nil
 	}
-	removeAfterSend := true
+	cleanupThumb := func() { _ = os.Remove(thumbPath) }
 	if media.AntiScanEnabled {
-		protectedPath, protectErr := prepareTelegramAntiScanThumbnailFile(ctx, media, thumbPath)
-		_ = os.Remove(thumbPath)
+		protectedPath, protectedCleanup, protectErr := prepareTelegramAntiScanUploadFile(ctx, media, thumbPath, cleanupThumb, "thumbnail")
 		if protectErr != nil {
 			return nil, nil, gerror.Wrap(protectErr, "处理TG视频缩略图防扫图失败")
 		}
 		thumbPath = protectedPath
-		removeAfterSend = false
+		cleanupThumb = protectedCleanup
 	}
 	file, err := os.Open(thumbPath)
 	if err != nil {
-		if removeAfterSend {
-			_ = os.Remove(thumbPath)
+		if cleanupThumb != nil {
+			cleanupThumb()
 		}
 		return nil, nil, gerror.Wrap(err, "打开TG视频缩略图失败")
-	}
-	var cleanupThumb func()
-	if removeAfterSend {
-		cleanupThumb = func() { _ = os.Remove(thumbPath) }
 	}
 	closer := closeWithCleanup(file, cleanupThumb)
 	return &models.InputFileUpload{Filename: filepath.Base(thumbPath), Data: file}, closer, nil
@@ -682,42 +676,47 @@ func closeTelegramMediaFiles(closers []io.Closer) {
 	}
 }
 
-func telegramSentMessagesFromGroup(msgs []*models.Message, purpose string, mediaIds []int64, assetHashes []string) []*telegramSentMessage {
+func telegramSentMessagesFromGroup(msgs []*models.Message, purpose string, media []*telegramMediaItem) []*telegramSentMessage {
 	list := make([]*telegramSentMessage, 0, len(msgs))
 	for i, msg := range msgs {
 		if msg == nil {
 			continue
 		}
-		mediaId := int64(0)
-		if i < len(mediaIds) {
-			mediaId = mediaIds[i]
+		var mediaItem *telegramMediaItem
+		if i < len(media) {
+			mediaItem = media[i]
 		}
-		assetHash := ""
-		if i < len(assetHashes) {
-			assetHash = assetHashes[i]
+		if mediaItem == nil {
+			continue
 		}
 		list = append(list, &telegramSentMessage{
-			MessageId:    int64(msg.ID),
-			MediaGroupId: msg.MediaGroupID,
-			Purpose:      purpose,
-			MediaId:      mediaId,
-			TgFileId:     telegramMessageFileId(msg),
-			AssetHash:    assetHash,
+			MessageId:        int64(msg.ID),
+			MediaGroupId:     msg.MediaGroupID,
+			Purpose:          purpose,
+			MediaId:          mediaItem.Id,
+			TgFileId:         telegramMessageFileId(msg),
+			AssetHash:        mediaItem.AssetHash,
+			ProtectedHashKey: mediaItem.ProtectedHashKey,
+			ProtectedPHash:   mediaItem.ProtectedPHash,
+			ProtectedDHash:   mediaItem.ProtectedDHash,
 		})
 	}
 	return list
 }
 
-func telegramSentMessagesFromSingle(msg *models.Message, purpose string, mediaId int64, assetHash string) ([]*telegramSentMessage, error) {
+func telegramSentMessagesFromSingle(msg *models.Message, purpose string, media *telegramMediaItem) ([]*telegramSentMessage, error) {
 	if msg == nil {
 		return nil, nil
 	}
 	return []*telegramSentMessage{{
-		MessageId:    int64(msg.ID),
-		MediaGroupId: msg.MediaGroupID,
-		Purpose:      purpose,
-		MediaId:      mediaId,
-		TgFileId:     telegramMessageFileId(msg),
-		AssetHash:    assetHash,
+		MessageId:        int64(msg.ID),
+		MediaGroupId:     msg.MediaGroupID,
+		Purpose:          purpose,
+		MediaId:          media.Id,
+		TgFileId:         telegramMessageFileId(msg),
+		AssetHash:        media.AssetHash,
+		ProtectedHashKey: media.ProtectedHashKey,
+		ProtectedPHash:   media.ProtectedPHash,
+		ProtectedDHash:   media.ProtectedDHash,
 	}}, nil
 }

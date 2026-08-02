@@ -20,15 +20,21 @@ type telegramMediaItem struct {
 	VideoDuration     int    `json:"videoDuration"`
 	AntiScanEnabled   bool   `json:"antiScanEnabled"`
 	AntiScanSeed      int64  `json:"antiScanSeed"`
+	ProtectedHashKey  string `json:"-"`
+	ProtectedPHash    uint64 `json:"-"`
+	ProtectedDHash    uint64 `json:"-"`
 }
 
 type telegramSentMessage struct {
-	MessageId    int64
-	MediaGroupId string
-	Purpose      string
-	MediaId      int64
-	TgFileId     string
-	AssetHash    string
+	MessageId        int64
+	MediaGroupId     string
+	Purpose          string
+	MediaId          int64
+	TgFileId         string
+	AssetHash        string
+	ProtectedHashKey string
+	ProtectedPHash   uint64
+	ProtectedDHash   uint64
 }
 
 type telegramCopyMediaRef struct {

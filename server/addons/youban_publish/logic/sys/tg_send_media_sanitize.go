@@ -28,11 +28,7 @@ func prepareTelegramMediaUploadFile(ctx context.Context, media *telegramMediaIte
 		return path, cleanup, nil
 	}
 	if media.AntiScanEnabled && isTelegramImageMedia(media.MediaType) {
-		protectedPath, err := prepareTelegramAntiScanFile(ctx, media, path)
-		if err != nil {
-			return "", cleanup, err
-		}
-		path = protectedPath
+		return prepareTelegramAntiScanUploadFile(ctx, media, path, cleanup, "image")
 	}
 	switch strings.ToLower(strings.TrimSpace(media.MediaType)) {
 	case "video":
@@ -40,6 +36,71 @@ func prepareTelegramMediaUploadFile(ctx context.Context, media *telegramMediaIte
 	default:
 		return prepareTelegramPhotoUploadFile(ctx, path, cleanup)
 	}
+}
+
+func prepareTelegramAntiScanUploadFile(ctx context.Context, media *telegramMediaItem, sourcePath string, cleanup func(), kind string) (string, func(), error) {
+	historyKey := telegramAntiScanHistoryKey(media, kind)
+	history := loadTelegramAntiScanHashHistory(ctx, historyKey)
+	sourceHash, sourceHashErr := telegramAntiScanFileHash(sourcePath)
+	bestScore := -1
+	bestPath := ""
+	var bestCleanup func()
+	var bestHash telegramAntiScanHash
+	for attempt := 0; attempt < telegramAntiScanCandidateAttempts; attempt++ {
+		var protectedPath string
+		var err error
+		if kind == "thumbnail" {
+			protectedPath, err = prepareTelegramAntiScanThumbnailFile(ctx, media, sourcePath, attempt)
+		} else {
+			protectedPath, err = prepareTelegramAntiScanFile(ctx, media, sourcePath, attempt)
+		}
+		if err != nil {
+			continue
+		}
+		candidatePath, candidateCleanup, err := prepareTelegramPhotoUploadFile(ctx, protectedPath, nil)
+		if err != nil {
+			continue
+		}
+		candidateHash, err := telegramAntiScanFileHash(candidatePath)
+		if err != nil {
+			if candidateCleanup != nil {
+				candidateCleanup()
+			}
+			continue
+		}
+		score, passed := 0, true
+		if sourceHashErr == nil {
+			score, passed = telegramAntiScanCandidateScore(sourceHash, candidateHash, history)
+		}
+		if passed {
+			if bestCleanup != nil {
+				bestCleanup()
+			}
+			media.ProtectedHashKey = historyKey
+			media.ProtectedPHash = candidateHash.PHash
+			media.ProtectedDHash = candidateHash.DHash
+			return candidatePath, chainCleanup(cleanup, candidateCleanup), nil
+		}
+		if score > bestScore {
+			if bestCleanup != nil {
+				bestCleanup()
+			}
+			bestScore, bestPath, bestCleanup, bestHash = score, candidatePath, candidateCleanup, candidateHash
+		} else if candidateCleanup != nil {
+			candidateCleanup()
+		}
+	}
+	if bestPath == "" {
+		if cleanup != nil {
+			cleanup()
+		}
+		return "", nil, gerror.New("生成防扫图候选文件失败")
+	}
+	media.ProtectedHashKey = historyKey
+	media.ProtectedPHash = bestHash.PHash
+	media.ProtectedDHash = bestHash.DHash
+	g.Log().Warningf(ctx, "防扫图候选未完全达到Hash距离要求，使用最优候选 mediaId:%d kind:%s score:%d", media.Id, kind, bestScore)
+	return bestPath, chainCleanup(cleanup, bestCleanup), nil
 }
 
 func prepareTelegramPhotoUploadFile(ctx context.Context, path string, cleanup func()) (string, func(), error) {

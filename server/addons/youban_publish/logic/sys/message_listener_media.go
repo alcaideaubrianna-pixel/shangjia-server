@@ -157,7 +157,7 @@ func (s *sSysPublish) sendTelegramSingleMediaWithMarkup(ctx context.Context, bot
 		if err != nil {
 			return nil, err
 		}
-		return telegramSentMessagesFromSingle(msg, purpose, media.Id, media.AssetHash)
+		return telegramSentMessagesFromSingle(msg, purpose, media)
 	default:
 		msg, err := bot.SendPhoto(ctx, &tgbot.SendPhotoParams{
 			ChatID:      chatId,
@@ -169,7 +169,7 @@ func (s *sSysPublish) sendTelegramSingleMediaWithMarkup(ctx context.Context, bot
 		if err != nil {
 			return nil, err
 		}
-		return telegramSentMessagesFromSingle(msg, purpose, media.Id, media.AssetHash)
+		return telegramSentMessagesFromSingle(msg, purpose, media)
 	}
 }
 

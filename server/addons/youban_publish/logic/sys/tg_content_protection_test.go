@@ -2,6 +2,8 @@ package sys
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -50,6 +52,70 @@ func TestRenderTelegramAntiScanFileDeterministicBySeed(t *testing.T) {
 	}
 }
 
+func TestRenderTelegramAntiScanFileChangesPerceptualHashBySeed(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "source.png")
+	writeAntiScanTestImage(t, sourcePath)
+	sourceHash, err := telegramAntiScanFileHash(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashes := make(map[telegramAntiScanHash]struct{})
+	for seed := int64(1); seed <= 5; seed++ {
+		targetPath := filepath.Join(dir, fmt.Sprintf("seed-%d.jpg", seed))
+		if err := renderTelegramAntiScanFile(sourcePath, targetPath, seed); err != nil {
+			t.Fatal(err)
+		}
+		finalPath, cleanup, err := prepareTelegramPhotoUploadFile(context.Background(), targetPath, nil)
+		if cleanup != nil {
+			defer cleanup()
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash, err := telegramAntiScanFileHash(finalPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, passed := telegramAntiScanCandidateScore(sourceHash, hash, nil); !passed {
+			t.Fatalf("seed %d failed perceptual distance after final JPEG encoding", seed)
+		}
+		hashes[hash] = struct{}{}
+	}
+	if len(hashes) < 4 {
+		t.Fatalf("different seeds produced too few perceptual variants: %d", len(hashes))
+	}
+}
+
+func TestTelegramAntiScanCandidateRejectsRecentCollision(t *testing.T) {
+	source := telegramAntiScanHash{PHash: 0, DHash: 0}
+	candidate := telegramAntiScanHash{PHash: 0xff, DHash: 0xff}
+	if _, passed := telegramAntiScanCandidateScore(source, candidate, nil); !passed {
+		t.Fatal("candidate far from source should pass")
+	}
+	history := []telegramAntiScanHash{{PHash: candidate.PHash ^ 1, DHash: candidate.DHash ^ 1}}
+	if _, passed := telegramAntiScanCandidateScore(source, candidate, history); passed {
+		t.Fatal("candidate close to recent history should be rejected")
+	}
+}
+
+func TestMergeTelegramAntiScanHashHistoryDeduplicatesAndTrims(t *testing.T) {
+	current := telegramAntiScanHash{PHash: 9, DHash: 9}
+	history := []telegramAntiScanHash{
+		current,
+		{PHash: 8, DHash: 8},
+		{PHash: 7, DHash: 7},
+		{PHash: 6, DHash: 6},
+	}
+	merged := mergeTelegramAntiScanHashHistory(history, current, 3)
+	if len(merged) != 3 {
+		t.Fatalf("unexpected history length: %d", len(merged))
+	}
+	if merged[0] != current || merged[1] != history[1] || merged[2] != history[2] {
+		t.Fatalf("unexpected history order: %#v", merged)
+	}
+}
+
 func TestObfuscateTelegramCaptionKeepsHTMLAndLimitsNumberScope(t *testing.T) {
 	caption := "<b>广州资料</b>\n📏身高：174.5\n⚖️体重：51kg\n电话：13800138000\n编号：G35535"
 	first := obfuscateTelegramCaption(caption, 88)
@@ -73,11 +139,29 @@ func TestObfuscateTelegramCaptionKeepsHTMLAndLimitsNumberScope(t *testing.T) {
 		regexp.MustCompile(`体重[^0-9]{0,8}[\x{200B}\x{200C}\x{2060}\x{2063}]`).MatchString(first) {
 		t.Fatalf("invisible characters were inserted before height or weight: %s", first)
 	}
-	if !regexp.MustCompile(`身高[^0-9]{0,8}(173|177)([^0-9]|$)`).MatchString(first) {
+	if !regexp.MustCompile(`身高[^0-9]{0,8}(175|176|177|178)([^0-9]|$)`).MatchString(first) {
 		t.Fatalf("height perturbation exceeded expected range: %s", first)
 	}
 	if !regexp.MustCompile(`体重[^0-9]{0,8}(49|53)kg`).MatchString(first) {
 		t.Fatalf("weight perturbation exceeded expected range: %s", first)
+	}
+}
+
+func TestObfuscateTelegramHeightOnlyIncreases(t *testing.T) {
+	seen := make(map[string]bool)
+	for seed := int64(1); seed <= 20; seed++ {
+		result := obfuscateTelegramText("身高：180 体重：50kg", rand.New(rand.NewSource(seed)), make(map[string]string))
+		matched := regexp.MustCompile(`身高：(180|181|182|183)`).FindStringSubmatch(result)
+		if len(matched) != 2 {
+			t.Fatalf("height must only increase, seed:%d result:%s", seed, result)
+		}
+		seen[matched[1]] = true
+		if !strings.Contains(result, "体重：48kg") && !strings.Contains(result, "体重：52kg") {
+			t.Fatalf("weight must support both directions, seed:%d result:%s", seed, result)
+		}
+	}
+	if len(seen) < 3 {
+		t.Fatalf("height random increment produced too few variants: %#v", seen)
 	}
 }
 

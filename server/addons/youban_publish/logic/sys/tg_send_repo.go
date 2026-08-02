@@ -200,6 +200,16 @@ func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegram
 			return gerror.Wrap(err, "保存TG消息记录失败")
 		}
 	}
+	storedHashes := make(map[string]telegramAntiScanHash)
+	for _, item := range messages {
+		if item == nil || item.ProtectedHashKey == "" || item.ProtectedPHash == 0 && item.ProtectedDHash == 0 {
+			continue
+		}
+		storedHashes[item.ProtectedHashKey] = telegramAntiScanHash{PHash: item.ProtectedPHash, DHash: item.ProtectedDHash}
+	}
+	for key, hash := range storedHashes {
+		appendTelegramAntiScanHashHistory(ctx, key, hash)
+	}
 	return nil
 }
 
