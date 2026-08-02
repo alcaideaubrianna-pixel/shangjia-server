@@ -398,9 +398,13 @@ func (s *sSysPublish) FollowNoteImageSearch(ctx context.Context, in *sysin.Follo
 	if err != nil {
 		return nil, 0, err
 	}
-	return s.profileImageSearchByAccountIds(ctx, &sysin.ProfileImageSearchInp{
+	scope, err := s.mediaSearchScopeByAccountIds(ctx, accountIds)
+	if err != nil {
+		return nil, 0, err
+	}
+	return s.profileImageSearch(ctx, &sysin.ProfileImageSearchInp{
 		ProfileListInp: in.ProfileListInp,
-	}, file, accountIds, account)
+	}, file, scope, account)
 }
 
 func intersectInt64(left []int64, right []int64) []int64 {

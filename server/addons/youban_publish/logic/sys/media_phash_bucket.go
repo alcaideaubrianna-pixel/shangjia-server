@@ -13,11 +13,12 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"golang.org/x/sync/singleflight"
+	publishmodel "hotgo/addons/youban_publish/model"
 	"hotgo/internal/library/cache"
 )
 
 const (
-	mediaPHashBucketCacheVersionKey  = "youban_publish:media_phash_bucket:version:v4"
+	mediaPHashBucketCacheVersionKey  = "youban_publish:media_phash_bucket:version:v5"
 	mediaPHashBucketResultTTL        = 365 * 24 * time.Hour
 	mediaPHashBucketMaxCandidates    = 50000
 	mediaPHashBucketMaxScopedIds     = 32
@@ -132,15 +133,13 @@ type mediaPHashBucketCell struct {
 	Value string
 }
 
-type mediaPHashBucketScopePart struct {
-	TenantId   int64
-	AccountIds []int64
-}
+type mediaPHashBucketScopePart = publishmodel.MediaSearchScopePartition
 
 func mediaPHashBucketVersion(ctx context.Context, tenantId int64, accountIds []int64) string {
 	ids := uniqueIds(accountIds)
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	if tenantId <= 0 {
-		return mediaPHashBucketVersionValue(ctx, mediaPHashBucketGlobalVersionKey())
+		return "0"
 	}
 	if len(ids) == 0 || len(ids) > mediaPHashBucketMaxScopedIds {
 		return mediaPHashBucketVersionValue(ctx, mediaPHashBucketTenantVersionKey(tenantId))
@@ -150,10 +149,6 @@ func mediaPHashBucketVersion(ctx context.Context, tenantId int64, accountIds []i
 		parts = append(parts, fmt.Sprintf("%d=%s", accountId, mediaPHashBucketVersionValue(ctx, mediaPHashBucketAccountVersionKey(tenantId, accountId))))
 	}
 	return mediaPHashHashKey(strings.Join(parts, ","))
-}
-
-func mediaPHashBucketGlobalVersionKey() string {
-	return mediaPHashBucketCacheVersionKey + ":global"
 }
 
 func mediaPHashBucketVersionValue(ctx context.Context, key string) string {
@@ -173,13 +168,10 @@ func mediaPHashBucketAccountVersionKey(tenantId int64, accountId int64) string {
 }
 
 func bumpMediaPHashBucketVersion(ctx context.Context, tenantId int64, accountId int64) error {
-	version := gtime.Now().UnixNano()
-	if err := cache.Instance().Set(ctx, mediaPHashBucketGlobalVersionKey(), version, mediaPHashBucketResultTTL); err != nil {
-		return err
-	}
 	if tenantId <= 0 {
 		return nil
 	}
+	version := gtime.Now().UnixNano()
 	if err := cache.Instance().Set(ctx, mediaPHashBucketTenantVersionKey(tenantId), version, mediaPHashBucketResultTTL); err != nil {
 		return err
 	}
@@ -258,13 +250,14 @@ func bumpMediaPHashBucketVersions(ctx context.Context, owners []mediaPHashBucket
 	return nil
 }
 
-func mediaPHashBucketCandidateRows(ctx context.Context, normalizedHash string, threshold int, tenantId int64, accountIds []int64, profileIds []int64, mediaType string, excludeProfileId int64) ([]mediaPHashBucketCandidateRow, error) {
-	return mediaPHashBucketCandidateRowsWithScopes(ctx, normalizedHash, threshold, []mediaPHashBucketScopePart{{TenantId: tenantId, AccountIds: accountIds}}, profileIds, mediaType, excludeProfileId)
-}
-
 func mediaPHashBucketCandidateRowsWithScopes(ctx context.Context, normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) ([]mediaPHashBucketCandidateRow, error) {
 	normalizedHash = strings.TrimSpace(strings.ToLower(normalizedHash))
 	if normalizedHash == "" {
+		return []mediaPHashBucketCandidateRow{}, nil
+	}
+	scopes = mediaPHashBucketValidScopes(scopes)
+	if len(scopes) == 0 {
+		g.Log().Warning(ctx, "跳过无租户账号范围的pHash候选查询")
 		return []mediaPHashBucketCandidateRow{}, nil
 	}
 	cacheKey := mediaPHashBucketCandidateCacheKey(ctx, normalizedHash, threshold, scopes, profileIds, mediaType, excludeProfileId)
@@ -301,8 +294,8 @@ func mediaPHashBucketCandidateRowsWithScopes(ctx context.Context, normalizedHash
 func mediaPHashBucketCandidateRowsWithScopesUncached(ctx context.Context, normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) ([]mediaPHashBucketCandidateRow, error) {
 	scopes = mediaPHashBucketValidScopes(scopes)
 	profileIds = uniqueIds(profileIds)
-	if len(scopes) == 0 && len(profileIds) == 0 {
-		g.Log().Warning(ctx, "跳过无租户、账号或资料范围的pHash候选查询")
+	if len(scopes) == 0 {
+		g.Log().Warning(ctx, "跳过无租户账号范围的pHash候选查询")
 		return []mediaPHashBucketCandidateRow{}, nil
 	}
 	if mediaPHashLshReady(ctx) && threshold <= 12 {
@@ -396,7 +389,7 @@ func mediaPHashBucketCandidateCacheKey(ctx context.Context, normalizedHash strin
 	sort.Strings(scopeParts)
 	ids := uniqueIds(profileIds)
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	return "youban_publish:media_phash_bucket:candidates:v4:" + mediaPHashHashKey(fmt.Sprintf("hash=%s|threshold=%d|scopes=%v|profiles=%v|type=%s|exclude=%d", normalizedHash, threshold, scopeParts, ids, strings.ToLower(strings.TrimSpace(mediaType)), excludeProfileId))
+	return "youban_publish:media_phash_bucket:candidates:v5:" + mediaPHashHashKey(fmt.Sprintf("hash=%s|threshold=%d|scopes=%v|profiles=%v|type=%s|exclude=%d", normalizedHash, threshold, scopeParts, ids, strings.ToLower(strings.TrimSpace(mediaType)), excludeProfileId))
 }
 
 func mediaPHashBucketBranchSQL(bucketPos int, bucketValue string, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) (string, []any) {
@@ -452,10 +445,8 @@ func mediaPHashBucketScopeSQL(alias string, scopes []mediaPHashBucketScopePart) 
 			fieldPrefix += "."
 		}
 		parts := make([]string, 0, 2)
-		if scope.TenantId > 0 {
-			parts = append(parts, fieldPrefix+"tenant_id = ?")
-			args = append(args, scope.TenantId)
-		}
+		parts = append(parts, fieldPrefix+"tenant_id = ?")
+		args = append(args, scope.TenantId)
 		if len(ids) > 0 {
 			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
 			parts = append(parts, fieldPrefix+"account_id IN ("+placeholders+")")
@@ -469,16 +460,5 @@ func mediaPHashBucketScopeSQL(alias string, scopes []mediaPHashBucketScopePart) 
 }
 
 func mediaPHashBucketValidScopes(scopes []mediaPHashBucketScopePart) []mediaPHashBucketScopePart {
-	result := make([]mediaPHashBucketScopePart, 0, len(scopes))
-	for _, scope := range scopes {
-		accountIds := uniqueIds(scope.AccountIds)
-		if scope.TenantId <= 0 && len(accountIds) == 0 {
-			continue
-		}
-		result = append(result, mediaPHashBucketScopePart{
-			TenantId:   scope.TenantId,
-			AccountIds: accountIds,
-		})
-	}
-	return result
+	return mediaSearchScopeFromPartitions(scopes).Partitions
 }

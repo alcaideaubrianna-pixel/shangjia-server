@@ -37,21 +37,17 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	if len(accountIds) == 0 {
 		return []*sysin.NoteModel{}, 0, nil
 	}
-	searchTenantId := in.TenantId
+	searchScope := mediaSearchScopeForTenant(in.TenantId, accountIds)
 	if strings.EqualFold(strings.TrimSpace(in.AccountType), sysin.PublishAccountTypeAdmin) {
-		// accountIds already comes from the administrator's permission scope.
-		// Do not apply the viewer tenant again, otherwise followed accounts from
-		// another tenant are removed before the pHash match is evaluated.
-		searchTenantId = 0
+		searchScope, err = s.mediaSearchScopeByAccountIds(ctx, accountIds)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 	searchIn := &sysin.ProfileImageSearchInp{
-		ProfileListInp: sysin.ProfileListInp{TenantId: searchTenantId, AccountId: in.AccountId},
-		Threshold:      in.Threshold,
+		Threshold: in.Threshold,
 	}
 	normalizeProfileImageSearchInput(searchIn)
-	if strings.EqualFold(strings.TrimSpace(in.AccountType), sysin.PublishAccountTypeAdmin) {
-		searchIn.AccountId = 0
-	}
 	candidates := make(map[int64]*botMediaSearchCandidate)
 	seenHashes := make(map[string]struct{})
 	for _, item := range in.Items {
@@ -71,7 +67,7 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 			continue
 		}
 		seenHashes[hashKey] = struct{}{}
-		items, searchErr := s.cachedProfileFingerprintSearchCandidates(ctx, fingerprint, searchIn, accountIds, nil)
+		items, searchErr := s.cachedProfileFingerprintSearchCandidates(ctx, fingerprint, searchIn, searchScope, nil)
 		if searchErr != nil {
 			return nil, 0, searchErr
 		}
@@ -111,7 +107,7 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	if len(profileIds) == 0 {
 		return []*sysin.NoteModel{}, total, nil
 	}
-	list, err := s.profileImageSearchNotesByProfileIds(ctx, profileIds, searchTenantId, accountIds, nil, "")
+	list, err := s.profileImageSearchNotesByScope(ctx, profileIds, searchScope, nil, "")
 	if err != nil {
 		return nil, 0, err
 	}

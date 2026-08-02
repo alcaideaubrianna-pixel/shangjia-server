@@ -22,6 +22,7 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	publishmodel "hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
@@ -301,9 +302,8 @@ func (s *sSysPublish) MyProfileImageSearch(ctx context.Context, in *sysin.Profil
 	if in == nil {
 		in = &sysin.ProfileImageSearchInp{}
 	}
-	in.TenantId = account.TenantId
-	in.AccountId = account.Id
-	return s.profileImageSearchByAccountIds(ctx, in, file, []int64{account.Id}, account)
+	searchIn := *in
+	return s.profileImageSearch(ctx, &searchIn, file, mediaSearchScopeForTenant(account.TenantId, []int64{account.Id}), account)
 }
 
 func (s *sSysPublish) AdminProfileImageSearch(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile) (list []*sysin.NoteModel, totalCount int, err error) {
@@ -321,26 +321,24 @@ func (s *sSysPublish) AdminProfileImageSearch(ctx context.Context, in *sysin.Pro
 	if len(scope.AccountIds) == 0 {
 		return []*sysin.NoteModel{}, 0, nil
 	}
-	if err = s.ensureAdminProfileScopeTenants(ctx, scope); err != nil {
+	searchScope, err := s.mediaSearchScopeByAccountIds(ctx, scope.AccountIds)
+	if err != nil {
 		return nil, 0, err
 	}
-	// The account list is already permission-scoped. Keep tenant unset here so
-	// followed accounts from another tenant are not discarded by the result query.
-	in.TenantId = 0
-	return s.profileImageSearchByAccountIds(ctx, in, file, scope.AccountIds, account)
+	searchIn := *in
+	return s.profileImageSearch(ctx, &searchIn, file, searchScope, account)
 }
 
-func (s *sSysPublish) profileImageSearchByAccountIds(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile, accountIds []int64, viewer *sysin.AccountModel) (list []*sysin.NoteModel, totalCount int, err error) {
+func (s *sSysPublish) profileImageSearch(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile, scope *publishmodel.MediaSearchScope, viewer *sysin.AccountModel) (list []*sysin.NoteModel, totalCount int, err error) {
 	normalizeProfileImageSearchInput(in)
-	accountIds = uniqueIds(accountIds)
-	if len(accountIds) == 0 {
+	if scope == nil || len(scope.Partitions) == 0 || len(scope.AccountIds) == 0 {
 		return []*sysin.NoteModel{}, 0, nil
 	}
 	fingerprint, err := uploadImageFingerprint(file)
 	if err != nil {
 		return nil, 0, err
 	}
-	matches, totalCount, err := s.findSimilarProfileMatchesByFingerprint(ctx, fingerprint, in, accountIds)
+	matches, totalCount, err := s.findSimilarProfileMatchesByFingerprint(ctx, fingerprint, in, scope)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -351,7 +349,7 @@ func (s *sSysPublish) profileImageSearchByAccountIds(ctx context.Context, in *sy
 	if len(profileIds) == 0 {
 		return []*sysin.NoteModel{}, totalCount, nil
 	}
-	list, err = s.profileImageSearchNotesByProfileIds(ctx, profileIds, in.TenantId, accountIds, viewer, "")
+	list, err = s.profileImageSearchNotesByScope(ctx, profileIds, scope, viewer, "")
 	if err != nil {
 		return nil, 0, err
 	}
@@ -392,21 +390,29 @@ type publishProfilePHashDistance struct {
 	MediaType string
 }
 
-func (s *sSysPublish) findSimilarProfileMatchesByPHash(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, accountIds []int64) (matches []publishProfilePHashDistance, totalCount int, err error) {
-	return s.findSimilarProfileMatchesByPHashBucket(ctx, queryHash, in, accountIds)
+func (s *sSysPublish) findSimilarProfileMatchesByPHash(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope) (matches []publishProfilePHashDistance, totalCount int, err error) {
+	return s.findSimilarProfileMatchesByPHashBucket(ctx, queryHash, in, scope)
 }
 
-func (s *sSysPublish) profileImageSearchCandidateProfileIds(ctx context.Context, in *sysin.ProfileListInp, accountIds []int64) ([]int64, error) {
+func (s *sSysPublish) profileImageSearchCandidateProfileIds(ctx context.Context, in *sysin.ProfileListInp, scope *publishmodel.MediaSearchScope) ([]int64, error) {
 	if !hasProfileSearchFilters(in) {
 		return nil, nil
 	}
-	base, err := s.profileBaseModel(ctx, in.TenantId, in.AccountId)
+	if scope == nil || len(scope.AccountIds) == 0 {
+		return []int64{}, nil
+	}
+	filters := *in
+	filters.TenantId = mediaSearchScopeTenantId(scope)
+	filters.AccountId = 0
+	base, err := s.profileBaseModel(ctx, filters.TenantId, 0)
 	if err != nil {
 		return nil, err
 	}
-	base = s.applyProfileFilters(ctx, base, in)
-	if len(accountIds) > 0 {
-		base = base.WhereIn("ps.account_id", accountIds)
+	base = s.applyProfileFilters(ctx, base, &filters)
+	if scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("ps", scope.Partitions); scopeSQL != "" {
+		base = base.Where("("+scopeSQL+")", scopeArgs...)
+	} else {
+		return []int64{}, nil
 	}
 	rows, err := base.Fields("p.id").All()
 	if err != nil {

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 
@@ -32,13 +31,13 @@ type mediaSimilarCandidate struct {
 }
 
 type mediaSimilarSource struct {
-	AccountId      int64  `json:"accountId"`
-	Id             int64  `json:"id"`
-	MediaType      string `json:"mediaType"`
-	PerceptualHash string `json:"perceptualHash"`
-	ProfileId      int64  `json:"profileId"`
-	TenantId       int64  `json:"tenantId"`
-	UpdatedAt      string `json:"updatedAt"`
+	AccountId      int64  `orm:"account_id"`
+	Id             int64  `orm:"id"`
+	MediaType      string `orm:"media_type"`
+	PerceptualHash string `orm:"perceptual_hash"`
+	ProfileId      int64  `orm:"profile_id"`
+	TenantId       int64  `orm:"tenant_id"`
+	UpdatedAt      string `orm:"updated_at"`
 }
 
 type mediaSimilarScope struct {
@@ -77,7 +76,7 @@ func (s *sSysPublish) MediaSimilarList(ctx context.Context, in *sysin.MediaSimil
 		return &sysin.MediaSimilarListModel{MediaId: in.MediaId, List: []*sysin.NoteModel{}}, total, nil
 	}
 	end := int(math.Min(float64(start+in.PerPage), float64(total)))
-	list, err := s.mediaSimilarNotes(ctx, account, items[start:end])
+	list, err := s.mediaSimilarNotes(ctx, account, scope, items[start:end])
 	if err != nil {
 		return nil, 0, err
 	}
@@ -241,48 +240,17 @@ func (s *sSysPublish) mediaSimilarVisibleScope(ctx context.Context, account *sys
 		ids = append(ids, followIds...)
 	}
 	ids = uniqueIds(ids)
-	partitions, err := s.mediaSimilarScopePartitions(ctx, ids)
+	searchScope, err := s.mediaSearchScopeByAccountIds(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
 	scope := &mediaSimilarScope{
-		AccountIds: ids,
+		AccountIds: searchScope.AccountIds,
 		CacheKey:   mediaSimilarScopeCacheKey(ctx, account.TenantId, account.Id),
-		Partitions: partitions,
+		Partitions: searchScope.Partitions,
 	}
 	_ = cache.Instance().Set(ctx, cacheKey, scope, accountVisibilityCacheTTL)
 	return scope, nil
-}
-
-func (s *sSysPublish) mediaSimilarScopePartitions(ctx context.Context, accountIds []int64) ([]mediaPHashBucketScopePart, error) {
-	accountIds = uniqueIds(accountIds)
-	if len(accountIds) == 0 {
-		return []mediaPHashBucketScopePart{}, nil
-	}
-	columns := pdao.YoubanPublishAccount.Columns()
-	var rows []struct {
-		Id       int64 `json:"id"`
-		TenantId int64 `json:"tenantId"`
-	}
-	if err := pdao.YoubanPublishAccount.Ctx(ctx).
-		Fields(columns.Id, columns.TenantId).
-		WhereIn(columns.Id, accountIds).
-		Where(columns.Status, 1).
-		WhereNull(columns.DeletedAt).
-		Scan(&rows); err != nil {
-		return nil, gerror.Wrap(err, "读取相似资料权限范围失败")
-	}
-	grouped := make(map[int64][]int64)
-	for _, row := range rows {
-		if row.Id > 0 && row.TenantId > 0 {
-			grouped[row.TenantId] = append(grouped[row.TenantId], row.Id)
-		}
-	}
-	partitions := make([]mediaPHashBucketScopePart, 0, len(grouped))
-	for tenantId, ids := range grouped {
-		partitions = append(partitions, mediaPHashBucketScopePart{TenantId: tenantId, AccountIds: uniqueIds(ids)})
-	}
-	return partitions, nil
 }
 
 func (s *sSysPublish) mediaSimilarBucketCandidates(ctx context.Context, scope *mediaSimilarScope, source *mediaSimilarSource, queryHash *goimagehash.ImageHash, threshold int) ([]mediaSimilarCandidate, error) {
@@ -392,7 +360,7 @@ func (s *sSysPublish) mediaByIds(ctx context.Context, mediaIds []int64) ([]*sysi
 	return media, nil
 }
 
-func (s *sSysPublish) mediaSimilarNotes(ctx context.Context, viewer *sysin.AccountModel, items []mediaSimilarCandidate) ([]*sysin.NoteModel, error) {
+func (s *sSysPublish) mediaSimilarNotes(ctx context.Context, viewer *sysin.AccountModel, scope *mediaSimilarScope, items []mediaSimilarCandidate) ([]*sysin.NoteModel, error) {
 	profileIds := make([]int64, 0, len(items))
 	mediaIds := make([]int64, 0, len(items))
 	for _, item := range items {
@@ -403,7 +371,7 @@ func (s *sSysPublish) mediaSimilarNotes(ctx context.Context, viewer *sysin.Accou
 			mediaIds = append(mediaIds, item.MediaId)
 		}
 	}
-	notes, err := s.profileImageSearchNotesByProfileIds(ctx, profileIds, 0, nil, viewer, "")
+	notes, err := s.profileImageSearchNotesByScope(ctx, profileIds, mediaSearchScopeFromPartitions(scope.Partitions), viewer, "")
 	if err != nil || len(notes) == 0 || len(mediaIds) == 0 {
 		return notes, err
 	}
@@ -481,15 +449,10 @@ func mediaSimilarLiveProfileIndexExistsSQL(profileIdExpr string, tenantIdExpr st
 }
 
 func mediaSimilarScopeIndexVersion(ctx context.Context, scope *mediaSimilarScope) string {
-	if scope == nil || len(scope.Partitions) == 0 {
+	if scope == nil {
 		return "0"
 	}
-	parts := make([]string, 0, len(scope.Partitions))
-	for _, partition := range scope.Partitions {
-		parts = append(parts, fmt.Sprintf("%d=%s", partition.TenantId, mediaPHashBucketVersion(ctx, partition.TenantId, partition.AccountIds)))
-	}
-	sort.Strings(parts)
-	return mediaSimilarHashKey(strings.Join(parts, ","))
+	return mediaSearchScopeVersion(ctx, mediaSearchScopeFromPartitions(scope.Partitions))
 }
 
 func mediaSimilarScopeCacheKey(ctx context.Context, tenantId int64, accountId int64) string {

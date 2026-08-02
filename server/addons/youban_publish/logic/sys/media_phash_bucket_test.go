@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -41,23 +42,17 @@ func TestMediaPHashDeduplicateProfilesKeepsBestMediaMatch(t *testing.T) {
 	}
 }
 
-func TestMediaPHashBucketScopeSQLKeepsTenantScopeWithoutAccounts(t *testing.T) {
+func TestMediaPHashBucketScopeSQLRejectsTenantScopeWithoutAccounts(t *testing.T) {
 	condition, args := mediaPHashBucketScopeSQL("b", []mediaPHashBucketScopePart{{TenantId: 2}})
-	if condition != "b.tenant_id = ?" {
-		t.Fatalf("unexpected condition: %s", condition)
-	}
-	if len(args) != 1 || args[0] != int64(2) {
-		t.Fatalf("unexpected args: %#v", args)
+	if condition != "" || len(args) != 0 {
+		t.Fatalf("tenant-only scope must be rejected: condition=%q args=%#v", condition, args)
 	}
 }
 
-func TestMediaPHashBucketScopeSQLKeepsAccountOnlyScope(t *testing.T) {
+func TestMediaPHashBucketScopeSQLRejectsAccountOnlyScope(t *testing.T) {
 	condition, args := mediaPHashBucketScopeSQL("b", []mediaPHashBucketScopePart{{AccountIds: []int64{9}}})
-	if condition != "b.account_id IN (?)" {
-		t.Fatalf("unexpected condition: %s", condition)
-	}
-	if len(args) != 1 || args[0] != int64(9) {
-		t.Fatalf("unexpected args: %#v", args)
+	if condition != "" || len(args) != 0 {
+		t.Fatalf("account-only scope must be rejected: condition=%q args=%#v", condition, args)
 	}
 }
 
@@ -65,6 +60,36 @@ func TestMediaPHashBucketScopeSQLDropsEmptyScope(t *testing.T) {
 	condition, args := mediaPHashBucketScopeSQL("b", []mediaPHashBucketScopePart{{}})
 	if condition != "" || len(args) != 0 {
 		t.Fatalf("empty scope must be rejected: condition=%q args=%#v", condition, args)
+	}
+}
+
+func TestMediaPHashBucketScopeSQLKeepsTenantAccountPairs(t *testing.T) {
+	condition, args := mediaPHashBucketScopeSQL("b", []mediaPHashBucketScopePart{
+		{TenantId: 3, AccountIds: []int64{9, 8}},
+		{TenantId: 2, AccountIds: []int64{5}},
+	})
+	want := "b.tenant_id = ? AND b.account_id IN (?) OR b.tenant_id = ? AND b.account_id IN (?,?)"
+	if condition != want {
+		t.Fatalf("condition = %q, want %q", condition, want)
+	}
+	wantArgs := []any{int64(2), int64(5), int64(3), int64(8), int64(9)}
+	if len(args) != len(wantArgs) {
+		t.Fatalf("args = %#v, want %#v", args, wantArgs)
+	}
+	for index := range args {
+		if args[index] != wantArgs[index] {
+			t.Fatalf("args = %#v, want %#v", args, wantArgs)
+		}
+	}
+}
+
+func TestMediaPHashBucketCandidatesRejectProfileOnlyScope(t *testing.T) {
+	rows, err := mediaPHashBucketCandidateRowsWithScopesUncached(context.Background(), "0123456789abcdef", 8, nil, []int64{9}, "image", 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("profile-only query must be rejected: %#v", rows)
 	}
 }
 

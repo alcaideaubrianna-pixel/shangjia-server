@@ -3,37 +3,39 @@ package sys
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/util/gconv"
 
+	publishmodel "hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 )
 
 const profileImageSearchResultTTL = 30 * time.Second
 
-func (s *sSysPublish) profileImageSearchNotesByProfileIds(ctx context.Context, profileIds []int64, tenantId int64, filterAccountIds []int64, viewer *sysin.AccountModel, permission string) ([]*sysin.NoteModel, error) {
+func (s *sSysPublish) profileImageSearchNotesByScope(ctx context.Context, profileIds []int64, scope *publishmodel.MediaSearchScope, viewer *sysin.AccountModel, permission string) ([]*sysin.NoteModel, error) {
 	profileIds = uniqueIds(profileIds)
-	if len(profileIds) == 0 {
+	if len(profileIds) == 0 || scope == nil || len(scope.AccountIds) == 0 {
 		return []*sysin.NoteModel{}, nil
 	}
-	cacheKey := profileImageSearchResultCacheKey(ctx, profileIds, tenantId, filterAccountIds, viewer, permission)
+	cacheKey := profileImageSearchResultCacheKey(ctx, profileIds, scope, viewer, permission)
 	if cached, err := cache.Instance().Get(ctx, cacheKey); err == nil && !cached.IsNil() {
 		var list []*sysin.NoteModel
 		if scanErr := cached.Scan(&list); scanErr == nil && list != nil {
 			return list, nil
 		}
 	}
-	base, err := s.profileBaseModel(ctx, tenantId, 0)
+	base, err := s.profileBaseModel(ctx, mediaSearchScopeTenantId(scope), 0)
 	if err != nil {
 		return nil, err
 	}
-	if len(filterAccountIds) > 0 {
-		base = base.WhereIn("ps.account_id", uniqueIds(filterAccountIds))
+	if scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("ps", scope.Partitions); scopeSQL != "" {
+		base = base.Where("("+scopeSQL+")", scopeArgs...)
+	} else {
+		return []*sysin.NoteModel{}, nil
 	}
 	rows, err := base.Fields(profileImageSearchListFields()).WhereIn("p.id", profileIds).All()
 	if err != nil {
@@ -88,16 +90,13 @@ func profileImageSearchListFields() string {
 	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,ps.tenant_id,ps.account_id,a.nickname AS account_name,a.nickname,a.username,COALESCE(ps.publish_task_status,'') AS task_status"
 }
 
-func profileImageSearchResultCacheKey(ctx context.Context, profileIds []int64, tenantId int64, filterAccountIds []int64, viewer *sysin.AccountModel, permission string) string {
-	ids := append([]int64(nil), filterAccountIds...)
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+func profileImageSearchResultCacheKey(ctx context.Context, profileIds []int64, scope *publishmodel.MediaSearchScope, viewer *sysin.AccountModel, permission string) string {
 	parts := []string{
-		"youban_publish:profile_image_search:result:v1",
-		fmt.Sprintf("tenant=%d", tenantId),
+		"youban_publish:profile_image_search:result:v2",
 		fmt.Sprintf("permission=%s", strings.TrimSpace(permission)),
-		fmt.Sprintf("version=%s", mediaPHashBucketVersion(ctx, tenantId, ids)),
+		fmt.Sprintf("scope=%s", mediaSearchScopeCacheKey(scope)),
+		fmt.Sprintf("version=%s", mediaSearchScopeVersion(ctx, scope)),
 		fmt.Sprintf("profiles=%v", profileIds),
-		fmt.Sprintf("accounts=%v", uniqueIds(ids)),
 	}
 	if viewer != nil {
 		parts = append(parts, fmt.Sprintf("viewer=%d", viewer.Id))

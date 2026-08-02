@@ -13,33 +13,30 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
+	publishmodel "hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 )
 
 type mediaPHashBucketCandidateRow struct {
-	AccountId  int64  `json:"accountId" orm:"account_id"`
-	BucketHits int    `json:"bucketHits" orm:"bucket_hits"`
-	HashValue  string `json:"hashValue" orm:"hash_value"`
-	MediaId    int64  `json:"mediaId" orm:"media_id"`
-	MediaType  string `json:"mediaType" orm:"media_type"`
-	ProfileId  int64  `json:"profileId" orm:"profile_id"`
-	TenantId   int64  `json:"tenantId" orm:"tenant_id"`
+	AccountId  int64  `orm:"account_id"`
+	BucketHits int    `orm:"bucket_hits"`
+	HashValue  string `orm:"hash_value"`
+	MediaId    int64  `orm:"media_id"`
+	MediaType  string `orm:"media_type"`
+	ProfileId  int64  `orm:"profile_id"`
+	TenantId   int64  `orm:"tenant_id"`
 }
 
-func (s *sSysPublish) findSimilarProfileMatchesByPHashBucket(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, accountIds []int64) ([]publishProfilePHashDistance, int, error) {
-	accountIds = uniqueIds(accountIds)
-	if len(accountIds) == 0 && in.AccountId > 0 {
-		accountIds = []int64{in.AccountId}
-	}
-	candidateProfileIds, err := s.profileImageSearchCandidateProfileIds(ctx, &in.ProfileListInp, accountIds)
+func (s *sSysPublish) findSimilarProfileMatchesByPHashBucket(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope) ([]publishProfilePHashDistance, int, error) {
+	candidateProfileIds, err := s.profileImageSearchCandidateProfileIds(ctx, &in.ProfileListInp, scope)
 	if err != nil {
 		return nil, 0, err
 	}
 	if candidateProfileIds != nil && len(candidateProfileIds) == 0 {
 		return []publishProfilePHashDistance{}, 0, nil
 	}
-	items, err := s.cachedProfilePHashSearchCandidates(ctx, queryHash, in, accountIds, candidateProfileIds)
+	items, err := s.cachedProfilePHashSearchCandidates(ctx, queryHash, in, scope, candidateProfileIds)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -64,26 +61,26 @@ func (s *sSysPublish) findSimilarProfileMatchesByPHashBucket(ctx context.Context
 	return items[start:end], totalCount, nil
 }
 
-func (s *sSysPublish) cachedProfilePHashSearchCandidates(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, accountIds []int64, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
-	return s.cachedProfileFingerprintSearchCandidates(ctx, &mediaFingerprint{PHash: queryHash}, in, accountIds, candidateProfileIds)
+func (s *sSysPublish) cachedProfilePHashSearchCandidates(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
+	return s.cachedProfileFingerprintSearchCandidates(ctx, &mediaFingerprint{PHash: queryHash}, in, scope, candidateProfileIds)
 }
 
-func (s *sSysPublish) cachedProfileFingerprintSearchCandidates(ctx context.Context, fingerprint *mediaFingerprint, in *sysin.ProfileImageSearchInp, accountIds []int64, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
-	if fingerprint == nil {
+func (s *sSysPublish) cachedProfileFingerprintSearchCandidates(ctx context.Context, fingerprint *mediaFingerprint, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
+	if fingerprint == nil || scope == nil || len(scope.Partitions) == 0 {
 		return []publishProfilePHashDistance{}, nil
 	}
 	queryHash := fingerprint.PHash
 	if queryHash == nil {
 		return []publishProfilePHashDistance{}, nil
 	}
-	cacheKey := mediaPHashSearchCacheKey(ctx, queryHash.GetHash(), fingerprint.MD5, in, accountIds, candidateProfileIds)
+	cacheKey := mediaPHashSearchCacheKey(ctx, queryHash.GetHash(), fingerprint.MD5, in, scope, candidateProfileIds)
 	if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
 		var cached []publishProfilePHashDistance
 		if scanErr := value.Scan(&cached); scanErr == nil {
 			return cached, nil
 		}
 	}
-	items, err := s.profileFingerprintSearchCandidatesExactFirst(ctx, fingerprint, in, accountIds, candidateProfileIds)
+	items, err := s.profileFingerprintSearchCandidatesExactFirst(ctx, fingerprint, in, scope, candidateProfileIds)
 	if err != nil {
 		return nil, err
 	}
@@ -91,8 +88,8 @@ func (s *sSysPublish) cachedProfileFingerprintSearchCandidates(ctx context.Conte
 	return items, nil
 }
 
-func (s *sSysPublish) findSimilarProfileMatchesByFingerprint(ctx context.Context, fingerprint *mediaFingerprint, in *sysin.ProfileImageSearchInp, accountIds []int64) ([]publishProfilePHashDistance, int, error) {
-	items, err := s.cachedProfileFingerprintSearchCandidates(ctx, fingerprint, in, accountIds, nil)
+func (s *sSysPublish) findSimilarProfileMatchesByFingerprint(ctx context.Context, fingerprint *mediaFingerprint, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope) ([]publishProfilePHashDistance, int, error) {
+	items, err := s.cachedProfileFingerprintSearchCandidates(ctx, fingerprint, in, scope, nil)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -117,16 +114,16 @@ func (s *sSysPublish) findSimilarProfileMatchesByFingerprint(ctx context.Context
 // profilePHashSearchCandidatesExactFirst follows the same precision-first
 // strategy as the source search service: approximate matches are only useful
 // when the permission-scoped exact pHash search has no result.
-func (s *sSysPublish) profilePHashSearchCandidatesExactFirst(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, accountIds []int64, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
-	return s.profileFingerprintSearchCandidatesExactFirst(ctx, &mediaFingerprint{PHash: queryHash}, in, accountIds, candidateProfileIds)
+func (s *sSysPublish) profilePHashSearchCandidatesExactFirst(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
+	return s.profileFingerprintSearchCandidatesExactFirst(ctx, &mediaFingerprint{PHash: queryHash}, in, scope, candidateProfileIds)
 }
 
-func (s *sSysPublish) profileFingerprintSearchCandidatesExactFirst(ctx context.Context, fingerprint *mediaFingerprint, in *sysin.ProfileImageSearchInp, accountIds []int64, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
+func (s *sSysPublish) profileFingerprintSearchCandidatesExactFirst(ctx context.Context, fingerprint *mediaFingerprint, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
 	if fingerprint == nil || fingerprint.PHash == nil {
 		return []publishProfilePHashDistance{}, nil
 	}
 	if fingerprint.MD5 != "" {
-		exact, err := mediaMD5CandidateMatches(ctx, fingerprint.MD5, in, accountIds, candidateProfileIds)
+		exact, err := mediaMD5CandidateMatches(ctx, fingerprint.MD5, scope, candidateProfileIds)
 		if err != nil {
 			return nil, err
 		}
@@ -137,19 +134,19 @@ func (s *sSysPublish) profileFingerprintSearchCandidatesExactFirst(ctx context.C
 	queryHash := fingerprint.PHash
 	exactInput := *in
 	exactInput.Threshold = 0
-	exact, err := s.profilePHashSearchCandidates(ctx, queryHash, &exactInput, accountIds, candidateProfileIds)
+	exact, err := s.profilePHashSearchCandidates(ctx, queryHash, &exactInput, scope, candidateProfileIds)
 	if err != nil {
 		return nil, err
 	}
 	if len(exact) > 0 {
 		return exact, nil
 	}
-	return s.profilePHashSearchCandidates(ctx, queryHash, in, accountIds, candidateProfileIds)
+	return s.profilePHashSearchCandidates(ctx, queryHash, in, scope, candidateProfileIds)
 }
 
-func mediaMD5CandidateMatches(ctx context.Context, md5Value string, in *sysin.ProfileImageSearchInp, accountIds []int64, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
+func mediaMD5CandidateMatches(ctx context.Context, md5Value string, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
 	md5Value = strings.TrimSpace(strings.ToLower(md5Value))
-	if md5Value == "" {
+	if md5Value == "" || scope == nil || len(scope.Partitions) == 0 {
 		return []publishProfilePHashDistance{}, nil
 	}
 	mod := g.DB().Model(publishMediaTable+" m").Safe().Ctx(ctx).
@@ -157,8 +154,10 @@ func mediaMD5CandidateMatches(ctx context.Context, md5Value string, in *sysin.Pr
 		Where("m.md5", md5Value).
 		Where("m.media_type IN ('image','video')").
 		WhereNull("m.deleted_at")
-	if scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("m", []mediaPHashBucketScopePart{{TenantId: in.TenantId, AccountIds: accountIds}}); scopeSQL != "" {
+	if scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("m", scope.Partitions); scopeSQL != "" {
 		mod = mod.Where("("+scopeSQL+")", scopeArgs...)
+	} else {
+		return []publishProfilePHashDistance{}, nil
 	}
 	if len(candidateProfileIds) > 0 {
 		mod = mod.WhereIn("m.profile_id", uniqueIds(candidateProfileIds))
@@ -176,8 +175,11 @@ func mediaMD5CandidateMatches(ctx context.Context, md5Value string, in *sysin.Pr
 	return mediaPHashDeduplicateProfiles(items), nil
 }
 
-func (s *sSysPublish) profilePHashSearchCandidates(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, accountIds []int64, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
-	rows, err := mediaPHashBucketCandidateRows(ctx, mediaPHashNormalizedValue(queryHash), in.Threshold, in.TenantId, accountIds, candidateProfileIds, "image", 0)
+func (s *sSysPublish) profilePHashSearchCandidates(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
+	if scope == nil || len(scope.Partitions) == 0 {
+		return []publishProfilePHashDistance{}, nil
+	}
+	rows, err := mediaPHashBucketCandidateRowsWithScopes(ctx, mediaPHashNormalizedValue(queryHash), in.Threshold, scope.Partitions, candidateProfileIds, "image", 0)
 	if err != nil {
 		return nil, err
 	}
@@ -199,10 +201,6 @@ func (s *sSysPublish) profilePHashSearchCandidates(ctx context.Context, queryHas
 		})
 	}
 	return mediaPHashDeduplicateProfiles(items), nil
-}
-
-func (s *sSysPublish) mediaPHashBucketCandidateRows(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, accountIds []int64, candidateProfileIds []int64) ([]mediaPHashBucketCandidateRow, error) {
-	return mediaPHashBucketCandidateRows(ctx, mediaPHashNormalizedValue(queryHash), in.Threshold, in.TenantId, accountIds, candidateProfileIds, "image", 0)
 }
 
 func mediaPHashDeduplicateProfiles(items []publishProfilePHashDistance) []publishProfilePHashDistance {
@@ -238,20 +236,18 @@ func mediaPHashMinEqualNibbles(threshold int) int {
 	return 16 - threshold
 }
 
-func mediaPHashSearchCacheKey(ctx context.Context, queryHash uint64, md5Value string, in *sysin.ProfileImageSearchInp, accountIds []int64, candidateProfileIds []int64) string {
+func mediaPHashSearchCacheKey(ctx context.Context, queryHash uint64, md5Value string, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) string {
 	parts := []string{
-		fmt.Sprintf("youban_publish:profile_image_search:v7:%d", queryHash),
+		fmt.Sprintf("youban_publish:profile_image_search:v8:%d", queryHash),
 		"md5=" + strings.TrimSpace(strings.ToLower(md5Value)),
-		fmt.Sprintf("tenant=%d", in.TenantId),
-		fmt.Sprintf("account=%d", in.AccountId),
 		fmt.Sprintf("threshold=%d", in.Threshold),
-		fmt.Sprintf("version=%s", mediaPHashBucketVersion(ctx, in.TenantId, accountIds)),
-	}
-	if len(accountIds) > 0 {
-		parts = append(parts, fmt.Sprintf("accounts=%v", uniqueIds(accountIds)))
+		fmt.Sprintf("scope=%s", mediaSearchScopeCacheKey(scope)),
+		fmt.Sprintf("version=%s", mediaSearchScopeVersion(ctx, scope)),
 	}
 	if len(candidateProfileIds) > 0 {
-		parts = append(parts, fmt.Sprintf("profiles=%v", uniqueIds(candidateProfileIds)))
+		ids := uniqueIds(candidateProfileIds)
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		parts = append(parts, fmt.Sprintf("profiles=%v", ids))
 	}
 	if strings.TrimSpace(in.Keyword) != "" {
 		parts = append(parts, "keyword="+strings.TrimSpace(in.Keyword))
