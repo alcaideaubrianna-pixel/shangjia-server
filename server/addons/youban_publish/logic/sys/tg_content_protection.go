@@ -18,6 +18,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/corona10/goimagehash"
 	"github.com/corona10/goimagehash/transforms"
@@ -438,7 +440,45 @@ func maxTelegramAntiScanInt(left int, right int) int {
 	return right
 }
 
-var telegramObfuscationNumberPattern = regexp.MustCompile(`(身高|体重)([^0-9]{0,6})([0-9]{3})(?:\.[0-9]+)?`)
+var telegramObfuscationNumberPattern = regexp.MustCompile(`(身高|体重)([^0-9]{0,6})([0-9]{2,3}(?:\.[0-9]+)?)([^0-9]|$)`)
+
+var telegramObfuscationSynonymGroups = [][]string{
+	{"没问题", "没毛病", "可以", "OK", "ok", "可", "行", "能"},
+	{"同意", "赞同", "认可", "接受", "支持"},
+	{"是的", "没错", "确实", "是", "对"},
+	{"好的", "不错", "好"},
+	{"没办法", "不可以", "不行", "不可", "不能"},
+	{"不同意", "不赞同", "不认可", "不接受", "不支持", "拒绝"},
+	{"不是", "并非", "否"},
+	{"不合适", "不建议", "不好", "不妥"},
+}
+
+var telegramObfuscationSynonymTerms = func() []string {
+	terms := make([]string, 0)
+	for _, group := range telegramObfuscationSynonymGroups {
+		terms = append(terms, group...)
+	}
+	sort.SliceStable(terms, func(left int, right int) bool {
+		return utf8.RuneCountInString(terms[left]) > utf8.RuneCountInString(terms[right])
+	})
+	return terms
+}()
+
+var telegramObfuscationSynonymAlternatives = func() map[string][]string {
+	result := make(map[string][]string)
+	for _, group := range telegramObfuscationSynonymGroups {
+		for _, term := range group {
+			alternatives := make([]string, 0, len(group)-1)
+			for _, candidate := range group {
+				if candidate != term {
+					alternatives = append(alternatives, candidate)
+				}
+			}
+			result[term] = alternatives
+		}
+	}
+	return result
+}()
 
 func obfuscateTelegramCaption(caption string, seed int64) string {
 	if strings.TrimSpace(caption) == "" {
@@ -450,8 +490,9 @@ func obfuscateTelegramCaption(caption string, seed int64) string {
 		return caption
 	}
 	random := rand.New(rand.NewSource(seed))
+	synonymReplacements := make(map[string]string)
 	for _, node := range nodes {
-		obfuscateTelegramTextNodes(node, random)
+		obfuscateTelegramTextNodes(node, random, synonymReplacements)
 	}
 	var builder bytes.Buffer
 	for _, node := range nodes {
@@ -466,33 +507,107 @@ func obfuscateTelegramCaption(caption string, seed int64) string {
 	return builder.String()
 }
 
-func obfuscateTelegramTextNodes(node *xhtml.Node, random *rand.Rand) {
+func obfuscateTelegramTextNodes(node *xhtml.Node, random *rand.Rand, synonymReplacements map[string]string) {
 	if node == nil {
 		return
 	}
 	if node.Type == xhtml.TextNode {
-		node.Data = obfuscateTelegramText(node.Data, random)
+		node.Data = obfuscateTelegramText(node.Data, random, synonymReplacements)
 	}
 	for child := node.FirstChild; child != nil; child = child.NextSibling {
-		obfuscateTelegramTextNodes(child, random)
+		obfuscateTelegramTextNodes(child, random, synonymReplacements)
 	}
 }
 
-func obfuscateTelegramText(value string, random *rand.Rand) string {
+func obfuscateTelegramText(value string, random *rand.Rand, synonymReplacements map[string]string) string {
 	value = telegramObfuscationNumberPattern.ReplaceAllStringFunc(value, func(match string) string {
 		parts := telegramObfuscationNumberPattern.FindStringSubmatch(match)
-		if len(parts) != 4 {
+		if len(parts) != 5 {
 			return match
 		}
 		number, err := strconv.ParseFloat(parts[3], 64)
 		if err != nil {
 			return match
 		}
-		delta := 0.1 + random.Float64()*0.9
+		delta := 2
 		if random.Intn(2) == 0 {
 			delta = -delta
 		}
-		return parts[1] + parts[2] + strconv.FormatFloat(number+delta, 'f', 1, 64)
+		result := int(math.Round(number)) + delta
+		minimum, maximum := telegramObfuscationNumberBounds(parts[1])
+		if result < minimum || result > maximum {
+			result = int(math.Round(number)) - delta
+		}
+		return parts[1] + parts[2] + strconv.Itoa(result) + parts[4]
 	})
-	return value
+	return obfuscateTelegramSynonyms(value, random, synonymReplacements)
+}
+
+func telegramObfuscationNumberBounds(label string) (int, int) {
+	if label == "身高" {
+		return 120, 220
+	}
+	return 30, 200
+}
+
+func obfuscateTelegramSynonyms(value string, random *rand.Rand, replacements map[string]string) string {
+	if value == "" {
+		return value
+	}
+	runes := []rune(value)
+	var builder strings.Builder
+	builder.Grow(len(value))
+	for index := 0; index < len(runes); {
+		term, termLength := telegramObfuscationSynonymAt(runes, index)
+		if term == "" || !telegramObfuscationTermBounded(runes, index, termLength) {
+			builder.WriteRune(runes[index])
+			index++
+			continue
+		}
+		replacement := replacements[term]
+		if replacement == "" {
+			alternatives := telegramObfuscationSynonymAlternatives[term]
+			if len(alternatives) == 0 {
+				builder.WriteString(term)
+				index += termLength
+				continue
+			}
+			replacement = alternatives[random.Intn(len(alternatives))]
+			replacements[term] = replacement
+		}
+		builder.WriteString(replacement)
+		index += termLength
+	}
+	return builder.String()
+}
+
+func telegramObfuscationSynonymAt(value []rune, index int) (string, int) {
+	for _, term := range telegramObfuscationSynonymTerms {
+		termRunes := []rune(term)
+		if index+len(termRunes) > len(value) {
+			continue
+		}
+		matched := true
+		for offset, termRune := range termRunes {
+			if value[index+offset] != termRune {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return term, len(termRunes)
+		}
+	}
+	return "", 0
+}
+
+func telegramObfuscationTermBounded(value []rune, index int, length int) bool {
+	leftBounded := index == 0 || telegramObfuscationBoundaryRune(value[index-1])
+	rightIndex := index + length
+	rightBounded := rightIndex >= len(value) || telegramObfuscationBoundaryRune(value[rightIndex])
+	return leftBounded && rightBounded
+}
+
+func telegramObfuscationBoundaryRune(value rune) bool {
+	return unicode.IsSpace(value) || unicode.IsPunct(value) || unicode.IsSymbol(value)
 }
