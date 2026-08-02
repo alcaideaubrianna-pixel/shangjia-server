@@ -324,6 +324,37 @@ func (s *sSysBot) replyWithMarkup(ctx context.Context, botId int64, chatId strin
 	return err
 }
 
+func (s *sSysBot) replyPhoto(ctx context.Context, botId int64, chatId string, imageURL string) error {
+	tokenText := ""
+	if botId > 0 {
+		if row, err := s.botById(ctx, botId); err == nil && row != nil {
+			tokenText = row.BotToken
+		}
+	}
+	if tokenText == "" {
+		if row, err := s.officialBot(ctx); err == nil && row != nil {
+			tokenText = row.BotToken
+		}
+	}
+	if tokenText == "" || strings.TrimSpace(imageURL) == "" {
+		return nil
+	}
+	tgBot, err := s.telegramBot(ctx, tokenText)
+	if err != nil {
+		return err
+	}
+	callCtx, cancel := telegramAPICtx()
+	defer cancel()
+	_, err = tgBot.SendPhoto(callCtx, &tgbot.SendPhotoParams{
+		ChatID: chatId,
+		Photo:  models.InputFile(&models.InputFileString{Data: imageURL}),
+	})
+	if err != nil && botId > 0 && shouldMarkBotOffline(err) {
+		_ = s.markBotOffline(ctx, botId, err)
+	}
+	return err
+}
+
 func (s *sSysBot) Notify(ctx context.Context, in *sysin.NotifyInp) error {
 	if in == nil {
 		return gerror.New("消息内容不能为空")

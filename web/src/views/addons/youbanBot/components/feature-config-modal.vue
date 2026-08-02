@@ -80,6 +80,21 @@
             MB；保存后会自动优化超大图片并生成方形 Inline 缩略图。
           </n-text>
         </n-space>
+        <n-space v-else-if="item.component === 'image_upload_general'" vertical class="w-full">
+          <UploadImage
+            v-model:value="form.configValues[item.field]"
+            :max-number="1"
+            accept=".jpg,.jpeg,.png,.webp"
+            :max-size="10"
+            :allowed-mime-types="['image/jpeg', 'image/jpg', 'image/png', 'image/webp']"
+            :help-text="item.placeholder"
+          />
+          <n-input
+            v-model:value="form.configValues[item.field]"
+            clearable
+            placeholder="也可直接填写 Telegram 可访问的图片外链"
+          />
+        </n-space>
         <TelegramRichEditor
           v-else-if="item.component === 'telegram_rich_text'"
           v-model:value="form.configValues[item.field]"

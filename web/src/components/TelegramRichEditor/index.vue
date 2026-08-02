@@ -1,5 +1,5 @@
 <template>
-  <div class="telegram-rich-editor" :style="editorStyle">
+  <div ref="containerRef" class="telegram-rich-editor" :style="editorStyle">
     <QuillEditor
       ref="editorRef"
       v-model:content="content"
@@ -14,15 +14,18 @@
 </template>
 
 <script lang="ts" setup>
-  import { computed, ref, watch } from 'vue';
+  import { computed, onBeforeUnmount, ref, watch } from 'vue';
   import { useThemeVars } from 'naive-ui';
   import { QuillEditor } from '@vueup/vue-quill';
   import '@vueup/vue-quill/dist/vue-quill.snow.css';
 
   const props = withDefaults(defineProps<{ value?: string }>(), { value: '' });
   const emit = defineEmits<{ (event: 'update:value', value: string): void }>();
+  const containerRef = ref<HTMLElement>();
   const editorRef = ref<any>();
   const content = ref('');
+  const isComposing = ref(false);
+  let editorRoot: HTMLElement | null = null;
   const themeVars = useThemeVars();
   const editorStyle = computed<Record<string, string>>(() => ({
     '--telegram-editor-border': themeVars.value.borderColor,
@@ -35,17 +38,28 @@
   }));
   const toolbar = [
     ['bold', 'italic', 'underline', 'strike'],
-    ['blockquote', 'code-block'],
+    ['blockquote'],
+    ['code', 'code-block'],
     ['link'],
     ['clean'],
   ];
-  const formats = ['bold', 'italic', 'underline', 'strike', 'blockquote', 'code-block', 'link'];
+  const formats = [
+    'bold',
+    'italic',
+    'underline',
+    'strike',
+    'blockquote',
+    'code',
+    'code-block',
+    'link',
+  ];
 
   watch(
     () => props.value,
     (value) => {
       const next = sanitizeTelegramHtml(value || '');
-      if (next !== content.value) {
+      const current = sanitizeTelegramHtml(editorRef.value?.getHTML?.() || content.value || '');
+      if (!isComposing.value && next !== current) {
         content.value = next;
         editorRef.value?.setHTML(next);
       }
@@ -53,15 +67,39 @@
     { immediate: true }
   );
 
-  function readyQuill() {
+  function readyQuill(quill?: any) {
     editorRef.value?.setHTML(sanitizeTelegramHtml(props.value || ''));
+    editorRoot = quill?.root || editorRef.value?.getQuill?.()?.root || null;
+    editorRoot?.addEventListener('compositionstart', handleCompositionStart);
+    editorRoot?.addEventListener('compositionend', handleCompositionEnd);
+    containerRef.value?.querySelector('.ql-code')?.setAttribute('title', '行内代码（兑换码）');
+    containerRef.value?.querySelector('.ql-code-block')?.setAttribute('title', '整段代码块');
   }
 
   function updateContent() {
+    if (isComposing.value) return;
+    syncContent();
+  }
+
+  function syncContent() {
     const value = sanitizeTelegramHtml(editorRef.value?.getHTML?.() || content.value || '');
-    content.value = value;
     emit('update:value', value);
   }
+
+  function handleCompositionStart() {
+    isComposing.value = true;
+  }
+
+  function handleCompositionEnd() {
+    isComposing.value = false;
+    window.setTimeout(syncContent, 0);
+  }
+
+  onBeforeUnmount(() => {
+    editorRoot?.removeEventListener('compositionstart', handleCompositionStart);
+    editorRoot?.removeEventListener('compositionend', handleCompositionEnd);
+    editorRoot = null;
+  });
 
   function sanitizeTelegramHtml(raw: string) {
     const doc = new DOMParser().parseFromString(raw || '', 'text/html');
@@ -185,6 +223,18 @@
     background: var(--telegram-editor-hover);
   }
 
+  :deep(.ql-toolbar.ql-snow button.ql-code svg) {
+    display: none;
+  }
+
+  :deep(.ql-toolbar.ql-snow button.ql-code::after) {
+    content: '<>';
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 20px;
+  }
+
   :deep(.ql-container.ql-snow) {
     min-height: 210px;
     color: var(--telegram-editor-text);
@@ -209,6 +259,15 @@
   :deep(.ql-editor blockquote) {
     padding-left: 12px;
     border-left: 3px solid var(--telegram-editor-primary);
+  }
+
+  :deep(.ql-editor code) {
+    padding: 2px 6px;
+    color: var(--telegram-editor-primary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.92em;
+    background: var(--telegram-editor-hover);
+    border-radius: 4px;
   }
 
   :deep(.ql-editor pre.ql-syntax) {
