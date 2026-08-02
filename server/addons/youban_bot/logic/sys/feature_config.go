@@ -108,7 +108,12 @@ func (s *sSysBot) AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp
 		return gerror.Wrap(err, "保存Bot插件失败")
 	}
 	s.clearFeatureCache()
-	g.Log().Infof(ctx, "Bot插件配置已刷新 featureKey:%s", featureKey)
+	if featureKey == inlinePromotionFeatureKey {
+		config := featureConfigValues(in.ConfigJson)
+		g.Log().Infof(ctx, "Inline宣传配置已保存 title:%s messageLength:%d target:%s", inlinePromotionConfigString(config, "title"), len(inlinePromotionConfigString(config, "messageText")), inlinePromotionConfigString(config, "targetFeatureKey"))
+	} else {
+		g.Log().Infof(ctx, "Bot插件配置已刷新 featureKey:%s", featureKey)
+	}
 	if err = s.syncAllTelegramBotMenus(ctx); err != nil {
 		g.Log().Warningf(ctx, "同步Telegram菜单失败 err:%+v", err)
 	}

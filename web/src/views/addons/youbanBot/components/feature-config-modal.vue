@@ -9,6 +9,14 @@
     @positive-click="emit('save')"
   >
     <n-form :model="form" label-placement="left" label-width="110" class="feature-config-form">
+      <n-alert
+        v-if="form.featureKey === 'inline_promotion'"
+        type="info"
+        title="Inline 展示说明"
+        class="mb-4"
+      >
+        候选标题和摘要只显示在输入 @机器人 后的候选列表；选中后发送到群聊的内容由“发送文案”决定。
+      </n-alert>
       <n-form-item label="插件 Key"
         ><n-input v-model:value="form.featureKey" disabled
       /></n-form-item>
@@ -105,12 +113,6 @@
           :autosize="item.component === 'textarea' ? { minRows: 3, maxRows: 8 } : undefined"
         />
       </n-form-item>
-      <n-form-item label="配置 JSON"
-        ><n-input
-          v-model:value="form.configJson"
-          type="textarea"
-          :autosize="{ minRows: 4, maxRows: 12 }"
-      /></n-form-item>
       <n-form-item label="说明"
         ><n-input
           v-model:value="form.description"

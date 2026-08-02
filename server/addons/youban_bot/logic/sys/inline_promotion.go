@@ -8,6 +8,7 @@ import (
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/frame/g"
 
 	"hotgo/addons/youban_bot/model/input/sysin"
 )
@@ -24,9 +25,9 @@ func (inlinePromotionFeature) Description() string { return "Inline 宣传" }
 func (inlinePromotionFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
 	return []*sysin.FeatureConfigSchema{
 		{Field: "menuVisible", Label: "菜单可见", Component: "hidden", Default: 0},
-		{Field: "title", Label: "宣传标题", Component: "input", Default: "悦伴资料管理机器人", Placeholder: "显示在 Inline 结果列表中的标题"},
-		{Field: "description", Label: "宣传摘要", Component: "textarea", Default: "快速管理、发布和推广您的资料", Placeholder: "显示在宣传标题下方的摘要"},
-		{Field: "messageText", Label: "宣传文案", Component: "telegram_rich_text", Default: "<b>悦伴资料管理机器人</b>\n\n快速管理、发布和推广您的资料。\n\n点击上方按钮进入机器人。", Placeholder: "用户选择宣传结果后发送到聊天中的内容"},
+		{Field: "title", Label: "候选标题", Component: "input", Default: "悦伴资料管理机器人", Placeholder: "仅显示在输入 @机器人 后的 Inline 候选列表"},
+		{Field: "description", Label: "候选摘要", Component: "textarea", Default: "快速管理、发布和推广您的资料", Placeholder: "仅显示在 Inline 候选标题下方"},
+		{Field: "messageText", Label: "发送文案", Component: "telegram_rich_text", Default: "<b>悦伴资料管理机器人</b>\n\n快速管理、发布和推广您的资料。\n\n点击上方按钮进入机器人。", Placeholder: "用户选中候选结果后真正发送到群聊的内容"},
 		{Field: "imageUrl", Label: "宣传图片", Component: "image_upload", Default: "", Placeholder: "支持上传或填写 Telegram 可访问的 JPEG 外链"},
 		{Field: "buttonText", Label: "打开按钮文案", Component: "input", Default: "打开机器人", Placeholder: "Inline 结果顶部按钮文案"},
 		{Field: "targetFeatureKey", Label: "点击后执行", Component: "select", Default: "start", Placeholder: "选择打开机器人后执行的插件命令", Options: inlinePromotionTargetFeatureOptions()},
@@ -60,6 +61,7 @@ func (s *sSysBot) answerInlinePromotion(ctx context.Context, botId int64, query 
 		title := defaultInlinePromotionValue(s.featureConfigValue(ctx, inlinePromotionFeatureKey, "title"), "悦伴资料管理机器人")
 		description := defaultInlinePromotionValue(s.featureConfigValue(ctx, inlinePromotionFeatureKey, "description"), "快速管理、发布和推广您的资料")
 		messageText := sanitizeTelegramHTML(defaultInlinePromotionValue(s.featureConfigValue(ctx, inlinePromotionFeatureKey, "messageText"), "<b>悦伴资料管理机器人</b>\n\n快速管理、发布和推广您的资料。"))
+		g.Log().Debugf(ctx, "响应Inline宣传 botId:%d username:%s title:%s messageLength:%d", botId, botRow.BotUsername, title, len(messageText))
 		buttonText := defaultInlinePromotionValue(s.featureConfigValue(ctx, inlinePromotionFeatureKey, "buttonText"), "打开机器人")
 		startParameter := normalizeInlinePromotionStartParameter(s.featureConfigValue(ctx, inlinePromotionFeatureKey, "startParameter"))
 		params.Button = &models.InlineQueryResultsButton{Text: buttonText, StartParameter: startParameter}
