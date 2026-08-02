@@ -51,10 +51,20 @@ func TestMediaPHashBucketScopeSQLKeepsTenantScopeWithoutAccounts(t *testing.T) {
 	}
 }
 
-func TestMediaPHashBucketScopeSQLDropsUnscopedPartitions(t *testing.T) {
+func TestMediaPHashBucketScopeSQLKeepsAccountOnlyScope(t *testing.T) {
 	condition, args := mediaPHashBucketScopeSQL("b", []mediaPHashBucketScopePart{{AccountIds: []int64{9}}})
+	if condition != "b.account_id IN (?)" {
+		t.Fatalf("unexpected condition: %s", condition)
+	}
+	if len(args) != 1 || args[0] != int64(9) {
+		t.Fatalf("unexpected args: %#v", args)
+	}
+}
+
+func TestMediaPHashBucketScopeSQLDropsEmptyScope(t *testing.T) {
+	condition, args := mediaPHashBucketScopeSQL("b", []mediaPHashBucketScopePart{{}})
 	if condition != "" || len(args) != 0 {
-		t.Fatalf("unscoped partition must be rejected: condition=%q args=%#v", condition, args)
+		t.Fatalf("empty scope must be rejected: condition=%q args=%#v", condition, args)
 	}
 }
 

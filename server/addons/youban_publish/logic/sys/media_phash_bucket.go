@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	mediaPHashBucketCacheVersionKey  = "youban_publish:media_phash_bucket:version:v3"
+	mediaPHashBucketCacheVersionKey  = "youban_publish:media_phash_bucket:version:v4"
 	mediaPHashBucketResultTTL        = 365 * 24 * time.Hour
 	mediaPHashBucketMaxCandidates    = 50000
 	mediaPHashBucketMaxScopedIds     = 32
@@ -139,7 +139,10 @@ type mediaPHashBucketScopePart struct {
 
 func mediaPHashBucketVersion(ctx context.Context, tenantId int64, accountIds []int64) string {
 	ids := uniqueIds(accountIds)
-	if tenantId <= 0 || len(ids) == 0 || len(ids) > mediaPHashBucketMaxScopedIds {
+	if tenantId <= 0 {
+		return mediaPHashBucketVersionValue(ctx, mediaPHashBucketGlobalVersionKey())
+	}
+	if len(ids) == 0 || len(ids) > mediaPHashBucketMaxScopedIds {
 		return mediaPHashBucketVersionValue(ctx, mediaPHashBucketTenantVersionKey(tenantId))
 	}
 	parts := make([]string, 0, len(ids))
@@ -147,6 +150,10 @@ func mediaPHashBucketVersion(ctx context.Context, tenantId int64, accountIds []i
 		parts = append(parts, fmt.Sprintf("%d=%s", accountId, mediaPHashBucketVersionValue(ctx, mediaPHashBucketAccountVersionKey(tenantId, accountId))))
 	}
 	return mediaPHashHashKey(strings.Join(parts, ","))
+}
+
+func mediaPHashBucketGlobalVersionKey() string {
+	return mediaPHashBucketCacheVersionKey + ":global"
 }
 
 func mediaPHashBucketVersionValue(ctx context.Context, key string) string {
@@ -167,6 +174,9 @@ func mediaPHashBucketAccountVersionKey(tenantId int64, accountId int64) string {
 
 func bumpMediaPHashBucketVersion(ctx context.Context, tenantId int64, accountId int64) error {
 	version := gtime.Now().UnixNano()
+	if err := cache.Instance().Set(ctx, mediaPHashBucketGlobalVersionKey(), version, mediaPHashBucketResultTTL); err != nil {
+		return err
+	}
 	if tenantId <= 0 {
 		return nil
 	}
@@ -386,7 +396,7 @@ func mediaPHashBucketCandidateCacheKey(ctx context.Context, normalizedHash strin
 	sort.Strings(scopeParts)
 	ids := uniqueIds(profileIds)
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	return "youban_publish:media_phash_bucket:candidates:v3:" + mediaPHashHashKey(fmt.Sprintf("hash=%s|threshold=%d|scopes=%v|profiles=%v|type=%s|exclude=%d", normalizedHash, threshold, scopeParts, ids, strings.ToLower(strings.TrimSpace(mediaType)), excludeProfileId))
+	return "youban_publish:media_phash_bucket:candidates:v4:" + mediaPHashHashKey(fmt.Sprintf("hash=%s|threshold=%d|scopes=%v|profiles=%v|type=%s|exclude=%d", normalizedHash, threshold, scopeParts, ids, strings.ToLower(strings.TrimSpace(mediaType)), excludeProfileId))
 }
 
 func mediaPHashBucketBranchSQL(bucketPos int, bucketValue string, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) (string, []any) {
@@ -441,16 +451,19 @@ func mediaPHashBucketScopeSQL(alias string, scopes []mediaPHashBucketScopePart) 
 		if fieldPrefix != "" {
 			fieldPrefix += "."
 		}
-		condition := fieldPrefix + "tenant_id = ?"
-		args = append(args, scope.TenantId)
+		parts := make([]string, 0, 2)
+		if scope.TenantId > 0 {
+			parts = append(parts, fieldPrefix+"tenant_id = ?")
+			args = append(args, scope.TenantId)
+		}
 		if len(ids) > 0 {
 			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-			condition += " AND " + fieldPrefix + "account_id IN (" + placeholders + ")"
+			parts = append(parts, fieldPrefix+"account_id IN ("+placeholders+")")
 			for _, id := range ids {
 				args = append(args, id)
 			}
 		}
-		conditions = append(conditions, condition)
+		conditions = append(conditions, strings.Join(parts, " AND "))
 	}
 	return strings.Join(conditions, " OR "), args
 }
@@ -458,12 +471,13 @@ func mediaPHashBucketScopeSQL(alias string, scopes []mediaPHashBucketScopePart) 
 func mediaPHashBucketValidScopes(scopes []mediaPHashBucketScopePart) []mediaPHashBucketScopePart {
 	result := make([]mediaPHashBucketScopePart, 0, len(scopes))
 	for _, scope := range scopes {
-		if scope.TenantId <= 0 {
+		accountIds := uniqueIds(scope.AccountIds)
+		if scope.TenantId <= 0 && len(accountIds) == 0 {
 			continue
 		}
 		result = append(result, mediaPHashBucketScopePart{
 			TenantId:   scope.TenantId,
-			AccountIds: uniqueIds(scope.AccountIds),
+			AccountIds: accountIds,
 		})
 	}
 	return result
