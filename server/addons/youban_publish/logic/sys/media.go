@@ -16,6 +16,7 @@ import (
 
 	"github.com/corona10/goimagehash"
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -499,6 +500,13 @@ func parseUploadPHash(value string) (*goimagehash.ImageHash, bool) {
 func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, in *sysin.MediaUploadInp, attachment *basesysin.AttachmentListModel, poster *basesysin.AttachmentListModel, originalAttachment *basesysin.AttachmentListModel, perceptualHash string) (res *sysin.MediaModel, err error) {
 	if attachment == nil || attachment.Id <= 0 {
 		return nil, gerror.New("附件上传失败")
+	}
+	if strings.TrimSpace(in.EditConfigJson) != "" {
+		if gjson.New(in.EditConfigJson).Get("backgroundReplaceEnabled").Bool() {
+			if err = s.ensureTenantVipFeature(ctx, task["tenant_id"].Int64(), sysin.TenantVipFeatureBackgroundReplace); err != nil {
+				return nil, err
+			}
+		}
 	}
 	now := gtime.Now()
 	editStatus := strings.TrimSpace(in.EditStatus)

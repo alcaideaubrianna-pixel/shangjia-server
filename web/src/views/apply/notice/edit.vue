@@ -89,6 +89,24 @@
                 <DatePicker v-model:formValue="formValue.expireAt" type="datetime" />
               </n-form-item>
 
+              <n-form-item
+                v-if="formValue.id < 1 && (formValue.type === 2 || formValue.type === 3)"
+                label="TG机器人"
+              >
+                <n-space vertical :size="4">
+                  <n-switch
+                    v-model:value="formValue.tgPush"
+                    :disabled="Boolean(formValue.publishAt)"
+                  >
+                    <template #checked>同步推送</template>
+                    <template #unchecked>不推送</template>
+                  </n-switch>
+                  <n-text depth="3" class="text-xs">
+                    仅立即发送时生效，只向已经绑定 Telegram 的接收人推送。
+                  </n-text>
+                </n-space>
+              </n-form-item>
+
               <template v-if="formValue.type === 2">
                 <n-form-item label="Banner" path="isBanner">
                   <n-switch
@@ -165,6 +183,9 @@
 
   function confirmForm(e) {
     e.preventDefault();
+    if (formValue.value.publishAt) {
+      formValue.value.tgPush = false;
+    }
     formBtnLoading.value = true;
     formRef.value.validate((errors) => {
       if (!errors) {

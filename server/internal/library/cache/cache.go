@@ -24,6 +24,10 @@ func Instance() *gcache.Cache {
 	return cache
 }
 
+func Initialized() bool {
+	return cache != nil
+}
+
 // SetAdapter 设置缓存适配器
 func SetAdapter(ctx context.Context) {
 	var adapter gcache.Adapter

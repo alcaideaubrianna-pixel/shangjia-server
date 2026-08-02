@@ -10,12 +10,9 @@ export const currencyOptions = [
 
 export function defaultConfig() {
   return {
-    activityText: '',
-    activityTitle: '',
     currency: 'USDT',
     discountText: '限时半价',
     enabled: true,
-    inviteRewardDays: 30,
     monthlyPrice: 30,
     originalPrice: 60,
     paymentGateway: 'gmpay',

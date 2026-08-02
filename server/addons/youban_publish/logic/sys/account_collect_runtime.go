@@ -10,6 +10,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
@@ -149,12 +150,16 @@ func (m *accountCollectSupervisor) stopAll() {
 func (s *sSysPublish) enabledAccountCollectSources(ctx context.Context) (map[int64][]accountCollectSourceRuntime, error) {
 	groups := make(map[int64][]accountCollectSourceRuntime)
 	if s.collectGlobalEnabled(ctx) {
+		if err := ensureTenantVipTables(ctx); err != nil {
+			return nil, err
+		}
 		if err := ensureCollectSourceColumns(ctx); err != nil {
 			return nil, err
 		}
 		var rows []accountCollectSourceRuntime
 		err := g.DB().Model(pdao.YoubanPublishCollectSource.Table()+" s").Safe().Ctx(ctx).
 			InnerJoin(publishTgAccountTable+" ta", "ta.id=s.tg_account_id").
+			InnerJoin(pdao.YoubanPublishTenantVip.Table()+" vip", "vip.tenant_id=s.tenant_id AND vip.status=1 AND vip.level>0 AND vip.deleted_at IS NULL").
 			Fields("s.id,s.tenant_id,s.account_id,s.tg_account_id,s.source_chat_id,s.source_username,s.history_collect_enabled,s.history_collect_mode,s.history_collect_days").
 			Where("s.source_type", sysin.CollectSourceTypeAccount).
 			Where("s.collect_enabled", 1).
@@ -162,6 +167,7 @@ func (s *sSysPublish) enabledAccountCollectSources(ctx context.Context) (map[int
 			WhereGT("s.tg_account_id", 0).
 			Where("ta.status", sysin.PublishTgAccountStatusAuthorized).
 			WhereNot("ta.session_key", "").
+			Where("(vip.expired_at IS NULL OR vip.expired_at>?)", gtime.Now()).
 			WhereNull("s.deleted_at").
 			WhereNull("ta.deleted_at").
 			OrderAsc("s.tg_account_id").

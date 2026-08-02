@@ -19,6 +19,14 @@ func accountFeatureSchema() []*sysin.FeatureConfigSchema {
 	}
 }
 
+func bindFeatureSchema() []*sysin.FeatureConfigSchema {
+	return []*sysin.FeatureConfigSchema{
+		{Field: "successText", Label: "绑定成功文案", Component: "telegram_rich_text", Default: "<b>绑定成功</b>，回到页面即可查看绑定状态。", Placeholder: "支持 Telegram HTML 和模板变量"},
+		{Field: "successButtons", Label: "底部按钮", Component: "telegram_buttons", Default: []interface{}{}, Placeholder: "仅支持 URL 按钮"},
+		{Field: "failedText", Label: "失败提示文案", Component: "textarea", Default: "验证码不存在或已失效，请在页面重新生成。", Placeholder: "验证码失败时提示"},
+	}
+}
+
 func simpleTextSchema(label string, defaultText string) []*sysin.FeatureConfigSchema {
 	return []*sysin.FeatureConfigSchema{
 		{Field: "replyText", Label: label, Component: "textarea", Default: defaultText, Placeholder: "机器人回复文案"},
@@ -121,7 +129,7 @@ type bindFeature struct{}
 func (bindFeature) Key() string                                { return "account_bind" }
 func (bindFeature) Command() string                            { return "bind" }
 func (bindFeature) Description() string                        { return "账号绑定" }
-func (bindFeature) ConfigSchema() []*sysin.FeatureConfigSchema { return accountFeatureSchema() }
+func (bindFeature) ConfigSchema() []*sysin.FeatureConfigSchema { return bindFeatureSchema() }
 func (bindFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFeatureContext) (bool, error) {
 	code := sixDigitRegexp.FindString(featureCtx.Args)
 	if code == "" {

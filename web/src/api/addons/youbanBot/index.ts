@@ -32,6 +32,14 @@ export function UserList(params = {}) {
   return http.request({ url: '/youban_bot/bot/user/list', method: 'get', params });
 }
 
+export function AccountBindList(params = {}) {
+  return http.request({ url: '/youban_bot/bot/binding/list', method: 'get', params });
+}
+
+export function AccountBindUnbind(params = {}) {
+  return http.request({ url: '/youban_bot/bot/binding/unbind', method: 'POST', params });
+}
+
 export function MessageList(params = {}) {
   return http.request({ url: '/youban_bot/bot/message/list', method: 'get', params });
 }

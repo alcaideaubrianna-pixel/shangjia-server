@@ -8,19 +8,36 @@ import (
 )
 
 const (
-	TenantVipFeatureSimilarMedia    = "similar_media"
-	TenantVipFeatureAntiScan        = "anti_scan"
-	TenantVipFeatureTextObfuscation = "text_obfuscation"
+	TenantVipFeatureSimilarMedia      = "similar_media"
+	TenantVipFeatureAntiScan          = "anti_scan"
+	TenantVipFeatureTextObfuscation   = "text_obfuscation"
+	TenantVipFeatureCollectSource     = "collect_source"
+	TenantVipFeatureBackgroundReplace = "background_replace"
 )
 
 type TenantVipStatusModel struct {
-	TenantId          int64       `json:"tenantId" dc:"租户ID"`
-	IsVip             bool        `json:"isVip" dc:"是否会员"`
-	Level             int         `json:"level" dc:"会员等级"`
-	Status            int         `json:"status" dc:"会员状态"`
-	ExpiredAt         *gtime.Time `json:"expiredAt" dc:"到期时间"`
-	Features          []string    `json:"features" dc:"会员权益"`
-	AvailableFeatures []string    `json:"availableFeatures" dc:"用户端可见功能"`
+	TenantId            int64                     `json:"tenantId" dc:"租户ID"`
+	IsVip               bool                      `json:"isVip" dc:"是否会员"`
+	Level               int                       `json:"level" dc:"会员等级"`
+	Status              int                       `json:"status" dc:"会员状态"`
+	ExpiredAt           *gtime.Time               `json:"expiredAt" dc:"到期时间"`
+	Features            []string                  `json:"features" dc:"会员权益"`
+	AvailableFeatures   []string                  `json:"availableFeatures" dc:"用户端可见功能"`
+	ActivityBannerTitle string                    `json:"activityBannerTitle" dc:"活动标题"`
+	ActivityBannerText  string                    `json:"activityBannerText" dc:"活动说明"`
+	Activities          []*TenantVipActivityModel `json:"activities" dc:"会员活动"`
+}
+
+type TenantVipActivityModel struct {
+	Code            string `json:"code" dc:"活动编码"`
+	Title           string `json:"title" dc:"活动标题"`
+	Description     string `json:"description" dc:"活动说明"`
+	Action          string `json:"action" dc:"操作类型"`
+	RewardDays      int    `json:"rewardDays" dc:"单次奖励天数"`
+	RewardCount     int    `json:"rewardCount" dc:"累计奖励次数"`
+	RewardDaysTotal int    `json:"rewardDaysTotal" dc:"累计奖励天数"`
+	Completed       bool   `json:"completed" dc:"是否已完成"`
+	StatusText      string `json:"statusText" dc:"状态说明"`
 }
 
 type TenantFeaturePermissionViewInp struct {
@@ -45,8 +62,6 @@ type TenantFeaturePermissionSaveInp struct {
 }
 
 type TenantVipPlanModel struct {
-	ActivityText  string                   `json:"activityText" dc:"活动说明"`
-	ActivityTitle string                   `json:"activityTitle" dc:"活动标题"`
 	Code          string                   `json:"code" dc:"套餐编码"`
 	CouponAmount  float64                  `json:"couponAmount" dc:"优惠券金额"`
 	CouponEnabled bool                     `json:"couponEnabled" dc:"是否启用优惠券"`
@@ -141,16 +156,12 @@ type TenantVipCouponCheckModel struct {
 }
 
 type TenantVipConfigModel struct {
-	ActivityText        string  `json:"activityText" dc:"活动说明"`
-	ActivityTitle       string  `json:"activityTitle" dc:"活动标题"`
-	Currency            string  `json:"currency" dc:"币种"`
-	DiscountText        string  `json:"discountText" dc:"折扣文案"`
-	Enabled             bool    `json:"enabled" dc:"是否启用"`
-	InviteRewardEnabled bool    `json:"inviteRewardEnabled" dc:"邀请返会员开关"`
-	InviteRewardDays    int     `json:"inviteRewardDays" dc:"邀请奖励天数"`
-	MonthlyPrice        float64 `json:"monthlyPrice" dc:"会员月价"`
-	OriginalPrice       float64 `json:"originalPrice" dc:"展示原价"`
-	PaymentGateway      string  `json:"paymentGateway" dc:"支付网关"`
+	Currency       string  `json:"currency" dc:"币种"`
+	DiscountText   string  `json:"discountText" dc:"折扣文案"`
+	Enabled        bool    `json:"enabled" dc:"是否启用"`
+	MonthlyPrice   float64 `json:"monthlyPrice" dc:"会员月价"`
+	OriginalPrice  float64 `json:"originalPrice" dc:"展示原价"`
+	PaymentGateway string  `json:"paymentGateway" dc:"支付网关"`
 }
 
 type TenantVipConfigSaveInp = TenantVipConfigModel

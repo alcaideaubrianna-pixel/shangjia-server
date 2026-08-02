@@ -288,6 +288,11 @@ func (s *sSysConfig) GetConfigByGroup(ctx context.Context, in *sysin.GetConfigIn
 			return
 		}
 	}
+	if in.Group == "youban_publish_vip_activity" {
+		if err = s.ensureYoubanPublishVipActivityConfig(ctx); err != nil {
+			return
+		}
+	}
 
 	var models []*entity.SysConfig
 	cols := dao.SysConfig.Columns()
@@ -337,6 +342,11 @@ func (s *sSysConfig) UpdateConfigByGroup(ctx context.Context, in *sysin.UpdateCo
 			return
 		}
 	}
+	if in.Group == "youban_publish_vip_activity" {
+		if err = s.ensureYoubanPublishVipActivityConfig(ctx); err != nil {
+			return
+		}
+	}
 	var (
 		mod    = dao.SysConfig.Ctx(ctx)
 		models []*entity.SysConfig
@@ -347,6 +357,11 @@ func (s *sSysConfig) UpdateConfigByGroup(ctx context.Context, in *sysin.UpdateCo
 	}
 
 	err = dao.SysConfig.Transaction(ctx, func(ctx context.Context, tx gdb.TX) (err error) {
+		if in.Group == youbanPublishVipActivityConfigGroup {
+			if err = s.refreshYoubanPublishVipActivityEnabledAt(ctx, tx, in.List, models); err != nil {
+				return
+			}
+		}
 		for k, v := range in.List {
 			row := s.getConfigByKey(k, models)
 			// 新增
@@ -356,7 +371,7 @@ func (s *sSysConfig) UpdateConfigByGroup(ctx context.Context, in *sysin.UpdateCo
 			}
 
 			// 更新
-			_, err = dao.SysConfig.Ctx(ctx).Where("id", row.Id).Data(g.Map{"value": normalizeConfigValue(v), "updated_at": gtime.Now()}).Update()
+			_, err = tx.Model(dao.SysConfig.Table()).Ctx(ctx).Where("id", row.Id).Data(g.Map{"value": normalizeConfigValue(v), "updated_at": gtime.Now()}).Update()
 			if err != nil {
 				return
 			}

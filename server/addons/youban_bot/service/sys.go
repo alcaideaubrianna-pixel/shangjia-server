@@ -2,9 +2,47 @@ package service
 
 import (
 	"context"
+	"sync"
 
 	"hotgo/addons/youban_bot/model/input/sysin"
 )
+
+type AccountBoundEvent struct {
+	App              string
+	AccountId        int64
+	BotId            int64
+	TelegramUserId   string
+	TelegramUsername string
+}
+
+type AccountBoundHook func(ctx context.Context, event *AccountBoundEvent) error
+
+var accountBoundHooks struct {
+	sync.RWMutex
+	list []AccountBoundHook
+}
+
+func RegisterAccountBoundHook(hook AccountBoundHook) {
+	if hook == nil {
+		return
+	}
+	accountBoundHooks.Lock()
+	accountBoundHooks.list = append(accountBoundHooks.list, hook)
+	accountBoundHooks.Unlock()
+}
+
+func TriggerAccountBoundHooks(ctx context.Context, event *AccountBoundEvent) []error {
+	accountBoundHooks.RLock()
+	hooks := append([]AccountBoundHook(nil), accountBoundHooks.list...)
+	accountBoundHooks.RUnlock()
+	errs := make([]error, 0)
+	for _, hook := range hooks {
+		if err := hook(ctx, event); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
+}
 
 type ISysBot interface {
 	StartRuntime(ctx context.Context)
@@ -17,6 +55,8 @@ type ISysBot interface {
 	AdminFeatureList(ctx context.Context, in *sysin.FeatureListInp) (list []*sysin.FeatureModel, totalCount int, err error)
 	AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp) (err error)
 	AdminUserList(ctx context.Context, in *sysin.UserListInp) (list []*sysin.UserModel, totalCount int, err error)
+	AdminAccountBindList(ctx context.Context, in *sysin.AccountBindListInp) (list []*sysin.AccountBindModel, totalCount int, err error)
+	AdminAccountBindUnbind(ctx context.Context, in *sysin.AccountBindUnbindInp) (err error)
 	AdminMessageList(ctx context.Context, in *sysin.MessageListInp) (list []*sysin.MessageModel, totalCount int, err error)
 	AdminBotChannelCacheList(ctx context.Context, in *sysin.BotChannelCacheListInp) (list []*sysin.BotChannelCacheModel, totalCount int, err error)
 	AdminUserSwitchSuperAdmin(ctx context.Context, in *sysin.UserSwitchSuperAdminInp) (err error)
@@ -33,6 +73,7 @@ type ISysBot interface {
 	TelegramWebhookRaw(ctx context.Context, in *sysin.WebhookInp) (err error)
 	Notify(ctx context.Context, in *sysin.NotifyInp) (err error)
 	NotifyAccount(ctx context.Context, in *sysin.NotifyAccountInp) (err error)
+	NotifyAccounts(ctx context.Context, in *sysin.NotifyAccountsInp) (err error)
 	NotifyRich(ctx context.Context, in *sysin.NotifyRichInp) (err error)
 	OfficialBotToken(ctx context.Context) (token string, err error)
 }

@@ -369,8 +369,10 @@ func (s *sSysBot) NotifyAccount(ctx context.Context, in *sysin.NotifyAccountInp)
 	if strings.TrimSpace(in.Text) == "" {
 		return gerror.New("消息内容不能为空")
 	}
-	if _, enabled := s.featureConfig(ctx, notifyFeature{}.Key()); !enabled {
-		return nil
+	if !in.IgnoreFeatureSwitch {
+		if _, enabled := s.featureConfig(ctx, notifyFeature{}.Key()); !enabled {
+			return nil
+		}
 	}
 
 	var bind *botBindRow
@@ -383,49 +385,155 @@ func (s *sSysBot) NotifyAccount(ctx context.Context, in *sysin.NotifyAccountInp)
 		return gerror.Wrap(err, "读取Telegram绑定失败")
 	}
 	if bind == nil || strings.TrimSpace(bind.TelegramUserId) == "" {
+		if in.RequireDelivery {
+			return gerror.New("当前账号未绑定Telegram")
+		}
 		return nil
 	}
 
-	botId := in.BotId
-	if botId <= 0 {
-		botId = bind.BotId
+	strategy := strings.TrimSpace(strings.ToLower(in.BotStrategy))
+	if strategy == "" {
+		strategy = "bound"
 	}
-	var botToken string
-	if botId > 0 {
+	botIds := make([]int64, 0, 2)
+	switch strategy {
+	case "official":
+		official, err := s.officialBot(ctx)
+		if err != nil {
+			return err
+		}
+		botIds = append(botIds, official.Id)
+		if in.FallbackBoundBot && bind.BotId > 0 && bind.BotId != official.Id {
+			botIds = append(botIds, bind.BotId)
+		}
+	case "explicit":
+		if in.BotId > 0 {
+			botIds = append(botIds, in.BotId)
+		}
+	default:
+		if bind.BotId > 0 {
+			botIds = append(botIds, bind.BotId)
+		} else if in.BotId > 0 {
+			botIds = append(botIds, in.BotId)
+		}
+	}
+	if len(botIds) == 0 {
+		official, err := s.officialBot(ctx)
+		if err != nil {
+			return err
+		}
+		botIds = append(botIds, official.Id)
+	}
+
+	var lastErr error
+	for _, botId := range botIds {
 		row, err := s.botById(ctx, botId)
 		if err != nil {
-			return err
+			lastErr = err
+			continue
 		}
-		botToken = row.BotToken
-	} else {
-		row, err := s.officialBot(ctx)
+		chatId, err := s.notifyAccountChatId(ctx, botId, bind.TelegramUserId)
 		if err != nil {
-			return err
+			lastErr = err
+			continue
 		}
-		botId = row.Id
-		botToken = row.BotToken
-	}
-
-	var user struct {
-		ChatId string `json:"chat_id"`
-	}
-	if err := g.DB().Model(userTable).Safe().Ctx(ctx).
-		Fields("chat_id").
-		Where("bot_id", botId).
-		Where("telegram_user_id", bind.TelegramUserId).
-		Where("status", 1).
-		WhereNull("deleted_at").
-		Scan(&user); err != nil {
-		return gerror.Wrap(err, "读取Telegram用户失败")
-	}
-	if strings.TrimSpace(user.ChatId) == "" {
+		if chatId == "" {
+			continue
+		}
+		_, err = s.sendMessage(ctx, row.BotToken, chatId, in.Text, firstNonEmpty(in.ParseMode, "HTML"), in.DisableNotice)
+		if err != nil {
+			lastErr = err
+			if shouldMarkBotOffline(err) {
+				_ = s.markBotOffline(ctx, botId, err)
+			}
+			continue
+		}
 		return nil
 	}
-	_, err := s.sendMessage(ctx, botToken, user.ChatId, in.Text, firstNonEmpty(in.ParseMode, "HTML"), in.DisableNotice)
-	if err != nil && botId > 0 && shouldMarkBotOffline(err) {
-		_ = s.markBotOffline(ctx, botId, err)
+	if in.RequireDelivery {
+		if lastErr != nil {
+			return gerror.Wrap(lastErr, "Telegram通知发送失败")
+		}
+		return gerror.New("没有可用的Telegram通知会话")
 	}
-	return err
+	return nil
+}
+
+func (s *sSysBot) notifyAccountChatId(ctx context.Context, botId int64, telegramUserId string) (string, error) {
+	value, err := g.DB().Model(userTable).Safe().Ctx(ctx).
+		Fields("chat_id").
+		Where("bot_id", botId).
+		Where("telegram_user_id", strings.TrimSpace(telegramUserId)).
+		Where("status", 1).
+		Value()
+	if err != nil {
+		return "", gerror.Wrap(err, "读取Telegram通知会话失败")
+	}
+	return strings.TrimSpace(value.String()), nil
+}
+
+func (s *sSysBot) NotifyAccounts(ctx context.Context, in *sysin.NotifyAccountsInp) error {
+	if in == nil || strings.TrimSpace(in.Text) == "" {
+		return gerror.New("消息内容不能为空")
+	}
+	app := strings.TrimSpace(in.App)
+	if app == "" {
+		app = consts.AppApi
+	}
+	accountIds := uniqueNotifyAccountIds(in.AccountIds)
+	if in.AllBound {
+		var rows []struct {
+			AccountId int64 `json:"account_id"`
+		}
+		if err := g.DB().Model(accountBindTbl).Safe().Ctx(ctx).
+			Fields("DISTINCT account_id").
+			Where("app", app).
+			Where("status", consts.StatusEnabled).
+			WhereNull("deleted_at").
+			Scan(&rows); err != nil {
+			return gerror.Wrap(err, "读取Telegram绑定账号失败")
+		}
+		for _, row := range rows {
+			accountIds = append(accountIds, row.AccountId)
+		}
+		accountIds = uniqueNotifyAccountIds(accountIds)
+	}
+	for index, accountId := range accountIds {
+		err := s.NotifyAccount(ctx, &sysin.NotifyAccountInp{
+			BotId:               in.BotId,
+			BotStrategy:         in.BotStrategy,
+			FallbackBoundBot:    in.FallbackBoundBot,
+			IgnoreFeatureSwitch: in.IgnoreFeatureSwitch,
+			App:                 app,
+			AccountId:           accountId,
+			Text:                in.Text,
+			ParseMode:           in.ParseMode,
+			DisableNotice:       in.DisableNotice,
+		})
+		if err != nil {
+			g.Log().Warningf(ctx, "批量Telegram通知失败 accountId:%d err:%+v", accountId, err)
+		}
+		if index < len(accountIds)-1 {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	return nil
+}
+
+func uniqueNotifyAccountIds(values []int64) []int64 {
+	result := make([]int64, 0, len(values))
+	seen := make(map[int64]struct{}, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func (s *sSysBot) sendMessage(ctx context.Context, botToken, chatId, text, parseMode string, disableNotice bool) (*models.Message, error) {

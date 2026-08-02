@@ -11,15 +11,18 @@ import (
 )
 
 type InviteInfoModel struct {
-	Code           string      `json:"code" dc:"邀请码"`
-	Source         string      `json:"source" dc:"来源"`
-	ExpiresAt      *gtime.Time `json:"expiresAt" dc:"过期时间"`
-	InviteCount    int         `json:"inviteCount" dc:"已邀请数量"`
-	UsedCount      int         `json:"usedCount" dc:"已使用数量"`
-	ExpireDays     int         `json:"expireDays" dc:"有效期天数"`
-	InviteUrl      string      `json:"inviteUrl" dc:"注册链接"`
-	WebInviteHint  string      `json:"webInviteHint" dc:"网页提示"`
-	CanGenerateBot bool        `json:"canGenerateBot" dc:"是否可生成"`
+	Code                string                    `json:"code" dc:"邀请码"`
+	Source              string                    `json:"source" dc:"来源"`
+	ExpiresAt           *gtime.Time               `json:"expiresAt" dc:"过期时间"`
+	InviteCount         int                       `json:"inviteCount" dc:"已邀请数量"`
+	UsedCount           int                       `json:"usedCount" dc:"已使用数量"`
+	ExpireDays          int                       `json:"expireDays" dc:"有效期天数"`
+	InviteUrl           string                    `json:"inviteUrl" dc:"注册链接"`
+	WebInviteHint       string                    `json:"webInviteHint" dc:"网页提示"`
+	CanGenerateBot      bool                      `json:"canGenerateBot" dc:"是否可生成"`
+	ActivityBannerTitle string                    `json:"activityBannerTitle" dc:"活动标题"`
+	ActivityBannerText  string                    `json:"activityBannerText" dc:"活动说明"`
+	Activities          []*TenantVipActivityModel `json:"activities" dc:"邀请活动"`
 }
 
 type InviteListInp struct {
@@ -30,23 +33,28 @@ type InviteListInp struct {
 }
 
 type InviteModel struct {
-	Id                int64       `json:"id" dc:"ID"`
-	Code              string      `json:"code" dc:"邀请码"`
-	Source            string      `json:"source" dc:"来源"`
-	InviterApp        string      `json:"inviterApp" dc:"邀请来源应用"`
-	InviterTenantId   int64       `json:"inviterTenantId" dc:"邀请人租户ID"`
-	InviterTenantName string      `json:"inviterTenantName" dc:"邀请人租户名称"`
-	InviterAccountId  int64       `json:"inviterAccountId" dc:"邀请人账号ID"`
-	InviterUsername   string      `json:"inviterUsername" dc:"邀请人账号"`
-	InviterNickname   string      `json:"inviterNickname" dc:"邀请人昵称"`
-	UsedTenantId      int64       `json:"usedTenantId" dc:"注册租户ID"`
-	UsedTenantName    string      `json:"usedTenantName" dc:"注册租户名称"`
-	UsedAccountId     int64       `json:"usedAccountId" dc:"注册账号ID"`
-	UsedAccountName   string      `json:"usedAccountName" dc:"注册账号"`
-	Status            string      `json:"status" dc:"状态"`
-	ExpiresAt         *gtime.Time `json:"expiresAt" dc:"过期时间"`
-	UsedAt            *gtime.Time `json:"usedAt" dc:"使用时间"`
-	CreatedAt         *gtime.Time `json:"createdAt" dc:"创建时间"`
+	Id                 int64       `json:"id" dc:"ID"`
+	Code               string      `json:"code" dc:"邀请码"`
+	Source             string      `json:"source" dc:"来源"`
+	InviterApp         string      `json:"inviterApp" dc:"邀请来源应用"`
+	InviterTenantId    int64       `json:"inviterTenantId" dc:"邀请人租户ID"`
+	InviterTenantName  string      `json:"inviterTenantName" dc:"邀请人租户名称"`
+	InviterAccountId   int64       `json:"inviterAccountId" dc:"邀请人账号ID"`
+	InviterUsername    string      `json:"inviterUsername" dc:"邀请人账号"`
+	InviterNickname    string      `json:"inviterNickname" dc:"邀请人昵称"`
+	UsedTenantId       int64       `json:"usedTenantId" dc:"注册租户ID"`
+	UsedTenantName     string      `json:"usedTenantName" dc:"注册租户名称"`
+	UsedAccountId      int64       `json:"usedAccountId" dc:"注册账号ID"`
+	UsedAccountName    string      `json:"usedAccountName" dc:"注册账号"`
+	Status             string      `json:"status" dc:"状态"`
+	ExpiresAt          *gtime.Time `json:"expiresAt" dc:"过期时间"`
+	UsedAt             *gtime.Time `json:"usedAt" dc:"使用时间"`
+	CreatedAt          *gtime.Time `json:"createdAt" dc:"创建时间"`
+	TelegramBoundAt    *gtime.Time `json:"telegramBoundAt" dc:"TG绑定时间"`
+	FirstPaidAt        *gtime.Time `json:"firstPaidAt" dc:"首次付费时间"`
+	BindRewardDays     int         `json:"bindRewardDays" dc:"绑定奖励天数"`
+	FirstPayRewardDays int         `json:"firstPayRewardDays" dc:"首付奖励天数"`
+	RewardDaysTotal    int         `json:"rewardDaysTotal" dc:"累计奖励天数"`
 }
 
 type InviteCreateInp struct {

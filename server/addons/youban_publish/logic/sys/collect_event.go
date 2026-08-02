@@ -341,6 +341,9 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if source.IsEmpty() {
 		return s.ignoreCollectEvent(ctx, eventId, "采集源不存在", "source")
 	}
+	if err = s.ensureTenantVipFeature(ctx, tenantId, sysin.TenantVipFeatureCollectSource); err != nil {
+		return s.ignoreCollectEvent(ctx, eventId, "VIP会员已到期，停止处理采集事件", "vip")
+	}
 	if source["collect_enabled"].Int() != 1 || source["status"].Int() != 1 {
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusPending, "采集源已暂停，等待恢复")
 		return s.enqueueCollectProcess(ctx, collectProcessQueuePayload{

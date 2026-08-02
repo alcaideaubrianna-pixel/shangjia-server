@@ -102,6 +102,28 @@ func (c *cBot) UserList(ctx context.Context, req *bot.UserListReq) (res *bot.Use
 	return
 }
 
+func (c *cBot) AccountBindList(ctx context.Context, req *bot.AccountBindListReq) (res *bot.AccountBindListRes, err error) {
+	list, totalCount, err := service.SysBot().AdminAccountBindList(ctx, &req.AccountBindListInp)
+	if err != nil {
+		return
+	}
+	if list == nil {
+		list = []*sysin.AccountBindModel{}
+	}
+	res = new(bot.AccountBindListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cBot) AccountBindUnbind(ctx context.Context, req *bot.AccountBindUnbindReq) (res *bot.AccountBindUnbindRes, err error) {
+	if err = service.SysBot().AdminAccountBindUnbind(ctx, &req.AccountBindUnbindInp); err != nil {
+		return
+	}
+	res = &bot.AccountBindUnbindRes{}
+	return
+}
+
 func (c *cBot) MessageList(ctx context.Context, req *bot.MessageListReq) (res *bot.MessageListRes, err error) {
 	list, totalCount, err := service.SysBot().AdminMessageList(ctx, &req.MessageListInp)
 	if err != nil {

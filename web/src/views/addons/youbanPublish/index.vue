@@ -250,6 +250,10 @@
           />
         </n-tab-pane>
 
+        <n-tab-pane name="activities" tab="活动管理" display-directive="show">
+          <ActivityPanel />
+        </n-tab-pane>
+
         <n-tab-pane name="member" tab="会员" display-directive="show">
           <MemberPanel ref="memberPanelRef" />
         </n-tab-pane>
@@ -585,6 +589,7 @@
   import { computed, h, nextTick, onMounted, reactive, ref } from 'vue';
   import { NButton, NPopover, NSpace, NTag, useDialog, useMessage } from 'naive-ui';
   import ChannelMemberPanel from './components/channel-member-panel.vue';
+  import ActivityPanel from './components/activity-panel.vue';
   import CloudResourceConfig from './components/cloud-resource-config.vue';
   import DashboardPanel from './components/dashboard-panel.vue';
   import ImportTaskPanel from './components/import-task-panel.vue';
@@ -604,6 +609,7 @@
     BotSave,
     AdminInviteList,
     AdminTgAccountList,
+    TgAccountUnbind,
     ConfigGet,
     ConfigUpdate,
     ChannelList,
@@ -1043,14 +1049,17 @@
     {
       title: '操作',
       key: 'actions',
-      width: 180,
+      width: 240,
       fixed: 'right',
       render(row: any) {
         return h(
           NSpace,
           {},
           {
-            default: () => [actionButton('查看频道', () => openChannelCaches(row))],
+            default: () => [
+              actionButton('查看频道', () => openChannelCaches(row)),
+              dangerButton('解绑', () => unbindTgAccount(row)),
+            ],
           }
         );
       },
@@ -1264,6 +1273,17 @@
     rememberActiveTab('channelCaches');
     await nextTick();
     await channelCachePanelRef.value?.openForTgAccount?.(row.id);
+  }
+
+  function unbindTgAccount(row: any) {
+    confirmDelete(
+      `确认解绑 TG 账号“${row.displayName || row.telegramUsername || row.telegramUserId || row.id}”？`,
+      async () => {
+        await TgAccountUnbind({ ids: [row.id] });
+        tgAccounts.value = tgAccounts.value.filter((item) => item.id !== row.id);
+        tgAccountPagination.itemCount = Math.max(0, tgAccountPagination.itemCount - 1);
+      }
+    );
   }
 
   async function loadTags() {

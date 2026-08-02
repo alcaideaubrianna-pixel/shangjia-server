@@ -59,6 +59,57 @@ func (c *cPublishServer) VipConfigView(ctx context.Context, req *publish.VipConf
 	return &publish.VipConfigViewRes{TenantVipConfigModel: data}, nil
 }
 
+func (c *cPublishServer) ActivityList(ctx context.Context, req *publish.ActivityListReq) (res *publish.ActivityListRes, err error) {
+	list, err := service.SysPublish().AdminActivityList(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.ActivityModel{}
+	}
+	return &publish.ActivityListRes{List: list}, nil
+}
+
+func (c *cPublishServer) ActivitySave(ctx context.Context, req *publish.ActivitySaveReq) (res *publish.ActivitySaveRes, err error) {
+	err = service.SysPublish().AdminActivitySave(ctx, &req.ActivitySaveInp)
+	return &publish.ActivitySaveRes{}, err
+}
+
+func (c *cPublishServer) ActivityRewardList(ctx context.Context, req *publish.ActivityRewardListReq) (res *publish.ActivityRewardListRes, err error) {
+	list, totalCount, err := service.SysPublish().AdminActivityRewardList(ctx, &req.ActivityRewardListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.ActivityRewardModel{}
+	}
+	res = new(publish.ActivityRewardListRes)
+	res.List = list
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cPublishServer) ActivityUserStatus(ctx context.Context, req *publish.ActivityUserStatusReq) (res *publish.ActivityUserStatusRes, err error) {
+	list, err := service.SysPublish().AdminActivityUserStatus(ctx, &req.ActivityUserStatusInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.ActivityUserStatusRes{List: list}, nil
+}
+
+func (c *cPublishServer) ActivityDebug(ctx context.Context, req *publish.ActivityDebugReq) (res *publish.ActivityDebugRes, err error) {
+	data, err := service.SysPublish().AdminActivityDebug(ctx, &req.ActivityDebugInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.ActivityDebugRes{ActivityUserStatusModel: data}, nil
+}
+
+func (c *cPublishServer) ActivityReset(ctx context.Context, req *publish.ActivityResetReq) (res *publish.ActivityResetRes, err error) {
+	err = service.SysPublish().AdminActivityReset(ctx, &req.ActivityResetInp)
+	return &publish.ActivityResetRes{}, err
+}
+
 func (c *cPublishServer) VipConfigSave(ctx context.Context, req *publish.VipConfigSaveReq) (res *publish.VipConfigSaveRes, err error) {
 	err = service.SysPublish().AdminTenantVipConfigSave(ctx, &req.TenantVipConfigSaveInp)
 	return &publish.VipConfigSaveRes{}, err
@@ -446,6 +497,14 @@ func (c *cPublishServer) TgAccountDelete(ctx context.Context, req *publish.TgAcc
 		return nil, err
 	}
 	res = &publish.TgAccountDeleteRes{}
+	return
+}
+
+func (c *cPublishServer) TgAccountUnbind(ctx context.Context, req *publish.TgAccountUnbindReq) (res *publish.TgAccountUnbindRes, err error) {
+	if err = service.SysPublish().ServerTgAccountUnbind(ctx, &req.TgAccountDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.TgAccountUnbindRes{}
 	return
 }
 

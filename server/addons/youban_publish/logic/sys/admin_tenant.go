@@ -147,51 +147,56 @@ func (s *sSysPublish) AdminTenantSave(ctx context.Context, in *sysin.TenantSaveI
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
-	returnRes := &sysin.TenantSaveModel{Id: in.Id}
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		tenantColumns := pdao.YoubanPublishTenant.Columns()
-		data := g.Map{
-			tenantColumns.Name:      in.Name,
-			tenantColumns.Remark:    strings.TrimSpace(in.Remark),
-			tenantColumns.Status:    in.Status,
-			tenantColumns.UpdatedBy: contexts.GetUserId(ctx),
-			tenantColumns.UpdatedAt: gtime.Now(),
-		}
-		if in.Id > 0 {
-			if _, err = tx.Model(pdao.YoubanPublishTenant.Table()).Safe().Ctx(ctx).Where(tenantColumns.Id, in.Id).WhereNull(tenantColumns.DeletedAt).Data(data).Update(); err != nil {
-				return gerror.Wrap(err, "保存租户失败")
-			}
-			return nil
-		}
-		data[tenantColumns.CreatedBy] = contexts.GetUserId(ctx)
-		data[tenantColumns.CreatedAt] = gtime.Now()
-		id, insertErr := tx.Model(pdao.YoubanPublishTenant.Table()).Safe().Ctx(ctx).Data(data).InsertAndGetId()
-		if insertErr != nil {
-			return gerror.Wrap(insertErr, "保存租户失败")
-		}
-		accountIn := &sysin.AccountSaveInp{
-			TenantId:    id,
-			AccountType: sysin.PublishAccountTypeAdmin,
-			Username:    in.Username,
-			Password:    in.Password,
-			Nickname:    in.Username,
-			Remark:      in.Remark,
-			Status:      consts.StatusEnabled,
-		}
-		if err = accountIn.Filter(ctx); err != nil {
-			return err
-		}
-		if err = s.savePublishAccount(ctx, tx, accountIn); err != nil {
-			return err
-		}
-		returnRes.Id = id
-		returnRes.Password = accountIn.Password
-		return nil
+		res, _, err = s.adminTenantSaveTx(ctx, tx, in)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	return returnRes, nil
+	return res, nil
+}
+
+func (s *sSysPublish) adminTenantSaveTx(ctx context.Context, tx gdb.TX, in *sysin.TenantSaveInp) (*sysin.TenantSaveModel, int64, error) {
+	returnRes := &sysin.TenantSaveModel{Id: in.Id}
+	tenantColumns := pdao.YoubanPublishTenant.Columns()
+	data := g.Map{
+		tenantColumns.Name:      in.Name,
+		tenantColumns.Remark:    strings.TrimSpace(in.Remark),
+		tenantColumns.Status:    in.Status,
+		tenantColumns.UpdatedBy: contexts.GetUserId(ctx),
+		tenantColumns.UpdatedAt: gtime.Now(),
+	}
+	if in.Id > 0 {
+		if _, err := tx.Model(pdao.YoubanPublishTenant.Table()).Safe().Ctx(ctx).Where(tenantColumns.Id, in.Id).WhereNull(tenantColumns.DeletedAt).Data(data).Update(); err != nil {
+			return nil, 0, gerror.Wrap(err, "保存租户失败")
+		}
+		return returnRes, 0, nil
+	}
+	data[tenantColumns.CreatedBy] = contexts.GetUserId(ctx)
+	data[tenantColumns.CreatedAt] = gtime.Now()
+	id, err := tx.Model(pdao.YoubanPublishTenant.Table()).Safe().Ctx(ctx).Data(data).InsertAndGetId()
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "保存租户失败")
+	}
+	accountIn := &sysin.AccountSaveInp{
+		TenantId:    id,
+		AccountType: sysin.PublishAccountTypeAdmin,
+		Username:    in.Username,
+		Password:    in.Password,
+		Nickname:    in.Username,
+		Remark:      in.Remark,
+		Status:      consts.StatusEnabled,
+	}
+	if err = accountIn.Filter(ctx); err != nil {
+		return nil, 0, err
+	}
+	if err = s.savePublishAccount(ctx, tx, accountIn); err != nil {
+		return nil, 0, err
+	}
+	returnRes.Id = id
+	returnRes.Password = accountIn.Password
+	return returnRes, accountIn.Id, nil
 }
 
 func (s *sSysPublish) AdminTenantDelete(ctx context.Context, in *sysin.TenantDeleteInp) (err error) {

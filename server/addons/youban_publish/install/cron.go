@@ -20,6 +20,9 @@ const (
 	cycleSchedulerCronName           = "youbanPublishCycleScheduler"
 	cycleSchedulerDevelopCronPattern = "@every 10m"
 	cycleSchedulerProductCronPattern = "@every 1h"
+	vipLifecycleCronName             = "youbanPublishVipLifecycle"
+	vipLifecycleDevelopCronPattern   = "@every 10m"
+	vipLifecycleProductCronPattern   = "@every 1h"
 )
 
 func cycleSchedulerCronPattern(mode string) string {
@@ -28,6 +31,15 @@ func cycleSchedulerCronPattern(mode string) string {
 		return cycleSchedulerDevelopCronPattern
 	default:
 		return cycleSchedulerProductCronPattern
+	}
+}
+
+func vipLifecycleCronPattern(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "not-set", "develop", "testing":
+		return vipLifecycleDevelopCronPattern
+	default:
+		return vipLifecycleProductCronPattern
 	}
 }
 
@@ -107,6 +119,45 @@ func ensureCycleSchedulerCron(ctx context.Context) error {
 	var cronRow *entity.SysCron
 	if err = dao.SysCron.Ctx(ctx).Where(columns.Name, cycleSchedulerCronName).Where(columns.Params, "").Scan(&cronRow); err != nil {
 		return gerror.Wrap(err, "读取上架循环调度定时任务失败")
+	}
+	return cron.RefreshStatus(cronRow)
+}
+
+func ensureVipLifecycleCron(ctx context.Context) error {
+	columns := dao.SysCron.Columns()
+	now := gtime.Now()
+	row, err := dao.SysCron.Ctx(ctx).Where(columns.Name, vipLifecycleCronName).Where(columns.Params, "").One()
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "does not exist") {
+			return nil
+		}
+		return gerror.Wrap(err, "读取会员生命周期定时任务失败")
+	}
+	data := g.Map{
+		columns.GroupId:   1,
+		columns.Title:     "上架VIP生命周期处理",
+		columns.Name:      vipLifecycleCronName,
+		columns.Params:    "",
+		columns.Pattern:   vipLifecycleCronPattern(g.Cfg().MustGet(ctx, "system.mode", "develop").String()),
+		columns.Policy:    consts.CronPolicySingle,
+		columns.Count:     0,
+		columns.Sort:      22,
+		columns.Remark:    "处理会员到期状态并重试Telegram会员通知",
+		columns.Status:    consts.StatusEnabled,
+		columns.UpdatedAt: now,
+	}
+	if row.IsEmpty() {
+		data[columns.CreatedAt] = now
+		_, err = dao.SysCron.Ctx(ctx).Data(data).Insert()
+	} else {
+		_, err = dao.SysCron.Ctx(ctx).Where(columns.Id, row[columns.Id].Int64()).Data(data).Update()
+	}
+	if err != nil {
+		return gerror.Wrap(err, "初始化会员生命周期定时任务失败")
+	}
+	var cronRow *entity.SysCron
+	if err = dao.SysCron.Ctx(ctx).Where(columns.Name, vipLifecycleCronName).Where(columns.Params, "").Scan(&cronRow); err != nil {
+		return gerror.Wrap(err, "读取会员生命周期定时任务失败")
 	}
 	return cron.RefreshStatus(cronRow)
 }

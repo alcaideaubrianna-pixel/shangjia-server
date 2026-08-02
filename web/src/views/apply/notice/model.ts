@@ -19,6 +19,7 @@ export class State {
   remark: string;
   sort: number;
   status: number = 1;
+  tgPush: boolean = false;
   createdBy: number;
   updatedBy: number;
   createdAt: string;

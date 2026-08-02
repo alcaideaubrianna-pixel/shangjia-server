@@ -59,6 +59,9 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 	if in == nil {
 		return 0, gerror.New("采集源参数不能为空")
 	}
+	if err = s.ensureTenantVipFeature(ctx, account.TenantId, sysin.TenantVipFeatureCollectSource); err != nil {
+		return 0, err
+	}
 	if err = ensureCollectSourceColumns(ctx); err != nil {
 		return 0, err
 	}
@@ -164,6 +167,11 @@ func (s *sSysPublish) CollectSourceStatus(ctx context.Context, in *sysin.Collect
 	}
 	if in == nil || in.Id <= 0 {
 		return gerror.New("采集源ID不能为空")
+	}
+	if in.Enabled == 1 {
+		if err = s.ensureTenantVipFeature(ctx, account.TenantId, sysin.TenantVipFeatureCollectSource); err != nil {
+			return err
+		}
 	}
 	data := g.Map{"updated_at": gtime.Now(), "updated_by": account.Id}
 	if in.Enabled == 1 {

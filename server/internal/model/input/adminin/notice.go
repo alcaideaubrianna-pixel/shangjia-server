@@ -26,6 +26,7 @@ type NoticeEditInp struct {
 	entity.AdminNotice
 	Receiver     []int64 `json:"receiver"     dc:"接收者"`
 	SenderAvatar string  `json:"senderAvatar" dc:"发送者头像"`
+	TgPush       bool    `json:"tgPush" orm:"-" dc:"是否同步推送Telegram"`
 }
 
 type NoticeEditModel struct{}

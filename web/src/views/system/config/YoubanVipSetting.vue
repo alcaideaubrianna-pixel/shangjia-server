@@ -3,7 +3,7 @@
     <n-spin :show="show" description="请稍候...">
       <n-form ref="formRef" :label-width="120" :model="formValue">
         <n-alert :show-icon="false" type="info" class="mb-4">
-          这里配置上架系统 VIP 的前台售价、折扣活动和邀请奖励。支付方式只保留 GMPay 和彩虹易支付。
+          这里配置上架系统 VIP 的售价、支付和优惠券。会员赠送及邀请奖励请在“会员活动”中配置。
         </n-alert>
 
         <n-form-item label="启用 VIP" path="youbanPublishVipEnabled">
@@ -70,29 +70,6 @@
           </n-input-number>
         </n-form-item>
 
-        <n-form-item label="邀请奖励" path="youbanPublishVipInviteRewardDays">
-          <n-input-number
-            v-model:value="formValue.youbanPublishVipInviteRewardDays"
-            :min="0"
-            clearable
-          >
-            <template #suffix>天</template>
-          </n-input-number>
-          <template #feedback>邀请人和被邀请人按账号关系自动结算，奖励天数可叠加。</template>
-        </n-form-item>
-
-        <n-form-item label="活动标题" path="youbanPublishVipActivityTitle">
-          <n-input v-model:value="formValue.youbanPublishVipActivityTitle" clearable />
-        </n-form-item>
-
-        <n-form-item label="活动说明" path="youbanPublishVipActivityText">
-          <n-input
-            v-model:value="formValue.youbanPublishVipActivityText"
-            type="textarea"
-            clearable
-          />
-        </n-form-item>
-
         <n-space>
           <n-button type="primary" @click="formSubmit">保存更新</n-button>
         </n-space>
@@ -121,9 +98,6 @@
   const formRef = ref<any>();
   const message = useMessage();
   const formValue = ref({
-    youbanPublishVipActivityText:
-      '邀请好友注册并完成首月付款后，邀请人自动获得 1 个月 VIP，有效期可叠加。',
-    youbanPublishVipActivityTitle: '邀请返会员',
     youbanPublishVipCouponAmount: 0,
     youbanPublishVipCouponCode: '',
     youbanPublishVipCouponEnabled: true,
@@ -131,7 +105,6 @@
     youbanPublishVipEnabled: true,
     youbanPublishVipPaymentGateway: 'gmpay',
     youbanPublishVipCurrency: 'USDT',
-    youbanPublishVipInviteRewardDays: 30,
     youbanPublishVipMonthlyPrice: 30,
     youbanPublishVipOriginalPrice: 60,
   });

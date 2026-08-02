@@ -45,6 +45,9 @@ func newModule() {
 
 func (m *module) Start(option *addons.Option) (err error) {
 	global.Init(m.ctx, m.skeleton)
+	if err = install.EnsureRuntimeCrons(m.ctx); err != nil {
+		return
+	}
 	option.Server.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(service.Middleware().Addon)
 		router.Api(m.ctx, group)

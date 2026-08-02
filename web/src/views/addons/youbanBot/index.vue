@@ -67,6 +67,10 @@
           />
         </n-tab-pane>
 
+        <n-tab-pane name="binding" tab="TG 绑定">
+          <account-bind-panel />
+        </n-tab-pane>
+
         <n-tab-pane name="user" tab="用户与消息">
           <user-message-panel />
         </n-tab-pane>
@@ -159,6 +163,7 @@
     FeatureSave,
   } from '@/api/addons/youbanBot';
   import FeatureConfigModal from './components/feature-config-modal.vue';
+  import AccountBindPanel from './components/account-bind-panel.vue';
   import UserMessagePanel from './components/user-message-panel.vue';
 
   const message = useMessage();

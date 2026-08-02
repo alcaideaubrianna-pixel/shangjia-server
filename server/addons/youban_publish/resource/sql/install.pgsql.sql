@@ -1786,6 +1786,95 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_success_record_job" ON "hg_youban_publ
 CREATE INDEX IF NOT EXISTS "idx_ybp_success_record_owner" ON "hg_youban_publish_success_record" ("tenant_id", "account_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_success_record_profile" ON "hg_youban_publish_success_record" ("profile_id", "id");
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tenant_vip" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "level" integer NOT NULL DEFAULT 0,
+  "status" integer NOT NULL DEFAULT 2,
+  "opened_at" timestamp DEFAULT NULL,
+  "expired_at" timestamp DEFAULT NULL,
+  "remark" text NOT NULL DEFAULT '',
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tenant_vip_tenant" ON "hg_youban_publish_tenant_vip" ("tenant_id") WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_vip_expired" ON "hg_youban_publish_tenant_vip" ("status", "expired_at", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tenant_vip_log" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "operator_id" bigint NOT NULL DEFAULT 0,
+  "source" varchar(32) NOT NULL DEFAULT '',
+  "action" varchar(32) NOT NULL DEFAULT '',
+  "before_status" integer NOT NULL DEFAULT 0,
+  "before_level" integer NOT NULL DEFAULT 0,
+  "before_expired_at" timestamp DEFAULT NULL,
+  "after_status" integer NOT NULL DEFAULT 0,
+  "after_level" integer NOT NULL DEFAULT 0,
+  "after_expired_at" timestamp DEFAULT NULL,
+  "remark" text NOT NULL DEFAULT '',
+  "created_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_tenant_vip_log_tenant" ON "hg_youban_publish_tenant_vip_log" ("tenant_id", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tenant_vip_coupon" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "code" varchar(64) NOT NULL DEFAULT '',
+  "use_type" varchar(16) NOT NULL DEFAULT 'single',
+  "amount" numeric(10,2) NOT NULL DEFAULT 0,
+  "total_count" integer NOT NULL DEFAULT 1,
+  "used_count" integer NOT NULL DEFAULT 0,
+  "status" integer NOT NULL DEFAULT 1,
+  "remark" text NOT NULL DEFAULT '',
+  "expired_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tenant_vip_coupon_code" ON "hg_youban_publish_tenant_vip_coupon" ("code") WHERE "deleted_at" IS NULL;
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tenant_vip_event" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "event_key" varchar(160) NOT NULL DEFAULT '',
+  "event_type" varchar(48) NOT NULL DEFAULT '',
+  "activity_code" varchar(64) NOT NULL DEFAULT '',
+  "activity_generation" integer NOT NULL DEFAULT 1,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "trigger_tenant_id" bigint NOT NULL DEFAULT 0,
+  "trigger_account_id" bigint NOT NULL DEFAULT 0,
+  "reference_type" varchar(32) NOT NULL DEFAULT '',
+  "reference_id" varchar(64) NOT NULL DEFAULT '',
+  "change_days" integer NOT NULL DEFAULT 0,
+  "before_expired_at" timestamp DEFAULT NULL,
+  "after_expired_at" timestamp DEFAULT NULL,
+  "notify_status" varchar(16) NOT NULL DEFAULT 'pending',
+  "notify_retry_count" integer NOT NULL DEFAULT 0,
+  "notify_next_retry_at" timestamp DEFAULT NULL,
+  "notified_at" timestamp DEFAULT NULL,
+  "error_message" text NOT NULL DEFAULT '',
+  "remark" text NOT NULL DEFAULT '',
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_vip_event_key" ON "hg_youban_publish_tenant_vip_event" ("event_key");
+CREATE INDEX IF NOT EXISTS "idx_ybp_vip_event_activity" ON "hg_youban_publish_tenant_vip_event" ("activity_code", "activity_generation", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_vip_event_tenant" ON "hg_youban_publish_tenant_vip_event" ("tenant_id", "event_type", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_vip_event_notify" ON "hg_youban_publish_tenant_vip_event" ("notify_status", "notify_next_retry_at", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_activity_generation" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "activity_code" varchar(64) NOT NULL DEFAULT '',
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "generation" integer NOT NULL DEFAULT 1,
+  "reset_reason" text NOT NULL DEFAULT '',
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_activity_generation" ON "hg_youban_publish_activity_generation" ("activity_code", "tenant_id");
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_full_push_batch" (
   "id" BIGSERIAL PRIMARY KEY, "batch_no" varchar(128) NOT NULL, "tenant_id" bigint NOT NULL DEFAULT 0,
   "channel_id" bigint NOT NULL DEFAULT 0, "requested_by" bigint NOT NULL DEFAULT 0,

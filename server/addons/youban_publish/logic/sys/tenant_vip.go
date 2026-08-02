@@ -37,7 +37,19 @@ func (s *sSysPublish) TenantVipStatus(ctx context.Context) (*sysin.TenantVipStat
 	if err != nil {
 		return nil, err
 	}
-	return s.tenantVipStatus(ctx, account.TenantId)
+	status, err := s.tenantVipStatus(ctx, account.TenantId)
+	if err != nil {
+		return nil, err
+	}
+	activities, activityCfg, err := s.tenantVipActivities(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	result := *status
+	result.Activities = activities
+	result.ActivityBannerTitle = activityCfg.ActivityBannerTitle
+	result.ActivityBannerText = activityCfg.ActivityBannerText
+	return &result, nil
 }
 
 func (s *sSysPublish) TenantVipPlans(ctx context.Context) ([]*sysin.TenantVipPlanModel, error) {
@@ -89,6 +101,7 @@ func (s *sSysPublish) TenantVipOrderCreate(ctx context.Context, in *sysin.Tenant
 	subject := fmt.Sprintf("上架系统VIP会员:%d天", plan.Days)
 	now := gtime.Now()
 	var res *sysin.TenantVipOrderModel
+	var freeOrderId int64
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		result, err := dao.AdminOrder.Ctx(ctx).Data(baseentity.AdminOrder{
 			MemberId:  contexts.GetUserId(ctx),
@@ -125,7 +138,11 @@ func (s *sSysPublish) TenantVipOrderCreate(ctx context.Context, in *sysin.Tenant
 			res.TradeType = create.Order.TradeType
 		}
 		if amount <= 0 {
-			if err = s.openTenantVip(ctx, account.TenantId, plan.Level, plan.Days, subject, "free"); err != nil {
+			orderColumns := dao.AdminOrder.Columns()
+			if _, err = dao.AdminOrder.Ctx(ctx).
+				Where(orderColumns.Id, orderId).
+				Data(g.Map{orderColumns.Status: consts.OrderStatusPay, orderColumns.UpdatedAt: now}).
+				Update(); err != nil {
 				return err
 			}
 			if err = s.markTenantVipCouponUsed(ctx, gjson.New(g.Map{
@@ -136,9 +153,23 @@ func (s *sSysPublish) TenantVipOrderCreate(ctx context.Context, in *sysin.Tenant
 			res.Status = consts.OrderStatusPay
 			res.StatusTxt = tenantVipOrderStatusText(consts.OrderStatusPay)
 			res.PaidAt = now
+			freeOrderId = orderId
 		}
 		return nil
 	})
+	if err == nil && freeOrderId > 0 {
+		_, err = s.applyTenantVipExtension(ctx, &tenantVipChangeInp{
+			EventKey:      fmt.Sprintf("%s:%d", tenantVipEventPay, freeOrderId),
+			EventType:     tenantVipEventPay,
+			TenantId:      account.TenantId,
+			AccountId:     account.Id,
+			ReferenceType: "order",
+			ReferenceId:   fmt.Sprintf("%d", freeOrderId),
+			Level:         plan.Level,
+			Days:          plan.Days,
+			Remark:        subject,
+		})
+	}
 	return res, err
 }
 
@@ -254,36 +285,53 @@ func (s *sSysPublish) TenantVipPayNotify(ctx context.Context, in *payin.NotifyCa
 	if order == nil {
 		return gerror.Newf("会员订单[%s]不存在", in.Pay.OrderSn)
 	}
-	if order.Status != consts.OrderStatusNotPay && order.Status != consts.OrderStatusClose {
+	if order.Status != consts.OrderStatusNotPay && order.Status != consts.OrderStatusClose && order.Status != consts.OrderStatusPay {
 		return nil
-	}
-	shouldReward, err := s.shouldRewardInviterVip(ctx, order.ProductId)
-	if err != nil {
-		return err
 	}
 	cfg, err := service.SysConfig().GetYoubanPublishVip(ctx)
 	if err != nil {
 		return err
 	}
 	plan := tenantVipPlanByCode(tenantVipPlanMonth, cfg)
-	_, err = dao.AdminOrder.Ctx(ctx).
-		Where(cols.Id, order.Id).
-		WhereIn(cols.Status, []int{consts.OrderStatusNotPay, consts.OrderStatusClose}).
-		Data(g.Map{cols.Status: consts.OrderStatusPay, cols.UpdatedAt: gtime.Now()}).
-		Update()
+	paidAt := order.UpdatedAt
+	if order.Status != consts.OrderStatusPay {
+		paidAt = gtime.Now()
+		_, err = dao.AdminOrder.Ctx(ctx).
+			Where(cols.Id, order.Id).
+			WhereIn(cols.Status, []int{consts.OrderStatusNotPay, consts.OrderStatusClose}).
+			Data(g.Map{cols.Status: consts.OrderStatusPay, cols.UpdatedAt: paidAt}).
+			Update()
+		if err != nil {
+			return err
+		}
+	}
+	change, err := s.applyTenantVipExtension(ctx, &tenantVipChangeInp{
+		EventKey:      fmt.Sprintf("%s:%d", tenantVipEventPay, order.Id),
+		EventType:     tenantVipEventPay,
+		TenantId:      order.ProductId,
+		AccountId:     order.MemberId,
+		ReferenceType: "order",
+		ReferenceId:   fmt.Sprintf("%d", order.Id),
+		Level:         plan.Level,
+		Days:          plan.Days,
+		Remark:        order.Remark,
+	})
 	if err != nil {
 		return err
 	}
-	if err = s.openTenantVip(ctx, order.ProductId, plan.Level, plan.Days, order.Remark, "pay"); err != nil {
-		return err
+	if change.Applied {
+		if err = s.markTenantVipCouponUsed(ctx, in.Pay.Detail); err != nil {
+			return err
+		}
 	}
-	if err = s.markTenantVipCouponUsed(ctx, in.Pay.Detail); err != nil {
-		return err
-	}
-	if !shouldReward {
+	if order.Money <= 0 {
 		return nil
 	}
-	return s.rewardInviterVip(ctx, order.ProductId, cfg)
+	activityCfg, err := service.SysConfig().GetYoubanPublishVipActivity(ctx)
+	if err != nil {
+		return err
+	}
+	return s.rewardInviterVip(ctx, order.ProductId, order.MemberId, paidAt, activityCfg)
 }
 
 func (s *sSysPublish) ensureTenantVipFeature(ctx context.Context, tenantId int64, featureCode string) error {
@@ -333,7 +381,11 @@ func (s *sSysPublish) loadTenantVipStatus(ctx context.Context, tenantId int64) (
 	if err != nil {
 		return nil, err
 	}
-	res.AvailableFeatures = []string{sysin.TenantVipFeatureAntiScan}
+	res.AvailableFeatures = []string{
+		sysin.TenantVipFeatureAntiScan,
+		sysin.TenantVipFeatureCollectSource,
+		sysin.TenantVipFeatureBackgroundReplace,
+	}
 	if permissions[sysin.TenantVipFeatureTextObfuscation] {
 		res.AvailableFeatures = append(res.AvailableFeatures, sysin.TenantVipFeatureTextObfuscation)
 	}
@@ -345,7 +397,12 @@ func (s *sSysPublish) loadTenantVipStatus(ctx context.Context, tenantId int64) (
 	res.ExpiredAt = vip.ExpiredAt
 	res.IsVip = vip.Status == consts.StatusEnabled && vip.Level > 0 && (vip.ExpiredAt == nil || vip.ExpiredAt.After(gtime.Now()))
 	if res.IsVip {
-		res.Features = []string{sysin.TenantVipFeatureSimilarMedia, sysin.TenantVipFeatureAntiScan}
+		res.Features = []string{
+			sysin.TenantVipFeatureSimilarMedia,
+			sysin.TenantVipFeatureAntiScan,
+			sysin.TenantVipFeatureCollectSource,
+			sysin.TenantVipFeatureBackgroundReplace,
+		}
 		if permissions[sysin.TenantVipFeatureTextObfuscation] {
 			res.Features = append(res.Features, sysin.TenantVipFeatureTextObfuscation)
 		}
@@ -354,44 +411,22 @@ func (s *sSysPublish) loadTenantVipStatus(ctx context.Context, tenantId int64) (
 }
 
 func (s *sSysPublish) openTenantVip(ctx context.Context, tenantId int64, level int, days int, remark string, source string) error {
-	if tenantId <= 0 || level <= 0 || days <= 0 {
-		return gerror.New("会员开通参数不完整")
-	}
-	before, err := s.tenantVipStatus(ctx, tenantId)
-	if err != nil {
-		return err
-	}
-	expiredAt := gtime.Now().AddDate(0, 0, days)
-	now := gtime.Now()
-	data := do.YoubanPublishTenantVip{
+	_, err := s.applyTenantVipExtension(ctx, &tenantVipChangeInp{
+		EventType: source,
 		TenantId:  tenantId,
 		Level:     level,
-		Status:    consts.StatusEnabled,
-		OpenedAt:  now,
-		ExpiredAt: expiredAt,
+		Days:      days,
 		Remark:    remark,
-		UpdatedAt: now,
-	}
-	cols := pdao.YoubanPublishTenantVip.Columns()
-	count, err := pdao.YoubanPublishTenantVip.Ctx(ctx).Where(cols.TenantId, tenantId).Count()
-	if err != nil {
-		return gerror.Wrap(err, "检查租户会员失败")
-	}
-	if count > 0 {
-		if _, err = pdao.YoubanPublishTenantVip.Ctx(ctx).Where(cols.TenantId, tenantId).Data(data).Update(); err != nil {
-			return gerror.Wrap(err, "更新租户会员失败")
-		}
-	} else {
-		data.CreatedAt = now
-		if _, err = pdao.YoubanPublishTenantVip.Ctx(ctx).Data(data).Insert(); err != nil {
-			return gerror.Wrap(err, "保存租户会员失败")
-		}
-	}
-	_, _ = cache.Instance().Remove(ctx, tenantVipCacheKey(tenantId))
-	return s.writeTenantVipLog(ctx, before, tenantId, level, expiredAt, source, remark)
+	})
+	return err
 }
 
-func (s *sSysPublish) writeTenantVipLog(ctx context.Context, before *sysin.TenantVipStatusModel, tenantId int64, level int, expiredAt *gtime.Time, source string, remark string) error {
+func (s *sSysPublish) writeTenantVipLogTx(ctx context.Context, tx gdb.TX, before *sysin.TenantVipStatusModel, tenantId int64, level int, expiredAt *gtime.Time, source string, remark string) error {
+	_, err := tx.Model(pdao.YoubanPublishTenantVipLog.Table()).Ctx(ctx).Data(tenantVipLogData(ctx, before, tenantId, level, expiredAt, source, remark)).Insert()
+	return gerror.Wrap(err, "写入租户会员日志失败")
+}
+
+func tenantVipLogData(ctx context.Context, before *sysin.TenantVipStatusModel, tenantId int64, level int, expiredAt *gtime.Time, source string, remark string) do.YoubanPublishTenantVipLog {
 	if before == nil {
 		before = &sysin.TenantVipStatusModel{}
 	}
@@ -405,7 +440,7 @@ func (s *sSysPublish) writeTenantVipLog(ctx context.Context, before *sysin.Tenan
 	} else if before.IsVip {
 		action = "adjust"
 	}
-	_, err := pdao.YoubanPublishTenantVipLog.Ctx(ctx).Data(do.YoubanPublishTenantVipLog{
+	return do.YoubanPublishTenantVipLog{
 		TenantId:        tenantId,
 		OperatorId:      contexts.GetUserId(ctx),
 		Source:          source,
@@ -418,38 +453,38 @@ func (s *sSysPublish) writeTenantVipLog(ctx context.Context, before *sysin.Tenan
 		AfterExpiredAt:  expiredAt,
 		Remark:          remark,
 		CreatedAt:       gtime.Now(),
-	}).Insert()
-	return gerror.Wrap(err, "写入租户会员日志失败")
+	}
 }
 
-func (s *sSysPublish) rewardInviterVip(ctx context.Context, paidTenantId int64, cfg *model.YoubanPublishVipConfig) error {
-	if cfg == nil || !cfg.InviteRewardEnabled || cfg.InviteRewardDays <= 0 || paidTenantId <= 0 {
+func (s *sSysPublish) rewardInviterVip(ctx context.Context, paidTenantId int64, paidAccountId int64, paidAt *gtime.Time, cfg *model.YoubanPublishVipActivityConfig) error {
+	if cfg == nil || !cfg.InviteFirstPayEnabled || cfg.InviteFirstPayDays <= 0 || paidTenantId <= 0 || !tenantVipActivityTriggerEligible(paidAt, cfg.InviteFirstPayEnabledAt) {
 		return nil
 	}
-	var row *webInviteRow
-	if err := g.DB().Model(webInviteTable).Safe().Ctx(ctx).
-		Where("used_tenant_id", paidTenantId).
-		Where("status", webInviteStatusUsed).
-		WhereNull("deleted_at").
-		OrderDesc("used_at").
-		Scan(&row); err != nil {
-		return gerror.Wrap(err, "读取邀请关系失败")
+	row, err := s.inviteByUsedTenant(ctx, paidTenantId)
+	if err != nil {
+		return err
 	}
 	if row == nil || row.InviterTenantId <= 0 || row.InviterTenantId == paidTenantId {
 		return nil
 	}
-	return s.openTenantVip(ctx, row.InviterTenantId, 1, cfg.InviteRewardDays, "邀请用户付款奖励", "invite_reward")
-}
-
-func (s *sSysPublish) shouldRewardInviterVip(ctx context.Context, tenantId int64) (bool, error) {
-	cols := dao.AdminOrder.Columns()
-	count, err := dao.AdminOrder.Ctx(ctx).
-		Where(cols.OrderType, tenantVipOrderType).
-		Where(cols.ProductId, tenantId).
-		Where(cols.Status, consts.OrderStatusPay).
-		Count()
+	eventKey, generation, err := s.tenantVipActivityEventIdentity(ctx, tenantVipEventInviteFirstPay, row.InviterTenantId, fmt.Sprintf("%s:%d:%d", tenantVipEventInviteFirstPay, row.InviterTenantId, paidTenantId))
 	if err != nil {
-		return false, gerror.Wrap(err, "检查会员首单失败")
+		return err
 	}
-	return count == 0, nil
+	_, err = s.applyTenantVipExtension(ctx, &tenantVipChangeInp{
+		EventKey:           eventKey,
+		EventType:          tenantVipEventInviteFirstPay,
+		ActivityCode:       tenantVipEventInviteFirstPay,
+		ActivityGeneration: generation,
+		TenantId:           row.InviterTenantId,
+		AccountId:          row.InviterAccountId,
+		TriggerTenantId:    paidTenantId,
+		TriggerAccountId:   paidAccountId,
+		ReferenceType:      "invite",
+		ReferenceId:        fmt.Sprintf("%d", row.Id),
+		Level:              1,
+		Days:               cfg.InviteFirstPayDays,
+		Remark:             "邀请好友首次付费奖励",
+	})
+	return err
 }

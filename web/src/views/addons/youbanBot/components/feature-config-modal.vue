@@ -42,6 +42,31 @@
           :options="item.options || []"
           :placeholder="item.placeholder"
         />
+        <TelegramRichEditor
+          v-else-if="item.component === 'telegram_rich_text'"
+          v-model:value="form.configValues[item.field]"
+        />
+        <n-space v-else-if="item.component === 'telegram_buttons'" vertical class="w-full">
+          <n-grid
+            v-for="(button, index) in buttonItems(item.field)"
+            :key="index"
+            :cols="12"
+            :x-gap="8"
+          >
+            <n-gi :span="3"><n-input v-model:value="button.text" placeholder="按钮文案" /></n-gi>
+            <n-gi :span="6"><n-input v-model:value="button.url" placeholder="https://..." /></n-gi>
+            <n-gi :span="2"
+              ><n-input-number v-model:value="button.row" :min="0" :max="7" placeholder="行"
+            /></n-gi>
+            <n-gi :span="1"
+              ><n-button quaternary type="error" @click="removeButton(item.field, index)"
+                >删</n-button
+              ></n-gi
+            >
+          </n-grid>
+          <n-button dashed block @click="addButton(item.field)">添加 URL 按钮</n-button>
+          <n-text depth="3">相同行号的按钮会排列在同一行，最多 8 个。</n-text>
+        </n-space>
         <n-input
           v-else
           v-model:value="form.configValues[item.field]"
@@ -96,27 +121,10 @@
   </n-modal>
 </template>
 
-<style scoped>
-.feature-config-modal :deep(.n-dialog) {
-  width: 720px;
-  max-width: calc(100vw - 32px);
-}
-
-.feature-config-form :deep(.n-form-item-blank),
-.feature-config-form :deep(.n-form-item-blank > *) {
-  width: 100%;
-}
-
-.feature-config-form :deep(.n-input),
-.feature-config-form :deep(.n-input-number),
-.feature-config-form :deep(.n-select) {
-  width: 100%;
-}
-</style>
-
 <script setup lang="ts">
   import { computed, onMounted, ref } from 'vue';
   import { BotList, UserList } from '@/api/addons/youbanBot';
+  import TelegramRichEditor from '@/components/TelegramRichEditor/index.vue';
 
   const props = defineProps<{ show: boolean; form: Record<string, any>; statusOptions: any[] }>();
   const form = computed(() => props.form);
@@ -159,16 +167,21 @@
     const keyword = adminKeyword.value.trim().toLowerCase();
     const selectedBotIds = new Set(adminBotIds.value.map((item) => String(item)));
     return adminUsers.value.filter((item) => {
-      const botIds = Array.isArray(item.botIds) && item.botIds.length > 0 ? item.botIds : [item.botId];
+      const botIds =
+        Array.isArray(item.botIds) && item.botIds.length > 0 ? item.botIds : [item.botId];
       if (selectedBotIds.size > 0 && !botIds.some((botId) => selectedBotIds.has(String(botId)))) {
         return false;
       }
       if (!keyword) return true;
-      return [item.telegramUserId, item.telegramUsername, item.bindAccountName, item.botUsername].some(
-        (v) =>
-          String(v || '')
-            .toLowerCase()
-            .includes(keyword)
+      return [
+        item.telegramUserId,
+        item.telegramUsername,
+        item.bindAccountName,
+        item.botUsername,
+      ].some((v) =>
+        String(v || '')
+          .toLowerCase()
+          .includes(keyword)
       );
     });
   });
@@ -180,7 +193,9 @@
   );
 
   function currentBotIds() {
-    return adminBotIds.value.length > 0 ? adminBotIds.value : superBots.value.map((item) => item.id);
+    return adminBotIds.value.length > 0
+      ? adminBotIds.value
+      : superBots.value.map((item) => item.id);
   }
 
   function mergeUsers(list: any[]) {
@@ -281,8 +296,43 @@
       );
   }
 
+  function buttonItems(field: string) {
+    if (!Array.isArray(form.value.configValues[field])) {
+      form.value.configValues[field] = [];
+    }
+    return form.value.configValues[field] as Array<{ text: string; url: string; row: number }>;
+  }
+
+  function addButton(field: string) {
+    const list = buttonItems(field);
+    if (list.length >= 8) return;
+    list.push({ text: '', url: '', row: list.length });
+  }
+
+  function removeButton(field: string, index: number) {
+    buttonItems(field).splice(index, 1);
+  }
+
   onMounted(async () => {
     await loadSuperBots();
     await loadAdminUsers();
   });
 </script>
+
+<style scoped>
+  .feature-config-modal :deep(.n-dialog) {
+    width: 720px;
+    max-width: calc(100vw - 32px);
+  }
+
+  .feature-config-form :deep(.n-form-item-blank),
+  .feature-config-form :deep(.n-form-item-blank > *) {
+    width: 100%;
+  }
+
+  .feature-config-form :deep(.n-input),
+  .feature-config-form :deep(.n-input-number),
+  .feature-config-form :deep(.n-select) {
+    width: 100%;
+  }
+</style>

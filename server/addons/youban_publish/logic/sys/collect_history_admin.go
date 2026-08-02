@@ -22,6 +22,9 @@ func (s *sSysPublish) CollectSourceHistoryStart(ctx context.Context, in *sysin.C
 	if in == nil || in.Id <= 0 {
 		return nil, gerror.New("采集源ID不能为空")
 	}
+	if err = s.ensureTenantVipFeature(ctx, account.TenantId, sysin.TenantVipFeatureCollectSource); err != nil {
+		return nil, err
+	}
 	taskId, err := s.createCollectHistoryTask(ctx, in.Id, account.TenantId, account.Id, true)
 	if err != nil {
 		return nil, err

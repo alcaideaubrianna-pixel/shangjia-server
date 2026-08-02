@@ -40,6 +40,15 @@ func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiSc
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
+	if in.BackgroundReplaceEnabled == 1 {
+		account, accountErr := s.currentAccount(ctx)
+		if accountErr != nil {
+			return nil, accountErr
+		}
+		if err = s.ensureTenantVipFeature(ctx, account.TenantId, sysin.TenantVipFeatureBackgroundReplace); err != nil {
+			return nil, err
+		}
+	}
 	imageBytes, originalUrl, err := readAntiScanPreviewImage(ctx, upload, in.UseDefaultImage)
 	if err != nil {
 		return nil, err

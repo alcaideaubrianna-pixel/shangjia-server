@@ -22,8 +22,6 @@ func tenantVipPlanByConfig(cfg *model.YoubanPublishVipConfig) *sysin.TenantVipPl
 		cfg = tenantVipDefaultConfig()
 	}
 	return &sysin.TenantVipPlanModel{
-		ActivityText:  cfg.ActivityText,
-		ActivityTitle: cfg.ActivityTitle,
 		Code:          tenantVipPlanMonth,
 		CouponAmount:  cfg.CouponAmount,
 		CouponEnabled: cfg.CouponEnabled,
@@ -77,16 +75,12 @@ func tenantVipOrderStatusText(status int) string {
 
 func tenantVipDefaultConfig() *model.YoubanPublishVipConfig {
 	return &model.YoubanPublishVipConfig{
-		Enabled:             true,
-		InviteRewardEnabled: true,
-		MonthlyPrice:        30,
-		OriginalPrice:       60,
-		DiscountText:        "限时半价",
-		InviteRewardDays:    30,
-		ActivityTitle:       "邀请返会员",
-		ActivityText:        "邀请好友注册并完成首月付款后，邀请人自动获得 1 个月 VIP，有效期可叠加。",
-		PaymentGateway:      consts.PayTypeGMPay,
-		Currency:            "USDT",
+		Enabled:        true,
+		MonthlyPrice:   30,
+		OriginalPrice:  60,
+		DiscountText:   "限时半价",
+		PaymentGateway: consts.PayTypeGMPay,
+		Currency:       "USDT",
 	}
 }
 

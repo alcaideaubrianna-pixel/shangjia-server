@@ -29,6 +29,7 @@
           <PaySetting v-if="type === 10" />
           <WechatSetting v-if="type === 11" />
           <YoubanVipSetting v-if="type === 12" />
+          <YoubanVipActivitySetting v-if="type === 13" />
         </n-card>
       </n-grid-item>
     </n-grid>
@@ -74,6 +75,9 @@
     }),
     YoubanVipSetting = defineAsyncComponent(() => {
       return import('./YoubanVipSetting.vue');
+    }),
+    YoubanVipActivitySetting = defineAsyncComponent(() => {
+      return import('./YoubanVipActivitySetting.vue');
     });
   const typeTabList = [
     {
@@ -133,8 +137,13 @@
     },
     {
       name: '上架VIP',
-      desc: '上架系统会员价格和活动',
+      desc: '上架系统会员价格和支付',
       key: 12,
+    },
+    {
+      name: '会员活动',
+      desc: '会员赠送、邀请奖励和通知',
+      key: 13,
     },
   ];
   export default defineComponent({
@@ -151,6 +160,7 @@
       WechatSetting,
       LoginSetting,
       YoubanVipSetting,
+      YoubanVipActivitySetting,
     },
     setup() {
       const router = useRouter();

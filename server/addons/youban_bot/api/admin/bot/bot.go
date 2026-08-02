@@ -75,6 +75,23 @@ type UserListRes struct {
 	List []*sysin.UserModel `json:"list" dc:"用户列表"`
 }
 
+type AccountBindListReq struct {
+	g.Meta `path:"/bot/binding/list" method:"get" tags:"全局机器人后台" summary:"TG绑定列表"`
+	sysin.AccountBindListInp
+}
+
+type AccountBindListRes struct {
+	form.PageRes
+	List []*sysin.AccountBindModel `json:"list" dc:"TG绑定列表"`
+}
+
+type AccountBindUnbindReq struct {
+	g.Meta `path:"/bot/binding/unbind" method:"post" tags:"全局机器人后台" summary:"解绑TG账号"`
+	sysin.AccountBindUnbindInp
+}
+
+type AccountBindUnbindRes struct{}
+
 type MessageListReq struct {
 	g.Meta `path:"/bot/message/list" method:"get" tags:"全局机器人后台" summary:"Bot消息日志"`
 	sysin.MessageListInp

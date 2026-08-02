@@ -43,10 +43,7 @@ func Install(ctx context.Context) error {
 	if err := execBusinessSql(ctx, businessSqlFiles(true)); err != nil {
 		return err
 	}
-	if err := ensureVipOrderCloseCron(ctx); err != nil {
-		return err
-	}
-	return ensureCycleSchedulerCron(ctx)
+	return EnsureRuntimeCrons(ctx)
 }
 
 func Upgrade(ctx context.Context) error {
@@ -56,10 +53,17 @@ func Upgrade(ctx context.Context) error {
 	if err := execBusinessSql(ctx, businessSqlFiles(false)); err != nil {
 		return err
 	}
+	return EnsureRuntimeCrons(ctx)
+}
+
+func EnsureRuntimeCrons(ctx context.Context) error {
 	if err := ensureVipOrderCloseCron(ctx); err != nil {
 		return err
 	}
-	return ensureCycleSchedulerCron(ctx)
+	if err := ensureCycleSchedulerCron(ctx); err != nil {
+		return err
+	}
+	return ensureVipLifecycleCron(ctx)
 }
 
 func HeavyIndexSqlFiles() []string {

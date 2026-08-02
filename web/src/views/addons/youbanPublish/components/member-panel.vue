@@ -88,15 +88,6 @@
         <n-form-item label="折扣文案"
           ><n-input v-model:value="configForm.discountText" clearable
         /></n-form-item>
-        <n-form-item label="邀请奖励"
-          ><n-input-number v-model:value="configForm.inviteRewardDays" :min="0" clearable
-        /></n-form-item>
-        <n-form-item label="活动标题"
-          ><n-input v-model:value="configForm.activityTitle" clearable
-        /></n-form-item>
-        <n-form-item label="活动说明"
-          ><n-input v-model:value="configForm.activityText" type="textarea" clearable
-        /></n-form-item>
       </n-form>
     </n-modal>
 

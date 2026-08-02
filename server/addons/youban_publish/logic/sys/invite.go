@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -12,6 +13,8 @@ import (
 	"github.com/gogf/gf/v2/util/grand"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
+	"hotgo/internal/dao"
 )
 
 const webInviteTable = "hg_youban_bot_invite_code"
@@ -44,6 +47,17 @@ func (s *sSysPublish) InviteInfo(ctx context.Context) (res *sysin.InviteInfoMode
 	res.ExpiresAt = item.ExpiresAt
 	res.InviteUrl = item.InviteUrl
 	res.InviteCount, res.UsedCount = s.webInviteCountStats(ctx, account.Id)
+	activities, activityCfg, activityErr := s.tenantVipActivities(ctx, account)
+	if activityErr != nil {
+		return nil, activityErr
+	}
+	for _, activity := range activities {
+		if activity.Code == tenantVipEventInviteBindGift || activity.Code == tenantVipEventInviteFirstPay {
+			res.Activities = append(res.Activities, activity)
+		}
+	}
+	res.ActivityBannerTitle = activityCfg.ActivityBannerTitle
+	res.ActivityBannerText = activityCfg.ActivityBannerText
 	return res, nil
 }
 
@@ -75,7 +89,98 @@ func (s *sSysPublish) InviteList(ctx context.Context, in *sysin.InviteListInp) (
 	for _, row := range rows {
 		list = append(list, row.toModel())
 	}
+	if err = s.enrichInviteActivityStatus(ctx, account.TenantId, list); err != nil {
+		return nil, 0, err
+	}
 	return
+}
+
+func (s *sSysPublish) enrichInviteActivityStatus(ctx context.Context, inviterTenantId int64, list []*sysin.InviteModel) error {
+	if len(list) == 0 {
+		return nil
+	}
+	accountIds := make([]int64, 0, len(list))
+	tenantIds := make([]int64, 0, len(list))
+	for _, item := range list {
+		if item.UsedAccountId > 0 {
+			accountIds = append(accountIds, item.UsedAccountId)
+		}
+		if item.UsedTenantId > 0 {
+			tenantIds = append(tenantIds, item.UsedTenantId)
+		}
+	}
+	type bindRow struct {
+		AccountId int64       `json:"account_id"`
+		BoundAt   *gtime.Time `json:"bound_at"`
+	}
+	binds := make(map[int64]*gtime.Time)
+	if len(accountIds) > 0 {
+		var rows []*bindRow
+		if err := g.DB().Model("hg_youban_bot_account_bind").Safe().Ctx(ctx).
+			Fields("account_id,MIN(created_at) AS bound_at").
+			Where("app", consts.AppApi).
+			WhereIn("account_id", accountIds).
+			Where("status", consts.StatusEnabled).
+			WhereNull("deleted_at").
+			Group("account_id").
+			Scan(&rows); err != nil {
+			return gerror.Wrap(err, "读取邀请用户TG绑定状态失败")
+		}
+		for _, row := range rows {
+			binds[row.AccountId] = row.BoundAt
+		}
+	}
+	type paidRow struct {
+		TenantId int64       `json:"tenant_id"`
+		PaidAt   *gtime.Time `json:"paid_at"`
+	}
+	paid := make(map[int64]*gtime.Time)
+	if len(tenantIds) > 0 {
+		orderColumns := dao.AdminOrder.Columns()
+		var rows []*paidRow
+		if err := dao.AdminOrder.Ctx(ctx).
+			Fields(orderColumns.ProductId+" AS tenant_id,MIN("+orderColumns.UpdatedAt+") AS paid_at").
+			Where(orderColumns.OrderType, tenantVipOrderType).
+			Where(orderColumns.Status, consts.OrderStatusPay).
+			WhereGT(orderColumns.Money, 0).
+			WhereIn(orderColumns.ProductId, tenantIds).
+			Group(orderColumns.ProductId).
+			Scan(&rows); err != nil {
+			return gerror.Wrap(err, "读取邀请用户首付状态失败")
+		}
+		for _, row := range rows {
+			paid[row.TenantId] = row.PaidAt
+		}
+	}
+	type rewardRow struct {
+		EventType       string `json:"event_type"`
+		TriggerTenantId int64  `json:"trigger_tenant_id"`
+		Days            int    `json:"days"`
+	}
+	rewards := make(map[string]int)
+	if len(tenantIds) > 0 {
+		var rows []*rewardRow
+		if err := g.DB().Model(tenantVipEventTable).Safe().Ctx(ctx).
+			Fields("event_type,trigger_tenant_id,COALESCE(SUM(change_days),0) AS days").
+			Where("tenant_id", inviterTenantId).
+			WhereIn("trigger_tenant_id", tenantIds).
+			WhereIn("event_type", []string{tenantVipEventInviteBindGift, tenantVipEventInviteFirstPay}).
+			Group("event_type,trigger_tenant_id").
+			Scan(&rows); err != nil {
+			return gerror.Wrap(err, "读取邀请奖励状态失败")
+		}
+		for _, row := range rows {
+			rewards[fmt.Sprintf("%s:%d", row.EventType, row.TriggerTenantId)] = row.Days
+		}
+	}
+	for _, item := range list {
+		item.TelegramBoundAt = binds[item.UsedAccountId]
+		item.FirstPaidAt = paid[item.UsedTenantId]
+		item.BindRewardDays = rewards[fmt.Sprintf("%s:%d", tenantVipEventInviteBindGift, item.UsedTenantId)]
+		item.FirstPayRewardDays = rewards[fmt.Sprintf("%s:%d", tenantVipEventInviteFirstPay, item.UsedTenantId)]
+		item.RewardDaysTotal = item.BindRewardDays + item.FirstPayRewardDays
+	}
+	return nil
 }
 
 func (s *sSysPublish) AdminInviteList(ctx context.Context, in *sysin.InviteListInp) (list []*sysin.InviteModel, totalCount int, err error) {

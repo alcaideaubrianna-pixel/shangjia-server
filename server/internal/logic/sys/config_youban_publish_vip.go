@@ -39,7 +39,6 @@ func (s *sSysConfig) ensureYoubanPublishVipConfig(ctx context.Context) (err erro
 		sort  int
 	}{
 		{key: "youbanPublishVipEnabled", name: "上架VIP开关", typ: consts.ConfigTypeBool, value: defaultCfg.Enabled, sort: 1},
-		{key: "youbanPublishVipInviteRewardEnabled", name: "邀请返会员开关", typ: consts.ConfigTypeBool, value: defaultCfg.InviteRewardEnabled, sort: 2},
 		{key: "youbanPublishVipMonthlyPrice", name: "上架VIP月价", typ: consts.ConfigTypeFloat64, value: defaultCfg.MonthlyPrice, sort: 3},
 		{key: "youbanPublishVipOriginalPrice", name: "上架VIP原价", typ: consts.ConfigTypeFloat64, value: defaultCfg.OriginalPrice, sort: 4},
 		{key: "youbanPublishVipDiscountText", name: "上架VIP折扣文案", typ: consts.ConfigTypeString, value: defaultCfg.DiscountText, sort: 5},
@@ -48,9 +47,6 @@ func (s *sSysConfig) ensureYoubanPublishVipConfig(ctx context.Context) (err erro
 		{key: "youbanPublishVipCouponAmount", name: "上架VIP优惠金额", typ: consts.ConfigTypeFloat64, value: defaultCfg.CouponAmount, sort: 8},
 		{key: "youbanPublishVipPaymentGateway", name: "上架VIP支付网关", typ: consts.ConfigTypeString, value: defaultCfg.PaymentGateway, sort: 9},
 		{key: "youbanPublishVipCurrency", name: "上架VIP币种", typ: consts.ConfigTypeString, value: defaultCfg.Currency, sort: 10},
-		{key: "youbanPublishVipInviteRewardDays", name: "邀请奖励天数", typ: consts.ConfigTypeInt, value: defaultCfg.InviteRewardDays, sort: 11},
-		{key: "youbanPublishVipActivityTitle", name: "上架VIP活动标题", typ: consts.ConfigTypeString, value: defaultCfg.ActivityTitle, sort: 12},
-		{key: "youbanPublishVipActivityText", name: "上架VIP活动说明", typ: consts.ConfigTypeString, value: defaultCfg.ActivityText, sort: 13},
 	}
 
 	cols := dao.SysConfig.Columns()
@@ -89,18 +85,14 @@ func (s *sSysConfig) ensureYoubanPublishVipConfig(ctx context.Context) (err erro
 
 func defaultYoubanPublishVipConfig() *model.YoubanPublishVipConfig {
 	return &model.YoubanPublishVipConfig{
-		Enabled:             true,
-		InviteRewardEnabled: true,
-		MonthlyPrice:        30,
-		OriginalPrice:       60,
-		DiscountText:        "限时半价",
-		CouponEnabled:       true,
-		CouponCode:          "",
-		CouponAmount:        0,
-		PaymentGateway:      consts.PayTypeGMPay,
-		Currency:            "USDT",
-		InviteRewardDays:    30,
-		ActivityTitle:       "邀请返会员",
-		ActivityText:        "邀请好友注册并完成首月付款后，邀请人自动获得 1 个月 VIP，有效期可叠加。",
+		Enabled:        true,
+		MonthlyPrice:   30,
+		OriginalPrice:  60,
+		DiscountText:   "限时半价",
+		CouponEnabled:  true,
+		CouponCode:     "",
+		CouponAmount:   0,
+		PaymentGateway: consts.PayTypeGMPay,
+		Currency:       "USDT",
 	}
 }

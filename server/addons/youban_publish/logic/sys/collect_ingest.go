@@ -54,6 +54,9 @@ func (s *sSysPublish) collectBotMessage(ctx context.Context, botId int64, msg *m
 }
 
 func (s *sSysPublish) collectSourcesByBotMessage(ctx context.Context, botId int64, msg *models.Message) ([]g.Map, error) {
+	if err := ensureTenantVipTables(ctx); err != nil {
+		return nil, err
+	}
 	chatId := strconv.FormatInt(msg.Chat.ID, 10)
 	version := s.collectSourceCacheVersion(ctx)
 	cacheKey := fmt.Sprintf("youban_publish:collect:sources:%s:%d:%s", version, botId, chatId)
@@ -63,14 +66,17 @@ func (s *sSysPublish) collectSourcesByBotMessage(ctx context.Context, botId int6
 			return collectBotSourceMaps(items), nil
 		}
 	}
-	mod := pdao.YoubanPublishCollectSource.Ctx(ctx).
-		Where("source_type", sysin.CollectSourceTypeBot).
-		Where("collect_enabled", 1).
-		Where("status", 1).
-		Where("source_chat_id", chatId).
-		WhereNull("deleted_at")
+	mod := pdao.YoubanPublishCollectSource.DB().Model(pdao.YoubanPublishCollectSource.Table()+" s").Safe().Ctx(ctx).
+		InnerJoin(pdao.YoubanPublishTenantVip.Table()+" vip", "vip.tenant_id=s.tenant_id AND vip.status=1 AND vip.level>0 AND vip.deleted_at IS NULL").
+		Where("s.source_type", sysin.CollectSourceTypeBot).
+		Where("s.collect_enabled", 1).
+		Where("s.status", 1).
+		Where("s.source_chat_id", chatId).
+		Where("(vip.expired_at IS NULL OR vip.expired_at>?)", gtime.Now()).
+		WhereNull("s.deleted_at").
+		Fields("s.*")
 	if botId > 0 {
-		mod = mod.Where("bot_id", botId)
+		mod = mod.Where("s.bot_id", botId)
 	}
 	records, err := mod.All()
 	if err != nil {

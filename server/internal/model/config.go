@@ -178,19 +178,34 @@ type MemberVipConfig struct {
 }
 
 type YoubanPublishVipConfig struct {
-	Enabled             bool    `json:"youbanPublishVipEnabled"`
-	InviteRewardEnabled bool    `json:"youbanPublishVipInviteRewardEnabled"`
-	MonthlyPrice        float64 `json:"youbanPublishVipMonthlyPrice"`
-	OriginalPrice       float64 `json:"youbanPublishVipOriginalPrice"`
-	DiscountText        string  `json:"youbanPublishVipDiscountText"`
-	CouponEnabled       bool    `json:"youbanPublishVipCouponEnabled"`
-	CouponCode          string  `json:"youbanPublishVipCouponCode"`
-	CouponAmount        float64 `json:"youbanPublishVipCouponAmount"`
-	PaymentGateway      string  `json:"youbanPublishVipPaymentGateway"`
-	Currency            string  `json:"youbanPublishVipCurrency"`
-	InviteRewardDays    int     `json:"youbanPublishVipInviteRewardDays"`
-	ActivityTitle       string  `json:"youbanPublishVipActivityTitle"`
-	ActivityText        string  `json:"youbanPublishVipActivityText"`
+	Enabled        bool    `json:"youbanPublishVipEnabled"`
+	MonthlyPrice   float64 `json:"youbanPublishVipMonthlyPrice"`
+	OriginalPrice  float64 `json:"youbanPublishVipOriginalPrice"`
+	DiscountText   string  `json:"youbanPublishVipDiscountText"`
+	CouponEnabled  bool    `json:"youbanPublishVipCouponEnabled"`
+	CouponCode     string  `json:"youbanPublishVipCouponCode"`
+	CouponAmount   float64 `json:"youbanPublishVipCouponAmount"`
+	PaymentGateway string  `json:"youbanPublishVipPaymentGateway"`
+	Currency       string  `json:"youbanPublishVipCurrency"`
+}
+
+type YoubanPublishVipActivityConfig struct {
+	BindGiftEnabled          bool   `json:"youbanPublishVipBindGiftEnabled"`
+	BindGiftDays             int    `json:"youbanPublishVipBindGiftDays"`
+	BindGiftEnabledAt        string `json:"youbanPublishVipBindGiftEnabledAt"`
+	InviteBindGiftEnabled    bool   `json:"youbanPublishVipInviteBindGiftEnabled"`
+	InviteBindGiftDays       int    `json:"youbanPublishVipInviteBindGiftDays"`
+	InviteBindGiftEnabledAt  string `json:"youbanPublishVipInviteBindGiftEnabledAt"`
+	InviteFirstPayEnabled    bool   `json:"youbanPublishVipInviteFirstPayGiftEnabled"`
+	InviteFirstPayDays       int    `json:"youbanPublishVipInviteFirstPayGiftDays"`
+	InviteFirstPayEnabledAt  string `json:"youbanPublishVipInviteFirstPayGiftEnabledAt"`
+	EventTrackingStartedAt   string `json:"youbanPublishVipEventTrackingStartedAt"`
+	ActivityBannerTitle      string `json:"youbanPublishVipActivityBannerTitle"`
+	ActivityBannerText       string `json:"youbanPublishVipActivityBannerText"`
+	PayNotifyEnabled         bool   `json:"youbanPublishVipPayNotifyEnabled"`
+	GiftNotifyEnabled        bool   `json:"youbanPublishVipGiftNotifyEnabled"`
+	AdminAdjustNotifyEnabled bool   `json:"youbanPublishVipAdminAdjustNotifyEnabled"`
+	ExpiredNotifyEnabled     bool   `json:"youbanPublishVipExpiredNotifyEnabled"`
 }
 
 // WechatOfficialAccountConfig 微信公众号配置

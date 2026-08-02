@@ -73,6 +73,9 @@ func (s *sSysPublish) collectFollowProfilePublished(ctx context.Context, task gd
 }
 
 func (s *sSysPublish) collectFollowSources(ctx context.Context, authorAccountId int64) ([]gdb.Record, error) {
+	if err := ensureTenantVipTables(ctx); err != nil {
+		return nil, err
+	}
 	sourceDao := pdao.YoubanPublishCollectSource
 	followDao := pdao.YoubanPublishAccountFollow
 	sourceCols := sourceDao.Columns()
@@ -83,10 +86,12 @@ func (s *sSysPublish) collectFollowSources(ctx context.Context, authorAccountId 
 			" AND f."+followCols.FollowingAccountId+"=s."+sourceCols.FollowAccountId+
 			" AND f."+followCols.Status+"='"+sysin.AccountFollowStatusApproved+"'"+
 			" AND f."+followCols.DeletedAt+" IS NULL").
+		InnerJoin(pdao.YoubanPublishTenantVip.Table()+" vip", "vip.tenant_id=s."+sourceCols.TenantId+" AND vip.status=1 AND vip.level>0 AND vip.deleted_at IS NULL").
 		Where("s."+sourceCols.SourceType, sysin.CollectSourceTypeFollow).
 		Where("s."+sourceCols.FollowAccountId, authorAccountId).
 		Where("s."+sourceCols.CollectEnabled, 1).
 		Where("s."+sourceCols.Status, 1).
+		Where("(vip.expired_at IS NULL OR vip.expired_at>?)", gtime.Now()).
 		WhereNull("s." + sourceCols.DeletedAt).
 		Fields("s.*").
 		All()

@@ -309,7 +309,7 @@ func accountVisibilityVersionValue(ctx context.Context, tenantId int64) string {
 }
 
 func bumpAccountVisibilityVersion(ctx context.Context, tenantId int64) error {
-	if tenantId <= 0 {
+	if tenantId <= 0 || !cache.Initialized() {
 		return nil
 	}
 	return cache.Instance().Set(ctx, accountVisibilityVersionKey(tenantId), time.Now().UnixNano(), accountVisibilityVersionTTL)

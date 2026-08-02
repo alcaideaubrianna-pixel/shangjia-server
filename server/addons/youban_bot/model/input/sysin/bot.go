@@ -102,7 +102,7 @@ type FeatureConfigOption struct {
 type FeatureConfigSchema struct {
 	Field       string                 `json:"field" dc:"字段"`
 	Label       string                 `json:"label" dc:"名称"`
-	Component   string                 `json:"component" dc:"组件：switch/input/textarea/select"`
+	Component   string                 `json:"component" dc:"组件：switch/input/textarea/select/telegram_rich_text/telegram_buttons"`
 	Placeholder string                 `json:"placeholder" dc:"提示"`
 	Default     interface{}            `json:"default" dc:"默认值"`
 	Options     []*FeatureConfigOption `json:"options" dc:"选项"`
@@ -127,6 +127,37 @@ type UserListInp struct {
 	IsBound int     `json:"isBound" dc:"绑定状态：1已绑定 2未绑定"`
 	BindApp string  `json:"bindApp" dc:"绑定应用：admin/api"`
 	Status  int     `json:"status" dc:"状态"`
+}
+
+type AccountBindListInp struct {
+	form.PageReq
+	BotId   int64  `json:"botId" dc:"绑定Bot ID"`
+	App     string `json:"app" dc:"应用：admin/api"`
+	Status  int    `json:"status" dc:"状态：1已绑定 2已解绑"`
+	Keyword string `json:"keyword" dc:"TG或系统账号关键词"`
+}
+
+type AccountBindModel struct {
+	Id                int64       `json:"id" dc:"ID"`
+	App               string      `json:"app" dc:"应用：admin/api"`
+	AccountId         int64       `json:"accountId" dc:"系统账号ID"`
+	AccountUsername   string      `json:"accountUsername" dc:"系统账号用户名"`
+	AccountName       string      `json:"accountName" dc:"系统账号名称"`
+	TenantId          int64       `json:"tenantId" dc:"账号归属ID"`
+	TenantName        string      `json:"tenantName" dc:"账号归属名称"`
+	TelegramUserId    string      `json:"telegramUserId" dc:"TG用户ID"`
+	TelegramUsername  string      `json:"telegramUsername" dc:"TG用户名"`
+	TelegramFirstName string      `json:"telegramFirstName" dc:"TG名"`
+	TelegramLastName  string      `json:"telegramLastName" dc:"TG姓"`
+	BotId             int64       `json:"botId" dc:"绑定Bot ID"`
+	BotUsername       string      `json:"botUsername" dc:"绑定Bot用户名"`
+	Status            int         `json:"status" dc:"状态"`
+	CreatedAt         *gtime.Time `json:"createdAt" dc:"绑定时间"`
+	UpdatedAt         *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
+type AccountBindUnbindInp struct {
+	Ids []int64 `json:"ids" v:"required#请选择要解绑的记录" dc:"绑定记录ID"`
 }
 
 type UserModel struct {
@@ -343,12 +374,29 @@ type NotifyInp struct {
 }
 
 type NotifyAccountInp struct {
-	BotId         int64  `json:"botId" dc:"Bot ID，为空优先使用绑定Bot"`
-	App           string `json:"app" dc:"应用：admin/api"`
-	AccountId     int64  `json:"accountId" dc:"系统账号ID"`
-	Text          string `json:"text" dc:"消息内容"`
-	ParseMode     string `json:"parseMode" dc:"解析模式"`
-	DisableNotice bool   `json:"disableNotice" dc:"是否静默"`
+	BotId               int64  `json:"botId" dc:"指定Bot ID"`
+	BotStrategy         string `json:"botStrategy" dc:"Bot策略：official/bound/explicit"`
+	FallbackBoundBot    bool   `json:"fallbackBoundBot" dc:"官方Bot不可达时是否降级绑定Bot"`
+	IgnoreFeatureSwitch bool   `json:"ignoreFeatureSwitch" dc:"是否忽略普通通知功能开关"`
+	RequireDelivery     bool   `json:"requireDelivery" dc:"无可用会话时是否返回错误"`
+	App                 string `json:"app" dc:"应用：admin/api"`
+	AccountId           int64  `json:"accountId" dc:"系统账号ID"`
+	Text                string `json:"text" dc:"消息内容"`
+	ParseMode           string `json:"parseMode" dc:"解析模式"`
+	DisableNotice       bool   `json:"disableNotice" dc:"是否静默"`
+}
+
+type NotifyAccountsInp struct {
+	BotId               int64   `json:"botId" dc:"指定Bot ID"`
+	BotStrategy         string  `json:"botStrategy" dc:"Bot策略：official/bound/explicit"`
+	FallbackBoundBot    bool    `json:"fallbackBoundBot" dc:"官方Bot不可达时是否降级绑定Bot"`
+	IgnoreFeatureSwitch bool    `json:"ignoreFeatureSwitch" dc:"是否忽略普通通知功能开关"`
+	App                 string  `json:"app" dc:"应用：admin/api"`
+	AccountIds          []int64 `json:"accountIds" dc:"系统账号ID列表"`
+	AllBound            bool    `json:"allBound" dc:"是否推送全部已绑定账号"`
+	Text                string  `json:"text" dc:"消息内容"`
+	ParseMode           string  `json:"parseMode" dc:"解析模式"`
+	DisableNotice       bool    `json:"disableNotice" dc:"是否静默"`
 }
 
 type NotifyRichInp struct {

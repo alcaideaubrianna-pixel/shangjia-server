@@ -68,6 +68,17 @@ func (s *sSysBot) AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp
 	if strings.TrimSpace(in.ConfigJson) != "" && !json.Valid([]byte(strings.TrimSpace(in.ConfigJson))) {
 		return gerror.New("配置JSON格式不正确")
 	}
+	if featureKey == (bindFeature{}).Key() {
+		config := featureConfigValues(in.ConfigJson)
+		config["successText"] = sanitizeTelegramHTML(fmt.Sprintf("%v", config["successText"]))
+		buttons, validateErr := normalizeTelegramURLButtons(config["successButtons"])
+		if validateErr != nil {
+			return validateErr
+		}
+		config["successButtons"] = buttons
+		data, _ := json.Marshal(config)
+		in.ConfigJson = string(data)
+	}
 	status := in.Status
 	if status == 0 {
 		status = 1

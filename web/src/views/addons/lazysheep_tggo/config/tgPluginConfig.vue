@@ -369,7 +369,7 @@
   import { computed, ref, watch } from 'vue';
   import { useMessage } from 'naive-ui';
   import RichButtonEditor from '../components/richButtonEditor.vue';
-  import TelegramRichEditor from '../components/telegramRichEditor.vue';
+  import TelegramRichEditor from '@/components/TelegramRichEditor/index.vue';
 
   const props = defineProps({
     plugin: {

@@ -296,10 +296,50 @@ export function AdminInviteList(params = {}) {
   return http.request({ url: '/youban_publish/publish/admin/invite/list', method: 'get', params });
 }
 
+export function ActivityList(params = {}) {
+  return http.request({ url: '/youban_publish/publish/activity/list', method: 'get', params });
+}
+
+export function ActivitySave(params = {}) {
+  return http.request({ url: '/youban_publish/publish/activity/save', method: 'POST', params });
+}
+
+export function ActivityRewardList(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/activity/reward/list',
+    method: 'get',
+    params,
+  });
+}
+
+export function ActivityUserStatus(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/activity/user/status',
+    method: 'get',
+    params,
+  });
+}
+
+export function ActivityDebug(params = {}) {
+  return http.request({ url: '/youban_publish/publish/activity/debug', method: 'POST', params });
+}
+
+export function ActivityReset(params = {}) {
+  return http.request({ url: '/youban_publish/publish/activity/reset', method: 'POST', params });
+}
+
 export function AdminTgAccountList(params = {}) {
   return http.request({
     url: '/youban_publish/publish/admin/tgAccount/list',
     method: 'get',
+    params,
+  });
+}
+
+export function TgAccountUnbind(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/tgAccount/unbind',
+    method: 'POST',
     params,
   });
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
@@ -13,6 +14,12 @@ import (
 	"hotgo/internal/library/token"
 	"hotgo/internal/model"
 )
+
+type accountRegisterTxResult struct {
+	Invite    *registerInviteCodeRow
+	Tenant    *sysin.TenantSaveModel
+	AccountId int64
+}
 
 func (s *sSysPublish) AccountLogin(ctx context.Context, in *sysin.AccountLoginInp) (res *sysin.AccountLoginModel, err error) {
 	if err = in.Filter(ctx); err != nil {
@@ -29,17 +36,7 @@ func (s *sSysPublish) AccountRegister(ctx context.Context, in *sysin.AccountRegi
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
-	invite, err := s.validateRegisterInviteCode(ctx, in.InviteCode)
-	if err != nil {
-		return nil, err
-	}
-	tenant, err := s.AdminTenantSave(ctx, &sysin.TenantSaveInp{
-		Name:     in.Name,
-		Username: in.Username,
-		Password: in.Password,
-		Remark:   "",
-		Status:   consts.StatusEnabled,
-	})
+	registration, err := s.registerAccountWithInvite(ctx, in)
 	if err != nil {
 		return nil, err
 	}
@@ -47,18 +44,50 @@ func (s *sSysPublish) AccountRegister(ctx context.Context, in *sysin.AccountRegi
 	if err != nil {
 		return nil, err
 	}
-	if markErr := s.markRegisterInviteUsed(ctx, invite.Code, tenant.Id, account.Id, account.Username); markErr != nil {
-		g.Log().Warningf(ctx, "标记邀请码已使用失败 code:%s tenantId:%d accountId:%d err:%+v", invite.Code, tenant.Id, account.Id, markErr)
-	}
-	if notifyErr := botService.SysBot().NotifySuperAdmins(ctx, 0, "register", buildRegisterInviteNotifyText(in.Name, account.Username, account.Nickname, invite.Code)); notifyErr != nil {
-		g.Log().Warningf(ctx, "推送邀请码注册通知失败 tenantId:%d accountId:%d err:%+v", tenant.Id, account.Id, notifyErr)
+	if notifyErr := botService.SysBot().NotifySuperAdmins(ctx, 0, "register", buildRegisterInviteNotifyText(in.Name, account.Username, account.Nickname, registration.Invite.Code)); notifyErr != nil {
+		g.Log().Warningf(ctx, "推送邀请码注册通知失败 tenantId:%d accountId:%d err:%+v", registration.Tenant.Id, account.Id, notifyErr)
 	}
 	loginRes, err := s.loginPublishAccount(ctx, account)
 	if err != nil {
 		return nil, err
 	}
-	loginRes.TenantId = tenant.Id
+	loginRes.TenantId = registration.Tenant.Id
 	return &sysin.AccountRegisterModel{AccountLoginModel: loginRes}, nil
+}
+
+func (s *sSysPublish) registerAccountWithInvite(ctx context.Context, in *sysin.AccountRegisterInp) (*accountRegisterTxResult, error) {
+	tenantIn := &sysin.TenantSaveInp{
+		Name:     in.Name,
+		Username: in.Username,
+		Password: in.Password,
+		Remark:   "",
+		Status:   consts.StatusEnabled,
+	}
+	if err := tenantIn.Filter(ctx); err != nil {
+		return nil, err
+	}
+	result := &accountRegisterTxResult{}
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		invite, err := s.validateRegisterInviteCodeTx(ctx, tx, in.InviteCode, true)
+		if err != nil {
+			return err
+		}
+		tenant, accountId, err := s.adminTenantSaveTx(ctx, tx, tenantIn)
+		if err != nil {
+			return err
+		}
+		if err = s.markRegisterInviteUsedTx(ctx, tx, invite.Id, tenant.Id, accountId, in.Username); err != nil {
+			return err
+		}
+		result.Invite = invite
+		result.Tenant = tenant
+		result.AccountId = accountId
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func buildRegisterInviteNotifyText(tenantName, username, nickname, inviteCode string) string {

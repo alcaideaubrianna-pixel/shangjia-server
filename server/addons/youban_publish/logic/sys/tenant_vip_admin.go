@@ -12,7 +12,6 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
-	"hotgo/internal/library/cache"
 	"hotgo/internal/model"
 	baseentity "hotgo/internal/model/entity"
 	basesysin "hotgo/internal/model/input/sysin"
@@ -37,16 +36,12 @@ func (s *sSysPublish) AdminTenantVipConfigView(ctx context.Context) (*sysin.Tena
 
 func (s *sSysPublish) AdminTenantVipConfigSave(ctx context.Context, in *sysin.TenantVipConfigSaveInp) error {
 	list := g.Map{
-		"youbanPublishVipActivityText":        in.ActivityText,
-		"youbanPublishVipActivityTitle":       in.ActivityTitle,
-		"youbanPublishVipCurrency":            strings.TrimSpace(in.Currency),
-		"youbanPublishVipDiscountText":        in.DiscountText,
-		"youbanPublishVipEnabled":             in.Enabled,
-		"youbanPublishVipInviteRewardEnabled": in.InviteRewardEnabled,
-		"youbanPublishVipInviteRewardDays":    in.InviteRewardDays,
-		"youbanPublishVipMonthlyPrice":        in.MonthlyPrice,
-		"youbanPublishVipOriginalPrice":       in.OriginalPrice,
-		"youbanPublishVipPaymentGateway":      strings.TrimSpace(in.PaymentGateway),
+		"youbanPublishVipCurrency":       strings.TrimSpace(in.Currency),
+		"youbanPublishVipDiscountText":   in.DiscountText,
+		"youbanPublishVipEnabled":        in.Enabled,
+		"youbanPublishVipMonthlyPrice":   in.MonthlyPrice,
+		"youbanPublishVipOriginalPrice":  in.OriginalPrice,
+		"youbanPublishVipPaymentGateway": strings.TrimSpace(in.PaymentGateway),
 	}
 	return service.SysConfig().UpdateConfigByGroup(ctx, &basesysin.UpdateConfigInp{Group: "youban_publish_vip", List: list})
 }
@@ -294,33 +289,7 @@ func (s *sSysPublish) markTenantVipCouponUsed(ctx context.Context, detail *gjson
 }
 
 func (s *sSysPublish) saveTenantVipUntil(ctx context.Context, tenantId int64, level int, expiredAt *gtime.Time, remark string, source string) error {
-	before, err := s.tenantVipStatus(ctx, tenantId)
-	if err != nil {
-		return err
-	}
-	now := gtime.Now()
-	status := consts.StatusDisable
-	if level > 0 && expiredAt != nil && expiredAt.After(now) {
-		status = consts.StatusEnabled
-	}
-	data := g.Map{"expired_at": expiredAt, "level": level, "opened_at": now, "remark": remark, "status": status, "updated_at": now}
-	cols := pdao.YoubanPublishTenantVip.Columns()
-	count, err := pdao.YoubanPublishTenantVip.Ctx(ctx).Where(cols.TenantId, tenantId).Count()
-	if err != nil {
-		return gerror.Wrap(err, "检查租户会员失败")
-	}
-	if count > 0 {
-		_, err = pdao.YoubanPublishTenantVip.Ctx(ctx).Where(cols.TenantId, tenantId).Data(data).Update()
-	} else {
-		data[cols.TenantId] = tenantId
-		data[cols.CreatedAt] = now
-		_, err = pdao.YoubanPublishTenantVip.Ctx(ctx).Data(data).Insert()
-	}
-	if err != nil {
-		return gerror.Wrap(err, "保存租户会员失败")
-	}
-	_, _ = cache.Instance().Remove(ctx, tenantVipCacheKey(tenantId))
-	return s.writeTenantVipLog(ctx, before, tenantId, level, expiredAt, source, remark)
+	return s.applyTenantVipUntil(ctx, tenantId, level, expiredAt, remark, source)
 }
 
 func (s *sSysPublish) adminTenantVipOrderModels(ctx context.Context, orders []*baseentity.AdminOrder) []*sysin.TenantVipOrderModel {
@@ -340,16 +309,12 @@ func tenantVipConfigModel(cfg *model.YoubanPublishVipConfig) *sysin.TenantVipCon
 		cfg = tenantVipDefaultConfig()
 	}
 	return &sysin.TenantVipConfigModel{
-		ActivityText:        cfg.ActivityText,
-		ActivityTitle:       cfg.ActivityTitle,
-		Currency:            tenantVipCurrency(cfg),
-		DiscountText:        cfg.DiscountText,
-		Enabled:             cfg.Enabled,
-		InviteRewardEnabled: cfg.InviteRewardEnabled,
-		InviteRewardDays:    cfg.InviteRewardDays,
-		MonthlyPrice:        cfg.MonthlyPrice,
-		OriginalPrice:       cfg.OriginalPrice,
-		PaymentGateway:      tenantVipPaymentGateway(cfg),
+		Currency:       tenantVipCurrency(cfg),
+		DiscountText:   cfg.DiscountText,
+		Enabled:        cfg.Enabled,
+		MonthlyPrice:   cfg.MonthlyPrice,
+		OriginalPrice:  cfg.OriginalPrice,
+		PaymentGateway: tenantVipPaymentGateway(cfg),
 	}
 }
 

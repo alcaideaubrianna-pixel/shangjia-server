@@ -8,6 +8,12 @@ package admin
 import (
 	"context"
 	"fmt"
+	"html"
+	"regexp"
+	"strings"
+
+	botsysin "hotgo/addons/youban_bot/model/input/sysin"
+	botservice "hotgo/addons/youban_bot/service"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
@@ -27,6 +33,11 @@ import (
 )
 
 type sAdminNotice struct{}
+
+var (
+	noticeTelegramBreakPattern = regexp.MustCompile(`(?i)<br\s*/?>|</p\s*>|</div\s*>|</li\s*>`)
+	noticeTelegramTagPattern   = regexp.MustCompile(`<[^>]+>`)
+)
 
 func NewAdminNotice() *sAdminNotice {
 	return &sAdminNotice{}
@@ -118,7 +129,42 @@ func (s *sAdminNotice) Edit(ctx context.Context, in *adminin.NoticeEditInp) (err
 			websocket.SendToAll(response)
 		}
 	})
+	if in.TgPush && (in.Type == consts.NoticeTypeNotice || in.Type == consts.NoticeTypeLetter) {
+		text := noticeTelegramText(in.Title, in.Content)
+		accountIds := append([]int64(nil), in.Receiver...)
+		allBound := in.Type == consts.NoticeTypeNotice
+		simple.SafeGo(ctx, func(ctx context.Context) {
+			if err := botservice.SysBot().NotifyAccounts(ctx, &botsysin.NotifyAccountsInp{
+				BotStrategy:         "official",
+				FallbackBoundBot:    true,
+				IgnoreFeatureSwitch: true,
+				App:                 consts.AppApi,
+				AccountIds:          accountIds,
+				AllBound:            allBound,
+				Text:                text,
+				ParseMode:           "HTML",
+			}); err != nil {
+				g.Log().Warningf(ctx, "通知公告Telegram推送失败 noticeId:%d err:%+v", in.Id, err)
+			}
+		})
+	}
 	return
+}
+
+func noticeTelegramText(title, content string) string {
+	plainText := noticeTelegramBreakPattern.ReplaceAllString(content, "\n")
+	plainText = noticeTelegramTagPattern.ReplaceAllString(plainText, "")
+	plainText = strings.TrimSpace(html.UnescapeString(plainText))
+	plainText = truncateNoticeTelegramText(plainText, 3500)
+	return fmt.Sprintf("<b>%s</b>\n\n%s", html.EscapeString(strings.TrimSpace(title)), html.EscapeString(plainText))
+}
+
+func truncateNoticeTelegramText(text string, limit int) string {
+	runes := []rune(text)
+	if limit <= 0 || len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit]) + "…"
 }
 
 func (s *sAdminNotice) shouldPushNow(in *adminin.NoticeEditInp) bool {

@@ -488,8 +488,19 @@ func (s *sSysBot) consumeBindCode(ctx context.Context, botId int64, msg *models.
 	if err != nil {
 		return gerror.Wrap(err, "更新绑定验证码失败")
 	}
+	text, markup := s.bindSuccessMessage(ctx, row.App, row.AccountId, telegramUserId, telegramUsername)
+	replyErr := s.replyWithMarkup(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), text, markup)
+	for _, hookErr := range service.TriggerAccountBoundHooks(ctx, &service.AccountBoundEvent{
+		App:              row.App,
+		AccountId:        row.AccountId,
+		BotId:            botId,
+		TelegramUserId:   telegramUserId,
+		TelegramUsername: telegramUsername,
+	}) {
+		g.Log().Warningf(ctx, "Telegram绑定后置处理失败 accountId:%d err:%+v", row.AccountId, hookErr)
+	}
 	_ = s.notifySuperAdmins(ctx, botId, superNotifyBind, botBindNotifyText(row.App, row.AccountId, telegramUsername))
-	return s.reply(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), "绑定成功，回到页面即可查看绑定状态。")
+	return replyErr
 }
 
 func (s *sSysBot) consumeLoginCode(ctx context.Context, botId int64, msg *models.Message, row *sysin.CodeStatusModel) error {

@@ -492,6 +492,13 @@ type TgAccountDeleteReq struct {
 
 type TgAccountDeleteRes struct{}
 
+type TgAccountUnbindReq struct {
+	g.Meta `path:"/publish/tgAccount/unbind" method:"post" tags:"上架插件后台" summary:"超级管理员解绑TG账号"`
+	sysin.TgAccountDeleteInp
+}
+
+type TgAccountUnbindRes struct{}
+
 type TgAccountRefreshReq struct {
 	g.Meta `path:"/publish/tgAccount/refresh" method:"post" tags:"上架插件后台" summary:"刷新TG账号状态"`
 	sysin.TgAccountRefreshInp

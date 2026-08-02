@@ -228,10 +228,21 @@ func (s *sSysPublish) AdminTgAccountDelete(ctx context.Context, in *sysin.TgAcco
 }
 
 func (s *sSysPublish) ServerTgAccountDelete(ctx context.Context, in *sysin.TgAccountDeleteInp) (err error) {
+	return s.serverTgAccountRemove(ctx, in, "删除TG账号失败")
+}
+
+func (s *sSysPublish) ServerTgAccountUnbind(ctx context.Context, in *sysin.TgAccountDeleteInp) (err error) {
+	return s.serverTgAccountRemove(ctx, in, "解绑TG账号失败")
+}
+
+func (s *sSysPublish) serverTgAccountRemove(ctx context.Context, in *sysin.TgAccountDeleteInp, errorMessage string) (err error) {
 	if err = s.requireSystemSuperAdmin(ctx); err != nil {
 		return err
 	}
 	if in == nil || len(in.Ids) == 0 {
+		if errorMessage == "解绑TG账号失败" {
+			return gerror.New("请选择要解绑的TG账号")
+		}
 		return gerror.New("请选择要删除的TG账号")
 	}
 	in.Ids = uniqueIds(in.Ids)
@@ -242,7 +253,7 @@ func (s *sSysPublish) ServerTgAccountDelete(ctx context.Context, in *sysin.TgAcc
 			"deleted_at": gtime.Now(),
 		}).
 		Update(); err != nil {
-		return gerror.Wrap(err, "删除TG账号失败")
+		return gerror.Wrap(err, errorMessage)
 	}
 	return nil
 }
