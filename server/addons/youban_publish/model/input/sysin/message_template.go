@@ -30,17 +30,18 @@ type MessageTemplateListInp struct {
 }
 
 type MessageTemplateMediaInp struct {
-	Id                int64  `json:"id" dc:"ID"`
-	MediaType         string `json:"mediaType" dc:"媒体类型"`
-	Name              string `json:"name" dc:"名称"`
-	FileUrl           string `json:"fileUrl" dc:"文件地址"`
-	StoragePath       string `json:"storagePath" dc:"存储路径"`
-	PosterUrl         string `json:"posterUrl" dc:"封面地址"`
-	PosterStoragePath string `json:"posterStoragePath" dc:"封面存储路径"`
-	TgFileId          string `json:"tgFileId" dc:"TG文件ID"`
-	TgThumbFileId     string `json:"tgThumbFileId" dc:"TG缩略图ID"`
-	AssetHash         string `json:"assetHash" dc:"资源哈希"`
-	SortIndex         int    `json:"sortIndex" dc:"排序"`
+	Id                    int64  `json:"id" dc:"ID"`
+	SourceMessageRecordId int64  `json:"sourceMessageRecordId" dc:"来源TG消息记录ID"`
+	MediaType             string `json:"mediaType" dc:"媒体类型"`
+	Name                  string `json:"name" dc:"名称"`
+	FileUrl               string `json:"fileUrl" dc:"文件地址"`
+	StoragePath           string `json:"storagePath" dc:"存储路径"`
+	PosterUrl             string `json:"posterUrl" dc:"封面地址"`
+	PosterStoragePath     string `json:"posterStoragePath" dc:"封面存储路径"`
+	TgFileId              string `json:"tgFileId" dc:"TG文件ID"`
+	TgThumbFileId         string `json:"tgThumbFileId" dc:"TG缩略图ID"`
+	AssetHash             string `json:"assetHash" dc:"资源哈希"`
+	SortIndex             int    `json:"sortIndex" dc:"排序"`
 }
 
 type MessageTemplateMediaUploadInp struct {
@@ -142,39 +143,41 @@ type MessagePushPlanModel struct {
 }
 
 type MessageTemplateModel struct {
-	Id         int64                        `json:"id" dc:"ID"`
-	TenantId   int64                        `json:"tenantId" dc:"租户ID"`
-	SerialNo   string                       `json:"serialNo" dc:"Inline模板编号"`
-	Name       string                       `json:"name" dc:"模板名称"`
-	Text       string                       `json:"text" dc:"文案"`
-	MediaCount int                          `json:"mediaCount" dc:"媒体数"`
-	Media      []*MessageTemplateMediaModel `json:"media" dc:"媒体"`
-	Status     int                          `json:"status" dc:"状态"`
-	PushMode   string                       `json:"pushMode" dc:"推送方式：bot/account"`
-	CreatedBy  int64                        `json:"createdBy" dc:"创建人"`
-	UpdatedBy  int64                        `json:"updatedBy" dc:"更新人"`
-	DeletedBy  int64                        `json:"deletedBy" dc:"删除人"`
-	CreatedAt  *gtime.Time                  `json:"createdAt" dc:"创建时间"`
-	UpdatedAt  *gtime.Time                  `json:"updatedAt" dc:"更新时间"`
-	DeletedAt  *gtime.Time                  `json:"deletedAt" dc:"删除时间"`
+	Id                    int64                        `json:"id" dc:"ID"`
+	TenantId              int64                        `json:"tenantId" dc:"租户ID"`
+	SerialNo              string                       `json:"serialNo" dc:"Inline模板编号"`
+	Name                  string                       `json:"name" dc:"模板名称"`
+	Text                  string                       `json:"text" dc:"文案"`
+	MediaCount            int                          `json:"mediaCount" dc:"媒体数"`
+	Media                 []*MessageTemplateMediaModel `json:"media" dc:"媒体"`
+	Status                int                          `json:"status" dc:"状态"`
+	PushMode              string                       `json:"pushMode" dc:"推送方式：bot/account"`
+	SourceMessageRecordId int64                        `json:"sourceMessageRecordId" dc:"来源TG消息记录ID"`
+	CreatedBy             int64                        `json:"createdBy" dc:"创建人"`
+	UpdatedBy             int64                        `json:"updatedBy" dc:"更新人"`
+	DeletedBy             int64                        `json:"deletedBy" dc:"删除人"`
+	CreatedAt             *gtime.Time                  `json:"createdAt" dc:"创建时间"`
+	UpdatedAt             *gtime.Time                  `json:"updatedAt" dc:"更新时间"`
+	DeletedAt             *gtime.Time                  `json:"deletedAt" dc:"删除时间"`
 }
 
 type MessageTemplateMediaModel struct {
-	Id                int64       `json:"id" dc:"ID"`
-	TemplateId        int64       `json:"templateId" dc:"模板ID"`
-	TenantId          int64       `json:"tenantId" dc:"租户ID"`
-	MediaType         string      `json:"mediaType" dc:"媒体类型"`
-	Name              string      `json:"name" dc:"名称"`
-	FileUrl           string      `json:"fileUrl" dc:"文件地址"`
-	StoragePath       string      `json:"storagePath" dc:"存储路径"`
-	PosterUrl         string      `json:"posterUrl" dc:"封面地址"`
-	PosterStoragePath string      `json:"posterStoragePath" dc:"封面存储路径"`
-	TgFileId          string      `json:"tgFileId" dc:"TG文件ID"`
-	TgThumbFileId     string      `json:"tgThumbFileId" dc:"TG缩略图ID"`
-	AssetHash         string      `json:"assetHash" dc:"资源哈希"`
-	SortIndex         int         `json:"sortIndex" dc:"排序"`
-	CreatedAt         *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt         *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id                    int64       `json:"id" dc:"ID"`
+	TemplateId            int64       `json:"templateId" dc:"模板ID"`
+	TenantId              int64       `json:"tenantId" dc:"租户ID"`
+	SourceMessageRecordId int64       `json:"sourceMessageRecordId" dc:"来源TG消息记录ID"`
+	MediaType             string      `json:"mediaType" dc:"媒体类型"`
+	Name                  string      `json:"name" dc:"名称"`
+	FileUrl               string      `json:"fileUrl" dc:"文件地址"`
+	StoragePath           string      `json:"storagePath" dc:"存储路径"`
+	PosterUrl             string      `json:"posterUrl" dc:"封面地址"`
+	PosterStoragePath     string      `json:"posterStoragePath" dc:"封面存储路径"`
+	TgFileId              string      `json:"tgFileId" dc:"TG文件ID"`
+	TgThumbFileId         string      `json:"tgThumbFileId" dc:"TG缩略图ID"`
+	AssetHash             string      `json:"assetHash" dc:"资源哈希"`
+	SortIndex             int         `json:"sortIndex" dc:"排序"`
+	CreatedAt             *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt             *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 func (in *MessageTemplateListInp) Filter(ctx context.Context) error {

@@ -188,8 +188,18 @@ func (s *sSysPublish) sendMessageTemplateToChannel(ctx context.Context, template
 		return result
 	}
 	if !ok {
-		message := "频道正在发送其他任务，请稍后重试"
-		s.failMessagePushJob(ctx, job, message)
+		delay := s.telegramChannelBusyDelay(ctx, job.Id)
+		if err = s.enqueueTelegramJob(ctx, job.Id, delay); err != nil {
+			s.failMessagePushJob(ctx, job, err.Error())
+			result.Message = err.Error()
+			return result
+		}
+		message := fmt.Sprintf("频道正在发送其他任务，已自动排队，预计%d秒后重试", int(delay.Seconds()))
+		if recordErr := s.upsertPublishJobRecord(ctx, job, "pending", message); recordErr != nil {
+			g.Log().Warningf(ctx, "更新快速推送排队记录失败 jobId:%d err:%+v", job.Id, recordErr)
+		}
+		s.appendTelegramJobLog(ctx, job, "message_push", "queued", message)
+		result.Status = sysin.MessagePushStatusPending
 		result.Message = message
 		return result
 	}
@@ -278,23 +288,20 @@ func (s *sSysPublish) SendMessagePushJob(ctx context.Context, jobId int64) error
 
 func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRecord, template *sysin.MessageTemplateModel, channel *messagePushChannel, tgAccountId int64) error {
 	media := messageTemplateTelegramMedia(template)
-	// Inline results are single-message results. Any media must use the
-	// account sender so mixed media can be delivered as one Telegram group.
+	if recordErr := s.upsertPublishJobRecord(ctx, job, "sending", ""); recordErr != nil {
+		g.Log().Warningf(ctx, "更新快速推送发送记录失败 jobId:%d err:%+v", job.Id, recordErr)
+	}
 	if messageTemplateUsesInline(template) && channel != nil && channel.TgAccountId > 0 && job.BotId > 0 {
 		s.appendTelegramJobLog(ctx, job, "inline_send", sysin.MessagePushStatusSending, fmt.Sprintf("尝试Inline推送 serial:%s botId:%d tgAccountId:%d", template.SerialNo, job.BotId, channel.TgAccountId))
 		messages, inlineErr := s.sendInlineTemplateByAccount(ctx, channel.TgAccountId, job.BotId, channel, template.SerialNo)
 		if inlineErr == nil {
-			if err := s.saveTelegramSentMessages(ctx, job, messages); err != nil {
+			if err := s.completeMessagePushJob(ctx, job, messages, "更新Inline消息推送任务状态失败"); err != nil {
 				return err
-			}
-			_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{"status": sysin.MessagePushStatusSent, "dispatch_status": tgDispatchStatusDone, "error_message": "", "sent_at": gtime.Now(), "updated_at": gtime.Now()}).Update()
-			if err != nil {
-				return gerror.Wrap(err, "更新Inline消息推送任务状态失败")
 			}
 			s.appendTelegramJobLog(ctx, job, "inline_send", sysin.MessagePushStatusSent, "Inline机器人消息模板推送成功")
 			return nil
 		}
-		s.appendTelegramJobLog(ctx, job, "inline_send", "fallback", "Inline推送失败，回退账号直发："+inlineErr.Error())
+		s.appendTelegramJobLog(ctx, job, "inline_send", "fallback", "Inline推送失败，尝试原消息保真发送："+inlineErr.Error())
 	} else {
 		reason := "模板包含媒体"
 		if template == nil || strings.TrimSpace(template.SerialNo) == "" {
@@ -306,26 +313,160 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 		}
 		s.appendTelegramJobLog(ctx, job, "inline_send", "skipped", "未执行Inline推送："+reason)
 	}
+	if messages, copied, copyErr := s.copyOriginalMessageTemplateByBot(ctx, job, template); copied {
+		if copyErr == nil {
+			if err := s.completeMessagePushJob(ctx, job, messages, "更新原消息复制任务状态失败"); err != nil {
+				return err
+			}
+			s.appendTelegramJobLog(ctx, job, "source_copy", sysin.MessagePushStatusSent, "Inline不可用，已复制原Telegram消息，完整保留格式、自定义Emoji和媒体组")
+			return nil
+		}
+		s.appendTelegramJobLog(ctx, job, "source_copy", "fallback", "Bot复制原消息失败，尝试TG账号无来源转发："+copyErr.Error())
+		messages, forwardErr := s.forwardOriginalMessageTemplateByAccount(ctx, tgAccountId, channel, template, media)
+		if forwardErr == nil {
+			if err := s.completeMessagePushJob(ctx, job, messages, "更新原消息账号转发任务状态失败"); err != nil {
+				return err
+			}
+			s.appendTelegramJobLog(ctx, job, "source_forward", sysin.MessagePushStatusSent, "Inline不可用，TG账号已无来源转发原消息，完整保留格式、自定义Emoji和媒体组")
+			return nil
+		}
+		s.appendTelegramJobLog(ctx, job, "source_forward", "fallback", "TG账号无来源转发失败，回退普通模板发送："+forwardErr.Error())
+		if messageTemplateRequiresSourcePreservation(template) {
+			return gerror.Wrap(forwardErr, "模板包含Telegram自定义Emoji，保真转发失败，已停止降级发送")
+		}
+	}
 	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusSending, "开始使用账号直发消息模板")
 	messages, err := s.sendMessageTemplateByTgAccount(ctx, tgAccountId, channel, telegramRichTextHTML(template.Text), media, messageTemplateHash(template))
 	if err != nil {
 		return err
 	}
-	if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
+	if err = s.completeMessagePushJob(ctx, job, messages, "更新消息推送任务状态失败"); err != nil {
 		return err
-	}
-	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
-		"status":          sysin.MessagePushStatusSent,
-		"dispatch_status": tgDispatchStatusDone,
-		"error_message":   "",
-		"sent_at":         gtime.Now(),
-		"updated_at":      gtime.Now(),
-	}).Update()
-	if err != nil {
-		return gerror.Wrap(err, "更新消息推送任务状态失败")
 	}
 	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusSent, "账号消息模板推送成功")
 	return nil
+}
+
+func (s *sSysPublish) completeMessagePushJob(ctx context.Context, job telegramJobRecord, messages []*telegramSentMessage, errorMessage string) error {
+	if err := s.saveTelegramSentMessages(ctx, job, messages); err != nil {
+		return err
+	}
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", job.Id).
+		WhereIn("status", messagePushActiveStatuses()).
+		Data(g.Map{
+			"status":          sysin.MessagePushStatusSent,
+			"dispatch_status": tgDispatchStatusDone,
+			"error_message":   "",
+			"sent_at":         gtime.Now(),
+			"updated_at":      gtime.Now(),
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, errorMessage)
+	}
+	if affected, affectedErr := result.RowsAffected(); affectedErr == nil && affected == 0 {
+		return nil
+	}
+	if recordErr := s.appendPublishSuccessRecord(ctx, job); recordErr != nil {
+		g.Log().Warningf(ctx, "保存快速推送成功记录失败 jobId:%d err:%+v", job.Id, recordErr)
+	}
+	return nil
+}
+
+func (s *sSysPublish) copyOriginalMessageTemplateByBot(ctx context.Context, job telegramJobRecord, template *sysin.MessageTemplateModel) ([]*telegramSentMessage, bool, error) {
+	recordIds := messageTemplateSourceRecordIds(template)
+	if len(recordIds) == 0 {
+		return nil, false, nil
+	}
+	s.appendTelegramJobLog(ctx, job, "source_copy", sysin.MessagePushStatusSending, fmt.Sprintf("尝试复制Telegram原消息 records:%v", recordIds))
+	result, err := botService.SysBot().CopyStoredMessages(ctx, &botsysin.StoredMessageCopyInp{
+		MessageRecordIds: recordIds,
+		TargetChatId:     normalizeTelegramChannelChatID(job.TargetChatId),
+	})
+	if err != nil {
+		return nil, true, err
+	}
+	if result == nil || len(result.MessageIds) == 0 {
+		return nil, true, gerror.New("复制Telegram原消息未返回消息ID")
+	}
+	messages := make([]*telegramSentMessage, 0, len(result.MessageIds))
+	for index, messageId := range result.MessageIds {
+		sent := &telegramSentMessage{MessageId: messageId, Purpose: "display"}
+		if index < len(template.Media) && template.Media[index] != nil {
+			sent.MediaId = template.Media[index].Id
+			sent.TgFileId = template.Media[index].TgFileId
+			sent.AssetHash = template.Media[index].AssetHash
+		}
+		messages = append(messages, sent)
+	}
+	return messages, true, nil
+}
+
+func messageTemplateSourceRecordIds(template *sysin.MessageTemplateModel) []int64 {
+	if template == nil {
+		return nil
+	}
+	if len(template.Media) == 0 {
+		if template.SourceMessageRecordId > 0 {
+			return []int64{template.SourceMessageRecordId}
+		}
+		return nil
+	}
+	ids := make([]int64, 0, len(template.Media))
+	for _, media := range template.Media {
+		if media == nil || media.SourceMessageRecordId <= 0 {
+			return nil
+		}
+		ids = append(ids, media.SourceMessageRecordId)
+	}
+	return ids
+}
+
+func messageTemplateRequiresSourcePreservation(template *sysin.MessageTemplateModel) bool {
+	if template == nil {
+		return false
+	}
+	text := strings.ToLower(template.Text)
+	return strings.Contains(text, "<tg-emoji") || strings.Contains(text, "emoji-id=")
+}
+
+func (s *sSysPublish) forwardOriginalMessageTemplateByAccount(ctx context.Context, tgAccountId int64, channel *messagePushChannel, template *sysin.MessageTemplateModel, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
+	recordIds := messageTemplateSourceRecordIds(template)
+	if len(recordIds) == 0 {
+		return nil, gerror.New("模板缺少Telegram原消息记录")
+	}
+	source, err := botService.SysBot().StoredMessageSource(ctx, recordIds)
+	if err != nil {
+		return nil, err
+	}
+	if source == nil || strings.TrimSpace(source.BotUsername) == "" || len(source.MessageIds) == 0 {
+		return nil, gerror.New("Telegram原消息来源不完整")
+	}
+	toPeer, err := messagePushInputPeer(channel)
+	if err != nil {
+		return nil, err
+	}
+	var sent []*telegramSentMessage
+	err = s.executeTelegramAccountOperation(ctx, tgAccountId, 2*time.Minute, func(runCtx context.Context, client *telegram.Client) error {
+		sender := gotdmessage.NewSender(client.API())
+		fromPeer, resolveErr := sender.Resolve("@" + strings.TrimPrefix(strings.TrimSpace(source.BotUsername), "@")).AsInputPeer(runCtx)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		messages, forwardErr := forwardMessageTemplateWithGotd(runCtx, client, fromPeer, toPeer, source.MessageIds, media)
+		if forwardErr != nil {
+			return forwardErr
+		}
+		sent = messages
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(sent) == 0 {
+		return nil, gerror.New("TG账号无来源转发未返回消息结果")
+	}
+	return sent, nil
 }
 
 func messageTemplateUsesInline(template *sysin.MessageTemplateModel) bool {
@@ -778,7 +919,7 @@ func (s *sSysPublish) createMessagePushJobWithOperation(ctx context.Context, tem
 		}
 		return telegramJobRecord{}, gerror.Wrap(err, "创建消息推送任务失败")
 	}
-	return telegramJobRecord{
+	job := telegramJobRecord{
 		Id:             id,
 		TaskId:         0,
 		OperationNo:    operationNo,
@@ -791,7 +932,14 @@ func (s *sSysPublish) createMessagePushJobWithOperation(ctx context.Context, tem
 		Priority:       priority,
 		QueueName:      queueName,
 		DispatchStatus: dispatchStatus,
-	}, nil
+	}
+	if supersedeErr := s.supersedeOlderMessagePushJobs(ctx, job); supersedeErr != nil {
+		g.Log().Warningf(ctx, "废弃旧快速推送任务失败 jobId:%d err:%+v", job.Id, supersedeErr)
+	}
+	if recordErr := s.upsertPublishJobRecord(ctx, job, "pending", ""); recordErr != nil {
+		g.Log().Warningf(ctx, "保存快速推送待发送记录失败 jobId:%d err:%+v", job.Id, recordErr)
+	}
+	return job, nil
 }
 
 func (s *sSysPublish) messagePushJobByOperation(ctx context.Context, operationNo string, channelId int64) (telegramJobRecord, error) {
@@ -820,15 +968,26 @@ func (s *sSysPublish) handleMessagePushQueuedJobError(ctx context.Context, job t
 		dispatchStatus = tgDispatchStatusIdle
 		nextRetryAt = gtime.Now().Add(policy.RetryDelay)
 	}
-	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
-		"status":              status,
-		"dispatch_status":     dispatchStatus,
-		"retry_count":         retryCount,
-		"next_retry_at":       nextRetryAt,
-		"error_message":       policy.Message,
-		"last_dispatch_error": policy.Message,
-		"updated_at":          gtime.Now(),
-	}).Update()
+	result, _ := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", job.Id).
+		WhereIn("status", messagePushActiveStatuses()).
+		Data(g.Map{
+			"status":              status,
+			"dispatch_status":     dispatchStatus,
+			"retry_count":         retryCount,
+			"next_retry_at":       nextRetryAt,
+			"error_message":       policy.Message,
+			"last_dispatch_error": policy.Message,
+			"updated_at":          gtime.Now(),
+		}).Update()
+	if result != nil {
+		if affected, affectedErr := result.RowsAffected(); affectedErr == nil && affected == 0 {
+			return nil
+		}
+	}
+	if recordErr := s.upsertPublishJobRecord(ctx, job, status, policy.Message); recordErr != nil {
+		g.Log().Warningf(ctx, "更新快速推送失败记录失败 jobId:%d status:%s err:%+v", job.Id, status, recordErr)
+	}
 	s.appendTelegramJobLog(ctx, job, "message_push", status, policy.Message)
 	if isTelegramPermanentAccountAuthError(err) {
 		s.handleMessagePushPermanentAuthError(ctx, job, policy.Message, err)
@@ -935,15 +1094,84 @@ func messagePushTemplateIdFromOperationNo(operationNo string) (int64, error) {
 }
 
 func (s *sSysPublish) failMessagePushJob(ctx context.Context, job telegramJobRecord, message string) {
+	updated := true
 	if job.Id > 0 {
-		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
-			"status":          sysin.MessagePushStatusFailed,
-			"dispatch_status": tgDispatchStatusDone,
-			"error_message":   message,
-			"updated_at":      gtime.Now(),
-		}).Update()
+		result, _ := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", job.Id).
+			WhereIn("status", messagePushActiveStatuses()).
+			Data(g.Map{
+				"status":          sysin.MessagePushStatusFailed,
+				"dispatch_status": tgDispatchStatusDone,
+				"error_message":   message,
+				"updated_at":      gtime.Now(),
+			}).Update()
+		if result != nil {
+			if affected, affectedErr := result.RowsAffected(); affectedErr == nil {
+				updated = affected > 0
+			}
+		}
+	}
+	if !updated {
+		return
+	}
+	if recordErr := s.upsertPublishJobRecord(ctx, job, sysin.MessagePushStatusFailed, message); recordErr != nil {
+		g.Log().Warningf(ctx, "更新快速推送失败记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
 	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusFailed, message)
+}
+
+func messagePushActiveStatuses() []string {
+	return []string{sysin.MessagePushStatusPending, "sending", "failed_retry"}
+}
+
+func (s *sSysPublish) supersedeOlderMessagePushJobs(ctx context.Context, job telegramJobRecord) error {
+	if job.Id <= 0 || job.TenantId <= 0 || job.AccountId <= 0 || strings.TrimSpace(job.TargetChatId) == "" {
+		return nil
+	}
+	templateId, err := messagePushTemplateIdFromOperationNo(job.OperationNo)
+	if err != nil {
+		return nil
+	}
+	var oldJobs []telegramJobRecord
+	if err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("id,task_id,operation_no,tenant_id,account_id,profile_id,channel_id,bot_id,target_chat_id,status").
+		Where("tenant_id", job.TenantId).
+		Where("account_id", job.AccountId).
+		Where("target_chat_id", normalizeTelegramChannelChatID(job.TargetChatId)).
+		Where("id < ?", job.Id).
+		WhereLike("operation_no", fmt.Sprintf("message_push:%d:%%", templateId)).
+		WhereIn("status", messagePushActiveStatuses()).
+		Scan(&oldJobs); err != nil {
+		return gerror.Wrap(err, "读取旧快速推送任务失败")
+	}
+	if len(oldJobs) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(oldJobs))
+	for _, oldJob := range oldJobs {
+		ids = append(ids, oldJob.Id)
+	}
+	message := "已由新的快速推送任务替代"
+	if _, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		WhereIn("id", ids).
+		WhereIn("status", messagePushActiveStatuses()).
+		Data(g.Map{
+			"status":              "superseded",
+			"dispatch_status":     tgDispatchStatusDone,
+			"next_retry_at":       nil,
+			"error_message":       message,
+			"last_dispatch_error": message,
+			"updated_at":          gtime.Now(),
+		}).Update(); err != nil {
+		return gerror.Wrap(err, "废弃旧快速推送任务失败")
+	}
+	if _, err = g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).
+		WhereIn("job_id", ids).
+		Data(g.Map{"status": "superseded", "message": message}).
+		Update(); err != nil {
+		return gerror.Wrap(err, "更新旧快速推送记录失败")
+	}
+	return nil
 }
 
 func (s *sSysPublish) messagePushChannels(ctx context.Context, ids []int64, tenantId int64) ([]*messagePushChannel, error) {

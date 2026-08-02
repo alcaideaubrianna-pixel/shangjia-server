@@ -14,6 +14,7 @@ const (
 	publishSuccessTypeCycle   = "cycle_publish"
 	publishSuccessTypeFull    = "full_push"
 	publishSuccessTypeProfile = "profile_publish"
+	publishSuccessTypeQuick   = "quick_push"
 )
 
 func (s *sSysPublish) appendPublishSuccessRecord(ctx context.Context, job telegramJobRecord) error {
@@ -110,6 +111,8 @@ func publishSuccessRecordAction(operationNo string) string {
 		return publishSuccessTypeFull
 	case strings.HasPrefix(operationNo, "collect:"):
 		return publishSuccessTypeCollect
+	case isMessagePushOperationNo(operationNo):
+		return publishSuccessTypeQuick
 	default:
 		return publishSuccessTypeProfile
 	}
@@ -123,12 +126,28 @@ func publishSuccessRecordMessage(action string) string {
 		return "全量推送成功"
 	case publishSuccessTypeCollect:
 		return "采集推送成功"
+	case publishSuccessTypeQuick:
+		return "快速推送成功"
 	default:
 		return "上架推送成功"
 	}
 }
 
 func publishJobRecordMessage(action string, status string) string {
+	if action == publishSuccessTypeQuick {
+		switch status {
+		case "sending":
+			return "快速推送正在发送"
+		case "failed_retry":
+			return "快速推送失败，等待重试"
+		case "failed":
+			return "快速推送失败"
+		case "success", "sent":
+			return "快速推送成功"
+		default:
+			return "快速推送等待发送"
+		}
+	}
 	switch status {
 	case "sending":
 		return "TG资料正在发送"

@@ -50,6 +50,7 @@ func (s *sSysBot) telegramMessageCleanupLoop(ctx context.Context) {
 func (s *sSysBot) cleanupTelegramMessages(ctx context.Context) error {
 	limitAt := gtime.Now().Add(-telegramMessageRetention)
 	_, err := g.DB().Model(messageTable).Safe().Ctx(ctx).
+		WhereNull("retained_at").
 		WhereLT("created_at", limitAt).
 		Delete()
 	return err
@@ -163,6 +164,7 @@ func (s *sSysBot) cleanTelegramMessageCacheByBatch(ctx context.Context, batchSiz
 	}
 	limitAt := gtime.Now().Add(-telegramMessageRetention)
 	_, err := g.DB().Model(messageTable).Safe().Ctx(ctx).
+		WhereNull("retained_at").
 		WhereLT("created_at", limitAt).
 		Limit(batchSize).
 		Delete()

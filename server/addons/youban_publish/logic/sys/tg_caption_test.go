@@ -72,6 +72,25 @@ func TestGotdHTMLParserKeepsConvertedLineBreaks(t *testing.T) {
 	}
 }
 
+func TestTelegramRichTextHTMLKeepsFormattingAndCustomEmoji(t *testing.T) {
+	input := `<tg-emoji emoji-id="5976568857786062743">😂</tg-emoji> <b>史上最强聊手上架管理工具</b>`
+	caption := telegramRichTextHTML(input)
+	if caption != input {
+		t.Fatalf("unexpected telegram html: %q", caption)
+	}
+	builder := entity.Builder{}
+	if err := styling.Perform(&builder, gotdhtml.String(nil, caption)); err != nil {
+		t.Fatal(err)
+	}
+	text, entities := builder.Complete()
+	if text != "😂 史上最强聊手上架管理工具" {
+		t.Fatalf("unexpected gotd text: %q", text)
+	}
+	if len(entities) != 2 {
+		t.Fatalf("expected custom emoji and bold entities, got %#v", entities)
+	}
+}
+
 func TestTelegramRichTextHTMLConvertsBreaksAndEmptyParagraphs(t *testing.T) {
 	input := `<p>第一行<br>第二行</p><p></p><p>第四行</p>`
 	got := telegramRichTextHTML(input)

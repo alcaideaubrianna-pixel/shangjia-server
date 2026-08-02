@@ -27,11 +27,7 @@ func (s *sSysPublish) publishRecordListFast(ctx context.Context, in *sysin.Publi
 	if in.Action != "" {
 		mod = mod.Where("l.action", in.Action)
 	}
-	if in.Status == "success" || in.Status == "sent" {
-		mod = mod.Where("l.status", "success")
-	} else if in.Status != "" {
-		mod = mod.Where("l.status", in.Status)
-	}
+	mod = applyPublishRecordStatusFilter(mod, in.Status)
 
 	totalCount, err = mod.Clone().Count()
 	if err != nil {

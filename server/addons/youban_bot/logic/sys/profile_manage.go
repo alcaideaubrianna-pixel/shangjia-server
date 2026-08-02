@@ -428,11 +428,13 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 	results := []models.InlineQueryResult{}
 	if row.Id > 0 {
 		var mediaRows []struct {
-			MediaType         string `json:"media_type"`
-			FileURL           string `json:"file_url"`
-			StoragePath       string `json:"storage_path"`
-			PosterURL         string `json:"poster_url"`
-			PosterStoragePath string `json:"poster_storage_path"`
+			MediaType             string `json:"media_type"`
+			FileURL               string `json:"file_url"`
+			StoragePath           string `json:"storage_path"`
+			PosterURL             string `json:"poster_url"`
+			PosterStoragePath     string `json:"poster_storage_path"`
+			TgFileID              string `json:"tg_file_id"`
+			SourceMessageRecordID int64  `json:"source_message_record_id"`
 		}
 		mediaErr := g.DB().Model("hg_youban_publish_message_media").Safe().Ctx(ctx).
 			Where("template_id", row.Id).
@@ -444,20 +446,40 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 		}
 		mediaCount := len(mediaRows)
 		var media struct {
-			MediaType         string `json:"media_type"`
-			FileURL           string `json:"file_url"`
-			StoragePath       string `json:"storage_path"`
-			PosterURL         string `json:"poster_url"`
-			PosterStoragePath string `json:"poster_storage_path"`
+			MediaType             string `json:"media_type"`
+			FileURL               string `json:"file_url"`
+			StoragePath           string `json:"storage_path"`
+			PosterURL             string `json:"poster_url"`
+			PosterStoragePath     string `json:"poster_storage_path"`
+			TgFileID              string `json:"tg_file_id"`
+			SourceMessageRecordID int64  `json:"source_message_record_id"`
 		}
 		if mediaCount == 1 {
 			media = mediaRows[0]
 		}
 		caption := publishService.SysPublish().TelegramRichTextHTML(row.Text)
 		if mediaCount == 1 && strings.EqualFold(strings.TrimSpace(media.MediaType), "image") {
+			cachedPhoto, cachedErr := s.templateInlineCachedPhoto(ctx, botId, media.SourceMessageRecordID, media.TgFileID)
+			if cachedErr != nil {
+				g.Log().Warningf(ctx, "读取Inline缓存图片失败 templateId:%d sourceMessageRecordId:%d err:%+v", row.Id, media.SourceMessageRecordID, cachedErr)
+			}
+			if cachedPhoto != nil && strings.TrimSpace(cachedPhoto.FileID) != "" {
+				cachedCaption := cachedPhoto.Caption
+				if strings.TrimSpace(cachedCaption) == "" {
+					cachedCaption = caption
+				}
+				results = append(results, &models.InlineQueryResultCachedPhoto{
+					ID:              row.SerialNo,
+					PhotoFileID:     cachedPhoto.FileID,
+					Title:           row.Name,
+					Description:     row.SerialNo,
+					Caption:         cachedCaption,
+					CaptionEntities: cachedPhoto.CaptionEntities,
+				})
+			}
 			photoURL := normalizePreviewMediaURL(s.absoluteMediaURL(ctx, firstNonEmpty(media.FileURL, media.StoragePath)))
 			thumbnailURL := normalizePreviewMediaURL(s.absoluteMediaURL(ctx, firstNonEmpty(media.PosterURL, media.PosterStoragePath, media.FileURL, media.StoragePath)))
-			if photoURL != "" && thumbnailURL != "" {
+			if len(results) == 0 && photoURL != "" && thumbnailURL != "" {
 				results = append(results, &models.InlineQueryResultPhoto{
 					ID:           row.SerialNo,
 					PhotoURL:     photoURL,
@@ -492,6 +514,51 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 	defer cancel()
 	_, err = bot.AnswerInlineQuery(callCtx, &tgbot.AnswerInlineQueryParams{InlineQueryID: query.ID, Results: results, CacheTime: 0, IsPersonal: false})
 	return err
+}
+
+type templateInlineCachedPhoto struct {
+	FileID          string
+	Caption         string
+	CaptionEntities []models.MessageEntity
+}
+
+func (s *sSysBot) templateInlineCachedPhoto(ctx context.Context, botId int64, sourceMessageRecordId int64, fallbackFileID string) (*templateInlineCachedPhoto, error) {
+	if strings.TrimSpace(fallbackFileID) != "" {
+		return &templateInlineCachedPhoto{FileID: strings.TrimSpace(fallbackFileID)}, nil
+	}
+	if botId <= 0 || sourceMessageRecordId <= 0 {
+		return nil, nil
+	}
+	var row struct {
+		RawJSON string `json:"raw_json"`
+	}
+	if err := g.DB().Model(messageTable).Safe().Ctx(ctx).
+		Fields("raw_json").
+		Where("id", sourceMessageRecordId).
+		Where("bot_id", botId).
+		Scan(&row); err != nil {
+		return nil, gerror.Wrap(err, "读取Telegram来源消息失败")
+	}
+	return decodeTemplateInlineCachedPhoto(row.RawJSON), nil
+}
+
+func decodeTemplateInlineCachedPhoto(rawJSON string) *templateInlineCachedPhoto {
+	if strings.TrimSpace(rawJSON) == "" {
+		return nil
+	}
+	var message models.Message
+	if json.Unmarshal([]byte(rawJSON), &message) != nil || len(message.Photo) == 0 {
+		return nil
+	}
+	photo := message.Photo[len(message.Photo)-1]
+	if strings.TrimSpace(photo.FileID) == "" {
+		return nil
+	}
+	return &templateInlineCachedPhoto{
+		FileID:          strings.TrimSpace(photo.FileID),
+		Caption:         message.Caption,
+		CaptionEntities: message.CaptionEntities,
+	}
 }
 
 func (s *sSysBot) boundProfileAccount(ctx context.Context, msg *models.Message) (*botProfileAccount, error) {

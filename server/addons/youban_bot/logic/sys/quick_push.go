@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/util/grand"
 
 	"hotgo/addons/youban_bot/model/input/sysin"
@@ -74,20 +76,20 @@ func (quickPushFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *bo
 }
 
 type quickPushSession struct {
-	SessionId         string                                  `json:"sessionId"`
-	BotId             int64                                   `json:"botId"`
-	TelegramUserId    string                                  `json:"telegramUserId"`
-	ChatId            string                                  `json:"chatId"`
-	State             string                                  `json:"state"`
-	TenantId          int64                                   `json:"tenantId"`
-	OperatorAccountId int64                                   `json:"operatorAccountId"`
-	SourceChatId      string                                  `json:"sourceChatId"`
-	SourceMessageId   int                                     `json:"sourceMessageId"`
-	Text              string                                  `json:"text"`
-	Media             []*publishsysin.MessageTemplateMediaInp `json:"media"`
-	PlanIds           []int64                                 `json:"planIds"`
-	SelectedPlanIds   []int64                                 `json:"selectedPlanIds"`
-	CreatedAt         int64                                   `json:"createdAt"`
+	SessionId             string                                  `json:"sessionId"`
+	BotId                 int64                                   `json:"botId"`
+	TelegramUserId        string                                  `json:"telegramUserId"`
+	ChatId                string                                  `json:"chatId"`
+	State                 string                                  `json:"state"`
+	TenantId              int64                                   `json:"tenantId"`
+	OperatorAccountId     int64                                   `json:"operatorAccountId"`
+	SourceMessageRecordId int64                                   `json:"sourceMessageRecordId"`
+	Text                  string                                  `json:"text"`
+	Media                 []*publishsysin.MessageTemplateMediaInp `json:"media"`
+	PlanIds               []int64                                 `json:"planIds"`
+	SelectedPlanIds       []int64                                 `json:"selectedPlanIds"`
+	SavedTemplateId       int64                                   `json:"savedTemplateId"`
+	CreatedAt             int64                                   `json:"createdAt"`
 }
 
 type quickPushSessionMessageHandler struct{}
@@ -101,7 +103,7 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 	if err != nil || session == nil || session.State != quickPushSessionStateWaiting {
 		return false, err
 	}
-	text := strings.TrimSpace(firstNonEmpty(event.Msg.Text, event.Msg.Caption, event.Text))
+	text := quickPushTelegramMessageText(event.Msg, event.Text)
 	// Navigation commands and menu labels always leave the current flow first.
 	// Without this guard, a stale waiting session consumes every later message.
 	if quickPushNavigationText(text) {
@@ -117,14 +119,192 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 	if err != nil {
 		return true, err
 	}
-	media = bot.persistQuickPushMedia(ctx, media)
+	sourceMessageRecordId, err := bot.telegramMessageRecordId(ctx, event.BotId, chatId, event.Msg.ID)
+	if err != nil {
+		return true, err
+	}
+	for _, item := range media {
+		if item == nil {
+			continue
+		}
+		item.SourceMessageRecordId = sourceMessageRecordId
+		item.TgFileId = ""
+	}
+	media, err = bot.persistQuickPushMedia(ctx, session.OperatorAccountId, media)
+	if err != nil {
+		g.Log().Warningf(ctx, "快速推送Telegram媒体转存失败 botId:%d chatId:%s messageId:%d err:%+v", event.BotId, chatId, event.Msg.ID, err)
+		return true, bot.reply(ctx, event.BotId, chatId, "图片或视频下载保存失败，请稍后重新发送。")
+	}
 	if strings.TrimSpace(event.Msg.MediaGroupID) != "" && len(media) > 0 {
 		return true, bot.collectQuickPushMediaGroup(ctx, row.BotToken, session, event.Msg, text, media)
 	}
 	if text == "" && len(media) == 0 {
 		return true, bot.reply(ctx, event.BotId, chatId, "当前支持快速推送文本、图片、视频和图文媒体组，请重新发送。")
 	}
-	return true, bot.startQuickPushSelection(ctx, row.BotToken, session, chatId, fmt.Sprintf("%d", event.Msg.Chat.ID), event.Msg.ID, text, media)
+	return true, bot.startQuickPushSelection(ctx, row.BotToken, session, chatId, sourceMessageRecordId, text, media)
+}
+
+func quickPushTelegramMessageText(msg *models.Message, fallback string) string {
+	if msg == nil {
+		return strings.TrimSpace(fallback)
+	}
+	text := msg.Text
+	entities := msg.Entities
+	if text == "" {
+		text = msg.Caption
+		entities = msg.CaptionEntities
+	}
+	if text == "" {
+		return strings.TrimSpace(fallback)
+	}
+	runes := []rune(text)
+	spans := make([]telegramHTMLEntitySpan, 0, len(entities))
+	for _, entity := range entities {
+		openTag, closeTag, ok := telegramEntityHTMLTags(entity)
+		if !ok || entity.Length <= 0 {
+			continue
+		}
+		start, startOK := telegramUTF16RuneIndex(runes, entity.Offset)
+		end, endOK := telegramUTF16RuneIndex(runes, entity.Offset+entity.Length)
+		if !startOK || !endOK || end <= start {
+			continue
+		}
+		spans = append(spans, telegramHTMLEntitySpan{Start: start, End: end, OpenTag: openTag, CloseTag: closeTag, Rank: telegramEntityNestingRank(entity.Type)})
+	}
+	if len(spans) == 0 {
+		return strings.TrimSpace(text)
+	}
+	sort.SliceStable(spans, func(i, j int) bool {
+		if spans[i].Start != spans[j].Start {
+			return spans[i].Start < spans[j].Start
+		}
+		if spans[i].End != spans[j].End {
+			return spans[i].End > spans[j].End
+		}
+		return spans[i].Rank < spans[j].Rank
+	})
+	openings := make(map[int][]telegramHTMLEntitySpan)
+	closings := make(map[int][]telegramHTMLEntitySpan)
+	for order := range spans {
+		spans[order].Order = order
+		openings[spans[order].Start] = append(openings[spans[order].Start], spans[order])
+		closings[spans[order].End] = append(closings[spans[order].End], spans[order])
+	}
+	var builder strings.Builder
+	for index := 0; index <= len(runes); index++ {
+		closing := closings[index]
+		sort.SliceStable(closing, func(i, j int) bool { return closing[i].Order > closing[j].Order })
+		for _, span := range closing {
+			builder.WriteString(span.CloseTag)
+		}
+		for _, span := range openings[index] {
+			builder.WriteString(span.OpenTag)
+		}
+		if index < len(runes) {
+			builder.WriteString(html.EscapeString(string(runes[index])))
+		}
+	}
+	return strings.TrimSpace(builder.String())
+}
+
+type telegramHTMLEntitySpan struct {
+	Start    int
+	End      int
+	OpenTag  string
+	CloseTag string
+	Rank     int
+	Order    int
+}
+
+func telegramEntityHTMLTags(entity models.MessageEntity) (string, string, bool) {
+	switch entity.Type {
+	case models.MessageEntityTypeBold:
+		return "<b>", "</b>", true
+	case models.MessageEntityTypeItalic:
+		return "<i>", "</i>", true
+	case models.MessageEntityTypeUnderline:
+		return "<u>", "</u>", true
+	case models.MessageEntityTypeStrikethrough:
+		return "<s>", "</s>", true
+	case models.MessageEntityTypeSpoiler:
+		return "<tg-spoiler>", "</tg-spoiler>", true
+	case models.MessageEntityTypeBlockquote:
+		return "<blockquote>", "</blockquote>", true
+	case models.MessageEntityTypeExpandableBlockquote:
+		return "<blockquote expandable>", "</blockquote>", true
+	case models.MessageEntityTypeCode:
+		return "<code>", "</code>", true
+	case models.MessageEntityTypePre:
+		language := strings.TrimSpace(entity.Language)
+		if language == "" {
+			return "<pre>", "</pre>", true
+		}
+		return `<pre><code class="language-` + html.EscapeString(language) + `">`, "</code></pre>", true
+	case models.MessageEntityTypeTextLink:
+		if strings.TrimSpace(entity.URL) == "" {
+			return "", "", false
+		}
+		return `<a href="` + html.EscapeString(strings.TrimSpace(entity.URL)) + `">`, "</a>", true
+	case models.MessageEntityTypeTextMention:
+		if entity.User == nil || entity.User.ID <= 0 {
+			return "", "", false
+		}
+		return fmt.Sprintf(`<a href="tg://user?id=%d">`, entity.User.ID), "</a>", true
+	case models.MessageEntityTypeCustomEmoji:
+		if strings.TrimSpace(entity.CustomEmojiID) == "" {
+			return "", "", false
+		}
+		return `<tg-emoji emoji-id="` + html.EscapeString(strings.TrimSpace(entity.CustomEmojiID)) + `">`, "</tg-emoji>", true
+	case models.MessageEntityTypeDateTime:
+		if entity.UnixTime <= 0 {
+			return "", "", false
+		}
+		openTag := fmt.Sprintf(`<tg-time unix="%d"`, entity.UnixTime)
+		if format := strings.TrimSpace(entity.DateTimeFormat); format != "" {
+			openTag += ` format="` + html.EscapeString(format) + `"`
+		}
+		return openTag + ">", "</tg-time>", true
+	default:
+		return "", "", false
+	}
+}
+
+func telegramEntityNestingRank(entityType models.MessageEntityType) int {
+	switch entityType {
+	case models.MessageEntityTypeBlockquote, models.MessageEntityTypeExpandableBlockquote:
+		return 10
+	case models.MessageEntityTypeBold, models.MessageEntityTypeItalic, models.MessageEntityTypeUnderline, models.MessageEntityTypeStrikethrough, models.MessageEntityTypeSpoiler:
+		return 20
+	case models.MessageEntityTypeTextLink, models.MessageEntityTypeTextMention:
+		return 30
+	case models.MessageEntityTypeCode, models.MessageEntityTypePre:
+		return 40
+	case models.MessageEntityTypeCustomEmoji, models.MessageEntityTypeDateTime:
+		return 50
+	default:
+		return 100
+	}
+}
+
+func telegramUTF16RuneIndex(runes []rune, offset int) (int, bool) {
+	if offset < 0 {
+		return 0, false
+	}
+	units := 0
+	for index, char := range runes {
+		if units == offset {
+			return index, true
+		}
+		if char > 0xFFFF {
+			units += 2
+		} else {
+			units++
+		}
+		if units > offset {
+			return 0, false
+		}
+	}
+	return len(runes), units == offset
 }
 
 func (s *sSysBot) handleQuickPushCallback(ctx context.Context, botId int64, query *models.CallbackQuery) (bool, error) {
@@ -181,6 +361,28 @@ func (s *sSysBot) handleQuickPushCallback(ctx context.Context, botId int64, quer
 		_ = s.saveQuickPushSession(ctx, session)
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 		return true, s.editQuickPushSelection(callCtx, tgBot, query, session, plans)
+	case "save":
+		if session.SavedTemplateId > 0 {
+			_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "当前内容已保存为模板", ShowAlert: false})
+			return true, nil
+		}
+		result, saveErr := publishService.SysPublish().QuickPushSaveTemplateByBot(ctx, &publishsysin.QuickPushBotSaveTemplateInp{
+			TenantId:              session.TenantId,
+			OperatorAccountId:     session.OperatorAccountId,
+			Text:                  session.Text,
+			Media:                 session.Media,
+			SourceMessageRecordId: session.SourceMessageRecordId,
+		})
+		if saveErr != nil {
+			_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "保存模板失败：" + quickPushCallbackAlertText(saveErr.Error()), ShowAlert: true})
+			return true, nil
+		}
+		session.SavedTemplateId = result.Id
+		if err = s.saveQuickPushSession(ctx, session); err != nil {
+			return true, err
+		}
+		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "模板已保存，可在上架后台查看", ShowAlert: false})
+		return true, s.editQuickPushSelection(callCtx, tgBot, query, session, plans)
 	case "cancel":
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "已取消快速推送", ShowAlert: false})
 		_ = s.removeQuickPushSession(ctx, botId, telegramUserId)
@@ -192,7 +394,7 @@ func (s *sSysBot) handleQuickPushCallback(ctx context.Context, botId int64, quer
 		}
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "已开始执行快速推送", ShowAlert: false})
 		_ = s.editQuickPushMessageText(callCtx, tgBot, query, "快速推送已开始执行，请稍候…", nil)
-		res, execErr := publishService.SysPublish().QuickPushExecuteByBot(ctx, &publishsysin.QuickPushBotExecuteInp{TenantId: session.TenantId, OperatorAccountId: session.OperatorAccountId, PlanIds: session.SelectedPlanIds, Text: session.Text, Media: session.Media, SourceChatId: session.SourceChatId, SourceMessageId: session.SourceMessageId})
+		res, execErr := publishService.SysPublish().QuickPushExecuteByBot(ctx, &publishsysin.QuickPushBotExecuteInp{TenantId: session.TenantId, OperatorAccountId: session.OperatorAccountId, TemplateId: session.SavedTemplateId, PlanIds: session.SelectedPlanIds, Text: session.Text, Media: session.Media, SourceMessageRecordId: session.SourceMessageRecordId})
 		_ = s.removeQuickPushSession(ctx, botId, telegramUserId)
 		if execErr != nil {
 			return true, s.editQuickPushMessageText(callCtx, tgBot, query, "快速推送执行失败："+html.EscapeString(execErr.Error()), nil)
@@ -208,18 +410,17 @@ func (s *sSysBot) handleQuickPushCallback(ctx context.Context, botId int64, quer
 }
 
 type quickPushPendingMediaGroup struct {
-	SessionId       string                                  `json:"sessionId"`
-	BotId           int64                                   `json:"botId"`
-	TelegramUserId  string                                  `json:"telegramUserId"`
-	ChatId          string                                  `json:"chatId"`
-	SourceChatId    string                                  `json:"sourceChatId"`
-	SourceMessageId int                                     `json:"sourceMessageId"`
-	Text            string                                  `json:"text"`
-	Media           []*publishsysin.MessageTemplateMediaInp `json:"media"`
-	CreatedAt       int64                                   `json:"createdAt"`
+	SessionId             string                                  `json:"sessionId"`
+	BotId                 int64                                   `json:"botId"`
+	TelegramUserId        string                                  `json:"telegramUserId"`
+	ChatId                string                                  `json:"chatId"`
+	SourceMessageRecordId int64                                   `json:"sourceMessageRecordId"`
+	Text                  string                                  `json:"text"`
+	Media                 []*publishsysin.MessageTemplateMediaInp `json:"media"`
+	CreatedAt             int64                                   `json:"createdAt"`
 }
 
-func (s *sSysBot) startQuickPushSelection(ctx context.Context, botToken string, session *quickPushSession, chatId string, sourceChatId string, sourceMessageId int, text string, media []*publishsysin.MessageTemplateMediaInp) error {
+func (s *sSysBot) startQuickPushSelection(ctx context.Context, botToken string, session *quickPushSession, chatId string, sourceMessageRecordId int64, text string, media []*publishsysin.MessageTemplateMediaInp) error {
 	plans, err := publishService.SysPublish().QuickPushBotPlanList(ctx, session.OperatorAccountId)
 	if err != nil {
 		_ = s.removeQuickPushSession(ctx, session.BotId, session.TelegramUserId)
@@ -230,8 +431,7 @@ func (s *sSysBot) startQuickPushSelection(ctx context.Context, botToken string, 
 		return s.reply(ctx, session.BotId, chatId, "暂无已启用的快速推送计划，请先在上架后台创建。")
 	}
 	session.State = quickPushSessionStateSelecting
-	session.SourceChatId = sourceChatId
-	session.SourceMessageId = sourceMessageId
+	session.SourceMessageRecordId = sourceMessageRecordId
 	session.Text = strings.TrimSpace(text)
 	session.Media = media
 	session.PlanIds = quickPushPlanIds(plans)
@@ -258,10 +458,16 @@ func (s *sSysBot) collectQuickPushMediaGroup(ctx context.Context, botToken strin
 		}
 	}
 	if isFirst {
-		pending = &quickPushPendingMediaGroup{SessionId: session.SessionId, BotId: session.BotId, TelegramUserId: session.TelegramUserId, ChatId: session.ChatId, SourceChatId: fmt.Sprintf("%d", msg.Chat.ID), SourceMessageId: msg.ID, CreatedAt: time.Now().Unix()}
+		pending = &quickPushPendingMediaGroup{SessionId: session.SessionId, BotId: session.BotId, TelegramUserId: session.TelegramUserId, ChatId: session.ChatId, CreatedAt: time.Now().Unix()}
 	}
 	if strings.TrimSpace(pending.Text) == "" {
 		pending.Text = strings.TrimSpace(text)
+		if pending.Text != "" && len(media) > 0 && media[0] != nil {
+			pending.SourceMessageRecordId = media[0].SourceMessageRecordId
+		}
+	}
+	if pending.SourceMessageRecordId <= 0 && len(media) > 0 && media[0] != nil {
+		pending.SourceMessageRecordId = media[0].SourceMessageRecordId
 	}
 	for _, item := range media {
 		if item == nil {
@@ -303,7 +509,7 @@ func (s *sSysBot) finishQuickPushMediaGroup(botToken string, botId int64, telegr
 	if len(pending.Media) == 0 && strings.TrimSpace(pending.Text) == "" {
 		return
 	}
-	if err = s.startQuickPushSelection(ctx, botToken, session, pending.ChatId, pending.SourceChatId, pending.SourceMessageId, pending.Text, pending.Media); err != nil {
+	if err = s.startQuickPushSelection(ctx, botToken, session, pending.ChatId, pending.SourceMessageRecordId, pending.Text, pending.Media); err != nil {
 		_ = s.reply(ctx, botId, pending.ChatId, "快速推送媒体组解析失败："+html.EscapeString(err.Error()))
 	}
 }
@@ -446,8 +652,22 @@ func quickPushPlanKeyboard(session *quickPushSession, plans []*publishsysin.Quic
 		rows = append(rows, row)
 	}
 	rows = append(rows, []models.InlineKeyboardButton{{Text: "全选", CallbackData: quickPushCallbackData("all", session.SessionId, 0)}, {Text: "取消全选", CallbackData: quickPushCallbackData("none", session.SessionId, 0)}})
+	saveLabel := "保存模板"
+	if session.SavedTemplateId > 0 {
+		saveLabel = "✅ 模板已保存"
+	}
+	rows = append(rows, []models.InlineKeyboardButton{{Text: saveLabel, CallbackData: quickPushCallbackData("save", session.SessionId, 0)}})
 	rows = append(rows, []models.InlineKeyboardButton{{Text: "返回", CallbackData: quickPushCallbackData("cancel", session.SessionId, 0)}, {Text: "发送", CallbackData: quickPushCallbackData("send", session.SessionId, 0)}})
 	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func quickPushCallbackAlertText(text string) string {
+	const maxRunes = 150
+	runes := []rune(strings.TrimSpace(text))
+	if len(runes) <= maxRunes {
+		return string(runes)
+	}
+	return string(runes[:maxRunes]) + "…"
 }
 
 func quickPushPlanDisplayName(item *publishsysin.QuickPushPlanModel) string {

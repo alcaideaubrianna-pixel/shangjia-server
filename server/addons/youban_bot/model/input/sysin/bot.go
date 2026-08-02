@@ -10,6 +10,8 @@ import (
 	"hotgo/internal/model/input/form"
 )
 
+const CustomEmojiResolveMaxCount = 200
+
 const (
 	BotCodeSceneLogin = "login"
 	BotCodeSceneBind  = "bind"
@@ -64,6 +66,22 @@ type BotDeleteInp struct {
 
 type BotRefreshInp struct {
 	Ids []int64 `json:"ids" v:"required#请选择要刷新的Bot" dc:"Bot ID列表"`
+}
+
+type StoredMessageCopyInp struct {
+	MessageRecordIds []int64 `json:"messageRecordIds" dc:"TG消息记录ID"`
+	TargetChatId     string  `json:"targetChatId" dc:"目标Chat ID"`
+}
+
+type StoredMessageCopyModel struct {
+	MessageIds []int64 `json:"messageIds" dc:"发送后的TG消息ID"`
+}
+
+type StoredMessageSourceModel struct {
+	BotId       int64  `json:"botId" dc:"来源Bot ID"`
+	BotUsername string `json:"botUsername" dc:"来源Bot用户名"`
+	ChatId      string `json:"chatId" dc:"来源Chat ID"`
+	MessageIds  []int  `json:"messageIds" dc:"来源TG消息ID"`
 }
 
 type BotRefreshModel struct {
@@ -205,6 +223,49 @@ type SendMessageInp struct {
 	ChatId        string `json:"chatId" v:"required#Chat ID不能为空" dc:"Chat ID"`
 	Text          string `json:"text" v:"required#消息内容不能为空" dc:"消息内容"`
 	DisableNotice bool   `json:"disableNotice" dc:"静默发送"`
+}
+
+type CustomEmojiResolveInp struct {
+	EmojiIds []string `json:"emojiIds" v:"required#Emoji ID不能为空" dc:"Telegram自定义Emoji ID列表"`
+}
+
+func (in *CustomEmojiResolveInp) Filter(ctx context.Context) error {
+	if len(in.EmojiIds) == 0 {
+		return gerror.New("Emoji ID不能为空")
+	}
+	if len(in.EmojiIds) > CustomEmojiResolveMaxCount {
+		return gerror.Newf("单次最多解析%d个Emoji", CustomEmojiResolveMaxCount)
+	}
+	seen := make(map[string]struct{}, len(in.EmojiIds))
+	result := make([]string, 0, len(in.EmojiIds))
+	for _, raw := range in.EmojiIds {
+		emojiId := strings.TrimSpace(raw)
+		if emojiId == "" || len(emojiId) > 64 {
+			return gerror.New("Emoji ID格式不正确")
+		}
+		for _, char := range emojiId {
+			if char < '0' || char > '9' {
+				return gerror.New("Emoji ID格式不正确")
+			}
+		}
+		if _, ok := seen[emojiId]; ok {
+			continue
+		}
+		seen[emojiId] = struct{}{}
+		result = append(result, emojiId)
+	}
+	in.EmojiIds = result
+	return nil
+}
+
+type CustomEmojiModel struct {
+	EmojiId       string `json:"emojiId" dc:"Telegram自定义Emoji ID"`
+	FileUrl       string `json:"fileUrl" dc:"缓存文件地址"`
+	RenderType    string `json:"renderType" dc:"渲染类型：image/video/lottie"`
+	FileFormat    string `json:"fileFormat" dc:"原始文件格式"`
+	FallbackEmoji string `json:"fallbackEmoji" dc:"回退Emoji"`
+	Width         int    `json:"width" dc:"宽度"`
+	Height        int    `json:"height" dc:"高度"`
 }
 
 type MessageModel struct {

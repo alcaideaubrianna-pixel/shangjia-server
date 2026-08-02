@@ -82,3 +82,14 @@ func (c *cBotAuth) BindInfo(ctx context.Context, req *botapi.BindInfoReq) (res *
 	res = &botapi.BindInfoRes{BindInfoModel: out}
 	return
 }
+
+func (c *cBotAuth) CustomEmojiResolve(ctx context.Context, req *botapi.CustomEmojiResolveReq) (res *botapi.CustomEmojiResolveRes, err error) {
+	list, err := service.SysBot().ResolveCustomEmojis(ctx, &req.CustomEmojiResolveInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.CustomEmojiModel{}
+	}
+	return &botapi.CustomEmojiResolveRes{List: list}, nil
+}

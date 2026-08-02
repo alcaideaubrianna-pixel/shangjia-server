@@ -226,11 +226,7 @@ func (s *sSysPublish) applyPublishRecordFilters(mod *gdb.Model, in *sysin.Publis
 	if in.Action != "" {
 		mod = mod.Where("l.action", in.Action)
 	}
-	if in.Status == "success" || in.Status == "sent" {
-		mod = mod.Where("l.status", "success")
-	} else if in.Status != "" {
-		mod = mod.Where("l.status", in.Status)
-	}
+	mod = applyPublishRecordStatusFilter(mod, in.Status)
 	if in.Keyword != "" {
 		like := "%" + in.Keyword + "%"
 		if id, err := strconv.ParseInt(in.Keyword, 10, 64); err == nil && id > 0 {
@@ -240,6 +236,21 @@ func (s *sSysPublish) applyPublishRecordFilters(mod *gdb.Model, in *sysin.Publis
 		}
 	}
 	return mod
+}
+
+func applyPublishRecordStatusFilter(mod *gdb.Model, status string) *gdb.Model {
+	switch status {
+	case "success", "sent":
+		return mod.Where("l.status", "success")
+	case "failed":
+		return mod.WhereIn("l.status", []string{"failed", "failed_retry"})
+	case "pending":
+		return mod.WhereIn("l.status", []string{"pending", "sending"})
+	case "":
+		return mod
+	default:
+		return mod.Where("l.status", status)
+	}
 }
 
 func (s *sSysPublish) publishRecordClear(ctx context.Context, tenantId int64, accountId int64) error {

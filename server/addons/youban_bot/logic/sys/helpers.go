@@ -277,7 +277,11 @@ func telegramProxyUrl(ctx context.Context) string {
 
 func telegramHTTPClient(proxyUrl string) (*http.Client, error) {
 	transport := &http.Transport{}
-	parsed, err := url.Parse(strings.TrimSpace(proxyUrl))
+	proxyUrl = strings.TrimSpace(proxyUrl)
+	if proxyUrl == "" {
+		return &http.Client{Timeout: 35 * time.Second, Transport: transport}, nil
+	}
+	parsed, err := url.Parse(proxyUrl)
 	if err != nil {
 		return nil, err
 	}

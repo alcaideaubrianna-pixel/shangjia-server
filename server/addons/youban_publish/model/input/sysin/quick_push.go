@@ -63,13 +63,21 @@ type QuickPushBotAccountModel struct {
 }
 
 type QuickPushBotExecuteInp struct {
-	TenantId          int64                      `json:"tenantId" dc:"租户ID"`
-	OperatorAccountId int64                      `json:"operatorAccountId" dc:"操作上架账号ID"`
-	PlanIds           []int64                    `json:"planIds" dc:"快速推送计划ID"`
-	Text              string                     `json:"text" dc:"推送文本"`
-	Media             []*MessageTemplateMediaInp `json:"media" dc:"推送媒体"`
-	SourceChatId      string                     `json:"sourceChatId" dc:"来源Chat ID"`
-	SourceMessageId   int                        `json:"sourceMessageId" dc:"来源消息ID"`
+	TenantId              int64                      `json:"tenantId" dc:"租户ID"`
+	OperatorAccountId     int64                      `json:"operatorAccountId" dc:"操作上架账号ID"`
+	TemplateId            int64                      `json:"templateId" dc:"已保存消息模板ID"`
+	PlanIds               []int64                    `json:"planIds" dc:"快速推送计划ID"`
+	Text                  string                     `json:"text" dc:"推送文本"`
+	Media                 []*MessageTemplateMediaInp `json:"media" dc:"推送媒体"`
+	SourceMessageRecordId int64                      `json:"sourceMessageRecordId" dc:"来源TG消息记录ID"`
+}
+
+type QuickPushBotSaveTemplateInp struct {
+	TenantId              int64                      `json:"tenantId" dc:"租户ID"`
+	OperatorAccountId     int64                      `json:"operatorAccountId" dc:"操作上架账号ID"`
+	Text                  string                     `json:"text" dc:"模板文本"`
+	Media                 []*MessageTemplateMediaInp `json:"media" dc:"模板媒体"`
+	SourceMessageRecordId int64                      `json:"sourceMessageRecordId" dc:"来源TG消息记录ID"`
 }
 
 type QuickPushBotExecuteModel struct {
@@ -123,14 +131,25 @@ func (in *QuickPushBotExecuteInp) Filter(ctx context.Context) error {
 	if len(in.PlanIds) == 0 {
 		return gerror.New("请选择快速推送计划")
 	}
-	in.Text = strings.TrimSpace(in.Text)
-	if in.Text == "" && len(in.Media) == 0 {
+	return filterQuickPushContent(&in.Text, in.Media)
+}
+
+func (in *QuickPushBotSaveTemplateInp) Filter(ctx context.Context) error {
+	if in.TenantId <= 0 || in.OperatorAccountId <= 0 {
+		return gerror.New("上架管理员账号不能为空")
+	}
+	return filterQuickPushContent(&in.Text, in.Media)
+}
+
+func filterQuickPushContent(text *string, media []*MessageTemplateMediaInp) error {
+	*text = strings.TrimSpace(*text)
+	if *text == "" && len(media) == 0 {
 		return gerror.New("快速推送文本和媒体不能同时为空")
 	}
-	if len(in.Media) > 10 {
+	if len(media) > 10 {
 		return gerror.New("每次快速推送最多支持10个媒体")
 	}
-	for index, item := range in.Media {
+	for index, item := range media {
 		if item == nil {
 			return gerror.New("快速推送媒体不能为空")
 		}

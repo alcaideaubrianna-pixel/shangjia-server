@@ -234,6 +234,13 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_template" (
   "updated_at" timestamp DEFAULT NULL,
   "deleted_at" timestamp DEFAULT NULL
 );
+ALTER TABLE "hg_youban_publish_message_template" ADD COLUMN IF NOT EXISTS "serial_no" varchar(32) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_message_template" ADD COLUMN IF NOT EXISTS "push_mode" varchar(16) NOT NULL DEFAULT 'bot';
+ALTER TABLE "hg_youban_publish_message_template" ADD COLUMN IF NOT EXISTS "source_message_record_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_message_template" DROP COLUMN IF EXISTS "source_bot_id";
+ALTER TABLE "hg_youban_publish_message_template" DROP COLUMN IF EXISTS "source_chat_id";
+ALTER TABLE "hg_youban_publish_message_template" DROP COLUMN IF EXISTS "source_message_id";
+ALTER TABLE "hg_youban_publish_message_template" DROP COLUMN IF EXISTS "source_text_hash";
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_media" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -252,6 +259,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_media" (
   "created_at" timestamp DEFAULT NULL,
   "updated_at" timestamp DEFAULT NULL
 );
+ALTER TABLE "hg_youban_publish_message_media" ADD COLUMN IF NOT EXISTS "source_message_record_id" bigint NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_push_plan" (
   "id" BIGSERIAL PRIMARY KEY,

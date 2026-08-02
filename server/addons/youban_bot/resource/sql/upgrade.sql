@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_message` (
   KEY `idx_ybbm_message` (`bot_id`,`message_id`),
   UNIQUE KEY `uk_ybbm_chat_message` (`chat_id`,`message_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot消息日志';
+ALTER TABLE `hg_youban_bot_message` ADD COLUMN `retained_at` datetime DEFAULT NULL COMMENT '业务保留时间';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_bot_channel_cache` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
@@ -62,6 +63,14 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_channel_cache` (
 ALTER TABLE `hg_youban_bot_bot` ADD COLUMN `run_mode` varchar(32) NOT NULL DEFAULT 'auto' COMMENT '运行模式' AFTER `is_default`;
 ALTER TABLE `hg_youban_bot_bot` ADD COLUMN `webhook_url` varchar(500) NOT NULL DEFAULT '' COMMENT 'Webhook地址' AFTER `run_mode`;
 ALTER TABLE `hg_youban_bot_user` ADD COLUMN `is_super_admin` tinyint(1) NOT NULL DEFAULT '0' COMMENT '超级管理员' AFTER `status`;
+
+ALTER TABLE `hg_youban_bot_account_bind` DROP INDEX `uk_ybbab_account`;
+ALTER TABLE `hg_youban_bot_account_bind` DROP INDEX `uk_ybbab_telegram`;
+ALTER TABLE `hg_youban_bot_account_bind`
+  ADD COLUMN IF NOT EXISTS `active_account_id` bigint(20) GENERATED ALWAYS AS (CASE WHEN `status`=1 AND `deleted_at` IS NULL THEN `account_id` ELSE NULL END) STORED,
+  ADD COLUMN IF NOT EXISTS `active_telegram_user_id` varchar(128) GENERATED ALWAYS AS (CASE WHEN `status`=1 AND `deleted_at` IS NULL THEN `telegram_user_id` ELSE NULL END) STORED;
+ALTER TABLE `hg_youban_bot_account_bind` ADD UNIQUE KEY `uk_ybbab_account` (`app`,`active_account_id`);
+ALTER TABLE `hg_youban_bot_account_bind` ADD UNIQUE KEY `uk_ybbab_telegram` (`app`,`active_telegram_user_id`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_bot_invite_code` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
@@ -130,3 +139,24 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_inline_share` (
   KEY `idx_ybbis_profile` (`profile_no`,`status`,`id`),
   KEY `idx_ybbis_owner` (`tenant_id`,`account_id`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴Bot资料内联分享';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_custom_emoji` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `custom_emoji_id` varchar(64) NOT NULL DEFAULT '' COMMENT 'Telegram自定义Emoji ID',
+  `file_unique_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'Telegram文件唯一ID',
+  `attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'HotGo附件ID',
+  `storage_path` varchar(500) NOT NULL DEFAULT '' COMMENT '存储路径',
+  `file_url` varchar(1000) NOT NULL DEFAULT '' COMMENT '访问地址',
+  `file_format` varchar(16) NOT NULL DEFAULT '' COMMENT 'Telegram原始格式',
+  `render_type` varchar(16) NOT NULL DEFAULT '' COMMENT '渲染类型',
+  `fallback_emoji` varchar(64) NOT NULL DEFAULT '' COMMENT '回退Emoji',
+  `width` int(11) NOT NULL DEFAULT '0' COMMENT '宽度',
+  `height` int(11) NOT NULL DEFAULT '0' COMMENT '高度',
+  `status` tinyint(4) NOT NULL DEFAULT '1' COMMENT '状态',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybbce_emoji` (`custom_emoji_id`),
+  KEY `idx_ybbce_file` (`file_unique_id`),
+  KEY `idx_ybbce_status` (`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴Telegram自定义Emoji缓存';

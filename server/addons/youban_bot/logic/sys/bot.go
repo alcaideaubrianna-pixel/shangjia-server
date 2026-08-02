@@ -18,6 +18,7 @@ import (
 
 	"hotgo/addons/youban_bot/model/input/sysin"
 	"hotgo/addons/youban_bot/service"
+	"hotgo/internal/consts"
 	"hotgo/internal/library/contexts"
 )
 
@@ -29,6 +30,7 @@ const (
 	userTable         = "hg_youban_bot_user"
 	messageTable      = "hg_youban_bot_message"
 	channelCacheTable = "hg_youban_bot_channel_cache"
+	customEmojiTable  = "hg_youban_bot_custom_emoji"
 
 	publishAccountTable = "hg_youban_publish_account"
 )
@@ -462,11 +464,11 @@ func (s *sSysBot) consumeBindCode(ctx context.Context, botId int64, msg *models.
 	}
 	telegramUserId := fmt.Sprintf("%d", msg.From.ID)
 	telegramUsername := strings.TrimPrefix(strings.TrimSpace(msg.From.Username), "@")
-	count, err := g.DB().Model(accountBindTbl).Safe().Ctx(ctx).Where("app", row.App).Where("telegram_user_id", telegramUserId).WhereNot("account_id", row.AccountId).WhereNull("deleted_at").Count()
+	conflict, err := s.activeTelegramBindingConflict(ctx, row.App, telegramUserId, row.AccountId)
 	if err != nil {
 		return gerror.Wrap(err, "检查Telegram绑定失败")
 	}
-	if count > 0 {
+	if conflict {
 		_, _ = s.markCodeFailed(ctx, row.Code, sysin.BotCodeStatusFailed, "该Telegram账号已绑定其他账号")
 		return s.reply(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), "当前 Telegram 已绑定其他账号，不能重复绑定。")
 	}
@@ -475,7 +477,14 @@ func (s *sSysBot) consumeBindCode(ctx context.Context, botId int64, msg *models.
 	var exists *struct {
 		Id int64 `json:"id"`
 	}
-	_ = g.DB().Model(accountBindTbl).Safe().Ctx(ctx).Fields("id").Where("app", row.App).Where("account_id", row.AccountId).Scan(&exists)
+	_ = g.DB().Model(accountBindTbl).Safe().Ctx(ctx).
+		Fields("id").
+		Where("app", row.App).
+		Where("account_id", row.AccountId).
+		WhereNull("deleted_at").
+		OrderAsc("status").
+		OrderDesc("id").
+		Scan(&exists)
 	if exists != nil && exists.Id > 0 {
 		_, err = g.DB().Model(accountBindTbl).Safe().Ctx(ctx).Where("id", exists.Id).Data(data).Update()
 	} else {
@@ -502,6 +511,17 @@ func (s *sSysBot) consumeBindCode(ctx context.Context, botId int64, msg *models.
 	}
 	_ = s.notifySuperAdmins(ctx, botId, superNotifyBind, botBindNotifyText(row.App, row.AccountId, telegramUsername))
 	return replyErr
+}
+
+func (s *sSysBot) activeTelegramBindingConflict(ctx context.Context, app string, telegramUserId string, accountId int64) (bool, error) {
+	count, err := g.DB().Model(accountBindTbl).Safe().Ctx(ctx).
+		Where("app", strings.TrimSpace(app)).
+		Where("telegram_user_id", strings.TrimSpace(telegramUserId)).
+		WhereNot("account_id", accountId).
+		Where("status", consts.StatusEnabled).
+		WhereNull("deleted_at").
+		Count()
+	return count > 0, err
 }
 
 func (s *sSysBot) consumeLoginCode(ctx context.Context, botId int64, msg *models.Message, row *sysin.CodeStatusModel) error {

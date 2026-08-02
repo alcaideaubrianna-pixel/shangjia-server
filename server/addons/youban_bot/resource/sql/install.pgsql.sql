@@ -75,8 +75,8 @@ CREATE TABLE IF NOT EXISTS hg_youban_bot_account_bind (
   updated_at timestamp,
   deleted_at timestamp
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uk_ybbab_account ON hg_youban_bot_account_bind (app,account_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uk_ybbab_telegram ON hg_youban_bot_account_bind (app,telegram_user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_ybbab_account ON hg_youban_bot_account_bind (app,account_id) WHERE status=1 AND deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_ybbab_telegram ON hg_youban_bot_account_bind (app,telegram_user_id) WHERE status=1 AND deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_ybbab_status ON hg_youban_bot_account_bind (status,id);
 
 CREATE TABLE IF NOT EXISTS hg_youban_bot_user (
@@ -112,6 +112,7 @@ CREATE TABLE IF NOT EXISTS hg_youban_bot_message (
   message_type varchar(32) NOT NULL DEFAULT '',
   text text,
   raw_json text,
+  retained_at timestamp,
   created_at timestamp
 );
 CREATE INDEX IF NOT EXISTS idx_ybbm_bot ON hg_youban_bot_message (bot_id,id);
@@ -202,3 +203,23 @@ CREATE TABLE IF NOT EXISTS hg_youban_bot_inline_share (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_ybbis_token ON hg_youban_bot_inline_share (token);
 CREATE INDEX IF NOT EXISTS idx_ybbis_profile ON hg_youban_bot_inline_share (profile_no,status,id);
 CREATE INDEX IF NOT EXISTS idx_ybbis_owner ON hg_youban_bot_inline_share (tenant_id,account_id,id);
+
+CREATE TABLE IF NOT EXISTS hg_youban_bot_custom_emoji (
+  id bigserial PRIMARY KEY,
+  custom_emoji_id varchar(64) NOT NULL DEFAULT '',
+  file_unique_id varchar(128) NOT NULL DEFAULT '',
+  attachment_id bigint NOT NULL DEFAULT 0,
+  storage_path varchar(500) NOT NULL DEFAULT '',
+  file_url varchar(1000) NOT NULL DEFAULT '',
+  file_format varchar(16) NOT NULL DEFAULT '',
+  render_type varchar(16) NOT NULL DEFAULT '',
+  fallback_emoji varchar(64) NOT NULL DEFAULT '',
+  width integer NOT NULL DEFAULT 0,
+  height integer NOT NULL DEFAULT 0,
+  status smallint NOT NULL DEFAULT 1,
+  created_at timestamp,
+  updated_at timestamp
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_ybbce_emoji ON hg_youban_bot_custom_emoji (custom_emoji_id);
+CREATE INDEX IF NOT EXISTS idx_ybbce_file ON hg_youban_bot_custom_emoji (file_unique_id);
+CREATE INDEX IF NOT EXISTS idx_ybbce_status ON hg_youban_bot_custom_emoji (status,id);

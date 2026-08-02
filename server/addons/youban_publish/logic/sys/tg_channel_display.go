@@ -43,7 +43,10 @@ func (s *sSysPublish) enrichPublishRecordChannelDisplays(ctx context.Context, te
 	}
 	groups := make(map[groupKey][]string)
 	for _, item := range list {
-		if item == nil || strings.TrimSpace(item.ChannelTitle) != "" || strings.TrimSpace(item.TargetChatId) == "" || tenantId <= 0 {
+		if item == nil || strings.TrimSpace(item.TargetChatId) == "" || tenantId <= 0 {
+			continue
+		}
+		if item.Action != publishSuccessTypeQuick && strings.TrimSpace(item.ChannelTitle) != "" {
 			continue
 		}
 		key := groupKey{tenantId: tenantId, tgAccountId: 0}
@@ -61,7 +64,10 @@ func (s *sSysPublish) enrichPublishRecordChannelDisplays(ctx context.Context, te
 		displays[key] = items
 	}
 	for _, item := range list {
-		if item == nil || strings.TrimSpace(item.ChannelTitle) != "" {
+		if item == nil {
+			continue
+		}
+		if item.Action != publishSuccessTypeQuick && strings.TrimSpace(item.ChannelTitle) != "" {
 			continue
 		}
 		key := groupKey{tenantId: tenantId, tgAccountId: 0}

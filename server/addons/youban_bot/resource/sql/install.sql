@@ -112,6 +112,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_message` (
   `message_type` varchar(32) NOT NULL DEFAULT '' COMMENT '消息类型',
   `text` text COMMENT '消息内容',
   `raw_json` longtext COMMENT '原始消息JSON',
+  `retained_at` datetime DEFAULT NULL COMMENT '业务保留时间',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   PRIMARY KEY (`id`),
   KEY `idx_ybbm_bot` (`bot_id`,`id`),
@@ -206,3 +207,24 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_inline_share` (
   KEY `idx_ybbis_profile` (`profile_no`,`status`,`id`),
   KEY `idx_ybbis_owner` (`tenant_id`,`account_id`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴Bot资料内联分享';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_custom_emoji` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `custom_emoji_id` varchar(64) NOT NULL DEFAULT '' COMMENT 'Telegram自定义Emoji ID',
+  `file_unique_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'Telegram文件唯一ID',
+  `attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'HotGo附件ID',
+  `storage_path` varchar(500) NOT NULL DEFAULT '' COMMENT '存储路径',
+  `file_url` varchar(1000) NOT NULL DEFAULT '' COMMENT '访问地址',
+  `file_format` varchar(16) NOT NULL DEFAULT '' COMMENT 'Telegram原始格式',
+  `render_type` varchar(16) NOT NULL DEFAULT '' COMMENT '渲染类型',
+  `fallback_emoji` varchar(64) NOT NULL DEFAULT '' COMMENT '回退Emoji',
+  `width` int(11) NOT NULL DEFAULT '0' COMMENT '宽度',
+  `height` int(11) NOT NULL DEFAULT '0' COMMENT '高度',
+  `status` tinyint(4) NOT NULL DEFAULT '1' COMMENT '状态',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybbce_emoji` (`custom_emoji_id`),
+  KEY `idx_ybbce_file` (`file_unique_id`),
+  KEY `idx_ybbce_status` (`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴Telegram自定义Emoji缓存';

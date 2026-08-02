@@ -67,6 +67,7 @@ type ISysBot interface {
 	BindCodeStart(ctx context.Context) (res *sysin.CodeStartModel, err error)
 	BindCodeStatus(ctx context.Context, in *sysin.CodeStatusInp) (res *sysin.CodeStatusModel, err error)
 	BindInfo(ctx context.Context) (res *sysin.BindInfoModel, err error)
+	ResolveCustomEmojis(ctx context.Context, in *sysin.CustomEmojiResolveInp) (list []*sysin.CustomEmojiModel, err error)
 	MyInviteInfo(ctx context.Context) (res *sysin.InviteInfoModel, err error)
 	MyInviteList(ctx context.Context, in *sysin.InviteListInp) (list []*sysin.InviteModel, totalCount int, err error)
 	CreateInviteCode(ctx context.Context, in *sysin.InviteCreateInp) (res *sysin.InviteCreateModel, err error)
@@ -75,6 +76,10 @@ type ISysBot interface {
 	NotifyAccount(ctx context.Context, in *sysin.NotifyAccountInp) (err error)
 	NotifyAccounts(ctx context.Context, in *sysin.NotifyAccountsInp) (err error)
 	NotifyRich(ctx context.Context, in *sysin.NotifyRichInp) (err error)
+	CopyStoredMessages(ctx context.Context, in *sysin.StoredMessageCopyInp) (res *sysin.StoredMessageCopyModel, err error)
+	StoredMessageSource(ctx context.Context, ids []int64) (res *sysin.StoredMessageSourceModel, err error)
+	RetainStoredMessages(ctx context.Context, ids []int64) (err error)
+	ReleaseStoredMessages(ctx context.Context, ids []int64) (err error)
 	OfficialBotToken(ctx context.Context) (token string, err error)
 }
 

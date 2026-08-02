@@ -13,32 +13,32 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 	"hotgo/internal/library/storager"
+	"hotgo/internal/model"
 	isc "hotgo/internal/service"
 	fileutil "hotgo/utility/file"
 )
 
-func (s *sSysBot) persistQuickPushMedia(ctx context.Context, media []*publishsysin.MessageTemplateMediaInp) []*publishsysin.MessageTemplateMediaInp {
+func (s *sSysBot) persistQuickPushMedia(ctx context.Context, operatorAccountId int64, media []*publishsysin.MessageTemplateMediaInp) ([]*publishsysin.MessageTemplateMediaInp, error) {
 	if len(media) == 0 {
-		return media
+		return media, nil
 	}
+	uploadCtx := quickPushMediaUploadContext(ctx, operatorAccountId)
 	result := make([]*publishsysin.MessageTemplateMediaInp, 0, len(media))
 	for _, item := range media {
 		if item == nil {
 			continue
 		}
 		stored := *item
-		fileURL, storagePath, err := persistQuickPushMediaFile(ctx, item.MediaType, item.Name, item.FileUrl)
+		fileURL, storagePath, err := persistQuickPushMediaFile(uploadCtx, item.MediaType, item.Name, item.FileUrl)
 		if err != nil {
-			g.Log().Warningf(ctx, "快速推送媒体转存失败，保留Telegram复制发送能力 mediaType:%s name:%s err:%+v", item.MediaType, item.Name, err)
-			stored.FileUrl = ""
-			stored.StoragePath = ""
-		} else {
-			stored.FileUrl = fileURL
-			stored.StoragePath = storagePath
+			return nil, gerror.Wrapf(err, "转存Telegram媒体失败 mediaType:%s name:%s", item.MediaType, item.Name)
 		}
+		stored.FileUrl = fileURL
+		stored.StoragePath = storagePath
 		if strings.TrimSpace(item.PosterUrl) != "" {
-			posterURL, posterPath, posterErr := persistQuickPushMediaFile(ctx, "image", item.Name+"-poster", item.PosterUrl)
+			posterURL, posterPath, posterErr := persistQuickPushMediaFile(uploadCtx, "image", item.Name+"-poster", item.PosterUrl)
 			if posterErr != nil {
 				g.Log().Warningf(ctx, "快速推送媒体封面转存失败 name:%s err:%+v", item.Name, posterErr)
 				stored.PosterUrl = ""
@@ -50,37 +50,24 @@ func (s *sSysBot) persistQuickPushMedia(ctx context.Context, media []*publishsys
 		}
 		result = append(result, &stored)
 	}
-	return result
+	return result, nil
+}
+
+func quickPushMediaUploadContext(ctx context.Context, operatorAccountId int64) context.Context {
+	return context.WithValue(ctx, consts.ContextHTTPKey, &model.Context{
+		Module:    consts.AppApi,
+		AddonName: "youban_bot",
+		User: &model.Identity{
+			Id:  operatorAccountId,
+			App: consts.AppApi,
+		},
+	})
 }
 
 func persistQuickPushMediaFile(ctx context.Context, mediaType string, name string, sourceURL string) (string, string, error) {
-	sourceURL = strings.TrimSpace(sourceURL)
-	if sourceURL == "" {
-		return "", "", nil
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+	data, err := downloadTelegramAsset(ctx, sourceURL)
 	if err != nil {
 		return "", "", err
-	}
-	client, err := telegramHTTPClient(telegramProxyUrl(ctx))
-	if err != nil {
-		return "", "", err
-	}
-	client.Timeout = 2 * time.Minute
-	response, err := client.Do(request)
-	if err != nil {
-		return "", "", err
-	}
-	defer response.Body.Close()
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return "", "", gerror.Newf("下载Telegram媒体失败，状态码:%d", response.StatusCode)
-	}
-	data, err := io.ReadAll(response.Body)
-	if err != nil {
-		return "", "", err
-	}
-	if len(data) == 0 {
-		return "", "", gerror.New("Telegram媒体内容为空")
 	}
 	filename := quickPushMediaFilename(name, mediaType)
 	header, err := fileutil.NewMultipartFileHeader(filename, data)
@@ -99,6 +86,38 @@ func persistQuickPushMediaFile(ctx context.Context, mediaType string, name strin
 		return "", "", gerror.New("系统存储未返回媒体地址")
 	}
 	return strings.TrimSpace(attachment.FileUrl), strings.TrimSpace(attachment.Path), nil
+}
+
+func downloadTelegramAsset(ctx context.Context, sourceURL string) ([]byte, error) {
+	sourceURL = strings.TrimSpace(sourceURL)
+	if sourceURL == "" {
+		return nil, gerror.New("Telegram媒体下载地址为空")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	client, err := telegramHTTPClient(telegramProxyUrl(ctx))
+	if err != nil {
+		return nil, err
+	}
+	client.Timeout = 2 * time.Minute
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, gerror.Newf("下载Telegram媒体失败，状态码:%d", response.StatusCode)
+	}
+	data, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, gerror.New("Telegram媒体内容为空")
+	}
+	return data, nil
 }
 
 func quickPushMediaFilename(name string, mediaType string) string {
