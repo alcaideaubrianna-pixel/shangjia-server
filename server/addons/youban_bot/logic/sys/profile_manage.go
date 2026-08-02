@@ -383,9 +383,7 @@ func (s *sSysBot) handleProfileInlineQuery(ctx context.Context, botId int64, que
 	if strings.HasPrefix(strings.ToUpper(q), "XX") {
 		return s.handleTemplateInlineQuery(ctx, botId, query, q)
 	}
-	// Note inline sharing is intentionally disabled; Inline is reserved for
-	// quick-push templates identified by the XXxxxxxx serial.
-	return nil
+	return s.answerInlinePromotion(ctx, botId, query)
 	/*
 		share, err := s.inlineShareByToken(ctx, q)
 		if err != nil {

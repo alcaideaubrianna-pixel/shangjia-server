@@ -48,6 +48,9 @@ func (startFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
 	}
 }
 func (startFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFeatureContext) (bool, error) {
+	if handled, err := bot.dispatchInlinePromotionStart(ctx, featureCtx); handled || err != nil {
+		return handled, err
+	}
 	text := bot.featureConfigValue(ctx, startFeature{}.Key(), "replyText")
 	var markup models.ReplyMarkup
 	if startMarkup := startFeatureMarkup(bot, ctx); startMarkup != nil {

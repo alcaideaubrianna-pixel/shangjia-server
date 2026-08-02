@@ -111,6 +111,7 @@ func registerBotFeature(feature botFeature) {
 
 func init() {
 	registerBotFeature(startFeature{})
+	registerBotFeature(inlinePromotionFeature{})
 	registerBotFeature(loginFeature{})
 	registerBotFeature(bindFeature{})
 	registerBotFeature(infoFeature{})

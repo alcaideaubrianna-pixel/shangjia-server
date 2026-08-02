@@ -223,8 +223,16 @@
         return map.includes(fileType);
       }
 
-      function checkImageAspectRatio(file: File) {
-        if (props.fileType !== 'image' || !props.imageAspectRatio) {
+      function checkImageDimensions(file: File) {
+        if (
+          props.fileType !== 'image' ||
+          (!props.imageAspectRatio &&
+            !props.imageMaxDimensionSum &&
+            !props.imageMaxAspectRatio &&
+            !props.imageMinShortSide &&
+            !props.imageMinLongSide &&
+            !props.imageRecommendedAspectRatio)
+        ) {
           return Promise.resolve(true);
         }
         return new Promise<boolean>((resolve) => {
@@ -233,13 +241,56 @@
           img.onload = () => {
             URL.revokeObjectURL(url);
             const ratio = img.naturalWidth / img.naturalHeight;
-            const valid = Math.abs(ratio - props.imageAspectRatio) <= props.imageAspectRatioTolerance;
-            if (!valid) {
-              message.error(
-                `图片比例需为 8:3，当前为 ${img.naturalWidth}:${img.naturalHeight}`
-              );
+            if (
+              props.imageAspectRatio &&
+              Math.abs(ratio - props.imageAspectRatio) > props.imageAspectRatioTolerance
+            ) {
+              message.error(`图片比例不符合要求，当前为 ${img.naturalWidth}:${img.naturalHeight}`);
+              resolve(false);
+              return;
             }
-            resolve(valid);
+            if (
+              props.imageMaxDimensionSum &&
+              img.naturalWidth + img.naturalHeight > props.imageMaxDimensionSum
+            ) {
+              message.error(`图片宽高之和不能超过 ${props.imageMaxDimensionSum} 像素`);
+              resolve(false);
+              return;
+            }
+            const shortSide = Math.min(img.naturalWidth, img.naturalHeight);
+            const longSide = Math.max(img.naturalWidth, img.naturalHeight);
+            if (
+              (props.imageMinShortSide && shortSide < props.imageMinShortSide) ||
+              (props.imageMinLongSide && longSide < props.imageMinLongSide)
+            ) {
+              message.error(
+                `图片尺寸不能小于 ${props.imageMinLongSide} × ${props.imageMinShortSide} 像素`
+              );
+              resolve(false);
+              return;
+            }
+            if (
+              props.imageMaxAspectRatio &&
+              shortSide > 0 &&
+              longSide / shortSide > props.imageMaxAspectRatio
+            ) {
+              message.error(`图片长宽比不能超过 ${props.imageMaxAspectRatio}:1`);
+              resolve(false);
+              return;
+            }
+            if (
+              props.imageRecommendedAspectRatio &&
+              Math.abs(longSide / shortSide - props.imageRecommendedAspectRatio) >
+                props.imageRecommendedAspectRatioTolerance
+            ) {
+              message.warning(
+                `当前尺寸 ${img.naturalWidth} × ${img.naturalHeight}，建议使用 16:9 横图以获得更好的展示效果`
+              );
+              resolve(true);
+              return;
+            }
+            message.success(`图片尺寸校验通过：${img.naturalWidth} × ${img.naturalHeight} 像素`);
+            resolve(true);
           };
           img.onerror = () => {
             URL.revokeObjectURL(url);
@@ -260,8 +311,9 @@
         }
 
         // 设置类型,则判断
-        const fileType =
-          props.fileType === 'image'
+        const fileType = props.allowedMimeTypes.length
+          ? props.allowedMimeTypes
+          : props.fileType === 'image'
             ? componentSetting.upload.imageType
             : componentSetting.upload.fileType;
         if (!checkFileType(fileType, fileInfo.type)) {
@@ -270,7 +322,7 @@
           return false;
         }
 
-        return checkImageAspectRatio(fileInfo);
+        return checkImageDimensions(fileInfo);
       }
 
       //上传结束

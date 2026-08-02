@@ -20,7 +20,12 @@
       <n-form-item label="状态"
         ><n-select v-model:value="form.status" :options="statusOptions"
       /></n-form-item>
-      <n-form-item v-for="item in form.configSchema" :key="item.field" :label="item.label">
+      <n-form-item
+        v-for="item in form.configSchema"
+        v-show="item.component !== 'hidden'"
+        :key="item.field"
+        :label="item.label"
+      >
         <n-switch
           v-if="item.component === 'switch'"
           v-model:value="form.configValues[item.field]"
@@ -42,6 +47,31 @@
           :options="item.options || []"
           :placeholder="item.placeholder"
         />
+        <n-space v-else-if="item.component === 'image_upload'" vertical class="w-full">
+          <UploadImage
+            v-model:value="form.configValues[item.field]"
+            :max-number="1"
+            accept=".jpg,.jpeg"
+            :max-size="5"
+            :allowed-mime-types="['image/jpeg', 'image/jpg']"
+            :image-max-dimension-sum="10000"
+            :image-max-aspect-ratio="20"
+            :image-min-short-side="360"
+            :image-min-long-side="640"
+            :image-recommended-aspect-ratio="16 / 9"
+            :image-recommended-aspect-ratio-tolerance="0.04"
+            help-text="上传后自动回填图片地址"
+          />
+          <n-input
+            v-model:value="form.configValues[item.field]"
+            clearable
+            placeholder="也可直接填写 Telegram 可访问的 JPG/JPEG 外链"
+          />
+          <n-text depth="3">
+            推荐使用 1280×720 的 16:9 横图。上传时校验 JPEG、最短边 360、最长边 640、最大 5
+            MB；保存后会自动优化超大图片并生成方形 Inline 缩略图。
+          </n-text>
+        </n-space>
         <TelegramRichEditor
           v-else-if="item.component === 'telegram_rich_text'"
           v-model:value="form.configValues[item.field]"
@@ -124,6 +154,7 @@
 <script setup lang="ts">
   import { computed, onMounted, ref } from 'vue';
   import { BotList, UserList } from '@/api/addons/youbanBot';
+  import UploadImage from '@/components/Upload/uploadImage.vue';
   import TelegramRichEditor from '@/components/TelegramRichEditor/index.vue';
 
   const props = defineProps<{ show: boolean; form: Record<string, any>; statusOptions: any[] }>();

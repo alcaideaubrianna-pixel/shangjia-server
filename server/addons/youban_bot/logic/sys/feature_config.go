@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -79,6 +80,18 @@ func (s *sSysBot) AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp
 		data, _ := json.Marshal(config)
 		in.ConfigJson = string(data)
 	}
+	if featureKey == inlinePromotionFeatureKey {
+		config := featureConfigValues(in.ConfigJson)
+		config["messageText"] = sanitizeTelegramHTML(fmt.Sprintf("%v", config["messageText"]))
+		config["startParameter"] = normalizeInlinePromotionStartParameter(fmt.Sprintf("%v", config["startParameter"]))
+		config["targetFeatureKey"] = normalizeInlinePromotionTargetFeatureKey(fmt.Sprintf("%v", config["targetFeatureKey"]))
+		config["targetCommandArgs"] = strings.TrimSpace(fmt.Sprintf("%v", config["targetCommandArgs"]))
+		if err = s.normalizeInlinePromotionImageConfig(ctx, config); err != nil {
+			return err
+		}
+		data, _ := json.Marshal(config)
+		in.ConfigJson = string(data)
+	}
 	status := in.Status
 	if status == 0 {
 		status = 1
@@ -95,6 +108,7 @@ func (s *sSysBot) AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp
 		return gerror.Wrap(err, "保存Bot插件失败")
 	}
 	s.clearFeatureCache()
+	g.Log().Infof(ctx, "Bot插件配置已刷新 featureKey:%s", featureKey)
 	if err = s.syncAllTelegramBotMenus(ctx); err != nil {
 		g.Log().Warningf(ctx, "同步Telegram菜单失败 err:%+v", err)
 	}
@@ -278,14 +292,18 @@ func (s *sSysBot) syncAllTelegramBotMenus(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	errorsList := make([]error, 0)
 	for _, item := range bots {
 		if item != nil && strings.TrimSpace(item.BotToken) != "" {
 			if err = s.syncTelegramBotMenu(ctx, item.BotToken); err != nil {
-				return err
+				g.Log().Warningf(ctx, "同步Telegram菜单失败 botId:%d username:%s err:%+v", item.Id, item.BotUsername, err)
+				errorsList = append(errorsList, fmt.Errorf("bot %s: %w", firstNonEmpty(item.BotUsername, fmt.Sprintf("%d", item.Id)), err))
+				continue
 			}
+			g.Log().Infof(ctx, "同步Telegram菜单成功 botId:%d username:%s", item.Id, item.BotUsername)
 		}
 	}
-	return nil
+	return errors.Join(errorsList...)
 }
 
 func (s *sSysBot) syncTelegramBotMenu(ctx context.Context, botToken string) error {

@@ -19,6 +19,10 @@ export const basicProps = {
     type: Number as PropType<number>,
     default: 0,
   },
+  allowedMimeTypes: {
+    type: Array as PropType<string[]>,
+    default: () => [],
+  },
   maxNumber: {
     type: Number as PropType<number>,
     default: Infinity,
@@ -30,6 +34,30 @@ export const basicProps = {
   imageAspectRatioTolerance: {
     type: Number as PropType<number>,
     default: 0.02,
+  },
+  imageMaxDimensionSum: {
+    type: Number as PropType<number>,
+    default: 0,
+  },
+  imageMaxAspectRatio: {
+    type: Number as PropType<number>,
+    default: 0,
+  },
+  imageMinShortSide: {
+    type: Number as PropType<number>,
+    default: 0,
+  },
+  imageMinLongSide: {
+    type: Number as PropType<number>,
+    default: 0,
+  },
+  imageRecommendedAspectRatio: {
+    type: Number as PropType<number>,
+    default: 0,
+  },
+  imageRecommendedAspectRatioTolerance: {
+    type: Number as PropType<number>,
+    default: 0.03,
   },
   value: {
     type: String as PropType<string>,

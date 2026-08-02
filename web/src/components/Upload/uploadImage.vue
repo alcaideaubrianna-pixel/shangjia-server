@@ -7,10 +7,19 @@
     :width="100"
     :height="100"
     :maxNumber="maxNumber"
+    :accept="accept"
     :helpText="helpText"
+    :maxSize="maxSize"
+    :allowedMimeTypes="allowedMimeTypes"
     :imageAspectRatio="imageAspectRatio"
     :imageAspectRatioTolerance="imageAspectRatioTolerance"
-    @uploadChange="uploadChange"
+    :imageMaxDimensionSum="imageMaxDimensionSum"
+    :imageMaxAspectRatio="imageMaxAspectRatio"
+    :imageMinShortSide="imageMinShortSide"
+    :imageMinLongSide="imageMinLongSide"
+    :imageRecommendedAspectRatio="imageRecommendedAspectRatio"
+    :imageRecommendedAspectRatioTolerance="imageRecommendedAspectRatioTolerance"
+    @upload-change="uploadChange"
     v-model:value="image"
     v-model:values="images"
   />
@@ -26,8 +35,17 @@
     value: string | string[] | null;
     maxNumber: number;
     helpText?: string;
+    accept?: string;
+    maxSize?: number;
+    allowedMimeTypes?: string[];
     imageAspectRatio?: number;
     imageAspectRatioTolerance?: number;
+    imageMaxDimensionSum?: number;
+    imageMaxAspectRatio?: number;
+    imageMinShortSide?: number;
+    imageMinLongSide?: number;
+    imageRecommendedAspectRatio?: number;
+    imageRecommendedAspectRatioTolerance?: number;
   }
 
   const emit = defineEmits(['update:value']);
@@ -35,8 +53,17 @@
     value: '',
     maxNumber: 1,
     helpText: '',
+    accept: '.jpg,.png,.jpeg,.svg,.gif,.webp',
+    maxSize: 0,
+    allowedMimeTypes: () => [],
     imageAspectRatio: 0,
     imageAspectRatioTolerance: 0.02,
+    imageMaxDimensionSum: 0,
+    imageMaxAspectRatio: 0,
+    imageMinShortSide: 0,
+    imageMinLongSide: 0,
+    imageRecommendedAspectRatio: 0,
+    imageRecommendedAspectRatioTolerance: 0.03,
   });
   const image = ref<string>('');
   const images = ref<string[]>([]);
