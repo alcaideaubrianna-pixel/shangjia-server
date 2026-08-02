@@ -33,6 +33,7 @@ func (s *sSysPublish) publishRecordListFast(ctx context.Context, in *sysin.Publi
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取发送记录总数失败")
 	}
+	normalizePublishRecordPage(in, totalCount)
 	if err = mod.Fields("l.id,l.job_id,l.task_id,l.tenant_id,l.account_id,l.profile_id,l.channel_id,l.bot_id,l.operation_no,l.target_chat_id,l.action,l.status,l.message,l.created_at").
 		Page(in.Page, in.PerPage).
 		OrderDesc("l.id").

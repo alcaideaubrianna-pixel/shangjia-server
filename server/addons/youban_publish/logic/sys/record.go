@@ -10,8 +10,10 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/dao"
+	"hotgo/internal/model/input/form"
 )
 
 func (s *sSysPublish) MyPublishRecordList(ctx context.Context, in *sysin.PublishRecordListInp) (list []*sysin.PublishRecordModel, totalCount int, err error) {
@@ -39,7 +41,33 @@ func (s *sSysPublish) AdminPublishRecordList(ctx context.Context, in *sysin.Publ
 	if err = in.Filter(ctx); err != nil {
 		return nil, 0, err
 	}
-	return s.publishRecordList(ctx, in, account.TenantId, 0)
+	tenantId, err := s.adminPublishRecordTenantId(ctx, in.AccountId, account.TenantId)
+	if err != nil {
+		return nil, 0, err
+	}
+	return s.publishRecordList(ctx, in, tenantId, 0)
+}
+
+func (s *sSysPublish) adminPublishRecordTenantId(ctx context.Context, accountId int64, currentTenantId int64) (int64, error) {
+	if accountId <= 0 || !s.isSystemSuperAdmin(ctx) {
+		return currentTenantId, nil
+	}
+	columns := pdao.YoubanPublishAccount.Columns()
+	var row struct {
+		TenantId int64 `json:"tenant_id"`
+	}
+	if err := pdao.YoubanPublishAccount.Ctx(ctx).
+		Fields(columns.TenantId).
+		Where(columns.Id, accountId).
+		Where(columns.Status, 1).
+		WhereNull(columns.DeletedAt).
+		Scan(&row); err != nil {
+		return 0, gerror.Wrap(err, "读取发布记录账号归属失败")
+	}
+	if row.TenantId <= 0 {
+		return 0, gerror.New("发布记录账号不存在或已停用")
+	}
+	return row.TenantId, nil
 }
 
 func (s *sSysPublish) AdminPublishRecordClear(ctx context.Context, in *sysin.PublishRecordClearInp) (err error) {
@@ -164,6 +192,7 @@ func (s *sSysPublish) publishRecordList(ctx context.Context, in *sysin.PublishRe
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取发送记录总数失败")
 	}
+	normalizePublishRecordPage(in, totalCount)
 	mod := s.publishRecordBaseModel(ctx, in, tenantId, accountId).Fields(
 		"l.id,l.job_id,l.task_id,l.tenant_id,l.account_id,l.profile_id,l.channel_id,l.bot_id,l.operation_no,l.target_chat_id,l.action,l.status,l.message,l.created_at",
 		"p.title",
@@ -184,6 +213,16 @@ func (s *sSysPublish) publishRecordList(ctx context.Context, in *sysin.PublishRe
 	}
 	normalizeCollectPublishRecordActions(list)
 	return
+}
+
+func normalizePublishRecordPage(in *sysin.PublishRecordListInp, totalCount int) {
+	if in == nil || totalCount <= 0 {
+		return
+	}
+	_, _, offset := form.CalPage(in.Page, in.PerPage)
+	if offset >= totalCount {
+		in.Page = 1
+	}
 }
 
 func (s *sSysPublish) publishRecordCountModel(ctx context.Context, in *sysin.PublishRecordListInp, tenantId int64, accountId int64) *gdb.Model {
