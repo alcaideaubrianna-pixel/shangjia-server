@@ -12,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
+	"github.com/gotd/td/tgerr"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
@@ -186,8 +187,13 @@ func (s *sSysPublish) checkBotChannelMember(ctx context.Context, botItem *sysin.
 }
 
 func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgAccountId int64, channel *sysin.ChannelCacheModel, bots []*sysin.BotModel) error {
-	if _, err := s.adminTgAccountById(ctx, tgAccountId, tenantId); err != nil {
+	account, err := s.adminTgAccountById(ctx, tgAccountId, tenantId)
+	if err != nil {
 		return err
+	}
+	lastLoginAt := ""
+	if account.LastLoginAt != nil {
+		lastLoginAt = account.LastLoginAt.String()
 	}
 	channelID, err := strconv.ParseInt(channel.ChannelId, 10, 64)
 	if err != nil {
@@ -207,6 +213,7 @@ func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgA
 			}
 			resolved, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: username})
 			if err != nil {
+				logChannelBotRPCError(ctx, "resolve_bot_username", tenantId, tgAccountId, lastLoginAt, channel.ChannelId, botItem, err)
 				return gerror.Wrap(err, "解析Bot用户名失败")
 			}
 			inputUser, err := resolvedBotInputUser(resolved)
@@ -232,11 +239,37 @@ func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgA
 				},
 				Rank: "资料推送",
 			}); err != nil {
+				logChannelBotRPCError(ctx, "edit_channel_admin", tenantId, tgAccountId, lastLoginAt, channel.ChannelId, botItem, err)
+				if tgerr.Is(err, "FRESH_CHANGE_ADMINS_FORBIDDEN") {
+					return gerror.New("当前TG登录会话处于Telegram安全冷却期，系统暂时无法自动将Bot设置为频道管理员。通常需要等待10～30分钟，然后点击“重新检测”。如需立即使用，请前往Telegram频道的「频道管理 → 管理员 → 添加管理员」，手动将所选Bot添加为管理员，并开启“发布消息”和“删除消息”权限，完成后返回页面重新检测")
+				}
 				return gerror.Wrap(err, "设置Bot频道管理员权限失败")
 			}
 		}
 		return nil
 	})
+}
+
+func logChannelBotRPCError(ctx context.Context, operation string, tenantId, tgAccountId int64, tgLastLoginAt, channelId string, botItem *sysin.BotModel, err error) {
+	fields := g.Map{
+		"operation":        operation,
+		"tenant_id":        tenantId,
+		"tg_account_id":    tgAccountId,
+		"tg_last_login_at": tgLastLoginAt,
+		"channel_id":       channelId,
+		"error":            err.Error(),
+	}
+	if botItem != nil {
+		fields["bot_id"] = botItem.Id
+		fields["bot_username"] = strings.TrimPrefix(botItem.BotUsername, "@")
+	}
+	if rpcErr, ok := tgerr.As(err); ok {
+		fields["rpc_code"] = rpcErr.Code
+		fields["rpc_type"] = rpcErr.Type
+		fields["rpc_message"] = rpcErr.Message
+		fields["rpc_argument"] = rpcErr.Argument
+	}
+	g.Log().Warning(ctx, "频道Bot Telegram RPC调用失败", fields)
 }
 
 func telegramBotChatID(channel *sysin.ChannelCacheModel) any {
