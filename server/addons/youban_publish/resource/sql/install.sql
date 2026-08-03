@@ -492,7 +492,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_success_record` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ybp_success_record_job` (`job_id`),
   KEY `idx_ybp_success_record_owner` (`tenant_id`,`account_id`,`id`),
-  KEY `idx_ybp_success_record_profile` (`profile_id`,`id`)
+  KEY `idx_ybp_success_record_profile` (`profile_id`,`id`),
+  KEY `idx_ybp_success_record_monitor` (`created_at`,`status`,`profile_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架成功发布记录';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_full_push_batch` (
@@ -1247,7 +1248,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_daily_stat` (
   `failed_count` int(11) NOT NULL DEFAULT '0' COMMENT '失败数量', `down_count` int(11) NOT NULL DEFAULT '0' COMMENT '下架数量',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间', `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_ybp_daily_stat_account_date` (`tenant_id`,`account_id`,`stat_date`)
+  UNIQUE KEY `uk_ybp_daily_stat_account_date` (`tenant_id`,`account_id`,`stat_date`),
+  KEY `idx_ybp_daily_stat_date` (`stat_date`,`account_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴每日上架统计';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_bot` (

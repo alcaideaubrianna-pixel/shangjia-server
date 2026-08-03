@@ -1,13 +1,23 @@
 package sysin
 
 type ServerDashboardModel struct {
-	Stats      []*ServerDashboardStat       `json:"stats" dc:"核心指标"`
-	TaskTrend  []*ServerDashboardTrendPoint `json:"taskTrend" dc:"任务趋势"`
-	Health     []*ServerDashboardHealth     `json:"health" dc:"系统健康"`
-	Todos      []*ServerDashboardTodo       `json:"todos" dc:"待处理事项"`
-	TenantRank []*ServerDashboardRank       `json:"tenantRank" dc:"账号归属排行"`
-	ErrorRank  []*ServerDashboardRank       `json:"errorRank" dc:"失败原因排行"`
-	UpdatedAt  string                       `json:"updatedAt" dc:"更新时间"`
+	Stats             []*ServerDashboardStat              `json:"stats" dc:"核心指标"`
+	TaskTrend         []*ServerDashboardTrendPoint        `json:"taskTrend" dc:"任务趋势"`
+	ProfileTrend      []*ServerDashboardProfileTrendPoint `json:"profileTrend" dc:"资料上架趋势"`
+	Health            []*ServerDashboardHealth            `json:"health" dc:"系统健康"`
+	Todos             []*ServerDashboardTodo              `json:"todos" dc:"待处理事项"`
+	PublishFailureTop []*ServerDashboardRank              `json:"publishFailureTop" dc:"发布失败Top10"`
+	ProfilePublishTop []*ServerDashboardRank              `json:"profilePublishTop" dc:"资料发布Top10"`
+	StartDate         string                              `json:"startDate" dc:"统计开始日期"`
+	EndDate           string                              `json:"endDate" dc:"统计结束日期"`
+	UpdatedAt         string                              `json:"updatedAt" dc:"更新时间"`
+}
+
+type ServerDashboardProfileTrendPoint struct {
+	Date      string `json:"date" dc:"日期"`
+	Created   int    `json:"created" dc:"新增资料"`
+	Published int    `json:"published" dc:"上架资料"`
+	Down      int    `json:"down" dc:"下架资料"`
 }
 
 type ServerDashboardStat struct {

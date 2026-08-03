@@ -12,11 +12,28 @@ import (
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/dao"
+	"hotgo/internal/library/cache"
 )
 
+const serverDashboardCacheTTL = time.Minute
+
 func (s *sSysPublish) ServerDashboard(ctx context.Context, in *sysin.TrendInp) (*sysin.ServerDashboardModel, error) {
-	days := normalizeTrendDays(in)
-	taskCounts, err := s.serverDashboardTaskCounts(ctx)
+	dateRange, err := resolveTrendDateRange(in)
+	if err != nil {
+		return nil, err
+	}
+	cacheKey := fmt.Sprintf("youban_publish:server_dashboard:%s:%s", dateRange.Start, dateRange.End)
+	if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {
+		var cached sysin.ServerDashboardModel
+		if scanErr := value.Scan(&cached); scanErr == nil {
+			return &cached, nil
+		}
+	}
+	taskTrend, taskCounts, err := s.serverDashboardPublishTaskTrend(ctx, dateRange)
+	if err != nil {
+		return nil, err
+	}
+	profileTrend, err := s.serverDashboardProfileTrend(ctx, dateRange)
 	if err != nil {
 		return nil, err
 	}
@@ -28,31 +45,32 @@ func (s *sSysPublish) ServerDashboard(ctx context.Context, in *sysin.TrendInp) (
 	if err != nil {
 		return nil, err
 	}
-	trend, err := s.serverDashboardTaskTrend(ctx, days)
-	if err != nil {
-		return nil, err
-	}
 	todos, err := s.serverDashboardTodos(ctx)
 	if err != nil {
 		return nil, err
 	}
-	tenantRank, err := s.serverDashboardTenantRank(ctx)
+	failureTop, err := s.serverDashboardPublishFailureTop(ctx, dateRange)
 	if err != nil {
 		return nil, err
 	}
-	errorRank, err := s.serverDashboardErrorRank(ctx)
+	profileTop, err := s.serverDashboardProfilePublishTop(ctx, dateRange)
 	if err != nil {
 		return nil, err
 	}
-	return &sysin.ServerDashboardModel{
-		Stats:      serverDashboardStats(basicCounts, taskCounts, tgOnline),
-		TaskTrend:  trend,
-		Health:     serverDashboardHealth(tgOnline, tgTotal, taskCounts[sysin.PublishTaskStatusFailed], basicCounts["channels"]),
-		Todos:      todos,
-		TenantRank: tenantRank,
-		ErrorRank:  errorRank,
-		UpdatedAt:  gtime.Now().String(),
-	}, nil
+	result := &sysin.ServerDashboardModel{
+		Stats:             serverDashboardStats(basicCounts, taskCounts, tgOnline),
+		TaskTrend:         taskTrend,
+		ProfileTrend:      profileTrend,
+		Health:            serverDashboardHealth(tgOnline, tgTotal, taskCounts[sysin.PublishTaskStatusFailed], basicCounts["channels"]),
+		Todos:             todos,
+		PublishFailureTop: failureTop,
+		ProfilePublishTop: profileTop,
+		StartDate:         dateRange.Start,
+		EndDate:           dateRange.End,
+		UpdatedAt:         gtime.Now().String(),
+	}
+	_ = cache.Instance().Set(ctx, cacheKey, result, serverDashboardCacheTTL)
+	return result, nil
 }
 
 func serverDashboardStats(basic map[string]int, tasks map[string]int, tgOnline int) []*sysin.ServerDashboardStat {
@@ -60,13 +78,171 @@ func serverDashboardStats(basic map[string]int, tasks map[string]int, tgOnline i
 	return []*sysin.ServerDashboardStat{
 		{Key: "tenants", Title: "账号归属", Value: basic["tenants"]},
 		{Key: "accounts", Title: "上架账号", Value: basic["accounts"]},
-		{Key: "tasks", Title: "任务总数", Value: basic["tasks"]},
+		{Key: "tasks", Title: "范围内任务", Value: tasks["total"]},
 		{Key: "published", Title: "发布成功", Value: tasks[sysin.PublishTaskStatusPublished]},
 		{Key: "failed", Title: "发布失败", Value: tasks[sysin.PublishTaskStatusFailed]},
 		{Key: "tgOnline", Title: "在线协议号", Value: tgOnline},
 		{Key: "channels", Title: "频道数量", Value: basic["channels"]},
 		{Key: "successRate", Title: "发布成功率", Value: int(successRate), Suffix: "%", Rate: successRate},
 	}
+}
+
+func (s *sSysPublish) serverDashboardPublishTaskTrend(ctx context.Context, dateRange *trendDateRange) ([]*sysin.ServerDashboardTrendPoint, map[string]int, error) {
+	var rows []struct {
+		Date   string `json:"date"`
+		Status string `json:"status"`
+		Count  int    `json:"count"`
+	}
+	err := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).
+		Fields("DATE(created_at) AS date", "status", "COUNT(*) AS count").
+		WhereGTE("created_at", dateRange.Start+" 00:00:00").
+		WhereLT("created_at", dashboardRangeEndExclusive(dateRange.End)).
+		Group("DATE(created_at),status").
+		Scan(&rows)
+	if err != nil {
+		return nil, nil, gerror.Wrap(err, "统计后台任务趋势失败")
+	}
+	points := makeDashboardTaskTrendPoints(dateRange)
+	index := make(map[string]*sysin.ServerDashboardTrendPoint, len(points))
+	counts := map[string]int{"total": 0}
+	for _, point := range points {
+		index[point.Date] = point
+	}
+	for _, row := range rows {
+		point := index[row.Date]
+		if point == nil {
+			continue
+		}
+		point.Created += row.Count
+		counts["total"] += row.Count
+		switch row.Status {
+		case "success", "sent":
+			point.Published += row.Count
+			counts[sysin.PublishTaskStatusPublished] += row.Count
+		case "failed":
+			point.Failed += row.Count
+			counts[sysin.PublishTaskStatusFailed] += row.Count
+		case "canceled", "superseded":
+			point.Canceled += row.Count
+			counts[sysin.PublishTaskStatusCanceled] += row.Count
+		}
+	}
+	return points, counts, nil
+}
+
+func (s *sSysPublish) serverDashboardProfileTrend(ctx context.Context, dateRange *trendDateRange) ([]*sysin.ServerDashboardProfileTrendPoint, error) {
+	points := makeDashboardProfileTrendPoints(dateRange)
+	index := make(map[string]*sysin.ServerDashboardProfileTrendPoint, len(points))
+	for _, point := range points {
+		index[point.Date] = point
+	}
+	var createdRows []struct {
+		Date  string `json:"date"`
+		Count int    `json:"count"`
+	}
+	if err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
+		Fields("DATE(created_at) AS date", "COUNT(*) AS count").
+		WhereGTE("created_at", dateRange.Start+" 00:00:00").
+		WhereLT("created_at", dashboardRangeEndExclusive(dateRange.End)).
+		Group("DATE(created_at)").Scan(&createdRows); err != nil {
+		return nil, gerror.Wrap(err, "统计新增资料趋势失败")
+	}
+	for _, row := range createdRows {
+		if point := index[row.Date]; point != nil {
+			point.Created = row.Count
+		}
+	}
+	var statRows []struct {
+		Date      string `json:"date"`
+		Published int    `json:"published"`
+		Down      int    `json:"down"`
+	}
+	if err := g.DB().Model(publishDailyStatTable).Safe().Ctx(ctx).
+		Fields("stat_date AS date", "SUM(published_count) AS published", "SUM(down_count) AS down").
+		WhereBetween("stat_date", dateRange.Start, dateRange.End).
+		Group("stat_date").Scan(&statRows); err != nil {
+		return nil, gerror.Wrap(err, "统计资料上架趋势失败")
+	}
+	for _, row := range statRows {
+		if point := index[row.Date]; point != nil {
+			point.Published = row.Published
+			point.Down = row.Down
+		}
+	}
+	return points, nil
+}
+
+func (s *sSysPublish) serverDashboardPublishFailureTop(ctx context.Context, dateRange *trendDateRange) ([]*sysin.ServerDashboardRank, error) {
+	var rows []struct {
+		Message string `json:"message"`
+		Count   int    `json:"count"`
+	}
+	err := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).
+		Fields("message", "COUNT(*) AS count").
+		Where("status", "failed").
+		WhereNot("message", "").
+		WhereGTE("created_at", dateRange.Start+" 00:00:00").
+		WhereLT("created_at", dashboardRangeEndExclusive(dateRange.End)).
+		Group("message").OrderDesc("count").Limit(10).Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "统计发布失败Top10失败")
+	}
+	items := make([]*sysin.ServerDashboardRank, 0, len(rows))
+	for index, row := range rows {
+		items = append(items, &sysin.ServerDashboardRank{Key: fmt.Sprintf("failure-%d", index), Name: dashboardTrim(row.Message, 42), Value: row.Count, Desc: "失败次数", Status: "error"})
+	}
+	return items, nil
+}
+
+func (s *sSysPublish) serverDashboardProfilePublishTop(ctx context.Context, dateRange *trendDateRange) ([]*sysin.ServerDashboardRank, error) {
+	var rows []struct {
+		ProfileId int64  `json:"profileId"`
+		ProfileNo string `json:"profileNo"`
+		Title     string `json:"title"`
+		Count     int    `json:"count"`
+	}
+	err := g.DB().Model(publishSuccessRecordTable+" r").Safe().Ctx(ctx).
+		LeftJoin(dao.ContentProfile.Table()+" p", "p.id=r.profile_id").
+		Fields("r.profile_id", "p.profile_no", "p.title", "COUNT(*) AS count").
+		WhereIn("r.status", []string{"success", "sent"}).WhereGT("r.profile_id", 0).
+		WhereGTE("r.created_at", dateRange.Start+" 00:00:00").
+		WhereLT("r.created_at", dashboardRangeEndExclusive(dateRange.End)).
+		Group("r.profile_id,p.profile_no,p.title").OrderDesc("count").Limit(10).Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "统计资料发布Top10失败")
+	}
+	items := make([]*sysin.ServerDashboardRank, 0, len(rows))
+	for _, row := range rows {
+		name := dashboardText(strings.TrimSpace(row.ProfileNo), fmt.Sprintf("资料 %d", row.ProfileId))
+		if title := strings.TrimSpace(row.Title); title != "" {
+			name += " · " + dashboardTrim(title, 24)
+		}
+		items = append(items, &sysin.ServerDashboardRank{Key: fmt.Sprintf("profile-%d", row.ProfileId), Name: name, Value: row.Count, Desc: "发布次数", Status: "success"})
+	}
+	return items, nil
+}
+
+func makeDashboardTaskTrendPoints(dateRange *trendDateRange) []*sysin.ServerDashboardTrendPoint {
+	points := make([]*sysin.ServerDashboardTrendPoint, 0, dateRange.Days)
+	start, _ := time.Parse(trendDateLayout, dateRange.Start)
+	for i := 0; i < dateRange.Days; i++ {
+		points = append(points, &sysin.ServerDashboardTrendPoint{Date: start.AddDate(0, 0, i).Format(trendDateLayout)})
+	}
+	return points
+}
+
+func makeDashboardProfileTrendPoints(dateRange *trendDateRange) []*sysin.ServerDashboardProfileTrendPoint {
+	points := make([]*sysin.ServerDashboardProfileTrendPoint, 0, dateRange.Days)
+	start, _ := time.Parse(trendDateLayout, dateRange.Start)
+	for i := 0; i < dateRange.Days; i++ {
+		points = append(points, &sysin.ServerDashboardProfileTrendPoint{Date: start.AddDate(0, 0, i).Format(trendDateLayout)})
+	}
+	return points
+}
+
+func dashboardRangeEndExclusive(endDate string) string {
+	end, _ := time.Parse(trendDateLayout, endDate)
+	return end.AddDate(0, 0, 1).Format(trendDateLayout) + " 00:00:00"
 }
 
 func serverDashboardHealth(tgOnline int, tgTotal int, failed int, channels int) []*sysin.ServerDashboardHealth {
@@ -87,27 +263,6 @@ func serverDashboardHealth(tgOnline int, tgTotal int, failed int, channels int) 
 		{Key: "queue", Title: "发布队列", Status: queueStatus, Value: fmt.Sprintf("%d 个失败", failed), Message: "失败任务需要排查或重试"},
 		{Key: "channel", Title: "频道配置", Status: channelStatus, Value: fmt.Sprintf("%d 个频道", channels), Message: "频道为资料分发目标"},
 	}
-}
-
-func (s *sSysPublish) serverDashboardTaskCounts(ctx context.Context) (map[string]int, error) {
-	var rows []struct {
-		Status string `json:"status"`
-		Count  int    `json:"count"`
-	}
-	err := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
-		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
-		Fields("CASE WHEN p.status = 1 THEN 'published' ELSE 'pending' END AS status", "COUNT(*) AS count").
-		WhereNull("p.deleted_at").
-		Group("CASE WHEN p.status = 1 THEN 'published' ELSE 'pending' END").
-		Scan(&rows)
-	if err != nil {
-		return nil, gerror.Wrap(err, "统计后台任务状态失败")
-	}
-	counts := make(map[string]int, len(rows))
-	for _, row := range rows {
-		counts[row.Status] = row.Count
-	}
-	return counts, nil
 }
 
 func (s *sSysPublish) serverDashboardBasicCounts(ctx context.Context) (map[string]int, error) {
@@ -144,48 +299,6 @@ func (s *sSysPublish) serverDashboardTgCounts(ctx context.Context) (online int, 
 	return
 }
 
-func (s *sSysPublish) serverDashboardTaskTrend(ctx context.Context, days int) ([]*sysin.ServerDashboardTrendPoint, error) {
-	start := time.Now().AddDate(0, 0, -days+1).Format("2006-01-02")
-	var rows []struct {
-		Date   string `json:"date"`
-		Status string `json:"status"`
-		Count  int    `json:"count"`
-	}
-	err := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
-		Fields("DATE(p.created_at) AS date", "CASE WHEN p.status = 1 THEN 'published' ELSE 'pending' END AS status", "COUNT(*) AS count").
-		WhereGTE("p.created_at", start+" 00:00:00").
-		WhereNull("p.deleted_at").
-		Group("DATE(p.created_at),CASE WHEN p.status = 1 THEN 'published' ELSE 'pending' END").
-		Scan(&rows)
-	if err != nil {
-		return nil, gerror.Wrap(err, "统计后台任务趋势失败")
-	}
-	points := make([]*sysin.ServerDashboardTrendPoint, 0, days)
-	index := make(map[string]*sysin.ServerDashboardTrendPoint, days)
-	for i := days - 1; i >= 0; i-- {
-		date := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
-		point := &sysin.ServerDashboardTrendPoint{Date: date}
-		index[date] = point
-		points = append(points, point)
-	}
-	for _, row := range rows {
-		point := index[row.Date]
-		if point == nil {
-			continue
-		}
-		point.Created += row.Count
-		switch row.Status {
-		case sysin.PublishTaskStatusPublished:
-			point.Published += row.Count
-		case sysin.PublishTaskStatusFailed:
-			point.Failed += row.Count
-		case sysin.PublishTaskStatusCanceled:
-			point.Canceled += row.Count
-		}
-	}
-	return points, nil
-}
-
 func (s *sSysPublish) serverDashboardTodos(ctx context.Context) ([]*sysin.ServerDashboardTodo, error) {
 	var rows []*collectTaskSummary
 	err := s.collectTaskSummaryModel(ctx).
@@ -207,67 +320,6 @@ func (s *sSysPublish) serverDashboardTodos(ctx context.Context) ([]*sysin.Server
 		})
 	}
 	return todos, nil
-}
-
-func (s *sSysPublish) serverDashboardTenantRank(ctx context.Context) ([]*sysin.ServerDashboardRank, error) {
-	var rows []struct {
-		TenantId int64  `json:"tenantId"`
-		Name     string `json:"name"`
-		Count    int    `json:"count"`
-	}
-	err := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
-		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
-		LeftJoin(publishTenantTable+" m", "m.id=ps.tenant_id").
-		Fields("ps.tenant_id,m.name,COUNT(*) AS count").
-		Where("p.status", 1).
-		WhereNull("p.deleted_at").
-		Group("ps.tenant_id,m.name").
-		OrderDesc("count").
-		Limit(8).
-		Scan(&rows)
-	if err != nil {
-		return nil, gerror.Wrap(err, "统计账号归属排行失败")
-	}
-	list := make([]*sysin.ServerDashboardRank, 0, len(rows))
-	for _, row := range rows {
-		list = append(list, &sysin.ServerDashboardRank{
-			Key:    fmt.Sprintf("tenant-%d", row.TenantId),
-			Name:   dashboardText(row.Name, fmt.Sprintf("归属 %d", row.TenantId)),
-			Value:  row.Count,
-			Desc:   "发布成功",
-			Status: "success",
-		})
-	}
-	return list, nil
-}
-
-func (s *sSysPublish) serverDashboardErrorRank(ctx context.Context) ([]*sysin.ServerDashboardRank, error) {
-	var rows []struct {
-		Message string `json:"message"`
-		Count   int    `json:"count"`
-	}
-	err := g.DB().Model(publishTgJobLogTable).Safe().Ctx(ctx).
-		Fields("message", "COUNT(*) AS count").
-		Where("status", sysin.PublishTaskStatusFailed).
-		WhereNot("message", "").
-		Group("message").
-		OrderDesc("count").
-		Limit(8).
-		Scan(&rows)
-	if err != nil {
-		return nil, gerror.Wrap(err, "统计后台失败原因失败")
-	}
-	list := make([]*sysin.ServerDashboardRank, 0, len(rows))
-	for index, row := range rows {
-		list = append(list, &sysin.ServerDashboardRank{
-			Key:    fmt.Sprintf("error-%d", index),
-			Name:   dashboardTrim(row.Message, 28),
-			Value:  row.Count,
-			Desc:   "失败次数",
-			Status: "error",
-		})
-	}
-	return list, nil
 }
 
 func serverDashboardTodoDesc(row *collectTaskSummary) string {

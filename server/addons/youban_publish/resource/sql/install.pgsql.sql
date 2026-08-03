@@ -863,6 +863,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_daily_stat" (
   "updated_at" timestamp DEFAULT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_daily_stat_account_date" ON "hg_youban_publish_daily_stat" ("tenant_id", "account_id", "stat_date");
+CREATE INDEX IF NOT EXISTS "idx_ybp_daily_stat_date" ON "hg_youban_publish_daily_stat" ("stat_date", "account_id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_bot" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -1806,6 +1807,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_success_record" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_success_record_job" ON "hg_youban_publish_success_record" ("job_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_success_record_owner" ON "hg_youban_publish_success_record" ("tenant_id", "account_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_success_record_profile" ON "hg_youban_publish_success_record" ("profile_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_success_record_monitor" ON "hg_youban_publish_success_record" ("created_at", "status", "profile_id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tenant_vip" (
   "id" BIGSERIAL PRIMARY KEY,

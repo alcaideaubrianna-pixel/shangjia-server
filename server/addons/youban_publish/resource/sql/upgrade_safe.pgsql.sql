@@ -115,3 +115,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_cloud_resource_usage" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_cloud_usage_daily" ON "hg_youban_publish_cloud_resource_usage" ("tenant_id", "account_id", "resource_type", "scene", "usage_date");
 CREATE INDEX IF NOT EXISTS "idx_ybp_cloud_usage_date" ON "hg_youban_publish_cloud_resource_usage" ("usage_date", "resource_type", "account_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_cloud_usage_account" ON "hg_youban_publish_cloud_resource_usage" ("account_id", "usage_date");
+
+CREATE INDEX IF NOT EXISTS "idx_ybp_daily_stat_date" ON "hg_youban_publish_daily_stat" ("stat_date", "account_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_success_record_monitor" ON "hg_youban_publish_success_record" ("created_at", "status", "profile_id");
