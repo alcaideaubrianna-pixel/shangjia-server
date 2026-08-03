@@ -374,20 +374,27 @@
         </n-tab-pane>
 
         <n-tab-pane name="cloudResource" tab="云资源配置">
-          <n-spin :show="cloudResourceLoading">
-            <n-space vertical class="config-section">
-              <CloudResourceConfig :model="cloudResourceConfig" />
-              <n-space justify="end">
-                <n-button @click="loadCloudResourceConfig">重置</n-button>
-                <n-button
-                  type="primary"
-                  :loading="cloudResourceSaving"
-                  @click="saveCloudResourceConfig"
-                  >保存配置</n-button
-                >
-              </n-space>
-            </n-space>
-          </n-spin>
+          <n-tabs type="segment" animated>
+            <n-tab-pane name="resourceConfig" tab="资源配置">
+              <n-spin :show="cloudResourceLoading">
+                <n-space vertical class="config-section">
+                  <CloudResourceConfig :model="cloudResourceConfig" />
+                  <n-space justify="end">
+                    <n-button @click="loadCloudResourceConfig">重置</n-button>
+                    <n-button
+                      type="primary"
+                      :loading="cloudResourceSaving"
+                      @click="saveCloudResourceConfig"
+                      >保存配置</n-button
+                    >
+                  </n-space>
+                </n-space>
+              </n-spin>
+            </n-tab-pane>
+            <n-tab-pane name="resourceUsage" tab="调用统计" display-directive="if">
+              <CloudResourceUsage />
+            </n-tab-pane>
+          </n-tabs>
         </n-tab-pane>
       </n-tabs>
     </n-card>
@@ -591,6 +598,7 @@
   import ChannelMemberPanel from './components/channel-member-panel.vue';
   import ActivityPanel from './components/activity-panel.vue';
   import CloudResourceConfig from './components/cloud-resource-config.vue';
+  import CloudResourceUsage from './components/cloud-resource-usage.vue';
   import DashboardPanel from './components/dashboard-panel.vue';
   import ImportTaskPanel from './components/import-task-panel.vue';
   import MemberPanel from './components/member-panel.vue';

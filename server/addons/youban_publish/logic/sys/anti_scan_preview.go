@@ -12,6 +12,7 @@ import (
 	"image/jpeg"
 	_ "image/png"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -41,13 +42,17 @@ func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiSc
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
-	if in.BackgroundReplaceEnabled == 1 {
+	usageOwner := cloudResourceUsageOwner{}
+	if needsAntiScanFaceDetection(in) || needsAntiScanMatting(in) {
 		account, accountErr := s.currentAccount(ctx)
 		if accountErr != nil {
 			return nil, accountErr
 		}
-		if err = s.ensureTenantVipFeature(ctx, account.TenantId, sysin.TenantVipFeatureBackgroundReplace); err != nil {
-			return nil, err
+		usageOwner = cloudResourceUsageOwner{TenantId: account.TenantId, AccountId: account.Id}
+		if in.BackgroundReplaceEnabled == 1 {
+			if err = s.ensureTenantVipFeature(ctx, account.TenantId, sysin.TenantVipFeatureBackgroundReplace); err != nil {
+				return nil, err
+			}
 		}
 	}
 	imageBytes, originalUrl, err := readAntiScanPreviewImage(ctx, upload, in.UseDefaultImage)
@@ -71,7 +76,7 @@ func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiSc
 	detectRes := &antiScanDetectResult{Provider: "none"}
 	warnings := []string{}
 	if !noop {
-		detectRes, warnings, err = s.detectAntiScanImage(ctx, imageHash, imageBytes, in, cloudConf)
+		detectRes, warnings, err = s.detectAntiScanImage(ctx, imageHash, imageBytes, in, cloudConf, usageOwner)
 		if err != nil {
 			return nil, err
 		}
@@ -111,14 +116,14 @@ type antiScanDetectResult struct {
 }
 
 // detectAntiScanImage 按精确图片哈希缓存云识别结果，避免相似图误复用抠图结果。
-func (s *sSysPublish) detectAntiScanImage(ctx context.Context, imageHash string, imageBytes []byte, in *sysin.AntiScanPreviewInp, conf *model.CloudResourceConfig) (*antiScanDetectResult, []string, error) {
+func (s *sSysPublish) detectAntiScanImage(ctx context.Context, imageHash string, imageBytes []byte, in *sysin.AntiScanPreviewInp, conf *model.CloudResourceConfig, usageOwner cloudResourceUsageOwner) (*antiScanDetectResult, []string, error) {
 	if conf == nil {
 		return nil, nil, gerror.New("云资源配置不合法")
 	}
 	res := &antiScanDetectResult{Provider: "none"}
 	warnings := []string{}
 	if needsAntiScanFaceDetection(in) {
-		faceRaw, faceCount, err := s.getOrCreateAntiScanFaceDetection(ctx, imageHash, imageBytes, conf)
+		faceRaw, faceCount, err := s.getOrCreateAntiScanFaceDetection(ctx, imageHash, imageBytes, conf, usageOwner)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -132,7 +137,7 @@ func (s *sSysPublish) detectAntiScanImage(ctx context.Context, imageHash string,
 		}
 	}
 	if needsAntiScanMatting(in) {
-		segmentRaw, err := s.getOrCreateAntiScanMatting(ctx, imageHash, imageBytes, conf)
+		segmentRaw, err := s.getOrCreateAntiScanMatting(ctx, imageHash, imageBytes, conf, usageOwner)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -165,7 +170,7 @@ func appendAntiScanProvider(current string, next string) string {
 	return current + "+" + next
 }
 
-func (s *sSysPublish) getOrCreateAntiScanFaceDetection(ctx context.Context, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig) (string, int, error) {
+func (s *sSysPublish) getOrCreateAntiScanFaceDetection(ctx context.Context, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig, usageOwner cloudResourceUsageOwner) (string, int, error) {
 	if cached, ok := s.getAntiScanFaceCache(ctx, imageHash); ok {
 		return cached.FaceRaw, cached.FaceCount, nil
 	}
@@ -177,7 +182,15 @@ func (s *sSysPublish) getOrCreateAntiScanFaceDetection(ctx context.Context, imag
 		return "", 0, err
 	}
 	client := newTencentVisionClient(conf.TencentSecretId, conf.TencentSecretKey, conf.TencentCloudSite, conf.TencentRegion, conf.TencentBdaEndpoint, conf.TencentIaiEndpoint)
+	startedAt := time.Now()
 	faceRaw, faceCount, err := client.detectFace(ctx, base64.StdEncoding.EncodeToString(normalized))
+	recordCloudResourceUsage(ctx, cloudResourceUsageEvent{
+		cloudResourceUsageOwner: usageOwner,
+		ResourceType:            sysin.CloudResourceTypeFaceDetection,
+		Scene:                   cloudResourceUsageScenePreview,
+		Success:                 err == nil,
+		Duration:                time.Since(startedAt),
+	})
 	if err != nil {
 		return "", 0, err
 	}
@@ -192,7 +205,7 @@ func (s *sSysPublish) getOrCreateAntiScanFaceDetection(ctx context.Context, imag
 	return faceRaw, faceCount, nil
 }
 
-func (s *sSysPublish) getOrCreateAntiScanMatting(ctx context.Context, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig) (string, error) {
+func (s *sSysPublish) getOrCreateAntiScanMatting(ctx context.Context, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig, usageOwner cloudResourceUsageOwner) (string, error) {
 	if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash); ok {
 		return cached.SegmentRaw, nil
 	}
@@ -200,7 +213,15 @@ func (s *sSysPublish) getOrCreateAntiScanMatting(ctx context.Context, imageHash 
 		return "", nil
 	}
 	client := newFapiHubClient(conf.FapiHubApiKey, conf.FapiHubEndpoint, conf.FapiHubModel)
+	startedAt := time.Now()
 	pngBytes, err := client.removeBackground(ctx, imageBytes)
+	recordCloudResourceUsage(ctx, cloudResourceUsageEvent{
+		cloudResourceUsageOwner: usageOwner,
+		ResourceType:            sysin.CloudResourceTypeBackgroundMatting,
+		Scene:                   cloudResourceUsageScenePreview,
+		Success:                 err == nil,
+		Duration:                time.Since(startedAt),
+	})
 	if err != nil {
 		g.Log().Warningf(ctx, "云端抠图调用失败 imageHash:%s err:%+v", imageHash, err)
 		return "", antiScanMattingPublicError()

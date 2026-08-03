@@ -988,6 +988,26 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_anti_scan_cache` (
   KEY `idx_ybp_anti_scan_provider` (`provider`,`cloud_raw_saved`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴防扫图预览缓存';
 
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_cloud_resource_usage` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '上架账号ID，0为系统调用',
+  `resource_type` varchar(32) NOT NULL DEFAULT '' COMMENT '资源类型',
+  `scene` varchar(32) NOT NULL DEFAULT '' COMMENT '调用场景',
+  `usage_date` date NOT NULL COMMENT '统计日期',
+  `request_count` bigint(20) NOT NULL DEFAULT '0' COMMENT '请求次数',
+  `success_count` bigint(20) NOT NULL DEFAULT '0' COMMENT '成功次数',
+  `failure_count` bigint(20) NOT NULL DEFAULT '0' COMMENT '失败次数',
+  `total_duration_ms` bigint(20) NOT NULL DEFAULT '0' COMMENT '累计耗时毫秒',
+  `last_called_at` datetime DEFAULT NULL COMMENT '最后调用时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_cloud_usage_daily` (`tenant_id`,`account_id`,`resource_type`,`scene`,`usage_date`),
+  KEY `idx_ybp_cloud_usage_date` (`usage_date`,`resource_type`,`account_id`),
+  KEY `idx_ybp_cloud_usage_account` (`account_id`,`usage_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴云资源每日调用统计';
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_anti_scan_material` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',

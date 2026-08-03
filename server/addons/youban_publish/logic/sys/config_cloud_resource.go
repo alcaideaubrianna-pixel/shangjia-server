@@ -3,11 +3,13 @@ package sys
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
 	"hotgo/addons/youban_publish/model"
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 func defaultCloudResourceConfig() *model.CloudResourceConfig {
@@ -54,7 +56,15 @@ func validateCloudResourceCredential(ctx context.Context, conf *model.CloudResou
 
 func validateFapiHubCredential(ctx context.Context, conf *model.CloudResourceConfig, imageBytes []byte) error {
 	client := newFapiHubClient(conf.FapiHubApiKey, conf.FapiHubEndpoint, conf.FapiHubModel)
-	if _, err := client.removeBackground(ctx, imageBytes); err != nil {
+	startedAt := time.Now()
+	_, err := client.removeBackground(ctx, imageBytes)
+	recordCloudResourceUsage(ctx, cloudResourceUsageEvent{
+		ResourceType: sysin.CloudResourceTypeBackgroundMatting,
+		Scene:        cloudResourceUsageSceneValidate,
+		Success:      err == nil,
+		Duration:     time.Since(startedAt),
+	})
+	if err != nil {
 		if strings.Contains(err.Error(), "HTTP 400") {
 			return gerror.Wrap(err, "FAPIHub 抠图接口请求校验失败")
 		}

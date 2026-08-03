@@ -588,6 +588,25 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_image" ON "hg_youban_publish_anti_
 CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_config" ON "hg_youban_publish_anti_scan_cache" ("image_hash", "config_hash");
 CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_provider" ON "hg_youban_publish_anti_scan_cache" ("provider", "cloud_raw_saved");
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_cloud_resource_usage" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "resource_type" varchar(32) NOT NULL DEFAULT '',
+  "scene" varchar(32) NOT NULL DEFAULT '',
+  "usage_date" date NOT NULL,
+  "request_count" bigint NOT NULL DEFAULT 0,
+  "success_count" bigint NOT NULL DEFAULT 0,
+  "failure_count" bigint NOT NULL DEFAULT 0,
+  "total_duration_ms" bigint NOT NULL DEFAULT 0,
+  "last_called_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_cloud_usage_daily" ON "hg_youban_publish_cloud_resource_usage" ("tenant_id", "account_id", "resource_type", "scene", "usage_date");
+CREATE INDEX IF NOT EXISTS "idx_ybp_cloud_usage_date" ON "hg_youban_publish_cloud_resource_usage" ("usage_date", "resource_type", "account_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_cloud_usage_account" ON "hg_youban_publish_cloud_resource_usage" ("account_id", "usage_date");
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_anti_scan_material" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,

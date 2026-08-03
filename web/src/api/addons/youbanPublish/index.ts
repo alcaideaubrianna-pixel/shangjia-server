@@ -292,6 +292,14 @@ export function ConfigUpdate(params = {}) {
   return http.request({ url: '/youban_publish/publish/config/update', method: 'POST', params });
 }
 
+export function CloudResourceUsageList(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/config/cloudUsageList',
+    method: 'get',
+    params,
+  });
+}
+
 export function AdminInviteList(params = {}) {
   return http.request({ url: '/youban_publish/publish/admin/invite/list', method: 'get', params });
 }

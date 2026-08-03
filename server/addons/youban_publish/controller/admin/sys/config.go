@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"hotgo/addons/youban_publish/api/admin/config"
+	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
 )
 
@@ -25,5 +26,20 @@ func (c *cConfig) Update(ctx context.Context, req *config.UpdateReq) (res *confi
 		return nil, err
 	}
 	res = &config.UpdateRes{}
+	return
+}
+
+func (c *cConfig) CloudUsageList(ctx context.Context, req *config.CloudUsageListReq) (res *config.CloudUsageListRes, err error) {
+	list, totalCount, summary, err := service.SysConfig().CloudResourceUsageList(ctx, &req.CloudResourceUsageListInp)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = []*sysin.CloudResourceUsageModel{}
+	}
+	res = new(config.CloudUsageListRes)
+	res.List = list
+	res.Summary = summary
+	res.PageRes.Pack(req, totalCount)
 	return
 }
