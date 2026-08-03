@@ -85,6 +85,43 @@ func (s *sSysBot) loginBoundAccount(ctx context.Context, app string, accountId i
 	return s.loginPublishAccount(ctx, accountId)
 }
 
+func (s *sSysBot) loginAccountProfile(ctx context.Context, app string, accountId int64) (*botLoginResult, error) {
+	if app == sysin.BotAppAdmin {
+		var account *entity.AdminMember
+		if err := dao.AdminMember.Ctx(ctx).WherePri(accountId).Scan(&account); err != nil {
+			return nil, gerror.Wrap(err, consts.ErrorORM)
+		}
+		if account == nil || account.Id <= 0 {
+			return nil, gerror.New("后台账号不存在")
+		}
+		if account.Status != consts.StatusEnabled {
+			return nil, gerror.New("后台账号已被禁用")
+		}
+		return &botLoginResult{
+			AccountType: "admin",
+			Nickname:    firstNonEmpty(account.RealName, account.Username),
+			Username:    account.Username,
+		}, nil
+	}
+
+	var account *publishsysin.AccountModel
+	if err := g.DB().Model(publishAccountTable).Safe().Ctx(ctx).Where("id", accountId).WhereNull("deleted_at").Scan(&account); err != nil {
+		return nil, gerror.Wrap(err, "读取上架账号失败")
+	}
+	if account == nil || account.Id <= 0 {
+		return nil, gerror.New("上架账号不存在")
+	}
+	if account.Status != consts.StatusEnabled {
+		return nil, gerror.New("上架账号已被停用")
+	}
+	return &botLoginResult{
+		AccountType: account.AccountType,
+		Nickname:    account.Nickname,
+		TenantId:    account.TenantId,
+		Username:    account.Username,
+	}, nil
+}
+
 func (s *sSysBot) loginAdminAccount(ctx context.Context, accountId int64) (*botLoginResult, error) {
 	var mb *entity.AdminMember
 	if err := dao.AdminMember.Ctx(ctx).WherePri(accountId).Scan(&mb); err != nil {

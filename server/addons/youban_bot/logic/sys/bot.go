@@ -50,6 +50,38 @@ type sSysBot struct {
 	featureDefaultsAt time.Time
 }
 
+type authCodeRow struct {
+	Id               int64       `json:"id"`
+	Code             string      `json:"code"`
+	Scene            string      `json:"scene"`
+	App              string      `json:"app"`
+	AccountId        int64       `json:"account_id"`
+	TelegramUserId   string      `json:"telegram_user_id"`
+	TelegramUsername string      `json:"telegram_username"`
+	LoginToken       string      `json:"login_token"`
+	Status           string      `json:"status"`
+	ErrorMessage     string      `json:"error_message"`
+	ExpiresAt        *gtime.Time `json:"expires_at"`
+}
+
+func (row *authCodeRow) statusModel() *sysin.CodeStatusModel {
+	if row == nil {
+		return nil
+	}
+	return &sysin.CodeStatusModel{
+		AccountId:        row.AccountId,
+		App:              row.App,
+		Code:             row.Code,
+		ErrorMessage:     row.ErrorMessage,
+		ExpiresAt:        row.ExpiresAt,
+		Scene:            row.Scene,
+		Status:           row.Status,
+		TelegramUserId:   row.TelegramUserId,
+		TelegramUsername: row.TelegramUsername,
+		Token:            row.LoginToken,
+	}
+}
+
 func init() {
 	service.RegisterSysBot(NewSysBot())
 }
@@ -385,7 +417,7 @@ func (s *sSysBot) codeStatus(ctx context.Context, code, scene, app string, accou
 	if strings.TrimSpace(code) == "" {
 		return nil, gerror.New("验证码不能为空")
 	}
-	var row *sysin.CodeStatusModel
+	var codeRow *authCodeRow
 	mod := g.DB().Model(authCodeTable).Safe().Ctx(ctx).Where("code", code).Where("scene", scene)
 	if app != "" {
 		mod = mod.Where("app", app)
@@ -393,18 +425,45 @@ func (s *sSysBot) codeStatus(ctx context.Context, code, scene, app string, accou
 	if accountId > 0 {
 		mod = mod.Where("account_id", accountId)
 	}
-	if err := mod.Scan(&row); err != nil {
+	if err := mod.Scan(&codeRow); err != nil {
 		return nil, gerror.Wrap(err, "读取验证码状态失败")
 	}
-	if row == nil {
+	if codeRow == nil {
 		return nil, gerror.New("验证码不存在")
 	}
-	if row.ExpiresAt != nil && row.ExpiresAt.Before(gtime.Now()) && row.Status == sysin.BotCodeStatusPending {
+	if codeRow.ExpiresAt != nil && codeRow.ExpiresAt.Before(gtime.Now()) && codeRow.Status == sysin.BotCodeStatusPending {
 		_, _ = g.DB().Model(authCodeTable).Safe().Ctx(ctx).Where("code", code).Data(g.Map{"status": sysin.BotCodeStatusExpired, "error_message": "验证码已过期", "updated_at": gtime.Now()}).Update()
-		row.Status = sysin.BotCodeStatusExpired
-		row.ErrorMessage = "验证码已过期"
+		codeRow.Status = sysin.BotCodeStatusExpired
+		codeRow.ErrorMessage = "验证码已过期"
 	}
-	row.AccessToken = row.Token
+	row := codeRow.statusModel()
+	if scene == sysin.BotCodeSceneLogin && row.Status == sysin.BotCodeStatusAuthorized {
+		if strings.TrimSpace(row.Token) == "" {
+			row.Status = sysin.BotCodeStatusFailed
+			row.ErrorMessage = "登录凭证生成失败，请重新获取验证码"
+			_, _ = s.markCodeFailed(ctx, row.Code, row.Status, row.ErrorMessage)
+			row.Token = ""
+			row.AccessToken = ""
+			return row, nil
+		}
+		profile, profileErr := s.loginAccountProfile(ctx, row.App, row.AccountId)
+		if profileErr != nil {
+			row.Status = sysin.BotCodeStatusFailed
+			row.ErrorMessage = profileErr.Error()
+			_, _ = s.markCodeFailed(ctx, row.Code, row.Status, row.ErrorMessage)
+			row.Token = ""
+			row.AccessToken = ""
+			return row, nil
+		}
+		row.TenantId = profile.TenantId
+		row.AccountType = profile.AccountType
+		row.Username = profile.Username
+		row.Nickname = profile.Nickname
+		row.AccessToken = row.Token
+	} else {
+		row.Token = ""
+		row.AccessToken = ""
+	}
 	return row, nil
 }
 
@@ -439,7 +498,7 @@ func (s *sSysBot) TelegramWebhookRaw(ctx context.Context, in *sysin.WebhookInp) 
 }
 
 func (s *sSysBot) consumeCode(ctx context.Context, botId int64, msg *models.Message, code string) error {
-	var row *sysin.CodeStatusModel
+	var row *authCodeRow
 	if err := g.DB().Model(authCodeTable).Safe().Ctx(ctx).Where("code", code).Where("status", sysin.BotCodeStatusPending).Scan(&row); err != nil {
 		return gerror.Wrap(err, "读取验证码失败")
 	}
@@ -457,7 +516,7 @@ func (s *sSysBot) consumeCode(ctx context.Context, botId int64, msg *models.Mess
 	return s.consumeLoginCode(ctx, botId, msg, row)
 }
 
-func (s *sSysBot) consumeBindCode(ctx context.Context, botId int64, msg *models.Message, row *sysin.CodeStatusModel) error {
+func (s *sSysBot) consumeBindCode(ctx context.Context, botId int64, msg *models.Message, row *authCodeRow) error {
 	if row.AccountId <= 0 {
 		_, _ = s.markCodeFailed(ctx, row.Code, sysin.BotCodeStatusFailed, "绑定账号不存在")
 		return nil
@@ -524,7 +583,7 @@ func (s *sSysBot) activeTelegramBindingConflict(ctx context.Context, app string,
 	return count > 0, err
 }
 
-func (s *sSysBot) consumeLoginCode(ctx context.Context, botId int64, msg *models.Message, row *sysin.CodeStatusModel) error {
+func (s *sSysBot) consumeLoginCode(ctx context.Context, botId int64, msg *models.Message, row *authCodeRow) error {
 	telegramUserId := fmt.Sprintf("%d", msg.From.ID)
 	bind, err := s.bindingByTelegram(ctx, row.App, telegramUserId)
 	if err != nil {
