@@ -26,12 +26,20 @@ type CloudResourceConfigSaveInp struct {
 	model.CloudResourceConfig
 }
 
-type CloudResourceUsageListInp struct {
-	form.PageReq
+type CloudResourceUsageQueryInp struct {
 	StartDate    string `json:"startDate" dc:"开始日期，格式 YYYY-MM-DD"`
 	EndDate      string `json:"endDate" dc:"结束日期，格式 YYYY-MM-DD"`
 	ResourceType string `json:"resourceType" dc:"资源类型"`
-	Keyword      string `json:"keyword" dc:"账号、昵称、账号归属"`
+}
+
+type CloudResourceUsageDashboardInp struct {
+	CloudResourceUsageQueryInp
+}
+
+type CloudResourceUsageListInp struct {
+	form.PageReq
+	CloudResourceUsageQueryInp
+	Keyword string `json:"keyword" dc:"账号、昵称、账号归属"`
 }
 
 type CloudResourceUsageModel struct {
@@ -67,7 +75,32 @@ type CloudResourceUsageSummaryModel struct {
 	AvgDurationMs          int64 `json:"avgDurationMs" dc:"平均耗时毫秒"`
 }
 
-func (in *CloudResourceUsageListInp) Filter(ctx context.Context) error {
+type CloudResourceUsageTrendModel struct {
+	UsageDate       string `json:"usageDate" dc:"统计日期"`
+	RequestCount    int64  `json:"requestCount" dc:"请求次数"`
+	SuccessCount    int64  `json:"successCount" dc:"成功次数"`
+	FailureCount    int64  `json:"failureCount" dc:"失败次数"`
+	TotalDurationMs int64  `json:"totalDurationMs" dc:"累计耗时毫秒"`
+	AvgDurationMs   int64  `json:"avgDurationMs" dc:"平均耗时毫秒"`
+}
+
+type CloudResourceUsageBreakdownModel struct {
+	ResourceType    string `json:"resourceType" dc:"资源类型"`
+	RequestCount    int64  `json:"requestCount" dc:"请求次数"`
+	SuccessCount    int64  `json:"successCount" dc:"成功次数"`
+	FailureCount    int64  `json:"failureCount" dc:"失败次数"`
+	TotalDurationMs int64  `json:"totalDurationMs" dc:"累计耗时毫秒"`
+	AvgDurationMs   int64  `json:"avgDurationMs" dc:"平均耗时毫秒"`
+}
+
+type CloudResourceUsageDashboardModel struct {
+	Summary   *CloudResourceUsageSummaryModel     `json:"summary" dc:"调用汇总"`
+	Trend     []*CloudResourceUsageTrendModel     `json:"trend" dc:"调用趋势"`
+	TopUsers  []*CloudResourceUsageModel          `json:"topUsers" dc:"调用量前十用户"`
+	Breakdown []*CloudResourceUsageBreakdownModel `json:"breakdown" dc:"资源类型分布"`
+}
+
+func (in *CloudResourceUsageQueryInp) Filter(ctx context.Context) error {
 	_ = ctx
 	if in == nil {
 		return gerror.New("云资源调用统计参数不能为空")
@@ -93,11 +126,28 @@ func (in *CloudResourceUsageListInp) Filter(ctx context.Context) error {
 	if endDate.Sub(startDate) > 366*24*time.Hour {
 		return gerror.New("单次查询时间范围不能超过一年")
 	}
-	in.Keyword = strings.TrimSpace(in.Keyword)
 	in.ResourceType = strings.TrimSpace(in.ResourceType)
 	if in.ResourceType != "" && in.ResourceType != CloudResourceTypeBackgroundMatting && in.ResourceType != CloudResourceTypeFaceDetection {
 		return gerror.New("云资源类型不合法")
 	}
+	return nil
+}
+
+func (in *CloudResourceUsageDashboardInp) Filter(ctx context.Context) error {
+	if in == nil {
+		return gerror.New("云资源统计大盘参数不能为空")
+	}
+	return in.CloudResourceUsageQueryInp.Filter(ctx)
+}
+
+func (in *CloudResourceUsageListInp) Filter(ctx context.Context) error {
+	if in == nil {
+		return gerror.New("云资源调用明细参数不能为空")
+	}
+	if err := in.CloudResourceUsageQueryInp.Filter(ctx); err != nil {
+		return err
+	}
+	in.Keyword = strings.TrimSpace(in.Keyword)
 	if in.Page <= 0 {
 		in.Page = 1
 	}

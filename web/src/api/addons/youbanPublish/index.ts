@@ -294,7 +294,15 @@ export function ConfigUpdate(params = {}) {
 
 export function CloudResourceUsageList(params = {}) {
   return http.request({
-    url: '/youban_publish/publish/config/cloudUsageList',
+    url: '/youban_publish/publish/config/cloudUsage/list',
+    method: 'get',
+    params,
+  });
+}
+
+export function CloudResourceUsageDashboard(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/config/cloudUsage/dashboard',
     method: 'get',
     params,
   });

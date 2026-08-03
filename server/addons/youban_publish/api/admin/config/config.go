@@ -23,13 +23,21 @@ type UpdateReq struct {
 
 type UpdateRes struct{}
 
+type CloudUsageDashboardReq struct {
+	g.Meta `path:"/publish/config/cloudUsage/dashboard" method:"get" tags:"上架插件后台" summary:"云资源统计大盘"`
+	sysin.CloudResourceUsageDashboardInp
+}
+
+type CloudUsageDashboardRes struct {
+	*sysin.CloudResourceUsageDashboardModel
+}
+
 type CloudUsageListReq struct {
-	g.Meta `path:"/publish/config/cloudUsageList" method:"get" tags:"上架插件后台" summary:"云资源调用统计"`
+	g.Meta `path:"/publish/config/cloudUsage/list" method:"get" tags:"上架插件后台" summary:"云资源调用明细"`
 	sysin.CloudResourceUsageListInp
 }
 
 type CloudUsageListRes struct {
 	form.PageRes
-	List    []*sysin.CloudResourceUsageModel      `json:"list" dc:"用户调用统计"`
-	Summary *sysin.CloudResourceUsageSummaryModel `json:"summary" dc:"调用汇总"`
+	List []*sysin.CloudResourceUsageModel `json:"list" dc:"用户调用明细"`
 }

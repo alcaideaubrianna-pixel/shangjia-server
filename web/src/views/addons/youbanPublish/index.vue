@@ -374,7 +374,7 @@
         </n-tab-pane>
 
         <n-tab-pane name="cloudResource" tab="云资源配置">
-          <n-tabs type="segment" animated>
+          <n-tabs type="line" animated>
             <n-tab-pane name="resourceConfig" tab="资源配置">
               <n-spin :show="cloudResourceLoading">
                 <n-space vertical class="config-section">
@@ -391,7 +391,10 @@
                 </n-space>
               </n-spin>
             </n-tab-pane>
-            <n-tab-pane name="resourceUsage" tab="调用统计" display-directive="if">
+            <n-tab-pane name="resourceDashboard" tab="统计大盘" display-directive="if">
+              <CloudResourceDashboard />
+            </n-tab-pane>
+            <n-tab-pane name="resourceUsage" tab="调用明细" display-directive="if">
               <CloudResourceUsage />
             </n-tab-pane>
           </n-tabs>
@@ -598,6 +601,7 @@
   import ChannelMemberPanel from './components/channel-member-panel.vue';
   import ActivityPanel from './components/activity-panel.vue';
   import CloudResourceConfig from './components/cloud-resource-config.vue';
+  import CloudResourceDashboard from './components/cloud-resource-dashboard.vue';
   import CloudResourceUsage from './components/cloud-resource-usage.vue';
   import DashboardPanel from './components/dashboard-panel.vue';
   import ImportTaskPanel from './components/import-task-panel.vue';

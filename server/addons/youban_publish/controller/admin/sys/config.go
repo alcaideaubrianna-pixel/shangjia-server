@@ -29,8 +29,16 @@ func (c *cConfig) Update(ctx context.Context, req *config.UpdateReq) (res *confi
 	return
 }
 
+func (c *cConfig) CloudUsageDashboard(ctx context.Context, req *config.CloudUsageDashboardReq) (res *config.CloudUsageDashboardRes, err error) {
+	data, err := service.SysConfig().CloudResourceUsageDashboard(ctx, &req.CloudResourceUsageDashboardInp)
+	if err != nil {
+		return nil, err
+	}
+	return &config.CloudUsageDashboardRes{CloudResourceUsageDashboardModel: data}, nil
+}
+
 func (c *cConfig) CloudUsageList(ctx context.Context, req *config.CloudUsageListReq) (res *config.CloudUsageListRes, err error) {
-	list, totalCount, summary, err := service.SysConfig().CloudResourceUsageList(ctx, &req.CloudResourceUsageListInp)
+	list, totalCount, err := service.SysConfig().CloudResourceUsageList(ctx, &req.CloudResourceUsageListInp)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +47,6 @@ func (c *cConfig) CloudUsageList(ctx context.Context, req *config.CloudUsageList
 	}
 	res = new(config.CloudUsageListRes)
 	res.List = list
-	res.Summary = summary
 	res.PageRes.Pack(req, totalCount)
 	return
 }
