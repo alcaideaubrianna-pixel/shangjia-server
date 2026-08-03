@@ -33,6 +33,7 @@ import (
 const (
 	antiScanCacheTable           = "hg_youban_publish_anti_scan_cache"
 	antiScanPreviewRenderVersion = 4
+	antiScanMattingErrorMessage  = "云端抠图服务暂时不可用，请稍后重试或联系管理员检查云资源额度"
 )
 
 // AdminAntiScanPreview 生成防扫图实时预览，预览产物按精确图片哈希 + 配置 hash 复用缓存。
@@ -140,7 +141,7 @@ func (s *sSysPublish) detectAntiScanImage(ctx context.Context, imageHash string,
 			res.CloudRawSaved = 1
 			res.Provider = appendAntiScanProvider(res.Provider, "fapihub-matting")
 		} else {
-			warnings = append(warnings, "FAPIHub 抠图未启用，背景替换将降级为本地纹理处理")
+			warnings = append(warnings, "云端抠图能力未启用，背景替换将降级为本地纹理处理")
 		}
 	}
 	return res, warnings, nil
@@ -201,7 +202,8 @@ func (s *sSysPublish) getOrCreateAntiScanMatting(ctx context.Context, imageHash 
 	client := newFapiHubClient(conf.FapiHubApiKey, conf.FapiHubEndpoint, conf.FapiHubModel)
 	pngBytes, err := client.removeBackground(ctx, imageBytes)
 	if err != nil {
-		return "", err
+		g.Log().Warningf(ctx, "云端抠图调用失败 imageHash:%s err:%+v", imageHash, err)
+		return "", antiScanMattingPublicError()
 	}
 	segmentRaw := encodeFapiHubSegmentPortrait(pngBytes)
 	if err = s.saveAntiScanDetectionPart(ctx, imageHash, &antiScanDetectResult{
@@ -212,6 +214,10 @@ func (s *sSysPublish) getOrCreateAntiScanMatting(ctx context.Context, imageHash 
 		return "", err
 	}
 	return segmentRaw, nil
+}
+
+func antiScanMattingPublicError() error {
+	return gerror.New(antiScanMattingErrorMessage)
 }
 
 func encodeFapiHubSegmentPortrait(imageBytes []byte) string {
