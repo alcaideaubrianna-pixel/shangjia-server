@@ -889,7 +889,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media` (
   `original_attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '原始HotGo附件ID',
   `edited_attachment_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '编辑后HotGo附件ID',
   `media_type` varchar(16) NOT NULL DEFAULT 'image' COMMENT '媒体类型',
-  `must_send` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否每次推送必发',
+  `must_send` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否每次推送必发',
   `purpose` varchar(16) NOT NULL DEFAULT 'display' COMMENT '用途：display展示 verify验证',
   `name` varchar(255) NOT NULL DEFAULT '' COMMENT '文件名',
   `file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '访问地址',

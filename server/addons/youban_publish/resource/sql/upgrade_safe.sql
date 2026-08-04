@@ -120,3 +120,6 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_cloud_resource_usage` (
   KEY `idx_ybp_cloud_usage_date` (`usage_date`,`resource_type`,`account_id`),
   KEY `idx_ybp_cloud_usage_account` (`account_id`,`usage_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴云资源每日调用统计';
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN IF NOT EXISTS `must_send` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否每次推送必发' AFTER `media_type`;
+UPDATE `hg_youban_publish_media` SET `must_send` = 0 WHERE EXISTS (SELECT 1 FROM `information_schema`.`columns` WHERE `table_schema` = DATABASE() AND `table_name` = 'hg_youban_publish_media' AND `column_name` = 'must_send' AND `column_default` = '1');
+ALTER TABLE `hg_youban_publish_media` ALTER COLUMN `must_send` SET DEFAULT '0';

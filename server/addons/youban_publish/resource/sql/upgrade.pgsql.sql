@@ -714,5 +714,7 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_profile_state_publish_active" ON "hg_youban_
 
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_obfuscation_enabled" smallint NOT NULL DEFAULT 0;
-ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "must_send" smallint NOT NULL DEFAULT 1;
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "must_send" smallint NOT NULL DEFAULT 0;
+UPDATE "hg_youban_publish_media" SET "must_send" = 0 WHERE EXISTS (SELECT 1 FROM "information_schema"."columns" WHERE "table_schema" = current_schema() AND "table_name" = 'hg_youban_publish_media' AND "column_name" = 'must_send' AND "column_default" LIKE '1%');
+ALTER TABLE "hg_youban_publish_media" ALTER COLUMN "must_send" SET DEFAULT 0;
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tenant_feature_permission" ("id" BIGSERIAL PRIMARY KEY,"tenant_id" bigint NOT NULL DEFAULT 0,"feature_code" varchar(64) NOT NULL DEFAULT '',"status" smallint NOT NULL DEFAULT 2,"created_at" timestamp DEFAULT NULL,"updated_at" timestamp DEFAULT NULL,UNIQUE("tenant_id","feature_code"));

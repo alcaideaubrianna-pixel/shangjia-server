@@ -485,7 +485,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media" (
   "original_attachment_id" bigint NOT NULL DEFAULT 0,
   "edited_attachment_id" bigint NOT NULL DEFAULT 0,
   "media_type" varchar(16) NOT NULL DEFAULT 'image',
-  "must_send" smallint NOT NULL DEFAULT 1,
+  "must_send" smallint NOT NULL DEFAULT 0,
   "purpose" varchar(16) NOT NULL DEFAULT 'display',
   "name" varchar(255) NOT NULL DEFAULT '',
   "file_url" varchar(1024) NOT NULL DEFAULT '',

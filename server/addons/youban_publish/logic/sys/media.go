@@ -596,7 +596,7 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 	if in.MustSend != nil {
 		data["must_send"] = *in.MustSend
 	} else if mediaId == 0 {
-		data["must_send"] = true
+		data["must_send"] = false
 	}
 	if editStatus == "edited" {
 		data["edited_attachment_id"] = attachment.Id
