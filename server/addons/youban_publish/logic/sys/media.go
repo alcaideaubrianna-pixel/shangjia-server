@@ -173,12 +173,21 @@ func (s *sSysPublish) syncOwnedMediaFromInput(ctx context.Context, tx gdb.TX, ow
 			removed = append(removed, mediaId)
 			continue
 		}
+		updateData := g.Map{
+			"purpose":    item.Purpose,
+			"sort_index": item.SortIndex,
+			"updated_at": now,
+			"updated_by": contexts.GetUserId(ctx),
+		}
+		if item.MustSend != nil {
+			updateData["must_send"] = boolToInt(*item.MustSend)
+		}
 		if _, err = mediaOwnerScope(tx.Model(publishMediaTable).Ctx(ctx), owner).
 			Where("id", mediaId).
 			WhereNull("deleted_at").
-			Data(g.Map{"purpose": item.Purpose, "sort_index": item.SortIndex, "updated_at": now, "updated_by": contexts.GetUserId(ctx)}).
+			Data(updateData).
 			Update(); err != nil {
-			return nil, gerror.Wrap(err, "更新资料媒体排序失败")
+			return nil, gerror.Wrap(err, "更新资料媒体配置失败")
 		}
 		delete(keep, mediaId)
 	}
@@ -594,9 +603,9 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 	}
 	mediaId := existing["id"].Int64()
 	if in.MustSend != nil {
-		data["must_send"] = *in.MustSend
+		data["must_send"] = boolToInt(*in.MustSend)
 	} else if mediaId == 0 {
-		data["must_send"] = false
+		data["must_send"] = 0
 	}
 	if editStatus == "edited" {
 		data["edited_attachment_id"] = attachment.Id

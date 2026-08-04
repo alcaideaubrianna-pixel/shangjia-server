@@ -596,6 +596,7 @@ type ProfileSaveInp struct {
 
 type ProfileMediaSaveItem struct {
 	MediaId   int64  `json:"mediaId" dc:"媒体ID"`
+	MustSend  *bool  `json:"mustSend" dc:"是否每次推送必发"`
 	Purpose   string `json:"purpose" dc:"用途：display/verify"`
 	SortIndex int    `json:"sortIndex" dc:"排序"`
 }
