@@ -362,6 +362,14 @@ hggen:
     webViewsPath: "../web/src/views/addons/{$name}"                 # web页面生成路径
 
 
+# 悦伴上架插件
+youbanPublish:
+  runtime:
+    # 运行角色。默认 all 保持单机完整能力；SAE 可按应用配置 web/account/scheduler/worker，
+    # 或按队列进一步拆为 push-worker/media-worker/background-worker。支持数组内逗号组合。
+    roles: [ "all" ]
+
+
 # 悦伴全局 Bot
 youbanBot:
   telegram:

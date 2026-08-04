@@ -22,6 +22,9 @@ func (c *cVipLifecycle) GetName() string {
 }
 
 func (c *cVipLifecycle) Execute(ctx context.Context, parser *cron.Parser) error {
+	if !service.SysPublish().RuntimeRoleEnabled(ctx, "scheduler") {
+		return nil
+	}
 	if err := service.SysPublish().ProcessTenantVipLifecycle(ctx, 500); err != nil {
 		parser.Logger.Warningf(ctx, "cron VipLifecycle Execute err:%+v", err)
 		return err

@@ -22,6 +22,9 @@ func (c *cCycleScheduler) GetName() string {
 }
 
 func (c *cCycleScheduler) Execute(ctx context.Context, parser *cron.Parser) error {
+	if !service.SysPublish().RuntimeRoleEnabled(ctx, "scheduler") {
+		return nil
+	}
 	if err := service.SysPublish().RunChannelCycleScheduler(ctx); err != nil {
 		parser.Logger.Warningf(ctx, "cron CycleScheduler Execute err:%+v", err)
 		return err

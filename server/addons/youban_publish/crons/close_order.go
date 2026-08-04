@@ -7,6 +7,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	publishservice "hotgo/addons/youban_publish/service"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/cron"
@@ -31,6 +32,9 @@ func (c *cVipOrderClose) GetName() string {
 }
 
 func (c *cVipOrderClose) Execute(ctx context.Context, parser *cron.Parser) (err error) {
+	if !publishservice.SysPublish().RuntimeRoleEnabled(ctx, "scheduler") {
+		return nil
+	}
 	cols := dao.AdminOrder.Columns()
 	_, err = service.AdminOrder().Model(ctx).
 		Where(cols.OrderType, "youban_tenant_vip").

@@ -22,6 +22,7 @@ type ISysPublish interface {
 	NoticeReadAll(ctx context.Context, in *sysin.NoticeReadAllInp) (err error)
 	NoticeMessageList(ctx context.Context, in *sysin.NoticeMessageListInp) (list []*adminin.NoticeMessageListModel, totalCount int, err error)
 	TelegramRichTextHTML(value string) string
+	RuntimeRoleEnabled(ctx context.Context, role string) bool
 	StartRuntime(ctx context.Context)
 	StopRuntime()
 	RunChannelCycleScheduler(ctx context.Context) error

@@ -9,7 +9,7 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
+func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	s.tgQueueMu.Lock()
 	if s.tgQueueServer != nil {
 		s.tgQueueMu.Unlock()
@@ -20,44 +20,36 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 		Queues:         map[string]int{tgQueueNameUrgent: 8, tgQueueNameDefault: 4, tgQueueNameBulk: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
-	mediaServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    collectMediaQueueConcurrency(ctx),
-		Queues:         collectMediaWorkerQueues(ctx),
-		RetryDelayFunc: telegramQueueRetryDelay,
-	})
-	backgroundServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.backgroundConcurrency", 4).Int(),
-		Queues:         map[string]int{tgQueueNameBackground: 1},
-		RetryDelayFunc: telegramQueueRetryDelay,
-	})
-	g.Log().Infof(ctx, "启动TG队列；采集媒体按实时、历史账号分片和旧队列公平消费")
+	g.Log().Info(ctx, "启动上架插件TG推送队列")
 	s.tgQueueServer = server
-	s.mediaQueueServer = mediaServer
-	s.backgroundQueueServer = backgroundServer
 	s.tgQueueMu.Unlock()
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tgTaskTypePublish, s.handleTelegramPublishTask)
 	mux.HandleFunc(tgTaskTypeCleanup, s.handleTelegramCleanupTask)
-	mux.HandleFunc(tgTaskTypeImport, s.handleImportTask)
-	mux.HandleFunc(tgTaskTypeRepair, s.handleTgMessageRepairTask)
-	mux.HandleFunc(tgTaskTypeImportMatch, s.handleImportMatchTask)
-	mux.HandleFunc(tgTaskTypeImportSync, s.handleImportTgSyncTask)
-	mux.HandleFunc(tgTaskTypeMaterialImport, s.handleMaterialImportTask)
 	mux.HandleFunc(tgTaskTypeDown, s.handleProfileDownTask)
-	mux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
-	mux.HandleFunc(tgTaskTypeCycleReschedule, s.handleCycleRescheduleTask)
-	mux.HandleFunc(tgTaskTypeCycleRefresh, s.handleCycleRefreshTask)
-	mux.HandleFunc(tgTaskTypeCollectHistory, s.handleCollectHistoryTask)
-	mux.HandleFunc(tgTaskTypeCollectTrigger, s.handleCollectTriggerTask)
-	mux.HandleFunc(tgTaskTypeChannelMemberSync, s.handleChannelMemberSyncTask)
-	mux.HandleFunc(tgTaskTypeCollectSourceDown, s.handleCollectSourceDownTask)
 
 	go func() {
 		if err := server.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件TG发送队列失败：%+v", err)
 		}
 	}()
+}
+
+func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
+	s.tgQueueMu.Lock()
+	if s.backgroundQueueServer != nil {
+		s.tgQueueMu.Unlock()
+		return
+	}
+	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.backgroundConcurrency", 4).Int(),
+		Queues:         map[string]int{tgQueueNameBackground: 1},
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
+	g.Log().Info(ctx, "启动上架插件后台队列")
+	s.backgroundQueueServer = server
+	s.tgQueueMu.Unlock()
 
 	backgroundMux := asynq.NewServeMux()
 	backgroundMux.HandleFunc(tgTaskTypeImport, s.handleImportTask)
@@ -75,19 +67,33 @@ func (s *sSysPublish) startTelegramQueueWorker(ctx context.Context) {
 	backgroundMux.HandleFunc(tgTaskTypeChannelMemberSync, s.handleChannelMemberSyncTask)
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDown, s.handleCollectSourceDownTask)
 	go func() {
-		if err := backgroundServer.Run(backgroundMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+		if err := server.Run(backgroundMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件后台队列失败：%+v", err)
 		}
 	}()
+}
 
+func (s *sSysPublish) startTelegramMediaWorker(ctx context.Context) {
+	s.tgQueueMu.Lock()
+	if s.mediaQueueServer != nil {
+		s.tgQueueMu.Unlock()
+		return
+	}
+	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    collectMediaQueueConcurrency(ctx),
+		Queues:         collectMediaWorkerQueues(ctx),
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
+	g.Log().Info(ctx, "启动上架插件采集媒体队列；按实时、历史账号分片和旧队列公平消费")
+	s.mediaQueueServer = server
+	s.tgQueueMu.Unlock()
 	mediaMux := asynq.NewServeMux()
 	mediaMux.HandleFunc(tgTaskTypeCollectMedia, s.handleCollectMediaCacheTask)
 	go func() {
-		if err := mediaServer.Run(mediaMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+		if err := server.Run(mediaMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件媒体缓存队列失败：%+v", err)
 		}
 	}()
-
 }
 
 func (s *sSysPublish) stopTelegramQueueWorker() {

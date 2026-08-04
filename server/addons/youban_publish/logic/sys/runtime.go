@@ -48,13 +48,37 @@ func (s *sSysPublish) StopRuntime() {
 }
 
 func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
+	config := loadPublishRuntimeConfig(ctx)
+	if len(config.Roles) == 0 {
+		g.Log().Warning(ctx, "上架插件未识别到有效运行角色，当前实例不会启动后台运行组件")
+	}
+	g.Log().Infof(ctx, "启动上架插件运行组件 roles:%v account:%t scheduler:%t pushWorker:%t mediaWorker:%t backgroundWorker:%t",
+		config.Roles, config.Account, config.Scheduler, config.PushWorker, config.MediaWorker, config.BackgroundWorker)
+	if config.PushWorker {
+		s.startTelegramPushWorker(ctx)
+	}
+	if config.MediaWorker {
+		s.startTelegramMediaWorker(ctx)
+	}
+	if config.BackgroundWorker {
+		s.startTelegramBackgroundWorker(ctx)
+	}
+	if config.Scheduler {
+		s.startPublishSchedulers(ctx)
+	}
+	if config.Account {
+		go s.runAccountCollectSupervisor(ctx)
+	}
+	<-ctx.Done()
+}
+
+func (s *sSysPublish) startPublishSchedulers(ctx context.Context) {
 	if err := ensurePublishChannelColumns(ctx); err != nil {
 		g.Log().Errorf(ctx, "检查频道循环上架字段失败：%+v", err)
 	}
 	if err := s.backfillPublishSuccessRecords(ctx, 5000); err != nil {
 		g.Log().Warningf(ctx, "补写成功发布记录失败：%+v", err)
 	}
-	s.startTelegramQueueWorker(ctx)
 	go s.runProfileCycleStartupRecovery(ctx)
 	go s.runScheduledPublishRuntime(ctx)
 	go s.runMessagePushPlanScheduler(ctx)
@@ -65,11 +89,9 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	go s.runCollectRecovery(ctx)
 	go s.runMaterialImportRecovery(ctx)
 	go s.runPublishRecordRetentionCleaner(ctx)
-	go s.runAccountCollectSupervisor(ctx)
 	go func() {
 		if err := s.recoverInterruptedTelegramJobs(ctx, 200); err != nil {
 			g.Log().Warningf(ctx, "恢复中断的TG推送任务失败：%+v", err)
 		}
 	}()
-	<-ctx.Done()
 }
