@@ -123,3 +123,5 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_cloud_resource_usage` (
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN IF NOT EXISTS `must_send` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否每次推送必发' AFTER `media_type`;
 UPDATE `hg_youban_publish_media` SET `must_send` = 0 WHERE EXISTS (SELECT 1 FROM `information_schema`.`columns` WHERE `table_schema` = DATABASE() AND `table_name` = 'hg_youban_publish_media' AND `column_name` = 'must_send' AND `column_default` = '1');
 ALTER TABLE `hg_youban_publish_media` ALTER COLUMN `must_send` SET DEFAULT '0';
+ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `send_phase` varchar(32) NOT NULL DEFAULT '' COMMENT '发送阶段' AFTER `dispatch_count`;
+ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `reconcile_count` int(11) NOT NULL DEFAULT '0' COMMENT '对账次数' AFTER `send_phase`;

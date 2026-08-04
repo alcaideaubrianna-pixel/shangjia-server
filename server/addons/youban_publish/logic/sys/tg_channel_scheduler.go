@@ -178,7 +178,7 @@ func (s *sSysPublish) telegramSchedulerCandidates(ctx context.Context) ([]telegr
 	var channels []telegramSchedulerChannel
 	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
 		Fields("j.channel_id,j.target_chat_id").
-		WhereIn("j.status", []string{"pending", "failed_retry"}).
+		WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
 		Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", now).
 		Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
 		Group("j.channel_id,j.target_chat_id").
@@ -217,7 +217,7 @@ func (s *sSysPublish) telegramSchedulerChannelCandidates(ctx context.Context, ch
 	now := gtime.Now()
 	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
 		Fields("j.*").
-		WhereIn("j.status", []string{"pending", "failed_retry"}).
+		WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
 		Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", now).
 		Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
 		Where(telegramSchedulerCollectPredecessorCondition()).
@@ -255,7 +255,7 @@ func telegramSchedulerCollectPredecessorCondition() string {
 		  AND pj.collect_source_message_id > 0
 		  AND pj.collect_source_message_id < j.collect_source_message_id
 		  AND (
-			pj.status IN ('pending', 'sending')
+			pj.status IN ('pending', 'sending', 'unknown')
 			OR (pj.status = 'failed_retry' AND (pj.next_retry_at IS NULL OR pj.next_retry_at <= NOW()))
 		  )
 		  AND ((j.channel_id > 0 AND pj.channel_id = j.channel_id) OR (j.channel_id <= 0 AND pj.target_chat_id = j.target_chat_id))
@@ -272,7 +272,7 @@ func (s *sSysPublish) telegramChannelHasActiveDispatch(ctx context.Context, job 
 	}
 	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
 		Where("j.id <> ?", job.Id).
-		WhereIn("j.status", []string{"sending", "pending", "failed_retry"}).
+		WhereIn("j.status", []string{"sending", "pending", "failed_retry", "unknown"}).
 		Where("(j.dispatch_status IN (?, ?) OR j.status = ?)", tgDispatchStatusQueued, tgDispatchStatusProcessing, "sending")
 	if isTelegramUrgentJob(job) {
 		mod = mod.Where("(j.status = ? OR j.dispatch_status = ? OR (j.dispatch_status = ? AND j.priority <= ?))", "sending", tgDispatchStatusProcessing, tgDispatchStatusQueued, tgJobPriorityUrgent)
@@ -297,7 +297,7 @@ func (s *sSysPublish) dispatchTelegramJob(ctx context.Context, job telegramJobRe
 	queueName := telegramQueueNameByPriority(priority)
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
-		WhereIn("status", []string{"pending", "failed_retry"}).
+		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
 		Data(g.Map{
 			"priority":            priority,
@@ -333,7 +333,7 @@ func (s *sSysPublish) resetStaleTelegramDispatchJobs(ctx context.Context) error 
 		timeoutSeconds = 300
 	}
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereIn("status", []string{"pending", "failed_retry"}).
+		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		Where("dispatch_status", tgDispatchStatusQueued).
 		Where("dispatched_at <= ?", gtime.Now().Add(-time.Duration(timeoutSeconds)*time.Second)).
 		Data(g.Map{

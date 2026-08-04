@@ -207,7 +207,7 @@ func (s *sSysPublish) collectSourcePendingDownJobs(ctx context.Context, taskIds 
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		WhereIn("profile_id", taskIds).
-		WhereIn("status", []string{"pending", "failed_retry", "sending"}).
+		WhereIn("status", []string{"pending", "failed_retry", "sending", "unknown"}).
 		OrderAsc("id").
 		Scan(&jobs)
 	if err != nil {
@@ -245,5 +245,5 @@ func (s *sSysPublish) finishCollectSourceDownDispatch(ctx context.Context, sourc
 }
 
 func collectSourceDownJobStatuses() []string {
-	return []string{"pending", "sending", "failed_retry", "failed", "sent", "superseded"}
+	return []string{"pending", "sending", "failed_retry", "unknown", "failed", "sent", "superseded"}
 }

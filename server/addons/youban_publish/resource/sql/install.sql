@@ -1074,6 +1074,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_job` (
   `next_cycle_at` datetime DEFAULT NULL COMMENT '下次循环时间', `priority` int(11) NOT NULL DEFAULT '100' COMMENT '调度优先级',
   `queue_name` varchar(64) NOT NULL DEFAULT '' COMMENT '队列名称', `dispatch_status` varchar(32) NOT NULL DEFAULT 'idle' COMMENT '调度状态',
   `dispatched_at` datetime DEFAULT NULL COMMENT '调度时间', `dispatch_count` int(11) NOT NULL DEFAULT '0' COMMENT '调度次数',
+  `send_phase` varchar(32) NOT NULL DEFAULT '' COMMENT '发送阶段', `reconcile_count` int(11) NOT NULL DEFAULT '0' COMMENT '对账次数',
   `last_dispatch_error` varchar(512) NOT NULL DEFAULT '' COMMENT '最后调度错误', `error_message` text COMMENT '错误信息',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间', `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`),

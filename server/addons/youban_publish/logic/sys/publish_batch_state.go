@@ -19,7 +19,7 @@ func publishBatchTerminalState(ctx context.Context, operationPrefix string) (boo
 	var counts publishBatchJobCounts
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Fields(`COUNT(*) AS total,
-			SUM(CASE WHEN status IN ('pending','sending','failed_retry') THEN 1 ELSE 0 END) AS pending,
+			SUM(CASE WHEN status IN ('pending','sending','failed_retry','unknown') THEN 1 ELSE 0 END) AS pending,
 			SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) AS sent,
 			SUM(CASE WHEN status IN ('failed','superseded') THEN 1 ELSE 0 END) AS failed`).
 		WhereLike("operation_no", operationPrefix+"%").

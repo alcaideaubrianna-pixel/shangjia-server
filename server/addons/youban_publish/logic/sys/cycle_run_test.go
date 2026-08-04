@@ -61,6 +61,21 @@ func TestProfileCycleOverdueAtDeterministic(t *testing.T) {
 	}
 }
 
+func TestProfileCycleOverdueSpreadDistribution(t *testing.T) {
+	now := gtime.New(time.Date(2026, 8, 4, 9, 0, 0, 0, time.UTC))
+	buckets := make(map[int]struct{})
+	for profileId := int64(1); profileId <= 1000; profileId++ {
+		next := profileCycleOverdueAt(now, profileId, 57)
+		if next.Before(now) || next.After(now.Add(5*time.Hour)) {
+			t.Fatalf("profile %d spread out of range: %v", profileId, next)
+		}
+		buckets[int(next.Sub(now).Minutes()/30)] = struct{}{}
+	}
+	if len(buckets) < 8 {
+		t.Fatalf("cycle spread is too concentrated, buckets=%d", len(buckets))
+	}
+}
+
 func TestSameProfileCycleConfig(t *testing.T) {
 	base := profileCycleChannelConfig{Id: 1, Enabled: 1, Days: 3, PublishTime: "17:30", Status: 1, Direction: "up"}
 	if !sameProfileCycleConfig(base, base) {

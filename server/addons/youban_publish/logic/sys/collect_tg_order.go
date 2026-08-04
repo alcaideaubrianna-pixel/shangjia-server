@@ -20,7 +20,7 @@ func (s *sSysPublish) collectTelegramJobHasPreviousActive(ctx context.Context, j
 		Where("j.collect_source_id", job.CollectSourceId).
 		Where("j.collect_source_chat_id", strings.TrimSpace(job.CollectSourceChatId)).
 		Where("j.collect_source_message_id < ?", job.CollectSourceMessageId).
-		WhereIn("j.status", []string{"pending", "sending", "failed_retry"})
+		WhereIn("j.status", []string{"pending", "sending", "failed_retry", "unknown"})
 	if job.ChannelId > 0 {
 		mod = mod.Where("j.channel_id", job.ChannelId)
 	} else {

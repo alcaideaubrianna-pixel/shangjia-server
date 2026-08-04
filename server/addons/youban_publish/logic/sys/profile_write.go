@@ -148,7 +148,7 @@ func (s *sSysPublish) supersedeProfilePendingTelegramJobs(ctx context.Context, p
 	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		WhereIn("profile_id", profileIds).
-		WhereIn("status", []string{"pending", "sending", "failed_retry"}).
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
 		OrderAsc("id").Scan(&jobs); err != nil {
 		return gerror.Wrap(err, "读取资料待发送TG任务失败")
 	}

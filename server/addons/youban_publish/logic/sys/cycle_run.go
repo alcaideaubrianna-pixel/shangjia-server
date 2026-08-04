@@ -328,7 +328,7 @@ func (s *sSysPublish) channelCycleBacklog(ctx context.Context, channelId int64) 
 	return g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("channel_id", channelId).
 		WhereLike("operation_no", "cycle_batch:%").
-		WhereIn("status", []string{"pending", "sending", "failed_retry"}).
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
 		Count()
 }
 

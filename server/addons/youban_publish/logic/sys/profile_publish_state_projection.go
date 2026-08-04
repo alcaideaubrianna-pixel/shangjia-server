@@ -163,7 +163,7 @@ func (s *sSysPublish) recoverMissingProfilePublishOperationStates(ctx context.Co
 		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=j.profile_id AND ps.tenant_id=j.tenant_id AND ps.account_id=j.account_id AND ps.deleted_at IS NULL").
 		Fields("j.tenant_id,j.account_id,j.profile_id,j.operation_no,j.status").
 		WhereNull("j.task_id").
-		WhereIn("j.status", []string{"pending", "sending", "failed_retry"}).
+		WhereIn("j.status", []string{"pending", "sending", "failed_retry", "unknown"}).
 		Where("j.operation_no <> ''").
 		Where("ps.publish_task_status = ''").
 		OrderDesc("j.id").

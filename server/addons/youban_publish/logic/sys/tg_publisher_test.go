@@ -1,6 +1,9 @@
 package sys
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestTelegramChannelSenderBotId(t *testing.T) {
 	tests := []struct {
@@ -84,5 +87,26 @@ func TestTelegramMediaItemHasSource(t *testing.T) {
 	}
 	if !telegramMediaItemHasSource(&telegramMediaItem{FileUrl: "https://cdn.example/image.jpg"}) {
 		t.Fatal("media URL should be considered sendable")
+	}
+}
+
+func TestTelegramMediaRequiresSanitizedUpload(t *testing.T) {
+	if telegramMediaRequiresSanitizedUpload(&telegramMediaItem{MediaType: "image", TgFileId: "AgAC-cached"}) {
+		t.Fatal("disabled anti-scan should reuse Telegram file_id")
+	}
+	if !telegramMediaRequiresSanitizedUpload(&telegramMediaItem{MediaType: "video", TgFileId: "BAAC-cached", AntiScanEnabled: true}) {
+		t.Fatal("enabled anti-scan must upload regenerated media")
+	}
+	if telegramMediaRequiresSanitizedUpload(nil) {
+		t.Fatal("nil media must not require sanitized upload")
+	}
+}
+
+func TestTelegramInvalidReusableFileError(t *testing.T) {
+	if !isTelegramInvalidReusableFileError(errors.New("Bad Request: wrong file identifier/HTTP URL specified")) {
+		t.Fatal("invalid Telegram file_id should fall back to upload")
+	}
+	if isTelegramInvalidReusableFileError(errors.New("context deadline exceeded")) {
+		t.Fatal("network timeout must not trigger immediate upload retry")
 	}
 }

@@ -306,7 +306,7 @@ func (s *sSysPublish) sendDownChannelProfileLockedByChannel(ctx context.Context,
 		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
 		return gerror.Wrapf(err, "推送下架频道展示资料失败，profile:%d，channel:%d", job.ProfileId, channelId)
 	}
-	verifyMessages, err := s.sendTelegramVerifyPart(ctx, bot, job.TargetChatId, verifyMedia)
+	verifyMessages, err := s.sendTelegramVerifyPart(ctx, bot, job.TargetChatId, "", verifyMedia)
 	if err != nil {
 		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
 		return gerror.Wrapf(err, "推送下架频道验证资料失败，profile:%d，channel:%d", job.ProfileId, channelId)

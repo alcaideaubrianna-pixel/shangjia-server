@@ -74,6 +74,13 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 			Media:  group,
 		})
 		closeTelegramMediaFiles(closers)
+		if err != nil && telegramMediaSetHasReusableFileId(chunk) && isTelegramInvalidReusableFileError(err) {
+			group, closers, err = s.telegramInputMediaGroup(ctx, telegramMediaSetWithoutTgFileId(chunk), chunkCaption)
+			if err == nil {
+				msgs, err = bot.SendMediaGroup(ctx, &tgbot.SendMediaGroupParams{ChatID: chatId, Media: group})
+				closeTelegramMediaFiles(closers)
+			}
+		}
 		if err != nil {
 			return allMessages, err
 		}
@@ -114,6 +121,12 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		}
 		applyTelegramSendVideoMeta(params, videoMeta)
 		msg, err := bot.SendVideo(ctx, params)
+		if err != nil && strings.TrimSpace(media.TgFileId) != "" && isTelegramInvalidReusableFileError(err) {
+			cloned := *media
+			cloned.TgFileId = ""
+			cloned.TgThumbFileId = ""
+			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -125,6 +138,11 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 			Caption:   caption,
 			ParseMode: telegramMediaParseMode(caption),
 		})
+		if err != nil && strings.TrimSpace(media.TgFileId) != "" && isTelegramInvalidReusableFileError(err) {
+			cloned := *media
+			cloned.TgFileId = ""
+			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -376,6 +394,28 @@ func telegramMediaSetWithoutTgFileId(media []*telegramMediaItem) []*telegramMedi
 	return list
 }
 
+func telegramMediaSetHasReusableFileId(media []*telegramMediaItem) bool {
+	for _, item := range media {
+		if item != nil && strings.TrimSpace(item.TgFileId) != "" && !telegramMediaRequiresSanitizedUpload(item) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTelegramInvalidReusableFileError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, part := range []string{"wrong file identifier", "file_id_invalid", "file reference expired", "file_reference_expired", "file_reference_invalid"} {
+		if strings.Contains(message, part) {
+			return true
+		}
+	}
+	return false
+}
+
 func telegramCopyMediaGroupRefs(media []*telegramMediaItem) (string, []int, bool) {
 	fromChatId := ""
 	messageIds := make([]int, 0, len(media))
@@ -456,15 +496,7 @@ func telegramInputMediaSource(ctx context.Context, media *telegramMediaItem) (st
 }
 
 func telegramMediaRequiresSanitizedUpload(media *telegramMediaItem) bool {
-	if media == nil {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(media.MediaType)) {
-	case "image", "photo", "video":
-		return true
-	default:
-		return false
-	}
+	return media != nil && media.AntiScanEnabled
 }
 
 type fileCleanupCloser struct {

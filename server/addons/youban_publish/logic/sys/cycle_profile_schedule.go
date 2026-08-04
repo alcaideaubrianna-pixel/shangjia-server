@@ -23,7 +23,7 @@ const (
 	profileCycleClaimLease          = 2 * time.Hour
 	profileCycleRetryDelay          = time.Hour
 	profileCycleRescheduleBatchSize = 500
-	profileCycleOverdueSpreadWindow = time.Hour
+	profileCycleOverdueSpreadWindow = 5 * time.Hour
 	profileCycleSummaryRefreshDelay = 30 * time.Second
 )
 
@@ -162,7 +162,7 @@ func profileCycleOverdueAt(now *gtime.Time, profileId, channelId int64) *gtime.T
 	if spreadSeconds <= 0 {
 		return now
 	}
-	offset := (profileId*31 + channelId*17) % spreadSeconds
+	offset := int64((uint64(profileId)*11400714819323198485 + uint64(channelId)*14029467366897019727) % uint64(spreadSeconds))
 	if offset < 0 {
 		offset = -offset
 	}
@@ -484,13 +484,13 @@ func (s *sSysPublish) disableProfileCycleJob(ctx context.Context, jobId int64, m
 func (s *sSysPublish) profileCycleChildActive(ctx context.Context, sourceJobId int64) (bool, error) {
 	prefix := fmt.Sprintf("cycle_batch:due:%d:", sourceJobId)
 	count, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereLike("operation_no", prefix+"%").WhereIn("status", []string{"pending", "sending", "failed_retry"}).Count()
+		WhereLike("operation_no", prefix+"%").WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).Count()
 	return count > 0, err
 }
 
 func (s *sSysPublish) profileCycleGlobalBacklog(ctx context.Context) (int, error) {
 	return g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereLike("operation_no", "cycle_batch:due:%").WhereIn("status", []string{"pending", "sending", "failed_retry"}).Count()
+		WhereLike("operation_no", "cycle_batch:due:%").WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).Count()
 }
 
 func dueProfileCycleOperationNo(sourceJobId int64, attempt int, profileId int64, channelId int64) string {

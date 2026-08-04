@@ -90,5 +90,5 @@ func (s *sSysPublish) channelClearQueueJobs(ctx context.Context, tenantId int64,
 }
 
 func channelQueueClearStatuses() []string {
-	return []string{"pending", "failed_retry", "sending"}
+	return []string{"pending", "failed_retry", "sending", "unknown"}
 }

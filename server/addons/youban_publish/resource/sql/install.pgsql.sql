@@ -670,6 +670,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_job" (
   "cycle_enabled" smallint NOT NULL DEFAULT 0, "cycle_days" integer NOT NULL DEFAULT 4, "cycle_publish_time" varchar(16) NOT NULL DEFAULT '',
   "next_cycle_at" timestamp DEFAULT NULL, "priority" integer NOT NULL DEFAULT 100, "queue_name" varchar(64) NOT NULL DEFAULT '',
   "dispatch_status" varchar(32) NOT NULL DEFAULT 'idle', "dispatched_at" timestamp DEFAULT NULL, "dispatch_count" integer NOT NULL DEFAULT 0,
+  "send_phase" varchar(32) NOT NULL DEFAULT '', "reconcile_count" integer NOT NULL DEFAULT 0,
   "last_dispatch_error" varchar(512) NOT NULL DEFAULT '', "error_message" text, "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL
 );
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "tenant_id" bigint NOT NULL DEFAULT 0;
