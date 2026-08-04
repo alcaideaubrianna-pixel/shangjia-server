@@ -128,6 +128,55 @@ func TestInviteConsumeRollbackIntegration(t *testing.T) {
 	}
 }
 
+func TestInstantRegisterAutoBindsTelegramIntegration(t *testing.T) {
+	if os.Getenv("YOUBAN_INVITE_INTEGRATION") != "1" {
+		t.Skip("set YOUBAN_INVITE_INTEGRATION=1 to run database integration test")
+	}
+	ctx := context.Background()
+	code := integrationInviteCode()
+	prefix := strings.ToLower(code)
+	telegramUserId := fmt.Sprintf("self_%d", time.Now().UnixNano())
+	now := gtime.Now()
+	_, err := g.DB().Model(botInviteCodeTable).Safe().Ctx(ctx).Data(g.Map{
+		"code": code, "source": registerInviteSourceSelf, "inviter_app": registerBindAppApi,
+		"registration_telegram_user_id":    telegramUserId,
+		"registration_telegram_username":   "instant_register",
+		"registration_telegram_first_name": "Instant",
+		"registration_telegram_last_name":  "Register",
+		"registration_bot_id":              1,
+		"status":                           registerInviteStatusActive, "expires_at": now.Add(10 * time.Minute), "created_at": now, "updated_at": now,
+	}).Insert()
+	if err != nil {
+		t.Fatalf("insert instant register invite: %+v", err)
+	}
+	defer func() {
+		_, _ = g.DB().Exec(ctx, "DELETE FROM "+botAccountBindTable+" WHERE telegram_user_id=?", telegramUserId)
+		deleteIntegrationRegisterData(t, ctx, code, prefix)
+	}()
+
+	registration, err := (&sSysPublish{}).registerAccountWithInvite(ctx, &sysin.AccountRegisterInp{
+		Username: prefix + "_self", Password: "InviteTest123!", Name: prefix + "_self", InviteCode: code,
+	})
+	if err != nil {
+		t.Fatalf("instant register: %+v", err)
+	}
+	if registration.Binding == nil || registration.Binding.AccountId != registration.AccountId || registration.Binding.TelegramUserId != telegramUserId {
+		t.Fatalf("binding event=%+v registration=%+v", registration.Binding, registration)
+	}
+	var binding struct {
+		AccountId      int64  `json:"account_id"`
+		TelegramUserId string `json:"telegram_user_id"`
+		Status         int    `json:"status"`
+	}
+	if err = g.DB().Model(botAccountBindTable).Safe().Ctx(ctx).
+		Where("app", registerBindAppApi).Where("telegram_user_id", telegramUserId).Scan(&binding); err != nil {
+		t.Fatalf("read instant register binding: %+v", err)
+	}
+	if binding.AccountId != registration.AccountId || binding.TelegramUserId != telegramUserId || binding.Status != 1 {
+		t.Fatalf("binding=%+v registration=%+v", binding, registration)
+	}
+}
+
 func TestInviteRewardUsesFirstTelegramBindTimeIntegration(t *testing.T) {
 	if os.Getenv("YOUBAN_INVITE_INTEGRATION") != "1" {
 		t.Skip("set YOUBAN_INVITE_INTEGRATION=1 to run database integration test")

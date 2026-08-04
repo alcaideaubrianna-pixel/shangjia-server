@@ -80,6 +80,15 @@ func (s *sSysBot) AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp
 		data, _ := json.Marshal(config)
 		in.ConfigJson = string(data)
 	}
+	if featureKey == (startFeature{}).Key() {
+		config := featureConfigValues(in.ConfigJson)
+		config["replyText"] = sanitizeTelegramHTML(fmt.Sprintf("%v", config["replyText"]))
+		if strings.TrimSpace(fmt.Sprintf("%v", config["welcomeImage"])) != "" && telegramHTMLTextLength(fmt.Sprintf("%v", config["replyText"])) > telegramPhotoCaptionMaxLength {
+			return gerror.Newf("配置欢迎图片时，欢迎文案不能超过%d个字符", telegramPhotoCaptionMaxLength)
+		}
+		data, _ := json.Marshal(config)
+		in.ConfigJson = string(data)
+	}
 	if featureKey == inlinePromotionFeatureKey {
 		config := featureConfigValues(in.ConfigJson)
 		config["messageText"] = sanitizeTelegramHTML(fmt.Sprintf("%v", config["messageText"]))
@@ -116,6 +125,7 @@ func (s *sSysBot) AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp
 	}
 	if err = s.syncAllTelegramBotMenus(ctx); err != nil {
 		g.Log().Warningf(ctx, "同步Telegram菜单失败 err:%+v", err)
+		return gerror.Wrap(err, "插件已保存，但同步机器人菜单失败")
 	}
 	return nil
 }
@@ -246,17 +256,22 @@ func (s *sSysBot) featureCommandMatches(ctx context.Context, feature botFeature,
 }
 
 func (s *sSysBot) matchFeatureLabel(ctx context.Context, row *botFeatureRow, feature botFeature, text string) bool {
+	name := ""
+	if row != nil {
+		name = row.Name
+	}
+	return featureLabelMatches(text, s.replyKeyboardLabel(ctx, feature), name, s.featureCommand(ctx, feature))
+}
+
+func featureLabelMatches(text string, keyboardLabel string, featureName string, command string) bool {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return false
 	}
-	if strings.EqualFold(text, s.featureDescription(ctx, feature)) {
+	if strings.EqualFold(text, strings.TrimSpace(keyboardLabel)) || strings.EqualFold(text, strings.TrimSpace(featureName)) {
 		return true
 	}
-	if row != nil && strings.EqualFold(text, strings.TrimSpace(row.Name)) {
-		return true
-	}
-	return strings.EqualFold(strings.TrimPrefix(text, "/"), strings.TrimPrefix(s.featureCommand(ctx, feature), "/"))
+	return strings.EqualFold(strings.TrimPrefix(text, "/"), strings.TrimPrefix(strings.TrimSpace(command), "/"))
 }
 
 func botCommandAndArgs(text string) (command string, args string) {
@@ -330,14 +345,16 @@ func (s *sSysBot) syncTelegramBotMenu(ctx context.Context, botToken string) erro
 		}
 		commands = append(commands, models.BotCommand{Command: cmd, Description: s.featureDescription(ctx, feature)})
 	}
+	callCtx, cancel := telegramAPICtx()
+	defer cancel()
 	if len(commands) == 0 {
-		_, err = bot.DeleteMyCommands(ctx, &tgbot.DeleteMyCommandsParams{Scope: &models.BotCommandScopeDefault{}})
+		_, err = bot.DeleteMyCommands(callCtx, &tgbot.DeleteMyCommandsParams{Scope: &models.BotCommandScopeDefault{}})
 		return err
 	}
-	if _, err = bot.SetMyCommands(ctx, &tgbot.SetMyCommandsParams{Commands: commands, Scope: &models.BotCommandScopeDefault{}}); err != nil {
+	if _, err = bot.SetMyCommands(callCtx, &tgbot.SetMyCommandsParams{Commands: commands, Scope: &models.BotCommandScopeDefault{}}); err != nil {
 		return err
 	}
-	_, err = bot.SetChatMenuButton(ctx, &tgbot.SetChatMenuButtonParams{MenuButton: &models.MenuButtonCommands{Type: models.MenuButtonTypeCommands}})
+	_, err = bot.SetChatMenuButton(callCtx, &tgbot.SetChatMenuButtonParams{MenuButton: &models.MenuButtonCommands{Type: models.MenuButtonTypeCommands}})
 	return err
 }
 

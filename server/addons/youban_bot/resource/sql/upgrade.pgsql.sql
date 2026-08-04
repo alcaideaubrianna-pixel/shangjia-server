@@ -78,6 +78,12 @@ CREATE TABLE IF NOT EXISTS hg_youban_bot_invite_code (
   used_tenant_id bigint NOT NULL DEFAULT 0,
   used_account_id bigint NOT NULL DEFAULT 0,
   used_username varchar(128) NOT NULL DEFAULT '',
+  registration_telegram_user_id varchar(128) NOT NULL DEFAULT '',
+  registration_telegram_username varchar(128) NOT NULL DEFAULT '',
+  registration_telegram_first_name varchar(128) NOT NULL DEFAULT '',
+  registration_telegram_last_name varchar(128) NOT NULL DEFAULT '',
+  registration_bot_id bigint NOT NULL DEFAULT 0,
+  registration_bound_at timestamp,
   status varchar(16) NOT NULL DEFAULT 'active',
   expires_at timestamp,
   used_at timestamp,
@@ -85,9 +91,16 @@ CREATE TABLE IF NOT EXISTS hg_youban_bot_invite_code (
   updated_at timestamp,
   deleted_at timestamp
 );
+ALTER TABLE hg_youban_bot_invite_code ADD COLUMN IF NOT EXISTS registration_telegram_user_id varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE hg_youban_bot_invite_code ADD COLUMN IF NOT EXISTS registration_telegram_username varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE hg_youban_bot_invite_code ADD COLUMN IF NOT EXISTS registration_telegram_first_name varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE hg_youban_bot_invite_code ADD COLUMN IF NOT EXISTS registration_telegram_last_name varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE hg_youban_bot_invite_code ADD COLUMN IF NOT EXISTS registration_bot_id bigint NOT NULL DEFAULT 0;
+ALTER TABLE hg_youban_bot_invite_code ADD COLUMN IF NOT EXISTS registration_bound_at timestamp;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_ybbic_code ON hg_youban_bot_invite_code (code);
 CREATE INDEX IF NOT EXISTS idx_ybbic_inviter ON hg_youban_bot_invite_code (inviter_app,inviter_account_id,source,status,id);
 CREATE INDEX IF NOT EXISTS idx_ybbic_status ON hg_youban_bot_invite_code (status,expires_at,id);
+CREATE INDEX IF NOT EXISTS idx_ybbic_self_register ON hg_youban_bot_invite_code (source,registration_telegram_user_id,status,expires_at,id);
 
 CREATE TABLE IF NOT EXISTS hg_youban_bot_profile_session (
   id bigserial PRIMARY KEY,

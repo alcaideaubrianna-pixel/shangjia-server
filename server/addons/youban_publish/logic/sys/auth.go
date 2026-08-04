@@ -19,6 +19,7 @@ type accountRegisterTxResult struct {
 	Invite    *registerInviteCodeRow
 	Tenant    *sysin.TenantSaveModel
 	AccountId int64
+	Binding   *botService.AccountBoundEvent
 }
 
 func (s *sSysPublish) AccountLogin(ctx context.Context, in *sysin.AccountLoginInp) (res *sysin.AccountLoginModel, err error) {
@@ -46,6 +47,11 @@ func (s *sSysPublish) AccountRegister(ctx context.Context, in *sysin.AccountRegi
 	}
 	if notifyErr := botService.SysBot().NotifySuperAdmins(ctx, 0, "register", buildRegisterInviteNotifyText(in.Name, account.Username, account.Nickname, registration.Invite.Code)); notifyErr != nil {
 		g.Log().Warningf(ctx, "推送邀请码注册通知失败 tenantId:%d accountId:%d err:%+v", registration.Tenant.Id, account.Id, notifyErr)
+	}
+	if registration.Binding != nil {
+		for _, hookErr := range botService.TriggerAccountBoundHooks(ctx, registration.Binding) {
+			g.Log().Warningf(ctx, "立即注册Telegram绑定后置处理失败 accountId:%d err:%+v", registration.AccountId, hookErr)
+		}
 	}
 	loginRes, err := s.loginPublishAccount(ctx, account)
 	if err != nil {
@@ -79,9 +85,14 @@ func (s *sSysPublish) registerAccountWithInvite(ctx context.Context, in *sysin.A
 		if err = s.markRegisterInviteUsedTx(ctx, tx, invite.Id, tenant.Id, accountId, in.Username); err != nil {
 			return err
 		}
+		binding, err := s.bindRegisterTelegramTx(ctx, tx, invite, accountId)
+		if err != nil {
+			return err
+		}
 		result.Invite = invite
 		result.Tenant = tenant
 		result.AccountId = accountId
+		result.Binding = binding
 		return nil
 	})
 	if err != nil {

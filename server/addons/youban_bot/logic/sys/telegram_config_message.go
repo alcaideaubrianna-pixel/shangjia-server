@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -22,6 +23,8 @@ type telegramURLButton struct {
 	URL  string `json:"url"`
 	Row  int    `json:"row"`
 }
+
+const telegramPhotoCaptionMaxLength = 1024
 
 func (s *sSysBot) bindSuccessMessage(ctx context.Context, app string, accountId int64, telegramUserId string, telegramUsername string) (string, models.ReplyMarkup) {
 	values := map[string]interface{}{}
@@ -151,4 +154,18 @@ func sanitizeTelegramHTML(raw string) string {
 		}
 	}
 	return strings.TrimSpace(output.String())
+}
+
+func telegramHTMLTextLength(raw string) int {
+	tokenizer := xhtml.NewTokenizer(strings.NewReader(raw))
+	length := 0
+	for {
+		tokenType := tokenizer.Next()
+		if tokenType == xhtml.ErrorToken {
+			return length
+		}
+		if tokenType == xhtml.TextToken {
+			length += utf8.RuneCount(tokenizer.Text())
+		}
+	}
 }

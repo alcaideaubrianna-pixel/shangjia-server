@@ -164,6 +164,12 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 	}
 	if update.CallbackQuery != nil {
 		g.Log().Infof(ctx, "收到Telegram Callback botId:%d chatId:%s userId:%s data:%s", botId, callbackQueryChatId(update.CallbackQuery), callbackQueryUserId(update.CallbackQuery), strings.TrimSpace(update.CallbackQuery.Data))
+		if handled, err := s.handleInstantRegisterCallback(ctx, botId, update.CallbackQuery); handled || err != nil {
+			if err != nil {
+				g.Log().Warningf(ctx, "Telegram Callback处理失败 handler:instant_register botId:%d chatId:%s userId:%s data:%s err:%+v", botId, callbackQueryChatId(update.CallbackQuery), callbackQueryUserId(update.CallbackQuery), strings.TrimSpace(update.CallbackQuery.Data), err)
+			}
+			return err
+		}
 		if handled, err := s.handleQuickPushCallback(ctx, botId, update.CallbackQuery); handled || err != nil {
 			if err != nil {
 				g.Log().Warningf(ctx, "Telegram Callback处理失败 handler:quick_push botId:%d chatId:%s userId:%s data:%s err:%+v", botId, callbackQueryChatId(update.CallbackQuery), callbackQueryUserId(update.CallbackQuery), strings.TrimSpace(update.CallbackQuery.Data), err)
@@ -202,11 +208,20 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 		g.Log().Warningf(ctx, "保存Telegram消息日志失败 botId:%d err:%+v", botId, err)
 	}
 	text := strings.TrimSpace(firstNonEmpty(msg.Text, msg.Caption))
-	_, err := s.dispatchBotMessage(ctx, &botMessageEvent{BotId: botId, Msg: msg, Text: text})
+	handled, err := s.dispatchBotMessage(ctx, &botMessageEvent{BotId: botId, Msg: msg, Text: text})
 	if err != nil {
 		g.Log().Warningf(ctx, "Telegram消息处理失败 botId:%d chatId:%d userId:%s text:%s err:%+v", botId, msg.Chat.ID, userId, text, err)
 	}
+	if msg.Chat.Type == models.ChatTypePrivate && (handled || isTelegramCommand(text)) {
+		if refreshErr := s.ensureReplyKeyboardCurrent(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID)); refreshErr != nil {
+			g.Log().Warningf(ctx, "刷新Telegram底部键盘失败 botId:%d chatId:%d userId:%s err:%+v", botId, msg.Chat.ID, userId, refreshErr)
+		}
+	}
 	return err
+}
+
+func isTelegramCommand(text string) bool {
+	return strings.HasPrefix(strings.TrimSpace(text), "/")
 }
 
 func callbackQueryChatId(query *models.CallbackQuery) string {

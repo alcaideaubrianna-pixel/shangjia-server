@@ -208,7 +208,7 @@ func (s *sSysPublish) AdminInviteList(ctx context.Context, in *sysin.InviteListI
 	}
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
-		mod = mod.Where("(i.code LIKE ? OR i.inviter_username LIKE ? OR i.inviter_nickname LIKE ? OR i.used_username LIKE ? OR ua.username LIKE ? OR ua.nickname LIKE ? OR it.name LIKE ? OR ut.name LIKE ?)", like, like, like, like, like, like, like, like)
+		mod = mod.Where("(i.code LIKE ? OR i.inviter_username LIKE ? OR i.inviter_nickname LIKE ? OR i.used_username LIKE ? OR i.registration_telegram_user_id LIKE ? OR i.registration_telegram_username LIKE ? OR ua.username LIKE ? OR ua.nickname LIKE ? OR it.name LIKE ? OR ut.name LIKE ?)", like, like, like, like, like, like, like, like, like, like)
 	}
 	var rows []*webInviteRow
 	if err = mod.Page(in.Page, in.PerPage).OrderDesc("i.id").ScanAndCount(&rows, &totalCount, false); err != nil {
@@ -413,6 +413,8 @@ type webInviteRow struct {
 	UsedUsername        string      `json:"used_username"`
 	UsedAccountUsername string      `json:"used_account_username"`
 	UsedAccountNickname string      `json:"used_account_nickname"`
+	TelegramUserId      string      `json:"registration_telegram_user_id"`
+	TelegramUsername    string      `json:"registration_telegram_username"`
 	Status              string      `json:"status"`
 	ExpiresAt           *gtime.Time `json:"expires_at"`
 	UsedAt              *gtime.Time `json:"used_at"`
@@ -438,6 +440,8 @@ func (r *webInviteRow) toModel() *sysin.InviteModel {
 		UsedTenantName:    r.UsedTenantName,
 		UsedAccountId:     r.UsedAccountId,
 		UsedAccountName:   firstNonEmpty(r.UsedUsername, r.UsedAccountUsername, r.UsedAccountNickname),
+		TelegramUserId:    r.TelegramUserId,
+		TelegramUsername:  r.TelegramUsername,
 		Status:            r.Status,
 		ExpiresAt:         r.ExpiresAt,
 		UsedAt:            r.UsedAt,

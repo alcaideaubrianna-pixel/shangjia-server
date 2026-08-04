@@ -154,6 +154,7 @@ func init() {
 	registerBotFeature(contactFeature{})
 	registerBotFeature(adminFeature{})
 	registerBotFeature(inviteFeature{})
+	registerBotFeature(instantRegisterFeature{})
 	registerBotFeature(profileFeature{})
 	registerBotFeature(scanFeature{})
 	registerBotFeature(quickPushFeature{})

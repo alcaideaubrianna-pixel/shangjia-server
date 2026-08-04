@@ -89,7 +89,7 @@ func (s *sSysBot) MyInviteList(ctx context.Context, in *sysin.InviteListInp) (li
 	}
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
-		mod = mod.Where("(code LIKE ? OR inviter_username LIKE ? OR inviter_nickname LIKE ? OR used_username LIKE ?)", like, like, like, like)
+		mod = mod.Where("(code LIKE ? OR inviter_username LIKE ? OR inviter_nickname LIKE ? OR used_username LIKE ? OR registration_telegram_user_id LIKE ? OR registration_telegram_username LIKE ?)", like, like, like, like, like, like)
 	}
 	var rows []*inviteRow
 	if err = mod.Page(in.Page, perPage).OrderDesc("id").ScanAndCount(&rows, &totalCount, false); err != nil {
@@ -332,6 +332,8 @@ type inviteRow struct {
 	UsedTenantId     int64       `json:"used_tenant_id"`
 	UsedAccountId    int64       `json:"used_account_id"`
 	UsedUsername     string      `json:"used_username"`
+	TelegramUserId   string      `json:"registration_telegram_user_id"`
+	TelegramUsername string      `json:"registration_telegram_username"`
 	Status           string      `json:"status"`
 	ExpiresAt        *gtime.Time `json:"expires_at"`
 	UsedAt           *gtime.Time `json:"used_at"`
@@ -356,6 +358,8 @@ func (r *inviteRow) toModel() *sysin.InviteModel {
 		UsedTenantName:   r.UsedTenantName,
 		UsedAccountId:    r.UsedAccountId,
 		UsedAccountName:  r.UsedUsername,
+		TelegramUserId:   r.TelegramUserId,
+		TelegramUsername: r.TelegramUsername,
 		Status:           r.Status,
 		ExpiresAt:        r.ExpiresAt,
 		UsedAt:           r.UsedAt,

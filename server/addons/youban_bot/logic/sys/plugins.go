@@ -54,37 +54,41 @@ func (startFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFea
 		return handled, err
 	}
 	chatID := fmt.Sprintf("%d", featureCtx.Msg.Chat.ID)
-	imageURL := normalizePreviewMediaURL(bot.absoluteMediaURL(ctx, bot.featureConfigValue(ctx, startFeature{}.Key(), "welcomeImage")))
-	if imageURL != "" {
-		if err := bot.replyPhoto(ctx, featureCtx.BotId, chatID, imageURL); err != nil {
+	text := startFeatureReplyText(bot, ctx)
+	markup := bot.replyKeyboard(ctx)
+	imageSource := strings.TrimSpace(bot.featureConfigValue(ctx, startFeature{}.Key(), "welcomeImage"))
+	if imageSource != "" {
+		if err := bot.replyPhotoWithCaption(ctx, featureCtx.BotId, chatID, imageSource, text, markup); err == nil {
+			return true, nil
+		} else {
 			g.Log().Warningf(ctx, "发送Start欢迎图片失败 botId:%d chatId:%s err:%+v", featureCtx.BotId, chatID, err)
 		}
-	}
-	text := bot.featureConfigValue(ctx, startFeature{}.Key(), "replyText")
-	var markup models.ReplyMarkup
-	if startMarkup := startFeatureMarkup(bot, ctx); startMarkup != nil {
-		markup = startMarkup
 	}
 	return true, bot.replyWithMarkup(ctx, featureCtx.BotId, chatID, text, markup)
 }
 
-func startFeatureMarkup(bot *sSysBot, ctx context.Context) *models.InlineKeyboardMarkup {
+func startFeatureReplyText(bot *sSysBot, ctx context.Context) string {
 	key := startFeature{}.Key()
-	buttons := make([]models.InlineKeyboardButton, 0, 2)
+	text := sanitizeTelegramHTML(bot.featureConfigValue(ctx, key, "replyText"))
+	links := make([]string, 0, 2)
 	adminID := strings.TrimSpace(bot.featureConfigValue(ctx, key, "contactAdminId"))
 	adminLabel := strings.TrimSpace(bot.featureConfigValue(ctx, key, "contactButtonLabel"))
 	if adminURL := telegramUserURL(adminID); adminURL != "" && adminLabel != "" {
-		buttons = append(buttons, models.InlineKeyboardButton{Text: adminLabel, URL: adminURL})
+		links = append(links, fmt.Sprintf(`<a href="%s">%s</a>`, html.EscapeString(adminURL), html.EscapeString(adminLabel)))
 	}
 	helpURL := telegramChannelURL(bot.featureConfigValue(ctx, key, "helpChannelUrl"))
 	helpLabel := strings.TrimSpace(bot.featureConfigValue(ctx, key, "helpButtonLabel"))
 	if helpURL != "" && helpLabel != "" {
-		buttons = append(buttons, models.InlineKeyboardButton{Text: helpLabel, URL: helpURL})
+		links = append(links, fmt.Sprintf(`<a href="%s">%s</a>`, html.EscapeString(helpURL), html.EscapeString(helpLabel)))
 	}
-	if len(buttons) == 0 {
-		return nil
+	if len(links) == 0 {
+		return text
 	}
-	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{buttons}}
+	withLinks := strings.TrimSpace(text + "\n\n" + strings.Join(links, "  ·  "))
+	if telegramHTMLTextLength(withLinks) > telegramPhotoCaptionMaxLength {
+		return text
+	}
+	return withLinks
 }
 
 func telegramUserURL(value string) string {

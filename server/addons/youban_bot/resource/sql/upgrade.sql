@@ -84,6 +84,12 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_invite_code` (
   `used_tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '使用邀请码注册租户ID',
   `used_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '使用邀请码注册账号ID',
   `used_username` varchar(128) NOT NULL DEFAULT '' COMMENT '使用邀请码注册账号',
+  `registration_telegram_user_id` varchar(128) NOT NULL DEFAULT '' COMMENT '自助注册TG用户ID',
+  `registration_telegram_username` varchar(128) NOT NULL DEFAULT '' COMMENT '自助注册TG用户名',
+  `registration_telegram_first_name` varchar(128) NOT NULL DEFAULT '' COMMENT '自助注册TG名',
+  `registration_telegram_last_name` varchar(128) NOT NULL DEFAULT '' COMMENT '自助注册TG姓',
+  `registration_bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '自助注册Bot ID',
+  `registration_bound_at` datetime DEFAULT NULL COMMENT '自动绑定时间',
   `status` varchar(16) NOT NULL DEFAULT 'active' COMMENT '状态',
   `expires_at` datetime DEFAULT NULL COMMENT '过期时间',
   `used_at` datetime DEFAULT NULL COMMENT '使用时间',
@@ -93,8 +99,17 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_invite_code` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ybbic_code` (`code`),
   KEY `idx_ybbic_inviter` (`inviter_app`,`inviter_account_id`,`source`,`status`,`id`),
-  KEY `idx_ybbic_status` (`status`,`expires_at`,`id`)
+  KEY `idx_ybbic_status` (`status`,`expires_at`,`id`),
+  KEY `idx_ybbic_self_register` (`source`,`registration_telegram_user_id`,`status`,`expires_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot邀请码';
+ALTER TABLE `hg_youban_bot_invite_code`
+  ADD COLUMN IF NOT EXISTS `registration_telegram_user_id` varchar(128) NOT NULL DEFAULT '' COMMENT '自助注册TG用户ID',
+  ADD COLUMN IF NOT EXISTS `registration_telegram_username` varchar(128) NOT NULL DEFAULT '' COMMENT '自助注册TG用户名',
+  ADD COLUMN IF NOT EXISTS `registration_telegram_first_name` varchar(128) NOT NULL DEFAULT '' COMMENT '自助注册TG名',
+  ADD COLUMN IF NOT EXISTS `registration_telegram_last_name` varchar(128) NOT NULL DEFAULT '' COMMENT '自助注册TG姓',
+  ADD COLUMN IF NOT EXISTS `registration_bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '自助注册Bot ID',
+  ADD COLUMN IF NOT EXISTS `registration_bound_at` datetime DEFAULT NULL COMMENT '自动绑定时间';
+ALTER TABLE `hg_youban_bot_invite_code` ADD INDEX `idx_ybbic_self_register` (`source`,`registration_telegram_user_id`,`status`,`expires_at`,`id`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_bot_profile_session` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',

@@ -977,6 +977,21 @@
       render: (row: any) => renderMiniTag(inviteSourceLabel(row.source), 'default'),
     },
     {
+      title: 'TG 用户名',
+      key: 'telegramUsername',
+      width: 160,
+      render: (row: any) => {
+        const username = String(row.telegramUsername || '').replace(/^@/, '');
+        return username ? `@${username}` : '-';
+      },
+    },
+    {
+      title: 'TG 用户 ID',
+      key: 'telegramUserId',
+      width: 160,
+      render: (row: any) => row.telegramUserId || '-',
+    },
+    {
       title: '邀请人租户',
       key: 'inviterTenantName',
       width: 160,

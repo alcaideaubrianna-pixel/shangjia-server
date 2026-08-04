@@ -46,6 +46,8 @@ type InviteModel struct {
 	UsedTenantName     string      `json:"usedTenantName" dc:"注册租户名称"`
 	UsedAccountId      int64       `json:"usedAccountId" dc:"注册账号ID"`
 	UsedAccountName    string      `json:"usedAccountName" dc:"注册账号"`
+	TelegramUserId     string      `json:"telegramUserId" dc:"注册TG用户ID"`
+	TelegramUsername   string      `json:"telegramUsername" dc:"注册TG用户名"`
 	Status             string      `json:"status" dc:"状态"`
 	ExpiresAt          *gtime.Time `json:"expiresAt" dc:"过期时间"`
 	UsedAt             *gtime.Time `json:"usedAt" dc:"使用时间"`

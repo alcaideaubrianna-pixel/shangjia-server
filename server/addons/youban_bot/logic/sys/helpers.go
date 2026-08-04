@@ -344,41 +344,26 @@ func (s *sSysBot) reply(ctx context.Context, botId int64, chatId string, text st
 }
 
 func (s *sSysBot) replyWithMarkup(ctx context.Context, botId int64, chatId string, text string, replyMarkup models.ReplyMarkup) error {
-	tokenText := ""
-	if botId > 0 {
-		if row, err := s.botById(ctx, botId); err == nil && row != nil {
-			tokenText = row.BotToken
-		}
-	}
-	if tokenText == "" {
-		if row, err := s.officialBot(ctx); err == nil && row != nil {
-			tokenText = row.BotToken
-		}
-	}
+	tokenText := s.replyBotToken(ctx, botId)
 	if tokenText == "" {
 		return nil
 	}
 	_, err := s.sendMessageWithMarkup(ctx, tokenText, chatId, text, "HTML", false, replyMarkup)
-	if err != nil && botId > 0 && shouldMarkBotOffline(err) {
-		_ = s.markBotOffline(ctx, botId, err)
-	}
+	s.trackReplyResult(ctx, botId, replyMarkup, err)
 	return err
 }
 
-func (s *sSysBot) replyPhoto(ctx context.Context, botId int64, chatId string, imageURL string) error {
-	tokenText := ""
-	if botId > 0 {
-		if row, err := s.botById(ctx, botId); err == nil && row != nil {
-			tokenText = row.BotToken
-		}
-	}
-	if tokenText == "" {
-		if row, err := s.officialBot(ctx); err == nil && row != nil {
-			tokenText = row.BotToken
-		}
-	}
-	if tokenText == "" || strings.TrimSpace(imageURL) == "" {
+func (s *sSysBot) replyPhotoWithCaption(ctx context.Context, botId int64, chatId string, imageSource string, caption string, replyMarkup models.ReplyMarkup) error {
+	tokenText := s.replyBotToken(ctx, botId)
+	if tokenText == "" || strings.TrimSpace(imageSource) == "" {
 		return nil
+	}
+	photo, closer, err := s.telegramPhotoInput(ctx, imageSource)
+	if err != nil {
+		return err
+	}
+	if closer != nil {
+		defer closer.Close()
 	}
 	tgBot, err := s.telegramBot(ctx, tokenText)
 	if err != nil {
@@ -387,13 +372,36 @@ func (s *sSysBot) replyPhoto(ctx context.Context, botId int64, chatId string, im
 	callCtx, cancel := telegramAPICtx()
 	defer cancel()
 	_, err = tgBot.SendPhoto(callCtx, &tgbot.SendPhotoParams{
-		ChatID: chatId,
-		Photo:  models.InputFile(&models.InputFileString{Data: imageURL}),
+		ChatID:      chatId,
+		Photo:       photo,
+		Caption:     caption,
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: replyMarkup,
 	})
-	if err != nil && botId > 0 && shouldMarkBotOffline(err) {
-		_ = s.markBotOffline(ctx, botId, err)
-	}
+	s.trackReplyResult(ctx, botId, replyMarkup, err)
 	return err
+}
+
+func (s *sSysBot) trackReplyResult(ctx context.Context, botId int64, replyMarkup models.ReplyMarkup, err error) {
+	if err != nil {
+		if botId > 0 && shouldMarkBotOffline(err) {
+			_ = s.markBotOffline(ctx, botId, err)
+		}
+		return
+	}
+	s.markReplyKeyboardDelivered(ctx, botId, replyMarkup)
+}
+
+func (s *sSysBot) replyBotToken(ctx context.Context, botId int64) string {
+	if botId > 0 {
+		if row, err := s.botById(ctx, botId); err == nil && row != nil && strings.TrimSpace(row.BotToken) != "" {
+			return strings.TrimSpace(row.BotToken)
+		}
+	}
+	if row, err := s.officialBot(ctx); err == nil && row != nil {
+		return strings.TrimSpace(row.BotToken)
+	}
+	return ""
 }
 
 func (s *sSysBot) Notify(ctx context.Context, in *sysin.NotifyInp) error {
@@ -635,7 +643,7 @@ func (s *sSysBot) replyKeyboard(ctx context.Context) *models.ReplyKeyboardMarkup
 		if !s.featureVisibleForTelegramUser(ctx, feature, telegramUserIdFromCtx(ctx)) {
 			continue
 		}
-		label := s.featureDescription(ctx, feature)
+		label := s.replyKeyboardLabel(ctx, feature)
 		if strings.TrimSpace(label) == "" {
 			label = "/" + strings.TrimPrefix(s.featureCommand(ctx, feature), "/")
 		}
@@ -653,6 +661,15 @@ func (s *sSysBot) replyKeyboard(ctx context.Context) *models.ReplyKeyboardMarkup
 		rows = append(rows, buttons[i:end])
 	}
 	return &models.ReplyKeyboardMarkup{Keyboard: rows, IsPersistent: true, ResizeKeyboard: true, InputFieldPlaceholder: "输入验证码或选择菜单"}
+}
+
+func (s *sSysBot) replyKeyboardLabel(ctx context.Context, feature botFeature) string {
+	if feature != nil && feature.Key() == (instantRegisterFeature{}).Key() {
+		if label := strings.TrimSpace(s.featureConfigValue(ctx, feature.Key(), "buttonLabel")); label != "" {
+			return label
+		}
+	}
+	return s.featureDescription(ctx, feature)
 }
 
 func telegramBotDisplayName(user *models.User) string {
@@ -920,7 +937,7 @@ func (s *sSysBot) featureVisibleForTelegramUser(ctx context.Context, feature bot
 		return false
 	}
 	key := feature.Key()
-	if key != (adminFeature{}).Key() && key != (quickPushFeature{}).Key() && key != (profileFeature{}).Key() {
+	if key != (adminFeature{}).Key() && key != (quickPushFeature{}).Key() && key != (profileFeature{}).Key() && key != (instantRegisterFeature{}).Key() {
 		return true
 	}
 	if telegramUserId == "" {
@@ -941,6 +958,14 @@ func (s *sSysBot) featureVisibleForTelegramUser(ctx context.Context, feature bot
 			return false
 		}
 		return bind != nil && bind.AccountId > 0
+	}
+	if key == (instantRegisterFeature{}).Key() {
+		bind, err := s.bindingByTelegram(ctx, sysin.BotAppApi, telegramUserId)
+		if err != nil {
+			g.Log().Warningf(ctx, "判断立即注册菜单可见失败 telegramUserId:%s err:%+v", telegramUserId, err)
+			return false
+		}
+		return bind == nil || bind.AccountId <= 0
 	}
 	_, account, err := s.quickPushBoundAccount(ctx, telegramUserId)
 	if err != nil {
