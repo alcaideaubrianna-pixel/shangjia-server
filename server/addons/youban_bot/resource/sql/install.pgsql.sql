@@ -175,6 +175,28 @@ CREATE INDEX IF NOT EXISTS idx_ybbic_inviter ON hg_youban_bot_invite_code (invit
 CREATE INDEX IF NOT EXISTS idx_ybbic_status ON hg_youban_bot_invite_code (status,expires_at,id);
 CREATE INDEX IF NOT EXISTS idx_ybbic_self_register ON hg_youban_bot_invite_code (source,registration_telegram_user_id,status,expires_at,id);
 
+CREATE TABLE IF NOT EXISTS hg_youban_bot_invite_usage (
+  id bigserial PRIMARY KEY,
+  invite_id bigint NOT NULL DEFAULT 0,
+  code varchar(16) NOT NULL DEFAULT '',
+  source varchar(16) NOT NULL DEFAULT 'web',
+  inviter_app varchar(32) NOT NULL DEFAULT 'api',
+  inviter_tenant_id bigint NOT NULL DEFAULT 0,
+  inviter_account_id bigint NOT NULL DEFAULT 0,
+  inviter_username varchar(128) NOT NULL DEFAULT '',
+  inviter_nickname varchar(128) NOT NULL DEFAULT '',
+  used_tenant_id bigint NOT NULL DEFAULT 0,
+  used_account_id bigint NOT NULL DEFAULT 0,
+  used_username varchar(128) NOT NULL DEFAULT '',
+  used_at timestamp,
+  created_at timestamp,
+  updated_at timestamp,
+  deleted_at timestamp
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_ybbiu_used_tenant ON hg_youban_bot_invite_usage (used_tenant_id);
+CREATE INDEX IF NOT EXISTS idx_ybbiu_invite ON hg_youban_bot_invite_usage (invite_id,id);
+CREATE INDEX IF NOT EXISTS idx_ybbiu_inviter ON hg_youban_bot_invite_usage (inviter_tenant_id,used_at,id);
+
 CREATE TABLE IF NOT EXISTS hg_youban_bot_profile_session (
   id bigserial PRIMARY KEY,
   bot_id bigint NOT NULL DEFAULT 0,

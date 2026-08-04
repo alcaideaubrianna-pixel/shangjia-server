@@ -334,18 +334,18 @@ func (s *sSysPublish) activityEligibleCount(ctx context.Context, handler *activi
 		}
 		return mod.Count()
 	case tenantVipEventInviteBindGift:
-		mod := g.DB().Model(webInviteTable+" i").Safe().Ctx(ctx).
+		mod := g.DB().Model(botInviteUsageTable+" i").Safe().Ctx(ctx).
 			InnerJoin(pdao.YoubanPublishAccount.Table()+" a", "a.tenant_id=i.used_tenant_id AND a.account_type='admin' AND a.deleted_at IS NULL").
 			InnerJoin("hg_youban_bot_account_bind b", "b.account_id=a.id AND b.app='api' AND b.status=1 AND b.deleted_at IS NULL").
-			Where("i.inviter_tenant_id", tenantId).Where("i.status", webInviteStatusUsed).WhereNull("i.deleted_at")
+			Where("i.inviter_tenant_id", tenantId).WhereNull("i.deleted_at")
 		if enabledAt != nil {
 			mod = mod.Where("COALESCE(b.created_at,b.updated_at)>=?", enabledAt)
 		}
 		return mod.Count()
 	case tenantVipEventInviteFirstPay:
-		mod := g.DB().Model(webInviteTable+" i").Safe().Ctx(ctx).
+		mod := g.DB().Model(botInviteUsageTable+" i").Safe().Ctx(ctx).
 			InnerJoin(dao.AdminOrder.Table()+" o", "o.product_id=i.used_tenant_id AND o.order_type='"+tenantVipOrderType+"' AND o.status="+fmt.Sprint(consts.OrderStatusPay)+" AND o.money>0").
-			Where("i.inviter_tenant_id", tenantId).Where("i.status", webInviteStatusUsed).WhereNull("i.deleted_at")
+			Where("i.inviter_tenant_id", tenantId).WhereNull("i.deleted_at")
 		if enabledAt != nil {
 			mod = mod.WhereGTE("o.updated_at", enabledAt)
 		}
@@ -385,11 +385,11 @@ func (s *sSysPublish) retryActivityForTenant(ctx context.Context, handler *activ
 			AccountId int64       `json:"account_id"`
 			BoundAt   *gtime.Time `json:"bound_at"`
 		}
-		if err := g.DB().Model(webInviteTable+" i").Safe().Ctx(ctx).
+		if err := g.DB().Model(botInviteUsageTable+" i").Safe().Ctx(ctx).
 			InnerJoin(pdao.YoubanPublishAccount.Table()+" a", "a.tenant_id=i.used_tenant_id AND a.account_type='admin' AND a.deleted_at IS NULL").
 			InnerJoin("hg_youban_bot_account_bind b", "b.account_id=a.id AND b.app='api' AND b.status=1 AND b.deleted_at IS NULL").
 			Fields("a.id AS account_id,COALESCE(b.created_at,b.updated_at) AS bound_at").Where("i.inviter_tenant_id", tenantId).
-			Where("i.status", webInviteStatusUsed).WhereNull("i.deleted_at").Scan(&rows); err != nil {
+			WhereNull("i.deleted_at").Scan(&rows); err != nil {
 			return gerror.Wrap(err, "读取邀请绑定记录失败")
 		}
 		for _, row := range rows {
@@ -407,10 +407,10 @@ func (s *sSysPublish) retryActivityForTenant(ctx context.Context, handler *activ
 			AccountId int64       `json:"account_id"`
 			PaidAt    *gtime.Time `json:"paid_at"`
 		}
-		if err := g.DB().Model(webInviteTable+" i").Safe().Ctx(ctx).
+		if err := g.DB().Model(botInviteUsageTable+" i").Safe().Ctx(ctx).
 			InnerJoin(dao.AdminOrder.Table()+" o", "o.product_id=i.used_tenant_id AND o.order_type='"+tenantVipOrderType+"' AND o.status="+fmt.Sprint(consts.OrderStatusPay)+" AND o.money>0").
 			Fields("o.product_id AS tenant_id,o.member_id AS account_id,o.updated_at AS paid_at").
-			Where("i.inviter_tenant_id", tenantId).Where("i.status", webInviteStatusUsed).WhereNull("i.deleted_at").Scan(&rows); err != nil {
+			Where("i.inviter_tenant_id", tenantId).WhereNull("i.deleted_at").Scan(&rows); err != nil {
 			return gerror.Wrap(err, "读取邀请付费记录失败")
 		}
 		for _, row := range rows {

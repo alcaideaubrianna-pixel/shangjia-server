@@ -82,7 +82,7 @@ func (s *sSysPublish) registerAccountWithInvite(ctx context.Context, in *sysin.A
 		if err != nil {
 			return err
 		}
-		if err = s.markRegisterInviteUsedTx(ctx, tx, invite.Id, tenant.Id, accountId, in.Username); err != nil {
+		if err = s.markRegisterInviteUsedTx(ctx, tx, invite, tenant.Id, accountId, in.Username); err != nil {
 			return err
 		}
 		binding, err := s.bindRegisterTelegramTx(ctx, tx, invite, accountId)

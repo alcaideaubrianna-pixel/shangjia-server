@@ -27,32 +27,24 @@ func (s *sSysPublish) AdminChannelClearQueue(ctx context.Context, in *sysin.Chan
 	if channel == nil || channel.Id <= 0 {
 		return nil, gerror.New("频道不存在")
 	}
-	jobs, err := s.channelClearQueueJobs(ctx, account.TenantId, in.ChannelId)
+	return s.clearTelegramChannelQueue(ctx, account.TenantId, in.ChannelId)
+}
+
+func (s *sSysPublish) clearTelegramChannelQueue(ctx context.Context, tenantId int64, channelId int64) (*sysin.ChannelClearQueueModel, error) {
+	res := &sysin.ChannelClearQueueModel{ChannelId: channelId}
+	if tenantId <= 0 {
+		return nil, gerror.New("账号归属不能为空")
+	}
+	base := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("tenant_id", tenantId)
+	if channelId > 0 {
+		base = base.Where("channel_id", channelId)
+	}
+	sending, err := base.Clone().Where("status", "sending").Count()
 	if err != nil {
-		return nil, err
+		return nil, gerror.Wrap(err, "统计频道发送中任务失败")
 	}
-	res = &sysin.ChannelClearQueueModel{ChannelId: in.ChannelId, Cleared: len(jobs)}
-	if len(jobs) == 0 {
-		return res, nil
-	}
-	jobIds := make([]int64, 0, len(jobs))
-	for _, job := range jobs {
-		if job.Id <= 0 {
-			continue
-		}
-		jobIds = append(jobIds, job.Id)
-		if job.Status == "sending" {
-			res.Sending++
-		}
-	}
-	if len(jobIds) == 0 {
-		return res, nil
-	}
-	now := gtime.Now()
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereIn("id", jobIds).
-		Where("tenant_id", account.TenantId).
-		Where("channel_id", in.ChannelId).
+	res.Sending = sending
+	result, err := base.
 		WhereIn("status", channelQueueClearStatuses()).
 		Data(g.Map{
 			"status":              "superseded",
@@ -60,7 +52,7 @@ func (s *sSysPublish) AdminChannelClearQueue(ctx context.Context, in *sysin.Chan
 			"next_retry_at":       nil,
 			"error_message":       channelQueueClearMessage,
 			"last_dispatch_error": channelQueueClearMessage,
-			"updated_at":          now,
+			"updated_at":          gtime.Now(),
 		}).
 		Update()
 	if err != nil {
@@ -68,27 +60,24 @@ func (s *sSysPublish) AdminChannelClearQueue(ctx context.Context, in *sysin.Chan
 	}
 	affected, _ := result.RowsAffected()
 	res.Cleared = int(affected)
-	for _, job := range jobs {
-		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "cleanup", "superseded", channelQueueClearMessage)
-	}
+	s.invalidateTelegramSchedulerChannelCache(ctx, channelId, "")
 	return res, nil
 }
 
-func (s *sSysPublish) channelClearQueueJobs(ctx context.Context, tenantId int64, channelId int64) ([]telegramResubmitJob, error) {
-	var jobs []telegramResubmitJob
+func (s *sSysPublish) channelClearQueueCount(ctx context.Context, tenantId int64, channelId int64) (int, error) {
 	mod := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		WhereIn("status", channelQueueClearStatuses())
 	if channelId > 0 {
 		mod = mod.Where("channel_id", channelId)
 	}
-	err := mod.OrderAsc("id").Scan(&jobs)
+	count, err := mod.Count()
 	if err != nil {
-		return nil, gerror.Wrap(err, "读取频道发送队列失败")
+		return 0, gerror.Wrap(err, "统计频道发送队列失败")
 	}
-	return jobs, nil
+	return count, nil
 }
 
 func channelQueueClearStatuses() []string {
-	return []string{"pending", "failed_retry", "sending", "unknown"}
+	return []string{"pending", "failed_retry", "unknown"}
 }

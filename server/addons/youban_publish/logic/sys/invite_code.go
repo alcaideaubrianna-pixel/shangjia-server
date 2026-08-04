@@ -14,7 +14,10 @@ import (
 
 const (
 	botInviteCodeTable       = "hg_youban_bot_invite_code"
+	botInviteUsageTable      = "hg_youban_bot_invite_usage"
 	botAccountBindTable      = "hg_youban_bot_account_bind"
+	registerInviteSourceWeb  = "web"
+	registerInviteSourceBot  = "bot"
 	registerInviteSourceSelf = "self_register"
 	registerBindAppApi       = "api"
 )
@@ -36,6 +39,11 @@ type registerInviteCodeRow struct {
 	RegistrationTelegramFirstName string      `json:"registration_telegram_first_name"`
 	RegistrationTelegramLastName  string      `json:"registration_telegram_last_name"`
 	RegistrationBotId             int64       `json:"registration_bot_id"`
+	InviterApp                    string      `json:"inviter_app"`
+	InviterTenantId               int64       `json:"inviter_tenant_id"`
+	InviterAccountId              int64       `json:"inviter_account_id"`
+	InviterUsername               string      `json:"inviter_username"`
+	InviterNickname               string      `json:"inviter_nickname"`
 }
 
 func (s *sSysPublish) validateRegisterInviteCode(ctx context.Context, code string) (*registerInviteCodeRow, error) {
@@ -72,9 +80,32 @@ func (s *sSysPublish) validateRegisterInviteCodeTx(ctx context.Context, tx gdb.T
 	return row, nil
 }
 
-func (s *sSysPublish) markRegisterInviteUsedTx(ctx context.Context, tx gdb.TX, inviteId int64, tenantId int64, accountId int64, username string) error {
+func (s *sSysPublish) markRegisterInviteUsedTx(ctx context.Context, tx gdb.TX, invite *registerInviteCodeRow, tenantId int64, accountId int64, username string) error {
+	if invite == nil || invite.Id <= 0 {
+		return gerror.New("邀请码信息不存在")
+	}
+	if isReusableRegisterInvite(invite.Source) {
+		now := gtime.Now()
+		_, err := tx.Model(botInviteUsageTable).Safe().Ctx(ctx).Data(g.Map{
+			"invite_id":          invite.Id,
+			"code":               invite.Code,
+			"source":             invite.Source,
+			"inviter_app":        invite.InviterApp,
+			"inviter_tenant_id":  invite.InviterTenantId,
+			"inviter_account_id": invite.InviterAccountId,
+			"inviter_username":   invite.InviterUsername,
+			"inviter_nickname":   invite.InviterNickname,
+			"used_tenant_id":     tenantId,
+			"used_account_id":    accountId,
+			"used_username":      strings.TrimSpace(username),
+			"used_at":            now,
+			"created_at":         now,
+			"updated_at":         now,
+		}).Insert()
+		return gerror.Wrap(err, "记录邀请码使用关系失败")
+	}
 	result, err := tx.Model(botInviteCodeTable).Safe().Ctx(ctx).
-		Where("id", inviteId).
+		Where("id", invite.Id).
 		Where("status", registerInviteStatusActive).
 		WhereNull("deleted_at").
 		Data(g.Map{
@@ -98,6 +129,15 @@ func (s *sSysPublish) markRegisterInviteUsedTx(ctx context.Context, tx gdb.TX, i
 	return nil
 }
 
+func isReusableRegisterInvite(source string) bool {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case registerInviteSourceWeb, registerInviteSourceBot:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *sSysPublish) bindRegisterTelegramTx(ctx context.Context, tx gdb.TX, invite *registerInviteCodeRow, accountId int64) (*botService.AccountBoundEvent, error) {
 	if invite == nil || strings.TrimSpace(invite.Source) != registerInviteSourceSelf {
 		return nil, nil
@@ -106,7 +146,7 @@ func (s *sSysPublish) bindRegisterTelegramTx(ctx context.Context, tx gdb.TX, inv
 	if telegramUserId == "" || accountId <= 0 {
 		return nil, gerror.New("立即注册链接缺少 Telegram 绑定信息，请返回机器人重新生成")
 	}
-	var active struct {
+	var active *struct {
 		AccountId      int64  `json:"account_id"`
 		TelegramUserId string `json:"telegram_user_id"`
 	}
@@ -119,7 +159,7 @@ func (s *sSysPublish) bindRegisterTelegramTx(ctx context.Context, tx gdb.TX, inv
 		Scan(&active); err != nil {
 		return nil, gerror.Wrap(err, "检查注册账号Telegram绑定失败")
 	}
-	if active.AccountId > 0 && (active.AccountId != accountId || active.TelegramUserId != telegramUserId) {
+	if active != nil && active.AccountId > 0 && (active.AccountId != accountId || active.TelegramUserId != telegramUserId) {
 		return nil, gerror.New("当前 Telegram 已绑定其他账号，不能重复注册绑定")
 	}
 	now := gtime.Now()
@@ -135,7 +175,7 @@ func (s *sSysPublish) bindRegisterTelegramTx(ctx context.Context, tx gdb.TX, inv
 		"updated_at":          now,
 		"deleted_at":          nil,
 	}
-	var existing struct {
+	var existing *struct {
 		Id int64 `json:"id"`
 	}
 	if err := tx.Model(botAccountBindTable).Safe().Ctx(ctx).
@@ -145,7 +185,7 @@ func (s *sSysPublish) bindRegisterTelegramTx(ctx context.Context, tx gdb.TX, inv
 		OrderDesc("status").OrderDesc("id").Scan(&existing); err != nil {
 		return nil, gerror.Wrap(err, "读取Telegram历史绑定失败")
 	}
-	if existing.Id > 0 {
+	if existing != nil && existing.Id > 0 {
 		if _, err := tx.Model(botAccountBindTable).Safe().Ctx(ctx).Where("id", existing.Id).Data(data).Update(); err != nil {
 			return nil, gerror.Wrap(err, "恢复注册账号Telegram绑定失败")
 		}

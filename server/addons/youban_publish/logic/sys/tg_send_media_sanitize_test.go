@@ -1,8 +1,13 @@
 package sys
 
 import (
+	"context"
 	"image"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/go-telegram/bot/models"
 )
 
 func TestSplitTelegramMediaItems(t *testing.T) {
@@ -13,6 +18,55 @@ func TestSplitTelegramMediaItems(t *testing.T) {
 	}
 	if len(chunks[0]) != 10 || len(chunks[1]) != 10 || len(chunks[2]) != 3 {
 		t.Fatalf("chunk sizes=%d,%d,%d, want 10,10,3", len(chunks[0]), len(chunks[1]), len(chunks[2]))
+	}
+}
+
+func TestTelegramSingleVideoUsesFileIdWithCover(t *testing.T) {
+	media := &telegramMediaItem{MediaType: "video", TgFileId: "video-file-id", AntiScanEnabled: true}
+	if !telegramVideoUsesReusableFileIdWithCover(media) {
+		t.Fatal("anti-scan single video should reuse its file_id with a new cover")
+	}
+	input, closer, err := telegramSingleMediaInputFile(context.Background(), media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closer != nil {
+		t.Fatal("file_id input should not allocate a closer")
+	}
+	value, ok := input.(*models.InputFileString)
+	if !ok || value.Data != media.TgFileId {
+		t.Fatalf("unexpected video input: %#v", input)
+	}
+}
+
+func TestPrepareTelegramMediaKeepsVideoFileIdForSingleCover(t *testing.T) {
+	media := &telegramMediaItem{MediaType: "video", TgFileId: "video-file-id", TgThumbFileId: "old-thumb", AntiScanEnabled: true}
+	(&sSysPublish{}).prepareTelegramMediaItemForSend(context.Background(), media)
+	if media.TgFileId != "video-file-id" {
+		t.Fatalf("video file_id was cleared: %q", media.TgFileId)
+	}
+	if media.TgThumbFileId != "" {
+		t.Fatalf("old thumbnail file_id was retained: %q", media.TgThumbFileId)
+	}
+}
+
+func TestCachedTelegramVideoPosterFilePrefersStoredPoster(t *testing.T) {
+	posterPath := filepath.Join(t.TempDir(), "poster.jpg")
+	if err := os.WriteFile(posterPath, []byte("poster"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path, cleanup, err := cachedTelegramVideoPosterFile(context.Background(), &telegramMediaItem{
+		MediaType:         "video",
+		PosterStoragePath: posterPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		t.Fatal("stored poster should not require cleanup")
+	}
+	if path != posterPath {
+		t.Fatalf("poster path=%q want=%q", path, posterPath)
 	}
 }
 

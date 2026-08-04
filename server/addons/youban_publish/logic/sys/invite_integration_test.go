@@ -63,35 +63,33 @@ func TestInviteConcurrentRegisterIntegration(t *testing.T) {
 	close(resultsCh)
 
 	successCount := 0
-	failureCount := 0
-	var success *accountRegisterTxResult
 	for result := range resultsCh {
-		if result.err == nil {
-			successCount++
-			success = result.data
-			continue
+		if result.err != nil {
+			t.Fatalf("concurrent register failed: %+v", result.err)
 		}
-		if !strings.Contains(result.err.Error(), "邀请码已使用或已失效") {
-			t.Fatalf("unexpected concurrent register error: %+v", result.err)
+		if result.data == nil || result.data.Tenant == nil || result.data.Tenant.Id <= 0 || result.data.AccountId <= 0 {
+			t.Fatalf("successful registration result is incomplete: %+v", result.data)
 		}
-		failureCount++
+		successCount++
 	}
-	if successCount != 1 || failureCount != 1 {
-		t.Fatalf("success=%d failure=%d, want 1/1", successCount, failureCount)
+	if successCount != 2 {
+		t.Fatalf("success=%d, want 2", successCount)
 	}
-	if success == nil || success.Tenant == nil || success.Tenant.Id <= 0 || success.AccountId <= 0 {
-		t.Fatalf("successful registration result is incomplete: %+v", success)
+	var invite struct {
+		Status string `json:"status"`
 	}
-	var inviteRelation struct {
-		Status        string `json:"status"`
-		UsedTenantId  int64  `json:"used_tenant_id"`
-		UsedAccountId int64  `json:"used_account_id"`
+	if err := g.DB().Model(botInviteCodeTable).Safe().Ctx(ctx).Where("code", code).Scan(&invite); err != nil {
+		t.Fatalf("read reusable invite: %+v", err)
 	}
-	if err := g.DB().Model(botInviteCodeTable).Safe().Ctx(ctx).Where("code", code).Scan(&inviteRelation); err != nil {
-		t.Fatalf("read consumed invite: %+v", err)
+	if invite.Status != registerInviteStatusActive {
+		t.Fatalf("invite status = %s, want active", invite.Status)
 	}
-	if inviteRelation.Status != registerInviteStatusUsed || inviteRelation.UsedTenantId != success.Tenant.Id || inviteRelation.UsedAccountId != success.AccountId {
-		t.Fatalf("invite relation = %+v, registration = %+v", inviteRelation, success)
+	usageCount, err := g.DB().Model(botInviteUsageTable).Safe().Ctx(ctx).Where("code", code).WhereNull("deleted_at").Count()
+	if err != nil {
+		t.Fatalf("count invite usages: %+v", err)
+	}
+	if usageCount != 2 {
+		t.Fatalf("invite usage count = %d, want 2", usageCount)
 	}
 }
 
@@ -111,7 +109,7 @@ func TestInviteConsumeRollbackIntegration(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if err = publish.markRegisterInviteUsedTx(ctx, tx, invite.Id, 900010, 910010, "integration_rollback"); err != nil {
+		if err = publish.markRegisterInviteUsedTx(ctx, tx, invite, 900010, 910010, "integration_rollback"); err != nil {
 			return err
 		}
 		return rollbackErr
@@ -243,7 +241,7 @@ func TestInviteBindEligibilityUsesFirstBindTimeIntegration(t *testing.T) {
 	}
 	defer func() {
 		_, _ = g.DB().Exec(ctx, "DELETE FROM hg_youban_bot_account_bind WHERE app='api' AND account_id=?", accountId)
-		_, _ = g.DB().Exec(ctx, "DELETE FROM hg_youban_bot_invite_code WHERE code=?", code)
+		_, _ = g.DB().Exec(ctx, "DELETE FROM "+botInviteUsageTable+" WHERE code=?", code)
 		_, _ = g.DB().Exec(ctx, "DELETE FROM hg_youban_publish_account WHERE id=?", accountId)
 	}()
 	_, err = g.DB().Model("hg_youban_bot_account_bind").Safe().Ctx(ctx).Data(g.Map{
@@ -259,9 +257,9 @@ func TestInviteBindEligibilityUsesFirstBindTimeIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert eligibility binding: %+v", err)
 	}
-	_, err = g.DB().Model(botInviteCodeTable).Safe().Ctx(ctx).Data(g.Map{
+	_, err = g.DB().Model(botInviteUsageTable).Safe().Ctx(ctx).Data(g.Map{
 		"code":               code,
-		"source":             "integration",
+		"source":             registerInviteSourceWeb,
 		"inviter_app":        "api",
 		"inviter_tenant_id":  inviterTenantId,
 		"inviter_account_id": inviterTenantId,
@@ -270,9 +268,7 @@ func TestInviteBindEligibilityUsesFirstBindTimeIntegration(t *testing.T) {
 		"used_tenant_id":     usedTenantId,
 		"used_account_id":    accountId,
 		"used_username":      username,
-		"status":             registerInviteStatusUsed,
 		"used_at":            createdAt,
-		"expires_at":         updatedAt,
 		"created_at":         createdAt,
 		"updated_at":         updatedAt,
 	}).Insert()
@@ -311,9 +307,9 @@ func TestInviteRewardsApplyOnceIntegration(t *testing.T) {
 	invitedTenantId := seed + 2
 	invitedAccountId := seed + 3
 	now := gtime.Now()
-	_, err := g.DB().Model(botInviteCodeTable).Safe().Ctx(ctx).Data(g.Map{
+	_, err := g.DB().Model(botInviteUsageTable).Safe().Ctx(ctx).Data(g.Map{
 		"code":               code,
-		"source":             "integration",
+		"source":             registerInviteSourceWeb,
 		"inviter_app":        "api",
 		"inviter_tenant_id":  inviterTenantId,
 		"inviter_account_id": inviterAccountId,
@@ -322,9 +318,7 @@ func TestInviteRewardsApplyOnceIntegration(t *testing.T) {
 		"used_tenant_id":     invitedTenantId,
 		"used_account_id":    invitedAccountId,
 		"used_username":      strings.ToLower(code),
-		"status":             registerInviteStatusUsed,
 		"used_at":            now,
-		"expires_at":         now.Add(time.Hour),
 		"created_at":         now,
 		"updated_at":         now,
 	}).Insert()
@@ -392,7 +386,7 @@ func insertIntegrationInvite(t *testing.T, ctx context.Context, code string) {
 	now := gtime.Now()
 	_, err := g.DB().Model(botInviteCodeTable).Safe().Ctx(ctx).Data(g.Map{
 		"code":               code,
-		"source":             "integration",
+		"source":             registerInviteSourceWeb,
 		"inviter_app":        "api",
 		"inviter_tenant_id":  999001,
 		"inviter_account_id": 999001,
@@ -410,6 +404,9 @@ func insertIntegrationInvite(t *testing.T, ctx context.Context, code string) {
 
 func deleteIntegrationInvite(t *testing.T, ctx context.Context, code string) {
 	t.Helper()
+	if _, err := g.DB().Exec(ctx, "DELETE FROM "+botInviteUsageTable+" WHERE code=?", code); err != nil {
+		t.Errorf("delete integration invite usages: %+v", err)
+	}
 	if _, err := g.DB().Exec(ctx, "DELETE FROM "+botInviteCodeTable+" WHERE code=?", code); err != nil {
 		t.Errorf("delete integration invite: %+v", err)
 	}

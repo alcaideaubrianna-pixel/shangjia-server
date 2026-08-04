@@ -111,6 +111,35 @@ ALTER TABLE `hg_youban_bot_invite_code`
   ADD COLUMN IF NOT EXISTS `registration_bound_at` datetime DEFAULT NULL COMMENT '自动绑定时间';
 ALTER TABLE `hg_youban_bot_invite_code` ADD INDEX `idx_ybbic_self_register` (`source`,`registration_telegram_user_id`,`status`,`expires_at`,`id`);
 
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_invite_usage` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `invite_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '邀请码ID',
+  `code` varchar(16) NOT NULL DEFAULT '' COMMENT '邀请码',
+  `source` varchar(16) NOT NULL DEFAULT 'web' COMMENT '来源',
+  `inviter_app` varchar(32) NOT NULL DEFAULT 'api' COMMENT '邀请人应用',
+  `inviter_tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '邀请人租户ID',
+  `inviter_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '邀请人账号ID',
+  `inviter_username` varchar(128) NOT NULL DEFAULT '' COMMENT '邀请人账号',
+  `inviter_nickname` varchar(128) NOT NULL DEFAULT '' COMMENT '邀请人昵称',
+  `used_tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '注册租户ID',
+  `used_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '注册账号ID',
+  `used_username` varchar(128) NOT NULL DEFAULT '' COMMENT '注册账号',
+  `used_at` datetime DEFAULT NULL COMMENT '使用时间',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybbiu_used_tenant` (`used_tenant_id`),
+  KEY `idx_ybbiu_invite` (`invite_id`,`id`),
+  KEY `idx_ybbiu_inviter` (`inviter_tenant_id`,`used_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴全局Bot邀请码使用记录';
+INSERT IGNORE INTO `hg_youban_bot_invite_usage` (`invite_id`,`code`,`source`,`inviter_app`,`inviter_tenant_id`,`inviter_account_id`,`inviter_username`,`inviter_nickname`,`used_tenant_id`,`used_account_id`,`used_username`,`used_at`,`created_at`,`updated_at`)
+SELECT `id`,`code`,`source`,`inviter_app`,`inviter_tenant_id`,`inviter_account_id`,`inviter_username`,`inviter_nickname`,`used_tenant_id`,`used_account_id`,`used_username`,`used_at`,COALESCE(`used_at`,`updated_at`,`created_at`),COALESCE(`used_at`,`updated_at`,`created_at`)
+FROM `hg_youban_bot_invite_code` WHERE `source` IN ('web','bot') AND `used_tenant_id`>0;
+UPDATE `hg_youban_bot_invite_code` SET `expires_at`=DATE_ADD(COALESCE(`created_at`,`updated_at`,NOW()), INTERVAL 7 DAY),`updated_at`=NOW() WHERE `source` IN ('web','bot') AND `expires_at` IS NULL;
+UPDATE `hg_youban_bot_invite_code` SET `status`='active',`updated_at`=NOW() WHERE `source` IN ('web','bot') AND `status`='used' AND (`expires_at` IS NULL OR `expires_at`>NOW());
+UPDATE `hg_youban_bot_invite_code` SET `status`='expired',`updated_at`=NOW() WHERE `source` IN ('web','bot') AND `expires_at` IS NOT NULL AND `expires_at`<=NOW() AND `status`<>'expired';
+
 CREATE TABLE IF NOT EXISTS `hg_youban_bot_profile_session` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
   `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Bot ID',

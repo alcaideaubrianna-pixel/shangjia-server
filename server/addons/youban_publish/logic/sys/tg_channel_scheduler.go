@@ -82,10 +82,17 @@ func (s *sSysPublish) scheduleTelegramJob(ctx context.Context, jobId int64, dela
 	if err != nil {
 		return gerror.Wrap(err, "标记TG任务待调度失败")
 	}
+	if shouldInvalidateTelegramSchedulerChannelCache(job, delay) {
+		s.invalidateTelegramSchedulerChannelCache(ctx, job.ChannelId, job.TargetChatId)
+	}
 	if delay <= 0 {
 		return s.dispatchTelegramDueJobs(ctx, 10)
 	}
 	return nil
+}
+
+func shouldInvalidateTelegramSchedulerChannelCache(job telegramJobRecord, delay time.Duration) bool {
+	return delay <= 0 && isTelegramUrgentJob(job)
 }
 
 func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) error {
@@ -243,6 +250,16 @@ func telegramSchedulerChannelCacheKey(channel telegramSchedulerChannel) string {
 		return "youban_publish:tg_scheduler:candidates:channel:" + strconv.FormatInt(channel.ChannelId, 10)
 	}
 	return "youban_publish:tg_scheduler:candidates:chat:" + normalizeTelegramChannelChatID(channel.TargetChatId)
+}
+
+func (s *sSysPublish) invalidateTelegramSchedulerChannelCache(ctx context.Context, channelId int64, targetChatId string) {
+	channel := telegramSchedulerChannel{ChannelId: channelId, TargetChatId: targetChatId}
+	if channel.ChannelId <= 0 && strings.TrimSpace(channel.TargetChatId) == "" {
+		return
+	}
+	if _, err := cache.Instance().Remove(ctx, telegramSchedulerChannelCacheKey(channel)); err != nil {
+		g.Log().Warningf(ctx, "清理TG频道调度候选缓存失败 channelId:%d chat:%s err:%+v", channelId, targetChatId, err)
+	}
 }
 
 func telegramSchedulerCollectPredecessorCondition() string {

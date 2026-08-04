@@ -427,7 +427,7 @@ func (s *sSysPublish) BotChannelFullPush(ctx context.Context, in *sysin.BotChann
 	if err != nil {
 		return nil, err
 	}
-	existingJobs, err := s.channelClearQueueJobs(ctx, in.TenantId, channel.Id)
+	existingQueue, err := s.channelClearQueueCount(ctx, in.TenantId, channel.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +438,7 @@ func (s *sSysPublish) BotChannelFullPush(ctx context.Context, in *sysin.BotChann
 	return &sysin.ChannelFullPushModel{
 		ChannelId:     channel.Id,
 		Queued:        batch.TotalCount,
-		ExistingQueue: len(existingJobs),
+		ExistingQueue: existingQueue,
 		BatchNo:       batch.BatchNo,
 		Status:        batch.Status,
 	}, nil
@@ -457,33 +457,5 @@ func (s *sSysPublish) BotChannelClearQueue(ctx context.Context, in *sysin.BotCha
 			return nil, gerror.New("频道不存在")
 		}
 	}
-	jobs, err := s.channelClearQueueJobs(ctx, in.TenantId, in.ChannelId)
-	if err != nil {
-		return nil, err
-	}
-	res = &sysin.ChannelClearQueueModel{ChannelId: in.ChannelId, Cleared: len(jobs)}
-	if len(jobs) == 0 {
-		return res, nil
-	}
-	jobIds := make([]int64, 0, len(jobs))
-	for _, job := range jobs {
-		jobIds = append(jobIds, job.Id)
-		if job.Status == "sending" {
-			res.Sending++
-		}
-	}
-	mod := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereIn("id", jobIds).
-		Where("tenant_id", in.TenantId).
-		WhereIn("status", channelQueueClearStatuses())
-	if in.ChannelId > 0 {
-		mod = mod.Where("channel_id", in.ChannelId)
-	}
-	result, err := mod.Data(g.Map{"status": "superseded", "dispatch_status": tgDispatchStatusDone, "next_retry_at": nil, "error_message": channelQueueClearMessage, "last_dispatch_error": channelQueueClearMessage, "updated_at": gtime.Now()}).Update()
-	if err != nil {
-		return nil, gerror.Wrap(err, "清空频道发送队列失败")
-	}
-	affected, _ := result.RowsAffected()
-	res.Cleared = int(affected)
-	return res, nil
+	return s.clearTelegramChannelQueue(ctx, in.TenantId, in.ChannelId)
 }

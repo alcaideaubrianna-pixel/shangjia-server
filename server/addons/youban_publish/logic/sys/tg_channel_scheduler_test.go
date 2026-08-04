@@ -3,6 +3,7 @@ package sys
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTelegramSchedulerCollectPredecessorCondition(t *testing.T) {
@@ -51,6 +52,20 @@ func TestTelegramSchedulerChannelCacheKey(t *testing.T) {
 	}
 	if got := telegramSchedulerChannelCacheKey(telegramSchedulerChannel{TargetChatId: "-100123"}); got != "youban_publish:tg_scheduler:candidates:chat:-100123" {
 		t.Fatalf("chat cache key = %q", got)
+	}
+}
+
+func TestShouldInvalidateTelegramSchedulerChannelCache(t *testing.T) {
+	urgent := telegramJobRecord{OperationNo: "profile:100:1"}
+	bulk := telegramJobRecord{OperationNo: "full_push:100:1"}
+	if !shouldInvalidateTelegramSchedulerChannelCache(urgent, 0) {
+		t.Fatal("immediate urgent job should invalidate channel candidates")
+	}
+	if shouldInvalidateTelegramSchedulerChannelCache(urgent, time.Second) {
+		t.Fatal("delayed urgent job should wait for its due scheduler scan")
+	}
+	if shouldInvalidateTelegramSchedulerChannelCache(bulk, 0) {
+		t.Fatal("bulk job should not invalidate the short-lived channel cache")
 	}
 }
 

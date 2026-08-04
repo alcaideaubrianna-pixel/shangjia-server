@@ -304,9 +304,8 @@ func tenantVipActivityTriggerEligible(triggerAt *gtime.Time, enabledAtText strin
 
 func (s *sSysPublish) inviteByUsedTenant(ctx context.Context, tenantId int64) (*webInviteRow, error) {
 	var row *webInviteRow
-	err := g.DB().Model(webInviteTable).Safe().Ctx(ctx).
+	err := g.DB().Model(botInviteUsageTable).Safe().Ctx(ctx).
 		Where("used_tenant_id", tenantId).
-		Where("status", webInviteStatusUsed).
 		WhereNull("deleted_at").
 		OrderDesc("used_at").
 		Scan(&row)
@@ -804,7 +803,7 @@ func (s *sSysPublish) reconcileTenantVipBindings(ctx context.Context, limit int)
 	model := g.DB().Model("hg_youban_bot_account_bind b").Safe().Ctx(ctx).
 		InnerJoin(accountTable+" a", "a.id=b.account_id AND a.deleted_at IS NULL").
 		LeftJoin(tenantVipEventTable+" bind_event", "bind_event.event_type='"+tenantVipEventBindGift+"' AND bind_event.tenant_id=a.tenant_id").
-		LeftJoin(webInviteTable+" invite", "invite.used_tenant_id=a.tenant_id AND invite.status='"+webInviteStatusUsed+"' AND invite.deleted_at IS NULL").
+		LeftJoin(botInviteUsageTable+" invite", "invite.used_tenant_id=a.tenant_id AND invite.deleted_at IS NULL").
 		LeftJoin(tenantVipEventTable+" invite_event", "invite_event.event_type='"+tenantVipEventInviteBindGift+"' AND invite_event.tenant_id=invite.inviter_tenant_id AND invite_event.trigger_tenant_id=a.tenant_id").
 		Fields("b.account_id,COALESCE(b.created_at,b.updated_at) AS bound_at").
 		Where("b.app", consts.AppApi).

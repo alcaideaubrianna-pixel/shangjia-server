@@ -306,7 +306,6 @@ func (inviteFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
 	return []*sysin.FeatureConfigSchema{
 		{Field: "replyText", Label: "回复文案", Component: "textarea", Default: "邀请码已生成，请复制下方内容到上架系统注册页使用。", Placeholder: "机器人生成邀请码后的回复文案"},
 		{Field: "publishDomain", Label: "上架端域名", Component: "input", Default: "", Placeholder: "例如：https://publish.example.com，留空则只返回相对路径"},
-		{Field: "expireDays", Label: "有效期天数", Component: "input", Default: 7, Placeholder: "默认 7 天"},
 		{Field: "codeLength", Label: "邀请码长度", Component: "input", Default: 6, Placeholder: "默认 6 位字母+数字"},
 		{Field: "unboundText", Label: "未绑定提示", Component: "textarea", Default: "请先在个人中心绑定系统账号后再使用。"},
 		{Field: "forbiddenText", Label: "无权限提示", Component: "textarea", Default: "仅管理员可生成好友邀请码。"},

@@ -18,7 +18,10 @@ import (
 	"hotgo/internal/library/contexts"
 )
 
-const inviteTable = "hg_youban_bot_invite_code"
+const (
+	inviteTable      = "hg_youban_bot_invite_code"
+	inviteUsageTable = "hg_youban_bot_invite_usage"
+)
 
 const (
 	inviteSourceWeb = "web"
@@ -48,7 +51,7 @@ func (s *sSysBot) MyInviteInfo(ctx context.Context) (res *sysin.InviteInfoModel,
 		res.CanGenerateBot = false
 		return res, nil
 	}
-	item, err := s.ensureInviteCode(ctx, account, inviteSourceWeb, false)
+	item, err := s.ensureInviteCode(ctx, account, inviteSourceWeb)
 	if err != nil {
 		return nil, err
 	}
@@ -80,19 +83,30 @@ func (s *sSysBot) MyInviteList(ctx context.Context, in *sysin.InviteListInp) (li
 	if perPage <= 0 {
 		perPage = 10
 	}
-	mod := g.DB().Model(inviteTable).Safe().Ctx(ctx).WhereNull("deleted_at").Where("inviter_account_id", account.Id)
+	mod := g.DB().Model(inviteTable+" i").Safe().Ctx(ctx).
+		LeftJoin(inviteUsageTable+" u", "u.invite_id=i.id AND u.deleted_at IS NULL").
+		Fields("COALESCE(u.id,i.id) AS id,i.code,i.source,i.inviter_app,i.inviter_tenant_id,i.inviter_account_id,i.inviter_username,i.inviter_nickname,"+
+			"COALESCE(u.used_tenant_id,i.used_tenant_id) AS used_tenant_id,COALESCE(u.used_account_id,i.used_account_id) AS used_account_id,"+
+			"COALESCE(u.used_username,i.used_username) AS used_username,i.registration_telegram_user_id,i.registration_telegram_username,"+
+			"CASE WHEN u.id IS NOT NULL THEN 'used' ELSE i.status END AS status,i.expires_at,COALESCE(u.used_at,i.used_at) AS used_at,i.created_at").
+		WhereNull("i.deleted_at").Where("i.inviter_account_id", account.Id)
 	if source := normalizeInviteSource(in.Source); source != "" {
-		mod = mod.Where("source", source)
+		mod = mod.Where("i.source", source)
 	}
 	if status := strings.TrimSpace(in.Status); status != "" {
-		mod = mod.Where("status", status)
+		switch status {
+		case inviteStatusUsed:
+			mod = mod.Where("(u.id IS NOT NULL OR i.status=?)", inviteStatusUsed)
+		case inviteStatusActive, inviteStatusExpired:
+			mod = mod.Where("u.id IS NULL").Where("i.status", status)
+		}
 	}
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
-		mod = mod.Where("(code LIKE ? OR inviter_username LIKE ? OR inviter_nickname LIKE ? OR used_username LIKE ? OR registration_telegram_user_id LIKE ? OR registration_telegram_username LIKE ?)", like, like, like, like, like, like)
+		mod = mod.Where("(i.code LIKE ? OR i.inviter_username LIKE ? OR i.inviter_nickname LIKE ? OR COALESCE(u.used_username,i.used_username) LIKE ? OR i.registration_telegram_user_id LIKE ? OR i.registration_telegram_username LIKE ?)", like, like, like, like, like, like)
 	}
 	var rows []*inviteRow
-	if err = mod.Page(in.Page, perPage).OrderDesc("id").ScanAndCount(&rows, &totalCount, false); err != nil {
+	if err = mod.Page(in.Page, perPage).OrderDesc("COALESCE(u.used_at,i.created_at)").OrderDesc("i.id").ScanAndCount(&rows, &totalCount, false); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取邀请码列表失败")
 	}
 	if len(rows) == 0 {
@@ -121,14 +135,14 @@ func (s *sSysBot) CreateInviteCode(ctx context.Context, in *sysin.InviteCreateIn
 	if source == "" {
 		source = inviteSourceWeb
 	}
-	item, err := s.ensureInviteCode(ctx, account, source, in.ForceNew == 1 || source == inviteSourceBot)
+	item, err := s.ensureInviteCode(ctx, account, source)
 	if err != nil {
 		return nil, err
 	}
 	return item, nil
 }
 
-func (s *sSysBot) ensureInviteCode(ctx context.Context, account *publishsysin.AccountModel, source string, forceNew bool) (*sysin.InviteCreateModel, error) {
+func (s *sSysBot) ensureInviteCode(ctx context.Context, account *publishsysin.AccountModel, source string) (*sysin.InviteCreateModel, error) {
 	if account == nil || account.Id <= 0 {
 		return nil, gerror.New("账号信息不存在")
 	}
@@ -139,10 +153,10 @@ func (s *sSysBot) ensureInviteCode(ctx context.Context, account *publishsysin.Ac
 	if account.AccountType != publishsysin.PublishAccountTypeAdmin {
 		return nil, gerror.New("仅上架端管理员可生成邀请码")
 	}
-	if !forceNew && source == inviteSourceWeb {
-		if row, err := s.latestActiveInvite(ctx, account.Id, source); err == nil && row != nil {
-			return s.inviteCreateModel(ctx, row), nil
-		}
+	if row, err := s.latestActiveInvite(ctx, account.Id, source); err != nil {
+		return nil, err
+	} else if row != nil {
+		return s.inviteCreateModel(ctx, row), nil
 	}
 	expireDays := s.inviteExpireDays(ctx)
 	codeLength := s.inviteCodeLength(ctx)
@@ -151,15 +165,6 @@ func (s *sSysBot) ensureInviteCode(ctx context.Context, account *publishsysin.Ac
 	code, err := s.uniqueInviteCode(ctx, codeLength)
 	if err != nil {
 		return nil, err
-	}
-	if forceNew || source == inviteSourceBot {
-		_, _ = g.DB().Model(inviteTable).Safe().Ctx(ctx).
-			Where("inviter_app", sysin.BotAppApi).
-			Where("inviter_account_id", account.Id).
-			Where("source", source).
-			Where("status", inviteStatusActive).
-			WhereNull("deleted_at").
-			Data(g.Map{"status": inviteStatusExpired, "updated_at": now}).Update()
 	}
 	data := g.Map{
 		"code":               code,
@@ -222,7 +227,7 @@ func (s *sSysBot) latestActiveInvite(ctx context.Context, accountId int64, sourc
 	}
 	if row.ExpiresAt != nil && row.ExpiresAt.Before(gtime.Now()) {
 		_, _ = g.DB().Model(inviteTable).Safe().Ctx(ctx).Where("id", row.Id).Data(g.Map{"status": inviteStatusExpired, "updated_at": gtime.Now()}).Update()
-		row.Status = inviteStatusExpired
+		return nil, nil
 	}
 	return row, nil
 }
@@ -230,23 +235,13 @@ func (s *sSysBot) latestActiveInvite(ctx context.Context, accountId int64, sourc
 func (s *sSysBot) inviteCountStats(ctx context.Context, accountId int64) (inviteCount int, usedCount int) {
 	mod := g.DB().Model(inviteTable).Safe().Ctx(ctx).Where("inviter_app", sysin.BotAppApi).Where("inviter_account_id", accountId).WhereNull("deleted_at")
 	inviteCount, _ = mod.Clone().Count()
-	usedCount, _ = mod.Clone().Where("status", inviteStatusUsed).Count()
+	usedCount, _ = g.DB().Model(inviteUsageTable).Safe().Ctx(ctx).Where("inviter_app", sysin.BotAppApi).Where("inviter_account_id", accountId).WhereNull("deleted_at").Count()
 	return
 }
 
 func (s *sSysBot) inviteExpireDays(ctx context.Context) int {
-	value := strings.TrimSpace(s.featureConfigValue(ctx, inviteFeature{}.Key(), "expireDays"))
-	if value == "" {
-		return 7
-	}
-	n, err := strconv.Atoi(value)
-	if err != nil || n <= 0 {
-		return 7
-	}
-	if n > 365 {
-		return 365
-	}
-	return n
+	_ = ctx
+	return 7
 }
 
 func (s *sSysBot) inviteCodeLength(ctx context.Context) int {

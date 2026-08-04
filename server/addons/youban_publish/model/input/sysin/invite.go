@@ -61,7 +61,7 @@ type InviteModel struct {
 
 type InviteCreateInp struct {
 	Source   string `json:"source" dc:"来源:web/bot"`
-	ForceNew int    `json:"forceNew" dc:"是否强制生成新邀请码：1是 0否"`
+	ForceNew int    `json:"forceNew" dc:"兼容字段，7天有效期内复用现有邀请码"`
 }
 
 type InviteCreateModel struct {
