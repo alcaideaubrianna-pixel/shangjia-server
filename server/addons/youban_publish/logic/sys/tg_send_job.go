@@ -54,6 +54,9 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 	if targetJob.Status == "unknown" {
 		return s.reconcileUnknownTelegramJob(ctx, targetJob)
 	}
+	if isDownTelegramOperationNo(targetJob.OperationNo) {
+		return s.sendQueuedDownChannelTelegramJob(ctx, jobId)
+	}
 	waitingOrder, err := s.telegramChannelHasEarlierActiveJob(ctx, targetJob)
 	if err != nil {
 		return err

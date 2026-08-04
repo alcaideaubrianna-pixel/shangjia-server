@@ -262,8 +262,7 @@ func (s *sSysPublish) createDownChannelTelegramJob(ctx context.Context, job tele
 func (s *sSysPublish) sendDownChannelProfileLockedByChannel(ctx context.Context, job telegramJobRecord, channelId int64) error {
 	activeIds, err := s.activeDownProfileIds(ctx, []int64{job.ProfileId}, job.TenantId)
 	if err != nil {
-		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
-		return err
+		return s.handleDownChannelTelegramJobError(ctx, job, err)
 	}
 	if len(activeIds) == 0 {
 		_ = s.markTelegramJobSuperseded(ctx, job.Id)
@@ -272,57 +271,46 @@ func (s *sSysPublish) sendDownChannelProfileLockedByChannel(ctx context.Context,
 	}
 	botToken, err := s.telegramJobBotToken(ctx, job.BotId, job.TenantId)
 	if err != nil {
-		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
-		return err
+		return s.handleDownChannelTelegramJobError(ctx, job, err)
 	}
 	bot, err := s.telegramBot(ctx, botToken)
 	if err != nil {
-		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
-		return err
+		return s.handleDownChannelTelegramJobError(ctx, job, err)
 	}
 	caption, err := s.telegramJobCaption(ctx, job)
 	if err != nil {
-		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
-		return err
+		return s.handleDownChannelTelegramJobError(ctx, job, err)
 	}
 	displayMedia, err := s.telegramJobMedia(ctx, job, "display")
 	if err != nil {
-		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
-		return err
+		return s.handleDownChannelTelegramJobError(ctx, job, err)
 	}
 	displayMedia, err = s.selectTelegramDisplayMediaForTenant(ctx, job, displayMedia)
 	if err != nil {
-		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
-		return err
+		return s.handleDownChannelTelegramJobError(ctx, job, err)
 	}
 	verifyMedia, err := s.telegramJobMedia(ctx, job, "verify")
 	if err != nil {
-		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
-		return err
+		return s.handleDownChannelTelegramJobError(ctx, job, err)
 	}
 	caption, err = s.applyTelegramJobContentProtection(ctx, job, caption, displayMedia, verifyMedia)
 	if err != nil {
-		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
-		return err
+		return s.handleDownChannelTelegramJobError(ctx, job, err)
 	}
 	messages, err := s.sendTelegramDisplayPart(ctx, bot, job.TargetChatId, caption, displayMedia)
 	if err != nil {
-		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
-		return gerror.Wrapf(err, "推送下架频道展示资料失败，profile:%d，channel:%d", job.ProfileId, channelId)
+		return s.handleDownChannelTelegramJobError(ctx, job, gerror.Wrapf(err, "推送下架频道展示资料失败，profile:%d，channel:%d", job.ProfileId, channelId))
 	}
 	verifyMessages, err := s.sendTelegramVerifyPart(ctx, bot, job.TargetChatId, "", verifyMedia)
 	if err != nil {
-		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
-		return gerror.Wrapf(err, "推送下架频道验证资料失败，profile:%d，channel:%d", job.ProfileId, channelId)
+		return s.handleDownChannelTelegramJobError(ctx, job, gerror.Wrapf(err, "推送下架频道验证资料失败，profile:%d，channel:%d", job.ProfileId, channelId))
 	}
 	messages = append(messages, verifyMessages...)
 	if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
-		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
-		return err
+		return s.handleDownChannelTelegramJobError(ctx, job, err)
 	}
 	if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {
-		_ = s.markDownChannelTelegramJobFailed(ctx, job, err)
-		return err
+		return s.handleDownChannelTelegramJobError(ctx, job, err)
 	}
 	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
 		"status":          "sent",
@@ -334,18 +322,48 @@ func (s *sSysPublish) sendDownChannelProfileLockedByChannel(ctx context.Context,
 	return nil
 }
 
-func (s *sSysPublish) markDownChannelTelegramJobFailed(ctx context.Context, job telegramJobRecord, cause error) error {
-	message := ""
-	if cause != nil {
-		message = cause.Error()
+func (s *sSysPublish) sendQueuedDownChannelTelegramJob(ctx context.Context, jobId int64) error {
+	job, locked, err := s.lockTelegramJob(ctx, jobId)
+	if err != nil || !locked {
+		return err
 	}
-	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
-		"status":          "failed",
-		"dispatch_status": tgDispatchStatusDone,
-		"error_message":   message,
-		"updated_at":      gtime.Now(),
-	}).Update()
-	return err
+	return s.sendDownChannelProfileLockedByChannel(ctx, job, job.ChannelId)
+}
+
+func (s *sSysPublish) handleDownChannelTelegramJobError(ctx context.Context, job telegramJobRecord, cause error) error {
+	retryCount := job.RetryCount + 1
+	policy := telegramJobErrorRetryPolicy(cause, retryCount)
+	status := "failed_retry"
+	dispatchStatus := tgDispatchStatusIdle
+	var nextRetryAt interface{} = gtime.Now().Add(policy.RetryDelay)
+	if policy.Permanent {
+		status = "failed"
+		dispatchStatus = tgDispatchStatusDone
+		nextRetryAt = nil
+	}
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", job.Id).
+		Where("status", "sending").
+		Data(g.Map{
+			"status":          status,
+			"dispatch_status": dispatchStatus,
+			"retry_count":     retryCount,
+			"next_retry_at":   nextRetryAt,
+			"error_message":   policy.Message,
+			"updated_at":      gtime.Now(),
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "更新下架频道TG失败任务状态失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected > 0 {
+		s.appendTelegramJobLog(ctx, job, "down_notify", status, policy.Message)
+	}
+	return nil
+}
+
+func isDownTelegramOperationNo(operationNo string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(operationNo)), "down:")
 }
 
 func (s *sSysPublish) telegramDownChannels(ctx context.Context, tenantId int64) ([]telegramJobChannel, error) {
