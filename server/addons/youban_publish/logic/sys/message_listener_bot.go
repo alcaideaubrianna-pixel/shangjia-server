@@ -36,18 +36,18 @@ func (s *sSysPublish) bindListenerTargetByCode(ctx context.Context, code string,
 		return gerror.Wrap(err, "读取监听绑定ID失败")
 	}
 	if plan.Id <= 0 {
-		return s.replyListenerBindMessage(ctx, in.ChatId, "绑定ID不存在或已失效，请在页面重新获取。")
+		return s.replyListenerBindMessage(ctx, in.BotId, in.ChatId, "绑定ID不存在或已失效，请在页面重新获取。")
 	}
 	chatType := listenerBotChatType(in.ChatType)
 	if chatType == "" {
-		return s.replyListenerBindMessage(ctx, in.ChatId, "请将机器人添加到需要接收通知的群聊，并在群聊中发送绑定ID。")
+		return s.replyListenerBindMessage(ctx, in.BotId, in.ChatId, "请将机器人添加到需要接收通知的群聊，并在群聊中发送绑定ID。")
 	}
 	currentChatId := normalizeTelegramChannelChatID(in.ChatId)
 	if strings.TrimSpace(currentChatId) == "" {
 		return gerror.New("当前群聊或频道无效")
 	}
 	if strings.TrimSpace(plan.NotifyChatId) != "" {
-		return s.replyListenerBindMessage(ctx, in.ChatId, "当前监听计划已经绑定通知目标，如需更换请先在页面解绑。")
+		return s.replyListenerBindMessage(ctx, in.BotId, in.ChatId, "当前监听计划已经绑定通知目标，如需更换请先在页面解绑。")
 	}
 	currentChatTitle := firstNonEmpty(strings.TrimSpace(in.ChatTitle), currentChatId)
 	now := gtime.Now()
@@ -65,7 +65,7 @@ func (s *sSysPublish) bindListenerTargetByCode(ctx context.Context, code string,
 		return gerror.Wrap(err, "绑定通知目标失败")
 	}
 	text := "通知目标已绑定：" + telegramEscapeText(currentChatTitle)
-	return s.replyListenerBindMessage(ctx, in.ChatId, text)
+	return s.replyListenerBindMessage(ctx, in.BotId, in.ChatId, text)
 }
 
 func listenerBotChatType(chatType string) string {
@@ -79,19 +79,24 @@ func listenerBotChatType(chatType string) string {
 	}
 }
 
-func (s *sSysPublish) replyListenerBindMessage(ctx context.Context, chatId string, text string) error {
+func (s *sSysPublish) replyListenerBindMessage(ctx context.Context, botId int64, chatId string, text string) error {
 	chatId = normalizeTelegramChannelChatID(chatId)
 	if strings.TrimSpace(chatId) == "" {
 		return gerror.New("当前群聊或频道无效")
 	}
-	return botServiceNotify(ctx, chatId, text)
+	return botServiceNotify(ctx, botId, chatId, text)
 }
 
-func botServiceNotify(ctx context.Context, chatId string, text string) error {
-	return botService.SysBot().Notify(ctx, &botsysin.NotifyInp{
+func botServiceNotify(ctx context.Context, botId int64, chatId string, text string) error {
+	return botService.SysBot().Notify(ctx, listenerBotNotifyInput(botId, chatId, text))
+}
+
+func listenerBotNotifyInput(botId int64, chatId string, text string) *botsysin.NotifyInp {
+	return &botsysin.NotifyInp{
+		BotId:         botId,
 		ChatId:        chatId,
 		Text:          text,
 		ParseMode:     "HTML",
 		DisableNotice: false,
-	})
+	}
 }
