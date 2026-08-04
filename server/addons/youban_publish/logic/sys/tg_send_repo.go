@@ -194,9 +194,10 @@ func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegram
 			"tg_file_id":     item.TgFileId,
 			"status":         "sent",
 			"sent_at":        now,
+			"deleted_at":     nil,
 			"created_at":     now,
 			"updated_at":     now,
-		}).Insert()
+		}).OnConflict("job_id,tg_message_id").OnDuplicate("status,sent_at,deleted_at,updated_at").Save()
 		if err != nil {
 			return gerror.Wrap(err, "保存TG消息记录失败")
 		}

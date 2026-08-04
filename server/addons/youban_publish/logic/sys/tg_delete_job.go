@@ -39,12 +39,16 @@ func (s *sSysPublish) telegramJobById(ctx context.Context, jobId int64) (telegra
 	return job, nil
 }
 
-func (s *sSysPublish) telegramJobActiveMessages(ctx context.Context, job telegramJobRecord) ([]telegramDeleteMessage, error) {
+func (s *sSysPublish) telegramJobActiveMessages(ctx context.Context, job telegramJobRecord, purpose ...string) ([]telegramDeleteMessage, error) {
 	var rows []telegramDeleteMessage
-	err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+	mod := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
 		Fields("id,target_chat_id,tg_message_id AS message_id").
 		Where("job_id", job.Id).
-		Where("status", "sent").
+		Where("status", "sent")
+	if len(purpose) > 0 && strings.TrimSpace(purpose[0]) != "" {
+		mod = mod.Where("purpose", strings.TrimSpace(purpose[0]))
+	}
+	err := mod.
 		OrderAsc("id").
 		Scan(&rows)
 	if err != nil {

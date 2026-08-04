@@ -710,3 +710,5 @@ ALTER TABLE `hg_youban_publish_media` ALTER COLUMN `must_send` SET DEFAULT '0';
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tenant_feature_permission` (`id` bigint unsigned NOT NULL AUTO_INCREMENT,`tenant_id` bigint NOT NULL DEFAULT '0',`feature_code` varchar(64) NOT NULL DEFAULT '',`status` tinyint NOT NULL DEFAULT '2',`created_at` datetime DEFAULT NULL,`updated_at` datetime DEFAULT NULL,PRIMARY KEY (`id`),UNIQUE KEY `uk_ybp_tenant_feature` (`tenant_id`,`feature_code`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `send_phase` varchar(32) NOT NULL DEFAULT '' COMMENT '发送阶段' AFTER `dispatch_count`;
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `reconcile_count` int(11) NOT NULL DEFAULT '0' COMMENT '对账次数' AFTER `send_phase`;
+DELETE older FROM `hg_youban_publish_tg_message` older INNER JOIN `hg_youban_publish_tg_message` newer ON older.`job_id` = newer.`job_id` AND older.`tg_message_id` = newer.`tg_message_id` AND older.`id` < newer.`id`;
+ALTER TABLE `hg_youban_publish_tg_message` ADD UNIQUE INDEX `uk_ybp_tg_message_job_message` (`job_id`,`tg_message_id`);

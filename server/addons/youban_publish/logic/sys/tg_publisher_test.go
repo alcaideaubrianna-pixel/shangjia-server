@@ -110,3 +110,15 @@ func TestTelegramInvalidReusableFileError(t *testing.T) {
 		t.Fatal("network timeout must not trigger immediate upload retry")
 	}
 }
+
+func TestTelegramMediaUsesReusableFileId(t *testing.T) {
+	if !telegramMediaUsesReusableFileId(&telegramMediaItem{MediaType: "video", TgFileId: "BAAC-cached"}) {
+		t.Fatal("cached Telegram video should skip local thumbnail generation")
+	}
+	if telegramMediaUsesReusableFileId(&telegramMediaItem{MediaType: "video", TgFileId: "copy:-1001:20"}) {
+		t.Fatal("copy references are not reusable Bot API file_id values")
+	}
+	if telegramMediaUsesReusableFileId(&telegramMediaItem{MediaType: "video", TgFileId: "BAAC-cached", AntiScanEnabled: true}) {
+		t.Fatal("anti-scan video must upload regenerated media")
+	}
+}

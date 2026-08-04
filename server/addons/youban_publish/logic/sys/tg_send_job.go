@@ -16,7 +16,10 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
-var errTelegramJobSuperseded = errors.New("TG推送任务已废弃")
+var (
+	errTelegramJobSuperseded     = errors.New("TG推送任务已废弃")
+	errTelegramDeliveryUncertain = errors.New("Telegram发送结果待对账")
+)
 
 func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 	targetJob, err := s.telegramJobById(ctx, jobId)
@@ -44,6 +47,10 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 		return nil
 	}
 	defer s.releaseTelegramChannelLease(ctx, lease)
+	targetJob, err = s.telegramJobById(ctx, jobId)
+	if err != nil {
+		return err
+	}
 	if targetJob.Status == "unknown" {
 		return s.reconcileUnknownTelegramJob(ctx, targetJob)
 	}
@@ -97,10 +104,16 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 	if err = s.sendLockedTelegramJob(ctx, job); err != nil {
 		return s.handleTelegramJobError(ctx, job, err)
 	}
-	return s.completeTelegramJob(ctx, job)
+	if err = s.completeTelegramJob(ctx, job); err != nil {
+		return s.handleTelegramJobError(ctx, job, gerror.Wrap(err, "完成TG推送任务失败"))
+	}
+	return nil
 }
 
 func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJobRecord) error {
+	if job.SendPhase == telegramSendPhaseVerifyConfirmed {
+		return nil
+	}
 	job.TargetChatId = normalizeTelegramChannelChatID(job.TargetChatId)
 	if strings.TrimSpace(job.TargetChatId) == "" {
 		return gerror.New("TG目标频道未配置")
@@ -138,45 +151,64 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	}
 	messages := make([]*telegramSentMessage, 0)
 	if !telegramSendPhaseHasDisplay(job.SendPhase) {
-		_ = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplaySending)
+		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplaySending); err != nil {
+			return err
+		}
 		messages, err = s.sendTelegramDisplayPart(ctx, bot, job.TargetChatId, telegramCaptionWithJobMarker(caption, job.Id, "display"), displayMedia)
 		if err != nil {
-			s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "展示资料分片推送失败")
+			_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "展示资料分片推送失败")
 			return gerror.Wrapf(err, "TG展示资料推送失败，job:%d，channel:%d，chat:%s", job.Id, job.ChannelId, job.TargetChatId)
 		}
 		if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
-			return err
+			return telegramDeliveryUncertainError(err)
 		}
-		_ = s.updateTelegramMediaFileIds(ctx, messages)
-		_ = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplayConfirmed)
+		if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {
+			g.Log().Warningf(ctx, "更新TG展示媒体file_id失败 job:%d err:%+v", job.Id, err)
+		}
+		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplayConfirmed); err != nil {
+			return telegramDeliveryUncertainError(err)
+		}
+		job.SendPhase = telegramSendPhaseDisplayConfirmed
 	}
 	if stillSending, err := s.telegramJobStillSending(ctx, job.Id); err != nil {
 		return err
 	} else if !stillSending {
-		_ = s.saveTelegramSentMessages(ctx, job, messages)
-		_ = s.updateTelegramMediaFileIds(ctx, messages)
 		s.appendTelegramJobLog(ctx, job, "publish", "superseded", "TG展示资料已发送但任务已废弃，停止推送验证资料")
 		return errTelegramJobSuperseded
 	}
-	_ = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifySending)
+	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifySending); err != nil {
+		return err
+	}
 	verifyMessages, err := s.sendTelegramVerifyPart(ctx, bot, job.TargetChatId, telegramCaptionWithJobMarker("", job.Id, "verify"), verifyMedia)
 	if err != nil {
 		if !isTelegramAmbiguousDeliveryError(err) {
-			s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "验证资料推送失败，清理已发送展示资料")
-			_ = s.updateTelegramJobSendPhase(ctx, job.Id, "")
+			if len(verifyMessages) > 0 {
+				if saveErr := s.saveTelegramSentMessages(ctx, job, verifyMessages); saveErr != nil {
+					return telegramDeliveryUncertainError(saveErr)
+				}
+			}
+			if cleanupErr := s.deleteTelegramMessageSetLockedByChannel(ctx, job, "验证资料推送失败，清理本次已发送消息"); cleanupErr != nil {
+				return cleanupErr
+			}
+			if phaseErr := s.updateTelegramJobSendPhase(ctx, job.Id, ""); phaseErr != nil {
+				return phaseErr
+			}
 		}
 		return gerror.Wrapf(err, "TG验证资料推送失败，job:%d，channel:%d，chat:%s", job.Id, job.ChannelId, job.TargetChatId)
 	}
 	if err = s.saveTelegramSentMessages(ctx, job, verifyMessages); err != nil {
-		return err
+		return telegramDeliveryUncertainError(err)
 	}
-	_ = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifyConfirmed)
+	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifyConfirmed); err != nil {
+		return telegramDeliveryUncertainError(err)
+	}
 	return s.updateTelegramMediaFileIds(ctx, verifyMessages)
 }
 
-func (s *sSysPublish) cleanupTelegramSentMessages(ctx context.Context, bot *tgbot.Bot, chatId string, messages []*telegramSentMessage, reason string) {
+func (s *sSysPublish) cleanupTelegramSentMessages(ctx context.Context, bot *tgbot.Bot, chatId string, messages []*telegramSentMessage, reason string) []int64 {
+	deletedIds := make([]int64, 0, len(messages))
 	if bot == nil || len(messages) == 0 {
-		return
+		return deletedIds
 	}
 	chatId = normalizeTelegramChannelChatID(chatId)
 	for _, item := range messages {
@@ -185,12 +217,16 @@ func (s *sSysPublish) cleanupTelegramSentMessages(ctx context.Context, bot *tgbo
 		}
 		if _, err := bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{ChatID: chatId, MessageID: int(item.MessageId)}); err != nil {
 			if isTelegramMessageAlreadyDeletedError(err) {
+				deletedIds = append(deletedIds, item.MessageId)
 				g.Log().Infof(ctx, "清理TG半组消息跳过，消息已不存在 chat:%s message:%d reason:%s", chatId, item.MessageId, reason)
 				continue
 			}
 			g.Log().Warningf(ctx, "清理TG半组消息失败 chat:%s message:%d reason:%s err:%+v", chatId, item.MessageId, reason, err)
+			continue
 		}
+		deletedIds = append(deletedIds, item.MessageId)
 	}
+	return deletedIds
 }
 
 func (s *sSysPublish) sendTelegramDisplayPart(ctx context.Context, bot *tgbot.Bot, chatId string, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
@@ -248,7 +284,7 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	if !policy.Permanent {
 		nextRetryAt = gtime.Now().Add(policy.RetryDelay)
 	}
-	_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Data(g.Map{
+	result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "sending").Data(g.Map{
 		"status":          status,
 		"dispatch_status": tgDispatchStatusIdle,
 		"retry_count":     retryCount,
@@ -256,6 +292,13 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 		"error_message":   message,
 		"updated_at":      gtime.Now(),
 	}).Update()
+	if updateErr != nil {
+		return gerror.Wrap(updateErr, "更新TG失败任务状态失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil
+	}
 	if recordErr := s.upsertPublishJobRecord(ctx, job, status, message); recordErr != nil {
 		g.Log().Warningf(ctx, "更新发布失败记录失败 jobId:%d status:%s err:%+v", job.Id, status, recordErr)
 	}

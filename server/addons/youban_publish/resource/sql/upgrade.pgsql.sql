@@ -720,3 +720,5 @@ ALTER TABLE "hg_youban_publish_media" ALTER COLUMN "must_send" SET DEFAULT 0;
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tenant_feature_permission" ("id" BIGSERIAL PRIMARY KEY,"tenant_id" bigint NOT NULL DEFAULT 0,"feature_code" varchar(64) NOT NULL DEFAULT '',"status" smallint NOT NULL DEFAULT 2,"created_at" timestamp DEFAULT NULL,"updated_at" timestamp DEFAULT NULL,UNIQUE("tenant_id","feature_code"));
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "send_phase" varchar(32) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "reconcile_count" integer NOT NULL DEFAULT 0;
+DELETE FROM "hg_youban_publish_tg_message" older USING "hg_youban_publish_tg_message" newer WHERE older."job_id" = newer."job_id" AND older."tg_message_id" = newer."tg_message_id" AND older."id" < newer."id";
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_message_job_message" ON "hg_youban_publish_tg_message" ("job_id", "tg_message_id");

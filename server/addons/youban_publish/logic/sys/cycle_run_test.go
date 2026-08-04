@@ -66,13 +66,35 @@ func TestProfileCycleOverdueSpreadDistribution(t *testing.T) {
 	buckets := make(map[int]struct{})
 	for profileId := int64(1); profileId <= 1000; profileId++ {
 		next := profileCycleOverdueAt(now, profileId, 57)
-		if next.Before(now) || next.After(now.Add(5*time.Hour)) {
+		if next.Before(now) || next.After(now.Add(profileCycleOverdueSpreadWindow)) {
 			t.Fatalf("profile %d spread out of range: %v", profileId, next)
 		}
 		buckets[int(next.Sub(now).Minutes()/30)] = struct{}{}
 	}
 	if len(buckets) < 8 {
 		t.Fatalf("cycle spread is too concentrated, buckets=%d", len(buckets))
+	}
+}
+
+func TestNextProfileCycleAtIncludesStableSpread(t *testing.T) {
+	base := gtime.New(time.Date(2026, 8, 4, 13, 0, 0, 0, time.UTC))
+	first := calculateScheduledProfileCycleAt(3, "09:00", base, 123, 57, false)
+	second := calculateScheduledProfileCycleAt(3, "09:00", base, 123, 57, false)
+	nominal := gtime.New(time.Date(2026, 8, 7, 9, 0, 0, 0, time.UTC))
+	if first == nil || !first.Equal(second) {
+		t.Fatalf("normal cycle spread must be deterministic: %v %v", first, second)
+	}
+	if first.Before(nominal) || first.After(nominal.Add(profileCycleOverdueSpreadWindow)) {
+		t.Fatalf("normal cycle spread out of range: %v", first)
+	}
+}
+
+func TestNextProfileCycleAtDevelopSpread(t *testing.T) {
+	base := gtime.New(time.Date(2026, 8, 4, 13, 0, 0, 0, time.UTC))
+	next := calculateScheduledProfileCycleAt(300, "09:00", base, 123, 57, true)
+	nominal := base.Add(300 * time.Second)
+	if next.Before(nominal) || next.After(nominal.Add(profileCycleDevelopSpreadWindow)) {
+		t.Fatalf("develop cycle spread out of range: %v", next)
 	}
 }
 

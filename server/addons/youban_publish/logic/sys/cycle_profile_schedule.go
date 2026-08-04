@@ -23,7 +23,8 @@ const (
 	profileCycleClaimLease          = 2 * time.Hour
 	profileCycleRetryDelay          = time.Hour
 	profileCycleRescheduleBatchSize = 500
-	profileCycleOverdueSpreadWindow = 5 * time.Hour
+	profileCycleOverdueSpreadWindow = 4 * time.Hour
+	profileCycleDevelopSpreadWindow = 5 * time.Minute
 	profileCycleSummaryRefreshDelay = 30 * time.Second
 )
 
@@ -91,7 +92,7 @@ func (s *sSysPublish) syncTelegramJobCycleSchedule(ctx context.Context, job tele
 	}
 	if profileCycleChannelUsable(config) {
 		data["cycle_enabled"] = 1
-		data["next_cycle_at"] = nextProfileCycleAt(ctx, config.Days, config.PublishTime, job.SentAt)
+		data["next_cycle_at"] = nextProfileCycleAt(ctx, config.Days, config.PublishTime, job.SentAt, job.ProfileId, job.ChannelId)
 	}
 	if _, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).WhereIn("status", []string{"sent", "superseded"}).Data(data).Update(); err != nil {
@@ -134,8 +135,23 @@ func sameProfileCycleConfig(first, second profileCycleChannelConfig) bool {
 		strings.TrimSpace(first.PublishTime) == strings.TrimSpace(second.PublishTime)
 }
 
-func nextProfileCycleAt(ctx context.Context, days int, publishTime string, sentAt *gtime.Time) *gtime.Time {
-	return calculateProfileCycleAt(days, publishTime, sentAt, isDevelopMode(ctx))
+func nextProfileCycleAt(ctx context.Context, days int, publishTime string, sentAt *gtime.Time, profileId, channelId int64) *gtime.Time {
+	return calculateScheduledProfileCycleAt(days, publishTime, sentAt, profileId, channelId, isDevelopMode(ctx))
+}
+
+func calculateScheduledProfileCycleAt(days int, publishTime string, sentAt *gtime.Time, profileId, channelId int64, develop bool) *gtime.Time {
+	next := calculateProfileCycleAt(days, publishTime, sentAt, develop)
+	if next == nil {
+		return nil
+	}
+	if _, _, ok := parseCycleClock(publishTime); !ok {
+		return next
+	}
+	window := profileCycleOverdueSpreadWindow
+	if develop {
+		window = profileCycleDevelopSpreadWindow
+	}
+	return next.Add(profileCycleSpreadOffset(profileId, channelId, window))
 }
 
 func calculateProfileCycleAt(days int, publishTime string, sentAt *gtime.Time, develop bool) *gtime.Time {
@@ -158,15 +174,16 @@ func profileCycleOverdueAt(now *gtime.Time, profileId, channelId int64) *gtime.T
 	if now == nil {
 		now = gtime.Now()
 	}
-	spreadSeconds := int64(profileCycleOverdueSpreadWindow / time.Second)
+	return now.Add(profileCycleSpreadOffset(profileId, channelId, profileCycleOverdueSpreadWindow))
+}
+
+func profileCycleSpreadOffset(profileId, channelId int64, window time.Duration) time.Duration {
+	spreadSeconds := uint64(window / time.Second)
 	if spreadSeconds <= 0 {
-		return now
+		return 0
 	}
-	offset := int64((uint64(profileId)*11400714819323198485 + uint64(channelId)*14029467366897019727) % uint64(spreadSeconds))
-	if offset < 0 {
-		offset = -offset
-	}
-	return now.Add(time.Duration(offset) * time.Second)
+	offset := (uint64(profileId)*11400714819323198485 + uint64(channelId)*14029467366897019727) % spreadSeconds
+	return time.Duration(offset) * time.Second
 }
 
 func (s *sSysPublish) rescheduleChannelProfileCycles(ctx context.Context, channelId int64) error {
@@ -252,7 +269,7 @@ func (s *sSysPublish) updateProfileCycleRescheduleBatch(ctx context.Context, con
 	args := make([]any, 0, 5+len(rows)*3)
 	args = append(args, defaultCycleDays(config.Days), strings.TrimSpace(config.PublishTime))
 	for _, row := range rows {
-		nextAt := nextProfileCycleAt(ctx, config.Days, config.PublishTime, row.SentAt)
+		nextAt := nextProfileCycleAt(ctx, config.Days, config.PublishTime, row.SentAt, row.ProfileId, config.Id)
 		if nextAt == nil || !nextAt.After(now) {
 			nextAt = profileCycleOverdueAt(now, row.ProfileId, config.Id)
 		}
@@ -406,7 +423,7 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		return false, s.disableProfileCycleJob(ctx, row.JobId, "频道循环配置已关闭")
 	}
 	if row.CycleDays != defaultCycleDays(config.Days) || strings.TrimSpace(row.CyclePublishTime) != strings.TrimSpace(config.PublishTime) {
-		nextAt := nextProfileCycleAt(ctx, config.Days, config.PublishTime, row.SentAt)
+		nextAt := nextProfileCycleAt(ctx, config.Days, config.PublishTime, row.SentAt, row.ProfileId, row.ChannelId)
 		if nextAt == nil || !nextAt.After(gtime.Now()) {
 			nextAt = profileCycleOverdueAt(gtime.Now(), row.ProfileId, row.ChannelId)
 		}

@@ -28,11 +28,17 @@ func TestTelegramAmbiguousDeliveryError(t *testing.T) {
 	if isTelegramAmbiguousDeliveryError(errors.New("Bad Request: chat not found")) {
 		t.Fatal("permanent API errors must not enter reconciliation")
 	}
+	if !isTelegramAmbiguousDeliveryError(telegramDeliveryUncertainError(errors.New("保存消息记录失败"))) {
+		t.Fatal("post-delivery persistence errors must enter reconciliation")
+	}
 }
 
 func TestTelegramSendPhaseHasDisplay(t *testing.T) {
 	if !telegramSendPhaseHasDisplay(telegramSendPhaseVerifySending) {
 		t.Fatal("verify phase must not resend display media")
+	}
+	if !telegramSendPhaseHasDisplay(telegramSendPhaseVerifyConfirmed) {
+		t.Fatal("confirmed verify phase must never resend display media")
 	}
 	if telegramSendPhaseHasDisplay(telegramSendPhaseDisplaySending) {
 		t.Fatal("unconfirmed display phase must be reconciled before reuse")

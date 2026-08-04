@@ -23,6 +23,18 @@ func (s *sSysPublish) deleteTelegramMessageSetLockedByChannel(ctx context.Contex
 	if err != nil {
 		return err
 	}
+	return s.deleteTelegramMessagesLockedByChannel(ctx, job, messages, reason)
+}
+
+func (s *sSysPublish) deleteTelegramMessagePurposeSetLockedByChannel(ctx context.Context, job telegramJobRecord, purpose string, reason string) error {
+	messages, err := s.telegramJobActiveMessages(ctx, job, purpose)
+	if err != nil {
+		return err
+	}
+	return s.deleteTelegramMessagesLockedByChannel(ctx, job, messages, reason)
+}
+
+func (s *sSysPublish) deleteTelegramMessagesLockedByChannel(ctx context.Context, job telegramJobRecord, messages []telegramDeleteMessage, reason string) error {
 	if len(messages) == 0 {
 		s.appendTelegramJobLog(ctx, job, "delete", "skipped", reason+"，未找到可删除的TG消息")
 		return nil

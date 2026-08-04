@@ -1184,6 +1184,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_message` (
   `sent_at` datetime DEFAULT NULL COMMENT '发送时间', `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间', `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_tg_message_job_message` (`job_id`,`tg_message_id`),
   KEY `idx_ybp_tg_message_job` (`job_id`,`status`,`id`),
   KEY `idx_ybp_tg_message_task` (`task_id`,`id`),
   KEY `idx_ybp_tg_message_profile` (`tenant_id`,`account_id`,`profile_id`)

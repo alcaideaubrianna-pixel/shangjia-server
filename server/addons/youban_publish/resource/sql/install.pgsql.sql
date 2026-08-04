@@ -791,6 +791,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_message" (
   "created_at" timestamp DEFAULT NULL,
   "updated_at" timestamp DEFAULT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_message_job_message" ON "hg_youban_publish_tg_message" ("job_id", "tg_message_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_job" ON "hg_youban_publish_tg_message" ("job_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_task" ON "hg_youban_publish_tg_message" ("task_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_profile" ON "hg_youban_publish_tg_message" ("tenant_id", "account_id", "profile_id");

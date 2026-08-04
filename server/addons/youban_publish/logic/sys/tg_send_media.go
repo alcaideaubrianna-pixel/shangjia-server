@@ -25,6 +25,9 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		return nil, nil
 	}
 	s.prepareTelegramMediaItemsForSend(ctx, media)
+	if strings.TrimSpace(caption) != "" && telegramMediaSetHasCopyRef(media) {
+		media = telegramMediaSetWithoutTgFileId(media)
+	}
 	if len(media) == 1 {
 		return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0])
 	}
@@ -59,7 +62,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 	allMessages := make([]*telegramSentMessage, 0, len(media))
 	for chunkIndex, chunk := range splitTelegramMediaItems(media, telegramMediaGroupMaxItems) {
 		chunkCaption := ""
-		if chunkIndex == 0 {
+		if chunkIndex == 0 || purpose == "verify" {
 			chunkCaption = caption
 		}
 		group, closers, err := s.telegramInputMediaGroup(ctx, chunk, chunkCaption)
@@ -103,7 +106,11 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 	}
 	switch media.MediaType {
 	case "video":
-		thumbnail, thumbnailCloser, err := telegramVideoThumbnail(ctx, media)
+		var thumbnail models.InputFile
+		var thumbnailCloser io.Closer
+		if !telegramMediaUsesReusableFileId(media) {
+			thumbnail, thumbnailCloser, err = telegramVideoThumbnail(ctx, media)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -311,13 +318,18 @@ func (s *sSysPublish) telegramInputMediaGroup(ctx context.Context, media []*tele
 			itemCaption = caption
 		}
 		if item.MediaType == "video" {
-			thumbnail, thumbnailCloser, err := telegramVideoThumbnail(ctx, item)
-			if err != nil {
-				closeTelegramMediaFiles(closers)
-				return nil, nil, err
-			}
-			if thumbnailCloser != nil {
-				closers = append(closers, thumbnailCloser)
+			var thumbnail models.InputFile
+			if !telegramMediaUsesReusableFileId(item) {
+				var thumbnailCloser io.Closer
+				var thumbErr error
+				thumbnail, thumbnailCloser, thumbErr = telegramVideoThumbnail(ctx, item)
+				if thumbErr != nil {
+					closeTelegramMediaFiles(closers)
+					return nil, nil, thumbErr
+				}
+				if thumbnailCloser != nil {
+					closers = append(closers, thumbnailCloser)
+				}
 			}
 			video := &models.InputMediaVideo{Media: source, Thumbnail: thumbnail, Caption: itemCaption, ParseMode: telegramMediaParseMode(itemCaption), SupportsStreaming: true, MediaAttachment: attachment}
 			applyTelegramInputMediaVideoMeta(video, s.telegramVideoMeta(ctx, item))
@@ -401,6 +413,18 @@ func telegramMediaSetHasReusableFileId(media []*telegramMediaItem) bool {
 		}
 	}
 	return false
+}
+
+func telegramMediaUsesReusableFileId(media *telegramMediaItem) bool {
+	if media == nil || telegramMediaRequiresSanitizedUpload(media) {
+		return false
+	}
+	fileId := strings.TrimSpace(media.TgFileId)
+	if fileId == "" {
+		return false
+	}
+	_, copyRef := telegramCopyMediaRefFromFileId(fileId)
+	return !copyRef
 }
 
 func isTelegramInvalidReusableFileError(err error) bool {

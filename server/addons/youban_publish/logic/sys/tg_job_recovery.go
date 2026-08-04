@@ -19,7 +19,7 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 	}
 	now := gtime.Now()
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereIn("status", []string{"pending", "failed_retry"}).
+		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
 		Data(g.Map{
 			"dispatch_status":     tgDispatchStatusIdle,
@@ -102,15 +102,26 @@ func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit
 
 func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job telegramJobRecord) error {
 	now := gtime.Now()
+	status := "failed_retry"
+	message := "TG推送任务长时间处于发送中，已自动重新投递"
+	nextRetryAt := any(nil)
+	reconcileCount := job.ReconcileCount
+	if job.SendPhase == telegramSendPhaseDisplaySending || job.SendPhase == telegramSendPhaseVerifySending {
+		status = "unknown"
+		message = "服务中断时TG发送结果不确定，已进入频道消息对账"
+		nextRetryAt = now.Add(telegramUnknownReconcileDelay)
+		reconcileCount = 0
+	}
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
 		Where("status", "sending").
 		WhereLTE("updated_at", now.Add(-telegramSendingJobRecoverAfter)).
 		Data(g.Map{
-			"status":          "failed_retry",
+			"status":          status,
 			"dispatch_status": tgDispatchStatusIdle,
-			"next_retry_at":   nil,
-			"error_message":   "TG推送任务长时间处于发送中，已自动重新投递",
+			"next_retry_at":   nextRetryAt,
+			"error_message":   message,
+			"reconcile_count": reconcileCount,
 			"updated_at":      now,
 		}).
 		Update()
@@ -121,7 +132,7 @@ func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job te
 	if affected == 0 {
 		return nil
 	}
-	s.appendTelegramJobLog(ctx, job, "publish", "requeued", "TG推送任务长时间处于发送中，已自动重新投递")
+	s.appendTelegramJobLog(ctx, job, "publish", status, message)
 	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPending); err != nil {
 		return err
 	}
