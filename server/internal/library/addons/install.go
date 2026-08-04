@@ -62,7 +62,7 @@ func Install(m Module) (err error) {
 		dao.SysAddonsInstall.Columns().Version: m.GetSkeleton().Version,
 		dao.SysAddonsInstall.Columns().Status:  consts.AddonsInstallStatusOk,
 	}
-	return g.DB().Transaction(m.Ctx(), func(ctx context.Context, tx gdb.TX) error {
+	err = g.DB().Transaction(m.Ctx(), func(ctx context.Context, tx gdb.TX) error {
 		if record != nil {
 			_, _ = GetModel(ctx).Where(dao.SysAddonsInstall.Columns().Id, record.Id).Delete()
 		}
@@ -72,6 +72,10 @@ func Install(m Module) (err error) {
 		}
 		return m.Install(ctx)
 	})
+	if err != nil {
+		return err
+	}
+	return clearTableFieldsCache(m.Ctx())
 }
 
 // Upgrade 更新模块
@@ -88,12 +92,16 @@ func Upgrade(m Module) (err error) {
 	data := g.Map{
 		dao.SysAddonsInstall.Columns().Version: m.GetSkeleton().Version,
 	}
-	return g.DB().Transaction(m.Ctx(), func(ctx context.Context, tx gdb.TX) error {
+	err = g.DB().Transaction(m.Ctx(), func(ctx context.Context, tx gdb.TX) error {
 		if _, err = GetModel(ctx).Where(dao.SysAddonsInstall.Columns().Id, record.Id).Data(data).Update(); err != nil {
 			return err
 		}
 		return m.Upgrade(ctx)
 	})
+	if err != nil {
+		return err
+	}
+	return clearTableFieldsCache(m.Ctx())
 }
 
 // UnInstall 卸载模块
@@ -111,10 +119,21 @@ func UnInstall(m Module) (err error) {
 		dao.SysAddonsInstall.Columns().Version: m.GetSkeleton().Version,
 		dao.SysAddonsInstall.Columns().Status:  consts.AddonsInstallStatusUn,
 	}
-	return g.DB().Transaction(m.Ctx(), func(ctx context.Context, tx gdb.TX) error {
+	err = g.DB().Transaction(m.Ctx(), func(ctx context.Context, tx gdb.TX) error {
 		if _, err = GetModel(ctx).Where(dao.SysAddonsInstall.Columns().Id, record.Id).Data(data).Update(); err != nil {
 			return err
 		}
 		return m.UnInstall(ctx)
 	})
+	if err != nil {
+		return err
+	}
+	return clearTableFieldsCache(m.Ctx())
+}
+
+func clearTableFieldsCache(ctx context.Context) error {
+	if err := g.DB().GetCore().ClearTableFieldsAll(ctx); err != nil {
+		return gerror.Wrap(err, "刷新数据库表结构缓存失败")
+	}
+	return nil
 }

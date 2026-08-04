@@ -56,6 +56,10 @@ func (s *sSysBot) ResolveCustomEmojis(ctx context.Context, in *sysin.CustomEmoji
 	}
 	if len(missing) > 0 {
 		if err = s.resolveMissingCustomEmojis(ctx, missing); err != nil {
+			if isIgnorableTelegramError(err) {
+				g.Log().Warningf(ctx, "Telegram自定义Emoji读取暂时不可用，返回已有缓存 emojiIds:%v err:%+v", missing, err)
+				return orderedCustomEmojiModels(in.EmojiIds, resolved), nil
+			}
 			return nil, err
 		}
 		refreshed, _, refreshErr := s.cachedCustomEmojis(ctx, missing)
@@ -66,13 +70,17 @@ func (s *sSysBot) ResolveCustomEmojis(ctx context.Context, in *sysin.CustomEmoji
 			resolved[emojiId] = item
 		}
 	}
+	return orderedCustomEmojiModels(in.EmojiIds, resolved), nil
+}
+
+func orderedCustomEmojiModels(emojiIds []string, resolved map[string]*sysin.CustomEmojiModel) []*sysin.CustomEmojiModel {
 	list := make([]*sysin.CustomEmojiModel, 0, len(resolved))
-	for _, emojiId := range in.EmojiIds {
+	for _, emojiId := range emojiIds {
 		if item := resolved[emojiId]; item != nil {
 			list = append(list, item)
 		}
 	}
-	return list, nil
+	return list
 }
 
 func (s *sSysBot) cachedCustomEmojis(ctx context.Context, emojiIds []string) (map[string]*sysin.CustomEmojiModel, []string, error) {
@@ -137,9 +145,11 @@ func (s *sSysBot) resolveMissingCustomEmojis(ctx context.Context, emojiIds []str
 	if err != nil {
 		return err
 	}
-	callCtx, cancel := telegramAPICtx()
-	stickers, err := bot.GetCustomEmojiStickers(callCtx, &tgbot.GetCustomEmojiStickersParams{CustomEmojiIDs: missing})
-	cancel()
+	stickers, err := retryTelegramTransient(ctx, "读取Telegram自定义Emoji", 3, func() ([]*models.Sticker, error) {
+		callCtx, cancel := telegramAPICtx()
+		defer cancel()
+		return bot.GetCustomEmojiStickers(callCtx, &tgbot.GetCustomEmojiStickersParams{CustomEmojiIDs: missing})
+	})
 	if err != nil {
 		return gerror.Wrap(err, "读取Telegram自定义Emoji失败")
 	}
@@ -153,7 +163,6 @@ func (s *sSysBot) resolveMissingCustomEmojis(ctx context.Context, emojiIds []str
 		item, persistErr := s.persistCustomEmoji(ctx, bot, token, sticker)
 		if persistErr != nil {
 			g.Log().Warning(ctx, "缓存Telegram自定义Emoji失败", g.Map{"emojiId": emojiId, "err": persistErr})
-			_ = cache.Instance().Set(ctx, customEmojiMissCacheKey(emojiId), 1, customEmojiMissCacheTTL)
 			continue
 		}
 		_ = cache.Instance().Set(ctx, customEmojiCacheKey(emojiId), item, customEmojiCacheTTL)
@@ -168,16 +177,20 @@ func (s *sSysBot) resolveMissingCustomEmojis(ctx context.Context, emojiIds []str
 }
 
 func (s *sSysBot) persistCustomEmoji(ctx context.Context, bot *tgbot.Bot, token string, sticker *models.Sticker) (*sysin.CustomEmojiModel, error) {
-	callCtx, cancel := telegramAPICtx()
-	file, err := bot.GetFile(callCtx, &tgbot.GetFileParams{FileID: sticker.FileID})
-	cancel()
+	file, err := retryTelegramTransient(ctx, "读取Telegram自定义Emoji文件", 3, func() (*models.File, error) {
+		callCtx, cancel := telegramAPICtx()
+		defer cancel()
+		return bot.GetFile(callCtx, &tgbot.GetFileParams{FileID: sticker.FileID})
+	})
 	if err != nil {
 		return nil, err
 	}
 	if file == nil || strings.TrimSpace(file.FilePath) == "" {
 		return nil, gerror.New("Telegram自定义Emoji文件地址为空")
 	}
-	data, err := downloadTelegramAsset(ctx, telegramFileURL(token, file.FilePath))
+	data, err := retryTelegramTransient(ctx, "下载Telegram自定义Emoji文件", 3, func() ([]byte, error) {
+		return downloadTelegramAsset(ctx, telegramFileURL(token, file.FilePath))
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -235,6 +248,31 @@ func (s *sSysBot) persistCustomEmoji(ctx context.Context, bot *tgbot.Bot, token 
 		return nil, gerror.Wrap(err, "保存Telegram自定义Emoji缓存失败")
 	}
 	return customEmojiModel(row), nil
+}
+
+func retryTelegramTransient[T any](ctx context.Context, operation string, attempts int, call func() (T, error)) (result T, err error) {
+	if attempts < 1 {
+		attempts = 1
+	}
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err = ctx.Err(); err != nil {
+			return result, err
+		}
+		result, err = call()
+		if err == nil || !isIgnorableTelegramError(err) || attempt == attempts {
+			return result, err
+		}
+		delay := time.Duration(attempt) * 200 * time.Millisecond
+		g.Log().Infof(ctx, "%s遇到瞬时错误，%s后重试 attempt:%d/%d err:%+v", operation, delay, attempt, attempts, err)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return result, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return result, err
 }
 
 func customEmojiFormat(sticker *models.Sticker, filePath string) (string, string, string) {
