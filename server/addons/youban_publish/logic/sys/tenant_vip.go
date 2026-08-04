@@ -385,6 +385,7 @@ func (s *sSysPublish) loadTenantVipStatus(ctx context.Context, tenantId int64) (
 		sysin.TenantVipFeatureAntiScan,
 		sysin.TenantVipFeatureCollectSource,
 		sysin.TenantVipFeatureBackgroundReplace,
+		sysin.TenantVipFeatureRandomMedia,
 	}
 	if permissions[sysin.TenantVipFeatureTextObfuscation] {
 		res.AvailableFeatures = append(res.AvailableFeatures, sysin.TenantVipFeatureTextObfuscation)
@@ -402,6 +403,7 @@ func (s *sSysPublish) loadTenantVipStatus(ctx context.Context, tenantId int64) (
 			sysin.TenantVipFeatureAntiScan,
 			sysin.TenantVipFeatureCollectSource,
 			sysin.TenantVipFeatureBackgroundReplace,
+			sysin.TenantVipFeatureRandomMedia,
 		}
 		if permissions[sysin.TenantVipFeatureTextObfuscation] {
 			res.Features = append(res.Features, sysin.TenantVipFeatureTextObfuscation)

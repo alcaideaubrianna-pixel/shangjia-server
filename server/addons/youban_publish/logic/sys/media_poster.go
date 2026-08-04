@@ -94,8 +94,8 @@ func generateVideoPosterPath(ctx context.Context, videoPath string) (string, err
 	_ = output.Close()
 	scaleFilter := `scale=if(gt(iw\,ih)\,320\,-2):if(gt(iw\,ih)\,-2\,320)`
 	attempts := [][]string{
-		{"-y", "-ss", "00:00:01", "-i", videoPath, "-frames:v", "1", "-vf", scaleFilter, "-q:v", "5", outputPath},
-		{"-y", "-i", videoPath, "-frames:v", "1", "-vf", scaleFilter, "-q:v", "5", outputPath},
+		{"-hide_banner", "-loglevel", "error", "-y", "-ss", "00:00:01", "-i", videoPath, "-frames:v", "1", "-vf", scaleFilter, "-q:v", "5", outputPath},
+		{"-hide_banner", "-loglevel", "error", "-y", "-i", videoPath, "-frames:v", "1", "-vf", scaleFilter, "-q:v", "5", outputPath},
 	}
 	var lastOutput []byte
 	var lastErr error
@@ -108,5 +108,20 @@ func generateVideoPosterPath(ctx context.Context, videoPath string) (string, err
 		}
 	}
 	_ = os.Remove(outputPath)
-	return "", gerror.Wrapf(lastErr, "生成视频封面失败：%s", ellipsisString(strings.TrimSpace(string(lastOutput)), 500))
+	if lastErr == nil {
+		lastErr = gerror.New("ffmpeg 未生成有效的视频封面文件")
+	}
+	return "", gerror.Wrapf(lastErr, "生成视频封面失败：%s", videoPosterCommandError(lastOutput, lastErr))
+}
+
+func videoPosterCommandError(output []byte, runErr error) string {
+	detail := strings.TrimSpace(string(output))
+	if detail == "" && runErr != nil {
+		detail = runErr.Error()
+	}
+	runes := []rune(detail)
+	if len(runes) <= 500 {
+		return detail
+	}
+	return "..." + string(runes[len(runes)-500:])
 }

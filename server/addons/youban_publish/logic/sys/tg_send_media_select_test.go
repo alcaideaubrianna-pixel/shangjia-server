@@ -8,7 +8,7 @@ func TestSelectTelegramDisplayMedia(t *testing.T) {
 	for id := int64(1); id <= 20; id++ {
 		media = append(media, &telegramMediaItem{Id: id, MediaType: "image", MustSend: id <= 3, SortIndex: int(id)})
 	}
-	selected := selectTelegramDisplayMedia(job, media, 10)
+	selected := selectTelegramDisplayMedia(job, media, 10, true)
 	if len(selected) != 10 {
 		t.Fatalf("selected=%d, want 10", len(selected))
 	}
@@ -24,7 +24,7 @@ func TestSelectTelegramDisplayMedia(t *testing.T) {
 			t.Fatalf("required media %d missing", id)
 		}
 	}
-	again := selectTelegramDisplayMedia(job, media, 10)
+	again := selectTelegramDisplayMedia(job, media, 10, true)
 	for i := range selected {
 		if selected[i].Id != again[i].Id {
 			t.Fatal("selection must be stable for retries")
@@ -37,7 +37,7 @@ func TestSelectTelegramDisplayMediaKeepsAllRequired(t *testing.T) {
 	for i := range media {
 		media[i] = &telegramMediaItem{Id: int64(i + 1), MediaType: "image", MustSend: true, SortIndex: i + 1}
 	}
-	selected := selectTelegramDisplayMedia(telegramJobRecord{Id: 1}, media, 10)
+	selected := selectTelegramDisplayMedia(telegramJobRecord{Id: 1}, media, 10, true)
 	if len(selected) != 12 {
 		t.Fatalf("selected=%d, want 12", len(selected))
 	}
@@ -49,11 +49,42 @@ func TestSelectTelegramDisplayMediaTreatsVideoAsRequired(t *testing.T) {
 	for id := int64(2); id <= 12; id++ {
 		media = append(media, &telegramMediaItem{Id: id, MediaType: "image", MustSend: false, SortIndex: int(id)})
 	}
-	selected := selectTelegramDisplayMedia(telegramJobRecord{Id: 8}, media, 10)
+	selected := selectTelegramDisplayMedia(telegramJobRecord{Id: 8}, media, 10, true)
 	for _, item := range selected {
 		if item.Id == 1 {
 			return
 		}
 	}
 	t.Fatal("video media must always be selected")
+}
+
+func TestSelectTelegramDisplayMediaVideoUsesMediaSlot(t *testing.T) {
+	media := make([]*telegramMediaItem, 0, 12)
+	media = append(media, &telegramMediaItem{Id: 1, MediaType: "video", SortIndex: 1})
+	for id := int64(2); id <= 12; id++ {
+		media = append(media, &telegramMediaItem{Id: id, MediaType: "image", SortIndex: int(id)})
+	}
+
+	selected := selectTelegramDisplayMedia(telegramJobRecord{Id: 10}, media, 10, true)
+	if len(selected) != 10 {
+		t.Fatalf("selected=%d, want 10", len(selected))
+	}
+}
+
+func TestSelectTelegramDisplayMediaFreeKeepsFirstTenImages(t *testing.T) {
+	media := make([]*telegramMediaItem, 0, 13)
+	for id := int64(1); id <= 12; id++ {
+		media = append(media, &telegramMediaItem{Id: id, MediaType: "image", MustSend: id == 12, SortIndex: int(id)})
+	}
+	media = append(media, &telegramMediaItem{Id: 13, MediaType: "video", SortIndex: 13})
+
+	selected := selectTelegramDisplayMedia(telegramJobRecord{Id: 9}, media, 10, false)
+	if len(selected) != 10 {
+		t.Fatalf("selected=%d, want 10", len(selected))
+	}
+	for _, item := range selected {
+		if item.Id > 10 {
+			t.Fatalf("free selection must freeze media %d", item.Id)
+		}
+	}
 }

@@ -1,15 +1,30 @@
 package sys
 
 import (
+	"context"
 	"fmt"
 	"hash/fnv"
 	"sort"
 	"strings"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
-func selectTelegramDisplayMedia(job telegramJobRecord, media []*telegramMediaItem, maxItems int) []*telegramMediaItem {
+func (s *sSysPublish) selectTelegramDisplayMediaForTenant(ctx context.Context, job telegramJobRecord, media []*telegramMediaItem) ([]*telegramMediaItem, error) {
+	status, err := s.tenantVipStatus(ctx, job.TenantId)
+	if err != nil {
+		return nil, err
+	}
+	randomEnabled := status.IsVip && containsString(status.Features, sysin.TenantVipFeatureRandomMedia)
+	return selectTelegramDisplayMedia(job, media, telegramMediaGroupMaxItems, randomEnabled), nil
+}
+
+func selectTelegramDisplayMedia(job telegramJobRecord, media []*telegramMediaItem, maxItems int, randomEnabled bool) []*telegramMediaItem {
 	if maxItems <= 0 || len(media) <= maxItems {
 		return media
+	}
+	if !randomEnabled {
+		return selectFreeTelegramDisplayMedia(media, maxItems)
 	}
 	required := make([]*telegramMediaItem, 0, len(media))
 	optional := make([]*telegramMediaItem, 0, len(media))
@@ -40,6 +55,20 @@ func selectTelegramDisplayMedia(job telegramJobRecord, media []*telegramMediaIte
 		}
 		return selected[i].Id < selected[j].Id
 	})
+	return selected
+}
+
+func selectFreeTelegramDisplayMedia(media []*telegramMediaItem, maxItems int) []*telegramMediaItem {
+	selected := make([]*telegramMediaItem, 0, maxItems)
+	for _, item := range media {
+		if item == nil {
+			continue
+		}
+		if len(selected) >= maxItems {
+			break
+		}
+		selected = append(selected, item)
+	}
 	return selected
 }
 

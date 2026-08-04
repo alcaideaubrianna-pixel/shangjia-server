@@ -177,7 +177,10 @@ func (s *sSysPublish) telegramJobPhaseExpectedMessageCount(ctx context.Context, 
 		return 0, err
 	}
 	if purpose == "display" {
-		media = selectTelegramDisplayMedia(job, media, telegramMediaGroupMaxItems)
+		media, err = s.selectTelegramDisplayMediaForTenant(ctx, job, media)
+		if err != nil {
+			return 0, err
+		}
 		if len(media) == 0 {
 			return 1, nil
 		}

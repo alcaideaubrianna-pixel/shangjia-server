@@ -1,68 +1,27 @@
 package sys
 
-import (
-	"errors"
-	"fmt"
-	"testing"
+import "testing"
 
-	tgbot "github.com/go-telegram/bot"
-)
+func TestTelegramDeleteMessageBatchesGroupsByChatAndLimit(t *testing.T) {
+	messages := []telegramDeleteMessage{
+		{Id: 1, TargetChatId: "123", MessageId: 11},
+		{Id: 2, TargetChatId: "-100456", MessageId: 21},
+		{Id: 3, TargetChatId: "123", MessageId: 12},
+		{Id: 4, TargetChatId: "123", MessageId: 13},
+		{Id: 0, TargetChatId: "123", MessageId: 14},
+	}
 
-func TestIsTelegramBotConfigMissingError(t *testing.T) {
-	if !isTelegramBotConfigMissingError(errors.New("读取历史配置失败: Bot配置不存在")) {
-		t.Fatal("expected missing bot configuration error to be recognized")
+	batches := telegramDeleteMessageBatches(messages, 2)
+	if len(batches) != 3 {
+		t.Fatalf("unexpected batch count: %d", len(batches))
 	}
-	if isTelegramBotConfigMissingError(errors.New("Telegram请求失败")) {
-		t.Fatal("unexpected error recognized as missing bot configuration")
+	if batches[0].chatId != "123" || len(batches[0].messages) != 2 {
+		t.Fatalf("unexpected first batch: %#v", batches[0])
 	}
-}
-
-func TestIsTelegramMessagePermanentlyUndeletableError(t *testing.T) {
-	if !isTelegramMessagePermanentlyUndeletableError(errors.New("Bad Request: message can't be deleted")) {
-		t.Fatal("expected Telegram deletion deadline error to be recognized")
+	if batches[1].chatId != "-100456" || len(batches[1].messages) != 1 {
+		t.Fatalf("unexpected second batch: %#v", batches[1])
 	}
-	if isTelegramMessagePermanentlyUndeletableError(errors.New("Too Many Requests")) {
-		t.Fatal("temporary Telegram error must remain retryable")
-	}
-}
-
-func TestIsTelegramMessageAlreadyDeletedError(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{
-			name: "telegram bad request message missing",
-			err:  fmt.Errorf("%w, Bad Request: message to delete not found", tgbot.ErrorBadRequest),
-			want: true,
-		},
-		{
-			name: "telegram not found message missing",
-			err:  fmt.Errorf("%w, message not found", tgbot.ErrorNotFound),
-			want: true,
-		},
-		{
-			name: "legacy textual response",
-			err:  errors.New("Bad Request: message to delete not found"),
-			want: true,
-		},
-		{
-			name: "chat missing",
-			err:  fmt.Errorf("%w, chat not found", tgbot.ErrorBadRequest),
-			want: false,
-		},
-		{
-			name: "temporary failure",
-			err:  errors.New("Too Many Requests"),
-			want: false,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := isTelegramMessageAlreadyDeletedError(test.err); got != test.want {
-				t.Fatalf("unexpected result: got=%v want=%v err=%v", got, test.want, test.err)
-			}
-		})
+	if batches[2].chatId != "123" || len(batches[2].messages) != 1 {
+		t.Fatalf("unexpected third batch: %#v", batches[2])
 	}
 }

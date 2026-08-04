@@ -131,7 +131,7 @@ func tenantVipFreeFeatures() []string {
 }
 
 func tenantVipPaidFeatures() []string {
-	return []string{"防扫图", "资料相似查询", "图片搜索", "采集代理", "群聊关键字监听", "可联系管理员开启独立访问域名"}
+	return []string{"无限展示图片与随机推送", "防扫图", "资料相似查询", "图片搜索", "采集代理", "群聊关键字监听", "可联系管理员开启独立访问域名"}
 }
 
 func tenantVipCacheKey(tenantId int64) string {

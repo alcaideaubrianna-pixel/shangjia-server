@@ -9,13 +9,17 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"golang.org/x/sync/errgroup"
 )
 
 const telegramMediaGroupMaxItems = 10
+const telegramMediaPrepareConcurrency = 4
 
 func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
 	if len(media) == 0 {
@@ -57,18 +61,22 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		return append(messages, copied...), nil
 	}
 	allMessages := make([]*telegramSentMessage, 0, len(media))
-	for chunkIndex, chunk := range splitTelegramMediaItems(media, telegramMediaGroupMaxItems) {
+	chunks := splitTelegramMediaItems(media, telegramMediaGroupMaxItems)
+	for chunkIndex, chunk := range chunks {
 		chunkCaption := ""
 		if chunkIndex == 0 || purpose == "verify" {
 			chunkCaption = caption
 		}
+		prepareStartedAt := time.Now()
 		group, closers, err := s.telegramInputMediaGroup(ctx, chunk, chunkCaption)
 		if err != nil {
 			return allMessages, err
 		}
+		g.Log().Infof(ctx, "TG媒体组准备完成 purpose:%s chunk:%d/%d media:%d antiScan:%d duration:%s", purpose, chunkIndex+1, len(chunks), len(chunk), telegramAntiScanMediaCount(chunk), time.Since(prepareStartedAt).Round(time.Millisecond))
 		if len(group) == 0 {
 			continue
 		}
+		sendStartedAt := time.Now()
 		msgs, err := bot.SendMediaGroup(ctx, &tgbot.SendMediaGroupParams{
 			ChatID: chatId,
 			Media:  group,
@@ -84,6 +92,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		if err != nil {
 			return allMessages, err
 		}
+		g.Log().Infof(ctx, "TG媒体组发送完成 purpose:%s chunk:%d/%d media:%d duration:%s", purpose, chunkIndex+1, len(chunks), len(chunk), time.Since(sendStartedAt).Round(time.Millisecond))
 		allMessages = append(allMessages, telegramSentMessagesFromGroup(msgs, purpose, chunk)...)
 	}
 	return allMessages, nil
@@ -94,6 +103,7 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 	if ref, ok := telegramCopyMediaRefFromFileId(media.TgFileId); ok {
 		return s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media, ref)
 	}
+	prepareStartedAt := time.Now()
 	input, closer, err := telegramSingleMediaInputFile(ctx, media)
 	if err != nil {
 		return nil, err
@@ -118,6 +128,7 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		if thumbnailCloser != nil {
 			defer thumbnailCloser.Close()
 		}
+		g.Log().Infof(ctx, "TG单媒体准备完成 purpose:%s mediaId:%d type:%s antiScan:%t duration:%s", purpose, media.Id, media.MediaType, media.AntiScanEnabled, time.Since(prepareStartedAt).Round(time.Millisecond))
 		videoMeta := telegramVideoMeta{}
 		if !reuseWithCover {
 			videoMeta = s.telegramVideoMeta(ctx, media)
@@ -132,6 +143,7 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 			SupportsStreaming: true,
 		}
 		applyTelegramSendVideoMeta(params, videoMeta)
+		sendStartedAt := time.Now()
 		msg, err := bot.SendVideo(ctx, params)
 		if err != nil && strings.TrimSpace(media.TgFileId) != "" && isTelegramInvalidReusableFileError(err) {
 			cloned := *media
@@ -142,8 +154,11 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		if err != nil {
 			return nil, err
 		}
+		g.Log().Infof(ctx, "TG单媒体发送完成 purpose:%s mediaId:%d type:%s duration:%s", purpose, media.Id, media.MediaType, time.Since(sendStartedAt).Round(time.Millisecond))
 		return telegramSentMessagesFromSingle(msg, purpose, media)
 	default:
+		g.Log().Infof(ctx, "TG单媒体准备完成 purpose:%s mediaId:%d type:%s antiScan:%t duration:%s", purpose, media.Id, media.MediaType, media.AntiScanEnabled, time.Since(prepareStartedAt).Round(time.Millisecond))
+		sendStartedAt := time.Now()
 		msg, err := bot.SendPhoto(ctx, &tgbot.SendPhotoParams{
 			ChatID:    chatId,
 			Photo:     input,
@@ -158,6 +173,7 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		if err != nil {
 			return nil, err
 		}
+		g.Log().Infof(ctx, "TG单媒体发送完成 purpose:%s mediaId:%d type:%s duration:%s", purpose, media.Id, media.MediaType, time.Since(sendStartedAt).Round(time.Millisecond))
 		return telegramSentMessagesFromSingle(msg, purpose, media)
 	}
 }
@@ -303,47 +319,88 @@ func (s *sSysPublish) copyTelegramSingleMediaWithoutCaption(ctx context.Context,
 }
 
 func (s *sSysPublish) telegramInputMediaGroup(ctx context.Context, media []*telegramMediaItem, caption string) ([]models.InputMedia, []io.Closer, error) {
-	group := make([]models.InputMedia, 0, len(media))
-	closers := make([]io.Closer, 0, len(media))
-	for _, item := range media {
-		source, attachment, closer, err := telegramInputMediaSource(ctx, item)
+	prepared := make([]telegramPreparedInputMedia, len(media))
+	prepareGroup, prepareCtx := errgroup.WithContext(ctx)
+	prepareGroup.SetLimit(telegramMediaPrepareConcurrency)
+	for index, item := range media {
+		index, item := index, item
+		prepareGroup.Go(func() error {
+			itemCaption := ""
+			if index == 0 {
+				itemCaption = caption
+			}
+			input, closers, err := s.telegramInputMediaItem(prepareCtx, item, itemCaption)
+			if err != nil {
+				return err
+			}
+			prepared[index] = telegramPreparedInputMedia{input: input, closers: closers}
+			return nil
+		})
+	}
+	if err := prepareGroup.Wait(); err != nil {
+		closeTelegramPreparedInputMedia(prepared)
+		return nil, nil, err
+	}
+	group := make([]models.InputMedia, 0, len(prepared))
+	closers := make([]io.Closer, 0, len(prepared)*2)
+	for _, item := range prepared {
+		group = append(group, item.input)
+		closers = append(closers, item.closers...)
+	}
+	return group, closers, nil
+}
+
+type telegramPreparedInputMedia struct {
+	input   models.InputMedia
+	closers []io.Closer
+}
+
+func (s *sSysPublish) telegramInputMediaItem(ctx context.Context, item *telegramMediaItem, caption string) (models.InputMedia, []io.Closer, error) {
+	source, attachment, closer, err := telegramInputMediaSource(ctx, item)
+	if err != nil {
+		return nil, nil, err
+	}
+	closers := make([]io.Closer, 0, 2)
+	if closer != nil {
+		closers = append(closers, closer)
+	}
+	if source == "" {
+		closeTelegramMediaFiles(closers)
+		return nil, nil, gerror.New("媒体文件地址为空")
+	}
+	if item.MediaType != "video" {
+		return &models.InputMediaPhoto{Media: source, Caption: caption, ParseMode: telegramMediaParseMode(caption), MediaAttachment: attachment}, closers, nil
+	}
+	var thumbnail models.InputFile
+	if !telegramMediaUsesReusableFileId(item) {
+		thumbnail, closer, err = telegramVideoThumbnail(ctx, item)
 		if err != nil {
 			closeTelegramMediaFiles(closers)
 			return nil, nil, err
 		}
-		if source == "" {
-			closeTelegramMediaFiles(closers)
-			return nil, nil, gerror.New("媒体文件地址为空")
-		}
 		if closer != nil {
 			closers = append(closers, closer)
 		}
-		itemCaption := ""
-		if len(group) == 0 {
-			itemCaption = caption
-		}
-		if item.MediaType == "video" {
-			var thumbnail models.InputFile
-			if !telegramMediaUsesReusableFileId(item) {
-				var thumbnailCloser io.Closer
-				var thumbErr error
-				thumbnail, thumbnailCloser, thumbErr = telegramVideoThumbnail(ctx, item)
-				if thumbErr != nil {
-					closeTelegramMediaFiles(closers)
-					return nil, nil, thumbErr
-				}
-				if thumbnailCloser != nil {
-					closers = append(closers, thumbnailCloser)
-				}
-			}
-			video := &models.InputMediaVideo{Media: source, Thumbnail: thumbnail, Caption: itemCaption, ParseMode: telegramMediaParseMode(itemCaption), SupportsStreaming: true, MediaAttachment: attachment}
-			applyTelegramInputMediaVideoMeta(video, s.telegramVideoMeta(ctx, item))
-			group = append(group, video)
-		} else {
-			group = append(group, &models.InputMediaPhoto{Media: source, Caption: itemCaption, ParseMode: telegramMediaParseMode(itemCaption), MediaAttachment: attachment})
+	}
+	video := &models.InputMediaVideo{Media: source, Thumbnail: thumbnail, Caption: caption, ParseMode: telegramMediaParseMode(caption), SupportsStreaming: true, MediaAttachment: attachment}
+	applyTelegramInputMediaVideoMeta(video, s.telegramVideoMeta(ctx, item))
+	return video, closers, nil
+}
+
+func closeTelegramPreparedInputMedia(prepared []telegramPreparedInputMedia) {
+	for _, item := range prepared {
+		closeTelegramMediaFiles(item.closers)
+	}
+}
+
+func telegramAntiScanMediaCount(media []*telegramMediaItem) int {
+	count := 0
+	for _, item := range media {
+		if item != nil && item.AntiScanEnabled {
+			count++
 		}
 	}
-	return group, closers, nil
+	return count
 }
 
 func telegramMediaParseMode(caption string) models.ParseMode {

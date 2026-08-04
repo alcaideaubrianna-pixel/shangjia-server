@@ -13,6 +13,7 @@ const (
 	TenantVipFeatureTextObfuscation   = "text_obfuscation"
 	TenantVipFeatureCollectSource     = "collect_source"
 	TenantVipFeatureBackgroundReplace = "background_replace"
+	TenantVipFeatureRandomMedia       = "random_media"
 )
 
 type TenantVipStatusModel struct {
