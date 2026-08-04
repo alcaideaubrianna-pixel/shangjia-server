@@ -124,3 +124,7 @@ ALTER TABLE "hg_youban_publish_media" ALTER COLUMN "must_send" SET DEFAULT 0;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "send_phase" varchar(32) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "reconcile_count" integer NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_tenant_channel_status" ON "hg_youban_publish_tg_job" ("tenant_id", "channel_id", "status", "id");
+DELETE FROM "hg_youban_publish_tg_message" older USING "hg_youban_publish_tg_message" newer WHERE older."job_id" = newer."job_id" AND older."tg_message_id" = newer."tg_message_id" AND older."id" < newer."id";
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_message_job_message" ON "hg_youban_publish_tg_message" ("job_id", "tg_message_id");
+ALTER TABLE "hg_youban_publish_tg_channel_stat" ALTER COLUMN "last_error_message" TYPE text;
+ALTER TABLE "hg_youban_publish_tg_bot_stat" ALTER COLUMN "last_error_message" TYPE text;

@@ -743,7 +743,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_channel_stat" (
   "rate_limit_count" integer NOT NULL DEFAULT 0,
   "last_sent_at" timestamp DEFAULT NULL,
   "last_error_at" timestamp DEFAULT NULL,
-  "last_error_message" varchar(512) NOT NULL DEFAULT '',
+  "last_error_message" text NOT NULL DEFAULT '',
   "created_at" timestamp DEFAULT NULL,
   "updated_at" timestamp DEFAULT NULL
 );
@@ -765,7 +765,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_bot_stat" (
   "rate_limit_count" integer NOT NULL DEFAULT 0,
   "last_sent_at" timestamp DEFAULT NULL,
   "last_error_at" timestamp DEFAULT NULL,
-  "last_error_message" varchar(512) NOT NULL DEFAULT '',
+  "last_error_message" text NOT NULL DEFAULT '',
   "created_at" timestamp DEFAULT NULL,
   "updated_at" timestamp DEFAULT NULL
 );

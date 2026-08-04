@@ -712,4 +712,6 @@ ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `send_phase` var
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `reconcile_count` int(11) NOT NULL DEFAULT '0' COMMENT '对账次数' AFTER `send_phase`;
 DELETE older FROM `hg_youban_publish_tg_message` older INNER JOIN `hg_youban_publish_tg_message` newer ON older.`job_id` = newer.`job_id` AND older.`tg_message_id` = newer.`tg_message_id` AND older.`id` < newer.`id`;
 ALTER TABLE `hg_youban_publish_tg_message` ADD UNIQUE INDEX `uk_ybp_tg_message_job_message` (`job_id`,`tg_message_id`);
+ALTER TABLE `hg_youban_publish_tg_channel_stat` MODIFY COLUMN `last_error_message` text NOT NULL COMMENT '最后错误';
+ALTER TABLE `hg_youban_publish_tg_bot_stat` MODIFY COLUMN `last_error_message` text NOT NULL COMMENT '最后错误';
 ALTER TABLE `hg_youban_publish_tg_job` ADD INDEX `idx_ybp_tg_job_tenant_channel_status` (`tenant_id`,`channel_id`,`status`,`id`);

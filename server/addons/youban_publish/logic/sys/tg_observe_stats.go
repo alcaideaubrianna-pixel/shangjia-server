@@ -15,6 +15,8 @@ import (
 	"hotgo/internal/consts"
 )
 
+const telegramObserveLastErrorMaxRunes = 512
+
 func (s *sSysPublish) runTelegramObserveStatsRefresher(ctx context.Context) {
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
@@ -165,7 +167,7 @@ ON CONFLICT ("queue_name","priority_level","status") DO UPDATE SET "stat_time"=E
 }
 
 func (s *sSysPublish) upsertTelegramChannelStat(ctx context.Context, tx gdb.TX, row gdb.Record, now *gtime.Time) error {
-	args := []interface{}{row["tenant_id"].Int64(), row["account_id"].Int64(), row["channel_id"].Int64(), row["target_chat_id"].String(), row["channel_title"].String(), row["pending_count"].Int(), row["queued_count"].Int(), row["sending_count"].Int(), row["sent_count"].Int(), row["failed_count"].Int(), row["retry_count"].Int(), row["rate_limit_count"].Int(), row["last_sent_at"], row["last_error_at"], row["last_error_message"].String(), now, now}
+	args := []interface{}{row["tenant_id"].Int64(), row["account_id"].Int64(), row["channel_id"].Int64(), row["target_chat_id"].String(), row["channel_title"].String(), row["pending_count"].Int(), row["queued_count"].Int(), row["sending_count"].Int(), row["sent_count"].Int(), row["failed_count"].Int(), row["retry_count"].Int(), row["rate_limit_count"].Int(), row["last_sent_at"], row["last_error_at"], truncateTelegramObserveError(row["last_error_message"].String()), now, now}
 	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
 		_, err := tx.Ctx(ctx).Exec(`INSERT INTO "`+publishTgChannelStatTable+`" ("tenant_id","account_id","channel_id","target_chat_id","channel_title","pending_count","queued_count","sending_count","sent_count","failed_count","retry_count","rate_limit_count","last_sent_at","last_error_at","last_error_message","created_at","updated_at")
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -177,7 +179,7 @@ ON CONFLICT ("channel_id","target_chat_id") DO UPDATE SET "tenant_id"=EXCLUDED."
 }
 
 func (s *sSysPublish) upsertTelegramBotStat(ctx context.Context, tx gdb.TX, row gdb.Record, now *gtime.Time) error {
-	args := []interface{}{row["tenant_id"].Int64(), row["bot_id"].Int64(), row["bot_name"].String(), row["bot_username"].String(), row["pending_count"].Int(), row["queued_count"].Int(), row["sending_count"].Int(), row["sent_count"].Int(), row["failed_count"].Int(), row["retry_count"].Int(), row["rate_limit_count"].Int(), row["last_sent_at"], row["last_error_at"], row["last_error_message"].String(), now, now}
+	args := []interface{}{row["tenant_id"].Int64(), row["bot_id"].Int64(), row["bot_name"].String(), row["bot_username"].String(), row["pending_count"].Int(), row["queued_count"].Int(), row["sending_count"].Int(), row["sent_count"].Int(), row["failed_count"].Int(), row["retry_count"].Int(), row["rate_limit_count"].Int(), row["last_sent_at"], row["last_error_at"], truncateTelegramObserveError(row["last_error_message"].String()), now, now}
 	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
 		_, err := tx.Ctx(ctx).Exec(`INSERT INTO "`+publishTgBotStatTable+`" ("tenant_id","bot_id","bot_name","bot_username","pending_count","queued_count","sending_count","sent_count","failed_count","retry_count","rate_limit_count","last_sent_at","last_error_at","last_error_message","created_at","updated_at")
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -186,4 +188,12 @@ ON CONFLICT ("tenant_id","bot_id") DO UPDATE SET "bot_name"=EXCLUDED."bot_name",
 	}
 	_, err := tx.Ctx(ctx).Exec("INSERT INTO `"+publishTgBotStatTable+"` (`tenant_id`,`bot_id`,`bot_name`,`bot_username`,`pending_count`,`queued_count`,`sending_count`,`sent_count`,`failed_count`,`retry_count`,`rate_limit_count`,`last_sent_at`,`last_error_at`,`last_error_message`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `bot_name`=VALUES(`bot_name`),`bot_username`=VALUES(`bot_username`),`pending_count`=VALUES(`pending_count`),`queued_count`=VALUES(`queued_count`),`sending_count`=VALUES(`sending_count`),`sent_count`=VALUES(`sent_count`),`failed_count`=VALUES(`failed_count`),`retry_count`=VALUES(`retry_count`),`rate_limit_count`=VALUES(`rate_limit_count`),`last_sent_at`=VALUES(`last_sent_at`),`last_error_at`=VALUES(`last_error_at`),`last_error_message`=VALUES(`last_error_message`),`updated_at`=VALUES(`updated_at`)", args...)
 	return err
+}
+
+func truncateTelegramObserveError(message string) string {
+	runes := []rune(message)
+	if len(runes) <= telegramObserveLastErrorMaxRunes {
+		return message
+	}
+	return string(runes[:telegramObserveLastErrorMaxRunes])
 }
