@@ -6,6 +6,7 @@ type telegramMediaItem struct {
 	Id                int64  `json:"id"`
 	AttachmentId      int64  `json:"attachmentId"`
 	MediaType         string `json:"mediaType"`
+	MustSend          bool   `json:"mustSend"`
 	Purpose           string `json:"purpose"`
 	FileUrl           string `json:"fileUrl"`
 	PosterUrl         string `json:"posterUrl"`

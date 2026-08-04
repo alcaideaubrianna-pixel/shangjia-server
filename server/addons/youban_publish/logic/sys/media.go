@@ -593,6 +593,11 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 		}
 	}
 	mediaId := existing["id"].Int64()
+	if in.MustSend != nil {
+		data["must_send"] = *in.MustSend
+	} else if mediaId == 0 {
+		data["must_send"] = true
+	}
 	if editStatus == "edited" {
 		data["edited_attachment_id"] = attachment.Id
 		data["edited_file_url"] = normalizeMediaFileURL(attachment.FileUrl, attachment.Path)

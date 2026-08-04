@@ -85,6 +85,7 @@ func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecor
 			Id:                record["id"].Int64(),
 			AttachmentId:      asset.AttachmentId,
 			MediaType:         mediaType,
+			MustSend:          record["must_send"].Bool(),
 			Purpose:           record["purpose"].String(),
 			FileUrl:           normalizeMediaFileURL(asset.FileUrl, asset.StoragePath),
 			PosterUrl:         posterUrl,

@@ -389,6 +389,7 @@ type MediaUploadInp struct {
 	ProfileId      int64  `json:"profileId" dc:"资料ID"`
 	MediaId        int64  `json:"mediaId" dc:"媒体ID，编辑已有媒体时传入"`
 	MediaType      string `json:"mediaType" dc:"媒体类型：image/video"`
+	MustSend       *bool  `json:"mustSend" dc:"是否每次推送必发"`
 	Purpose        string `json:"purpose" dc:"用途：display/verify"`
 	SortIndex      int    `json:"sortIndex" dc:"排序"`
 	EditConfigJson string `json:"editConfigJson" dc:"图片编辑配置"`
@@ -435,6 +436,7 @@ type MediaModel struct {
 	OriginalAttachmentId int64       `json:"originalAttachmentId" dc:"原始附件ID"`
 	EditedAttachmentId   int64       `json:"editedAttachmentId" dc:"编辑后附件ID"`
 	MediaType            string      `json:"mediaType" dc:"媒体类型"`
+	MustSend             bool        `json:"mustSend" dc:"是否每次推送必发"`
 	Purpose              string      `json:"purpose" dc:"用途：display/verify"`
 	Name                 string      `json:"name" dc:"文件名"`
 	FileUrl              string      `json:"fileUrl" dc:"访问地址"`

@@ -118,6 +118,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if err != nil {
 		return err
 	}
+	displayMedia = selectTelegramDisplayMedia(job, displayMedia, telegramMediaGroupMaxItems)
 	verifyMedia, err := s.telegramJobMedia(ctx, job, "verify")
 	if err != nil {
 		return err
