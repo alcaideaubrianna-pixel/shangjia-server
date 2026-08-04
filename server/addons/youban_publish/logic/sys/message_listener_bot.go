@@ -38,6 +38,10 @@ func (s *sSysPublish) bindListenerTargetByCode(ctx context.Context, code string,
 	if plan.Id <= 0 {
 		return s.replyListenerBindMessage(ctx, in.ChatId, "绑定ID不存在或已失效，请在页面重新获取。")
 	}
+	chatType := listenerBotChatType(in.ChatType)
+	if chatType == "" {
+		return s.replyListenerBindMessage(ctx, in.ChatId, "请将机器人添加到需要接收通知的群聊，并在群聊中发送绑定ID。")
+	}
 	currentChatId := normalizeTelegramChannelChatID(in.ChatId)
 	if strings.TrimSpace(currentChatId) == "" {
 		return gerror.New("当前群聊或频道无效")
@@ -52,7 +56,7 @@ func (s *sSysPublish) bindListenerTargetByCode(ctx context.Context, code string,
 		WhereNull("deleted_at").
 		Data(g.Map{
 			"notify_chat_id":    currentChatId,
-			"notify_chat_type":  listenerBotChatType(in.ChatType),
+			"notify_chat_type":  chatType,
 			"notify_chat_title": currentChatTitle,
 			"notify_bound_at":   now,
 			"updated_at":        now,
@@ -65,13 +69,13 @@ func (s *sSysPublish) bindListenerTargetByCode(ctx context.Context, code string,
 }
 
 func listenerBotChatType(chatType string) string {
-	switch strings.TrimSpace(chatType) {
+	switch strings.ToLower(strings.TrimSpace(chatType)) {
 	case "channel":
 		return "channel"
 	case "group", "supergroup":
 		return "group"
 	default:
-		return "group"
+		return ""
 	}
 }
 

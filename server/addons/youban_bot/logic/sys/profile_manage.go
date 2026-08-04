@@ -53,6 +53,9 @@ func (profileManageMessageHandler) Handle(ctx context.Context, bot *sSysBot, eve
 		return false, nil
 	}
 	text := strings.TrimSpace(firstNonEmpty(event.Msg.Text, event.Msg.Caption, event.Text))
+	if botListenerBindCode(text) != "" {
+		return false, nil
+	}
 	if isCancelProfileCommand(text) {
 		return true, bot.cancelProfileSession(ctx, event.BotId, event.Msg)
 	}
@@ -105,6 +108,9 @@ func (s *sSysBot) isProfileSearchTrigger(ctx context.Context, text string) bool 
 	if text == "" {
 		return false
 	}
+	if botListenerBindCode(text) != "" {
+		return false
+	}
 	if nos := extractProfileNos(text); len(nos) == 1 && strings.EqualFold(text, nos[0]) {
 		return true
 	}
@@ -125,6 +131,9 @@ func isCancelProfileCommand(text string) bool {
 }
 
 func looksLikeProfileCommand(text string) bool {
+	if botListenerBindCode(text) != "" {
+		return false
+	}
 	lower := strings.ToLower(strings.TrimSpace(text))
 	if strings.HasPrefix(lower, "/send") || strings.HasPrefix(lower, "/note") || strings.HasPrefix(lower, "/profile") {
 		return true

@@ -28,10 +28,14 @@ type botMessageHandler interface {
 var botMessageHandlers = []botMessageHandler{
 	quickPushSessionMessageHandler{},
 	botFeatureMessageHandler{},
+	publishListenerBindMessageHandler{},
 	profileManageMessageHandler{},
 	scanMediaMessageHandler{},
-	publishListenerBindMessageHandler{},
 	authCodeMessageHandler{},
+}
+
+func botListenerBindCode(text string) string {
+	return strings.ToUpper(botListenerBindCodeRegexp.FindString(text))
 }
 
 func botAllowedUpdates() []string {
@@ -83,7 +87,7 @@ func (botFeatureMessageHandler) Handle(ctx context.Context, bot *sSysBot, event 
 type publishListenerBindMessageHandler struct{}
 
 func (publishListenerBindMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *botMessageEvent) (handled bool, err error) {
-	code := strings.ToUpper(botListenerBindCodeRegexp.FindString(event.Text))
+	code := botListenerBindCode(event.Text)
 	if code == "" {
 		return false, nil
 	}
