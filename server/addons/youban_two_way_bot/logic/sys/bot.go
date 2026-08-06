@@ -26,9 +26,7 @@ type sSysTwoWayBot struct {
 	bots          map[string]*tgbot.Bot
 	runtimeMu     sync.Mutex
 	runtimeCancel context.CancelFunc
-	runtimeCtx    context.Context
 	runtimeDone   chan struct{}
-	pollingBots   map[string]struct{}
 }
 
 func init() {

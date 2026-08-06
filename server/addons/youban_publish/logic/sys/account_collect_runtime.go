@@ -17,7 +17,6 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
-	"hotgo/addons/youban_publish/service"
 )
 
 const accountCollectSupervisorInterval = 15 * time.Second
@@ -186,50 +185,7 @@ func (s *sSysPublish) enabledAccountCollectSources(ctx context.Context) (map[int
 			groups[row.TgAccountId] = append(groups[row.TgAccountId], row)
 		}
 	}
-	ids, err := s.authorizedAutoDeleteTgAccountIds(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, id := range ids {
-		if _, ok := groups[id]; !ok {
-			groups[id] = []accountCollectSourceRuntime{}
-		}
-	}
 	return groups, nil
-}
-
-func (s *sSysPublish) authorizedAutoDeleteTgAccountIds(ctx context.Context) ([]int64, error) {
-	var rows []struct {
-		Id       int64 `json:"id"`
-		TenantId int64 `json:"tenantId"`
-	}
-	err := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id").
-		Where("status", sysin.PublishTgAccountStatusAuthorized).
-		WhereNot("session_key", "").
-		WhereNull("deleted_at").
-		OrderAsc("id").
-		Scan(&rows)
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取自动删除监听TG账号失败")
-	}
-	enabledTenants := make(map[int64]bool)
-	ids := make([]int64, 0, len(rows))
-	for _, row := range rows {
-		enabled, ok := enabledTenants[row.TenantId]
-		if !ok {
-			conf, configErr := service.SysConfig().AutoDeleteConfigForTenant(ctx, row.TenantId)
-			if configErr != nil {
-				return nil, configErr
-			}
-			enabled = conf != nil && conf.AutoDeleteConfig != nil && conf.Enabled == 1
-			enabledTenants[row.TenantId] = enabled
-		}
-		if enabled && row.Id > 0 {
-			ids = append(ids, row.Id)
-		}
-	}
-	return ids, nil
 }
 
 func startAccountCollectWorker(ctx context.Context, service *sSysPublish, tgAccountId int64, signature string, sources []accountCollectSourceRuntime, listeners []accountListenPlanRuntime) *accountCollectWorker {

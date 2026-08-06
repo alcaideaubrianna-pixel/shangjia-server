@@ -1164,6 +1164,7 @@ type ChannelModel struct {
 	PublishVisible          int         `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
 	AntiScanEnabled         int         `json:"antiScanEnabled" dc:"频道防扫图开关"`
 	TextObfuscationEnabled  int         `json:"textObfuscationEnabled" dc:"频道文本混淆开关"`
+	AutoDeleteEnabled       int         `json:"autoDeleteEnabled" dc:"频道自动删除开关"`
 	BotIds                  []int64     `json:"botIds" dc:"绑定Bot ID列表"`
 	BotIdJson               string      `json:"botIdJson" dc:"绑定Bot ID JSON"`
 	BotPermissionStatusJson string      `json:"botPermissionStatusJson" dc:"Bot权限检测结果JSON"`
@@ -1193,6 +1194,7 @@ type ChannelSaveInp struct {
 	PublishVisible         int     `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
 	AntiScanEnabled        int     `json:"antiScanEnabled" dc:"频道防扫图开关"`
 	TextObfuscationEnabled int     `json:"textObfuscationEnabled" dc:"频道文本混淆开关"`
+	AutoDeleteEnabled      int     `json:"autoDeleteEnabled" dc:"频道自动删除开关"`
 	BotIds                 []int64 `json:"botIds" dc:"绑定Bot ID列表"`
 	Remark                 string  `json:"remark" dc:"备注"`
 	Status                 int     `json:"status" dc:"状态：1启用 2停用"`
@@ -1241,6 +1243,9 @@ func (in *ChannelSaveInp) Filter(ctx context.Context) error {
 	}
 	if in.TextObfuscationEnabled != 0 && in.TextObfuscationEnabled != 1 {
 		return gerror.New("频道文本混淆开关不合法")
+	}
+	if in.AutoDeleteEnabled != 0 && in.AutoDeleteEnabled != 1 {
+		return gerror.New("频道自动删除开关不合法")
 	}
 	if in.CyclePublishEnabled == 1 && in.CyclePublishDays <= 0 {
 		in.CyclePublishDays = 4

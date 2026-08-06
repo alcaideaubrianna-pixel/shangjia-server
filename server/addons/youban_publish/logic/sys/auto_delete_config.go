@@ -86,7 +86,6 @@ func (s *sSysConfig) AutoDeleteConfigSave(ctx context.Context, in *sysin.AutoDel
 	now := gtime.Now()
 	data := g.Map{
 		columns.TenantId:           tenantId,
-		columns.Enabled:            in.Enabled,
 		columns.CustomKeywordsJson: mustConfigJSON(in.CustomKeywords),
 		columns.CustomRulesJson:    mustConfigJSON(in.CustomRules),
 		columns.UpdatedBy:          contexts.GetUserId(ctx),

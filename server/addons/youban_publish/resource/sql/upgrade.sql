@@ -704,6 +704,11 @@ ALTER TABLE `hg_youban_publish_profile_state` ADD INDEX `idx_ybp_profile_state_p
 
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '频道防扫图开关';
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `text_obfuscation_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '频道文本混淆开关';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `auto_delete_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '频道自动删除开关';
+UPDATE `hg_youban_publish_channel` c
+INNER JOIN `hg_youban_publish_tenant_auto_delete_config` t ON t.`tenant_id` = c.`tenant_id`
+SET c.`auto_delete_enabled` = 1
+WHERE c.`auto_delete_enabled` = 0 AND t.`enabled` = 1 AND c.`publish_direction` = 'up' AND c.`status` = 1 AND c.`deleted_at` IS NULL;
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN IF NOT EXISTS `must_send` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否每次推送必发' AFTER `media_type`;
 UPDATE `hg_youban_publish_media` SET `must_send` = 0 WHERE EXISTS (SELECT 1 FROM `information_schema`.`columns` WHERE `table_schema` = DATABASE() AND `table_name` = 'hg_youban_publish_media' AND `column_name` = 'must_send' AND `column_default` = '1');
 ALTER TABLE `hg_youban_publish_media` ALTER COLUMN `must_send` SET DEFAULT '0';

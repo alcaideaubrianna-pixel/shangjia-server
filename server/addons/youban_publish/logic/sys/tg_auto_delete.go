@@ -14,10 +14,10 @@ import (
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gotd/td/tg"
 
 	"hotgo/addons/youban_publish/service"
 	"hotgo/internal/library/cache"
+	"hotgo/internal/library/hgrds/lock"
 )
 
 const (
@@ -97,12 +97,12 @@ func (s *sSysPublish) handleTelegramAutoDelete(ctx context.Context, botId int64,
 		}
 		return
 	}
-	conf, err := service.SysConfig().AutoDeleteConfigForTenant(ctx, channel.TenantId)
-	if err != nil || conf == nil || conf.AutoDeleteConfig == nil {
-		g.Log().Warningf(ctx, "读取租户频道自动删除配置失败 tenant:%d err:%+v", channel.TenantId, err)
+	if channel.AutoDeleteEnabled != 1 {
 		return
 	}
-	if conf.Enabled != 1 {
+	conf, err := service.SysConfig().AutoDeleteConfigForTenant(ctx, channel.TenantId)
+	if err != nil || conf == nil || conf.AutoDeleteConfig == nil {
+		g.Log().Warningf(ctx, "读取租户频道自动删除规则失败 tenant:%d err:%+v", channel.TenantId, err)
 		return
 	}
 	keyword := matchedAutoDeleteKeyword(text, conf.Keywords)
@@ -112,6 +112,11 @@ func (s *sSysPublish) handleTelegramAutoDelete(ctx context.Context, botId int64,
 	if keyword == "" {
 		return
 	}
+	messageLock := lock.Mutex(fmt.Sprintf("youban_publish:auto_delete:%d:%d", channel.Id, msg.ID))
+	if err = messageLock.TryLock(ctx); err != nil {
+		return
+	}
+	defer func() { _ = messageLock.Unlock(context.Background()) }()
 	botItem, err := s.deleteMatchedTelegramMessageWithChannelBots(ctx, botId, channel, strconv.FormatInt(msg.Chat.ID, 10), msg.ID)
 	if botItem == nil || botItem.Id <= 0 || (err != nil && !isTelegramMessageAlreadyDeletedError(err)) {
 		if err != nil {
@@ -129,56 +134,6 @@ func (s *sSysPublish) handleTelegramAutoDelete(ctx context.Context, botId int64,
 		return
 	}
 	s.appendAutoDeleteLog(ctx, channel, botItem.Id, msg, keyword, "success", "频道消息命中关键词，已自动删除")
-}
-
-func (s *sSysPublish) handleGotdAutoDelete(ctx context.Context, tenantId int64, msg *tg.Message) {
-	if msg == nil || msg.ID <= 0 || strings.TrimSpace(msg.Message) == "" {
-		return
-	}
-	chatIds := gotdMessageChatIds(msg)
-	channel, err := s.autoDeleteChannelByChatIds(ctx, tenantId, chatIds)
-	if err != nil || channel == nil || channel.Id <= 0 {
-		if err != nil {
-			autoDeleteWarn(ctx, "gotd_channel_lookup", "频道自动删除账号监听查询频道失败 tenant:%d chats:%s err:%+v", tenantId, strings.Join(chatIds, ","), err)
-		}
-		return
-	}
-	conf, err := service.SysConfig().AutoDeleteConfigForTenant(ctx, channel.TenantId)
-	if err != nil || conf == nil || conf.AutoDeleteConfig == nil {
-		g.Log().Warningf(ctx, "读取租户频道自动删除配置失败 tenant:%d err:%+v", channel.TenantId, err)
-		return
-	}
-	if conf.Enabled != 1 {
-		return
-	}
-	keyword := matchedAutoDeleteKeyword(msg.Message, conf.Keywords)
-	if keyword == "" {
-		keyword = matchedAutoDeleteRule(msg.Message, conf.Rules)
-	}
-	if keyword == "" {
-		return
-	}
-	chatId := normalizeTelegramChannelChatID(channel.TargetChatId)
-	if chatId == "" && len(chatIds) > 0 {
-		chatId = normalizeTelegramChannelChatID(chatIds[0])
-	}
-	botItem, err := s.deleteMatchedTelegramMessageWithChannelBots(ctx, 0, channel, chatId, msg.ID)
-	if botItem == nil || botItem.Id <= 0 || (err != nil && !isTelegramMessageAlreadyDeletedError(err)) {
-		if err != nil {
-			autoDeleteWarn(ctx, "gotd_bot_lookup", "频道自动删除账号监听查询Bot失败 channel:%d err:%+v", channel.Id, err)
-		}
-		return
-	}
-	if err != nil {
-		if isTelegramMessageAlreadyDeletedError(err) {
-			s.appendAutoDeleteLogByValues(ctx, channel, botItem.Id, msg.ID, keyword, "skipped", "频道消息命中关键词，TG消息已不存在")
-			return
-		}
-		s.appendAutoDeleteLogByValues(ctx, channel, botItem.Id, msg.ID, keyword, "failed", err.Error())
-		g.Log().Warningf(ctx, "频道自动删除失败 channel:%d bot:%d message:%d err:%+v", channel.Id, botItem.Id, msg.ID, err)
-		return
-	}
-	s.appendAutoDeleteLogByValues(ctx, channel, botItem.Id, msg.ID, keyword, "success", "账号监听频道消息命中关键词，已自动删除")
 }
 
 func matchedAutoDeleteKeyword(text string, keywords []string) string {
@@ -300,46 +255,7 @@ func (s *sSysPublish) autoDeleteChannel(ctx context.Context, chat models.Chat, t
 		mod = mod.Where("target_chat_id IN(?, ?)", chatId, positiveChatId)
 	}
 	var channel *autoDeleteChannel
-	if err := mod.Fields("id,tenant_id,bot_id_json,bot_permission_status_json,channel_title,target_chat_id").OrderDesc("id").Scan(&channel); err != nil {
-		return nil, err
-	}
-	autoDeleteChannelCacheSet(ctx, cacheKey, channel)
-	return channel, nil
-}
-
-func (s *sSysPublish) autoDeleteChannelByChatIds(ctx context.Context, tenantId int64, chatIds []string) (*autoDeleteChannel, error) {
-	values := make([]string, 0, len(chatIds)*2)
-	for _, chatId := range chatIds {
-		chatId = strings.TrimSpace(chatId)
-		if chatId == "" {
-			continue
-		}
-		values = append(values, chatId)
-		if strings.HasPrefix(chatId, "-100") {
-			values = append(values, strings.TrimPrefix(chatId, "-100"))
-		}
-	}
-	values = uniqueStrings(values)
-	if len(values) == 0 {
-		return nil, nil
-	}
-	cacheKey := s.autoDeleteChannelCacheKey(ctx, fmt.Sprintf("gotd:%d", tenantId), values)
-	if channel, hit := autoDeleteChannelCacheGet(ctx, cacheKey); hit {
-		return channel, nil
-	}
-	var channel *autoDeleteChannel
-	mod := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Where("status", 1).
-		Where("publish_direction", "up").
-		WhereNull("deleted_at").
-		WhereIn("target_chat_id", values)
-	if tenantId > 0 {
-		mod = mod.Where("tenant_id", tenantId)
-	}
-	if err := mod.
-		Fields("id,tenant_id,bot_id_json,channel_title,target_chat_id").
-		OrderDesc("id").
-		Scan(&channel); err != nil {
+	if err := mod.Fields("id,tenant_id,bot_id_json,bot_permission_status_json,channel_title,target_chat_id,auto_delete_enabled").OrderDesc("id").Scan(&channel); err != nil {
 		return nil, err
 	}
 	autoDeleteChannelCacheSet(ctx, cacheKey, channel)

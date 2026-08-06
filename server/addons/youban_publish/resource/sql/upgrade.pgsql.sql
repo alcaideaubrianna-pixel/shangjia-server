@@ -714,6 +714,12 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_profile_state_publish_active" ON "hg_youban_
 
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_obfuscation_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "auto_delete_enabled" smallint NOT NULL DEFAULT 0;
+UPDATE "hg_youban_publish_channel" c
+SET "auto_delete_enabled" = 1
+FROM "hg_youban_publish_tenant_auto_delete_config" t
+WHERE t."tenant_id" = c."tenant_id" AND c."auto_delete_enabled" = 0 AND t."enabled" = 1
+  AND c."publish_direction" = 'up' AND c."status" = 1 AND c."deleted_at" IS NULL;
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "must_send" smallint NOT NULL DEFAULT 0;
 UPDATE "hg_youban_publish_media" SET "must_send" = 0 WHERE EXISTS (SELECT 1 FROM "information_schema"."columns" WHERE "table_schema" = current_schema() AND "table_name" = 'hg_youban_publish_media' AND "column_name" = 'must_send' AND "column_default" LIKE '1%');
 ALTER TABLE "hg_youban_publish_media" ALTER COLUMN "must_send" SET DEFAULT 0;

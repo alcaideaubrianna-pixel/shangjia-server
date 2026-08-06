@@ -218,6 +218,7 @@ type autoDeleteChannel struct {
 	BotPermissionStatusJson string `json:"botPermissionStatusJson"`
 	ChannelTitle            string `json:"channelTitle"`
 	TargetChatId            string `json:"targetChatId"`
+	AutoDeleteEnabled       int    `json:"autoDeleteEnabled"`
 }
 
 type autoDeleteChannelCacheItem struct {

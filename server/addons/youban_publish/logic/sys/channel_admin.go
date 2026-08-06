@@ -264,10 +264,14 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 			in.PublishVisible = identity.PublishVisible
 			in.AntiScanEnabled = identity.AntiScanEnabled
 			in.TextObfuscationEnabled = identity.TextObfuscationEnabled
+			in.AutoDeleteEnabled = identity.AutoDeleteEnabled
 			if len(in.BotIds) == 0 {
 				in.BotIds = existingBotIds
 			}
 		}
+	}
+	if isCreate && in.AutoDeleteEnabled == 0 {
+		in.AutoDeleteEnabled = 1
 	}
 	botJSON, err := encodeBotIds(in.BotIds)
 	if err != nil {
@@ -292,6 +296,7 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		"publish_visible":            in.PublishVisible,
 		"anti_scan_enabled":          in.AntiScanEnabled,
 		"text_obfuscation_enabled":   in.TextObfuscationEnabled,
+		"auto_delete_enabled":        in.AutoDeleteEnabled,
 		"bot_id_json":                botJSON,
 		"bot_permission_status_json": permissionStatusJSON,
 		"remark":                     in.Remark,
@@ -336,6 +341,7 @@ type channelStableIdentity struct {
 	PublishVisible         int    `orm:"publish_visible"`
 	AntiScanEnabled        int    `orm:"anti_scan_enabled"`
 	TextObfuscationEnabled int    `orm:"text_obfuscation_enabled"`
+	AutoDeleteEnabled      int    `orm:"auto_delete_enabled"`
 	Deleted                bool   `orm:"deleted"`
 }
 
@@ -351,7 +357,7 @@ func (s *sSysPublish) channelByStableIdentity(ctx context.Context, tenantId int6
 		Where("target_chat_id", targetChatId).
 		Where("publish_direction", publishDirection)
 	err := base.Clone().
-		Fields("id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,is_default_selected,publish_visible,anti_scan_enabled,text_obfuscation_enabled,0 AS deleted").
+		Fields("id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,is_default_selected,publish_visible,anti_scan_enabled,text_obfuscation_enabled,auto_delete_enabled,0 AS deleted").
 		OrderDesc("id").
 		Limit(1).
 		Scan(&channel)
@@ -360,7 +366,7 @@ func (s *sSysPublish) channelByStableIdentity(ctx context.Context, tenantId int6
 	}
 	if channel.Id <= 0 {
 		err = base.Clone().Unscoped().
-			Fields("id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,is_default_selected,publish_visible,anti_scan_enabled,text_obfuscation_enabled,1 AS deleted").
+			Fields("id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,is_default_selected,publish_visible,anti_scan_enabled,text_obfuscation_enabled,auto_delete_enabled,1 AS deleted").
 			WhereNotNull("deleted_at").
 			OrderDesc("id").
 			Limit(1).
