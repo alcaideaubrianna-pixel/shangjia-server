@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -19,15 +20,28 @@ func telegramAccountClientLeaseKey(tgAccountId int64) string {
 	return fmt.Sprintf("%s%d", telegramAccountClientLeaseKeyPrefix, tgAccountId)
 }
 
-func acquireTelegramAccountClientLease(ctx context.Context, tgAccountId int64) (*lock.Lock, error) {
-	if tgAccountId <= 0 {
-		return nil, gerror.New("TG账号无效")
+type telegramAccountBusyError struct {
+	tgAccountId int64
+	err         error
+}
+
+func (e *telegramAccountBusyError) Error() string {
+	if e == nil || e.err == nil {
+		return fmt.Sprintf("TG账号连接正在使用，等待账号连接释放 tgAccountId:%d", e.tgAccountId)
 	}
-	lease := lock.NewConfig(2*time.Minute, time.Second).Mutex(telegramAccountClientLeaseKey(tgAccountId))
-	if err := lease.TryLock(ctx); err != nil {
-		return nil, gerror.Wrapf(err, "TG账号连接正在使用，拒绝创建第二个客户端 tgAccountId:%d", tgAccountId)
+	return fmt.Sprintf("TG账号连接正在使用，等待账号连接释放 tgAccountId:%d: %v", e.tgAccountId, e.err)
+}
+
+func (e *telegramAccountBusyError) Unwrap() error {
+	if e == nil {
+		return nil
 	}
-	return lease, nil
+	return e.err
+}
+
+func isTelegramAccountBusyError(err error) bool {
+	var busyErr *telegramAccountBusyError
+	return errors.As(err, &busyErr)
 }
 
 func waitTelegramAccountClientLease(
@@ -88,8 +102,13 @@ func (s *sSysPublish) runTelegramClientWithAccountLease(ctx context.Context, tgA
 	if run == nil {
 		return gerror.New("Telegram客户端运行函数不能为空")
 	}
-	lease, err := acquireTelegramAccountClientLease(ctx, tgAccountId)
+	lease, err := acquireTelegramAccountClientLeaseWait(ctx, tgAccountId, func(waitErr error) {
+		g.Log().Infof(ctx, "TG账号连接繁忙，等待已有操作完成 tgAccountId:%d err:%+v", tgAccountId, waitErr)
+	})
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, lock.ErrTimeout) {
+			err = &telegramAccountBusyError{tgAccountId: tgAccountId, err: err}
+		}
 		g.Log().Warningf(ctx, "TG账号连接租约获取失败 tgAccountId:%d err:%+v", tgAccountId, err)
 		return err
 	}

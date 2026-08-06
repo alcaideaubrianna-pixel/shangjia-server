@@ -279,8 +279,14 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 			return nil
 		}
 	}
+	if isTelegramNetworkRetryError(err) {
+		s.clearTelegramBotCache()
+	}
 	retryCount := job.RetryCount + 1
 	policy := telegramJobErrorRetryPolicy(err, retryCount)
+	if isTelegramAccountBusyError(err) {
+		retryCount = job.RetryCount
+	}
 	message := policy.Message
 	status := "failed_retry"
 	if policy.Permanent {

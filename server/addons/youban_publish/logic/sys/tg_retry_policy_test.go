@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -25,6 +26,17 @@ func TestTelegramChannelPermissionError(t *testing.T) {
 	}
 	if isTelegramChannelPermissionError(assertError("rpc error: DC is closed")) {
 		t.Fatal("DC is closed must remain a transient connection error")
+	}
+}
+
+func TestTelegramAccountBusyDoesNotBecomePermanentAfterFiveRetries(t *testing.T) {
+	err := &telegramAccountBusyError{tgAccountId: 16, err: context.DeadlineExceeded}
+	policy := telegramJobErrorRetryPolicy(err, telegramRetryMaxCount+1)
+	if policy.Permanent {
+		t.Fatal("account busy must remain retryable")
+	}
+	if policy.RetryDelay <= 0 {
+		t.Fatal("account busy must have a retry delay")
 	}
 }
 

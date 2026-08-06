@@ -959,7 +959,13 @@ func (s *sSysPublish) messagePushJobByOperation(ctx context.Context, operationNo
 
 func (s *sSysPublish) handleMessagePushQueuedJobError(ctx context.Context, job telegramJobRecord, err error) error {
 	retryCount := job.RetryCount + 1
+	if isTelegramNetworkRetryError(err) {
+		s.clearTelegramBotCache()
+	}
 	policy := telegramJobErrorRetryPolicy(err, retryCount)
+	if isTelegramAccountBusyError(err) {
+		retryCount = job.RetryCount
+	}
 	status := sysin.MessagePushStatusFailed
 	dispatchStatus := tgDispatchStatusDone
 	var nextRetryAt any

@@ -33,6 +33,12 @@ func telegramJobErrorRetryPolicy(err error, retryCount int) telegramJobRetryPoli
 			Message:   telegramPermanentSendErrorMessage(err),
 		}
 	}
+	if isTelegramAccountBusyError(err) {
+		return telegramJobRetryPolicy{
+			RetryDelay: 15 * time.Second,
+			Message:    "Telegram账号当前正在执行其他操作，任务将在账号空闲后自动重试",
+		}
+	}
 	if retryCount >= telegramRetryMaxCount {
 		return telegramJobRetryPolicy{
 			Permanent: true,

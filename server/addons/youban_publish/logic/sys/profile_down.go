@@ -332,7 +332,13 @@ func (s *sSysPublish) sendQueuedDownChannelTelegramJob(ctx context.Context, jobI
 
 func (s *sSysPublish) handleDownChannelTelegramJobError(ctx context.Context, job telegramJobRecord, cause error) error {
 	retryCount := job.RetryCount + 1
+	if isTelegramNetworkRetryError(cause) {
+		s.clearTelegramBotCache()
+	}
 	policy := telegramJobErrorRetryPolicy(cause, retryCount)
+	if isTelegramAccountBusyError(cause) {
+		retryCount = job.RetryCount
+	}
 	status := "failed_retry"
 	dispatchStatus := tgDispatchStatusIdle
 	var nextRetryAt interface{} = gtime.Now().Add(policy.RetryDelay)
