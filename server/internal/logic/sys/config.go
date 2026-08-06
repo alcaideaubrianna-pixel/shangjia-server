@@ -129,7 +129,7 @@ func (s *sSysConfig) ensureEpayConfig(ctx context.Context) (err error) {
 	}{
 		{key: "payGMPayGateway", name: "GMPay 网关地址", typ: consts.ConfigTypeString, value: "http://127.0.0.1:18000", sort: 940, tip: "GMPay 网关地址"},
 		{key: "payGMPayPid", name: "GMPay 商户ID", typ: consts.ConfigTypeString, value: "", sort: 950, tip: "GMPay 商户PID"},
-		{key: "payGMPayKey", name: "GMPay Secret Key", typ: consts.ConfigTypeString, value: "", sort: 960, tip: "GMPay API secret_key，用于 MD5 签名"},
+		{key: "payGMPayKey", name: "GMPay Secret Key", typ: consts.ConfigTypeString, value: "", sort: 960, tip: "GMPay API secret_key，用于 HMAC-SHA256 签名"},
 		{key: "payGMPayToken", name: "GMPay 默认代币", typ: consts.ConfigTypeString, value: "usdt", sort: 970, tip: "GMPay 创建订单时的 token"},
 		{key: "payGMPayNetwork", name: "GMPay 默认网络", typ: consts.ConfigTypeString, value: "tron", sort: 980, tip: "GMPay 创建订单时的默认网络"},
 		{key: "payRainbowGateway", name: "彩虹易支付网关地址", typ: consts.ConfigTypeString, value: "https://pay.v8jisu.cn", sort: 990, tip: "彩虹易支付网关地址"},
