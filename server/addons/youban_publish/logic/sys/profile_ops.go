@@ -319,6 +319,31 @@ func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) 
 	return res, err
 }
 
+func (s *sSysPublish) AdminNoteBatchIds(ctx context.Context, in *sysin.NoteListInp) (res *sysin.AdminNoteBatchIdsModel, err error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil {
+		in = &sysin.NoteListInp{}
+	}
+	scope, err := s.adminProfileVisibleScope(ctx, account, &in.ProfileListInp)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.ensureAdminProfileScopeTenants(ctx, scope); err != nil {
+		return nil, err
+	}
+	if scope.Strict && len(scope.AccountIds) == 0 {
+		return &sysin.AdminNoteBatchIdsModel{Ids: []int64{}}, nil
+	}
+	ids, err := s.adminNoteIndexProfileIds(ctx, in, scope.TenantId, scope.TenantIds, scope.AccountIds)
+	if err != nil {
+		return nil, err
+	}
+	return &sysin.AdminNoteBatchIdsModel{Ids: ids, Total: len(ids)}, nil
+}
+
 func adminNoteBoolValue(value bool) int {
 	if value {
 		return 1

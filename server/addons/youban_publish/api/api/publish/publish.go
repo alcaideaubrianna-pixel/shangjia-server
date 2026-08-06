@@ -576,6 +576,15 @@ type AdminNoteListRes struct {
 	*sysin.AdminNotePageModel
 }
 
+type AdminNoteBatchIdsReq struct {
+	g.Meta `path:"/publish/admin/note/batch/ids" method:"get" tags:"上架插件管理端" summary:"获取批量操作资料ID"`
+	sysin.NoteListInp
+}
+
+type AdminNoteBatchIdsRes struct {
+	*sysin.AdminNoteBatchIdsModel
+}
+
 type AdminTagListReq struct {
 	g.Meta `path:"/publish/admin/tag/list" method:"get" tags:"上架插件管理端" summary:"标签列表"`
 	sysin.TagListInp

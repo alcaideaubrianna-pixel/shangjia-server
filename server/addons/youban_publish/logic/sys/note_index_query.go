@@ -53,6 +53,28 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 	return list, hasMore, nextCursor, nil
 }
 
+func (s *sSysPublish) adminNoteIndexProfileIds(ctx context.Context, in *sysin.NoteListInp, tenantId int64, tenantIds []int64, accountIds []int64) ([]int64, error) {
+	if in == nil {
+		in = &sysin.NoteListInp{}
+	}
+	mod := noteIndexModel(ctx).LeftJoin(publishAccountTable+" a", "a.id=i.account_id AND a.deleted_at IS NULL")
+	mod = applyNoteIndexScope(mod, tenantId, tenantIds, accountIds, &in.ProfileListInp)
+	mod = applyNoteIndexFilters(mod, &in.ProfileListInp)
+	var rows []struct {
+		Id int64 `orm:"id"`
+	}
+	if err := mod.Fields("i.profile_id AS id").Group("i.profile_id").Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "获取批量操作资料ID失败")
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row.Id > 0 {
+			ids = append(ids, row.Id)
+		}
+	}
+	return ids, nil
+}
+
 func applyNoteIndexScope(mod *gdb.Model, tenantId int64, tenantIds []int64, accountIds []int64, in *sysin.ProfileListInp) *gdb.Model {
 	if len(tenantIds) > 0 {
 		mod = mod.WhereIn("i.tenant_id", tenantIds)

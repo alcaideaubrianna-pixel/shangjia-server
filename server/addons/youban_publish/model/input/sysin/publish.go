@@ -768,6 +768,11 @@ type AdminNotePageModel struct {
 	NextCursor string                `json:"nextCursor" dc:"下一页游标"`
 }
 
+type AdminNoteBatchIdsModel struct {
+	Ids   []int64 `json:"ids" dc:"批量执行资料ID"`
+	Total int     `json:"total" dc:"资料总数"`
+}
+
 type FollowNoteMediaModel struct {
 	Id                int64  `json:"id" dc:"ID"`
 	ProfileId         int64  `json:"profileId" dc:"资料ID"`

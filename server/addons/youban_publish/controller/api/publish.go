@@ -738,6 +738,19 @@ func (c *cPublishAdmin) NoteList(ctx context.Context, req *publish.AdminNoteList
 	return &publish.AdminNoteListRes{AdminNotePageModel: data}, nil
 }
 
+func (c *cPublishAdmin) NoteBatchIds(ctx context.Context, req *publish.AdminNoteBatchIdsReq) (res *publish.AdminNoteBatchIdsRes, err error) {
+	data, err := service.SysPublish().AdminNoteBatchIds(ctx, &req.NoteListInp)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		data = &sysin.AdminNoteBatchIdsModel{Ids: []int64{}}
+	} else if data.Ids == nil {
+		data.Ids = []int64{}
+	}
+	return &publish.AdminNoteBatchIdsRes{AdminNoteBatchIdsModel: data}, nil
+}
+
 func (c *cPublishAdmin) TagList(ctx context.Context, req *publish.AdminTagListReq) (res *publish.AdminTagListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminTagList(ctx, &req.TagListInp)
 	if err != nil {

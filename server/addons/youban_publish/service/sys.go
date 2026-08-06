@@ -256,6 +256,7 @@ type ISysPublish interface {
 	AdminTgMessageRepairStart(ctx context.Context, in *sysin.TgMessageRepairStartInp) (res *sysin.TgMessageRepairModel, err error)
 	AdminTgMessageRepairView(ctx context.Context, in *sysin.TgMessageRepairViewInp) (res *sysin.TgMessageRepairModel, err error)
 	AdminNoteList(ctx context.Context, in *sysin.NoteListInp) (res *sysin.AdminNotePageModel, err error)
+	AdminNoteBatchIds(ctx context.Context, in *sysin.NoteListInp) (res *sysin.AdminNoteBatchIdsModel, err error)
 	AdminTagList(ctx context.Context, in *sysin.TagListInp) (list []*sysin.TagModel, totalCount int, err error)
 	AdminTagSave(ctx context.Context, in *sysin.TagSaveInp) (err error)
 	AdminTagDelete(ctx context.Context, in *sysin.TagDeleteInp) (err error)
