@@ -33,6 +33,7 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
+// 仅触发推送
 type telegramChannelSendPolicy struct {
 	AntiScanEnabled        bool
 	TextObfuscationEnabled bool
@@ -222,6 +223,7 @@ func telegramAntiScanCandidateScore(source telegramAntiScanHash, candidate teleg
 		if previousPDistance <= telegramAntiScanHashDistanceTarget && previousDDistance <= telegramAntiScanHashDistanceTarget {
 			passed = false
 		}
+
 		if distance := previousPDistance + previousDDistance; distance < score {
 			score = distance
 		}
