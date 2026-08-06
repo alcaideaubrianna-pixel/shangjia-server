@@ -357,6 +357,7 @@ func (s *sSysPublish) channelByStableIdentity(ctx context.Context, tenantId int6
 		Where("target_chat_id", targetChatId).
 		Where("publish_direction", publishDirection)
 	err := base.Clone().
+		WhereNull("deleted_at").
 		Fields("id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,is_default_selected,publish_visible,anti_scan_enabled,text_obfuscation_enabled,auto_delete_enabled,0 AS deleted").
 		OrderDesc("id").
 		Limit(1).
@@ -365,7 +366,7 @@ func (s *sSysPublish) channelByStableIdentity(ctx context.Context, tenantId int6
 		return nil, gerror.Wrap(err, "读取频道稳定标识失败")
 	}
 	if channel.Id <= 0 {
-		err = base.Clone().Unscoped().
+		err = base.Clone().
 			Fields("id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,is_default_selected,publish_visible,anti_scan_enabled,text_obfuscation_enabled,auto_delete_enabled,1 AS deleted").
 			WhereNotNull("deleted_at").
 			OrderDesc("id").
@@ -427,11 +428,7 @@ func (s *sSysPublish) AdminChannelDelete(ctx context.Context, in *sysin.ChannelD
 	if _, err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		WhereIn("id", in.Ids).
 		Where("tenant_id", account.TenantId).
-		Data(g.Map{
-			"deleted_by": account.Id,
-			"deleted_at": gtime.Now(),
-		}).
-		Update(); err != nil {
+		Delete(); err != nil {
 		return gerror.Wrap(err, "删除频道配置失败")
 	}
 	s.refreshAutoDeleteChannelCache(ctx)
@@ -445,11 +442,7 @@ func (s *sSysPublish) ServerChannelDelete(ctx context.Context, in *sysin.Channel
 	in.Ids = uniqueIds(in.Ids)
 	if _, err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		WhereIn("id", in.Ids).
-		Data(g.Map{
-			"deleted_by": contexts.GetUserId(ctx),
-			"deleted_at": gtime.Now(),
-		}).
-		Update(); err != nil {
+		Delete(); err != nil {
 		return gerror.Wrap(err, "删除频道配置失败")
 	}
 	s.refreshAutoDeleteChannelCache(ctx)
