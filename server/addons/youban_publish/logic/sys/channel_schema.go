@@ -35,7 +35,7 @@ func ensurePublishChannelPgsqlColumns(ctx context.Context) error {
 		`ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "publish_visible" smallint NOT NULL DEFAULT 1`,
 		`ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_enabled" smallint NOT NULL DEFAULT 0`,
 		`ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "text_obfuscation_enabled" smallint NOT NULL DEFAULT 0`,
-		`ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "auto_delete_enabled" smallint NOT NULL DEFAULT 0`,
+		`ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "auto_delete_enabled" smallint NOT NULL DEFAULT 1`,
 		`ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "bot_permission_status_json" text NOT NULL DEFAULT '[]'`,
 	}
 	for _, statement := range statements {
@@ -58,7 +58,7 @@ func ensurePublishChannelMysqlColumns(ctx context.Context) error {
 		"ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `publish_visible` tinyint(1) NOT NULL DEFAULT '1' COMMENT '上架端资料选择可见' AFTER `is_default_selected`",
 		"ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '频道防扫图开关' AFTER `publish_visible`",
 		"ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `text_obfuscation_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '频道文本混淆开关' AFTER `anti_scan_enabled`",
-		"ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `auto_delete_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '频道自动删除开关' AFTER `text_obfuscation_enabled`",
+		"ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `auto_delete_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '频道自动删除开关' AFTER `text_obfuscation_enabled`",
 		"ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `bot_permission_status_json` text NOT NULL COMMENT '频道Bot权限检测结果JSON' AFTER `bot_id_json`",
 	}
 	for _, statement := range statements {
