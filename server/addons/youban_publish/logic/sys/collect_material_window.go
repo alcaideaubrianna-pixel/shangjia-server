@@ -27,6 +27,7 @@ const (
 	collectMaterialRolePending             = "pending"
 	collectMaterialRoleDisplay             = "display"
 	collectMaterialRoleVerify              = "verify"
+	collectMaterialGroupCollecting         = "group_collecting"
 	collectMaterialGroupWaitingVerify      = "waiting_verify"
 )
 
@@ -286,7 +287,7 @@ func (s *sSysPublish) markCollectMaterialWaitingVerify(ctx context.Context, even
 	_, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Where("id", eventID).
 		Where("material_role", collectMaterialRolePending).
-		Where("material_group_status IS NULL OR material_group_status = '' OR material_group_status = ?", collectMaterialGroupWaitingVerify).
+		Where("material_group_status IS NULL OR material_group_status = '' OR material_group_status IN (?, ?)", collectMaterialGroupWaitingVerify, collectMaterialGroupCollecting).
 		Data(g.Map{
 			"material_group_status": collectMaterialGroupWaitingVerify,
 			"updated_at":            gtime.Now(),
