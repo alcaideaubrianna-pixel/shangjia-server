@@ -921,8 +921,20 @@ func shouldMarkBotOffline(err error) bool {
 	if err == nil || isIgnorableTelegramError(err) {
 		return false
 	}
-	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "unauthorized") || strings.Contains(text, "token") || strings.Contains(text, "not found") || strings.Contains(text, "forbidden")
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	if strings.Contains(text, "forbidden") ||
+		strings.Contains(text, "bot was blocked by the user") ||
+		strings.Contains(text, "user is deactivated") ||
+		strings.Contains(text, "chat not found") ||
+		strings.Contains(text, "message to delete not found") {
+		return false
+	}
+	return strings.Contains(text, "unauthorized") ||
+		strings.Contains(text, "invalid bot token") ||
+		strings.Contains(text, "bot token is invalid") ||
+		strings.Contains(text, "token is invalid") ||
+		text == "not found" ||
+		text == "not found, not found"
 }
 
 func telegramUserIdFromCtx(ctx context.Context) string {
