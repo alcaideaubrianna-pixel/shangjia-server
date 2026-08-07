@@ -49,7 +49,11 @@ func (s *sSysPublish) profilePublishSource(ctx context.Context, profileId, tenan
 }
 
 func (s *sSysPublish) submitProfilePublish(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool) error {
-	return s.submitProfilePublishWithMeta(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, telegramProfilePublishMeta{})
+	return s.submitProfilePublishWithMetaAndDispatch(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, telegramProfilePublishMeta{}, true)
+}
+
+func (s *sSysPublish) submitProfilePublishDeferred(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool) error {
+	return s.submitProfilePublishWithMetaAndDispatch(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, telegramProfilePublishMeta{}, false)
 }
 
 type telegramProfilePublishMeta struct {
@@ -60,6 +64,10 @@ type telegramProfilePublishMeta struct {
 }
 
 func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta) error {
+	return s.submitProfilePublishWithMetaAndDispatch(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, meta, true)
+}
+
+func (s *sSysPublish) submitProfilePublishWithMetaAndDispatch(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta, dispatch bool) error {
 	source, err := s.profilePublishSource(ctx, profileId, tenantId, accountId, requireOnline)
 	if err != nil {
 		return err
@@ -89,7 +97,11 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 		return err
 	}
 	for _, jobId := range jobIds {
-		if err = s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
+		enqueue := s.enqueueTelegramJob
+		if !dispatch {
+			enqueue = s.enqueueTelegramJobDeferred
+		}
+		if err = enqueue(ctx, jobId, 0); err != nil {
 			message := "Redis调度失败，等待数据库调度器恢复：" + err.Error()
 			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
 				"dispatch_status": tgDispatchStatusIdle, "last_dispatch_error": message, "updated_at": gtime.Now(),

@@ -120,12 +120,20 @@ func (e *tgRetryAfterError) Unwrap() error {
 }
 
 func (s *sSysPublish) enqueueTelegramJob(ctx context.Context, jobId int64, delay time.Duration) error {
+	return s.scheduleTelegramJobWithDispatch(ctx, jobId, delay, true)
+}
+
+func (s *sSysPublish) enqueueTelegramJobDeferred(ctx context.Context, jobId int64, delay time.Duration) error {
+	return s.scheduleTelegramJobWithDispatch(ctx, jobId, delay, false)
+}
+
+func (s *sSysPublish) scheduleTelegramJobWithDispatch(ctx context.Context, jobId int64, delay time.Duration, dispatch bool) error {
 	if delay <= 0 {
 		if windowDelay, enabled := s.telegramPublishWindowDelay(ctx); enabled && windowDelay > 0 {
 			delay = windowDelay
 		}
 	}
-	return s.scheduleTelegramJob(ctx, jobId, delay)
+	return s.scheduleTelegramJobWithOptions(ctx, jobId, delay, dispatch)
 }
 
 func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64, delay time.Duration) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -24,6 +25,7 @@ const (
 	fullPushBatchCompleted    = "completed"
 	fullPushBatchPartial      = "partial_failed"
 	fullPushBatchFailed       = "failed"
+	fullPushSchedulerLockKey  = "youban_publish:full_push:scheduler"
 )
 
 type fullPushBatchRecord struct {
@@ -134,7 +136,7 @@ func (s *sSysPublish) fullPushSnapshot(ctx context.Context, tenantId int64) (*fu
 }
 
 func (s *sSysPublish) runFullPushBatchScheduler(ctx context.Context) {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(fullPushSchedulerInterval(ctx))
 	defer ticker.Stop()
 	time.Sleep(time.Second)
 	for {
@@ -142,7 +144,7 @@ func (s *sSysPublish) runFullPushBatchScheduler(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := s.dispatchFullPushBatches(ctx, 5); err != nil && ctx.Err() == nil {
+			if err := s.dispatchFullPushBatches(ctx, fullPushCandidateCount(ctx)); err != nil && ctx.Err() == nil {
 				g.Log().Warningf(ctx, "调度全量推送批次失败：%+v", err)
 			}
 		}
@@ -150,30 +152,73 @@ func (s *sSysPublish) runFullPushBatchScheduler(ctx context.Context) {
 }
 
 func (s *sSysPublish) dispatchFullPushBatches(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = fullPushCandidateCount(ctx)
+	}
 	lockCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	lock := hglock.NewConfig(15*time.Second, 100*time.Millisecond).Mutex("youban_publish:full_push_batch")
+	lock := hglock.NewConfig(15*time.Second, 100*time.Millisecond).Mutex(fullPushSchedulerLockKey)
 	if err := lock.TryLock(lockCtx); err != nil {
 		if gerror.Is(err, hglock.ErrLockFailed) {
 			return nil
 		}
 		return gerror.Wrap(err, "获取全量推送调度锁失败")
 	}
-	defer s.releaseTelegramChannelLease(context.Background(), lock)
 	var batches []fullPushBatchRecord
 	if err := g.DB().Model(publishFullPushBatchTable).Safe().Ctx(ctx).
 		WhereIn("status", []string{fullPushBatchPending, fullPushBatchRunning, fullPushBatchDispatching}).
+		OrderAsc("updated_at").
 		OrderAsc("id").
 		Limit(limit).
 		Scan(&batches); err != nil {
+		s.releaseTelegramChannelLease(context.Background(), lock)
 		return gerror.Wrap(err, "读取待处理全量推送批次失败")
 	}
+	s.releaseTelegramChannelLease(context.Background(), lock)
+
+	workerCount := fullPushExpandWorkerCount(ctx)
+	semaphore := make(chan struct{}, workerCount)
+	var waitGroup sync.WaitGroup
 	for _, batch := range batches {
-		if err := s.advanceFullPushBatch(ctx, batch, 200); err != nil {
-			g.Log().Warningf(ctx, "推进全量推送批次失败 batch:%s err:%+v", batch.BatchNo, err)
-		}
+		batch := batch
+		semaphore <- struct{}{}
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			defer func() { <-semaphore }()
+			lease, ok, err := s.tryFullPushExpandLease(ctx, batch.ChannelId)
+			if err != nil {
+				g.Log().Warningf(ctx, "获取全量推送频道展开租约失败 batch:%s channelId:%d err:%+v", batch.BatchNo, batch.ChannelId, err)
+				return
+			}
+			if !ok {
+				return
+			}
+			defer s.releaseTelegramChannelLease(context.Background(), lease)
+			if err = s.advanceFullPushBatch(ctx, batch, fullPushPageSize(ctx)); err != nil {
+				g.Log().Warningf(ctx, "推进全量推送批次失败 batch:%s err:%+v", batch.BatchNo, err)
+			}
+		}()
 	}
+	waitGroup.Wait()
 	return nil
+}
+
+func (s *sSysPublish) tryFullPushExpandLease(ctx context.Context, channelId int64) (*hglock.Lock, bool, error) {
+	if channelId <= 0 {
+		return nil, false, gerror.New("全量推送频道无效")
+	}
+	key := fmt.Sprintf("youban_publish:full_push:expand:channel:%d", channelId)
+	lease := hglock.NewConfig(fullPushExpandLeaseTTL(ctx), 100*time.Millisecond).Mutex(key)
+	lockCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+	defer cancel()
+	if err := lease.TryLock(lockCtx); err != nil {
+		if gerror.Is(err, hglock.ErrLockFailed) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return lease, true, nil
 }
 
 func (s *sSysPublish) advanceFullPushBatch(ctx context.Context, batch fullPushBatchRecord, limit int) error {
@@ -335,7 +380,7 @@ func fullPushOnlineProfileBaseModel(ctx context.Context, tenantId int64) *gdb.Mo
 }
 
 func (s *sSysPublish) enqueueFullPushProfile(ctx context.Context, batch fullPushBatchRecord, profile fullPushProfile) error {
-	err := s.submitProfilePublish(ctx, profile.ProfileId, profile.TenantId, profile.AccountId, batch.RequestedBy,
+	err := s.submitProfilePublishDeferred(ctx, profile.ProfileId, profile.TenantId, profile.AccountId, batch.RequestedBy,
 		fullPushProfileOperationNo(batch.BatchNo, profile.ProfileId), []int64{batch.ChannelId}, true)
 	if errors.Is(err, errPublishProfileUnavailable) {
 		return nil

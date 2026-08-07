@@ -368,6 +368,12 @@ youbanPublish:
     # 运行角色。默认 all 保持单机完整能力；SAE 可按应用配置 web/account/scheduler/worker，
     # 或按队列进一步拆为 push-worker/media-worker/background-worker。支持数组内逗号组合。
     roles: [ "all" ]
+  fullPush:
+    expandWorkerCount: 4
+    pageSize: 100
+    candidateCount: 20
+    schedulerIntervalSeconds: 2
+    expandLeaseSeconds: 60
 
 
 # 悦伴全局 Bot

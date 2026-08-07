@@ -53,6 +53,10 @@ func (s *sSysPublish) runTelegramChannelScheduler(ctx context.Context) {
 }
 
 func (s *sSysPublish) scheduleTelegramJob(ctx context.Context, jobId int64, delay time.Duration) error {
+	return s.scheduleTelegramJobWithOptions(ctx, jobId, delay, true)
+}
+
+func (s *sSysPublish) scheduleTelegramJobWithOptions(ctx context.Context, jobId int64, delay time.Duration, dispatch bool) error {
 	if jobId <= 0 {
 		return nil
 	}
@@ -85,7 +89,7 @@ func (s *sSysPublish) scheduleTelegramJob(ctx context.Context, jobId int64, dela
 	if shouldInvalidateTelegramSchedulerChannelCache(job, delay) {
 		s.invalidateTelegramSchedulerChannelCache(ctx, job.ChannelId, job.TargetChatId)
 	}
-	if delay <= 0 {
+	if dispatch && delay <= 0 {
 		return s.dispatchTelegramDueJobs(ctx, 10)
 	}
 	return nil
