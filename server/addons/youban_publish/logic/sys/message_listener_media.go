@@ -50,6 +50,58 @@ func (s *sSysPublish) listenerNotifyMedia(ctx context.Context, plan accountListe
 	return true, nil
 }
 
+func (s *sSysPublish) listenerNotifyByAccount(ctx context.Context, plan accountListenPlanRuntime, notifyChatId string, sourceChatId string, messages []*tg.Message, text string, buttonLabel string, buttonURL string, includeMedia bool) error {
+	channels, err := s.messagePushCachedTargets(ctx, plan.TgAccountId, []string{notifyChatId}, plan.TenantId)
+	if err != nil {
+		return gerror.Wrap(err, "协议号无法读取通知群聊，请确认账号已加入群聊并刷新群聊缓存")
+	}
+	if len(channels) != 1 || channels[0] == nil {
+		return gerror.New("协议号未找到通知群聊，请确认账号已加入群聊并刷新群聊缓存")
+	}
+	media := []*telegramMediaItem(nil)
+	if includeMedia {
+		media, err = s.listenerMessageMediaItems(ctx, plan, sourceChatId, messages)
+		if err != nil {
+			return err
+		}
+		if len(media) == 0 {
+			return gerror.New("协议号兜底未读取到可推送媒体")
+		}
+	}
+	caption := listenerAccountFallbackText(text, buttonLabel, buttonURL, len(media) > 0)
+	_, err = s.sendMessageTemplateByTgAccount(ctx, plan.TgAccountId, channels[0], telegramRichTextHTML(caption), media, "")
+	if err != nil {
+		return gerror.Wrap(err, "协议号推送监听通知失败")
+	}
+	return nil
+}
+
+func shouldFallbackListenerBotToAccount(err error) bool {
+	if err == nil || isTelegramNetworkRetryError(err) {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return !strings.Contains(message, "too many requests") &&
+		!strings.Contains(message, "retry after") &&
+		!strings.Contains(message, "flood_wait")
+}
+
+func listenerAccountFallbackText(text string, buttonLabel string, buttonURL string, mediaCaption bool) string {
+	text = strings.TrimSpace(text)
+	buttonURL = strings.TrimSpace(buttonURL)
+	if buttonURL != "" {
+		buttonLabel = strings.TrimSpace(buttonLabel)
+		if buttonLabel == "" {
+			buttonLabel = "查看用户"
+		}
+		text = strings.TrimSpace(text + "\n\n" + `<a href="` + telegramEscapeText(buttonURL) + `">` + telegramEscapeText(buttonLabel) + `</a>`)
+	}
+	if mediaCaption {
+		return truncateTelegramCaption(text)
+	}
+	return text
+}
+
 func (s *sSysPublish) listenerMessageMediaItems(ctx context.Context, plan accountListenPlanRuntime, sourceChatId string, messages []*tg.Message) ([]*telegramMediaItem, error) {
 	type mediaResult struct {
 		index int

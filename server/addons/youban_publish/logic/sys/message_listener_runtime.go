@@ -422,6 +422,15 @@ func (s *sSysPublish) listenerNotifyMatch(ctx context.Context, plan accountListe
 	mediaSent, notifyErr := s.listenerNotifyMedia(ctx, plan, notifyChatId, sourceChatId, sourceMessages, text, buttonLabel, buttonURL)
 	if notifyErr != nil {
 		g.Log().Warningf(ctx, "监听媒体推送失败 plan:%d target:%d notifyChat:%s sourceChat:%s messages:%d err:%+v", plan.Id, target.Id, notifyChatId, sourceChatId, len(sourceMessages), notifyErr)
+		if mediaSent && shouldFallbackListenerBotToAccount(notifyErr) {
+			fallbackErr := s.listenerNotifyByAccount(ctx, plan, notifyChatId, sourceChatId, sourceMessages, text, buttonLabel, buttonURL, true)
+			if fallbackErr == nil {
+				g.Log().Infof(ctx, "监听媒体Bot推送失败，协议号兜底成功 plan:%d target:%d notifyChat:%s tgAccountId:%d", plan.Id, target.Id, notifyChatId, plan.TgAccountId)
+				notifyErr = nil
+			} else {
+				notifyErr = gerror.Wrapf(fallbackErr, "Bot推送失败且协议号兜底失败，Bot错误：%v", notifyErr)
+			}
+		}
 	}
 	if !mediaSent {
 		textErr := botService.SysBot().NotifyRich(ctx, &botsysin.NotifyRichInp{
@@ -434,6 +443,15 @@ func (s *sSysPublish) listenerNotifyMatch(ctx context.Context, plan accountListe
 		})
 		if textErr != nil {
 			g.Log().Warningf(ctx, "监听文本推送失败 plan:%d target:%d notifyChat:%s err:%+v", plan.Id, target.Id, notifyChatId, textErr)
+			if shouldFallbackListenerBotToAccount(textErr) {
+				fallbackErr := s.listenerNotifyByAccount(ctx, plan, notifyChatId, sourceChatId, nil, text, buttonLabel, buttonURL, false)
+				if fallbackErr == nil {
+					g.Log().Infof(ctx, "监听文本Bot推送失败，协议号兜底成功 plan:%d target:%d notifyChat:%s tgAccountId:%d", plan.Id, target.Id, notifyChatId, plan.TgAccountId)
+					textErr = nil
+				} else {
+					textErr = gerror.Wrapf(fallbackErr, "Bot推送失败且协议号兜底失败，Bot错误：%v", textErr)
+				}
+			}
 		}
 		if notifyErr == nil {
 			notifyErr = textErr
