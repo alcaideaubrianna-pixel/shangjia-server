@@ -31,6 +31,7 @@ import (
 const (
 	tgLoginStatusPending          = "pending"
 	tgLoginStatusScanning         = "scanning"
+	tgLoginStatusCodeRequired     = "code_required"
 	tgLoginStatusPasswordRequired = "password_required"
 	tgLoginStatusAuthorized       = "authorized"
 	tgLoginStatusFailed           = "failed"
@@ -46,7 +47,10 @@ type telegramLoginRuntime struct {
 	tgAccountName    string
 	tgAccountRemark  string
 	tgLoginSessionId int64
+	phone            string
+	codeHash         string
 	cancel           context.CancelFunc
+	codeCh           chan string
 	passwordCh       chan string
 }
 
@@ -217,6 +221,114 @@ func (s *sSysPublish) runTelegramLogin(ctx context.Context, runtime *telegramLog
 	})
 }
 
+func (s *sSysPublish) runTelegramPhoneLogin(ctx context.Context, runtime *telegramLoginRuntime, conf *model.TelegramConfig, tenantId int64, accountId int64, sessionKey string, updateStatus telegramLoginStatusUpdater) {
+	defer func() {
+		runtime.cancel()
+		s.removeLoginRuntime(runtime.loginToken)
+	}()
+
+	storage, err := s.telegramSessionStorage(sessionKey)
+	if err != nil {
+		s.markTelegramLoginFailed(context.Background(), runtime.loginToken, accountId, err.Error(), updateStatus)
+		return
+	}
+	options := telegram.Options{SessionStorage: storage}
+	if resolver, resolverErr := telegramMTProtoResolver(conf.ProxyUrl); resolverErr != nil {
+		s.markTelegramLoginFailed(context.Background(), runtime.loginToken, accountId, resolverErr.Error(), updateStatus)
+		return
+	} else if resolver != nil {
+		options.Resolver = resolver
+	}
+
+	client := telegram.NewClient(conf.AppId, conf.AppHash, options)
+	err = client.Run(ctx, func(runCtx context.Context) error {
+		sentCode, sendErr := client.Auth().SendCode(runCtx, runtime.phone, auth.SendCodeOptions{})
+		if sendErr != nil {
+			return friendlyTelegramPhoneError(sendErr)
+		}
+		switch sent := sentCode.(type) {
+		case *tg.AuthSentCodeSuccess:
+			authorization, ok := sent.Authorization.(*tg.AuthAuthorization)
+			if !ok {
+				return gerror.New("该手机号尚未注册 Telegram，请先注册后再登录")
+			}
+			return s.finishAdminTgAccountLogin(runCtx, runtime, tenantId, accountId, sessionKey, authorization)
+		case *tg.AuthSentCode:
+			runtime.codeHash = sent.PhoneCodeHash
+		default:
+			return gerror.New("Telegram未返回可用的验证码登录方式")
+		}
+
+		if err := updateStatus(runCtx, runtime.loginToken, accountId, g.Map{
+			"status":        tgLoginStatusCodeRequired,
+			"error_message": "",
+			"expires_at":    gtime.Now().Add(5 * time.Minute),
+		}); err != nil {
+			return err
+		}
+
+		for {
+			select {
+			case <-runCtx.Done():
+				return runCtx.Err()
+			case code := <-runtime.codeCh:
+				authorization, signInErr := client.Auth().SignIn(runCtx, runtime.phone, code, runtime.codeHash)
+				if telegramPasswordNeeded(signInErr) {
+					if err := updateStatus(runCtx, runtime.loginToken, accountId, g.Map{
+						"status":        tgLoginStatusPasswordRequired,
+						"error_message": "",
+						"expires_at":    gtime.Now().Add(5 * time.Minute),
+					}); err != nil {
+						return err
+					}
+					authorization, signInErr = s.waitTelegramPassword(runCtx, runtime, client)
+				}
+				if tgerr.Is(signInErr, "PHONE_CODE_INVALID") || tgerr.Is(signInErr, "PHONE_CODE_EMPTY") {
+					_ = updateStatus(runCtx, runtime.loginToken, accountId, g.Map{
+						"status":        tgLoginStatusCodeRequired,
+						"error_message": "验证码错误，请重新输入",
+						"expires_at":    gtime.Now().Add(5 * time.Minute),
+					})
+					continue
+				}
+				if signInErr != nil {
+					return friendlyTelegramPhoneError(signInErr)
+				}
+				return s.finishAdminTgAccountLogin(runCtx, runtime, tenantId, accountId, sessionKey, authorization)
+			}
+		}
+	})
+	if err == nil || errors.Is(err, context.Canceled) {
+		return
+	}
+	status := tgLoginStatusFailed
+	if errors.Is(err, context.DeadlineExceeded) {
+		status = tgLoginStatusExpired
+	}
+	_ = updateStatus(context.Background(), runtime.loginToken, accountId, g.Map{
+		"status":        status,
+		"error_message": err.Error(),
+	})
+}
+
+func friendlyTelegramPhoneError(err error) error {
+	var signUpRequired *auth.SignUpRequired
+	switch {
+	case errors.As(err, &signUpRequired):
+		return gerror.New("该手机号尚未注册 Telegram，请先注册后再登录")
+	case tgerr.Is(err, "PHONE_NUMBER_INVALID"):
+		return gerror.New("手机号格式不正确，请检查国家区号和号码")
+	case tgerr.Is(err, "PHONE_NUMBER_BANNED"):
+		return gerror.New("该手机号已被 Telegram 限制登录")
+	case tgerr.Is(err, "PHONE_CODE_EXPIRED"):
+		return gerror.New("验证码已过期，请重新发送")
+	case tgerr.Is(err, "FLOOD_WAIT"):
+		return gerror.New("操作过于频繁，请稍后再试")
+	default:
+		return err
+	}
+}
+
 func (s *sSysPublish) waitTelegramPassword(ctx context.Context, runtime *telegramLoginRuntime, client *telegram.Client) (*tg.AuthAuthorization, error) {
 	for {
 		select {
@@ -297,6 +409,10 @@ func (s *sSysPublish) finishAdminTgAccountLogin(ctx context.Context, runtime *te
 		displayName = runtime.tgAccountName
 	}
 	now := gtime.Now()
+	telegramPhone := normalizeStoredTelegramPhone(user.Phone)
+	if telegramPhone == "" {
+		telegramPhone = runtime.phone
+	}
 	authorizedTgAccountId := runtime.tgAccountId
 	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if _, err := tx.Model(publishTgLoginTable).Safe().Ctx(ctx).
@@ -321,7 +437,7 @@ func (s *sSysPublish) finishAdminTgAccountLogin(ctx context.Context, runtime *te
 			"telegram_username":   username,
 			"telegram_first_name": user.FirstName,
 			"telegram_last_name":  user.LastName,
-			"telegram_phone":      user.Phone,
+			"telegram_phone":      telegramPhone,
 			"telegram_is_bot":     boolToInt(user.Bot),
 			"session_key":         sessionKey,
 			"login_token":         runtime.loginToken,
@@ -376,6 +492,19 @@ func (s *sSysPublish) finishAdminTgAccountLogin(ctx context.Context, runtime *te
 
 func telegramPasswordNeeded(err error) bool {
 	return errors.Is(err, auth.ErrPasswordAuthNeeded) || tgerr.Is(err, "SESSION_PASSWORD_NEEDED")
+}
+
+func normalizeStoredTelegramPhone(phone string) string {
+	digits := make([]rune, 0, len(phone))
+	for _, char := range strings.TrimSpace(phone) {
+		if char >= '0' && char <= '9' {
+			digits = append(digits, char)
+		}
+	}
+	if len(digits) == 0 {
+		return ""
+	}
+	return "+" + string(digits)
 }
 
 func (s *sSysPublish) telegramLoginById(ctx context.Context, id int64, accountId int64) (*sysin.TelegramLoginModel, error) {

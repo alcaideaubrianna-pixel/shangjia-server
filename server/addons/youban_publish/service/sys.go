@@ -129,6 +129,8 @@ type ISysPublish interface {
 	AdminBotRefresh(ctx context.Context, in *sysin.BotRefreshInp) (list []*sysin.BotRefreshModel, err error)
 	AdminTgAccountList(ctx context.Context, in *sysin.TgAccountListInp) (list []*sysin.TgAccountModel, totalCount int, err error)
 	AdminTgAccountStartLogin(ctx context.Context, in *sysin.TgAccountStartLoginInp) (res *sysin.TgAccountModel, err error)
+	AdminTgAccountPhoneStart(ctx context.Context, in *sysin.TgAccountPhoneStartInp) (res *sysin.TgAccountModel, err error)
+	AdminTgAccountCode(ctx context.Context, in *sysin.TgAccountCodeInp) (res *sysin.TgAccountModel, err error)
 	AdminTgAccountLoginStatus(ctx context.Context, in *sysin.TgAccountLoginStatusInp) (res *sysin.TgAccountModel, err error)
 	AdminTgAccountPassword(ctx context.Context, in *sysin.TgAccountPasswordInp) (res *sysin.TgAccountModel, err error)
 	AdminTgAccountDelete(ctx context.Context, in *sysin.TgAccountDeleteInp) (err error)

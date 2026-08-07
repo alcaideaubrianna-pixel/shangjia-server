@@ -223,6 +223,24 @@ type AdminTgAccountStartLoginRes struct {
 	*sysin.TgAccountModel
 }
 
+type AdminTgAccountPhoneStartReq struct {
+	g.Meta `path:"/publish/admin/tgAccount/phone/start" method:"post" tags:"上架插件管理端" summary:"发起TG账号手机号登录"`
+	sysin.TgAccountPhoneStartInp
+}
+
+type AdminTgAccountPhoneStartRes struct {
+	*sysin.TgAccountModel
+}
+
+type AdminTgAccountCodeReq struct {
+	g.Meta `path:"/publish/admin/tgAccount/code" method:"post" tags:"上架插件管理端" summary:"提交TG账号登录验证码"`
+	sysin.TgAccountCodeInp
+}
+
+type AdminTgAccountCodeRes struct {
+	*sysin.TgAccountModel
+}
+
 type AdminTgAccountLoginStatusReq struct {
 	g.Meta `path:"/publish/admin/tgAccount/loginStatus" method:"get" tags:"上架插件管理端" summary:"查询TG账号扫码登录状态"`
 	sysin.TgAccountLoginStatusInp

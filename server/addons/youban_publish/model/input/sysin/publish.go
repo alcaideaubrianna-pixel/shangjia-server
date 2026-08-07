@@ -27,6 +27,7 @@ const (
 
 	PublishTgAccountStatusPending    = "pending"
 	PublishTgAccountStatusScanning   = "scanning"
+	PublishTgAccountStatusCode       = "code_required"
 	PublishTgAccountStatusPassword   = "password_required"
 	PublishTgAccountStatusAuthorized = "authorized"
 	PublishTgAccountStatusExpired    = "expired"
@@ -1114,6 +1115,19 @@ type TgAccountStartLoginInp struct {
 	Remark      string `json:"remark" dc:"备注"`
 }
 
+type TgAccountPhoneStartInp struct {
+	TgAccountStartLoginInp
+	Phone string `json:"phone" v:"required#手机号不能为空" dc:"国际格式手机号"`
+}
+
+func (in *TgAccountPhoneStartInp) Filter(ctx context.Context) error {
+	if err := in.TgAccountStartLoginInp.Filter(ctx); err != nil {
+		return err
+	}
+	in.Phone = strings.TrimSpace(in.Phone)
+	return nil
+}
+
 func (in *TgAccountStartLoginInp) Filter(ctx context.Context) error {
 	in.DisplayName = strings.TrimSpace(in.DisplayName)
 	in.Remark = strings.TrimSpace(in.Remark)
@@ -1127,6 +1141,11 @@ type TgAccountLoginStatusInp struct {
 type TgAccountPasswordInp struct {
 	LoginToken string `json:"loginToken" v:"required#登录令牌不能为空" dc:"登录令牌"`
 	Password   string `json:"password" v:"required#二次验证密码不能为空" dc:"二次验证密码"`
+}
+
+type TgAccountCodeInp struct {
+	LoginToken string `json:"loginToken" v:"required#登录令牌不能为空" dc:"登录令牌"`
+	Code       string `json:"code" v:"required#Telegram验证码不能为空" dc:"Telegram验证码"`
 }
 
 type TgAccountDeleteInp struct {

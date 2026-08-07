@@ -130,6 +130,134 @@ func (s *sSysPublish) AdminTgAccountStartLogin(ctx context.Context, in *sysin.Tg
 	return s.adminTgAccountLoginById(ctx, id, current.TenantId, current.Id)
 }
 
+func (s *sSysPublish) AdminTgAccountPhoneStart(ctx context.Context, in *sysin.TgAccountPhoneStartInp) (res *sysin.TgAccountModel, err error) {
+	if in == nil {
+		in = &sysin.TgAccountPhoneStartInp{}
+	}
+	current, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	in.TenantId = current.TenantId
+	if err = in.Filter(ctx); err != nil {
+		return nil, err
+	}
+	phone, err := normalizeTelegramLoginPhone(in.Phone)
+	if err != nil {
+		return nil, err
+	}
+	conf, err := NewSysConfig().GetTelegram(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if conf.AppId <= 0 || strings.TrimSpace(conf.AppHash) == "" {
+		return nil, gerror.New("请先在插件配置中填写Telegram App ID和App Hash")
+	}
+	if in.TgAccountId > 0 {
+		if _, err = s.adminTgAccountById(ctx, in.TgAccountId, current.TenantId); err != nil {
+			return nil, err
+		}
+	}
+
+	s.cancelAccountLogin(current.Id)
+	now := gtime.Now()
+	token := grand.S(40)
+	expiresAt := now.Add(5 * time.Minute)
+	sessionKey, _, err := s.telegramSessionPath(current.TenantId, current.Id, token)
+	if err != nil {
+		return nil, err
+	}
+	id, err := g.DB().Model(publishTgLoginTable).Safe().Ctx(ctx).Data(g.Map{
+		"tenant_id":   current.TenantId,
+		"merchant_id": current.TenantId,
+		"account_id":  current.Id,
+		"login_token": token,
+		"session_key": sessionKey,
+		"status":      tgLoginStatusPending,
+		"expires_at":  expiresAt,
+		"created_at":  now,
+		"updated_at":  now,
+	}).InsertAndGetId()
+	if err != nil {
+		return nil, gerror.Wrap(err, "创建TG账号登录会话失败")
+	}
+
+	loginCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	runtime := &telegramLoginRuntime{
+		loginToken:       token,
+		accountId:        current.Id,
+		tenantId:         current.TenantId,
+		adminTgAccount:   true,
+		tgAccountId:      in.TgAccountId,
+		tgAccountName:    in.DisplayName,
+		tgAccountRemark:  in.Remark,
+		tgLoginSessionId: id,
+		phone:            phone,
+		cancel:           cancel,
+		codeCh:           make(chan string),
+		passwordCh:       make(chan string),
+	}
+	s.storeLoginRuntime(token, runtime)
+	go s.runTelegramPhoneLogin(loginCtx, runtime, conf, current.TenantId, current.Id, sessionKey, s.updateTelegramLoginStatus)
+	return s.adminTgAccountLoginById(ctx, id, current.TenantId, current.Id)
+}
+
+func (s *sSysPublish) AdminTgAccountCode(ctx context.Context, in *sysin.TgAccountCodeInp) (res *sysin.TgAccountModel, err error) {
+	if in == nil || strings.TrimSpace(in.LoginToken) == "" {
+		return nil, gerror.New("登录令牌不能为空")
+	}
+	code := strings.TrimSpace(in.Code)
+	if code == "" {
+		return nil, gerror.New("Telegram验证码不能为空")
+	}
+	current, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	item, err := s.AdminTgAccountLoginStatus(ctx, &sysin.TgAccountLoginStatusInp{LoginToken: in.LoginToken})
+	if err != nil {
+		return nil, err
+	}
+	if item.Status != tgLoginStatusCodeRequired {
+		return nil, gerror.New("当前登录会话不需要验证码")
+	}
+	if item.TenantId != current.TenantId || item.AccountId != current.Id {
+		return nil, gerror.New("TG账号登录会话不存在")
+	}
+	runtime := s.getLoginRuntime(strings.TrimSpace(in.LoginToken), current.Id)
+	if runtime == nil || runtime.codeCh == nil {
+		return nil, gerror.New("登录会话已失效，请重新发起登录")
+	}
+	if err = s.updateTelegramLoginStatus(ctx, strings.TrimSpace(in.LoginToken), current.Id, g.Map{
+		"error_message": "",
+	}); err != nil {
+		return nil, err
+	}
+	select {
+	case runtime.codeCh <- code:
+	case <-time.After(10 * time.Second):
+		return nil, gerror.New("提交Telegram验证码超时，请重试")
+	}
+	return s.waitAdminTgAccountPasswordResult(ctx, strings.TrimSpace(in.LoginToken), current.TenantId, current.Id)
+}
+
+func normalizeTelegramLoginPhone(phone string) (string, error) {
+	phone = strings.TrimSpace(phone)
+	if !strings.HasPrefix(phone, "+") {
+		return "", gerror.New("手机号必须包含国际区号，例如 +8613800138000")
+	}
+	digits := make([]rune, 0, len(phone))
+	for _, char := range phone[1:] {
+		if char >= '0' && char <= '9' {
+			digits = append(digits, char)
+		}
+	}
+	if len(digits) < 7 || len(digits) > 15 {
+		return "", gerror.New("手机号格式不正确，请检查国家区号和号码")
+	}
+	return "+" + string(digits), nil
+}
+
 func (s *sSysPublish) AdminTgAccountLoginStatus(ctx context.Context, in *sysin.TgAccountLoginStatusInp) (res *sysin.TgAccountModel, err error) {
 	if in == nil || strings.TrimSpace(in.LoginToken) == "" {
 		return nil, gerror.New("登录令牌不能为空")
@@ -152,7 +280,7 @@ func (s *sSysPublish) AdminTgAccountLoginStatus(ctx context.Context, in *sysin.T
 			Where("login_token", strings.TrimSpace(in.LoginToken)).
 			Data(g.Map{
 				"status":        sysin.PublishTgAccountStatusExpired,
-				"error_message": "扫码会话已过期",
+				"error_message": "登录会话已过期",
 				"updated_at":    gtime.Now(),
 			}).
 			Update(); err != nil {
@@ -180,14 +308,14 @@ func (s *sSysPublish) AdminTgAccountPassword(ctx context.Context, in *sysin.TgAc
 		return nil, err
 	}
 	if item.Status != tgLoginStatusPasswordRequired {
-		return nil, gerror.New("当前扫码会话不需要二次验证密码")
+		return nil, gerror.New("当前登录会话不需要二次验证密码")
 	}
 	if item.TenantId != current.TenantId || item.AccountId != current.Id {
-		return nil, gerror.New("TG账号扫码会话不存在")
+		return nil, gerror.New("TG账号登录会话不存在")
 	}
 	runtime := s.getLoginRuntime(strings.TrimSpace(in.LoginToken), current.Id)
 	if runtime == nil {
-		return nil, gerror.New("扫码登录会话已失效，请重新发起登录")
+		return nil, gerror.New("登录会话已失效，请重新发起登录")
 	}
 	if err = s.updateTelegramLoginStatus(ctx, strings.TrimSpace(in.LoginToken), current.Id, g.Map{
 		"error_message": "",
@@ -369,10 +497,10 @@ func (s *sSysPublish) adminTgAccountLoginById(ctx context.Context, id int64, ten
 		mod = mod.Where("account_id", accountId)
 	}
 	if err := mod.Scan(&item); err != nil {
-		return nil, gerror.Wrap(err, "读取TG账号扫码会话失败")
+		return nil, gerror.Wrap(err, "读取TG账号登录会话失败")
 	}
 	if item == nil || item.Id <= 0 {
-		return nil, gerror.New("TG账号扫码会话不存在")
+		return nil, gerror.New("TG账号登录会话不存在")
 	}
 	return item, nil
 }
@@ -387,10 +515,10 @@ func (s *sSysPublish) adminTgAccountLoginByToken(ctx context.Context, token stri
 		mod = mod.Where("account_id", accountId)
 	}
 	if err := mod.Scan(&item); err != nil {
-		return nil, gerror.Wrap(err, "读取TG账号扫码状态失败")
+		return nil, gerror.Wrap(err, "读取TG账号登录状态失败")
 	}
 	if item == nil || item.Id <= 0 {
-		return nil, gerror.New("TG账号扫码会话不存在")
+		return nil, gerror.New("TG账号登录会话不存在")
 	}
 	return item, nil
 }

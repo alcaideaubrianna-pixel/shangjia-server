@@ -321,6 +321,24 @@ func (c *cPublishAdmin) TgAccountStartLogin(ctx context.Context, req *publish.Ad
 	return
 }
 
+func (c *cPublishAdmin) TgAccountPhoneStart(ctx context.Context, req *publish.AdminTgAccountPhoneStartReq) (res *publish.AdminTgAccountPhoneStartRes, err error) {
+	item, err := service.SysPublish().AdminTgAccountPhoneStart(ctx, &req.TgAccountPhoneStartInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminTgAccountPhoneStartRes{TgAccountModel: item}
+	return
+}
+
+func (c *cPublishAdmin) TgAccountCode(ctx context.Context, req *publish.AdminTgAccountCodeReq) (res *publish.AdminTgAccountCodeRes, err error) {
+	item, err := service.SysPublish().AdminTgAccountCode(ctx, &req.TgAccountCodeInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminTgAccountCodeRes{TgAccountModel: item}
+	return
+}
+
 func (c *cPublishAdmin) TgAccountLoginStatus(ctx context.Context, req *publish.AdminTgAccountLoginStatusReq) (res *publish.AdminTgAccountLoginStatusRes, err error) {
 	item, err := service.SysPublish().AdminTgAccountLoginStatus(ctx, &req.TgAccountLoginStatusInp)
 	if err != nil {
