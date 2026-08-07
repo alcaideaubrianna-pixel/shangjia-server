@@ -232,6 +232,9 @@ func (s *sSysPublish) AdminMessagePushPlanStatus(ctx context.Context, in *sysin.
 }
 
 func (s *sSysPublish) runMessagePushPlanScheduler(ctx context.Context) {
+	if err := s.repairMessagePushPlanSchedules(ctx); err != nil {
+		g.Log().Warningf(ctx, "修复消息推送计划时间失败：%+v", err)
+	}
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	time.Sleep(5 * time.Second)
@@ -245,6 +248,50 @@ func (s *sSysPublish) runMessagePushPlanScheduler(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (s *sSysPublish) repairMessagePushPlanSchedules(ctx context.Context) error {
+	if err := ensureMessagePushTables(ctx); err != nil {
+		return err
+	}
+	lock := hglock.NewConfig(30*time.Second, 100*time.Millisecond).Mutex("youban_publish:message_push_plan")
+	if err := lock.TryLock(ctx); err != nil {
+		if gerror.Is(err, hglock.ErrLockFailed) {
+			return nil
+		}
+		return gerror.Wrap(err, "获取消息推送计划修复锁失败")
+	}
+	defer s.releaseTelegramChannelLease(ctx, lock)
+
+	var plans []messagePushPlanRecord
+	if err := publishdao.YoubanPublishMessagePushPlan.Ctx(ctx).
+		Where("status", 1).
+		WhereNull("deleted_at").
+		OrderAsc("id").
+		Scan(&plans); err != nil {
+		return gerror.Wrap(err, "读取待修复消息推送计划失败")
+	}
+	now := gtime.Now()
+	for _, plan := range plans {
+		nextRunAt := messagePushPlanNextRunAtFromRecord(decodeStringArray(plan.Times), plan.IntervalDays, plan.LastRunAt, now)
+		if messagePushPlanSameWallClock(plan.NextRunAt, nextRunAt) {
+			continue
+		}
+		if _, err := publishdao.YoubanPublishMessagePushPlan.Ctx(ctx).
+			Where("id", plan.Id).
+			Where("status", 1).
+			WhereNull("deleted_at").
+			Data(g.Map{
+				"next_run_at": nextRunAt,
+				"locked_at":   nil,
+				"updated_at":  now,
+			}).
+			Update(); err != nil {
+			return gerror.Wrapf(err, "修复消息推送计划时间失败 plan:%d", plan.Id)
+		}
+		g.Log().Infof(ctx, "消息推送计划时间已修复 plan:%d nextRunAt:%s", plan.Id, nextRunAt.Format("Y-m-d H:i:s"))
+	}
+	return nil
 }
 
 func (s *sSysPublish) executeDueMessagePushPlans(ctx context.Context, limit int) error {
@@ -284,7 +331,7 @@ func (s *sSysPublish) executeDueMessagePushPlans(ctx context.Context, limit int)
 
 func (s *sSysPublish) executeMessagePushPlan(ctx context.Context, plan messagePushPlanRecord) error {
 	now := gtime.Now()
-	scheduledAt := plan.NextRunAt
+	scheduledAt := messagePushPlanWallClock(plan.NextRunAt)
 	if scheduledAt == nil {
 		scheduledAt = now
 	}
@@ -419,8 +466,8 @@ func messagePushPlanModels(records []*messagePushPlanRecord) []*sysin.MessagePus
 			IntervalDays:    normalizeMessagePushPlanIntervalDays(item.IntervalDays),
 			IntervalSeconds: item.IntervalSeconds,
 			Status:          item.Status,
-			NextRunAt:       item.NextRunAt,
-			LastRunAt:       item.LastRunAt,
+			NextRunAt:       messagePushPlanWallClock(item.NextRunAt),
+			LastRunAt:       messagePushPlanWallClock(item.LastRunAt),
 			LastResult:      item.LastResult,
 			CreatedBy:       item.CreatedBy,
 			UpdatedBy:       item.UpdatedBy,
@@ -458,7 +505,7 @@ func nextMessagePushPlanRunAt(times []string, intervalDays int, scheduledAt, now
 	}
 	intervalDays = normalizeMessagePushPlanIntervalDays(intervalDays)
 	base := now.Time.In(time.Local)
-	scheduled := scheduledAt.Time.In(time.Local)
+	scheduled := messagePushPlanWallClock(scheduledAt).Time
 	parsedTimes := parseMessagePushPlanTimes(times)
 	if len(parsedTimes) == 0 {
 		return gtime.NewFromTime(base.AddDate(0, 0, intervalDays))
@@ -490,6 +537,34 @@ func nextMessagePushPlanRunAt(times []string, intervalDays int, scheduledAt, now
 		activeDay = activeDay.AddDate(0, 0, intervalDays)
 	}
 	return gtime.NewFromTime(messagePushPlanTime(activeDay, parsedTimes[0]))
+}
+
+func messagePushPlanNextRunAtFromRecord(times []string, intervalDays int, lastRunAt, now *gtime.Time) *gtime.Time {
+	if lastRunAt == nil {
+		return firstMessagePushPlanRunAt(times, now)
+	}
+	return nextMessagePushPlanRunAt(times, intervalDays, messagePushPlanWallClock(lastRunAt), now)
+}
+
+func messagePushPlanWallClock(value *gtime.Time) *gtime.Time {
+	if value == nil {
+		return nil
+	}
+	item := value.Time
+	return gtime.NewFromTime(time.Date(
+		item.Year(), item.Month(), item.Day(),
+		item.Hour(), item.Minute(), item.Second(), item.Nanosecond(),
+		time.Local,
+	))
+}
+
+func messagePushPlanSameWallClock(left, right *gtime.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	leftTime := messagePushPlanWallClock(left).Time
+	rightTime := messagePushPlanWallClock(right).Time
+	return leftTime.Equal(rightTime)
 }
 
 func parseMessagePushPlanTimes(values []string) []time.Time {

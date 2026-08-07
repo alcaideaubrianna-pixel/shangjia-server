@@ -49,6 +49,27 @@ func TestNextMessagePushPlanRunAtDefaultsToDaily(t *testing.T) {
 	assertMessagePushPlanTime(t, got, 2026, time.August, 3, 18, 0, 0)
 }
 
+func TestMessagePushPlanWallClockPreservesPostgresTimestampFields(t *testing.T) {
+	originalLocation := time.Local
+	time.Local = time.FixedZone("Asia/Shanghai", 8*60*60)
+	defer func() { time.Local = originalLocation }()
+
+	databaseValue := gtime.NewFromTime(time.Date(2026, time.August, 7, 11, 0, 0, 0, time.UTC))
+	got := messagePushPlanWallClock(databaseValue)
+	assertMessagePushPlanTime(t, got, 2026, time.August, 7, 11, 0, 0)
+}
+
+func TestMessagePushPlanNextRunAtFromRecordRepairsSameDaySlot(t *testing.T) {
+	originalLocation := time.Local
+	time.Local = time.FixedZone("Asia/Shanghai", 8*60*60)
+	defer func() { time.Local = originalLocation }()
+
+	lastRunFromDatabase := gtime.NewFromTime(time.Date(2026, time.August, 7, 11, 0, 0, 0, time.UTC))
+	now := messagePushPlanTestTime(2026, time.August, 7, 11, 30, 0)
+	got := messagePushPlanNextRunAtFromRecord([]string{"11:00:00", "19:00:00"}, 1, lastRunFromDatabase, now)
+	assertMessagePushPlanTime(t, got, 2026, time.August, 7, 19, 0, 0)
+}
+
 func messagePushPlanTestTime(year int, month time.Month, day, hour, minute, second int) *gtime.Time {
 	return gtime.NewFromTime(time.Date(year, month, day, hour, minute, second, 0, time.Local))
 }
