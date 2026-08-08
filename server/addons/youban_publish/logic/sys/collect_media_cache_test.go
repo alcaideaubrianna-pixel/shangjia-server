@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogf/gf/v2/container/gvar"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	"hotgo/addons/youban_publish/internal/model/entity"
@@ -99,6 +101,23 @@ func TestCollectMediaRowNeedsCacheSupportsMessageReference(t *testing.T) {
 	}
 	if collectMediaRowNeedsCache("", "gotd:-100123:456", "storage/cache/media.jpg", "", "", 0) {
 		t.Fatal("did not expect an existing storage path to trigger media cache")
+	}
+}
+
+func TestCollectEventMediaRowNeedsCacheSupportsBotFileID(t *testing.T) {
+	row := &collectEventMediaRow{YoubanPublishCollectEventMedia: &entity.YoubanPublishCollectEventMedia{
+		SourceFileId: "AgACBotFileID",
+		MediaType:    "photo",
+	}}
+	if !collectEventMediaRowNeedsCache(gdb.Record{"source_type": gvar.New("bot")}, row) {
+		t.Fatal("expected a Bot file ID without a local path to require media cache")
+	}
+	if collectEventMediaRowNeedsCache(gdb.Record{"source_type": gvar.New("account")}, row) {
+		t.Fatal("did not expect an account file ID without gotd metadata to require media cache")
+	}
+	row.StoragePath = "storage/cache/media.jpg"
+	if collectEventMediaRowNeedsCache(gdb.Record{"source_type": gvar.New("bot")}, row) {
+		t.Fatal("did not expect a cached Bot media row to require media cache")
 	}
 }
 

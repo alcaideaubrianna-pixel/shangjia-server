@@ -100,10 +100,22 @@ func mediaFileCacheRemoteSource(ctx context.Context, media *telegramMediaItem) (
 }
 
 func cachedRemoteMediaFile(ctx context.Context, key string, source string, ext string) (string, error) {
+	return cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx, key, source, source, ext, nil)
+}
+
+func cachedRemoteMediaFileWithMetaSource(ctx context.Context, key string, source string, metaSource string, ext string) (string, error) {
+	return cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx, key, source, metaSource, ext, nil)
+}
+
+func cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx context.Context, key string, source string, metaSource string, ext string, downloader func(context.Context, string, string) error) (string, error) {
 	key = strings.TrimSpace(key)
 	source = strings.TrimSpace(source)
+	metaSource = strings.TrimSpace(metaSource)
 	if key == "" || source == "" {
 		return "", nil
+	}
+	if metaSource == "" {
+		metaSource = source
 	}
 	dir := mediaFileCacheDir(ctx)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -112,22 +124,25 @@ func cachedRemoteMediaFile(ctx context.Context, key string, source string, ext s
 	filePath := mediaFileCachePath(dir, key, ext)
 	metaPath := filePath + ".json"
 	if fileExists(filePath) {
-		if err := touchMediaFileCacheMeta(metaPath, key, source, filePath); err != nil {
+		if err := touchMediaFileCacheMeta(metaPath, key, metaSource, filePath); err != nil {
 			g.Log().Warningf(ctx, "更新媒体缓存访问时间失败 path:%s err:%+v", filePath, err)
 		}
 		return filePath, nil
 	}
 	value, err, _ := mediaFileCacheDownloadGroup.Do(key, func() (interface{}, error) {
 		if fileExists(filePath) {
-			if err := touchMediaFileCacheMeta(metaPath, key, source, filePath); err != nil {
+			if err := touchMediaFileCacheMeta(metaPath, key, metaSource, filePath); err != nil {
 				g.Log().Warningf(ctx, "更新媒体缓存访问时间失败 path:%s err:%+v", filePath, err)
 			}
 			return filePath, nil
 		}
-		if err := downloadMediaFileCache(ctx, source, filePath); err != nil {
+		if downloader == nil {
+			downloader = downloadMediaFileCache
+		}
+		if err := downloader(ctx, source, filePath); err != nil {
 			return "", err
 		}
-		if err := touchMediaFileCacheMeta(metaPath, key, source, filePath); err != nil {
+		if err := touchMediaFileCacheMeta(metaPath, key, metaSource, filePath); err != nil {
 			return "", err
 		}
 		if err := pruneMediaFileCache(ctx); err != nil {
@@ -189,11 +204,18 @@ func cachedGeneratedMediaFile(ctx context.Context, key string, source string, ex
 }
 
 func downloadMediaFileCache(ctx context.Context, source string, filePath string) error {
+	return downloadMediaFileCacheWithClient(ctx, &http.Client{Timeout: 2 * time.Minute}, source, filePath)
+}
+
+func downloadMediaFileCacheWithClient(ctx context.Context, client *http.Client, source string, filePath string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
 	if err != nil {
 		return gerror.Wrap(err, "创建远程媒体下载请求失败")
 	}
-	resp, err := (&http.Client{Timeout: 2 * time.Minute}).Do(req)
+	if client == nil {
+		client = &http.Client{Timeout: 2 * time.Minute}
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return gerror.Wrap(err, "下载远程媒体失败")
 	}
