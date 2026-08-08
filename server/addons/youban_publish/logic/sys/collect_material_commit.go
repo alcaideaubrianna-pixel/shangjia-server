@@ -334,7 +334,7 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 				return gerror.Wrap(txErr, "更新采集资料失败")
 			}
 		}
-		if txErr = s.upsertProfileStateTx(ctx, tx, profileId, tenantId, accountId, "", "", 0, nil); txErr != nil {
+		if txErr = s.upsertProfileStateTx(ctx, tx, profileId, tenantId, accountId, "", 0, nil); txErr != nil {
 			return txErr
 		}
 		if _, txErr = tx.Model(publishMediaTable).Safe().Ctx(ctx).Where("profile_id", profileId).WhereNull("deleted_at").Data(g.Map{"deleted_at": now, "deleted_by": accountId, "updated_at": now}).Update(); txErr != nil {

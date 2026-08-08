@@ -368,7 +368,7 @@ func (s *sSysPublish) updateTgMessageRepairRun(ctx context.Context, runId int64,
 func (s *sSysPublish) tgMessageRepairTask(ctx context.Context, profileId int64, tenantId int64, accountId int64) (gdb.Record, error) {
 	mod := g.DB().Model(dao.ContentProfile.Table()+" p").Safe().Ctx(ctx).
 		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=p.id AND ps.deleted_at IS NULL").
-		Fields("0 AS id,ps.tenant_id,ps.account_id,p.id AS profile_id,p.title,p.profile_no,p.plain_text,ps.channel_id_json,p.status,p.visibility,p.published_at,p.created_at,p.updated_at,p.source_type,p.source_key,p.source_created_at,p.source_updated_at").
+		Fields("0 AS id,ps.tenant_id,ps.account_id,p.id AS profile_id,p.title,p.profile_no,p.plain_text,p.status,p.visibility,p.published_at,p.created_at,p.updated_at,p.source_type,p.source_key,p.source_created_at,p.source_updated_at").
 		Where("ps.tenant_id", tenantId).
 		Where("p.id", profileId).
 		WhereNull("p.deleted_at")
@@ -383,7 +383,10 @@ func (s *sSysPublish) tgMessageRepairTask(ctx context.Context, profileId int64, 
 }
 
 func (s *sSysPublish) tgMessageRepairChannels(ctx context.Context, task gdb.Record) ([]tgMessageRepairChannel, error) {
-	channelIds := decodeInt64JSON(task["channel_id_json"].String())
+	channelIds, err := s.profileChannelIdsOrDefaults(ctx, task["tenant_id"].Int64(), task["account_id"].Int64(), task["profile_id"].Int64())
+	if err != nil {
+		return nil, err
+	}
 	mod := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Fields("id,tg_account_id,target_chat_id,bot_id_json").
 		Where("tenant_id", task["tenant_id"].Int64()).
@@ -392,8 +395,6 @@ func (s *sSysPublish) tgMessageRepairChannels(ctx context.Context, task gdb.Reco
 		WhereNull("deleted_at")
 	if len(channelIds) > 0 {
 		mod = mod.WhereIn("id", channelIds)
-	} else {
-		mod = mod.Where("is_default_selected", 1)
 	}
 	var channels []tgMessageRepairChannel
 	if err := mod.OrderAsc("id").Scan(&channels); err != nil {

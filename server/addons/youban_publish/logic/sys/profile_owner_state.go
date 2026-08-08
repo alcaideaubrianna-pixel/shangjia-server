@@ -33,11 +33,11 @@ func (s *sSysPublish) profileState(ctx context.Context, profileId int64, tenantI
 	return row, nil
 }
 
-func (s *sSysPublish) upsertProfileStateTx(ctx context.Context, tx gdb.TX, profileId int64, tenantId int64, accountId int64, channelJSON string, customerRemark string, antiScanEnabled int, publishAt *gtime.Time) error {
+func (s *sSysPublish) upsertProfileStateTx(ctx context.Context, tx gdb.TX, profileId int64, tenantId int64, accountId int64, customerRemark string, antiScanEnabled int, publishAt *gtime.Time) error {
 	now := gtime.Now()
 	data := g.Map{
 		"tenant_id": tenantId, "account_id": accountId, "profile_id": profileId,
-		"channel_id_json": channelJSON, "customer_remark": customerRemark,
+		"customer_remark":   customerRemark,
 		"anti_scan_enabled": antiScanEnabled, "publish_at": publishAt,
 		"created_by": contexts.GetUserId(ctx), "updated_by": contexts.GetUserId(ctx),
 		"created_at": now, "updated_at": now, "deleted_at": nil,

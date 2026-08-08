@@ -33,13 +33,18 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			return nil, err
 		}
 	}
+	defaultChannelIds, err := s.defaultSelectedPublishChannelIds(ctx, tenantId)
+	if err != nil {
+		return nil, err
+	}
 	in.ChannelIds, err = s.availableProfileChannelIds(ctx, in.ChannelIds, tenantId)
 	if err != nil {
 		return nil, err
 	}
-	channelJSON, err := encodeBotIds(in.ChannelIds)
-	if err != nil {
-		return nil, err
+	requestedChannelIds := uniqueIds(in.ChannelIds)
+	manualChannelIds := uniqueIds(in.ChannelIds)
+	if len(manualChannelIds) == 0 || sameInt64Set(requestedChannelIds, defaultChannelIds) {
+		manualChannelIds = nil
 	}
 	var publishAt *gtime.Time
 	if in.PublishAt != "" {
@@ -76,7 +81,10 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 				return err
 			}
 		}
-		if err = s.upsertProfileStateTx(ctx, tx, profileId, tenantId, accountId, channelJSON, in.CustomerRemark, in.AntiScanEnabled, publishAt); err != nil {
+		if err = s.upsertProfileStateTx(ctx, tx, profileId, tenantId, accountId, in.CustomerRemark, in.AntiScanEnabled, publishAt); err != nil {
+			return err
+		}
+		if err = replaceProfileChannelMappings(ctx, tx, tenantId, accountId, profileId, manualChannelIds); err != nil {
 			return err
 		}
 		if in.Media != nil {
@@ -102,6 +110,24 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 		return nil, err
 	}
 	return &sysin.ProfileSaveModel{Id: profileId, Uuid: profile.Uuid, ProfileNo: profile.ProfileNo}, nil
+}
+
+func sameInt64Set(left, right []int64) bool {
+	left = uniqueIds(left)
+	right = uniqueIds(right)
+	if len(left) != len(right) {
+		return false
+	}
+	seen := make(map[int64]struct{}, len(left))
+	for _, id := range left {
+		seen[id] = struct{}{}
+	}
+	for _, id := range right {
+		if _, ok := seen[id]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDeleteInp, tenantId int64, accountId int64) (err error) {
@@ -200,9 +226,6 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 		return nil, gerror.New("资料不存在或无权操作")
 	}
 	if in.Status == 1 {
-		if err = s.syncDefaultSelectedChannelProfiles(ctx, tenantId, ids); err != nil {
-			return nil, err
-		}
 		if err = s.submitProfilesByIds(ctx, ids, tenantId, accountId); err != nil {
 			return nil, err
 		}

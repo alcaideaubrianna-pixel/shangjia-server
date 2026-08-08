@@ -265,7 +265,7 @@ func (s *sSysPublish) followNoteListByAccounts(ctx context.Context, in *sysin.Pr
 }
 
 func followNoteListFields() string {
-	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,ps.tenant_id,ps.account_id,a.nickname AS account_name,a.nickname,a.username,COALESCE(ps.publish_task_status,'') AS task_status,'' AS tg_status,CASE WHEN ps.channel_id_json IS NULL OR ps.channel_id_json='' OR ps.channel_id_json='[]' THEN 0 ELSE 1 END AS tg_push_enabled"
+	return "p.id,p.source_note_uuid AS uuid,p.profile_no,p.title,p.summary,p.province,p.city," + profileTagFieldExpr() + " AS tag,p.visibility,p.review_status,p.status,p.image_count,p.video_count,p.published_at,p.created_at,p.updated_at,ps.tenant_id,ps.account_id,a.nickname AS account_name,a.nickname,a.username,COALESCE(ps.publish_task_status,'') AS task_status,'' AS tg_status,CASE WHEN EXISTS (SELECT 1 FROM " + publishProfileChannelTable + " pc WHERE pc.tenant_id=ps.tenant_id AND pc.profile_id=ps.profile_id AND pc.is_manual=1 AND pc.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM " + publishChannelTable + " dc WHERE dc.tenant_id=ps.tenant_id AND dc.publish_direction='up' AND dc.status=1 AND dc.is_default_selected=1 AND dc.deleted_at IS NULL) THEN 1 ELSE 0 END AS tg_push_enabled"
 }
 
 func followNoteFromProfile(profile *sysin.ProfileModel, media []*sysin.FollowNoteMediaModel) *sysin.FollowNoteModel {

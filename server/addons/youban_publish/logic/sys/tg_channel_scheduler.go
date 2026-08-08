@@ -194,6 +194,41 @@ func (s *sSysPublish) telegramSchedulerCandidates(ctx context.Context, limit int
 		candidateLimit = 1000
 	}
 	now := gtime.Now()
+	urgent, err := s.telegramSchedulerCandidatesByPriority(ctx, now, telegramSchedulerPriorityUrgent, candidateLimit)
+	if err != nil {
+		return nil, err
+	}
+	normal, err := s.telegramSchedulerCandidatesByPriority(ctx, now, telegramSchedulerPriorityNormal, candidateLimit)
+	if err != nil {
+		return nil, err
+	}
+	bulk, err := s.telegramSchedulerCandidatesByPriority(ctx, now, telegramSchedulerPriorityBulk, candidateLimit)
+	if err != nil {
+		return nil, err
+	}
+	return mergeTelegramSchedulerCandidates(urgent, normal, bulk, limit), nil
+}
+
+const (
+	telegramSchedulerPriorityUrgent = iota + 1
+	telegramSchedulerPriorityNormal
+	telegramSchedulerPriorityBulk
+)
+
+func (s *sSysPublish) telegramSchedulerCandidatesByPriority(ctx context.Context, now *gtime.Time, bucket int, limit int) ([]telegramJobRecord, error) {
+	priorityExpr := `CASE
+		WHEN LOWER(TRIM(j.operation_no)) LIKE 'profile:%' THEN 10
+		WHEN j.priority > 0 AND j.priority <> 100 THEN j.priority
+		WHEN LOWER(TRIM(j.operation_no)) LIKE 'full_push:%' OR LOWER(TRIM(j.operation_no)) LIKE 'cycle_batch:%' THEN 90
+		ELSE 50
+	END`
+	priorityCondition := "(" + priorityExpr + ") >= 90"
+	switch bucket {
+	case telegramSchedulerPriorityUrgent:
+		priorityCondition = "(" + priorityExpr + ") <= 10"
+	case telegramSchedulerPriorityNormal:
+		priorityCondition = "(" + priorityExpr + ") > 10 AND (" + priorityExpr + ") < 90"
+	}
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
 		Fields("j.*").
@@ -201,13 +236,45 @@ func (s *sSysPublish) telegramSchedulerCandidates(ctx context.Context, limit int
 		Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", now).
 		Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
 		Where(telegramSchedulerCollectPredecessorCondition()).
-		OrderAsc("j.priority").OrderAsc("j.created_at").OrderAsc("j.id").
-		Limit(candidateLimit).
+		Where(priorityCondition).
+		OrderAsc("j.created_at").OrderAsc("j.id").
+		Limit(limit).
 		Scan(&jobs)
 	if err != nil {
-		return nil, gerror.Wrap(err, "读取TG待调度任务失败")
+		return nil, gerror.Wrapf(err, "读取TG待调度任务失败 bucket:%d", bucket)
 	}
 	return jobs, nil
+}
+
+func mergeTelegramSchedulerCandidates(urgent, normal, bulk []telegramJobRecord, limit int) []telegramJobRecord {
+	if limit <= 0 {
+		return nil
+	}
+	result := make([]telegramJobRecord, 0, len(urgent)+len(normal)+len(bulk))
+	urgentLimit := len(urgent)
+	if len(bulk) > 0 && urgentLimit >= limit {
+		urgentLimit = limit - 1
+	}
+	result = append(result, urgent[:urgentLimit]...)
+	if len(bulk) > 0 && urgentLimit < limit {
+		result = append(result, bulk[0])
+		bulk = bulk[1:]
+	}
+	normalIndex, bulkIndex := 0, 0
+	for normalIndex < len(normal) || bulkIndex < len(bulk) {
+		for i := 0; i < 4 && normalIndex < len(normal); i++ {
+			result = append(result, normal[normalIndex])
+			normalIndex++
+		}
+		if bulkIndex < len(bulk) {
+			result = append(result, bulk[bulkIndex])
+			bulkIndex++
+		}
+	}
+	if len(result) > urgentLimit+limit*9 {
+		result = result[:urgentLimit+limit*9]
+	}
+	return result
 }
 
 func telegramSchedulerChannelCacheKey(channel telegramSchedulerChannel) string {

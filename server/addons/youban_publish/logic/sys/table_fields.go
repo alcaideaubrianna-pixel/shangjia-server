@@ -6,6 +6,7 @@ var (
 	publishTenantTable               = pdao.YoubanPublishTenant.Table()
 	publishAccountTable              = pdao.YoubanPublishAccount.Table()
 	publishProfileStateTable         = "hg_youban_publish_profile_state"
+	publishProfileChannelTable       = "hg_youban_publish_profile_channel"
 	publishImportTaskTable           = pdao.YoubanPublishImportTask.Table()
 	publishImportMatchRunTable       = pdao.YoubanPublishImportMatchRun.Table()
 	publishImportMatchItemTable      = pdao.YoubanPublishImportMatchItem.Table()

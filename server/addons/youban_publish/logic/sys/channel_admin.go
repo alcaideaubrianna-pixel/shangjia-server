@@ -322,11 +322,6 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	if err != nil {
 		return gerror.Wrap(err, "保存频道配置失败")
 	}
-	if in.PublishDirection == "up" && in.IsDefaultSelected == 1 {
-		if err = s.syncDefaultSelectedChannelProfiles(ctx, in.TenantId); err != nil {
-			return err
-		}
-	}
 	if !reusedStableIdentity {
 		if err = s.syncChannelCycleAfterSave(ctx, in.TenantId, in.Id, in.CyclePublishEnabled, in.CyclePublishDays, in.CyclePublishTime); err != nil {
 			return err

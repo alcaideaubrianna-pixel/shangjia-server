@@ -13,9 +13,15 @@ import (
 var errNoTelegramPublishChannels = errors.New("未配置可推送频道")
 
 func (s *sSysPublish) telegramJobChannels(ctx context.Context, task gdb.Record, targetChannelIds ...[]int64) ([]telegramJobChannel, error) {
-	channelIds := decodeInt64JSON(task["channel_id_json"].String())
+	var channelIds []int64
 	if len(targetChannelIds) > 0 {
 		channelIds = uniqueIds(targetChannelIds[0])
+	} else {
+		var err error
+		channelIds, err = s.profileChannelIdsOrDefaults(ctx, task["tenant_id"].Int64(), task["account_id"].Int64(), task["profile_id"].Int64())
+		if err != nil {
+			return nil, err
+		}
 	}
 	mod := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Where("tenant_id", task["tenant_id"].Int64()).
@@ -24,8 +30,6 @@ func (s *sSysPublish) telegramJobChannels(ctx context.Context, task gdb.Record, 
 		WhereNull("deleted_at")
 	if len(channelIds) > 0 {
 		mod = mod.WhereIn("id", channelIds)
-	} else {
-		mod = mod.Where("is_default_selected", 1)
 	}
 	var channels []telegramJobChannel
 	if err := mod.Fields("id,target_chat_id,bot_id_json").OrderAsc("id").Scan(&channels); err != nil {

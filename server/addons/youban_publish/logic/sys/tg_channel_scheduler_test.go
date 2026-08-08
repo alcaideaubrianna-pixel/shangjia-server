@@ -88,3 +88,46 @@ func TestIsManualProfilePublishOperation(t *testing.T) {
 		})
 	}
 }
+
+func TestMergeTelegramSchedulerCandidatesReservesBulkSlot(t *testing.T) {
+	urgent := make([]telegramJobRecord, 20)
+	for index := range urgent {
+		urgent[index].Id = int64(index + 1)
+	}
+	bulk := []telegramJobRecord{{Id: 9001}}
+	merged := mergeTelegramSchedulerCandidates(urgent, nil, bulk, 10)
+	if len(merged) < 10 {
+		t.Fatalf("merged candidate count = %d, want at least 10", len(merged))
+	}
+	seenBulk := false
+	for _, job := range merged[:10] {
+		if job.Id == 9001 {
+			seenBulk = true
+			break
+		}
+	}
+	if !seenBulk {
+		t.Fatal("bulk candidate was not reserved within the scheduler batch")
+	}
+}
+
+func TestMergeTelegramSchedulerCandidatesInterleavesBulk(t *testing.T) {
+	normal := make([]telegramJobRecord, 8)
+	bulk := make([]telegramJobRecord, 2)
+	for index := range normal {
+		normal[index].Id = int64(index + 1)
+	}
+	for index := range bulk {
+		bulk[index].Id = int64(100 + index)
+	}
+	merged := mergeTelegramSchedulerCandidates(nil, normal, bulk, 10)
+	bulkPositions := make([]int, 0, len(bulk))
+	for index, job := range merged {
+		if job.Id >= 100 {
+			bulkPositions = append(bulkPositions, index)
+		}
+	}
+	if len(bulkPositions) != len(bulk) || bulkPositions[0] > 4 {
+		t.Fatalf("bulk candidates were not interleaved fairly: positions=%v", bulkPositions)
+	}
+}

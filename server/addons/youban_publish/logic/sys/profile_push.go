@@ -13,7 +13,10 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 	if profile == nil {
 		return []*sysin.ProfilePushChannelModel{}, nil
 	}
-	channelIds := decodeInt64JSON(profile.ChannelIdJson)
+	channelIds, err := s.profileChannelIdsOrDefaults(ctx, profile.TenantId, profile.AccountId, profile.Id)
+	if err != nil {
+		return nil, err
+	}
 	var indexedChannels []struct {
 		ChannelId int64 `orm:"channel_id"`
 	}
