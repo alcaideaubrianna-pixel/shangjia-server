@@ -22,6 +22,7 @@ const (
 	collectGroupedEventDelay     = collectMaterialGroupingDelay
 	collectSourceCacheVersionKey = "youban_publish:collect:sources:version"
 	collectSourceCacheTTL        = 30 * time.Second
+	collectSourceMissLogTTL      = time.Minute
 )
 
 type collectBotSourceCacheItem struct {
@@ -36,11 +37,16 @@ func (s *sSysPublish) collectBotMessage(ctx context.Context, botId int64, msg *m
 		return
 	}
 	if !s.collectGlobalEnabled(ctx) {
+		s.logCollectBotSkip(ctx, botId, msg, "采集总开关已关闭")
 		return
 	}
 	sources, err := s.collectSourcesByBotMessage(ctx, botId, msg)
 	if err != nil {
 		g.Log().Warningf(ctx, "读取Bot采集源失败 bot:%d chat:%d err:%+v", botId, msg.Chat.ID, err)
+		return
+	}
+	if len(sources) == 0 {
+		s.logCollectBotSkip(ctx, botId, msg, "没有匹配到启用中的Bot采集源，请检查bot_id、采集开关、状态和会员有效期")
 		return
 	}
 	for _, source := range sources {
@@ -51,6 +57,18 @@ func (s *sSysPublish) collectBotMessage(ctx context.Context, botId int64, msg *m
 			continue
 		}
 	}
+}
+
+func (s *sSysPublish) logCollectBotSkip(ctx context.Context, botId int64, msg *models.Message, reason string) {
+	if msg == nil {
+		return
+	}
+	key := fmt.Sprintf("youban_publish:collect:source-miss:%d", botId)
+	if value, err := cache.Instance().Get(ctx, key); err == nil && !value.IsNil() {
+		return
+	}
+	_ = cache.Instance().Set(ctx, key, 1, collectSourceMissLogTTL)
+	g.Log().Warningf(ctx, "Bot采集跳过消息 bot:%d chat:%d message:%d reason:%s", botId, msg.Chat.ID, msg.ID, reason)
 }
 
 func (s *sSysPublish) collectSourcesByBotMessage(ctx context.Context, botId int64, msg *models.Message) ([]g.Map, error) {

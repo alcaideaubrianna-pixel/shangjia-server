@@ -68,6 +68,21 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 	if err = in.Filter(ctx); err != nil {
 		return 0, err
 	}
+	if in.SourceType == sysin.CollectSourceTypeBot {
+		var botExists bool
+		botExists, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).
+			Where("id", in.BotId).
+			Where("tenant_id", account.TenantId).
+			Where("status", 1).
+			WhereNull("deleted_at").
+			Exist()
+		if err != nil {
+			return 0, gerror.Wrap(err, "校验Bot采集机器人失败")
+		}
+		if !botExists {
+			return 0, gerror.New("Bot采集机器人不存在、已停用或不属于当前账号")
+		}
+	}
 	now := gtime.Now()
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		data := g.Map{

@@ -227,6 +227,9 @@ func (in *CollectSourceSaveInp) Filter(ctx context.Context) error {
 		return gerror.New("采集源类型不合法")
 	}
 	if in.SourceType == CollectSourceTypeBot {
+		if in.BotId <= 0 {
+			return gerror.New("Bot采集必须选择机器人")
+		}
 		in.BotCollectScope = "all"
 	} else {
 		in.BotCollectScope = ""

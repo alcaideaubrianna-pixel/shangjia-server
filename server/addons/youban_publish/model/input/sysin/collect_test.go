@@ -64,11 +64,18 @@ func TestNormalizeCollectHistoryConfig(t *testing.T) {
 }
 
 func TestCollectSourceSaveInpFilterBotScope(t *testing.T) {
-	source := &CollectSourceSaveInp{SourceType: CollectSourceTypeBot, Title: "BOT 采集", BotCollectScope: "private"}
+	source := &CollectSourceSaveInp{SourceType: CollectSourceTypeBot, Title: "BOT 采集", BotId: 27, BotCollectScope: "private"}
 	if err := source.Filter(nil); err != nil {
 		t.Fatalf("Filter() error = %v", err)
 	}
 	if source.BotCollectScope != "all" {
 		t.Fatalf("BotCollectScope = %q, want %q", source.BotCollectScope, "all")
+	}
+}
+
+func TestCollectSourceSaveInpFilterRequiresBot(t *testing.T) {
+	source := &CollectSourceSaveInp{SourceType: CollectSourceTypeBot, Title: "BOT 采集"}
+	if err := source.Filter(nil); err == nil {
+		t.Fatal("Filter() error = nil, want Bot selection error")
 	}
 }
