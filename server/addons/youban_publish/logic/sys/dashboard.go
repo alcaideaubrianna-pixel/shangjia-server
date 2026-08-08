@@ -35,7 +35,14 @@ func (s *sSysPublish) AdminDashboardTrend(ctx context.Context, in *sysin.TrendIn
 	if err != nil {
 		return nil, err
 	}
-	return s.dashboardTrend(ctx, in, account.TenantId, 0)
+	accountId := int64(0)
+	if in != nil && in.AccountId > 0 {
+		accountId = in.AccountId
+		if err = s.ensureAdminManageableAccount(ctx, account, accountId); err != nil {
+			return nil, gerror.Wrap(err, "校验趋势账号失败")
+		}
+	}
+	return s.dashboardTrend(ctx, in, account.TenantId, accountId)
 }
 
 func (s *sSysPublish) MyDashboardTrend(ctx context.Context, in *sysin.TrendInp) (*sysin.DashboardTrendModel, error) {

@@ -983,6 +983,7 @@ type CityOptionModel struct {
 }
 
 type TrendInp struct {
+	AccountId int64  `json:"accountId" dc:"账号ID，管理员趋势查询可选"`
 	Days      int    `json:"days" dc:"趋势天数，默认7，最多90"`
 	StartDate string `json:"startDate" dc:"趋势开始日期，格式YYYY-MM-DD"`
 	EndDate   string `json:"endDate" dc:"趋势结束日期，格式YYYY-MM-DD"`
