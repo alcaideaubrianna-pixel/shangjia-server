@@ -58,3 +58,9 @@ type ApplicationUnblacklistReq struct {
 	sysin.CooperationApplicationActionInp
 }
 type ApplicationUnblacklistRes struct{}
+
+type ImportReq struct {
+	g.Meta `path:"/cooperation/import" method:"post" tags:"平台合作" summary:"批量导入平台机器人"`
+	sysin.CooperationImportInp
+}
+type ImportRes struct{ *sysin.CooperationImportModel }

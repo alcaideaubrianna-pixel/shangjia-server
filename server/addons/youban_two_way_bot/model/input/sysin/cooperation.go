@@ -104,3 +104,43 @@ type CooperationApplicationActionInp struct {
 	Id     int64  `json:"id"`
 	Remark string `json:"remark"`
 }
+
+type CooperationImportInp struct {
+	BotUsername string `json:"botUsername"`
+}
+
+func (in *CooperationImportInp) Filter(context.Context) error {
+	in.BotUsername = strings.TrimSpace(strings.TrimPrefix(in.BotUsername, "@"))
+	if in.BotUsername == "" {
+		return gerror.New("请输入机器人用户名")
+	}
+	if len(in.BotUsername) < 5 || len(in.BotUsername) > 64 {
+		return gerror.New("机器人用户名格式不正确")
+	}
+	for _, char := range in.BotUsername {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '_' {
+			return gerror.New("机器人用户名格式不正确")
+		}
+	}
+	return nil
+}
+
+type CooperationImportChannelModel struct {
+	ChannelId    int64  `json:"channelId"`
+	ChannelTitle string `json:"channelTitle"`
+	Status       string `json:"status"`
+	ErrorMessage string `json:"errorMessage"`
+}
+
+type CooperationImportModel struct {
+	ApplicationId int64                            `json:"applicationId"`
+	BotUsername   string                           `json:"botUsername"`
+	BotName       string                           `json:"botName"`
+	Status        string                           `json:"status"`
+	Total         int                              `json:"total"`
+	Success       int                              `json:"success"`
+	Exists        int                              `json:"exists"`
+	Failed        int                              `json:"failed"`
+	Message       string                           `json:"message"`
+	Channels      []*CooperationImportChannelModel `json:"channels"`
+}

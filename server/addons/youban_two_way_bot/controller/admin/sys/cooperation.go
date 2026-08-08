@@ -45,3 +45,7 @@ func (c *cCooperation) ApplicationBlacklist(ctx context.Context, req *cooperatio
 func (c *cCooperation) ApplicationUnblacklist(ctx context.Context, req *cooperation.ApplicationUnblacklistReq) (*cooperation.ApplicationUnblacklistRes, error) {
 	return &cooperation.ApplicationUnblacklistRes{}, service.SysTwoWayBot().AdminCooperationApplicationUnblacklist(ctx, &req.CooperationApplicationActionInp)
 }
+func (c *cCooperation) Import(ctx context.Context, req *cooperation.ImportReq) (*cooperation.ImportRes, error) {
+	v, e := service.SysTwoWayBot().AdminCooperationImport(ctx, &req.CooperationImportInp)
+	return &cooperation.ImportRes{CooperationImportModel: v}, e
+}

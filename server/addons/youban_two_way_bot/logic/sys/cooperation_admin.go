@@ -2,7 +2,10 @@ package sys
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -13,7 +16,10 @@ import (
 	twdao "hotgo/addons/youban_two_way_bot/internal/dao"
 	"hotgo/addons/youban_two_way_bot/internal/model/entity"
 	"hotgo/addons/youban_two_way_bot/model/input/sysin"
+	"hotgo/internal/library/cache"
 )
+
+const cooperationImportApplicant = "__platform_import__"
 
 func (s *sSysTwoWayBot) AdminCooperationConfigView(ctx context.Context) (*sysin.CooperationConfigModel, error) {
 	account, err := currentAdminAccount(ctx)
@@ -127,7 +133,7 @@ func (s *sSysTwoWayBot) AdminCooperationApplicationList(ctx context.Context, in 
 		in = &sysin.CooperationApplicationListInp{}
 	}
 	columns := twdao.YoubanTwoWayBotCooperationApplication.Columns()
-	mod := twdao.YoubanTwoWayBotCooperationApplication.Ctx(ctx).Where(columns.TenantId, account.TenantId).WhereNull(columns.DeletedAt)
+	mod := twdao.YoubanTwoWayBotCooperationApplication.Ctx(ctx).Where(columns.TenantId, account.TenantId).WhereNot(columns.ApplicantTgUserId, cooperationImportApplicant).WhereNull(columns.DeletedAt)
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
 		mod = mod.Where("(applicant_username LIKE ? OR submitted_bot_username LIKE ? OR submitted_bot_name LIKE ?)", like, like, like)
@@ -322,4 +328,223 @@ func cooperationApplicationChannels(ctx context.Context, applicationId int64) ([
 		out = append(out, &sysin.CooperationApplicationChannelModel{ChannelId: row.ChannelId, ChannelTitle: row.ChannelTitle, Status: row.Status, ErrorMessage: row.ErrorMessage, JoinedAt: row.JoinedAt})
 	}
 	return out, nil
+}
+
+func (s *sSysTwoWayBot) AdminCooperationImport(ctx context.Context, in *sysin.CooperationImportInp) (*sysin.CooperationImportModel, error) {
+	if in == nil {
+		return nil, gerror.New("导入参数不能为空")
+	}
+	if err := in.Filter(ctx); err != nil {
+		return nil, err
+	}
+	account, err := currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	configColumns := twdao.YoubanTwoWayBotCooperationConfig.Columns()
+	var config *entity.YoubanTwoWayBotCooperationConfig
+	if err = twdao.YoubanTwoWayBotCooperationConfig.Ctx(ctx).
+		Where(configColumns.TenantId, account.TenantId).
+		Where(configColumns.Status, 1).
+		WhereNull(configColumns.DeletedAt).
+		Scan(&config); err != nil {
+		return nil, gerror.Wrap(err, "读取平台合作配置失败")
+	}
+	if config == nil || config.Id <= 0 {
+		return nil, gerror.New("请先保存平台合作配置")
+	}
+	channels, err := cooperationChannels(ctx, config.Id)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取合作频道失败")
+	}
+	if len(channels) == 0 {
+		return nil, gerror.New("平台尚未配置可用频道")
+	}
+	runtime := &cooperationConfigRuntime{Id: config.Id, TenantId: config.TenantId, BotId: config.BotId, TwoWayBotId: config.TwoWayBotId, ReviewRequired: config.ReviewRequired, NotificationType: config.NotificationType}
+	resolved, err := s.resolveCooperationBot(ctx, runtime, in.BotUsername)
+	if err != nil {
+		return nil, err
+	}
+	appColumns := twdao.YoubanTwoWayBotCooperationApplication.Columns()
+	var app *entity.YoubanTwoWayBotCooperationApplication
+	if err = twdao.YoubanTwoWayBotCooperationApplication.Ctx(ctx).
+		Where(appColumns.TenantId, account.TenantId).
+		Where(appColumns.ConfigId, config.Id).
+		Where(appColumns.SubmittedBotUserId, strconv.FormatInt(resolved.UserId, 10)).
+		Where(appColumns.ApplicantTgUserId, cooperationImportApplicant).
+		WhereNull(appColumns.DeletedAt).
+		OrderDesc(appColumns.Id).
+		Scan(&app); err != nil {
+		return nil, gerror.Wrap(err, "查询机器人导入记录失败")
+	}
+	if app != nil && app.Id > 0 && app.JoinStatus == sysin.CooperationJoinSuccess {
+		channelColumns := twdao.YoubanTwoWayBotCooperationApplicationChannel.Columns()
+		successCount, countErr := twdao.YoubanTwoWayBotCooperationApplicationChannel.Ctx(ctx).
+			Where(channelColumns.ApplicationId, app.Id).
+			Where(channelColumns.Status, sysin.CooperationJoinSuccess).
+			WhereIn(channelColumns.ChannelId, cooperationChannelIds(channels)).
+			Count()
+		if countErr == nil && successCount == len(channels) {
+			return s.cooperationImportResult(ctx, app, "exists"), nil
+		}
+	}
+	rateKey := fmt.Sprintf("ybtwb:cooperation:import:tenant:%d", account.TenantId)
+	if value, getErr := cache.Instance().Get(ctx, rateKey); getErr == nil && !value.IsNil() {
+		result := &sysin.CooperationImportModel{ApplicationId: appId(app), BotUsername: resolved.Username, BotName: resolved.Name, Status: "rate_limited", Message: "Telegram操作频繁，请稍后重试"}
+		return result, nil
+	}
+	_ = cache.Instance().Set(ctx, rateKey, 1, 8*time.Second)
+	if app == nil || app.Id <= 0 {
+		app, err = s.createCooperationImportApplication(ctx, config, resolved, channels)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err = s.processCooperationImport(ctx, app, channels); err != nil {
+		return nil, err
+	}
+	return s.cooperationImportResult(ctx, app, "completed"), nil
+}
+
+func (s *sSysTwoWayBot) createCooperationImportApplication(ctx context.Context, config *entity.YoubanTwoWayBotCooperationConfig, bot *cooperationResolvedBot, channels []*cooperationChannelRuntime) (*entity.YoubanTwoWayBotCooperationApplication, error) {
+	columns := twdao.YoubanTwoWayBotCooperationApplication.Columns()
+	now := gtime.Now()
+	id, err := twdao.YoubanTwoWayBotCooperationApplication.Ctx(ctx).Data(g.Map{
+		columns.TenantId:             config.TenantId,
+		columns.ConfigId:             config.Id,
+		columns.ApplicantTgUserId:    cooperationImportApplicant,
+		columns.SubmittedBotUserId:   strconv.FormatInt(bot.UserId, 10),
+		columns.SubmittedBotUsername: bot.Username,
+		columns.SubmittedBotName:     bot.Name,
+		columns.ReviewStatus:         sysin.CooperationReviewNotRequired,
+		columns.JoinStatus:           sysin.CooperationJoinNotStarted,
+		columns.SubmittedAt:          now,
+		columns.CreatedAt:            now,
+		columns.UpdatedAt:            now,
+	}).InsertAndGetId()
+	if err != nil {
+		return nil, gerror.Wrap(err, "创建机器人导入记录失败")
+	}
+	channelColumns := twdao.YoubanTwoWayBotCooperationApplicationChannel.Columns()
+	for _, channel := range channels {
+		if _, err = twdao.YoubanTwoWayBotCooperationApplicationChannel.Ctx(ctx).Data(g.Map{
+			channelColumns.TenantId:      config.TenantId,
+			channelColumns.ApplicationId: id,
+			channelColumns.ChannelId:     channel.Id,
+			channelColumns.Status:        sysin.CooperationJoinNotStarted,
+			channelColumns.CreatedAt:     now,
+			channelColumns.UpdatedAt:     now,
+		}).Insert(); err != nil {
+			return nil, gerror.Wrap(err, "创建机器人导入频道记录失败")
+		}
+	}
+	var app *entity.YoubanTwoWayBotCooperationApplication
+	if err = twdao.YoubanTwoWayBotCooperationApplication.Ctx(ctx).Where(columns.Id, id).Scan(&app); err != nil {
+		return nil, err
+	}
+	return app, nil
+}
+
+func (s *sSysTwoWayBot) processCooperationImport(ctx context.Context, app *entity.YoubanTwoWayBotCooperationApplication, channels []*cooperationChannelRuntime) error {
+	if app == nil || app.Id <= 0 {
+		return gerror.New("机器人导入记录不存在")
+	}
+	appColumns := twdao.YoubanTwoWayBotCooperationApplication.Columns()
+	channelColumns := twdao.YoubanTwoWayBotCooperationApplicationChannel.Columns()
+	_, _ = twdao.YoubanTwoWayBotCooperationApplication.Ctx(ctx).Where(appColumns.Id, app.Id).Data(g.Map{appColumns.JoinStatus: sysin.CooperationJoinProcessing, appColumns.UpdatedAt: gtime.Now()}).Update()
+	var existing []struct {
+		ChannelId int64  `json:"channelId"`
+		Status    string `json:"status"`
+	}
+	if err := twdao.YoubanTwoWayBotCooperationApplicationChannel.Ctx(ctx).Fields(channelColumns.ChannelId, channelColumns.Status).Where(channelColumns.ApplicationId, app.Id).Scan(&existing); err != nil {
+		return gerror.Wrap(err, "读取机器人导入频道状态失败")
+	}
+	statusByChannel := make(map[int64]string, len(existing))
+	for _, item := range existing {
+		statusByChannel[item.ChannelId] = item.Status
+	}
+	success, failed := 0, 0
+	messages := make([]string, 0)
+	for _, channel := range channels {
+		if _, ok := statusByChannel[channel.Id]; !ok {
+			if _, err := twdao.YoubanTwoWayBotCooperationApplicationChannel.Ctx(ctx).Data(g.Map{
+				channelColumns.TenantId:      app.TenantId,
+				channelColumns.ApplicationId: app.Id,
+				channelColumns.ChannelId:     channel.Id,
+				channelColumns.Status:        sysin.CooperationJoinNotStarted,
+				channelColumns.CreatedAt:     gtime.Now(),
+				channelColumns.UpdatedAt:     gtime.Now(),
+			}).Insert(); err != nil {
+				return gerror.Wrap(err, "创建新增合作频道记录失败")
+			}
+		}
+		if statusByChannel[channel.Id] == sysin.CooperationJoinSuccess {
+			success++
+			continue
+		}
+		joinErr := s.addCooperationBotChannelAdmin(ctx, app.TenantId, channel, app.SubmittedBotUsername)
+		status := sysin.CooperationJoinSuccess
+		errorMessage := ""
+		if joinErr != nil {
+			failed++
+			status = sysin.CooperationJoinFailed
+			errorMessage = cooperationTelegramError(joinErr)
+			messages = append(messages, channel.ChannelTitle+"："+errorMessage)
+		} else {
+			success++
+		}
+		_, _ = twdao.YoubanTwoWayBotCooperationApplicationChannel.Ctx(ctx).
+			Where(channelColumns.ApplicationId, app.Id).
+			Where(channelColumns.ChannelId, channel.Id).
+			Data(g.Map{channelColumns.Status: status, channelColumns.ErrorMessage: errorMessage, channelColumns.JoinedAt: gtime.Now(), channelColumns.UpdatedAt: gtime.Now()}).Update()
+	}
+	joinStatus := sysin.CooperationJoinSuccess
+	if failed > 0 && success > 0 {
+		joinStatus = sysin.CooperationJoinPartialFailed
+	} else if failed > 0 {
+		joinStatus = sysin.CooperationJoinFailed
+	}
+	_, err := twdao.YoubanTwoWayBotCooperationApplication.Ctx(ctx).Where(appColumns.Id, app.Id).Data(g.Map{appColumns.JoinStatus: joinStatus, appColumns.ErrorMessage: strings.Join(messages, "；"), appColumns.UpdatedAt: gtime.Now()}).Update()
+	app.JoinStatus = joinStatus
+	app.ErrorMessage = strings.Join(messages, "；")
+	return err
+}
+
+func (s *sSysTwoWayBot) cooperationImportResult(ctx context.Context, app *entity.YoubanTwoWayBotCooperationApplication, status string) *sysin.CooperationImportModel {
+	result := &sysin.CooperationImportModel{ApplicationId: appId(app), BotUsername: app.SubmittedBotUsername, BotName: app.SubmittedBotName, Status: status, Message: app.ErrorMessage}
+	channels, err := cooperationApplicationChannels(ctx, appId(app))
+	if err != nil {
+		return result
+	}
+	result.Total = len(channels)
+	for _, channel := range channels {
+		channelStatus := channel.Status
+		if status == "exists" && channelStatus == sysin.CooperationJoinSuccess {
+			channelStatus = "exists"
+			result.Exists++
+		} else if channelStatus == sysin.CooperationJoinSuccess {
+			result.Success++
+		} else if channelStatus == sysin.CooperationJoinFailed {
+			result.Failed++
+		}
+		result.Channels = append(result.Channels, &sysin.CooperationImportChannelModel{ChannelId: channel.ChannelId, ChannelTitle: channel.ChannelTitle, Status: channelStatus, ErrorMessage: channel.ErrorMessage})
+	}
+	return result
+}
+
+func appId(app *entity.YoubanTwoWayBotCooperationApplication) int64 {
+	if app == nil {
+		return 0
+	}
+	return app.Id
+}
+
+func cooperationChannelIds(channels []*cooperationChannelRuntime) []int64 {
+	ids := make([]int64, 0, len(channels))
+	for _, channel := range channels {
+		if channel != nil && channel.Id > 0 {
+			ids = append(ids, channel.Id)
+		}
+	}
+	return ids
 }

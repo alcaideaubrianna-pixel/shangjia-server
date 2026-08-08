@@ -26,6 +26,7 @@ type ISysTwoWayBot interface {
 	AdminCooperationApplicationRetry(ctx context.Context, in *sysin.CooperationApplicationActionInp) error
 	AdminCooperationApplicationBlacklist(ctx context.Context, in *sysin.CooperationApplicationActionInp) error
 	AdminCooperationApplicationUnblacklist(ctx context.Context, in *sysin.CooperationApplicationActionInp) error
+	AdminCooperationImport(ctx context.Context, in *sysin.CooperationImportInp) (*sysin.CooperationImportModel, error)
 }
 
 var localSysTwoWayBot ISysTwoWayBot
