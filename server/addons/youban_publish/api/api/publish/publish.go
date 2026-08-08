@@ -536,10 +536,19 @@ type AdminProfileEditRes struct {
 
 type AdminProfilePublishReq struct {
 	g.Meta `path:"/publish/admin/profile/publish" method:"post" tags:"上架插件管理端" summary:"发布资料"`
-	sysin.ProfileViewInp
+	sysin.AdminProfilePublishInp
 }
 
 type AdminProfilePublishRes struct{}
+
+type AdminProfileBatchCancelReq struct {
+	g.Meta `path:"/publish/admin/profile/batch/cancel" method:"post" tags:"上架插件管理端" summary:"取消批量资料发布"`
+	sysin.AdminProfileBatchCancelInp
+}
+
+type AdminProfileBatchCancelRes struct {
+	*sysin.AdminProfileBatchCancelModel
+}
 
 type AdminProfileDeleteReq struct {
 	g.Meta `path:"/publish/admin/profile/delete" method:"post" tags:"上架插件管理端" summary:"删除资料"`

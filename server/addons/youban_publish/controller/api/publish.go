@@ -684,10 +684,18 @@ func (c *cPublishAdmin) ProfileCreate(ctx context.Context, req *publish.AdminPro
 }
 
 func (c *cPublishAdmin) ProfilePublish(ctx context.Context, req *publish.AdminProfilePublishReq) (res *publish.AdminProfilePublishRes, err error) {
-	if err = service.SysPublish().AdminProfilePublish(ctx, &req.ProfileViewInp); err != nil {
+	if err = service.SysPublish().AdminProfilePublish(ctx, &req.AdminProfilePublishInp); err != nil {
 		return nil, err
 	}
 	return &publish.AdminProfilePublishRes{}, nil
+}
+
+func (c *cPublishAdmin) ProfileBatchCancel(ctx context.Context, req *publish.AdminProfileBatchCancelReq) (res *publish.AdminProfileBatchCancelRes, err error) {
+	data, err := service.SysPublish().AdminProfileBatchCancel(ctx, &req.AdminProfileBatchCancelInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminProfileBatchCancelRes{AdminProfileBatchCancelModel: data}, nil
 }
 
 func (c *cPublishAdmin) ProfileDelete(ctx context.Context, req *publish.AdminProfileDeleteReq) (res *publish.AdminProfileDeleteRes, err error) {

@@ -9,7 +9,8 @@ import (
 )
 
 func isManualProfilePublishOperation(operationNo string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(operationNo)), "profile:")
+	operationNo = strings.ToLower(strings.TrimSpace(operationNo))
+	return strings.HasPrefix(operationNo, "profile:") || strings.HasPrefix(operationNo, "batchtext:")
 }
 
 func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current telegramJobRecord) (bool, error) {
@@ -23,16 +24,26 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 		Where("profile_id", current.ProfileId).
 		Where("target_chat_id", normalizeTelegramChannelChatID(current.TargetChatId)).
 		WhereLT("id", current.Id).
-		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown", "sent", "superseded"}).
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown", "sent"}).
 		OrderAsc("id").
 		Scan(&previous)
 	if err != nil {
 		return false, gerror.Wrap(err, "读取频道历史上架任务失败")
 	}
 	previousJobIds := make([]int64, 0, len(previous))
+	activeMessages := make(map[int64][]telegramDeleteMessage, len(previous))
 	for _, job := range previous {
-		if err = s.deleteTelegramMessageSetLockedByChannel(ctx, job, "资料重新上架"); err != nil {
-			return false, gerror.Wrap(err, "删除频道历史上架消息失败")
+		messages, messageErr := s.telegramJobActiveMessages(ctx, job)
+		if messageErr != nil {
+			return false, messageErr
+		}
+		if len(messages) > 0 {
+			activeMessages[job.Id] = messages
+		}
+		if len(messages) > 0 {
+			if err = s.deleteTelegramMessagesLockedByChannel(ctx, job, messages, "资料重新上架"); err != nil {
+				return false, gerror.Wrap(err, "删除频道历史上架消息失败")
+			}
 		}
 		previousJobIds = append(previousJobIds, job.Id)
 	}
@@ -41,7 +52,7 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 		return false, err
 	}
 	for _, job := range previous {
-		if undeletableJobs[job.Id] {
+		if len(activeMessages[job.Id]) > 0 && undeletableJobs[job.Id] {
 			message := "频道中存在已超过Telegram删除时限的同资料旧消息，无法删除，将继续推送最新资料，频道内可能暂时保留历史消息"
 			s.appendTelegramJobLog(ctx, current, "republish", "warning", message)
 			g.Log().Warningf(ctx, "资料上架保留Telegram不可删除旧消息，继续推送新消息 profileId:%d channelId:%d oldJobId:%d currentJobId:%d", current.ProfileId, current.ChannelId, job.Id, current.Id)
@@ -49,7 +60,11 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 		if err = s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
 			return false, err
 		}
-		s.appendTelegramJobLog(ctx, job, "republish", "superseded", "资料重新上架，已由该频道的新上架任务替换")
+		if len(activeMessages[job.Id]) > 0 {
+			s.appendTelegramJobLog(ctx, job, "republish", "superseded", "资料重新上架，已由该频道的新上架任务替换")
+		} else {
+			s.appendTelegramJobLog(ctx, job, "publish", "superseded", "资料已有新的上架任务，旧待发送任务已废弃")
+		}
 	}
 	return true, nil
 }

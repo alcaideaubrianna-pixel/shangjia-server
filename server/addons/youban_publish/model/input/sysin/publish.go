@@ -492,6 +492,20 @@ type ProfileViewInp struct {
 	Uuid string `json:"uuid" dc:"资料UUID"`
 }
 
+type AdminProfilePublishInp struct {
+	ProfileViewInp
+	BatchId string `json:"batchId" dc:"批量操作ID"`
+}
+
+type AdminProfileBatchCancelInp struct {
+	BatchId string `json:"batchId" v:"required#批量操作ID不能为空" dc:"批量操作ID"`
+}
+
+type AdminProfileBatchCancelModel struct {
+	Canceled int `json:"canceled" dc:"已取消TG任务数"`
+	Sending  int `json:"sending" dc:"已进入发送流程、无法取消的任务数"`
+}
+
 type ProfileModel struct {
 	Id                    int64       `json:"id" dc:"资料ID"`
 	NoteIndexId           int64       `json:"-" dc:"资料索引ID"`

@@ -60,6 +60,7 @@ type telegramJobRecord struct {
 	CollectSourceMessageId int64       `json:"collectSourceMessageId"`
 	RetryCount             int         `json:"retryCount"`
 	Priority               int         `json:"priority"`
+	AsynqTaskId            string      `json:"asynqTaskId"`
 	QueueName              string      `json:"queueName"`
 	DispatchStatus         string      `json:"dispatchStatus"`
 	DispatchedAt           *gtime.Time `json:"dispatchedAt"`

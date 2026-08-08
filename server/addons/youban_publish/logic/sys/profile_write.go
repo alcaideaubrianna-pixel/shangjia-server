@@ -200,6 +200,9 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 		return nil, gerror.New("资料不存在或无权操作")
 	}
 	if in.Status == 1 {
+		if err = s.syncDefaultSelectedChannelProfiles(ctx, tenantId, ids); err != nil {
+			return nil, err
+		}
 		if err = s.submitProfilesByIds(ctx, ids, tenantId, accountId); err != nil {
 			return nil, err
 		}
