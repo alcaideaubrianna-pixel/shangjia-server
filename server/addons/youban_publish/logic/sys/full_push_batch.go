@@ -166,7 +166,7 @@ func (s *sSysPublish) dispatchFullPushBatches(ctx context.Context, limit int) er
 	}
 	var batches []fullPushBatchRecord
 	if err := g.DB().Model(publishFullPushBatchTable).Safe().Ctx(ctx).
-		WhereIn("status", []string{fullPushBatchPending, fullPushBatchRunning, fullPushBatchDispatching}).
+		WhereIn("status", []string{fullPushBatchPending, fullPushBatchRunning}).
 		OrderAsc("updated_at").
 		OrderAsc("id").
 		Limit(limit).
