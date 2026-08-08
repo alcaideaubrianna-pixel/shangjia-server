@@ -39,13 +39,22 @@ func buildTelegramTaskCaption(row gdb.Record, setting *sysin.AccountSettingModel
 	}
 	if setting != nil && setting.EnableSuffix == 1 {
 		if suffix := telegramRichTextHTML(setting.SuffixContent); suffix != "" {
-			if len(lines) > 0 {
-				lines = append(lines, "")
-			}
-			lines = append(lines, suffix)
+			lines = appendCaptionSuffix(lines, suffix)
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func appendCaptionSuffix(lines []string, suffix string) []string {
+	suffix = strings.TrimSpace(suffix)
+	if suffix == "" {
+		return lines
+	}
+	if len(lines) == 0 {
+		return append(lines, suffix)
+	}
+	lines[len(lines)-1] = strings.TrimRight(lines[len(lines)-1], " \t") + " " + suffix
+	return lines
 }
 
 func appendCaptionMark(lines []string, mark string, position string) []string {

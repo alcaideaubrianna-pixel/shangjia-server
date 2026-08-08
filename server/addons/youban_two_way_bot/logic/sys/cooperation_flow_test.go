@@ -36,10 +36,17 @@ func TestCooperationApplicantWithUsername(t *testing.T) {
 
 func TestCooperationChannelAdminRights(t *testing.T) {
 	rights := cooperationChannelAdminRights()
-	if !rights.PostMessages || !rights.EditMessages || !rights.DeleteMessages {
+	if !rights.ChangeInfo ||
+		!rights.PostMessages ||
+		!rights.EditMessages ||
+		!rights.DeleteMessages ||
+		!rights.PostStories ||
+		!rights.EditStories ||
+		!rights.DeleteStories ||
+		!rights.InviteUsers {
 		t.Fatalf("required channel admin rights are missing: %#v", rights)
 	}
-	if rights.Other || rights.PostStories || rights.EditStories || rights.DeleteStories || rights.InviteUsers || rights.AddAdmins {
+	if rights.Other || rights.BanUsers || rights.PinMessages || rights.AddAdmins || rights.ManageCall || rights.ManageTopics {
 		t.Fatalf("unexpected channel admin rights enabled: %#v", rights)
 	}
 }

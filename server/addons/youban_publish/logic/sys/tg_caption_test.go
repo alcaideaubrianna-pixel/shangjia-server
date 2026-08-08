@@ -51,6 +51,54 @@ func TestTelegramCaptionMarkDoesNotUseProfileTitle(t *testing.T) {
 	}
 }
 
+func TestBuildTelegramTaskCaptionAppendsSuffixToLastLine(t *testing.T) {
+	row := gdb.Record{
+		"plain_text": gvar.New("我的"),
+	}
+	setting := &sysin.AccountSettingModel{
+		EnableSuffix:  1,
+		SuffixContent: "XX",
+	}
+
+	if got := buildTelegramTaskCaption(row, setting); got != "我的 XX" {
+		t.Fatalf("suffix should be appended to the last line, got %q", got)
+	}
+}
+
+func TestBuildTelegramTaskCaptionAppendsSuffixAfterBottomMark(t *testing.T) {
+	row := gdb.Record{
+		"plain_text":       gvar.New("我的"),
+		"account_sequence": gvar.New(7),
+		"account_nickname": gvar.New("AB"),
+	}
+	setting := &sysin.AccountSettingModel{
+		EnableSuffix:    1,
+		SuffixContent:   "XX",
+		EnableTitleMark: 1,
+		MarkMode:        "nickname",
+		NumberSource:    "sequence",
+		MarkPosition:    "bottom",
+	}
+
+	if got := buildTelegramTaskCaption(row, setting); got != "我的\n\nAB007 XX" {
+		t.Fatalf("suffix should follow the final number mark inline, got %q", got)
+	}
+}
+
+func TestBuildTelegramTaskCaptionAppendsRichTextSuffixInline(t *testing.T) {
+	row := gdb.Record{
+		"plain_text": gvar.New("我的"),
+	}
+	setting := &sysin.AccountSettingModel{
+		EnableSuffix:  1,
+		SuffixContent: "<b>XX</b>",
+	}
+
+	if got := buildTelegramTaskCaption(row, setting); got != "我的 <b>XX</b>" {
+		t.Fatalf("rich text suffix should remain inline, got %q", got)
+	}
+}
+
 func TestTelegramRichTextHTMLKeepsLineBreaks(t *testing.T) {
 	input := `<p><strong>天美传媒</strong> 招聊手合作，</p><p>@tmcmkfbot 负责人: @timi_by</p><blockquote><p>⚠️ 新系统，不需要添加机器人</p><p>直接通过机器人自助提交频道链接</p></blockquote><p>🔥外围/中圈/日本女优/韩国明星</p>`
 	got := telegramRichTextHTML(input)

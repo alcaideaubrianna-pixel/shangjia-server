@@ -678,7 +678,16 @@ func cooperationBotAlreadyRemoved(err error) bool {
 }
 
 func cooperationChannelAdminRights() tg.ChatAdminRights {
-	return tg.ChatAdminRights{PostMessages: true, EditMessages: true, DeleteMessages: true}
+	return tg.ChatAdminRights{
+		ChangeInfo:     true,
+		PostMessages:   true,
+		EditMessages:   true,
+		DeleteMessages: true,
+		InviteUsers:    true,
+		PostStories:    true,
+		EditStories:    true,
+		DeleteStories:  true,
+	}
 }
 
 func (s *sSysTwoWayBot) notifyCooperationApplicant(ctx context.Context, id, tenantId int64, status string) error {
