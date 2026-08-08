@@ -1745,11 +1745,13 @@ func (s *sSysContent) ImportRunList(ctx context.Context, in *sysin.ContentImport
 
 func (s *sSysContent) publicProfileWhere(mod *gdb.Model) *gdb.Model {
 	profileColumns := dao.ContentProfile.Columns()
+	mediaColumns := dao.ContentMedia.Columns()
 	return mod.
 		Where(aliasField("p", profileColumns.Status), 1).
 		WhereIn(aliasField("p", profileColumns.ImportStatus), publicProfileImportStatuses).
 		Where(aliasField("p", profileColumns.ReviewStatus), consts.ContentReviewApproved).
-		WhereIn(aliasField("p", profileColumns.Visibility), []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly})
+		WhereIn(aliasField("p", profileColumns.Visibility), []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly}).
+		Where("EXISTS (SELECT 1 FROM "+dao.ContentMedia.Table()+" m WHERE m."+mediaColumns.ProfileId+"=p."+profileColumns.Id+" AND m."+mediaColumns.Status+"=? AND m."+mediaColumns.MediaType+"=? AND COALESCE(m."+mediaColumns.DisplayStoragePath+", '')<>'')", consts.StatusEnabled, consts.ContentMediaTypeImage)
 }
 
 func (s *sSysContent) ClearHomeProfileCardsCache(ctx context.Context) {
