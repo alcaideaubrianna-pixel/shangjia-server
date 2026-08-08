@@ -144,6 +144,8 @@ const (
 	homeProfileFeedHot    homeProfileFeed = "hot"
 )
 
+var publicProfileImportStatuses = []string{"imported", "duplicate", "feiniu_sync", "collect"}
+
 func NewSysContent() *sSysContent {
 	return &sSysContent{}
 }
@@ -1423,7 +1425,7 @@ func (s *sSysContent) DedupeProfilesByImagePHash(ctx context.Context, in *sysin.
 		LeftJoin(dao.ContentMedia.Table()+" m", aliasField("m", mediaColumns.ProfileId)+"="+aliasField("p", profileColumns.Id)).
 		Where(aliasField("p", profileColumns.Status), consts.StatusEnabled).
 		Where(aliasField("p", profileColumns.ReviewStatus), consts.ContentReviewApproved).
-		WhereIn(aliasField("p", profileColumns.ImportStatus), []string{"imported", "duplicate"}).
+		WhereIn(aliasField("p", profileColumns.ImportStatus), publicProfileImportStatuses).
 		WhereIn(aliasField("p", profileColumns.Visibility), []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly}).
 		WhereNull(aliasField("p", profileColumns.DeletedAt)).
 		Where(aliasField("m", mediaColumns.MediaType), consts.ContentMediaTypeImage).
@@ -1745,7 +1747,7 @@ func (s *sSysContent) publicProfileWhere(mod *gdb.Model) *gdb.Model {
 	profileColumns := dao.ContentProfile.Columns()
 	return mod.
 		Where(aliasField("p", profileColumns.Status), 1).
-		WhereIn(aliasField("p", profileColumns.ImportStatus), []string{"imported", "duplicate"}).
+		WhereIn(aliasField("p", profileColumns.ImportStatus), publicProfileImportStatuses).
 		Where(aliasField("p", profileColumns.ReviewStatus), consts.ContentReviewApproved).
 		WhereIn(aliasField("p", profileColumns.Visibility), []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly})
 }
@@ -2686,7 +2688,7 @@ func (s *sSysContent) findDuplicateProfileByImagePHash(ctx context.Context, prof
 		WhereNot(aliasField("m", mediaColumns.PerceptualHash), "").
 		Where(aliasField("p", profileColumns.Status), consts.StatusEnabled).
 		Where(aliasField("p", profileColumns.ReviewStatus), consts.ContentReviewApproved).
-		WhereIn(aliasField("p", profileColumns.ImportStatus), []string{"imported", "duplicate"}).
+		WhereIn(aliasField("p", profileColumns.ImportStatus), publicProfileImportStatuses).
 		WhereIn(aliasField("p", profileColumns.Visibility), []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly}).
 		WhereNull(aliasField("p", profileColumns.DeletedAt)).
 		Where(aliasField("m", mediaColumns.ProfileId)+"<>?", profileId).
@@ -2742,7 +2744,7 @@ func (s *sSysContent) isActiveProfileImagePHashSignature(ctx context.Context, pr
 		Where(profileColumns.Id, profileId).
 		Where(profileColumns.Status, consts.StatusEnabled).
 		Where(profileColumns.ReviewStatus, consts.ContentReviewApproved).
-		WhereIn(profileColumns.ImportStatus, []string{"imported", "duplicate"}).
+		WhereIn(profileColumns.ImportStatus, publicProfileImportStatuses).
 		WhereIn(profileColumns.Visibility, []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly}).
 		WhereNull(profileColumns.DeletedAt).
 		Count()
@@ -2808,7 +2810,7 @@ func (s *sSysContent) findSimilarProfileIdsByPHash(ctx context.Context, queryHas
 		WhereNot(aliasField("m", mediaColumns.PerceptualHash), "").
 		Where(aliasField("p", profileColumns.Status), consts.StatusEnabled).
 		Where(aliasField("p", profileColumns.ReviewStatus), consts.ContentReviewApproved).
-		WhereIn(aliasField("p", profileColumns.ImportStatus), []string{"imported", "duplicate"}).
+		WhereIn(aliasField("p", profileColumns.ImportStatus), publicProfileImportStatuses).
 		WhereIn(aliasField("p", profileColumns.Visibility), []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly}).
 		WhereNull(aliasField("p", profileColumns.DeletedAt)).
 		All()
