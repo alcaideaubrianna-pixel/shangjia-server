@@ -64,7 +64,7 @@ func TestNormalizeCollectHistoryConfig(t *testing.T) {
 }
 
 func TestCollectSourceSaveInpFilterBotScope(t *testing.T) {
-	source := &CollectSourceSaveInp{SourceType: CollectSourceTypeBot, Title: "Bot 全消息入口", BotCollectScope: "private"}
+	source := &CollectSourceSaveInp{SourceType: CollectSourceTypeBot, Title: "BOT 采集", BotCollectScope: "private"}
 	if err := source.Filter(nil); err != nil {
 		t.Fatalf("Filter() error = %v", err)
 	}
