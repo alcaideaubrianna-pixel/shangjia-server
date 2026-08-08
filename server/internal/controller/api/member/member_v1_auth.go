@@ -17,7 +17,7 @@ func (c *ControllerV1) Register(ctx context.Context, req *v1.RegisterReq) (res *
 }
 
 func (c *ControllerV1) AccountLogin(ctx context.Context, req *v1.AccountLoginReq) (res *v1.AccountLoginRes, err error) {
-	model, err := service.AdminSite().AccountLogin(ctx, &req.AccountLoginInp)
+	model, err := service.AdminSite().MemberAccountLogin(ctx, &req.AccountLoginInp)
 	if err != nil {
 		return
 	}

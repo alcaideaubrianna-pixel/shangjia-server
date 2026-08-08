@@ -255,11 +255,20 @@ func (s *sAdminSite) MobileRegister(ctx context.Context, in *adminin.MemberRegis
 		}
 	}
 
-	return s.handleLogin(ctx, member)
+	return s.handleMemberLogin(ctx, member)
 }
 
 // AccountLogin 账号登录
 func (s *sAdminSite) AccountLogin(ctx context.Context, in *adminin.AccountLoginInp) (res *adminin.LoginModel, err error) {
+	return s.accountLogin(ctx, in, consts.AppAdmin)
+}
+
+// MemberAccountLogin 移动端账号登录。
+func (s *sAdminSite) MemberAccountLogin(ctx context.Context, in *adminin.AccountLoginInp) (res *adminin.LoginModel, err error) {
+	return s.accountLogin(ctx, in, consts.AppApi)
+}
+
+func (s *sAdminSite) accountLogin(ctx context.Context, in *adminin.AccountLoginInp, app string) (res *adminin.LoginModel, err error) {
 	defer func() {
 		service.SysLoginLog().Push(ctx, &sysin.LoginLogPushInp{Response: res, Err: err})
 	}()
@@ -297,7 +306,7 @@ func (s *sAdminSite) AccountLogin(ctx context.Context, in *adminin.AccountLoginI
 		return
 	}
 
-	res, err = s.handleLogin(ctx, mb)
+	res, err = s.handleLoginWithApp(ctx, mb, app)
 	return
 }
 
@@ -369,6 +378,14 @@ func (s *sAdminSite) MobileLogin(ctx context.Context, in *adminin.MobileLoginInp
 
 // handleLogin .
 func (s *sAdminSite) handleLogin(ctx context.Context, mb *entity.AdminMember) (res *adminin.LoginModel, err error) {
+	return s.handleLoginWithApp(ctx, mb, consts.AppAdmin)
+}
+
+func (s *sAdminSite) handleMemberLogin(ctx context.Context, mb *entity.AdminMember) (res *adminin.LoginModel, err error) {
+	return s.handleLoginWithApp(ctx, mb, consts.AppApi)
+}
+
+func (s *sAdminSite) handleLoginWithApp(ctx context.Context, mb *entity.AdminMember, app string) (res *adminin.LoginModel, err error) {
 	role, dept, err := s.getLoginRoleAndDept(ctx, mb.RoleId, mb.DeptId)
 	if err != nil {
 		return nil, err
@@ -386,7 +403,7 @@ func (s *sAdminSite) handleLogin(ctx context.Context, mb *entity.AdminMember) (r
 		Avatar:   mb.Avatar,
 		Email:    mb.Email,
 		Mobile:   mb.Mobile,
-		App:      consts.AppAdmin,
+		App:      app,
 		LoginAt:  gtime.Now(),
 	}
 

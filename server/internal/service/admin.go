@@ -269,6 +269,8 @@ type (
 		MobileRegister(ctx context.Context, in *adminin.MemberRegisterInp) (res *adminin.LoginModel, err error)
 		// AccountLogin 账号登录
 		AccountLogin(ctx context.Context, in *adminin.AccountLoginInp) (res *adminin.LoginModel, err error)
+		// MemberAccountLogin 移动端账号登录
+		MemberAccountLogin(ctx context.Context, in *adminin.AccountLoginInp) (res *adminin.LoginModel, err error)
 		// MobileLogin 手机号登录
 		MobileLogin(ctx context.Context, in *adminin.MobileLoginInp) (res *adminin.LoginModel, err error)
 		// BindUserContext 绑定用户上下文
