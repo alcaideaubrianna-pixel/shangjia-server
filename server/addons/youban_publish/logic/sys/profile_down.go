@@ -134,8 +134,8 @@ func (s *sSysPublish) cleanupProfileDownMessagesBeforePublish(ctx context.Contex
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("profile_id", profileId).
-		Where("status", "sent").
 		WhereLike("operation_no", "down:%").
+		Where("EXISTS (SELECT 1 FROM " + publishTgMessageTable + " m WHERE m.job_id=" + publishTgJobTable + ".id AND m.status='sent')").
 		OrderAsc("id").
 		Scan(&jobs)
 	if err != nil {
