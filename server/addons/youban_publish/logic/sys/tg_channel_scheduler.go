@@ -2,9 +2,7 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -24,7 +22,6 @@ const (
 	tgDispatchStatusProcessing = "processing"
 	tgDispatchStatusDone       = "done"
 	tgSchedulerChannelCacheTTL = time.Second
-	tgSchedulerChannelLimit    = 10000
 )
 
 func (s *sSysPublish) runTelegramChannelScheduler(ctx context.Context) {
@@ -115,11 +112,12 @@ func (s *sSysPublish) dispatchTelegramDueJobs(ctx context.Context, limit int) er
 		}
 		return gerror.Wrap(err, "获取TG调度器锁失败")
 	}
-	defer s.releaseTelegramChannelLease(context.Background(), lock)
 	if err := s.resetStaleTelegramDispatchJobs(ctx); err != nil {
+		s.releaseTelegramChannelLease(context.Background(), lock)
 		return err
 	}
-	jobs, err := s.telegramSchedulerCandidates(ctx)
+	jobs, err := s.telegramSchedulerCandidates(ctx, limit)
+	s.releaseTelegramChannelLease(context.Background(), lock)
 	if err != nil {
 		return err
 	}
@@ -181,70 +179,33 @@ type telegramSchedulerChannel struct {
 	TargetChatId string `orm:"target_chat_id"`
 }
 
-func (s *sSysPublish) telegramSchedulerCandidates(ctx context.Context) ([]telegramJobRecord, error) {
+func (s *sSysPublish) telegramSchedulerCandidates(ctx context.Context, limit int) ([]telegramJobRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if limit <= 0 {
+		limit = 50
+	}
+	candidateLimit := limit * 8
+	if candidateLimit < 100 {
+		candidateLimit = 100
+	}
+	if candidateLimit > 1000 {
+		candidateLimit = 1000
+	}
 	now := gtime.Now()
-	var channels []telegramSchedulerChannel
+	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
-		Fields("j.channel_id,j.target_chat_id").
-		WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
-		Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", now).
-		Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
-		Group("j.channel_id,j.target_chat_id").
-		Scan(&channels)
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取TG待调度频道失败")
-	}
-	jobs := make([]telegramJobRecord, 0, len(channels)*10)
-	for _, channel := range channels {
-		channelJobs, channelErr := s.telegramSchedulerChannelCandidates(ctx, channel)
-		if channelErr != nil {
-			return nil, channelErr
-		}
-		jobs = append(jobs, channelJobs...)
-	}
-	sort.SliceStable(jobs, func(i, j int) bool {
-		if jobs[i].Priority != jobs[j].Priority {
-			return jobs[i].Priority < jobs[j].Priority
-		}
-		if jobs[i].CreatedAt != nil && jobs[j].CreatedAt != nil && !jobs[i].CreatedAt.Equal(jobs[j].CreatedAt) {
-			return jobs[i].CreatedAt.Before(jobs[j].CreatedAt)
-		}
-		return jobs[i].Id < jobs[j].Id
-	})
-	return jobs, nil
-}
-
-func (s *sSysPublish) telegramSchedulerChannelCandidates(ctx context.Context, channel telegramSchedulerChannel) ([]telegramJobRecord, error) {
-	cacheKey := telegramSchedulerChannelCacheKey(channel)
-	if cached, err := cache.Instance().Get(ctx, cacheKey); err == nil && !cached.IsNil() {
-		var jobs []telegramJobRecord
-		if json.Unmarshal([]byte(cached.String()), &jobs) == nil {
-			return jobs, nil
-		}
-	}
-	now := gtime.Now()
-	mod := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
 		Fields("j.*").
 		WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
 		Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", now).
 		Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
 		Where(telegramSchedulerCollectPredecessorCondition()).
 		OrderAsc("j.priority").OrderAsc("j.created_at").OrderAsc("j.id").
-		Limit(tgSchedulerChannelLimit)
-	if channel.ChannelId > 0 {
-		mod = mod.Where("j.channel_id", channel.ChannelId)
-	} else {
-		mod = mod.Where("j.target_chat_id", normalizeTelegramChannelChatID(channel.TargetChatId))
-	}
-	var jobs []telegramJobRecord
-	if err := mod.Scan(&jobs); err != nil {
-		return nil, gerror.Wrap(err, "读取频道待调度TG任务失败")
-	}
-	if payload, err := json.Marshal(jobs); err == nil {
-		_ = cache.Instance().Set(ctx, cacheKey, string(payload), tgSchedulerChannelCacheTTL)
+		Limit(candidateLimit).
+		Scan(&jobs)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取TG待调度任务失败")
 	}
 	return jobs, nil
 }

@@ -102,7 +102,9 @@ func (s *sSysPublish) runTelegramClientWithAccountLease(ctx context.Context, tgA
 	if run == nil {
 		return gerror.New("Telegram客户端运行函数不能为空")
 	}
-	lease, err := acquireTelegramAccountClientLeaseWait(ctx, tgAccountId, func(waitErr error) {
+	leaseCtx, cancel := context.WithTimeout(ctx, telegramAccountClientLeaseWaitTimeout(ctx))
+	defer cancel()
+	lease, err := acquireTelegramAccountClientLeaseWait(leaseCtx, tgAccountId, func(waitErr error) {
 		g.Log().Infof(ctx, "TG账号连接繁忙，等待已有操作完成 tgAccountId:%d err:%+v", tgAccountId, waitErr)
 	})
 	if err != nil {
@@ -118,6 +120,17 @@ func (s *sSysPublish) runTelegramClientWithAccountLease(ctx context.Context, tgA
 		}
 	}()
 	return client.Run(ctx, run)
+}
+
+func telegramAccountClientLeaseWaitTimeout(ctx context.Context) time.Duration {
+	seconds := g.Cfg().MustGet(ctx, "youbanPublish.queue.accountBusyTimeoutSeconds", 10).Int()
+	if seconds < 1 {
+		seconds = 1
+	}
+	if seconds > 60 {
+		seconds = 60
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func (s *sSysPublish) executeTelegramAccountOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) error {
