@@ -55,3 +55,10 @@ type AdminAntiScanMaterialUploadReq struct {
 type AdminAntiScanMaterialUploadRes struct {
 	*sysin.AntiScanMaterialModel
 }
+
+type AdminAntiScanMaterialDeleteReq struct {
+	g.Meta `path:"/publish/admin/antiScan/material/delete" method:"post" tags:"上架插件管理端" summary:"删除防扫图素材"`
+	sysin.AntiScanMaterialDeleteInp
+}
+
+type AdminAntiScanMaterialDeleteRes struct{}

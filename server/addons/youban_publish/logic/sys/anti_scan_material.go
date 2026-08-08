@@ -84,6 +84,40 @@ func (s *sSysPublish) AdminAntiScanMaterialUpload(ctx context.Context, in *sysin
 	}, nil
 }
 
+func (s *sSysPublish) AdminAntiScanMaterialDelete(ctx context.Context, in *sysin.AntiScanMaterialDeleteInp) error {
+	if in == nil || in.Id <= 0 {
+		return gerror.New("请选择要删除的素材")
+	}
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return err
+	}
+	if err = ensureAntiScanMaterialTable(ctx); err != nil {
+		return err
+	}
+	result, err := g.DB().Model(antiScanMaterialTable).Safe().Ctx(ctx).
+		Where("id", in.Id).
+		Where("tenant_id", account.TenantId).
+		Where("account_id", account.Id).
+		WhereNull("deleted_at").
+		Data(g.Map{
+			"deleted_at": gtime.Now(),
+			"updated_at": gtime.Now(),
+		}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "删除素材失败")
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "读取素材删除结果失败")
+	}
+	if affected == 0 {
+		return gerror.New("素材不存在或已删除")
+	}
+	return nil
+}
+
 func ensureAntiScanMaterialTable(ctx context.Context) error {
 	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
 		return ensureAntiScanMaterialPgsql(ctx)

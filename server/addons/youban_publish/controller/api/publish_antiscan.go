@@ -66,3 +66,11 @@ func (c *cPublishAdmin) AntiScanMaterialUpload(ctx context.Context, req *publish
 	res = &publish.AdminAntiScanMaterialUploadRes{AntiScanMaterialModel: data}
 	return
 }
+
+func (c *cPublishAdmin) AntiScanMaterialDelete(ctx context.Context, req *publish.AdminAntiScanMaterialDeleteReq) (res *publish.AdminAntiScanMaterialDeleteRes, err error) {
+	if err = service.SysPublish().AdminAntiScanMaterialDelete(ctx, &req.AntiScanMaterialDeleteInp); err != nil {
+		return nil, err
+	}
+	res = &publish.AdminAntiScanMaterialDeleteRes{}
+	return
+}

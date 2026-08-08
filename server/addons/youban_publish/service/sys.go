@@ -118,6 +118,7 @@ type ISysPublish interface {
 	AdminAntiScanPreview(ctx context.Context, in *sysin.AntiScanPreviewInp, file *ghttp.UploadFile) (res *sysin.AntiScanPreviewModel, err error)
 	AdminAntiScanMaterialList(ctx context.Context, in *sysin.AntiScanMaterialListInp) (list []*sysin.AntiScanMaterialModel, err error)
 	AdminAntiScanMaterialUpload(ctx context.Context, in *sysin.AntiScanMaterialUploadInp, file *ghttp.UploadFile) (res *sysin.AntiScanMaterialModel, err error)
+	AdminAntiScanMaterialDelete(ctx context.Context, in *sysin.AntiScanMaterialDeleteInp) (err error)
 	ServerTagSave(ctx context.Context, in *sysin.TagSaveInp) (err error)
 	ServerTagDelete(ctx context.Context, in *sysin.TagDeleteInp) (err error)
 	AdminBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error)

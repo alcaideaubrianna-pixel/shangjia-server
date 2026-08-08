@@ -10,6 +10,7 @@ import (
 )
 
 type AntiScanPreviewInp struct {
+	PreviewOnly     int `json:"previewOnly"`
 	UseDefaultImage int `json:"useDefaultImage"`
 	model.AntiScanConfig
 }
@@ -35,6 +36,9 @@ func (in *AntiScanPreviewInp) Filter(ctx context.Context) error {
 		return err
 	}
 	in.AntiScanConfig = save.AntiScanConfig
+	if in.PreviewOnly != 0 {
+		in.PreviewOnly = 1
+	}
 	in.MaskMode = strings.ToLower(strings.TrimSpace(in.MaskMode))
 	if in.UseDefaultImage != 0 {
 		in.UseDefaultImage = 1

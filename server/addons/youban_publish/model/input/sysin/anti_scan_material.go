@@ -14,6 +14,10 @@ type AntiScanMaterialUploadInp struct {
 	Name string `json:"name" dc:"素材名称"`
 }
 
+type AntiScanMaterialDeleteInp struct {
+	Id int64 `json:"id" v:"required#请选择要删除的素材" dc:"素材ID"`
+}
+
 type AntiScanMaterialModel struct {
 	Id        int64  `json:"id"`
 	Type      string `json:"type"`

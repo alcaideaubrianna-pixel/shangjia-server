@@ -24,7 +24,7 @@ func applyAntiScanWatermarks(dst *image.RGBA, in *sysin.AntiScanPreviewInp) {
 	if in.WatermarkEnabled == 1 {
 		text := strings.TrimSpace(in.WatermarkText)
 		if text == "" {
-			text = "youban"
+			text = "xiaohuiji"
 		}
 		lines = append(lines, text)
 	}
@@ -38,15 +38,21 @@ func applyAntiScanWatermarks(dst *image.RGBA, in *sysin.AntiScanPreviewInp) {
 	alpha := uint8(clampInt(in.WatermarkOpacity*255/100, 13, 204))
 	text := strings.TrimSpace(strings.Join(lines, "  "))
 	if text == "" {
-		text = "youban preview"
+		text = "xiaohuiji"
 	}
-	mark := rotateWatermark(renderWatermarkText(text, fontSize, alpha), -24)
-	stepX := maxInt(mark.Bounds().Dx()+fontSize*6, 120)
-	stepY := maxInt(mark.Bounds().Dy()+fontSize*3, 80)
+	mark := rotateWatermark(renderWatermarkText(text, fontSize, alpha), -18)
+	stepX := maxInt(mark.Bounds().Dx()+fontSize*8, 160)
+	stepY := maxInt(mark.Bounds().Dy()+fontSize*5, 110)
+	row := 0
 	for y := -stepY; y < dst.Bounds().Dy()+stepY; y += stepY {
-		for x := -stepX; x < dst.Bounds().Dx()+stepX; x += stepX {
+		offset := 0
+		if row%2 == 1 {
+			offset = stepX / 3
+		}
+		for x := -stepX + offset; x < dst.Bounds().Dx()+stepX; x += stepX {
 			draw.Draw(dst, image.Rect(x, y, x+mark.Bounds().Dx(), y+mark.Bounds().Dy()), mark, image.Point{}, draw.Over)
 		}
+		row++
 	}
 }
 
@@ -68,7 +74,7 @@ func renderWatermarkText(text string, fontSize int, alpha uint8) *image.RGBA {
 }
 
 func renderBasicWatermarkText(text string, fontSize int, alpha uint8) *image.RGBA {
-	text = firstASCII(text, "youban preview")
+	text = firstASCII(text, "xiaohuiji")
 	baseWidth := maxInt(len(text)*8+8, 64)
 	baseHeight := 18
 	base := image.NewRGBA(image.Rect(0, 0, baseWidth, baseHeight))

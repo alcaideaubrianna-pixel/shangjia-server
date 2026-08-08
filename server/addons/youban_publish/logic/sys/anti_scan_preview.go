@@ -69,9 +69,11 @@ func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiSc
 	}
 	configHash := antiScanConfigHash(in, cloudConf)
 	noop := isAntiScanNoop(in)
-	if cached, ok := s.getAntiScanPreviewCache(ctx, imageHash, configHash); ok {
-		cached.CacheHit = 1
-		return cached, nil
+	if in.PreviewOnly != 1 {
+		if cached, ok := s.getAntiScanPreviewCache(ctx, imageHash, configHash); ok {
+			cached.CacheHit = 1
+			return cached, nil
+		}
 	}
 	detectRes := &antiScanDetectResult{Provider: "none"}
 	warnings := []string{}
@@ -86,9 +88,14 @@ func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiSc
 		return nil, err
 	}
 	warnings = append(warnings, renderWarnings...)
-	previewUrl, err := uploadAntiScanPreview(ctx, previewBytes, in)
-	if err != nil {
-		return nil, err
+	previewUrl := ""
+	if in.PreviewOnly == 1 {
+		previewUrl = antiScanPreviewDataURL(previewBytes)
+	} else {
+		previewUrl, err = uploadAntiScanPreview(ctx, previewBytes, in)
+		if err != nil {
+			return nil, err
+		}
 	}
 	res = &sysin.AntiScanPreviewModel{
 		CacheHit:      0,
@@ -101,10 +108,16 @@ func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiSc
 		Warnings:      warnings,
 		CloudRawSaved: detectRes.CloudRawSaved,
 	}
-	if err = s.saveAntiScanPreviewCache(ctx, res, detectRes); err != nil {
-		return nil, err
+	if in.PreviewOnly != 1 {
+		if err = s.saveAntiScanPreviewCache(ctx, res, detectRes); err != nil {
+			return nil, err
+		}
 	}
 	return res, nil
+}
+
+func antiScanPreviewDataURL(imageBytes []byte) string {
+	return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(imageBytes)
 }
 
 type antiScanDetectResult struct {
@@ -137,8 +150,18 @@ func (s *sSysPublish) detectAntiScanImage(ctx context.Context, imageHash string,
 		}
 	}
 	if needsAntiScanMatting(in) {
-		segmentRaw, err := s.getOrCreateAntiScanMatting(ctx, imageHash, imageBytes, conf, usageOwner)
+		mattingCtx := ctx
+		cancel := func() {}
+		if in.PreviewOnly == 1 {
+			mattingCtx, cancel = context.WithTimeout(ctx, 8*time.Second)
+		}
+		segmentRaw, err := s.getOrCreateAntiScanMatting(mattingCtx, imageHash, imageBytes, conf, usageOwner)
+		cancel()
 		if err != nil {
+			if in.PreviewOnly == 1 {
+				warnings = append(warnings, "云端抠图响应较慢，预览已先使用背景纹理；正式应用时会继续尝试抠图")
+				return res, warnings, nil
+			}
 			return nil, nil, err
 		}
 		res.SegmentRaw = segmentRaw

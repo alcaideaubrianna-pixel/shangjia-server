@@ -49,6 +49,9 @@ func renderAntiScanPreview(ctx context.Context, src []byte, in *sysin.AntiScanPr
 	if err != nil {
 		return nil, nil, gerror.New("图片格式不支持，请上传 JPG、PNG、GIF 或 WEBP")
 	}
+	if in.PreviewOnly == 1 {
+		base = resizeAntiScanPreviewImage(base, 1600)
+	}
 	warnings := []string{}
 	canvas := imageToRGBA(base)
 	if in.BackgroundReplaceEnabled == 1 || in.BackgroundTextureEnabled == 1 {
@@ -77,6 +80,19 @@ func renderAntiScanPreview(ctx context.Context, src []byte, in *sysin.AntiScanPr
 		return nil, nil, gerror.Wrap(err, "编码预览图失败")
 	}
 	return buf.Bytes(), warnings, nil
+}
+
+func resizeAntiScanPreviewImage(src image.Image, maximumDimension int) image.Image {
+	bounds := src.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	if maxInt(width, height) <= maximumDimension {
+		return src
+	}
+	scale := float64(maximumDimension) / float64(maxInt(width, height))
+	destination := image.NewRGBA(image.Rect(0, 0, int(float64(width)*scale), int(float64(height)*scale)))
+	xdraw.ApproxBiLinear.Scale(destination, destination.Bounds(), src, bounds, draw.Src, nil)
+	return destination
 }
 
 func isAntiScanNoop(in *sysin.AntiScanPreviewInp) bool {

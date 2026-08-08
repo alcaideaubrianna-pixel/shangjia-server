@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	xdraw "golang.org/x/image/draw"
@@ -32,6 +33,13 @@ func patternedBackground(width int, height int, in *sysin.AntiScanPreviewInp) *i
 	drawPresetBackground(dst, in.BackgroundTexturePreset, in.StickerOpacity)
 	return dst
 }
+
+type antiScanTextureCacheItem struct {
+	expiresAt time.Time
+	data      []byte
+}
+
+var antiScanTextureCache sync.Map
 
 func drawPresetBackground(dst *image.RGBA, preset string, opacity int) {
 	b := dst.Bounds()
@@ -101,8 +109,19 @@ func readTextureImageBytes(imageUrl string) ([]byte, bool) {
 	if !strings.HasPrefix(imageUrl, "http://") && !strings.HasPrefix(imageUrl, "https://") {
 		return nil, false
 	}
-	client := http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(imageUrl)
+	if cached, ok := antiScanTextureCache.Load(imageUrl); ok {
+		item := cached.(antiScanTextureCacheItem)
+		if time.Now().Before(item.expiresAt) {
+			return item.data, true
+		}
+		antiScanTextureCache.Delete(imageUrl)
+	}
+	request, err := http.NewRequest(http.MethodGet, imageUrl, nil)
+	if err != nil {
+		return nil, false
+	}
+	client := http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(request)
 	if err != nil {
 		return nil, false
 	}
@@ -111,7 +130,14 @@ func readTextureImageBytes(imageUrl string) ([]byte, bool) {
 		return nil, false
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	return data, err == nil && len(data) > 0
+	if err != nil || len(data) == 0 {
+		return nil, false
+	}
+	antiScanTextureCache.Store(imageUrl, antiScanTextureCacheItem{
+		data:      data,
+		expiresAt: time.Now().Add(15 * time.Minute),
+	})
+	return data, true
 }
 
 func drawRabbitBackground(dst *image.RGBA) {

@@ -156,6 +156,9 @@ func (in *AntiScanConfigSaveInp) Filter(ctx context.Context) error {
 	in.BackgroundTexturePreset = strings.ToLower(strings.TrimSpace(in.BackgroundTexturePreset))
 	in.BackgroundTextureImage = strings.TrimSpace(in.BackgroundTextureImage)
 	in.WatermarkText = strings.TrimSpace(in.WatermarkText)
+	if in.WatermarkText == "" {
+		in.WatermarkText = "xiaohuiji"
+	}
 	in.StickerText = strings.TrimSpace(in.StickerText)
 	if in.MaskMode == "" {
 		in.MaskMode = "qr"
@@ -170,13 +173,13 @@ func (in *AntiScanConfigSaveInp) Filter(ctx context.Context) error {
 		return gerror.New("打码方式不合法")
 	}
 	if in.WatermarkFontSize <= 0 {
-		in.WatermarkFontSize = 22
+		in.WatermarkFontSize = 20
 	}
 	if in.WatermarkFontSize < 12 || in.WatermarkFontSize > 56 {
 		return gerror.New("水印字体大小必须在12到56之间")
 	}
 	if in.WatermarkOpacity <= 0 {
-		in.WatermarkOpacity = 28
+		in.WatermarkOpacity = 20
 	}
 	if in.WatermarkOpacity < 5 || in.WatermarkOpacity > 80 {
 		return gerror.New("水印透明度必须在5到80之间")
