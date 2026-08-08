@@ -45,6 +45,26 @@ func (s *sSysPublish) syncMediaPHashBucketByMediaId(ctx context.Context, mediaId
 	return s.replaceMediaPHashBucketByMediaRow(ctx, row)
 }
 
+func (s *sSysPublish) syncMediaPHashBucketsByProfileId(ctx context.Context, profileId int64) error {
+	if profileId <= 0 {
+		return nil
+	}
+	var mediaIds []int64
+	if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Fields("id").
+		Where("profile_id", profileId).
+		WhereNull("deleted_at").
+		Scan(&mediaIds); err != nil {
+		return gerror.Wrap(err, "读取资料媒体哈希索引失败")
+	}
+	for _, mediaId := range mediaIds {
+		if err := s.syncMediaPHashBucketByMediaId(ctx, mediaId); err != nil {
+			return gerror.Wrapf(err, "同步资料媒体哈希索引失败 mediaId:%d", mediaId)
+		}
+	}
+	return nil
+}
+
 func (s *sSysPublish) SyncMediaPHashBucketByMediaId(ctx context.Context, mediaId int64) error {
 	return s.syncMediaPHashBucketByMediaId(ctx, mediaId)
 }

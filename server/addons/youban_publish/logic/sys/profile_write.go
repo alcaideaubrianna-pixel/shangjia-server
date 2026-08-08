@@ -101,6 +101,11 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			g.Log().Warningf(ctx, "清理已删除资料索引失败 mediaId:%d err:%v", mediaId, deleteErr)
 		}
 	}
+	if in.Media != nil {
+		if err = s.syncMediaPHashBucketsByProfileId(ctx, profileId); err != nil {
+			return nil, err
+		}
+	}
 	if err = s.syncProfileNoteIndex(ctx, profileId); err != nil {
 		return nil, err
 	}
