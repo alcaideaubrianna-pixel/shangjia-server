@@ -449,6 +449,15 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if !verifyReady {
 		return newCollectProcessRetryError(30*time.Second, "等待验证资料媒体缓存完成")
 	}
+	dedupeLock := lock.NewConfig(2*time.Minute, 20*time.Millisecond).Mutex(fmt.Sprintf(
+		"youban_publish:collect:dedupe-commit:%d:%d",
+		event["tenant_id"].Int64(),
+		event["account_id"].Int64(),
+	))
+	if err = dedupeLock.Lock(ctx); err != nil {
+		return gerror.Wrap(err, "获取采集资料提交锁失败")
+	}
+	defer func() { _ = dedupeLock.Unlock(context.Background()) }()
 	if event["media_count"].Int() > 0 {
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaReady, "")
 		s.appendCollectEventLogForRecord(ctx, event, "media", "ready", "媒体已就绪", "")
@@ -475,15 +484,6 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		return newCollectProcessRetryError(30*time.Second, err.Error())
 	}
 	content = canonical
-	dedupeLock := lock.NewConfig(2*time.Minute, 20*time.Millisecond).Mutex(fmt.Sprintf(
-		"youban_publish:collect:dedupe-commit:%d:%d",
-		event["tenant_id"].Int64(),
-		event["account_id"].Int64(),
-	))
-	if err = dedupeLock.Lock(ctx); err != nil {
-		return gerror.Wrap(err, "获取采集资料提交锁失败")
-	}
-	defer func() { _ = dedupeLock.Unlock(context.Background()) }()
 	candidateRules, err = s.filterCollectRulesByFinalDedupeBatch(ctx, event, content, candidateRules)
 	if err != nil {
 		return err
