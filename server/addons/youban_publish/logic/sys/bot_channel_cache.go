@@ -87,7 +87,7 @@ func (s *sSysPublish) cacheBotMessage(ctx context.Context, tenantId, botId int64
 		return err
 	}
 	chatType := strings.TrimSpace(string(msg.Chat.Type))
-	if chatType != "channel" && chatType != "group" && chatType != "supergroup" {
+	if chatType != "private" && chatType != "channel" && chatType != "group" && chatType != "supergroup" {
 		return nil
 	}
 	chatId := g.NewVar(msg.Chat.ID).String()
@@ -143,7 +143,7 @@ func (s *sSysPublish) AdminBotChannelCacheList(ctx context.Context, in *sysin.Bo
 	mod := g.DB().Model(publishBotChannelCacheTable+" c").Safe().Ctx(ctx).
 		LeftJoin(publishBotTable+" b", "b.id=c.bot_id").
 		Where("c.tenant_id", account.TenantId).WhereNull("b.deleted_at").
-		Fields("c.id,c.bot_id,b.bot_username,c.chat_id AS channel_id,c.chat_title AS channel_title,c.chat_username AS channel_username,c.chat_type,c.is_broadcast,c.is_megagroup,c.message_count,c.last_message_text,c.last_message_at,c.created_at,c.updated_at")
+		Fields("c.id,c.bot_id,b.bot_username,c.chat_id AS channel_id,c.chat_title AS channel_title,c.chat_username AS channel_username,c.chat_type,CASE WHEN c.chat_type='private' THEN 1 ELSE 0 END AS is_private,c.is_broadcast,c.is_megagroup,c.message_count,c.last_message_text,c.last_message_at,c.created_at,c.updated_at")
 	if in.BotId > 0 {
 		mod = mod.Where("c.bot_id", in.BotId)
 	}
@@ -152,6 +152,8 @@ func (s *sSysPublish) AdminBotChannelCacheList(ctx context.Context, in *sysin.Bo
 		mod = mod.Where("(c.chat_id LIKE ? OR c.chat_title LIKE ? OR c.chat_username LIKE ? OR b.bot_username LIKE ?)", like, like, like, like)
 	}
 	switch strings.ToLower(strings.TrimSpace(in.Type)) {
+	case "private":
+		mod = mod.Where("c.chat_type", "private")
 	case "channel":
 		mod = mod.Where("c.is_broadcast", 1)
 	case "group":

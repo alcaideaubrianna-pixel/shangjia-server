@@ -70,6 +70,9 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_collect_media_stat_owner" ON "hg_youban_publ
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_media_stat_source" ON "hg_youban_publish_collect_media_stat" ("source_id", "created_at");
 
 ALTER TABLE "hg_youban_publish_collect_source"
+  ADD COLUMN IF NOT EXISTS "bot_collect_scope" varchar(16) NOT NULL DEFAULT 'chat';
+
+ALTER TABLE "hg_youban_publish_collect_source"
   ADD COLUMN IF NOT EXISTS "history_collect_enabled" smallint NOT NULL DEFAULT 0;
 
 ALTER TABLE "hg_youban_publish_collect_source"
@@ -77,6 +80,8 @@ ALTER TABLE "hg_youban_publish_collect_source"
 
 ALTER TABLE "hg_youban_publish_collect_source"
   ADD COLUMN IF NOT EXISTS "history_collect_days" integer NOT NULL DEFAULT 30;
+
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_bot_scope" ON "hg_youban_publish_collect_source" ("bot_id", "bot_collect_scope", "source_chat_id", "status");
 
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_event_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "collect_source_id" bigint NOT NULL DEFAULT 0;
@@ -520,7 +525,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_state" (
   "tenant_id" bigint NOT NULL DEFAULT 0,
   "account_id" bigint NOT NULL DEFAULT 0,
   "profile_id" bigint NOT NULL DEFAULT 0,
-  "channel_id_json" text,
   "customer_remark" text,
   "anti_scan_enabled" smallint NOT NULL DEFAULT 0,
   "publish_at" timestamp DEFAULT NULL,
@@ -532,6 +536,22 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_state" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_profile_state_profile" ON "hg_youban_publish_profile_state" ("profile_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_profile_state_owner" ON "hg_youban_publish_profile_state" ("tenant_id", "account_id", "profile_id") WHERE "deleted_at" IS NULL;
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_channel" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0,
+  "is_manual" smallint NOT NULL DEFAULT 1,
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL,
+  CONSTRAINT "uk_ybp_profile_channel" UNIQUE ("tenant_id","profile_id","channel_id")
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_channel_owner" ON "hg_youban_publish_profile_channel" ("tenant_id","account_id","profile_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_channel_channel" ON "hg_youban_publish_profile_channel" ("tenant_id","channel_id","profile_id");
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "operation_no" varchar(128) NOT NULL DEFAULT '';
 DROP INDEX IF EXISTS "uk_ybp_tg_job_task_channel";
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_task_channel" ON "hg_youban_publish_tg_job" ("task_id", "channel_id", "id");

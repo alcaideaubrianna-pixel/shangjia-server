@@ -57,9 +57,8 @@ func (s *sSysPublish) collectSourcesByBotMessage(ctx context.Context, botId int6
 	if err := ensureTenantVipTables(ctx); err != nil {
 		return nil, err
 	}
-	chatId := strconv.FormatInt(msg.Chat.ID, 10)
 	version := s.collectSourceCacheVersion(ctx)
-	cacheKey := fmt.Sprintf("youban_publish:collect:sources:%s:%d:%s", version, botId, chatId)
+	cacheKey := fmt.Sprintf("youban_publish:collect:sources:%s:%d", version, botId)
 	if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {
 		var items []collectBotSourceCacheItem
 		if json.Unmarshal([]byte(value.String()), &items) == nil {
@@ -71,7 +70,6 @@ func (s *sSysPublish) collectSourcesByBotMessage(ctx context.Context, botId int6
 		Where("s.source_type", sysin.CollectSourceTypeBot).
 		Where("s.collect_enabled", 1).
 		Where("s.status", 1).
-		Where("s.source_chat_id", chatId).
 		Where("(vip.expired_at IS NULL OR vip.expired_at>?)", gtime.Now()).
 		WhereNull("s.deleted_at").
 		Fields("s.*")

@@ -66,3 +66,23 @@ func TestUpgradeSafeSqlIncludesProfileCycleDueIndex(t *testing.T) {
 		})
 	}
 }
+
+func TestUpgradeSafeSqlIncludesBotCollectScope(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		path string
+	}{
+		{name: "mysql", path: "addons/youban_publish/resource/sql/upgrade_safe.sql"},
+		{name: "pgsql", path: "addons/youban_publish/resource/sql/upgrade_safe.pgsql.sql"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sql := readSqlFile(test.path)
+			if !strings.Contains(sql, "bot_collect_scope") {
+				t.Fatalf("upgrade SQL does not add bot_collect_scope: %s", sql)
+			}
+			if !strings.Contains(sql, "idx_ybp_collect_source_bot_scope") {
+				t.Fatalf("upgrade SQL does not add bot scope index: %s", sql)
+			}
+		})
+	}
+}

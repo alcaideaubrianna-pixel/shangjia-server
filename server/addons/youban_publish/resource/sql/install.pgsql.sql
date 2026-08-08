@@ -75,7 +75,6 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_state" (
   "tenant_id" bigint NOT NULL DEFAULT 0,
   "account_id" bigint NOT NULL DEFAULT 0,
   "profile_id" bigint NOT NULL DEFAULT 0,
-  "channel_id_json" text,
   "customer_remark" text,
   "anti_scan_enabled" smallint NOT NULL DEFAULT 0,
   "publish_at" timestamp DEFAULT NULL,
@@ -91,6 +90,22 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_state" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_profile_state_profile" ON "hg_youban_publish_profile_state" ("profile_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_profile_state_owner" ON "hg_youban_publish_profile_state" ("tenant_id", "account_id", "profile_id") WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_ybp_profile_state_publish_active" ON "hg_youban_publish_profile_state" ("publish_task_status", "publish_task_updated_at", "profile_id") WHERE "deleted_at" IS NULL AND "publish_task_status" <> '';
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_channel" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0,
+  "is_manual" smallint NOT NULL DEFAULT 1,
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL,
+  CONSTRAINT "uk_ybp_profile_channel" UNIQUE ("tenant_id","profile_id","channel_id")
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_channel_owner" ON "hg_youban_publish_profile_channel" ("tenant_id","account_id","profile_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_channel_channel" ON "hg_youban_publish_profile_channel" ("tenant_id","channel_id","profile_id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_note_index" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -754,6 +769,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_bot_stat" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,
   "bot_id" bigint NOT NULL DEFAULT 0,
+  "bot_collect_scope" varchar(16) NOT NULL DEFAULT 'chat',
   "bot_name" varchar(128) NOT NULL DEFAULT '',
   "bot_username" varchar(128) NOT NULL DEFAULT '',
   "pending_count" integer NOT NULL DEFAULT 0,
@@ -1209,6 +1225,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_source" (
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_owner" ON "hg_youban_publish_collect_source" ("tenant_id", "account_id", "source_type", "status");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_bot_chat" ON "hg_youban_publish_collect_source" ("bot_id", "source_chat_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_bot_scope" ON "hg_youban_publish_collect_source" ("bot_id", "bot_collect_scope", "source_chat_id", "status");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_rule" (
   "id" BIGSERIAL PRIMARY KEY,

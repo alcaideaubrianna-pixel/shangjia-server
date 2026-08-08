@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_source` (
   `source_username` varchar(128) NOT NULL DEFAULT '' COMMENT '来源用户名',
   `tg_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '协议号ID',
   `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '机器人ID',
+  `bot_collect_scope` varchar(16) NOT NULL DEFAULT 'chat' COMMENT 'Bot采集范围：chat/private',
   `follow_account_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '关注账号ID',
   `collect_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否开启采集',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态',
@@ -103,7 +104,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_source` (
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
   KEY `idx_ybp_collect_source_owner` (`tenant_id`,`account_id`,`source_type`,`status`),
-  KEY `idx_ybp_collect_source_bot_chat` (`bot_id`,`source_chat_id`)
+  KEY `idx_ybp_collect_source_bot_chat` (`bot_id`,`source_chat_id`),
+  KEY `idx_ybp_collect_source_bot_scope` (`bot_id`,`bot_collect_scope`,`source_chat_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集源';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_rule` (
@@ -456,7 +458,6 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_state` (
   `tenant_id` bigint(20) NOT NULL DEFAULT '0',
   `account_id` bigint(20) NOT NULL DEFAULT '0',
   `profile_id` bigint(20) NOT NULL DEFAULT '0',
-  `channel_id_json` text,
   `customer_remark` text,
   `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0',
   `publish_at` datetime DEFAULT NULL,
@@ -473,6 +474,23 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_state` (
   KEY `idx_ybp_profile_state_owner` (`tenant_id`,`account_id`,`profile_id`),
   KEY `idx_ybp_profile_state_publish_active` (`publish_task_status`,`publish_task_updated_at`,`profile_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上架资料归属和发布配置';
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_channel` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0',
+  `channel_id` bigint(20) NOT NULL DEFAULT '0',
+  `is_manual` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否资料手动选择',
+  `created_by` bigint(20) NOT NULL DEFAULT '0',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_profile_channel` (`tenant_id`,`profile_id`,`channel_id`),
+  KEY `idx_ybp_profile_channel_owner` (`tenant_id`,`account_id`,`profile_id`),
+  KEY `idx_ybp_profile_channel_channel` (`tenant_id`,`channel_id`,`profile_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='资料推送频道映射';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_success_record` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,

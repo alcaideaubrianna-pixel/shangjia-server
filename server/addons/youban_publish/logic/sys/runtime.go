@@ -48,6 +48,9 @@ func (s *sSysPublish) StopRuntime() {
 }
 
 func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
+	if err := ensureCollectSourceColumns(ctx); err != nil {
+		g.Log().Warningf(ctx, "检查采集源字段失败：%+v", err)
+	}
 	config := loadPublishRuntimeConfig(ctx)
 	if len(config.Roles) == 0 {
 		g.Log().Warning(ctx, "上架插件未识别到有效运行角色，当前实例不会启动后台运行组件")

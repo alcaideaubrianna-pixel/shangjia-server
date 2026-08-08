@@ -128,3 +128,23 @@ DELETE FROM "hg_youban_publish_tg_message" older USING "hg_youban_publish_tg_mes
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_message_job_message" ON "hg_youban_publish_tg_message" ("job_id", "tg_message_id");
 ALTER TABLE "hg_youban_publish_tg_channel_stat" ALTER COLUMN "last_error_message" TYPE text;
 ALTER TABLE "hg_youban_publish_tg_bot_stat" ALTER COLUMN "last_error_message" TYPE text;
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_channel" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0,
+  "is_manual" smallint NOT NULL DEFAULT 1,
+  "created_by" bigint NOT NULL DEFAULT 0,
+  "updated_by" bigint NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL,
+  "deleted_at" timestamp DEFAULT NULL,
+  CONSTRAINT "uk_ybp_profile_channel" UNIQUE ("tenant_id","profile_id","channel_id")
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_channel_owner" ON "hg_youban_publish_profile_channel" ("tenant_id","account_id","profile_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_channel_channel" ON "hg_youban_publish_profile_channel" ("tenant_id","channel_id","profile_id");
+
+ALTER TABLE "hg_youban_publish_collect_source" ADD COLUMN IF NOT EXISTS "bot_collect_scope" varchar(16) NOT NULL DEFAULT 'chat';
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_bot_scope" ON "hg_youban_publish_collect_source" ("bot_id", "bot_collect_scope", "source_chat_id", "status");

@@ -110,6 +110,7 @@ type CollectSourceModel struct {
 	SourceUsername        string      `json:"sourceUsername" dc:"用户名"`
 	TgAccountId           int64       `json:"tgAccountId" dc:"协议号ID"`
 	BotId                 int64       `json:"botId" dc:"机器人ID"`
+	BotCollectScope       string      `json:"botCollectScope" dc:"Bot采集范围"`
 	FollowAccountId       int64       `json:"followAccountId" dc:"关注账号ID"`
 	CollectEnabled        int         `json:"collectEnabled" dc:"采集开关"`
 	HistoryCollectEnabled int         `json:"historyCollectEnabled" dc:"历史采集开关"`
@@ -134,6 +135,7 @@ type CollectSourceSaveInp struct {
 	SourceUsername        string  `json:"sourceUsername" dc:"用户名"`
 	TgAccountId           int64   `json:"tgAccountId" dc:"协议号ID"`
 	BotId                 int64   `json:"botId" dc:"机器人ID"`
+	BotCollectScope       string  `json:"botCollectScope" dc:"Bot采集范围"`
 	FollowAccountId       int64   `json:"followAccountId" dc:"关注账号ID"`
 	CollectEnabled        int     `json:"collectEnabled" dc:"采集开关"`
 	HistoryCollectEnabled int     `json:"historyCollectEnabled" dc:"历史采集开关"`
@@ -223,6 +225,11 @@ func (in *CollectSourceSaveInp) Filter(ctx context.Context) error {
 	}
 	if in.SourceType != CollectSourceTypeAccount && in.SourceType != CollectSourceTypeBot && in.SourceType != CollectSourceTypeFollow {
 		return gerror.New("采集源类型不合法")
+	}
+	if in.SourceType == CollectSourceTypeBot {
+		in.BotCollectScope = "all"
+	} else {
+		in.BotCollectScope = ""
 	}
 	if in.Title == "" {
 		return gerror.New("采集源名称不能为空")

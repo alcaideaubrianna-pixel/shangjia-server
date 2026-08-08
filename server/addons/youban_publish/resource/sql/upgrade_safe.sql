@@ -130,3 +130,24 @@ DELETE older FROM `hg_youban_publish_tg_message` older INNER JOIN `hg_youban_pub
 ALTER TABLE `hg_youban_publish_tg_message` ADD UNIQUE INDEX `uk_ybp_tg_message_job_message` (`job_id`,`tg_message_id`);
 ALTER TABLE `hg_youban_publish_tg_channel_stat` MODIFY COLUMN `last_error_message` text NOT NULL COMMENT '最后错误';
 ALTER TABLE `hg_youban_publish_tg_bot_stat` MODIFY COLUMN `last_error_message` text NOT NULL COMMENT '最后错误';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_channel` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0',
+  `channel_id` bigint(20) NOT NULL DEFAULT '0',
+  `is_manual` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否资料手动选择',
+  `created_by` bigint(20) NOT NULL DEFAULT '0',
+  `updated_by` bigint(20) NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_profile_channel` (`tenant_id`,`profile_id`,`channel_id`),
+  KEY `idx_ybp_profile_channel_owner` (`tenant_id`,`account_id`,`profile_id`),
+  KEY `idx_ybp_profile_channel_channel` (`tenant_id`,`channel_id`,`profile_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='资料推送频道映射';
+
+ALTER TABLE `hg_youban_publish_collect_source` ADD COLUMN `bot_collect_scope` varchar(16) NOT NULL DEFAULT 'chat' COMMENT 'Bot采集范围：chat/private' AFTER `bot_id`;
+ALTER TABLE `hg_youban_publish_collect_source` ADD KEY `idx_ybp_collect_source_bot_scope` (`bot_id`,`bot_collect_scope`,`source_chat_id`,`status`);

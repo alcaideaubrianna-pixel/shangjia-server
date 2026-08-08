@@ -62,3 +62,13 @@ func TestNormalizeCollectHistoryConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestCollectSourceSaveInpFilterBotScope(t *testing.T) {
+	source := &CollectSourceSaveInp{SourceType: CollectSourceTypeBot, Title: "Bot 全消息入口", BotCollectScope: "private"}
+	if err := source.Filter(nil); err != nil {
+		t.Fatalf("Filter() error = %v", err)
+	}
+	if source.BotCollectScope != "all" {
+		t.Fatalf("BotCollectScope = %q, want %q", source.BotCollectScope, "all")
+	}
+}

@@ -521,7 +521,7 @@ type ProfileModel struct {
 	AccountName           string      `json:"accountName" dc:"上架账号昵称"`
 	Nickname              string      `json:"nickname" dc:"账号名称"`
 	Username              string      `json:"username" dc:"上架账号用户名"`
-	ChannelIdJson         string      `json:"channelIdJson" dc:"推送频道ID JSON"`
+	ChannelIds            []int64     `json:"channelIds" dc:"推送频道ID列表"`
 	AntiScanEnabled       int         `json:"antiScanEnabled" dc:"是否防扫图处理"`
 	CustomerRemark        string      `json:"customerRemark" dc:"客服备注"`
 	TaskStatus            string      `json:"taskStatus" dc:"上架任务状态"`
@@ -1027,6 +1027,7 @@ type BotChannelCacheModel struct {
 	ChannelTitle    string      `json:"channelTitle" dc:"频道/群聊名称"`
 	ChannelUsername string      `json:"channelUsername" dc:"频道/群聊用户名"`
 	ChatType        string      `json:"chatType" dc:"聊天类型"`
+	IsPrivate       int         `json:"isPrivate" dc:"是否私聊"`
 	IsBroadcast     int         `json:"isBroadcast" dc:"是否频道"`
 	IsMegagroup     int         `json:"isMegagroup" dc:"是否群聊"`
 	MessageCount    int         `json:"messageCount" dc:"消息数"`

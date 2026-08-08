@@ -79,6 +79,7 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 			"source_username":         in.SourceUsername,
 			"tg_account_id":           in.TgAccountId,
 			"bot_id":                  in.BotId,
+			"bot_collect_scope":       in.BotCollectScope,
 			"follow_account_id":       in.FollowAccountId,
 			"collect_enabled":         in.CollectEnabled,
 			"history_collect_enabled": in.HistoryCollectEnabled,
