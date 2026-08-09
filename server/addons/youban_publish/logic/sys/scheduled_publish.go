@@ -14,6 +14,7 @@ import (
 )
 
 type scheduledPublishProfile struct {
+	StateId   int64       `json:"stateId"`
 	AccountId int64       `json:"accountId"`
 	ProfileId int64       `json:"profileId"`
 	PublishAt *gtime.Time `json:"publishAt"`
@@ -45,7 +46,7 @@ func (s *sSysPublish) submitDuePublishTasks(ctx context.Context) error {
 	err := g.DB().Model(publishProfileStateTable+" ps").Safe().Ctx(ctx).
 		InnerJoin(dao.ContentProfile.Table()+" p", "p.id=ps.profile_id AND p.deleted_at IS NULL").
 		InnerJoin(publishAccountTable+" a", "a.id=ps.account_id AND a.deleted_at IS NULL AND a.status=1").
-		Fields("ps.profile_id,ps.tenant_id,ps.account_id,ps.publish_at").
+		Fields("ps.id AS state_id,ps.profile_id,ps.tenant_id,ps.account_id,ps.publish_at").
 		WhereNotNull("ps.publish_at").
 		WhereLTE("ps.publish_at", gtime.Now()).
 		WhereNull("ps.deleted_at").
@@ -56,7 +57,7 @@ func (s *sSysPublish) submitDuePublishTasks(ctx context.Context) error {
 		return gerror.Wrap(err, "读取到期上架资料失败")
 	}
 	for _, item := range list {
-		if item == nil || item.ProfileId <= 0 || item.TenantId <= 0 || item.AccountId <= 0 || item.PublishAt == nil {
+		if item == nil || item.StateId <= 0 || item.ProfileId <= 0 || item.TenantId <= 0 || item.AccountId <= 0 || item.PublishAt == nil {
 			continue
 		}
 		operationNo := fmt.Sprintf("scheduled:%d:%d", item.ProfileId, item.PublishAt.TimestampNano())
@@ -82,10 +83,7 @@ func (s *sSysPublish) submitDuePublishTasks(ctx context.Context) error {
 
 func (s *sSysPublish) clearInvalidScheduledPublish(ctx context.Context, item *scheduledPublishProfile) error {
 	_, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
-		Where("profile_id", item.ProfileId).
-		Where("tenant_id", item.TenantId).
-		Where("account_id", item.AccountId).
-		Where("publish_at", item.PublishAt).
+		Where("id", item.StateId).
 		WhereNull("deleted_at").
 		Data(g.Map{"publish_at": nil, "updated_at": gtime.Now()}).Update()
 	return err

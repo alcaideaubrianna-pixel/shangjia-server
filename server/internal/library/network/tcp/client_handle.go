@@ -57,8 +57,8 @@ func (client *Client) serverLogin() {
 func (client *Client) onResponseServerLogin(ctx context.Context, req *ServerLoginRes) {
 	if err := req.GetError(); err != nil {
 		client.isLogin.Set(false)
-		client.logger.Warningf(ctx, "onResponseServerLogin destroy, err:%v", err)
-		client.Destroy()
+		client.logger.Warningf(ctx, "onResponseServerLogin stop reconnect, err:%v", err)
+		client.stopReconnect()
 		return
 	}
 

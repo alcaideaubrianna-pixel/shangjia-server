@@ -924,7 +924,7 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 	result := &tenantVipChangeResult{}
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		now := gtime.Now()
-		eventId, err := tx.Model(tenantVipEventTable).Safe().Ctx(ctx).Data(g.Map{
+		_, err := tx.Model(tenantVipEventTable).Safe().Ctx(ctx).Data(g.Map{
 			"event_key":        eventKey,
 			"event_type":       tenantVipEventExpired,
 			"tenant_id":        vip.TenantId,
@@ -933,14 +933,15 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 			"remark":           "会员到期",
 			"created_at":       now,
 			"updated_at":       now,
-		}).InsertAndGetId()
+		}).OnConflict("event_key").OnDuplicateEx("id").Save()
 		if err != nil {
-			if tenantVipDuplicateError(err) {
-				return nil
-			}
 			return gerror.Wrap(err, "创建会员到期事件失败")
 		}
-		result.EventId = eventId
+		var event tenantVipEventRow
+		if err = tx.Model(tenantVipEventTable).Safe().Ctx(ctx).Where("event_key", eventKey).Scan(&event); err != nil {
+			return gerror.Wrap(err, "读取会员到期事件失败")
+		}
+		result.EventId = event.Id
 
 		columns := pdao.YoubanPublishTenantVip.Columns()
 		var locked *entity.YoubanPublishTenantVip

@@ -204,9 +204,14 @@ func (client *Client) read() {
 	go func() {
 		defer func() {
 			client.Close()
+			if !client.config.AutoReconnect || client.stopFlag.Val() {
+				return
+			}
 			client.logger.Debugf(client.ctx, "client are about to be reconnected..")
 			time.Sleep(client.config.ConnectInterval)
-			_ = client.Start()
+			if !client.stopFlag.Val() {
+				_ = client.Start()
+			}
 		}()
 
 		if err := client.conn.Run(); err != nil {
@@ -240,6 +245,18 @@ func (client *Client) Destroy() {
 		client.conn.Close()
 		client.conn = nil
 	}
+}
+
+func (client *Client) stopReconnect() {
+	client.stopFlag.Set(true)
+	client.stopCron()
+	client.mutex.Lock()
+	client.closeFlag.Set(true)
+	if client.conn != nil {
+		client.conn.Close()
+		client.conn = nil
+	}
+	client.mutex.Unlock()
 }
 
 // Stop 停止服务

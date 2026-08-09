@@ -49,6 +49,9 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverCollectHistoryTasks(ctx, 20); err != nil {
 		g.Log().Warningf(ctx, "恢复历史采集任务失败：%+v", err)
 	}
+	if err := s.ignoreStaleCollectEventsForDisabledSources(ctx, 100); err != nil {
+		g.Log().Warningf(ctx, "清理已关闭采集源事件失败：%+v", err)
+	}
 	if err := s.recoverCollectEvents(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复采集事件处理失败：%+v", err)
 	}
@@ -58,6 +61,52 @@ func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	if err := s.recoverCollectPublishTasks(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复采集推送任务失败：%+v", err)
 	}
+}
+
+func (s *sSysPublish) ignoreStaleCollectEventsForDisabledSources(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	deadline := gtime.Now().Add(-collectEventRecoverAfter)
+	statuses := []string{
+		sysin.CollectEventStatusPending,
+		sysin.CollectEventStatusGroupCollect,
+		sysin.CollectEventStatusWaitingOrder,
+		sysin.CollectEventStatusPrechecked,
+		sysin.CollectEventStatusMediaPending,
+		sysin.CollectEventStatusMediaReady,
+		sysin.CollectEventStatusFailed,
+	}
+	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
+		Fields("e.id").
+		WhereIn("e.status", statuses).
+		WhereLTE("e.updated_at", deadline).
+		Where("NOT " + enabledCollectSourceExistsSQL("e")).
+		OrderAsc("e.updated_at").
+		Limit(limit).
+		All()
+	if err != nil {
+		return gerror.Wrap(err, "读取已关闭采集源事件失败")
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if id := row["id"].Int64(); id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	now := gtime.Now()
+	if _, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).WhereIn("id", ids).Data(g.Map{
+		"status":        sysin.CollectEventStatusIgnored,
+		"error_message": "采集源已关闭，事件不再处理",
+		"processed_at":  now,
+		"updated_at":    now,
+	}).Update(); err != nil {
+		return gerror.Wrap(err, "标记已关闭采集源事件失败")
+	}
+	return nil
 }
 
 func (s *sSysPublish) recoverStaleCollectMediaRows(ctx context.Context, limit int) error {
