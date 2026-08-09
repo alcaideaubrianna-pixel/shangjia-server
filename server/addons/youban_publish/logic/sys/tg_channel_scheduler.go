@@ -17,19 +17,15 @@ import (
 )
 
 const (
-	tgDispatchStatusIdle       = "idle"
-	tgDispatchStatusQueued     = "queued"
-	tgDispatchStatusProcessing = "processing"
-	tgDispatchStatusDone       = "done"
-	tgSchedulerChannelCacheTTL = time.Second
+	tgDispatchStatusIdle               = "idle"
+	tgDispatchStatusQueued             = "queued"
+	tgDispatchStatusProcessing         = "processing"
+	tgDispatchStatusDone               = "done"
+	tgSchedulerChannelCacheTTL         = time.Second
+	defaultTelegramSchedulerRunTimeout = 10 * time.Second
 )
 
 func (s *sSysPublish) runTelegramChannelScheduler(ctx context.Context) {
-	defer func() {
-		if err := recover(); err != nil {
-			g.Log().Warningf(ctx, "TG频道调度器异常退出：%v", err)
-		}
-	}()
 	g.Log().Info(ctx, "TG频道调度器已启动")
 	time.Sleep(time.Second)
 	ticker := time.NewTicker(time.Second)
@@ -39,14 +35,36 @@ func (s *sSysPublish) runTelegramChannelScheduler(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := s.dispatchTelegramDueJobs(ctx, g.Cfg().MustGet(ctx, "youbanPublish.queue.schedulerBatchSize", 50).Int()); err != nil {
-				if ctx.Err() != nil || errors.Is(err, context.Canceled) {
-					return
-				}
-				g.Log().Warningf(ctx, "调度TG频道推送任务失败：%+v", err)
-			}
+			s.runTelegramSchedulerTick(ctx, g.Cfg().MustGet(ctx, "youbanPublish.queue.schedulerBatchSize", 50).Int())
 		}
 	}
+}
+
+func (s *sSysPublish) runTelegramSchedulerTick(ctx context.Context, limit int) {
+	tickCtx, cancel := context.WithTimeout(ctx, telegramSchedulerRunTimeout(ctx))
+	defer cancel()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			g.Log().Warningf(ctx, "TG频道调度单轮异常，下一轮继续：%v", recovered)
+		}
+	}()
+	if err := s.dispatchTelegramDueJobs(tickCtx, limit); err != nil {
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+			return
+		}
+		g.Log().Warningf(ctx, "调度TG频道推送任务失败：%+v", err)
+	}
+}
+
+func telegramSchedulerRunTimeout(ctx context.Context) time.Duration {
+	seconds := g.Cfg().MustGet(ctx, "youbanPublish.queue.schedulerRunTimeoutSeconds", int(defaultTelegramSchedulerRunTimeout/time.Second)).Int()
+	if seconds < 2 {
+		seconds = 2
+	}
+	if seconds > 60 {
+		seconds = 60
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func (s *sSysPublish) scheduleTelegramJob(ctx context.Context, jobId int64, delay time.Duration) error {
@@ -229,13 +247,18 @@ func (s *sSysPublish) telegramSchedulerCandidatesByPriority(ctx context.Context,
 	case telegramSchedulerPriorityNormal:
 		priorityCondition = "(" + priorityExpr + ") > 10 AND (" + priorityExpr + ") < 90"
 	}
+	mod := g.DB().Model(publishTgJobTable + " j").Safe().Ctx(ctx).Unscoped()
+	if bucket == telegramSchedulerPriorityBulk {
+		mod = mod.Where("(LOWER(TRIM(j.operation_no)) LIKE 'full_push:%' OR LOWER(TRIM(j.operation_no)) LIKE 'cycle_batch:%')")
+	} else {
+		mod = mod.Where(telegramSchedulerCollectPredecessorCondition())
+	}
 	var jobs []telegramJobRecord
-	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
+	err := mod.
 		Fields("j.*").
 		WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
 		Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", now).
 		Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
-		Where(telegramSchedulerCollectPredecessorCondition()).
 		Where(priorityCondition).
 		OrderAsc("j.created_at").OrderAsc("j.id").
 		Limit(limit).
