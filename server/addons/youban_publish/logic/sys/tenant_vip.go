@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -137,7 +138,7 @@ func (s *sSysPublish) TenantVipOrderCreate(ctx context.Context, in *sysin.Tenant
 			PayType:    in.PayType,
 			TradeType:  in.TradeType,
 			PayAmount:  amount,
-			ReturnUrl:  in.ReturnUrl,
+			ReturnUrl:  tenantVipPaymentReturnURL(in.ReturnUrl, orderSn),
 		})
 		if err != nil {
 			return err
@@ -265,7 +266,7 @@ func (s *sSysPublish) TenantVipOrderPay(ctx context.Context, in *sysin.TenantVip
 		return nil, gerror.New("会员支付记录不存在")
 	}
 	if strings.TrimSpace(in.ReturnUrl) != "" {
-		pay.ReturnUrl = strings.TrimSpace(in.ReturnUrl)
+		pay.ReturnUrl = tenantVipPaymentReturnURL(in.ReturnUrl, order.OrderSn)
 	}
 	payOrder, err := payment.New(pay.PayType).CreateOrder(ctx, payin.CreateOrderInp{Pay: pay})
 	if err != nil {
@@ -282,6 +283,38 @@ func (s *sSysPublish) TenantVipOrderPay(ctx context.Context, in *sysin.TenantVip
 		res.TradeType = payOrder.TradeType
 	}
 	return res, nil
+}
+
+func tenantVipPaymentReturnURL(raw string, orderSn string) string {
+	const placeholder = "__ORDER_NO__"
+
+	raw = strings.TrimSpace(raw)
+	orderSn = strings.TrimSpace(orderSn)
+	if raw == "" || orderSn == "" {
+		return raw
+	}
+	if strings.Contains(raw, placeholder) {
+		return strings.ReplaceAll(raw, placeholder, url.QueryEscape(orderSn))
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed == nil {
+		return raw
+	}
+	if parsed.Fragment != "" {
+		fragment, fragmentErr := url.Parse(parsed.Fragment)
+		if fragmentErr == nil && fragment != nil {
+			query := fragment.Query()
+			query.Set("orderNo", orderSn)
+			fragment.RawQuery = query.Encode()
+			parsed.Fragment = fragment.String()
+			return parsed.String()
+		}
+	}
+	query := parsed.Query()
+	query.Set("orderNo", orderSn)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 func (s *sSysPublish) TenantVipPayNotify(ctx context.Context, in *payin.NotifyCallFuncInp) error {
