@@ -75,7 +75,7 @@ func (s *sSysPublish) createFullPushBatch(ctx context.Context, tenantId, channel
 			return &active, nil
 		}
 	}
-	snapshot, err := s.fullPushSnapshot(ctx, tenantId)
+	snapshot, err := s.fullPushSnapshot(ctx, tenantId, channelId)
 	if err != nil {
 		return nil, err
 	}
@@ -124,9 +124,9 @@ func (s *sSysPublish) createFullPushBatch(ctx context.Context, tenantId, channel
 	}, nil
 }
 
-func (s *sSysPublish) fullPushSnapshot(ctx context.Context, tenantId int64) (*fullPushSnapshot, error) {
+func (s *sSysPublish) fullPushSnapshot(ctx context.Context, tenantId, channelId int64) (*fullPushSnapshot, error) {
 	var snapshot fullPushSnapshot
-	err := fullPushOnlineProfileBaseModel(ctx, tenantId).
+	err := s.fullPushEligibleProfileModel(ctx, tenantId, channelId).
 		Fields("COALESCE(MAX(p.id), 0) AS snapshot_max_profile_id, COUNT(*) AS total_count").
 		Scan(&snapshot)
 	if err != nil {
@@ -236,7 +236,7 @@ func (s *sSysPublish) advanceFullPushBatch(ctx context.Context, batch fullPushBa
 	if err != nil {
 		return gerror.Wrap(err, "更新全量推送批次状态失败")
 	}
-	profiles, err := s.fullPushProfiles(ctx, batch.TenantId, batch.CursorProfileId, batch.SnapshotMaxProfileId, limit)
+	profiles, err := s.fullPushProfiles(ctx, batch.TenantId, batch.ChannelId, batch.CursorProfileId, batch.SnapshotMaxProfileId, limit)
 	if err != nil {
 		return s.retryFullPushBatch(ctx, batch, err)
 	}
@@ -349,12 +349,12 @@ func (s *sSysPublish) finalizeFullPushBatch(ctx context.Context, batch fullPushB
 	return nil
 }
 
-func (s *sSysPublish) fullPushProfiles(ctx context.Context, tenantId, lastId, maxProfileId int64, limit int) ([]fullPushProfile, error) {
+func (s *sSysPublish) fullPushProfiles(ctx context.Context, tenantId, channelId, lastId, maxProfileId int64, limit int) ([]fullPushProfile, error) {
 	if limit <= 0 {
 		limit = 500
 	}
 	var profiles []fullPushProfile
-	err := fullPushOnlineProfileBaseModel(ctx, tenantId).
+	err := s.fullPushEligibleProfileModel(ctx, tenantId, channelId).
 		Fields("ps.tenant_id,ps.account_id,p.id AS profile_id").
 		WhereGT("p.id", lastId).
 		WhereLTE("p.id", maxProfileId).
@@ -365,6 +365,18 @@ func (s *sSysPublish) fullPushProfiles(ctx context.Context, tenantId, lastId, ma
 		return nil, gerror.Wrap(err, "读取全量推送当前资料失败")
 	}
 	return profiles, nil
+}
+
+func (s *sSysPublish) fullPushEligibleProfileModel(ctx context.Context, tenantId, channelId int64) *gdb.Model {
+	mod := fullPushOnlineProfileBaseModel(ctx, tenantId)
+	if channelId <= 0 {
+		return mod.Where("1=0")
+	}
+	manualChannel := fmt.Sprintf(`EXISTS (SELECT 1 FROM %s pc WHERE pc.tenant_id=ps.tenant_id AND pc.account_id=ps.account_id AND pc.profile_id=ps.profile_id AND pc.channel_id=? AND pc.is_manual=1 AND pc.deleted_at IS NULL)`, publishProfileChannelTable)
+	manualAnyChannel := fmt.Sprintf(`EXISTS (SELECT 1 FROM %s pc WHERE pc.tenant_id=ps.tenant_id AND pc.account_id=ps.account_id AND pc.profile_id=ps.profile_id AND pc.is_manual=1 AND pc.deleted_at IS NULL)`, publishProfileChannelTable)
+	defaultChannel := fmt.Sprintf(`EXISTS (SELECT 1 FROM %s dc WHERE dc.tenant_id=ps.tenant_id AND dc.id=? AND dc.publish_direction='up' AND dc.status=1 AND dc.is_default_selected=1 AND dc.deleted_at IS NULL)`, publishChannelTable)
+	condition := fmt.Sprintf(`(%s OR (NOT %s AND %s))`, manualChannel, manualAnyChannel, defaultChannel)
+	return mod.Where(condition, channelId, channelId)
 }
 
 func fullPushOnlineProfileBaseModel(ctx context.Context, tenantId int64) *gdb.Model {

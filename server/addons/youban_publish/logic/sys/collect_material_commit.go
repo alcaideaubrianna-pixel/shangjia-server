@@ -328,6 +328,9 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 			if profileId <= 0 {
 				return gerror.New("创建采集资料失败")
 			}
+			if err = replaceProfileChannelMappings(ctx, tx, tenantId, accountId, profileId, collectRuleTargetChannelIds(rule)); err != nil {
+				return err
+			}
 		} else {
 			profileId = existing[columns.Id].Int64()
 			if _, txErr = tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Where(columns.Id, profileId).Data(data).Update(); txErr != nil {

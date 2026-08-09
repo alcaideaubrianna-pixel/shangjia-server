@@ -33,17 +33,12 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			return nil, err
 		}
 	}
-	defaultChannelIds, err := s.defaultSelectedPublishChannelIds(ctx, tenantId)
-	if err != nil {
-		return nil, err
-	}
 	in.ChannelIds, err = s.availableProfileChannelIds(ctx, in.ChannelIds, tenantId)
 	if err != nil {
 		return nil, err
 	}
-	requestedChannelIds := uniqueIds(in.ChannelIds)
 	manualChannelIds := uniqueIds(in.ChannelIds)
-	if len(manualChannelIds) == 0 || sameInt64Set(requestedChannelIds, defaultChannelIds) {
+	if len(manualChannelIds) == 0 {
 		manualChannelIds = nil
 	}
 	var publishAt *gtime.Time

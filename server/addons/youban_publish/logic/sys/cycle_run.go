@@ -98,8 +98,7 @@ func (s *sSysPublish) AdminChannelCycleRun(ctx context.Context, in *sysin.Channe
 		if affected == 0 {
 			return gerror.New("该频道已有循环曝光正在执行")
 		}
-		count, countErr := tx.Model(publishChannelProfileTable).Safe().Ctx(ctx).
-			Where("channel_id", channel.Id).Where("status", "active").Count()
+		count, countErr := s.fullPushEligibleProfileModel(ctx, account.TenantId, channel.Id).Count()
 		if countErr != nil {
 			return gerror.Wrap(countErr, "统计频道循环资料失败")
 		}
@@ -309,7 +308,7 @@ func (s *sSysPublish) channelCycleById(ctx context.Context, channelId int64) (ch
 
 func (s *sSysPublish) channelCyclePage(ctx context.Context, tenantId, channelId int64, cursorId int64, limit int) ([]channelProfileRecord, error) {
 	var items []channelProfileRecord
-	err := fullPushOnlineProfileBaseModel(ctx, tenantId).
+	err := s.fullPushEligibleProfileModel(ctx, tenantId, channelId).
 		Fields("p.id AS id,ps.tenant_id,ps.account_id,p.id AS profile_id").
 		WhereGT("p.id", cursorId).
 		OrderAsc("p.id").
