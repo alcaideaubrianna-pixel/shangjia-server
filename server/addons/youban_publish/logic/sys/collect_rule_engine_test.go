@@ -131,3 +131,23 @@ func TestCollectDedupeCacheEntryValid(t *testing.T) {
 		t.Fatal("zero-day window must have no expiration")
 	}
 }
+
+func TestApplyCollectIntroFeeTruncate(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "removes matched line and following text", text: "标题\n介绍费 7888\nKK", want: "标题"},
+		{name: "removes all text when first line matches", text: "介绍费 7888\nKK", want: ""},
+		{name: "supports windows line endings", text: "标题\r\n介绍费：7888\r\nKK", want: "标题"},
+		{name: "keeps text without keyword", text: "标题\n联系方式\nKK", want: "标题\n联系方式\nKK"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := applyCollectIntroFeeTruncate(test.text); got != test.want {
+				t.Fatalf("truncate text = %q, want %q", got, test.want)
+			}
+		})
+	}
+}

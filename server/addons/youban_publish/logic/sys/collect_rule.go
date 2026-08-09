@@ -68,6 +68,9 @@ func (s *sSysPublish) CollectRuleList(ctx context.Context, in *sysin.CollectRule
 		item.Tags = config.Tags
 		item.DeleteLineTexts = config.DeleteLines
 		item.DeleteTexts = config.DeleteTexts
+		if config.TruncateIntroFee {
+			item.TruncateIntroFeeEnabled = 1
+		}
 		item.BlockTexts = config.BlockedTexts
 		item.Replacements = make([]sysin.CollectRuleReplaceModel, 0, len(config.Replacements))
 		for _, replacement := range config.Replacements {
@@ -141,7 +144,7 @@ func (s *sSysPublish) CollectRuleSave(ctx context.Context, in *sysin.CollectRule
 		}
 		return syncCollectRuleItemsTx(ctx, tx, account.TenantId, account.Id, id, collectRuleItems{
 			Keywords: in.Keywords, Tags: in.Tags, Replacements: replacements,
-			DeleteLines: in.DeleteLineTexts, DeleteTexts: in.DeleteTexts, BlockedTexts: in.BlockTexts,
+			DeleteLines: in.DeleteLineTexts, DeleteTexts: in.DeleteTexts, TruncateIntroFee: in.TruncateIntroFeeEnabled == 1, BlockedTexts: in.BlockTexts,
 		})
 	})
 	if err != nil {

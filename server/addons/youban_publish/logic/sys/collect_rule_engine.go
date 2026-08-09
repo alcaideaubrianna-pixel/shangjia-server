@@ -48,7 +48,11 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 			MatchJSON: matchJSON,
 		}
 	}
-	text := applyCollectLineDeletes(rawText, collectRuleStrings(rule, "delete_lines"))
+	text := rawText
+	if rule["truncate_intro_fee_enabled"].Bool() {
+		text = applyCollectIntroFeeTruncate(text)
+	}
+	text = applyCollectLineDeletes(text, collectRuleStrings(rule, "delete_lines"))
 	text = applyCollectTextDeletes(text, collectRuleStrings(rule, "delete_texts"))
 	text = applyCollectReplacements(text, collectRuleReplacements(rule))
 	if shouldDropCollectStandaloneCodeCaption(text, mediaCount) {
@@ -353,6 +357,16 @@ func applyCollectLineDeletes(text string, values []string) string {
 		kept = append(kept, line)
 	}
 	return strings.Join(kept, "\n")
+}
+
+func applyCollectIntroFeeTruncate(text string) string {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	for index, line := range lines {
+		if strings.Contains(line, "介绍费") {
+			return strings.Join(lines[:index], "\n")
+		}
+	}
+	return text
 }
 
 func normalizedCollectTerms(values []string) []string {

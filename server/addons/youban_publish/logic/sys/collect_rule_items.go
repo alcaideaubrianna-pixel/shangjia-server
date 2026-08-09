@@ -15,21 +15,23 @@ import (
 const collectRuleItemTable = "hg_youban_publish_collect_rule_item"
 
 const (
-	collectRuleItemKeyword    = "keyword"
-	collectRuleItemTag        = "tag"
-	collectRuleItemReplace    = "replace"
-	collectRuleItemDeleteLine = "delete_line"
-	collectRuleItemDeleteText = "delete_text"
-	collectRuleItemBlockText  = "block_text"
+	collectRuleItemKeyword          = "keyword"
+	collectRuleItemTag              = "tag"
+	collectRuleItemReplace          = "replace"
+	collectRuleItemDeleteLine       = "delete_line"
+	collectRuleItemDeleteText       = "delete_text"
+	collectRuleItemTruncateIntroFee = "truncate_intro_fee"
+	collectRuleItemBlockText        = "block_text"
 )
 
 type collectRuleItems struct {
-	Keywords     []string
-	Tags         []string
-	Replacements []collectReplaceRule
-	DeleteLines  []string
-	DeleteTexts  []string
-	BlockedTexts []string
+	Keywords         []string
+	Tags             []string
+	Replacements     []collectReplaceRule
+	DeleteLines      []string
+	DeleteTexts      []string
+	TruncateIntroFee bool
+	BlockedTexts     []string
 }
 
 func collectRuleItemMap(ctx context.Context, ruleIds []int64) (map[int64]*collectRuleItems, error) {
@@ -63,6 +65,8 @@ func collectRuleItemMap(ctx context.Context, ruleIds []int64) (map[int64]*collec
 			items.DeleteLines = append(items.DeleteLines, value)
 		case collectRuleItemDeleteText:
 			items.DeleteTexts = append(items.DeleteTexts, value)
+		case collectRuleItemTruncateIntroFee:
+			items.TruncateIntroFee = true
 		case collectRuleItemBlockText:
 			items.BlockedTexts = append(items.BlockedTexts, value)
 		}
@@ -88,6 +92,7 @@ func attachCollectRuleItems(ctx context.Context, rules []gdb.Record) error {
 		rule["tags"] = gvar.New(items.Tags)
 		rule["delete_lines"] = gvar.New(items.DeleteLines)
 		rule["delete_texts"] = gvar.New(items.DeleteTexts)
+		rule["truncate_intro_fee_enabled"] = gvar.New(items.TruncateIntroFee)
 		rule["blocked_texts"] = gvar.New(items.BlockedTexts)
 		from := make([]string, 0, len(items.Replacements))
 		to := make([]string, 0, len(items.Replacements))
@@ -157,6 +162,11 @@ func syncCollectRuleItemsTx(ctx context.Context, tx gdb.TX, tenantId, accountId,
 	}
 	for _, value := range items.DeleteTexts {
 		if err := insert(collectRuleItemDeleteText, value, ""); err != nil {
+			return err
+		}
+	}
+	if items.TruncateIntroFee {
+		if err := insert(collectRuleItemTruncateIntroFee, "介绍费", ""); err != nil {
 			return err
 		}
 	}
