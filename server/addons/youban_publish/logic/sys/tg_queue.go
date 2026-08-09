@@ -146,6 +146,25 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	if err != nil {
 		return err
 	}
+	if active, checkErr := s.telegramJobChannelIsActive(ctx, job); checkErr != nil {
+		return checkErr
+	} else if !active {
+		_, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", jobId).
+			WhereIn("status", []string{"pending", "failed_retry", "unknown", "sending"}).
+			Data(g.Map{
+				"status":              "superseded",
+				"dispatch_status":     tgDispatchStatusDone,
+				"next_retry_at":       nil,
+				"error_message":       "目标频道已删除或禁用，任务自动终止",
+				"last_dispatch_error": "目标频道已删除或禁用，任务自动终止",
+				"updated_at":          gtime.Now(),
+			}).Update()
+		if updateErr != nil {
+			return gerror.Wrap(updateErr, "终止无效频道TG任务失败")
+		}
+		return nil
+	}
 	priority := s.telegramJobPriority(job)
 	queueName := telegramQueueNameByPriorityAndChannel(ctx, priority, job.ChannelId)
 	data := g.Map{

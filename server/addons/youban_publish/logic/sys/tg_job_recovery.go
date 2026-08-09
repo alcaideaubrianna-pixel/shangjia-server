@@ -25,6 +25,7 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
+		Where(telegramActiveChannelCondition()).
 		Data(g.Map{
 			"dispatch_status":     tgDispatchStatusIdle,
 			"next_retry_at":       now,
@@ -99,6 +100,7 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
+		Where(telegramActiveChannelCondition()).
 		WhereLTE("dispatched_at", deadline).
 		OrderAsc("dispatched_at").OrderAsc("id").
 		Limit(limit).
@@ -145,6 +147,7 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
+		Where(telegramActiveChannelCondition()).
 		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", nowText).
 		WhereLTE("updated_at", deadline).
 		OrderAsc("updated_at").OrderAsc("id").
@@ -174,6 +177,22 @@ func telegramRecoveryTimeText(value *gtime.Time) string {
 	return value.Format("Y-m-d H:i:s")
 }
 
+func (s *sSysPublish) telegramJobChannelIsActive(ctx context.Context, job telegramJobRecord) (bool, error) {
+	if job.ChannelId <= 0 || job.TenantId <= 0 {
+		return false, nil
+	}
+	count, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Where("id", job.ChannelId).
+		Where("tenant_id", job.TenantId).
+		Where("status", 1).
+		WhereNull("deleted_at").
+		Count()
+	if err != nil {
+		return false, gerror.Wrap(err, "检查TG任务目标频道失败")
+	}
+	return count > 0, nil
+}
+
 func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit int) error {
 	if limit <= 0 {
 		limit = 100
@@ -182,6 +201,7 @@ func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("status", "sending").
+		Where(telegramActiveChannelCondition()).
 		WhereLTE("updated_at", deadline).
 		OrderAsc("updated_at").
 		Limit(limit).
@@ -198,6 +218,10 @@ func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit
 		}
 	}
 	return nil
+}
+
+func telegramActiveChannelCondition() string {
+	return "EXISTS (SELECT 1 FROM " + publishChannelTable + " c WHERE c.id=channel_id AND c.tenant_id=tenant_id AND c.status=1 AND c.deleted_at IS NULL)"
 }
 
 func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job telegramJobRecord) error {
