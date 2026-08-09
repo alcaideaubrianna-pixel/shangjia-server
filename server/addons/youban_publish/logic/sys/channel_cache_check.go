@@ -169,7 +169,7 @@ func (s *sSysPublish) checkBotChannelMember(ctx context.Context, botItem *sysin.
 		UserID: profile.ID,
 	})
 	if err != nil {
-		return false, false, false, "Bot 未加入频道或无法读取频道成员状态：" + err.Error()
+		return false, false, false, channelBotMemberErrorMessage(err.Error())
 	}
 	canSend = telegramBotCanSendMessage(member)
 	canDelete = telegramBotCanDeleteMessage(member)
@@ -184,6 +184,17 @@ func (s *sSysPublish) checkBotChannelMember(ctx context.Context, botItem *sysin.
 		return false, canDelete, inChannel, "Bot 已加入频道但没有发送消息权限"
 	}
 	return canSend, false, inChannel, "Bot 已加入频道但没有删除消息权限"
+}
+
+func channelBotMemberErrorMessage(raw string) string {
+	text := strings.ToLower(strings.TrimSpace(raw))
+	if strings.Contains(text, "member list is inaccessible") {
+		return "暂时无法读取频道中的 Bot 状态。请确认 Bot 已加入频道并已设置为管理员，同时开启“发布消息”和“删除消息”权限，然后重新检测"
+	}
+	if strings.Contains(text, "chat not found") {
+		return "无法找到该频道。请确认频道仍然存在，并检查频道配置是否正确，然后重新检测"
+	}
+	return "暂时无法读取频道中的 Bot 状态，请确认 Bot 已加入频道并拥有发布、删除消息权限，然后重新检测"
 }
 
 func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgAccountId int64, channel *sysin.ChannelCacheModel, bots []*sysin.BotModel) error {
@@ -240,6 +251,15 @@ func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgA
 				Rank: "资料推送",
 			}); err != nil {
 				logChannelBotRPCError(ctx, "edit_channel_admin", tenantId, tgAccountId, lastLoginAt, channel.ChannelId, botItem, err)
+				if tgerr.Is(err, "ADMINS_TOO_MUCH") {
+					return gerror.New("该频道的管理员数量已达到 Telegram 上限，暂时无法自动添加 Bot。请先进入频道管理，移除不再使用的管理员或 Bot，然后重新检测")
+				}
+				if tgerr.Is(err, "BOTS_TOO_MUCH") {
+					return gerror.New("该频道可添加的机器人数量已达到 Telegram 上限，暂时无法继续添加 Bot。请先移除不再使用的机器人，然后重新检测")
+				}
+				if tgerr.Is(err, "CHAT_ADMIN_REQUIRED") {
+					return gerror.New("当前 Telegram 账号没有管理频道管理员的权限，请使用频道所有者或管理员账号重新检测")
+				}
 				if tgerr.Is(err, "FRESH_CHANGE_ADMINS_FORBIDDEN") {
 					return gerror.New("当前TG登录会话处于Telegram安全冷却期，系统暂时无法自动将Bot设置为频道管理员。通常需要等待10～30分钟，然后点击“重新检测”。如需立即使用，请前往Telegram频道的「频道管理 → 管理员 → 添加管理员」，手动将所选Bot添加为管理员，并开启“发布消息”和“删除消息”权限，完成后返回页面重新检测")
 				}
