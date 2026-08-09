@@ -752,3 +752,4 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_message_job_message" ON "hg_youban_
 ALTER TABLE "hg_youban_publish_tg_channel_stat" ALTER COLUMN "last_error_message" TYPE text;
 ALTER TABLE "hg_youban_publish_tg_bot_stat" ALTER COLUMN "last_error_message" TYPE text;
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_tenant_channel_status" ON "hg_youban_publish_tg_job" ("tenant_id", "channel_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_due_dispatch" ON "hg_youban_publish_tg_job" ("dispatch_status", "status", "next_retry_at", "created_at", "id");

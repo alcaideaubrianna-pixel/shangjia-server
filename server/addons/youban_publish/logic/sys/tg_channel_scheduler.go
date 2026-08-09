@@ -250,10 +250,15 @@ func (s *sSysPublish) telegramSchedulerCandidatesByPriority(ctx context.Context,
 	mod := g.DB().Model(publishTgJobTable + " j").Safe().Ctx(ctx).Unscoped()
 	if bucket == telegramSchedulerPriorityBulk {
 		mod = mod.Where("(LOWER(TRIM(j.operation_no)) LIKE 'full_push:%' OR LOWER(TRIM(j.operation_no)) LIKE 'cycle_batch:%')")
-	} else {
-		mod = mod.Where(telegramSchedulerCollectPredecessorCondition())
 	}
 	var jobs []telegramJobRecord
+	prefilterLimit := limit
+	if bucket != telegramSchedulerPriorityBulk {
+		prefilterLimit *= 4
+		if prefilterLimit > 2000 {
+			prefilterLimit = 2000
+		}
+	}
 	err := mod.
 		Fields("j.*").
 		WhereIn("j.status", []string{"pending", "failed_retry", "unknown"}).
@@ -261,12 +266,29 @@ func (s *sSysPublish) telegramSchedulerCandidatesByPriority(ctx context.Context,
 		Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
 		Where(priorityCondition).
 		OrderAsc("j.created_at").OrderAsc("j.id").
-		Limit(limit).
+		Limit(prefilterLimit).
 		Scan(&jobs)
 	if err != nil {
 		return nil, gerror.Wrapf(err, "读取TG待调度任务失败 bucket:%d", bucket)
 	}
-	return jobs, nil
+	if bucket == telegramSchedulerPriorityBulk || len(jobs) == 0 {
+		return jobs, nil
+	}
+	ids := make([]int64, 0, len(jobs))
+	for _, job := range jobs {
+		ids = append(ids, job.Id)
+	}
+	var eligible []telegramJobRecord
+	if err = g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Unscoped().
+		Fields("j.*").
+		WhereIn("j.id", ids).
+		Where(telegramSchedulerCollectPredecessorCondition()).
+		OrderAsc("j.created_at").OrderAsc("j.id").
+		Limit(limit).
+		Scan(&eligible); err != nil {
+		return nil, gerror.Wrapf(err, "读取TG采集顺序候选失败 bucket:%d", bucket)
+	}
+	return eligible, nil
 }
 
 func mergeTelegramSchedulerCandidates(urgent, normal, bulk []telegramJobRecord, limit int) []telegramJobRecord {
