@@ -17,7 +17,7 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 	}
 	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.concurrency", 20).Int(),
-		Queues:         map[string]int{tgQueueNameUrgent: 8, tgQueueNameDefault: 4, tgQueueNameBulk: 1},
+		Queues:         telegramPublishQueueWeights(ctx),
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	g.Log().Info(ctx, "启动上架插件TG推送队列")

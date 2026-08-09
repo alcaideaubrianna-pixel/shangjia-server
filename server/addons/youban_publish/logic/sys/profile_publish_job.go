@@ -147,7 +147,7 @@ func (s *sSysPublish) ensureTelegramProfileJobWithMeta(ctx context.Context, sour
 		"target_chat_id": job.TargetChatId, "status": "pending",
 		"collect_event_id": job.CollectEventId, "collect_source_id": job.CollectSourceId,
 		"collect_source_chat_id": job.CollectSourceChatId, "collect_source_message_id": job.CollectSourceMessageId,
-		"priority": s.telegramJobPriority(job), "queue_name": telegramQueueNameByPriority(s.telegramJobPriority(job)),
+		"priority": s.telegramJobPriority(job), "queue_name": telegramQueueNameByPriorityAndChannel(ctx, s.telegramJobPriority(job), channel.Id),
 		"dispatch_status": tgDispatchStatusIdle, "created_at": now, "updated_at": now,
 	}).InsertAndGetId()
 	if err != nil {

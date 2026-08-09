@@ -376,6 +376,7 @@ youbanPublish:
     expandLeaseSeconds: 60
   queue:
     accountBusyTimeoutSeconds: 10
+    publishQueueShards: 16
 
 
 # 悦伴全局 Bot

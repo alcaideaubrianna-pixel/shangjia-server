@@ -891,6 +891,7 @@ func (s *sSysPublish) createMessagePushJobWithOperation(ctx context.Context, tem
 	if strings.TrimSpace(operationNo) == "" {
 		return telegramJobRecord{}, gerror.New("消息推送操作号不能为空")
 	}
+	queueName = telegramQueueNameByPriorityAndChannel(ctx, priority, channel.Id)
 	if existing, err := s.messagePushJobByOperation(ctx, operationNo, channel.Id); err != nil {
 		return telegramJobRecord{}, err
 	} else if existing.Id > 0 {

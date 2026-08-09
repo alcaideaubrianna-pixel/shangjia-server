@@ -143,7 +143,7 @@ func (s *sSysPublish) enqueueTelegramJobDirect(ctx context.Context, jobId int64,
 		return err
 	}
 	priority := s.telegramJobPriority(job)
-	queueName := telegramQueueNameByPriority(priority)
+	queueName := telegramQueueNameByPriorityAndChannel(ctx, priority, job.ChannelId)
 	data := g.Map{
 		"priority":            priority,
 		"queue_name":          queueName,
