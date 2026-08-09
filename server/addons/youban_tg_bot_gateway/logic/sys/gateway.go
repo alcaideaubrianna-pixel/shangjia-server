@@ -18,6 +18,7 @@ import (
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/hibiken/asynq"
 	"golang.org/x/net/proxy"
 
 	"hotgo/addons/youban_tg_bot_gateway/service"
@@ -35,6 +36,9 @@ type sGateway struct {
 	runtimes map[string]*botRuntime
 	bindings map[string][]service.BotBinding
 	clients  map[string]*tgbot.Bot
+	queueMu  sync.Mutex
+	queue    *asynq.Server
+	queueCli *asynq.Client
 }
 
 func init() { service.RegisterGateway(NewGateway()) }
@@ -50,6 +54,7 @@ func (s *sGateway) StartRuntime(ctx context.Context) {
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	s.cancel, s.done = cancel, make(chan struct{})
+	s.startUpdateQueue(ctx)
 	go func() { defer close(s.done); s.run(runCtx) }()
 }
 
@@ -73,6 +78,7 @@ func (s *sGateway) StopRuntime() {
 		case <-time.After(3 * time.Second):
 		}
 	}
+	s.stopUpdateQueue()
 }
 
 func (s *sGateway) run(ctx context.Context) {
@@ -150,8 +156,8 @@ func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *se
 		return nil
 	}
 	client, err := newBot(token, conf.ProxyURL, func(handlerCtx context.Context, bot *tgbot.Bot, update *models.Update) {
-		if dispatchErr := s.dispatch(handlerCtx, key, update); dispatchErr != nil {
-			g.Log().Warningf(handlerCtx, "TG Bot Gateway分发失败 key:%s err:%+v", key, dispatchErr)
+		if enqueueErr := s.enqueueUpdate(handlerCtx, key, update); enqueueErr != nil {
+			g.Log().Warningf(handlerCtx, "TG Bot Gateway更新入队失败 key:%s err:%+v", key, enqueueErr)
 		}
 	})
 	if err != nil {
@@ -194,7 +200,7 @@ func (s *sGateway) Webhook(ctx context.Context, key string, body []byte, secret 
 	if err = json.Unmarshal(body, &update); err != nil {
 		return gerror.Wrap(err, "解析Telegram消息失败")
 	}
-	return s.dispatch(ctx, strings.TrimSpace(key), &update)
+	return s.enqueueUpdateBody(ctx, strings.TrimSpace(key), body)
 }
 
 func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Update) error {
