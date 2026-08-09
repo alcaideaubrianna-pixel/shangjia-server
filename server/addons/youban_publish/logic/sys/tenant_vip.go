@@ -103,7 +103,18 @@ func (s *sSysPublish) TenantVipOrderCreate(ctx context.Context, in *sysin.Tenant
 	var res *sysin.TenantVipOrderModel
 	var freeOrderId int64
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		result, err := dao.AdminOrder.Ctx(ctx).Data(baseentity.AdminOrder{
+		orderColumns := dao.AdminOrder.Columns()
+		result, err := dao.AdminOrder.Ctx(ctx).Fields(
+			orderColumns.MemberId,
+			orderColumns.OrderType,
+			orderColumns.ProductId,
+			orderColumns.OrderSn,
+			orderColumns.Money,
+			orderColumns.Remark,
+			orderColumns.Status,
+			orderColumns.CreatedAt,
+			orderColumns.UpdatedAt,
+		).Data(baseentity.AdminOrder{
 			MemberId:  contexts.GetUserId(ctx),
 			OrderType: tenantVipOrderType,
 			ProductId: account.TenantId,
