@@ -41,6 +41,8 @@ const (
 
 const collectMediaMaxBulkQueueShards = 16
 
+const telegramPublishTaskTimeout = 5 * time.Minute
+
 func collectMediaBulkQueueName(shard int) string {
 	if shard < 0 {
 		shard = -shard
@@ -503,7 +505,7 @@ func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType
 	options := []asynq.Option{
 		asynq.Queue(queueName),
 		asynq.MaxRetry(10),
-		asynq.Timeout(5 * time.Minute),
+		asynq.Timeout(telegramPublishTaskTimeout),
 	}
 	if unique {
 		options = append(options, asynq.Unique(30*time.Second))

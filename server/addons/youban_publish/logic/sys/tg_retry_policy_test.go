@@ -40,6 +40,13 @@ func TestTelegramAccountBusyDoesNotBecomePermanentAfterFiveRetries(t *testing.T)
 	}
 }
 
+func TestTelegramVideoAsPhotoIsPermanent(t *testing.T) {
+	err := assertError(`Bad Request: can't use file of type Video as Photo`)
+	if !isTelegramPermanentSendError(err) {
+		t.Fatal("video as photo must be treated as a permanent media type error")
+	}
+}
+
 func assertError(message string) error {
 	return simpleError(message)
 }

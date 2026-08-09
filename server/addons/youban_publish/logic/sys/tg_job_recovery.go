@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	telegramSendingJobRecoverAfter  = 2 * time.Minute
+	telegramSendingJobRecoverAfter  = telegramPublishTaskTimeout + 2*time.Minute
 	telegramPendingJobRecoverAfter  = 30 * time.Second
 	telegramDispatchJobRecoverAfter = 5 * time.Minute
 )

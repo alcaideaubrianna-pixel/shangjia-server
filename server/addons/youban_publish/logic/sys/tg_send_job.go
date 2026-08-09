@@ -37,7 +37,7 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 		return err
 	}
 	if !ok {
-		delay := s.telegramChannelBusyDelay(ctx, jobId)
+		delay := s.telegramChannelBusyDelay(ctx, jobId, targetJob.DispatchCount)
 		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
 			"dispatch_status":     tgDispatchStatusIdle,
 			"next_retry_at":       gtime.Now().Add(delay),
@@ -67,13 +67,39 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 	return s.sendTelegramJobLockedByChannel(ctx, jobId)
 }
 
-func (s *sSysPublish) telegramChannelBusyDelay(ctx context.Context, jobId int64) time.Duration {
+func (s *sSysPublish) telegramChannelBusyDelay(ctx context.Context, jobId int64, dispatchCounts ...int) time.Duration {
 	base := g.Cfg().MustGet(ctx, "youbanPublish.queue.channelBusyDelaySeconds", 3).Int()
 	if base <= 0 {
 		base = 3
 	}
+	dispatchCount := 0
+	if len(dispatchCounts) > 0 && dispatchCounts[0] > 0 {
+		dispatchCount = dispatchCounts[0]
+	}
+	return telegramChannelBusyDelayDuration(base, jobId, dispatchCount)
+}
+
+func telegramChannelBusyDelayDuration(base int, jobId int64, dispatchCount int) time.Duration {
+	if base <= 0 {
+		base = 3
+	}
+	if dispatchCount < 0 {
+		dispatchCount = 0
+	}
+	level := dispatchCount / 5
+	if level > 4 {
+		level = 4
+	}
+	backoff := 0
+	if level > 0 {
+		backoff = 1 << level
+	}
 	jitter := int(jobId % 3)
-	return time.Duration(base+jitter) * time.Second
+	delay := base + backoff + jitter
+	if delay > 30 {
+		delay = 30
+	}
+	return time.Duration(delay) * time.Second
 }
 
 func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId int64) error {

@@ -188,7 +188,7 @@ func (s *sSysPublish) sendMessageTemplateToChannel(ctx context.Context, template
 		return result
 	}
 	if !ok {
-		delay := s.telegramChannelBusyDelay(ctx, job.Id)
+		delay := s.telegramChannelBusyDelay(ctx, job.Id, job.DispatchCount)
 		if err = s.enqueueTelegramJob(ctx, job.Id, delay); err != nil {
 			s.failMessagePushJob(ctx, job, err.Error())
 			result.Message = err.Error()
@@ -251,7 +251,7 @@ func (s *sSysPublish) SendMessagePushJob(ctx context.Context, jobId int64) error
 		return err
 	}
 	if !ok {
-		delay := s.telegramChannelBusyDelay(ctx, jobId)
+		delay := s.telegramChannelBusyDelay(ctx, jobId, targetJob.DispatchCount)
 		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
 			"dispatch_status":     tgDispatchStatusIdle,
 			"next_retry_at":       gtime.Now().Add(delay),

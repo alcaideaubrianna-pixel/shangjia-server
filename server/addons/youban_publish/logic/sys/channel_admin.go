@@ -328,6 +328,7 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		}
 	}
 	s.refreshAutoDeleteChannelCache(ctx)
+	s.refreshCollectSourceCache(ctx)
 	return nil
 }
 
@@ -432,6 +433,7 @@ func (s *sSysPublish) AdminChannelDelete(ctx context.Context, in *sysin.ChannelD
 		return gerror.Wrap(err, "删除频道配置失败")
 	}
 	s.refreshAutoDeleteChannelCache(ctx)
+	s.refreshCollectSourceCache(ctx)
 	return nil
 }
 
@@ -446,6 +448,7 @@ func (s *sSysPublish) ServerChannelDelete(ctx context.Context, in *sysin.Channel
 		return gerror.Wrap(err, "删除频道配置失败")
 	}
 	s.refreshAutoDeleteChannelCache(ctx)
+	s.refreshCollectSourceCache(ctx)
 	return nil
 }
 

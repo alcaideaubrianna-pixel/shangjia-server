@@ -18,7 +18,7 @@ func (s *sSysPublish) CleanupTelegramJobMessages(ctx context.Context, jobId int6
 		return err
 	}
 	if !ok {
-		delay := s.telegramChannelBusyDelay(ctx, jobId)
+		delay := s.telegramChannelBusyDelay(ctx, jobId, job.DispatchCount)
 		return s.requeueTelegramJob(ctx, tgTaskTypeCleanup, jobId, delay)
 	}
 	defer s.releaseTelegramChannelLease(ctx, lease)

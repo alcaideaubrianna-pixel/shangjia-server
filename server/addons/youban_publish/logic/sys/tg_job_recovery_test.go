@@ -2,19 +2,23 @@ package sys
 
 import (
 	"testing"
-
-	"github.com/gogf/gf/v2/os/gtime"
+	"time"
 )
 
-func TestTelegramRecoveryTimeTextUsesApplicationWallClock(t *testing.T) {
-	value := gtime.NewFromStr("2026-08-09 17:07:13")
-	if got := telegramRecoveryTimeText(value); got != "2026-08-09 17:07:13" {
-		t.Fatalf("telegramRecoveryTimeText() = %q, want %q", got, "2026-08-09 17:07:13")
+func TestTelegramSendingRecoveryStartsAfterTaskTimeout(t *testing.T) {
+	if telegramSendingJobRecoverAfter <= telegramPublishTaskTimeout {
+		t.Fatalf("sending recovery %s must be later than task timeout %s", telegramSendingJobRecoverAfter, telegramPublishTaskTimeout)
 	}
 }
 
-func TestTelegramRecoveryTimeTextNil(t *testing.T) {
-	if got := telegramRecoveryTimeText(nil); got != "" {
-		t.Fatalf("telegramRecoveryTimeText(nil) = %q, want empty string", got)
+func TestTelegramChannelBusyDelayBackoff(t *testing.T) {
+	initial := telegramChannelBusyDelayDuration(3, 10, 0)
+	busy := telegramChannelBusyDelayDuration(3, 10, 20)
+	max := telegramChannelBusyDelayDuration(3, 10, 1000)
+	if busy <= initial {
+		t.Fatalf("busy delay must grow: initial=%s busy=%s", initial, busy)
+	}
+	if max > 30*time.Second {
+		t.Fatalf("busy delay must be capped: %s", max)
 	}
 }

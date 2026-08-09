@@ -14,6 +14,8 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 const (
@@ -234,31 +236,81 @@ func (s *sSysPublish) releaseUnknownTelegramJobClaim(ctx context.Context, jobId 
 }
 
 func (s *sSysPublish) postponeUnknownTelegramJob(ctx context.Context, job telegramJobRecord, cause error) error {
-	if cause != nil {
-		message := "TG频道消息对账暂时不可用，任务继续保持UNKNOWN：" + cause.Error()
-		_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(g.Map{
-			"dispatch_status": tgDispatchStatusIdle, "next_retry_at": gtime.Now().Add(time.Minute),
-			"error_message": message, "updated_at": gtime.Now(),
-		}).Update()
-		if err == nil {
-			s.appendTelegramJobLog(ctx, job, "reconcile", "waiting", message)
-		}
-		return err
+	decision := telegramUnknownReconcileNextState(job, cause)
+	now := gtime.Now()
+	data := g.Map{
+		"status":          decision.Status,
+		"dispatch_status": decision.DispatchStatus,
+		"retry_count":     decision.RetryCount,
+		"reconcile_count": decision.ReconcileCount,
+		"next_retry_at":   nil,
+		"error_message":   decision.Message,
+		"updated_at":      now,
 	}
+	if decision.RetryDelay > 0 {
+		data["next_retry_at"] = now.Add(decision.RetryDelay)
+	}
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", job.Id).Where("status", "unknown").Data(data).Update()
+	if err != nil {
+		return gerror.Wrap(err, "更新TG对账任务状态失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil
+	}
+	s.appendTelegramJobLog(ctx, job, "reconcile", decision.Status, decision.Message)
+	projectedStatus := sysin.PublishTaskStatusPending
+	if decision.Status == "failed" {
+		projectedStatus = sysin.PublishTaskStatusFailed
+		if job.CollectEventId > 0 {
+			_ = s.markCollectDispatchFailedByProfile(ctx, job.ProfileId, job.CollectEventId, decision.Message)
+		}
+	}
+	return s.updateProfilePublishOperationState(ctx, job, projectedStatus)
+}
+
+type telegramUnknownReconcileDecision struct {
+	Status         string
+	DispatchStatus string
+	RetryCount     int
+	ReconcileCount int
+	RetryDelay     time.Duration
+	Message        string
+}
+
+func telegramUnknownReconcileNextState(job telegramJobRecord, cause error) telegramUnknownReconcileDecision {
 	count := job.ReconcileCount + 1
 	if count < telegramUnknownReconcileMaxCount {
-		_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(g.Map{
-			"reconcile_count": count, "dispatch_status": tgDispatchStatusIdle, "next_retry_at": gtime.Now().Add(telegramUnknownReconcileDelay), "updated_at": gtime.Now(),
-		}).Update()
-		return err
+		message := "TG频道消息对账未发现对应消息，等待再次确认"
+		delay := telegramUnknownReconcileDelay
+		if cause != nil {
+			message = "TG频道消息对账暂时不可用，等待再次确认：" + cause.Error()
+			delay = time.Minute
+		}
+		return telegramUnknownReconcileDecision{
+			Status: "unknown", DispatchStatus: tgDispatchStatusIdle,
+			RetryCount: job.RetryCount, ReconcileCount: count,
+			RetryDelay: delay, Message: message,
+		}
 	}
-	message := "频道历史连续两次未发现对应消息，恢复正常重试"
-	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(g.Map{
-		"status": "failed_retry", "dispatch_status": tgDispatchStatusIdle, "retry_count": job.RetryCount + 1,
-		"next_retry_at": gtime.Now().Add(telegramRecoverableRetryDelay(cause, job.RetryCount+1)), "error_message": message,
-		"reconcile_count": count, "updated_at": gtime.Now(),
-	}).Update()
-	return err
+	retryCount := job.RetryCount + 1
+	message := "频道历史连续对账未确认对应消息，恢复正常重试"
+	if cause != nil {
+		message = "TG频道消息连续对账失败，恢复正常重试：" + cause.Error()
+	}
+	if retryCount >= telegramRetryMaxCount {
+		return telegramUnknownReconcileDecision{
+			Status: "failed", DispatchStatus: tgDispatchStatusDone,
+			RetryCount: retryCount, ReconcileCount: count,
+			Message: "TG发送结果连续无法完成对账，已达到最大重试次数并终止任务：" + message,
+		}
+	}
+	return telegramUnknownReconcileDecision{
+		Status: "failed_retry", DispatchStatus: tgDispatchStatusIdle,
+		RetryCount: retryCount, ReconcileCount: count,
+		RetryDelay: telegramRecoverableRetryDelay(cause, retryCount), Message: message,
+	}
 }
 
 func (s *sSysPublish) findTelegramJobPhaseMessages(ctx context.Context, job telegramJobRecord, purpose string, expectedCount int) ([]*telegramSentMessage, error) {

@@ -44,3 +44,33 @@ func TestTelegramSendPhaseHasDisplay(t *testing.T) {
 		t.Fatal("unconfirmed display phase must be reconciled before reuse")
 	}
 }
+
+func TestTelegramUnknownReconcileCauseStillCounts(t *testing.T) {
+	decision := telegramUnknownReconcileNextState(telegramJobRecord{RetryCount: 1}, errors.New("协议号暂不可用"))
+	if decision.Status != "unknown" {
+		t.Fatalf("unexpected status: %s", decision.Status)
+	}
+	if decision.ReconcileCount != 1 {
+		t.Fatalf("cause must increment reconcile count, got %d", decision.ReconcileCount)
+	}
+}
+
+func TestTelegramUnknownReconcileFallsBackToRetry(t *testing.T) {
+	decision := telegramUnknownReconcileNextState(telegramJobRecord{RetryCount: 1, ReconcileCount: 1}, errors.New("读取频道历史失败"))
+	if decision.Status != "failed_retry" {
+		t.Fatalf("unexpected status: %s", decision.Status)
+	}
+	if decision.RetryCount != 2 || decision.RetryDelay <= 0 {
+		t.Fatalf("unexpected retry decision: %+v", decision)
+	}
+}
+
+func TestTelegramUnknownReconcileStopsAtRetryLimit(t *testing.T) {
+	decision := telegramUnknownReconcileNextState(telegramJobRecord{RetryCount: telegramRetryMaxCount - 1, ReconcileCount: 1}, nil)
+	if decision.Status != "failed" || decision.DispatchStatus != tgDispatchStatusDone {
+		t.Fatalf("unexpected terminal decision: %+v", decision)
+	}
+	if decision.RetryDelay != 0 {
+		t.Fatalf("terminal decision must not retry: %s", decision.RetryDelay)
+	}
+}

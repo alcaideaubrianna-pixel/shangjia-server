@@ -106,6 +106,7 @@ func isTelegramPermanentSendError(err error) bool {
 		"photo invalid",
 		"photo_ext",
 		"media_invalid",
+		"can't use file of type video as photo",
 		"file_reference_expired",
 		"webpage_curl_failed",
 		"webpage_media_empty",

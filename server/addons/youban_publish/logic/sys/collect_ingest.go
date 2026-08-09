@@ -19,10 +19,11 @@ import (
 )
 
 const (
-	collectGroupedEventDelay     = collectMaterialGroupingDelay
-	collectSourceCacheVersionKey = "youban_publish:collect:sources:version"
-	collectSourceCacheTTL        = 30 * time.Second
-	collectSourceMissLogTTL      = time.Minute
+	collectGroupedEventDelay      = collectMaterialGroupingDelay
+	collectSourceCacheVersionKey  = "youban_publish:collect:sources:version"
+	collectSourceCacheTTL         = 30 * time.Second
+	collectSourceMissLogTTL       = time.Minute
+	collectPublishChannelCacheKey = "youban_publish:collect:publish_channels"
 )
 
 type collectBotSourceCacheItem struct {
@@ -50,6 +51,15 @@ func (s *sSysPublish) collectBotMessage(ctx context.Context, botId int64, msg *m
 		return
 	}
 	for _, source := range sources {
+		blocked, checkErr := s.botCollectMessageFromPublishChannel(ctx, gconv.Int64(source["tenant_id"]), msg.Chat.ID)
+		if checkErr != nil {
+			g.Log().Warningf(ctx, "检查Bot采集上架频道过滤失败，已安全丢弃消息 source:%d chat:%d message:%d err:%+v", gconv.Int64(source["id"]), msg.Chat.ID, msg.ID, checkErr)
+			continue
+		}
+		if blocked {
+			g.Log().Infof(ctx, "Bot采集忽略当前账号上架频道消息 source:%d chat:%d message:%d", gconv.Int64(source["id"]), msg.Chat.ID, msg.ID)
+			continue
+		}
 		message := botCollectMessage(botId, source, msg)
 		_, err := s.ingestAndProcessCollectMessage(ctx, message)
 		if err != nil {
@@ -57,6 +67,50 @@ func (s *sSysPublish) collectBotMessage(ctx context.Context, botId int64, msg *m
 			continue
 		}
 	}
+}
+
+func (s *sSysPublish) botCollectMessageFromPublishChannel(ctx context.Context, tenantId int64, chatId int64) (bool, error) {
+	if tenantId <= 0 || chatId == 0 {
+		return false, nil
+	}
+	version := s.collectSourceCacheVersion(ctx)
+	cacheKey := fmt.Sprintf("%s:%s:%d", collectPublishChannelCacheKey, version, tenantId)
+	var chatIds []string
+	if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {
+		if json.Unmarshal([]byte(value.String()), &chatIds) == nil {
+			return botCollectChatMatchesPublishChannel(chatId, chatIds), nil
+		}
+	}
+	records, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Fields("target_chat_id").
+		Where("tenant_id", tenantId).
+		Where("publish_direction", "up").
+		WhereNull("deleted_at").
+		All()
+	if err != nil {
+		return false, err
+	}
+	chatIds = make([]string, 0, len(records))
+	for _, record := range records {
+		targetChatId := normalizeTelegramChannelChatID(record["target_chat_id"].String())
+		if targetChatId != "" {
+			chatIds = append(chatIds, targetChatId)
+		}
+	}
+	if data, marshalErr := json.Marshal(chatIds); marshalErr == nil {
+		_ = cache.Instance().Set(ctx, cacheKey, string(data), collectSourceCacheTTL)
+	}
+	return botCollectChatMatchesPublishChannel(chatId, chatIds), nil
+}
+
+func botCollectChatMatchesPublishChannel(chatId int64, publishChatIds []string) bool {
+	incoming := normalizeTelegramChannelChatID(strconv.FormatInt(chatId, 10))
+	for _, publishChatId := range publishChatIds {
+		if incoming == normalizeTelegramChannelChatID(publishChatId) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *sSysPublish) logCollectBotSkip(ctx context.Context, botId int64, msg *models.Message, reason string) {
