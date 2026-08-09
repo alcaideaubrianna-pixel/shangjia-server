@@ -44,16 +44,12 @@ func (s *sSysPublish) clearTelegramChannelQueue(ctx context.Context, tenantId in
 		return nil, gerror.Wrap(err, "统计频道发送中任务失败")
 	}
 	res.Sending = sending
+	data := telegramJobStateUpdateData("superseded", 0, gtime.Now())
+	data["error_message"] = channelQueueClearMessage
+	data["last_dispatch_error"] = channelQueueClearMessage
 	result, err := base.
 		WhereIn("status", channelQueueClearStatuses()).
-		Data(g.Map{
-			"status":              "superseded",
-			"dispatch_status":     tgDispatchStatusDone,
-			"next_retry_at":       nil,
-			"error_message":       channelQueueClearMessage,
-			"last_dispatch_error": channelQueueClearMessage,
-			"updated_at":          gtime.Now(),
-		}).
+		Data(data).
 		Update()
 	if err != nil {
 		return nil, gerror.Wrap(err, "清空频道发送队列失败")

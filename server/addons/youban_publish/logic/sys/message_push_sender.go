@@ -959,45 +959,25 @@ func (s *sSysPublish) messagePushJobByOperation(ctx context.Context, operationNo
 }
 
 func (s *sSysPublish) handleMessagePushQueuedJobError(ctx context.Context, job telegramJobRecord, err error) error {
-	retryCount := job.RetryCount + 1
 	if isTelegramNetworkRetryError(err) {
 		s.clearTelegramBotCache()
 	}
-	policy := telegramJobErrorRetryPolicy(err, retryCount)
-	if isTelegramAccountBusyError(err) {
-		retryCount = job.RetryCount
-	}
-	status := sysin.MessagePushStatusFailed
-	dispatchStatus := tgDispatchStatusDone
-	var nextRetryAt any
-	if !policy.Permanent {
-		status = "failed_retry"
-		dispatchStatus = tgDispatchStatusIdle
-		nextRetryAt = gtime.Now().Add(policy.RetryDelay)
-	}
+	decision := telegramJobFailureNextState(err, job.RetryCount)
 	result, _ := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
 		WhereIn("status", messagePushActiveStatuses()).
-		Data(g.Map{
-			"status":              status,
-			"dispatch_status":     dispatchStatus,
-			"retry_count":         retryCount,
-			"next_retry_at":       nextRetryAt,
-			"error_message":       policy.Message,
-			"last_dispatch_error": policy.Message,
-			"updated_at":          gtime.Now(),
-		}).Update()
+		Data(telegramJobFailureUpdateData(decision, gtime.Now())).Update()
 	if result != nil {
 		if affected, affectedErr := result.RowsAffected(); affectedErr == nil && affected == 0 {
 			return nil
 		}
 	}
-	if recordErr := s.upsertPublishJobRecord(ctx, job, status, policy.Message); recordErr != nil {
-		g.Log().Warningf(ctx, "更新快速推送失败记录失败 jobId:%d status:%s err:%+v", job.Id, status, recordErr)
+	if recordErr := s.upsertPublishJobRecord(ctx, job, decision.Status, decision.Message); recordErr != nil {
+		g.Log().Warningf(ctx, "更新快速推送失败记录失败 jobId:%d status:%s err:%+v", job.Id, decision.Status, recordErr)
 	}
-	s.appendTelegramJobLog(ctx, job, "message_push", status, policy.Message)
+	s.appendTelegramJobLog(ctx, job, "message_push", decision.Status, decision.Message)
 	if isTelegramPermanentAccountAuthError(err) {
-		s.handleMessagePushPermanentAuthError(ctx, job, policy.Message, err)
+		s.handleMessagePushPermanentAuthError(ctx, job, decision.Message, err)
 	}
 	return nil
 }
@@ -1159,17 +1139,13 @@ func (s *sSysPublish) supersedeOlderMessagePushJobs(ctx context.Context, job tel
 		ids = append(ids, oldJob.Id)
 	}
 	message := "已由新的快速推送任务替代"
+	data := telegramJobStateUpdateData("superseded", 0, gtime.Now())
+	data["error_message"] = message
+	data["last_dispatch_error"] = message
 	if _, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereIn("id", ids).
 		WhereIn("status", messagePushActiveStatuses()).
-		Data(g.Map{
-			"status":              "superseded",
-			"dispatch_status":     tgDispatchStatusDone,
-			"next_retry_at":       nil,
-			"error_message":       message,
-			"last_dispatch_error": message,
-			"updated_at":          gtime.Now(),
-		}).Update(); err != nil {
+		Data(data).Update(); err != nil {
 		return gerror.Wrap(err, "废弃旧快速推送任务失败")
 	}
 	if _, err = g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).

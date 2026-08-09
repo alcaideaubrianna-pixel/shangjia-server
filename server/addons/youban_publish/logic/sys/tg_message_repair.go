@@ -811,12 +811,11 @@ func (s *sSysPublish) ensureTgRepairJob(ctx context.Context, task gdb.Record, ch
 		}
 	}
 	if existing.Id > 0 {
-		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", existing.Id).Data(g.Map{
-			"status":        "sent",
-			"error_message": "",
-			"sent_at":       gtime.Now(),
-			"updated_at":    gtime.Now(),
-		}).Update()
+		now := gtime.Now()
+		data := telegramJobStateUpdateData("sent", 0, now)
+		data["error_message"] = ""
+		data["sent_at"] = now
+		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", existing.Id).Data(data).Update()
 		return existing.Id, nil
 	}
 	botId := firstPositiveId(decodeBotIds(channel.BotIdJson))
@@ -824,21 +823,19 @@ func (s *sSysPublish) ensureTgRepairJob(ctx context.Context, task gdb.Record, ch
 		return 0, gerror.New("上架频道缺少Bot配置，无法删除历史消息")
 	}
 	now := gtime.Now()
-	return g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
-		"tenant_id":      task["tenant_id"].Int64(),
-		"merchant_id":    task["tenant_id"].Int64(),
-		"account_id":     task["account_id"].Int64(),
-		"profile_id":     task["profile_id"].Int64(),
-		"channel_id":     channel.Id,
-		"bot_id":         botId,
-		"target_chat_id": targetChatId,
-		"status":         "sent",
-		"retry_count":    0,
-		"error_message":  "",
-		"sent_at":        now,
-		"created_at":     now,
-		"updated_at":     now,
-	}).InsertAndGetId()
+	data := telegramJobStateUpdateData("sent", 0, now)
+	data["tenant_id"] = task["tenant_id"].Int64()
+	data["merchant_id"] = task["tenant_id"].Int64()
+	data["account_id"] = task["account_id"].Int64()
+	data["profile_id"] = task["profile_id"].Int64()
+	data["channel_id"] = channel.Id
+	data["bot_id"] = botId
+	data["target_chat_id"] = targetChatId
+	data["retry_count"] = 0
+	data["error_message"] = ""
+	data["sent_at"] = now
+	data["created_at"] = now
+	return g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
 }
 
 func (s *sSysPublish) ensureTgRepairMessage(ctx context.Context, task gdb.Record, jobId int64, item tgMessageRepairCacheRow) error {

@@ -151,17 +151,14 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	if active, checkErr := s.telegramJobChannelIsActive(ctx, job); checkErr != nil {
 		return checkErr
 	} else if !active {
+		message := "目标频道已删除或禁用，任务自动终止"
+		data := telegramJobStateUpdateData("superseded", 0, gtime.Now())
+		data["error_message"] = message
+		data["last_dispatch_error"] = message
 		_, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 			Where("id", jobId).
 			WhereIn("status", []string{"pending", "failed_retry", "unknown", "sending"}).
-			Data(g.Map{
-				"status":              "superseded",
-				"dispatch_status":     tgDispatchStatusDone,
-				"next_retry_at":       nil,
-				"error_message":       "目标频道已删除或禁用，任务自动终止",
-				"last_dispatch_error": "目标频道已删除或禁用，任务自动终止",
-				"updated_at":          gtime.Now(),
-			}).Update()
+			Data(data).Update()
 		if updateErr != nil {
 			return gerror.Wrap(updateErr, "终止无效频道TG任务失败")
 		}

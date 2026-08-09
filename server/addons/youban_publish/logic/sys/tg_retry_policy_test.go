@@ -4,6 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/gogf/gf/v2/os/gtime"
 )
 
 func TestTelegramJobErrorRetryPolicyPermanentForBannedInChannel(t *testing.T) {
@@ -44,6 +47,30 @@ func TestTelegramVideoAsPhotoIsPermanent(t *testing.T) {
 	err := assertError(`Bad Request: can't use file of type Video as Photo`)
 	if !isTelegramPermanentSendError(err) {
 		t.Fatal("video as photo must be treated as a permanent media type error")
+	}
+}
+
+func TestTelegramJobStateUpdateDataUsesSingleTerminalRule(t *testing.T) {
+	now := gtime.Now()
+	for _, status := range []string{"sent", "failed", "superseded"} {
+		data := telegramJobStateUpdateData(status, time.Minute, now)
+		if data["dispatch_status"] != tgDispatchStatusDone {
+			t.Fatalf("terminal status %s must be done: %+v", status, data)
+		}
+		if data["next_retry_at"] != nil {
+			t.Fatalf("terminal status %s must not retry: %+v", status, data)
+		}
+	}
+	retry := telegramJobStateUpdateData("failed_retry", time.Minute, now)
+	if retry["dispatch_status"] != tgDispatchStatusIdle || retry["next_retry_at"] == nil {
+		t.Fatalf("retry status must remain idle with next retry: %+v", retry)
+	}
+}
+
+func TestTelegramJobFailureNextStateUsesTerminalRule(t *testing.T) {
+	decision := telegramJobFailureNextState(assertError("Bad Request: chat not found"), 0)
+	if decision.Status != "failed" || decision.DispatchStatus != tgDispatchStatusDone || decision.RetryDelay != 0 {
+		t.Fatalf("unexpected permanent failure decision: %+v", decision)
 	}
 }
 

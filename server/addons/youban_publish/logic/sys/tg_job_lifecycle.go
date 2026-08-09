@@ -13,14 +13,10 @@ func (s *sSysPublish) deleteTelegramJobMessagesForResubmit(ctx context.Context, 
 }
 
 func (s *sSysPublish) markTelegramJobSuperseded(ctx context.Context, jobId int64) error {
+	now := gtime.Now()
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", jobId).
-		Data(g.Map{
-			"status":          "superseded",
-			"dispatch_status": tgDispatchStatusDone,
-			"next_retry_at":   nil,
-			"updated_at":      gtime.Now(),
-		}).Update()
+		Data(telegramJobStateUpdateData("superseded", 0, now)).Update()
 	if err != nil {
 		return gerror.Wrap(err, "废弃TG推送任务失败")
 	}

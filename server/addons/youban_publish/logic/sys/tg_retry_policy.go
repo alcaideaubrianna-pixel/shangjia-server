@@ -8,6 +8,8 @@ import (
 	"time"
 
 	tgbot "github.com/go-telegram/bot"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/tgerr"
 )
 
@@ -21,6 +23,64 @@ type telegramJobRetryPolicy struct {
 	Permanent  bool
 	RetryDelay time.Duration
 	Message    string
+}
+
+type telegramJobFailureDecision struct {
+	Status         string
+	DispatchStatus string
+	RetryCount     int
+	RetryDelay     time.Duration
+	Message        string
+}
+
+func telegramJobFailureNextState(err error, currentRetryCount int) telegramJobFailureDecision {
+	retryCount := currentRetryCount + 1
+	policy := telegramJobErrorRetryPolicy(err, retryCount)
+	if isTelegramAccountBusyError(err) {
+		retryCount = currentRetryCount
+	}
+	decision := telegramJobFailureDecision{
+		Status:         "failed_retry",
+		DispatchStatus: tgDispatchStatusIdle,
+		RetryCount:     retryCount,
+		RetryDelay:     policy.RetryDelay,
+		Message:        policy.Message,
+	}
+	if policy.Permanent {
+		decision.Status = "failed"
+		decision.DispatchStatus = tgDispatchStatusDone
+		decision.RetryDelay = 0
+	}
+	return decision
+}
+
+func telegramJobStateUpdateData(status string, retryDelay time.Duration, now *gtime.Time) g.Map {
+	dispatchStatus := tgDispatchStatusIdle
+	switch status {
+	case "sending":
+		dispatchStatus = tgDispatchStatusProcessing
+	case "sent", "failed", "superseded":
+		dispatchStatus = tgDispatchStatusDone
+		retryDelay = 0
+	}
+	data := g.Map{
+		"status":          status,
+		"dispatch_status": dispatchStatus,
+		"next_retry_at":   nil,
+		"updated_at":      now,
+	}
+	if retryDelay > 0 {
+		data["next_retry_at"] = now.Add(retryDelay)
+	}
+	return data
+}
+
+func telegramJobFailureUpdateData(decision telegramJobFailureDecision, now *gtime.Time) g.Map {
+	data := telegramJobStateUpdateData(decision.Status, decision.RetryDelay, now)
+	data["retry_count"] = decision.RetryCount
+	data["error_message"] = decision.Message
+	data["last_dispatch_error"] = decision.Message
+	return data
 }
 
 func telegramJobErrorRetryPolicy(err error, retryCount int) telegramJobRetryPolicy {

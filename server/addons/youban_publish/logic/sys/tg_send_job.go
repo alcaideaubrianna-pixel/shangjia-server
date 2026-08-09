@@ -308,28 +308,10 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	if isTelegramNetworkRetryError(err) {
 		s.clearTelegramBotCache()
 	}
-	retryCount := job.RetryCount + 1
-	policy := telegramJobErrorRetryPolicy(err, retryCount)
-	if isTelegramAccountBusyError(err) {
-		retryCount = job.RetryCount
-	}
-	message := policy.Message
-	status := "failed_retry"
-	if policy.Permanent {
-		status = "failed"
-	}
-	var nextRetryAt any
-	if !policy.Permanent {
-		nextRetryAt = gtime.Now().Add(policy.RetryDelay)
-	}
-	result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "sending").Data(g.Map{
-		"status":          status,
-		"dispatch_status": tgDispatchStatusIdle,
-		"retry_count":     retryCount,
-		"next_retry_at":   nextRetryAt,
-		"error_message":   message,
-		"updated_at":      gtime.Now(),
-	}).Update()
+	decision := telegramJobFailureNextState(err, job.RetryCount)
+	result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", job.Id).Where("status", "sending").
+		Data(telegramJobFailureUpdateData(decision, gtime.Now())).Update()
 	if updateErr != nil {
 		return gerror.Wrap(updateErr, "更新TG失败任务状态失败")
 	}
@@ -337,15 +319,15 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	if affected == 0 {
 		return nil
 	}
-	if recordErr := s.upsertPublishJobRecord(ctx, job, status, message); recordErr != nil {
-		g.Log().Warningf(ctx, "更新发布失败记录失败 jobId:%d status:%s err:%+v", job.Id, status, recordErr)
+	if recordErr := s.upsertPublishJobRecord(ctx, job, decision.Status, decision.Message); recordErr != nil {
+		g.Log().Warningf(ctx, "更新发布失败记录失败 jobId:%d status:%s err:%+v", job.Id, decision.Status, recordErr)
 	}
-	s.appendTelegramJobLog(ctx, job, "publish", status, message)
-	if status == "failed" && job.CollectEventId > 0 {
-		_ = s.markCollectDispatchFailedByProfile(ctx, job.ProfileId, job.CollectEventId, message)
+	s.appendTelegramJobLog(ctx, job, "publish", decision.Status, decision.Message)
+	if decision.Status == "failed" && job.CollectEventId > 0 {
+		_ = s.markCollectDispatchFailedByProfile(ctx, job.ProfileId, job.CollectEventId, decision.Message)
 	}
 	projectedStatus := sysin.PublishTaskStatusPending
-	if status == "failed" {
+	if decision.Status == "failed" {
 		projectedStatus = sysin.PublishTaskStatusFailed
 	}
 	if stateErr := s.updateProfilePublishOperationState(ctx, job, projectedStatus); stateErr != nil {
@@ -411,16 +393,13 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
 	}
 	sentAt := gtime.Now()
+	data := telegramJobStateUpdateData("sent", 0, sentAt)
+	data["error_message"] = ""
+	data["sent_at"] = sentAt
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
 		Where("status", "sending").
-		Data(g.Map{
-			"status":          "sent",
-			"dispatch_status": tgDispatchStatusDone,
-			"error_message":   "",
-			"sent_at":         sentAt,
-			"updated_at":      sentAt,
-		}).Update()
+		Data(data).Update()
 	if err != nil {
 		return gerror.Wrap(err, "更新TG任务状态失败")
 	}
