@@ -113,7 +113,7 @@ func (s *sSysPublish) TenantVipOrderCreate(ctx context.Context, in *sysin.Tenant
 			Status:    consts.OrderStatusNotPay,
 			CreatedAt: now,
 			UpdatedAt: now,
-		}).OmitEmptyData().Insert()
+		}).Insert()
 		if err != nil {
 			return err
 		}
