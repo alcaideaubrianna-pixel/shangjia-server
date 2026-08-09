@@ -85,7 +85,6 @@ func (s *sSysPublish) startPublishSchedulers(ctx context.Context) {
 	go s.runProfileCycleStartupRecovery(ctx)
 	go s.runScheduledPublishRuntime(ctx)
 	go s.runMessagePushPlanScheduler(ctx)
-	go s.runTelegramChannelScheduler(ctx)
 	go s.runFullPushBatchScheduler(ctx)
 	go s.runTelegramObserveStatsRefresher(ctx)
 	go s.runTelegramJobRecovery(ctx)

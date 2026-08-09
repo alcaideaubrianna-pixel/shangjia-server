@@ -147,9 +147,6 @@ func (s *sSysPublish) AdminProfileBatchCancel(ctx context.Context, in *sysin.Adm
 	operations := make(map[string]telegramJobRecord)
 	for _, job := range jobs {
 		operations[job.OperationNo] = job
-		if job.Status != "superseded" {
-			s.invalidateTelegramSchedulerChannelCache(ctx, job.ChannelId, job.TargetChatId)
-		}
 	}
 	for operationNo, job := range operations {
 		active, countErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).

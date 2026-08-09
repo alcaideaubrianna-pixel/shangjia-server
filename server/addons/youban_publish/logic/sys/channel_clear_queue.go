@@ -60,7 +60,6 @@ func (s *sSysPublish) clearTelegramChannelQueue(ctx context.Context, tenantId in
 	}
 	affected, _ := result.RowsAffected()
 	res.Cleared = int(affected)
-	s.invalidateTelegramSchedulerChannelCache(ctx, channelId, "")
 	return res, nil
 }
 

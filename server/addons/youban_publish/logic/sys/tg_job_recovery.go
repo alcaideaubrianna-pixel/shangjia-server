@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	telegramSendingJobRecoverAfter = 2 * time.Minute
-	telegramPendingJobRecoverAfter = 30 * time.Second
+	telegramSendingJobRecoverAfter  = 2 * time.Minute
+	telegramPendingJobRecoverAfter  = 30 * time.Second
+	telegramDispatchJobRecoverAfter = 5 * time.Minute
 )
 
 func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit int) error {
@@ -40,6 +41,9 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 	if err = s.recoverPendingIdleTelegramJobs(ctx, limit); err != nil {
 		return err
 	}
+	if err = s.recoverStaleTelegramDispatchJobs(ctx, limit); err != nil {
+		return err
+	}
 	return s.recoverStaleTelegramSendingJobs(ctx, limit)
 }
 
@@ -53,14 +57,14 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	if err := s.recoverPendingIdleTelegramJobs(ctx, 500); err != nil {
 		g.Log().Warningf(ctx, "恢复待入队TG推送任务失败：%+v", err)
 	}
+	if err := s.recoverStaleTelegramDispatchJobs(ctx, 200); err != nil {
+		g.Log().Warningf(ctx, "恢复调度中断TG推送任务失败：%+v", err)
+	}
 	if err := s.recoverMissingProfilePublishOperationStates(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "补建资料上架状态失败：%+v", err)
 	}
 	if err := s.recoverProfilePublishOperationStates(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复资料上架状态失败：%+v", err)
-	}
-	if err := s.dispatchTelegramDueJobs(ctx, g.Cfg().MustGet(ctx, "youbanPublish.queue.schedulerBatchSize", 50).Int()); err != nil {
-		g.Log().Warningf(ctx, "调度待恢复TG推送任务失败：%+v", err)
 	}
 	for {
 		select {
@@ -69,6 +73,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 		case <-ticker.C:
 			if err := s.recoverPendingIdleTelegramJobs(ctx, 500); err != nil {
 				g.Log().Warningf(ctx, "恢复待入队TG推送任务失败：%+v", err)
+			}
+			if err := s.recoverStaleTelegramDispatchJobs(ctx, 200); err != nil {
+				g.Log().Warningf(ctx, "恢复调度中断TG推送任务失败：%+v", err)
 			}
 			if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
 				g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
@@ -79,11 +86,52 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 			if err := s.recoverProfilePublishOperationStates(ctx, 100); err != nil {
 				g.Log().Warningf(ctx, "恢复资料上架状态失败：%+v", err)
 			}
-			if err := s.dispatchTelegramDueJobs(ctx, g.Cfg().MustGet(ctx, "youbanPublish.queue.schedulerBatchSize", 50).Int()); err != nil {
-				g.Log().Warningf(ctx, "调度待恢复TG推送任务失败：%+v", err)
-			}
 		}
 	}
+}
+
+func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	deadline := gtime.Now().Add(-telegramDispatchJobRecoverAfter)
+	var jobs []telegramJobRecord
+	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
+		WhereLTE("dispatched_at", deadline).
+		OrderAsc("dispatched_at").OrderAsc("id").
+		Limit(limit).
+		Scan(&jobs)
+	if err != nil {
+		return gerror.Wrap(err, "读取调度中断TG推送任务失败")
+	}
+	for _, job := range jobs {
+		if job.Id <= 0 {
+			continue
+		}
+		result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", job.Id).
+			WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
+			Data(g.Map{
+				"dispatch_status":     tgDispatchStatusIdle,
+				"next_retry_at":       gtime.Now(),
+				"last_dispatch_error": "TG任务调度超时，已自动恢复入队",
+				"updated_at":          gtime.Now(),
+			}).Update()
+		if updateErr != nil {
+			g.Log().Warningf(ctx, "重置调度中断TG任务失败 job:%d err:%+v", job.Id, updateErr)
+			continue
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			continue
+		}
+		if enqueueErr := s.enqueueTelegramJob(ctx, job.Id, 0); enqueueErr != nil {
+			g.Log().Warningf(ctx, "重新入队调度中断TG任务失败 job:%d err:%+v", job.Id, enqueueErr)
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit int) error {

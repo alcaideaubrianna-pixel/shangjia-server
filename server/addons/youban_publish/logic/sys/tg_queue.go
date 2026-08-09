@@ -189,7 +189,7 @@ func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64
 
 func (s *sSysPublish) requeueTelegramJob(ctx context.Context, taskType string, jobId int64, delay time.Duration) error {
 	if taskType == tgTaskTypePublish {
-		return s.scheduleTelegramJob(ctx, jobId, delay)
+		return s.enqueueTelegramJobDirect(ctx, jobId, delay)
 	}
 	return s.enqueueTelegramTask(ctx, taskType, jobId, delay, false)
 }
