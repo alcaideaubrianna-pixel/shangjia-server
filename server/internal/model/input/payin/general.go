@@ -20,10 +20,16 @@ type CreateOrderInp struct {
 }
 
 type CreateOrderModel struct {
-	TradeType  string `json:"tradeType"     description:"交易类型"`
-	PayURL     string `json:"payURL"        description:"支付地址"`
-	OutTradeNo string `json:"outTradeNo"    description:"商户订单号"`
-	JsApi      *JSAPI `json:"jsApi"         description:"jsapi支付参数"`
+	TradeType      string  `json:"tradeType"      description:"交易类型"`
+	PayURL         string  `json:"payURL"         description:"支付地址"`
+	OutTradeNo     string  `json:"outTradeNo"     description:"商户订单号"`
+	TradeID        string  `json:"tradeId,omitempty" description:"第三方交易号"`
+	Currency       string  `json:"currency,omitempty" description:"计价币种"`
+	Token          string  `json:"token,omitempty" description:"支付币种"`
+	Network        string  `json:"network,omitempty" description:"支付网络"`
+	ActualAmount   float64 `json:"actualAmount,omitempty" description:"实际支付金额"`
+	ReceiveAddress string  `json:"receiveAddress,omitempty" description:"收款地址"`
+	JsApi          *JSAPI  `json:"jsApi"          description:"jsapi支付参数"`
 }
 
 type JSAPI struct {

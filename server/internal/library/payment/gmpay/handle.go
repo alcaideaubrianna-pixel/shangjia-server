@@ -71,7 +71,7 @@ func (h *GMPay) Notify(ctx context.Context, in payin.NotifyInp) (res *payin.Noti
 		OutTradeNo:    notify.OrderID,
 		TransactionId: firstNonEmpty(notify.BlockTransactionID, notify.TradeID, notify.OrderID),
 		PayAt:         payAt,
-		ActualAmount:  notify.Amount,
+		ActualAmount:  firstPositive(notify.ActualAmount, notify.Amount),
 	}
 	return
 }
@@ -128,9 +128,15 @@ func (h *GMPay) CreateOrder(ctx context.Context, in payin.CreateOrderInp) (res *
 	}
 
 	res = &payin.CreateOrderModel{
-		TradeType:  in.Pay.TradeType,
-		PayURL:     rsp.PaymentURL,
-		OutTradeNo: in.Pay.OutTradeNo,
+		TradeType:      in.Pay.TradeType,
+		PayURL:         rsp.PaymentURL,
+		OutTradeNo:     in.Pay.OutTradeNo,
+		TradeID:        firstNonEmpty(rsp.Data.TradeID, rsp.TradeID),
+		Currency:       rsp.Data.Currency,
+		Token:          rsp.Data.Token,
+		Network:        rsp.Data.Network,
+		ActualAmount:   firstPositive(rsp.Data.ActualAmount, rsp.Data.Amount),
+		ReceiveAddress: rsp.Data.ReceiveAddress,
 	}
 	return
 }
@@ -202,6 +208,34 @@ func (h *GMPay) parseCreateResponse(raw string) (rsp *createTransactionResponse,
 		json.Get("order_id").String(),
 		json.Get("orderId").String(),
 	)
+	rsp.Data.Currency = firstNonEmpty(
+		json.Get("data.currency").String(),
+		json.Get("currency").String(),
+	)
+	rsp.Data.Token = firstNonEmpty(
+		json.Get("data.token").String(),
+		json.Get("token").String(),
+	)
+	rsp.Data.Network = firstNonEmpty(
+		json.Get("data.network").String(),
+		json.Get("network").String(),
+	)
+	rsp.Data.ReceiveAddress = firstNonEmpty(
+		json.Get("data.receive_address").String(),
+		json.Get("data.receiveAddress").String(),
+		json.Get("receive_address").String(),
+		json.Get("receiveAddress").String(),
+	)
+	rsp.Data.Amount = firstPositive(
+		json.Get("data.amount").Float64(),
+		json.Get("amount").Float64(),
+	)
+	rsp.Data.ActualAmount = firstPositive(
+		json.Get("data.actual_amount").Float64(),
+		json.Get("data.actualAmount").Float64(),
+		json.Get("actual_amount").Float64(),
+		json.Get("actualAmount").Float64(),
+	)
 	rsp.PaymentURL = rsp.Data.PaymentURL
 	rsp.TradeID = rsp.Data.TradeID
 	rsp.OrderID = rsp.Data.OrderID
@@ -246,6 +280,15 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstPositive(values ...float64) float64 {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func normalizePaymentURL(raw string) string {

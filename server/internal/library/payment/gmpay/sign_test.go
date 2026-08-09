@@ -1,6 +1,10 @@
 package gmpay
 
-import "testing"
+import (
+	"testing"
+
+	"hotgo/internal/model"
+)
 
 func TestSignParamsUsesGMPayHMACSHA256(t *testing.T) {
 	params := map[string]string{
@@ -36,5 +40,36 @@ func TestIsPaymentSuccessSupportsLegacyStatusFields(t *testing.T) {
 	}
 	if !isPaymentSuccess(&notifyRequest{Code: 200}) {
 		t.Fatal("legacy code 200 should be treated as a successful payment")
+	}
+}
+
+func TestNotifyUsesActualAmountAndOrderID(t *testing.T) {
+	notify := &notifyRequest{
+		Status:             2,
+		OrderID:            "ORD-2",
+		Amount:             30,
+		ActualAmount:       30.01,
+		BlockTransactionID: "tx-2",
+	}
+
+	if got := firstPositive(notify.ActualAmount, notify.Amount); got != 30.01 {
+		t.Fatalf("actual amount = %v, want 30.01", got)
+	}
+	if notify.OrderID != "ORD-2" {
+		t.Fatalf("order id = %q, want %q", notify.OrderID, "ORD-2")
+	}
+}
+
+func TestParseCreateResponseReadsActualAmount(t *testing.T) {
+	client := New(&model.PayConfig{GMPayKey: "secret", GMPayPid: "1000"})
+	rsp, err := client.parseCreateResponse(`{"status_code":200,"data":{"payment_url":"https://pay.test/checkout/1","trade_id":"trade-1","order_id":"ORD-1","amount":30,"actual_amount":30.01,"currency":"USDT","token":"USDT","network":"tron","receive_address":"TAddress"}}`)
+	if err != nil {
+		t.Fatalf("parse create response: %v", err)
+	}
+	if rsp.Data.ActualAmount != 30.01 {
+		t.Fatalf("actual amount = %v, want 30.01", rsp.Data.ActualAmount)
+	}
+	if rsp.Data.ReceiveAddress != "TAddress" {
+		t.Fatalf("receive address = %q, want %q", rsp.Data.ReceiveAddress, "TAddress")
 	}
 }
