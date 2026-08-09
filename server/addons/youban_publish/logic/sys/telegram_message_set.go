@@ -72,7 +72,14 @@ func (s *sSysPublish) deleteTelegramMessagesLockedByChannel(ctx context.Context,
 		if batchErr == nil {
 			batchErr = gerror.New("Telegram批量删除返回失败")
 		}
-		g.Log().Warningf(ctx, "批量删除TG消息失败，回退逐条删除 job:%d chat:%s count:%d err:%+v", job.Id, batch.chatId, len(batch.messages), batchErr)
+		if isTelegramBotRemovedError(batchErr) {
+			if err = markTelegramMessagesUndeletable(ctx, batch.messages); err != nil {
+				return err
+			}
+			s.appendTelegramJobLog(ctx, job, "delete", "skipped", fmt.Sprintf("%s，Bot已不在频道，跳过TG消息清理，频道:%s，消息数:%d", reason, batch.chatId, len(batch.messages)))
+			continue
+		}
+		g.Log().Debugf(ctx, "批量删除TG消息失败，回退逐条删除 job:%d chat:%s count:%d err:%+v", job.Id, batch.chatId, len(batch.messages), batchErr)
 		if err = s.deleteTelegramMessagesIndividually(ctx, bot, job, batch.messages, reason); err != nil {
 			return err
 		}
@@ -93,11 +100,17 @@ func (s *sSysPublish) deleteTelegramMessagesIndividually(ctx context.Context, bo
 				continue
 			}
 			if isTelegramMessagePermanentlyUndeletableError(err) {
-				_, _ = g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
-					Where("id", item.Id).
-					Data(g.Map{"status": "undeletable", "updated_at": gtime.Now()}).
-					Update()
+				if markErr := markTelegramMessagesUndeletable(ctx, []telegramDeleteMessage{item}); markErr != nil {
+					return markErr
+				}
 				s.appendTelegramJobLog(ctx, job, "delete", "skipped", fmt.Sprintf("%s，TG消息已超过可删除时限，保留旧消息并继续处理，频道:%s，消息:%d", reason, chatId, item.MessageId))
+				continue
+			}
+			if isTelegramBotRemovedError(err) {
+				if markErr := markTelegramMessagesUndeletable(ctx, []telegramDeleteMessage{item}); markErr != nil {
+					return markErr
+				}
+				s.appendTelegramJobLog(ctx, job, "delete", "skipped", fmt.Sprintf("%s，Bot已不在频道，跳过TG消息清理，频道:%s，消息:%d", reason, chatId, item.MessageId))
 				continue
 			}
 			message := fmt.Sprintf("%s，删除TG消息失败，频道:%s，消息:%d，错误:%s", reason, chatId, item.MessageId, err.Error())
@@ -139,6 +152,14 @@ func telegramDeleteMessageBatches(messages []telegramDeleteMessage, maxItems int
 }
 
 func markTelegramMessagesDeleted(ctx context.Context, messages []telegramDeleteMessage) error {
+	return markTelegramMessagesStatus(ctx, messages, "deleted")
+}
+
+func markTelegramMessagesUndeletable(ctx context.Context, messages []telegramDeleteMessage) error {
+	return markTelegramMessagesStatus(ctx, messages, "undeletable")
+}
+
+func markTelegramMessagesStatus(ctx context.Context, messages []telegramDeleteMessage, status string) error {
 	ids := make([]int64, 0, len(messages))
 	for _, item := range messages {
 		if item.Id > 0 {
@@ -148,9 +169,19 @@ func markTelegramMessagesDeleted(ctx context.Context, messages []telegramDeleteM
 	if len(ids) == 0 {
 		return nil
 	}
+	status = strings.TrimSpace(status)
+	if status == "" {
+		return gerror.New("TG消息状态不能为空")
+	}
+	data := g.Map{"status": status, "updated_at": gtime.Now()}
+	if status == "deleted" {
+		data["deleted_at"] = gtime.Now()
+	} else {
+		data["deleted_at"] = nil
+	}
 	_, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
 		WhereIn("id", ids).
-		Data(g.Map{"status": "deleted", "deleted_at": gtime.Now(), "updated_at": gtime.Now()}).
+		Data(data).
 		Update()
 	return gerror.Wrap(err, "更新TG消息删除状态失败")
 }
@@ -166,6 +197,16 @@ func isTelegramMessagePermanentlyUndeletableError(err error) bool {
 
 func isTelegramBotConfigMissingError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "Bot配置不存在")
+}
+
+func isTelegramBotRemovedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "bot was kicked") ||
+		strings.Contains(message, "bot was blocked") ||
+		strings.Contains(message, "chat not found")
 }
 
 func isTelegramMessageAlreadyDeletedError(err error) bool {

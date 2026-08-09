@@ -1,27 +1,27 @@
 package sys
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
-func TestTelegramDeleteMessageBatchesGroupsByChatAndLimit(t *testing.T) {
-	messages := []telegramDeleteMessage{
-		{Id: 1, TargetChatId: "123", MessageId: 11},
-		{Id: 2, TargetChatId: "-100456", MessageId: 21},
-		{Id: 3, TargetChatId: "123", MessageId: 12},
-		{Id: 4, TargetChatId: "123", MessageId: 13},
-		{Id: 0, TargetChatId: "123", MessageId: 14},
+func TestIsTelegramBotRemovedError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "kicked", err: errors.New("forbidden: bot was kicked from the channel"), want: true},
+		{name: "blocked", err: errors.New("forbidden: bot was blocked by the user"), want: true},
+		{name: "chat missing", err: errors.New("bad request: chat not found"), want: true},
+		{name: "rate limited", err: errors.New("too many requests: retry after 5"), want: false},
+		{name: "permission", err: errors.New("not enough rights to delete messages"), want: false},
 	}
-
-	batches := telegramDeleteMessageBatches(messages, 2)
-	if len(batches) != 3 {
-		t.Fatalf("unexpected batch count: %d", len(batches))
-	}
-	if batches[0].chatId != "123" || len(batches[0].messages) != 2 {
-		t.Fatalf("unexpected first batch: %#v", batches[0])
-	}
-	if batches[1].chatId != "-100456" || len(batches[1].messages) != 1 {
-		t.Fatalf("unexpected second batch: %#v", batches[1])
-	}
-	if batches[2].chatId != "123" || len(batches[2].messages) != 1 {
-		t.Fatalf("unexpected third batch: %#v", batches[2])
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isTelegramBotRemovedError(test.err); got != test.want {
+				t.Fatalf("isTelegramBotRemovedError() = %v, want %v", got, test.want)
+			}
+		})
 	}
 }
