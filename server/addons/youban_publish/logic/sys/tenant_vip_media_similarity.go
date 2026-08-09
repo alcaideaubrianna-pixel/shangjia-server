@@ -20,7 +20,10 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-const mediaSimilarResultCacheTTL = 10 * time.Minute
+const (
+	mediaSimilarResultCacheTTL = 3 * time.Minute
+	mediaSimilarSlowThreshold  = 500 * time.Millisecond
+)
 
 var mediaSimilarCandidateGroup singleflight.Group
 
@@ -47,6 +50,7 @@ type mediaSimilarScope struct {
 }
 
 func (s *sSysPublish) MediaSimilarList(ctx context.Context, in *sysin.MediaSimilarListInp) (*sysin.MediaSimilarListModel, int, error) {
+	startedAt := time.Now()
 	account, err := s.currentAccount(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -55,31 +59,41 @@ func (s *sSysPublish) MediaSimilarList(ctx context.Context, in *sysin.MediaSimil
 		return nil, 0, err
 	}
 	normalizeMediaSimilarListInput(in)
+	scopeStartedAt := time.Now()
 	scope, err := s.mediaSimilarVisibleScope(ctx, account)
 	if err != nil {
 		return nil, 0, err
 	}
+	scopeDuration := time.Since(scopeStartedAt)
+	sourceStartedAt := time.Now()
 	source, err := s.visibleSourceMedia(ctx, scope, in.MediaId)
 	if err != nil {
 		return nil, 0, err
 	}
+	sourceDuration := time.Since(sourceStartedAt)
+	candidateStartedAt := time.Now()
 	items, err := s.cachedMediaSimilarCandidates(ctx, scope, source, in.Threshold)
 	if err != nil {
 		return nil, 0, err
 	}
+	candidateDuration := time.Since(candidateStartedAt)
 	total := len(items)
 	start := (in.Page - 1) * in.PerPage
 	if start < 0 {
 		start = 0
 	}
 	if start >= total {
+		s.logSlowMediaSimilarList(ctx, in, total, scopeDuration, sourceDuration, candidateDuration, 0, time.Since(startedAt))
 		return &sysin.MediaSimilarListModel{MediaId: in.MediaId, List: []*sysin.NoteModel{}}, total, nil
 	}
 	end := int(math.Min(float64(start+in.PerPage), float64(total)))
+	noteStartedAt := time.Now()
 	list, err := s.mediaSimilarNotes(ctx, account, scope, items[start:end])
 	if err != nil {
 		return nil, 0, err
 	}
+	noteDuration := time.Since(noteStartedAt)
+	s.logSlowMediaSimilarList(ctx, in, total, scopeDuration, sourceDuration, candidateDuration, noteDuration, time.Since(startedAt))
 	return &sysin.MediaSimilarListModel{MediaId: in.MediaId, List: list}, total, nil
 }
 
@@ -87,11 +101,11 @@ func (s *sSysPublish) cachedMediaSimilarCandidates(ctx context.Context, scope *m
 	if source == nil {
 		return []mediaSimilarCandidate{}, nil
 	}
-	cacheKey := mediaSimilarResultCacheKey(ctx, scope, source, threshold)
+	cacheKey := mediaSimilarResultCacheKey(scope, source, threshold)
 	if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
 		var cached []mediaSimilarCandidate
 		if scanErr := value.Scan(&cached); scanErr == nil {
-			return s.filterLiveMediaSimilarCandidates(ctx, source, cached)
+			return filterMediaSimilarCandidates(source, cached), nil
 		}
 	}
 	result, err, _ := mediaSimilarCandidateGroup.Do(cacheKey, func() (any, error) {
@@ -104,7 +118,7 @@ func (s *sSysPublish) cachedMediaSimilarCandidates(ctx context.Context, scope *m
 	if !ok {
 		return nil, gerror.New("解析相似媒体查询结果失败")
 	}
-	return s.filterLiveMediaSimilarCandidates(ctx, source, items)
+	return filterMediaSimilarCandidates(source, items), nil
 }
 
 func (s *sSysPublish) computeMediaSimilarCandidates(ctx context.Context, scope *mediaSimilarScope, source *mediaSimilarSource, threshold int, cacheKey string) ([]mediaSimilarCandidate, error) {
@@ -125,45 +139,6 @@ func (s *sSysPublish) computeMediaSimilarCandidates(ctx context.Context, scope *
 	})
 	_ = cache.Instance().Set(ctx, cacheKey, items, mediaSimilarResultCacheTTL)
 	return items, nil
-}
-
-func (s *sSysPublish) filterLiveMediaSimilarCandidates(ctx context.Context, source *mediaSimilarSource, items []mediaSimilarCandidate) ([]mediaSimilarCandidate, error) {
-	items = filterMediaSimilarCandidates(source, items)
-	if len(items) == 0 {
-		return []mediaSimilarCandidate{}, nil
-	}
-	mediaIds := make([]int64, 0, len(items))
-	for _, item := range items {
-		if item.MediaId > 0 {
-			mediaIds = append(mediaIds, item.MediaId)
-		}
-	}
-	if len(mediaIds) == 0 {
-		return []mediaSimilarCandidate{}, nil
-	}
-	rows, err := g.DB().Model(publishMediaTable+" m").Safe().Ctx(ctx).
-		Fields("m.id,m.profile_id,m.tenant_id,m.account_id").
-		WhereIn("m.id", uniqueIds(mediaIds)).
-		WhereNull("m.deleted_at").
-		Where("m.perceptual_hash IS NOT NULL").
-		Where("m.perceptual_hash <> ''").
-		Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=m.profile_id AND ps.tenant_id=m.tenant_id AND ps.account_id=m.account_id AND ps.deleted_at IS NULL)").
-		Where(mediaSimilarLiveProfileIndexExistsSQL("m.profile_id", "m.tenant_id", "m.account_id")).
-		All()
-	if err != nil {
-		return nil, gerror.Wrap(err, "校验相似媒体有效性失败")
-	}
-	valid := make(map[int64]struct{}, len(rows))
-	for _, row := range rows {
-		valid[row["id"].Int64()] = struct{}{}
-	}
-	filtered := make([]mediaSimilarCandidate, 0, len(items))
-	for _, item := range items {
-		if _, ok := valid[item.MediaId]; ok {
-			filtered = append(filtered, item)
-		}
-	}
-	return filtered, nil
 }
 
 func (s *sSysPublish) visibleSourceMedia(ctx context.Context, scope *mediaSimilarScope, mediaId int64) (*mediaSimilarSource, error) {
@@ -309,24 +284,20 @@ func filterMediaSimilarCandidates(source *mediaSimilarSource, items []mediaSimil
 }
 
 func mediaSimilarDeduplicate(items []mediaSimilarCandidate) []mediaSimilarCandidate {
-	distanceByProfile := map[int64]int{}
+	bestByProfile := make(map[int64]mediaSimilarCandidate, len(items))
 	for _, item := range items {
 		if item.ProfileId <= 0 {
 			continue
 		}
-		current, exists := distanceByProfile[item.ProfileId]
-		if !exists || item.Distance < current {
-			distanceByProfile[item.ProfileId] = item.Distance
+		current, exists := bestByProfile[item.ProfileId]
+		if !exists || item.Distance < current.Distance ||
+			(item.Distance == current.Distance && item.MediaId < current.MediaId) {
+			bestByProfile[item.ProfileId] = item
 		}
 	}
-	res := make([]mediaSimilarCandidate, 0, len(distanceByProfile))
-	for profileId, distance := range distanceByProfile {
-		for _, item := range items {
-			if item.ProfileId == profileId && item.Distance == distance {
-				res = append(res, item)
-				break
-			}
-		}
+	res := make([]mediaSimilarCandidate, 0, len(bestByProfile))
+	for _, item := range bestByProfile {
+		res = append(res, item)
 	}
 	return res
 }
@@ -415,20 +386,37 @@ func normalizeMediaSimilarListInput(in *sysin.MediaSimilarListInp) {
 	}
 }
 
-func mediaSimilarResultCacheKey(ctx context.Context, scope *mediaSimilarScope, source *mediaSimilarSource, threshold int) string {
+func mediaSimilarResultCacheKey(scope *mediaSimilarScope, source *mediaSimilarSource, threshold int) string {
 	updatedAt := strings.TrimSpace(source.UpdatedAt)
 	return fmt.Sprintf(
-		"youban_publish:media_similar:v7:%s:%s:%d:%d:%s",
+		"youban_publish:media_similar:v8:%s:%d:%d:%s",
 		scope.CacheKey,
-		mediaSimilarScopeIndexVersion(ctx, scope),
 		source.Id,
 		threshold,
 		mediaSimilarHashKey(firstNonEmpty(source.PerceptualHash, "-")+":"+updatedAt),
 	)
 }
 
-func mediaSimilarCountCacheKey(ctx context.Context, scope *mediaSimilarScope, source *mediaSimilarSource, threshold int) string {
-	return "youban_publish:media_similar:count:v4:" + mediaSimilarResultCacheKey(ctx, scope, source, threshold)
+func mediaSimilarCountCacheKey(scope *mediaSimilarScope, source *mediaSimilarSource, threshold int) string {
+	return "youban_publish:media_similar:count:v5:" + mediaSimilarResultCacheKey(scope, source, threshold)
+}
+
+func (s *sSysPublish) logSlowMediaSimilarList(ctx context.Context, in *sysin.MediaSimilarListInp, total int, scopeDuration time.Duration, sourceDuration time.Duration, candidateDuration time.Duration, noteDuration time.Duration, totalDuration time.Duration) {
+	if totalDuration < mediaSimilarSlowThreshold {
+		return
+	}
+	g.Log().Warning(ctx, "相似媒体列表查询耗时过长", g.Map{
+		"mediaId":     in.MediaId,
+		"page":        in.Page,
+		"perPage":     in.PerPage,
+		"threshold":   in.Threshold,
+		"total":       total,
+		"scopeMs":     scopeDuration.Milliseconds(),
+		"sourceMs":    sourceDuration.Milliseconds(),
+		"candidateMs": candidateDuration.Milliseconds(),
+		"noteMs":      noteDuration.Milliseconds(),
+		"totalMs":     totalDuration.Milliseconds(),
+	})
 }
 
 func mediaSimilarLiveProfileIndexExistsSQL(profileIdExpr string, tenantIdExpr string, accountIdExpr string) string {
@@ -446,13 +434,6 @@ func mediaSimilarLiveProfileIndexExistsSQL(profileIdExpr string, tenantIdExpr st
 		AND i.status = p.status
       AND i.visibility = p.visibility
 )`, tenantIdExpr, accountIdExpr, profileIdExpr)
-}
-
-func mediaSimilarScopeIndexVersion(ctx context.Context, scope *mediaSimilarScope) string {
-	if scope == nil {
-		return "0"
-	}
-	return mediaSearchScopeVersion(ctx, mediaSearchScopeFromPartitions(scope.Partitions))
 }
 
 func mediaSimilarScopeCacheKey(ctx context.Context, tenantId int64, accountId int64) string {

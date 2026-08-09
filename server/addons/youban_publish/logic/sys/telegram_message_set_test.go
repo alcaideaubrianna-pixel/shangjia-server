@@ -25,3 +25,23 @@ func TestIsTelegramBotRemovedError(t *testing.T) {
 		})
 	}
 }
+
+func TestIsTelegramMessagePermanentlyUndeletableError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "cannot delete", err: errors.New("bad request: message can't be deleted"), want: true},
+		{name: "unicode apostrophe", err: errors.New("bad request: message can’t be deleted"), want: true},
+		{name: "missing", err: errors.New("bad request: message to delete not found"), want: false},
+		{name: "rate limited", err: errors.New("too many requests: retry after 5"), want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isTelegramMessagePermanentlyUndeletableError(test.err); got != test.want {
+				t.Fatalf("isTelegramMessagePermanentlyUndeletableError() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}

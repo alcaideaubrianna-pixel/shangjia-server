@@ -98,14 +98,42 @@ func mediaPHashLshBucketValues(hash string) []mediaPHashLshCell {
 }
 
 func mediaPHashLshCandidateRowsWithScopes(ctx context.Context, normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) ([]mediaPHashBucketCandidateRow, error) {
+	query, args, err := mediaPHashLshCandidateSQL(normalizedHash, threshold, scopes, profileIds, mediaType, excludeProfileId)
+	if err != nil {
+		return nil, err
+	}
+	if query == "" {
+		return []mediaPHashBucketCandidateRow{}, nil
+	}
+	rows := make([]mediaPHashBucketCandidateRow, 0)
+	if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") {
+			if _, err = tx.Exec("SET LOCAL work_mem = '64MB'"); err != nil {
+				return gerror.Wrap(err, "设置pHash LSH查询内存失败")
+			}
+			if _, err = tx.Exec("SET LOCAL jit = off"); err != nil {
+				return gerror.Wrap(err, "关闭pHash LSH查询JIT失败")
+			}
+		}
+		if err = tx.Raw(query, args...).Scan(&rows); err != nil {
+			return gerror.Wrap(err, "查询pHash LSH候选失败")
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func mediaPHashLshCandidateSQL(normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) (string, []any, error) {
 	cells := mediaPHashLshCells(normalizedHash, threshold)
 	if len(cells) == 0 {
-		return nil, gerror.New("pHash LSH 查询参数无效")
+		return "", nil, gerror.New("pHash LSH 查询参数无效")
 	}
 	scopes = mediaPHashBucketValidScopes(scopes)
 	profileIds = uniqueIds(profileIds)
 	if len(scopes) == 0 && len(profileIds) == 0 {
-		return []mediaPHashBucketCandidateRow{}, nil
+		return "", nil, nil
 	}
 	branchCapacity := mediaPHashLshBlockCount
 	if len(scopes) > 0 {
@@ -146,36 +174,26 @@ SELECT candidate.media_id, candidate.profile_id, candidate.account_id,
        candidate.bucket_hits
 FROM candidate
 WHERE EXISTS (
-    SELECT 1 FROM hg_content_profile p
-    WHERE p.id = candidate.profile_id AND p.deleted_at IS NULL
-)
-AND EXISTS (
     SELECT 1 FROM hg_youban_publish_profile_state ps
     WHERE ps.profile_id = candidate.profile_id
       AND ps.tenant_id = candidate.tenant_id
       AND ps.account_id = candidate.account_id
       AND ps.deleted_at IS NULL
 )
+AND EXISTS (
+    SELECT 1 FROM hg_youban_publish_media m
+    WHERE m.id = candidate.media_id
+      AND m.profile_id = candidate.profile_id
+      AND m.tenant_id = candidate.tenant_id
+      AND m.account_id = candidate.account_id
+      AND m.deleted_at IS NULL
+      AND m.perceptual_hash IS NOT NULL
+      AND m.perceptual_hash <> ''
+)
+AND %s
 ORDER BY candidate.bucket_hits DESC
-LIMIT %d`, strings.Join(branches, " UNION ALL "), mediaPHashBucketMaxCandidates)
-	rows := make([]mediaPHashBucketCandidateRow, 0)
-	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") {
-			if _, err := tx.Exec("SET LOCAL work_mem = '64MB'"); err != nil {
-				return gerror.Wrap(err, "设置pHash LSH查询内存失败")
-			}
-			if _, err := tx.Exec("SET LOCAL jit = off"); err != nil {
-				return gerror.Wrap(err, "关闭pHash LSH查询JIT失败")
-			}
-		}
-		if err := tx.Raw(query, args...).Scan(&rows); err != nil {
-			return gerror.Wrap(err, "查询pHash LSH候选失败")
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	return rows, nil
+LIMIT %d`, strings.Join(branches, " UNION ALL "), mediaSimilarLiveProfileIndexExistsSQL("candidate.profile_id", "candidate.tenant_id", "candidate.account_id"), mediaPHashBucketMaxCandidates)
+	return query, args, nil
 }
 
 func mediaPHashLshBranchSQL(pos int, values []int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) (string, []any) {

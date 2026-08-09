@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	mediaSimilarCountCacheTTL    = time.Hour
+	mediaSimilarCountCacheTTL    = 3 * time.Minute
 	mediaSimilarDefaultThreshold = 8
 )
 
@@ -56,7 +56,7 @@ func (s *sSysPublish) cachedMediaSimilarCount(ctx context.Context, scope *mediaS
 	if source == nil {
 		return 0, nil
 	}
-	cacheKey := mediaSimilarCountCacheKey(ctx, scope, source, threshold)
+	cacheKey := mediaSimilarCountCacheKey(scope, source, threshold)
 	if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
 		return value.Int(), nil
 	}

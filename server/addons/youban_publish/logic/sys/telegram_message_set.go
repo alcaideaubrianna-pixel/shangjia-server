@@ -79,6 +79,13 @@ func (s *sSysPublish) deleteTelegramMessagesLockedByChannel(ctx context.Context,
 			s.appendTelegramJobLog(ctx, job, "delete", "skipped", fmt.Sprintf("%s，Bot已不在频道，跳过TG消息清理，频道:%s，消息数:%d", reason, batch.chatId, len(batch.messages)))
 			continue
 		}
+		if isTelegramMessagePermanentlyUndeletableError(batchErr) {
+			if err = markTelegramMessagesUndeletable(ctx, batch.messages); err != nil {
+				return err
+			}
+			s.appendTelegramJobLog(ctx, job, "delete", "skipped", fmt.Sprintf("%s，TG消息已不可删除，保留旧消息并继续处理，频道:%s，消息数:%d", reason, batch.chatId, len(batch.messages)))
+			continue
+		}
 		g.Log().Debugf(ctx, "批量删除TG消息失败，回退逐条删除 job:%d chat:%s count:%d err:%+v", job.Id, batch.chatId, len(batch.messages), batchErr)
 		if err = s.deleteTelegramMessagesIndividually(ctx, bot, job, batch.messages, reason); err != nil {
 			return err
