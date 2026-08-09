@@ -36,8 +36,8 @@ const (
 
 	telegramTextMessageMaxChars = 4096
 	profileCreateMaxMediaBytes  = 100 * 1024 * 1024
-	profileMediaGroupDebounce   = 30 * time.Second
-	profileMediaGroupCacheTTL   = 5 * time.Minute
+	profileMediaGroupDebounce   = 3 * time.Minute
+	profileMediaGroupCacheTTL   = 10 * time.Minute
 )
 
 var profileNoFindRegexp = regexp.MustCompile(`(?i)\b[A-Z][A-Z0-9]{4,}\b`)
@@ -1476,6 +1476,7 @@ type profilePendingMediaGroup struct {
 	Text      string                                  `json:"text"`
 	Media     []*publishsysin.MessageTemplateMediaInp `json:"media"`
 	CreatedAt int64                                   `json:"createdAt"`
+	UpdatedAt int64                                   `json:"updatedAt"`
 }
 
 func (s *sSysBot) createProfileFromMessage(ctx context.Context, botId int64, msg *models.Message, text string) error {
@@ -1495,6 +1496,16 @@ func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64,
 	row, err := s.botById(ctx, botId)
 	if err != nil {
 		return err
+	}
+	if strings.TrimSpace(text) != "" || len(msg.Photo) > 0 || msg.Video != nil {
+		acknowledged, ackErr := s.acknowledgeProfileInput(ctx, session.Id, msg.MediaGroupID)
+		if ackErr != nil {
+			g.Log().Warningf(ctx, "发送资料接收反馈失败 sessionId:%d groupId:%s err:%+v", session.Id, msg.MediaGroupID, ackErr)
+		} else if acknowledged {
+			if ackErr = s.sendMessageOnly(ctx, botId, chatId, "已收到，正在处理，请稍候..."); ackErr != nil {
+				g.Log().Warningf(ctx, "发送资料处理中反馈失败 sessionId:%d groupId:%s err:%+v", session.Id, msg.MediaGroupID, ackErr)
+			}
+		}
 	}
 	media, err := s.resolveTelegramMessageMedia(ctx, row.BotToken, msg)
 	if err != nil {
@@ -1657,9 +1668,11 @@ func (s *sSysBot) collectProfileMediaGroup(ctx context.Context, botToken string,
 				isFirst = false
 			}
 		}
+		now := time.Now()
 		if isFirst {
-			pending = &profilePendingMediaGroup{SessionId: session.Id, BotId: session.BotId, ChatId: fmt.Sprintf("%d", msg.Chat.ID), CreatedAt: time.Now().Unix()}
+			pending = &profilePendingMediaGroup{SessionId: session.Id, BotId: session.BotId, ChatId: fmt.Sprintf("%d", msg.Chat.ID), CreatedAt: now.Unix()}
 		}
+		pending.UpdatedAt = now.UnixNano()
 		if strings.TrimSpace(pending.Text) == "" {
 			pending.Text = strings.TrimSpace(text)
 		}
@@ -1692,6 +1705,34 @@ func profileMediaGroupKey(sessionId int64, groupId string) string {
 	return fmt.Sprintf("youban_bot:profile_group:%d:%s", sessionId, strings.TrimSpace(groupId))
 }
 
+func profileMediaGroupAckKey(sessionId int64, groupId string) string {
+	return fmt.Sprintf("youban_bot:profile_group_ack:%d:%s", sessionId, strings.TrimSpace(groupId))
+}
+
+func (s *sSysBot) acknowledgeProfileInput(ctx context.Context, sessionId int64, groupId string) (bool, error) {
+	groupId = strings.TrimSpace(groupId)
+	if groupId == "" {
+		return true, nil
+	}
+	key := profileMediaGroupAckKey(sessionId, groupId)
+	acknowledged := false
+	err := s.withProfileMediaGroupLock(ctx, sessionId, groupId, func() error {
+		value, err := cache.Instance().Get(ctx, key)
+		if err != nil {
+			return err
+		}
+		if value != nil && !value.IsNil() {
+			return nil
+		}
+		if err = cache.Instance().Set(ctx, key, 1, profileMediaGroupCacheTTL); err != nil {
+			return err
+		}
+		acknowledged = true
+		return nil
+	})
+	return acknowledged, err
+}
+
 func profileMediaGroupLockKey(sessionId int64, groupId string) string {
 	return "youban_bot:profile_group:lock:" + fmt.Sprintf("%d:%s", sessionId, strings.TrimSpace(groupId))
 }
@@ -1714,36 +1755,63 @@ func (s *sSysBot) releaseProfileMediaGroupLock(lock *hglock.Lock) {
 }
 
 func (s *sSysBot) finishProfileMediaGroup(botId int64, groupId string, account *botProfileAccount, session *profileSessionRow) {
-	time.Sleep(profileMediaGroupDebounce)
 	ctx := context.Background()
 	key := profileMediaGroupKey(session.Id, groupId)
 	var pending profilePendingMediaGroup
-	found := false
-	err := s.withProfileMediaGroupLock(ctx, session.Id, groupId, func() error {
-		value, err := cache.Instance().Get(ctx, key)
-		if err != nil || value == nil || value.IsNil() {
+	for {
+		found := false
+		ready := false
+		wait := time.Duration(0)
+		err := s.withProfileMediaGroupLock(ctx, session.Id, groupId, func() error {
+			value, err := cache.Instance().Get(ctx, key)
+			if err != nil || value == nil || value.IsNil() {
+				return err
+			}
+			if err = json.Unmarshal([]byte(value.String()), &pending); err != nil || pending.SessionId == 0 {
+				return err
+			}
+			found = true
+			wait = profileMediaGroupIdleWait(pending, time.Now())
+			if wait > 0 {
+				return nil
+			}
+			ready = true
+			_, err = cache.Instance().Remove(ctx, key)
 			return err
+		})
+		if err != nil || !found {
+			return
 		}
-		if err = json.Unmarshal([]byte(value.String()), &pending); err != nil || pending.SessionId == 0 {
-			return err
+		if ready {
+			break
 		}
-		found = true
-		_, err = cache.Instance().Remove(ctx, key)
-		return err
-	})
-	if err != nil || !found {
-		return
+		time.Sleep(wait)
 	}
 	var current *profileSessionRow
-	if err = g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Where("id", session.Id).Where("status", profileSessionStatusActive).WhereGT("expires_at", gtime.Now()).Scan(&current); err != nil || current == nil || current.Id <= 0 {
+	if scanErr := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Where("id", session.Id).Where("status", profileSessionStatusActive).WhereGT("expires_at", gtime.Now()).Scan(&current); scanErr != nil || current == nil || current.Id <= 0 {
 		return
 	}
 	if len(pending.Media) == 0 && strings.TrimSpace(pending.Text) == "" {
 		return
 	}
-	if err = s.consumeProfileCreatePart(ctx, botId, pending.ChatId, account, current, pending.Text, pending.Media); err != nil {
-		_ = s.reply(ctx, botId, pending.ChatId, "资料媒体组解析失败："+html.EscapeString(err.Error()))
+	if consumeErr := s.consumeProfileCreatePart(ctx, botId, pending.ChatId, account, current, pending.Text, pending.Media); consumeErr != nil {
+		_ = s.reply(ctx, botId, pending.ChatId, "资料媒体组解析失败："+html.EscapeString(consumeErr.Error()))
 	}
+}
+
+func profileMediaGroupIdleWait(pending profilePendingMediaGroup, now time.Time) time.Duration {
+	lastMessageAt := time.Unix(0, pending.UpdatedAt)
+	if pending.UpdatedAt <= 0 {
+		lastMessageAt = time.Unix(pending.CreatedAt, 0)
+	}
+	idle := now.Sub(lastMessageAt)
+	if idle >= profileMediaGroupDebounce {
+		return 0
+	}
+	if idle < 0 {
+		return profileMediaGroupDebounce
+	}
+	return profileMediaGroupDebounce - idle
 }
 
 type inlineShareRow struct {

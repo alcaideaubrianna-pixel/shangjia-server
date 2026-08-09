@@ -84,6 +84,12 @@ func (s *sSysPublish) BotProfileCreate(ctx context.Context, in *sysin.BotProfile
 		title = firstLineForProfileTitle(plainText)
 	}
 	if title == "" {
+		title = firstLineForProfileTitle(in.VerifyText)
+	}
+	if title == "" {
+		title = botProfileMediaFallbackTitle(in.DisplayMedia, in.VerifyMedia)
+	}
+	if title == "" {
 		return nil, gerror.New("标题不能为空")
 	}
 	status := in.Status
@@ -254,6 +260,23 @@ func firstLineForProfileTitle(text string) string {
 		return string(runes[:30])
 	}
 	return line
+}
+
+func botProfileMediaFallbackTitle(displayMedia []*sysin.MessageTemplateMediaInp, verifyMedia []*sysin.MessageTemplateMediaInp) string {
+	for _, media := range [][]*sysin.MessageTemplateMediaInp{displayMedia, verifyMedia} {
+		for _, item := range media {
+			if item == nil {
+				continue
+			}
+			switch strings.ToLower(strings.TrimSpace(item.MediaType)) {
+			case "video":
+				return "视频资料"
+			case "image":
+				return "图片资料"
+			}
+		}
+	}
+	return ""
 }
 
 func (s *sSysPublish) BotProfileEdit(ctx context.Context, in *sysin.BotProfileEditInp) (res *sysin.NoteModel, err error) {
