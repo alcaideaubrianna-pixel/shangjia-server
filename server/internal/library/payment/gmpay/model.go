@@ -31,12 +31,14 @@ type createTransactionResponse struct {
 }
 
 type notifyRequest struct {
-	Code        int     `json:"code"`
-	OrderID     string  `json:"order_id"`
-	TradeID     string  `json:"trade_id"`
-	PaymentType string  `json:"payment_type"`
-	StatusCode  int     `json:"status_code"`
-	Message     string  `json:"message"`
-	Amount      float64 `json:"amount"`
-	Signature   string  `json:"signature"`
+	Status             int     `json:"status"`
+	Code               int     `json:"code"`
+	OrderID            string  `json:"order_id"`
+	TradeID            string  `json:"trade_id"`
+	BlockTransactionID string  `json:"block_transaction_id"`
+	PaymentType        string  `json:"payment_type"`
+	StatusCode         int     `json:"status_code"`
+	Message            string  `json:"message"`
+	Amount             float64 `json:"amount"`
+	Signature          string  `json:"signature"`
 }

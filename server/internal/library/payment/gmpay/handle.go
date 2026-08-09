@@ -57,11 +57,8 @@ func (h *GMPay) Notify(ctx context.Context, in payin.NotifyInp) (res *payin.Noti
 		err = gerror.New("解析 GMPay 回调参数失败")
 		return
 	}
-	if notify.StatusCode == 0 {
-		notify.StatusCode = notify.Code
-	}
-	if notify.StatusCode != 200 {
-		err = gerror.Newf("非交易支付成功状态，无需处理：%v", notify.StatusCode)
+	if !isPaymentSuccess(notify) {
+		err = gerror.Newf("非交易支付成功状态，无需处理：status=%d status_code=%d code=%d", notify.Status, notify.StatusCode, notify.Code)
 		return
 	}
 	if strings.TrimSpace(notify.OrderID) == "" {
@@ -72,11 +69,24 @@ func (h *GMPay) Notify(ctx context.Context, in payin.NotifyInp) (res *payin.Noti
 	payAt := gtime.Now()
 	res = &payin.NotifyModel{
 		OutTradeNo:    notify.OrderID,
-		TransactionId: firstNonEmpty(notify.TradeID, notify.OrderID),
+		TransactionId: firstNonEmpty(notify.BlockTransactionID, notify.TradeID, notify.OrderID),
 		PayAt:         payAt,
 		ActualAmount:  notify.Amount,
 	}
 	return
+}
+
+func isPaymentSuccess(notify *notifyRequest) bool {
+	if notify == nil {
+		return false
+	}
+	if notify.Status == 2 {
+		return true
+	}
+	if notify.Status == 0 && notify.StatusCode == 200 {
+		return true
+	}
+	return notify.Status == 0 && notify.StatusCode == 0 && notify.Code == 200
 }
 
 func (h *GMPay) CreateOrder(ctx context.Context, in payin.CreateOrderInp) (res *payin.CreateOrderModel, err error) {

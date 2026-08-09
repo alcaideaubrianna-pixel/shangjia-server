@@ -20,3 +20,21 @@ func TestSignParamsUsesGMPayHMACSHA256(t *testing.T) {
 		t.Fatalf("unexpected GMPay signature: got %q, want %q", actual, expected)
 	}
 }
+
+func TestIsPaymentSuccessSupportsCurrentGMPayStatus(t *testing.T) {
+	if !isPaymentSuccess(&notifyRequest{Status: 2}) {
+		t.Fatal("status 2 should be treated as a successful payment")
+	}
+	if isPaymentSuccess(&notifyRequest{Status: 1}) {
+		t.Fatal("status 1 should not be treated as a successful payment")
+	}
+}
+
+func TestIsPaymentSuccessSupportsLegacyStatusFields(t *testing.T) {
+	if !isPaymentSuccess(&notifyRequest{StatusCode: 200}) {
+		t.Fatal("legacy status_code 200 should be treated as a successful payment")
+	}
+	if !isPaymentSuccess(&notifyRequest{Code: 200}) {
+		t.Fatal("legacy code 200 should be treated as a successful payment")
+	}
+}
