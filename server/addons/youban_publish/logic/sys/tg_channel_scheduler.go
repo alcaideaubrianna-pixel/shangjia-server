@@ -212,15 +212,15 @@ func (s *sSysPublish) telegramSchedulerCandidates(ctx context.Context, limit int
 		candidateLimit = 1000
 	}
 	now := gtime.Now()
+	bulk, err := s.telegramSchedulerCandidatesByPriority(ctx, now, telegramSchedulerPriorityBulk, candidateLimit)
+	if err != nil {
+		return nil, err
+	}
 	urgent, err := s.telegramSchedulerCandidatesByPriority(ctx, now, telegramSchedulerPriorityUrgent, candidateLimit)
 	if err != nil {
 		return nil, err
 	}
 	normal, err := s.telegramSchedulerCandidatesByPriority(ctx, now, telegramSchedulerPriorityNormal, candidateLimit)
-	if err != nil {
-		return nil, err
-	}
-	bulk, err := s.telegramSchedulerCandidatesByPriority(ctx, now, telegramSchedulerPriorityBulk, candidateLimit)
 	if err != nil {
 		return nil, err
 	}
