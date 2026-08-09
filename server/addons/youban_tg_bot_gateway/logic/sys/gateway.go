@@ -196,9 +196,8 @@ func (s *sGateway) Webhook(ctx context.Context, key string, body []byte, secret 
 	if conf.WebhookSecret != "" && secret != conf.WebhookSecret {
 		return gerror.New("Webhook Secret无效")
 	}
-	var update models.Update
-	if err = json.Unmarshal(body, &update); err != nil {
-		return gerror.Wrap(err, "解析Telegram消息失败")
+	if len(body) == 0 || !json.Valid(body) {
+		return gerror.New("Webhook消息格式不正确")
 	}
 	return s.enqueueUpdateBody(ctx, strings.TrimSpace(key), body)
 }
