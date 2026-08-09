@@ -822,7 +822,7 @@ func (s *sSysBot) sendProfileContent(ctx context.Context, botId int64, chatId st
 	defer cancel()
 	displayCaption := profilePreviewDisplayCaption(note)
 	if profileHasPurposeMedia(note.Media, "display") {
-		if err = s.sendProfileMediaPurpose(ctx, callCtx, bot, chatId, note.Media, "display", displayCaption); err != nil {
+		if err = s.sendProfileMediaPurpose(ctx, callCtx, bot, chatId, note.Media, "display", displayCaption, false); err != nil {
 			return err
 		}
 	} else if strings.TrimSpace(note.PlainText) != "" {
@@ -831,14 +831,14 @@ func (s *sSysBot) sendProfileContent(ctx context.Context, botId int64, chatId st
 		}
 	}
 	if profileHasPurposeMedia(note.Media, "verify") {
-		if err = s.sendProfileMediaPurpose(ctx, callCtx, bot, chatId, note.Media, "verify", "验证资料"); err != nil {
+		if err = s.sendProfileMediaPurpose(ctx, callCtx, bot, chatId, note.Media, "verify", "验证资料", false); err != nil {
 			return err
 		}
 	}
 	return s.sendMessageOnly(ctx, botId, chatId, "预览完成。")
 }
 
-func (s *sSysBot) sendProfileMediaPurpose(ctx context.Context, callCtx context.Context, bot *tgbot.Bot, chatId string, media []*publishsysin.MediaModel, purpose string, captionPrefix string) error {
+func (s *sSysBot) sendProfileMediaPurpose(ctx context.Context, callCtx context.Context, bot *tgbot.Bot, chatId string, media []*publishsysin.MediaModel, purpose string, captionPrefix string, forceUpload bool) error {
 	items := make([]*publishsysin.MediaModel, 0)
 	for _, item := range media {
 		if item == nil || strings.TrimSpace(item.Purpose) != purpose {
@@ -861,13 +861,15 @@ func (s *sSysBot) sendProfileMediaPurpose(ctx context.Context, callCtx context.C
 			end = len(items)
 		}
 		group := make([]models.InputMedia, 0, end-start)
+		groupItems := make([]*publishsysin.MediaModel, 0, end-start)
+		groupCaptions := make([]string, 0, end-start)
 		closers := make([]*os.File, 0)
 		for index, item := range items[start:end] {
 			caption := ""
 			if start == 0 && index == 0 && strings.TrimSpace(captionPrefix) != "" {
 				caption = captionPrefix
 			}
-			input, file, err := s.profilePreviewInputMedia(ctx, item, caption)
+			input, file, err := s.profilePreviewInputMediaWithUpload(ctx, item, caption, forceUpload)
 			if err != nil {
 				g.Log().Warningf(ctx, "Bot资料预览准备媒体失败 chatId:%s purpose:%s mediaId:%d err:%+v", chatId, purpose, item.Id, err)
 				continue
@@ -877,6 +879,8 @@ func (s *sSysBot) sendProfileMediaPurpose(ctx context.Context, callCtx context.C
 			}
 			if input != nil {
 				group = append(group, input)
+				groupItems = append(groupItems, item)
+				groupCaptions = append(groupCaptions, caption)
 			}
 		}
 		defer func(files []*os.File) {
@@ -888,17 +892,23 @@ func (s *sSysBot) sendProfileMediaPurpose(ctx context.Context, callCtx context.C
 			continue
 		}
 		if len(group) == 1 {
-			if err := s.sendSingleProfileMedia(callCtx, bot, chatId, group[0]); err != nil {
+			if err := s.sendSingleProfileMediaWithFallback(ctx, callCtx, bot, chatId, groupItems[0], groupCaptions[0], group[0]); err != nil {
 				return err
 			}
 			continue
 		}
 		if _, err := bot.SendMediaGroup(callCtx, &tgbot.SendMediaGroupParams{ChatID: chatId, Media: group}); err != nil {
 			g.Log().Warningf(ctx, "Bot资料预览媒体组发送失败 chatId:%s purpose:%s err:%+v", chatId, purpose, err)
-			for _, single := range group {
-				if sendErr := s.sendSingleProfileMedia(callCtx, bot, chatId, single); sendErr != nil {
-					g.Log().Warningf(ctx, "Bot资料预览单媒体发送失败 chatId:%s purpose:%s err:%+v", chatId, purpose, sendErr)
+			var lastErr error
+			for index, single := range group {
+				item := groupItems[index]
+				if sendErr := s.sendSingleProfileMediaWithFallback(ctx, callCtx, bot, chatId, item, groupCaptions[index], single); sendErr != nil {
+					lastErr = sendErr
+					g.Log().Warningf(ctx, "Bot资料预览单媒体发送失败 chatId:%s purpose:%s mediaId:%d err:%+v", chatId, purpose, item.Id, sendErr)
 				}
+			}
+			if lastErr != nil {
+				return lastErr
 			}
 		}
 	}
@@ -906,11 +916,18 @@ func (s *sSysBot) sendProfileMediaPurpose(ctx context.Context, callCtx context.C
 }
 
 func (s *sSysBot) profilePreviewInputMedia(ctx context.Context, media *publishsysin.MediaModel, caption string) (models.InputMedia, *os.File, error) {
+	return s.profilePreviewInputMediaWithUpload(ctx, media, caption, false)
+}
+
+func (s *sSysBot) profilePreviewInputMediaWithUpload(ctx context.Context, media *publishsysin.MediaModel, caption string, forceUpload bool) (models.InputMedia, *os.File, error) {
 	if media == nil {
 		return nil, nil, nil
 	}
 	source := profileMediaSource(ctx, s, media)
 	var file *os.File
+	if forceUpload {
+		source = ""
+	}
 	if source == "" || strings.HasPrefix(strings.TrimSpace(media.TgFileId), "copy:") {
 		cached, err := publishService.SysPublish().BotMediaCacheFile(ctx, &publishsysin.BotMediaCacheFileInp{Media: media})
 		if err != nil {
@@ -924,6 +941,9 @@ func (s *sSysBot) profilePreviewInputMedia(ctx context.Context, media *publishsy
 			file = opened
 			source = "attach://" + fmt.Sprintf("preview_%d_%s", media.Id, telegramSafeUploadFilename(cached.Path))
 		}
+	}
+	if forceUpload && file == nil {
+		return nil, nil, gerror.New("无法读取资料媒体文件")
 	}
 	if strings.TrimSpace(source) == "" {
 		return nil, file, gerror.New("媒体文件地址为空")
@@ -946,13 +966,40 @@ func (s *sSysBot) profilePreviewInputMedia(ctx context.Context, media *publishsy
 		if file != nil {
 			video.MediaAttachment = file
 		}
-		if thumb := profileMediaThumbSource(ctx, s, media); thumb != "" {
+		thumb := profileMediaThumbSource(ctx, s, media)
+		if forceUpload && strings.TrimSpace(media.TgThumbFileId) != "" {
+			thumb = normalizePreviewMediaURL(s.absoluteMediaURL(ctx, firstNonEmpty(media.PosterUrl, media.PosterStoragePath)))
+		}
+		if thumb != "" {
 			video.Thumbnail = &models.InputFileString{Data: thumb}
 		}
 		return video, file, nil
 	default:
 		return nil, file, nil
 	}
+}
+
+func (s *sSysBot) sendSingleProfileMediaWithFallback(ctx context.Context, callCtx context.Context, bot *tgbot.Bot, chatId string, media *publishsysin.MediaModel, caption string, input models.InputMedia) error {
+	err := s.sendSingleProfileMedia(callCtx, bot, chatId, input)
+	if err == nil || !isInvalidTelegramMediaReference(err) {
+		return err
+	}
+	fallback, file, fallbackErr := s.profilePreviewInputMediaWithUpload(ctx, media, caption, true)
+	if fallbackErr != nil {
+		return err
+	}
+	if file != nil {
+		defer file.Close()
+	}
+	return s.sendSingleProfileMedia(callCtx, bot, chatId, fallback)
+}
+
+func isInvalidTelegramMediaReference(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "wrong file identifier") || strings.Contains(message, "file identifier/ http url")
 }
 
 func telegramSafeUploadFilename(path string) string {
@@ -1114,6 +1161,11 @@ func profileCardMarkup(profileNo string, purpose string) *models.InlineKeyboardM
 	case "edit":
 		return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
 			{{Text: "编辑此笔记", CallbackData: "pf:edit:" + profileNo}, {Text: "查看详情", CallbackData: "pf:view:" + profileNo}},
+			{{Text: "返回资料管理", CallbackData: "pf:menu"}},
+		}}
+	case "readonly":
+		return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+			{{Text: "预览", CallbackData: "pf:send:" + profileNo}},
 			{{Text: "返回资料管理", CallbackData: "pf:menu"}},
 		}}
 	default:

@@ -89,26 +89,7 @@ func (s *sSysBot) handleScanCallback(ctx context.Context, botId int64, query *mo
 	if query.Message.Message == nil {
 		return true, nil
 	}
-	parts := strings.Split(strings.TrimSpace(query.Data), ":")
-	if len(parts) != 4 || parts[2] == "" {
-		return true, gerror.New("扫图结果已失效")
-	}
-	var state scanResultState
-	value, err := cache.Instance().Get(ctx, scanResultKey(parts[2]))
-	if err != nil || value == nil || value.IsNil() || json.Unmarshal([]byte(value.String()), &state) != nil {
-		return true, s.sendMessageOnly(ctx, botId, fmt.Sprintf("%d", query.Message.Message.Chat.ID), "扫图结果已失效，请重新发送媒体。")
-	}
-	profileId := parseTelegramUserId(parts[3])
-	if !containsInt64(state.ProfileIds, profileId) {
-		return true, gerror.New("扫图资料不存在")
-	}
-	account, err := s.boundProfileAccountByUser(ctx, query.From.ID)
-	if err != nil {
-		return true, s.replyBotError(ctx, botId, fmt.Sprintf("%d", query.Message.Message.Chat.ID), "扫图预览", err)
-	}
-	if account.TenantId != state.TenantId || account.AccountId != state.AccountId {
-		return true, gerror.New("扫图结果无权操作")
-	}
+	chatId := fmt.Sprintf("%d", query.Message.Message.Chat.ID)
 	row, err := s.botById(ctx, botId)
 	if err != nil {
 		return true, err
@@ -120,11 +101,38 @@ func (s *sSysBot) handleScanCallback(ctx context.Context, botId int64, query *mo
 	callCtx, cancel := telegramAPICtx()
 	defer cancel()
 	_, _ = bot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
+	parts := strings.Split(strings.TrimSpace(query.Data), ":")
+	if len(parts) != 4 || parts[2] == "" {
+		return true, s.sendMessageOnly(ctx, botId, chatId, "扫图结果已失效，请重新发送媒体。")
+	}
+	var state scanResultState
+	value, err := cache.Instance().Get(ctx, scanResultKey(parts[2]))
+	if err != nil || value == nil || value.IsNil() || json.Unmarshal([]byte(value.String()), &state) != nil {
+		return true, s.sendMessageOnly(ctx, botId, fmt.Sprintf("%d", query.Message.Message.Chat.ID), "扫图结果已失效，请重新发送媒体。")
+	}
+	profileId := parseTelegramUserId(parts[3])
+	if !containsInt64(state.ProfileIds, profileId) {
+		return true, s.sendMessageOnly(ctx, botId, chatId, "扫图资料不存在，请重新发送媒体搜索。")
+	}
+	account, err := s.boundProfileAccountByUser(ctx, query.From.ID)
+	if err != nil {
+		return true, s.replyBotError(ctx, botId, chatId, "扫图预览", err)
+	}
+	if account.TenantId != state.TenantId || account.AccountId != state.AccountId {
+		return true, s.sendMessageOnly(ctx, botId, chatId, "扫图结果已失效，请重新发送媒体。")
+	}
 	note, err := publishService.SysPublish().BotProfileView(ctx, &publishsysin.BotProfileViewInp{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType, ProfileId: profileId})
 	if err != nil {
-		return true, s.replyBotError(ctx, botId, fmt.Sprintf("%d", query.Message.Message.Chat.ID), "扫图预览", err)
+		return true, s.replyBotError(ctx, botId, chatId, "扫图预览", err)
 	}
-	return true, s.sendScanProfileContent(ctx, botId, fmt.Sprintf("%d", query.Message.Message.Chat.ID), note)
+	if err = s.sendScanProfileContent(ctx, botId, chatId, note); err != nil {
+		return true, s.replyBotError(ctx, botId, chatId, "扫图预览", err)
+	}
+	purpose := "readonly"
+	if note.AccountId == account.AccountId {
+		purpose = "view"
+	}
+	return true, s.replyBotError(ctx, botId, chatId, "扫图预览", s.sendProfileCard(ctx, botId, chatId, note, purpose))
 }
 
 func (s *sSysBot) sendScanProfileContent(ctx context.Context, botId int64, chatId string, note *publishsysin.NoteModel) error {
@@ -143,7 +151,7 @@ func (s *sSysBot) sendScanProfileContent(ctx context.Context, botId int64, chatI
 	defer cancel()
 	caption := profilePreviewDisplayCaption(note)
 	if profileHasPurposeMedia(note.Media, "display") {
-		if err = s.sendProfileMediaPurpose(ctx, callCtx, bot, chatId, note.Media, "display", caption); err != nil {
+		if err = s.sendProfileMediaPurpose(ctx, callCtx, bot, chatId, note.Media, "display", caption, true); err != nil {
 			return err
 		}
 	} else if strings.TrimSpace(note.PlainText) != "" {
@@ -152,7 +160,7 @@ func (s *sSysBot) sendScanProfileContent(ctx context.Context, botId int64, chatI
 		}
 	}
 	if profileHasPurposeMedia(note.Media, "verify") {
-		if err = s.sendProfileMediaPurpose(ctx, callCtx, bot, chatId, note.Media, "verify", "验证资料"); err != nil {
+		if err = s.sendProfileMediaPurpose(ctx, callCtx, bot, chatId, note.Media, "verify", "验证资料", true); err != nil {
 			return err
 		}
 	}

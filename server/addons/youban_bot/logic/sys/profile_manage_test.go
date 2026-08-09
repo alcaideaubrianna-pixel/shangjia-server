@@ -1,9 +1,19 @@
 package sys
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
+
+func TestIsInvalidTelegramMediaReference(t *testing.T) {
+	if !isInvalidTelegramMediaReference(errors.New("bad request: wrong file identifier/HTTP URL specified")) {
+		t.Fatal("expected invalid Telegram media reference to be detected")
+	}
+	if isInvalidTelegramMediaReference(errors.New("request timeout")) {
+		t.Fatal("unexpectedly classified timeout as invalid media reference")
+	}
+}
 
 func TestProfileMediaGroupIdleWaitUsesLastMessageTime(t *testing.T) {
 	now := time.Date(2026, 8, 9, 16, 0, 0, 0, time.Local)
