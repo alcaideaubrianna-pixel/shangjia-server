@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
@@ -120,20 +122,65 @@ func (e *tgRetryAfterError) Unwrap() error {
 }
 
 func (s *sSysPublish) enqueueTelegramJob(ctx context.Context, jobId int64, delay time.Duration) error {
-	return s.scheduleTelegramJobWithDispatch(ctx, jobId, delay, true)
+	return s.enqueueTelegramJobDirect(ctx, jobId, delay)
 }
 
 func (s *sSysPublish) enqueueTelegramJobDeferred(ctx context.Context, jobId int64, delay time.Duration) error {
-	return s.scheduleTelegramJobWithDispatch(ctx, jobId, delay, false)
+	return s.enqueueTelegramJobDirect(ctx, jobId, delay)
 }
 
-func (s *sSysPublish) scheduleTelegramJobWithDispatch(ctx context.Context, jobId int64, delay time.Duration, dispatch bool) error {
+func (s *sSysPublish) enqueueTelegramJobDirect(ctx context.Context, jobId int64, delay time.Duration) error {
+	if jobId <= 0 {
+		return nil
+	}
 	if delay <= 0 {
 		if windowDelay, enabled := s.telegramPublishWindowDelay(ctx); enabled && windowDelay > 0 {
 			delay = windowDelay
 		}
 	}
-	return s.scheduleTelegramJobWithOptions(ctx, jobId, delay, dispatch)
+	job, err := s.telegramJobById(ctx, jobId)
+	if err != nil {
+		return err
+	}
+	priority := s.telegramJobPriority(job)
+	queueName := telegramQueueNameByPriority(priority)
+	data := g.Map{
+		"priority":            priority,
+		"queue_name":          queueName,
+		"dispatch_status":     tgDispatchStatusQueued,
+		"dispatched_at":       gtime.Now(),
+		"dispatch_count":      gdb.Raw("dispatch_count + 1"),
+		"last_dispatch_error": "",
+		"updated_at":          gtime.Now(),
+	}
+	if delay > 0 {
+		data["next_retry_at"] = gtime.Now().Add(delay)
+	} else {
+		data["next_retry_at"] = nil
+	}
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", jobId).
+		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
+		Data(data).Update()
+	if err != nil {
+		return gerror.Wrap(err, "锁定TG任务入队状态失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil
+	}
+	if err = s.enqueueTelegramTaskWithQueue(ctx, tgTaskTypePublish, jobId, delay, true, queueName); err != nil {
+		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).
+			Where("dispatch_status", tgDispatchStatusQueued).
+			Data(g.Map{
+				"dispatch_status":     tgDispatchStatusIdle,
+				"last_dispatch_error": err.Error(),
+				"updated_at":          gtime.Now(),
+			}).Update()
+		return gerror.Wrap(err, "TG任务直接入队失败")
+	}
+	return nil
 }
 
 func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64, delay time.Duration) error {

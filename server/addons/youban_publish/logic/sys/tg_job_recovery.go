@@ -11,7 +11,10 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
-const telegramSendingJobRecoverAfter = 2 * time.Minute
+const (
+	telegramSendingJobRecoverAfter = 2 * time.Minute
+	telegramPendingJobRecoverAfter = 30 * time.Second
+)
 
 func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit int) error {
 	if limit <= 0 {
@@ -34,6 +37,9 @@ func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit 
 	if affected, _ := result.RowsAffected(); affected > 0 {
 		g.Log().Infof(ctx, "已恢复调度中断的TG任务：%d条", affected)
 	}
+	if err = s.recoverPendingIdleTelegramJobs(ctx, limit); err != nil {
+		return err
+	}
 	return s.recoverStaleTelegramSendingJobs(ctx, limit)
 }
 
@@ -43,6 +49,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	time.Sleep(15 * time.Second)
 	if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
+	}
+	if err := s.recoverPendingIdleTelegramJobs(ctx, 500); err != nil {
+		g.Log().Warningf(ctx, "恢复待入队TG推送任务失败：%+v", err)
 	}
 	if err := s.recoverMissingProfilePublishOperationStates(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "补建资料上架状态失败：%+v", err)
@@ -58,6 +67,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if err := s.recoverPendingIdleTelegramJobs(ctx, 500); err != nil {
+				g.Log().Warningf(ctx, "恢复待入队TG推送任务失败：%+v", err)
+			}
 			if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
 				g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
 			}
@@ -72,6 +84,34 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	deadline := gtime.Now().Add(-telegramPendingJobRecoverAfter)
+	var jobs []telegramJobRecord
+	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
+		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", gtime.Now()).
+		WhereLTE("updated_at", deadline).
+		OrderAsc("updated_at").OrderAsc("id").
+		Limit(limit).
+		Scan(&jobs)
+	if err != nil {
+		return gerror.Wrap(err, "读取待入队TG推送任务失败")
+	}
+	for _, job := range jobs {
+		if job.Id <= 0 {
+			continue
+		}
+		if err = s.enqueueTelegramJob(ctx, job.Id, 0); err != nil {
+			g.Log().Warningf(ctx, "恢复待入队TG推送任务失败 job:%d err:%+v", job.Id, err)
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit int) error {
