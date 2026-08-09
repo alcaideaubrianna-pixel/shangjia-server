@@ -130,6 +130,10 @@ func (s *sSysPublish) enqueueTelegramJobDeferred(ctx context.Context, jobId int6
 }
 
 func (s *sSysPublish) enqueueTelegramJobDirect(ctx context.Context, jobId int64, delay time.Duration) error {
+	return s.enqueueTelegramJobDirectWithUnique(ctx, jobId, delay, true)
+}
+
+func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jobId int64, delay time.Duration, unique bool) error {
 	if jobId <= 0 {
 		return nil
 	}
@@ -170,7 +174,7 @@ func (s *sSysPublish) enqueueTelegramJobDirect(ctx context.Context, jobId int64,
 	if affected == 0 {
 		return nil
 	}
-	if err = s.enqueueTelegramTaskWithQueue(ctx, tgTaskTypePublish, jobId, delay, true, queueName); err != nil {
+	if err = s.enqueueTelegramTaskWithQueue(ctx, tgTaskTypePublish, jobId, delay, unique, queueName); err != nil {
 		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).
 			Where("dispatch_status", tgDispatchStatusQueued).
 			Data(g.Map{

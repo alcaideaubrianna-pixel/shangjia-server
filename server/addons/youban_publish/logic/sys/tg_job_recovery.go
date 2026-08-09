@@ -94,7 +94,7 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 	if limit <= 0 {
 		limit = 100
 	}
-	deadline := gtime.Now().Add(-telegramDispatchJobRecoverAfter)
+	deadline := telegramRecoveryTimeText(gtime.Now().Add(-telegramDispatchJobRecoverAfter))
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
@@ -138,18 +138,23 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 	if limit <= 0 {
 		limit = 100
 	}
-	deadline := gtime.Now().Add(-telegramPendingJobRecoverAfter)
+	now := gtime.Now()
+	nowText := telegramRecoveryTimeText(now)
+	deadline := telegramRecoveryTimeText(now.Add(-telegramPendingJobRecoverAfter))
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
-		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", gtime.Now()).
+		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", nowText).
 		WhereLTE("updated_at", deadline).
 		OrderAsc("updated_at").OrderAsc("id").
 		Limit(limit).
 		Scan(&jobs)
 	if err != nil {
 		return gerror.Wrap(err, "读取待入队TG推送任务失败")
+	}
+	if len(jobs) > 0 {
+		g.Log().Infof(ctx, "恢复待入队TG推送任务：%d条", len(jobs))
 	}
 	for _, job := range jobs {
 		if job.Id <= 0 {
@@ -162,11 +167,18 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 	return nil
 }
 
+func telegramRecoveryTimeText(value *gtime.Time) string {
+	if value == nil {
+		return ""
+	}
+	return value.Format("Y-m-d H:i:s")
+}
+
 func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit int) error {
 	if limit <= 0 {
 		limit = 100
 	}
-	deadline := gtime.Now().Add(-telegramSendingJobRecoverAfter)
+	deadline := telegramRecoveryTimeText(gtime.Now().Add(-telegramSendingJobRecoverAfter))
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("status", "sending").

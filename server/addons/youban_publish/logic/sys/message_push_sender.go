@@ -258,7 +258,7 @@ func (s *sSysPublish) SendMessagePushJob(ctx context.Context, jobId int64) error
 			"last_dispatch_error": "频道正在发送其他任务，已等待重新调度",
 			"updated_at":          gtime.Now(),
 		}).Update()
-		return nil
+		return s.enqueueTelegramJobDirectWithUnique(ctx, jobId, delay, false)
 	}
 	defer s.releaseTelegramChannelLease(ctx, lease)
 	job, locked, err := s.lockTelegramJob(ctx, jobId)
