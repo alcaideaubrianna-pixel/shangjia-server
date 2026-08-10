@@ -164,5 +164,8 @@ func (s *sSysPublish) botProfileViewByAccountIds(ctx context.Context, profileId 
 	if err = s.applyProfileTagNames(ctx, []*sysin.ProfileModel{profile}); err != nil {
 		return nil, err
 	}
+	if err = s.applyProfileCollectionMetadata(ctx, []*sysin.ProfileModel{profile}); err != nil {
+		return nil, err
+	}
 	return profile, nil
 }
