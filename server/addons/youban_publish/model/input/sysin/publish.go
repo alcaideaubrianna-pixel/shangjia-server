@@ -507,43 +507,46 @@ type AdminProfileBatchCancelModel struct {
 }
 
 type ProfileModel struct {
-	Id                    int64       `json:"id" dc:"资料ID"`
-	NoteIndexId           int64       `json:"-" dc:"资料索引ID"`
-	Uuid                  string      `json:"uuid" dc:"资料UUID"`
-	TenantId              int64       `json:"tenantId" dc:"租户ID"`
-	AccountId             int64       `json:"accountId" dc:"上架账号ID"`
-	SourceType            string      `json:"sourceType" dc:"资料来源类型"`
-	IsCollected           bool        `json:"isCollected" dc:"是否采集资料"`
-	CollectSourceId       int64       `json:"collectSourceId" dc:"采集源频道ID"`
-	CollectSourceName     string      `json:"collectSourceName" dc:"采集源频道名称"`
-	CollectSourceUsername string      `json:"collectSourceUsername" dc:"采集源频道用户名"`
-	TenantName            string      `json:"tenantName" dc:"账号归属"`
-	AccountName           string      `json:"accountName" dc:"上架账号昵称"`
-	Nickname              string      `json:"nickname" dc:"账号名称"`
-	Username              string      `json:"username" dc:"上架账号用户名"`
-	ChannelIds            []int64     `json:"channelIds" dc:"推送频道ID列表"`
-	AntiScanEnabled       int         `json:"antiScanEnabled" dc:"是否防扫图处理"`
-	CustomerRemark        string      `json:"customerRemark" dc:"客服备注"`
-	TaskStatus            string      `json:"taskStatus" dc:"上架任务状态"`
-	TgStatus              string      `json:"tgStatus" dc:"TG推送状态"`
-	TgPushEnabled         int         `json:"tgPushEnabled" dc:"是否推送TG"`
-	ProfileNo             string      `json:"profileNo" dc:"资料编号"`
-	Title                 string      `json:"title" dc:"标题"`
-	Summary               string      `json:"summary" dc:"摘要"`
-	PlainText             string      `json:"plainText" dc:"正文"`
-	Province              string      `json:"province" dc:"省份"`
-	City                  string      `json:"city" dc:"城市"`
-	Tag                   string      `json:"tag" dc:"标签"`
-	Visibility            string      `json:"visibility" dc:"可见性"`
-	ReviewStatus          string      `json:"reviewStatus" dc:"审核状态"`
-	Status                int         `json:"status" dc:"状态"`
-	ImageCount            int         `json:"imageCount" dc:"图片数"`
-	VideoCount            int         `json:"videoCount" dc:"视频数"`
-	CanEdit               bool        `json:"canEdit" dc:"当前账号是否可编辑"`
-	Permission            string      `json:"permission" dc:"当前账号权限：creator/admin/visitor"`
-	PublishedAt           *gtime.Time `json:"publishedAt" dc:"发布时间"`
-	CreatedAt             *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt             *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id                     int64       `json:"id" dc:"资料ID"`
+	NoteIndexId            int64       `json:"-" dc:"资料索引ID"`
+	Uuid                   string      `json:"uuid" dc:"资料UUID"`
+	TenantId               int64       `json:"tenantId" dc:"租户ID"`
+	AccountId              int64       `json:"accountId" dc:"上架账号ID"`
+	SourceType             string      `json:"sourceType" dc:"资料来源类型"`
+	IsCollected            bool        `json:"isCollected" dc:"是否采集资料"`
+	CollectSourceId        int64       `json:"collectSourceId" dc:"采集源频道ID"`
+	CollectSourceName      string      `json:"collectSourceName" dc:"采集源频道名称"`
+	CollectSourceUsername  string      `json:"collectSourceUsername" dc:"采集源频道用户名"`
+	CollectSourceChatId    string      `json:"collectSourceChatId" dc:"采集来源TG Chat ID"`
+	CollectSourceMessageId int64       `json:"collectSourceMessageId" dc:"采集来源消息ID"`
+	CollectSourceUrl       string      `json:"collectSourceUrl" dc:"采集来源地址"`
+	TenantName             string      `json:"tenantName" dc:"账号归属"`
+	AccountName            string      `json:"accountName" dc:"上架账号昵称"`
+	Nickname               string      `json:"nickname" dc:"账号名称"`
+	Username               string      `json:"username" dc:"上架账号用户名"`
+	ChannelIds             []int64     `json:"channelIds" dc:"推送频道ID列表"`
+	AntiScanEnabled        int         `json:"antiScanEnabled" dc:"是否防扫图处理"`
+	CustomerRemark         string      `json:"customerRemark" dc:"客服备注"`
+	TaskStatus             string      `json:"taskStatus" dc:"上架任务状态"`
+	TgStatus               string      `json:"tgStatus" dc:"TG推送状态"`
+	TgPushEnabled          int         `json:"tgPushEnabled" dc:"是否推送TG"`
+	ProfileNo              string      `json:"profileNo" dc:"资料编号"`
+	Title                  string      `json:"title" dc:"标题"`
+	Summary                string      `json:"summary" dc:"摘要"`
+	PlainText              string      `json:"plainText" dc:"正文"`
+	Province               string      `json:"province" dc:"省份"`
+	City                   string      `json:"city" dc:"城市"`
+	Tag                    string      `json:"tag" dc:"标签"`
+	Visibility             string      `json:"visibility" dc:"可见性"`
+	ReviewStatus           string      `json:"reviewStatus" dc:"审核状态"`
+	Status                 int         `json:"status" dc:"状态"`
+	ImageCount             int         `json:"imageCount" dc:"图片数"`
+	VideoCount             int         `json:"videoCount" dc:"视频数"`
+	CanEdit                bool        `json:"canEdit" dc:"当前账号是否可编辑"`
+	Permission             string      `json:"permission" dc:"当前账号权限：creator/admin/visitor"`
+	PublishedAt            *gtime.Time `json:"publishedAt" dc:"发布时间"`
+	CreatedAt              *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt              *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type ProfileViewModel struct {

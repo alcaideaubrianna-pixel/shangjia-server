@@ -41,4 +41,5 @@ var (
 	publishCollectHistoryLogTable    = pdao.YoubanPublishCollectHistoryLog.Table()
 	publishCollectSourceTable        = pdao.YoubanPublishCollectSource.Table()
 	publishCollectDispatchTable      = pdao.YoubanPublishCollectDispatch.Table()
+	publishCollectEventTable         = pdao.YoubanPublishCollectEvent.Table()
 )

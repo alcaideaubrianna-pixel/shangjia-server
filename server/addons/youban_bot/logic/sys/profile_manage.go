@@ -792,8 +792,11 @@ func (s *sSysBot) sendProfileCard(ctx context.Context, botId int64, chatId strin
 	if mediaSummary != "" {
 		header += "\n" + mediaSummary
 	}
+	if source := profileSourceDisplay(note); source != "" {
+		header += "\n" + source
+	}
 	text := profileCardText(header, note.PlainText)
-	markup := profileCardMarkup(note.ProfileNo, purpose)
+	markup := profileCardMarkupForNote(note, purpose)
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, markup)
 	return err
 }
@@ -1070,7 +1073,29 @@ func profileMediaThumbSource(ctx context.Context, s *sSysBot, media *publishsysi
 }
 
 func profileShareText(note *publishsysin.NoteModel) string {
-	return fmt.Sprintf("<b>%s</b>\n编号：<code>%s</code>\n\n%s", html.EscapeString(note.Title), html.EscapeString(note.ProfileNo), html.EscapeString(note.PlainText))
+	header := fmt.Sprintf("<b>%s</b>\n编号：<code>%s</code>", html.EscapeString(note.Title), html.EscapeString(note.ProfileNo))
+	if source := profileSourceDisplay(note); source != "" {
+		header += "\n" + source
+	}
+	return header + "\n\n" + html.EscapeString(note.PlainText)
+}
+
+func profileSourceDisplay(note *publishsysin.NoteModel) string {
+	if note == nil || !note.IsCollected {
+		return ""
+	}
+	name := strings.TrimSpace(note.CollectSourceName)
+	username := strings.TrimPrefix(strings.TrimSpace(note.CollectSourceUsername), "@")
+	if name == "" {
+		name = username
+	}
+	if name == "" {
+		return ""
+	}
+	if username != "" && !strings.Contains(name, "@"+username) {
+		name += " (@" + username + ")"
+	}
+	return "来源频道：" + html.EscapeString(name)
 }
 
 func profilePreviewDisplayCaption(note *publishsysin.NoteModel) string {
@@ -1176,6 +1201,19 @@ func profileCardMarkup(profileNo string, purpose string) *models.InlineKeyboardM
 			{{Text: "返回资料管理", CallbackData: "pf:menu"}},
 		}}
 	}
+}
+
+func profileCardMarkupForNote(note *publishsysin.NoteModel, purpose string) *models.InlineKeyboardMarkup {
+	if note == nil {
+		return profileCardMarkup("", purpose)
+	}
+	markup := profileCardMarkup(note.ProfileNo, purpose)
+	url := strings.TrimSpace(note.CollectSourceUrl)
+	if !note.IsCollected || url == "" {
+		return markup
+	}
+	markup.InlineKeyboard = append(markup.InlineKeyboard, []models.InlineKeyboardButton{{Text: "来源频道 >", URL: url}})
+	return markup
 }
 
 func profileMediaSummary(media []*publishsysin.MediaModel) string {

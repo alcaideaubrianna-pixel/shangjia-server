@@ -13,7 +13,7 @@
               <n-descriptions-item label="来源">{{ data.sourceType || '-' }}</n-descriptions-item>
               <n-descriptions-item label="来源ID">{{ data.sourceNoteId || '-' }}</n-descriptions-item>
               <n-descriptions-item label="来源键">{{ data.sourceKey || '-' }}</n-descriptions-item>
-              <n-descriptions-item label="频道">{{ data.channelTitle || data.channelUsername || '-' }}</n-descriptions-item>
+              <n-descriptions-item label="频道">{{ data.sourceChannelTitle || data.sourceChannelUsername || data.channelTitle || data.channelUsername || '-' }}</n-descriptions-item>
               <n-descriptions-item label="频道ID">{{ data.sourceChannelId || '-' }}</n-descriptions-item>
               <n-descriptions-item label="TG Chat">{{ data.tgChatId || '-' }}</n-descriptions-item>
               <n-descriptions-item label="消息ID">{{ data.sourceMessageId || '-' }}</n-descriptions-item>
@@ -100,7 +100,11 @@
               <n-descriptions-item label="频道ID">{{ data.source?.sourceChannelId || '-' }}</n-descriptions-item>
               <n-descriptions-item label="消息ID">{{ data.source?.sourceMessageId || '-' }}</n-descriptions-item>
               <n-descriptions-item label="分组ID">{{ data.source?.sourceGroupedId || '-' }}</n-descriptions-item>
+              <n-descriptions-item label="来源频道">{{ data.source?.channelTitle || data.source?.channelUsername || '-' }}</n-descriptions-item>
               <n-descriptions-item label="文本哈希">{{ data.source?.sourceTextHash || '-' }}</n-descriptions-item>
+              <n-descriptions-item v-if="data.source?.sourceUrl" label="来源地址">
+                <n-a :href="data.source.sourceUrl" target="_blank" rel="noopener noreferrer">点击跳转 &gt;</n-a>
+              </n-descriptions-item>
             </n-descriptions>
             <n-card class="mt-4" size="small" title="同步属性" :bordered="false">
               <n-descriptions v-if="attributeRows.length" bordered label-placement="left" :column="2">

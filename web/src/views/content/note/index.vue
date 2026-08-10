@@ -87,7 +87,9 @@
               <n-tag size="small" :bordered="false">标签 {{ item.cupSize || '-' }}</n-tag>
               <n-tag size="small" :bordered="false">陪伴 {{ item.daysWithEscort || '-' }}</n-tag>
               <n-tag size="small" :bordered="false">生活费 {{ item.expectedLivingCost || '-' }}</n-tag>
-              <n-tag size="small" :bordered="false">来源 {{ item.sourceNoteId || '-' }}</n-tag>
+              <n-tag size="small" :bordered="false">
+                来源 {{ item.sourceChannelTitle || item.sourceChannelUsername || item.sourceNoteId || '-' }}
+              </n-tag>
             </div>
             <div class="note-card__params">
               <n-tag v-for="tag in paramTags(item)" :key="tag" size="small" :bordered="false" type="info">{{ tag }}</n-tag>

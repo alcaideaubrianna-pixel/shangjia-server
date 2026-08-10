@@ -15,6 +15,7 @@ import (
 )
 
 const telegramChannelDisplayCacheTTL = 10 * time.Minute
+const collectedChannelDisplayCacheTTL = 24 * time.Hour
 
 var telegramChannelDisplayLocalCache sync.Map
 
@@ -188,6 +189,73 @@ func (s *sSysPublish) loadTelegramChannelDisplays(ctx context.Context, tenantId 
 		}
 	}
 	return res, nil
+}
+
+func collectedChannelDisplayCacheKey(tenantId, botId int64, chatId string) string {
+	return fmt.Sprintf("youban_publish:collect_channel_display:%d:%d:%s", tenantId, botId, normalizeTelegramChannelChatID(chatId))
+}
+
+func (s *sSysPublish) resolveBotChannelDisplays(ctx context.Context, tenantId, botId int64, channelIds []string) (map[string]telegramChannelDisplay, error) {
+	result := make(map[string]telegramChannelDisplay)
+	pending := make([]string, 0, len(channelIds))
+	seen := make(map[string]struct{}, len(channelIds))
+	for _, raw := range channelIds {
+		channelId := normalizeTelegramChannelChatID(raw)
+		if channelId == "" {
+			continue
+		}
+		if _, ok := seen[channelId]; ok {
+			continue
+		}
+		seen[channelId] = struct{}{}
+		cacheKey := collectedChannelDisplayCacheKey(tenantId, botId, channelId)
+		if item, ok := telegramChannelDisplayLocalCacheGet(cacheKey); ok {
+			result[channelId] = item
+			continue
+		}
+		cacheVar, err := cache.Instance().Get(ctx, cacheKey)
+		if err == nil && !cacheVar.IsNil() {
+			var item telegramChannelDisplay
+			if scanErr := cacheVar.Scan(&item); scanErr == nil && !item.Empty() {
+				result[channelId] = item
+				telegramChannelDisplayLocalCacheSet(cacheKey, item)
+				continue
+			}
+		}
+		pending = append(pending, channelId)
+	}
+	if len(pending) == 0 || botId <= 0 {
+		return result, nil
+	}
+	lookupIds := make([]string, 0, len(pending)*2)
+	for _, channelId := range pending {
+		lookupIds = append(lookupIds, tgChannelCacheLookupIds(channelId)...)
+	}
+	var rows []struct {
+		ChatId   string `json:"chatId"`
+		Title    string `json:"title"`
+		Username string `json:"username"`
+	}
+	if err := g.DB().Model(publishBotChannelCacheTable).Safe().Ctx(ctx).
+		Fields("chat_id,chat_title,chat_username").
+		Where("tenant_id", tenantId).Where("bot_id", botId).
+		WhereIn("chat_id", uniqueStrings(lookupIds)).Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "读取Bot采集来源频道缓存失败")
+	}
+	for _, row := range rows {
+		item := telegramChannelDisplay{Title: strings.TrimSpace(row.Title), Username: strings.TrimSpace(row.Username)}
+		if item.Empty() {
+			continue
+		}
+		for _, id := range tgChannelCacheLookupIds(row.ChatId) {
+			id = normalizeTelegramChannelChatID(id)
+			result[id] = item
+			cacheKey := collectedChannelDisplayCacheKey(tenantId, botId, id)
+			telegramChannelDisplayLocalCacheSet(cacheKey, item)
+			_ = cache.Instance().Set(ctx, cacheKey, item, collectedChannelDisplayCacheTTL)
+		}
+	}
+	return result, nil
 }
 
 func telegramChannelDisplayLocalCacheGet(key string) (telegramChannelDisplay, bool) {

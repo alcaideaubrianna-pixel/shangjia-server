@@ -381,10 +381,16 @@ func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gd
 }
 
 type profileCollectionMetadataRow struct {
-	ProfileId      int64  `orm:"profile_id"`
-	SourceId       int64  `orm:"source_id"`
-	SourceName     string `orm:"source_name"`
-	SourceUsername string `orm:"source_username"`
+	TenantId        int64  `orm:"tenant_id"`
+	ProfileId       int64  `orm:"profile_id"`
+	SourceId        int64  `orm:"source_id"`
+	SourceType      string `orm:"source_type"`
+	SourceName      string `orm:"source_name"`
+	SourceUsername  string `orm:"source_username"`
+	SourceChatId    string `orm:"source_chat_id"`
+	SourceMessageId int64  `orm:"source_message_id"`
+	BotId           int64  `orm:"bot_id"`
+	TgAccountId     int64  `orm:"tg_account_id"`
 }
 
 func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list []*sysin.ProfileModel) error {
@@ -401,8 +407,11 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 	var rows []profileCollectionMetadataRow
 	err := g.DB().Model(publishCollectDispatchTable+" d").Safe().Ctx(ctx).
 		InnerJoin(publishCollectSourceTable+" s", "s.id=d.source_id AND s.deleted_at IS NULL").
+		LeftJoin(publishCollectEventTable+" e", "e.id=d.event_id").
 		WhereIn("d.profile_id", profileIds).
-		Fields("d.profile_id,d.source_id,s.title AS source_name,s.source_username").
+		Fields("s.tenant_id,d.profile_id,d.source_id,s.source_type,s.title AS source_name,s.source_username,s.bot_id,s.tg_account_id," +
+			"COALESCE(NULLIF(e.source_chat_id,''),s.source_chat_id) AS source_chat_id," +
+			"COALESCE(NULLIF(e.source_message_id,0),0) AS source_message_id").
 		OrderAsc("d.profile_id").OrderDesc("d.id").Scan(&rows)
 	if err != nil {
 		return gerror.Wrap(err, "读取资料采集来源失败")
@@ -412,6 +421,39 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 		if _, ok := metadata[row.ProfileId]; !ok {
 			metadata[row.ProfileId] = row
 		}
+	}
+	botChats := make(map[int64][]string)
+	tgChats := make(map[int64][]string)
+	for _, row := range metadata {
+		if strings.EqualFold(strings.TrimSpace(row.SourceType), sysin.CollectSourceTypeBot) && row.BotId > 0 {
+			botChats[row.BotId] = append(botChats[row.BotId], row.SourceChatId)
+		} else if row.TgAccountId > 0 {
+			tgChats[row.TgAccountId] = append(tgChats[row.TgAccountId], row.SourceChatId)
+		}
+	}
+	botDisplays := make(map[int64]map[int64]map[string]telegramChannelDisplay, len(botChats))
+	for botId, chatIds := range botChats {
+		tenantId := collectionMetadataTenantId(metadata, botId, true)
+		displays, displayErr := s.resolveBotChannelDisplays(ctx, tenantId, botId, chatIds)
+		if displayErr != nil {
+			return gerror.Wrap(displayErr, "读取Bot采集来源频道失败")
+		}
+		if botDisplays[tenantId] == nil {
+			botDisplays[tenantId] = make(map[int64]map[string]telegramChannelDisplay)
+		}
+		botDisplays[tenantId][botId] = displays
+	}
+	tgDisplays := make(map[int64]map[int64]map[string]telegramChannelDisplay, len(tgChats))
+	for tgAccountId, chatIds := range tgChats {
+		tenantId := collectionMetadataTenantId(metadata, tgAccountId, false)
+		displays, displayErr := s.resolveTelegramChannelDisplays(ctx, tenantId, tgAccountId, chatIds)
+		if displayErr != nil {
+			return gerror.Wrap(displayErr, "读取TG采集来源频道失败")
+		}
+		if tgDisplays[tenantId] == nil {
+			tgDisplays[tenantId] = make(map[int64]map[string]telegramChannelDisplay)
+		}
+		tgDisplays[tenantId][tgAccountId] = displays
 	}
 	for _, item := range list {
 		if item == nil {
@@ -425,8 +467,46 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 		item.CollectSourceId = row.SourceId
 		item.CollectSourceName = strings.TrimSpace(row.SourceName)
 		item.CollectSourceUsername = strings.TrimSpace(row.SourceUsername)
+		item.CollectSourceChatId = strings.TrimSpace(row.SourceChatId)
+		item.CollectSourceMessageId = row.SourceMessageId
+		display := telegramChannelDisplay{}
+		if strings.EqualFold(strings.TrimSpace(row.SourceType), sysin.CollectSourceTypeBot) {
+			display = botDisplays[row.TenantId][row.BotId][normalizeTelegramChannelChatID(row.SourceChatId)]
+		} else {
+			display = tgDisplays[row.TenantId][row.TgAccountId][normalizeTelegramChannelChatID(row.SourceChatId)]
+		}
+		if !display.Empty() {
+			item.CollectSourceName = display.Title
+			item.CollectSourceUsername = display.Username
+		}
+		if item.CollectSourceMessageId > 0 {
+			item.CollectSourceUrl = collectedTelegramMessageURL(item.CollectSourceChatId, item.CollectSourceUsername, item.CollectSourceMessageId)
+		}
 	}
 	return nil
+}
+
+func collectionMetadataTenantId(metadata map[int64]profileCollectionMetadataRow, accountId int64, bot bool) int64 {
+	for _, row := range metadata {
+		if (bot && row.BotId == accountId) || (!bot && row.TgAccountId == accountId) {
+			return row.TenantId
+		}
+	}
+	return 0
+}
+
+func collectedTelegramMessageURL(chatId, username string, messageId int64) string {
+	if messageId <= 0 {
+		return ""
+	}
+	if username = strings.TrimPrefix(strings.TrimSpace(username), "@"); username != "" {
+		return fmt.Sprintf("https://t.me/%s/%d", username, messageId)
+	}
+	chatId = normalizeTelegramChannelChatID(chatId)
+	if strings.HasPrefix(chatId, "-100") {
+		return fmt.Sprintf("https://t.me/c/%s/%d", strings.TrimPrefix(chatId, "-100"), messageId)
+	}
+	return ""
 }
 
 func splitProfileTagValues(value string) []string {

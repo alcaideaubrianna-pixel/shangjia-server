@@ -306,69 +306,72 @@ type ContentNoteListInp struct {
 }
 
 type ContentNoteListModel struct {
-	Id                   int64                    `json:"id" dc:"ID"`
-	ProfileNo            string                   `json:"profileNo" dc:"资料编号"`
-	SourceType           string                   `json:"sourceType" dc:"来源类型"`
-	SourceNoteId         int64                    `json:"sourceNoteId" dc:"来源笔记ID"`
-	SourceKey            string                   `json:"sourceKey" dc:"来源唯一键"`
-	SourceTextHash       string                   `json:"sourceTextHash" dc:"来源文本哈希"`
-	ChannelId            int64                    `json:"channelId" dc:"本地频道ID"`
-	SourceChannelId      int64                    `json:"sourceChannelId" dc:"来源频道ID"`
-	ChannelTitle         string                   `json:"channelTitle" dc:"频道标题"`
-	ChannelUsername      string                   `json:"channelUsername" dc:"频道用户名"`
-	TgChatId             string                   `json:"tgChatId" dc:"TG Chat ID"`
-	SourceMessageId      int64                    `json:"sourceMessageId" dc:"来源消息ID"`
-	Title                string                   `json:"title" dc:"标题"`
-	Summary              string                   `json:"summary" dc:"摘要"`
-	PlainText            string                   `json:"plainText" dc:"正文纯文本"`
-	HtmlText             string                   `json:"htmlText" dc:"HTML正文"`
-	SourceCategoryCode   string                   `json:"sourceCategoryCode" dc:"FeiNiu分类编码"`
-	Province             string                   `json:"province" dc:"省份"`
-	City                 string                   `json:"city" dc:"城市"`
-	Age                  int                      `json:"age" dc:"年龄"`
-	Height               int                      `json:"height" dc:"身高"`
-	Weight               int                      `json:"weight" dc:"体重"`
-	CupSize              string                   `json:"cupSize" dc:"资料标签"`
-	DaysWithEscort       int                      `json:"daysWithEscort" dc:"陪伴天数"`
-	ExpectedLivingCost   int                      `json:"expectedLivingCost" dc:"期望生活费"`
-	CanFlyToProvince     int                      `json:"canFlyToProvince" dc:"可飞外省"`
-	CanGoAbroad          int                      `json:"canGoAbroad" dc:"可出国"`
-	CanOvernight         int                      `json:"canOvernight" dc:"可过夜"`
-	CanCohabitate        int                      `json:"canCohabitate" dc:"可同居"`
-	HasHealthCheck       int                      `json:"hasHealthCheck" dc:"有体检"`
-	IsFullMonth          int                      `json:"isFullMonth" dc:"满月"`
-	IsVirgin             int                      `json:"isVirgin" dc:"是否处"`
-	AcceptSm             int                      `json:"acceptSm" dc:"接受SM"`
-	NoCondomAfterCheck   int                      `json:"noCondomAfterCheck" dc:"体检后无套"`
-	AllowCreampie        int                      `json:"allowCreampie" dc:"可内射"`
-	HasTattoo            int                      `json:"hasTattoo" dc:"有纹身"`
-	IsFavorite           int                      `json:"isFavorite" dc:"收藏"`
-	SourceEditedAt       *gtime.Time              `json:"sourceEditedAt" dc:"FeiNiu编辑时间"`
-	GroupParams          string                   `json:"groupParams" dc:"分组参数"`
-	TagParams            string                   `json:"tagParams" dc:"标签参数"`
-	TextBlockCount       int                      `json:"textBlockCount" dc:"文本块数"`
-	StoragePolicy        string                   `json:"storagePolicy" dc:"存储策略"`
-	SourceRemark         string                   `json:"sourceRemark" dc:"FeiNiu备注"`
-	SourceCreateBy       string                   `json:"sourceCreateBy" dc:"FeiNiu创建者"`
-	SourceUpdateBy       string                   `json:"sourceUpdateBy" dc:"FeiNiu更新者"`
-	SourceCreatedAt      *gtime.Time              `json:"sourceCreatedAt" dc:"FeiNiu创建时间"`
-	SourceUpdatedAt      *gtime.Time              `json:"sourceUpdatedAt" dc:"FeiNiu更新时间"`
-	ImageCount           int                      `json:"imageCount" dc:"图片数"`
-	VideoCount           int                      `json:"videoCount" dc:"视频数"`
-	HasVerificationVideo int                      `json:"hasVerificationVideo" dc:"是否有验证视频"`
-	MemberOnlyVideo      int                      `json:"memberOnlyVideo" dc:"视频是否会员可见"`
-	DuplicateOfId        int64                    `json:"duplicateOfId" dc:"重复资料ID"`
-	Visibility           string                   `json:"visibility" dc:"可见性"`
-	ReviewStatus         string                   `json:"reviewStatus" dc:"审核状态"`
-	ImportStatus         string                   `json:"importStatus" dc:"导入状态"`
-	AdminRemark          string                   `json:"adminRemark" dc:"后台备注"`
-	HomeRecommend        int                      `json:"homeRecommend" dc:"首页推荐"`
-	HomeSort             int                      `json:"homeSort" dc:"首页推荐排序"`
-	Status               int                      `json:"status" dc:"状态"`
-	PublishedAt          *gtime.Time              `json:"publishedAt" dc:"发布时间"`
-	CreatedAt            *gtime.Time              `json:"createdAt" dc:"创建时间"`
-	UpdatedAt            *gtime.Time              `json:"updatedAt" dc:"更新时间"`
-	Media                []*ContentNoteMediaModel `json:"media" dc:"媒体列表"`
+	Id                    int64                    `json:"id" dc:"ID"`
+	ProfileNo             string                   `json:"profileNo" dc:"资料编号"`
+	SourceType            string                   `json:"sourceType" dc:"来源类型"`
+	SourceNoteId          int64                    `json:"sourceNoteId" dc:"来源笔记ID"`
+	SourceKey             string                   `json:"sourceKey" dc:"来源唯一键"`
+	SourceTextHash        string                   `json:"sourceTextHash" dc:"来源文本哈希"`
+	ChannelId             int64                    `json:"channelId" dc:"本地频道ID"`
+	SourceChannelId       int64                    `json:"sourceChannelId" dc:"来源频道ID"`
+	ChannelTitle          string                   `json:"channelTitle" dc:"频道标题"`
+	ChannelUsername       string                   `json:"channelUsername" dc:"频道用户名"`
+	TgChatId              string                   `json:"tgChatId" dc:"TG Chat ID"`
+	SourceMessageId       int64                    `json:"sourceMessageId" dc:"来源消息ID"`
+	SourceChannelTitle    string                   `json:"sourceChannelTitle" dc:"来源频道标题"`
+	SourceChannelUsername string                   `json:"sourceChannelUsername" dc:"来源频道用户名"`
+	SourceUrl             string                   `json:"sourceUrl" dc:"来源地址"`
+	Title                 string                   `json:"title" dc:"标题"`
+	Summary               string                   `json:"summary" dc:"摘要"`
+	PlainText             string                   `json:"plainText" dc:"正文纯文本"`
+	HtmlText              string                   `json:"htmlText" dc:"HTML正文"`
+	SourceCategoryCode    string                   `json:"sourceCategoryCode" dc:"FeiNiu分类编码"`
+	Province              string                   `json:"province" dc:"省份"`
+	City                  string                   `json:"city" dc:"城市"`
+	Age                   int                      `json:"age" dc:"年龄"`
+	Height                int                      `json:"height" dc:"身高"`
+	Weight                int                      `json:"weight" dc:"体重"`
+	CupSize               string                   `json:"cupSize" dc:"资料标签"`
+	DaysWithEscort        int                      `json:"daysWithEscort" dc:"陪伴天数"`
+	ExpectedLivingCost    int                      `json:"expectedLivingCost" dc:"期望生活费"`
+	CanFlyToProvince      int                      `json:"canFlyToProvince" dc:"可飞外省"`
+	CanGoAbroad           int                      `json:"canGoAbroad" dc:"可出国"`
+	CanOvernight          int                      `json:"canOvernight" dc:"可过夜"`
+	CanCohabitate         int                      `json:"canCohabitate" dc:"可同居"`
+	HasHealthCheck        int                      `json:"hasHealthCheck" dc:"有体检"`
+	IsFullMonth           int                      `json:"isFullMonth" dc:"满月"`
+	IsVirgin              int                      `json:"isVirgin" dc:"是否处"`
+	AcceptSm              int                      `json:"acceptSm" dc:"接受SM"`
+	NoCondomAfterCheck    int                      `json:"noCondomAfterCheck" dc:"体检后无套"`
+	AllowCreampie         int                      `json:"allowCreampie" dc:"可内射"`
+	HasTattoo             int                      `json:"hasTattoo" dc:"有纹身"`
+	IsFavorite            int                      `json:"isFavorite" dc:"收藏"`
+	SourceEditedAt        *gtime.Time              `json:"sourceEditedAt" dc:"FeiNiu编辑时间"`
+	GroupParams           string                   `json:"groupParams" dc:"分组参数"`
+	TagParams             string                   `json:"tagParams" dc:"标签参数"`
+	TextBlockCount        int                      `json:"textBlockCount" dc:"文本块数"`
+	StoragePolicy         string                   `json:"storagePolicy" dc:"存储策略"`
+	SourceRemark          string                   `json:"sourceRemark" dc:"FeiNiu备注"`
+	SourceCreateBy        string                   `json:"sourceCreateBy" dc:"FeiNiu创建者"`
+	SourceUpdateBy        string                   `json:"sourceUpdateBy" dc:"FeiNiu更新者"`
+	SourceCreatedAt       *gtime.Time              `json:"sourceCreatedAt" dc:"FeiNiu创建时间"`
+	SourceUpdatedAt       *gtime.Time              `json:"sourceUpdatedAt" dc:"FeiNiu更新时间"`
+	ImageCount            int                      `json:"imageCount" dc:"图片数"`
+	VideoCount            int                      `json:"videoCount" dc:"视频数"`
+	HasVerificationVideo  int                      `json:"hasVerificationVideo" dc:"是否有验证视频"`
+	MemberOnlyVideo       int                      `json:"memberOnlyVideo" dc:"视频是否会员可见"`
+	DuplicateOfId         int64                    `json:"duplicateOfId" dc:"重复资料ID"`
+	Visibility            string                   `json:"visibility" dc:"可见性"`
+	ReviewStatus          string                   `json:"reviewStatus" dc:"审核状态"`
+	ImportStatus          string                   `json:"importStatus" dc:"导入状态"`
+	AdminRemark           string                   `json:"adminRemark" dc:"后台备注"`
+	HomeRecommend         int                      `json:"homeRecommend" dc:"首页推荐"`
+	HomeSort              int                      `json:"homeSort" dc:"首页推荐排序"`
+	Status                int                      `json:"status" dc:"状态"`
+	PublishedAt           *gtime.Time              `json:"publishedAt" dc:"发布时间"`
+	CreatedAt             *gtime.Time              `json:"createdAt" dc:"创建时间"`
+	UpdatedAt             *gtime.Time              `json:"updatedAt" dc:"更新时间"`
+	Media                 []*ContentNoteMediaModel `json:"media" dc:"媒体列表"`
 }
 
 type ContentNoteViewInp struct {
@@ -476,6 +479,9 @@ type ContentNoteSourceModel struct {
 	SourceTextHash  string `json:"sourceTextHash" dc:"来源文本哈希"`
 	RawText         string `json:"rawText" dc:"原始文本"`
 	RawMessageJson  string `json:"rawMessageJson" dc:"原始消息JSON"`
+	ChannelTitle    string `json:"channelTitle" dc:"来源频道标题"`
+	ChannelUsername string `json:"channelUsername" dc:"来源频道用户名"`
+	SourceUrl       string `json:"sourceUrl" dc:"来源地址"`
 }
 
 type ContentNoteViewModel struct {
