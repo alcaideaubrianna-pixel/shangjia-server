@@ -86,6 +86,14 @@ func TestCollectProcessTaskBodyIsSourceScoped(t *testing.T) {
 	}
 }
 
+func TestCollectProcessScheduleKeyIsSourceScoped(t *testing.T) {
+	first := collectProcessScheduleKey(collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 4})
+	second := collectProcessScheduleKey(collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 5})
+	if first == second || first != "youban_publish:collect:process:schedule:2:3:4" {
+		t.Fatalf("unexpected schedule keys: %s %s", first, second)
+	}
+}
+
 func TestListCollectSourceTasksScansAllPages(t *testing.T) {
 	calls := 0
 	list := func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error) {

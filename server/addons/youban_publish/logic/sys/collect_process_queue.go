@@ -12,8 +12,10 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
 
+	publishconsts "hotgo/addons/youban_publish/consts"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 	"hotgo/internal/library/hgrds/lock"
 )
 
@@ -46,6 +48,8 @@ type collectProcessQueuePayload struct {
 const (
 	collectProcessTaskUniqueTTL = 30 * time.Minute
 	collectProcessTaskMaxRetry  = 1000
+	collectProcessScheduleTTL   = 35 * time.Minute
+	collectProcessMinimumDelay  = 5 * time.Second
 )
 
 func (s *sSysPublish) enqueueCollectProcess(ctx context.Context, payload collectProcessQueuePayload, delay time.Duration) error {
@@ -80,7 +84,16 @@ func (s *sSysPublish) enqueueCollectProcessTask(ctx context.Context, payload col
 		asynq.Timeout(30 * time.Minute),
 	}
 	if unique {
+		reserved, reserveErr := reserveCollectProcessSchedule(ctx, payload, uniqueTTL)
+		if reserveErr != nil {
+			return false, reserveErr
+		}
+		if !reserved {
+			return false, nil
+		}
 		options = append(options, asynq.Unique(uniqueTTL))
+	} else if err = refreshCollectProcessSchedule(ctx, payload, uniqueTTL); err != nil {
+		return false, err
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
@@ -89,7 +102,51 @@ func (s *sSysPublish) enqueueCollectProcessTask(ctx context.Context, payload col
 	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
 		return false, nil
 	}
+	if err != nil {
+		removeCollectProcessSchedule(ctx, payload)
+	}
 	return err == nil, err
+}
+
+func collectProcessScheduleKey(payload collectProcessQueuePayload) string {
+	return fmt.Sprintf("%s%d:%d:%d", publishconsts.CollectProcessScheduleKeyPrefix, payload.TenantId, payload.AccountId, payload.SourceId)
+}
+
+func reserveCollectProcessSchedule(ctx context.Context, payload collectProcessQueuePayload, ttl time.Duration) (bool, error) {
+	if !cache.Initialized() || g.Cfg().MustGet(ctx, "cache.adapter").String() != "redis" {
+		return true, nil
+	}
+	if ttl <= 0 {
+		ttl = collectProcessScheduleTTL
+	}
+	ok, err := cache.Instance().SetIfNotExist(ctx, collectProcessScheduleKey(payload), 1, ttl)
+	if err != nil {
+		g.Log().Warningf(ctx, "采集源调度去重缓存不可用，放行任务 sourceId:%d err:%+v", payload.SourceId, err)
+		return true, nil
+	}
+	return ok, nil
+}
+
+func refreshCollectProcessSchedule(ctx context.Context, payload collectProcessQueuePayload, ttl time.Duration) error {
+	if !cache.Initialized() || g.Cfg().MustGet(ctx, "cache.adapter").String() != "redis" {
+		return nil
+	}
+	if ttl <= 0 {
+		ttl = collectProcessScheduleTTL
+	}
+	if err := cache.Instance().Set(ctx, collectProcessScheduleKey(payload), 1, ttl); err != nil {
+		return gerror.Wrap(err, "刷新采集源调度去重缓存失败")
+	}
+	return nil
+}
+
+func removeCollectProcessSchedule(ctx context.Context, payload collectProcessQueuePayload) {
+	if !cache.Initialized() || g.Cfg().MustGet(ctx, "cache.adapter").String() != "redis" {
+		return
+	}
+	if _, err := cache.Instance().Remove(ctx, collectProcessScheduleKey(payload)); err != nil {
+		g.Log().Warningf(ctx, "清理采集源调度去重缓存失败 sourceId:%d err:%+v", payload.SourceId, err)
+	}
 }
 
 func collectProcessTaskBody(payload collectProcessQueuePayload) ([]byte, error) {
@@ -149,12 +206,19 @@ func collectProcessSourceEnabled(ctx context.Context, payload collectProcessQueu
 }
 
 func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload collectProcessQueuePayload) (time.Duration, bool, error) {
+	enabled, err := collectProcessSourceEnabled(ctx, payload)
+	if err != nil {
+		return 0, false, err
+	}
+	if !enabled {
+		return 0, false, nil
+	}
 	executed, err := s.processCollectSourceWindowWithLock(ctx, payload)
 	if err != nil {
 		return 0, false, err
 	}
 	if !executed {
-		return 0, false, nil
+		return collectProcessMinimumDelay, true, nil
 	}
 	delay, pending, err := nextCollectProcessDelay(ctx, payload)
 	if err != nil {

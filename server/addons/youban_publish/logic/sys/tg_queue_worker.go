@@ -208,10 +208,13 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 	}
 	delay, pending, err := s.processCollectSourceTask(ctx, payload)
 	if err != nil || !pending {
+		if err == nil {
+			removeCollectProcessSchedule(ctx, payload)
+		}
 		return err
 	}
-	if delay <= time.Second {
-		delay = 0
+	if delay < collectProcessMinimumDelay {
+		delay = collectProcessMinimumDelay
 	}
 	enqueued, err := s.enqueueCollectProcessDeferred(ctx, payload, delay)
 	if err != nil {
