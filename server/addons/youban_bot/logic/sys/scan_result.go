@@ -54,6 +54,9 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 		state.ProfileIds = append(state.ProfileIds, note.Id)
 		accountName := firstNonEmpty(note.AccountName, note.Nickname, note.Username, "资料")
 		label := fmt.Sprintf("[%s] %s", shortButtonText(accountName, 18), shortButtonText(note.ProfileNo, 16))
+		if sourceName := profileSourceName(note); sourceName != "" {
+			label += " [" + shortButtonText(sourceName, 16) + "]"
+		}
 		buttons = append(buttons, []models.InlineKeyboardButton{{Text: label, CallbackData: fmt.Sprintf("scan:view:%s:%d", token, note.Id)}})
 	}
 	if len(state.ProfileIds) == 0 {

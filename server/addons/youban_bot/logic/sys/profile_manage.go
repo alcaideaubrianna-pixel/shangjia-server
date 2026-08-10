@@ -1073,14 +1073,21 @@ func profileMediaThumbSource(ctx context.Context, s *sSysBot, media *publishsysi
 }
 
 func profileShareText(note *publishsysin.NoteModel) string {
+	return profileShareHeader(note) + "\n\n" + html.EscapeString(note.PlainText)
+}
+
+func profileShareHeader(note *publishsysin.NoteModel) string {
+	if note == nil {
+		return ""
+	}
 	header := fmt.Sprintf("<b>%s</b>\n编号：<code>%s</code>", html.EscapeString(note.Title), html.EscapeString(note.ProfileNo))
 	if source := profileSourceDisplay(note); source != "" {
 		header += "\n" + source
 	}
-	return header + "\n\n" + html.EscapeString(note.PlainText)
+	return header
 }
 
-func profileSourceDisplay(note *publishsysin.NoteModel) string {
+func profileSourceName(note *publishsysin.NoteModel) string {
 	if note == nil || !note.IsCollected {
 		return ""
 	}
@@ -1089,13 +1096,19 @@ func profileSourceDisplay(note *publishsysin.NoteModel) string {
 	if name == "" {
 		name = username
 	}
+	return name
+}
+
+func profileSourceDisplay(note *publishsysin.NoteModel) string {
+	name := profileSourceName(note)
 	if name == "" {
 		return ""
 	}
-	if username != "" && !strings.Contains(name, "@"+username) {
-		name += " (@" + username + ")"
+	url := strings.TrimSpace(note.CollectSourceUrl)
+	if url == "" {
+		return "资料来源：" + html.EscapeString(name)
 	}
-	return "来源频道：" + html.EscapeString(name)
+	return "资料来源：<a href=\"" + html.EscapeString(url) + "\">" + html.EscapeString(name) + "</a>"
 }
 
 func profilePreviewDisplayCaption(note *publishsysin.NoteModel) string {
@@ -1108,7 +1121,7 @@ func profilePreviewDisplayCaption(note *publishsysin.NoteModel) string {
 	if len(runes) <= 1000 {
 		return caption
 	}
-	header := fmt.Sprintf("<b>%s</b>\n编号：<code>%s</code>\n\n", html.EscapeString(note.Title), html.EscapeString(note.ProfileNo))
+	header := profileShareHeader(note) + "\n\n"
 	remain := 1000 - len([]rune(header)) - 3
 	if remain <= 0 {
 		return shortText(header, 997) + "..."
@@ -1219,10 +1232,10 @@ func profileCardMarkupForNote(note *publishsysin.NoteModel, purpose string) *mod
 func profileMediaSummary(media []*publishsysin.MediaModel) string {
 	lines := make([]string, 0, 2)
 	if line := profileMediaPurposeSummary(media, "display"); line != "" {
-		lines = append(lines, "展示资料: "+line)
+		lines = append(lines, "展示资料："+line)
 	}
 	if line := profileMediaPurposeSummary(media, "verify"); line != "" {
-		lines = append(lines, "验证资料: "+line)
+		lines = append(lines, "验证资料："+line)
 	}
 	return strings.Join(lines, "\n")
 }
