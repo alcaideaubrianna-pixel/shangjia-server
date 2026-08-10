@@ -15,7 +15,7 @@ type profileChannelMappingRow struct {
 	ChannelId int64 `orm:"channel_id"`
 }
 
-func profileChannelIds(ctx context.Context, tenantId, accountId, profileId int64) ([]int64, error) {
+func profileChannelIds(ctx context.Context, tenantId, profileId int64) ([]int64, error) {
 	if tenantId <= 0 || profileId <= 0 {
 		return []int64{}, nil
 	}
@@ -25,9 +25,6 @@ func profileChannelIds(ctx context.Context, tenantId, accountId, profileId int64
 		Where("profile_id", profileId).
 		Where("is_manual", 1).
 		WhereNull("deleted_at")
-	if accountId > 0 {
-		mod = mod.Where("account_id", accountId)
-	}
 	var rows []profileChannelMappingRow
 	if err := mod.OrderAsc("channel_id").Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "读取资料推送频道配置失败")
@@ -78,7 +75,7 @@ func replaceProfileChannelMappings(ctx context.Context, tx gdb.TX, tenantId, acc
 }
 
 func (s *sSysPublish) profileChannelIdsOrDefaults(ctx context.Context, tenantId, accountId, profileId int64) ([]int64, error) {
-	ids, err := profileChannelIds(ctx, tenantId, accountId, profileId)
+	ids, err := profileChannelIds(ctx, tenantId, profileId)
 	if err != nil {
 		return nil, err
 	}

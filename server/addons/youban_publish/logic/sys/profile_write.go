@@ -33,13 +33,13 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			return nil, err
 		}
 	}
-	in.ChannelIds, err = s.availableProfileChannelIds(ctx, in.ChannelIds, tenantId)
-	if err != nil {
-		return nil, err
-	}
-	manualChannelIds := uniqueIds(in.ChannelIds)
-	if len(manualChannelIds) == 0 {
-		manualChannelIds = nil
+	var manualChannelIds []int64
+	if in.ChannelIds != nil {
+		in.ChannelIds, err = s.availableProfileChannelIds(ctx, in.ChannelIds, tenantId)
+		if err != nil {
+			return nil, err
+		}
+		manualChannelIds = uniqueIds(in.ChannelIds)
 	}
 	var publishAt *gtime.Time
 	if in.PublishAt != "" {
@@ -48,47 +48,64 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			return nil, gerror.New("定时上架时间不合法")
 		}
 	}
-	var profileId int64
+	profileId := in.Id
+	isNewProfile := profileId == 0
 	var removedMediaIds []int64
-	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		if in.Id > 0 {
-			profileId = in.Id
-			stateMod := tx.Model(publishProfileStateTable).Ctx(ctx).
-				Where("profile_id", profileId).
-				Where("tenant_id", tenantId).
-				WhereNull("deleted_at")
-			if accountId > 0 {
-				stateMod = stateMod.Where("account_id", accountId)
+	transaction := func() error {
+		return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+			if in.Id > 0 {
+				profileId = in.Id
+				stateMod := tx.Model(publishProfileStateTable).Ctx(ctx).
+					Where("profile_id", profileId).
+					Where("tenant_id", tenantId).
+					WhereNull("deleted_at")
+				if accountId > 0 {
+					stateMod = stateMod.Where("account_id", accountId)
+				}
+				if count, checkErr := stateMod.Count(); checkErr != nil {
+					return gerror.Wrap(checkErr, "检查资料归属失败")
+				} else if count == 0 {
+					return gerror.New("资料不存在或无权操作")
+				}
 			}
-			if count, checkErr := stateMod.Count(); checkErr != nil {
-				return gerror.Wrap(checkErr, "检查资料归属失败")
-			} else if count == 0 {
-				return gerror.New("资料不存在或无权操作")
+			if profileId == 0 {
+				profileId, err = s.createProfileFromInput(ctx, tx, in, tenantId, accountId)
+				if err != nil {
+					return err
+				}
+			} else {
+				if err = s.updateProfileFromInput(ctx, tx, in, profileId, accountId, publishAt); err != nil {
+					return err
+				}
 			}
-		}
-		if profileId == 0 {
-			profileId, err = s.createProfileFromInput(ctx, tx, in, tenantId, accountId)
-			if err != nil {
+			if err = s.upsertProfileStateTx(ctx, tx, profileId, tenantId, accountId, in.CustomerRemark, in.AntiScanEnabled, publishAt); err != nil {
 				return err
 			}
-		} else {
-			if err = s.updateProfileFromInput(ctx, tx, in, profileId, accountId, publishAt); err != nil {
+			if isNewProfile || in.ChannelIds != nil {
+				if err = replaceProfileChannelMappings(ctx, tx, tenantId, accountId, profileId, manualChannelIds); err != nil {
+					return err
+				}
+			}
+			if in.Media != nil {
+				removedMediaIds, err = s.syncProfileMediaFromInput(ctx, tx, profileId, tenantId, accountId, in.Media)
 				return err
 			}
-		}
-		if err = s.upsertProfileStateTx(ctx, tx, profileId, tenantId, accountId, in.CustomerRemark, in.AntiScanEnabled, publishAt); err != nil {
-			return err
-		}
-		if err = replaceProfileChannelMappings(ctx, tx, tenantId, accountId, profileId, manualChannelIds); err != nil {
-			return err
-		}
-		if in.Media != nil {
-			removedMediaIds, err = s.syncProfileMediaFromInput(ctx, tx, profileId, tenantId, accountId, in.Media)
-			return err
-		}
-		return nil
-	})
+			return nil
+		})
+	}
+	if profileId > 0 {
+		err = s.withProfileLifecycleLock(ctx, tenantId, profileId, transaction)
+	} else {
+		err = transaction()
+	}
 	if err != nil {
+		return nil, err
+	}
+	effectiveChannelIds, err := s.profileChannelIdsOrDefaults(ctx, tenantId, accountId, profileId)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.supersedeProfilePendingTelegramJobsOutsideChannels(ctx, profileId, tenantId, accountId, effectiveChannelIds); err != nil {
 		return nil, err
 	}
 	for _, mediaId := range removedMediaIds {
@@ -112,22 +129,32 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	return &sysin.ProfileSaveModel{Id: profileId, Uuid: profile.Uuid, ProfileNo: profile.ProfileNo}, nil
 }
 
-func sameInt64Set(left, right []int64) bool {
-	left = uniqueIds(left)
-	right = uniqueIds(right)
-	if len(left) != len(right) {
-		return false
+func (s *sSysPublish) supersedeProfilePendingTelegramJobsOutsideChannels(ctx context.Context, profileId, tenantId, accountId int64, channelIds []int64) error {
+	if profileId <= 0 || tenantId <= 0 {
+		return nil
 	}
-	seen := make(map[int64]struct{}, len(left))
-	for _, id := range left {
-		seen[id] = struct{}{}
+	mod := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("profile_id", profileId).
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"})
+	if accountId > 0 {
+		mod = mod.Where("account_id", accountId)
 	}
-	for _, id := range right {
-		if _, ok := seen[id]; !ok {
-			return false
+	channelIds = uniqueIds(channelIds)
+	if len(channelIds) > 0 {
+		mod = mod.WhereNotIn("channel_id", channelIds)
+	}
+	var jobs []telegramResubmitJob
+	if err := mod.OrderAsc("id").Scan(&jobs); err != nil {
+		return gerror.Wrap(err, "读取资料已移除频道的TG任务失败")
+	}
+	for _, job := range jobs {
+		if err := s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
+			return err
 		}
+		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "publish", "superseded", "资料频道配置已变更，停止已移除频道的待发送任务")
 	}
-	return true
+	return nil
 }
 
 func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDeleteInp, tenantId int64, accountId int64) (err error) {

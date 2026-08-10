@@ -10,7 +10,10 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/net/ghttp"
 
+	"hotgo/internal/consts"
+	"hotgo/internal/library/contexts"
 	"hotgo/internal/library/storager"
+	"hotgo/internal/model"
 	basesysin "hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
 )
@@ -26,7 +29,17 @@ func uploadMediaPoster(ctx context.Context, file *ghttp.UploadFile) (*basesysin.
 	if file == nil {
 		return nil, nil
 	}
-	return service.CommonUpload().UploadFile(ctx, storager.KindImg, file)
+	return service.CommonUpload().UploadFile(mediaPosterUploadContext(ctx), storager.KindImg, file)
+}
+
+func mediaPosterUploadContext(ctx context.Context) context.Context {
+	if contexts.GetModule(ctx) != "" {
+		return ctx
+	}
+	return context.WithValue(ctx, consts.ContextHTTPKey, &model.Context{
+		Module: consts.AppApi,
+		User:   contexts.GetUser(ctx),
+	})
 }
 
 func posterFileUrl(attachment *basesysin.AttachmentListModel) string {

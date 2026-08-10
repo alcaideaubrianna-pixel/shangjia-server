@@ -1,9 +1,14 @@
 package sys
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
+
+	"hotgo/internal/consts"
+	"hotgo/internal/library/contexts"
+	"hotgo/internal/model"
 )
 
 func TestVideoPosterCommandErrorUsesOutputTail(t *testing.T) {
@@ -21,5 +26,19 @@ func TestVideoPosterCommandErrorFallsBackToRunError(t *testing.T) {
 	detail := videoPosterCommandError(nil, errors.New("signal: killed"))
 	if detail != "signal: killed" {
 		t.Fatalf("detail=%q", detail)
+	}
+}
+
+func TestMediaPosterUploadContextAddsApiModule(t *testing.T) {
+	ctx := mediaPosterUploadContext(context.Background())
+	if got := contexts.GetModule(ctx); got != consts.AppApi {
+		t.Fatalf("module=%q, want %q", got, consts.AppApi)
+	}
+}
+
+func TestMediaPosterUploadContextPreservesRequestModule(t *testing.T) {
+	ctx := context.WithValue(context.Background(), consts.ContextHTTPKey, &model.Context{Module: consts.AppAdmin})
+	if got := contexts.GetModule(mediaPosterUploadContext(ctx)); got != consts.AppAdmin {
+		t.Fatalf("module=%q, want %q", got, consts.AppAdmin)
 	}
 }

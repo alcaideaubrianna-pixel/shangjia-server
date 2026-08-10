@@ -68,14 +68,34 @@ func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileI
 }
 
 func (s *sSysPublish) submitProfilePublishWithMetaAndDispatch(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta, dispatch bool) error {
+	if profileId <= 0 {
+		return s.submitProfilePublishWithMetaAndDispatchUnlocked(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, meta, dispatch)
+	}
+	return s.withProfileLifecycleLock(ctx, tenantId, profileId, func() error {
+		return s.submitProfilePublishWithMetaAndDispatchUnlocked(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, meta, dispatch)
+	})
+}
+
+func (s *sSysPublish) submitProfilePublishWithMetaAndDispatchUnlocked(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta, dispatch bool) error {
 	source, err := s.profilePublishSource(ctx, profileId, tenantId, accountId, requireOnline)
 	if err != nil {
 		return err
 	}
-	channels, err := s.telegramJobChannels(ctx, source, channelIds)
+	requestedChannelIds := uniqueIds(channelIds)
+	var channels []telegramJobChannel
+	if len(requestedChannelIds) == 0 {
+		channels, err = s.telegramJobChannels(ctx, source)
+	} else {
+		channels, err = s.telegramJobChannels(ctx, source, requestedChannelIds)
+	}
 	if err != nil {
 		return err
 	}
+	resolvedChannelIds := make([]int64, 0, len(channels))
+	for _, channel := range channels {
+		resolvedChannelIds = append(resolvedChannelIds, channel.Id)
+	}
+	g.Log().Infof(ctx, "资料发布频道解析 profileId:%d tenantId:%d accountId:%d requestedChannelIds:%v resolvedChannelIds:%v explicit:%t", profileId, tenantId, accountId, requestedChannelIds, resolvedChannelIds, len(channelIds) > 0)
 	operationNo = strings.TrimSpace(operationNo)
 	if operationNo == "" {
 		operationNo = newTelegramOperationNo("profile", profileId)

@@ -16,6 +16,9 @@ func (s *sSysPublish) telegramJobChannels(ctx context.Context, task gdb.Record, 
 	var channelIds []int64
 	if len(targetChannelIds) > 0 {
 		channelIds = uniqueIds(targetChannelIds[0])
+		if len(channelIds) == 0 {
+			return nil, errNoTelegramPublishChannels
+		}
 	} else {
 		var err error
 		channelIds, err = s.profileChannelIdsOrDefaults(ctx, task["tenant_id"].Int64(), task["account_id"].Int64(), task["profile_id"].Int64())

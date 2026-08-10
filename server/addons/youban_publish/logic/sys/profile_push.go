@@ -17,44 +17,11 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 	if err != nil {
 		return nil, err
 	}
-	var indexedChannels []struct {
-		ChannelId int64 `orm:"channel_id"`
-	}
-	if err := g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).
-		Fields("channel_id").
-		Where("tenant_id", profile.TenantId).
-		Where("profile_id", profile.Id).
-		Where("status", "active").
-		Scan(&indexedChannels); err != nil {
-		return nil, err
-	}
-	indexedChannelIds := make([]int64, 0, len(indexedChannels))
-	for _, item := range indexedChannels {
-		indexedChannelIds = append(indexedChannelIds, item.ChannelId)
-	}
-	channelIds = uniqueIds(append(channelIds, indexedChannelIds...))
 	if len(channelIds) == 0 {
 		return []*sysin.ProfilePushChannelModel{}, nil
 	}
 	if err := ensurePublishChannelColumns(ctx); err != nil {
 		return nil, err
-	}
-	var channelRefs []struct {
-		Id           int64  `orm:"id"`
-		TargetChatId string `orm:"target_chat_id"`
-	}
-	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Fields("id,target_chat_id").
-		Where("tenant_id", profile.TenantId).
-		WhereIn("id", channelIds).
-		Scan(&channelRefs); err != nil {
-		return nil, err
-	}
-	targetChatIds := make([]string, 0, len(channelRefs))
-	for _, item := range channelRefs {
-		if item.TargetChatId != "" {
-			targetChatIds = append(targetChatIds, item.TargetChatId)
-		}
 	}
 	var channels []*sysin.ProfilePushChannelModel
 	mod := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
@@ -62,11 +29,7 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 		Where("tenant_id", profile.TenantId).
 		Where("publish_direction", "up").
 		WhereNull("deleted_at")
-	if len(targetChatIds) > 0 {
-		mod = mod.Where("(id IN(?) OR target_chat_id IN(?))", channelIds, uniqueStrings(targetChatIds))
-	} else {
-		mod = mod.WhereIn("id", channelIds)
-	}
+	mod = mod.WhereIn("id", channelIds)
 	if err := mod.
 		OrderAsc("id").
 		Scan(&channels); err != nil {
