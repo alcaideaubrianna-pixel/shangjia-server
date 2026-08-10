@@ -139,6 +139,7 @@ func (s *sSysPublish) syncOwnedMediaFromInput(ctx context.Context, tx gdb.TX, ow
 
 	var current []gdb.Record
 	mediaMod := mediaOwnerScope(tx.Model(publishMediaTable).Ctx(ctx), owner).
+		Fields("id,processing_status").
 		Where("profile_id", profileId).
 		WhereNull("deleted_at")
 	if tenantId > 0 {
@@ -157,6 +158,9 @@ func (s *sSysPublish) syncOwnedMediaFromInput(ctx context.Context, tx gdb.TX, ow
 		mediaId := row["id"].Int64()
 		item, retained := keep[mediaId]
 		if !retained {
+			if processingStatus := strings.TrimSpace(row["processing_status"].String()); processingStatus != "" && processingStatus != "ready" {
+				return nil, gerror.New("资料存在仍在处理的媒体，请等待媒体处理完成后再保存")
+			}
 			if _, err = mediaOwnerScope(tx.Model(publishMediaTable).Ctx(ctx), owner).
 				Where("id", mediaId).
 				WhereNull("deleted_at").
