@@ -181,6 +181,21 @@ func (s *sSysPublish) telegramJobChannelIsActive(ctx context.Context, job telegr
 	if job.ChannelId <= 0 || job.TenantId <= 0 {
 		return false, nil
 	}
+	if isMessagePushOperationNo(job.OperationNo) {
+		if job.AccountId <= 0 || job.TargetChatId == "" {
+			return false, nil
+		}
+		count, err := g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).
+			Where("id", job.ChannelId).
+			Where("tenant_id", job.TenantId).
+			Where("tg_account_id", job.AccountId).
+			Where("REPLACE(channel_id, '-100', '') = REPLACE(?, '-100', '')", normalizeTelegramChannelChatID(job.TargetChatId)).
+			Count()
+		if err != nil {
+			return false, gerror.Wrap(err, "检查快速推送目标频道失败")
+		}
+		return count > 0, nil
+	}
 	count, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Where("id", job.ChannelId).
 		Where("tenant_id", job.TenantId).
@@ -221,7 +236,10 @@ func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit
 }
 
 func telegramActiveChannelCondition() string {
-	return "EXISTS (SELECT 1 FROM " + publishChannelTable + " c WHERE c.id=channel_id AND c.tenant_id=tenant_id AND c.status=1 AND c.deleted_at IS NULL)"
+	jobTable := publishTgJobTable
+	publishChannelCondition := "EXISTS (SELECT 1 FROM " + publishChannelTable + " c WHERE c.id=" + jobTable + ".channel_id AND c.tenant_id=" + jobTable + ".tenant_id AND c.status=1 AND c.deleted_at IS NULL)"
+	messagePushChannelCondition := "((" + jobTable + ".operation_no LIKE 'message_push:%' OR " + jobTable + ".operation_no LIKE 'message_push_plan:%') AND EXISTS (SELECT 1 FROM " + publishTgChannelTable + " tc WHERE tc.id=" + jobTable + ".channel_id AND tc.tenant_id=" + jobTable + ".tenant_id AND tc.tg_account_id=" + jobTable + ".account_id AND REPLACE(tc.channel_id, '-100', '') = REPLACE(" + jobTable + ".target_chat_id, '-100', '')))"
+	return "(" + publishChannelCondition + " OR " + messagePushChannelCondition + ")"
 }
 
 func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job telegramJobRecord) error {

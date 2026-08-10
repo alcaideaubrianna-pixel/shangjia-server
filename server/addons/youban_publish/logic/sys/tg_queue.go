@@ -157,6 +157,9 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 		return checkErr
 	} else if !active {
 		message := "目标频道已删除或禁用，任务自动终止"
+		if isMessagePushOperationNo(job.OperationNo) {
+			message = "快速推送目标已失效，任务自动终止"
+		}
 		data := telegramJobStateUpdateData("superseded", 0, gtime.Now())
 		data["error_message"] = message
 		data["last_dispatch_error"] = message
@@ -166,6 +169,9 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 			Data(data).Update()
 		if updateErr != nil {
 			return gerror.Wrap(updateErr, "终止无效频道TG任务失败")
+		}
+		if recordErr := s.upsertPublishJobRecord(ctx, job, "superseded", message); recordErr != nil {
+			g.Log().Warningf(ctx, "更新无效频道发布记录失败 jobId:%d err:%+v", job.Id, recordErr)
 		}
 		return nil
 	}
