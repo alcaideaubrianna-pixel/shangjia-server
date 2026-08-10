@@ -95,6 +95,7 @@ func (s *sSysPublish) collectDedupeCandidateEvents(ctx context.Context, event gd
 		model := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 			Where("tenant_id", event["tenant_id"].Int64()).
 			Where("account_id", event["account_id"].Int64()).
+			Where("EXISTS (SELECT 1 FROM hg_youban_publish_collect_source s WHERE s.id = hg_youban_publish_collect_event.source_id AND s.tenant_id = hg_youban_publish_collect_event.tenant_id AND s.account_id = hg_youban_publish_collect_event.account_id AND s.deleted_at IS NULL)").
 			WhereLT("id", event["id"].Int64())
 		if days > 0 {
 			model = model.WhereGTE("received_at", gtime.NewFromTime(time.Now().AddDate(0, 0, -days)))

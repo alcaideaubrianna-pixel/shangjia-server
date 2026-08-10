@@ -150,6 +150,9 @@ func (s *sSysPublish) CollectSourceDelete(ctx context.Context, in *sysin.IdsInp)
 		if err = s.cancelCollectSourceRuntime(ctx, sourceId, account.TenantId, account.Id); err != nil {
 			return gerror.Wrap(err, "取消采集源任务失败")
 		}
+		if err = s.clearCollectSourceDedupe(ctx, sourceId, account.TenantId, account.Id); err != nil {
+			return gerror.Wrap(err, "清理采集源去重数据失败")
+		}
 	}
 	err = pdao.YoubanPublishCollectSource.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if _, deleteErr := tx.Model(pdao.YoubanPublishCollectSourceRule.Table()).Ctx(ctx).

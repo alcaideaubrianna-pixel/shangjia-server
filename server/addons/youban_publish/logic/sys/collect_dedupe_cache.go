@@ -86,6 +86,38 @@ func writeCollectDedupeCache(ctx context.Context, values map[string]collectDedup
 	return err
 }
 
+func clearCollectDedupeCacheForAccount(ctx context.Context, tenantID, accountID int64) error {
+	if tenantID <= 0 || accountID <= 0 {
+		return nil
+	}
+	cursor := "0"
+	pattern := fmt.Sprintf("%s:%d:%d:*", collectDedupeCacheKeyPrefix, tenantID, accountID)
+	for {
+		value, err := g.Redis().Do(ctx, "SCAN", cursor, "MATCH", pattern, "COUNT", 500)
+		if err != nil {
+			return err
+		}
+		parts := value.Array()
+		if len(parts) != 2 {
+			return fmt.Errorf("解析采集去重缓存扫描结果失败")
+		}
+		cursor = gvar.New(parts[0]).String()
+		keys := gvar.New(parts[1]).Strings()
+		if len(keys) > 0 {
+			args := make([]interface{}, 0, len(keys))
+			for _, key := range keys {
+				args = append(args, key)
+			}
+			if _, err = g.Redis().Do(ctx, "DEL", args...); err != nil {
+				return err
+			}
+		}
+		if cursor == "0" {
+			return nil
+		}
+	}
+}
+
 func collectDedupeCacheEntryValid(entry collectDedupeCacheEntry, days int, now time.Time) bool {
 	if entry.EventID <= 0 || entry.ReceivedAt <= 0 {
 		return false
@@ -124,6 +156,7 @@ func (s *sSysPublish) warmCollectDedupeCacheForSentDispatches(ctx context.Contex
 	events, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Fields("id,tenant_id,account_id,text_hash,dedupe_key,received_at").
 		WhereIn("id", eventIDs).
+		Where("EXISTS (SELECT 1 FROM hg_youban_publish_collect_source s WHERE s.id = hg_youban_publish_collect_event.source_id AND s.tenant_id = hg_youban_publish_collect_event.tenant_id AND s.account_id = hg_youban_publish_collect_event.account_id AND s.deleted_at IS NULL)").
 		All()
 	if err != nil {
 		return err
