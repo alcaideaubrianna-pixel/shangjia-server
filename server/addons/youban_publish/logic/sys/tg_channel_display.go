@@ -224,7 +224,7 @@ func (s *sSysPublish) resolveBotChannelDisplays(ctx context.Context, tenantId, b
 		}
 		pending = append(pending, channelId)
 	}
-	if len(pending) == 0 || botId <= 0 {
+	if len(pending) == 0 {
 		return result, nil
 	}
 	lookupIds := make([]string, 0, len(pending)*2)
@@ -236,10 +236,14 @@ func (s *sSysPublish) resolveBotChannelDisplays(ctx context.Context, tenantId, b
 		Title    string `json:"title"`
 		Username string `json:"username"`
 	}
-	if err := g.DB().Model(publishBotChannelCacheTable).Safe().Ctx(ctx).
+	mod := g.DB().Model(publishBotChannelCacheTable).Safe().Ctx(ctx).
 		Fields("chat_id,chat_title,chat_username").
-		Where("tenant_id", tenantId).Where("bot_id", botId).
-		WhereIn("chat_id", uniqueStrings(lookupIds)).Scan(&rows); err != nil {
+		Where("tenant_id", tenantId).
+		WhereIn("chat_id", uniqueStrings(lookupIds))
+	if botId > 0 {
+		mod = mod.Where("bot_id", botId)
+	}
+	if err := mod.Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "读取Bot采集来源频道缓存失败")
 	}
 	for _, row := range rows {

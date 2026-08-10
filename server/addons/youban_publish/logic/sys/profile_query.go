@@ -117,6 +117,9 @@ func (s *sSysPublish) profileViewBySelector(ctx context.Context, in *sysin.Profi
 	if err = s.applyProfileTagNames(ctx, []*sysin.ProfileModel{res}); err != nil {
 		return nil, err
 	}
+	if err = s.applyProfileCollectionMetadata(ctx, []*sysin.ProfileModel{res}); err != nil {
+		return nil, err
+	}
 	if res.ChannelIds, err = s.profileChannelIdsOrDefaults(ctx, res.TenantId, res.AccountId, res.Id); err != nil {
 		return nil, err
 	}
@@ -408,8 +411,9 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 	err := g.DB().Model(publishCollectDispatchTable+" d").Safe().Ctx(ctx).
 		InnerJoin(publishCollectSourceTable+" s", "s.id=d.source_id AND s.deleted_at IS NULL").
 		LeftJoin(publishCollectEventTable+" e", "e.id=d.event_id").
+		LeftJoin(publishBotChannelCacheTable+" bc", "bc.tenant_id=s.tenant_id AND bc.bot_id=COALESCE(NULLIF(s.bot_id,0),e.bot_id) AND bc.chat_id=COALESCE(NULLIF(e.source_chat_id,''),s.source_chat_id)").
 		WhereIn("d.profile_id", profileIds).
-		Fields("s.tenant_id,d.profile_id,d.source_id,s.source_type,s.title AS source_name,s.source_username,s.bot_id,s.tg_account_id," +
+		Fields("s.tenant_id,d.profile_id,d.source_id,s.source_type,COALESCE(NULLIF(bc.chat_title,''),s.title) AS source_name,COALESCE(NULLIF(bc.chat_username,''),s.source_username) AS source_username,s.bot_id,s.tg_account_id," +
 			"COALESCE(NULLIF(e.source_chat_id,''),s.source_chat_id) AS source_chat_id," +
 			"COALESCE(NULLIF(e.source_message_id,0),0) AS source_message_id").
 		OrderAsc("d.profile_id").OrderDesc("d.id").Scan(&rows)
@@ -425,7 +429,7 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 	botChats := make(map[int64][]string)
 	tgChats := make(map[int64][]string)
 	for _, row := range metadata {
-		if strings.EqualFold(strings.TrimSpace(row.SourceType), sysin.CollectSourceTypeBot) && row.BotId > 0 {
+		if strings.EqualFold(strings.TrimSpace(row.SourceType), sysin.CollectSourceTypeBot) {
 			botChats[row.BotId] = append(botChats[row.BotId], row.SourceChatId)
 		} else if row.TgAccountId > 0 {
 			tgChats[row.TgAccountId] = append(tgChats[row.TgAccountId], row.SourceChatId)

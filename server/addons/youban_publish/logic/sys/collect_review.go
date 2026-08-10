@@ -77,6 +77,9 @@ func (s *sSysPublish) CollectReviewList(ctx context.Context, in *sysin.CollectRe
 	if hasMore {
 		list = list[:perPage]
 	}
+	if err = s.fillCollectReviewSourceDisplays(ctx, list, account.TenantId); err != nil {
+		return nil, err
+	}
 	if err = s.fillCollectReviewTargetChannelNames(ctx, list, account.TenantId); err != nil {
 		return nil, err
 	}
@@ -88,6 +91,59 @@ func (s *sSysPublish) CollectReviewList(ctx context.Context, in *sysin.CollectRe
 		nextCursor = encodeCollectReviewCursor(list[len(list)-1].Id)
 	}
 	return &sysin.CollectReviewPageModel{List: list, HasMore: hasMore, NextCursor: nextCursor}, nil
+}
+
+func (s *sSysPublish) fillCollectReviewSourceDisplays(ctx context.Context, list []*sysin.CollectReviewModel, tenantId int64) error {
+	eventIds := make([]int64, 0, len(list))
+	byEvent := make(map[int64]*sysin.CollectReviewModel, len(list))
+	for _, review := range list {
+		if review == nil || review.EventId <= 0 {
+			continue
+		}
+		eventIds = append(eventIds, review.EventId)
+		byEvent[review.EventId] = review
+	}
+	if len(eventIds) == 0 {
+		return nil
+	}
+	var rows []struct {
+		EventId      int64  `json:"eventId"`
+		SourceChatId string `json:"sourceChatId"`
+		BotId        int64  `json:"botId"`
+	}
+	if err := pdao.YoubanPublishCollectEvent.DB().Model(pdao.YoubanPublishCollectEvent.Table()+" e").Safe().Ctx(ctx).
+		LeftJoin(pdao.YoubanPublishCollectSource.Table()+" s", "s.id=e.source_id").
+		Fields("e.id AS event_id,e.source_chat_id,COALESCE(NULLIF(s.bot_id,0),e.bot_id) AS bot_id").
+		Where("e.tenant_id", tenantId).WhereIn("e.id", eventIds).Scan(&rows); err != nil {
+		return gerror.Wrap(err, "读取采集频道来源失败")
+	}
+	chatIdsByBot := make(map[int64][]string)
+	for _, row := range rows {
+		if strings.TrimSpace(row.SourceChatId) != "" {
+			chatIdsByBot[row.BotId] = append(chatIdsByBot[row.BotId], row.SourceChatId)
+		}
+	}
+	displaysByBot := make(map[int64]map[string]telegramChannelDisplay, len(chatIdsByBot))
+	for botId, chatIds := range chatIdsByBot {
+		displays, err := s.resolveBotChannelDisplays(ctx, tenantId, botId, chatIds)
+		if err != nil {
+			return gerror.Wrap(err, "读取Bot采集频道显示名称失败")
+		}
+		displaysByBot[botId] = displays
+	}
+	for _, row := range rows {
+		review := byEvent[row.EventId]
+		if review == nil {
+			continue
+		}
+		display := displaysByBot[row.BotId][normalizeTelegramChannelChatID(row.SourceChatId)]
+		if display.Empty() {
+			continue
+		}
+		review.SourceDisplayName = display.Title
+		review.SourceUsername = display.Username
+	}
+	return nil
 }
 
 func encodeCollectReviewCursor(id int64) string {

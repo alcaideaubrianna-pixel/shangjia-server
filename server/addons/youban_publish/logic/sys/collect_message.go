@@ -149,24 +149,35 @@ func (s *sSysPublish) mergeCollectMessageEvent(ctx context.Context, event gdb.Re
 	if collectEventAlreadyMatched(event[eventCols.Status].String()) && !shouldMerge {
 		return eventId, nil
 	}
-	nextText := strings.TrimSpace(event[eventCols.RawText].String())
-	if nextText == "" {
-		nextText = rawText
-	}
-	nextSourceMessageId := event[eventCols.SourceMessageId].Int64()
-	if message.SourceMessageId > 0 && (nextSourceMessageId <= 0 || message.SourceMessageId < nextSourceMessageId) {
-		nextSourceMessageId = message.SourceMessageId
-	}
 	_, err := eventDao.Ctx(ctx).Where(eventCols.Id, eventId).Data(g.Map{
-		eventCols.RawText:         nextText,
-		eventCols.SourceMessageId: nextSourceMessageId,
-		eventCols.TextHash:        collectHash(nextText),
-		eventCols.Status:          collectMergedEventStatus(event, message),
-		eventCols.ErrorMessage:    "",
-		eventCols.UpdatedAt:       now,
+		eventCols.Status:       collectMergedEventStatus(event, message),
+		eventCols.ErrorMessage: "",
+		eventCols.UpdatedAt:    now,
 	}).Update()
 	if err != nil {
 		return eventId, gerror.Wrap(err, "更新采集事件失败")
+	}
+	if message.SourceMessageId > 0 {
+		_, err = eventDao.Ctx(ctx).
+			Where(eventCols.Id, eventId).
+			Where("("+eventCols.SourceMessageId+" <= 0 OR "+eventCols.SourceMessageId+" > ?)", message.SourceMessageId).
+			Data(g.Map{eventCols.SourceMessageId: message.SourceMessageId, eventCols.UpdatedAt: now}).Update()
+		if err != nil {
+			return eventId, gerror.Wrap(err, "更新采集事件来源消息失败")
+		}
+	}
+	if strings.TrimSpace(rawText) != "" {
+		_, err = eventDao.Ctx(ctx).
+			Where(eventCols.Id, eventId).
+			Where(eventCols.RawText, "").
+			Data(g.Map{
+				eventCols.RawText:   rawText,
+				eventCols.TextHash:  collectHash(rawText),
+				eventCols.UpdatedAt: now,
+			}).Update()
+		if err != nil {
+			return eventId, gerror.Wrap(err, "更新采集事件正文失败")
+		}
 	}
 	updated, err := eventDao.Ctx(ctx).Where(eventCols.Id, eventId).One()
 	if err != nil {
