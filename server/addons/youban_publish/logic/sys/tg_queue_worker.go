@@ -89,6 +89,8 @@ func (s *sSysPublish) startTelegramMediaWorker(ctx context.Context) {
 	s.tgQueueMu.Unlock()
 	mediaMux := asynq.NewServeMux()
 	mediaMux.HandleFunc(tgTaskTypeCollectMedia, s.handleCollectMediaCacheTask)
+	mediaMux.HandleFunc(tgTaskTypeMediaProcess, s.handleMediaProcessTask)
+	go s.recoverMediaProcessTasks(ctx)
 	go func() {
 		if err := server.Run(mediaMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件媒体缓存队列失败：%+v", err)

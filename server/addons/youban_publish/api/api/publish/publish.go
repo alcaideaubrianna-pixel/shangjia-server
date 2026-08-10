@@ -3,6 +3,7 @@ package publish
 import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/model/input/form"
+	basesysin "hotgo/internal/model/input/sysin"
 
 	"github.com/gogf/gf/v2/frame/g"
 )
@@ -498,6 +499,33 @@ type AdminUploadMediaRes struct {
 	*sysin.MediaModel
 }
 
+type AdminMediaMultipartCheckReq struct {
+	g.Meta `path:"/publish/admin/media/upload/check" method:"post" tags:"上架插件管理端" summary:"检查资料媒体分片"`
+	*basesysin.CheckMultipartInp
+}
+
+type AdminMediaMultipartCheckRes struct {
+	*basesysin.CheckMultipartModel
+}
+
+type AdminMediaMultipartPartReq struct {
+	g.Meta `path:"/publish/admin/media/upload/part" method:"post" mime:"multipart/form-data" tags:"上架插件管理端" summary:"上传资料媒体分片"`
+	*basesysin.UploadPartInp
+}
+
+type AdminMediaMultipartPartRes struct {
+	*basesysin.UploadPartModel
+}
+
+type AdminMediaMultipartAttachReq struct {
+	g.Meta `path:"/publish/admin/media/upload/attach" method:"post" tags:"上架插件管理端" summary:"绑定分片资料媒体"`
+	sysin.MediaMultipartAttachInp
+}
+
+type AdminMediaMultipartAttachRes struct {
+	*sysin.MediaModel
+}
+
 type AdminProfileListReq struct {
 	g.Meta `path:"/publish/admin/profile/list" method:"get" tags:"上架插件管理端" summary:"资料列表"`
 	sysin.ProfileListInp
@@ -747,6 +775,33 @@ type UploadMediaReq struct {
 }
 
 type UploadMediaRes struct {
+	*sysin.MediaModel
+}
+
+type MediaMultipartCheckReq struct {
+	g.Meta `path:"/publish/media/upload/check" method:"post" tags:"上架插件" summary:"检查资料媒体分片"`
+	*basesysin.CheckMultipartInp
+}
+
+type MediaMultipartCheckRes struct {
+	*basesysin.CheckMultipartModel
+}
+
+type MediaMultipartPartReq struct {
+	g.Meta `path:"/publish/media/upload/part" method:"post" mime:"multipart/form-data" tags:"上架插件" summary:"上传资料媒体分片"`
+	*basesysin.UploadPartInp
+}
+
+type MediaMultipartPartRes struct {
+	*basesysin.UploadPartModel
+}
+
+type MediaMultipartAttachReq struct {
+	g.Meta `path:"/publish/media/upload/attach" method:"post" tags:"上架插件" summary:"绑定分片资料媒体"`
+	sysin.MediaMultipartAttachInp
+}
+
+type MediaMultipartAttachRes struct {
 	*sysin.MediaModel
 }
 

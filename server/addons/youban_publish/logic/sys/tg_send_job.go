@@ -29,6 +29,11 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 	if isMessagePushOperationNo(targetJob.OperationNo) {
 		return s.SendMessagePushJob(ctx, jobId)
 	}
+	if ready, readyErr := s.profileMediaReady(ctx, targetJob.ProfileId); readyErr != nil {
+		return readyErr
+	} else if !ready {
+		return s.postponeTelegramJobUntilMediaReady(ctx, jobId)
+	}
 	if targetJob.CollectSourceId > 0 && !s.collectPushEnabled(ctx) {
 		return s.postponeTelegramJobForCollectPushPause(ctx, targetJob)
 	}

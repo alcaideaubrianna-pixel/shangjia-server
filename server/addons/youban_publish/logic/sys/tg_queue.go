@@ -33,6 +33,7 @@ const (
 	tgTaskTypeCycleReschedule   = "youban_publish:cycle:reschedule"
 	tgTaskTypeCycleRefresh      = "youban_publish:cycle:refresh"
 	tgTaskTypeCollectMedia      = "youban_publish:collect:media_cache"
+	tgTaskTypeMediaProcess      = "youban_publish:media:process"
 	tgTaskTypeCollectProcess    = "youban_publish:collect:process"
 	tgTaskTypeCollectHistory    = "youban_publish:collect:history"
 	tgTaskTypeCollectTrigger    = "youban_publish:collect:trigger"
@@ -66,6 +67,10 @@ const (
 
 type tgQueuePayload struct {
 	JobId int64 `json:"jobId"`
+}
+
+type mediaProcessQueuePayload struct {
+	MediaId int64 `json:"mediaId"`
 }
 
 type importQueuePayload struct {

@@ -119,6 +119,9 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_cloud_usage_account" ON "hg_youban_publish_c
 CREATE INDEX IF NOT EXISTS "idx_ybp_daily_stat_date" ON "hg_youban_publish_daily_stat" ("stat_date", "account_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_success_record_monitor" ON "hg_youban_publish_success_record" ("created_at", "status", "profile_id");
 ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "must_send" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "processing_status" varchar(16) NOT NULL DEFAULT 'ready';
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "processing_error" text;
+ALTER TABLE "hg_youban_publish_media" ADD COLUMN IF NOT EXISTS "processing_started_at" timestamp DEFAULT NULL;
 UPDATE "hg_youban_publish_media" SET "must_send" = 0 WHERE EXISTS (SELECT 1 FROM "information_schema"."columns" WHERE "table_schema" = current_schema() AND "table_name" = 'hg_youban_publish_media' AND "column_name" = 'must_send' AND "column_default" LIKE '1%');
 ALTER TABLE "hg_youban_publish_media" ALTER COLUMN "must_send" SET DEFAULT 0;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "send_phase" varchar(32) NOT NULL DEFAULT '';

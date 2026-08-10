@@ -268,6 +268,10 @@ func HasFile(ctx context.Context, md5 string) (res *entity.SysAttachment, err er
 // CheckMultipart 检查文件分片
 func CheckMultipart(ctx context.Context, in *CheckMultipartParams) (res *CheckMultipartModel, err error) {
 	res = new(CheckMultipartModel)
+	if in == nil {
+		return nil, gerror.New("分片上传参数不能为空")
+	}
+	in.Md5 = normalizeMultipartDigest(in.Md5)
 
 	meta := new(FileMeta)
 	meta.Filename = in.FileName
@@ -320,6 +324,14 @@ func CheckMultipart(ctx context.Context, in *CheckMultipartParams) (res *CheckMu
 	res.Progress = CalcUploadProgress(progress.UploadedIndex, progress.ShardCount)
 	res.SizeFormat = format.FileSize(progress.Meta.Size)
 	return
+}
+
+func normalizeMultipartDigest(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 32 {
+		return value[:32]
+	}
+	return value
 }
 
 // CalcUploadProgress 计算上传进度

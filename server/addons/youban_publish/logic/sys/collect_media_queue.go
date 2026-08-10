@@ -51,6 +51,46 @@ func (s *sSysPublish) enqueueCollectMediaCache(ctx context.Context, payload coll
 	return err
 }
 
+func (s *sSysPublish) enqueueMediaProcess(ctx context.Context, mediaId int64, delay time.Duration) error {
+	if mediaId <= 0 {
+		return nil
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(mediaProcessQueuePayload{MediaId: mediaId})
+	if err != nil {
+		return err
+	}
+	task := asynq.NewTask(tgTaskTypeMediaProcess, body)
+	options := []asynq.Option{
+		asynq.Queue(tgQueueNameMediaRealtime),
+		asynq.MaxRetry(8),
+		asynq.Timeout(30 * time.Minute),
+		asynq.Unique(24 * time.Hour),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err = client.EnqueueContext(ctx, task, options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
+		return nil
+	}
+	return err
+}
+
+func decodeMediaProcessQueuePayload(task *asynq.Task) (mediaProcessQueuePayload, error) {
+	var payload mediaProcessQueuePayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return payload, fmt.Errorf("解析媒体处理任务失败: %w", err)
+	}
+	if payload.MediaId <= 0 {
+		return payload, fmt.Errorf("媒体处理任务缺少mediaId")
+	}
+	return payload, nil
+}
+
 func (s *sSysPublish) enqueueCollectMediaCacheTask(ctx context.Context, payload collectMediaQueuePayload, delay time.Duration) (bool, error) {
 	return s.enqueueCollectMediaCacheTaskWithUnique(ctx, payload, delay, true)
 }

@@ -111,11 +111,12 @@ func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record
 	if in.MediaType == "video" {
 		uploadType = storager.KindVideo
 	}
-	assetsStartedAt := time.Now()
-	assets, err := requireMediaUploadAssets(ctx, in.MediaType, file, poster)
-	logMediaUploadStage(ctx, "prepare_assets", assetsStartedAt, in, file, err)
-	if err != nil {
-		return nil, err
+	var posterAttachment *basesysin.AttachmentListModel
+	if poster != nil && in.MediaType == "video" {
+		posterAttachment, err = uploadMediaPoster(ctx, poster)
+		if err != nil {
+			return nil, err
+		}
 	}
 	attachmentStartedAt := time.Now()
 	attachment, err := service.CommonUpload().UploadFile(ctx, uploadType, file)
@@ -133,8 +134,13 @@ func (s *sSysPublish) saveUploadedTaskMedia(ctx context.Context, task gdb.Record
 		}
 	}
 	saveStartedAt := time.Now()
-	res, err = s.saveMediaAttachment(ctx, task, in, attachment, mediaPosterAttachment(assets.Poster), originalAttachment, assets.PerceptualHash)
+	res, err = s.saveMediaAttachment(ctx, task, in, attachment, posterAttachment, originalAttachment, "")
 	logMediaUploadStage(ctx, "save_media", saveStartedAt, in, file, err)
+	if err == nil && res != nil && res.Id > 0 {
+		if enqueueErr := s.enqueueMediaProcess(ctx, res.Id, 0); enqueueErr != nil {
+			g.Log().Warningf(ctx, "媒体异步处理入队失败，后续恢复任务会补偿 media_id:%d err:%+v", res.Id, enqueueErr)
+		}
+	}
 	return res, err
 }
 

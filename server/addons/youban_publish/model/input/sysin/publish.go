@@ -451,6 +451,8 @@ type MediaModel struct {
 	MimeType             string      `json:"mimeType" dc:"MIME"`
 	Md5                  string      `json:"md5" dc:"MD5"`
 	PerceptualHash       string      `json:"perceptualHash" dc:"图片感知哈希"`
+	ProcessingStatus     string      `json:"processingStatus" dc:"媒体处理状态"`
+	ProcessingError      string      `json:"processingError" dc:"媒体处理错误"`
 	EditConfigJson       string      `json:"editConfigJson" dc:"图片编辑配置"`
 	EditStatus           string      `json:"editStatus" dc:"编辑状态：raw/edited"`
 	TgFileId             string      `json:"tgFileId" dc:"TG文件ID"`

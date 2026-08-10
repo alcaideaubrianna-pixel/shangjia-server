@@ -635,6 +635,37 @@ func (c *cPublishAdmin) UploadMedia(ctx context.Context, req *publish.AdminUploa
 	return
 }
 
+func (c *cPublishAdmin) MediaMultipartCheck(ctx context.Context, req *publish.AdminMediaMultipartCheckReq) (res *publish.AdminMediaMultipartCheckRes, err error) {
+	data, err := service.SysPublish().MediaMultipartCheck(ctx, req.CheckMultipartParams)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminMediaMultipartCheckRes{CheckMultipartModel: data}, nil
+}
+
+func (c *cPublishAdmin) MediaMultipartPart(ctx context.Context, req *publish.AdminMediaMultipartPartReq) (res *publish.AdminMediaMultipartPartRes, err error) {
+	if req.UploadPartParams == nil {
+		return nil, gerror.New("分片上传参数不能为空")
+	}
+	req.UploadPartParams.File = g.RequestFromCtx(ctx).GetUploadFile("file")
+	if req.UploadPartParams.File == nil {
+		return nil, gerror.New("没有找到上传的分片文件")
+	}
+	data, err := service.SysPublish().MediaMultipartPart(ctx, req.UploadPartParams)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminMediaMultipartPartRes{UploadPartModel: data}, nil
+}
+
+func (c *cPublishAdmin) MediaMultipartAttach(ctx context.Context, req *publish.AdminMediaMultipartAttachReq) (res *publish.AdminMediaMultipartAttachRes, err error) {
+	data, err := service.SysPublish().AdminMediaMultipartAttach(ctx, &req.MediaMultipartAttachInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminMediaMultipartAttachRes{MediaModel: data}, nil
+}
+
 func (c *cPublishAdmin) ProfileList(ctx context.Context, req *publish.AdminProfileListReq) (res *publish.AdminProfileListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminProfileList(ctx, &req.ProfileListInp)
 	if err != nil {
@@ -940,6 +971,37 @@ func (c *cPublish) UploadMedia(ctx context.Context, req *publish.UploadMediaReq)
 	}
 	res = &publish.UploadMediaRes{MediaModel: data}
 	return
+}
+
+func (c *cPublish) MediaMultipartCheck(ctx context.Context, req *publish.MediaMultipartCheckReq) (res *publish.MediaMultipartCheckRes, err error) {
+	data, err := service.SysPublish().MediaMultipartCheck(ctx, req.CheckMultipartParams)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.MediaMultipartCheckRes{CheckMultipartModel: data}, nil
+}
+
+func (c *cPublish) MediaMultipartPart(ctx context.Context, req *publish.MediaMultipartPartReq) (res *publish.MediaMultipartPartRes, err error) {
+	if req.UploadPartParams == nil {
+		return nil, gerror.New("分片上传参数不能为空")
+	}
+	req.UploadPartParams.File = g.RequestFromCtx(ctx).GetUploadFile("file")
+	if req.UploadPartParams.File == nil {
+		return nil, gerror.New("没有找到上传的分片文件")
+	}
+	data, err := service.SysPublish().MediaMultipartPart(ctx, req.UploadPartParams)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.MediaMultipartPartRes{UploadPartModel: data}, nil
+}
+
+func (c *cPublish) MediaMultipartAttach(ctx context.Context, req *publish.MediaMultipartAttachReq) (res *publish.MediaMultipartAttachRes, err error) {
+	data, err := service.SysPublish().MyMediaMultipartAttach(ctx, &req.MediaMultipartAttachInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.MediaMultipartAttachRes{MediaModel: data}, nil
 }
 
 func (c *cPublish) MediaList(ctx context.Context, req *publish.MediaListReq) (res *publish.MediaListRes, err error) {

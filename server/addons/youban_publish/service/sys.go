@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/storager"
 	adminin "hotgo/internal/model/input/adminin"
 	basesysin "hotgo/internal/model/input/sysin"
 
@@ -111,6 +112,9 @@ type ISysPublish interface {
 	AdminImportTaskRetry(ctx context.Context, in *sysin.ImportTaskActionInp) (err error)
 	AdminMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error)
 	AdminMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile, originalFile *ghttp.UploadFile) (res *sysin.MediaModel, err error)
+	MediaMultipartCheck(ctx context.Context, in *storager.CheckMultipartParams) (res *basesysin.CheckMultipartModel, err error)
+	MediaMultipartPart(ctx context.Context, in *storager.UploadPartParams) (res *basesysin.UploadPartModel, err error)
+	AdminMediaMultipartAttach(ctx context.Context, in *sysin.MediaMultipartAttachInp) (res *sysin.MediaModel, err error)
 	AdminMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error)
 	ProcessMediaAssets(ctx context.Context, in *sysin.MediaAssetsInp) (res *sysin.MediaAssetsModel, err error)
 	SyncMediaPHashBucketByMediaId(ctx context.Context, mediaId int64) (err error)
@@ -316,6 +320,7 @@ type ISysPublish interface {
 	FollowNoteImageSearch(ctx context.Context, in *sysin.FollowNoteListInp, file *ghttp.UploadFile) (list []*sysin.NoteModel, totalCount int, err error)
 	ExecuteImportTask(ctx context.Context, id int64) (err error)
 	MyMediaUpload(ctx context.Context, in *sysin.MediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile, originalFile *ghttp.UploadFile) (res *sysin.MediaModel, err error)
+	MyMediaMultipartAttach(ctx context.Context, in *sysin.MediaMultipartAttachInp) (res *sysin.MediaModel, err error)
 	MyMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error)
 	TelegramLoginStart(ctx context.Context, in *sysin.TelegramLoginStartInp) (res *sysin.TelegramLoginModel, err error)
 	TelegramLoginStatus(ctx context.Context, in *sysin.TelegramLoginStatusInp) (res *sysin.TelegramLoginModel, err error)

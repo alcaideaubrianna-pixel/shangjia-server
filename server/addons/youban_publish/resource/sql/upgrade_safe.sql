@@ -121,6 +121,9 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_cloud_resource_usage` (
   KEY `idx_ybp_cloud_usage_account` (`account_id`,`usage_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴云资源每日调用统计';
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN IF NOT EXISTS `must_send` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否每次推送必发' AFTER `media_type`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN IF NOT EXISTS `processing_status` varchar(16) NOT NULL DEFAULT 'ready' COMMENT '媒体处理状态：uploaded/processing/ready/failed';
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN IF NOT EXISTS `processing_error` text COMMENT '媒体处理错误';
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN IF NOT EXISTS `processing_started_at` datetime DEFAULT NULL COMMENT '媒体处理开始时间';
 UPDATE `hg_youban_publish_media` SET `must_send` = 0 WHERE EXISTS (SELECT 1 FROM `information_schema`.`columns` WHERE `table_schema` = DATABASE() AND `table_name` = 'hg_youban_publish_media' AND `column_name` = 'must_send' AND `column_default` = '1');
 ALTER TABLE `hg_youban_publish_media` ALTER COLUMN `must_send` SET DEFAULT '0';
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `send_phase` varchar(32) NOT NULL DEFAULT '' COMMENT '发送阶段' AFTER `dispatch_count`;

@@ -734,6 +734,9 @@ WHERE `auto_delete_enabled` = 0
   AND `status` = 1
   AND `deleted_at` IS NULL;
 ALTER TABLE `hg_youban_publish_media` ADD COLUMN IF NOT EXISTS `must_send` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否每次推送必发' AFTER `media_type`;
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN IF NOT EXISTS `processing_status` varchar(16) NOT NULL DEFAULT 'ready' COMMENT '媒体处理状态：uploaded/processing/ready/failed';
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN IF NOT EXISTS `processing_error` text COMMENT '媒体处理错误';
+ALTER TABLE `hg_youban_publish_media` ADD COLUMN IF NOT EXISTS `processing_started_at` datetime DEFAULT NULL COMMENT '媒体处理开始时间';
 UPDATE `hg_youban_publish_media` SET `must_send` = 0 WHERE EXISTS (SELECT 1 FROM `information_schema`.`columns` WHERE `table_schema` = DATABASE() AND `table_name` = 'hg_youban_publish_media' AND `column_name` = 'must_send' AND `column_default` = '1');
 ALTER TABLE `hg_youban_publish_media` ALTER COLUMN `must_send` SET DEFAULT '0';
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tenant_feature_permission` (`id` bigint unsigned NOT NULL AUTO_INCREMENT,`tenant_id` bigint NOT NULL DEFAULT '0',`feature_code` varchar(64) NOT NULL DEFAULT '',`status` tinyint NOT NULL DEFAULT '2',`created_at` datetime DEFAULT NULL,`updated_at` datetime DEFAULT NULL,PRIMARY KEY (`id`),UNIQUE KEY `uk_ybp_tenant_feature` (`tenant_id`,`feature_code`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
