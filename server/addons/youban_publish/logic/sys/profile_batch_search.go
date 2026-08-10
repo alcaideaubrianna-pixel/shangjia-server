@@ -58,6 +58,9 @@ func (s *sSysPublish) profileImageSearchNotesByScope(ctx context.Context, profil
 	if err = s.applyProfileTagNames(ctx, profiles); err != nil {
 		return nil, err
 	}
+	if err = s.applyProfileCollectionMetadata(ctx, profiles); err != nil {
+		return nil, err
+	}
 	mediaBuckets, err := s.mediaCoverListByProfileModels(ctx, profiles)
 	if err != nil {
 		return nil, err
@@ -92,7 +95,7 @@ func profileImageSearchListFields() string {
 
 func profileImageSearchResultCacheKey(ctx context.Context, profileIds []int64, scope *publishmodel.MediaSearchScope, viewer *sysin.AccountModel, permission string) string {
 	parts := []string{
-		"youban_publish:profile_image_search:result:v2",
+		"youban_publish:profile_image_search:result:v3",
 		fmt.Sprintf("permission=%s", strings.TrimSpace(permission)),
 		fmt.Sprintf("scope=%s", mediaSearchScopeCacheKey(scope)),
 		fmt.Sprintf("version=%s", mediaSearchScopeVersion(ctx, scope)),
