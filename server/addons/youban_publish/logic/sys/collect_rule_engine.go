@@ -18,6 +18,8 @@ var (
 	collectLinkPattern               = regexp.MustCompile(`(?i)(https?://|t\.me/|telegram\.me/)`)
 	collectUsernamePattern           = regexp.MustCompile(`@`)
 	collectStandaloneCodeCaptionRule = regexp.MustCompile(`^[A-Za-z]{1,4}\d{3,6}$`)
+	collectMaterialMetaLineRule      = regexp.MustCompile(`^\s*(?:昵称|编号|同行)\s*(?:[:：=].*)?\s*$`)
+	collectMaterialCodeLineRule      = regexp.MustCompile(`^\s*(?:(?:[A-Za-z]{1,8}[-_ ]?\d{3,10}|[\p{Han}]{1,8}\d{3,10})(?:\s+|$))+\s*$`)
 )
 
 type collectRuleDecision struct {
@@ -361,11 +363,31 @@ func applyCollectLineDeletes(text string, values []string) string {
 }
 
 func applyCollectIntroFeeTruncate(text string) string {
-	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	for index, line := range lines {
-		if strings.Contains(line, "介绍费") {
-			return strings.Join(lines[:index], "\n")
+	normalized := strings.ReplaceAll(text, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+	start := 0
+	changed := false
+	for start < len(lines) {
+		line := strings.TrimSpace(lines[start])
+		if line == "" {
+			start++
+			changed = true
+			continue
 		}
+		if collectMaterialMetaLineRule.MatchString(line) || collectMaterialCodeLineRule.MatchString(line) {
+			start++
+			changed = true
+			continue
+		}
+		break
+	}
+	for index := start; index < len(lines); index++ {
+		if strings.Contains(lines[index], "介绍费") {
+			return strings.TrimSpace(strings.Join(lines[start:index], "\n"))
+		}
+	}
+	if changed {
+		return strings.TrimSpace(strings.Join(lines[start:], "\n"))
 	}
 	return text
 }

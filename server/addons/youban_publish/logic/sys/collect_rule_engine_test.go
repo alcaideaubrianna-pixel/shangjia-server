@@ -142,6 +142,10 @@ func TestApplyCollectIntroFeeTruncate(t *testing.T) {
 		{name: "removes all text when first line matches", text: "介绍费 7888\nKK", want: ""},
 		{name: "supports windows line endings", text: "标题\r\n介绍费：7888\r\nKK", want: "标题"},
 		{name: "keeps text without keyword", text: "标题\n联系方式\nKK", want: "标题\n联系方式\nKK"},
+		{name: "removes leading profile metadata", text: "昵称：朴朴\n编号：XXX123\n同行：否\n正常文案", want: "正常文案"},
+		{name: "removes leading latin and chinese codes", text: "XXX123\n朴朴123123\n正常文案", want: "正常文案"},
+		{name: "removes metadata before intro fee and following text", text: "昵称：朴朴\nX123\n正常文案\n介绍费：7888\n联系方式", want: "正常文案"},
+		{name: "keeps metadata words in normal body", text: "这是昵称说明\n编号是内部记录\n同行可以联系", want: "这是昵称说明\n编号是内部记录\n同行可以联系"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
