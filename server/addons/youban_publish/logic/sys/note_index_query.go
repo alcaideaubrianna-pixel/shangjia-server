@@ -112,6 +112,12 @@ func applyNoteIndexFilters(mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model 
 	if in.CollectSourceId > 0 {
 		mod = mod.Where("EXISTS (SELECT 1 FROM "+publishCollectDispatchTable+" d WHERE d.profile_id=i.profile_id AND d.source_id=?)", in.CollectSourceId)
 	}
+	switch strings.TrimSpace(in.SourceScope) {
+	case "collected":
+		mod = mod.Where("EXISTS (SELECT 1 FROM " + publishCollectDispatchTable + " d WHERE d.profile_id=i.profile_id)")
+	case "manual":
+		mod = mod.Where("NOT EXISTS (SELECT 1 FROM " + publishCollectDispatchTable + " d WHERE d.profile_id=i.profile_id)")
+	}
 	if tag := strings.TrimSpace(in.Tag); tag != "" {
 		mod = applyNoteIndexTagFilter(mod, splitProfileTagValues(tag))
 	}

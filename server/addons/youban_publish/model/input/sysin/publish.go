@@ -479,6 +479,7 @@ type ProfileListInp struct {
 	TenantId        int64  `json:"tenantId" dc:"租户ID"`
 	AccountId       int64  `json:"accountId" dc:"上架账号ID"`
 	CollectSourceId int64  `json:"collectSourceId" dc:"采集源频道ID"`
+	SourceScope     string `json:"sourceScope" dc:"资料来源范围：all/collected/manual"`
 	AccountScope    string `json:"accountScope" dc:"账号范围：all/mine/following"`
 	Keyword         string `json:"keyword" dc:"标题/编号/正文"`
 	Province        string `json:"province" dc:"省份"`
