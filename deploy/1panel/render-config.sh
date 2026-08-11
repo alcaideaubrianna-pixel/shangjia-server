@@ -125,6 +125,14 @@ replace_in_top("system", "mode", yaml_quote(env("YOUBAN_MODE", "product")))
 
 replace_in_top("server", "address", yaml_quote(":" + env("YOUBAN_SERVER_PORT", "8000").lstrip(":")))
 
+runtime_roles = [
+    role.strip()
+    for role in re.split(r"[,;|]", env("YOUBAN_PUBLISH_RUNTIME_ROLES", "all"))
+    if role.strip()
+]
+runtime_roles_yaml = "[" + ", ".join(yaml_quote(role) for role in runtime_roles) + "]"
+replace_in_nested("youbanPublish", "runtime", "roles", runtime_roles_yaml)
+
 replace_in_top("cache", "adapter", yaml_quote(env("YOUBAN_CACHE_ADAPTER", "redis")))
 replace_in_top("token", "secretKey", yaml_quote(env("YOUBAN_TOKEN_SECRET", "change-me")))
 replace_in_top("queue", "driver", yaml_quote(env("YOUBAN_QUEUE_DRIVER", "redis")))
