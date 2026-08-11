@@ -365,29 +365,36 @@ func applyCollectLineDeletes(text string, values []string) string {
 func applyCollectIntroFeeTruncate(text string) string {
 	normalized := strings.ReplaceAll(text, "\r\n", "\n")
 	lines := strings.Split(normalized, "\n")
-	start := 0
 	changed := false
+	cutoff := len(lines)
+	for index, line := range lines {
+		if strings.Contains(line, "介绍费") {
+			cutoff = index
+			changed = true
+			break
+		}
+	}
+	lines = lines[:cutoff]
+	start := 0
 	for start < len(lines) {
 		line := strings.TrimSpace(lines[start])
-		if line == "" {
-			start++
-			changed = true
-			continue
-		}
-		if collectMaterialMetaLineRule.MatchString(line) || collectMaterialCodeLineRule.MatchString(line) {
+		if line == "" || collectMaterialMetaLineRule.MatchString(line) || collectMaterialCodeLineRule.MatchString(line) {
 			start++
 			changed = true
 			continue
 		}
 		break
 	}
-	for index := start; index < len(lines); index++ {
-		if strings.Contains(lines[index], "介绍费") {
-			return strings.TrimSpace(strings.Join(lines[start:index], "\n"))
+	kept := make([]string, 0, len(lines)-start)
+	for _, line := range lines[start:] {
+		if collectMaterialMetaLineRule.MatchString(strings.TrimSpace(line)) {
+			changed = true
+			continue
 		}
+		kept = append(kept, line)
 	}
 	if changed {
-		return strings.TrimSpace(strings.Join(lines[start:], "\n"))
+		return strings.TrimSpace(strings.Join(kept, "\n"))
 	}
 	return text
 }
