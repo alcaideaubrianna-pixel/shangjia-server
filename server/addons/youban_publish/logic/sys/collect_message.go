@@ -92,7 +92,7 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 	if strings.TrimSpace(message.SourceGroupedId) != "" {
 		status = sysin.CollectEventStatusGroupCollect
 	}
-	eventId, err := eventDao.Ctx(ctx).Data(g.Map{
+	_, err = eventDao.Ctx(ctx).Data(g.Map{
 		eventCols.TenantId:        message.TenantId,
 		eventCols.AccountId:       message.AccountId,
 		eventCols.SourceId:        message.SourceId,
@@ -111,23 +111,24 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 		eventCols.ReceivedAt:      receivedAt,
 		eventCols.CreatedAt:       now,
 		eventCols.UpdatedAt:       now,
-	}).InsertAndGetId()
+	}).OnConflict(eventCols.SourceUniqueKey).
+		OnDuplicate(eventCols.SourceUniqueKey).
+		Save()
 	if err != nil {
-		if isCollectEventUniqueConflict(err) {
-			event, readErr := eventDao.Ctx(ctx).Where(eventCols.SourceUniqueKey, message.SourceUniqueKey).One()
-			if readErr != nil {
-				return 0, gerror.Wrap(readErr, "读取冲突采集事件失败")
-			}
-			if !event.IsEmpty() {
-				message.Media = media
-				return s.mergeCollectMessageEvent(ctx, event, message, rawText, now)
-			}
-		}
 		return 0, gerror.Wrap(err, "创建采集事件失败")
 	}
-	created, err := eventDao.Ctx(ctx).Where(eventCols.Id, eventId).One()
+	created, err := eventDao.Ctx(ctx).Where(eventCols.SourceUniqueKey, message.SourceUniqueKey).One()
 	if err != nil {
 		return 0, gerror.Wrap(err, "读取采集事件失败")
+	}
+	if created.IsEmpty() {
+		return 0, gerror.New("创建采集事件后未找到记录")
+	}
+	eventId := created[eventCols.Id].Int64()
+	createdAt := created[eventCols.CreatedAt].GTime()
+	if createdAt == nil || !createdAt.Time.Equal(now.Time) {
+		message.Media = media
+		return s.mergeCollectMessageEvent(ctx, created, message, rawText, now)
 	}
 	if err = s.upsertCollectEventMedia(ctx, created, message.Media); err != nil {
 		return 0, err
@@ -199,15 +200,6 @@ func collectMergedEventStatus(event gdb.Record, message *CollectMessage) string 
 		return sysin.CollectEventStatusPending
 	}
 	return sysin.CollectEventStatusPending
-}
-
-func isCollectEventUniqueConflict(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := err.Error()
-	return strings.Contains(message, "uk_ybp_collect_event_unique") ||
-		strings.Contains(message, "duplicate key value")
 }
 
 func collectExistingEventShouldMerge(event gdb.Record, media []collectMediaItem) bool {
