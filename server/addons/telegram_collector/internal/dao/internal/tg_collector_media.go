@@ -29,7 +29,9 @@ type TgCollectorMediaColumns struct {
 	Size              string //
 	PipelineVersion   string //
 	Status            string //
+	FileURL           string //
 	StoragePath       string //
+	PosterURL         string //
 	PosterStoragePath string //
 	Phash             string //
 	Dhash             string //
@@ -52,7 +54,9 @@ var tgCollectorMediaColumns = TgCollectorMediaColumns{
 	Size:              "size",
 	PipelineVersion:   "pipeline_version",
 	Status:            "status",
+	FileURL:           "file_url",
 	StoragePath:       "storage_path",
+	PosterURL:         "poster_url",
 	PosterStoragePath: "poster_storage_path",
 	Phash:             "phash",
 	Dhash:             "dhash",

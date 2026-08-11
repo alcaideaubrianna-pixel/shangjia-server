@@ -915,6 +915,22 @@ func (s *sSysPublish) downloadBotTelegramMedia(ctx context.Context, tenantId int
 	if strings.TrimSpace(path) == "" {
 		return nil, gerror.New("Bot媒体文件下载完成但缓存路径为空")
 	}
+	md5Value, mediaSize, mimeType, err := calculateTelegramMediaFingerprint(path, item.Type, item.SourceMimeType)
+	if err != nil {
+		return nil, err
+	}
+	if cached, ok, cacheErr := lookupTelegramCollectorMediaCache(ctx, item.Type, md5Value, mediaSize, mimeType); cacheErr != nil {
+		return nil, cacheErr
+	} else if ok {
+		item.FileUrl = telegramCollectorMediaCacheURL(cached)
+		item.StoragePath = cached.StoragePath
+		item.FileMd5 = md5Value
+		item.SourceSize = mediaSize
+		item.SourceMimeType = mimeType
+		item.FilePhash = cached.PHash
+		item.PosterUrl = firstNonEmpty(cached.PosterURL, cached.PosterStoragePath)
+		return &collectDownloadedMedia{FileUrl: item.FileUrl, Path: item.StoragePath, Item: item}, nil
+	}
 	attachment, err := s.uploadCollectMediaToStorage(ctx, item.Type, path)
 	if err != nil {
 		return nil, gerror.Wrap(err, "Bot采集媒体上传云存储失败")
@@ -924,6 +940,9 @@ func (s *sSysPublish) downloadBotTelegramMedia(ctx context.Context, tenantId int
 	}
 	item.FileUrl = strings.TrimSpace(attachment.FileUrl)
 	item.StoragePath = normalizeStoredMediaPath(attachment.Path)
+	item.FileMd5 = md5Value
+	item.SourceSize = mediaSize
+	item.SourceMimeType = mimeType
 	return &collectDownloadedMedia{
 		AttachmentId: attachment.Id,
 		FileUrl:      item.FileUrl,

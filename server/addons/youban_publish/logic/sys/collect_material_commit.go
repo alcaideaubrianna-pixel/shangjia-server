@@ -54,6 +54,52 @@ type telegramCollectorMediaCacheState struct {
 	Entry       *collectorin.MediaCacheEntry
 }
 
+func telegramCollectorMediaCacheURL(entry *collectorin.MediaCacheEntry) string {
+	if entry == nil {
+		return ""
+	}
+	if value := strings.TrimSpace(entry.FileURL); strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
+		return value
+	}
+	if value := strings.TrimSpace(entry.StoragePath); strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
+		return value
+	}
+	return ""
+}
+
+func calculateTelegramMediaFingerprint(localPath string, mediaType string, mimeType string) (string, int64, string, error) {
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return "", 0, "", gerror.Wrap(err, "读取采集媒体文件信息失败")
+	}
+	if info.IsDir() {
+		return "", 0, "", gerror.New("采集媒体缓存路径不能是目录")
+	}
+	md5Value, err := fileMD5(localPath)
+	if err != nil {
+		return "", 0, "", gerror.Wrap(err, "计算采集媒体MD5失败")
+	}
+	mimeType = strings.TrimSpace(mimeType)
+	if mimeType == "" {
+		mimeType = mime.TypeByExtension(strings.ToLower(filepath.Ext(localPath)))
+	}
+	return md5Value, info.Size(), mimeType, nil
+}
+
+func lookupTelegramCollectorMediaCache(ctx context.Context, mediaType string, md5Value string, size int64, mimeType string) (*collectorin.MediaCacheEntry, bool, error) {
+	md5Value = strings.TrimSpace(md5Value)
+	mimeType = strings.TrimSpace(mimeType)
+	if md5Value == "" || size <= 0 {
+		return nil, false, nil
+	}
+	fingerprint := collectorservice.BuildMediaFingerprint(md5Value, size, telegramCollectorMediaKind(mediaType), mimeType)
+	entry, ready, err := collectorservice.Collector().MediaCache(ctx, fingerprint)
+	if err != nil || !ready || entry == nil || telegramCollectorMediaCacheURL(entry) == "" {
+		return entry, false, err
+	}
+	return entry, true, nil
+}
+
 func acquireTelegramCollectorMediaCache(ctx context.Context, mediaType, storagePath, md5Value string, size int64, mimeType string) (*telegramCollectorMediaCacheState, error) {
 	if !collectorservice.Collector().Enabled(ctx) {
 		return nil, nil
@@ -93,7 +139,7 @@ func acquireTelegramCollectorMediaCache(ctx context.Context, mediaType, storageP
 		return nil, err
 	}
 	state := &telegramCollectorMediaCacheState{Fingerprint: fingerprint, MD5: md5Value, MimeType: mimeType, Size: size}
-	if ready && entry != nil && strings.TrimSpace(entry.StoragePath) != "" {
+	if ready && entry != nil && telegramCollectorMediaCacheURL(entry) != "" {
 		state.Entry = entry
 		return state, nil
 	}
@@ -168,6 +214,9 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 			storagePath := normalizeStoredMediaPath(item.StoragePath)
 			fileURL := strings.TrimSpace(item.FileUrl)
 			mediaSize := mediaStorageSize(storagePath)
+			if mediaSize <= 0 {
+				mediaSize = item.SourceSize
+			}
 			mediaMD5 := strings.TrimSpace(item.FileMd5)
 			cacheState, cacheErr := acquireTelegramCollectorMediaCache(ctx, mediaType, storagePath, mediaMD5, mediaSize, item.SourceMimeType)
 			if cacheErr != nil {
@@ -180,16 +229,20 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 			var assets *mediaAssetMetadata
 			if cacheState != nil && cacheState.Entry != nil {
 				cachedPath := strings.TrimSpace(cacheState.Entry.StoragePath)
-				if strings.HasPrefix(cachedPath, "http://") || strings.HasPrefix(cachedPath, "https://") {
-					fileURL = cachedPath
-					storagePath = ""
+				cachedURL := telegramCollectorMediaCacheURL(cacheState.Entry)
+				if cachedURL != "" {
+					fileURL = cachedURL
+					if strings.HasPrefix(cachedPath, "http://") || strings.HasPrefix(cachedPath, "https://") {
+						storagePath = ""
+					} else {
+						storagePath = strings.TrimSpace(cachedPath)
+					}
 				} else if cachedPath != "" {
 					storagePath = normalizeStoredMediaPath(cachedPath)
-					fileURL = ""
 				}
 				assets = &mediaAssetMetadata{
 					PerceptualHash:    cacheState.Entry.PHash,
-					PosterURL:         cacheState.Entry.PosterStoragePath,
+					PosterURL:         firstNonEmpty(cacheState.Entry.PosterURL, cacheState.Entry.PosterStoragePath),
 					PosterStoragePath: cacheState.Entry.PosterStoragePath,
 				}
 			}
@@ -225,8 +278,10 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 				if cacheState != nil && cacheState.Claimed {
 					entry := &collectorin.MediaCacheEntry{
 						Fingerprint:       cacheState.Fingerprint,
-						StoragePath:       firstNonEmpty(storagePath, fileURL),
-						PosterStoragePath: firstNonEmpty(assetPosterStoragePath(assets), assetPosterURL(assets)),
+						FileURL:           fileURL,
+						StoragePath:       storagePath,
+						PosterURL:         assetPosterURL(assets),
+						PosterStoragePath: assetPosterStoragePath(assets),
 						PHash:             assetPerceptualHash(assets),
 						Kind:              telegramCollectorMediaKind(mediaType),
 						MimeType:          cacheState.MimeType,

@@ -48,6 +48,21 @@ func (p *publishCollectorAccountMediaProvider) StoreMedia(ctx context.Context, t
 		return nil, gerror.New("Telegram账号媒体存储参数无效")
 	}
 	ctx = collectMediaRuntimeContext(ctx, task.MediaOwnerAccountID)
+	md5Value, mediaSize, mimeType, err := calculateTelegramMediaFingerprint(localPath, task.Media.Type, task.Media.SourceMimeType)
+	if err != nil {
+		return nil, err
+	}
+	if cached, ok, cacheErr := lookupTelegramCollectorMediaCache(ctx, task.Media.Type, md5Value, mediaSize, mimeType); cacheErr != nil {
+		return nil, cacheErr
+	} else if ok {
+		task.Media.FileURL = telegramCollectorMediaCacheURL(cached)
+		task.Media.StoragePath = cached.StoragePath
+		task.Media.FileMD5 = md5Value
+		task.Media.SourceSize = mediaSize
+		task.Media.FilePHash = cached.PHash
+		task.Media.PosterURL = firstNonEmpty(cached.PosterURL, cached.PosterStoragePath)
+		return &collectorin.AccountMediaDownloadResult{FileURL: task.Media.FileURL, StoragePath: task.Media.StoragePath, Media: task.Media}, nil
+	}
 	attachment, err := p.publish.uploadCollectMediaToStorage(ctx, task.Media.Type, localPath)
 	if err != nil {
 		return nil, err
@@ -55,6 +70,9 @@ func (p *publishCollectorAccountMediaProvider) StoreMedia(ctx context.Context, t
 	item := task.Media
 	item.FileURL = strings.TrimSpace(attachment.FileUrl)
 	item.StoragePath = normalizeStoredMediaPath(attachment.Path)
+	item.FileMD5 = md5Value
+	item.SourceSize = mediaSize
+	item.SourceMimeType = mimeType
 	return &collectorin.AccountMediaDownloadResult{
 		AttachmentID: attachment.Id, FileURL: item.FileURL, StoragePath: item.StoragePath, Media: item,
 	}, nil

@@ -53,7 +53,9 @@ CREATE TABLE IF NOT EXISTS `hg_tg_collector_media` (
     `size` BIGINT NOT NULL DEFAULT 0,
     `pipeline_version` VARCHAR(64) NOT NULL DEFAULT 'v1',
     `status` VARCHAR(32) NOT NULL DEFAULT 'processing',
+    `file_url` TEXT NOT NULL,
     `storage_path` TEXT NOT NULL,
+    `poster_url` TEXT NOT NULL,
     `poster_storage_path` TEXT NOT NULL,
     `phash` VARCHAR(128) NOT NULL,
     `dhash` VARCHAR(128) NOT NULL,
@@ -67,6 +69,9 @@ CREATE TABLE IF NOT EXISTS `hg_tg_collector_media` (
     UNIQUE KEY `uq_tg_collector_media_fingerprint` (`tenant_id`, `fingerprint`, `pipeline_version`),
     KEY `idx_tg_collector_media_task` (`status`, `next_run_at`, `lease_until`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE `hg_tg_collector_media` ADD COLUMN IF NOT EXISTS `file_url` TEXT NOT NULL;
+ALTER TABLE `hg_tg_collector_media` ADD COLUMN IF NOT EXISTS `poster_url` TEXT NOT NULL;
 
 CREATE TABLE IF NOT EXISTS `hg_tg_collector_delivery` (
     `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,

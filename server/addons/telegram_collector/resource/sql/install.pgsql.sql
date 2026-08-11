@@ -55,7 +55,9 @@ CREATE TABLE IF NOT EXISTS "hg_tg_collector_media" (
     "size" BIGINT NOT NULL DEFAULT 0,
     "pipeline_version" VARCHAR(64) NOT NULL DEFAULT 'v1',
     "status" VARCHAR(32) NOT NULL DEFAULT 'processing',
+    "file_url" TEXT NOT NULL DEFAULT '',
     "storage_path" TEXT NOT NULL DEFAULT '',
+    "poster_url" TEXT NOT NULL DEFAULT '',
     "poster_storage_path" TEXT NOT NULL DEFAULT '',
     "phash" VARCHAR(128) NOT NULL DEFAULT '',
     "dhash" VARCHAR(128) NOT NULL DEFAULT '',
@@ -68,6 +70,9 @@ CREATE TABLE IF NOT EXISTS "hg_tg_collector_media" (
     "updated_at" TIMESTAMP NULL,
     CONSTRAINT "uq_tg_collector_media_fingerprint" UNIQUE ("tenant_id", "fingerprint", "pipeline_version")
 );
+
+ALTER TABLE "hg_tg_collector_media" ADD COLUMN IF NOT EXISTS "file_url" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "hg_tg_collector_media" ADD COLUMN IF NOT EXISTS "poster_url" TEXT NOT NULL DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS "idx_tg_collector_media_task" ON "hg_tg_collector_media" ("status", "next_run_at", "lease_until", "id");
 

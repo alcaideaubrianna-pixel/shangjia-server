@@ -20,7 +20,9 @@ type TgCollectorMedia struct {
 	Size              any         //
 	PipelineVersion   any         //
 	Status            any         //
+	FileURL           any         //
 	StoragePath       any         //
+	PosterURL         any         //
 	PosterStoragePath any         //
 	Phash             any         //
 	Dhash             any         //

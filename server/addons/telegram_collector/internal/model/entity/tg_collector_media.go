@@ -18,7 +18,9 @@ type TgCollectorMedia struct {
 	Size              int64       `json:"size"              orm:"size"                description:""`
 	PipelineVersion   string      `json:"pipelineVersion"   orm:"pipeline_version"    description:""`
 	Status            string      `json:"status"            orm:"status"              description:""`
+	FileURL           string      `json:"fileUrl"            orm:"file_url"            description:""`
 	StoragePath       string      `json:"storagePath"       orm:"storage_path"        description:""`
+	PosterURL         string      `json:"posterUrl"          orm:"poster_url"          description:""`
 	PosterStoragePath string      `json:"posterStoragePath" orm:"poster_storage_path" description:""`
 	Phash             string      `json:"phash"             orm:"phash"               description:""`
 	Dhash             string      `json:"dhash"             orm:"dhash"               description:""`

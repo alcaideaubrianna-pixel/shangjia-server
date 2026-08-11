@@ -14,7 +14,9 @@ const (
 
 type MediaCacheEntry struct {
 	Fingerprint       string    `json:"fingerprint"`
+	FileURL           string    `json:"fileUrl,omitempty"`
 	StoragePath       string    `json:"storagePath"`
+	PosterURL         string    `json:"posterUrl,omitempty"`
 	PosterStoragePath string    `json:"posterStoragePath,omitempty"`
 	PHash             string    `json:"phash,omitempty"`
 	DHash             string    `json:"dhash,omitempty"`

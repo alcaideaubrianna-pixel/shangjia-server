@@ -7,9 +7,22 @@ import (
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 
 	"hotgo/addons/youban_publish/internal/model/entity"
 )
+
+func TestTelegramCollectorMediaCacheURL(t *testing.T) {
+	if got := telegramCollectorMediaCacheURL(&collectorin.MediaCacheEntry{FileURL: "https://cdn.test/media.jpg", StoragePath: "media.jpg"}); got != "https://cdn.test/media.jpg" {
+		t.Fatalf("got URL %q, want FileURL", got)
+	}
+	if got := telegramCollectorMediaCacheURL(&collectorin.MediaCacheEntry{StoragePath: "https://cdn.test/legacy.jpg"}); got != "https://cdn.test/legacy.jpg" {
+		t.Fatalf("got URL %q, want legacy StoragePath URL", got)
+	}
+	if got := telegramCollectorMediaCacheURL(&collectorin.MediaCacheEntry{StoragePath: "storage/cache/media.jpg"}); got != "" {
+		t.Fatalf("got URL %q, want empty URL for local path", got)
+	}
+}
 
 func TestCollectMediaSourceGone(t *testing.T) {
 	err := gerror.Wrap(errCollectMediaSourceGone, "TG原消息不存在或无权读取")
