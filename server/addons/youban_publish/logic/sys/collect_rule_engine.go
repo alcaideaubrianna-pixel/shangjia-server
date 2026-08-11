@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -376,13 +377,15 @@ func applyCollectIntroFeeTruncate(text string) string {
 	}
 	lines = lines[:cutoff]
 	start := 0
+	firstContentLine := true
 	for start < len(lines) {
 		line := strings.TrimSpace(lines[start])
-		if line == "" || collectMaterialMetaLineRule.MatchString(line) || collectMaterialCodeLineRule.MatchString(line) {
+		if line == "" || collectMaterialMetaLineRule.MatchString(line) || collectMaterialCodeLineRule.MatchString(line) || (firstContentLine && !collectLineContainsChinese(line)) {
 			start++
 			changed = true
 			continue
 		}
+		firstContentLine = false
 		break
 	}
 	kept := make([]string, 0, len(lines)-start)
@@ -397,6 +400,15 @@ func applyCollectIntroFeeTruncate(text string) string {
 		return strings.TrimSpace(strings.Join(kept, "\n"))
 	}
 	return text
+}
+
+func collectLineContainsChinese(line string) bool {
+	for _, char := range line {
+		if unicode.Is(unicode.Han, char) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizedCollectTerms(values []string) []string {
