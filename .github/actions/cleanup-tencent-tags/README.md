@@ -2,7 +2,7 @@
 
 Reusable GitHub composite action for Tencent Personal Container Registry repositories.
 
-The action lists tags through `DescribeImagePersonal`, sorts them by push/update/creation time, and removes old tags through `BatchDeleteImagePersonal`.
+The action lists tags through `DescribeImagePersonal`, sorts them by push/update/creation time, and removes old tags through `BatchDeleteImagePersonal`. It uses small batches and falls back to `DeleteImagePersonal` when Tencent's personal-registry batch endpoint returns an internal error.
 
 Required environment variables:
 

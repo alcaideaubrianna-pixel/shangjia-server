@@ -7,12 +7,16 @@ import hmac
 import json
 import os
 import sys
+import time
+import urllib.error
 import urllib.request
 
 
 ENDPOINT = os.getenv("TCR_API_ENDPOINT", "tcr.tencentcloudapi.com")
 SERVICE = "tcr"
 VERSION = "2019-09-24"
+MAX_DELETE_BATCH = 20
+MAX_RETRIES = 3
 
 
 def required(name):
@@ -71,16 +75,34 @@ def sign_request(action, payload, secret_id, secret_key, region):
 
 
 def call_api(action, payload, secret_id, secret_key, region):
-    body, headers = sign_request(action, payload, secret_id, secret_key, region)
-    request = urllib.request.Request(
-        f"https://{ENDPOINT}/", data=body.encode("utf-8"), headers=headers, method="POST"
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        result = json.loads(response.read().decode("utf-8"))
-    error = result.get("Response", {}).get("Error")
-    if error:
-        raise RuntimeError(f"{error.get('Code')}: {error.get('Message')}")
-    return result.get("Response", {})
+    for attempt in range(MAX_RETRIES + 1):
+        body, headers = sign_request(action, payload, secret_id, secret_key, region)
+        request = urllib.request.Request(
+            f"https://{ENDPOINT}/", data=body.encode("utf-8"), headers=headers, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError) as error:
+            if attempt >= MAX_RETRIES:
+                raise RuntimeError(f"{action} network failure after retries: {error}") from error
+            time.sleep(2**attempt)
+            continue
+
+        response = result.get("Response", {})
+        error = response.get("Error")
+        if not error:
+            return response
+
+        code = error.get("Code") or "unknown"
+        message = error.get("Message") or "unknown error"
+        request_id = response.get("RequestId") or "unknown"
+        retryable = code.startswith("InternalError") or code.startswith("RequestLimitExceeded")
+        if retryable and attempt < MAX_RETRIES:
+            print(f"{action} failed, retrying request_id={request_id} code={code} attempt={attempt + 1}")
+            time.sleep(2**attempt)
+            continue
+        raise RuntimeError(f"{action} failed: {code}: {message}; request_id={request_id}")
 
 
 def list_tags(repo_name, secret_id, secret_key, region):
@@ -112,6 +134,29 @@ def tag_sort_key(tag):
     )
 
 
+def is_missing_tag_error(error):
+    message = str(error).lower()
+    return "notfound" in message or "not found" in message or "noimage" in message
+
+
+def delete_tags_individually(tags, repo_name, secret_id, secret_key, region):
+    for tag in tags:
+        try:
+            response = call_api(
+                "DeleteImagePersonal",
+                {"RepoName": repo_name, "Tag": tag},
+                secret_id,
+                secret_key,
+                region,
+            )
+            print(f"deleted tag={tag} request_id={response.get('RequestId', 'unknown')}")
+        except RuntimeError as error:
+            if is_missing_tag_error(error):
+                print(f"tag already absent={tag}")
+                continue
+            raise
+
+
 def main():
     secret_id = required("TENCENTCLOUD_SECRET_ID")
     secret_key = required("TENCENTCLOUD_SECRET_KEY")
@@ -131,16 +176,20 @@ def main():
         print("dry run tags:", ", ".join(tag["TagName"] for tag in tags_to_delete))
         return
 
-    for start in range(0, len(tags_to_delete), 100):
-        batch = tags_to_delete[start : start + 100]
-        call_api(
-            "BatchDeleteImagePersonal",
-            {"RepoName": repo_name, "Tags": [tag["TagName"] for tag in batch]},
-            secret_id,
-            secret_key,
-            region,
-        )
-        print("deleted:", ", ".join(tag["TagName"] for tag in batch))
+    for start in range(0, len(tags_to_delete), MAX_DELETE_BATCH):
+        batch = [tag["TagName"] for tag in tags_to_delete[start : start + MAX_DELETE_BATCH]]
+        try:
+            response = call_api(
+                "BatchDeleteImagePersonal",
+                {"RepoName": repo_name, "Tags": batch},
+                secret_id,
+                secret_key,
+                region,
+            )
+            print(f"deleted batch count={len(batch)} request_id={response.get('RequestId', 'unknown')}")
+        except RuntimeError as error:
+            print(f"batch delete failed, falling back to individual tags: {error}")
+            delete_tags_individually(batch, repo_name, secret_id, secret_key, region)
 
 
 if __name__ == "__main__":
