@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/hibiken/asynq"
 
+	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/service"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/payment"
@@ -64,6 +65,7 @@ func NewSysPublish() *sSysPublish {
 func init() {
 	publish := NewSysPublish()
 	service.RegisterSysPublish(publish)
+	collectorservice.RegisterDeliveryHandler(&publishCollectorDeliveryHandler{publish: publish})
 	gatewayservice.RegisterProvider(&publishBotGatewayProvider{publish: publish})
 	gatewayservice.RegisterConfigProvider(func(ctx context.Context) (*gatewayservice.RuntimeConfig, error) {
 		conf, err := NewSysConfig().GetTelegram(ctx)

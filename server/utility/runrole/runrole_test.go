@@ -13,7 +13,7 @@ func TestNormalize(t *testing.T) {
 	}{
 		{name: "all", values: []string{"web,all"}, want: []string{All}},
 		{name: "three roles", values: []string{"runtime", "worker|web"}, want: []string{Runtime, Web, Worker}},
-		{name: "split roles", values: []string{"account,scheduler,push-worker"}, want: []string{Account, Scheduler, Worker}},
+		{name: "split roles", values: []string{"account,scheduler,push-worker"}, want: []string{Account, PushWorker, Scheduler}},
 		{name: "invalid", values: []string{"unknown"}, want: []string{}},
 	}
 	for _, test := range tests {
@@ -26,7 +26,7 @@ func TestNormalize(t *testing.T) {
 }
 
 func TestNormalizeLegacy(t *testing.T) {
-	want := []string{Runtime, Worker}
+	want := []string{MediaWorker, Runtime}
 	if got := normalizeLegacy([]string{"account,scheduler,media-worker"}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("normalizeLegacy() = %v, want %v", got, want)
 	}

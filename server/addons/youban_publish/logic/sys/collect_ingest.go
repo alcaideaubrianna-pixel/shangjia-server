@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/gconv"
@@ -33,40 +34,37 @@ type collectBotSourceCacheItem struct {
 	SourceTitle string `json:"sourceTitle"`
 }
 
-func (s *sSysPublish) collectBotMessage(ctx context.Context, botId int64, msg *models.Message) {
+func (s *sSysPublish) collectBotMessage(ctx context.Context, botId int64, msg *models.Message) error {
 	if msg == nil {
-		return
+		return nil
 	}
 	if !s.collectGlobalEnabled(ctx) {
 		s.logCollectBotSkip(ctx, botId, msg, "采集总开关已关闭")
-		return
+		return nil
 	}
 	sources, err := s.collectSourcesByBotMessage(ctx, botId, msg)
 	if err != nil {
-		g.Log().Warningf(ctx, "读取Bot采集源失败 bot:%d chat:%d err:%+v", botId, msg.Chat.ID, err)
-		return
+		return gerror.Wrap(err, "读取Bot采集源失败")
 	}
 	if len(sources) == 0 {
 		s.logCollectBotSkip(ctx, botId, msg, "没有匹配到启用中的Bot采集源，请检查bot_id、采集开关、状态和会员有效期")
-		return
+		return nil
 	}
 	for _, source := range sources {
 		blocked, checkErr := s.botCollectMessageFromPublishChannel(ctx, gconv.Int64(source["tenant_id"]), msg.Chat.ID)
 		if checkErr != nil {
-			g.Log().Warningf(ctx, "检查Bot采集上架频道过滤失败，已安全丢弃消息 source:%d chat:%d message:%d err:%+v", gconv.Int64(source["id"]), msg.Chat.ID, msg.ID, checkErr)
-			continue
+			return gerror.Wrap(checkErr, "检查Bot采集上架频道过滤失败")
 		}
 		if blocked {
 			g.Log().Infof(ctx, "Bot采集忽略当前账号上架频道消息 source:%d chat:%d message:%d", gconv.Int64(source["id"]), msg.Chat.ID, msg.ID)
 			continue
 		}
 		message := botCollectMessage(botId, source, msg)
-		_, err := s.ingestAndProcessCollectMessage(ctx, message)
-		if err != nil {
-			g.Log().Errorf(ctx, "处理Bot采集事件失败 source:%d msg:%d err:%+v", gconv.Int64(source["id"]), msg.ID, err)
-			continue
+		if _, err = s.ingestAndProcessCollectMessage(ctx, message); err != nil {
+			return gerror.Wrapf(err, "处理Bot采集事件失败 source:%d msg:%d", gconv.Int64(source["id"]), msg.ID)
 		}
 	}
+	return nil
 }
 
 func (s *sSysPublish) botCollectMessageFromPublishChannel(ctx context.Context, tenantId int64, chatId int64) (bool, error) {

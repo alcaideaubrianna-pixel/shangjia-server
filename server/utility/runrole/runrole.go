@@ -11,12 +11,16 @@ import (
 )
 
 const (
-	All       = "all"
-	Web       = "web"
-	Worker    = "worker"
-	Account   = "account"
-	Scheduler = "scheduler"
-	Runtime   = "runtime"
+	All              = "all"
+	Web              = "web"
+	Worker           = "worker"
+	CollectorWorker  = "collector-worker"
+	PushWorker       = "push-worker"
+	MediaWorker      = "media-worker"
+	BackgroundWorker = "background-worker"
+	Account          = "account"
+	Scheduler        = "scheduler"
+	Runtime          = "runtime"
 )
 
 var processRoles struct {
@@ -95,8 +99,8 @@ func normalizeLegacy(values []string) []string {
 				mapped = append(mapped, item)
 			case "account", "scheduler":
 				mapped = append(mapped, Runtime)
-			case "push-worker", "media-worker", "background-worker":
-				mapped = append(mapped, Worker)
+			case PushWorker, MediaWorker, BackgroundWorker, CollectorWorker:
+				mapped = append(mapped, item)
 			}
 		}
 	}
@@ -109,8 +113,16 @@ func canonical(role string) string {
 		return All
 	case Web:
 		return Web
-	case Worker, "push-worker", "media-worker", "background-worker":
+	case Worker:
 		return Worker
+	case CollectorWorker:
+		return CollectorWorker
+	case PushWorker:
+		return PushWorker
+	case MediaWorker:
+		return MediaWorker
+	case BackgroundWorker:
+		return BackgroundWorker
 	case Account:
 		return Account
 	case Scheduler:

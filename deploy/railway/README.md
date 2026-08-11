@@ -1,6 +1,6 @@
 # Railway 部署说明
 
-项目使用同一个镜像创建四个 Railway Service。四个服务共享数据库、Redis 和业务环境变量，但启动命令与运行角色不同。
+项目使用同一个镜像创建 API、兼容 Worker、Collector Worker、Media Worker、Publish Worker、Account 和 Scheduler 服务。所有服务共享数据库、Redis 和业务环境变量，但启动命令与运行角色不同。
 
 项目级 Railway Infrastructure as Code 位于 `.railway/railway.ts`，负责声明 PostgreSQL、Redis、四个运行服务、Singapore 区域和基础环境变量。它不是 Template，不会替代 Railway 项目本身；首次使用前先确认镜像地址和 Railway 项目环境。
 
@@ -28,6 +28,31 @@ ghcr.io/<owner>/youban-server:sha-xxxxxxx
 - Healthcheck Path：`/readyz`
 - 不绑定公网业务域名
 - 消费 HotGo Queue 和上架系统 Asynq Worker，可根据队列积压增加副本
+- 迁移期间保留为兼容 Worker；确认三个独立 Worker 稳定后再逐步缩容或移除
+
+## Collector Worker Service
+
+- Start Command：`/app/hotgo collector-worker`
+- `YOUBAN_RUNTIME_ROLES=collector-worker`
+- Healthcheck Path：`/readyz`
+- 负责实时/历史采集事件、后台采集任务和标准化交付
+- 可以横向扩容，但历史展开必须继续遵守来源级背压和幂等
+
+## Media Worker Service
+
+- Start Command：`/app/hotgo media-worker`
+- `YOUBAN_RUNTIME_ROLES=media-worker`
+- Healthcheck Path：`/readyz`
+- 负责采集媒体下载、媒体处理、对象存储和 PHash
+- 可以根据媒体积压、CPU 和网络耗时独立扩容
+
+## Publish Worker Service
+
+- Start Command：`/app/hotgo publish-worker`
+- `YOUBAN_RUNTIME_ROLES=push-worker`
+- Healthcheck Path：`/readyz`
+- 负责 Telegram 发布、单频道顺序、限流和失败重试
+- 可以横向扩容，一个频道异常不得影响其他频道
 
 ## Account Service
 
@@ -50,7 +75,7 @@ ghcr.io/<owner>/youban-server:sha-xxxxxxx
 
 ## 公共要求
 
-- 四个服务必须使用同一个镜像标签和同一套数据库、Redis 配置
+- 所有应用服务必须使用同一个镜像标签和同一套数据库、Redis 配置
 - Railway 会覆盖镜像 `ENTRYPOINT`，Start Command 必须填写 `/app/hotgo <role>`，不能只填写角色名
 - 不要设置 `YOUBAN_SERVER_PORT` 或 `GF_SERVER_PORT`，让程序直接读取 Railway 自动注入的 `PORT`
 - `YOUBAN_CACHE_ADAPTER` 和 `YOUBAN_QUEUE_DRIVER` 必须使用 `redis`
@@ -99,17 +124,23 @@ npx -y @railway/cli@latest config apply
 
 当前 GitHub Actions 负责构建并推送分支、发布标签和 `sha-xxxxxxx` 镜像。生产部署只选择明确的发布标签或 SHA 标签，不直接部署分支标签：
 
-1. Redeploy Worker
-2. Redeploy Scheduler
-3. Redeploy Account
-4. Redeploy API
+1. Redeploy Collector Worker
+2. Redeploy Media Worker
+3. Redeploy Publish Worker
+4. Redeploy compatibility Worker
+5. Redeploy Scheduler
+6. Redeploy Account
+7. Redeploy API
 
 自动发布时，GitHub Actions 将 `YOUBAN_RAILWAY_IMAGE` 设置为本次构建产生的完整标签，再执行 Railway IaC。建议使用 GitHub `production` Environment 保存 `RAILWAY_TOKEN` 并按需开启人工审批。不要让三个 Railway Service 分别从 GitHub 重复构建同一个 Dockerfile。
 
 ## 推荐上线顺序
 
-1. 部署 Worker，确认队列可以正常消费
-2. 部署 Scheduler，保持 1 个副本并确认 Cron TCP 授权正常
-3. 部署 Account，保持 1 个副本并确认 Telegram 账号租约正常
-4. 部署 API，绑定域名并验证登录、上传、支付回调和 Telegram Webhook
-5. 观察任务积压和账号数量后，仅扩容 API、Worker 和 Account
+1. 显式执行 `telegram_collector` 插件安装或升级 SQL
+2. 部署 Collector、Media、Publish Worker，但保持 `YOUBAN_TELEGRAM_COLLECTOR_ENABLED=false`
+3. 部署 Account，确认同一 TG 账号始终只有一个连接租约持有者
+4. 部署 API，验证现有 Bot Gateway、采集和发布链路不受影响
+5. 在测试租户开启 `YOUBAN_TELEGRAM_COLLECTOR_ENABLED=true`，观察 Event、Delivery、媒体命中率和重试指标
+6. 扩大灰度范围，确认新旧链路的资料数量、媒体数量和目标频道一致
+7. 保留兼容 Worker，观察独立 Worker 稳定后再缩容
+8. 根据各自队列积压分别扩容 Collector、Media、Publish 和 Account

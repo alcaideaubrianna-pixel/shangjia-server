@@ -3,14 +3,19 @@ package sys
 import (
 	"context"
 	"fmt"
+	"mime"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
@@ -38,6 +43,85 @@ type collectPreparedMedia struct {
 type collectPreparedMaterial struct {
 	Content *collectContentResult
 	Media   []collectPreparedMedia
+}
+
+type telegramCollectorMediaCacheState struct {
+	Fingerprint string
+	MD5         string
+	MimeType    string
+	Size        int64
+	Claimed     bool
+	Entry       *collectorin.MediaCacheEntry
+}
+
+func acquireTelegramCollectorMediaCache(ctx context.Context, mediaType, storagePath, md5Value string, size int64, mimeType string) (*telegramCollectorMediaCacheState, error) {
+	if !collectorservice.Collector().Enabled(ctx) {
+		return nil, nil
+	}
+	md5Value = strings.TrimSpace(md5Value)
+	mimeType = strings.TrimSpace(mimeType)
+	localPath := ""
+	if strings.TrimSpace(storagePath) != "" {
+		resolved, err := resolveMediaLocalPath(storagePath)
+		if err == nil {
+			localPath = resolved
+		}
+	}
+	if localPath != "" {
+		if size <= 0 {
+			if info, err := os.Stat(localPath); err == nil {
+				size = info.Size()
+			}
+		}
+		if md5Value == "" {
+			value, err := fileMD5(localPath)
+			if err != nil {
+				return nil, gerror.Wrap(err, "计算采集媒体MD5失败")
+			}
+			md5Value = value
+		}
+		if mimeType == "" {
+			mimeType = mime.TypeByExtension(strings.ToLower(filepath.Ext(localPath)))
+		}
+	}
+	if md5Value == "" || size <= 0 {
+		return nil, nil
+	}
+	fingerprint := collectorservice.BuildMediaFingerprint(md5Value, size, telegramCollectorMediaKind(mediaType), mimeType)
+	entry, ready, err := collectorservice.Collector().MediaCache(ctx, fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	state := &telegramCollectorMediaCacheState{Fingerprint: fingerprint, MD5: md5Value, MimeType: mimeType, Size: size}
+	if ready && entry != nil && strings.TrimSpace(entry.StoragePath) != "" {
+		state.Entry = entry
+		return state, nil
+	}
+	claimed, err := collectorservice.Collector().ClaimMediaProcessing(ctx, fingerprint, 30*time.Minute)
+	if err != nil {
+		return nil, err
+	}
+	if !claimed {
+		return nil, newCollectMediaRetryError("相同Telegram媒体正在由其他Worker处理，等待复用结果", 5*time.Second)
+	}
+	state.Claimed = true
+	return state, nil
+}
+
+func releaseTelegramCollectorMediaCache(ctx context.Context, state *telegramCollectorMediaCacheState, cause error) {
+	if state == nil || !state.Claimed || strings.TrimSpace(state.Fingerprint) == "" {
+		return
+	}
+	if err := collectorservice.Collector().ReleaseMediaProcessing(ctx, state.Fingerprint, cause); err != nil {
+		g.Log().Warningf(ctx, "释放Telegram采集媒体处理租约失败 fingerprint:%s err:%+v", state.Fingerprint, err)
+	}
+}
+
+func telegramCollectorMediaKind(mediaType string) string {
+	if strings.EqualFold(strings.TrimSpace(mediaType), "video") {
+		return collectorin.MediaKindVideo
+	}
+	return collectorin.MediaKindPhoto
 }
 
 func (s *sSysPublish) commitCollectMaterial(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (int64, error) {
@@ -85,9 +169,34 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 			fileURL := strings.TrimSpace(item.FileUrl)
 			mediaSize := mediaStorageSize(storagePath)
 			mediaMD5 := strings.TrimSpace(item.FileMd5)
-			if fileURL == "" && storagePath != "" {
+			cacheState, cacheErr := acquireTelegramCollectorMediaCache(ctx, mediaType, storagePath, mediaMD5, mediaSize, item.SourceMimeType)
+			if cacheErr != nil {
+				return nil, cacheErr
+			}
+			if cacheState != nil {
+				mediaMD5 = cacheState.MD5
+				mediaSize = cacheState.Size
+			}
+			var assets *mediaAssetMetadata
+			if cacheState != nil && cacheState.Entry != nil {
+				cachedPath := strings.TrimSpace(cacheState.Entry.StoragePath)
+				if strings.HasPrefix(cachedPath, "http://") || strings.HasPrefix(cachedPath, "https://") {
+					fileURL = cachedPath
+					storagePath = ""
+				} else if cachedPath != "" {
+					storagePath = normalizeStoredMediaPath(cachedPath)
+					fileURL = ""
+				}
+				assets = &mediaAssetMetadata{
+					PerceptualHash:    cacheState.Entry.PHash,
+					PosterURL:         cacheState.Entry.PosterStoragePath,
+					PosterStoragePath: cacheState.Entry.PosterStoragePath,
+				}
+			}
+			if assets == nil && fileURL == "" && storagePath != "" {
 				attachment, uploadErr := s.uploadCollectMediaToStorage(ctx, mediaType, storagePath)
 				if uploadErr != nil {
+					releaseTelegramCollectorMediaCache(ctx, cacheState, uploadErr)
 					return nil, gerror.Wrap(uploadErr, "保存采集媒体 CDN 资源失败")
 				}
 				fileURL = strings.TrimSpace(attachment.FileUrl)
@@ -101,12 +210,33 @@ func (s *sSysPublish) prepareCollectMaterialSnapshot(ctx context.Context, event 
 					mediaMD5 = strings.TrimSpace(attachment.Md5)
 				}
 				if fileURL == "" && storagePath == "" {
-					return nil, gerror.New("采集媒体上传完成但没有可用地址")
+					emptyErr := gerror.New("采集媒体上传完成但没有可用地址")
+					releaseTelegramCollectorMediaCache(ctx, cacheState, emptyErr)
+					return nil, emptyErr
 				}
 			}
-			assets, assetErr := processMediaAssetMetadata(ctx, mediaType, storagePath, fileURL, item.PosterUrl, "")
-			if assetErr != nil {
-				return nil, gerror.Wrap(assetErr, "处理采集媒体指纹失败")
+			if assets == nil {
+				var assetErr error
+				assets, assetErr = processMediaAssetMetadata(ctx, mediaType, storagePath, fileURL, item.PosterUrl, "")
+				if assetErr != nil {
+					releaseTelegramCollectorMediaCache(ctx, cacheState, assetErr)
+					return nil, gerror.Wrap(assetErr, "处理采集媒体指纹失败")
+				}
+				if cacheState != nil && cacheState.Claimed {
+					entry := &collectorin.MediaCacheEntry{
+						Fingerprint:       cacheState.Fingerprint,
+						StoragePath:       firstNonEmpty(storagePath, fileURL),
+						PosterStoragePath: firstNonEmpty(assetPosterStoragePath(assets), assetPosterURL(assets)),
+						PHash:             assetPerceptualHash(assets),
+						Kind:              telegramCollectorMediaKind(mediaType),
+						MimeType:          cacheState.MimeType,
+						Size:              mediaSize,
+					}
+					if saveErr := collectorservice.Collector().SaveMediaReady(ctx, entry, 0); saveErr != nil {
+						releaseTelegramCollectorMediaCache(ctx, cacheState, saveErr)
+						return nil, gerror.Wrap(saveErr, "保存Telegram采集媒体复用索引失败")
+					}
+				}
 			}
 			preparedMedia := collectPreparedMedia{
 				EventMediaId:      item.EventMediaId,

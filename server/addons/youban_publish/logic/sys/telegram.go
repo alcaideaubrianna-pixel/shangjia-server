@@ -23,5 +23,7 @@ func (s *sSysPublish) handleTelegramUpdate(ctx context.Context, botId int64, ten
 	if err := s.cacheBotMessage(ctx, tenantId, botId, msg); err != nil {
 		g.Log().Warningf(ctx, "缓存上架Bot频道消息失败 bot:%d chat:%d err:%+v", botId, msg.Chat.ID, err)
 	}
-	s.collectBotMessage(ctx, botId, msg)
+	if err := s.collectBotMessage(ctx, botId, msg); err != nil {
+		g.Log().Warningf(ctx, "处理Bot采集消息失败 bot:%d chat:%d message:%d err:%+v", botId, msg.Chat.ID, msg.ID, err)
+	}
 }

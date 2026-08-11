@@ -59,6 +59,12 @@ export default defineRailway(() => {
     YOUBAN_TELEMETRY_SECURE: "false",
     YOUBAN_TELEMETRY_SAMPLE_RATIO: "0.15",
     YOUBAN_TELEMETRY_METRICS_INTERVAL_SECONDS: "15",
+    YOUBAN_TELEGRAM_COLLECTOR_ENABLED: "false",
+    YOUBAN_TELEGRAM_COLLECTOR_CONCURRENCY: "12",
+    YOUBAN_TELEGRAM_COLLECTOR_RECOVERY_BATCH_SIZE: "200",
+    YOUBAN_TELEGRAM_DELIVERY_CONCURRENCY: "8",
+    YOUBAN_TELEGRAM_MEDIA_CONCURRENCY: "6",
+    YOUBAN_TELEGRAM_ACCOUNT_LEASE_SECONDS: "45",
   };
 
   const observe = service("xiaohuiji-observe", {
@@ -100,6 +106,7 @@ export default defineRailway(() => {
     env: {
       ...commonEnv,
       YOUBAN_RUNTIME_ROLES: "web",
+      YOUBAN_TELEMETRY_SERVICE_NAME: "xiaohuiji-api",
     },
   });
 
@@ -111,6 +118,43 @@ export default defineRailway(() => {
     env: {
       ...commonEnv,
       YOUBAN_RUNTIME_ROLES: "worker",
+      YOUBAN_TELEMETRY_SERVICE_NAME: "xiaohuiji-worker",
+    },
+  });
+
+  const collectorWorker = service("xiaohuiji-collector-worker", {
+    source: appImage,
+    start: "/app/hotgo collector-worker",
+    healthcheck: "/readyz",
+    replicas: { [singapore]: 1 },
+    env: {
+      ...commonEnv,
+      YOUBAN_RUNTIME_ROLES: "collector-worker",
+      YOUBAN_TELEMETRY_SERVICE_NAME: "xiaohuiji-collector-worker",
+    },
+  });
+
+  const mediaWorker = service("xiaohuiji-media-worker", {
+    source: appImage,
+    start: "/app/hotgo media-worker",
+    healthcheck: "/readyz",
+    replicas: { [singapore]: 1 },
+    env: {
+      ...commonEnv,
+      YOUBAN_RUNTIME_ROLES: "media-worker",
+      YOUBAN_TELEMETRY_SERVICE_NAME: "xiaohuiji-media-worker",
+    },
+  });
+
+  const publishWorker = service("xiaohuiji-publish-worker", {
+    source: appImage,
+    start: "/app/hotgo publish-worker",
+    healthcheck: "/readyz",
+    replicas: { [singapore]: 1 },
+    env: {
+      ...commonEnv,
+      YOUBAN_RUNTIME_ROLES: "push-worker",
+      YOUBAN_TELEMETRY_SERVICE_NAME: "xiaohuiji-publish-worker",
     },
   });
 
@@ -122,6 +166,7 @@ export default defineRailway(() => {
     env: {
       ...commonEnv,
       YOUBAN_RUNTIME_ROLES: "account",
+      YOUBAN_TELEMETRY_SERVICE_NAME: "xiaohuiji-account",
     },
   });
 
@@ -133,11 +178,25 @@ export default defineRailway(() => {
     env: {
       ...commonEnv,
       YOUBAN_RUNTIME_ROLES: "scheduler",
+      YOUBAN_TELEMETRY_SERVICE_NAME: "xiaohuiji-scheduler",
       YOUBAN_TCP_CRON_ADDRESS: "xiaohuiji-api.railway.internal:8099",
     },
   });
 
   return project("xiaohuiji-production", {
-    resources: [database, cache, observeData, observe, collector, api, worker, account, scheduler],
+    resources: [
+      database,
+      cache,
+      observeData,
+      observe,
+      collector,
+      api,
+      worker,
+      collectorWorker,
+      mediaWorker,
+      publishWorker,
+      account,
+      scheduler,
+    ],
   });
 });

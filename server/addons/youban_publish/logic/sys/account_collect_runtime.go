@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
+	collectorservice "hotgo/addons/telegram_collector/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -213,17 +215,27 @@ func (w *accountCollectWorker) run(ctx context.Context) {
 		close(w.done)
 	}()
 	defer w.clearListenerGroups()
-	accountLock, err := acquireTelegramAccountClientLeaseWait(ctx, w.tgAccountId, func(waitErr error) {
-		g.Log().Infof(ctx, "账号采集 worker 等待旧实例连接租约释放 tgAccountId:%d err:%+v", w.tgAccountId, waitErr)
-	})
+	leaseTTL := time.Duration(g.Cfg().MustGet(ctx, "telegramCollector.account.leaseSeconds", 120).Int()) * time.Second
+	if leaseTTL < 30*time.Second {
+		leaseTTL = 30 * time.Second
+	}
+	accountLease, acquired, err := collectorservice.AccountLeaseManager().Acquire(ctx, w.tgAccountId, telegramCollectorAccountInstanceID(), leaseTTL)
 	if err != nil {
 		if !isContextDone(ctx) {
 			g.Log().Warningf(ctx, "账号采集 worker 获取集群连接租约失败 tgAccountId:%d err:%+v", w.tgAccountId, err)
 		}
 		return
 	}
+	if !acquired {
+		g.Log().Infof(ctx, "账号采集 worker 等待其他实例释放连接租约 tgAccountId:%d", w.tgAccountId)
+		return
+	}
 	g.Log().Infof(ctx, "账号采集 worker 已取得集群连接租约 tgAccountId:%d", w.tgAccountId)
-	defer func() { _ = accountLock.Unlock(context.Background()) }()
+	defer func() {
+		if releaseErr := collectorservice.AccountLeaseManager().Release(context.Background(), accountLease); releaseErr != nil {
+			g.Log().Warningf(context.Background(), "账号采集 worker 释放集群连接租约失败 tgAccountId:%d err:%+v", w.tgAccountId, releaseErr)
+		}
+	}()
 	sources, listeners := w.configSnapshot()
 	g.Log().Infof(ctx, "账号采集 worker 启动 tgAccountId:%d sources:%d listeners:%d listenerTargets:%d", w.tgAccountId, len(sources), len(listeners), accountListenerTargetCount(listeners))
 	defer g.Log().Infof(context.Background(), "账号采集 worker 停止 tgAccountId:%d", w.tgAccountId)
@@ -234,6 +246,19 @@ func (w *accountCollectWorker) run(ctx context.Context) {
 		}
 		g.Log().Warningf(ctx, "账号采集 worker 异常 tgAccountId:%d err:%+v", w.tgAccountId, err)
 	}
+}
+
+func telegramCollectorAccountInstanceID() string {
+	for _, key := range []string{"RAILWAY_REPLICA_ID", "RAILWAY_DEPLOYMENT_ID", "HOSTNAME"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return fmt.Sprintf("%s:%d", value, os.Getpid())
+		}
+	}
+	hostname, err := os.Hostname()
+	if err == nil && strings.TrimSpace(hostname) != "" {
+		return fmt.Sprintf("%s:%d", hostname, os.Getpid())
+	}
+	return fmt.Sprintf("local:%d", os.Getpid())
 }
 
 func (w *accountCollectWorker) updateConfig(signature string, sources []accountCollectSourceRuntime, listeners []accountListenPlanRuntime) bool {
