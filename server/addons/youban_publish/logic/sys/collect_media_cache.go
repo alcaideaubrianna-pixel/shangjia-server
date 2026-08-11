@@ -915,7 +915,21 @@ func (s *sSysPublish) downloadBotTelegramMedia(ctx context.Context, tenantId int
 	if strings.TrimSpace(path) == "" {
 		return nil, gerror.New("Bot媒体文件下载完成但缓存路径为空")
 	}
-	return &collectDownloadedMedia{Path: path, Item: item}, nil
+	attachment, err := s.uploadCollectMediaToStorage(ctx, item.Type, path)
+	if err != nil {
+		return nil, gerror.Wrap(err, "Bot采集媒体上传云存储失败")
+	}
+	if attachment == nil || (strings.TrimSpace(attachment.FileUrl) == "" && strings.TrimSpace(attachment.Path) == "") {
+		return nil, gerror.New("Bot采集媒体上传云存储未返回有效地址")
+	}
+	item.FileUrl = strings.TrimSpace(attachment.FileUrl)
+	item.StoragePath = normalizeStoredMediaPath(attachment.Path)
+	return &collectDownloadedMedia{
+		AttachmentId: attachment.Id,
+		FileUrl:      item.FileUrl,
+		Path:         firstNonEmpty(item.StoragePath, item.FileUrl),
+		Item:         item,
+	}, nil
 }
 
 func collectMediaSourceGone(err error) bool {
