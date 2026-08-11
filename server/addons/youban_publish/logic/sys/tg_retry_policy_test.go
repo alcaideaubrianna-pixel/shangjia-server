@@ -83,24 +83,6 @@ func TestTelegramSlowModeErrorIsDetected(t *testing.T) {
 	}
 }
 
-func TestTelegramChannelNextSendDelay(t *testing.T) {
-	location := time.FixedZone("Asia/Shanghai", 8*60*60)
-	lastSentAt := gtime.New(time.Date(2026, 8, 11, 13, 0, 0, 0, location))
-	now := gtime.New(time.Date(2026, 8, 11, 13, 0, 20, 0, location))
-	if got := telegramChannelNextSendDelay(lastSentAt, now, 30*time.Second); got != 10*time.Second {
-		t.Fatalf("expected 10 seconds remaining, got %s", got)
-	}
-	if got := telegramChannelNextSendDelay(lastSentAt, now, 15*time.Second); got != 0 {
-		t.Fatalf("expected no delay after interval elapsed, got %s", got)
-	}
-}
-
-func TestTelegramChannelNextSendDelayHandlesMissingTime(t *testing.T) {
-	if got := telegramChannelNextSendDelay(nil, gtime.Now(), 30*time.Second); got != 0 {
-		t.Fatalf("expected no delay when last sent time is missing, got %s", got)
-	}
-}
-
 func assertError(message string) error {
 	return simpleError(message)
 }

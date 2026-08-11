@@ -159,6 +159,15 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 		return err
 	}
 	if !shouldEnqueue {
+		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", jobId).
+			WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+			Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
+			Data(g.Map{
+				"next_retry_at":       gtime.Now().Add(15 * time.Second),
+				"last_dispatch_error": "同频道已有活动任务，等待当前任务完成后唤醒",
+				"updated_at":          gtime.Now(),
+			}).Update()
 		return nil
 	}
 	if active, checkErr := s.telegramJobChannelIsActive(ctx, job); checkErr != nil {

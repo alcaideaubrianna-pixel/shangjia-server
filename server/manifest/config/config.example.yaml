@@ -377,7 +377,6 @@ youbanPublish:
   queue:
     accountBusyTimeoutSeconds: 10
     publishQueueShards: 16
-    channelSendIntervalSeconds: 30
 
 
 # 悦伴全局 Bot
