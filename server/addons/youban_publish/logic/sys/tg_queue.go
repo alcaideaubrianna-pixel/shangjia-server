@@ -154,6 +154,13 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	if err != nil {
 		return err
 	}
+	shouldEnqueue, err := s.shouldEnqueueTelegramChannelJob(ctx, job)
+	if err != nil {
+		return err
+	}
+	if !shouldEnqueue {
+		return nil
+	}
 	if active, checkErr := s.telegramJobChannelIsActive(ctx, job); checkErr != nil {
 		return checkErr
 	} else if !active {
