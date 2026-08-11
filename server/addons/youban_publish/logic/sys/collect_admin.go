@@ -42,6 +42,17 @@ func (s *sSysPublish) CollectSourceList(ctx context.Context, in *sysin.CollectSo
 	if err = mod.Page(in.Page, in.PerPage).OrderDesc("id").Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取采集源失败")
 	}
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		item.HistoryCollectEnabled, item.HistoryCollectMode, item.HistoryCollectDays = sysin.NormalizeCollectHistoryConfig(
+			item.SourceType,
+			item.HistoryCollectEnabled,
+			item.HistoryCollectMode,
+			item.HistoryCollectDays,
+		)
+	}
 	if err = s.fillCollectSourceRules(ctx, list); err != nil {
 		return nil, 0, err
 	}
@@ -125,7 +136,7 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 		return s.saveCollectSourceRules(ctx, tx, account.TenantId, id, in.RuleIds)
 	})
 	if err == nil && id > 0 && in.HistoryCollectEnabled == 1 {
-		go s.maybeCreateCollectHistoryTask(context.Background(), id, account.TenantId, account.Id)
+		s.maybeCreateCollectHistoryTask(context.Background(), id, account.TenantId, account.Id)
 	}
 	if err == nil {
 		s.refreshCollectEventRulesCache(ctx)
