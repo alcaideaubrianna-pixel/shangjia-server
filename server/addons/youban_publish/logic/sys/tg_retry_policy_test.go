@@ -74,6 +74,15 @@ func TestTelegramJobFailureNextStateUsesTerminalRule(t *testing.T) {
 	}
 }
 
+func TestTelegramSlowModeErrorIsDetected(t *testing.T) {
+	if !isTelegramSlowModeError(assertError("rpc error: SLOWMODE_WAIT (9)")) {
+		t.Fatal("SLOWMODE_WAIT must be detected")
+	}
+	if isTelegramSlowModeError(assertError("too many requests: retry after 9")) {
+		t.Fatal("generic rate limit must not be treated as channel slow mode")
+	}
+}
+
 func assertError(message string) error {
 	return simpleError(message)
 }

@@ -228,7 +228,15 @@ func (s *sSysPublish) advanceFullPushBatch(ctx context.Context, batch fullPushBa
 	if batch.Status == fullPushBatchDispatching {
 		return s.finalizeFullPushBatch(ctx, batch)
 	}
-	_, err := g.DB().Model(publishFullPushBatchTable).Safe().Ctx(ctx).
+	pendingJobs, err := s.fullPushPendingJobCount(ctx, batch.TenantId, batch.ChannelId)
+	if err != nil {
+		return s.retryFullPushBatch(ctx, batch, err)
+	}
+	if pendingJobs >= fullPushPendingJobLimit(ctx) {
+		g.Log().Debugf(ctx, "全量推送达到频道待发送水位，暂停展开 batch:%s channelId:%d pending:%d limit:%d", batch.BatchNo, batch.ChannelId, pendingJobs, fullPushPendingJobLimit(ctx))
+		return nil
+	}
+	_, err = g.DB().Model(publishFullPushBatchTable).Safe().Ctx(ctx).
 		Where("id", batch.Id).
 		WhereIn("status", []string{fullPushBatchPending, fullPushBatchRunning}).
 		Data(g.Map{"status": fullPushBatchRunning, "updated_at": gtime.Now()}).
@@ -267,6 +275,21 @@ func (s *sSysPublish) advanceFullPushBatch(ctx context.Context, batch fullPushBa
 		return s.beginFullPushDispatch(ctx, batch)
 	}
 	return nil
+}
+
+func (s *sSysPublish) fullPushPendingJobCount(ctx context.Context, tenantId, channelId int64) (int, error) {
+	if tenantId <= 0 || channelId <= 0 {
+		return 0, nil
+	}
+	count, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("channel_id", channelId).
+		WhereIn("status", []string{"pending", "failed_retry", "sending", "unknown"}).
+		Count()
+	if err != nil {
+		return 0, gerror.Wrap(err, "统计频道待发送TG任务失败")
+	}
+	return count, nil
 }
 
 func newFullPushBatchNo(channelId, timestampNano int64) string {
