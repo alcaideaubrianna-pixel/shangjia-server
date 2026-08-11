@@ -72,7 +72,7 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 		text = strings.TrimSpace(rule["header_markdown"].String()) + "\n\n" + text
 	}
 	if rule["footer_enabled"].Int() == 1 && strings.TrimSpace(rule["footer_markdown"].String()) != "" {
-		text = strings.TrimSpace(text + "\n\n" + strings.TrimSpace(rule["footer_markdown"].String()))
+		text = strings.TrimSpace(text + "\n" + strings.TrimSpace(rule["footer_markdown"].String()))
 	}
 	return &collectRuleDecision{
 		Matched:   true,

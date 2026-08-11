@@ -4,7 +4,26 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/gogf/gf/v2/container/gvar"
+	"github.com/gogf/gf/v2/database/gdb"
 )
+
+func TestBuildCollectRuleDecisionAppendsFooterWithoutBlankLine(t *testing.T) {
+	event := gdb.Record{
+		"raw_text":    gvar.New("今日资料\n编号：R25318"),
+		"media_count": gvar.New(1),
+	}
+	rule := gdb.Record{
+		"footer_enabled":  gvar.New(1),
+		"footer_markdown": gvar.New("联系客服：@xiaohuiji"),
+	}
+
+	decision := buildCollectRuleDecision(event, nil, rule)
+	if got, want := decision.Text, "今日资料\n编号：R25318\n联系客服：@xiaohuiji"; got != want {
+		t.Fatalf("decision text = %q, want %q", got, want)
+	}
+}
 
 func collectDedupeMaterialFromValues(textHash string, mediaJSON string) collectDedupeMaterial {
 	items := make([]collectMediaItem, 0)
