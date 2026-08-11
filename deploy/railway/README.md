@@ -4,7 +4,14 @@
 
 项目级 Railway Infrastructure as Code 位于 `.railway/railway.ts`，负责声明 PostgreSQL、Redis、三个运行服务、Singapore 区域和基础环境变量。它不是 Template，不会替代 Railway 项目本身；首次使用前先确认镜像地址和 Railway 项目环境。
 
-推荐三个服务都使用 CI 已发布的 GHCR `main` 标签，例如 `ghcr.io/<owner>/youban-server:main`。每次发布仍同时保留 `sha-xxxxxxx` 不可变标签用于审计和回滚。
+三个服务必须使用同一个不可变镜像标签。推荐使用发布标签或 CI 生成的 SHA 标签，例如：
+
+```text
+ghcr.io/<owner>/youban-server:v20260811-01
+ghcr.io/<owner>/youban-server:sha-xxxxxxx
+```
+
+禁止使用 `main`、`latest` 等可变标签作为生产部署版本，避免多分支构建互相覆盖。
 
 ## API Service
 
@@ -58,25 +65,35 @@ Railway IaC 使用根目录 `package.json` 中的 `railway` TypeScript SDK，要
 
 第一次执行 `config plan` 必须先确认资源名称和变更内容。若 Railway 项目中已经手动创建了同名服务或数据库，先核对 CLI 的资源匹配结果，不要直接创建重复的 PostgreSQL 或 Redis。
 
-配置文件中的 GHCR 镜像目前是：
+配置文件不会内置镜像标签，执行 IaC 时必须显式传入完整镜像引用：
 
 ```text
-ghcr.io/mjiadfwaff-bot/youban-server:main
+YOUBAN_RAILWAY_IMAGE=ghcr.io/<owner>/youban-server:sha-xxxxxxx
 ```
 
-如果仓库迁移到其他 GitHub Owner，需要同步修改 `.railway/railway.ts` 的 `imageRef`。私有 GHCR 镜像还需要在 Railway 配置 Registry 凭证。
+如果仓库迁移到其他 GitHub Owner，只需要修改命令中的镜像地址，不需要修改 IaC 文件。私有 GHCR 镜像还需要在 Railway 配置 Registry 凭证。
 
 `railway config apply` 只负责项目资源和服务配置，不负责构建镜像。镜像仍由 GitHub Actions 构建并推送。
 
+使用指定标签部署：
+
+```bash
+export YOUBAN_RAILWAY_IMAGE=ghcr.io/<owner>/youban-server:v20260811-01
+npx -y @railway/cli@latest config plan
+npx -y @railway/cli@latest config apply
+```
+
+切换到另一个版本时，只替换 `YOUBAN_RAILWAY_IMAGE`，重新执行 `config plan` 和 `config apply`。三个服务会统一切换到同一个镜像版本。
+
 ## 自动部署
 
-当前 GitHub Actions 已负责构建并推送 `main`、`latest` 和 `sha-xxxxxxx` 镜像。首次部署建议先手动执行 `railway config apply` 并验证三种角色稳定，再在镜像构建成功的 Job 后追加 Railway CLI 自动发布：
+当前 GitHub Actions 负责构建并推送分支、发布标签和 `sha-xxxxxxx` 镜像。生产部署只选择明确的发布标签或 SHA 标签，不直接部署分支标签：
 
 1. Redeploy Worker
 2. Redeploy Runtime
 3. Redeploy API
 
-生产环境只允许 `main` 分支触发自动发布，建议使用 GitHub `production` Environment 保存 `RAILWAY_TOKEN` 并按需开启人工审批。不要让三个 Railway Service 分别从 GitHub 重复构建同一个 Dockerfile。
+自动发布时，GitHub Actions 将 `YOUBAN_RAILWAY_IMAGE` 设置为本次构建产生的完整标签，再执行 Railway IaC。建议使用 GitHub `production` Environment 保存 `RAILWAY_TOKEN` 并按需开启人工审批。不要让三个 Railway Service 分别从 GitHub 重复构建同一个 Dockerfile。
 
 ## 推荐上线顺序
 

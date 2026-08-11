@@ -7,8 +7,14 @@ import {
   service,
 } from "railway/iac";
 
-const imageRef = "ghcr.io/mjiadfwaff-bot/youban-server:main";
+const imageRef = process.env.YOUBAN_RAILWAY_IMAGE?.trim();
 const singapore = "asia-southeast1-eqsg3a";
+
+if (!imageRef) {
+  throw new Error(
+    "YOUBAN_RAILWAY_IMAGE is required, for example ghcr.io/<owner>/youban-server:sha-abc1234",
+  );
+}
 
 export default defineRailway(() => {
   const database = postgres("Postgres");
