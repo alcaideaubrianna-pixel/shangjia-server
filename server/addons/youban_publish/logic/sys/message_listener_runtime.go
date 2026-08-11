@@ -271,7 +271,7 @@ func (w *accountCollectWorker) handleListenerMessage(ctx context.Context, entiti
 	if w == nil || msg == nil {
 		return
 	}
-	_, listeners := w.configSnapshot()
+	listeners := w.configSnapshot()
 	if len(listeners) == 0 {
 		return
 	}
@@ -315,7 +315,7 @@ func (w *accountCollectWorker) handleListenerMessageGroup(ctx context.Context, g
 	if w == nil || group == nil || len(group.messages) == 0 {
 		return
 	}
-	_, listeners := w.configSnapshot()
+	listeners := w.configSnapshot()
 	if len(listeners) == 0 {
 		return
 	}

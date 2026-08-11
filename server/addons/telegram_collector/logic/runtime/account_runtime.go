@@ -29,11 +29,13 @@ type accountRuntime struct {
 }
 
 type accountWorker struct {
+	bindingMu  sync.RWMutex
 	binding    *sysin.AccountRuntimeBinding
 	session    collectorservice.AccountRuntimeSession
 	cancel     context.CancelFunc
 	done       chan struct{}
 	operations chan accountOperationTask
+	messages   chan accountMessageTask
 	gate       sync.RWMutex
 }
 
@@ -173,7 +175,7 @@ func (r *accountRuntime) sync(ctx context.Context) {
 		}
 		active[binding.AccountID] = struct{}{}
 		if worker := r.workers[binding.AccountID]; worker != nil && !worker.isDone() {
-			worker.binding = binding
+			worker.updateBinding(binding)
 			worker.session.UpdateAccountRuntime(binding)
 			continue
 		}
@@ -186,7 +188,10 @@ func (r *accountRuntime) sync(ctx context.Context) {
 			continue
 		}
 		workerCtx, cancel := context.WithCancel(ctx)
-		worker := &accountWorker{binding: binding, session: session, cancel: cancel, done: make(chan struct{}), operations: make(chan accountOperationTask, 256)}
+		worker := &accountWorker{
+			binding: binding, session: session, cancel: cancel, done: make(chan struct{}),
+			operations: make(chan accountOperationTask, 256), messages: make(chan accountMessageTask, 4096),
+		}
 		r.workers[binding.AccountID] = worker
 		workerGauge, _ := accountRuntimeMeter.Int64UpDownCounter("telegram_account_runtime_workers")
 		workerGauge.Add(ctx, 1)
@@ -250,7 +255,11 @@ func (w *accountWorker) run(ctx context.Context) {
 	if leaseTTL < 30*time.Second {
 		leaseTTL = 30 * time.Second
 	}
-	lease, acquired, err := collectorservice.AccountLeaseManager().Acquire(ctx, w.binding.AccountID, accountRuntimeInstanceID(), leaseTTL)
+	binding := w.bindingSnapshot()
+	if binding == nil || binding.AccountID <= 0 {
+		return
+	}
+	lease, acquired, err := collectorservice.AccountLeaseManager().Acquire(ctx, binding.AccountID, accountRuntimeInstanceID(), leaseTTL)
 	leaseResult := "acquired"
 	if err != nil {
 		leaseResult = "error"
@@ -261,7 +270,7 @@ func (w *accountWorker) run(ctx context.Context) {
 	leaseCounter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", leaseResult)))
 	if err != nil || !acquired {
 		if err != nil {
-			g.Log().Warningf(ctx, "获取Telegram账号运行租约失败 accountId:%d err:%+v", w.binding.AccountID, err)
+			g.Log().Warningf(ctx, "获取Telegram账号运行租约失败 accountId:%d err:%+v", binding.AccountID, err)
 		}
 		return
 	}
@@ -269,7 +278,7 @@ func (w *accountWorker) run(ctx context.Context) {
 	startCounter, _ := accountRuntimeMeter.Int64Counter("telegram_account_runtime_starts_total")
 	startCounter.Add(ctx, 1)
 	dispatcher := tg.NewUpdateDispatcher()
-	w.session.BindAccountRuntimeHandlers(dispatcher)
+	w.bindAccountMessageHandlers(dispatcher)
 	client, err := w.session.NewAccountRuntimeClient(ctx, dispatcher)
 	if err != nil {
 		w.session.HandleAccountRuntimeError(ctx, err)
@@ -280,6 +289,7 @@ func (w *accountWorker) run(ctx context.Context) {
 			return selfErr
 		}
 		w.session.StartAccountRuntime(runCtx, client)
+		go w.runAccountMessageLoop(runCtx)
 		go w.runOperations(runCtx, client)
 		go RunAccountTaskLoop(runCtx, client, lease, w.gate.RLocker())
 		<-runCtx.Done()
@@ -288,6 +298,29 @@ func (w *accountWorker) run(ctx context.Context) {
 	if err != nil && ctx.Err() == nil {
 		w.session.HandleAccountRuntimeError(ctx, err)
 	}
+}
+
+func (w *accountWorker) updateBinding(binding *sysin.AccountRuntimeBinding) {
+	if w == nil || binding == nil {
+		return
+	}
+	w.bindingMu.Lock()
+	w.binding = binding
+	w.bindingMu.Unlock()
+}
+
+func (w *accountWorker) bindingSnapshot() *sysin.AccountRuntimeBinding {
+	if w == nil {
+		return nil
+	}
+	w.bindingMu.RLock()
+	defer w.bindingMu.RUnlock()
+	if w.binding == nil {
+		return nil
+	}
+	copyBinding := *w.binding
+	copyBinding.Sources = append([]sysin.AccountRuntimeSource(nil), w.binding.Sources...)
+	return &copyBinding
 }
 
 func (w *accountWorker) runOperations(ctx context.Context, client *telegram.Client) {

@@ -42,13 +42,26 @@ type AccountTaskHandler interface {
 	HandleAccountTask(ctx context.Context, client *telegram.Client, task *sysin.AccountTask) (*sysin.AccountMediaDownloadResult, error)
 }
 
+type AccountMediaProvider interface {
+	ResolvePeer(ctx context.Context, tenantID, accountID int64, chatID string, client *telegram.Client) (tg.InputPeerClass, error)
+	StoreMedia(ctx context.Context, task *sysin.AccountTask, localPath string) (*sysin.AccountMediaDownloadResult, error)
+}
+
+type IAccountHistory interface {
+	FetchPage(ctx context.Context, client *telegram.Client, request *sysin.AccountHistoryPageRequest) ([]*tg.Message, error)
+	RetryDelay(err error) (time.Duration, bool)
+}
+
 type AccountRuntimeSession interface {
 	UpdateAccountRuntime(binding *sysin.AccountRuntimeBinding) bool
-	BindAccountRuntimeHandlers(dispatcher tg.UpdateDispatcher)
 	NewAccountRuntimeClient(ctx context.Context, dispatcher tg.UpdateDispatcher) (*telegram.Client, error)
 	StartAccountRuntime(ctx context.Context, client *telegram.Client)
 	StopAccountRuntime()
 	HandleAccountRuntimeError(ctx context.Context, err error)
+}
+
+type AccountRuntimeMessageObserver interface {
+	HandleAccountRuntimeMessage(ctx context.Context, entities tg.Entities, message *tg.Message, chatIDs []string)
 }
 
 type AccountRuntimeProvider interface {
@@ -84,6 +97,8 @@ var localAccountTasks IAccountTasks
 var accountTaskHandlers = map[string]AccountTaskHandler{}
 var localAccountRuntime IAccountRuntime
 var localAccountRuntimeProvider AccountRuntimeProvider
+var localAccountMediaProvider AccountMediaProvider
+var localAccountHistory IAccountHistory
 
 func Collector() ICollector {
 	if localCollector == nil {
@@ -115,6 +130,12 @@ func RegisterAccountTaskHandler(taskType string, handler AccountTaskHandler) {
 }
 
 func AccountTaskHandlerFor(taskType string) AccountTaskHandler { return accountTaskHandlers[taskType] }
+
+func AccountMedia() AccountMediaProvider              { return localAccountMediaProvider }
+func RegisterAccountMedia(value AccountMediaProvider) { localAccountMediaProvider = value }
+
+func AccountHistory() IAccountHistory              { return localAccountHistory }
+func RegisterAccountHistory(value IAccountHistory) { localAccountHistory = value }
 
 func AccountRuntime() IAccountRuntime                        { return localAccountRuntime }
 func RegisterAccountRuntime(value IAccountRuntime)           { localAccountRuntime = value }

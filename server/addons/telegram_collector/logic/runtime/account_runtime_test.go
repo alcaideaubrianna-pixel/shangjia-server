@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/tg"
+
+	"hotgo/addons/telegram_collector/model/input/sysin"
 )
 
 func TestAccountRuntimeRefreshCoalescesSignals(t *testing.T) {
@@ -41,5 +44,40 @@ func TestAccountRuntimeExecuteWithoutWorker(t *testing.T) {
 	used, err := runtime.Execute(context.Background(), 9, time.Second, func(context.Context, *telegram.Client) error { return nil })
 	if err != nil || used {
 		t.Fatalf("execute used=%t err=%v", used, err)
+	}
+}
+
+func TestAccountMessageEventPreservesMediaGroupAndMetadata(t *testing.T) {
+	message := &tg.Message{
+		ID: 17, Date: 1786435200, Message: "资料正文",
+		PeerID: &tg.PeerChannel{ChannelID: 123},
+	}
+	message.SetMedia(&tg.MessageMediaPhoto{Photo: &tg.Photo{
+		ID: 88, AccessHash: 99, FileReference: []byte("ref"), DCID: 2,
+		Sizes: []tg.PhotoSizeClass{&tg.PhotoSize{Type: "x", W: 800, H: 600, Size: 1024}},
+	}})
+	message.SetGroupedID(9001)
+	event := accountMessageEvent(&sysin.AccountRuntimeBinding{AccountID: 5}, accountMessageTask{
+		source:  sysin.AccountRuntimeSource{TenantID: 1, AccountID: 2, SourceID: 3},
+		message: message, chatID: "-100123",
+	})
+	if event == nil || event.SourceGroupedID != "9001" || len(event.Media) != 1 {
+		t.Fatalf("unexpected event: %+v", event)
+	}
+	media := event.Media[0]
+	if media.SourceMediaID != 88 || media.SourceAccessHash != 99 || media.SourceThumbSize != "x" {
+		t.Fatalf("unexpected media metadata: %+v", media)
+	}
+}
+
+func TestMatchAccountRuntimeSourcesSupportsChannelFormats(t *testing.T) {
+	sources := []sysin.AccountRuntimeSource{
+		{SourceID: 1, ChatID: "123"},
+		{SourceID: 2, ChatID: "-100123"},
+		{SourceID: 3, ChatID: "999"},
+	}
+	matches := matchAccountRuntimeSources(sources, []string{"123", "-100123"})
+	if len(matches) != 2 || matches[0].SourceID != 1 || matches[1].SourceID != 2 {
+		t.Fatalf("unexpected matches: %+v", matches)
 	}
 }

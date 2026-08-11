@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/tg"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -21,6 +22,8 @@ type publishCollectorDeliveryHandler struct {
 
 type publishCollectorAccountTaskHandler struct{ publish *sSysPublish }
 
+type publishCollectorAccountMediaProvider struct{ publish *sSysPublish }
+
 func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (*collectorin.AccountMediaDownloadResult, error) {
 	if h == nil || h.publish == nil || task == nil {
 		return nil, gerror.New("Telegram账号任务处理参数无效")
@@ -28,44 +31,32 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Conte
 	switch task.TaskType {
 	case collectorin.AccountTaskTypeHistoryPage:
 		return nil, h.publish.handleCollectHistoryAccountTask(ctx, client, task.HistoryTaskID)
-	case collectorin.AccountTaskTypeMediaDownload:
-		return h.publish.handleAccountMediaDownloadTask(ctx, client, task)
 	default:
 		return nil, gerror.Newf("不支持的Telegram账号任务类型：%s", task.TaskType)
 	}
 }
 
-func (s *sSysPublish) handleAccountMediaDownloadTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (*collectorin.AccountMediaDownloadResult, error) {
-	item := collectMediaItemFromCollector(task.Media)
+func (p *publishCollectorAccountMediaProvider) ResolvePeer(ctx context.Context, tenantID, accountID int64, chatID string, client *telegram.Client) (tg.InputPeerClass, error) {
+	if p == nil || p.publish == nil {
+		return nil, gerror.New("Telegram账号媒体 Peer 解析器未初始化")
+	}
+	return p.publish.collectMediaInputPeer(ctx, tenantID, accountID, client, chatID)
+}
+
+func (p *publishCollectorAccountMediaProvider) StoreMedia(ctx context.Context, task *collectorin.AccountTask, localPath string) (*collectorin.AccountMediaDownloadResult, error) {
+	if p == nil || p.publish == nil || task == nil {
+		return nil, gerror.New("Telegram账号媒体存储参数无效")
+	}
 	ctx = collectMediaRuntimeContext(ctx, task.MediaOwnerAccountID)
-	downloaded, err := s.downloadTelegramMediaWithRefresh(ctx, task.TenantID, task.AccountID, item, client)
-	if err != nil {
-		if collectMediaSourceGone(err) {
-			return &collectorin.AccountMediaDownloadResult{
-				Media: collectorMediaItemFromCollect(item), ErrorCode: "source_gone", ErrorMessage: err.Error(),
-			}, nil
-		}
-		return nil, err
-	}
-	if downloaded == nil || strings.TrimSpace(downloaded.Path) == "" {
-		return nil, gerror.New("账号媒体下载完成但未返回本地缓存文件")
-	}
-	attachment, err := s.uploadCollectMediaToStorage(ctx, item.Type, downloaded.Path)
+	attachment, err := p.publish.uploadCollectMediaToStorage(ctx, task.Media.Type, localPath)
 	if err != nil {
 		return nil, err
 	}
-	resultItem := downloaded.Item
-	if strings.TrimSpace(resultItem.FileId) == "" {
-		resultItem = item
-	}
-	resultItem.FileUrl = strings.TrimSpace(attachment.FileUrl)
-	resultItem.StoragePath = normalizeStoredMediaPath(attachment.Path)
-	resultItem.DebugMetaJson = firstNonEmpty(downloaded.MetaJson, resultItem.DebugMetaJson)
+	item := task.Media
+	item.FileURL = strings.TrimSpace(attachment.FileUrl)
+	item.StoragePath = normalizeStoredMediaPath(attachment.Path)
 	return &collectorin.AccountMediaDownloadResult{
-		AttachmentID: attachment.Id,
-		FileURL:      resultItem.FileUrl,
-		StoragePath:  resultItem.StoragePath,
-		Media:        collectorMediaItemFromCollect(resultItem),
+		AttachmentID: attachment.Id, FileURL: item.FileURL, StoragePath: item.StoragePath, Media: item,
 	}, nil
 }
 

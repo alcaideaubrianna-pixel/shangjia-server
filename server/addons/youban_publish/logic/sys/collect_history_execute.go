@@ -250,27 +250,17 @@ func collectHistoryNextOffset(current int, messages []*tg.Message) int {
 }
 
 func collectHistoryPage(ctx context.Context, client *telegram.Client, channelID int64, accessHash int64, offsetID int, limit int) ([]*tg.Message, error) {
-	var res tg.MessagesMessagesClass
-	var err error
-	for attempt := 0; attempt < 3; attempt++ {
-		res, err = client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
-			Peer:     &tg.InputPeerChannel{ChannelID: channelID, AccessHash: accessHash},
-			OffsetID: offsetID,
-			Limit:    limit,
-		})
-		if err == nil {
-			return tgHistoryMessages(res), nil
-		}
-		delay := tgRepairBackoffDelay(attempt, err)
-		if collectHistoryIsFloodWait(err) {
-			return nil, &collectHistoryPauseError{delay: delay, err: err}
-		}
-		if !isTgRepairRetryableErr(err) || attempt == 2 {
-			return nil, gerror.Wrap(err, "拉取历史消息失败")
-		}
-		time.Sleep(delay)
+	history := collectorservice.AccountHistory()
+	if history == nil {
+		return nil, gerror.New("Telegram历史采集执行器未注册")
 	}
-	return tgHistoryMessages(res), nil
+	messages, err := history.FetchPage(ctx, client, &collectorin.AccountHistoryPageRequest{
+		ChannelID: channelID, AccessHash: accessHash, OffsetID: offsetID, Limit: limit,
+	})
+	if delay, ok := history.RetryDelay(err); ok {
+		return nil, &collectHistoryPauseError{delay: delay, err: err}
+	}
+	return messages, err
 }
 
 func collectHistoryNextPageLimit(pendingCount int, pendingLimit int) int {

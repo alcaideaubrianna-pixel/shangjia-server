@@ -55,24 +55,16 @@ func TestCollectHistoryTransientClientError(t *testing.T) {
 func TestAccountCollectWorkerConfigHotUpdate(t *testing.T) {
 	worker := &accountCollectWorker{
 		signature: "old",
-		sources:   []accountCollectSourceRuntime{{Id: 1}},
 	}
-	changed := worker.updateConfig(
-		"new",
-		[]accountCollectSourceRuntime{{Id: 20}},
-		[]accountListenPlanRuntime{{Id: 30}},
-	)
+	changed := worker.updateConfig("new", []accountListenPlanRuntime{{Id: 30}})
 	if !changed {
 		t.Fatal("config update must report a change")
 	}
-	sources, listeners := worker.configSnapshot()
-	if len(sources) != 1 || sources[0].Id != 20 {
-		t.Fatalf("sources = %+v, want source 20", sources)
-	}
+	listeners := worker.configSnapshot()
 	if len(listeners) != 1 || listeners[0].Id != 30 {
 		t.Fatalf("listeners = %+v, want listener 30", listeners)
 	}
-	if worker.updateConfig("new", sources, listeners) {
+	if worker.updateConfig("new", listeners) {
 		t.Fatal("same signature must not trigger another update")
 	}
 }

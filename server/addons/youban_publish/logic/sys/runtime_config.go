@@ -43,7 +43,7 @@ func loadPublishRuntimeConfig(ctx context.Context) publishRuntimeConfig {
 			values = append(values, publishRuntimeRolePushWorker)
 		case runrole.MediaWorker:
 			values = append(values, publishRuntimeRoleMediaWorker)
-		case runrole.BackgroundWorker, runrole.CollectorWorker:
+		case runrole.BackgroundWorker:
 			values = append(values, publishRuntimeRoleBackgroundWorker)
 		case runrole.Account:
 			values = append(values, publishRuntimeRoleAccount)

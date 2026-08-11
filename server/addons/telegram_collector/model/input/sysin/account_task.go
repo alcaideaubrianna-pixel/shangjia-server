@@ -70,3 +70,10 @@ type AccountTaskStatusStat struct {
 	OldestCreatedAt *time.Time
 	OldestUpdatedAt *time.Time
 }
+
+type AccountHistoryPageRequest struct {
+	ChannelID  int64
+	AccessHash int64
+	OffsetID   int
+	Limit      int
+}

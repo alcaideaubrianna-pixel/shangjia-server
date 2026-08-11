@@ -14,7 +14,6 @@ import (
 type publishAccountRuntimeProvider struct{ publish *sSysPublish }
 
 type publishAccountRuntimePayload struct {
-	Sources   []accountCollectSourceRuntime
 	Listeners []accountListenPlanRuntime
 }
 
@@ -31,7 +30,8 @@ func (p *publishAccountRuntimeProvider) ListAccountRuntimes(ctx context.Context)
 		bindings = append(bindings, &collectorin.AccountRuntimeBinding{
 			AccountID: accountID,
 			Signature: accountMonitorGroupSignature(group.Sources, group.Listeners),
-			Payload:   &publishAccountRuntimePayload{Sources: group.Sources, Listeners: group.Listeners},
+			Sources:   collectorAccountRuntimeSources(group.Sources),
+			Payload:   &publishAccountRuntimePayload{Listeners: group.Listeners},
 		})
 	}
 	return bindings, nil
@@ -47,9 +47,7 @@ func (p *publishAccountRuntimeProvider) OpenAccountRuntime(_ context.Context, bi
 	}
 	return &accountCollectWorker{
 		service: p.publish, tgAccountId: binding.AccountID, signature: binding.Signature,
-		sources:         append([]accountCollectSourceRuntime(nil), payload.Sources...),
 		listeners:       append([]accountListenPlanRuntime(nil), payload.Listeners...),
-		messages:        make(chan accountCollectMessageTask, 4096),
 		listenerGroups:  make(map[string]*listenerMessageGroup),
 		listenerSenders: make(map[string]listenerMessageSenderInfo),
 	}, nil
@@ -63,11 +61,7 @@ func (w *accountCollectWorker) UpdateAccountRuntime(binding *collectorin.Account
 	if !ok || payload == nil {
 		return false
 	}
-	return w.updateConfig(binding.Signature, payload.Sources, payload.Listeners)
-}
-
-func (w *accountCollectWorker) BindAccountRuntimeHandlers(dispatcher tg.UpdateDispatcher) {
-	w.bindGotdHandlers(dispatcher)
+	return w.updateConfig(binding.Signature, payload.Listeners)
 }
 
 func (w *accountCollectWorker) NewAccountRuntimeClient(ctx context.Context, dispatcher tg.UpdateDispatcher) (*telegram.Client, error) {
@@ -84,7 +78,6 @@ func (w *accountCollectWorker) NewAccountRuntimeClient(ctx context.Context, disp
 
 func (w *accountCollectWorker) StartAccountRuntime(ctx context.Context, _ *telegram.Client) {
 	w.service.closeAccountCollectCircuit(w.tgAccountId)
-	go w.runMessageLoop(ctx)
 }
 
 func (w *accountCollectWorker) StopAccountRuntime() { w.clearListenerGroups() }
@@ -97,4 +90,25 @@ func (w *accountCollectWorker) HandleAccountRuntimeError(ctx context.Context, er
 	if isTelegramPermanentAccountAuthError(err) {
 		w.service.handleTgAccountPermanentAuthError(context.Background(), w.tgAccountId, 0, telegramPermanentAccountAuthMessage(err), err)
 	}
+}
+
+func (w *accountCollectWorker) HandleAccountRuntimeMessage(ctx context.Context, entities tg.Entities, message *tg.Message, chatIDs []string) {
+	if w == nil || message == nil {
+		return
+	}
+	if gotdMessageGroupedId(message) != "" {
+		w.bufferListenerGroupedMessage(ctx, entities, message, chatIDs)
+		return
+	}
+	w.handleListenerMessage(ctx, entities, message, chatIDs)
+}
+
+func collectorAccountRuntimeSources(sources []accountCollectSourceRuntime) []collectorin.AccountRuntimeSource {
+	result := make([]collectorin.AccountRuntimeSource, 0, len(sources))
+	for _, source := range sources {
+		result = append(result, collectorin.AccountRuntimeSource{
+			TenantID: source.TenantId, AccountID: source.AccountId, SourceID: source.Id, ChatID: source.SourceChatId,
+		})
+	}
+	return result
 }

@@ -24,13 +24,21 @@
 - 插件入队失败时，Bot 由统一 Gateway 重试；协议号消息不再回退旧采集入口；
 - 新增账号事件转换和 Delivery 还原测试，验证媒体元数据、分组标识和来源唯一键不丢失。
 
+第三阶段已完成 Telegram 执行面收敛：
+
+- Account Runtime 在 `telegram_collector` 内统一绑定 gotd 更新回调、采集源匹配和 Event 入库；`youban_publish` 不再注册旧账号采集 Goroutine。
+- 协议号媒体下载、文件引用刷新、DC 切换、并发传输和临时文件清理迁入 `telegram_collector`；发布插件只提供 Peer 解析和通用附件存储适配。
+- 历史分页的 Telegram API 调用迁入 `telegram_collector`，历史任务游标、资料解析和业务日志仍由 `youban_publish` 维护。
+- `collector-worker` 不再映射为上架后台 Worker；`account` 角色不再启动上架插件旧 Runtime，避免重复连接、重复消费和锁冲突。
+- 删除 `youban_publish` 内已无调用的协议号媒体传输池、媒体下载链路和启动期采集源 DDL。
+
 生产开关仍为：
 
 ```text
 YOUBAN_TELEGRAM_COLLECTOR_ENABLED=true
 ```
 
-新插件现在是 Bot、协议号实时消息和历史消息的唯一采集事件入口。关闭开关只用于紧急停止采集，不会回退到 `youban_publish` 旧入口。
+新插件现在是 Bot、协议号实时消息和历史消息的唯一采集事件入口，也是协议号连接、媒体下载和历史分页 API 的唯一执行入口。关闭开关只用于紧急停止采集，不会回退到 `youban_publish` 旧入口。
 
 启用第二阶段时必须同时确认：
 

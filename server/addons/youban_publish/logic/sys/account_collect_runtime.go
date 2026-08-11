@@ -37,19 +37,11 @@ type accountCollectWorker struct {
 	tgAccountId      int64
 	configMu         sync.RWMutex
 	signature        string
-	sources          []accountCollectSourceRuntime
 	listeners        []accountListenPlanRuntime
-	messages         chan accountCollectMessageTask
 	listenerGroupMu  sync.Mutex
 	listenerGroups   map[string]*listenerMessageGroup
 	listenerSenderMu sync.Mutex
 	listenerSenders  map[string]listenerMessageSenderInfo
-}
-
-type accountCollectMessageTask struct {
-	source accountCollectSourceRuntime
-	msg    *tg.Message
-	chatId string
 }
 
 type accountCollectOperation func(context.Context, *telegram.Client) error
@@ -83,22 +75,21 @@ func (s *sSysPublish) enabledAccountCollectSources(ctx context.Context) (map[int
 	return groups, nil
 }
 
-func (w *accountCollectWorker) updateConfig(signature string, sources []accountCollectSourceRuntime, listeners []accountListenPlanRuntime) bool {
+func (w *accountCollectWorker) updateConfig(signature string, listeners []accountListenPlanRuntime) bool {
 	w.configMu.Lock()
 	defer w.configMu.Unlock()
 	if w.signature == signature {
 		return false
 	}
 	w.signature = signature
-	w.sources = append([]accountCollectSourceRuntime(nil), sources...)
 	w.listeners = append([]accountListenPlanRuntime(nil), listeners...)
 	return true
 }
 
-func (w *accountCollectWorker) configSnapshot() ([]accountCollectSourceRuntime, []accountListenPlanRuntime) {
+func (w *accountCollectWorker) configSnapshot() []accountListenPlanRuntime {
 	w.configMu.RLock()
 	defer w.configMu.RUnlock()
-	return append([]accountCollectSourceRuntime(nil), w.sources...), append([]accountListenPlanRuntime(nil), w.listeners...)
+	return append([]accountListenPlanRuntime(nil), w.listeners...)
 }
 
 func (w *accountCollectWorker) clearListenerGroups() {
@@ -109,17 +100,6 @@ func (w *accountCollectWorker) clearListenerGroups() {
 			group.timer.Stop()
 		}
 		delete(w.listenerGroups, key)
-	}
-}
-
-func (w *accountCollectWorker) runMessageLoop(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case task := <-w.messages:
-			w.ingestGotdMessage(ctx, task.source, task.msg, task.chatId)
-		}
 	}
 }
 

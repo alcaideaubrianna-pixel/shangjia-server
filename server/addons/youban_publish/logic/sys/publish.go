@@ -63,7 +63,7 @@ func init() {
 	service.RegisterSysPublish(publish)
 	collectorservice.RegisterDeliveryHandler(&publishCollectorDeliveryHandler{publish: publish})
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeHistoryPage, &publishCollectorAccountTaskHandler{publish: publish})
-	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeMediaDownload, &publishCollectorAccountTaskHandler{publish: publish})
+	collectorservice.RegisterAccountMedia(&publishCollectorAccountMediaProvider{publish: publish})
 	collectorservice.RegisterAccountRuntimeProvider(&publishAccountRuntimeProvider{publish: publish})
 	gatewayservice.RegisterProvider(&publishBotGatewayProvider{publish: publish})
 	gatewayservice.RegisterConfigProvider(func(ctx context.Context) (*gatewayservice.RuntimeConfig, error) {
