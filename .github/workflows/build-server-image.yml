@@ -91,15 +91,14 @@ jobs:
 
       - name: Reserve Tencent registry tag capacity
         if: ${{ success() }}
-        continue-on-error: true
         uses: ./.github/actions/cleanup-tencent-tags
         env:
           TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}
           TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}
           TCR_REGION: ${{ vars.TCR_REGION || 'ap-hongkong' }}
           TCR_REPO_NAME: ${{ steps.image.outputs.tencent_repo }}
-          # 每次构建最多新增 branch/tag 与 sha 两个新标签，预留 2 个名额后总数不超过 50。
-          TCR_KEEP_TAGS: "48"
+          # 每次构建最多新增 branch/tag 与 sha 两个新标签，预留 2 个名额后总数不超过 20。
+          TCR_KEEP_TAGS: "18"
 
       - name: Build and push server image
         uses: docker/build-push-action@v6

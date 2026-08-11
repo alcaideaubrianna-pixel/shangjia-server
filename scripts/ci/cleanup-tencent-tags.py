@@ -18,8 +18,7 @@ VERSION = "2019-09-24"
 def required(name):
     value = os.getenv(name, "").strip()
     if not value:
-        print(f"missing {name}; skip Tencent tag cleanup")
-        sys.exit(0)
+        raise RuntimeError(f"missing {name}; Tencent tag cleanup cannot continue")
     return value
 
 
