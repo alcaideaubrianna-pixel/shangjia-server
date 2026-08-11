@@ -120,22 +120,18 @@ npx -y @railway/cli@latest config apply
 
 切换到另一个版本时，只替换 `YOUBAN_RAILWAY_IMAGE`，重新执行 `config plan` 和 `config apply`。三个服务会统一切换到同一个镜像版本。
 
-## GitHub Actions 自动部署
+## GitHub Actions 与 Railway 自动部署
 
-`.github/workflows/build-server-image.yml` 在 `sj/develop`、`feat/railway-runtime-ci-split` 分支或 `v*` 发布标签构建成功后，会自动执行 Railway IaC 部署；其他 `feat/**` 分支只构建镜像，不会触碰生产环境。
+GitHub Actions 只负责构建并推送不可变镜像。Railway 服务通过原生 GitHub 集成监听连接分支，等待 GitHub Actions 成功后自动部署，不再由 workflow 调用 Railway CLI。
 
-在 GitHub 仓库的 `production` Environment 中配置：
+Railway 服务设置中需要：
 
-- Secret：`RAILWAY_TOKEN`，使用 production 项目的 Project Token。
-- Variable：`RAILWAY_PROJECT_ID`，填写 Railway 项目 ID。若误配置为 Secret，workflow 也会兼容读取 `secrets.RAILWAY_PROJECT_ID`。
+- 连接正确的 GitHub 仓库和部署分支；
+- 启用 **自动部署**；
+- 启用 **Wait for CI**，等待 GitHub Actions 成功后再部署；
+- 确认 Railway GitHub App 对仓库具有贡献者访问权限。
 
-部署 Job 会使用当前提交的业务镜像 `sha-<commit>` 和 Collector 镜像 `otel-sha-<commit>`，执行 `railway config apply --yes`，并等待所有服务进入 `SUCCESS`。不要把 Railway Token 写入仓库变量、代码或日志。
-
-构建成功、Railway 部署成功或失败会复用 GitHub Actions 的 Telegram Secret 发送通知：
-
-- Secret：`YOUBAN_TELEGRAM_BOT_TOKEN`
-- Secret：`YOUBAN_TELEGRAM_CHAT_ID`
-- 通知包含分支/标签、提交 SHA、不可变镜像、Railway 项目和 Actions 详情地址
+GitHub Actions 不再需要 `RAILWAY_TOKEN` 或 `RAILWAY_PROJECT_ID`。Railway 部署失败、等待 CI 或分支未触发时，直接查看 Railway 服务的部署历史和 GitHub Actions 运行状态。
 
 Railway 项目本身也支持 Project Webhook，可在 Railway 项目设置中订阅部署失败、部署状态变化和资源告警。Webhook 更适合接入 OpenObserve、Slack 或 Discord；Telegram 通知继续由 GitHub Actions 发送，避免额外维护一个 Webhook 转发服务。
 
@@ -151,7 +147,7 @@ Railway 项目本身也支持 Project Webhook，可在 Railway 项目设置中�
 6. Redeploy Account
 7. Redeploy API
 
-自动发布时，GitHub Actions 将 `YOUBAN_RAILWAY_IMAGE` 设置为本次构建产生的完整标签，再执行 Railway IaC。建议使用 GitHub `production` Environment 保存 `RAILWAY_TOKEN` 并按需开启人工审批。不要让三个 Railway Service 分别从 GitHub 重复构建同一个 Dockerfile。
+自动发布时，GitHub Actions 将本次构建产生的镜像标签推送到腾讯云镜像仓库；Railway 原生 GitHub 集成负责使用连接分支的最新提交触发部署。不要再维护 GitHub Actions 到 Railway 的第二套 CLI 部署链路。
 
 ## 推荐上线顺序
 
