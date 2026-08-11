@@ -13,7 +13,7 @@ func TestNormalize(t *testing.T) {
 	}{
 		{name: "all", values: []string{"web,all"}, want: []string{All}},
 		{name: "three roles", values: []string{"runtime", "worker|web"}, want: []string{Runtime, Web, Worker}},
-		{name: "aliases", values: []string{"account,scheduler,push-worker"}, want: []string{Runtime, Worker}},
+		{name: "split roles", values: []string{"account,scheduler,push-worker"}, want: []string{Account, Scheduler, Worker}},
 		{name: "invalid", values: []string{"unknown"}, want: []string{}},
 	}
 	for _, test := range tests {

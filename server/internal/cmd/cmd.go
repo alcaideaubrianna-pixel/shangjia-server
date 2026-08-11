@@ -31,7 +31,9 @@ var (
 		>> 所有服务  [go run main.go]   热编译  [gf run main.go]
 		>> API服务   [go run main.go web]
 		>> Worker服务 [go run main.go worker]
-		>> Runtime服务 [go run main.go runtime]
+		>> Account服务 [go run main.go account]
+		>> Scheduler服务 [go run main.go scheduler]
+		>> Runtime兼容服务 [go run main.go runtime]
 		>> HTTP服务  [go run main.go http]
 		>> 消息队列  [go run main.go queue]
 		>> 定时任务  [go run main.go cron]
@@ -104,6 +106,10 @@ var (
 
 	Worker = roleCommand("worker", "启动 Worker 服务", runrole.Worker, Http, Queue)
 
+	Account = roleCommand("account", "启动 Telegram 账号与 Bot 常驻服务", runrole.Account, Http)
+
+	Scheduler = roleCommand("scheduler", "启动 Cron 与调度服务", runrole.Scheduler, Http, Cron)
+
 	Runtime = roleCommand("runtime", "启动 Runtime 服务", runrole.Runtime, Http, Cron)
 )
 
@@ -131,7 +137,7 @@ func roleCommand(name string, brief string, role string, commands ...*gcmd.Comma
 }
 
 func init() {
-	if err := Main.AddCommand(All, Web, Worker, Runtime, Http, Queue, Cron, Auth, Tools, Up, Help); err != nil {
+	if err := Main.AddCommand(All, Web, Worker, Account, Scheduler, Runtime, Http, Queue, Cron, Auth, Tools, Up, Help); err != nil {
 		panic(err)
 	}
 }

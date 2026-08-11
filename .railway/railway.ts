@@ -63,18 +63,30 @@ export default defineRailway(() => {
     },
   });
 
-  const runtime = service("youban-runtime", {
+  const account = service("youban-account", {
     source: appImage,
-    start: "/app/hotgo runtime",
+    start: "/app/hotgo account",
     healthcheck: "/readyz",
     replicas: { [singapore]: 1 },
     env: {
       ...commonEnv,
-      YOUBAN_RUNTIME_ROLES: "runtime",
+      YOUBAN_RUNTIME_ROLES: "account",
+    },
+  });
+
+  const scheduler = service("youban-scheduler", {
+    source: appImage,
+    start: "/app/hotgo scheduler",
+    healthcheck: "/readyz",
+    replicas: { [singapore]: 1 },
+    env: {
+      ...commonEnv,
+      YOUBAN_RUNTIME_ROLES: "scheduler",
+      YOUBAN_TCP_CRON_ADDRESS: "youban-api.railway.internal:8099",
     },
   });
 
   return project("youban-production", {
-    resources: [database, cache, api, worker, runtime],
+    resources: [database, cache, api, worker, account, scheduler],
   });
 });

@@ -11,10 +11,12 @@ import (
 )
 
 const (
-	All     = "all"
-	Web     = "web"
-	Worker  = "worker"
-	Runtime = "runtime"
+	All       = "all"
+	Web       = "web"
+	Worker    = "worker"
+	Account   = "account"
+	Scheduler = "scheduler"
+	Runtime   = "runtime"
 )
 
 var processRoles struct {
@@ -109,7 +111,11 @@ func canonical(role string) string {
 		return Web
 	case Worker, "push-worker", "media-worker", "background-worker":
 		return Worker
-	case Runtime, "account", "scheduler", "bot":
+	case Account:
+		return Account
+	case Scheduler:
+		return Scheduler
+	case Runtime, "bot":
 		return Runtime
 	default:
 		return ""

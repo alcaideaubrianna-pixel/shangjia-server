@@ -31,7 +31,7 @@ func (m *module) Start(option *addons.Option) error {
 		group.Middleware(internalservice.Middleware().Addon)
 		router.Api(m.ctx, group)
 	})
-	if runrole.Enabled(m.ctx, runrole.Runtime) {
+	if runrole.Enabled(m.ctx, runrole.Account) || runrole.Enabled(m.ctx, runrole.Runtime) {
 		gatewayservice.Gateway().StartRuntime(m.ctx)
 	}
 	return nil

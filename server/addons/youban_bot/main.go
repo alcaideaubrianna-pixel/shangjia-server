@@ -49,7 +49,7 @@ func (m *module) Start(option *addons.Option) (err error) {
 		router.Api(m.ctx, group)
 		router.Admin(m.ctx, group)
 	})
-	if runrole.Enabled(m.ctx, runrole.Runtime) {
+	if runrole.Enabled(m.ctx, runrole.Account) || runrole.Enabled(m.ctx, runrole.Runtime) {
 		botService.SysBot().StartRuntime(m.ctx)
 	}
 	return
