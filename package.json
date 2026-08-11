@@ -1,0 +1,11 @@
+{
+  "name": "youban-railway-infrastructure",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "railway": "^3.7.0"
+  }
+}

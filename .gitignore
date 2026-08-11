@@ -7,6 +7,7 @@ server/__debug_bin*
 pull.bat
 push.sh
 /dist
+/node_modules/
 /server/runtime/
 server/resource/public/storage/cache
 server/.serena/cache

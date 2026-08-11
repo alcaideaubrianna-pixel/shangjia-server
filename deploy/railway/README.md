@@ -48,10 +48,13 @@
 在仓库根目录执行 Railway CLI：
 
 ```bash
+npm install
 railway link
 railway config plan
 railway config apply
 ```
+
+Railway IaC 使用根目录 `package.json` 中的 `railway` TypeScript SDK，要求 Node.js 22 或更高版本。第一次拉取仓库或 SDK 版本更新后需要先执行 `npm install`。
 
 第一次执行 `config plan` 必须先确认资源名称和变更内容。若 Railway 项目中已经手动创建了同名服务或数据库，先核对 CLI 的资源匹配结果，不要直接创建重复的 PostgreSQL 或 Redis。
 
