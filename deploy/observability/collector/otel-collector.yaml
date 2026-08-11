@@ -17,7 +17,6 @@ receivers:
       load: {}
       filesystem: {}
       network: {}
-      process: {}
   sqlquery/core:
     driver: postgres
     datasource: ${env:XIAOHUIJI_PG_DSN}
