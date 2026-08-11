@@ -31,10 +31,6 @@ export default defineRailway(() => {
   const appImage = image(imageRef);
   const collectorImage = image(collectorImageRef);
   const openObserveImage = image("openobserve/openobserve:v0.92.0");
-  const collectorData = volume("xiaohuiji-otel-data", {
-    region: singapore,
-    sizeMB: 1024,
-  });
   const observeData = volume("xiaohuiji-observe-data", {
     region: singapore,
     sizeMB: 5000,
@@ -88,9 +84,6 @@ export default defineRailway(() => {
     start: "/otelcol-contrib --config=/etc/otelcol-contrib/config.yaml",
     healthcheck: "/",
     replicas: { [singapore]: 1 },
-    volumeMounts: {
-      "/var/lib/otelcol": collectorData,
-    },
     env: {
       XIAOHUIJI_PG_DSN: database.env.DATABASE_URL,
       OPENOBSERVE_OTLP_ENDPOINT: "http://xiaohuiji-observe.railway.internal:5080/api/default",
@@ -145,6 +138,6 @@ export default defineRailway(() => {
   });
 
   return project("xiaohuiji-production", {
-    resources: [database, cache, observeData, collectorData, observe, collector, api, worker, account, scheduler],
+    resources: [database, cache, observeData, observe, collector, api, worker, account, scheduler],
   });
 });

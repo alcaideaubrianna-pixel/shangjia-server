@@ -1,12 +1,6 @@
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
-  file_storage:
-    directory: /var/lib/otelcol
-    create_directory: true
-    compaction:
-      directory: /var/lib/otelcol
-      on_start: true
 
 receivers:
   otlp:
@@ -260,7 +254,6 @@ exporters:
       enabled: true
       num_consumers: 4
       queue_size: 10000
-      storage: file_storage
     retry_on_failure:
       enabled: true
       initial_interval: 1s
@@ -268,7 +261,7 @@ exporters:
       max_elapsed_time: 0s
 
 service:
-  extensions: [health_check, file_storage]
+  extensions: [health_check]
   pipelines:
     traces:
       receivers: [otlp]
