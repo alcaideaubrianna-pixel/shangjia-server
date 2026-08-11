@@ -90,3 +90,29 @@ CREATE TABLE IF NOT EXISTS "hg_tg_collector_delivery" (
 );
 
 CREATE INDEX IF NOT EXISTS "idx_tg_collector_delivery_task" ON "hg_tg_collector_delivery" ("status", "priority", "next_run_at", "lease_until", "id");
+
+CREATE TABLE IF NOT EXISTS "hg_tg_collector_account_task" (
+    "id" BIGSERIAL PRIMARY KEY,
+    "tenant_id" BIGINT NOT NULL DEFAULT 0,
+    "account_id" BIGINT NOT NULL DEFAULT 0,
+    "task_type" VARCHAR(64) NOT NULL DEFAULT '',
+    "task_key" VARCHAR(255) NOT NULL,
+    "priority" INT NOT NULL DEFAULT 0,
+    "status" VARCHAR(32) NOT NULL DEFAULT 'pending',
+    "payload" JSONB NOT NULL,
+    "result" JSONB NULL,
+    "attempt_count" INT NOT NULL DEFAULT 0,
+    "max_attempts" INT NOT NULL DEFAULT 5,
+    "next_run_at" TIMESTAMP NULL,
+    "lease_owner" VARCHAR(128) NOT NULL DEFAULT '',
+    "lease_epoch" BIGINT NOT NULL DEFAULT 0,
+    "lease_until" TIMESTAMP NULL,
+    "error_message" TEXT NOT NULL DEFAULT '',
+    "completed_at" TIMESTAMP NULL,
+    "created_at" TIMESTAMP NULL,
+    "updated_at" TIMESTAMP NULL,
+    CONSTRAINT "uq_tg_collector_account_task_key" UNIQUE ("tenant_id", "task_key")
+);
+
+CREATE INDEX IF NOT EXISTS "idx_tg_collector_account_task_claim" ON "hg_tg_collector_account_task" ("account_id", "status", "priority", "next_run_at", "lease_until", "id");
+CREATE INDEX IF NOT EXISTS "idx_tg_collector_account_task_recovery" ON "hg_tg_collector_account_task" ("status", "lease_until", "next_run_at", "id");

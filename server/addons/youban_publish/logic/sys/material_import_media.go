@@ -11,7 +11,6 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gotd/td/telegram"
 	"golang.org/x/sync/errgroup"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
@@ -28,16 +27,10 @@ func (s *sSysPublish) executeMaterialImportMedia(ctx context.Context, taskId int
 	if err = s.materialImportEnsureNotCanceled(ctx, task.Id); err != nil {
 		return err
 	}
-	run := func(runCtx context.Context, client *telegram.Client) error {
-		if _, selfErr := client.Self(runCtx); selfErr != nil {
-			return selfErr
-		}
-		return s.materialImportDownloadGroups(runCtx, task, client)
-	}
-	return s.executeTelegramAccountMediaOperation(ctx, task.TgAccountId, 5*time.Hour, run)
+	return s.materialImportDownloadGroups(ctx, task)
 }
 
-func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sysin.MaterialImportTaskModel, client *telegram.Client) error {
+func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sysin.MaterialImportTaskModel) error {
 	groups, err := s.materialImportPendingMediaGroups(ctx, task.Id)
 	if err != nil {
 		return err
@@ -57,7 +50,7 @@ func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sy
 					materialImportSendErr(errCh, err)
 					return
 				}
-				groupErr := s.materialImportDownloadGroup(ctx, task, group, client)
+				groupErr := s.materialImportDownloadGroup(ctx, task, group)
 				if groupErr != nil {
 					if collectMediaSourceGone(groupErr) {
 						_ = s.materialImportMarkGroupDiscarded(ctx, group.Id, group.MediaTotal, groupErr.Error())
@@ -138,7 +131,7 @@ func (s *sSysPublish) materialImportFailedGroupCount(ctx context.Context, taskId
 	return value, nil
 }
 
-func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel, client *telegram.Client) error {
+func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sysin.MaterialImportTaskModel, group *sysin.MaterialImportGroupModel) error {
 	if !profileMessageHasProfileText(firstNonEmpty(group.ProfileText, group.RawText)) {
 		return s.materialImportMarkGroupDone(ctx, group.Id, 0, 0)
 	}
@@ -190,7 +183,7 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 		}
 	}
 	_ = s.materialImportMarkGroupRunning(ctx, group.Id)
-	_, failed, err := s.downloadMaterialImportItems(ctx, task, group.Id, missingItems, client)
+	_, failed, err := s.downloadMaterialImportItems(ctx, task, group.Id, missingItems)
 	if err != nil {
 		return err
 	}
@@ -225,7 +218,7 @@ func (s *sSysPublish) materialImportDownloadGroup(ctx context.Context, task *sys
 	return s.materialImportMarkGroupDone(ctx, group.Id, profileId, 0)
 }
 
-func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sysin.MaterialImportTaskModel, groupID int64, items []collectMediaItem, client *telegram.Client) (int, int, error) {
+func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sysin.MaterialImportTaskModel, groupID int64, items []collectMediaItem) (int, int, error) {
 	if len(items) == 0 {
 		return 0, 0, nil
 	}
@@ -263,10 +256,13 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 				items[index].StoragePath = ""
 			}
 			itemCtx, cancel := context.WithTimeout(groupCtx, materialImportMediaItemTimeout)
-			down, err := s.downloadTelegramMediaWithRefresh(itemCtx, task.TenantId, task.TgAccountId, item, client)
+			down, err := s.downloadTelegramMedia(itemCtx, task.TenantId, task.AccountId, task.TgAccountId, item)
 			cancel()
 			if err != nil {
 				if collectMediaSourceGone(err) {
+					return err
+				}
+				if collectMediaRetryErrorFrom(err) != nil {
 					return err
 				}
 				mu.Lock()
@@ -277,6 +273,12 @@ func (s *sSysPublish) downloadMaterialImportItems(ctx context.Context, task *sys
 			if strings.TrimSpace(down.Path) != "" {
 				mu.Lock()
 				items[index].StoragePath = down.Path
+				items[index].FileUrl = down.FileUrl
+				if strings.TrimSpace(down.Item.FileId) != "" {
+					items[index] = down.Item
+					items[index].StoragePath = down.Path
+					items[index].FileUrl = down.FileUrl
+				}
 				mu.Unlock()
 			}
 			mu.Lock()

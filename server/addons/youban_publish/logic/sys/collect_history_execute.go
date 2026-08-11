@@ -2,7 +2,9 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -31,6 +34,10 @@ type collectHistoryPauseError struct {
 	err   error
 }
 
+type collectHistoryAccountTaskPayload struct {
+	TaskID int64 `json:"taskId"`
+}
+
 func (e *collectHistoryPauseError) Error() string {
 	return e.err.Error()
 }
@@ -47,9 +54,40 @@ func (s *sSysPublish) ExecuteCollectHistoryTask(ctx context.Context, taskId int6
 	if task.Status == sysin.CollectHistoryTaskStatusSuccess || task.Status == sysin.CollectHistoryTaskStatusFailed || task.Status == sysin.CollectHistoryTaskStatusCanceled {
 		return nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 25*time.Minute)
-	defer cancel()
-	err = s.executeCollectHistoryTask(runCtx, task)
+	payload, err := json.Marshal(collectHistoryAccountTaskPayload{TaskID: task.Id})
+	if err != nil {
+		return gerror.Wrap(err, "序列化历史采集账号任务失败")
+	}
+	version := int64(0)
+	if task.UpdatedAt != nil {
+		version = task.UpdatedAt.TimestampNano()
+	}
+	_, err = collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: task.TenantId, AccountID: task.TgAccountId,
+		TaskType: collectorin.AccountTaskTypeHistoryPage,
+		TaskKey:  collectHistoryAccountTaskKey(task.Id, task.OffsetId, version),
+		Priority: collectorin.EventPriorityNormal, Payload: payload, MaxAttempts: 5,
+	})
+	if err != nil {
+		return gerror.Wrap(err, "提交历史采集账号任务失败")
+	}
+	s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "queued", "历史采集已提交账号运行实例", g.Map{"offsetId": task.OffsetId, "tgAccountId": task.TgAccountId})
+	return nil
+}
+
+func collectHistoryAccountTaskKey(taskID int64, offsetID int, version int64) string {
+	return fmt.Sprintf("history:%d:offset:%d:version:%d", taskID, offsetID, version)
+}
+
+func (s *sSysPublish) handleCollectHistoryAccountTask(ctx context.Context, client *telegram.Client, taskId int64) error {
+	task, err := s.loadCollectHistoryTask(ctx, taskId)
+	if err != nil {
+		return err
+	}
+	if task.Status == sysin.CollectHistoryTaskStatusSuccess || task.Status == sysin.CollectHistoryTaskStatusFailed || task.Status == sysin.CollectHistoryTaskStatusCanceled {
+		return nil
+	}
+	err = s.executeCollectHistoryTask(ctx, client, task)
 	if canceled, cancelErr := collectHistoryTaskCanceled(ctx, task.Id); cancelErr != nil {
 		return cancelErr
 	} else if canceled {
@@ -106,7 +144,7 @@ func collectHistoryTransientClientError(err error) bool {
 	return false
 }
 
-func (s *sSysPublish) executeCollectHistoryTask(ctx context.Context, task *sysin.CollectHistoryTaskModel) error {
+func (s *sSysPublish) executeCollectHistoryTask(ctx context.Context, client *telegram.Client, task *sysin.CollectHistoryTaskModel) error {
 	if task == nil || task.Id <= 0 {
 		return gerror.New("历史采集任务不存在")
 	}
@@ -122,30 +160,13 @@ func (s *sSysPublish) executeCollectHistoryTask(ctx context.Context, task *sysin
 	if err = s.markCollectHistoryRunning(ctx, task); err != nil {
 		return err
 	}
-	run := func(runCtx context.Context, client *telegram.Client) error {
-		if _, selfErr := client.Self(runCtx); selfErr != nil {
-			return selfErr
-		}
-		return s.scanCollectHistory(runCtx, client, task, source, channelID, accessHash)
+	if client == nil {
+		return gerror.New("TG账号共享连接不可用")
 	}
-	usedRuntime, err := s.executeAccountCollectOperation(ctx, task.TgAccountId, 25*time.Minute, run)
-	if err != nil {
+	if _, err = client.Self(ctx); err != nil {
 		return err
 	}
-	if usedRuntime {
-		return nil
-	}
-	if circuitErr := s.accountCollectCircuitError(task.TgAccountId); circuitErr != nil {
-		return circuitErr
-	}
-	return newCollectHistoryRuntimeWaitError(task.TgAccountId)
-}
-
-func newCollectHistoryRuntimeWaitError(tgAccountId int64) *collectHistoryPauseError {
-	return &collectHistoryPauseError{
-		delay: 5 * time.Second,
-		err:   gerror.Newf("TG账号共享连接正在建立，历史采集等待后自动重试 tgAccountId:%d", tgAccountId),
-	}
+	return s.scanCollectHistory(ctx, client, task, source, channelID, accessHash)
 }
 
 func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.Client, task *sysin.CollectHistoryTaskModel, source *sysin.CollectSourceModel, channelID int64, accessHash int64) error {

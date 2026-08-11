@@ -17,6 +17,7 @@ import (
 type accountLeaseHolder struct {
 	lease *sysin.AccountLease
 	lock  *lock.Lock
+	ttl   time.Duration
 }
 
 type sAccountLease struct {
@@ -52,7 +53,7 @@ func (s *sAccountLease) Acquire(ctx context.Context, accountID int64, instanceID
 	}
 	lease := &sysin.AccountLease{AccountID: accountID, InstanceID: instanceID, Epoch: epoch, ExpiresAt: time.Now().Add(ttl)}
 	s.mu.Lock()
-	s.holders[epoch] = &accountLeaseHolder{lease: lease, lock: locker}
+	s.holders[epoch] = &accountLeaseHolder{lease: lease, lock: locker, ttl: ttl}
 	s.mu.Unlock()
 	return lease, true, nil
 }
@@ -67,9 +68,22 @@ func (s *sAccountLease) Renew(ctx context.Context, lease *sysin.AccountLease, tt
 		s.mu.Unlock()
 		return false, nil
 	}
-	if ttl <= 0 {
-		ttl = 45 * time.Second
+	s.mu.Unlock()
+	valid, err := holder.lock.Refresh(ctx)
+	if err != nil {
+		return false, gerror.Wrap(err, "续期Telegram账号运行租约失败")
 	}
+	if !valid {
+		s.mu.Lock()
+		delete(s.holders, lease.Epoch)
+		s.mu.Unlock()
+		return false, nil
+	}
+	if ttl <= 0 {
+		ttl = holder.ttl
+	}
+	holder.ttl = ttl
+	s.mu.Lock()
 	lease.ExpiresAt = time.Now().Add(ttl)
 	holder.lease.ExpiresAt = lease.ExpiresAt
 	s.mu.Unlock()

@@ -72,9 +72,6 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	if config.Scheduler {
 		s.startPublishSchedulers(ctx)
 	}
-	if config.Account {
-		go s.runAccountCollectSupervisor(ctx)
-	}
 	<-ctx.Done()
 }
 

@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 
-	"github.com/gotd/td/telegram"
 	"github.com/hibiken/asynq"
 )
 
@@ -127,29 +125,5 @@ func TestExpectedTelegramObserveShutdownError(t *testing.T) {
 	}
 	if !isExpectedTelegramObserveShutdownError(errors.New("sql: transaction has already been committed or rolled back")) {
 		t.Fatal("completed transaction rollback should be treated as an expected shutdown")
-	}
-}
-
-func TestAccountCollectOperationReturnsWhenTaskIsCanceled(t *testing.T) {
-	worker := &accountCollectWorker{}
-	taskCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() {
-		done <- worker.runOperation(context.Background(), nil, accountCollectOperationTask{
-			ctx: taskCtx,
-			run: func(ctx context.Context, _ *telegram.Client) error {
-				<-ctx.Done()
-				return ctx.Err()
-			},
-		})
-	}()
-
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("canceled account collect operation did not return")
 	}
 }

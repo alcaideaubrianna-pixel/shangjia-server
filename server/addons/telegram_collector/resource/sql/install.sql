@@ -86,3 +86,28 @@ CREATE TABLE IF NOT EXISTS `hg_tg_collector_delivery` (
     UNIQUE KEY `uq_tg_collector_delivery_key` (`tenant_id`, `delivery_key`),
     KEY `idx_tg_collector_delivery_task` (`status`, `priority`, `next_run_at`, `lease_until`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `hg_tg_collector_account_task` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `tenant_id` BIGINT NOT NULL DEFAULT 0,
+    `account_id` BIGINT NOT NULL DEFAULT 0,
+    `task_type` VARCHAR(64) NOT NULL DEFAULT '',
+    `task_key` VARCHAR(255) NOT NULL,
+    `priority` INT NOT NULL DEFAULT 0,
+    `status` VARCHAR(32) NOT NULL DEFAULT 'pending',
+    `payload` LONGTEXT NOT NULL,
+    `result` LONGTEXT NULL,
+    `attempt_count` INT NOT NULL DEFAULT 0,
+    `max_attempts` INT NOT NULL DEFAULT 5,
+    `next_run_at` DATETIME NULL,
+    `lease_owner` VARCHAR(128) NOT NULL DEFAULT '',
+    `lease_epoch` BIGINT NOT NULL DEFAULT 0,
+    `lease_until` DATETIME NULL,
+    `error_message` TEXT NOT NULL,
+    `completed_at` DATETIME NULL,
+    `created_at` DATETIME NULL,
+    `updated_at` DATETIME NULL,
+    UNIQUE KEY `uq_tg_collector_account_task_key` (`tenant_id`, `task_key`),
+    KEY `idx_tg_collector_account_task_claim` (`account_id`, `status`, `priority`, `next_run_at`, `lease_until`, `id`),
+    KEY `idx_tg_collector_account_task_recovery` (`status`, `lease_until`, `next_run_at`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

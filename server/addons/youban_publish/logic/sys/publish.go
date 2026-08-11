@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/hibiken/asynq"
 
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/service"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
@@ -42,11 +43,8 @@ type sSysPublish struct {
 	collectMediaSlots     chan struct{}
 	collectMediaAccounts  map[string]chan struct{}
 
-	accountRuntimeMu      publishRuntimeMutex
-	accountRuntimes       map[int64]*accountCollectWorker
-	accountRuntimeRefresh chan struct{}
-	accountCircuitMu      publishRuntimeMutex
-	accountCircuits       map[int64]accountCollectCircuit
+	accountCircuitMu publishRuntimeMutex
+	accountCircuits  map[int64]accountCollectCircuit
 }
 
 func NewSysPublish() *sSysPublish {
@@ -56,8 +54,6 @@ func NewSysPublish() *sSysPublish {
 		collectGroupTimers:    make(map[int64]*time.Timer),
 		collectMediaLastTouch: make(map[string]time.Time),
 		collectMediaAccounts:  make(map[string]chan struct{}),
-		accountRuntimes:       make(map[int64]*accountCollectWorker),
-		accountRuntimeRefresh: make(chan struct{}, 1),
 		accountCircuits:       make(map[int64]accountCollectCircuit),
 	}
 }
@@ -66,6 +62,9 @@ func init() {
 	publish := NewSysPublish()
 	service.RegisterSysPublish(publish)
 	collectorservice.RegisterDeliveryHandler(&publishCollectorDeliveryHandler{publish: publish})
+	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeHistoryPage, &publishCollectorAccountTaskHandler{publish: publish})
+	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeMediaDownload, &publishCollectorAccountTaskHandler{publish: publish})
+	collectorservice.RegisterAccountRuntimeProvider(&publishAccountRuntimeProvider{publish: publish})
 	gatewayservice.RegisterProvider(&publishBotGatewayProvider{publish: publish})
 	gatewayservice.RegisterConfigProvider(func(ctx context.Context) (*gatewayservice.RuntimeConfig, error) {
 		conf, err := NewSysConfig().GetTelegram(ctx)

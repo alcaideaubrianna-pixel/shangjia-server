@@ -56,10 +56,14 @@ func (m *module) Start(option *addons.Option) error {
 	if runrole.Enabled(m.ctx, runrole.Worker) || runrole.Enabled(m.ctx, runrole.PushWorker) {
 		collectorservice.Collector().StartDeliveryRuntime(m.ctx)
 	}
+	if runrole.Enabled(m.ctx, runrole.Account) || runrole.Enabled(m.ctx, runrole.Runtime) {
+		collectorservice.AccountRuntime().Start(m.ctx)
+	}
 	return nil
 }
 
 func (m *module) Stop() error {
+	collectorservice.AccountRuntime().Stop()
 	collectorservice.Collector().StopRuntime()
 	return nil
 }

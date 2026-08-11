@@ -134,7 +134,7 @@ func (s *sSysPublish) listenerMessageMediaItems(ctx context.Context, plan accoun
 			}
 			defer func() { <-slots }()
 			item := items[0]
-			downloaded, err := s.downloadTelegramMedia(ctx, plan.TenantId, plan.TgAccountId, item)
+			downloaded, err := s.downloadTelegramMedia(ctx, plan.TenantId, plan.AccountId, plan.TgAccountId, item)
 			if err != nil {
 				g.Log().Warningf(ctx, "下载监听媒体失败 plan:%d sourceChat:%s message:%d type:%s fileId:%s err:%+v", plan.Id, sourceChatId, msg.ID, item.Type, item.FileId, err)
 				result.err = gerror.Wrapf(err, "下载监听媒体失败 message:%d", msg.ID)

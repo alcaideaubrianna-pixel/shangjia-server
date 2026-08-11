@@ -116,6 +116,16 @@ func (l *Lock) Unlock(ctx context.Context) error {
 	return err
 }
 
+// Refresh verifies ownership and renews the lock TTL.
+func (l *Lock) Refresh(ctx context.Context) (bool, error) {
+	var args = []interface{}{l.ttl.Seconds(), l.randomValue}
+	eval, err := g.Redis().GroupScript().Eval(ctx, renewalScript, 1, []string{l.resource}, args)
+	if err != nil {
+		return false, err
+	}
+	return eval.Int() > 0, nil
+}
+
 func (l *Lock) LockFunc(ctx context.Context, f func()) error {
 	if err := l.Lock(ctx); err != nil {
 		return err

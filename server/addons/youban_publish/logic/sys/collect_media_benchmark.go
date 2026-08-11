@@ -90,7 +90,7 @@ func (s *sSysPublish) CollectMediaBenchmark(ctx context.Context, in *sysin.Colle
 				}
 				item.ExpectedSize = row["source_size"].Int64()
 				start := time.Now()
-				downloaded, downloadErr := s.downloadTelegramMedia(ctx, account.TenantId, item.TgAccountId, collectMediaItem{
+				downloaded, downloadErr := s.downloadTelegramMedia(ctx, account.TenantId, account.Id, item.TgAccountId, collectMediaItem{
 					Type: row["media_type"].String(), FileId: row["source_file_id"].String(),
 					FileUrl: row["file_url"].String(), StoragePath: row["storage_path"].String(), PosterUrl: row["poster_url"].String(),
 					SourceKind: row["source_kind"].String(), SourceMediaId: row["source_media_id"].Int64(),

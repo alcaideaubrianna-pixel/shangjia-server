@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,8 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -63,6 +66,13 @@ func (e *collectMediaRetryError) Error() string {
 		return ""
 	}
 	return e.message
+}
+
+func (e *collectMediaRetryError) AccountTaskRetryDelay() time.Duration {
+	if e == nil {
+		return 0
+	}
+	return e.delay
 }
 
 func newCollectMediaRetryError(message string, delay time.Duration) *collectMediaRetryError {
@@ -474,7 +484,7 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 			if sourceType == sysin.CollectSourceTypeBot {
 				cached, err = s.downloadBotTelegramMedia(ctx, event["tenant_id"].Int64(), event["bot_id"].Int64(), items[index])
 			} else {
-				cached, err = s.downloadTelegramMedia(ctx, event["tenant_id"].Int64(), event["tg_account_id"].Int64(), items[index])
+				cached, err = s.downloadTelegramMedia(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), event["tg_account_id"].Int64(), items[index])
 			}
 			if err != nil {
 				downloadDuration := time.Since(startedAt).Milliseconds()
@@ -782,49 +792,63 @@ func collectMediaAuthBytesInvalid(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "auth_bytes_invalid")
 }
 
-func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64, tgAccountId int64, item collectMediaItem) (*collectDownloadedMedia, error) {
-	startedAt := time.Now()
+func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64, accountId int64, tgAccountId int64, item collectMediaItem) (*collectDownloadedMedia, error) {
 	if tgAccountId <= 0 {
 		return nil, gerror.New("账号采集媒体缺少TG账号")
 	}
-	downloadTimeout := collectMediaFileDownloadTimeout(ctx, item.SourceSize)
-	downloadCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
-	defer cancel()
-	clientStartedAt := time.Now()
-	client, err := s.accountCollectRuntimeClient(tgAccountId)
+	payload, err := json.Marshal(&collectorin.AccountMediaDownloadPayload{
+		TenantID:  tenantId,
+		AccountID: accountId,
+		Media:     collectorMediaItemFromCollect(item),
+	})
 	if err != nil {
-		g.Log().Warningf(ctx, "TG媒体下载获取账号客户端失败 tgAccountId:%d fileId:%s lookupDuration:%s total:%s err:%+v", tgAccountId, item.FileId, time.Since(clientStartedAt).Round(time.Millisecond), time.Since(startedAt).Round(time.Millisecond), err)
-		var retryErr *collectMediaRetryError
-		if errors.As(err, &retryErr) {
-			return nil, retryErr
-		}
-		return nil, newCollectMediaRetryError("账号采集客户端暂不可用，等待重试: "+err.Error(), 30*time.Second)
+		return nil, gerror.Wrap(err, "序列化账号媒体下载任务失败")
 	}
-	g.Log().Debugf(ctx, "TG媒体下载获取账号客户端完成 tgAccountId:%d fileId:%s duration:%s", tgAccountId, item.FileId, time.Since(clientStartedAt).Round(time.Millisecond))
-	transferStartedAt := time.Now()
-	result, err := s.downloadTelegramMediaWithRefresh(downloadCtx, tenantId, tgAccountId, item, client)
+	taskID, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: tenantId, AccountID: tgAccountId, TaskType: collectorin.AccountTaskTypeMediaDownload,
+		TaskKey: accountMediaDownloadTaskKey(tgAccountId, item), Priority: collectorin.EventPriorityRealtime,
+		Payload: payload, MaxAttempts: 5,
+	})
 	if err != nil {
-		g.Log().Warningf(ctx, "TG媒体下载传输失败 tgAccountId:%d fileId:%s size:%d duration:%s total:%s err:%+v", tgAccountId, item.FileId, item.SourceSize, time.Since(transferStartedAt).Round(time.Millisecond), time.Since(startedAt).Round(time.Millisecond), err)
-		if collectMediaShouldReconnectAccount(err) {
-			s.openAccountCollectCircuit(ctx, tgAccountId, err)
-			s.restartAccountCollectWorker(ctx, tgAccountId, err)
-			state, _ := s.accountCollectCircuitState(tgAccountId)
-			if state.permanent {
-				return nil, gerror.New(fmt.Sprintf("TG账号需要重新授权，已暂停媒体任务 tgAccountId:%d", tgAccountId))
-			}
-			if retryErr := collectMediaRetryErrorFrom(err); retryErr != nil {
-				retryErr.delay = accountCollectConnectionRetryDelay
-				retryErr.message = fmt.Sprintf("TG账号连接正在重建，当前媒体等待%s后自动重试：%v", retryErr.delay.Round(time.Second), err)
-				return nil, retryErr
-			}
-		}
+		return nil, gerror.Wrap(err, "提交账号媒体下载任务失败")
+	}
+	task, err := collectorservice.AccountTasks().Get(ctx, taskID)
+	if err != nil {
 		return nil, err
 	}
-	if result == nil || strings.TrimSpace(result.Path) == "" {
-		return nil, gerror.New("账号采集媒体下载完成但未返回缓存文件")
+	switch task.Status {
+	case collectorin.AccountTaskStatusCompleted:
+		var result collectorin.AccountMediaDownloadResult
+		if err = json.Unmarshal(task.Result, &result); err != nil {
+			return nil, gerror.Wrap(err, "解析账号媒体下载结果失败")
+		}
+		if result.ErrorCode == "source_gone" {
+			return nil, gerror.Wrap(errCollectMediaSourceGone, firstNonEmpty(result.ErrorMessage, "TG原消息已删除或已无可用媒体"))
+		}
+		if strings.TrimSpace(result.StoragePath) == "" && strings.TrimSpace(result.FileURL) == "" {
+			return nil, gerror.New("账号媒体下载任务未返回共享存储地址")
+		}
+		return &collectDownloadedMedia{
+			AttachmentId: result.AttachmentID,
+			FileUrl:      strings.TrimSpace(result.FileURL),
+			Path:         firstNonEmpty(result.StoragePath, result.FileURL),
+			MetaJson:     result.Media.DebugMetaJSON,
+			Item:         collectMediaItemFromCollector(result.Media),
+		}, nil
+	case collectorin.AccountTaskStatusDead, collectorin.AccountTaskStatusCancelled:
+		return nil, gerror.New(firstNonEmpty(task.ErrorMessage, "账号媒体下载任务已终止"))
+	default:
+		delay := 3 * time.Second
+		if task.NextRunAt != nil && time.Until(*task.NextRunAt) > delay {
+			delay = time.Until(*task.NextRunAt)
+		}
+		return nil, newCollectMediaFairnessRetryError("账号媒体下载任务等待执行", delay)
 	}
-	g.Log().Infof(ctx, "TG媒体下载链路完成 tgAccountId:%d fileId:%s size:%d transfer:%s total:%s path:%s", tgAccountId, item.FileId, item.SourceSize, time.Since(transferStartedAt).Round(time.Millisecond), time.Since(startedAt).Round(time.Millisecond), result.Path)
-	return result, nil
+}
+
+func accountMediaDownloadTaskKey(tgAccountID int64, item collectMediaItem) string {
+	identity := fmt.Sprintf("%d|%s|%s|%d|%d|%d", tgAccountID, strings.TrimSpace(item.Type), strings.TrimSpace(item.FileId), item.SourceMediaId, item.SourceDCId, item.SourceSize)
+	return fmt.Sprintf("media:%x", sha256.Sum256([]byte(identity)))
 }
 
 func (s *sSysPublish) downloadBotTelegramMedia(ctx context.Context, tenantId int64, botId int64, item collectMediaItem) (*collectDownloadedMedia, error) {

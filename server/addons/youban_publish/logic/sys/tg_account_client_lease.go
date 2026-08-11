@@ -142,24 +142,10 @@ func telegramAccountClientLeaseWaitTimeout(ctx context.Context) time.Duration {
 }
 
 func (s *sSysPublish) executeTelegramAccountOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) error {
-	return s.executeTelegramAccountOperationMode(ctx, tgAccountId, timeout, run, false)
-}
-
-func (s *sSysPublish) executeTelegramAccountMediaOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) error {
-	return s.executeTelegramAccountOperationMode(ctx, tgAccountId, timeout, run, true)
-}
-
-func (s *sSysPublish) executeTelegramAccountOperationMode(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation, parallel bool) error {
 	if tgAccountId <= 0 || run == nil {
 		return gerror.New("TG账号操作参数无效")
 	}
-	var usedRuntime bool
-	var err error
-	if parallel {
-		usedRuntime, err = s.executeAccountCollectMediaOperation(ctx, tgAccountId, timeout, run)
-	} else {
-		usedRuntime, err = s.executeAccountCollectOperation(ctx, tgAccountId, timeout, run)
-	}
+	usedRuntime, err := s.executeAccountCollectOperation(ctx, tgAccountId, timeout, run)
 	if err != nil || usedRuntime {
 		return err
 	}

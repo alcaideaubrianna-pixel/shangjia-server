@@ -44,7 +44,7 @@ func executeSQLFile(ctx context.Context, path string) error {
 }
 
 func readSQLFile(path string) string {
-	for _, candidate := range []string{path, "server/" + path, "../../" + path} {
+	for _, candidate := range []string{path, "server/" + path, "../../" + path, "../../../" + path} {
 		if gfile.Exists(candidate) {
 			return gfile.GetContents(candidate)
 		}
