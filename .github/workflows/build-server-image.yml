@@ -5,6 +5,7 @@ on:
     branches:
       - sj/develop
       - main
+      - "feat/**"
     tags:
       - "v*"
     paths:
