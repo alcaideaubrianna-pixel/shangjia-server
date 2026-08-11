@@ -1,5 +1,6 @@
 {
   "version": 8,
+  "dashboardId": "xiaohuiji-http-api-performance",
   "title": "xiaohuiji HTTP API performance",
   "description": "HTTP API 请求量、耗时分位数、平均耗时和错误路由排行",
   "tabs": [
