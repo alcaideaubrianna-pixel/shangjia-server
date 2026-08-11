@@ -638,3 +638,21 @@ xiaohuiji-otel-collector.OPENOBSERVE_AUTHORIZATION
 ```
 
 `OPENOBSERVE_AUTHORIZATION` 使用 `Basic base64(email:password)`。完成后重新部署 Collector，并验证 `/healthz`、Collector `:13133/`、OpenObserve OTLP 数据流和 Telegram 告警恢复通知。
+
+## HTTP 接口性能大盘
+
+HTTP 性能大盘定义保存在 `deploy/observability/dashboards/http-performance.json`，当前线上大盘名称为 `xiaohuiji HTTP API performance`。
+
+应用部署后，OpenObserve 会出现以下指标流：
+
+- `xiaohuiji_http_server_duration_bucket`：接口耗时直方图桶，用于 P95/P99。
+- `xiaohuiji_http_server_duration_sum` / `xiaohuiji_http_server_duration_count`：用于平均耗时。
+- `xiaohuiji_http_server_requests`：按路由、方法和状态码统计请求量。
+
+查看接口耗时排行时，打开 HTTP Overview 大盘，重点关注“接口耗时 P95 / P99”和“接口平均耗时排行”。如果需要临时查询，可使用：
+
+```promql
+histogram_quantile(0.95, sum by (le, http_route) (rate(xiaohuiji_http_server_duration_bucket[5m])))
+```
+
+当前指标按 `http_route` 聚合，不使用原始 URL 作为标签，避免资料编号、频道 ID 等高基数路径污染监控。

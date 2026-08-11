@@ -120,6 +120,25 @@ npx -y @railway/cli@latest config apply
 
 切换到另一个版本时，只替换 `YOUBAN_RAILWAY_IMAGE`，重新执行 `config plan` 和 `config apply`。三个服务会统一切换到同一个镜像版本。
 
+## GitHub Actions 自动部署
+
+`.github/workflows/build-server-image.yml` 在 `sj/develop`、`feat/railway-runtime-ci-split` 分支或 `v*` 发布标签构建成功后，会自动执行 Railway IaC 部署；其他 `feat/**` 分支只构建镜像，不会触碰生产环境。
+
+在 GitHub 仓库的 `production` Environment 中配置：
+
+- Secret：`RAILWAY_TOKEN`，使用 production 项目的 Project Token。
+- Variable：`RAILWAY_PROJECT_ID`，填写 Railway 项目 ID。
+
+部署 Job 会使用当前提交的业务镜像 `sha-<commit>` 和 Collector 镜像 `otel-sha-<commit>`，执行 `railway config apply --yes`，并等待所有服务进入 `SUCCESS`。不要把 Railway Token 写入仓库变量、代码或日志。
+
+构建成功、Railway 部署成功或失败会复用 GitHub Actions 的 Telegram Secret 发送通知：
+
+- Secret：`YOUBAN_TELEGRAM_BOT_TOKEN`
+- Secret：`YOUBAN_TELEGRAM_CHAT_ID`
+- 通知包含分支/标签、提交 SHA、不可变镜像、Railway 项目和 Actions 详情地址
+
+Railway 项目本身也支持 Project Webhook，可在 Railway 项目设置中订阅部署失败、部署状态变化和资源告警。Webhook 更适合接入 OpenObserve、Slack 或 Discord；Telegram 通知继续由 GitHub Actions 发送，避免额外维护一个 Webhook 转发服务。
+
 ## 自动部署
 
 当前 GitHub Actions 负责构建并推送分支、发布标签和 `sha-xxxxxxx` 镜像。生产部署只选择明确的发布标签或 SHA 标签，不直接部署分支标签：

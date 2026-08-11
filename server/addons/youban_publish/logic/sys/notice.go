@@ -198,13 +198,14 @@ func (s *sSysPublish) NoticePullMessages(ctx context.Context, in *sysin.PullMess
 	if err != nil {
 		return nil, err
 	}
+	readSet, err := s.noticeReadSet(ctx, noticeIDs(rows), accountID)
+	if err != nil {
+		return nil, err
+	}
 	res = &adminin.PullMessagesModel{List: make([]*adminin.PullMessagesRow, 0, len(rows)), NoticeUnreadCountModel: &adminin.NoticeUnreadCountModel{}}
 	for _, row := range rows {
 		item := pullMessagesRow(row)
-		item.IsRead, err = s.noticeIsRead(ctx, row.Id, accountID)
-		if err != nil {
-			return nil, err
-		}
+		_, item.IsRead = readSet[row.Id]
 		res.List = append(res.List, item)
 		if !item.IsRead {
 			switch item.Type {
@@ -278,11 +279,13 @@ func (s *sSysPublish) NoticeMessageList(ctx context.Context, in *sysin.NoticeMes
 		end = len(filtered)
 	}
 	accountID := contexts.GetUserId(ctx)
-	for _, row := range filtered[start:end] {
-		read, readErr := s.noticeIsRead(ctx, row.Id, accountID)
-		if readErr != nil {
-			return nil, 0, readErr
-		}
+	pageRows := filtered[start:end]
+	readSet, err := s.noticeReadSet(ctx, noticeIDs(pageRows), accountID)
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, row := range pageRows {
+		_, read := readSet[row.Id]
 		list = append(list, &adminin.NoticeMessageListModel{Id: row.Id, Type: int64(row.Type), Title: row.Title, Content: row.Content, Tag: row.Tag, Sort: row.Sort, CreatedBy: row.CreatedBy, CreatedAt: row.CreatedAt, IsRead: read})
 	}
 	return list, totalCount, nil
@@ -339,9 +342,36 @@ func (s *sSysPublish) visibleNoticeRows(ctx context.Context, accountID int64, li
 	return visible, nil
 }
 
-func (s *sSysPublish) noticeIsRead(ctx context.Context, noticeID, accountID int64) (bool, error) {
-	count, err := pdao.YoubanPublishNoticeRead.Ctx(ctx).Where(pdao.YoubanPublishNoticeRead.Columns().NoticeId, noticeID).Where(pdao.YoubanPublishNoticeRead.Columns().AccountId, accountID).Count()
-	return count > 0, err
+func (s *sSysPublish) noticeReadSet(ctx context.Context, noticeIDs []int64, accountID int64) (map[int64]struct{}, error) {
+	readSet := make(map[int64]struct{}, len(noticeIDs))
+	if len(noticeIDs) == 0 || accountID <= 0 {
+		return readSet, nil
+	}
+	cols := pdao.YoubanPublishNoticeRead.Columns()
+	var rows []struct {
+		NoticeId int64 `json:"noticeId" orm:"notice_id"`
+	}
+	if err := pdao.YoubanPublishNoticeRead.Ctx(ctx).
+		Fields(cols.NoticeId).
+		Where(cols.AccountId, accountID).
+		WhereIn(cols.NoticeId, noticeIDs).
+		Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "获取通知公告阅读状态失败")
+	}
+	for _, row := range rows {
+		readSet[row.NoticeId] = struct{}{}
+	}
+	return readSet, nil
+}
+
+func noticeIDs(rows []*pentity.YoubanPublishNotice) []int64 {
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row != nil && row.Id > 0 {
+			ids = append(ids, row.Id)
+		}
+	}
+	return ids
 }
 
 func noticeEntity(row *pentity.YoubanPublishNotice) entity.AdminNotice {

@@ -1,0 +1,233 @@
+{
+  "version": 8,
+  "title": "xiaohuiji HTTP API performance",
+  "description": "HTTP API 请求量、耗时分位数、平均耗时和错误路由排行",
+  "tabs": [
+    {
+      "tabId": "http-overview",
+      "name": "HTTP Overview",
+      "panels": [
+        {
+          "id": "http-latency-percentiles",
+          "type": "line",
+          "title": "接口耗时 P95 / P99",
+          "description": "按路由统计最近 5 分钟请求耗时分位数，单位秒",
+          "config": {
+            "show_legends": true,
+            "legends_position": "bottom",
+            "unit": "seconds",
+            "axis_border_show": true,
+            "connect_nulls": true,
+            "line_thickness": 1.5,
+            "show_symbol": false,
+            "line_interpolation": "smooth",
+            "no_value_replacement": ""
+          },
+          "queryType": "promql",
+          "queries": [
+            {
+              "query": "histogram_quantile(0.95, sum by (le, http_route) (rate(xiaohuiji_http_server_duration_bucket[5m])))",
+              "customQuery": true,
+              "fields": {
+                "stream": "xiaohuiji_http_server_duration_bucket",
+                "stream_type": "metrics",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "P95 {{http_route}}",
+                "layer_type": "line",
+                "weight_fixed": 1,
+                "limit": 0,
+                "time_shift": []
+              }
+            },
+            {
+              "query": "histogram_quantile(0.99, sum by (le, http_route) (rate(xiaohuiji_http_server_duration_bucket[5m])))",
+              "customQuery": true,
+              "fields": {
+                "stream": "xiaohuiji_http_server_duration_bucket",
+                "stream_type": "metrics",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "P99 {{http_route}}",
+                "layer_type": "line",
+                "weight_fixed": 1,
+                "limit": 0,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 96,
+            "h": 18,
+            "i": 1
+          }
+        },
+        {
+          "id": "http-average-latency",
+          "type": "table",
+          "title": "接口平均耗时排行",
+          "description": "按路由统计最近 5 分钟平均请求耗时，单位秒",
+          "config": {
+            "wrap_table_cells": true,
+            "table_dynamic_columns": true,
+            "show_legends": false,
+            "unit": "seconds",
+            "axis_border_show": true,
+            "table_transpose": false
+          },
+          "queryType": "promql",
+          "queries": [
+            {
+              "query": "sum by (http_route) (rate(xiaohuiji_http_server_duration_sum[5m])) / sum by (http_route) (rate(xiaohuiji_http_server_duration_count[5m]))",
+              "customQuery": true,
+              "fields": {
+                "stream": "xiaohuiji_http_server_duration_sum",
+                "stream_type": "metrics",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "{{http_route}}",
+                "layer_type": "table",
+                "weight_fixed": 1,
+                "limit": 50,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 96,
+            "y": 0,
+            "w": 96,
+            "h": 18,
+            "i": 2
+          }
+        },
+        {
+          "id": "http-request-rate",
+          "type": "line",
+          "title": "接口请求速率",
+          "description": "最近 5 分钟各路由请求速率",
+          "config": {
+            "show_legends": true,
+            "legends_position": "bottom",
+            "unit": "short",
+            "axis_border_show": true,
+            "connect_nulls": true,
+            "line_thickness": 1.5,
+            "show_symbol": false
+          },
+          "queryType": "promql",
+          "queries": [
+            {
+              "query": "sum by (http_route) (rate(xiaohuiji_http_server_requests[5m]))",
+              "customQuery": true,
+              "fields": {
+                "stream": "xiaohuiji_http_server_requests",
+                "stream_type": "metrics",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "{{http_route}}",
+                "layer_type": "line",
+                "weight_fixed": 1,
+                "limit": 0,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 18,
+            "w": 96,
+            "h": 18,
+            "i": 3
+          }
+        },
+        {
+          "id": "http-5xx-routes",
+          "type": "table",
+          "title": "5xx 错误路由排行",
+          "description": "最近 5 分钟 HTTP 5xx 请求速率",
+          "config": {
+            "wrap_table_cells": true,
+            "table_dynamic_columns": true,
+            "show_legends": false,
+            "unit": "short",
+            "axis_border_show": true,
+            "table_transpose": false
+          },
+          "queryType": "promql",
+          "queries": [
+            {
+              "query": "sum by (http_route) (rate(xiaohuiji_http_server_requests{http_status_code=~\"5..\"}[5m]))",
+              "customQuery": true,
+              "fields": {
+                "stream": "xiaohuiji_http_server_requests",
+                "stream_type": "metrics",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "{{http_route}}",
+                "layer_type": "table",
+                "weight_fixed": 1,
+                "limit": 50,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 96,
+            "y": 18,
+            "w": 96,
+            "h": 18,
+            "i": 4
+          }
+        }
+      ]
+    }
+  ]
+}

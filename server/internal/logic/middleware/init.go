@@ -66,7 +66,7 @@ func (s *sMiddleware) Ctx(r *ghttp.Request) {
 	r.SetCtx(gi18n.WithLanguage(r.Context(), simple.GetHeaderLocale(r.Context())))
 
 	// 链路追踪
-	if g.Cfg().MustGet(r.Context(), "jaeger.switch").Bool() || g.Cfg().MustGet(r.Context(), "apm.switch").Bool() {
+	if g.Cfg().MustGet(r.Context(), "telemetry.switch").Bool() || g.Cfg().MustGet(r.Context(), "jaeger.switch").Bool() || g.Cfg().MustGet(r.Context(), "apm.switch").Bool() {
 		ctx, traceSpan := gtrace.NewSpan(r.Context(), r.Method+" "+r.URL.Path, trace.WithSpanKind(trace.SpanKindServer))
 		traceSpan.SetAttributes(
 			attribute.String("traceID", gctx.CtxId(ctx)),
