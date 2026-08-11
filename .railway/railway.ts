@@ -85,7 +85,7 @@ export default defineRailway(() => {
 
   const collector = service("xiaohuiji-otel-collector", {
     source: collectorImage,
-    start: "--config=/etc/otelcol-contrib/config.yaml",
+    start: "/otelcol-contrib --config=/etc/otelcol-contrib/config.yaml",
     healthcheck: "/",
     replicas: { [singapore]: 1 },
     volumeMounts: {
