@@ -338,6 +338,11 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	if stateErr := s.updateProfilePublishOperationState(ctx, job, projectedStatus); stateErr != nil {
 		return stateErr
 	}
+	if decision.Status == "failed" {
+		if wakeErr := s.wakeNextTelegramChannelJob(ctx, job, gtime.Now()); wakeErr != nil {
+			g.Log().Warningf(ctx, "永久失败后唤醒频道下一条TG任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
+		}
+	}
 	return nil
 }
 
@@ -429,7 +434,13 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		return completeErr
 	}
 	if !operationCompleted {
+		if wakeErr := s.wakeNextTelegramChannelJob(ctx, job, sentAt); wakeErr != nil {
+			g.Log().Warningf(ctx, "唤醒频道下一条TG任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
+		}
 		return nil
+	}
+	if wakeErr := s.wakeNextTelegramChannelJob(ctx, job, sentAt); wakeErr != nil {
+		g.Log().Warningf(ctx, "唤醒频道下一条TG任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
 	}
 	if job.CollectEventId > 0 {
 		return s.markCollectDispatchSentByProfile(ctx, job.ProfileId, job.CollectEventId)

@@ -2,13 +2,18 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	hglock "hotgo/internal/library/hgrds/lock"
 )
+
+const telegramChannelDispatchLeaseTTL = 15 * time.Second
 
 func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, job telegramJobRecord) (bool, error) {
 	if err := ctx.Err(); err != nil {
@@ -65,11 +70,104 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	count, err := mod.Count()
+	var earlier struct {
+		Id int64 `orm:"id"`
+	}
+	err := mod.Fields("j.id").Limit(1).Scan(&earlier)
 	if err != nil {
 		return false, gerror.Wrap(err, "检查频道前序TG任务失败")
 	}
-	return count > 0, nil
+	return earlier.Id > 0, nil
+}
+
+func telegramChannelSendInterval(ctx context.Context) time.Duration {
+	seconds := g.Cfg().MustGet(ctx, "youbanPublish.queue.channelSendIntervalSeconds", 30).Int()
+	if seconds < 0 {
+		seconds = 0
+	}
+	if seconds > 10*60 {
+		seconds = 10 * 60
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func telegramChannelNextSendDelay(lastSentAt, now *gtime.Time, interval time.Duration) time.Duration {
+	if lastSentAt == nil || now == nil || interval <= 0 {
+		return 0
+	}
+	remaining := interval - now.Sub(lastSentAt)
+	if remaining <= 0 {
+		return 0
+	}
+	return remaining
+}
+
+func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegramJobRecord, lastSentAt *gtime.Time) error {
+	if job.TenantId <= 0 || job.ChannelId <= 0 {
+		return nil
+	}
+	var next telegramJobRecord
+	now := gtime.Now()
+	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", job.TenantId).
+		Where("channel_id", job.ChannelId).
+		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
+		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", now).
+		OrderAsc("priority").OrderAsc("id").
+		Limit(1).
+		Scan(&next)
+	if err != nil {
+		return gerror.Wrap(err, "读取频道下一条TG任务失败")
+	}
+	if next.Id <= 0 {
+		return nil
+	}
+	delay := telegramChannelNextSendDelay(lastSentAt, now, telegramChannelSendInterval(ctx))
+	if err = s.enqueueTelegramJob(ctx, next.Id, delay); err != nil {
+		return gerror.Wrap(err, "唤醒频道下一条TG任务失败")
+	}
+	return nil
+}
+
+func telegramChannelDispatchKey(tenantId, channelId int64) string {
+	return fmt.Sprintf("youban_publish:tg_channel_dispatch:%d:%d", tenantId, channelId)
+}
+
+func (s *sSysPublish) shouldEnqueueTelegramChannelJob(ctx context.Context, job telegramJobRecord) (bool, error) {
+	if job.TenantId <= 0 || job.ChannelId <= 0 {
+		return true, nil
+	}
+	lease := hglock.NewConfig(telegramChannelDispatchLeaseTTL, 100*time.Millisecond).
+		Mutex(telegramChannelDispatchKey(job.TenantId, job.ChannelId))
+	if err := lease.TryLock(ctx); err != nil {
+		if gerror.Is(err, hglock.ErrLockFailed) {
+			return false, nil
+		}
+		return false, gerror.Wrap(err, "获取频道任务调度租约失败")
+	}
+	defer func() {
+		if err := lease.Unlock(ctx); err != nil && !gerror.Is(err, hglock.ErrNotExist) {
+			g.Log().Warningf(ctx, "释放频道任务调度租约失败 tenantId:%d channelId:%d err:%+v", job.TenantId, job.ChannelId, err)
+		}
+	}()
+
+	var active struct {
+		Id int64 `orm:"id"`
+	}
+	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("tenant_id", job.TenantId).
+		Where("channel_id", job.ChannelId).
+		Where("id <> ?", job.Id).
+		Where(`(
+			status = 'sending' OR
+			(status IN ('pending', 'failed_retry', 'unknown') AND dispatch_status IN (?, ?))
+		)`, tgDispatchStatusQueued, tgDispatchStatusProcessing).
+		Fields("id").Limit(1).Scan(&active)
+	if err != nil {
+		return false, gerror.Wrap(err, "检查频道活动TG任务失败")
+	}
+	return active.Id <= 0, nil
 }
 
 func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, job telegramJobRecord) error {
