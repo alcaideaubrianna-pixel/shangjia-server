@@ -199,10 +199,10 @@ jobs:
           clean_project_id="${clean_project_id//$'\n'/}"
           test -n "$clean_token" || { echo "Missing production secret: RAILWAY_TOKEN"; exit 1; }
           test -n "$clean_project_id" || { echo "Missing production variable: RAILWAY_PROJECT_ID"; exit 1; }
-          case "$clean_token" in
-            prj_*) ;;
-            *) echo "RAILWAY_TOKEN must be a Railway project token beginning with prj_"; exit 1 ;;
-          esac
+          if [[ "$clean_token" =~ [[:space:]] ]]; then
+            echo "RAILWAY_TOKEN contains whitespace; recreate the GitHub Secret without spaces or line breaks"
+            exit 1
+          fi
           echo "::add-mask::$clean_token"
           printf 'RAILWAY_TOKEN=%s\n' "$clean_token" >> "$GITHUB_ENV"
           printf 'RAILWAY_PROJECT_ID=%s\n' "$clean_project_id" >> "$GITHUB_ENV"
