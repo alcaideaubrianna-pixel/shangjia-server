@@ -173,26 +173,9 @@ func (s *sCollector) processEvent(ctx context.Context, payload *sysin.EventTask)
 		return s.failEvent(ctx, payload.EventID, gerror.New("Telegram原始事件为空"))
 	}
 	raw := []byte(row.RawUpdate.String())
-	var update models.Update
-	if err = json.Unmarshal(raw, &update); err != nil {
-		return s.failEvent(ctx, payload.EventID, gerror.Wrap(err, "解析Telegram原始事件失败"))
-	}
-	message := collectorUpdateMessage(&update)
-	delivery := sysin.CollectorDelivery{
-		DeliveryKey:     fmt.Sprintf("event:%d", row.Id),
-		TenantID:        row.TenantId,
-		EventID:         row.Id,
-		SourceID:        row.SourceId,
-		SourceType:      row.SourceType,
-		SourceChatID:    row.ChatId,
-		SourceMessageID: row.MessageId,
-		RawUpdate:       raw,
-	}
-	if message != nil {
-		delivery.RawText = strings.TrimSpace(message.Text)
-		if delivery.RawText == "" {
-			delivery.RawText = strings.TrimSpace(message.Caption)
-		}
+	delivery, err := collectorDeliveryFromEvent(&row, raw)
+	if err != nil {
+		return s.failEvent(ctx, payload.EventID, err)
 	}
 	deliveryID, err := s.saveDelivery(ctx, &delivery)
 	if err != nil {
@@ -213,6 +196,53 @@ func (s *sCollector) processEvent(ctx context.Context, payload *sysin.EventTask)
 	return err
 }
 
+func collectorDeliveryFromEvent(row *entity.TgCollectorEvent, raw []byte) (sysin.CollectorDelivery, error) {
+	if row == nil {
+		return sysin.CollectorDelivery{}, gerror.New("Telegram采集事件为空")
+	}
+	delivery := sysin.CollectorDelivery{
+		DeliveryKey:     fmt.Sprintf("event:%d", row.Id),
+		TenantID:        row.TenantId,
+		EventID:         row.Id,
+		SourceID:        row.SourceId,
+		SourceType:      row.SourceType,
+		SourceChatID:    row.ChatId,
+		SourceMessageID: row.MessageId,
+		RawUpdate:       raw,
+	}
+	switch row.SourceType {
+	case sysin.SourceTypeBot:
+		var update models.Update
+		if err := json.Unmarshal(raw, &update); err != nil {
+			return sysin.CollectorDelivery{}, gerror.Wrap(err, "解析Telegram Bot原始事件失败")
+		}
+		message := collectorUpdateMessage(&update)
+		if message != nil {
+			delivery.RawText = strings.TrimSpace(message.Text)
+			if delivery.RawText == "" {
+				delivery.RawText = strings.TrimSpace(message.Caption)
+			}
+		}
+	case sysin.SourceTypeAccount:
+		var message sysin.AccountMessageEvent
+		if err := json.Unmarshal(raw, &message); err != nil {
+			return sysin.CollectorDelivery{}, gerror.Wrap(err, "解析Telegram账号原始事件失败")
+		}
+		delivery.AccountID = message.AccountID
+		delivery.TgAccountID = message.TgAccountID
+		delivery.SourceChatID = message.SourceChatID
+		delivery.SourceMessageID = message.SourceMessageID
+		delivery.SourceGroupedID = message.SourceGroupedID
+		delivery.SourceUniqueKey = message.SourceUniqueKey
+		delivery.RawText = strings.TrimSpace(message.RawText)
+		delivery.Media = append([]sysin.CollectorMediaItem(nil), message.Media...)
+		delivery.ReceivedAt = message.ReceivedAt
+	default:
+		return sysin.CollectorDelivery{}, gerror.Newf("不支持的Telegram采集来源类型：%s", row.SourceType)
+	}
+	return delivery, nil
+}
+
 func (s *sCollector) saveDelivery(ctx context.Context, delivery *sysin.CollectorDelivery) (int64, error) {
 	payload, err := json.Marshal(delivery)
 	if err != nil {
@@ -225,7 +255,7 @@ func (s *sCollector) saveDelivery(ctx context.Context, delivery *sysin.Collector
 		EventId:     delivery.EventID,
 		DeliveryKey: delivery.DeliveryKey,
 		Status:      sysin.DeliveryStatusPending,
-		Priority:    sysin.EventPriorityUrgent,
+		Priority:    deliveryPriority(delivery),
 		Payload:     gjson.New(payload),
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -247,6 +277,16 @@ func (s *sCollector) saveDelivery(ctx context.Context, delivery *sysin.Collector
 		return 0, gerror.New("Telegram采集交付ID无效")
 	}
 	return row.Id, nil
+}
+
+func deliveryPriority(delivery *sysin.CollectorDelivery) int {
+	if delivery == nil {
+		return sysin.EventPriorityNormal
+	}
+	if delivery.SourceType == sysin.SourceTypeAccount {
+		return sysin.EventPriorityRealtime
+	}
+	return sysin.EventPriorityUrgent
 }
 
 func (s *sCollector) failEvent(ctx context.Context, eventID int64, cause error) error {

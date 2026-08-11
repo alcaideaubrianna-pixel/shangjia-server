@@ -15,6 +15,15 @@
 - 已接入 OTel Event/Delivery 数量和耗时指标；
 - 已补 PostgreSQL 集成测试，覆盖 Event/Delivery 幂等、Delivery 消费和媒体租约复用。
 
+第二阶段已完成协议号实时事件接入：
+
+- Account Runtime 仅负责把账号消息转换为标准 `AccountMessageEvent` 并写入插件 Event；
+- Collector Worker 按 `account` 来源解析标准事件并创建 Delivery；
+- Publish Worker 通过现有注册式 Adapter 还原为上架插件采集模型，复用原有资料解析、媒体组聚合和发布规则；
+- Bot 与协议号链路在插件启用后停止重复执行旧采集入口，缓存、自动删除等非采集能力保持不变；
+- 插件入队失败时，Bot 由统一 Gateway 重试，协议号消息回退旧链路，避免静默丢失；
+- 新增账号事件转换和 Delivery 还原测试，验证媒体元数据、分组标识和来源唯一键不丢失。
+
 生产开关仍为：
 
 ```text
@@ -22,6 +31,13 @@ YOUBAN_TELEGRAM_COLLECTOR_ENABLED=false
 ```
 
 因此本次部署只增加代码、表结构和独立服务能力，不会自动切换现有采集流量。完成插件安装 SQL、Shadow 观测和积压核对后，再按租户逐步开启。
+
+启用第二阶段时必须同时确认：
+
+1. `collector-worker` 已启动并能消费 `tg.collect.*`；
+2. `publish-worker` 已启动并能消费 `tg.delivery.ready`；
+3. Account Runtime 与两个 Worker 使用同一 Redis/数据库；
+4. 先只在测试租户开启 `YOUBAN_TELEGRAM_COLLECTOR_ENABLED=true`，确认事件延迟、失败重试和旧资料去重后再扩大范围。
 
 ## 1. 开发范围
 

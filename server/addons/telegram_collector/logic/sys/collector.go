@@ -97,6 +97,66 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 	return nil
 }
 
+func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.AccountMessageEvent) error {
+	if message == nil {
+		return gerror.New("Telegram账号采集消息为空")
+	}
+	if !collectorEnabled(ctx) {
+		return nil
+	}
+	if message.TenantID <= 0 || message.AccountID <= 0 || message.SourceID <= 0 || message.TgAccountID <= 0 {
+		return gerror.New("Telegram账号采集消息归属不完整")
+	}
+	message.SourceChatID = strings.TrimSpace(message.SourceChatID)
+	message.SourceUniqueKey = strings.TrimSpace(message.SourceUniqueKey)
+	if message.SourceChatID == "" || message.SourceMessageID <= 0 || message.SourceUniqueKey == "" {
+		return gerror.New("Telegram账号采集消息标识不完整")
+	}
+	if message.ReceivedAt.IsZero() {
+		message.ReceivedAt = time.Now()
+	}
+	raw, err := json.Marshal(message)
+	if err != nil {
+		return gerror.Wrap(err, "序列化Telegram账号采集事件失败")
+	}
+	event := sysin.RawUpdateEvent{
+		EventID:    message.SourceUniqueKey,
+		TenantID:   message.TenantID,
+		SourceID:   message.SourceID,
+		SourceType: sysin.SourceTypeAccount,
+		AccountID:  message.TgAccountID,
+		ChatID:     parseCollectorChatID(message.SourceChatID),
+		MessageID:  message.SourceMessageID,
+		Priority:   sysin.EventPriorityRealtime,
+		RawUpdate:  raw,
+		ReceivedAt: message.ReceivedAt,
+		TraceID:    message.TraceID,
+	}
+	eventID, err := s.persistEvent(ctx, &event)
+	if err != nil {
+		return err
+	}
+	if err = s.enqueueEventTask(ctx, sysin.EventTask{EventID: eventID, EventKey: event.EventID, Priority: event.Priority}); err != nil {
+		return gerror.Wrap(err, "Telegram账号采集事件入队失败")
+	}
+	counter, _ := collectorMeter.Int64Counter("telegram_collector_ingest_total")
+	counter.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("source_type", sysin.SourceTypeAccount),
+		attribute.String("priority", "realtime"),
+	))
+	return nil
+}
+
+func parseCollectorChatID(value string) int64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	var chatID int64
+	_, _ = fmt.Sscan(value, &chatID)
+	return chatID
+}
+
 func (s *sCollector) persistEvent(ctx context.Context, event *sysin.RawUpdateEvent) (int64, error) {
 	if event == nil {
 		return 0, gerror.New("Telegram采集事件为空")

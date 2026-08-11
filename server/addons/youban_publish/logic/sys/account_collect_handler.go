@@ -11,6 +11,8 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/tg"
 
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -66,11 +68,50 @@ func (w *accountCollectWorker) handleGotdMessage(ctx context.Context, entities t
 
 func (w *accountCollectWorker) ingestGotdMessage(ctx context.Context, source accountCollectSourceRuntime, msg *tg.Message, chatId string) {
 	message := gotdCollectMessage(w.tgAccountId, source, msg, chatId)
+	if collectorservice.Collector().Enabled(ctx) {
+		if err := collectorservice.Collector().IngestAccountMessage(ctx, accountCollectorEvent(message)); err == nil {
+			return
+		} else {
+			g.Log().Warningf(ctx, "Telegram账号采集插件接收失败，回退旧链路 source:%d msg:%d err:%+v", source.Id, msg.ID, err)
+		}
+	}
 	_, err := w.service.ingestAndProcessCollectMessage(ctx, message)
 	if err != nil {
 		g.Log().Errorf(ctx, "处理账号采集事件失败 source:%d msg:%d err:%+v", source.Id, msg.ID, err)
 		return
 	}
+}
+
+func accountCollectorEvent(message *CollectMessage) *collectorin.AccountMessageEvent {
+	if message == nil {
+		return nil
+	}
+	event := &collectorin.AccountMessageEvent{
+		TenantID:        message.TenantId,
+		AccountID:       message.AccountId,
+		SourceID:        message.SourceId,
+		TgAccountID:     message.TgAccountId,
+		SourceChatID:    message.SourceChatId,
+		SourceMessageID: message.SourceMessageId,
+		SourceGroupedID: message.SourceGroupedId,
+		SourceUniqueKey: message.SourceUniqueKey,
+		RawText:         message.RawText,
+	}
+	if message.ReceivedAt != nil {
+		event.ReceivedAt = message.ReceivedAt.Time
+	}
+	event.Media = make([]collectorin.CollectorMediaItem, 0, len(message.Media))
+	for _, item := range message.Media {
+		event.Media = append(event.Media, collectorin.CollectorMediaItem{
+			Type: item.Type, Purpose: item.Purpose, FileID: item.FileId, FileURL: item.FileUrl,
+			StoragePath: item.StoragePath, PosterURL: item.PosterUrl, FileMD5: item.FileMd5,
+			FilePHash: item.FilePhash, SourceKind: item.SourceKind, SourceMediaID: item.SourceMediaId,
+			SourceAccessHash: item.SourceAccessHash, SourceFileReference: append([]byte(nil), item.SourceFileReference...),
+			SourceThumbSize: item.SourceThumbSize, SourceMimeType: item.SourceMimeType,
+			SourceDCID: item.SourceDCId, SourceSize: item.SourceSize, DebugMetaJSON: item.DebugMetaJson,
+		})
+	}
+	return event
 }
 
 func gotdCollectMessage(tgAccountId int64, source accountCollectSourceRuntime, msg *tg.Message, chatId string) *CollectMessage {

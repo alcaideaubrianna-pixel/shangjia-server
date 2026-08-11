@@ -14,6 +14,7 @@ import (
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 
 	"hotgo/addons/telegram_collector/internal/dao"
+	"hotgo/addons/telegram_collector/internal/model/entity"
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 )
@@ -54,6 +55,56 @@ func TestUpdateEventIDUsesPayloadHashWithoutUpdateID(t *testing.T) {
 	second := updateEventID("bot-key", 7, 0, []byte(`{"ok":false}`))
 	if first == second {
 		t.Fatal("expected payload hash to distinguish updates without an id")
+	}
+}
+
+func TestCollectorDeliveryFromAccountEvent(t *testing.T) {
+	receivedAt := time.Date(2026, 8, 11, 10, 30, 0, 0, time.FixedZone("CST", 8*60*60))
+	message := sysin.AccountMessageEvent{
+		TenantID:        7,
+		AccountID:       8,
+		SourceID:        9,
+		TgAccountID:     10,
+		SourceChatID:    "-100123456",
+		SourceMessageID: 11,
+		SourceGroupedID: "12",
+		SourceUniqueKey: "account:10:source:9:-100123456:group:12",
+		RawText:         " 测试账号采集 ",
+		ReceivedAt:      receivedAt,
+		Media: []sysin.CollectorMediaItem{{
+			Type:                "video",
+			FileID:              "gotd:-100123456:11",
+			SourceKind:          "document",
+			SourceMediaID:       13,
+			SourceAccessHash:    14,
+			SourceFileReference: []byte{1, 2, 3},
+			SourceMimeType:      "video/mp4",
+			SourceSize:          1024,
+		}},
+	}
+	raw, err := json.Marshal(message)
+	if err != nil {
+		t.Fatalf("marshal account message: %v", err)
+	}
+	delivery, err := collectorDeliveryFromEvent(&entity.TgCollectorEvent{
+		Id: 15, TenantId: message.TenantID, SourceId: message.SourceID,
+		SourceType: sysin.SourceTypeAccount, AccountId: message.TgAccountID,
+		ChatId: message.SourceChatID, MessageId: message.SourceMessageID,
+	}, raw)
+	if err != nil {
+		t.Fatalf("build account delivery: %v", err)
+	}
+	if delivery.AccountID != message.AccountID || delivery.TgAccountID != message.TgAccountID {
+		t.Fatalf("unexpected account identity: %+v", delivery)
+	}
+	if delivery.RawText != "测试账号采集" || delivery.SourceUniqueKey != message.SourceUniqueKey {
+		t.Fatalf("unexpected delivery content: %+v", delivery)
+	}
+	if len(delivery.Media) != 1 || delivery.Media[0].SourceMediaID != 13 {
+		t.Fatalf("unexpected delivery media: %+v", delivery.Media)
+	}
+	if !delivery.ReceivedAt.Equal(receivedAt) {
+		t.Fatalf("receivedAt=%v want=%v", delivery.ReceivedAt, receivedAt)
 	}
 }
 

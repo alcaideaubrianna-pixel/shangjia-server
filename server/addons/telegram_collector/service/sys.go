@@ -14,6 +14,7 @@ type ICollector interface {
 	StartDeliveryRuntime(ctx context.Context)
 	StopRuntime()
 	IngestBotUpdate(ctx context.Context, bot BotContext, update *models.Update) error
+	IngestAccountMessage(ctx context.Context, event *sysin.AccountMessageEvent) error
 	MediaCache(ctx context.Context, fingerprint string) (*sysin.MediaCacheEntry, bool, error)
 	ClaimMediaProcessing(ctx context.Context, fingerprint string, ttl time.Duration) (bool, error)
 	SaveMediaReady(ctx context.Context, entry *sysin.MediaCacheEntry, ttl time.Duration) error
