@@ -37,7 +37,7 @@ export default defineRailway(() => {
   });
   const observeData = volume("xiaohuiji-observe-data", {
     region: singapore,
-    sizeMB: 10240,
+    sizeMB: 5000,
   });
 
   const commonEnv = {
