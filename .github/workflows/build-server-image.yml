@@ -193,8 +193,19 @@ jobs:
 
       - name: Validate Railway deployment configuration
         run: |
-          test -n "$RAILWAY_TOKEN" || { echo "Missing production secret: RAILWAY_TOKEN"; exit 1; }
-          test -n "$RAILWAY_PROJECT_ID" || { echo "Missing production variable: RAILWAY_PROJECT_ID"; exit 1; }
+          clean_token="${RAILWAY_TOKEN//$'\r'/}"
+          clean_token="${clean_token//$'\n'/}"
+          clean_project_id="${RAILWAY_PROJECT_ID//$'\r'/}"
+          clean_project_id="${clean_project_id//$'\n'/}"
+          test -n "$clean_token" || { echo "Missing production secret: RAILWAY_TOKEN"; exit 1; }
+          test -n "$clean_project_id" || { echo "Missing production variable: RAILWAY_PROJECT_ID"; exit 1; }
+          case "$clean_token" in
+            prj_*) ;;
+            *) echo "RAILWAY_TOKEN must be a Railway project token beginning with prj_"; exit 1 ;;
+          esac
+          echo "::add-mask::$clean_token"
+          printf 'RAILWAY_TOKEN=%s\n' "$clean_token" >> "$GITHUB_ENV"
+          printf 'RAILWAY_PROJECT_ID=%s\n' "$clean_project_id" >> "$GITHUB_ENV"
 
       - name: Set immutable image references
         run: |
