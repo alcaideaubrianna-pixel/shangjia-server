@@ -45,7 +45,7 @@ ghcr.io/<owner>/youban-server:sha-xxxxxxx
 - Healthcheck Path：`/readyz`
 - 不绑定公网业务域名
 - 运行 HotGo Cron、发布调度和恢复调度
-- `YOUBAN_TCP_CRON_ADDRESS=youban-api.railway.internal:8099`
+- `YOUBAN_TCP_CRON_ADDRESS=xiaohuiji-api.railway.internal:8099`
 - 固定 1 个副本，禁止横向扩容
 
 ## 公共要求

@@ -41,7 +41,7 @@ export default defineRailway(() => {
     YOUBAN_QUEUE_DRIVER: "redis",
   };
 
-  const api = service("youban-api", {
+  const api = service("xiaohuiji-api", {
     source: appImage,
     start: "/app/hotgo web",
     healthcheck: "/readyz",
@@ -52,7 +52,7 @@ export default defineRailway(() => {
     },
   });
 
-  const worker = service("youban-worker", {
+  const worker = service("xiaohuiji-worker", {
     source: appImage,
     start: "/app/hotgo worker",
     healthcheck: "/readyz",
@@ -63,7 +63,7 @@ export default defineRailway(() => {
     },
   });
 
-  const account = service("youban-account", {
+  const account = service("xiaohuiji-account", {
     source: appImage,
     start: "/app/hotgo account",
     healthcheck: "/readyz",
@@ -74,7 +74,7 @@ export default defineRailway(() => {
     },
   });
 
-  const scheduler = service("youban-scheduler", {
+  const scheduler = service("xiaohuiji-scheduler", {
     source: appImage,
     start: "/app/hotgo scheduler",
     healthcheck: "/readyz",
@@ -82,11 +82,11 @@ export default defineRailway(() => {
     env: {
       ...commonEnv,
       YOUBAN_RUNTIME_ROLES: "scheduler",
-      YOUBAN_TCP_CRON_ADDRESS: "youban-api.railway.internal:8099",
+      YOUBAN_TCP_CRON_ADDRESS: "xiaohuiji-api.railway.internal:8099",
     },
   });
 
-  return project("youban-production", {
+  return project("xiaohuiji-production", {
     resources: [database, cache, api, worker, account, scheduler],
   });
 });
