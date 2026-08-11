@@ -1211,6 +1211,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_source" (
   "source_username" varchar(128) NOT NULL DEFAULT '',
   "tg_account_id" bigint NOT NULL DEFAULT 0,
   "bot_id" bigint NOT NULL DEFAULT 0,
+  "bot_collect_scope" varchar(16) NOT NULL DEFAULT 'chat',
   "follow_account_id" bigint NOT NULL DEFAULT 0,
   "collect_enabled" smallint NOT NULL DEFAULT 0,
   "status" smallint NOT NULL DEFAULT 1,
@@ -1226,6 +1227,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_source" (
   "updated_at" timestamp DEFAULT NULL,
   "deleted_at" timestamp DEFAULT NULL
 );
+ALTER TABLE "hg_youban_publish_collect_source" ADD COLUMN IF NOT EXISTS "bot_collect_scope" varchar(16) NOT NULL DEFAULT 'chat';
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_owner" ON "hg_youban_publish_collect_source" ("tenant_id", "account_id", "source_type", "status");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_bot_chat" ON "hg_youban_publish_collect_source" ("bot_id", "source_chat_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_bot_scope" ON "hg_youban_publish_collect_source" ("bot_id", "bot_collect_scope", "source_chat_id", "status");

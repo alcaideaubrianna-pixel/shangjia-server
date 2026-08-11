@@ -165,19 +165,62 @@ SET `pid` = @addonsId,
     `updated_at` = @now
 WHERE @addonsId IS NOT NULL AND `name` = 'develop_addons';
 
+INSERT INTO `hg_admin_role_menu` (`role_id`, `menu_id`)
+SELECT r.`id`, m.`id`
+FROM `hg_admin_role` r
+JOIN `hg_admin_menu` m ON m.`name` = 'develop_addons'
+WHERE (
+    r.`id` IN (1, 2)
+    OR EXISTS (
+        SELECT 1
+        FROM `hg_admin_role_menu` rm_root
+        JOIN `hg_admin_menu` root ON root.`id` = rm_root.`menu_id`
+        WHERE rm_root.`role_id` = r.`id`
+          AND root.`name` = 'addons'
+    )
+)
+AND NOT EXISTS (
+    SELECT 1
+    FROM `hg_admin_role_menu` rm
+    WHERE rm.`role_id` = r.`id`
+      AND rm.`menu_id` = m.`id`
+);
+
 DELETE rm FROM `hg_admin_role_menu` rm
 JOIN `hg_admin_menu` m ON m.`id` = rm.`menu_id`
 JOIN `hg_admin_menu` example ON example.`name` = 'hgexample'
 WHERE m.`id` = example.`id`
-   OR m.`tree` LIKE CONCAT(example.`tree`, '%');
+   OR m.`tree` LIKE CONCAT(example.`tree`, 'tr_', example.`id`, ' %');
 
 UPDATE `hg_admin_menu` m
-JOIN (SELECT `tree` FROM `hg_admin_menu` WHERE `name` = 'hgexample' LIMIT 1) example
+JOIN (SELECT `id`, `tree` FROM `hg_admin_menu` WHERE `name` = 'hgexample' LIMIT 1) example
 SET m.`status` = '2',
     m.`hidden` = '1',
     m.`updated_at` = @now
 WHERE m.`name` = 'hgexample'
-   OR m.`tree` LIKE CONCAT(example.`tree`, '%');
+   OR m.`tree` LIKE CONCAT(example.`tree`, 'tr_', example.`id`, ' %');
+
+UPDATE `hg_admin_menu` AS m
+JOIN (
+    SELECT `id`
+    FROM `hg_admin_menu`
+    WHERE `name` = 'addons'
+    LIMIT 1
+) AS root
+SET m.`pid` = root.`id`,
+    m.`title` = '插件管理',
+    m.`path` = 'addons',
+    m.`type` = '2',
+    m.`redirect` = '',
+    m.`permissions` = '/addons/selects,/addons/list',
+    m.`component` = '/develop/addons/index',
+    m.`always_show` = '1',
+    m.`hidden` = '0',
+    m.`level` = '2',
+    m.`tree` = CONCAT('tr_', root.`id`, ' '),
+    m.`status` = '1',
+    m.`updated_at` = @now
+WHERE m.`name` = 'develop_addons';
 
 UPDATE `hg_admin_menu`
 SET `redirect` = '/develop/addons/index',

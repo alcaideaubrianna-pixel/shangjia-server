@@ -150,19 +150,65 @@ SET "pid" = root."id",
 FROM (SELECT "id" FROM "hg_admin_menu" WHERE "name" = 'addons' LIMIT 1) root
 WHERE "hg_admin_menu"."name" = 'develop_addons';
 
+INSERT INTO "hg_admin_role_menu" ("role_id", "menu_id")
+SELECT r."id", m."id"
+FROM "hg_admin_role" r
+JOIN "hg_admin_menu" m ON m."name" = 'develop_addons'
+WHERE (
+    r."id" IN (1, 2)
+    OR EXISTS (
+        SELECT 1
+        FROM "hg_admin_role_menu" rm_root
+        JOIN "hg_admin_menu" root ON root."id" = rm_root."menu_id"
+        WHERE rm_root."role_id" = r."id"
+          AND root."name" = 'addons'
+    )
+)
+AND NOT EXISTS (
+    SELECT 1
+    FROM "hg_admin_role_menu" rm
+    WHERE rm."role_id" = r."id"
+      AND rm."menu_id" = m."id"
+);
+
 DELETE FROM "hg_admin_role_menu" rm
 USING "hg_admin_menu" m
 JOIN "hg_admin_menu" example ON example."name" = 'hgexample'
 WHERE rm."menu_id" = m."id"
-  AND (m."id" = example."id" OR m."tree" LIKE example."tree" || '%');
+  AND (
+      m."id" = example."id"
+      OR m."tree" LIKE example."tree" || 'tr_' || example."id"::text || ' %'
+  );
 
 UPDATE "hg_admin_menu" m
 SET "status" = 2,
     "hidden" = 1,
     "updated_at" = NOW()
-FROM (SELECT "tree" FROM "hg_admin_menu" WHERE "name" = 'hgexample' LIMIT 1) example
+FROM (SELECT "id", "tree" FROM "hg_admin_menu" WHERE "name" = 'hgexample' LIMIT 1) example
 WHERE m."name" = 'hgexample'
-   OR m."tree" LIKE example."tree" || '%';
+   OR m."tree" LIKE example."tree" || 'tr_' || example."id"::text || ' %';
+
+UPDATE "hg_admin_menu" AS m
+SET "pid" = root."id",
+    "title" = '插件管理',
+    "path" = 'addons',
+    "type" = 2,
+    "redirect" = '',
+    "permissions" = '/addons/selects,/addons/list',
+    "component" = '/develop/addons/index',
+    "always_show" = 1,
+    "hidden" = 0,
+    "level" = 2,
+    "tree" = 'tr_' || root."id"::text || ' ',
+    "status" = 1,
+    "updated_at" = NOW()
+FROM (
+    SELECT "id"
+    FROM "hg_admin_menu"
+    WHERE "name" = 'addons'
+    LIMIT 1
+) AS root
+WHERE m."name" = 'develop_addons';
 
 UPDATE "hg_admin_menu"
 SET "redirect" = '/develop/addons/index',
