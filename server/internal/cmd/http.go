@@ -18,6 +18,7 @@ import (
 	"hotgo/internal/router"
 	"hotgo/internal/service"
 	"hotgo/internal/websocket"
+	"hotgo/utility/runrole"
 )
 
 var (
@@ -28,6 +29,8 @@ var (
 		Func: func(ctx context.Context, parser *gcmd.Parser) (err error) {
 			// 初始化http服务
 			s := g.Server()
+			registerHealthHandlers(s)
+			webRuntime := runrole.Enabled(ctx, runrole.Web)
 
 			// 初始化请求前回调
 			s.BindHookHandler("/*any", ghttp.HookBeforeServe, service.Hook().BeforeServe)
@@ -65,25 +68,27 @@ var (
 				return err
 			}
 
-			// 初始化casbin权限
-			casbin.InitEnforcer(ctx)
+			if webRuntime {
+				// 初始化casbin权限
+				casbin.InitEnforcer(ctx)
 
-			// 初始化生成代码配置
-			if !gmode.IsProduct() {
-				hggen.InIt(ctx)
+				// 初始化生成代码配置
+				if !gmode.IsProduct() {
+					hggen.InIt(ctx)
+				}
+
+				// 启动tcp服务
+				service.TCPServer().Start(ctx)
+
+				// 启动服务监控
+				service.AdminMonitor().StartMonitor(ctx)
+
+				// 加载ip访问黑名单
+				service.SysBlacklist().Load(ctx)
+
+				// 注册支付成功回调方法
+				service.Pay().RegisterNotifyCall()
 			}
-
-			// 启动tcp服务
-			service.TCPServer().Start(ctx)
-
-			// 启动服务监控
-			service.AdminMonitor().StartMonitor(ctx)
-
-			// 加载ip访问黑名单
-			service.SysBlacklist().Load(ctx)
-
-			// 注册支付成功回调方法
-			service.Pay().RegisterNotifyCall()
 
 			serverWg.Add(1)
 
@@ -92,10 +97,12 @@ var (
 
 			go func() {
 				<-serverCloseSignal
-				websocket.Stop()              // 关闭websocket
-				service.TCPServer().Stop(ctx) // 关闭tcp服务器
-				addons.StopModules(ctx)       // 停止插件
-				_ = s.Shutdown()              // 关闭http服务，主服务建议放在最后一个关闭
+				websocket.Stop() // 关闭websocket
+				if webRuntime {
+					service.TCPServer().Stop(ctx) // 关闭tcp服务器
+				}
+				addons.StopModules(ctx) // 停止插件
+				_ = s.Shutdown()        // 关闭http服务，主服务建议放在最后一个关闭
 				g.Log().Debug(ctx, "http successfully closed ..")
 				serverWg.Done()
 			}()

@@ -24,29 +24,45 @@ type gatewayUpdatePayload struct {
 
 func (s *sGateway) startUpdateQueue(ctx context.Context) {
 	s.queueMu.Lock()
-	defer s.queueMu.Unlock()
-	if s.queue != nil || s.queueCli != nil {
+	if s.queue != nil {
+		s.queueMu.Unlock()
 		return
 	}
-	redisOpt := asynq.RedisClientOpt{
-		Addr:     g.Cfg().MustGet(ctx, "redis.default.address", "127.0.0.1:6379").String(),
-		Password: g.Cfg().MustGet(ctx, "redis.default.pass", "").String(),
-		DB:       g.Cfg().MustGet(ctx, "redis.default.db", 0).Int(),
-	}
+	redisOpt := gatewayRedisOption(ctx)
 	server := asynq.NewServer(redisOpt, asynq.Config{
 		Concurrency: gatewayQueueConcurrency(ctx),
 		Queues:      map[string]int{tgGatewayQueueName: 1},
 	})
-	client := asynq.NewClient(redisOpt)
+	if s.queueCli == nil {
+		s.queueCli = asynq.NewClient(redisOpt)
+	}
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tgGatewayTaskType, s.handleUpdateTask)
-	s.queue, s.queueCli = server, client
+	s.queue = server
+	s.queueMu.Unlock()
 	g.Log().Infof(ctx, "启动TG Bot Gateway异步更新队列 concurrency:%d", gatewayQueueConcurrency(ctx))
 	go func() {
 		if err := server.Run(mux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "TG Bot Gateway异步更新队列停止：%+v", err)
 		}
 	}()
+}
+
+func gatewayRedisOption(ctx context.Context) asynq.RedisClientOpt {
+	return asynq.RedisClientOpt{
+		Addr:     g.Cfg().MustGet(ctx, "redis.default.address", "127.0.0.1:6379").String(),
+		Password: g.Cfg().MustGet(ctx, "redis.default.pass", "").String(),
+		DB:       g.Cfg().MustGet(ctx, "redis.default.db", 0).Int(),
+	}
+}
+
+func (s *sGateway) updateQueueClient(ctx context.Context) *asynq.Client {
+	s.queueMu.Lock()
+	defer s.queueMu.Unlock()
+	if s.queueCli == nil {
+		s.queueCli = asynq.NewClient(gatewayRedisOption(ctx))
+	}
+	return s.queueCli
 }
 
 func gatewayQueueConcurrency(ctx context.Context) int {
@@ -89,12 +105,7 @@ func (s *sGateway) enqueueUpdateBody(ctx context.Context, key string, body []byt
 	if err != nil {
 		return fmt.Errorf("序列化Telegram队列任务失败: %w", err)
 	}
-	s.queueMu.Lock()
-	client := s.queueCli
-	s.queueMu.Unlock()
-	if client == nil {
-		return fmt.Errorf("TG Bot Gateway异步队列未启动")
-	}
+	client := s.updateQueueClient(ctx)
 	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgGatewayTaskType, payload),
 		asynq.Queue(tgGatewayQueueName),
 		asynq.MaxRetry(10),

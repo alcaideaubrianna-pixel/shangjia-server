@@ -2,4 +2,4 @@
 set -e
 
 cd /app
-exec ./hotgo
+exec ./hotgo "$@"

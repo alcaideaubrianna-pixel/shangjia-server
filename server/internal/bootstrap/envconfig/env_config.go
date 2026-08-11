@@ -28,7 +28,7 @@ var items = []item{
 	{Key: "database.default.link", EnvKeys: []string{"GF_DATABASE_DEFAULT_LINK", "YOUBAN_DATABASE_LINK", "DATABASE_DEFAULT_LINK"}},
 	{Key: "database.default.debug", EnvKeys: []string{"GF_DATABASE_DEFAULT_DEBUG", "YOUBAN_DB_DEBUG", "DATABASE_DEBUG"}},
 	{Key: "database.default.Prefix", EnvKeys: []string{"GF_DATABASE_DEFAULT_PREFIX", "YOUBAN_DB_PREFIX", "DATABASE_PREFIX"}},
-	{Key: "youbanPublish.runtime.roles", EnvKeys: []string{"YOUBAN_PUBLISH_RUNTIME_ROLES"}},
+	{Key: "runtime.roles", EnvKeys: []string{"YOUBAN_RUNTIME_ROLES"}},
 	{Key: "youbanPublish.queue.concurrency", EnvKeys: []string{"YOUBAN_PUBLISH_QUEUE_CONCURRENCY"}},
 	{Key: "youbanTgBotGateway.queue.concurrency", EnvKeys: []string{"YOUBAN_TG_BOT_GATEWAY_QUEUE_CONCURRENCY"}},
 	{Key: "youbanPublish.queue.backgroundConcurrency", EnvKeys: []string{"YOUBAN_PUBLISH_BACKGROUND_CONCURRENCY"}},

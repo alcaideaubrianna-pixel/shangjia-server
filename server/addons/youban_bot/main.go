@@ -15,6 +15,7 @@ import (
 	botService "hotgo/addons/youban_bot/service"
 	"hotgo/internal/library/addons"
 	"hotgo/internal/service"
+	"hotgo/utility/runrole"
 )
 
 type module struct {
@@ -48,7 +49,9 @@ func (m *module) Start(option *addons.Option) (err error) {
 		router.Api(m.ctx, group)
 		router.Admin(m.ctx, group)
 	})
-	botService.SysBot().StartRuntime(m.ctx)
+	if runrole.Enabled(m.ctx, runrole.Runtime) {
+		botService.SysBot().StartRuntime(m.ctx)
+	}
 	return
 }
 

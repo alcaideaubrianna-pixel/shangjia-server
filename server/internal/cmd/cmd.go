@@ -9,6 +9,7 @@ import (
 	"context"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcmd"
+	"hotgo/utility/runrole"
 	"hotgo/utility/simple"
 )
 
@@ -28,6 +29,9 @@ var (
 		---------------------------------------------------------------------------------
 		启动服务
 		>> 所有服务  [go run main.go]   热编译  [gf run main.go]
+		>> API服务   [go run main.go web]
+		>> Worker服务 [go run main.go worker]
+		>> Runtime服务 [go run main.go runtime]
 		>> HTTP服务  [go run main.go http]
 		>> 消息队列  [go run main.go queue]
 		>> 定时任务  [go run main.go cron]
@@ -71,6 +75,7 @@ var (
 		Brief:       "start all server",
 		Description: "this is the command entry for starting all server",
 		Func: func(ctx context.Context, parser *gcmd.Parser) (err error) {
+			runrole.Set(runrole.All)
 			g.Log().Debug(ctx, "starting all server")
 
 			// 需要启动的服务
@@ -94,10 +99,39 @@ var (
 			return
 		},
 	}
+
+	Web = roleCommand("web", "启动 API 服务", runrole.Web, Http)
+
+	Worker = roleCommand("worker", "启动 Worker 服务", runrole.Worker, Http, Queue)
+
+	Runtime = roleCommand("runtime", "启动 Runtime 服务", runrole.Runtime, Http, Cron)
 )
 
+func roleCommand(name string, brief string, role string, commands ...*gcmd.Command) *gcmd.Command {
+	return &gcmd.Command{
+		Name:  name,
+		Usage: name,
+		Brief: brief,
+		Func: func(ctx context.Context, parser *gcmd.Parser) error {
+			runrole.Set(role)
+			for _, command := range commands {
+				current := command
+				simple.SafeGo(ctx, func(ctx context.Context) {
+					if err := current.Func(ctx, parser); err != nil {
+						g.Log().Fatalf(ctx, "%s start fail:%+v", current.Name, err)
+					}
+				})
+			}
+			signalListen(ctx, signalHandlerForOverall)
+			<-serverCloseSignal
+			serverWg.Wait()
+			return nil
+		},
+	}
+}
+
 func init() {
-	if err := Main.AddCommand(All, Http, Queue, Cron, Auth, Tools, Up, Help); err != nil {
+	if err := Main.AddCommand(All, Web, Worker, Runtime, Http, Queue, Cron, Auth, Tools, Up, Help); err != nil {
 		panic(err)
 	}
 }

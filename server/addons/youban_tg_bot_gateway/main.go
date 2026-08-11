@@ -10,6 +10,7 @@ import (
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/addons"
 	internalservice "hotgo/internal/service"
+	"hotgo/utility/runrole"
 	"sync"
 )
 
@@ -30,7 +31,9 @@ func (m *module) Start(option *addons.Option) error {
 		group.Middleware(internalservice.Middleware().Addon)
 		router.Api(m.ctx, group)
 	})
-	gatewayservice.Gateway().StartRuntime(m.ctx)
+	if runrole.Enabled(m.ctx, runrole.Runtime) {
+		gatewayservice.Gateway().StartRuntime(m.ctx)
+	}
 	return nil
 }
 func (m *module) Stop() error                     { gatewayservice.Gateway().StopRuntime(); return nil }

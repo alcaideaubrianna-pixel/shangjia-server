@@ -18,6 +18,7 @@ import (
 	aservice "hotgo/addons/lazysheep_tggo/service"
 	"hotgo/internal/library/addons"
 	iservice "hotgo/internal/service"
+	"hotgo/utility/runrole"
 	"sync"
 )
 
@@ -57,14 +58,16 @@ func (m *module) Start(option *addons.Option) (err error) {
 		router.Admin(m.ctx, group)
 		router.Api(m.ctx, group)
 	})
-	go func() {
-		if err := aservice.SysLazysheepTggo().BootBots(m.ctx); err != nil {
-			g.Log().Warningf(m.ctx, "懒羊羊TGGo机器人启动失败：%+v", err)
-		}
-	}()
-	aservice.SysLazysheepTggo().StartAutoPullLoop(m.ctx)
-	aservice.SysLazysheepTggo().StartPullMonitorAggregator(m.ctx)
-	aservice.SysLazysheepTggo().StartPushQueueLoop(m.ctx)
+	if runrole.Enabled(m.ctx, runrole.Runtime) {
+		go func() {
+			if err := aservice.SysLazysheepTggo().BootBots(m.ctx); err != nil {
+				g.Log().Warningf(m.ctx, "懒羊羊TGGo机器人启动失败：%+v", err)
+			}
+		}()
+		aservice.SysLazysheepTggo().StartAutoPullLoop(m.ctx)
+		aservice.SysLazysheepTggo().StartPullMonitorAggregator(m.ctx)
+		aservice.SysLazysheepTggo().StartPushQueueLoop(m.ctx)
+	}
 	return
 }
 

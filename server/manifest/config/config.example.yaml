@@ -363,11 +363,11 @@ hggen:
 
 
 # 悦伴上架插件
+runtime:
+  # 全局运行角色。生产环境必须显式使用 web、worker 或 runtime；all 仅用于本地和单实例部署。
+  roles: [ "all" ]
+
 youbanPublish:
-  runtime:
-    # 运行角色。默认 all 保持单机完整能力；SAE 可按应用配置 web/account/scheduler/worker，
-    # 或按队列进一步拆为 push-worker/media-worker/background-worker。支持数组内逗号组合。
-    roles: [ "all" ]
   fullPush:
     expandWorkerCount: 4
     pageSize: 100

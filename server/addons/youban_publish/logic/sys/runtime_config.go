@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gogf/gf/v2/frame/g"
+	"hotgo/utility/runrole"
 )
 
 const (
@@ -29,11 +29,21 @@ type publishRuntimeConfig struct {
 }
 
 func loadPublishRuntimeConfig(ctx context.Context) publishRuntimeConfig {
-	value, err := g.Cfg().Get(ctx, "youbanPublish.runtime.roles")
-	if err != nil || value == nil || value.IsNil() {
-		return parsePublishRuntimeRoles([]string{publishRuntimeRoleAll})
+	roles := runrole.Roles(ctx)
+	values := make([]string, 0, len(roles)*2)
+	for _, role := range roles {
+		switch role {
+		case runrole.All:
+			return parsePublishRuntimeRoles([]string{publishRuntimeRoleAll})
+		case runrole.Web:
+			values = append(values, publishRuntimeRoleWeb)
+		case runrole.Worker:
+			values = append(values, publishRuntimeRoleWorker)
+		case runrole.Runtime:
+			values = append(values, publishRuntimeRoleAccount, publishRuntimeRoleScheduler)
+		}
 	}
-	return parsePublishRuntimeRoles(value.Strings())
+	return parsePublishRuntimeRoles(values)
 }
 
 func (s *sSysPublish) RuntimeRoleEnabled(ctx context.Context, role string) bool {

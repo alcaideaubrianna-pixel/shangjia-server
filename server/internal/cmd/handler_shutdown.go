@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	serverCloseSignal = make(chan struct{}, 1)
+	serverCloseSignal = make(chan struct{})
 	serverWg          = sync.WaitGroup{}
 	once              sync.Once
 )
@@ -24,7 +24,6 @@ var (
 // signalHandlerForOverall 关闭信号处理
 func signalHandlerForOverall(sig os.Signal) {
 	serverCloseEvent(gctx.GetInitCtx())
-	serverCloseSignal <- struct{}{}
 }
 
 // signalListen 信号监听
@@ -40,5 +39,6 @@ func signalListen(ctx context.Context, handler ...gproc.SigHandler) {
 func serverCloseEvent(ctx context.Context) {
 	once.Do(func() {
 		simple.Event().Call(consts.EventServerClose, ctx)
+		close(serverCloseSignal)
 	})
 }
