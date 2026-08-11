@@ -656,3 +656,31 @@ histogram_quantile(0.95, sum by (le, http_route) (rate(xiaohuiji_http_server_dur
 ```
 
 当前指标按 `http_route` 聚合，不使用原始 URL 作为标签，避免资料编号、频道 ID 等高基数路径污染监控。
+
+## Telegram 运营大盘
+
+TG 运营大盘定义保存在 `deploy/observability/dashboards/tg-operations.json`，导入后名称为
+`xiaohuiji Telegram operations`，按 Tab 分为“异常总览”和五组详情：
+
+1. **异常总览**：最近 15 分钟发送错误、TG 发送延迟分布、媒体下载错误/超时、频道重试 Top 20、频道积压 Top 20、无消费者任务。
+2. **TG 账号租约**：活动租约数、租约事件速率、账号状态。
+3. **网关 Bot 与 Webhook**：Bot configured/running 数量、Webhook 接收结果、更新分发结果。
+4. **采集事件**：未处理事件数量、最老事件年龄、长期无事件采集源。
+5. **媒体下载与验证资料**：媒体缓存积压、PHash/验证资料处理队列、文件引用过期和视频预览图缺失。
+6. **频道推送与 TG 积压**：TG Job、Asynq 队列、频道积压 Top 20、消费者和无消费者任务。
+
+异常总览中的错误类型已经做了低基数归类：`rate_limit`、`timeout`、`authorization`、`permission`、`media`、`other`。
+发送延迟按 `<5s`、`5-30s`、`30-120s`、`>=120s` 分桶；出现 `30-120s` 或 `>=120s` 时，优先检查
+频道积压、重试 Top 和消费者面板。媒体错误中的 `timeout` 表示下载超时，`file_reference_expired` 表示 Telegram
+文件引用过期，需要重新获取文件引用或触发媒体重试。
+
+导入后建议先将时间范围设为最近 1 小时。SQL 快照指标每 15 秒刷新一次，Asynq 和运行时指标按各自
+采集周期更新；如果某个面板为空，应先检查对应指标是否已经进入 OpenObserve，而不是直接判断业务链路失败。
+
+常用排查顺序：
+
+1. 先看“TG Worker 与消费者”，确认有 worker 且没有无消费者任务。
+2. 再看“TG Job 积压”和“频道积压 Top 20”，确认任务是否停在数据库或 Redis。
+3. 采集问题查看“采集事件”和“媒体下载与验证资料”，区分事件未入队、媒体未 ready、PHash 未完成。
+4. Bot 问题查看“网关 Bot 与 Webhook”，区分 Webhook 未收到、入队失败和分发未完成。
+5. 账号问题查看“TG 账号租约”，重点关注 `conflict`、`lock_failed`、`expired` 事件。

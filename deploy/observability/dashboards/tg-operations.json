@@ -1,0 +1,303 @@
+{
+  "version": 8,
+  "dashboardId": "xiaohuiji-tg-operations",
+  "title": "xiaohuiji Telegram operations",
+  "description": "TG 账号租约、Bot Gateway、采集、媒体处理、频道推送与队列积压监控",
+  "tabs": [
+    {
+      "tabId": "tg-incident-overview",
+      "name": "异常总览",
+      "panels": [
+        {
+          "id": "tg-incident-errors",
+          "type": "line",
+          "title": "最近 15 分钟发送错误",
+          "description": "只看失败和重试任务，数值大于 0 就需要进一步看错误类型。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [{"query": "sum by (error_type) (xiaohuiji_publish_errors)", "customQuery": true, "fields": {"stream": "xiaohuiji_publish_errors", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "{error_type}", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}],
+          "layout": {"x": 0, "y": 0, "w": 96, "h": 14, "i": 1}
+        },
+        {
+          "id": "tg-incident-latency",
+          "type": "line",
+          "title": "TG 发送延迟分布",
+          "description": "最近 15 分钟成功发送任务从 dispatched 到 sent 的延迟分桶；出现 30-120s 或 >=120s 说明发送链路明显变慢。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [{"query": "sum by (latency_bucket) (xiaohuiji_publish_send_latency_count)", "customQuery": true, "fields": {"stream": "xiaohuiji_publish_send_latency_count", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "{latency_bucket}", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}],
+          "layout": {"x": 96, "y": 0, "w": 96, "h": 14, "i": 2}
+        },
+        {
+          "id": "tg-incident-media-errors",
+          "type": "line",
+          "title": "媒体下载错误与超时",
+          "description": "最近 15 分钟媒体失败按错误类型和媒体类型分组，timeout 是下载超时，file_reference_expired 是 TG 文件引用失效。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [{"query": "sum by (error_type, media_type) (xiaohuiji_collect_media_errors)", "customQuery": true, "fields": {"stream": "xiaohuiji_collect_media_errors", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "{error_type}/{media_type}", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}],
+          "layout": {"x": 0, "y": 14, "w": 96, "h": 14, "i": 3}
+        },
+        {
+          "id": "tg-incident-retries",
+          "type": "table",
+          "title": "频道重试 Top 20",
+          "description": "最近 1 小时按频道汇总 retry_count；持续增长通常表示限流、权限、账号或媒体链路异常。",
+          "config": {"wrap_table_cells": true, "table_dynamic_columns": true, "show_legends": false, "unit": "short", "table_transpose": false},
+          "queryType": "promql",
+          "queries": [
+            {"query": "xiaohuiji_publish_channel_retries", "customQuery": true, "fields": {"stream": "xiaohuiji_publish_channel_retries", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "channel {channel_id} retries", "layer_type": "table", "weight_fixed": 1, "limit": 20, "time_shift": []}},
+            {"query": "xiaohuiji_publish_channel_retry_jobs", "customQuery": true, "fields": {"stream": "xiaohuiji_publish_channel_retry_jobs", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "channel {channel_id} retry jobs", "layer_type": "table", "weight_fixed": 1, "limit": 20, "time_shift": []}},
+            {"query": "xiaohuiji_publish_channel_max_retry_count", "customQuery": true, "fields": {"stream": "xiaohuiji_publish_channel_max_retry_count", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "channel {channel_id} max retry", "layer_type": "table", "weight_fixed": 1, "limit": 20, "time_shift": []}}
+          ],
+          "layout": {"x": 96, "y": 14, "w": 96, "h": 14, "i": 4}
+        },
+        {
+          "id": "tg-incident-backlog",
+          "type": "table",
+          "title": "频道积压 Top 20",
+          "description": "待发送数量、最老任务年龄和预计清空时间；预计清空时间为 -1 表示最近 10 分钟没有成功发送。",
+          "config": {"wrap_table_cells": true, "table_dynamic_columns": true, "show_legends": false, "unit": "short", "table_transpose": false},
+          "queryType": "promql",
+          "queries": [
+            {"query": "xiaohuiji_publish_channel_pending", "customQuery": true, "fields": {"stream": "xiaohuiji_publish_channel_pending", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "channel {channel_id} pending", "layer_type": "table", "weight_fixed": 1, "limit": 20, "time_shift": []}},
+            {"query": "xiaohuiji_publish_channel_oldest_age_seconds", "customQuery": true, "fields": {"stream": "xiaohuiji_publish_channel_oldest_age_seconds", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "channel {channel_id} oldest seconds", "layer_type": "table", "weight_fixed": 1, "limit": 20, "time_shift": []}},
+            {"query": "xiaohuiji_publish_channel_estimated_clear_minutes", "customQuery": true, "fields": {"stream": "xiaohuiji_publish_channel_estimated_clear_minutes", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "channel {channel_id} clear minutes", "layer_type": "table", "weight_fixed": 1, "limit": 20, "time_shift": []}}
+          ],
+          "layout": {"x": 0, "y": 28, "w": 144, "h": 14, "i": 5}
+        },
+        {
+          "id": "tg-incident-consumers",
+          "type": "line",
+          "title": "是否有消费者在工作",
+          "description": "无消费者队列或任务大于 0 时，说明 Redis/Asynq 有任务但没有对应 Worker 消费。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [
+            {"query": "xiaohuiji_asynq_consumer_workers", "customQuery": true, "fields": {"stream": "xiaohuiji_asynq_consumer_workers", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "worker count", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}},
+            {"query": "xiaohuiji_invariant_queued_jobs_without_consumer", "customQuery": true, "fields": {"stream": "xiaohuiji_invariant_queued_jobs_without_consumer", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "queues without consumer", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}},
+            {"query": "xiaohuiji_invariant_queue_pending_without_consumer", "customQuery": true, "fields": {"stream": "xiaohuiji_invariant_queue_pending_without_consumer", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "tasks without consumer", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}
+          ],
+          "layout": {"x": 144, "y": 28, "w": 48, "h": 14, "i": 6}
+        },
+        {
+          "id": "tg-incident-oldest-age",
+          "type": "line",
+          "title": "各链路最长等待时间",
+          "description": "TG Job、采集事件、媒体下载和 PHash 的最老任务年龄，单位秒；数量不高但年龄持续增长同样属于卡死。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "seconds", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [
+            {"query": "max(xiaohuiji_publish_oldest_job_age_seconds)", "customQuery": true, "fields": {"stream": "xiaohuiji_publish_oldest_job_age_seconds", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "publish job", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}},
+            {"query": "max(xiaohuiji_collect_oldest_event_age_seconds)", "customQuery": true, "fields": {"stream": "xiaohuiji_collect_oldest_event_age_seconds", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "collect event", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}},
+            {"query": "max(xiaohuiji_collect_oldest_media_age_seconds)", "customQuery": true, "fields": {"stream": "xiaohuiji_collect_oldest_media_age_seconds", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "collect media", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}},
+            {"query": "max(xiaohuiji_media_phash_oldest_age_seconds)", "customQuery": true, "fields": {"stream": "xiaohuiji_media_phash_oldest_age_seconds", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "phash", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}
+          ],
+          "layout": {"x": 0, "y": 42, "w": 192, "h": 14, "i": 7}
+        }
+      ]
+    },
+    {
+      "tabId": "tg-account-lease",
+      "name": "详情：TG 账号租约",
+      "panels": [
+        {
+          "id": "tg-lease-active",
+          "type": "line",
+          "title": "活动账号租约数",
+          "description": "当前进程持有的账号租约数量，持续上升通常表示租约未释放。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [{"query": "sum(xiaohuiji_tg_account_lease_active)", "customQuery": true, "fields": {"stream": "xiaohuiji_tg_account_lease_active", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "active leases", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}],
+          "layout": {"x": 0, "y": 0, "w": 96, "h": 16, "i": 1}
+        },
+        {
+          "id": "tg-lease-events",
+          "type": "line",
+          "title": "账号租约事件速率",
+          "description": "租约获取、续期、释放、冲突和 lock_failed 等事件。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [{"query": "sum by (action) (rate(xiaohuiji_tg_account_lease_events[5m]))", "customQuery": true, "fields": {"stream": "xiaohuiji_tg_account_lease_events", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "{action}", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}],
+          "layout": {"x": 96, "y": 0, "w": 96, "h": 16, "i": 2}
+        },
+        {
+          "id": "tg-account-status",
+          "type": "table",
+          "title": "TG 账号状态",
+          "description": "账号状态快照，用于判断在线、授权失效和异常账号。",
+          "config": {"wrap_table_cells": true, "table_dynamic_columns": true, "show_legends": false, "unit": "short", "table_transpose": false},
+          "queryType": "promql",
+          "queries": [{"query": "sum by (status) (xiaohuiji_tg_accounts)", "customQuery": true, "fields": {"stream": "xiaohuiji_tg_accounts", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "{status}", "layer_type": "table", "weight_fixed": 1, "limit": 50, "time_shift": []}}],
+          "layout": {"x": 0, "y": 16, "w": 96, "h": 14, "i": 3}
+        }
+      ]
+    },
+    {
+      "tabId": "tg-gateway",
+      "name": "详情：网关 Bot 与 Webhook",
+      "panels": [
+        {
+          "id": "tg-gateway-bots",
+          "type": "line",
+          "title": "Gateway Bot 配置与运行数",
+          "description": "configured 与 running 的 Bot 数量对比，差值表示网关尚未建立运行实例。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [{"query": "sum by (state) (xiaohuiji_tg_gateway_bots)", "customQuery": true, "fields": {"stream": "xiaohuiji_tg_gateway_bots", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "{state}", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}],
+          "layout": {"x": 0, "y": 0, "w": 96, "h": 16, "i": 4}
+        },
+        {
+          "id": "tg-gateway-webhook",
+          "type": "line",
+          "title": "Webhook 接收速率",
+          "description": "Webhook received/queued/failed 速率，queued 明显低于 received 时需要检查入队链路。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [{"query": "sum by (result) (rate(xiaohuiji_tg_gateway_webhook_updates[5m]))", "customQuery": true, "fields": {"stream": "xiaohuiji_tg_gateway_webhook_updates", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "{result}", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}],
+          "layout": {"x": 96, "y": 0, "w": 96, "h": 16, "i": 5}
+        },
+        {
+          "id": "tg-gateway-dispatch",
+          "type": "line",
+          "title": "Webhook 更新分发速率",
+          "description": "Gateway 将更新交给 feature 或 provider 的速率，长时间为零表示收到消息但没有完成分发。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [{"query": "sum by (result) (rate(xiaohuiji_tg_gateway_updates_dispatched[5m]))", "customQuery": true, "fields": {"stream": "xiaohuiji_tg_gateway_updates_dispatched", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "{result}", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}],
+          "layout": {"x": 0, "y": 16, "w": 192, "h": 14, "i": 6}
+        }
+      ]
+    },
+    {
+      "tabId": "tg-collect",
+      "name": "详情：采集事件",
+      "panels": [
+        {
+          "id": "tg-collect-events",
+          "type": "line",
+          "title": "采集事件积压",
+          "description": "按 source_type 与 status 查看尚未处理的采集事件。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [{"query": "sum by (source_type, status) (xiaohuiji_collect_events)", "customQuery": true, "fields": {"stream": "xiaohuiji_collect_events", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "{source_type}/{status}", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}],
+          "layout": {"x": 0, "y": 0, "w": 96, "h": 16, "i": 7}
+        },
+        {
+          "id": "tg-collect-event-age",
+          "type": "line",
+          "title": "最老采集事件年龄",
+          "description": "按来源类型和状态显示最老未处理事件的年龄，单位秒。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "seconds", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [{"query": "max by (source_type, status) (xiaohuiji_collect_oldest_event_age_seconds)", "customQuery": true, "fields": {"stream": "xiaohuiji_collect_oldest_event_age_seconds", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "{source_type}/{status}", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}],
+          "layout": {"x": 96, "y": 0, "w": 96, "h": 16, "i": 8}
+        },
+        {
+          "id": "tg-collect-stale-sources",
+          "type": "line",
+          "title": "长期无事件采集源",
+          "description": "已启用但一小时没有产生事件的采集源数量。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [{"query": "sum by (source_type) (xiaohuiji_collect_configured_sources_without_events)", "customQuery": true, "fields": {"stream": "xiaohuiji_collect_configured_sources_without_events", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "{source_type}", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}],
+          "layout": {"x": 0, "y": 16, "w": 192, "h": 14, "i": 9}
+        }
+      ]
+    },
+    {
+      "tabId": "tg-media",
+      "name": "详情：媒体下载与验证资料",
+      "panels": [
+        {
+          "id": "tg-media-download",
+          "type": "line",
+          "title": "媒体下载积压",
+          "description": "按缓存状态和媒体类型统计待下载/处理中媒体。ready 不计入积压。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [{"query": "sum by (cache_status, media_type) (xiaohuiji_collect_media)", "customQuery": true, "fields": {"stream": "xiaohuiji_collect_media", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "{cache_status}/{media_type}", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}],
+          "layout": {"x": 0, "y": 0, "w": 96, "h": 16, "i": 10}
+        },
+        {
+          "id": "tg-media-phash",
+          "type": "line",
+          "title": "验证资料与 PHash 处理队列",
+          "description": "资料媒体 processing_status 为 uploaded/processing/failed 的数量。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [{"query": "sum by (processing_status) (xiaohuiji_media_phash_queue)", "customQuery": true, "fields": {"stream": "xiaohuiji_media_phash_queue", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "{processing_status}", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}],
+          "layout": {"x": 96, "y": 0, "w": 96, "h": 16, "i": 11}
+        },
+        {
+          "id": "tg-media-faults",
+          "type": "line",
+          "title": "媒体处理异常",
+          "description": "FILE_REFERENCE_EXPIRED 与视频预览图缺失。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [
+            {"query": "xiaohuiji_tg_file_reference_expired", "customQuery": true, "fields": {"stream": "xiaohuiji_tg_file_reference_expired", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "file reference expired", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}},
+            {"query": "xiaohuiji_collect_video_preview_missing", "customQuery": true, "fields": {"stream": "xiaohuiji_collect_video_preview_missing", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "video preview missing", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}
+          ],
+          "layout": {"x": 0, "y": 16, "w": 192, "h": 14, "i": 12}
+        }
+      ]
+    },
+    {
+      "tabId": "tg-publish",
+      "name": "详情：频道推送与 TG 积压",
+      "panels": [
+        {
+          "id": "tg-publish-jobs",
+          "type": "line",
+          "title": "TG Job 积压",
+          "description": "按队列、优先级、Job 状态和分发状态统计待发送任务。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [{"query": "sum by (queue_name, priority, status, dispatch_status) (xiaohuiji_publish_jobs)", "customQuery": true, "fields": {"stream": "xiaohuiji_publish_jobs", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "{queue_name}/{priority}/{status}/{dispatch_status}", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}],
+          "layout": {"x": 0, "y": 0, "w": 96, "h": 16, "i": 13}
+        },
+        {
+          "id": "tg-asynq-queues",
+          "type": "line",
+          "title": "TG 发送队列状态",
+          "description": "Asynq pending、active、retry、scheduled 和 orphan latency。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [{"query": "sum by (queue, state) (xiaohuiji_asynq_tasks)", "customQuery": true, "fields": {"stream": "xiaohuiji_asynq_tasks", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "{queue}/{state}", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}],
+          "layout": {"x": 96, "y": 0, "w": 96, "h": 16, "i": 14}
+        },
+        {
+          "id": "tg-channel-backlog",
+          "type": "table",
+          "title": "频道积压 Top 20",
+          "description": "按频道显示待发送数量、最老任务年龄和预计清空时间。预计值为 -1 表示最近 10 分钟没有成功发送。",
+          "config": {"wrap_table_cells": true, "table_dynamic_columns": true, "show_legends": false, "unit": "short", "table_transpose": false},
+          "queryType": "promql",
+          "queries": [
+            {"query": "xiaohuiji_publish_channel_pending", "customQuery": true, "fields": {"stream": "xiaohuiji_publish_channel_pending", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "channel {channel_id} pending", "layer_type": "table", "weight_fixed": 1, "limit": 20, "time_shift": []}},
+            {"query": "xiaohuiji_publish_channel_oldest_age_seconds", "customQuery": true, "fields": {"stream": "xiaohuiji_publish_channel_oldest_age_seconds", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "channel {channel_id} oldest age", "layer_type": "table", "weight_fixed": 1, "limit": 20, "time_shift": []}},
+            {"query": "xiaohuiji_publish_channel_estimated_clear_minutes", "customQuery": true, "fields": {"stream": "xiaohuiji_publish_channel_estimated_clear_minutes", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "channel {channel_id} clear minutes", "layer_type": "table", "weight_fixed": 1, "limit": 20, "time_shift": []}}
+          ],
+          "layout": {"x": 0, "y": 16, "w": 144, "h": 14, "i": 15}
+        },
+        {
+          "id": "tg-publish-consumers",
+          "type": "line",
+          "title": "TG Worker 与消费者",
+          "description": "Asynq server、worker、queue consumer 数量和无消费者任务。",
+          "config": {"show_legends": true, "legends_position": "bottom", "unit": "short", "connect_nulls": true},
+          "queryType": "promql",
+          "queries": [
+            {"query": "xiaohuiji_asynq_consumer_servers", "customQuery": true, "fields": {"stream": "xiaohuiji_asynq_consumer_servers", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "consumer servers", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}},
+            {"query": "xiaohuiji_asynq_consumer_workers", "customQuery": true, "fields": {"stream": "xiaohuiji_asynq_consumer_workers", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "consumer workers", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}},
+            {"query": "xiaohuiji_invariant_queued_jobs_without_consumer", "customQuery": true, "fields": {"stream": "xiaohuiji_invariant_queued_jobs_without_consumer", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "queues without consumer", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}},
+            {"query": "xiaohuiji_invariant_queue_pending_without_consumer", "customQuery": true, "fields": {"stream": "xiaohuiji_invariant_queue_pending_without_consumer", "stream_type": "metrics", "x": [], "y": [], "z": [], "breakdown": [], "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}}, "config": {"promql_legend": "tasks without consumer", "layer_type": "line", "weight_fixed": 1, "limit": 0, "time_shift": []}}
+          ],
+          "layout": {"x": 144, "y": 16, "w": 48, "h": 14, "i": 16}
+        }
+      ]
+    }
+  ]
+}

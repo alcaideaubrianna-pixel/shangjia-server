@@ -209,6 +209,104 @@ receivers:
             value_column: oldest_age_seconds
             value_type: int
             attribute_columns: [processing_status]
+      - sql: |
+          SELECT CASE
+                   WHEN UPPER(COALESCE(error_message, '')) LIKE '%SLOWMODE_WAIT%'
+                     OR UPPER(COALESCE(error_message, '')) LIKE '%FLOOD_WAIT%'
+                     OR UPPER(COALESCE(error_message, '')) LIKE '%TOO MANY REQUESTS%' THEN 'rate_limit'
+                   WHEN UPPER(COALESCE(error_message, '')) LIKE '%TIMEOUT%'
+                     OR UPPER(COALESCE(error_message, '')) LIKE '%DEADLINE%'
+                     OR UPPER(COALESCE(error_message, '')) LIKE '%CONTEXT CANCELED%' THEN 'timeout'
+                   WHEN UPPER(COALESCE(error_message, '')) LIKE '%AUTH%'
+                     OR UPPER(COALESCE(error_message, '')) LIKE '%SESSION%'
+                     OR UPPER(COALESCE(error_message, '')) LIKE '%UNAUTHORIZED%' THEN 'authorization'
+                   WHEN UPPER(COALESCE(error_message, '')) LIKE '%PERMISSION%'
+                     OR UPPER(COALESCE(error_message, '')) LIKE '%CHAT_ADMIN_REQUIRED%'
+                     OR UPPER(COALESCE(error_message, '')) LIKE '%FORBIDDEN%' THEN 'permission'
+                   WHEN UPPER(COALESCE(error_message, '')) LIKE '%FILE%'
+                     OR UPPER(COALESCE(error_message, '')) LIKE '%MEDIA%'
+                     OR UPPER(COALESCE(error_message, '')) LIKE '%IMAGE_PROCESS_FAILED%' THEN 'media'
+                   ELSE 'other'
+                 END AS error_type,
+                 COUNT(*)::bigint AS error_count
+          FROM hg_youban_publish_tg_job
+          WHERE status IN ('failed','failed_retry')
+            AND COALESCE(updated_at, created_at) >= NOW() - INTERVAL '15 minutes'
+          GROUP BY 1
+        metrics:
+          - metric_name: xiaohuiji.publish.errors
+            value_column: error_count
+            value_type: int
+            attribute_columns: [error_type]
+      - sql: |
+          SELECT CASE
+                   WHEN sent_at IS NULL OR dispatched_at IS NULL THEN 'unknown'
+                   WHEN EXTRACT(EPOCH FROM (sent_at - dispatched_at)) < 5 THEN '<5s'
+                   WHEN EXTRACT(EPOCH FROM (sent_at - dispatched_at)) < 30 THEN '5-30s'
+                   WHEN EXTRACT(EPOCH FROM (sent_at - dispatched_at)) < 120 THEN '30-120s'
+                   ELSE '>=120s'
+                 END AS latency_bucket,
+                 COUNT(*)::bigint AS send_count,
+                 COALESCE(AVG(GREATEST(EXTRACT(EPOCH FROM (sent_at - dispatched_at)), 0)), 0)::bigint AS average_seconds
+          FROM hg_youban_publish_tg_job
+          WHERE status = 'sent'
+            AND sent_at >= NOW() - INTERVAL '15 minutes'
+            AND dispatched_at IS NOT NULL
+          GROUP BY 1
+        metrics:
+          - metric_name: xiaohuiji.publish.send_latency_count
+            value_column: send_count
+            value_type: int
+            attribute_columns: [latency_bucket]
+          - metric_name: xiaohuiji.publish.send_latency_average_seconds
+            value_column: average_seconds
+            value_type: int
+            attribute_columns: [latency_bucket]
+      - sql: |
+          SELECT channel_id::text AS channel_id,
+                 COUNT(*) FILTER (WHERE retry_count > 0)::bigint AS retry_jobs,
+                 COALESCE(SUM(retry_count), 0)::bigint AS retry_count,
+                 COALESCE(MAX(retry_count), 0)::bigint AS max_retry_count
+          FROM hg_youban_publish_tg_job
+          WHERE retry_count > 0
+            AND COALESCE(updated_at, created_at) >= NOW() - INTERVAL '1 hour'
+          GROUP BY channel_id
+          ORDER BY retry_count DESC
+          LIMIT 20
+        metrics:
+          - metric_name: xiaohuiji.publish.channel_retries
+            value_column: retry_count
+            value_type: int
+            attribute_columns: [channel_id]
+          - metric_name: xiaohuiji.publish.channel_retry_jobs
+            value_column: retry_jobs
+            value_type: int
+            attribute_columns: [channel_id]
+          - metric_name: xiaohuiji.publish.channel_max_retry_count
+            value_column: max_retry_count
+            value_type: int
+            attribute_columns: [channel_id]
+      - sql: |
+          SELECT CASE
+                   WHEN UPPER(COALESCE(error_message, '')) LIKE '%TIMEOUT%'
+                     OR UPPER(COALESCE(error_message, '')) LIKE '%DEADLINE%'
+                     OR UPPER(COALESCE(error_message, '')) LIKE '%CONTEXT CANCELED%' THEN 'timeout'
+                   WHEN UPPER(COALESCE(error_message, '')) LIKE '%FILE_REFERENCE_EXPIRED%' THEN 'file_reference_expired'
+                   WHEN UPPER(COALESCE(error_message, '')) LIKE '%FLOOD_WAIT%'
+                     OR UPPER(COALESCE(error_message, '')) LIKE '%TOO MANY REQUESTS%' THEN 'rate_limit'
+                   ELSE 'other'
+                 END AS error_type,
+                 media_type,
+                 COUNT(*)::bigint AS error_count
+          FROM hg_youban_publish_collect_event_media
+          WHERE cache_status = 'failed'
+            AND updated_at >= NOW() - INTERVAL '15 minutes'
+          GROUP BY 1, 2
+        metrics:
+          - metric_name: xiaohuiji.collect.media_errors
+            value_column: error_count
+            value_type: int
+            attribute_columns: [error_type, media_type]
 
 processors:
   memory_limiter:
