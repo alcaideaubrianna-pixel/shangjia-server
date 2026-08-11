@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -45,8 +46,7 @@ func (s *sSysPublish) refreshAsynqObserveMetrics(ctx context.Context) {
 	for _, queue := range queues {
 		info, err := inspector.GetQueueInfo(queue)
 		if err != nil {
-			if errors.Is(err, asynq.ErrQueueNotFound) {
-				// 队列尚未创建是正常情况，不应持续制造告警日志。
+			if isAsynqQueueNotFound(err) {
 				recordAsynqQueueGauge(ctx, queue, "pending", 0)
 				recordAsynqQueueGauge(ctx, queue, "active", 0)
 				recordAsynqQueueGauge(ctx, queue, "scheduled", 0)
@@ -68,6 +68,18 @@ func (s *sSysPublish) refreshAsynqObserveMetrics(ctx context.Context) {
 	observeQueuedJobsWithoutConsumer(ctx, servers)
 	s.observeDatabaseJobsMissingAsynqTask(ctx, inspector)
 	s.observeAsynqTasksWithTerminalDatabaseJob(ctx, inspector, queues)
+}
+
+func isAsynqQueueNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, asynq.ErrQueueNotFound) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "not_found") && strings.Contains(message, "queue") ||
+		strings.Contains(message, "queue") && strings.Contains(message, "does not exist")
 }
 
 func observeAsynqConsumerMetrics(ctx context.Context, servers []*asynq.ServerInfo) {
