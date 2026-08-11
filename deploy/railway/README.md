@@ -2,6 +2,8 @@
 
 项目使用同一个镜像创建三个 Railway Service。三个服务共享数据库、Redis 和业务环境变量，但启动命令与运行角色不同。
 
+项目级 Railway Infrastructure as Code 位于 `.railway/railway.ts`，负责声明 PostgreSQL、Redis、三个运行服务、Singapore 区域和基础环境变量。它不是 Template，不会替代 Railway 项目本身；首次使用前先确认镜像地址和 Railway 项目环境。
+
 推荐三个服务都使用 CI 已发布的 GHCR `main` 标签，例如 `ghcr.io/<owner>/youban-server:main`。每次发布仍同时保留 `sha-xxxxxxx` 不可变标签用于审计和回滚。
 
 ## API Service
@@ -41,9 +43,31 @@
 - 数据库迁移通过显式 Job 或手动命令执行，不要放入三个服务的启动命令
 - Runtime 滚动发布可能出现新旧实例短暂重叠，Telegram 账号和调度任务仍需依赖现有租约及分布式锁保护
 
+## Infrastructure as Code
+
+在仓库根目录执行 Railway CLI：
+
+```bash
+railway link
+railway config plan
+railway config apply
+```
+
+第一次执行 `config plan` 必须先确认资源名称和变更内容。若 Railway 项目中已经手动创建了同名服务或数据库，先核对 CLI 的资源匹配结果，不要直接创建重复的 PostgreSQL 或 Redis。
+
+配置文件中的 GHCR 镜像目前是：
+
+```text
+ghcr.io/mjiadfwaff-bot/youban-server:main
+```
+
+如果仓库迁移到其他 GitHub Owner，需要同步修改 `.railway/railway.ts` 的 `imageRef`。私有 GHCR 镜像还需要在 Railway 配置 Registry 凭证。
+
+`railway config apply` 只负责项目资源和服务配置，不负责构建镜像。镜像仍由 GitHub Actions 构建并推送。
+
 ## 自动部署
 
-当前 GitHub Actions 已负责构建并推送 `main`、`latest` 和 `sha-xxxxxxx` 镜像。首次部署建议手动触发 Railway Redeploy，确认三种角色稳定后，再在镜像构建成功的 Job 后追加 Railway CLI 自动发布：
+当前 GitHub Actions 已负责构建并推送 `main`、`latest` 和 `sha-xxxxxxx` 镜像。首次部署建议先手动执行 `railway config apply` 并验证三种角色稳定，再在镜像构建成功的 Job 后追加 Railway CLI 自动发布：
 
 1. Redeploy Worker
 2. Redeploy Runtime
