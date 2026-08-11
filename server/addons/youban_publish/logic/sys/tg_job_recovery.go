@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -144,17 +145,12 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 	nowText := telegramRecoveryTimeText(now)
 	deadline := telegramRecoveryTimeText(now.Add(-telegramPendingJobRecoverAfter))
 	var jobs []telegramJobRecord
-	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
-		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
-		Where(telegramActiveChannelCondition()).
-		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", nowText).
-		WhereLTE("updated_at", deadline).
-		OrderAsc("updated_at").OrderAsc("id").
-		Limit(limit).
-		Scan(&jobs)
+	rows, err := g.DB().GetAll(ctx, pendingIdleTelegramChannelHeadQuery(limit), tgDispatchStatusIdle, nowText, deadline)
 	if err != nil {
 		return gerror.Wrap(err, "读取待入队TG推送任务失败")
+	}
+	if err = rows.Structs(&jobs); err != nil {
+		return gerror.Wrap(err, "解析待入队TG推送任务失败")
 	}
 	if len(jobs) > 0 {
 		g.Log().Infof(ctx, "恢复待入队TG推送任务：%d条", len(jobs))
@@ -168,6 +164,30 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 		}
 	}
 	return nil
+}
+
+func pendingIdleTelegramChannelHeadQuery(limit int) string {
+	if limit <= 0 {
+		limit = 100
+	}
+	return fmt.Sprintf(`
+SELECT ranked.*
+FROM (
+    SELECT %s.*,
+           ROW_NUMBER() OVER (
+               PARTITION BY tenant_id, channel_id
+               ORDER BY COALESCE(priority, 100) ASC, id ASC
+           ) AS recovery_rank
+    FROM %s
+    WHERE status IN ('pending', 'failed_retry', 'unknown')
+      AND (dispatch_status = ? OR dispatch_status = '')
+      AND %s
+      AND (next_retry_at IS NULL OR next_retry_at <= ?)
+      AND updated_at <= ?
+) ranked
+WHERE ranked.recovery_rank = 1
+ORDER BY ranked.updated_at ASC, ranked.id ASC
+LIMIT %d`, publishTgJobTable, publishTgJobTable, telegramActiveChannelCondition(), limit)
 }
 
 func telegramRecoveryTimeText(value *gtime.Time) string {

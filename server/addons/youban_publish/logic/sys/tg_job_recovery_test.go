@@ -39,3 +39,24 @@ func TestTelegramActiveChannelConditionSupportsMessagePushTargets(t *testing.T) 
 		t.Fatalf("active channel condition does not validate publish channels")
 	}
 }
+
+func TestPendingIdleTelegramChannelHeadQueryIsFairPerChannel(t *testing.T) {
+	query := pendingIdleTelegramChannelHeadQuery(500)
+	for _, fragment := range []string{
+		"ROW_NUMBER() OVER",
+		"PARTITION BY tenant_id, channel_id",
+		"ORDER BY COALESCE(priority, 100) ASC, id ASC",
+		"WHERE ranked.recovery_rank = 1",
+		"LIMIT 500",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("expected recovery query to contain %q", fragment)
+		}
+	}
+}
+
+func TestPendingIdleTelegramChannelHeadQueryUsesSafeDefaultLimit(t *testing.T) {
+	if query := pendingIdleTelegramChannelHeadQuery(0); !strings.Contains(query, "LIMIT 100") {
+		t.Fatalf("expected default recovery limit, query: %s", query)
+	}
+}
