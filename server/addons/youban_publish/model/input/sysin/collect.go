@@ -295,7 +295,7 @@ type CollectRuleModel struct {
 	Replacements            []CollectRuleReplaceModel `json:"replacements" dc:"文本替换"`
 	DeleteLineTexts         []string                  `json:"deleteLineTexts" dc:"整行删除文本"`
 	DeleteTexts             []string                  `json:"deleteTexts" dc:"删除文本"`
-	TruncateIntroFeeEnabled int                       `json:"truncateIntroFeeEnabled" dc:"删除介绍费及后续文案"`
+	TruncateIntroFeeEnabled int                       `json:"truncateIntroFeeEnabled" dc:"清理资料头部标识及介绍费后续文案"`
 	BlockTexts              []string                  `json:"blockTexts" dc:"屏蔽文本"`
 	BlockLink               int                       `json:"blockLink" dc:"屏蔽链接"`
 	BlockUsername           int                       `json:"blockUsername" dc:"屏蔽用户名"`
@@ -324,7 +324,7 @@ type CollectRuleSaveInp struct {
 	Replacements            []CollectRuleReplaceModel `json:"replacements" dc:"文本替换"`
 	DeleteLineTexts         []string                  `json:"deleteLineTexts" dc:"整行删除文本"`
 	DeleteTexts             []string                  `json:"deleteTexts" dc:"删除文本"`
-	TruncateIntroFeeEnabled int                       `json:"truncateIntroFeeEnabled" dc:"删除介绍费及后续文案"`
+	TruncateIntroFeeEnabled int                       `json:"truncateIntroFeeEnabled" dc:"清理资料头部标识及介绍费后续文案"`
 	BlockTexts              []string                  `json:"blockTexts" dc:"屏蔽文本"`
 	BlockLink               int                       `json:"blockLink" dc:"屏蔽链接"`
 	BlockUsername           int                       `json:"blockUsername" dc:"屏蔽用户名"`
