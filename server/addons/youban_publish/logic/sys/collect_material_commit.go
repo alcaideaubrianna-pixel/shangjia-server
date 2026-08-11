@@ -63,7 +63,7 @@ func acquireTelegramCollectorMediaCache(ctx context.Context, mediaType, storageP
 	localPath := ""
 	if strings.TrimSpace(storagePath) != "" {
 		resolved, err := resolveMediaLocalPath(storagePath)
-		if err == nil {
+		if err == nil && fileExists(resolved) {
 			localPath = resolved
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"mime"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -724,10 +725,21 @@ func collectMediaRowNeedsCache(sourceFileId string, sourceMessageRef string, sto
 	if sourceRef == "" {
 		sourceRef = strings.TrimSpace(sourceMessageRef)
 	}
-	return strings.HasPrefix(sourceRef, "gotd:") &&
-		strings.TrimSpace(storagePath) == "" &&
-		strings.TrimSpace(fileUrl) == "" &&
-		!(strings.TrimSpace(backupChatId) != "" && backupMessageId > 0)
+	if sourceRef == "" || strings.TrimSpace(fileUrl) != "" ||
+		(strings.TrimSpace(backupChatId) != "" && backupMessageId > 0) {
+		return false
+	}
+	storagePath = strings.TrimSpace(storagePath)
+	if storagePath == "" {
+		return strings.HasPrefix(sourceRef, "gotd:")
+	}
+	if isCollectMediaCachePath(storagePath) {
+		return !fileExists(resolveTelegramLocalPath(storagePath))
+	}
+	if filepath.IsAbs(storagePath) || strings.HasPrefix(storagePath, "attachment/") || strings.HasPrefix(storagePath, "upload/") || strings.HasPrefix(storagePath, "uploads/") {
+		return !fileExists(resolveTelegramLocalPath(storagePath))
+	}
+	return false
 }
 
 func collectEventMediaRowNeedsCache(event gdb.Record, row *collectEventMediaRow) bool {

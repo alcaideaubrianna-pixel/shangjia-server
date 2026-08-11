@@ -50,6 +50,15 @@ func TestCollectMediaRowNeedsCacheSupportsMessageReference(t *testing.T) {
 	}
 }
 
+func TestCollectMediaRowNeedsCacheRetriesMissingLocalStorage(t *testing.T) {
+	if !collectMediaRowNeedsCache("gotd:-100123:456", "", "attachment/2026-08-12/missing.jpg", "", "", 0) {
+		t.Fatal("expected a missing local attachment to trigger media cache")
+	}
+	if collectMediaRowNeedsCache("gotd:-100123:456", "", "attachment/2026-08-12/missing.jpg", "https://cdn.test/missing.jpg", "", 0) {
+		t.Fatal("a remote file URL should not trigger local media cache")
+	}
+}
+
 func TestCollectEventMediaRowNeedsCacheSupportsBotFileID(t *testing.T) {
 	row := &collectEventMediaRow{YoubanPublishCollectEventMedia: &entity.YoubanPublishCollectEventMedia{
 		SourceFileId: "AgACBotFileID",
