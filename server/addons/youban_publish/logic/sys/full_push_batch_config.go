@@ -13,6 +13,7 @@ const (
 	defaultFullPushCandidateCount    = 20
 	defaultFullPushSchedulerInterval = 2 * time.Second
 	defaultFullPushExpandLeaseTTL    = 60 * time.Second
+	defaultFullPushPendingJobLimit   = 300
 )
 
 func fullPushExpandWorkerCount(ctx context.Context) int {
@@ -69,4 +70,15 @@ func fullPushExpandLeaseTTL(ctx context.Context) time.Duration {
 		seconds = maxSeconds
 	}
 	return time.Duration(seconds) * time.Second
+}
+
+func fullPushPendingJobLimit(ctx context.Context) int {
+	value := g.Cfg().MustGet(ctx, "youbanPublish.fullPush.pendingJobLimit", defaultFullPushPendingJobLimit).Int()
+	if value < 50 {
+		return 50
+	}
+	if value > 2000 {
+		return 2000
+	}
+	return value
 }

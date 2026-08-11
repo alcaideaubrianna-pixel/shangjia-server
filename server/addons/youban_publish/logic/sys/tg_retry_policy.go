@@ -125,6 +125,9 @@ func telegramRecoverableRetryDelay(err error, retryCount int) time.Duration {
 		if delay > telegramRetryMaxDelay {
 			return telegramRetryMaxDelay
 		}
+		if isTelegramSlowModeError(err) {
+			return delay + time.Duration(retryCount%3)*time.Second
+		}
 		if delay < telegramRetryMinDelay {
 			return telegramRetryMinDelay
 		}
@@ -143,6 +146,14 @@ func telegramRecoverableRetryDelay(err error, retryCount int) time.Duration {
 		return telegramRetryMaxDelay
 	}
 	return delay + jitter
+}
+
+func isTelegramSlowModeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToUpper(err.Error())
+	return strings.Contains(message, "SLOWMODE_WAIT") || strings.Contains(message, "SLOWMODE WAIT")
 }
 
 func isTelegramPermanentSendError(err error) bool {
