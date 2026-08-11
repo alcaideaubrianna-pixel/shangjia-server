@@ -234,6 +234,10 @@ func TestCollectorMediaCacheDatabaseFallbackIntegration(t *testing.T) {
 	ctx := context.Background()
 	collector := NewCollector()
 	fingerprint := BuildMediaFingerprint(fmt.Sprintf("integration-%d", time.Now().UnixNano()), 128, "photo", "image/jpeg")
+	missing, ready, err := collector.MediaCache(ctx, fingerprint)
+	if err != nil || ready || missing != nil {
+		t.Fatalf("missing media cache: cached=%+v ready=%v err=%v", missing, ready, err)
+	}
 	claimed, err := collector.ClaimMediaProcessing(ctx, fingerprint, time.Minute)
 	if err != nil || !claimed {
 		t.Fatalf("claim media: claimed=%v err=%v", claimed, err)

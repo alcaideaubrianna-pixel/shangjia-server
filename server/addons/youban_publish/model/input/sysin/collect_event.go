@@ -36,8 +36,11 @@ type CollectEventLogModel struct {
 }
 
 type CollectMaterialDiagnoseInp struct {
-	SourceId int64 `json:"sourceId" dc:"采集源ID，0表示全部"`
-	Limit    int   `json:"limit" dc:"诊断数量，默认30"`
+	SourceId        int64  `json:"sourceId" dc:"采集源ID，0表示全部"`
+	EventId         int64  `json:"eventId" dc:"采集事件ID，0表示全部"`
+	ProfileNo       string `json:"profileNo" dc:"资料编号，可直接定位资料"`
+	SourceGroupedId string `json:"sourceGroupedId" dc:"TG媒体组ID"`
+	Limit           int    `json:"limit" dc:"诊断数量，默认30"`
 }
 
 type CollectMaterialDiagnoseItem struct {
@@ -60,17 +63,48 @@ type CollectMaterialDiagnoseItem struct {
 }
 
 type CollectMaterialDiagnoseModel struct {
-	TotalEvents        int                            `json:"totalEvents" dc:"事件总数"`
-	DisplayEvents      int                            `json:"displayEvents" dc:"展示事件数"`
-	VerifyEvents       int                            `json:"verifyEvents" dc:"验证事件数"`
-	PairedEvents       int                            `json:"pairedEvents" dc:"已匹配验证事件数"`
-	UnmatchedVerify    int                            `json:"unmatchedVerify" dc:"未匹配验证事件数"`
-	MissingVerify      int                            `json:"missingVerify" dc:"未找到验证事件的展示事件数"`
-	ReviewEvents       int                            `json:"reviewEvents" dc:"已进入审核事件数"`
-	MediaPendingEvents int                            `json:"mediaPendingEvents" dc:"媒体处理中事件数"`
-	WaitingEvents      int                            `json:"waitingEvents" dc:"等待前序/分组事件数"`
-	FailedEvents       int                            `json:"failedEvents" dc:"失败事件数"`
-	Items              []*CollectMaterialDiagnoseItem `json:"items" dc:"诊断明细"`
+	TotalEvents        int                             `json:"totalEvents" dc:"事件总数"`
+	DisplayEvents      int                             `json:"displayEvents" dc:"展示事件数"`
+	VerifyEvents       int                             `json:"verifyEvents" dc:"验证事件数"`
+	PairedEvents       int                             `json:"pairedEvents" dc:"已匹配验证事件数"`
+	UnmatchedVerify    int                             `json:"unmatchedVerify" dc:"未匹配验证事件数"`
+	MissingVerify      int                             `json:"missingVerify" dc:"未找到验证事件的展示事件数"`
+	ReviewEvents       int                             `json:"reviewEvents" dc:"已进入审核事件数"`
+	MediaPendingEvents int                             `json:"mediaPendingEvents" dc:"媒体处理中事件数"`
+	WaitingEvents      int                             `json:"waitingEvents" dc:"等待前序/分组事件数"`
+	FailedEvents       int                             `json:"failedEvents" dc:"失败事件数"`
+	Items              []*CollectMaterialDiagnoseItem  `json:"items" dc:"诊断明细"`
+	Timelines          []*CollectMaterialTimelineModel `json:"timelines" dc:"按资料和频道拆分的端到端时间线"`
+}
+
+type CollectMaterialTimelineNodeModel struct {
+	Stage                  string      `json:"stage" dc:"阶段标识"`
+	Label                  string      `json:"label" dc:"阶段名称"`
+	At                     *gtime.Time `json:"at" dc:"节点时间"`
+	DurationFromPreviousMs int64       `json:"durationFromPreviousMs" dc:"距上一节点耗时毫秒"`
+	DurationFromStartMs    int64       `json:"durationFromStartMs" dc:"距TG收到消息耗时毫秒"`
+}
+
+type CollectMaterialTimelineModel struct {
+	EventId              int64                               `json:"eventId" dc:"采集事件ID"`
+	ProfileId            int64                               `json:"profileId" dc:"资料ID"`
+	ProfileNo            string                              `json:"profileNo" dc:"资料编号"`
+	SourceId             int64                               `json:"sourceId" dc:"采集源ID"`
+	SourceType           string                              `json:"sourceType" dc:"采集来源类型"`
+	SourceChatId         string                              `json:"sourceChatId" dc:"来源Chat ID"`
+	SourceMessageId      int64                               `json:"sourceMessageId" dc:"来源消息ID"`
+	SourceGroupedId      string                              `json:"sourceGroupedId" dc:"媒体组ID"`
+	MediaCount           int                                 `json:"mediaCount" dc:"媒体数量"`
+	DispatchId           int64                               `json:"dispatchId" dc:"采集分发ID"`
+	DispatchStatus       string                              `json:"dispatchStatus" dc:"采集分发状态"`
+	JobId                int64                               `json:"jobId" dc:"TG Job ID"`
+	ChannelId            int64                               `json:"channelId" dc:"频道ID"`
+	JobStatus            string                              `json:"jobStatus" dc:"TG Job状态"`
+	TotalDurationMs      int64                               `json:"totalDurationMs" dc:"端到端总耗时毫秒"`
+	BottleneckStage      string                              `json:"bottleneckStage" dc:"最慢阶段"`
+	BottleneckLabel      string                              `json:"bottleneckLabel" dc:"最慢阶段名称"`
+	BottleneckDurationMs int64                               `json:"bottleneckDurationMs" dc:"最慢阶段耗时毫秒"`
+	Nodes                []*CollectMaterialTimelineNodeModel `json:"nodes" dc:"时间线节点"`
 }
 
 type CollectMediaBenchmarkInp struct {

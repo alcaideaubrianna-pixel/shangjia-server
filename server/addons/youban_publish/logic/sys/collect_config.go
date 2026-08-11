@@ -57,6 +57,7 @@ func (s *sSysPublish) CollectConfigSave(ctx context.Context, in *sysin.CollectCo
 	})
 	if err == nil {
 		_, _ = cache.Instance().Remove(ctx, collectConfigCacheKey)
+		s.refreshAccountCollectSupervisor()
 	}
 	return err
 }

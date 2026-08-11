@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -30,11 +29,6 @@ const (
 	deliveryRecoveryStaleTime = 15 * time.Second
 	deliveryMaxAttempts       = 5
 )
-
-type deliveryTaskPayload struct {
-	DeliveryID int64 `json:"deliveryId"`
-	Priority   int   `json:"priority"`
-}
 
 func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 	if !collectorEnabled(ctx) {
@@ -79,17 +73,13 @@ func (s *sCollector) enqueueDeliveryTask(ctx context.Context, deliveryID int64, 
 	if deliveryID <= 0 {
 		return gerror.New("Telegram采集交付任务ID无效")
 	}
-	body, err := json.Marshal(deliveryTaskPayload{DeliveryID: deliveryID, Priority: priority})
-	if err != nil {
-		return err
-	}
 	s.queueMu.Lock()
 	if s.queueClient == nil {
 		s.queueClient = asynq.NewClient(collectorRedisOption(ctx))
 	}
 	client := s.queueClient
 	s.queueMu.Unlock()
-	_, err = client.EnqueueContext(ctx, asynq.NewTask(deliveryTaskType, body),
+	_, err := client.EnqueueContext(ctx, asynq.NewTask(deliveryTaskType, collectorTaskPayload(deliveryID)),
 		asynq.Queue(consts.QueueDeliveryReady),
 		asynq.MaxRetry(deliveryMaxAttempts-1),
 		asynq.Timeout(3*time.Minute),
@@ -98,12 +88,12 @@ func (s *sCollector) enqueueDeliveryTask(ctx context.Context, deliveryID int64, 
 }
 
 func (s *sCollector) handleDeliveryTask(ctx context.Context, task *asynq.Task) error {
-	var payload deliveryTaskPayload
-	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
-		return gerror.Wrap(err, "解析Telegram采集交付任务失败")
+	deliveryID, err := parseCollectorTaskID(task.Payload(), "交付")
+	if err != nil {
+		return err
 	}
 	startedAt := time.Now()
-	if err := s.processDelivery(ctx, payload.DeliveryID); err != nil {
+	if err = s.processDelivery(ctx, deliveryID); err != nil {
 		counter, _ := collectorMeter.Int64Counter("telegram_collector_delivery_total")
 		counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "failed")))
 		return err
@@ -140,14 +130,22 @@ func (s *sCollector) processDelivery(ctx context.Context, deliveryID int64) erro
 	if err = dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).Scan(&row); err != nil {
 		return s.failDelivery(ctx, deliveryID, err)
 	}
-	if row.Payload == nil {
-		return s.failDelivery(ctx, deliveryID, gerror.New("Telegram采集交付内容为空"))
+	if row.EventId <= 0 {
+		return s.failDelivery(ctx, deliveryID, gerror.New("Telegram采集交付缺少原始事件"))
 	}
-	var delivery sysin.CollectorDelivery
-	if err = json.Unmarshal(row.Payload.MustToJson(), &delivery); err != nil {
-		return s.failDelivery(ctx, deliveryID, gerror.Wrap(err, "解析Telegram采集交付失败"))
+	var event entity.TgCollectorEvent
+	if err = dao.TgCollectorEvent.Ctx(ctx).WherePri(row.EventId).Scan(&event); err != nil {
+		return s.failDelivery(ctx, deliveryID, gerror.Wrap(err, "读取Telegram采集原始事件失败"))
+	}
+	if event.Id <= 0 || event.RawUpdate == nil {
+		return s.failDelivery(ctx, deliveryID, gerror.New("Telegram采集原始事件不存在"))
+	}
+	delivery, err := collectorDeliveryFromEvent(&event, []byte(event.RawUpdate.String()))
+	if err != nil {
+		return s.failDelivery(ctx, deliveryID, err)
 	}
 	delivery.ID = deliveryID
+	delivery.DeliveryKey = row.DeliveryKey
 	handler := collectorservice.CollectorDeliveryHandler()
 	if handler == nil {
 		return s.failDelivery(ctx, deliveryID, gerror.New("Telegram采集交付处理器尚未注册"))

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/go-telegram/bot/models"
@@ -33,13 +32,14 @@ type IAccountTasks interface {
 	Submit(ctx context.Context, in *sysin.AccountTaskSubmit) (int64, error)
 	Get(ctx context.Context, taskID int64) (*sysin.AccountTask, error)
 	Claim(ctx context.Context, lease *sysin.AccountLease, limit int, ttl time.Duration) ([]*sysin.AccountTask, error)
-	Complete(ctx context.Context, taskID int64, lease *sysin.AccountLease, result json.RawMessage) error
+	Complete(ctx context.Context, taskID int64, lease *sysin.AccountLease, result *sysin.AccountMediaDownloadResult) error
 	Fail(ctx context.Context, in *sysin.AccountTaskFailure) error
 	RecoverExpired(ctx context.Context, limit int) (int, error)
+	ActiveStatusStats(ctx context.Context) ([]sysin.AccountTaskStatusStat, error)
 }
 
 type AccountTaskHandler interface {
-	HandleAccountTask(ctx context.Context, client *telegram.Client, task *sysin.AccountTask) (json.RawMessage, error)
+	HandleAccountTask(ctx context.Context, client *telegram.Client, task *sysin.AccountTask) (*sysin.AccountMediaDownloadResult, error)
 }
 
 type AccountRuntimeSession interface {

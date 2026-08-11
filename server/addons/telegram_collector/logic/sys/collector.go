@@ -86,7 +86,7 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 	if err != nil {
 		return err
 	}
-	if err = s.enqueueEventTask(ctx, sysin.EventTask{EventID: eventID, EventKey: event.EventID, Priority: event.Priority}); err != nil {
+	if err = s.enqueueEventTask(ctx, eventID, event.Priority); err != nil {
 		return gerror.Wrap(err, "Telegram采集事件入队失败")
 	}
 	counter, _ := collectorMeter.Int64Counter("telegram_collector_ingest_total")
@@ -136,7 +136,7 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 	if err != nil {
 		return err
 	}
-	if err = s.enqueueEventTask(ctx, sysin.EventTask{EventID: eventID, EventKey: event.EventID, Priority: event.Priority}); err != nil {
+	if err = s.enqueueEventTask(ctx, eventID, event.Priority); err != nil {
 		return gerror.Wrap(err, "Telegram账号采集事件入队失败")
 	}
 	counter, _ := collectorMeter.Int64Counter("telegram_collector_ingest_total")
@@ -248,17 +248,19 @@ func (s *sCollector) MediaCache(ctx context.Context, fingerprint string) (*sysin
 		}
 	}
 	columns := dao.TgCollectorMedia.Columns()
-	var row entity.TgCollectorMedia
+	var rows []*entity.TgCollectorMedia
 	if err := dao.TgCollectorMedia.Ctx(ctx).
 		Where(columns.TenantId, 0).
 		Where(columns.Fingerprint, fingerprint).
 		Where(columns.PipelineVersion, mediaPipelineVersion).
-		Scan(&row); err != nil {
+		Limit(1).
+		Scan(&rows); err != nil {
 		return nil, false, gerror.Wrap(err, "读取Telegram媒体索引失败")
 	}
-	if row.Id <= 0 {
+	if len(rows) == 0 || rows[0] == nil || rows[0].Id <= 0 {
 		return nil, false, nil
 	}
+	row := rows[0]
 	entry := &sysin.MediaCacheEntry{
 		Fingerprint:       row.Fingerprint,
 		StoragePath:       row.StoragePath,

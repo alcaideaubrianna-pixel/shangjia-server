@@ -796,18 +796,10 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 	if tgAccountId <= 0 {
 		return nil, gerror.New("账号采集媒体缺少TG账号")
 	}
-	payload, err := json.Marshal(&collectorin.AccountMediaDownloadPayload{
-		TenantID:  tenantId,
-		AccountID: accountId,
-		Media:     collectorMediaItemFromCollect(item),
-	})
-	if err != nil {
-		return nil, gerror.Wrap(err, "序列化账号媒体下载任务失败")
-	}
 	taskID, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
 		TenantID: tenantId, AccountID: tgAccountId, TaskType: collectorin.AccountTaskTypeMediaDownload,
 		TaskKey: accountMediaDownloadTaskKey(tgAccountId, item), Priority: collectorin.EventPriorityRealtime,
-		Payload: payload, MaxAttempts: 5,
+		MediaOwnerAccountID: accountId, Media: ptrCollectorMediaItem(collectorMediaItemFromCollect(item)), MaxAttempts: 5,
 	})
 	if err != nil {
 		return nil, gerror.Wrap(err, "提交账号媒体下载任务失败")
@@ -818,10 +810,7 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 	}
 	switch task.Status {
 	case collectorin.AccountTaskStatusCompleted:
-		var result collectorin.AccountMediaDownloadResult
-		if err = json.Unmarshal(task.Result, &result); err != nil {
-			return nil, gerror.Wrap(err, "解析账号媒体下载结果失败")
-		}
+		result := task.MediaResult
 		if result.ErrorCode == "source_gone" {
 			return nil, gerror.Wrap(errCollectMediaSourceGone, firstNonEmpty(result.ErrorMessage, "TG原消息已删除或已无可用媒体"))
 		}
@@ -844,6 +833,10 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 		}
 		return nil, newCollectMediaFairnessRetryError("账号媒体下载任务等待执行", delay)
 	}
+}
+
+func ptrCollectorMediaItem(item collectorin.CollectorMediaItem) *collectorin.CollectorMediaItem {
+	return &item
 }
 
 func accountMediaDownloadTaskKey(tgAccountID int64, item collectMediaItem) string {

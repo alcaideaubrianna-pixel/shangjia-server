@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -103,13 +103,12 @@ func (s *sCollector) ensureRuntimeContext(ctx context.Context) context.Context {
 	return s.runtimeCtx
 }
 
-func (s *sCollector) enqueueEventTask(ctx context.Context, payload sysin.EventTask) error {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
+func (s *sCollector) enqueueEventTask(ctx context.Context, eventID int64, priority int) error {
+	if eventID <= 0 {
+		return gerror.New("Telegram采集事件任务ID无效")
 	}
 	queueName := consts.QueueCollectRealtime
-	if payload.Priority >= sysin.EventPriorityUrgent {
+	if priority >= sysin.EventPriorityUrgent {
 		queueName = consts.QueueCollectUrgent
 	}
 	s.queueMu.Lock()
@@ -118,7 +117,7 @@ func (s *sCollector) enqueueEventTask(ctx context.Context, payload sysin.EventTa
 	}
 	client := s.queueClient
 	s.queueMu.Unlock()
-	_, err = client.EnqueueContext(ctx, asynq.NewTask(eventTaskType, body),
+	_, err := client.EnqueueContext(ctx, asynq.NewTask(eventTaskType, collectorTaskPayload(eventID)),
 		asynq.Queue(queueName),
 		asynq.MaxRetry(eventMaxAttempts-1),
 		asynq.Timeout(2*time.Minute),
@@ -127,12 +126,12 @@ func (s *sCollector) enqueueEventTask(ctx context.Context, payload sysin.EventTa
 }
 
 func (s *sCollector) handleEventTask(ctx context.Context, task *asynq.Task) error {
-	var payload sysin.EventTask
-	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
-		return gerror.Wrap(err, "解析Telegram采集事件任务失败")
+	eventID, err := parseCollectorTaskID(task.Payload(), "事件")
+	if err != nil {
+		return err
 	}
 	startedAt := time.Now()
-	if err := s.processEvent(ctx, &payload); err != nil {
+	if err = s.processEvent(ctx, eventID); err != nil {
 		counter, _ := collectorMeter.Int64Counter("telegram_collector_event_total")
 		counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "failed")))
 		return err
@@ -142,14 +141,14 @@ func (s *sCollector) handleEventTask(ctx context.Context, task *asynq.Task) erro
 	return nil
 }
 
-func (s *sCollector) processEvent(ctx context.Context, payload *sysin.EventTask) error {
-	if payload == nil || payload.EventID <= 0 {
+func (s *sCollector) processEvent(ctx context.Context, eventID int64) error {
+	if eventID <= 0 {
 		return gerror.New("Telegram采集事件任务无效")
 	}
 	columns := dao.TgCollectorEvent.Columns()
 	now := gtime.Now()
 	result, err := dao.TgCollectorEvent.Ctx(ctx).
-		Where(columns.Id, payload.EventID).
+		Where(columns.Id, eventID).
 		WhereIn(columns.Status, []string{sysin.EventStatusReceived, sysin.EventStatusFailedRetry}).
 		Data(g.Map{
 			columns.Status:       sysin.EventStatusProcessing,
@@ -166,26 +165,26 @@ func (s *sCollector) processEvent(ctx context.Context, payload *sysin.EventTask)
 		return nil
 	}
 	var row entity.TgCollectorEvent
-	if err = dao.TgCollectorEvent.Ctx(ctx).WherePri(payload.EventID).Scan(&row); err != nil {
-		return s.failEvent(ctx, payload.EventID, err)
+	if err = dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).Scan(&row); err != nil {
+		return s.failEvent(ctx, eventID, err)
 	}
 	if row.RawUpdate == nil {
-		return s.failEvent(ctx, payload.EventID, gerror.New("Telegram原始事件为空"))
+		return s.failEvent(ctx, eventID, gerror.New("Telegram原始事件为空"))
 	}
 	raw := []byte(row.RawUpdate.String())
 	delivery, err := collectorDeliveryFromEvent(&row, raw)
 	if err != nil {
-		return s.failEvent(ctx, payload.EventID, err)
+		return s.failEvent(ctx, eventID, err)
 	}
 	deliveryID, err := s.saveDelivery(ctx, &delivery)
 	if err != nil {
-		return s.failEvent(ctx, payload.EventID, err)
+		return s.failEvent(ctx, eventID, err)
 	}
 	delivery.ID = deliveryID
 	if err = s.enqueueDeliveryTask(ctx, deliveryID, row.Priority); err != nil {
-		return s.failEvent(ctx, payload.EventID, err)
+		return s.failEvent(ctx, eventID, err)
 	}
-	_, err = dao.TgCollectorEvent.Ctx(ctx).WherePri(payload.EventID).Data(g.Map{
+	_, err = dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).Data(g.Map{
 		columns.Status:       sysin.EventStatusReady,
 		columns.ProcessedAt:  gtime.Now(),
 		columns.LeaseOwner:   "",
@@ -244,19 +243,14 @@ func collectorDeliveryFromEvent(row *entity.TgCollectorEvent, raw []byte) (sysin
 }
 
 func (s *sCollector) saveDelivery(ctx context.Context, delivery *sysin.CollectorDelivery) (int64, error) {
-	payload, err := json.Marshal(delivery)
-	if err != nil {
-		return 0, gerror.Wrap(err, "序列化Telegram采集交付失败")
-	}
 	columns := dao.TgCollectorDelivery.Columns()
 	now := gtime.Now()
-	_, err = dao.TgCollectorDelivery.Ctx(ctx).Data(do.TgCollectorDelivery{
+	_, err := dao.TgCollectorDelivery.Ctx(ctx).Data(do.TgCollectorDelivery{
 		TenantId:    delivery.TenantID,
 		EventId:     delivery.EventID,
 		DeliveryKey: delivery.DeliveryKey,
 		Status:      sysin.DeliveryStatusPending,
 		Priority:    deliveryPriority(delivery),
-		Payload:     gjson.New(payload),
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}).OnConflict(columns.TenantId + "," + columns.DeliveryKey).
@@ -437,11 +431,7 @@ func (s *sCollector) enqueueDueEventTasks(ctx context.Context, limit int) error 
 		if affected == 0 {
 			continue
 		}
-		if updateErr = s.enqueueEventTask(ctx, sysin.EventTask{
-			EventID:  eventID,
-			EventKey: row[columns.EventKey].String(),
-			Priority: row[columns.Priority].Int(),
-		}); updateErr != nil {
+		if updateErr = s.enqueueEventTask(ctx, eventID, row[columns.Priority].Int()); updateErr != nil {
 			return gerror.Wrap(updateErr, "投递待恢复Telegram采集事件失败")
 		}
 	}
@@ -454,6 +444,18 @@ func collectorRedisOption(ctx context.Context) asynq.RedisClientOpt {
 		Password: g.Cfg().MustGet(ctx, "redis.default.pass", "").String(),
 		DB:       g.Cfg().MustGet(ctx, "redis.default.db", 0).Int(),
 	}
+}
+
+func parseCollectorTaskID(payload []byte, taskName string) (int64, error) {
+	taskID, err := strconv.ParseInt(strings.TrimSpace(string(payload)), 10, 64)
+	if err != nil || taskID <= 0 {
+		return 0, gerror.Newf("Telegram采集%s任务ID无效", taskName)
+	}
+	return taskID, nil
+}
+
+func collectorTaskPayload(taskID int64) []byte {
+	return []byte(strconv.FormatInt(taskID, 10))
 }
 
 func collectorConcurrency(ctx context.Context) int {

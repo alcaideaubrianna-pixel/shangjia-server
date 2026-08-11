@@ -8,6 +8,9 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gotd/td/telegram"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
@@ -22,6 +25,8 @@ type accountTaskRetryDelay interface {
 	AccountTaskRetryDelay() time.Duration
 }
 
+var accountRuntimeMeter = otel.Meter("hotgo/addons/telegram_collector/runtime")
+
 func RunAccountTaskLoop(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate sync.Locker) {
 	if client == nil || lease == nil {
 		return
@@ -29,8 +34,12 @@ func RunAccountTaskLoop(ctx context.Context, client *telegram.Client, lease *sys
 	ticker := time.NewTicker(accountTaskPollInterval)
 	defer ticker.Stop()
 	for {
-		if !processAccountTask(ctx, client, lease, operationGate) {
+		keepRunning, handled := processAccountTask(ctx, client, lease, operationGate)
+		if !keepRunning {
 			return
+		}
+		if handled {
+			continue
 		}
 		select {
 		case <-ctx.Done():
@@ -40,27 +49,30 @@ func RunAccountTaskLoop(ctx context.Context, client *telegram.Client, lease *sys
 	}
 }
 
-func processAccountTask(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate sync.Locker) bool {
+func processAccountTask(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate sync.Locker) (bool, bool) {
 	renewed, err := collectorservice.AccountLeaseManager().Renew(ctx, lease, 0)
 	if err != nil {
 		g.Log().Warningf(ctx, "续期Telegram账号任务租约失败 tgAccountId:%d err:%+v", lease.AccountID, err)
-		return false
+		return false, false
 	}
 	if !renewed {
 		g.Log().Warningf(ctx, "Telegram账号任务租约已失效，停止领取任务 tgAccountId:%d epoch:%d", lease.AccountID, lease.Epoch)
-		return false
+		return false, false
 	}
 	tasks, err := collectorservice.AccountTasks().Claim(ctx, lease, 1, accountTaskLeaseTTL)
 	if err != nil {
 		g.Log().Warningf(ctx, "领取Telegram账号任务失败 tgAccountId:%d err:%+v", lease.AccountID, err)
-		return true
+		return true, false
 	}
 	for _, task := range tasks {
 		if task == nil {
 			continue
 		}
+		startedAt := time.Now()
+		resultStatus := "completed"
 		handler := collectorservice.AccountTaskHandlerFor(task.TaskType)
 		if handler == nil {
+			resultStatus = "failed"
 			err = collectorservice.AccountTasks().Fail(ctx, &sysin.AccountTaskFailure{
 				TaskID: task.ID, Lease: lease, RetryDelay: time.Minute,
 				Cause: gerror.New("Telegram账号任务处理器不存在：" + task.TaskType),
@@ -80,16 +92,28 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 			if handleErr == nil {
 				err = collectorservice.AccountTasks().Complete(ctx, task.ID, lease, result)
 			} else {
+				resultStatus = "failed"
 				err = collectorservice.AccountTasks().Fail(ctx, &sysin.AccountTaskFailure{
 					TaskID: task.ID, Lease: lease, Cause: handleErr, RetryDelay: retryDelay(handleErr),
 				})
 			}
 		}
 		if err != nil {
+			resultStatus = "commit_failed"
 			g.Log().Warningf(ctx, "提交Telegram账号任务结果失败 taskId:%d type:%s err:%+v", task.ID, task.TaskType, err)
 		}
+		counter, _ := accountRuntimeMeter.Int64Counter("telegram_account_task_total")
+		counter.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("task_type", task.TaskType),
+			attribute.String("result", resultStatus),
+		))
+		histogram, _ := accountRuntimeMeter.Float64Histogram("telegram_account_task_duration_seconds")
+		histogram.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(
+			attribute.String("task_type", task.TaskType),
+			attribute.String("result", resultStatus),
+		))
 	}
-	return true
+	return true, len(tasks) > 0
 }
 
 func keepAccountTaskLeaseAlive(ctx context.Context, cancel context.CancelFunc, lease *sysin.AccountLease) func() {

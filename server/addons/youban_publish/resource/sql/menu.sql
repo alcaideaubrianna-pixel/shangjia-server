@@ -164,3 +164,22 @@ SET `pid` = @addonsId,
     `status` = '1',
     `updated_at` = @now
 WHERE @addonsId IS NOT NULL AND `name` = 'develop_addons';
+
+DELETE rm FROM `hg_admin_role_menu` rm
+JOIN `hg_admin_menu` m ON m.`id` = rm.`menu_id`
+JOIN `hg_admin_menu` example ON example.`name` = 'hgexample'
+WHERE m.`id` = example.`id`
+   OR m.`tree` LIKE CONCAT(example.`tree`, '%');
+
+UPDATE `hg_admin_menu` m
+JOIN (SELECT `tree` FROM `hg_admin_menu` WHERE `name` = 'hgexample' LIMIT 1) example
+SET m.`status` = '2',
+    m.`hidden` = '1',
+    m.`updated_at` = @now
+WHERE m.`name` = 'hgexample'
+   OR m.`tree` LIKE CONCAT(example.`tree`, '%');
+
+UPDATE `hg_admin_menu`
+SET `redirect` = '/develop/addons/index',
+    `updated_at` = @now
+WHERE `name` = 'addons';

@@ -5,7 +5,6 @@
 package do
 
 import (
-	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 )
@@ -19,7 +18,6 @@ type TgCollectorDelivery struct {
 	DeliveryKey  any         //
 	Status       any         //
 	Priority     any         //
-	Payload      *gjson.Json //
 	AttemptCount any         //
 	NextRunAt    *gtime.Time //
 	LeaseOwner   any         //

@@ -11,6 +11,8 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
@@ -115,13 +117,39 @@ func (r *accountRuntime) run(ctx context.Context, done chan struct{}) {
 		case <-syncTicker.C:
 			r.sync(ctx)
 		case <-recoveryTicker.C:
-			if tasks := collectorservice.AccountTasks(); tasks != nil {
-				if recovered, err := tasks.RecoverExpired(ctx, 100); err != nil {
-					g.Log().Warningf(ctx, "恢复超时Telegram账号任务失败：%+v", err)
-				} else if recovered > 0 {
-					g.Log().Infof(ctx, "已恢复超时Telegram账号任务 count:%d", recovered)
-				}
+			r.recoverAndObserveAccountTasks(ctx)
+		}
+	}
+}
+
+func (r *accountRuntime) recoverAndObserveAccountTasks(ctx context.Context) {
+	tasks := collectorservice.AccountTasks()
+	if recovered, err := tasks.RecoverExpired(ctx, 100); err != nil {
+		g.Log().Warningf(ctx, "恢复超时Telegram账号任务失败：%+v", err)
+	} else if recovered > 0 {
+		g.Log().Infof(ctx, "已恢复超时Telegram账号任务 count:%d", recovered)
+	}
+	stats, err := tasks.ActiveStatusStats(ctx)
+	if err != nil {
+		g.Log().Warningf(ctx, "统计Telegram账号任务状态失败：%+v", err)
+		return
+	}
+	now := time.Now()
+	depth, _ := accountRuntimeMeter.Int64Histogram("telegram_account_task_queue_depth")
+	age, _ := accountRuntimeMeter.Float64Histogram("telegram_account_task_oldest_age_seconds")
+	for _, stat := range stats {
+		attributes := metric.WithAttributes(attribute.String("status", stat.Status))
+		depth.Record(ctx, stat.Total, attributes)
+		oldest := stat.OldestCreatedAt
+		if stat.Status == sysin.AccountTaskStatusProcessing {
+			oldest = stat.OldestUpdatedAt
+		}
+		if oldest != nil {
+			seconds := now.Sub(*oldest).Seconds()
+			if seconds < 0 {
+				seconds = 0
 			}
+			age.Record(ctx, seconds, attributes)
 		}
 	}
 }
@@ -160,6 +188,8 @@ func (r *accountRuntime) sync(ctx context.Context) {
 		workerCtx, cancel := context.WithCancel(ctx)
 		worker := &accountWorker{binding: binding, session: session, cancel: cancel, done: make(chan struct{}), operations: make(chan accountOperationTask, 256)}
 		r.workers[binding.AccountID] = worker
+		workerGauge, _ := accountRuntimeMeter.Int64UpDownCounter("telegram_account_runtime_workers")
+		workerGauge.Add(ctx, 1)
 		go worker.run(workerCtx)
 	}
 	for accountID, worker := range r.workers {
@@ -210,13 +240,25 @@ func (r *accountRuntime) Execute(ctx context.Context, accountID int64, timeout t
 }
 
 func (w *accountWorker) run(ctx context.Context) {
-	defer close(w.done)
+	defer func() {
+		workerGauge, _ := accountRuntimeMeter.Int64UpDownCounter("telegram_account_runtime_workers")
+		workerGauge.Add(context.Background(), -1)
+		close(w.done)
+	}()
 	defer w.session.StopAccountRuntime()
 	leaseTTL := time.Duration(g.Cfg().MustGet(ctx, "telegramCollector.account.leaseSeconds", 120).Int()) * time.Second
 	if leaseTTL < 30*time.Second {
 		leaseTTL = 30 * time.Second
 	}
 	lease, acquired, err := collectorservice.AccountLeaseManager().Acquire(ctx, w.binding.AccountID, accountRuntimeInstanceID(), leaseTTL)
+	leaseResult := "acquired"
+	if err != nil {
+		leaseResult = "error"
+	} else if !acquired {
+		leaseResult = "held_by_other_instance"
+	}
+	leaseCounter, _ := accountRuntimeMeter.Int64Counter("telegram_account_runtime_lease_acquire_total")
+	leaseCounter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", leaseResult)))
 	if err != nil || !acquired {
 		if err != nil {
 			g.Log().Warningf(ctx, "获取Telegram账号运行租约失败 accountId:%d err:%+v", w.binding.AccountID, err)
@@ -224,6 +266,8 @@ func (w *accountWorker) run(ctx context.Context) {
 		return
 	}
 	defer collectorservice.AccountLeaseManager().Release(context.Background(), lease)
+	startCounter, _ := accountRuntimeMeter.Int64Counter("telegram_account_runtime_starts_total")
+	startCounter.Add(ctx, 1)
 	dispatcher := tg.NewUpdateDispatcher()
 	w.session.BindAccountRuntimeHandlers(dispatcher)
 	client, err := w.session.NewAccountRuntimeClient(ctx, dispatcher)

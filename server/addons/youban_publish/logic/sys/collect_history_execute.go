@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -34,10 +33,6 @@ type collectHistoryPauseError struct {
 	err   error
 }
 
-type collectHistoryAccountTaskPayload struct {
-	TaskID int64 `json:"taskId"`
-}
-
 func (e *collectHistoryPauseError) Error() string {
 	return e.err.Error()
 }
@@ -54,10 +49,6 @@ func (s *sSysPublish) ExecuteCollectHistoryTask(ctx context.Context, taskId int6
 	if task.Status == sysin.CollectHistoryTaskStatusSuccess || task.Status == sysin.CollectHistoryTaskStatusFailed || task.Status == sysin.CollectHistoryTaskStatusCanceled {
 		return nil
 	}
-	payload, err := json.Marshal(collectHistoryAccountTaskPayload{TaskID: task.Id})
-	if err != nil {
-		return gerror.Wrap(err, "序列化历史采集账号任务失败")
-	}
 	version := int64(0)
 	if task.UpdatedAt != nil {
 		version = task.UpdatedAt.TimestampNano()
@@ -66,7 +57,7 @@ func (s *sSysPublish) ExecuteCollectHistoryTask(ctx context.Context, taskId int6
 		TenantID: task.TenantId, AccountID: task.TgAccountId,
 		TaskType: collectorin.AccountTaskTypeHistoryPage,
 		TaskKey:  collectHistoryAccountTaskKey(task.Id, task.OffsetId, version),
-		Priority: collectorin.EventPriorityNormal, Payload: payload, MaxAttempts: 5,
+		Priority: collectorin.EventPriorityNormal, HistoryTaskID: task.Id, MaxAttempts: 5,
 	})
 	if err != nil {
 		return gerror.Wrap(err, "提交历史采集账号任务失败")

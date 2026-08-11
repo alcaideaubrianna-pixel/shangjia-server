@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/go-telegram/bot/models"
@@ -20,17 +21,13 @@ type publishCollectorDeliveryHandler struct {
 
 type publishCollectorAccountTaskHandler struct{ publish *sSysPublish }
 
-func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (json.RawMessage, error) {
+func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (*collectorin.AccountMediaDownloadResult, error) {
 	if h == nil || h.publish == nil || task == nil {
 		return nil, gerror.New("Telegram账号任务处理参数无效")
 	}
 	switch task.TaskType {
 	case collectorin.AccountTaskTypeHistoryPage:
-		var payload collectHistoryAccountTaskPayload
-		if err := json.Unmarshal(task.Payload, &payload); err != nil {
-			return nil, gerror.Wrap(err, "解析历史采集账号任务失败")
-		}
-		return nil, h.publish.handleCollectHistoryAccountTask(ctx, client, payload.TaskID)
+		return nil, h.publish.handleCollectHistoryAccountTask(ctx, client, task.HistoryTaskID)
 	case collectorin.AccountTaskTypeMediaDownload:
 		return h.publish.handleAccountMediaDownloadTask(ctx, client, task)
 	default:
@@ -38,19 +35,15 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Conte
 	}
 }
 
-func (s *sSysPublish) handleAccountMediaDownloadTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (json.RawMessage, error) {
-	var payload collectorin.AccountMediaDownloadPayload
-	if err := json.Unmarshal(task.Payload, &payload); err != nil {
-		return nil, gerror.Wrap(err, "解析账号媒体下载任务失败")
-	}
-	item := collectMediaItemFromCollector(payload.Media)
-	ctx = collectMediaRuntimeContext(ctx, payload.AccountID)
-	downloaded, err := s.downloadTelegramMediaWithRefresh(ctx, payload.TenantID, task.AccountID, item, client)
+func (s *sSysPublish) handleAccountMediaDownloadTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (*collectorin.AccountMediaDownloadResult, error) {
+	item := collectMediaItemFromCollector(task.Media)
+	ctx = collectMediaRuntimeContext(ctx, task.MediaOwnerAccountID)
+	downloaded, err := s.downloadTelegramMediaWithRefresh(ctx, task.TenantID, task.AccountID, item, client)
 	if err != nil {
 		if collectMediaSourceGone(err) {
-			return json.Marshal(&collectorin.AccountMediaDownloadResult{
+			return &collectorin.AccountMediaDownloadResult{
 				Media: collectorMediaItemFromCollect(item), ErrorCode: "source_gone", ErrorMessage: err.Error(),
-			})
+			}, nil
 		}
 		return nil, err
 	}
@@ -68,12 +61,12 @@ func (s *sSysPublish) handleAccountMediaDownloadTask(ctx context.Context, client
 	resultItem.FileUrl = strings.TrimSpace(attachment.FileUrl)
 	resultItem.StoragePath = normalizeStoredMediaPath(attachment.Path)
 	resultItem.DebugMetaJson = firstNonEmpty(downloaded.MetaJson, resultItem.DebugMetaJson)
-	return json.Marshal(&collectorin.AccountMediaDownloadResult{
+	return &collectorin.AccountMediaDownloadResult{
 		AttachmentID: attachment.Id,
 		FileURL:      resultItem.FileUrl,
 		StoragePath:  resultItem.StoragePath,
 		Media:        collectorMediaItemFromCollect(resultItem),
-	})
+	}, nil
 }
 
 func collectorMediaItemFromCollect(item collectMediaItem) collectorin.CollectorMediaItem {
@@ -121,11 +114,15 @@ func (h *publishCollectorDeliveryHandler) HandleCollectorDelivery(ctx context.Co
 }
 
 func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
+	uniqueKey := strings.TrimSpace(delivery.SourceUniqueKey)
+	if groupedID := strings.TrimSpace(delivery.SourceGroupedID); groupedID != "" {
+		uniqueKey = accountCollectMaterialGroupKey(delivery, groupedID)
+	}
 	message := &CollectMessage{
 		TenantId: delivery.TenantID, AccountId: delivery.AccountID, SourceId: delivery.SourceID,
 		SourceType: sysin.CollectSourceTypeAccount, TgAccountId: delivery.TgAccountID,
 		SourceChatId: delivery.SourceChatID, SourceMessageId: delivery.SourceMessageID,
-		SourceGroupedId: delivery.SourceGroupedID, SourceUniqueKey: delivery.SourceUniqueKey,
+		SourceGroupedId: delivery.SourceGroupedID, SourceUniqueKey: uniqueKey,
 		RawText: delivery.RawText,
 	}
 	if !delivery.ReceivedAt.IsZero() {
@@ -144,4 +141,21 @@ func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delive
 	}
 	_, err := s.ingestAndProcessCollectMessage(ctx, message)
 	return err
+}
+
+func accountCollectMaterialGroupKey(delivery *collectorin.CollectorDelivery, groupedID string) string {
+	if delivery == nil {
+		return ""
+	}
+	groupedID = strings.TrimSpace(groupedID)
+	if groupedID == "" {
+		return strings.TrimSpace(delivery.SourceUniqueKey)
+	}
+	return fmt.Sprintf(
+		"account:%d:source:%d:%s:group:%s",
+		delivery.TgAccountID,
+		delivery.SourceID,
+		strings.TrimSpace(delivery.SourceChatID),
+		groupedID,
+	)
 }

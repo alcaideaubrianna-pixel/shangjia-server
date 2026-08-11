@@ -39,12 +39,6 @@ type RawUpdateEvent struct {
 	TraceID    string    `json:"traceId,omitempty"`
 }
 
-type EventTask struct {
-	EventID  int64  `json:"eventId"`
-	EventKey string `json:"eventKey"`
-	Priority int    `json:"priority"`
-}
-
 type AccountMessageEvent struct {
 	TenantID        int64                `json:"tenantId"`
 	AccountID       int64                `json:"accountId"`

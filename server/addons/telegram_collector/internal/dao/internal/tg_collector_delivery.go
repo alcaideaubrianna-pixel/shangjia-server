@@ -27,7 +27,6 @@ type TgCollectorDeliveryColumns struct {
 	DeliveryKey  string //
 	Status       string //
 	Priority     string //
-	Payload      string //
 	AttemptCount string //
 	NextRunAt    string //
 	LeaseOwner   string //
@@ -45,7 +44,6 @@ var tgCollectorDeliveryColumns = TgCollectorDeliveryColumns{
 	DeliveryKey:  "delivery_key",
 	Status:       "status",
 	Priority:     "priority",
-	Payload:      "payload",
 	AttemptCount: "attempt_count",
 	NextRunAt:    "next_run_at",
 	LeaseOwner:   "lease_owner",

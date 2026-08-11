@@ -130,6 +130,7 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 	if err == nil {
 		s.refreshCollectEventRulesCache(ctx)
 		s.refreshCollectSourceCache(ctx)
+		s.refreshAccountCollectSupervisor()
 	}
 	return id, err
 }

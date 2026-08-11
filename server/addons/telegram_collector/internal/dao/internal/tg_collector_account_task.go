@@ -21,48 +21,86 @@ type TgCollectorAccountTaskDao struct {
 
 // TgCollectorAccountTaskColumns defines and stores column names for the table hg_tg_collector_account_task.
 type TgCollectorAccountTaskColumns struct {
-	Id           string //
-	TenantId     string //
-	AccountId    string //
-	TaskType     string //
-	TaskKey      string //
-	Priority     string //
-	Status       string //
-	Payload      string //
-	Result       string //
-	AttemptCount string //
-	MaxAttempts  string //
-	NextRunAt    string //
-	LeaseOwner   string //
-	LeaseEpoch   string //
-	LeaseUntil   string //
-	ErrorMessage string //
-	CompletedAt  string //
-	CreatedAt    string //
-	UpdatedAt    string //
+	Id                  string //
+	TenantId            string //
+	AccountId           string //
+	TaskType            string //
+	TaskKey             string //
+	Priority            string //
+	Status              string //
+	AttemptCount        string //
+	MaxAttempts         string //
+	NextRunAt           string //
+	LeaseOwner          string //
+	LeaseEpoch          string //
+	LeaseUntil          string //
+	ErrorMessage        string //
+	CompletedAt         string //
+	CreatedAt           string //
+	UpdatedAt           string //
+	HistoryTaskId       string //
+	MediaOwnerAccountId string //
+	MediaType           string //
+	MediaPurpose        string //
+	SourceFileId        string //
+	FileUrl             string //
+	StoragePath         string //
+	PosterUrl           string //
+	FileMd5             string //
+	FilePhash           string //
+	SourceKind          string //
+	SourceMediaId       string //
+	SourceAccessHash    string //
+	SourceFileReference string //
+	SourceThumbSize     string //
+	SourceMimeType      string //
+	SourceDcId          string //
+	SourceSize          string //
+	DebugMetaText       string //
+	AttachmentId        string //
+	ResultErrorCode     string //
 }
 
 // tgCollectorAccountTaskColumns holds the columns for the table hg_tg_collector_account_task.
 var tgCollectorAccountTaskColumns = TgCollectorAccountTaskColumns{
-	Id:           "id",
-	TenantId:     "tenant_id",
-	AccountId:    "account_id",
-	TaskType:     "task_type",
-	TaskKey:      "task_key",
-	Priority:     "priority",
-	Status:       "status",
-	Payload:      "payload",
-	Result:       "result",
-	AttemptCount: "attempt_count",
-	MaxAttempts:  "max_attempts",
-	NextRunAt:    "next_run_at",
-	LeaseOwner:   "lease_owner",
-	LeaseEpoch:   "lease_epoch",
-	LeaseUntil:   "lease_until",
-	ErrorMessage: "error_message",
-	CompletedAt:  "completed_at",
-	CreatedAt:    "created_at",
-	UpdatedAt:    "updated_at",
+	Id:                  "id",
+	TenantId:            "tenant_id",
+	AccountId:           "account_id",
+	TaskType:            "task_type",
+	TaskKey:             "task_key",
+	Priority:            "priority",
+	Status:              "status",
+	AttemptCount:        "attempt_count",
+	MaxAttempts:         "max_attempts",
+	NextRunAt:           "next_run_at",
+	LeaseOwner:          "lease_owner",
+	LeaseEpoch:          "lease_epoch",
+	LeaseUntil:          "lease_until",
+	ErrorMessage:        "error_message",
+	CompletedAt:         "completed_at",
+	CreatedAt:           "created_at",
+	UpdatedAt:           "updated_at",
+	HistoryTaskId:       "history_task_id",
+	MediaOwnerAccountId: "media_owner_account_id",
+	MediaType:           "media_type",
+	MediaPurpose:        "media_purpose",
+	SourceFileId:        "source_file_id",
+	FileUrl:             "file_url",
+	StoragePath:         "storage_path",
+	PosterUrl:           "poster_url",
+	FileMd5:             "file_md5",
+	FilePhash:           "file_phash",
+	SourceKind:          "source_kind",
+	SourceMediaId:       "source_media_id",
+	SourceAccessHash:    "source_access_hash",
+	SourceFileReference: "source_file_reference",
+	SourceThumbSize:     "source_thumb_size",
+	SourceMimeType:      "source_mime_type",
+	SourceDcId:          "source_dc_id",
+	SourceSize:          "source_size",
+	DebugMetaText:       "debug_meta_text",
+	AttachmentId:        "attachment_id",
+	ResultErrorCode:     "result_error_code",
 }
 
 // NewTgCollectorAccountTaskDao creates and returns a new DAO object for table data access.

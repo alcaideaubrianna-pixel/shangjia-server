@@ -149,3 +149,22 @@ SET "pid" = root."id",
     "updated_at" = NOW()
 FROM (SELECT "id" FROM "hg_admin_menu" WHERE "name" = 'addons' LIMIT 1) root
 WHERE "hg_admin_menu"."name" = 'develop_addons';
+
+DELETE FROM "hg_admin_role_menu" rm
+USING "hg_admin_menu" m
+JOIN "hg_admin_menu" example ON example."name" = 'hgexample'
+WHERE rm."menu_id" = m."id"
+  AND (m."id" = example."id" OR m."tree" LIKE example."tree" || '%');
+
+UPDATE "hg_admin_menu" m
+SET "status" = 2,
+    "hidden" = 1,
+    "updated_at" = NOW()
+FROM (SELECT "tree" FROM "hg_admin_menu" WHERE "name" = 'hgexample' LIMIT 1) example
+WHERE m."name" = 'hgexample'
+   OR m."tree" LIKE example."tree" || '%';
+
+UPDATE "hg_admin_menu"
+SET "redirect" = '/develop/addons/index',
+    "updated_at" = NOW()
+WHERE "name" = 'addons';

@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
@@ -22,10 +21,9 @@ func TestAccountTaskPersistenceIntegration(t *testing.T) {
 	ctx := context.Background()
 	service := &sAccountTasks{}
 	seed := time.Now().UnixNano()
-	payload, _ := json.Marshal(map[string]int64{"taskId": seed})
 	submit := &sysin.AccountTaskSubmit{
 		TenantID: seed, AccountID: seed, TaskType: sysin.AccountTaskTypeHistoryPage,
-		TaskKey: fmt.Sprintf("integration:%d", seed), Priority: 10, Payload: payload, MaxAttempts: 2,
+		TaskKey: fmt.Sprintf("integration:%d", seed), Priority: 10, HistoryTaskID: seed, MaxAttempts: 2,
 	}
 	taskID, err := service.Submit(ctx, submit)
 	if err != nil {
@@ -48,8 +46,7 @@ func TestAccountTaskPersistenceIntegration(t *testing.T) {
 	if err = service.Complete(ctx, taskID, wrongLease, nil); err == nil {
 		t.Fatal("stale lease must not complete account task")
 	}
-	result, _ := json.Marshal(map[string]bool{"ok": true})
-	if err = service.Complete(ctx, taskID, lease, result); err != nil {
+	if err = service.Complete(ctx, taskID, lease, nil); err != nil {
 		t.Fatalf("complete account task: %v", err)
 	}
 	columns := dao.TgCollectorAccountTask.Columns()
@@ -58,9 +55,46 @@ func TestAccountTaskPersistenceIntegration(t *testing.T) {
 		t.Fatalf("completed status=%s err=%v", row[columns.Status].String(), err)
 	}
 
+	media := sysin.CollectorMediaItem{
+		Type: "video", Purpose: "verify", FileID: fmt.Sprintf("gotd:%d", seed),
+		SourceKind: "document", SourceMediaID: seed, SourceAccessHash: seed + 1,
+		SourceFileReference: []byte{0, 1, 2, 127, 255}, SourceMimeType: "video/mp4",
+		SourceDCID: 5, SourceSize: 4096, DebugMetaJSON: `{"duration":12}`,
+	}
+	mediaSubmit := &sysin.AccountTaskSubmit{
+		TenantID: seed, AccountID: seed, TaskType: sysin.AccountTaskTypeMediaDownload,
+		TaskKey: fmt.Sprintf("integration-media:%d", seed), Priority: 100,
+		MediaOwnerAccountID: seed, Media: &media, MaxAttempts: 2,
+	}
+	mediaTaskID, err := service.Submit(ctx, mediaSubmit)
+	if err != nil {
+		t.Fatalf("submit media account task: %v", err)
+	}
+	mediaTasks, err := service.Claim(ctx, lease, 1, time.Minute)
+	if err != nil || len(mediaTasks) != 1 || mediaTasks[0].ID != mediaTaskID {
+		t.Fatalf("claim media tasks=%+v err=%v", mediaTasks, err)
+	}
+	claimedMedia := mediaTasks[0].Media
+	if claimedMedia.FileID != media.FileID || string(claimedMedia.SourceFileReference) != string(media.SourceFileReference) {
+		t.Fatalf("claimed media=%+v want=%+v", claimedMedia, media)
+	}
+	mediaResult := &sysin.AccountMediaDownloadResult{
+		AttachmentID: seed, FileURL: "https://example.test/media.mp4",
+		StoragePath: "attachment/integration/media.mp4", Media: claimedMedia,
+	}
+	if err = service.Complete(ctx, mediaTaskID, lease, mediaResult); err != nil {
+		t.Fatalf("complete media account task: %v", err)
+	}
+	completedMediaTask, err := service.Get(ctx, mediaTaskID)
+	if err != nil || completedMediaTask.MediaResult.AttachmentID != mediaResult.AttachmentID ||
+		completedMediaTask.MediaResult.StoragePath != mediaResult.StoragePath ||
+		string(completedMediaTask.Media.SourceFileReference) != string(media.SourceFileReference) {
+		t.Fatalf("completed media task=%+v err=%v", completedMediaTask, err)
+	}
+
 	recoverySubmit := &sysin.AccountTaskSubmit{
 		TenantID: seed, AccountID: seed, TaskType: sysin.AccountTaskTypeHistoryPage,
-		TaskKey: fmt.Sprintf("integration-recovery:%d", seed), Priority: 1, Payload: payload, MaxAttempts: 2,
+		TaskKey: fmt.Sprintf("integration-recovery:%d", seed), Priority: 1, HistoryTaskID: seed, MaxAttempts: 2,
 	}
 	recoveryID, err := service.Submit(ctx, recoverySubmit)
 	if err != nil {

@@ -75,7 +75,6 @@ CREATE TABLE IF NOT EXISTS `hg_tg_collector_delivery` (
     `delivery_key` VARCHAR(255) NOT NULL,
     `status` VARCHAR(32) NOT NULL DEFAULT 'pending',
     `priority` INT NOT NULL DEFAULT 0,
-    `payload` LONGTEXT NOT NULL,
     `attempt_count` INT NOT NULL DEFAULT 0,
     `next_run_at` DATETIME NULL,
     `lease_owner` VARCHAR(128) NOT NULL DEFAULT '',
@@ -87,6 +86,8 @@ CREATE TABLE IF NOT EXISTS `hg_tg_collector_delivery` (
     KEY `idx_tg_collector_delivery_task` (`status`, `priority`, `next_run_at`, `lease_until`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+ALTER TABLE `hg_tg_collector_delivery` DROP COLUMN IF EXISTS `payload`;
+
 CREATE TABLE IF NOT EXISTS `hg_tg_collector_account_task` (
     `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `tenant_id` BIGINT NOT NULL DEFAULT 0,
@@ -95,8 +96,27 @@ CREATE TABLE IF NOT EXISTS `hg_tg_collector_account_task` (
     `task_key` VARCHAR(255) NOT NULL,
     `priority` INT NOT NULL DEFAULT 0,
     `status` VARCHAR(32) NOT NULL DEFAULT 'pending',
-    `payload` LONGTEXT NOT NULL,
-    `result` LONGTEXT NULL,
+    `history_task_id` BIGINT NOT NULL DEFAULT 0,
+    `media_owner_account_id` BIGINT NOT NULL DEFAULT 0,
+    `media_type` VARCHAR(32) NOT NULL DEFAULT '',
+    `media_purpose` VARCHAR(32) NOT NULL DEFAULT '',
+    `source_file_id` TEXT NOT NULL,
+    `file_url` TEXT NOT NULL,
+    `storage_path` TEXT NOT NULL,
+    `poster_url` TEXT NOT NULL,
+    `file_md5` VARCHAR(128) NOT NULL DEFAULT '',
+    `file_phash` VARCHAR(128) NOT NULL DEFAULT '',
+    `source_kind` VARCHAR(32) NOT NULL DEFAULT '',
+    `source_media_id` BIGINT NOT NULL DEFAULT 0,
+    `source_access_hash` BIGINT NOT NULL DEFAULT 0,
+    `source_file_reference` BLOB NULL,
+    `source_thumb_size` VARCHAR(32) NOT NULL DEFAULT '',
+    `source_mime_type` VARCHAR(128) NOT NULL DEFAULT '',
+    `source_dc_id` INT NOT NULL DEFAULT 0,
+    `source_size` BIGINT NOT NULL DEFAULT 0,
+    `debug_meta_text` TEXT NOT NULL,
+    `attachment_id` BIGINT NOT NULL DEFAULT 0,
+    `result_error_code` VARCHAR(64) NOT NULL DEFAULT '',
     `attempt_count` INT NOT NULL DEFAULT 0,
     `max_attempts` INT NOT NULL DEFAULT 5,
     `next_run_at` DATETIME NULL,
@@ -111,3 +131,28 @@ CREATE TABLE IF NOT EXISTS `hg_tg_collector_account_task` (
     KEY `idx_tg_collector_account_task_claim` (`account_id`, `status`, `priority`, `next_run_at`, `lease_until`, `id`),
     KEY `idx_tg_collector_account_task_recovery` (`status`, `lease_until`, `next_run_at`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `history_task_id` BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `media_owner_account_id` BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `media_type` VARCHAR(32) NOT NULL DEFAULT '';
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `media_purpose` VARCHAR(32) NOT NULL DEFAULT '';
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `source_file_id` TEXT NOT NULL;
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `file_url` TEXT NOT NULL;
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `storage_path` TEXT NOT NULL;
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `poster_url` TEXT NOT NULL;
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `file_md5` VARCHAR(128) NOT NULL DEFAULT '';
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `file_phash` VARCHAR(128) NOT NULL DEFAULT '';
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `source_kind` VARCHAR(32) NOT NULL DEFAULT '';
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `source_media_id` BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `source_access_hash` BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `source_file_reference` BLOB NULL;
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `source_thumb_size` VARCHAR(32) NOT NULL DEFAULT '';
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `source_mime_type` VARCHAR(128) NOT NULL DEFAULT '';
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `source_dc_id` INT NOT NULL DEFAULT 0;
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `source_size` BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `debug_meta_text` TEXT NOT NULL;
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `attachment_id` BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE `hg_tg_collector_account_task` ADD COLUMN IF NOT EXISTS `result_error_code` VARCHAR(64) NOT NULL DEFAULT '';
+DELETE FROM `hg_tg_collector_account_task` WHERE (`task_type`='history_page' AND `history_task_id`<=0) OR (`task_type`='media_download' AND `source_file_id`='');
+ALTER TABLE `hg_tg_collector_account_task` DROP COLUMN IF EXISTS `payload`;
+ALTER TABLE `hg_tg_collector_account_task` DROP COLUMN IF EXISTS `result`;

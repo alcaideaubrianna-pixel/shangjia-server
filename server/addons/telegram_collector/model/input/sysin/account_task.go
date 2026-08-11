@@ -1,9 +1,6 @@
 package sysin
 
-import (
-	"encoding/json"
-	"time"
-)
+import "time"
 
 const (
 	AccountTaskStatusPending     = "pending"
@@ -18,39 +15,37 @@ const (
 )
 
 type AccountTaskSubmit struct {
-	TenantID    int64           `json:"tenantId"`
-	AccountID   int64           `json:"accountId"`
-	TaskType    string          `json:"taskType"`
-	TaskKey     string          `json:"taskKey"`
-	Priority    int             `json:"priority"`
-	Payload     json.RawMessage `json:"payload"`
-	MaxAttempts int             `json:"maxAttempts"`
-	NextRunAt   *time.Time      `json:"nextRunAt,omitempty"`
+	TenantID            int64
+	AccountID           int64
+	TaskType            string
+	TaskKey             string
+	Priority            int
+	HistoryTaskID       int64
+	MediaOwnerAccountID int64
+	Media               *CollectorMediaItem
+	MaxAttempts         int
+	NextRunAt           *time.Time
 }
 
 type AccountTask struct {
-	ID           int64           `json:"id"`
-	TenantID     int64           `json:"tenantId"`
-	AccountID    int64           `json:"accountId"`
-	TaskType     string          `json:"taskType"`
-	TaskKey      string          `json:"taskKey"`
-	Priority     int             `json:"priority"`
-	Status       string          `json:"status"`
-	Payload      json.RawMessage `json:"payload"`
-	Result       json.RawMessage `json:"result,omitempty"`
-	AttemptCount int             `json:"attemptCount"`
-	MaxAttempts  int             `json:"maxAttempts"`
-	LeaseOwner   string          `json:"leaseOwner"`
-	LeaseEpoch   int64           `json:"leaseEpoch"`
-	LeaseUntil   *time.Time      `json:"leaseUntil,omitempty"`
-	NextRunAt    *time.Time      `json:"nextRunAt,omitempty"`
-	ErrorMessage string          `json:"errorMessage,omitempty"`
-}
-
-type AccountMediaDownloadPayload struct {
-	TenantID  int64              `json:"tenantId"`
-	AccountID int64              `json:"accountId"`
-	Media     CollectorMediaItem `json:"media"`
+	ID                  int64  `json:"id"`
+	TenantID            int64  `json:"tenantId"`
+	AccountID           int64  `json:"accountId"`
+	TaskType            string `json:"taskType"`
+	TaskKey             string `json:"taskKey"`
+	Priority            int    `json:"priority"`
+	Status              string `json:"status"`
+	HistoryTaskID       int64
+	MediaOwnerAccountID int64
+	Media               CollectorMediaItem
+	MediaResult         AccountMediaDownloadResult
+	AttemptCount        int        `json:"attemptCount"`
+	MaxAttempts         int        `json:"maxAttempts"`
+	LeaseOwner          string     `json:"leaseOwner"`
+	LeaseEpoch          int64      `json:"leaseEpoch"`
+	LeaseUntil          *time.Time `json:"leaseUntil,omitempty"`
+	NextRunAt           *time.Time `json:"nextRunAt,omitempty"`
+	ErrorMessage        string     `json:"errorMessage,omitempty"`
 }
 
 type AccountMediaDownloadResult struct {
@@ -67,4 +62,11 @@ type AccountTaskFailure struct {
 	Lease      *AccountLease `json:"lease"`
 	Cause      error         `json:"-"`
 	RetryDelay time.Duration `json:"retryDelay"`
+}
+
+type AccountTaskStatusStat struct {
+	Status          string
+	Total           int64
+	OldestCreatedAt *time.Time
+	OldestUpdatedAt *time.Time
 }

@@ -31,13 +31,45 @@ func (s *sSysPublish) CollectMaterialDiagnose(ctx context.Context, in *sysin.Col
 	if in != nil && in.SourceId > 0 {
 		mod = mod.Where("source_id", in.SourceId)
 	}
+	if in != nil && in.EventId > 0 {
+		mod = mod.Where("id", in.EventId)
+	}
+	if in != nil && strings.TrimSpace(in.SourceGroupedId) != "" {
+		mod = mod.Where("source_grouped_id", strings.TrimSpace(in.SourceGroupedId))
+	}
+	if in != nil && strings.TrimSpace(in.ProfileNo) != "" {
+		profileIds, profileErr := g.DB().Model("hg_content_profile").Safe().Ctx(ctx).
+			Fields("id").Where("profile_no", strings.TrimSpace(in.ProfileNo)).Array()
+		if profileErr != nil {
+			return nil, gerror.Wrap(profileErr, "读取资料编号失败")
+		}
+		if len(profileIds) == 0 {
+			return &sysin.CollectMaterialDiagnoseModel{Items: make([]*sysin.CollectMaterialDiagnoseItem, 0), Timelines: make([]*sysin.CollectMaterialTimelineModel, 0)}, nil
+		}
+		eventIds, dispatchErr := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
+			Fields("event_id").WhereIn("profile_id", profileIds).WhereGT("event_id", 0).Array()
+		if dispatchErr != nil {
+			return nil, gerror.Wrap(dispatchErr, "读取资料采集事件失败")
+		}
+		if len(eventIds) == 0 {
+			return &sysin.CollectMaterialDiagnoseModel{Items: make([]*sysin.CollectMaterialDiagnoseItem, 0), Timelines: make([]*sysin.CollectMaterialTimelineModel, 0)}, nil
+		}
+		mod = mod.WhereIn("id", eventIds)
+	}
 	rows, err := mod.OrderDesc("id").Limit(limit).All()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取采集诊断事件失败")
 	}
-	result := &sysin.CollectMaterialDiagnoseModel{Items: make([]*sysin.CollectMaterialDiagnoseItem, 0, len(rows))}
+	result := &sysin.CollectMaterialDiagnoseModel{
+		Items:     make([]*sysin.CollectMaterialDiagnoseItem, 0, len(rows)),
+		Timelines: make([]*sysin.CollectMaterialTimelineModel, 0),
+	}
 	if len(rows) == 0 {
 		return result, nil
+	}
+	rows, err = s.expandCollectMaterialDiagnoseGroups(ctx, account.TenantId, account.Id, rows)
+	if err != nil {
+		return nil, err
 	}
 
 	byChat := make(map[string][]gdb.Record)
@@ -131,8 +163,56 @@ func (s *sSysPublish) CollectMaterialDiagnose(ctx context.Context, in *sysin.Col
 		return nil, err
 	}
 	result.ReviewEvents = reviewCount
+	timelines, err := s.fillCollectMaterialDiagnoseTimelines(ctx, account.TenantId, account.Id, result.Items)
+	if err != nil {
+		return nil, err
+	}
+	sortCollectMaterialTimelines(timelines)
+	result.Timelines = timelines
 	g.Log().Infof(ctx, "采集链路诊断完成 total:%d display:%d verify:%d paired:%d missingVerify:%d unmatchedVerify:%d review:%d mediaPending:%d waiting:%d failed:%d", result.TotalEvents, result.DisplayEvents, result.VerifyEvents, result.PairedEvents, result.MissingVerify, result.UnmatchedVerify, result.ReviewEvents, result.MediaPendingEvents, result.WaitingEvents, result.FailedEvents)
 	return result, nil
+}
+
+func (s *sSysPublish) expandCollectMaterialDiagnoseGroups(ctx context.Context, tenantId, accountId int64, rows []gdb.Record) ([]gdb.Record, error) {
+	groupedIds := make(map[string]struct{})
+	seen := make(map[int64]struct{}, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		seen[row["id"].Int64()] = struct{}{}
+		if groupedId := strings.TrimSpace(row["source_grouped_id"].String()); groupedId != "" {
+			groupedIds[groupedId] = struct{}{}
+		}
+	}
+	if len(groupedIds) == 0 {
+		return rows, nil
+	}
+	ids := make([]string, 0, len(groupedIds))
+	for groupedId := range groupedIds {
+		ids = append(ids, groupedId)
+	}
+	extra, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		WhereIn("source_grouped_id", ids).
+		OrderAsc("source_message_id").
+		Limit(100).
+		All()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取媒体组兄弟事件失败")
+	}
+	for _, row := range extra {
+		if row == nil || row["id"].Int64() <= 0 {
+			continue
+		}
+		if _, ok := seen[row["id"].Int64()]; ok {
+			continue
+		}
+		seen[row["id"].Int64()] = struct{}{}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }
 
 func (s *sSysPublish) collectDiagnoseEventMedia(ctx context.Context, event gdb.Record) ([]collectMediaItem, error) {

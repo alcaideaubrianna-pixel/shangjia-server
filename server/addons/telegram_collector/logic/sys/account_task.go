@@ -2,18 +2,15 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/telegram_collector/internal/dao"
-	"hotgo/addons/telegram_collector/internal/model/do"
 	"hotgo/addons/telegram_collector/internal/model/entity"
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
@@ -29,8 +26,11 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 	}
 	in.TaskType = strings.TrimSpace(in.TaskType)
 	in.TaskKey = strings.TrimSpace(in.TaskKey)
-	if in.TaskType == "" || in.TaskKey == "" || len(in.Payload) == 0 {
+	if in.TaskType == "" || in.TaskKey == "" {
 		return 0, gerror.New("Telegram账号任务参数不完整")
+	}
+	if err := validateAccountTaskSubmit(in); err != nil {
+		return 0, err
 	}
 	if in.MaxAttempts <= 0 {
 		in.MaxAttempts = 5
@@ -41,12 +41,16 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 	if in.NextRunAt != nil {
 		nextRunAt = gtime.New(*in.NextRunAt)
 	}
-	_, err := dao.TgCollectorAccountTask.Ctx(ctx).Data(do.TgCollectorAccountTask{
-		TenantId: in.TenantID, AccountId: in.AccountID, TaskType: in.TaskType,
-		TaskKey: in.TaskKey, Priority: in.Priority, Status: sysin.AccountTaskStatusPending,
-		Payload: gjson.New(in.Payload), MaxAttempts: in.MaxAttempts, NextRunAt: nextRunAt,
-		CreatedAt: now, UpdatedAt: now,
-	}).OnConflict(columns.TenantId + "," + columns.TaskKey).
+	data := g.Map{
+		columns.TenantId: in.TenantID, columns.AccountId: in.AccountID, columns.TaskType: in.TaskType,
+		columns.TaskKey: in.TaskKey, columns.Priority: in.Priority, columns.Status: sysin.AccountTaskStatusPending,
+		columns.HistoryTaskId: in.HistoryTaskID, columns.MediaOwnerAccountId: in.MediaOwnerAccountID,
+		columns.MaxAttempts: in.MaxAttempts, columns.NextRunAt: nextRunAt, columns.CreatedAt: now, columns.UpdatedAt: now,
+	}
+	if in.Media != nil {
+		fillAccountTaskMediaData(data, in.Media)
+	}
+	_, err := dao.TgCollectorAccountTask.Ctx(ctx).Data(data).OnConflict(columns.TenantId + "," + columns.TaskKey).
 		OnDuplicate(g.Map{columns.TaskKey: conflictIncomingColumn(ctx, columns.TaskKey)}).
 		Save()
 	if err != nil {
@@ -61,6 +65,22 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 		return 0, gerror.Wrap(err, "读取Telegram账号任务失败")
 	}
 	return row.Id, nil
+}
+
+func validateAccountTaskSubmit(in *sysin.AccountTaskSubmit) error {
+	switch in.TaskType {
+	case sysin.AccountTaskTypeHistoryPage:
+		if in.HistoryTaskID <= 0 {
+			return gerror.New("Telegram历史采集任务ID无效")
+		}
+	case sysin.AccountTaskTypeMediaDownload:
+		if in.MediaOwnerAccountID <= 0 || in.Media == nil || strings.TrimSpace(in.Media.FileID) == "" {
+			return gerror.New("Telegram媒体下载任务参数不完整")
+		}
+	default:
+		return gerror.Newf("不支持的Telegram账号任务类型：%s", in.TaskType)
+	}
+	return nil
 }
 
 func (s *sAccountTasks) Get(ctx context.Context, taskID int64) (*sysin.AccountTask, error) {
@@ -136,7 +156,7 @@ func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, li
 	return claimed, nil
 }
 
-func (s *sAccountTasks) Complete(ctx context.Context, taskID int64, lease *sysin.AccountLease, result json.RawMessage) error {
+func (s *sAccountTasks) Complete(ctx context.Context, taskID int64, lease *sysin.AccountLease, result *sysin.AccountMediaDownloadResult) error {
 	if taskID <= 0 || lease == nil {
 		return gerror.New("Telegram账号任务完成参数无效")
 	}
@@ -145,8 +165,15 @@ func (s *sAccountTasks) Complete(ctx context.Context, taskID int64, lease *sysin
 		columns.Status: sysin.AccountTaskStatusCompleted, columns.LeaseOwner: "", columns.LeaseEpoch: 0,
 		columns.LeaseUntil: nil, columns.ErrorMessage: "", columns.CompletedAt: gtime.Now(), columns.UpdatedAt: gtime.Now(),
 	}
-	if len(result) > 0 {
-		data[columns.Result] = gjson.New(result)
+	if result != nil {
+		fillAccountTaskMediaData(data, &result.Media)
+		data[columns.AttachmentId] = result.AttachmentID
+		data[columns.FileUrl] = result.FileURL
+		data[columns.StoragePath] = result.StoragePath
+		data[columns.ResultErrorCode] = result.ErrorCode
+		if result.ErrorMessage != "" {
+			data[columns.ErrorMessage] = result.ErrorMessage
+		}
 	}
 	updated, err := dao.TgCollectorAccountTask.Ctx(ctx).
 		WherePri(taskID).
@@ -247,6 +274,50 @@ func (s *sAccountTasks) RecoverExpired(ctx context.Context, limit int) (int, err
 	return recovered, nil
 }
 
+func (s *sAccountTasks) ActiveStatusStats(ctx context.Context) ([]sysin.AccountTaskStatusStat, error) {
+	columns := dao.TgCollectorAccountTask.Columns()
+	type statusRow struct {
+		Status          string      `json:"status"`
+		Total           int64       `json:"total"`
+		OldestCreatedAt *gtime.Time `json:"oldestCreatedAt"`
+		OldestUpdatedAt *gtime.Time `json:"oldestUpdatedAt"`
+	}
+	var rows []*statusRow
+	if err := dao.TgCollectorAccountTask.Ctx(ctx).
+		Fields(
+			columns.Status,
+			"COUNT(1) AS total",
+			"MIN("+columns.CreatedAt+") AS oldest_created_at",
+			"MIN("+columns.UpdatedAt+") AS oldest_updated_at",
+		).
+		WhereIn(columns.Status, []string{
+			sysin.AccountTaskStatusPending,
+			sysin.AccountTaskStatusProcessing,
+			sysin.AccountTaskStatusFailedRetry,
+		}).
+		Group(columns.Status).
+		Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "统计Telegram账号任务状态失败")
+	}
+	stats := make([]sysin.AccountTaskStatusStat, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		stat := sysin.AccountTaskStatusStat{Status: row.Status, Total: row.Total}
+		if row.OldestCreatedAt != nil {
+			value := row.OldestCreatedAt.Time
+			stat.OldestCreatedAt = &value
+		}
+		if row.OldestUpdatedAt != nil {
+			value := row.OldestUpdatedAt.Time
+			stat.OldestUpdatedAt = &value
+		}
+		stats = append(stats, stat)
+	}
+	return stats, nil
+}
+
 func accountTaskModel(row *entity.TgCollectorAccountTask) *sysin.AccountTask {
 	if row == nil {
 		return nil
@@ -258,12 +329,10 @@ func accountTaskModel(row *entity.TgCollectorAccountTask) *sysin.AccountTask {
 		LeaseOwner: row.LeaseOwner, LeaseEpoch: row.LeaseEpoch,
 		ErrorMessage: row.ErrorMessage,
 	}
-	if row.Payload != nil {
-		model.Payload = append(json.RawMessage(nil), row.Payload.MustToJson()...)
-	}
-	if row.Result != nil {
-		model.Result = append(json.RawMessage(nil), row.Result.MustToJson()...)
-	}
+	model.HistoryTaskID = row.HistoryTaskId
+	model.MediaOwnerAccountID = row.MediaOwnerAccountId
+	model.Media = accountTaskMediaModel(row)
+	model.MediaResult = sysin.AccountMediaDownloadResult{AttachmentID: row.AttachmentId, FileURL: row.FileUrl, StoragePath: row.StoragePath, Media: model.Media, ErrorCode: row.ResultErrorCode, ErrorMessage: row.ErrorMessage}
 	if row.LeaseUntil != nil {
 		value := row.LeaseUntil.Time
 		model.LeaseUntil = &value
@@ -273,4 +342,21 @@ func accountTaskModel(row *entity.TgCollectorAccountTask) *sysin.AccountTask {
 		model.NextRunAt = &value
 	}
 	return model
+}
+
+func fillAccountTaskMediaData(data g.Map, media *sysin.CollectorMediaItem) {
+	if media == nil {
+		return
+	}
+	columns := dao.TgCollectorAccountTask.Columns()
+	data[columns.MediaType], data[columns.MediaPurpose], data[columns.SourceFileId] = media.Type, media.Purpose, media.FileID
+	data[columns.FileUrl], data[columns.StoragePath], data[columns.PosterUrl] = media.FileURL, media.StoragePath, media.PosterURL
+	data[columns.FileMd5], data[columns.FilePhash], data[columns.SourceKind] = media.FileMD5, media.FilePHash, media.SourceKind
+	data[columns.SourceMediaId], data[columns.SourceAccessHash], data[columns.SourceFileReference] = media.SourceMediaID, media.SourceAccessHash, media.SourceFileReference
+	data[columns.SourceThumbSize], data[columns.SourceMimeType], data[columns.SourceDcId], data[columns.SourceSize] = media.SourceThumbSize, media.SourceMimeType, media.SourceDCID, media.SourceSize
+	data[columns.DebugMetaText] = media.DebugMetaJSON
+}
+
+func accountTaskMediaModel(row *entity.TgCollectorAccountTask) sysin.CollectorMediaItem {
+	return sysin.CollectorMediaItem{Type: row.MediaType, Purpose: row.MediaPurpose, FileID: row.SourceFileId, FileURL: row.FileUrl, StoragePath: row.StoragePath, PosterURL: row.PosterUrl, FileMD5: row.FileMd5, FilePHash: row.FilePhash, SourceKind: row.SourceKind, SourceMediaID: row.SourceMediaId, SourceAccessHash: row.SourceAccessHash, SourceFileReference: []byte(row.SourceFileReference), SourceThumbSize: row.SourceThumbSize, SourceMimeType: row.SourceMimeType, SourceDCID: row.SourceDcId, SourceSize: row.SourceSize, DebugMetaJSON: row.DebugMetaText}
 }

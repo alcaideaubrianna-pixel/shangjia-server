@@ -107,10 +107,7 @@ func accountCollectorEvent(message *CollectMessage) *collectorin.AccountMessageE
 
 func gotdCollectMessage(tgAccountId int64, source accountCollectSourceRuntime, msg *tg.Message, chatId string) *CollectMessage {
 	groupedId := gotdMessageGroupedId(msg)
-	uniqueKey := fmt.Sprintf("account:%d:source:%d:%s:%d", tgAccountId, source.Id, chatId, msg.ID)
-	if groupedId != "" {
-		uniqueKey = fmt.Sprintf("account:%d:source:%d:%s:group:%s", tgAccountId, source.Id, chatId, groupedId)
-	}
+	uniqueKey := fmt.Sprintf("account:%d:source:%d:%s:message:%d", tgAccountId, source.Id, chatId, msg.ID)
 	return &CollectMessage{
 		TenantId:        source.TenantId,
 		AccountId:       source.AccountId,
