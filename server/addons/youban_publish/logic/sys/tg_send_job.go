@@ -42,13 +42,19 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 		return err
 	}
 	if !ok {
+		if targetJob.Status == "sending" {
+			return nil
+		}
 		delay := s.telegramChannelBusyDelay(ctx, jobId, targetJob.DispatchCount)
-		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
-			"dispatch_status":     tgDispatchStatusIdle,
-			"next_retry_at":       gtime.Now().Add(delay),
-			"last_dispatch_error": "频道正在发送其他任务，已等待重新调度",
-			"updated_at":          gtime.Now(),
-		}).Update()
+		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", jobId).
+			WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+			Data(g.Map{
+				"dispatch_status":     tgDispatchStatusIdle,
+				"next_retry_at":       gtime.Now().Add(delay),
+				"last_dispatch_error": "频道正在发送其他任务，已等待重新调度",
+				"updated_at":          gtime.Now(),
+			}).Update()
 		return s.enqueueTelegramJobDirectWithUnique(ctx, jobId, delay, false)
 	}
 	defer s.releaseTelegramChannelLease(ctx, lease)
