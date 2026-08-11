@@ -42,7 +42,7 @@ jobs:
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           echo "server=ghcr.io/${owner}/youban-server" >> "$GITHUB_OUTPUT"
-          echo "collector=ghcr.io/${owner}/xiaohuiji-otel-collector" >> "$GITHUB_OUTPUT"
+          echo "collector=ghcr.io/${owner}/youban-server" >> "$GITHUB_OUTPUT"
           echo "tencent_registry=hkccr.ccs.tencentyun.com" >> "$GITHUB_OUTPUT"
           echo "tencent_repo=testaaaaa/dwadfwaf" >> "$GITHUB_OUTPUT"
           echo "tencent=hkccr.ccs.tencentyun.com/testaaaaa/dwadfwaf" >> "$GITHUB_OUTPUT"
@@ -84,10 +84,10 @@ jobs:
         with:
           images: ${{ steps.image.outputs.collector }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref_name == 'sj/develop' || github.ref_name == github.event.repository.default_branch }}
-            type=ref,event=branch
-            type=ref,event=tag
-            type=sha,prefix=sha-
+            type=raw,value=otel-latest,enable=${{ github.ref_name == 'sj/develop' || github.ref_name == github.event.repository.default_branch }}
+            type=ref,event=branch,prefix=otel-
+            type=ref,event=tag,prefix=otel-
+            type=sha,prefix=otel-sha-
 
       - name: Reserve Tencent registry tag capacity
         if: ${{ success() }}
