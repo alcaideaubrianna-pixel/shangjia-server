@@ -20,9 +20,11 @@ import (
 const traceIDHeader = "X-Trace-ID"
 
 var (
-	httpMetricsOnce     sync.Once
-	httpRequestDuration metric.Float64Histogram
-	httpRequestCount    metric.Int64Counter
+	httpMetricsOnce           sync.Once
+	httpRequestCount          metric.Int64Counter
+	httpRequestDurationCount  metric.Int64Counter
+	httpRequestDurationSum    metric.Float64Counter
+	httpRequestDurationBucket metric.Int64Counter
 )
 
 // AccessLog 记录结构化访问日志。
@@ -68,14 +70,22 @@ func (s *sMiddleware) AccessLog(r *ghttp.Request) {
 func recordHTTPMetrics(ctx context.Context, r *ghttp.Request, duration time.Duration) {
 	httpMetricsOnce.Do(func() {
 		meter := otel.Meter("hotgo/http")
-		httpRequestDuration, _ = meter.Float64Histogram(
-			"xiaohuiji.http.server.duration",
-			metric.WithDescription("HTTP server request duration"),
-			metric.WithUnit("s"),
-		)
 		httpRequestCount, _ = meter.Int64Counter(
 			"xiaohuiji.http.server.requests",
 			metric.WithDescription("HTTP server request count"),
+		)
+		httpRequestDurationCount, _ = meter.Int64Counter(
+			"xiaohuiji.http.server.duration.count",
+			metric.WithDescription("HTTP server request duration observation count"),
+		)
+		httpRequestDurationSum, _ = meter.Float64Counter(
+			"xiaohuiji.http.server.duration.sum",
+			metric.WithDescription("HTTP server request duration sum"),
+			metric.WithUnit("s"),
+		)
+		httpRequestDurationBucket, _ = meter.Int64Counter(
+			"xiaohuiji.http.server.duration.bucket",
+			metric.WithDescription("Cumulative HTTP server request duration buckets"),
 		)
 	})
 	route := r.URL.Path
@@ -87,10 +97,42 @@ func recordHTTPMetrics(ctx context.Context, r *ghttp.Request, duration time.Dura
 		attribute.String("http_route", route),
 		attribute.Int("http_status_code", r.Response.Status),
 	)
-	if httpRequestDuration != nil {
-		httpRequestDuration.Record(ctx, duration.Seconds(), attributes)
-	}
 	if httpRequestCount != nil {
 		httpRequestCount.Add(ctx, 1, attributes)
 	}
+	if httpRequestDurationCount != nil {
+		httpRequestDurationCount.Add(ctx, 1, attributes)
+	}
+	if httpRequestDurationSum != nil {
+		httpRequestDurationSum.Add(ctx, duration.Seconds(), attributes)
+	}
+	if httpRequestDurationBucket != nil {
+		for _, bucket := range httpDurationBuckets {
+			if duration.Seconds() > bucket.seconds {
+				continue
+			}
+			httpRequestDurationBucket.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("http_method", r.Method),
+				attribute.String("http_route", route),
+				attribute.Int("http_status_code", r.Response.Status),
+				attribute.String("le", bucket.label),
+			))
+		}
+	}
+}
+
+type httpDurationBucket struct {
+	seconds float64
+	label   string
+}
+
+var httpDurationBuckets = []httpDurationBucket{
+	{seconds: 0.1, label: "0.1"},
+	{seconds: 0.25, label: "0.25"},
+	{seconds: 0.5, label: "0.5"},
+	{seconds: 1, label: "1"},
+	{seconds: 2, label: "2"},
+	{seconds: 5, label: "5"},
+	{seconds: 10, label: "10"},
+	{seconds: 1<<63 - 1, label: "+Inf"},
 }
