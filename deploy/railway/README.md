@@ -127,7 +127,7 @@ npx -y @railway/cli@latest config apply
 在 GitHub 仓库的 `production` Environment 中配置：
 
 - Secret：`RAILWAY_TOKEN`，使用 production 项目的 Project Token。
-- Variable：`RAILWAY_PROJECT_ID`，填写 Railway 项目 ID。
+- Variable：`RAILWAY_PROJECT_ID`，填写 Railway 项目 ID。若误配置为 Secret，workflow 也会兼容读取 `secrets.RAILWAY_PROJECT_ID`。
 
 部署 Job 会使用当前提交的业务镜像 `sha-<commit>` 和 Collector 镜像 `otel-sha-<commit>`，执行 `railway config apply --yes`，并等待所有服务进入 `SUCCESS`。不要把 Railway Token 写入仓库变量、代码或日志。
 
