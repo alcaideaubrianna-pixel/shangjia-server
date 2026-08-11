@@ -7,7 +7,7 @@ WORKDIR /src/web
 RUN corepack enable && corepack prepare pnpm@10 --activate
 
 COPY web/package.json web/pnpm-lock.yaml ./
-RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
+RUN --mount=type=cache,id=cacheKey:pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 
 COPY web ./
@@ -45,12 +45,12 @@ FROM golang:1.25.0-bookworm AS server-builder
 
 WORKDIR /src/server
 
-RUN --mount=type=cache,id=gomod,target=/go/pkg/mod \
-    --mount=type=cache,id=gobuild,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=cacheKey:gomod,target=/go/pkg/mod \
+    --mount=type=cache,id=cacheKey:gobuild,target=/root/.cache/go-build \
     go install github.com/gogf/gf/cmd/gf/v2@v2.10.0
 
 COPY server/go.mod server/go.sum ./
-RUN --mount=type=cache,id=gomod,target=/go/pkg/mod \
+RUN --mount=type=cache,id=cacheKey:gomod,target=/go/pkg/mod \
     go mod download
 
 COPY server ./
@@ -58,8 +58,8 @@ RUN cp manifest/config/config.example.yaml manifest/config/config.yaml
 RUN rm -rf resource/public/admin && mkdir -p resource/public/admin
 COPY --from=web-builder /src/web/dist/. ./resource/public/admin/
 
-RUN --mount=type=cache,id=gomod,target=/go/pkg/mod \
-    --mount=type=cache,id=gobuild,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=cacheKey:gomod,target=/go/pkg/mod \
+    --mount=type=cache,id=cacheKey:gobuild,target=/root/.cache/go-build \
     rm -f internal/packed/packed.go \
     && gf pack resource,storage,manifest/config internal/packed/packed.go --keepPath=true \
     && CGO_ENABLED=1 go build -trimpath -o /tmp/hotgo ./main.go \
