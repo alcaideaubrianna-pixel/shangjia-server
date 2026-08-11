@@ -283,6 +283,15 @@ apm:
   hostName: ""
   secure: false
 
+# 通用 OpenTelemetry，Railway 和其他部署环境统一使用
+telemetry:
+  switch: false
+  endpoint: "127.0.0.1:4317"
+  secure: false
+  serviceName: "xiaohuiji"
+  sampleRatio: 0.15
+  metricsIntervalSeconds: 15
+
 
 # 内容导入
 contentImport:

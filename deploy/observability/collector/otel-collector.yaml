@@ -1,0 +1,288 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  file_storage:
+    directory: /var/lib/otelcol
+    create_directory: true
+    compaction:
+      directory: /var/lib/otelcol
+      on_start: true
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu: {}
+      memory: {}
+      load: {}
+      filesystem: {}
+      network: {}
+      process: {}
+  sqlquery/core:
+    driver: postgres
+    datasource: ${env:XIAOHUIJI_PG_DSN}
+    collection_interval: 15s
+    queries:
+      - sql: |
+          SELECT COALESCE(NULLIF(queue_name, ''), 'youban_publish_tg') AS queue_name,
+                 priority,
+                 status,
+                 dispatch_status,
+                 COUNT(*)::bigint AS job_count,
+                 COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(created_at))), 0)::bigint AS oldest_age_seconds
+          FROM hg_youban_publish_tg_job
+          WHERE status IN ('pending','failed_retry','unknown','sending')
+          GROUP BY 1,2,3,4
+        metrics:
+          - metric_name: xiaohuiji.publish.jobs
+            value_column: job_count
+            value_type: int
+            attribute_columns: [queue_name, priority, status, dispatch_status]
+          - metric_name: xiaohuiji.publish.oldest_job_age_seconds
+            value_column: oldest_age_seconds
+            value_type: int
+            attribute_columns: [queue_name, priority, status, dispatch_status]
+      - sql: |
+          SELECT status, source_type, COUNT(*)::bigint AS event_count,
+                 COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(COALESCE(received_at, created_at)))), 0)::bigint AS oldest_age_seconds
+          FROM hg_youban_publish_collect_event
+          WHERE processed_at IS NULL AND created_at >= NOW() - INTERVAL '3 days'
+          GROUP BY status, source_type
+        metrics:
+          - metric_name: xiaohuiji.collect.events
+            value_column: event_count
+            value_type: int
+            attribute_columns: [status, source_type]
+          - metric_name: xiaohuiji.collect.oldest_event_age_seconds
+            value_column: oldest_age_seconds
+            value_type: int
+            attribute_columns: [status, source_type]
+      - sql: |
+          SELECT cache_status, media_type, COUNT(*)::bigint AS media_count,
+                 COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(created_at))), 0)::bigint AS oldest_age_seconds
+          FROM hg_youban_publish_collect_event_media
+          WHERE cache_status <> 'ready' AND created_at >= NOW() - INTERVAL '3 days'
+          GROUP BY cache_status, media_type
+        metrics:
+          - metric_name: xiaohuiji.collect.media
+            value_column: media_count
+            value_type: int
+            attribute_columns: [cache_status, media_type]
+          - metric_name: xiaohuiji.collect.oldest_media_age_seconds
+            value_column: oldest_age_seconds
+            value_type: int
+            attribute_columns: [cache_status, media_type]
+      - sql: |
+          SELECT status, COUNT(*)::bigint AS account_count
+          FROM hg_youban_publish_tg_account
+          WHERE deleted_at IS NULL
+          GROUP BY status
+        metrics:
+          - metric_name: xiaohuiji.tg.accounts
+            value_column: account_count
+            value_type: int
+            attribute_columns: [status]
+      - sql: |
+          SELECT COUNT(*)::bigint AS violation_count
+          FROM (
+            SELECT channel_id
+            FROM hg_youban_publish_tg_job
+            WHERE status = 'sending' OR dispatch_status = 'processing'
+            GROUP BY channel_id
+            HAVING COUNT(*) > 1
+          ) violations
+        metrics:
+          - metric_name: xiaohuiji.invariant.channel_multiple_active_jobs
+            value_column: violation_count
+            value_type: int
+      - sql: |
+          SELECT COUNT(*)::bigint AS violation_count
+          FROM hg_youban_publish_tg_job
+          WHERE status = 'sending' AND updated_at < NOW() - INTERVAL '12 minutes'
+        metrics:
+          - metric_name: xiaohuiji.invariant.stale_sending_jobs
+            value_column: violation_count
+            value_type: int
+      - sql: |
+          SELECT COUNT(*)::bigint AS violation_count
+          FROM (
+            SELECT channel_id
+            FROM hg_youban_publish_tg_job j
+            WHERE j.status IN ('pending','failed_retry','unknown')
+              AND COALESCE(j.dispatch_status, '') IN ('', 'idle')
+              AND j.updated_at < NOW() - INTERVAL '2 minutes'
+              AND NOT EXISTS (
+                SELECT 1 FROM hg_youban_publish_tg_job active
+                WHERE active.channel_id = j.channel_id
+                  AND (active.status = 'sending' OR active.dispatch_status IN ('queued','processing'))
+              )
+            GROUP BY channel_id
+          ) violations
+        metrics:
+          - metric_name: xiaohuiji.invariant.idle_channel_without_active_head
+            value_column: violation_count
+            value_type: int
+      - sql: |
+          SELECT COUNT(*)::bigint AS invalid_count
+          FROM hg_youban_publish_collect_event
+          WHERE bot_id = 0 AND source_type = 'bot' AND created_at >= NOW() - INTERVAL '1 hour'
+        metrics:
+          - metric_name: xiaohuiji.invariant.collect_bot_id_zero
+            value_column: invalid_count
+            value_type: int
+      - sql: |
+          SELECT source_type, COUNT(*)::bigint AS stale_source_count
+          FROM hg_youban_publish_collect_source
+          WHERE collect_enabled = 1 AND status = 1 AND deleted_at IS NULL
+            AND COALESCE(last_event_at, created_at) < NOW() - INTERVAL '1 hour'
+          GROUP BY source_type
+        metrics:
+          - metric_name: xiaohuiji.collect.configured_sources_without_events
+            value_column: stale_source_count
+            value_type: int
+            attribute_columns: [source_type]
+      - sql: |
+          WITH pending AS (
+            SELECT channel_id, COUNT(*)::bigint AS pending_count,
+                   MIN(created_at) AS oldest_at
+            FROM hg_youban_publish_tg_job
+            WHERE status IN ('pending','failed_retry','unknown')
+              AND COALESCE(dispatch_status, '') IN ('', 'idle','queued','processing')
+            GROUP BY channel_id
+          ), sent AS (
+            SELECT channel_id, COUNT(*)::numeric / 10.0 AS sent_per_minute
+            FROM hg_youban_publish_tg_job
+            WHERE status = 'sent' AND sent_at >= NOW() - INTERVAL '10 minutes'
+            GROUP BY channel_id
+          )
+          SELECT pending.channel_id::text AS channel_id,
+                 pending.pending_count,
+                 COALESCE(EXTRACT(EPOCH FROM (NOW() - pending.oldest_at)), 0)::bigint AS oldest_age_seconds,
+                 COALESCE(CEIL(pending.pending_count / NULLIF(sent.sent_per_minute, 0)), -1)::bigint AS estimated_clear_minutes
+          FROM pending LEFT JOIN sent USING (channel_id)
+          ORDER BY pending.pending_count DESC
+          LIMIT 20
+        metrics:
+          - metric_name: xiaohuiji.publish.channel_pending
+            value_column: pending_count
+            value_type: int
+            attribute_columns: [channel_id]
+          - metric_name: xiaohuiji.publish.channel_oldest_age_seconds
+            value_column: oldest_age_seconds
+            value_type: int
+            attribute_columns: [channel_id]
+          - metric_name: xiaohuiji.publish.channel_estimated_clear_minutes
+            value_column: estimated_clear_minutes
+            value_type: int
+            attribute_columns: [channel_id]
+      - sql: |
+          SELECT COUNT(*)::bigint AS error_count
+          FROM hg_youban_publish_collect_event_media
+          WHERE error_message ILIKE '%FILE_REFERENCE_EXPIRED%'
+            AND updated_at >= NOW() - INTERVAL '15 minutes'
+        metrics:
+          - metric_name: xiaohuiji.tg.file_reference_expired
+            value_column: error_count
+            value_type: int
+      - sql: |
+          SELECT COUNT(*)::bigint AS missing_preview_count
+          FROM hg_youban_publish_collect_event_media
+          WHERE media_type = 'video' AND cache_status = 'ready'
+            AND COALESCE(poster_url, '') = ''
+            AND updated_at >= NOW() - INTERVAL '1 hour'
+        metrics:
+          - metric_name: xiaohuiji.collect.video_preview_missing
+            value_column: missing_preview_count
+            value_type: int
+      - sql: |
+          SELECT processing_status, COUNT(*)::bigint AS media_count,
+                 COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(updated_at))), 0)::bigint AS oldest_age_seconds
+          FROM hg_youban_publish_media
+          WHERE deleted_at IS NULL
+            AND processing_status IN ('uploaded','processing','failed')
+          GROUP BY processing_status
+        metrics:
+          - metric_name: xiaohuiji.media.phash_queue
+            value_column: media_count
+            value_type: int
+            attribute_columns: [processing_status]
+          - metric_name: xiaohuiji.media.phash_oldest_age_seconds
+            value_column: oldest_age_seconds
+            value_type: int
+            attribute_columns: [processing_status]
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 384
+    spike_limit_mib: 96
+  resource:
+    attributes:
+      - key: deployment.environment.name
+        value: production
+        action: upsert
+      - key: telemetry.platform
+        value: railway
+        action: upsert
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    expected_new_traces_per_sec: 200
+    policies:
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: slow
+        type: latency
+        latency:
+          threshold_ms: 2000
+      - name: baseline
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 15
+
+exporters:
+  otlphttp/openobserve:
+    endpoint: ${env:OPENOBSERVE_OTLP_ENDPOINT}
+    headers:
+      Authorization: ${env:OPENOBSERVE_AUTHORIZATION}
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 10000
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 0s
+
+service:
+  extensions: [health_check, file_storage]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, tail_sampling, batch]
+      exporters: [otlphttp/openobserve]
+    metrics:
+      receivers: [otlp, hostmetrics, sqlquery/core]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/openobserve]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/openobserve]
+
+  telemetry:
+    logs:
+      level: info

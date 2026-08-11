@@ -2,12 +2,15 @@ import {
   defineRailway,
   image,
   postgres,
+  preserve,
   project,
   redis as railwayRedis,
   service,
+  volume,
 } from "railway/iac";
 
 const imageRef = process.env.YOUBAN_RAILWAY_IMAGE?.trim();
+const collectorImageRef = process.env.XIAOHUIJI_OTEL_COLLECTOR_IMAGE?.trim();
 const singapore = "asia-southeast1-eqsg3a";
 
 if (!imageRef) {
@@ -16,10 +19,26 @@ if (!imageRef) {
   );
 }
 
+if (!collectorImageRef) {
+  throw new Error(
+    "XIAOHUIJI_OTEL_COLLECTOR_IMAGE is required, for example ghcr.io/<owner>/xiaohuiji-otel-collector:sha-abc1234",
+  );
+}
+
 export default defineRailway(() => {
   const database = postgres("Postgres");
   const cache = railwayRedis("Redis");
   const appImage = image(imageRef);
+  const collectorImage = image(collectorImageRef);
+  const openObserveImage = image("openobserve/openobserve:v0.92.0");
+  const collectorData = volume("xiaohuiji-otel-data", {
+    region: singapore,
+    sizeMB: 1024,
+  });
+  const observeData = volume("xiaohuiji-observe-data", {
+    region: singapore,
+    sizeMB: 10240,
+  });
 
   const commonEnv = {
     YOUBAN_APP_NAME: "youban",
@@ -39,7 +58,46 @@ export default defineRailway(() => {
     YOUBAN_REDIS_DB: "0",
     YOUBAN_CACHE_ADAPTER: "redis",
     YOUBAN_QUEUE_DRIVER: "redis",
+    YOUBAN_TELEMETRY_SWITCH: "true",
+    YOUBAN_TELEMETRY_ENDPOINT: "xiaohuiji-otel-collector.railway.internal:4317",
+    YOUBAN_TELEMETRY_SECURE: "false",
+    YOUBAN_TELEMETRY_SAMPLE_RATIO: "0.15",
+    YOUBAN_TELEMETRY_METRICS_INTERVAL_SECONDS: "15",
   };
+
+  const observe = service("xiaohuiji-observe", {
+    source: openObserveImage,
+    healthcheck: "/healthz",
+    replicas: { [singapore]: 1 },
+    volumeMounts: {
+      "/data": observeData,
+    },
+    env: {
+      ZO_DATA_DIR: "/data",
+      ZO_LOCAL_MODE: "true",
+      ZO_HTTP_PORT: "5080",
+      PORT: "5080",
+      ZO_ROOT_USER_EMAIL: preserve(),
+      ZO_ROOT_USER_PASSWORD: preserve(),
+      ZO_TELEMETRY: "false",
+    },
+  });
+
+  const collector = service("xiaohuiji-otel-collector", {
+    source: collectorImage,
+    start: "--config=/etc/otelcol-contrib/config.yaml",
+    healthcheck: "/",
+    replicas: { [singapore]: 1 },
+    volumeMounts: {
+      "/var/lib/otelcol": collectorData,
+    },
+    env: {
+      XIAOHUIJI_PG_DSN: database.env.DATABASE_URL,
+      OPENOBSERVE_OTLP_ENDPOINT: `http://${observe.env.RAILWAY_PRIVATE_DOMAIN}:5080/api/default`,
+      OPENOBSERVE_AUTHORIZATION: preserve(),
+      PORT: "13133",
+    },
+  });
 
   const api = service("xiaohuiji-api", {
     source: appImage,
@@ -87,6 +145,6 @@ export default defineRailway(() => {
   });
 
   return project("xiaohuiji-production", {
-    resources: [database, cache, api, worker, account, scheduler],
+    resources: [database, cache, observeData, collectorData, observe, collector, api, worker, account, scheduler],
   });
 });

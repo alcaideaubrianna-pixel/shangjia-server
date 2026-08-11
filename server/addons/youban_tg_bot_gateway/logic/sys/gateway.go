@@ -19,10 +19,15 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/hibiken/asynq"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/net/proxy"
 
 	"hotgo/addons/youban_tg_bot_gateway/service"
 )
+
+var gatewayObserveMeter = otel.Meter("hotgo/addons/youban_tg_bot_gateway")
 
 type botRuntime struct {
 	cancel        context.CancelFunc
@@ -170,7 +175,17 @@ func (s *sGateway) sync(ctx context.Context) error {
 		}
 	}
 	s.mu.Unlock()
+	s.observeBotCounts(ctx, len(bindings))
 	return nil
+}
+
+func (s *sGateway) observeBotCounts(ctx context.Context, configured int) {
+	s.mu.Lock()
+	running := len(s.runtimes)
+	s.mu.Unlock()
+	gauge, _ := gatewayObserveMeter.Int64Gauge("xiaohuiji.tg.gateway_bots")
+	gauge.Record(ctx, int64(configured), metric.WithAttributes(attribute.String("state", "configured")))
+	gauge.Record(ctx, int64(running), metric.WithAttributes(attribute.String("state", "running")))
 }
 
 func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *service.RuntimeConfig) error {
@@ -215,6 +230,8 @@ func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *se
 }
 
 func (s *sGateway) Webhook(ctx context.Context, key string, body []byte, secret string) error {
+	webhooks, _ := gatewayObserveMeter.Int64Counter("xiaohuiji.tg.gateway_webhook_updates")
+	webhooks.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "received")))
 	conf, err := service.RuntimeConfiguration(ctx)
 	if err != nil {
 		return err
@@ -225,7 +242,13 @@ func (s *sGateway) Webhook(ctx context.Context, key string, body []byte, secret 
 	if len(body) == 0 || !json.Valid(body) {
 		return gerror.New("Webhook消息格式不正确")
 	}
-	return s.enqueueUpdateBody(ctx, strings.TrimSpace(key), body)
+	err = s.enqueueUpdateBody(ctx, strings.TrimSpace(key), body)
+	result := "queued"
+	if err != nil {
+		result = "failed"
+	}
+	webhooks.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
+	return err
 }
 
 func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Update) error {
@@ -250,6 +273,8 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 			return featureErr
 		}
 		if handled {
+			counter, _ := gatewayObserveMeter.Int64Counter("xiaohuiji.tg.gateway_updates_dispatched")
+			counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "handled")))
 			return nil
 		}
 	}
@@ -266,6 +291,8 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 			return err
 		}
 	}
+	counter, _ := gatewayObserveMeter.Int64Counter("xiaohuiji.tg.gateway_updates_dispatched")
+	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "provider_dispatch")))
 	return nil
 }
 

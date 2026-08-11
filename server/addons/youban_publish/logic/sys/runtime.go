@@ -66,6 +66,9 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	if config.BackgroundWorker {
 		s.startTelegramBackgroundWorker(ctx)
 	}
+	if config.PushWorker || config.MediaWorker || config.BackgroundWorker {
+		go s.runAsynqObserveMetrics(ctx)
+	}
 	if config.Scheduler {
 		s.startPublishSchedulers(ctx)
 	}

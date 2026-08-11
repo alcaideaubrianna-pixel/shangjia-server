@@ -92,6 +92,10 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 }
 
 func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limit int) error {
+	startedAt := time.Now()
+	scanned := 0
+	var observeErr error
+	defer func() { observeRecoveryRun(ctx, "stale_dispatch", startedAt, scanned, observeErr) }()
 	if limit <= 0 {
 		limit = 100
 	}
@@ -106,8 +110,10 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 		Limit(limit).
 		Scan(&jobs)
 	if err != nil {
+		observeErr = err
 		return gerror.Wrap(err, "读取调度中断TG推送任务失败")
 	}
+	scanned = len(jobs)
 	for _, job := range jobs {
 		if job.Id <= 0 {
 			continue
@@ -137,6 +143,10 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 }
 
 func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit int) error {
+	startedAt := time.Now()
+	scanned := 0
+	var observeErr error
+	defer func() { observeRecoveryRun(ctx, "pending_idle", startedAt, scanned, observeErr) }()
 	if limit <= 0 {
 		limit = 100
 	}
@@ -154,8 +164,10 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 		Limit(limit).
 		Scan(&jobs)
 	if err != nil {
+		observeErr = err
 		return gerror.Wrap(err, "读取待入队TG推送任务失败")
 	}
+	scanned = len(jobs)
 	if len(jobs) > 0 {
 		g.Log().Infof(ctx, "恢复待入队TG推送任务：%d条", len(jobs))
 	}
@@ -209,6 +221,10 @@ func (s *sSysPublish) telegramJobChannelIsActive(ctx context.Context, job telegr
 }
 
 func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit int) error {
+	startedAt := time.Now()
+	scanned := 0
+	var observeErr error
+	defer func() { observeRecoveryRun(ctx, "stale_sending", startedAt, scanned, observeErr) }()
 	if limit <= 0 {
 		limit = 100
 	}
@@ -222,8 +238,10 @@ func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit
 		Limit(limit).
 		Scan(&jobs)
 	if err != nil {
+		observeErr = err
 		return gerror.Wrap(err, "读取卡住的TG推送任务失败")
 	}
+	scanned = len(jobs)
 	for _, job := range jobs {
 		if job.Id <= 0 {
 			continue

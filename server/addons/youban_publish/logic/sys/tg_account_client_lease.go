@@ -68,6 +68,7 @@ func waitTelegramAccountClientLease(
 		if !gerror.Is(err, lock.ErrLockFailed) {
 			return nil, err
 		}
+		observeTelegramLease(ctx, "lock_failed", 0)
 		if !waitingLogged && onWait != nil {
 			onWait(err)
 			waitingLogged = true
@@ -105,6 +106,7 @@ func (s *sSysPublish) runTelegramClientWithAccountLease(ctx context.Context, tgA
 	leaseCtx, cancel := context.WithTimeout(ctx, telegramAccountClientLeaseWaitTimeout(ctx))
 	defer cancel()
 	lease, err := acquireTelegramAccountClientLeaseWait(leaseCtx, tgAccountId, func(waitErr error) {
+		observeTelegramLease(ctx, "conflict", tgAccountId)
 		g.Log().Infof(ctx, "TG账号连接繁忙，等待已有操作完成 tgAccountId:%d err:%+v", tgAccountId, waitErr)
 	})
 	if err != nil {
@@ -112,12 +114,18 @@ func (s *sSysPublish) runTelegramClientWithAccountLease(ctx context.Context, tgA
 			err = &telegramAccountBusyError{tgAccountId: tgAccountId, err: err}
 		}
 		g.Log().Warningf(ctx, "TG账号连接租约获取失败 tgAccountId:%d err:%+v", tgAccountId, err)
+		observeTelegramLease(ctx, "acquire_failed", tgAccountId)
 		return err
 	}
+	observeTelegramLease(ctx, "acquired", tgAccountId)
+	observeTelegramLeaseActive(ctx, 1)
 	defer func() {
+		observeTelegramLeaseActive(context.Background(), -1)
 		if unlockErr := lease.Unlock(context.Background()); unlockErr != nil {
+			observeTelegramLease(context.Background(), "release_failed", tgAccountId)
 			g.Log().Warningf(context.Background(), "TG账号连接租约释放失败 tgAccountId:%d err:%+v", tgAccountId, unlockErr)
 		}
+		observeTelegramLease(context.Background(), "released", tgAccountId)
 	}()
 	return client.Run(ctx, run)
 }
