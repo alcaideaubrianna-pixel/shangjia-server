@@ -13,6 +13,7 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
+	collectorservice "hotgo/addons/telegram_collector/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
@@ -354,14 +355,15 @@ func (s *sSysPublish) ingestCollectHistoryMessages(ctx context.Context, task *sy
 		}
 		stats.scanned++
 		message := gotdCollectMessage(source.TgAccountId, runtimeSource, msg, source.SourceChatId)
-		exists, err := collectEventExists(ctx, message.SourceUniqueKey)
+		event := accountCollectorEvent(message)
+		exists, err := collectorservice.Collector().EventExists(ctx, event.TenantID, event.SourceUniqueKey)
 		if err != nil {
 			return stats, nextOffset, stop, err
 		}
-		_, err = s.ingestCollectMessage(ctx, message)
+		err = collectorservice.Collector().IngestAccountMessage(ctx, event)
 		if err != nil {
 			stats.failed++
-			s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "warn", "event", "历史消息写入事件失败", g.Map{"messageId": msg.ID, "error": err.Error()})
+			s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "warn", "event", "历史消息提交采集插件失败", g.Map{"messageId": msg.ID, "error": err.Error()})
 			continue
 		}
 		if exists {
@@ -384,11 +386,4 @@ func collectHistoryMessagesInSendOrder(messages []*tg.Message) []*tg.Message {
 		return ordered[i].ID < ordered[j].ID
 	})
 	return ordered
-}
-
-func collectEventExists(ctx context.Context, uniqueKey string) (bool, error) {
-	count, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Where("source_unique_key", strings.TrimSpace(uniqueKey)).
-		Count()
-	return count > 0, gerror.Wrap(err, "检查采集事件重复失败")
 }

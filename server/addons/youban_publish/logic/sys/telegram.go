@@ -6,8 +6,6 @@ import (
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/frame/g"
-
-	collectorservice "hotgo/addons/telegram_collector/service"
 )
 
 func (s *sSysPublish) telegramUpdateHandler(ctx context.Context, currentBot *tgbot.Bot, update *models.Update) {
@@ -24,11 +22,5 @@ func (s *sSysPublish) handleTelegramUpdate(ctx context.Context, botId int64, ten
 	s.handleTelegramAutoDelete(ctx, botId, tenantId, msg, text)
 	if err := s.cacheBotMessage(ctx, tenantId, botId, msg); err != nil {
 		g.Log().Warningf(ctx, "缓存上架Bot频道消息失败 bot:%d chat:%d err:%+v", botId, msg.Chat.ID, err)
-	}
-	if collectorservice.Collector().Enabled(ctx) {
-		return
-	}
-	if err := s.collectBotMessage(ctx, botId, msg); err != nil {
-		g.Log().Warningf(ctx, "处理Bot采集消息失败 bot:%d chat:%d message:%d err:%+v", botId, msg.Chat.ID, msg.ID, err)
 	}
 }

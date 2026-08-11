@@ -110,8 +110,8 @@ func TestCollectorDeliveryFromAccountEvent(t *testing.T) {
 
 func TestBotCollectorFeatureDoesNotConsumeUpdate(t *testing.T) {
 	feature := &botCollectorFeature{}
-	// The feature is disabled by default until the source/event persistence
-	// migration is enabled, so existing Gateway providers remain unchanged.
+	// The provider still handles non-collection features such as message cache
+	// and automatic deletion after the collector records the update.
 	handled, err := feature.HandleUpdate(t.Context(), gatewayservice.BotContext{}, &models.Update{ID: 1})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -170,6 +170,10 @@ func TestCollectorPersistenceIntegration(t *testing.T) {
 	eventRow, err := dao.TgCollectorEvent.Ctx(ctx).Fields(eventColumns.Status).WherePri(eventID).One()
 	if err != nil || eventRow[eventColumns.Status].String() != sysin.EventStatusReady {
 		t.Fatalf("duplicate event reset status: status=%s err=%v", eventRow[eventColumns.Status].String(), err)
+	}
+	exists, err := collector.EventExists(ctx, event.TenantID, event.EventID)
+	if err != nil || !exists {
+		t.Fatalf("event exists=%v err=%v", exists, err)
 	}
 	delivery := &sysin.CollectorDelivery{
 		DeliveryKey:     fmt.Sprintf("integration:%d", seed),

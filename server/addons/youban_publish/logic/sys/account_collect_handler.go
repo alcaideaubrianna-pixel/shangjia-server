@@ -68,17 +68,8 @@ func (w *accountCollectWorker) handleGotdMessage(ctx context.Context, entities t
 
 func (w *accountCollectWorker) ingestGotdMessage(ctx context.Context, source accountCollectSourceRuntime, msg *tg.Message, chatId string) {
 	message := gotdCollectMessage(w.tgAccountId, source, msg, chatId)
-	if collectorservice.Collector().Enabled(ctx) {
-		if err := collectorservice.Collector().IngestAccountMessage(ctx, accountCollectorEvent(message)); err == nil {
-			return
-		} else {
-			g.Log().Warningf(ctx, "Telegram账号采集插件接收失败，回退旧链路 source:%d msg:%d err:%+v", source.Id, msg.ID, err)
-		}
-	}
-	_, err := w.service.ingestAndProcessCollectMessage(ctx, message)
-	if err != nil {
-		g.Log().Errorf(ctx, "处理账号采集事件失败 source:%d msg:%d err:%+v", source.Id, msg.ID, err)
-		return
+	if err := collectorservice.Collector().IngestAccountMessage(ctx, accountCollectorEvent(message)); err != nil {
+		g.Log().Errorf(ctx, "提交Telegram账号采集事件失败 source:%d msg:%d err:%+v", source.Id, msg.ID, err)
 	}
 }
 

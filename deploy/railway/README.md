@@ -137,10 +137,10 @@ npx -y @railway/cli@latest config apply
 ## 推荐上线顺序
 
 1. 显式执行 `telegram_collector` 插件安装或升级 SQL
-2. 部署 Collector、Media、Publish Worker，但保持 `YOUBAN_TELEGRAM_COLLECTOR_ENABLED=false`
+2. 部署 Collector、Media、Publish Worker，并保持 `YOUBAN_TELEGRAM_COLLECTOR_ENABLED=true`
 3. 部署 Account，确认同一 TG 账号始终只有一个连接租约持有者
 4. 部署 API，验证现有 Bot Gateway、采集和发布链路不受影响
-5. 在测试租户开启 `YOUBAN_TELEGRAM_COLLECTOR_ENABLED=true`，观察 Event、Delivery、媒体命中率和重试指标
-6. 扩大灰度范围，确认新旧链路的资料数量、媒体数量和目标频道一致
+5. 观察 Event、Delivery、媒体命中率和重试指标
+6. 确认实时与历史采集的资料数量、媒体数量和目标频道一致
 7. 保留兼容 Worker，观察独立 Worker 稳定后再缩容
 8. 根据各自队列积压分别扩容 Collector、Media、Publish 和 Account

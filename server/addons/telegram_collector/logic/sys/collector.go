@@ -147,6 +147,22 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 	return nil
 }
 
+func (s *sCollector) EventExists(ctx context.Context, tenantID int64, eventKey string) (bool, error) {
+	eventKey = strings.TrimSpace(eventKey)
+	if tenantID <= 0 || eventKey == "" {
+		return false, nil
+	}
+	columns := dao.TgCollectorEvent.Columns()
+	count, err := dao.TgCollectorEvent.Ctx(ctx).
+		Where(columns.TenantId, tenantID).
+		Where(columns.EventKey, eventKey).
+		Count()
+	if err != nil {
+		return false, gerror.Wrap(err, "检查Telegram采集事件失败")
+	}
+	return count > 0, nil
+}
+
 func parseCollectorChatID(value string) int64 {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -419,7 +435,7 @@ func (s *sCollector) ReleaseMediaProcessing(ctx context.Context, fingerprint str
 }
 
 func collectorEnabled(ctx context.Context) bool {
-	return g.Cfg().MustGet(ctx, "telegramCollector.enabled", false).Bool()
+	return g.Cfg().MustGet(ctx, "telegramCollector.enabled", true).Bool()
 }
 
 func conflictIncomingColumn(ctx context.Context, column string) gdb.Raw {

@@ -2,7 +2,7 @@
 
 ## 当前实现状态（2026-08-11）
 
-第一阶段已完成并保持生产默认关闭：
+基础设施、实时事件和历史事件直接切换已完成：
 
 - 已创建 `addons/telegram_collector` HotGo 插件、安装 SQL 和 GoFrame 生成 DAO；
 - 已复用 `youban_tg_bot_gateway`，未新增第二套 Bot Webhook；
@@ -21,23 +21,23 @@
 - Collector Worker 按 `account` 来源解析标准事件并创建 Delivery；
 - Publish Worker 通过现有注册式 Adapter 还原为上架插件采集模型，复用原有资料解析、媒体组聚合和发布规则；
 - Bot 与协议号链路在插件启用后停止重复执行旧采集入口，缓存、自动删除等非采集能力保持不变；
-- 插件入队失败时，Bot 由统一 Gateway 重试，协议号消息回退旧链路，避免静默丢失；
+- 插件入队失败时，Bot 由统一 Gateway 重试；协议号消息不再回退旧采集入口；
 - 新增账号事件转换和 Delivery 还原测试，验证媒体元数据、分组标识和来源唯一键不丢失。
 
 生产开关仍为：
 
 ```text
-YOUBAN_TELEGRAM_COLLECTOR_ENABLED=false
+YOUBAN_TELEGRAM_COLLECTOR_ENABLED=true
 ```
 
-因此本次部署只增加代码、表结构和独立服务能力，不会自动切换现有采集流量。完成插件安装 SQL、Shadow 观测和积压核对后，再按租户逐步开启。
+新插件现在是 Bot、协议号实时消息和历史消息的唯一采集事件入口。关闭开关只用于紧急停止采集，不会回退到 `youban_publish` 旧入口。
 
 启用第二阶段时必须同时确认：
 
 1. `collector-worker` 已启动并能消费 `tg.collect.*`；
 2. `publish-worker` 已启动并能消费 `tg.delivery.ready`；
 3. Account Runtime 与两个 Worker 使用同一 Redis/数据库；
-4. 先只在测试租户开启 `YOUBAN_TELEGRAM_COLLECTOR_ENABLED=true`，确认事件延迟、失败重试和旧资料去重后再扩大范围。
+4. 本地确认事件延迟、失败重试、历史进度和资料去重后再部署生产。
 
 ## 1. 开发范围
 
