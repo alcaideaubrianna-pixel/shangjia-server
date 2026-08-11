@@ -33,6 +33,7 @@ type sGateway struct {
 	mu       sync.Mutex
 	cancel   context.CancelFunc
 	done     chan struct{}
+	refresh  chan struct{}
 	runtimes map[string]*botRuntime
 	bindings map[string][]service.BotBinding
 	clients  map[string]*tgbot.Bot
@@ -43,7 +44,12 @@ type sGateway struct {
 
 func init() { service.RegisterGateway(NewGateway()) }
 func NewGateway() *sGateway {
-	return &sGateway{runtimes: map[string]*botRuntime{}, bindings: map[string][]service.BotBinding{}, clients: map[string]*tgbot.Bot{}}
+	return &sGateway{
+		refresh:  make(chan struct{}, 1),
+		runtimes: map[string]*botRuntime{},
+		bindings: map[string][]service.BotBinding{},
+		clients:  map[string]*tgbot.Bot{},
+	}
 }
 
 func (s *sGateway) StartRuntime(ctx context.Context) {
@@ -84,19 +90,39 @@ func (s *sGateway) StopRuntime() {
 func (s *sGateway) run(ctx context.Context) {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
-	for {
+	syncGateway := func() {
 		if err := s.sync(ctx); err != nil {
 			g.Log().Warningf(ctx, "同步TG Bot Gateway失败：%+v", err)
 		}
+	}
+	syncGateway()
+	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			syncGateway()
+		case <-s.refresh:
+			for {
+				select {
+				case <-s.refresh:
+					continue
+				default:
+					syncGateway()
+				}
+				break
+			}
 		}
 	}
 }
 
-func (s *sGateway) Refresh(ctx context.Context) error { return s.sync(ctx) }
+func (s *sGateway) Refresh(_ context.Context) error {
+	select {
+	case s.refresh <- struct{}{}:
+	default:
+	}
+	return nil
+}
 
 func (s *sGateway) sync(ctx context.Context) error {
 	conf, err := service.RuntimeConfiguration(ctx)

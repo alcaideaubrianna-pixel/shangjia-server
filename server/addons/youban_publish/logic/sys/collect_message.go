@@ -36,7 +36,7 @@ func (s *sSysPublish) ingestAndProcessCollectMessage(ctx context.Context, messag
 		return 0, err
 	}
 	if strings.TrimSpace(message.SourceGroupedId) != "" {
-		g.Log().Infof(ctx, "采集消息已入库，等待媒体组聚合 eventId:%d sourceId:%d sourceMessageId:%d groupedId:%s media:%d", eventId, message.SourceId, message.SourceMessageId, message.SourceGroupedId, len(message.Media))
+		g.Log().Debugf(ctx, "采集消息已入库，等待媒体组聚合 eventId:%d sourceId:%d sourceMessageId:%d groupedId:%s media:%d", eventId, message.SourceId, message.SourceMessageId, message.SourceGroupedId, len(message.Media))
 		s.scheduleCollectGroupedEvent(eventId, message.SourceId, message.TenantId, message.AccountId)
 		return eventId, nil
 	}
@@ -48,7 +48,7 @@ func (s *sSysPublish) ingestAndProcessCollectMessage(ctx context.Context, messag
 	}, collectMaterialGroupingDelay); err != nil {
 		return eventId, err
 	}
-	g.Log().Infof(ctx, "采集消息已入库并投递处理 eventId:%d sourceId:%d sourceMessageId:%d media:%d", eventId, message.SourceId, message.SourceMessageId, len(message.Media))
+	g.Log().Debugf(ctx, "采集消息已入库并投递处理 eventId:%d sourceId:%d sourceMessageId:%d media:%d", eventId, message.SourceId, message.SourceMessageId, len(message.Media))
 	return eventId, nil
 }
 

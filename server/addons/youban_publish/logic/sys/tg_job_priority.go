@@ -67,16 +67,15 @@ func telegramQueueNameByPriorityAndChannel(ctx context.Context, priority int, ch
 	return fmt.Sprintf("%s_%d", baseName, shard)
 }
 
-func telegramPublishQueueWeights(ctx context.Context) map[string]int {
+func telegramPublishForegroundQueueWeights(ctx context.Context) map[string]int {
 	shardCount := telegramPublishQueueShardCount(ctx)
-	weights := make(map[string]int, shardCount*3+3)
+	weights := make(map[string]int, shardCount*2+2)
 	for _, item := range []struct {
 		baseName string
 		weight   int
 	}{
 		{baseName: tgQueueNameUrgent, weight: 8},
 		{baseName: tgQueueNameDefault, weight: 4},
-		{baseName: tgQueueNameBulk, weight: 1},
 	} {
 		weights[item.baseName] = 1
 		for shard := 0; shard < shardCount; shard++ {
@@ -84,4 +83,24 @@ func telegramPublishQueueWeights(ctx context.Context) map[string]int {
 		}
 	}
 	return weights
+}
+
+func telegramPublishBulkQueueWeights(ctx context.Context) map[string]int {
+	shardCount := telegramPublishQueueShardCount(ctx)
+	weights := map[string]int{tgQueueNameBulk: 1}
+	for shard := 0; shard < shardCount; shard++ {
+		weights[fmt.Sprintf("%s_%d", tgQueueNameBulk, shard)] = 1
+	}
+	return weights
+}
+
+func telegramPublishBulkConcurrency(ctx context.Context) int {
+	value := g.Cfg().MustGet(ctx, "youbanPublish.queue.publishBulkConcurrency", 4).Int()
+	if value < 1 {
+		return 1
+	}
+	if value > 16 {
+		return 16
+	}
+	return value
 }

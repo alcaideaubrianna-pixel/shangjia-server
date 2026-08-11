@@ -21,6 +21,26 @@ func TestCollectHistoryRuntimeWaitError(t *testing.T) {
 	}
 }
 
+func TestCollectHistoryNextPageLimit(t *testing.T) {
+	tests := []struct {
+		name         string
+		pendingCount int
+		pendingLimit int
+		want         int
+	}{
+		{name: "empty backlog uses page limit", pendingCount: 0, pendingLimit: 200, want: collectHistoryPageLimit},
+		{name: "remaining capacity limits page", pendingCount: 70, pendingLimit: 80, want: 10},
+		{name: "full backlog stops expansion", pendingCount: 80, pendingLimit: 80, want: 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := collectHistoryNextPageLimit(test.pendingCount, test.pendingLimit); got != test.want {
+				t.Fatalf("page limit = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
 func TestAccountCollectOperationsShareWorker(t *testing.T) {
 	service := NewSysPublish()
 	worker := &accountCollectWorker{

@@ -111,18 +111,18 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 			g.Log().Debugf(ctx, "采集事件仍在分组窗口内 eventId:%d sourceId:%d messageId:%d receivedAt:%s role:%s", event["id"].Int64(), payload.SourceId, event["source_message_id"].Int64(), collectMaterialEventTime(event), role)
 			continue
 		}
-		g.Log().Infof(ctx, "采集事件进入分组判断 eventId:%d sourceId:%d messageId:%d chat:%s role:%s", event["id"].Int64(), payload.SourceId, event["source_message_id"].Int64(), chatID, role)
+		g.Log().Debugf(ctx, "采集事件进入分组判断 eventId:%d sourceId:%d messageId:%d chat:%s role:%s", event["id"].Int64(), payload.SourceId, event["source_message_id"].Int64(), chatID, role)
 		classification, err := s.classifyCollectEvent(ctx, event, nil)
 		if err != nil {
 			return err
 		}
-		g.Log().Infof(ctx, "采集消息分组分类 eventId:%d sourceId:%d chat:%s messageId:%d groupedId:%s role:%s kind:%s media:%d text:%s", event["id"].Int64(), payload.SourceId, chatID, event["source_message_id"].Int64(), event["source_grouped_id"].String(), role, classification.Kind, event["media_count"].Int(), truncateCollectDiagnosticText(event["raw_text"].String(), 80))
+		g.Log().Debugf(ctx, "采集消息分组分类 eventId:%d sourceId:%d chat:%s messageId:%d groupedId:%s role:%s kind:%s media:%d text:%s", event["id"].Int64(), payload.SourceId, chatID, event["source_message_id"].Int64(), event["source_grouped_id"].String(), role, classification.Kind, event["media_count"].Int(), truncateCollectDiagnosticText(event["raw_text"].String(), 80))
 		switch classification.Kind {
 		case profileMessageKindDisplay:
 			verifyIndex := s.findCollectVerifyEvent(rows, messageViews, index)
 			if verifyIndex >= 0 {
 				verify := rows[verifyIndex]
-				g.Log().Infof(ctx, "采集消息匹配验证组 eventId:%d verifyEventId:%d displayMessageId:%d verifyMessageId:%d verifyGroupedId:%s verifyMedia:%d", event["id"].Int64(), verify["id"].Int64(), event["source_message_id"].Int64(), verify["source_message_id"].Int64(), verify["source_grouped_id"].String(), verify["media_count"].Int())
+				g.Log().Debugf(ctx, "采集消息匹配验证组 eventId:%d verifyEventId:%d displayMessageId:%d verifyMessageId:%d verifyGroupedId:%s verifyMedia:%d", event["id"].Int64(), verify["id"].Int64(), event["source_message_id"].Int64(), verify["source_message_id"].Int64(), verify["source_grouped_id"].String(), verify["media_count"].Int())
 			} else {
 				g.Log().Warningf(ctx, "采集消息未匹配验证组 eventId:%d sourceMessageId:%d media:%d age:%s", event["id"].Int64(), event["source_message_id"].Int64(), event["media_count"].Int(), collectMaterialEventTime(event))
 			}
@@ -154,7 +154,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				g.Log().Infof(ctx, "采集资料组等待异步依赖，继续处理后续资料 eventId:%d err:%s", event["id"].Int64(), err.Error())
 			}
 		case profileMessageKindVerify:
-			g.Log().Infof(ctx, "采集消息识别为验证组 eventId:%d sourceMessageId:%d groupedId:%s media:%d role:%s", event["id"].Int64(), event["source_message_id"].Int64(), event["source_grouped_id"].String(), event["media_count"].Int(), role)
+			g.Log().Debugf(ctx, "采集消息识别为验证组 eventId:%d sourceMessageId:%d groupedId:%s media:%d role:%s", event["id"].Int64(), event["source_message_id"].Int64(), event["source_grouped_id"].String(), event["media_count"].Int(), role)
 			displayIndex := s.findCollectDisplayEvent(rows, messageViews, index)
 			if displayIndex >= 0 {
 				display := rows[displayIndex]

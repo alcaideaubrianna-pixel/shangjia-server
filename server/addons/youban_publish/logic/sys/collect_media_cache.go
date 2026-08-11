@@ -173,7 +173,7 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 		}
 	}()
 	ctx = collectMediaRuntimeContext(ctx, payload.AccountId)
-	g.Log().Infof(ctx, "采集媒体缓存任务开始 eventId:%d tenantId:%d accountId:%d sourceId:%d tgAccountId:%d", payload.EventId, payload.TenantId, payload.AccountId, payload.SourceId, payload.TgAccountId)
+	g.Log().Debugf(ctx, "采集媒体缓存任务开始 eventId:%d tenantId:%d accountId:%d sourceId:%d tgAccountId:%d", payload.EventId, payload.TenantId, payload.AccountId, payload.SourceId, payload.TgAccountId)
 	lockStartedAt := time.Now()
 	distributedLock := lock.NewConfig(35*time.Minute, time.Second).Mutex(fmt.Sprintf("youban_publish:collect:media:event:%d", payload.EventId))
 	if err := distributedLock.TryLock(ctx); err != nil {
@@ -184,28 +184,28 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 		g.Log().Errorf(ctx, "采集媒体任务获取事件锁异常 eventId:%d wait:%s err:%+v", payload.EventId, time.Since(lockStartedAt).Round(time.Millisecond), err)
 		return newCollectMediaRetryError("获取采集事件媒体锁失败: "+err.Error(), 15*time.Second)
 	}
-	g.Log().Infof(ctx, "采集媒体任务获取事件锁完成 eventId:%d wait:%s", payload.EventId, time.Since(lockStartedAt).Round(time.Millisecond))
+	g.Log().Debugf(ctx, "采集媒体任务获取事件锁完成 eventId:%d wait:%s", payload.EventId, time.Since(lockStartedAt).Round(time.Millisecond))
 	defer func() { _ = distributedLock.Unlock(context.Background()) }()
 	accountIntervalStartedAt := time.Now()
 	s.waitCollectMediaAccountInterval(ctx, payload.TenantId, payload.TgAccountId)
-	g.Log().Infof(ctx, "采集媒体任务账号间隔等待完成 eventId:%d wait:%s", payload.EventId, time.Since(accountIntervalStartedAt).Round(time.Millisecond))
+	g.Log().Debugf(ctx, "采集媒体任务账号间隔等待完成 eventId:%d wait:%s", payload.EventId, time.Since(accountIntervalStartedAt).Round(time.Millisecond))
 	readEventStartedAt := time.Now()
 	event, err := s.collectMediaCacheEvent(ctx, payload)
 	if err != nil {
 		return err
 	}
-	g.Log().Infof(ctx, "采集媒体任务读取事件完成 eventId:%d duration:%s status:%s", payload.EventId, time.Since(readEventStartedAt).Round(time.Millisecond), event["status"].String())
+	g.Log().Debugf(ctx, "采集媒体任务读取事件完成 eventId:%d duration:%s status:%s", payload.EventId, time.Since(readEventStartedAt).Round(time.Millisecond), event["status"].String())
 	if event.IsEmpty() {
 		g.Log().Warningf(ctx, "采集媒体任务对应事件不存在，跳过历史任务 eventId:%d tenantId:%d accountId:%d sourceId:%d", payload.EventId, payload.TenantId, payload.AccountId, payload.SourceId)
 		return nil
 	}
 	statEvent = event
 	if collectEventAlreadyMatched(event["status"].String()) {
-		g.Log().Infof(ctx, "采集媒体任务对应事件已完成，跳过重复任务 eventId:%d status:%s", payload.EventId, event["status"].String())
+		g.Log().Debugf(ctx, "采集媒体任务对应事件已完成，跳过重复任务 eventId:%d status:%s", payload.EventId, event["status"].String())
 		return nil
 	}
 	if event["status"].String() == sysin.CollectEventStatusIgnored {
-		g.Log().Infof(ctx, "采集媒体任务对应事件已忽略，取消媒体下载 eventId:%d", payload.EventId)
+		g.Log().Debugf(ctx, "采集媒体任务对应事件已忽略，取消媒体下载 eventId:%d", payload.EventId)
 		return nil
 	}
 	if event["material_role"].String() == collectMaterialRoleVerify && event["material_parent_event_id"].Int64() > 0 {
@@ -252,7 +252,7 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 	}
 	cacheStartedAt := time.Now()
 	changed, err := s.cacheCollectEventStructuredMedia(ctx, event)
-	g.Log().Infof(ctx, "采集媒体任务媒体阶段完成 eventId:%d duration:%s changed:%t err:%v", payload.EventId, time.Since(cacheStartedAt).Round(time.Millisecond), changed, err)
+	g.Log().Debugf(ctx, "采集媒体任务媒体阶段完成 eventId:%d duration:%s changed:%t err:%v", payload.EventId, time.Since(cacheStartedAt).Round(time.Millisecond), changed, err)
 	if err != nil {
 		var discardedErr *collectMediaDiscardedError
 		if errors.As(err, &discardedErr) {
@@ -281,7 +281,7 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 			return err
 		}
 	}
-	g.Log().Infof(ctx, "采集媒体缓存任务完成 eventId:%d changed:%t total:%s", payload.EventId, changed, time.Since(taskStartedAt).Round(time.Millisecond))
+	g.Log().Debugf(ctx, "采集媒体缓存任务完成 eventId:%d changed:%t total:%s", payload.EventId, changed, time.Since(taskStartedAt).Round(time.Millisecond))
 	s.appendCollectEventLogForRecord(ctx, event, "media", "ready", "媒体缓存任务处理完成", "")
 	if err := s.processCollectEvent(ctx, payload.EventId, payload.TenantId, payload.AccountId); err != nil {
 		if isCollectProcessRetryError(err) {
@@ -383,7 +383,7 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 		return false, err
 	}
 	items := collectMediaRowsToItems(rows, event["material_role"].String())
-	g.Log().Infof(ctx, "采集媒体阶段读取媒体完成 eventId:%d sourceType:%s mediaCount:%d duration:%s", event["id"].Int64(), event["source_type"].String(), len(rows), time.Since(stageStartedAt).Round(time.Millisecond))
+	g.Log().Debugf(ctx, "采集媒体阶段读取媒体完成 eventId:%d sourceType:%s mediaCount:%d duration:%s", event["id"].Int64(), event["source_type"].String(), len(rows), time.Since(stageStartedAt).Round(time.Millisecond))
 	s.appendCollectEventLogForRecord(ctx, event, "media", "checking", "开始检查媒体缓存方式", fmt.Sprintf("media=%d", len(items)))
 	changed := false
 	s.appendCollectEventLogForRecord(ctx, event, "media", "downloading", "采集媒体使用统一下载与云存储缓存", "")
@@ -535,7 +535,7 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 				"download_error_type":  "",
 				"updated_at":           gtime.Now(),
 			}).Update()
-			g.Log().Infof(ctx, "采集媒体下载完成 eventId:%d mediaId:%d sourceMessageId:%d duration:%s size:%d sourceType:%s", event["id"].Int64(), row.Id, row.SourceMessageId, time.Since(startedAt).Round(time.Millisecond), cachedSize, sourceType)
+			g.Log().Debugf(ctx, "采集媒体下载完成 eventId:%d mediaId:%d sourceMessageId:%d duration:%s size:%d sourceType:%s", event["id"].Int64(), row.Id, row.SourceMessageId, time.Since(startedAt).Round(time.Millisecond), cachedSize, sourceType)
 			result.item = cached.Item
 			if strings.TrimSpace(result.item.FileId) == "" {
 				result.item = items[index]

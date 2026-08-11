@@ -24,7 +24,7 @@ func (s *sSysPublish) enqueueCollectHistoryTask(ctx context.Context, taskId int6
 	}
 	task := asynq.NewTask(tgTaskTypeCollectHistory, body)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBackground),
+		asynq.Queue(tgQueueNameHistory),
 		asynq.MaxRetry(0),
 		asynq.Timeout(30 * time.Minute),
 		asynq.Unique(30 * time.Second),
