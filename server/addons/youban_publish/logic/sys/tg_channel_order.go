@@ -70,14 +70,11 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	var earlier struct {
-		Id int64 `orm:"id"`
-	}
-	err := mod.Fields("j.id").Limit(1).Scan(&earlier)
+	earlier, err := mod.Fields("j.id").Limit(1).One()
 	if err != nil {
 		return false, gerror.Wrap(err, "检查频道前序TG任务失败")
 	}
-	return earlier.Id > 0, nil
+	return !earlier.IsEmpty(), nil
 }
 
 func telegramChannelSendInterval(ctx context.Context) time.Duration {
@@ -106,9 +103,8 @@ func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegr
 	if job.TenantId <= 0 || job.ChannelId <= 0 {
 		return nil
 	}
-	var next telegramJobRecord
 	now := gtime.Now()
-	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	nextRecord, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", job.TenantId).
 		Where("channel_id", job.ChannelId).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
@@ -116,9 +112,16 @@ func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegr
 		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", now).
 		OrderAsc("priority").OrderAsc("id").
 		Limit(1).
-		Scan(&next)
+		One()
 	if err != nil {
 		return gerror.Wrap(err, "读取频道下一条TG任务失败")
+	}
+	if nextRecord.IsEmpty() {
+		return nil
+	}
+	var next telegramJobRecord
+	if err = nextRecord.Struct(&next); err != nil {
+		return gerror.Wrap(err, "解析频道下一条TG任务失败")
 	}
 	if next.Id <= 0 {
 		return nil
@@ -152,10 +155,7 @@ func (s *sSysPublish) shouldEnqueueTelegramChannelJob(ctx context.Context, job t
 		}
 	}()
 
-	var active struct {
-		Id int64 `orm:"id"`
-	}
-	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	active, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", job.TenantId).
 		Where("channel_id", job.ChannelId).
 		Where("id <> ?", job.Id).
@@ -163,11 +163,11 @@ func (s *sSysPublish) shouldEnqueueTelegramChannelJob(ctx context.Context, job t
 			status = 'sending' OR
 			(status IN ('pending', 'failed_retry', 'unknown') AND dispatch_status IN (?, ?))
 		)`, tgDispatchStatusQueued, tgDispatchStatusProcessing).
-		Fields("id").Limit(1).Scan(&active)
+		Fields("id").Limit(1).One()
 	if err != nil {
 		return false, gerror.Wrap(err, "检查频道活动TG任务失败")
 	}
-	return active.Id <= 0, nil
+	return active.IsEmpty(), nil
 }
 
 func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, job telegramJobRecord) error {
