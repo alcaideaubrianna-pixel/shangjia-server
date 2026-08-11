@@ -152,9 +152,6 @@ func (s *sSysPublish) enabledAccountCollectSources(ctx context.Context) (map[int
 		if err := ensureTenantVipTables(ctx); err != nil {
 			return nil, err
 		}
-		if err := ensureCollectSourceColumns(ctx); err != nil {
-			return nil, err
-		}
 		var rows []accountCollectSourceRuntime
 		err := g.DB().Model(pdao.YoubanPublishCollectSource.Table()+" s").Safe().Ctx(ctx).
 			InnerJoin(publishTgAccountTable+" ta", "ta.id=s.tg_account_id").

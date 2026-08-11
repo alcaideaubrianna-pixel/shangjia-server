@@ -163,16 +163,13 @@ func collectMediaBulkQueueShards(ctx context.Context) int {
 	return shards
 }
 
-func collectMediaWorkerQueues(ctx context.Context) map[string]int {
-	realtimeWeight := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaRealtimeWeight", 32).Int()
+func collectMediaRealtimeWorkerQueues() map[string]int {
+	return map[string]int{tgQueueNameMediaRealtime: 1}
+}
+
+func collectMediaBulkWorkerQueues(ctx context.Context) map[string]int {
 	bulkWeight := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaBulkWeight", 1).Int()
 	legacyWeight := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaLegacyWeight", 1).Int()
-	if realtimeWeight < 1 {
-		realtimeWeight = 1
-	}
-	if realtimeWeight > 100 {
-		realtimeWeight = 100
-	}
 	if bulkWeight < 1 {
 		bulkWeight = 1
 	}
@@ -185,12 +182,20 @@ func collectMediaWorkerQueues(ctx context.Context) map[string]int {
 	if legacyWeight > 20 {
 		legacyWeight = 20
 	}
-	queues := map[string]int{
-		tgQueueNameMediaRealtime: realtimeWeight,
-		tgQueueNameMedia:         legacyWeight,
-	}
+	queues := map[string]int{tgQueueNameMedia: legacyWeight}
 	for _, queue := range collectMediaBulkQueueNames() {
 		queues[queue] = bulkWeight
 	}
 	return queues
+}
+
+func collectMediaBulkConcurrency(ctx context.Context) int {
+	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaBulkConcurrency", 2).Int()
+	if concurrency < 1 {
+		return 1
+	}
+	if concurrency > 8 {
+		return 8
+	}
+	return concurrency
 }

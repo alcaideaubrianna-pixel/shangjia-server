@@ -22,6 +22,7 @@ const (
 	tgQueueNameMediaRealtime    = "youban_publish_media_realtime"
 	tgQueueNameMediaBulkPrefix  = "youban_publish_media_bulk_"
 	tgQueueNameBackground       = "youban_publish_background"
+	tgQueueNameHistory          = "youban_publish_history"
 	tgTaskTypePublish           = "youban_publish:tg:publish"
 	tgTaskTypeCleanup           = "youban_publish:tg:cleanup"
 	tgTaskTypeImport            = "youban_publish:import:legacy"

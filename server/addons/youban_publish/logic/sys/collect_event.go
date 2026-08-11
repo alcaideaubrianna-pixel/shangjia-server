@@ -328,7 +328,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		g.Log().Warningf(ctx, "采集事件不存在，跳过处理 eventId:%d tenantId:%d accountId:%d", eventId, tenantId, accountId)
 		return gerror.New("采集事件不存在")
 	}
-	g.Log().Infof(ctx, "采集事件开始处理 eventId:%d sourceId:%d sourceMessageId:%d groupedId:%s status:%s media:%d", eventId, event["source_id"].Int64(), event["source_message_id"].Int64(), event["source_grouped_id"].String(), event["status"].String(), event["media_count"].Int())
+	g.Log().Debugf(ctx, "采集事件开始处理 eventId:%d sourceId:%d sourceMessageId:%d groupedId:%s status:%s media:%d", eventId, event["source_id"].Int64(), event["source_message_id"].Int64(), event["source_grouped_id"].String(), event["status"].String(), event["media_count"].Int())
 	source, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
 		Where("id", event["source_id"].Int64()).
 		Where("tenant_id", tenantId).
@@ -358,7 +358,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		if !needsRepair {
 			return nil
 		}
-		g.Log().Infof(ctx, "采集事件存在未回写资料，重新进入分发回写 eventId:%d", eventId)
+		g.Log().Debugf(ctx, "采集事件存在未回写资料，重新进入分发回写 eventId:%d", eventId)
 	}
 	materialRole := strings.TrimSpace(event["material_role"].String())
 	if materialRole == "" || materialRole == collectMaterialRolePending {
@@ -439,7 +439,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		return verifyErr
 	}
 	if s.collectEventNeedsMediaCache(ctx, event) {
-		g.Log().Infof(ctx, "采集事件进入媒体缓存 eventId:%d media:%d", eventId, event["media_count"].Int())
+		g.Log().Debugf(ctx, "采集事件进入媒体缓存 eventId:%d media:%d", eventId, event["media_count"].Int())
 		if err = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaPending, "媒体缓存中"); err != nil {
 			return err
 		}

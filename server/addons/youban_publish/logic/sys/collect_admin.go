@@ -62,9 +62,6 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 	if err = s.ensureTenantVipFeature(ctx, account.TenantId, sysin.TenantVipFeatureCollectSource); err != nil {
 		return 0, err
 	}
-	if err = ensureCollectSourceColumns(ctx); err != nil {
-		return 0, err
-	}
 	if err = in.Filter(ctx); err != nil {
 		return 0, err
 	}

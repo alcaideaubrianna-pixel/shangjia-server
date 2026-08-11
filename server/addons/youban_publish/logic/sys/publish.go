@@ -25,8 +25,11 @@ type sSysPublish struct {
 	tgQueueMu             publishRuntimeMutex
 	tgQueueClient         *asynq.Client
 	tgQueueServer         *asynq.Server
+	tgBulkQueueServer     *asynq.Server
 	mediaQueueServer      *asynq.Server
+	mediaBulkQueueServer  *asynq.Server
 	backgroundQueueServer *asynq.Server
+	historyQueueServer    *asynq.Server
 
 	telegramChannelMu    publishRuntimeMutex
 	telegramChannelLocks map[string]*publishRuntimeMutex

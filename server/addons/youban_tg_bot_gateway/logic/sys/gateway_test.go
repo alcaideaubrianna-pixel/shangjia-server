@@ -1,10 +1,23 @@
 package sys
 
 import (
+	"context"
 	"testing"
 
 	"hotgo/addons/youban_tg_bot_gateway/service"
 )
+
+func TestGatewayRefreshCoalescesSignals(t *testing.T) {
+	gateway := NewGateway()
+	for range 3 {
+		if err := gateway.Refresh(context.Background()); err != nil {
+			t.Fatalf("Refresh() error = %v", err)
+		}
+	}
+	if got := len(gateway.refresh); got != 1 {
+		t.Fatalf("refresh signals = %d, want 1", got)
+	}
+}
 
 func TestRuntimeModeForSystem(t *testing.T) {
 	tests := []struct {

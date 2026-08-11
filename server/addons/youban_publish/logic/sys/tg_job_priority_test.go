@@ -20,13 +20,17 @@ func TestTelegramQueueNameByPriorityAndChannel(t *testing.T) {
 }
 
 func TestTelegramPublishQueueWeightsKeepLegacyQueues(t *testing.T) {
-	queues := telegramPublishQueueWeights(context.Background())
-	for _, queue := range []string{tgQueueNameUrgent, tgQueueNameDefault, tgQueueNameBulk} {
-		if queues[queue] <= 0 {
-			t.Fatalf("legacy queue %s is not registered", queue)
+	foreground := telegramPublishForegroundQueueWeights(context.Background())
+	bulk := telegramPublishBulkQueueWeights(context.Background())
+	for _, queue := range []string{tgQueueNameUrgent, tgQueueNameDefault} {
+		if foreground[queue] <= 0 {
+			t.Fatalf("foreground queue %s is not registered", queue)
 		}
 	}
-	if queues[telegramQueueNameByPriorityAndChannel(context.Background(), tgJobPriorityBulk, 1)] <= 0 {
+	if bulk[tgQueueNameBulk] <= 0 {
+		t.Fatalf("legacy bulk queue is not registered")
+	}
+	if bulk[telegramQueueNameByPriorityAndChannel(context.Background(), tgJobPriorityBulk, 1)] <= 0 {
 		t.Fatal("bulk shard queue is not registered")
 	}
 }

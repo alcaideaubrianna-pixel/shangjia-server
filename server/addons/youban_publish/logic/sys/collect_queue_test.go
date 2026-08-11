@@ -35,13 +35,17 @@ func TestCollectMediaQueueNamePrioritizesRealtime(t *testing.T) {
 	}
 }
 
-func TestCollectMediaWorkerQueuesIncludeAllBulkShards(t *testing.T) {
-	queues := collectMediaWorkerQueues(context.Background())
-	if len(queues) != collectMediaMaxBulkQueueShards+2 {
-		t.Fatalf("queue count = %d", len(queues))
+func TestCollectMediaWorkerQueuesSeparateRealtimeAndBulk(t *testing.T) {
+	realtimeQueues := collectMediaRealtimeWorkerQueues()
+	bulkQueues := collectMediaBulkWorkerQueues(context.Background())
+	if len(realtimeQueues) != 1 || realtimeQueues[tgQueueNameMediaRealtime] != 1 {
+		t.Fatalf("realtime queues = %#v", realtimeQueues)
 	}
-	if queues[tgQueueNameMediaRealtime] <= queues[collectMediaBulkQueueName(0)] {
-		t.Fatal("realtime queue must have a higher default weight")
+	if len(bulkQueues) != collectMediaMaxBulkQueueShards+1 {
+		t.Fatalf("queue count = %d", len(bulkQueues))
+	}
+	if _, ok := bulkQueues[tgQueueNameMediaRealtime]; ok {
+		t.Fatal("realtime queue must not be consumed by bulk workers")
 	}
 }
 
