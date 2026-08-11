@@ -1299,6 +1299,25 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_source_rule" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_source_rule" ON "hg_youban_publish_collect_source_rule" ("source_id", "rule_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_rule_source" ON "hg_youban_publish_collect_source_rule" ("tenant_id", "source_id", "status");
 
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_bot_channel_cache" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "bot_id" bigint NOT NULL DEFAULT 0,
+  "chat_id" varchar(128) NOT NULL DEFAULT '',
+  "chat_type" varchar(32) NOT NULL DEFAULT '',
+  "chat_title" varchar(255) NOT NULL DEFAULT '',
+  "chat_username" varchar(128) NOT NULL DEFAULT '',
+  "is_broadcast" smallint NOT NULL DEFAULT 0,
+  "is_megagroup" smallint NOT NULL DEFAULT 0,
+  "message_count" integer NOT NULL DEFAULT 0,
+  "last_message_text" text,
+  "last_message_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_bot_channel_cache_bot_chat" ON "hg_youban_publish_bot_channel_cache" ("tenant_id", "bot_id", "chat_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_bot_channel_cache_list" ON "hg_youban_publish_bot_channel_cache" ("tenant_id", "bot_id", "last_message_at", "id");
+
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_event" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,

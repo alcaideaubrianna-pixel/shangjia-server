@@ -7,7 +7,9 @@ OpenObserve 部署完成后创建 Telegram Webhook Destination，并按以下规
 | 告警 | 条件 |
 |---|---|
 | API 全部不可用 | `xiaohuiji.process.up{service_name="xiaohuiji-api"}` 2 分钟无数据 |
-| Worker 全部停止 | `xiaohuiji.runtime.heartbeat{role="worker"}` 2 分钟未更新 |
+| 发布 Worker 停止 | `xiaohuiji.runtime.heartbeat{role="push-worker"}` 2 分钟未更新 |
+| 媒体 Worker 停止 | `xiaohuiji.runtime.heartbeat{role="media-worker"}` 2 分钟未更新 |
+| 后台 Worker 停止 | `xiaohuiji.runtime.heartbeat{role="background-worker"}` 2 分钟未更新 |
 | Scheduler 无心跳 | `xiaohuiji.runtime.heartbeat{role="scheduler"}` 2 分钟未更新 |
 | 数据库采集失败 | `xiaohuiji.publish.jobs` 与 `xiaohuiji.collect.events` 同时 2 分钟无数据 |
 | 全局停止发送 | publish pending > 0，10 分钟 sent 增量为 0 |
@@ -33,6 +35,8 @@ OpenObserve 部署完成后创建 Telegram Webhook Destination，并按以下规
 | 视频预览图缺失 | `xiaohuiji.collect.video_preview_missing > 0` |
 | PHash/媒体处理积压 | `xiaohuiji.media.phash_oldest_age_seconds > 300` |
 | 单频道清空时间过长 | `xiaohuiji.publish.channel_estimated_clear_minutes > 120` |
+| 有任务但没有消费者 | `xiaohuiji.invariant.queued_jobs_without_consumer > 0` 持续 2 分钟 |
+| 队列任务无消费者数量 | `xiaohuiji.invariant.queue_pending_without_consumer > 0` 持续 2 分钟 |
 
 ## Telegram 消息字段
 

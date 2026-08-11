@@ -179,6 +179,26 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_source_rule` (
   KEY `idx_ybp_collect_source_rule_source` (`tenant_id`,`source_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集源规则';
 
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_bot_channel_cache` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',
+  `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '机器人ID',
+  `chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '聊天ID',
+  `chat_type` varchar(32) NOT NULL DEFAULT '' COMMENT '聊天类型',
+  `chat_title` varchar(255) NOT NULL DEFAULT '' COMMENT '聊天标题',
+  `chat_username` varchar(128) NOT NULL DEFAULT '' COMMENT '聊天用户名',
+  `is_broadcast` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否频道',
+  `is_megagroup` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否超级群',
+  `message_count` int(11) NOT NULL DEFAULT '0' COMMENT '消息数量',
+  `last_message_text` text COMMENT '最后消息文本',
+  `last_message_at` datetime DEFAULT NULL COMMENT '最后消息时间',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_bot_channel_cache_bot_chat` (`tenant_id`,`bot_id`,`chat_id`),
+  KEY `idx_ybp_bot_channel_cache_list` (`tenant_id`,`bot_id`,`last_message_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot采集频道缓存';
+
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_event` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
   `tenant_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '租户ID',

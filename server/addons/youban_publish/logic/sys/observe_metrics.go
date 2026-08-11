@@ -11,6 +11,26 @@ import (
 
 var publishObserveMeter = otel.Meter("hotgo/addons/youban_publish")
 
+func observePublishRuntimeHeartbeat(ctx context.Context, config publishRuntimeConfig) {
+	roles := map[string]bool{
+		"account":           config.Account,
+		"scheduler":         config.Scheduler,
+		"push-worker":       config.PushWorker,
+		"media-worker":      config.MediaWorker,
+		"background-worker": config.BackgroundWorker,
+	}
+	gauge, _ := publishObserveMeter.Int64Gauge("xiaohuiji.runtime.heartbeat")
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.runtime.heartbeats")
+	for role, enabled := range roles {
+		if !enabled {
+			continue
+		}
+		attrs := metric.WithAttributes(attribute.String("role", role))
+		gauge.Record(ctx, 1, attrs)
+		counter.Add(ctx, 1, attrs)
+	}
+}
+
 func observeRecoveryRun(ctx context.Context, step string, startedAt time.Time, scanned int, err error) {
 	result := "success"
 	if err != nil {

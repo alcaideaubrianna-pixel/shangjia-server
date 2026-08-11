@@ -54,6 +54,9 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	}
 	g.Log().Infof(ctx, "启动上架插件运行组件 roles:%v account:%t scheduler:%t pushWorker:%t mediaWorker:%t backgroundWorker:%t",
 		config.Roles, config.Account, config.Scheduler, config.PushWorker, config.MediaWorker, config.BackgroundWorker)
+	observePublishRuntimeHeartbeat(ctx, config)
+	heartbeatTicker := time.NewTicker(30 * time.Second)
+	defer heartbeatTicker.Stop()
 	if config.PushWorker {
 		s.startTelegramPushWorker(ctx)
 	}
@@ -69,7 +72,14 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	if config.Scheduler {
 		s.startPublishSchedulers(ctx)
 	}
-	<-ctx.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-heartbeatTicker.C:
+			observePublishRuntimeHeartbeat(ctx, config)
+		}
+	}
 }
 
 func (s *sSysPublish) startPublishSchedulers(ctx context.Context) {

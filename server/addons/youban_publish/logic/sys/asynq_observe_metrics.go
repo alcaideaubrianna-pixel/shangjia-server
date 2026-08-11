@@ -36,9 +36,25 @@ func (s *sSysPublish) refreshAsynqObserveMetrics(ctx context.Context) {
 	inspector := asynq.NewInspector(telegramQueueRedisOpt(ctx))
 	defer inspector.Close()
 	queues := telegramObserveQueueNames(ctx)
+	servers, err := inspector.Servers()
+	if err != nil {
+		g.Log().Warningf(ctx, "读取Asynq消费者状态失败：%+v", err)
+		return
+	}
+	observeAsynqConsumerMetrics(ctx, servers)
 	for _, queue := range queues {
 		info, err := inspector.GetQueueInfo(queue)
 		if err != nil {
+			if errors.Is(err, asynq.ErrQueueNotFound) {
+				// 队列尚未创建是正常情况，不应持续制造告警日志。
+				recordAsynqQueueGauge(ctx, queue, "pending", 0)
+				recordAsynqQueueGauge(ctx, queue, "active", 0)
+				recordAsynqQueueGauge(ctx, queue, "scheduled", 0)
+				recordAsynqQueueGauge(ctx, queue, "retry", 0)
+				recordAsynqQueueGauge(ctx, queue, "archived", 0)
+				recordAsynqQueueGauge(ctx, queue, "orphan_latency_seconds", 0)
+				continue
+			}
 			g.Log().Warningf(ctx, "读取Asynq队列指标失败 queue:%s err:%+v", queue, err)
 			continue
 		}
@@ -49,8 +65,69 @@ func (s *sSysPublish) refreshAsynqObserveMetrics(ctx context.Context) {
 		recordAsynqQueueGauge(ctx, queue, "archived", info.Archived)
 		recordAsynqQueueGauge(ctx, queue, "orphan_latency_seconds", int(info.Latency.Seconds()))
 	}
+	observeQueuedJobsWithoutConsumer(ctx, servers)
 	s.observeDatabaseJobsMissingAsynqTask(ctx, inspector)
 	s.observeAsynqTasksWithTerminalDatabaseJob(ctx, inspector, queues)
+}
+
+func observeAsynqConsumerMetrics(ctx context.Context, servers []*asynq.ServerInfo) {
+	serversGauge, _ := publishObserveMeter.Int64Gauge("xiaohuiji.asynq.consumer_servers")
+	workersGauge, _ := publishObserveMeter.Int64Gauge("xiaohuiji.asynq.consumer_workers")
+	queueConsumersGauge, _ := publishObserveMeter.Int64Gauge("xiaohuiji.asynq.queue_consumers")
+	queueSet := make(map[string]struct{})
+	workers := 0
+	for _, server := range servers {
+		if server == nil {
+			continue
+		}
+		workers += len(server.ActiveWorkers)
+		for queue := range server.Queues {
+			queueSet[queue] = struct{}{}
+		}
+	}
+	serversGauge.Record(ctx, int64(len(servers)))
+	workersGauge.Record(ctx, int64(workers))
+	queueConsumersGauge.Record(ctx, int64(len(queueSet)))
+}
+
+type asynqQueuedJobCount struct {
+	QueueName string `json:"queue_name"`
+	Count     int    `json:"count"`
+}
+
+func observeQueuedJobsWithoutConsumer(ctx context.Context, servers []*asynq.ServerInfo) {
+	consumerQueues := make(map[string]struct{})
+	for _, server := range servers {
+		if server == nil {
+			continue
+		}
+		for queue := range server.Queues {
+			consumerQueues[queue] = struct{}{}
+		}
+	}
+	var jobs []asynqQueuedJobCount
+	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("queue_name, COUNT(*) AS count").
+		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
+		WhereIn("status", []string{"pending", "failed_retry", "unknown", "sending"}).
+		Group("queue_name").Scan(&jobs)
+	if err != nil {
+		g.Log().Warningf(ctx, "读取无消费者TG任务指标失败：%+v", err)
+		return
+	}
+	withoutConsumer := 0
+	withoutConsumerTasks := 0
+	for _, job := range jobs {
+		if _, ok := consumerQueues[job.QueueName]; ok {
+			continue
+		}
+		withoutConsumer++
+		withoutConsumerTasks += job.Count
+	}
+	queuesGauge, _ := publishObserveMeter.Int64Gauge("xiaohuiji.invariant.queued_jobs_without_consumer")
+	tasksGauge, _ := publishObserveMeter.Int64Gauge("xiaohuiji.invariant.queue_pending_without_consumer")
+	queuesGauge.Record(ctx, int64(withoutConsumer))
+	tasksGauge.Record(ctx, int64(withoutConsumerTasks))
 }
 
 func telegramObserveQueueNames(ctx context.Context) []string {
