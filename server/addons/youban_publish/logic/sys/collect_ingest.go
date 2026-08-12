@@ -191,9 +191,6 @@ func botCollectMessage(botId int64, source g.Map, msg *models.Message) *CollectM
 		receivedAt = gtime.NewFromTime(time.Unix(int64(msg.Date), 0))
 	}
 	uniqueKey := "bot:" + strconv.FormatInt(botId, 10) + ":source:" + strconv.FormatInt(gconv.Int64(source["id"]), 10) + ":" + chatId + ":" + strconv.Itoa(msg.ID)
-	if groupedId := strings.TrimSpace(msg.MediaGroupID); groupedId != "" {
-		uniqueKey = "bot:" + strconv.FormatInt(botId, 10) + ":source:" + strconv.FormatInt(gconv.Int64(source["id"]), 10) + ":" + chatId + ":group:" + groupedId
-	}
 	return &CollectMessage{
 		TenantId:        gconv.Int64(source["tenant_id"]),
 		AccountId:       gconv.Int64(source["account_id"]),

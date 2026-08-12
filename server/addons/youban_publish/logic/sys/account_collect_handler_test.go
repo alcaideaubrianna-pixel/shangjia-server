@@ -3,6 +3,8 @@ package sys
 import (
 	"testing"
 
+	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gotd/td/tg"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
@@ -46,6 +48,21 @@ func TestGotdCollectMessageUsesMessageIdentityForMediaGroups(t *testing.T) {
 
 	firstMessage := gotdCollectMessage(3, source, first, "-100123")
 	secondMessage := gotdCollectMessage(3, source, second, "-100123")
+	if firstMessage.SourceGroupedId == "" || firstMessage.SourceGroupedId != secondMessage.SourceGroupedId {
+		t.Fatalf("media group identity mismatch: first=%q second=%q", firstMessage.SourceGroupedId, secondMessage.SourceGroupedId)
+	}
+	if firstMessage.SourceUniqueKey == secondMessage.SourceUniqueKey {
+		t.Fatalf("media group messages must have distinct event keys: %q", firstMessage.SourceUniqueKey)
+	}
+}
+
+func TestBotCollectMessageUsesMessageIdentityForMediaGroups(t *testing.T) {
+	source := g.Map{"id": int64(7), "tenant_id": int64(1), "account_id": int64(2)}
+	first := &models.Message{ID: 101, Chat: models.Chat{ID: -100123}, MediaGroupID: "9001"}
+	second := &models.Message{ID: 102, Chat: models.Chat{ID: -100123}, MediaGroupID: "9001"}
+
+	firstMessage := botCollectMessage(3, source, first)
+	secondMessage := botCollectMessage(3, source, second)
 	if firstMessage.SourceGroupedId == "" || firstMessage.SourceGroupedId != secondMessage.SourceGroupedId {
 		t.Fatalf("media group identity mismatch: first=%q second=%q", firstMessage.SourceGroupedId, secondMessage.SourceGroupedId)
 	}
