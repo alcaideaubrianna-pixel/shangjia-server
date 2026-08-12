@@ -5,9 +5,11 @@ import (
 	"hotgo/internal/global"
 	"hotgo/internal/library/location"
 	"hotgo/internal/library/token"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/net/gtrace"
@@ -39,7 +41,8 @@ func (s *sMiddleware) AccessLog(r *ghttp.Request) {
 	r.Middleware.Next()
 
 	duration := time.Since(start)
-	recordHTTPMetrics(r.Context(), r, duration)
+	businessCode := getHTTPBusinessCode(r)
+	recordHTTPMetrics(r.Context(), r, duration, businessCode)
 	clientIP := location.GetClientIp(r)
 	memberId := int64(0)
 	if user, err := token.ParseLoginUser(r); err == nil && user != nil {
@@ -55,6 +58,7 @@ func (s *sMiddleware) AccessLog(r *ghttp.Request) {
 		"path":                 r.URL.Path,
 		"query":                r.URL.RawQuery,
 		"status":               r.Response.Status,
+		"business_code":        businessCode,
 		"duration_ms":          duration.Milliseconds(),
 		"duration":             duration.String(),
 		"user_agent":           r.UserAgent(),
@@ -67,7 +71,7 @@ func (s *sMiddleware) AccessLog(r *ghttp.Request) {
 	})
 }
 
-func recordHTTPMetrics(ctx context.Context, r *ghttp.Request, duration time.Duration) {
+func recordHTTPMetrics(ctx context.Context, r *ghttp.Request, duration time.Duration, businessCode string) {
 	httpMetricsOnce.Do(func() {
 		meter := otel.Meter("hotgo/http")
 		httpRequestCount, _ = meter.Int64Counter(
@@ -96,6 +100,7 @@ func recordHTTPMetrics(ctx context.Context, r *ghttp.Request, duration time.Dura
 		attribute.String("http_method", r.Method),
 		attribute.String("http_route", route),
 		attribute.Int("http_status_code", r.Response.Status),
+		attribute.String("http_business_code", businessCode),
 	)
 	if httpRequestCount != nil {
 		httpRequestCount.Add(ctx, 1, attributes)
@@ -115,10 +120,32 @@ func recordHTTPMetrics(ctx context.Context, r *ghttp.Request, duration time.Dura
 				attribute.String("http_method", r.Method),
 				attribute.String("http_route", route),
 				attribute.Int("http_status_code", r.Response.Status),
+				attribute.String("http_business_code", businessCode),
 				attribute.String("le", bucket.label),
 			))
 		}
 	}
+}
+
+func getHTTPBusinessCode(r *ghttp.Request) string {
+	if r == nil || r.Response == nil || r.Response.BufferLength() == 0 {
+		return ""
+	}
+	contentType := r.Response.Header().Get("Content-Type")
+	if contentType != "" && !strings.Contains(strings.ToLower(contentType), "json") {
+		return ""
+	}
+	if r.Response.BufferLength() > 128*1024 {
+		return ""
+	}
+	responseJSON, err := gjson.LoadContent(r.Response.Buffer())
+	if err != nil {
+		return ""
+	}
+	if !responseJSON.Contains("code") {
+		return ""
+	}
+	return responseJSON.Get("code").String()
 }
 
 type httpDurationBucket struct {

@@ -647,7 +647,7 @@ HTTP 性能大盘定义保存在 `deploy/observability/dashboards/http-performan
 
 - `xiaohuiji_http_server_duration_bucket`：接口耗时直方图桶，用于 P95/P99。
 - `xiaohuiji_http_server_duration_sum` / `xiaohuiji_http_server_duration_count`：用于平均耗时。
-- `xiaohuiji_http_server_requests`：按路由、方法和状态码统计请求量。
+- `xiaohuiji_http_server_requests`：按路由、方法、HTTP 状态码和业务 `code` 统计请求量。
 
 查看接口耗时排行时，打开 HTTP Overview 大盘，重点关注“接口耗时 P95 / P99”和“接口平均耗时排行”。如果需要临时查询，可使用：
 
@@ -656,6 +656,9 @@ histogram_quantile(0.95, sum by (le, http_route) (rate(xiaohuiji_http_server_dur
 ```
 
 当前指标按 `http_route` 聚合，不使用原始 URL 作为标签，避免资料编号、频道 ID 等高基数路径污染监控。
+统一 JSON 响应中的 `code` 会作为 `http_business_code` 标签写入 HTTP 指标和访问日志；打开“业务响应码分布”
+与“业务错误码 × 路由排行”即可区分 HTTP 200 但业务失败的请求。非 JSON、流式和超过 128 KB 的响应不解析业务码，
+避免下载接口和大响应增加额外开销。
 
 ## Telegram 运营大盘
 

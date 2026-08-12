@@ -400,6 +400,103 @@
           }
         },
         {
+          "id": "http-business-code-distribution",
+          "type": "line",
+          "title": "业务响应码分布",
+          "description": "按统一 JSON 响应体中的 code 统计请求速率；code=0 通常表示成功，非 0 表示业务失败。",
+          "config": {
+            "show_legends": true,
+            "legends_position": "bottom",
+            "unit": "short",
+            "axis_border_show": true,
+            "connect_nulls": true,
+            "line_thickness": 1.5,
+            "show_symbol": false
+          },
+          "queryType": "promql",
+          "queries": [
+            {
+              "query": "sum by (http_business_code) (rate(xiaohuiji_http_server_requests{http_business_code!=\"\"}[5m]))",
+              "customQuery": true,
+              "fields": {
+                "stream": "xiaohuiji_http_server_requests",
+                "stream_type": "metrics",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "业务 code={http_business_code}",
+                "layer_type": "line",
+                "weight_fixed": 1,
+                "limit": 0,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 54,
+            "w": 96,
+            "h": 18,
+            "i": 10
+          }
+        },
+        {
+          "id": "http-business-error-routes",
+          "type": "table",
+          "title": "业务错误码 × 路由排行",
+          "description": "过滤 code=0 后按业务 code 和路由统计失败请求，快速定位哪个接口返回了业务错误。",
+          "config": {
+            "wrap_table_cells": true,
+            "table_dynamic_columns": true,
+            "show_legends": false,
+            "unit": "short",
+            "axis_border_show": true,
+            "table_transpose": false
+          },
+          "queryType": "promql",
+          "queries": [
+            {
+              "query": "sum by (http_business_code, http_route) (rate(xiaohuiji_http_server_requests{http_business_code!=\"\", http_business_code!=\"0\"}[5m]))",
+              "customQuery": true,
+              "fields": {
+                "stream": "xiaohuiji_http_server_requests",
+                "stream_type": "metrics",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "code={http_business_code} {http_route}",
+                "layer_type": "table",
+                "weight_fixed": 1,
+                "limit": 50,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 96,
+            "y": 54,
+            "w": 96,
+            "h": 18,
+            "i": 11
+          }
+        },
+        {
           "id": "http-slow-routes",
           "type": "table",
           "title": "慢请求路由排行（>2 秒）",

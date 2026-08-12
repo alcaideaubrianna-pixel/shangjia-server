@@ -404,20 +404,86 @@ func (s *sAdminNotice) PullMessages(ctx context.Context, in *adminin.PullMessage
 		return
 	}
 
+	readNoticeIds := make(map[int64]struct{}, len(res.List))
+	avatarMemberIds := make([]int64, 0, len(res.List))
+	for _, item := range res.List {
+		if item == nil {
+			continue
+		}
+		if item.Type == consts.NoticeTypeLetter && item.CreatedBy > 0 {
+			avatarMemberIds = append(avatarMemberIds, item.CreatedBy)
+		}
+	}
+	readCols := dao.AdminNoticeRead.Columns()
+	var readRows []struct {
+		NoticeId int64 `orm:"notice_id"`
+	}
+	if len(res.List) > 0 {
+		noticeIds := make([]int64, 0, len(res.List))
+		for _, item := range res.List {
+			if item != nil {
+				noticeIds = append(noticeIds, item.Id)
+			}
+		}
+		if err = dao.AdminNoticeRead.Ctx(ctx).
+			Fields(readCols.NoticeId).
+			Where(readCols.MemberId, memberId).
+			WhereIn(readCols.NoticeId, noticeIds).
+			Scan(&readRows); err != nil {
+			err = gerror.Wrap(err, consts.ErrorORM)
+			return
+		}
+	}
+	for _, row := range readRows {
+		readNoticeIds[row.NoticeId] = struct{}{}
+	}
+
+	avatarMap := make(map[int64]string, len(avatarMemberIds))
+	avatarMemberIds = uniqueNoticeInt64s(avatarMemberIds)
+	if len(avatarMemberIds) > 0 {
+		var members []struct {
+			Id     int64  `orm:"id"`
+			Avatar string `orm:"avatar"`
+		}
+		memberCols := dao.AdminMember.Columns()
+		if err = dao.AdminMember.Ctx(ctx).
+			Fields(memberCols.Id, memberCols.Avatar).
+			WhereIn(memberCols.Id, avatarMemberIds).
+			Scan(&members); err != nil {
+			err = gerror.Wrap(err, consts.ErrorORM)
+			return
+		}
+		for _, member := range members {
+			avatarMap[member.Id] = member.Avatar
+		}
+	}
+
 	for _, v := range res.List {
-		count, _ := dao.AdminNoticeRead.Ctx(ctx).Where(dao.AdminNoticeRead.Columns().NoticeId, v.Id).Where(dao.AdminNoticeRead.Columns().MemberId, memberId).Count()
-		if count > 0 {
+		if _, ok := readNoticeIds[v.Id]; ok {
 			v.IsRead = true
 		}
 
 		if v.Type == consts.NoticeTypeLetter {
-			val, err := dao.AdminMember.Ctx(ctx).Fields(dao.AdminMember.Columns().Avatar).Where(dao.AdminMember.Columns().Id, v.CreatedBy).Value()
-			if err == nil {
-				v.SenderAvatar = val.String()
-			}
+			v.SenderAvatar = avatarMap[v.CreatedBy]
 		}
 	}
 	return
+}
+
+func uniqueNoticeInt64s(values []int64) []int64 {
+	seen := make(map[int64]struct{}, len(values))
+	result := make([]int64, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 // UnreadCount 获取所有类型消息的未读数量
@@ -636,17 +702,63 @@ func (s *sAdminNotice) MessageList(ctx context.Context, in *adminin.NoticeMessag
 		return
 	}
 
+	noticeIds := make([]int64, 0, len(list))
+	avatarMemberIds := make([]int64, 0, len(list))
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		noticeIds = append(noticeIds, item.Id)
+		if item.Type == consts.NoticeTypeLetter && item.CreatedBy > 0 {
+			avatarMemberIds = append(avatarMemberIds, item.CreatedBy)
+		}
+	}
+	readNoticeIds := make(map[int64]struct{}, len(noticeIds))
+	readCols := dao.AdminNoticeRead.Columns()
+	if len(noticeIds) > 0 {
+		var readRows []struct {
+			NoticeId int64 `orm:"notice_id"`
+		}
+		if err = dao.AdminNoticeRead.Ctx(ctx).
+			Fields(readCols.NoticeId).
+			Where(readCols.MemberId, memberId).
+			WhereIn(readCols.NoticeId, noticeIds).
+			Scan(&readRows); err != nil {
+			err = gerror.Wrap(err, consts.ErrorORM)
+			return
+		}
+		for _, row := range readRows {
+			readNoticeIds[row.NoticeId] = struct{}{}
+		}
+	}
+
+	avatarMap := make(map[int64]string, len(avatarMemberIds))
+	avatarMemberIds = uniqueNoticeInt64s(avatarMemberIds)
+	if len(avatarMemberIds) > 0 {
+		var members []struct {
+			Id     int64  `orm:"id"`
+			Avatar string `orm:"avatar"`
+		}
+		memberCols := dao.AdminMember.Columns()
+		if err = dao.AdminMember.Ctx(ctx).
+			Fields(memberCols.Id, memberCols.Avatar).
+			WhereIn(memberCols.Id, avatarMemberIds).
+			Scan(&members); err != nil {
+			err = gerror.Wrap(err, consts.ErrorORM)
+			return
+		}
+		for _, member := range members {
+			avatarMap[member.Id] = member.Avatar
+		}
+	}
+
 	for _, v := range list {
-		count, _ := dao.AdminNoticeRead.Ctx(ctx).Where(dao.AdminNoticeRead.Columns().NoticeId, v.Id).Where(dao.AdminNoticeRead.Columns().MemberId, memberId).Count()
-		if count > 0 {
+		if _, ok := readNoticeIds[v.Id]; ok {
 			v.IsRead = true
 		}
 
 		if v.Type == consts.NoticeTypeLetter {
-			val, err := dao.AdminMember.Ctx(ctx).Fields(dao.AdminMember.Columns().Avatar).Where(dao.AdminMember.Columns().Id, v.CreatedBy).Value()
-			if err == nil {
-				v.SenderAvatar = val.String()
-			}
+			v.SenderAvatar = avatarMap[v.CreatedBy]
 		}
 	}
 	return
