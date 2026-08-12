@@ -106,7 +106,7 @@ func (s *sSysPublish) recoverMediaProcessTasks(ctx context.Context) {
 	cutoff := gtime.Now().Add(-time.Minute)
 	if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		WhereIn("processing_status", []string{mediaProcessingUploaded, mediaProcessingProcessing}).
-		Where("updated_at < ?", cutoff).
+		WhereLT("updated_at", cutoff).
 		WhereNull("deleted_at").Fields("id").Limit(200).Scan(&rows); err != nil {
 		g.Log().Warningf(ctx, "恢复媒体异步处理任务查询失败 err:%+v", err)
 		return
