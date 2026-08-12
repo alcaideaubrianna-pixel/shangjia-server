@@ -406,6 +406,7 @@ func (s *sSysPublish) applyTenantVipExtension(ctx context.Context, in *tenantVip
 	if result.Applied {
 		if cache.Initialized() {
 			_, _ = cache.Instance().Remove(ctx, tenantVipCacheKey(in.TenantId))
+			_, _ = cache.Instance().Remove(ctx, tenantVipFullCacheKey(in.TenantId))
 		}
 		if notifyErr := s.notifyTenantVipEvent(ctx, result.EventId); notifyErr != nil {
 			g.Log().Warningf(ctx, "会员通知发送失败 eventId:%d err:%+v", result.EventId, notifyErr)
@@ -499,6 +500,7 @@ func (s *sSysPublish) applyTenantVipUntil(ctx context.Context, tenantId int64, l
 		return err
 	}
 	_, _ = cache.Instance().Remove(ctx, tenantVipCacheKey(tenantId))
+	_, _ = cache.Instance().Remove(ctx, tenantVipFullCacheKey(tenantId))
 	if notifyErr := s.notifyTenantVipEvent(ctx, result.EventId); notifyErr != nil {
 		g.Log().Warningf(ctx, "会员调整通知失败 eventId:%d err:%+v", result.EventId, notifyErr)
 	}
@@ -973,6 +975,7 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 	}
 	if result.Applied {
 		_, _ = cache.Instance().Remove(ctx, tenantVipCacheKey(vip.TenantId))
+		_, _ = cache.Instance().Remove(ctx, tenantVipFullCacheKey(vip.TenantId))
 	}
 	if result.EventId > 0 {
 		if notifyErr := s.notifyTenantVipEvent(ctx, result.EventId); notifyErr != nil {

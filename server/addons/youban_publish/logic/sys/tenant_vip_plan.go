@@ -138,6 +138,10 @@ func tenantVipCacheKey(tenantId int64) string {
 	return fmt.Sprintf("youban_publish:tenant_vip:%d", tenantId)
 }
 
+func tenantVipFullCacheKey(tenantId int64) string {
+	return fmt.Sprintf("youban_publish:tenant_vip_full:%d", tenantId)
+}
+
 func containsString(list []string, target string) bool {
 	for _, item := range list {
 		if item == target {

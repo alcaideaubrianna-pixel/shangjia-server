@@ -8,15 +8,6 @@ import (
 	"hotgo/addons/youban_publish/service"
 )
 
-func (c *cPublish) TenantVipStatus(ctx context.Context, req *publish.TenantVipStatusReq) (res *publish.TenantVipStatusRes, err error) {
-	data, err := service.SysPublish().TenantVipStatus(ctx)
-	if err != nil {
-		return nil, err
-	}
-	res = &publish.TenantVipStatusRes{TenantVipStatusModel: data}
-	return
-}
-
 func (c *cPublish) TenantVipPlans(ctx context.Context, req *publish.TenantVipPlansReq) (res *publish.TenantVipPlansRes, err error) {
 	list, err := service.SysPublish().TenantVipPlans(ctx)
 	if err != nil {

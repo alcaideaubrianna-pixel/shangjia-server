@@ -29,18 +29,25 @@ import (
 )
 
 const tenantVipCacheTTL = 5 * time.Minute
+const tenantVipFullCacheTTL = 5 * time.Minute
 const tenantVipOrderGroup = "youban_tenant_vip"
 const tenantVipOrderType = "youban_tenant_vip"
 const tenantVipPlanMonth = "vip_month"
 
-func (s *sSysPublish) TenantVipStatus(ctx context.Context) (*sysin.TenantVipStatusModel, error) {
-	account, err := s.currentAccount(ctx)
-	if err != nil {
-		return nil, err
+func (s *sSysPublish) tenantVipStatusForAccount(ctx context.Context, account *sysin.AccountModel) (*sysin.TenantVipStatusModel, error) {
+	if account == nil || account.TenantId <= 0 {
+		return nil, gerror.New("当前账号信息无效")
 	}
 	status, err := s.tenantVipStatus(ctx, account.TenantId)
 	if err != nil {
 		return nil, err
+	}
+	fullCacheKey := tenantVipFullCacheKey(account.TenantId)
+	if value, cacheErr := cache.Instance().Get(ctx, fullCacheKey); cacheErr == nil && !value.IsNil() {
+		var cached sysin.TenantVipStatusModel
+		if scanErr := value.Scan(&cached); scanErr == nil && cached.TenantId > 0 {
+			return &cached, nil
+		}
 	}
 	activities, activityCfg, err := s.tenantVipActivities(ctx, account)
 	if err != nil {
@@ -50,6 +57,7 @@ func (s *sSysPublish) TenantVipStatus(ctx context.Context) (*sysin.TenantVipStat
 	result.Activities = activities
 	result.ActivityBannerTitle = activityCfg.ActivityBannerTitle
 	result.ActivityBannerText = activityCfg.ActivityBannerText
+	_ = cache.Instance().Set(ctx, fullCacheKey, &result, tenantVipFullCacheTTL)
 	return &result, nil
 }
 
@@ -392,9 +400,6 @@ func (s *sSysPublish) ensureTenantVipFeature(ctx context.Context, tenantId int64
 func (s *sSysPublish) tenantVipStatus(ctx context.Context, tenantId int64) (*sysin.TenantVipStatusModel, error) {
 	if tenantId <= 0 {
 		return nil, gerror.New("租户ID不能为空")
-	}
-	if err := ensureTenantVipTables(ctx); err != nil {
-		return nil, err
 	}
 	cacheKey := tenantVipCacheKey(tenantId)
 	if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {

@@ -79,6 +79,7 @@ func (s *sSysPublish) AdminTenantFeaturePermissionSave(ctx context.Context, in *
 	}
 	_, _ = cache.Instance().Remove(ctx, tenantFeaturePermissionCacheKey(in.TenantId))
 	_, _ = cache.Instance().Remove(ctx, tenantVipCacheKey(in.TenantId))
+	_, _ = cache.Instance().Remove(ctx, tenantVipFullCacheKey(in.TenantId))
 	return nil
 }
 

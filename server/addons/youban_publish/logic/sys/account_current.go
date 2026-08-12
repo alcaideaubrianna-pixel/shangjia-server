@@ -11,6 +11,10 @@ func (s *sSysPublish) CurrentAccount(ctx context.Context) (*sysin.CurrentAccount
 	if err != nil {
 		return nil, err
 	}
+	vip, err := s.tenantVipStatusForAccount(ctx, account)
+	if err != nil {
+		return nil, err
+	}
 	return &sysin.CurrentAccountModel{
 		Id:          account.Id,
 		TenantId:    account.TenantId,
@@ -22,5 +26,6 @@ func (s *sSysPublish) CurrentAccount(ctx context.Context) (*sysin.CurrentAccount
 		Status:      account.Status,
 		CreatedAt:   account.CreatedAt,
 		UpdatedAt:   account.UpdatedAt,
+		Vip:         vip,
 	}, nil
 }

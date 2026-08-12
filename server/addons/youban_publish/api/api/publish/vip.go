@@ -7,14 +7,6 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
-type TenantVipStatusReq struct {
-	g.Meta `path:"/publish/vip/status" method:"get" tags:"上架插件" summary:"租户会员状态"`
-}
-
-type TenantVipStatusRes struct {
-	*sysin.TenantVipStatusModel
-}
-
 type TenantVipPlansReq struct {
 	g.Meta `path:"/publish/vip/plans" method:"get" tags:"上架插件" summary:"租户会员套餐"`
 }

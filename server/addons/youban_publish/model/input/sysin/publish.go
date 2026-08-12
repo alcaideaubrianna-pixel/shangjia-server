@@ -282,6 +282,7 @@ type CurrentAccountModel struct {
 	Status      int         `json:"status" dc:"状态"`
 	CreatedAt   *gtime.Time `json:"createdAt" dc:"创建时间"`
 	UpdatedAt   *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Vip         *TenantVipStatusModel `json:"vip" dc:"会员状态"`
 }
 
 type UpdateAccountPasswordInp struct {

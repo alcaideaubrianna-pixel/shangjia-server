@@ -183,7 +183,6 @@ type ISysPublish interface {
 	AccountLogin(ctx context.Context, in *sysin.AccountLoginInp) (res *sysin.AccountLoginModel, err error)
 	AccountRegister(ctx context.Context, in *sysin.AccountRegisterInp) (res *sysin.AccountRegisterModel, err error)
 	CurrentAccount(ctx context.Context) (res *sysin.CurrentAccountModel, err error)
-	TenantVipStatus(ctx context.Context) (res *sysin.TenantVipStatusModel, err error)
 	HandleVipAccountBound(ctx context.Context, accountId int64) (err error)
 	ProcessTenantVipLifecycle(ctx context.Context, limit int) (err error)
 	AdminActivityList(ctx context.Context) (list []*sysin.ActivityModel, err error)
