@@ -57,3 +57,28 @@ func observeTelegramLeaseActive(ctx context.Context, delta int64) {
 	gauge, _ := publishObserveMeter.Int64UpDownCounter("xiaohuiji.tg.account_lease_active")
 	gauge.Add(ctx, delta)
 }
+
+func observeCollectHistoryBackpressure(ctx context.Context, sourceID int64, stats collectHistoryPendingStats, limit int) {
+	attrs := metric.WithAttributes(attribute.Int64("source_id", sourceID))
+	pending, _ := publishObserveMeter.Int64Gauge("xiaohuiji.collect.history_pending")
+	pending.Record(ctx, int64(stats.Total), attrs)
+	threshold, _ := publishObserveMeter.Int64Gauge("xiaohuiji.collect.history_pending_limit")
+	threshold.Record(ctx, int64(limit), attrs)
+	for status, count := range stats.ByStatus {
+		statusAttrs := metric.WithAttributes(attribute.Int64("source_id", sourceID), attribute.String("status", status))
+		gauge, _ := publishObserveMeter.Int64Gauge("xiaohuiji.collect.history_pending_by_status")
+		gauge.Record(ctx, int64(count), statusAttrs)
+	}
+}
+
+func observeCollectHistoryPage(ctx context.Context, sourceID int64, fetched int, offsetID int, duration time.Duration) {
+	attrs := metric.WithAttributes(attribute.Int64("source_id", sourceID))
+	pages, _ := publishObserveMeter.Int64Counter("xiaohuiji.collect.history_pages")
+	pages.Add(ctx, 1, attrs)
+	messages, _ := publishObserveMeter.Int64Counter("xiaohuiji.collect.history_messages")
+	messages.Add(ctx, int64(fetched), attrs)
+	offset, _ := publishObserveMeter.Int64Gauge("xiaohuiji.collect.history_offset")
+	offset.Record(ctx, int64(offsetID), attrs)
+	pageDuration, _ := publishObserveMeter.Float64Histogram("xiaohuiji.collect.history_page_duration_ms")
+	pageDuration.Record(ctx, float64(duration.Milliseconds()), attrs)
+}

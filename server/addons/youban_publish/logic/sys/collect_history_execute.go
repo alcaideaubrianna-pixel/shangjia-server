@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -22,7 +23,7 @@ import (
 
 const (
 	collectHistoryPageLimit                = 100
-	collectHistoryPagesPerRun              = 20
+	collectHistoryPagesPerRunDefault       = 1
 	collectHistoryPageInterval             = 900 * time.Millisecond
 	collectHistoryPendingEventLimitDefault = 80
 	collectHistoryBackpressureDelayDefault = 30 * time.Second
@@ -163,24 +164,27 @@ func (s *sSysPublish) executeCollectHistoryTask(ctx context.Context, client *tel
 func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.Client, task *sysin.CollectHistoryTaskModel, source *sysin.CollectSourceModel, channelID int64, accessHash int64) error {
 	offsetID := task.OffsetId
 	cutoff := collectHistoryCutoff(task)
-	for page := 0; page < collectHistoryPagesPerRun; page++ {
+	for page := 0; page < collectHistoryPagesPerRun(ctx); page++ {
+		pageStartedAt := time.Now()
 		if canceled, cancelErr := collectHistoryTaskCanceled(ctx, task.Id); cancelErr != nil {
 			return cancelErr
 		} else if canceled {
 			return nil
 		}
-		pendingCount, err := collectHistoryPendingEventCount(ctx, task)
+		pending, err := collectHistoryPendingEventCount(ctx, task)
 		if err != nil {
 			return err
 		}
 		pendingLimit := collectHistoryPendingEventLimit(ctx)
-		if pendingCount >= pendingLimit {
+		observeCollectHistoryBackpressure(ctx, task.SourceId, *pending, pendingLimit)
+		if pending.Total >= pendingLimit {
+			g.Log().Warningf(ctx, "TG历史采集触发背压 sourceId:%d pending:%d groupCollecting:%d waitingOrder:%d prechecked:%d mediaPending:%d mediaReady:%d", task.SourceId, pending.Total, pending.ByStatus[sysin.CollectEventStatusGroupCollect], pending.ByStatus[sysin.CollectEventStatusWaitingOrder], pending.ByStatus[sysin.CollectEventStatusPrechecked], pending.ByStatus[sysin.CollectEventStatusMediaPending], pending.ByStatus[sysin.CollectEventStatusMediaReady])
 			return &collectHistoryPauseError{
 				delay: collectHistoryBackpressureDelay(ctx),
-				err:   gerror.Newf("历史采集等待已有资料处理完成，当前待处理:%d，上限:%d", pendingCount, pendingLimit),
+				err:   gerror.Newf("历史采集等待已有资料处理完成，当前待处理:%d，上限:%d（分组中:%d，媒体待处理:%d）", pending.Total, pendingLimit, pending.ByStatus[sysin.CollectEventStatusGroupCollect], pending.ByStatus[sysin.CollectEventStatusMediaPending]),
 			}
 		}
-		pageLimit := collectHistoryNextPageLimit(pendingCount, pendingLimit)
+		pageLimit := collectHistoryNextPageLimit(pending.Total, pendingLimit)
 		messages, err := collectHistoryPage(ctx, client, channelID, accessHash, offsetID, pageLimit)
 		if err != nil {
 			return err
@@ -198,6 +202,7 @@ func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.C
 		if err = s.updateCollectHistoryProgress(ctx, task, stats, offsetID); err != nil {
 			return err
 		}
+		observeCollectHistoryPage(ctx, task.SourceId, len(messages), offsetID, time.Since(pageStartedAt))
 		s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "page", "历史消息分页处理完成", g.Map{
 			"page":      page + 1,
 			"offsetId":  offsetID,
@@ -220,7 +225,11 @@ func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.C
 		if stop || len(messages) < pageLimit {
 			return s.finishCollectHistoryTask(ctx, task, "历史消息已拉取完成")
 		}
-		time.Sleep(collectHistoryPageInterval)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(collectHistoryPageInterval):
+		}
 	}
 	return s.rescheduleCollectHistoryTask(ctx, task, offsetID)
 }
@@ -282,6 +291,17 @@ func collectHistoryPendingEventLimit(ctx context.Context) int {
 	return limit
 }
 
+func collectHistoryPagesPerRun(ctx context.Context) int {
+	pages := g.Cfg().MustGet(ctx, "youbanPublish.queue.historyPagesPerRun", collectHistoryPagesPerRunDefault).Int()
+	if pages < 1 {
+		return collectHistoryPagesPerRunDefault
+	}
+	if pages > 5 {
+		return 5
+	}
+	return pages
+}
+
 func collectHistoryBackpressureDelay(ctx context.Context) time.Duration {
 	seconds := g.Cfg().MustGet(ctx, "youbanPublish.queue.historyBackpressureDelaySeconds", int(collectHistoryBackpressureDelayDefault/time.Second)).Int()
 	if seconds < 1 {
@@ -301,12 +321,20 @@ func collectHistoryQueueConcurrency(ctx context.Context) int {
 	return value
 }
 
-func collectHistoryPendingEventCount(ctx context.Context, task *sysin.CollectHistoryTaskModel) (int, error) {
+type collectHistoryPendingStats struct {
+	Total    int
+	ByStatus map[string]int
+}
+
+func collectHistoryPendingEventCount(ctx context.Context, task *sysin.CollectHistoryTaskModel) (*collectHistoryPendingStats, error) {
+	stats := &collectHistoryPendingStats{ByStatus: make(map[string]int)}
 	if task == nil || task.SourceId <= 0 || task.TenantId <= 0 {
-		return 0, nil
+		return stats, nil
 	}
 	cols := pdao.YoubanPublishCollectEvent.Columns()
-	count, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+	var rows []gdb.Record
+	err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Fields(cols.Status, "COUNT(*) AS total").
 		Where(cols.TenantId, task.TenantId).
 		Where(cols.SourceId, task.SourceId).
 		WhereIn(cols.Status, []string{
@@ -317,11 +345,18 @@ func collectHistoryPendingEventCount(ctx context.Context, task *sysin.CollectHis
 			sysin.CollectEventStatusMediaPending,
 			sysin.CollectEventStatusMediaReady,
 		}).
-		Count()
+		Group(cols.Status).
+		Scan(&rows)
 	if err != nil {
-		return 0, gerror.Wrap(err, "统计历史采集待处理资料失败")
+		return nil, gerror.Wrap(err, "统计历史采集待处理资料失败")
 	}
-	return count, nil
+	for _, row := range rows {
+		status := row[cols.Status].String()
+		count := row["total"].Int()
+		stats.ByStatus[status] = count
+		stats.Total += count
+	}
+	return stats, nil
 }
 
 type collectHistoryStats struct {
