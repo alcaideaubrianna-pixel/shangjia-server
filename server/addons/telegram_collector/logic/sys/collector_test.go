@@ -43,18 +43,26 @@ func TestBuildMediaFingerprintStableAndTypeAware(t *testing.T) {
 }
 
 func TestUpdateEventIDUsesTelegramUpdateID(t *testing.T) {
-	first := updateEventID("bot-key", 7, 42, []byte(`{"ok":true}`))
-	second := updateEventID("bot-key", 7, 42, []byte(`{"ok":false}`))
+	first := updateEventID("bot-key", 7, 11, 42, []byte(`{"ok":true}`))
+	second := updateEventID("bot-key", 7, 11, 42, []byte(`{"ok":false}`))
 	if first != second {
 		t.Fatalf("expected update id to be the stable identity: %s != %s", first, second)
 	}
 }
 
 func TestUpdateEventIDUsesPayloadHashWithoutUpdateID(t *testing.T) {
-	first := updateEventID("bot-key", 7, 0, []byte(`{"ok":true}`))
-	second := updateEventID("bot-key", 7, 0, []byte(`{"ok":false}`))
+	first := updateEventID("bot-key", 7, 11, 0, []byte(`{"ok":true}`))
+	second := updateEventID("bot-key", 7, 11, 0, []byte(`{"ok":false}`))
 	if first == second {
 		t.Fatal("expected payload hash to distinguish updates without an id")
+	}
+}
+
+func TestUpdateEventIDSeparatesCollectorSources(t *testing.T) {
+	first := updateEventID("bot-key", 7, 11, 42, []byte(`{"ok":true}`))
+	second := updateEventID("bot-key", 7, 12, 42, []byte(`{"ok":true}`))
+	if first == second {
+		t.Fatal("expected different collector sources to have different event ids")
 	}
 }
 

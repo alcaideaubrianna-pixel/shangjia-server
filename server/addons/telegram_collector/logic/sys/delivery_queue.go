@@ -44,7 +44,8 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 	server := asynq.NewServer(collectorRedisOption(runtimeCtx), asynq.Config{
 		Concurrency: collectorDeliveryConcurrency(runtimeCtx),
 		Queues: map[string]int{
-			consts.QueueDeliveryReady: 1,
+			consts.QueueDeliveryUrgent: 8,
+			consts.QueueDeliveryReady:  2,
 		},
 	})
 	if s.queueClient == nil {
@@ -79,8 +80,12 @@ func (s *sCollector) enqueueDeliveryTask(ctx context.Context, deliveryID int64, 
 	}
 	client := s.queueClient
 	s.queueMu.Unlock()
+	queueName := consts.QueueDeliveryReady
+	if priority >= sysin.EventPriorityUrgent {
+		queueName = consts.QueueDeliveryUrgent
+	}
 	_, err := client.EnqueueContext(ctx, asynq.NewTask(deliveryTaskType, collectorTaskPayload(deliveryID)),
-		asynq.Queue(consts.QueueDeliveryReady),
+		asynq.Queue(queueName),
 		asynq.MaxRetry(deliveryMaxAttempts-1),
 		asynq.Timeout(3*time.Minute),
 	)

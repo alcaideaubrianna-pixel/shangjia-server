@@ -10,6 +10,7 @@ const (
 	QueueMediaAccount    = "tg.media.account"
 	QueueMediaProcess    = "tg.media.process"
 	QueueDeliveryReady   = "tg.delivery.ready"
+	QueueDeliveryUrgent  = "tg.delivery.urgent"
 	QueuePublishUrgent   = "tg.publish.urgent"
 	QueuePublishNormal   = "tg.publish.normal"
 	QueuePublishRetry    = "tg.publish.retry"

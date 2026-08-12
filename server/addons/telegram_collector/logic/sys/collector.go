@@ -68,7 +68,7 @@ func (s *sCollector) IngestBotUpdate(ctx context.Context, bot collectorservice.B
 		return gerror.Wrap(err, "序列化Telegram采集事件失败")
 	}
 	event := sysin.RawUpdateEvent{
-		EventID:    updateEventID(bot.Key, bot.Binding.TenantID, update.ID, raw),
+		EventID:    updateEventID(bot.Key, bot.Binding.TenantID, bot.Binding.SourceID, update.ID, raw),
 		TenantID:   bot.Binding.TenantID,
 		SourceID:   bot.Binding.SourceID,
 		SourceType: sysin.SourceTypeBot,
@@ -457,12 +457,13 @@ func BuildMediaFingerprint(md5 string, size int64, kind, mimeType string) string
 	return collectorservice.BuildMediaFingerprint(md5, size, kind, mimeType)
 }
 
-func updateEventID(botKey string, tenantID, updateID int64, raw []byte) string {
+func updateEventID(botKey string, tenantID, sourceID, updateID int64, raw []byte) string {
+	scope := fmt.Sprintf("source:%d", sourceID)
 	if updateID > 0 {
-		return fmt.Sprintf("bot:%s:tenant:%d:update:%d", botKey, tenantID, updateID)
+		return fmt.Sprintf("bot:%s:tenant:%d:%s:update:%d", botKey, tenantID, scope, updateID)
 	}
 	hash := sha256.Sum256(raw)
-	return "bot:" + botKey + ":tenant:" + fmt.Sprintf("%d", tenantID) + ":hash:" + hex.EncodeToString(hash[:])
+	return "bot:" + botKey + ":tenant:" + fmt.Sprintf("%d", tenantID) + ":" + scope + ":hash:" + hex.EncodeToString(hash[:])
 }
 
 type botCollectorFeature struct{}
