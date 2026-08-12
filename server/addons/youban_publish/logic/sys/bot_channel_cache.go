@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-telegram/bot/models"
@@ -15,76 +14,13 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
-	"hotgo/internal/consts"
 )
 
 const publishBotChannelCacheTable = "hg_youban_publish_bot_channel_cache"
 
-var publishBotChannelCacheSchema = struct {
-	sync.Mutex
-	ready bool
-}{}
-
-func ensurePublishBotChannelCacheTable(ctx context.Context) error {
-	publishBotChannelCacheSchema.Lock()
-	defer publishBotChannelCacheSchema.Unlock()
-	if publishBotChannelCacheSchema.ready {
-		return nil
-	}
-	if strings.EqualFold(g.DB().GetConfig().Type, consts.DBPgsql) {
-		_, err := g.DB().Exec(ctx, `CREATE TABLE IF NOT EXISTS "hg_youban_publish_bot_channel_cache" (
-			"id" BIGSERIAL PRIMARY KEY,
-			"tenant_id" bigint NOT NULL DEFAULT 0,
-			"bot_id" bigint NOT NULL DEFAULT 0,
-			"chat_id" varchar(128) NOT NULL DEFAULT '',
-			"chat_type" varchar(32) NOT NULL DEFAULT '',
-			"chat_title" varchar(255) NOT NULL DEFAULT '',
-			"chat_username" varchar(128) NOT NULL DEFAULT '',
-			"is_broadcast" smallint NOT NULL DEFAULT 0,
-			"is_megagroup" smallint NOT NULL DEFAULT 0,
-			"message_count" integer NOT NULL DEFAULT 0,
-			"last_message_text" text,
-			"last_message_at" timestamp DEFAULT NULL,
-			"created_at" timestamp DEFAULT NULL,
-			"updated_at" timestamp DEFAULT NULL
-		);
-		CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_bot_channel_cache_bot_chat" ON "hg_youban_publish_bot_channel_cache" ("tenant_id", "bot_id", "chat_id");
-		CREATE INDEX IF NOT EXISTS "idx_ybp_bot_channel_cache_list" ON "hg_youban_publish_bot_channel_cache" ("tenant_id", "bot_id", "last_message_at", "id");`)
-		if err == nil {
-			publishBotChannelCacheSchema.ready = true
-		}
-		return err
-	}
-	_, err := g.DB().Exec(ctx, `CREATE TABLE IF NOT EXISTS hg_youban_publish_bot_channel_cache (
-		id BIGINT AUTO_INCREMENT PRIMARY KEY,
-		tenant_id BIGINT NOT NULL DEFAULT 0,
-		bot_id BIGINT NOT NULL DEFAULT 0,
-		chat_id VARCHAR(128) NOT NULL DEFAULT '',
-		chat_type VARCHAR(32) NOT NULL DEFAULT '',
-		chat_title VARCHAR(255) NOT NULL DEFAULT '',
-		chat_username VARCHAR(128) NOT NULL DEFAULT '',
-		is_broadcast TINYINT NOT NULL DEFAULT 0,
-		is_megagroup TINYINT NOT NULL DEFAULT 0,
-		message_count INT NOT NULL DEFAULT 0,
-		last_message_text TEXT,
-		last_message_at DATETIME NULL,
-		created_at DATETIME NULL,
-		updated_at DATETIME NULL,
-		UNIQUE KEY uk_ybp_bot_channel_cache_bot_chat (tenant_id, bot_id, chat_id),
-		KEY idx_ybp_bot_channel_cache_list (tenant_id, bot_id, last_message_at, id)
-	)`)
-	if err == nil {
-		publishBotChannelCacheSchema.ready = true
-	}
-	return err
-}
-
 func (s *sSysPublish) cacheBotMessage(ctx context.Context, tenantId, botId int64, msg *models.Message) error {
 	if tenantId <= 0 || botId <= 0 || msg == nil || msg.Chat.ID == 0 {
 		return nil
-	}
-	if err := ensurePublishBotChannelCacheTable(ctx); err != nil {
-		return err
 	}
 	chatType := strings.TrimSpace(string(msg.Chat.Type))
 	if chatType != "private" && chatType != "channel" && chatType != "group" && chatType != "supergroup" {
@@ -132,9 +68,6 @@ func (s *sSysPublish) cacheBotMessage(ctx context.Context, tenantId, botId int64
 func (s *sSysPublish) AdminBotChannelCacheList(ctx context.Context, in *sysin.BotChannelCacheListInp) (list []*sysin.BotChannelCacheModel, totalCount int, err error) {
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
-		return nil, 0, err
-	}
-	if err = ensurePublishBotChannelCacheTable(ctx); err != nil {
 		return nil, 0, err
 	}
 	if in == nil {

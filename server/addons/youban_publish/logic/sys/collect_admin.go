@@ -155,28 +155,21 @@ func (s *sSysPublish) CollectSourceDelete(ctx context.Context, in *sysin.IdsInp)
 		return gerror.New("请选择采集源")
 	}
 	ids := uniqueIds(in.Ids)
-	for _, sourceId := range ids {
-		if err = s.cancelCollectSourceRuntime(ctx, sourceId, account.TenantId, account.Id); err != nil {
-			return gerror.Wrap(err, "取消采集源任务失败")
-		}
-		if err = s.clearCollectSourceDedupe(ctx, sourceId, account.TenantId, account.Id); err != nil {
-			return gerror.Wrap(err, "清理采集源去重数据失败")
-		}
-	}
+	now := gtime.Now()
 	err = pdao.YoubanPublishCollectSource.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if _, updateErr := tx.Model(pdao.YoubanPublishCollectSource.Table()).Ctx(ctx).
+			WhereIn("id", ids).
+			Where("tenant_id", account.TenantId).
+			Where("account_id", account.Id).
+			WhereNull("deleted_at").
+			Data(g.Map{"collect_enabled": 0, "deleted_at": now, "updated_by": account.Id, "updated_at": now}).Update(); updateErr != nil {
+			return gerror.Wrap(updateErr, "标记采集源删除失败")
+		}
 		if _, deleteErr := tx.Model(pdao.YoubanPublishCollectSourceRule.Table()).Ctx(ctx).
 			WhereIn("source_id", ids).
 			Where("tenant_id", account.TenantId).
 			Delete(); deleteErr != nil {
 			return gerror.Wrap(deleteErr, "删除采集源规则绑定失败")
-		}
-		if _, deleteErr := tx.Model(pdao.YoubanPublishCollectSource.Table()).Ctx(ctx).
-			WhereIn("id", ids).
-			Where("tenant_id", account.TenantId).
-			Where("account_id", account.Id).
-			Unscoped().
-			Delete(); deleteErr != nil {
-			return gerror.Wrap(deleteErr, "物理删除采集源失败")
 		}
 		return nil
 	})
@@ -184,6 +177,11 @@ func (s *sSysPublish) CollectSourceDelete(ctx context.Context, in *sysin.IdsInp)
 		s.refreshCollectEventRulesCache(ctx)
 		s.refreshCollectSourceCache(ctx)
 		s.refreshAccountCollectSupervisor()
+		for _, sourceId := range ids {
+			if enqueueErr := s.enqueueCollectSourceDelete(ctx, collectSourceDeleteQueuePayload{SourceId: sourceId, TenantId: account.TenantId, AccountId: account.Id}); enqueueErr != nil {
+				return gerror.Wrap(enqueueErr, "投递采集源删除清理任务失败")
+			}
+		}
 	}
 	return gerror.Wrap(err, "删除采集源失败")
 }

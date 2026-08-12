@@ -407,9 +407,6 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 	if len(profileIds) == 0 {
 		return nil
 	}
-	if err := ensurePublishBotChannelCacheTable(ctx); err != nil {
-		return gerror.Wrap(err, "初始化Bot采集来源缓存失败")
-	}
 	var rows []profileCollectionMetadataRow
 	err := g.DB().Model(publishCollectDispatchTable+" d").Safe().Ctx(ctx).
 		InnerJoin(publishCollectSourceTable+" s", "s.id=d.source_id AND s.deleted_at IS NULL").

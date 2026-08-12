@@ -16,6 +16,25 @@ import (
 
 const collectSourceCanceledMessage = "采集源已删除，未完成任务已取消"
 
+func (s *sSysPublish) executeCollectSourceDeleteCleanup(ctx context.Context, sourceId, tenantId, accountId int64) error {
+	now := gtime.Now()
+	taskIDs, err := s.cancelCollectSourceHistoryTasks(ctx, sourceId, tenantId, accountId, now)
+	if err != nil {
+		return err
+	}
+	if err = s.cancelCollectSourceEvents(ctx, sourceId, tenantId, accountId, now); err != nil {
+		return err
+	}
+	if err = s.clearCollectSourceAsynqTasks(ctx, sourceId, taskIDs); err != nil {
+		return err
+	}
+	if err = clearCollectDedupeCacheForAccount(ctx, tenantId, accountId); err != nil {
+		return gerror.Wrap(err, "清理采集源去重缓存失败")
+	}
+	g.Log().Infof(ctx, "采集源删除清理完成 sourceId:%d historyTasks:%d", sourceId, len(taskIDs))
+	return nil
+}
+
 func (s *sSysPublish) cancelCollectSourceRuntime(ctx context.Context, sourceId int64, tenantId int64, accountId int64) error {
 	if sourceId <= 0 || tenantId <= 0 || accountId <= 0 {
 		return gerror.New("采集源取消参数不完整")

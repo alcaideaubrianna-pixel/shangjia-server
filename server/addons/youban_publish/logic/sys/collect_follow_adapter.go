@@ -73,9 +73,6 @@ func (s *sSysPublish) collectFollowProfilePublished(ctx context.Context, task gd
 }
 
 func (s *sSysPublish) collectFollowSources(ctx context.Context, authorAccountId int64) ([]gdb.Record, error) {
-	if err := ensureTenantVipTables(ctx); err != nil {
-		return nil, err
-	}
 	sourceDao := pdao.YoubanPublishCollectSource
 	followDao := pdao.YoubanPublishAccountFollow
 	sourceCols := sourceDao.Columns()

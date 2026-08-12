@@ -12,9 +12,6 @@ import (
 )
 
 func (s *sSysPublish) AdminChannelCacheList(ctx context.Context, in *sysin.ChannelCacheListInp) (list []*sysin.ChannelCacheModel, totalCount int, err error) {
-	if err = ensurePublishTgChannelColumns(ctx); err != nil {
-		return nil, 0, err
-	}
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -35,9 +32,6 @@ func (s *sSysPublish) AdminChannelCacheList(ctx context.Context, in *sysin.Chann
 }
 
 func (s *sSysPublish) ServerChannelCacheList(ctx context.Context, in *sysin.ChannelCacheListInp) (list []*sysin.ChannelCacheModel, totalCount int, err error) {
-	if err = ensurePublishTgChannelColumns(ctx); err != nil {
-		return nil, 0, err
-	}
 	if err = s.requireSystemSuperAdmin(ctx); err != nil {
 		return nil, 0, err
 	}
@@ -162,9 +156,6 @@ func (s *sSysPublish) AdminChannelCacheResolve(ctx context.Context, in *sysin.Ch
 }
 
 func (s *sSysPublish) AdminChannelCacheRefresh(ctx context.Context, in *sysin.ChannelCacheRefreshInp) (res *sysin.ChannelCacheRefreshModel, err error) {
-	if err = ensurePublishTgChannelColumns(ctx); err != nil {
-		return nil, err
-	}
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err

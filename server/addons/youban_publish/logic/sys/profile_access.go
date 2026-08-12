@@ -39,9 +39,6 @@ func (s *sSysPublish) allowedProfileIds(ctx context.Context, ids []int64, tenant
 }
 
 func (s *sSysPublish) ensureProfileChannels(ctx context.Context, ids []int64, tenantId int64) error {
-	if err := ensurePublishChannelColumns(ctx); err != nil {
-		return err
-	}
 	ids = uniqueIds(ids)
 	if len(ids) == 0 {
 		return nil
@@ -64,9 +61,6 @@ func (s *sSysPublish) ensureProfileChannels(ctx context.Context, ids []int64, te
 }
 
 func (s *sSysPublish) availableProfileChannelIds(ctx context.Context, ids []int64, tenantId int64) ([]int64, error) {
-	if err := ensurePublishChannelColumns(ctx); err != nil {
-		return nil, err
-	}
 	ids = uniqueIds(ids)
 	if len(ids) == 0 {
 		return []int64{}, nil

@@ -83,6 +83,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	backgroundMux.HandleFunc(tgTaskTypeCollectTrigger, s.handleCollectTriggerTask)
 	backgroundMux.HandleFunc(tgTaskTypeChannelMemberSync, s.handleChannelMemberSyncTask)
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDown, s.handleCollectSourceDownTask)
+	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDelete, s.handleCollectSourceDeleteTask)
 	go func() {
 		if err := server.Run(backgroundMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件后台队列失败：%+v", err)
@@ -251,6 +252,14 @@ func (s *sSysPublish) handleCollectSourceDownTask(ctx context.Context, task *asy
 	}
 	_, err = s.ExecuteCollectSourceDown(ctx, payload.SourceId, payload.TenantId, payload.AccountId)
 	return err
+}
+
+func (s *sSysPublish) handleCollectSourceDeleteTask(ctx context.Context, task *asynq.Task) error {
+	payload, err := decodeCollectSourceDeleteQueuePayload(task)
+	if err != nil {
+		return err
+	}
+	return s.executeCollectSourceDeleteCleanup(ctx, payload.SourceId, payload.TenantId, payload.AccountId)
 }
 
 func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.Task) error {

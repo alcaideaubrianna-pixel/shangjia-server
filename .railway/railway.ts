@@ -112,18 +112,6 @@ export default defineRailway(() => {
     },
   });
 
-  const worker = service("xiaohuiji-worker", {
-    source: appImage,
-    start: "/app/hotgo worker",
-    healthcheck: "/readyz",
-    replicas: { [singapore]: 1 },
-    env: {
-      ...commonEnv,
-      YOUBAN_RUNTIME_ROLES: "worker",
-      YOUBAN_TELEMETRY_SERVICE_NAME: "xiaohuiji-worker",
-    },
-  });
-
   const collectorWorker = service("xiaohuiji-collector-worker", {
     source: appImage,
     start: "/app/hotgo collector-worker",
@@ -193,7 +181,6 @@ export default defineRailway(() => {
       observe,
       collector,
       api,
-      worker,
       collectorWorker,
       mediaWorker,
       publishWorker,

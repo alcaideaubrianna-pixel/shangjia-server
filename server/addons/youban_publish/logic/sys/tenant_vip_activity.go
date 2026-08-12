@@ -88,10 +88,6 @@ func (s *sSysPublish) tenantVipActivities(ctx context.Context, account *sysin.Ac
 	if account == nil || account.TenantId <= 0 {
 		return []*sysin.TenantVipActivityModel{}, cfg, nil
 	}
-	if err = ensureTenantVipTables(ctx); err != nil {
-		return nil, nil, err
-	}
-
 	var summaries []*tenantVipEventSummary
 	err = g.DB().Model(tenantVipEventTable).Safe().Ctx(ctx).
 		Fields("event_type,COUNT(*) AS count,COALESCE(SUM(change_days),0) AS days").
@@ -316,9 +312,6 @@ func (s *sSysPublish) applyTenantVipExtension(ctx context.Context, in *tenantVip
 	if in == nil || in.TenantId <= 0 || in.Level <= 0 || in.Days <= 0 {
 		return nil, gerror.New("会员变更参数不完整")
 	}
-	if err := ensureTenantVipTables(ctx); err != nil {
-		return nil, err
-	}
 	in.EventKey = strings.TrimSpace(in.EventKey)
 	if in.EventKey == "" {
 		in.EventKey = fmt.Sprintf("%s:%d:%d", in.EventType, in.TenantId, gtime.Now().TimestampNano())
@@ -426,9 +419,6 @@ func tenantVipExtensionExpiredAt(now *gtime.Time, currentExpiredAt *gtime.Time, 
 func (s *sSysPublish) applyTenantVipUntil(ctx context.Context, tenantId int64, level int, expiredAt *gtime.Time, remark string, eventType string) error {
 	if tenantId <= 0 {
 		return gerror.New("账号归属不能为空")
-	}
-	if err := ensureTenantVipTables(ctx); err != nil {
-		return err
 	}
 	result := &tenantVipChangeResult{}
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
@@ -692,9 +682,6 @@ func (s *sSysPublish) tenantVipNotifyAccountId(ctx context.Context, tenantId int
 func (s *sSysPublish) ProcessTenantVipLifecycle(ctx context.Context, limit int) error {
 	if limit <= 0 || limit > 1000 {
 		limit = 500
-	}
-	if err := ensureTenantVipTables(ctx); err != nil {
-		return err
 	}
 	if err := s.reconcileTenantVipBindings(ctx, limit); err != nil {
 		return err

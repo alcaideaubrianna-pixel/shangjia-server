@@ -19,9 +19,6 @@ import (
 )
 
 func (s *sSysPublish) AdminChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error) {
-	if err = ensurePublishChannelColumns(ctx); err != nil {
-		return nil, 0, err
-	}
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -98,9 +95,6 @@ func deduplicateChannelsByTargetChatId(list []*sysin.ChannelModel) []*sysin.Chan
 }
 
 func (s *sSysPublish) MyChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error) {
-	if err = ensurePublishChannelColumns(ctx); err != nil {
-		return nil, 0, err
-	}
 	account, err := s.currentAccount(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -137,9 +131,6 @@ func (s *sSysPublish) MyChannelList(ctx context.Context, in *sysin.ChannelListIn
 }
 
 func (s *sSysPublish) ServerChannelList(ctx context.Context, in *sysin.ChannelListInp) (list []*sysin.ChannelModel, totalCount int, err error) {
-	if err = ensurePublishChannelColumns(ctx); err != nil {
-		return nil, 0, err
-	}
 	if in == nil {
 		in = &sysin.ChannelListInp{}
 	}
@@ -167,9 +158,6 @@ func (s *sSysPublish) ServerChannelList(ctx context.Context, in *sysin.ChannelLi
 }
 
 func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSaveInp) (err error) {
-	if err = ensurePublishChannelColumns(ctx); err != nil {
-		return err
-	}
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return err

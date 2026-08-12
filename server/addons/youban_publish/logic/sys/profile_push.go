@@ -20,9 +20,6 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 	if len(channelIds) == 0 {
 		return []*sysin.ProfilePushChannelModel{}, nil
 	}
-	if err := ensurePublishChannelColumns(ctx); err != nil {
-		return nil, err
-	}
 	var channels []*sysin.ProfilePushChannelModel
 	mod := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Fields("id AS channel_id,channel_title,channel_username,status,cycle_publish_enabled,cycle_publish_days").

@@ -15,30 +15,31 @@ import (
 )
 
 const (
-	tgQueueNameUrgent           = "youban_publish_tg_urgent"
-	tgQueueNameDefault          = "youban_publish_tg"
-	tgQueueNameBulk             = "youban_publish_tg_bulk"
-	tgQueueNameMedia            = "youban_publish_media"
-	tgQueueNameMediaRealtime    = "youban_publish_media_realtime"
-	tgQueueNameMediaBulkPrefix  = "youban_publish_media_bulk_"
-	tgQueueNameBackground       = "youban_publish_background"
-	tgQueueNameHistory          = "youban_publish_history"
-	tgTaskTypePublish           = "youban_publish:tg:publish"
-	tgTaskTypeCleanup           = "youban_publish:tg:cleanup"
-	tgTaskTypeImport            = "youban_publish:import:legacy"
-	tgTaskTypeRepair            = "youban_publish:tg:message_repair"
-	tgTaskTypeImportMatch       = "youban_publish:import:tg_match"
-	tgTaskTypeImportSync        = "youban_publish:import:tg_sync"
-	tgTaskTypeDown              = "youban_publish:profile:down"
-	tgTaskTypeCycleRun          = "youban_publish:cycle:run"
-	tgTaskTypeCycleReschedule   = "youban_publish:cycle:reschedule"
-	tgTaskTypeCycleRefresh      = "youban_publish:cycle:refresh"
-	tgTaskTypeCollectMedia      = "youban_publish:collect:media_cache"
-	tgTaskTypeMediaProcess      = "youban_publish:media:process"
-	tgTaskTypeCollectProcess    = "youban_publish:collect:process"
-	tgTaskTypeCollectHistory    = "youban_publish:collect:history"
-	tgTaskTypeCollectTrigger    = "youban_publish:collect:trigger"
-	tgTaskTypeChannelMemberSync = "youban_publish:tg:channel_member_sync"
+	tgQueueNameUrgent             = "youban_publish_tg_urgent"
+	tgQueueNameDefault            = "youban_publish_tg"
+	tgQueueNameBulk               = "youban_publish_tg_bulk"
+	tgQueueNameMedia              = "youban_publish_media"
+	tgQueueNameMediaRealtime      = "youban_publish_media_realtime"
+	tgQueueNameMediaBulkPrefix    = "youban_publish_media_bulk_"
+	tgQueueNameBackground         = "youban_publish_background"
+	tgQueueNameHistory            = "youban_publish_history"
+	tgTaskTypePublish             = "youban_publish:tg:publish"
+	tgTaskTypeCleanup             = "youban_publish:tg:cleanup"
+	tgTaskTypeImport              = "youban_publish:import:legacy"
+	tgTaskTypeRepair              = "youban_publish:tg:message_repair"
+	tgTaskTypeImportMatch         = "youban_publish:import:tg_match"
+	tgTaskTypeImportSync          = "youban_publish:import:tg_sync"
+	tgTaskTypeDown                = "youban_publish:profile:down"
+	tgTaskTypeCycleRun            = "youban_publish:cycle:run"
+	tgTaskTypeCycleReschedule     = "youban_publish:cycle:reschedule"
+	tgTaskTypeCycleRefresh        = "youban_publish:cycle:refresh"
+	tgTaskTypeCollectMedia        = "youban_publish:collect:media_cache"
+	tgTaskTypeMediaProcess        = "youban_publish:media:process"
+	tgTaskTypeCollectProcess      = "youban_publish:collect:process"
+	tgTaskTypeCollectHistory      = "youban_publish:collect:history"
+	tgTaskTypeCollectTrigger      = "youban_publish:collect:trigger"
+	tgTaskTypeCollectSourceDelete = "youban_publish:collect:source_delete"
+	tgTaskTypeChannelMemberSync   = "youban_publish:tg:channel_member_sync"
 )
 
 const collectMediaMaxBulkQueueShards = 16
@@ -111,6 +112,12 @@ type collectHistoryQueuePayload struct {
 }
 
 type collectTriggerQueuePayload struct {
+	AccountId int64 `json:"accountId"`
+	SourceId  int64 `json:"sourceId"`
+	TenantId  int64 `json:"tenantId"`
+}
+
+type collectSourceDeleteQueuePayload struct {
 	AccountId int64 `json:"accountId"`
 	SourceId  int64 `json:"sourceId"`
 	TenantId  int64 `json:"tenantId"`

@@ -83,9 +83,6 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 }
 
 func (s *sSysPublish) startPublishSchedulers(ctx context.Context) {
-	if err := ensurePublishChannelColumns(ctx); err != nil {
-		g.Log().Errorf(ctx, "检查频道循环上架字段失败：%+v", err)
-	}
 	if err := s.backfillPublishSuccessRecords(ctx, 5000); err != nil {
 		g.Log().Warningf(ctx, "补写成功发布记录失败：%+v", err)
 	}

@@ -87,9 +87,6 @@ func (s *sSysPublish) AdminTenantVipOrderList(ctx context.Context, in *sysin.Ten
 }
 
 func (s *sSysPublish) AdminTenantVipLogList(ctx context.Context, in *sysin.TenantVipLogListInp) ([]*sysin.TenantVipLogModel, int, error) {
-	if err := ensureTenantVipTables(ctx); err != nil {
-		return nil, 0, err
-	}
 	if in.Page <= 0 {
 		in.Page = 1
 	}
@@ -124,9 +121,6 @@ func (s *sSysPublish) AdminTenantVipLogList(ctx context.Context, in *sysin.Tenan
 }
 
 func (s *sSysPublish) AdminTenantVipCouponList(ctx context.Context, in *sysin.TenantVipCouponListInp) ([]*sysin.TenantVipCouponModel, int, error) {
-	if err := ensureTenantVipTables(ctx); err != nil {
-		return nil, 0, err
-	}
 	if in.Page <= 0 {
 		in.Page = 1
 	}
@@ -152,9 +146,6 @@ func (s *sSysPublish) AdminTenantVipCouponList(ctx context.Context, in *sysin.Te
 }
 
 func (s *sSysPublish) AdminTenantVipCouponSave(ctx context.Context, in *sysin.TenantVipCouponSaveInp) error {
-	if err := ensureTenantVipTables(ctx); err != nil {
-		return err
-	}
 	code := strings.ToUpper(strings.TrimSpace(in.Code))
 	if code == "" {
 		code = randomTenantVipCouponCode()
@@ -244,9 +235,6 @@ func (s *sSysPublish) tenantVipOrderAmountWithCoupon(ctx context.Context, price 
 }
 
 func (s *sSysPublish) getTenantVipCouponByCode(ctx context.Context, code string) (*sysin.TenantVipCouponModel, error) {
-	if err := ensureTenantVipTables(ctx); err != nil {
-		return nil, err
-	}
 	var coupon sysin.TenantVipCouponModel
 	if err := g.DB().Model(tenantVipCouponTable).Safe().Ctx(ctx).Where("code", strings.ToUpper(strings.TrimSpace(code))).WhereNull("deleted_at").Scan(&coupon); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

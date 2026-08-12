@@ -70,9 +70,6 @@ func activityAdminHandlerByCode(code string) *activityAdminHandler {
 }
 
 func (s *sSysPublish) AdminActivityList(ctx context.Context) ([]*sysin.ActivityModel, error) {
-	if err := ensureTenantVipTables(ctx); err != nil {
-		return nil, err
-	}
 	cfg, err := isc.SysConfig().GetYoubanPublishVipActivity(ctx)
 	if err != nil {
 		return nil, err
@@ -128,9 +125,6 @@ func (s *sSysPublish) AdminActivitySave(ctx context.Context, in *sysin.ActivityS
 }
 
 func (s *sSysPublish) AdminActivityRewardList(ctx context.Context, in *sysin.ActivityRewardListInp) (list []*sysin.ActivityRewardModel, totalCount int, err error) {
-	if err = ensureTenantVipTables(ctx); err != nil {
-		return
-	}
 	if in == nil {
 		in = &sysin.ActivityRewardListInp{}
 	}
@@ -219,9 +213,6 @@ func (s *sSysPublish) AdminActivityReset(ctx context.Context, in *sysin.Activity
 	if strings.TrimSpace(in.Reason) == "" {
 		return gerror.New("请填写重置原因")
 	}
-	if err := ensureTenantVipTables(ctx); err != nil {
-		return err
-	}
 	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		now := gtime.Now()
 		var row struct {
@@ -267,9 +258,6 @@ func tenantVipActivityEventKey(baseKey string, generation int) string {
 }
 
 func (s *sSysPublish) tenantVipActivityGeneration(ctx context.Context, code string, tenantId int64) (int, error) {
-	if err := ensureTenantVipTables(ctx); err != nil {
-		return 0, err
-	}
 	value, err := g.DB().Model(activityGenerationTable).Safe().Ctx(ctx).
 		Fields("generation").Where("activity_code", code).Where("tenant_id", tenantId).Value()
 	if err != nil {

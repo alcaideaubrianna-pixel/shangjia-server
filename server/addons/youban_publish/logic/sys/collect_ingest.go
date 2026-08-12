@@ -124,9 +124,6 @@ func (s *sSysPublish) logCollectBotSkip(ctx context.Context, botId int64, msg *m
 }
 
 func (s *sSysPublish) collectSourcesByBotMessage(ctx context.Context, botId int64, msg *models.Message) ([]g.Map, error) {
-	if err := ensureTenantVipTables(ctx); err != nil {
-		return nil, err
-	}
 	version := s.collectSourceCacheVersion(ctx)
 	cacheKey := fmt.Sprintf("youban_publish:collect:sources:%s:%d", version, botId)
 	if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {
