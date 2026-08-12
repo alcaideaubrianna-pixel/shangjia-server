@@ -40,6 +40,8 @@ export default defineRailway(() => {
     YOUBAN_APP_NAME: "youban",
     YOUBAN_MODE: "product",
     YOUBAN_DEBUG: "false",
+    YOUBAN_LOG_LEVEL: "info",
+    YOUBAN_DB_LOG_LEVEL: "warning",
     YOUBAN_DB_DRIVER: "pgsql",
     YOUBAN_DB_HOST: database.env.PGHOST,
     YOUBAN_DB_PORT: database.env.PGPORT,

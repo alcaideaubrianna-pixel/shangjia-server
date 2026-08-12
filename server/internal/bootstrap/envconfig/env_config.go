@@ -18,6 +18,8 @@ var items = []item{
 	{Key: "system.appName", EnvKeys: []string{"GF_SYSTEM_APPNAME", "YOUBAN_APP_NAME", "APP_NAME"}},
 	{Key: "system.mode", EnvKeys: []string{"GF_SYSTEM_MODE", "YOUBAN_MODE", "APP_MODE", "MODE"}},
 	{Key: "system.debug", EnvKeys: []string{"GF_SYSTEM_DEBUG", "YOUBAN_DEBUG", "APP_DEBUG", "DEBUG"}},
+	{Key: "logger.level", EnvKeys: []string{"GF_LOGGER_LEVEL", "YOUBAN_LOG_LEVEL", "LOG_LEVEL"}},
+	{Key: "database.logger.level", EnvKeys: []string{"GF_DATABASE_LOGGER_LEVEL", "YOUBAN_DB_LOG_LEVEL", "DATABASE_LOG_LEVEL"}},
 	{Key: "server.address", EnvKeys: []string{"GF_SERVER_ADDRESS", "YOUBAN_SERVER_ADDRESS"}},
 	{Key: "cache.adapter", EnvKeys: []string{"GF_CACHE_ADAPTER", "YOUBAN_CACHE_ADAPTER", "CACHE_ADAPTER"}},
 	{Key: "token.secretKey", EnvKeys: []string{"GF_TOKEN_SECRETKEY", "GF_TOKEN_SECRET_KEY", "YOUBAN_TOKEN_SECRET", "TOKEN_SECRET_KEY"}},
