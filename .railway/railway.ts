@@ -148,6 +148,18 @@ export default defineRailway(() => {
     },
   });
 
+  const backgroundWorker = service("xiaohuiji-background-worker", {
+    source: appImage,
+    start: "/app/hotgo background-worker",
+    healthcheck: "/readyz",
+    replicas: { [singapore]: 1 },
+    env: {
+      ...commonEnv,
+      YOUBAN_RUNTIME_ROLES: "background-worker",
+      YOUBAN_TELEMETRY_SERVICE_NAME: "xiaohuiji-background-worker",
+    },
+  });
+
   const account = service("xiaohuiji-account", {
     source: appImage,
     start: "/app/hotgo account",
@@ -184,6 +196,7 @@ export default defineRailway(() => {
       collectorWorker,
       mediaWorker,
       publishWorker,
+      backgroundWorker,
       account,
       scheduler,
     ],
