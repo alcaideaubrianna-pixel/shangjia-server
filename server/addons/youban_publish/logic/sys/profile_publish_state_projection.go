@@ -213,7 +213,7 @@ func (s *sSysPublish) recoverProfilePublishOperationState(ctx context.Context, s
 		Fields("COUNT(1) AS total," +
 			"SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed," +
 			"SUM(CASE WHEN status='sending' THEN 1 ELSE 0 END) AS sending," +
-			"SUM(CASE WHEN status IN ('pending','failed_retry') THEN 1 ELSE 0 END) AS pending," +
+			"SUM(CASE WHEN status IN ('pending','failed_retry','unknown') THEN 1 ELSE 0 END) AS pending," +
 			"SUM(CASE WHEN status IN ('sent','superseded') THEN 1 ELSE 0 END) AS completed").
 		One()
 	if err != nil {
