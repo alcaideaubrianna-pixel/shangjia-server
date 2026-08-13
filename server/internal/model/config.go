@@ -72,7 +72,10 @@ type UploadConfig struct {
 	// 腾讯云cos配置
 	CosSecretId  string `json:"uploadCosSecretId"`
 	CosSecretKey string `json:"uploadCosSecretKey"`
+	CosBucket    string `json:"uploadCosBucket"`
+	CosRegion    string `json:"uploadCosRegion"`
 	CosBucketURL string `json:"uploadCosBucketURL"`
+	CosUploadURL string `json:"uploadCosUploadURL"`
 	CosPublicURL string `json:"uploadCosPublicURL"`
 	CosPath      string `json:"uploadCosPath"`
 	// 阿里云oss配置

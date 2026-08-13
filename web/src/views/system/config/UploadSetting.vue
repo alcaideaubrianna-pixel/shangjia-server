@@ -97,15 +97,36 @@
               <n-input v-model:value="formValue.uploadCosPath" placeholder="" />
               <template #feedback>填对对象存储中的相对路径</template>
             </n-form-item>
-            <n-form-item label="上传 Bucket 域名" path="uploadCosBucketURL">
+            <n-form-item label="COS Bucket" path="uploadCosBucket">
+              <n-input
+                v-model:value="formValue.uploadCosBucket"
+                placeholder="例如：bucket-1250000000"
+              />
+              <template #feedback>存储桶名称，必须包含 APPID 后缀</template>
+            </n-form-item>
+            <n-form-item label="COS Region" path="uploadCosRegion">
+              <n-input v-model:value="formValue.uploadCosRegion" placeholder="例如：ap-hongkong" />
+              <template #feedback>存储桶所属地域</template>
+            </n-form-item>
+            <n-form-item label="COS 源站域名" path="uploadCosBucketURL">
               <n-input v-model:value="formValue.uploadCosBucketURL" placeholder="" />
               <template #feedback
-                >服务端 SDK 上传地址，例如：https://bucket.example.com</template
+                >服务端 SDK
+                地址，例如：https://bucket-1250000000.cos.ap-hongkong.myqcloud.com</template
+              >
+            </n-form-item>
+            <n-form-item label="浏览器上传域名" path="uploadCosUploadURL">
+              <n-input v-model:value="formValue.uploadCosUploadURL" placeholder="" />
+              <template #feedback
+                >可选；仅当 CDN 已放行 PUT、POST、HEAD、DELETE 和 OPTIONS 时填写，为空直接上传 COS
+                源站</template
               >
             </n-form-item>
             <n-form-item label="公开访问域名" path="uploadCosPublicURL">
               <n-input v-model:value="formValue.uploadCosPublicURL" placeholder="" />
-              <template #feedback>前端展示/CDN 域名，例如：https://img.example.com；为空则使用 Bucket 域名</template>
+              <template #feedback
+                >前端展示/CDN 域名，例如：https://img.example.com；为空则使用 Bucket 域名</template
+              >
             </n-form-item>
           </n-tab-pane>
 
@@ -349,7 +370,10 @@
     uploadUCloudEndpoint: '',
     uploadCosSecretId: '',
     uploadCosSecretKey: '',
+    uploadCosBucket: '',
+    uploadCosRegion: '',
     uploadCosBucketURL: '',
+    uploadCosUploadURL: '',
     uploadCosPublicURL: '',
     uploadCosPath: '',
     uploadOssSecretId: '',

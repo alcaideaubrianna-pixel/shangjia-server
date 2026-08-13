@@ -90,7 +90,7 @@ func (s *sSysPublish) createMediaDirectUpload(ctx context.Context, in *sysin.Med
 	if _, err := s.resolveMediaEditTask(ctx, &in.MediaUploadInp, tenantId, accountId); err != nil {
 		return nil, err
 	}
-	bucket, region, err := directUploadBucketRegionFromConfig(cfg.CosBucketURL, cfg.CosPublicURL)
+	bucket, region, err := directUploadBucketRegionFromConfig(cfg.CosBucket, cfg.CosRegion, cfg.CosBucketURL, cfg.CosPublicURL)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func (s *sSysPublish) createMediaDirectUpload(ctx context.Context, in *sysin.Med
 		Bucket:       bucket,
 		Region:       region,
 		Key:          key,
-		UploadDomain: directUploadCDNDomain(cfg.CosPublicURL),
+		UploadDomain: directUploadDomain(cfg.CosUploadURL),
 	}, nil
 }
 
@@ -299,22 +299,27 @@ func directUploadBucketRegion(rawURL string) (string, string, error) {
 	return parts[0], parts[2], nil
 }
 
-func directUploadBucketRegionFromConfig(bucketURL, publicURL string) (string, string, error) {
+func directUploadBucketRegionFromConfig(bucket, region, bucketURL, publicURL string) (string, string, error) {
+	bucket = strings.TrimSpace(bucket)
+	region = strings.TrimSpace(region)
+	if bucket != "" || region != "" {
+		if bucket == "" || region == "" {
+			return "", "", gerror.New("COS Bucket和Region必须同时配置")
+		}
+		return bucket, region, nil
+	}
 	for _, candidate := range []string{bucketURL, publicURL} {
-		bucket, region, err := directUploadBucketRegion(candidate)
+		parsedBucket, parsedRegion, err := directUploadBucketRegion(candidate)
 		if err == nil {
-			return bucket, region, nil
+			return parsedBucket, parsedRegion, nil
 		}
 	}
-	return "", "", gerror.New("无法识别COS Bucket和Region，请在uploadCosBucketURL中配置 *.cos.<region>.myqcloud.com 源站域名，CDN域名请配置到uploadCosPublicURL")
+	return "", "", gerror.New("无法识别COS Bucket和Region，请在后台明确配置COS Bucket与Region，或配置 *.cos.<region>.myqcloud.com 源站域名")
 }
 
-func directUploadCDNDomain(rawURL string) string {
+func directUploadDomain(rawURL string) string {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || u.Scheme == "" || u.Hostname() == "" {
-		return ""
-	}
-	if _, _, err = directUploadBucketRegion(rawURL); err == nil {
 		return ""
 	}
 	return strings.TrimRight(u.Scheme+"://"+u.Host, "/")
