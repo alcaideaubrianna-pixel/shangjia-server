@@ -154,18 +154,23 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 	nowText := telegramRecoveryTimeText(now)
 	deadline := telegramRecoveryTimeText(now.Add(-telegramPendingJobRecoverAfter))
 	var jobs []telegramJobRecord
-	eligible := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Fields("*, ROW_NUMBER() OVER (PARTITION BY tenant_id, channel_id ORDER BY priority ASC, id ASC) AS channel_rank").
-		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
-		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
-		Where(telegramActiveChannelCondition()).
-		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", nowText).
-		WhereLTE("updated_at", deadline)
-	err := g.DB().Model(eligible, "eligible_jobs").Safe().Ctx(ctx).
-		Where("channel_rank", 1).
-		OrderAsc("updated_at").OrderAsc("id").
-		Limit(limit).
-		Scan(&jobs)
+	query := `WITH eligible_jobs AS (
+		SELECT j.*, ROW_NUMBER() OVER (
+			PARTITION BY j.tenant_id, j.channel_id
+			ORDER BY j.priority ASC, j.id ASC
+		) AS channel_rank
+		FROM ` + publishTgJobTable + ` j
+		WHERE j.status IN ('pending', 'failed_retry', 'unknown')
+			AND (j.dispatch_status = ? OR j.dispatch_status = '')
+			AND ` + telegramActiveChannelConditionForAlias("j") + `
+			AND (j.next_retry_at IS NULL OR j.next_retry_at <= ?)
+			AND j.updated_at <= ?
+	)
+	SELECT * FROM eligible_jobs
+	WHERE channel_rank = 1
+	ORDER BY updated_at ASC, id ASC
+	LIMIT ?`
+	err := g.DB().GetScan(ctx, &jobs, query, tgDispatchStatusIdle, nowText, deadline, limit)
 	if err != nil {
 		observeErr = err
 		return gerror.Wrap(err, "读取待入队TG推送任务失败")
@@ -257,7 +262,10 @@ func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit
 }
 
 func telegramActiveChannelCondition() string {
-	jobTable := publishTgJobTable
+	return telegramActiveChannelConditionForAlias(publishTgJobTable)
+}
+
+func telegramActiveChannelConditionForAlias(jobTable string) string {
 	publishChannelCondition := "EXISTS (SELECT 1 FROM " + publishChannelTable + " c WHERE c.id=" + jobTable + ".channel_id AND c.tenant_id=" + jobTable + ".tenant_id AND c.status=1 AND c.deleted_at IS NULL)"
 	messagePushChannelCondition := "((" + jobTable + ".operation_no LIKE 'message_push:%' OR " + jobTable + ".operation_no LIKE 'message_push_plan:%') AND EXISTS (SELECT 1 FROM " + publishTgChannelTable + " tc WHERE tc.id=" + jobTable + ".channel_id AND tc.tenant_id=" + jobTable + ".tenant_id AND tc.tg_account_id=" + jobTable + ".account_id AND REPLACE(tc.channel_id, '-100', '') = REPLACE(" + jobTable + ".target_chat_id, '-100', '')))"
 	return "(" + publishChannelCondition + " OR " + messagePushChannelCondition + ")"
