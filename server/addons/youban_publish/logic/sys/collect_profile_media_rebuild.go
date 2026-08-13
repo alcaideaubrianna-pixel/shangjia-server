@@ -51,7 +51,7 @@ func RebuildCollectProfileMedia(ctx context.Context, options CollectProfileMedia
 
 func collectProfileMediaRebuildCandidates(ctx context.Context, options CollectProfileMediaRebuildOptions) (gdb.Result, error) {
 	model := g.DB().Model("hg_content_profile p").Safe().Ctx(ctx).
-		Fields("p.id AS profile_id,d.event_id,e.tenant_id,e.account_id,e.source_id,e.tg_account_id,e.media_count,COUNT(DISTINCT m.id) AS profile_media_count,COUNT(DISTINCT CASE WHEN COALESCE(em.source_file_id,'') <> '' OR COALESCE(em.source_message_ref,'') <> '' OR em.backup_message_id > 0 THEN em.id END) AS recoverable").
+		Fields("p.id AS profile_id,d.event_id,e.tenant_id,e.account_id,e.source_id,e.tg_account_id,e.media_count,e.material_role,e.material_group_status,COUNT(DISTINCT m.id) AS profile_media_count,COUNT(DISTINCT CASE WHEN COALESCE(em.source_file_id,'') <> '' OR COALESCE(em.source_message_ref,'') <> '' OR em.backup_message_id > 0 THEN em.id END) AS recoverable").
 		InnerJoin("hg_youban_publish_collect_dispatch d", "d.profile_id=p.id").
 		InnerJoin("hg_youban_publish_collect_event e", "e.id=d.event_id").
 		LeftJoin("hg_youban_publish_media m", "m.profile_id=p.id AND m.deleted_at IS NULL").
@@ -65,7 +65,7 @@ func collectProfileMediaRebuildCandidates(ctx context.Context, options CollectPr
 	if len(options.ProfileIDs) > 0 {
 		model = model.WhereIn("p.id", options.ProfileIDs)
 	}
-	rows, err := model.Group("p.id,d.event_id,e.tenant_id,e.account_id,e.source_id,e.tg_account_id,e.media_count").
+	rows, err := model.Group("p.id,d.event_id,e.tenant_id,e.account_id,e.source_id,e.tg_account_id,e.media_count,e.material_role,e.material_group_status").
 		Having("e.media_count > COUNT(DISTINCT m.id)").
 		OrderAsc("p.id").Limit(options.Limit).All()
 	return rows, gerror.Wrap(err, "读取资料媒体重建候选失败")
@@ -75,6 +75,14 @@ func collectProfileMediaRebuildRecoverable(count int) bool { return count > 0 }
 
 func (s *sSysPublish) resetCollectProfileMediaRebuild(ctx context.Context, row gdb.Record) error {
 	now := gtime.Now().Add(-10 * time.Minute)
+	materialRole := row["material_role"].String()
+	if materialRole != collectMaterialRoleDisplay && materialRole != collectMaterialRoleVerify {
+		materialRole = collectMaterialRoleDisplay
+	}
+	materialGroupStatus := row["material_group_status"].String()
+	if materialGroupStatus == "" || materialGroupStatus == collectMaterialGroupCollecting {
+		materialGroupStatus = "complete"
+	}
 	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if _, err := tx.Model("hg_youban_publish_collect_event_media").Safe().Ctx(ctx).
 			Where("event_id", row["event_id"].Int64()).
@@ -84,7 +92,7 @@ func (s *sSysPublish) resetCollectProfileMediaRebuild(ctx context.Context, row g
 		}
 		if _, err := tx.Model("hg_youban_publish_collect_event").Safe().Ctx(ctx).
 			Where("id", row["event_id"].Int64()).
-			Data(g.Map{"status": "media_pending", "material_role": "pending", "material_group_status": "collecting", "processed_at": nil, "error_message": "资料媒体重建：重新下载", "updated_at": now}).Update(); err != nil {
+			Data(g.Map{"status": "media_pending", "material_role": materialRole, "material_group_status": materialGroupStatus, "processed_at": nil, "error_message": "资料媒体重建：重新下载", "updated_at": now}).Update(); err != nil {
 			return gerror.Wrap(err, "重置资料采集事件失败")
 		}
 		return nil

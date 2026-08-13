@@ -47,7 +47,6 @@ func collectProfileMediaComplete(ctx context.Context, profileId int64) (bool, er
 		InnerJoin("hg_youban_publish_collect_event e", "e.id=d.event_id").
 		LeftJoin("hg_youban_publish_media m", "m.profile_id=d.profile_id AND m.deleted_at IS NULL").
 		Where("d.profile_id", profileId).
-		WhereNull("d.deleted_at").
 		One()
 	if err != nil {
 		return false, gerror.Wrap(err, "检查资料媒体完整性失败")
