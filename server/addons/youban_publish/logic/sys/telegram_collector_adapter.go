@@ -2,12 +2,11 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
-	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
@@ -108,15 +107,7 @@ func (h *publishCollectorDeliveryHandler) HandleCollectorDelivery(ctx context.Co
 	}
 	switch delivery.SourceType {
 	case collectorin.SourceTypeBot:
-		var update models.Update
-		if err := json.Unmarshal(delivery.RawUpdate, &update); err != nil {
-			return gerror.Wrap(err, "解析Telegram采集交付原始消息失败")
-		}
-		message, _ := telegramUpdateMessage(&update)
-		if message == nil {
-			return nil
-		}
-		return h.publish.collectBotMessage(ctx, delivery.SourceID, message)
+		return h.publish.ingestCollectorBotDelivery(ctx, delivery)
 	case collectorin.SourceTypeAccount:
 		return h.publish.ingestCollectorAccountDelivery(ctx, delivery)
 	default:
@@ -124,17 +115,53 @@ func (h *publishCollectorDeliveryHandler) HandleCollectorDelivery(ctx context.Co
 	}
 }
 
-func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
-	uniqueKey := strings.TrimSpace(delivery.SourceUniqueKey)
-	if groupedID := strings.TrimSpace(delivery.SourceGroupedID); groupedID != "" {
-		uniqueKey = accountCollectMaterialGroupKey(delivery, groupedID)
+func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
+	if !s.collectGlobalEnabled(ctx) {
+		return nil
 	}
+	source, err := g.DB().Model(publishCollectSourceTable+" s").Safe().Ctx(ctx).
+		InnerJoin("hg_youban_publish_tenant_vip vip", "vip.tenant_id=s.tenant_id AND vip.status=1 AND vip.level>0 AND vip.deleted_at IS NULL").
+		Fields("s.id,s.tenant_id,s.account_id").
+		Where("s.id", delivery.SourceID).
+		Where("s.source_type", sysin.CollectSourceTypeBot).
+		Where("s.collect_enabled", 1).
+		Where("s.status", 1).
+		Where("(vip.expired_at IS NULL OR vip.expired_at>?)", gtime.Now()).
+		WhereNull("s.deleted_at").
+		One()
+	if err != nil {
+		return gerror.Wrap(err, "读取Bot采集源失败")
+	}
+	if source.IsEmpty() {
+		return nil
+	}
+	blocked, err := s.botCollectMessageFromPublishChannel(ctx, source["tenant_id"].Int64(), g.NewVar(delivery.SourceChatID).Int64())
+	if err != nil {
+		return gerror.Wrap(err, "检查Bot采集上架频道过滤失败")
+	}
+	if blocked {
+		return nil
+	}
+	message := collectorDeliveryMessage(delivery, source["tenant_id"].Int64(), source["account_id"].Int64(), source["id"].Int64(), sysin.CollectSourceTypeBot)
+	_, err = s.ingestAndProcessCollectMessage(ctx, message)
+	return err
+}
+
+func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
+	message := collectorDeliveryMessage(delivery, delivery.TenantID, delivery.AccountID, delivery.SourceID, sysin.CollectSourceTypeAccount)
+	message.TgAccountId = delivery.TgAccountID
+	if groupedID := strings.TrimSpace(delivery.SourceGroupedID); groupedID != "" {
+		message.SourceUniqueKey = accountCollectMaterialGroupKey(delivery, groupedID)
+	}
+	_, err := s.ingestAndProcessCollectMessage(ctx, message)
+	return err
+}
+
+func collectorDeliveryMessage(delivery *collectorin.CollectorDelivery, tenantID, accountID, sourceID int64, sourceType string) *CollectMessage {
 	message := &CollectMessage{
-		TenantId: delivery.TenantID, AccountId: delivery.AccountID, SourceId: delivery.SourceID,
-		SourceType: sysin.CollectSourceTypeAccount, TgAccountId: delivery.TgAccountID,
+		TenantId: tenantID, AccountId: accountID, SourceId: sourceID, SourceType: sourceType,
 		SourceChatId: delivery.SourceChatID, SourceMessageId: delivery.SourceMessageID,
-		SourceGroupedId: delivery.SourceGroupedID, SourceUniqueKey: uniqueKey,
-		RawText: delivery.RawText,
+		SourceGroupedId: delivery.SourceGroupedID, SourceUniqueKey: delivery.SourceUniqueKey, RawText: delivery.RawText,
 	}
 	if !delivery.ReceivedAt.IsZero() {
 		message.ReceivedAt = gtime.New(delivery.ReceivedAt)
@@ -150,8 +177,7 @@ func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delive
 			SourceDCId: item.SourceDCID, SourceSize: item.SourceSize, DebugMetaJson: item.DebugMetaJSON,
 		})
 	}
-	_, err := s.ingestAndProcessCollectMessage(ctx, message)
-	return err
+	return message
 }
 
 func accountCollectMaterialGroupKey(delivery *collectorin.CollectorDelivery, groupedID string) string {

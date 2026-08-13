@@ -64,6 +64,7 @@ var (
 		>> 删除采集规则唯一编号字段  [go run main.go up -m=fix -a1=collectRuleRemoveUniqueNo]
 		>> 创建采集去重查询索引  [go run main.go up -m=fix -a1=collectDedupeIndexes]
 		>> 统一采集资料未上架状态  [go run main.go up -m=fix -a1=collectProfileOfflineState]
+		>> 修复拆分的Bot媒体组，默认仅预览  [go run main.go up -m=fix -a1=collectBotMediaGroupRepair -since="2026-08-12 19:00:00" -limit=100 -apply=1]
 		---------------------------------------------------------------------------------
 		更多
        	github地址：https://github.com/bufanyun/hotgo

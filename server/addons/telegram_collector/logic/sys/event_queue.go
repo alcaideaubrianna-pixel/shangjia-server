@@ -221,6 +221,14 @@ func collectorDeliveryFromEvent(row *entity.TgCollectorEvent, raw []byte) (sysin
 			if delivery.RawText == "" {
 				delivery.RawText = strings.TrimSpace(message.Caption)
 			}
+			delivery.SourceChatID = strconv.FormatInt(message.Chat.ID, 10)
+			delivery.SourceMessageID = int64(message.ID)
+			delivery.SourceGroupedID = strings.TrimSpace(message.MediaGroupID)
+			delivery.SourceUniqueKey = collectorBotMessageKey(row.SourceId, delivery.SourceChatID, delivery.SourceMessageID, delivery.SourceGroupedID)
+			delivery.Media = collectorBotMediaItems(message)
+			if message.Date > 0 {
+				delivery.ReceivedAt = time.Unix(int64(message.Date), 0)
+			}
 		}
 	case sysin.SourceTypeAccount:
 		var message sysin.AccountMessageEvent
@@ -240,6 +248,28 @@ func collectorDeliveryFromEvent(row *entity.TgCollectorEvent, raw []byte) (sysin
 		return sysin.CollectorDelivery{}, gerror.Newf("不支持的Telegram采集来源类型：%s", row.SourceType)
 	}
 	return delivery, nil
+}
+
+func collectorBotMessageKey(sourceID int64, chatID string, messageID int64, groupedID string) string {
+	if groupedID = strings.TrimSpace(groupedID); groupedID != "" {
+		return fmt.Sprintf("bot:%d:%s:group:%s", sourceID, chatID, groupedID)
+	}
+	return fmt.Sprintf("bot:%d:%s:message:%d", sourceID, chatID, messageID)
+}
+
+func collectorBotMediaItems(message *models.Message) []sysin.CollectorMediaItem {
+	items := make([]sysin.CollectorMediaItem, 0, 2)
+	if len(message.Photo) > 0 {
+		photo := message.Photo[len(message.Photo)-1]
+		items = append(items, sysin.CollectorMediaItem{Type: "photo", FileID: photo.FileID})
+	}
+	if message.Video != nil {
+		items = append(items, sysin.CollectorMediaItem{Type: "video", FileID: message.Video.FileID})
+	}
+	if message.Document != nil {
+		items = append(items, sysin.CollectorMediaItem{Type: "document", FileID: message.Document.FileID})
+	}
+	return items
 }
 
 func (s *sCollector) saveDelivery(ctx context.Context, delivery *sysin.CollectorDelivery) (int64, error) {

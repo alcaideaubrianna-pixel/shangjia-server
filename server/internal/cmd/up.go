@@ -8,10 +8,12 @@ package cmd
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcmd"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/install"
 	publishsys "hotgo/addons/youban_publish/logic/sys"
@@ -123,6 +125,24 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.NormalizeYoubanPublishCollectRelations(ctx)
 	case "collectMediaMetaNormalize":
 		err = fix.NormalizeYoubanPublishCollectMediaMeta(ctx)
+	case "collectBotMediaGroupRepair":
+		groupedIds := make([]string, 0)
+		for _, groupedId := range strings.Split(args["a2"], ",") {
+			if groupedId = strings.TrimSpace(groupedId); groupedId != "" {
+				groupedIds = append(groupedIds, groupedId)
+			}
+		}
+		limit, _ := strconv.Atoi(args["limit"])
+		result, repairErr := publishsys.RepairCollectBotMediaGroups(ctx, publishsys.CollectBotMediaGroupRepairOptions{
+			GroupedIDs: groupedIds,
+			Since:      gtime.NewFromStr(strings.TrimSpace(args["since"])),
+			Limit:      limit,
+			DryRun:     strings.TrimSpace(args["apply"]) != "1",
+		})
+		if repairErr != nil {
+			return repairErr
+		}
+		g.Log().Infof(ctx, "Bot媒体组修复完成 dryRun:%t groups:%d events:%d media:%d requeued:%d groupedIds:%v", strings.TrimSpace(args["apply"]) != "1", result.Groups, result.Events, result.Media, result.Requeued, result.GroupedIDs)
 	case "materialImportMediaNormalize":
 		err = fix.NormalizeYoubanPublishMaterialImportMedia(ctx)
 	case "materialImportMediaRepair":

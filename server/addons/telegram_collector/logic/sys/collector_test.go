@@ -116,6 +116,43 @@ func TestCollectorDeliveryFromAccountEvent(t *testing.T) {
 	}
 }
 
+func TestCollectorDeliveryFromBotMediaGroup(t *testing.T) {
+	receivedAt := time.Date(2026, 8, 14, 1, 0, 0, 0, time.UTC)
+	message := &models.Message{
+		ID: 101, Chat: models.Chat{ID: 7074948877}, MediaGroupID: "9001",
+		Caption: " 测试资料 ", Date: int(receivedAt.Unix()),
+		Photo: []models.PhotoSize{{FileID: "small"}, {FileID: "large"}},
+	}
+	raw, err := json.Marshal(&models.Update{Message: message})
+	if err != nil {
+		t.Fatalf("marshal bot update: %v", err)
+	}
+	delivery, err := collectorDeliveryFromEvent(&entity.TgCollectorEvent{
+		Id: 15, TenantId: 7, SourceId: 9, SourceType: sysin.SourceTypeBot,
+		ChatId: "7074948877", MessageId: 101,
+	}, raw)
+	if err != nil {
+		t.Fatalf("build bot delivery: %v", err)
+	}
+	if delivery.SourceGroupedID != "9001" || delivery.SourceUniqueKey != "bot:9:7074948877:group:9001" {
+		t.Fatalf("unexpected media group identity: %+v", delivery)
+	}
+	if delivery.RawText != "测试资料" || len(delivery.Media) != 1 || delivery.Media[0].FileID != "large" {
+		t.Fatalf("unexpected bot delivery content: %+v", delivery)
+	}
+	if !delivery.ReceivedAt.Equal(receivedAt) {
+		t.Fatalf("receivedAt=%v want=%v", delivery.ReceivedAt, receivedAt)
+	}
+	secondKey := collectorBotMessageKey(9, "7074948877", 102, "9001")
+	if secondKey != delivery.SourceUniqueKey {
+		t.Fatalf("same media group must share event key: first=%q second=%q", delivery.SourceUniqueKey, secondKey)
+	}
+	if collectorBotMessageKey(9, "7074948877", 103, "9002") == delivery.SourceUniqueKey ||
+		collectorBotMessageKey(9, "7074948877", 104, "") == delivery.SourceUniqueKey {
+		t.Fatal("different groups and standalone messages must use independent event keys")
+	}
+}
+
 func TestBotCollectorFeatureDoesNotConsumeUpdate(t *testing.T) {
 	feature := &botCollectorFeature{}
 	// The provider still handles non-collection features such as message cache
