@@ -82,7 +82,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 			Media:  group,
 		})
 		closeTelegramMediaFiles(closers)
-		if err != nil && telegramMediaSetHasReusableFileId(chunk) && isTelegramInvalidReusableFileError(err) {
+		if err != nil && telegramMediaSetHasReusableFileId(chunk) && (isTelegramInvalidReusableFileError(err) || isTelegramPhotoTooLargeError(err)) {
 			group, closers, err = s.telegramInputMediaGroup(ctx, telegramMediaSetWithoutTgFileId(chunk), chunkCaption)
 			if err == nil {
 				msgs, err = bot.SendMediaGroup(ctx, &tgbot.SendMediaGroupParams{ChatID: chatId, Media: group})
@@ -145,13 +145,19 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 		applyTelegramSendVideoMeta(params, videoMeta)
 		sendStartedAt := time.Now()
 		msg, err := bot.SendVideo(ctx, params)
-		if err != nil && strings.TrimSpace(media.TgFileId) != "" && isTelegramInvalidReusableFileError(err) {
+		if err != nil && strings.TrimSpace(media.TgFileId) != "" && (isTelegramInvalidReusableFileError(err) || isTelegramPhotoTooLargeError(err)) {
 			cloned := *media
 			cloned.TgFileId = ""
 			cloned.TgThumbFileId = ""
 			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned)
 		}
 		if err != nil {
+			if isTelegramPhotoTooLargeError(err) {
+				cloned := *media
+				cloned.TgFileId = ""
+				cloned.TgThumbFileId = ""
+				return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned)
+			}
 			return nil, err
 		}
 		g.Log().Infof(ctx, "TG单媒体发送完成 purpose:%s mediaId:%d type:%s duration:%s", purpose, media.Id, media.MediaType, time.Since(sendStartedAt).Round(time.Millisecond))
