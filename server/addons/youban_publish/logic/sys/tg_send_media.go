@@ -202,9 +202,10 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 			Caption:   caption,
 			ParseMode: telegramMediaParseMode(caption),
 		})
-		if err != nil && strings.TrimSpace(media.TgFileId) != "" && isTelegramInvalidReusableFileError(err) {
+		if err != nil && strings.TrimSpace(media.TgFileId) != "" && (isTelegramInvalidReusableFileError(err) || isTelegramPhotoTooLargeError(err)) {
 			cloned := *media
 			cloned.TgFileId = ""
+			cloned.TgThumbFileId = ""
 			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned)
 		}
 		if err != nil {
@@ -224,10 +225,17 @@ func (s *sSysPublish) copyTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		if !ok {
 			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0])
 		}
-		return s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0], ref)
+		messages, err := s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0], ref)
+		if err != nil && isTelegramPhotoTooLargeError(err) {
+			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutTgFileId(media))
+		}
+		return messages, err
 	}
 	copied, ok, err := s.copyTelegramMediaGroup(ctx, bot, chatId, purpose, caption, media)
 	if err != nil {
+		if isTelegramPhotoTooLargeError(err) {
+			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutTgFileId(media))
+		}
 		return copied, err
 	}
 	if !ok {
