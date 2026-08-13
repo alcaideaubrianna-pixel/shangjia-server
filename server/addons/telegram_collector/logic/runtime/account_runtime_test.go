@@ -70,6 +70,25 @@ func TestAccountMessageEventPreservesMediaGroupAndMetadata(t *testing.T) {
 	}
 }
 
+func TestBuildAccountMessageEventIsStableForRealtimeAndHistory(t *testing.T) {
+	source := sysin.AccountRuntimeSource{TenantID: 1, AccountID: 2, SourceID: 3, ChatID: "-100123"}
+	message := &tg.Message{ID: 17, Date: 1786435200, Message: "资料正文"}
+	message.SetGroupedID(9001)
+	message.SetMedia(&tg.MessageMediaPhoto{Photo: &tg.Photo{ID: 88, AccessHash: 99, FileReference: []byte("ref"), DCID: 2}})
+
+	realtime := BuildAccountMessageEvent(5, source, message, source.ChatID)
+	history := BuildAccountMessageEvent(5, source, message, source.ChatID)
+	if realtime == nil || history == nil {
+		t.Fatal("account message event must be built")
+	}
+	if realtime.SourceUniqueKey != history.SourceUniqueKey || realtime.SourceGroupedID != history.SourceGroupedID {
+		t.Fatalf("realtime/history identity drift: realtime=%+v history=%+v", realtime, history)
+	}
+	if len(realtime.Media) != 1 || realtime.Media[0].SourceMediaID != 88 || realtime.Media[0].SourceAccessHash != 99 {
+		t.Fatalf("media metadata lost: %+v", realtime.Media)
+	}
+}
+
 func TestMatchAccountRuntimeSourcesSupportsChannelFormats(t *testing.T) {
 	sources := []sysin.AccountRuntimeSource{
 		{SourceID: 1, ChatID: "123"},

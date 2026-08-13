@@ -16,6 +16,7 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
+	collectorruntime "hotgo/addons/telegram_collector/logic/runtime"
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
@@ -403,12 +404,8 @@ func (s *sSysPublish) ingestCollectHistoryMessages(ctx context.Context, task *sy
 	stats := collectHistoryStats{}
 	nextOffset := task.OffsetId
 	stop := false
-	runtimeSource := accountCollectSourceRuntime{
-		Id:           source.Id,
-		TenantId:     source.TenantId,
-		AccountId:    source.AccountId,
-		TgAccountId:  source.TgAccountId,
-		SourceChatId: source.SourceChatId,
+	runtimeSource := collectorin.AccountRuntimeSource{
+		SourceID: source.Id, TenantID: source.TenantId, AccountID: source.AccountId, ChatID: source.SourceChatId,
 	}
 	messages = collectHistoryMessagesInSendOrder(messages)
 	for _, msg := range messages {
@@ -424,8 +421,10 @@ func (s *sSysPublish) ingestCollectHistoryMessages(ctx context.Context, task *sy
 			continue
 		}
 		stats.scanned++
-		message := gotdCollectMessage(source.TgAccountId, runtimeSource, msg, source.SourceChatId)
-		event := accountCollectorEvent(message)
+		event := collectorruntime.BuildAccountMessageEvent(source.TgAccountId, runtimeSource, msg, source.SourceChatId)
+		if event == nil {
+			continue
+		}
 		exists, err := collectorservice.Collector().EventExists(ctx, event.TenantID, event.SourceUniqueKey)
 		if err != nil {
 			return stats, nextOffset, stop, err

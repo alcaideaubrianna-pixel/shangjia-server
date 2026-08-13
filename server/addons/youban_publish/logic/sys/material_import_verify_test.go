@@ -78,3 +78,24 @@ func TestCollectMaterialUnitsPairAcrossIgnoredMessages(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectMaterialUnitsNeverMixDisplayAndVerifyGroups(t *testing.T) {
+	units := []*collectMaterialUnit{
+		{GroupedId: "display-1", RawText: "昵称：A300\n城市：广州", MessageId: 300, Messages: []int{300, 301}, Media: []collectMediaItem{
+			{Type: "photo", FileId: "photo-1"}, {Type: "video", FileId: "display-video"},
+		}},
+		{GroupedId: "verify-1", MessageId: 302, Messages: []int{302}, Media: []collectMediaItem{{Type: "video", FileId: "verify-video"}}},
+	}
+	paired := pairCollectMaterialUnits(units)
+	if len(paired) != 1 || len(paired[0].Media) != 3 {
+		t.Fatalf("paired=%#v", paired)
+	}
+	for _, media := range paired[0].Media {
+		if media.FileId == "display-video" && media.Purpose == collectMaterialRoleVerify {
+			t.Fatal("display video must never be relabeled as verification media")
+		}
+		if media.FileId == "verify-video" && media.Purpose != collectMaterialRoleVerify {
+			t.Fatal("verification video must remain separated by purpose")
+		}
+	}
+}

@@ -153,6 +153,83 @@ func TestCollectorDeliveryFromBotMediaGroup(t *testing.T) {
 	}
 }
 
+func TestCollectorDeliveryFromBotCases(t *testing.T) {
+	tests := []struct {
+		name       string
+		message    *models.Message
+		wantChat   string
+		wantKey    string
+		wantText   string
+		wantMedia  string
+		wantFileID string
+	}{
+		{
+			name: "private text", message: &models.Message{ID: 1, Chat: models.Chat{ID: 88, Type: models.ChatTypePrivate}, Text: " 私聊资料 "},
+			wantChat: "88", wantKey: "bot:9:88:message:1", wantText: "私聊资料",
+		},
+		{
+			name: "channel photo group", message: &models.Message{ID: 2, Chat: models.Chat{ID: -10088, Type: models.ChatTypeChannel}, MediaGroupID: "700", Caption: "频道资料", Photo: []models.PhotoSize{{FileID: "small"}, {FileID: "large"}}},
+			wantChat: "-10088", wantKey: "bot:9:-10088:group:700", wantText: "频道资料", wantMedia: "photo", wantFileID: "large",
+		},
+		{
+			name: "private video", message: &models.Message{ID: 3, Chat: models.Chat{ID: 99, Type: models.ChatTypePrivate}, Video: &models.Video{FileID: "video"}},
+			wantChat: "99", wantKey: "bot:9:99:message:3", wantMedia: "video", wantFileID: "video",
+		},
+		{
+			name: "private document", message: &models.Message{ID: 4, Chat: models.Chat{ID: 99, Type: models.ChatTypePrivate}, Document: &models.Document{FileID: "document"}},
+			wantChat: "99", wantKey: "bot:9:99:message:4", wantMedia: "document", wantFileID: "document",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			raw, err := json.Marshal(&models.Update{Message: test.message})
+			if err != nil {
+				t.Fatal(err)
+			}
+			delivery, err := collectorDeliveryFromEvent(&entity.TgCollectorEvent{Id: 1, SourceId: 9, SourceType: sysin.SourceTypeBot}, raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if delivery.SourceChatID != test.wantChat || delivery.SourceUniqueKey != test.wantKey || delivery.RawText != test.wantText {
+				t.Fatalf("delivery identity/content mismatch: %+v", delivery)
+			}
+			if test.wantMedia == "" {
+				if len(delivery.Media) != 0 {
+					t.Fatalf("media=%+v, want none", delivery.Media)
+				}
+				return
+			}
+			if len(delivery.Media) != 1 || delivery.Media[0].Type != test.wantMedia || delivery.Media[0].FileID != test.wantFileID {
+				t.Fatalf("media=%+v", delivery.Media)
+			}
+		})
+	}
+}
+
+func TestCollectorAccountDeliveryKeepsRealtimeAndHistoryIdentity(t *testing.T) {
+	base := sysin.AccountMessageEvent{
+		TenantID: 1, AccountID: 2, SourceID: 3, TgAccountID: 4,
+		SourceChatID: "-1005", SourceMessageID: 6, SourceGroupedID: "7",
+		SourceUniqueKey: "account:4:source:3:-1005:message:6", RawText: "资料",
+		Media: []sysin.CollectorMediaItem{{Type: "photo", FileID: "gotd:-1005:6", SourceMediaID: 8}},
+	}
+	for _, name := range []string{"realtime", "history"} {
+		t.Run(name, func(t *testing.T) {
+			raw, err := json.Marshal(base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			delivery, err := collectorDeliveryFromEvent(&entity.TgCollectorEvent{Id: 9, SourceType: sysin.SourceTypeAccount}, raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if delivery.SourceUniqueKey != base.SourceUniqueKey || delivery.SourceGroupedID != base.SourceGroupedID || len(delivery.Media) != 1 || delivery.Media[0].SourceMediaID != 8 {
+				t.Fatalf("delivery=%+v", delivery)
+			}
+		})
+	}
+}
+
 func TestBotCollectorFeatureDoesNotConsumeUpdate(t *testing.T) {
 	feature := &botCollectorFeature{}
 	// The provider still handles non-collection features such as message cache

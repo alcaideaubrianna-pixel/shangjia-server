@@ -81,3 +81,65 @@ func TestCollectMaterialEventIngestOlderThanUsesCreatedAt(t *testing.T) {
 		t.Fatal("historical event should wait from ingestion time before finalizing an unmatched pair")
 	}
 }
+
+func TestPairCollectMaterialMessagesCases(t *testing.T) {
+	tests := []struct {
+		name  string
+		views []collectMaterialMessageView
+		want  []collectMaterialPair
+	}{
+		{
+			name: "display then verify",
+			views: []collectMaterialMessageView{
+				{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo", FileId: "p"}}},
+				{Media: []collectMediaItem{{Type: "video", FileId: "v"}}},
+			},
+			want: []collectMaterialPair{{DisplayIndex: 0, VerifyIndex: 1}},
+		},
+		{
+			name: "notice between display and verify",
+			views: []collectMaterialMessageView{
+				{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo", FileId: "p"}}},
+				{RawText: "✅提交成功！"},
+				{Media: []collectMediaItem{{Type: "video", FileId: "v"}}},
+			},
+			want: []collectMaterialPair{{DisplayIndex: 0, VerifyIndex: 2}},
+		},
+		{
+			name: "next display closes previous",
+			views: []collectMaterialMessageView{
+				{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo", FileId: "p1"}}},
+				{RawText: "昵称：B", Media: []collectMediaItem{{Type: "photo", FileId: "p2"}}},
+				{Media: []collectMediaItem{{Type: "video", FileId: "v"}}},
+			},
+			want: []collectMaterialPair{{DisplayIndex: 1, VerifyIndex: 2}},
+		},
+		{
+			name: "verify before display is isolated",
+			views: []collectMaterialMessageView{
+				{Media: []collectMediaItem{{Type: "video", FileId: "v"}}},
+				{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo", FileId: "p"}}},
+			},
+		},
+		{
+			name: "mixed media without text is not verify",
+			views: []collectMaterialMessageView{
+				{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo", FileId: "p"}}},
+				{Media: []collectMediaItem{{Type: "photo", FileId: "p2"}, {Type: "video", FileId: "v"}}},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := pairCollectMaterialMessages(test.views)
+			if len(got) != len(test.want) {
+				t.Fatalf("pairs=%+v want=%+v", got, test.want)
+			}
+			for index := range got {
+				if got[index] != test.want[index] {
+					t.Fatalf("pairs=%+v want=%+v", got, test.want)
+				}
+			}
+		})
+	}
+}

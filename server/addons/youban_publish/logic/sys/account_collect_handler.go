@@ -4,65 +4,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/tg"
-
-	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
-	"hotgo/addons/youban_publish/model/input/sysin"
 )
-
-func accountCollectorEvent(message *CollectMessage) *collectorin.AccountMessageEvent {
-	if message == nil {
-		return nil
-	}
-	event := &collectorin.AccountMessageEvent{
-		TenantID:        message.TenantId,
-		AccountID:       message.AccountId,
-		SourceID:        message.SourceId,
-		TgAccountID:     message.TgAccountId,
-		SourceChatID:    message.SourceChatId,
-		SourceMessageID: message.SourceMessageId,
-		SourceGroupedID: message.SourceGroupedId,
-		SourceUniqueKey: message.SourceUniqueKey,
-		RawText:         message.RawText,
-	}
-	if message.ReceivedAt != nil {
-		event.ReceivedAt = message.ReceivedAt.Time
-	}
-	event.Media = make([]collectorin.CollectorMediaItem, 0, len(message.Media))
-	for _, item := range message.Media {
-		event.Media = append(event.Media, collectorin.CollectorMediaItem{
-			Type: item.Type, Purpose: item.Purpose, FileID: item.FileId, FileURL: item.FileUrl,
-			StoragePath: item.StoragePath, PosterURL: item.PosterUrl, FileMD5: item.FileMd5,
-			FilePHash: item.FilePhash, SourceKind: item.SourceKind, SourceMediaID: item.SourceMediaId,
-			SourceAccessHash: item.SourceAccessHash, SourceFileReference: append([]byte(nil), item.SourceFileReference...),
-			SourceThumbSize: item.SourceThumbSize, SourceMimeType: item.SourceMimeType,
-			SourceDCID: item.SourceDCId, SourceSize: item.SourceSize, DebugMetaJSON: item.DebugMetaJson,
-		})
-	}
-	return event
-}
-
-func gotdCollectMessage(tgAccountId int64, source accountCollectSourceRuntime, msg *tg.Message, chatId string) *CollectMessage {
-	groupedId := gotdMessageGroupedId(msg)
-	uniqueKey := fmt.Sprintf("account:%d:source:%d:%s:message:%d", tgAccountId, source.Id, chatId, msg.ID)
-	return &CollectMessage{
-		TenantId:        source.TenantId,
-		AccountId:       source.AccountId,
-		SourceId:        source.Id,
-		SourceType:      sysin.CollectSourceTypeAccount,
-		TgAccountId:     tgAccountId,
-		SourceChatId:    chatId,
-		SourceMessageId: int64(msg.ID),
-		SourceGroupedId: groupedId,
-		SourceUniqueKey: uniqueKey,
-		RawText:         strings.TrimSpace(msg.Message),
-		Media:           gotdCollectMedia(msg, chatId),
-		ReceivedAt:      gtime.NewFromTime(time.Unix(int64(msg.Date), 0)),
-	}
-}
 
 func gotdMessageGroupedId(msg *tg.Message) string {
 	if msg == nil {

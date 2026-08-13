@@ -3,8 +3,6 @@ package sys
 import (
 	"testing"
 
-	"github.com/gotd/td/tg"
-
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
@@ -34,23 +32,6 @@ func TestValidateAccountCollectTgAccount(t *testing.T) {
 				t.Fatalf("validateAccountCollectTgAccount() error = %v, wantErr %v", err, test.wantErr)
 			}
 		})
-	}
-}
-
-func TestGotdCollectMessageUsesMessageIdentityForMediaGroups(t *testing.T) {
-	source := accountCollectSourceRuntime{Id: 7, TenantId: 1, AccountId: 2}
-	first := &tg.Message{ID: 101, Message: "资料"}
-	first.SetGroupedID(9001)
-	second := &tg.Message{ID: 102}
-	second.SetGroupedID(9001)
-
-	firstMessage := gotdCollectMessage(3, source, first, "-100123")
-	secondMessage := gotdCollectMessage(3, source, second, "-100123")
-	if firstMessage.SourceGroupedId == "" || firstMessage.SourceGroupedId != secondMessage.SourceGroupedId {
-		t.Fatalf("media group identity mismatch: first=%q second=%q", firstMessage.SourceGroupedId, secondMessage.SourceGroupedId)
-	}
-	if firstMessage.SourceUniqueKey == secondMessage.SourceUniqueKey {
-		t.Fatalf("media group messages must have distinct event keys: %q", firstMessage.SourceUniqueKey)
 	}
 }
 

@@ -83,14 +83,22 @@ func accountMessageEvent(binding *sysin.AccountRuntimeBinding, task accountMessa
 	if binding == nil || task.message == nil || task.source.SourceID <= 0 {
 		return nil
 	}
-	message := task.message
+	return BuildAccountMessageEvent(binding.AccountID, task.source, task.message, task.chatID)
+}
+
+// BuildAccountMessageEvent is the single conversion boundary shared by
+// realtime listeners and history-page collection.
+func BuildAccountMessageEvent(tgAccountID int64, source sysin.AccountRuntimeSource, message *tg.Message, chatID string) *sysin.AccountMessageEvent {
+	if tgAccountID <= 0 || source.SourceID <= 0 || message == nil || message.ID <= 0 {
+		return nil
+	}
 	groupedID := accountMessageGroupedID(message)
 	return &sysin.AccountMessageEvent{
-		TenantID: task.source.TenantID, AccountID: task.source.AccountID, SourceID: task.source.SourceID,
-		TgAccountID: binding.AccountID, SourceChatID: task.chatID, SourceMessageID: int64(message.ID),
+		TenantID: source.TenantID, AccountID: source.AccountID, SourceID: source.SourceID,
+		TgAccountID: tgAccountID, SourceChatID: chatID, SourceMessageID: int64(message.ID),
 		SourceGroupedID: groupedID,
-		SourceUniqueKey: fmt.Sprintf("account:%d:source:%d:%s:message:%d", binding.AccountID, task.source.SourceID, task.chatID, message.ID),
-		RawText:         strings.TrimSpace(message.Message), Media: accountMessageMedia(message, task.chatID),
+		SourceUniqueKey: fmt.Sprintf("account:%d:source:%d:%s:message:%d", tgAccountID, source.SourceID, chatID, message.ID),
+		RawText:         strings.TrimSpace(message.Message), Media: accountMessageMedia(message, chatID),
 		ReceivedAt: time.Unix(int64(message.Date), 0),
 	}
 }
