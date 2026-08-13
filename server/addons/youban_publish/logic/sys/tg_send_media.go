@@ -527,6 +527,7 @@ func telegramMediaSetWithoutTgFileId(media []*telegramMediaItem) []*telegramMedi
 		cloned := *item
 		cloned.TgFileId = ""
 		cloned.TgThumbFileId = ""
+		cloned.ForceUpload = true
 		list = append(list, &cloned)
 	}
 	return list
@@ -542,7 +543,7 @@ func telegramMediaSetHasReusableFileId(media []*telegramMediaItem) bool {
 }
 
 func telegramMediaUsesReusableFileId(media *telegramMediaItem) bool {
-	if media == nil || telegramMediaRequiresSanitizedUpload(media) {
+	if media == nil || media.ForceUpload || telegramMediaRequiresSanitizedUpload(media) {
 		return false
 	}
 	fileId := strings.TrimSpace(media.TgFileId)
@@ -620,7 +621,7 @@ func telegramInputMediaSource(ctx context.Context, media *telegramMediaItem) (st
 	if media == nil {
 		return "", nil, nil, gerror.New("媒体文件为空")
 	}
-	if source := strings.TrimSpace(media.TgFileId); source != "" && !telegramMediaRequiresSanitizedUpload(media) {
+	if source := strings.TrimSpace(media.TgFileId); source != "" && !media.ForceUpload && !telegramMediaRequiresSanitizedUpload(media) {
 		return source, nil, nil, nil
 	}
 	path, cleanup, err := cachedTelegramMediaFile(ctx, media)
@@ -640,6 +641,9 @@ func telegramInputMediaSource(ctx context.Context, media *telegramMediaItem) (st
 			cleanup()
 		}
 		return "", nil, nil, gerror.Wrapf(err, "打开媒体文件失败:%s", path)
+	}
+	if info, statErr := file.Stat(); statErr == nil {
+		g.Log().Info(ctx, "TG媒体上传文件已准备", g.Map{"mediaId": media.Id, "mediaType": media.MediaType, "sizeBytes": info.Size(), "forceUpload": media.ForceUpload})
 	}
 	attachName := fmt.Sprintf("media_%d_%s", media.Id, telegramUploadFilename(media, path))
 	return "attach://" + attachName, file, closeWithCleanup(file, cleanup), nil

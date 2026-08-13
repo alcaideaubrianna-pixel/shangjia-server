@@ -21,6 +21,7 @@ type telegramMediaItem struct {
 	VideoDuration     int    `json:"videoDuration"`
 	AntiScanEnabled   bool   `json:"antiScanEnabled"`
 	AntiScanSeed      int64  `json:"antiScanSeed"`
+	ForceUpload       bool   `json:"-"`
 	ProtectedHashKey  string `json:"-"`
 	ProtectedPHash    uint64 `json:"-"`
 	ProtectedDHash    uint64 `json:"-"`

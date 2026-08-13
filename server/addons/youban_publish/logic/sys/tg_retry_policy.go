@@ -102,7 +102,7 @@ func telegramJobErrorRetryPolicy(err error, retryCount int) telegramJobRetryPoli
 	if retryCount >= telegramRetryMaxCount {
 		return telegramJobRetryPolicy{
 			Permanent: true,
-			Message:   fmt.Sprintf("Telegram 发送连续失败已达到 %d 次，已停止该任务并释放频道队列：%s", telegramRetryMaxCount, err.Error()),
+			Message:   fmt.Sprintf("Telegram 发送连续失败已达到 %d 次，已停止该任务并释放频道队列：%s", telegramRetryMaxCount, telegramUserFacingError(err)),
 		}
 	}
 	delay := telegramRecoverableRetryDelay(err, retryCount)
@@ -110,6 +110,19 @@ func telegramJobErrorRetryPolicy(err error, retryCount int) telegramJobRetryPoli
 		RetryDelay: delay,
 		Message:    telegramJobFriendlyErrorMessage(err, delay, retryCount),
 	}
+}
+
+func telegramUserFacingError(err error) string {
+	if err == nil {
+		return "未知错误"
+	}
+	if isTelegramPhotoTooLargeError(err) {
+		return "图片超过 Telegram 允许的 10MB 上限，系统将压缩后自动重试"
+	}
+	if isTelegramRequestEntityTooLargeError(err) {
+		return "媒体组上传请求过大，系统将调整发送方式后自动重试"
+	}
+	return err.Error()
 }
 
 func telegramRecoverableRetryDelay(err error, retryCount int) time.Duration {
@@ -258,9 +271,9 @@ func telegramJobFriendlyErrorMessage(err error, retryDelay time.Duration, retryC
 		return fmt.Sprintf("Telegram 发送频率过快，已触发限流；系统会等待 %d 秒后自动重试（第 %d 次）。建议为该频道配置多个可用推送 BOT，或降低全量推送/循环推送频率。", seconds, retryCount)
 	}
 	if isTelegramNetworkRetryError(err) {
-		return fmt.Sprintf("Telegram 网络请求临时失败，系统会等待 %s 后自动重试（第 %d 次）：%s", retryDelay, retryCount, err.Error())
+		return fmt.Sprintf("Telegram 网络请求临时失败，系统会等待 %s 后自动重试（第 %d 次）：%s", retryDelay, retryCount, telegramUserFacingError(err))
 	}
-	return fmt.Sprintf("Telegram 发送失败，系统会等待 %s 后自动重试（第 %d 次）：%s", retryDelay, retryCount, err.Error())
+	return fmt.Sprintf("Telegram 发送失败，系统会等待 %s 后自动重试（第 %d 次）：%s", retryDelay, retryCount, telegramUserFacingError(err))
 }
 
 func isTelegramNetworkRetryError(err error) bool {
