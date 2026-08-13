@@ -24,6 +24,7 @@ type collectMediaQueuePayload struct {
 const (
 	collectMediaTaskUniqueTTL  = 24 * time.Hour
 	collectMediaRealtimeWindow = 10 * time.Minute
+	mediaProcessTaskUniqueTTL  = 5 * time.Minute
 )
 
 func collectMediaQueuePayloadFromEvent(event gdb.Record) collectMediaQueuePayload {
@@ -68,7 +69,7 @@ func (s *sSysPublish) enqueueMediaProcess(ctx context.Context, mediaId int64, de
 		asynq.Queue(tgQueueNameMediaRealtime),
 		asynq.MaxRetry(8),
 		asynq.Timeout(30 * time.Minute),
-		asynq.Unique(24 * time.Hour),
+		asynq.Unique(mediaProcessTaskUniqueTTL),
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
