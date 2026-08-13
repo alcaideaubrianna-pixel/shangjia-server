@@ -155,25 +155,28 @@ receivers:
             GROUP BY channel_id
           )
           SELECT pending.channel_id::text AS channel_id,
+                 COALESCE(NULLIF(c.channel_title, ''), '频道 ' || pending.channel_id::text) || ' (' || pending.channel_id::text || ')' AS channel,
                  pending.pending_count,
                  COALESCE(EXTRACT(EPOCH FROM (NOW() - pending.oldest_at)), 0)::bigint AS oldest_age_seconds,
                  COALESCE(CEIL(pending.pending_count / NULLIF(sent.sent_per_minute, 0)), -1)::bigint AS estimated_clear_minutes
-          FROM pending LEFT JOIN sent USING (channel_id)
+          FROM pending
+          LEFT JOIN sent USING (channel_id)
+          LEFT JOIN hg_youban_publish_channel c ON c.id = pending.channel_id AND c.deleted_at IS NULL
           ORDER BY pending.pending_count DESC
           LIMIT 20
         metrics:
           - metric_name: xiaohuiji.publish.channel_pending
             value_column: pending_count
             value_type: int
-            attribute_columns: [channel_id]
+            attribute_columns: [channel_id, channel]
           - metric_name: xiaohuiji.publish.channel_oldest_age_seconds
             value_column: oldest_age_seconds
             value_type: int
-            attribute_columns: [channel_id]
+            attribute_columns: [channel_id, channel]
           - metric_name: xiaohuiji.publish.channel_estimated_clear_minutes
             value_column: estimated_clear_minutes
             value_type: int
-            attribute_columns: [channel_id]
+            attribute_columns: [channel_id, channel]
       - sql: |
           SELECT COUNT(*)::bigint AS error_count
           FROM hg_youban_publish_collect_event_media
@@ -263,29 +266,127 @@ receivers:
             value_type: int
             attribute_columns: [latency_bucket]
       - sql: |
-          SELECT channel_id::text AS channel_id,
+          SELECT j.channel_id::text AS channel_id,
+                 COALESCE(NULLIF(MAX(c.channel_title), ''), '频道 ' || j.channel_id::text) || ' (' || j.channel_id::text || ')' AS channel,
                  COUNT(*) FILTER (WHERE retry_count > 0)::bigint AS retry_jobs,
                  COALESCE(SUM(retry_count), 0)::bigint AS retry_count,
                  COALESCE(MAX(retry_count), 0)::bigint AS max_retry_count
-          FROM hg_youban_publish_tg_job
+          FROM hg_youban_publish_tg_job j
+          LEFT JOIN hg_youban_publish_channel c ON c.id = j.channel_id AND c.deleted_at IS NULL
           WHERE retry_count > 0
-            AND COALESCE(updated_at, created_at) >= NOW() - INTERVAL '1 hour'
-          GROUP BY channel_id
+            AND COALESCE(j.updated_at, j.created_at) >= NOW() - INTERVAL '1 hour'
+          GROUP BY j.channel_id
           ORDER BY retry_count DESC
           LIMIT 20
         metrics:
           - metric_name: xiaohuiji.publish.channel_retries
             value_column: retry_count
             value_type: int
-            attribute_columns: [channel_id]
+            attribute_columns: [channel_id, channel]
           - metric_name: xiaohuiji.publish.channel_retry_jobs
             value_column: retry_jobs
             value_type: int
-            attribute_columns: [channel_id]
+            attribute_columns: [channel_id, channel]
           - metric_name: xiaohuiji.publish.channel_max_retry_count
             value_column: max_retry_count
             value_type: int
-            attribute_columns: [channel_id]
+            attribute_columns: [channel_id, channel]
+      - sql: |
+          SELECT j.bot_id::text AS bot_id,
+                 COALESCE(NULLIF(MAX(b.bot_name), ''), NULLIF(MAX(b.bot_username), ''), 'Bot ' || j.bot_id::text) AS bot,
+                 COUNT(*)::bigint AS message_count
+          FROM hg_youban_publish_tg_job j
+          LEFT JOIN hg_youban_publish_bot b ON b.id = j.bot_id AND b.deleted_at IS NULL
+          WHERE j.status = 'sent' AND j.sent_at >= NOW() - INTERVAL '1 hour' AND j.bot_id > 0
+          GROUP BY j.bot_id
+          ORDER BY message_count DESC
+          LIMIT 20
+        metrics:
+          - metric_name: xiaohuiji.publish.bot_messages_1h
+            value_column: message_count
+            value_type: int
+            attribute_columns: [bot_id, bot]
+      - sql: |
+          SELECT e.bot_id::text AS bot_id,
+                 COALESCE(NULLIF(MAX(b.bot_name), ''), NULLIF(MAX(b.bot_username), ''), 'Bot ' || e.bot_id::text) AS bot,
+                 COUNT(*)::bigint AS collect_count
+          FROM hg_youban_publish_collect_event e
+          LEFT JOIN hg_youban_publish_bot b ON b.id = e.bot_id AND b.deleted_at IS NULL
+          WHERE e.source_type = 'bot' AND e.created_at >= NOW() - INTERVAL '1 hour' AND e.bot_id > 0
+          GROUP BY e.bot_id
+          ORDER BY collect_count DESC
+          LIMIT 20
+        metrics:
+          - metric_name: xiaohuiji.collect.bot_messages_1h
+            value_column: collect_count
+            value_type: int
+            attribute_columns: [bot_id, bot]
+      - sql: |
+          SELECT e.tg_account_id::text AS tg_account_id,
+                 COALESCE(NULLIF(MAX(ta.display_name), ''), NULLIF(MAX(ta.telegram_username), ''), '协议账号 ' || e.tg_account_id::text) AS tg_account,
+                 COUNT(*)::bigint AS collect_count,
+                 (COUNT(*)::numeric / 60.0)::double precision AS messages_per_minute
+          FROM hg_youban_publish_collect_event e
+          LEFT JOIN hg_youban_publish_tg_account ta ON ta.id = e.tg_account_id AND ta.deleted_at IS NULL
+          WHERE e.source_type = 'account' AND e.created_at >= NOW() - INTERVAL '1 hour' AND e.tg_account_id > 0
+          GROUP BY e.tg_account_id
+          ORDER BY collect_count DESC
+          LIMIT 20
+        metrics:
+          - metric_name: xiaohuiji.collect.account_messages_1h
+            value_column: collect_count
+            value_type: int
+            attribute_columns: [tg_account_id, tg_account]
+          - metric_name: xiaohuiji.collect.account_messages_per_minute
+            value_column: messages_per_minute
+            value_type: double
+            attribute_columns: [tg_account_id, tg_account]
+      - sql: |
+          SELECT j.account_id::text AS account_id,
+                 COALESCE(NULLIF(MAX(a.nickname), ''), NULLIF(MAX(a.username), ''), '业务账号 ' || j.account_id::text) AS account,
+                 COUNT(*)::bigint AS publish_count,
+                 COALESCE(AVG(GREATEST(EXTRACT(EPOCH FROM (j.sent_at - j.created_at)), 0)), 0)::double precision AS average_seconds
+          FROM hg_youban_publish_tg_job j
+          LEFT JOIN hg_youban_publish_account a ON a.id = j.account_id AND a.deleted_at IS NULL
+          WHERE j.status = 'sent' AND j.sent_at >= NOW() - INTERVAL '1 hour' AND j.account_id > 0
+          GROUP BY j.account_id
+          ORDER BY average_seconds DESC
+          LIMIT 20
+        metrics:
+          - metric_name: xiaohuiji.publish.account_messages_1h
+            value_column: publish_count
+            value_type: int
+            attribute_columns: [account_id, account]
+          - metric_name: xiaohuiji.publish.account_average_seconds
+            value_column: average_seconds
+            value_type: double
+            attribute_columns: [account_id, account]
+      - sql: |
+          SELECT COALESCE(NULLIF(media_type, ''), 'unknown') AS media_type,
+                 COUNT(*)::bigint AS download_count,
+                 COALESCE(SUM(download_bytes), 0)::bigint AS download_bytes,
+                 COALESCE(AVG(download_duration_ms), 0)::double precision AS average_duration_ms,
+                 COALESCE(SUM(download_bytes)::double precision / NULLIF(SUM(download_duration_ms), 0) / 125.0, 0) AS throughput_mbps
+          FROM hg_youban_publish_collect_event_media
+          WHERE cache_status = 'ready' AND updated_at >= NOW() - INTERVAL '15 minutes'
+          GROUP BY media_type
+        metrics:
+          - metric_name: xiaohuiji.collect.media_download_count_15m
+            value_column: download_count
+            value_type: int
+            attribute_columns: [media_type]
+          - metric_name: xiaohuiji.collect.media_download_bytes_15m
+            value_column: download_bytes
+            value_type: int
+            attribute_columns: [media_type]
+          - metric_name: xiaohuiji.collect.media_download_average_ms
+            value_column: average_duration_ms
+            value_type: double
+            attribute_columns: [media_type]
+          - metric_name: xiaohuiji.collect.media_download_throughput_mbps
+            value_column: throughput_mbps
+            value_type: double
+            attribute_columns: [media_type]
       - sql: |
           SELECT CASE
                    WHEN UPPER(COALESCE(error_message, '')) LIKE '%TIMEOUT%'

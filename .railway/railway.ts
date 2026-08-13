@@ -94,7 +94,7 @@ export default defineRailway(() => {
     replicas: { [singapore]: 1 },
     env: {
       XIAOHUIJI_PG_DSN: database.env.DATABASE_URL,
-      OPENOBSERVE_OTLP_ENDPOINT: "http://xiaohuiji-observe.railway.internal:5080/api/default",
+      OPENOBSERVE_OTLP_ENDPOINT: "https://xiaohuiji-observe-production.up.railway.app/api/default",
       OPENOBSERVE_AUTHORIZATION: preserve(),
       PORT: "13133",
     },

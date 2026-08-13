@@ -64,7 +64,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://xiaohuiji-otel-collector.railway.internal:431
 Collector 使用：
 
 ```text
-OPENOBSERVE_ENDPOINT=http://xiaohuiji-observe.railway.internal:5080
+OPENOBSERVE_ENDPOINT=https://xiaohuiji-observe-production.up.railway.app
 ```
 
 不同 Railway Environment 必须各部署一套 Collector；Railway 私网域名只在同一 Environment 内有效。
@@ -641,7 +641,7 @@ xiaohuiji-otel-collector.OPENOBSERVE_AUTHORIZATION
 
 ## HTTP 接口性能大盘
 
-HTTP 性能大盘定义保存在 `deploy/observability/dashboards/http-performance.json`，当前线上大盘名称为 `xiaohuiji HTTP API performance`。
+HTTP 性能大盘定义保存在 `deploy/observability/dashboards/http-performance.json`，导入后的大盘名称为“`小灰机 HTTP API 性能`”。
 
 应用部署后，OpenObserve 会出现以下指标流：
 
@@ -649,15 +649,17 @@ HTTP 性能大盘定义保存在 `deploy/observability/dashboards/http-performan
 - `xiaohuiji_http_server_duration_sum` / `xiaohuiji_http_server_duration_count`：用于平均耗时。
 - `xiaohuiji_http_server_requests`：按路由、方法、HTTP 状态码和业务 `code` 统计请求量。
 
-查看接口耗时排行时，打开 HTTP Overview 大盘，重点关注“接口耗时 P95 / P99”和“接口平均耗时排行”。如果需要临时查询，可使用：
+大盘按“流量与可用性”“接口延迟”“业务响应”三个中文 Tab 拆分。查看接口耗时排行时，打开“接口延迟”，重点关注
+“接口延迟 P50 / P95 / P99”和“接口平均耗时排行”。如果需要临时查询，可使用：
 
 ```promql
 histogram_quantile(0.95, sum by (le, http_route) (rate(xiaohuiji_http_server_duration_bucket[5m])))
 ```
 
 当前指标按 `http_route` 聚合，不使用原始 URL 作为标签，避免资料编号、频道 ID 等高基数路径污染监控。
-统一 JSON 响应中的 `code` 会作为 `http_business_code` 标签写入 HTTP 指标和访问日志；打开“业务响应码分布”
-与“业务错误码 × 路由排行”即可区分 HTTP 200 但业务失败的请求。非 JSON、流式和超过 128 KB 的响应不解析业务码，
+统一 JSON 响应中的 `code` 会作为 `http_business_code` 标签写入 HTTP 指标和访问日志；打开“业务响应”中的
+“业务成功率”“业务失败率”“业务响应码请求数（最近 5 分钟）”与“业务错误码 × 路由排行”，即可区分 HTTP 200
+但业务失败的请求。业务响应码使用表格展示最近 5 分钟请求数，避免将每秒速率误读成业务码。非 JSON、流式和超过 128 KB 的响应不解析业务码，
 避免下载接口和大响应增加额外开销。
 
 ## Telegram 运营大盘
@@ -679,6 +681,13 @@ TG 运营大盘定义保存在 `deploy/observability/dashboards/tg-operations.js
 
 导入后建议先将时间范围设为最近 1 小时。SQL 快照指标每 15 秒刷新一次，Asynq 和运行时指标按各自
 采集周期更新；如果某个面板为空，应先检查对应指标是否已经进入 OpenObserve，而不是直接判断业务链路失败。
+
+异常总览第一行固定显示“监控数据是否正常上报”和“展示与验证资料混组拦截”。心跳全部为 0 表示采集链路异常，
+不是业务没有问题。面板查询统一使用 `or vector(0)`，没有异常时显示 0，避免空白图表造成误判。
+
+Railway 私网 DNS 无法解析 Observe 服务名时，Collector 使用公共 OTLP 地址
+`https://xiaohuiji-observe-production.up.railway.app/api/default`。该地址仍通过
+`OPENOBSERVE_AUTHORIZATION` 鉴权，恢复后应检查 Collector 日志中不存在 `Exporting failed`。
 
 常用排查顺序：
 
