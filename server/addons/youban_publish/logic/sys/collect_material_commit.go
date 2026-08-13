@@ -472,12 +472,18 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		columns := dao.ContentProfile.Columns()
 		existing, txErr := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).
-			Fields(columns.Id).
+			Fields(columns.Id, columns.SourceKey, columns.HasVerificationVideo, columns.ImageCount, columns.VideoCount).
 			Where(columns.SourceKey, sourceKey).
 			WhereNull(columns.DeletedAt).
 			One()
 		if txErr != nil {
 			return gerror.Wrap(txErr, "读取采集资料失败")
+		}
+		if existing.IsEmpty() {
+			existing, txErr = existingLegacyCollectProfile(ctx, tx, event)
+			if txErr != nil {
+				return txErr
+			}
 		}
 		data := g.Map{
 			columns.SourceType: collectProfileSourceType, columns.SourceKey: sourceKey,
@@ -518,6 +524,14 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 			}
 		} else {
 			profileId = existing[columns.Id].Int64()
+			if !collectProfileMaterialShouldReplace(existing, imageCount, videoCount, hasVerificationVideo) {
+				if existing[columns.SourceKey].String() != sourceKey {
+					if _, txErr = tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Where(columns.Id, profileId).Data(g.Map{columns.SourceKey: sourceKey, columns.UpdatedAt: now}).Update(); txErr != nil {
+						return gerror.Wrap(txErr, "升级采集资料身份键失败")
+					}
+				}
+				return nil
+			}
 			if _, txErr = tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Where(columns.Id, profileId).Data(data).Update(); txErr != nil {
 				return gerror.Wrap(txErr, "更新采集资料失败")
 			}
@@ -529,6 +543,7 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 			return gerror.Wrap(txErr, "清理采集旧媒体失败")
 		}
 		for _, media := range content.Media {
+			media.PerceptualHash = strings.TrimSpace(media.PerceptualHash)
 			_, txErr = tx.Model(publishMediaTable).Safe().Ctx(ctx).Data(g.Map{
 				"tenant_id": tenantId, "merchant_id": tenantId, "account_id": accountId, "profile_id": profileId,
 				"media_type": media.MediaType, "purpose": media.Purpose, "name": fmt.Sprintf("collect-%d-%s-%d", event["id"].Int64(), media.Purpose, media.SortIndex),
@@ -569,6 +584,49 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 	}
 	iservice.SysContent().ClearHomeProfileCardsCache(ctx)
 	return profileId, nil
+}
+
+func collectProfileMaterialShouldReplace(existing gdb.Record, imageCount, videoCount, hasVerificationVideo int) bool {
+	if existing.IsEmpty() {
+		return true
+	}
+	if existing["has_verification_video"].Int() == 1 && hasVerificationVideo != 1 {
+		return false
+	}
+	if existing["has_verification_video"].Int() != 1 && hasVerificationVideo == 1 {
+		return true
+	}
+	return imageCount+videoCount >= existing["image_count"].Int()+existing["video_count"].Int()
+}
+
+func existingLegacyCollectProfile(ctx context.Context, tx gdb.TX, event gdb.Record) (gdb.Record, error) {
+	tenantID := event["tenant_id"].Int64()
+	accountID := event["account_id"].Int64()
+	groupedID := strings.TrimSpace(event["source_grouped_id"].String())
+	chatID := normalizeTelegramChannelChatID(event["source_chat_id"].String())
+	if tenantID <= 0 || accountID <= 0 || groupedID == "" || chatID == "" {
+		return nil, nil
+	}
+	chatIDs := []string{chatID}
+	if strings.HasPrefix(chatID, "-100") {
+		chatIDs = append(chatIDs, strings.TrimPrefix(chatID, "-100"))
+	}
+	conditions := make([]string, 0, len(chatIDs))
+	args := make([]interface{}, 0, len(chatIDs))
+	for _, candidateChatID := range chatIDs {
+		conditions = append(conditions, "p.source_key LIKE ?")
+		args = append(args, "%:"+candidateChatID+":group:"+groupedID+":%")
+	}
+	row, err := tx.Model(dao.ContentProfile.Table()+" p").Ctx(ctx).
+		Fields("p.id,p.source_key,p.has_verification_video,p.image_count,p.video_count").
+		WhereNull("p.deleted_at").
+		Where("("+strings.Join(conditions, " OR ")+")", args[:len(chatIDs)]...).
+		Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=p.id AND ps.tenant_id=? AND ps.account_id=? AND ps.deleted_at IS NULL)", tenantID, accountID).
+		OrderDesc("p.has_verification_video").OrderDesc("p.id").Limit(1).One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取旧版采集资料失败")
+	}
+	return row, nil
 }
 
 func collectPreparedMediaCounts(media []collectPreparedMedia) (imageCount int, videoCount int, hasVerificationVideo int) {

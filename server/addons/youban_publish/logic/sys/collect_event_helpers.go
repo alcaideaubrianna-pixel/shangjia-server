@@ -19,6 +19,16 @@ import (
 var collectGeneratedTitleNumberPattern = regexp.MustCompile(`(?im)^\s*编号\s*[:：=]\s*C\d+\s*$\n?`)
 
 func collectPublishClientRequestId(event gdb.Record, rule gdb.Record) string {
+	tenantID := event["tenant_id"].Int64()
+	accountID := event["account_id"].Int64()
+	chatID := normalizeTelegramChannelChatID(event["source_chat_id"].String())
+	groupedID := strings.TrimSpace(event["source_grouped_id"].String())
+	if tenantID > 0 && accountID > 0 && chatID != "" && groupedID != "" {
+		return fmt.Sprintf("collect:v2:%d:%d:%s:group:%s", tenantID, accountID, chatID, groupedID)
+	}
+	if messageID := event["source_message_id"].Int64(); tenantID > 0 && accountID > 0 && chatID != "" && messageID > 0 {
+		return fmt.Sprintf("collect:v2:%d:%d:%s:message:%d", tenantID, accountID, chatID, messageID)
+	}
 	return fmt.Sprintf("collect:%s:%d", event["source_unique_key"].String(), rule["id"].Int64())
 }
 
