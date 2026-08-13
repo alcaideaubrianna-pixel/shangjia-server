@@ -77,29 +77,7 @@ func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, jo
 	return !earlier.IsEmpty(), nil
 }
 
-func telegramChannelSendInterval(ctx context.Context) time.Duration {
-	seconds := g.Cfg().MustGet(ctx, "youbanPublish.queue.channelSendIntervalSeconds", 30).Int()
-	if seconds < 0 {
-		seconds = 0
-	}
-	if seconds > 10*60 {
-		seconds = 10 * 60
-	}
-	return time.Duration(seconds) * time.Second
-}
-
-func telegramChannelNextSendDelay(lastSentAt, now *gtime.Time, interval time.Duration) time.Duration {
-	if lastSentAt == nil || now == nil || interval <= 0 {
-		return 0
-	}
-	remaining := interval - now.Sub(lastSentAt)
-	if remaining <= 0 {
-		return 0
-	}
-	return remaining
-}
-
-func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegramJobRecord, lastSentAt *gtime.Time) error {
+func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegramJobRecord) error {
 	if job.TenantId <= 0 || job.ChannelId <= 0 {
 		return nil
 	}
@@ -126,8 +104,7 @@ func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegr
 	if next.Id <= 0 {
 		return nil
 	}
-	delay := telegramChannelNextSendDelay(lastSentAt, now, telegramChannelSendInterval(ctx))
-	if err = s.enqueueTelegramJob(ctx, next.Id, delay); err != nil {
+	if err = s.enqueueTelegramJob(ctx, next.Id, 0); err != nil {
 		return gerror.Wrap(err, "唤醒频道下一条TG任务失败")
 	}
 	return nil

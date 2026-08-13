@@ -18,14 +18,16 @@ func isTelegramUrgentJob(job telegramJobRecord) bool {
 
 func telegramJobPriorityValue(job telegramJobRecord) int {
 	operationNo := strings.ToLower(strings.TrimSpace(job.OperationNo))
-	if strings.HasPrefix(operationNo, "profile:") {
+	if isManualProfilePublishOperation(operationNo) ||
+		strings.HasPrefix(operationNo, "quick_push:") ||
+		strings.HasPrefix(operationNo, "message_push:") {
 		return tgJobPriorityUrgent
-	}
-	if job.Priority > 0 && job.Priority != 100 {
-		return job.Priority
 	}
 	if strings.HasPrefix(operationNo, "full_push:") || strings.HasPrefix(operationNo, "cycle_batch:") {
 		return tgJobPriorityBulk
+	}
+	if job.Priority > 0 && job.Priority != 100 {
+		return job.Priority
 	}
 	return tgJobPriorityDefault
 }

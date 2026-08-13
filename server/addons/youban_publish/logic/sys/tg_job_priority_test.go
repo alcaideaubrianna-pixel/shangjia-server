@@ -34,3 +34,27 @@ func TestTelegramPublishQueueWeightsKeepLegacyQueues(t *testing.T) {
 		t.Fatal("bulk shard queue is not registered")
 	}
 }
+
+func TestTelegramJobPriorityClassifiesPublishOperations(t *testing.T) {
+	cases := []struct {
+		name        string
+		operationNo string
+		priority    int
+		want        int
+	}{
+		{name: "manual profile", operationNo: "profile:123", want: tgJobPriorityUrgent},
+		{name: "manual batch", operationNo: "batchtext:1:batch-1:profile:123", want: tgJobPriorityUrgent},
+		{name: "message push", operationNo: "message_push:1:2:3", want: tgJobPriorityUrgent},
+		{name: "full push", operationNo: "full_push:1:2", want: tgJobPriorityBulk},
+		{name: "cycle push", operationNo: "cycle_batch:1:2:3", want: tgJobPriorityBulk},
+		{name: "explicit default", operationNo: "collect:1", priority: tgJobPriorityDefault, want: tgJobPriorityDefault},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			job := telegramJobRecord{OperationNo: testCase.operationNo, Priority: testCase.priority}
+			if got := telegramJobPriorityValue(job); got != testCase.want {
+				t.Fatalf("expected priority %d, got %d", testCase.want, got)
+			}
+		})
+	}
+}
