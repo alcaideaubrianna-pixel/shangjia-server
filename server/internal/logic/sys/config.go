@@ -209,11 +209,59 @@ func (s *sSysConfig) GetGeo(ctx context.Context) (conf *model.GeoConfig, err err
 
 // GetUpload 获取上传配置
 func (s *sSysConfig) GetUpload(ctx context.Context) (conf *model.UploadConfig, err error) {
+	if err = s.ensureCosUploadConfig(ctx); err != nil {
+		return
+	}
 	models, err := s.GetConfigByGroup(ctx, &sysin.GetConfigInp{Group: "upload"})
 	if err != nil {
 		return
 	}
 	err = gconv.Scan(models.List, &conf)
+	return
+}
+
+func (s *sSysConfig) ensureCosUploadConfig(ctx context.Context) (err error) {
+	defaults := []struct {
+		key  string
+		name string
+		sort int
+		tip  string
+	}{
+		{key: "uploadCosBucket", name: "COS Bucket", sort: 475, tip: "存储桶名称，必须包含APPID后缀，例如：bucket-1250000000"},
+		{key: "uploadCosRegion", name: "COS Region", sort: 476, tip: "存储桶所属地域，例如：ap-hongkong"},
+		{key: "uploadCosUploadURL", name: "COS浏览器上传域名", sort: 485, tip: "可选；为空直接上传COS源站，填写CDN前需放行COS写请求和CORS"},
+	}
+
+	cols := dao.SysConfig.Columns()
+	for _, item := range defaults {
+		count, countErr := dao.SysConfig.Ctx(ctx).
+			Where(cols.Group, "upload").
+			Where(cols.Key, item.key).
+			Count()
+		if countErr != nil {
+			return countErr
+		}
+		if count > 0 {
+			continue
+		}
+		_, err = dao.SysConfig.Ctx(ctx).Data(g.Map{
+			cols.Group:        "upload",
+			cols.Key:          item.key,
+			cols.Name:         item.name,
+			cols.Type:         consts.ConfigTypeString,
+			cols.Value:        "",
+			cols.DefaultValue: "",
+			cols.IsDefault:    0,
+			cols.Sort:         item.sort,
+			cols.Tip:          item.tip,
+			cols.Status:       consts.StatusEnabled,
+			cols.CreatedAt:    gtime.Now(),
+			cols.UpdatedAt:    gtime.Now(),
+		}).Insert()
+		if err != nil {
+			return
+		}
+	}
 	return
 }
 
@@ -334,6 +382,11 @@ func (s *sSysConfig) UpdateConfigByGroup(ctx context.Context, in *sysin.UpdateCo
 	}
 	if in.Group == "member_vip" {
 		if err = s.ensureMemberVipConfig(ctx); err != nil {
+			return
+		}
+	}
+	if in.Group == "upload" {
+		if err = s.ensureCosUploadConfig(ctx); err != nil {
 			return
 		}
 	}
