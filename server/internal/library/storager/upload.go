@@ -243,6 +243,22 @@ func write(ctx context.Context, meta *FileMeta, fullPath string) (models *entity
 	return
 }
 
+// WriteDirectUploadAttachment records an object that was uploaded directly to the active storage drive.
+func WriteDirectUploadAttachment(ctx context.Context, fileName string, size int64, fullPath string) (*entity.SysAttachment, error) {
+	meta := &FileMeta{
+		Filename: fileName,
+		Size:     size,
+		Ext:      Ext(fileName),
+	}
+	meta.Kind = GetFileKind(meta.Ext)
+	meta.MimeType = GetFileMimeType(meta.Ext)
+	meta.NaiveType = meta.MimeType
+	if meta.NaiveType == "" {
+		meta.NaiveType = "text/plain"
+	}
+	return write(ctx, meta, fullPath)
+}
+
 // HasFile 检查附件是否存在
 func HasFile(ctx context.Context, md5 string) (res *entity.SysAttachment, err error) {
 	if err = GetModel(ctx).Where(dao.SysAttachment.Columns().Md5, md5).Scan(&res); err != nil {

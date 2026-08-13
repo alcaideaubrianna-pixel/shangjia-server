@@ -666,6 +666,30 @@ func (c *cPublishAdmin) MediaMultipartAttach(ctx context.Context, req *publish.A
 	return &publish.AdminMediaMultipartAttachRes{MediaModel: data}, nil
 }
 
+func (c *cPublishAdmin) MediaDirectUploadCreate(ctx context.Context, req *publish.AdminMediaDirectUploadCreateReq) (*publish.AdminMediaDirectUploadCreateRes, error) {
+	data, err := service.SysPublish().AdminMediaDirectUploadCreate(ctx, &req.MediaDirectUploadCreateInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminMediaDirectUploadCreateRes{MediaDirectUploadCreateModel: data}, nil
+}
+
+func (c *cPublishAdmin) MediaDirectUploadSign(ctx context.Context, req *publish.AdminMediaDirectUploadSignReq) (*publish.AdminMediaDirectUploadSignRes, error) {
+	data, err := service.SysPublish().AdminMediaDirectUploadSign(ctx, &req.MediaDirectUploadSignInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminMediaDirectUploadSignRes{MediaDirectUploadSignModel: data}, nil
+}
+
+func (c *cPublishAdmin) MediaDirectUploadComplete(ctx context.Context, req *publish.AdminMediaDirectUploadCompleteReq) (*publish.AdminMediaDirectUploadCompleteRes, error) {
+	data, err := service.SysPublish().AdminMediaDirectUploadComplete(ctx, &req.MediaDirectUploadCompleteInp, g.RequestFromCtx(ctx).GetUploadFile("poster"))
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminMediaDirectUploadCompleteRes{MediaModel: data}, nil
+}
+
 func (c *cPublishAdmin) ProfileList(ctx context.Context, req *publish.AdminProfileListReq) (res *publish.AdminProfileListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminProfileList(ctx, &req.ProfileListInp)
 	if err != nil {
@@ -1002,6 +1026,30 @@ func (c *cPublish) MediaMultipartAttach(ctx context.Context, req *publish.MediaM
 		return nil, err
 	}
 	return &publish.MediaMultipartAttachRes{MediaModel: data}, nil
+}
+
+func (c *cPublish) MediaDirectUploadCreate(ctx context.Context, req *publish.MediaDirectUploadCreateReq) (*publish.MediaDirectUploadCreateRes, error) {
+	data, err := service.SysPublish().MyMediaDirectUploadCreate(ctx, &req.MediaDirectUploadCreateInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.MediaDirectUploadCreateRes{MediaDirectUploadCreateModel: data}, nil
+}
+
+func (c *cPublish) MediaDirectUploadSign(ctx context.Context, req *publish.MediaDirectUploadSignReq) (*publish.MediaDirectUploadSignRes, error) {
+	data, err := service.SysPublish().MyMediaDirectUploadSign(ctx, &req.MediaDirectUploadSignInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.MediaDirectUploadSignRes{MediaDirectUploadSignModel: data}, nil
+}
+
+func (c *cPublish) MediaDirectUploadComplete(ctx context.Context, req *publish.MediaDirectUploadCompleteReq) (*publish.MediaDirectUploadCompleteRes, error) {
+	data, err := service.SysPublish().MyMediaDirectUploadComplete(ctx, &req.MediaDirectUploadCompleteInp, g.RequestFromCtx(ctx).GetUploadFile("poster"))
+	if err != nil {
+		return nil, err
+	}
+	return &publish.MediaDirectUploadCompleteRes{MediaModel: data}, nil
 }
 
 func (c *cPublish) MediaList(ctx context.Context, req *publish.MediaListReq) (res *publish.MediaListRes, err error) {

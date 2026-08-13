@@ -40,6 +40,11 @@ func newCosClient() (*cos.Client, error) {
 	}), nil
 }
 
+// NewCosClient returns a COS client configured with the active upload settings.
+func NewCosClient() (*cos.Client, error) {
+	return newCosClient()
+}
+
 // Upload 上传到腾讯云cos对象存储
 func (d *CosDrive) Upload(ctx context.Context, file *ghttp.UploadFile) (fullPath string, err error) {
 	if config.CosPath == "" {

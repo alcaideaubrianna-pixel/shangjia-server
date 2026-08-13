@@ -713,9 +713,17 @@ func normalizeMediaFileURL(fileURL string, storagePath string) string {
 	if contentPath := normalizeTelegramContentStoragePath(storagePath); contentPath != "" {
 		return normalizeTelegramContentURL(contentPath)
 	}
-	if fileURL == "" || isLocalMediaURL(fileURL) || isTelegramFileURL(fileURL) {
+	if fileURL == "" || !isAbsoluteMediaURL(fileURL) || isLocalMediaURL(fileURL) || isTelegramFileURL(fileURL) {
 		if isAbsoluteMediaURL(storagePath) {
 			return storagePath
+		}
+		if uploadConfig := storager.GetConfig(); uploadConfig != nil && uploadConfig.Drive == consts.UploadDriveCos {
+			if publicURL := strings.TrimRight(uploadConfig.CosPublicURL, "/"); publicURL != "" {
+				return publicURL + "/" + strings.TrimLeft(storagePath, "/")
+			}
+			if bucketURL := strings.TrimRight(uploadConfig.CosBucketURL, "/"); bucketURL != "" {
+				return bucketURL + "/" + strings.TrimLeft(storagePath, "/")
+			}
 		}
 		return "/" + strings.TrimLeft(storagePath, "/")
 	}

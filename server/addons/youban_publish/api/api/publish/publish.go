@@ -526,6 +526,26 @@ type AdminMediaMultipartAttachRes struct {
 	*sysin.MediaModel
 }
 
+type AdminMediaDirectUploadCreateReq struct {
+	g.Meta `path:"/publish/admin/media/direct-upload/create" method:"post" tags:"上架插件管理端" summary:"创建COS直传会话"`
+	sysin.MediaDirectUploadCreateInp
+}
+type AdminMediaDirectUploadCreateRes struct {
+	*sysin.MediaDirectUploadCreateModel
+}
+type AdminMediaDirectUploadSignReq struct {
+	g.Meta `path:"/publish/admin/media/direct-upload/sign" method:"post" tags:"上架插件管理端" summary:"签发COS直传请求"`
+	sysin.MediaDirectUploadSignInp
+}
+type AdminMediaDirectUploadSignRes struct {
+	*sysin.MediaDirectUploadSignModel
+}
+type AdminMediaDirectUploadCompleteReq struct {
+	g.Meta `path:"/publish/admin/media/direct-upload/complete" method:"post" mime:"multipart/form-data" tags:"上架插件管理端" summary:"完成COS直传"`
+	sysin.MediaDirectUploadCompleteInp
+}
+type AdminMediaDirectUploadCompleteRes struct{ *sysin.MediaModel }
+
 type AdminProfileListReq struct {
 	g.Meta `path:"/publish/admin/profile/list" method:"get" tags:"上架插件管理端" summary:"资料列表"`
 	sysin.ProfileListInp
@@ -804,6 +824,26 @@ type MediaMultipartAttachReq struct {
 type MediaMultipartAttachRes struct {
 	*sysin.MediaModel
 }
+
+type MediaDirectUploadCreateReq struct {
+	g.Meta `path:"/publish/media/direct-upload/create" method:"post" tags:"上架插件" summary:"创建COS直传会话"`
+	sysin.MediaDirectUploadCreateInp
+}
+type MediaDirectUploadCreateRes struct {
+	*sysin.MediaDirectUploadCreateModel
+}
+type MediaDirectUploadSignReq struct {
+	g.Meta `path:"/publish/media/direct-upload/sign" method:"post" tags:"上架插件" summary:"签发COS直传请求"`
+	sysin.MediaDirectUploadSignInp
+}
+type MediaDirectUploadSignRes struct {
+	*sysin.MediaDirectUploadSignModel
+}
+type MediaDirectUploadCompleteReq struct {
+	g.Meta `path:"/publish/media/direct-upload/complete" method:"post" mime:"multipart/form-data" tags:"上架插件" summary:"完成COS直传"`
+	sysin.MediaDirectUploadCompleteInp
+}
+type MediaDirectUploadCompleteRes struct{ *sysin.MediaModel }
 
 type MediaListReq struct {
 	g.Meta `path:"/publish/media/list" method:"get" tags:"上架插件" summary:"资料媒体列表"`
