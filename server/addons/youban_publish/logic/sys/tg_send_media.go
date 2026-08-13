@@ -125,7 +125,14 @@ func (s *sSysPublish) sendTelegramOversizedMediaChunk(ctx context.Context, bot *
 func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem) ([]*telegramSentMessage, error) {
 	s.prepareTelegramMediaItemForSend(ctx, media)
 	if ref, ok := telegramCopyMediaRefFromFileId(media.TgFileId); ok {
-		return s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media, ref)
+		messages, err := s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media, ref)
+		if err != nil && isTelegramPhotoTooLargeError(err) {
+			cloned := *media
+			cloned.TgFileId = ""
+			cloned.TgThumbFileId = ""
+			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned)
+		}
+		return messages, err
 	}
 	prepareStartedAt := time.Now()
 	input, closer, err := telegramSingleMediaInputFile(ctx, media)
