@@ -19,12 +19,14 @@ import (
 )
 
 const (
-	telegramSendPhaseDisplaySending   = "display_sending"
-	telegramSendPhaseDisplayConfirmed = "display_confirmed"
-	telegramSendPhaseVerifySending    = "verify_sending"
-	telegramSendPhaseVerifyConfirmed  = "verify_confirmed"
-	telegramUnknownReconcileDelay     = 20 * time.Second
-	telegramUnknownReconcileMaxCount  = 2
+	telegramSendPhaseDisplaySending    = "display_sending"
+	telegramSendPhaseDisplayConfirmed  = "display_confirmed"
+	telegramSendPhaseVerifySending     = "verify_sending"
+	telegramSendPhaseVerifyConfirmed   = "verify_confirmed"
+	telegramSendPhaseCombinedSending   = "combined_sending"
+	telegramSendPhaseCombinedConfirmed = "combined_confirmed"
+	telegramUnknownReconcileDelay      = 20 * time.Second
+	telegramUnknownReconcileMaxCount   = 2
 )
 
 type telegramReconcileChannel struct {
@@ -35,7 +37,7 @@ type telegramReconcileChannel struct {
 
 func telegramSendPhaseHasDisplay(phase string) bool {
 	switch strings.TrimSpace(phase) {
-	case telegramSendPhaseDisplayConfirmed, telegramSendPhaseVerifySending, telegramSendPhaseVerifyConfirmed:
+	case telegramSendPhaseDisplayConfirmed, telegramSendPhaseVerifySending, telegramSendPhaseVerifyConfirmed, telegramSendPhaseCombinedConfirmed:
 		return true
 	default:
 		return false
@@ -129,6 +131,8 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 	purpose := "display"
 	if job.SendPhase == telegramSendPhaseVerifySending {
 		purpose = "verify"
+	} else if job.SendPhase == telegramSendPhaseCombinedSending {
+		purpose = "combined"
 	}
 	expectedCount, err := s.telegramJobPhaseExpectedMessageCount(ctx, job, purpose)
 	if err != nil {
@@ -147,7 +151,7 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 	if len(messages) < expectedCount {
 		return s.recoverIncompleteTelegramJobPhase(ctx, job, purpose, len(messages), expectedCount)
 	}
-	if purpose == "verify" {
+	if purpose == "verify" || purpose == "combined" {
 		result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(g.Map{
 			"status": "sending", "send_phase": telegramSendPhaseVerifyConfirmed, "dispatch_status": tgDispatchStatusProcessing, "error_message": "", "updated_at": gtime.Now(),
 		}).Update()
@@ -174,6 +178,21 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 }
 
 func (s *sSysPublish) telegramJobPhaseExpectedMessageCount(ctx context.Context, job telegramJobRecord, purpose string) (int, error) {
+	if purpose == "combined" {
+		display, err := s.telegramJobMedia(ctx, job, "display")
+		if err != nil {
+			return 0, err
+		}
+		display, err = s.selectTelegramDisplayMediaForTenant(ctx, job, display)
+		if err != nil {
+			return 0, err
+		}
+		verify, err := s.telegramJobMedia(ctx, job, "verify")
+		if err != nil {
+			return 0, err
+		}
+		return len(display) + len(verify), nil
+	}
 	media, err := s.telegramJobMedia(ctx, job, purpose)
 	if err != nil {
 		return 0, err

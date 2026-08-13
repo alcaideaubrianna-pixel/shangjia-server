@@ -43,6 +43,18 @@ func TestTelegramSendPhaseHasDisplay(t *testing.T) {
 	if telegramSendPhaseHasDisplay(telegramSendPhaseDisplaySending) {
 		t.Fatal("unconfirmed display phase must be reconciled before reuse")
 	}
+	if !telegramSendPhaseHasDisplay(telegramSendPhaseCombinedConfirmed) {
+		t.Fatal("confirmed combined phase must never resend media")
+	}
+}
+
+func TestTelegramMediaPurposeUsesOriginalPurpose(t *testing.T) {
+	if got := telegramMediaPurpose(&telegramMediaItem{Purpose: "verify"}, "display"); got != "verify" {
+		t.Fatalf("purpose=%q, want verify", got)
+	}
+	if got := telegramMediaPurpose(&telegramMediaItem{}, "display"); got != "display" {
+		t.Fatalf("fallback purpose=%q, want display", got)
+	}
 }
 
 func TestTelegramUnknownReconcileCauseStillCounts(t *testing.T) {

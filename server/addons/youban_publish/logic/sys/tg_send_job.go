@@ -151,7 +151,7 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 }
 
 func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJobRecord) error {
-	if job.SendPhase == telegramSendPhaseVerifyConfirmed {
+	if job.SendPhase == telegramSendPhaseVerifyConfirmed || job.SendPhase == telegramSendPhaseCombinedConfirmed {
 		return nil
 	}
 	job.TargetChatId = normalizeTelegramChannelChatID(job.TargetChatId)
@@ -185,6 +185,11 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	caption, err = s.applyTelegramJobContentProtection(ctx, job, caption, displayMedia, verifyMedia)
 	if err != nil {
 		return err
+	}
+	if len(displayMedia) > 0 && len(verifyMedia) > 0 && !telegramSendPhaseHasDisplay(job.SendPhase) {
+		if handled, combinedErr := s.sendTelegramCombinedMediaByAccount(ctx, job, caption, displayMedia, verifyMedia); handled || combinedErr != nil {
+			return combinedErr
+		}
 	}
 	if stillSending, err := s.telegramJobStillSending(ctx, job.Id); err != nil {
 		return err
@@ -320,12 +325,37 @@ func (s *sSysPublish) sendTelegramJobMediaByAccount(ctx context.Context, job tel
 	if err != nil {
 		return nil, gerror.Wrap(err, "协议号整组发送媒体失败")
 	}
-	for _, message := range messages {
-		if message != nil {
-			message.Purpose = purpose
-		}
-	}
 	return messages, nil
+}
+
+func (s *sSysPublish) sendTelegramCombinedMediaByAccount(ctx context.Context, job telegramJobRecord, caption string, displayMedia, verifyMedia []*telegramMediaItem) (bool, error) {
+	channel, err := s.messagePushChannelFromJob(ctx, job)
+	if err != nil {
+		return false, err
+	}
+	if channel.TgAccountId <= 0 {
+		return false, nil
+	}
+	media := make([]*telegramMediaItem, 0, len(displayMedia)+len(verifyMedia))
+	media = append(media, displayMedia...)
+	media = append(media, verifyMedia...)
+	if len(media) > telegramMediaGroupMaxItems {
+		return false, nil
+	}
+	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseCombinedSending); err != nil {
+		return true, err
+	}
+	messages, err := s.sendMessageTemplateByTgAccount(ctx, channel.TgAccountId, channel, telegramCaptionWithJobMarker(caption, job.Id, "combined"), media, "")
+	if err != nil {
+		return true, gerror.Wrap(err, "协议号整组发送完整资料失败")
+	}
+	if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
+		return true, telegramDeliveryUncertainError(err)
+	}
+	if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {
+		g.Log().Warningf(ctx, "更新TG完整媒体组file_id失败 job:%d err:%+v", job.Id, err)
+	}
+	return true, s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseCombinedConfirmed)
 }
 
 func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJobRecord, err error) error {
