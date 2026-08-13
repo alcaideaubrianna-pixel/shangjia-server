@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -34,12 +35,26 @@ type collectHistoryPauseError struct {
 	err   error
 }
 
+const collectHistoryBackpressureLogInterval = time.Minute
+
+var collectHistoryBackpressureLogs = struct {
+	sync.Mutex
+	last map[int64]time.Time
+}{last: make(map[int64]time.Time)}
+
 func (e *collectHistoryPauseError) Error() string {
 	return e.err.Error()
 }
 
 func (e *collectHistoryPauseError) Unwrap() error {
 	return e.err
+}
+
+func (e *collectHistoryPauseError) AccountTaskRetryDelay() time.Duration {
+	if e == nil || e.delay <= 0 {
+		return collectHistoryBackpressureDelayDefault
+	}
+	return e.delay
 }
 
 func (s *sSysPublish) ExecuteCollectHistoryTask(ctx context.Context, taskId int64) error {
@@ -178,7 +193,9 @@ func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.C
 		pendingLimit := collectHistoryPendingEventLimit(ctx)
 		observeCollectHistoryBackpressure(ctx, task.SourceId, *pending, pendingLimit)
 		if pending.Total >= pendingLimit {
-			g.Log().Warningf(ctx, "TG历史采集触发背压 sourceId:%d pending:%d groupCollecting:%d waitingOrder:%d prechecked:%d mediaPending:%d mediaReady:%d", task.SourceId, pending.Total, pending.ByStatus[sysin.CollectEventStatusGroupCollect], pending.ByStatus[sysin.CollectEventStatusWaitingOrder], pending.ByStatus[sysin.CollectEventStatusPrechecked], pending.ByStatus[sysin.CollectEventStatusMediaPending], pending.ByStatus[sysin.CollectEventStatusMediaReady])
+			if shouldLogCollectHistoryBackpressure(task.SourceId, time.Now()) {
+				g.Log().Warningf(ctx, "TG历史采集触发背压 sourceId:%d pending:%d groupCollecting:%d waitingOrder:%d prechecked:%d mediaPending:%d mediaReady:%d", task.SourceId, pending.Total, pending.ByStatus[sysin.CollectEventStatusGroupCollect], pending.ByStatus[sysin.CollectEventStatusWaitingOrder], pending.ByStatus[sysin.CollectEventStatusPrechecked], pending.ByStatus[sysin.CollectEventStatusMediaPending], pending.ByStatus[sysin.CollectEventStatusMediaReady])
+			}
 			return &collectHistoryPauseError{
 				delay: collectHistoryBackpressureDelay(ctx),
 				err:   gerror.Newf("历史采集等待已有资料处理完成，当前待处理:%d，上限:%d（分组中:%d，媒体待处理:%d）", pending.Total, pendingLimit, pending.ByStatus[sysin.CollectEventStatusGroupCollect], pending.ByStatus[sysin.CollectEventStatusMediaPending]),
@@ -232,6 +249,22 @@ func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.C
 		}
 	}
 	return s.rescheduleCollectHistoryTask(ctx, task, offsetID)
+}
+
+func shouldLogCollectHistoryBackpressure(sourceID int64, now time.Time) bool {
+	collectHistoryBackpressureLogs.Lock()
+	defer collectHistoryBackpressureLogs.Unlock()
+	last, ok := collectHistoryBackpressureLogs.last[sourceID]
+	if ok && now.Sub(last) < collectHistoryBackpressureLogInterval {
+		return false
+	}
+	collectHistoryBackpressureLogs.last[sourceID] = now
+	for id, loggedAt := range collectHistoryBackpressureLogs.last {
+		if now.Sub(loggedAt) > 10*collectHistoryBackpressureLogInterval {
+			delete(collectHistoryBackpressureLogs.last, id)
+		}
+	}
+	return true
 }
 
 func collectHistoryTaskCanceled(ctx context.Context, taskId int64) (bool, error) {

@@ -134,20 +134,9 @@ func (s *sGateway) sync(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	bindings := map[string][]service.BotBinding{}
-	for _, provider := range service.Providers() {
-		items, listErr := provider.ListEnabledBots(ctx)
-		if listErr != nil {
-			return listErr
-		}
-		for _, item := range items {
-			item.Token = strings.TrimSpace(item.Token)
-			if item.Token == "" {
-				continue
-			}
-			key := tokenKey(item.Token)
-			bindings[key] = append(bindings[key], item)
-		}
+	bindings, err := s.loadBindings(ctx)
+	if err != nil {
+		return err
 	}
 	s.mu.Lock()
 	s.bindings = bindings
@@ -177,6 +166,25 @@ func (s *sGateway) sync(ctx context.Context) error {
 	s.mu.Unlock()
 	s.observeBotCounts(ctx, len(bindings))
 	return nil
+}
+
+func (s *sGateway) loadBindings(ctx context.Context) (map[string][]service.BotBinding, error) {
+	bindings := map[string][]service.BotBinding{}
+	for _, provider := range service.Providers() {
+		items, listErr := provider.ListEnabledBots(ctx)
+		if listErr != nil {
+			return nil, listErr
+		}
+		for _, item := range items {
+			item.Token = strings.TrimSpace(item.Token)
+			if item.Token == "" {
+				continue
+			}
+			key := tokenKey(item.Token)
+			bindings[key] = append(bindings[key], item)
+		}
+	}
+	return bindings, nil
 }
 
 func (s *sGateway) observeBotCounts(ctx context.Context, configured int) {
@@ -256,10 +264,12 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 	bindings := append([]service.BotBinding(nil), s.bindings[key]...)
 	s.mu.Unlock()
 	if len(bindings) == 0 {
-		if err := s.sync(ctx); err != nil {
+		loaded, err := s.loadBindings(ctx)
+		if err != nil {
 			return err
 		}
 		s.mu.Lock()
+		s.bindings = loaded
 		bindings = append(bindings, s.bindings[key]...)
 		s.mu.Unlock()
 	}

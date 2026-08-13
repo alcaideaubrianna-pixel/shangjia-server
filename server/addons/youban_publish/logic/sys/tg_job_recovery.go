@@ -154,12 +154,15 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 	nowText := telegramRecoveryTimeText(now)
 	deadline := telegramRecoveryTimeText(now.Add(-telegramPendingJobRecoverAfter))
 	var jobs []telegramJobRecord
-	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	eligible := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("*, ROW_NUMBER() OVER (PARTITION BY tenant_id, channel_id ORDER BY priority ASC, id ASC) AS channel_rank").
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
 		Where(telegramActiveChannelCondition()).
 		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", nowText).
-		WhereLTE("updated_at", deadline).
+		WhereLTE("updated_at", deadline)
+	err := g.DB().Model(eligible, "eligible_jobs").Safe().Ctx(ctx).
+		Where("channel_rank", 1).
 		OrderAsc("updated_at").OrderAsc("id").
 		Limit(limit).
 		Scan(&jobs)
