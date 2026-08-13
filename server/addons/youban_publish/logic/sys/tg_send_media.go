@@ -832,7 +832,7 @@ func telegramSentMessagesFromGroup(msgs []*models.Message, purpose string, media
 		list = append(list, &telegramSentMessage{
 			MessageId:        int64(msg.ID),
 			MediaGroupId:     msg.MediaGroupID,
-			Purpose:          telegramMediaPurpose(mediaItem, purpose),
+			Purpose:          purpose,
 			MediaId:          mediaItem.Id,
 			TgFileId:         telegramMessageFileId(msg),
 			AssetHash:        mediaItem.AssetHash,
@@ -842,13 +842,6 @@ func telegramSentMessagesFromGroup(msgs []*models.Message, purpose string, media
 		})
 	}
 	return list
-}
-
-func telegramMediaPurpose(media *telegramMediaItem, fallback string) string {
-	if media != nil && strings.TrimSpace(media.Purpose) != "" {
-		return strings.TrimSpace(media.Purpose)
-	}
-	return fallback
 }
 
 func telegramSentMessagesFromSingle(msg *models.Message, purpose string, media *telegramMediaItem) ([]*telegramSentMessage, error) {
