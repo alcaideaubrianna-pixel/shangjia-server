@@ -149,6 +149,15 @@ type ProfileStatusReq struct {
 	sysin.ProfileStatusInp
 }
 
+type GlobalProfileStatusReq struct {
+	g.Meta `path:"/publish/profile/globalStatus" method:"post" tags:"上架插件后台" summary:"超级管理员批量上下架资料"`
+	sysin.ProfileStatusInp
+}
+
+type GlobalProfileStatusRes struct {
+	*sysin.ProfileStatusModel
+}
+
 type ProfileStatusRes struct {
 	*sysin.ProfileStatusModel
 }

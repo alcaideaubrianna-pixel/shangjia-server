@@ -290,6 +290,13 @@ func (s *sSysPublish) AdminProfileStatus(ctx context.Context, in *sysin.ProfileS
 	return s.updateProfileStatus(ctx, in, account.TenantId, 0)
 }
 
+func (s *sSysPublish) AdminGlobalProfileStatus(ctx context.Context, in *sysin.ProfileStatusInp) (res *sysin.ProfileStatusModel, err error) {
+	if err = s.requireSystemSuperAdmin(ctx); err != nil {
+		return nil, err
+	}
+	return s.updateProfileStatus(ctx, in, 0, 0)
+}
+
 func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) (res *sysin.AdminNotePageModel, err error) {
 	startedAt := time.Now()
 	account, err := s.currentAdminAccount(ctx)
