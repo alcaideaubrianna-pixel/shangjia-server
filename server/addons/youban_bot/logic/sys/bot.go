@@ -23,14 +23,15 @@ import (
 )
 
 const (
-	botTable          = "hg_youban_bot_bot"
-	featureTable      = "hg_youban_bot_feature"
-	authCodeTable     = "hg_youban_bot_auth_code"
-	accountBindTbl    = "hg_youban_bot_account_bind"
-	userTable         = "hg_youban_bot_user"
-	messageTable      = "hg_youban_bot_message"
-	channelCacheTable = "hg_youban_bot_channel_cache"
-	customEmojiTable  = "hg_youban_bot_custom_emoji"
+	botTable           = "hg_youban_bot_bot"
+	featureTable       = "hg_youban_bot_feature"
+	authCodeTable      = "hg_youban_bot_auth_code"
+	accountBindTbl     = "hg_youban_bot_account_bind"
+	userTable          = "hg_youban_bot_user"
+	messageTable       = "hg_youban_bot_message"
+	channelCacheTable  = "hg_youban_bot_channel_cache"
+	customEmojiTable   = "hg_youban_bot_custom_emoji"
+	broadcastTaskTable = "hg_youban_bot_broadcast_task"
 
 	publishAccountTable = "hg_youban_publish_account"
 )
@@ -48,6 +49,8 @@ type sSysBot struct {
 	features          map[string]*botFeatureRow
 	featureAt         time.Time
 	featureDefaultsAt time.Time
+	broadcastMu       sync.Mutex
+	broadcastRunning  bool
 }
 
 type authCodeRow struct {
@@ -92,6 +95,7 @@ func (s *sSysBot) StartRuntime(ctx context.Context) {
 	_ = s.syncAllTelegramBotMenus(ctx)
 	s.startPolling(ctx)
 	s.startTelegramMessageCleanup(ctx)
+	s.startPendingBroadcasts(ctx)
 }
 func (s *sSysBot) StopRuntime() {
 	s.stopPolling()

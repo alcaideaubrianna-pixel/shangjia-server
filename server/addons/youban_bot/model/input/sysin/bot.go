@@ -225,6 +225,32 @@ type SendMessageInp struct {
 	DisableNotice bool   `json:"disableNotice" dc:"静默发送"`
 }
 
+type BroadcastCreateInp struct {
+	BotIds        []int64 `json:"botIds" dc:"Bot ID列表；为空使用全部启用的官方Bot"`
+	Text          string  `json:"text" v:"required#消息内容不能为空" dc:"消息内容"`
+	DisableNotice bool    `json:"disableNotice" dc:"静默发送"`
+}
+
+type BroadcastTaskInp struct {
+	Id int64 `json:"id" v:"required|min:1#任务ID不能为空|任务ID不正确"`
+}
+
+type BroadcastTaskModel struct {
+	Id            int64       `json:"id"`
+	BotIds        []int64     `json:"botIds"`
+	Text          string      `json:"text"`
+	DisableNotice bool        `json:"disableNotice"`
+	Status        string      `json:"status"`
+	TotalCount    int         `json:"totalCount"`
+	SuccessCount  int         `json:"successCount"`
+	FailedCount   int         `json:"failedCount"`
+	BlockedCount  int         `json:"blockedCount"`
+	LastError     string      `json:"lastError"`
+	CreatedAt     *gtime.Time `json:"createdAt"`
+	StartedAt     *gtime.Time `json:"startedAt"`
+	FinishedAt    *gtime.Time `json:"finishedAt"`
+}
+
 type CustomEmojiResolveInp struct {
 	EmojiIds []string `json:"emojiIds" v:"required#Emoji ID不能为空" dc:"Telegram自定义Emoji ID列表"`
 }

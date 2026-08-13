@@ -71,6 +71,10 @@
           <account-bind-panel />
         </n-tab-pane>
 
+        <n-tab-pane name="broadcast" tab="全局推送">
+          <broadcast-panel />
+        </n-tab-pane>
+
         <n-tab-pane name="user" tab="用户与消息">
           <user-message-panel />
         </n-tab-pane>
@@ -164,6 +168,7 @@
   } from '@/api/addons/youbanBot';
   import FeatureConfigModal from './components/feature-config-modal.vue';
   import AccountBindPanel from './components/account-bind-panel.vue';
+  import BroadcastPanel from './components/broadcast-panel.vue';
   import UserMessagePanel from './components/user-message-panel.vue';
 
   const message = useMessage();

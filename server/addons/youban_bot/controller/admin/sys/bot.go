@@ -167,3 +167,19 @@ func (c *cBot) SendMessage(ctx context.Context, req *bot.SendMessageReq) (res *b
 	res = &bot.SendMessageRes{}
 	return
 }
+
+func (c *cBot) BroadcastCreate(ctx context.Context, req *bot.BroadcastCreateReq) (res *bot.BroadcastCreateRes, err error) {
+	task, err := service.SysBot().AdminBroadcastCreate(ctx, &req.BroadcastCreateInp)
+	if err != nil {
+		return nil, err
+	}
+	return &bot.BroadcastCreateRes{BroadcastTaskModel: task}, nil
+}
+
+func (c *cBot) BroadcastTask(ctx context.Context, req *bot.BroadcastTaskReq) (res *bot.BroadcastTaskRes, err error) {
+	task, err := service.SysBot().AdminBroadcastTask(ctx, &req.BroadcastTaskInp)
+	if err != nil {
+		return nil, err
+	}
+	return &bot.BroadcastTaskRes{BroadcastTaskModel: task}, nil
+}

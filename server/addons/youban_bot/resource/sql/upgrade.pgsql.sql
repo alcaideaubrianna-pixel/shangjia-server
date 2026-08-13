@@ -192,3 +192,21 @@ CREATE TABLE IF NOT EXISTS hg_youban_bot_custom_emoji (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_ybbce_emoji ON hg_youban_bot_custom_emoji (custom_emoji_id);
 CREATE INDEX IF NOT EXISTS idx_ybbce_file ON hg_youban_bot_custom_emoji (file_unique_id);
 CREATE INDEX IF NOT EXISTS idx_ybbce_status ON hg_youban_bot_custom_emoji (status,id);
+
+CREATE TABLE IF NOT EXISTS hg_youban_bot_broadcast_task (
+  id bigserial PRIMARY KEY,
+  bot_ids_json text NOT NULL,
+  text text NOT NULL,
+  disable_notice smallint NOT NULL DEFAULT 0,
+  status varchar(32) NOT NULL DEFAULT 'pending',
+  total_count integer NOT NULL DEFAULT 0,
+  success_count integer NOT NULL DEFAULT 0,
+  failed_count integer NOT NULL DEFAULT 0,
+  blocked_count integer NOT NULL DEFAULT 0,
+  last_error text,
+  created_at timestamp,
+  started_at timestamp,
+  finished_at timestamp,
+  updated_at timestamp
+);
+CREATE INDEX IF NOT EXISTS idx_ybbbt_status ON hg_youban_bot_broadcast_task (status,id);

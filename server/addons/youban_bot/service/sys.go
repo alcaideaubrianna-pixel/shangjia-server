@@ -61,6 +61,8 @@ type ISysBot interface {
 	AdminBotChannelCacheList(ctx context.Context, in *sysin.BotChannelCacheListInp) (list []*sysin.BotChannelCacheModel, totalCount int, err error)
 	AdminUserSwitchSuperAdmin(ctx context.Context, in *sysin.UserSwitchSuperAdminInp) (err error)
 	AdminSendMessage(ctx context.Context, in *sysin.SendMessageInp) (err error)
+	AdminBroadcastCreate(ctx context.Context, in *sysin.BroadcastCreateInp) (res *sysin.BroadcastTaskModel, err error)
+	AdminBroadcastTask(ctx context.Context, in *sysin.BroadcastTaskInp) (res *sysin.BroadcastTaskModel, err error)
 	NotifySuperAdmins(ctx context.Context, botId int64, scene string, text string) (err error)
 	LoginCodeStart(ctx context.Context, in *sysin.CodeStartInp) (res *sysin.CodeStartModel, err error)
 	LoginCodeStatus(ctx context.Context, in *sysin.CodeStatusInp) (res *sysin.CodeStatusModel, err error)

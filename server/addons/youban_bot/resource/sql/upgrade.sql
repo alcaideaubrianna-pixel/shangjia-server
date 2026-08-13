@@ -204,3 +204,22 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_custom_emoji` (
   KEY `idx_ybbce_file` (`file_unique_id`),
   KEY `idx_ybbce_status` (`status`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴Telegram自定义Emoji缓存';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_broadcast_task` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `bot_ids_json` text NOT NULL,
+  `text` text NOT NULL,
+  `disable_notice` tinyint(1) NOT NULL DEFAULT 0,
+  `status` varchar(32) NOT NULL DEFAULT 'pending',
+  `total_count` int NOT NULL DEFAULT 0,
+  `success_count` int NOT NULL DEFAULT 0,
+  `failed_count` int NOT NULL DEFAULT 0,
+  `blocked_count` int NOT NULL DEFAULT 0,
+  `last_error` text,
+  `created_at` datetime DEFAULT NULL,
+  `started_at` datetime DEFAULT NULL,
+  `finished_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_ybbbt_status` (`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='全局Bot推送任务';

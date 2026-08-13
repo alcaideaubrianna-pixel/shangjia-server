@@ -51,3 +51,11 @@ export function UserSwitchSuperAdmin(params = {}) {
 export function SendMessage(params = {}) {
   return http.request({ url: '/youban_bot/bot/message/send', method: 'POST', params });
 }
+
+export function BroadcastCreate(params = {}) {
+  return http.request({ url: '/youban_bot/bot/broadcast/create', method: 'POST', params });
+}
+
+export function BroadcastTask(params = {}) {
+  return http.request({ url: '/youban_bot/bot/broadcast/task', method: 'get', params });
+}

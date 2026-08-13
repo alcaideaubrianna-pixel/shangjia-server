@@ -125,3 +125,21 @@ type SendMessageReq struct {
 }
 
 type SendMessageRes struct{}
+
+type BroadcastCreateReq struct {
+	g.Meta `path:"/bot/broadcast/create" method:"post" tags:"全局机器人后台" summary:"创建全局推送任务"`
+	sysin.BroadcastCreateInp
+}
+
+type BroadcastCreateRes struct {
+	*sysin.BroadcastTaskModel
+}
+
+type BroadcastTaskReq struct {
+	g.Meta `path:"/bot/broadcast/task" method:"get" tags:"全局机器人后台" summary:"获取全局推送任务"`
+	sysin.BroadcastTaskInp
+}
+
+type BroadcastTaskRes struct {
+	*sysin.BroadcastTaskModel
+}
