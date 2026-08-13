@@ -434,6 +434,15 @@ func (c *cPublishAdmin) ChannelCacheRefresh(ctx context.Context, req *publish.Ad
 	return
 }
 
+func (c *cPublishAdmin) ChannelCacheRefreshStatus(ctx context.Context, req *publish.AdminChannelCacheRefreshStatusReq) (res *publish.AdminChannelCacheRefreshStatusRes, err error) {
+	item, err := service.SysPublish().AdminChannelCacheRefreshStatus(ctx, &req.ChannelCacheRefreshStatusInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &publish.AdminChannelCacheRefreshStatusRes{ChannelCacheRefreshModel: item}
+	return
+}
+
 func (c *cPublishAdmin) ChannelCheck(ctx context.Context, req *publish.AdminChannelCheckReq) (res *publish.AdminChannelCheckRes, err error) {
 	item, err := service.SysPublish().AdminChannelCheck(ctx, &req.ChannelCheckInp)
 	if err != nil {

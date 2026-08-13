@@ -12,7 +12,10 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -60,12 +63,20 @@ func (s *sSysPublish) fetchTgAccountChannelCaches(ctx context.Context, item *sys
 }
 
 func fetchTgAccountChannelCachesWithClient(ctx context.Context, client *telegram.Client) ([]*tgDialogCache, error) {
+	channels := make([]*tgDialogCache, 0)
+	err := scanTgAccountChannelCachesWithClient(ctx, client, func(page []*tgDialogCache) error {
+		channels = append(channels, page...)
+		return nil
+	})
+	return channels, err
+}
+
+func scanTgAccountChannelCachesWithClient(ctx context.Context, client *telegram.Client, consume func([]*tgDialogCache) error) error {
 	if client == nil {
-		return nil, gerror.New("Telegram客户端未初始化")
+		return gerror.New("Telegram客户端未初始化")
 	}
 	const pageLimit = 100
 	const maxPages = 1000
-	channels := make([]*tgDialogCache, 0)
 	seenChannels := make(map[string]struct{})
 	seenOffsets := make(map[string]struct{})
 	offsetDate := 0
@@ -74,7 +85,7 @@ func fetchTgAccountChannelCachesWithClient(ctx context.Context, client *telegram
 	for page := 0; page < maxPages; page++ {
 		offsetKey := fmt.Sprintf("%d:%d:%T", offsetDate, offsetID, offsetPeer)
 		if _, exists := seenOffsets[offsetKey]; exists {
-			return nil, gerror.New("Telegram频道分页游标未推进")
+			return gerror.New("Telegram频道分页游标未推进")
 		}
 		seenOffsets[offsetKey] = struct{}{}
 		dialogs, err := client.API().MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
@@ -84,8 +95,9 @@ func fetchTgAccountChannelCachesWithClient(ctx context.Context, client *telegram
 			OffsetPeer: offsetPeer,
 		})
 		if err != nil {
-			return nil, gerror.Wrapf(err, "读取Telegram频道对话失败 page:%d", page+1)
+			return gerror.Wrapf(err, "读取Telegram频道对话失败 page:%d", page+1)
 		}
+		pageChannels := make([]*tgDialogCache, 0, pageLimit)
 		for _, chat := range tgDialogsChats(dialogs) {
 			cache := tgDialogCacheFromChat(chat)
 			if cache == nil || strings.TrimSpace(cache.ChannelId) == "" {
@@ -95,17 +107,54 @@ func fetchTgAccountChannelCachesWithClient(ctx context.Context, client *telegram
 				continue
 			}
 			seenChannels[cache.ChannelId] = struct{}{}
-			channels = append(channels, cache)
+			pageChannels = append(pageChannels, cache)
+		}
+		if len(pageChannels) > 0 && consume != nil {
+			if err = consume(pageChannels); err != nil {
+				return err
+			}
 		}
 		nextDate, nextID, nextPeer, ok := tgDialogsNextOffset(dialogs)
 		if !ok {
-			return channels, nil
+			return nil
 		}
 		offsetDate = nextDate
 		offsetID = nextID
 		offsetPeer = nextPeer
 	}
-	return nil, gerror.New("Telegram频道对话超过最大分页数量")
+	return gerror.New("Telegram频道对话超过最大分页数量")
+}
+
+func (s *sSysPublish) handleDialogCacheRefreshAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
+	if task == nil || task.TenantID <= 0 || task.AccountID <= 0 {
+		return gerror.New("频道缓存刷新任务参数无效")
+	}
+	startedAt := time.Now()
+	pageCount := 0
+	channelCount := 0
+	err := scanTgAccountChannelCachesWithClient(ctx, client, func(channels []*tgDialogCache) error {
+		pageCount++
+		channelCount += len(channels)
+		now := gtime.Now()
+		for _, channel := range channels {
+			if err := s.upsertTgDialogCache(ctx, task.TenantID, task.AccountID, channel, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	result := "success"
+	if err != nil {
+		result = "failed"
+	}
+	attrs := metric.WithAttributes(attribute.String("result", result))
+	duration, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.dialog_cache_refresh_duration_seconds")
+	duration.Record(ctx, time.Since(startedAt).Seconds(), attrs)
+	pages, _ := publishObserveMeter.Int64Histogram("xiaohuiji.tg.dialog_cache_refresh_pages")
+	pages.Record(ctx, int64(pageCount), attrs)
+	channels, _ := publishObserveMeter.Int64Histogram("xiaohuiji.tg.dialog_cache_refresh_channels")
+	channels.Record(ctx, int64(channelCount), attrs)
+	return err
 }
 
 func tgDialogsChats(dialogs tg.MessagesDialogsClass) []tg.ChatClass {

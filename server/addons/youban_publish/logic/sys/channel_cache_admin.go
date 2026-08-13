@@ -2,12 +2,16 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -173,24 +177,67 @@ func (s *sSysPublish) AdminChannelCacheRefresh(ctx context.Context, in *sysin.Ch
 	if item.Status != sysin.PublishTgAccountStatusAuthorized {
 		return nil, gerror.New("TG账号未授权，请先刷新账号状态或重新扫码登录")
 	}
-	channels, err := s.fetchTgAccountChannelCaches(ctx, item)
+	taskId, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID:    account.TenantId,
+		AccountID:   in.TgAccountId,
+		TaskType:    collectorin.AccountTaskTypeDialogCacheRefresh,
+		TaskKey:     fmt.Sprintf("dialog-cache-refresh:%d:%d", in.TgAccountId, time.Now().UnixNano()),
+		Priority:    100,
+		MaxAttempts: 3,
+	})
 	if err != nil {
-		if isTelegramAuthKeyUnregistered(err) {
-			s.expireTgAccountSession(context.Background(), item.Id, account.TenantId, account.Id, tgAccountSessionExpiredMessage)
-			return nil, gerror.New(tgAccountSessionExpiredMessage)
-		}
-		return nil, gerror.Wrap(err, "同步TG账号频道失败")
+		return nil, gerror.Wrap(err, "创建频道缓存刷新任务失败")
 	}
-	now := gtime.Now()
-	for _, channel := range channels {
-		if err = s.upsertTgDialogCache(ctx, account.TenantId, in.TgAccountId, channel, now); err != nil {
-			return nil, err
+	collectorservice.AccountRuntime().Refresh()
+	return &sysin.ChannelCacheRefreshModel{
+		Message:     "频道缓存刷新任务已提交",
+		TgAccountId: in.TgAccountId,
+		TaskId:      taskId,
+		Status:      collectorin.AccountTaskStatusPending,
+	}, nil
+}
+
+func (s *sSysPublish) AdminChannelCacheRefreshStatus(ctx context.Context, in *sysin.ChannelCacheRefreshStatusInp) (*sysin.ChannelCacheRefreshModel, error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil || in.TaskId <= 0 {
+		return nil, gerror.New("刷新任务无效")
+	}
+	task, err := collectorservice.AccountTasks().Get(ctx, in.TaskId)
+	if err != nil {
+		return nil, err
+	}
+	if task.TenantID != account.TenantId || task.TaskType != collectorin.AccountTaskTypeDialogCacheRefresh {
+		return nil, gerror.New("刷新任务不存在")
+	}
+	if err = s.ensureTgAccountBelongsAccount(ctx, task.AccountID, account.TenantId, account.Id); err != nil {
+		return nil, err
+	}
+	count := 0
+	if task.CreatedAt != nil {
+		count, err = g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).
+			Where("tenant_id", account.TenantId).
+			Where("tg_account_id", task.AccountID).
+			WhereGTE("last_sync_at", gtime.New(*task.CreatedAt)).
+			Count()
+		if err != nil {
+			return nil, gerror.Wrap(err, "读取频道缓存刷新进度失败")
 		}
+	}
+	message := "频道缓存刷新中"
+	if task.Status == collectorin.AccountTaskStatusCompleted {
+		message = "群聊 / 频道缓存已更新"
+	} else if task.Status == collectorin.AccountTaskStatusDead {
+		message = "频道缓存刷新失败"
+	}
+	syncedAt := ""
+	if task.CompletedAt != nil {
+		syncedAt = gtime.New(*task.CompletedAt).String()
 	}
 	return &sysin.ChannelCacheRefreshModel{
-		Count:       len(channels),
-		Message:     "群聊 / 频道缓存已更新",
-		SyncedAt:    now.String(),
-		TgAccountId: in.TgAccountId,
+		Count: count, Message: message, SyncedAt: syncedAt, TgAccountId: task.AccountID,
+		TaskId: task.ID, Status: task.Status, ErrorMessage: task.ErrorMessage,
 	}, nil
 }

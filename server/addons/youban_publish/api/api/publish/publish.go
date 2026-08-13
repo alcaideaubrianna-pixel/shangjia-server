@@ -321,6 +321,15 @@ type AdminChannelCacheRefreshRes struct {
 	*sysin.ChannelCacheRefreshModel
 }
 
+type AdminChannelCacheRefreshStatusReq struct {
+	g.Meta `path:"/publish/admin/channel/cache/refresh/status" method:"get" tags:"上架插件管理端" summary:"查询TG账号频道缓存刷新状态"`
+	sysin.ChannelCacheRefreshStatusInp
+}
+
+type AdminChannelCacheRefreshStatusRes struct {
+	*sysin.ChannelCacheRefreshModel
+}
+
 type AdminChannelCheckReq struct {
 	g.Meta `path:"/publish/admin/channel/check" method:"post" tags:"上架插件管理端" summary:"检测频道Bot权限"`
 	sysin.ChannelCheckInp

@@ -1408,10 +1408,17 @@ type ChannelCacheRefreshInp struct {
 }
 
 type ChannelCacheRefreshModel struct {
-	Count       int    `json:"count" dc:"同步数量"`
-	Message     string `json:"message" dc:"同步结果"`
-	SyncedAt    string `json:"syncedAt" dc:"同步时间"`
-	TgAccountId int64  `json:"tgAccountId" dc:"TG账号ID"`
+	Count        int    `json:"count" dc:"同步数量"`
+	Message      string `json:"message" dc:"同步结果"`
+	SyncedAt     string `json:"syncedAt" dc:"同步时间"`
+	TgAccountId  int64  `json:"tgAccountId" dc:"TG账号ID"`
+	TaskId       int64  `json:"taskId" dc:"异步任务ID"`
+	Status       string `json:"status" dc:"任务状态"`
+	ErrorMessage string `json:"errorMessage" dc:"失败原因"`
+}
+
+type ChannelCacheRefreshStatusInp struct {
+	TaskId int64 `json:"taskId" v:"required|min:1#刷新任务不能为空|刷新任务无效" dc:"异步任务ID"`
 }
 
 type ChannelCheckInp struct {

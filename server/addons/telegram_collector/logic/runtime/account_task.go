@@ -155,6 +155,10 @@ func accountTaskTimeout(taskType string) time.Duration {
 		return 25 * time.Minute
 	case sysin.AccountTaskTypeMediaDownload:
 		return 10 * time.Minute
+	case sysin.AccountTaskTypeUsernameResolveDiagnostic:
+		return 30 * time.Second
+	case sysin.AccountTaskTypeDialogCacheRefresh:
+		return 30 * time.Minute
 	default:
 		return 5 * time.Minute
 	}

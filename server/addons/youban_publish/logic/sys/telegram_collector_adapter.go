@@ -31,6 +31,8 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Conte
 	switch task.TaskType {
 	case collectorin.AccountTaskTypeHistoryPage:
 		return nil, h.publish.handleCollectHistoryAccountTask(ctx, client, task.HistoryTaskID)
+	case collectorin.AccountTaskTypeDialogCacheRefresh:
+		return nil, h.publish.handleDialogCacheRefreshAccountTask(ctx, client, task)
 	default:
 		return nil, gerror.Newf("不支持的Telegram账号任务类型：%s", task.TaskType)
 	}

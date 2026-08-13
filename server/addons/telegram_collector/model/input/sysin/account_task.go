@@ -10,8 +10,10 @@ const (
 	AccountTaskStatusDead        = "dead"
 	AccountTaskStatusCancelled   = "cancelled"
 
-	AccountTaskTypeHistoryPage   = "history_page"
-	AccountTaskTypeMediaDownload = "media_download"
+	AccountTaskTypeHistoryPage               = "history_page"
+	AccountTaskTypeMediaDownload             = "media_download"
+	AccountTaskTypeUsernameResolveDiagnostic = "username_resolve_diagnostic"
+	AccountTaskTypeDialogCacheRefresh        = "dialog_cache_refresh"
 )
 
 type AccountTaskSubmit struct {
@@ -46,6 +48,8 @@ type AccountTask struct {
 	LeaseUntil          *time.Time `json:"leaseUntil,omitempty"`
 	NextRunAt           *time.Time `json:"nextRunAt,omitempty"`
 	ErrorMessage        string     `json:"errorMessage,omitempty"`
+	CreatedAt           *time.Time `json:"createdAt,omitempty"`
+	CompletedAt         *time.Time `json:"completedAt,omitempty"`
 }
 
 type AccountMediaDownloadResult struct {

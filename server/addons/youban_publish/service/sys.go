@@ -148,6 +148,7 @@ type ISysPublish interface {
 	AdminChannelCacheList(ctx context.Context, in *sysin.ChannelCacheListInp) (list []*sysin.ChannelCacheModel, totalCount int, err error)
 	AdminChannelCacheResolve(ctx context.Context, in *sysin.ChannelCacheResolveInp) (list []*sysin.ChannelCacheResolveModel, err error)
 	AdminChannelCacheRefresh(ctx context.Context, in *sysin.ChannelCacheRefreshInp) (res *sysin.ChannelCacheRefreshModel, err error)
+	AdminChannelCacheRefreshStatus(ctx context.Context, in *sysin.ChannelCacheRefreshStatusInp) (res *sysin.ChannelCacheRefreshModel, err error)
 	AdminChannelCheck(ctx context.Context, in *sysin.ChannelCheckInp) (res *sysin.ChannelCheckModel, err error)
 	AdminChannelMemberSyncStart(ctx context.Context, in *sysin.TgChannelMemberSyncStartInp) (res *sysin.TgChannelMemberSyncModel, err error)
 	AdminChannelMemberSyncView(ctx context.Context, in *sysin.TgChannelMemberSyncViewInp) (res *sysin.TgChannelMemberSyncModel, err error)

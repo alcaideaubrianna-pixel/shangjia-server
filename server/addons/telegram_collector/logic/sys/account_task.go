@@ -77,6 +77,8 @@ func validateAccountTaskSubmit(in *sysin.AccountTaskSubmit) error {
 		if in.MediaOwnerAccountID <= 0 || in.Media == nil || strings.TrimSpace(in.Media.FileID) == "" {
 			return gerror.New("Telegram媒体下载任务参数不完整")
 		}
+	case sysin.AccountTaskTypeUsernameResolveDiagnostic:
+	case sysin.AccountTaskTypeDialogCacheRefresh:
 	default:
 		return gerror.Newf("不支持的Telegram账号任务类型：%s", in.TaskType)
 	}
@@ -341,6 +343,14 @@ func accountTaskModel(row *entity.TgCollectorAccountTask) *sysin.AccountTask {
 	if row.NextRunAt != nil {
 		value := row.NextRunAt.Time
 		model.NextRunAt = &value
+	}
+	if row.CreatedAt != nil {
+		value := row.CreatedAt.Time
+		model.CreatedAt = &value
+	}
+	if row.CompletedAt != nil {
+		value := row.CompletedAt.Time
+		model.CompletedAt = &value
 	}
 	return model
 }

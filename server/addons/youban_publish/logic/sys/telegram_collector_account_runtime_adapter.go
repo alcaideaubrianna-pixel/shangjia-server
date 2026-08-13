@@ -4,11 +4,13 @@ import (
 	"context"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
+	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 )
 
 type publishAccountRuntimeProvider struct{ publish *sSysPublish }
@@ -21,6 +23,17 @@ func (p *publishAccountRuntimeProvider) ListAccountRuntimes(ctx context.Context)
 	groups, err := p.publish.enabledAccountMonitorGroups(ctx)
 	if err != nil {
 		return nil, err
+	}
+	accountIDs, err := p.publish.authorizedTgAccountRuntimeIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, accountID := range accountIDs {
+		if accountID > 0 {
+			if _, exists := groups[accountID]; !exists {
+				groups[accountID] = accountMonitorGroupRuntime{}
+			}
+		}
 	}
 	bindings := make([]*collectorin.AccountRuntimeBinding, 0, len(groups))
 	for accountID, group := range groups {
@@ -35,6 +48,28 @@ func (p *publishAccountRuntimeProvider) ListAccountRuntimes(ctx context.Context)
 		})
 	}
 	return bindings, nil
+}
+
+func (s *sSysPublish) authorizedTgAccountRuntimeIDs(ctx context.Context) ([]int64, error) {
+	var rows []struct {
+		Id int64 `json:"id"`
+	}
+	if err := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
+		Fields("id").
+		Where("status", publishsysin.PublishTgAccountStatusAuthorized).
+		WhereNot("session_key", "").
+		WhereNull("deleted_at").
+		OrderAsc("id").
+		Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "读取常驻Telegram账号失败")
+	}
+	result := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row.Id > 0 {
+			result = append(result, row.Id)
+		}
+	}
+	return result, nil
 }
 
 func (p *publishAccountRuntimeProvider) OpenAccountRuntime(_ context.Context, binding *collectorin.AccountRuntimeBinding) (collectorservice.AccountRuntimeSession, error) {
