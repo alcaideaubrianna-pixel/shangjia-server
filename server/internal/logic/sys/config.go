@@ -229,7 +229,6 @@ func (s *sSysConfig) ensureCosUploadConfig(ctx context.Context) (err error) {
 	}{
 		{key: "uploadCosBucket", name: "COS Bucket", sort: 475, tip: "存储桶名称，必须包含APPID后缀，例如：bucket-1250000000"},
 		{key: "uploadCosRegion", name: "COS Region", sort: 476, tip: "存储桶所属地域，例如：ap-hongkong"},
-		{key: "uploadCosUploadURL", name: "COS浏览器上传域名", sort: 485, tip: "可选；为空直接上传COS源站，填写CDN前需放行COS写请求和CORS"},
 	}
 
 	cols := dao.SysConfig.Columns()

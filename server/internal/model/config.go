@@ -75,7 +75,6 @@ type UploadConfig struct {
 	CosBucket    string `json:"uploadCosBucket"`
 	CosRegion    string `json:"uploadCosRegion"`
 	CosBucketURL string `json:"uploadCosBucketURL"`
-	CosUploadURL string `json:"uploadCosUploadURL"`
 	CosPublicURL string `json:"uploadCosPublicURL"`
 	CosPath      string `json:"uploadCosPath"`
 	// 阿里云oss配置

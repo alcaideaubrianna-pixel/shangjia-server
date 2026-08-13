@@ -59,9 +59,6 @@ func TestDirectUploadBucketRegionFromConfigAllowsCDNPublicURL(t *testing.T) {
 	if bucket != "youbanyue01-1442821378" || region != "ap-hongkong" {
 		t.Fatalf("unexpected bucket/region: %q %q", bucket, region)
 	}
-	if got := directUploadDomain("https://img.yuebanby.com/path"); got != "https://img.yuebanby.com" {
-		t.Fatalf("unexpected CDN upload domain: %q", got)
-	}
 }
 
 func TestDirectUploadBucketRegionFromConfigSupportsLegacySwappedURLs(t *testing.T) {

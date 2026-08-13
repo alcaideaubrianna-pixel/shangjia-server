@@ -101,11 +101,10 @@ func (s *sSysPublish) createMediaDirectUpload(ctx context.Context, in *sysin.Med
 		return nil, gerror.Wrap(err, "创建直传会话失败")
 	}
 	return &sysin.MediaDirectUploadCreateModel{
-		SessionId:    sessionId,
-		Bucket:       bucket,
-		Region:       region,
-		Key:          key,
-		UploadDomain: directUploadDomain(cfg.CosUploadURL),
+		SessionId: sessionId,
+		Bucket:    bucket,
+		Region:    region,
+		Key:       key,
 	}, nil
 }
 
@@ -315,14 +314,6 @@ func directUploadBucketRegionFromConfig(bucket, region, bucketURL, publicURL str
 		}
 	}
 	return "", "", gerror.New("无法识别COS Bucket和Region，请在后台明确配置COS Bucket与Region，或配置 *.cos.<region>.myqcloud.com 源站域名")
-}
-
-func directUploadDomain(rawURL string) string {
-	u, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil || u.Scheme == "" || u.Hostname() == "" {
-		return ""
-	}
-	return strings.TrimRight(u.Scheme+"://"+u.Host, "/")
 }
 
 func (s *sSysPublish) mediaViewById(ctx context.Context, id int64) (*sysin.MediaModel, error) {

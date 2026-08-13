@@ -14,11 +14,10 @@ type MediaDirectUploadCreateInp struct {
 }
 
 type MediaDirectUploadCreateModel struct {
-	SessionId    string `json:"sessionId"`
-	Bucket       string `json:"bucket"`
-	Region       string `json:"region"`
-	Key          string `json:"key"`
-	UploadDomain string `json:"uploadDomain" dc:"浏览器直传域名，为空时使用COS源站"`
+	SessionId string `json:"sessionId"`
+	Bucket    string `json:"bucket"`
+	Region    string `json:"region"`
+	Key       string `json:"key"`
 }
 
 type MediaDirectUploadSignInp struct {

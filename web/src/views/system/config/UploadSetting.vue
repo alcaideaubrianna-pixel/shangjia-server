@@ -115,13 +115,6 @@
                 地址，例如：https://bucket-1250000000.cos.ap-hongkong.myqcloud.com</template
               >
             </n-form-item>
-            <n-form-item label="浏览器上传域名" path="uploadCosUploadURL">
-              <n-input v-model:value="formValue.uploadCosUploadURL" placeholder="" />
-              <template #feedback
-                >可选；仅当 CDN 已放行 PUT、POST、HEAD、DELETE 和 OPTIONS 时填写，为空直接上传 COS
-                源站</template
-              >
-            </n-form-item>
             <n-form-item label="公开访问域名" path="uploadCosPublicURL">
               <n-input v-model:value="formValue.uploadCosPublicURL" placeholder="" />
               <template #feedback
@@ -373,7 +366,6 @@
     uploadCosBucket: '',
     uploadCosRegion: '',
     uploadCosBucketURL: '',
-    uploadCosUploadURL: '',
     uploadCosPublicURL: '',
     uploadCosPath: '',
     uploadOssSecretId: '',
