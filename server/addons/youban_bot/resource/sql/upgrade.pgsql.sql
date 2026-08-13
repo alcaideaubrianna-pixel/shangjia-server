@@ -215,7 +215,9 @@ CREATE TABLE IF NOT EXISTS hg_youban_bot_broadcast_task_bot (
   task_id bigint NOT NULL,
   bot_id bigint NOT NULL,
   created_at timestamp,
-  CONSTRAINT uk_ybbtb_task_bot UNIQUE (task_id,bot_id)
+  CONSTRAINT uk_ybbtb_task_bot UNIQUE (task_id,bot_id),
+  CONSTRAINT chk_ybbtb_bot_positive CHECK (bot_id > 0)
 );
+DELETE FROM hg_youban_bot_broadcast_task_bot WHERE bot_id <= 0;
 CREATE INDEX IF NOT EXISTS idx_ybbtb_bot ON hg_youban_bot_broadcast_task_bot (bot_id,task_id);
 ALTER TABLE hg_youban_bot_broadcast_task DROP COLUMN IF EXISTS bot_ids_json;

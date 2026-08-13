@@ -230,7 +230,9 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_broadcast_task_bot` (
   `created_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ybbtb_task_bot` (`task_id`,`bot_id`),
-  KEY `idx_ybbtb_bot` (`bot_id`,`task_id`)
+  KEY `idx_ybbtb_bot` (`bot_id`,`task_id`),
+  CONSTRAINT `chk_ybbtb_bot_positive` CHECK (`bot_id` > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='全局Bot推送任务关联Bot';
 
+DELETE FROM `hg_youban_bot_broadcast_task_bot` WHERE `bot_id` <= 0;
 ALTER TABLE `hg_youban_bot_broadcast_task` DROP COLUMN IF EXISTS `bot_ids_json`;

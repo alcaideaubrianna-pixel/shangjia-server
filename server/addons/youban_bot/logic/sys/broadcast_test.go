@@ -40,3 +40,12 @@ func TestPositiveUniqueInt64s(t *testing.T) {
 		t.Fatalf("unexpected ids: %v", got)
 	}
 }
+
+func TestBotIdsFromRows(t *testing.T) {
+	if got := botIdsFromRows([]*broadcastBotIdRow{{Id: 1}}, false); len(got) != 1 || got[0] != 1 {
+		t.Fatalf("unexpected bot ids: %v", got)
+	}
+	if got := botIdsFromRows([]*broadcastBotIdRow{{BotId: 1}}, true); len(got) != 1 || got[0] != 1 {
+		t.Fatalf("unexpected relation bot ids: %v", got)
+	}
+}

@@ -36,6 +36,11 @@ type broadcastRecipient struct {
 	TelegramUserId string `json:"telegram_user_id"`
 }
 
+type broadcastBotIdRow struct {
+	Id    int64 `json:"id"`
+	BotId int64 `json:"bot_id"`
+}
+
 func (s *sSysBot) AdminBroadcastCreate(ctx context.Context, in *sysin.BroadcastCreateInp) (*sysin.BroadcastTaskModel, error) {
 	if in == nil || strings.TrimSpace(in.Text) == "" {
 		return nil, gerror.New("消息内容不能为空")
@@ -48,15 +53,17 @@ func (s *sSysBot) AdminBroadcastCreate(ctx context.Context, in *sysin.BroadcastC
 	}
 	botIds := positiveUniqueInt64s(in.BotIds)
 	if len(botIds) == 0 {
-		if err := g.DB().Model(botTable).Safe().Ctx(ctx).Fields("id").Where("status", 1).Where("is_official", 1).Order("is_default DESC,id ASC").Scan(&botIds); err != nil {
+		var rows []*broadcastBotIdRow
+		if err := g.DB().Model(botTable).Safe().Ctx(ctx).Fields("id").Where("status", 1).Where("is_official", 1).Order("is_default DESC,id ASC").Scan(&rows); err != nil {
 			return nil, gerror.Wrap(err, "读取官方Bot失败")
 		}
+		botIds = botIdsFromRows(rows, false)
 	}
-	var allowedBotIds []int64
-	if err := g.DB().Model(botTable).Safe().Ctx(ctx).Fields("id").WhereIn("id", botIds).Where("status", 1).Where("is_official", 1).Order("is_default DESC,id ASC").Scan(&allowedBotIds); err != nil {
+	var allowedRows []*broadcastBotIdRow
+	if err := g.DB().Model(botTable).Safe().Ctx(ctx).Fields("id").WhereIn("id", botIds).Where("status", 1).Where("is_official", 1).Order("is_default DESC,id ASC").Scan(&allowedRows); err != nil {
 		return nil, gerror.Wrap(err, "校验官方Bot失败")
 	}
-	botIds = allowedBotIds
+	botIds = botIdsFromRows(allowedRows, false)
 	if len(botIds) == 0 {
 		return nil, gerror.New("没有可用的官方Bot")
 	}
@@ -147,6 +154,10 @@ func (s *sSysBot) runBroadcast(ctx context.Context, task *broadcastTaskRow) {
 		return
 	}
 	recipients = uniqueBroadcastRecipients(recipients)
+	if len(recipients) == 0 {
+		s.finishBroadcast(ctx, task.Id, "failed", 0, 0, 0, 0, "所选Bot没有可投递的已绑定私聊用户")
+		return
+	}
 	_, _ = g.DB().Model(broadcastTaskTable).Safe().Ctx(ctx).Where("id", task.Id).Data(g.Map{"status": "running", "total_count": len(recipients), "started_at": gtime.Now(), "updated_at": gtime.Now()}).Update()
 	success, failed, blocked := 0, 0, 0
 	lastError := ""
@@ -202,14 +213,30 @@ func (row *broadcastTaskRow) model(botIds []int64) *sysin.BroadcastTaskModel {
 }
 
 func (s *sSysBot) broadcastTaskBotIds(ctx context.Context, taskId int64) ([]int64, error) {
-	var botIds []int64
-	if err := g.DB().Model(broadcastTaskBotTable).Safe().Ctx(ctx).Fields("bot_id").Where("task_id", taskId).Order("id ASC").Scan(&botIds); err != nil {
+	var rows []*broadcastBotIdRow
+	if err := g.DB().Model(broadcastTaskBotTable).Safe().Ctx(ctx).Fields("bot_id").Where("task_id", taskId).Order("id ASC").Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "读取推送Bot失败")
 	}
+	botIds := botIdsFromRows(rows, true)
 	if len(botIds) == 0 {
 		return nil, gerror.New("推送任务没有关联Bot")
 	}
 	return botIds, nil
+}
+
+func botIdsFromRows(rows []*broadcastBotIdRow, relation bool) []int64 {
+	values := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		if relation {
+			values = append(values, row.BotId)
+		} else {
+			values = append(values, row.Id)
+		}
+	}
+	return positiveUniqueInt64s(values)
 }
 
 func positiveUniqueInt64s(values []int64) []int64 {
