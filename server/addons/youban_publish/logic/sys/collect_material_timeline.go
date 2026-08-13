@@ -12,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/dbinit"
 )
 
 type collectTimelineCollectorEvent struct {
@@ -144,6 +145,13 @@ func collectTimelineMessageIds(ctx context.Context, tenantId, accountId int64, e
 func collectTimelineCollectorEvents(ctx context.Context, tenantId int64, sourceIds, messageIds []int64) (map[string]*collectTimelineCollectorEvent, error) {
 	result := make(map[string]*collectTimelineCollectorEvent)
 	if len(sourceIds) == 0 || len(messageIds) == 0 {
+		return result, nil
+	}
+	available, err := dbinit.HasTable(ctx, "hg_tg_collector_event")
+	if err != nil {
+		return nil, gerror.Wrap(err, "检查Collector原始事件表失败")
+	}
+	if !available {
 		return result, nil
 	}
 	rows, err := g.DB().Model("hg_tg_collector_event e").Safe().Ctx(ctx).
