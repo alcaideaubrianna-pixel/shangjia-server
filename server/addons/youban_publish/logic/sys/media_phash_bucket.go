@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -18,15 +19,20 @@ import (
 )
 
 const (
-	mediaPHashBucketCacheVersionKey  = "youban_publish:media_phash_bucket:version:v5"
-	mediaPHashBucketResultTTL        = 365 * 24 * time.Hour
-	mediaPHashBucketMaxCandidates    = 50000
-	mediaPHashBucketMaxScopedIds     = 32
-	mediaPHashCandidateWorkMem       = "64MB"
-	mediaPHashProfileDeleteBatchSize = 500
+	publishMediaPHashAliasBucketTable = "hg_youban_publish_media_phash_alias_bucket"
+	mediaPHashBucketCacheVersionKey   = "youban_publish:media_phash_bucket:version:v5"
+	mediaPHashBucketResultTTL         = 365 * 24 * time.Hour
+	mediaPHashBucketMaxCandidates     = 50000
+	mediaPHashBucketMaxScopedIds      = 32
+	mediaPHashCandidateWorkMem        = "64MB"
+	mediaPHashProfileDeleteBatchSize  = 500
 )
 
 var mediaPHashBucketCandidateGroup singleflight.Group
+var mediaPHashAliasTableState struct {
+	sync.Mutex
+	ready bool
+}
 
 func (s *sSysPublish) syncMediaPHashBucketByMediaId(ctx context.Context, mediaId int64) error {
 	if mediaId <= 0 {
@@ -312,6 +318,9 @@ func mediaPHashBucketCandidateRowsWithScopes(ctx context.Context, normalizedHash
 }
 
 func mediaPHashBucketCandidateRowsWithScopesUncached(ctx context.Context, normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) ([]mediaPHashBucketCandidateRow, error) {
+	if err := ensureMediaPHashAliasBucketTable(ctx); err != nil {
+		return nil, err
+	}
 	scopes = mediaPHashBucketValidScopes(scopes)
 	profileIds = uniqueIds(profileIds)
 	if len(scopes) == 0 {
@@ -354,9 +363,9 @@ WITH bucket_match AS (
 %s
 ), candidate AS (
 SELECT media_id, profile_id, account_id, tenant_id, media_type,
-       MAX(hash_value) AS hash_value, COUNT(*) AS bucket_hits
+       hash_value, COUNT(*) AS bucket_hits
 FROM bucket_match
-GROUP BY media_id, profile_id, account_id, tenant_id, media_type
+GROUP BY media_id, profile_id, account_id, tenant_id, media_type, hash_value
 HAVING COUNT(*) >= ?
 )
 SELECT candidate.media_id, candidate.profile_id, candidate.account_id,
@@ -439,12 +448,64 @@ func mediaPHashBucketBranchSQL(bucketPos int, bucketValue string, scopes []media
 		conds = append(conds, "b.profile_id <> ?")
 		args = append(args, excludeProfileId)
 	}
+	condition := strings.Join(conds, " AND ")
 	sql := fmt.Sprintf(
 		`SELECT b.media_id, b.profile_id, b.account_id, b.tenant_id, b.media_type, b.hash_value FROM %s AS b WHERE %s`,
-		publishMediaPHashBucketTable,
-		strings.Join(conds, " AND "),
+		publishMediaPHashBucketTable, condition,
 	)
 	return sql, args
+}
+
+func ensureMediaPHashAliasBucketTable(ctx context.Context) error {
+	mediaPHashAliasTableState.Lock()
+	defer mediaPHashAliasTableState.Unlock()
+	if mediaPHashAliasTableState.ready {
+		return nil
+	}
+	sql := `CREATE TABLE IF NOT EXISTS hg_youban_publish_media_phash_alias_bucket (
+		id BIGSERIAL PRIMARY KEY, tenant_id bigint NOT NULL DEFAULT 0, account_id bigint NOT NULL DEFAULT 0,
+		profile_id bigint NOT NULL DEFAULT 0, media_id bigint NOT NULL DEFAULT 0, media_type varchar(16) NOT NULL DEFAULT '',
+		fingerprint_key varchar(64) NOT NULL DEFAULT '', hash_value varchar(64) NOT NULL DEFAULT '',
+		bucket_pos smallint NOT NULL DEFAULT 0, bucket_value integer NOT NULL DEFAULT 0, created_at timestamp, updated_at timestamp,
+		UNIQUE(media_id,fingerprint_key,bucket_pos))`
+	if strings.Contains(strings.ToLower(g.DB().GetConfig().Type), "mysql") {
+		sql = `CREATE TABLE IF NOT EXISTS hg_youban_publish_media_phash_alias_bucket (
+			id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, tenant_id BIGINT NOT NULL DEFAULT 0, account_id BIGINT NOT NULL DEFAULT 0,
+			profile_id BIGINT NOT NULL DEFAULT 0, media_id BIGINT NOT NULL DEFAULT 0, media_type VARCHAR(16) NOT NULL DEFAULT '',
+			fingerprint_key VARCHAR(64) NOT NULL DEFAULT '', hash_value VARCHAR(64) NOT NULL DEFAULT '',
+			bucket_pos SMALLINT NOT NULL DEFAULT 0, bucket_value INT NOT NULL DEFAULT 0, created_at DATETIME, updated_at DATETIME,
+			UNIQUE KEY uk_ybp_phash_alias_media_key_pos(media_id,fingerprint_key,bucket_pos),
+			KEY idx_ybp_phash_alias_search(tenant_id,media_type,bucket_pos,bucket_value,account_id,profile_id,media_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+	}
+	if _, err := g.DB().Exec(ctx, sql); err != nil {
+		return gerror.Wrap(err, "初始化防扫图搜索指纹表失败")
+	}
+	mediaPHashAliasTableState.ready = true
+	return nil
+}
+
+func (s *sSysPublish) saveAntiScanSearchFingerprint(ctx context.Context, job telegramJobRecord, item *telegramSentMessage) error {
+	if item == nil || item.MediaId <= 0 || item.ProtectedPHash == 0 || strings.TrimSpace(item.ProtectedHashKey) == "" {
+		return nil
+	}
+	if err := ensureMediaPHashAliasBucketTable(ctx); err != nil {
+		return err
+	}
+	hash := fmt.Sprintf("%016x", item.ProtectedPHash)
+	buckets := mediaPHashLshBucketValues(hash)
+	now := gtime.Now()
+	for _, bucket := range buckets {
+		_, err := g.DB().Model(publishMediaPHashAliasBucketTable).Safe().Ctx(ctx).Data(g.Map{
+			"tenant_id": job.TenantId, "account_id": job.AccountId, "profile_id": job.ProfileId,
+			"media_id": item.MediaId, "media_type": "image", "fingerprint_key": item.ProtectedHashKey,
+			"hash_value": hash, "bucket_pos": bucket.Pos, "bucket_value": bucket.Value,
+			"created_at": now, "updated_at": now,
+		}).OnConflict("media_id,fingerprint_key,bucket_pos").OnDuplicate("hash_value,bucket_value,updated_at").Save()
+		if err != nil {
+			return gerror.Wrap(err, "写入防扫图搜索指纹失败")
+		}
+	}
+	return bumpMediaPHashBucketVersion(ctx, job.TenantId, job.AccountId)
 }
 
 func mediaPHashBucketMediaTypeCondition(field string, mediaType string) (string, []any) {

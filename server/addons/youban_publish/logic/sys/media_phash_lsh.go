@@ -165,9 +165,9 @@ WITH bucket_match AS (
 %s
 ), candidate AS (
 SELECT media_id, profile_id, account_id, tenant_id, media_type,
-       MAX(hash_value) AS hash_value, COUNT(*) AS bucket_hits
+       hash_value, COUNT(*) AS bucket_hits
 FROM bucket_match
-GROUP BY media_id, profile_id, account_id, tenant_id, media_type
+GROUP BY media_id, profile_id, account_id, tenant_id, media_type, hash_value
 )
 SELECT candidate.media_id, candidate.profile_id, candidate.account_id,
        candidate.tenant_id, candidate.media_type, candidate.hash_value,
@@ -225,7 +225,11 @@ func mediaPHashLshBranchSQL(pos int, values []int, scopes []mediaPHashBucketScop
 		conds = append(conds, "b.profile_id <> ?")
 		args = append(args, excludeProfileId)
 	}
-	return fmt.Sprintf("SELECT b.media_id,b.profile_id,b.account_id,b.tenant_id,b.media_type,b.hash_value FROM %s b WHERE %s", publishMediaPHashLshTable, strings.Join(conds, " AND ")), args
+	condition := strings.Join(conds, " AND ")
+	selectSQL := "SELECT b.media_id,b.profile_id,b.account_id,b.tenant_id,b.media_type,b.hash_value FROM %s b WHERE %s"
+	query := fmt.Sprintf(selectSQL, publishMediaPHashLshTable, condition) + " UNION ALL " +
+		fmt.Sprintf(selectSQL, publishMediaPHashAliasBucketTable, condition)
+	return query, append(args, args...)
 }
 
 func mediaPHashLshRowsForMedia(media gdb.Record, hash string, now *gtime.Time) []g.Map {

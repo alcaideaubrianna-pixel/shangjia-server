@@ -42,8 +42,9 @@ func TestMediaPHashLshProfileCountSQLSplitsTenantPartitions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(query, "SELECT b.media_id"); got != mediaPHashLshBlockCount*2 {
-		t.Fatalf("LSH branch count = %d, want %d", got, mediaPHashLshBlockCount*2)
+	want := mediaPHashLshBlockCount * 2 * 2
+	if got := strings.Count(query, "SELECT b.media_id"); got != want {
+		t.Fatalf("LSH branch count = %d, want %d", got, want)
 	}
 }
 

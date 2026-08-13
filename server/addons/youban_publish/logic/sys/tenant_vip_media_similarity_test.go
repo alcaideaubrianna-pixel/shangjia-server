@@ -56,6 +56,7 @@ func TestMediaPHashLshCandidateSQLRequiresLiveMediaAndNote(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"hg_youban_publish_media m",
+		"hg_youban_publish_media_phash_alias_bucket",
 		"m.deleted_at IS NULL",
 		"hg_youban_publish_note_index",
 		"i.deleted_at IS NULL",

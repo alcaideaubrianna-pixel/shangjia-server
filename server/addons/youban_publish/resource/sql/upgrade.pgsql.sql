@@ -775,3 +775,12 @@ ALTER TABLE "hg_youban_publish_tg_channel_stat" ALTER COLUMN "last_error_message
 ALTER TABLE "hg_youban_publish_tg_bot_stat" ALTER COLUMN "last_error_message" TYPE text;
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_tenant_channel_status" ON "hg_youban_publish_tg_job" ("tenant_id", "channel_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_due_dispatch" ON "hg_youban_publish_tg_job" ("dispatch_status", "status", "next_retry_at", "created_at", "id");
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_alias_bucket" (
+  "id" BIGSERIAL PRIMARY KEY, "tenant_id" bigint NOT NULL DEFAULT 0, "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0, "media_id" bigint NOT NULL DEFAULT 0, "media_type" varchar(16) NOT NULL DEFAULT '',
+  "fingerprint_key" varchar(64) NOT NULL DEFAULT '', "hash_value" varchar(64) NOT NULL DEFAULT '',
+  "bucket_pos" smallint NOT NULL DEFAULT 0, "bucket_value" integer NOT NULL DEFAULT 0,
+  "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_phash_alias_media_key_pos" ON "hg_youban_publish_media_phash_alias_bucket" ("media_id","fingerprint_key","bucket_pos");
+CREATE INDEX IF NOT EXISTS "idx_ybp_phash_alias_search" ON "hg_youban_publish_media_phash_alias_bucket" ("tenant_id","media_type","bucket_pos","bucket_value") INCLUDE ("media_id","profile_id","account_id","hash_value");

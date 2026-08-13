@@ -216,6 +216,14 @@ func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegram
 	for key, hash := range storedHashes {
 		appendTelegramAntiScanHashHistory(ctx, key, hash)
 	}
+	for _, item := range messages {
+		if item == nil || item.MediaId <= 0 || item.ProtectedHashKey == "" || item.ProtectedPHash == 0 {
+			continue
+		}
+		if err := s.saveAntiScanSearchFingerprint(ctx, job, item); err != nil {
+			g.Log().Warningf(ctx, "保存防扫图搜索指纹失败 jobId:%d mediaId:%d err:%+v", job.Id, item.MediaId, err)
+		}
+	}
 	return nil
 }
 

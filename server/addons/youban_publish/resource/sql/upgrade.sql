@@ -767,3 +767,13 @@ ALTER TABLE `hg_youban_publish_tg_message` ADD UNIQUE INDEX `uk_ybp_tg_message_j
 ALTER TABLE `hg_youban_publish_tg_channel_stat` MODIFY COLUMN `last_error_message` text NOT NULL COMMENT '最后错误';
 ALTER TABLE `hg_youban_publish_tg_bot_stat` MODIFY COLUMN `last_error_message` text NOT NULL COMMENT '最后错误';
 ALTER TABLE `hg_youban_publish_tg_job` ADD INDEX `idx_ybp_tg_job_tenant_channel_status` (`tenant_id`,`channel_id`,`status`,`id`);
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_media_phash_alias_bucket` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT, `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `account_id` bigint(20) NOT NULL DEFAULT '0', `profile_id` bigint(20) NOT NULL DEFAULT '0',
+  `media_id` bigint(20) NOT NULL DEFAULT '0', `media_type` varchar(16) NOT NULL DEFAULT '',
+  `fingerprint_key` varchar(64) NOT NULL DEFAULT '', `hash_value` varchar(64) NOT NULL DEFAULT '',
+  `bucket_pos` smallint(6) NOT NULL DEFAULT '0', `bucket_value` int(11) NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL, `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_phash_alias_media_key_pos` (`media_id`,`fingerprint_key`,`bucket_pos`),
+  KEY `idx_ybp_phash_alias_search` (`tenant_id`,`media_type`,`bucket_pos`,`bucket_value`,`account_id`,`profile_id`,`media_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='防扫图媒体搜索指纹';
