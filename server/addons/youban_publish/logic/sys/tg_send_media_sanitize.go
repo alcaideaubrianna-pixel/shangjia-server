@@ -112,7 +112,10 @@ func prepareTelegramPhotoUploadFile(ctx context.Context, path string, cleanup fu
 	if info.Size() <= telegramPhotoMaxUploadBytes && ext == ".png" {
 		cleanPath, err := stripTelegramPhotoMetadata(ctx, path, ext, 0)
 		if err == nil && cleanPath != "" {
-			return cleanPath, chainCleanup(cleanup, func() { _ = os.Remove(cleanPath) }), nil
+			if cleanSize, sizeErr := fileSize(cleanPath); sizeErr == nil && cleanSize <= telegramPhotoMaxUploadBytes {
+				return cleanPath, chainCleanup(cleanup, func() { _ = os.Remove(cleanPath) }), nil
+			}
+			_ = os.Remove(cleanPath)
 		}
 	}
 	cleanPath, err := compressTelegramPhotoForUpload(ctx, path)

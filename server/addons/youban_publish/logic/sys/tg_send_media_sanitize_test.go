@@ -3,12 +3,49 @@ package sys
 import (
 	"context"
 	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/go-telegram/bot/models"
 )
+
+func TestPrepareTelegramPhotoUploadFileKeepsOutputWithinLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.png")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, 2400, 2400))
+	for y := 0; y < 2400; y++ {
+		for x := 0; x < 2400; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: uint8(x), G: uint8(y), B: uint8(x + y), A: 255})
+		}
+	}
+	if err = png.Encode(file, img); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err = file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	outPath, cleanup, err := prepareTelegramPhotoUploadFile(context.Background(), path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	size, err := fileSize(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size > telegramPhotoMaxUploadBytes {
+		t.Fatalf("output size=%d exceeds limit=%d", size, telegramPhotoMaxUploadBytes)
+	}
+}
 
 func TestSplitTelegramMediaItems(t *testing.T) {
 	media := make([]*telegramMediaItem, 23)
