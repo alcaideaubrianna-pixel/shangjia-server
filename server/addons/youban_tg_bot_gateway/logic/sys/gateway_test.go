@@ -2,10 +2,35 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/go-telegram/bot/models"
 
 	"hotgo/addons/youban_tg_bot_gateway/service"
 )
+
+type failingGatewayFeature struct{}
+
+func (f *failingGatewayFeature) Key() string   { return "failing-test-feature" }
+func (f *failingGatewayFeature) Priority() int { return 100 }
+func (f *failingGatewayFeature) Menus(context.Context, service.BotContext) (service.FeatureMenus, error) {
+	return service.FeatureMenus{}, nil
+}
+func (f *failingGatewayFeature) HandleUpdate(context.Context, service.BotContext, *models.Update) (bool, error) {
+	return false, errors.New("feature failed")
+}
+
+type recordingGatewayProvider struct{ called bool }
+
+func (p *recordingGatewayProvider) Name() string { return "recording-test-provider" }
+func (p *recordingGatewayProvider) ListEnabledBots(context.Context) ([]service.BotBinding, error) {
+	return nil, nil
+}
+func (p *recordingGatewayProvider) HandleUpdate(context.Context, service.BotBinding, *models.Update) error {
+	p.called = true
+	return nil
+}
 
 func TestGatewayRefreshCoalescesSignals(t *testing.T) {
 	gateway := NewGateway()
@@ -65,5 +90,22 @@ func TestNormalizeMenuItemsRejectsConflict(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("normalizeMenuItems() expected conflict error")
+	}
+}
+
+func TestDispatchRunsProviderWhenFeatureFails(t *testing.T) {
+	feature := &failingGatewayFeature{}
+	provider := &recordingGatewayProvider{}
+	service.RegisterFeature(feature)
+	service.RegisterProvider(provider)
+	gateway := NewGateway()
+	gateway.bindings["test-key"] = []service.BotBinding{{Owner: provider.Name()}}
+
+	err := gateway.dispatch(t.Context(), "test-key", &models.Update{ID: 1})
+	if err == nil {
+		t.Fatal("dispatch() expected feature error")
+	}
+	if !provider.called {
+		t.Fatal("dispatch() did not run provider after feature failure")
 	}
 }

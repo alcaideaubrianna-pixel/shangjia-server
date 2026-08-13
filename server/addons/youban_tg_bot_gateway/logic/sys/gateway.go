@@ -267,10 +267,12 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 	if len(bindings) > 0 {
 		botCtx.Token = bindings[0].Token
 	}
+	var featureErrors []error
 	for _, feature := range service.Features() {
 		handled, featureErr := feature.HandleUpdate(ctx, botCtx, update)
 		if featureErr != nil {
-			return featureErr
+			featureErrors = append(featureErrors, gerror.Wrapf(featureErr, "TG Bot附加功能处理失败 feature:%s", feature.Key()))
+			continue
 		}
 		if handled {
 			counter, _ := gatewayObserveMeter.Int64Counter("xiaohuiji.tg.gateway_updates_dispatched")
@@ -290,6 +292,9 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 		if err := provider.HandleUpdate(ctx, binding, update); err != nil {
 			return err
 		}
+	}
+	if len(featureErrors) > 0 {
+		return errors.Join(featureErrors...)
 	}
 	counter, _ := gatewayObserveMeter.Int64Counter("xiaohuiji.tg.gateway_updates_dispatched")
 	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "provider_dispatch")))
