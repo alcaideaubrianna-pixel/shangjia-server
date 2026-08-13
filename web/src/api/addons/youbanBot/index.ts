@@ -59,3 +59,11 @@ export function BroadcastCreate(params = {}) {
 export function BroadcastTask(params = {}) {
   return http.request({ url: '/youban_bot/bot/broadcast/task', method: 'get', params });
 }
+
+export function BroadcastList(params = {}) {
+  return http.request({ url: '/youban_bot/bot/broadcast/list', method: 'get', params });
+}
+
+export function BroadcastRecipientList(params = {}) {
+  return http.request({ url: '/youban_bot/bot/broadcast/recipient/list', method: 'get', params });
+}

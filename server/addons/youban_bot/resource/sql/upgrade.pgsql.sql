@@ -221,3 +221,21 @@ CREATE TABLE IF NOT EXISTS hg_youban_bot_broadcast_task_bot (
 DELETE FROM hg_youban_bot_broadcast_task_bot WHERE bot_id <= 0;
 CREATE INDEX IF NOT EXISTS idx_ybbtb_bot ON hg_youban_bot_broadcast_task_bot (bot_id,task_id);
 ALTER TABLE hg_youban_bot_broadcast_task DROP COLUMN IF EXISTS bot_ids_json;
+
+CREATE TABLE IF NOT EXISTS hg_youban_bot_broadcast_recipient (
+  id bigserial PRIMARY KEY,
+  task_id bigint NOT NULL,
+  bot_id bigint NOT NULL,
+  telegram_user_id varchar(128) NOT NULL DEFAULT '',
+  telegram_username varchar(255) NOT NULL DEFAULT '',
+  telegram_first_name varchar(255) NOT NULL DEFAULT '',
+  telegram_last_name varchar(255) NOT NULL DEFAULT '',
+  chat_id varchar(128) NOT NULL DEFAULT '',
+  status varchar(32) NOT NULL DEFAULT 'pending',
+  error_message text,
+  sent_at timestamp,
+  created_at timestamp,
+  updated_at timestamp,
+  CONSTRAINT uk_ybbr_task_user UNIQUE (task_id,telegram_user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ybbr_task_status ON hg_youban_bot_broadcast_recipient (task_id,status,id);

@@ -31,9 +31,12 @@ type broadcastTaskRow struct {
 }
 
 type broadcastRecipient struct {
-	BotId          int64  `json:"bot_id"`
-	ChatId         string `json:"chat_id"`
-	TelegramUserId string `json:"telegram_user_id"`
+	BotId             int64  `json:"bot_id"`
+	ChatId            string `json:"chat_id"`
+	TelegramUserId    string `json:"telegram_user_id"`
+	TelegramUsername  string `json:"telegram_username"`
+	TelegramFirstName string `json:"telegram_first_name"`
+	TelegramLastName  string `json:"telegram_last_name"`
 }
 
 type broadcastBotIdRow struct {
@@ -108,11 +111,70 @@ func (s *sSysBot) AdminBroadcastTask(ctx context.Context, in *sysin.BroadcastTas
 	if row.Id == 0 {
 		return nil, gerror.New("推送任务不存在")
 	}
-	botIds, err := s.broadcastTaskBotIds(ctx, row.Id)
+	botIds, err := s.broadcastTaskBotIdsOptional(ctx, row.Id)
 	if err != nil {
 		return nil, err
 	}
 	return row.model(botIds), nil
+}
+
+func (s *sSysBot) AdminBroadcastTaskList(ctx context.Context, in *sysin.BroadcastTaskListInp) ([]*sysin.BroadcastTaskModel, int, error) {
+	if err := s.ensureBroadcastTable(ctx); err != nil {
+		return nil, 0, err
+	}
+	mod := g.DB().Model(broadcastTaskTable).Safe().Ctx(ctx)
+	if in != nil && strings.TrimSpace(in.Status) != "" {
+		mod = mod.Where("status", strings.TrimSpace(in.Status))
+	}
+	total, err := mod.Clone().Count()
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "统计推送记录失败")
+	}
+	var rows []*broadcastTaskRow
+	if in != nil {
+		mod = mod.Page(in.Page, in.PerPage)
+	}
+	if err = mod.OrderDesc("id").Scan(&rows); err != nil {
+		return nil, 0, gerror.Wrap(err, "读取推送记录失败")
+	}
+	list := make([]*sysin.BroadcastTaskModel, 0, len(rows))
+	for _, row := range rows {
+		botIds, readErr := s.broadcastTaskBotIdsOptional(ctx, row.Id)
+		if readErr != nil {
+			return nil, 0, readErr
+		}
+		list = append(list, row.model(botIds))
+	}
+	return list, total, nil
+}
+
+func (s *sSysBot) AdminBroadcastRecipientList(ctx context.Context, in *sysin.BroadcastRecipientListInp) ([]*sysin.BroadcastRecipientModel, int, error) {
+	if in == nil || in.TaskId <= 0 {
+		return nil, 0, gerror.New("任务ID不正确")
+	}
+	if err := s.ensureBroadcastTable(ctx); err != nil {
+		return nil, 0, err
+	}
+	mod := g.DB().Model(broadcastRecipientTable+" r").Safe().Ctx(ctx).
+		LeftJoin(botTable+" b", "b.id=r.bot_id").Where("r.task_id", in.TaskId)
+	if status := strings.TrimSpace(in.Status); status != "" {
+		mod = mod.Where("r.status", status)
+	}
+	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		mod = mod.Where("r.telegram_user_id LIKE ? OR r.telegram_username LIKE ? OR r.telegram_first_name LIKE ? OR r.telegram_last_name LIKE ?", like, like, like, like)
+	}
+	total, err := mod.Clone().Count()
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "统计推送明细失败")
+	}
+	list := make([]*sysin.BroadcastRecipientModel, 0)
+	err = mod.Fields("r.id,r.task_id,r.bot_id,b.bot_username,r.telegram_user_id,r.telegram_username,r.telegram_first_name,r.telegram_last_name,r.chat_id,r.status,r.error_message,r.sent_at,r.created_at").
+		Page(in.Page, in.PerPage).OrderAsc("r.id").Scan(&list)
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "读取推送明细失败")
+	}
+	return list, total, nil
 }
 
 func (s *sSysBot) startPendingBroadcasts(ctx context.Context) {
@@ -145,7 +207,7 @@ func (s *sSysBot) runBroadcast(ctx context.Context, task *broadcastTaskRow) {
 	}
 	var recipients []*broadcastRecipient
 	err = g.DB().Model(userTable+" u").Safe().Ctx(ctx).
-		Fields("u.bot_id,u.chat_id,u.telegram_user_id").
+		Fields("u.bot_id,u.chat_id,u.telegram_user_id,u.telegram_username,u.telegram_first_name,u.telegram_last_name").
 		WhereIn("u.bot_id", botIds).Where("u.status", 1).Where("u.chat_type", "private").Where("u.chat_id<>''").
 		Where("EXISTS (SELECT 1 FROM " + accountBindTbl + " ab WHERE ab.telegram_user_id=u.telegram_user_id AND ab.status=1 AND ab.deleted_at IS NULL)").
 		Order("u.telegram_user_id,u.bot_id").Scan(&recipients)
@@ -156,6 +218,22 @@ func (s *sSysBot) runBroadcast(ctx context.Context, task *broadcastTaskRow) {
 	recipients = uniqueBroadcastRecipients(recipients)
 	if len(recipients) == 0 {
 		s.finishBroadcast(ctx, task.Id, "failed", 0, 0, 0, 0, "所选Bot没有可投递的已绑定私聊用户")
+		return
+	}
+	rows := make([]g.Map, 0, len(recipients))
+	for _, recipient := range recipients {
+		rows = append(rows, g.Map{
+			"task_id": task.Id, "bot_id": recipient.BotId, "chat_id": recipient.ChatId,
+			"telegram_user_id": recipient.TelegramUserId, "telegram_username": recipient.TelegramUsername,
+			"telegram_first_name": recipient.TelegramFirstName, "telegram_last_name": recipient.TelegramLastName,
+			"status": "pending", "error_message": "", "created_at": gtime.Now(), "updated_at": gtime.Now(),
+		})
+	}
+	if _, err = g.DB().Model(broadcastRecipientTable).Safe().Ctx(ctx).Data(rows).
+		OnConflict("task_id,telegram_user_id").
+		OnDuplicateEx("id", "task_id", "telegram_user_id", "status", "error_message", "sent_at", "created_at").
+		Save(); err != nil {
+		s.finishBroadcast(ctx, task.Id, "failed", len(recipients), 0, 0, 0, err.Error())
 		return
 	}
 	_, _ = g.DB().Model(broadcastTaskTable).Safe().Ctx(ctx).Where("id", task.Id).Data(g.Map{"status": "running", "total_count": len(recipients), "started_at": gtime.Now(), "updated_at": gtime.Now()}).Update()
@@ -173,9 +251,11 @@ func (s *sSysBot) runBroadcast(ctx context.Context, task *broadcastTaskRow) {
 		}
 		if rowErr == nil {
 			success++
+			_, _ = g.DB().Model(broadcastRecipientTable).Safe().Ctx(ctx).Where("task_id", task.Id).Where("telegram_user_id", recipient.TelegramUserId).Data(g.Map{"status": "success", "error_message": "", "sent_at": gtime.Now(), "updated_at": gtime.Now()}).Update()
 		} else {
 			failed++
 			lastError = rowErr.Error()
+			_, _ = g.DB().Model(broadcastRecipientTable).Safe().Ctx(ctx).Where("task_id", task.Id).Where("telegram_user_id", recipient.TelegramUserId).Data(g.Map{"status": "failed", "error_message": lastError, "updated_at": gtime.Now()}).Update()
 			if isBroadcastBlocked(rowErr) {
 				blocked++
 			}
@@ -193,14 +273,19 @@ func (s *sSysBot) finishBroadcast(ctx context.Context, id int64, status string, 
 func (s *sSysBot) ensureBroadcastTable(ctx context.Context) error {
 	taskSQL := "CREATE TABLE IF NOT EXISTS " + broadcastTaskTable + " (id BIGSERIAL PRIMARY KEY,text TEXT NOT NULL,disable_notice SMALLINT NOT NULL DEFAULT 0,status VARCHAR(32) NOT NULL DEFAULT 'pending',total_count INTEGER NOT NULL DEFAULT 0,success_count INTEGER NOT NULL DEFAULT 0,failed_count INTEGER NOT NULL DEFAULT 0,blocked_count INTEGER NOT NULL DEFAULT 0,last_error TEXT,created_at TIMESTAMP,started_at TIMESTAMP,finished_at TIMESTAMP,updated_at TIMESTAMP)"
 	relationSQL := "CREATE TABLE IF NOT EXISTS " + broadcastTaskBotTable + " (id BIGSERIAL PRIMARY KEY,task_id BIGINT NOT NULL,bot_id BIGINT NOT NULL,created_at TIMESTAMP,UNIQUE(task_id,bot_id))"
+	recipientSQL := "CREATE TABLE IF NOT EXISTS " + broadcastRecipientTable + " (id BIGSERIAL PRIMARY KEY,task_id BIGINT NOT NULL,bot_id BIGINT NOT NULL,telegram_user_id VARCHAR(128) NOT NULL DEFAULT '',telegram_username VARCHAR(255) NOT NULL DEFAULT '',telegram_first_name VARCHAR(255) NOT NULL DEFAULT '',telegram_last_name VARCHAR(255) NOT NULL DEFAULT '',chat_id VARCHAR(128) NOT NULL DEFAULT '',status VARCHAR(32) NOT NULL DEFAULT 'pending',error_message TEXT,sent_at TIMESTAMP,created_at TIMESTAMP,updated_at TIMESTAMP,UNIQUE(task_id,telegram_user_id))"
 	if strings.Contains(strings.ToLower(g.DB().GetConfig().Type), "mysql") {
 		taskSQL = "CREATE TABLE IF NOT EXISTS " + broadcastTaskTable + " (id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,text TEXT NOT NULL,disable_notice TINYINT NOT NULL DEFAULT 0,status VARCHAR(32) NOT NULL DEFAULT 'pending',total_count INT NOT NULL DEFAULT 0,success_count INT NOT NULL DEFAULT 0,failed_count INT NOT NULL DEFAULT 0,blocked_count INT NOT NULL DEFAULT 0,last_error TEXT,created_at DATETIME,started_at DATETIME,finished_at DATETIME,updated_at DATETIME) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
 		relationSQL = "CREATE TABLE IF NOT EXISTS " + broadcastTaskBotTable + " (id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,task_id BIGINT NOT NULL,bot_id BIGINT NOT NULL,created_at DATETIME,UNIQUE KEY uk_ybbtb_task_bot(task_id,bot_id),KEY idx_ybbtb_bot(bot_id,task_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+		recipientSQL = "CREATE TABLE IF NOT EXISTS " + broadcastRecipientTable + " (id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,task_id BIGINT NOT NULL,bot_id BIGINT NOT NULL,telegram_user_id VARCHAR(128) NOT NULL DEFAULT '',telegram_username VARCHAR(255) NOT NULL DEFAULT '',telegram_first_name VARCHAR(255) NOT NULL DEFAULT '',telegram_last_name VARCHAR(255) NOT NULL DEFAULT '',chat_id VARCHAR(128) NOT NULL DEFAULT '',status VARCHAR(32) NOT NULL DEFAULT 'pending',error_message TEXT,sent_at DATETIME,created_at DATETIME,updated_at DATETIME,UNIQUE KEY uk_ybbr_task_user(task_id,telegram_user_id),KEY idx_ybbr_task_status(task_id,status,id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
 	}
 	if _, err := g.DB().Exec(ctx, taskSQL); err != nil {
 		return err
 	}
 	if _, err := g.DB().Exec(ctx, relationSQL); err != nil {
+		return err
+	}
+	if _, err := g.DB().Exec(ctx, recipientSQL); err != nil {
 		return err
 	}
 	dropSQL := "ALTER TABLE " + broadcastTaskTable + " DROP COLUMN IF EXISTS bot_ids_json"
@@ -213,14 +298,22 @@ func (row *broadcastTaskRow) model(botIds []int64) *sysin.BroadcastTaskModel {
 }
 
 func (s *sSysBot) broadcastTaskBotIds(ctx context.Context, taskId int64) ([]int64, error) {
+	botIds, err := s.broadcastTaskBotIdsOptional(ctx, taskId)
+	if err != nil {
+		return nil, err
+	}
+	if len(botIds) == 0 {
+		return nil, gerror.New("推送任务没有关联Bot")
+	}
+	return botIds, nil
+}
+
+func (s *sSysBot) broadcastTaskBotIdsOptional(ctx context.Context, taskId int64) ([]int64, error) {
 	var rows []*broadcastBotIdRow
 	if err := g.DB().Model(broadcastTaskBotTable).Safe().Ctx(ctx).Fields("bot_id").Where("task_id", taskId).Order("id ASC").Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "读取推送Bot失败")
 	}
 	botIds := botIdsFromRows(rows, true)
-	if len(botIds) == 0 {
-		return nil, gerror.New("推送任务没有关联Bot")
-	}
 	return botIds, nil
 }
 

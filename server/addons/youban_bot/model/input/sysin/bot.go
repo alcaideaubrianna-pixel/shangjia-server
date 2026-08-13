@@ -235,6 +235,18 @@ type BroadcastTaskInp struct {
 	Id int64 `json:"id" v:"required|min:1#任务ID不能为空|任务ID不正确"`
 }
 
+type BroadcastTaskListInp struct {
+	form.PageReq
+	Status string `json:"status" dc:"任务状态"`
+}
+
+type BroadcastRecipientListInp struct {
+	form.PageReq
+	TaskId  int64  `json:"taskId" v:"required|min:1#任务ID不能为空|任务ID不正确" dc:"任务ID"`
+	Status  string `json:"status" dc:"发送状态"`
+	Keyword string `json:"keyword" dc:"TG用户关键词"`
+}
+
 type BroadcastTaskModel struct {
 	Id            int64       `json:"id"`
 	BotIds        []int64     `json:"botIds"`
@@ -249,6 +261,22 @@ type BroadcastTaskModel struct {
 	CreatedAt     *gtime.Time `json:"createdAt"`
 	StartedAt     *gtime.Time `json:"startedAt"`
 	FinishedAt    *gtime.Time `json:"finishedAt"`
+}
+
+type BroadcastRecipientModel struct {
+	Id                int64       `json:"id"`
+	TaskId            int64       `json:"taskId"`
+	BotId             int64       `json:"botId"`
+	BotUsername       string      `json:"botUsername"`
+	TelegramUserId    string      `json:"telegramUserId"`
+	TelegramUsername  string      `json:"telegramUsername"`
+	TelegramFirstName string      `json:"telegramFirstName"`
+	TelegramLastName  string      `json:"telegramLastName"`
+	ChatId            string      `json:"chatId"`
+	Status            string      `json:"status"`
+	ErrorMessage      string      `json:"errorMessage"`
+	SentAt            *gtime.Time `json:"sentAt"`
+	CreatedAt         *gtime.Time `json:"createdAt"`
 }
 
 type CustomEmojiResolveInp struct {

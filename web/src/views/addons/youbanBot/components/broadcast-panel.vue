@@ -2,6 +2,9 @@
   <n-alert type="warning" title="发送范围" class="mb-4">
     仅发送给已绑定系统账号、且曾与所选 Bot 建立私聊的 Telegram 用户。同一 Bot 下按 Chat ID 去重。
   </n-alert>
+  <n-space justify="end" class="mb-4">
+    <n-button @click="openBroadcastRecords">推送记录</n-button>
+  </n-space>
   <n-form ref="formRef" :model="form" :rules="rules" label-placement="top">
     <n-form-item label="发送 Bot" path="botIds">
       <n-select
@@ -56,10 +59,12 @@
   import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
   import type { FormInst, FormRules } from 'naive-ui';
   import { useMessage } from 'naive-ui';
+  import { useRouter } from 'vue-router';
 
   import { BotList, BroadcastCreate, BroadcastTask } from '@/api/addons/youbanBot';
 
   const message = useMessage();
+  const router = useRouter();
   const formRef = ref<FormInst | null>(null);
   const submitting = ref(false);
   const botRows = ref<any[]>([]);
@@ -114,6 +119,10 @@
     } finally {
       submitting.value = false;
     }
+  }
+
+  function openBroadcastRecords() {
+    router.push({ name: 'youbanBot', query: { view: 'broadcast-records' } });
   }
 
   function schedulePoll() {

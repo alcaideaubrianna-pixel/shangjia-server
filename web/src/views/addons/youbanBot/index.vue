@@ -1,5 +1,6 @@
 <template>
-  <div class="youban-bot-page">
+  <broadcast-records v-if="showBroadcastRecords" />
+  <div v-else class="youban-bot-page">
     <n-card :bordered="false" title="全局 Bot 管理">
       <n-tabs v-model:value="activeTab" type="line" animated>
         <n-tab-pane name="bot" tab="Bot 配置">
@@ -154,7 +155,7 @@
 </template>
 
 <script setup lang="ts">
-  import { h, onMounted, reactive, ref } from 'vue';
+  import { computed, h, onMounted, reactive, ref } from 'vue';
   import { NButton, NPopconfirm, NSpace, NSwitch, NTag, useMessage } from 'naive-ui';
 
   import {
@@ -170,8 +171,12 @@
   import AccountBindPanel from './components/account-bind-panel.vue';
   import BroadcastPanel from './components/broadcast-panel.vue';
   import UserMessagePanel from './components/user-message-panel.vue';
+  import BroadcastRecords from './broadcast-records.vue';
+  import { useRoute } from 'vue-router';
 
   const message = useMessage();
+  const route = useRoute();
+  const showBroadcastRecords = computed(() => route.query.view === 'broadcast-records');
   const activeTab = ref('bot');
   const botLoading = ref(false);
   const featureLoading = ref(false);

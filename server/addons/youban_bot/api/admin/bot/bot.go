@@ -143,3 +143,23 @@ type BroadcastTaskReq struct {
 type BroadcastTaskRes struct {
 	*sysin.BroadcastTaskModel
 }
+
+type BroadcastTaskListReq struct {
+	g.Meta `path:"/bot/broadcast/list" method:"get" tags:"全局机器人后台" summary:"全局推送记录列表"`
+	sysin.BroadcastTaskListInp
+}
+
+type BroadcastTaskListRes struct {
+	form.PageRes
+	List []*sysin.BroadcastTaskModel `json:"list" dc:"推送记录"`
+}
+
+type BroadcastRecipientListReq struct {
+	g.Meta `path:"/bot/broadcast/recipient/list" method:"get" tags:"全局机器人后台" summary:"全局推送收件人明细"`
+	sysin.BroadcastRecipientListInp
+}
+
+type BroadcastRecipientListRes struct {
+	form.PageRes
+	List []*sysin.BroadcastRecipientModel `json:"list" dc:"推送明细"`
+}

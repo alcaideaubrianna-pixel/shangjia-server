@@ -183,3 +183,23 @@ func (c *cBot) BroadcastTask(ctx context.Context, req *bot.BroadcastTaskReq) (re
 	}
 	return &bot.BroadcastTaskRes{BroadcastTaskModel: task}, nil
 }
+
+func (c *cBot) BroadcastTaskList(ctx context.Context, req *bot.BroadcastTaskListReq) (res *bot.BroadcastTaskListRes, err error) {
+	list, totalCount, err := service.SysBot().AdminBroadcastTaskList(ctx, &req.BroadcastTaskListInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &bot.BroadcastTaskListRes{List: list}
+	res.PageRes.Pack(req, totalCount)
+	return
+}
+
+func (c *cBot) BroadcastRecipientList(ctx context.Context, req *bot.BroadcastRecipientListReq) (res *bot.BroadcastRecipientListRes, err error) {
+	list, totalCount, err := service.SysBot().AdminBroadcastRecipientList(ctx, &req.BroadcastRecipientListInp)
+	if err != nil {
+		return nil, err
+	}
+	res = &bot.BroadcastRecipientListRes{List: list}
+	res.PageRes.Pack(req, totalCount)
+	return
+}

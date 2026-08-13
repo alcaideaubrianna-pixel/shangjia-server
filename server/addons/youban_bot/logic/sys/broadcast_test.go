@@ -49,3 +49,10 @@ func TestBotIdsFromRows(t *testing.T) {
 		t.Fatalf("unexpected relation bot ids: %v", got)
 	}
 }
+
+func TestBroadcastTaskRowModelAllowsMissingBotRelation(t *testing.T) {
+	model := (&broadcastTaskRow{Id: 1, Status: "completed"}).model(nil)
+	if model.Id != 1 || len(model.BotIds) != 0 {
+		t.Fatalf("unexpected task model: %+v", model)
+	}
+}

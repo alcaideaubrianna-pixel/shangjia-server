@@ -236,3 +236,22 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_broadcast_task_bot` (
 
 DELETE FROM `hg_youban_bot_broadcast_task_bot` WHERE `bot_id` <= 0;
 ALTER TABLE `hg_youban_bot_broadcast_task` DROP COLUMN IF EXISTS `bot_ids_json`;
+
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_broadcast_recipient` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `task_id` bigint(20) NOT NULL,
+  `bot_id` bigint(20) NOT NULL,
+  `telegram_user_id` varchar(128) NOT NULL DEFAULT '',
+  `telegram_username` varchar(255) NOT NULL DEFAULT '',
+  `telegram_first_name` varchar(255) NOT NULL DEFAULT '',
+  `telegram_last_name` varchar(255) NOT NULL DEFAULT '',
+  `chat_id` varchar(128) NOT NULL DEFAULT '',
+  `status` varchar(32) NOT NULL DEFAULT 'pending',
+  `error_message` text,
+  `sent_at` datetime DEFAULT NULL,
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybbr_task_user` (`task_id`,`telegram_user_id`),
+  KEY `idx_ybbr_task_status` (`task_id`,`status`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='全局Bot推送收件人明细';
