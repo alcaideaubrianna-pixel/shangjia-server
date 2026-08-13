@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+func TestProfileSearchModelDoesNotReferenceRemovedProjectionAlias(t *testing.T) {
+	for _, field := range profileSearchKeywordFields() {
+		if strings.HasPrefix(field, "t.") {
+			t.Fatalf("profile search references missing t alias: %s", field)
+		}
+	}
+}
+
 func TestSegmentedLikeConditionSearchesEveryTermAcrossFields(t *testing.T) {
 	condition, args := segmentedLikeCondition([]string{"p.profile_no", "p.title", "p.summary", "p.plain_text"}, []string{"af001", "深圳"})
 	if strings.Count(condition, " AND ") != 1 {

@@ -44,15 +44,12 @@ func (s *sSysPublish) profileSearchModel(ctx context.Context, base *gdb.Model, i
 		return base
 	}
 
-	searchCondition, searchArgs := segmentedLikeCondition([]string{
-		"p.profile_no",
-		"p.title",
-		"p.summary",
-		"t.title",
-		"p.plain_text",
-		"t.plain_text",
-	}, terms)
+	searchCondition, searchArgs := segmentedLikeCondition(profileSearchKeywordFields(), terms)
 	return base.Clone().Where(searchCondition, searchArgs...)
+}
+
+func profileSearchKeywordFields() []string {
+	return []string{"p.profile_no", "p.title", "p.summary", "p.plain_text"}
 }
 
 func (s *sSysPublish) scanProfilePage(mod *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string) ([]*sysin.ProfileModel, int, error) {
