@@ -195,7 +195,6 @@ CREATE INDEX IF NOT EXISTS idx_ybbce_status ON hg_youban_bot_custom_emoji (statu
 
 CREATE TABLE IF NOT EXISTS hg_youban_bot_broadcast_task (
   id bigserial PRIMARY KEY,
-  bot_ids_json text NOT NULL,
   text text NOT NULL,
   disable_notice smallint NOT NULL DEFAULT 0,
   status varchar(32) NOT NULL DEFAULT 'pending',
@@ -210,3 +209,13 @@ CREATE TABLE IF NOT EXISTS hg_youban_bot_broadcast_task (
   updated_at timestamp
 );
 CREATE INDEX IF NOT EXISTS idx_ybbbt_status ON hg_youban_bot_broadcast_task (status,id);
+
+CREATE TABLE IF NOT EXISTS hg_youban_bot_broadcast_task_bot (
+  id bigserial PRIMARY KEY,
+  task_id bigint NOT NULL,
+  bot_id bigint NOT NULL,
+  created_at timestamp,
+  CONSTRAINT uk_ybbtb_task_bot UNIQUE (task_id,bot_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ybbtb_bot ON hg_youban_bot_broadcast_task_bot (bot_id,task_id);
+ALTER TABLE hg_youban_bot_broadcast_task DROP COLUMN IF EXISTS bot_ids_json;

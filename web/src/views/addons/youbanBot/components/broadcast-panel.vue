@@ -70,10 +70,12 @@
     text: [{ required: true, message: '请输入消息内容', trigger: ['input', 'blur'] }],
   };
   const botOptions = computed(() =>
-    botRows.value.map((item) => ({
-      label: item.botUsername ? `@${item.botUsername}` : item.botName,
-      value: item.id,
-    }))
+    botRows.value
+      .map((item) => ({
+        label: item.botUsername ? `@${item.botUsername}` : item.botName,
+        value: Number(item.id ?? item.Id),
+      }))
+      .filter((item) => Number.isInteger(item.value) && item.value > 0)
   );
   const taskRunning = computed(() => ['pending', 'running'].includes(task.value?.status));
   const statusLabel = computed(

@@ -23,15 +23,16 @@ import (
 )
 
 const (
-	botTable           = "hg_youban_bot_bot"
-	featureTable       = "hg_youban_bot_feature"
-	authCodeTable      = "hg_youban_bot_auth_code"
-	accountBindTbl     = "hg_youban_bot_account_bind"
-	userTable          = "hg_youban_bot_user"
-	messageTable       = "hg_youban_bot_message"
-	channelCacheTable  = "hg_youban_bot_channel_cache"
-	customEmojiTable   = "hg_youban_bot_custom_emoji"
-	broadcastTaskTable = "hg_youban_bot_broadcast_task"
+	botTable              = "hg_youban_bot_bot"
+	featureTable          = "hg_youban_bot_feature"
+	authCodeTable         = "hg_youban_bot_auth_code"
+	accountBindTbl        = "hg_youban_bot_account_bind"
+	userTable             = "hg_youban_bot_user"
+	messageTable          = "hg_youban_bot_message"
+	channelCacheTable     = "hg_youban_bot_channel_cache"
+	customEmojiTable      = "hg_youban_bot_custom_emoji"
+	broadcastTaskTable    = "hg_youban_bot_broadcast_task"
+	broadcastTaskBotTable = "hg_youban_bot_broadcast_task_bot"
 
 	publishAccountTable = "hg_youban_publish_account"
 )

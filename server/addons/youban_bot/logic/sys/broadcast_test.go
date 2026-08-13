@@ -33,3 +33,10 @@ func TestUniqueBroadcastRecipients(t *testing.T) {
 		t.Fatalf("unexpected recipients: %+v", got)
 	}
 }
+
+func TestPositiveUniqueInt64s(t *testing.T) {
+	got := positiveUniqueInt64s([]int64{0, 1, 1, -2, 3})
+	if len(got) != 2 || got[0] != 1 || got[1] != 3 {
+		t.Fatalf("unexpected ids: %v", got)
+	}
+}

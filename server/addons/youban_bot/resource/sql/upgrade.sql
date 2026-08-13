@@ -207,7 +207,6 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_custom_emoji` (
 
 CREATE TABLE IF NOT EXISTS `hg_youban_bot_broadcast_task` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
-  `bot_ids_json` text NOT NULL,
   `text` text NOT NULL,
   `disable_notice` tinyint(1) NOT NULL DEFAULT 0,
   `status` varchar(32) NOT NULL DEFAULT 'pending',
@@ -223,3 +222,15 @@ CREATE TABLE IF NOT EXISTS `hg_youban_bot_broadcast_task` (
   PRIMARY KEY (`id`),
   KEY `idx_ybbbt_status` (`status`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='全局Bot推送任务';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_bot_broadcast_task_bot` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `task_id` bigint(20) NOT NULL,
+  `bot_id` bigint(20) NOT NULL,
+  `created_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybbtb_task_bot` (`task_id`,`bot_id`),
+  KEY `idx_ybbtb_bot` (`bot_id`,`task_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='全局Bot推送任务关联Bot';
+
+ALTER TABLE `hg_youban_bot_broadcast_task` DROP COLUMN IF EXISTS `bot_ids_json`;
