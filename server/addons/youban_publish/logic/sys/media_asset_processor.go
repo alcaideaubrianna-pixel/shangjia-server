@@ -58,6 +58,8 @@ func processMediaAssetMetadata(
 	posterURL string,
 	fileName string,
 ) (*mediaAssetMetadata, error) {
+	fileURL = normalizeMediaFileURL(fileURL, storagePath)
+	posterURL = normalizeMediaFileURL(posterURL, "")
 	pipelineResult, err := processMediaPipeline(ctx, mediaPipelineSource{
 		MediaType: mediaType,
 		LocalPath: storagePath,
