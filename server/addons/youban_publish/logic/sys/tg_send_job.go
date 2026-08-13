@@ -362,7 +362,7 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	if errors.Is(err, errTelegramJobSuperseded) {
 		return nil
 	}
-	if isTelegramAmbiguousDeliveryError(err) {
+	if !isTelegramAccountBusyError(err) && isTelegramAmbiguousDeliveryError(err) {
 		return s.markTelegramJobUnknown(ctx, job, err)
 	}
 	allowed, allowedErr := s.canSendTelegramJob(ctx, job)

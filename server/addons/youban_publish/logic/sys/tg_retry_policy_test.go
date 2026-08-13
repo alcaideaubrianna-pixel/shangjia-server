@@ -43,6 +43,17 @@ func TestTelegramAccountBusyDoesNotBecomePermanentAfterFiveRetries(t *testing.T)
 	}
 }
 
+func TestTelegramAccountBusyIsNotAmbiguousDelivery(t *testing.T) {
+	err := &telegramAccountBusyError{tgAccountId: 33, err: context.DeadlineExceeded}
+	if !isTelegramAmbiguousDeliveryError(err) {
+		t.Fatal("wrapped deadline remains ambiguous before account-busy precedence is applied")
+	}
+	decision := telegramJobFailureNextState(err, 2)
+	if decision.Status != "failed_retry" || decision.RetryCount != 2 || decision.RetryDelay <= 0 {
+		t.Fatalf("account busy must retry without consuming retry count: %+v", decision)
+	}
+}
+
 func TestTelegramVideoAsPhotoIsPermanent(t *testing.T) {
 	err := assertError(`Bad Request: can't use file of type Video as Photo`)
 	if !isTelegramPermanentSendError(err) {
