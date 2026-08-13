@@ -75,6 +75,8 @@ type ISysPublish interface {
 	AdminMaterialImportTaskRetry(ctx context.Context, in *sysin.MaterialImportTaskActionInp) (err error)
 	RepairMaterialImportMissingMedia(ctx context.Context, accountId int64, groupIds []int64) error
 	RepairCollectReviewMedia(ctx context.Context, reviewIds []int64) error
+	AIOpsRebuildProfileMedia(ctx context.Context, profileIds []int64, dryRun bool) (*sysin.CollectProfileMediaRebuildResult, error)
+	AIOpsRepublishProfiles(ctx context.Context, in *sysin.ProfileStatusInp) (*sysin.ProfileStatusModel, error)
 	ServerMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error)
 	ServerMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error)
 	ServerBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error)

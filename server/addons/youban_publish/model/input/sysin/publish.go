@@ -272,16 +272,16 @@ type AccountSettingModel struct {
 }
 
 type CurrentAccountModel struct {
-	Id          int64       `json:"id" dc:"账号ID"`
-	TenantId    int64       `json:"tenantId" dc:"租户ID"`
-	ParentId    int64       `json:"parentId" dc:"父账号ID"`
-	AccountType string      `json:"accountType" dc:"账号类型"`
-	Nickname    string      `json:"nickname" dc:"账号名称"`
-	Username    string      `json:"username" dc:"用户名"`
-	Remark      string      `json:"remark" dc:"个人简介"`
-	Status      int         `json:"status" dc:"状态"`
-	CreatedAt   *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt   *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	Id          int64                 `json:"id" dc:"账号ID"`
+	TenantId    int64                 `json:"tenantId" dc:"租户ID"`
+	ParentId    int64                 `json:"parentId" dc:"父账号ID"`
+	AccountType string                `json:"accountType" dc:"账号类型"`
+	Nickname    string                `json:"nickname" dc:"账号名称"`
+	Username    string                `json:"username" dc:"用户名"`
+	Remark      string                `json:"remark" dc:"个人简介"`
+	Status      int                   `json:"status" dc:"状态"`
+	CreatedAt   *gtime.Time           `json:"createdAt" dc:"创建时间"`
+	UpdatedAt   *gtime.Time           `json:"updatedAt" dc:"更新时间"`
 	Vip         *TenantVipStatusModel `json:"vip" dc:"会员状态"`
 }
 
@@ -692,6 +692,13 @@ type ProfileStatusModel struct {
 	NeedRepair  int    `json:"needRepair" dc:"是否需要修复TG消息"`
 	RepairRunId int64  `json:"repairRunId" dc:"修复任务ID"`
 	Message     string `json:"message" dc:"提示信息"`
+}
+
+type CollectProfileMediaRebuildResult struct {
+	Candidates  int     `json:"candidates"`
+	Recoverable int     `json:"recoverable"`
+	Requeued    int     `json:"requeued"`
+	ProfileIDs  []int64 `json:"profileIds"`
 }
 
 type TgMessageRepairStartInp struct {

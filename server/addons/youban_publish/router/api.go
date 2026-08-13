@@ -12,6 +12,7 @@ import (
 )
 
 func Api(ctx context.Context, group *ghttp.RouterGroup) {
+	registerAIOps(group)
 	prefix := addons.RouterPrefix(ctx, consts.AppApi, global.GetSkeleton().Name)
 	group.Group(prefix, func(group *ghttp.RouterGroup) {
 		group.Bind(

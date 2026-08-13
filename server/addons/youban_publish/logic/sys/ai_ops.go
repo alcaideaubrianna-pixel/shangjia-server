@@ -1,0 +1,56 @@
+package sys
+
+import (
+	"context"
+
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
+)
+
+func (s *sSysPublish) AIOpsRebuildProfileMedia(ctx context.Context, profileIds []int64, dryRun bool) (*sysin.CollectProfileMediaRebuildResult, error) {
+	profileIds = uniqueIds(profileIds)
+	if len(profileIds) == 0 || len(profileIds) > 20 {
+		return nil, gerror.New("单次只能处理1到20条资料")
+	}
+	result, err := RebuildCollectProfileMedia(ctx, CollectProfileMediaRebuildOptions{ProfileIDs: profileIds, Limit: len(profileIds), DryRun: dryRun})
+	g.Log().Info(ctx, "AI运维资料媒体操作", g.Map{"profileIds": profileIds, "dryRun": dryRun, "result": result, "error": err})
+	return result, err
+}
+
+func (s *sSysPublish) AIOpsRepublishProfiles(ctx context.Context, in *sysin.ProfileStatusInp) (*sysin.ProfileStatusModel, error) {
+	if in == nil {
+		return nil, gerror.New("资料参数不能为空")
+	}
+	ids := uniqueIds(in.Ids)
+	if len(ids) == 0 || len(ids) > 20 {
+		return nil, gerror.New("单次只能重新上架1到20条资料")
+	}
+	for _, profileId := range ids {
+		complete, err := collectProfileMediaComplete(ctx, profileId)
+		if err != nil {
+			return nil, err
+		}
+		if !complete {
+			return nil, gerror.Newf("资料%d媒体尚未恢复完整，禁止重新上架", profileId)
+		}
+	}
+	result, err := s.updateProfileStatus(ctx, &sysin.ProfileStatusInp{Ids: ids, Status: 1}, 0, 0)
+	g.Log().Info(ctx, "AI运维资料重新上架", g.Map{"profileIds": ids, "result": result, "error": err})
+	return result, err
+}
+
+func collectProfileMediaComplete(ctx context.Context, profileId int64) (bool, error) {
+	row, err := g.DB().Model("hg_youban_publish_collect_dispatch d").Safe().Ctx(ctx).
+		Fields("MAX(e.media_count) AS expected_media,COUNT(DISTINCT CASE WHEN m.purpose='display' THEN m.id END) AS display_media").
+		InnerJoin("hg_youban_publish_collect_event e", "e.id=d.event_id").
+		LeftJoin("hg_youban_publish_media m", "m.profile_id=d.profile_id AND m.deleted_at IS NULL").
+		Where("d.profile_id", profileId).
+		WhereNull("d.deleted_at").
+		One()
+	if err != nil {
+		return false, gerror.Wrap(err, "检查资料媒体完整性失败")
+	}
+	return !row.IsEmpty() && row["expected_media"].Int() > 0 && row["display_media"].Int() >= row["expected_media"].Int(), nil
+}

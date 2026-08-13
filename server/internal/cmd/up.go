@@ -143,6 +143,29 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 			return repairErr
 		}
 		g.Log().Infof(ctx, "Bot媒体组修复完成 dryRun:%t groups:%d events:%d media:%d requeued:%d groupedIds:%v", strings.TrimSpace(args["apply"]) != "1", result.Groups, result.Events, result.Media, result.Requeued, result.GroupedIDs)
+	case "collectProfileMediaRebuild":
+		profileIDs := make([]int64, 0)
+		for _, value := range strings.Split(args["a2"], ",") {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			profileID, parseErr := strconv.ParseInt(value, 10, 64)
+			if parseErr != nil || profileID <= 0 {
+				return gerror.New("collectProfileMediaRebuild 的 a2 必须是逗号分隔的有效资料ID")
+			}
+			profileIDs = append(profileIDs, profileID)
+		}
+		limit, _ := strconv.Atoi(args["limit"])
+		result, rebuildErr := publishsys.RebuildCollectProfileMedia(ctx, publishsys.CollectProfileMediaRebuildOptions{
+			ProfileIDs: profileIDs,
+			Limit:      limit,
+			DryRun:     strings.TrimSpace(args["apply"]) != "1",
+		})
+		if rebuildErr != nil {
+			return rebuildErr
+		}
+		g.Log().Infof(ctx, "资料媒体重建完成 dryRun:%t candidates:%d recoverable:%d requeued:%d profileIds:%v", strings.TrimSpace(args["apply"]) != "1", result.Candidates, result.Recoverable, result.Requeued, result.ProfileIDs)
 	case "materialImportMediaNormalize":
 		err = fix.NormalizeYoubanPublishMaterialImportMedia(ctx)
 	case "materialImportMediaRepair":
