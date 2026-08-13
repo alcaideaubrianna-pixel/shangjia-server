@@ -26,6 +26,7 @@ type FileMeta struct {
 type MultipartProgress struct {
 	UploadId      string      `json:"uploadId"`      // 上传事件ID
 	ThirdUploadId string      `json:"thirdUploadId"` // 第三方上传事件ID
+	ObjectPath    string      `json:"objectPath"`    // 对象存储路径
 	Meta          *FileMeta   `json:"meta"`          // 文件元数据
 	ShardCount    int         `json:"shardCount"`    // 分片数量
 	UploadedIndex []int       `json:"uploadedIndex"` // 已上传的分片索引
