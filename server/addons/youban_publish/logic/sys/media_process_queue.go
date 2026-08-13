@@ -40,11 +40,18 @@ func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Ta
 	if err != nil {
 		return err
 	}
+	fileURL := media["file_url"].String()
+	if !isAbsoluteMediaURL(fileURL) && media["attachment_id"].Int64() > 0 {
+		fileURL, err = attachmentMediaSource(ctx, media["attachment_id"].Int64())
+		if err != nil {
+			return err
+		}
+	}
 
 	metadata, processErr := processMediaAssetMetadata(ctx,
 		media["media_type"].String(),
 		media["storage_path"].String(),
-		media["file_url"].String(),
+		fileURL,
 		media["poster_url"].String(),
 		media["name"].String(),
 	)

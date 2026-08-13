@@ -707,9 +707,6 @@ func normalizeMediaFileURL(fileURL string, storagePath string) string {
 	if contentPath := normalizeTelegramContentStoragePath(fileURL); contentPath != "" {
 		return normalizeTelegramContentURL(contentPath)
 	}
-	if fileURL != "" && !isAbsoluteMediaURL(fileURL) {
-		return normalizeMediaStorageURL(fileURL)
-	}
 	if storagePath == "" {
 		return fileURL
 	}
@@ -720,24 +717,9 @@ func normalizeMediaFileURL(fileURL string, storagePath string) string {
 		if isAbsoluteMediaURL(storagePath) {
 			return storagePath
 		}
-		return normalizeMediaStorageURL(storagePath)
+		return "/" + strings.TrimLeft(storagePath, "/")
 	}
 	return fileURL
-}
-
-func normalizeMediaStorageURL(storagePath string) string {
-	return joinMediaStorageURL(mediaContentCDNBaseURL(), storagePath)
-}
-
-func joinMediaStorageURL(baseURL string, storagePath string) string {
-	storagePath = strings.TrimLeft(strings.TrimSpace(storagePath), "/")
-	if storagePath == "" {
-		return ""
-	}
-	if baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/"); baseURL != "" {
-		return baseURL + "/" + storagePath
-	}
-	return "/" + storagePath
 }
 
 func normalizeStoredMediaPath(raw string) string {
