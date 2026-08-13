@@ -313,6 +313,14 @@ func (c *cPublishServer) ProfileList(ctx context.Context, req *publish.ProfileLi
 	return
 }
 
+func (c *cPublishServer) ProfileStatus(ctx context.Context, req *publish.ProfileStatusReq) (res *publish.ProfileStatusRes, err error) {
+	data, err := service.SysPublish().AdminProfileStatus(ctx, &req.ProfileStatusInp)
+	if err != nil {
+		return
+	}
+	return &publish.ProfileStatusRes{ProfileStatusModel: data}, nil
+}
+
 func (c *cPublishServer) ProfileView(ctx context.Context, req *publish.ProfileViewReq) (res *publish.ProfileViewRes, err error) {
 	data, err := service.SysPublish().ServerProfileView(ctx, &req.ProfileViewInp)
 	if err != nil {

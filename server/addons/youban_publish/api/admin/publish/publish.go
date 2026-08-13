@@ -144,6 +144,15 @@ type ProfileDeleteReq struct {
 
 type ProfileDeleteRes struct{}
 
+type ProfileStatusReq struct {
+	g.Meta `path:"/publish/profile/status" method:"post" tags:"上架插件后台" summary:"批量上下架资料"`
+	sysin.ProfileStatusInp
+}
+
+type ProfileStatusRes struct {
+	*sysin.ProfileStatusModel
+}
+
 type ProfilePurgeDeletedReq struct {
 	g.Meta `path:"/publish/profile/purgeDeleted" method:"post" tags:"上架插件后台" summary:"清空账号软删除资料"`
 	sysin.ProfilePurgeDeletedInp
