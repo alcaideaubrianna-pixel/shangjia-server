@@ -89,6 +89,14 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 				closeTelegramMediaFiles(closers)
 			}
 		}
+		if err != nil && isTelegramRequestEntityTooLargeError(err) {
+			fallback, fallbackErr := s.sendTelegramOversizedMediaChunk(ctx, bot, chatId, purpose, chunkCaption, chunk)
+			if fallbackErr == nil {
+				allMessages = append(allMessages, fallback...)
+				continue
+			}
+			err = fallbackErr
+		}
 		if err != nil {
 			return allMessages, err
 		}
@@ -96,6 +104,22 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		allMessages = append(allMessages, telegramSentMessagesFromGroup(msgs, purpose, chunk)...)
 	}
 	return allMessages, nil
+}
+
+func (s *sSysPublish) sendTelegramOversizedMediaChunk(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
+	if len(media) <= 1 {
+		return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0])
+	}
+	middle := len(media) / 2
+	first, err := s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, media[:middle])
+	if err != nil {
+		return nil, err
+	}
+	second, err := s.sendTelegramMediaSet(ctx, bot, chatId, purpose, "", media[middle:])
+	if err != nil {
+		return first, err
+	}
+	return append(first, second...), nil
 }
 
 func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem) ([]*telegramSentMessage, error) {

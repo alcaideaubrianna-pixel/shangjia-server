@@ -202,6 +202,14 @@ func isTelegramPhotoTooLargeError(err error) bool {
 	return strings.Contains(message, "too big for a photo") || strings.Contains(message, "file of size") && strings.Contains(message, "maximum is")
 }
 
+func isTelegramRequestEntityTooLargeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "413") && strings.Contains(message, "request entity too large")
+}
+
 func isTelegramChannelPermissionError(err error) bool {
 	if err == nil {
 		return false
