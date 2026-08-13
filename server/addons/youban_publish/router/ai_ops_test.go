@@ -2,6 +2,13 @@ package router
 
 import "testing"
 
+func TestAIOpsRouteUsesAddonPrefix(t *testing.T) {
+	const path = "/api/youban_publish/ai-ops/profile/media"
+	if path == "/internal/youban-publish/ai-ops/profile/media" {
+		t.Fatal("AI运维接口必须使用标准插件路由前缀")
+	}
+}
+
 func TestAIOpsTokenMatches(t *testing.T) {
 	tests := []struct {
 		name     string

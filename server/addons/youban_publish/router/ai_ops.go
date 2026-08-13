@@ -13,7 +13,7 @@ import (
 )
 
 func registerAIOps(group *ghttp.RouterGroup) {
-	group.Group("/internal/youban-publish/ai-ops", func(group *ghttp.RouterGroup) {
+	group.Group("/ai-ops", func(group *ghttp.RouterGroup) {
 		group.Middleware(aiOpsAuth)
 		group.Bind(api.AIOps)
 	})
