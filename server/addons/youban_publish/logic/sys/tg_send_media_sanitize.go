@@ -108,14 +108,14 @@ func prepareTelegramPhotoUploadFile(ctx context.Context, path string, cleanup fu
 	if err != nil {
 		return path, cleanup, err
 	}
-	ext := strings.ToLower(filepath.Ext(path))
-	if info.Size() <= telegramPhotoMaxUploadBytes && ext == ".png" {
-		cleanPath, err := stripTelegramPhotoMetadata(ctx, path, ext, 0)
-		if err == nil && cleanPath != "" {
-			if cleanSize, sizeErr := fileSize(cleanPath); sizeErr == nil && cleanSize <= telegramPhotoMaxUploadBytes {
-				return cleanPath, chainCleanup(cleanup, func() { _ = os.Remove(cleanPath) }), nil
+	if info.Size() <= telegramPhotoMaxUploadBytes {
+		file, openErr := os.Open(path)
+		if openErr == nil {
+			config, _, decodeErr := image.DecodeConfig(file)
+			_ = file.Close()
+			if decodeErr == nil && telegramPhotoDimensionsValid(config.Width, config.Height) {
+				return path, cleanup, nil
 			}
-			_ = os.Remove(cleanPath)
 		}
 	}
 	cleanPath, err := compressTelegramPhotoForUpload(ctx, path)

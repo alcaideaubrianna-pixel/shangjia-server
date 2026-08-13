@@ -47,6 +47,31 @@ func TestPrepareTelegramPhotoUploadFileKeepsOutputWithinLimit(t *testing.T) {
 	}
 }
 
+func TestPrepareTelegramPhotoUploadFileKeepsValidImageUnchanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.png")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = png.Encode(file, image.NewNRGBA(image.Rect(0, 0, 100, 100))); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err = file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	outPath, cleanup, err := prepareTelegramPhotoUploadFile(context.Background(), path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		t.Fatal("valid image should not allocate cleanup")
+	}
+	if outPath != path {
+		t.Fatalf("outPath=%q want=%q", outPath, path)
+	}
+}
+
 func TestSplitTelegramMediaItems(t *testing.T) {
 	media := make([]*telegramMediaItem, 23)
 	chunks := splitTelegramMediaItems(media, telegramMediaGroupMaxItems)
