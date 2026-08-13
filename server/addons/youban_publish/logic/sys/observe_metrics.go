@@ -58,6 +58,11 @@ func observeTelegramLeaseActive(ctx context.Context, delta int64) {
 	gauge.Add(ctx, delta)
 }
 
+func observeTelegramMediaPurposeViolation(ctx context.Context, stage string) {
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.media_purpose_violations")
+	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("stage", stage)))
+}
+
 func observeCollectHistoryBackpressure(ctx context.Context, sourceID int64, stats collectHistoryPendingStats, limit int) {
 	attrs := metric.WithAttributes(attribute.Int64("source_id", sourceID))
 	pending, _ := publishObserveMeter.Int64Gauge("xiaohuiji.collect.history_pending")

@@ -180,6 +180,10 @@ func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegram
 		if item == nil || item.MessageId <= 0 {
 			continue
 		}
+		if err := s.ensureTelegramMediaGroupPurpose(ctx, job, item); err != nil {
+			observeTelegramMediaPurposeViolation(ctx, "persist")
+			return err
+		}
 		_, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).Data(g.Map{
 			"job_id":         job.Id,
 			"tenant_id":      job.TenantId,
@@ -211,6 +215,25 @@ func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegram
 	}
 	for key, hash := range storedHashes {
 		appendTelegramAntiScanHashHistory(ctx, key, hash)
+	}
+	return nil
+}
+
+func (s *sSysPublish) ensureTelegramMediaGroupPurpose(ctx context.Context, job telegramJobRecord, item *telegramSentMessage) error {
+	if item == nil || strings.TrimSpace(item.MediaGroupId) == "" || (item.Purpose != "display" && item.Purpose != "verify") {
+		return nil
+	}
+	exists, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+		Where("job_id", job.Id).
+		Where("media_group_id", item.MediaGroupId).
+		WhereNot("purpose", item.Purpose).
+		WhereIn("purpose", []string{"display", "verify"}).
+		Count()
+	if err != nil {
+		return gerror.Wrap(err, "校验TG媒体组用途失败")
+	}
+	if exists > 0 {
+		return gerror.New("展示资料与验证资料禁止合并发送")
 	}
 	return nil
 }

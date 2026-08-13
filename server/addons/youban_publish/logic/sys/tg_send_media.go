@@ -25,6 +25,10 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 	if len(media) == 0 {
 		return nil, nil
 	}
+	if err := validateTelegramMediaPurpose(purpose, media); err != nil {
+		observeTelegramMediaPurposeViolation(ctx, "send")
+		return nil, err
+	}
 	s.prepareTelegramMediaItemsForSend(ctx, media)
 	if strings.TrimSpace(caption) != "" && telegramMediaSetHasCopyRef(media) {
 		media = telegramMediaSetWithoutTgFileId(media)
@@ -96,6 +100,19 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		allMessages = append(allMessages, telegramSentMessagesFromGroup(msgs, purpose, chunk)...)
 	}
 	return allMessages, nil
+}
+
+func validateTelegramMediaPurpose(purpose string, media []*telegramMediaItem) error {
+	purpose = strings.TrimSpace(purpose)
+	if purpose != "display" && purpose != "verify" {
+		return gerror.New("TG媒体发送用途不合法")
+	}
+	for _, item := range media {
+		if item == nil || strings.TrimSpace(item.Purpose) != purpose {
+			return gerror.New("展示资料与验证资料禁止合并发送")
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem) ([]*telegramSentMessage, error) {
