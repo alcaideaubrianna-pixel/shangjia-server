@@ -122,12 +122,9 @@ func applyNoteIndexFilters(mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model 
 		mod = applyNoteIndexTagFilter(mod, splitProfileTagValues(tag))
 	}
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
-		if profileNo, ok := normalizeProfileNoSearchKeyword(keyword); ok {
-			return mod.Where("i.profile_no", profileNo)
-		}
 		terms := splitProfileSearchTerms(keyword)
 		if len(terms) > 0 {
-			condition, args := segmentedLikeConditionNullSafe([]string{"i.profile_no", "i.title", "i.plain_text"}, terms)
+			condition, args := segmentedLikeConditionNullSafe([]string{"i.profile_no", "i.title", "i.summary", "i.plain_text"}, terms)
 			mod = mod.Where(condition, args...)
 		}
 	}

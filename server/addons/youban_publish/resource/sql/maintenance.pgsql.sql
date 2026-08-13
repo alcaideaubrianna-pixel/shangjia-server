@@ -4,6 +4,8 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_tenant_remark_trgm" ON "hg_youban_publish_te
 CREATE INDEX IF NOT EXISTS "idx_ybp_account_username_trgm" ON "hg_youban_publish_account" USING gin ("username" gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS "idx_content_profile_source_uuid" ON "hg_content_profile" ("source_note_uuid") WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_content_profile_title_trgm" ON "hg_content_profile" USING gin ("title" gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS "idx_content_profile_profile_no_trgm" ON "hg_content_profile" USING gin ("profile_no" gin_trgm_ops) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_content_profile_summary_trgm" ON "hg_content_profile" USING gin ("summary" gin_trgm_ops) WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_content_profile_plain_text_trgm" ON "hg_content_profile" USING gin ("plain_text" gin_trgm_ops);
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_content_profile_no" ON "hg_content_profile" ("profile_no");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_log_tenant" ON "hg_youban_publish_tg_job_log" ("tenant_id", "id");

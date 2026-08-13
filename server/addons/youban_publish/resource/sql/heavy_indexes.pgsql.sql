@@ -7,6 +7,8 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_account_updated" ON 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_updated_cursor" ON "hg_youban_publish_note_index" ("updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_profile" ON "hg_youban_publish_note_index" ("profile_id") WHERE "deleted_at" IS NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_title_trgm" ON "hg_youban_publish_note_index" USING gin ("title" gin_trgm_ops) WHERE "deleted_at" IS NULL;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_profile_no_trgm" ON "hg_youban_publish_note_index" USING gin ("profile_no" gin_trgm_ops) WHERE "deleted_at" IS NULL;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_summary_trgm" ON "hg_youban_publish_note_index" USING gin ("summary" gin_trgm_ops) WHERE "deleted_at" IS NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_plain_text_trgm" ON "hg_youban_publish_note_index" USING gin ("plain_text" gin_trgm_ops) WHERE "deleted_at" IS NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_content_profile_source_uuid" ON "hg_content_profile" ("source_note_uuid") WHERE "deleted_at" IS NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_media_phash_lsh_lookup" ON "hg_youban_publish_media_phash_lsh" ("tenant_id", "media_type", "bucket_pos", "bucket_value", "account_id", "profile_id", "media_id") INCLUDE ("hash_value");

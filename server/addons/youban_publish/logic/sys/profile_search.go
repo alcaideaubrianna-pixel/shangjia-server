@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"regexp"
 	"strings"
 	"time"
 
@@ -13,8 +12,6 @@ import (
 	"hotgo/internal/library/cache"
 	"hotgo/internal/model/input/form"
 )
-
-var profileSearchProfileNoRegexp = regexp.MustCompile(`^[A-Z][A-Z0-9]{4,}$`)
 
 func (s *sSysPublish) searchProfilePage(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string) ([]*sysin.ProfileModel, int, error) {
 	if in == nil {
@@ -42,17 +39,15 @@ func (s *sSysPublish) profileSearchModel(ctx context.Context, base *gdb.Model, i
 		return base
 	}
 
-	if profileNo, ok := normalizeProfileNoSearchKeyword(keyword); ok {
-		return base.Clone().Where("p.profile_no", profileNo)
-	}
-
 	terms := splitProfileSearchTerms(keyword)
 	if len(terms) == 0 {
 		return base
 	}
 
 	searchCondition, searchArgs := segmentedLikeCondition([]string{
+		"p.profile_no",
 		"p.title",
+		"p.summary",
 		"t.title",
 		"p.plain_text",
 		"t.plain_text",
@@ -130,19 +125,6 @@ func scanProfileOffsetPage(mod *gdb.Model, fields string, offset int, limit int,
 		list = []*sysin.ProfileModel{}
 	}
 	return list, nil
-}
-
-func normalizeProfileNoSearchKeyword(keyword string) (string, bool) {
-	profileNo := normalizeBotProfileNo(keyword)
-	if !profileSearchProfileNoRegexp.MatchString(profileNo) {
-		return profileNo, false
-	}
-	for _, char := range profileNo {
-		if char >= '0' && char <= '9' {
-			return profileNo, true
-		}
-	}
-	return profileNo, false
 }
 
 func splitProfileSearchTerms(keyword string) []string {

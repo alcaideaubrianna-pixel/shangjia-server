@@ -321,14 +321,10 @@ func (s *sSysPublish) applyProfileFilters(ctx context.Context, mod *gdb.Model, i
 		return mod
 	}
 	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
-		if profileNo, ok := normalizeProfileNoSearchKeyword(keyword); ok {
-			mod = mod.Where("p.profile_no", profileNo)
-		} else {
-			terms := splitProfileSearchTerms(keyword)
-			if len(terms) > 0 {
-				condition, args := segmentedLikeCondition([]string{"p.title", "p.plain_text"}, terms)
-				mod = mod.Where(condition, args...)
-			}
+		terms := splitProfileSearchTerms(keyword)
+		if len(terms) > 0 {
+			condition, args := segmentedLikeCondition([]string{"p.profile_no", "p.title", "p.summary", "p.plain_text"}, terms)
+			mod = mod.Where(condition, args...)
 		}
 	}
 	return mod
