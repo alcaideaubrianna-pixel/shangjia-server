@@ -83,6 +83,27 @@ func TestTelegramSlowModeErrorIsDetected(t *testing.T) {
 	}
 }
 
+func TestTelegramMediaSizeLimitError(t *testing.T) {
+	for _, message := range []string{
+		"413 Request Entity Too Large",
+		"file of size 14851446 bytes is too big for a photo; maximum is 10485760 bytes",
+		"Bad Request: file is too big",
+	} {
+		if !isTelegramMediaSizeLimitError(assertError(message)) {
+			t.Fatalf("media size error must trigger account fallback: %q", message)
+		}
+	}
+	for _, message := range []string{
+		"Bad Request: chat not found",
+		"Too Many Requests: retry after 10",
+		"context deadline exceeded",
+	} {
+		if isTelegramMediaSizeLimitError(assertError(message)) {
+			t.Fatalf("non-size error must not trigger account fallback: %q", message)
+		}
+	}
+}
+
 func assertError(message string) error {
 	return simpleError(message)
 }

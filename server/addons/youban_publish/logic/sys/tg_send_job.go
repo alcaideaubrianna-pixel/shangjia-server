@@ -197,7 +197,11 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplaySending); err != nil {
 			return err
 		}
-		messages, err = s.sendTelegramDisplayPart(ctx, bot, job.TargetChatId, telegramCaptionWithJobMarker(caption, job.Id, "display"), displayMedia)
+		displayCaption := telegramCaptionWithJobMarker(caption, job.Id, "display")
+		messages, err = s.sendTelegramDisplayPart(ctx, bot, job.TargetChatId, displayCaption, displayMedia)
+		if err != nil && len(messages) == 0 && isTelegramMediaSizeLimitError(err) {
+			messages, err = s.sendTelegramJobMediaByAccount(ctx, job, "display", displayCaption, displayMedia, err)
+		}
 		if err != nil {
 			_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "展示资料分片推送失败")
 			return gerror.Wrapf(err, "TG展示资料推送失败，job:%d，channel:%d，chat:%s", job.Id, job.ChannelId, job.TargetChatId)
@@ -222,7 +226,11 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifySending); err != nil {
 		return err
 	}
-	verifyMessages, err := s.sendTelegramVerifyPart(ctx, bot, job.TargetChatId, telegramCaptionWithJobMarker("", job.Id, "verify"), verifyMedia)
+	verifyCaption := telegramCaptionWithJobMarker("", job.Id, "verify")
+	verifyMessages, err := s.sendTelegramVerifyPart(ctx, bot, job.TargetChatId, verifyCaption, verifyMedia)
+	if err != nil && len(verifyMessages) == 0 && isTelegramMediaSizeLimitError(err) {
+		verifyMessages, err = s.sendTelegramJobMediaByAccount(ctx, job, "verify", verifyCaption, verifyMedia, err)
+	}
 	if err != nil {
 		if !isTelegramAmbiguousDeliveryError(err) {
 			if len(verifyMessages) > 0 {
@@ -294,6 +302,30 @@ func (s *sSysPublish) sendTelegramVerifyPart(ctx context.Context, bot *tgbot.Bot
 		return nil, nil
 	}
 	return s.sendTelegramMediaSet(ctx, bot, chatId, "verify", caption, media)
+}
+
+func (s *sSysPublish) sendTelegramJobMediaByAccount(ctx context.Context, job telegramJobRecord, purpose string, caption string, media []*telegramMediaItem, botErr error) ([]*telegramSentMessage, error) {
+	channel, err := s.messagePushChannelFromJob(ctx, job)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取协议号降级发送频道失败")
+	}
+	if channel.TgAccountId <= 0 {
+		return nil, gerror.Newf("Bot发送媒体超过限制，频道未绑定协议号，无法整组降级发送：%v", botErr)
+	}
+	g.Log().Warning(ctx, "Bot媒体发送触发协议号整组降级", g.Map{
+		"jobId": job.Id, "channelId": job.ChannelId, "tgAccountId": channel.TgAccountId,
+		"purpose": purpose, "mediaCount": len(media), "reason": botErr.Error(),
+	})
+	messages, err := s.sendMessageTemplateByTgAccount(ctx, channel.TgAccountId, channel, caption, media, "")
+	if err != nil {
+		return nil, gerror.Wrap(err, "协议号整组发送媒体失败")
+	}
+	for _, message := range messages {
+		if message != nil {
+			message.Purpose = purpose
+		}
+	}
+	return messages, nil
 }
 
 func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJobRecord, err error) error {
