@@ -1,5 +1,127 @@
 # Railway 数据迁移工具
 
+## 一键快速在线迁移（推荐）
+
+`fast-migrate.sh` 是正式切换入口。它不会在本机保存 30GB 数据文件，而是通过
+SSH/Railway 隧道使用 `pgcopydb` 并行复制 PostgreSQL，并使用 RedisShake 持续同步
+Redis。所有密钥只保存在本机 `.migration-state/`，该目录已加入 `.gitignore`。
+
+### 1. 迁移前只读检查
+
+```bash
+./deploy/migration/fast-migrate.sh precheck
+```
+
+检查内容：
+
+- 本机 Docker、Railway CLI、SSH 私钥和必要命令；
+- 腾讯云 PostgreSQL/Redis 容器和网络连通性；
+- Railway PostgreSQL/Redis 变量和隧道；
+- Railway 七个业务服务必须全部停止；
+- Railway PostgreSQL 和 Redis 必须为空；
+- 源库大小、表数量、Redis DB/Key 数量；
+- PostgreSQL `wal_level`、复制参数和无主键表；
+- 目标容量和迁移端口是否可用。
+
+该命令不修改数据库、不重启 PostgreSQL，也不会启动同步。
+
+### 2. 一条命令预同步并在凌晨切换
+
+建议在迁移前一天执行：
+
+```bash
+./deploy/migration/fast-migrate.sh run 02:00
+```
+
+执行顺序：
+
+1. 自动运行全部预检查；
+2. 将源 PostgreSQL 配置为 logical WAL（首次会重启 PostgreSQL 一次）；
+3. 自动创建独立迁移账号，并为无主键表设置 `REPLICA IDENTITY FULL`；
+4. 启动 `pgcopydb clone --follow`：8 个表任务、8 个索引任务，大表按 CTID 并行拆分；
+5. 启动 RedisShake：源 DB3 全量复制后持续追 AOF 增量；
+6. 等待到下一次本地时间 02:00；
+7. 禁止旧 PostgreSQL 业务账号登录、暂停源 Redis 写入；
+8. 设置 PostgreSQL 最终 WAL 终点并等待 CDC 追平；
+9. 同步 Sequence，优雅停止 RedisShake；
+10. 精确校验全部 PostgreSQL 表行数、TG session、Redis Key/TTL/内容；
+11. 将 Railway 服务统一切换到源 Redis DB，并按 Account → Worker → Scheduler → API 顺序启动；
+12. 只有全部校验通过才执行可选切流 Hook。
+
+> `run 02:00` 必须提前执行。若凌晨 02:00 才开始全量复制，30GB 数据不可能在分钟级完成。
+
+### 3. 查看实时进度
+
+另开终端执行：
+
+```bash
+./deploy/migration/fast-migrate.sh watch
+```
+
+或只显示一次：
+
+```bash
+./deploy/migration/fast-migrate.sh status
+```
+
+显示 PostgreSQL 表/索引复制进度、CDC Slot lag、目标数据库大小、Redis 源/目标 Key 数量和 RedisShake 最近日志。
+
+### 4. 分步执行
+
+如不希望命令一直等待：
+
+```bash
+./deploy/migration/fast-migrate.sh prepare
+./deploy/migration/fast-migrate.sh watch
+./deploy/migration/fast-migrate.sh schedule 02:00
+```
+
+也可以在确认停机后手动切换：
+
+```bash
+./deploy/migration/fast-migrate.sh cutover
+```
+
+### 5. 自动切换域名/Webhook
+
+脚本不猜测 Cloudflare、Telegram Webhook 和支付平台的具体切换命令。可在执行前配置一个 Hook；
+它只会在数据库和 Redis 全部校验通过、Railway 服务健康后运行：
+
+```bash
+export MIGRATION_CUTOVER_HOOK='./deploy/migration/switch-traffic.sh'
+./deploy/migration/fast-migrate.sh run 02:00
+```
+
+### 6. 回滚与清理
+
+切换异常时：
+
+```bash
+./deploy/migration/fast-migrate.sh rollback
+```
+
+该命令停止 Railway 业务服务、解除源 PostgreSQL 登录限制并解除 Redis 暂停；之后按原方式启动腾讯云业务。
+
+确认迁移稳定后清理本机同步容器和隧道：
+
+```bash
+./deploy/migration/fast-migrate.sh cleanup
+```
+
+Telegram session 存储在 PostgreSQL，会完整复制。切换过程先停止旧账号运行时，再启动 Railway
+`xiaohuiji-account`，不会主动注销 Telegram session，也不会让两个 Account 实例同时登录。
+
+### 当前环境实测结果（2026-08-12）
+
+- 源 PostgreSQL：约 30GB，190 张 public 表；
+- 源 Redis：DB3，约 18.5 万 Key；
+- Railway PostgreSQL/Redis：空；
+- Railway 七个业务服务：全部停止；
+- 源 `wal_level=replica`：`prepare` 首次会自动改为 `logical` 并重启一次；
+- 无主键表：2 张，`prepare` 自动设置复制身份。
+
+## 旧快照/单账号工具
+
 目录包含四个工具：
 
 - `pre-migrate.sh`：全量 PostgreSQL/Redis 快照，以及可选的 Railway 恢复；

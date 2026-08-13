@@ -1,0 +1,75 @@
+services:
+  shangjia-api:
+    image: hkccr.ccs.tencentyun.com/testaaaaa/dwadfwaf:sha-15ccfd5
+    container_name: youban-server
+    entrypoint: ["./hotgo"]
+    command: ["web"]
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      TZ: "${YOUBAN_TZ:-Asia/Shanghai}"
+      YOUBAN_RUNTIME_ROLES: web
+      YOUBAN_LOG_LEVEL: warning
+      GF_LOGGER_LEVEL: warning
+      YOUBAN_DB_LOG_LEVEL: warning
+    ports: ["${YOUBAN_HTTP_PORT:-8000}:8000"]
+    volumes: &app-volumes
+      - ./data/logs:/app/logs
+      - ./data/attachment:/app/resource/public/attachment
+      - ./data/addons:/app/resource/addons
+      - ./data/storage:/app/storage
+    networks: [youban-network]
+
+  shangjia-worker:
+    image: hkccr.ccs.tencentyun.com/testaaaaa/dwadfwaf:sha-15ccfd5
+    container_name: youban-worker
+    entrypoint: ["./hotgo"]
+    command: ["worker"]
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      TZ: "${YOUBAN_TZ:-Asia/Shanghai}"
+      YOUBAN_RUNTIME_ROLES: worker
+      YOUBAN_LOG_LEVEL: warning
+      GF_LOGGER_LEVEL: warning
+      YOUBAN_DB_LOG_LEVEL: warning
+    volumes: *app-volumes
+    networks: [youban-network]
+
+  shangjia-account:
+    image: hkccr.ccs.tencentyun.com/testaaaaa/dwadfwaf:sha-15ccfd5
+    container_name: youban-account
+    entrypoint: ["./hotgo"]
+    command: ["account"]
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      TZ: "${YOUBAN_TZ:-Asia/Shanghai}"
+      YOUBAN_RUNTIME_ROLES: account
+      YOUBAN_LOG_LEVEL: warning
+      GF_LOGGER_LEVEL: warning
+      YOUBAN_DB_LOG_LEVEL: warning
+    volumes: *app-volumes
+    networks: [youban-network]
+
+  shangjia-scheduler:
+    image: hkccr.ccs.tencentyun.com/testaaaaa/dwadfwaf:sha-15ccfd5
+    container_name: youban-scheduler
+    entrypoint: ["./hotgo"]
+    command: ["scheduler"]
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      TZ: "${YOUBAN_TZ:-Asia/Shanghai}"
+      YOUBAN_RUNTIME_ROLES: scheduler
+      YOUBAN_TCP_CRON_ADDRESS: shangjia-api:8099
+      YOUBAN_LOG_LEVEL: warning
+      GF_LOGGER_LEVEL: warning
+      YOUBAN_DB_LOG_LEVEL: warning
+    volumes: *app-volumes
+    networks: [youban-network]
+
+networks:
+  youban-network:
+    name: ${YOUBAN_DOCKER_NETWORK:-1panel-network}
+    external: true
