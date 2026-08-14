@@ -114,7 +114,7 @@ func (s *sSysPublish) runTelegramClientWithAccountLease(ctx context.Context, tgA
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, lock.ErrTimeout) {
 			err = &telegramAccountBusyError{tgAccountId: tgAccountId, err: err}
 		}
-		g.Log().Warningf(ctx, "TG账号连接租约获取失败 tgAccountId:%d err:%+v", tgAccountId, err)
+		g.Log().Errorf(ctx, "TG账号连接租约获取失败，协议号降级任务未执行 tgAccountId:%d err:%+v", tgAccountId, err)
 		observeTelegramLease(ctx, "acquire_failed", tgAccountId)
 		return err
 	}
