@@ -53,6 +53,9 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 			if captionMessage != nil {
 				s.cleanupTelegramSentMessages(ctx, bot, chatId, []*telegramSentMessage{{MessageId: int64(captionMessage.ID), Purpose: purpose}}, "复制媒体组失败")
 			}
+			if isTelegramCopySourceUnavailableError(err) || isTelegramPhotoTooLargeError(err) {
+				return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutTgFileId(media))
+			}
 			return nil, err
 		}
 		if !ok {
@@ -126,7 +129,7 @@ func validateTelegramMediaPurpose(purpose string, media []*telegramMediaItem) er
 
 func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem) ([]*telegramSentMessage, error) {
 	s.prepareTelegramMediaItemForSend(ctx, media)
-	if ref, ok := telegramCopyMediaRefFromFileId(media.TgFileId); ok {
+	if ref, ok := telegramCopyMediaRefFromFileId(media.TgFileId); ok && !telegramMediaRequiresSanitizedUpload(media) {
 		messages, err := s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media, ref)
 		if err != nil && (isTelegramPhotoTooLargeError(err) || isTelegramCopySourceUnavailableError(err)) {
 			cloned := *media
