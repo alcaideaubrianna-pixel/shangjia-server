@@ -433,13 +433,9 @@ receivers:
             value_type: int
       - sql: |
           SELECT buffers_clean::bigint AS buffers_clean,
-                 maxwritten_clean::bigint AS maxwritten_clean,
-                 buffers_backend::bigint AS buffers_backend
+                 maxwritten_clean::bigint AS maxwritten_clean
           FROM pg_stat_bgwriter
         metrics:
-          - metric_name: xiaohuiji.postgres.buffers_backend_total
-            value_column: buffers_backend
-            value_type: int
           - metric_name: xiaohuiji.postgres.maxwritten_clean_total
             value_column: maxwritten_clean
             value_type: int
