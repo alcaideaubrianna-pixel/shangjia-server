@@ -36,7 +36,8 @@ const (
 
 	telegramTextMessageMaxChars = 4096
 	profileCreateMaxMediaBytes  = 100 * 1024 * 1024
-	profileMediaGroupDebounce   = 3 * time.Minute
+	profileMediaGroupDebounce   = 5 * time.Second
+	profileSessionTimeout       = 6 * time.Minute
 	profileMediaGroupCacheTTL   = 10 * time.Minute
 )
 
@@ -1594,6 +1595,13 @@ func (s *sSysBot) createProfileFromMessage(ctx context.Context, botId int64, msg
 func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64, msg *models.Message, account *botProfileAccount, session *profileSessionRow, text string) error {
 	trace := fmt.Sprintf("PF-%d", session.Id)
 	startedAt := time.Now()
+	mediaKind := "text"
+	if len(msg.Photo) > 0 {
+		mediaKind = "photo"
+	} else if msg.Video != nil {
+		mediaKind = "video"
+	}
+	g.Log().Infof(ctx, "Bot资料消息收到 trace:%s session_id:%d bot_id:%d message_id:%d chat_id:%d media_group_id:%s media_kind:%s text_len:%d", trace, session.Id, botId, msg.ID, msg.Chat.ID, strings.TrimSpace(msg.MediaGroupID), mediaKind, len(strings.TrimSpace(text)))
 	chatId := fmt.Sprintf("%d", msg.Chat.ID)
 	if err := profileMessageMediaSizeError(msg); err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
@@ -1607,10 +1615,12 @@ func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64,
 		if ackErr != nil {
 			g.Log().Warningf(ctx, "发送资料接收反馈失败 sessionId:%d groupId:%s err:%+v", session.Id, msg.MediaGroupID, ackErr)
 		} else if acknowledged {
+			g.Log().Infof(ctx, "Bot资料处理反馈已发送 trace:%s message_id:%d", trace, msg.ID)
 			ackText := fmt.Sprintf("已收到，正在处理，请稍候...\n处理编号：PF-%d", session.Id)
 			if ackErr = s.sendMessageOnly(ctx, botId, chatId, ackText); ackErr != nil {
 				g.Log().Warningf(ctx, "发送资料处理中反馈失败 sessionId:%d groupId:%s err:%+v", session.Id, msg.MediaGroupID, ackErr)
 			}
+			s.scheduleProfileSessionTimeout(session.Id, botId, chatId)
 		}
 	}
 	media, err := s.resolveTelegramMessageMedia(ctx, row.BotToken, msg)
@@ -1625,6 +1635,29 @@ func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64,
 	return s.consumeProfileCreatePart(ctx, botId, chatId, account, session, strings.TrimSpace(text), media)
 }
 
+func (s *sSysBot) scheduleProfileSessionTimeout(sessionId, botId int64, chatId string) {
+	go func() {
+		timer := time.NewTimer(profileSessionTimeout)
+		defer timer.Stop()
+		<-timer.C
+		ctx := context.Background()
+		var row struct {
+			Step   string `json:"step"`
+			Status string `json:"status"`
+		}
+		if err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("step,status").Where("id", sessionId).Scan(&row); err != nil || row.Status != profileSessionStatusActive {
+			return
+		}
+		_, err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Where("id", sessionId).Where("status", profileSessionStatusActive).Data(g.Map{"status": profileSessionStatusCanceled, "updated_at": gtime.Now()}).Update()
+		if err != nil {
+			g.Log().Warningf(ctx, "Bot资料会话超时更新失败 trace:PF-%d step:%s err:%v", sessionId, row.Step, err)
+			return
+		}
+		g.Log().Warningf(ctx, "Bot资料会话处理超时 trace:PF-%d step:%s", sessionId, row.Step)
+		_ = s.sendMessageOnly(ctx, botId, chatId, fmt.Sprintf("资料处理超时，请重新发送。\n处理编号：PF-%d", sessionId))
+	}()
+}
+
 func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, chatId string, account *botProfileAccount, session *profileSessionRow, text string, media []*publishsysin.MessageTemplateMediaInp) error {
 	trace := fmt.Sprintf("PF-%d", session.Id)
 	startedAt := time.Now()
@@ -1636,6 +1669,7 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 		}
 		draft.DisplayText = strings.TrimSpace(text)
 		draft.DisplayMedia = media
+		g.Log().Infof(ctx, "Bot资料展示内容已解析 trace:%s media_count:%d text_len:%d", trace, len(media), len(draft.DisplayText))
 		claimed, err := s.claimProfileSessionStep(ctx, session.Id, "waiting_display", "waiting_verify", draft)
 		if err != nil {
 			return err
