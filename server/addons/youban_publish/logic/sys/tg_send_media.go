@@ -128,7 +128,7 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 	s.prepareTelegramMediaItemForSend(ctx, media)
 	if ref, ok := telegramCopyMediaRefFromFileId(media.TgFileId); ok {
 		messages, err := s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media, ref)
-		if err != nil && isTelegramPhotoTooLargeError(err) {
+		if err != nil && (isTelegramPhotoTooLargeError(err) || isTelegramCopySourceUnavailableError(err)) {
 			cloned := *media
 			cloned.TgFileId = ""
 			cloned.TgThumbFileId = ""
