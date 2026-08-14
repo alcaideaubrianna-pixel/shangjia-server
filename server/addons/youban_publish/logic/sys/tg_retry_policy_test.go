@@ -80,8 +80,8 @@ func TestTelegramJobStateUpdateDataUsesSingleTerminalRule(t *testing.T) {
 
 func TestTelegramJobFailureNextStateUsesTerminalRule(t *testing.T) {
 	decision := telegramJobFailureNextState(assertError("Bad Request: chat not found"), 0)
-	if decision.Status != "failed" || decision.DispatchStatus != tgDispatchStatusDone || decision.RetryDelay != 0 {
-		t.Fatalf("unexpected permanent failure decision: %+v", decision)
+	if decision.Status != "failed_retry" || decision.DispatchStatus != tgDispatchStatusIdle || decision.RetryDelay <= 0 {
+		t.Fatalf("chat not found should be retried: %+v", decision)
 	}
 }
 

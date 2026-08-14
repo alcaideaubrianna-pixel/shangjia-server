@@ -179,7 +179,6 @@ func isTelegramPermanentSendError(err error) bool {
 		"bad request: message to forward not found",
 		"bad request: there are no messages to forward",
 		"bad request: message identifiers must be in a strictly increasing order",
-		"bad request: chat not found",
 		"bad request: user banned in channel",
 		"bad request: user is banned in channel",
 		"user_banned_in_channel",
