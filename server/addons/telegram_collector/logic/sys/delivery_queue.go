@@ -27,6 +27,7 @@ const (
 	deliveryLeaseDuration     = 3 * time.Minute
 	deliveryRecoveryInterval  = 30 * time.Second
 	deliveryRecoveryStaleTime = 15 * time.Second
+	deliveryTaskUniqueTTL     = 5 * time.Minute
 	deliveryMaxAttempts       = 5
 )
 
@@ -88,7 +89,11 @@ func (s *sCollector) enqueueDeliveryTask(ctx context.Context, deliveryID int64, 
 		asynq.Queue(queueName),
 		asynq.MaxRetry(deliveryMaxAttempts-1),
 		asynq.Timeout(3*time.Minute),
+		asynq.Unique(deliveryTaskUniqueTTL),
 	)
+	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
+		return nil
+	}
 	return err
 }
 
@@ -302,21 +307,7 @@ func (s *sCollector) enqueueDueDeliveryTasks(ctx context.Context, limit int) err
 		if deliveryID <= 0 || status == "" {
 			continue
 		}
-		claim := dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).Where(columns.Status, status)
-		if status == sysin.DeliveryStatusPending {
-			claim = claim.WhereLTE(columns.UpdatedAt, staleBefore)
-		} else {
-			claim = claim.WhereNotNull(columns.NextRunAt).WhereLTE(columns.NextRunAt, now)
-		}
-		result, updateErr := claim.Data(g.Map{columns.UpdatedAt: now}).Update()
-		if updateErr != nil {
-			return gerror.Wrap(updateErr, "领取待恢复Telegram采集交付失败")
-		}
-		affected, _ := result.RowsAffected()
-		if affected == 0 {
-			continue
-		}
-		if updateErr = s.enqueueDeliveryTask(ctx, deliveryID, row[columns.Priority].Int()); updateErr != nil {
+		if updateErr := s.enqueueDeliveryTask(ctx, deliveryID, row[columns.Priority].Int()); updateErr != nil {
 			return gerror.Wrap(updateErr, "投递待恢复Telegram采集交付失败")
 		}
 	}

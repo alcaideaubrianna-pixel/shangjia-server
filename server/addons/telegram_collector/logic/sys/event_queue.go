@@ -32,6 +32,7 @@ const (
 	eventLeaseDuration     = 2 * time.Minute
 	eventRecoveryInterval  = 30 * time.Second
 	eventRecoveryStaleTime = 15 * time.Second
+	eventTaskUniqueTTL     = 5 * time.Minute
 	eventMaxAttempts       = 5
 )
 
@@ -121,7 +122,11 @@ func (s *sCollector) enqueueEventTask(ctx context.Context, eventID int64, priori
 		asynq.Queue(queueName),
 		asynq.MaxRetry(eventMaxAttempts-1),
 		asynq.Timeout(2*time.Minute),
+		asynq.Unique(eventTaskUniqueTTL),
 	)
+	if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
+		return nil
+	}
 	return err
 }
 
@@ -445,23 +450,7 @@ func (s *sCollector) enqueueDueEventTasks(ctx context.Context, limit int) error 
 		if eventID <= 0 || status == "" {
 			continue
 		}
-		claim := dao.TgCollectorEvent.Ctx(ctx).
-			WherePri(eventID).
-			Where(columns.Status, status)
-		if status == sysin.EventStatusReceived {
-			claim = claim.WhereLTE(columns.UpdatedAt, staleBefore)
-		} else {
-			claim = claim.WhereNotNull(columns.NextRunAt).WhereLTE(columns.NextRunAt, now)
-		}
-		result, updateErr := claim.Data(g.Map{columns.UpdatedAt: now}).Update()
-		if updateErr != nil {
-			return gerror.Wrap(updateErr, "领取待恢复Telegram采集事件失败")
-		}
-		affected, _ := result.RowsAffected()
-		if affected == 0 {
-			continue
-		}
-		if updateErr = s.enqueueEventTask(ctx, eventID, row[columns.Priority].Int()); updateErr != nil {
+		if updateErr := s.enqueueEventTask(ctx, eventID, row[columns.Priority].Int()); updateErr != nil {
 			return gerror.Wrap(updateErr, "投递待恢复Telegram采集事件失败")
 		}
 	}
