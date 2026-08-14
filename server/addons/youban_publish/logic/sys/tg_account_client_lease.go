@@ -89,7 +89,7 @@ func acquireTelegramAccountClientLeaseWait(ctx context.Context, tgAccountId int6
 		return nil, gerror.New("TG账号无效")
 	}
 	return waitTelegramAccountClientLease(ctx, time.Second, func() (*lock.Lock, error) {
-		lease := lock.NewConfig(2*time.Minute, time.Second).Mutex(telegramAccountClientLeaseKey(tgAccountId))
+		lease := lock.NewConfig(5*time.Minute, time.Second).Mutex(telegramAccountClientLeaseKey(tgAccountId))
 		if err := lease.TryLock(ctx); err != nil {
 			return nil, err
 		}
@@ -132,12 +132,12 @@ func (s *sSysPublish) runTelegramClientWithAccountLease(ctx context.Context, tgA
 }
 
 func telegramAccountClientLeaseWaitTimeout(ctx context.Context) time.Duration {
-	seconds := g.Cfg().MustGet(ctx, "youbanPublish.queue.accountBusyTimeoutSeconds", 10).Int()
+	seconds := g.Cfg().MustGet(ctx, "youbanPublish.queue.accountBusyTimeoutSeconds", 120).Int()
 	if seconds < 1 {
 		seconds = 1
 	}
-	if seconds > 60 {
-		seconds = 60
+	if seconds > 300 {
+		seconds = 300
 	}
 	return time.Duration(seconds) * time.Second
 }
