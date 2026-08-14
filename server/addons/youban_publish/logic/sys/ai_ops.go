@@ -45,7 +45,7 @@ func collectProfileMediaComplete(ctx context.Context, profileId int64) (bool, er
 	// collect_dispatch has no deleted_at column. Safe() would append a
 	// non-existent d.deleted_at predicate when the table is aliased.
 	row, err := g.DB().Model("hg_youban_publish_collect_dispatch d").Ctx(ctx).
-		Fields("MAX(e.media_count) AS expected_media,COUNT(DISTINCT CASE WHEN m.purpose='display' THEN m.id END) AS display_media").
+		Fields("MAX(e.media_count) AS expected_media,COUNT(DISTINCT m.id) AS profile_media").
 		InnerJoin("hg_youban_publish_collect_event e", "e.id=d.event_id").
 		LeftJoin("hg_youban_publish_media m", "m.profile_id=d.profile_id AND m.deleted_at IS NULL").
 		Where("d.profile_id", profileId).
@@ -53,5 +53,13 @@ func collectProfileMediaComplete(ctx context.Context, profileId int64) (bool, er
 	if err != nil {
 		return false, gerror.Wrap(err, "检查资料媒体完整性失败")
 	}
-	return !row.IsEmpty() && row["expected_media"].Int() > 0 && row["display_media"].Int() >= row["expected_media"].Int(), nil
+	if row.IsEmpty() {
+		g.Log().Warningf(ctx, "资料媒体完整性检查无采集记录 profileId:%d", profileId)
+		return false, nil
+	}
+	expectedMedia := row["expected_media"].Int()
+	profileMedia := row["profile_media"].Int()
+	complete := expectedMedia > 0 && profileMedia >= expectedMedia
+	g.Log().Infof(ctx, "资料媒体完整性检查 profileId:%d expected:%d actual:%d complete:%t", profileId, expectedMedia, profileMedia, complete)
+	return complete, nil
 }
