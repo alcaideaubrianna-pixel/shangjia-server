@@ -59,7 +59,7 @@ func (s *sSysPublish) materialImportIndexChannel(ctx context.Context, task *sysi
 		Fields("id,tg_account_id,target_chat_id,bot_id_json").
 		Where("tenant_id", task.TenantId).
 		Where("tg_account_id", task.TgAccountId).
-		Where("REPLACE(target_chat_id, '-100', '')", sourceChatKey).
+		Where("REPLACE(target_chat_id, '-100', '') = ?", sourceChatKey).
 		Where("status", 1).
 		WhereNull("deleted_at").
 		OrderAsc("id").
@@ -132,7 +132,7 @@ func (s *sSysPublish) materialImportSourceChannelCache(ctx context.Context, task
 		Fields("id,tenant_id,tg_account_id,channel_id,channel_title,channel_username,management_role,can_post_messages,can_invite_users,can_add_admins").
 		Where("tenant_id", task.TenantId).
 		Where("tg_account_id", task.TgAccountId).
-		Where("REPLACE(channel_id, '-100', '')", sourceChatKey).
+		Where("REPLACE(channel_id, '-100', '') = ?", sourceChatKey).
 		Scan(&cache)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取导入源频道缓存失败")
@@ -160,7 +160,7 @@ func (s *sSysPublish) materialImportDefaultBotID(ctx context.Context, tenantId i
 func (s *sSysPublish) materialImportBotHasSourceChannel(ctx context.Context, botId int64, sourceChatKey string) (bool, error) {
 	count, err := g.DB().Model("hg_youban_bot_channel_cache").Safe().Ctx(ctx).
 		Where("bot_id", botId).
-		Where("REPLACE(chat_id, '-100', '')", sourceChatKey).
+		Where("REPLACE(chat_id, '-100', '') = ?", sourceChatKey).
 		Count()
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "does not exist") {
