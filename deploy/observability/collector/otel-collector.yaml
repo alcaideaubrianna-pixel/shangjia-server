@@ -409,14 +409,12 @@ receivers:
             value_type: int
             attribute_columns: [error_type, media_type]
       - sql: |
-          SELECT checkpoints_timed::bigint AS checkpoints_timed,
-                 checkpoints_req::bigint AS checkpoints_requested,
-                 checkpoint_write_time::double precision AS checkpoint_write_time_ms,
-                 checkpoint_sync_time::double precision AS checkpoint_sync_time_ms,
-                 buffers_checkpoint::bigint AS buffers_checkpoint,
-                 buffers_backend::bigint AS buffers_backend,
-                 maxwritten_clean::bigint AS maxwritten_clean
-          FROM pg_stat_bgwriter
+          SELECT num_timed::bigint AS checkpoints_timed,
+                 num_requested::bigint AS checkpoints_requested,
+                 write_time::double precision AS checkpoint_write_time_ms,
+                 sync_time::double precision AS checkpoint_sync_time_ms,
+                 buffers_written::bigint AS buffers_checkpoint
+          FROM pg_stat_checkpointer
         metrics:
           - metric_name: xiaohuiji.postgres.checkpoints_timed_total
             value_column: checkpoints_timed
@@ -433,6 +431,12 @@ receivers:
           - metric_name: xiaohuiji.postgres.buffers_checkpoint_total
             value_column: buffers_checkpoint
             value_type: int
+      - sql: |
+          SELECT buffers_clean::bigint AS buffers_clean,
+                 maxwritten_clean::bigint AS maxwritten_clean,
+                 buffers_backend::bigint AS buffers_backend
+          FROM pg_stat_bgwriter
+        metrics:
           - metric_name: xiaohuiji.postgres.buffers_backend_total
             value_column: buffers_backend
             value_type: int
