@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -181,7 +183,7 @@ func (s *sSysPublish) ensureMaterialImportTelegramJob(ctx context.Context, task 
 		Where("profile_id", profileId).
 		Where("operation_no", operationNo).
 		Where("channel_id", channel.Id).
-		Scan(&existing); err != nil {
+		Scan(&existing); !materialImportIndexLookupSucceeded(err) {
 		return 0, gerror.Wrap(err, "读取导入TG消息索引任务失败")
 	}
 	now := gtime.Now()
@@ -208,6 +210,10 @@ func (s *sSysPublish) ensureMaterialImportTelegramJob(ctx context.Context, task 
 	data["created_at"] = now
 	id, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(data).InsertAndGetId()
 	return id, gerror.Wrap(err, "创建导入TG消息索引任务失败")
+}
+
+func materialImportIndexLookupSucceeded(err error) bool {
+	return err == nil || errors.Is(err, sql.ErrNoRows)
 }
 
 func (s *sSysPublish) materialImportCachedMessages(ctx context.Context, task *sysin.MaterialImportTaskModel, ids []int64) ([]tgMessageRepairCacheRow, error) {

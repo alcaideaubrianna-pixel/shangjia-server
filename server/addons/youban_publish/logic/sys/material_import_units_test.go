@@ -1,6 +1,22 @@
 package sys
 
-import "testing"
+import (
+	"database/sql"
+	"errors"
+	"testing"
+)
+
+func TestMaterialImportIndexLookupSucceeded(t *testing.T) {
+	if !materialImportIndexLookupSucceeded(nil) {
+		t.Fatal("nil lookup error should succeed")
+	}
+	if !materialImportIndexLookupSucceeded(sql.ErrNoRows) {
+		t.Fatal("missing index job should create a new job")
+	}
+	if materialImportIndexLookupSucceeded(errors.New("database unavailable")) {
+		t.Fatal("database errors must not be ignored")
+	}
+}
 
 func TestCollectMaterialUnitsMergeCrossPageLeadingUnits(t *testing.T) {
 	newerPage := []*collectMaterialUnit{
