@@ -1309,6 +1309,9 @@ func (in *ChannelSaveInp) Filter(ctx context.Context) error {
 	}
 	in.CyclePublishTime = strings.TrimSpace(in.CyclePublishTime)
 	in.BotIds = uniquePositiveInt64(in.BotIds)
+	if len(in.BotIds) == 0 {
+		return gerror.New("频道至少需要绑定一个推送BOT")
+	}
 	in.Remark = strings.TrimSpace(in.Remark)
 	return nil
 }
