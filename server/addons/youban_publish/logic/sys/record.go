@@ -318,30 +318,44 @@ func (s *sSysPublish) enrichPublishRecordFullPushProgress(ctx context.Context, l
 	if len(batchKeys) == 0 {
 		return nil
 	}
-	progress := make(map[string][2]int, len(batchKeys))
+	type batchProgress struct {
+		BatchNo       string `orm:"batch_no"`
+		Done          int    `orm:"done_count"`
+		Generated     int    `orm:"generated_count"`
+		SnapshotTotal int    `orm:"total_count"`
+		Queued        int    `orm:"queued_count"`
+	}
+	keys := make([]string, 0, len(batchKeys))
 	for key := range batchKeys {
-		total, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("operation_no LIKE ?", key+":%").Count()
-		if err != nil {
-			return gerror.Wrap(err, "统计全量推送进度失败")
+		keys = append(keys, key)
+	}
+	var rows []batchProgress
+	err := g.DB().Model(publishFullPushBatchTable+" b").Safe().Ctx(ctx).
+		LeftJoin(publishTgJobTable+" j", "j.operation_no >= CONCAT(b.batch_no, ':') AND j.operation_no < CONCAT(b.batch_no, ';')").
+		Fields("b.batch_no,b.total_count,b.queued_count,COUNT(j.id) AS generated_count,COUNT(CASE WHEN j.status IN ('sent','failed','superseded') THEN 1 END) AS done_count").
+		WhereIn("b.batch_no", keys).
+		Group("b.batch_no,b.total_count,b.queued_count").
+		Scan(&rows)
+	if err != nil {
+		return gerror.Wrap(err, "批量统计全量推送进度失败")
+	}
+	progress := make(map[string]batchProgress, len(rows))
+	for _, row := range rows {
+		if row.SnapshotTotal <= 0 {
+			row.SnapshotTotal = row.Generated
 		}
-		done, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-			Where("operation_no LIKE ?", key+":%").
-			WhereIn("status", []string{"sent", "failed", "superseded"}).
-			Count()
-		if err != nil {
-			return gerror.Wrap(err, "统计全量推送完成数失败")
-		}
-		progress[key] = [2]int{done, total}
+		progress[row.BatchNo] = row
 	}
 	for _, item := range list {
 		if item == nil || item.Action != "full_push" {
 			continue
 		}
 		value := progress[fullPushOperationBatchKey(item.OperationNo)]
-		item.ProgressDone = value[0]
-		item.ProgressTotal = value[1]
-		if value[1] > 0 {
-			item.ProgressText = fmt.Sprintf("%d/%d", value[0], value[1])
+		item.ProgressDone = value.Done
+		item.ProgressTotal = value.SnapshotTotal
+		item.ProgressQueued = value.Queued
+		if value.SnapshotTotal > 0 {
+			item.ProgressText = fmt.Sprintf("%d/%d（已调度%d）", value.Done, value.SnapshotTotal, value.Queued)
 		}
 	}
 	return nil

@@ -89,6 +89,7 @@ type PublishRecordModel struct {
 	Title           string      `json:"title" dc:"资料标题"`
 	ProgressDone    int         `json:"progressDone" dc:"批次已完成数量"`
 	ProgressTotal   int         `json:"progressTotal" dc:"批次总数量"`
+	ProgressQueued  int         `json:"progressQueued" dc:"批次已调度数量"`
 	ProgressText    string      `json:"progressText" dc:"批次进度文本"`
 }
 
