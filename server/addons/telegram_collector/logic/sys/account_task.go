@@ -56,6 +56,26 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 	if err != nil {
 		return 0, gerror.Wrap(err, "保存Telegram账号任务失败")
 	}
+	if in.TaskType == sysin.AccountTaskTypeMediaDownload {
+		revive := g.Map{
+			columns.Status: sysin.AccountTaskStatusPending, columns.Priority: in.Priority,
+			columns.AttemptCount: 0, columns.MaxAttempts: in.MaxAttempts, columns.NextRunAt: nextRunAt,
+			columns.LeaseOwner: "", columns.LeaseEpoch: 0, columns.LeaseUntil: nil,
+			columns.ErrorMessage: "", columns.CompletedAt: nil, columns.AttachmentId: 0,
+			columns.ResultErrorCode: "", columns.FileUrl: "", columns.StoragePath: "", columns.UpdatedAt: now,
+		}
+		if in.Media != nil {
+			fillAccountTaskMediaData(revive, in.Media)
+		}
+		if _, err = dao.TgCollectorAccountTask.Ctx(ctx).
+			Where(columns.TenantId, in.TenantID).
+			Where(columns.TaskKey, in.TaskKey).
+			Where(columns.TaskType, sysin.AccountTaskTypeMediaDownload).
+			WhereIn(columns.Status, []string{sysin.AccountTaskStatusDead, sysin.AccountTaskStatusCancelled}).
+			Data(revive).Update(); err != nil {
+			return 0, gerror.Wrap(err, "恢复Telegram媒体下载任务失败")
+		}
+	}
 	var row entity.TgCollectorAccountTask
 	if err = dao.TgCollectorAccountTask.Ctx(ctx).
 		Fields(columns.Id).
@@ -65,6 +85,14 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 		return 0, gerror.Wrap(err, "读取Telegram账号任务失败")
 	}
 	return row.Id, nil
+}
+
+func (s *sAccountTasks) SubmitAndWait(ctx context.Context, in *sysin.AccountTaskSubmit, pollInterval time.Duration) (*sysin.AccountTask, error) {
+	taskID, err := s.Submit(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	return s.WaitTerminal(ctx, taskID, pollInterval)
 }
 
 func validateAccountTaskSubmit(in *sysin.AccountTaskSubmit) error {
@@ -100,6 +128,41 @@ func (s *sAccountTasks) Get(ctx context.Context, taskID int64) (*sysin.AccountTa
 		return nil, gerror.New("Telegram账号任务不存在")
 	}
 	return accountTaskModel(&row), nil
+}
+
+func (s *sAccountTasks) WaitTerminal(ctx context.Context, taskID int64, pollInterval time.Duration) (*sysin.AccountTask, error) {
+	if pollInterval <= 0 {
+		pollInterval = time.Second
+	}
+	for {
+		task, err := s.Get(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		if accountTaskTerminal(task.Status) {
+			return task, nil
+		}
+		wait := pollInterval
+		if task.NextRunAt != nil && time.Until(*task.NextRunAt) > wait {
+			wait = time.Until(*task.NextRunAt)
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func accountTaskTerminal(status string) bool {
+	switch status {
+	case sysin.AccountTaskStatusCompleted, sysin.AccountTaskStatusDead, sysin.AccountTaskStatusCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, limit int, ttl time.Duration) ([]*sysin.AccountTask, error) {

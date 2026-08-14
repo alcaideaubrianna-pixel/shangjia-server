@@ -805,37 +805,16 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 	if tgAccountId <= 0 {
 		return nil, gerror.New("账号采集媒体缺少TG账号")
 	}
-	taskID, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, &collectorin.AccountTaskSubmit{
 		TenantID: tenantId, AccountID: tgAccountId, TaskType: collectorin.AccountTaskTypeMediaDownload,
 		TaskKey: accountMediaDownloadTaskKey(tgAccountId, item), Priority: collectorin.EventPriorityRealtime,
 		MediaOwnerAccountID: accountId, Media: ptrCollectorMediaItem(collectorMediaItemFromCollect(item)), MaxAttempts: 5,
-	})
+	}, time.Second)
 	if err != nil {
-		return nil, gerror.Wrap(err, "提交账号媒体下载任务失败")
-	}
-	// Submission is asynchronous. Waiting for a single immediate status read
-	// used to abort the whole import batch whenever the account runtime had not
-	// claimed the task yet, causing an endless 3-second requeue loop.
-	var task *collectorin.AccountTask
-	for {
-		task, err = collectorservice.AccountTasks().Get(ctx, taskID)
-		if err != nil {
-			return nil, err
-		}
-		if task.Status == collectorin.AccountTaskStatusCompleted || task.Status == collectorin.AccountTaskStatusDead || task.Status == collectorin.AccountTaskStatusCancelled {
-			break
-		}
-		wait := time.Second
-		if task.NextRunAt != nil && time.Until(*task.NextRunAt) > wait {
-			wait = time.Until(*task.NextRunAt)
-		}
-		timer := time.NewTimer(wait)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, newCollectMediaFairnessRetryError("账号媒体下载任务等待执行", 3*time.Second)
-		case <-timer.C:
 		}
+		return nil, gerror.Wrap(err, "提交账号媒体下载任务失败")
 	}
 	switch task.Status {
 	case collectorin.AccountTaskStatusCompleted:

@@ -32,3 +32,16 @@ func TestValidateAccountTaskSubmitRejectsUnknownTaskType(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestAccountTaskTerminal(t *testing.T) {
+	for _, status := range []string{sysin.AccountTaskStatusCompleted, sysin.AccountTaskStatusDead, sysin.AccountTaskStatusCancelled} {
+		if !accountTaskTerminal(status) {
+			t.Fatalf("status %q should be terminal", status)
+		}
+	}
+	for _, status := range []string{sysin.AccountTaskStatusPending, sysin.AccountTaskStatusProcessing, sysin.AccountTaskStatusFailedRetry} {
+		if accountTaskTerminal(status) {
+			t.Fatalf("status %q should not be terminal", status)
+		}
+	}
+}

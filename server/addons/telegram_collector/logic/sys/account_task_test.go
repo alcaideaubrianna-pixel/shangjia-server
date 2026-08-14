@@ -91,6 +91,30 @@ func TestAccountTaskPersistenceIntegration(t *testing.T) {
 		string(completedMediaTask.Media.SourceFileReference) != string(media.SourceFileReference) {
 		t.Fatalf("completed media task=%+v err=%v", completedMediaTask, err)
 	}
+	reusedMediaTask, err := service.SubmitAndWait(ctx, mediaSubmit, time.Millisecond)
+	if err != nil || reusedMediaTask.Status != sysin.AccountTaskStatusCompleted ||
+		reusedMediaTask.MediaResult.AttachmentID != mediaResult.AttachmentID {
+		t.Fatalf("reused completed media task=%+v err=%v", reusedMediaTask, err)
+	}
+	_, err = dao.TgCollectorAccountTask.Ctx(ctx).WherePri(mediaTaskID).Data(g.Map{
+		columns.Status: sysin.AccountTaskStatusDead, columns.AttemptCount: 2,
+		columns.LeaseOwner: "expired-owner", columns.LeaseEpoch: seed, columns.LeaseUntil: time.Now(),
+		columns.ErrorMessage: "download failed", columns.ResultErrorCode: "download_failed",
+	}).Update()
+	if err != nil {
+		t.Fatalf("prepare dead media task: %v", err)
+	}
+	revivedMediaTaskID, err := service.Submit(ctx, mediaSubmit)
+	if err != nil || revivedMediaTaskID != mediaTaskID {
+		t.Fatalf("revive media task id=%d want=%d err=%v", revivedMediaTaskID, mediaTaskID, err)
+	}
+	revivedMediaTask, err := service.Get(ctx, mediaTaskID)
+	if err != nil || revivedMediaTask.Status != sysin.AccountTaskStatusPending || revivedMediaTask.AttemptCount != 0 ||
+		revivedMediaTask.LeaseOwner != "" || revivedMediaTask.LeaseEpoch != 0 || revivedMediaTask.LeaseUntil != nil ||
+		revivedMediaTask.ErrorMessage != "" || revivedMediaTask.MediaResult.AttachmentID != 0 ||
+		revivedMediaTask.MediaResult.ErrorCode != "" {
+		t.Fatalf("revived media task=%+v err=%v", revivedMediaTask, err)
+	}
 
 	recoverySubmit := &sysin.AccountTaskSubmit{
 		TenantID: seed, AccountID: seed, TaskType: sysin.AccountTaskTypeHistoryPage,

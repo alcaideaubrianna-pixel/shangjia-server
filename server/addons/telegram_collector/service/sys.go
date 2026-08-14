@@ -30,7 +30,9 @@ type DeliveryHandler interface {
 
 type IAccountTasks interface {
 	Submit(ctx context.Context, in *sysin.AccountTaskSubmit) (int64, error)
+	SubmitAndWait(ctx context.Context, in *sysin.AccountTaskSubmit, pollInterval time.Duration) (*sysin.AccountTask, error)
 	Get(ctx context.Context, taskID int64) (*sysin.AccountTask, error)
+	WaitTerminal(ctx context.Context, taskID int64, pollInterval time.Duration) (*sysin.AccountTask, error)
 	Claim(ctx context.Context, lease *sysin.AccountLease, limit int, ttl time.Duration) ([]*sysin.AccountTask, error)
 	Complete(ctx context.Context, taskID int64, lease *sysin.AccountLease, result *sysin.AccountMediaDownloadResult) error
 	Fail(ctx context.Context, in *sysin.AccountTaskFailure) error
