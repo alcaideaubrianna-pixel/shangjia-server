@@ -1605,7 +1605,8 @@ func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64,
 		if ackErr != nil {
 			g.Log().Warningf(ctx, "发送资料接收反馈失败 sessionId:%d groupId:%s err:%+v", session.Id, msg.MediaGroupID, ackErr)
 		} else if acknowledged {
-			if ackErr = s.sendMessageOnly(ctx, botId, chatId, "已收到，正在处理，请稍候..."); ackErr != nil {
+			ackText := fmt.Sprintf("已收到，正在处理，请稍候...\n处理编号：PF-%d", session.Id)
+			if ackErr = s.sendMessageOnly(ctx, botId, chatId, ackText); ackErr != nil {
 				g.Log().Warningf(ctx, "发送资料处理中反馈失败 sessionId:%d groupId:%s err:%+v", session.Id, msg.MediaGroupID, ackErr)
 			}
 		}
