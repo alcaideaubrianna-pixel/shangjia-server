@@ -402,7 +402,7 @@ xiaohuiji_tg_media_group_waiting
 
 ### 5.4 SQL Query Receiver
 
-Collector 直接连接 Railway PostgreSQL，按 15～30 秒执行只读聚合 SQL，避免额外维护 `xiaohuiji-observer` 服务。采集内容包括：
+Collector 直接连接 Railway PostgreSQL，按 15～60 秒执行只读聚合 SQL，避免额外维护 `xiaohuiji-observer` 服务。采集内容包括：
 
 - 采集事件按状态、来源、账号的数量和最老时间。
 - 采集媒体按缓存状态、媒体类型的数量和最老时间。
@@ -413,6 +413,10 @@ Collector 直接连接 Railway PostgreSQL，按 15～30 秒执行只读聚合 SQ
 - 账号在线状态、最后心跳、租约超时。
 - Scheduler 最近心跳和最近调度时间。
 - 失败错误分类 Top N。
+- PostgreSQL checkpoint 次数、写入/同步耗时和后台刷盘缓冲区。
+- PostgreSQL WAL records、FPI 和字节数。
+- 当前数据库提交、回滚、临时文件、临时字节和死锁累计值。
+- Top 50 高频写入表、更新次数、删除次数和死元组数量。
 
 SQL 必须：
 
@@ -488,6 +492,9 @@ PostgreSQL：
 - 锁等待、长事务、死锁。
 - 查询失败率和事务回滚。
 - 关键业务表增长量。
+- `xiaohuiji.postgres.checkpoint_write_time_ms_total` 与 `xiaohuiji.postgres.checkpoint_sync_time_ms_total` 持续增长时，表示刷盘压力上升。
+- `xiaohuiji.postgres.wal_bytes_total` 增长过快时，结合 `xiaohuiji.postgres.table_updates_total` 定位高频写表。
+- `xiaohuiji.postgres.table_dead_tuples` 持续增长时，检查 autovacuum 和重复更新。
 
 Redis：
 

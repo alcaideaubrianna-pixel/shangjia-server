@@ -408,6 +408,129 @@ receivers:
             value_column: error_count
             value_type: int
             attribute_columns: [error_type, media_type]
+      - sql: |
+          SELECT checkpoints_timed::bigint AS checkpoints_timed,
+                 checkpoints_req::bigint AS checkpoints_requested,
+                 checkpoint_write_time::double precision AS checkpoint_write_time_ms,
+                 checkpoint_sync_time::double precision AS checkpoint_sync_time_ms,
+                 buffers_checkpoint::bigint AS buffers_checkpoint,
+                 buffers_backend::bigint AS buffers_backend,
+                 maxwritten_clean::bigint AS maxwritten_clean
+          FROM pg_stat_bgwriter
+        metrics:
+          - metric_name: xiaohuiji.postgres.checkpoints_timed_total
+            value_column: checkpoints_timed
+            value_type: int
+          - metric_name: xiaohuiji.postgres.checkpoints_requested_total
+            value_column: checkpoints_requested
+            value_type: int
+          - metric_name: xiaohuiji.postgres.checkpoint_write_time_ms_total
+            value_column: checkpoint_write_time_ms
+            value_type: double
+          - metric_name: xiaohuiji.postgres.checkpoint_sync_time_ms_total
+            value_column: checkpoint_sync_time_ms
+            value_type: double
+          - metric_name: xiaohuiji.postgres.buffers_checkpoint_total
+            value_column: buffers_checkpoint
+            value_type: int
+          - metric_name: xiaohuiji.postgres.buffers_backend_total
+            value_column: buffers_backend
+            value_type: int
+          - metric_name: xiaohuiji.postgres.maxwritten_clean_total
+            value_column: maxwritten_clean
+            value_type: int
+      - sql: |
+          SELECT wal_records::bigint AS wal_records,
+                 wal_fpi::bigint AS wal_fpi,
+                 wal_bytes::double precision AS wal_bytes
+          FROM pg_stat_wal
+        metrics:
+          - metric_name: xiaohuiji.postgres.wal_records_total
+            value_column: wal_records
+            value_type: int
+          - metric_name: xiaohuiji.postgres.wal_fpi_total
+            value_column: wal_fpi
+            value_type: int
+          - metric_name: xiaohuiji.postgres.wal_bytes_total
+            value_column: wal_bytes
+            value_type: double
+      - sql: |
+          SELECT datname,
+                 xact_commit::bigint AS commits,
+                 xact_rollback::bigint AS rollbacks,
+                 blks_read::bigint AS blocks_read,
+                 blks_hit::bigint AS blocks_hit,
+                 temp_files::bigint AS temp_files,
+                 temp_bytes::double precision AS temp_bytes,
+                 deadlocks::bigint AS deadlocks
+          FROM pg_stat_database
+          WHERE datname = current_database()
+        metrics:
+          - metric_name: xiaohuiji.postgres.commits_total
+            value_column: commits
+            value_type: int
+            attribute_columns: [datname]
+          - metric_name: xiaohuiji.postgres.rollbacks_total
+            value_column: rollbacks
+            value_type: int
+            attribute_columns: [datname]
+          - metric_name: xiaohuiji.postgres.blocks_read_total
+            value_column: blocks_read
+            value_type: int
+            attribute_columns: [datname]
+          - metric_name: xiaohuiji.postgres.blocks_hit_total
+            value_column: blocks_hit
+            value_type: int
+            attribute_columns: [datname]
+          - metric_name: xiaohuiji.postgres.temp_files_total
+            value_column: temp_files
+            value_type: int
+            attribute_columns: [datname]
+          - metric_name: xiaohuiji.postgres.temp_bytes_total
+            value_column: temp_bytes
+            value_type: double
+            attribute_columns: [datname]
+          - metric_name: xiaohuiji.postgres.deadlocks_total
+            value_column: deadlocks
+            value_type: int
+            attribute_columns: [datname]
+      - sql: |
+          SELECT relname,
+                 n_tup_ins::bigint AS inserts,
+                 n_tup_upd::bigint AS updates,
+                 n_tup_del::bigint AS deletes,
+                 n_dead_tup::bigint AS dead_tuples,
+                 seq_scan::bigint AS sequential_scans,
+                 idx_scan::bigint AS index_scans
+          FROM pg_stat_user_tables
+          WHERE n_tup_ins + n_tup_upd + n_tup_del > 0
+          ORDER BY n_tup_upd + n_tup_ins + n_tup_del DESC
+          LIMIT 50
+        metrics:
+          - metric_name: xiaohuiji.postgres.table_inserts_total
+            value_column: inserts
+            value_type: int
+            attribute_columns: [relname]
+          - metric_name: xiaohuiji.postgres.table_updates_total
+            value_column: updates
+            value_type: int
+            attribute_columns: [relname]
+          - metric_name: xiaohuiji.postgres.table_deletes_total
+            value_column: deletes
+            value_type: int
+            attribute_columns: [relname]
+          - metric_name: xiaohuiji.postgres.table_dead_tuples
+            value_column: dead_tuples
+            value_type: int
+            attribute_columns: [relname]
+          - metric_name: xiaohuiji.postgres.table_sequential_scans_total
+            value_column: sequential_scans
+            value_type: int
+            attribute_columns: [relname]
+          - metric_name: xiaohuiji.postgres.table_index_scans_total
+            value_column: index_scans
+            value_type: int
+            attribute_columns: [relname]
 
 processors:
   memory_limiter:
