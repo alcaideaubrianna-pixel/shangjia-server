@@ -42,7 +42,9 @@ func (s *sSysPublish) AIOpsRepublishProfiles(ctx context.Context, in *sysin.Prof
 }
 
 func collectProfileMediaComplete(ctx context.Context, profileId int64) (bool, error) {
-	row, err := g.DB().Model("hg_youban_publish_collect_dispatch d").Safe().Ctx(ctx).
+	// collect_dispatch has no deleted_at column. Safe() would append a
+	// non-existent d.deleted_at predicate when the table is aliased.
+	row, err := g.DB().Model("hg_youban_publish_collect_dispatch d").Ctx(ctx).
 		Fields("MAX(e.media_count) AS expected_media,COUNT(DISTINCT CASE WHEN m.purpose='display' THEN m.id END) AS display_media").
 		InnerJoin("hg_youban_publish_collect_event e", "e.id=d.event_id").
 		LeftJoin("hg_youban_publish_media m", "m.profile_id=d.profile_id AND m.deleted_at IS NULL").
