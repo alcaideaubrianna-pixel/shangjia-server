@@ -60,9 +60,101 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Conte
 		return nil, h.publish.handleMessagePushInlineAccountTask(ctx, client, task)
 	case collectorin.AccountTaskTypeMessageReconcile:
 		return nil, h.publish.handleMessageReconcileAccountTask(ctx, client, task)
+	case collectorin.AccountTaskTypeMessageMediaFallback:
+		return nil, h.publish.handleMessageMediaFallbackAccountTask(ctx, client, task)
 	default:
 		return nil, gerror.Newf("不支持的Telegram账号任务类型：%s", task.TaskType)
 	}
+}
+
+func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
+	const prefix = "message-media-fallback:"
+	parts := strings.Split(strings.TrimPrefix(task.TaskKey, prefix), ":")
+	if len(parts) != 2 || !strings.HasPrefix(task.TaskKey, prefix) {
+		return gerror.New("媒体降级发送账号任务参数无效")
+	}
+	jobID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || jobID <= 0 || (parts[1] != "display" && parts[1] != "verify") {
+		return gerror.New("媒体降级发送账号任务参数无效")
+	}
+	job, err := s.telegramJobById(ctx, jobID)
+	if err != nil || job.Status != "sending" {
+		return err
+	}
+	channel, err := s.messagePushChannelFromJob(ctx, job)
+	if err != nil {
+		return err
+	}
+	if task.AccountID != channel.TgAccountId {
+		return gerror.New("媒体降级发送账号任务与目标频道账号不一致")
+	}
+	media, err := s.telegramJobMedia(ctx, job, parts[1])
+	if err != nil {
+		return err
+	}
+	caption := ""
+	if parts[1] == "display" {
+		caption, err = s.telegramJobCaption(ctx, job)
+		if err != nil {
+			return err
+		}
+	}
+	caption = telegramCaptionWithJobMarker(caption, job.Id, parts[1])
+	peer, err := messagePushInputPeer(channel)
+	if err != nil {
+		return err
+	}
+	messages, err := sendMessageTemplateWithTgClient(ctx, client, peer, caption, media, nil, task.AccountID, "")
+	if err != nil {
+		return gerror.Wrap(err, "协议号媒体降级发送失败")
+	}
+	for _, message := range messages {
+		if message != nil {
+			message.Purpose = parts[1]
+		}
+	}
+	if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
+		return err
+	}
+	if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {
+		return err
+	}
+	if parts[1] == "display" {
+		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplayConfirmed); err != nil {
+			return err
+		}
+		verifyMedia, err := s.telegramJobMedia(ctx, job, "verify")
+		if err != nil {
+			return err
+		}
+		if len(verifyMedia) == 0 {
+			return s.completeTelegramJob(ctx, job)
+		}
+		verifyCaption := telegramCaptionWithJobMarker("", job.Id, "verify")
+		verifyMessages, err := sendMessageTemplateWithTgClient(ctx, client, peer, verifyCaption, verifyMedia, nil, task.AccountID, "")
+		if err != nil {
+			return gerror.Wrap(err, "协议号验证媒体降级发送失败")
+		}
+		for _, message := range verifyMessages {
+			if message != nil {
+				message.Purpose = "verify"
+			}
+		}
+		if err = s.saveTelegramSentMessages(ctx, job, verifyMessages); err != nil {
+			return err
+		}
+		if err = s.updateTelegramMediaFileIds(ctx, verifyMessages); err != nil {
+			return err
+		}
+		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifyConfirmed); err != nil {
+			return err
+		}
+		return s.completeTelegramJob(ctx, job)
+	}
+	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifyConfirmed); err != nil {
+		return err
+	}
+	return s.completeTelegramJob(ctx, job)
 }
 
 func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {

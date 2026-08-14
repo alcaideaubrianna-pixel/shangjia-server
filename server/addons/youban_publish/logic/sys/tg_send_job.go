@@ -15,12 +15,15 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"golang.org/x/sync/errgroup"
 
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 var (
-	errTelegramJobSuperseded     = errors.New("TG推送任务已废弃")
-	errTelegramDeliveryUncertain = errors.New("Telegram发送结果待对账")
+	errTelegramJobSuperseded       = errors.New("TG推送任务已废弃")
+	errTelegramDeliveryUncertain   = errors.New("Telegram发送结果待对账")
+	errTelegramMediaFallbackQueued = errors.New("Telegram媒体降级任务已提交")
 )
 
 func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
@@ -269,6 +272,9 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			messages, err = s.sendTelegramJobMediaByAccount(ctx, job, "display", displayCaption, displayMedia, err)
 		}
 		if err != nil {
+			if errors.Is(err, errTelegramMediaFallbackQueued) {
+				return nil
+			}
 			if !isTelegramMediaSizeLimitError(err) {
 				logTelegramBotMediaSendFailure(ctx, job, "展示", displayMedia, err)
 			}
@@ -303,6 +309,9 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		verifyMessages, err = s.sendTelegramJobMediaByAccount(ctx, job, "verify", verifyCaption, verifyMedia, err)
 	}
 	if err != nil {
+		if errors.Is(err, errTelegramMediaFallbackQueued) {
+			return nil
+		}
 		if !isTelegramMediaSizeLimitError(err) {
 			logTelegramBotMediaSendFailure(ctx, job, "验证", verifyMedia, err)
 		}
@@ -419,16 +428,17 @@ func (s *sSysPublish) sendTelegramJobMediaByAccount(ctx context.Context, job tel
 		"jobId": job.Id, "channelId": job.ChannelId, "tgAccountId": channel.TgAccountId,
 		"purpose": purpose, "mediaCount": len(media), "media": telegramMediaDebugSummary(media), "reason": botErr.Error(),
 	})
-	messages, err := s.sendMessageTemplateByTgAccount(ctx, channel.TgAccountId, channel, caption, media, "")
+	_, err = collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: job.TenantId, AccountID: channel.TgAccountId,
+		TaskType: collectorin.AccountTaskTypeMessageMediaFallback,
+		TaskKey:  fmt.Sprintf("message-media-fallback:%d:%s", job.Id, purpose),
+		Priority: collectorin.EventPriorityUrgent, MaxAttempts: 5,
+	})
 	if err != nil {
-		return nil, gerror.Wrap(err, "协议号整组发送媒体失败")
+		return nil, gerror.Wrap(err, "提交协议号媒体降级任务失败")
 	}
-	for _, message := range messages {
-		if message != nil {
-			message.Purpose = purpose
-		}
-	}
-	return messages, nil
+	s.appendTelegramJobLog(ctx, job, "account_fallback", "queued", "Bot媒体组超过请求大小限制，已提交账号服务常驻客户端发送")
+	return nil, errTelegramMediaFallbackQueued
 }
 
 func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJobRecord, err error) error {

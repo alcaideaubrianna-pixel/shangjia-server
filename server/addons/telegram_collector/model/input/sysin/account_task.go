@@ -17,6 +17,7 @@ const (
 	AccountTaskTypeDialogCacheRefresh        = "dialog_cache_refresh"
 	AccountTaskTypeMessagePushInline         = "message_push_inline"
 	AccountTaskTypeMessageReconcile          = "message_reconcile"
+	AccountTaskTypeMessageMediaFallback      = "message_media_fallback"
 )
 
 type AccountTaskSubmit struct {

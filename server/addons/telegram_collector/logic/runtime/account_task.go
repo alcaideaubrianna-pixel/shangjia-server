@@ -165,6 +165,8 @@ func accountTaskTimeout(taskType string) time.Duration {
 		return 2 * time.Minute
 	case sysin.AccountTaskTypeMessageReconcile:
 		return 2 * time.Minute
+	case sysin.AccountTaskTypeMessageMediaFallback:
+		return 5 * time.Minute
 	default:
 		return 5 * time.Minute
 	}

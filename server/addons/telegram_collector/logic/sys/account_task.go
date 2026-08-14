@@ -56,7 +56,7 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 	if err != nil {
 		return 0, gerror.Wrap(err, "保存Telegram账号任务失败")
 	}
-	if in.TaskType == sysin.AccountTaskTypeMediaDownload || in.TaskType == sysin.AccountTaskTypeMessageReconcile {
+	if in.TaskType == sysin.AccountTaskTypeMediaDownload || in.TaskType == sysin.AccountTaskTypeMessageReconcile || in.TaskType == sysin.AccountTaskTypeMessageMediaFallback {
 		terminalStatuses := []string{sysin.AccountTaskStatusDead, sysin.AccountTaskStatusCancelled}
 		if in.TaskType == sysin.AccountTaskTypeMessageReconcile {
 			terminalStatuses = append(terminalStatuses, sysin.AccountTaskStatusCompleted)
@@ -116,6 +116,7 @@ func validateAccountTaskSubmit(in *sysin.AccountTaskSubmit) error {
 	case sysin.AccountTaskTypeDialogCacheRefresh:
 	case sysin.AccountTaskTypeMessagePushInline:
 	case sysin.AccountTaskTypeMessageReconcile:
+	case sysin.AccountTaskTypeMessageMediaFallback:
 	default:
 		return gerror.Newf("不支持的Telegram账号任务类型：%s", in.TaskType)
 	}
