@@ -14,6 +14,21 @@ import (
 )
 
 const telegramChannelDispatchLeaseTTL = 15 * time.Second
+const defaultTelegramChannelPreparationDepth = 4
+
+func telegramChannelPreparationDepth(ctx context.Context) int {
+	return normalizeTelegramChannelPreparationDepth(g.Cfg().MustGet(ctx, "youbanPublish.queue.channelPreparationDepth", defaultTelegramChannelPreparationDepth).Int())
+}
+
+func normalizeTelegramChannelPreparationDepth(depth int) int {
+	if depth < 1 {
+		return 1
+	}
+	if depth > 16 {
+		return 16
+	}
+	return depth
+}
 
 func (s *sSysPublish) telegramChannelHasEarlierActiveJob(ctx context.Context, job telegramJobRecord) (bool, error) {
 	if err := ctx.Err(); err != nil {
@@ -140,11 +155,11 @@ func (s *sSysPublish) shouldEnqueueTelegramChannelJob(ctx context.Context, job t
 			status = 'sending' OR
 			(status IN ('pending', 'failed_retry', 'unknown') AND dispatch_status IN (?, ?))
 		)`, tgDispatchStatusQueued, tgDispatchStatusProcessing).
-		Fields("id").Limit(1).One()
+		Fields("id").Limit(telegramChannelPreparationDepth(ctx)).Count()
 	if err != nil {
 		return false, gerror.Wrap(err, "检查频道活动TG任务失败")
 	}
-	return active.IsEmpty(), nil
+	return active < telegramChannelPreparationDepth(ctx), nil
 }
 
 func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, job telegramJobRecord) error {

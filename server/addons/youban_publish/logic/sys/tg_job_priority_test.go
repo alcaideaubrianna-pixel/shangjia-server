@@ -58,3 +58,20 @@ func TestTelegramJobPriorityClassifiesPublishOperations(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeTelegramChannelPreparationDepth(t *testing.T) {
+	tests := []struct {
+		input int
+		want  int
+	}{
+		{input: 0, want: 1},
+		{input: 1, want: 1},
+		{input: 4, want: 4},
+		{input: 32, want: 16},
+	}
+	for _, test := range tests {
+		if got := normalizeTelegramChannelPreparationDepth(test.input); got != test.want {
+			t.Fatalf("normalizeTelegramChannelPreparationDepth(%d)=%d, want %d", test.input, got, test.want)
+		}
+	}
+}
