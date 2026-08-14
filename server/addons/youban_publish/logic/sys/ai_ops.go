@@ -45,7 +45,7 @@ func collectProfileMediaComplete(ctx context.Context, profileId int64) (bool, er
 	// collect_dispatch has no deleted_at column. Safe() would append a
 	// non-existent d.deleted_at predicate when the table is aliased.
 	row, err := g.DB().Model("hg_youban_publish_collect_dispatch d").Ctx(ctx).
-		Fields("MAX(e.media_count) AS expected_media,COUNT(DISTINCT m.id) AS profile_media").
+		Fields("COALESCE(MAX(CASE WHEN e.material_role='display' THEN e.media_count END),MAX(e.media_count)) AS expected_media,COUNT(DISTINCT m.id) AS profile_media").
 		InnerJoin("hg_youban_publish_collect_event e", "e.id=d.event_id").
 		LeftJoin("hg_youban_publish_media m", "m.profile_id=d.profile_id AND m.deleted_at IS NULL").
 		Where("d.profile_id", profileId).
