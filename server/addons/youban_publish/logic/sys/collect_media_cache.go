@@ -813,9 +813,29 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 	if err != nil {
 		return nil, gerror.Wrap(err, "提交账号媒体下载任务失败")
 	}
-	task, err := collectorservice.AccountTasks().Get(ctx, taskID)
-	if err != nil {
-		return nil, err
+	// Submission is asynchronous. Waiting for a single immediate status read
+	// used to abort the whole import batch whenever the account runtime had not
+	// claimed the task yet, causing an endless 3-second requeue loop.
+	var task *collectorin.AccountTask
+	for {
+		task, err = collectorservice.AccountTasks().Get(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		if task.Status == collectorin.AccountTaskStatusCompleted || task.Status == collectorin.AccountTaskStatusDead || task.Status == collectorin.AccountTaskStatusCancelled {
+			break
+		}
+		wait := time.Second
+		if task.NextRunAt != nil && time.Until(*task.NextRunAt) > wait {
+			wait = time.Until(*task.NextRunAt)
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, newCollectMediaFairnessRetryError("账号媒体下载任务等待执行", 3*time.Second)
+		case <-timer.C:
+		}
 	}
 	switch task.Status {
 	case collectorin.AccountTaskStatusCompleted:
@@ -836,11 +856,7 @@ func (s *sSysPublish) downloadTelegramMedia(ctx context.Context, tenantId int64,
 	case collectorin.AccountTaskStatusDead, collectorin.AccountTaskStatusCancelled:
 		return nil, gerror.New(firstNonEmpty(task.ErrorMessage, "账号媒体下载任务已终止"))
 	default:
-		delay := 3 * time.Second
-		if task.NextRunAt != nil && time.Until(*task.NextRunAt) > delay {
-			delay = time.Until(*task.NextRunAt)
-		}
-		return nil, newCollectMediaFairnessRetryError("账号媒体下载任务等待执行", delay)
+		return nil, newCollectMediaFairnessRetryError("账号媒体下载任务等待执行", 3*time.Second)
 	}
 }
 
