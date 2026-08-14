@@ -133,18 +133,6 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 			fileURL := strings.TrimSpace(item.FileUrl)
 			storagePath := strings.TrimSpace(item.StoragePath)
 			assetHash := mediaAssetHash(strings.TrimSpace(item.AssetHash), storagePath, fileURL)
-			assets, assetErr := processMediaAssetMetadata(ctx, mediaType, storagePath, fileURL, item.PosterUrl, item.Name)
-			if assetErr != nil {
-				g.Log().Warning(ctx, "处理机器人资料媒体失败", g.Map{"profileId": profileId, "mediaType": mediaType, "path": storagePath, "err": assetErr})
-			}
-			perceptualHash := ""
-			posterURL := strings.TrimSpace(item.PosterUrl)
-			posterStoragePath := strings.TrimSpace(item.PosterStoragePath)
-			if assets != nil {
-				perceptualHash = assets.PerceptualHash
-				posterURL = firstNonEmpty(assets.PosterURL, posterURL)
-				posterStoragePath = firstNonEmpty(assets.PosterStoragePath, posterStoragePath)
-			}
 			data := g.Map{
 				"tenant_id":              tenantId,
 				"merchant_id":            tenantId,
@@ -159,8 +147,8 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 				"file_url":               fileURL,
 				"original_file_url":      fileURL,
 				"edited_file_url":        "",
-				"poster_url":             posterURL,
-				"poster_storage_path":    posterStoragePath,
+				"poster_url":             strings.TrimSpace(item.PosterUrl),
+				"poster_storage_path":    strings.TrimSpace(item.PosterStoragePath),
 				"tg_file_id":             strings.TrimSpace(item.TgFileId),
 				"tg_thumb_file_id":       strings.TrimSpace(item.TgThumbFileId),
 				"tg_cache_asset_hash":    assetHash,
@@ -170,7 +158,9 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 				"edited_storage_path":    "",
 				"mime_type":              "",
 				"md5":                    strings.TrimSpace(item.AssetHash),
-				"perceptual_hash":        perceptualHash,
+				"perceptual_hash":        "",
+				"processing_status":      mediaProcessingUploaded,
+				"processing_error":       "",
 				"edit_status":            mediaEditStatusRaw,
 				"size":                   0,
 				"sort_index":             sortIndex,
@@ -180,9 +170,12 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 				"created_at":             now,
 				"updated_at":             now,
 			}
-			_, err := s.saveMediaRecordAndIndex(ctx, data, "保存机器人资料媒体失败")
+			mediaId, err := s.saveMediaRecordAndIndex(ctx, data, "保存机器人资料媒体失败")
 			if err != nil {
 				return err
+			}
+			if err = s.enqueueMediaProcess(ctx, mediaId, 0); err != nil {
+				g.Log().Warning(ctx, "机器人资料媒体已落库但进入处理队列失败", g.Map{"profileId": profileId, "mediaId": mediaId, "err": err})
 			}
 		}
 		return nil
