@@ -153,6 +153,8 @@ func accountTaskTimeout(taskType string) time.Duration {
 	switch taskType {
 	case sysin.AccountTaskTypeHistoryPage:
 		return 25 * time.Minute
+	case sysin.AccountTaskTypeMaterialImportHistoryPage:
+		return 25 * time.Minute
 	case sysin.AccountTaskTypeMediaDownload:
 		return 10 * time.Minute
 	case sysin.AccountTaskTypeUsernameResolveDiagnostic:

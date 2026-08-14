@@ -12,6 +12,7 @@ import (
 func TestPublishAccountTaskHandlersRegistered(t *testing.T) {
 	for _, taskType := range []string{
 		collectorin.AccountTaskTypeHistoryPage,
+		collectorin.AccountTaskTypeMaterialImportHistoryPage,
 		collectorin.AccountTaskTypeDialogCacheRefresh,
 	} {
 		if collectorservice.AccountTaskHandlerFor(taskType) == nil {

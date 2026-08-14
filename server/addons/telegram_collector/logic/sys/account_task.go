@@ -73,6 +73,9 @@ func validateAccountTaskSubmit(in *sysin.AccountTaskSubmit) error {
 		if in.HistoryTaskID <= 0 {
 			return gerror.New("Telegram历史采集任务ID无效")
 		}
+	case sysin.AccountTaskTypeMaterialImportHistoryPage:
+		// 资料导入任务通过 task key 携带导入任务 ID 和分页游标，
+		// 具体格式由资料导入模块校验；这里仅确认任务类型已注册支持。
 	case sysin.AccountTaskTypeMediaDownload:
 		if in.MediaOwnerAccountID <= 0 || in.Media == nil || strings.TrimSpace(in.Media.FileID) == "" {
 			return gerror.New("Telegram媒体下载任务参数不完整")
