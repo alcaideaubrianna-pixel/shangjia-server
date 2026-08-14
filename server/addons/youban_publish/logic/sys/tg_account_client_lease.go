@@ -11,6 +11,7 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
+	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/internal/library/hgrds/lock"
 )
 
@@ -145,11 +146,32 @@ func (s *sSysPublish) executeTelegramAccountOperation(ctx context.Context, tgAcc
 	if tgAccountId <= 0 || run == nil {
 		return gerror.New("TG账号操作参数无效")
 	}
-	usedRuntime, err := s.executeAccountCollectOperation(ctx, tgAccountId, timeout, run)
-	if err != nil || usedRuntime {
-		return err
+	// Account workers are refreshed asynchronously after login or source
+	// changes. Give the shared runtime a chance to create the worker before
+	// falling back to a standalone client, otherwise a just-logged-in account
+	// can race its own collector and hit the lease timeout.
+	for attempt := 0; attempt < 3; attempt++ {
+		usedRuntime, err := s.executeAccountCollectOperation(ctx, tgAccountId, timeout, run)
+		if err != nil || usedRuntime {
+			return err
+		}
+		collectorservice.AccountRuntime().Refresh()
+		if err := waitTelegramAccountRuntimeRefresh(ctx, 250*time.Millisecond); err != nil {
+			return err
+		}
 	}
 	return s.executeTelegramAccountStandaloneOperation(ctx, tgAccountId, timeout, run)
+}
+
+func waitTelegramAccountRuntimeRefresh(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (s *sSysPublish) executeTelegramAccountStandaloneOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) error {
