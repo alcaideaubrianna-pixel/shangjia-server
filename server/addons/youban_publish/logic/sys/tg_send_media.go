@@ -36,7 +36,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 	if len(media) == 1 {
 		return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0])
 	}
-	if telegramMediaSetHasCopyRef(media) {
+	if telegramMediaSetHasCopyRef(media) && !telegramMediaSetRequiresUpload(media) {
 		if strings.TrimSpace(caption) == "" {
 			return s.copyTelegramMediaSet(ctx, bot, chatId, purpose, caption, media)
 		}
@@ -100,6 +100,15 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		allMessages = append(allMessages, telegramSentMessagesFromGroup(msgs, purpose, chunk)...)
 	}
 	return allMessages, nil
+}
+
+func telegramMediaSetRequiresUpload(media []*telegramMediaItem) bool {
+	for _, item := range media {
+		if telegramMediaRequiresSanitizedUpload(item) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateTelegramMediaPurpose(purpose string, media []*telegramMediaItem) error {
