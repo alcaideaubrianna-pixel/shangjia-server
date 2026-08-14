@@ -19,6 +19,7 @@ import (
 )
 
 const accountRuntimeSyncInterval = 15 * time.Second
+const accountRuntimeOperationConcurrency = 4
 
 type accountRuntime struct {
 	mu      sync.Mutex
@@ -29,14 +30,14 @@ type accountRuntime struct {
 }
 
 type accountWorker struct {
-	bindingMu  sync.RWMutex
-	binding    *sysin.AccountRuntimeBinding
-	session    collectorservice.AccountRuntimeSession
-	cancel     context.CancelFunc
-	done       chan struct{}
-	operations chan accountOperationTask
-	messages   chan accountMessageTask
-	gate       sync.RWMutex
+	bindingMu      sync.RWMutex
+	binding        *sysin.AccountRuntimeBinding
+	session        collectorservice.AccountRuntimeSession
+	cancel         context.CancelFunc
+	done           chan struct{}
+	operations     chan accountOperationTask
+	messages       chan accountMessageTask
+	operationSlots chan struct{}
 }
 
 type accountOperationTask struct {
@@ -191,6 +192,7 @@ func (r *accountRuntime) sync(ctx context.Context) {
 		worker := &accountWorker{
 			binding: binding, session: session, cancel: cancel, done: make(chan struct{}),
 			operations: make(chan accountOperationTask, 256), messages: make(chan accountMessageTask, 4096),
+			operationSlots: make(chan struct{}, accountRuntimeOperationConcurrency),
 		}
 		r.workers[binding.AccountID] = worker
 		workerGauge, _ := accountRuntimeMeter.Int64UpDownCounter("telegram_account_runtime_workers")
@@ -291,7 +293,7 @@ func (w *accountWorker) run(ctx context.Context) {
 		w.session.StartAccountRuntime(runCtx, client)
 		go w.runAccountMessageLoop(runCtx)
 		go w.runOperations(runCtx, client)
-		go RunAccountTaskLoop(runCtx, client, lease, w.gate.RLocker())
+		go RunAccountTaskLoop(runCtx, client, lease, nil)
 		<-runCtx.Done()
 		return runCtx.Err()
 	})
@@ -329,17 +331,23 @@ func (w *accountWorker) runOperations(ctx context.Context, client *telegram.Clie
 		case <-ctx.Done():
 			return
 		case task := <-w.operations:
-			w.gate.Lock()
-			runCtx := ctx
-			if task.ctx != nil {
-				runCtx = task.ctx
-			}
-			err := task.run(runCtx, client)
-			w.gate.Unlock()
-			select {
-			case task.done <- err:
-			default:
-			}
+			go func(task accountOperationTask) {
+				select {
+				case w.operationSlots <- struct{}{}:
+				case <-ctx.Done():
+					return
+				}
+				defer func() { <-w.operationSlots }()
+				runCtx := ctx
+				if task.ctx != nil {
+					runCtx = task.ctx
+				}
+				err := task.run(runCtx, client)
+				select {
+				case task.done <- err:
+				default:
+				}
+			}(task)
 		}
 	}
 }

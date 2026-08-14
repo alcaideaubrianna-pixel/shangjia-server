@@ -46,6 +46,14 @@ func (s *sSysPublish) ExecuteMaterialImportTask(ctx context.Context, taskId int6
 		if isTelegramPermanentAccountAuthError(err) {
 			s.handleTgAccountPermanentAuthError(context.Background(), task.TgAccountId, task.UpdatedBy, telegramPermanentAccountAuthMessage(err), err)
 		}
+		if isTelegramAccountBusyError(err) {
+			const retryDelaySeconds = 15
+			message := fmt.Sprintf("TG账号连接正在使用，任务将在%d秒后自动重试 tgAccountId:%d", retryDelaySeconds, task.TgAccountId)
+			if waitErr := s.materialImportMarkWaiting(ctx, task.Id, task.UpdatedBy, retryDelaySeconds, message, task.Stage); waitErr != nil {
+				return waitErr
+			}
+			return s.enqueueMaterialImportTask(ctx, task.Id, retryDelaySeconds*time.Second)
+		}
 		if pause, ok := err.(*collectHistoryPauseError); ok {
 			delay := int(pause.delay.Seconds())
 			if delay <= 0 {
