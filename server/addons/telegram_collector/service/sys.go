@@ -79,6 +79,7 @@ type IAccountRuntime interface {
 	Refresh()
 	Restart(accountID int64)
 	Execute(ctx context.Context, accountID int64, timeout time.Duration, operation AccountOperation) (bool, error)
+	ExecutePriority(ctx context.Context, accountID int64, timeout time.Duration, operation AccountOperation) (bool, error)
 }
 
 type BotContext struct {

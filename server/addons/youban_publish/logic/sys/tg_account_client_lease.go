@@ -163,6 +163,23 @@ func (s *sSysPublish) executeTelegramAccountOperation(ctx context.Context, tgAcc
 	return s.executeTelegramAccountStandaloneOperation(ctx, tgAccountId, timeout, run)
 }
 
+func (s *sSysPublish) executeTelegramAccountPriorityOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) error {
+	if tgAccountId <= 0 || run == nil {
+		return gerror.New("TG账号操作参数无效")
+	}
+	for attempt := 0; attempt < 3; attempt++ {
+		usedRuntime, err := collectorservice.AccountRuntime().ExecutePriority(ctx, tgAccountId, timeout, collectorservice.AccountOperation(run))
+		if err != nil || usedRuntime {
+			return err
+		}
+		collectorservice.AccountRuntime().Refresh()
+		if err := waitTelegramAccountRuntimeRefresh(ctx, 250*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	return gerror.New("TG账号常驻客户端尚未就绪，请稍后重试")
+}
+
 func waitTelegramAccountRuntimeRefresh(ctx context.Context, delay time.Duration) error {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()

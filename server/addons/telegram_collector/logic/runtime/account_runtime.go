@@ -20,6 +20,7 @@ import (
 
 const accountRuntimeSyncInterval = 15 * time.Second
 const accountRuntimeOperationConcurrency = 4
+const accountRuntimePriorityOperationConcurrency = 1
 
 type accountRuntime struct {
 	mu      sync.Mutex
@@ -30,14 +31,16 @@ type accountRuntime struct {
 }
 
 type accountWorker struct {
-	bindingMu      sync.RWMutex
-	binding        *sysin.AccountRuntimeBinding
-	session        collectorservice.AccountRuntimeSession
-	cancel         context.CancelFunc
-	done           chan struct{}
-	operations     chan accountOperationTask
-	messages       chan accountMessageTask
-	operationSlots chan struct{}
+	bindingMu              sync.RWMutex
+	binding                *sysin.AccountRuntimeBinding
+	session                collectorservice.AccountRuntimeSession
+	cancel                 context.CancelFunc
+	done                   chan struct{}
+	operations             chan accountOperationTask
+	priorityOperations     chan accountOperationTask
+	messages               chan accountMessageTask
+	operationSlots         chan struct{}
+	priorityOperationSlots chan struct{}
 }
 
 type accountOperationTask struct {
@@ -191,8 +194,8 @@ func (r *accountRuntime) sync(ctx context.Context) {
 		workerCtx, cancel := context.WithCancel(ctx)
 		worker := &accountWorker{
 			binding: binding, session: session, cancel: cancel, done: make(chan struct{}),
-			operations: make(chan accountOperationTask, 256), messages: make(chan accountMessageTask, 4096),
-			operationSlots: make(chan struct{}, accountRuntimeOperationConcurrency),
+			operations: make(chan accountOperationTask, 256), priorityOperations: make(chan accountOperationTask, 64), messages: make(chan accountMessageTask, 4096),
+			operationSlots: make(chan struct{}, accountRuntimeOperationConcurrency), priorityOperationSlots: make(chan struct{}, accountRuntimePriorityOperationConcurrency),
 		}
 		r.workers[binding.AccountID] = worker
 		workerGauge, _ := accountRuntimeMeter.Int64UpDownCounter("telegram_account_runtime_workers")
@@ -218,6 +221,14 @@ func (r *accountRuntime) stopAll() {
 }
 
 func (r *accountRuntime) Execute(ctx context.Context, accountID int64, timeout time.Duration, operation collectorservice.AccountOperation) (bool, error) {
+	return r.execute(ctx, accountID, timeout, operation, false)
+}
+
+func (r *accountRuntime) ExecutePriority(ctx context.Context, accountID int64, timeout time.Duration, operation collectorservice.AccountOperation) (bool, error) {
+	return r.execute(ctx, accountID, timeout, operation, true)
+}
+
+func (r *accountRuntime) execute(ctx context.Context, accountID int64, timeout time.Duration, operation collectorservice.AccountOperation, priority bool) (bool, error) {
 	if accountID <= 0 || operation == nil {
 		return false, nil
 	}
@@ -233,8 +244,12 @@ func (r *accountRuntime) Execute(ctx context.Context, accountID int64, timeout t
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	task := accountOperationTask{ctx: runCtx, run: operation, done: make(chan error, 1)}
+	queue := worker.operations
+	if priority {
+		queue = worker.priorityOperations
+	}
 	select {
-	case worker.operations <- task:
+	case queue <- task:
 	case <-runCtx.Done():
 		return true, runCtx.Err()
 	}
@@ -293,12 +308,24 @@ func (w *accountWorker) run(ctx context.Context) {
 		w.session.StartAccountRuntime(runCtx, client)
 		go w.runAccountMessageLoop(runCtx)
 		go w.runOperations(runCtx, client)
+		go w.runPriorityOperations(runCtx, client)
 		go RunAccountTaskLoop(runCtx, client, lease, nil)
 		<-runCtx.Done()
 		return runCtx.Err()
 	})
 	if err != nil && ctx.Err() == nil {
 		w.session.HandleAccountRuntimeError(ctx, err)
+	}
+}
+
+func (w *accountWorker) runPriorityOperations(ctx context.Context, client *telegram.Client) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case task := <-w.priorityOperations:
+			w.runOperation(ctx, client, task, w.priorityOperationSlots)
+		}
 	}
 }
 
@@ -331,25 +358,29 @@ func (w *accountWorker) runOperations(ctx context.Context, client *telegram.Clie
 		case <-ctx.Done():
 			return
 		case task := <-w.operations:
-			go func(task accountOperationTask) {
-				select {
-				case w.operationSlots <- struct{}{}:
-				case <-ctx.Done():
-					return
-				}
-				defer func() { <-w.operationSlots }()
-				runCtx := ctx
-				if task.ctx != nil {
-					runCtx = task.ctx
-				}
-				err := task.run(runCtx, client)
-				select {
-				case task.done <- err:
-				default:
-				}
-			}(task)
+			w.runOperation(ctx, client, task, w.operationSlots)
 		}
 	}
+}
+
+func (w *accountWorker) runOperation(ctx context.Context, client *telegram.Client, task accountOperationTask, slots chan struct{}) {
+	go func() {
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
+		defer func() { <-slots }()
+		runCtx := ctx
+		if task.ctx != nil {
+			runCtx = task.ctx
+		}
+		err := task.run(runCtx, client)
+		select {
+		case task.done <- err:
+		default:
+		}
+	}()
 }
 
 func (w *accountWorker) stop() {

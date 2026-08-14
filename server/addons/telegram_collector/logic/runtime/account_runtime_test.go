@@ -47,6 +47,45 @@ func TestAccountRuntimeExecuteWithoutWorker(t *testing.T) {
 	}
 }
 
+func TestAccountRuntimePriorityOperationUsesReservedSlot(t *testing.T) {
+	workerCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	worker := &accountWorker{
+		done:                   make(chan struct{}),
+		operations:             make(chan accountOperationTask, 8),
+		priorityOperations:     make(chan accountOperationTask, 2),
+		operationSlots:         make(chan struct{}, accountRuntimeOperationConcurrency),
+		priorityOperationSlots: make(chan struct{}, accountRuntimePriorityOperationConcurrency),
+	}
+	runtime := &accountRuntime{refresh: make(chan struct{}, 1), workers: map[int64]*accountWorker{7: worker}}
+	go worker.runOperations(workerCtx, nil)
+	go worker.runPriorityOperations(workerCtx, nil)
+
+	release := make(chan struct{})
+	for index := 0; index < accountRuntimeOperationConcurrency; index++ {
+		go func() {
+			_, _ = runtime.Execute(context.Background(), 7, time.Second, func(context.Context, *telegram.Client) error {
+				<-release
+				return nil
+			})
+		}()
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(worker.operationSlots) < accountRuntimeOperationConcurrency && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(worker.operationSlots) != accountRuntimeOperationConcurrency {
+		close(release)
+		t.Fatal("normal operation slots were not saturated")
+	}
+
+	used, err := runtime.ExecutePriority(context.Background(), 7, time.Second, func(context.Context, *telegram.Client) error { return nil })
+	close(release)
+	if err != nil || !used {
+		t.Fatalf("priority operation used=%t err=%v", used, err)
+	}
+}
+
 func TestAccountMessageEventPreservesMediaGroupAndMetadata(t *testing.T) {
 	message := &tg.Message{
 		ID: 17, Date: 1786435200, Message: "资料正文",

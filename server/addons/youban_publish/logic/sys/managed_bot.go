@@ -91,7 +91,7 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 	}
 	var created *tg.User
 	var token string
-	err = s.executeTelegramAccountOperation(ctx, account.Id, 90*time.Second, func(clientCtx context.Context, client *telegram.Client) error {
+	err = s.executeTelegramAccountPriorityOperation(ctx, account.Id, 90*time.Second, func(clientCtx context.Context, client *telegram.Client) error {
 		manager, resolveErr := resolveManagedBotUser(clientCtx, client, managerUsername)
 		if resolveErr != nil {
 			return resolveErr
@@ -188,7 +188,7 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 
 func (s *sSysPublish) checkManagedBotUsername(ctx context.Context, account *sysin.TgAccountModel, username string) (available bool, err error) {
 	returnValue := false
-	err = s.executeTelegramAccountOperation(ctx, account.Id, 45*time.Second, func(clientCtx context.Context, client *telegram.Client) error {
+	err = s.executeTelegramAccountPriorityOperation(ctx, account.Id, 45*time.Second, func(clientCtx context.Context, client *telegram.Client) error {
 		returnValue, err = client.API().BotsCheckUsername(clientCtx, username)
 		return err
 	})
