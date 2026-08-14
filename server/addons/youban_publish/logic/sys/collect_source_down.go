@@ -9,10 +9,11 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
-	"hotgo/internal/consts"
 )
 
 const collectSourceDownMessage = "采集源一键下架"
+
+const collectSourceDownDeleteBatchSize = 200
 
 func (s *sSysPublish) CollectSourceDown(ctx context.Context, in *sysin.CollectSourceDownInp) (*sysin.CollectSourceDownModel, error) {
 	account, err := s.currentAccount(ctx)
@@ -57,9 +58,10 @@ func (s *sSysPublish) CollectSourceDown(ctx context.Context, in *sysin.CollectSo
 		return nil, err
 	}
 	if err = s.enqueueCollectSourceDown(ctx, collectSourceDownQueuePayload{
-		AccountId: account.Id,
-		SourceId:  in.Id,
-		TenantId:  account.TenantId,
+		AccountId:      account.Id,
+		DeleteProfiles: in.DeleteProfiles,
+		SourceId:       in.Id,
+		TenantId:       account.TenantId,
 	}, 0); err != nil {
 		return nil, gerror.Wrap(err, "投递采集源下架任务失败")
 	}
@@ -67,7 +69,7 @@ func (s *sSysPublish) CollectSourceDown(ctx context.Context, in *sysin.CollectSo
 	return res, nil
 }
 
-func (s *sSysPublish) ExecuteCollectSourceDown(ctx context.Context, sourceId int64, tenantId int64, accountId int64) (*sysin.CollectSourceDownModel, error) {
+func (s *sSysPublish) ExecuteCollectSourceDown(ctx context.Context, sourceId int64, tenantId int64, accountId int64, deleteProfiles bool) (*sysin.CollectSourceDownModel, error) {
 	profileIds, err := s.collectSourceProfileIds(ctx, sourceId, tenantId, accountId)
 	if err != nil {
 		return nil, err
@@ -86,11 +88,15 @@ func (s *sSysPublish) ExecuteCollectSourceDown(ctx context.Context, sourceId int
 	for _, job := range jobs {
 		if job.Status == "sent" || res.MessageCount > 0 {
 			if err = s.deleteTelegramMessageSet(ctx, job.telegramJobRecord(), collectSourceDownMessage); err != nil {
-				return nil, err
+				// A failed Telegram cleanup must not prevent local profiles from
+				// being taken offline. The message may already be deleted or the
+				// bot may lack permission; record it and continue the state update.
+				g.Log().Warningf(ctx, "采集源下架清理TG消息失败，继续下架资料 jobId:%d err:%v", job.Id, err)
 			}
 		}
 		if err = s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
-			return nil, err
+			g.Log().Warningf(ctx, "采集源下架废弃TG任务失败，继续下架资料 jobId:%d err:%v", job.Id, err)
+			continue
 		}
 		s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "down", "deleted", "采集源一键下架，目标频道消息已删除或任务已废弃")
 	}
@@ -99,6 +105,17 @@ func (s *sSysPublish) ExecuteCollectSourceDown(ctx context.Context, sourceId int
 	}
 	if err = s.finishCollectSourceDownDispatch(ctx, sourceId, profileIds, tenantId, accountId); err != nil {
 		return nil, err
+	}
+	if deleteProfiles {
+		for start := 0; start < len(profileIds); start += collectSourceDownDeleteBatchSize {
+			end := start + collectSourceDownDeleteBatchSize
+			if end > len(profileIds) {
+				end = len(profileIds)
+			}
+			if err = s.deleteProfiles(ctx, &sysin.ProfileDeleteInp{Ids: profileIds[start:end]}, tenantId, accountId); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return res, nil
 }
@@ -217,12 +234,7 @@ func (s *sSysPublish) collectSourcePendingDownJobs(ctx context.Context, taskIds 
 }
 
 func (s *sSysPublish) finishCollectSourceDownProfiles(ctx context.Context, profileIds []int64, tenantId int64) error {
-	for _, profileId := range uniqueIds(profileIds) {
-		if _, err := s.syncProfilePublishState(ctx, profileId, 2, consts.ContentVisibilityPrivate, nil); err != nil {
-			return err
-		}
-	}
-	if err := s.deactivateChannelProfiles(ctx, tenantId, profileIds); err != nil {
+	if err := s.setProfilesOffline(ctx, profileIds, tenantId); err != nil {
 		return err
 	}
 	return s.refreshProfileNoteIndexes(ctx, profileIds)

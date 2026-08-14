@@ -258,20 +258,7 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 		}
 		return &sysin.ProfileStatusModel{Message: "资料已提交上架"}, nil
 	}
-	for _, id := range ids {
-		if err = s.withProfileLifecycleLock(ctx, tenantId, id, func() error {
-			_, lockErr := s.syncProfilePublishState(ctx, id, in.Status, consts.ContentVisibilityPrivate, nil)
-			return lockErr
-		}); err != nil {
-			return nil, gerror.Wrap(err, "更新资料状态失败")
-		}
-	}
-	for _, id := range ids {
-		if err = s.syncProfileNoteIndex(ctx, id); err != nil {
-			return nil, err
-		}
-	}
-	if err = s.deactivateChannelProfiles(ctx, tenantId, ids); err != nil {
+	if err = s.setProfilesOffline(ctx, ids, tenantId); err != nil {
 		return nil, err
 	}
 	if err = s.enqueueProfileDownRun(ctx, tenantId, ids, 0); err != nil {
@@ -279,6 +266,31 @@ func (s *sSysPublish) updateProfileStatus(ctx context.Context, in *sysin.Profile
 	}
 	service.SysContent().ClearHomeProfileCardsCache(ctx)
 	return &sysin.ProfileStatusModel{Message: "资料已下架，已有TG消息将在后台清理"}, nil
+}
+
+// setProfilesOffline applies the shared local state transition used by both
+// regular batch operations and collect-source shutdowns. Telegram cleanup is
+// intentionally handled by each caller's queue workflow.
+func (s *sSysPublish) setProfilesOffline(ctx context.Context, ids []int64, tenantId int64) error {
+	ids = uniqueIds(ids)
+	for _, id := range ids {
+		if err := s.withProfileLifecycleLock(ctx, tenantId, id, func() error {
+			_, lockErr := s.syncProfilePublishState(ctx, id, 2, consts.ContentVisibilityPrivate, nil)
+			return lockErr
+		}); err != nil {
+			return gerror.Wrap(err, "更新资料状态失败")
+		}
+	}
+	for _, id := range ids {
+		if err := s.syncProfileNoteIndex(ctx, id); err != nil {
+			return err
+		}
+	}
+	if err := s.deactivateChannelProfiles(ctx, tenantId, ids); err != nil {
+		return err
+	}
+	service.SysContent().ClearHomeProfileCardsCache(ctx)
+	return nil
 }
 
 func (s *sSysPublish) submitProfilesByIds(ctx context.Context, ids []int64, tenantId int64, accountId int64) error {

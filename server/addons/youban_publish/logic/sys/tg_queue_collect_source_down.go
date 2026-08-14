@@ -13,9 +13,10 @@ import (
 const tgTaskTypeCollectSourceDown = "youban_publish:collect:source_down"
 
 type collectSourceDownQueuePayload struct {
-	AccountId int64 `json:"accountId"`
-	SourceId  int64 `json:"sourceId"`
-	TenantId  int64 `json:"tenantId"`
+	AccountId      int64 `json:"accountId"`
+	DeleteProfiles bool  `json:"deleteProfiles"`
+	SourceId       int64 `json:"sourceId"`
+	TenantId       int64 `json:"tenantId"`
 }
 
 func (s *sSysPublish) enqueueCollectSourceDown(ctx context.Context, payload collectSourceDownQueuePayload, delay time.Duration) error {

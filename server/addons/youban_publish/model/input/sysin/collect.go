@@ -401,7 +401,8 @@ type CollectStatusInp struct {
 }
 
 type CollectSourceDownInp struct {
-	Id int64 `json:"id" v:"required|min:1#采集源ID不能为空|采集源ID不能为空" dc:"采集源ID"`
+	Id             int64 `json:"id" v:"required|min:1#采集源ID不能为空|采集源ID不能为空" dc:"采集源ID"`
+	DeleteProfiles bool  `json:"deleteProfiles" dc:"下架后删除资料"`
 }
 
 type CollectSourceDownModel struct {

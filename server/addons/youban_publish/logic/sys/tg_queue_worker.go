@@ -250,7 +250,7 @@ func (s *sSysPublish) handleCollectSourceDownTask(ctx context.Context, task *asy
 	if err != nil {
 		return err
 	}
-	_, err = s.ExecuteCollectSourceDown(ctx, payload.SourceId, payload.TenantId, payload.AccountId)
+	_, err = s.ExecuteCollectSourceDown(ctx, payload.SourceId, payload.TenantId, payload.AccountId, payload.DeleteProfiles)
 	return err
 }
 
