@@ -1056,11 +1056,53 @@ func (s *sSysPublish) collectMediaInputPeer(ctx context.Context, tenantId int64,
 			return peer, nil
 		}
 	}
+	// Basic groups use PeerChat and have no channel access hash. Their realtime
+	// updates may carry the positive chat ID, while the configured source uses
+	// the conventional negative form (for example -5596823874).
+	if peer, ok := s.collectBasicGroupInputPeer(ctx, tenantId, tgAccountId, chatId); ok {
+		return peer, nil
+	}
 	id, parseErr := strconv.ParseInt(strings.TrimSpace(chatId), 10, 64)
 	if parseErr == nil && id > 0 {
 		return &tg.InputPeerUser{UserID: id}, nil
 	}
 	return nil, gerror.New("账号采集媒体无法解析原消息会话")
+}
+
+func (s *sSysPublish) collectBasicGroupInputPeer(ctx context.Context, tenantId int64, tgAccountId int64, chatId string) (tg.InputPeerClass, bool) {
+	ids := tgChannelCacheLookupIds(chatId)
+	if raw := strings.TrimSpace(chatId); raw != "" && !strings.HasPrefix(raw, "-") {
+		ids = append(ids, "-"+raw)
+	}
+	if len(ids) == 0 {
+		return nil, false
+	}
+	var source struct {
+		SourceChatId string `orm:"source_chat_id"`
+	}
+	if err := g.DB().Model(publishCollectSourceTable).Safe().Ctx(ctx).
+		Fields("source_chat_id").
+		Where("tenant_id", tenantId).
+		Where("tg_account_id", tgAccountId).
+		WhereIn("source_chat_id", uniqueStrings(ids)).
+		WhereNull("deleted_at").
+		Scan(&source); err != nil {
+		return nil, false
+	}
+	id, ok := parseBasicGroupChatID(source.SourceChatId)
+	if !ok {
+		return nil, false
+	}
+	return &tg.InputPeerChat{ChatID: id}, true
+}
+
+func parseBasicGroupChatID(value string) (int64, bool) {
+	raw := strings.TrimSpace(value)
+	if !strings.HasPrefix(raw, "-") || strings.HasPrefix(raw, "-100") {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(strings.TrimPrefix(raw, "-"), 10, 64)
+	return id, err == nil && id > 0
 }
 
 func collectMediaUploadContext(ctx context.Context, accountId int64) context.Context {

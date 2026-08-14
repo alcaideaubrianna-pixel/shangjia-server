@@ -12,6 +12,15 @@ import (
 	"hotgo/addons/youban_publish/internal/model/entity"
 )
 
+func TestParseBasicGroupChatID(t *testing.T) {
+	if got, ok := parseBasicGroupChatID("-5596823874"); !ok || got != 5596823874 {
+		t.Fatalf("basic group id = %d, ok=%t", got, ok)
+	}
+	if _, ok := parseBasicGroupChatID("-1005596823874"); ok {
+		t.Fatal("channel id must not be treated as basic group")
+	}
+}
+
 func TestTelegramCollectorMediaCacheURL(t *testing.T) {
 	if got := telegramCollectorMediaCacheURL(&collectorin.MediaCacheEntry{FileURL: "https://cdn.test/media.jpg", StoragePath: "media.jpg"}); got != "https://cdn.test/media.jpg" {
 		t.Fatalf("got URL %q, want FileURL", got)
