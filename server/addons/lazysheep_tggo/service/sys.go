@@ -54,6 +54,7 @@ type (
 		SyncBot(ctx context.Context, botKey string) error
 		SyncAllBots(ctx context.Context) error
 		HandleWebhook(ctx context.Context, botKey string, payload []byte, secretToken string) error
+		ProcessWebhook(ctx context.Context, botKey string, payload []byte) error
 		SetWebhook(ctx context.Context, botKey, webhookURL string) error
 	}
 )

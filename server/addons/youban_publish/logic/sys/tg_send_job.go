@@ -270,7 +270,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		}
 		if err != nil {
 			if !isTelegramMediaSizeLimitError(err) {
-				g.Log().Errorf(ctx, "Bot展示媒体发送失败，未进入协议号降级 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia), err)
+				logTelegramBotMediaSendFailure(ctx, job, "展示", displayMedia, err)
 			}
 			_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "展示资料分片推送失败")
 			return gerror.Wrapf(err, "TG展示资料推送失败，job:%d，channel:%d，chat:%s", job.Id, job.ChannelId, job.TargetChatId)
@@ -304,7 +304,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	}
 	if err != nil {
 		if !isTelegramMediaSizeLimitError(err) {
-			g.Log().Errorf(ctx, "Bot验证媒体发送失败，未进入协议号降级 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia), err)
+			logTelegramBotMediaSendFailure(ctx, job, "验证", verifyMedia, err)
 		}
 		if !isTelegramAmbiguousDeliveryError(err) {
 			if len(verifyMessages) > 0 {
@@ -328,6 +328,14 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		return telegramDeliveryUncertainError(err)
 	}
 	return s.updateTelegramMediaFileIds(ctx, verifyMessages)
+}
+
+func logTelegramBotMediaSendFailure(ctx context.Context, job telegramJobRecord, purpose string, media []*telegramMediaItem, err error) {
+	if isTelegramAccountBusyError(err) || isTelegramNetworkRetryError(err) {
+		g.Log().Warningf(ctx, "Bot%s媒体发送遇到可恢复错误，等待队列重试 jobId:%d botId:%d chat:%s media:%s err:%v", purpose, job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(media), err)
+		return
+	}
+	g.Log().Errorf(ctx, "Bot%s媒体发送失败，未进入协议号降级 jobId:%d botId:%d chat:%s media:%s err:%+v", purpose, job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(media), err)
 }
 
 func telegramMediaDebugSummary(media []*telegramMediaItem) string {

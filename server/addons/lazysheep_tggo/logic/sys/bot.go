@@ -24,6 +24,7 @@ import (
 	"hotgo/addons/lazysheep_tggo/model"
 	lsysin "hotgo/addons/lazysheep_tggo/model/input/sysin"
 	"hotgo/addons/lazysheep_tggo/service"
+	"hotgo/internal/library/queue"
 )
 
 type runtimeStore struct {
@@ -187,6 +188,25 @@ func (s *sLazySheepTGGo) startPollingBot(ctx context.Context, botKey string) err
 }
 
 func (s *sLazySheepTGGo) HandleWebhook(ctx context.Context, botKey string, payload []byte, secretToken string) error {
+	state, err := s.GetState(ctx)
+	if err != nil {
+		return err
+	}
+	cfg, ok := state.Bots[botKey]
+	if !ok || cfg == nil {
+		return fmt.Errorf("bot not found: %s", botKey)
+	}
+	if cfg.WebhookSecret == "" || secretToken != cfg.WebhookSecret {
+		return fmt.Errorf("telegram webhook secret mismatch: %s", botKey)
+	}
+	var update models.Update
+	if err := json.Unmarshal(payload, &update); err != nil {
+		return err
+	}
+	return queue.Push(lsysin.WebhookUpdateTopic, &lsysin.WebhookUpdateTask{BotKey: botKey, Payload: payload})
+}
+
+func (s *sLazySheepTGGo) ProcessWebhook(ctx context.Context, botKey string, payload []byte) error {
 	rt := s.runtime.get(botKey)
 	if rt == nil {
 		if err := s.SyncBot(ctx, botKey); err != nil {
@@ -196,9 +216,6 @@ func (s *sLazySheepTGGo) HandleWebhook(ctx context.Context, botKey string, paylo
 	}
 	if rt == nil || rt.client == nil {
 		return fmt.Errorf("bot runtime not ready: %s", botKey)
-	}
-	if rt.cfg.WebhookSecret == "" || secretToken != rt.cfg.WebhookSecret {
-		return fmt.Errorf("telegram webhook secret mismatch: %s", botKey)
 	}
 	var update models.Update
 	if err := json.Unmarshal(payload, &update); err != nil {
