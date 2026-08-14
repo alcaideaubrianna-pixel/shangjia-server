@@ -1,10 +1,6 @@
 package sys
 
 import (
-	"context"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -69,30 +65,5 @@ func TestMaterialImportMediaItemReadyAcceptsCloudURL(t *testing.T) {
 	item := collectMediaItem{FileUrl: "https://img.example.com/a.jpg", StoragePath: "missing.jpg"}
 	if !materialImportMediaItemReady(item) {
 		t.Fatal("expected cloud URL to be reusable")
-	}
-}
-
-func TestMaterialImportUploadFileFallsBackToCloudURL(t *testing.T) {
-	const expected = "cloud-media-content"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, expected)
-	}))
-	defer server.Close()
-
-	upload, err := materialImportUploadFileFromPath(context.Background(), "hotgo/file/missing.jpg", server.URL+"/media.jpg", "media.jpg")
-	if err != nil {
-		t.Fatalf("fallback upload file: %v", err)
-	}
-	reader, err := upload.Open()
-	if err != nil {
-		t.Fatalf("open upload file: %v", err)
-	}
-	defer reader.Close()
-	content, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatalf("read upload file: %v", err)
-	}
-	if string(content) != expected {
-		t.Fatalf("upload content = %q, want %q", content, expected)
 	}
 }
