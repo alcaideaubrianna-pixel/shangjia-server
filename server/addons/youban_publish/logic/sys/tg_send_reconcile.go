@@ -136,11 +136,12 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 		TenantID: job.TenantId, AccountID: channel.TgAccountId,
 		TaskType: collectorin.AccountTaskTypeMessageReconcile,
 		TaskKey:  fmt.Sprintf("message-reconcile:%d", job.Id),
-		Priority: tgJobPriorityUrgent, MaxAttempts: 3,
+		Priority: collectorin.EventPriorityUrgent, MaxAttempts: 3,
 	})
 	if err != nil {
 		return s.postponeUnknownTelegramJob(ctx, job, gerror.Wrap(err, "提交频道消息对账任务失败"))
 	}
+	collectorservice.AccountRuntime().Refresh()
 	message := fmt.Sprintf("TG发送结果待确认，已提交账号服务频道消息对账 accountTaskId:%d", accountTaskID)
 	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(g.Map{
 		"dispatch_status": tgDispatchStatusIdle, "next_retry_at": gtime.Now().Add(2 * time.Minute), "error_message": message, "updated_at": gtime.Now(),

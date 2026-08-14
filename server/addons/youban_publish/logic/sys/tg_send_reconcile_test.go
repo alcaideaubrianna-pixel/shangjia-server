@@ -74,3 +74,12 @@ func TestTelegramUnknownReconcileStopsAtRetryLimit(t *testing.T) {
 		t.Fatalf("terminal decision must not retry: %s", decision.RetryDelay)
 	}
 }
+
+func TestTelegramJobReconcilePurpose(t *testing.T) {
+	if purpose := telegramJobReconcilePurpose(telegramJobRecord{SendPhase: telegramSendPhaseVerifySending}); purpose != "verify" {
+		t.Fatalf("verify phase purpose = %q", purpose)
+	}
+	if purpose := telegramJobReconcilePurpose(telegramJobRecord{SendPhase: telegramSendPhaseDisplaySending}); purpose != "display" {
+		t.Fatalf("display phase purpose = %q", purpose)
+	}
+}
