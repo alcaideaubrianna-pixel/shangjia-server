@@ -25,7 +25,7 @@ func (s *sSysPublish) runTelegramObserveStatsRefresher(ctx context.Context) {
 		return
 	case <-timer.C:
 	}
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
 		if ctx.Err() != nil {
