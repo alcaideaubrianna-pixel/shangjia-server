@@ -293,18 +293,19 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 	}
 	if messageTemplateUsesInline(template) && channel != nil && channel.TgAccountId > 0 && job.BotId > 0 {
 		s.appendTelegramJobLog(ctx, job, "inline_send", sysin.MessagePushStatusSending, fmt.Sprintf("尝试Inline推送 serial:%s botId:%d tgAccountId:%d", template.SerialNo, job.BotId, channel.TgAccountId))
-		messages, inlineErr := s.sendInlineTemplateByAccount(ctx, channel.TgAccountId, job.BotId, channel, template.SerialNo)
+		messages, inlineErr, sendErr := s.sendInlineTemplateWithAccountFallback(ctx, channel.TgAccountId, channel, template)
+		if sendErr != nil {
+			return sendErr
+		}
+		if err := s.completeMessagePushJob(ctx, job, messages, "更新快速推送任务状态失败"); err != nil {
+			return err
+		}
 		if inlineErr == nil {
-			if err := s.completeMessagePushJob(ctx, job, messages, "更新Inline消息推送任务状态失败"); err != nil {
-				return err
-			}
 			s.appendTelegramJobLog(ctx, job, "inline_send", sysin.MessagePushStatusSent, "Inline机器人消息模板推送成功")
-			return nil
+		} else {
+			s.appendTelegramJobLog(ctx, job, "account_fallback", sysin.MessagePushStatusSent, "Inline推送失败，已复用同一账号客户端直发："+inlineErr.Error())
 		}
-		if isTelegramAccountBusyError(inlineErr) {
-			return inlineErr
-		}
-		s.appendTelegramJobLog(ctx, job, "inline_send", "fallback", "Inline推送失败，尝试原消息保真发送："+inlineErr.Error())
+		return nil
 	} else {
 		reason := "模板包含媒体"
 		if template == nil || strings.TrimSpace(template.SerialNo) == "" {
@@ -514,34 +515,11 @@ func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAcco
 		g.Log().Warningf(ctx, "读取消息模板复用源失败 tgAccountId:%d templateHash:%s err:%+v", tgAccountId, templateHash, err)
 	}
 	var sent []*telegramSentMessage
-	send := func(runCtx context.Context, client *telegram.Client) error {
-		if source != nil && len(source.MessageIds) > 0 {
-			messages, forwardErr := forwardMessageTemplateWithGotd(runCtx, client, source.Peer, peer, source.MessageIds, media)
-			if forwardErr == nil && len(messages) > 0 {
-				sent = messages
-				return nil
-			}
-			if forwardErr != nil {
-				if delay, ok := collectMediaFloodWaitDelay(forwardErr); ok {
-					g.Log().Warningf(runCtx, "复用TG历史消息触发Telegram限流，交给队列等待重试 tgAccountId:%d templateHash:%s wait:%s err:%v", tgAccountId, templateHash, delay, forwardErr)
-					return forwardErr
-				}
-				if isTelegramChannelPermissionError(forwardErr) {
-					g.Log().Errorf(runCtx, "TG目标频道权限异常，停止历史消息回退上传 tgAccountId:%d templateHash:%s err:%v", tgAccountId, templateHash, forwardErr)
-					return forwardErr
-				}
-				g.Log().Warningf(runCtx, "复用TG历史消息转发失败，回退上传 tgAccountId:%d templateHash:%s err:%v", tgAccountId, templateHash, forwardErr)
-			}
-		}
-		sender := gotdmessage.NewSender(client.API())
-		messages, sendErr := sendMessageTemplateWithGotd(runCtx, sender.To(peer), caption, media)
-		if sendErr != nil {
-			return sendErr
-		}
-		sent = messages
-		return nil
-	}
-	err = s.executeTelegramAccountOperation(ctx, tgAccountId, 2*time.Minute, send)
+	err = s.executeTelegramAccountOperation(ctx, tgAccountId, 2*time.Minute, func(runCtx context.Context, client *telegram.Client) error {
+		var sendErr error
+		sent, sendErr = sendMessageTemplateWithTgClient(runCtx, client, peer, caption, media, source, tgAccountId, templateHash)
+		return sendErr
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -549,6 +527,28 @@ func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAcco
 		return nil, gerror.New("账号推送已调用，但未读取到TG消息结果")
 	}
 	return sent, nil
+}
+
+func sendMessageTemplateWithTgClient(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, caption string, media []*telegramMediaItem, source *messageTemplateForwardSource, tgAccountId int64, templateHash string) ([]*telegramSentMessage, error) {
+	if source != nil && len(source.MessageIds) > 0 {
+		messages, forwardErr := forwardMessageTemplateWithGotd(ctx, client, source.Peer, peer, source.MessageIds, media)
+		if forwardErr == nil && len(messages) > 0 {
+			return messages, nil
+		}
+		if forwardErr != nil {
+			if delay, ok := collectMediaFloodWaitDelay(forwardErr); ok {
+				g.Log().Warningf(ctx, "复用TG历史消息触发Telegram限流，交给队列等待重试 tgAccountId:%d templateHash:%s wait:%s err:%v", tgAccountId, templateHash, delay, forwardErr)
+				return nil, forwardErr
+			}
+			if isTelegramChannelPermissionError(forwardErr) {
+				g.Log().Errorf(ctx, "TG目标频道权限异常，停止历史消息回退上传 tgAccountId:%d templateHash:%s err:%v", tgAccountId, templateHash, forwardErr)
+				return nil, forwardErr
+			}
+			g.Log().Warningf(ctx, "复用TG历史消息转发失败，回退上传 tgAccountId:%d templateHash:%s err:%v", tgAccountId, templateHash, forwardErr)
+		}
+	}
+	sender := gotdmessage.NewSender(client.API())
+	return sendMessageTemplateWithGotd(ctx, sender.To(peer), caption, media)
 }
 
 func messageTemplateRequiresSanitizedUpload(media []*telegramMediaItem) bool {
