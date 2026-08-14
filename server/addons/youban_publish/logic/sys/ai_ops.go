@@ -28,6 +28,15 @@ func (s *sSysPublish) AIOpsRepublishProfiles(ctx context.Context, in *sysin.Prof
 		return nil, gerror.New("单次只能重新上架1到20条资料")
 	}
 	for _, profileId := range ids {
+		profile, err := s.profilePublishSource(ctx, profileId, 0, 0, false)
+		if err != nil {
+			return nil, err
+		}
+		if profile["status"].Int() != 1 {
+			if _, err = s.updateProfileStatus(ctx, &sysin.ProfileStatusInp{Ids: []int64{profileId}, Status: 1}, 0, 0); err != nil {
+				return nil, err
+			}
+		}
 		complete, err := collectProfileMediaComplete(ctx, profileId)
 		if err != nil {
 			return nil, err
@@ -35,10 +44,13 @@ func (s *sSysPublish) AIOpsRepublishProfiles(ctx context.Context, in *sysin.Prof
 		if !complete {
 			return nil, gerror.Newf("资料%d媒体尚未恢复完整，禁止重新上架", profileId)
 		}
+		if err = s.submitProfilePublish(ctx, profileId, profile["tenant_id"].Int64(), profile["account_id"].Int64(), 0, newTelegramOperationNo("ai-republish", profileId), nil, false); err != nil {
+			return nil, gerror.Wrapf(err, "资料%d提交TG发布任务失败", profileId)
+		}
 	}
-	result, err := s.updateProfileStatus(ctx, &sysin.ProfileStatusInp{Ids: ids, Status: 1}, 0, 0)
-	g.Log().Info(ctx, "AI运维资料重新上架", g.Map{"profileIds": ids, "result": result, "error": err})
-	return result, err
+	result := &sysin.ProfileStatusModel{Message: "资料已提交TG发布任务"}
+	g.Log().Info(ctx, "AI运维资料重新上架", g.Map{"profileIds": ids, "result": result})
+	return result, nil
 }
 
 func collectProfileMediaComplete(ctx context.Context, profileId int64) (bool, error) {
