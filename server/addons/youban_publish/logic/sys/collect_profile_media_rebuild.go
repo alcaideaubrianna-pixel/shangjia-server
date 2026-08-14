@@ -58,6 +58,7 @@ func collectProfileMediaRebuildCandidates(ctx context.Context, options CollectPr
 		LeftJoin("hg_youban_publish_collect_event_media em", "em.event_id=e.id").
 		Where("p.source_type", "youban_collect").
 		WhereNull("p.deleted_at").
+		Where("e.material_role", collectMaterialRoleDisplay).
 		Where("(e.status IN (?, ?, ?, ?, ?) OR (e.status = ? AND e.error_message = ?))",
 			"processed", "ignored", "failed", "prechecked", "media_ready",
 			"media_pending", "资料媒体重建：重新下载").
