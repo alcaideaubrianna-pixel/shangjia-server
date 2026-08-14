@@ -111,6 +111,15 @@ func TestTelegramInvalidReusableFileError(t *testing.T) {
 	}
 }
 
+func TestTelegramCopySourceUnavailableError(t *testing.T) {
+	if !isTelegramCopySourceUnavailableError(errors.New("Bad Request: chat not found")) {
+		t.Fatal("copy source chat failure should fall back to upload")
+	}
+	if isTelegramCopySourceUnavailableError(errors.New("context deadline exceeded")) {
+		t.Fatal("network timeout should remain a normal retry")
+	}
+}
+
 func TestTelegramMediaUsesReusableFileId(t *testing.T) {
 	if !telegramMediaUsesReusableFileId(&telegramMediaItem{MediaType: "video", TgFileId: "BAAC-cached"}) {
 		t.Fatal("cached Telegram video should skip local thumbnail generation")

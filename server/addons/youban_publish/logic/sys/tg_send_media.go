@@ -219,14 +219,14 @@ func (s *sSysPublish) copyTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0])
 		}
 		messages, err := s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0], ref)
-		if err != nil && isTelegramPhotoTooLargeError(err) {
+		if err != nil && (isTelegramPhotoTooLargeError(err) || isTelegramCopySourceUnavailableError(err)) {
 			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutTgFileId(media))
 		}
 		return messages, err
 	}
 	copied, ok, err := s.copyTelegramMediaGroup(ctx, bot, chatId, purpose, caption, media)
 	if err != nil {
-		if isTelegramPhotoTooLargeError(err) {
+		if isTelegramPhotoTooLargeError(err) || isTelegramCopySourceUnavailableError(err) {
 			return s.sendTelegramMediaSet(ctx, bot, chatId, purpose, caption, telegramMediaSetWithoutTgFileId(media))
 		}
 		return copied, err
@@ -558,6 +558,15 @@ func isTelegramInvalidReusableFileError(err error) bool {
 		}
 	}
 	return false
+}
+
+func isTelegramCopySourceUnavailableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "bad request: chat not found") ||
+		strings.Contains(message, "message to copy not found")
 }
 
 func telegramCopyMediaGroupRefs(media []*telegramMediaItem) (string, []int, bool) {
