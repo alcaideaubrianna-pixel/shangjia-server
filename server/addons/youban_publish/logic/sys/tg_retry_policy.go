@@ -36,9 +36,6 @@ type telegramJobFailureDecision struct {
 func telegramJobFailureNextState(err error, currentRetryCount int) telegramJobFailureDecision {
 	retryCount := currentRetryCount + 1
 	policy := telegramJobErrorRetryPolicy(err, retryCount)
-	if isTelegramAccountBusyError(err) {
-		retryCount = currentRetryCount
-	}
 	decision := telegramJobFailureDecision{
 		Status:         "failed_retry",
 		DispatchStatus: tgDispatchStatusIdle,
@@ -94,9 +91,15 @@ func telegramJobErrorRetryPolicy(err error, retryCount int) telegramJobRetryPoli
 		}
 	}
 	if isTelegramAccountBusyError(err) {
+		if retryCount >= telegramRetryMaxCount {
+			return telegramJobRetryPolicy{
+				Permanent: true,
+				Message:   fmt.Sprintf("Telegram账号连接持续繁忙，已重试 %d 次，任务已停止；请检查账号是否有长时间运行的采集或发送任务", telegramRetryMaxCount),
+			}
+		}
 		return telegramJobRetryPolicy{
 			RetryDelay: 15 * time.Second,
-			Message:    "Telegram账号当前正在执行其他操作，任务将在账号空闲后自动重试",
+			Message:    fmt.Sprintf("Telegram账号当前正在执行其他操作，任务将在 15 秒后自动重试（第 %d/%d 次）", retryCount, telegramRetryMaxCount),
 		}
 	}
 	if retryCount >= telegramRetryMaxCount {

@@ -32,14 +32,14 @@ func TestTelegramChannelPermissionError(t *testing.T) {
 	}
 }
 
-func TestTelegramAccountBusyDoesNotBecomePermanentAfterFiveRetries(t *testing.T) {
+func TestTelegramAccountBusyBecomesPermanentAfterFiveRetries(t *testing.T) {
 	err := &telegramAccountBusyError{tgAccountId: 16, err: context.DeadlineExceeded}
-	policy := telegramJobErrorRetryPolicy(err, telegramRetryMaxCount+1)
-	if policy.Permanent {
-		t.Fatal("account busy must remain retryable")
+	policy := telegramJobErrorRetryPolicy(err, telegramRetryMaxCount)
+	if !policy.Permanent {
+		t.Fatal("account busy must become permanent after retry limit")
 	}
-	if policy.RetryDelay <= 0 {
-		t.Fatal("account busy must have a retry delay")
+	if policy.RetryDelay != 0 {
+		t.Fatal("permanent account busy must not have a retry delay")
 	}
 }
 
@@ -49,8 +49,8 @@ func TestTelegramAccountBusyIsNotAmbiguousDelivery(t *testing.T) {
 		t.Fatal("wrapped deadline remains ambiguous before account-busy precedence is applied")
 	}
 	decision := telegramJobFailureNextState(err, 2)
-	if decision.Status != "failed_retry" || decision.RetryCount != 2 || decision.RetryDelay <= 0 {
-		t.Fatalf("account busy must retry without consuming retry count: %+v", decision)
+	if decision.Status != "failed_retry" || decision.RetryCount != 3 || decision.RetryDelay <= 0 {
+		t.Fatalf("account busy must consume retry count: %+v", decision)
 	}
 }
 
