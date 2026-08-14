@@ -3,10 +3,13 @@ package sys
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -469,7 +472,8 @@ func (s *sSysPublish) saveMaterialImportProfileMedia(ctx context.Context, task *
 			continue
 		}
 		purpose := materialImportMediaPurpose(item)
-		upload, err := materialImportUploadFileFromPath(path, fmt.Sprintf("material-import-%d-%d%s", group.Id, index+1, filepath.Ext(path)))
+		fileURL := normalizeMediaFileURL(item.FileUrl, path)
+		upload, err := materialImportUploadFileFromPath(ctx, path, fileURL, fmt.Sprintf("material-import-%d-%d%s", group.Id, index+1, filepath.Ext(path)))
 		if err != nil {
 			return nil, err
 		}
@@ -514,10 +518,29 @@ func firstPositiveInt64(values ...int64) int64 {
 	return 1
 }
 
-func materialImportUploadFileFromPath(path string, name string) (*ghttp.UploadFile, error) {
+func materialImportUploadFileFromPath(ctx context.Context, path string, sourceURL string, name string) (*ghttp.UploadFile, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return nil, gerror.Wrap(err, "读取TG导入媒体失败")
+		sourceURL = strings.TrimSpace(sourceURL)
+		if sourceURL == "" || !strings.HasPrefix(sourceURL, "http://") && !strings.HasPrefix(sourceURL, "https://") {
+			return nil, gerror.Wrap(err, "读取TG导入媒体失败")
+		}
+		req, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+		if requestErr != nil {
+			return nil, gerror.Wrap(err, "读取TG导入媒体失败")
+		}
+		resp, requestErr := (&http.Client{Timeout: 2 * time.Minute}).Do(req)
+		if requestErr != nil {
+			return nil, gerror.Wrap(requestErr, "下载TG导入媒体失败")
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			return nil, gerror.Newf("下载TG导入媒体失败：HTTP %d", resp.StatusCode)
+		}
+		content, requestErr = io.ReadAll(resp.Body)
+		if requestErr != nil {
+			return nil, gerror.Wrap(requestErr, "读取TG导入媒体失败")
+		}
 	}
 	if len(content) == 0 {
 		return nil, gerror.New("TG导入媒体为空")
