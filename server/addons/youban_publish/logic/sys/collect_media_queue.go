@@ -143,7 +143,7 @@ func decodeCollectMediaQueuePayload(task *asynq.Task) (collectMediaQueuePayload,
 }
 
 func collectMediaQueueConcurrency(ctx context.Context) int {
-	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 3).Int()
+	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 4).Int()
 	if concurrency < 1 {
 		return 1
 	}

@@ -121,8 +121,8 @@ func (s *sAccountTasks) Claim(ctx context.Context, lease *sysin.AccountLease, li
 		WhereIn(columns.Status, []string{sysin.AccountTaskStatusPending, sysin.AccountTaskStatusFailedRetry}).
 		Where("("+columns.NextRunAt+" IS NULL OR "+columns.NextRunAt+"<=?)", now).
 		Where("("+columns.LeaseUntil+" IS NULL OR "+columns.LeaseUntil+"<?)", now).
-		Order(gdb.Raw("CASE WHEN " + columns.TaskType + " = 'media_download' THEN 1 ELSE 0 END DESC")).
 		OrderDesc(columns.Priority).
+		Order(gdb.Raw("CASE WHEN " + columns.TaskType + " = 'media_download' THEN 1 ELSE 0 END DESC")).
 		OrderAsc(columns.NextRunAt + "," + columns.Id).
 		Limit(limit).
 		Scan(&candidates)
