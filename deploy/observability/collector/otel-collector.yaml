@@ -20,7 +20,7 @@ receivers:
   sqlquery/core:
     driver: postgres
     datasource: ${env:XIAOHUIJI_PG_DSN}
-    collection_interval: 15s
+    collection_interval: 60s
     queries:
       - sql: |
           SELECT COALESCE(NULLIF(queue_name, ''), 'youban_publish_tg') AS queue_name,
@@ -599,4 +599,4 @@ service:
 
   telemetry:
     logs:
-      level: info
+      level: warn

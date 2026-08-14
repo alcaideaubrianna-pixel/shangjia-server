@@ -67,6 +67,7 @@ func init() {
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeMaterialImportHistoryPage, accountTaskHandler)
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeDialogCacheRefresh, accountTaskHandler)
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeMessagePushInline, accountTaskHandler)
+	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeMessageReconcile, accountTaskHandler)
 	collectorservice.RegisterAccountMedia(&publishCollectorAccountMediaProvider{publish: publish})
 	collectorservice.RegisterAccountRuntimeProvider(&publishAccountRuntimeProvider{publish: publish})
 	gatewayservice.RegisterProvider(&publishBotGatewayProvider{publish: publish})

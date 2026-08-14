@@ -17,6 +17,7 @@ func TestValidateAccountTaskSubmitSupportsAllRegisteredTaskTypes(t *testing.T) {
 		{name: "username diagnostic", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeUsernameResolveDiagnostic}},
 		{name: "dialog refresh", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeDialogCacheRefresh}},
 		{name: "message push inline", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeMessagePushInline}},
+		{name: "message reconcile", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeMessageReconcile}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

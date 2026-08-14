@@ -58,9 +58,34 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Conte
 		return nil, h.publish.handleDialogCacheRefreshAccountTask(ctx, client, task)
 	case collectorin.AccountTaskTypeMessagePushInline:
 		return nil, h.publish.handleMessagePushInlineAccountTask(ctx, client, task)
+	case collectorin.AccountTaskTypeMessageReconcile:
+		return nil, h.publish.handleMessageReconcileAccountTask(ctx, client, task)
 	default:
 		return nil, gerror.Newf("不支持的Telegram账号任务类型：%s", task.TaskType)
 	}
+}
+
+func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
+	const prefix = "message-reconcile:"
+	jobID, err := strconv.ParseInt(strings.TrimPrefix(task.TaskKey, prefix), 10, 64)
+	if err != nil || jobID <= 0 || !strings.HasPrefix(task.TaskKey, prefix) {
+		return gerror.New("消息对账账号任务参数无效")
+	}
+	job, err := s.telegramJobById(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	if job.Status != "unknown" {
+		return nil
+	}
+	channel, err := s.telegramReconcileChannel(ctx, job)
+	if err != nil {
+		return err
+	}
+	if task.AccountID != channel.TgAccountId {
+		return gerror.New("消息对账账号任务与目标频道账号不一致")
+	}
+	return s.reconcileUnknownTelegramJobWithClient(ctx, client, job)
 }
 
 func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {

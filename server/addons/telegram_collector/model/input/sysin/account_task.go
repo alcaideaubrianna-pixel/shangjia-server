@@ -16,6 +16,7 @@ const (
 	AccountTaskTypeUsernameResolveDiagnostic = "username_resolve_diagnostic"
 	AccountTaskTypeDialogCacheRefresh        = "dialog_cache_refresh"
 	AccountTaskTypeMessagePushInline         = "message_push_inline"
+	AccountTaskTypeMessageReconcile          = "message_reconcile"
 )
 
 type AccountTaskSubmit struct {

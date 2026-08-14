@@ -15,6 +15,8 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -126,15 +128,36 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 	if err != nil {
 		return s.releaseUnknownTelegramJobClaim(ctx, job.Id, err)
 	}
-	purpose := "display"
-	if job.SendPhase == telegramSendPhaseVerifySending {
-		purpose = "verify"
+	channel, err := s.telegramReconcileChannel(ctx, job)
+	if err != nil {
+		return s.postponeUnknownTelegramJob(ctx, job, err)
 	}
+	accountTaskID, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: job.TenantId, AccountID: channel.TgAccountId,
+		TaskType: collectorin.AccountTaskTypeMessageReconcile,
+		TaskKey:  fmt.Sprintf("message-reconcile:%d", job.Id),
+		Priority: tgJobPriorityUrgent, MaxAttempts: 3,
+	})
+	if err != nil {
+		return s.postponeUnknownTelegramJob(ctx, job, gerror.Wrap(err, "提交频道消息对账任务失败"))
+	}
+	message := fmt.Sprintf("TG发送结果待确认，已提交账号服务频道消息对账 accountTaskId:%d", accountTaskID)
+	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(g.Map{
+		"dispatch_status": tgDispatchStatusIdle, "next_retry_at": gtime.Now().Add(2 * time.Minute), "error_message": message, "updated_at": gtime.Now(),
+	}).Update()
+	if err == nil {
+		s.appendTelegramJobLog(ctx, job, "reconcile", "queued", message)
+	}
+	return err
+}
+
+func (s *sSysPublish) reconcileUnknownTelegramJobWithClient(ctx context.Context, client *telegram.Client, job telegramJobRecord) error {
+	purpose := telegramJobReconcilePurpose(job)
 	expectedCount, err := s.telegramJobPhaseExpectedMessageCount(ctx, job, purpose)
 	if err != nil {
 		return s.postponeUnknownTelegramJob(ctx, job, err)
 	}
-	messages, err := s.findTelegramJobPhaseMessages(ctx, job, purpose, expectedCount)
+	messages, err := s.findTelegramJobPhaseMessagesWithClient(ctx, client, job, purpose, expectedCount)
 	if err != nil {
 		return s.postponeUnknownTelegramJob(ctx, job, err)
 	}
@@ -171,6 +194,13 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 		return s.postponeUnknownTelegramJob(ctx, job, err)
 	}
 	return nil
+}
+
+func telegramJobReconcilePurpose(job telegramJobRecord) string {
+	if job.SendPhase == telegramSendPhaseVerifySending {
+		return "verify"
+	}
+	return "display"
 }
 
 func (s *sSysPublish) telegramJobPhaseExpectedMessageCount(ctx context.Context, job telegramJobRecord, purpose string) (int, error) {
@@ -313,13 +343,24 @@ func telegramUnknownReconcileNextState(job telegramJobRecord, cause error) teleg
 	}
 }
 
-func (s *sSysPublish) findTelegramJobPhaseMessages(ctx context.Context, job telegramJobRecord, purpose string, expectedCount int) ([]*telegramSentMessage, error) {
+func (s *sSysPublish) telegramReconcileChannel(ctx context.Context, job telegramJobRecord) (telegramReconcileChannel, error) {
 	var channel telegramReconcileChannel
 	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Fields("id,tg_account_id,target_chat_id").Where("id", job.ChannelId).Where("tenant_id", job.TenantId).Scan(&channel); err != nil {
-		return nil, gerror.Wrap(err, "读取TG对账频道失败")
+		return channel, gerror.Wrap(err, "读取TG对账频道失败")
 	}
 	if channel.TgAccountId <= 0 {
-		return nil, gerror.New("频道未绑定协议号，无法自动对账")
+		return channel, gerror.New("频道未绑定协议号，无法自动对账")
+	}
+	return channel, nil
+}
+
+func (s *sSysPublish) findTelegramJobPhaseMessagesWithClient(ctx context.Context, client *telegram.Client, job telegramJobRecord, purpose string, expectedCount int) ([]*telegramSentMessage, error) {
+	if client == nil {
+		return nil, gerror.New("Telegram账号客户端未就绪")
+	}
+	channel, err := s.telegramReconcileChannel(ctx, job)
+	if err != nil {
+		return nil, err
 	}
 	cache, err := s.tgChannelCacheByChannelId(ctx, job.TenantId, channel.TgAccountId, channel.TargetChatId)
 	if err != nil {
@@ -335,54 +376,51 @@ func (s *sSysPublish) findTelegramJobPhaseMessages(ctx context.Context, job tele
 	}
 	marker := telegramJobPhaseMarker(job.Id, purpose)
 	var found []*telegramSentMessage
-	err = s.executeTelegramAccountOperation(ctx, channel.TgAccountId, 45*time.Second, func(runCtx context.Context, client *telegram.Client) error {
-		cutoff := time.Now().Add(-15 * time.Minute).Unix()
-		if job.CreatedAt != nil {
-			cutoff = job.CreatedAt.Add(-2 * time.Minute).Unix()
+	cutoff := time.Now().Add(-15 * time.Minute).Unix()
+	if job.CreatedAt != nil {
+		cutoff = job.CreatedAt.Add(-2 * time.Minute).Unix()
+	}
+	offsetId := 0
+	for page := 0; page < 10; page++ {
+		res, err := client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{Peer: &tg.InputPeerChannel{ChannelID: channelId, AccessHash: accessHash}, OffsetID: offsetId, Limit: 100})
+		if err != nil {
+			return nil, err
 		}
-		offsetId := 0
-		for page := 0; page < 10; page++ {
-			res, requestErr := client.API().MessagesGetHistory(runCtx, &tg.MessagesGetHistoryRequest{Peer: &tg.InputPeerChannel{ChannelID: channelId, AccessHash: accessHash}, OffsetID: offsetId, Limit: 100})
-			if requestErr != nil {
-				return requestErr
+		items := tgHistoryMessages(res)
+		if len(items) == 0 {
+			break
+		}
+		groupIDs := make(map[int64]struct{})
+		stop := false
+		for _, item := range items {
+			if item == nil || item.ID <= 0 {
+				continue
 			}
-			items := tgHistoryMessages(res)
-			if len(items) == 0 {
-				break
+			if int64(item.Date) < cutoff {
+				stop = true
+				continue
 			}
-			groupIds := make(map[int64]struct{})
-			stop := false
-			for _, item := range items {
-				if item == nil || item.ID <= 0 {
-					continue
-				}
-				if int64(item.Date) < cutoff {
-					stop = true
-					continue
-				}
-				if offsetId == 0 || item.ID < offsetId {
-					offsetId = item.ID
-				}
-				if strings.Contains(item.Message, marker) {
-					groupIds[item.GroupedID] = struct{}{}
-				}
+			if offsetId == 0 || item.ID < offsetId {
+				offsetId = item.ID
 			}
-			for _, item := range items {
-				if item == nil {
-					continue
-				}
-				_, sameGroup := groupIds[item.GroupedID]
-				if strings.Contains(item.Message, marker) || item.GroupedID > 0 && sameGroup {
-					found = append(found, telegramReconciledMessage(item, purpose))
-				}
-			}
-			if expectedCount > 0 && len(found) >= expectedCount || stop || offsetId <= 0 {
-				break
+			if strings.Contains(item.Message, marker) {
+				groupIDs[item.GroupedID] = struct{}{}
 			}
 		}
-		return nil
-	})
-	return found, err
+		for _, item := range items {
+			if item == nil {
+				continue
+			}
+			_, sameGroup := groupIDs[item.GroupedID]
+			if strings.Contains(item.Message, marker) || item.GroupedID > 0 && sameGroup {
+				found = append(found, telegramReconciledMessage(item, purpose))
+			}
+		}
+		if expectedCount > 0 && len(found) >= expectedCount || stop || offsetId <= 0 {
+			break
+		}
+	}
+	return found, nil
 }
 
 func telegramReconciledMessage(item *tg.Message, purpose string) *telegramSentMessage {

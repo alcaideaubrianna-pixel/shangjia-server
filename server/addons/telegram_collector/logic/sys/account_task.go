@@ -56,7 +56,11 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 	if err != nil {
 		return 0, gerror.Wrap(err, "保存Telegram账号任务失败")
 	}
-	if in.TaskType == sysin.AccountTaskTypeMediaDownload {
+	if in.TaskType == sysin.AccountTaskTypeMediaDownload || in.TaskType == sysin.AccountTaskTypeMessageReconcile {
+		terminalStatuses := []string{sysin.AccountTaskStatusDead, sysin.AccountTaskStatusCancelled}
+		if in.TaskType == sysin.AccountTaskTypeMessageReconcile {
+			terminalStatuses = append(terminalStatuses, sysin.AccountTaskStatusCompleted)
+		}
 		revive := g.Map{
 			columns.Status: sysin.AccountTaskStatusPending, columns.Priority: in.Priority,
 			columns.AttemptCount: 0, columns.MaxAttempts: in.MaxAttempts, columns.NextRunAt: nextRunAt,
@@ -70,10 +74,10 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 		if _, err = dao.TgCollectorAccountTask.Ctx(ctx).
 			Where(columns.TenantId, in.TenantID).
 			Where(columns.TaskKey, in.TaskKey).
-			Where(columns.TaskType, sysin.AccountTaskTypeMediaDownload).
-			WhereIn(columns.Status, []string{sysin.AccountTaskStatusDead, sysin.AccountTaskStatusCancelled}).
+			Where(columns.TaskType, in.TaskType).
+			WhereIn(columns.Status, terminalStatuses).
 			Data(revive).Update(); err != nil {
-			return 0, gerror.Wrap(err, "恢复Telegram媒体下载任务失败")
+			return 0, gerror.Wrap(err, "恢复Telegram账号任务失败")
 		}
 	}
 	var row entity.TgCollectorAccountTask
@@ -111,6 +115,7 @@ func validateAccountTaskSubmit(in *sysin.AccountTaskSubmit) error {
 	case sysin.AccountTaskTypeUsernameResolveDiagnostic:
 	case sysin.AccountTaskTypeDialogCacheRefresh:
 	case sysin.AccountTaskTypeMessagePushInline:
+	case sysin.AccountTaskTypeMessageReconcile:
 	default:
 		return gerror.Newf("不支持的Telegram账号任务类型：%s", in.TaskType)
 	}
