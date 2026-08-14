@@ -16,6 +16,7 @@ func TestValidateAccountTaskSubmitSupportsAllRegisteredTaskTypes(t *testing.T) {
 		{name: "material import history", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeMaterialImportHistoryPage, TaskKey: "material-import:1:offset:0"}},
 		{name: "username diagnostic", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeUsernameResolveDiagnostic}},
 		{name: "dialog refresh", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeDialogCacheRefresh}},
+		{name: "message push inline", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeMessagePushInline}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

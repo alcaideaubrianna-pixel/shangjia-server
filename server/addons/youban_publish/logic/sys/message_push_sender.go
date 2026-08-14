@@ -25,6 +25,8 @@ import (
 	"github.com/gotd/td/tg"
 	_ "golang.org/x/image/webp"
 
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
 	botService "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -74,9 +76,8 @@ type messageTemplatePushTarget struct {
 	QueueName   string
 }
 
-func (s *sSysPublish) pushMessageTemplateTargetsWithSeed(ctx context.Context, template *sysin.MessageTemplateModel, targets []*messageTemplatePushTarget, tenantId int64, accountId int64) *sysin.MessageTemplatePushModel {
+func (s *sSysPublish) queueMessageTemplateTargets(ctx context.Context, template *sysin.MessageTemplateModel, targets []*messageTemplatePushTarget, tenantId int64, accountId int64) *sysin.MessageTemplatePushModel {
 	res := &sysin.MessageTemplatePushModel{Total: len(targets), Results: make([]*sysin.MessageTemplatePushResultModel, 0, len(targets))}
-	seedSentByAccount := make(map[int64]bool)
 	for _, target := range targets {
 		if target == nil || target.Channel == nil {
 			result := &sysin.MessageTemplatePushResultModel{Status: sysin.MessagePushStatusFailed, Message: "目标群聊或频道未配置"}
@@ -88,23 +89,15 @@ func (s *sSysPublish) pushMessageTemplateTargetsWithSeed(ctx context.Context, te
 		if targetAccountId <= 0 {
 			targetAccountId = accountId
 		}
-		var result *sysin.MessageTemplatePushResultModel
-		if !seedSentByAccount[targetAccountId] {
-			result = s.sendMessageTemplateToChannel(ctx, template, target.Channel, tenantId, targetAccountId)
-			if result.Status == sysin.MessagePushStatusSent {
-				seedSentByAccount[targetAccountId] = true
-			}
-		} else {
-			priority := target.Priority
-			if priority <= 0 {
-				priority = tgJobPriorityBulk
-			}
-			queueName := strings.TrimSpace(target.QueueName)
-			if queueName == "" {
-				queueName = tgQueueNameBulk
-			}
-			result = s.queueMessageTemplateToChannelWithPriority(ctx, template, target.Channel, tenantId, targetAccountId, target.OperationNo, target.Delay, priority, queueName)
+		priority := target.Priority
+		if priority <= 0 {
+			priority = tgJobPriorityBulk
 		}
+		queueName := strings.TrimSpace(target.QueueName)
+		if queueName == "" {
+			queueName = tgQueueNameBulk
+		}
+		result := s.queueMessageTemplateToChannelWithPriority(ctx, template, target.Channel, tenantId, targetAccountId, target.OperationNo, target.Delay, priority, queueName)
 		res.Results = append(res.Results, result)
 		if result.Status == sysin.MessagePushStatusPending || result.Status == sysin.MessagePushStatusSent {
 			res.Success++
@@ -161,57 +154,7 @@ func (s *sSysPublish) AdminMessageTemplatePush(ctx context.Context, in *sysin.Me
 	for _, channel := range channels {
 		targets = append(targets, &messageTemplatePushTarget{Channel: channel, AccountId: in.AccountId, OperationNo: messagePushManualOperationNo(template, channel), Priority: tgJobPriorityUrgent, QueueName: tgQueueNameUrgent})
 	}
-	return s.pushMessageTemplateTargetsWithSeed(ctx, template, targets, account.TenantId, in.AccountId), nil
-}
-
-func (s *sSysPublish) sendMessageTemplateToChannel(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64) *sysin.MessageTemplatePushResultModel {
-	result := &sysin.MessageTemplatePushResultModel{
-		ChannelId:    channel.Id,
-		TargetChatId: channel.TargetChatId,
-		Status:       sysin.MessagePushStatusFailed,
-	}
-	if channel == nil || strings.TrimSpace(channel.TargetChatId) == "" {
-		result.Message = "目标群聊或频道未配置"
-		return result
-	}
-	botId := firstMessagePushBotId(channel)
-	job, err := s.createMessagePushJob(ctx, template, channel, tenantId, accountId, botId)
-	if err != nil {
-		result.Message = err.Error()
-		return result
-	}
-	result.JobId = job.Id
-	lease, ok, err := s.tryTelegramChannelLease(ctx, channel.TargetChatId)
-	if err != nil {
-		s.failMessagePushJob(ctx, job, err.Error())
-		result.Message = err.Error()
-		return result
-	}
-	if !ok {
-		delay := s.telegramChannelBusyDelay(ctx, job.Id, job.DispatchCount)
-		if err = s.enqueueTelegramJob(ctx, job.Id, delay); err != nil {
-			s.failMessagePushJob(ctx, job, err.Error())
-			result.Message = err.Error()
-			return result
-		}
-		message := fmt.Sprintf("频道正在发送其他任务，已自动排队，预计%d秒后重试", int(delay.Seconds()))
-		if recordErr := s.upsertPublishJobRecord(ctx, job, "pending", message); recordErr != nil {
-			g.Log().Warningf(ctx, "更新快速推送排队记录失败 jobId:%d err:%+v", job.Id, recordErr)
-		}
-		s.appendTelegramJobLog(ctx, job, "message_push", "queued", message)
-		result.Status = sysin.MessagePushStatusPending
-		result.Message = message
-		return result
-	}
-	defer s.releaseTelegramChannelLease(ctx, lease)
-	if err = s.sendMessagePushJob(ctx, job, template, channel, accountId); err != nil {
-		s.failMessagePushJob(ctx, job, err.Error())
-		result.Message = err.Error()
-		return result
-	}
-	result.Status = sysin.MessagePushStatusSent
-	result.Message = "推送成功"
-	return result
+	return s.queueMessageTemplateTargets(ctx, template, targets, account.TenantId, in.AccountId), nil
 }
 
 func (s *sSysPublish) queueMessageTemplateToChannelWithPriority(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, operationNo string, delay time.Duration, priority int, queueName string) *sysin.MessageTemplatePushResultModel {
@@ -292,19 +235,15 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 		g.Log().Warningf(ctx, "更新快速推送发送记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
 	if messageTemplateUsesInline(template) && channel != nil && channel.TgAccountId > 0 && job.BotId > 0 {
-		s.appendTelegramJobLog(ctx, job, "inline_send", sysin.MessagePushStatusSending, fmt.Sprintf("尝试Inline推送 serial:%s botId:%d tgAccountId:%d", template.SerialNo, job.BotId, channel.TgAccountId))
-		messages, inlineErr, sendErr := s.sendInlineTemplateWithAccountFallback(ctx, channel.TgAccountId, channel, template)
-		if sendErr != nil {
-			return sendErr
+		accountTaskId, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+			TenantID: job.TenantId, AccountID: channel.TgAccountId,
+			TaskType: collectorin.AccountTaskTypeMessagePushInline,
+			TaskKey:  fmt.Sprintf("message-push-inline:%d", job.Id), Priority: tgJobPriorityUrgent, MaxAttempts: 5,
+		})
+		if err != nil {
+			return gerror.Wrap(err, "提交Inline账号任务失败")
 		}
-		if err := s.completeMessagePushJob(ctx, job, messages, "更新快速推送任务状态失败"); err != nil {
-			return err
-		}
-		if inlineErr == nil {
-			s.appendTelegramJobLog(ctx, job, "inline_send", sysin.MessagePushStatusSent, "Inline机器人消息模板推送成功")
-		} else {
-			s.appendTelegramJobLog(ctx, job, "account_fallback", sysin.MessagePushStatusSent, "Inline推送失败，已复用同一账号客户端直发："+inlineErr.Error())
-		}
+		s.appendTelegramJobLog(ctx, job, "inline_send", "queued", fmt.Sprintf("Inline任务已提交到账号服务 accountTaskId:%d tgAccountId:%d", accountTaskId, channel.TgAccountId))
 		return nil
 	} else {
 		reason := "模板包含媒体"

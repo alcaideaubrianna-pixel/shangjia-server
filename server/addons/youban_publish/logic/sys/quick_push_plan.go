@@ -278,7 +278,7 @@ func (s *sSysPublish) QuickPushExecuteByBot(ctx context.Context, in *sysin.Quick
 			targets = append(targets, &messageTemplatePushTarget{Channel: channel, AccountId: plan.AccountId, OperationNo: quickPushOperationNo(plan.Id, template.Id, channel.TargetChatId), Priority: tgJobPriorityUrgent, QueueName: tgQueueNameUrgent})
 		}
 	}
-	batch := s.pushMessageTemplateTargetsWithSeed(ctx, template, targets, in.TenantId, accountId)
+	batch := s.queueMessageTemplateTargets(ctx, template, targets, in.TenantId, accountId)
 	res.Total += batch.Total
 	res.Success += batch.Success
 	res.Failed += batch.Failed

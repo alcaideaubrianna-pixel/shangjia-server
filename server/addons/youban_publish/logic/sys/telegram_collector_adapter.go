@@ -56,9 +56,58 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Conte
 		return nil, h.publish.pullMaterialImportPages(ctx, client, importTask, peer, cache)
 	case collectorin.AccountTaskTypeDialogCacheRefresh:
 		return nil, h.publish.handleDialogCacheRefreshAccountTask(ctx, client, task)
+	case collectorin.AccountTaskTypeMessagePushInline:
+		return nil, h.publish.handleMessagePushInlineAccountTask(ctx, client, task)
 	default:
 		return nil, gerror.Newf("不支持的Telegram账号任务类型：%s", task.TaskType)
 	}
+}
+
+func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
+	const prefix = "message-push-inline:"
+	jobId, err := strconv.ParseInt(strings.TrimPrefix(task.TaskKey, prefix), 10, 64)
+	if err != nil || jobId <= 0 || !strings.HasPrefix(task.TaskKey, prefix) {
+		return gerror.New("Inline账号任务参数无效")
+	}
+	job, err := s.telegramJobById(ctx, jobId)
+	if err != nil {
+		return err
+	}
+	if job.Status == sysin.MessagePushStatusSent {
+		return nil
+	}
+	templateId, err := messagePushTemplateIdFromOperationNo(job.OperationNo)
+	if err != nil {
+		return err
+	}
+	template, err := s.messageTemplate(ctx, templateId, job.TenantId)
+	if err != nil {
+		return err
+	}
+	channel, err := s.messagePushChannelFromJob(ctx, job)
+	if err != nil {
+		return err
+	}
+	if task.AccountID != channel.TgAccountId {
+		return gerror.New("Inline账号任务与目标频道账号不一致")
+	}
+	peer, err := messagePushInputPeer(channel)
+	if err != nil {
+		return err
+	}
+	botUsername, err := inlineBotUsername(ctx)
+	if err != nil {
+		return err
+	}
+	messages, err := sendInlineTemplateWithClient(ctx, client, peer, botUsername, template.SerialNo)
+	if err != nil {
+		return gerror.Wrapf(err, "Inline推送失败 serial:%s", template.SerialNo)
+	}
+	if err = s.completeMessagePushJob(ctx, job, messages, "更新Inline消息推送任务状态失败"); err != nil {
+		return err
+	}
+	s.appendTelegramJobLog(ctx, job, "inline_send", sysin.MessagePushStatusSent, "账号服务Inline机器人消息模板推送成功")
+	return nil
 }
 
 func (p *publishCollectorAccountMediaProvider) ResolvePeer(ctx context.Context, tenantID, accountID int64, chatID string, client *telegram.Client) (tg.InputPeerClass, error) {

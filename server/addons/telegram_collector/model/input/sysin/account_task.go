@@ -15,6 +15,7 @@ const (
 	AccountTaskTypeMediaDownload             = "media_download"
 	AccountTaskTypeUsernameResolveDiagnostic = "username_resolve_diagnostic"
 	AccountTaskTypeDialogCacheRefresh        = "dialog_cache_refresh"
+	AccountTaskTypeMessagePushInline         = "message_push_inline"
 )
 
 type AccountTaskSubmit struct {

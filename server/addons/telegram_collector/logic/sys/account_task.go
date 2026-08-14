@@ -110,6 +110,7 @@ func validateAccountTaskSubmit(in *sysin.AccountTaskSubmit) error {
 		}
 	case sysin.AccountTaskTypeUsernameResolveDiagnostic:
 	case sysin.AccountTaskTypeDialogCacheRefresh:
+	case sysin.AccountTaskTypeMessagePushInline:
 	default:
 		return gerror.Newf("不支持的Telegram账号任务类型：%s", in.TaskType)
 	}

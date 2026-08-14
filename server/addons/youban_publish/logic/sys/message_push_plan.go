@@ -378,7 +378,7 @@ func (s *sSysPublish) executeMessagePushPlan(ctx context.Context, plan messagePu
 				delayIndex++
 			}
 		}
-		batch := s.pushMessageTemplateTargetsWithSeed(ctx, template, targets, plan.TenantId, plan.AccountId)
+		batch := s.queueMessageTemplateTargets(ctx, template, targets, plan.TenantId, plan.AccountId)
 		success += batch.Success
 		failed += batch.Failed
 		for _, result := range batch.Results {
