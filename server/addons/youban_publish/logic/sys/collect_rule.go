@@ -40,6 +40,38 @@ func (s *sSysPublish) CollectRuleList(ctx context.Context, in *sysin.CollectRule
 	if err = mod.Page(in.Page, in.PerPage).OrderAsc("sort").OrderDesc("id").Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取采集规则失败")
 	}
+	if err = fillCollectRuleDetails(ctx, list); err != nil {
+		return nil, 0, err
+	}
+	return
+}
+
+func (s *sSysPublish) CollectRuleView(ctx context.Context, in *sysin.CollectRuleViewInp) (res *sysin.CollectRuleModel, err error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil || in.Id <= 0 {
+		return nil, gerror.New("规则ID不能为空")
+	}
+	if err = pdao.YoubanPublishCollectRule.Ctx(ctx).
+		Where("id", in.Id).
+		Where("tenant_id", account.TenantId).
+		Where("account_id", account.Id).
+		WhereNull("deleted_at").
+		Scan(&res); err != nil {
+		return nil, gerror.Wrap(err, "获取采集规则失败")
+	}
+	if res == nil || res.Id <= 0 {
+		return nil, gerror.New("采集规则不存在")
+	}
+	if err = fillCollectRuleDetails(ctx, []*sysin.CollectRuleModel{res}); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func fillCollectRuleDetails(ctx context.Context, list []*sysin.CollectRuleModel) error {
 	ruleIds := make([]int64, 0, len(list))
 	for _, item := range list {
 		if item != nil {
@@ -48,7 +80,7 @@ func (s *sSysPublish) CollectRuleList(ctx context.Context, in *sysin.CollectRule
 	}
 	channelMap, err := collectRuleChannelMap(ctx, ruleIds)
 	if err != nil {
-		return nil, 0, err
+		return err
 	}
 	for _, item := range list {
 		if item != nil {
@@ -57,7 +89,7 @@ func (s *sSysPublish) CollectRuleList(ctx context.Context, in *sysin.CollectRule
 	}
 	itemMap, err := collectRuleItemMap(ctx, ruleIds)
 	if err != nil {
-		return nil, 0, err
+		return err
 	}
 	for _, item := range list {
 		if item == nil || itemMap[item.Id] == nil {
@@ -77,7 +109,7 @@ func (s *sSysPublish) CollectRuleList(ctx context.Context, in *sysin.CollectRule
 			item.Replacements = append(item.Replacements, sysin.CollectRuleReplaceModel{From: replacement.From, To: replacement.To})
 		}
 	}
-	return
+	return nil
 }
 
 func (s *sSysPublish) CollectRuleSave(ctx context.Context, in *sysin.CollectRuleSaveInp) (id int64, err error) {

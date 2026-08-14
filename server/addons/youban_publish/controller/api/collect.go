@@ -133,6 +133,14 @@ func (c *cPublish) CollectRuleList(ctx context.Context, req *publish.CollectRule
 	return
 }
 
+func (c *cPublish) CollectRuleView(ctx context.Context, req *publish.CollectRuleViewReq) (res *publish.CollectRuleViewRes, err error) {
+	view, err := service.SysPublish().CollectRuleView(ctx, &req.CollectRuleViewInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.CollectRuleViewRes{CollectRuleModel: view}, nil
+}
+
 func (c *cPublish) CollectRuleSave(ctx context.Context, req *publish.CollectRuleSaveReq) (res *publish.CollectRuleSaveRes, err error) {
 	id, err := service.SysPublish().CollectRuleSave(ctx, &req.CollectRuleSaveInp)
 	if err != nil {

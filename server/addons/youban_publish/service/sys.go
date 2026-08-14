@@ -302,6 +302,7 @@ type ISysPublish interface {
 	CollectHistoryTaskList(ctx context.Context, in *sysin.CollectHistoryTaskListInp) (list []*sysin.CollectHistoryTaskModel, totalCount int, err error)
 	CollectHistoryLogList(ctx context.Context, in *sysin.CollectHistoryLogListInp) (list []*sysin.CollectHistoryLogModel, totalCount int, err error)
 	CollectRuleList(ctx context.Context, in *sysin.CollectRuleListInp) (list []*sysin.CollectRuleModel, totalCount int, err error)
+	CollectRuleView(ctx context.Context, in *sysin.CollectRuleViewInp) (res *sysin.CollectRuleModel, err error)
 	CollectRuleSave(ctx context.Context, in *sysin.CollectRuleSaveInp) (id int64, err error)
 	CollectRuleDelete(ctx context.Context, in *sysin.IdsInp) (err error)
 	CollectEventList(ctx context.Context, in *sysin.CollectEventListInp) (list []*sysin.CollectEventModel, totalCount int, err error)

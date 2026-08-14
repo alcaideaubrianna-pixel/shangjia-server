@@ -120,6 +120,15 @@ type CollectRuleListRes struct {
 	List []*sysin.CollectRuleModel `json:"list" dc:"规则列表"`
 }
 
+type CollectRuleViewReq struct {
+	g.Meta `path:"/publish/collect/rule/view" method:"get" tags:"上架插件" summary:"采集规则详情"`
+	sysin.CollectRuleViewInp
+}
+
+type CollectRuleViewRes struct {
+	*sysin.CollectRuleModel
+}
+
 type CollectRuleSaveReq struct {
 	g.Meta `path:"/publish/collect/rule/save" method:"post" tags:"上架插件" summary:"保存采集规则"`
 	sysin.CollectRuleSaveInp

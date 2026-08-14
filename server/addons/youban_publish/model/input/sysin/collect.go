@@ -279,6 +279,10 @@ type CollectRuleListInp struct {
 	Status        int    `json:"status" dc:"状态"`
 }
 
+type CollectRuleViewInp struct {
+	Id int64 `json:"id" v:"required|min:1#规则ID不能为空|规则ID不能为空" dc:"规则ID"`
+}
+
 type CollectRuleModel struct {
 	Id                      int64                     `json:"id" dc:"ID"`
 	TenantId                int64                     `json:"tenantId" dc:"租户ID"`
