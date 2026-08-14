@@ -1592,6 +1592,8 @@ func (s *sSysBot) createProfileFromMessage(ctx context.Context, botId int64, msg
 }
 
 func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64, msg *models.Message, account *botProfileAccount, session *profileSessionRow, text string) error {
+	trace := fmt.Sprintf("PF-%d", session.Id)
+	startedAt := time.Now()
 	chatId := fmt.Sprintf("%d", msg.Chat.ID)
 	if err := profileMessageMediaSizeError(msg); err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
@@ -1613,8 +1615,10 @@ func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64,
 	}
 	media, err := s.resolveTelegramMessageMedia(ctx, row.BotToken, msg)
 	if err != nil {
+		g.Log().Warningf(ctx, "Bot资料处理失败 trace:%s stage:resolve_media elapsed_ms:%d err:%v", trace, time.Since(startedAt).Milliseconds(), err)
 		return err
 	}
+	g.Log().Infof(ctx, "Bot资料处理阶段 trace:%s stage:media_resolved elapsed_ms:%d media_count:%d", trace, time.Since(startedAt).Milliseconds(), len(media))
 	if strings.TrimSpace(msg.MediaGroupID) != "" && len(media) > 0 {
 		return s.collectProfileMediaGroup(ctx, row.BotToken, account, session, msg, text, media)
 	}
@@ -1622,6 +1626,8 @@ func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64,
 }
 
 func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, chatId string, account *botProfileAccount, session *profileSessionRow, text string, media []*publishsysin.MessageTemplateMediaInp) error {
+	trace := fmt.Sprintf("PF-%d", session.Id)
+	startedAt := time.Now()
 	draft := decodeProfileCreateDraft(session.PayloadJson)
 	switch session.Step {
 	case "waiting_display":
@@ -1674,12 +1680,14 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 		}
 		res, err := publishService.SysPublish().BotProfileCreate(ctx, &publishsysin.BotProfileCreateInp{TenantId: account.TenantId, AccountId: account.AccountId, PlainText: draft.DisplayText, DisplayMedia: draft.DisplayMedia, VerifyText: draft.VerifyText, VerifyMedia: draft.VerifyMedia, Status: 2})
 		if err != nil {
+			g.Log().Warningf(ctx, "Bot资料创建失败 trace:%s stage:create_profile elapsed_ms:%d err:%v", trace, time.Since(startedAt).Milliseconds(), err)
 			_ = s.resetProfileSessionStep(ctx, session.Id, "saving", "waiting_verify", draft)
 			if replyErr := s.replyBotError(ctx, botId, chatId, "资料管理", err); replyErr != nil {
 				return replyErr
 			}
 			return s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_verify")
 		}
+		g.Log().Infof(ctx, "Bot资料创建完成 trace:%s stage:create_profile elapsed_ms:%d profile_id:%d", trace, time.Since(startedAt).Milliseconds(), res.Id)
 		_ = s.completeProfileSession(ctx, session.Id)
 		return s.sendProfileCreateSuccess(ctx, botId, chatId, res)
 	}
