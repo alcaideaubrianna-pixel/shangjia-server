@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -30,6 +31,29 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Conte
 	switch task.TaskType {
 	case collectorin.AccountTaskTypeHistoryPage:
 		return nil, h.publish.handleCollectHistoryAccountTask(ctx, client, task.HistoryTaskID)
+	case collectorin.AccountTaskTypeMaterialImportHistoryPage:
+		const prefix = "material-import:"
+		parts := strings.Split(strings.TrimPrefix(task.TaskKey, prefix), ":")
+		taskID, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil || taskID <= 0 || !strings.HasPrefix(task.TaskKey, prefix) {
+			return nil, gerror.New("资料导入账号任务参数无效")
+		}
+		importTask, err := h.publish.materialImportTaskByPrimary(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		cache, err := h.publish.tgChannelCacheByChannelId(ctx, importTask.TenantId, importTask.TgAccountId, importTask.SourceChatId)
+		if err != nil {
+			return nil, err
+		}
+		peer, err := collectInputPeerChannel(cache)
+		if err != nil {
+			return nil, err
+		}
+		if _, err = client.Self(ctx); err != nil {
+			return nil, err
+		}
+		return nil, h.publish.pullMaterialImportPages(ctx, client, importTask, peer, cache)
 	case collectorin.AccountTaskTypeDialogCacheRefresh:
 		return nil, h.publish.handleDialogCacheRefreshAccountTask(ctx, client, task)
 	default:

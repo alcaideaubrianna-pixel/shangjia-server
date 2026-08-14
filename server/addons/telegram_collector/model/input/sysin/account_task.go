@@ -11,6 +11,7 @@ const (
 	AccountTaskStatusCancelled   = "cancelled"
 
 	AccountTaskTypeHistoryPage               = "history_page"
+	AccountTaskTypeMaterialImportHistoryPage = "material_import_history_page"
 	AccountTaskTypeMediaDownload             = "media_download"
 	AccountTaskTypeUsernameResolveDiagnostic = "username_resolve_diagnostic"
 	AccountTaskTypeDialogCacheRefresh        = "dialog_cache_refresh"

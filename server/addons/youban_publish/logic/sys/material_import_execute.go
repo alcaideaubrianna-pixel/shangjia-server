@@ -14,6 +14,8 @@ import (
 	"github.com/gotd/td/tg"
 
 	"github.com/gogf/gf/v2/util/gconv"
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	hglock "hotgo/internal/library/hgrds/lock"
@@ -84,21 +86,16 @@ func (s *sSysPublish) executeMaterialImport(ctx context.Context, task *sysin.Mat
 }
 
 func (s *sSysPublish) executeMaterialImportPull(ctx context.Context, task *sysin.MaterialImportTaskModel) error {
-	cache, err := s.tgChannelCacheByChannelId(ctx, task.TenantId, task.TgAccountId, task.SourceChatId)
+	_, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: task.TenantId, AccountID: task.TgAccountId,
+		TaskType: collectorin.AccountTaskTypeMaterialImportHistoryPage,
+		TaskKey:  fmt.Sprintf("material-import:%d:offset:%d", task.Id, task.PullOffsetId),
+		Priority: collectorin.EventPriorityUrgent, MaxAttempts: 5,
+	})
 	if err != nil {
-		return err
+		return gerror.Wrap(err, "提交资料导入账号任务失败")
 	}
-	peer, err := collectInputPeerChannel(cache)
-	if err != nil {
-		return err
-	}
-	run := func(runCtx context.Context, client *telegram.Client) error {
-		if _, selfErr := client.Self(runCtx); selfErr != nil {
-			return selfErr
-		}
-		return s.pullMaterialImportPages(runCtx, client, task, peer, cache)
-	}
-	return s.executeTelegramAccountOperation(ctx, task.TgAccountId, 50*time.Minute, run)
+	return nil
 }
 
 func (s *sSysPublish) pullMaterialImportPages(ctx context.Context, client *telegram.Client, task *sysin.MaterialImportTaskModel, peer *tg.InputPeerChannel, cache *sysin.ChannelCacheModel) error {
