@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogf/gf/v2/errors/gerror"
+
 	"hotgo/internal/library/hgrds/lock"
 )
 
@@ -57,6 +59,13 @@ func TestWaitTelegramAccountClientLeaseStopsWithContext(t *testing.T) {
 	}
 	if got := attempts.Load(); got != 0 {
 		t.Fatalf("attempts = %d, want 0 after context cancellation", got)
+	}
+}
+
+func TestTelegramAccountBusyErrorSurvivesWrap(t *testing.T) {
+	err := gerror.Wrap(&telegramAccountBusyError{tgAccountId: 33, err: context.DeadlineExceeded}, "Inline推送失败")
+	if !isTelegramAccountBusyError(err) {
+		t.Fatalf("wrapped error should remain a Telegram account busy error: %v", err)
 	}
 }
 

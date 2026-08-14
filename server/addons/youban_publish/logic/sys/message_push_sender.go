@@ -301,6 +301,9 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 			s.appendTelegramJobLog(ctx, job, "inline_send", sysin.MessagePushStatusSent, "Inline机器人消息模板推送成功")
 			return nil
 		}
+		if isTelegramAccountBusyError(inlineErr) {
+			return inlineErr
+		}
 		s.appendTelegramJobLog(ctx, job, "inline_send", "fallback", "Inline推送失败，尝试原消息保真发送："+inlineErr.Error())
 	} else {
 		reason := "模板包含媒体"
@@ -351,7 +354,7 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 }
 
 func (s *sSysPublish) sendMessageTemplateByBot(ctx context.Context, job telegramJobRecord, template *sysin.MessageTemplateModel, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
-	token, err := s.telegramJobBotToken(ctx, job.BotId, job.TenantId)
+	token, err := botService.SysBot().OfficialBotToken(ctx)
 	if err != nil {
 		return nil, err
 	}
