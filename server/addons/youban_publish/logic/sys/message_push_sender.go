@@ -313,27 +313,30 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 		}
 		s.appendTelegramJobLog(ctx, job, "inline_send", "skipped", "未执行Inline推送："+reason)
 	}
-	if messages, copied, copyErr := s.copyOriginalMessageTemplateByBot(ctx, job, template); copied {
-		if copyErr == nil {
-			if err := s.completeMessagePushJob(ctx, job, messages, "更新原消息复制任务状态失败"); err != nil {
-				return err
+	if !messageTemplateRequiresSanitizedUpload(media) {
+		if messages, copied, copyErr := s.copyOriginalMessageTemplateByBot(ctx, job, template); copied {
+			if copyErr == nil {
+				if err := s.completeMessagePushJob(ctx, job, messages, "更新原消息复制任务状态失败"); err != nil {
+					return err
+				}
+				s.appendTelegramJobLog(ctx, job, "source_copy", sysin.MessagePushStatusSent, "Inline不可用，已复制原Telegram消息，完整保留格式、自定义Emoji和媒体组")
+				return nil
 			}
-			s.appendTelegramJobLog(ctx, job, "source_copy", sysin.MessagePushStatusSent, "Inline不可用，已复制原Telegram消息，完整保留格式、自定义Emoji和媒体组")
-			return nil
+			s.appendTelegramJobLog(ctx, job, "source_copy", "fallback", "Bot复制原消息失败，改用Bot本地媒体上传："+copyErr.Error())
 		}
-		s.appendTelegramJobLog(ctx, job, "source_copy", "fallback", "Bot复制原消息失败，尝试TG账号无来源转发："+copyErr.Error())
-		messages, forwardErr := s.forwardOriginalMessageTemplateByAccount(ctx, tgAccountId, channel, template, media)
-		if forwardErr == nil {
-			if err := s.completeMessagePushJob(ctx, job, messages, "更新原消息账号转发任务状态失败"); err != nil {
-				return err
-			}
-			s.appendTelegramJobLog(ctx, job, "source_forward", sysin.MessagePushStatusSent, "Inline不可用，TG账号已无来源转发原消息，完整保留格式、自定义Emoji和媒体组")
-			return nil
+	}
+	messages, botErr := s.sendMessageTemplateByBot(ctx, job, template, media)
+	if botErr == nil {
+		if err := s.completeMessagePushJob(ctx, job, messages, "更新Bot消息推送任务状态失败"); err != nil {
+			return err
 		}
-		s.appendTelegramJobLog(ctx, job, "source_forward", "fallback", "TG账号无来源转发失败，回退普通模板发送："+forwardErr.Error())
-		if messageTemplateRequiresSourcePreservation(template) {
-			return gerror.Wrap(forwardErr, "模板包含Telegram自定义Emoji，保真转发失败，已停止降级发送")
-		}
+		s.appendTelegramJobLog(ctx, job, "bot_upload", sysin.MessagePushStatusSent, "原消息复制失败，已由Bot重新上传本地媒体")
+		return nil
+	} else {
+		s.appendTelegramJobLog(ctx, job, "bot_upload", "fallback", "Bot本地上传失败，准备进入受控降级："+botErr.Error())
+	}
+	if !isTelegramMediaSizeLimitError(botErr) {
+		return gerror.Wrap(botErr, "Bot上传消息失败，未执行TG账号降级")
 	}
 	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusSending, "开始使用账号直发消息模板")
 	messages, err := s.sendMessageTemplateByTgAccount(ctx, tgAccountId, channel, telegramRichTextHTML(template.Text), media, messageTemplateHash(template))
@@ -345,6 +348,18 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 	}
 	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusSent, "账号消息模板推送成功")
 	return nil
+}
+
+func (s *sSysPublish) sendMessageTemplateByBot(ctx context.Context, job telegramJobRecord, template *sysin.MessageTemplateModel, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
+	token, err := s.telegramJobBotToken(ctx, job.BotId, job.TenantId)
+	if err != nil {
+		return nil, err
+	}
+	bot, err := s.telegramBot(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	return s.sendTelegramMediaSet(ctx, bot, normalizeTelegramChannelChatID(job.TargetChatId), "display", telegramRichTextHTML(template.Text), media)
 }
 
 func (s *sSysPublish) completeMessagePushJob(ctx context.Context, job telegramJobRecord, messages []*telegramSentMessage, errorMessage string) error {
@@ -488,7 +503,10 @@ func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAcco
 	if err != nil {
 		return nil, err
 	}
-	source, err := s.messageTemplateForwardSource(ctx, tgAccountId, templateHash)
+	var source *messageTemplateForwardSource
+	if !messageTemplateRequiresSanitizedUpload(media) {
+		source, err = s.messageTemplateForwardSource(ctx, tgAccountId, templateHash)
+	}
 	if err != nil {
 		g.Log().Warningf(ctx, "读取消息模板复用源失败 tgAccountId:%d templateHash:%s err:%+v", tgAccountId, templateHash, err)
 	}
@@ -528,6 +546,15 @@ func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAcco
 		return nil, gerror.New("账号推送已调用，但未读取到TG消息结果")
 	}
 	return sent, nil
+}
+
+func messageTemplateRequiresSanitizedUpload(media []*telegramMediaItem) bool {
+	for _, item := range media {
+		if item != nil && item.AntiScanEnabled {
+			return true
+		}
+	}
+	return false
 }
 
 func sendMessageTemplateWithGotd(ctx context.Context, builder *gotdmessage.RequestBuilder, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
