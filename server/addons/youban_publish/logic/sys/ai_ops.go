@@ -54,6 +54,22 @@ func (s *sSysPublish) AIOpsRepublishProfiles(ctx context.Context, in *sysin.Prof
 }
 
 func collectProfileMediaComplete(ctx context.Context, profileId int64) (bool, error) {
+	profile, err := g.DB().Model("hg_content_profile p").Safe().Ctx(ctx).
+		Fields("p.source_type,COUNT(DISTINCT m.id) AS media_count").
+		LeftJoin("hg_youban_publish_media m", "m.profile_id=p.id AND m.deleted_at IS NULL").
+		Where("p.id", profileId).WhereNull("p.deleted_at").
+		Group("p.id,p.source_type").One()
+	if err != nil {
+		return false, gerror.Wrap(err, "读取资料媒体信息失败")
+	}
+	if profile.IsEmpty() {
+		return false, nil
+	}
+	if profile["source_type"].String() != "youban_collect" {
+		complete := profile["media_count"].Int() > 0
+		g.Log().Infof(ctx, "非采集资料媒体完整性检查 profileId:%d sourceType:%s media:%d complete:%t", profileId, profile["source_type"].String(), profile["media_count"].Int(), complete)
+		return complete, nil
+	}
 	// collect_dispatch has no deleted_at column. Safe() would append a
 	// non-existent d.deleted_at predicate when the table is aliased.
 	row, err := g.DB().Model("hg_youban_publish_collect_dispatch d").Ctx(ctx).
