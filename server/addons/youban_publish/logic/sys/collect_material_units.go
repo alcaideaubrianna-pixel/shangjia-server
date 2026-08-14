@@ -40,7 +40,13 @@ func pairCollectMaterialMessages(messages []collectMaterialMessageView) []collec
 	for index, message := range messages {
 		switch classifyProfileMessage(message.RawText, message.Media).Kind {
 		case profileMessageKindDisplay:
-			lastDisplayIndex = index
+			// A repeated profile text may be posted between a media group and its
+			// verification video. Keep the media-bearing group as the pairing
+			// candidate; a text-only display can start a pair only when no display
+			// is currently waiting.
+			if lastDisplayIndex < 0 || len(message.Media) > 0 {
+				lastDisplayIndex = index
+			}
 		case profileMessageKindVerify:
 			if lastDisplayIndex >= 0 {
 				pairs = append(pairs, collectMaterialPair{DisplayIndex: lastDisplayIndex, VerifyIndex: index})

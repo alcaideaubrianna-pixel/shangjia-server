@@ -106,6 +106,23 @@ func TestPairCollectMaterialMessagesCases(t *testing.T) {
 			want: []collectMaterialPair{{DisplayIndex: 0, VerifyIndex: 2}},
 		},
 		{
+			name: "repeated profile text between media display and verify",
+			views: []collectMaterialMessageView{
+				{RawText: "昵称：SKS457", Media: []collectMediaItem{{Type: "photo", FileId: "p"}, {Type: "video", FileId: "display-v"}}},
+				{RawText: "昵称：SKS457\n年龄：20"},
+				{Media: []collectMediaItem{{Type: "video", FileId: "verify-v"}}},
+			},
+			want: []collectMaterialPair{{DisplayIndex: 0, VerifyIndex: 2}},
+		},
+		{
+			name: "text only display can pair when no media display is waiting",
+			views: []collectMaterialMessageView{
+				{RawText: "昵称：A\n年龄：20"},
+				{Media: []collectMediaItem{{Type: "video", FileId: "v"}}},
+			},
+			want: []collectMaterialPair{{DisplayIndex: 0, VerifyIndex: 1}},
+		},
+		{
 			name: "next display closes previous",
 			views: []collectMaterialMessageView{
 				{RawText: "昵称：A", Media: []collectMediaItem{{Type: "photo", FileId: "p1"}}},
