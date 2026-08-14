@@ -55,6 +55,36 @@ func TestQuickPushPlanKeyboardIncludesTemplateSave(t *testing.T) {
 	}
 }
 
+func TestQuickPushEntryKeyboardIncludesTemplateActions(t *testing.T) {
+	session := &quickPushSession{SessionId: "session"}
+	keyboard := quickPushEntryKeyboard(session)
+	if !quickPushKeyboardHasButton(keyboard, "取消", quickPushCallbackData("cancel", session.SessionId, 0)) {
+		t.Fatal("expected cancel button")
+	}
+	if !quickPushKeyboardHasButton(keyboard, "查看已有模板", quickPushCallbackData("templates", session.SessionId, 0)) {
+		t.Fatal("expected template list button")
+	}
+}
+
+func TestQuickPushTemplateDetailKeyboardIncludesManageActions(t *testing.T) {
+	session := &quickPushSession{SessionId: "session"}
+	keyboard := quickPushTemplateDetailKeyboard(session, 12, false)
+	for _, action := range []struct {
+		text string
+		name string
+	}{
+		{text: "修改名称", name: "editname"},
+		{text: "修改文本", name: "edittext"},
+		{text: "修改媒体", name: "editmedia"},
+		{text: "删除", name: "delete"},
+		{text: "快速发送", name: "use"},
+	} {
+		if !quickPushKeyboardHasButton(keyboard, action.text, quickPushCallbackData(action.name, session.SessionId, 12)) {
+			t.Fatalf("expected %s button", action.text)
+		}
+	}
+}
+
 func TestQuickPushMediaUploadContext(t *testing.T) {
 	ctx := quickPushMediaUploadContext(context.Background(), 123)
 	if got := contexts.GetModule(ctx); got != consts.AppApi {

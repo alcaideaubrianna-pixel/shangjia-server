@@ -204,6 +204,124 @@ func (s *sSysPublish) QuickPushBotPlanList(ctx context.Context, accountId int64)
 	return quickPushPlanModels(records), nil
 }
 
+func (s *sSysPublish) QuickPushBotTemplateList(ctx context.Context, accountId int64) ([]*sysin.MessageTemplateModel, error) {
+	account, err := s.quickPushAccountById(ctx, accountId)
+	if err != nil {
+		return nil, err
+	}
+	if err = ensureMessagePushTables(ctx); err != nil {
+		return nil, err
+	}
+	list := make([]*sysin.MessageTemplateModel, 0)
+	if err = g.DB().Model(messageTemplateTable).Safe().Ctx(ctx).
+		Where("tenant_id", account.TenantId).Where("status", consts.StatusEnabled).WhereNull("deleted_at").
+		OrderDesc("id").Limit(20).Scan(&list); err != nil {
+		return nil, gerror.Wrap(err, "读取快速推送模板失败")
+	}
+	return list, nil
+}
+
+func (s *sSysPublish) QuickPushBotTemplateView(ctx context.Context, accountId int64, templateId int64) (*sysin.MessageTemplateModel, error) {
+	account, err := s.quickPushAccountById(ctx, accountId)
+	if err != nil {
+		return nil, err
+	}
+	return s.quickPushMessageTemplateById(ctx, templateId, account.TenantId)
+}
+
+func (s *sSysPublish) QuickPushBotTemplateUpdate(ctx context.Context, in *sysin.QuickPushBotTemplateUpdateInp) error {
+	if in == nil || in.TemplateId <= 0 {
+		return gerror.New("消息模板不能为空")
+	}
+	account, err := s.quickPushAccountById(ctx, in.OperatorAccountId)
+	if err != nil {
+		return err
+	}
+	template, err := s.quickPushMessageTemplateById(ctx, in.TemplateId, account.TenantId)
+	if err != nil {
+		return err
+	}
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		name = template.Name
+	}
+	text := strings.TrimSpace(in.Text)
+	media := in.Media
+	if media == nil {
+		text = template.Text
+		media = messageTemplateMediaInputs(template.Media)
+		in.SourceMessageRecordId = template.SourceMessageRecordId
+	}
+	if text == "" && len(media) == 0 {
+		return gerror.New("模板文案和媒体不能同时为空")
+	}
+	previousSourceRecordIds := messageTemplateStoredSourceRecordIds(template, template.Media)
+	if in.Media != nil {
+		if err = botService.SysBot().RetainStoredMessages(ctx, quickPushSourceRecordIds(in.SourceMessageRecordId, media)); err != nil {
+			return err
+		}
+	}
+	now := gtime.Now()
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if _, updateErr := tx.Model(messageTemplateTable).Ctx(ctx).Where("id", template.Id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").Data(g.Map{"name": name, "text": text, "media_count": len(media), "source_message_record_id": in.SourceMessageRecordId, "updated_by": account.Id, "updated_at": now}).Update(); updateErr != nil {
+			return gerror.Wrap(updateErr, "更新快速推送模板失败")
+		}
+		if in.Media == nil {
+			return nil
+		}
+		if _, deleteErr := tx.Model(messageMediaTable).Ctx(ctx).Where("template_id", template.Id).Delete(); deleteErr != nil {
+			return gerror.Wrap(deleteErr, "清理快速推送模板媒体失败")
+		}
+		for index, item := range media {
+			if item == nil {
+				continue
+			}
+			sortIndex := item.SortIndex
+			if sortIndex <= 0 {
+				sortIndex = index + 1
+			}
+			if _, insertErr := tx.Model(messageMediaTable).Ctx(ctx).Data(g.Map{"template_id": template.Id, "tenant_id": account.TenantId, "source_message_record_id": item.SourceMessageRecordId, "media_type": item.MediaType, "name": item.Name, "file_url": item.FileUrl, "storage_path": item.StoragePath, "poster_url": item.PosterUrl, "poster_storage_path": item.PosterStoragePath, "tg_file_id": item.TgFileId, "tg_thumb_file_id": item.TgThumbFileId, "asset_hash": messageMediaAssetHash(item), "sort_index": sortIndex, "created_at": now, "updated_at": now}).Insert(); insertErr != nil {
+				return gerror.Wrap(insertErr, "保存快速推送模板媒体失败")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if in.Media != nil {
+		return s.releaseUnusedStoredMessageRecords(ctx, previousSourceRecordIds)
+	}
+	return nil
+}
+
+func (s *sSysPublish) QuickPushBotTemplateDelete(ctx context.Context, accountId int64, templateId int64) error {
+	account, err := s.quickPushAccountById(ctx, accountId)
+	if err != nil {
+		return err
+	}
+	template, err := s.quickPushMessageTemplateById(ctx, templateId, account.TenantId)
+	if err != nil {
+		return err
+	}
+	_, err = g.DB().Model(messageTemplateTable).Safe().Ctx(ctx).Where("id", template.Id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").Data(g.Map{"deleted_by": account.Id, "deleted_at": gtime.Now(), "updated_at": gtime.Now()}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "删除快速推送模板失败")
+	}
+	return s.releaseUnusedStoredMessageRecords(ctx, messageTemplateStoredSourceRecordIds(template, template.Media))
+}
+
+func messageTemplateMediaInputs(media []*sysin.MessageTemplateMediaModel) []*sysin.MessageTemplateMediaInp {
+	items := make([]*sysin.MessageTemplateMediaInp, 0, len(media))
+	for _, item := range media {
+		if item == nil {
+			continue
+		}
+		items = append(items, &sysin.MessageTemplateMediaInp{Id: item.Id, SourceMessageRecordId: item.SourceMessageRecordId, MediaType: item.MediaType, Name: item.Name, FileUrl: item.FileUrl, StoragePath: item.StoragePath, PosterUrl: item.PosterUrl, PosterStoragePath: item.PosterStoragePath, TgFileId: item.TgFileId, TgThumbFileId: item.TgThumbFileId, AssetHash: item.AssetHash, SortIndex: item.SortIndex})
+	}
+	return items
+}
+
 func (s *sSysPublish) QuickPushSaveTemplateByBot(ctx context.Context, in *sysin.QuickPushBotSaveTemplateInp) (*sysin.MessageTemplateSaveModel, error) {
 	if in == nil {
 		return nil, gerror.New("快速推送模板不能为空")

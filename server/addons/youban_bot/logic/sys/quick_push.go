@@ -25,6 +25,9 @@ import (
 const (
 	quickPushSessionStateWaiting   = "waiting_message"
 	quickPushSessionStateSelecting = "selecting_plans"
+	quickPushSessionStateEditName  = "editing_template_name"
+	quickPushSessionStateEditText  = "editing_template_text"
+	quickPushSessionStateEditMedia = "editing_template_media"
 	quickPushSessionTTL            = 30 * time.Minute
 	quickPushCallbackPrefix        = "yb_qp"
 )
@@ -72,7 +75,12 @@ func (quickPushFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *bo
 	if strings.TrimSpace(text) == "" {
 		text = "请发送或转发需要快速推送的文本、图片、视频或图文媒体组。"
 	}
-	return true, bot.reply(ctx, featureCtx.BotId, chatId, text)
+	row, err := bot.botById(ctx, featureCtx.BotId)
+	if err != nil {
+		return true, err
+	}
+	_, err = bot.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, quickPushEntryKeyboard(session))
+	return true, err
 }
 
 type quickPushSession struct {
@@ -89,6 +97,7 @@ type quickPushSession struct {
 	PlanIds               []int64                                 `json:"planIds"`
 	SelectedPlanIds       []int64                                 `json:"selectedPlanIds"`
 	SavedTemplateId       int64                                   `json:"savedTemplateId"`
+	EditingTemplateId     int64                                   `json:"editingTemplateId"`
 	CreatedAt             int64                                   `json:"createdAt"`
 }
 
@@ -100,7 +109,7 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 	}
 	telegramUserId := fmt.Sprintf("%d", event.Msg.From.ID)
 	session, err := bot.quickPushSession(ctx, event.BotId, telegramUserId)
-	if err != nil || session == nil || session.State != quickPushSessionStateWaiting {
+	if err != nil || session == nil {
 		return false, err
 	}
 	text := quickPushTelegramMessageText(event.Msg, event.Text)
@@ -108,6 +117,32 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 	// Without this guard, a stale waiting session consumes every later message.
 	if quickPushNavigationText(text) {
 		_ = bot.removeQuickPushSession(ctx, event.BotId, telegramUserId)
+		return false, nil
+	}
+	if session.State == quickPushSessionStateEditName || session.State == quickPushSessionStateEditText {
+		if text == "" {
+			return true, bot.reply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "请输入有效内容，或点击取消返回模板详情。")
+		}
+		update := &publishsysin.QuickPushBotTemplateUpdateInp{OperatorAccountId: session.OperatorAccountId, TemplateId: session.EditingTemplateId}
+		if session.State == quickPushSessionStateEditName {
+			update.Name = text
+		} else {
+			template, viewErr := publishService.SysPublish().QuickPushBotTemplateView(ctx, session.OperatorAccountId, session.EditingTemplateId)
+			if viewErr != nil {
+				return true, viewErr
+			}
+			update.Name = template.Name
+			update.Text = text
+			update.Media = messageTemplateMediaToInputs(template.Media)
+		}
+		if err = publishService.SysPublish().QuickPushBotTemplateUpdate(ctx, update); err != nil {
+			return true, bot.reply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "修改模板失败："+err.Error())
+		}
+		session.State = quickPushSessionStateWaiting
+		_ = bot.saveQuickPushSession(ctx, session)
+		return true, bot.sendQuickPushTemplateDetail(ctx, event.BotId, session, session.EditingTemplateId, "模板修改成功。\n\n")
+	}
+	if session.State != quickPushSessionStateWaiting && session.State != quickPushSessionStateEditMedia {
 		return false, nil
 	}
 	chatId := fmt.Sprintf("%d", event.Msg.Chat.ID)
@@ -134,6 +169,24 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 	if err != nil {
 		g.Log().Warningf(ctx, "快速推送Telegram媒体转存失败 botId:%d chatId:%s messageId:%d err:%+v", event.BotId, chatId, event.Msg.ID, err)
 		return true, bot.reply(ctx, event.BotId, chatId, "图片或视频下载保存失败，请稍后重新发送。")
+	}
+	if session.State == quickPushSessionStateEditMedia {
+		if len(media) == 0 {
+			return true, bot.reply(ctx, event.BotId, chatId, "请发送图片、视频或图文媒体组，或点击取消返回。")
+		}
+		if strings.TrimSpace(event.Msg.MediaGroupID) != "" {
+			return true, bot.reply(ctx, event.BotId, chatId, "修改模板媒体暂不支持分次接收媒体组，请将媒体作为一组重新发送。")
+		}
+		template, viewErr := publishService.SysPublish().QuickPushBotTemplateView(ctx, session.OperatorAccountId, session.EditingTemplateId)
+		if viewErr != nil {
+			return true, viewErr
+		}
+		if err = publishService.SysPublish().QuickPushBotTemplateUpdate(ctx, &publishsysin.QuickPushBotTemplateUpdateInp{OperatorAccountId: session.OperatorAccountId, TemplateId: template.Id, Name: template.Name, Text: template.Text, Media: media, SourceMessageRecordId: sourceMessageRecordId}); err != nil {
+			return true, bot.reply(ctx, event.BotId, chatId, "修改模板媒体失败："+err.Error())
+		}
+		session.State = quickPushSessionStateWaiting
+		_ = bot.saveQuickPushSession(ctx, session)
+		return true, bot.sendQuickPushTemplateDetail(ctx, event.BotId, session, session.EditingTemplateId, "模板媒体修改成功。\n\n")
 	}
 	if strings.TrimSpace(event.Msg.MediaGroupID) != "" && len(media) > 0 {
 		return true, bot.collectQuickPushMediaGroup(ctx, row.BotToken, session, event.Msg, text, media)
@@ -336,8 +389,15 @@ func (s *sSysBot) handleQuickPushCallback(ctx context.Context, botId int64, quer
 	}
 	callCtx, cancel := telegramAPICtx()
 	defer cancel()
-	if session == nil || session.SessionId != sessionId || session.State != quickPushSessionStateSelecting {
+	if session == nil || session.SessionId != sessionId {
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "快速推送会话已失效", ShowAlert: false})
+		return true, nil
+	}
+	if handled, callbackErr := s.handleQuickPushTemplateCallback(ctx, callCtx, tgBot, query, session, action, planId); handled {
+		return true, callbackErr
+	}
+	if session.State != quickPushSessionStateSelecting {
+		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "当前操作已失效", ShowAlert: false})
 		return true, nil
 	}
 	plans, err := publishService.SysPublish().QuickPushBotPlanList(ctx, session.OperatorAccountId)
@@ -659,6 +719,159 @@ func quickPushPlanKeyboard(session *quickPushSession, plans []*publishsysin.Quic
 	rows = append(rows, []models.InlineKeyboardButton{{Text: saveLabel, CallbackData: quickPushCallbackData("save", session.SessionId, 0)}})
 	rows = append(rows, []models.InlineKeyboardButton{{Text: "返回", CallbackData: quickPushCallbackData("cancel", session.SessionId, 0)}, {Text: "发送", CallbackData: quickPushCallbackData("send", session.SessionId, 0)}})
 	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func quickPushEntryKeyboard(session *quickPushSession) *models.InlineKeyboardMarkup {
+	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{
+		{Text: "取消", CallbackData: quickPushCallbackData("cancel", session.SessionId, 0)},
+		{Text: "查看已有模板", CallbackData: quickPushCallbackData("templates", session.SessionId, 0)},
+	}}}
+}
+
+func (s *sSysBot) handleQuickPushTemplateCallback(ctx context.Context, callCtx context.Context, tgBot *tgbot.Bot, query *models.CallbackQuery, session *quickPushSession, action string, templateId int64) (bool, error) {
+	switch action {
+	case "templates", "backlist":
+		list, err := publishService.SysPublish().QuickPushBotTemplateList(ctx, session.OperatorAccountId)
+		if err != nil {
+			return true, err
+		}
+		session.State = quickPushSessionStateWaiting
+		session.EditingTemplateId = 0
+		_ = s.saveQuickPushSession(ctx, session)
+		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
+		return true, s.editQuickPushMessageText(callCtx, tgBot, query, quickPushTemplateListText(list), quickPushTemplateListKeyboard(session, list))
+	case "view":
+		template, err := publishService.SysPublish().QuickPushBotTemplateView(ctx, session.OperatorAccountId, templateId)
+		if err != nil {
+			return true, err
+		}
+		session.EditingTemplateId = template.Id
+		session.State = quickPushSessionStateWaiting
+		_ = s.saveQuickPushSession(ctx, session)
+		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
+		return true, s.editQuickPushMessageText(callCtx, tgBot, query, quickPushTemplateDetailText(template), quickPushTemplateDetailKeyboard(session, template.Id, false))
+	case "editname", "edittext", "editmedia":
+		state := quickPushSessionStateEditName
+		prompt := "请发送新的模板名称。"
+		if action == "edittext" {
+			state, prompt = quickPushSessionStateEditText, "请发送新的模板文本。"
+		} else if action == "editmedia" {
+			state, prompt = quickPushSessionStateEditMedia, "请发送新的图片或视频，发送后将整体替换原模板媒体。"
+		}
+		session.State = state
+		session.EditingTemplateId = templateId
+		_ = s.saveQuickPushSession(ctx, session)
+		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
+		return true, s.editQuickPushMessageText(callCtx, tgBot, query, prompt, quickPushEditCancelKeyboard(session, templateId))
+	case "delete":
+		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
+		return true, s.editQuickPushMessageText(callCtx, tgBot, query, "确定删除当前模板吗？删除后不可恢复。", quickPushTemplateDetailKeyboard(session, templateId, true))
+	case "confirmdel":
+		if err := publishService.SysPublish().QuickPushBotTemplateDelete(ctx, session.OperatorAccountId, templateId); err != nil {
+			return true, err
+		}
+		list, err := publishService.SysPublish().QuickPushBotTemplateList(ctx, session.OperatorAccountId)
+		if err != nil {
+			return true, err
+		}
+		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "模板已删除"})
+		return true, s.editQuickPushMessageText(callCtx, tgBot, query, quickPushTemplateListText(list), quickPushTemplateListKeyboard(session, list))
+	case "use":
+		template, err := publishService.SysPublish().QuickPushBotTemplateView(ctx, session.OperatorAccountId, templateId)
+		if err != nil {
+			return true, err
+		}
+		plans, err := publishService.SysPublish().QuickPushBotPlanList(ctx, session.OperatorAccountId)
+		if err != nil {
+			return true, err
+		}
+		if len(plans) == 0 {
+			_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "暂无已启用的快速推送计划", ShowAlert: true})
+			return true, nil
+		}
+		session.State = quickPushSessionStateSelecting
+		session.SavedTemplateId = template.Id
+		session.Text = template.Text
+		session.Media = messageTemplateMediaToInputs(template.Media)
+		session.SourceMessageRecordId = template.SourceMessageRecordId
+		session.PlanIds = quickPushPlanIds(plans)
+		session.SelectedPlanIds = append([]int64(nil), session.PlanIds...)
+		_ = s.saveQuickPushSession(ctx, session)
+		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
+		return true, s.editQuickPushMessageText(callCtx, tgBot, query, quickPushSelectionText(session, plans), quickPushPlanKeyboard(session, plans))
+	case "cancel":
+		if session.State == quickPushSessionStateSelecting {
+			return false, nil
+		}
+		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "已取消快速推送"})
+		_ = s.removeQuickPushSession(ctx, session.BotId, session.TelegramUserId)
+		return true, s.editQuickPushMessageText(callCtx, tgBot, query, "已取消快速推送。", nil)
+	}
+	return false, nil
+}
+
+func quickPushTemplateListText(list []*publishsysin.MessageTemplateModel) string {
+	if len(list) == 0 {
+		return "<b>已有模板</b>\n\n暂无可用模板。"
+	}
+	return fmt.Sprintf("<b>已有模板</b>\n\n共显示最近 %d 个模板，点击模板名称查看和修改。", len(list))
+}
+
+func quickPushTemplateListKeyboard(session *quickPushSession, list []*publishsysin.MessageTemplateModel) *models.InlineKeyboardMarkup {
+	rows := make([][]models.InlineKeyboardButton, 0, len(list)+1)
+	for _, item := range list {
+		if item != nil {
+			rows = append(rows, []models.InlineKeyboardButton{{Text: item.Name, CallbackData: quickPushCallbackData("view", session.SessionId, item.Id)}})
+		}
+	}
+	rows = append(rows, []models.InlineKeyboardButton{{Text: "返回", CallbackData: quickPushCallbackData("cancel", session.SessionId, 0)}})
+	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func quickPushTemplateDetailText(template *publishsysin.MessageTemplateModel) string {
+	text := strings.TrimSpace(template.Text)
+	if text == "" {
+		text = "无"
+	}
+	return fmt.Sprintf("<b>%s</b>\n\n<b>文本</b>\n%s\n\n<b>媒体</b>：%d 个", html.EscapeString(template.Name), text, len(template.Media))
+}
+
+func quickPushTemplateDetailKeyboard(session *quickPushSession, templateId int64, confirmingDelete bool) *models.InlineKeyboardMarkup {
+	if confirmingDelete {
+		return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "确认删除", CallbackData: quickPushCallbackData("confirmdel", session.SessionId, templateId)}}, {{Text: "取消", CallbackData: quickPushCallbackData("view", session.SessionId, templateId)}}}}
+	}
+	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+		{{Text: "修改名称", CallbackData: quickPushCallbackData("editname", session.SessionId, templateId)}, {Text: "修改文本", CallbackData: quickPushCallbackData("edittext", session.SessionId, templateId)}},
+		{{Text: "修改媒体", CallbackData: quickPushCallbackData("editmedia", session.SessionId, templateId)}, {Text: "删除", CallbackData: quickPushCallbackData("delete", session.SessionId, templateId)}},
+		{{Text: "返回模板列表", CallbackData: quickPushCallbackData("backlist", session.SessionId, 0)}, {Text: "快速发送", CallbackData: quickPushCallbackData("use", session.SessionId, templateId)}},
+	}}
+}
+
+func quickPushEditCancelKeyboard(session *quickPushSession, templateId int64) *models.InlineKeyboardMarkup {
+	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "取消修改", CallbackData: quickPushCallbackData("view", session.SessionId, templateId)}}}}
+}
+
+func messageTemplateMediaToInputs(media []*publishsysin.MessageTemplateMediaModel) []*publishsysin.MessageTemplateMediaInp {
+	items := make([]*publishsysin.MessageTemplateMediaInp, 0, len(media))
+	for _, item := range media {
+		if item != nil {
+			items = append(items, &publishsysin.MessageTemplateMediaInp{Id: item.Id, SourceMessageRecordId: item.SourceMessageRecordId, MediaType: item.MediaType, Name: item.Name, FileUrl: item.FileUrl, StoragePath: item.StoragePath, PosterUrl: item.PosterUrl, PosterStoragePath: item.PosterStoragePath, TgFileId: item.TgFileId, TgThumbFileId: item.TgThumbFileId, AssetHash: item.AssetHash, SortIndex: item.SortIndex})
+		}
+	}
+	return items
+}
+
+func (s *sSysBot) sendQuickPushTemplateDetail(ctx context.Context, botId int64, session *quickPushSession, templateId int64, prefix string) error {
+	template, err := publishService.SysPublish().QuickPushBotTemplateView(ctx, session.OperatorAccountId, templateId)
+	if err != nil {
+		return err
+	}
+	row, err := s.botById(ctx, botId)
+	if err != nil {
+		return err
+	}
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, session.ChatId, prefix+quickPushTemplateDetailText(template), "HTML", false, quickPushTemplateDetailKeyboard(session, template.Id, false))
+	return err
 }
 
 func quickPushCallbackAlertText(text string) string {

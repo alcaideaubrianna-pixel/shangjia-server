@@ -80,6 +80,15 @@ type QuickPushBotSaveTemplateInp struct {
 	SourceMessageRecordId int64                      `json:"sourceMessageRecordId" dc:"来源TG消息记录ID"`
 }
 
+type QuickPushBotTemplateUpdateInp struct {
+	OperatorAccountId     int64                      `json:"operatorAccountId" dc:"操作上架账号ID"`
+	TemplateId            int64                      `json:"templateId" dc:"消息模板ID"`
+	Name                  string                     `json:"name" dc:"模板名称"`
+	Text                  string                     `json:"text" dc:"模板文本"`
+	Media                 []*MessageTemplateMediaInp `json:"media" dc:"模板媒体"`
+	SourceMessageRecordId int64                      `json:"sourceMessageRecordId" dc:"来源TG消息记录ID"`
+}
+
 type QuickPushBotExecuteModel struct {
 	Failed  int                               `json:"failed" dc:"失败数"`
 	Results []*MessageTemplatePushResultModel `json:"results" dc:"推送结果"`
