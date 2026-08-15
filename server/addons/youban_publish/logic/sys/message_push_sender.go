@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -16,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	tgbot "github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -302,10 +305,81 @@ func (s *sSysPublish) sendMessageTemplateByBot(ctx context.Context, job telegram
 	if err != nil {
 		return nil, err
 	}
-	return s.sendTelegramMediaSet(ctx, bot, normalizeTelegramChannelChatID(job.TargetChatId), "display", telegramRichTextHTML(template.Text), media)
+	caption := telegramRichTextHTML(template.Text)
+	markup := messageTemplateButtonMarkup(template, len(media))
+	if len(media) == 0 {
+		if strings.TrimSpace(caption) == "" {
+			return nil, gerror.New("展示资料和推送文案不能同时为空")
+		}
+		msg, sendErr := bot.SendMessage(ctx, &tgbot.SendMessageParams{
+			ChatID:      normalizeTelegramChannelChatID(job.TargetChatId),
+			Text:        caption,
+			ParseMode:   models.ParseModeHTML,
+			ReplyMarkup: markup,
+		})
+		if sendErr != nil {
+			return nil, sendErr
+		}
+		if msg == nil || msg.ID <= 0 {
+			return nil, gerror.New("Bot发送文本未返回Telegram消息记录")
+		}
+		return []*telegramSentMessage{{MessageId: int64(msg.ID), Purpose: "display"}}, nil
+	}
+	return s.sendTelegramMediaSet(ctx, bot, normalizeTelegramChannelChatID(job.TargetChatId), "display", caption, media, markup)
+}
+
+func messageTemplateButtonMarkup(template *sysin.MessageTemplateModel, mediaCount int) models.ReplyMarkup {
+	if template == nil || mediaCount > 1 || strings.TrimSpace(template.ButtonConfig) == "" {
+		return nil
+	}
+	var config sysin.MessageTemplateButtonConfig
+	if json.Unmarshal([]byte(template.ButtonConfig), &config) != nil {
+		return nil
+	}
+	if config.Mode == "reply" {
+		rows := make([][]models.KeyboardButton, 0, len(config.Rows))
+		for _, row := range config.Rows {
+			buttons := make([]models.KeyboardButton, 0, len(row))
+			for _, button := range row {
+				if strings.TrimSpace(button.Text) != "" {
+					buttons = append(buttons, models.KeyboardButton{Text: button.Text})
+				}
+			}
+			if len(buttons) > 0 {
+				rows = append(rows, buttons)
+			}
+		}
+		if len(rows) > 0 {
+			return &models.ReplyKeyboardMarkup{Keyboard: rows, ResizeKeyboard: true, IsPersistent: true}
+		}
+		return nil
+	}
+	if config.Mode != "inline" {
+		return nil
+	}
+	rows := make([][]models.InlineKeyboardButton, 0, len(config.Rows))
+	for _, row := range config.Rows {
+		buttons := make([]models.InlineKeyboardButton, 0, len(row))
+		for _, button := range row {
+			if strings.TrimSpace(button.Text) == "" || strings.TrimSpace(button.URL) == "" {
+				continue
+			}
+			buttons = append(buttons, models.InlineKeyboardButton{Text: button.Text, URL: button.URL, Style: sysin.TelegramButtonStyle(button.Color)})
+		}
+		if len(buttons) > 0 {
+			rows = append(rows, buttons)
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 func (s *sSysPublish) completeMessagePushJob(ctx context.Context, job telegramJobRecord, messages []*telegramSentMessage, errorMessage string) error {
+	if len(messages) == 0 {
+		return gerror.New("Telegram未返回发送消息记录，任务不能标记为成功")
+	}
 	if err := s.saveTelegramSentMessages(ctx, job, messages); err != nil {
 		return err
 	}

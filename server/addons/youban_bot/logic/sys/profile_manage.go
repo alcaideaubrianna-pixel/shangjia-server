@@ -428,11 +428,12 @@ func (s *sSysBot) handleProfileInlineQuery(ctx context.Context, botId int64, que
 
 func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, query *models.InlineQuery, serial string) error {
 	var row struct {
-		Id       int64  `json:"id"`
-		SerialNo string `json:"serial_no"`
-		Name     string `json:"name"`
-		Text     string `json:"text"`
-		Status   int    `json:"status"`
+		Id           int64  `json:"id"`
+		SerialNo     string `json:"serial_no"`
+		Name         string `json:"name"`
+		Text         string `json:"text"`
+		Status       int    `json:"status"`
+		ButtonConfig string `json:"button_config"`
 	}
 	if err := g.DB().Model("hg_youban_publish_message_template").Safe().Ctx(ctx).
 		Where("serial_no", strings.ToUpper(strings.TrimSpace(serial))).Where("status", 1).WhereNull("deleted_at").Scan(&row); err != nil {
@@ -471,6 +472,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 			media = mediaRows[0]
 		}
 		caption := publishService.SysPublish().TelegramRichTextHTML(row.Text)
+		buttonMarkup := templateInlineButtonMarkup(row.ButtonConfig)
 		if mediaCount == 1 && strings.EqualFold(strings.TrimSpace(media.MediaType), "image") {
 			cachedPhoto, cachedErr := s.templateInlineCachedPhoto(ctx, botId, media.SourceMessageRecordID, media.TgFileID)
 			if cachedErr != nil {
@@ -488,6 +490,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 					Description:     row.SerialNo,
 					Caption:         cachedCaption,
 					CaptionEntities: cachedPhoto.CaptionEntities,
+					ReplyMarkup:     buttonMarkup,
 				})
 			}
 			photoURL := normalizePreviewMediaURL(s.absoluteMediaURL(ctx, firstNonEmpty(media.FileURL, media.StoragePath)))
@@ -501,6 +504,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 					Description:  row.SerialNo,
 					Caption:      caption,
 					ParseMode:    models.ParseModeHTML,
+					ReplyMarkup:  buttonMarkup,
 				})
 			}
 		} else {
@@ -512,6 +516,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 					MessageText: caption,
 					ParseMode:   models.ParseModeHTML,
 				},
+				ReplyMarkup: buttonMarkup,
 			})
 		}
 	}
@@ -527,6 +532,35 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 	defer cancel()
 	_, err = bot.AnswerInlineQuery(callCtx, &tgbot.AnswerInlineQueryParams{InlineQueryID: query.ID, Results: results, CacheTime: 0, IsPersonal: false})
 	return err
+}
+
+func templateInlineButtonMarkup(value string) *models.InlineKeyboardMarkup {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	var config publishsysin.MessageTemplateButtonConfig
+	if err := json.Unmarshal([]byte(value), &config); err != nil || config.Mode != "inline" {
+		return nil
+	}
+	rows := make([][]models.InlineKeyboardButton, 0, len(config.Rows))
+	for _, row := range config.Rows {
+		buttons := make([]models.InlineKeyboardButton, 0, len(row))
+		for _, button := range row {
+			text := strings.TrimSpace(button.Text)
+			url := strings.TrimSpace(button.URL)
+			if text == "" || url == "" {
+				continue
+			}
+			buttons = append(buttons, models.InlineKeyboardButton{Text: text, URL: url, Style: publishsysin.TelegramButtonStyle(button.Color)})
+		}
+		if len(buttons) > 0 {
+			rows = append(rows, buttons)
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 type templateInlineCachedPhoto struct {

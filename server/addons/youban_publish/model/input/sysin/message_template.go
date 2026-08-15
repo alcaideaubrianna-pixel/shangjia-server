@@ -2,6 +2,7 @@ package sysin
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -50,12 +51,13 @@ type MessageTemplateMediaUploadInp struct {
 }
 
 type MessageTemplateSaveInp struct {
-	Id       int64                      `json:"id" dc:"ID"`
-	Name     string                     `json:"name" dc:"模板名称"`
-	Text     string                     `json:"text" dc:"文案"`
-	Media    []*MessageTemplateMediaInp `json:"media" dc:"媒体"`
-	Status   int                        `json:"status" dc:"状态"`
-	PushMode string                     `json:"pushMode" dc:"推送方式：bot/account"`
+	Id           int64                      `json:"id" dc:"ID"`
+	Name         string                     `json:"name" dc:"模板名称"`
+	Text         string                     `json:"text" dc:"文案"`
+	Media        []*MessageTemplateMediaInp `json:"media" dc:"媒体"`
+	Status       int                        `json:"status" dc:"状态"`
+	PushMode     string                     `json:"pushMode" dc:"推送方式：bot/account"`
+	ButtonConfig string                     `json:"buttonConfig" dc:"Telegram按钮配置JSON"`
 }
 
 type MessageTemplateDeleteInp struct {
@@ -153,12 +155,70 @@ type MessageTemplateModel struct {
 	Status                int                          `json:"status" dc:"状态"`
 	PushMode              string                       `json:"pushMode" dc:"推送方式：bot/account"`
 	SourceMessageRecordId int64                        `json:"sourceMessageRecordId" dc:"来源TG消息记录ID"`
+	ButtonConfig          string                       `json:"buttonConfig" dc:"Telegram按钮配置JSON"`
 	CreatedBy             int64                        `json:"createdBy" dc:"创建人"`
 	UpdatedBy             int64                        `json:"updatedBy" dc:"更新人"`
 	DeletedBy             int64                        `json:"deletedBy" dc:"删除人"`
 	CreatedAt             *gtime.Time                  `json:"createdAt" dc:"创建时间"`
 	UpdatedAt             *gtime.Time                  `json:"updatedAt" dc:"更新时间"`
 	DeletedAt             *gtime.Time                  `json:"deletedAt" dc:"删除时间"`
+}
+
+type MessageTemplateButtonConfig struct {
+	Mode string                    `json:"mode"` // inline/reply
+	Rows [][]MessageTemplateButton `json:"rows"`
+}
+
+type MessageTemplateButton struct {
+	Text  string `json:"text"`
+	URL   string `json:"url,omitempty"`
+	Color string `json:"color,omitempty"`
+}
+
+func TelegramButtonStyle(color string) string {
+	switch strings.ToLower(strings.TrimSpace(color)) {
+	case "#p", "primary":
+		return "primary"
+	case "#r", "danger":
+		return "danger"
+	case "#g", "success":
+		return "success"
+	default:
+		return ""
+	}
+}
+
+func (in *MessageTemplateSaveInp) NormalizeButtonConfig() error {
+	if strings.TrimSpace(in.ButtonConfig) == "" {
+		in.ButtonConfig = ""
+		return nil
+	}
+	var config MessageTemplateButtonConfig
+	if err := json.Unmarshal([]byte(in.ButtonConfig), &config); err != nil {
+		return gerror.New("按钮配置格式不正确")
+	}
+	config.Mode = strings.TrimSpace(config.Mode)
+	if config.Mode != "inline" {
+		return gerror.New("当前仅支持消息按钮")
+	}
+	count := 0
+	for _, row := range config.Rows {
+		for _, button := range row {
+			if strings.TrimSpace(button.Text) == "" {
+				return gerror.New("按钮名称不能为空")
+			}
+			if strings.TrimSpace(button.URL) == "" {
+				return gerror.New("消息按钮链接不能为空")
+			}
+			count++
+		}
+	}
+	if count > 8 {
+		return gerror.New("按钮最多配置8个")
+	}
+	data, _ := json.Marshal(config)
+	in.ButtonConfig = string(data)
+	return nil
 }
 
 type MessageTemplateMediaModel struct {
