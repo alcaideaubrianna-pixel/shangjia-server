@@ -89,6 +89,8 @@ type QuickPushBotTemplateUpdateInp struct {
 	Text                  string                     `json:"text" dc:"模板文本"`
 	Media                 []*MessageTemplateMediaInp `json:"media" dc:"模板媒体"`
 	SourceMessageRecordId int64                      `json:"sourceMessageRecordId" dc:"来源TG消息记录ID"`
+	ButtonConfig          string                     `json:"buttonConfig" dc:"Telegram按钮配置JSON"`
+	UpdateButtonConfig    bool                       `json:"updateButtonConfig" dc:"是否更新按钮配置"`
 }
 
 type QuickPushBotExecuteModel struct {

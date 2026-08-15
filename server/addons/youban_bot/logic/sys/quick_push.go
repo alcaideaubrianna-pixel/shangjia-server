@@ -126,7 +126,17 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 		if parseErr != nil {
 			return true, bot.reply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), parseErr.Error())
 		}
-		session.ButtonConfig = config
+		if session.EditingTemplateId > 0 {
+			template, viewErr := publishService.SysPublish().QuickPushBotTemplateView(ctx, session.OperatorAccountId, session.EditingTemplateId)
+			if viewErr != nil {
+				return true, bot.reply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "读取模板失败："+viewErr.Error())
+			}
+			if err = publishService.SysPublish().QuickPushBotTemplateUpdate(ctx, &publishsysin.QuickPushBotTemplateUpdateInp{OperatorAccountId: session.OperatorAccountId, TemplateId: session.EditingTemplateId, Name: template.Name, Text: template.Text, Media: messageTemplateMediaToInputs(template.Media), ButtonConfig: config, UpdateButtonConfig: true}); err != nil {
+				return true, bot.reply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "按钮设置失败："+err.Error())
+			}
+		} else {
+			session.ButtonConfig = config
+		}
 		session.State = quickPushSessionStateWaiting
 		if err = bot.saveQuickPushSession(ctx, session); err != nil {
 			return true, err
@@ -749,7 +759,6 @@ func quickPushEntryKeyboard(session *quickPushSession) *models.InlineKeyboardMar
 	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{
 		{Text: "取消", CallbackData: quickPushCallbackData("cancel", session.SessionId, 0)},
 		{Text: "查看已有模板", CallbackData: quickPushCallbackData("templates", session.SessionId, 0)},
-		{Text: "设置按钮", CallbackData: quickPushCallbackData("buttons", session.SessionId, 0)},
 	}}}
 }
 
@@ -828,6 +837,12 @@ func (s *sSysBot) handleQuickPushTemplateCallback(ctx context.Context, callCtx c
 		_ = s.saveQuickPushSession(ctx, session)
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 		return true, s.editQuickPushMessageText(callCtx, tgBot, query, prompt, quickPushEditCancelKeyboard(session, templateId))
+	case "editbuttons":
+		session.State = quickPushSessionStateEditButtons
+		session.EditingTemplateId = templateId
+		_ = s.saveQuickPushSession(ctx, session)
+		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
+		return true, s.editQuickPushMessageText(callCtx, tgBot, query, "请发送按钮配置：每行一行按钮，使用 && 分隔同一行按钮。格式：按钮名称-跳转链接；发送 /clear 清除按钮。", quickPushEditCancelKeyboard(session, templateId))
 	case "delete":
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 		return true, s.editQuickPushMessageText(callCtx, tgBot, query, "确定删除当前模板吗？删除后不可恢复。", quickPushTemplateDetailKeyboard(session, templateId, true))
@@ -913,7 +928,8 @@ func quickPushTemplateDetailKeyboard(session *quickPushSession, templateId int64
 	}
 	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
 		{{Text: "修改名称", CallbackData: quickPushCallbackData("editname", session.SessionId, templateId)}, {Text: "修改文本", CallbackData: quickPushCallbackData("edittext", session.SessionId, templateId)}},
-		{{Text: "修改媒体", CallbackData: quickPushCallbackData("editmedia", session.SessionId, templateId)}, {Text: "删除", CallbackData: quickPushCallbackData("delete", session.SessionId, templateId)}},
+		{{Text: "修改媒体", CallbackData: quickPushCallbackData("editmedia", session.SessionId, templateId)}, {Text: "设置按钮", CallbackData: quickPushCallbackData("editbuttons", session.SessionId, templateId)}},
+		{{Text: "删除", CallbackData: quickPushCallbackData("delete", session.SessionId, templateId)}},
 		{{Text: "返回模板列表", CallbackData: quickPushCallbackData("backlist", session.SessionId, 0)}, {Text: "快速发送", CallbackData: quickPushCallbackData("use", session.SessionId, templateId)}},
 	}}
 }

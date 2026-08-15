@@ -263,7 +263,11 @@ func (s *sSysPublish) QuickPushBotTemplateUpdate(ctx context.Context, in *sysin.
 	}
 	now := gtime.Now()
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		if _, updateErr := tx.Model(messageTemplateTable).Ctx(ctx).Where("id", template.Id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").Data(g.Map{"name": name, "text": text, "media_count": len(media), "source_message_record_id": in.SourceMessageRecordId, "updated_by": account.Id, "updated_at": now}).Update(); updateErr != nil {
+		data := g.Map{"name": name, "text": text, "media_count": len(media), "source_message_record_id": in.SourceMessageRecordId, "updated_by": account.Id, "updated_at": now}
+		if in.UpdateButtonConfig {
+			data["button_config"] = in.ButtonConfig
+		}
+		if _, updateErr := tx.Model(messageTemplateTable).Ctx(ctx).Where("id", template.Id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").Data(data).Update(); updateErr != nil {
 			return gerror.Wrap(updateErr, "更新快速推送模板失败")
 		}
 		if in.Media == nil {
