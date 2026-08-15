@@ -468,6 +468,21 @@ func updateEventID(botKey string, tenantID, sourceID, updateID int64, raw []byte
 
 type botCollectorFeature struct{}
 
+type botCollectionSource struct {
+	SourceID int64
+	TenantID int64
+}
+
+func matchBotCollectionSources(sources []botCollectionSource, tenantID, botID int64) []botCollectionSource {
+	matched := make([]botCollectionSource, 0, len(sources))
+	for _, source := range sources {
+		if source.TenantID == tenantID && source.SourceID > 0 && botID > 0 {
+			matched = append(matched, source)
+		}
+	}
+	return matched
+}
+
 func (f *botCollectorFeature) Key() string { return gatewayOwner }
 
 func (f *botCollectorFeature) Priority() int { return 10 }
@@ -487,17 +502,14 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 		// Gateway bindings identify the BOT. Resolve all enabled collection
 		// sources for that BOT here, so private chats, groups, and channels use
 		// the same source routing and never confuse bot_id with source_id.
-		var sources []struct {
-			SourceID int64 `json:"id"`
-			TenantID int64 `json:"tenantId"`
-		}
+		var sources []botCollectionSource
 		if err := g.DB().Model("hg_youban_publish_collect_source").Safe().Ctx(ctx).
 			Fields("id,tenant_id").Where("tenant_id", binding.TenantID).
 			Where("bot_id", binding.ReferenceID).Where("source_type", "bot").
 			Where("collect_enabled", 1).Where("status", 1).WhereNull("deleted_at").Scan(&sources); err != nil {
 			return false, err
 		}
-		for _, source := range sources {
+		for _, source := range matchBotCollectionSources(sources, binding.TenantID, binding.ReferenceID) {
 			if err := collectorservice.Collector().IngestBotUpdate(ctx, collectorservice.BotContext{
 				Key: bot.Key, Token: bot.Token,
 				Binding: collectorservice.BotBinding{TenantID: source.TenantID, SourceID: source.SourceID, Reference: fmt.Sprintf("source:%d", source.SourceID)},
