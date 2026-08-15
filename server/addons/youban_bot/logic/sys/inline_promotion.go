@@ -35,8 +35,27 @@ func (inlinePromotionFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
 		{Field: "startParameter", Label: "启动参数", Component: "hidden", Default: "inline_entry"},
 	}
 }
-func (inlinePromotionFeature) Handle(context.Context, *sSysBot, *botFeatureContext) (bool, error) {
-	return false, nil
+func (inlinePromotionFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFeatureContext) (bool, error) {
+	if featureCtx == nil || featureCtx.Msg == nil {
+		return true, nil
+	}
+	startParameter := normalizeInlinePromotionStartParameter(bot.featureConfigValue(ctx, inlinePromotionFeatureKey, "startParameter"))
+	if handled, err := bot.dispatchInlinePromotionStart(ctx, &botFeatureContext{
+		BotId: featureCtx.BotId,
+		Msg:   featureCtx.Msg,
+		Args:  startParameter,
+	}); handled || err != nil {
+		return true, err
+	}
+	botRow, err := bot.botById(ctx, featureCtx.BotId)
+	if err != nil {
+		return true, err
+	}
+	username := strings.TrimPrefix(strings.TrimSpace(botRow.BotUsername), "@")
+	if username == "" {
+		return true, bot.reply(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), "合作推广功能已开启，请在群聊中输入 @机器人选择推广内容。")
+	}
+	return true, bot.reply(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), fmt.Sprintf("请在群聊中输入 @%s，选择推广内容后发送。", username))
 }
 
 func (s *sSysBot) answerInlinePromotion(ctx context.Context, botId int64, query *models.InlineQuery) error {
