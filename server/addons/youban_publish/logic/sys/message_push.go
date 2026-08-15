@@ -315,6 +315,51 @@ func (s *sSysPublish) ensureMessageTemplatesBelongTenant(ctx context.Context, id
 	return nil
 }
 
+func (s *sSysPublish) filterDeletedMessageTemplates(ctx context.Context, ids []int64, tenantId int64) ([]int64, error) {
+	ids = uniqueIds(ids)
+	if len(ids) == 0 {
+		return nil, gerror.New("请选择消息模板")
+	}
+	var rows []struct {
+		Id        int64       `json:"id"`
+		DeletedAt *gtime.Time `json:"deleted_at"`
+	}
+	if err := g.DB().Model(messageTemplateTable).Safe().Ctx(ctx).
+		Fields("id, deleted_at").
+		WhereIn("id", ids).
+		Where("tenant_id", tenantId).
+		Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "读取消息模板状态失败")
+	}
+	active := make(map[int64]struct{}, len(rows))
+	deleted := make(map[int64]struct{}, len(rows))
+	for _, row := range rows {
+		if row.DeletedAt != nil {
+			deleted[row.Id] = struct{}{}
+			continue
+		}
+		active[row.Id] = struct{}{}
+	}
+	filtered := make([]int64, 0, len(active))
+	invalid := make([]int64, 0)
+	for _, id := range ids {
+		if _, ok := active[id]; ok {
+			filtered = append(filtered, id)
+			continue
+		}
+		if _, ok := deleted[id]; !ok {
+			invalid = append(invalid, id)
+		}
+	}
+	if len(invalid) > 0 {
+		return nil, gerror.Newf("存在无效或无权操作的消息模板，模板ID：%v", invalid)
+	}
+	if len(filtered) == 0 {
+		return nil, gerror.New("请选择推送模板")
+	}
+	return filtered, nil
+}
+
 func messageMediaAssetHash(item *sysin.MessageTemplateMediaInp) string {
 	if item == nil {
 		return ""

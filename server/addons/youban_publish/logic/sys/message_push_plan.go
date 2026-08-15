@@ -112,7 +112,7 @@ func (s *sSysPublish) AdminMessagePushPlanSave(ctx context.Context, in *sysin.Me
 	if err = s.ensureMessagePushTgAccountBelongTenant(ctx, in.AccountId, account.TenantId); err != nil {
 		return nil, err
 	}
-	if err = s.ensureMessageTemplatesBelongTenant(ctx, in.TemplateIds, account.TenantId); err != nil {
+	if in.TemplateIds, err = s.filterDeletedMessageTemplates(ctx, in.TemplateIds, account.TenantId); err != nil {
 		return nil, err
 	}
 	if err = s.ensureMessagePushTargetCaches(ctx, in.AccountId, in.TargetChatIds, account.TenantId); err != nil {
