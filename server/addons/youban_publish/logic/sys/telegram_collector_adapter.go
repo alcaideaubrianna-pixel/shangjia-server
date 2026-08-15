@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	tgbot "github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -13,6 +15,7 @@ import (
 	"github.com/gotd/td/tg"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	botService "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -219,10 +222,10 @@ func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, cl
 	messages, err := sendInlineTemplateWithClient(ctx, client, peer, botUsername, template.SerialNo)
 	if err != nil {
 		inlineErr := gerror.Wrapf(err, "Inline推送失败 serial:%s", template.SerialNo)
-		return s.fallbackMessagePushInline(ctx, job, template, inlineErr)
+		return s.fallbackMessagePushInline(ctx, client, channel, job, template, inlineErr)
 	}
 	if len(messages) == 0 {
-		return s.fallbackMessagePushInline(ctx, job, template, gerror.New("Inline推送未返回Telegram消息记录"))
+		return s.fallbackMessagePushInline(ctx, client, channel, job, template, gerror.New("Inline推送未返回Telegram消息记录"))
 	}
 	if err = s.completeMessagePushJob(ctx, job, messages, "更新Inline消息推送任务状态失败"); err != nil {
 		return err
@@ -231,8 +234,12 @@ func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, cl
 	return nil
 }
 
-func (s *sSysPublish) fallbackMessagePushInline(ctx context.Context, job telegramJobRecord, template *sysin.MessageTemplateModel, inlineErr error) error {
+func (s *sSysPublish) fallbackMessagePushInline(ctx context.Context, client *telegram.Client, channel *messagePushChannel, job telegramJobRecord, template *sysin.MessageTemplateModel, inlineErr error) error {
 	s.appendTelegramJobLog(ctx, job, "inline_send", "fallback", "Inline推送失败，改用官方Bot上传："+inlineErr.Error())
+	if !s.botCanAccessChat(ctx, job.TargetChatId) {
+		s.appendTelegramJobLog(ctx, job, "bot_upload", "skipped", "官方Bot未加入目标群，跳过Bot发送，改用协议号发送")
+		return s.sendMessageTemplateByAccountClient(ctx, client, channel, job, template)
+	}
 	fallbackMessages, fallbackErr := s.sendMessageTemplateByBot(ctx, job, template, messageTemplateTelegramMedia(template))
 	if fallbackErr == nil {
 		if completeErr := s.completeMessagePushJob(ctx, job, fallbackMessages, "更新Bot降级推送任务状态失败"); completeErr != nil {
@@ -241,8 +248,47 @@ func (s *sSysPublish) fallbackMessagePushInline(ctx context.Context, job telegra
 		s.appendTelegramJobLog(ctx, job, "bot_upload", sysin.MessagePushStatusSent, "Inline推送超时，已由官方Bot降级发送成功")
 		return nil
 	}
-	s.appendTelegramJobLog(ctx, job, "bot_upload", "failed", "Inline推送和官方Bot降级均失败："+fallbackErr.Error())
-	return gerror.Wrapf(fallbackErr, "Inline推送失败且Bot降级失败 serial:%s", template.SerialNo)
+	s.appendTelegramJobLog(ctx, job, "bot_upload", "failed", "官方Bot发送失败，改用协议号发送："+fallbackErr.Error())
+	return s.sendMessageTemplateByAccountClient(ctx, client, channel, job, template)
+}
+
+func (s *sSysPublish) botCanAccessChat(ctx context.Context, chatID string) bool {
+	token, err := botService.SysBot().OfficialBotToken(ctx)
+	if err != nil {
+		return false
+	}
+	bot, err := s.telegramBot(ctx, token)
+	if err != nil {
+		return false
+	}
+	me, err := bot.GetMe(ctx)
+	if err != nil {
+		return false
+	}
+	member, err := bot.GetChatMember(ctx, &tgbot.GetChatMemberParams{ChatID: normalizeTelegramChannelChatID(chatID), UserID: me.ID})
+	if err != nil || member == nil {
+		return false
+	}
+	return member.Type != models.ChatMemberTypeLeft && member.Type != models.ChatMemberTypeBanned && telegramBotCanSendMessage(member)
+}
+
+func (s *sSysPublish) sendMessageTemplateByAccountClient(ctx context.Context, client *telegram.Client, channel *messagePushChannel, job telegramJobRecord, template *sysin.MessageTemplateModel) error {
+	if client == nil || channel == nil {
+		return gerror.New("协议号降级发送客户端或目标无效")
+	}
+	peer, err := messagePushInputPeer(channel)
+	if err != nil {
+		return err
+	}
+	sent, err := sendMessageTemplateWithTgClient(ctx, client, peer, telegramRichTextHTML(template.Text), messageTemplateTelegramMedia(template), nil, job.AccountId, "")
+	if err != nil {
+		return gerror.Wrap(err, "协议号降级发送失败")
+	}
+	if err = s.completeMessagePushJob(ctx, job, sent, "更新协议号降级任务状态失败"); err != nil {
+		return err
+	}
+	s.appendTelegramJobLog(ctx, job, "account_send", sysin.MessagePushStatusSent, "Inline和Bot均不可用，已由协议号发送成功")
+	return nil
 }
 
 func (p *publishCollectorAccountMediaProvider) ResolvePeer(ctx context.Context, tenantID, accountID int64, chatID string, client *telegram.Client) (tg.InputPeerClass, error) {

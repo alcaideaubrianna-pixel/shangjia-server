@@ -49,8 +49,8 @@ func TestTelegramAccountBusyIsNotAmbiguousDelivery(t *testing.T) {
 		t.Fatal("wrapped deadline remains ambiguous before account-busy precedence is applied")
 	}
 	decision := telegramJobFailureNextState(err, 2)
-	if decision.Status != "failed_retry" || decision.RetryCount != 3 || decision.RetryDelay <= 0 {
-		t.Fatalf("account busy must consume retry count: %+v", decision)
+	if decision.Status != "failed" || decision.DispatchStatus != tgDispatchStatusDone || decision.RetryCount != 3 || decision.RetryDelay != 0 {
+		t.Fatalf("account busy must stop after retry limit: %+v", decision)
 	}
 }
 
@@ -80,8 +80,11 @@ func TestTelegramJobStateUpdateDataUsesSingleTerminalRule(t *testing.T) {
 
 func TestTelegramJobFailureNextStateUsesTerminalRule(t *testing.T) {
 	decision := telegramJobFailureNextState(assertError("Bad Request: chat not found"), 0)
-	if decision.Status != "failed_retry" || decision.DispatchStatus != tgDispatchStatusIdle || decision.RetryDelay <= 0 {
-		t.Fatalf("chat not found should be retried: %+v", decision)
+	if decision.Status != "failed" || decision.DispatchStatus != tgDispatchStatusDone || decision.RetryDelay != 0 {
+		t.Fatalf("chat not found must be terminal: %+v", decision)
+	}
+	if !strings.Contains(decision.Message, "目标群组或频道不存在") {
+		t.Fatalf("unexpected chat-not-found message: %q", decision.Message)
 	}
 }
 

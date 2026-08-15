@@ -17,7 +17,7 @@ func inlineBotUsername(ctx context.Context) (string, error) {
 		BotUsername string `json:"bot_username"`
 	}
 	if err := g.DB().Model("hg_youban_bot_bot").Safe().Ctx(ctx).
-		Where("is_default", 1).Where("status", 1).WhereNull("deleted_at").
+		Where("is_official", 1).Where("is_default", 1).Where("status", 1).WhereNull("deleted_at").
 		OrderAsc("id").Fields("bot_username").Scan(&botRow); err != nil {
 		return "", gerror.Wrap(err, "读取推送机器人失败")
 	}

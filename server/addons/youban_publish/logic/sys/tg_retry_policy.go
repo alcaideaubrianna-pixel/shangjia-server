@@ -178,6 +178,8 @@ func isTelegramPermanentSendError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	permanentParts := []string{
+		"bad request: chat not found",
+		"chat not found",
 		"bad request: message to copy not found",
 		"bad request: message to forward not found",
 		"bad request: there are no messages to forward",
@@ -272,6 +274,9 @@ func telegramPermanentSendErrorMessage(err error) string {
 	}
 	if strings.Contains(message, "bot was blocked by the user") {
 		return "Telegram 发送失败：当前 Bot 被目标对象拉黑或封禁，已停止该任务并释放频道队列：" + err.Error()
+	}
+	if strings.Contains(message, "chat not found") {
+		return "Telegram 发送失败：目标群组或频道不存在，或官方 Bot 不在目标中；请检查目标 ID、Bot 成员资格和频道迁移状态，已停止该任务并释放频道队列：" + err.Error()
 	}
 	return "Telegram 发送遇到不可恢复错误，已停止该任务并释放频道队列：" + err.Error()
 }
