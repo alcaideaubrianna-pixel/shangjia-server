@@ -307,6 +307,9 @@ func (s *sSysPublish) recoverCollectHistoryTask(ctx context.Context, row gdb.Rec
 	if taskId <= 0 {
 		return nil
 	}
+	if strings.Contains(row["error_message"].String(), "TG账号连接正在使用，拒绝创建第二个客户端") {
+		g.Log().Errorf(ctx, "历史采集任务曾因重复创建TG客户端失败，正在恢复 task:%d accountId:%d tgAccountId:%d err:%s", taskId, row["account_id"].Int64(), row["tg_account_id"].Int64(), row["error_message"].String())
+	}
 	_, err := pdao.YoubanPublishCollectHistoryTask.Ctx(ctx).Where("id", taskId).Data(g.Map{
 		"status":        sysin.CollectHistoryTaskStatusPending,
 		"error_message": "",

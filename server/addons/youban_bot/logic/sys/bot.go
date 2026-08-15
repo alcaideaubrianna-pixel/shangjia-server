@@ -530,15 +530,16 @@ func (s *sSysBot) consumeBindCode(ctx context.Context, botId int64, msg *models.
 	}
 	telegramUserId := fmt.Sprintf("%d", msg.From.ID)
 	telegramUsername := strings.TrimPrefix(strings.TrimSpace(msg.From.Username), "@")
-	conflict, err := s.activeTelegramBindingConflict(ctx, row.App, telegramUserId, row.AccountId)
-	if err != nil {
-		return gerror.Wrap(err, "检查Telegram绑定失败")
-	}
-	if conflict {
-		_, _ = s.markCodeFailed(ctx, row.Code, sysin.BotCodeStatusFailed, "该Telegram账号已绑定其他账号")
-		return s.reply(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), "当前 Telegram 已绑定其他账号，不能重复绑定。")
-	}
+	var err error
 	now := gtime.Now()
+	if _, err = g.DB().Model(accountBindTbl).Safe().Ctx(ctx).
+		Where("app", row.App).
+		Where("telegram_user_id", telegramUserId).
+		Where("status", 1).
+		WhereNull("deleted_at").
+		Data(g.Map{"status": 2, "updated_at": now}).Update(); err != nil {
+		return gerror.Wrap(err, "停用旧Telegram绑定失败")
+	}
 	data := g.Map{"app": row.App, "account_id": row.AccountId, "telegram_user_id": telegramUserId, "telegram_username": telegramUsername, "telegram_first_name": msg.From.FirstName, "telegram_last_name": msg.From.LastName, "bot_id": botId, "status": 1, "updated_at": now}
 	var exists *struct {
 		Id int64 `json:"id"`
@@ -566,6 +567,9 @@ func (s *sSysBot) consumeBindCode(ctx context.Context, botId int64, msg *models.
 	}
 	text, markup := s.bindSuccessMessage(ctx, row.App, row.AccountId, telegramUserId, telegramUsername)
 	replyErr := s.replyWithMarkup(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), text, markup)
+	if keyboardErr := s.ensureReplyKeyboardCurrent(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID)); keyboardErr != nil {
+		g.Log().Warningf(ctx, "绑定成功后刷新Telegram底部键盘失败 botId:%d chatId:%d userId:%s err:%+v", botId, msg.Chat.ID, telegramUserId, keyboardErr)
+	}
 	for _, hookErr := range service.TriggerAccountBoundHooks(ctx, &service.AccountBoundEvent{
 		App:              row.App,
 		AccountId:        row.AccountId,

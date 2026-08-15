@@ -260,7 +260,11 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 	}
 	cacheStartedAt := time.Now()
 	changed, err := s.cacheCollectEventStructuredMedia(ctx, event)
-	g.Log().Debugf(ctx, "采集媒体任务媒体阶段完成 eventId:%d duration:%s changed:%t err:%v", payload.EventId, time.Since(cacheStartedAt).Round(time.Millisecond), changed, err)
+	if err != nil {
+		g.Log().Warningf(ctx, "采集媒体任务媒体阶段未完成 eventId:%d duration:%s changed:%t err:%v", payload.EventId, time.Since(cacheStartedAt).Round(time.Millisecond), changed, err)
+	} else {
+		g.Log().Debugf(ctx, "采集媒体任务媒体阶段完成 eventId:%d duration:%s changed:%t", payload.EventId, time.Since(cacheStartedAt).Round(time.Millisecond), changed)
+	}
 	if err != nil {
 		var discardedErr *collectMediaDiscardedError
 		if errors.As(err, &discardedErr) {

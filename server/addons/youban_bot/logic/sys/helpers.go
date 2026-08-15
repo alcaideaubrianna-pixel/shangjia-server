@@ -847,14 +847,26 @@ func (s *sSysBot) resolveTelegramMessageMedia(ctx context.Context, botToken stri
 	if err != nil {
 		return nil, err
 	}
+	var thumbURL string
+	var thumbErr error
+	thumbDone := make(chan struct{})
+	if thumbFileId != "" {
+		go func() {
+			thumbURL, thumbErr = s.telegramFileDownloadURL(ctx, tgBot, botToken, thumbFileId)
+			close(thumbDone)
+		}()
+	} else {
+		close(thumbDone)
+	}
 	fileURL, err := s.telegramFileDownloadURL(ctx, tgBot, botToken, fileId)
 	if err != nil {
 		return nil, err
 	}
 	posterURL := ""
 	if thumbFileId != "" {
-		if url, thumbErr := s.telegramFileDownloadURL(ctx, tgBot, botToken, thumbFileId); thumbErr == nil {
-			posterURL = url
+		<-thumbDone
+		if thumbErr == nil {
+			posterURL = thumbURL
 		} else {
 			g.Log().Warning(ctx, "读取Telegram媒体缩略图失败", g.Map{"chatId": msg.Chat.ID, "messageId": msg.ID, "thumbFileId": thumbFileId, "err": thumbErr})
 		}
