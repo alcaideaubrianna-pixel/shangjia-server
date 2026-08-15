@@ -227,7 +227,7 @@ func (s *sSysPublish) AdminMessageTemplateDelete(ctx context.Context, in *sysin.
 
 func (s *sSysPublish) messageTemplate(ctx context.Context, id int64, tenantId int64) (*sysin.MessageTemplateModel, error) {
 	var template *sysin.MessageTemplateModel
-	if err := g.DB().Model(messageTemplateTable).Safe().Ctx(ctx).
+	if err := g.DB().Model(messageTemplateTable).Unscoped().Safe().Ctx(ctx).
 		Where("id", id).
 		Where("tenant_id", tenantId).
 		WhereNull("deleted_at").
