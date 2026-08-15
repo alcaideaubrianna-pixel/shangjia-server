@@ -217,6 +217,9 @@ func (s *sSysConfig) GetUpload(ctx context.Context) (conf *model.UploadConfig, e
 		return
 	}
 	err = gconv.Scan(models.List, &conf)
+	if err == nil && conf != nil && conf.CosBucket != "" && conf.CosRegion != "" {
+		conf.CosBucketURL = fmt.Sprintf("https://%s.cos.%s.myqcloud.com", conf.CosBucket, conf.CosRegion)
+	}
 	return
 }
 

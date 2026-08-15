@@ -216,7 +216,7 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 	media, err = bot.persistQuickPushMedia(ctx, session.OperatorAccountId, media)
 	if err != nil {
 		g.Log().Warningf(ctx, "快速推送Telegram媒体转存失败 botId:%d chatId:%s messageId:%d err:%+v", event.BotId, chatId, event.Msg.ID, err)
-		return true, bot.reply(ctx, event.BotId, chatId, "图片或视频下载保存失败，请稍后重新发送。")
+		return true, bot.reply(ctx, event.BotId, chatId, "图片或视频保存失败："+quickPushCallbackAlertText(err.Error()))
 	}
 	if session.State == quickPushSessionStateEditMedia {
 		if len(media) == 0 {
