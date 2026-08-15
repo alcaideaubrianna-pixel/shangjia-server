@@ -208,13 +208,13 @@ func TestCollectorDeliveryFromBotCases(t *testing.T) {
 
 func TestMatchBotCollectionSourcesProductionCase(t *testing.T) {
 	sources := []botCollectionSource{
-		{TenantID: 10, SourceID: 130},
-		{TenantID: 10, SourceID: 131},
-		{TenantID: 11, SourceID: 140},
+		{TenantID: 10, ID: 130},
+		{TenantID: 10, ID: 131},
+		{TenantID: 11, ID: 140},
 	}
 	for _, messageType := range []string{"private", "group", "channel"} {
 		matched := matchBotCollectionSources(sources, 10, 9)
-		if len(matched) != 2 || matched[0].SourceID != 130 || matched[1].SourceID != 131 {
+		if len(matched) != 2 || matched[0].ID != 130 || matched[1].ID != 131 {
 			t.Fatalf("%s update matched sources = %+v", messageType, matched)
 		}
 	}

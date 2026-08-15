@@ -469,14 +469,14 @@ func updateEventID(botKey string, tenantID, sourceID, updateID int64, raw []byte
 type botCollectorFeature struct{}
 
 type botCollectionSource struct {
-	SourceID int64
+	ID       int64
 	TenantID int64
 }
 
 func matchBotCollectionSources(sources []botCollectionSource, tenantID, botID int64) []botCollectionSource {
 	matched := make([]botCollectionSource, 0, len(sources))
 	for _, source := range sources {
-		if source.TenantID == tenantID && source.SourceID > 0 && botID > 0 {
+		if source.TenantID == tenantID && source.ID > 0 && botID > 0 {
 			matched = append(matched, source)
 		}
 	}
@@ -509,10 +509,14 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 			Where("collect_enabled", 1).Where("status", 1).WhereNull("deleted_at").Scan(&sources); err != nil {
 			return false, err
 		}
-		for _, source := range matchBotCollectionSources(sources, binding.TenantID, binding.ReferenceID) {
+		matchedSources := matchBotCollectionSources(sources, binding.TenantID, binding.ReferenceID)
+		if len(matchedSources) == 0 {
+			g.Log().Warningf(ctx, "TG Bot采集更新未匹配到采集源 tenantId:%d botId:%d sourceCount:%d", binding.TenantID, binding.ReferenceID, len(sources))
+		}
+		for _, source := range matchedSources {
 			if err := collectorservice.Collector().IngestBotUpdate(ctx, collectorservice.BotContext{
 				Key: bot.Key, Token: bot.Token,
-				Binding: collectorservice.BotBinding{TenantID: source.TenantID, SourceID: source.SourceID, Reference: fmt.Sprintf("source:%d", source.SourceID)},
+				Binding: collectorservice.BotBinding{TenantID: source.TenantID, SourceID: source.ID, Reference: fmt.Sprintf("source:%d", source.ID)},
 			}, update); err != nil {
 				return false, err
 			}
