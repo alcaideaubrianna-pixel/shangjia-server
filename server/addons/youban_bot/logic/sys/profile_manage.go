@@ -497,7 +497,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 			media = mediaRows[0]
 		}
 		caption := publishService.SysPublish().TelegramRichTextHTML(row.Text)
-		buttonMarkup := templateInlineButtonMarkup(row.ButtonConfig)
+		buttonMarkup := inlineQueryReplyMarkup(templateInlineButtonMarkup(row.ButtonConfig))
 		if mediaCount == 1 && strings.EqualFold(strings.TrimSpace(media.MediaType), "image") {
 			cachedPhoto, cachedErr := s.templateInlineCachedPhoto(ctx, botId, media.SourceMessageRecordID, media.TgFileID)
 			if cachedErr != nil {
@@ -563,6 +563,13 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 	return err
 }
 
+func inlineQueryReplyMarkup(markup *models.InlineKeyboardMarkup) models.ReplyMarkup {
+	if markup == nil {
+		return nil
+	}
+	return *markup
+}
+
 func templateInlineButtonMarkup(value string) *models.InlineKeyboardMarkup {
 	if strings.TrimSpace(value) == "" {
 		return nil
@@ -576,7 +583,7 @@ func templateInlineButtonMarkup(value string) *models.InlineKeyboardMarkup {
 		buttons := make([]models.InlineKeyboardButton, 0, len(row))
 		for _, button := range row {
 			text := strings.TrimSpace(button.Text)
-			url := strings.TrimSpace(button.URL)
+			url := templateInlineButtonURL(button.URL)
 			if text == "" || url == "" {
 				continue
 			}
@@ -590,6 +597,14 @@ func templateInlineButtonMarkup(value string) *models.InlineKeyboardMarkup {
 		return nil
 	}
 	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func templateInlineButtonURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if strings.HasPrefix(rawURL, "@") && len(rawURL) > 1 {
+		return "https://t.me/" + strings.TrimPrefix(rawURL, "@")
+	}
+	return rawURL
 }
 
 type templateInlineCachedPhoto struct {

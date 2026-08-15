@@ -1,10 +1,28 @@
 package sys
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/go-telegram/bot/models"
 )
+
+func TestInlineQueryReplyMarkupMarshalsAsObject(t *testing.T) {
+	markup := inlineQueryReplyMarkup(&models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "测试", URL: "https://t.me/test"}}}})
+	data, err := json.Marshal(markup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) == 0 || data[0] != '{' {
+		t.Fatalf("inline reply markup must be a JSON object: %s", data)
+	}
+}
+
+func TestTemplateInlineButtonURLNormalizesUsername(t *testing.T) {
+	if got := templateInlineButtonURL("@xhjsjbot"); got != "https://t.me/xhjsjbot" {
+		t.Fatalf("unexpected normalized URL: %s", got)
+	}
+}
 
 func TestDecodeTemplateInlineCachedPhoto(t *testing.T) {
 	raw := `{"photo":[{"file_id":"small","width":90,"height":90},{"file_id":"largest","width":1280,"height":720}],"caption":"测试文案","caption_entities":[{"type":"custom_emoji","offset":0,"length":2,"custom_emoji_id":"5976568857786062743"}]}`
