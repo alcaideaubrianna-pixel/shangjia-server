@@ -867,6 +867,22 @@ func (s *sSysBot) handleQuickPushTemplateCallback(ctx context.Context, callCtx c
 		_ = s.saveQuickPushSession(ctx, session)
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 		return true, s.editQuickPushMessageText(callCtx, tgBot, query, quickPushButtonConfigPrompt, quickPushEditCancelKeyboard(session, templateId))
+	case "preview":
+		template, err := publishService.SysPublish().QuickPushBotTemplateView(ctx, session.OperatorAccountId, templateId)
+		if err != nil {
+			return true, err
+		}
+		text := sanitizeTelegramHTML(template.Text)
+		if text == "" {
+			text = html.EscapeString(template.Name)
+		}
+		var markup models.ReplyMarkup
+		if len(template.Media) <= 1 {
+			markup = templateInlineButtonMarkup(template.ButtonConfig)
+		}
+		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "预览已发送"})
+		_, err = tgBot.SendMessage(callCtx, &tgbot.SendMessageParams{ChatID: session.ChatId, Text: text, ParseMode: models.ParseModeHTML, ReplyMarkup: markup})
+		return true, err
 	case "delete":
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 		return true, s.editQuickPushMessageText(callCtx, tgBot, query, "确定删除当前模板吗？删除后不可恢复。", quickPushTemplateDetailKeyboard(session, templateId, true))
@@ -957,7 +973,7 @@ func quickPushTemplateDetailKeyboard(session *quickPushSession, templateId int64
 	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
 		{{Text: "修改名称", CallbackData: quickPushCallbackData("editname", session.SessionId, templateId)}, {Text: "修改文本", CallbackData: quickPushCallbackData("edittext", session.SessionId, templateId)}},
 		{{Text: "修改媒体", CallbackData: quickPushCallbackData("editmedia", session.SessionId, templateId)}, {Text: "设置按钮", CallbackData: quickPushCallbackData("editbuttons", session.SessionId, templateId)}},
-		{{Text: "删除", CallbackData: quickPushCallbackData("delete", session.SessionId, templateId)}},
+		{{Text: "预览", CallbackData: quickPushCallbackData("preview", session.SessionId, templateId)}, {Text: "删除", CallbackData: quickPushCallbackData("delete", session.SessionId, templateId)}},
 		{{Text: "返回模板列表", CallbackData: quickPushCallbackData("backlist", session.SessionId, 0)}, {Text: "快速发送", CallbackData: quickPushCallbackData("use", session.SessionId, templateId)}},
 	}}
 }
