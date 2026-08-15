@@ -256,18 +256,18 @@ func validateInlinePublishTemplate(template *sysin.MessageTemplateModel) error {
 	}
 	media := messageTemplateTelegramMedia(template)
 	if len(media) > 1 {
-		return gerror.New("Inline仅支持单个媒体，当前媒体数量超过1")
+		return gerror.New("仅支持单个媒体，当前媒体数量超过1")
 	}
 	if len(media) == 1 {
 		item := media[0]
 		if item == nil || !strings.EqualFold(strings.TrimSpace(item.MediaType), "image") {
-			return gerror.New("Inline仅支持单张图片，视频或媒体组改用协议号")
+			return gerror.New("仅支持单张图片，视频或媒体组改用协议号")
 		}
 		if strings.TrimSpace(item.TgFileId) == "" && !isInlineHTTPSURL(firstNonEmpty(item.FileUrl, item.StoragePath)) {
-			return gerror.New("Inline图片缺少有效Telegram文件ID或公网HTTPS地址")
+			return gerror.New("图片缺少有效Telegram文件ID或公网HTTPS地址")
 		}
 		if len([]rune(template.Text)) > 1024 {
-			return gerror.New("Inline图片文案超过Telegram允许的1024字符")
+			return gerror.New("图片文案超过 Telegram BOT 限制，已自动使用协议号发送")
 		}
 	} else if len([]rune(template.Text)) > 4096 {
 		return gerror.New("Inline文案超过Telegram允许的4096字符")
