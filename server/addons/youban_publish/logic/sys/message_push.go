@@ -64,6 +64,12 @@ func (s *sSysPublish) AdminMessageTemplateSave(ctx context.Context, in *sysin.Me
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
+	if err = in.NormalizeButtonConfig(); err != nil {
+		return nil, err
+	}
+	if len(in.Media) > 1 && in.ButtonConfig != "" {
+		in.ButtonConfig = ""
+	}
 	if in.Id > 0 {
 		if err = s.ensureMessageTemplatesBelongTenant(ctx, []int64{in.Id}, account.TenantId); err != nil {
 			return nil, err
@@ -117,6 +123,7 @@ func (s *sSysPublish) AdminMessageTemplateSave(ctx context.Context, in *sysin.Me
 			"media_count":              len(in.Media),
 			"status":                   in.Status,
 			"source_message_record_id": sourceMessageRecordId,
+			"button_config":            in.ButtonConfig,
 			"updated_by":               account.Id,
 			"updated_at":               now,
 		}

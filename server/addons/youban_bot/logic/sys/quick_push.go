@@ -23,13 +23,14 @@ import (
 )
 
 const (
-	quickPushSessionStateWaiting   = "waiting_message"
-	quickPushSessionStateSelecting = "selecting_plans"
-	quickPushSessionStateEditName  = "editing_template_name"
-	quickPushSessionStateEditText  = "editing_template_text"
-	quickPushSessionStateEditMedia = "editing_template_media"
-	quickPushSessionTTL            = 30 * time.Minute
-	quickPushCallbackPrefix        = "yb_qp"
+	quickPushSessionStateWaiting     = "waiting_message"
+	quickPushSessionStateSelecting   = "selecting_plans"
+	quickPushSessionStateEditName    = "editing_template_name"
+	quickPushSessionStateEditText    = "editing_template_text"
+	quickPushSessionStateEditMedia   = "editing_template_media"
+	quickPushSessionStateEditButtons = "editing_template_buttons"
+	quickPushSessionTTL              = 30 * time.Minute
+	quickPushCallbackPrefix          = "yb_qp"
 )
 
 type quickPushFeature struct{}
@@ -97,6 +98,7 @@ type quickPushSession struct {
 	PlanIds               []int64                                 `json:"planIds"`
 	SelectedPlanIds       []int64                                 `json:"selectedPlanIds"`
 	SavedTemplateId       int64                                   `json:"savedTemplateId"`
+	ButtonConfig          string                                  `json:"buttonConfig"`
 	EditingTemplateId     int64                                   `json:"editingTemplateId"`
 	CreatedAt             int64                                   `json:"createdAt"`
 }
@@ -118,6 +120,18 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 	if quickPushNavigationText(text) {
 		_ = bot.removeQuickPushSession(ctx, event.BotId, telegramUserId)
 		return false, nil
+	}
+	if session.State == quickPushSessionStateEditButtons {
+		config, parseErr := parseQuickPushButtons(text)
+		if parseErr != nil {
+			return true, bot.reply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), parseErr.Error())
+		}
+		session.ButtonConfig = config
+		session.State = quickPushSessionStateWaiting
+		if err = bot.saveQuickPushSession(ctx, session); err != nil {
+			return true, err
+		}
+		return true, bot.reply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "按钮设置已保存。")
 	}
 	if session.State == quickPushSessionStateEditName || session.State == quickPushSessionStateEditText {
 		if text == "" {
@@ -394,6 +408,15 @@ func (s *sSysBot) handleQuickPushCallback(ctx context.Context, botId int64, quer
 		return true, nil
 	}
 	if handled, callbackErr := s.handleQuickPushTemplateCallback(ctx, callCtx, tgBot, query, session, action, planId); handled {
+		if callbackErr != nil {
+			text := quickPushCallbackAlertText(callbackErr.Error())
+			if text == "" {
+				text = "模板操作失败，请稍后重试"
+			}
+			_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: text, ShowAlert: true})
+			g.Log().Errorf(ctx, "快速推送模板回调失败 botId:%d userId:%s action:%s templateId:%d err:%+v", botId, telegramUserId, action, planId, callbackErr)
+			return true, nil
+		}
 		return true, callbackErr
 	}
 	if session.State != quickPushSessionStateSelecting {
@@ -432,6 +455,7 @@ func (s *sSysBot) handleQuickPushCallback(ctx context.Context, botId int64, quer
 			Text:                  session.Text,
 			Media:                 session.Media,
 			SourceMessageRecordId: session.SourceMessageRecordId,
+			ButtonConfig:          session.ButtonConfig,
 		})
 		if saveErr != nil {
 			_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "保存模板失败：" + quickPushCallbackAlertText(saveErr.Error()), ShowAlert: true})
@@ -454,7 +478,7 @@ func (s *sSysBot) handleQuickPushCallback(ctx context.Context, botId int64, quer
 		}
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "已开始执行快速推送", ShowAlert: false})
 		_ = s.editQuickPushMessageText(callCtx, tgBot, query, "快速推送已开始执行，请稍候…", nil)
-		res, execErr := publishService.SysPublish().QuickPushExecuteByBot(ctx, &publishsysin.QuickPushBotExecuteInp{TenantId: session.TenantId, OperatorAccountId: session.OperatorAccountId, TemplateId: session.SavedTemplateId, PlanIds: session.SelectedPlanIds, Text: session.Text, Media: session.Media, SourceMessageRecordId: session.SourceMessageRecordId})
+		res, execErr := publishService.SysPublish().QuickPushExecuteByBot(ctx, &publishsysin.QuickPushBotExecuteInp{TenantId: session.TenantId, OperatorAccountId: session.OperatorAccountId, TemplateId: session.SavedTemplateId, PlanIds: session.SelectedPlanIds, Text: session.Text, Media: session.Media, SourceMessageRecordId: session.SourceMessageRecordId, ButtonConfig: session.ButtonConfig})
 		_ = s.removeQuickPushSession(ctx, botId, telegramUserId)
 		if execErr != nil {
 			return true, s.editQuickPushMessageText(callCtx, tgBot, query, "快速推送执行失败："+html.EscapeString(execErr.Error()), nil)
@@ -725,7 +749,48 @@ func quickPushEntryKeyboard(session *quickPushSession) *models.InlineKeyboardMar
 	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{
 		{Text: "取消", CallbackData: quickPushCallbackData("cancel", session.SessionId, 0)},
 		{Text: "查看已有模板", CallbackData: quickPushCallbackData("templates", session.SessionId, 0)},
+		{Text: "设置按钮", CallbackData: quickPushCallbackData("buttons", session.SessionId, 0)},
 	}}}
+}
+
+func parseQuickPushButtons(text string) (string, error) {
+	if strings.TrimSpace(text) == "/clear" {
+		return "", nil
+	}
+	mode := "inline"
+	rows := make([][]publishsysin.MessageTemplateButton, 0)
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		row := make([]publishsysin.MessageTemplateButton, 0)
+		for _, raw := range strings.Split(line, "&&") {
+			item := strings.TrimSpace(raw)
+			if item == "" {
+				continue
+			}
+			button := publishsysin.MessageTemplateButton{Text: item}
+			if dash := strings.Index(item, "-"); dash > 0 {
+				button.Text = strings.TrimSpace(item[:dash])
+				button.URL = strings.TrimSpace(item[dash+1:])
+			} else {
+				return "", gerror.New("消息按钮必须使用：按钮名称-跳转链接")
+			}
+			if strings.HasPrefix(button.Text, "#p") || strings.HasPrefix(button.Text, "#r") || strings.HasPrefix(button.Text, "#g") {
+				button.Color = button.Text[:2]
+				button.Text = strings.TrimSpace(button.Text[2:])
+			}
+			if button.Text == "" || (mode == "inline" && button.URL == "") {
+				return "", gerror.New("按钮格式不正确，请使用 名称-链接 或直接填写底部按钮名称")
+			}
+			row = append(row, button)
+		}
+		if len(row) > 0 {
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) == 0 {
+		return "", gerror.New("按钮配置不能为空")
+	}
+	data, _ := json.Marshal(publishsysin.MessageTemplateButtonConfig{Mode: mode, Rows: rows})
+	return string(data), nil
 }
 
 func (s *sSysBot) handleQuickPushTemplateCallback(ctx context.Context, callCtx context.Context, tgBot *tgbot.Bot, query *models.CallbackQuery, session *quickPushSession, action string, templateId int64) (bool, error) {
@@ -794,11 +859,17 @@ func (s *sSysBot) handleQuickPushTemplateCallback(ctx context.Context, callCtx c
 		session.Text = template.Text
 		session.Media = messageTemplateMediaToInputs(template.Media)
 		session.SourceMessageRecordId = template.SourceMessageRecordId
+		session.ButtonConfig = template.ButtonConfig
 		session.PlanIds = quickPushPlanIds(plans)
 		session.SelectedPlanIds = append([]int64(nil), session.PlanIds...)
 		_ = s.saveQuickPushSession(ctx, session)
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 		return true, s.editQuickPushMessageText(callCtx, tgBot, query, quickPushSelectionText(session, plans), quickPushPlanKeyboard(session, plans))
+	case "buttons":
+		session.State = quickPushSessionStateEditButtons
+		_ = s.saveQuickPushSession(ctx, session)
+		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
+		return true, s.editQuickPushMessageText(callCtx, tgBot, query, "请发送按钮配置：每行一行按钮，使用 && 分隔同一行按钮。消息按钮格式：名称-链接；底部键盘直接填写按钮名称。发送 /clear 清除按钮。", quickPushEditCancelKeyboard(session, 0))
 	case "cancel":
 		if session.State == quickPushSessionStateSelecting {
 			return false, nil

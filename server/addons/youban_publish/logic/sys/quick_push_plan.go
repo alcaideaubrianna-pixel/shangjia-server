@@ -339,7 +339,7 @@ func (s *sSysPublish) QuickPushSaveTemplateByBot(ctx context.Context, in *sysin.
 	if account.TenantId != in.TenantId {
 		return nil, gerror.New("上架管理员账号无权保存当前快速推送模板")
 	}
-	template, err := s.createQuickPushMessageTemplate(ctx, in.TenantId, in.OperatorAccountId, in.Text, in.Media, in.SourceMessageRecordId)
+	template, err := s.createQuickPushMessageTemplate(ctx, in.TenantId, in.OperatorAccountId, in.Text, in.Media, in.SourceMessageRecordId, in.ButtonConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +374,7 @@ func (s *sSysPublish) QuickPushExecuteByBot(ctx context.Context, in *sysin.Quick
 	if in.TemplateId > 0 {
 		template, err = s.quickPushMessageTemplateById(ctx, in.TemplateId, in.TenantId)
 	} else {
-		template, err = s.createQuickPushMessageTemplate(ctx, in.TenantId, in.OperatorAccountId, in.Text, in.Media, in.SourceMessageRecordId)
+		template, err = s.createQuickPushMessageTemplate(ctx, in.TenantId, in.OperatorAccountId, in.Text, in.Media, in.SourceMessageRecordId, in.ButtonConfig)
 	}
 	if err != nil {
 		return nil, err
@@ -458,7 +458,10 @@ func (s *sSysPublish) quickPushPlansByIds(ctx context.Context, ids []int64, tena
 	return plans, nil
 }
 
-func (s *sSysPublish) createQuickPushMessageTemplate(ctx context.Context, tenantId int64, operatorAccountId int64, text string, media []*sysin.MessageTemplateMediaInp, sourceMessageRecordId int64) (*sysin.MessageTemplateModel, error) {
+func (s *sSysPublish) createQuickPushMessageTemplate(ctx context.Context, tenantId int64, operatorAccountId int64, text string, media []*sysin.MessageTemplateMediaInp, sourceMessageRecordId int64, buttonConfig string) (*sysin.MessageTemplateModel, error) {
+	if len(media) > 1 {
+		buttonConfig = ""
+	}
 	sourceRecordIds := quickPushSourceRecordIds(sourceMessageRecordId, media)
 	if err := botService.SysBot().RetainStoredMessages(ctx, sourceRecordIds); err != nil {
 		return nil, err
@@ -470,7 +473,7 @@ func (s *sSysPublish) createQuickPushMessageTemplate(ctx context.Context, tenant
 	if err != nil {
 		return nil, err
 	}
-	template := &sysin.MessageTemplateModel{TenantId: tenantId, SerialNo: serialNo, PushMode: sysin.MessageTemplatePushModeBot, Name: name, Text: text, MediaCount: len(media), Media: []*sysin.MessageTemplateMediaModel{}, Status: 1, SourceMessageRecordId: sourceMessageRecordId, CreatedBy: operatorAccountId, UpdatedBy: operatorAccountId, CreatedAt: now, UpdatedAt: now}
+	template := &sysin.MessageTemplateModel{TenantId: tenantId, SerialNo: serialNo, PushMode: sysin.MessageTemplatePushModeBot, Name: name, Text: text, MediaCount: len(media), Media: []*sysin.MessageTemplateMediaModel{}, Status: 1, SourceMessageRecordId: sourceMessageRecordId, ButtonConfig: buttonConfig, CreatedBy: operatorAccountId, UpdatedBy: operatorAccountId, CreatedAt: now, UpdatedAt: now}
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		id, err := tx.Model(messageTemplateTable).Ctx(ctx).Data(g.Map{
 			"tenant_id":                tenantId,
@@ -481,6 +484,7 @@ func (s *sSysPublish) createQuickPushMessageTemplate(ctx context.Context, tenant
 			"media_count":              len(media),
 			"status":                   1,
 			"source_message_record_id": sourceMessageRecordId,
+			"button_config":            buttonConfig,
 			"created_by":               operatorAccountId,
 			"updated_by":               operatorAccountId,
 			"created_at":               now,
