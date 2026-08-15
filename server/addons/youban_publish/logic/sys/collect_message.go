@@ -158,6 +158,15 @@ func (s *sSysPublish) mergeCollectMessageEvent(ctx context.Context, event gdb.Re
 	if err != nil {
 		return eventId, gerror.Wrap(err, "更新采集事件失败")
 	}
+	if message.BotId > 0 && event[eventCols.BotId].Int64() <= 0 {
+		_, err = eventDao.Ctx(ctx).
+			Where(eventCols.Id, eventId).
+			WhereLTE(eventCols.BotId, 0).
+			Data(g.Map{eventCols.BotId: message.BotId, eventCols.UpdatedAt: now}).Update()
+		if err != nil {
+			return eventId, gerror.Wrap(err, "补全采集事件Bot失败")
+		}
+	}
 	if message.SourceMessageId > 0 {
 		_, err = eventDao.Ctx(ctx).
 			Where(eventCols.Id, eventId).

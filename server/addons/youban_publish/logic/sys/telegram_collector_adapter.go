@@ -375,7 +375,7 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	}
 	source, err := g.DB().Model(publishCollectSourceTable+" s").Safe().Ctx(ctx).
 		InnerJoin("hg_youban_publish_tenant_vip vip", "vip.tenant_id=s.tenant_id AND vip.status=1 AND vip.level>0 AND vip.deleted_at IS NULL").
-		Fields("s.id,s.tenant_id,s.account_id").
+		Fields("s.id,s.tenant_id,s.account_id,s.bot_id").
 		Where("s.id", delivery.SourceID).
 		Where("s.source_type", sysin.CollectSourceTypeBot).
 		Where("s.collect_enabled", 1).
@@ -397,6 +397,7 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 		return nil
 	}
 	message := collectorDeliveryMessage(delivery, source["tenant_id"].Int64(), source["account_id"].Int64(), source["id"].Int64(), sysin.CollectSourceTypeBot)
+	message.BotId = source["bot_id"].Int64()
 	_, err = s.ingestAndProcessCollectMessage(ctx, message)
 	return err
 }

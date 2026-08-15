@@ -207,6 +207,13 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 		g.Log().Warningf(ctx, "采集媒体任务对应事件不存在，跳过历史任务 eventId:%d tenantId:%d accountId:%d sourceId:%d", payload.EventId, payload.TenantId, payload.AccountId, payload.SourceId)
 		return nil
 	}
+	if event["source_type"].String() == sysin.CollectSourceTypeBot && event["bot_id"].Int64() <= 0 {
+		botID, resolveErr := s.resolveCollectEventBotID(ctx, event)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		event["bot_id"] = g.NewVar(botID)
+	}
 	statEvent = event
 	if collectEventAlreadyMatched(event["status"].String()) {
 		g.Log().Debugf(ctx, "采集媒体任务对应事件已完成，跳过重复任务 eventId:%d status:%s", payload.EventId, event["status"].String())
@@ -304,6 +311,41 @@ func (s *sSysPublish) ExecuteCollectMediaCache(ctx context.Context, payload coll
 		return err
 	}
 	return nil
+}
+
+func (s *sSysPublish) resolveCollectEventBotID(ctx context.Context, event gdb.Record) (int64, error) {
+	if event.IsEmpty() {
+		return 0, gerror.New("Bot采集事件为空")
+	}
+	botID := event["bot_id"].Int64()
+	if botID > 0 {
+		return botID, nil
+	}
+	source, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
+		Fields("bot_id").
+		Where("id", event["source_id"].Int64()).
+		Where("tenant_id", event["tenant_id"].Int64()).
+		Where("account_id", event["account_id"].Int64()).
+		Where("source_type", sysin.CollectSourceTypeBot).
+		WhereNull("deleted_at").
+		One()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取Bot采集源媒体配置失败")
+	}
+	botID = source["bot_id"].Int64()
+	if botID <= 0 {
+		return 0, gerror.New("Bot采集媒体缺少Bot ID")
+	}
+	_, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Where("id", event["id"].Int64()).
+		WhereLTE("bot_id", 0).
+		Data(g.Map{"bot_id": botID, "updated_at": gtime.Now()}).
+		Update()
+	if err != nil {
+		return 0, gerror.Wrap(err, "补全Bot采集事件媒体配置失败")
+	}
+	g.Log().Infof(ctx, "已从采集源补全Bot采集事件媒体配置 eventId:%d sourceId:%d botId:%d", event["id"].Int64(), event["source_id"].Int64(), botID)
+	return botID, nil
 }
 
 func collectMediaRuntimeContext(ctx context.Context, accountId int64) context.Context {
