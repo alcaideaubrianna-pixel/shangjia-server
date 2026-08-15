@@ -287,16 +287,30 @@ func (s *sSysPublish) ensureMessageTemplatesBelongTenant(ctx context.Context, id
 	if len(ids) == 0 {
 		return gerror.New("请选择消息模板")
 	}
-	count, err := g.DB().Model(messageTemplateTable).Safe().Ctx(ctx).
+	var validRows []struct {
+		Id int64 `json:"id"`
+	}
+	err := g.DB().Model(messageTemplateTable).Safe().Ctx(ctx).
+		Fields("id").
 		WhereIn("id", ids).
 		Where("tenant_id", tenantId).
 		WhereNull("deleted_at").
-		Count()
+		Scan(&validRows)
 	if err != nil {
 		return gerror.Wrap(err, "检查消息模板权限失败")
 	}
-	if count != len(ids) {
-		return gerror.New("存在无权操作的消息模板")
+	valid := make(map[int64]struct{}, len(validRows))
+	for _, row := range validRows {
+		valid[row.Id] = struct{}{}
+	}
+	invalid := make([]int64, 0)
+	for _, id := range ids {
+		if _, ok := valid[id]; !ok {
+			invalid = append(invalid, id)
+		}
+	}
+	if len(invalid) > 0 {
+		return gerror.Newf("存在无效或无权操作的消息模板，模板ID：%v", invalid)
 	}
 	return nil
 }
