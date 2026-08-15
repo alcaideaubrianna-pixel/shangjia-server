@@ -2,7 +2,9 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -66,6 +68,8 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Conte
 		return nil, h.publish.handleMessageReconcileAccountTask(ctx, client, task)
 	case collectorin.AccountTaskTypeMessageMediaFallback:
 		return nil, h.publish.handleMessageMediaFallbackAccountTask(ctx, client, task)
+	case collectorin.AccountTaskTypeMessageDeleteFallback:
+		return nil, h.publish.handleMessageDeleteFallbackAccountTask(ctx, client, task)
 	default:
 		return nil, gerror.Newf("不支持的Telegram账号任务类型：%s", task.TaskType)
 	}
@@ -214,6 +218,11 @@ func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, cl
 	if task.AccountID != channel.TgAccountId {
 		return gerror.New("Inline账号任务与目标频道账号不一致")
 	}
+	if validationErr := validateInlinePublishTemplate(template); validationErr != nil {
+		g.Log().Errorf(ctx, "Inline发布协议校验失败，直接降级协议号 jobId:%d serial:%s err:%+v", job.Id, template.SerialNo, validationErr)
+		s.appendTelegramJobLog(ctx, job, "inline_send", "skipped", "Inline协议校验失败，直接降级协议号："+validationErr.Error())
+		return s.sendMessageTemplateByAccountClient(ctx, client, channel, job, template)
+	}
 	peer, err := messagePushInputPeer(channel)
 	if err != nil {
 		return err
@@ -236,6 +245,66 @@ func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, cl
 	}
 	s.appendTelegramJobLog(ctx, job, "inline_send", sysin.MessagePushStatusSent, fmt.Sprintf("账号服务Inline机器人消息模板推送成功 duration:%s", time.Since(startedAt)))
 	return nil
+}
+
+func validateInlinePublishTemplate(template *sysin.MessageTemplateModel) error {
+	if template == nil {
+		return gerror.New("Inline模板为空")
+	}
+	if strings.TrimSpace(template.SerialNo) == "" {
+		return gerror.New("Inline模板编号为空")
+	}
+	media := messageTemplateTelegramMedia(template)
+	if len(media) > 1 {
+		return gerror.New("Inline仅支持单个媒体，当前媒体数量超过1")
+	}
+	if len(media) == 1 {
+		item := media[0]
+		if item == nil || !strings.EqualFold(strings.TrimSpace(item.MediaType), "image") {
+			return gerror.New("Inline仅支持单张图片，视频或媒体组改用协议号")
+		}
+		if strings.TrimSpace(item.TgFileId) == "" && !isInlineHTTPSURL(firstNonEmpty(item.FileUrl, item.StoragePath)) {
+			return gerror.New("Inline图片缺少有效Telegram文件ID或公网HTTPS地址")
+		}
+		if len([]rune(template.Text)) > 1024 {
+			return gerror.New("Inline图片文案超过Telegram允许的1024字符")
+		}
+	} else if len([]rune(template.Text)) > 4096 {
+		return gerror.New("Inline文案超过Telegram允许的4096字符")
+	}
+	if strings.TrimSpace(template.ButtonConfig) != "" {
+		var config sysin.MessageTemplateButtonConfig
+		if err := json.Unmarshal([]byte(template.ButtonConfig), &config); err != nil {
+			return gerror.Wrap(err, "Inline按钮配置不是有效JSON")
+		}
+		if config.Mode != "inline" {
+			return gerror.New("Inline按钮配置模式必须是inline")
+		}
+		for rowIndex, row := range config.Rows {
+			for buttonIndex, button := range row {
+				if strings.TrimSpace(button.Text) == "" {
+					return gerror.Newf("Inline按钮文本为空，位置：%d-%d", rowIndex+1, buttonIndex+1)
+				}
+				if !isInlineHTTPSURL(inlinePublishButtonURL(button.URL)) {
+					return gerror.Newf("Inline按钮链接不是有效HTTPS地址，位置：%d-%d，原值：%s", rowIndex+1, buttonIndex+1, button.URL)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func isInlineHTTPSURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && parsed.Scheme == "https" && parsed.Host != ""
+}
+
+func inlinePublishButtonURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "@") && len(raw) > 1 {
+		return "https://t.me/" + strings.TrimPrefix(raw, "@")
+	}
+	return raw
 }
 
 func (s *sSysPublish) fallbackMessagePushInline(ctx context.Context, client *telegram.Client, channel *messagePushChannel, job telegramJobRecord, template *sysin.MessageTemplateModel, inlineErr error) error {
