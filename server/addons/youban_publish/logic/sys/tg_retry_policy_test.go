@@ -32,7 +32,7 @@ func TestTelegramChannelPermissionError(t *testing.T) {
 	}
 }
 
-func TestTelegramAccountBusyBecomesPermanentAfterFiveRetries(t *testing.T) {
+func TestTelegramAccountBusyBecomesPermanentAfterThreeRetries(t *testing.T) {
 	err := &telegramAccountBusyError{tgAccountId: 16, err: context.DeadlineExceeded}
 	policy := telegramJobErrorRetryPolicy(err, telegramRetryMaxCount)
 	if !policy.Permanent {

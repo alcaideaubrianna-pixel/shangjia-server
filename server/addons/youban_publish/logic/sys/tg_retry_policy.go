@@ -16,7 +16,7 @@ import (
 const (
 	telegramRetryMinDelay = 30 * time.Second
 	telegramRetryMaxDelay = 2 * time.Hour
-	telegramRetryMaxCount = 5
+	telegramRetryMaxCount = 3
 )
 
 type telegramJobRetryPolicy struct {
