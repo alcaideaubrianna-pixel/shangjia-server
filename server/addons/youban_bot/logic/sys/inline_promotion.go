@@ -22,6 +22,9 @@ type inlinePromotionFeature struct{}
 func (inlinePromotionFeature) Key() string         { return inlinePromotionFeatureKey }
 func (inlinePromotionFeature) Command() string     { return "" }
 func (inlinePromotionFeature) Description() string { return "Inline 宣传" }
+func (inlinePromotionFeature) Match(_ context.Context, _ *sSysBot, _ *botFeatureRow, text string) bool {
+	return strings.TrimSpace(text) == "合作推广广告"
+}
 func (inlinePromotionFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
 	return []*sysin.FeatureConfigSchema{
 		{Field: "menuVisible", Label: "菜单可见", Component: "hidden", Default: 0},

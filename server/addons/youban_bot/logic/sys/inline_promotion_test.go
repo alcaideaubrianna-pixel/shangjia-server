@@ -2,6 +2,7 @@ package sys
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -23,6 +24,16 @@ func TestInlinePromotionFeatureHidesMenuEntry(t *testing.T) {
 	schema := (inlinePromotionFeature{}).ConfigSchema()
 	if len(schema) == 0 || schema[0].Field != "menuVisible" || schema[0].Component != "hidden" || schema[0].Default != 0 {
 		t.Fatalf("inline promotion menu configuration is not hidden: %+v", schema)
+	}
+}
+
+func TestInlinePromotionLegacyMenuLabel(t *testing.T) {
+	feature := inlinePromotionFeature{}
+	if !feature.Match(context.Background(), nil, nil, " 合作推广广告 ") {
+		t.Fatal("legacy promotion menu label should match")
+	}
+	if feature.Match(context.Background(), nil, nil, "合作推广") {
+		t.Fatal("unrelated promotion text should not match")
 	}
 }
 
