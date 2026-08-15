@@ -16,7 +16,7 @@ func (s *sSysPublish) BotProfileSearch(ctx context.Context, in *sysin.BotProfile
 	if in.TenantId <= 0 {
 		return nil, 0, gerror.New("上架账号信息不完整")
 	}
-	profileIn := &sysin.NoteListInp{ProfileListInp: sysin.ProfileListInp{TenantId: in.TenantId, AccountId: in.AccountId, Keyword: strings.TrimSpace(in.Keyword), Status: in.Status}}
+	profileIn := &sysin.NoteListInp{ProfileListInp: sysin.ProfileListInp{Keyword: strings.TrimSpace(in.Keyword), Status: in.Status}}
 	profileIn.Page = in.Page
 	profileIn.PerPage = in.PerPage
 	if profileIn.Page <= 0 {
@@ -28,7 +28,26 @@ func (s *sSysPublish) BotProfileSearch(ctx context.Context, in *sysin.BotProfile
 	if no := normalizeBotProfileNo(in.ProfileNo); no != "" {
 		profileIn.Keyword = no
 	}
-	return s.noteList(ctx, profileIn)
+	accountIds, err := s.botProfileSearchAccountIds(ctx, in)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(accountIds) == 0 {
+		return []*sysin.NoteModel{}, 0, nil
+	}
+	return s.noteListByAccountIds(ctx, profileIn, accountIds)
+}
+
+func (s *sSysPublish) botProfileSearchAccountIds(ctx context.Context, in *sysin.BotProfileSearchInp) ([]int64, error) {
+	account := &sysin.AccountModel{Id: in.AccountId, TenantId: in.TenantId, AccountType: strings.TrimSpace(in.AccountType)}
+	if strings.EqualFold(account.AccountType, sysin.PublishAccountTypeAdmin) {
+		scope, err := s.adminProfileVisibleScope(ctx, account, &sysin.ProfileListInp{AccountScope: "all"})
+		if err != nil {
+			return nil, err
+		}
+		return uniqueIds(scope.AccountIds), nil
+	}
+	return s.followNoteAccountIds(ctx, account, &sysin.FollowNoteListInp{Scope: "all"})
 }
 
 func (s *sSysPublish) BotProfileImageSearch(ctx context.Context, in *sysin.BotProfileImageSearchInp) (list []*sysin.NoteModel, totalCount int, err error) {

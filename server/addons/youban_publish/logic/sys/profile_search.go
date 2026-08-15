@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"time"
 
@@ -12,6 +13,22 @@ import (
 	"hotgo/internal/library/cache"
 	"hotgo/internal/model/input/form"
 )
+
+var (
+	profileSearchLabelRegexp = regexp.MustCompile(`(?i)^\s*(?:资料)?编号\s*[:：=]?\s*`)
+	profileSearchNoRegexp    = regexp.MustCompile(`^[A-Z][A-Z0-9]{4,}$`)
+	profileSearchMarkRegexp  = regexp.MustCompile(`^(.+?)([0-9]{3})$`)
+)
+
+type profileSearchFields struct {
+	ProfileNo    string
+	Title        string
+	Summary      string
+	PlainText    string
+	AccountAlias string
+	SettingAlias string
+	StateAlias   string
+}
 
 func (s *sSysPublish) searchProfilePage(ctx context.Context, base *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string) ([]*sysin.ProfileModel, int, error) {
 	if in == nil {
@@ -33,23 +50,90 @@ func (s *sSysPublish) profileSearchModel(ctx context.Context, base *gdb.Model, i
 	if in == nil {
 		in = &sysin.ProfileListInp{}
 	}
-	keyword := strings.TrimSpace(in.Keyword)
 	base = s.applyProfileNonKeywordFilters(ctx, base, in)
-	if keyword == "" {
-		return base
-	}
-
-	terms := splitProfileSearchTerms(keyword)
-	if len(terms) == 0 {
-		return base
-	}
-
-	searchCondition, searchArgs := segmentedLikeCondition(profileSearchKeywordFields(), terms)
-	return base.Clone().Where(searchCondition, searchArgs...)
+	return applyProfileKeywordSearch(base, in.Keyword, profileTableSearchFields())
 }
 
 func profileSearchKeywordFields() []string {
 	return []string{"p.profile_no", "p.title", "p.summary", "p.plain_text"}
+}
+
+func profileTableSearchFields() profileSearchFields {
+	return profileSearchFields{
+		ProfileNo: "p.profile_no", Title: "p.title", Summary: "p.summary", PlainText: "p.plain_text",
+		AccountAlias: "a", SettingAlias: "account_setting", StateAlias: "ps",
+	}
+}
+
+func noteIndexSearchFields() profileSearchFields {
+	return profileSearchFields{
+		ProfileNo: "p.profile_no", Title: "i.title", Summary: "i.summary", PlainText: "i.plain_text",
+		AccountAlias: "a", SettingAlias: "account_setting", StateAlias: "ps",
+	}
+}
+
+func applyProfileKeywordSearch(mod *gdb.Model, keyword string, fields profileSearchFields) *gdb.Model {
+	keyword = normalizeProfileSearchKeyword(keyword)
+	if keyword == "" {
+		return mod
+	}
+	upper := strings.ToUpper(keyword)
+	if profileSearchNoRegexp.MatchString(upper) {
+		condition, args := profileTextSearchCondition(keyword, fields)
+		return mod.Where("(UPPER("+fields.ProfileNo+") = ? OR "+condition+")", append([]interface{}{upper}, args...)...)
+	}
+	if sequence, prefix, ok := parseProfilePublishMark(keyword); ok {
+		mod = mod.LeftJoin(publishAccountSettingTable+" account_setting", "account_setting.tenant_id="+fields.StateAlias+".tenant_id AND account_setting.account_id="+fields.StateAlias+".account_id AND account_setting.deleted_at IS NULL")
+		sequenceExpr := profileAccountSequenceExpr(fields.StateAlias)
+		condition, args := profileTextSearchCondition(keyword, fields)
+		if prefix == "" {
+			return mod.Where("("+sequenceExpr+" = ? OR "+condition+")", append([]interface{}{sequence}, args...)...)
+		}
+		return mod.Where("(UPPER("+profilePublishMarkExpr(fields, sequenceExpr)+") = ? OR "+condition+")", append([]interface{}{strings.ToUpper(prefix + sequence)}, args...)...)
+	}
+	condition, args := profileTextSearchCondition(keyword, fields)
+	return mod.Where(condition, args...)
+}
+
+func profileTextSearchCondition(keyword string, fields profileSearchFields) (string, []interface{}) {
+	terms := splitProfileSearchTerms(keyword)
+	if len(terms) == 0 {
+		return "1=1", nil
+	}
+	return segmentedLikeConditionNullSafe([]string{fields.ProfileNo, fields.Title, fields.Summary, fields.PlainText}, terms)
+}
+
+func normalizeProfileSearchKeyword(keyword string) string {
+	return strings.TrimSpace(profileSearchLabelRegexp.ReplaceAllString(strings.TrimSpace(keyword), ""))
+}
+
+func parseProfilePublishMark(keyword string) (sequence string, prefix string, ok bool) {
+	keyword = strings.TrimSpace(keyword)
+	if profileSearchNoRegexp.MatchString(strings.ToUpper(keyword)) {
+		return "", "", false
+	}
+	if len(keyword) == 3 {
+		for _, r := range keyword {
+			if r < '0' || r > '9' {
+				return "", "", false
+			}
+		}
+		return keyword, "", true
+	}
+	matches := profileSearchMarkRegexp.FindStringSubmatch(keyword)
+	if len(matches) != 3 {
+		return "", "", false
+	}
+	return matches[2], strings.TrimSpace(matches[1]), true
+}
+
+func profileAccountSequenceExpr(stateAlias string) string {
+	return "LPAD(CONCAT('',(SELECT COUNT(1) FROM " + publishProfileStateTable + " ps_seq WHERE ps_seq.tenant_id=" + stateAlias + ".tenant_id AND ps_seq.account_id=" + stateAlias + ".account_id AND ps_seq.id<=" + stateAlias + ".id AND ps_seq.deleted_at IS NULL)),3,'0')"
+}
+
+func profilePublishMarkExpr(fields profileSearchFields, sequenceExpr string) string {
+	prefix := "CASE WHEN " + fields.SettingAlias + ".mark_mode='custom' AND COALESCE(" + fields.SettingAlias + ".custom_mark_text,'')<>'' THEN " + fields.SettingAlias + ".custom_mark_text ELSE COALESCE(" + fields.AccountAlias + ".nickname,'') END"
+	return "CASE WHEN COALESCE(" + fields.SettingAlias + ".enable_title_mark,0)=1 AND COALESCE(" + fields.SettingAlias + ".number_source,'sequence')<>'random' THEN CONCAT(" + prefix + "," + sequenceExpr + ") ELSE '' END"
 }
 
 func (s *sSysPublish) scanProfilePage(mod *gdb.Model, in *sysin.ProfileListInp, fields string, countErrMessage string, listErrMessage string) ([]*sysin.ProfileModel, int, error) {

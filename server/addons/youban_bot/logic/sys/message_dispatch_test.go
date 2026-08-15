@@ -29,6 +29,19 @@ func TestListenerBindCodeIsNotProfileCommand(t *testing.T) {
 	}
 }
 
+func TestLooksLikeProfileSearchIdentifier(t *testing.T) {
+	for _, value := range []string{"M48574", "m48574", "编号：M48574", "001", "天空001"} {
+		if !looksLikeProfileSearchIdentifier(value) {
+			t.Fatalf("%q should be recognized as profile search identifier", value)
+		}
+	}
+	for _, value := range []string{"", "普通关键词", "12"} {
+		if looksLikeProfileSearchIdentifier(value) {
+			t.Fatalf("%q should not be recognized as profile search identifier", value)
+		}
+	}
+}
+
 func TestListenerBindHandlerRunsBeforeProfileHandler(t *testing.T) {
 	bindIndex := -1
 	profileIndex := -1

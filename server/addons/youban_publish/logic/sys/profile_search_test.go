@@ -38,3 +38,30 @@ func TestSplitProfileSearchTermsRemovesDuplicates(t *testing.T) {
 		t.Fatalf("unexpected terms: %#v", terms)
 	}
 }
+
+func TestNormalizeProfileSearchKeyword(t *testing.T) {
+	for input, want := range map[string]string{
+		"编号：m48574":   "m48574",
+		"资料编号 M48574": "M48574",
+		" 天空001 ":     "天空001",
+	} {
+		if got := normalizeProfileSearchKeyword(input); got != want {
+			t.Fatalf("normalize %q = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestParseProfilePublishMark(t *testing.T) {
+	for input, want := range map[string][2]string{
+		"001":   {"001", ""},
+		"天空001": {"001", "天空"},
+	} {
+		sequence, prefix, ok := parseProfilePublishMark(input)
+		if !ok || sequence != want[0] || prefix != want[1] {
+			t.Fatalf("parse %q = (%q,%q,%v), want (%q,%q,true)", input, sequence, prefix, ok, want[0], want[1])
+		}
+	}
+	if _, _, ok := parseProfilePublishMark("M48574"); ok {
+		t.Fatal("profile number must not be parsed as publish mark")
+	}
+}

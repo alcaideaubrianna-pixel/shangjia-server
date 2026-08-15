@@ -848,11 +848,12 @@ type FollowNoteModel struct {
 // BotProfileSearchInp is used by youban_bot to search profiles for a bound publish account.
 type BotProfileSearchInp struct {
 	form.PageReq
-	TenantId  int64  `json:"tenantId" dc:"租户ID"`
-	AccountId int64  `json:"accountId" dc:"上架账号ID"`
-	Keyword   string `json:"keyword" dc:"标题/编号/正文"`
-	ProfileNo string `json:"profileNo" dc:"资料编号"`
-	Status    int    `json:"status" dc:"状态：1上架 2下架"`
+	TenantId    int64  `json:"tenantId" dc:"租户ID"`
+	AccountId   int64  `json:"accountId" dc:"上架账号ID"`
+	AccountType string `json:"accountType" dc:"账号类型"`
+	Keyword     string `json:"keyword" dc:"标题/编号/正文"`
+	ProfileNo   string `json:"profileNo" dc:"资料编号"`
+	Status      int    `json:"status" dc:"状态：1上架 2下架"`
 }
 
 // BotProfileViewInp is used by youban_bot to view a profile by id or profile_no.

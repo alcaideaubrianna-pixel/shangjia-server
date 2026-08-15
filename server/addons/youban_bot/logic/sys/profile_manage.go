@@ -41,7 +41,10 @@ const (
 	profileMediaGroupCacheTTL   = 10 * time.Minute
 )
 
-var profileNoFindRegexp = regexp.MustCompile(`(?i)\b[A-Z][A-Z0-9]{4,}\b`)
+var (
+	profileNoFindRegexp   = regexp.MustCompile(`(?i)\b[A-Z][A-Z0-9]{4,}\b`)
+	profileMarkFindRegexp = regexp.MustCompile(`^\S{0,32}[0-9]{3}$`)
+)
 
 type botProfileAccount struct {
 	TenantId    int64
@@ -85,7 +88,7 @@ func (profileManageMessageHandler) Handle(ctx context.Context, bot *sSysBot, eve
 		}
 		chatID := fmt.Sprintf("%d", event.Msg.Chat.ID)
 		if nos := extractProfileNos(text); len(nos) == 1 && strings.EqualFold(strings.TrimSpace(text), nos[0]) {
-			return true, bot.showProfileCard(ctx, event.BotId, chatID, account, nos[0])
+			return true, bot.searchProfilesAndReply(ctx, event.BotId, chatID, account, nos[0], "view")
 		}
 		return true, bot.searchProfilesAndReply(ctx, event.BotId, chatID, account, text, "view")
 	}
@@ -115,7 +118,7 @@ func (s *sSysBot) isProfileSearchTrigger(ctx context.Context, text string) bool 
 	if botListenerBindCode(text) != "" {
 		return false
 	}
-	if nos := extractProfileNos(text); len(nos) == 1 && strings.EqualFold(text, nos[0]) {
+	if looksLikeProfileSearchIdentifier(text) {
 		return true
 	}
 	command, args := botCommandAndArgs(text)
@@ -147,7 +150,19 @@ func looksLikeProfileCommand(text string) bool {
 			return true
 		}
 	}
-	return profileNoFindRegexp.MatchString(text)
+	return looksLikeProfileSearchIdentifier(text)
+}
+
+func looksLikeProfileSearchIdentifier(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	normalized := strings.TrimSpace(strings.NewReplacer("资料编号", "", "编号", "", "：", "", ":", "", "=", "").Replace(text))
+	if nos := extractProfileNos(normalized); len(nos) == 1 && strings.EqualFold(normalized, nos[0]) {
+		return true
+	}
+	return profileMarkFindRegexp.MatchString(normalized)
 }
 
 func (s *sSysBot) profileMenuMarkup() *models.InlineKeyboardMarkup {
@@ -257,7 +272,10 @@ func (s *sSysBot) handleProfileTextCommand(ctx context.Context, botId int64, msg
 		return true, s.searchProfilesAndReply(ctx, botId, chatId, account, kw, "view")
 	}
 	if len(nos) > 0 {
-		return true, s.showProfileCard(ctx, botId, chatId, account, nos[0])
+		return true, s.searchProfilesAndReply(ctx, botId, chatId, account, nos[0], "view")
+	}
+	if looksLikeProfileSearchIdentifier(text) {
+		return true, s.searchProfilesAndReply(ctx, botId, chatId, account, text, "view")
 	}
 	return false, nil
 }
@@ -793,7 +811,7 @@ func botProfileScopeAccountId(account *botProfileAccount) int64 {
 }
 
 func botProfileSearchInput(account *botProfileAccount, keyword string, page int, perPage int) *publishsysin.BotProfileSearchInp {
-	in := &publishsysin.BotProfileSearchInp{TenantId: account.TenantId, Keyword: keyword}
+	in := &publishsysin.BotProfileSearchInp{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType, Keyword: keyword}
 	if account.AccountType != "admin" {
 		in.AccountId = account.AccountId
 	}

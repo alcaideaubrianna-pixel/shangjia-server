@@ -121,14 +121,7 @@ func applyNoteIndexFilters(mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model 
 	if tag := strings.TrimSpace(in.Tag); tag != "" {
 		mod = applyNoteIndexTagFilter(mod, splitProfileTagValues(tag))
 	}
-	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
-		terms := splitProfileSearchTerms(keyword)
-		if len(terms) > 0 {
-			condition, args := segmentedLikeConditionNullSafe([]string{"i.profile_no", "i.title", "i.summary", "i.plain_text"}, terms)
-			mod = mod.Where(condition, args...)
-		}
-	}
-	return mod
+	return applyProfileKeywordSearch(mod, in.Keyword, noteIndexSearchFields())
 }
 
 func applyNoteIndexTagFilter(mod *gdb.Model, tags []string) *gdb.Model {
@@ -194,5 +187,5 @@ func decodeAdminNoteCursor(raw string) (*adminNoteCursor, error) {
 }
 
 func adminNoteIndexFields() string {
-	return "i.id AS note_index_id,i.profile_id AS id,i.uuid,i.tenant_id,i.account_id,p.source_type,i.profile_no,i.title,i.summary,i.plain_text,i.province,i.city,i.tag,i.visibility,i.review_status,i.status,i.published_at,i.created_at,i.updated_at,i.task_status,a.nickname AS account_name,a.nickname,a.username"
+	return "i.id AS note_index_id,i.profile_id AS id,i.uuid,i.tenant_id,i.account_id,p.source_type,p.profile_no,i.title,i.summary,i.plain_text,i.province,i.city,i.tag,i.visibility,i.review_status,i.status,i.published_at,i.created_at,i.updated_at,i.task_status,a.nickname AS account_name,a.nickname,a.username"
 }

@@ -128,6 +128,15 @@ func (s *sSysPublish) profileViewBySelector(ctx context.Context, in *sysin.Profi
 
 func (s *sSysPublish) noteList(ctx context.Context, in *sysin.NoteListInp) (list []*sysin.NoteModel, totalCount int, err error) {
 	profiles, totalCount, err := s.profileList(ctx, &in.ProfileListInp)
+	return s.notesFromProfiles(ctx, profiles, totalCount, err)
+}
+
+func (s *sSysPublish) noteListByAccountIds(ctx context.Context, in *sysin.NoteListInp, accountIds []int64) (list []*sysin.NoteModel, totalCount int, err error) {
+	profiles, totalCount, err := s.profileListByAccountIds(ctx, &in.ProfileListInp, 0, accountIds)
+	return s.notesFromProfiles(ctx, profiles, totalCount, err)
+}
+
+func (s *sSysPublish) notesFromProfiles(ctx context.Context, profiles []*sysin.ProfileModel, totalCount int, err error) (list []*sysin.NoteModel, resultTotal int, resultErr error) {
 	if err != nil {
 		return nil, 0, err
 	}
@@ -140,7 +149,7 @@ func (s *sSysPublish) noteList(ctx context.Context, in *sysin.NoteListInp) (list
 		}
 		list = append(list, note)
 	}
-	return
+	return list, totalCount, nil
 }
 
 func (s *sSysPublish) adminNoteList(ctx context.Context, in *sysin.NoteListInp, tenantId int64, tenantIds []int64, accountIds []int64, viewer *sysin.AccountModel) (*sysin.AdminNotePageModel, error) {
