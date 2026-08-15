@@ -162,6 +162,9 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 		if err = bot.saveQuickPushSession(ctx, session); err != nil {
 			return true, err
 		}
+		if session.EditingTemplateId > 0 {
+			return true, bot.sendQuickPushTemplateDetail(ctx, event.BotId, session, session.EditingTemplateId, "按钮设置已保存。\n\n")
+		}
 		return true, bot.reply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "按钮设置已保存。")
 	}
 	if session.State == quickPushSessionStateEditName || session.State == quickPushSessionStateEditText {
@@ -940,7 +943,11 @@ func quickPushTemplateDetailText(template *publishsysin.MessageTemplateModel) st
 	if text == "" {
 		text = "无"
 	}
-	return fmt.Sprintf("<b>%s</b>\n\n<b>文本</b>\n%s\n\n<b>媒体</b>：%d 个", html.EscapeString(template.Name), text, len(template.Media))
+	buttonStatus := "未设置"
+	if strings.TrimSpace(template.ButtonConfig) != "" {
+		buttonStatus = "已设置"
+	}
+	return fmt.Sprintf("<b>%s</b>\n\n<b>文本</b>\n%s\n\n<b>媒体</b>：%d 个\n<b>按钮</b>：%s", html.EscapeString(template.Name), text, len(template.Media), buttonStatus)
 }
 
 func quickPushTemplateDetailKeyboard(session *quickPushSession, templateId int64, confirmingDelete bool) *models.InlineKeyboardMarkup {
