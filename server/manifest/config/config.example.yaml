@@ -377,6 +377,11 @@ runtime:
   roles: [ "all" ]
 
 youbanPublish:
+  telegramDeleteFallback:
+    intervalSeconds: 120       # 同一协议号两次旧消息删除任务的最小间隔
+    jitterSeconds: 30          # 在最小间隔上增加的确定性抖动上限
+    floodWaitBufferSeconds: 5  # Telegram要求等待时间之外的安全缓冲
+    maxAttempts: 5             # 临时错误最大尝试次数
   fullPush:
     expandWorkerCount: 4
     pageSize: 100

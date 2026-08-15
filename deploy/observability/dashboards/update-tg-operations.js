@@ -48,6 +48,20 @@ const throughputTab = {
 dashboard.tabs = dashboard.tabs.filter((tab) => tab.tabId !== throughputTab.tabId);
 dashboard.tabs.push(throughputTab);
 
+const deleteFallbackTab = {
+  tabId: 'tg-delete-fallback',
+  name: '协议号删除兜底',
+  panels: [
+    panel('tg-delete-fallback-events', '删除兜底事件趋势', '按结果查看排队、执行、成功、重试、限流和永久失败。flood_wait、dead 或 permanent_failed 大于 0 时需要排查。', 'sum by (result) (increase(xiaohuiji_tg_delete_fallback_events[15m]))', 'xiaohuiji_tg_delete_fallback_events', '{result}', 0, 0, 96, 16, 1),
+    panel('tg-delete-fallback-flood-accounts', '限流协议号 Top 10', '最近 6 小时触发 FloodWait 的协议号。结合日志中的 taskId、jobId 和 wait 定位具体任务。', 'topk(10, sum by (tg_account_id) (increase(xiaohuiji_tg_delete_fallback_events{result="flood_wait"}[6h])))', 'xiaohuiji_tg_delete_fallback_events', '账号 {tg_account_id}', 96, 0, 96, 16, 2),
+    panel('tg-delete-fallback-wait-p95', '等待时间 P95', 'queue 表示主动节流排队时间；flood_wait 表示 Telegram 返回的限流等待时间，单位秒。', 'histogram_quantile(0.95, sum by (le, kind) (rate(xiaohuiji_tg_delete_fallback_wait_seconds_bucket[15m])))', 'xiaohuiji_tg_delete_fallback_wait_seconds_bucket', '{kind}', 0, 16, 96, 16, 3),
+    panel('tg-delete-fallback-messages', '删除消息数量', '最近 15 分钟排队和实际成功删除的消息数量。success 持续为 0 且 queued 增长表示任务积压。', 'sum by (result) (increase(xiaohuiji_tg_delete_fallback_messages[15m]))', 'xiaohuiji_tg_delete_fallback_messages', '{result}', 96, 16, 96, 16, 4),
+  ],
+};
+
+dashboard.tabs = dashboard.tabs.filter((tab) => tab.tabId !== deleteFallbackTab.tabId);
+dashboard.tabs.push(deleteFallbackTab);
+
 const accountStatusPanel = dashboard.tabs
   .flatMap((tab) => tab.panels)
   .find((item) => item.id === 'tg-account-status');

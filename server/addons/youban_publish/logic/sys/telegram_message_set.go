@@ -45,7 +45,10 @@ func (s *sSysPublish) deleteTelegramMessagesLockedByChannel(ctx context.Context,
 	botToken, err := s.telegramCleanupJobBotToken(ctx, job.BotId, job.TenantId)
 	if err != nil {
 		if isTelegramBotConfigMissingError(err) {
-			s.appendTelegramJobLog(ctx, job, "delete", "skipped", reason+"，历史Bot配置已删除，跳过旧TG消息清理")
+			if markErr := markTelegramMessagesUndeletable(ctx, messages); markErr != nil {
+				return markErr
+			}
+			s.enqueueTelegramMessageDeleteFallback(ctx, job, reason, err)
 			return nil
 		}
 		return err
@@ -76,14 +79,14 @@ func (s *sSysPublish) deleteTelegramMessagesLockedByChannel(ctx context.Context,
 			if err = markTelegramMessagesUndeletable(ctx, batch.messages); err != nil {
 				return err
 			}
-			s.appendTelegramJobLog(ctx, job, "delete", "skipped", fmt.Sprintf("%s，Bot已不在频道，跳过TG消息清理，频道:%s，消息数:%d", reason, batch.chatId, len(batch.messages)))
+			s.enqueueTelegramMessageDeleteFallback(ctx, job, reason, batchErr)
 			continue
 		}
 		if isTelegramMessagePermanentlyUndeletableError(batchErr) {
 			if err = markTelegramMessagesUndeletable(ctx, batch.messages); err != nil {
 				return err
 			}
-			s.appendTelegramJobLog(ctx, job, "delete", "skipped", fmt.Sprintf("%s，TG消息已不可删除，保留旧消息并继续处理，频道:%s，消息数:%d", reason, batch.chatId, len(batch.messages)))
+			s.enqueueTelegramMessageDeleteFallback(ctx, job, reason, batchErr)
 			continue
 		}
 		g.Log().Debugf(ctx, "批量删除TG消息失败，回退逐条删除 job:%d chat:%s count:%d err:%+v", job.Id, batch.chatId, len(batch.messages), batchErr)
@@ -97,6 +100,7 @@ func (s *sSysPublish) deleteTelegramMessagesLockedByChannel(ctx context.Context,
 }
 
 func (s *sSysPublish) deleteTelegramMessagesIndividually(ctx context.Context, bot *tgbot.Bot, job telegramJobRecord, messages []telegramDeleteMessage, reason string) error {
+	fallbackQueued := false
 	for _, item := range messages {
 		chatId := normalizeTelegramChannelChatID(item.TargetChatId)
 		_, err := bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{ChatID: chatId, MessageID: int(item.MessageId)})
@@ -110,14 +114,20 @@ func (s *sSysPublish) deleteTelegramMessagesIndividually(ctx context.Context, bo
 				if markErr := markTelegramMessagesUndeletable(ctx, []telegramDeleteMessage{item}); markErr != nil {
 					return markErr
 				}
-				s.appendTelegramJobLog(ctx, job, "delete", "skipped", fmt.Sprintf("%s，TG消息已超过可删除时限，保留旧消息并继续处理，频道:%s，消息:%d", reason, chatId, item.MessageId))
+				if !fallbackQueued {
+					s.enqueueTelegramMessageDeleteFallback(ctx, job, reason, err)
+					fallbackQueued = true
+				}
 				continue
 			}
 			if isTelegramBotRemovedError(err) {
 				if markErr := markTelegramMessagesUndeletable(ctx, []telegramDeleteMessage{item}); markErr != nil {
 					return markErr
 				}
-				s.appendTelegramJobLog(ctx, job, "delete", "skipped", fmt.Sprintf("%s，Bot已不在频道，跳过TG消息清理，频道:%s，消息:%d", reason, chatId, item.MessageId))
+				if !fallbackQueued {
+					s.enqueueTelegramMessageDeleteFallback(ctx, job, reason, err)
+					fallbackQueued = true
+				}
 				continue
 			}
 			message := fmt.Sprintf("%s，删除TG消息失败，频道:%s，消息:%d，错误:%s", reason, chatId, item.MessageId, err.Error())

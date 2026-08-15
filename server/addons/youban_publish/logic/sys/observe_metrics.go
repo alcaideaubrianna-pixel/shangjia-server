@@ -63,6 +63,28 @@ func observeTelegramMediaPurposeViolation(ctx context.Context, stage string) {
 	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("stage", stage)))
 }
 
+func observeTelegramDeleteFallback(ctx context.Context, result string, tgAccountID int64, value int64) {
+	attrs := metric.WithAttributes(
+		attribute.String("result", result),
+		attribute.Int64("tg_account_id", tgAccountID),
+	)
+	events, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.delete_fallback_events")
+	events.Add(ctx, 1, attrs)
+	if value > 0 {
+		messages, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.delete_fallback_messages")
+		messages.Add(ctx, value, attrs)
+	}
+}
+
+func observeTelegramDeleteFallbackWait(ctx context.Context, kind string, tgAccountID int64, wait time.Duration) {
+	attrs := metric.WithAttributes(
+		attribute.String("kind", kind),
+		attribute.Int64("tg_account_id", tgAccountID),
+	)
+	histogram, _ := publishObserveMeter.Float64Histogram("xiaohuiji.tg.delete_fallback_wait_seconds")
+	histogram.Record(ctx, wait.Seconds(), attrs)
+}
+
 func observeCollectHistoryBackpressure(ctx context.Context, sourceID int64, stats collectHistoryPendingStats, limit int) {
 	attrs := metric.WithAttributes(attribute.Int64("source_id", sourceID))
 	pending, _ := publishObserveMeter.Int64Gauge("xiaohuiji.collect.history_pending")

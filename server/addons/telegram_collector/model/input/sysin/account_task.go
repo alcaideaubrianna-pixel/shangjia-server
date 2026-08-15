@@ -18,6 +18,7 @@ const (
 	AccountTaskTypeMessagePushInline         = "message_push_inline"
 	AccountTaskTypeMessageReconcile          = "message_reconcile"
 	AccountTaskTypeMessageMediaFallback      = "message_media_fallback"
+	AccountTaskTypeMessageDeleteFallback     = "message_delete_fallback"
 )
 
 type AccountTaskSubmit struct {

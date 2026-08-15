@@ -15,6 +15,7 @@ func TestPublishAccountTaskHandlersRegistered(t *testing.T) {
 		collectorin.AccountTaskTypeMaterialImportHistoryPage,
 		collectorin.AccountTaskTypeDialogCacheRefresh,
 		collectorin.AccountTaskTypeMessagePushInline,
+		collectorin.AccountTaskTypeMessageDeleteFallback,
 	} {
 		if collectorservice.AccountTaskHandlerFor(taskType) == nil {
 			t.Fatalf("Telegram account task handler is not registered: %s", taskType)
