@@ -321,24 +321,23 @@ func (s *sSysPublish) filterDeletedMessageTemplates(ctx context.Context, ids []i
 		return nil, gerror.New("请选择消息模板")
 	}
 	var rows []struct {
-		Id        int64       `json:"id"`
-		DeletedAt *gtime.Time `json:"deleted_at"`
+		Id       int64 `json:"id"`
+		TenantId int64 `json:"tenant_id"`
 	}
-	if err := g.DB().Model(messageTemplateTable).Safe().Ctx(ctx).
-		Fields("id, deleted_at").
+	if err := g.DB().Model(messageTemplateTable).Unscoped().Safe().Ctx(ctx).
+		Fields("id, tenant_id").
 		WhereIn("id", ids).
-		Where("tenant_id", tenantId).
 		Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "读取消息模板状态失败")
 	}
 	active := make(map[int64]struct{}, len(rows))
-	deleted := make(map[int64]struct{}, len(rows))
+	foreign := make(map[int64]struct{})
 	for _, row := range rows {
-		if row.DeletedAt != nil {
-			deleted[row.Id] = struct{}{}
-			continue
+		if row.TenantId != tenantId {
+			foreign[row.Id] = struct{}{}
+		} else {
+			active[row.Id] = struct{}{}
 		}
-		active[row.Id] = struct{}{}
 	}
 	filtered := make([]int64, 0, len(active))
 	invalid := make([]int64, 0)
@@ -347,7 +346,7 @@ func (s *sSysPublish) filterDeletedMessageTemplates(ctx context.Context, ids []i
 			filtered = append(filtered, id)
 			continue
 		}
-		if _, ok := deleted[id]; !ok {
+		if _, ok := foreign[id]; ok {
 			invalid = append(invalid, id)
 		}
 	}
