@@ -2,11 +2,8 @@ package sys
 
 import (
 	"context"
-	"io"
-	"net/http"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -86,38 +83,6 @@ func persistQuickPushMediaFile(ctx context.Context, mediaType string, name strin
 		return "", "", gerror.New("系统存储未返回媒体地址")
 	}
 	return strings.TrimSpace(attachment.FileUrl), strings.TrimSpace(attachment.Path), nil
-}
-
-func downloadTelegramAsset(ctx context.Context, sourceURL string) ([]byte, error) {
-	sourceURL = strings.TrimSpace(sourceURL)
-	if sourceURL == "" {
-		return nil, gerror.New("Telegram媒体下载地址为空")
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	client, err := telegramHTTPClient(telegramProxyUrl(ctx))
-	if err != nil {
-		return nil, err
-	}
-	client.Timeout = 2 * time.Minute
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return nil, gerror.Newf("下载Telegram媒体失败，状态码:%d", response.StatusCode)
-	}
-	data, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, gerror.New("Telegram媒体内容为空")
-	}
-	return data, nil
 }
 
 func quickPushMediaFilename(name string, mediaType string) string {
