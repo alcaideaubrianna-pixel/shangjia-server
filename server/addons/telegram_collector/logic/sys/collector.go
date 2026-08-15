@@ -484,16 +484,26 @@ func (f *botCollectorFeature) HandleUpdate(ctx context.Context, bot gatewayservi
 		if binding.Owner != gatewayOwner && binding.Owner != "youban_publish" {
 			continue
 		}
-		if err := collectorservice.Collector().IngestBotUpdate(ctx, collectorservice.BotContext{
-			Key:   bot.Key,
-			Token: bot.Token,
-			Binding: collectorservice.BotBinding{
-				TenantID:  binding.TenantID,
-				SourceID:  binding.ReferenceID,
-				Reference: fmt.Sprintf("bot:%d", binding.ReferenceID),
-			},
-		}, update); err != nil {
+		// Gateway bindings identify the BOT. Resolve all enabled collection
+		// sources for that BOT here, so private chats, groups, and channels use
+		// the same source routing and never confuse bot_id with source_id.
+		var sources []struct {
+			SourceID int64 `json:"id"`
+			TenantID int64 `json:"tenantId"`
+		}
+		if err := g.DB().Model("hg_youban_publish_collect_source").Safe().Ctx(ctx).
+			Fields("id,tenant_id").Where("tenant_id", binding.TenantID).
+			Where("bot_id", binding.ReferenceID).Where("source_type", "bot").
+			Where("collect_enabled", 1).Where("status", 1).WhereNull("deleted_at").Scan(&sources); err != nil {
 			return false, err
+		}
+		for _, source := range sources {
+			if err := collectorservice.Collector().IngestBotUpdate(ctx, collectorservice.BotContext{
+				Key: bot.Key, Token: bot.Token,
+				Binding: collectorservice.BotBinding{TenantID: source.TenantID, SourceID: source.SourceID, Reference: fmt.Sprintf("source:%d", source.SourceID)},
+			}, update); err != nil {
+				return false, err
+			}
 		}
 	}
 	// Collector is an additional gateway consumer. Returning false allows the
