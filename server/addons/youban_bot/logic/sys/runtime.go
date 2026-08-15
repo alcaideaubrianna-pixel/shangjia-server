@@ -106,12 +106,33 @@ func (s *sSysBot) ensureTelegramWebhook(ctx context.Context, bot *tgbot.Bot, row
 		}
 		g.Log().Warningf(ctx, "读取Telegram Webhook信息失败，继续尝试设置 botId:%d err:%+v", row.Id, err)
 	}
-	if info != nil && strings.TrimSpace(info.URL) == strings.TrimSpace(webhookUrl) {
+	if info != nil && strings.TrimSpace(info.URL) == strings.TrimSpace(webhookUrl) &&
+		botAllowedUpdatesMatch(info.AllowedUpdates) && strings.TrimSpace(info.LastErrorMessage) == "" {
 		g.Log().Infof(ctx, "Telegram Bot Webhook已存在，跳过重复设置 botId:%d username:%s url:%s", row.Id, row.BotUsername, webhookUrl)
 		return nil
 	}
+	if info != nil && strings.TrimSpace(info.LastErrorMessage) != "" {
+		g.Log().Warningf(ctx, "Telegram Bot Webhook存在投递错误，重新设置 botId:%d url:%s lastError:%s lastErrorDate:%d pending:%d", row.Id, webhookUrl, info.LastErrorMessage, info.LastErrorDate, info.PendingUpdateCount)
+	}
 	_, err = bot.SetWebhook(ctx, &tgbot.SetWebhookParams{URL: webhookUrl, AllowedUpdates: botAllowedUpdates()})
 	return err
+}
+
+func botAllowedUpdatesMatch(actual []string) bool {
+	expected := botAllowedUpdates()
+	if len(actual) != len(expected) {
+		return false
+	}
+	set := make(map[string]struct{}, len(actual))
+	for _, update := range actual {
+		set[strings.TrimSpace(update)] = struct{}{}
+	}
+	for _, update := range expected {
+		if _, ok := set[update]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func isTelegramTooManyRequests(err error) bool {

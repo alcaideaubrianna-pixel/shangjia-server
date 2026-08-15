@@ -60,3 +60,24 @@ func TestListenerBindHandlerRunsBeforeProfileHandler(t *testing.T) {
 		t.Fatalf("listener bind handler must run before profile handler: bind=%d profile=%d", bindIndex, profileIndex)
 	}
 }
+
+func TestBotAllowedUpdatesMatch(t *testing.T) {
+	allowed := botAllowedUpdates()
+	if !botAllowedUpdatesMatch(allowed) {
+		t.Fatal("configured updates should match")
+	}
+	reversed := append([]string(nil), allowed...)
+	for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
+		reversed[left], reversed[right] = reversed[right], reversed[left]
+	}
+	if !botAllowedUpdatesMatch(reversed) {
+		t.Fatal("update order should not affect matching")
+	}
+	if botAllowedUpdatesMatch(allowed[:len(allowed)-1]) {
+		t.Fatal("missing update should not match")
+	}
+	withDuplicate := append(append([]string(nil), allowed...), allowed[0])
+	if botAllowedUpdatesMatch(withDuplicate) {
+		t.Fatal("duplicate update should not match")
+	}
+}
