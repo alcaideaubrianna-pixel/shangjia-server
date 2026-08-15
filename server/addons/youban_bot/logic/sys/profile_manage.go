@@ -497,7 +497,12 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 			media = mediaRows[0]
 		}
 		caption := publishService.SysPublish().TelegramRichTextHTML(row.Text)
-		buttonMarkup := inlineQueryReplyMarkup(templateInlineButtonMarkup(row.ButtonConfig))
+		buttonMarkup, buttonCount, buttonError := templateInlineButtonMarkupWithStats(row.ButtonConfig)
+		if buttonError != nil {
+			g.Log().Errorf(ctx, "Inline按钮配置解析失败 botId:%d queryId:%s templateId:%d serial:%s err:%+v", botId, query.ID, row.Id, row.SerialNo, buttonError)
+		} else {
+			g.Log().Infof(ctx, "Inline按钮配置解析完成 botId:%d queryId:%s templateId:%d mode:%s buttonCount:%d hasReplyMarkup:%t", botId, query.ID, row.Id, buttonConfigMode(row.ButtonConfig), buttonCount, buttonMarkup != nil)
+		}
 		if mediaCount == 1 && strings.EqualFold(strings.TrimSpace(media.MediaType), "image") {
 			cachedPhoto, cachedErr := s.templateInlineCachedPhoto(ctx, botId, media.SourceMessageRecordID, media.TgFileID)
 			if cachedErr != nil {
@@ -571,14 +576,23 @@ func inlineQueryReplyMarkup(markup *models.InlineKeyboardMarkup) models.ReplyMar
 }
 
 func templateInlineButtonMarkup(value string) *models.InlineKeyboardMarkup {
+	markup, _, _ := templateInlineButtonMarkupWithStats(value)
+	return markup
+}
+
+func templateInlineButtonMarkupWithStats(value string) (*models.InlineKeyboardMarkup, int, error) {
 	if strings.TrimSpace(value) == "" {
-		return nil
+		return nil, 0, nil
 	}
 	var config publishsysin.MessageTemplateButtonConfig
 	if err := json.Unmarshal([]byte(value), &config); err != nil || config.Mode != "inline" {
-		return nil
+		if err != nil {
+			return nil, 0, err
+		}
+		return nil, 0, gerror.Newf("按钮模式不是inline：%s", config.Mode)
 	}
 	rows := make([][]models.InlineKeyboardButton, 0, len(config.Rows))
+	buttonCount := 0
 	for _, row := range config.Rows {
 		buttons := make([]models.InlineKeyboardButton, 0, len(row))
 		for _, button := range row {
@@ -588,15 +602,24 @@ func templateInlineButtonMarkup(value string) *models.InlineKeyboardMarkup {
 				continue
 			}
 			buttons = append(buttons, models.InlineKeyboardButton{Text: text, URL: url, Style: publishsysin.TelegramButtonStyle(button.Color)})
+			buttonCount++
 		}
 		if len(buttons) > 0 {
 			rows = append(rows, buttons)
 		}
 	}
 	if len(rows) == 0 {
-		return nil
+		return nil, 0, gerror.New("按钮配置没有有效按钮")
 	}
-	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}, buttonCount, nil
+}
+
+func buttonConfigMode(value string) string {
+	var config publishsysin.MessageTemplateButtonConfig
+	if err := json.Unmarshal([]byte(value), &config); err != nil {
+		return "invalid"
+	}
+	return strings.TrimSpace(config.Mode)
 }
 
 func templateInlineButtonURL(rawURL string) string {
