@@ -881,6 +881,17 @@ func (s *sSysBot) handleQuickPushTemplateCallback(ctx context.Context, callCtx c
 			markup = templateInlineButtonMarkup(template.ButtonConfig)
 		}
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "预览已发送"})
+		if len(template.Media) == 1 {
+			media := template.Media[0]
+			mediaURL := s.absoluteMediaURL(ctx, firstNonEmpty(media.FileUrl, media.StoragePath))
+			if strings.EqualFold(media.MediaType, "image") {
+				return true, s.replyPhotoWithCaption(ctx, session.BotId, session.ChatId, mediaURL, text, markup)
+			}
+			if strings.EqualFold(media.MediaType, "video") {
+				_, err = tgBot.SendVideo(callCtx, &tgbot.SendVideoParams{ChatID: session.ChatId, Video: &models.InputFileString{Data: mediaURL}, Caption: text, ParseMode: models.ParseModeHTML, ReplyMarkup: markup, SupportsStreaming: true})
+				return true, err
+			}
+		}
 		_, err = tgBot.SendMessage(callCtx, &tgbot.SendMessageParams{ChatID: session.ChatId, Text: text, ParseMode: models.ParseModeHTML, ReplyMarkup: markup})
 		return true, err
 	case "delete":
