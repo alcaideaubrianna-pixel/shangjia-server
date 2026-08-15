@@ -208,11 +208,11 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 		g.Log().Warningf(ctx, "保存Telegram消息日志失败 botId:%d err:%+v", botId, err)
 	}
 	text := strings.TrimSpace(firstNonEmpty(msg.Text, msg.Caption))
-	handled, err := s.dispatchBotMessage(ctx, &botMessageEvent{BotId: botId, Msg: msg, Text: text})
+	_, err := s.dispatchBotMessage(ctx, &botMessageEvent{BotId: botId, Msg: msg, Text: text})
 	if err != nil {
 		g.Log().Warningf(ctx, "Telegram消息处理失败 botId:%d chatId:%d userId:%s text:%s err:%+v", botId, msg.Chat.ID, userId, text, err)
 	}
-	if msg.Chat.Type == models.ChatTypePrivate && (handled || isTelegramCommand(text)) {
+	if msg.Chat.Type == models.ChatTypePrivate {
 		if refreshErr := s.ensureReplyKeyboardCurrent(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID)); refreshErr != nil {
 			g.Log().Warningf(ctx, "刷新Telegram底部键盘失败 botId:%d chatId:%d userId:%s err:%+v", botId, msg.Chat.ID, userId, refreshErr)
 		}

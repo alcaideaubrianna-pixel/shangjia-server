@@ -231,6 +231,9 @@ func (s *sSysBot) dispatchFeature(ctx context.Context, botId int64, msg *models.
 		}
 		row, enabled := s.featureConfig(ctx, feature.Key())
 		if !enabled {
+			if command == "" && feature.Key() == inlinePromotionFeatureKey && s.matchFeatureLabel(ctx, row, feature, labelText) {
+				return true, s.reply(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), "合作推广功能当前未启用")
+			}
 			continue
 		}
 		if command != "" && s.featureCommandMatches(ctx, feature, command) {
