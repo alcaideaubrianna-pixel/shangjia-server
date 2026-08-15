@@ -26,6 +26,49 @@ func TestBuildCollectRuleDecisionAppendsFooterWithoutBlankLine(t *testing.T) {
 	}
 }
 
+func TestCollectRuleOnlineCaseMatrix(t *testing.T) {
+	base := func() gdb.Record {
+		return gdb.Record{
+			"block_plain_text": gvar.New(1), "block_link": gvar.New(1), "block_username": gvar.New(1),
+			"full_match_enabled": gvar.New(0), "keywords": gvar.New([]string{}), "tags": gvar.New([]string{}),
+			"blocked_texts": gvar.New([]string{}), "delete_lines": gvar.New([]string{}), "delete_texts": gvar.New([]string{}),
+			"replace_from": gvar.New([]string{}), "replace_to": gvar.New([]string{}), "truncate_intro_fee_enabled": gvar.New(false),
+		}
+	}
+	cases := []struct {
+		name, text, want string
+		media            int
+		mutate           func(gdb.Record)
+		matched          bool
+	}{
+		{name: "normal enters and replaces", text: "正文 A", media: 1, want: "正文 B", mutate: func(r gdb.Record) {
+			r["replace_from"] = gvar.New([]string{"A"})
+			r["replace_to"] = gvar.New([]string{"B"})
+		}, matched: true},
+		{name: "no media skipped", text: "正文", media: 0, want: "", mutate: func(gdb.Record) {}, matched: false},
+		{name: "blocked text skipped", text: "正文黑名单", media: 1, want: "", mutate: func(r gdb.Record) { r["blocked_texts"] = gvar.New([]string{"黑名单"}) }, matched: false},
+		{name: "intro fee truncated", text: "正文\n介绍费：7888\n尾部", media: 1, want: "正文", mutate: func(r gdb.Record) { r["truncate_intro_fee_enabled"] = gvar.New(true) }, matched: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rule := base()
+			tc.mutate(rule)
+			event := gdb.Record{"raw_text": gvar.New(tc.text), "media_count": gvar.New(tc.media)}
+			pre := precheckCollectRule(event, rule)
+			if pre.Matched != tc.matched {
+				t.Fatalf("matched=%t want %t reason=%s", pre.Matched, tc.matched, pre.Reason)
+			}
+			if !tc.matched {
+				return
+			}
+			decision := buildCollectRuleDecision(event, nil, rule)
+			if decision.Text != tc.want {
+				t.Fatalf("text=%q want %q", decision.Text, tc.want)
+			}
+		})
+	}
+}
+
 func collectDedupeMaterialFromValues(textHash string, mediaJSON string) collectDedupeMaterial {
 	items := make([]collectMediaItem, 0)
 	_ = json.Unmarshal([]byte(mediaJSON), &items)
