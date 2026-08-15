@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -184,6 +185,7 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 }
 
 func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
+	startedAt := time.Now()
 	const prefix = "message-push-inline:"
 	jobId, err := strconv.ParseInt(strings.TrimPrefix(task.TaskKey, prefix), 10, 64)
 	if err != nil || jobId <= 0 || !strings.HasPrefix(task.TaskKey, prefix) {
@@ -196,6 +198,7 @@ func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, cl
 	if job.Status == sysin.MessagePushStatusSent {
 		return nil
 	}
+	s.appendTelegramJobLog(ctx, job, "inline_send", "started", fmt.Sprintf("开始Inline发布 accountTaskId:%d tgAccountId:%d", task.ID, task.AccountID))
 	templateId, err := messagePushTemplateIdFromOperationNo(job.OperationNo)
 	if err != nil {
 		return err
@@ -222,6 +225,7 @@ func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, cl
 	messages, err := sendInlineTemplateWithClient(ctx, client, peer, botUsername, template.SerialNo)
 	if err != nil {
 		inlineErr := gerror.Wrapf(err, "Inline推送失败 serial:%s", template.SerialNo)
+		s.appendTelegramJobLog(ctx, job, "inline_send", "failed", fmt.Sprintf("Inline请求失败 duration:%s err:%v", time.Since(startedAt), inlineErr))
 		return s.fallbackMessagePushInline(ctx, client, channel, job, template, inlineErr)
 	}
 	if len(messages) == 0 {
@@ -230,7 +234,7 @@ func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, cl
 	if err = s.completeMessagePushJob(ctx, job, messages, "更新Inline消息推送任务状态失败"); err != nil {
 		return err
 	}
-	s.appendTelegramJobLog(ctx, job, "inline_send", sysin.MessagePushStatusSent, "账号服务Inline机器人消息模板推送成功")
+	s.appendTelegramJobLog(ctx, job, "inline_send", sysin.MessagePushStatusSent, fmt.Sprintf("账号服务Inline机器人消息模板推送成功 duration:%s", time.Since(startedAt)))
 	return nil
 }
 

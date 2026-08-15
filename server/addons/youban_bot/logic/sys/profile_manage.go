@@ -445,6 +445,11 @@ func (s *sSysBot) handleProfileInlineQuery(ctx context.Context, botId int64, que
 }
 
 func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, query *models.InlineQuery, serial string) error {
+	startedAt := time.Now()
+	g.Log().Infof(ctx, "Inline模板请求开始 botId:%d queryId:%s serial:%s", botId, query.ID, serial)
+	defer func() {
+		g.Log().Infof(ctx, "Inline模板请求结束 botId:%d queryId:%s serial:%s duration:%s", botId, query.ID, serial, time.Since(startedAt))
+	}()
 	var row struct {
 		Id           int64  `json:"id"`
 		SerialNo     string `json:"serial_no"`
@@ -457,6 +462,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 		Where("serial_no", strings.ToUpper(strings.TrimSpace(serial))).Where("status", 1).WhereNull("deleted_at").Scan(&row); err != nil {
 		return err
 	}
+	g.Log().Infof(ctx, "Inline模板查询完成 botId:%d queryId:%s serial:%s templateId:%d", botId, query.ID, serial, row.Id)
 	results := []models.InlineQueryResult{}
 	if row.Id > 0 {
 		var mediaRows []struct {
@@ -476,6 +482,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 		if mediaErr != nil {
 			return mediaErr
 		}
+		g.Log().Infof(ctx, "Inline模板媒体查询完成 botId:%d queryId:%s templateId:%d mediaCount:%d", botId, query.ID, row.Id, len(mediaRows))
 		mediaCount := len(mediaRows)
 		var media struct {
 			MediaType             string `json:"media_type"`
@@ -548,7 +555,11 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 	}
 	callCtx, cancel := telegramAPICtx()
 	defer cancel()
+	g.Log().Infof(ctx, "Inline模板开始响应 botId:%d queryId:%s serial:%s resultCount:%d", botId, query.ID, serial, len(results))
 	_, err = bot.AnswerInlineQuery(callCtx, &tgbot.AnswerInlineQueryParams{InlineQueryID: query.ID, Results: results, CacheTime: 0, IsPersonal: false})
+	if err != nil {
+		g.Log().Errorf(ctx, "Inline模板响应失败 botId:%d queryId:%s serial:%s duration:%s err:%+v", botId, query.ID, serial, time.Since(startedAt), err)
+	}
 	return err
 }
 
