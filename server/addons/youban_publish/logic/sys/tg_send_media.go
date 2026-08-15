@@ -21,7 +21,7 @@ import (
 const telegramMediaGroupMaxItems = 10
 const telegramMediaPrepareConcurrency = 4
 
-func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
+func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media []*telegramMediaItem, replyMarkup ...models.ReplyMarkup) ([]*telegramSentMessage, error) {
 	if len(media) == 0 {
 		return nil, nil
 	}
@@ -34,7 +34,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		media = telegramMediaSetWithoutTgFileId(media)
 	}
 	if len(media) == 1 {
-		return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0])
+		return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0], replyMarkup...)
 	}
 	if telegramMediaSetHasCopyRef(media) && !telegramMediaSetRequiresUpload(media) {
 		if strings.TrimSpace(caption) == "" {
@@ -127,7 +127,7 @@ func validateTelegramMediaPurpose(purpose string, media []*telegramMediaItem) er
 	return nil
 }
 
-func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem) ([]*telegramSentMessage, error) {
+func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bot, chatId string, purpose string, caption string, media *telegramMediaItem, replyMarkup ...models.ReplyMarkup) ([]*telegramSentMessage, error) {
 	s.prepareTelegramMediaItemForSend(ctx, media)
 	if ref, ok := telegramCopyMediaRefFromFileId(media.TgFileId); ok && !telegramMediaRequiresSanitizedUpload(media) {
 		messages, err := s.copyTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media, ref)
@@ -135,7 +135,7 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 			cloned := *media
 			cloned.TgFileId = ""
 			cloned.TgThumbFileId = ""
-			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned)
+			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned, replyMarkup...)
 		}
 		return messages, err
 	}
@@ -178,6 +178,9 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 			ParseMode:         telegramMediaParseMode(caption),
 			SupportsStreaming: true,
 		}
+		if len(replyMarkup) > 0 {
+			params.ReplyMarkup = replyMarkup[0]
+		}
 		applyTelegramSendVideoMeta(params, videoMeta)
 		sendStartedAt := time.Now()
 		msg, err := bot.SendVideo(ctx, params)
@@ -185,14 +188,14 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 			cloned := *media
 			cloned.TgFileId = ""
 			cloned.TgThumbFileId = ""
-			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned)
+			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned, replyMarkup...)
 		}
 		if err != nil {
 			if isTelegramPhotoTooLargeError(err) {
 				cloned := *media
 				cloned.TgFileId = ""
 				cloned.TgThumbFileId = ""
-				return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned)
+				return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned, replyMarkup...)
 			}
 			return nil, err
 		}
@@ -201,17 +204,21 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 	default:
 		g.Log().Infof(ctx, "TG单媒体准备完成 purpose:%s mediaId:%d type:%s antiScan:%t duration:%s", purpose, media.Id, media.MediaType, media.AntiScanEnabled, time.Since(prepareStartedAt).Round(time.Millisecond))
 		sendStartedAt := time.Now()
-		msg, err := bot.SendPhoto(ctx, &tgbot.SendPhotoParams{
+		params := &tgbot.SendPhotoParams{
 			ChatID:    chatId,
 			Photo:     input,
 			Caption:   caption,
 			ParseMode: telegramMediaParseMode(caption),
-		})
+		}
+		if len(replyMarkup) > 0 {
+			params.ReplyMarkup = replyMarkup[0]
+		}
+		msg, err := bot.SendPhoto(ctx, params)
 		if err != nil && strings.TrimSpace(media.TgFileId) != "" && (isTelegramInvalidReusableFileError(err) || isTelegramPhotoTooLargeError(err)) {
 			cloned := *media
 			cloned.TgFileId = ""
 			cloned.TgThumbFileId = ""
-			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned)
+			return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned, replyMarkup...)
 		}
 		if err != nil {
 			return nil, err
