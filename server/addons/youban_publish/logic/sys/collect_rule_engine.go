@@ -369,7 +369,9 @@ func applyCollectIntroFeeTruncate(text string) string {
 	changed := false
 	cutoff := len(lines)
 	for index, line := range lines {
-		if strings.Contains(line, "介绍费") {
+		// Match against a normalized copy only; preserve the original text,
+		// emoji, spacing, and formatting in all retained lines.
+		if strings.Contains(normalizeCollectKeywordText(line), "介绍费") {
 			cutoff = index
 			changed = true
 			break
@@ -400,6 +402,15 @@ func applyCollectIntroFeeTruncate(text string) string {
 		return strings.TrimSpace(strings.Join(kept, "\n"))
 	}
 	return text
+}
+
+func normalizeCollectKeywordText(text string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, text)
 }
 
 func collectLineContainsChinese(line string) bool {

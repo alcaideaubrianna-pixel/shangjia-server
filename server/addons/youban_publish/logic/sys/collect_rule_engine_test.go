@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -160,6 +161,7 @@ func TestApplyCollectIntroFeeTruncate(t *testing.T) {
 		{name: "removes matched line and following text", text: "标题\n介绍费 7888\nKK", want: "标题"},
 		{name: "removes all text when first line matches", text: "介绍费 7888\nKK", want: ""},
 		{name: "supports windows line endings", text: "标题\r\n介绍费：7888\r\nKK", want: "标题"},
+		{name: "matches intro fee with invisible format characters", text: "标题\n介\u200b绍\u200d费：7888(香水湾💦)⁣‌\n联系方式", want: "标题"},
 		{name: "keeps text without keyword", text: "标题\n联系方式\nKK", want: "标题\n联系方式\nKK"},
 		{name: "removes leading profile metadata", text: "昵称：朴朴\n编号：XXX123\n同行：否\n正常文案", want: "正常文案"},
 		{name: "removes leading latin and chinese codes", text: "XXX123\n朴朴123123\n正常文案", want: "正常文案"},
@@ -179,5 +181,75 @@ func TestApplyCollectIntroFeeTruncate(t *testing.T) {
 				t.Fatalf("truncate text = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestBuildCollectRuleDecisionKeepsIntroFeeTruncatedAcrossRepeatedProcessing(t *testing.T) {
+	rawText := "省份：广东\n城市：广州\n介绍费：7888(香水湾💦)"
+	event := gdb.Record{
+		"raw_text":    gvar.New(rawText),
+		"media_count": gvar.New(2),
+	}
+	rule := gdb.Record{
+		"truncate_intro_fee_enabled": gvar.New(true),
+		"delete_lines":               gvar.New([]string{}),
+		"delete_texts":               gvar.New([]string{}),
+		"replace_from":               gvar.New([]string{}),
+		"replace_to":                 gvar.New([]string{}),
+		"blocked_texts":              gvar.New([]string{}),
+	}
+
+	first := buildCollectRuleDecision(event, nil, rule)
+	second := buildCollectRuleDecision(event, nil, rule)
+	if first.Text != "省份：广东\n城市：广州" || second.Text != first.Text {
+		t.Fatalf("repeated rule processing produced inconsistent text: first=%q second=%q", first.Text, second.Text)
+	}
+	if event["raw_text"].String() != rawText {
+		t.Fatalf("rule processing mutated raw text: %q", event["raw_text"].String())
+	}
+}
+
+func TestNormalizeCollectMaterialTextRemovesIntroFeeAtCommitBoundary(t *testing.T) {
+	s := &sSysPublish{}
+	event := gdb.Record{"id": gvar.New(int64(101))}
+	rule := gdb.Record{"id": gvar.New(int64(46)), "truncate_intro_fee_enabled": gvar.New(true)}
+	text := "正文\n介绍费：7888(香水湾💦)"
+	if got, want := s.normalizeCollectMaterialText(context.Background(), event, rule, text), "正文"; got != want {
+		t.Fatalf("commit boundary text = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeCollectMaterialTextPreservesOriginalWhenEditingDisabled(t *testing.T) {
+	s := &sSysPublish{}
+	event := gdb.Record{"id": gvar.New(int64(102))}
+	rule := gdb.Record{"id": gvar.New(int64(47)), "truncate_intro_fee_enabled": gvar.New(false)}
+	text := "正文\n介绍费：7888(香水湾💦)"
+	if got := s.normalizeCollectMaterialText(context.Background(), event, rule, text); got != text {
+		t.Fatalf("disabled edit changed original text: got %q want %q", got, text)
+	}
+}
+
+func TestNormalizeCollectMaterialTextPreservesEmojiAndLineBreaks(t *testing.T) {
+	s := &sSysPublish{}
+	event := gdb.Record{"id": gvar.New(int64(103))}
+	rule := gdb.Record{"id": gvar.New(int64(48)), "truncate_intro_fee_enabled": gvar.New(true)}
+	text := "标题💦\n正文第一行\n正文第二行\n介绍费：7888(香水湾💦)"
+	if got, want := s.normalizeCollectMaterialText(context.Background(), event, rule, text), "标题💦\n正文第一行\n正文第二行"; got != want {
+		t.Fatalf("cleaned text lost formatting: got %q want %q", got, want)
+	}
+}
+
+func TestNormalizeCollectMaterialTextPreservesFooterIntroFee(t *testing.T) {
+	s := &sSysPublish{}
+	event := gdb.Record{"id": gvar.New(int64(104))}
+	rule := gdb.Record{
+		"id":                         gvar.New(int64(49)),
+		"truncate_intro_fee_enabled": gvar.New(true),
+		"footer_markdown":            gvar.New("追加文案：介绍费请联系客服"),
+	}
+	text := "正文\n介绍费：7888\n追加文案：介绍费请联系客服"
+	want := text
+	if got := s.normalizeCollectMaterialText(context.Background(), event, rule, text); got != want {
+		t.Fatalf("footer intro fee was removed: got %q want %q", got, want)
 	}
 }

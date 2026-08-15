@@ -171,11 +171,46 @@ func telegramCollectorMediaKind(mediaType string) string {
 }
 
 func (s *sSysPublish) commitCollectMaterial(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (int64, error) {
+	text = s.normalizeCollectMaterialText(ctx, event, rule, text)
 	prepared, err := s.prepareCollectMaterial(ctx, event, content)
 	if err != nil {
 		return 0, err
 	}
 	return s.commitCollectPreparedProfile(ctx, event, prepared, rule, text)
+}
+
+// normalizeCollectMaterialText is the final text boundary before a collected
+// profile is persisted. Upstream rule evaluation normally performs this work,
+// but repeated events and retry/update paths must not be able to write raw text
+// back over the cleaned profile text.
+func (s *sSysPublish) normalizeCollectMaterialText(ctx context.Context, event gdb.Record, rule gdb.Record, text string) string {
+	if !rule["truncate_intro_fee_enabled"].Bool() {
+		return text
+	}
+	// The rule engine appends user-configured footer text after cleaning the
+	// source body. When a footer is configured, do not re-truncate the final
+	// caption at this boundary; retry/merge records may not carry the footer
+	// field and would otherwise delete the user's appended text.
+	if strings.TrimSpace(rule["footer_markdown"].String()) != "" {
+		return text
+	}
+	// Footer/追加文案 is intentionally user-authored and may itself contain
+	// the keyword. Only normalize the source body before the exact footer.
+	footer := strings.TrimSpace(rule["footer_markdown"].String())
+	body := text
+	footerSuffix := ""
+	if footer != "" {
+		candidate := "\n" + footer
+		if strings.HasSuffix(text, candidate) {
+			body = strings.TrimSuffix(text, candidate)
+			footerSuffix = candidate
+		}
+	}
+	cleaned := applyCollectIntroFeeTruncate(body) + footerSuffix
+	if cleaned != text {
+		g.Log().Infof(ctx, "采集资料提交前执行介绍费兜底清洗 eventId:%d ruleId:%d beforeLen:%d afterLen:%d", event["id"].Int64(), rule["id"].Int64(), len([]rune(text)), len([]rune(cleaned)))
+	}
+	return cleaned
 }
 
 func (s *sSysPublish) prepareCollectMaterial(ctx context.Context, event gdb.Record, content *collectContentResult) (*collectPreparedMaterial, error) {
