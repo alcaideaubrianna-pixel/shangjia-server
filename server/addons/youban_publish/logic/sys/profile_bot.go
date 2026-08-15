@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -81,10 +82,10 @@ func (s *sSysPublish) BotProfileCreate(ctx context.Context, in *sysin.BotProfile
 	title := strings.TrimSpace(in.Title)
 	plainText := strings.TrimSpace(in.PlainText)
 	if title == "" {
-		title = firstLineForProfileTitle(plainText)
+		title = botProfileTitleFromText(plainText)
 	}
 	if title == "" {
-		title = firstLineForProfileTitle(in.VerifyText)
+		title = botProfileTitleFromText(in.VerifyText)
 	}
 	if title == "" {
 		title = botProfileMediaFallbackTitle(in.DisplayMedia, in.VerifyMedia)
@@ -186,7 +187,21 @@ func (s *sSysPublish) saveBotProfileMedia(ctx context.Context, profileId int64, 
 	if err := insertItems("verify", verifyMedia); err != nil {
 		return err
 	}
-	return nil
+	return s.syncBotProfileMedia(ctx, profileId)
+}
+
+func (s *sSysPublish) syncBotProfileMedia(ctx context.Context, profileId int64) error {
+	return s.withProfileMediaSyncLock(ctx, profileId, func(ctx context.Context, tx gdb.TX) error {
+		owner, err := tx.Model(publishMediaTable).Ctx(ctx).
+			Fields("profile_id").
+			Where("profile_id", profileId).
+			WhereNull("deleted_at").
+			One()
+		if err != nil {
+			return gerror.Wrap(err, "读取机器人资料媒体归属失败")
+		}
+		return s.syncOwnedMediaToProfile(ctx, tx, owner, profileId)
+	})
 }
 
 func (s *sSysPublish) replaceBotProfileMedia(ctx context.Context, profileId int64, tenantId int64, accountId int64, displayMedia []*sysin.MessageTemplateMediaInp, verifyMedia []*sysin.MessageTemplateMediaInp) error {
@@ -253,6 +268,19 @@ func firstLineForProfileTitle(text string) string {
 		return string(runes[:30])
 	}
 	return line
+}
+
+func botProfileTitleFromText(text string) string {
+	_, _, nickname := materialImportTitle(text)
+	if nickname != "" {
+		return firstLineForProfileTitle(nickname)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		if title, ok := materialImportPrefixedValue(line, "标题"); ok {
+			return firstLineForProfileTitle(title)
+		}
+	}
+	return firstLineForProfileTitle(text)
 }
 
 func botProfileMediaFallbackTitle(displayMedia []*sysin.MessageTemplateMediaInp, verifyMedia []*sysin.MessageTemplateMediaInp) string {

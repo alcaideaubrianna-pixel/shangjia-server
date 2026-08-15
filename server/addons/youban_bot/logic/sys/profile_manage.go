@@ -7,8 +7,10 @@ import (
 	"html"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	tgbot "github.com/go-telegram/bot"
@@ -36,7 +38,7 @@ const (
 
 	telegramTextMessageMaxChars = 4096
 	profileCreateMaxMediaBytes  = 100 * 1024 * 1024
-	profileMediaGroupDebounce   = 5 * time.Second
+	profileMediaGroupDebounce   = 2 * time.Second
 	profileSessionTimeout       = 6 * time.Minute
 	profileMediaGroupCacheTTL   = 10 * time.Minute
 )
@@ -67,6 +69,7 @@ func (profileManageMessageHandler) Handle(ctx context.Context, bot *sSysBot, eve
 		return true, bot.cancelProfileSession(ctx, event.BotId, event.Msg)
 	}
 	if session := bot.activeProfileSession(ctx, event.BotId, event.Msg); session != nil {
+		g.Log().Infof(ctx, "Bot资料事件命中会话 trace:PF-%d bot_id:%d message_id:%d media_group_id:%s scene:%s step:%s text_len:%d photo_count:%d has_video:%t", session.Id, event.BotId, event.Msg.ID, strings.TrimSpace(event.Msg.MediaGroupID), session.Scene, session.Step, len(strings.TrimSpace(text)), len(event.Msg.Photo), event.Msg.Video != nil)
 		account := &botProfileAccount{TenantId: session.TenantId, AccountId: session.AccountId, AccountType: session.AccountType, App: session.App}
 		if session.Scene == "create" || session.Scene == "replace" {
 			return true, bot.consumeProfileSessionMessage(ctx, event.BotId, event.Msg, account, session, text)
@@ -926,21 +929,22 @@ func (s *sSysBot) sendProfileContent(ctx context.Context, botId int64, chatId st
 	callCtx, cancel := telegramAPICtx()
 	defer cancel()
 	displayCaption := profilePreviewDisplayCaption(note)
-	if profileHasPurposeMedia(note.Media, "display") {
+	if profileHasSendablePurposeMedia(ctx, s, note.Media, "display") {
 		if err = s.sendProfileMediaPurpose(ctx, callCtx, bot, chatId, note.Media, "display", displayCaption, false); err != nil {
 			return err
 		}
 	} else if strings.TrimSpace(note.PlainText) != "" {
+		g.Log().Warningf(ctx, "Bot资料预览展示媒体不可发送，改为发送原文 chatId:%s profileId:%d profileNo:%s", chatId, note.Id, note.ProfileNo)
 		if _, err = s.sendMessage(ctx, row.BotToken, chatId, profileShareText(note), "HTML", false); err != nil {
 			return err
 		}
 	}
-	if profileHasPurposeMedia(note.Media, "verify") {
+	if profileHasSendablePurposeMedia(ctx, s, note.Media, "verify") {
 		if err = s.sendProfileMediaPurpose(ctx, callCtx, bot, chatId, note.Media, "verify", "验证资料", false); err != nil {
 			return err
 		}
 	}
-	return s.sendMessageOnly(ctx, botId, chatId, "预览完成。")
+	return s.sendPlainMessageOnly(ctx, botId, chatId, "预览完成。")
 }
 
 func (s *sSysBot) sendProfileMediaPurpose(ctx context.Context, callCtx context.Context, bot *tgbot.Bot, chatId string, media []*publishsysin.MediaModel, purpose string, captionPrefix string, forceUpload bool) error {
@@ -1143,6 +1147,17 @@ func (s *sSysBot) sendSingleProfileMedia(ctx context.Context, bot *tgbot.Bot, ch
 	default:
 		return nil
 	}
+}
+
+func profileHasSendablePurposeMedia(ctx context.Context, s *sSysBot, media []*publishsysin.MediaModel, purpose string) bool {
+	for _, item := range media {
+		if item != nil && strings.TrimSpace(item.Purpose) == purpose && (strings.TrimSpace(item.MediaType) == "image" || strings.TrimSpace(item.MediaType) == "video") {
+			if profileMediaSource(ctx, s, item) != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func profileHasPurposeMedia(media []*publishsysin.MediaModel, purpose string) bool {
@@ -1416,6 +1431,15 @@ func (s *sSysBot) sendMessageOnly(ctx context.Context, botId int64, chatId strin
 	return s.reply(ctx, botId, chatId, text)
 }
 
+func (s *sSysBot) sendPlainMessageOnly(ctx context.Context, botId int64, chatId string, text string) error {
+	row, err := s.botById(ctx, botId)
+	if err != nil {
+		return err
+	}
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, nil)
+	return err
+}
+
 func (s *sSysBot) absoluteMediaURL(ctx context.Context, u string) string {
 	u = strings.TrimSpace(u)
 	if u == "" || strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
@@ -1515,6 +1539,7 @@ type profileSessionRow struct {
 	Id          int64  `json:"id"`
 	Scene       string `json:"scene"`
 	Step        string `json:"step"`
+	Status      string `json:"status"`
 	ProfileId   int64  `json:"profile_id"`
 	ProfileNo   string `json:"profile_no"`
 	PayloadJson string `json:"payload_json"`
@@ -1668,16 +1693,22 @@ func (s *sSysBot) isWaitingProfileCreate(ctx context.Context, botId int64, msg *
 }
 
 type profileCreateDraft struct {
-	DisplayText  string                                  `json:"displayText"`
-	DisplayMedia []*publishsysin.MessageTemplateMediaInp `json:"displayMedia"`
-	VerifyText   string                                  `json:"verifyText"`
-	VerifyMedia  []*publishsysin.MessageTemplateMediaInp `json:"verifyMedia"`
+	DisplayText             string                                  `json:"displayText"`
+	DisplayMedia            []*publishsysin.MessageTemplateMediaInp `json:"displayMedia"`
+	VerifyText              string                                  `json:"verifyText"`
+	VerifyMedia             []*publishsysin.MessageTemplateMediaInp `json:"verifyMedia"`
+	PendingGroupId          string                                  `json:"pendingGroupId,omitempty"`
+	PendingGroup            *profilePendingMediaGroup               `json:"pendingGroup,omitempty"`
+	PendingVerify           *profilePendingMediaGroup               `json:"pendingVerify,omitempty"`
+	CompletedDisplayGroupId string                                  `json:"completedDisplayGroupId,omitempty"`
 }
 
 type profilePendingMediaGroup struct {
 	SessionId int64                                   `json:"sessionId"`
 	BotId     int64                                   `json:"botId"`
 	ChatId    string                                  `json:"chatId"`
+	GroupId   string                                  `json:"groupId"`
+	Purpose   string                                  `json:"purpose"`
 	Text      string                                  `json:"text"`
 	Media     []*publishsysin.MessageTemplateMediaInp `json:"media"`
 	CreatedAt int64                                   `json:"createdAt"`
@@ -1697,6 +1728,23 @@ func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64,
 	if session == nil || msg == nil {
 		return nil
 	}
+	var preparedMedia []*publishsysin.MessageTemplateMediaInp
+	if strings.TrimSpace(msg.MediaGroupID) != "" {
+		if err := s.reserveProfileMediaGroup(ctx, session, msg, text); err != nil {
+			return err
+		}
+		row, err := s.botById(ctx, botId)
+		if err != nil {
+			return err
+		}
+		preparedMedia, err = s.resolveTelegramMessageMedia(ctx, row.BotToken, msg)
+		if err != nil {
+			chatId := fmt.Sprintf("%d", msg.Chat.ID)
+			_ = s.replyBotError(ctx, botId, chatId, "资料管理", gerror.Wrap(err, "当前资料媒体解析失败，请重新发送当前步骤"))
+			return err
+		}
+		g.Log().Infof(ctx, "Bot资料媒体并发解析完成 trace:PF-%d message_id:%d media_count:%d", session.Id, msg.ID, len(preparedMedia))
+	}
 	lockCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	lock := hglock.NewConfig(20*time.Second, 100*time.Millisecond).Mutex(profileSessionLockKey(session.Id))
@@ -1706,12 +1754,23 @@ func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64,
 	defer func() { _ = lock.Unlock(context.Background()) }()
 	latest := s.activeProfileSession(ctx, botId, msg)
 	if latest == nil || latest.Id != session.Id {
+		var state struct {
+			Step   string `json:"step"`
+			Status string `json:"status"`
+		}
+		_ = g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("step,status").Where("id", session.Id).Scan(&state)
+		if state.Status == profileSessionStatusCompleted {
+			g.Log().Infof(ctx, "Bot资料消息忽略已完成会话的延迟重复事件 trace:PF-%d bot_id:%d message_id:%d media_group_id:%s step:%s status:%s", session.Id, botId, msg.ID, strings.TrimSpace(msg.MediaGroupID), state.Step, state.Status)
+			return nil
+		}
+		g.Log().Warningf(ctx, "Bot资料会话校验失败 trace:PF-%d bot_id:%d message_id:%d media_group_id:%s expected_step:%s current_step:%s current_status:%s", session.Id, botId, msg.ID, strings.TrimSpace(msg.MediaGroupID), session.Step, state.Step, state.Status)
 		return s.replyBotError(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), "资料管理", gerror.New("资料会话已失效，请重新开始新增资料"))
 	}
-	return s.consumeProfileSessionMessageLocked(ctx, botId, msg, account, latest, text)
+	g.Log().Infof(ctx, "Bot资料会话校验通过 trace:PF-%d bot_id:%d message_id:%d media_group_id:%s step:%s", latest.Id, botId, msg.ID, strings.TrimSpace(msg.MediaGroupID), latest.Step)
+	return s.consumeProfileSessionMessageLocked(ctx, botId, msg, account, latest, text, preparedMedia)
 }
 
-func (s *sSysBot) consumeProfileSessionMessageLocked(ctx context.Context, botId int64, msg *models.Message, account *botProfileAccount, session *profileSessionRow, text string) error {
+func (s *sSysBot) consumeProfileSessionMessageLocked(ctx context.Context, botId int64, msg *models.Message, account *botProfileAccount, session *profileSessionRow, text string, preparedMedia []*publishsysin.MessageTemplateMediaInp) error {
 	trace := fmt.Sprintf("PF-%d", session.Id)
 	startedAt := time.Now()
 	mediaKind := "text"
@@ -1736,38 +1795,69 @@ func (s *sSysBot) consumeProfileSessionMessageLocked(ctx context.Context, botId 
 		} else if acknowledged {
 			g.Log().Infof(ctx, "Bot资料处理反馈已发送 trace:%s message_id:%d", trace, msg.ID)
 			ackText := fmt.Sprintf("已收到，正在处理，请稍候...\n处理编号：PF-%d", session.Id)
-			if ackErr = s.sendMessageOnly(ctx, botId, chatId, ackText); ackErr != nil {
+			if ackErr = s.sendPlainMessageOnly(ctx, botId, chatId, ackText); ackErr != nil {
 				g.Log().Warningf(ctx, "发送资料处理中反馈失败 sessionId:%d groupId:%s err:%+v", session.Id, msg.MediaGroupID, ackErr)
 			}
 			s.scheduleProfileSessionTimeout(session.Id, botId, chatId)
 		}
 	}
-	media, err := s.resolveTelegramMessageMedia(ctx, row.BotToken, msg)
-	if err != nil {
-		g.Log().Warningf(ctx, "Bot资料处理失败 trace:%s stage:resolve_media elapsed_ms:%d err:%v", trace, time.Since(startedAt).Milliseconds(), err)
-		_ = s.replyBotError(ctx, botId, chatId, "资料管理", gerror.Wrap(err, "当前资料媒体解析失败，请重新发送当前步骤"))
-		_ = s.sendProfileCreateStepPrompt(ctx, botId, chatId, session.Step)
-		return err
-	}
-	g.Log().Infof(ctx, "Bot资料处理阶段 trace:%s stage:media_resolved elapsed_ms:%d media_count:%d", trace, time.Since(startedAt).Milliseconds(), len(media))
-	if session.Step == "waiting_display" && msg.Video != nil && strings.TrimSpace(msg.MediaGroupID) == "" {
-		if value, _ := cache.Instance().Get(ctx, profilePendingDisplayKey(session.Id)); value != nil && !value.IsNil() {
-			pending := &profilePendingMediaGroup{SessionId: session.Id, BotId: botId, ChatId: chatId, Text: strings.TrimSpace(text), Media: media, CreatedAt: time.Now().Unix(), UpdatedAt: time.Now().UnixNano()}
-			payload, marshalErr := json.Marshal(pending)
-			if marshalErr != nil {
-				return marshalErr
-			}
-			if setErr := cache.Instance().Set(ctx, profilePendingVerifyKey(session.Id), string(payload), profileMediaGroupCacheTTL); setErr != nil {
-				return setErr
-			}
-			_ = s.sendMessageOnly(ctx, botId, chatId, "已收到验证视频，展示资料处理完成后会自动归入验证资料。")
-			return nil
+	media := preparedMedia
+	if media == nil {
+		media, err = s.resolveTelegramMessageMedia(ctx, row.BotToken, msg)
+		if err != nil {
+			g.Log().Warningf(ctx, "Bot资料处理失败 trace:%s stage:resolve_media elapsed_ms:%d err:%v", trace, time.Since(startedAt).Milliseconds(), err)
+			_ = s.replyBotError(ctx, botId, chatId, "资料管理", gerror.Wrap(err, "当前资料媒体解析失败，请重新发送当前步骤"))
+			_ = s.sendProfileCreateStepPrompt(ctx, botId, chatId, session.Step)
+			return err
 		}
 	}
+	g.Log().Infof(ctx, "Bot资料处理阶段 trace:%s stage:media_resolved elapsed_ms:%d media_count:%d", trace, time.Since(startedAt).Milliseconds(), len(media))
+	draft := decodeProfileCreateDraft(session.PayloadJson)
+	if session.Step == "waiting_display" && draft.PendingGroup != nil && strings.TrimSpace(msg.MediaGroupID) == "" && (strings.TrimSpace(text) != "" || len(media) > 0) {
+		pendingVerify := &profilePendingMediaGroup{SessionId: session.Id, BotId: botId, ChatId: chatId, Purpose: "verify", Text: strings.TrimSpace(text), Media: media, CreatedAt: time.Now().Unix(), UpdatedAt: time.Now().UnixNano()}
+		draft.PendingVerify = pendingVerify
+		if err := s.updateProfileSession(ctx, session.Id, session.Step, draft); err != nil {
+			return err
+		}
+		g.Log().Infof(ctx, "Bot资料第二媒体消息已归入验证资料 trace:%s media_count:%d", trace, len(media))
+		go s.finishProfileMediaGroup(botId, strings.TrimSpace(draft.PendingGroupId), account, session)
+		return nil
+	}
 	if strings.TrimSpace(msg.MediaGroupID) != "" && len(media) > 0 {
-		return s.collectProfileMediaGroup(ctx, row.BotToken, account, session, msg, text, media)
+		return s.collectProfileMediaGroup(ctx, account, session, msg, text, media)
 	}
 	return s.consumeProfileCreatePart(ctx, botId, chatId, account, session, strings.TrimSpace(text), media)
+}
+
+func (s *sSysBot) reserveProfileMediaGroup(ctx context.Context, session *profileSessionRow, msg *models.Message, text string) error {
+	if session == nil || msg == nil || strings.TrimSpace(msg.MediaGroupID) == "" || session.Step != "waiting_display" {
+		return nil
+	}
+	lockCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	lock := hglock.NewConfig(15*time.Second, 100*time.Millisecond).Mutex(profileSessionLockKey(session.Id))
+	if err := lock.Lock(lockCtx); err != nil {
+		return gerror.Wrap(err, "登记资料媒体组失败")
+	}
+	defer func() { _ = lock.Unlock(context.Background()) }()
+	var latest profileSessionRow
+	if err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("id,step,status,payload_json").Where("id", session.Id).Where("status", profileSessionStatusActive).Scan(&latest); err != nil {
+		return err
+	}
+	if latest.Id == 0 || latest.Step != "waiting_display" {
+		return nil
+	}
+	draft := decodeProfileCreateDraft(latest.PayloadJson)
+	groupId := strings.TrimSpace(msg.MediaGroupID)
+	if draft.PendingGroupId != "" && draft.PendingGroupId != groupId && draft.PendingGroup != nil {
+		return nil
+	}
+	if draft.PendingGroupId == groupId && draft.PendingGroup != nil {
+		return nil
+	}
+	draft.PendingGroupId = groupId
+	draft.PendingGroup = &profilePendingMediaGroup{SessionId: session.Id, BotId: session.BotId, ChatId: fmt.Sprintf("%d", msg.Chat.ID), GroupId: groupId, Purpose: "display", Text: strings.TrimSpace(text), CreatedAt: time.Now().Unix(), UpdatedAt: time.Now().UnixNano()}
+	return s.updateProfileSession(ctx, session.Id, latest.Step, draft)
 }
 
 func profileSessionLockKey(sessionId int64) string {
@@ -1811,8 +1901,10 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 	draft := decodeProfileCreateDraft(session.PayloadJson)
 	switch session.Step {
 	case "waiting_display":
-		if strings.TrimSpace(text) == "" && len(media) == 0 {
-			return s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_display")
+		if strings.TrimSpace(text) == "" {
+			g.Log().Warningf(ctx, "Bot资料展示组缺少正文 trace:%s session_id:%d media_count:%d", trace, session.Id, len(media))
+			_ = s.updateProfileSession(ctx, session.Id, "waiting_display", &profileCreateDraft{})
+			return s.replyBotError(ctx, botId, chatId, "资料管理", gerror.New("展示资料必须包含正文，请重新发送第一组展示资料"))
 		}
 		draft.DisplayText = strings.TrimSpace(text)
 		draft.DisplayMedia = media
@@ -1822,9 +1914,11 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 			return err
 		}
 		if !claimed {
+			g.Log().Warningf(ctx, "Bot资料展示内容未成功抢占会话步骤 trace:%s session_id:%d", trace, session.Id)
 			return nil
 		}
-		if err := s.sendMessageOnly(ctx, botId, chatId, "已收到展示资料。"); err != nil {
+		g.Log().Infof(ctx, "Bot资料展示内容已写入会话 trace:%s session_id:%d media_count:%d text_len:%d", trace, session.Id, len(draft.DisplayMedia), len(draft.DisplayText))
+		if err := s.sendPlainMessageOnly(ctx, botId, chatId, "已收到展示资料。"); err != nil {
 			return err
 		}
 		s.scheduleVerifyPrompt(session.Id, botId, chatId)
@@ -1835,6 +1929,13 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 			media = nil
 		} else if strings.TrimSpace(text) == "" && len(media) == 0 {
 			return s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_verify")
+		}
+		if strings.TrimSpace(draft.DisplayText) == "" && len(draft.DisplayMedia) == 0 {
+			g.Log().Warningf(ctx, "Bot资料创建阻止空展示资料 trace:%s session_id:%d verify_media_count:%d verify_text_len:%d", trace, session.Id, len(media), len(strings.TrimSpace(text)))
+			if err := s.resetProfileSessionStep(ctx, session.Id, "waiting_verify", "waiting_display", draft); err != nil {
+				return err
+			}
+			return s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_display")
 		}
 		draft.VerifyText = strings.TrimSpace(text)
 		draft.VerifyMedia = media
@@ -1882,15 +1983,29 @@ func (s *sSysBot) scheduleVerifyPrompt(sessionId, botId int64, chatId string) {
 		defer timer.Stop()
 		<-timer.C
 		ctx := context.Background()
-		if value, _ := cache.Instance().Get(ctx, profilePendingVerifyKey(sessionId)); value != nil && !value.IsNil() {
+		lock := hglock.NewConfig(20*time.Second, 100*time.Millisecond).Mutex(profileSessionLockKey(sessionId))
+		if err := lock.Lock(ctx); err != nil {
 			return
 		}
-		var row struct{ Step, Status string }
-		if err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("step,status").Where("id", sessionId).Scan(&row); err != nil || row.Status != profileSessionStatusActive || row.Step != "waiting_verify" {
+		defer func() { _ = lock.Unlock(context.Background()) }()
+		var row profileSessionRow
+		if err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("step,status,payload_json").Where("id", sessionId).Scan(&row); err != nil || row.Status != profileSessionStatusActive || row.Step != "waiting_verify" {
+			return
+		}
+		draft := decodeProfileCreateDraft(row.PayloadJson)
+		if !profileShouldSendVerifyPrompt(row.Step, row.Status, draft) {
+			g.Log().Infof(ctx, "Bot资料验证提示跳过，仍有媒体组待处理 trace:PF-%d pending_group:%t pending_verify:%t", sessionId, draft.PendingGroup != nil, draft.PendingVerify != nil)
 			return
 		}
 		_ = s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_verify")
 	}()
+}
+
+func profileShouldSendVerifyPrompt(step string, status string, draft *profileCreateDraft) bool {
+	if step != "waiting_verify" || status != profileSessionStatusActive {
+		return false
+	}
+	return draft == nil || (draft.PendingGroup == nil && draft.PendingVerify == nil)
 }
 
 func (s *sSysBot) sendProfileCreateSuccess(ctx context.Context, botId int64, chatId string, res *publishsysin.ProfileSaveModel) error {
@@ -1931,6 +2046,35 @@ func (s *sSysBot) updateProfileSession(ctx context.Context, id int64, step strin
 	return err
 }
 
+func (s *sSysBot) clearProfilePendingGroupSnapshot(ctx context.Context, sessionId int64) error {
+	var row profileSessionRow
+	if err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("id,step,status,payload_json").Where("id", sessionId).Where("status", profileSessionStatusActive).Scan(&row); err != nil {
+		return err
+	}
+	if row.Id == 0 {
+		return nil
+	}
+	draft := decodeProfileCreateDraft(row.PayloadJson)
+	draft.PendingGroupId = ""
+	draft.PendingGroup = nil
+	return s.updateProfileSession(ctx, sessionId, row.Step, draft)
+}
+
+func (s *sSysBot) markProfileDisplayGroupCompleted(ctx context.Context, sessionId int64, groupId string) error {
+	var row profileSessionRow
+	if err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("id,step,status,payload_json").Where("id", sessionId).Where("status", profileSessionStatusActive).Scan(&row); err != nil {
+		return err
+	}
+	if row.Id == 0 {
+		return nil
+	}
+	draft := decodeProfileCreateDraft(row.PayloadJson)
+	draft.PendingGroupId = ""
+	draft.PendingGroup = nil
+	draft.CompletedDisplayGroupId = strings.TrimSpace(groupId)
+	return s.updateProfileSession(ctx, sessionId, row.Step, draft)
+}
+
 func (s *sSysBot) claimProfileSessionStep(ctx context.Context, id int64, fromStep string, toStep string, payload interface{}) (bool, error) {
 	payloadText := ""
 	if payload != nil {
@@ -1963,78 +2107,70 @@ func (s *sSysBot) resetProfileSessionStep(ctx context.Context, id int64, fromSte
 	return err
 }
 
-func (s *sSysBot) collectProfileMediaGroup(ctx context.Context, botToken string, account *botProfileAccount, session *profileSessionRow, msg *models.Message, text string, media []*publishsysin.MessageTemplateMediaInp) error {
+func (s *sSysBot) collectProfileMediaGroup(ctx context.Context, account *botProfileAccount, session *profileSessionRow, msg *models.Message, text string, media []*publishsysin.MessageTemplateMediaInp) error {
 	groupId := strings.TrimSpace(msg.MediaGroupID)
 	if groupId == "" || len(media) == 0 {
 		return nil
 	}
-	key := profileMediaGroupKey(session.Id, groupId)
-	shouldFinalize := false
-	if err := s.withProfileMediaGroupLock(ctx, session.Id, groupId, func() error {
-		value, _ := cache.Instance().Get(ctx, key)
-		pending := &profilePendingMediaGroup{}
-		isFirst := true
-		if value != nil && !value.IsNil() && strings.TrimSpace(value.String()) != "" {
-			if err := json.Unmarshal([]byte(value.String()), pending); err == nil && pending.SessionId == session.Id {
-				isFirst = false
-			}
+	if session.Step == "waiting_verify" {
+		draft := decodeProfileCreateDraft(session.PayloadJson)
+		if strings.TrimSpace(draft.CompletedDisplayGroupId) == groupId {
+			g.Log().Infof(ctx, "Bot资料忽略已完成展示媒体组的延迟重复事件 trace:PF-%d groupId:%s", session.Id, groupId)
+			return nil
 		}
-		now := time.Now()
-		if isFirst {
-			pending = &profilePendingMediaGroup{SessionId: session.Id, BotId: session.BotId, ChatId: fmt.Sprintf("%d", msg.Chat.ID), CreatedAt: now.Unix()}
-			_ = cache.Instance().Set(ctx, profilePendingDisplayKey(session.Id), groupId, profileMediaGroupCacheTTL)
+	}
+	draft := decodeProfileCreateDraft(session.PayloadJson)
+	groupPurpose := profileMediaGroupPurpose(session.Step, draft, groupId)
+	if groupPurpose == "verify_pending" {
+		pending := draft.PendingVerify
+		if pending == nil || pending.GroupId != groupId {
+			pending = &profilePendingMediaGroup{SessionId: session.Id, BotId: session.BotId, ChatId: fmt.Sprintf("%d", msg.Chat.ID), GroupId: groupId, Purpose: "verify", CreatedAt: time.Now().Unix()}
 		}
-		pending.UpdatedAt = now.UnixNano()
+		pending.UpdatedAt = time.Now().UnixNano()
 		if strings.TrimSpace(pending.Text) == "" {
 			pending.Text = strings.TrimSpace(text)
 		}
-		for _, item := range media {
-			if item == nil {
-				continue
-			}
-			item.SortIndex = len(pending.Media) + 1
-			pending.Media = append(pending.Media, item)
+		pending.Media = appendProfileGroupMedia(pending.Media, msg.ID, media)
+		draft.PendingVerify = pending
+		if err := s.updateProfileSession(ctx, session.Id, session.Step, draft); err != nil {
+			return gerror.Wrap(err, "保存验证资料媒体组失败")
 		}
-		bs, err := json.Marshal(pending)
-		if err != nil {
-			return gerror.Wrap(err, "保存资料媒体组失败")
-		}
-		if err = cache.Instance().Set(ctx, key, string(bs), profileMediaGroupCacheTTL); err != nil {
-			return err
-		}
-		shouldFinalize = isFirst
+		g.Log().Infof(ctx, "Bot资料第二媒体组已持久化 trace:PF-%d groupId:%s media_count:%d", session.Id, groupId, len(pending.Media))
 		return nil
-	}); err != nil {
-		return err
 	}
+	pending := draft.PendingGroup
+	shouldFinalize := pending == nil || draft.PendingGroupId != groupId
 	if shouldFinalize {
-		go s.finishProfileMediaGroup(session.BotId, groupId, account, session)
+		pending = &profilePendingMediaGroup{SessionId: session.Id, BotId: session.BotId, ChatId: fmt.Sprintf("%d", msg.Chat.ID), GroupId: groupId, Purpose: groupPurpose, CreatedAt: time.Now().Unix()}
 	}
+	pending.UpdatedAt = time.Now().UnixNano()
+	if strings.TrimSpace(pending.Text) == "" {
+		pending.Text = strings.TrimSpace(text)
+	}
+	pending.Media = appendProfileGroupMedia(pending.Media, msg.ID, media)
+	draft.PendingGroupId = groupId
+	draft.PendingGroup = pending
+	if err := s.updateProfileSession(ctx, session.Id, session.Step, draft); err != nil {
+		return gerror.Wrap(err, "保存资料媒体组失败")
+	}
+	g.Log().Infof(ctx, "Bot资料媒体组已持久化 trace:PF-%d groupId:%s media_count:%d finalize:%t", session.Id, groupId, len(media), shouldFinalize)
+	// 每条媒体消息都触发一次幂等收尾，避免首次 goroutine 丢失后会话永久停留。
+	go s.finishProfileMediaGroup(session.BotId, groupId, account, session)
 	return nil
 }
 
-func profileMediaGroupKey(sessionId int64, groupId string) string {
-	return fmt.Sprintf("youban_bot:profile_group:%d:%s", sessionId, strings.TrimSpace(groupId))
-}
-
-func profilePendingDisplayKey(sessionId int64) string {
-	return fmt.Sprintf("youban_bot:profile_pending_display:%d", sessionId)
-}
-
-func profilePendingVerifyKey(sessionId int64) string {
-	return fmt.Sprintf("youban_bot:profile_pending_verify:%d", sessionId)
-}
-
-func profileMediaGroupAckKey(sessionId int64, groupId string) string {
-	return fmt.Sprintf("youban_bot:profile_group_ack:%d:%s", sessionId, strings.TrimSpace(groupId))
+func profileMediaGroupPurpose(step string, draft *profileCreateDraft, groupId string) string {
+	if step == "waiting_verify" {
+		return "verify"
+	}
+	if step == "waiting_display" && draft != nil && draft.PendingGroup != nil && strings.TrimSpace(draft.PendingGroupId) != "" && strings.TrimSpace(draft.PendingGroupId) != strings.TrimSpace(groupId) {
+		return "verify_pending"
+	}
+	return "display"
 }
 
 func (s *sSysBot) acknowledgeProfileInput(ctx context.Context, sessionId int64, groupId string) (bool, error) {
-	groupId = strings.TrimSpace(groupId)
-	if groupId == "" {
-		return true, nil
-	}
-	key := profileMediaGroupAckKey(sessionId, groupId)
+	key := fmt.Sprintf("youban_bot:profile_session_ack:%d", sessionId)
 	acknowledged := false
 	err := s.withProfileMediaGroupLock(ctx, sessionId, groupId, func() error {
 		value, err := cache.Instance().Get(ctx, key)
@@ -2074,75 +2210,295 @@ func (s *sSysBot) releaseProfileMediaGroupLock(lock *hglock.Lock) {
 	}
 }
 
+func (s *sSysBot) startProfileSessionRecovery(ctx context.Context) {
+	s.stopProfileSessionRecovery()
+	recoveryCtx, cancel := context.WithCancel(ctx)
+	s.profileRecoveryMu.Lock()
+	s.profileRecoveryCancel = cancel
+	s.profileRecoveryMu.Unlock()
+	go func() {
+		s.recoverPendingProfileMediaGroups(recoveryCtx)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-recoveryCtx.Done():
+				return
+			case <-ticker.C:
+				s.recoverPendingProfileMediaGroups(recoveryCtx)
+			}
+		}
+	}()
+}
+
+func (s *sSysBot) stopProfileSessionRecovery() {
+	s.profileRecoveryMu.Lock()
+	cancel := s.profileRecoveryCancel
+	s.profileRecoveryCancel = nil
+	s.profileRecoveryMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (s *sSysBot) recoverPendingProfileMediaGroups(ctx context.Context) {
+	var sessions []profileSessionRow
+	err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).
+		Fields("id,bot_id,scene,step,status,payload_json,tenant_id,account_id,app").
+		Where("status", profileSessionStatusActive).
+		WhereIn("step", []string{"waiting_display", "waiting_verify"}).
+		WhereLTE("updated_at", gtime.Now().Add(-profileMediaGroupDebounce)).
+		WhereGT("expires_at", gtime.Now()).
+		OrderAsc("updated_at").
+		Limit(20).
+		Scan(&sessions)
+	if err != nil {
+		g.Log().Warningf(ctx, "恢复Bot资料媒体组查询失败 err:%+v", err)
+		return
+	}
+	for index := range sessions {
+		session := &sessions[index]
+		draft := decodeProfileCreateDraft(session.PayloadJson)
+		groupId := strings.TrimSpace(draft.PendingGroupId)
+		displayReady := groupId != "" && draft.PendingGroup != nil && profileMediaGroupIdleWait(*draft.PendingGroup, time.Now()) == 0
+		verifyReady := session.Step == "waiting_verify" && draft.PendingVerify != nil && profileMediaGroupIdleWait(*draft.PendingVerify, time.Now()) == 0
+		if !displayReady && !verifyReady {
+			continue
+		}
+		if session.AccountId > 0 {
+			var accountRow struct {
+				AccountType string `json:"account_type"`
+			}
+			_ = g.DB().Model(publishAccountTable).Safe().Ctx(ctx).Fields("account_type").Where("id", session.AccountId).WhereNull("deleted_at").Scan(&accountRow)
+			session.AccountType = accountRow.AccountType
+		}
+		account := &botProfileAccount{TenantId: session.TenantId, AccountId: session.AccountId, AccountType: session.AccountType, App: session.App}
+		if displayReady {
+			g.Log().Infof(ctx, "恢复Bot资料展示组收尾 trace:PF-%d groupId:%s media_count:%d", session.Id, groupId, len(draft.PendingGroup.Media))
+			go s.finishProfileMediaGroup(session.BotId, groupId, account, session)
+			continue
+		}
+		g.Log().Infof(ctx, "恢复Bot资料验证组收尾 trace:PF-%d media_count:%d", session.Id, len(draft.PendingVerify.Media))
+		go s.finishPendingProfileVerifyGroup(session.BotId, account, session.Id)
+	}
+}
+
 func (s *sSysBot) finishProfileMediaGroup(botId int64, groupId string, account *botProfileAccount, session *profileSessionRow) {
 	ctx := context.Background()
-	key := profileMediaGroupKey(session.Id, groupId)
+	trace := fmt.Sprintf("PF-%d", session.Id)
+	startedAt := time.Now()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			g.Log().Errorf(ctx, "Bot资料媒体组收尾发生未捕获异常 trace:%s groupId:%s elapsed_ms:%d panic:%v", trace, groupId, time.Since(startedAt).Milliseconds(), recovered)
+		}
+	}()
+	g.Log().Infof(ctx, "Bot资料媒体组收尾开始 trace:%s groupId:%s", trace, groupId)
 	var pending profilePendingMediaGroup
 	for {
 		found := false
-		ready := false
 		wait := time.Duration(0)
 		err := s.withProfileMediaGroupLock(ctx, session.Id, groupId, func() error {
-			value, err := cache.Instance().Get(ctx, key)
-			if err != nil || value == nil || value.IsNil() {
+			var durable profileSessionRow
+			if err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("id,step,status,payload_json").Where("id", session.Id).Where("status", profileSessionStatusActive).Scan(&durable); err != nil {
 				return err
 			}
-			if err = json.Unmarshal([]byte(value.String()), &pending); err != nil || pending.SessionId == 0 {
-				return err
-			}
-			found = true
-			wait = profileMediaGroupIdleWait(pending, time.Now())
-			if wait > 0 {
+			if durable.Id == 0 {
 				return nil
 			}
-			ready = true
-			_, err = cache.Instance().Remove(ctx, key)
-			return err
+			draft := decodeProfileCreateDraft(durable.PayloadJson)
+			if draft.PendingGroupId != groupId || draft.PendingGroup == nil {
+				return nil
+			}
+			pending = *draft.PendingGroup
+			found = true
+			wait = profileMediaGroupIdleWait(pending, time.Now())
+			return nil
 		})
-		if err != nil || !found {
+		if err != nil {
+			g.Log().Errorf(ctx, "Bot资料媒体组读取会话快照失败 trace:%s groupId:%s err:%+v", trace, groupId, err)
 			return
 		}
-		if ready {
+		if !found {
+			g.Log().Infof(ctx, "Bot资料媒体组收尾跳过，会话快照已变化 trace:%s groupId:%s", trace, groupId)
+			return
+		}
+		if wait <= 0 {
 			break
 		}
 		time.Sleep(wait)
 	}
+	g.Log().Infof(ctx, "Bot资料媒体组开始从原消息重建 trace:%s groupId:%s snapshot_media_count:%d", trace, groupId, len(pending.Media))
+	if stored, storedText, rebuildErr := s.rebuildProfileMediaGroupFromStoredMessages(ctx, botId, pending.ChatId, groupId); rebuildErr != nil {
+		g.Log().Errorf(ctx, "Bot资料媒体组从原消息重建失败 trace:%s groupId:%s err:%+v", trace, groupId, rebuildErr)
+	} else if len(stored) > 0 {
+		pending.Media = stored
+		if strings.TrimSpace(storedText) != "" {
+			pending.Text = storedText
+		}
+	}
+	g.Log().Infof(ctx, "Bot资料媒体组原消息重建完成 trace:%s groupId:%s media_count:%d text_len:%d", trace, groupId, len(pending.Media), len(strings.TrimSpace(pending.Text)))
+	lock := hglock.NewConfig(20*time.Second, 100*time.Millisecond).Mutex(profileSessionLockKey(session.Id))
+	if err := lock.Lock(ctx); err != nil {
+		g.Log().Errorf(ctx, "Bot资料媒体组获取会话顺序锁失败 trace:%s groupId:%s err:%+v", trace, groupId, err)
+		return
+	}
+	defer func() { _ = lock.Unlock(context.Background()) }()
+	g.Log().Infof(ctx, "Bot资料媒体组已获取会话顺序锁 trace:%s groupId:%s", trace, groupId)
 	var current *profileSessionRow
 	if scanErr := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Where("id", session.Id).Where("status", profileSessionStatusActive).WhereGT("expires_at", gtime.Now()).Scan(&current); scanErr != nil || current == nil || current.Id <= 0 {
+		g.Log().Errorf(ctx, "Bot资料媒体组读取最终会话失败 trace:%s groupId:%s err:%+v current_nil:%t", trace, groupId, scanErr, current == nil)
 		return
 	}
+	g.Log().Infof(ctx, "Bot资料媒体组最终会话已读取 trace:%s groupId:%s step:%s status:%s", trace, groupId, current.Step, current.Status)
 	if len(pending.Media) == 0 && strings.TrimSpace(pending.Text) == "" {
+		g.Log().Errorf(ctx, "Bot资料媒体组收尾数据为空 trace:%s groupId:%s", trace, groupId)
 		return
 	}
-	if marker, _ := cache.Instance().Get(ctx, profilePendingDisplayKey(session.Id)); marker != nil && !marker.IsNil() && marker.String() != groupId && current.Step == "waiting_display" {
-		if payload, marshalErr := json.Marshal(pending); marshalErr == nil {
-			_ = cache.Instance().Set(ctx, profilePendingVerifyKey(session.Id), string(payload), profileMediaGroupCacheTTL)
-		}
+	pending.Media = orderedProfileGroupMedia(pending.Media)
+	if pending.Purpose == "verify" && current.Step != "waiting_verify" {
+		g.Log().Infof(ctx, "Bot资料验证媒体组等待展示资料完成 trace:PF-%d groupId:%s step:%s", session.Id, groupId, current.Step)
 		return
 	}
-	if marker, _ := cache.Instance().Get(ctx, profilePendingDisplayKey(session.Id)); marker != nil && !marker.IsNil() && marker.String() != groupId && current.Step == "waiting_verify" {
-		_, _ = cache.Instance().Remove(ctx, profilePendingDisplayKey(session.Id))
-		_ = s.consumeProfileCreatePart(ctx, botId, pending.ChatId, account, current, pending.Text, pending.Media)
+	if pending.Purpose == "display" && current.Step != "waiting_display" {
+		g.Log().Infof(ctx, "Bot资料展示媒体组已处理，忽略重复收尾 trace:PF-%d groupId:%s step:%s", session.Id, groupId, current.Step)
 		return
 	}
 	if consumeErr := s.consumeProfileCreatePart(ctx, botId, pending.ChatId, account, current, pending.Text, pending.Media); consumeErr != nil {
+		g.Log().Errorf(ctx, "Bot资料媒体组消费失败 trace:%s groupId:%s step:%s media_count:%d text_len:%d err:%+v", trace, groupId, current.Step, len(pending.Media), len(strings.TrimSpace(pending.Text)), consumeErr)
 		_ = s.reply(ctx, botId, pending.ChatId, "资料媒体组解析失败："+html.EscapeString(consumeErr.Error()))
 		return
 	}
-	if value, _ := cache.Instance().Get(ctx, profilePendingVerifyKey(session.Id)); value != nil && !value.IsNil() {
-		_, _ = cache.Instance().Remove(ctx, profilePendingDisplayKey(session.Id))
-		var verify profilePendingMediaGroup
-		if json.Unmarshal([]byte(value.String()), &verify) == nil {
-			_, _ = cache.Instance().Remove(ctx, profilePendingVerifyKey(session.Id))
-			current.Step = "waiting_verify"
-			draft := decodeProfileCreateDraft(current.PayloadJson)
-			draft.VerifyText = verify.Text
-			draft.VerifyMedia = verify.Media
-			if payload, marshalErr := json.Marshal(draft); marshalErr == nil {
-				current.PayloadJson = string(payload)
-			}
-			_ = s.consumeProfileCreatePart(ctx, botId, verify.ChatId, account, current, verify.Text, verify.Media)
+	g.Log().Infof(ctx, "Bot资料媒体组消费完成 trace:%s groupId:%s step:%s elapsed_ms:%d", trace, groupId, current.Step, time.Since(startedAt).Milliseconds())
+	if pending.Purpose == "display" {
+		if markErr := s.markProfileDisplayGroupCompleted(ctx, session.Id, groupId); markErr != nil {
+			g.Log().Warningf(ctx, "Bot资料展示媒体组完成标记失败 trace:PF-%d groupId:%s err:%+v", session.Id, groupId, markErr)
 		}
+	}
+	if clearErr := s.clearProfilePendingGroupSnapshot(ctx, session.Id); clearErr != nil {
+		g.Log().Warningf(ctx, "Bot资料媒体组快照清理失败 trace:PF-%d groupId:%s err:%+v", session.Id, groupId, clearErr)
+	}
+	if pending.Purpose == "display" {
+		go s.finishPendingProfileVerifyGroup(botId, account, session.Id)
+	}
+}
+
+func (s *sSysBot) rebuildProfileMediaGroupFromStoredMessages(ctx context.Context, botId int64, chatId string, groupId string) ([]*publishsysin.MessageTemplateMediaInp, string, error) {
+	if botId <= 0 || strings.TrimSpace(chatId) == "" || strings.TrimSpace(groupId) == "" {
+		return nil, "", nil
+	}
+	var rows []struct {
+		MessageId int    `json:"message_id"`
+		RawJson   string `json:"raw_json"`
+	}
+	if err := g.DB().Model(messageTable).Safe().Ctx(ctx).Fields("message_id,raw_json").
+		Where("bot_id", botId).Where("chat_id", strings.TrimSpace(chatId)).
+		WhereLike("raw_json", "%"+strings.TrimSpace(groupId)+"%").
+		OrderAsc("message_id").Limit(20).Scan(&rows); err != nil {
+		return nil, "", err
+	}
+	if len(rows) == 0 {
+		return nil, "", nil
+	}
+	row, err := s.botById(ctx, botId)
+	if err != nil {
+		return nil, "", err
+	}
+	mediaByMessage := make([][]*publishsysin.MessageTemplateMediaInp, len(rows))
+	textByMessage := make([]string, len(rows))
+	var waitGroup sync.WaitGroup
+	var firstErr error
+	var errorMu sync.Mutex
+	for index := range rows {
+		index := index
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			var message models.Message
+			if unmarshalErr := json.Unmarshal([]byte(rows[index].RawJson), &message); unmarshalErr != nil {
+				errorMu.Lock()
+				if firstErr == nil {
+					firstErr = unmarshalErr
+				}
+				errorMu.Unlock()
+				return
+			}
+			text := strings.TrimSpace(firstNonEmpty(message.Text, message.Caption))
+			textByMessage[index] = text
+			items, resolveErr := s.resolveTelegramMessageMedia(ctx, row.BotToken, &message)
+			if resolveErr != nil {
+				errorMu.Lock()
+				if firstErr == nil {
+					firstErr = resolveErr
+				}
+				errorMu.Unlock()
+				return
+			}
+			for _, item := range items {
+				if item != nil {
+					item.SortIndex = rows[index].MessageId
+				}
+			}
+			mediaByMessage[index] = items
+		}()
+	}
+	waitGroup.Wait()
+	if firstErr != nil {
+		return nil, "", firstErr
+	}
+	var media []*publishsysin.MessageTemplateMediaInp
+	var text string
+	for index := range mediaByMessage {
+		media = append(media, mediaByMessage[index]...)
+		if text == "" && textByMessage[index] != "" {
+			text = textByMessage[index]
+		}
+	}
+	return orderedProfileGroupMedia(media), text, nil
+}
+
+func (s *sSysBot) finishPendingProfileVerifyGroup(botId int64, account *botProfileAccount, sessionId int64) {
+	ctx := context.Background()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			g.Log().Errorf(ctx, "Bot资料验证组收尾发生未捕获异常 trace:PF-%d panic:%v", sessionId, recovered)
+		}
+	}()
+	for {
+		var row profileSessionRow
+		if err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("id,step,status,payload_json").Where("id", sessionId).Where("status", profileSessionStatusActive).Scan(&row); err != nil || row.Id == 0 {
+			return
+		}
+		draft := decodeProfileCreateDraft(row.PayloadJson)
+		if draft.PendingVerify == nil {
+			return
+		}
+		if wait := profileMediaGroupIdleWait(*draft.PendingVerify, time.Now()); wait > 0 {
+			time.Sleep(wait)
+			continue
+		}
+		lock := hglock.NewConfig(20*time.Second, 100*time.Millisecond).Mutex(profileSessionLockKey(sessionId))
+		if err := lock.Lock(ctx); err != nil {
+			g.Log().Warningf(ctx, "Bot资料验证组获取会话锁失败 trace:PF-%d err:%+v", sessionId, err)
+			return
+		}
+		var latest profileSessionRow
+		err := g.DB().Model(profileSessionTable).Safe().Ctx(ctx).Fields("id,step,status,payload_json").Where("id", sessionId).Where("status", profileSessionStatusActive).Scan(&latest)
+		if err == nil && latest.Id > 0 && latest.Step == "waiting_verify" {
+			latestDraft := decodeProfileCreateDraft(latest.PayloadJson)
+			verify := latestDraft.PendingVerify
+			if verify != nil && profileMediaGroupIdleWait(*verify, time.Now()) == 0 {
+				verify.Media = orderedProfileGroupMedia(verify.Media)
+				latestDraft.PendingVerify = nil
+				_ = s.updateProfileSession(ctx, sessionId, latest.Step, latestDraft)
+				latest.PayloadJson = gjson.MustEncodeString(latestDraft)
+				err = s.consumeProfileCreatePart(ctx, botId, verify.ChatId, account, &latest, verify.Text, verify.Media)
+			}
+		}
+		_ = lock.Unlock(context.Background())
+		if err != nil {
+			g.Log().Warningf(ctx, "Bot资料验证组处理失败 trace:PF-%d err:%+v", sessionId, err)
+		}
+		return
 	}
 }
 
@@ -2159,6 +2515,57 @@ func profileMediaGroupIdleWait(pending profilePendingMediaGroup, now time.Time) 
 		return profileMediaGroupDebounce
 	}
 	return profileMediaGroupDebounce - idle
+}
+
+func appendProfileGroupMedia(current []*publishsysin.MessageTemplateMediaInp, messageId int, incoming []*publishsysin.MessageTemplateMediaInp) []*publishsysin.MessageTemplateMediaInp {
+	seen := make(map[string]struct{}, len(current)+len(incoming))
+	for _, item := range current {
+		if item != nil {
+			seen[profileDraftMediaIdentity(item)] = struct{}{}
+		}
+	}
+	for _, item := range incoming {
+		if item == nil {
+			continue
+		}
+		identity := profileDraftMediaIdentity(item)
+		if _, exists := seen[identity]; exists {
+			continue
+		}
+		item.SortIndex = messageId
+		current = append(current, item)
+		seen[identity] = struct{}{}
+	}
+	return current
+}
+
+func orderedProfileGroupMedia(media []*publishsysin.MessageTemplateMediaInp) []*publishsysin.MessageTemplateMediaInp {
+	ordered := append([]*publishsysin.MessageTemplateMediaInp(nil), media...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i] == nil {
+			return false
+		}
+		if ordered[j] == nil {
+			return true
+		}
+		return ordered[i].SortIndex < ordered[j].SortIndex
+	})
+	result := ordered[:0]
+	for _, item := range ordered {
+		if item == nil {
+			continue
+		}
+		item.SortIndex = len(result) + 1
+		result = append(result, item)
+	}
+	return result
+}
+
+func profileDraftMediaIdentity(media *publishsysin.MessageTemplateMediaInp) string {
+	if media == nil {
+		return ""
+	}
+	return strings.Join([]string{strings.TrimSpace(media.MediaType), strings.TrimSpace(media.TgFileId), strings.TrimSpace(media.FileUrl), strings.TrimSpace(media.Name)}, "|")
 }
 
 type inlineShareRow struct {

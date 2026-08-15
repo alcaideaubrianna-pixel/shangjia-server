@@ -41,18 +41,20 @@ const (
 var sixDigitRegexp = regexp.MustCompile(`\b\d{6}\b`)
 
 type sSysBot struct {
-	telegramBotMu     sync.Mutex
-	telegramBots      map[string]*tgbot.Bot
-	runtimeMu         sync.Mutex
-	runtimeCancel     context.CancelFunc
-	cleanupMu         sync.Mutex
-	cleanupCancel     context.CancelFunc
-	featureMu         sync.RWMutex
-	features          map[string]*botFeatureRow
-	featureAt         time.Time
-	featureDefaultsAt time.Time
-	broadcastMu       sync.Mutex
-	broadcastRunning  bool
+	telegramBotMu         sync.Mutex
+	telegramBots          map[string]*tgbot.Bot
+	runtimeMu             sync.Mutex
+	runtimeCancel         context.CancelFunc
+	cleanupMu             sync.Mutex
+	cleanupCancel         context.CancelFunc
+	featureMu             sync.RWMutex
+	features              map[string]*botFeatureRow
+	featureAt             time.Time
+	featureDefaultsAt     time.Time
+	broadcastMu           sync.Mutex
+	broadcastRunning      bool
+	profileRecoveryMu     sync.Mutex
+	profileRecoveryCancel context.CancelFunc
 }
 
 type authCodeRow struct {
@@ -98,10 +100,12 @@ func (s *sSysBot) StartRuntime(ctx context.Context) {
 	s.startPolling(ctx)
 	s.startTelegramMessageCleanup(ctx)
 	s.startPendingBroadcasts(ctx)
+	s.startProfileSessionRecovery(ctx)
 }
 func (s *sSysBot) StopRuntime() {
 	s.stopPolling()
 	s.stopTelegramMessageCleanup()
+	s.stopProfileSessionRecovery()
 	s.clearTelegramBotCache()
 }
 

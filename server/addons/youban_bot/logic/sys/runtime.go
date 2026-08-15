@@ -213,6 +213,9 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 		g.Log().Warningf(ctx, "Telegram消息处理失败 botId:%d chatId:%d userId:%s text:%s err:%+v", botId, msg.Chat.ID, userId, text, err)
 	}
 	if msg.Chat.Type == models.ChatTypePrivate {
+		if s.activeProfileSession(ctx, botId, msg) != nil {
+			return err
+		}
 		if refreshErr := s.ensureReplyKeyboardCurrent(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID)); refreshErr != nil {
 			g.Log().Warningf(ctx, "刷新Telegram底部键盘失败 botId:%d chatId:%d userId:%s err:%+v", botId, msg.Chat.ID, userId, refreshErr)
 		}
