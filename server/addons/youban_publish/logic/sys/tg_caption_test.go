@@ -12,6 +12,13 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
+func TestDefaultAccountSettingDisablesTitleMark(t *testing.T) {
+	setting := defaultAccountSetting(471)
+	if setting.EnableTitleMark != 0 {
+		t.Fatalf("default title mark should be disabled, got %d", setting.EnableTitleMark)
+	}
+}
+
 func TestTelegramCaptionMarkHonorsAccountNumberSettings(t *testing.T) {
 	row := gdb.Record{
 		"title":            gvar.New("资料标题"),

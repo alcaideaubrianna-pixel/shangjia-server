@@ -198,7 +198,7 @@ func (s *sSysPublish) ensureAdminManageableAccount(ctx context.Context, admin *s
 func defaultAccountSetting(accountId int64) *sysin.AccountSettingModel {
 	return &sysin.AccountSettingModel{
 		AccountId:       accountId,
-		EnableTitleMark: 1,
+		EnableTitleMark: 0,
 		MarkMode:        "nickname",
 		NumberSource:    "sequence",
 		MarkPosition:    "top",
