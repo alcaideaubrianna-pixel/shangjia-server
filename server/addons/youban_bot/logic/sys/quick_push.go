@@ -33,6 +33,27 @@ const (
 	quickPushCallbackPrefix          = "yb_qp"
 )
 
+const quickPushButtonConfigPrompt = `请发送按钮配置：
+
+提示：
+1. - 减号左边是按钮名称，右边是链接
+2. && 用来分割一行的多个按钮
+3. 换行可以让按钮另起一行
+
+示例：
+
+一、消息按钮：
+链接名称-https://t.me/xxx
+链接名称1-https://t.me/xxx && 链接名称2-https://t.me/xxx
+#p第1行链接名称1-https://t.me/xxx && #r第1行链接名称2-https://t.me/xxx
+#g第2行链接名称1-https://t.me/xxx && 第2行链接名称2-https://t.me/xxx
+
+二、底部键盘：
+导航 && 签到
+
+⚠️ 消息按钮和底部键盘不能同时发送，/clear 命令可以关闭底部键盘
+⚠️ #p-蓝色背景 #r-红色背景 #g-绿色背景`
+
 type quickPushFeature struct{}
 
 func (quickPushFeature) Key() string     { return "quick_push" }
@@ -842,7 +863,7 @@ func (s *sSysBot) handleQuickPushTemplateCallback(ctx context.Context, callCtx c
 		session.EditingTemplateId = templateId
 		_ = s.saveQuickPushSession(ctx, session)
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
-		return true, s.editQuickPushMessageText(callCtx, tgBot, query, "请发送按钮配置：每行一行按钮，使用 && 分隔同一行按钮。格式：按钮名称-跳转链接；发送 /clear 清除按钮。", quickPushEditCancelKeyboard(session, templateId))
+		return true, s.editQuickPushMessageText(callCtx, tgBot, query, quickPushButtonConfigPrompt, quickPushEditCancelKeyboard(session, templateId))
 	case "delete":
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 		return true, s.editQuickPushMessageText(callCtx, tgBot, query, "确定删除当前模板吗？删除后不可恢复。", quickPushTemplateDetailKeyboard(session, templateId, true))
@@ -884,7 +905,7 @@ func (s *sSysBot) handleQuickPushTemplateCallback(ctx context.Context, callCtx c
 		session.State = quickPushSessionStateEditButtons
 		_ = s.saveQuickPushSession(ctx, session)
 		_, _ = tgBot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
-		return true, s.editQuickPushMessageText(callCtx, tgBot, query, "请发送按钮配置：每行一行按钮，使用 && 分隔同一行按钮。消息按钮格式：名称-链接；底部键盘直接填写按钮名称。发送 /clear 清除按钮。", quickPushEditCancelKeyboard(session, 0))
+		return true, s.editQuickPushMessageText(callCtx, tgBot, query, quickPushButtonConfigPrompt, quickPushEditCancelKeyboard(session, 0))
 	case "cancel":
 		if session.State == quickPushSessionStateSelecting {
 			return false, nil
@@ -915,7 +936,7 @@ func quickPushTemplateListKeyboard(session *quickPushSession, list []*publishsys
 }
 
 func quickPushTemplateDetailText(template *publishsysin.MessageTemplateModel) string {
-	text := strings.TrimSpace(template.Text)
+	text := sanitizeTelegramHTML(template.Text)
 	if text == "" {
 		text = "无"
 	}
