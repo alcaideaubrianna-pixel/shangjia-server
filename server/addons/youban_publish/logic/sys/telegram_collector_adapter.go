@@ -137,6 +137,12 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	if parts[1] == "display" {
+		media, err = s.selectTelegramDisplayMediaForTenant(ctx, job, media)
+		if err != nil {
+			return err
+		}
+	}
 	caption := ""
 	if parts[1] == "display" {
 		caption, err = s.telegramJobCaption(ctx, job)
