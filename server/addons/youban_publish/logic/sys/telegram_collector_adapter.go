@@ -99,12 +99,26 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Conte
 }
 
 func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
+	startedAt := time.Now()
+	stageStartedAt := startedAt
+	var jobID int64
+	var err error
+	stage := func(name string, fields ...interface{}) {
+		duration := time.Since(stageStartedAt)
+		g.Log().Infof(ctx, "协议号媒体降级阶段完成 taskId:%d jobId:%d tgAccountId:%d stage:%s stageDuration:%s totalDuration:%s fields:%v", task.ID, jobID, task.AccountID, name, duration.Round(time.Millisecond), time.Since(startedAt).Round(time.Millisecond), fields)
+		stageStartedAt = time.Now()
+	}
+	defer func() {
+		if err := ctx.Err(); err != nil {
+			g.Log().Warningf(ctx, "协议号媒体降级任务上下文结束 taskId:%d tgAccountId:%d totalDuration:%s err:%+v", task.ID, task.AccountID, time.Since(startedAt).Round(time.Millisecond), err)
+		}
+	}()
 	const prefix = "message-media-fallback:"
 	parts := strings.Split(strings.TrimPrefix(task.TaskKey, prefix), ":")
 	if len(parts) != 2 || !strings.HasPrefix(task.TaskKey, prefix) {
 		return gerror.New("媒体降级发送账号任务参数无效")
 	}
-	jobID, err := strconv.ParseInt(parts[0], 10, 64)
+	jobID, err = strconv.ParseInt(parts[0], 10, 64)
 	if err != nil || jobID <= 0 || (parts[1] != "display" && parts[1] != "verify") {
 		return gerror.New("媒体降级发送账号任务参数无效")
 	}
@@ -112,6 +126,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	stage("读取任务与Job", "purpose", parts[1], "jobStatus", job.Status)
 	if job.Status != "sending" {
 		messageCount, countErr := s.telegramJobSentMessageCount(ctx, job.Id, parts[1])
 		if countErr != nil {
@@ -156,6 +171,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	if task.AccountID != channel.TgAccountId {
 		return gerror.New("媒体降级发送账号任务与目标频道账号不一致")
 	}
+	stage("读取频道")
 	media, err := s.telegramJobMedia(ctx, job, parts[1])
 	if err != nil {
 		return err
@@ -166,6 +182,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			return err
 		}
 	}
+	stage("读取并选择媒体", "mediaCount", len(media))
 	var verifyMedia []*telegramMediaItem
 	if parts[1] == "display" {
 		verifyMedia, err = s.telegramJobMedia(ctx, job, "verify")
@@ -173,6 +190,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			return err
 		}
 	}
+	stage("读取验证媒体", "verifyMediaCount", len(verifyMedia))
 	caption := ""
 	if parts[1] == "display" {
 		caption, err = s.telegramJobCaption(ctx, job)
@@ -184,6 +202,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	stage("媒体内容保护与缩略图准备", "mediaCount", len(media), "verifyMediaCount", len(verifyMedia))
 	caption = telegramCaptionWithJobMarker(caption, job.Id, parts[1])
 	peer, err := messagePushInputPeer(channel)
 	if err != nil {
@@ -193,6 +212,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	if err != nil {
 		return gerror.Wrap(err, "协议号媒体降级发送失败")
 	}
+	stage("发送展示媒体", "messageCount", len(messages))
 	for _, message := range messages {
 		if message != nil {
 			message.Purpose = parts[1]
@@ -201,6 +221,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
 		return err
 	}
+	stage("保存展示消息")
 	if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {
 		return err
 	}
@@ -217,6 +238,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		if err != nil {
 			return gerror.Wrap(err, "协议号验证媒体降级发送失败")
 		}
+		stage("发送验证媒体", "messageCount", len(verifyMessages))
 		for _, message := range verifyMessages {
 			if message != nil {
 				message.Purpose = "verify"
@@ -225,6 +247,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		if err = s.saveTelegramSentMessages(ctx, job, verifyMessages); err != nil {
 			return err
 		}
+		stage("保存验证消息")
 		if err = s.updateTelegramMediaFileIds(ctx, verifyMessages); err != nil {
 			return err
 		}
