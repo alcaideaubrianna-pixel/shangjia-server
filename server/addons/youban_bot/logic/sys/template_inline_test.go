@@ -18,6 +18,28 @@ func TestInlineQueryReplyMarkupMarshalsAsObject(t *testing.T) {
 	}
 }
 
+func TestInlineQueryResultOmitsEmptyReplyMarkup(t *testing.T) {
+	result := models.InlineQueryResultArticle{
+		ID:          "XX1V01S0",
+		Title:       "频道推广",
+		ReplyMarkup: inlineQueryReplyMarkup(nil),
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) == "" || json.Valid(data) == false {
+		t.Fatalf("invalid inline result JSON: %s", data)
+	}
+	var decoded map[string]interface{}
+	if err = json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := decoded["reply_markup"]; exists {
+		t.Fatalf("empty reply markup must be omitted: %s", data)
+	}
+}
+
 func TestTemplateInlineButtonURLNormalizesUsername(t *testing.T) {
 	if got := templateInlineButtonURL("@xhjsjbot"); got != "https://t.me/xhjsjbot" {
 		t.Fatalf("unexpected normalized URL: %s", got)

@@ -501,6 +501,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 		}
 		caption := publishService.SysPublish().TelegramRichTextHTML(row.Text)
 		buttonMarkup, buttonCount, buttonError := templateInlineButtonMarkupWithStats(row.ButtonConfig)
+		inlineButtonMarkup := inlineQueryReplyMarkup(buttonMarkup)
 		if buttonError != nil {
 			g.Log().Errorf(ctx, "Inline按钮配置解析失败 botId:%d queryId:%s templateId:%d serial:%s err:%+v", botId, query.ID, row.Id, row.SerialNo, buttonError)
 		} else {
@@ -523,7 +524,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 					Description:     row.SerialNo,
 					Caption:         cachedCaption,
 					CaptionEntities: cachedPhoto.CaptionEntities,
-					ReplyMarkup:     buttonMarkup,
+					ReplyMarkup:     inlineButtonMarkup,
 				})
 			}
 			photoURL := normalizePreviewMediaURL(s.absoluteMediaURL(ctx, firstNonEmpty(media.FileURL, media.StoragePath)))
@@ -537,7 +538,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 					Description:  row.SerialNo,
 					Caption:      caption,
 					ParseMode:    models.ParseModeHTML,
-					ReplyMarkup:  buttonMarkup,
+					ReplyMarkup:  inlineButtonMarkup,
 				})
 			}
 		} else {
@@ -549,7 +550,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 					MessageText: caption,
 					ParseMode:   models.ParseModeHTML,
 				},
-				ReplyMarkup: buttonMarkup,
+				ReplyMarkup: inlineButtonMarkup,
 			})
 		}
 	}
