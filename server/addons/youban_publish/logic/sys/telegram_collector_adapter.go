@@ -166,12 +166,23 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			return err
 		}
 	}
+	var verifyMedia []*telegramMediaItem
+	if parts[1] == "display" {
+		verifyMedia, err = s.telegramJobMedia(ctx, job, "verify")
+		if err != nil {
+			return err
+		}
+	}
 	caption := ""
 	if parts[1] == "display" {
 		caption, err = s.telegramJobCaption(ctx, job)
 		if err != nil {
 			return err
 		}
+	}
+	caption, err = s.applyTelegramJobContentProtection(ctx, job, caption, media, verifyMedia)
+	if err != nil {
+		return err
 	}
 	caption = telegramCaptionWithJobMarker(caption, job.Id, parts[1])
 	peer, err := messagePushInputPeer(channel)
@@ -195,10 +206,6 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	}
 	if parts[1] == "display" {
 		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplayConfirmed); err != nil {
-			return err
-		}
-		verifyMedia, err := s.telegramJobMedia(ctx, job, "verify")
-		if err != nil {
 			return err
 		}
 		if len(verifyMedia) == 0 {
