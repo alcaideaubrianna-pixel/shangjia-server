@@ -530,7 +530,7 @@ func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAcco
 	var sent []*telegramSentMessage
 	err = s.executeTelegramAccountOperation(ctx, tgAccountId, 2*time.Minute, func(runCtx context.Context, client *telegram.Client) error {
 		var sendErr error
-		sent, sendErr = sendMessageTemplateWithTgClient(runCtx, client, peer, caption, media, source, tgAccountId, templateHash)
+		sent, sendErr = s.sendMessageTemplateWithTgClient(runCtx, client, peer, caption, media, source, tgAccountId, templateHash)
 		return sendErr
 	})
 	if err != nil {
@@ -542,7 +542,7 @@ func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAcco
 	return sent, nil
 }
 
-func sendMessageTemplateWithTgClient(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, caption string, media []*telegramMediaItem, source *messageTemplateForwardSource, tgAccountId int64, templateHash string) ([]*telegramSentMessage, error) {
+func (s *sSysPublish) sendMessageTemplateWithTgClient(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, caption string, media []*telegramMediaItem, source *messageTemplateForwardSource, tgAccountId int64, templateHash string) ([]*telegramSentMessage, error) {
 	if source != nil && len(source.MessageIds) > 0 {
 		messages, forwardErr := forwardMessageTemplateWithGotd(ctx, client, source.Peer, peer, source.MessageIds, media)
 		if forwardErr == nil && len(messages) > 0 {
@@ -561,7 +561,7 @@ func sendMessageTemplateWithTgClient(ctx context.Context, client *telegram.Clien
 		}
 	}
 	sender := gotdmessage.NewSender(client.API())
-	return sendMessageTemplateWithGotd(ctx, sender.To(peer), caption, media)
+	return s.sendMessageTemplateWithGotd(ctx, sender.To(peer), caption, media)
 }
 
 func messageTemplateRequiresSanitizedUpload(media []*telegramMediaItem) bool {
@@ -573,7 +573,7 @@ func messageTemplateRequiresSanitizedUpload(media []*telegramMediaItem) bool {
 	return false
 }
 
-func sendMessageTemplateWithGotd(ctx context.Context, builder *gotdmessage.RequestBuilder, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
+func (s *sSysPublish) sendMessageTemplateWithGotd(ctx context.Context, builder *gotdmessage.RequestBuilder, caption string, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
 	if len(media) == 0 {
 		if strings.TrimSpace(caption) == "" {
 			return nil, gerror.New("消息模板文案和媒体不能同时为空")
@@ -585,7 +585,7 @@ func sendMessageTemplateWithGotd(ctx context.Context, builder *gotdmessage.Reque
 		return gotdSentMessagesFromUpdates(updates, nil), nil
 	}
 	if len(media) == 1 {
-		updates, err := sendSingleMessageTemplateMediaWithGotd(ctx, builder, caption, media[0])
+		updates, err := s.sendSingleMessageTemplateMediaWithGotd(ctx, builder, caption, media[0])
 		if err != nil {
 			return nil, err
 		}
@@ -598,7 +598,7 @@ func sendMessageTemplateWithGotd(ctx context.Context, builder *gotdmessage.Reque
 			if chunkIndex == 0 {
 				chunkCaption = caption
 			}
-			chunkMessages, err := sendMessageTemplateWithGotd(ctx, builder, chunkCaption, chunk)
+			chunkMessages, err := s.sendMessageTemplateWithGotd(ctx, builder, chunkCaption, chunk)
 			if err != nil {
 				return messages, err
 			}
@@ -612,7 +612,7 @@ func sendMessageTemplateWithGotd(ctx context.Context, builder *gotdmessage.Reque
 		if index == 0 {
 			itemCaption = caption
 		}
-		option, err := gotdMessageMediaAlbumOption(ctx, builder, itemCaption, item)
+		option, err := s.gotdMessageMediaAlbumOption(ctx, builder, itemCaption, item)
 		if err != nil {
 			return nil, err
 		}
@@ -625,7 +625,7 @@ func sendMessageTemplateWithGotd(ctx context.Context, builder *gotdmessage.Reque
 	return gotdSentMessagesFromUpdates(updates, media), nil
 }
 
-func sendSingleMessageTemplateMediaWithGotd(ctx context.Context, builder *gotdmessage.RequestBuilder, caption string, media *telegramMediaItem) (tg.UpdatesClass, error) {
+func (s *sSysPublish) sendSingleMessageTemplateMediaWithGotd(ctx context.Context, builder *gotdmessage.RequestBuilder, caption string, media *telegramMediaItem) (tg.UpdatesClass, error) {
 	upload, cleanup, err := gotdMessageUploadOption(ctx, media)
 	if err != nil {
 		return nil, err
@@ -638,12 +638,12 @@ func sendSingleMessageTemplateMediaWithGotd(ctx context.Context, builder *gotdme
 		captionOptions = append(captionOptions, gotdhtml.String(nil, caption))
 	}
 	if media != nil && media.MediaType == "video" {
-		return sendGotdVideoWithPreview(ctx, builder, upload, cleanup, media, captionOptions...)
+		return s.sendGotdVideoWithPreview(ctx, builder, upload, cleanup, media, captionOptions...)
 	}
 	return builder.Upload(upload).Photo(ctx, captionOptions...)
 }
 
-func sendGotdVideoWithPreview(ctx context.Context, builder *gotdmessage.RequestBuilder, upload gotdmessage.UploadOption, cleanup func(), media *telegramMediaItem, caption ...gotdmessage.StyledTextOption) (tg.UpdatesClass, error) {
+func (s *sSysPublish) sendGotdVideoWithPreview(ctx context.Context, builder *gotdmessage.RequestBuilder, upload gotdmessage.UploadOption, cleanup func(), media *telegramMediaItem, caption ...gotdmessage.StyledTextOption) (tg.UpdatesClass, error) {
 	posterPath, posterCleanup, posterErr := cachedTelegramVideoPosterFile(ctx, media)
 	if posterErr != nil {
 		return nil, posterErr
@@ -669,14 +669,25 @@ func sendGotdVideoWithPreview(ctx context.Context, builder *gotdmessage.RequestB
 	if err != nil {
 		return nil, err
 	}
+	meta := s.telegramVideoMeta(ctx, media)
+	videoAttribute := &tg.DocumentAttributeVideo{SupportsStreaming: true}
+	if meta.Width > 0 {
+		videoAttribute.W = meta.Width
+	}
+	if meta.Height > 0 {
+		videoAttribute.H = meta.Height
+	}
+	if meta.Duration > 0 {
+		videoAttribute.Duration = float64(meta.Duration)
+	}
 	video := gotdmessage.UploadedDocument(file, caption...).
 		MIME("video/mp4").
 		Thumb(thumb).
-		Attributes(&tg.DocumentAttributeVideo{SupportsStreaming: true})
+		Attributes(videoAttribute)
 	return builder.Media(ctx, video)
 }
 
-func gotdMessageMediaAlbumOption(ctx context.Context, builder *gotdmessage.RequestBuilder, caption string, media *telegramMediaItem) (gotdmessage.MultiMediaOption, error) {
+func (s *sSysPublish) gotdMessageMediaAlbumOption(ctx context.Context, builder *gotdmessage.RequestBuilder, caption string, media *telegramMediaItem) (gotdmessage.MultiMediaOption, error) {
 	upload, cleanup, err := gotdMessageUploadOption(ctx, media)
 	if err != nil {
 		return nil, err
@@ -712,9 +723,20 @@ func gotdMessageMediaAlbumOption(ctx context.Context, builder *gotdmessage.Reque
 			if err != nil {
 				return nil, err
 			}
+			meta := s.telegramVideoMeta(ctx, media)
+			videoAttribute := &tg.DocumentAttributeVideo{SupportsStreaming: true}
+			if meta.Width > 0 {
+				videoAttribute.W = meta.Width
+			}
+			if meta.Height > 0 {
+				videoAttribute.H = meta.Height
+			}
+			if meta.Duration > 0 {
+				videoAttribute.Duration = float64(meta.Duration)
+			}
 			return gotdmessage.UploadedDocument(file, captionOptions...).
 				MIME("video/mp4").Thumb(thumb).
-				Attributes(&tg.DocumentAttributeVideo{SupportsStreaming: true}), nil
+				Attributes(videoAttribute), nil
 		}
 		return gotdmessage.Video(file, captionOptions...).SupportsStreaming(), nil
 	}
