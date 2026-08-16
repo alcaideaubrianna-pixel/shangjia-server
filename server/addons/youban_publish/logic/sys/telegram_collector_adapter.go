@@ -86,9 +86,24 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		return gerror.New("媒体降级发送账号任务参数无效")
 	}
 	job, err := s.telegramJobById(ctx, jobID)
-	if err != nil || job.Status != "sending" {
+	if err != nil {
 		return err
 	}
+	if job.Status != "sending" {
+		messageCount, countErr := s.telegramJobSentMessageCount(ctx, job.Id, parts[1])
+		if countErr != nil {
+			return countErr
+		}
+		if mediaFallbackTaskCanSkip(job.Status, messageCount) {
+			g.Log().Infof(ctx, "协议号媒体降级任务幂等完成 taskId:%d jobId:%d tgAccountId:%d purpose:%s messageCount:%d", task.ID, job.Id, task.AccountID, parts[1], messageCount)
+			return nil
+		}
+		stateErr := gerror.Newf("协议号媒体降级任务状态异常，拒绝静默完成：jobId=%d status=%s sendPhase=%s purpose=%s messageCount=%d", job.Id, job.Status, job.SendPhase, parts[1], messageCount)
+		g.Log().Warningf(ctx, "协议号媒体降级任务拒绝静默完成 taskId:%d tgAccountId:%d err:%+v", task.ID, task.AccountID, stateErr)
+		s.appendTelegramJobLog(ctx, job, "account_fallback", "failed", stateErr.Error())
+		return stateErr
+	}
+	g.Log().Infof(ctx, "协议号媒体降级任务开始执行 taskId:%d jobId:%d tgAccountId:%d purpose:%s attempt:%d/%d", task.ID, job.Id, task.AccountID, parts[1], task.AttemptCount, task.MaxAttempts)
 	channel, err := s.messagePushChannelFromJob(ctx, job)
 	if err != nil {
 		return err
@@ -136,6 +151,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			return err
 		}
 		if len(verifyMedia) == 0 {
+			g.Log().Infof(ctx, "协议号媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMessages:0", task.ID, job.Id, task.AccountID, len(messages))
 			return s.completeTelegramJob(ctx, job)
 		}
 		verifyCaption := telegramCaptionWithJobMarker("", job.Id, "verify")
@@ -157,12 +173,30 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifyConfirmed); err != nil {
 			return err
 		}
+		g.Log().Infof(ctx, "协议号媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMessages:%d", task.ID, job.Id, task.AccountID, len(messages), len(verifyMessages))
 		return s.completeTelegramJob(ctx, job)
 	}
 	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifyConfirmed); err != nil {
 		return err
 	}
+	g.Log().Infof(ctx, "协议号验证媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d verifyMessages:%d", task.ID, job.Id, task.AccountID, len(messages))
 	return s.completeTelegramJob(ctx, job)
+}
+
+func mediaFallbackTaskCanSkip(jobStatus string, sentMessageCount int) bool {
+	return jobStatus == "sent" && sentMessageCount > 0
+}
+
+func (s *sSysPublish) telegramJobSentMessageCount(ctx context.Context, jobID int64, purpose string) (int, error) {
+	count, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+		Where("job_id", jobID).
+		Where("purpose", purpose).
+		Where("status", "sent").
+		Count()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取协议号媒体降级消息数量失败")
+	}
+	return count, nil
 }
 
 func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {

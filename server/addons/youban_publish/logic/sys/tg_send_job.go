@@ -209,6 +209,10 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 	}
 	s.appendTelegramJobLog(ctx, job, "publish", "started", s.telegramJobPublishMessage(ctx, job, "开始推送TG资料"))
 	if err = s.sendLockedTelegramJob(ctx, job); err != nil {
+		if errors.Is(err, errTelegramMediaFallbackQueued) {
+			s.appendTelegramJobLog(ctx, job, "account_fallback", "waiting", "协议号媒体降级任务已排队，TG任务保持发送中并等待账号服务完成")
+			return nil
+		}
 		return s.handleTelegramJobError(ctx, job, err)
 	}
 	if err = s.completeTelegramJob(ctx, job); err != nil {
@@ -273,7 +277,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		}
 		if err != nil {
 			if errors.Is(err, errTelegramMediaFallbackQueued) {
-				return nil
+				return err
 			}
 			if !isTelegramMediaSizeLimitError(err) {
 				logTelegramBotMediaSendFailure(ctx, job, "展示", displayMedia, err)
@@ -310,7 +314,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	}
 	if err != nil {
 		if errors.Is(err, errTelegramMediaFallbackQueued) {
-			return nil
+			return err
 		}
 		if !isTelegramMediaSizeLimitError(err) {
 			logTelegramBotMediaSendFailure(ctx, job, "验证", verifyMedia, err)
