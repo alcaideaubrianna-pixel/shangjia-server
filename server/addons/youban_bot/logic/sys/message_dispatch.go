@@ -29,9 +29,9 @@ var botMessageHandlers = []botMessageHandler{
 	quickPushSessionMessageHandler{},
 	botFeatureMessageHandler{},
 	publishListenerBindMessageHandler{},
+	authCodeMessageHandler{},
 	profileManageMessageHandler{},
 	scanMediaMessageHandler{},
-	authCodeMessageHandler{},
 }
 
 func botListenerBindCode(text string) string {
@@ -115,6 +115,13 @@ func (authCodeMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *b
 	}
 	code := sixDigitRegexp.FindString(event.Text)
 	if code == "" {
+		return false, nil
+	}
+	pending, err := bot.pendingAuthCodeExists(ctx, code)
+	if err != nil {
+		return true, err
+	}
+	if !pending {
 		return false, nil
 	}
 	return true, bot.consumeCode(ctx, event.BotId, event.Msg, code)

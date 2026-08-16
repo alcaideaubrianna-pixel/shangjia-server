@@ -527,6 +527,17 @@ func (s *sSysBot) consumeCode(ctx context.Context, botId int64, msg *models.Mess
 	return s.consumeLoginCode(ctx, botId, msg, row)
 }
 
+func (s *sSysBot) pendingAuthCodeExists(ctx context.Context, code string) (bool, error) {
+	count, err := g.DB().Model(authCodeTable).Safe().Ctx(ctx).
+		Where("code", strings.TrimSpace(code)).
+		Where("status", sysin.BotCodeStatusPending).
+		Count()
+	if err != nil {
+		return false, gerror.Wrap(err, "读取验证码失败")
+	}
+	return count > 0, nil
+}
+
 func (s *sSysBot) consumeBindCode(ctx context.Context, botId int64, msg *models.Message, row *authCodeRow) error {
 	if row.AccountId <= 0 {
 		_, _ = s.markCodeFailed(ctx, row.Code, sysin.BotCodeStatusFailed, "绑定账号不存在")

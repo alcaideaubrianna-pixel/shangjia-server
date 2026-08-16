@@ -44,20 +44,26 @@ func TestLooksLikeProfileSearchIdentifier(t *testing.T) {
 
 func TestListenerBindHandlerRunsBeforeProfileHandler(t *testing.T) {
 	bindIndex := -1
+	authCodeIndex := -1
 	profileIndex := -1
 	for index, handler := range botMessageHandlers {
 		switch handler.(type) {
 		case publishListenerBindMessageHandler:
 			bindIndex = index
+		case authCodeMessageHandler:
+			authCodeIndex = index
 		case profileManageMessageHandler:
 			profileIndex = index
 		}
 	}
-	if bindIndex < 0 || profileIndex < 0 {
-		t.Fatalf("message handlers missing: bind=%d profile=%d", bindIndex, profileIndex)
+	if bindIndex < 0 || authCodeIndex < 0 || profileIndex < 0 {
+		t.Fatalf("message handlers missing: bind=%d auth=%d profile=%d", bindIndex, authCodeIndex, profileIndex)
 	}
 	if bindIndex >= profileIndex {
 		t.Fatalf("listener bind handler must run before profile handler: bind=%d profile=%d", bindIndex, profileIndex)
+	}
+	if authCodeIndex >= profileIndex {
+		t.Fatalf("auth code handler must run before profile handler: auth=%d profile=%d", authCodeIndex, profileIndex)
 	}
 }
 
