@@ -8,19 +8,12 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gotd/td/telegram"
-	"github.com/gotd/td/tg"
 
 	collectorservice "hotgo/addons/telegram_collector/service"
-	"hotgo/internal/library/hgrds/lock"
 )
 
-const telegramAccountClientLeaseKeyPrefix = "youban_publish:tg:account-client:"
-
-func telegramAccountClientLeaseKey(tgAccountId int64) string {
-	return fmt.Sprintf("%s%d", telegramAccountClientLeaseKeyPrefix, tgAccountId)
-}
-
+// telegramAccountBusyError remains for retry-policy compatibility with tasks
+// persisted by older versions. New account operations use AccountRuntime.
 type telegramAccountBusyError struct {
 	tgAccountId int64
 	err         error
@@ -45,139 +38,48 @@ func isTelegramAccountBusyError(err error) bool {
 	return errors.As(err, &busyErr)
 }
 
-func waitTelegramAccountClientLease(
-	ctx context.Context,
-	retryInterval time.Duration,
-	acquire func() (*lock.Lock, error),
-	onWait func(error),
-) (*lock.Lock, error) {
-	if acquire == nil {
-		return nil, gerror.New("TG账号连接租约获取函数不能为空")
-	}
-	if retryInterval <= 0 {
-		retryInterval = time.Second
-	}
-	waitingLogged := false
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		lease, err := acquire()
-		if err == nil {
-			return lease, nil
-		}
-		if !gerror.Is(err, lock.ErrLockFailed) {
-			return nil, err
-		}
-		observeTelegramLease(ctx, "lock_failed", 0)
-		if !waitingLogged && onWait != nil {
-			onWait(err)
-			waitingLogged = true
-		}
-		timer := time.NewTimer(retryInterval)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return nil, ctx.Err()
-		case <-timer.C:
-		}
-	}
-}
-
-func acquireTelegramAccountClientLeaseWait(ctx context.Context, tgAccountId int64, onWait func(error)) (*lock.Lock, error) {
-	if tgAccountId <= 0 {
-		return nil, gerror.New("TG账号无效")
-	}
-	return waitTelegramAccountClientLease(ctx, time.Second, func() (*lock.Lock, error) {
-		lease := lock.NewConfig(5*time.Minute, time.Second).Mutex(telegramAccountClientLeaseKey(tgAccountId))
-		if err := lease.TryLock(ctx); err != nil {
-			return nil, err
-		}
-		return lease, nil
-	}, onWait)
-}
-
-func (s *sSysPublish) runTelegramClientWithAccountLease(ctx context.Context, tgAccountId int64, client *telegram.Client, run func(context.Context) error) error {
-	if client == nil {
-		return gerror.New("Telegram客户端未初始化")
-	}
-	if run == nil {
-		return gerror.New("Telegram客户端运行函数不能为空")
-	}
-	leaseCtx, cancel := context.WithTimeout(ctx, telegramAccountClientLeaseWaitTimeout(ctx))
-	defer cancel()
-	lease, err := acquireTelegramAccountClientLeaseWait(leaseCtx, tgAccountId, func(waitErr error) {
-		observeTelegramLease(ctx, "conflict", tgAccountId)
-		g.Log().Infof(ctx, "TG账号连接繁忙，等待已有操作完成 tgAccountId:%d err:%+v", tgAccountId, waitErr)
-	})
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, lock.ErrTimeout) {
-			err = &telegramAccountBusyError{tgAccountId: tgAccountId, err: err}
-		}
-		g.Log().Errorf(ctx, "TG账号连接租约获取失败，协议号降级任务未执行 tgAccountId:%d err:%+v", tgAccountId, err)
-		observeTelegramLease(ctx, "acquire_failed", tgAccountId)
-		return err
-	}
-	observeTelegramLease(ctx, "acquired", tgAccountId)
-	observeTelegramLeaseActive(ctx, 1)
-	defer func() {
-		observeTelegramLeaseActive(context.Background(), -1)
-		if unlockErr := lease.Unlock(context.Background()); unlockErr != nil {
-			observeTelegramLease(context.Background(), "release_failed", tgAccountId)
-			g.Log().Warningf(context.Background(), "TG账号连接租约释放失败 tgAccountId:%d err:%+v", tgAccountId, unlockErr)
-		}
-		observeTelegramLease(context.Background(), "released", tgAccountId)
-	}()
-	return client.Run(ctx, run)
-}
-
-func telegramAccountClientLeaseWaitTimeout(ctx context.Context) time.Duration {
-	seconds := g.Cfg().MustGet(ctx, "youbanPublish.queue.accountBusyTimeoutSeconds", 120).Int()
-	if seconds < 1 {
-		seconds = 1
-	}
-	if seconds > 300 {
-		seconds = 300
-	}
-	return time.Duration(seconds) * time.Second
-}
-
 func (s *sSysPublish) executeTelegramAccountOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) error {
 	if tgAccountId <= 0 || run == nil {
 		return gerror.New("TG账号操作参数无效")
 	}
-	// Account workers are refreshed asynchronously after login or source
-	// changes. Give the shared runtime a chance to create the worker before
-	// falling back to a standalone client, otherwise a just-logged-in account
-	// can race its own collector and hit the lease timeout.
-	for attempt := 0; attempt < 3; attempt++ {
-		usedRuntime, err := s.executeAccountCollectOperation(ctx, tgAccountId, timeout, run)
-		if err != nil || usedRuntime {
-			return err
-		}
-		collectorservice.AccountRuntime().Refresh()
-		if err := waitTelegramAccountRuntimeRefresh(ctx, 250*time.Millisecond); err != nil {
-			return err
-		}
-	}
-	return s.executeTelegramAccountStandaloneOperation(ctx, tgAccountId, timeout, run)
+	return s.executeTelegramAccountRuntimeUntilReady(ctx, tgAccountId, timeout, run, false)
 }
 
 func (s *sSysPublish) executeTelegramAccountPriorityOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) error {
 	if tgAccountId <= 0 || run == nil {
 		return gerror.New("TG账号操作参数无效")
 	}
-	for attempt := 0; attempt < 3; attempt++ {
-		usedRuntime, err := collectorservice.AccountRuntime().ExecutePriority(ctx, tgAccountId, timeout, collectorservice.AccountOperation(run))
-		if err != nil || usedRuntime {
+	return s.executeTelegramAccountRuntimeUntilReady(ctx, tgAccountId, timeout, run, true)
+}
+
+func (s *sSysPublish) executeTelegramAccountRuntimeUntilReady(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation, priority bool) error {
+	if timeout <= 0 {
+		timeout = 90 * time.Second
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	waitingLogged := false
+	for {
+		var used bool
+		var err error
+		operation := collectorservice.AccountOperation(run)
+		if priority {
+			used, err = collectorservice.AccountRuntime().ExecutePriority(runCtx, tgAccountId, timeout, operation)
+		} else {
+			used, err = collectorservice.AccountRuntime().Execute(runCtx, tgAccountId, timeout, operation)
+		}
+		if err != nil || used {
 			return err
+		}
+		if !waitingLogged {
+			g.Log().Infof(runCtx, "TG账号操作等待常驻客户端 tgAccountId:%d priority:%t", tgAccountId, priority)
+			waitingLogged = true
 		}
 		collectorservice.AccountRuntime().Refresh()
-		if err := waitTelegramAccountRuntimeRefresh(ctx, 250*time.Millisecond); err != nil {
-			return err
+		if err = waitTelegramAccountRuntimeRefresh(runCtx, 250*time.Millisecond); err != nil {
+			return gerror.New("TG账号常驻客户端正在启动，请稍后重试")
 		}
 	}
-	return gerror.New("TG账号常驻客户端尚未就绪，请稍后重试")
 }
 
 func waitTelegramAccountRuntimeRefresh(ctx context.Context, delay time.Duration) error {
@@ -189,30 +91,4 @@ func waitTelegramAccountRuntimeRefresh(ctx context.Context, delay time.Duration)
 	case <-timer.C:
 		return nil
 	}
-}
-
-func (s *sSysPublish) executeTelegramAccountStandaloneOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) error {
-	if tgAccountId <= 0 || run == nil {
-		return gerror.New("TG账号操作参数无效")
-	}
-	account, err := s.accountCollectTgAccount(ctx, tgAccountId)
-	if err != nil {
-		return err
-	}
-	conf, err := NewSysConfig().GetTelegram(ctx)
-	if err != nil {
-		return err
-	}
-	client, err := s.newAccountCollectClient(ctx, conf, account, tg.NewUpdateDispatcher())
-	if err != nil {
-		return err
-	}
-	if timeout <= 0 {
-		timeout = 90 * time.Second
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	return s.runTelegramClientWithAccountLease(runCtx, tgAccountId, client, func(runCtx context.Context) error {
-		return run(runCtx, client)
-	})
 }

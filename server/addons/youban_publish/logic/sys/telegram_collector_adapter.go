@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -35,6 +36,28 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Conte
 		return nil, gerror.New("Telegram账号任务处理参数无效")
 	}
 	switch task.TaskType {
+	case collectorin.AccountTaskTypeChannelBotAttach:
+		const prefix = "channel-bot-attach:"
+		encoded := strings.TrimPrefix(task.TaskKey, prefix)
+		if !strings.HasPrefix(task.TaskKey, prefix) {
+			return nil, gerror.New("频道Bot管理任务参数无效")
+		}
+		body, err := base64.RawURLEncoding.DecodeString(encoded)
+		if err != nil {
+			return nil, gerror.Wrap(err, "解析频道Bot管理任务失败")
+		}
+		var payload channelBotAttachTaskPayload
+		if err = json.Unmarshal(body, &payload); err != nil {
+			return nil, gerror.Wrap(err, "解析频道Bot管理参数失败")
+		}
+		if payload.TenantID != task.TenantID || payload.TGAccountID != task.AccountID || len(payload.BotIDs) == 0 {
+			return nil, gerror.New("频道Bot管理任务归属不一致")
+		}
+		bots, err := h.publish.channelCheckBots(ctx, payload.BotIDs, payload.TenantID)
+		if err != nil {
+			return nil, err
+		}
+		return nil, h.publish.attachChannelBotsWithClient(ctx, client, payload.TenantID, payload.TGAccountID, &sysin.ChannelCacheModel{ChannelId: payload.ChannelID, AccessHash: payload.AccessHash}, bots)
 	case collectorin.AccountTaskTypeHistoryPage:
 		return nil, h.publish.handleCollectHistoryAccountTask(ctx, client, task.HistoryTaskID)
 	case collectorin.AccountTaskTypeMaterialImportHistoryPage:

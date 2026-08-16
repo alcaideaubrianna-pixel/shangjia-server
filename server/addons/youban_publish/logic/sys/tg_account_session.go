@@ -28,27 +28,10 @@ func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64
 		return sysin.PublishTgAccountStatusFailed, err.Error()
 	}
 	var user *tg.User
-	usedRuntime, err := s.executeAccountCollectOperation(ctx, item.Id, 30*time.Second, func(runCtx context.Context, client *telegram.Client) error {
+	err = s.executeTelegramAccountOperation(ctx, item.Id, 30*time.Second, func(runCtx context.Context, client *telegram.Client) error {
 		user, err = client.Self(runCtx)
 		return err
 	})
-	if !usedRuntime {
-		conf, confErr := NewSysConfig().GetTelegram(ctx)
-		if confErr != nil {
-			return s.failTgAccountRefresh(ctx, id, tenantId, operatorId, confErr.Error())
-		}
-		storage, storageErr := s.telegramSessionStorage(item.SessionKey)
-		if storageErr != nil {
-			return s.failTgAccountRefresh(ctx, id, tenantId, operatorId, storageErr.Error())
-		}
-		options := telegram.Options{SessionStorage: storage}
-		if resolver, resolverErr := telegramMTProtoResolver(conf.ProxyUrl); resolverErr != nil {
-			return s.failTgAccountRefresh(ctx, id, tenantId, operatorId, resolverErr.Error())
-		} else if resolver != nil {
-			options.Resolver = resolver
-		}
-		user, err = s.readTelegramSelf(ctx, item.Id, conf.AppId, conf.AppHash, options)
-	}
 	if err != nil {
 		if isTelegramPermanentAccountAuthError(err) {
 			return s.expireTgAccountSession(
@@ -174,22 +157,6 @@ func (s *sSysPublish) notifyTgAccountOwner(ctx context.Context, tgAccountId int6
 		return &messagePushTgAccountOwner{}, nil
 	}
 	return account, nil
-}
-
-func (s *sSysPublish) readTelegramSelf(ctx context.Context, tgAccountId int64, appId int, appHash string, options telegram.Options) (*tg.User, error) {
-	client := telegram.NewClient(appId, appHash, options)
-	var self *tg.User
-	runCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	err := s.runTelegramClientWithAccountLease(runCtx, tgAccountId, client, func(ctx context.Context) error {
-		user, err := client.Self(ctx)
-		if err != nil {
-			return err
-		}
-		self = user
-		return nil
-	})
-	return self, err
 }
 
 func (s *sSysPublish) updateTgAccountRefreshResult(ctx context.Context, id int64, tenantId int64, operatorId int64, status string, message string, user *tg.User, username string, displayName string) {

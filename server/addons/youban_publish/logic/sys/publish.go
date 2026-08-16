@@ -70,6 +70,7 @@ func init() {
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeMessageReconcile, accountTaskHandler)
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeMessageMediaFallback, accountTaskHandler)
 	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeMessageDeleteFallback, accountTaskHandler)
+	collectorservice.RegisterAccountTaskHandler(collectorin.AccountTaskTypeChannelBotAttach, accountTaskHandler)
 	collectorservice.RegisterAccountMedia(&publishCollectorAccountMediaProvider{publish: publish})
 	collectorservice.RegisterAccountRuntimeProvider(&publishAccountRuntimeProvider{publish: publish})
 	gatewayservice.RegisterProvider(&publishBotGatewayProvider{publish: publish})

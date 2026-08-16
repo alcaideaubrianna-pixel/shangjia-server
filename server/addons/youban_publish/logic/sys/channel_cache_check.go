@@ -2,6 +2,8 @@ package sys
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -14,8 +16,18 @@ import (
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+type channelBotAttachTaskPayload struct {
+	TenantID    int64   `json:"tenantId"`
+	TGAccountID int64   `json:"tgAccountId"`
+	ChannelID   string  `json:"channelId"`
+	AccessHash  string  `json:"accessHash"`
+	BotIDs      []int64 `json:"botIds"`
+}
 
 func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCheckInp) (res *sysin.ChannelCheckModel, err error) {
 	checkCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
@@ -204,6 +216,7 @@ func channelCheckTelegramErrorMessage(err error) string {
 	message := strings.ToUpper(err.Error())
 	if strings.Contains(message, "TG账号连接正在使用") ||
 		strings.Contains(message, "TG账号常驻客户端尚未就绪") ||
+		strings.Contains(message, "TG账号常驻客户端正在启动") ||
 		strings.Contains(message, "CONTEXT DEADLINE EXCEEDED") {
 		return "TG账号正在执行其他操作，请稍后刷新后重试"
 	}
@@ -211,6 +224,38 @@ func channelCheckTelegramErrorMessage(err error) string {
 }
 
 func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgAccountId int64, channel *sysin.ChannelCacheModel, bots []*sysin.BotModel) error {
+	payload := channelBotAttachTaskPayload{TenantID: tenantId, TGAccountID: tgAccountId, ChannelID: channel.ChannelId, AccessHash: channel.AccessHash}
+	for _, bot := range bots {
+		if bot != nil && bot.Id > 0 {
+			payload.BotIDs = append(payload.BotIDs, bot.Id)
+		}
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return gerror.Wrap(err, "创建频道Bot管理任务失败")
+	}
+	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: tenantId, AccountID: tgAccountId,
+		TaskType: collectorin.AccountTaskTypeChannelBotAttach,
+		TaskKey:  "channel-bot-attach:" + base64.RawURLEncoding.EncodeToString(body),
+		Priority: -100, MaxAttempts: 3,
+	}, 500*time.Millisecond)
+	if err != nil {
+		return gerror.Wrap(err, "提交频道Bot管理任务失败")
+	}
+	if task == nil || task.Status != collectorin.AccountTaskStatusCompleted {
+		if task != nil && strings.TrimSpace(task.ErrorMessage) != "" {
+			return gerror.New(task.ErrorMessage)
+		}
+		return gerror.New("频道Bot管理任务未完成，请稍后重新检测")
+	}
+	return nil
+}
+
+func (s *sSysPublish) attachChannelBotsWithClient(ctx context.Context, client *telegram.Client, tenantId int64, tgAccountId int64, channel *sysin.ChannelCacheModel, bots []*sysin.BotModel) error {
+	if client == nil {
+		return gerror.New("Telegram常驻客户端未就绪")
+	}
 	account, err := s.adminTgAccountById(ctx, tgAccountId, tenantId)
 	if err != nil {
 		return err
@@ -227,60 +272,58 @@ func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgA
 	if err != nil {
 		return gerror.New("频道AccessHash无效，请刷新频道缓存")
 	}
-	return s.executeTelegramAccountPriorityOperation(ctx, tgAccountId, 35*time.Second, func(ctx context.Context, client *telegram.Client) error {
-		api := client.API()
-		inputChannel := &tg.InputChannel{ChannelID: channelID, AccessHash: accessHash}
-		for _, botItem := range bots {
-			username := strings.TrimPrefix(strings.TrimSpace(botItem.BotUsername), "@")
-			if username == "" {
-				return gerror.New("Bot缺少用户名，请先刷新Bot")
-			}
-			resolved, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: username})
-			if err != nil {
-				logChannelBotRPCError(ctx, "resolve_bot_username", tenantId, tgAccountId, lastLoginAt, channel.ChannelId, botItem, err)
-				return gerror.Wrap(err, "解析Bot用户名失败")
-			}
-			inputUser, err := resolvedBotInputUser(resolved)
-			if err != nil {
-				return err
-			}
-			if _, err = api.ChannelsEditAdmin(ctx, &tg.ChannelsEditAdminRequest{
-				Channel: inputChannel,
-				UserID:  inputUser,
-				AdminRights: tg.ChatAdminRights{
-					ChangeInfo:     false,
-					PostMessages:   true,
-					EditMessages:   true,
-					DeleteMessages: true,
-					BanUsers:       false,
-					InviteUsers:    false,
-					PinMessages:    false,
-					AddAdmins:      false,
-					Other:          true,
-					PostStories:    true,
-					EditStories:    true,
-					DeleteStories:  true,
-				},
-				Rank: "资料推送",
-			}); err != nil {
-				logChannelBotRPCError(ctx, "edit_channel_admin", tenantId, tgAccountId, lastLoginAt, channel.ChannelId, botItem, err)
-				if tgerr.Is(err, "ADMINS_TOO_MUCH") {
-					return gerror.New("该频道的管理员数量已达到 Telegram 上限，暂时无法自动添加 Bot。请先进入频道管理，移除不再使用的管理员或 Bot，然后重新检测")
-				}
-				if tgerr.Is(err, "BOTS_TOO_MUCH") {
-					return gerror.New("该频道可添加的机器人数量已达到 Telegram 上限，暂时无法继续添加 Bot。请先移除不再使用的机器人，然后重新检测")
-				}
-				if tgerr.Is(err, "CHAT_ADMIN_REQUIRED") {
-					return gerror.New("当前 Telegram 账号没有管理频道管理员的权限，请使用频道所有者或管理员账号重新检测")
-				}
-				if tgerr.Is(err, "FRESH_CHANGE_ADMINS_FORBIDDEN") {
-					return gerror.New("当前TG登录会话处于Telegram安全冷却期，系统暂时无法自动将Bot设置为频道管理员。通常需要等待10～30分钟，然后点击“重新检测”。如需立即使用，请前往Telegram频道的「频道管理 → 管理员 → 添加管理员」，手动将所选Bot添加为管理员，并开启“发布消息”和“删除消息”权限，完成后返回页面重新检测")
-				}
-				return gerror.Wrap(err, "设置Bot频道管理员权限失败")
-			}
+	api := client.API()
+	inputChannel := &tg.InputChannel{ChannelID: channelID, AccessHash: accessHash}
+	for _, botItem := range bots {
+		username := strings.TrimPrefix(strings.TrimSpace(botItem.BotUsername), "@")
+		if username == "" {
+			return gerror.New("Bot缺少用户名，请先刷新Bot")
 		}
-		return nil
-	})
+		resolved, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: username})
+		if err != nil {
+			logChannelBotRPCError(ctx, "resolve_bot_username", tenantId, tgAccountId, lastLoginAt, channel.ChannelId, botItem, err)
+			return gerror.Wrap(err, "解析Bot用户名失败")
+		}
+		inputUser, err := resolvedBotInputUser(resolved)
+		if err != nil {
+			return err
+		}
+		if _, err = api.ChannelsEditAdmin(ctx, &tg.ChannelsEditAdminRequest{
+			Channel: inputChannel,
+			UserID:  inputUser,
+			AdminRights: tg.ChatAdminRights{
+				ChangeInfo:     false,
+				PostMessages:   true,
+				EditMessages:   true,
+				DeleteMessages: true,
+				BanUsers:       false,
+				InviteUsers:    false,
+				PinMessages:    false,
+				AddAdmins:      false,
+				Other:          true,
+				PostStories:    true,
+				EditStories:    true,
+				DeleteStories:  true,
+			},
+			Rank: "资料推送",
+		}); err != nil {
+			logChannelBotRPCError(ctx, "edit_channel_admin", tenantId, tgAccountId, lastLoginAt, channel.ChannelId, botItem, err)
+			if tgerr.Is(err, "ADMINS_TOO_MUCH") {
+				return gerror.New("该频道的管理员数量已达到 Telegram 上限，暂时无法自动添加 Bot。请先进入频道管理，移除不再使用的管理员或 Bot，然后重新检测")
+			}
+			if tgerr.Is(err, "BOTS_TOO_MUCH") {
+				return gerror.New("该频道可添加的机器人数量已达到 Telegram 上限，暂时无法继续添加 Bot。请先移除不再使用的机器人，然后重新检测")
+			}
+			if tgerr.Is(err, "CHAT_ADMIN_REQUIRED") {
+				return gerror.New("当前 Telegram 账号没有管理频道管理员的权限，请使用频道所有者或管理员账号重新检测")
+			}
+			if tgerr.Is(err, "FRESH_CHANGE_ADMINS_FORBIDDEN") {
+				return gerror.New("当前TG登录会话处于Telegram安全冷却期，系统暂时无法自动将Bot设置为频道管理员。通常需要等待10～30分钟，然后点击“重新检测”。如需立即使用，请前往Telegram频道的「频道管理 → 管理员 → 添加管理员」，手动将所选Bot添加为管理员，并开启“发布消息”和“删除消息”权限，完成后返回页面重新检测")
+			}
+			return gerror.Wrap(err, "设置Bot频道管理员权限失败")
+		}
+	}
+	return nil
 }
 
 func logChannelBotRPCError(ctx context.Context, operation string, tenantId, tgAccountId int64, tgLastLoginAt, channelId string, botItem *sysin.BotModel, err error) {
