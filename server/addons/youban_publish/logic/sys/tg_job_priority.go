@@ -19,6 +19,7 @@ func isTelegramUrgentJob(job telegramJobRecord) bool {
 func telegramJobPriorityValue(job telegramJobRecord) int {
 	operationNo := strings.ToLower(strings.TrimSpace(job.OperationNo))
 	if isManualProfilePublishOperation(operationNo) ||
+		strings.HasPrefix(operationNo, "ai-republish:") ||
 		strings.HasPrefix(operationNo, "quick_push:") ||
 		strings.HasPrefix(operationNo, "message_push:") {
 		return tgJobPriorityUrgent
