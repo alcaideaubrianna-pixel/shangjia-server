@@ -591,6 +591,21 @@ func sendMessageTemplateWithGotd(ctx context.Context, builder *gotdmessage.Reque
 		}
 		return gotdSentMessagesFromUpdates(updates, media), nil
 	}
+	if len(media) > telegramMediaGroupMaxItems {
+		messages := make([]*telegramSentMessage, 0, len(media))
+		for chunkIndex, chunk := range splitTelegramMediaItems(media, telegramMediaGroupMaxItems) {
+			chunkCaption := ""
+			if chunkIndex == 0 {
+				chunkCaption = caption
+			}
+			chunkMessages, err := sendMessageTemplateWithGotd(ctx, builder, chunkCaption, chunk)
+			if err != nil {
+				return messages, err
+			}
+			messages = append(messages, chunkMessages...)
+		}
+		return messages, nil
+	}
 	album := make([]gotdmessage.MultiMediaOption, 0, len(media))
 	for index, item := range media {
 		itemCaption := ""

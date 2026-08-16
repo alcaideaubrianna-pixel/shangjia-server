@@ -98,10 +98,32 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			g.Log().Infof(ctx, "协议号媒体降级任务幂等完成 taskId:%d jobId:%d tgAccountId:%d purpose:%s messageCount:%d", task.ID, job.Id, task.AccountID, parts[1], messageCount)
 			return nil
 		}
-		stateErr := gerror.Newf("协议号媒体降级任务状态异常，拒绝静默完成：jobId=%d status=%s sendPhase=%s purpose=%s messageCount=%d", job.Id, job.Status, job.SendPhase, parts[1], messageCount)
-		g.Log().Warningf(ctx, "协议号媒体降级任务拒绝静默完成 taskId:%d tgAccountId:%d err:%+v", task.ID, task.AccountID, stateErr)
-		s.appendTelegramJobLog(ctx, job, "account_fallback", "failed", stateErr.Error())
-		return stateErr
+		// Reconciliation may conservatively move a Bot-failed job to unknown
+		// before the account fallback starts. With no messages for this phase,
+		// it is safe to claim the job for the fallback instead of abandoning it.
+		if job.Status == "unknown" && messageCount == 0 {
+			result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+				Where("id", job.Id).Where("status", "unknown").
+				Data(g.Map{"status": "sending", "dispatch_status": tgDispatchStatusProcessing, "updated_at": gtime.Now()}).Update()
+			if updateErr != nil {
+				return gerror.Wrap(updateErr, "恢复协议号媒体降级任务状态失败")
+			}
+			rowsAffected, rowsErr := result.RowsAffected()
+			if rowsErr != nil {
+				return gerror.Wrap(rowsErr, "确认协议号媒体降级任务状态失败")
+			}
+			if rowsAffected == 0 {
+				return gerror.New("协议号媒体降级任务正在被其他发送流程处理")
+			}
+			job.Status = "sending"
+			g.Log().Infof(ctx, "协议号媒体降级任务从未知状态恢复发送 taskId:%d jobId:%d purpose:%s", task.ID, job.Id, parts[1])
+		}
+		if job.Status != "sending" {
+			stateErr := gerror.Newf("协议号媒体降级任务状态异常，拒绝静默完成：jobId=%d status=%s sendPhase=%s purpose=%s messageCount=%d", job.Id, job.Status, job.SendPhase, parts[1], messageCount)
+			g.Log().Warningf(ctx, "协议号媒体降级任务拒绝静默完成 taskId:%d tgAccountId:%d err:%+v", task.ID, task.AccountID, stateErr)
+			s.appendTelegramJobLog(ctx, job, "account_fallback", "failed", stateErr.Error())
+			return stateErr
+		}
 	}
 	g.Log().Infof(ctx, "协议号媒体降级任务开始执行 taskId:%d jobId:%d tgAccountId:%d purpose:%s attempt:%d/%d", task.ID, job.Id, task.AccountID, parts[1], task.AttemptCount, task.MaxAttempts)
 	channel, err := s.messagePushChannelFromJob(ctx, job)
