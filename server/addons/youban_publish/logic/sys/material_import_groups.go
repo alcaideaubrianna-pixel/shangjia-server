@@ -2,7 +2,10 @@ package sys
 
 import (
 	"context"
+	"strings"
 
+	"github.com/gogf/gf/v2/container/gvar"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -30,6 +33,10 @@ func (s *sSysPublish) upsertMaterialImportDisplayUnit(ctx context.Context, task 
 	if err != nil {
 		return gerror.Wrap(err, "读取资料导入分组失败")
 	}
+	processedText, err := s.applyMaterialImportCollectRules(ctx, task, unit.RawText, mediaCount)
+	if err != nil {
+		return err
+	}
 	now := gtime.Now()
 	data := g.Map{
 		"task_id":            task.Id,
@@ -38,15 +45,15 @@ func (s *sSysPublish) upsertMaterialImportDisplayUnit(ctx context.Context, task 
 		"source_chat_id":     task.SourceChatId,
 		"source_grouped_id":  unit.GroupedId,
 		"source_unique_key":  unit.UniqueKey,
-		"raw_text":           firstNonEmpty(unit.RawText, existing["raw_text"].String()),
-		"profile_text":       firstNonEmpty(unit.RawText, existing["profile_text"].String()),
+		"raw_text":           firstNonEmpty(processedText, existing["raw_text"].String()),
+		"profile_text":       firstNonEmpty(processedText, existing["profile_text"].String()),
 		"media_total":        mediaCount,
 		"status":             sysin.MaterialImportStatusPending,
 		"message_at":         unit.MessageAt,
 		"updated_at":         now,
 		"source_message_ids": collectMaterialMessageIDs(existing["source_message_ids"].String(), unit.Messages),
 	}
-	parsedText := firstNonEmpty(unit.RawText, existing["raw_text"].String())
+	parsedText := firstNonEmpty(processedText, existing["raw_text"].String())
 	title, profileNo, nickname := materialImportTitle(parsedText)
 	data["title"] = title
 	data["profile_no"] = profileNo
@@ -70,4 +77,48 @@ func (s *sSysPublish) upsertMaterialImportDisplayUnit(ctx context.Context, task 
 		return gerror.Wrap(err, "更新资料导入分组失败")
 	}
 	return s.replaceMaterialImportGroupMedia(ctx, existing["id"].Int64(), task.Id, task.TenantId, task.AccountId, items)
+}
+
+func (s *sSysPublish) applyMaterialImportCollectRules(ctx context.Context, task *sysin.MaterialImportTaskModel, rawText string, mediaCount int) (string, error) {
+	rawText = strings.TrimSpace(rawText)
+	if task == nil || task.TenantId <= 0 || task.AccountId <= 0 || strings.TrimSpace(task.SourceChatId) == "" {
+		return rawText, nil
+	}
+	sourceKey := strings.TrimPrefix(strings.TrimSpace(task.SourceChatId), "-100")
+	var source gdb.Record
+	err := g.DB().Model(publishCollectSourceTable).Safe().Ctx(ctx).
+		Where("tenant_id", task.TenantId).
+		Where("account_id", task.AccountId).
+		Where("tg_account_id", task.TgAccountId).
+		Where("REPLACE(source_chat_id, '-100', '') = ?", sourceKey).
+		Where("status", 1).
+		WhereNull("deleted_at").
+		OrderAsc("id").
+		Scan(&source)
+	if err != nil {
+		return rawText, gerror.Wrap(err, "读取TG导入来源采集配置失败")
+	}
+	if source.IsEmpty() {
+		return rawText, nil
+	}
+	event := gdb.Record{
+		"id":                gvar.New(int64(0)),
+		"tenant_id":         gvar.New(task.TenantId),
+		"account_id":        gvar.New(task.AccountId),
+		"source_id":         gvar.New(source["id"].Int64()),
+		"raw_text":          gvar.New(rawText),
+		"media_count":       gvar.New(mediaCount),
+		"source_message_id": gvar.New(int64(0)),
+	}
+	rules, err := s.collectEventRules(ctx, event, task.TenantId, task.AccountId)
+	if err != nil {
+		return rawText, err
+	}
+	for _, rule := range rules {
+		if !precheckCollectRule(event, rule).Matched {
+			continue
+		}
+		return buildCollectRuleDecision(event, nil, rule).Text, nil
+	}
+	return rawText, nil
 }
