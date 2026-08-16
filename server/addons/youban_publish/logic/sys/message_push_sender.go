@@ -651,6 +651,13 @@ func sendGotdVideoWithPreview(ctx context.Context, builder *gotdmessage.RequestB
 	if posterPath == "" {
 		return builder.Upload(upload).Video(ctx, caption...)
 	}
+	if media.AntiScanEnabled {
+		protectedPath, protectedCleanup, protectErr := prepareTelegramAntiScanUploadFile(ctx, media, posterPath, posterCleanup, "thumbnail")
+		if protectErr != nil {
+			return nil, gerror.Wrap(protectErr, "处理TG视频缩略图防扫图失败")
+		}
+		posterPath, posterCleanup = protectedPath, protectedCleanup
+	}
 	if posterCleanup != nil {
 		defer posterCleanup()
 	}
@@ -691,6 +698,13 @@ func gotdMessageMediaAlbumOption(ctx context.Context, builder *gotdmessage.Reque
 			return nil, posterErr
 		}
 		if posterPath != "" {
+			if media.AntiScanEnabled {
+				protectedPath, protectedCleanup, protectErr := prepareTelegramAntiScanUploadFile(ctx, media, posterPath, posterCleanup, "thumbnail")
+				if protectErr != nil {
+					return nil, protectErr
+				}
+				posterPath, posterCleanup = protectedPath, protectedCleanup
+			}
 			if posterCleanup != nil {
 				defer posterCleanup()
 			}
