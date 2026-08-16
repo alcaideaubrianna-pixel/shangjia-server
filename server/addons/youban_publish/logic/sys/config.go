@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/gconv"
 
 	"hotgo/addons/youban_publish/global"
@@ -126,6 +127,14 @@ func (s *sSysConfig) PublishConfigView(ctx context.Context, in *sysin.PublishCon
 	if err = s.scanConfigGroup(ctx, publishConfigGroupPublish, conf); err != nil {
 		return nil, err
 	}
+	if account, accountErr := (&sSysPublish{}).currentAccount(ctx); accountErr == nil && account != nil {
+		if row, rowErr := g.DB().Model(publishAccountSettingTable).Safe().Ctx(ctx).
+			Where("tenant_id", account.TenantId).Where("account_id", account.Id).WhereNull("deleted_at").One(); rowErr == nil && !row.IsEmpty() {
+			if raw := strings.TrimSpace(row["publish_config_json"].String()); raw != "" {
+				_ = json.Unmarshal([]byte(raw), conf)
+			}
+		}
+	}
 	res = &sysin.PublishConfigViewModel{PublishConfig: conf}
 	return
 }
@@ -137,7 +146,45 @@ func (s *sSysConfig) PublishConfigSave(ctx context.Context, in *sysin.PublishCon
 	if err := in.Filter(ctx); err != nil {
 		return err
 	}
-	return s.updateConfigGroup(ctx, publishConfigGroupPublish, publishConfigMap(&in.PublishConfig))
+	account, err := (&sSysPublish{}).currentAccount(ctx)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(in.PublishConfig)
+	if err != nil {
+		return gerror.Wrap(err, "编码账号推送配置失败")
+	}
+	now := gtime.Now()
+	data := g.Map{"tenant_id": account.TenantId, "account_id": account.Id, "publish_config_json": string(raw), "updated_by": account.Id, "updated_at": now}
+	count, err := g.DB().Model(publishAccountSettingTable).Safe().Ctx(ctx).Where("tenant_id", account.TenantId).Where("account_id", account.Id).WhereNull("deleted_at").Count()
+	if err != nil {
+		return gerror.Wrap(err, "检查账号推送配置失败")
+	}
+	if count > 0 {
+		_, err = g.DB().Model(publishAccountSettingTable).Safe().Ctx(ctx).Where("tenant_id", account.TenantId).Where("account_id", account.Id).WhereNull("deleted_at").Data(data).Update()
+	} else {
+		data["created_by"], data["created_at"] = account.Id, now
+		_, err = g.DB().Model(publishAccountSettingTable).Safe().Ctx(ctx).Data(data).Insert()
+	}
+	if err != nil {
+		return gerror.Wrap(err, "保存账号推送配置失败")
+	}
+	return nil
+}
+
+func (s *sSysConfig) publishConfigViewByAccount(ctx context.Context, tenantId, accountId int64) (*model.PublishConfig, error) {
+	conf := defaultPublishConfig()
+	if err := s.scanConfigGroup(ctx, publishConfigGroupPublish, conf); err != nil {
+		return nil, err
+	}
+	row, err := g.DB().Model(publishAccountSettingTable).Safe().Ctx(ctx).Where("tenant_id", tenantId).Where("account_id", accountId).WhereNull("deleted_at").One()
+	if err != nil {
+		return nil, err
+	}
+	if !row.IsEmpty() && strings.TrimSpace(row["publish_config_json"].String()) != "" {
+		_ = json.Unmarshal([]byte(row["publish_config_json"].String()), conf)
+	}
+	return conf, nil
 }
 
 func (s *sSysConfig) CloudResourceConfigView(ctx context.Context, in *sysin.CloudResourceConfigViewInp) (res *sysin.CloudResourceConfigViewModel, err error) {

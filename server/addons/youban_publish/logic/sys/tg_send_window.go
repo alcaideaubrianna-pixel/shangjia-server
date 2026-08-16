@@ -8,19 +8,16 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
-
-	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 var errTelegramPublishWindowBlocked = errors.New("当前不在自动发送时间窗口内，等待下一个发送窗口")
 
-func (s *sSysPublish) telegramPublishWindowDelay(ctx context.Context) (time.Duration, bool) {
-	res, err := NewSysConfig().PublishConfigView(ctx, &sysin.PublishConfigViewInp{})
-	if err != nil || res == nil || res.PublishConfig == nil {
+func (s *sSysPublish) telegramPublishWindowDelay(ctx context.Context, tenantId, accountId int64) (time.Duration, bool) {
+	conf, err := NewSysConfig().publishConfigViewByAccount(ctx, tenantId, accountId)
+	if err != nil || conf == nil {
 		g.Log().Warningf(ctx, "读取TG发送时间窗口配置失败：%+v", err)
 		return 0, false
 	}
-	conf := res.PublishConfig
 	if conf.SendWindowEnabled != 1 {
 		return 0, false
 	}

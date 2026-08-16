@@ -900,6 +900,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_account_setting` (
 ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN `cycle_publish_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否循环上架' AFTER `default_recycle_days`;
 ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN `cycle_publish_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环上架天数' AFTER `cycle_publish_enabled`;
 ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环上架时间' AFTER `cycle_publish_days`;
+ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN `publish_config_json` text NOT NULL COMMENT '账号级推送配置JSON';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tenant_auto_delete_config` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',

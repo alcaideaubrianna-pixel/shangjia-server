@@ -152,14 +152,14 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	if jobId <= 0 {
 		return nil
 	}
-	if delay <= 0 {
-		if windowDelay, enabled := s.telegramPublishWindowDelay(ctx); enabled && windowDelay > 0 {
-			delay = windowDelay
-		}
-	}
 	job, err := s.telegramJobById(ctx, jobId)
 	if err != nil {
 		return err
+	}
+	if delay <= 0 {
+		if windowDelay, enabled := s.telegramPublishWindowDelay(ctx, job.TenantId, job.AccountId); enabled && windowDelay > 0 {
+			delay = windowDelay
+		}
 	}
 	shouldEnqueue, err := s.shouldEnqueueTelegramChannelJob(ctx, job)
 	if err != nil {

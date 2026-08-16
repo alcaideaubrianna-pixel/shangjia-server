@@ -12,8 +12,6 @@ import (
 
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
-
-	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 type profileDownPlan struct {
@@ -22,14 +20,7 @@ type profileDownPlan struct {
 }
 
 func (s *sSysPublish) prepareProfileDownPlan(ctx context.Context, tenantId int64) (*profileDownPlan, error) {
-	res, err := NewSysConfig().PublishConfigView(ctx, &sysin.PublishConfigViewInp{})
-	if err != nil {
-		return nil, err
-	}
 	plan := &profileDownPlan{}
-	if res != nil && res.PublishConfig.SkipDownChannelEnabled == 1 {
-		return plan, nil
-	}
 	channels, err := s.telegramDownChannels(ctx, tenantId)
 	if err != nil {
 		return nil, err
@@ -162,6 +153,13 @@ func (s *sSysPublish) notifyProfilesDown(ctx context.Context, ids []int64, tenan
 		return nil
 	}
 	for _, row := range rows {
+		conf, confErr := NewSysConfig().publishConfigViewByAccount(ctx, tenantId, row["account_id"].Int64())
+		if confErr != nil {
+			return confErr
+		}
+		if conf != nil && conf.SkipDownChannelEnabled == 1 {
+			continue
+		}
 		for _, channel := range channels {
 			if err = s.sendDownChannelProfile(ctx, tenantId, channel, row, operationNo, cutoffAt); err != nil {
 				return err

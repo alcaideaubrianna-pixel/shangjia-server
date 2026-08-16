@@ -474,6 +474,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_account_setting_account" ON "hg_youban
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "cycle_publish_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "cycle_publish_days" integer NOT NULL DEFAULT 4;
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "cycle_publish_time" varchar(16) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "publish_config_json" text NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tenant_auto_delete_config" (
   "id" BIGSERIAL PRIMARY KEY,
