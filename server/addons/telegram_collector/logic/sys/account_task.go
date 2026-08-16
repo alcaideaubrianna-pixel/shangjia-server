@@ -56,7 +56,7 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 	if err != nil {
 		return 0, gerror.Wrap(err, "保存Telegram账号任务失败")
 	}
-	if in.TaskType == sysin.AccountTaskTypeMediaDownload || in.TaskType == sysin.AccountTaskTypeMessageReconcile || in.TaskType == sysin.AccountTaskTypeMessageMediaFallback {
+	if accountTaskCanRevive(in.TaskType) {
 		terminalStatuses := []string{sysin.AccountTaskStatusDead, sysin.AccountTaskStatusCancelled}
 		if in.TaskType == sysin.AccountTaskTypeMessageReconcile {
 			terminalStatuses = append(terminalStatuses, sysin.AccountTaskStatusCompleted)
@@ -89,6 +89,19 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 		return 0, gerror.Wrap(err, "读取Telegram账号任务失败")
 	}
 	return row.Id, nil
+}
+
+func accountTaskCanRevive(taskType string) bool {
+	switch taskType {
+	case sysin.AccountTaskTypeHistoryPage,
+		sysin.AccountTaskTypeMaterialImportHistoryPage,
+		sysin.AccountTaskTypeMediaDownload,
+		sysin.AccountTaskTypeMessageReconcile,
+		sysin.AccountTaskTypeMessageMediaFallback:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *sAccountTasks) SubmitAndWait(ctx context.Context, in *sysin.AccountTaskSubmit, pollInterval time.Duration) (*sysin.AccountTask, error) {

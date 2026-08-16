@@ -47,3 +47,20 @@ func TestAccountTaskTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountTaskCanRevive(t *testing.T) {
+	for _, taskType := range []string{
+		sysin.AccountTaskTypeHistoryPage,
+		sysin.AccountTaskTypeMaterialImportHistoryPage,
+		sysin.AccountTaskTypeMediaDownload,
+		sysin.AccountTaskTypeMessageReconcile,
+		sysin.AccountTaskTypeMessageMediaFallback,
+	} {
+		if !accountTaskCanRevive(taskType) {
+			t.Fatalf("task type %q should be revivable", taskType)
+		}
+	}
+	if accountTaskCanRevive(sysin.AccountTaskTypeDialogCacheRefresh) {
+		t.Fatal("dialog cache refresh should not revive a terminal task")
+	}
+}

@@ -85,8 +85,7 @@ func (s *sSysPublish) applyMaterialImportCollectRules(ctx context.Context, task 
 		return rawText, nil
 	}
 	sourceKey := strings.TrimPrefix(strings.TrimSpace(task.SourceChatId), "-100")
-	var source gdb.Record
-	err := g.DB().Model(publishCollectSourceTable).Safe().Ctx(ctx).
+	source, err := g.DB().Model(publishCollectSourceTable).Safe().Ctx(ctx).
 		Where("tenant_id", task.TenantId).
 		Where("account_id", task.AccountId).
 		Where("tg_account_id", task.TgAccountId).
@@ -94,7 +93,7 @@ func (s *sSysPublish) applyMaterialImportCollectRules(ctx context.Context, task 
 		Where("status", 1).
 		WhereNull("deleted_at").
 		OrderAsc("id").
-		Scan(&source)
+		One()
 	if err != nil {
 		return rawText, gerror.Wrap(err, "读取TG导入来源采集配置失败")
 	}
