@@ -638,9 +638,35 @@ func sendSingleMessageTemplateMediaWithGotd(ctx context.Context, builder *gotdme
 		captionOptions = append(captionOptions, gotdhtml.String(nil, caption))
 	}
 	if media != nil && media.MediaType == "video" {
-		return builder.Upload(upload).Video(ctx, captionOptions...)
+		return sendGotdVideoWithPreview(ctx, builder, upload, cleanup, media, captionOptions...)
 	}
 	return builder.Upload(upload).Photo(ctx, captionOptions...)
+}
+
+func sendGotdVideoWithPreview(ctx context.Context, builder *gotdmessage.RequestBuilder, upload gotdmessage.UploadOption, cleanup func(), media *telegramMediaItem, caption ...gotdmessage.StyledTextOption) (tg.UpdatesClass, error) {
+	posterPath, posterCleanup, posterErr := cachedTelegramVideoPosterFile(ctx, media)
+	if posterErr != nil {
+		return nil, posterErr
+	}
+	if posterPath == "" {
+		return builder.Upload(upload).Video(ctx, caption...)
+	}
+	if posterCleanup != nil {
+		defer posterCleanup()
+	}
+	file, err := builder.Upload(upload).AsInputFile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	thumb, err := builder.Upload(gotdmessage.FromPath(posterPath)).AsInputFile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	video := gotdmessage.UploadedDocument(file, caption...).
+		MIME("video/mp4").
+		Thumb(thumb).
+		Attributes(&tg.DocumentAttributeVideo{SupportsStreaming: true})
+	return builder.Media(ctx, video)
 }
 
 func gotdMessageMediaAlbumOption(ctx context.Context, builder *gotdmessage.RequestBuilder, caption string, media *telegramMediaItem) (gotdmessage.MultiMediaOption, error) {
@@ -660,6 +686,22 @@ func gotdMessageMediaAlbumOption(ctx context.Context, builder *gotdmessage.Reque
 		captionOptions = append(captionOptions, gotdhtml.String(nil, caption))
 	}
 	if media != nil && media.MediaType == "video" {
+		posterPath, posterCleanup, posterErr := cachedTelegramVideoPosterFile(ctx, media)
+		if posterErr != nil {
+			return nil, posterErr
+		}
+		if posterPath != "" {
+			if posterCleanup != nil {
+				defer posterCleanup()
+			}
+			thumb, err := builder.Upload(gotdmessage.FromPath(posterPath)).AsInputFile(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return gotdmessage.UploadedDocument(file, captionOptions...).
+				MIME("video/mp4").Thumb(thumb).
+				Attributes(&tg.DocumentAttributeVideo{SupportsStreaming: true}), nil
+		}
 		return gotdmessage.Video(file, captionOptions...).SupportsStreaming(), nil
 	}
 	return gotdmessage.UploadedPhoto(file, captionOptions...), nil
