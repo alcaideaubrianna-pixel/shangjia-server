@@ -1,6 +1,9 @@
 package sys
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestChannelBotMemberErrorMessage(t *testing.T) {
 	tests := []struct {
@@ -28,6 +31,26 @@ func TestChannelBotMemberErrorMessage(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if got := channelBotMemberErrorMessage(test.raw); got != test.want {
+				t.Fatalf("message = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestChannelCheckTelegramErrorMessage(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "busy", err: errors.New("TG账号连接正在使用，等待账号连接释放"), want: "TG账号正在执行其他操作，请稍后刷新后重试"},
+		{name: "runtime unavailable", err: errors.New("TG账号常驻客户端尚未就绪，请稍后重试"), want: "TG账号正在执行其他操作，请稍后刷新后重试"},
+		{name: "deadline", err: errors.New("context deadline exceeded"), want: "TG账号正在执行其他操作，请稍后刷新后重试"},
+		{name: "other", err: errors.New("解析Bot用户名失败"), want: "解析Bot用户名失败"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := channelCheckTelegramErrorMessage(test.err); got != test.want {
 				t.Fatalf("message = %q, want %q", got, test.want)
 			}
 		})

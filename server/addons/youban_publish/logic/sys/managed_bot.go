@@ -42,6 +42,7 @@ func (s *sSysPublish) AdminBotUsernameCheck(ctx context.Context, in *sysin.BotUs
 
 	available, checkErr := s.checkManagedBotUsername(ctx, account, username)
 	if checkErr != nil {
+		g.Log().Errorf(ctx, "检查Managed Bot用户名失败 tgAccountId:%d username:%s err:%+v", account.Id, username, checkErr)
 		return &sysin.BotUsernameCheckModel{
 			Available:   false,
 			BotUsername: username,
@@ -277,6 +278,8 @@ func managedBotErrorMessage(err error) string {
 		return "TG账号需要二次验证，请先完成授权"
 	case strings.Contains(message, "AUTH_KEY_DUPLICATED"):
 		return "TG账号 session 被重复使用，请停止该账号的其他任务后重试"
+	case strings.Contains(message, "TG账号连接正在使用"), strings.Contains(message, "TG账号常驻客户端尚未就绪"):
+		return "TG账号正在执行其他操作，请稍后重试"
 	case strings.Contains(message, "SESSION_REVOKED"), strings.Contains(message, "SESSION_EXPIRED"):
 		return "TG账号 session 已失效，请重新登录"
 	case strings.Contains(message, "ACCOUNT_NOT_FOUND"):

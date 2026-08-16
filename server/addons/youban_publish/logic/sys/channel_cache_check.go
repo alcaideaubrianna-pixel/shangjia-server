@@ -18,6 +18,9 @@ import (
 )
 
 func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCheckInp) (res *sysin.ChannelCheckModel, err error) {
+	checkCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	ctx = checkCtx
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
@@ -102,7 +105,7 @@ func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.Chann
 		if tryAttachBot {
 			if err = s.attachChannelBots(ctx, tenantId, in.TgAccountId, cache, bots); err != nil {
 				res.Allowed = 0
-				res.Message = err.Error()
+				res.Message = channelCheckTelegramErrorMessage(err)
 				return res, nil
 			}
 			res.Message = "已尝试设置 Bot 为频道管理员，请稍后刷新状态确认"
@@ -194,6 +197,19 @@ func channelBotMemberErrorMessage(raw string) string {
 	return "暂时无法读取频道中的 Bot 状态，请确认 Bot 已加入频道并拥有发布、删除消息权限，然后重新检测"
 }
 
+func channelCheckTelegramErrorMessage(err error) string {
+	if err == nil {
+		return "频道检查失败，请稍后重试"
+	}
+	message := strings.ToUpper(err.Error())
+	if strings.Contains(message, "TG账号连接正在使用") ||
+		strings.Contains(message, "TG账号常驻客户端尚未就绪") ||
+		strings.Contains(message, "CONTEXT DEADLINE EXCEEDED") {
+		return "TG账号正在执行其他操作，请稍后刷新后重试"
+	}
+	return err.Error()
+}
+
 func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgAccountId int64, channel *sysin.ChannelCacheModel, bots []*sysin.BotModel) error {
 	account, err := s.adminTgAccountById(ctx, tgAccountId, tenantId)
 	if err != nil {
@@ -211,7 +227,7 @@ func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgA
 	if err != nil {
 		return gerror.New("频道AccessHash无效，请刷新频道缓存")
 	}
-	return s.executeTelegramAccountOperation(ctx, tgAccountId, 35*time.Second, func(ctx context.Context, client *telegram.Client) error {
+	return s.executeTelegramAccountPriorityOperation(ctx, tgAccountId, 35*time.Second, func(ctx context.Context, client *telegram.Client) error {
 		api := client.API()
 		inputChannel := &tg.InputChannel{ChannelID: channelID, AccessHash: accessHash}
 		for _, botItem := range bots {
