@@ -208,7 +208,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	messages, err := sendMessageTemplateWithTgClient(ctx, client, peer, caption, media, nil, task.AccountID, "")
+	messages, err := s.sendMessageTemplateWithTgClient(ctx, client, peer, caption, media, nil, task.AccountID, "")
 	if err != nil {
 		return gerror.Wrap(err, "协议号媒体降级发送失败")
 	}
@@ -234,7 +234,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			return s.completeTelegramJob(ctx, job)
 		}
 		verifyCaption := telegramCaptionWithJobMarker("", job.Id, "verify")
-		verifyMessages, err := sendMessageTemplateWithTgClient(ctx, client, peer, verifyCaption, verifyMedia, nil, task.AccountID, "")
+		verifyMessages, err := s.sendMessageTemplateWithTgClient(ctx, client, peer, verifyCaption, verifyMedia, nil, task.AccountID, "")
 		if err != nil {
 			return gerror.Wrap(err, "协议号验证媒体降级发送失败")
 		}
@@ -468,7 +468,7 @@ func (s *sSysPublish) sendMessageTemplateByAccountClient(ctx context.Context, cl
 	if err != nil {
 		return err
 	}
-	sent, err := sendMessageTemplateWithTgClient(ctx, client, peer, telegramRichTextHTML(template.Text), messageTemplateTelegramMedia(template), nil, job.AccountId, "")
+	sent, err := s.sendMessageTemplateWithTgClient(ctx, client, peer, telegramRichTextHTML(template.Text), messageTemplateTelegramMedia(template), nil, job.AccountId, "")
 	if err != nil {
 		return gerror.Wrap(err, "协议号降级发送失败")
 	}
