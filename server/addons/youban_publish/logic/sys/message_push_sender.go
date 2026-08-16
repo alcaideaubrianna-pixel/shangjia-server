@@ -271,6 +271,18 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 			s.appendTelegramJobLog(ctx, job, "source_copy", "fallback", "Bot复制原消息失败，改用Bot本地媒体上传："+copyErr.Error())
 		}
 	}
+	if !s.botCanAccessChat(ctx, job.TargetChatId) {
+		s.appendTelegramJobLog(ctx, job, "bot_upload", "skipped", "官方Bot不在目标群或不具备发送权限，直接使用协议号发送")
+		messages, accountErr := s.sendMessageTemplateByTgAccount(ctx, tgAccountId, channel, telegramRichTextHTML(template.Text), media, messageTemplateHash(template))
+		if accountErr != nil {
+			return accountErr
+		}
+		if err := s.completeMessagePushJob(ctx, job, messages, "更新协议号降级推送任务状态失败"); err != nil {
+			return err
+		}
+		s.appendTelegramJobLog(ctx, job, "account_send", sysin.MessagePushStatusSent, "官方Bot不可达，已由协议号发送成功")
+		return nil
+	}
 	messages, botErr := s.sendMessageTemplateByBot(ctx, job, template, media)
 	if botErr == nil {
 		if err := s.completeMessagePushJob(ctx, job, messages, "更新Bot消息推送任务状态失败"); err != nil {
