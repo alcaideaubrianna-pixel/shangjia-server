@@ -23,6 +23,54 @@ func TestPublishAccountTaskHandlersRegistered(t *testing.T) {
 	}
 }
 
+func TestAccountTaskFinalAttempt(t *testing.T) {
+	tests := []struct {
+		name string
+		task *collectorin.AccountTask
+		want bool
+	}{
+		{name: "nil task", want: false},
+		{name: "no max attempts", task: &collectorin.AccountTask{AttemptCount: 1}, want: false},
+		{name: "retry remains", task: &collectorin.AccountTask{AttemptCount: 2, MaxAttempts: 3}, want: false},
+		{name: "final attempt", task: &collectorin.AccountTask{AttemptCount: 3, MaxAttempts: 3}, want: true},
+		{name: "past final attempt", task: &collectorin.AccountTask{AttemptCount: 4, MaxAttempts: 3}, want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := accountTaskFinalAttempt(test.task); got != test.want {
+				t.Fatalf("accountTaskFinalAttempt() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestParseMessagePushAccountTaskKey(t *testing.T) {
+	tests := []struct {
+		key     string
+		jobID   int64
+		mode    string
+		wantErr bool
+	}{
+		{key: "message-push-inline:123", jobID: 123, mode: "inline"},
+		{key: "message-push-inline:456:account", jobID: 456, mode: "account"},
+		{key: "message-push-inline:0", wantErr: true},
+		{key: "message-push-inline:1:unknown", wantErr: true},
+		{key: "other:1", wantErr: true},
+	}
+	for _, test := range tests {
+		jobID, mode, err := parseMessagePushAccountTaskKey(test.key)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("parseMessagePushAccountTaskKey(%q) expected error", test.key)
+			}
+			continue
+		}
+		if err != nil || jobID != test.jobID || mode != test.mode {
+			t.Fatalf("parseMessagePushAccountTaskKey(%q) = (%d, %q, %v)", test.key, jobID, mode, err)
+		}
+	}
+}
+
 func TestCollectorDeliveryMessageCases(t *testing.T) {
 	receivedAt := time.Date(2026, 8, 14, 2, 0, 0, 0, time.UTC)
 	tests := []struct {

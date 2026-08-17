@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
@@ -304,7 +305,7 @@ func (w *accountCollectWorker) handleListenerMessage(ctx context.Context, entiti
 				continue
 			}
 			g.Log().Infof(ctx, "监听计划命中 tgAccountId:%d plan:%d target:%d chat:%s keywords:%s out:%t", plan.TgAccountId, plan.Id, target.Id, sourceChatId, strings.Join(matchedKeywords, ","), msg.Out)
-			if err := w.service.listenerNotifyMatch(ctx, plan, target, entities, []*tg.Message{msg}, sourceChatId, target.TargetChatTitle, sender, text, matchedKeywords, nil, listenerMessagesMediaHash([]*tg.Message{msg})); err != nil {
+			if err := w.service.listenerNotifyMatch(ctx, w.currentClient(), plan, target, entities, []*tg.Message{msg}, sourceChatId, target.TargetChatTitle, sender, text, matchedKeywords, nil, listenerMessagesMediaHash([]*tg.Message{msg})); err != nil {
 				g.Log().Warningf(ctx, "推送监听命中消息失败 plan:%d target:%d err:%+v", plan.Id, target.Id, err)
 			}
 		}
@@ -353,7 +354,7 @@ func (w *accountCollectWorker) handleListenerMessageGroup(ctx context.Context, g
 				continue
 			}
 			g.Log().Infof(ctx, "监听计划命中媒体组 tgAccountId:%d plan:%d target:%d chat:%s messages:%d keywords:%s", plan.TgAccountId, plan.Id, target.Id, sourceChatId, len(sourceMessageIds), strings.Join(matchedKeywords, ","))
-			if err := w.service.listenerNotifyMatch(ctx, plan, target, group.entities, group.messages, sourceChatId, target.TargetChatTitle, sender, text, matchedKeywords, sourceMessageIds, mediaHash); err != nil {
+			if err := w.service.listenerNotifyMatch(ctx, w.currentClient(), plan, target, group.entities, group.messages, sourceChatId, target.TargetChatTitle, sender, text, matchedKeywords, sourceMessageIds, mediaHash); err != nil {
 				g.Log().Warningf(ctx, "推送监听命中媒体组失败 plan:%d target:%d err:%+v", plan.Id, target.Id, err)
 			}
 		}
@@ -369,7 +370,7 @@ func listenerLooksLikeNotifyMessage(text string) bool {
 		strings.Contains(text, "来源：")
 }
 
-func (s *sSysPublish) listenerNotifyMatch(ctx context.Context, plan accountListenPlanRuntime, target accountListenTargetRuntime, entities tg.Entities, sourceMessages []*tg.Message, sourceChatId string, sourceChatTitle string, sender listenerMessageSenderInfo, normalizedText string, matchedKeywords []string, sourceMessageIds []int, mediaHash string) error {
+func (s *sSysPublish) listenerNotifyMatch(ctx context.Context, client *telegram.Client, plan accountListenPlanRuntime, target accountListenTargetRuntime, entities tg.Entities, sourceMessages []*tg.Message, sourceChatId string, sourceChatTitle string, sender listenerMessageSenderInfo, normalizedText string, matchedKeywords []string, sourceMessageIds []int, mediaHash string) error {
 	sourceMessages = listenerNonNilMessages(sourceMessages)
 	if len(sourceMessages) == 0 {
 		return nil
@@ -391,7 +392,7 @@ func (s *sSysPublish) listenerNotifyMatch(ctx context.Context, plan accountListe
 	if len(sourceMessageIds) == 0 {
 		sourceMessageIds = []int{msg.ID}
 	}
-	sender = s.resolveListenerSender(ctx, plan, sourceChatId, msg, sender)
+	sender = s.resolveListenerSenderWithClient(ctx, client, plan, sourceChatId, msg, sender)
 	dedupeKey := listenerDedupeKey(plan.Id, sender.UserId, normalizedText, mediaHash)
 	now := gtime.Now()
 	if s.listenerNoticeInCooldown(ctx, plan.Id, sender, normalizedText, now) {
@@ -425,7 +426,7 @@ func (s *sSysPublish) listenerNotifyMatch(ctx context.Context, plan accountListe
 	if notifyErr != nil {
 		g.Log().Warningf(ctx, "监听媒体推送失败 plan:%d target:%d notifyChat:%s sourceChat:%s messages:%d err:%+v", plan.Id, target.Id, notifyChatId, sourceChatId, len(sourceMessages), notifyErr)
 		if mediaSent && shouldFallbackListenerBotToAccount(notifyErr) {
-			fallbackErr := s.listenerNotifyByAccount(ctx, plan, notifyChatId, sourceChatId, sourceMessages, text, buttonLabel, buttonURL, true)
+			fallbackErr := s.listenerNotifyByAccountWithClient(ctx, client, plan, notifyChatId, sourceChatId, sourceMessages, text, buttonLabel, buttonURL, true)
 			if fallbackErr == nil {
 				g.Log().Infof(ctx, "监听媒体Bot推送失败，协议号兜底成功 plan:%d target:%d notifyChat:%s tgAccountId:%d", plan.Id, target.Id, notifyChatId, plan.TgAccountId)
 				notifyErr = nil
@@ -446,7 +447,7 @@ func (s *sSysPublish) listenerNotifyMatch(ctx context.Context, plan accountListe
 		if textErr != nil {
 			g.Log().Warningf(ctx, "监听文本推送失败 plan:%d target:%d notifyChat:%s err:%+v", plan.Id, target.Id, notifyChatId, textErr)
 			if shouldFallbackListenerBotToAccount(textErr) {
-				fallbackErr := s.listenerNotifyByAccount(ctx, plan, notifyChatId, sourceChatId, nil, text, buttonLabel, buttonURL, false)
+				fallbackErr := s.listenerNotifyByAccountWithClient(ctx, client, plan, notifyChatId, sourceChatId, nil, text, buttonLabel, buttonURL, false)
 				if fallbackErr == nil {
 					g.Log().Infof(ctx, "监听文本Bot推送失败，协议号兜底成功 plan:%d target:%d notifyChat:%s tgAccountId:%d", plan.Id, target.Id, notifyChatId, plan.TgAccountId)
 					textErr = nil

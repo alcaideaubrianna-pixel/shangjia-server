@@ -30,7 +30,7 @@ type listenerSenderRecord struct {
 	LastSeenAt        *gtime.Time `json:"lastSeenAt"`
 }
 
-func (s *sSysPublish) resolveListenerSender(ctx context.Context, plan accountListenPlanRuntime, sourceChatId string, msg *tg.Message, sender listenerMessageSenderInfo) listenerMessageSenderInfo {
+func (s *sSysPublish) resolveListenerSenderWithClient(ctx context.Context, client *telegram.Client, plan accountListenPlanRuntime, sourceChatId string, msg *tg.Message, sender listenerMessageSenderInfo) listenerMessageSenderInfo {
 	sender = normalizeListenerSender(sender)
 	if sender.UserId == "" || listenerSenderComplete(sender) {
 		_ = s.saveListenerSender(ctx, plan, sender)
@@ -43,7 +43,14 @@ func (s *sSysPublish) resolveListenerSender(ctx context.Context, plan accountLis
 		_ = s.cacheListenerSender(ctx, plan.TgAccountId, stored)
 		return stored
 	}
-	fetched, err := s.fetchListenerSenderFromTelegram(ctx, plan, sourceChatId, msg, sender.UserId)
+	var fetched listenerMessageSenderInfo
+	var err error
+	if client != nil {
+		uid, parseErr := strconv.ParseInt(strings.TrimSpace(sender.UserId), 10, 64)
+		if parseErr == nil {
+			fetched, err = s.fetchListenerSenderWithClient(ctx, plan, sourceChatId, msg, uid, client)
+		}
+	}
 	if err != nil {
 		g.Log().Debugf(ctx, "补全监听发送者资料失败 tgAccountId:%d user:%s msg:%d err:%+v", plan.TgAccountId, sender.UserId, msg.ID, err)
 		return sender
@@ -53,29 +60,6 @@ func (s *sSysPublish) resolveListenerSender(ctx context.Context, plan accountLis
 	}
 	_ = s.saveListenerSender(ctx, plan, fetched)
 	return fetched
-}
-
-func (s *sSysPublish) fetchListenerSenderFromTelegram(ctx context.Context, plan accountListenPlanRuntime, sourceChatId string, msg *tg.Message, userId string) (listenerMessageSenderInfo, error) {
-	if msg == nil || strings.TrimSpace(userId) == "" {
-		return listenerMessageSenderInfo{}, nil
-	}
-	uid, err := strconv.ParseInt(strings.TrimSpace(userId), 10, 64)
-	if err != nil || uid <= 0 {
-		return listenerMessageSenderInfo{}, nil
-	}
-	var out listenerMessageSenderInfo
-	err = s.executeTelegramAccountOperation(ctx, plan.TgAccountId, 30*time.Second, func(runCtx context.Context, client *telegram.Client) error {
-		sender, fetchErr := s.fetchListenerSenderWithClient(runCtx, plan, sourceChatId, msg, uid, client)
-		if fetchErr != nil {
-			return fetchErr
-		}
-		out = sender
-		return nil
-	})
-	if err != nil {
-		return listenerMessageSenderInfo{}, err
-	}
-	return out, nil
 }
 
 func (s *sSysPublish) fetchListenerSenderWithClient(ctx context.Context, plan accountListenPlanRuntime, sourceChatId string, msg *tg.Message, userId int64, client *telegram.Client) (listenerMessageSenderInfo, error) {

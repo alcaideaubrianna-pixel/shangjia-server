@@ -10,6 +10,7 @@ import (
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
 	botService "hotgo/addons/youban_bot/service"
@@ -50,7 +51,10 @@ func (s *sSysPublish) listenerNotifyMedia(ctx context.Context, plan accountListe
 	return true, nil
 }
 
-func (s *sSysPublish) listenerNotifyByAccount(ctx context.Context, plan accountListenPlanRuntime, notifyChatId string, sourceChatId string, messages []*tg.Message, text string, buttonLabel string, buttonURL string, includeMedia bool) error {
+func (s *sSysPublish) listenerNotifyByAccountWithClient(ctx context.Context, client *telegram.Client, plan accountListenPlanRuntime, notifyChatId string, sourceChatId string, messages []*tg.Message, text string, buttonLabel string, buttonURL string, includeMedia bool) error {
+	if client == nil {
+		return gerror.New("监听协议号客户端未就绪")
+	}
 	channels, err := s.messagePushCachedTargets(ctx, plan.TgAccountId, []string{notifyChatId}, plan.TenantId)
 	if err != nil {
 		return gerror.Wrap(err, "协议号无法读取通知群聊，请确认账号已加入群聊并刷新群聊缓存")
@@ -69,7 +73,11 @@ func (s *sSysPublish) listenerNotifyByAccount(ctx context.Context, plan accountL
 		}
 	}
 	caption := listenerAccountFallbackText(text, buttonLabel, buttonURL, len(media) > 0)
-	_, err = s.sendMessageTemplateByTgAccount(ctx, plan.TgAccountId, channels[0], telegramRichTextHTML(caption), media, "")
+	peer, err := messagePushInputPeer(&messagePushChannel{TargetChatId: channels[0].TargetChatId, TgAccountId: channels[0].TgAccountId, AccessHash: channels[0].AccessHash, ChannelTitle: channels[0].ChannelTitle, IsBroadcast: channels[0].IsBroadcast, IsMegagroup: channels[0].IsMegagroup})
+	if err != nil {
+		return err
+	}
+	_, err = s.sendMessageTemplateWithTgClient(ctx, client, peer, telegramRichTextHTML(caption), media, nil, plan.TgAccountId, "")
 	if err != nil {
 		return gerror.Wrap(err, "协议号推送监听通知失败")
 	}

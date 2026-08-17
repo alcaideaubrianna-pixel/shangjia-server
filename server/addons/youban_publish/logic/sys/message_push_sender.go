@@ -226,39 +226,26 @@ func (s *sSysPublish) SendMessagePushJob(ctx context.Context, jobId int64) error
 	if err != nil {
 		return s.handleMessagePushQueuedJobError(ctx, job, err)
 	}
-	if err = s.sendMessagePushJob(ctx, job, template, channel, job.AccountId); err != nil {
+	if err = s.sendMessagePushJob(ctx, job, template, channel); err != nil {
 		return s.handleMessagePushQueuedJobError(ctx, job, err)
 	}
 	return nil
 }
 
-func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRecord, template *sysin.MessageTemplateModel, channel *messagePushChannel, tgAccountId int64) error {
+func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRecord, template *sysin.MessageTemplateModel, channel *messagePushChannel) error {
 	media := messageTemplateTelegramMedia(template)
 	if recordErr := s.upsertPublishJobRecord(ctx, job, "sending", ""); recordErr != nil {
 		g.Log().Warningf(ctx, "更新快速推送发送记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
-	if messageTemplateUsesInline(template) && channel != nil && channel.TgAccountId > 0 && job.BotId > 0 {
-		accountTaskId, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
-			TenantID: job.TenantId, AccountID: channel.TgAccountId,
-			TaskType: collectorin.AccountTaskTypeMessagePushInline,
-			TaskKey:  fmt.Sprintf("message-push-inline:%d", job.Id), Priority: tgJobPriorityUrgent, MaxAttempts: 5,
-		})
-		if err != nil {
-			return gerror.Wrap(err, "提交Inline账号任务失败")
-		}
-		s.appendTelegramJobLog(ctx, job, "inline_send", "queued", fmt.Sprintf("Inline任务已提交到账号服务 accountTaskId:%d tgAccountId:%d", accountTaskId, channel.TgAccountId))
-		return nil
-	} else {
-		reason := "模板包含媒体"
-		if template == nil || strings.TrimSpace(template.SerialNo) == "" {
-			reason = "模板缺少Inline编号"
-		} else if channel == nil || channel.TgAccountId <= 0 {
-			reason = "目标缺少TG账号"
-		} else if job.BotId <= 0 {
-			reason = "目标缺少可用机器人"
-		}
-		s.appendTelegramJobLog(ctx, job, "inline_send", "skipped", "未执行Inline推送："+reason)
+	inlineValidationErr := validateInlinePublishTemplate(template)
+	if inlineValidationErr == nil && channel != nil && channel.TgAccountId > 0 && job.BotId > 0 {
+		return s.submitMessagePushAccountTask(ctx, job, channel, "inline")
 	}
+	inlineSkipReason := "目标缺少TG账号或可用Bot"
+	if inlineValidationErr != nil {
+		inlineSkipReason = inlineValidationErr.Error()
+	}
+	s.appendTelegramJobLog(ctx, job, "inline_send", "skipped", "未进入Inline账号任务，继续由Bot直接发送："+inlineSkipReason)
 	if !messageTemplateRequiresSanitizedUpload(media) {
 		if messages, copied, copyErr := s.copyOriginalMessageTemplateByBot(ctx, job, template); copied {
 			if copyErr == nil {
@@ -272,16 +259,11 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 		}
 	}
 	if !s.botCanAccessChat(ctx, job.TargetChatId) {
-		s.appendTelegramJobLog(ctx, job, "bot_upload", "skipped", "官方Bot不在目标群或不具备发送权限，直接使用协议号发送")
-		messages, accountErr := s.sendMessageTemplateByTgAccount(ctx, tgAccountId, channel, telegramRichTextHTML(template.Text), media, messageTemplateHash(template))
-		if accountErr != nil {
-			return accountErr
+		if channel != nil && channel.TgAccountId > 0 {
+			s.appendTelegramJobLog(ctx, job, "bot_upload", "skipped", "官方Bot不在目标群或不具备发送权限，提交协议号降级任务")
+			return s.submitMessagePushAccountTask(ctx, job, channel, "account")
 		}
-		if err := s.completeMessagePushJob(ctx, job, messages, "更新协议号降级推送任务状态失败"); err != nil {
-			return err
-		}
-		s.appendTelegramJobLog(ctx, job, "account_send", sysin.MessagePushStatusSent, "官方Bot不可达，已由协议号发送成功")
-		return nil
+		return gerror.New("官方Bot不在目标群或不具备发送权限，且目标未配置TG账号")
 	}
 	messages, botErr := s.sendMessageTemplateByBot(ctx, job, template, media)
 	if botErr == nil {
@@ -293,18 +275,33 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 	} else {
 		s.appendTelegramJobLog(ctx, job, "bot_upload", "fallback", "Bot本地上传失败，准备进入受控降级："+botErr.Error())
 	}
-	if !isTelegramMediaSizeLimitError(botErr) {
-		return gerror.Wrap(botErr, "Bot上传消息失败，未执行TG账号降级")
+	if channel != nil && channel.TgAccountId > 0 {
+		return s.submitMessagePushAccountTask(ctx, job, channel, "account")
 	}
-	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusSending, "开始使用账号直发消息模板")
-	messages, err := s.sendMessageTemplateByTgAccount(ctx, tgAccountId, channel, telegramRichTextHTML(template.Text), media, messageTemplateHash(template))
+	return gerror.Wrap(botErr, "Bot上传消息失败且目标未配置TG账号，无法执行协议号降级")
+}
+
+func (s *sSysPublish) submitMessagePushAccountTask(ctx context.Context, job telegramJobRecord, channel *messagePushChannel, mode string) error {
+	if channel == nil || channel.TgAccountId <= 0 {
+		return gerror.New("消息推送目标未配置TG账号")
+	}
+	taskKey := fmt.Sprintf("message-push-inline:%d", job.Id)
+	stage := "inline_send"
+	description := "Inline推送链路"
+	if mode == "account" {
+		taskKey += ":account"
+		stage = "account_send"
+		description = "协议号降级链路"
+	}
+	accountTaskId, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: job.TenantId, AccountID: channel.TgAccountId,
+		TaskType: collectorin.AccountTaskTypeMessagePushInline,
+		TaskKey:  taskKey, Priority: tgJobPriorityUrgent, MaxAttempts: 5,
+	})
 	if err != nil {
-		return err
+		return gerror.Wrapf(err, "提交%s账号任务失败", description)
 	}
-	if err = s.completeMessagePushJob(ctx, job, messages, "更新消息推送任务状态失败"); err != nil {
-		return err
-	}
-	s.appendTelegramJobLog(ctx, job, "message_push", sysin.MessagePushStatusSent, "账号消息模板推送成功")
+	s.appendTelegramJobLog(ctx, job, stage, "queued", fmt.Sprintf("%s已提交到账号服务 accountTaskId:%d tgAccountId:%d", description, accountTaskId, channel.TgAccountId))
 	return nil
 }
 
@@ -474,45 +471,6 @@ func messageTemplateRequiresSourcePreservation(template *sysin.MessageTemplateMo
 	return strings.Contains(text, "<tg-emoji") || strings.Contains(text, "emoji-id=")
 }
 
-func (s *sSysPublish) forwardOriginalMessageTemplateByAccount(ctx context.Context, tgAccountId int64, channel *messagePushChannel, template *sysin.MessageTemplateModel, media []*telegramMediaItem) ([]*telegramSentMessage, error) {
-	recordIds := messageTemplateSourceRecordIds(template)
-	if len(recordIds) == 0 {
-		return nil, gerror.New("模板缺少Telegram原消息记录")
-	}
-	source, err := botService.SysBot().StoredMessageSource(ctx, recordIds)
-	if err != nil {
-		return nil, err
-	}
-	if source == nil || strings.TrimSpace(source.BotUsername) == "" || len(source.MessageIds) == 0 {
-		return nil, gerror.New("Telegram原消息来源不完整")
-	}
-	toPeer, err := messagePushInputPeer(channel)
-	if err != nil {
-		return nil, err
-	}
-	var sent []*telegramSentMessage
-	err = s.executeTelegramAccountOperation(ctx, tgAccountId, 2*time.Minute, func(runCtx context.Context, client *telegram.Client) error {
-		sender := gotdmessage.NewSender(client.API())
-		fromPeer, resolveErr := sender.Resolve("@" + strings.TrimPrefix(strings.TrimSpace(source.BotUsername), "@")).AsInputPeer(runCtx)
-		if resolveErr != nil {
-			return resolveErr
-		}
-		messages, forwardErr := forwardMessageTemplateWithGotd(runCtx, client, fromPeer, toPeer, source.MessageIds, media)
-		if forwardErr != nil {
-			return forwardErr
-		}
-		sent = messages
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(sent) == 0 {
-		return nil, gerror.New("TG账号无来源转发未返回消息结果")
-	}
-	return sent, nil
-}
-
 func messageTemplateUsesInline(template *sysin.MessageTemplateModel) bool {
 	if template == nil || strings.TrimSpace(template.SerialNo) == "" {
 		return false
@@ -522,36 +480,6 @@ func messageTemplateUsesInline(template *sysin.MessageTemplateModel) bool {
 		return true
 	}
 	return len(media) == 1 && media[0].MediaType == "image"
-}
-
-func (s *sSysPublish) sendMessageTemplateByTgAccount(ctx context.Context, tgAccountId int64, channel *messagePushChannel, caption string, media []*telegramMediaItem, templateHash string) ([]*telegramSentMessage, error) {
-	if channel == nil {
-		return nil, gerror.New("推送目标不能为空")
-	}
-	peer, err := messagePushInputPeer(channel)
-	if err != nil {
-		return nil, err
-	}
-	var source *messageTemplateForwardSource
-	if !messageTemplateRequiresSanitizedUpload(media) {
-		source, err = s.messageTemplateForwardSource(ctx, tgAccountId, templateHash)
-	}
-	if err != nil {
-		g.Log().Warningf(ctx, "读取消息模板复用源失败 tgAccountId:%d templateHash:%s err:%+v", tgAccountId, templateHash, err)
-	}
-	var sent []*telegramSentMessage
-	err = s.executeTelegramAccountOperation(ctx, tgAccountId, 2*time.Minute, func(runCtx context.Context, client *telegram.Client) error {
-		var sendErr error
-		sent, sendErr = s.sendMessageTemplateWithTgClient(runCtx, client, peer, caption, media, source, tgAccountId, templateHash)
-		return sendErr
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(sent) == 0 {
-		return nil, gerror.New("账号推送已调用，但未读取到TG消息结果")
-	}
-	return sent, nil
 }
 
 func (s *sSysPublish) sendMessageTemplateWithTgClient(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, caption string, media []*telegramMediaItem, source *messageTemplateForwardSource, tgAccountId int64, templateHash string) ([]*telegramSentMessage, error) {

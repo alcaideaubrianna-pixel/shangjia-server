@@ -111,11 +111,15 @@ func (w *accountCollectWorker) NewAccountRuntimeClient(ctx context.Context, disp
 	return w.service.newAccountCollectClient(ctx, conf, account, dispatcher)
 }
 
-func (w *accountCollectWorker) StartAccountRuntime(ctx context.Context, _ *telegram.Client) {
+func (w *accountCollectWorker) StartAccountRuntime(ctx context.Context, client *telegram.Client) {
+	w.setClient(client)
 	w.service.closeAccountCollectCircuit(w.tgAccountId)
 }
 
-func (w *accountCollectWorker) StopAccountRuntime() { w.clearListenerGroups() }
+func (w *accountCollectWorker) StopAccountRuntime() {
+	w.setClient(nil)
+	w.clearListenerGroups()
+}
 
 func (w *accountCollectWorker) HandleAccountRuntimeError(ctx context.Context, err error) {
 	if err == nil || isContextDone(ctx) {

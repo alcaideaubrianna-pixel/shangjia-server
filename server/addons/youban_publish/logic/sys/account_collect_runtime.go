@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -35,6 +34,8 @@ type accountCollectSourceRuntime struct {
 type accountCollectWorker struct {
 	service          *sSysPublish
 	tgAccountId      int64
+	clientMu         sync.RWMutex
+	client           *telegram.Client
 	configMu         sync.RWMutex
 	signature        string
 	listeners        []accountListenPlanRuntime
@@ -100,8 +101,16 @@ func (w *accountCollectWorker) clearListenerGroups() {
 	}
 }
 
-func (s *sSysPublish) executeAccountCollectOperation(ctx context.Context, tgAccountId int64, timeout time.Duration, run accountCollectOperation) (bool, error) {
-	return collectorservice.AccountRuntime().Execute(ctx, tgAccountId, timeout, collectorservice.AccountOperation(run))
+func (w *accountCollectWorker) setClient(client *telegram.Client) {
+	w.clientMu.Lock()
+	w.client = client
+	w.clientMu.Unlock()
+}
+
+func (w *accountCollectWorker) currentClient() *telegram.Client {
+	w.clientMu.RLock()
+	defer w.clientMu.RUnlock()
+	return w.client
 }
 
 func (s *sSysPublish) restartAccountCollectWorker(ctx context.Context, tgAccountId int64, reason error) {

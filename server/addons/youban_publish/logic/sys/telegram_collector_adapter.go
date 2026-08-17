@@ -303,17 +303,25 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 	return s.reconcileUnknownTelegramJobWithClient(ctx, client, job)
 }
 
-func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
+func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (err error) {
 	startedAt := time.Now()
-	const prefix = "message-push-inline:"
-	jobId, err := strconv.ParseInt(strings.TrimPrefix(task.TaskKey, prefix), 10, 64)
-	if err != nil || jobId <= 0 || !strings.HasPrefix(task.TaskKey, prefix) {
-		return gerror.New("Inline账号任务参数无效")
+	jobId, mode, err := parseMessagePushAccountTaskKey(task.TaskKey)
+	if err != nil {
+		return err
 	}
+	accountOnly := mode == "account"
 	job, err := s.telegramJobById(ctx, jobId)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err == nil || !accountTaskFinalAttempt(task) {
+			return
+		}
+		message := "Telegram消息推送连续失败，账号任务已停止：" + err.Error()
+		s.failMessagePushJob(ctx, job, message)
+		g.Log().Errorf(ctx, "消息推送账号任务最终失败 taskId:%d jobId:%d tgAccountId:%d attempt:%d/%d err:%+v", task.ID, job.Id, task.AccountID, task.AttemptCount, task.MaxAttempts, err)
+	}()
 	if job.Status == sysin.MessagePushStatusSent {
 		return nil
 	}
@@ -333,10 +341,14 @@ func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, cl
 	if task.AccountID != channel.TgAccountId {
 		return gerror.New("Inline账号任务与目标频道账号不一致")
 	}
-	if validationErr := validateInlinePublishTemplate(template); validationErr != nil {
-		g.Log().Errorf(ctx, "Inline发布协议校验失败，直接降级协议号 jobId:%d serial:%s err:%+v", job.Id, template.SerialNo, validationErr)
-		s.appendTelegramJobLog(ctx, job, "inline_send", "skipped", "Inline协议校验失败，直接降级协议号："+validationErr.Error())
+	if accountOnly {
+		s.appendTelegramJobLog(ctx, job, "account_send", "started", fmt.Sprintf("开始执行协议号降级 accountTaskId:%d tgAccountId:%d", task.ID, task.AccountID))
 		return s.sendMessageTemplateByAccountClient(ctx, client, channel, job, template)
+	}
+	if validationErr := validateInlinePublishTemplate(template); validationErr != nil {
+		g.Log().Errorf(ctx, "Inline发布协议校验失败，进入Bot与协议号降级链路 jobId:%d serial:%s err:%+v", job.Id, template.SerialNo, validationErr)
+		s.appendTelegramJobLog(ctx, job, "inline_send", "skipped", "Inline协议校验失败，进入降级链路："+validationErr.Error())
+		return s.fallbackMessagePushInline(ctx, client, channel, job, template, validationErr)
 	}
 	peer, err := messagePushInputPeer(channel)
 	if err != nil {
@@ -360,6 +372,33 @@ func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, cl
 	}
 	s.appendTelegramJobLog(ctx, job, "inline_send", sysin.MessagePushStatusSent, fmt.Sprintf("账号服务Inline机器人消息模板推送成功 duration:%s", time.Since(startedAt)))
 	return nil
+}
+
+func parseMessagePushAccountTaskKey(taskKey string) (jobId int64, mode string, err error) {
+	const prefix = "message-push-inline:"
+	if !strings.HasPrefix(taskKey, prefix) {
+		return 0, "", gerror.New("消息推送账号任务参数无效")
+	}
+	parts := strings.Split(strings.TrimPrefix(taskKey, prefix), ":")
+	if len(parts) == 0 || len(parts) > 2 {
+		return 0, "", gerror.New("消息推送账号任务参数无效")
+	}
+	jobId, err = strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || jobId <= 0 {
+		return 0, "", gerror.New("消息推送账号任务Job ID无效")
+	}
+	mode = "inline"
+	if len(parts) == 2 {
+		mode = parts[1]
+	}
+	if mode != "inline" && mode != "account" {
+		return 0, "", gerror.New("消息推送账号任务模式无效")
+	}
+	return jobId, mode, nil
+}
+
+func accountTaskFinalAttempt(task *collectorin.AccountTask) bool {
+	return task != nil && task.MaxAttempts > 0 && task.AttemptCount >= task.MaxAttempts
 }
 
 func validateInlinePublishTemplate(template *sysin.MessageTemplateModel) error {
@@ -468,7 +507,17 @@ func (s *sSysPublish) sendMessageTemplateByAccountClient(ctx context.Context, cl
 	if err != nil {
 		return err
 	}
-	sent, err := s.sendMessageTemplateWithTgClient(ctx, client, peer, telegramRichTextHTML(template.Text), messageTemplateTelegramMedia(template), nil, job.AccountId, "")
+	media := messageTemplateTelegramMedia(template)
+	templateHash := messageTemplateHash(template)
+	var source *messageTemplateForwardSource
+	if !messageTemplateRequiresSanitizedUpload(media) {
+		source, err = s.messageTemplateForwardSource(ctx, channel.TgAccountId, templateHash)
+		if err != nil {
+			g.Log().Warningf(ctx, "读取消息模板复用源失败 jobId:%d tgAccountId:%d templateHash:%s err:%+v", job.Id, channel.TgAccountId, templateHash, err)
+			source = nil
+		}
+	}
+	sent, err := s.sendMessageTemplateWithTgClient(ctx, client, peer, telegramRichTextHTML(template.Text), media, source, channel.TgAccountId, templateHash)
 	if err != nil {
 		return gerror.Wrap(err, "协议号降级发送失败")
 	}
