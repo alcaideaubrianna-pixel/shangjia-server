@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -16,6 +15,8 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
 	botService "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -23,35 +24,43 @@ import (
 )
 
 func (s *sSysPublish) refreshAdminTgAccountSession(ctx context.Context, id int64, tenantId int64, operatorId int64) (status string, message string) {
-	item, err := s.adminTgAccountById(ctx, id, tenantId)
+	if _, err := s.adminTgAccountById(ctx, id, tenantId); err != nil {
+		return sysin.PublishTgAccountStatusFailed, err.Error()
+	}
+	_, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: tenantId, AccountID: id, TaskType: collectorin.AccountTaskTypeTgAccountRefresh,
+		TaskKey: fmt.Sprintf("tg-account-refresh:%d:%d:%d", id, tenantId, operatorId), Priority: 10, MaxAttempts: 3,
+	})
 	if err != nil {
 		return sysin.PublishTgAccountStatusFailed, err.Error()
 	}
-	var user *tg.User
-	err = s.executeTelegramAccountOperation(ctx, item.Id, 30*time.Second, func(runCtx context.Context, client *telegram.Client) error {
-		user, err = client.Self(runCtx)
-		return err
-	})
+	return sysin.PublishTgAccountStatusPending, "TG账号刷新任务已提交"
+}
+
+func (s *sSysPublish) handleTgAccountRefreshTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
+	var id, tenantId, operatorId int64
+	if task == nil || task.TaskKey == "" {
+		return gerror.New("TG账号刷新任务参数无效")
+	}
+	if _, err := fmt.Sscanf(task.TaskKey, "tg-account-refresh:%d:%d:%d", &id, &tenantId, &operatorId); err != nil || id <= 0 || tenantId <= 0 {
+		return gerror.New("TG账号刷新任务参数无效")
+	}
+	user, err := client.Self(ctx)
 	if err != nil {
 		if isTelegramPermanentAccountAuthError(err) {
-			return s.expireTgAccountSession(
-				context.Background(),
-				id,
-				tenantId,
-				operatorId,
-				telegramPermanentAccountAuthMessage(err),
-			)
+			s.expireTgAccountSession(context.Background(), id, tenantId, operatorId, telegramPermanentAccountAuthMessage(err))
+		} else {
+			s.failTgAccountRefresh(context.Background(), id, tenantId, operatorId, err.Error())
 		}
-		return s.failTgAccountRefresh(context.Background(), id, tenantId, operatorId, err.Error())
+		return err
 	}
-	username := ""
-	displayName := ""
+	username, displayName := "", ""
 	if user != nil {
 		username = user.Username
 		displayName = strings.TrimSpace(user.FirstName + " " + user.LastName)
 	}
 	s.updateTgAccountRefreshResult(ctx, id, tenantId, operatorId, sysin.PublishTgAccountStatusAuthorized, "", user, username, displayName)
-	return sysin.PublishTgAccountStatusAuthorized, ""
+	return nil
 }
 
 func (s *sSysPublish) failTgAccountRefresh(ctx context.Context, id int64, tenantId int64, operatorId int64, message string) (string, string) {

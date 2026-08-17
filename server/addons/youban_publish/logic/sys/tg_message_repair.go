@@ -17,6 +17,8 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
@@ -258,7 +260,34 @@ func (s *sSysPublish) tgMessageRepairRunProfileId(ctx context.Context, runId int
 	return value.Int64(), nil
 }
 
-func (s *sSysPublish) ExecuteTgMessageRepairRun(ctx context.Context, runId int64) (err error) {
+func (s *sSysPublish) ExecuteTgMessageRepairRun(ctx context.Context, runId int64) error {
+	var run tgMessageRepairRun
+	err := g.DB().Model(publishTgMessageRepairRunTable).Safe().Ctx(ctx).Where("id", runId).Scan(&run)
+	if err != nil {
+		return gerror.Wrap(err, "读取TG消息修复任务失败")
+	}
+	if run.Id <= 0 || run.AccountId <= 0 {
+		return gerror.New("TG消息修复任务或账号不存在")
+	}
+	_, err = collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: run.TenantId, AccountID: run.AccountId, TaskType: collectorin.AccountTaskTypeMessageRepair,
+		TaskKey: fmt.Sprintf("message-repair:%d", runId), Priority: 50, MaxAttempts: 3,
+	})
+	return err
+}
+
+func (s *sSysPublish) handleMessageRepairAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
+	var runId int64
+	if task == nil {
+		return gerror.New("TG消息修复任务参数无效")
+	}
+	if _, err := fmt.Sscanf(task.TaskKey, "message-repair:%d", &runId); err != nil || runId <= 0 {
+		return gerror.New("TG消息修复任务参数无效")
+	}
+	return s.executeTgMessageRepairRunWithClient(ctx, client, runId)
+}
+
+func (s *sSysPublish) executeTgMessageRepairRunWithClient(ctx context.Context, client *telegram.Client, runId int64) (err error) {
 	run, locked, err := s.lockTgMessageRepairRun(ctx, runId)
 	if err != nil || !locked {
 		return err
@@ -294,7 +323,7 @@ func (s *sSysPublish) ExecuteTgMessageRepairRun(ctx context.Context, runId int64
 	scanned := 0
 	for _, channel := range channels {
 		time.Sleep(400 * time.Millisecond)
-		count, scanErr := s.scanTgChannelMessages(ctx, run.TenantId, channel)
+		count, scanErr := s.scanTgChannelMessagesWithClient(ctx, client, run.TenantId, channel)
 		scanned += count
 		_ = s.updateTgMessageRepairRun(ctx, runId, g.Map{"scanned_count": scanned, "progress": 55, "updated_at": gtime.Now()})
 		if scanErr != nil {
@@ -411,6 +440,54 @@ func (s *sSysPublish) scanTgChannelMessagesSince(ctx context.Context, tenantId i
 	if channel.TgAccountId <= 0 {
 		return 0, gerror.New("频道未绑定协议号，无法拉取历史消息")
 	}
+	taskKey := fmt.Sprintf("message-repair-scan:%d:%d:%d:%d", tenantId, channel.Id, channel.TgAccountId, cutoff)
+	taskID, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: tenantId, AccountID: channel.TgAccountId, TaskType: collectorin.AccountTaskTypeMessageRepairScan,
+		TaskKey: taskKey, Priority: 50, MaxAttempts: 3,
+	})
+	if err != nil {
+		return 0, err
+	}
+	task, err := collectorservice.AccountTasks().WaitTerminal(ctx, taskID, 2*time.Second)
+	if err != nil {
+		return 0, err
+	}
+	if task.Status != collectorin.AccountTaskStatusCompleted {
+		return 0, gerror.New(task.ErrorMessage)
+	}
+	return int(task.MediaResult.Media.SourceMediaID), nil
+}
+
+func (s *sSysPublish) handleMessageRepairScanAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (*collectorin.AccountMediaDownloadResult, error) {
+	var tenantId, channelId, accountId, cutoff int64
+	if task == nil {
+		return nil, gerror.New("TG消息扫描任务参数无效")
+	}
+	if _, err := fmt.Sscanf(task.TaskKey, "message-repair-scan:%d:%d:%d:%d", &tenantId, &channelId, &accountId, &cutoff); err != nil || tenantId <= 0 || channelId <= 0 || accountId <= 0 {
+		return nil, gerror.New("TG消息扫描任务参数无效")
+	}
+	var channel tgMessageRepairChannel
+	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channelId).Scan(&channel); err != nil {
+		return nil, err
+	}
+	count, err := s.scanTgChannelMessagesSinceWithClient(ctx, client, tenantId, channel, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	return &collectorin.AccountMediaDownloadResult{Media: collectorin.CollectorMediaItem{SourceMediaID: int64(count)}}, nil
+}
+
+func (s *sSysPublish) scanTgChannelMessagesWithClient(ctx context.Context, client *telegram.Client, tenantId int64, channel tgMessageRepairChannel) (int, error) {
+	return s.scanTgChannelMessagesSinceWithClient(ctx, client, tenantId, channel, time.Now().AddDate(0, -6, 0).Unix())
+}
+
+func (s *sSysPublish) scanTgChannelMessagesSinceWithClient(ctx context.Context, client *telegram.Client, tenantId int64, channel tgMessageRepairChannel, cutoff int64) (int, error) {
+	if client == nil {
+		return 0, gerror.New("Telegram客户端未初始化")
+	}
+	if channel.TgAccountId <= 0 {
+		return 0, gerror.New("频道未绑定协议号，无法拉取历史消息")
+	}
 	if err := ensureTgMessageCacheMediaTypeColumn(ctx); err != nil {
 		return 0, err
 	}
@@ -431,7 +508,7 @@ func (s *sSysPublish) scanTgChannelMessagesSince(ctx context.Context, tenantId i
 		return 0, err
 	}
 	scanned := 0
-	err = s.executeTelegramAccountOperation(ctx, channel.TgAccountId, 2*time.Minute, func(ctx context.Context, client *telegram.Client) error {
+	err = func() error {
 		offsetID := 0
 		for {
 			previousOffset := offsetID
@@ -484,7 +561,8 @@ func (s *sSysPublish) scanTgChannelMessagesSince(ctx context.Context, tenantId i
 			}
 			time.Sleep(600 * time.Millisecond)
 		}
-	})
+		return nil
+	}()
 	if err != nil {
 		return scanned, gerror.Wrap(err, "拉取TG频道历史消息失败")
 	}

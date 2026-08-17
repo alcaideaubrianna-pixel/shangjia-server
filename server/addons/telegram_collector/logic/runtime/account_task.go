@@ -177,6 +177,14 @@ func accountTaskTimeout(taskType string) time.Duration {
 		return 30 * time.Second
 	case sysin.AccountTaskTypeManagedBotCreate:
 		return 90 * time.Second
+	case sysin.AccountTaskTypeChannelMemberSync:
+		return 2 * time.Hour
+	case sysin.AccountTaskTypeTgAccountRefresh:
+		return 30 * time.Second
+	case sysin.AccountTaskTypeMessageRepair:
+		return 25 * time.Minute
+	case sysin.AccountTaskTypeMessageRepairScan:
+		return 10 * time.Minute
 	default:
 		return 5 * time.Minute
 	}

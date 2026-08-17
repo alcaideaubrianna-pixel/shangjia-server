@@ -97,6 +97,14 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Conte
 		return h.publish.handleManagedBotUsernameCheckAccountTask(ctx, client, task)
 	case collectorin.AccountTaskTypeManagedBotCreate:
 		return h.publish.handleManagedBotCreateAccountTask(ctx, client, task)
+	case collectorin.AccountTaskTypeChannelMemberSync:
+		return nil, h.publish.handleChannelMemberSyncAccountTask(ctx, client, task)
+	case collectorin.AccountTaskTypeTgAccountRefresh:
+		return nil, h.publish.handleTgAccountRefreshTask(ctx, client, task)
+	case collectorin.AccountTaskTypeMessageRepair:
+		return nil, h.publish.handleMessageRepairAccountTask(ctx, client, task)
+	case collectorin.AccountTaskTypeMessageRepairScan:
+		return h.publish.handleMessageRepairScanAccountTask(ctx, client, task)
 	default:
 		return nil, gerror.Newf("不支持的Telegram账号任务类型：%s", task.TaskType)
 	}

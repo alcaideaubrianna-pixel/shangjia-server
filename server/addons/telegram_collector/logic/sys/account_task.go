@@ -135,6 +135,10 @@ func validateAccountTaskSubmit(in *sysin.AccountTaskSubmit) error {
 	case sysin.AccountTaskTypeChannelBotAttach:
 	case sysin.AccountTaskTypeManagedBotUsernameCheck:
 	case sysin.AccountTaskTypeManagedBotCreate:
+	case sysin.AccountTaskTypeChannelMemberSync:
+	case sysin.AccountTaskTypeTgAccountRefresh:
+	case sysin.AccountTaskTypeMessageRepair:
+	case sysin.AccountTaskTypeMessageRepairScan:
 	default:
 		return gerror.Newf("不支持的Telegram账号任务类型：%s", in.TaskType)
 	}

@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -39,14 +42,20 @@ func (s *sSysPublish) ExecuteChannelMemberSyncTask(ctx context.Context, taskId i
 	if channelMemberTaskTerminal(task.Status) {
 		return nil
 	}
-	if err = s.executeChannelMemberSync(ctx, task); err != nil {
+	accountTaskID, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: task.TenantId, AccountID: task.TgAccountId,
+		TaskType: collectorin.AccountTaskTypeChannelMemberSync,
+		TaskKey:  fmt.Sprintf("channel-member-sync:%d", task.Id), Priority: 50, MaxAttempts: 3,
+	})
+	if err != nil {
 		_ = s.markChannelMemberTaskFailed(ctx, task.Id, err)
 		return err
 	}
+	g.Log().Infof(ctx, "频道成员同步已提交账号任务 taskId:%d accountTaskId:%d", task.Id, accountTaskID)
 	return nil
 }
 
-func (s *sSysPublish) executeChannelMemberSync(ctx context.Context, task *sysin.TgChannelMemberSyncModel) error {
+func (s *sSysPublish) executeChannelMemberSyncWithClient(ctx context.Context, client *telegram.Client, task *sysin.TgChannelMemberSyncModel) error {
 	cache, err := s.tgChannelCacheByChannelId(ctx, task.TenantId, task.TgAccountId, task.ChannelId)
 	if err != nil {
 		return err
@@ -57,19 +66,33 @@ func (s *sSysPublish) executeChannelMemberSync(ctx context.Context, task *sysin.
 	}
 	startAt := gtime.Now()
 	seen := map[int64]string{}
-	err = s.executeTelegramAccountOperation(ctx, task.TgAccountId, 2*time.Hour, func(runCtx context.Context, client *telegram.Client) error {
-		if _, err = client.Self(runCtx); err != nil {
-			return err
-		}
-		if err = s.syncChannelMembersByFilter(runCtx, client, task, peer, &tg.ChannelParticipantsAdmins{}, seen, tgChannelMemberStageAdmins); err != nil {
-			return err
-		}
-		return s.syncChannelMembersByFilter(runCtx, client, task, peer, &tg.ChannelParticipantsRecent{}, seen, tgChannelMemberStageMembers)
-	})
+	if _, err = client.Self(ctx); err != nil {
+		return err
+	}
+	if err = s.syncChannelMembersByFilter(ctx, client, task, peer, &tg.ChannelParticipantsAdmins{}, seen, tgChannelMemberStageAdmins); err != nil {
+		return err
+	}
+	err = s.syncChannelMembersByFilter(ctx, client, task, peer, &tg.ChannelParticipantsRecent{}, seen, tgChannelMemberStageMembers)
 	if err != nil {
 		return err
 	}
 	return s.finishChannelMemberSync(ctx, task, startAt)
+}
+
+func (s *sSysPublish) handleChannelMemberSyncAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
+	const prefix = "channel-member-sync:"
+	id, err := strconv.ParseInt(strings.TrimPrefix(task.TaskKey, prefix), 10, 64)
+	if err != nil || id <= 0 || !strings.HasPrefix(task.TaskKey, prefix) || task.AccountID <= 0 {
+		return gerror.New("频道成员同步账号任务参数无效")
+	}
+	model, err := s.channelMemberSyncTaskById(ctx, id)
+	if err != nil {
+		return err
+	}
+	if model.TgAccountId != task.AccountID {
+		return gerror.New("频道成员同步账号任务账号不一致")
+	}
+	return s.executeChannelMemberSyncWithClient(ctx, client, model)
 }
 
 func channelMemberInputChannel(channel *sysin.ChannelCacheModel) (*tg.InputChannel, error) {

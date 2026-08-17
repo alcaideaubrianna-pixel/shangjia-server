@@ -22,6 +22,10 @@ const (
 	AccountTaskTypeChannelBotAttach          = "channel_bot_attach"
 	AccountTaskTypeManagedBotUsernameCheck   = "managed_bot_username_check"
 	AccountTaskTypeManagedBotCreate          = "managed_bot_create"
+	AccountTaskTypeChannelMemberSync         = "channel_member_sync"
+	AccountTaskTypeTgAccountRefresh          = "tg_account_refresh"
+	AccountTaskTypeMessageRepair             = "message_repair"
+	AccountTaskTypeMessageRepairScan         = "message_repair_scan"
 )
 
 type AccountTaskSubmit struct {

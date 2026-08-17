@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -50,14 +51,17 @@ func (s *sSysPublish) fetchTgAccountChannelCaches(ctx context.Context, item *sys
 	if item == nil || item.Id <= 0 {
 		return nil, gerror.New("TG账号不存在")
 	}
-	var channels []*tgDialogCache
-	err := s.executeTelegramAccountOperation(ctx, item.Id, 90*time.Second, func(runCtx context.Context, client *telegram.Client) error {
-		var fetchErr error
-		channels, fetchErr = fetchTgAccountChannelCachesWithClient(runCtx, client)
-		return fetchErr
-	})
+	_, err := collectorservice.AccountTasks().SubmitAndWait(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: item.TenantId, AccountID: item.Id, TaskType: collectorin.AccountTaskTypeDialogCacheRefresh,
+		TaskKey: fmt.Sprintf("dialog-cache-refresh:%d:%d", item.TenantId, item.Id), Priority: 20, MaxAttempts: 3,
+	}, 2*time.Second)
 	if err != nil {
-		return nil, gerror.Wrap(err, "读取TG频道对话失败")
+		return nil, gerror.Wrap(err, "刷新TG频道缓存失败")
+	}
+	var channels []*tgDialogCache
+	if err = g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).
+		Where("tenant_id", item.TenantId).Where("tg_account_id", item.Id).Scan(&channels); err != nil {
+		return nil, gerror.Wrap(err, "读取TG频道缓存失败")
 	}
 	return channels, nil
 }
