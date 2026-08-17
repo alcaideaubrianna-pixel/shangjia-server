@@ -93,9 +93,71 @@ func (h *publishCollectorAccountTaskHandler) HandleAccountTask(ctx context.Conte
 		return nil, h.publish.handleMessageMediaFallbackAccountTask(ctx, client, task)
 	case collectorin.AccountTaskTypeMessageDeleteFallback:
 		return nil, h.publish.handleMessageDeleteFallbackAccountTask(ctx, client, task)
+	case collectorin.AccountTaskTypeManagedBotUsernameCheck:
+		return h.publish.handleManagedBotUsernameCheckAccountTask(ctx, client, task)
+	case collectorin.AccountTaskTypeManagedBotCreate:
+		return h.publish.handleManagedBotCreateAccountTask(ctx, client, task)
 	default:
 		return nil, gerror.Newf("不支持的Telegram账号任务类型：%s", task.TaskType)
 	}
+}
+
+func (s *sSysPublish) handleManagedBotUsernameCheckAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (*collectorin.AccountMediaDownloadResult, error) {
+	accountID, username, err := parseManagedBotUsernameCheckTaskKey(task.TaskKey)
+	if err != nil {
+		return nil, err
+	}
+	if accountID != task.AccountID {
+		return nil, gerror.New("Managed Bot用户名检测任务账号不一致")
+	}
+	available, err := client.API().BotsCheckUsername(ctx, username)
+	if err != nil {
+		return nil, gerror.Wrap(err, "检查Managed Bot用户名失败")
+	}
+	resultCode := managedBotUsernameOccupiedResult
+	if available {
+		resultCode = managedBotUsernameAvailableResult
+	}
+	return &collectorin.AccountMediaDownloadResult{ErrorCode: resultCode}, nil
+}
+
+func (s *sSysPublish) handleManagedBotCreateAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (*collectorin.AccountMediaDownloadResult, error) {
+	payload, err := parseManagedBotCreateTaskKey(task.TaskKey)
+	if err != nil {
+		return nil, err
+	}
+	if payload.AccountID != task.AccountID {
+		return nil, gerror.New("Managed Bot创建任务账号不一致")
+	}
+	manager, err := resolveManagedBotUser(ctx, client, payload.ManagerUsername)
+	if err != nil {
+		return nil, err
+	}
+	if !manager.BotCanManageBots {
+		return nil, gerror.New("官方Bot尚未开启Bot Management Mode")
+	}
+	available, err := client.API().BotsCheckUsername(ctx, payload.Username)
+	if err != nil {
+		return nil, err
+	}
+	if !available {
+		return nil, gerror.New("该 Bot 用户名已被占用")
+	}
+	createdUser, err := client.API().BotsCreateBot(ctx, &tg.BotsCreateBotRequest{
+		Name: payload.Name, Username: payload.Username,
+		ManagerID: &tg.InputUser{UserID: manager.ID, AccessHash: manager.AccessHash},
+	})
+	if err != nil {
+		return nil, err
+	}
+	created, ok := createdUser.(*tg.User)
+	if !ok || created == nil || created.ID <= 0 || created.AccessHash == 0 {
+		return nil, gerror.New("Telegram未返回新Bot的有效身份信息")
+	}
+	return &collectorin.AccountMediaDownloadResult{
+		FileURL: firstNonEmpty(created.Username, payload.Username),
+		Media:   collectorin.CollectorMediaItem{SourceMediaID: created.ID, SourceAccessHash: created.AccessHash},
+	}, nil
 }
 
 func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {

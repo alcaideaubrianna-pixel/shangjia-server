@@ -5,6 +5,22 @@ import (
 	"testing"
 )
 
+func TestManagedBotUsernameCheckTaskKey(t *testing.T) {
+	key := managedBotUsernameCheckTaskKey(21, "Example_Bot")
+	accountID, username, err := parseManagedBotUsernameCheckTaskKey(key)
+	if err != nil {
+		t.Fatalf("parse task key failed: %v", err)
+	}
+	if accountID != 21 || username != "example_bot" {
+		t.Fatalf("unexpected task key result accountID:%d username:%s", accountID, username)
+	}
+	for _, invalid := range []string{"", "managed-bot-username-check:0:testbot", "managed-bot-username-check:21:bad"} {
+		if _, _, parseErr := parseManagedBotUsernameCheckTaskKey(invalid); parseErr == nil {
+			t.Fatalf("expected invalid task key error: %s", invalid)
+		}
+	}
+}
+
 func TestNormalizeManagedBotUsername(t *testing.T) {
 	tests := []struct {
 		name    string

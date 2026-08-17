@@ -18,6 +18,7 @@ func TestValidateAccountTaskSubmitSupportsAllRegisteredTaskTypes(t *testing.T) {
 		{name: "dialog refresh", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeDialogCacheRefresh}},
 		{name: "message push inline", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeMessagePushInline}},
 		{name: "message reconcile", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeMessageReconcile}},
+		{name: "managed bot username check", in: &sysin.AccountTaskSubmit{TaskType: sysin.AccountTaskTypeManagedBotUsernameCheck}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -55,6 +56,7 @@ func TestAccountTaskCanRevive(t *testing.T) {
 		sysin.AccountTaskTypeMediaDownload,
 		sysin.AccountTaskTypeMessageReconcile,
 		sysin.AccountTaskTypeMessageMediaFallback,
+		sysin.AccountTaskTypeManagedBotUsernameCheck,
 	} {
 		if !accountTaskCanRevive(taskType) {
 			t.Fatalf("task type %q should be revivable", taskType)

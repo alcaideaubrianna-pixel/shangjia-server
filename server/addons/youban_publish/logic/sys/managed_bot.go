@@ -2,10 +2,16 @@ package sys
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	botService "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
@@ -19,6 +25,20 @@ import (
 )
 
 var managedBotUsernamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{4,31}bot$`)
+
+const (
+	managedBotUsernameCheckTaskPrefix = "managed-bot-username-check:"
+	managedBotUsernameAvailableResult = "available"
+	managedBotUsernameOccupiedResult  = "occupied"
+	managedBotCreateTaskPrefix        = "managed-bot-create:"
+)
+
+type managedBotCreateTaskPayload struct {
+	AccountID       int64  `json:"accountId"`
+	Name            string `json:"name"`
+	Username        string `json:"username"`
+	ManagerUsername string `json:"managerUsername"`
+}
 
 func (s *sSysPublish) AdminBotUsernameCheck(ctx context.Context, in *sysin.BotUsernameCheckInp) (res *sysin.BotUsernameCheckModel, err error) {
 	if in == nil {
@@ -90,40 +110,23 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 	if err != nil {
 		return nil, err
 	}
-	var created *tg.User
-	var token string
-	err = s.executeTelegramAccountPriorityOperation(ctx, account.Id, 90*time.Second, func(clientCtx context.Context, client *telegram.Client) error {
-		manager, resolveErr := resolveManagedBotUser(clientCtx, client, managerUsername)
-		if resolveErr != nil {
-			return resolveErr
+	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: account.TenantId, AccountID: account.Id, TaskType: collectorin.AccountTaskTypeManagedBotCreate,
+		TaskKey:  managedBotCreateTaskKey(&managedBotCreateTaskPayload{AccountID: account.Id, Name: name, Username: username, ManagerUsername: managerUsername}),
+		Priority: tgJobPriorityUrgent, MaxAttempts: 1,
+	}, 250*time.Millisecond)
+	if err != nil || task.Status != collectorin.AccountTaskStatusCompleted {
+		if err == nil {
+			err = gerror.New(task.ErrorMessage)
 		}
-		if !manager.BotCanManageBots {
-			return gerror.New("官方Bot尚未开启Bot Management Mode")
-		}
-		available, checkErr := client.API().BotsCheckUsername(clientCtx, username)
-		if checkErr != nil {
-			return checkErr
-		}
-		if !available {
-			return gerror.New("该 Bot 用户名已被占用")
-		}
-		createdUser, createErr := client.API().BotsCreateBot(clientCtx, &tg.BotsCreateBotRequest{
-			Name:      name,
-			Username:  username,
-			ManagerID: &tg.InputUser{UserID: manager.ID, AccessHash: manager.AccessHash},
-		})
-		if createErr != nil {
-			return createErr
-		}
-		created, _ = createdUser.(*tg.User)
-		if created == nil || created.ID <= 0 {
-			return gerror.New("Telegram未返回新Bot的有效身份信息")
-		}
-		return nil
-	})
-	if err != nil {
 		g.Log().Errorf(ctx, "创建Managed Bot失败 tgAccountId:%d username:%s err:%+v", in.TgAccountId, username, err)
 		return nil, gerror.New(managedBotErrorMessage(err))
+	}
+	createdID := task.MediaResult.Media.SourceMediaID
+	createdAccessHash := task.MediaResult.Media.SourceAccessHash
+	createdUsername := firstNonEmpty(task.MediaResult.FileURL, username)
+	if createdID <= 0 || createdAccessHash == 0 {
+		return nil, gerror.New("Telegram未返回新Bot的有效身份信息")
 	}
 	managerToken, err := botService.SysBot().OfficialBotToken(ctx)
 	if err != nil {
@@ -133,9 +136,9 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取官方Bot客户端失败")
 	}
-	token, err = managerBot.GetManagedBotToken(ctx, &tgbot.GetManagedBotTokenParams{UserID: created.ID})
+	token, err := managerBot.GetManagedBotToken(ctx, &tgbot.GetManagedBotTokenParams{UserID: createdID})
 	if err != nil {
-		g.Log().Errorf(ctx, "获取Managed Bot Token失败 botId:%d username:%s err:%+v", created.ID, username, err)
+		g.Log().Errorf(ctx, "获取Managed Bot Token失败 botId:%d username:%s err:%+v", createdID, username, err)
 		return nil, gerror.New(managedBotErrorMessage(err))
 	}
 	token = strings.TrimSpace(token)
@@ -143,10 +146,7 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 		return nil, gerror.New("官方Bot未返回新Bot Token，请稍后重试")
 	}
 
-	botUsername := username
-	if created != nil && strings.TrimSpace(created.Username) != "" {
-		botUsername = strings.TrimPrefix(strings.TrimSpace(created.Username), "@")
-	}
+	botUsername := strings.TrimPrefix(strings.TrimSpace(createdUsername), "@")
 	status := in.Status
 	if status == 0 {
 		status = 1
@@ -187,13 +187,84 @@ func (s *sSysPublish) AdminBotCreate(ctx context.Context, in *sysin.BotCreateInp
 	}, nil
 }
 
+func managedBotCreateTaskKey(payload *managedBotCreateTaskPayload) string {
+	encoded, _ := json.Marshal(payload)
+	return managedBotCreateTaskPrefix + base64.RawURLEncoding.EncodeToString(encoded)
+}
+
+func parseManagedBotCreateTaskKey(taskKey string) (*managedBotCreateTaskPayload, error) {
+	if !strings.HasPrefix(taskKey, managedBotCreateTaskPrefix) {
+		return nil, gerror.New("Managed Bot创建任务参数无效")
+	}
+	data, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(taskKey, managedBotCreateTaskPrefix))
+	if err != nil {
+		return nil, gerror.Wrap(err, "解析Managed Bot创建任务失败")
+	}
+	var payload managedBotCreateTaskPayload
+	if err = json.Unmarshal(data, &payload); err != nil || payload.AccountID <= 0 || strings.TrimSpace(payload.Name) == "" {
+		return nil, gerror.New("Managed Bot创建任务参数不完整")
+	}
+	payload.Username, err = normalizeManagedBotUsername(payload.Username)
+	if err != nil {
+		return nil, err
+	}
+	payload.ManagerUsername = strings.TrimPrefix(strings.TrimSpace(payload.ManagerUsername), "@")
+	if payload.ManagerUsername == "" {
+		return nil, gerror.New("Managed Bot管理者用户名为空")
+	}
+	return &payload, nil
+}
+
 func (s *sSysPublish) checkManagedBotUsername(ctx context.Context, account *sysin.TgAccountModel, username string) (available bool, err error) {
-	returnValue := false
-	err = s.executeTelegramAccountPriorityOperation(ctx, account.Id, 45*time.Second, func(clientCtx context.Context, client *telegram.Client) error {
-		returnValue, err = client.API().BotsCheckUsername(clientCtx, username)
-		return err
-	})
-	return returnValue, err
+	if account == nil || account.Id <= 0 {
+		return false, gerror.New("TG账号不存在")
+	}
+	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, &collectorin.AccountTaskSubmit{
+		TenantID: account.TenantId, AccountID: account.Id,
+		TaskType: collectorin.AccountTaskTypeManagedBotUsernameCheck,
+		TaskKey:  managedBotUsernameCheckTaskKey(account.Id, username), Priority: 100, MaxAttempts: 1,
+	}, 250*time.Millisecond)
+	if err != nil {
+		return false, gerror.Wrap(err, "等待Managed Bot用户名检测失败")
+	}
+	if task.Status != collectorin.AccountTaskStatusCompleted {
+		message := task.ErrorMessage
+		if strings.TrimSpace(message) == "" {
+			message = "Managed Bot用户名检测失败"
+		}
+		return false, gerror.New(message)
+	}
+	switch task.MediaResult.ErrorCode {
+	case managedBotUsernameAvailableResult:
+		return true, nil
+	case managedBotUsernameOccupiedResult:
+		return false, nil
+	default:
+		return false, gerror.New("Managed Bot用户名检测未返回有效结果")
+	}
+}
+
+func managedBotUsernameCheckTaskKey(accountID int64, username string) string {
+	return fmt.Sprintf("%s%d:%s", managedBotUsernameCheckTaskPrefix, accountID, strings.ToLower(strings.TrimSpace(username)))
+}
+
+func parseManagedBotUsernameCheckTaskKey(taskKey string) (accountID int64, username string, err error) {
+	if !strings.HasPrefix(taskKey, managedBotUsernameCheckTaskPrefix) {
+		return 0, "", gerror.New("Managed Bot用户名检测任务参数无效")
+	}
+	parts := strings.Split(strings.TrimPrefix(taskKey, managedBotUsernameCheckTaskPrefix), ":")
+	if len(parts) != 2 {
+		return 0, "", gerror.New("Managed Bot用户名检测任务参数无效")
+	}
+	accountID, err = strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || accountID <= 0 {
+		return 0, "", gerror.New("Managed Bot用户名检测任务账号无效")
+	}
+	username, err = normalizeManagedBotUsername(parts[1])
+	if err != nil {
+		return 0, "", err
+	}
+	return accountID, username, nil
 }
 
 func (s *sSysPublish) officialManagerUsername(ctx context.Context) (string, error) {

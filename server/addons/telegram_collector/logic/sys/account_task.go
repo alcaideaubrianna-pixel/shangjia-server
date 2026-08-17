@@ -58,7 +58,7 @@ func (s *sAccountTasks) Submit(ctx context.Context, in *sysin.AccountTaskSubmit)
 	}
 	if accountTaskCanRevive(in.TaskType) {
 		terminalStatuses := []string{sysin.AccountTaskStatusDead, sysin.AccountTaskStatusCancelled}
-		if in.TaskType == sysin.AccountTaskTypeMessageReconcile {
+		if in.TaskType == sysin.AccountTaskTypeMessageReconcile || in.TaskType == sysin.AccountTaskTypeManagedBotUsernameCheck {
 			terminalStatuses = append(terminalStatuses, sysin.AccountTaskStatusCompleted)
 		}
 		revive := g.Map{
@@ -97,7 +97,8 @@ func accountTaskCanRevive(taskType string) bool {
 		sysin.AccountTaskTypeMaterialImportHistoryPage,
 		sysin.AccountTaskTypeMediaDownload,
 		sysin.AccountTaskTypeMessageReconcile,
-		sysin.AccountTaskTypeMessageMediaFallback:
+		sysin.AccountTaskTypeMessageMediaFallback,
+		sysin.AccountTaskTypeManagedBotUsernameCheck:
 		return true
 	default:
 		return false
@@ -132,6 +133,8 @@ func validateAccountTaskSubmit(in *sysin.AccountTaskSubmit) error {
 	case sysin.AccountTaskTypeMessageMediaFallback:
 	case sysin.AccountTaskTypeMessageDeleteFallback:
 	case sysin.AccountTaskTypeChannelBotAttach:
+	case sysin.AccountTaskTypeManagedBotUsernameCheck:
+	case sysin.AccountTaskTypeManagedBotCreate:
 	default:
 		return gerror.Newf("不支持的Telegram账号任务类型：%s", in.TaskType)
 	}

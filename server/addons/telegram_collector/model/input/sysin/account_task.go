@@ -20,6 +20,8 @@ const (
 	AccountTaskTypeMessageMediaFallback      = "message_media_fallback"
 	AccountTaskTypeMessageDeleteFallback     = "message_delete_fallback"
 	AccountTaskTypeChannelBotAttach          = "channel_bot_attach"
+	AccountTaskTypeManagedBotUsernameCheck   = "managed_bot_username_check"
+	AccountTaskTypeManagedBotCreate          = "managed_bot_create"
 )
 
 type AccountTaskSubmit struct {
