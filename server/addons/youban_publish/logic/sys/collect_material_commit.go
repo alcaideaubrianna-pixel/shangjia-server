@@ -184,6 +184,14 @@ func (s *sSysPublish) commitCollectMaterial(ctx context.Context, event gdb.Recor
 // but repeated events and retry/update paths must not be able to write raw text
 // back over the cleaned profile text.
 func (s *sSysPublish) normalizeCollectMaterialText(ctx context.Context, event gdb.Record, rule gdb.Record, text string) string {
+	if suffix := strings.TrimSpace(rule["intro_fee_suffix"].String()); suffix != "" {
+		original := event["raw_text"].String()
+		body := text
+		if rule["truncate_intro_fee_enabled"].Bool() {
+			body = applyCollectIntroFeeTruncate(text)
+		}
+		return applyCollectIntroFeeSuffix(body, original, suffix)
+	}
 	if !rule["truncate_intro_fee_enabled"].Bool() {
 		return text
 	}

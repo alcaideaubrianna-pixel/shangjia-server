@@ -103,6 +103,10 @@ func fillCollectRuleDetails(ctx context.Context, list []*sysin.CollectRuleModel)
 		if config.TruncateIntroFee {
 			item.TruncateIntroFeeEnabled = 1
 		}
+		item.IntroFeeSuffix = config.IntroFeeSuffix
+		if config.IntroFeeSuffix != "" {
+			item.IntroFeeSuffixEnabled = 1
+		}
 		item.BlockTexts = config.BlockedTexts
 		item.Replacements = make([]sysin.CollectRuleReplaceModel, 0, len(config.Replacements))
 		for _, replacement := range config.Replacements {
@@ -174,9 +178,14 @@ func (s *sSysPublish) CollectRuleSave(ctx context.Context, in *sysin.CollectRule
 		for _, replacement := range in.Replacements {
 			replacements = append(replacements, collectReplaceRule{From: replacement.From, To: replacement.To})
 		}
+		introFeeSuffix := ""
+		if in.IntroFeeSuffixEnabled == 1 {
+			introFeeSuffix = in.IntroFeeSuffix
+		}
 		return syncCollectRuleItemsTx(ctx, tx, account.TenantId, account.Id, id, collectRuleItems{
 			Keywords: in.Keywords, Tags: in.Tags, Replacements: replacements,
-			DeleteLines: in.DeleteLineTexts, DeleteTexts: in.DeleteTexts, TruncateIntroFee: in.TruncateIntroFeeEnabled == 1, BlockedTexts: in.BlockTexts,
+			DeleteLines: in.DeleteLineTexts, DeleteTexts: in.DeleteTexts, TruncateIntroFee: in.TruncateIntroFeeEnabled == 1,
+			IntroFeeSuffix: introFeeSuffix, BlockedTexts: in.BlockTexts,
 		})
 	})
 	if err != nil {

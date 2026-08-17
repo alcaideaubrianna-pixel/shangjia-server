@@ -21,6 +21,7 @@ const (
 	collectRuleItemDeleteLine       = "delete_line"
 	collectRuleItemDeleteText       = "delete_text"
 	collectRuleItemTruncateIntroFee = "truncate_intro_fee"
+	collectRuleItemIntroFeeSuffix   = "intro_fee_suffix"
 	collectRuleItemBlockText        = "block_text"
 )
 
@@ -31,6 +32,7 @@ type collectRuleItems struct {
 	DeleteLines      []string
 	DeleteTexts      []string
 	TruncateIntroFee bool
+	IntroFeeSuffix   string
 	BlockedTexts     []string
 }
 
@@ -67,6 +69,8 @@ func collectRuleItemMap(ctx context.Context, ruleIds []int64) (map[int64]*collec
 			items.DeleteTexts = append(items.DeleteTexts, value)
 		case collectRuleItemTruncateIntroFee:
 			items.TruncateIntroFee = true
+		case collectRuleItemIntroFeeSuffix:
+			items.IntroFeeSuffix = value
 		case collectRuleItemBlockText:
 			items.BlockedTexts = append(items.BlockedTexts, value)
 		}
@@ -93,6 +97,7 @@ func attachCollectRuleItems(ctx context.Context, rules []gdb.Record) error {
 		rule["delete_lines"] = gvar.New(items.DeleteLines)
 		rule["delete_texts"] = gvar.New(items.DeleteTexts)
 		rule["truncate_intro_fee_enabled"] = gvar.New(items.TruncateIntroFee)
+		rule["intro_fee_suffix"] = gvar.New(items.IntroFeeSuffix)
 		rule["blocked_texts"] = gvar.New(items.BlockedTexts)
 		from := make([]string, 0, len(items.Replacements))
 		to := make([]string, 0, len(items.Replacements))
@@ -167,6 +172,11 @@ func syncCollectRuleItemsTx(ctx context.Context, tx gdb.TX, tenantId, accountId,
 	}
 	if items.TruncateIntroFee {
 		if err := insert(collectRuleItemTruncateIntroFee, "介绍费", ""); err != nil {
+			return err
+		}
+	}
+	if items.IntroFeeSuffix != "" {
+		if err := insert(collectRuleItemIntroFeeSuffix, items.IntroFeeSuffix, ""); err != nil {
 			return err
 		}
 	}

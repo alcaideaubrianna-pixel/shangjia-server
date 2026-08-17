@@ -227,6 +227,60 @@ func TestApplyCollectIntroFeeTruncate(t *testing.T) {
 	}
 }
 
+func TestApplyCollectIntroFeeSuffix(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		original string
+		suffix   string
+		want     string
+	}{
+		{name: "space suffix", text: "正文\n介绍费 7888 KK", original: "正文\n介绍费 7888 KK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
+		{name: "joined suffix", text: "正文\n介绍费 7888KK", original: "正文\n介绍费 7888KK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
+		{name: "joined chinese suffix", text: "正文\n介绍费:7888七七n", original: "正文\n介绍费:7888七七n", suffix: "AA", want: "正文\n介绍费 7888 AA"},
+		{name: "hyphen suffix", text: "正文\n介绍费：6888 BLY-54", original: "正文\n介绍费：6888 BLY-54", suffix: "AA", want: "正文\n介绍费 6888 AA"},
+		{name: "colon suffix", text: "正文\n介绍费: 7888 KK", original: "正文\n介绍费: 7888 KK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
+		{name: "suffix on next line", text: "正文\n介绍费 7888\nKK", original: "正文\n介绍费 7888\nKK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
+		{name: "long suffix on next line", text: "正文\n介绍费7888\nBLYS", original: "正文\n介绍费7888\nBLYS", suffix: "AA", want: "正文\n介绍费 7888 AA"},
+		{name: "preserves following content", text: "正文\n介绍费 7888 KK\n联系方式", original: "正文\n介绍费 7888 KK\n联系方式", suffix: "AA", want: "正文\n联系方式\n介绍费 7888 AA"},
+		{name: "amount punctuation", text: "正文\n介绍费用：7,888.50 元 KK", original: "正文\n介绍费用：7,888.50 元 KK", suffix: "AA", want: "正文\n介绍费 7,888.50 元 AA"},
+		{name: "windows lines", text: "正文\r\n介绍费：7888\r\nKK", original: "正文\r\n介绍费：7888\r\nKK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
+		{name: "no fee", text: "正文\n联系方式", original: "正文\n联系方式", suffix: "AA", want: "正文\n联系方式"},
+		{name: "disabled", text: "正文\n介绍费 7888 KK", original: "正文\n介绍费 7888 KK", suffix: "", want: "正文\n介绍费 7888 KK"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := applyCollectIntroFeeSuffix(test.text, test.original, test.suffix); got != test.want {
+				t.Fatalf("applyCollectIntroFeeSuffix() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestBuildCollectRuleDecisionRestoresIntroFeeAfterTruncate(t *testing.T) {
+	event := gdb.Record{"raw_text": gvar.New("编号：A123\n正文\n介绍费 7888\nKK"), "media_count": gvar.New(1)}
+	rule := gdb.Record{
+		"truncate_intro_fee_enabled": gvar.New(true), "intro_fee_suffix": gvar.New("AA"),
+		"delete_lines": gvar.New([]string{}), "delete_texts": gvar.New([]string{}),
+		"replace_from": gvar.New([]string{}), "replace_to": gvar.New([]string{}),
+	}
+	if got, want := buildCollectRuleDecision(event, nil, rule).Text, "正文\n介绍费 7888 AA"; got != want {
+		t.Fatalf("decision text = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeCollectMaterialTextPreservesModifiedIntroFee(t *testing.T) {
+	s := &sSysPublish{}
+	event := gdb.Record{"id": gvar.New(int64(105)), "raw_text": gvar.New("正文\n介绍费 7888 KK")}
+	rule := gdb.Record{
+		"id": gvar.New(int64(50)), "truncate_intro_fee_enabled": gvar.New(true),
+		"intro_fee_suffix": gvar.New("AA"),
+	}
+	if got, want := s.normalizeCollectMaterialText(context.Background(), event, rule, "正文\n介绍费 7888 AA"), "正文\n介绍费 7888 AA"; got != want {
+		t.Fatalf("commit boundary text = %q, want %q", got, want)
+	}
+}
+
 func TestBuildCollectRuleDecisionKeepsIntroFeeTruncatedAcrossRepeatedProcessing(t *testing.T) {
 	rawText := "省份：广东\n城市：广州\n介绍费：7888(香水湾💦)"
 	event := gdb.Record{

@@ -21,6 +21,8 @@ var (
 	collectStandaloneCodeCaptionRule = regexp.MustCompile(`^[A-Za-z]{1,4}\d{3,6}$`)
 	collectMaterialMetaLineRule      = regexp.MustCompile(`^\s*(?:昵称|编号|同行)\s*(?:[:：=].*)?\s*$`)
 	collectMaterialCodeLineRule      = regexp.MustCompile(`^\s*(?:(?:[A-Za-z]{1,8}[-_ ]?\d{3,10}|[\p{Han}]{1,8}\d{3,10})(?:\s+|$))+\s*$`)
+	collectIntroFeeAmountRule        = regexp.MustCompile(`介绍费(?:用)?\s*[:：=]?\s*([¥￥]?\s*\d[\d,.]*(?:\s*(?:元|万))?)`)
+	collectIntroFeeStandaloneSuffix  = regexp.MustCompile(`^[A-Za-z]{1,16}$`)
 )
 
 type collectRuleDecision struct {
@@ -52,6 +54,7 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 		}
 	}
 	text := rawText
+	introFeeSuffix := strings.TrimSpace(rule["intro_fee_suffix"].String())
 	if rule["truncate_intro_fee_enabled"].Bool() {
 		text = applyCollectIntroFeeTruncate(text)
 	}
@@ -73,6 +76,9 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 	}
 	if rule["footer_enabled"].Int() == 1 && strings.TrimSpace(rule["footer_markdown"].String()) != "" {
 		text = strings.TrimSpace(text + "\n" + strings.TrimSpace(rule["footer_markdown"].String()))
+	}
+	if introFeeSuffix != "" {
+		text = applyCollectIntroFeeSuffix(text, rawText, introFeeSuffix)
 	}
 	return &collectRuleDecision{
 		Matched:   true,
@@ -402,6 +408,43 @@ func applyCollectIntroFeeTruncate(text string) string {
 		return strings.TrimSpace(strings.Join(kept, "\n"))
 	}
 	return text
+}
+
+func applyCollectIntroFeeSuffix(text, original, suffix string) string {
+	suffix = strings.TrimSpace(suffix)
+	amount := collectIntroFeeAmount(original)
+	if suffix == "" || amount == "" {
+		return text
+	}
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	kept := make([]string, 0, len(lines)+1)
+	removeNextSuffix := false
+	for _, line := range lines {
+		if removeNextSuffix && collectIntroFeeStandaloneSuffix.MatchString(strings.TrimSpace(line)) {
+			removeNextSuffix = false
+			continue
+		}
+		removeNextSuffix = false
+		if collectIntroFeeAmount(normalizeCollectKeywordText(line)) != "" {
+			removeNextSuffix = true
+			continue
+		}
+		kept = append(kept, line)
+	}
+	body := strings.TrimSpace(strings.Join(kept, "\n"))
+	feeLine := "介绍费 " + amount + " " + suffix
+	if body == "" {
+		return feeLine
+	}
+	return body + "\n" + feeLine
+}
+
+func collectIntroFeeAmount(text string) string {
+	match := collectIntroFeeAmountRule.FindStringSubmatch(normalizeCollectKeywordText(text))
+	if len(match) < 2 {
+		return ""
+	}
+	return strings.Join(strings.Fields(strings.TrimSpace(match[1])), " ")
 }
 
 func normalizeCollectKeywordText(text string) string {

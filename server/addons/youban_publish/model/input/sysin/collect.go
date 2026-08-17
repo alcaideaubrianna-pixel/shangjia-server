@@ -300,6 +300,8 @@ type CollectRuleModel struct {
 	DeleteLineTexts         []string                  `json:"deleteLineTexts" dc:"整行删除文本"`
 	DeleteTexts             []string                  `json:"deleteTexts" dc:"删除文本"`
 	TruncateIntroFeeEnabled int                       `json:"truncateIntroFeeEnabled" dc:"清理资料头部标识及介绍费后续文案"`
+	IntroFeeSuffixEnabled   int                       `json:"introFeeSuffixEnabled" dc:"介绍费后缀修改开关"`
+	IntroFeeSuffix          string                    `json:"introFeeSuffix" dc:"介绍费新后缀"`
 	BlockTexts              []string                  `json:"blockTexts" dc:"屏蔽文本"`
 	BlockLink               int                       `json:"blockLink" dc:"屏蔽链接"`
 	BlockUsername           int                       `json:"blockUsername" dc:"屏蔽用户名"`
@@ -329,6 +331,8 @@ type CollectRuleSaveInp struct {
 	DeleteLineTexts         []string                  `json:"deleteLineTexts" dc:"整行删除文本"`
 	DeleteTexts             []string                  `json:"deleteTexts" dc:"删除文本"`
 	TruncateIntroFeeEnabled int                       `json:"truncateIntroFeeEnabled" dc:"清理资料头部标识及介绍费后续文案"`
+	IntroFeeSuffixEnabled   int                       `json:"introFeeSuffixEnabled" dc:"介绍费后缀修改开关"`
+	IntroFeeSuffix          string                    `json:"introFeeSuffix" dc:"介绍费新后缀"`
 	BlockTexts              []string                  `json:"blockTexts" dc:"屏蔽文本"`
 	BlockLink               int                       `json:"blockLink" dc:"屏蔽链接"`
 	BlockUsername           int                       `json:"blockUsername" dc:"屏蔽用户名"`
@@ -348,6 +352,10 @@ func (in *CollectRuleSaveInp) Filter(ctx context.Context) error {
 	in.Tags = trimCollectInputValues(in.Tags)
 	in.DeleteLineTexts = trimCollectInputValues(in.DeleteLineTexts)
 	in.DeleteTexts = trimCollectInputValues(in.DeleteTexts)
+	in.IntroFeeSuffix = strings.TrimSpace(in.IntroFeeSuffix)
+	if in.IntroFeeSuffixEnabled == 1 && in.IntroFeeSuffix == "" {
+		return gerror.New("请填写介绍费新后缀")
+	}
 	in.BlockTexts = trimCollectInputValues(in.BlockTexts)
 	for index := range in.Replacements {
 		in.Replacements[index].From = strings.TrimSpace(in.Replacements[index].From)
