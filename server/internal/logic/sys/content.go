@@ -1805,7 +1805,9 @@ func (s *sSysContent) publicProfileWhere(mod *gdb.Model) *gdb.Model {
 		WhereIn(aliasField("p", profileColumns.ImportStatus), publicProfileImportStatuses).
 		Where(aliasField("p", profileColumns.ReviewStatus), consts.ContentReviewApproved).
 		WhereIn(aliasField("p", profileColumns.Visibility), []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly}).
-		Where("EXISTS (SELECT 1 FROM "+dao.ContentMedia.Table()+" m WHERE m."+mediaColumns.ProfileId+"=p."+profileColumns.Id+" AND m."+mediaColumns.Status+"=? AND m."+mediaColumns.MediaType+"=? AND COALESCE(m."+mediaColumns.DisplayStoragePath+", '')<>'')", consts.StatusEnabled, consts.ContentMediaTypeImage)
+		Where("(EXISTS (SELECT 1 FROM "+dao.ContentMedia.Table()+" m WHERE m."+mediaColumns.ProfileId+"=p."+profileColumns.Id+" AND m."+mediaColumns.Status+"=? AND m."+mediaColumns.MediaType+"=? AND COALESCE(m."+mediaColumns.DisplayStoragePath+", '')<>'') "+
+			"OR EXISTS (SELECT 1 FROM hg_youban_publish_media pm WHERE pm.profile_id=p."+profileColumns.Id+" AND pm.status=? AND pm.deleted_at IS NULL AND pm.media_type=? AND COALESCE(NULLIF(pm.edited_storage_path, ''), NULLIF(pm.storage_path, ''), NULLIF(pm.edited_file_url, ''), NULLIF(pm.file_url, ''))<>'') )",
+			consts.StatusEnabled, consts.ContentMediaTypeImage, consts.StatusEnabled, "image")
 	scope := profilescope.FromContext(mod.GetCtx())
 	if !scope.Applied {
 		return mod
@@ -1813,19 +1815,9 @@ func (s *sSysContent) publicProfileWhere(mod *gdb.Model) *gdb.Model {
 	if len(scope.TenantIds) == 0 {
 		return mod.Where("1=0")
 	}
-	// Profile state is a projection maintained by the publish addon. Older
-	// published profiles can predate that projection, so use their published
-	// media ownership as a source-backed fallback. This keeps historical data
-	// visible while still removing profiles when the tenant takes them offline.
 	return mod.Where(
-		"(EXISTS (SELECT 1 FROM hg_youban_publish_profile_state yps WHERE yps.profile_id=p."+profileColumns.Id+" AND yps.tenant_id IN(?) AND yps.deleted_at IS NULL) "+
-			"OR EXISTS (SELECT 1 FROM hg_youban_publish_media ypm WHERE ypm.profile_id=p."+profileColumns.Id+" AND ypm.tenant_id IN(?) AND ypm.status=? AND ypm.deleted_at IS NULL) "+
-			"OR EXISTS (SELECT 1 FROM hg_youban_publish_channel_profile ycp WHERE ycp.profile_id=p."+profileColumns.Id+" AND ycp.tenant_id IN(?) AND ycp.status=?))",
+		"EXISTS (SELECT 1 FROM hg_youban_publish_profile_state yps WHERE yps.profile_id=p."+profileColumns.Id+" AND yps.tenant_id IN(?) AND yps.deleted_at IS NULL)",
 		scope.TenantIds,
-		scope.TenantIds,
-		consts.StatusEnabled,
-		scope.TenantIds,
-		"active",
 	)
 }
 
