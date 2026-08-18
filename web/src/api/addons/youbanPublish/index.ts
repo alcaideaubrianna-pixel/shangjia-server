@@ -447,3 +447,19 @@ export function VipCouponSave(params = {}) {
 export function VipCouponStatus(params = {}) {
   return http.request({ url: '/youban_publish/publish/vip/coupon/status', method: 'POST', params });
 }
+
+export function CmsAppList(params = {}) {
+  return http.request({ url: '/youban_open/cmsApp/list', method: 'get', params });
+}
+
+export function CmsAppSave(params = {}) {
+  return http.request({ url: '/youban_open/cmsApp/save', method: 'POST', params });
+}
+
+export function CmsAppResetSecret(params = {}) {
+  return http.request({
+    url: '/youban_open/cmsApp/resetSecret',
+    method: 'POST',
+    params,
+  });
+}

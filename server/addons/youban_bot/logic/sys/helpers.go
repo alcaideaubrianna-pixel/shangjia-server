@@ -20,13 +20,13 @@ import (
 
 	"hotgo/addons/youban_bot/model/input/sysin"
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
+	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/library/token"
 	"hotgo/internal/model"
 	"hotgo/internal/model/entity"
-	isc "hotgo/internal/service"
 )
 
 type telegramUserIdCtxKey struct{}
@@ -257,41 +257,10 @@ func (s *sSysBot) telegramBot(ctx context.Context, botToken string) (*tgbot.Bot,
 	if botToken == "" {
 		return nil, gerror.New("Telegram Bot Token未配置")
 	}
-	cacheKey := botToken
-	s.telegramBotMu.Lock()
-	if s.telegramBots != nil {
-		if bot := s.telegramBots[cacheKey]; bot != nil {
-			s.telegramBotMu.Unlock()
-			return bot, nil
-		}
-	}
-	s.telegramBotMu.Unlock()
-	client := &http.Client{Timeout: 35 * time.Second}
-	if proxyUrl := telegramProxyUrl(ctx); proxyUrl != "" {
-		proxyClient, err := telegramHTTPClient(proxyUrl)
-		if err != nil {
-			return nil, err
-		}
-		client = proxyClient
-	}
-	bot, err := tgbot.New(botToken, tgbot.WithHTTPClient(21*time.Second, client), tgbot.WithSkipGetMe(), tgbot.WithAllowedUpdates([]string{"message", "edited_message"}), tgbot.WithErrorsHandler(func(err error) { logTelegramSDKError(ctx, err) }))
-	if err != nil {
-		return nil, err
-	}
-	s.telegramBotMu.Lock()
-	if s.telegramBots == nil {
-		s.telegramBots = map[string]*tgbot.Bot{}
-	}
-	s.telegramBots[cacheKey] = bot
-	s.telegramBotMu.Unlock()
-	return bot, nil
+	return gatewayservice.Gateway().Client(ctx, botToken)
 }
 
-func (s *sSysBot) clearTelegramBotCache() {
-	s.telegramBotMu.Lock()
-	defer s.telegramBotMu.Unlock()
-	s.telegramBots = nil
-}
+func (s *sSysBot) clearTelegramBotCache() {}
 
 func telegramProxyUrl(ctx context.Context) string {
 	candidates := []string{
@@ -744,49 +713,6 @@ func normalizeSwitch(v int) int {
 		return 1
 	}
 	return 0
-}
-
-func (s *sSysBot) botRuntimeMode(ctx context.Context, row *sysin.BotModel) string {
-	if raw := strings.TrimSpace(g.Cfg().MustGet(ctx, "youbanBot.telegram.runtimeMode").String()); raw != "" {
-		if mode := normalizeRunMode(raw); mode != "auto" {
-			return mode
-		}
-	}
-	if row != nil {
-		return normalizeRunMode(row.RunMode)
-	}
-	return "auto"
-}
-
-func (s *sSysBot) shouldUseWebhookInAuto(ctx context.Context) bool {
-	if g.Cfg().MustGet(ctx, "youbanBot.telegram.autoWebhook", false).Bool() {
-		return true
-	}
-	mode := strings.ToLower(strings.TrimSpace(g.Cfg().MustGet(ctx, "system.mode").String()))
-	return mode == "product" || mode == "production" || mode == "prod" || mode == "staging"
-}
-
-func (s *sSysBot) botWebhookURL(ctx context.Context, row *sysin.BotModel) string {
-	if row == nil {
-		return ""
-	}
-	if url := strings.TrimSpace(row.WebhookUrl); url != "" {
-		return url
-	}
-	base := ""
-	if basic, err := isc.SysConfig().GetBasic(ctx); err == nil && basic != nil {
-		base = strings.TrimRight(strings.TrimSpace(basic.Domain), "/")
-	}
-	if base == "" {
-		base = strings.TrimRight(strings.TrimSpace(g.Cfg().MustGet(ctx, "youbanBot.telegram.webhookDomain").String()), "/")
-	}
-	if base == "" {
-		return ""
-	}
-	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
-		base = "https://" + base
-	}
-	return fmt.Sprintf("%s/api/youban_bot/telegram/webhook?botId=%d", base, row.Id)
 }
 
 func (s *sSysBot) markBotOffline(ctx context.Context, botId int64, err error) error {

@@ -32,6 +32,41 @@ SET "title" = '上架系统',
 FROM (SELECT "id" FROM "hg_admin_menu" WHERE "name" = 'addons' LIMIT 1) root
 WHERE "hg_admin_menu"."name" = 'youbanPublish';
 
+INSERT INTO "hg_admin_menu" (
+  "pid", "title", "name", "path", "icon", "type", "redirect", "permissions",
+  "permission_name", "component", "always_show", "active_menu", "is_root",
+  "is_frame", "frame_src", "keep_alive", "hidden", "affix", "level", "tree",
+  "sort", "remark", "status", "created_at", "updated_at"
+)
+SELECT
+  parent."id", 'CMS 应用', 'youbanPublishCmsApps', 'cms-apps',
+  'icon-park-outline:connection-point-two', 2, '',
+  '/youban_open/cmsApp/list,/youban_open/cmsApp/save,/youban_open/cmsApp/resetSecret',
+  '', '/addons/youbanPublishCmsApp/index', 0, 'youbanPublish', 0,
+  0, '', 0, 2, 0, 3, parent."tree" || 'tr_' || parent."id"::text || ' ',
+  5, '资料开放接口应用管理', 1, NOW(), NOW()
+FROM (SELECT "id", "tree" FROM "hg_admin_menu" WHERE "name" = 'youbanPublish' LIMIT 1) parent
+WHERE NOT EXISTS (SELECT 1 FROM "hg_admin_menu" WHERE "name" = 'youbanPublishCmsApps');
+
+UPDATE "hg_admin_menu"
+SET "pid" = parent."id",
+    "title" = 'CMS 应用',
+    "path" = 'cms-apps',
+    "icon" = 'icon-park-outline:connection-point-two',
+    "type" = 2,
+    "permissions" = '/youban_open/cmsApp/list,/youban_open/cmsApp/save,/youban_open/cmsApp/resetSecret',
+    "component" = '/addons/youbanPublishCmsApp/index',
+    "active_menu" = 'youbanPublish',
+    "hidden" = 2,
+    "level" = 3,
+    "tree" = parent."tree" || 'tr_' || parent."id"::text || ' ',
+    "sort" = 5,
+    "remark" = '资料开放接口应用管理',
+    "status" = 1,
+    "updated_at" = NOW()
+FROM (SELECT "id", "tree" FROM "hg_admin_menu" WHERE "name" = 'youbanPublish' LIMIT 1) parent
+WHERE "hg_admin_menu"."name" = 'youbanPublishCmsApps';
+
 WITH parent AS (
   SELECT "id", "tree" FROM "hg_admin_menu" WHERE "name" = 'youbanPublish' LIMIT 1
 ), buttons AS (
@@ -99,6 +134,7 @@ SELECT r."id", m."id"
 FROM "hg_admin_role" r
 JOIN "hg_admin_menu" m ON m."name" IN (
   'youbanPublish',
+  'youbanPublishCmsApps',
   'youbanPublishTenant',
   'youbanPublishAccount',
   'youbanPublishProfile',

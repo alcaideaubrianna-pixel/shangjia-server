@@ -92,15 +92,6 @@ func (c *cChat) Unread(ctx context.Context, req *chat.UnreadReq) (res *chat.Unre
 	return
 }
 
-func (c *cChat) TelegramWebhook(ctx context.Context, req *chat.TelegramWebhookReq) (res *chat.TelegramWebhookRes, err error) {
-	err = service.SysChat().TelegramWebhookRaw(ctx, req.BotId, g.RequestFromCtx(ctx).GetBody(), &req.TelegramWebhookInp)
-	if err != nil {
-		return
-	}
-	res = &chat.TelegramWebhookRes{}
-	return
-}
-
 func (c *cChat) List(ctx context.Context, req *chat.ListReq) (res *chat.ListRes, err error) {
 	list, totalCount, err := service.SysChat().List(ctx, &req.ChatConversationListInp)
 	if err != nil {

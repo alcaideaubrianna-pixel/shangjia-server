@@ -15,7 +15,6 @@ type ISysTwoWayBot interface {
 	AdminBotDelete(ctx context.Context, in *sysin.BotDeleteInp) (err error)
 	AdminBotRefreshWebhook(ctx context.Context, in *sysin.BotActionInp) (err error)
 	AdminBotSetup(ctx context.Context, in *sysin.BotActionInp) (err error)
-	TelegramWebhookRaw(ctx context.Context, in *sysin.WebhookInp) (err error)
 	AdminCooperationConfigView(ctx context.Context) (*sysin.CooperationConfigModel, error)
 	AdminCooperationConfigSave(ctx context.Context, in *sysin.CooperationConfigSaveInp) (*sysin.CooperationConfigModel, error)
 	AdminCooperationApplicationList(ctx context.Context, in *sysin.CooperationApplicationListInp) ([]*sysin.CooperationApplicationModel, int, error)

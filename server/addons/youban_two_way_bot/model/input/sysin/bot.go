@@ -135,8 +135,3 @@ type BotModel struct {
 	CreatedAt            *gtime.Time `json:"createdAt" dc:"创建时间"`
 	UpdatedAt            *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
-
-type WebhookInp struct {
-	BotId int64
-	Body  []byte
-}

@@ -18,6 +18,7 @@ import (
 	"hotgo/addons/youban_publish/install"
 	publishsys "hotgo/addons/youban_publish/logic/sys"
 	"hotgo/internal/cmd/upgrade/fix"
+	"hotgo/internal/service"
 )
 
 var (
@@ -81,6 +82,13 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.ApplyYoubanPublishHeavyIndexes(ctx)
 	case "mediaPHashProfileIndexes":
 		err = fix.ApplyYoubanPublishMediaPHashProfileIndexes(ctx)
+	case "contentMediaRepair":
+		limit, _ := strconv.Atoi(args["limit"])
+		count, repairErr := service.SysContent().RepairFeiNiuMedia(ctx, limit)
+		err = repairErr
+		if err == nil {
+			g.Log().Infof(ctx, "历史资料媒体修复完成，本轮补齐:%d", count)
+		}
 	case "publishProfileMedia":
 		err = fix.BackfillYoubanPublishProfileMedia(ctx)
 	case "publishChannelProfile":

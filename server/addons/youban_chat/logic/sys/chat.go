@@ -11,8 +11,6 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -29,7 +27,7 @@ import (
 	"github.com/yazmeyaa/telegram_sticker_converter/tgs"
 
 	"hotgo/addons/youban_chat/model/input/sysin"
-	"hotgo/addons/youban_chat/service"
+	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
@@ -39,11 +37,6 @@ import (
 )
 
 type sSysChat struct {
-	runtimeCancel             context.CancelFunc
-	runtimeDone               chan struct{}
-	runtimeMu                 sync.Mutex
-	telegramBotMu             sync.Mutex
-	telegramBots              map[string]*tgbot.Bot
 	telegramFeatureMu         sync.RWMutex
 	telegramFeatures          map[string]*chatFeatureRow
 	telegramFeatureAt         time.Time
@@ -92,6 +85,8 @@ type chatMessageRow struct {
 	Status            string      `json:"status"`
 	SenderName        string      `json:"sender_name"`
 	AttachmentsJson   string      `json:"attachments_json"`
+	ReplyToMessageId  int64       `json:"reply_to_message_id"`
+	ReactionsJson     string      `json:"reactions_json"`
 	TgChatId          string      `json:"tg_chat_id"`
 	TgMessageThreadId int64       `json:"tg_message_thread_id"`
 	TgMessageId       int64       `json:"tg_message_id"`
@@ -145,6 +140,7 @@ type profileBrief struct {
 
 type chatBotRow struct {
 	Id          int64       `json:"id"`
+	AppId       string      `json:"app_id"`
 	BotName     string      `json:"bot_name"`
 	BotUsername string      `json:"bot_username"`
 	BotToken    string      `json:"bot_token"`
@@ -156,6 +152,7 @@ type chatBotRow struct {
 
 type chatBindingRow struct {
 	Id               int64       `json:"id"`
+	AppId            string      `json:"app_id"`
 	BindCode         string      `json:"bind_code"`
 	BindType         string      `json:"bind_type"`
 	SourceChannelId  int64       `json:"source_channel_id"`
@@ -192,130 +189,7 @@ func NewSysChat() *sSysChat {
 }
 
 func init() {
-	service.RegisterSysChat(NewSysChat())
-}
-
-func (s *sSysChat) StartRuntime(ctx context.Context) {
-	s.runtimeMu.Lock()
-	defer s.runtimeMu.Unlock()
-	if s.runtimeCancel != nil {
-		return
-	}
-	runtimeCtx, cancel := context.WithCancel(context.Background())
-	s.runtimeCancel = cancel
-	s.runtimeDone = make(chan struct{})
-	go func() {
-		defer close(s.runtimeDone)
-		s.runTelegramRuntime(runtimeCtx, ctx)
-	}()
-}
-
-func (s *sSysChat) StopRuntime() {
-	s.runtimeMu.Lock()
-	cancel := s.runtimeCancel
-	done := s.runtimeDone
-	s.runtimeCancel = nil
-	s.runtimeDone = nil
-	s.runtimeMu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
-	if done != nil {
-		select {
-		case <-done:
-		case <-time.After(3 * time.Second):
-		}
-	}
-}
-
-func (s *sSysChat) runTelegramRuntime(runtimeCtx context.Context, cfgCtx context.Context) {
-	time.Sleep(2 * time.Second)
-	mode := strings.ToLower(g.Cfg().MustGet(cfgCtx, "system.mode", "").String())
-	if mode == "" || mode == "develop" || mode == "testing" || mode == "not-set" {
-		s.runTelegramPolling(runtimeCtx)
-		return
-	}
-	s.setupTelegramWebhooks(cfgCtx)
-	<-runtimeCtx.Done()
-}
-
-func (s *sSysChat) runTelegramPolling(ctx context.Context) {
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
-	runningBots := map[string]struct{}{}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			bots, err := s.enabledBots(ctx)
-			if err != nil {
-				g.Log().Warningf(ctx, "读取Telegram Bot失败：%+v", err)
-				continue
-			}
-			for _, bot := range bots {
-				if bot == nil || strings.TrimSpace(bot.BotToken) == "" {
-					continue
-				}
-				botToken := strings.TrimSpace(bot.BotToken)
-				if _, ok := runningBots[botToken]; ok {
-					continue
-				}
-				tgBot, botErr := s.telegramBot(ctx, botToken)
-				if botErr != nil {
-					if strings.Contains(strings.ToLower(botErr.Error()), "unauthorized") {
-						_, disableErr := g.DB().Model(chatBotTable).Ctx(ctx).
-							Where("id", bot.Id).
-							Where("status", 1).
-							Data(g.Map{"status": 0, "updated_at": gtime.Now()}).
-							Update()
-						if disableErr != nil {
-							g.Log().Errorf(ctx, "初始化Telegram Bot失败，Token无效且自动禁用失败 bot:%d err:%+v disableErr:%+v", bot.Id, botErr, disableErr)
-						} else {
-							g.Log().Errorf(ctx, "初始化Telegram Bot失败，Token无效或已被撤销，已自动禁用 bot:%d err:%+v", bot.Id, botErr)
-						}
-					} else {
-						g.Log().Warningf(ctx, "初始化Telegram Bot失败 bot:%d err:%+v", bot.Id, botErr)
-					}
-					continue
-				}
-				if err = s.telegramDeleteWebhook(ctx, botToken); err != nil {
-					g.Log().Warningf(ctx, "清理Telegram webhook失败 bot:%d err:%+v", bot.Id, err)
-				}
-				if err = s.syncTelegramBotMenu(ctx, botToken); err != nil {
-					g.Log().Warningf(ctx, "同步Telegram菜单失败 bot:%d err:%+v", bot.Id, err)
-				}
-				runningBots[botToken] = struct{}{}
-				go tgBot.Start(ctx)
-			}
-		}
-	}
-}
-
-func (s *sSysChat) setupTelegramWebhooks(ctx context.Context) {
-	webhookBase := strings.TrimRight(g.Cfg().MustGet(ctx, "youbanChat.telegram.webhookBaseUrl", "").String(), "/")
-	if webhookBase == "" {
-		g.Log().Warning(ctx, "Telegram webhookBaseUrl未配置，跳过自动setWebhook")
-		return
-	}
-	bots, err := s.enabledBots(ctx)
-	if err != nil {
-		g.Log().Warningf(ctx, "读取Telegram Bot失败：%+v", err)
-		return
-	}
-	for _, bot := range bots {
-		if bot == nil || strings.TrimSpace(bot.BotToken) == "" {
-			continue
-		}
-		webhookURL := fmt.Sprintf("%s/api/youban_chat/telegram/webhook?botId=%d", webhookBase, bot.Id)
-		if err = s.telegramSetWebhook(ctx, bot.BotToken, webhookURL); err != nil {
-			g.Log().Warningf(ctx, "设置Telegram webhook失败 bot:%d err:%+v", bot.Id, err)
-			continue
-		}
-		if err = s.syncTelegramBotMenu(ctx, bot.BotToken); err != nil {
-			g.Log().Warningf(ctx, "同步Telegram菜单失败 bot:%d err:%+v", bot.Id, err)
-		}
-	}
+	registerChatGateway(NewSysChat())
 }
 
 func (s *sSysChat) Start(ctx context.Context, in *sysin.ChatStartInp) (res *sysin.ChatStartModel, err error) {
@@ -434,9 +308,12 @@ func (s *sSysChat) Send(ctx context.Context, in *sysin.ChatSendInp) (res *sysin.
 		return
 	}
 	messageId := normalizeClientMessageId(in.ClientMessageId, memberId)
-	id, err := s.saveMessage(ctx, row.Id, messageId, "mine", content, "text", "sent", memberDisplayName(member), nil)
+	id, inserted, err := s.saveMessage(ctx, row.Id, messageId, "mine", content, "text", "sent", memberDisplayName(member), nil)
 	if err != nil {
 		return
+	}
+	if !inserted {
+		return &sysin.ChatSendModel{MessageId: id, ClientMessageId: messageId, Status: "read"}, nil
 	}
 	_, _ = g.DB().Model(chatConversationTable).Ctx(ctx).
 		Where("id", row.Id).
@@ -594,9 +471,12 @@ func (s *sSysChat) Upload(ctx context.Context, in *sysin.ChatUploadInp, file *gh
 	}
 	content := strings.TrimSpace(in.Content)
 	messageId := fmt.Sprintf("msg_%d_%d", memberId, time.Now().UnixNano())
-	id, err := s.saveMessage(ctx, row.Id, messageId, "mine", content, "text", "sent", memberDisplayName(member), []*sysin.ChatMessageAttachmentModel{attachment})
+	id, inserted, err := s.saveMessage(ctx, row.Id, messageId, "mine", content, "text", "sent", memberDisplayName(member), []*sysin.ChatMessageAttachmentModel{attachment})
 	if err != nil {
 		return
+	}
+	if !inserted {
+		return &sysin.ChatUploadModel{Message: &sysin.ChatMessageModel{Id: id, ConversationId: row.Id, Direction: "mine", Content: content, ContentType: attachment.FileType, Status: "read", Attachments: []*sysin.ChatMessageAttachmentModel{attachment}}}, nil
 	}
 	message := &sysin.ChatMessageModel{
 		Id:             id,
@@ -652,6 +532,9 @@ func (s *sSysChat) Unread(ctx context.Context) (res *sysin.ChatUnreadModel, err 
 func (s *sSysChat) TelegramWebhook(ctx context.Context, in *sysin.TelegramWebhookInp) (err error) {
 	if in == nil {
 		return nil
+	}
+	if in.MessageReaction != nil {
+		return s.applyTelegramReaction(ctx, in.MessageReaction)
 	}
 	msg := in.Message
 	if msg == nil {
@@ -717,24 +600,44 @@ func (s *sSysChat) TelegramWebhook(ctx context.Context, in *sysin.TelegramWebhoo
 	return nil
 }
 
-func (s *sSysChat) TelegramWebhookRaw(ctx context.Context, botId int64, body []byte, fallback *sysin.TelegramWebhookInp) error {
-	if len(body) == 0 {
-		return s.TelegramWebhook(ctx, fallback)
+func (s *sSysChat) applyTelegramReaction(ctx context.Context, in *sysin.TelegramReactionInp) error {
+	if in == nil || in.ChatId == 0 || in.MessageId <= 0 {
+		return nil
 	}
-	var update models.Update
-	if err := json.Unmarshal(body, &update); err != nil {
-		g.Log().Warningf(ctx, "解析Telegram webhook原始消息失败，使用兼容入参 bot:%d err:%+v", botId, err)
-		return s.TelegramWebhook(ctx, fallback)
-	}
-	in, err := telegramUpdateToWebhookInp(&update)
-	if err != nil {
+	if err := s.ensureTelegramMessageReadColumns(ctx); err != nil {
 		return err
 	}
-	if in == nil {
-		return s.TelegramWebhook(ctx, fallback)
+	var message *chatMessageRow
+	if err := g.DB().Model(chatMessageTable).Ctx(ctx).Where("tg_chat_id", fmt.Sprintf("%d", in.ChatId)).Where("tg_message_id", in.MessageId).Scan(&message); err != nil {
+		return gerror.Wrap(err, "读取Telegram反应消息失败")
 	}
-	in.BotId = botId
-	return s.TelegramWebhook(ctx, in)
+	if message == nil {
+		return nil
+	}
+	reactions := map[string][]string{}
+	_ = json.Unmarshal([]byte(message.ReactionsJson), &reactions)
+	actor := fmt.Sprintf("telegram:%d", in.ActorId)
+	for emoji, values := range reactions {
+		filtered := values[:0]
+		for _, value := range values {
+			if value != actor {
+				filtered = append(filtered, value)
+			}
+		}
+		if len(filtered) == 0 {
+			delete(reactions, emoji)
+		} else {
+			reactions[emoji] = filtered
+		}
+	}
+	for _, emoji := range in.NewReaction {
+		if strings.TrimSpace(emoji) != "" {
+			reactions[emoji] = append(reactions[emoji], actor)
+		}
+	}
+	encoded, _ := json.Marshal(reactions)
+	_, err := g.DB().Model(chatMessageTable).Ctx(ctx).Where("id", message.Id).Data(g.Map{"reactions_json": string(encoded), "updated_at": gtime.Now()}).Update()
+	return err
 }
 
 func (s *sSysChat) List(ctx context.Context, in *sysin.ChatConversationListInp) (list []*sysin.ChatConversationListModel, totalCount int, err error) {
@@ -1651,6 +1554,8 @@ func (s *sSysChat) ensureTelegramMessageReadColumns(ctx context.Context) error {
 		`ALTER TABLE hg_youban_chat_message ADD COLUMN IF NOT EXISTS tg_message_thread_id bigint NOT NULL DEFAULT 0`,
 		`ALTER TABLE hg_youban_chat_message ADD COLUMN IF NOT EXISTS tg_message_id bigint NOT NULL DEFAULT 0`,
 		`ALTER TABLE hg_youban_chat_message ADD COLUMN IF NOT EXISTS read_at timestamp`,
+		`ALTER TABLE hg_youban_chat_message ADD COLUMN IF NOT EXISTS reply_to_message_id bigint NOT NULL DEFAULT 0`,
+		`ALTER TABLE hg_youban_chat_message ADD COLUMN IF NOT EXISTS reactions_json text`,
 		`CREATE INDEX IF NOT EXISTS idx_ybcm_tg_message ON hg_youban_chat_message (tg_chat_id, tg_message_id)`,
 	}
 	if strings.ToLower(g.DB().GetConfig().Type) != consts.DBPgsql {
@@ -1659,6 +1564,8 @@ func (s *sSysChat) ensureTelegramMessageReadColumns(ctx context.Context) error {
 			"ALTER TABLE `hg_youban_chat_message` ADD COLUMN IF NOT EXISTS `tg_message_thread_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG话题ID'",
 			"ALTER TABLE `hg_youban_chat_message` ADD COLUMN IF NOT EXISTS `tg_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG消息ID'",
 			"ALTER TABLE `hg_youban_chat_message` ADD COLUMN IF NOT EXISTS `read_at` datetime DEFAULT NULL COMMENT '已读时间'",
+			"ALTER TABLE `hg_youban_chat_message` ADD COLUMN IF NOT EXISTS `reply_to_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '引用本地消息ID'",
+			"ALTER TABLE `hg_youban_chat_message` ADD COLUMN IF NOT EXISTS `reactions_json` text COMMENT '表情反应JSON'",
 		}
 	}
 	for _, sql := range sqlList {
@@ -1795,6 +1702,9 @@ func (s *sSysChat) memberTelegramTitle(ctx context.Context, member *entity.Admin
 	name := memberDisplayName(member)
 	if member == nil {
 		return name
+	}
+	if member.Id < 0 {
+		return fmt.Sprintf("%s [网站用户]", name)
 	}
 	vip, err := internalService.AdminMember().GetVip(ctx, member.Id)
 	if err != nil || vip == nil || !vip.IsVip {
@@ -1995,7 +1905,6 @@ func (s *sSysChat) notifyTelegramSession(ctx context.Context, row *chatConversat
 }
 
 func (s *sSysChat) notifyTelegramMessage(ctx context.Context, row *chatConversationRow, profile *profileBrief, member *entity.AdminMember, messageId string, content string, attachments []*sysin.ChatMessageAttachmentModel) error {
-	_ = messageId
 	botToken, chatID, err := s.telegramTarget(ctx, row)
 	if err != nil || botToken == "" || chatID == "" {
 		return err
@@ -2010,22 +1919,48 @@ func (s *sSysChat) notifyTelegramMessage(ctx context.Context, row *chatConversat
 			return err
 		}
 	}
+	replyToTelegramID := s.telegramReplyTarget(ctx, row.Id, messageId)
 	senderTitle := s.memberTelegramTitle(ctx, member)
 	text := fmt.Sprintf("<b>%s</b>：\n%s", senderTitle, strings.TrimSpace(content))
 	if strings.TrimSpace(content) == "" && len(attachments) > 0 {
 		text = fmt.Sprintf("<b>%s</b>：\n%s", senderTitle, attachmentLastMessage(&sysin.ChatMessageModel{Attachments: attachments}))
 	}
 	if len(attachments) > 0 {
-		if err = s.telegramSendAttachments(ctx, botToken, chatID, topicID, text, attachments); err != nil {
+		var tgMessageID int64
+		if tgMessageID, err = s.telegramSendAttachments(ctx, botToken, chatID, topicID, replyToTelegramID, text, attachments); err != nil {
 			return gerror.Wrap(err, "发送Telegram附件失败")
 		}
+		s.persistTelegramMessageTarget(ctx, messageId, chatID, topicID, tgMessageID)
 		return nil
 	}
-	_, err = s.telegramSendMessage(ctx, botToken, chatID, topicID, text)
+	var tgMessageID int64
+	tgMessageID, err = s.telegramSendMessageReply(ctx, botToken, chatID, topicID, replyToTelegramID, text)
 	if err != nil {
 		return gerror.Wrap(err, "发送Telegram消息失败")
 	}
+	s.persistTelegramMessageTarget(ctx, messageId, chatID, topicID, tgMessageID)
 	return nil
+}
+
+func (s *sSysChat) telegramReplyTarget(ctx context.Context, conversationID int64, externalMessageID string) int64 {
+	var current *chatMessageRow
+	if err := g.DB().Model(chatMessageTable).Ctx(ctx).Where("conversation_id", conversationID).Where("pocketping_message_id", externalMessageID).Scan(&current); err != nil || current == nil || current.ReplyToMessageId <= 0 {
+		return 0
+	}
+	value, err := g.DB().Model(chatMessageTable).Ctx(ctx).Where("conversation_id", conversationID).Where("id", current.ReplyToMessageId).Fields("tg_message_id").Value()
+	if err != nil {
+		return 0
+	}
+	return value.Int64()
+}
+
+func (s *sSysChat) persistTelegramMessageTarget(ctx context.Context, externalMessageID, chatID string, topicID, messageID int64) {
+	if messageID <= 0 {
+		return
+	}
+	_, _ = g.DB().Model(chatMessageTable).Ctx(ctx).Where("pocketping_message_id", externalMessageID).Data(g.Map{
+		"tg_chat_id": chatID, "tg_message_thread_id": topicID, "tg_message_id": messageID, "updated_at": gtime.Now(),
+	}).Update()
 }
 
 func (s *sSysChat) sendTelegramSessionNotice(ctx context.Context, botToken, chatID string, topicID int64, row *chatConversationRow, profile *profileBrief, member *entity.AdminMember) error {
@@ -2157,6 +2092,10 @@ func isTelegramNotForumError(err error) bool {
 }
 
 func (s *sSysChat) telegramSendMessage(ctx context.Context, botToken, chatID string, topicID int64, text string) (int64, error) {
+	return s.telegramSendMessageReply(ctx, botToken, chatID, topicID, 0, text)
+}
+
+func (s *sSysChat) telegramSendMessageReply(ctx context.Context, botToken, chatID string, topicID, replyToMessageID int64, text string) (int64, error) {
 	bot, err := s.telegramBot(ctx, botToken)
 	if err != nil {
 		return 0, err
@@ -2164,6 +2103,9 @@ func (s *sSysChat) telegramSendMessage(ctx context.Context, botToken, chatID str
 	params := &tgbot.SendMessageParams{ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML}
 	if topicID > 0 {
 		params.MessageThreadID = int(topicID)
+	}
+	if replyToMessageID > 0 {
+		params.ReplyParameters = &models.ReplyParameters{MessageID: int(replyToMessageID)}
 	}
 	message, err := bot.SendMessage(ctx, params)
 	if err != nil {
@@ -2175,11 +2117,12 @@ func (s *sSysChat) telegramSendMessage(ctx context.Context, botToken, chatID str
 	return int64(message.ID), nil
 }
 
-func (s *sSysChat) telegramSendAttachments(ctx context.Context, botToken, chatID string, topicID int64, caption string, attachments []*sysin.ChatMessageAttachmentModel) error {
+func (s *sSysChat) telegramSendAttachments(ctx context.Context, botToken, chatID string, topicID, replyToMessageID int64, caption string, attachments []*sysin.ChatMessageAttachmentModel) (int64, error) {
 	bot, err := s.telegramBot(ctx, botToken)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	var firstMessageID int64
 	for i, item := range attachments {
 		if item == nil {
 			continue
@@ -2198,28 +2141,43 @@ func (s *sSysChat) telegramSendAttachments(ctx context.Context, botToken, chatID
 			if topicID > 0 {
 				params.MessageThreadID = int(topicID)
 			}
-			if _, err = bot.SendPhoto(ctx, params); err != nil {
-				return err
+			if i == 0 && replyToMessageID > 0 {
+				params.ReplyParameters = &models.ReplyParameters{MessageID: int(replyToMessageID)}
+			}
+			if sent, sendErr := bot.SendPhoto(ctx, params); sendErr != nil {
+				return 0, sendErr
+			} else if firstMessageID == 0 && sent != nil {
+				firstMessageID = int64(sent.ID)
 			}
 		case "video":
 			params := &tgbot.SendVideoParams{ChatID: chatID, Video: file, Caption: itemCaption, ParseMode: models.ParseModeHTML, SupportsStreaming: true}
 			if topicID > 0 {
 				params.MessageThreadID = int(topicID)
 			}
-			if _, err = bot.SendVideo(ctx, params); err != nil {
-				return err
+			if i == 0 && replyToMessageID > 0 {
+				params.ReplyParameters = &models.ReplyParameters{MessageID: int(replyToMessageID)}
+			}
+			if sent, sendErr := bot.SendVideo(ctx, params); sendErr != nil {
+				return 0, sendErr
+			} else if firstMessageID == 0 && sent != nil {
+				firstMessageID = int64(sent.ID)
 			}
 		default:
 			params := &tgbot.SendDocumentParams{ChatID: chatID, Document: file, Caption: itemCaption, ParseMode: models.ParseModeHTML}
 			if topicID > 0 {
 				params.MessageThreadID = int(topicID)
 			}
-			if _, err = bot.SendDocument(ctx, params); err != nil {
-				return err
+			if i == 0 && replyToMessageID > 0 {
+				params.ReplyParameters = &models.ReplyParameters{MessageID: int(replyToMessageID)}
+			}
+			if sent, sendErr := bot.SendDocument(ctx, params); sendErr != nil {
+				return 0, sendErr
+			} else if firstMessageID == 0 && sent != nil {
+				firstMessageID = int64(sent.ID)
 			}
 		}
 	}
-	return nil
+	return firstMessageID, nil
 }
 
 func telegramInputFile(item *sysin.ChatMessageAttachmentModel) models.InputFile {
@@ -2239,69 +2197,12 @@ func telegramInputFile(item *sysin.ChatMessageAttachmentModel) models.InputFile 
 	return nil
 }
 
-func (s *sSysChat) telegramSetWebhook(ctx context.Context, botToken string, webhookURL string) error {
-	bot, err := s.telegramBot(ctx, botToken)
-	if err != nil {
-		return err
-	}
-	_, err = bot.SetWebhook(ctx, &tgbot.SetWebhookParams{
-		URL:            webhookURL,
-		AllowedUpdates: []string{"message", "edited_message"},
-	})
-	return err
-}
-
-func (s *sSysChat) telegramDeleteWebhook(ctx context.Context, botToken string) error {
-	bot, err := s.telegramBot(ctx, botToken)
-	if err != nil {
-		return err
-	}
-	_, err = bot.DeleteWebhook(ctx, &tgbot.DeleteWebhookParams{DropPendingUpdates: false})
-	return err
-}
-
 func (s *sSysChat) telegramBot(ctx context.Context, botToken string) (*tgbot.Bot, error) {
 	botToken = strings.TrimSpace(botToken)
 	if botToken == "" {
 		return nil, gerror.New("Telegram Bot Token未配置")
 	}
-	proxyUrl := s.telegramProxy(ctx)
-	cacheKey := botToken + "\n" + proxyUrl
-	s.telegramBotMu.Lock()
-	if s.telegramBots != nil {
-		if bot := s.telegramBots[cacheKey]; bot != nil {
-			s.telegramBotMu.Unlock()
-			return bot, nil
-		}
-	}
-	s.telegramBotMu.Unlock()
-
-	client := &http.Client{Timeout: 35 * time.Second}
-	if proxyUrl != "" {
-		parsedUrl, err := url.Parse(proxyUrl)
-		if err != nil {
-			return nil, err
-		}
-		client.Transport = &http.Transport{Proxy: http.ProxyURL(parsedUrl)}
-	}
-	bot, err := tgbot.New(botToken,
-		tgbot.WithHTTPClient(21*time.Second, client),
-		tgbot.WithAllowedUpdates(tgbot.AllowedUpdates{"message", "edited_message"}),
-		tgbot.WithErrorsHandler(func(err error) {
-			g.Log().Warningf(ctx, "Telegram SDK错误：%+v", err)
-		}),
-		tgbot.WithDefaultHandler(s.telegramUpdateHandler),
-	)
-	if err != nil {
-		return nil, err
-	}
-	s.telegramBotMu.Lock()
-	if s.telegramBots == nil {
-		s.telegramBots = make(map[string]*tgbot.Bot)
-	}
-	s.telegramBots[cacheKey] = bot
-	s.telegramBotMu.Unlock()
-	return bot, nil
+	return gatewayservice.Gateway().Client(ctx, botToken)
 }
 
 func (s *sSysChat) telegramBotProfile(ctx context.Context, botToken string) (*models.User, error) {
@@ -2317,44 +2218,6 @@ func (s *sSysChat) telegramBotProfile(ctx context.Context, botToken string) (*mo
 		return nil, gerror.New("Token不是有效的Telegram Bot")
 	}
 	return user, nil
-}
-
-func (s *sSysChat) telegramUpdateHandler(ctx context.Context, currentBot *tgbot.Bot, update *models.Update) {
-	if update == nil {
-		return
-	}
-	in, err := telegramUpdateToWebhookInp(update)
-	if err != nil {
-		g.Log().Warningf(ctx, "转换Telegram更新失败 update:%d err:%+v", update.ID, err)
-		return
-	}
-	if in.BotId == 0 {
-		in.BotId = s.telegramBotIdBySDKBot(ctx, currentBot)
-	}
-	if err = s.TelegramWebhook(ctx, in); err != nil {
-		g.Log().Warningf(ctx, "处理Telegram更新失败 update:%d err:%+v", update.ID, err)
-	}
-}
-
-func (s *sSysChat) telegramBotIdBySDKBot(ctx context.Context, currentBot *tgbot.Bot) int64 {
-	if currentBot == nil {
-		return 0
-	}
-	me, err := currentBot.GetMe(ctx)
-	if err != nil || me == nil || strings.TrimSpace(me.Username) == "" {
-		return 0
-	}
-	var row *chatBotRow
-	err = g.DB().Model(chatBotTable).Ctx(ctx).
-		Fields("id").
-		Where("bot_username", me.Username).
-		Where("status", 1).
-		WhereNull("deleted_at").
-		Scan(&row)
-	if err != nil || row == nil {
-		return 0
-	}
-	return row.Id
 }
 
 func (s *sSysChat) telegramMessageAttachments(ctx context.Context, row *chatConversationRow, msg *sysin.TelegramMessageInp) ([]*sysin.ChatMessageAttachmentModel, error) {
@@ -2578,11 +2441,26 @@ func telegramUpdateToWebhookInp(update *models.Update) (*sysin.TelegramWebhookIn
 	if update == nil {
 		return nil, nil
 	}
-	return &sysin.TelegramWebhookInp{
+	in := &sysin.TelegramWebhookInp{
 		UpdateId:      int64(update.ID),
 		Message:       telegramSDKMessageToInp(update.Message),
 		EditedMessage: telegramSDKMessageToInp(update.EditedMessage),
-	}, nil
+	}
+	if update.MessageReaction != nil {
+		reaction := update.MessageReaction
+		actorID := int64(0)
+		if reaction.User != nil {
+			actorID = reaction.User.ID
+		}
+		emojis := make([]string, 0, len(reaction.NewReaction))
+		for _, item := range reaction.NewReaction {
+			if item.ReactionTypeEmoji != nil {
+				emojis = append(emojis, item.ReactionTypeEmoji.Emoji)
+			}
+		}
+		in.MessageReaction = &sysin.TelegramReactionInp{ChatId: reaction.Chat.ID, MessageId: int64(reaction.MessageID), ActorId: actorID, NewReaction: emojis}
+	}
+	return in, nil
 }
 
 func telegramSDKMessageToInp(msg *models.Message) *sysin.TelegramMessageInp {
@@ -2695,23 +2573,7 @@ func telegramSDKStickerToInp(sticker *models.Sticker) *sysin.TelegramStickerInp 
 	}
 }
 
-func (s *sSysChat) telegramProxy(ctx context.Context) string {
-	if proxyUrl := strings.TrimSpace(g.Cfg().MustGet(ctx, "youbanChat.telegram.proxy", "").String()); proxyUrl != "" {
-		return proxyUrl
-	}
-	mode := strings.ToLower(g.Cfg().MustGet(ctx, "system.mode", "").String())
-	if mode != "" && mode != "develop" && mode != "testing" && mode != "not-set" {
-		return ""
-	}
-	for _, key := range []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"} {
-		if proxyUrl := strings.TrimSpace(os.Getenv(key)); proxyUrl != "" {
-			return proxyUrl
-		}
-	}
-	return ""
-}
-
-func (s *sSysChat) saveMessage(ctx context.Context, conversationId int64, externalMessageId, direction, content, contentType, status, senderName string, attachments []*sysin.ChatMessageAttachmentModel) (id int64, err error) {
+func (s *sSysChat) saveMessage(ctx context.Context, conversationId int64, externalMessageId, direction, content, contentType, status, senderName string, attachments []*sysin.ChatMessageAttachmentModel) (id int64, inserted bool, err error) {
 	attachmentsJson := "[]"
 	if len(attachments) > 0 {
 		bytes, _ := json.Marshal(attachments)
@@ -2723,12 +2585,13 @@ func (s *sSysChat) saveMessage(ctx context.Context, conversationId int64, extern
 		if strings.Contains(strings.ToLower(err.Error()), "duplicate") || strings.Contains(strings.ToLower(err.Error()), "unique") {
 			value, valueErr := g.DB().Model(chatMessageTable).Ctx(ctx).Where("pocketping_message_id", externalMessageId).Fields("id").Value()
 			if valueErr == nil {
-				return value.Int64(), nil
+				return value.Int64(), false, nil
 			}
 		}
 		err = gerror.Wrap(err, "保存聊天消息失败")
+		return 0, false, err
 	}
-	return
+	return id, true, nil
 }
 
 func (s *sSysChat) saveTelegramInboundMessage(ctx context.Context, row *chatConversationRow, msg *sysin.TelegramMessageInp, externalMessageId, content, contentType, senderName string, attachments []*sysin.ChatMessageAttachmentModel) (id int64, inserted bool, err error) {
@@ -2743,6 +2606,17 @@ func (s *sSysChat) saveTelegramInboundMessage(ctx context.Context, row *chatConv
 		bytes, _ := json.Marshal(attachments)
 		attachmentsJson = string(bytes)
 	}
+	replyToMessageID := int64(0)
+	if msg.ReplyTo != nil && msg.ReplyTo.MessageId > 0 {
+		value, valueErr := g.DB().Model(chatMessageTable).Ctx(ctx).
+			Where("conversation_id", row.Id).
+			Where("tg_chat_id", fmt.Sprintf("%d", msg.Chat.Id)).
+			Where("tg_message_id", msg.ReplyTo.MessageId).
+			Fields("id").Value()
+		if valueErr == nil {
+			replyToMessageID = value.Int64()
+		}
+	}
 	data := g.Map{
 		"conversation_id":       row.Id,
 		"pocketping_message_id": externalMessageId,
@@ -2752,6 +2626,7 @@ func (s *sSysChat) saveTelegramInboundMessage(ctx context.Context, row *chatConv
 		"status":                "unread",
 		"sender_name":           senderName,
 		"attachments_json":      attachmentsJson,
+		"reply_to_message_id":   replyToMessageID,
 		"tg_chat_id":            fmt.Sprintf("%d", msg.Chat.Id),
 		"tg_message_thread_id":  msg.MessageThreadId,
 		"tg_message_id":         msg.MessageId,
@@ -2787,15 +2662,14 @@ func (s *sSysChat) telegramSetMessageReaction(ctx context.Context, row *chatConv
 	if err != nil {
 		return err
 	}
+	reaction := []models.ReactionType(nil)
+	if strings.TrimSpace(emoji) != "" {
+		reaction = []models.ReactionType{{Type: models.ReactionTypeTypeEmoji, ReactionTypeEmoji: &models.ReactionTypeEmoji{Emoji: emoji}}}
+	}
 	_, err = bot.SetMessageReaction(ctx, &tgbot.SetMessageReactionParams{
 		ChatID:    chatID,
 		MessageID: int(msg.TgMessageId),
-		Reaction: []models.ReactionType{{
-			Type: models.ReactionTypeTypeEmoji,
-			ReactionTypeEmoji: &models.ReactionTypeEmoji{
-				Emoji: emoji,
-			},
-		}},
+		Reaction:  reaction,
 	})
 	return err
 }
@@ -2813,7 +2687,11 @@ func packLocalChatMessage(item *chatMessageRow) *sysin.ChatMessageModel {
 	if item.ReadAt != nil {
 		readAt = item.ReadAt.String()
 	}
-	return &sysin.ChatMessageModel{Id: item.Id, ClientMessageId: item.ExternalMessageId, ConversationId: item.ConversationId, Direction: item.Direction, Content: item.Content, ContentType: item.ContentType, Status: item.Status, SenderName: item.SenderName, CreatedAt: createdAt, ReadAt: readAt, Attachments: attachments}
+	reactions := map[string][]string{}
+	if strings.TrimSpace(item.ReactionsJson) != "" {
+		_ = json.Unmarshal([]byte(item.ReactionsJson), &reactions)
+	}
+	return &sysin.ChatMessageModel{Id: item.Id, ClientMessageId: item.ExternalMessageId, ConversationId: item.ConversationId, Direction: item.Direction, Content: item.Content, ContentType: item.ContentType, Status: item.Status, SenderName: item.SenderName, CreatedAt: createdAt, ReadAt: readAt, Attachments: attachments, Reactions: reactions}
 }
 
 func packApiChatMessage(item *chatMessageRow) *sysin.ChatMessageModel {
@@ -2864,6 +2742,9 @@ func chatSessionId(conversationId int64) string {
 }
 
 func memberShortId(memberId int64) string {
+	if memberId < 0 {
+		memberId = -memberId
+	}
 	return fmt.Sprintf("U%05d", memberId%100000)
 }
 

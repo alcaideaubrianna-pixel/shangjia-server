@@ -2024,3 +2024,33 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_activity_generation` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ybp_activity_generation` (`activity_code`,`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_cms_app` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT, `app_id` varchar(64) NOT NULL DEFAULT '',
+  `app_secret` varchar(255) NOT NULL DEFAULT '', `name` varchar(128) NOT NULL DEFAULT '',
+  `base_url` varchar(512) NOT NULL DEFAULT '', `instance_id` varchar(128) DEFAULT NULL,
+  `enroll_hash` varchar(64) NOT NULL DEFAULT '', `source_ip` varchar(64) NOT NULL DEFAULT '',
+  `cms_version` varchar(64) NOT NULL DEFAULT '', `last_heartbeat_at` datetime DEFAULT NULL,
+  `status` tinyint NOT NULL DEFAULT 1, `created_at` datetime DEFAULT NULL, `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_cms_app_app_id` (`app_id`),
+  UNIQUE KEY `uk_ybp_cms_app_instance_id` (`instance_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='XC-CMS开放应用';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_cms_binding_code` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT, `app_id` varchar(64) NOT NULL DEFAULT '',
+  `code_hash` varchar(64) NOT NULL DEFAULT '', `code_hint` varchar(16) NOT NULL DEFAULT '',
+  `version` int NOT NULL DEFAULT 1, `status` tinyint NOT NULL DEFAULT 1,
+  `created_at` datetime DEFAULT NULL, `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_cms_binding_code_app` (`app_id`),
+  UNIQUE KEY `uk_ybp_cms_binding_code_hash` (`code_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='XC-CMS租户绑定码';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_cms_tenant_binding` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT, `app_id` varchar(64) NOT NULL DEFAULT '',
+  `tenant_id` bigint NOT NULL DEFAULT 0, `code_version` int NOT NULL DEFAULT 1,
+  `status` varchar(16) NOT NULL DEFAULT 'pending', `reason` varchar(500) NOT NULL DEFAULT '',
+  `requested_at` datetime DEFAULT NULL, `reviewed_at` datetime DEFAULT NULL,
+  `created_at` datetime DEFAULT NULL, `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_cms_tenant_binding` (`app_id`,`tenant_id`),
+  KEY `idx_ybp_cms_binding_tenant_status` (`tenant_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='XC-CMS租户绑定关系';

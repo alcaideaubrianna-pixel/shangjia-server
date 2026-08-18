@@ -46,10 +46,3 @@ type CustomEmojiResolveReq struct {
 type CustomEmojiResolveRes struct {
 	List []*sysin.CustomEmojiModel `json:"list" dc:"Emoji资源列表"`
 }
-
-type TelegramWebhookReq struct {
-	g.Meta `path:"/telegram/webhook" method:"post" tags:"全局机器人" summary:"Telegram Webhook"`
-	BotId  int64 `json:"botId" dc:"Bot ID"`
-}
-
-type TelegramWebhookRes struct{}

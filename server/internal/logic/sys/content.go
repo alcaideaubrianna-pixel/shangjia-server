@@ -10,6 +10,9 @@ import (
 	"hotgo/internal/dao"
 	"hotgo/internal/library/cache"
 	"hotgo/internal/library/location"
+	"hotgo/internal/library/profileextractor"
+	"hotgo/internal/library/profilescope"
+	"hotgo/internal/library/publishmedia"
 	"hotgo/internal/library/storager"
 	"hotgo/internal/library/token"
 	"hotgo/internal/model/entity"
@@ -44,7 +47,7 @@ const (
 	feiNiuCosURLPrefix          = "https://sh-hk-qiuniu-1368574312.cos.ap-hongkong.myqcloud.com/"
 	feiNiuProxyCosPrefix        = "/prod-api/telegram/content-note/cos/"
 	contentFilterOptionsKey     = "content:profile:filter_options"
-	contentRegionsKey           = "content:profile:regions"
+	contentRegionsKey           = "content:profile:regions:v4"
 	contentHomeCardsKeyBase     = "content:home:profile_cards"
 	contentProfileStatsTable    = "hg_content_profile_stats"
 	contentImagePHashSigKey     = "content:profile:image_phash_sig:"
@@ -188,6 +191,18 @@ func splitFilterValues(value string) []string {
 		list = append(list, part)
 	}
 	return list
+}
+
+func parseInt64FilterValues(value string) []int64 {
+	parts := splitFilterValues(value)
+	ids := make([]int64, 0, len(parts))
+	for _, part := range parts {
+		id, err := strconv.ParseInt(part, 10, 64)
+		if err == nil && id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func parseFilterRanges(value string) []contentFilterRange {
@@ -431,6 +446,12 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 	profileColumns := dao.ContentProfile.Columns()
 	mod := dao.ContentProfile.Ctx(ctx).As("p")
 	mod = s.publicProfileWhere(mod)
+	if len(in.ProfileIds) > 0 {
+		mod = mod.WhereIn(aliasField("p", profileColumns.Id), in.ProfileIds)
+	}
+	if excludedIds := parseInt64FilterValues(in.ExcludeProfileIds); len(excludedIds) > 0 {
+		mod = mod.WhereNotIn(aliasField("p", profileColumns.Id), excludedIds)
+	}
 	if len(in.ExcludeActions) == 0 {
 		in.ExcludeActions = []string{"block"}
 	}
@@ -605,12 +626,17 @@ func (s *sSysContent) buildProfileListFromRows(ctx context.Context, rows []conte
 	if err != nil {
 		return
 	}
+	regionDirectory := loadContentRegionDirectory(ctx)
 	for _, row := range rows {
 		item := row.toListModel()
+		decorateProfileRegionWithDirectory(regionDirectory, item)
 		item.CoverUrl = contentAssetURL(coverMap[row.Id])
 		item.Avatar = item.CoverUrl
 		item.Media = mediaMap[row.Id]
 		item.Photos = mediaPhotos(item.Media)
+		if item.CoverUrl == "" && len(item.Photos) > 0 {
+			item.CoverUrl, item.Avatar = item.Photos[0], item.Photos[0]
+		}
 		list = append(list, item)
 	}
 	return
@@ -660,16 +686,21 @@ func (s *sSysContent) listProfilesByIds(ctx context.Context, profileIds []int64)
 		return
 	}
 	list = make([]*sysin.ContentProfileListModel, 0, len(profileIds))
+	regionDirectory := loadContentRegionDirectory(ctx)
 	for _, id := range profileIds {
 		row, ok := rowMap[id]
 		if !ok {
 			continue
 		}
 		item := row.toListModel()
+		decorateProfileRegionWithDirectory(regionDirectory, item)
 		item.CoverUrl = contentAssetURL(coverMap[row.Id])
 		item.Avatar = item.CoverUrl
 		item.Media = mediaMap[row.Id]
 		item.Photos = mediaPhotos(item.Media)
+		if item.CoverUrl == "" && len(item.Photos) > 0 {
+			item.CoverUrl, item.Avatar = item.Photos[0], item.Photos[0]
+		}
 		list = append(list, item)
 	}
 	return list, len(list), nil
@@ -825,7 +856,9 @@ func (s *sSysContent) buildStandardRegionOptions(ctx context.Context) (list []*s
 			}
 			provinceMap[row.Id] = &sysin.ContentProfileRegionOption{
 				Label:    title,
-				Value:    title,
+				Value:    strconv.FormatInt(row.Id, 10),
+				Code:     strconv.FormatInt(row.Id, 10),
+				Type:     "province",
 				Province: title,
 				Children: []*sysin.ContentProfileRegionOption{},
 			}
@@ -842,7 +875,9 @@ func (s *sSysContent) buildStandardRegionOptions(ctx context.Context) (list []*s
 		}
 		parent.Children = append(parent.Children, &sysin.ContentProfileRegionOption{
 			Label:    city,
-			Value:    parent.Province + "/" + city,
+			Value:    strconv.FormatInt(row.Id, 10),
+			Code:     strconv.FormatInt(row.Id, 10),
+			Type:     "city",
 			Province: parent.Province,
 			City:     city,
 		})
@@ -866,6 +901,8 @@ func (s *sSysContent) buildStandardRegionOptions(ctx context.Context) (list []*s
 		item := &sysin.ContentProfileRegionOption{
 			Label:    province,
 			Value:    province,
+			Code:     province,
+			Type:     "country",
 			Province: province,
 			Children: []*sysin.ContentProfileRegionOption{},
 		}
@@ -876,6 +913,8 @@ func (s *sSysContent) buildStandardRegionOptions(ctx context.Context) (list []*s
 			item.Children = append(item.Children, &sysin.ContentProfileRegionOption{
 				Label:    city,
 				Value:    province + "/" + city,
+				Code:     province + "/" + city,
+				Type:     "city",
 				Province: province,
 				City:     city,
 			})
@@ -1239,6 +1278,7 @@ func (s *sSysContent) ViewProfile(ctx context.Context, in *sysin.ContentProfileV
 		VideoCount:              row.VideoCount,
 		MemberOnly:              row.Visibility == consts.ContentVisibilityMemberOnly,
 	}
+	decorateProfileRegionWithDirectory(loadContentRegionDirectory(ctx), &res.ContentProfileListModel)
 	if isVip {
 		res.PlainText = filterSensitivePlainText(row.PlainText)
 	}
@@ -1404,6 +1444,12 @@ LIMIT ?`, queryAfterNoteId, lastNoteId, batchSize)
 	}
 	res.MediaImported += repaired
 	return
+}
+
+// RepairFeiNiuMedia repairs historical profiles whose media rows are missing or incomplete.
+func (s *sSysContent) RepairFeiNiuMedia(ctx context.Context, limit int) (count int, err error) {
+	sourceGroup := g.Cfg().MustGet(ctx, "contentImport.feiniu.dbGroup", "feiniu").String()
+	return s.repairFeiNiuMissingMedia(ctx, g.DB(sourceGroup), limit)
 }
 
 func (s *sSysContent) DedupeProfilesByImagePHash(ctx context.Context, in *sysin.ContentDedupePHashInp) (res *sysin.ContentDedupePHashModel, err error) {
@@ -1746,12 +1792,23 @@ func (s *sSysContent) ImportRunList(ctx context.Context, in *sysin.ContentImport
 func (s *sSysContent) publicProfileWhere(mod *gdb.Model) *gdb.Model {
 	profileColumns := dao.ContentProfile.Columns()
 	mediaColumns := dao.ContentMedia.Columns()
-	return mod.
+	mod = mod.
 		Where(aliasField("p", profileColumns.Status), 1).
 		WhereIn(aliasField("p", profileColumns.ImportStatus), publicProfileImportStatuses).
 		Where(aliasField("p", profileColumns.ReviewStatus), consts.ContentReviewApproved).
 		WhereIn(aliasField("p", profileColumns.Visibility), []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly}).
 		Where("EXISTS (SELECT 1 FROM "+dao.ContentMedia.Table()+" m WHERE m."+mediaColumns.ProfileId+"=p."+profileColumns.Id+" AND m."+mediaColumns.Status+"=? AND m."+mediaColumns.MediaType+"=? AND COALESCE(m."+mediaColumns.DisplayStoragePath+", '')<>'')", consts.StatusEnabled, consts.ContentMediaTypeImage)
+	scope := profilescope.FromContext(mod.GetCtx())
+	if !scope.Applied {
+		return mod
+	}
+	if len(scope.TenantIds) == 0 {
+		return mod.Where("1=0")
+	}
+	return mod.Where(
+		"EXISTS (SELECT 1 FROM hg_youban_publish_profile_state yps WHERE yps.profile_id=p."+profileColumns.Id+" AND yps.tenant_id IN(?) AND yps.deleted_at IS NULL)",
+		scope.TenantIds,
+	)
 }
 
 func (s *sSysContent) ClearHomeProfileCardsCache(ctx context.Context) {
@@ -1876,6 +1933,9 @@ func (s *sSysContent) buildImportAutoSyncModel(sourceName string, cronData *enti
 }
 
 func (s *sSysContent) isRequestVip(ctx context.Context) bool {
+	if profilescope.FromContext(ctx).Trusted {
+		return true
+	}
 	r := g.RequestFromCtx(ctx)
 	if r == nil {
 		return false
@@ -1973,7 +2033,38 @@ func (s *sSysContent) getProfileMediaMap(ctx context.Context, profileIds []int64
 		}
 		res[profileId] = append(res[profileId], buildContentMediaModel(row, isMember, imageIndex))
 	}
+	published, err := publishmedia.Resolve(ctx, missingProfileMediaIDs(profileIds, res))
+	if err != nil {
+		return nil, gerror.Wrap(err, "获取上架资料媒体失败，请稍后重试")
+	}
+	for profileID, items := range published {
+		imageIndex := 0
+		for _, item := range items {
+			locked := !isMember && (item.Type == consts.ContentMediaTypeVideo || imageIndex > 0)
+			displayURL, previewURL := contentAssetURL(item.URL), contentAssetURL(item.PreviewURL)
+			if locked {
+				displayURL, previewURL = "", ""
+			}
+			res[profileID] = append(res[profileID], &sysin.ContentMediaModel{
+				Id: item.ID, Type: item.Type, DisplayUrl: displayURL, PreviewUrl: previewURL,
+				Locked: locked, Placeholder: locked, ProcessDone: true,
+			})
+			if item.Type == consts.ContentMediaTypeImage {
+				imageIndex++
+			}
+		}
+	}
 	return
+}
+
+func missingProfileMediaIDs(profileIDs []int64, media map[int64][]*sysin.ContentMediaModel) []int64 {
+	missing := make([]int64, 0)
+	for _, profileID := range profileIDs {
+		if len(media[profileID]) == 0 {
+			missing = append(missing, profileID)
+		}
+	}
+	return missing
 }
 
 func (s *sSysContent) listProfileMedia(ctx context.Context, profileId int64, isMember bool) (list []*sysin.ContentMediaModel, err error) {
@@ -2007,6 +2098,13 @@ func (s *sSysContent) listProfileMedia(ctx context.Context, profileId int64, isM
 			continue
 		}
 		list = append(list, buildContentMediaModel(row, isMember, imageIndex))
+	}
+	if len(list) == 0 {
+		mediaMap, loadErr := s.getProfileMediaMap(ctx, []int64{profileId}, isMember)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		list = mediaMap[profileId]
 	}
 	return
 }
@@ -2182,6 +2280,7 @@ func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, 
 		status = 2
 	}
 	province, city := normalizeProfileRegionForOption(source["province"].String(), source["city"].String())
+	extracted := profileextractor.Merge(source["plain_text"].String(), source["height"].Int(), source["weight"].Int(), source["cup_size"].String())
 
 	now := gtime.Now()
 	data := g.Map{
@@ -2225,9 +2324,9 @@ func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, 
 		profileColumns.Province:             province,
 		profileColumns.City:                 city,
 		profileColumns.Age:                  source["age"].Int(),
-		profileColumns.Height:               source["height"].Int(),
-		profileColumns.Weight:               source["weight"].Int(),
-		profileColumns.CupSize:              source["cup_size"].String(),
+		profileColumns.Height:               extracted.Height,
+		profileColumns.Weight:               extracted.Weight,
+		profileColumns.CupSize:              extracted.Cup,
 		profileColumns.HasVerificationVideo: flagToInt(source["has_verification_video"].String()),
 		profileColumns.ImageCount:           source["image_count"].Int(),
 		profileColumns.VideoCount:           source["video_count"].Int(),

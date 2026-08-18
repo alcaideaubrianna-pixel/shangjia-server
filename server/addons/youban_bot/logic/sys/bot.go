@@ -2,14 +2,12 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
-	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -18,6 +16,7 @@ import (
 
 	"hotgo/addons/youban_bot/model/input/sysin"
 	"hotgo/addons/youban_bot/service"
+	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/consts"
 	"hotgo/internal/library/contexts"
 )
@@ -41,10 +40,6 @@ const (
 var sixDigitRegexp = regexp.MustCompile(`\b\d{6}\b`)
 
 type sSysBot struct {
-	telegramBotMu         sync.Mutex
-	telegramBots          map[string]*tgbot.Bot
-	runtimeMu             sync.Mutex
-	runtimeCancel         context.CancelFunc
 	cleanupMu             sync.Mutex
 	cleanupCancel         context.CancelFunc
 	featureMu             sync.RWMutex
@@ -90,23 +85,22 @@ func (row *authCodeRow) statusModel() *sysin.CodeStatusModel {
 }
 
 func init() {
-	service.RegisterSysBot(NewSysBot())
+	bot := NewSysBot()
+	service.RegisterSysBot(bot)
+	gatewayservice.RegisterProvider(&botGatewayProvider{bot: bot})
 }
 
 func NewSysBot() *sSysBot { return &sSysBot{} }
 
 func (s *sSysBot) StartRuntime(ctx context.Context) {
 	_ = s.syncAllTelegramBotMenus(ctx)
-	s.startPolling(ctx)
 	s.startTelegramMessageCleanup(ctx)
 	s.startPendingBroadcasts(ctx)
 	s.startProfileSessionRecovery(ctx)
 }
 func (s *sSysBot) StopRuntime() {
-	s.stopPolling()
 	s.stopTelegramMessageCleanup()
 	s.stopProfileSessionRecovery()
-	s.clearTelegramBotCache()
 }
 
 type botFeature interface {
@@ -490,22 +484,6 @@ func (s *sSysBot) uniqueCode(ctx context.Context) (string, error) {
 		}
 	}
 	return "", gerror.New("生成验证码失败，请重试")
-}
-
-func (s *sSysBot) TelegramWebhookRaw(ctx context.Context, in *sysin.WebhookInp) (err error) {
-	if in == nil || len(in.Body) == 0 {
-		return gerror.New("Webhook消息不能为空")
-	}
-	var update models.Update
-	if err = json.Unmarshal(in.Body, &update); err != nil {
-		return gerror.Wrap(err, "解析Telegram消息失败")
-	}
-	botId := in.BotId
-	if botId <= 0 {
-		botId = s.fallbackWebhookBotId(ctx)
-	}
-	g.Log().Infof(ctx, "处理Telegram Webhook updateId:%d botId:%d", update.ID, botId)
-	return s.handleUpdate(ctx, botId, &update)
 }
 
 func (s *sSysBot) consumeCode(ctx context.Context, botId int64, msg *models.Message, code string) error {

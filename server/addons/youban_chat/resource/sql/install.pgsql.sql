@@ -1,3 +1,15 @@
+CREATE TABLE IF NOT EXISTS hg_youban_chat_visitor (
+  id bigserial PRIMARY KEY,
+  app_id varchar(128) NOT NULL,
+  external_user_id varchar(128) NOT NULL,
+  name varchar(128) NOT NULL DEFAULT '',
+  email varchar(255) NOT NULL DEFAULT '',
+  avatar_url varchar(500) NOT NULL DEFAULT '',
+  created_at timestamp,
+  updated_at timestamp
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_ybcv_app_user ON hg_youban_chat_visitor (app_id, external_user_id);
+
 CREATE TABLE IF NOT EXISTS hg_youban_chat_conversation (
   id bigserial PRIMARY KEY,
   member_id bigint NOT NULL,
@@ -41,6 +53,8 @@ CREATE TABLE IF NOT EXISTS hg_youban_chat_message (
   status varchar(32) NOT NULL DEFAULT 'sent',
   sender_name varchar(128),
   attachments_json text,
+  reply_to_message_id bigint NOT NULL DEFAULT 0,
+  reactions_json text,
   tg_chat_id varchar(128) NOT NULL DEFAULT '',
   tg_message_thread_id bigint NOT NULL DEFAULT 0,
   tg_message_id bigint NOT NULL DEFAULT 0,
@@ -57,6 +71,8 @@ ALTER TABLE hg_youban_chat_message ADD COLUMN IF NOT EXISTS tg_chat_id varchar(1
 ALTER TABLE hg_youban_chat_message ADD COLUMN IF NOT EXISTS tg_message_thread_id bigint NOT NULL DEFAULT 0;
 ALTER TABLE hg_youban_chat_message ADD COLUMN IF NOT EXISTS tg_message_id bigint NOT NULL DEFAULT 0;
 ALTER TABLE hg_youban_chat_message ADD COLUMN IF NOT EXISTS read_at timestamp;
+ALTER TABLE hg_youban_chat_message ADD COLUMN IF NOT EXISTS reply_to_message_id bigint NOT NULL DEFAULT 0;
+ALTER TABLE hg_youban_chat_message ADD COLUMN IF NOT EXISTS reactions_json text;
 
 CREATE TABLE IF NOT EXISTS hg_youban_chat_bot (
   id bigserial PRIMARY KEY,
@@ -71,6 +87,8 @@ CREATE TABLE IF NOT EXISTS hg_youban_chat_bot (
 );
 CREATE INDEX IF NOT EXISTS idx_ybcb_username ON hg_youban_chat_bot (bot_username);
 CREATE INDEX IF NOT EXISTS idx_ybcb_status ON hg_youban_chat_bot (status);
+ALTER TABLE hg_youban_chat_bot ADD COLUMN IF NOT EXISTS app_id varchar(128) NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_ybcb_app_id ON hg_youban_chat_bot (app_id);
 
 CREATE TABLE IF NOT EXISTS hg_youban_chat_binding (
   id bigserial PRIMARY KEY,
@@ -91,6 +109,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_ybcb_bind_code ON hg_youban_chat_binding (b
 CREATE INDEX IF NOT EXISTS idx_ybcb_source_channel ON hg_youban_chat_binding (source_channel_id, status);
 CREATE INDEX IF NOT EXISTS idx_ybcb_content_channel ON hg_youban_chat_binding (content_channel_id, status);
 CREATE INDEX IF NOT EXISTS idx_ybcb_global ON hg_youban_chat_binding (bind_type, status);
+ALTER TABLE hg_youban_chat_binding ADD COLUMN IF NOT EXISTS app_id varchar(128) NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_ybcb_binding_app_id ON hg_youban_chat_binding (app_id);
 
 CREATE TABLE IF NOT EXISTS hg_youban_chat_binding_channel (
   id bigserial PRIMARY KEY,

@@ -129,6 +129,26 @@ func (s *sGateway) Refresh(_ context.Context) error {
 	return nil
 }
 
+func (s *sGateway) Client(ctx context.Context, token string) (*tgbot.Bot, error) {
+	key := tokenKey(token)
+	s.mu.Lock()
+	client := s.clients[key]
+	s.mu.Unlock()
+	if client != nil {
+		return client, nil
+	}
+	if err := s.sync(ctx); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	client = s.clients[key]
+	s.mu.Unlock()
+	if client == nil {
+		return nil, gerror.New("TG Bot Gateway未找到已启用的Bot")
+	}
+	return client, nil
+}
+
 func (s *sGateway) sync(ctx context.Context) error {
 	conf, err := service.RuntimeConfiguration(ctx)
 	if err != nil {
@@ -425,7 +445,7 @@ func tokenKey(token string) string {
 	return hex.EncodeToString(sum[:12])
 }
 func allowedUpdates() []string {
-	return []string{models.AllowedUpdateMessage, models.AllowedUpdateEditedMessage, models.AllowedUpdateChannelPost, models.AllowedUpdateEditedChannelPost, models.AllowedUpdateCallbackQuery}
+	return []string{models.AllowedUpdateMessage, models.AllowedUpdateEditedMessage, models.AllowedUpdateChannelPost, models.AllowedUpdateEditedChannelPost, models.AllowedUpdateCallbackQuery, models.AllowedUpdateMessageReaction}
 }
 
 func newBot(token, proxyURL string, handler tgbot.HandlerFunc) (*tgbot.Bot, error) {

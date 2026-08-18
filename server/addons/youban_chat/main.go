@@ -11,10 +11,9 @@ import (
 	"hotgo/addons/youban_chat/install"
 	_ "hotgo/addons/youban_chat/logic"
 	"hotgo/addons/youban_chat/router"
-	chatService "hotgo/addons/youban_chat/service"
+	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/addons"
 	"hotgo/internal/service"
-	"hotgo/utility/runrole"
 )
 
 type module struct {
@@ -50,14 +49,13 @@ func (m *module) Start(option *addons.Option) (err error) {
 		router.Api(m.ctx, group)
 		router.Admin(m.ctx, group)
 	})
-	if runrole.Enabled(m.ctx, runrole.Account) || runrole.Enabled(m.ctx, runrole.Runtime) {
-		chatService.SysChat().StartRuntime(m.ctx)
+	if err = gatewayservice.Gateway().Refresh(m.ctx); err != nil {
+		return err
 	}
 	return
 }
 
 func (m *module) Stop() (err error) {
-	chatService.SysChat().StopRuntime()
 	return
 }
 

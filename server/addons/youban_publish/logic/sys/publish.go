@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/hibiken/asynq"
@@ -20,8 +19,6 @@ type sSysPublish struct {
 	runtimeCancel         context.CancelFunc
 	runtimeDone           chan struct{}
 	runtimeMu             publishRuntimeMutex
-	telegramBotMu         publishRuntimeMutex
-	telegramBots          map[string]*tgbot.Bot
 	tgLoginMu             publishRuntimeMutex
 	tgLogins              map[string]*telegramLoginRuntime
 	tgQueueMu             publishRuntimeMutex

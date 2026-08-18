@@ -16,7 +16,6 @@ import (
 	"golang.org/x/net/proxy"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
-	"hotgo/addons/youban_publish/service"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/contexts"
 )
@@ -182,6 +181,9 @@ func (s *sSysPublish) saveBot(ctx context.Context, in *sysin.BotSaveInp, tenantI
 		return gerror.Wrap(err, "保存Bot配置失败")
 	}
 	s.clearTelegramBotCache()
+	if refreshErr := gatewayservice.Gateway().Refresh(ctx); refreshErr != nil {
+		g.Log().Warningf(ctx, "刷新TG Bot Gateway失败：%+v", refreshErr)
+	}
 	return nil
 }
 
@@ -204,6 +206,9 @@ func (s *sSysPublish) AdminBotDelete(ctx context.Context, in *sysin.BotDeleteInp
 		return gerror.Wrap(err, "删除Bot配置失败")
 	}
 	s.clearTelegramBotCache()
+	if refreshErr := gatewayservice.Gateway().Refresh(ctx); refreshErr != nil {
+		g.Log().Warningf(ctx, "刷新TG Bot Gateway失败：%+v", refreshErr)
+	}
 	return nil
 }
 
@@ -273,6 +278,9 @@ func (s *sSysPublish) refreshBots(ctx context.Context, ids []int64, tenantId int
 		list = append(list, result)
 	}
 	s.clearTelegramBotCache()
+	if refreshErr := gatewayservice.Gateway().Refresh(ctx); refreshErr != nil {
+		g.Log().Warningf(ctx, "刷新TG Bot Gateway失败：%+v", refreshErr)
+	}
 	return list, nil
 }
 
@@ -336,53 +344,10 @@ func (s *sSysPublish) telegramBot(ctx context.Context, botToken string) (*tgbot.
 	if botToken == "" {
 		return nil, gerror.New("Telegram Bot Token未配置")
 	}
-	conf, err := service.SysConfig().GetTelegram(ctx)
-	if err != nil {
-		return nil, err
-	}
-	cacheKey := botToken + "\n" + conf.ProxyUrl
-	s.telegramBotMu.Lock()
-	if s.telegramBots != nil {
-		if bot := s.telegramBots[cacheKey]; bot != nil {
-			s.telegramBotMu.Unlock()
-			return bot, nil
-		}
-	}
-	s.telegramBotMu.Unlock()
-
-	client, err := telegramHTTPClient(conf.ProxyUrl)
-	if err != nil {
-		return nil, err
-	}
-	opts := []tgbot.Option{
-		tgbot.WithHTTPClient(21*time.Second, client),
-		tgbot.WithSkipGetMe(),
-		tgbot.WithAllowedUpdates(telegramAllowedUpdates()),
-		tgbot.WithErrorsHandler(func(err error) {
-			g.Log().Warningf(ctx, "Telegram SDK错误：%+v", err)
-		}),
-		tgbot.WithDefaultHandler(s.telegramUpdateHandler),
-	}
-	if conf.WebhookSecret != "" {
-		opts = append(opts, tgbot.WithWebhookSecretToken(conf.WebhookSecret))
-	}
-	bot, err := tgbot.New(botToken, opts...)
-	if err != nil {
-		return nil, err
-	}
-	s.telegramBotMu.Lock()
-	if s.telegramBots == nil {
-		s.telegramBots = map[string]*tgbot.Bot{}
-	}
-	s.telegramBots[cacheKey] = bot
-	s.telegramBotMu.Unlock()
-	return bot, nil
+	return gatewayservice.Gateway().Client(ctx, botToken)
 }
 
 func (s *sSysPublish) clearTelegramBotCache() {
-	s.telegramBotMu.Lock()
-	defer s.telegramBotMu.Unlock()
-	s.telegramBots = nil
 	clearAutoDeleteBotLocalCache()
 }
 

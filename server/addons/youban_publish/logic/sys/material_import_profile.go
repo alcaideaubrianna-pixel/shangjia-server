@@ -17,6 +17,7 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
+	"hotgo/internal/library/profileextractor"
 	"hotgo/utility/file"
 )
 
@@ -335,13 +336,28 @@ func (s *sSysPublish) refreshMaterialImportProfileMetadata(ctx context.Context, 
 		return err
 	}
 	columns := dao.ContentProfile.Columns()
+	current, err := dao.ContentProfile.Ctx(ctx).
+		Fields(columns.Height, columns.Weight, columns.CupSize).
+		Where(columns.Id, profileId).
+		WhereNull(columns.DeletedAt).
+		One()
+	if err != nil {
+		return gerror.Wrap(err, "读取TG导入资料结构化字段失败")
+	}
+	extracted := profileextractor.Refresh(plainText, profileextractor.Fields{
+		Height: current[columns.Height].Int(),
+		Weight: current[columns.Weight].Int(),
+		Cup:    current[columns.CupSize].String(),
+	})
 	if _, err = dao.ContentProfile.Ctx(ctx).
 		Where(columns.Id, profileId).
 		WhereNull(columns.DeletedAt).
 		Data(g.Map{
 			columns.Province:        metadata.Province,
 			columns.City:            metadata.City,
-			columns.CupSize:         metadata.Tag,
+			columns.Height:          extracted.Height,
+			columns.Weight:          extracted.Weight,
+			columns.CupSize:         extracted.Cup,
 			columns.SourceUpdateBy:  task.SourceTitle,
 			columns.SourceUpdatedAt: gtime.Now(),
 			columns.UpdatedAt:       gtime.Now(),

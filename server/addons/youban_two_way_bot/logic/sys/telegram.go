@@ -2,7 +2,6 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -14,34 +13,8 @@ import (
 
 	twdao "hotgo/addons/youban_two_way_bot/internal/dao"
 	"hotgo/addons/youban_two_way_bot/internal/model/entity"
-	"hotgo/addons/youban_two_way_bot/model/input/sysin"
 	"hotgo/internal/library/cache"
 )
-
-func (s *sSysTwoWayBot) TelegramWebhookRaw(ctx context.Context, in *sysin.WebhookInp) error {
-	if in == nil || len(in.Body) == 0 {
-		return gerror.New("Webhook消息不能为空")
-	}
-	if in.BotId <= 0 {
-		return gerror.New("缺少Bot ID")
-	}
-	var update models.Update
-	if err := json.Unmarshal(in.Body, &update); err != nil {
-		return gerror.Wrap(err, "解析Telegram webhook失败")
-	}
-	row, err := s.botByWebhookId(ctx, in.BotId)
-	if err != nil {
-		return err
-	}
-	if row.Status != sysin.TwoWayBotStatusEnabled {
-		return nil
-	}
-	bot, err := s.telegramBot(ctx, row.BotToken)
-	if err != nil {
-		return err
-	}
-	return s.handleTelegramUpdate(ctx, bot, row, &update)
-}
 
 func (s *sSysTwoWayBot) handleTelegramUpdate(ctx context.Context, bot *tgbot.Bot, row *entity.YoubanTwoWayBotBot, update *models.Update) error {
 	if row == nil || update == nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 )
 
@@ -34,6 +35,7 @@ type IGateway interface {
 	StopRuntime()
 	Refresh(ctx context.Context) error
 	Webhook(ctx context.Context, key string, body []byte, secret string) error
+	Client(ctx context.Context, token string) (*tgbot.Bot, error)
 }
 
 var (

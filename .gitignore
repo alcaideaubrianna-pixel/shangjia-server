@@ -12,5 +12,7 @@ push.sh
 server/resource/public/storage/cache
 server/.serena/cache
 docker
+!server/manifest/docker/
+!server/manifest/docker/entrypoint.sh
 logs
 /.migration-state/

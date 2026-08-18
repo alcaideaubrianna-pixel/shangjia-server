@@ -10,37 +10,40 @@ import (
 
 type ContentProfileListInp struct {
 	form.PageReq
-	Feed            string `json:"feed" dc:"首页流：nearby/latest/hot"`
-	Keyword         string `json:"keyword" dc:"关键词"`
-	Province        string `json:"province" dc:"省份"`
-	City            string `json:"city" dc:"城市"`
-	AgeMin          int    `json:"ageMin" dc:"最小年龄"`
-	AgeMax          int    `json:"ageMax" dc:"最大年龄"`
-	AgeRanges       string `json:"ageRanges" dc:"年龄范围，逗号分隔"`
-	HeightMin       int    `json:"heightMin" dc:"最小身高"`
-	HeightMax       int    `json:"heightMax" dc:"最大身高"`
-	HeightRanges    string `json:"heightRanges" dc:"身高范围，逗号分隔"`
-	WeightMin       int    `json:"weightMin" dc:"最小体重"`
-	WeightMax       int    `json:"weightMax" dc:"最大体重"`
-	WeightRanges    string `json:"weightRanges" dc:"体重范围，逗号分隔"`
-	Cup             string `json:"cup" dc:"资料标签"`
-	Cups            string `json:"cups" dc:"资料标签，逗号分隔"`
-	HasVideo        int    `json:"hasVideo" dc:"是否有视频"`
-	HasVerification int    `json:"hasVerification" dc:"是否有验证视频"`
-	CanFly          int    `json:"canFly" dc:"可飞外省"`
-	CanGoAbroad     int    `json:"canGoAbroad" dc:"可出国"`
-	CanOvernight    int    `json:"canOvernight" dc:"可过夜"`
-	CanCohabitate   int    `json:"canCohabitate" dc:"可同居"`
-	HasHealthCheck  int    `json:"hasHealthCheck" dc:"有体检"`
-	IsFullMonth     int    `json:"isFullMonth" dc:"满月"`
-	IsVirgin        int    `json:"isVirgin" dc:"是否处"`
-	AcceptSm        int    `json:"acceptSm" dc:"接受SM"`
-	NoCondom        int    `json:"noCondom" dc:"体检后无套"`
-	AllowCreampie   int    `json:"allowCreampie" dc:"可内射"`
-	HasTattoo       int    `json:"hasTattoo" dc:"有纹身"`
-	Sort            string `json:"sort" dc:"排序"`
-	WithTotal       int    `json:"withTotal" dc:"是否返回总数"`
-	ExcludeActions  []string
+	Feed              string `json:"feed" dc:"首页流：recommended/latest/hot/region"`
+	ActorId           string `json:"actorId" dc:"平台侧不可逆用户标识"`
+	Keyword           string `json:"keyword" dc:"关键词"`
+	Province          string `json:"province" dc:"省份"`
+	City              string `json:"city" dc:"城市"`
+	AgeMin            int    `json:"ageMin" dc:"最小年龄"`
+	AgeMax            int    `json:"ageMax" dc:"最大年龄"`
+	AgeRanges         string `json:"ageRanges" dc:"年龄范围，逗号分隔"`
+	HeightMin         int    `json:"heightMin" dc:"最小身高"`
+	HeightMax         int    `json:"heightMax" dc:"最大身高"`
+	HeightRanges      string `json:"heightRanges" dc:"身高范围，逗号分隔"`
+	WeightMin         int    `json:"weightMin" dc:"最小体重"`
+	WeightMax         int    `json:"weightMax" dc:"最大体重"`
+	WeightRanges      string `json:"weightRanges" dc:"体重范围，逗号分隔"`
+	Cup               string `json:"cup" dc:"资料标签"`
+	Cups              string `json:"cups" dc:"资料标签，逗号分隔"`
+	HasVideo          int    `json:"hasVideo" dc:"是否有视频"`
+	HasVerification   int    `json:"hasVerification" dc:"是否有验证视频"`
+	CanFly            int    `json:"canFly" dc:"可飞外省"`
+	CanGoAbroad       int    `json:"canGoAbroad" dc:"可出国"`
+	CanOvernight      int    `json:"canOvernight" dc:"可过夜"`
+	CanCohabitate     int    `json:"canCohabitate" dc:"可同居"`
+	HasHealthCheck    int    `json:"hasHealthCheck" dc:"有体检"`
+	IsFullMonth       int    `json:"isFullMonth" dc:"满月"`
+	IsVirgin          int    `json:"isVirgin" dc:"是否处"`
+	AcceptSm          int    `json:"acceptSm" dc:"接受SM"`
+	NoCondom          int    `json:"noCondom" dc:"体检后无套"`
+	AllowCreampie     int    `json:"allowCreampie" dc:"可内射"`
+	HasTattoo         int    `json:"hasTattoo" dc:"有纹身"`
+	Sort              string `json:"sort" dc:"排序"`
+	WithTotal         int    `json:"withTotal" dc:"是否返回总数"`
+	ExcludeActions    []string
+	ProfileIds        []int64 `json:"-"`
+	ExcludeProfileIds string  `json:"excludeIds" dc:"排除资料ID，逗号分隔"`
 }
 
 type HomeProfileCardsInp struct {
@@ -60,6 +63,9 @@ type ContentProfileListModel struct {
 	Summary       string               `json:"summary" dc:"摘要"`
 	Province      string               `json:"province" dc:"省份"`
 	City          string               `json:"city" dc:"城市"`
+	ProvinceCode  string               `json:"provinceCode" dc:"省份编码"`
+	CityCode      string               `json:"cityCode" dc:"城市编码"`
+	LocationLabel string               `json:"locationLabel" dc:"地区显示名称"`
 	Age           int                  `json:"age" dc:"年龄"`
 	Height        int                  `json:"height" dc:"身高"`
 	Weight        int                  `json:"weight" dc:"体重"`
@@ -92,6 +98,8 @@ type ContentProfileRegionsModel struct {
 type ContentProfileRegionOption struct {
 	Label    string                        `json:"label" dc:"显示名称"`
 	Value    string                        `json:"value" dc:"筛选值"`
+	Code     string                        `json:"code" dc:"地区编码"`
+	Type     string                        `json:"type" dc:"地区类型"`
 	Province string                        `json:"province" dc:"省份/国家"`
 	City     string                        `json:"city" dc:"城市"`
 	Count    int                           `json:"count" dc:"资料数量"`

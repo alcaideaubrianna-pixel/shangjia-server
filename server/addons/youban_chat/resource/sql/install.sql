@@ -1,3 +1,16 @@
+CREATE TABLE IF NOT EXISTS `hg_youban_chat_visitor` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `app_id` varchar(128) NOT NULL COMMENT '开放应用ID',
+  `external_user_id` varchar(128) NOT NULL COMMENT '外部用户ID',
+  `name` varchar(128) NOT NULL DEFAULT '' COMMENT '显示名称',
+  `email` varchar(255) NOT NULL DEFAULT '' COMMENT '邮箱',
+  `avatar_url` varchar(500) NOT NULL DEFAULT '' COMMENT '头像',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybcv_app_user` (`app_id`, `external_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴聊天_外部访客';
+
 CREATE TABLE IF NOT EXISTS `hg_youban_chat_conversation` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
   `member_id` bigint(20) NOT NULL COMMENT '会员ID',
@@ -42,6 +55,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_chat_message` (
   `status` varchar(32) NOT NULL DEFAULT 'sent' COMMENT '状态',
   `sender_name` varchar(128) DEFAULT NULL COMMENT '发送人',
   `attachments_json` text COMMENT '附件JSON',
+  `reply_to_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '引用本地消息ID',
+  `reactions_json` text COMMENT '表情反应JSON',
   `tg_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'TG群ID',
   `tg_message_thread_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG话题ID',
   `tg_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG消息ID',
@@ -59,6 +74,8 @@ ALTER TABLE `hg_youban_chat_message` ADD COLUMN IF NOT EXISTS `tg_chat_id` varch
 ALTER TABLE `hg_youban_chat_message` ADD COLUMN IF NOT EXISTS `tg_message_thread_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG话题ID';
 ALTER TABLE `hg_youban_chat_message` ADD COLUMN IF NOT EXISTS `tg_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG消息ID';
 ALTER TABLE `hg_youban_chat_message` ADD COLUMN IF NOT EXISTS `read_at` datetime DEFAULT NULL COMMENT '已读时间';
+ALTER TABLE `hg_youban_chat_message` ADD COLUMN IF NOT EXISTS `reply_to_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '引用本地消息ID';
+ALTER TABLE `hg_youban_chat_message` ADD COLUMN IF NOT EXISTS `reactions_json` text COMMENT '表情反应JSON';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_chat_bot` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
@@ -74,6 +91,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_chat_bot` (
   KEY `idx_ybcb_username` (`bot_username`),
   KEY `idx_ybcb_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴聊天_Bot';
+ALTER TABLE `hg_youban_chat_bot` ADD COLUMN IF NOT EXISTS `app_id` varchar(128) NOT NULL DEFAULT '' COMMENT '开放应用ID';
+ALTER TABLE `hg_youban_chat_bot` ADD KEY `idx_ybcb_app_id` (`app_id`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_chat_binding` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
@@ -95,6 +114,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_chat_binding` (
   KEY `idx_ybcb_content_channel` (`content_channel_id`, `status`),
   KEY `idx_ybcb_global` (`bind_type`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴聊天_频道群绑定';
+ALTER TABLE `hg_youban_chat_binding` ADD COLUMN IF NOT EXISTS `app_id` varchar(128) NOT NULL DEFAULT '' COMMENT '开放应用ID';
+ALTER TABLE `hg_youban_chat_binding` ADD KEY `idx_ybcb_binding_app_id` (`app_id`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_chat_binding_channel` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',

@@ -72,13 +72,6 @@ type UnreadRes struct {
 	*sysin.ChatUnreadModel
 }
 
-type TelegramWebhookReq struct {
-	g.Meta `path:"/telegram/webhook" method:"post" tags:"悦伴聊天" summary:"Telegram Webhook"`
-	sysin.TelegramWebhookInp
-}
-
-type TelegramWebhookRes struct{}
-
 type ListReq struct {
 	g.Meta `path:"/chat/list" method:"get" tags:"悦伴聊天" summary:"聊天会话列表"`
 	sysin.ChatConversationListInp

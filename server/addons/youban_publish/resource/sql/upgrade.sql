@@ -777,3 +777,60 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media_phash_alias_bucket` (
   PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_phash_alias_media_key_pos` (`media_id`,`fingerprint_key`,`bucket_pos`),
   KEY `idx_ybp_phash_alias_search` (`tenant_id`,`media_type`,`bucket_pos`,`bucket_value`,`account_id`,`profile_id`,`media_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='防扫图媒体搜索指纹';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_cms_app` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `app_id` varchar(64) NOT NULL DEFAULT '',
+  `app_secret` varchar(255) NOT NULL DEFAULT '',
+  `name` varchar(128) NOT NULL DEFAULT '',
+  `base_url` varchar(512) NOT NULL DEFAULT '',
+  `instance_id` varchar(128) DEFAULT NULL,
+  `enroll_hash` varchar(64) NOT NULL DEFAULT '',
+  `source_ip` varchar(64) NOT NULL DEFAULT '',
+  `cms_version` varchar(64) NOT NULL DEFAULT '',
+  `last_heartbeat_at` datetime DEFAULT NULL,
+  `status` tinyint(4) NOT NULL DEFAULT '1',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_cms_app_app_id` (`app_id`),
+  UNIQUE KEY `uk_ybp_cms_app_instance_id` (`instance_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='XC-CMS开放应用';
+
+ALTER TABLE `hg_youban_publish_cms_app`
+  ADD COLUMN IF NOT EXISTS `instance_id` varchar(128) DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS `enroll_hash` varchar(64) NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS `source_ip` varchar(64) NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS `cms_version` varchar(64) NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS `last_heartbeat_at` datetime DEFAULT NULL,
+  ADD UNIQUE KEY IF NOT EXISTS `uk_ybp_cms_app_instance_id` (`instance_id`);
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_cms_binding_code` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `app_id` varchar(64) NOT NULL DEFAULT '',
+  `code_hash` varchar(64) NOT NULL DEFAULT '',
+  `code_hint` varchar(16) NOT NULL DEFAULT '',
+  `version` int(11) NOT NULL DEFAULT '1',
+  `status` tinyint(4) NOT NULL DEFAULT '1',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_cms_binding_code_app` (`app_id`),
+  UNIQUE KEY `uk_ybp_cms_binding_code_hash` (`code_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='XC-CMS租户绑定码';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_cms_tenant_binding` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `app_id` varchar(64) NOT NULL DEFAULT '',
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0',
+  `code_version` int(11) NOT NULL DEFAULT '1',
+  `status` varchar(16) NOT NULL DEFAULT 'pending',
+  `reason` varchar(500) NOT NULL DEFAULT '',
+  `requested_at` datetime DEFAULT NULL,
+  `reviewed_at` datetime DEFAULT NULL,
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_cms_tenant_binding` (`app_id`,`tenant_id`),
+  KEY `idx_ybp_cms_binding_tenant_status` (`tenant_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='XC-CMS租户绑定关系';

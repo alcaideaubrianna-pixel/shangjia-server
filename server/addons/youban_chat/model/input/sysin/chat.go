@@ -64,6 +64,8 @@ type ChatMessageModel struct {
 	CreatedAt       string                        `json:"createdAt"      dc:"创建时间"`
 	ReadAt          string                        `json:"readAt"         dc:"已读时间"`
 	Attachments     []*ChatMessageAttachmentModel `json:"attachments"    dc:"附件"`
+	Reactions       map[string][]string           `json:"reactions"      dc:"表情反应"`
+	Reply           *ChatMessageModel             `json:"reply,omitempty" dc:"引用消息"`
 }
 
 type ChatMessagesModel struct {
@@ -89,10 +91,18 @@ type ChatUnreadModel struct {
 }
 
 type TelegramWebhookInp struct {
-	UpdateId      int64               `json:"update_id" dc:"Telegram更新ID"`
-	BotId         int64               `json:"botId"     dc:"Bot ID"`
-	Message       *TelegramMessageInp `json:"message"   dc:"消息"`
-	EditedMessage *TelegramMessageInp `json:"edited_message" dc:"编辑消息"`
+	UpdateId        int64                `json:"update_id" dc:"Telegram更新ID"`
+	BotId           int64                `json:"botId"     dc:"Bot ID"`
+	Message         *TelegramMessageInp  `json:"message"   dc:"消息"`
+	EditedMessage   *TelegramMessageInp  `json:"edited_message" dc:"编辑消息"`
+	MessageReaction *TelegramReactionInp `json:"message_reaction" dc:"消息反应"`
+}
+
+type TelegramReactionInp struct {
+	ChatId      int64    `json:"chat_id"`
+	MessageId   int64    `json:"message_id"`
+	ActorId     int64    `json:"actor_id"`
+	NewReaction []string `json:"new_reaction"`
 }
 
 type TelegramMessageInp struct {

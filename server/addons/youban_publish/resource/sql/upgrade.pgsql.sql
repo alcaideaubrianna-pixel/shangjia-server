@@ -784,3 +784,38 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_alias_bucket" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_phash_alias_media_key_pos" ON "hg_youban_publish_media_phash_alias_bucket" ("media_id","fingerprint_key","bucket_pos");
 CREATE INDEX IF NOT EXISTS "idx_ybp_phash_alias_search" ON "hg_youban_publish_media_phash_alias_bucket" ("tenant_id","media_type","bucket_pos","bucket_value") INCLUDE ("media_id","profile_id","account_id","hash_value");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_cms_app" (
+  "id" BIGSERIAL PRIMARY KEY, "app_id" varchar(64) NOT NULL DEFAULT '',
+  "app_secret" varchar(255) NOT NULL DEFAULT '', "name" varchar(128) NOT NULL DEFAULT '',
+  "base_url" varchar(512) NOT NULL DEFAULT '', "instance_id" varchar(128) DEFAULT NULL,
+  "enroll_hash" varchar(64) NOT NULL DEFAULT '', "source_ip" varchar(64) NOT NULL DEFAULT '',
+  "cms_version" varchar(64) NOT NULL DEFAULT '', "last_heartbeat_at" timestamp DEFAULT NULL,
+  "status" smallint NOT NULL DEFAULT 1, "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL,
+  UNIQUE ("app_id"), UNIQUE ("instance_id")
+);
+
+ALTER TABLE "hg_youban_publish_cms_app" ADD COLUMN IF NOT EXISTS "instance_id" varchar(128) DEFAULT NULL;
+ALTER TABLE "hg_youban_publish_cms_app" ADD COLUMN IF NOT EXISTS "enroll_hash" varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_cms_app" ADD COLUMN IF NOT EXISTS "source_ip" varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_cms_app" ADD COLUMN IF NOT EXISTS "cms_version" varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_cms_app" ADD COLUMN IF NOT EXISTS "last_heartbeat_at" timestamp DEFAULT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_cms_app_instance_id" ON "hg_youban_publish_cms_app" ("instance_id");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_cms_binding_code" (
+  "id" BIGSERIAL PRIMARY KEY, "app_id" varchar(64) NOT NULL DEFAULT '',
+  "code_hash" varchar(64) NOT NULL DEFAULT '', "code_hint" varchar(16) NOT NULL DEFAULT '',
+  "version" integer NOT NULL DEFAULT 1, "status" smallint NOT NULL DEFAULT 1,
+  "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL,
+  UNIQUE ("app_id"), UNIQUE ("code_hash")
+);
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_cms_tenant_binding" (
+  "id" BIGSERIAL PRIMARY KEY, "app_id" varchar(64) NOT NULL DEFAULT '',
+  "tenant_id" bigint NOT NULL DEFAULT 0, "code_version" integer NOT NULL DEFAULT 1,
+  "status" varchar(16) NOT NULL DEFAULT 'pending', "reason" varchar(500) NOT NULL DEFAULT '',
+  "requested_at" timestamp DEFAULT NULL, "reviewed_at" timestamp DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL,
+  UNIQUE ("app_id","tenant_id")
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_cms_binding_tenant_status" ON "hg_youban_publish_cms_tenant_binding" ("tenant_id","status");

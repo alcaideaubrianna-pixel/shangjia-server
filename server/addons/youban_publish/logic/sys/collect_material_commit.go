@@ -19,6 +19,7 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
+	"hotgo/internal/library/profileextractor"
 	iservice "hotgo/internal/service"
 )
 
@@ -508,6 +509,7 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 	if err != nil {
 		return 0, err
 	}
+	extracted := profileextractor.Parse(text)
 	sourceKey := collectPublishClientRequestId(event, rule)
 	now := gtime.Now()
 	imageCount, videoCount, hasVerificationVideo := collectPreparedMediaCounts(content.Media)
@@ -515,7 +517,8 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		columns := dao.ContentProfile.Columns()
 		existing, txErr := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).
-			Fields(columns.Id, columns.SourceKey, columns.HasVerificationVideo, columns.ImageCount, columns.VideoCount).
+			Fields(columns.Id, columns.SourceKey, columns.HasVerificationVideo, columns.ImageCount, columns.VideoCount,
+				columns.Height, columns.Weight, columns.CupSize).
 			Where(columns.SourceKey, sourceKey).
 			WhereNull(columns.DeletedAt).
 			One()
@@ -528,12 +531,20 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 				return txErr
 			}
 		}
+		if !existing.IsEmpty() {
+			extracted = profileextractor.Refresh(text, profileextractor.Fields{
+				Height: existing[columns.Height].Int(),
+				Weight: existing[columns.Weight].Int(),
+				Cup:    existing[columns.CupSize].String(),
+			})
+		}
 		data := g.Map{
 			columns.SourceType: collectProfileSourceType, columns.SourceKey: sourceKey,
 			columns.SourceTextHash: collectHash(text), columns.Title: title,
 			columns.Summary: profileSummary(text), columns.PlainText: text,
 			columns.Province: metadata.Province, columns.City: metadata.City,
-			columns.CupSize: metadata.Tag, columns.Visibility: consts.ContentVisibilityPublic,
+			columns.Height: extracted.Height, columns.Weight: extracted.Weight,
+			columns.CupSize: extracted.Cup, columns.Visibility: consts.ContentVisibilityPublic,
 			columns.ReviewStatus: consts.ContentReviewApproved, columns.ImportStatus: "collect",
 			columns.SourceUpdateBy: fmt.Sprintf("%d", accountId), columns.SourceUpdatedAt: now,
 			columns.Status: 2, columns.PublishedAt: nil, columns.UpdatedAt: now, columns.DeletedAt: nil,
@@ -661,7 +672,7 @@ func existingLegacyCollectProfile(ctx context.Context, tx gdb.TX, event gdb.Reco
 		args = append(args, "%:"+candidateChatID+":group:"+groupedID+":%")
 	}
 	row, err := tx.Model(dao.ContentProfile.Table()+" p").Ctx(ctx).
-		Fields("p.id,p.source_key,p.has_verification_video,p.image_count,p.video_count").
+		Fields("p.id,p.source_key,p.has_verification_video,p.image_count,p.video_count,p.height,p.weight,p.cup_size").
 		WhereNull("p.deleted_at").
 		Where("("+strings.Join(conditions, " OR ")+")", args[:len(chatIDs)]...).
 		Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=p.id AND ps.tenant_id=? AND ps.account_id=? AND ps.deleted_at IS NULL)", tenantID, accountID).

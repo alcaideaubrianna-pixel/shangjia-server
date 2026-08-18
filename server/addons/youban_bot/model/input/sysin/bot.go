@@ -477,11 +477,6 @@ type InviteCreateModel struct {
 	InviteUrl string      `json:"inviteUrl" dc:"注册链接"`
 }
 
-type WebhookInp struct {
-	BotId int64  `json:"botId" dc:"Bot ID"`
-	Body  []byte `json:"-" dc:"原始消息"`
-}
-
 type NotifyInp struct {
 	BotId         int64  `json:"botId" dc:"Bot ID，为空使用官方Bot"`
 	ChatId        string `json:"chatId" dc:"目标Chat ID"`

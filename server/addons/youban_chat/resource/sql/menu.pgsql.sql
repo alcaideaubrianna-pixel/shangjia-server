@@ -100,3 +100,10 @@ WHERE r.id IN (1, 2)
   AND NOT EXISTS (
     SELECT 1 FROM hg_admin_role_menu rm WHERE rm.role_id = r.id AND rm.menu_id = m.id
   );
+INSERT INTO hg_admin_menu (pid,title,name,path,icon,type,redirect,permissions,permission_name,component,always_show,active_menu,is_root,is_frame,frame_src,keep_alive,hidden,affix,level,tree,sort,remark,status,created_at,updated_at)
+SELECT root.id,'悦伴客服','youbanChatAdmin','youbanChatAdmin','lucide:messages-square',2,'','/youban_chat/chat/list,/youban_chat/chat/view,/youban_chat/chat/messages,/youban_chat/chat/clear,/youban_chat/chat/botList,/youban_chat/chat/saveBot,/youban_chat/chat/bindingList,/youban_chat/chat/saveBinding,/youban_chat/chat/channelOptions,/youban_chat/chat/operatorList,/youban_chat/chat/saveOperator,/youban_chat/chat/featureList,/youban_chat/chat/saveFeature','','/addons/youban_chat/index',1,'',0,0,'',1,2,0,2,'tr_'||root.id::text||' ',36,'悦伴客服插件后台',1,NOW(),NOW()
+FROM (SELECT id FROM hg_admin_menu WHERE name='addons' LIMIT 1) root WHERE NOT EXISTS (SELECT 1 FROM hg_admin_menu WHERE name='youbanChatAdmin');
+
+UPDATE hg_admin_menu SET title='悦伴客服',path='youbanChatAdmin',icon='lucide:messages-square',type=2,component='/addons/youban_chat/index',permissions='/youban_chat/chat/list,/youban_chat/chat/view,/youban_chat/chat/messages,/youban_chat/chat/clear,/youban_chat/chat/botList,/youban_chat/chat/saveBot,/youban_chat/chat/bindingList,/youban_chat/chat/saveBinding,/youban_chat/chat/channelOptions,/youban_chat/chat/operatorList,/youban_chat/chat/saveOperator,/youban_chat/chat/featureList,/youban_chat/chat/saveFeature',hidden=2,status=1,updated_at=NOW() WHERE name='youbanChatAdmin';
+
+INSERT INTO hg_admin_role_menu (role_id,menu_id) SELECT r.id,m.id FROM hg_admin_role r JOIN hg_admin_menu m ON m.name='youbanChatAdmin' WHERE r.id IN (1,2) AND NOT EXISTS (SELECT 1 FROM hg_admin_role_menu rm WHERE rm.role_id=r.id AND rm.menu_id=m.id);

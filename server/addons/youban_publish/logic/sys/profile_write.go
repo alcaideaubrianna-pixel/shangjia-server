@@ -15,6 +15,7 @@ import (
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
+	"hotgo/internal/library/profileextractor"
 	"hotgo/internal/service"
 )
 
@@ -312,6 +313,7 @@ func (s *sSysPublish) submitProfilesByIds(ctx context.Context, ids []int64, tena
 func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, tenantId int64, accountId int64) (int64, error) {
 	columns := dao.ContentProfile.Columns()
 	now := gtime.Now()
+	extracted := profileextractor.Merge(in.PlainText, 0, 0, in.Tag)
 	data := g.Map{
 		columns.SourceType:      publishProfileSourceType,
 		columns.SourceNoteUuid:  newPublishProfileUUID(),
@@ -321,7 +323,9 @@ func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		columns.PlainText:       in.PlainText,
 		columns.Province:        in.Province,
 		columns.City:            in.City,
-		columns.CupSize:         in.Tag,
+		columns.Height:          extracted.Height,
+		columns.Weight:          extracted.Weight,
+		columns.CupSize:         extracted.Cup,
 		columns.Visibility:      consts.ContentVisibilityPublic,
 		columns.ReviewStatus:    consts.ContentReviewPending,
 		columns.ImportStatus:    "manual",
@@ -371,6 +375,8 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 			columns.PlainText,
 			columns.Province,
 			columns.City,
+			columns.Height,
+			columns.Weight,
 			columns.CupSize,
 		).
 		One()
@@ -388,13 +394,23 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		nextStatus = 1
 		nextVisibility = consts.ContentVisibilityPublic
 	}
+	extracted := profileextractor.Refresh(in.PlainText, profileextractor.Fields{
+		Height: current[columns.Height].Int(),
+		Weight: current[columns.Weight].Int(),
+		Cup:    current[columns.CupSize].String(),
+	})
+	if cup := profileextractor.NormalizeCup(in.Tag); cup != "" {
+		extracted.Cup = cup
+	}
 	data := g.Map{
 		columns.Title:       in.Title,
 		columns.Summary:     profileSummary(in.PlainText),
 		columns.PlainText:   in.PlainText,
 		columns.Province:    in.Province,
 		columns.City:        in.City,
-		columns.CupSize:     in.Tag,
+		columns.Height:      extracted.Height,
+		columns.Weight:      extracted.Weight,
+		columns.CupSize:     extracted.Cup,
 		columns.Visibility:  nextVisibility,
 		columns.AdminRemark: in.CustomerRemark,
 		columns.Status:      nextStatus,
@@ -422,7 +438,8 @@ func profileContentChanged(current gdb.Record, in *sysin.ProfileSaveInp) bool {
 		strings.TrimSpace(current["plain_text"].String()) != strings.TrimSpace(in.PlainText) ||
 		strings.TrimSpace(current["province"].String()) != strings.TrimSpace(in.Province) ||
 		strings.TrimSpace(current["city"].String()) != strings.TrimSpace(in.City) ||
-		strings.TrimSpace(current["cup_size"].String()) != strings.TrimSpace(in.Tag)
+		(profileextractor.NormalizeCup(in.Tag) != "" &&
+			strings.TrimSpace(current["cup_size"].String()) != profileextractor.NormalizeCup(in.Tag))
 }
 
 func isProfileNoUniqueConstraintError(err error) bool {
