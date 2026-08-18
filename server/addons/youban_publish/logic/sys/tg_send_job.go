@@ -271,8 +271,8 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		displayCaption := telegramCaptionWithJobMarker(caption, job.Id, "display")
 		g.Log().Infof(ctx, "TG展示资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia))
 		messages, err = s.sendTelegramDisplayPart(ctx, bot, job.TargetChatId, displayCaption, displayMedia)
-		if err != nil && len(messages) == 0 && isTelegramMediaSizeLimitError(err) {
-			g.Log().Warningf(ctx, "Bot展示媒体发送失败，命中大小降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia), err)
+		if err != nil && len(messages) == 0 && (isTelegramMediaSizeLimitError(err) || isTelegramMediaSourceUnavailableError(err)) {
+			g.Log().Warningf(ctx, "Bot展示媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia), err)
 			messages, err = s.sendTelegramJobMediaByAccount(ctx, job, "display", displayCaption, displayMedia, err)
 		}
 		if err != nil {
@@ -308,8 +308,8 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	verifyCaption := telegramCaptionWithJobMarker("", job.Id, "verify")
 	g.Log().Infof(ctx, "TG验证资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia))
 	verifyMessages, err := s.sendTelegramVerifyPart(ctx, bot, job.TargetChatId, verifyCaption, verifyMedia)
-	if err != nil && len(verifyMessages) == 0 && isTelegramMediaSizeLimitError(err) {
-		g.Log().Warningf(ctx, "Bot验证媒体发送失败，命中大小降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia), err)
+	if err != nil && len(verifyMessages) == 0 && (isTelegramMediaSizeLimitError(err) || isTelegramMediaSourceUnavailableError(err)) {
+		g.Log().Warningf(ctx, "Bot验证媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia), err)
 		verifyMessages, err = s.sendTelegramJobMediaByAccount(ctx, job, "verify", verifyCaption, verifyMedia, err)
 	}
 	if err != nil {
@@ -349,6 +349,15 @@ func logTelegramBotMediaSendFailure(ctx context.Context, job telegramJobRecord, 
 		return
 	}
 	g.Log().Errorf(ctx, "Bot%s媒体发送失败，未进入协议号降级 jobId:%d botId:%d chat:%s media:%s err:%+v", purpose, job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(media), err)
+}
+
+func isTelegramMediaSourceUnavailableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "下载远程媒体失败：http 404") ||
+		strings.Contains(message, "下载远程媒体失败: http 404")
 }
 
 func telegramMediaDebugSummary(media []*telegramMediaItem) string {

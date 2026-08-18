@@ -63,40 +63,55 @@ func cachedTelegramMediaFile(ctx context.Context, media *telegramMediaItem) (str
 			return localPath, nil, nil
 		}
 	}
-	source, err := mediaFileCacheRemoteSource(ctx, media)
+	sources, err := mediaFileCacheRemoteSources(ctx, media)
 	if err != nil {
 		return "", nil, err
 	}
-	if source == "" {
+	if len(sources) == 0 {
 		return "", nil, nil
 	}
-	path, err := cachedRemoteMediaFile(ctx, mediaFileCacheKey(media, source), source, mediaFileCacheExt(media, source))
-	return path, nil, err
+	var lastErr error
+	for _, source := range sources {
+		path, sourceErr := cachedRemoteMediaFile(ctx, mediaFileCacheKey(media, source), source, mediaFileCacheExt(media, source))
+		if sourceErr == nil {
+			return path, nil, nil
+		}
+		lastErr = sourceErr
+		g.Log().Warningf(ctx, "媒体主地址下载失败，尝试备用附件地址 mediaId:%d source:%s err:%+v", media.Id, source, sourceErr)
+	}
+	return "", nil, lastErr
 }
 
-func mediaFileCacheRemoteSource(ctx context.Context, media *telegramMediaItem) (string, error) {
+func mediaFileCacheRemoteSources(ctx context.Context, media *telegramMediaItem) ([]string, error) {
 	if media == nil {
-		return "", nil
+		return nil, nil
 	}
-	source := strings.TrimSpace(media.FileUrl)
-	if strings.HasPrefix(strings.ToLower(source), "http") {
-		return source, nil
+	sources := make([]string, 0, 2)
+	seen := make(map[string]struct{}, 2)
+	add := func(source string) {
+		source = strings.TrimSpace(source)
+		if source == "" || !strings.HasPrefix(strings.ToLower(source), "http") {
+			return
+		}
+		if _, exists := seen[source]; exists {
+			return
+		}
+		seen[source] = struct{}{}
+		sources = append(sources, source)
 	}
+	add(media.FileUrl)
 	if media.AttachmentId <= 0 {
-		return "", nil
+		return sources, nil
 	}
 	row, err := g.DB().Model(sysAttachmentTable).Safe().Ctx(ctx).Fields("file_url,path,drive").Where("id", media.AttachmentId).One()
 	if err != nil {
-		return "", gerror.Wrap(err, "读取资源文件地址失败")
+		return nil, gerror.Wrap(err, "读取资源文件地址失败")
 	}
-	if row == nil || row.IsEmpty() {
-		return "", nil
+	if row != nil && !row.IsEmpty() {
+		add(storager.LastUrl(ctx, row["file_url"].String(), row["drive"].String()))
+		add(storager.LastUrl(ctx, row["path"].String(), row["drive"].String()))
 	}
-	fullPath := firstNonEmpty(row["file_url"].String(), row["path"].String())
-	if strings.TrimSpace(fullPath) == "" {
-		return "", nil
-	}
-	return storager.LastUrl(ctx, fullPath, row["drive"].String()), nil
+	return sources, nil
 }
 
 func cachedRemoteMediaFile(ctx context.Context, key string, source string, ext string) (string, error) {
