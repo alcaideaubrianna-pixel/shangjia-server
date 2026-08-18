@@ -13,10 +13,19 @@ func TestAuditProfileAcceptsMatchingFields(t *testing.T) {
 	}
 }
 
-func TestAuditProfileRejectsMentionedButUnparsedValue(t *testing.T) {
+func TestAuditProfileAllowsExplicitInvalidSourceValue(t *testing.T) {
 	analysis := profileextractor.Analyze("身高：999 体重：20斤")
-	issues := auditProfile(analysis)
-	if len(issues) != 2 {
+	if issues := auditProfile(analysis); len(issues) != 0 {
+		t.Fatalf("unexpected issues: %v", issues)
+	}
+	if !analysis.HeightSourceInvalid || !analysis.WeightSourceInvalid {
+		t.Fatalf("expected invalid source markers: %+v", analysis)
+	}
+}
+
+func TestAuditProfileRejectsUnrecognizedSourceFormat(t *testing.T) {
+	analysis := profileextractor.Analyze("身高：很高 体重：很重")
+	if issues := auditProfile(analysis); len(issues) != 2 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
 }

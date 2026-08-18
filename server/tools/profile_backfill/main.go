@@ -12,20 +12,23 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 
+	"hotgo/internal/bootstrap/envconfig"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/profileextractor"
 )
 
 type options struct {
-	batchSize   int
-	startID     int64
-	dryRun      bool
-	strict      bool
-	maxBatches  int
-	indexesOnly bool
+	batchSize      int
+	startID        int64
+	dryRun         bool
+	strict         bool
+	maxBatches     int
+	indexesOnly    bool
+	includeDeleted bool
 }
 
 func main() {
+	envconfig.Apply(context.Background())
 	opts := options{}
 	flag.IntVar(&opts.batchSize, "batch-size", 1000, "number of profiles processed per batch")
 	flag.Int64Var(&opts.startID, "start-id", 0, "resume after this profile ID")
@@ -33,6 +36,7 @@ func main() {
 	flag.BoolVar(&opts.strict, "strict", true, "stop before writing a batch containing anomalous profile fields")
 	flag.IntVar(&opts.maxBatches, "max-batches", 0, "stop after this many batches; zero processes all batches")
 	flag.BoolVar(&opts.indexesOnly, "indexes-only", false, "create profile field indexes and exit")
+	flag.BoolVar(&opts.includeDeleted, "include-deleted", false, "include soft-deleted profiles in the backfill")
 	flag.Parse()
 	if opts.batchSize < 1 || opts.batchSize > 2000 {
 		fmt.Fprintln(os.Stderr, "batch-size must be between 1 and 2000")
@@ -60,7 +64,11 @@ func run(ctx context.Context, opts options) error {
 		if opts.maxBatches > 0 && batchNo >= opts.maxBatches {
 			break
 		}
-		rows, err := dao.ContentProfile.Ctx(ctx).
+		model := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx)
+		if opts.includeDeleted {
+			model = model.Unscoped()
+		}
+		rows, err := model.
 			WhereGT(columns.Id, lastID).
 			Fields(columns.Id, columns.PlainText, columns.Province, columns.City, columns.Age, columns.Height, columns.Weight, columns.CupSize).
 			OrderAsc(columns.Id).
@@ -142,12 +150,7 @@ func run(ctx context.Context, opts options) error {
 		}
 		if !opts.dryRun && len(updates) > 0 {
 			if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-				for id, data := range updates {
-					if _, updateErr := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Where(columns.Id, id).Data(data).Update(); updateErr != nil {
-						return fmt.Errorf("update profile %d: %w", id, updateErr)
-					}
-				}
-				return nil
+				return bulkUpdateProfiles(tx, updates, columns.Height, columns.Weight, columns.CupSize)
 			}); err != nil {
 				return err
 			}
@@ -156,6 +159,36 @@ func run(ctx context.Context, opts options) error {
 	}
 	fmt.Printf("done lastId=%d scanned=%d changed=%d sourceMissing=%d coverage=%.2f%% dryRun=%t\n", lastID, totalScanned, totalUpdated, totalSourceMissing, percentage(totalExtracted, totalExpected), opts.dryRun)
 	return nil
+}
+
+func bulkUpdateProfiles(tx gdb.TX, updates map[int64]g.Map, heightField, weightField, cupField string) error {
+	var query strings.Builder
+	query.WriteString(`UPDATE "hg_content_profile" AS p SET "height"=COALESCE(v.height,p."height"),"weight"=COALESCE(v.weight,p."weight"),"cup_size"=COALESCE(v.cup_size,p."cup_size") FROM (VALUES `)
+	args := make([]interface{}, 0, len(updates)*4)
+	index := 1
+	row := 0
+	for id, data := range updates {
+		if row > 0 {
+			query.WriteByte(',')
+		}
+		fmt.Fprintf(&query, "($%d::bigint,$%d::integer,$%d::integer,$%d::text)", index, index+1, index+2, index+3)
+		args = append(args, id, nullableUpdateValue(data, heightField), nullableUpdateValue(data, weightField), nullableUpdateValue(data, cupField))
+		index += 4
+		row++
+	}
+	query.WriteString(`) AS v(id,height,weight,cup_size) WHERE p."id"=v.id`)
+	if _, err := tx.Exec(query.String(), args...); err != nil {
+		return fmt.Errorf("bulk update %d profiles: %w", len(updates), err)
+	}
+	return nil
+}
+
+func nullableUpdateValue(data g.Map, field string) interface{} {
+	value, ok := data[field]
+	if !ok {
+		return nil
+	}
+	return value
 }
 
 func ensureProfileFieldIndexes(ctx context.Context) error {
@@ -193,13 +226,13 @@ ORDER BY indexname`)
 
 func auditProfile(analysis profileextractor.Analysis) []string {
 	issues := make([]string, 0)
-	if analysis.HeightMentioned && !analysis.HeightSourceEmpty && analysis.Height == 0 {
+	if analysis.HeightMentioned && !analysis.HeightSourceEmpty && !analysis.HeightSourceInvalid && analysis.Height == 0 {
 		issues = append(issues, "height_unparsed")
 	}
-	if analysis.WeightMentioned && !analysis.WeightSourceEmpty && analysis.Weight == 0 {
+	if analysis.WeightMentioned && !analysis.WeightSourceEmpty && !analysis.WeightSourceInvalid && analysis.Weight == 0 {
 		issues = append(issues, "weight_unparsed")
 	}
-	if analysis.CupMentioned && !analysis.CupSourceEmpty && analysis.Cup == "" {
+	if analysis.CupMentioned && !analysis.CupSourceEmpty && !analysis.CupSourceInvalid && analysis.Cup == "" {
 		issues = append(issues, "cup_unparsed")
 	}
 	return issues
