@@ -271,7 +271,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		displayCaption := telegramCaptionWithJobMarker(caption, job.Id, "display")
 		g.Log().Infof(ctx, "TG展示资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia))
 		messages, err = s.sendTelegramDisplayPart(ctx, bot, job.TargetChatId, displayCaption, displayMedia)
-		if err != nil && len(messages) == 0 && (isTelegramMediaSizeLimitError(err) || isTelegramMediaSourceUnavailableError(err)) {
+		if err != nil && len(messages) == 0 && shouldFallbackTelegramMediaToAccount(err) {
 			g.Log().Warningf(ctx, "Bot展示媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia), err)
 			messages, err = s.sendTelegramJobMediaByAccount(ctx, job, "display", displayCaption, displayMedia, err)
 		}
@@ -308,7 +308,7 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	verifyCaption := telegramCaptionWithJobMarker("", job.Id, "verify")
 	g.Log().Infof(ctx, "TG验证资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia))
 	verifyMessages, err := s.sendTelegramVerifyPart(ctx, bot, job.TargetChatId, verifyCaption, verifyMedia)
-	if err != nil && len(verifyMessages) == 0 && (isTelegramMediaSizeLimitError(err) || isTelegramMediaSourceUnavailableError(err)) {
+	if err != nil && len(verifyMessages) == 0 && shouldFallbackTelegramMediaToAccount(err) {
 		g.Log().Warningf(ctx, "Bot验证媒体发送失败，命中媒体降级条件 jobId:%d botId:%d chat:%s media:%s err:%+v", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia), err)
 		verifyMessages, err = s.sendTelegramJobMediaByAccount(ctx, job, "verify", verifyCaption, verifyMedia, err)
 	}
@@ -358,6 +358,19 @@ func isTelegramMediaSourceUnavailableError(err error) bool {
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "下载远程媒体失败：http 404") ||
 		strings.Contains(message, "下载远程媒体失败: http 404")
+}
+
+func isTelegramBotMediaProcessingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToUpper(err.Error()), "IMAGE_PROCESS_FAILED")
+}
+
+func shouldFallbackTelegramMediaToAccount(err error) bool {
+	return isTelegramMediaSizeLimitError(err) ||
+		isTelegramMediaSourceUnavailableError(err) ||
+		isTelegramBotMediaProcessingError(err)
 }
 
 func telegramMediaDebugSummary(media []*telegramMediaItem) string {

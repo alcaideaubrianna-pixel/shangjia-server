@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -87,10 +88,11 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 			if operationGate != nil {
 				operationGate.Unlock()
 			}
+			taskCtxErr := taskCtx.Err()
 			stopRenew()
 			cancel()
-			if handleErr != nil && taskCtx.Err() != nil {
-				g.Log().Warningf(ctx, "Telegram账号任务处理超时 taskId:%d type:%s tgAccountId:%d timeout:%s attempt:%d/%d err:%+v", task.ID, task.TaskType, task.AccountID, accountTaskTimeout(task.TaskType), task.AttemptCount, task.MaxAttempts, taskCtx.Err())
+			if handleErr != nil && errors.Is(taskCtxErr, context.DeadlineExceeded) {
+				g.Log().Warningf(ctx, "Telegram账号任务处理超时 taskId:%d type:%s tgAccountId:%d timeout:%s attempt:%d/%d err:%+v", task.ID, task.TaskType, task.AccountID, accountTaskTimeout(task.TaskType), task.AttemptCount, task.MaxAttempts, taskCtxErr)
 			}
 			if handleErr == nil {
 				err = collectorservice.AccountTasks().Complete(ctx, task.ID, lease, result)

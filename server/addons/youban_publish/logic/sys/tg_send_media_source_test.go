@@ -25,3 +25,23 @@ func TestIsTelegramMediaSourceUnavailableError(t *testing.T) {
 		})
 	}
 }
+
+func TestIsTelegramBotMediaProcessingError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "image process failed", err: errors.New("IMAGE_PROCESS_FAILED"), want: true},
+		{name: "wrapped telegram error", err: errors.New("Bad Request: failed to send message #5 with the error message IMAGE_PROCESS_FAILED"), want: true},
+		{name: "unrelated media error", err: errors.New("VIDEO_CONTENT_TYPE_INVALID"), want: false},
+		{name: "nil", err: nil, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isTelegramBotMediaProcessingError(test.err); got != test.want {
+				t.Fatalf("got %v, want %v", got, test.want)
+			}
+		})
+	}
+}
