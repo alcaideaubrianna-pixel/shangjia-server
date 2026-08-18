@@ -1819,10 +1819,13 @@ func (s *sSysContent) publicProfileWhere(mod *gdb.Model) *gdb.Model {
 	// visible while still removing profiles when the tenant takes them offline.
 	return mod.Where(
 		"(EXISTS (SELECT 1 FROM hg_youban_publish_profile_state yps WHERE yps.profile_id=p."+profileColumns.Id+" AND yps.tenant_id IN(?) AND yps.deleted_at IS NULL) "+
-			"OR EXISTS (SELECT 1 FROM hg_youban_publish_media ypm WHERE ypm.profile_id=p."+profileColumns.Id+" AND ypm.tenant_id IN(?) AND ypm.status=? AND ypm.deleted_at IS NULL))",
+			"OR EXISTS (SELECT 1 FROM hg_youban_publish_media ypm WHERE ypm.profile_id=p."+profileColumns.Id+" AND ypm.tenant_id IN(?) AND ypm.status=? AND ypm.deleted_at IS NULL) "+
+			"OR EXISTS (SELECT 1 FROM hg_youban_publish_channel_profile ycp WHERE ycp.profile_id=p."+profileColumns.Id+" AND ycp.tenant_id IN(?) AND ycp.status=?))",
 		scope.TenantIds,
 		scope.TenantIds,
 		consts.StatusEnabled,
+		scope.TenantIds,
+		"active",
 	)
 }
 
