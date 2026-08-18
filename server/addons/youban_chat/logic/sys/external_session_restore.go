@@ -9,7 +9,7 @@ import (
 
 func (s *sSysChat) deletedExternalConversation(ctx context.Context, ownerId, profileId int64) (*chatConversationRow, error) {
 	var row *chatConversationRow
-	err := g.DB().Model(chatConversationTable).Ctx(ctx).
+	err := g.DB().Model(chatConversationTable).Ctx(ctx).Unscoped().
 		Where("member_id", ownerId).
 		Where("profile_id", profileId).
 		WhereNotNull("deleted_at").
