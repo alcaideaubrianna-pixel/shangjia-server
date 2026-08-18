@@ -99,6 +99,16 @@ type ChatAdminSaveBotReq struct {
 	chatsysin.ExternalAdminBotSaveInp
 }
 type ChatAdminSaveBotRes struct{}
+type ChatAdminDeleteBotReq struct {
+	g.Meta `path:"/open/v1/chat/admin/bots/{id}" method:"delete" tags:"开放聊天管理" summary:"删除租户Bot"`
+	Id     int64 `json:"id"`
+}
+type ChatAdminDeleteBotRes struct{}
+type ChatAdminRotateBotBindingCodeReq struct {
+	g.Meta `path:"/open/v1/chat/admin/bots/{id}/binding-code/rotate" method:"post" tags:"开放聊天管理" summary:"刷新租户Bot绑定码"`
+	Id     int64 `json:"id"`
+}
+type ChatAdminRotateBotBindingCodeRes struct{}
 type ChatAdminConversationsReq struct {
 	g.Meta   `path:"/open/v1/chat/admin/conversations" method:"get" tags:"开放聊天管理" summary:"租户会话列表"`
 	Page     int `json:"page"`

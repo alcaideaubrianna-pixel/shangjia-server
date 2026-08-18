@@ -22,6 +22,8 @@ type ISysChat interface {
 	ExternalDelete(ctx context.Context, in *sysin.ExternalConversationActionInp) (err error)
 	ExternalAdminBots(ctx context.Context, in *sysin.ExternalAdminListInp) (res *sysin.ExternalAdminBotListModel, err error)
 	ExternalAdminSaveBot(ctx context.Context, in *sysin.ExternalAdminBotSaveInp) (err error)
+	ExternalAdminDeleteBot(ctx context.Context, in *sysin.ExternalAdminBotActionInp) (err error)
+	ExternalAdminRotateBotBindingCode(ctx context.Context, in *sysin.ExternalAdminBotActionInp) (err error)
 	ExternalAdminConversations(ctx context.Context, in *sysin.ExternalAdminConversationInp) (res *sysin.ExternalAdminConversationListModel, err error)
 	ExternalAdminMessages(ctx context.Context, in *sysin.ExternalAdminConversationInp) (res *sysin.ChatMessagesModel, err error)
 	ExternalAdminClear(ctx context.Context, in *sysin.ExternalAdminConversationInp) (err error)

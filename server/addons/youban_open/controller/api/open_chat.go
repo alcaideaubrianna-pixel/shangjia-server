@@ -97,6 +97,14 @@ func (c *cOpenChat) AdminSaveBot(ctx context.Context, req *open.ChatAdminSaveBot
 	}
 	return &open.ChatAdminSaveBotRes{}, nil
 }
+func (c *cOpenChat) AdminDeleteBot(ctx context.Context, req *open.ChatAdminDeleteBotReq) (*open.ChatAdminDeleteBotRes, error) {
+	err := chatservice.SysChat().ExternalAdminDeleteBot(ctx, &sysin.ExternalAdminBotActionInp{AppId: opencontext.AppId(ctx), Id: req.Id})
+	return &open.ChatAdminDeleteBotRes{}, err
+}
+func (c *cOpenChat) AdminRotateBotBindingCode(ctx context.Context, req *open.ChatAdminRotateBotBindingCodeReq) (*open.ChatAdminRotateBotBindingCodeRes, error) {
+	err := chatservice.SysChat().ExternalAdminRotateBotBindingCode(ctx, &sysin.ExternalAdminBotActionInp{AppId: opencontext.AppId(ctx), Id: req.Id})
+	return &open.ChatAdminRotateBotBindingCodeRes{}, err
+}
 func (c *cOpenChat) AdminConversations(ctx context.Context, req *open.ChatAdminConversationsReq) (*open.ChatAdminConversationsRes, error) {
 	data, err := chatservice.SysChat().ExternalAdminConversations(ctx, &sysin.ExternalAdminConversationInp{AppId: opencontext.AppId(ctx), Page: req.Page, PerPage: req.PageSize})
 	return &open.ChatAdminConversationsRes{ExternalAdminConversationListModel: data}, err

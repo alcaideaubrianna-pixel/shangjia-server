@@ -88,10 +88,19 @@ type ExternalAdminBotModel struct {
 	TokenHint   string `json:"tokenHint"`
 	Remark      string `json:"remark"`
 	Status      int    `json:"status"`
+	BindingId   int64  `json:"bindingId"`
+	BindCode    string `json:"bindCode"`
+	TgChatId    string `json:"tgChatId"`
+	TgChatTitle string `json:"tgChatTitle"`
+	IsBound     bool   `json:"isBound"`
 }
 type ExternalAdminBotListModel struct {
 	List  []*ExternalAdminBotModel `json:"list"`
 	Total int                      `json:"total"`
+}
+type ExternalAdminBotActionInp struct {
+	AppId string `json:"-"`
+	Id    int64  `json:"id" v:"required|min:1#Bot ID不能为空|Bot ID不能为空"`
 }
 type ExternalAdminConversationInp struct {
 	AppId          string `json:"-"`

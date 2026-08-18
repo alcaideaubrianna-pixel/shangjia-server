@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -57,7 +58,33 @@ func (s *sSysChat) ExternalAdminBots(ctx context.Context, in *sysin.ExternalAdmi
 		if len(row.BotToken) >= 4 {
 			hint = "****" + row.BotToken[len(row.BotToken)-4:]
 		}
-		res.List = append(res.List, &sysin.ExternalAdminBotModel{Id: row.Id, BotName: row.BotName, BotUsername: row.BotUsername, TokenHint: hint, Remark: row.Remark, Status: row.Status})
+		var binding *chatBindingRow
+		if err := g.DB().Model(chatBindingTable).Ctx(ctx).
+			Where("app_id", in.AppId).
+			Where("bot_id", row.Id).
+			WhereNull("deleted_at").
+			OrderDesc("id").
+			Scan(&binding); err != nil {
+			return nil, gerror.Wrap(err, "读取Bot绑定码失败")
+		}
+		if binding == nil {
+			now := gtime.Now()
+			code := randomBindCode()
+			bindingId, err := g.DB().Model(chatBindingTable).Ctx(ctx).Data(g.Map{"app_id": in.AppId, "bind_code": code, "bind_type": "global", "bot_id": row.Id, "tg_chat_id": "", "tg_chat_title": "", "remark": row.Remark, "status": 1, "created_at": now, "updated_at": now}).InsertAndGetId()
+			if err != nil {
+				return nil, gerror.Wrap(err, "生成Bot绑定码失败")
+			}
+			binding = &chatBindingRow{Id: bindingId, AppId: in.AppId, BotId: row.Id, BindCode: code, BindType: "global", Status: 1}
+		}
+		item := &sysin.ExternalAdminBotModel{Id: row.Id, BotName: row.BotName, BotUsername: row.BotUsername, TokenHint: hint, Remark: row.Remark, Status: row.Status}
+		if binding != nil {
+			item.BindingId = binding.Id
+			item.BindCode = binding.BindCode
+			item.TgChatId = binding.TgChatId
+			item.TgChatTitle = binding.TgChatTitle
+			item.IsBound = strings.TrimSpace(binding.TgChatId) != ""
+		}
+		res.List = append(res.List, item)
 	}
 	return res, nil
 }
@@ -75,8 +102,75 @@ func (s *sSysChat) ExternalAdminSaveBot(ctx context.Context, in *sysin.ExternalA
 		return gerror.Wrap(err, "校验Bot Token失败")
 	}
 	now := gtime.Now()
-	_, err = g.DB().Model(chatBotTable).Ctx(ctx).Data(g.Map{"app_id": in.AppId, "bot_name": telegramBotDisplayName(profile), "bot_username": strings.TrimPrefix(profile.Username, "@"), "bot_token": token, "remark": strings.TrimSpace(in.Remark), "status": 1, "created_at": now, "updated_at": now}).Insert()
-	return err
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		botId, insertErr := tx.Model(chatBotTable).Ctx(ctx).Data(g.Map{"app_id": in.AppId, "bot_name": telegramBotDisplayName(profile), "bot_username": strings.TrimPrefix(profile.Username, "@"), "bot_token": token, "remark": strings.TrimSpace(in.Remark), "status": 1, "created_at": now, "updated_at": now}).InsertAndGetId()
+		if insertErr != nil {
+			return gerror.Wrap(insertErr, "保存Bot失败")
+		}
+		_, insertErr = tx.Model(chatBindingTable).Ctx(ctx).Data(g.Map{"app_id": in.AppId, "bind_code": randomBindCode(), "bind_type": "global", "bot_id": botId, "tg_chat_id": "", "tg_chat_title": "", "remark": strings.TrimSpace(in.Remark), "status": 1, "created_at": now, "updated_at": now}).Insert()
+		return gerror.Wrap(insertErr, "生成Bot绑定码失败")
+	})
+	if err != nil {
+		return err
+	}
+	if err = s.syncTelegramBotMenu(ctx, token); err != nil {
+		g.Log().Warningf(ctx, "同步Telegram菜单失败 bot:%s err:%+v", profile.Username, err)
+	}
+	return nil
+}
+
+func (s *sSysChat) externalAdminBot(ctx context.Context, appId string, id int64) (*chatBotRow, error) {
+	if strings.TrimSpace(appId) == "" || id <= 0 {
+		return nil, gerror.New("Bot ID无效")
+	}
+	var row *chatBotRow
+	err := g.DB().Model(chatBotTable).Ctx(ctx).Where("app_id", appId).Where("id", id).WhereNull("deleted_at").Scan(&row)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取Bot失败")
+	}
+	if row == nil {
+		return nil, gerror.New("Bot不存在或无权访问")
+	}
+	return row, nil
+}
+
+func (s *sSysChat) ExternalAdminDeleteBot(ctx context.Context, in *sysin.ExternalAdminBotActionInp) error {
+	if in == nil {
+		return gerror.New("Bot ID无效")
+	}
+	row, err := s.externalAdminBot(ctx, in.AppId, in.Id)
+	if err != nil {
+		return err
+	}
+	now := gtime.Now()
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if _, err = tx.Model(chatBindingTable).Ctx(ctx).Where("app_id", in.AppId).Where("bot_id", row.Id).WhereNull("deleted_at").Data(g.Map{"status": 0, "deleted_at": now, "updated_at": now}).Update(); err != nil {
+			return gerror.Wrap(err, "停用Bot群组绑定失败")
+		}
+		_, err = tx.Model(chatBotTable).Ctx(ctx).Where("app_id", in.AppId).Where("id", row.Id).Data(g.Map{"status": 0, "deleted_at": now, "updated_at": now}).Update()
+		return gerror.Wrap(err, "删除Bot失败")
+	})
+}
+
+func (s *sSysChat) ExternalAdminRotateBotBindingCode(ctx context.Context, in *sysin.ExternalAdminBotActionInp) error {
+	if in == nil {
+		return gerror.New("Bot ID无效")
+	}
+	row, err := s.externalAdminBot(ctx, in.AppId, in.Id)
+	if err != nil {
+		return err
+	}
+	now := gtime.Now()
+	result, err := g.DB().Model(chatBindingTable).Ctx(ctx).Where("app_id", in.AppId).Where("bot_id", row.Id).WhereNull("deleted_at").Data(g.Map{"bind_code": randomBindCode(), "updated_at": now}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "刷新Bot绑定码失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected > 0 {
+		return nil
+	}
+	_, err = g.DB().Model(chatBindingTable).Ctx(ctx).Data(g.Map{"app_id": in.AppId, "bind_code": randomBindCode(), "bind_type": "global", "bot_id": row.Id, "tg_chat_id": "", "tg_chat_title": "", "remark": row.Remark, "status": 1, "created_at": now, "updated_at": now}).Insert()
+	return gerror.Wrap(err, "生成Bot绑定码失败")
 }
 
 func (s *sSysChat) externalAdminConversation(ctx context.Context, appId string, id int64) (*chatConversationRow, error) {
@@ -252,7 +346,7 @@ func (s *sSysChat) ExternalSession(ctx context.Context, in *sysin.ExternalSessio
 	if err != nil {
 		return nil, err
 	}
-	binding, err := s.matchBinding(ctx, profile)
+	binding, err := s.matchExternalBinding(ctx, in.Visitor.AppId, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -280,6 +374,35 @@ func (s *sSysChat) ExternalSession(ctx context.Context, in *sysin.ExternalSessio
 	}
 	_, _ = g.DB().Model(chatConversationTable).Ctx(ctx).Where("id", row.Id).Data(g.Map{"user_hidden_at": nil, "updated_at": gtime.Now()}).Update()
 	return s.packStart(row), nil
+}
+
+func (s *sSysChat) matchExternalBinding(ctx context.Context, appId string, profile *profileBrief) (*chatBindingRow, error) {
+	base := func() *gdb.Model {
+		return s.bindingModel(ctx).Where("b.app_id", strings.TrimSpace(appId))
+	}
+	var row *chatBindingRow
+	if profile != nil && (profile.SourceChannelId > 0 || profile.ChannelId > 0) {
+		mod := base().Where("b.bind_type", "channel")
+		if profile.SourceChannelId > 0 && profile.ChannelId > 0 {
+			mod = mod.Where("(b.source_channel_id=? OR b.content_channel_id=?)", profile.SourceChannelId, profile.ChannelId)
+		} else if profile.SourceChannelId > 0 {
+			mod = mod.Where("b.source_channel_id", profile.SourceChannelId)
+		} else {
+			mod = mod.Where("b.content_channel_id", profile.ChannelId)
+		}
+		if err := mod.OrderDesc("b.updated_at").OrderDesc("b.id").Scan(&row); err != nil {
+			return nil, gerror.Wrap(err, "匹配租户客服群绑定失败")
+		}
+		if row != nil && strings.TrimSpace(row.TgChatId) != "" {
+			return row, nil
+		}
+	}
+	row = nil
+	err := base().Where("b.bind_type", "global").OrderDesc("b.updated_at").OrderDesc("b.id").Scan(&row)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取租户默认客服群绑定失败")
+	}
+	return row, nil
 }
 
 func (s *sSysChat) ExternalSend(ctx context.Context, in *sysin.ExternalMessageInp) (*sysin.ChatSendModel, error) {

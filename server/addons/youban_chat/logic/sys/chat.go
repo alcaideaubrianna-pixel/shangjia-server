@@ -2826,6 +2826,12 @@ func (s *sSysChat) bindTelegramChatByCode(ctx context.Context, code string, msg 
 		g.Log().Warningf(ctx, "Telegram绑定码不存在 bot:%d chat:%d code:%s", botId, msg.Chat.Id, code)
 		return nil
 	}
+	if botId > 0 && row.BotId > 0 && row.BotId != botId {
+		if token != "" {
+			_, _ = s.telegramSendMessage(ctx, token, fmt.Sprintf("%d", msg.Chat.Id), msg.MessageThreadId, "绑定码与当前Bot不匹配")
+		}
+		return nil
+	}
 	data := g.Map{"tg_chat_id": fmt.Sprintf("%d", msg.Chat.Id), "tg_chat_title": telegramChatTitle(msg.Chat), "updated_at": gtime.Now()}
 	if botId > 0 {
 		data["bot_id"] = botId
