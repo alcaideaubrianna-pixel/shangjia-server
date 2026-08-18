@@ -211,7 +211,7 @@ func (s *sSysChat) ExternalAdminConversations(ctx context.Context, in *sysin.Ext
 		if item.ProfileId > 0 {
 			name = fmt.Sprintf("%s · 资料 %d", name, item.ProfileId)
 		}
-		model := &sysin.ExternalConversationModel{Id: item.Id, ConversationId: item.Id, ProfileId: item.ProfileId, Name: name, Status: item.Status, UnreadCount: item.UnreadCount, LastMessage: item.LastMessage}
+		model := &sysin.ExternalConversationModel{Id: item.Id, ConversationId: item.Id, ProfileId: item.ProfileId, Name: name, Status: item.Status, UnreadCount: item.UnreadCount, LastMessage: item.LastMessage, CanDelete: true}
 		if item.LastMessageAt != nil {
 			model.LastMessageAt = item.LastMessageAt.String()
 		}
@@ -330,7 +330,7 @@ func (s *sSysChat) ExternalSession(ctx context.Context, in *sysin.ExternalSessio
 	if err := s.ensureExternalConversationColumns(ctx); err != nil {
 		return nil, err
 	}
-	visitor, _, err := s.externalActor(ctx, &in.Visitor)
+	visitor, member, err := s.externalActor(ctx, &in.Visitor)
 	if err != nil {
 		return nil, err
 	}
@@ -373,6 +373,11 @@ func (s *sSysChat) ExternalSession(ctx context.Context, in *sysin.ExternalSessio
 		return nil, err
 	}
 	_, _ = g.DB().Model(chatConversationTable).Ctx(ctx).Where("id", row.Id).Data(g.Map{"user_hidden_at": nil, "updated_at": gtime.Now()}).Update()
+	if row.TgMessageThreadId <= 0 {
+		if err = s.notifyTelegramSession(ctx, row, profile, member); err != nil {
+			return nil, err
+		}
+	}
 	return s.packStart(row), nil
 }
 
