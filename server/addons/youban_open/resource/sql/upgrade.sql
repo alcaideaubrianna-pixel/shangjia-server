@@ -1,14 +1,14 @@
-UPDATE `hg_admin_menu`
-SET `title` = '开放中心 - CMS 应用',
-    `permissions` = '/youban_open/cmsApp/list,/youban_open/cmsApp/save,/youban_open/cmsApp/resetSecret',
-    `remark` = '开放中心应用授权管理',
-    `updated_at` = NOW()
-WHERE `name` = 'youbanPublishCmsApps';
+DELETE FROM `hg_admin_role_menu` WHERE `menu_id` IN (SELECT `id` FROM `hg_admin_menu` WHERE `name` = 'youbanPublishCmsApps');
+DELETE FROM `hg_admin_menu` WHERE `name` = 'youbanPublishCmsApps';
 
 UPDATE `hg_admin_menu` SET `component` = '/addons/youbanopen/index', `updated_at` = NOW() WHERE `name` = 'youbanOpenCmsApps';
 UPDATE `hg_admin_menu` m JOIN `hg_admin_menu` p ON p.`name` = 'addons' SET m.`pid` = p.`id`, m.`type` = '2', m.`path` = 'youbanOpen', m.`component` = '/addons/youbanopen/index', m.`level` = '2', m.`updated_at` = NOW() WHERE m.`name` = 'youbanOpen';
 INSERT INTO `hg_admin_role_menu` (`role_id`,`menu_id`) SELECT r.`id`,m.`id` FROM `hg_admin_role` r JOIN `hg_admin_menu` m ON m.`name` IN ('youbanOpen','youbanOpenCmsApps') WHERE r.`id` IN (1,2) AND NOT EXISTS (SELECT 1 FROM `hg_admin_role_menu` rm WHERE rm.`role_id`=r.`id` AND rm.`menu_id`=m.`id`);
-ALTER TABLE `hg_youban_publish_cms_app` ADD COLUMN `review_mode` varchar(32) NOT NULL DEFAULT 'review_required';
+ALTER TABLE `hg_youban_publish_cms_app` ADD COLUMN `review_mode` varchar(32) NOT NULL DEFAULT 'auto_approve';
+ALTER TABLE `hg_youban_publish_cms_app` MODIFY COLUMN `review_mode` varchar(32) NOT NULL DEFAULT 'auto_approve';
+UPDATE `hg_youban_publish_cms_app` SET `review_mode` = 'auto_approve' WHERE `review_mode` = 'review_required';
+ALTER TABLE `hg_youban_publish_cms_tenant_binding` MODIFY COLUMN `status` varchar(32) NOT NULL DEFAULT 'approved';
+UPDATE `hg_youban_publish_cms_tenant_binding` SET `status` = 'approved', `reviewed_at` = COALESCE(`reviewed_at`, NOW()), `updated_at` = NOW() WHERE `status` = 'pending';
 CREATE TABLE IF NOT EXISTS `hg_youban_open_profile_event` (`id` bigint NOT NULL AUTO_INCREMENT,`app_id` varchar(128) NOT NULL,`event_id` varchar(128) NOT NULL,`actor_id` varchar(128) NOT NULL,`profile_id` bigint NOT NULL,`event_type` varchar(32) NOT NULL,`occurred_at` datetime NULL,`created_at` datetime NULL,PRIMARY KEY (`id`),UNIQUE KEY `uk_ybo_event_app_event` (`app_id`,`event_id`),KEY `idx_ybo_event_app_profile_time` (`app_id`,`profile_id`,`created_at`));
 CREATE TABLE IF NOT EXISTS `hg_youban_open_profile_metric_daily` (`id` bigint NOT NULL AUTO_INCREMENT,`app_id` varchar(128) NOT NULL,`profile_id` bigint NOT NULL,`metric_date` date NOT NULL,`view_count` int NOT NULL DEFAULT 0,`unique_view_count` int NOT NULL DEFAULT 0,`favorite_count` int NOT NULL DEFAULT 0,`created_at` datetime NULL,`updated_at` datetime NULL,PRIMARY KEY (`id`),UNIQUE KEY `uk_ybo_metric_app_profile_date` (`app_id`,`profile_id`,`metric_date`),KEY `idx_ybo_metric_app_date` (`app_id`,`metric_date`));
 CREATE TABLE IF NOT EXISTS `hg_youban_open_profile_actor_daily` (`id` bigint NOT NULL AUTO_INCREMENT,`app_id` varchar(128) NOT NULL,`actor_id` varchar(128) NOT NULL,`profile_id` bigint NOT NULL,`metric_date` date NOT NULL,`created_at` datetime NULL,PRIMARY KEY (`id`),UNIQUE KEY `uk_ybo_actor_daily` (`app_id`,`actor_id`,`profile_id`,`metric_date`));

@@ -64,7 +64,7 @@ func (s *sOpenAccess) AppSave(ctx context.Context, in *sysin.CmsAppSaveInp) (*sy
 	}
 	result, err := pdao.CmsApp.Ctx(ctx).Data(g.Map{
 		columns.AppId: appId, columns.AppSecret: secret, columns.Name: strings.TrimSpace(in.Name),
-		columns.BaseUrl: strings.TrimSpace(in.BaseUrl), columns.Status: in.Status,
+		columns.BaseUrl: strings.TrimSpace(in.BaseUrl), columns.ReviewMode: sysin.CmsReviewAutomatic, columns.Status: in.Status,
 		columns.CreatedAt: now, columns.UpdatedAt: now,
 	}).Insert()
 	if err != nil {
@@ -356,15 +356,7 @@ func (s *sOpenAccess) ClaimBinding(ctx context.Context, tenantId int64, in *sysi
 	if existing != nil && existing.Status == sysin.CmsBindingApproved {
 		return existing, nil
 	}
-	appColumns := pdao.CmsApp.Columns()
-	reviewMode, err := pdao.CmsApp.Ctx(ctx).Where(appColumns.AppId, codeRow.AppId).Value(appColumns.ReviewMode)
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取平台审核策略失败")
-	}
-	status := sysin.CmsBindingPending
-	if reviewMode.String() == sysin.CmsReviewAutomatic {
-		status = sysin.CmsBindingApproved
-	}
+	status := sysin.CmsBindingApproved
 	now := gtime.Now()
 	data := g.Map{columns.CodeVersion: codeRow.Version, columns.Status: status,
 		columns.Reason: "", columns.RequestedAt: now, columns.UpdatedAt: now}

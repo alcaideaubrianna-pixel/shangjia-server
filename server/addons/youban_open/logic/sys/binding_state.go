@@ -81,14 +81,14 @@ func (s *sOpenAccess) bindingList(ctx context.Context, model *gdb.Model) ([]*sys
 func ensureBindingTables(ctx context.Context) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS hg_youban_publish_cms_binding_code (id BIGSERIAL PRIMARY KEY, app_id VARCHAR(128) NOT NULL, code_hash VARCHAR(128) NOT NULL, code_hint VARCHAR(32) NOT NULL DEFAULT '', version INTEGER NOT NULL DEFAULT 1, status SMALLINT NOT NULL DEFAULT 1, created_at TIMESTAMP, updated_at TIMESTAMP)`,
-		`CREATE TABLE IF NOT EXISTS hg_youban_publish_cms_tenant_binding (id BIGSERIAL PRIMARY KEY, app_id VARCHAR(128) NOT NULL, tenant_id BIGINT NOT NULL, code_version INTEGER NOT NULL DEFAULT 1, status VARCHAR(32) NOT NULL DEFAULT 'pending', reason VARCHAR(255) NOT NULL DEFAULT '', requested_at TIMESTAMP, reviewed_at TIMESTAMP, created_at TIMESTAMP, updated_at TIMESTAMP)`,
+		`CREATE TABLE IF NOT EXISTS hg_youban_publish_cms_tenant_binding (id BIGSERIAL PRIMARY KEY, app_id VARCHAR(128) NOT NULL, tenant_id BIGINT NOT NULL, code_version INTEGER NOT NULL DEFAULT 1, status VARCHAR(32) NOT NULL DEFAULT 'approved', reason VARCHAR(255) NOT NULL DEFAULT '', requested_at TIMESTAMP, reviewed_at TIMESTAMP, created_at TIMESTAMP, updated_at TIMESTAMP)`,
 	}
 	for _, statement := range statements {
 		if _, err := g.DB().Exec(ctx, statement); err != nil {
 			return err
 		}
 	}
-	_, err := g.DB().Exec(ctx, `ALTER TABLE hg_youban_publish_cms_app ADD COLUMN IF NOT EXISTS review_mode VARCHAR(32) NOT NULL DEFAULT 'review_required'`)
+	_, err := g.DB().Exec(ctx, `ALTER TABLE hg_youban_publish_cms_app ADD COLUMN IF NOT EXISTS review_mode VARCHAR(32) NOT NULL DEFAULT 'auto_approve'`)
 	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate") {
 		return err
 	}
