@@ -70,6 +70,39 @@ func (s *sSysPublish) materialImportTargetChannelIds(ctx context.Context, reques
 	return channelIds, nil
 }
 
+func (s *sSysPublish) materialImportStoredChannelIds(ctx context.Context, requested []int64, tenantId int64) ([]int64, error) {
+	channelIds, err := s.materialImportTargetChannelIds(ctx, requested, tenantId)
+	if err != nil {
+		return nil, err
+	}
+	defaultChannelIds, err := s.materialImportTargetChannelIds(ctx, nil, tenantId)
+	if err != nil {
+		return nil, err
+	}
+	if sameChannelIds(channelIds, defaultChannelIds) {
+		return []int64{}, nil
+	}
+	return channelIds, nil
+}
+
+func sameChannelIds(left, right []int64) bool {
+	left = uniqueIds(left)
+	right = uniqueIds(right)
+	if len(left) != len(right) {
+		return false
+	}
+	rightSet := make(map[int64]struct{}, len(right))
+	for _, channelId := range right {
+		rightSet[channelId] = struct{}{}
+	}
+	for _, channelId := range left {
+		if _, ok := rightSet[channelId]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *sSysPublish) AdminMaterialImportTaskList(ctx context.Context, in *sysin.MaterialImportListInp) (list []*sysin.MaterialImportTaskModel, totalCount int, err error) {
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
@@ -112,7 +145,7 @@ func (s *sSysPublish) AdminMaterialImportTaskCreate(ctx context.Context, in *sys
 	if err = s.ensureEditableAccount(ctx, in.AccountId, account.TenantId); err != nil {
 		return 0, err
 	}
-	channelIds, err := s.materialImportTargetChannelIds(ctx, in.ChannelIds, account.TenantId)
+	channelIds, err := s.materialImportStoredChannelIds(ctx, in.ChannelIds, account.TenantId)
 	if err != nil {
 		return 0, err
 	}
@@ -205,7 +238,7 @@ func (s *sSysPublish) ServerMaterialImportTaskCreate(ctx context.Context, in *sy
 	if err != nil {
 		return 0, err
 	}
-	channelIds, err := s.materialImportTargetChannelIds(ctx, in.ChannelIds, target.TenantId)
+	channelIds, err := s.materialImportStoredChannelIds(ctx, in.ChannelIds, target.TenantId)
 	if err != nil {
 		return 0, err
 	}

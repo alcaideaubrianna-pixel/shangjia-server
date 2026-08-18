@@ -28,14 +28,7 @@ func (s *sSysPublish) saveMaterialImportGroupProfile(ctx context.Context, task *
 	if title == "" {
 		title = fmt.Sprintf("%dTG%d", task.AccountId, group.Id)
 	}
-	var err error
 	channelIds := append([]int64(nil), task.ChannelIds...)
-	if len(channelIds) == 0 {
-		channelIds, err = s.materialImportTargetChannelIds(ctx, nil, task.TenantId)
-		if err != nil {
-			return 0, err
-		}
-	}
 	input := &sysin.ProfileSaveInp{
 		Id:         group.ProfileId,
 		ChannelIds: channelIds,
