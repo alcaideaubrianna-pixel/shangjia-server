@@ -1813,9 +1813,16 @@ func (s *sSysContent) publicProfileWhere(mod *gdb.Model) *gdb.Model {
 	if len(scope.TenantIds) == 0 {
 		return mod.Where("1=0")
 	}
+	// Profile state is a projection maintained by the publish addon. Older
+	// published profiles can predate that projection, so use their published
+	// media ownership as a source-backed fallback. This keeps historical data
+	// visible while still removing profiles when the tenant takes them offline.
 	return mod.Where(
-		"EXISTS (SELECT 1 FROM hg_youban_publish_profile_state yps WHERE yps.profile_id=p."+profileColumns.Id+" AND yps.tenant_id IN(?) AND yps.deleted_at IS NULL)",
+		"(EXISTS (SELECT 1 FROM hg_youban_publish_profile_state yps WHERE yps.profile_id=p."+profileColumns.Id+" AND yps.tenant_id IN(?) AND yps.deleted_at IS NULL) "+
+			"OR EXISTS (SELECT 1 FROM hg_youban_publish_media ypm WHERE ypm.profile_id=p."+profileColumns.Id+" AND ypm.tenant_id IN(?) AND ypm.status=? AND ypm.deleted_at IS NULL))",
 		scope.TenantIds,
+		scope.TenantIds,
+		consts.StatusEnabled,
 	)
 }
 
