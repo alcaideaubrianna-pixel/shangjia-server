@@ -346,6 +346,12 @@ func (s *sSysChat) ExternalSession(ctx context.Context, in *sysin.ExternalSessio
 	if err != nil {
 		return nil, err
 	}
+	if row == nil {
+		row, err = s.deletedExternalConversation(ctx, ownerId, in.ProfileId)
+		if err != nil {
+			return nil, err
+		}
+	}
 	binding, err := s.matchExternalBinding(ctx, in.Visitor.AppId, profile)
 	if err != nil {
 		return nil, err
@@ -372,7 +378,7 @@ func (s *sSysChat) ExternalSession(ctx context.Context, in *sysin.ExternalSessio
 	} else if err = s.ensureConversationRoute(ctx, row, binding); err != nil {
 		return nil, err
 	}
-	_, _ = g.DB().Model(chatConversationTable).Ctx(ctx).Where("id", row.Id).Data(g.Map{"user_hidden_at": nil, "updated_at": gtime.Now()}).Update()
+	_, _ = g.DB().Model(chatConversationTable).Ctx(ctx).Where("id", row.Id).Data(g.Map{"deleted_at": nil, "user_hidden_at": nil, "status": "opened", "updated_at": gtime.Now()}).Update()
 	if row.TgMessageThreadId <= 0 {
 		if err = s.notifyTelegramSession(ctx, row, profile, member); err != nil {
 			return nil, err
