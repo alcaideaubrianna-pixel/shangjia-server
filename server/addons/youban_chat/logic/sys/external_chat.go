@@ -170,7 +170,10 @@ func (s *sSysChat) ExternalConversations(ctx context.Context, in *sysin.External
 		return nil, err
 	}
 	var rows []*chatConversationRow
-	err = g.DB().Model(chatConversationTable).Ctx(ctx).Where("member_id", externalOwnerId(visitor.Id)).OrderDesc("updated_at").Scan(&rows)
+	if err = s.ensureExternalConversationColumns(ctx); err != nil {
+		return nil, err
+	}
+	err = g.DB().Model(chatConversationTable).Ctx(ctx).Where("member_id", externalOwnerId(visitor.Id)).WhereNull("deleted_at").WhereNull("user_hidden_at").OrderDesc("pinned_at").OrderDesc("updated_at").Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取客服会话失败")
 	}
@@ -184,13 +187,46 @@ func (s *sSysChat) ExternalConversations(ctx context.Context, in *sysin.External
 		if row.ProfileId > 0 {
 			name = fmt.Sprintf("%s · 资料 %d", visitorName, row.ProfileId)
 		}
-		item := &sysin.ExternalConversationModel{Id: row.Id, ConversationId: row.Id, ProfileId: row.ProfileId, Name: name, Status: row.Status, UnreadCount: row.UnreadCount, LastMessage: row.LastMessage}
+		item := &sysin.ExternalConversationModel{Id: row.Id, ConversationId: row.Id, ProfileId: row.ProfileId, Name: name, Status: row.Status, UnreadCount: row.UnreadCount, LastMessage: row.LastMessage, IsPinned: row.PinnedAt != nil, CanDelete: row.ProfileId > 0}
 		if row.LastMessageAt != nil {
 			item.LastMessageAt = row.LastMessageAt.String()
 		}
 		res.List = append(res.List, item)
 	}
 	return res, nil
+}
+
+func (s *sSysChat) ExternalPin(ctx context.Context, in *sysin.ExternalConversationActionInp) error {
+	visitor, _, err := s.externalActor(ctx, &in.Visitor)
+	if err != nil {
+		return err
+	}
+	row, err := s.getConversationById(ctx, externalOwnerId(visitor.Id), in.ConversationId)
+	if err != nil {
+		return err
+	}
+	data := g.Map{"pinned_at": nil, "updated_at": gtime.Now()}
+	if in.Pinned || row.ProfileId == 0 {
+		data["pinned_at"] = gtime.Now()
+	}
+	_, err = g.DB().Model(chatConversationTable).Ctx(ctx).Where("id", row.Id).Data(data).Update()
+	return err
+}
+
+func (s *sSysChat) ExternalDelete(ctx context.Context, in *sysin.ExternalConversationActionInp) error {
+	visitor, _, err := s.externalActor(ctx, &in.Visitor)
+	if err != nil {
+		return err
+	}
+	row, err := s.getConversationById(ctx, externalOwnerId(visitor.Id), in.ConversationId)
+	if err != nil {
+		return err
+	}
+	if row.ProfileId == 0 {
+		return gerror.New("默认客服会话不能删除")
+	}
+	_, err = g.DB().Model(chatConversationTable).Ctx(ctx).Where("id", row.Id).Data(g.Map{"user_hidden_at": gtime.Now(), "unread_count": 0, "updated_at": gtime.Now()}).Update()
+	return err
 }
 
 type externalVisitorRow struct {
@@ -204,6 +240,9 @@ type externalVisitorRow struct {
 }
 
 func (s *sSysChat) ExternalSession(ctx context.Context, in *sysin.ExternalSessionInp) (*sysin.ChatStartModel, error) {
+	if err := s.ensureExternalConversationColumns(ctx); err != nil {
+		return nil, err
+	}
 	visitor, _, err := s.externalActor(ctx, &in.Visitor)
 	if err != nil {
 		return nil, err
@@ -246,6 +285,7 @@ func (s *sSysChat) ExternalSession(ctx context.Context, in *sysin.ExternalSessio
 	} else if err = s.ensureConversationRoute(ctx, row, binding); err != nil {
 		return nil, err
 	}
+	_, _ = g.DB().Model(chatConversationTable).Ctx(ctx).Where("id", row.Id).Data(g.Map{"user_hidden_at": nil, "updated_at": gtime.Now()}).Update()
 	return s.packStart(row), nil
 }
 
@@ -510,6 +550,14 @@ created_at TIMESTAMP, updated_at TIMESTAMP)`)
 	}
 	_, _ = g.DB().Exec(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS uk_ybcv_app_user ON hg_youban_chat_visitor (app_id, external_user_id)")
 	return nil
+}
+
+func (s *sSysChat) ensureExternalConversationColumns(ctx context.Context) error {
+	if err := s.ensureConversationUserColumns(ctx); err != nil {
+		return err
+	}
+	_, err := g.DB().Exec(ctx, "ALTER TABLE hg_youban_chat_conversation ADD COLUMN IF NOT EXISTS user_hidden_at timestamp")
+	return err
 }
 
 func externalOwnerId(visitorId int64) int64 { return -visitorId }

@@ -24,6 +24,18 @@ func (c *cOpenChat) Conversations(ctx context.Context, req *open.ChatConversatio
 	return &open.ChatConversationsRes{ExternalConversationsModel: data}, err
 }
 
+func (c *cOpenChat) Pin(ctx context.Context, req *open.ChatPinReq) (*open.ChatPinRes, error) {
+	req.Visitor.AppId = opencontext.AppId(ctx)
+	err := chatservice.SysChat().ExternalPin(ctx, &req.ExternalConversationActionInp)
+	return &open.ChatPinRes{}, err
+}
+
+func (c *cOpenChat) Delete(ctx context.Context, req *open.ChatDeleteReq) (*open.ChatDeleteRes, error) {
+	req.Visitor.AppId = opencontext.AppId(ctx)
+	err := chatservice.SysChat().ExternalDelete(ctx, &req.ExternalConversationActionInp)
+	return &open.ChatDeleteRes{}, err
+}
+
 func (c *cOpenChat) Send(ctx context.Context, req *open.ChatSendReq) (*open.ChatSendRes, error) {
 	req.Visitor.AppId = opencontext.AppId(ctx)
 	data, err := chatservice.SysChat().ExternalSend(ctx, &req.ExternalMessageInp)

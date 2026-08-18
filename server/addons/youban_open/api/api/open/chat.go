@@ -20,6 +20,18 @@ type ChatConversationsRes struct {
 	*chatsysin.ExternalConversationsModel
 }
 
+type ChatPinReq struct {
+	g.Meta `path:"/open/v1/chat/conversations/pin" method:"post" tags:"开放聊天" summary:"置顶客服会话"`
+	chatsysin.ExternalConversationActionInp
+}
+type ChatPinRes struct{}
+
+type ChatDeleteReq struct {
+	g.Meta `path:"/open/v1/chat/conversations/delete" method:"post" tags:"开放聊天" summary:"隐藏客服会话"`
+	chatsysin.ExternalConversationActionInp
+}
+type ChatDeleteRes struct{}
+
 type ChatSendReq struct {
 	g.Meta `path:"/open/v1/chat/messages" method:"post" tags:"开放聊天" summary:"发送客服消息"`
 	chatsysin.ExternalMessageInp

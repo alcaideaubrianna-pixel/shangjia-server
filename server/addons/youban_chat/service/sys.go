@@ -18,6 +18,8 @@ type ISysChat interface {
 	Unread(ctx context.Context) (res *sysin.ChatUnreadModel, err error)
 	ExternalSession(ctx context.Context, in *sysin.ExternalSessionInp) (res *sysin.ChatStartModel, err error)
 	ExternalConversations(ctx context.Context, in *sysin.ExternalConversationsInp) (res *sysin.ExternalConversationsModel, err error)
+	ExternalPin(ctx context.Context, in *sysin.ExternalConversationActionInp) (err error)
+	ExternalDelete(ctx context.Context, in *sysin.ExternalConversationActionInp) (err error)
 	ExternalAdminBots(ctx context.Context, in *sysin.ExternalAdminListInp) (res *sysin.ExternalAdminBotListModel, err error)
 	ExternalAdminSaveBot(ctx context.Context, in *sysin.ExternalAdminBotSaveInp) (err error)
 	ExternalAdminConversations(ctx context.Context, in *sysin.ExternalAdminConversationInp) (res *sysin.ExternalAdminConversationListModel, err error)

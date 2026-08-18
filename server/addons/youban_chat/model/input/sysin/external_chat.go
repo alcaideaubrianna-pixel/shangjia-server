@@ -56,9 +56,18 @@ type ExternalConversationModel struct {
 	UnreadCount    int    `json:"unreadCount"`
 	LastMessage    string `json:"lastMessage"`
 	LastMessageAt  string `json:"lastMessageAt"`
+	Avatar         string `json:"avatar"`
+	IsPinned       bool   `json:"isPinned"`
+	CanDelete      bool   `json:"canDelete"`
 }
 type ExternalConversationsModel struct {
 	List []*ExternalConversationModel `json:"list"`
+}
+
+type ExternalConversationActionInp struct {
+	Visitor        ExternalVisitorInp `json:"visitor" v:"required#访客信息不能为空"`
+	ConversationId int64              `json:"conversationId" v:"required|min:1#会话ID不能为空|会话ID不能为空"`
+	Pinned         bool               `json:"pinned"`
 }
 
 type ExternalAdminListInp struct {
