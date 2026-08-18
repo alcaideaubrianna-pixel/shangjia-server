@@ -40,6 +40,7 @@
       :mask-closable="false"
       preset="dialog"
       :title="form.id > 0 ? '编辑 CMS 应用' : '新增 CMS 应用'"
+      :loading="saving"
       positive-text="保存"
       negative-text="取消"
       @positive-click="saveApp"
@@ -182,8 +183,11 @@
   const columns: DataTableColumns<CmsApp> = [
     { title: '应用名称', key: 'name', minWidth: 180 },
     {
-      title: '实例 ID', key: 'instanceId', minWidth: 210,
-      ellipsis: { tooltip: true }, render: (row) => row.instanceId || '手动应用',
+      title: '实例 ID',
+      key: 'instanceId',
+      minWidth: 210,
+      ellipsis: { tooltip: true },
+      render: (row) => row.instanceId || '手动应用',
     },
     { title: 'App ID', key: 'appId', minWidth: 190 },
     {
@@ -194,7 +198,9 @@
       render: (row) => row.baseUrl || '-',
     },
     {
-      title: '来源 IP / 版本', key: 'sourceIp', minWidth: 160,
+      title: '来源 IP / 版本',
+      key: 'sourceIp',
+      minWidth: 160,
       render: (row) => [row.sourceIp, row.cmsVersion].filter(Boolean).join(' / ') || '-',
     },
     {
@@ -204,11 +210,21 @@
       render: (row) =>
         h(
           NTag,
-          { type: row.status === 1 ? 'success' : row.status === 2 ? 'warning' : 'default', bordered: false },
-          { default: () => statusOptions.find((item) => item.value === row.status)?.label || '未知' }
+          {
+            type: row.status === 1 ? 'success' : row.status === 2 ? 'warning' : 'default',
+            bordered: false,
+          },
+          {
+            default: () => statusOptions.find((item) => item.value === row.status)?.label || '未知',
+          }
         ),
     },
-    { title: '最后心跳', key: 'lastHeartbeatAt', width: 180, render: (row) => row.lastHeartbeatAt || '-' },
+    {
+      title: '最后心跳',
+      key: 'lastHeartbeatAt',
+      width: 180,
+      render: (row) => row.lastHeartbeatAt || '-',
+    },
     {
       title: '操作',
       key: 'actions',
@@ -262,8 +278,7 @@
     editorVisible.value = true;
   }
 
-  async function saveApp(event: MouseEvent) {
-    event.preventDefault();
+  async function saveApp() {
     if (saving.value) return false;
     try {
       await formRef.value?.validate();
