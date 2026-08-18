@@ -14,6 +14,7 @@ type ContentProfileListInp struct {
 	ActorId           string `json:"actorId" dc:"平台侧不可逆用户标识"`
 	Keyword           string `json:"keyword" dc:"关键词"`
 	Province          string `json:"province" dc:"省份"`
+	Provinces         string `json:"provinces" dc:"多个省份，逗号分隔"`
 	City              string `json:"city" dc:"城市"`
 	AgeMin            int    `json:"ageMin" dc:"最小年龄"`
 	AgeMax            int    `json:"ageMax" dc:"最大年龄"`

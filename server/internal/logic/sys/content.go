@@ -473,7 +473,15 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 			keyword, keyword, keyword, keyword, keyword, keyword,
 		)
 	}
-	if in.Province != "" {
+	if in.Provinces != "" {
+		values := make([]string, 0)
+		for _, province := range strings.Split(in.Provinces, ",") {
+			values = append(values, provinceFilterValues(province)...)
+		}
+		if values = uniqueNonEmptyStrings(values...); len(values) > 0 {
+			mod = mod.WhereIn(aliasField("p", profileColumns.Province), values)
+		}
+	} else if in.Province != "" {
 		mod = mod.WhereIn(aliasField("p", profileColumns.Province), provinceFilterValues(in.Province))
 	}
 	if in.City != "" {
