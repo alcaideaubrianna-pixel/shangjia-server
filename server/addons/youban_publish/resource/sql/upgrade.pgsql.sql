@@ -819,3 +819,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_cms_tenant_binding" (
   UNIQUE ("app_id","tenant_id")
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_cms_binding_tenant_status" ON "hg_youban_publish_cms_tenant_binding" ("tenant_id","status");
+
+CREATE INDEX IF NOT EXISTS "idx_content_profile_height_active" ON "hg_content_profile" ("height") WHERE "deleted_at" IS NULL AND "height" > 0;
+CREATE INDEX IF NOT EXISTS "idx_content_profile_weight_active" ON "hg_content_profile" ("weight") WHERE "deleted_at" IS NULL AND "weight" > 0;
+CREATE INDEX IF NOT EXISTS "idx_content_profile_cup_active" ON "hg_content_profile" ("cup_size") WHERE "deleted_at" IS NULL AND "cup_size" <> '';

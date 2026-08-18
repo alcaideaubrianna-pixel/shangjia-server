@@ -66,3 +66,60 @@ func TestRefreshReplacesMentionedAndPreservesMissing(t *testing.T) {
 		t.Fatalf("unexpected refreshed fields: %+v", result)
 	}
 }
+
+func TestParseFeiNiuObfuscatedUnicode(t *testing.T) {
+	result := Parse("身︂高︃：162⁠­\n体︊重：110­⁠\n罩︄杯：C")
+	if result.Height != 162 || result.Weight != 110 || result.Cup != "C" {
+		t.Fatalf("unexpected obfuscated fields: %+v", result)
+	}
+}
+
+func TestParseFeiNiuUnitsAndRanges(t *testing.T) {
+	tests := []struct {
+		text   string
+		height int
+		weight int
+	}{
+		{text: "身高 1.68米 体重 48kg", height: 168, weight: 96},
+		{text: "身高 168cm 体重 65", height: 168, weight: 130},
+		{text: "身高 161厘米 体重 42公斤", height: 161, weight: 84},
+		{text: "身高 139 体重 49斤", height: 0, weight: 0},
+		{text: "身高 211 体重 301斤", height: 0, weight: 0},
+		{text: "升高：163 体重：78", height: 163, weight: 78},
+		{text: "身高：1.67 体重：1235", height: 167, weight: 123},
+		{text: "身高：168 体重：1043", height: 168, weight: 104},
+	}
+	for _, test := range tests {
+		result := Parse(test.text)
+		if result.Height != test.height || result.Weight != test.weight {
+			t.Fatalf("text %q got %+v", test.text, result)
+		}
+	}
+}
+
+func TestParseFeiNiuCompactFields(t *testing.T) {
+	result := Parse("资料 23 / 168 / 98 C杯")
+	if result.Height != 168 || result.Weight != 98 || result.Cup != "C" {
+		t.Fatalf("unexpected compact fields: %+v", result)
+	}
+}
+
+func TestParseFeiNiuCupVariants(t *testing.T) {
+	tests := map[string]string{
+		"胸围：36c":       "C",
+		"净身高172 34C➕真": "C",
+		"罩杯：H+":        "H",
+		"罩杯：小b":        "B",
+		"罩杯：快C":        "C",
+		"罩杯：·B":        "B",
+		"罩杯：bc":        "B",
+		"罩杯：e和f之间":     "E",
+		"罩呗：85C":       "C",
+		"罩杯：未知":        "",
+	}
+	for text, want := range tests {
+		if got := Parse(text).Cup; got != want {
+			t.Fatalf("text %q cup %q, want %q", text, got, want)
+		}
+	}
+}

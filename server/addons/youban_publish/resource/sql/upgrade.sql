@@ -834,3 +834,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_cms_tenant_binding` (
   UNIQUE KEY `uk_ybp_cms_tenant_binding` (`app_id`,`tenant_id`),
   KEY `idx_ybp_cms_binding_tenant_status` (`tenant_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='XC-CMS租户绑定关系';
+
+ALTER TABLE `hg_content_profile`
+  ADD INDEX IF NOT EXISTS `idx_content_profile_height_active` (`deleted_at`,`height`),
+  ADD INDEX IF NOT EXISTS `idx_content_profile_weight_active` (`deleted_at`,`weight`),
+  ADD INDEX IF NOT EXISTS `idx_content_profile_cup_active` (`deleted_at`,`cup_size`);

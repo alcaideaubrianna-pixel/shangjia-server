@@ -69,6 +69,9 @@ UPDATE "hg_youban_publish_account" SET "tenant_id" = "merchant_id" WHERE "tenant
 CREATE INDEX IF NOT EXISTS "idx_ybp_account_tenant" ON "hg_youban_publish_account" ("tenant_id", "account_type", "status");
 CREATE INDEX IF NOT EXISTS "idx_ybp_account_username_trgm" ON "hg_youban_publish_account" USING gin ("username" gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS "idx_content_profile_note_order" ON "hg_content_profile" ("updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_content_profile_height_active" ON "hg_content_profile" ("height") WHERE "deleted_at" IS NULL AND "height" > 0;
+CREATE INDEX IF NOT EXISTS "idx_content_profile_weight_active" ON "hg_content_profile" ("weight") WHERE "deleted_at" IS NULL AND "weight" > 0;
+CREATE INDEX IF NOT EXISTS "idx_content_profile_cup_active" ON "hg_content_profile" ("cup_size") WHERE "deleted_at" IS NULL AND "cup_size" <> '';
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_state" (
   "id" BIGSERIAL PRIMARY KEY,
