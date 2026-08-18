@@ -16,6 +16,8 @@ import (
 	"hotgo/internal/dao"
 )
 
+const blockedCollectAccountUsername = "tianmei"
+
 func (s *sSysPublish) collectFollowProfilePublished(ctx context.Context, task gdb.Record) error {
 	if !s.collectGlobalEnabled(ctx) {
 		return nil
@@ -27,6 +29,14 @@ func (s *sSysPublish) collectFollowProfilePublished(ctx context.Context, task gd
 	authorAccountId := task["account_id"].Int64()
 	profileId := task["profile_id"].Int64()
 	if authorTenantId <= 0 || authorAccountId <= 0 || profileId <= 0 {
+		return nil
+	}
+	blocked, err := collectFollowAuthorBlocked(ctx, authorAccountId)
+	if err != nil {
+		return err
+	}
+	if blocked {
+		g.Log().Infof(ctx, "关注采集已屏蔽资料作者 accountId:%d profileId:%d username:%s", authorAccountId, profileId, blockedCollectAccountUsername)
 		return nil
 	}
 	profile, err := s.collectFollowProfile(ctx, authorTenantId, authorAccountId, profileId)
@@ -70,6 +80,26 @@ func (s *sSysPublish) collectFollowProfilePublished(ctx context.Context, task gd
 		}
 	}
 	return nil
+}
+
+func collectFollowAuthorBlocked(ctx context.Context, accountId int64) (bool, error) {
+	if accountId <= 0 {
+		return false, nil
+	}
+	accountDao := pdao.YoubanPublishAccount
+	columns := accountDao.Columns()
+	username, err := accountDao.Ctx(ctx).
+		Fields(columns.Username).
+		Where(columns.Id, accountId).
+		Value()
+	if err != nil {
+		return false, gerror.Wrap(err, "读取关注采集资料作者失败")
+	}
+	return normalizeCollectAccountUsername(username.String()) == blockedCollectAccountUsername, nil
+}
+
+func normalizeCollectAccountUsername(username string) string {
+	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(username), "@"))
 }
 
 func (s *sSysPublish) collectFollowSources(ctx context.Context, authorAccountId int64) ([]gdb.Record, error) {

@@ -13,8 +13,11 @@ type ChatSessionReq struct {
 
 type ChatSessionRes struct{ *chatsysin.ChatStartModel }
 type ChatConversationsReq struct {
-	g.Meta `path:"/open/v1/chat/conversations" method:"get" tags:"开放聊天" summary:"获取客服会话列表"`
-	chatsysin.ExternalConversationsInp
+	g.Meta         `path:"/open/v1/chat/conversations" method:"get" tags:"开放聊天" summary:"获取客服会话列表"`
+	ExternalUserId string `json:"externalUserId" v:"required#用户标识不能为空"`
+	Name           string `json:"name"`
+	Email          string `json:"email"`
+	AvatarUrl      string `json:"avatarUrl"`
 }
 type ChatConversationsRes struct {
 	*chatsysin.ExternalConversationsModel

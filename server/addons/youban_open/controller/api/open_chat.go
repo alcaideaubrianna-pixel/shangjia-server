@@ -19,8 +19,14 @@ func (c *cOpenChat) Session(ctx context.Context, req *open.ChatSessionReq) (*ope
 	return &open.ChatSessionRes{ChatStartModel: data}, err
 }
 func (c *cOpenChat) Conversations(ctx context.Context, req *open.ChatConversationsReq) (*open.ChatConversationsRes, error) {
-	req.Visitor.AppId = opencontext.AppId(ctx)
-	data, err := chatservice.SysChat().ExternalConversations(ctx, &req.ExternalConversationsInp)
+	in := &sysin.ExternalConversationsInp{Visitor: sysin.ExternalVisitorInp{
+		AppId:          opencontext.AppId(ctx),
+		ExternalUserId: req.ExternalUserId,
+		Name:           req.Name,
+		Email:          req.Email,
+		AvatarUrl:      req.AvatarUrl,
+	}}
+	data, err := chatservice.SysChat().ExternalConversations(ctx, in)
 	return &open.ChatConversationsRes{ExternalConversationsModel: data}, err
 }
 

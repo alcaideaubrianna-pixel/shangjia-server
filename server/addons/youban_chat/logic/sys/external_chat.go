@@ -178,16 +178,12 @@ func (s *sSysChat) ExternalConversations(ctx context.Context, in *sysin.External
 		return nil, gerror.Wrap(err, "读取客服会话失败")
 	}
 	res := &sysin.ExternalConversationsModel{List: make([]*sysin.ExternalConversationModel, 0, len(rows))}
-	visitorName := strings.TrimSpace(in.Visitor.Name)
-	if visitorName == "" {
-		visitorName = "在线客服"
-	}
 	for _, row := range rows {
-		name := visitorName
+		name := "在线客服"
 		if row.ProfileId > 0 {
-			name = fmt.Sprintf("%s · 资料 %d", visitorName, row.ProfileId)
+			name = fmt.Sprintf("在线客服 · 资料 %d", row.ProfileId)
 		}
-		item := &sysin.ExternalConversationModel{Id: row.Id, ConversationId: row.Id, ProfileId: row.ProfileId, Name: name, Status: row.Status, UnreadCount: row.UnreadCount, LastMessage: row.LastMessage, IsPinned: row.PinnedAt != nil, CanDelete: row.ProfileId > 0}
+		item := &sysin.ExternalConversationModel{Id: row.Id, ConversationId: row.Id, ProfileId: row.ProfileId, Name: name, Status: row.Status, UnreadCount: row.UnreadCount, LastMessage: row.LastMessage, IsPinned: row.PinnedAt != nil, CanDelete: true}
 		if row.LastMessageAt != nil {
 			item.LastMessageAt = row.LastMessageAt.String()
 		}
@@ -221,9 +217,6 @@ func (s *sSysChat) ExternalDelete(ctx context.Context, in *sysin.ExternalConvers
 	row, err := s.getConversationById(ctx, externalOwnerId(visitor.Id), in.ConversationId)
 	if err != nil {
 		return err
-	}
-	if row.ProfileId == 0 {
-		return gerror.New("默认客服会话不能删除")
 	}
 	_, err = g.DB().Model(chatConversationTable).Ctx(ctx).Where("id", row.Id).Data(g.Map{"user_hidden_at": gtime.Now(), "unread_count": 0, "updated_at": gtime.Now()}).Update()
 	return err
@@ -556,8 +549,7 @@ func (s *sSysChat) ensureExternalConversationColumns(ctx context.Context) error 
 	if err := s.ensureConversationUserColumns(ctx); err != nil {
 		return err
 	}
-	_, err := g.DB().Exec(ctx, "ALTER TABLE hg_youban_chat_conversation ADD COLUMN IF NOT EXISTS user_hidden_at timestamp")
-	return err
+	return ensureExternalConversationHiddenColumn(ctx)
 }
 
 func externalOwnerId(visitorId int64) int64 { return -visitorId }
