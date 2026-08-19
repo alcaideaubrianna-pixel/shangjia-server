@@ -2485,10 +2485,18 @@ func telegramUpdateToWebhookInp(update *models.Update) (*sysin.TelegramWebhookIn
 	if update == nil {
 		return nil, nil
 	}
+	message := update.Message
+	if message == nil {
+		message = update.ChannelPost
+	}
+	editedMessage := update.EditedMessage
+	if editedMessage == nil {
+		editedMessage = update.EditedChannelPost
+	}
 	in := &sysin.TelegramWebhookInp{
 		UpdateId:      int64(update.ID),
-		Message:       telegramSDKMessageToInp(update.Message),
-		EditedMessage: telegramSDKMessageToInp(update.EditedMessage),
+		Message:       telegramSDKMessageToInp(message),
+		EditedMessage: telegramSDKMessageToInp(editedMessage),
 	}
 	if update.MessageReaction != nil {
 		reaction := update.MessageReaction

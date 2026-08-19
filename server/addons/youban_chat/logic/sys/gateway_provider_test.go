@@ -43,6 +43,28 @@ func TestTelegramUpdateToWebhookInputPreservesChatMedia(t *testing.T) {
 	}
 }
 
+func TestTelegramUpdateToWebhookInputAcceptsChannelPost(t *testing.T) {
+	update := &models.Update{
+		ID: 92,
+		ChannelPost: &models.Message{
+			ID:              33,
+			MessageThreadID: 4,
+			Chat:            models.Chat{ID: -1004420178952, Type: models.ChatTypeSupergroup},
+			Photo:           []models.PhotoSize{{FileID: "channel-photo"}},
+		},
+	}
+	in, err := telegramUpdateToWebhookInp(update)
+	if err != nil {
+		t.Fatalf("telegramUpdateToWebhookInp() error = %v", err)
+	}
+	if in == nil || in.Message == nil || in.Message.MessageId != 33 {
+		t.Fatalf("channel post was not mapped as a message: %#v", in)
+	}
+	if len(in.Message.Photo) != 1 || in.Message.Photo[0].FileId != "channel-photo" {
+		t.Fatalf("channel post photo was not preserved: %#v", in.Message.Photo)
+	}
+}
+
 func TestExternalOwnerIDUsesSeparateNegativeNamespace(t *testing.T) {
 	if got := externalOwnerId(42); got != -42 {
 		t.Fatalf("externalOwnerId() = %d, want -42", got)
