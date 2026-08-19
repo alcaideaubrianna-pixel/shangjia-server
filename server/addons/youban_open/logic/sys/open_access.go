@@ -64,7 +64,7 @@ func (s *sOpenAccess) AppSave(ctx context.Context, in *sysin.CmsAppSaveInp) (*sy
 	}
 	result, err := pdao.CmsApp.Ctx(ctx).Data(g.Map{
 		columns.AppId: appId, columns.AppSecret: secret, columns.Name: strings.TrimSpace(in.Name),
-		columns.BaseUrl: strings.TrimSpace(in.BaseUrl), columns.ReviewMode: sysin.CmsReviewAutomatic, columns.Status: in.Status,
+		columns.BaseUrl: strings.TrimSpace(in.BaseUrl), columns.ReviewMode: sysin.CmsReviewRequired, columns.Status: in.Status,
 		columns.CreatedAt: now, columns.UpdatedAt: now,
 	}).Insert()
 	if err != nil {
@@ -152,7 +152,7 @@ func (s *sOpenAccess) RegisterInstance(ctx context.Context, in *sysin.CmsInstanc
 		columns.AppId: appID, columns.AppSecret: secret, columns.InstanceId: instanceID,
 		columns.EnrollHash: hashEnrollmentToken(token), columns.Name: strings.TrimSpace(in.Name),
 		columns.BaseUrl: strings.TrimSpace(in.BaseUrl), columns.SourceIp: strings.TrimSpace(sourceIP),
-		columns.CmsVersion: strings.TrimSpace(in.Version), columns.Status: 1,
+		columns.CmsVersion: strings.TrimSpace(in.Version), columns.ReviewMode: sysin.CmsReviewRequired, columns.Status: 1,
 		columns.LastHeartbeatAt: now, columns.CreatedAt: now, columns.UpdatedAt: now,
 	}).Insert()
 	if err != nil {
@@ -371,7 +371,21 @@ func (s *sOpenAccess) ClaimBinding(ctx context.Context, tenantId int64, in *sysi
 	if existing != nil && existing.Status == sysin.CmsBindingApproved {
 		return existing, nil
 	}
-	status := sysin.CmsBindingApproved
+	appColumns := pdao.CmsApp.Columns()
+	reviewMode, err := pdao.CmsApp.Ctx(ctx).
+		Where(appColumns.AppId, codeRow.AppId).
+		Where(appColumns.Status, 1).
+		Value(appColumns.ReviewMode)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取CMS审核策略失败")
+	}
+	if reviewMode.IsEmpty() {
+		return nil, gerror.New("CMS应用不可用")
+	}
+	status := sysin.CmsBindingPending
+	if reviewMode.String() == sysin.CmsReviewAutomatic {
+		status = sysin.CmsBindingApproved
+	}
 	now := gtime.Now()
 	data := g.Map{columns.CodeVersion: codeRow.Version, columns.Status: status,
 		columns.Reason: "", columns.RequestedAt: now, columns.UpdatedAt: now}
