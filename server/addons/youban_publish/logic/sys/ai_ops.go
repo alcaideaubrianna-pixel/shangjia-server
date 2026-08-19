@@ -14,7 +14,10 @@ func (s *sSysPublish) AIOpsRebuildProfileMedia(ctx context.Context, profileIds [
 	if len(profileIds) == 0 || len(profileIds) > 20 {
 		return nil, gerror.New("单次只能处理1到20条资料")
 	}
-	result, err := RebuildCollectProfileMedia(ctx, CollectProfileMediaRebuildOptions{ProfileIDs: profileIds, Limit: len(profileIds), DryRun: dryRun})
+	result, err := s.rebuildBotProfileMedia(ctx, profileIds, dryRun)
+	if err == nil && result.Candidates == 0 {
+		result, err = RebuildCollectProfileMedia(ctx, CollectProfileMediaRebuildOptions{ProfileIDs: profileIds, Limit: len(profileIds), DryRun: dryRun})
+	}
 	g.Log().Info(ctx, "AI运维资料媒体操作", g.Map{"profileIds": profileIds, "dryRun": dryRun, "result": result, "error": err})
 	return result, err
 }

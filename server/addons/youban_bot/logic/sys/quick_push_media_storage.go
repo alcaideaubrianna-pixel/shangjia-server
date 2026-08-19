@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -18,34 +19,61 @@ import (
 )
 
 func (s *sSysBot) persistQuickPushMedia(ctx context.Context, operatorAccountId int64, media []*publishsysin.MessageTemplateMediaInp) ([]*publishsysin.MessageTemplateMediaInp, error) {
+	return s.persistTelegramMedia(ctx, operatorAccountId, media)
+}
+
+func (s *sSysBot) persistTelegramMedia(ctx context.Context, operatorAccountId int64, media []*publishsysin.MessageTemplateMediaInp) ([]*publishsysin.MessageTemplateMediaInp, error) {
 	if len(media) == 0 {
 		return media, nil
 	}
 	uploadCtx := quickPushMediaUploadContext(ctx, operatorAccountId)
-	result := make([]*publishsysin.MessageTemplateMediaInp, 0, len(media))
-	for _, item := range media {
+	result := make([]*publishsysin.MessageTemplateMediaInp, len(media))
+	workerLimit := 4
+	if len(media) < workerLimit {
+		workerLimit = len(media)
+	}
+	semaphore := make(chan struct{}, workerLimit)
+	var wait sync.WaitGroup
+	var firstErr error
+	var errMu sync.Mutex
+	for index, item := range media {
 		if item == nil {
 			continue
 		}
-		stored := *item
-		fileURL, storagePath, err := persistQuickPushMediaFile(uploadCtx, item.MediaType, item.Name, item.FileUrl)
-		if err != nil {
-			return nil, gerror.Wrapf(err, "转存Telegram媒体失败 mediaType:%s name:%s", item.MediaType, item.Name)
-		}
-		stored.FileUrl = fileURL
-		stored.StoragePath = storagePath
-		if strings.TrimSpace(item.PosterUrl) != "" {
-			posterURL, posterPath, posterErr := persistQuickPushMediaFile(uploadCtx, "image", item.Name+"-poster", item.PosterUrl)
-			if posterErr != nil {
-				g.Log().Warningf(ctx, "快速推送媒体封面转存失败 name:%s err:%+v", item.Name, posterErr)
-				stored.PosterUrl = ""
-				stored.PosterStoragePath = ""
-			} else {
-				stored.PosterUrl = posterURL
-				stored.PosterStoragePath = posterPath
+		wait.Add(1)
+		go func(index int, item *publishsysin.MessageTemplateMediaInp) {
+			defer wait.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+			stored := *item
+			fileURL, storagePath, err := persistQuickPushMediaFile(uploadCtx, item.MediaType, item.Name, item.FileUrl)
+			if err != nil {
+				errMu.Lock()
+				if firstErr == nil {
+					firstErr = gerror.Wrapf(err, "转存Telegram媒体失败 mediaType:%s name:%s", item.MediaType, item.Name)
+				}
+				errMu.Unlock()
+				return
 			}
-		}
-		result = append(result, &stored)
+			stored.FileUrl = fileURL
+			stored.StoragePath = storagePath
+			if strings.TrimSpace(item.PosterUrl) != "" {
+				posterURL, posterPath, posterErr := persistQuickPushMediaFile(uploadCtx, "image", item.Name+"-poster", item.PosterUrl)
+				if posterErr != nil {
+					g.Log().Warningf(ctx, "Telegram媒体封面转存失败 name:%s err:%+v", item.Name, posterErr)
+					stored.PosterUrl = ""
+					stored.PosterStoragePath = ""
+				} else {
+					stored.PosterUrl = posterURL
+					stored.PosterStoragePath = posterPath
+				}
+			}
+			result[index] = &stored
+		}(index, item)
+	}
+	wait.Wait()
+	if firstErr != nil {
+		return nil, firstErr
 	}
 	return result, nil
 }

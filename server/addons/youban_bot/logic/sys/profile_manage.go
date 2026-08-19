@@ -1940,6 +1940,18 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 		}
 		draft.VerifyText = strings.TrimSpace(text)
 		draft.VerifyMedia = media
+		persistedDisplay, err := s.persistTelegramMedia(ctx, account.AccountId, draft.DisplayMedia)
+		if err != nil {
+			g.Log().Warningf(ctx, "Bot资料展示媒体持久化失败 trace:%s media_count:%d err:%+v", trace, len(draft.DisplayMedia), err)
+			return s.replyBotError(ctx, botId, chatId, "资料管理", gerror.Wrap(err, "展示资料保存失败，请重新发送"))
+		}
+		persistedVerify, err := s.persistTelegramMedia(ctx, account.AccountId, draft.VerifyMedia)
+		if err != nil {
+			g.Log().Warningf(ctx, "Bot资料验证媒体持久化失败 trace:%s media_count:%d err:%+v", trace, len(draft.VerifyMedia), err)
+			return s.replyBotError(ctx, botId, chatId, "资料管理", gerror.Wrap(err, "验证资料保存失败，请重新发送"))
+		}
+		draft.DisplayMedia = persistedDisplay
+		draft.VerifyMedia = persistedVerify
 		claimed, err := s.claimProfileSessionStep(ctx, session.Id, "waiting_verify", "saving", draft)
 		if err != nil {
 			return err
