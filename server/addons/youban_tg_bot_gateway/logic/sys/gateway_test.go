@@ -44,6 +44,18 @@ func TestGatewayRefreshCoalescesSignals(t *testing.T) {
 	}
 }
 
+func TestUpdateNeedsImmediateDispatch(t *testing.T) {
+	if !updateNeedsImmediateDispatch(&models.Update{InlineQuery: &models.InlineQuery{ID: "inline-query"}}) {
+		t.Fatal("inline query must bypass the asynchronous update queue")
+	}
+	if updateNeedsImmediateDispatch(&models.Update{Message: &models.Message{ID: 1}}) {
+		t.Fatal("ordinary message should continue through the asynchronous update queue")
+	}
+	if updateNeedsImmediateDispatch(nil) {
+		t.Fatal("nil update must not use immediate dispatch")
+	}
+}
+
 func TestRuntimeModeForSystem(t *testing.T) {
 	tests := []struct {
 		name       string

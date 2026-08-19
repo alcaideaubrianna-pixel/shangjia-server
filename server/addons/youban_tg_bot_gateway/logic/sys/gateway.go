@@ -237,8 +237,8 @@ func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *se
 		return nil
 	}
 	client, err := newBot(token, conf.ProxyURL, func(handlerCtx context.Context, bot *tgbot.Bot, update *models.Update) {
-		if enqueueErr := s.enqueueUpdate(handlerCtx, key, update); enqueueErr != nil {
-			g.Log().Warningf(handlerCtx, "TG Bot Gateway更新入队失败 key:%s err:%+v", key, enqueueErr)
+		if submitErr := s.submitUpdate(handlerCtx, key, update); submitErr != nil {
+			g.Log().Warningf(handlerCtx, "TG Bot Gateway更新提交失败 key:%s err:%+v", key, submitErr)
 		}
 	})
 	if err != nil {
@@ -282,13 +282,31 @@ func (s *sGateway) Webhook(ctx context.Context, key string, body []byte, secret 
 	if len(body) == 0 || !json.Valid(body) {
 		return gerror.New("Webhook消息格式不正确")
 	}
-	err = s.enqueueUpdateBody(ctx, strings.TrimSpace(key), body)
+	var update models.Update
+	if err = json.Unmarshal(body, &update); err != nil {
+		return gerror.Wrap(err, "Webhook消息格式不正确")
+	}
+	err = s.submitUpdate(ctx, strings.TrimSpace(key), &update)
 	result := "queued"
+	if updateNeedsImmediateDispatch(&update) {
+		result = "dispatched"
+	}
 	if err != nil {
 		result = "failed"
 	}
 	webhooks.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
 	return err
+}
+
+func (s *sGateway) submitUpdate(ctx context.Context, key string, update *models.Update) error {
+	if updateNeedsImmediateDispatch(update) {
+		return s.dispatch(ctx, key, update)
+	}
+	return s.enqueueUpdate(ctx, key, update)
+}
+
+func updateNeedsImmediateDispatch(update *models.Update) bool {
+	return update != nil && update.InlineQuery != nil
 }
 
 func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Update) error {
