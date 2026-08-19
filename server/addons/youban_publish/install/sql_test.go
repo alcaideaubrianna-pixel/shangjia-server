@@ -86,3 +86,23 @@ func TestUpgradeSafeSqlIncludesBotCollectScope(t *testing.T) {
 		})
 	}
 }
+
+func TestBotMessageSourceUsesMessageLevelUniqueKey(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "mysql install", path: "addons/youban_publish/resource/sql/install.sql", want: "(`chat_id`,`message_id`)"},
+		{name: "mysql upgrade", path: "addons/youban_publish/resource/sql/upgrade_safe.sql", want: "(`chat_id`,`message_id`)"},
+		{name: "pgsql install", path: "addons/youban_publish/resource/sql/install.pgsql.sql", want: "(\"chat_id\", \"message_id\")"},
+		{name: "pgsql upgrade", path: "addons/youban_publish/resource/sql/upgrade_safe.pgsql.sql", want: "(\"chat_id\", \"message_id\")"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sql := readSqlFile(test.path)
+			if !strings.Contains(sql, "uk_ybp_bot_message_source") || !strings.Contains(sql, test.want) {
+				t.Fatalf("message source unique key is not message-level: %s", sql)
+			}
+		})
+	}
+}

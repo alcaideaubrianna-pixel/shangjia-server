@@ -1993,7 +1993,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_bot_message_source" (
   "sender_chat_title" varchar(255) NOT NULL DEFAULT '', "reply_to_message_id" bigint NOT NULL DEFAULT 0, "reply_job_id" bigint NOT NULL DEFAULT 0,
   "reply_profile_id" bigint NOT NULL DEFAULT 0, "reply_purpose" varchar(16) NOT NULL DEFAULT '', "update_type" varchar(64) NOT NULL DEFAULT '',
   "message_text" text, "received_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, "deleted_at" timestamp DEFAULT NULL,
-  CONSTRAINT "uk_ybp_bot_message_source" UNIQUE ("received_bot_id", "chat_id", "message_id")
+  CONSTRAINT "uk_ybp_bot_message_source" UNIQUE ("chat_id", "message_id")
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_chat_time" ON "hg_youban_publish_bot_message_source" ("chat_id", "received_at");
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_reply" ON "hg_youban_publish_bot_message_source" ("reply_job_id", "reply_profile_id", "reply_to_message_id");

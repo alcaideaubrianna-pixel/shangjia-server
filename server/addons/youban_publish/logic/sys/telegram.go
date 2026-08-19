@@ -73,7 +73,7 @@ func (s *sSysPublish) recordTelegramBotMessageSource(ctx context.Context, botId,
 	}
 	_, err := g.DB().Model(telegramBotMessageSourceTable).Safe().Ctx(ctx).
 		Data(data).
-		OnConflict("received_bot_id,chat_id,message_id").
+		OnConflict("chat_id,message_id").
 		OnDuplicate("tenant_id,media_group_id,sender_user_id,sender_username,sender_chat_id,sender_chat_title,reply_to_message_id,reply_job_id,reply_profile_id,reply_purpose,update_type,message_text,received_at").
 		Save()
 	if err != nil {
