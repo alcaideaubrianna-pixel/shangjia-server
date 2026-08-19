@@ -7,6 +7,7 @@ INSERT INTO "hg_admin_role_menu" ("role_id","menu_id") SELECT r."id",m."id" FROM
 ALTER TABLE "hg_youban_publish_cms_app" ADD COLUMN IF NOT EXISTS "review_mode" varchar(32) NOT NULL DEFAULT 'auto_approve';
 ALTER TABLE "hg_youban_publish_cms_app" ALTER COLUMN "review_mode" SET DEFAULT 'auto_approve';
 UPDATE "hg_youban_publish_cms_app" SET "review_mode" = 'auto_approve' WHERE "review_mode" = 'review_required';
+UPDATE "hg_youban_publish_cms_app" SET "status" = 1 WHERE "status" = 2 AND "instance_id" <> '';
 ALTER TABLE "hg_youban_publish_cms_tenant_binding" ALTER COLUMN "status" SET DEFAULT 'approved';
 UPDATE "hg_youban_publish_cms_tenant_binding" SET "status" = 'approved', "reviewed_at" = COALESCE("reviewed_at", NOW()), "updated_at" = NOW() WHERE "status" = 'pending';
 CREATE TABLE IF NOT EXISTS "hg_youban_open_profile_event" ("id" bigserial PRIMARY KEY,"app_id" varchar(128) NOT NULL,"event_id" varchar(128) NOT NULL,"actor_id" varchar(128) NOT NULL,"profile_id" bigint NOT NULL,"event_type" varchar(32) NOT NULL,"occurred_at" timestamp,"created_at" timestamp);

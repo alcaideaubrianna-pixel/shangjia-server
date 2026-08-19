@@ -44,18 +44,21 @@ type CmsInstanceRegisterInp struct {
 }
 
 type CmsInstanceRegisterModel struct {
-	InstanceId  string `json:"instanceId"`
-	Status      string `json:"status"`
-	EnrollToken string `json:"enrollToken,omitempty"`
-	AppId       string `json:"appId,omitempty"`
-	AppSecret   string `json:"appSecret,omitempty"`
+	InstanceId        string `json:"instanceId"`
+	Status            string `json:"status"`
+	EnrollToken       string `json:"enrollToken,omitempty"`
+	AppId             string `json:"appId,omitempty"`
+	AppSecret         string `json:"appSecret,omitempty"`
+	CredentialVersion string `json:"credentialVersion,omitempty"`
+	CredentialChanged bool   `json:"credentialChanged"`
 }
 
 type CmsInstanceHeartbeatInp struct {
-	InstanceId  string `json:"instanceId" v:"required#实例ID不能为空"`
-	EnrollToken string `json:"enrollToken" v:"required#实例令牌不能为空"`
-	BaseUrl     string `json:"baseUrl"`
-	Version     string `json:"version"`
+	InstanceId        string `json:"instanceId" v:"required#实例ID不能为空"`
+	EnrollToken       string `json:"enrollToken" v:"required#实例令牌不能为空"`
+	CredentialVersion string `json:"credentialVersion"`
+	BaseUrl           string `json:"baseUrl"`
+	Version           string `json:"version"`
 }
 
 type CmsBindingModel struct {

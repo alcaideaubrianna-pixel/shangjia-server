@@ -134,28 +134,34 @@ func (s *sOpenAccess) RegisterInstance(ctx context.Context, in *sysin.CmsInstanc
 		return nil, gerror.Wrap(err, "读取CMS实例失败")
 	}
 	if app != nil {
-		return s.instanceState(ctx, app, in.EnrollToken, "")
+		return s.instanceState(ctx, app, in.EnrollToken, "", "")
 	}
 	appID, secret, err := newCmsCredential()
 	if err != nil {
 		return nil, err
 	}
-	token, err := newEnrollmentToken()
-	if err != nil {
-		return nil, err
+	token := strings.TrimSpace(in.EnrollToken)
+	if token == "" {
+		token, err = newEnrollmentToken()
+		if err != nil {
+			return nil, err
+		}
 	}
 	now := gtime.Now()
-	_, err = pdao.CmsApp.Ctx(ctx).Data(g.Map{
+	insertResult, err := pdao.CmsApp.Ctx(ctx).Data(g.Map{
 		columns.AppId: appID, columns.AppSecret: secret, columns.InstanceId: instanceID,
 		columns.EnrollHash: hashEnrollmentToken(token), columns.Name: strings.TrimSpace(in.Name),
 		columns.BaseUrl: strings.TrimSpace(in.BaseUrl), columns.SourceIp: strings.TrimSpace(sourceIP),
-		columns.CmsVersion: strings.TrimSpace(in.Version), columns.Status: 2,
+		columns.CmsVersion: strings.TrimSpace(in.Version), columns.Status: 1,
 		columns.LastHeartbeatAt: now, columns.CreatedAt: now, columns.UpdatedAt: now,
 	}).Insert()
 	if err != nil {
 		return nil, gerror.Wrap(err, "注册CMS实例失败")
 	}
-	return &sysin.CmsInstanceRegisterModel{InstanceId: instanceID, Status: "pending", EnrollToken: token}, nil
+	id, _ := insertResult.LastInsertId()
+	return s.instanceState(ctx, &sysin.CmsAppModel{
+		Id: id, AppId: appID, AppSecret: secret, InstanceId: instanceID, Status: 1,
+	}, token, hashEnrollmentToken(token), "")
 }
 
 func (s *sOpenAccess) HeartbeatInstance(ctx context.Context, in *sysin.CmsInstanceHeartbeatInp, sourceIP string) (*sysin.CmsInstanceRegisterModel, error) {
@@ -177,7 +183,7 @@ func (s *sOpenAccess) HeartbeatInstance(ctx context.Context, in *sysin.CmsInstan
 	if err != nil {
 		return nil, gerror.Wrap(err, "更新CMS实例心跳失败")
 	}
-	return s.instanceState(ctx, app, in.EnrollToken, appEnrollHash(ctx, app.Id))
+	return s.instanceState(ctx, app, in.EnrollToken, appEnrollHash(ctx, app.Id), in.CredentialVersion)
 }
 
 func appEnrollHash(ctx context.Context, id int64) string {
@@ -186,7 +192,12 @@ func appEnrollHash(ctx context.Context, id int64) string {
 	return value.String()
 }
 
-func (s *sOpenAccess) instanceState(ctx context.Context, app *sysin.CmsAppModel, token, knownHash string) (*sysin.CmsInstanceRegisterModel, error) {
+func credentialVersion(appId, secret string) string {
+	digest := sha256.Sum256([]byte(strings.TrimSpace(appId) + "\x00" + secret))
+	return hex.EncodeToString(digest[:8])
+}
+
+func (s *sOpenAccess) instanceState(ctx context.Context, app *sysin.CmsAppModel, token, knownHash, clientVersion string) (*sysin.CmsInstanceRegisterModel, error) {
 	if knownHash == "" {
 		knownHash = appEnrollHash(ctx, app.Id)
 	}
@@ -211,7 +222,11 @@ func (s *sOpenAccess) instanceState(ctx context.Context, app *sysin.CmsAppModel,
 		if err := pdao.CmsApp.Ctx(ctx).Fields(columns.AppId, columns.AppSecret).Where(columns.Id, app.Id).Scan(&credential); err != nil {
 			return nil, err
 		}
-		result.AppId, result.AppSecret = credential.AppId, credential.AppSecret
+		result.CredentialVersion = credentialVersion(credential.AppId, credential.AppSecret)
+		result.CredentialChanged = strings.TrimSpace(clientVersion) != result.CredentialVersion
+		if result.CredentialChanged {
+			result.AppId, result.AppSecret = credential.AppId, credential.AppSecret
+		}
 	}
 	return result, nil
 }
