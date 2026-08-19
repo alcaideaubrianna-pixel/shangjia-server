@@ -32,6 +32,7 @@ import (
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/library/storager"
+	"hotgo/internal/library/telegrammedia"
 	"hotgo/internal/model/entity"
 	internalService "hotgo/internal/service"
 )
@@ -2419,22 +2420,12 @@ func (s *sSysChat) saveTelegramFileAttachment(ctx context.Context, botToken stri
 	if err != nil {
 		return nil, err
 	}
-	tgFile, err := bot.GetFile(ctx, &tgbot.GetFileParams{FileID: file.FileID})
+	data, _, err := telegrammedia.Download(ctx, bot, file.FileID)
 	if err != nil {
-		return nil, err
+		return nil, gerror.Wrapf(err, "下载Telegram附件失败 fileId:%s", file.FileID)
 	}
-	downloadURL := bot.FileDownloadLink(tgFile)
-	response, err := g.Client().Timeout(60*time.Second).Get(ctx, downloadURL)
-	if err != nil {
-		return nil, gerror.Wrap(err, "下载Telegram附件失败")
-	}
-	defer response.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, gerror.Newf("下载Telegram附件失败，状态码：%d", response.StatusCode)
-	}
-	data := response.ReadAll()
 	name := fallbackString(file.FileName, "telegram_attachment")
-	contentType := strings.ToLower(strings.TrimSpace(response.Header.Get("Content-Type")))
+	contentType := mime.TypeByExtension(filepath.Ext(name))
 	if file.ConvertTGS {
 		converted, convertedName, convertedType, convertErr := convertTelegramTGS(ctx, name, data)
 		if convertErr != nil {
