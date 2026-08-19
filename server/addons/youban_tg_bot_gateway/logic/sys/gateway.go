@@ -36,6 +36,7 @@ type botRuntime struct {
 }
 type sGateway struct {
 	mu       sync.Mutex
+	syncMu   sync.Mutex
 	cancel   context.CancelFunc
 	done     chan struct{}
 	refresh  chan struct{}
@@ -162,6 +163,11 @@ func (s *sGateway) Probe(ctx context.Context, token string) (*models.User, error
 }
 
 func (s *sGateway) sync(ctx context.Context) error {
+	// Client() may be called concurrently by media workers, auto-delete jobs,
+	// and webhook handlers. Serialize the Telegram sync so one bot cannot issue
+	// overlapping SetWebhook/DeleteWebhook requests and trigger Telegram 429s.
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
 	conf, err := service.RuntimeConfiguration(ctx)
 	if err != nil {
 		return err
