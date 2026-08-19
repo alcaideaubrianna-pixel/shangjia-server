@@ -99,8 +99,12 @@ func mediaFileCacheRemoteSources(ctx context.Context, media *telegramMediaItem) 
 		seen[source] = struct{}{}
 		sources = append(sources, source)
 	}
-	add(media.FileUrl)
+	// Telegram Bot API file URLs are temporary and commonly return 404 after
+	// the bot file cache expires. Prefer the durable object-storage attachment
+	// whenever one is available, and only use the Telegram URL as a fallback.
+	telegramSource := strings.TrimSpace(media.FileUrl)
 	if media.AttachmentId <= 0 {
+		add(telegramSource)
 		return sources, nil
 	}
 	row, err := g.DB().Model(sysAttachmentTable).Safe().Ctx(ctx).Fields("file_url,path,drive").Where("id", media.AttachmentId).One()
@@ -111,6 +115,7 @@ func mediaFileCacheRemoteSources(ctx context.Context, media *telegramMediaItem) 
 		add(storager.LastUrl(ctx, row["file_url"].String(), row["drive"].String()))
 		add(storager.LastUrl(ctx, row["path"].String(), row["drive"].String()))
 	}
+	add(telegramSource)
 	return sources, nil
 }
 
