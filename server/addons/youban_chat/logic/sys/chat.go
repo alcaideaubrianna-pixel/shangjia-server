@@ -2295,6 +2295,7 @@ func (s *sSysChat) telegramMessageAttachments(ctx context.Context, row *chatConv
 	if botToken == "" {
 		return nil, nil
 	}
+	uploadCtx := telegramMediaUploadContext(ctx)
 	var files []telegramIncomingFile
 	if len(msg.Photo) > 0 {
 		photo := msg.Photo[len(msg.Photo)-1]
@@ -2338,7 +2339,7 @@ func (s *sSysChat) telegramMessageAttachments(ctx context.Context, row *chatConv
 	}
 	attachments := make([]*sysin.ChatMessageAttachmentModel, 0, len(files))
 	for _, file := range files {
-		item, itemErr := s.saveTelegramFileAttachment(ctx, botToken, file)
+		item, itemErr := s.saveTelegramFileAttachment(uploadCtx, botToken, file)
 		if itemErr != nil {
 			if file.Optional {
 				g.Log().Warningf(ctx, "保存Telegram可选附件失败 message:%d file:%s type:%s convert:%v err:%+v", msg.MessageId, file.FileName, file.FileType, file.ConvertTGS, itemErr)
