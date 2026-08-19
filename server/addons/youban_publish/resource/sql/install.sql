@@ -2054,3 +2054,15 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_cms_tenant_binding` (
   PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_cms_tenant_binding` (`app_id`,`tenant_id`),
   KEY `idx_ybp_cms_binding_tenant_status` (`tenant_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='XC-CMS租户绑定关系';
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_bot_message_source` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT, `tenant_id` bigint NOT NULL DEFAULT 0, `received_bot_id` bigint NOT NULL DEFAULT 0,
+  `chat_id` varchar(64) NOT NULL DEFAULT '', `message_id` bigint NOT NULL DEFAULT 0, `media_group_id` varchar(128) NOT NULL DEFAULT '',
+  `sender_user_id` bigint NOT NULL DEFAULT 0, `sender_username` varchar(255) NOT NULL DEFAULT '', `sender_chat_id` bigint NOT NULL DEFAULT 0,
+  `sender_chat_title` varchar(255) NOT NULL DEFAULT '', `reply_to_message_id` bigint NOT NULL DEFAULT 0, `reply_job_id` bigint NOT NULL DEFAULT 0,
+  `reply_profile_id` bigint NOT NULL DEFAULT 0, `reply_purpose` varchar(16) NOT NULL DEFAULT '', `update_type` varchar(64) NOT NULL DEFAULT '',
+  `message_text` text, `received_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_bot_message_source` (`received_bot_id`,`chat_id`,`message_id`),
+  KEY `idx_ybp_bot_message_source_chat_time` (`chat_id`,`received_at`), KEY `idx_ybp_bot_message_source_reply` (`reply_job_id`,`reply_profile_id`,`reply_to_message_id`),
+  KEY `idx_ybp_bot_message_source_sender` (`sender_user_id`,`sender_chat_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
