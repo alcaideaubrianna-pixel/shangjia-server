@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -19,10 +21,11 @@ func (s *sSysPublish) rebuildBotProfileMedia(ctx context.Context, profileIds []i
 	result := &sysin.CollectProfileMediaRebuildResult{ProfileIDs: make([]int64, 0, len(profileIds))}
 	for _, profileId := range profileIds {
 		var profile struct {
-			ID         int64  `json:"id"`
-			SourceType string `json:"source_type"`
+			ID         int64       `json:"id"`
+			SourceType string      `json:"source_type"`
+			CreatedAt  *gtime.Time `json:"created_at"`
 		}
-		if err := g.DB().Model("hg_content_profile").Safe().Ctx(ctx).Fields("id,source_type").Where("id", profileId).WhereNull("deleted_at").Scan(&profile); err != nil {
+		if err := g.DB().Model("hg_content_profile").Safe().Ctx(ctx).Fields("id,source_type,created_at").Where("id", profileId).WhereNull("deleted_at").Scan(&profile); err != nil {
 			return result, gerror.Wrap(err, "读取Bot资料失败")
 		}
 		if profile.ID == 0 || profile.SourceType != "youban_publish" {
@@ -31,30 +34,19 @@ func (s *sSysPublish) rebuildBotProfileMedia(ctx context.Context, profileIds []i
 		result.Candidates++
 		result.ProfileIDs = append(result.ProfileIDs, profileId)
 		rows, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-			Fields("id,tenant_id,media_type,tg_file_id,storage_path,file_url").
+			Fields("id,tenant_id,account_id,media_type,name,tg_file_id,storage_path,file_url").
 			Where("profile_id", profileId).WhereNull("deleted_at").OrderAsc("sort_index").All()
 		if err != nil {
 			return result, gerror.Wrap(err, "读取Bot资料媒体失败")
 		}
 		recoverable := 0
 		for _, row := range rows {
-			if strings.TrimSpace(row["storage_path"].String()) != "" || !strings.HasPrefix(strings.TrimSpace(row["tg_file_id"].String()), "copy:") {
+			if strings.TrimSpace(row["storage_path"].String()) != "" {
 				continue
 			}
-			chatID, messageID, parseErr := parseBotMediaCopyReference(row["tg_file_id"].String())
-			if parseErr != nil {
-				return result, parseErr
-			}
-			var source struct {
-				BotID    int64  `json:"bot_id"`
-				BotToken string `json:"bot_token"`
-				RawJSON  string `json:"raw_json"`
-			}
-			if err = g.DB().Model("hg_youban_bot_message m").Safe().Ctx(ctx).
-				Fields("m.bot_id,m.raw_json,b.bot_token").
-				LeftJoin("hg_youban_bot_bot b", "b.id=m.bot_id AND b.deleted_at IS NULL").
-				Where("m.chat_id", chatID).Where("m.message_id", messageID).Scan(&source); err != nil {
-				return result, gerror.Wrap(err, "读取Bot原始媒体消息失败")
+			source, sourceErr := s.findBotProfileMediaSource(ctx, row, profile.CreatedAt)
+			if sourceErr != nil {
+				return result, gerror.Wrapf(sourceErr, "定位Bot原始媒体失败 mediaId:%d", row["id"].Int64())
 			}
 			fileID, fileName, sourceErr := botMessageMediaFileID(source.RawJSON, row["media_type"].String())
 			if sourceErr != nil {
@@ -94,6 +86,68 @@ func (s *sSysPublish) rebuildBotProfileMedia(ctx context.Context, profileIds []i
 		}
 	}
 	return result, nil
+}
+
+type botProfileMediaSource struct {
+	BotID    int64  `json:"bot_id"`
+	BotToken string `json:"bot_token"`
+	RawJSON  string `json:"raw_json"`
+}
+
+func (s *sSysPublish) findBotProfileMediaSource(ctx context.Context, media gdb.Record, profileCreatedAt *gtime.Time) (*botProfileMediaSource, error) {
+	if strings.HasPrefix(strings.TrimSpace(media["tg_file_id"].String()), "copy:") {
+		chatID, messageID, err := parseBotMediaCopyReference(media["tg_file_id"].String())
+		if err != nil {
+			return nil, err
+		}
+		var source botProfileMediaSource
+		if err = g.DB().Model("hg_youban_bot_message m").Safe().Ctx(ctx).
+			Fields("m.bot_id,m.raw_json,b.bot_token").
+			LeftJoin("hg_youban_bot_bot b", "b.id=m.bot_id AND b.deleted_at IS NULL").
+			Where("m.chat_id", chatID).Where("m.message_id", messageID).Scan(&source); err != nil {
+			return nil, gerror.Wrap(err, "读取Bot原始媒体消息失败")
+		}
+		return &source, nil
+	}
+	if profileCreatedAt == nil || strings.TrimSpace(media["name"].String()) == "" {
+		return nil, gerror.New("Bot媒体缺少可回溯的创建时间或文件名")
+	}
+	var sessions []struct {
+		BotID       int64       `json:"bot_id"`
+		ChatID      string      `json:"chat_id"`
+		PayloadJSON string      `json:"payload_json"`
+		CreatedAt   *gtime.Time `json:"created_at"`
+		UpdatedAt   *gtime.Time `json:"updated_at"`
+	}
+	if err := g.DB().Model("hg_youban_bot_profile_session").Safe().Ctx(ctx).
+		Fields("bot_id,chat_id,payload_json,created_at,updated_at").
+		Where("tenant_id", media["tenant_id"].Int64()).Where("account_id", media["account_id"].Int64()).
+		WhereBetween("created_at", profileCreatedAt.Add(-15*time.Minute), profileCreatedAt.Add(2*time.Minute)).
+		OrderDesc("id").Limit(50).Scan(&sessions); err != nil {
+		return nil, gerror.Wrap(err, "读取Bot资料创建会话失败")
+	}
+	name := strings.TrimSpace(media["name"].String())
+	for _, session := range sessions {
+		if !strings.Contains(session.PayloadJSON, name) || session.CreatedAt == nil || session.UpdatedAt == nil {
+			continue
+		}
+		var messages []*botProfileMediaSource
+		if err := g.DB().Model("hg_youban_bot_message m").Safe().Ctx(ctx).
+			Fields("m.bot_id,m.raw_json,b.bot_token").
+			LeftJoin("hg_youban_bot_bot b", "b.id=m.bot_id AND b.deleted_at IS NULL").
+			Where("m.bot_id", session.BotID).Where("m.chat_id", session.ChatID).
+			WhereBetween("m.created_at", session.CreatedAt.Add(-time.Minute), session.UpdatedAt.Add(time.Minute)).
+			OrderAsc("m.message_id").Scan(&messages); err != nil {
+			return nil, gerror.Wrap(err, "读取Bot会话媒体消息失败")
+		}
+		for _, message := range messages {
+			_, fileName, err := botMessageMediaFileID(message.RawJSON, media["media_type"].String())
+			if err == nil && strings.EqualFold(strings.TrimSpace(fileName), name) {
+				return message, nil
+			}
+		}
+	}
+	return nil, gerror.Newf("未找到Bot原始媒体消息 name:%s", name)
 }
 
 func parseBotMediaCopyReference(value string) (string, int, error) {
