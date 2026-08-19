@@ -717,6 +717,13 @@ func (s *sSysChat) updateExternalConversation(ctx context.Context, id int64, las
 
 func externalUploadAttachment(ctx context.Context, fileName, mimeType string, data []byte) (*sysin.ChatMessageAttachmentModel, error) {
 	fileType := normalizeAttachmentType("", fileName, mimeType)
+	if fileType == "video" {
+		var err error
+		fileName, mimeType, data, err = normalizeBrowserVideo(ctx, fileName, mimeType, data)
+		if err != nil {
+			return nil, err
+		}
+	}
 	name := ensureAttachmentExt(fileName, fileType, mimeType)
 	attachment, err := storager.DoUpload(ctx, storagerKindByFileType(fileType), bytesUploadFile(name, data))
 	if err != nil {
