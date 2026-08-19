@@ -2318,7 +2318,7 @@ func (s *sSysChat) telegramMessageAttachments(ctx context.Context, row *chatConv
 			fileType = "image"
 			convertTGS = false
 		}
-		files = append(files, telegramIncomingFile{FileID: fileID, FileName: fmt.Sprintf("telegram_sticker_%d_%d%s", msg.Chat.Id, msg.MessageId, ext), FileType: fileType, ConvertTGS: convertTGS, Optional: convertTGS})
+		files = append(files, telegramIncomingFile{FileID: fileID, FileName: fmt.Sprintf("telegram_sticker_%d_%d%s", msg.Chat.Id, msg.MessageId, ext), FileType: fileType, ConvertTGS: convertTGS, Optional: true})
 	}
 	customEmojiFiles, err := s.telegramCustomEmojiFiles(ctx, botToken, msg)
 	if err != nil {

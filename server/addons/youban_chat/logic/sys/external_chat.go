@@ -457,11 +457,7 @@ func (s *sSysChat) ExternalSend(ctx context.Context, in *sysin.ExternalMessageIn
 	}
 	profile, err := s.getConversationProfileBrief(ctx, row)
 	if err == nil {
-		err = s.notifyTelegramMessage(ctx, row, profile, member, messageId, content, nil)
-	}
-	if err != nil {
-		_, _ = g.DB().Model(chatMessageTable).Ctx(ctx).Where("id", id).Data(g.Map{"status": "failed", "updated_at": gtime.Now()}).Update()
-		return nil, gerror.Wrap(err, "发送 Telegram 消息失败")
+		go s.notifyExternalMessageAsync(row, profile, member, messageId, content, nil, id)
 	}
 	s.updateExternalConversation(ctx, row.Id, content)
 	return &sysin.ChatSendModel{MessageId: id, ClientMessageId: messageId, Status: "sent"}, nil
@@ -542,15 +538,20 @@ func (s *sSysChat) ExternalFile(ctx context.Context, in *sysin.ExternalFileInp) 
 	}
 	profile, err := s.getConversationProfileBrief(ctx, row)
 	if err == nil {
-		err = s.notifyTelegramMessage(ctx, row, profile, member, messageId, content, []*sysin.ChatMessageAttachmentModel{attachment})
-	}
-	if err != nil {
-		_, _ = g.DB().Model(chatMessageTable).Ctx(ctx).Where("id", id).Data(g.Map{"status": "failed", "updated_at": gtime.Now()}).Update()
-		return nil, gerror.Wrap(err, "发送 Telegram 附件失败")
+		go s.notifyExternalMessageAsync(row, profile, member, messageId, content, []*sysin.ChatMessageAttachmentModel{attachment}, id)
 	}
 	message := &sysin.ChatMessageModel{Id: id, ClientMessageId: messageId, ConversationId: row.Id, Direction: "mine", Content: content, ContentType: attachment.FileType, Status: "sent", SenderName: memberDisplayName(member), CreatedAt: gtime.Now().String(), Attachments: []*sysin.ChatMessageAttachmentModel{attachment}}
 	s.updateExternalConversation(ctx, row.Id, attachmentLastMessage(message))
 	return &sysin.ChatUploadModel{Message: message}, nil
+}
+
+func (s *sSysChat) notifyExternalMessageAsync(row *chatConversationRow, profile *profileBrief, member *entity.AdminMember, messageId, content string, attachments []*sysin.ChatMessageAttachmentModel, localId int64) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := s.notifyTelegramMessage(ctx, row, profile, member, messageId, content, attachments); err != nil {
+		g.Log().Warningf(ctx, "异步发送Telegram消息失败 message:%d err:%+v", localId, err)
+		_, _ = g.DB().Model(chatMessageTable).Ctx(ctx).Where("id", localId).Data(g.Map{"status": "failed", "updated_at": gtime.Now()}).Update()
+	}
 }
 
 func (s *sSysChat) ExternalRead(ctx context.Context, in *sysin.ExternalReadInp) error {
