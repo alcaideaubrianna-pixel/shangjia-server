@@ -24,3 +24,15 @@ func TestBotMessageMediaFileID(t *testing.T) {
 		t.Fatalf("video = %q, %q, %v", fileID, name, err)
 	}
 }
+
+func TestBotTokenFromFileURL(t *testing.T) {
+	token, err := botTokenFromFileURL("https://api.telegram.org/file/bot123456:secret/photos/file_1.jpg")
+	if err != nil || token != "123456:secret" {
+		t.Fatalf("botTokenFromFileURL() = %q, %v", token, err)
+	}
+	for _, value := range []string{"", "https://example.com/file.jpg", "https://api.telegram.org/file/botinvalid/file.jpg"} {
+		if _, err = botTokenFromFileURL(value); err == nil {
+			t.Fatalf("botTokenFromFileURL(%q) must fail", value)
+		}
+	}
+}

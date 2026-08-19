@@ -45,12 +45,15 @@ func (s *sSysPublish) rebuildBotProfileMedia(ctx context.Context, profileIds []i
 				continue
 			}
 			source, sourceErr := s.findBotProfileMediaSource(ctx, row, profile.CreatedAt)
+			fileID, fileName := "", strings.TrimSpace(row["name"].String())
+			if sourceErr == nil {
+				fileID, fileName, sourceErr = botMessageMediaFileID(source.RawJSON, row["media_type"].String())
+			}
+			if sourceErr != nil {
+				source, fileID, sourceErr = s.findBotProfileMediaDirectSource(ctx, row)
+			}
 			if sourceErr != nil {
 				return result, gerror.Wrapf(sourceErr, "定位Bot原始媒体失败 mediaId:%d", row["id"].Int64())
-			}
-			fileID, fileName, sourceErr := botMessageMediaFileID(source.RawJSON, row["media_type"].String())
-			if sourceErr != nil {
-				return result, gerror.Wrapf(sourceErr, "Bot原始媒体不可恢复 mediaId:%d", row["id"].Int64())
 			}
 			if source.BotID <= 0 || strings.TrimSpace(source.BotToken) == "" {
 				return result, gerror.Newf("Bot原始媒体缺少Bot ID mediaId:%d", row["id"].Int64())
@@ -86,6 +89,45 @@ func (s *sSysPublish) rebuildBotProfileMedia(ctx context.Context, profileIds []i
 		}
 	}
 	return result, nil
+}
+
+func (s *sSysPublish) findBotProfileMediaDirectSource(ctx context.Context, media gdb.Record) (*botProfileMediaSource, string, error) {
+	fileID := strings.TrimSpace(media["tg_file_id"].String())
+	if fileID == "" || strings.HasPrefix(fileID, "copy:") {
+		return nil, "", gerror.New("Bot媒体缺少可直接下载的File ID")
+	}
+	token, err := botTokenFromFileURL(media["file_url"].String())
+	if err != nil {
+		return nil, "", err
+	}
+	var source botProfileMediaSource
+	if err = g.DB().Model("hg_youban_bot_bot").Ctx(ctx).
+		Fields("id AS bot_id,bot_token").Where("bot_token", token).OrderDesc("id").Limit(1).Scan(&source); err != nil {
+		return nil, "", gerror.Wrap(err, "读取历史Bot下载凭证失败")
+	}
+	if source.BotID <= 0 || strings.TrimSpace(source.BotToken) == "" {
+		return nil, "", gerror.New("历史Bot下载凭证不存在")
+	}
+	return &source, fileID, nil
+}
+
+func botTokenFromFileURL(value string) (string, error) {
+	const marker = "/file/bot"
+	value = strings.TrimSpace(value)
+	start := strings.Index(value, marker)
+	if start < 0 {
+		return "", gerror.New("Bot临时文件地址无效")
+	}
+	remainder := value[start+len(marker):]
+	end := strings.IndexByte(remainder, '/')
+	if end <= 0 {
+		return "", gerror.New("Bot临时文件地址缺少Token")
+	}
+	token := strings.TrimSpace(remainder[:end])
+	if !strings.Contains(token, ":") {
+		return "", gerror.New("Bot临时文件地址Token无效")
+	}
+	return token, nil
 }
 
 type botProfileMediaSource struct {
