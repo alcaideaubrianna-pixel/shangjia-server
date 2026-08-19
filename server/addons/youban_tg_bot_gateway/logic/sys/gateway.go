@@ -329,6 +329,7 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 		bindings = append(bindings, s.bindings[key]...)
 		s.mu.Unlock()
 	}
+	logGatewayUpdate(ctx, update, len(bindings))
 	botCtx := service.BotContext{Key: key, Bindings: bindings}
 	if len(bindings) > 0 {
 		botCtx.Token = bindings[0].Token
@@ -341,6 +342,7 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 			continue
 		}
 		if handled {
+			g.Log().Infof(ctx, "TG Bot Gateway更新已由功能消费 update:%d feature:%s", update.ID, feature.Key())
 			counter, _ := gatewayObserveMeter.Int64Counter("xiaohuiji.tg.gateway_updates_dispatched")
 			counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "handled")))
 			return nil
@@ -358,6 +360,7 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 		if err := provider.HandleUpdate(ctx, binding, update); err != nil {
 			return err
 		}
+		g.Log().Infof(ctx, "TG Bot Gateway更新已分发 update:%d provider:%s reference:%d", update.ID, binding.Owner, binding.ReferenceID)
 	}
 	if len(featureErrors) > 0 {
 		return errors.Join(featureErrors...)

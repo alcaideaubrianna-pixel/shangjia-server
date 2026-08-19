@@ -573,6 +573,7 @@ func (s *sSysChat) TelegramWebhook(ctx context.Context, in *sysin.TelegramWebhoo
 		row, err = s.getLatestConversationByTelegramChat(ctx, fmt.Sprintf("%d", msg.Chat.Id))
 	}
 	if err != nil || row == nil {
+		g.Log().Warningf(ctx, "TG链路 conversation_not_found updateId:%d chatId:%d topicId:%d messageId:%d err:%+v", in.UpdateId, msg.Chat.Id, msg.MessageThreadId, msg.MessageId, err)
 		return err
 	}
 	operatorName := telegramUserName(msg.From)
@@ -598,8 +599,10 @@ func (s *sSysChat) TelegramWebhook(ctx context.Context, in *sysin.TelegramWebhoo
 		return
 	}
 	if !inserted {
+		g.Log().Infof(ctx, "TG链路 message_duplicate updateId:%d conversationId:%d messageId:%d", in.UpdateId, row.Id, msg.MessageId)
 		return nil
 	}
+	g.Log().Infof(ctx, "TG链路 message_persisted updateId:%d conversationId:%d messageId:%d contentType:%s attachments:%d", in.UpdateId, row.Id, msg.MessageId, contentType, len(attachments))
 	if err = s.markMineMessagesReadByTelegramReply(ctx, row); err != nil {
 		return
 	}
@@ -2446,9 +2449,11 @@ func (s *sSysChat) saveTelegramFileAttachment(ctx context.Context, botToken stri
 	name = ensureAttachmentExt(name, fileType, contentType)
 	attachment, err := storager.DoUpload(ctx, storagerKindByFileType(fileType), bytesUploadFile(name, data))
 	if err != nil {
+		g.Log().Errorf(ctx, "TG链路 storage_upload_failed fileId:%s name:%s fileType:%s bytes:%d err:%+v", file.FileID, name, fileType, len(data), err)
 		return nil, gerror.Wrapf(err, "保存Telegram附件失败 file:%s type:%s contentType:%s size:%d", name, fileType, contentType, len(data))
 	}
 	url := storager.LastUrl(ctx, attachment.FileUrl, attachment.Drive)
+	g.Log().Infof(ctx, "TG链路 storage_upload_complete fileId:%s attachmentId:%d name:%s fileType:%s bytes:%d drive:%s", file.FileID, attachment.Id, attachment.Name, fileType, len(data), attachment.Drive)
 	return &sysin.ChatMessageAttachmentModel{Id: attachment.Id, Name: attachment.Name, FileType: fileType, DataUrl: url, ThumbUrl: url, FallbackUrl: url}, nil
 }
 
