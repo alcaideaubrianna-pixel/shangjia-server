@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -328,7 +329,7 @@ type externalVisitorRow struct {
 }
 
 func (s *sSysChat) ExternalSession(ctx context.Context, in *sysin.ExternalSessionInp) (*sysin.ChatStartModel, error) {
-	if err := s.ensureExternalConversationColumns(ctx); err != nil {
+	if err := s.ensureExternalSchema(ctx); err != nil {
 		return nil, err
 	}
 	visitor, member, err := s.externalActor(ctx, &in.Visitor)
@@ -347,7 +348,8 @@ func (s *sSysChat) ExternalSession(ctx context.Context, in *sysin.ExternalSessio
 	if err != nil {
 		return nil, err
 	}
-	if row == nil {
+	created := row == nil
+	if created {
 		row, err = s.deletedExternalConversation(ctx, ownerId, in.ProfileId)
 		if err != nil {
 			return nil, err
@@ -380,12 +382,18 @@ func (s *sSysChat) ExternalSession(ctx context.Context, in *sysin.ExternalSessio
 		return nil, err
 	}
 	_, _ = g.DB().Model(chatConversationTable).Ctx(ctx).Unscoped().Where("id", row.Id).Data(g.Map{"deleted_at": nil, "user_hidden_at": nil, "status": "opened", "updated_at": gtime.Now()}).Update()
-	if row.TgMessageThreadId <= 0 {
-		if err = s.notifyTelegramSession(ctx, row, profile, member); err != nil {
-			return nil, err
-		}
+	if created {
+		go s.initializeExternalTelegramSession(row, profile, member)
 	}
 	return s.packStart(row), nil
+}
+
+func (s *sSysChat) initializeExternalTelegramSession(row *chatConversationRow, profile *profileBrief, member *entity.AdminMember) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := s.notifyTelegramSession(ctx, row, profile, member); err != nil {
+		g.Log().Warningf(ctx, "异步初始化Telegram会话失败 conversation:%d err:%+v", row.Id, err)
+	}
 }
 
 func (s *sSysChat) matchExternalBinding(ctx context.Context, appId string, profile *profileBrief) (*chatBindingRow, error) {
@@ -641,9 +649,6 @@ func (s *sSysChat) validateExternalReply(ctx context.Context, conversationId, me
 }
 
 func (s *sSysChat) externalActor(ctx context.Context, in *sysin.ExternalVisitorInp) (*externalVisitorRow, *entity.AdminMember, error) {
-	if err := ensureExternalVisitorTable(ctx); err != nil {
-		return nil, nil, gerror.Wrap(err, "初始化外部访客表失败")
-	}
 	appId := strings.TrimSpace(in.AppId)
 	externalId := strings.TrimSpace(in.ExternalUserId)
 	if appId == "" || externalId == "" {
@@ -685,6 +690,22 @@ func (s *sSysChat) ensureExternalConversationColumns(ctx context.Context) error 
 		return err
 	}
 	return ensureExternalConversationHiddenColumn(ctx)
+}
+
+func (s *sSysChat) ensureExternalSchema(ctx context.Context) error {
+	s.externalSchemaMu.Lock()
+	defer s.externalSchemaMu.Unlock()
+	if s.externalSchemaReady {
+		return nil
+	}
+	if err := ensureExternalVisitorTable(ctx); err != nil {
+		return gerror.Wrap(err, "初始化外部访客表失败")
+	}
+	if err := s.ensureExternalConversationColumns(ctx); err != nil {
+		return err
+	}
+	s.externalSchemaReady = true
+	return nil
 }
 
 func externalOwnerId(visitorId int64) int64 { return -visitorId }

@@ -41,6 +41,16 @@ type sSysChat struct {
 	telegramFeatures          map[string]*chatFeatureRow
 	telegramFeatureAt         time.Time
 	telegramFeatureDefaultsAt time.Time
+	externalSchemaMu          sync.Mutex
+	externalSchemaReady       bool
+	telegramCapabilityMu      sync.RWMutex
+	telegramForumCapabilities map[string]telegramForumCapability
+	telegramTopicLocks        sync.Map
+}
+
+type telegramForumCapability struct {
+	enabled   bool
+	expiresAt time.Time
 }
 
 const (
@@ -2056,6 +2066,24 @@ func (s *sSysChat) ensureTelegramTopic(ctx context.Context, botToken, chatID str
 	if row.TgMessageThreadId > 0 {
 		return row.TgMessageThreadId, nil
 	}
+	lockValue, _ := s.telegramTopicLocks.LoadOrStore(row.Id, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer func() {
+		lock.Unlock()
+		s.telegramTopicLocks.Delete(row.Id)
+	}()
+	var persistedThreadID int64
+	if err := g.DB().Model(chatConversationTable).Ctx(ctx).Where("id", row.Id).Fields("tg_message_thread_id").Scan(&persistedThreadID); err != nil {
+		return 0, gerror.Wrap(err, "读取Telegram话题失败")
+	}
+	if persistedThreadID > 0 {
+		row.TgMessageThreadId = persistedThreadID
+		return persistedThreadID, nil
+	}
+	if enabled, known := s.telegramForumCapability(chatID); known && !enabled {
+		return 0, nil
+	}
 	name := telegramTopicName(row, profile, member)
 	bot, err := s.telegramBot(ctx, botToken)
 	if err != nil {
@@ -2067,6 +2095,7 @@ func (s *sSysChat) ensureTelegramTopic(ctx context.Context, botToken, chatID str
 	})
 	if err != nil {
 		if isTelegramNotForumError(err) {
+			s.cacheTelegramForumCapability(chatID, false)
 			g.Log().Warningf(ctx, "Telegram群未开启话题，降级发送到普通群 chat:%s conversation:%d", chatID, row.Id)
 			return 0, nil
 		}
@@ -2076,11 +2105,35 @@ func (s *sSysChat) ensureTelegramTopic(ctx context.Context, botToken, chatID str
 		return 0, gerror.New("Telegram 创建话题失败")
 	}
 	row.TgMessageThreadId = int64(topic.MessageThreadID)
+	s.cacheTelegramForumCapability(chatID, true)
 	_, err = g.DB().Model(chatConversationTable).Ctx(ctx).Where("id", row.Id).Data(g.Map{"tg_message_thread_id": topic.MessageThreadID, "updated_at": gtime.Now()}).Update()
 	if err != nil {
 		return 0, gerror.Wrap(err, "保存Telegram话题失败")
 	}
 	return int64(topic.MessageThreadID), nil
+}
+
+func (s *sSysChat) telegramForumCapability(chatID string) (bool, bool) {
+	s.telegramCapabilityMu.RLock()
+	capability, ok := s.telegramForumCapabilities[strings.TrimSpace(chatID)]
+	s.telegramCapabilityMu.RUnlock()
+	if !ok || time.Now().After(capability.expiresAt) {
+		return false, false
+	}
+	return capability.enabled, true
+}
+
+func (s *sSysChat) cacheTelegramForumCapability(chatID string, enabled bool) {
+	key := strings.TrimSpace(chatID)
+	if key == "" {
+		return
+	}
+	s.telegramCapabilityMu.Lock()
+	if s.telegramForumCapabilities == nil {
+		s.telegramForumCapabilities = make(map[string]telegramForumCapability)
+	}
+	s.telegramForumCapabilities[key] = telegramForumCapability{enabled: enabled, expiresAt: time.Now().Add(10 * time.Minute)}
+	s.telegramCapabilityMu.Unlock()
 }
 
 func isTelegramNotForumError(err error) bool {
