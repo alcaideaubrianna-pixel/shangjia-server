@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"hotgo/internal/library/cache"
 )
 
 func (s *sSysPublish) lockTelegramJob(ctx context.Context, jobId int64) (telegramJobRecord, bool, error) {
@@ -204,6 +205,9 @@ func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegram
 		}).OnConflict("job_id,tg_message_id").OnDuplicate("status,sent_at,deleted_at,updated_at").Save()
 		if err != nil {
 			return gerror.Wrap(err, "保存TG消息记录失败")
+		}
+		if isProtectedTelegramPublishPurpose(item.Purpose) {
+			_ = cache.Instance().Set(ctx, telegramPublishMessageCacheKey(job.TargetChatId, int(item.MessageId)), 1, autoDeletePublishMessageCacheTTL)
 		}
 	}
 	storedHashes := make(map[string]telegramAntiScanHash)

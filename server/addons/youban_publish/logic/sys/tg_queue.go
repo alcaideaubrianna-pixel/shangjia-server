@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -25,6 +26,7 @@ const (
 	tgQueueNameHistory            = "youban_publish_history"
 	tgTaskTypePublish             = "youban_publish:tg:publish"
 	tgTaskTypeCleanup             = "youban_publish:tg:cleanup"
+	tgTaskTypeAutoDelete          = "youban_publish:tg:auto_delete"
 	tgTaskTypeImport              = "youban_publish:import:legacy"
 	tgTaskTypeRepair              = "youban_publish:tg:message_repair"
 	tgTaskTypeImportMatch         = "youban_publish:import:tg_match"
@@ -69,6 +71,15 @@ const (
 
 type tgQueuePayload struct {
 	JobId int64 `json:"jobId"`
+}
+
+type autoDeleteQueuePayload struct {
+	BotId     int64  `json:"botId"`
+	TenantId  int64  `json:"tenantId"`
+	ChannelId int64  `json:"channelId"`
+	ChatId    string `json:"chatId"`
+	MessageId int    `json:"messageId"`
+	Keyword   string `json:"keyword"`
 }
 
 type mediaProcessQueuePayload struct {
@@ -233,6 +244,32 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 
 func (s *sSysPublish) enqueueTelegramCleanupJob(ctx context.Context, jobId int64, delay time.Duration) error {
 	return s.enqueueTelegramTask(ctx, tgTaskTypeCleanup, jobId, delay, true)
+}
+
+func (s *sSysPublish) enqueueTelegramAutoDelete(ctx context.Context, payload autoDeleteQueuePayload) error {
+	if payload.ChannelId <= 0 || payload.MessageId <= 0 || strings.TrimSpace(payload.ChatId) == "" {
+		return nil
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	task := asynq.NewTask(tgTaskTypeAutoDelete, body)
+	_, err = client.EnqueueContext(ctx, task,
+		asynq.Queue(tgQueueNameBackground),
+		asynq.MaxRetry(3),
+		asynq.Timeout(time.Minute),
+		asynq.Unique(2*time.Minute),
+		asynq.ProcessIn(40*time.Second),
+	)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	return err
 }
 
 func (s *sSysPublish) requeueTelegramJob(ctx context.Context, taskType string, jobId int64, delay time.Duration) error {
