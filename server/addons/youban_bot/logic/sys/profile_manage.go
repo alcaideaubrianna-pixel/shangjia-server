@@ -41,6 +41,7 @@ const (
 	profileMediaGroupDebounce   = 2 * time.Second
 	profileSessionTimeout       = 6 * time.Minute
 	profileMediaGroupCacheTTL   = 10 * time.Minute
+	templateInlinePhotoCacheTTL = 24 * time.Hour
 )
 
 var (
@@ -461,11 +462,12 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 		Status       int    `json:"status"`
 		ButtonConfig string `json:"button_config"`
 	}
+	templateQueryStartedAt := time.Now()
 	if err := g.DB().Model("hg_youban_publish_message_template").Safe().Ctx(ctx).
 		Where("serial_no", strings.ToUpper(strings.TrimSpace(serial))).Where("status", 1).WhereNull("deleted_at").Scan(&row); err != nil {
 		return err
 	}
-	g.Log().Infof(ctx, "Inline模板查询完成 botId:%d queryId:%s serial:%s templateId:%d", botId, query.ID, serial, row.Id)
+	g.Log().Infof(ctx, "Inline模板查询完成 botId:%d queryId:%s serial:%s templateId:%d duration:%s", botId, query.ID, serial, row.Id, time.Since(templateQueryStartedAt))
 	results := []models.InlineQueryResult{}
 	if row.Id > 0 {
 		var mediaRows []struct {
@@ -477,6 +479,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 			TgFileID              string `json:"tg_file_id"`
 			SourceMessageRecordID int64  `json:"source_message_record_id"`
 		}
+		mediaQueryStartedAt := time.Now()
 		mediaErr := g.DB().Model("hg_youban_publish_message_media").Safe().Ctx(ctx).
 			Where("template_id", row.Id).
 			OrderAsc("sort_index").
@@ -485,7 +488,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 		if mediaErr != nil {
 			return mediaErr
 		}
-		g.Log().Infof(ctx, "Inline模板媒体查询完成 botId:%d queryId:%s templateId:%d mediaCount:%d", botId, query.ID, row.Id, len(mediaRows))
+		g.Log().Infof(ctx, "Inline模板媒体查询完成 botId:%d queryId:%s templateId:%d mediaCount:%d duration:%s", botId, query.ID, row.Id, len(mediaRows), time.Since(mediaQueryStartedAt))
 		mediaCount := len(mediaRows)
 		var media struct {
 			MediaType             string `json:"media_type"`
@@ -508,7 +511,9 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 			g.Log().Infof(ctx, "Inline按钮配置解析完成 botId:%d queryId:%s templateId:%d mode:%s buttonCount:%d hasReplyMarkup:%t", botId, query.ID, row.Id, buttonConfigMode(row.ButtonConfig), buttonCount, buttonMarkup != nil)
 		}
 		if mediaCount == 1 && strings.EqualFold(strings.TrimSpace(media.MediaType), "image") {
+			photoStartedAt := time.Now()
 			cachedPhoto, cachedErr := s.templateInlineCachedPhoto(ctx, botId, media.SourceMessageRecordID, media.TgFileID)
+			g.Log().Infof(ctx, "Inline模板来源图片处理完成 botId:%d queryId:%s templateId:%d cacheKey:%s duration:%s", botId, query.ID, row.Id, templateInlinePhotoCacheKey(botId, media.SourceMessageRecordID), time.Since(photoStartedAt))
 			if cachedErr != nil {
 				g.Log().Warningf(ctx, "读取Inline缓存图片失败 templateId:%d sourceMessageRecordId:%d err:%+v", row.Id, media.SourceMessageRecordID, cachedErr)
 			}
@@ -554,10 +559,12 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 			})
 		}
 	}
+	botLookupStartedAt := time.Now()
 	botRow, err := s.botById(ctx, botId)
 	if err != nil {
 		return err
 	}
+	g.Log().Infof(ctx, "Inline Bot配置查询完成 botId:%d queryId:%s duration:%s", botId, query.ID, time.Since(botLookupStartedAt))
 	bot, err := s.telegramBot(ctx, botRow.BotToken)
 	if err != nil {
 		return err
@@ -565,7 +572,9 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 	callCtx, cancel := telegramAPICtx()
 	defer cancel()
 	g.Log().Infof(ctx, "Inline模板开始响应 botId:%d queryId:%s serial:%s resultCount:%d", botId, query.ID, serial, len(results))
+	answerStartedAt := time.Now()
 	_, err = bot.AnswerInlineQuery(callCtx, &tgbot.AnswerInlineQueryParams{InlineQueryID: query.ID, Results: results, CacheTime: 0, IsPersonal: false})
+	g.Log().Infof(ctx, "Inline模板响应调用完成 botId:%d queryId:%s duration:%s", botId, query.ID, time.Since(answerStartedAt))
 	if err != nil {
 		g.Log().Errorf(ctx, "Inline模板响应失败 botId:%d queryId:%s serial:%s duration:%s err:%+v", botId, query.ID, serial, time.Since(startedAt), err)
 	}
@@ -640,12 +649,26 @@ type templateInlineCachedPhoto struct {
 	CaptionEntities []models.MessageEntity
 }
 
+func templateInlinePhotoCacheKey(botId, sourceMessageRecordId int64) string {
+	return fmt.Sprintf("youban_bot:inline_photo:%d:%d", botId, sourceMessageRecordId)
+}
+
 func (s *sSysBot) templateInlineCachedPhoto(ctx context.Context, botId int64, sourceMessageRecordId int64, fallbackFileID string) (*templateInlineCachedPhoto, error) {
 	if strings.TrimSpace(fallbackFileID) != "" {
 		return &templateInlineCachedPhoto{FileID: strings.TrimSpace(fallbackFileID)}, nil
 	}
 	if botId <= 0 || sourceMessageRecordId <= 0 {
 		return nil, nil
+	}
+	cacheKey := templateInlinePhotoCacheKey(botId, sourceMessageRecordId)
+	if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
+		if value.String() == "__miss__" {
+			return nil, nil
+		}
+		var cached templateInlineCachedPhoto
+		if json.Unmarshal([]byte(value.String()), &cached) == nil && strings.TrimSpace(cached.FileID) != "" {
+			return &cached, nil
+		}
 	}
 	var row struct {
 		RawJSON string `json:"raw_json"`
@@ -657,7 +680,15 @@ func (s *sSysBot) templateInlineCachedPhoto(ctx context.Context, botId int64, so
 		Scan(&row); err != nil {
 		return nil, gerror.Wrap(err, "读取Telegram来源消息失败")
 	}
-	return decodeTemplateInlineCachedPhoto(row.RawJSON), nil
+	photo := decodeTemplateInlineCachedPhoto(row.RawJSON)
+	if photo == nil {
+		_ = cache.Instance().Set(ctx, cacheKey, "__miss__", time.Minute)
+		return nil, nil
+	}
+	if data, marshalErr := json.Marshal(photo); marshalErr == nil {
+		_ = cache.Instance().Set(ctx, cacheKey, string(data), templateInlinePhotoCacheTTL)
+	}
+	return photo, nil
 }
 
 func decodeTemplateInlineCachedPhoto(rawJSON string) *templateInlineCachedPhoto {

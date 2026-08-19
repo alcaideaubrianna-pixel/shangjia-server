@@ -238,6 +238,15 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 		g.Log().Warningf(ctx, "更新快速推送发送记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
 	inlineValidationErr := validateInlinePublishTemplate(template)
+	// Inline only supports a single media item. Multi-media pushes use the
+	// account client directly so they do not pass through the Bot fallback path.
+	if len(media) > 1 {
+		if channel != nil && channel.TgAccountId > 0 {
+			s.appendTelegramJobLog(ctx, job, "inline_send", "skipped", "多媒体不进入Inline链路，改由协议号账号推送")
+			return s.submitMessagePushAccountTask(ctx, job, channel, "account")
+		}
+		return gerror.New("多媒体推送目标未配置TG账号")
+	}
 	if inlineValidationErr == nil && channel != nil && channel.TgAccountId > 0 && job.BotId > 0 {
 		return s.submitMessagePushAccountTask(ctx, job, channel, "inline")
 	}

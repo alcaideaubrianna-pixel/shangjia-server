@@ -67,9 +67,6 @@ func (s *sSysPublish) AdminMessageTemplateSave(ctx context.Context, in *sysin.Me
 	if err = in.NormalizeButtonConfig(); err != nil {
 		return nil, err
 	}
-	if len(in.Media) > 1 && in.ButtonConfig != "" {
-		in.ButtonConfig = ""
-	}
 	if in.Id > 0 {
 		if err = s.ensureMessageTemplatesBelongTenant(ctx, []int64{in.Id}, account.TenantId); err != nil {
 			return nil, err
