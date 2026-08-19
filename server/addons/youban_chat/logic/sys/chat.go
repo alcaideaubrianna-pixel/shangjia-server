@@ -548,6 +548,10 @@ func (s *sSysChat) TelegramWebhook(ctx context.Context, in *sysin.TelegramWebhoo
 		return s.applyTelegramReaction(ctx, in.MessageReaction)
 	}
 	msg := in.Message
+	updateKind := "message"
+	if msg == nil {
+		updateKind = "edited_message"
+	}
 	if msg == nil {
 		msg = in.EditedMessage
 	}
@@ -575,8 +579,10 @@ func (s *sSysChat) TelegramWebhook(ctx context.Context, in *sysin.TelegramWebhoo
 	messageId := fmt.Sprintf("telegram_%d_%d", msg.Chat.Id, msg.MessageId)
 	attachments, err := s.telegramMessageAttachments(ctx, row, msg)
 	if err != nil {
+		g.Log().Errorf(ctx, "Telegram客服媒体处理失败 kind:%s chat:%d topic:%d message:%d photo:%d video:%t document:%t sticker:%t animation:%t err:%+v", updateKind, msg.Chat.Id, msg.MessageThreadId, msg.MessageId, len(msg.Photo), msg.Video != nil, msg.Document != nil, msg.Sticker != nil, msg.Animation != nil, err)
 		return
 	}
+	g.Log().Infof(ctx, "Telegram客服入站消息 kind:%s chat:%d topic:%d message:%d photo:%d video:%t document:%t sticker:%t animation:%t attachments:%d", updateKind, msg.Chat.Id, msg.MessageThreadId, msg.MessageId, len(msg.Photo), msg.Video != nil, msg.Document != nil, msg.Sticker != nil, msg.Animation != nil, len(attachments))
 	if telegramHasVisualEmoji(msg) && len(attachments) > 0 {
 		text = ""
 	}
