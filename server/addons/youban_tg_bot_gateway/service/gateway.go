@@ -36,6 +36,7 @@ type IGateway interface {
 	Refresh(ctx context.Context) error
 	Webhook(ctx context.Context, key string, body []byte, secret string) error
 	Client(ctx context.Context, token string) (*tgbot.Bot, error)
+	Probe(ctx context.Context, token string) (*models.User, error)
 }
 
 var (

@@ -2208,11 +2208,7 @@ func (s *sSysChat) telegramBot(ctx context.Context, botToken string) (*tgbot.Bot
 func (s *sSysChat) telegramBotProfile(ctx context.Context, botToken string) (*models.User, error) {
 	profileCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	bot, err := s.telegramBot(profileCtx, botToken)
-	if err != nil {
-		return nil, err
-	}
-	user, err := bot.GetMe(profileCtx)
+	user, err := gatewayservice.Gateway().Probe(profileCtx, strings.TrimSpace(botToken))
 	if err != nil {
 		if profileCtx.Err() == context.DeadlineExceeded {
 			return nil, gerror.New("连接Telegram超时，请检查服务器网络后重试")

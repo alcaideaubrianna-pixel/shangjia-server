@@ -149,6 +149,18 @@ func (s *sGateway) Client(ctx context.Context, token string) (*tgbot.Bot, error)
 	return client, nil
 }
 
+func (s *sGateway) Probe(ctx context.Context, token string) (*models.User, error) {
+	conf, err := service.RuntimeConfiguration(ctx)
+	if err != nil {
+		return nil, err
+	}
+	client, err := newBot(strings.TrimSpace(token), conf.ProxyURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	return client.GetMe(ctx)
+}
+
 func (s *sGateway) sync(ctx context.Context) error {
 	conf, err := service.RuntimeConfiguration(ctx)
 	if err != nil {

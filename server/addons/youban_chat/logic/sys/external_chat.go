@@ -13,6 +13,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_chat/model/input/sysin"
+	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/storager"
 	"hotgo/internal/model/entity"
 )
@@ -113,8 +114,8 @@ func (s *sSysChat) ExternalAdminSaveBot(ctx context.Context, in *sysin.ExternalA
 	if err != nil {
 		return err
 	}
-	if err = s.syncTelegramBotMenu(ctx, token); err != nil {
-		g.Log().Warningf(ctx, "同步Telegram菜单失败 bot:%s err:%+v", profile.Username, err)
+	if err = gatewayservice.Gateway().Refresh(ctx); err != nil {
+		g.Log().Warningf(ctx, "刷新Telegram Gateway失败 bot:%s err:%+v", profile.Username, err)
 	}
 	return nil
 }
