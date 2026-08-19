@@ -918,8 +918,19 @@ func (s *sSysPublish) downloadBotTelegramMedia(ctx context.Context, tenantId int
 	if strings.TrimSpace(botRow.BotToken) == "" {
 		return nil, gerror.New("Bot媒体下载凭证不存在")
 	}
+	return s.downloadBotTelegramMediaWithToken(ctx, botId, botRow.BotToken, item)
+}
 
-	bot, err := s.telegramBot(ctx, botRow.BotToken)
+func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, botId int64, botToken string, item collectMediaItem) (*collectDownloadedMedia, error) {
+	botToken = strings.TrimSpace(botToken)
+	if botId <= 0 || botToken == "" {
+		return nil, gerror.New("Bot媒体下载凭证不存在")
+	}
+	fileID := strings.TrimSpace(item.FileId)
+	if fileID == "" {
+		return nil, gerror.New("Bot采集媒体缺少File ID")
+	}
+	bot, err := s.telegramBot(ctx, botToken)
 	if err != nil {
 		return nil, gerror.Wrap(err, "创建Bot媒体下载客户端失败")
 	}

@@ -46,24 +46,28 @@ func (s *sSysPublish) rebuildBotProfileMedia(ctx context.Context, profileIds []i
 				return result, parseErr
 			}
 			var source struct {
-				BotID   int64  `json:"bot_id"`
-				RawJSON string `json:"raw_json"`
+				BotID    int64  `json:"bot_id"`
+				BotToken string `json:"bot_token"`
+				RawJSON  string `json:"raw_json"`
 			}
-			if err = g.DB().Model("hg_youban_bot_message").Safe().Ctx(ctx).Fields("bot_id,raw_json").Where("chat_id", chatID).Where("message_id", messageID).Scan(&source); err != nil {
+			if err = g.DB().Model("hg_youban_bot_message m").Safe().Ctx(ctx).
+				Fields("m.bot_id,m.raw_json,b.bot_token").
+				LeftJoin("hg_youban_bot_bot b", "b.id=m.bot_id AND b.deleted_at IS NULL").
+				Where("m.chat_id", chatID).Where("m.message_id", messageID).Scan(&source); err != nil {
 				return result, gerror.Wrap(err, "读取Bot原始媒体消息失败")
 			}
 			fileID, fileName, sourceErr := botMessageMediaFileID(source.RawJSON, row["media_type"].String())
 			if sourceErr != nil {
 				return result, gerror.Wrapf(sourceErr, "Bot原始媒体不可恢复 mediaId:%d", row["id"].Int64())
 			}
-			if source.BotID <= 0 {
+			if source.BotID <= 0 || strings.TrimSpace(source.BotToken) == "" {
 				return result, gerror.Newf("Bot原始媒体缺少Bot ID mediaId:%d", row["id"].Int64())
 			}
 			recoverable++
 			if dryRun {
 				continue
 			}
-			downloaded, downloadErr := s.downloadBotTelegramMedia(ctx, row["tenant_id"].Int64(), source.BotID, collectMediaItem{Type: row["media_type"].String(), FileId: fileID})
+			downloaded, downloadErr := s.downloadBotTelegramMediaWithToken(ctx, source.BotID, source.BotToken, collectMediaItem{Type: row["media_type"].String(), FileId: fileID})
 			if downloadErr != nil {
 				return result, gerror.Wrapf(downloadErr, "恢复Bot资料媒体失败 mediaId:%d", row["id"].Int64())
 			}
