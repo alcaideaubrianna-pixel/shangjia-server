@@ -474,6 +474,10 @@ func (s *sSysPublish) materialImportTaskList(ctx context.Context, tenantId int64
 }
 
 func (s *sSysPublish) materialImportTaskView(ctx context.Context, id int64, tenantId int64) (*sysin.MaterialImportTaskModel, error) {
+	// 详情轮询必须先汇总分组进度，避免并发媒体任务完成后页面继续显示旧快照。
+	if err := s.refreshMaterialImportTaskStats(ctx, id); err != nil {
+		return nil, gerror.Wrap(err, "刷新资料导入进度失败")
+	}
 	row, err := s.materialImportTaskRecord(ctx, id, tenantId)
 	if err != nil {
 		return nil, err
