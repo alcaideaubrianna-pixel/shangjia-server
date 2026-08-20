@@ -396,7 +396,11 @@ func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, cl
 	if job.Status == sysin.MessagePushStatusSent {
 		return nil
 	}
-	s.appendTelegramJobLog(ctx, job, "inline_send", "started", fmt.Sprintf("开始Inline发布 accountTaskId:%d tgAccountId:%d", task.ID, task.AccountID))
+	if accountOnly {
+		s.appendTelegramJobLog(ctx, job, "account_send", "started", fmt.Sprintf("开始协议号发送 accountTaskId:%d tgAccountId:%d", task.ID, task.AccountID))
+	} else {
+		s.appendTelegramJobLog(ctx, job, "inline_send", "started", fmt.Sprintf("开始Inline发布 accountTaskId:%d tgAccountId:%d", task.ID, task.AccountID))
+	}
 	templateId, err := messagePushTemplateIdFromOperationNo(job.OperationNo)
 	if err != nil {
 		return err

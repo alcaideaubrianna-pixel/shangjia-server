@@ -490,6 +490,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 			g.Log().Errorf(ctx, "Inline阶段失败 stage:media_query botId:%d queryId:%s templateId:%d duration:%s err:%+v", botId, query.ID, row.Id, time.Since(mediaQueryStartedAt), mediaErr)
 			return mediaErr
 		}
+		mediaRows = filterInlineMediaRows(mediaRows)
 		g.Log().Infof(ctx, "Inline模板媒体查询完成 botId:%d queryId:%s templateId:%d mediaCount:%d duration:%s", botId, query.ID, row.Id, len(mediaRows), time.Since(mediaQueryStartedAt))
 		mediaCount := len(mediaRows)
 		var media struct {
@@ -585,6 +586,33 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 		g.Log().Errorf(ctx, "Inline模板响应失败 botId:%d queryId:%s serial:%s duration:%s err:%+v", botId, query.ID, serial, time.Since(startedAt), err)
 	}
 	return err
+}
+
+func filterInlineMediaRows(rows []struct {
+	MediaType             string `json:"media_type"`
+	FileURL               string `json:"file_url"`
+	StoragePath           string `json:"storage_path"`
+	PosterURL             string `json:"poster_url"`
+	PosterStoragePath     string `json:"poster_storage_path"`
+	TgFileID              string `json:"tg_file_id"`
+	SourceMessageRecordID int64  `json:"source_message_record_id"`
+}) []struct {
+	MediaType             string `json:"media_type"`
+	FileURL               string `json:"file_url"`
+	StoragePath           string `json:"storage_path"`
+	PosterURL             string `json:"poster_url"`
+	PosterStoragePath     string `json:"poster_storage_path"`
+	TgFileID              string `json:"tg_file_id"`
+	SourceMessageRecordID int64  `json:"source_message_record_id"`
+} {
+	filtered := rows[:0]
+	for _, row := range rows {
+		if strings.TrimSpace(row.TgFileID) == "" && strings.TrimSpace(row.FileURL) == "" && strings.TrimSpace(row.StoragePath) == "" {
+			continue
+		}
+		filtered = append(filtered, row)
+	}
+	return filtered
 }
 
 func inlineQueryReplyMarkup(markup *models.InlineKeyboardMarkup) models.ReplyMarkup {
