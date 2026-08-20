@@ -238,6 +238,11 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 		g.Log().Warningf(ctx, "更新快速推送发送记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
 	inlineValidationErr := validateInlinePublishTemplate(template)
+	validationReason := "ok"
+	if inlineValidationErr != nil {
+		validationReason = inlineValidationErr.Error()
+	}
+	g.Log().Infof(ctx, "快速推送决策 jobId:%d operationNo:%s targetChatId:%s channelId:%d tgAccountId:%d sourceBotId:%d templateSerial:%s mediaCount:%d hasText:%t inlineValidation:%s", job.Id, job.OperationNo, job.TargetChatId, job.ChannelId, channelTgAccountId(channel), job.BotId, templateSerialNo(template), len(media), template != nil && strings.TrimSpace(template.Text) != "", validationReason)
 	// Inline only supports a single media item. Multi-media pushes use the
 	// account client directly so they do not pass through the Bot fallback path.
 	if len(media) > 1 {
@@ -292,6 +297,20 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 		return s.submitMessagePushAccountTask(ctx, job, channel, "account")
 	}
 	return gerror.Wrap(botErr, "Bot上传消息失败且目标未配置TG账号，无法执行协议号降级")
+}
+
+func channelTgAccountId(channel *messagePushChannel) int64 {
+	if channel == nil {
+		return 0
+	}
+	return channel.TgAccountId
+}
+
+func templateSerialNo(template *sysin.MessageTemplateModel) string {
+	if template == nil {
+		return ""
+	}
+	return strings.TrimSpace(template.SerialNo)
 }
 
 func (s *sSysPublish) submitMessagePushAccountTask(ctx context.Context, job telegramJobRecord, channel *messagePushChannel, mode string) error {
