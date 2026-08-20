@@ -14,10 +14,21 @@ import (
 )
 
 const (
-	accountMediaPartSize         = 1 << 20
-	accountMediaPoolSize   int64 = 8
-	accountMediaMaxThreads       = 8
+	accountMediaPartSize             = 1 << 20
+	accountMediaPoolSize       int64 = 8
+	accountMediaDefaultThreads       = 6
+	accountMediaMaxThreads           = 8
 )
+
+func normalizeAccountMediaThreads(threads int) int {
+	if threads < 1 {
+		return 1
+	}
+	if threads > accountMediaMaxThreads {
+		return accountMediaMaxThreads
+	}
+	return threads
+}
 
 type accountMediaTransferManager struct {
 	mu    sync.Mutex

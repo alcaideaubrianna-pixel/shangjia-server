@@ -61,6 +61,22 @@ func TestAccountMediaTransferBestThreads(t *testing.T) {
 	}
 }
 
+func TestNormalizeAccountMediaThreads(t *testing.T) {
+	tests := []struct {
+		value int
+		want  int
+	}{
+		{value: accountMediaDefaultThreads, want: 6},
+		{value: 0, want: 1},
+		{value: accountMediaMaxThreads + 1, want: accountMediaMaxThreads},
+	}
+	for _, test := range tests {
+		if got := normalizeAccountMediaThreads(test.value); got != test.want {
+			t.Fatalf("normalizeAccountMediaThreads(%d)=%d want=%d", test.value, got, test.want)
+		}
+	}
+}
+
 func TestAccountMediaTransferErrors(t *testing.T) {
 	if !accountMediaConnectionInvalid(errors.New("AUTH_BYTES_INVALID")) || !accountMediaConnectionInvalid(errors.New("DC is closed")) {
 		t.Fatal("expected connection error classification")

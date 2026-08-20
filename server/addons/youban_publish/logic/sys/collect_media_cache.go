@@ -1208,24 +1208,39 @@ type collectMediaCacheResult struct {
 	metaJSON string
 }
 
+const (
+	collectMediaDefaultGlobalConcurrency  = 16
+	collectMediaDefaultAccountConcurrency = 4
+	collectMediaMaxGlobalConcurrency      = 64
+	collectMediaMaxAccountConcurrency     = 8
+)
+
+func normalizeCollectMediaConcurrency(globalLimit int, accountLimit int) (int, int) {
+	if globalLimit < 1 {
+		globalLimit = 1
+	}
+	if globalLimit > collectMediaMaxGlobalConcurrency {
+		globalLimit = collectMediaMaxGlobalConcurrency
+	}
+	if accountLimit < 1 {
+		accountLimit = 1
+	}
+	if accountLimit > collectMediaMaxAccountConcurrency {
+		accountLimit = collectMediaMaxAccountConcurrency
+	}
+	if accountLimit > globalLimit {
+		accountLimit = globalLimit
+	}
+	return globalLimit, accountLimit
+}
+
 func (s *sSysPublish) acquireCollectMediaDownloadSlots(ctx context.Context, tenantId int64, tgAccountId int64) (func(), error) {
 	if tenantId <= 0 {
 		return func() {}, gerror.New("采集媒体下载缺少租户")
 	}
-	globalLimit := g.Cfg().MustGet(ctx, "youbanPublish.collect.globalMediaConcurrency", 8).Int()
-	if globalLimit < 1 {
-		globalLimit = 1
-	}
-	if globalLimit > 64 {
-		globalLimit = 64
-	}
-	accountLimit := g.Cfg().MustGet(ctx, "youbanPublish.collect.accountMediaConcurrency", 2).Int()
-	if accountLimit < 1 {
-		accountLimit = 1
-	}
-	if accountLimit > 8 {
-		accountLimit = 8
-	}
+	globalLimit := g.Cfg().MustGet(ctx, "youbanPublish.collect.globalMediaConcurrency", collectMediaDefaultGlobalConcurrency).Int()
+	accountLimit := g.Cfg().MustGet(ctx, "youbanPublish.collect.accountMediaConcurrency", collectMediaDefaultAccountConcurrency).Int()
+	globalLimit, accountLimit = normalizeCollectMediaConcurrency(globalLimit, accountLimit)
 	s.collectMediaMu.Lock()
 	if s.collectMediaSlots == nil || cap(s.collectMediaSlots) != globalLimit {
 		s.collectMediaSlots = make(chan struct{}, globalLimit)

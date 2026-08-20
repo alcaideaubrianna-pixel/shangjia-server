@@ -102,13 +102,7 @@ func transferAccountTaskMedia(ctx context.Context, client *telegram.Client, acco
 	timeout := accountMediaDownloadTimeout(media.SourceSize)
 	downloadCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	threads := g.Cfg().MustGet(ctx, "telegramCollector.media.concurrency", 4).Int()
-	if threads < 1 {
-		threads = 1
-	}
-	if threads > accountMediaMaxThreads {
-		threads = accountMediaMaxThreads
-	}
+	threads := normalizeAccountMediaThreads(g.Cfg().MustGet(ctx, "telegramCollector.media.concurrency", accountMediaDefaultThreads).Int())
 	startedAt := time.Now()
 	if err = globalAccountMediaTransfer.download(downloadCtx, accountID, client, location, path, media.SourceSize, media.SourceDCID, threads); err != nil {
 		_ = os.Remove(path)
