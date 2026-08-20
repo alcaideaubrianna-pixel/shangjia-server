@@ -37,8 +37,12 @@ func (p *publishAccountRuntimeProvider) ListAccountRuntimes(ctx context.Context)
 	}
 	bindings := make([]*collectorin.AccountRuntimeBinding, 0, len(groups))
 	for accountID, group := range groups {
-		if accountID <= 0 || !p.publish.accountCollectCircuitShouldStart(accountID) {
+		pendingDelete := accountID > 0 && p.publish.accountHasPendingDeleteFallback(ctx, accountID)
+		if accountID <= 0 || (!p.publish.accountCollectCircuitShouldStart(accountID) && !pendingDelete) {
 			continue
+		}
+		if pendingDelete && !p.publish.accountCollectCircuitShouldStart(accountID) {
+			g.Log().Warningf(ctx, "TG账号存在待处理删除任务但被熔断，允许Runtime自愈重试 tgAccountId:%d", accountID)
 		}
 		bindings = append(bindings, &collectorin.AccountRuntimeBinding{
 			AccountID: accountID,
@@ -48,6 +52,18 @@ func (p *publishAccountRuntimeProvider) ListAccountRuntimes(ctx context.Context)
 		})
 	}
 	return bindings, nil
+}
+
+func (s *sSysPublish) accountHasPendingDeleteFallback(ctx context.Context, accountID int64) bool {
+	if accountID <= 0 {
+		return false
+	}
+	count, err := g.DB().Model("hg_tg_collector_account_task").Safe().Ctx(ctx).
+		Where("account_id", accountID).
+		Where("task_type", collectorin.AccountTaskTypeMessageDeleteFallback).
+		WhereIn("status", []string{collectorin.AccountTaskStatusPending, collectorin.AccountTaskStatusFailedRetry, collectorin.AccountTaskStatusProcessing}).
+		Count()
+	return err == nil && count > 0
 }
 
 func (s *sSysPublish) authorizedTgAccountRuntimeIDs(ctx context.Context) ([]int64, error) {
