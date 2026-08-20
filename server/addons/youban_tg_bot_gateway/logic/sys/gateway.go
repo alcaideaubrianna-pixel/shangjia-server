@@ -235,7 +235,7 @@ func (s *sGateway) observeBotCounts(ctx context.Context, configured int) {
 }
 
 func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *service.RuntimeConfig) error {
-	signature := mode + "\n" + strings.TrimSpace(conf.WebhookBaseURL) + "\n" + strings.TrimSpace(conf.ProxyURL)
+	signature := mode + "\n" + strings.TrimSpace(conf.WebhookBaseURL) + "\n" + strings.TrimSpace(conf.ProxyURL) + "\n" + strings.Join(allowedUpdates(), ",")
 	s.mu.Lock()
 	current := s.runtimes[key]
 	s.mu.Unlock()
@@ -517,7 +517,16 @@ func tokenKey(token string) string {
 	return hex.EncodeToString(sum[:12])
 }
 func allowedUpdates() []string {
-	return []string{models.AllowedUpdateMessage, models.AllowedUpdateEditedMessage, models.AllowedUpdateChannelPost, models.AllowedUpdateEditedChannelPost, models.AllowedUpdateCallbackQuery, models.AllowedUpdateMessageReaction}
+	return []string{
+		models.AllowedUpdateMessage,
+		models.AllowedUpdateEditedMessage,
+		models.AllowedUpdateChannelPost,
+		models.AllowedUpdateEditedChannelPost,
+		models.AllowedUpdateCallbackQuery,
+		models.AllowedUpdateInlineQuery,
+		models.AllowedUpdateMessageReaction,
+		models.AllowedUpdateMyChatMember,
+	}
 }
 
 func newBot(token, proxyURL string, handler tgbot.HandlerFunc) (*tgbot.Bot, error) {

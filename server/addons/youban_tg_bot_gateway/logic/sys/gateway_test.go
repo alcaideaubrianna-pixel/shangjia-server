@@ -56,6 +56,18 @@ func TestUpdateNeedsImmediateDispatch(t *testing.T) {
 	}
 }
 
+func TestAllowedUpdatesIncludeInlineAndMembership(t *testing.T) {
+	updates := make(map[string]bool)
+	for _, update := range allowedUpdates() {
+		updates[update] = true
+	}
+	for _, required := range []string{models.AllowedUpdateInlineQuery, models.AllowedUpdateMyChatMember} {
+		if !updates[required] {
+			t.Fatalf("allowedUpdates() missing %q", required)
+		}
+	}
+}
+
 func TestRuntimeModeForSystem(t *testing.T) {
 	tests := []struct {
 		name       string
