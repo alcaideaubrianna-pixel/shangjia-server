@@ -465,6 +465,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 	templateQueryStartedAt := time.Now()
 	if err := g.DB().Model("hg_youban_publish_message_template").Safe().Ctx(ctx).
 		Where("serial_no", strings.ToUpper(strings.TrimSpace(serial))).Where("status", 1).WhereNull("deleted_at").Scan(&row); err != nil {
+		g.Log().Errorf(ctx, "Inline阶段失败 stage:template_query botId:%d queryId:%s serial:%s duration:%s err:%+v", botId, query.ID, serial, time.Since(templateQueryStartedAt), err)
 		return err
 	}
 	g.Log().Infof(ctx, "Inline模板查询完成 botId:%d queryId:%s serial:%s templateId:%d duration:%s", botId, query.ID, serial, row.Id, time.Since(templateQueryStartedAt))
@@ -486,6 +487,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 			Limit(2).
 			Scan(&mediaRows)
 		if mediaErr != nil {
+			g.Log().Errorf(ctx, "Inline阶段失败 stage:media_query botId:%d queryId:%s templateId:%d duration:%s err:%+v", botId, query.ID, row.Id, time.Since(mediaQueryStartedAt), mediaErr)
 			return mediaErr
 		}
 		g.Log().Infof(ctx, "Inline模板媒体查询完成 botId:%d queryId:%s templateId:%d mediaCount:%d duration:%s", botId, query.ID, row.Id, len(mediaRows), time.Since(mediaQueryStartedAt))
@@ -562,13 +564,17 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 	botLookupStartedAt := time.Now()
 	botRow, err := s.botById(ctx, botId)
 	if err != nil {
+		g.Log().Errorf(ctx, "Inline阶段失败 stage:bot_lookup botId:%d queryId:%s duration:%s err:%+v", botId, query.ID, time.Since(botLookupStartedAt), err)
 		return err
 	}
 	g.Log().Infof(ctx, "Inline Bot配置查询完成 botId:%d queryId:%s duration:%s", botId, query.ID, time.Since(botLookupStartedAt))
+	clientStartedAt := time.Now()
 	bot, err := s.telegramBot(ctx, botRow.BotToken)
 	if err != nil {
+		g.Log().Errorf(ctx, "Inline阶段失败 stage:bot_client botId:%d queryId:%s duration:%s err:%+v", botId, query.ID, time.Since(clientStartedAt), err)
 		return err
 	}
+	g.Log().Infof(ctx, "Inline Bot客户端创建完成 botId:%d queryId:%s duration:%s", botId, query.ID, time.Since(clientStartedAt))
 	callCtx, cancel := telegramAPICtx()
 	defer cancel()
 	g.Log().Infof(ctx, "Inline模板开始响应 botId:%d queryId:%s serial:%s resultCount:%d", botId, query.ID, serial, len(results))
