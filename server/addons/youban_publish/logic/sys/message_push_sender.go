@@ -247,7 +247,11 @@ func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRec
 		}
 		return gerror.New("多媒体推送目标未配置TG账号")
 	}
-	if inlineValidationErr == nil && channel != nil && channel.TgAccountId > 0 && job.BotId > 0 {
+	// Quick push Inline always uses the configured official Bot. job.BotId is
+	// the source/profile Bot and is commonly zero for group quick-push jobs;
+	// requiring it incorrectly skips Inline and sends the task through the
+	// Bot/account fallback path even when the template has no media.
+	if inlineValidationErr == nil && channel != nil && channel.TgAccountId > 0 {
 		return s.submitMessagePushAccountTask(ctx, job, channel, "inline")
 	}
 	inlineSkipReason := "目标缺少TG账号或可用Bot"
