@@ -22,6 +22,20 @@ type PublishRecordListInp struct {
 
 type PublishRecordClearInp struct{}
 
+type InclusionRecordListInp struct {
+	form.PageReq
+	ProfileId int64 `json:"profileId" v:"required|min:1#资料ID不能为空|资料ID无效" dc:"资料ID"`
+}
+
+type InclusionRecordModel struct {
+	Id          int64       `json:"id" dc:"记录ID"`
+	BotId       int64       `json:"botId" dc:"机器人ID"`
+	BotName     string      `json:"botName" dc:"机器人昵称"`
+	BotUsername string      `json:"botUsername" dc:"机器人用户名"`
+	MessageText string      `json:"messageText" dc:"消息内容"`
+	ReceivedAt  *gtime.Time `json:"receivedAt" dc:"接收时间"`
+}
+
 type TgObserveQueueListInp struct {
 	form.PageReq
 	QueueName string `json:"queueName" dc:"队列名称"`

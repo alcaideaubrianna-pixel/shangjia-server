@@ -181,6 +181,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_bot_message_source` (
   UNIQUE KEY `uk_ybp_bot_message_source` (`chat_id`,`message_id`),
   KEY `idx_ybp_bot_message_source_chat_time` (`chat_id`,`received_at`),
   KEY `idx_ybp_bot_message_source_reply` (`reply_job_id`,`reply_profile_id`,`reply_to_message_id`),
+  KEY `idx_ybp_bot_message_source_profile_time` (`tenant_id`,`reply_profile_id`,`received_at`,`id`),
   KEY `idx_ybp_bot_message_source_sender` (`sender_user_id`,`sender_chat_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -189,3 +190,4 @@ INNER JOIN `hg_youban_publish_bot_message_source` newer
   ON older.`chat_id` = newer.`chat_id` AND older.`message_id` = newer.`message_id` AND older.`id` > newer.`id`;
 ALTER TABLE `hg_youban_publish_bot_message_source` DROP INDEX `uk_ybp_bot_message_source`;
 ALTER TABLE `hg_youban_publish_bot_message_source` ADD UNIQUE KEY `uk_ybp_bot_message_source` (`chat_id`,`message_id`);
+CREATE INDEX `idx_ybp_tg_message_target_message` ON `hg_youban_publish_tg_message` (`target_chat_id`,`tg_message_id`,`id`);

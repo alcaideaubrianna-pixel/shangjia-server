@@ -819,6 +819,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_message_job_message" ON "hg_youban_
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_job" ON "hg_youban_publish_tg_message" ("job_id", "status", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_task" ON "hg_youban_publish_tg_message" ("task_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_profile" ON "hg_youban_publish_tg_message" ("tenant_id", "account_id", "profile_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_target_message" ON "hg_youban_publish_tg_message" ("target_chat_id", "tg_message_id", "id" DESC);
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_message_repair_run" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -1997,4 +1998,5 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_bot_message_source" (
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_chat_time" ON "hg_youban_publish_bot_message_source" ("chat_id", "received_at");
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_reply" ON "hg_youban_publish_bot_message_source" ("reply_job_id", "reply_profile_id", "reply_to_message_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_profile_time" ON "hg_youban_publish_bot_message_source" ("tenant_id", "reply_profile_id", "received_at" DESC, "id" DESC);
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_sender" ON "hg_youban_publish_bot_message_source" ("sender_user_id", "sender_chat_id");

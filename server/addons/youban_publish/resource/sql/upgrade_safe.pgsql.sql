@@ -175,8 +175,10 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_bot_message_source" (
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_chat_time" ON "hg_youban_publish_bot_message_source" ("chat_id", "received_at");
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_reply" ON "hg_youban_publish_bot_message_source" ("reply_job_id", "reply_profile_id", "reply_to_message_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_profile_time" ON "hg_youban_publish_bot_message_source" ("tenant_id", "reply_profile_id", "received_at" DESC, "id" DESC);
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_sender" ON "hg_youban_publish_bot_message_source" ("sender_user_id", "sender_chat_id");
 DELETE FROM "hg_youban_publish_bot_message_source" older USING "hg_youban_publish_bot_message_source" newer
 WHERE older."chat_id" = newer."chat_id" AND older."message_id" = newer."message_id" AND older."id" > newer."id";
 ALTER TABLE "hg_youban_publish_bot_message_source" DROP CONSTRAINT IF EXISTS "uk_ybp_bot_message_source";
 ALTER TABLE "hg_youban_publish_bot_message_source" ADD CONSTRAINT "uk_ybp_bot_message_source" UNIQUE ("chat_id", "message_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_target_message" ON "hg_youban_publish_tg_message" ("target_chat_id", "tg_message_id", "id" DESC);

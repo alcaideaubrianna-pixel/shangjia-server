@@ -30,6 +30,16 @@ func (c *cPublishAdmin) PublishRecordClear(ctx context.Context, req *publish.Adm
 	return
 }
 
+func (c *cPublishAdmin) InclusionRecordList(ctx context.Context, req *publish.AdminInclusionRecordListReq) (*publish.AdminInclusionRecordListRes, error) {
+	list, total, err := service.SysPublish().AdminInclusionRecordList(ctx, &req.InclusionRecordListInp)
+	if err != nil {
+		return nil, err
+	}
+	res := &publish.AdminInclusionRecordListRes{List: list}
+	res.PageRes.Pack(req, total)
+	return res, nil
+}
+
 func (c *cPublishAdmin) TgObserveQueueList(ctx context.Context, req *publish.AdminTgObserveQueueListReq) (res *publish.AdminTgObserveQueueListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminTgObserveQueueList(ctx, &req.TgObserveQueueListInp)
 	if err != nil {
@@ -101,6 +111,16 @@ func (c *cPublish) MyPublishRecordClear(ctx context.Context, req *publish.MyPubl
 	}
 	res = &publish.MyPublishRecordClearRes{}
 	return
+}
+
+func (c *cPublish) MyInclusionRecordList(ctx context.Context, req *publish.MyInclusionRecordListReq) (*publish.MyInclusionRecordListRes, error) {
+	list, total, err := service.SysPublish().MyInclusionRecordList(ctx, &req.InclusionRecordListInp)
+	if err != nil {
+		return nil, err
+	}
+	res := &publish.MyInclusionRecordListRes{List: list}
+	res.PageRes.Pack(req, total)
+	return res, nil
 }
 
 func (c *cPublish) MyDevPublishChainTest(ctx context.Context, req *publish.MyDevPublishChainTestReq) (res *publish.MyDevPublishChainTestRes, err error) {

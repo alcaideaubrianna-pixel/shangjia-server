@@ -1231,7 +1231,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_message` (
   UNIQUE KEY `uk_ybp_tg_message_job_message` (`job_id`,`tg_message_id`),
   KEY `idx_ybp_tg_message_job` (`job_id`,`status`,`id`),
   KEY `idx_ybp_tg_message_task` (`task_id`,`id`),
-  KEY `idx_ybp_tg_message_profile` (`tenant_id`,`account_id`,`profile_id`)
+  KEY `idx_ybp_tg_message_profile` (`tenant_id`,`account_id`,`profile_id`),
+  KEY `idx_ybp_tg_message_target_message` (`target_chat_id`,`tg_message_id`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG消息记录';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_message_repair_run` (
@@ -2063,6 +2064,6 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_bot_message_source` (
   `reply_profile_id` bigint NOT NULL DEFAULT 0, `reply_purpose` varchar(16) NOT NULL DEFAULT '', `update_type` varchar(64) NOT NULL DEFAULT '',
   `message_text` text, `received_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, `deleted_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_bot_message_source` (`chat_id`,`message_id`),
-  KEY `idx_ybp_bot_message_source_chat_time` (`chat_id`,`received_at`), KEY `idx_ybp_bot_message_source_reply` (`reply_job_id`,`reply_profile_id`,`reply_to_message_id`),
+  KEY `idx_ybp_bot_message_source_chat_time` (`chat_id`,`received_at`), KEY `idx_ybp_bot_message_source_reply` (`reply_job_id`,`reply_profile_id`,`reply_to_message_id`), KEY `idx_ybp_bot_message_source_profile_time` (`tenant_id`,`reply_profile_id`,`received_at`,`id`),
   KEY `idx_ybp_bot_message_source_sender` (`sender_user_id`,`sender_chat_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

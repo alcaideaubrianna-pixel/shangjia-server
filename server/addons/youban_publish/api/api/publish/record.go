@@ -24,6 +24,16 @@ type AdminPublishRecordClearReq struct {
 
 type AdminPublishRecordClearRes struct{}
 
+type AdminInclusionRecordListReq struct {
+	g.Meta `path:"/publish/admin/profile/inclusion/list" method:"get" tags:"上架插件管理端" summary:"资料收录记录"`
+	sysin.InclusionRecordListInp
+}
+
+type AdminInclusionRecordListRes struct {
+	form.PageRes
+	List []*sysin.InclusionRecordModel `json:"list"`
+}
+
 type AdminTgObserveQueueListReq struct {
 	g.Meta `path:"/publish/admin/observe/queue/list" method:"get" tags:"上架插件管理端" summary:"TG队列观测统计"`
 	sysin.TgObserveQueueListInp
@@ -79,6 +89,16 @@ type MyPublishRecordClearReq struct {
 }
 
 type MyPublishRecordClearRes struct{}
+
+type MyInclusionRecordListReq struct {
+	g.Meta `path:"/publish/profile/inclusion/list" method:"get" tags:"上架插件" summary:"我的资料收录记录"`
+	sysin.InclusionRecordListInp
+}
+
+type MyInclusionRecordListRes struct {
+	form.PageRes
+	List []*sysin.InclusionRecordModel `json:"list"`
+}
 
 type MyDevPublishChainTestReq struct {
 	g.Meta `path:"/publish/dev/publishChainTest" method:"post" tags:"上架插件" summary:"开发环境我的推送链路测试"`

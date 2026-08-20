@@ -48,6 +48,44 @@ func (s *sSysPublish) AdminPublishRecordList(ctx context.Context, in *sysin.Publ
 	return s.publishRecordList(ctx, in, tenantId, 0)
 }
 
+func (s *sSysPublish) MyInclusionRecordList(ctx context.Context, in *sysin.InclusionRecordListInp) ([]*sysin.InclusionRecordModel, int, error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return s.inclusionRecordList(ctx, in, account.TenantId, account.Id)
+}
+
+func (s *sSysPublish) AdminInclusionRecordList(ctx context.Context, in *sysin.InclusionRecordListInp) ([]*sysin.InclusionRecordModel, int, error) {
+	account, err := s.currentAdminAccount(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return s.inclusionRecordList(ctx, in, account.TenantId, 0)
+}
+
+func (s *sSysPublish) inclusionRecordList(ctx context.Context, in *sysin.InclusionRecordListInp, tenantId, accountId int64) (list []*sysin.InclusionRecordModel, totalCount int, err error) {
+	if in == nil || in.ProfileId <= 0 {
+		return nil, 0, gerror.New("资料ID不能为空")
+	}
+	mod := g.DB().Model(telegramBotMessageSourceTable+" m").Safe().Ctx(ctx).
+		LeftJoin(publishBotTable+" b", "b.id=m.received_bot_id").
+		Where("m.tenant_id", tenantId).Where("m.reply_profile_id", in.ProfileId).
+		Where("m.message_text != ''").WhereNull("m.deleted_at")
+	if accountId > 0 {
+		mod = mod.Where("EXISTS (SELECT 1 FROM "+publishNoteIndexTable+" i WHERE i.tenant_id=m.tenant_id AND i.profile_id=m.reply_profile_id AND i.account_id=? AND i.deleted_at IS NULL)", accountId)
+	}
+	if totalCount, err = mod.Clone().Count(); err != nil {
+		return nil, 0, gerror.Wrap(err, "统计收录记录失败")
+	}
+	err = mod.Fields("m.id,m.received_bot_id AS bot_id,b.bot_name,b.bot_username,m.message_text,m.received_at").
+		Page(in.Page, in.PerPage).OrderDesc("m.received_at").OrderDesc("m.id").Scan(&list)
+	if err != nil {
+		return nil, 0, gerror.Wrap(err, "获取收录记录失败")
+	}
+	return list, totalCount, nil
+}
+
 func (s *sSysPublish) adminPublishRecordTenantId(ctx context.Context, accountId int64, currentTenantId int64) (int64, error) {
 	if accountId <= 0 || !s.isSystemSuperAdmin(ctx) {
 		return currentTenantId, nil
