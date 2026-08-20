@@ -14,9 +14,10 @@ func TestMessageTemplateUsesInline(t *testing.T) {
 		want     bool
 	}{
 		{name: "text", template: &sysin.MessageTemplateModel{SerialNo: "XX123456", Text: "text"}, want: true},
-		{name: "single image", template: &sysin.MessageTemplateModel{SerialNo: "XX123456", Media: []*sysin.MessageTemplateMediaModel{{MediaType: "image"}}}, want: true},
-		{name: "single video", template: &sysin.MessageTemplateModel{SerialNo: "XX123456", Media: []*sysin.MessageTemplateMediaModel{{MediaType: "video"}}}, want: false},
-		{name: "multiple images", template: &sysin.MessageTemplateModel{SerialNo: "XX123456", Media: []*sysin.MessageTemplateMediaModel{{MediaType: "image"}, {MediaType: "image"}}}, want: false},
+		{name: "single image", template: &sysin.MessageTemplateModel{SerialNo: "XX123456", Media: []*sysin.MessageTemplateMediaModel{{MediaType: "image", FileUrl: "https://cdn.example/image.jpg"}}}, want: true},
+		{name: "single video", template: &sysin.MessageTemplateModel{SerialNo: "XX123456", Media: []*sysin.MessageTemplateMediaModel{{MediaType: "video", FileUrl: "https://cdn.example/video.mp4"}}}, want: false},
+		{name: "multiple images", template: &sysin.MessageTemplateModel{SerialNo: "XX123456", Media: []*sysin.MessageTemplateMediaModel{{MediaType: "image", FileUrl: "https://cdn.example/1.jpg"}, {MediaType: "image", FileUrl: "https://cdn.example/2.jpg"}}}, want: false},
+		{name: "placeholder plus single image", template: &sysin.MessageTemplateModel{SerialNo: "XX123456", Media: []*sysin.MessageTemplateMediaModel{{MediaType: "image"}, {MediaType: "image", FileUrl: "https://cdn.example/1.jpg"}}}, want: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

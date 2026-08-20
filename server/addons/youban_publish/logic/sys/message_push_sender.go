@@ -233,7 +233,7 @@ func (s *sSysPublish) SendMessagePushJob(ctx context.Context, jobId int64) error
 }
 
 func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRecord, template *sysin.MessageTemplateModel, channel *messagePushChannel) error {
-	media := messageTemplateTelegramMedia(template)
+	media := inlineDisplayMedia(template)
 	if recordErr := s.upsertPublishJobRecord(ctx, job, "sending", ""); recordErr != nil {
 		g.Log().Warningf(ctx, "更新快速推送发送记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
@@ -507,11 +507,27 @@ func messageTemplateUsesInline(template *sysin.MessageTemplateModel) bool {
 	if template == nil || strings.TrimSpace(template.SerialNo) == "" {
 		return false
 	}
-	media := messageTemplateTelegramMedia(template)
+	media := inlineDisplayMedia(template)
 	if len(media) == 0 {
 		return true
 	}
 	return len(media) == 1 && media[0].MediaType == "image"
+}
+
+// inlineDisplayMedia excludes placeholder rows that cannot be rendered by Telegram.
+func inlineDisplayMedia(template *sysin.MessageTemplateModel) []*telegramMediaItem {
+	media := messageTemplateTelegramMedia(template)
+	valid := make([]*telegramMediaItem, 0, len(media))
+	for _, item := range media {
+		if item == nil {
+			continue
+		}
+		if strings.TrimSpace(item.TgFileId) == "" && strings.TrimSpace(item.FileUrl) == "" && strings.TrimSpace(item.StoragePath) == "" {
+			continue
+		}
+		valid = append(valid, item)
+	}
+	return valid
 }
 
 func (s *sSysPublish) sendMessageTemplateWithTgClient(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, caption string, media []*telegramMediaItem, source *messageTemplateForwardSource, tgAccountId int64, templateHash string) ([]*telegramSentMessage, error) {
