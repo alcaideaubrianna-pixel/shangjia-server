@@ -477,18 +477,19 @@ type BotMediaCacheFileModel struct {
 
 type ProfileListInp struct {
 	form.PageReq
-	TenantId        int64  `json:"tenantId" dc:"租户ID"`
-	AccountId       int64  `json:"accountId" dc:"上架账号ID"`
-	CollectSourceId int64  `json:"collectSourceId" dc:"采集源频道ID"`
-	SourceScope     string `json:"sourceScope" dc:"资料来源范围：all/collected/manual"`
-	AccountScope    string `json:"accountScope" dc:"账号范围：all/mine/following"`
-	Keyword         string `json:"keyword" dc:"标题/编号/正文"`
-	Province        string `json:"province" dc:"省份"`
-	City            string `json:"city" dc:"城市"`
-	Tag             string `json:"tag" dc:"标签"`
-	ReviewStatus    string `json:"reviewStatus" dc:"审核状态"`
-	Visibility      string `json:"visibility" dc:"可见性"`
-	Status          int    `json:"status" dc:"状态：1上架 2下架"`
+	TenantId            int64  `json:"tenantId" dc:"租户ID"`
+	AccountId           int64  `json:"accountId" dc:"上架账号ID"`
+	CollectSourceId     int64  `json:"collectSourceId" dc:"采集源频道ID"`
+	CollectSourceChatId string `json:"collectSourceChatId" dc:"采集频道ID"`
+	SourceScope         string `json:"sourceScope" dc:"资料来源范围：all/collected/manual"`
+	AccountScope        string `json:"accountScope" dc:"账号范围：all/mine/following"`
+	Keyword             string `json:"keyword" dc:"标题/编号/正文"`
+	Province            string `json:"province" dc:"省份"`
+	City                string `json:"city" dc:"城市"`
+	Tag                 string `json:"tag" dc:"标签"`
+	ReviewStatus        string `json:"reviewStatus" dc:"审核状态"`
+	Visibility          string `json:"visibility" dc:"可见性"`
+	Status              int    `json:"status" dc:"状态：1上架 2下架"`
 }
 
 type ProfileViewInp struct {

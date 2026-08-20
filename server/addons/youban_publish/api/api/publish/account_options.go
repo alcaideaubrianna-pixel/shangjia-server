@@ -16,9 +16,13 @@ type AdminAccountOptionsRes struct {
 }
 
 type AdminCollectSourceOptionsReq struct {
-	g.Meta `path:"/publish/admin/collect/source/options" method:"get" tags:"上架插件管理端" summary:"采集源筛选选项"`
+	g.Meta  `path:"/publish/admin/collect/source/options" method:"get" tags:"上架插件管理端" summary:"采集源筛选选项"`
+	Keyword string `json:"keyword" in:"query"`
+	Page    int    `json:"page" in:"query"`
+	PerPage int    `json:"perPage" in:"query"`
 }
 
 type AdminCollectSourceOptionsRes struct {
-	List []*sysin.CollectSourceOptionModel `json:"list" dc:"采集源筛选选项"`
+	List       []*sysin.CollectSourceOptionModel `json:"list" dc:"采集频道筛选选项"`
+	TotalCount int                               `json:"totalCount"`
 }

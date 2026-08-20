@@ -383,7 +383,13 @@ func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gd
 		mod = mod.Where("p.status", in.Status)
 	}
 	if in.CollectSourceId > 0 {
-		mod = mod.Where("EXISTS (SELECT 1 FROM "+publishCollectDispatchTable+" d WHERE d.profile_id=p.id AND d.source_id=?)", in.CollectSourceId)
+		condition := "EXISTS (SELECT 1 FROM " + publishCollectDispatchTable + " d JOIN " + publishCollectEventTable + " e ON e.id=d.event_id WHERE d.profile_id=p.id AND d.source_id=?"
+		args := []interface{}{in.CollectSourceId}
+		if chatId := strings.TrimSpace(in.CollectSourceChatId); chatId != "" {
+			condition += " AND e.source_chat_id=?"
+			args = append(args, chatId)
+		}
+		mod = mod.Where(condition+")", args...)
 	}
 	return mod
 }

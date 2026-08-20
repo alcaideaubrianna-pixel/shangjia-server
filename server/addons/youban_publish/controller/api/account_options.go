@@ -21,12 +21,12 @@ func (c *cPublishAdmin) AccountOptions(ctx context.Context, req *publish.AdminAc
 }
 
 func (c *cPublishAdmin) CollectSourceOptions(ctx context.Context, req *publish.AdminCollectSourceOptionsReq) (res *publish.AdminCollectSourceOptionsRes, err error) {
-	list, err := service.SysPublish().AdminCollectSourceOptions(ctx)
+	list, totalCount, err := service.SysPublish().AdminCollectSourceOptions(ctx, req.Keyword, req.Page, req.PerPage)
 	if err != nil {
 		return nil, err
 	}
 	if list == nil {
 		list = []*sysin.CollectSourceOptionModel{}
 	}
-	return &publish.AdminCollectSourceOptionsRes{List: list}, nil
+	return &publish.AdminCollectSourceOptionsRes{List: list, TotalCount: totalCount}, nil
 }

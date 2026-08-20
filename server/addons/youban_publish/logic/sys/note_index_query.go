@@ -110,7 +110,13 @@ func applyNoteIndexFilters(mod *gdb.Model, in *sysin.ProfileListInp) *gdb.Model 
 		mod = mod.Where("i.status", in.Status)
 	}
 	if in.CollectSourceId > 0 {
-		mod = mod.Where("EXISTS (SELECT 1 FROM "+publishCollectDispatchTable+" d WHERE d.profile_id=i.profile_id AND d.source_id=?)", in.CollectSourceId)
+		condition := "EXISTS (SELECT 1 FROM " + publishCollectDispatchTable + " d JOIN " + publishCollectEventTable + " e ON e.id=d.event_id WHERE d.profile_id=i.profile_id AND d.source_id=?"
+		args := []interface{}{in.CollectSourceId}
+		if chatId := strings.TrimSpace(in.CollectSourceChatId); chatId != "" {
+			condition += " AND e.source_chat_id=?"
+			args = append(args, chatId)
+		}
+		mod = mod.Where(condition+")", args...)
 	}
 	switch strings.TrimSpace(in.SourceScope) {
 	case "collected":
