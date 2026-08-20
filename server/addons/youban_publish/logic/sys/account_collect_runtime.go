@@ -122,7 +122,7 @@ func (s *sSysPublish) restartAccountCollectWorker(ctx context.Context, tgAccount
 }
 
 func accountCollectMediaConcurrency(ctx context.Context) int {
-	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.collect.mediaFileConcurrency", 2).Int()
+	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.collect.mediaFileConcurrency", 8).Int()
 	if concurrency < 1 {
 		return 1
 	}

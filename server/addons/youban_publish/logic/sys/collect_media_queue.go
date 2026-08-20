@@ -22,10 +22,24 @@ type collectMediaQueuePayload struct {
 }
 
 const (
-	collectMediaTaskUniqueTTL  = 24 * time.Hour
-	collectMediaRealtimeWindow = 10 * time.Minute
-	mediaProcessTaskUniqueTTL  = 5 * time.Minute
+	collectMediaTaskUniqueTTL           = 24 * time.Hour
+	collectMediaRealtimeWindow          = 10 * time.Minute
+	mediaProcessTaskUniqueTTL           = 5 * time.Minute
+	collectMediaQueueDefaultConcurrency = 16
+	collectMediaQueueMaxConcurrency     = 32
+	collectMediaBulkDefaultConcurrency  = 8
+	collectMediaBulkMaxConcurrency      = 16
 )
+
+func normalizeCollectMediaWorkerConcurrency(concurrency int, maximum int) int {
+	if concurrency < 1 {
+		return 1
+	}
+	if concurrency > maximum {
+		return maximum
+	}
+	return concurrency
+}
 
 func collectMediaQueuePayloadFromEvent(event gdb.Record) collectMediaQueuePayload {
 	payload := collectMediaQueuePayload{
@@ -143,14 +157,8 @@ func decodeCollectMediaQueuePayload(task *asynq.Task) (collectMediaQueuePayload,
 }
 
 func collectMediaQueueConcurrency(ctx context.Context) int {
-	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", 4).Int()
-	if concurrency < 1 {
-		return 1
-	}
-	if concurrency > 8 {
-		return 8
-	}
-	return concurrency
+	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaConcurrency", collectMediaQueueDefaultConcurrency).Int()
+	return normalizeCollectMediaWorkerConcurrency(concurrency, collectMediaQueueMaxConcurrency)
 }
 
 func collectMediaBulkQueueShards(ctx context.Context) int {
@@ -191,12 +199,6 @@ func collectMediaBulkWorkerQueues(ctx context.Context) map[string]int {
 }
 
 func collectMediaBulkConcurrency(ctx context.Context) int {
-	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaBulkConcurrency", 2).Int()
-	if concurrency < 1 {
-		return 1
-	}
-	if concurrency > 8 {
-		return 8
-	}
-	return concurrency
+	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaBulkConcurrency", collectMediaBulkDefaultConcurrency).Int()
+	return normalizeCollectMediaWorkerConcurrency(concurrency, collectMediaBulkMaxConcurrency)
 }

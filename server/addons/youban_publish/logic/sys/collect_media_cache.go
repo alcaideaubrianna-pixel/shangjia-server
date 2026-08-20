@@ -1209,9 +1209,9 @@ type collectMediaCacheResult struct {
 }
 
 const (
-	collectMediaDefaultGlobalConcurrency  = 16
-	collectMediaDefaultAccountConcurrency = 4
-	collectMediaMaxGlobalConcurrency      = 64
+	collectMediaDefaultGlobalConcurrency  = 64
+	collectMediaDefaultAccountConcurrency = 8
+	collectMediaMaxGlobalConcurrency      = 256
 	collectMediaMaxAccountConcurrency     = 8
 )
 

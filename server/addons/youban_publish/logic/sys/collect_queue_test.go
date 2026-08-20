@@ -47,6 +47,21 @@ func TestCollectMediaWorkerQueuesSeparateRealtimeAndBulk(t *testing.T) {
 	}
 }
 
+func TestCollectMediaWorkerConcurrencyLimits(t *testing.T) {
+	if collectMediaQueueDefaultConcurrency != 16 || collectMediaBulkDefaultConcurrency != 8 {
+		t.Fatalf("unexpected defaults realtime:%d bulk:%d", collectMediaQueueDefaultConcurrency, collectMediaBulkDefaultConcurrency)
+	}
+	if got := normalizeCollectMediaWorkerConcurrency(0, collectMediaQueueMaxConcurrency); got != 1 {
+		t.Fatalf("minimum concurrency = %d", got)
+	}
+	if got := normalizeCollectMediaWorkerConcurrency(100, collectMediaQueueMaxConcurrency); got != 32 {
+		t.Fatalf("realtime maximum concurrency = %d", got)
+	}
+	if got := normalizeCollectMediaWorkerConcurrency(100, collectMediaBulkMaxConcurrency); got != 16 {
+		t.Fatalf("bulk maximum concurrency = %d", got)
+	}
+}
+
 func TestFairCollectMediaQueuePayloadsRoundRobinsAccounts(t *testing.T) {
 	payloads := []collectMediaQueuePayload{
 		{EventId: 1, TenantId: 1, TgAccountId: 10, Bulk: true},

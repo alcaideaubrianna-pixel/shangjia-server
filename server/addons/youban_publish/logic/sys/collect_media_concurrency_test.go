@@ -8,9 +8,9 @@ func TestNormalizeCollectMediaConcurrency(t *testing.T) {
 		global, account         int
 		wantGlobal, wantAccount int
 	}{
-		{name: "defaults", global: collectMediaDefaultGlobalConcurrency, account: collectMediaDefaultAccountConcurrency, wantGlobal: 16, wantAccount: 4},
+		{name: "defaults", global: collectMediaDefaultGlobalConcurrency, account: collectMediaDefaultAccountConcurrency, wantGlobal: 64, wantAccount: 8},
 		{name: "minimum", global: 0, account: 0, wantGlobal: 1, wantAccount: 1},
-		{name: "maximum", global: 100, account: 100, wantGlobal: collectMediaMaxGlobalConcurrency, wantAccount: collectMediaMaxAccountConcurrency},
+		{name: "maximum", global: 1000, account: 100, wantGlobal: collectMediaMaxGlobalConcurrency, wantAccount: collectMediaMaxAccountConcurrency},
 		{name: "account bounded by global", global: 2, account: 8, wantGlobal: 2, wantAccount: 2},
 	}
 	for _, test := range tests {

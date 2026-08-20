@@ -77,6 +77,15 @@ func TestNormalizeAccountMediaThreads(t *testing.T) {
 	}
 }
 
+func TestAccountMediaConcurrencyMatchesRuntimeCapacity(t *testing.T) {
+	if accountTaskWorkerCount != 8 {
+		t.Fatalf("account task worker count = %d", accountTaskWorkerCount)
+	}
+	if accountMediaPoolSize < int64(accountTaskWorkerCount) {
+		t.Fatalf("media pool size %d is smaller than task worker count %d", accountMediaPoolSize, accountTaskWorkerCount)
+	}
+}
+
 func TestAccountMediaTransferErrors(t *testing.T) {
 	if !accountMediaConnectionInvalid(errors.New("AUTH_BYTES_INVALID")) || !accountMediaConnectionInvalid(errors.New("DC is closed")) {
 		t.Fatal("expected connection error classification")

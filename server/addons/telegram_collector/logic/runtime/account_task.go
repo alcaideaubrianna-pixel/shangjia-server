@@ -20,7 +20,7 @@ import (
 const (
 	accountTaskPollInterval = 2 * time.Second
 	accountTaskLeaseTTL     = 30 * time.Minute
-	accountTaskWorkerCount  = 4
+	accountTaskWorkerCount  = 8
 )
 
 type accountTaskRetryDelay interface {
