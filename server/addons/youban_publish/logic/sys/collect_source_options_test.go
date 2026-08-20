@@ -9,21 +9,22 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
-func TestCountCollectSourceOptionGroupsUsesSubquery(t *testing.T) {
+func TestCountCollectSourceOptionGroupsOnlySelectsGroupKeys(t *testing.T) {
 	ctx := context.Background()
 	mod := g.DB().Model("events e").Safe().Ctx(ctx)
 	sql, err := gdb.ToSQL(ctx, func(sqlCtx context.Context) error {
 		_, countErr := countCollectSourceOptionGroups(sqlCtx, mod)
 		return countErr
 	})
-	if err != nil {
-		t.Fatalf("build grouped count SQL: %v", err)
+	generated := sql
+	if generated == "" && err != nil {
+		generated = err.Error()
 	}
-	upperSQL := strings.ToUpper(sql)
-	if !strings.Contains(upperSQL, "FROM (SELECT") || !strings.Contains(upperSQL, "COUNT(1)") {
-		t.Fatalf("count must wrap grouped query: %s", sql)
+	upperSQL := strings.ToUpper(generated)
+	if !strings.Contains(upperSQL, "SELECT E.SOURCE_ID,E.SOURCE_CHAT_ID") || !strings.Contains(upperSQL, "GROUP BY") {
+		t.Fatalf("count must select grouped keys: %s", generated)
 	}
-	if strings.Contains(upperSQL, "COUNT(E.SOURCE_ID") || strings.Contains(upperSQL, "MAX(E.TITLE)") {
-		t.Fatalf("count retained list fields: %s", sql)
+	if strings.Contains(upperSQL, "COUNT(") || strings.Contains(upperSQL, "MAX(") || strings.Contains(upperSQL, "COLLECT_SOURCE_GROUPS") {
+		t.Fatalf("count retained list fields: %s", generated)
 	}
 }

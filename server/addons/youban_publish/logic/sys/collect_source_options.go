@@ -71,6 +71,10 @@ func (s *sSysPublish) AdminCollectSourceOptions(ctx context.Context, keyword str
 }
 
 func countCollectSourceOptionGroups(ctx context.Context, mod *gdb.Model) (int, error) {
-	grouped := mod.Clone().Fields(gdb.Raw("e.source_id,e.source_chat_id")).Group("e.source_id,e.source_chat_id")
-	return g.DB().Model("? AS collect_source_groups", grouped).Safe().Ctx(ctx).Count()
+	var groups []struct {
+		SourceId     int64  `orm:"source_id"`
+		SourceChatId string `orm:"source_chat_id"`
+	}
+	err := mod.Clone().Fields(gdb.Raw("e.source_id,e.source_chat_id")).Group("e.source_id,e.source_chat_id").Scan(&groups)
+	return len(groups), err
 }
