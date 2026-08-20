@@ -20,6 +20,7 @@ import (
 const (
 	accountTaskPollInterval = 2 * time.Second
 	accountTaskLeaseTTL     = 30 * time.Minute
+	accountTaskWorkerCount  = 4
 )
 
 type accountTaskRetryDelay interface {
@@ -32,6 +33,21 @@ func RunAccountTaskLoop(ctx context.Context, client *telegram.Client, lease *sys
 	if client == nil || lease == nil {
 		return
 	}
+	var workers sync.WaitGroup
+	if operationGate == nil {
+		operationGate = &sync.Mutex{}
+	}
+	workers.Add(accountTaskWorkerCount)
+	for workerID := 1; workerID <= accountTaskWorkerCount; workerID++ {
+		go func(workerID int) {
+			defer workers.Done()
+			accountTaskWorkerLoop(ctx, client, lease, operationGate, workerID)
+		}(workerID)
+	}
+	workers.Wait()
+}
+
+func accountTaskWorkerLoop(ctx context.Context, client *telegram.Client, lease *sysin.AccountLease, operationGate sync.Locker, workerID int) {
 	ticker := time.NewTicker(accountTaskPollInterval)
 	defer ticker.Stop()
 	for {
@@ -40,6 +56,7 @@ func RunAccountTaskLoop(ctx context.Context, client *telegram.Client, lease *sys
 			return
 		}
 		if handled {
+			g.Log().Debugf(ctx, "Telegram账号任务worker完成任务 tgAccountId:%d worker:%d", lease.AccountID, workerID)
 			continue
 		}
 		select {
@@ -81,11 +98,11 @@ func processAccountTask(ctx context.Context, client *telegram.Client, lease *sys
 		} else {
 			taskCtx, cancel := context.WithTimeout(ctx, accountTaskTimeout(task.TaskType))
 			stopRenew := keepAccountTaskLeaseAlive(taskCtx, cancel, lease)
-			if operationGate != nil {
+			if operationGate != nil && task.TaskType != sysin.AccountTaskTypeMediaDownload {
 				operationGate.Lock()
 			}
 			result, handleErr := handler.HandleAccountTask(taskCtx, client, task)
-			if operationGate != nil {
+			if operationGate != nil && task.TaskType != sysin.AccountTaskTypeMediaDownload {
 				operationGate.Unlock()
 			}
 			taskCtxErr := taskCtx.Err()
