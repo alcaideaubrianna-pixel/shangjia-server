@@ -15,6 +15,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
+	"hotgo/internal/library/cache"
 )
 
 func (s *sSysBot) restartRuntime(ctx context.Context) {
@@ -46,7 +47,14 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 		return nil
 	}
 	if update.InlineQuery != nil {
+		g.Log().Infof(ctx, "TG链路 youban_bot_inline_handle botId:%d updateId:%d queryId:%s query:%q", botId, update.ID, update.InlineQuery.ID, strings.TrimSpace(update.InlineQuery.Query))
 		return s.handleProfileInlineQuery(ctx, botId, update.InlineQuery)
+	}
+	if update.MyChatMember != nil {
+		chatID := fmt.Sprintf("%d", update.MyChatMember.Chat.ID)
+		_, _ = cache.Instance().Remove(ctx, "youban_publish:official_bot_chat_unavailable:"+chatID)
+		g.Log().Infof(ctx, "Bot群成员状态更新，已清除官方Bot不可用缓存 botId:%d chatId:%s", botId, chatID)
+		return nil
 	}
 	if update.CallbackQuery != nil {
 		g.Log().Infof(ctx, "收到Telegram Callback botId:%d chatId:%s userId:%s data:%s", botId, callbackQueryChatId(update.CallbackQuery), callbackQueryUserId(update.CallbackQuery), strings.TrimSpace(update.CallbackQuery.Data))

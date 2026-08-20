@@ -405,7 +405,7 @@ func messageTemplateButtonMarkup(template *sysin.MessageTemplateModel, mediaCoun
 			if strings.TrimSpace(button.Text) == "" || strings.TrimSpace(button.URL) == "" {
 				continue
 			}
-			buttons = append(buttons, models.InlineKeyboardButton{Text: button.Text, URL: button.URL, Style: sysin.TelegramButtonStyle(button.Color)})
+			buttons = append(buttons, models.InlineKeyboardButton{Text: button.Text, URL: inlinePublishButtonURL(button.URL), Style: sysin.TelegramButtonStyle(button.Color)})
 		}
 		if len(buttons) > 0 {
 			rows = append(rows, buttons)

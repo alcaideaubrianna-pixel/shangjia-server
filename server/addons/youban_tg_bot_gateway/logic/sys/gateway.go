@@ -292,6 +292,9 @@ func (s *sGateway) Webhook(ctx context.Context, key string, body []byte, secret 
 	if err = json.Unmarshal(body, &update); err != nil {
 		return gerror.Wrap(err, "Webhook消息格式不正确")
 	}
+	if update.InlineQuery != nil {
+		g.Log().Infof(ctx, "TG链路 gateway_webhook_inline_received key:%s updateId:%d queryId:%s query:%q", key, update.ID, update.InlineQuery.ID, strings.TrimSpace(update.InlineQuery.Query))
+	}
 	err = s.submitUpdate(ctx, strings.TrimSpace(key), &update)
 	result := "queued"
 	if updateNeedsImmediateDispatch(&update) {
@@ -316,6 +319,13 @@ func updateNeedsImmediateDispatch(update *models.Update) bool {
 }
 
 func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Update) error {
+	dispatchStartedAt := time.Now()
+	if update != nil && update.InlineQuery != nil {
+		g.Log().Infof(ctx, "TG链路 gateway_inline_dispatch_start key:%s updateId:%d queryId:%s", key, update.ID, update.InlineQuery.ID)
+		defer func() {
+			g.Log().Infof(ctx, "TG链路 gateway_inline_dispatch_end key:%s updateId:%d queryId:%s duration:%s", key, update.ID, update.InlineQuery.ID, time.Since(dispatchStartedAt))
+		}()
+	}
 	s.mu.Lock()
 	bindings := append([]service.BotBinding(nil), s.bindings[key]...)
 	s.mu.Unlock()
@@ -329,6 +339,14 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 		bindings = append(bindings, s.bindings[key]...)
 		s.mu.Unlock()
 	}
+	if update != nil && update.InlineQuery != nil {
+		for _, binding := range bindings {
+			g.Log().Infof(ctx, "TG链路 gateway_inline_binding key:%s updateId:%d owner:%s reference:%d tenant:%d", key, update.ID, binding.Owner, binding.ReferenceID, binding.TenantID)
+		}
+		if len(bindings) == 0 {
+			g.Log().Warningf(ctx, "TG链路 gateway_inline_no_binding key:%s updateId:%d queryId:%s", key, update.ID, update.InlineQuery.ID)
+		}
+	}
 	logGatewayUpdate(ctx, update, len(bindings))
 	botCtx := service.BotContext{Key: key, Bindings: bindings}
 	if len(bindings) > 0 {
@@ -336,7 +354,13 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 	}
 	var featureErrors []error
 	for _, feature := range service.Features() {
+		if update != nil && update.InlineQuery != nil {
+			g.Log().Infof(ctx, "TG链路 gateway_inline_feature_start updateId:%d feature:%s", update.ID, feature.Key())
+		}
 		handled, featureErr := feature.HandleUpdate(ctx, botCtx, update)
+		if update != nil && update.InlineQuery != nil {
+			g.Log().Infof(ctx, "TG链路 gateway_inline_feature_end updateId:%d feature:%s handled:%t err:%v", update.ID, feature.Key(), handled, featureErr)
+		}
 		if featureErr != nil {
 			featureErrors = append(featureErrors, gerror.Wrapf(featureErr, "TG Bot附加功能处理失败 feature:%s", feature.Key()))
 			continue
@@ -357,8 +381,17 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 		if provider == nil {
 			continue
 		}
+		if update != nil && update.InlineQuery != nil {
+			g.Log().Infof(ctx, "TG链路 gateway_inline_provider_start updateId:%d provider:%s reference:%d", update.ID, binding.Owner, binding.ReferenceID)
+		}
 		if err := provider.HandleUpdate(ctx, binding, update); err != nil {
+			if update != nil && update.InlineQuery != nil {
+				g.Log().Warningf(ctx, "TG链路 gateway_inline_provider_error updateId:%d provider:%s reference:%d err:%+v", update.ID, binding.Owner, binding.ReferenceID, err)
+			}
 			return err
+		}
+		if update != nil && update.InlineQuery != nil {
+			g.Log().Infof(ctx, "TG链路 gateway_inline_provider_end updateId:%d provider:%s reference:%d", update.ID, binding.Owner, binding.ReferenceID)
 		}
 		g.Log().Infof(ctx, "TG Bot Gateway更新已分发 update:%d provider:%s reference:%d", update.ID, binding.Owner, binding.ReferenceID)
 	}

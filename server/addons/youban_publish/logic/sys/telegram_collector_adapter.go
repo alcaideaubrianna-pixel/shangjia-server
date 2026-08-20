@@ -21,6 +21,7 @@ import (
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	botService "hotgo/addons/youban_bot/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 )
 
 type publishCollectorDeliveryHandler struct {
@@ -550,6 +551,10 @@ func (s *sSysPublish) fallbackMessagePushInline(ctx context.Context, client *tel
 }
 
 func (s *sSysPublish) botCanAccessChat(ctx context.Context, chatID string) bool {
+	cacheKey := officialBotChatUnavailableCacheKey(chatID)
+	if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {
+		return false
+	}
 	token, err := botService.SysBot().OfficialBotToken(ctx)
 	if err != nil {
 		return false
@@ -566,7 +571,15 @@ func (s *sSysPublish) botCanAccessChat(ctx context.Context, chatID string) bool 
 	if err != nil || member == nil {
 		return false
 	}
-	return member.Type != models.ChatMemberTypeLeft && member.Type != models.ChatMemberTypeBanned && telegramBotCanSendMessage(member)
+	canSend := member.Type != models.ChatMemberTypeLeft && member.Type != models.ChatMemberTypeBanned && telegramBotCanSendMessage(member)
+	if !canSend {
+		_ = cache.Instance().Set(ctx, cacheKey, 1, 24*time.Hour)
+	}
+	return canSend
+}
+
+func officialBotChatUnavailableCacheKey(chatID string) string {
+	return "youban_publish:official_bot_chat_unavailable:" + normalizeTelegramChannelChatID(chatID)
 }
 
 func (s *sSysPublish) sendMessageTemplateByAccountClient(ctx context.Context, client *telegram.Client, channel *messagePushChannel, job telegramJobRecord, template *sysin.MessageTemplateModel) error {

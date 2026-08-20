@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/frame/g"
 
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 )
@@ -35,5 +36,8 @@ func (p *botGatewayProvider) ListEnabledBots(ctx context.Context) ([]gatewayserv
 }
 
 func (p *botGatewayProvider) HandleUpdate(ctx context.Context, binding gatewayservice.BotBinding, update *models.Update) error {
+	if update != nil && update.InlineQuery != nil {
+		g.Log().Infof(ctx, "TG链路 youban_bot_inline_provider_enter botId:%d updateId:%d queryId:%s query:%q", binding.ReferenceID, update.ID, update.InlineQuery.ID, strings.TrimSpace(update.InlineQuery.Query))
+	}
 	return p.bot.handleUpdate(ctx, binding.ReferenceID, update)
 }
