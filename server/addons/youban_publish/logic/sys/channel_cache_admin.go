@@ -59,7 +59,10 @@ func (s *sSysPublish) channelCacheList(ctx context.Context, in *sysin.ChannelCac
 	mod := g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("tg_account_id", in.TgAccountId)
-	if keyword := strings.TrimSpace(in.Keyword); keyword != "" {
+	if keyword := strings.Trim(strings.TrimSpace(in.Keyword), "@"); keyword != "" {
+		// Telegram usernames are commonly entered with a leading '@', while
+		// channel_username is stored without it.
+		keyword = strings.TrimPrefix(keyword, "@")
 		like := "%" + keyword + "%"
 		mod = mod.Where("(channel_title LIKE ? OR channel_username LIKE ? OR channel_id LIKE ?)", like, like, like)
 	}
