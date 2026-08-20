@@ -27,7 +27,7 @@ func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.L
 	if feed == "region" {
 		in.Feed = "latest"
 	}
-	if feed == "hot" || feed == "recommended" {
+	if (feed == "hot" || feed == "recommended") && !hasAdvancedProfileFilters(in) {
 		ids, rankErr := addonService.OpenAccess().RankedProfileIds(ctx, opencontext.AppId(ctx), in.ActorId, feed, 500)
 		if rankErr != nil {
 			return nil, rankErr
@@ -71,6 +71,12 @@ func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.L
 	res = &open.ListRes{List: list}
 	res.PageRes.Pack(req, total)
 	return res, nil
+}
+
+func hasAdvancedProfileFilters(in sysin.ContentProfileListInp) bool {
+	return strings.TrimSpace(in.Keyword) != "" || in.AgeMin > 0 || in.AgeMax > 0 ||
+		in.HeightMin > 0 || in.HeightMax > 0 || strings.TrimSpace(in.Cups) != "" ||
+		strings.TrimSpace(in.Cup) != ""
 }
 
 func appendUniqueProfiles(ranked, fallback []*sysin.ContentProfileListModel) []*sysin.ContentProfileListModel {

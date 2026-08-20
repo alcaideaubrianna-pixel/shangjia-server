@@ -466,11 +466,12 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 				aliasField("p", profileColumns.ProfileNo) + " LIKE ?",
 				aliasField("p", profileColumns.Title) + " LIKE ?",
 				aliasField("p", profileColumns.Summary) + " LIKE ?",
+				aliasField("p", profileColumns.PlainText) + " LIKE ?",
 				aliasField("p", profileColumns.Province) + " LIKE ?",
 				aliasField("p", profileColumns.City) + " LIKE ?",
 				aliasField("p", profileColumns.CupSize) + " LIKE ?",
 			}, " OR ")+")",
-			keyword, keyword, keyword, keyword, keyword, keyword,
+			keyword, keyword, keyword, keyword, keyword, keyword, keyword,
 		)
 	}
 	if in.Provinces != "" {

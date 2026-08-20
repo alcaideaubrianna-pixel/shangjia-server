@@ -823,3 +823,5 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_cms_binding_tenant_status" ON "hg_youban_pub
 CREATE INDEX IF NOT EXISTS "idx_content_profile_height_active" ON "hg_content_profile" ("height") WHERE "deleted_at" IS NULL AND "height" > 0;
 CREATE INDEX IF NOT EXISTS "idx_content_profile_weight_active" ON "hg_content_profile" ("weight") WHERE "deleted_at" IS NULL AND "weight" > 0;
 CREATE INDEX IF NOT EXISTS "idx_content_profile_cup_active" ON "hg_content_profile" ("cup_size") WHERE "deleted_at" IS NULL AND "cup_size" <> '';
+CREATE INDEX IF NOT EXISTS "idx_content_profile_age_active" ON "hg_content_profile" ("age") WHERE "deleted_at" IS NULL AND "age" > 0;
+CREATE INDEX IF NOT EXISTS "idx_content_profile_plain_text_trgm" ON "hg_content_profile" USING gin ("plain_text" gin_trgm_ops) WHERE "deleted_at" IS NULL;

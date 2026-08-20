@@ -4,6 +4,7 @@ DELETE FROM `hg_admin_menu` WHERE `name` = 'youbanPublishCmsApps';
 UPDATE `hg_admin_menu` SET `component` = '/addons/youbanopen/index', `updated_at` = NOW() WHERE `name` = 'youbanOpenCmsApps';
 UPDATE `hg_admin_menu` m JOIN `hg_admin_menu` p ON p.`name` = 'addons' SET m.`pid` = p.`id`, m.`type` = '2', m.`path` = 'youbanOpen', m.`component` = '/addons/youbanopen/index', m.`level` = '2', m.`updated_at` = NOW() WHERE m.`name` = 'youbanOpen';
 INSERT INTO `hg_admin_role_menu` (`role_id`,`menu_id`) SELECT r.`id`,m.`id` FROM `hg_admin_role` r JOIN `hg_admin_menu` m ON m.`name` IN ('youbanOpen','youbanOpenCmsApps') WHERE r.`id` IN (1,2) AND NOT EXISTS (SELECT 1 FROM `hg_admin_role_menu` rm WHERE rm.`role_id`=r.`id` AND rm.`menu_id`=m.`id`);
+ALTER TABLE `hg_content_profile` ADD INDEX `idx_content_profile_age_active` (`deleted_at`,`age`);
 ALTER TABLE `hg_youban_publish_cms_app` ADD COLUMN `review_mode` varchar(32) NOT NULL DEFAULT 'review_required';
 ALTER TABLE `hg_youban_publish_cms_app` MODIFY COLUMN `review_mode` varchar(32) NOT NULL DEFAULT 'review_required';
 UPDATE `hg_youban_publish_cms_app` SET `status` = 1 WHERE `status` = 2 AND `instance_id` <> '';

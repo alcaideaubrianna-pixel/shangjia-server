@@ -838,4 +838,5 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_cms_tenant_binding` (
 ALTER TABLE `hg_content_profile`
   ADD INDEX IF NOT EXISTS `idx_content_profile_height_active` (`deleted_at`,`height`),
   ADD INDEX IF NOT EXISTS `idx_content_profile_weight_active` (`deleted_at`,`weight`),
-  ADD INDEX IF NOT EXISTS `idx_content_profile_cup_active` (`deleted_at`,`cup_size`);
+  ADD INDEX IF NOT EXISTS `idx_content_profile_cup_active` (`deleted_at`,`cup_size`),
+  ADD INDEX IF NOT EXISTS `idx_content_profile_age_active` (`deleted_at`,`age`);
