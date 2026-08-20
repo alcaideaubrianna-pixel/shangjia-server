@@ -479,7 +479,7 @@ func validateInlinePublishTemplate(template *sysin.MessageTemplateModel) error {
 	if strings.TrimSpace(template.SerialNo) == "" {
 		return gerror.New("Inline模板编号为空")
 	}
-	media := messageTemplateTelegramMedia(template)
+	media := inlineDisplayMedia(template)
 	if len(media) > 1 {
 		return gerror.New("仅支持单个媒体，当前媒体数量超过1")
 	}

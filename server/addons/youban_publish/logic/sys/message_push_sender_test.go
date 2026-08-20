@@ -28,6 +28,19 @@ func TestMessageTemplateUsesInline(t *testing.T) {
 	}
 }
 
+func TestValidateInlineTemplateIgnoresPlaceholderMedia(t *testing.T) {
+	template := &sysin.MessageTemplateModel{
+		SerialNo: "XX123456",
+		Media: []*sysin.MessageTemplateMediaModel{
+			{MediaType: "image"},
+			{MediaType: "image", FileUrl: "https://cdn.example/image.jpg"},
+		},
+	}
+	if err := validateInlinePublishTemplate(template); err != nil {
+		t.Fatalf("validateInlinePublishTemplate() error = %v", err)
+	}
+}
+
 func TestShouldFallbackListenerBotToAccount(t *testing.T) {
 	tests := []struct {
 		name string
