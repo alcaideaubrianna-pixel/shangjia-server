@@ -64,25 +64,16 @@ func (s *sSysPublish) enqueueTelegramMessageDeleteFallback(ctx context.Context, 
 
 func telegramDeleteFallbackNextRunAt(ctx context.Context, tgAccountID, jobID int64) time.Time {
 	now := time.Now()
-	base := now
-	value, err := g.DB().Model("hg_tg_collector_account_task").Safe().Ctx(ctx).
-		Fields("MAX(next_run_at) AS next_run_at").
-		Where("account_id", tgAccountID).
-		Where("task_type", collectorin.AccountTaskTypeMessageDeleteFallback).
-		WhereIn("status", []string{collectorin.AccountTaskStatusPending, collectorin.AccountTaskStatusFailedRetry, collectorin.AccountTaskStatusProcessing}).
-		One()
-	if err == nil && !value.IsEmpty() {
-		if latest := value["next_run_at"].GTime(); latest != nil && latest.Time.After(base) {
-			base = latest.Time
-		}
-	}
 	intervalSeconds := telegramDeleteFallbackConfigInt(ctx, "intervalSeconds", int(telegramDeleteFallbackInterval/time.Second), 10, 3600)
 	jitterSeconds := telegramDeleteFallbackConfigInt(ctx, "jitterSeconds", 30, 0, 300)
 	jitter := time.Duration(0)
 	if jitterSeconds > 0 {
 		jitter = time.Duration(jobID%int64(jitterSeconds+1)) * time.Second
 	}
-	return base.Add(time.Duration(intervalSeconds)*time.Second + jitter)
+	// Do not chain from the latest queued task. A busy account could otherwise
+	// push new deletion jobs days into the future. Account workers already
+	// serialize Telegram operations and apply their own rate limits.
+	return now.Add(time.Duration(intervalSeconds)*time.Second + jitter)
 }
 
 func telegramDeleteFallbackConfigInt(ctx context.Context, key string, fallback, minimum, maximum int) int {

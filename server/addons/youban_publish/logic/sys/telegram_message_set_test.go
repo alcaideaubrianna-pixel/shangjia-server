@@ -1,9 +1,19 @@
 package sys
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 )
+
+func TestTelegramDeleteFallbackNextRunDoesNotChainBacklog(t *testing.T) {
+	started := time.Now()
+	next := telegramDeleteFallbackNextRunAt(context.Background(), 39, 123)
+	if next.Before(started.Add(10*time.Second)) || next.After(started.Add(3*time.Minute)) {
+		t.Fatalf("fallback next run = %s, expected within roughly 10s-3m", next)
+	}
+}
 
 func TestIsTelegramBotRemovedError(t *testing.T) {
 	tests := []struct {
