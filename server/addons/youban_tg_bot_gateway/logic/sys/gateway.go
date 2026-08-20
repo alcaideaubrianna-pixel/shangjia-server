@@ -131,6 +131,7 @@ func (s *sGateway) Refresh(_ context.Context) error {
 }
 
 func (s *sGateway) Client(ctx context.Context, token string) (*tgbot.Bot, error) {
+	token = strings.TrimSpace(token)
 	key := tokenKey(token)
 	s.mu.Lock()
 	client := s.clients[key]
@@ -138,15 +139,28 @@ func (s *sGateway) Client(ctx context.Context, token string) (*tgbot.Bot, error)
 	if client != nil {
 		return client, nil
 	}
-	if err := s.sync(ctx); err != nil {
+	loaded, err := s.loadBindings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(loaded[key]) == 0 {
+		return nil, gerror.New("TG Bot Gateway未找到已启用的Bot")
+	}
+	conf, err := service.RuntimeConfiguration(ctx)
+	if err != nil {
+		return nil, err
+	}
+	client, err = newBot(token, conf.ProxyURL, nil)
+	if err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
-	client = s.clients[key]
-	s.mu.Unlock()
-	if client == nil {
-		return nil, gerror.New("TG Bot Gateway未找到已启用的Bot")
+	if cached := s.clients[key]; cached != nil {
+		client = cached
+	} else {
+		s.clients[key] = client
 	}
+	s.mu.Unlock()
 	return client, nil
 }
 
