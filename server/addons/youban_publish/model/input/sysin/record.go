@@ -28,12 +28,16 @@ type InclusionRecordListInp struct {
 }
 
 type InclusionRecordModel struct {
-	Id          int64       `json:"id" dc:"记录ID"`
-	BotId       int64       `json:"botId" dc:"机器人ID"`
-	BotName     string      `json:"botName" dc:"机器人昵称"`
-	BotUsername string      `json:"botUsername" dc:"机器人用户名"`
-	MessageText string      `json:"messageText" dc:"消息内容"`
-	ReceivedAt  *gtime.Time `json:"receivedAt" dc:"接收时间"`
+	Id              int64       `json:"id" dc:"记录ID"`
+	BotId           int64       `json:"botId" dc:"机器人ID"`
+	BotName         string      `json:"botName" dc:"机器人昵称"`
+	BotUsername     string      `json:"botUsername" dc:"机器人用户名"`
+	SenderUserId    int64       `json:"senderUserId" dc:"发送用户ID"`
+	SenderUsername  string      `json:"senderUsername" dc:"发送用户名"`
+	SenderChatId    int64       `json:"senderChatId" dc:"发送频道ID"`
+	SenderChatTitle string      `json:"senderChatTitle" dc:"发送频道名称"`
+	MessageText     string      `json:"messageText" dc:"消息内容"`
+	ReceivedAt      *gtime.Time `json:"receivedAt" dc:"接收时间"`
 }
 
 type TgObserveQueueListInp struct {

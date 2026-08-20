@@ -78,7 +78,7 @@ func (s *sSysPublish) inclusionRecordList(ctx context.Context, in *sysin.Inclusi
 	if totalCount, err = mod.Clone().Count(); err != nil {
 		return nil, 0, gerror.Wrap(err, "统计收录记录失败")
 	}
-	err = mod.Fields("m.id,m.received_bot_id AS bot_id,b.bot_name,b.bot_username,m.message_text,m.received_at").
+	err = mod.Fields("m.id,m.received_bot_id AS bot_id,b.bot_name,b.bot_username,m.sender_user_id,m.sender_username,m.sender_chat_id,m.sender_chat_title,m.message_text,m.received_at").
 		Page(in.Page, in.PerPage).OrderDesc("m.received_at").OrderDesc("m.id").Scan(&list)
 	if err != nil {
 		return nil, 0, gerror.Wrap(err, "获取收录记录失败")
