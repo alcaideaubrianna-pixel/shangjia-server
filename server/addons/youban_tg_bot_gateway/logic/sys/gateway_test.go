@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
 	"hotgo/addons/youban_tg_bot_gateway/service"
@@ -65,6 +66,42 @@ func TestAllowedUpdatesIncludeInlineAndMembership(t *testing.T) {
 		if !updates[required] {
 			t.Fatalf("allowedUpdates() missing %q", required)
 		}
+	}
+}
+
+func TestClientCacheMissUsesLightweightFactory(t *testing.T) {
+	const token = "123456:test-token"
+	key := tokenKey(token)
+	gateway := NewGateway()
+	loadCalls, configCalls, factoryCalls := 0, 0, 0
+	gateway.loadBindingsForClient = func(context.Context) (map[string][]service.BotBinding, error) {
+		loadCalls++
+		return map[string][]service.BotBinding{key: {{Owner: "test", ReferenceID: 1, Token: token}}}, nil
+	}
+	gateway.runtimeConfigForClient = func(context.Context) (*service.RuntimeConfig, error) {
+		configCalls++
+		return &service.RuntimeConfig{}, nil
+	}
+	want := new(tgbot.Bot)
+	gateway.newClientForToken = func(gotToken, _ string, _ tgbot.HandlerFunc) (*tgbot.Bot, error) {
+		factoryCalls++
+		if gotToken != token {
+			t.Fatalf("client token = %q, want %q", gotToken, token)
+		}
+		return want, nil
+	}
+
+	for range 2 {
+		got, err := gateway.Client(context.Background(), token)
+		if err != nil {
+			t.Fatalf("Client() error = %v", err)
+		}
+		if got != want {
+			t.Fatal("Client() did not return cached lightweight client")
+		}
+	}
+	if loadCalls != 1 || configCalls != 1 || factoryCalls != 1 {
+		t.Fatalf("calls load/config/factory = %d/%d/%d, want 1/1/1", loadCalls, configCalls, factoryCalls)
 	}
 }
 

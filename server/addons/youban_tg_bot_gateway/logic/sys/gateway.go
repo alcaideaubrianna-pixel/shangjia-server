@@ -35,17 +35,20 @@ type botRuntime struct {
 	menuSignature string
 }
 type sGateway struct {
-	mu       sync.Mutex
-	syncMu   sync.Mutex
-	cancel   context.CancelFunc
-	done     chan struct{}
-	refresh  chan struct{}
-	runtimes map[string]*botRuntime
-	bindings map[string][]service.BotBinding
-	clients  map[string]*tgbot.Bot
-	queueMu  sync.Mutex
-	queue    *asynq.Server
-	queueCli *asynq.Client
+	mu                     sync.Mutex
+	syncMu                 sync.Mutex
+	cancel                 context.CancelFunc
+	done                   chan struct{}
+	refresh                chan struct{}
+	runtimes               map[string]*botRuntime
+	bindings               map[string][]service.BotBinding
+	clients                map[string]*tgbot.Bot
+	queueMu                sync.Mutex
+	queue                  *asynq.Server
+	queueCli               *asynq.Client
+	loadBindingsForClient  func(context.Context) (map[string][]service.BotBinding, error)
+	runtimeConfigForClient func(context.Context) (*service.RuntimeConfig, error)
+	newClientForToken      func(string, string, tgbot.HandlerFunc) (*tgbot.Bot, error)
 }
 
 func init() { service.RegisterGateway(NewGateway()) }
@@ -139,18 +142,30 @@ func (s *sGateway) Client(ctx context.Context, token string) (*tgbot.Bot, error)
 	if client != nil {
 		return client, nil
 	}
-	loaded, err := s.loadBindings(ctx)
+	loadBindings := s.loadBindings
+	if s.loadBindingsForClient != nil {
+		loadBindings = s.loadBindingsForClient
+	}
+	loaded, err := loadBindings(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if len(loaded[key]) == 0 {
 		return nil, gerror.New("TG Bot Gateway未找到已启用的Bot")
 	}
-	conf, err := service.RuntimeConfiguration(ctx)
+	runtimeConfig := service.RuntimeConfiguration
+	if s.runtimeConfigForClient != nil {
+		runtimeConfig = s.runtimeConfigForClient
+	}
+	conf, err := runtimeConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
-	client, err = newBot(token, conf.ProxyURL, nil)
+	clientFactory := newBot
+	if s.newClientForToken != nil {
+		clientFactory = s.newClientForToken
+	}
+	client, err = clientFactory(token, conf.ProxyURL, nil)
 	if err != nil {
 		return nil, err
 	}
