@@ -12,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/gconv"
 
 	"hotgo/addons/youban_chat/model/input/sysin"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
@@ -201,28 +202,22 @@ func (s *sSysChat) ExternalAdminConversations(ctx context.Context, in *sysin.Ext
 	// Use explicit aliases: scanning c.* into an embedded struct can silently
 	// leave numeric fields at zero with some database drivers.
 	mod := g.DB().Model(chatConversationTable+" c").Ctx(ctx).InnerJoin(externalVisitorTable+" v", "c.member_id=-v.id").Where("v.app_id", in.AppId).WhereNull("c.deleted_at").Fields("c.id AS id,c.profile_id AS profile_id,c.status AS status,c.unread_count AS unread_count,c.last_message AS last_message,c.last_message_at AS last_message_at,v.name AS visitor_name")
-	var rows []struct {
-		Id            int64       `json:"id"`
-		ProfileId     int64       `json:"profile_id"`
-		Status        string      `json:"status"`
-		UnreadCount   int         `json:"unread_count"`
-		LastMessage   string      `json:"last_message"`
-		LastMessageAt *gtime.Time `json:"last_message_at"`
-		VisitorName   string      `json:"visitor_name"`
-	}
+	var rows []gdb.Record
 	total := 0
 	if err := mod.Page(page, size).OrderDesc("c.updated_at").ScanAndCount(&rows, &total, false); err != nil {
 		return nil, gerror.Wrap(err, "读取租户会话列表失败")
 	}
 	res := &sysin.ExternalAdminConversationListModel{List: make([]*sysin.ExternalConversationModel, 0, len(rows)), Total: total}
 	for _, item := range rows {
-		name := item.VisitorName
-		if item.ProfileId > 0 {
-			name = fmt.Sprintf("%s · 资料 %d", name, item.ProfileId)
+		id := gconv.Int64(item["id"])
+		profileId := gconv.Int64(item["profile_id"])
+		name := gconv.String(item["visitor_name"])
+		if profileId > 0 {
+			name = fmt.Sprintf("%s · 资料 %d", name, profileId)
 		}
-		model := &sysin.ExternalConversationModel{Id: item.Id, ConversationId: item.Id, ProfileId: item.ProfileId, Name: name, Status: item.Status, UnreadCount: item.UnreadCount, LastMessage: item.LastMessage, CanDelete: true}
-		if item.LastMessageAt != nil {
-			model.LastMessageAt = item.LastMessageAt.String()
+		model := &sysin.ExternalConversationModel{Id: id, ConversationId: id, ProfileId: profileId, Name: name, Status: gconv.String(item["status"]), UnreadCount: gconv.Int(item["unread_count"]), LastMessage: gconv.String(item["last_message"]), CanDelete: true}
+		if value := item["last_message_at"]; value != nil {
+			model.LastMessageAt = gconv.String(value)
 		}
 		res.List = append(res.List, model)
 	}
