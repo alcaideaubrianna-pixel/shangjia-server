@@ -198,10 +198,17 @@ func (s *sSysChat) ExternalAdminConversations(ctx context.Context, in *sysin.Ext
 	if size < 1 || size > 100 {
 		size = 20
 	}
-	mod := g.DB().Model(chatConversationTable+" c").Ctx(ctx).InnerJoin(externalVisitorTable+" v", "c.member_id=-v.id").Where("v.app_id", in.AppId).WhereNull("c.deleted_at").Fields("c.*,v.name AS visitor_name")
+	// Use explicit aliases: scanning c.* into an embedded struct can silently
+	// leave numeric fields at zero with some database drivers.
+	mod := g.DB().Model(chatConversationTable+" c").Ctx(ctx).InnerJoin(externalVisitorTable+" v", "c.member_id=-v.id").Where("v.app_id", in.AppId).WhereNull("c.deleted_at").Fields("c.id AS id,c.profile_id AS profile_id,c.status AS status,c.unread_count AS unread_count,c.last_message AS last_message,c.last_message_at AS last_message_at,v.name AS visitor_name")
 	var rows []struct {
-		chatConversationRow
-		VisitorName string `json:"visitor_name"`
+		Id            int64       `json:"id"`
+		ProfileId     int64       `json:"profile_id"`
+		Status        string      `json:"status"`
+		UnreadCount   int         `json:"unread_count"`
+		LastMessage   string      `json:"last_message"`
+		LastMessageAt *gtime.Time `json:"last_message_at"`
+		VisitorName   string      `json:"visitor_name"`
 	}
 	total := 0
 	if err := mod.Page(page, size).OrderDesc("c.updated_at").ScanAndCount(&rows, &total, false); err != nil {
