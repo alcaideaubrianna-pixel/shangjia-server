@@ -101,8 +101,18 @@ func (s *sSysPublish) handleMessageDeleteFallbackAccountTask(ctx context.Context
 		return err
 	}
 	channel, err := s.messagePushChannelFromJob(ctx, job)
-	if err != nil {
-		return err
+	if err != nil || channel == nil || channel.TgAccountId != task.AccountID {
+		channels, cacheErr := s.messagePushCachedTargets(ctx, task.AccountID, []string{normalizeTelegramChannelChatID(job.TargetChatId)}, job.TenantId)
+		if cacheErr != nil {
+			if err != nil {
+				return err
+			}
+			return gerror.Wrap(cacheErr, "读取协议号删除目标失败")
+		}
+		if len(channels) == 0 {
+			return gerror.New("协议号删除目标不存在")
+		}
+		channel = channels[0]
 	}
 	if channel.TgAccountId != task.AccountID {
 		return gerror.New("协议号删除兜底任务与频道绑定账号不一致")

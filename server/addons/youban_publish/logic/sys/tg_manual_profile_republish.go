@@ -30,6 +30,13 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 	if err != nil {
 		return false, gerror.Wrap(err, "读取频道历史上架任务失败")
 	}
+	legacy, err := s.telegramSupersededJobsWithUndeletableMessages(ctx, current)
+	if err != nil {
+		return false, err
+	}
+	for _, job := range legacy {
+		s.enqueueTelegramMessageDeleteFallback(ctx, job, "资料重新上架清理历史遗留消息", nil)
+	}
 	previousJobIds := make([]int64, 0, len(previous))
 	activeMessages := make(map[int64][]telegramDeleteMessage, len(previous))
 	for _, job := range previous {
@@ -67,4 +74,21 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 		}
 	}
 	return true, nil
+}
+
+func (s *sSysPublish) telegramSupersededJobsWithUndeletableMessages(ctx context.Context, current telegramJobRecord) ([]telegramJobRecord, error) {
+	var jobs []telegramJobRecord
+	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		Fields("j.id,j.task_id,j.operation_no,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.bot_id,j.target_chat_id,j.status").
+		Where("j.tenant_id", current.TenantId).
+		Where("j.profile_id", current.ProfileId).
+		Where("j.target_chat_id", normalizeTelegramChannelChatID(current.TargetChatId)).
+		WhereLT("j.id", current.Id).
+		Where("j.status", "superseded").
+		Where("EXISTS (SELECT 1 FROM " + publishTgMessageTable + " m WHERE m.job_id=j.id AND m.status='undeletable')").
+		OrderAsc("j.id").Scan(&jobs)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取频道历史遗留消息失败")
+	}
+	return jobs, nil
 }

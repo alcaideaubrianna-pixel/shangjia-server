@@ -14,6 +14,12 @@ import (
 	"hotgo/addons/telegram_collector/model/input/sysin"
 )
 
+func TestAccountTaskCanReviveMessageDeleteFallback(t *testing.T) {
+	if !accountTaskCanRevive(sysin.AccountTaskTypeMessageDeleteFallback) {
+		t.Fatal("message delete fallback task must revive after account runtime recovers")
+	}
+}
+
 func TestAccountTaskPersistenceIntegration(t *testing.T) {
 	if os.Getenv("YOUBAN_TELEGRAM_COLLECTOR_INTEGRATION") != "1" {
 		t.Skip("set YOUBAN_TELEGRAM_COLLECTOR_INTEGRATION=1 to run database integration test")
