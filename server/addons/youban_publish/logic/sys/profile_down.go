@@ -108,12 +108,17 @@ func (s *sSysPublish) deleteProfilesTelegramMessages(ctx context.Context, ids []
 	if err != nil {
 		return err
 	}
+	channelIDs := make([]int64, 0, len(jobs))
 	for _, job := range jobs {
-		preserve, policyErr := s.channelPreservesHistoryMessages(ctx, job.TenantId, job.ChannelId)
-		if policyErr != nil {
-			return policyErr
-		}
-		if preserve {
+		channelIDs = append(channelIDs, job.ChannelId)
+	}
+	policies, err := s.channelHistoryMessagePolicies(ctx, tenantId, channelIDs)
+	if err != nil {
+		return err
+	}
+	for _, job := range jobs {
+		preserve, configured := policies[job.ChannelId]
+		if !configured || preserve {
 			s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "down", "skipped", "资料下架，频道已配置保留旧消息")
 			continue
 		}

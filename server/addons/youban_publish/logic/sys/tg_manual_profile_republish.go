@@ -50,19 +50,22 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 		if messageErr != nil {
 			return false, messageErr
 		}
-		if len(messages) > 0 && !preserveHistory {
+		if len(messages) > 0 {
 			activeMessages[job.Id] = messages
 		}
-		if len(messages) > 0 {
+		if shouldDeleteChannelHistory(preserveHistory, len(messages)) {
 			if err = s.deleteTelegramMessagesLockedByChannel(ctx, job, messages, "资料重新上架"); err != nil {
 				return false, gerror.Wrap(err, "删除频道历史上架消息失败")
 			}
 		}
 		previousJobIds = append(previousJobIds, job.Id)
 	}
-	undeletableJobs, err := s.telegramJobsWithUndeletableMessages(ctx, previousJobIds)
-	if err != nil {
-		return false, err
+	undeletableJobs := make(map[int64]bool)
+	if !preserveHistory {
+		undeletableJobs, err = s.telegramJobsWithUndeletableMessages(ctx, previousJobIds)
+		if err != nil {
+			return false, err
+		}
 	}
 	for _, job := range previous {
 		if len(activeMessages[job.Id]) > 0 && undeletableJobs[job.Id] {
@@ -73,13 +76,19 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 		if err = s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
 			return false, err
 		}
-		if len(activeMessages[job.Id]) > 0 {
+		if preserveHistory && len(activeMessages[job.Id]) > 0 {
+			s.appendTelegramJobLog(ctx, job, "republish", "superseded", "资料重新上架，频道已配置保留旧消息")
+		} else if len(activeMessages[job.Id]) > 0 {
 			s.appendTelegramJobLog(ctx, job, "republish", "superseded", "资料重新上架，已由该频道的新上架任务替换")
 		} else {
 			s.appendTelegramJobLog(ctx, job, "publish", "superseded", "资料已有新的上架任务，旧待发送任务已废弃")
 		}
 	}
 	return true, nil
+}
+
+func shouldDeleteChannelHistory(preserveHistory bool, messageCount int) bool {
+	return !preserveHistory && messageCount > 0
 }
 
 func (s *sSysPublish) telegramSupersededJobsWithActiveMessages(ctx context.Context, current telegramJobRecord) ([]telegramJobRecord, error) {
