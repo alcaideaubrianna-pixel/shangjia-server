@@ -1409,6 +1409,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_channel` (
   `anti_scan_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '频道防扫图开关',
   `text_obfuscation_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '频道文本混淆开关',
   `auto_delete_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '频道自动删除开关',
+  `preserve_history_messages` tinyint(1) NOT NULL DEFAULT '0' COMMENT '下架和循环上架时保留旧消息',
   `bot_id_json` text COMMENT '绑定Bot ID JSON',
   `bot_permission_status_json` text NOT NULL COMMENT '频道Bot权限检测结果JSON',
   `remark` varchar(500) NOT NULL DEFAULT '' COMMENT '备注',

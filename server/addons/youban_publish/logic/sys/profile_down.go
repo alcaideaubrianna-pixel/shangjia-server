@@ -109,6 +109,14 @@ func (s *sSysPublish) deleteProfilesTelegramMessages(ctx context.Context, ids []
 		return err
 	}
 	for _, job := range jobs {
+		preserve, policyErr := s.channelPreservesHistoryMessages(ctx, job.TenantId, job.ChannelId)
+		if policyErr != nil {
+			return policyErr
+		}
+		if preserve {
+			s.appendTelegramJobLog(ctx, job.telegramJobRecord(), "down", "skipped", "资料下架，频道已配置保留旧消息")
+			continue
+		}
 		if err = s.enqueueTelegramCleanupJob(ctx, job.Id, 0); err != nil {
 			return gerror.Wrap(err, "加入TG下架清理队列失败")
 		}

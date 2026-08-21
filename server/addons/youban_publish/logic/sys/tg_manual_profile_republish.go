@@ -17,8 +17,12 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 	if current.Id <= 0 || current.TenantId <= 0 || current.ProfileId <= 0 || current.ChannelId <= 0 {
 		return true, nil
 	}
+	preserveHistory, err := s.channelPreservesHistoryMessages(ctx, current.TenantId, current.ChannelId)
+	if err != nil {
+		return false, err
+	}
 	var previous []telegramJobRecord
-	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Fields("id,task_id,operation_no,tenant_id,account_id,profile_id,channel_id,bot_id,target_chat_id,status").
 		Where("tenant_id", current.TenantId).
 		Where("profile_id", current.ProfileId).
@@ -30,12 +34,14 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 	if err != nil {
 		return false, gerror.Wrap(err, "读取频道历史上架任务失败")
 	}
-	legacy, err := s.telegramSupersededJobsWithUndeletableMessages(ctx, current)
-	if err != nil {
-		return false, err
-	}
-	for _, job := range legacy {
-		s.enqueueTelegramMessageDeleteFallback(ctx, job, "资料重新上架清理历史遗留消息", nil)
+	if !preserveHistory {
+		legacy, legacyErr := s.telegramSupersededJobsWithActiveMessages(ctx, current)
+		if legacyErr != nil {
+			return false, legacyErr
+		}
+		for _, job := range legacy {
+			s.enqueueTelegramMessageDeleteFallback(ctx, job, "资料重新上架清理历史遗留消息", nil)
+		}
 	}
 	previousJobIds := make([]int64, 0, len(previous))
 	activeMessages := make(map[int64][]telegramDeleteMessage, len(previous))
@@ -44,7 +50,7 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 		if messageErr != nil {
 			return false, messageErr
 		}
-		if len(messages) > 0 {
+		if len(messages) > 0 && !preserveHistory {
 			activeMessages[job.Id] = messages
 		}
 		if len(messages) > 0 {
@@ -76,7 +82,7 @@ func (s *sSysPublish) prepareProfileChannelPublish(ctx context.Context, current 
 	return true, nil
 }
 
-func (s *sSysPublish) telegramSupersededJobsWithUndeletableMessages(ctx context.Context, current telegramJobRecord) ([]telegramJobRecord, error) {
+func (s *sSysPublish) telegramSupersededJobsWithActiveMessages(ctx context.Context, current telegramJobRecord) ([]telegramJobRecord, error) {
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		Fields("j.id,j.task_id,j.operation_no,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.bot_id,j.target_chat_id,j.status").
@@ -85,7 +91,7 @@ func (s *sSysPublish) telegramSupersededJobsWithUndeletableMessages(ctx context.
 		Where("j.target_chat_id", normalizeTelegramChannelChatID(current.TargetChatId)).
 		WhereLT("j.id", current.Id).
 		Where("j.status", "superseded").
-		Where("EXISTS (SELECT 1 FROM " + publishTgMessageTable + " m WHERE m.job_id=j.id AND m.status='undeletable')").
+		Where("EXISTS (SELECT 1 FROM " + publishTgMessageTable + " m WHERE m.job_id=j.id AND m.status IN ('sent','undeletable'))").
 		OrderAsc("j.id").Scan(&jobs)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取频道历史遗留消息失败")

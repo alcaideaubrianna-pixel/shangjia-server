@@ -994,6 +994,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel" (
   "anti_scan_enabled" smallint NOT NULL DEFAULT 0,
   "text_obfuscation_enabled" smallint NOT NULL DEFAULT 0,
   "auto_delete_enabled" smallint NOT NULL DEFAULT 1,
+  "preserve_history_messages" smallint NOT NULL DEFAULT 0,
   "bot_id_json" text,
   "bot_permission_status_json" text NOT NULL DEFAULT '[]',
   "remark" varchar(500) NOT NULL DEFAULT '',

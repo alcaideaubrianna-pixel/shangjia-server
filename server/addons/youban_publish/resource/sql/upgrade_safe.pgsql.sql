@@ -182,3 +182,4 @@ WHERE older."chat_id" = newer."chat_id" AND older."message_id" = newer."message_
 ALTER TABLE "hg_youban_publish_bot_message_source" DROP CONSTRAINT IF EXISTS "uk_ybp_bot_message_source";
 ALTER TABLE "hg_youban_publish_bot_message_source" ADD CONSTRAINT "uk_ybp_bot_message_source" UNIQUE ("chat_id", "message_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_target_message" ON "hg_youban_publish_tg_message" ("target_chat_id", "tg_message_id", "id" DESC);
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "preserve_history_messages" smallint NOT NULL DEFAULT 0;
