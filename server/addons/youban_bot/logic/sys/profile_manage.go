@@ -173,7 +173,6 @@ func (s *sSysBot) profileMenuMarkup() *models.InlineKeyboardMarkup {
 	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
 		{{Text: "笔记列表", CallbackData: "pf:list:1"}, {Text: "新建笔记", CallbackData: "pf:create"}},
 		{{Text: "搜索笔记", CallbackData: "pf:search"}, {Text: "发送笔记", CallbackData: "pf:asksend"}},
-		{{Text: "上架笔记", CallbackData: "pf:askup"}, {Text: "下架笔记", CallbackData: "pf:askdown"}},
 		{{Text: "编辑笔记", CallbackData: "pf:askedit"}, {Text: "频道管理", CallbackData: "ch:list"}},
 		{{Text: "取消当前操作", CallbackData: "pf:cancel"}},
 	}}
