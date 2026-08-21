@@ -124,10 +124,10 @@ func (s *sSysPublish) handleTelegramAutoDelete(ctx context.Context, botId int64,
 		BotId: botId, TenantId: tenantId, ChannelId: channel.Id,
 		ChatId: strconv.FormatInt(msg.Chat.ID, 10), MessageId: msg.ID, Keyword: keyword,
 	}); err != nil {
-		autoDeleteWarn(ctx, fmt.Sprintf("enqueue:%d:%d", channel.Id, msg.ID), "频道自动删除延迟任务入队失败 channel:%d message:%d err:%+v", channel.Id, msg.ID, err)
+		autoDeleteWarn(ctx, fmt.Sprintf("enqueue:%d:%d", channel.Id, msg.ID), "频道自动删除任务入队失败 channel:%d message:%d err:%+v", channel.Id, msg.ID, err)
 		return
 	}
-	g.Log().Infof(ctx, "频道自动删除已延迟入队 channel:%d chat:%d message:%d keyword:%s delay:40s", channel.Id, msg.Chat.ID, msg.ID, keyword)
+	g.Log().Infof(ctx, "频道自动删除已入队 channel:%d chat:%d message:%d keyword:%s", channel.Id, msg.Chat.ID, msg.ID, keyword)
 }
 
 func (s *sSysPublish) handleTelegramAutoDeleteTask(ctx context.Context, task *asynq.Task) error {
@@ -167,7 +167,7 @@ func (s *sSysPublish) handleTelegramAutoDeleteTask(ctx context.Context, task *as
 		g.Log().Warningf(ctx, "频道自动删除失败 channel:%d bot:%d message:%d err:%+v", channel.Id, botItem.Id, payload.MessageId, err)
 		return nil
 	}
-	s.appendAutoDeleteLogByValues(ctx, channel, botItem.Id, payload.MessageId, payload.Keyword, "success", "频道消息命中关键词，延迟40秒后已自动删除")
+	s.appendAutoDeleteLogByValues(ctx, channel, botItem.Id, payload.MessageId, payload.Keyword, "success", "频道消息命中关键词，已自动删除")
 	return nil
 }
 

@@ -185,6 +185,9 @@ func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegram
 			observeTelegramMediaPurposeViolation(ctx, "persist")
 			return err
 		}
+		if isProtectedTelegramPublishPurpose(item.Purpose) {
+			_ = cache.Instance().Set(ctx, telegramPublishMessageCacheKey(job.TargetChatId, int(item.MessageId)), 1, autoDeletePublishMessageCacheTTL)
+		}
 		_, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).Data(g.Map{
 			"job_id":         job.Id,
 			"tenant_id":      job.TenantId,
@@ -205,9 +208,6 @@ func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegram
 		}).OnConflict("job_id,tg_message_id").OnDuplicate("status,sent_at,deleted_at,updated_at").Save()
 		if err != nil {
 			return gerror.Wrap(err, "保存TG消息记录失败")
-		}
-		if isProtectedTelegramPublishPurpose(item.Purpose) {
-			_ = cache.Instance().Set(ctx, telegramPublishMessageCacheKey(job.TargetChatId, int(item.MessageId)), 1, autoDeletePublishMessageCacheTTL)
 		}
 	}
 	storedHashes := make(map[string]telegramAntiScanHash)

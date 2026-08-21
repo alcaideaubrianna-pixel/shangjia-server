@@ -264,7 +264,6 @@ func (s *sSysPublish) enqueueTelegramAutoDelete(ctx context.Context, payload aut
 		asynq.MaxRetry(3),
 		asynq.Timeout(time.Minute),
 		asynq.Unique(2*time.Minute),
-		asynq.ProcessIn(40*time.Second),
 	)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
