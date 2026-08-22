@@ -261,7 +261,7 @@ func (s *sSysBot) handleProfileTextCommand(ctx context.Context, botId int64, msg
 			return true, s.startProfileSession(ctx, botId, msg, "send", "waiting_profile_no", 0, "", nil, "请输入要发送的笔记编号、标题或正文关键词，例如：A00001")
 		}
 		for _, no := range nos {
-			if err := s.sendProfileByNo(ctx, botId, chatId, account, no, 0); err != nil {
+			if err := s.sendProfileByNo(ctx, botId, chatId, account, no); err != nil {
 				return true, err
 			}
 		}
@@ -386,12 +386,12 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 	case "down":
 		return true, s.changeProfilesStatus(ctx, botId, chatId, account, []string{no}, 2)
 	case "send":
-		return true, s.sendProfileByNo(ctx, botId, chatId, account, no, 0)
+		return true, s.sendProfileByNo(ctx, botId, chatId, account, no)
 	case "view":
-		return true, s.showProfileCard(ctx, botId, chatId, account, no, 0)
+		return true, s.showProfileCard(ctx, botId, chatId, account, no)
 	case "backview":
 		_ = s.cancelProfileSessionByIdsSilent(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId)
-		return true, s.showProfileCard(ctx, botId, chatId, account, no, 0)
+		return true, s.showProfileCard(ctx, botId, chatId, account, no)
 	case "edit":
 		return true, s.showProfileEditMenu(ctx, botId, chatId, account, no)
 	case "edtitle":
@@ -927,6 +927,20 @@ func botProfileScopeAccountId(account *botProfileAccount) int64 {
 	return account.AccountId
 }
 
+func botProfileViewInput(account *botProfileAccount, profileNo string) *publishsysin.BotProfileViewInp {
+	if account == nil {
+		return &publishsysin.BotProfileViewInp{ProfileNo: profileNo}
+	}
+	// View permission is always evaluated from the real bound account. Admin
+	// write operations may use accountId=0, but reads must retain this context.
+	return &publishsysin.BotProfileViewInp{
+		TenantId:    account.TenantId,
+		AccountId:   account.AccountId,
+		AccountType: account.AccountType,
+		ProfileNo:   profileNo,
+	}
+}
+
 func botProfileSearchInput(account *botProfileAccount, keyword string, page int, perPage int) *publishsysin.BotProfileSearchInp {
 	in := &publishsysin.BotProfileSearchInp{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType, Keyword: keyword}
 	if account.AccountType != "admin" {
@@ -937,10 +951,11 @@ func botProfileSearchInput(account *botProfileAccount, keyword string, page int,
 	return in
 }
 
-func (s *sSysBot) showProfileCard(ctx context.Context, botId int64, chatId string, account *botProfileAccount, no string, ownerAccountId int64) error {
-	in := &publishsysin.BotProfileViewInp{TenantId: account.TenantId, AccountId: botProfileScopeAccountId(account), AccountType: account.AccountType, ProfileNo: no}
+func (s *sSysBot) showProfileCard(ctx context.Context, botId int64, chatId string, account *botProfileAccount, no string) error {
+	in := botProfileViewInput(account, no)
 	note, err := publishService.SysPublish().BotProfileView(ctx, in)
 	if err != nil {
+		g.Log().Warning(ctx, "Bot资料详情读取失败", g.Map{"botId": botId, "chatId": chatId, "tenantId": account.TenantId, "accountId": account.AccountId, "accountType": account.AccountType, "profileNo": no, "err": err})
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
 	}
 	return s.sendProfileCard(ctx, botId, chatId, note, "view")
@@ -972,10 +987,11 @@ func (s *sSysBot) sendProfileCard(ctx context.Context, botId int64, chatId strin
 	return err
 }
 
-func (s *sSysBot) sendProfileByNo(ctx context.Context, botId int64, chatId string, account *botProfileAccount, no string, ownerAccountId int64) error {
-	in := &publishsysin.BotProfileViewInp{TenantId: account.TenantId, AccountId: botProfileScopeAccountId(account), AccountType: account.AccountType, ProfileNo: no}
+func (s *sSysBot) sendProfileByNo(ctx context.Context, botId int64, chatId string, account *botProfileAccount, no string) error {
+	in := botProfileViewInput(account, no)
 	note, err := publishService.SysPublish().BotProfileView(ctx, in)
 	if err != nil {
+		g.Log().Warning(ctx, "Bot资料预览读取失败", g.Map{"botId": botId, "chatId": chatId, "tenantId": account.TenantId, "accountId": account.AccountId, "accountType": account.AccountType, "profileNo": no, "err": err})
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
 	}
 	return s.sendProfileContent(ctx, botId, chatId, note)
@@ -1731,7 +1747,7 @@ func (s *sSysBot) consumeProfileSessionText(ctx context.Context, botId int64, ms
 		}
 		_ = s.completeProfileSession(ctx, session.Id)
 		for _, no := range nos {
-			if err := s.sendProfileByNo(ctx, botId, chatId, account, no, 0); err != nil {
+			if err := s.sendProfileByNo(ctx, botId, chatId, account, no); err != nil {
 				return err
 			}
 		}
@@ -2687,7 +2703,7 @@ func (s *sSysBot) ensureInlineShare(ctx context.Context, botId int64, account *b
 	if no == "" {
 		return "", gerror.New("资料编号不能为空")
 	}
-	note, err := publishService.SysPublish().BotProfileView(ctx, &publishsysin.BotProfileViewInp{TenantId: account.TenantId, AccountId: botProfileScopeAccountId(account), ProfileNo: no})
+	note, err := publishService.SysPublish().BotProfileView(ctx, &publishsysin.BotProfileViewInp{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType, ProfileNo: no})
 	if err != nil {
 		return "", err
 	}
@@ -2723,7 +2739,7 @@ func profileCallbackData(action string, no string) string {
 }
 
 func (s *sSysBot) showProfileEditMenu(ctx context.Context, botId int64, chatId string, account *botProfileAccount, no string) error {
-	note, err := publishService.SysPublish().BotProfileView(ctx, &publishsysin.BotProfileViewInp{TenantId: account.TenantId, AccountId: botProfileScopeAccountId(account), ProfileNo: no})
+	note, err := publishService.SysPublish().BotProfileView(ctx, &publishsysin.BotProfileViewInp{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType, ProfileNo: no})
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
 	}
