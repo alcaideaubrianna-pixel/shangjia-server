@@ -45,6 +45,7 @@ type CmsInstanceRegisterInp struct {
 
 type CmsInstanceRegisterModel struct {
 	InstanceId        string `json:"instanceId"`
+	AppName           string `json:"appName,omitempty"`
 	Status            string `json:"status"`
 	EnrollToken       string `json:"enrollToken,omitempty"`
 	AppId             string `json:"appId,omitempty"`

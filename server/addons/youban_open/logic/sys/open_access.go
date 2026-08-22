@@ -212,7 +212,7 @@ func (s *sOpenAccess) instanceState(ctx context.Context, app *sysin.CmsAppModel,
 	} else if app.Status == 4 {
 		status = "revoked"
 	}
-	result := &sysin.CmsInstanceRegisterModel{InstanceId: app.InstanceId, Status: status}
+	result := &sysin.CmsInstanceRegisterModel{InstanceId: app.InstanceId, AppName: app.Name, Status: status}
 	if status == "approved" && token != "" {
 		columns := pdao.CmsApp.Columns()
 		var credential struct {
