@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/dao"
 )
 
 func (s *sSysPublish) BotProfileSearch(ctx context.Context, in *sysin.BotProfileSearchInp) (list []*sysin.NoteModel, totalCount int, err error) {
@@ -36,6 +36,37 @@ func (s *sSysPublish) BotProfileSearch(ctx context.Context, in *sysin.BotProfile
 		return []*sysin.NoteModel{}, 0, nil
 	}
 	return s.noteListByAccountIds(ctx, profileIn, accountIds)
+}
+
+func (s *sSysPublish) botResolveProfileIdByAccountIds(ctx context.Context, tenantId int64, accountIds []int64, profileNo string, publicOnly bool) (int64, error) {
+	no := normalizeBotProfileNo(profileNo)
+	if no == "" {
+		return 0, gerror.New("资料编号不能为空")
+	}
+	if len(accountIds) == 0 {
+		return 0, gerror.New("资料不存在或无权操作")
+	}
+	base, err := s.profileBaseModel(ctx, tenantId, 0)
+	if err != nil {
+		return 0, err
+	}
+	base = base.WhereIn("ps.account_id", uniqueIds(accountIds))
+	if publicOnly {
+		base = base.Where("p."+dao.ContentProfile.Columns().Status, 1)
+	}
+	row, err := base.Fields("p."+dao.ContentProfile.Columns().Id).
+		Where("p."+dao.ContentProfile.Columns().ProfileNo, no).One()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取资料失败")
+	}
+	if row.IsEmpty() {
+		return 0, gerror.New("资料不存在或无权操作")
+	}
+	id := row[dao.ContentProfile.Columns().Id].Int64()
+	if id <= 0 {
+		return 0, gerror.New("资料不存在或无权操作")
+	}
+	return id, nil
 }
 
 func (s *sSysPublish) botProfileSearchAccountIds(ctx context.Context, in *sysin.BotProfileSearchInp) ([]int64, error) {
@@ -70,8 +101,16 @@ func (s *sSysPublish) BotProfileView(ctx context.Context, in *sysin.BotProfileVi
 	}
 	profileId := in.ProfileId
 	var profile *sysin.ProfileModel
-	if len(in.AccountIds) == 0 && strings.EqualFold(strings.TrimSpace(in.AccountType), sysin.PublishAccountTypeAdmin) {
-		in.AccountIds, err = s.botMediaSearchAccountIds(ctx, &sysin.BotMediaSearchInp{TenantId: in.TenantId, AccountId: in.AccountId, AccountType: in.AccountType})
+	if in.AccountId > 0 {
+		visibleIds, scopeErr := s.botProfileSearchAccountIds(ctx, &sysin.BotProfileSearchInp{TenantId: in.TenantId, AccountId: in.AccountId, AccountType: in.AccountType})
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
+		if len(in.AccountIds) > 0 {
+			in.AccountIds = intersectInt64(uniqueIds(in.AccountIds), visibleIds)
+		} else {
+			in.AccountIds = visibleIds
+		}
 	}
 	if len(in.AccountIds) > 0 && profileId > 0 {
 		viewTenantId := in.TenantId
@@ -83,7 +122,14 @@ func (s *sSysPublish) BotProfileView(ctx context.Context, in *sysin.BotProfileVi
 		}
 		profile, err = s.botProfileViewByAccountIds(ctx, profileId, viewTenantId, in.AccountIds)
 	} else if profileId <= 0 {
-		profileId, err = s.botResolveProfileId(ctx, in.TenantId, in.AccountId, in.ProfileNo, in.PublicOnly)
+		profileId, err = s.botResolveProfileIdByAccountIds(ctx, in.TenantId, in.AccountIds, in.ProfileNo, in.PublicOnly)
+		if err == nil && len(in.AccountIds) > 0 {
+			viewTenantId := in.TenantId
+			if strings.EqualFold(strings.TrimSpace(in.AccountType), sysin.PublishAccountTypeAdmin) {
+				viewTenantId = 0
+			}
+			profile, err = s.botProfileViewByAccountIds(ctx, profileId, viewTenantId, in.AccountIds)
+		}
 	}
 	if err != nil {
 		return nil, err
