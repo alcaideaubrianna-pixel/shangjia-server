@@ -191,6 +191,15 @@ func TestObfuscateTelegramSynonymsUsesConsistentSafeReplacements(t *testing.T) {
 	}
 }
 
+func TestObfuscateTelegramSynonymsDoesNotGenerateAwkwardNegativeTerms(t *testing.T) {
+	for seed := int64(1); seed <= 100; seed++ {
+		result := obfuscateTelegramText("结果：不行，规则：不可以，状态：不能。", rand.New(rand.NewSource(seed)), make(map[string]string))
+		if strings.Contains(result, "并非") || strings.Contains(result, "否") {
+			t.Fatalf("awkward negative synonym generated, seed:%d result:%s", seed, result)
+		}
+	}
+}
+
 func TestObfuscateTelegramCaptionSharesSynonymMappingAcrossHTMLNodes(t *testing.T) {
 	result := obfuscateTelegramCaption("<b>可</b>\n可", 77)
 	matchedReplacement := ""
