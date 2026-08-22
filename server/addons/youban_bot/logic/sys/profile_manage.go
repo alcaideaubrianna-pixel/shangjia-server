@@ -261,7 +261,7 @@ func (s *sSysBot) handleProfileTextCommand(ctx context.Context, botId int64, msg
 			return true, s.startProfileSession(ctx, botId, msg, "send", "waiting_profile_no", 0, "", nil, "请输入要发送的笔记编号、标题或正文关键词，例如：A00001")
 		}
 		for _, no := range nos {
-			if err := s.sendProfileByNo(ctx, botId, chatId, account, no); err != nil {
+			if err := s.sendProfileByNo(ctx, botId, chatId, account, no, 0); err != nil {
 				return true, err
 			}
 		}
@@ -323,6 +323,10 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 	no := ""
 	if len(parts) > 2 {
 		no = strings.ToUpper(parts[2])
+	}
+	ownerAccountId := int64(0)
+	if len(parts) > 3 {
+		ownerAccountId = parseInt64(parts[3])
 	}
 	if strings.HasPrefix(query.Data, "ch:") {
 		return s.handleChannelCallback(ctx, botId, chatId, fmt.Sprintf("%d", query.From.ID), account, query.Data, query)
@@ -386,12 +390,12 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 	case "down":
 		return true, s.changeProfilesStatus(ctx, botId, chatId, account, []string{no}, 2)
 	case "send":
-		return true, s.sendProfileByNo(ctx, botId, chatId, account, no)
+		return true, s.sendProfileByNo(ctx, botId, chatId, account, no, ownerAccountId)
 	case "view":
-		return true, s.showProfileCard(ctx, botId, chatId, account, no)
+		return true, s.showProfileCard(ctx, botId, chatId, account, no, ownerAccountId)
 	case "backview":
 		_ = s.cancelProfileSessionByIdsSilent(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId)
-		return true, s.showProfileCard(ctx, botId, chatId, account, no)
+		return true, s.showProfileCard(ctx, botId, chatId, account, no, ownerAccountId)
 	case "edit":
 		return true, s.showProfileEditMenu(ctx, botId, chatId, account, no)
 	case "edtitle":
@@ -826,7 +830,7 @@ func (s *sSysBot) showProfileList(ctx context.Context, botId int64, chatId strin
 			title = shortText(note.PlainText, 18)
 		}
 		label := fmt.Sprintf("%s · %s", note.ProfileNo, shortButtonText(title, 24))
-		buttons = append(buttons, []models.InlineKeyboardButton{{Text: label, CallbackData: "pf:view:" + note.ProfileNo}})
+		buttons = append(buttons, []models.InlineKeyboardButton{{Text: label, CallbackData: profileCallbackDataForNote("view", note)}})
 	}
 	pager := []models.InlineKeyboardButton{}
 	if page > 1 {
@@ -937,8 +941,13 @@ func botProfileSearchInput(account *botProfileAccount, keyword string, page int,
 	return in
 }
 
-func (s *sSysBot) showProfileCard(ctx context.Context, botId int64, chatId string, account *botProfileAccount, no string) error {
-	note, err := publishService.SysPublish().BotProfileView(ctx, &publishsysin.BotProfileViewInp{TenantId: account.TenantId, AccountId: botProfileScopeAccountId(account), ProfileNo: no})
+func (s *sSysBot) showProfileCard(ctx context.Context, botId int64, chatId string, account *botProfileAccount, no string, ownerAccountId int64) error {
+	in := &publishsysin.BotProfileViewInp{TenantId: account.TenantId, AccountId: botProfileScopeAccountId(account), ProfileNo: no}
+	if ownerAccountId > 0 {
+		in.AccountIds = []int64{ownerAccountId}
+		in.AccountType = account.AccountType
+	}
+	note, err := publishService.SysPublish().BotProfileView(ctx, in)
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
 	}
@@ -971,8 +980,13 @@ func (s *sSysBot) sendProfileCard(ctx context.Context, botId int64, chatId strin
 	return err
 }
 
-func (s *sSysBot) sendProfileByNo(ctx context.Context, botId int64, chatId string, account *botProfileAccount, no string) error {
-	note, err := publishService.SysPublish().BotProfileView(ctx, &publishsysin.BotProfileViewInp{TenantId: account.TenantId, AccountId: botProfileScopeAccountId(account), ProfileNo: no})
+func (s *sSysBot) sendProfileByNo(ctx context.Context, botId int64, chatId string, account *botProfileAccount, no string, ownerAccountId int64) error {
+	in := &publishsysin.BotProfileViewInp{TenantId: account.TenantId, AccountId: botProfileScopeAccountId(account), ProfileNo: no}
+	if ownerAccountId > 0 {
+		in.AccountIds = []int64{ownerAccountId}
+		in.AccountType = account.AccountType
+	}
+	note, err := publishService.SysPublish().BotProfileView(ctx, in)
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
 	}
@@ -1398,11 +1412,33 @@ func profileCardMarkup(profileNo string, purpose string) *models.InlineKeyboardM
 	}
 }
 
+func profileCallbackDataForNote(action string, note *publishsysin.NoteModel) string {
+	if note == nil {
+		return "pf:" + action
+	}
+	data := "pf:" + action + ":" + strings.ToUpper(strings.TrimSpace(note.ProfileNo))
+	if note.AccountId > 0 {
+		data += fmt.Sprintf(":%d", note.AccountId)
+	}
+	return data
+}
+
 func profileCardMarkupForNote(note *publishsysin.NoteModel, purpose string) *models.InlineKeyboardMarkup {
 	if note == nil {
 		return profileCardMarkup("", purpose)
 	}
 	markup := profileCardMarkup(note.ProfileNo, purpose)
+	if note.AccountId > 0 {
+		owner := fmt.Sprintf(":%d", note.AccountId)
+		for rowIndex := range markup.InlineKeyboard {
+			for buttonIndex := range markup.InlineKeyboard[rowIndex] {
+				data := markup.InlineKeyboard[rowIndex][buttonIndex].CallbackData
+				if strings.HasPrefix(data, "pf:") && strings.Count(data, ":") == 2 {
+					markup.InlineKeyboard[rowIndex][buttonIndex].CallbackData = data + owner
+				}
+			}
+		}
+	}
 	url := strings.TrimSpace(note.CollectSourceUrl)
 	if !note.IsCollected || url == "" {
 		return markup
@@ -1721,7 +1757,7 @@ func (s *sSysBot) consumeProfileSessionText(ctx context.Context, botId int64, ms
 		}
 		_ = s.completeProfileSession(ctx, session.Id)
 		for _, no := range nos {
-			if err := s.sendProfileByNo(ctx, botId, chatId, account, no); err != nil {
+			if err := s.sendProfileByNo(ctx, botId, chatId, account, no, 0); err != nil {
 				return err
 			}
 		}
