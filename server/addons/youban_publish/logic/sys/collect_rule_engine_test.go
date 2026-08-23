@@ -206,6 +206,13 @@ func TestApplyCollectIntroFeeTruncate(t *testing.T) {
 		{name: "supports windows line endings", text: "标题\r\n介绍费：7888\r\nKK", want: "标题"},
 		{name: "matches intro fee with invisible format characters", text: "标题\n介\u200b绍\u200d费：7888(香水湾💦)⁣‌\n联系方式", want: "标题"},
 		{name: "matches recommendation fee", text: "标题\n推荐费：7888 情诗X\n介绍费:7889\u2060⁣‌", want: "标题"},
+		{name: "matches referral fee synonyms", text: "标题\n中介费：7888\n尾部", want: "标题"},
+		{name: "matches brokerage fee synonym", text: "标题\n牵线费用：7888\n尾部", want: "标题"},
+		{name: "matches intermediary fee synonym", text: "标题\n居间费：7888\n尾部", want: "标题"},
+		{name: "matches connection fee synonym", text: "标题\n对接费用：6888\n尾部", want: "标题"},
+		{name: "matches brokerage service fee", text: "标题\n中介服务费7888\n尾部", want: "标题"},
+		{name: "matches variation selectors inside keyword", text: "标题\n介︇绍️费：7888\n尾部", want: "标题"},
+		{name: "cleans joined suffix with invisible tail", text: "雷点（不能接受的）：拍照 户外 手指 肛交 多\n介绍费7888TT​‌⁣‌​​​‌​‌​​‌‌‌‌​‌‌‌‌​​‌‌‌​‌‌‌​‌​‌‌‌‌‌‌​​‌​​​​‌‌​‌‌​​​​​‌‌‌​‌​‌​​​‌‌​‌‌‌​‌‌​‌⁤", want: "雷点（不能接受的）：拍照 户外 手指 肛交 多"},
 		{name: "keeps text without keyword", text: "标题\n联系方式\nKK", want: "标题\n联系方式\nKK"},
 		{name: "removes leading profile metadata", text: "昵称：朴朴\n编号：XXX123\n同行：否\n正常文案", want: "正常文案"},
 		{name: "removes leading latin and chinese codes", text: "XXX123\n朴朴123123\n正常文案", want: "正常文案"},
@@ -238,6 +245,7 @@ func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 	}{
 		{name: "space suffix", text: "正文\n介绍费 7888 KK", original: "正文\n介绍费 7888 KK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
 		{name: "joined suffix", text: "正文\n介绍费 7888KK", original: "正文\n介绍费 7888KK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
+		{name: "joined suffix with invisible tail", text: "雷点（不能接受的）：拍照 户外 手指 肛交 多\n介绍费7888TT​‌⁣‌​​​‌​‌​​‌‌‌‌​‌‌‌‌​​‌‌‌​‌‌‌​‌​‌‌‌‌‌‌​​‌​​​​‌‌​‌‌​​​​​‌‌‌​‌​‌​​​‌‌​‌‌‌​‌‌​‌⁤", original: "雷点（不能接受的）：拍照 户外 手指 肛交 多\n介绍费7888TT​‌⁣‌​​​‌​‌​​‌‌‌‌​‌‌‌‌​​‌‌‌​‌‌‌​‌​‌‌‌‌‌‌​​‌​​​​‌‌​‌‌​​​​​‌‌‌​‌​‌​​​‌‌​‌‌‌​‌‌​‌⁤", suffix: "AA", want: "雷点（不能接受的）：拍照 户外 手指 肛交 多\n介绍费 7888 AA"},
 		{name: "joined chinese suffix", text: "正文\n介绍费:7888七七n", original: "正文\n介绍费:7888七七n", suffix: "AA", want: "正文\n介绍费 7888 AA"},
 		{name: "hyphen suffix", text: "正文\n介绍费：6888 BLY-54", original: "正文\n介绍费：6888 BLY-54", suffix: "AA", want: "正文\n介绍费 6888 AA"},
 		{name: "colon suffix", text: "正文\n介绍费: 7888 KK", original: "正文\n介绍费: 7888 KK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
@@ -246,6 +254,7 @@ func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 		{name: "preserves following content", text: "正文\n介绍费 7888 KK\n联系方式", original: "正文\n介绍费 7888 KK\n联系方式", suffix: "AA", want: "正文\n联系方式\n介绍费 7888 AA"},
 		{name: "amount punctuation", text: "正文\n介绍费用：7,888.50 元 KK", original: "正文\n介绍费用：7,888.50 元 KK", suffix: "AA", want: "正文\n介绍费 7,888.50 元 AA"},
 		{name: "recommendation fee removes duplicated intro fee", text: "推荐费：7888 情诗X\n七七xq\n介绍费:7889\u2060⁣‌", original: "推荐费：7888 情诗X\n七七xq\n介绍费:7889\u2060⁣‌", suffix: "七七xq", want: "介绍费 7888 七七xq"},
+		{name: "obfuscated brokerage fee", text: "正文\n牵︊线️费：7888 燕姐", original: "正文\n牵︊线️费：7888 燕姐", suffix: "AA", want: "正文\n介绍费 7888 AA"},
 		{name: "windows lines", text: "正文\r\n介绍费：7888\r\nKK", original: "正文\r\n介绍费：7888\r\nKK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
 		{name: "no fee", text: "正文\n联系方式", original: "正文\n联系方式", suffix: "AA", want: "正文\n联系方式"},
 		{name: "disabled", text: "正文\n介绍费 7888 KK", original: "正文\n介绍费 7888 KK", suffix: "", want: "正文\n介绍费 7888 KK"},
@@ -280,6 +289,19 @@ func TestBuildCollectRuleDecisionRestoresIntroFeeAfterTruncate(t *testing.T) {
 		"replace_from": gvar.New([]string{}), "replace_to": gvar.New([]string{}),
 	}
 	if got, want := buildCollectRuleDecision(event, nil, rule).Text, "正文\n介绍费 7888 AA"; got != want {
+		t.Fatalf("decision text = %q, want %q", got, want)
+	}
+}
+
+func TestBuildCollectRuleDecisionReplacesJoinedIntroFeeSuffix(t *testing.T) {
+	raw := "雷点（不能接受的）：拍照 户外 手指 肛交 多\n介绍费7888TT​‌⁣‌​​​‌​‌​​‌‌‌‌​‌‌‌‌​​‌‌‌​‌‌‌​‌​‌‌‌‌‌‌​​‌​​​​‌‌​‌‌​​​​​‌‌‌​‌​‌​​​‌‌​‌‌‌​‌‌​‌⁤"
+	event := gdb.Record{"raw_text": gvar.New(raw), "media_count": gvar.New(1)}
+	rule := gdb.Record{
+		"truncate_intro_fee_enabled": gvar.New(true), "intro_fee_suffix": gvar.New("AA"),
+		"delete_lines": gvar.New([]string{}), "delete_texts": gvar.New([]string{}),
+		"replace_from": gvar.New([]string{}), "replace_to": gvar.New([]string{}),
+	}
+	if got, want := buildCollectRuleDecision(event, nil, rule).Text, "雷点（不能接受的）：拍照 户外 手指 肛交 多\n介绍费 7888 AA"; got != want {
 		t.Fatalf("decision text = %q, want %q", got, want)
 	}
 }
