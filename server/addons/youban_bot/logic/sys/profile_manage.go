@@ -785,6 +785,15 @@ func extractProfileNos(text string) []string {
 	return res
 }
 
+func exactProfileNo(text string) string {
+	normalized := strings.TrimSpace(strings.NewReplacer("资料编号", "", "笔记编号", "", "编号", "", "：", "", ":", "", "=", "").Replace(text))
+	nos := extractProfileNos(normalized)
+	if len(nos) != 1 || !strings.EqualFold(normalized, nos[0]) {
+		return ""
+	}
+	return nos[0]
+}
+
 func profileActionKeyword(text string, actionWords ...string) string {
 	kw := strings.TrimSpace(text)
 	for _, word := range actionWords {
@@ -798,7 +807,7 @@ func (s *sSysBot) showProfileList(ctx context.Context, botId int64, chatId strin
 	if page <= 0 {
 		page = 1
 	}
-	const perPage = 15
+	const perPage = 10
 	list, total, err := publishService.SysPublish().BotProfileSearch(ctx, botProfileSearchInput(account, "", page, perPage))
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "笔记列表", err)
@@ -860,6 +869,13 @@ func (s *sSysBot) changeProfilesStatus(ctx context.Context, botId int64, chatId 
 }
 
 func (s *sSysBot) searchProfilesAndReply(ctx context.Context, botId int64, chatId string, account *botProfileAccount, keyword string, purpose string) error {
+	if no := exactProfileNo(keyword); no != "" {
+		note, err := publishService.SysPublish().BotProfileView(ctx, botProfileViewInput(account, no))
+		if err != nil {
+			return s.replyBotError(ctx, botId, chatId, "资料管理", err)
+		}
+		return s.sendProfileCard(ctx, botId, chatId, note, profileCardPurpose(account, note, purpose))
+	}
 	list, _, err := publishService.SysPublish().BotProfileSearch(ctx, botProfileSearchInput(account, keyword, 1, 5))
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
@@ -868,7 +884,7 @@ func (s *sSysBot) searchProfilesAndReply(ctx context.Context, botId int64, chatI
 		return s.sendMessageOnly(ctx, botId, chatId, "未找到匹配笔记。")
 	}
 	for _, note := range list {
-		if err := s.sendProfileCard(ctx, botId, chatId, note, purpose); err != nil {
+		if err := s.sendProfileCard(ctx, botId, chatId, note, profileCardPurpose(account, note, purpose)); err != nil {
 			return err
 		}
 	}
@@ -913,7 +929,7 @@ func (s *sSysBot) consumeProfileSearchImageMessage(ctx context.Context, botId in
 		return s.sendMessageOnly(ctx, botId, chatId, "未找到相似图片笔记。")
 	}
 	for _, note := range list {
-		if err := s.sendProfileCard(ctx, botId, chatId, note, "view"); err != nil {
+		if err := s.sendProfileCard(ctx, botId, chatId, note, profileCardPurpose(account, note, "view")); err != nil {
 			return err
 		}
 	}
@@ -921,10 +937,17 @@ func (s *sSysBot) consumeProfileSearchImageMessage(ctx context.Context, botId in
 }
 
 func botProfileScopeAccountId(account *botProfileAccount) int64 {
-	if account == nil || account.AccountType == "admin" {
+	if account == nil {
 		return 0
 	}
 	return account.AccountId
+}
+
+func profileCardPurpose(account *botProfileAccount, note *publishsysin.NoteModel, requested string) string {
+	if account == nil || note == nil || note.AccountId != account.AccountId {
+		return "readonly"
+	}
+	return requested
 }
 
 func botProfileViewInput(account *botProfileAccount, profileNo string) *publishsysin.BotProfileViewInp {
@@ -958,7 +981,7 @@ func (s *sSysBot) showProfileCard(ctx context.Context, botId int64, chatId strin
 		g.Log().Warning(ctx, "Bot资料详情读取失败", g.Map{"botId": botId, "chatId": chatId, "tenantId": account.TenantId, "accountId": account.AccountId, "accountType": account.AccountType, "profileNo": no, "err": err})
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
 	}
-	return s.sendProfileCard(ctx, botId, chatId, note, "view")
+	return s.sendProfileCard(ctx, botId, chatId, note, profileCardPurpose(account, note, "view"))
 }
 
 func (s *sSysBot) sendProfileCard(ctx context.Context, botId int64, chatId string, note *publishsysin.NoteModel, purpose string) error {
@@ -993,6 +1016,9 @@ func (s *sSysBot) sendProfileByNo(ctx context.Context, botId int64, chatId strin
 	if err != nil {
 		g.Log().Warning(ctx, "Bot资料预览读取失败", g.Map{"botId": botId, "chatId": chatId, "tenantId": account.TenantId, "accountId": account.AccountId, "accountType": account.AccountType, "profileNo": no, "err": err})
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
+	}
+	if profileCardPurpose(account, note, "send") == "readonly" {
+		return s.sendProfileCard(ctx, botId, chatId, note, "readonly")
 	}
 	return s.sendProfileContent(ctx, botId, chatId, note)
 }
@@ -2742,6 +2768,9 @@ func (s *sSysBot) showProfileEditMenu(ctx context.Context, botId int64, chatId s
 	note, err := publishService.SysPublish().BotProfileView(ctx, &publishsysin.BotProfileViewInp{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType, ProfileNo: no})
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
+	}
+	if profileCardPurpose(account, note, "edit") == "readonly" {
+		return s.sendProfileCard(ctx, botId, chatId, note, "readonly")
 	}
 	row, err := s.botById(ctx, botId)
 	if err != nil {

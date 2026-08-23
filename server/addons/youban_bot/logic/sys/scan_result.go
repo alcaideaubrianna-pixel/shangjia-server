@@ -131,11 +131,7 @@ func (s *sSysBot) handleScanCallback(ctx context.Context, botId int64, query *mo
 	if err = s.sendScanProfileContent(ctx, botId, chatId, note); err != nil {
 		return true, s.replyBotError(ctx, botId, chatId, "扫图预览", err)
 	}
-	purpose := "readonly"
-	if note.AccountId == account.AccountId {
-		purpose = "view"
-	}
-	return true, s.replyBotError(ctx, botId, chatId, "扫图预览", s.sendProfileCard(ctx, botId, chatId, note, purpose))
+	return true, s.replyBotError(ctx, botId, chatId, "扫图预览", s.sendProfileCard(ctx, botId, chatId, note, profileCardPurpose(account, note, "view")))
 }
 
 func (s *sSysBot) sendScanProfileContent(ctx context.Context, botId int64, chatId string, note *publishsysin.NoteModel) error {

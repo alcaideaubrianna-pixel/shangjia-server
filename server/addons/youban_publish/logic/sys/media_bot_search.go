@@ -37,12 +37,9 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	if len(accountIds) == 0 {
 		return []*sysin.NoteModel{}, 0, nil
 	}
-	searchScope := mediaSearchScopeForTenant(in.TenantId, accountIds)
-	if strings.EqualFold(strings.TrimSpace(in.AccountType), sysin.PublishAccountTypeAdmin) {
-		searchScope, err = s.mediaSearchScopeByAccountIds(ctx, accountIds)
-		if err != nil {
-			return nil, 0, err
-		}
+	searchScope, err := s.mediaSearchScopeByAccountIds(ctx, accountIds)
+	if err != nil {
+		return nil, 0, err
 	}
 	searchIn := &sysin.ProfileImageSearchInp{
 		Threshold: in.Threshold,
@@ -115,15 +112,10 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 }
 
 func (s *sSysPublish) botMediaSearchAccountIds(ctx context.Context, in *sysin.BotMediaSearchInp) ([]int64, error) {
-	if !strings.EqualFold(strings.TrimSpace(in.AccountType), sysin.PublishAccountTypeAdmin) {
-		return []int64{in.AccountId}, nil
-	}
-	viewer := &sysin.AccountModel{Id: in.AccountId, TenantId: in.TenantId, AccountType: sysin.PublishAccountTypeAdmin}
-	scope, err := s.adminProfileVisibleScope(ctx, viewer, &sysin.ProfileListInp{AccountScope: "all"})
-	if err != nil {
-		return nil, err
-	}
-	return uniqueIds(scope.AccountIds), nil
+	viewer := &sysin.AccountModel{Id: in.AccountId, TenantId: in.TenantId, AccountType: strings.TrimSpace(in.AccountType)}
+	return s.botProfileViewAccountIds(ctx, &sysin.BotProfileViewInp{
+		TenantId: viewer.TenantId, AccountId: viewer.Id, AccountType: viewer.AccountType,
+	})
 }
 
 func orderBotMediaSearchNotes(list []*sysin.NoteModel, profileIds []int64) []*sysin.NoteModel {

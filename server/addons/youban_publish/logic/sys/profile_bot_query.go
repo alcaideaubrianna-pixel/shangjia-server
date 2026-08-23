@@ -71,7 +71,18 @@ func (s *sSysPublish) botResolveProfileIdByAccountIds(ctx context.Context, tenan
 
 func (s *sSysPublish) botProfileSearchAccountIds(ctx context.Context, in *sysin.BotProfileSearchInp) ([]int64, error) {
 	account := &sysin.AccountModel{Id: in.AccountId, TenantId: in.TenantId, AccountType: strings.TrimSpace(in.AccountType)}
-	if strings.EqualFold(account.AccountType, sysin.PublishAccountTypeAdmin) {
+	if account.Id <= 0 {
+		return nil, gerror.New("上架账号信息不完整")
+	}
+	return []int64{account.Id}, nil
+}
+
+func (s *sSysPublish) botProfileViewAccountIds(ctx context.Context, in *sysin.BotProfileViewInp) ([]int64, error) {
+	account := &sysin.AccountModel{Id: in.AccountId, TenantId: in.TenantId, AccountType: strings.TrimSpace(in.AccountType)}
+	if account.Id <= 0 {
+		return nil, gerror.New("上架账号信息不完整")
+	}
+	if account.AccountType == sysin.PublishAccountTypeAdmin {
 		scope, err := s.adminProfileVisibleScope(ctx, account, &sysin.ProfileListInp{AccountScope: "all"})
 		if err != nil {
 			return nil, err
@@ -102,7 +113,7 @@ func (s *sSysPublish) BotProfileView(ctx context.Context, in *sysin.BotProfileVi
 	profileId := in.ProfileId
 	var profile *sysin.ProfileModel
 	if in.AccountId > 0 {
-		visibleIds, scopeErr := s.botProfileSearchAccountIds(ctx, &sysin.BotProfileSearchInp{TenantId: in.TenantId, AccountId: in.AccountId, AccountType: in.AccountType})
+		visibleIds, scopeErr := s.botProfileViewAccountIds(ctx, in)
 		if scopeErr != nil {
 			return nil, scopeErr
 		}
@@ -113,22 +124,16 @@ func (s *sSysPublish) BotProfileView(ctx context.Context, in *sysin.BotProfileVi
 		}
 	}
 	if len(in.AccountIds) > 0 && profileId > 0 {
-		viewTenantId := in.TenantId
-		if strings.EqualFold(strings.TrimSpace(in.AccountType), sysin.PublishAccountTypeAdmin) {
-			// The admin scope may include followed accounts from other tenants.
-			// AccountIds is the permission boundary; applying the current tenant
-			// again would reject profiles already returned by image search.
-			viewTenantId = 0
-		}
-		profile, err = s.botProfileViewByAccountIds(ctx, profileId, viewTenantId, in.AccountIds)
+		// AccountIds is the permission boundary and may contain approved
+		// followed accounts from another tenant.
+		profile, err = s.botProfileViewByAccountIds(ctx, profileId, 0, in.AccountIds)
 	} else if profileId <= 0 {
-		profileId, err = s.botResolveProfileIdByAccountIds(ctx, in.TenantId, in.AccountIds, in.ProfileNo, in.PublicOnly)
+		// AccountIds has already been derived from the bound account's own/follow
+		// scope. Do not re-apply the viewer tenant here because followed profiles
+		// may belong to another tenant.
+		profileId, err = s.botResolveProfileIdByAccountIds(ctx, 0, in.AccountIds, in.ProfileNo, in.PublicOnly)
 		if err == nil && len(in.AccountIds) > 0 {
-			viewTenantId := in.TenantId
-			if strings.EqualFold(strings.TrimSpace(in.AccountType), sysin.PublishAccountTypeAdmin) {
-				viewTenantId = 0
-			}
-			profile, err = s.botProfileViewByAccountIds(ctx, profileId, viewTenantId, in.AccountIds)
+			profile, err = s.botProfileViewByAccountIds(ctx, profileId, 0, in.AccountIds)
 		}
 	}
 	if err != nil {
