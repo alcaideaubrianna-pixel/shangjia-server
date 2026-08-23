@@ -205,6 +205,7 @@ func TestApplyCollectIntroFeeTruncate(t *testing.T) {
 		{name: "removes all text when first line matches", text: "介绍费 7888\nKK", want: ""},
 		{name: "supports windows line endings", text: "标题\r\n介绍费：7888\r\nKK", want: "标题"},
 		{name: "matches intro fee with invisible format characters", text: "标题\n介\u200b绍\u200d费：7888(香水湾💦)⁣‌\n联系方式", want: "标题"},
+		{name: "matches recommendation fee", text: "标题\n推荐费：7888 情诗X\n介绍费:7889\u2060⁣‌", want: "标题"},
 		{name: "keeps text without keyword", text: "标题\n联系方式\nKK", want: "标题\n联系方式\nKK"},
 		{name: "removes leading profile metadata", text: "昵称：朴朴\n编号：XXX123\n同行：否\n正常文案", want: "正常文案"},
 		{name: "removes leading latin and chinese codes", text: "XXX123\n朴朴123123\n正常文案", want: "正常文案"},
@@ -244,6 +245,7 @@ func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 		{name: "long suffix on next line", text: "正文\n介绍费7888\nBLYS", original: "正文\n介绍费7888\nBLYS", suffix: "AA", want: "正文\n介绍费 7888 AA"},
 		{name: "preserves following content", text: "正文\n介绍费 7888 KK\n联系方式", original: "正文\n介绍费 7888 KK\n联系方式", suffix: "AA", want: "正文\n联系方式\n介绍费 7888 AA"},
 		{name: "amount punctuation", text: "正文\n介绍费用：7,888.50 元 KK", original: "正文\n介绍费用：7,888.50 元 KK", suffix: "AA", want: "正文\n介绍费 7,888.50 元 AA"},
+		{name: "recommendation fee removes duplicated intro fee", text: "推荐费：7888 情诗X\n七七xq\n介绍费:7889\u2060⁣‌", original: "推荐费：7888 情诗X\n七七xq\n介绍费:7889\u2060⁣‌", suffix: "七七xq", want: "介绍费 7888 七七xq"},
 		{name: "windows lines", text: "正文\r\n介绍费：7888\r\nKK", original: "正文\r\n介绍费：7888\r\nKK", suffix: "AA", want: "正文\n介绍费 7888 AA"},
 		{name: "no fee", text: "正文\n联系方式", original: "正文\n联系方式", suffix: "AA", want: "正文\n联系方式"},
 		{name: "disabled", text: "正文\n介绍费 7888 KK", original: "正文\n介绍费 7888 KK", suffix: "", want: "正文\n介绍费 7888 KK"},
@@ -254,6 +256,19 @@ func TestApplyCollectIntroFeeSuffix(t *testing.T) {
 				t.Fatalf("applyCollectIntroFeeSuffix() = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestIsCollectIntroFeeStandaloneSuffix(t *testing.T) {
+	for _, text := range []string{"KK", "BLYS", "七七xq", "A5"} {
+		if !isCollectIntroFeeStandaloneSuffix(text) {
+			t.Fatalf("%q should be recognized as fee suffix", text)
+		}
+	}
+	for _, text := range []string{"联系方式", "联系七七", "正文内容"} {
+		if isCollectIntroFeeStandaloneSuffix(text) {
+			t.Fatalf("%q should be preserved as content", text)
+		}
 	}
 }
 

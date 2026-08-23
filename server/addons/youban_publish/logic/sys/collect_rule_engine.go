@@ -21,8 +21,8 @@ var (
 	collectStandaloneCodeCaptionRule = regexp.MustCompile(`^[A-Za-z]{1,4}\d{3,6}$`)
 	collectMaterialMetaLineRule      = regexp.MustCompile(`^\s*(?:昵称|编号|同行)\s*(?:[:：=].*)?\s*$`)
 	collectMaterialCodeLineRule      = regexp.MustCompile(`^\s*(?:(?:[A-Za-z]{1,8}[-_ ]?\d{3,10}|[\p{Han}]{1,8}\d{3,10})(?:\s+|$))+\s*$`)
-	collectIntroFeeAmountRule        = regexp.MustCompile(`介绍费(?:用)?\s*[:：=]?\s*([¥￥]?\s*\d[\d,.]*(?:\s*(?:元|万))?)`)
-	collectIntroFeeStandaloneSuffix  = regexp.MustCompile(`^[A-Za-z]{1,16}$`)
+	collectIntroFeeAmountRule        = regexp.MustCompile(`(?:介绍费(?:用)?|推荐费(?:用)?)\s*[:：=]?\s*([¥￥]?\s*\d[\d,.]*(?:\s*(?:元|万))?)`)
+	collectIntroFeeStandaloneSuffix  = regexp.MustCompile(`^[\p{Han}A-Za-z0-9]{1,32}$`)
 )
 
 type collectRuleDecision struct {
@@ -377,7 +377,7 @@ func applyCollectIntroFeeTruncate(text string) string {
 	for index, line := range lines {
 		// Match against a normalized copy only; preserve the original text,
 		// emoji, spacing, and formatting in all retained lines.
-		if strings.Contains(normalizeCollectKeywordText(line), "介绍费") {
+		if collectIntroFeeAmount(line) != "" {
 			cutoff = index
 			changed = true
 			break
@@ -420,7 +420,7 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 	kept := make([]string, 0, len(lines)+1)
 	removeNextSuffix := false
 	for _, line := range lines {
-		if removeNextSuffix && collectIntroFeeStandaloneSuffix.MatchString(strings.TrimSpace(line)) {
+		if removeNextSuffix && isCollectIntroFeeStandaloneSuffix(strings.TrimSpace(line)) {
 			removeNextSuffix = false
 			continue
 		}
@@ -437,6 +437,19 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 		return feeLine
 	}
 	return body + "\n" + feeLine
+}
+
+func isCollectIntroFeeStandaloneSuffix(text string) bool {
+	text = strings.TrimSpace(text)
+	if !collectIntroFeeStandaloneSuffix.MatchString(text) {
+		return false
+	}
+	for _, r := range text {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return true
+		}
+	}
+	return false
 }
 
 func collectIntroFeeAmount(text string) string {
