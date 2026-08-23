@@ -303,6 +303,7 @@ type ISysPublish interface {
 	CollectSourceDelete(ctx context.Context, in *sysin.IdsInp) (err error)
 	CollectSourceStatus(ctx context.Context, in *sysin.CollectStatusInp) (err error)
 	CollectSourceDown(ctx context.Context, in *sysin.CollectSourceDownInp) (res *sysin.CollectSourceDownModel, err error)
+	CollectSourceProfileIds(ctx context.Context, in *sysin.CollectSourceProfileIdsInp) (res *sysin.CollectSourceProfileIdsModel, err error)
 	CollectSourceHistoryStart(ctx context.Context, in *sysin.CollectSourceHistoryStartInp) (res *sysin.CollectHistoryTaskModel, err error)
 	CollectSourceReset(ctx context.Context, in *sysin.CollectSourceResetInp) (res *sysin.CollectSourceResetModel, err error)
 	CollectHistoryTaskList(ctx context.Context, in *sysin.CollectHistoryTaskListInp) (list []*sysin.CollectHistoryTaskModel, totalCount int, err error)

@@ -15,6 +15,36 @@ const collectSourceDownMessage = "采集源一键下架"
 
 const collectSourceDownDeleteBatchSize = 200
 
+func (s *sSysPublish) CollectSourceProfileIds(ctx context.Context, in *sysin.CollectSourceProfileIdsInp) (*sysin.CollectSourceProfileIdsModel, error) {
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil || in.Id <= 0 {
+		return nil, gerror.New("采集源ID不能为空")
+	}
+	source, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
+		Where("id", in.Id).
+		Where("tenant_id", account.TenantId).
+		Where("account_id", account.Id).
+		WhereNull("deleted_at").
+		One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取采集源失败")
+	}
+	if source.IsEmpty() {
+		return nil, gerror.New("采集源不存在")
+	}
+	ids, err := s.collectSourceProfileIds(ctx, in.Id, account.TenantId, account.Id)
+	if err != nil {
+		return nil, err
+	}
+	if ids == nil {
+		ids = []int64{}
+	}
+	return &sysin.CollectSourceProfileIdsModel{Ids: ids}, nil
+}
+
 func (s *sSysPublish) CollectSourceDown(ctx context.Context, in *sysin.CollectSourceDownInp) (*sysin.CollectSourceDownModel, error) {
 	account, err := s.currentAccount(ctx)
 	if err != nil {

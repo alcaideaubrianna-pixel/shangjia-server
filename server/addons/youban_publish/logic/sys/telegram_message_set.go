@@ -59,42 +59,10 @@ func (s *sSysPublish) deleteTelegramMessagesLockedByChannel(ctx context.Context,
 	}
 	s.appendTelegramJobLog(ctx, job, "delete", "started", reason+"，开始删除TG消息")
 	startedAt := time.Now()
-	batches := telegramDeleteMessageBatches(messages, telegramDeleteMessagesMaxItems)
-	for _, batch := range batches {
-		messageIds := make([]int, 0, len(batch.messages))
-		for _, item := range batch.messages {
-			messageIds = append(messageIds, int(item.MessageId))
-		}
-		deleted, batchErr := bot.DeleteMessages(ctx, &tgbot.DeleteMessagesParams{ChatID: batch.chatId, MessageIDs: messageIds})
-		if batchErr == nil && deleted {
-			if err = markTelegramMessagesDeleted(ctx, batch.messages); err != nil {
-				return err
-			}
-			continue
-		}
-		if batchErr == nil {
-			batchErr = gerror.New("Telegram批量删除返回失败")
-		}
-		if isTelegramBotRemovedError(batchErr) {
-			if err = markTelegramMessagesUndeletable(ctx, batch.messages); err != nil {
-				return err
-			}
-			s.enqueueTelegramMessageDeleteFallback(ctx, job, reason, batchErr)
-			continue
-		}
-		if isTelegramMessagePermanentlyUndeletableError(batchErr) {
-			if err = markTelegramMessagesUndeletable(ctx, batch.messages); err != nil {
-				return err
-			}
-			s.enqueueTelegramMessageDeleteFallback(ctx, job, reason, batchErr)
-			continue
-		}
-		g.Log().Debugf(ctx, "批量删除TG消息失败，回退逐条删除 job:%d chat:%s count:%d err:%+v", job.Id, batch.chatId, len(batch.messages), batchErr)
-		if err = s.deleteTelegramMessagesIndividually(ctx, bot, job, batch.messages, reason); err != nil {
-			return err
-		}
+	if err = s.deleteTelegramMessagesIndividually(ctx, bot, job, messages, reason); err != nil {
+		return err
 	}
-	g.Log().Infof(ctx, "TG消息删除完成 job:%d messages:%d batches:%d duration:%s", job.Id, len(messages), len(batches), time.Since(startedAt).Round(time.Millisecond))
+	g.Log().Infof(ctx, "TG消息逐条删除完成 job:%d messages:%d duration:%s", job.Id, len(messages), time.Since(startedAt).Round(time.Millisecond))
 	s.appendTelegramJobLog(ctx, job, "delete", "success", reason+"，TG消息删除成功")
 	return nil
 }

@@ -75,6 +75,14 @@ func (c *cPublish) CollectSourceDown(ctx context.Context, req *publish.CollectSo
 	return &publish.CollectSourceDownRes{CollectSourceDownModel: data}, nil
 }
 
+func (c *cPublish) CollectSourceProfileIds(ctx context.Context, req *publish.CollectSourceProfileIdsReq) (res *publish.CollectSourceProfileIdsRes, err error) {
+	data, err := service.SysPublish().CollectSourceProfileIds(ctx, &req.CollectSourceProfileIdsInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.CollectSourceProfileIdsRes{CollectSourceProfileIdsModel: data}, nil
+}
+
 func (c *cPublish) CollectSourceHistoryStart(ctx context.Context, req *publish.CollectSourceHistoryStartReq) (res *publish.CollectSourceHistoryStartRes, err error) {
 	data, err := service.SysPublish().CollectSourceHistoryStart(ctx, &req.CollectSourceHistoryStartInp)
 	if err != nil {

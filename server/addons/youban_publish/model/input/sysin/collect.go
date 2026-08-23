@@ -417,6 +417,14 @@ type CollectSourceDownInp struct {
 	DeleteProfiles bool  `json:"deleteProfiles" dc:"下架后删除资料"`
 }
 
+type CollectSourceProfileIdsInp struct {
+	Id int64 `json:"id" v:"required|min:1#采集源ID不能为空|采集源ID不能为空" dc:"采集源ID"`
+}
+
+type CollectSourceProfileIdsModel struct {
+	Ids []int64 `json:"ids" dc:"采集源关联资料ID列表"`
+}
+
 type CollectSourceDownModel struct {
 	SourceId     int64 `json:"sourceId" dc:"采集源ID"`
 	TaskCount    int   `json:"taskCount" dc:"关联任务数"`

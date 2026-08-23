@@ -72,6 +72,15 @@ type CollectSourceDownRes struct {
 	*sysin.CollectSourceDownModel
 }
 
+type CollectSourceProfileIdsReq struct {
+	g.Meta `path:"/publish/collect/source/profile/ids" method:"get" tags:"上架插件" summary:"获取采集源关联资料ID"`
+	sysin.CollectSourceProfileIdsInp
+}
+
+type CollectSourceProfileIdsRes struct {
+	*sysin.CollectSourceProfileIdsModel
+}
+
 type CollectSourceHistoryStartReq struct {
 	g.Meta `path:"/publish/collect/source/history/start" method:"post" tags:"上架插件" summary:"启动采集源历史采集"`
 	sysin.CollectSourceHistoryStartInp
