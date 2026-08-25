@@ -213,6 +213,8 @@ func TestApplyCollectIntroFeeTruncate(t *testing.T) {
 		{name: "matches brokerage service fee", text: "标题\n中介服务费7888\n尾部", want: "标题"},
 		{name: "matches variation selectors inside keyword", text: "标题\n介︇绍️费：7888\n尾部", want: "标题"},
 		{name: "cleans joined suffix with invisible tail", text: "雷点（不能接受的）：拍照 户外 手指 肛交 多\n介绍费7888TT​‌⁣‌​​​‌​‌​​‌‌‌‌​‌‌‌‌​​‌‌‌​‌‌‌​‌​‌‌‌‌‌‌​​‌​​​​‌‌​‌‌​​​​​‌‌‌​‌​‌​​​‌‌​‌‌‌​‌‌​‌⁤", want: "雷点（不能接受的）：拍照 户外 手指 肛交 多"},
+		{name: "removes source mark before intro fee", text: "个人优点:反差、私生活少、嫩\n不能接受金主:身高170以下、太胖\n情诗w41\n七七xq\n介绍费:7889", want: "个人优点:反差、私生活少、嫩\n不能接受金主:身高170以下、太胖\n七七xq"},
+		{name: "removes obfuscated source mark line", text: "正文\n情\u2060诗 W41\n介绍费:7889", want: "正文"},
 		{name: "keeps text without keyword", text: "标题\n联系方式\nKK", want: "标题\n联系方式\nKK"},
 		{name: "removes leading profile metadata", text: "昵称：朴朴\n编号：XXX123\n同行：否\n正常文案", want: "正常文案"},
 		{name: "removes leading latin and chinese codes", text: "XXX123\n朴朴123123\n正常文案", want: "正常文案"},
@@ -289,6 +291,26 @@ func TestBuildCollectRuleDecisionRestoresIntroFeeAfterTruncate(t *testing.T) {
 		"replace_from": gvar.New([]string{}), "replace_to": gvar.New([]string{}),
 	}
 	if got, want := buildCollectRuleDecision(event, nil, rule).Text, "正文\n介绍费 7888 AA"; got != want {
+		t.Fatalf("decision text = %q, want %q", got, want)
+	}
+}
+
+func TestBuildCollectRuleDecisionRemovesOriginalSourceMarkAndPreservesFooter(t *testing.T) {
+	event := gdb.Record{
+		"raw_text":    gvar.New("个人优点:反差、私生活少、嫩\n情诗w41\n介绍费:7888 情诗X"),
+		"media_count": gvar.New(2),
+	}
+	rule := gdb.Record{
+		"truncate_intro_fee_enabled": gvar.New(true),
+		"footer_enabled":             gvar.New(1),
+		"footer_markdown":            gvar.New("七七xq\n介绍费:7889"),
+		"delete_lines":               gvar.New([]string{}),
+		"delete_texts":               gvar.New([]string{}),
+		"replace_from":               gvar.New([]string{}),
+		"replace_to":                 gvar.New([]string{}),
+	}
+	want := "个人优点:反差、私生活少、嫩\n七七xq\n介绍费:7889"
+	if got := buildCollectRuleDecision(event, nil, rule).Text; got != want {
 		t.Fatalf("decision text = %q, want %q", got, want)
 	}
 }

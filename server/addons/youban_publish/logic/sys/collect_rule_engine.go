@@ -398,7 +398,8 @@ func applyCollectIntroFeeTruncate(text string) string {
 	}
 	kept := make([]string, 0, len(lines)-start)
 	for _, line := range lines[start:] {
-		if collectMaterialMetaLineRule.MatchString(strings.TrimSpace(line)) {
+		trimmed := strings.TrimSpace(line)
+		if collectMaterialMetaLineRule.MatchString(trimmed) || isCollectIntroFeeSourceMarkLine(trimmed) {
 			changed = true
 			continue
 		}
@@ -408,6 +409,10 @@ func applyCollectIntroFeeTruncate(text string) string {
 		return strings.TrimSpace(strings.Join(kept, "\n"))
 	}
 	return text
+}
+
+func isCollectIntroFeeSourceMarkLine(line string) bool {
+	return strings.Contains(normalizeCollectKeywordText(line), "情诗")
 }
 
 func applyCollectIntroFeeSuffix(text, original, suffix string) string {
