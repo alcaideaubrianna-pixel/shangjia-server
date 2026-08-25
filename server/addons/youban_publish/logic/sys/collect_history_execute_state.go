@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gotd/td/tg"
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -100,20 +101,38 @@ func (s *sSysPublish) pauseCollectHistoryTask(ctx context.Context, task *sysin.C
 	return s.enqueueCollectHistoryTask(ctx, task.Id, delay)
 }
 
-func (s *sSysPublish) collectHistoryChannel(ctx context.Context, source *sysin.CollectSourceModel) (*sysin.ChannelCacheModel, int64, int64, error) {
+func (s *sSysPublish) collectHistoryPeer(ctx context.Context, source *sysin.CollectSourceModel) (*sysin.ChannelCacheModel, tg.InputPeerClass, error) {
 	cache, err := s.tgChannelCacheByChannelId(ctx, source.TenantId, source.TgAccountId, source.SourceChatId)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, nil, err
 	}
-	channelID, err := strconv.ParseInt(cache.ChannelId, 10, 64)
+	peer, err := collectHistoryInputPeer(cache)
 	if err != nil {
-		return nil, 0, 0, gerror.New("频道ID无效，请刷新频道缓存")
+		return nil, nil, err
+	}
+	return cache, peer, nil
+}
+
+func collectHistoryInputPeer(cache *sysin.ChannelCacheModel) (tg.InputPeerClass, error) {
+	if cache == nil {
+		return nil, gerror.New("群聊 / 频道缓存不存在，请刷新缓存")
+	}
+	if cache.IsBroadcast != 1 && cache.IsMegagroup != 1 {
+		chatID, ok := parseBasicGroupChatID(cache.ChannelId)
+		if !ok {
+			return nil, gerror.New("普通群聊ID无效，请刷新群聊缓存")
+		}
+		return &tg.InputPeerChat{ChatID: chatID}, nil
+	}
+	channelID, err := strconv.ParseInt(strings.TrimPrefix(strings.TrimSpace(cache.ChannelId), "-100"), 10, 64)
+	if err != nil || channelID <= 0 {
+		return nil, gerror.New("频道ID无效，请刷新频道缓存")
 	}
 	accessHash, err := strconv.ParseInt(cache.AccessHash, 10, 64)
-	if err != nil {
-		return nil, 0, 0, gerror.New("频道AccessHash无效，请刷新频道缓存")
+	if err != nil || accessHash == 0 {
+		return nil, gerror.New("频道AccessHash无效，请刷新频道缓存")
 	}
-	return cache, channelID, accessHash, nil
+	return &tg.InputPeerChannel{ChannelID: channelID, AccessHash: accessHash}, nil
 }
 
 func collectHistoryCutoff(task *sysin.CollectHistoryTaskModel) *gtime.Time {

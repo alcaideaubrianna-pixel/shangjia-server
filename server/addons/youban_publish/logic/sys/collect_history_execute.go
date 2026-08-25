@@ -160,7 +160,7 @@ func (s *sSysPublish) executeCollectHistoryTask(ctx context.Context, client *tel
 	if err != nil {
 		return err
 	}
-	cache, channelID, accessHash, err := s.collectHistoryChannel(ctx, source)
+	cache, peer, err := s.collectHistoryPeer(ctx, source)
 	if err != nil {
 		return err
 	}
@@ -174,10 +174,10 @@ func (s *sSysPublish) executeCollectHistoryTask(ctx context.Context, client *tel
 	if _, err = client.Self(ctx); err != nil {
 		return err
 	}
-	return s.scanCollectHistory(ctx, client, task, source, channelID, accessHash)
+	return s.scanCollectHistory(ctx, client, task, source, peer)
 }
 
-func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.Client, task *sysin.CollectHistoryTaskModel, source *sysin.CollectSourceModel, channelID int64, accessHash int64) error {
+func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.Client, task *sysin.CollectHistoryTaskModel, source *sysin.CollectSourceModel, peer tg.InputPeerClass) error {
 	offsetID := task.OffsetId
 	cutoff := collectHistoryCutoff(task)
 	for page := 0; page < collectHistoryPagesPerRun(ctx); page++ {
@@ -203,7 +203,7 @@ func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.C
 			}
 		}
 		pageLimit := collectHistoryNextPageLimit(pending.Total, pendingLimit)
-		messages, err := collectHistoryPage(ctx, client, channelID, accessHash, offsetID, pageLimit)
+		messages, err := collectHistoryPage(ctx, client, peer, offsetID, pageLimit)
 		if err != nil {
 			return err
 		}
@@ -292,13 +292,13 @@ func collectHistoryNextOffset(current int, messages []*tg.Message) int {
 	return next
 }
 
-func collectHistoryPage(ctx context.Context, client *telegram.Client, channelID int64, accessHash int64, offsetID int, limit int) ([]*tg.Message, error) {
+func collectHistoryPage(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, offsetID int, limit int) ([]*tg.Message, error) {
 	history := collectorservice.AccountHistory()
 	if history == nil {
 		return nil, gerror.New("Telegram历史采集执行器未注册")
 	}
 	messages, err := history.FetchPage(ctx, client, &collectorin.AccountHistoryPageRequest{
-		ChannelID: channelID, AccessHash: accessHash, OffsetID: offsetID, Limit: limit,
+		Peer: peer, OffsetID: offsetID, Limit: limit,
 	})
 	if delay, ok := history.RetryDelay(err); ok {
 		return nil, &collectHistoryPauseError{delay: delay, err: err}

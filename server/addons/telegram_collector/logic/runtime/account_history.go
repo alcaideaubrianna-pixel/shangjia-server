@@ -29,14 +29,14 @@ func init() {
 }
 
 func (h *accountHistory) FetchPage(ctx context.Context, client *telegram.Client, request *sysin.AccountHistoryPageRequest) ([]*tg.Message, error) {
-	if client == nil || request == nil || request.ChannelID <= 0 || request.AccessHash == 0 || request.Limit <= 0 {
+	if client == nil || !validAccountHistoryPageRequest(request) {
 		return nil, gerror.New("Telegram历史分页参数无效")
 	}
 	var result tg.MessagesMessagesClass
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
 		result, err = client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
-			Peer:     &tg.InputPeerChannel{ChannelID: request.ChannelID, AccessHash: request.AccessHash},
+			Peer:     request.Peer,
 			OffsetID: request.OffsetID, Limit: request.Limit,
 		})
 		if err == nil {
@@ -56,6 +56,20 @@ func (h *accountHistory) FetchPage(ctx context.Context, client *telegram.Client,
 		}
 	}
 	return accountHistoryMessages(result), nil
+}
+
+func validAccountHistoryPageRequest(request *sysin.AccountHistoryPageRequest) bool {
+	if request == nil || request.Peer == nil || request.Limit <= 0 {
+		return false
+	}
+	switch peer := request.Peer.(type) {
+	case *tg.InputPeerChat:
+		return peer.ChatID > 0
+	case *tg.InputPeerChannel:
+		return peer.ChannelID > 0 && peer.AccessHash != 0
+	default:
+		return false
+	}
 }
 
 func (h *accountHistory) RetryDelay(err error) (time.Duration, bool) {

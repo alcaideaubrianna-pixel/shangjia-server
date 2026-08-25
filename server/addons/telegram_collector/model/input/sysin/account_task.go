@@ -1,6 +1,10 @@
 package sysin
 
-import "time"
+import (
+	"time"
+
+	"github.com/gotd/td/tg"
+)
 
 const (
 	AccountTaskStatusPending     = "pending"
@@ -88,8 +92,7 @@ type AccountTaskStatusStat struct {
 }
 
 type AccountHistoryPageRequest struct {
-	ChannelID  int64
-	AccessHash int64
-	OffsetID   int
-	Limit      int
+	Peer     tg.InputPeerClass
+	OffsetID int
+	Limit    int
 }
