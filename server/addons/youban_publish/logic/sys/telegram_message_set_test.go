@@ -55,3 +55,23 @@ func TestIsTelegramMessagePermanentlyUndeletableError(t *testing.T) {
 		})
 	}
 }
+
+func TestIsTelegramDeleteRetryableError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "http2 goaway", err: errors.New("http2: Transport received Server's graceful shutdown GOAWAY"), want: true},
+		{name: "bad gateway", err: errors.New("502 Bad Gateway"), want: true},
+		{name: "rate limited", err: errors.New("Too Many Requests: retry after 11"), want: true},
+		{name: "permission", err: errors.New("message can't be deleted"), want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isTelegramDeleteRetryableError(test.err); got != test.want {
+				t.Fatalf("isTelegramDeleteRetryableError() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}

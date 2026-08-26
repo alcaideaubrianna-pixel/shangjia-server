@@ -69,6 +69,7 @@ func (s *sSysPublish) deleteTelegramMessagesLockedByChannel(ctx context.Context,
 
 func (s *sSysPublish) deleteTelegramMessagesIndividually(ctx context.Context, bot *tgbot.Bot, job telegramJobRecord, messages []telegramDeleteMessage, reason string) error {
 	fallbackQueued := false
+	var retryErrors []string
 	for _, item := range messages {
 		chatId := normalizeTelegramChannelChatID(item.TargetChatId)
 		_, err := bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{ChatID: chatId, MessageID: int(item.MessageId)})
@@ -100,11 +101,18 @@ func (s *sSysPublish) deleteTelegramMessagesIndividually(ctx context.Context, bo
 			}
 			message := fmt.Sprintf("%s，删除TG消息失败，频道:%s，消息:%d，错误:%s", reason, chatId, item.MessageId, err.Error())
 			s.appendTelegramJobLog(ctx, job, "delete", "failed", message)
+			if isTelegramDeleteRetryableError(err) {
+				retryErrors = append(retryErrors, message)
+				continue
+			}
 			return gerror.New(message)
 		}
 		if err = markTelegramMessagesDeleted(ctx, []telegramDeleteMessage{item}); err != nil {
 			return err
 		}
+	}
+	if len(retryErrors) > 0 {
+		return gerror.New(strings.Join(retryErrors, "; "))
 	}
 	return nil
 }
@@ -208,4 +216,21 @@ func isTelegramMessageAlreadyDeletedError(err error) bool {
 		errors.Is(err, tgbot.ErrorNotFound) ||
 		strings.Contains(message, "bad request") ||
 		strings.Contains(message, "not found")
+}
+
+func isTelegramDeleteRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, keyword := range []string{
+		"too many requests", "retry after", "timeout", "deadline exceeded",
+		"goaway", "graceful shutdown", "connection reset", "connection refused",
+		"broken pipe", "bad gateway", "eof",
+	} {
+		if strings.Contains(message, keyword) {
+			return true
+		}
+	}
+	return false
 }
