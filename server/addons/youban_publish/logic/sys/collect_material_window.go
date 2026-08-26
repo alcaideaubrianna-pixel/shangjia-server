@@ -381,7 +381,10 @@ func (s *sSysPublish) mergeCollectMaterialContent(ctx context.Context, display g
 }
 
 func collectMaterialEventOlderThan(event gdb.Record, age time.Duration) bool {
-	eventAt := collectMaterialEventAt(event)
+	// History imports retain Telegram's original received_at. Grouping must wait
+	// from local ingestion, otherwise an old album is classified before all of
+	// its messages have been merged.
+	eventAt := collectMaterialEventCreatedAt(event)
 	if eventAt.IsZero() {
 		return false
 	}

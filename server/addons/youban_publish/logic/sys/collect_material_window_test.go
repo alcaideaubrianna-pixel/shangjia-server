@@ -66,9 +66,19 @@ func collectTestMediaByEvent(rows []gdb.Record) map[int64][]collectMediaItem {
 
 func TestCollectMaterialEventOlderThanUsesDatabaseWallClock(t *testing.T) {
 	databaseTime := time.Now().Add(-4 * time.Minute).UTC()
-	event := gdb.Record{"received_at": gvar.New(databaseTime)}
+	event := gdb.Record{"created_at": gvar.New(databaseTime)}
 	if !collectMaterialEventOlderThan(event, 3*time.Minute) {
 		t.Fatalf("database wall-clock event should be considered older than grouping window")
+	}
+}
+
+func TestCollectMaterialEventOlderThanWaitsFromHistoricalIngestion(t *testing.T) {
+	event := gdb.Record{
+		"received_at": gvar.New(time.Now().Add(-24 * time.Hour)),
+		"created_at":  gvar.New(time.Now().Add(-time.Minute)),
+	}
+	if collectMaterialEventOlderThan(event, 3*time.Minute) {
+		t.Fatal("historical media group should wait from local ingestion time")
 	}
 }
 

@@ -530,6 +530,17 @@ func (s *sSysPublish) ignoreCollectEvent(ctx context.Context, eventId int64, mes
 	if err := s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusIgnored, message); err != nil {
 		return err
 	}
+	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
+	if _, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Where(mediaCols.EventId, eventId).
+		WhereIn(mediaCols.CacheStatus, []string{collectMediaCachePending, collectMediaCacheDownloading}).
+		Data(g.Map{
+			mediaCols.CacheStatus:  collectMediaCacheCanceled,
+			mediaCols.ErrorMessage: message,
+			mediaCols.UpdatedAt:    gtime.Now(),
+		}).Update(); err != nil {
+		return gerror.Wrap(err, "取消已忽略事件媒体失败")
+	}
 	return s.ignorePairedCollectVerifyEvents(ctx, eventId, message)
 }
 

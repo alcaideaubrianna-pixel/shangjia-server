@@ -41,3 +41,14 @@ func TestCollectEventIgnoreType(t *testing.T) {
 		})
 	}
 }
+
+func TestCollectEventTerminalStatus(t *testing.T) {
+	for _, status := range []string{sysin.CollectEventStatusIgnored, sysin.CollectEventStatusFailed} {
+		if !collectEventTerminalStatus(status) {
+			t.Fatalf("status %q should be terminal", status)
+		}
+	}
+	if collectEventTerminalStatus(sysin.CollectEventStatusGroupCollect) {
+		t.Fatal("group_collecting should remain processable")
+	}
+}

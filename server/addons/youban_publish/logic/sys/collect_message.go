@@ -146,11 +146,17 @@ func (s *sSysPublish) mergeCollectMessageEvent(ctx context.Context, event gdb.Re
 	eventDao := pdao.YoubanPublishCollectEvent
 	eventCols := eventDao.Columns()
 	eventId := event[eventCols.Id].Int64()
-	shouldMerge := collectExistingEventShouldMerge(event, message.Media)
+	shouldMerge, err := s.collectExistingEventShouldMerge(ctx, event, message.Media, rawText)
+	if err != nil {
+		return eventId, err
+	}
 	if collectEventAlreadyMatched(event[eventCols.Status].String()) && !shouldMerge {
 		return eventId, nil
 	}
-	_, err := eventDao.Ctx(ctx).Where(eventCols.Id, eventId).Data(g.Map{
+	if collectEventTerminalStatus(event[eventCols.Status].String()) && !shouldMerge {
+		return eventId, nil
+	}
+	_, err = eventDao.Ctx(ctx).Where(eventCols.Id, eventId).Data(g.Map{
 		eventCols.Status:       collectMergedEventStatus(event, message),
 		eventCols.ErrorMessage: "",
 		eventCols.UpdatedAt:    now,
@@ -196,6 +202,13 @@ func (s *sSysPublish) mergeCollectMessageEvent(ctx context.Context, event gdb.Re
 	if err = s.upsertCollectEventMedia(ctx, updated, message.Media); err != nil {
 		return eventId, err
 	}
+	if collectEventTerminalStatus(event[eventCols.Status].String()) {
+		mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
+		_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+			Where(mediaCols.EventId, eventId).
+			Where(mediaCols.CacheStatus, collectMediaCacheCanceled).
+			Data(g.Map{mediaCols.CacheStatus: collectMediaCachePending, mediaCols.ErrorMessage: "", mediaCols.UpdatedAt: now}).Update()
+	}
 	s.appendCollectEventLogForRecord(ctx, updated, "ingest", "updated", "采集事件已合并媒体", "")
 	return eventId, nil
 }
@@ -211,8 +224,32 @@ func collectMergedEventStatus(event gdb.Record, message *CollectMessage) string 
 	return sysin.CollectEventStatusPending
 }
 
-func collectExistingEventShouldMerge(event gdb.Record, media []collectMediaItem) bool {
-	return strings.TrimSpace(event["source_grouped_id"].String()) != "" && len(normalizeCollectMediaItems(media)) > 0
+func (s *sSysPublish) collectExistingEventShouldMerge(ctx context.Context, event gdb.Record, media []collectMediaItem, rawText string) (bool, error) {
+	if strings.TrimSpace(event["raw_text"].String()) == "" && strings.TrimSpace(rawText) != "" {
+		return true, nil
+	}
+	items := normalizeCollectMediaItems(media)
+	if strings.TrimSpace(event["source_grouped_id"].String()) == "" || len(items) == 0 {
+		return false, nil
+	}
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		keys = append(keys, collectMediaSourceKey(item))
+	}
+	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
+	count, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+		Where(mediaCols.EventId, event["id"].Int64()).
+		WhereIn(mediaCols.SourceMediaKey, uniqueStrings(keys)).
+		Count()
+	if err != nil {
+		return false, gerror.Wrap(err, "检查采集媒体组新增媒体失败")
+	}
+	return count < len(uniqueStrings(keys)), nil
+}
+
+func collectEventTerminalStatus(status string) bool {
+	status = strings.TrimSpace(status)
+	return status == sysin.CollectEventStatusIgnored || status == sysin.CollectEventStatusFailed
 }
 
 func normalizeCollectMediaItems(media []collectMediaItem) []collectMediaItem {
