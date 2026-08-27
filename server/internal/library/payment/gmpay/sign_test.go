@@ -77,10 +77,10 @@ func TestParseCreateResponseReadsActualAmount(t *testing.T) {
 	}
 }
 
-func TestCreateRequestUsesFiatCurrencyForUSDTTrade(t *testing.T) {
+func TestCreateRequestUsesConfiguredSettlementCurrencyForUSDTTrade(t *testing.T) {
 	client := New(&model.PayConfig{
 		GMPayPid: "102699979444", GMPayKey: "secret",
-		GMPayToken: "usdt", GMPayNetwork: "tron",
+		GMPayCurrency: "usd", GMPayToken: "usdt", GMPayNetwork: "tron",
 	})
 	req, err := client.createRequest(&entity.PayLog{
 		OutTradeNo: "ORD-1", PayAmount: 50, TradeType: "usdt",
@@ -94,8 +94,16 @@ func TestCreateRequestUsesFiatCurrencyForUSDTTrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	if !strings.Contains(string(body), `"currency":"CNY"`) || strings.Contains(string(body), `"currency":"usdt"`) {
+	if !strings.Contains(string(body), `"currency":"USD"`) || strings.Contains(string(body), `"currency":"usdt"`) {
 		t.Fatalf("unexpected request body: %s", body)
+	}
+}
+
+func TestCreateRequestRejectsInvalidSettlementCurrency(t *testing.T) {
+	client := New(&model.PayConfig{GMPayPid: "1000", GMPayCurrency: "usdt"})
+	_, err := client.createRequest(&entity.PayLog{})
+	if err == nil || !strings.Contains(err.Error(), "三位代码") {
+		t.Fatalf("error = %v, want currency validation", err)
 	}
 }
 

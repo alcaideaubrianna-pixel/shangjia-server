@@ -152,11 +152,12 @@ type PayConfig struct {
 	QQPayMchId  string `json:"payQQPayMchId"`
 	QQPayApiKey string `json:"payQQPayApiKey"`
 	// GMPay
-	GMPayGateway string `json:"payGMPayGateway"`
-	GMPayPid     string `json:"payGMPayPid"`
-	GMPayKey     string `json:"payGMPayKey"`
-	GMPayToken   string `json:"payGMPayToken"`
-	GMPayNetwork string `json:"payGMPayNetwork"`
+	GMPayGateway  string `json:"payGMPayGateway"`
+	GMPayPid      string `json:"payGMPayPid"`
+	GMPayKey      string `json:"payGMPayKey"`
+	GMPayCurrency string `json:"payGMPayCurrency"`
+	GMPayToken    string `json:"payGMPayToken"`
+	GMPayNetwork  string `json:"payGMPayNetwork"`
 	// 彩虹易支付
 	RainbowGateway string `json:"payRainbowGateway"`
 	RainbowPid     string `json:"payRainbowPid"`

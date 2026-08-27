@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	defaultCurrency = "CNY"
+	defaultCurrency = "USD"
 	gmpayOrderAPI   = "/payments/gmpay/v1/order/create-transaction"
 )
 
@@ -134,11 +134,18 @@ func (h *GMPay) createRequest(pay *entity.PayLog) (createTransactionRequest, err
 	if pay == nil {
 		return createTransactionRequest{}, gerror.New("支付订单不能为空")
 	}
+	currency := strings.ToUpper(strings.TrimSpace(h.config.GMPayCurrency))
+	if currency == "" {
+		currency = defaultCurrency
+	}
+	if len(currency) != 3 {
+		return createTransactionRequest{}, gerror.New("GMPay 结算币种必须是三位代码，例如 USD 或 CNY")
+	}
 	req := createTransactionRequest{
 		Pid:         strings.TrimSpace(h.config.GMPayPid),
 		OrderID:     pay.OutTradeNo,
 		Amount:      pay.PayAmount,
-		Currency:    defaultCurrency,
+		Currency:    currency,
 		NotifyURL:   pay.NotifyUrl,
 		RedirectURL: pay.ReturnUrl,
 		Name:        pay.Subject,
