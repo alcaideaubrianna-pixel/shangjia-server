@@ -46,17 +46,20 @@ func TestIsPaymentSuccessSupportsLegacyStatusFields(t *testing.T) {
 	}
 }
 
-func TestNotifyUsesActualAmountAndOrderID(t *testing.T) {
+func TestNotifyKeepsSettlementAmountSeparateFromTokenAmount(t *testing.T) {
 	notify := &notifyRequest{
 		Status:             2,
 		OrderID:            "ORD-2",
-		Amount:             30,
-		ActualAmount:       30.01,
+		Amount:             100,
+		ActualAmount:       100.0001,
 		BlockTransactionID: "tx-2",
 	}
 
-	if got := firstPositive(notify.ActualAmount, notify.Amount); got != 30.01 {
-		t.Fatalf("actual amount = %v, want 30.01", got)
+	if notify.Amount != 100 {
+		t.Fatalf("settlement amount = %v, want 100", notify.Amount)
+	}
+	if notify.ActualAmount != 100.0001 {
+		t.Fatalf("token amount = %v, want 100.0001", notify.ActualAmount)
 	}
 	if notify.OrderID != "ORD-2" {
 		t.Fatalf("order id = %q, want %q", notify.OrderID, "ORD-2")

@@ -17,6 +17,8 @@ func (c *ControllerV1) NotifyGMPay(ctx context.Context, req *v1.NotifyGMPayReq) 
 		return nil, err
 	}
 
-	response.RText(g.RequestFromCtx(ctx), "ok")
+	request := g.RequestFromCtx(ctx)
+	request.Response.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	response.RText(request, "ok")
 	return
 }

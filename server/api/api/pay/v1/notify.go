@@ -42,11 +42,11 @@ type NotifyQQPayRes struct {
 
 // NotifyGMPayReq GMPay回调
 type NotifyGMPayReq struct {
-	g.Meta `path:"/pay/notify/gmpay" method:"all" tags:"支付异步通知" summary:"GMPay回调"`
+	g.Meta `path:"/pay/notify/gmpay" method:"post" tags:"支付异步通知" summary:"GMPay回调"`
 }
 
 type NotifyGMPayRes struct {
-	g.Meta `mime:"text/html" type:"string" example:"success"`
+	g.Meta `mime:"text/plain" type:"string" example:"ok"`
 	*payin.PayNotifyModel
 }
 

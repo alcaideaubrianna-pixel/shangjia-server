@@ -56,6 +56,10 @@ func (h *GMPay) Notify(ctx context.Context, in payin.NotifyInp) (res *payin.Noti
 		err = gerror.New("解析 GMPay 回调参数失败")
 		return
 	}
+	if strings.TrimSpace(notify.Pid) != strings.TrimSpace(h.config.GMPayPid) {
+		err = gerror.New("GMPay 回调商户 PID 不匹配")
+		return
+	}
 	if !isPaymentSuccess(notify) {
 		err = gerror.Newf("非交易支付成功状态，无需处理：status=%d status_code=%d code=%d", notify.Status, notify.StatusCode, notify.Code)
 		return
@@ -70,7 +74,8 @@ func (h *GMPay) Notify(ctx context.Context, in payin.NotifyInp) (res *payin.Noti
 		OutTradeNo:    notify.OrderID,
 		TransactionId: firstNonEmpty(notify.BlockTransactionID, notify.TradeID, notify.OrderID),
 		PayAt:         payAt,
-		ActualAmount:  firstPositive(notify.ActualAmount, notify.Amount),
+		// amount 是订单计价币种金额；actual_amount 是实际支付的代币数量，二者不能直接比较。
+		ActualAmount: notify.Amount,
 	}
 	return
 }
