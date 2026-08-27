@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"hotgo/internal/model"
+	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/payin"
 
 	"github.com/gogf/gf/v2/encoding/gjson"
@@ -20,9 +21,7 @@ import (
 )
 
 const (
-	defaultCurrency = "cny"
-	defaultToken    = "usdt"
-	defaultNetwork  = "tron"
+	defaultCurrency = "CNY"
 	gmpayOrderAPI   = "/payments/gmpay/v1/order/create-transaction"
 )
 
@@ -98,20 +97,10 @@ func (h *GMPay) CreateOrder(ctx context.Context, in payin.CreateOrderInp) (res *
 		return
 	}
 
-	req := createTransactionRequest{
-		Pid:         strings.TrimSpace(h.config.GMPayPid),
-		OrderID:     in.Pay.OutTradeNo,
-		Amount:      in.Pay.PayAmount,
-		Currency:    defaultCurrency,
-		NotifyURL:   in.Pay.NotifyUrl,
-		RedirectURL: in.Pay.ReturnUrl,
-		Name:        in.Pay.Subject,
+	req, err := h.createRequest(in.Pay)
+	if err != nil {
+		return nil, err
 	}
-	if strings.EqualFold(strings.TrimSpace(in.Pay.TradeType), "usdt") {
-		req.Currency = defaultToken
-	}
-	req.Token = firstNonEmpty(strings.TrimSpace(h.config.GMPayToken), defaultToken)
-	req.Network = firstNonEmpty(strings.TrimSpace(h.config.GMPayNetwork), defaultNetwork)
 	req.Signature = signParams(h.requestSignMap(req), h.config.GMPayKey)
 
 	resp, err := g.Client().SetTimeout(15*time.Second).ContentJson().Post(ctx, h.gateway()+gmpayOrderAPI, req)
@@ -139,6 +128,27 @@ func (h *GMPay) CreateOrder(ctx context.Context, in payin.CreateOrderInp) (res *
 		ReceiveAddress: rsp.Data.ReceiveAddress,
 	}
 	return
+}
+
+func (h *GMPay) createRequest(pay *entity.PayLog) (createTransactionRequest, error) {
+	if pay == nil {
+		return createTransactionRequest{}, gerror.New("支付订单不能为空")
+	}
+	req := createTransactionRequest{
+		Pid:         strings.TrimSpace(h.config.GMPayPid),
+		OrderID:     pay.OutTradeNo,
+		Amount:      pay.PayAmount,
+		Currency:    defaultCurrency,
+		NotifyURL:   pay.NotifyUrl,
+		RedirectURL: pay.ReturnUrl,
+		Name:        pay.Subject,
+	}
+	req.Token = strings.TrimSpace(h.config.GMPayToken)
+	req.Network = strings.TrimSpace(h.config.GMPayNetwork)
+	if (req.Token == "") != (req.Network == "") {
+		return createTransactionRequest{}, gerror.New("GMPay token 和 network 必须同时配置或同时留空")
+	}
+	return req, nil
 }
 
 func (h *GMPay) requestParams(request *ghttp.Request) map[string]string {
@@ -186,6 +196,7 @@ func (h *GMPay) parseCreateResponse(raw string) (rsp *createTransactionResponse,
 		StatusCode: json.Get("status_code").Int(),
 		Code:       json.Get("code").Int(),
 		Message:    firstNonEmpty(json.Get("message").String(), json.Get("msg").String()),
+		RequestID:  json.Get("request_id").String(),
 	}
 	if rsp.StatusCode == 0 {
 		rsp.StatusCode = rsp.Code
@@ -242,7 +253,11 @@ func (h *GMPay) parseCreateResponse(raw string) (rsp *createTransactionResponse,
 	rsp.PaymentURL = normalizePaymentURL(rsp.PaymentURL)
 
 	if rsp.StatusCode != 200 {
-		err = gerror.Newf("GMPay 创建订单失败：%s", firstNonEmpty(rsp.Message, raw))
+		message := firstNonEmpty(rsp.Message, raw)
+		if rsp.RequestID != "" {
+			message += "，request_id=" + rsp.RequestID
+		}
+		err = gerror.Newf("GMPay 创建订单失败：%s", message)
 		return
 	}
 	if rsp.PaymentURL == "" {

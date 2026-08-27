@@ -20,6 +20,7 @@ type createTransactionResponse struct {
 	Code       int    `json:"code"`
 	Message    string `json:"message"`
 	Msg        string `json:"msg"`
+	RequestID  string `json:"request_id"`
 	Data       struct {
 		PaymentURL     string  `json:"payment_url"`
 		TradeID        string  `json:"trade_id"`

@@ -1,9 +1,12 @@
 package gmpay
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"hotgo/internal/model"
+	"hotgo/internal/model/entity"
 )
 
 func TestSignParamsUsesGMPayHMACSHA256(t *testing.T) {
@@ -71,5 +74,43 @@ func TestParseCreateResponseReadsActualAmount(t *testing.T) {
 	}
 	if rsp.Data.ReceiveAddress != "TAddress" {
 		t.Fatalf("receive address = %q, want %q", rsp.Data.ReceiveAddress, "TAddress")
+	}
+}
+
+func TestCreateRequestUsesFiatCurrencyForUSDTTrade(t *testing.T) {
+	client := New(&model.PayConfig{
+		GMPayPid: "102699979444", GMPayKey: "secret",
+		GMPayToken: "usdt", GMPayNetwork: "tron",
+	})
+	req, err := client.createRequest(&entity.PayLog{
+		OutTradeNo: "ORD-1", PayAmount: 50, TradeType: "usdt",
+		NotifyUrl: "https://merchant.test/notify",
+	})
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	req.Signature = signParams(client.requestSignMap(req), client.config.GMPayKey)
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	if !strings.Contains(string(body), `"currency":"CNY"`) || strings.Contains(string(body), `"currency":"usdt"`) {
+		t.Fatalf("unexpected request body: %s", body)
+	}
+}
+
+func TestCreateRequestRequiresTokenAndNetworkTogether(t *testing.T) {
+	client := New(&model.PayConfig{GMPayPid: "1000", GMPayToken: "usdt"})
+	_, err := client.createRequest(&entity.PayLog{})
+	if err == nil || !strings.Contains(err.Error(), "必须同时配置") {
+		t.Fatalf("error = %v, want paired token/network validation", err)
+	}
+}
+
+func TestParseCreateResponseIncludesRequestID(t *testing.T) {
+	client := New(&model.PayConfig{})
+	_, err := client.parseCreateResponse(`{"status_code":10009,"message":"invalid parameters","data":null,"request_id":"req-1"}`)
+	if err == nil || !strings.Contains(err.Error(), "request_id=req-1") {
+		t.Fatalf("error = %v, want request id", err)
 	}
 }
