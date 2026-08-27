@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
@@ -18,8 +19,8 @@ import (
 )
 
 const (
-	telegramDeleteFallbackPriority = -100
-	telegramDeleteFallbackInterval = 2 * time.Minute
+	telegramDeleteFallbackPriority = -10
+	telegramDeleteFallbackInterval = time.Minute
 )
 
 type telegramDeleteFallbackRetryError struct {
@@ -35,6 +36,12 @@ func (s *sSysPublish) enqueueTelegramMessageDeleteFallback(ctx context.Context, 
 	channel, err := s.messagePushChannelFromJob(ctx, job)
 	if err != nil || channel.TgAccountId <= 0 {
 		s.appendTelegramJobLog(ctx, job, "delete_fallback", "failed", "协议号删除兜底不可用：频道未绑定有效协议号")
+		return
+	}
+	if err = s.ensureTelegramDeleteFallbackAccountAvailable(ctx, channel.TgAccountId); err != nil {
+		observeTelegramDeleteFallback(ctx, "account_unavailable", channel.TgAccountId, 0)
+		g.Log().Warningf(ctx, "协议号删除兜底不可用 tgAccountId:%d jobId:%d channelId:%d err:%+v", channel.TgAccountId, job.Id, job.ChannelId, err)
+		s.appendTelegramJobLog(ctx, job, "delete_fallback", "failed", "协议号删除兜底不可用："+err.Error())
 		return
 	}
 	nextRunAt := telegramDeleteFallbackNextRunAt(ctx, channel.TgAccountId, job.Id)
@@ -60,6 +67,57 @@ func (s *sSysPublish) enqueueTelegramMessageDeleteFallback(ctx context.Context, 
 		message += "，原因：" + cause.Error()
 	}
 	s.appendTelegramJobLog(ctx, job, "delete_fallback", "queued", message)
+}
+
+func (s *sSysPublish) ensureTelegramDeleteFallbackAccountAvailable(ctx context.Context, tgAccountID int64) error {
+	if tgAccountID <= 0 {
+		return gerror.New("频道未绑定有效协议号")
+	}
+	count, err := g.DB().Model(publishTgAccountTable).Safe().Ctx(ctx).
+		Where("id", tgAccountID).
+		Where("status", "authorized").
+		WhereNot("session_key", "").
+		WhereNull("deleted_at").
+		Count()
+	if err != nil {
+		return gerror.Wrap(err, "检查协议号状态失败")
+	}
+	if count == 0 {
+		return gerror.New("频道绑定的协议号已失效或已删除，请重新绑定")
+	}
+	return nil
+}
+
+func (s *sSysPublish) cancelTelegramDeleteFallbackTasks(ctx context.Context, tgAccountIDs []int64, reason string) {
+	tgAccountIDs = uniqueIds(tgAccountIDs)
+	if len(tgAccountIDs) == 0 {
+		return
+	}
+	if strings.TrimSpace(reason) == "" {
+		reason = "协议号不可用，删除任务已取消"
+	}
+	result, err := g.DB().Model("hg_tg_collector_account_task").Safe().Ctx(ctx).
+		WhereIn("account_id", tgAccountIDs).
+		Where("task_type", collectorin.AccountTaskTypeMessageDeleteFallback).
+		WhereIn("status", []string{collectorin.AccountTaskStatusPending, collectorin.AccountTaskStatusFailedRetry}).
+		Data(g.Map{
+			"status":        collectorin.AccountTaskStatusCancelled,
+			"next_run_at":   nil,
+			"lease_owner":   "",
+			"lease_epoch":   0,
+			"lease_until":   nil,
+			"error_message": reason,
+			"completed_at":  gtime.Now(),
+			"updated_at":    gtime.Now(),
+		}).Update()
+	if err != nil {
+		g.Log().Warningf(ctx, "取消失效协议号删除任务失败 tgAccountIds:%v err:%+v", tgAccountIDs, err)
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected > 0 {
+		g.Log().Warningf(ctx, "已取消失效协议号删除任务 tgAccountIds:%v tasks:%d reason:%s", tgAccountIDs, affected, reason)
+	}
 }
 
 func telegramDeleteFallbackNextRunAt(ctx context.Context, tgAccountID, jobID int64) time.Time {

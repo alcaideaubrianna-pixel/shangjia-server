@@ -18,10 +18,10 @@ func TestTelegramDeleteFallbackRetryErrorProvidesDelay(t *testing.T) {
 }
 
 func TestTelegramDeleteFallbackConstantsRemainLowPriority(t *testing.T) {
-	if telegramDeleteFallbackPriority >= 0 {
-		t.Fatalf("fallback priority = %d, want below normal priority", telegramDeleteFallbackPriority)
+	if telegramDeleteFallbackPriority != -10 {
+		t.Fatalf("fallback priority = %d, want -10", telegramDeleteFallbackPriority)
 	}
-	if telegramDeleteFallbackInterval != 2*time.Minute {
+	if telegramDeleteFallbackInterval != time.Minute {
 		t.Fatalf("fallback interval = %s", telegramDeleteFallbackInterval)
 	}
 }

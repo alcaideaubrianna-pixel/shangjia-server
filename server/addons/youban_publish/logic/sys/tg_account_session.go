@@ -72,6 +72,7 @@ const tgAccountSessionExpiredMessage = "TG账号登录态已失效，请重新�
 
 func (s *sSysPublish) expireTgAccountSession(ctx context.Context, id int64, tenantId int64, operatorId int64, message string) (string, string) {
 	s.updateTgAccountRefreshResult(ctx, id, tenantId, operatorId, sysin.PublishTgAccountStatusExpired, message, nil, "", "")
+	s.cancelTelegramDeleteFallbackTasks(ctx, []int64{id}, message)
 	return sysin.PublishTgAccountStatusExpired, message
 }
 

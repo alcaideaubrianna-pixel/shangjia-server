@@ -352,6 +352,7 @@ func (s *sSysPublish) AdminTgAccountDelete(ctx context.Context, in *sysin.TgAcco
 		Update(); err != nil {
 		return gerror.Wrap(err, "删除TG账号失败")
 	}
+	s.cancelTelegramDeleteFallbackTasks(ctx, in.Ids, "TG账号已删除，协议号删除任务已取消")
 	return nil
 }
 
@@ -383,6 +384,7 @@ func (s *sSysPublish) serverTgAccountRemove(ctx context.Context, in *sysin.TgAcc
 		Update(); err != nil {
 		return gerror.Wrap(err, errorMessage)
 	}
+	s.cancelTelegramDeleteFallbackTasks(ctx, in.Ids, "TG账号已删除或解绑，协议号删除任务已取消")
 	return nil
 }
 
