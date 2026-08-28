@@ -31,14 +31,13 @@ func decorateProfileRegionWithDirectory(directory *contentRegionDirectory, profi
 		return
 	}
 	provinceRaw, cityRaw := strings.TrimSpace(profile.Province), strings.TrimSpace(profile.City)
-	province, city := provinceRaw, cityRaw
-	if row := directory.byCode[provinceRaw]; row != nil {
+	province, provinceKnown := resolveRegionCodes(directory, provinceRaw)
+	city, cityKnown := resolveRegionCodes(directory, cityRaw)
+	if provinceKnown {
 		profile.ProvinceCode = provinceRaw
-		province = cleanRegionToken(row.Title)
 	}
-	if row := directory.byCode[cityRaw]; row != nil {
+	if cityKnown {
 		profile.CityCode = cityRaw
-		city = cleanRegionToken(row.Title)
 	}
 	province, city = normalizeProfileRegionForOption(province, city)
 	profile.Province, profile.City = province, city
@@ -46,4 +45,38 @@ func decorateProfileRegionWithDirectory(directory *contentRegionDirectory, profi
 	if city == "" || city == province {
 		profile.LocationLabel = province
 	}
+}
+
+// resolveRegionCodes handles both a single code and legacy comma-separated codes.
+func resolveRegionCodes(directory *contentRegionDirectory, raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '，' || r == '、' })
+	if len(parts) == 0 {
+		return cleanRegionToken(raw), false
+	}
+	labels := make([]string, 0, len(parts))
+	known := false
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		label := cleanRegionToken(part)
+		if row := directory.byCode[part]; row != nil {
+			label = cleanRegionToken(row.Title)
+			known = true
+		}
+		if label != "" {
+			if _, ok := seen[label]; ok {
+				continue
+			}
+			seen[label] = struct{}{}
+			labels = append(labels, label)
+		}
+	}
+	return strings.Join(labels, ","), known
 }
