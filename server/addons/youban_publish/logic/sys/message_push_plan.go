@@ -27,6 +27,7 @@ type messagePushPlanRecord struct {
 	IntervalDays    int         `json:"intervalDays"`
 	IntervalSeconds int         `json:"intervalSeconds"`
 	Status          int         `json:"status"`
+	PushMode        string      `json:"pushMode"`
 	NextRunAt       *gtime.Time `json:"nextRunAt"`
 	LastRunAt       *gtime.Time `json:"lastRunAt"`
 	LastResult      string      `json:"lastResult"`
@@ -104,6 +105,12 @@ func (s *sSysPublish) AdminMessagePushPlanSave(ctx context.Context, in *sysin.Me
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
+	if in.PushMode == "" {
+		in.PushMode = sysin.MessageTemplatePushModeBot
+	}
+	if in.PushMode != sysin.MessageTemplatePushModeBot && in.PushMode != sysin.MessageTemplatePushModeAccount {
+		return nil, gerror.New("消息推送方式不合法")
+	}
 	if in.Id > 0 {
 		if err = s.ensureMessagePushPlansBelongTenant(ctx, []int64{in.Id}, account.TenantId); err != nil {
 			return nil, err
@@ -130,6 +137,7 @@ func (s *sSysPublish) AdminMessagePushPlanSave(ctx context.Context, in *sysin.Me
 		"interval_days":    in.IntervalDays,
 		"interval_seconds": in.IntervalSeconds,
 		"status":           in.Status,
+		"push_mode":        in.PushMode,
 		"next_run_at":      nextRunAt,
 		"locked_at":        nil,
 		"last_result":      "",
@@ -373,7 +381,7 @@ func (s *sSysPublish) executeMessagePushPlan(ctx context.Context, plan messagePu
 		for channelIndex, channel := range channels {
 			delay := time.Duration(delayIndex*plan.IntervalSeconds) * time.Second
 			operationNo := messagePushPlanOperationNo(plan.Id, scheduledAt, template, channel.TargetChatId)
-			targets = append(targets, &messageTemplatePushTarget{Channel: channel, AccountId: plan.AccountId, OperationNo: operationNo, Delay: delay, Priority: tgJobPriorityBulk, QueueName: tgQueueNameBulk})
+			targets = append(targets, &messageTemplatePushTarget{Channel: channel, AccountId: plan.AccountId, OperationNo: operationNo, Delay: delay, Priority: tgJobPriorityBulk, QueueName: tgQueueNameBulk, PushMode: plan.PushMode})
 			if shouldWaitMessagePushPlan(templateIndex, channelIndex, len(templateIds), len(channels)) {
 				delayIndex++
 			}

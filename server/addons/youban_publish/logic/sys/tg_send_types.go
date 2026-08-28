@@ -53,6 +53,7 @@ type telegramJobRecord struct {
 	ProfileId              int64       `json:"profileId"`
 	ChannelId              int64       `json:"channelId"`
 	BotId                  int64       `json:"botId"`
+	PushMode               string      `json:"pushMode"`
 	Status                 string      `json:"status"`
 	TargetChatId           string      `json:"targetChatId"`
 	CollectEventId         int64       `json:"collectEventId"`

@@ -77,6 +77,7 @@ type messageTemplatePushTarget struct {
 	Delay       time.Duration
 	Priority    int
 	QueueName   string
+	PushMode    string
 }
 
 func (s *sSysPublish) queueMessageTemplateTargets(ctx context.Context, template *sysin.MessageTemplateModel, targets []*messageTemplatePushTarget, tenantId int64, accountId int64) *sysin.MessageTemplatePushModel {
@@ -100,7 +101,7 @@ func (s *sSysPublish) queueMessageTemplateTargets(ctx context.Context, template 
 		if queueName == "" {
 			queueName = tgQueueNameBulk
 		}
-		result := s.queueMessageTemplateToChannelWithPriority(ctx, template, target.Channel, tenantId, targetAccountId, target.OperationNo, target.Delay, priority, queueName)
+		result := s.queueMessageTemplateToChannelWithPriority(ctx, template, target.Channel, tenantId, targetAccountId, target.OperationNo, target.Delay, priority, queueName, target.PushMode)
 		res.Results = append(res.Results, result)
 		if result.Status == sysin.MessagePushStatusPending || result.Status == sysin.MessagePushStatusSent {
 			res.Success++
@@ -160,7 +161,7 @@ func (s *sSysPublish) AdminMessageTemplatePush(ctx context.Context, in *sysin.Me
 	return s.queueMessageTemplateTargets(ctx, template, targets, account.TenantId, in.AccountId), nil
 }
 
-func (s *sSysPublish) queueMessageTemplateToChannelWithPriority(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, operationNo string, delay time.Duration, priority int, queueName string) *sysin.MessageTemplatePushResultModel {
+func (s *sSysPublish) queueMessageTemplateToChannelWithPriority(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, operationNo string, delay time.Duration, priority int, queueName string, pushModes ...string) *sysin.MessageTemplatePushResultModel {
 	result := &sysin.MessageTemplatePushResultModel{
 		Status: sysin.MessagePushStatusFailed,
 	}
@@ -171,7 +172,11 @@ func (s *sSysPublish) queueMessageTemplateToChannelWithPriority(ctx context.Cont
 	result.ChannelId = channel.Id
 	result.TargetChatId = channel.TargetChatId
 	botId := firstMessagePushBotId(channel)
-	job, err := s.createQueuedMessagePushJobWithPriority(ctx, template, channel, tenantId, accountId, botId, operationNo, priority, queueName)
+	pushMode := sysin.MessageTemplatePushModeBot
+	if len(pushModes) > 0 && pushModes[0] != "" {
+		pushMode = pushModes[0]
+	}
+	job, err := s.createQueuedMessagePushJobWithPriority(ctx, template, channel, tenantId, accountId, botId, operationNo, priority, queueName, pushMode)
 	if err != nil {
 		result.Message = err.Error()
 		return result
@@ -233,6 +238,13 @@ func (s *sSysPublish) SendMessagePushJob(ctx context.Context, jobId int64) error
 }
 
 func (s *sSysPublish) sendMessagePushJob(ctx context.Context, job telegramJobRecord, template *sysin.MessageTemplateModel, channel *messagePushChannel) error {
+	if job.PushMode == sysin.MessageTemplatePushModeAccount {
+		if channel == nil || channel.TgAccountId <= 0 {
+			return gerror.New("已选择协议号推送，但目标群聊未配置协议号账号")
+		}
+		s.appendTelegramJobLog(ctx, job, "account_send", "queued", "计划已关闭机器人推送，直接提交协议号发送")
+		return s.submitMessagePushAccountTask(ctx, job, channel, "account")
+	}
 	media := inlineDisplayMedia(template)
 	if recordErr := s.upsertPublishJobRecord(ctx, job, "sending", ""); recordErr != nil {
 		g.Log().Warningf(ctx, "更新快速推送发送记录失败 jobId:%d err:%+v", job.Id, recordErr)
@@ -1007,15 +1019,23 @@ func (s *sSysPublish) createQueuedMessagePushJob(ctx context.Context, template *
 	return s.createQueuedMessagePushJobWithPriority(ctx, template, channel, tenantId, accountId, botId, operationNo, tgJobPriorityBulk, tgQueueNameBulk)
 }
 
-func (s *sSysPublish) createQueuedMessagePushJobWithPriority(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, botId int64, operationNo string, priority int, queueName string) (telegramJobRecord, error) {
-	return s.createMessagePushJobWithOperation(ctx, template, channel, tenantId, accountId, botId, operationNo, priority, queueName, tgDispatchStatusIdle, gtime.Now())
+func (s *sSysPublish) createQueuedMessagePushJobWithPriority(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, botId int64, operationNo string, priority int, queueName string, pushModes ...string) (telegramJobRecord, error) {
+	pushMode := sysin.MessageTemplatePushModeBot
+	if len(pushModes) > 0 && pushModes[0] != "" {
+		pushMode = pushModes[0]
+	}
+	return s.createMessagePushJobWithOperation(ctx, template, channel, tenantId, accountId, botId, operationNo, priority, queueName, tgDispatchStatusIdle, gtime.Now(), pushMode)
 }
 
-func (s *sSysPublish) createMessagePushJobWithOperation(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, botId int64, operationNo string, priority int, queueName string, dispatchStatus string, now *gtime.Time) (telegramJobRecord, error) {
+func (s *sSysPublish) createMessagePushJobWithOperation(ctx context.Context, template *sysin.MessageTemplateModel, channel *messagePushChannel, tenantId int64, accountId int64, botId int64, operationNo string, priority int, queueName string, dispatchStatus string, now *gtime.Time, pushModes ...string) (telegramJobRecord, error) {
 	if strings.TrimSpace(operationNo) == "" {
 		return telegramJobRecord{}, gerror.New("消息推送操作号不能为空")
 	}
 	queueName = telegramQueueNameByPriorityAndChannel(ctx, priority, channel.Id)
+	pushMode := sysin.MessageTemplatePushModeBot
+	if len(pushModes) > 0 && pushModes[0] != "" {
+		pushMode = pushModes[0]
+	}
 	if existing, err := s.messagePushJobByOperation(ctx, operationNo, channel.Id); err != nil {
 		return telegramJobRecord{}, err
 	} else if existing.Id > 0 {
@@ -1034,6 +1054,7 @@ func (s *sSysPublish) createMessagePushJobWithOperation(ctx context.Context, tem
 		"priority":        priority,
 		"queue_name":      queueName,
 		"dispatch_status": dispatchStatus,
+		"push_mode":       pushMode,
 		"created_at":      now,
 		"updated_at":      now,
 	}
@@ -1057,6 +1078,7 @@ func (s *sSysPublish) createMessagePushJobWithOperation(ctx context.Context, tem
 		Priority:       priority,
 		QueueName:      queueName,
 		DispatchStatus: dispatchStatus,
+		PushMode:       pushMode,
 	}
 	if supersedeErr := s.supersedeOlderMessagePushJobs(ctx, job); supersedeErr != nil {
 		g.Log().Warningf(ctx, "废弃旧快速推送任务失败 jobId:%d err:%+v", job.Id, supersedeErr)

@@ -462,6 +462,8 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_account_setting" (
   "number_source" varchar(16) NOT NULL DEFAULT 'sequence',
   "custom_mark_text" varchar(128) NOT NULL DEFAULT '',
   "mark_position" varchar(16) NOT NULL DEFAULT 'bottom',
+	"shared_resource_enabled" smallint NOT NULL DEFAULT 0,
+	"telegram_binding_enabled" smallint NOT NULL DEFAULT 0,
   "default_recycle_days" integer NOT NULL DEFAULT 0,
   "cycle_publish_enabled" smallint NOT NULL DEFAULT 0,
   "cycle_publish_days" integer NOT NULL DEFAULT 4,
@@ -478,6 +480,8 @@ ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "cycle_
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "cycle_publish_days" integer NOT NULL DEFAULT 4;
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "cycle_publish_time" varchar(16) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "publish_config_json" text NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "shared_resource_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "telegram_binding_enabled" smallint NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tenant_auto_delete_config" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -2001,3 +2005,5 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_chat_time" ON "hg_youban_
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_reply" ON "hg_youban_publish_bot_message_source" ("reply_job_id", "reply_profile_id", "reply_to_message_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_profile_time" ON "hg_youban_publish_bot_message_source" ("tenant_id", "reply_profile_id", "received_at" DESC, "id" DESC);
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_sender" ON "hg_youban_publish_bot_message_source" ("sender_user_id", "sender_chat_id");
+ALTER TABLE "hg_youban_publish_message_push_plan" ADD COLUMN IF NOT EXISTS "push_mode" varchar(16) NOT NULL DEFAULT 'bot';
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "push_mode" varchar(16) NOT NULL DEFAULT 'bot';

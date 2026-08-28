@@ -1,3 +1,7 @@
+ALTER TABLE `hg_youban_publish_account_setting`
+  ADD COLUMN IF NOT EXISTS `shared_resource_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '上架账号是否可管理租户共享资料',
+  ADD COLUMN IF NOT EXISTS `telegram_binding_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '上架账号是否可绑定并使用Telegram';
+
 ALTER TABLE `hg_youban_publish_collect_rule`
   ADD COLUMN `full_match_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '全量匹配' AFTER `dedupe_days`;
 
@@ -840,3 +844,5 @@ ALTER TABLE `hg_content_profile`
   ADD INDEX IF NOT EXISTS `idx_content_profile_weight_active` (`deleted_at`,`weight`),
   ADD INDEX IF NOT EXISTS `idx_content_profile_cup_active` (`deleted_at`,`cup_size`),
   ADD INDEX IF NOT EXISTS `idx_content_profile_age_active` (`deleted_at`,`age`);
+ALTER TABLE `hg_youban_publish_message_push_plan` ADD COLUMN IF NOT EXISTS `push_mode` varchar(16) NOT NULL DEFAULT 'bot';
+ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `push_mode` varchar(16) NOT NULL DEFAULT 'bot';

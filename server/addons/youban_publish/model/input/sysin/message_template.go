@@ -24,6 +24,10 @@ const (
 	MessageTemplatePushModeAccount = "account"
 )
 
+func validMessagePushMode(mode string) bool {
+	return mode == MessageTemplatePushModeBot || mode == MessageTemplatePushModeAccount
+}
+
 type MessageTemplateListInp struct {
 	form.PageReq
 	Keyword string `json:"keyword" dc:"关键词"`
@@ -87,6 +91,7 @@ type MessagePushPlanSaveInp struct {
 	IntervalDays    int      `json:"intervalDays" dc:"执行间隔天数"`
 	IntervalSeconds int      `json:"intervalSeconds" dc:"多次推送间隔秒数"`
 	Status          int      `json:"status" dc:"状态：1启用 2停用"`
+	PushMode        string   `json:"pushMode" dc:"推送方式：bot/account"`
 }
 
 type MessagePushPlanDeleteInp struct {
@@ -133,6 +138,7 @@ type MessagePushPlanModel struct {
 	IntervalDays     int               `json:"intervalDays" dc:"执行间隔天数"`
 	IntervalSeconds  int               `json:"intervalSeconds" dc:"多次推送间隔秒数"`
 	Status           int               `json:"status" dc:"状态：1启用 2停用"`
+	PushMode         string            `json:"pushMode" dc:"推送方式：bot/account"`
 	NextRunAt        *gtime.Time       `json:"nextRunAt" dc:"下次执行时间"`
 	LastRunAt        *gtime.Time       `json:"lastRunAt" dc:"最后执行时间"`
 	LastResult       string            `json:"lastResult" dc:"最后执行结果"`

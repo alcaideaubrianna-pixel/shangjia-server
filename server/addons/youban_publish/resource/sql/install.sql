@@ -884,6 +884,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_account_setting` (
   `number_source` varchar(16) NOT NULL DEFAULT 'sequence' COMMENT '编号来源',
   `custom_mark_text` varchar(128) NOT NULL DEFAULT '' COMMENT '自定义标识文字',
   `mark_position` varchar(16) NOT NULL DEFAULT 'bottom' COMMENT '显示位置',
+	`shared_resource_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '上架账号是否可管理租户共享资料',
+	`telegram_binding_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '上架账号是否可绑定并使用Telegram',
   `default_recycle_days` int(11) NOT NULL DEFAULT '0' COMMENT '默认循环天数',
   `cycle_publish_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否循环上架',
   `cycle_publish_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环上架天数',
@@ -901,6 +903,8 @@ ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN `cycle_publish_enable
 ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN `cycle_publish_days` int(11) NOT NULL DEFAULT '4' COMMENT '循环上架天数' AFTER `cycle_publish_enabled`;
 ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN `cycle_publish_time` varchar(16) NOT NULL DEFAULT '' COMMENT '循环上架时间' AFTER `cycle_publish_days`;
 ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN `publish_config_json` text NOT NULL COMMENT '账号级推送配置JSON';
+ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN IF NOT EXISTS `shared_resource_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '上架账号是否可管理租户共享资料';
+ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN IF NOT EXISTS `telegram_binding_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '上架账号是否可绑定并使用Telegram';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tenant_auto_delete_config` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -1948,6 +1952,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tenant_vip` (
   UNIQUE KEY `uk_ybp_tenant_vip_tenant` (`tenant_id`),
   KEY `idx_ybp_vip_expired` (`status`,`expired_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE `hg_youban_publish_message_push_plan` ADD COLUMN IF NOT EXISTS `push_mode` varchar(16) NOT NULL DEFAULT 'bot';
+ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `push_mode` varchar(16) NOT NULL DEFAULT 'bot';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tenant_vip_log` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,

@@ -1,3 +1,6 @@
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "shared_resource_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "telegram_binding_enabled" smallint NOT NULL DEFAULT 0;
+
 ALTER TABLE "hg_youban_publish_collect_rule"
   ADD COLUMN IF NOT EXISTS "full_match_enabled" smallint NOT NULL DEFAULT 0;
 
@@ -825,3 +828,5 @@ CREATE INDEX IF NOT EXISTS "idx_content_profile_weight_active" ON "hg_content_pr
 CREATE INDEX IF NOT EXISTS "idx_content_profile_cup_active" ON "hg_content_profile" ("cup_size") WHERE "deleted_at" IS NULL AND "cup_size" <> '';
 CREATE INDEX IF NOT EXISTS "idx_content_profile_age_active" ON "hg_content_profile" ("age") WHERE "deleted_at" IS NULL AND "age" > 0;
 CREATE INDEX IF NOT EXISTS "idx_content_profile_plain_text_trgm" ON "hg_content_profile" USING gin ("plain_text" gin_trgm_ops) WHERE "deleted_at" IS NULL;
+ALTER TABLE "hg_youban_publish_message_push_plan" ADD COLUMN IF NOT EXISTS "push_mode" varchar(16) NOT NULL DEFAULT 'bot';
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "push_mode" varchar(16) NOT NULL DEFAULT 'bot';
