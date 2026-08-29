@@ -75,7 +75,19 @@ func (s *sSysPublish) MyMediaList(ctx context.Context, in *sysin.MediaListInp) (
 	if err != nil {
 		return nil, err
 	}
-	return s.mediaListByProfile(ctx, in.ProfileId, account.TenantId, account.Id)
+	capability, err := s.activeAccountCapability(ctx, account.TenantId, account.Id)
+	if err != nil {
+		return nil, err
+	}
+	accountScope := account.Id
+	if capability.SharedResourceEnabled == 1 {
+		accountScope = 0
+	}
+	profile, err := s.profileView(ctx, in.ProfileId, account.TenantId, accountScope)
+	if err != nil {
+		return nil, err
+	}
+	return s.mediaListByProfile(ctx, in.ProfileId, account.TenantId, profile.AccountId)
 }
 
 func mediaOwnerScope(mod *gdb.Model, owner gdb.Record) *gdb.Model {
@@ -315,8 +327,25 @@ func (s *sSysPublish) MyProfileImageSearch(ctx context.Context, in *sysin.Profil
 	if in == nil {
 		in = &sysin.ProfileImageSearchInp{}
 	}
+	if err = s.ensureTenantVipFeature(ctx, account.TenantId, sysin.TenantVipFeatureSimilarMedia); err != nil {
+		return nil, 0, err
+	}
+	capability, err := s.activeAccountCapability(ctx, account.TenantId, account.Id)
+	if err != nil {
+		return nil, 0, err
+	}
+	accountIds, err := s.sharedProfileAccountIds(ctx, capability)
+	if err != nil {
+		return nil, 0, err
+	}
 	searchIn := *in
-	return s.profileImageSearch(ctx, &searchIn, file, mediaSearchScopeForTenant(account.TenantId, []int64{account.Id}), account)
+	list, totalCount, err = s.profileImageSearch(ctx, &searchIn, file, mediaSearchScopeForTenant(account.TenantId, accountIds), account)
+	for _, item := range list {
+		if item != nil {
+			markProfilePermission(&item.ProfileModel, sharedProfilePermission(capability, &item.ProfileModel))
+		}
+	}
+	return list, totalCount, err
 }
 
 func (s *sSysPublish) AdminProfileImageSearch(ctx context.Context, in *sysin.ProfileImageSearchInp, file *ghttp.UploadFile) (list []*sysin.NoteModel, totalCount int, err error) {
@@ -326,6 +355,9 @@ func (s *sSysPublish) AdminProfileImageSearch(ctx context.Context, in *sysin.Pro
 	}
 	if in == nil {
 		in = &sysin.ProfileImageSearchInp{}
+	}
+	if err = s.ensureTenantVipFeature(ctx, account.TenantId, sysin.TenantVipFeatureSimilarMedia); err != nil {
+		return nil, 0, err
 	}
 	scope, err := s.adminProfileVisibleScope(ctx, account, &in.ProfileListInp)
 	if err != nil {
