@@ -12,8 +12,17 @@ import (
 )
 
 func (s *sSysPublish) AccountCapability(ctx context.Context, app string, accountId int64) (*sysin.AccountCapabilityModel, error) {
-	if strings.TrimSpace(app) != "api" {
+	app = strings.TrimSpace(app)
+	// 管理员 Bot 使用独立的后台账号校验；这里仅为其保留基础能力标识，
+	// 资料客服能力必须走 api 分支并验证上架账号状态及租户归属。
+	if app == "admin" {
+		if accountId <= 0 {
+			return nil, gerror.New("后台账号信息不完整")
+		}
 		return &sysin.AccountCapabilityModel{AccountId: accountId, AccountType: sysin.PublishAccountTypeAdmin, TelegramBindingEnabled: 1}, nil
+	}
+	if app != "api" {
+		return nil, gerror.Newf("不支持的账号应用类型：%s", app)
 	}
 	return s.activeAccountCapability(ctx, 0, accountId)
 }
