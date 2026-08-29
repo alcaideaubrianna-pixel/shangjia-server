@@ -238,11 +238,7 @@ func (s *sSysBot) enabledBots(ctx context.Context) ([]*sysin.BotModel, error) {
 }
 
 func (s *sSysBot) telegramBotProfile(ctx context.Context, botToken string) (*models.User, error) {
-	bot, err := s.telegramBot(ctx, botToken)
-	if err != nil {
-		return nil, err
-	}
-	user, err := bot.GetMe(ctx)
+	user, err := gatewayservice.Gateway().Probe(ctx, strings.TrimSpace(botToken))
 	if err != nil {
 		return nil, err
 	}

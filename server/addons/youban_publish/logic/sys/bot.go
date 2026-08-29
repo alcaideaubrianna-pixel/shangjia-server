@@ -325,11 +325,7 @@ func (s *sSysPublish) getBotById(ctx context.Context, id int64, tenantId int64) 
 }
 
 func (s *sSysPublish) telegramBotProfile(ctx context.Context, botToken string) (*models.User, error) {
-	bot, err := s.telegramBot(ctx, botToken)
-	if err != nil {
-		return nil, err
-	}
-	user, err := bot.GetMe(ctx)
+	user, err := gatewayservice.Gateway().Probe(ctx, strings.TrimSpace(botToken))
 	if err != nil {
 		return nil, err
 	}
