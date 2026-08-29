@@ -224,6 +224,8 @@ func fillAccountSettingSaveInpFromRequest(ctx context.Context, in *sysin.Account
 	in.NumberSource = body.Get("numberSource", in.NumberSource).String()
 	in.CustomMarkText = body.Get("customMarkText", in.CustomMarkText).String()
 	in.MarkPosition = body.Get("markPosition", in.MarkPosition).String()
+	in.SharedResourceEnabled = body.Get("sharedResourceEnabled", in.SharedResourceEnabled).Int()
+	in.TelegramBindingEnabled = body.Get("telegramBindingEnabled", in.TelegramBindingEnabled).Int()
 }
 
 func (c *cPublishAdmin) BotList(ctx context.Context, req *publish.AdminBotListReq) (res *publish.AdminBotListRes, err error) {

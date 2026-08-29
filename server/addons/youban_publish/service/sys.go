@@ -12,6 +12,7 @@ import (
 )
 
 type ISysPublish interface {
+	AccountCapability(ctx context.Context, app string, accountId int64) (res *sysin.AccountCapabilityModel, err error)
 	NoticeList(ctx context.Context, in *sysin.NoticeListInp) (list []*adminin.NoticeListModel, totalCount int, err error)
 	NoticeView(ctx context.Context, in *sysin.NoticeViewInp) (res *adminin.NoticeViewModel, err error)
 	NoticeEdit(ctx context.Context, in *sysin.NoticeEditInp) (err error)

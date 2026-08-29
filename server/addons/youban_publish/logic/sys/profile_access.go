@@ -9,6 +9,81 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
+type profileOwnerGroup struct {
+	AccountId int64
+	Ids       []int64
+}
+
+func (s *sSysPublish) profileOwnerGroups(ctx context.Context, inIds []int64, uuids []string, capability *sysin.AccountCapabilityModel) ([]profileOwnerGroup, error) {
+	if capability == nil {
+		return nil, gerror.New("上架账号信息不完整")
+	}
+	accountScope := capability.AccountId
+	if capability.SharedResourceEnabled == 1 {
+		accountScope = 0
+	}
+	ids, err := s.allowedProfileTargetIds(ctx, inIds, uuids, capability.TenantId, accountScope)
+	if err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		ProfileId int64 `json:"profile_id"`
+		AccountId int64 `json:"account_id"`
+	}
+	if err = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).Fields("profile_id,account_id").WhereIn("profile_id", uniqueIds(ids)).Where("tenant_id", capability.TenantId).WhereNull("deleted_at").Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "检查共享资料权限失败")
+	}
+	grouped := make(map[int64][]int64)
+	for _, row := range rows {
+		if row.AccountId != capability.AccountId && capability.SharedResourceEnabled != 1 {
+			continue
+		}
+		grouped[row.AccountId] = append(grouped[row.AccountId], row.ProfileId)
+	}
+	groups := make([]profileOwnerGroup, 0, len(grouped))
+	for accountId, profileIds := range grouped {
+		groups = append(groups, profileOwnerGroup{AccountId: accountId, Ids: uniqueIds(profileIds)})
+	}
+	if len(groups) == 0 {
+		return nil, gerror.New("资料不存在或无权操作")
+	}
+	return groups, nil
+}
+
+func (s *sSysPublish) deleteProfilesByCapability(ctx context.Context, in *sysin.ProfileDeleteInp, capability *sysin.AccountCapabilityModel) error {
+	if in == nil {
+		return gerror.New("请选择要删除的资料")
+	}
+	groups, err := s.profileOwnerGroups(ctx, in.Ids, in.Uuids, capability)
+	if err != nil {
+		return err
+	}
+	for _, group := range groups {
+		if err = s.deleteProfiles(ctx, &sysin.ProfileDeleteInp{Ids: group.Ids}, capability.TenantId, group.AccountId); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *sSysPublish) updateProfileStatusByCapability(ctx context.Context, in *sysin.ProfileStatusInp, capability *sysin.AccountCapabilityModel) (*sysin.ProfileStatusModel, error) {
+	if in == nil {
+		return nil, gerror.New("请选择要处理的资料")
+	}
+	groups, err := s.profileOwnerGroups(ctx, in.Ids, in.Uuids, capability)
+	if err != nil {
+		return nil, err
+	}
+	var result *sysin.ProfileStatusModel
+	for _, group := range groups {
+		result, err = s.updateProfileStatus(ctx, &sysin.ProfileStatusInp{Ids: group.Ids, Status: in.Status}, capability.TenantId, group.AccountId)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
 func (s *sSysPublish) allowedProfileIds(ctx context.Context, ids []int64, tenantId int64, accountId int64) ([]int64, error) {
 	if len(ids) == 0 {
 		return []int64{}, nil

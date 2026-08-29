@@ -395,6 +395,7 @@ func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gd
 }
 
 type profileCollectionMetadataRow struct {
+	DispatchId      int64  `orm:"dispatch_id"`
 	TenantId        int64  `orm:"tenant_id"`
 	ProfileId       int64  `orm:"profile_id"`
 	SourceId        int64  `orm:"source_id"`
@@ -424,7 +425,7 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 		LeftJoin(publishCollectEventTable+" e", "e.id=d.event_id").
 		LeftJoin(publishBotChannelCacheTable+" bc", "bc.tenant_id=s.tenant_id AND bc.bot_id=COALESCE(NULLIF(s.bot_id,0),e.bot_id) AND bc.chat_id=COALESCE(NULLIF(e.source_chat_id,''),s.source_chat_id)").
 		WhereIn("d.profile_id", profileIds).
-		Fields("s.tenant_id,d.profile_id,d.source_id,s.source_type,COALESCE(NULLIF(bc.chat_title,''),s.title) AS source_name,COALESCE(NULLIF(bc.chat_username,''),s.source_username) AS source_username,s.bot_id,s.tg_account_id," +
+		Fields("d.id AS dispatch_id,s.tenant_id,d.profile_id,d.source_id,s.source_type,COALESCE(NULLIF(bc.chat_title,''),s.title) AS source_name,COALESCE(NULLIF(bc.chat_username,''),s.source_username) AS source_username,s.bot_id,s.tg_account_id," +
 			"COALESCE(NULLIF(e.source_chat_id,''),s.source_chat_id) AS source_chat_id," +
 			"COALESCE(NULLIF(e.source_message_id,0),0) AS source_message_id").
 		OrderAsc("d.profile_id").OrderDesc("d.id").Scan(&rows)
@@ -433,7 +434,8 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 	}
 	metadata := make(map[int64]profileCollectionMetadataRow, len(rows))
 	for _, row := range rows {
-		if _, ok := metadata[row.ProfileId]; !ok {
+		current, ok := metadata[row.ProfileId]
+		if !ok || preferProfileCollectionMetadata(row, current) {
 			metadata[row.ProfileId] = row
 		}
 	}
@@ -499,6 +501,25 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 		}
 	}
 	return nil
+}
+
+func preferProfileCollectionMetadata(candidate, current profileCollectionMetadataRow) bool {
+	candidatePriority := profileCollectionMetadataPriority(candidate)
+	currentPriority := profileCollectionMetadataPriority(current)
+	if candidatePriority != currentPriority {
+		return candidatePriority < currentPriority
+	}
+	return candidate.DispatchId > current.DispatchId
+}
+
+func profileCollectionMetadataPriority(row profileCollectionMetadataRow) int {
+	if strings.TrimSpace(row.SourceUsername) != "" {
+		return 0
+	}
+	if !strings.EqualFold(strings.TrimSpace(row.SourceType), sysin.CollectSourceTypeBot) {
+		return 1
+	}
+	return 2
 }
 
 func collectionMetadataTenantId(metadata map[int64]profileCollectionMetadataRow, accountId int64, bot bool) int64 {

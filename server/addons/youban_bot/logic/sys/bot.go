@@ -16,6 +16,8 @@ import (
 
 	"hotgo/addons/youban_bot/model/input/sysin"
 	"hotgo/addons/youban_bot/service"
+	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
+	publishService "hotgo/addons/youban_publish/service"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/consts"
 	"hotgo/internal/library/contexts"
@@ -360,6 +362,9 @@ func (s *sSysBot) BindCodeStart(ctx context.Context) (res *sysin.CodeStartModel,
 	if user == nil || user.Id <= 0 {
 		return nil, gerror.New("请先登录")
 	}
+	if _, err = s.ensureTelegramBindingAccess(ctx, user.App, user.Id); err != nil {
+		return nil, err
+	}
 	return s.createCode(ctx, sysin.BotCodeSceneBind, user.App, user.Id)
 }
 
@@ -368,6 +373,9 @@ func (s *sSysBot) BindCodeStatus(ctx context.Context, in *sysin.CodeStatusInp) (
 	if user == nil || user.Id <= 0 {
 		return nil, gerror.New("请先登录")
 	}
+	if _, err := s.ensureTelegramBindingAccess(ctx, user.App, user.Id); err != nil {
+		return nil, err
+	}
 	return s.codeStatus(ctx, strings.TrimSpace(in.Code), sysin.BotCodeSceneBind, user.App, user.Id)
 }
 
@@ -375,6 +383,9 @@ func (s *sSysBot) BindInfo(ctx context.Context) (res *sysin.BindInfoModel, err e
 	user := contexts.GetUser(ctx)
 	if user == nil || user.Id <= 0 {
 		return nil, gerror.New("请先登录")
+	}
+	if _, err = s.ensureTelegramBindingAccess(ctx, user.App, user.Id); err != nil {
+		return nil, err
 	}
 	botUsername := ""
 	if bot, botErr := s.officialBot(ctx); botErr == nil && bot != nil {
@@ -393,6 +404,17 @@ func (s *sSysBot) BindInfo(ctx context.Context) (res *sysin.BindInfoModel, err e
 	row.Bound = strings.TrimSpace(row.TelegramUserId) != ""
 	row.BotUsername = botUsername
 	return row, nil
+}
+
+func (s *sSysBot) ensureTelegramBindingAccess(ctx context.Context, app string, accountId int64) (*publishsysin.AccountCapabilityModel, error) {
+	capability, err := publishService.SysPublish().AccountCapability(ctx, app, accountId)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(app) == sysin.BotAppApi && capability.AccountType == publishsysin.PublishAccountTypeUploader && capability.TelegramBindingEnabled != 1 {
+		return nil, gerror.New("当前上架账号未开启TG绑定权限，请联系管理员")
+	}
+	return capability, nil
 }
 
 func (s *sSysBot) createCode(ctx context.Context, scene, app string, accountId int64) (*sysin.CodeStartModel, error) {
@@ -520,6 +542,10 @@ func (s *sSysBot) consumeBindCode(ctx context.Context, botId int64, msg *models.
 	if row.AccountId <= 0 {
 		_, _ = s.markCodeFailed(ctx, row.Code, sysin.BotCodeStatusFailed, "绑定账号不存在")
 		return nil
+	}
+	if _, accessErr := s.ensureTelegramBindingAccess(ctx, row.App, row.AccountId); accessErr != nil {
+		_, _ = s.markCodeFailed(ctx, row.Code, sysin.BotCodeStatusFailed, accessErr.Error())
+		return s.reply(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), accessErr.Error())
 	}
 	telegramUserId := fmt.Sprintf("%d", msg.From.ID)
 	telegramUsername := strings.TrimPrefix(strings.TrimSpace(msg.From.Username), "@")

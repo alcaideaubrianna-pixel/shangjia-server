@@ -20,11 +20,16 @@ func (s *sSysPublish) MyProfilePublish(ctx context.Context, in *sysin.ProfileVie
 	if in == nil || !hasProfileSelector(in.Id, in.Uuid) {
 		return gerror.New("资料UUID不能为空")
 	}
-	profileId, err := s.resolveProfileId(ctx, in.Id, in.Uuid, account.TenantId, account.Id)
+	capability, err := s.activeAccountCapability(ctx, account.TenantId, account.Id)
 	if err != nil {
 		return err
 	}
-	return s.submitProfilePublish(ctx, profileId, account.TenantId, account.Id, contexts.GetUserId(ctx), "", nil, false)
+	groups, err := s.profileOwnerGroups(ctx, []int64{in.Id}, []string{in.Uuid}, capability)
+	if err != nil {
+		return err
+	}
+	group := groups[0]
+	return s.submitProfilePublish(ctx, group.Ids[0], account.TenantId, group.AccountId, contexts.GetUserId(ctx), "", nil, false)
 }
 
 func (s *sSysPublish) AdminProfilePublish(ctx context.Context, in *sysin.AdminProfilePublishInp) error {

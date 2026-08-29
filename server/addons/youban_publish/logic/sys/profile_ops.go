@@ -23,10 +23,19 @@ func (s *sSysPublish) MyProfileList(ctx context.Context, in *sysin.ProfileListIn
 	if in == nil {
 		in = &sysin.ProfileListInp{}
 	}
-	in.TenantId = account.TenantId
-	in.AccountId = account.Id
-	list, totalCount, err = s.profileList(ctx, in)
-	markProfilesPermission(list, sysin.ProfilePermissionCreator)
+	capability, err := s.activeAccountCapability(ctx, account.TenantId, account.Id)
+	if err != nil {
+		return nil, 0, err
+	}
+	accountIds, err := s.sharedProfileAccountIds(ctx, capability)
+	if err != nil {
+		return nil, 0, err
+	}
+	in.TenantId, in.AccountId = account.TenantId, 0
+	list, totalCount, err = s.profileListByAccountIds(ctx, in, account.TenantId, accountIds)
+	for _, item := range list {
+		markProfilePermission(item, sharedProfilePermission(capability, item))
+	}
 	return
 }
 
@@ -38,16 +47,24 @@ func (s *sSysPublish) MyProfileView(ctx context.Context, in *sysin.ProfileViewIn
 	if in == nil || !hasProfileSelector(in.Id, in.Uuid) {
 		return nil, gerror.New("资料UUID不能为空")
 	}
-	profileId, err := s.resolveProfileId(ctx, in.Id, in.Uuid, account.TenantId, account.Id)
+	capability, err := s.activeAccountCapability(ctx, account.TenantId, account.Id)
 	if err != nil {
 		return nil, err
 	}
-	profile, err := s.profileView(ctx, profileId, account.TenantId, account.Id)
+	ownerScope := account.Id
+	if capability.SharedResourceEnabled == 1 {
+		ownerScope = 0
+	}
+	profileId, err := s.resolveProfileId(ctx, in.Id, in.Uuid, account.TenantId, ownerScope)
 	if err != nil {
 		return nil, err
 	}
-	markProfilePermission(profile, sysin.ProfilePermissionCreator)
-	media, err := s.mediaListByEditableProfile(ctx, profile.Id, account.TenantId, account.Id)
+	profile, err := s.profileView(ctx, profileId, account.TenantId, ownerScope)
+	if err != nil {
+		return nil, err
+	}
+	markProfilePermission(profile, sharedProfilePermission(capability, profile))
+	media, err := s.mediaListByEditableProfile(ctx, profile.Id, account.TenantId, profile.AccountId)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +130,11 @@ func (s *sSysPublish) MyProfileDelete(ctx context.Context, in *sysin.ProfileDele
 	if err != nil {
 		return err
 	}
-	return s.deleteProfiles(ctx, in, account.TenantId, account.Id)
+	capability, err := s.activeAccountCapability(ctx, account.TenantId, account.Id)
+	if err != nil {
+		return err
+	}
+	return s.deleteProfilesByCapability(ctx, in, capability)
 }
 
 func (s *sSysPublish) MyProfileStatus(ctx context.Context, in *sysin.ProfileStatusInp) (res *sysin.ProfileStatusModel, err error) {
@@ -121,7 +142,11 @@ func (s *sSysPublish) MyProfileStatus(ctx context.Context, in *sysin.ProfileStat
 	if err != nil {
 		return nil, err
 	}
-	return s.updateProfileStatus(ctx, in, account.TenantId, account.Id)
+	capability, err := s.activeAccountCapability(ctx, account.TenantId, account.Id)
+	if err != nil {
+		return nil, err
+	}
+	return s.updateProfileStatusByCapability(ctx, in, capability)
 }
 
 func (s *sSysPublish) MyNoteList(ctx context.Context, in *sysin.NoteListInp) (list []*sysin.NoteModel, totalCount int, err error) {
@@ -132,10 +157,21 @@ func (s *sSysPublish) MyNoteList(ctx context.Context, in *sysin.NoteListInp) (li
 	if in == nil {
 		in = &sysin.NoteListInp{}
 	}
-	in.TenantId = account.TenantId
-	in.AccountId = account.Id
-	list, totalCount, err = s.noteList(ctx, in)
-	markNotesPermission(list, sysin.ProfilePermissionCreator)
+	capability, err := s.activeAccountCapability(ctx, account.TenantId, account.Id)
+	if err != nil {
+		return nil, 0, err
+	}
+	accountIds, err := s.sharedProfileAccountIds(ctx, capability)
+	if err != nil {
+		return nil, 0, err
+	}
+	in.TenantId, in.AccountId = account.TenantId, 0
+	list, totalCount, err = s.noteListByAccountIds(ctx, in, accountIds)
+	for _, item := range list {
+		if item != nil {
+			markProfilePermission(&item.ProfileModel, sharedProfilePermission(capability, &item.ProfileModel))
+		}
+	}
 	return
 }
 

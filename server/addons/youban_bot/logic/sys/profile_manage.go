@@ -50,10 +50,11 @@ var (
 )
 
 type botProfileAccount struct {
-	TenantId    int64
-	AccountId   int64
-	AccountType string
-	App         string
+	TenantId              int64
+	AccountId             int64
+	AccountType           string
+	App                   string
+	SharedResourceEnabled bool
 }
 
 type profileManageMessageHandler struct{}
@@ -70,8 +71,14 @@ func (profileManageMessageHandler) Handle(ctx context.Context, bot *sSysBot, eve
 		return true, bot.cancelProfileSession(ctx, event.BotId, event.Msg)
 	}
 	if session := bot.activeProfileSession(ctx, event.BotId, event.Msg); session != nil {
+		account, accessErr := bot.boundProfileAccountByUser(ctx, event.Msg.From.ID)
+		if accessErr != nil {
+			return true, bot.reply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), accessErr.Error())
+		}
 		g.Log().Infof(ctx, "Bot资料事件命中会话 trace:PF-%d bot_id:%d message_id:%d media_group_id:%s scene:%s step:%s text_len:%d photo_count:%d has_video:%t", session.Id, event.BotId, event.Msg.ID, strings.TrimSpace(event.Msg.MediaGroupID), session.Scene, session.Step, len(strings.TrimSpace(text)), len(event.Msg.Photo), event.Msg.Video != nil)
-		account := &botProfileAccount{TenantId: session.TenantId, AccountId: session.AccountId, AccountType: session.AccountType, App: session.App}
+		if account.AccountId != session.AccountId || account.TenantId != session.TenantId {
+			return true, bot.reply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "当前绑定账号已变更，请重新操作")
+		}
 		if session.Scene == "create" || session.Scene == "replace" {
 			return true, bot.consumeProfileSessionMessage(ctx, event.BotId, event.Msg, account, session, text)
 		}
@@ -758,18 +765,14 @@ func (s *sSysBot) boundProfileAccountByUser(ctx context.Context, telegramUserId 
 	if bind == nil || bind.AccountId <= 0 {
 		return nil, gerror.New("请先绑定上架端账号后再使用资料管理。")
 	}
-	var row struct {
-		Id          int64  `json:"id"`
-		TenantId    int64  `json:"tenant_id"`
-		AccountType string `json:"account_type"`
+	capability, err := publishService.SysPublish().AccountCapability(ctx, botsysin.BotAppApi, bind.AccountId)
+	if err != nil {
+		return nil, err
 	}
-	if err = g.DB().Model(publishAccountTable).Safe().Ctx(ctx).Fields("id,tenant_id,account_type").Where("id", bind.AccountId).Where("status", 1).WhereNull("deleted_at").Scan(&row); err != nil {
-		return nil, gerror.Wrap(err, "读取上架账号失败")
+	if capability.AccountType == publishsysin.PublishAccountTypeUploader && capability.TelegramBindingEnabled != 1 {
+		return nil, gerror.New("当前上架账号未开启TG绑定权限，请联系管理员")
 	}
-	if row.Id <= 0 || row.TenantId <= 0 {
-		return nil, gerror.New("绑定的上架账号不可用")
-	}
-	return &botProfileAccount{TenantId: row.TenantId, AccountId: row.Id, AccountType: row.AccountType, App: botsysin.BotAppApi}, nil
+	return &botProfileAccount{TenantId: capability.TenantId, AccountId: capability.AccountId, AccountType: capability.AccountType, App: botsysin.BotAppApi, SharedResourceEnabled: capability.SharedResourceEnabled == 1}, nil
 }
 
 func extractProfileNos(text string) []string {
@@ -853,7 +856,7 @@ func (s *sSysBot) showProfileList(ctx context.Context, botId int64, chatId strin
 }
 
 func (s *sSysBot) changeProfilesStatus(ctx context.Context, botId int64, chatId string, account *botProfileAccount, nos []string, status int) error {
-	res, err := publishService.SysPublish().BotProfileStatus(ctx, &publishsysin.BotProfileStatusInp{TenantId: account.TenantId, AccountId: botProfileScopeAccountId(account), Nos: nos, Status: status})
+	res, err := publishService.SysPublish().BotProfileStatus(ctx, &publishsysin.BotProfileStatusInp{TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType, Nos: nos, Status: status})
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
 	}
@@ -944,7 +947,10 @@ func botProfileScopeAccountId(account *botProfileAccount) int64 {
 }
 
 func profileCardPurpose(account *botProfileAccount, note *publishsysin.NoteModel, requested string) string {
-	if account == nil || note == nil || note.AccountId != account.AccountId {
+	if account == nil || note == nil {
+		return "readonly"
+	}
+	if note.AccountId != account.AccountId && !(account.SharedResourceEnabled && note.TenantId == account.TenantId) {
 		return "readonly"
 	}
 	return requested
@@ -1334,7 +1340,11 @@ func profileSourceDisplay(note *publishsysin.NoteModel) string {
 	if url == "" {
 		return "资料来源：" + html.EscapeString(name)
 	}
-	return "资料来源：<a href=\"" + html.EscapeString(url) + "\">" + html.EscapeString(name) + "</a>"
+	return "资料来源：" + html.EscapeString(name) + "\n资料链接：<a href=\"" + html.EscapeString(url) + "\">" + html.EscapeString(telegramSourceLinkLabel(url)) + "</a>"
+}
+
+func telegramSourceLinkLabel(url string) string {
+	return strings.TrimPrefix(strings.TrimSpace(url), "https://")
 }
 
 func profilePreviewDisplayCaption(note *publishsysin.NoteModel) string {

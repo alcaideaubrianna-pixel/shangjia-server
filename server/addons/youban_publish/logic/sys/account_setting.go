@@ -44,6 +44,13 @@ func (s *sSysPublish) MyAccountSettingSave(ctx context.Context, in *sysin.Accoun
 		return nil, gerror.New("账号设置不能为空")
 	}
 	in.AccountId = account.Id
+	// 权限开关只能由管理员授予，上架账号不能通过个人设置自行提权。
+	current, settingErr := s.accountSetting(ctx, account.TenantId, account.Id)
+	if settingErr != nil {
+		return nil, settingErr
+	}
+	in.SharedResourceEnabled = current.SharedResourceEnabled
+	in.TelegramBindingEnabled = current.TelegramBindingEnabled
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
@@ -67,6 +74,15 @@ func (s *sSysPublish) AdminAccountSettingSave(ctx context.Context, in *sysin.Acc
 	}
 	if err = s.ensureAdminManageableAccount(ctx, admin, in.AccountId); err != nil {
 		return nil, err
+	}
+	var target sysin.AccountModel
+	if err = g.DB().Model(pdao.YoubanPublishAccount.Table()).Safe().Ctx(ctx).
+		Where("id", in.AccountId).Where("tenant_id", admin.TenantId).WhereNull("deleted_at").Scan(&target); err != nil {
+		return nil, gerror.Wrap(err, "读取上架账号失败")
+	}
+	if target.AccountType != sysin.PublishAccountTypeUploader {
+		in.SharedResourceEnabled = 0
+		in.TelegramBindingEnabled = 0
 	}
 	if err = s.saveAccountSetting(ctx, admin.TenantId, admin.Id, in); err != nil {
 		return nil, err
@@ -134,17 +150,19 @@ func (s *sSysPublish) accountDisplayName(ctx context.Context, tenantId int64, ac
 func (s *sSysPublish) saveAccountSetting(ctx context.Context, tenantId int64, operatorId int64, in *sysin.AccountSettingSaveInp) error {
 	now := gtime.Now()
 	data := g.Map{
-		"tenant_id":         tenantId,
-		"account_id":        in.AccountId,
-		"enable_suffix":     in.EnableSuffix,
-		"suffix_content":    in.SuffixContent,
-		"enable_title_mark": in.EnableTitleMark,
-		"mark_mode":         in.MarkMode,
-		"number_source":     in.NumberSource,
-		"custom_mark_text":  in.CustomMarkText,
-		"mark_position":     in.MarkPosition,
-		"updated_by":        operatorId,
-		"updated_at":        now,
+		"tenant_id":                tenantId,
+		"account_id":               in.AccountId,
+		"enable_suffix":            in.EnableSuffix,
+		"suffix_content":           in.SuffixContent,
+		"enable_title_mark":        in.EnableTitleMark,
+		"mark_mode":                in.MarkMode,
+		"number_source":            in.NumberSource,
+		"custom_mark_text":         in.CustomMarkText,
+		"mark_position":            in.MarkPosition,
+		"shared_resource_enabled":  in.SharedResourceEnabled,
+		"telegram_binding_enabled": in.TelegramBindingEnabled,
+		"updated_by":               operatorId,
+		"updated_at":               now,
 	}
 	count, err := g.DB().Model(publishAccountSettingTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
@@ -214,6 +232,8 @@ func fillAccountSettingModel(model *sysin.AccountSettingModel, row gdb.Record) {
 	model.NumberSource = strings.TrimSpace(row["number_source"].String())
 	model.CustomMarkText = strings.TrimSpace(row["custom_mark_text"].String())
 	model.MarkPosition = strings.TrimSpace(row["mark_position"].String())
+	model.SharedResourceEnabled = row["shared_resource_enabled"].Int()
+	model.TelegramBindingEnabled = row["telegram_binding_enabled"].Int()
 	model.CreatedAt = row["created_at"].GTime()
 	model.UpdatedAt = row["updated_at"].GTime()
 	if model.MarkMode == "" {

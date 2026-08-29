@@ -70,18 +70,23 @@ func (s *sSysPublish) botResolveProfileIdByAccountIds(ctx context.Context, tenan
 }
 
 func (s *sSysPublish) botProfileSearchAccountIds(ctx context.Context, in *sysin.BotProfileSearchInp) ([]int64, error) {
-	account := &sysin.AccountModel{Id: in.AccountId, TenantId: in.TenantId, AccountType: strings.TrimSpace(in.AccountType)}
-	if account.Id <= 0 {
-		return nil, gerror.New("上架账号信息不完整")
+	// Bot 调用前已由绑定层实时校验账号；管理员的搜索范围保持为当前账号。
+	if strings.TrimSpace(in.AccountType) == sysin.PublishAccountTypeAdmin && in.AccountId > 0 {
+		return []int64{in.AccountId}, nil
 	}
-	return []int64{account.Id}, nil
+	capability, err := s.activeAccountCapability(ctx, in.TenantId, in.AccountId)
+	if err != nil {
+		return nil, err
+	}
+	return s.sharedProfileAccountIds(ctx, capability)
 }
 
 func (s *sSysPublish) botProfileViewAccountIds(ctx context.Context, in *sysin.BotProfileViewInp) ([]int64, error) {
-	account := &sysin.AccountModel{Id: in.AccountId, TenantId: in.TenantId, AccountType: strings.TrimSpace(in.AccountType)}
-	if account.Id <= 0 {
-		return nil, gerror.New("上架账号信息不完整")
+	capability, err := s.activeAccountCapability(ctx, in.TenantId, in.AccountId)
+	if err != nil {
+		return nil, err
 	}
+	account := &sysin.AccountModel{Id: capability.AccountId, TenantId: capability.TenantId, AccountType: capability.AccountType}
 	if account.AccountType == sysin.PublishAccountTypeAdmin {
 		scope, err := s.adminProfileVisibleScope(ctx, account, &sysin.ProfileListInp{AccountScope: "all"})
 		if err != nil {
@@ -89,7 +94,15 @@ func (s *sSysPublish) botProfileViewAccountIds(ctx context.Context, in *sysin.Bo
 		}
 		return uniqueIds(scope.AccountIds), nil
 	}
-	return s.followNoteAccountIds(ctx, account, &sysin.FollowNoteListInp{Scope: "all"})
+	followIds, err := s.followNoteAccountIds(ctx, account, &sysin.FollowNoteListInp{Scope: "all"})
+	if err != nil {
+		return nil, err
+	}
+	sharedIds, err := s.sharedProfileAccountIds(ctx, capability)
+	if err != nil {
+		return nil, err
+	}
+	return uniqueIds(append(sharedIds, followIds...)), nil
 }
 
 func (s *sSysPublish) BotProfileImageSearch(ctx context.Context, in *sysin.BotProfileImageSearchInp) (list []*sysin.NoteModel, totalCount int, err error) {

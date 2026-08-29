@@ -17,6 +17,7 @@ const (
 
 	ProfilePermissionCreator = "creator"
 	ProfilePermissionAdmin   = "admin"
+	ProfilePermissionShared  = "shared"
 	ProfilePermissionVisitor = "visitor"
 
 	PublishTaskStatusPending    = "pending"
@@ -214,14 +215,16 @@ type AccountSettingViewInp struct {
 }
 
 type AccountSettingSaveInp struct {
-	AccountId       int64  `json:"accountId" v:"required|min:1#账号ID不能为空|账号ID不能为空" dc:"账号ID"`
-	EnableSuffix    int    `json:"enableSuffix" dc:"是否启用发送后缀"`
-	SuffixContent   string `json:"suffixContent" dc:"发送后缀内容"`
-	EnableTitleMark int    `json:"enableTitleMark" dc:"是否启用编号标识"`
-	MarkMode        string `json:"markMode" dc:"前缀模式：nickname/custom"`
-	NumberSource    string `json:"numberSource" dc:"编号来源：sequence/random"`
-	CustomMarkText  string `json:"customMarkText" dc:"自定义前缀"`
-	MarkPosition    string `json:"markPosition" dc:"显示位置：top/bottom/feeLine"`
+	AccountId              int64  `json:"accountId" v:"required|min:1#账号ID不能为空|账号ID不能为空" dc:"账号ID"`
+	EnableSuffix           int    `json:"enableSuffix" dc:"是否启用发送后缀"`
+	SuffixContent          string `json:"suffixContent" dc:"发送后缀内容"`
+	EnableTitleMark        int    `json:"enableTitleMark" dc:"是否启用编号标识"`
+	MarkMode               string `json:"markMode" dc:"前缀模式：nickname/custom"`
+	NumberSource           string `json:"numberSource" dc:"编号来源：sequence/random"`
+	CustomMarkText         string `json:"customMarkText" dc:"自定义前缀"`
+	MarkPosition           string `json:"markPosition" dc:"显示位置：top/bottom/feeLine"`
+	SharedResourceEnabled  int    `json:"sharedResourceEnabled" dc:"是否允许上架账号管理租户共享资料"`
+	TelegramBindingEnabled int    `json:"telegramBindingEnabled" dc:"是否允许上架账号绑定并使用Telegram"`
 }
 
 func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
@@ -254,21 +257,37 @@ func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
 	if in.EnableTitleMark != 0 && in.EnableTitleMark != 1 {
 		return gerror.New("编号标识开关不合法")
 	}
+	if in.SharedResourceEnabled != 0 && in.SharedResourceEnabled != 1 {
+		return gerror.New("共享资源开关不合法")
+	}
+	if in.TelegramBindingEnabled != 0 && in.TelegramBindingEnabled != 1 {
+		return gerror.New("TG绑定开关不合法")
+	}
 	return nil
 }
 
 type AccountSettingModel struct {
-	AccountId       int64       `json:"accountId" dc:"账号ID"`
-	EnableSuffix    int         `json:"enableSuffix" dc:"是否启用发送后缀"`
-	SuffixContent   string      `json:"suffixContent" dc:"发送后缀内容"`
-	EnableTitleMark int         `json:"enableTitleMark" dc:"是否启用编号标识"`
-	MarkMode        string      `json:"markMode" dc:"前缀模式"`
-	NumberSource    string      `json:"numberSource" dc:"编号来源"`
-	CustomMarkText  string      `json:"customMarkText" dc:"自定义前缀"`
-	MarkPosition    string      `json:"markPosition" dc:"显示位置"`
-	PreviewMark     string      `json:"previewMark" dc:"编号标识预览"`
-	CreatedAt       *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt       *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	AccountId              int64       `json:"accountId" dc:"账号ID"`
+	EnableSuffix           int         `json:"enableSuffix" dc:"是否启用发送后缀"`
+	SuffixContent          string      `json:"suffixContent" dc:"发送后缀内容"`
+	EnableTitleMark        int         `json:"enableTitleMark" dc:"是否启用编号标识"`
+	MarkMode               string      `json:"markMode" dc:"前缀模式"`
+	NumberSource           string      `json:"numberSource" dc:"编号来源"`
+	CustomMarkText         string      `json:"customMarkText" dc:"自定义前缀"`
+	MarkPosition           string      `json:"markPosition" dc:"显示位置"`
+	PreviewMark            string      `json:"previewMark" dc:"编号标识预览"`
+	SharedResourceEnabled  int         `json:"sharedResourceEnabled" dc:"是否允许管理租户共享资料"`
+	TelegramBindingEnabled int         `json:"telegramBindingEnabled" dc:"是否允许绑定并使用Telegram"`
+	CreatedAt              *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt              *gtime.Time `json:"updatedAt" dc:"更新时间"`
+}
+
+type AccountCapabilityModel struct {
+	AccountId              int64  `json:"accountId" dc:"账号ID"`
+	TenantId               int64  `json:"tenantId" dc:"租户ID"`
+	AccountType            string `json:"accountType" dc:"账号类型"`
+	SharedResourceEnabled  int    `json:"sharedResourceEnabled" dc:"是否允许管理租户共享资料"`
+	TelegramBindingEnabled int    `json:"telegramBindingEnabled" dc:"是否允许绑定并使用Telegram"`
 }
 
 type CurrentAccountModel struct {
@@ -870,11 +889,12 @@ type BotProfileViewInp struct {
 
 // BotProfileStatusInp is used by youban_bot to update profile status.
 type BotProfileStatusInp struct {
-	TenantId  int64    `json:"tenantId" dc:"租户ID"`
-	AccountId int64    `json:"accountId" dc:"上架账号ID"`
-	Ids       []int64  `json:"ids" dc:"资料ID列表"`
-	Nos       []string `json:"nos" dc:"资料编号列表"`
-	Status    int      `json:"status" dc:"状态：1上架 2下架"`
+	TenantId    int64    `json:"tenantId" dc:"租户ID"`
+	AccountId   int64    `json:"accountId" dc:"上架账号ID"`
+	AccountType string   `json:"accountType" dc:"账号类型：admin/uploader"`
+	Ids         []int64  `json:"ids" dc:"资料ID列表"`
+	Nos         []string `json:"nos" dc:"资料编号列表"`
+	Status      int      `json:"status" dc:"状态：1上架 2下架"`
 }
 
 // BotProfileCreateInp is used by youban_bot to create a text profile quickly.

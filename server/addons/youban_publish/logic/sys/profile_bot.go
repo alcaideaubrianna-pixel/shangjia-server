@@ -64,15 +64,23 @@ func (s *sSysPublish) BotProfileStatus(ctx context.Context, in *sysin.BotProfile
 	if in == nil {
 		return nil, gerror.New("资料信息不能为空")
 	}
+	capability, err := s.activeAccountCapability(ctx, in.TenantId, in.AccountId)
+	if err != nil {
+		return nil, err
+	}
+	accountIds, err := s.sharedProfileAccountIds(ctx, capability)
+	if err != nil {
+		return nil, err
+	}
 	ids := append([]int64{}, in.Ids...)
 	for _, no := range in.Nos {
-		id, err := s.botResolveProfileId(ctx, in.TenantId, in.AccountId, no, false)
+		id, err := s.botResolveProfileIdByAccountIds(ctx, in.TenantId, accountIds, no, false)
 		if err != nil {
 			return nil, err
 		}
 		ids = append(ids, id)
 	}
-	return s.updateProfileStatus(ctx, &sysin.ProfileStatusInp{Ids: ids, Status: in.Status}, in.TenantId, in.AccountId)
+	return s.updateProfileStatusByCapability(ctx, &sysin.ProfileStatusInp{Ids: ids, Status: in.Status}, capability)
 }
 
 func (s *sSysPublish) BotProfileCreate(ctx context.Context, in *sysin.BotProfileCreateInp) (res *sysin.ProfileSaveModel, err error) {
