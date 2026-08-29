@@ -42,6 +42,18 @@ func TestTenantVipActivityTriggerEligible(t *testing.T) {
 	}
 }
 
+func TestTenantVipActivityAccountEligible(t *testing.T) {
+	if tenantVipActivityAccountEligible(nil) {
+		t.Fatal("nil account must not participate in VIP activities")
+	}
+	if tenantVipActivityAccountEligible(&sysin.AccountModel{TenantId: 1, AccountType: sysin.PublishAccountTypeUploader}) {
+		t.Fatal("uploader account must not participate in VIP activities")
+	}
+	if !tenantVipActivityAccountEligible(&sysin.AccountModel{TenantId: 1, AccountType: sysin.PublishAccountTypeAdmin}) {
+		t.Fatal("tenant admin account should participate in VIP activities")
+	}
+}
+
 func TestTenantVipEventNotifyEnabled(t *testing.T) {
 	cfg := &model.YoubanPublishVipActivityConfig{
 		GiftNotifyEnabled:    true,

@@ -85,7 +85,7 @@ func (s *sSysPublish) tenantVipActivities(ctx context.Context, account *sysin.Ac
 	if err != nil {
 		return nil, nil, err
 	}
-	if account == nil || account.TenantId <= 0 {
+	if !tenantVipActivityAccountEligible(account) {
 		return []*sysin.TenantVipActivityModel{}, cfg, nil
 	}
 	var summaries []*tenantVipEventSummary
@@ -174,7 +174,7 @@ func (s *sSysPublish) handleTenantVipAccountBoundAt(ctx context.Context, account
 	if err != nil {
 		return err
 	}
-	if account == nil || account.TenantId <= 0 {
+	if !tenantVipActivityAccountEligible(account) {
 		return nil
 	}
 	boundAt, err = s.tenantVipAccountFirstBoundAt(ctx, account.Id, boundAt)
@@ -230,7 +230,7 @@ func (s *sSysPublish) tenantVipAccountById(ctx context.Context, accountId int64)
 }
 
 func (s *sSysPublish) applyTenantVipBindGift(ctx context.Context, account *sysin.AccountModel, boundAt *gtime.Time, cfg *model.YoubanPublishVipActivityConfig) error {
-	if account == nil || account.TenantId <= 0 || cfg == nil || !cfg.BindGiftEnabled || cfg.BindGiftDays <= 0 || !tenantVipActivityTriggerEligible(boundAt, cfg.BindGiftEnabledAt) {
+	if !tenantVipActivityAccountEligible(account) || cfg == nil || !cfg.BindGiftEnabled || cfg.BindGiftDays <= 0 || !tenantVipActivityTriggerEligible(boundAt, cfg.BindGiftEnabledAt) {
 		return nil
 	}
 	eventKey, generation, err := s.tenantVipActivityEventIdentity(ctx, tenantVipEventBindGift, account.TenantId, fmt.Sprintf("%s:%d", tenantVipEventBindGift, account.TenantId))
@@ -254,7 +254,7 @@ func (s *sSysPublish) applyTenantVipBindGift(ctx context.Context, account *sysin
 }
 
 func (s *sSysPublish) applyTenantVipInviteBindGift(ctx context.Context, account *sysin.AccountModel, boundAt *gtime.Time, cfg *model.YoubanPublishVipActivityConfig) error {
-	if account == nil || account.TenantId <= 0 || cfg == nil {
+	if !tenantVipActivityAccountEligible(account) || cfg == nil {
 		return nil
 	}
 	if !cfg.InviteBindGiftEnabled || cfg.InviteBindGiftDays <= 0 || !tenantVipActivityTriggerEligible(boundAt, cfg.InviteBindGiftEnabledAt) {
@@ -284,6 +284,10 @@ func (s *sSysPublish) applyTenantVipInviteBindGift(ctx context.Context, account 
 		Remark:             "邀请好友绑定Telegram奖励",
 	})
 	return err
+}
+
+func tenantVipActivityAccountEligible(account *sysin.AccountModel) bool {
+	return account != nil && account.TenantId > 0 && account.AccountType == sysin.PublishAccountTypeAdmin
 }
 
 func (s *sSysPublish) HandleVipAccountBound(ctx context.Context, accountId int64) error {
