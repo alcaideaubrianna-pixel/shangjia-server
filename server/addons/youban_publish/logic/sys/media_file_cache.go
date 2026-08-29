@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -26,6 +27,8 @@ const (
 	mediaFileCacheDefaultDir      = "storage/cache/youban_publish/media"
 	mediaFileCacheDefaultMaxBytes = int64(1 << 30)
 	mediaFileCacheTargetRatio     = 0.9
+	mediaFileCacheCosModeCDN      = "cdn"
+	mediaFileCacheCosModeOrigin   = "origin"
 )
 
 var mediaFileCacheDownloadGroup singleflight.Group
@@ -45,6 +48,13 @@ type mediaFileCacheEntry struct {
 	filePath string
 	size     int64
 	lastUse  int64
+}
+
+type mediaFileCacheSource struct {
+	URL        string
+	CacheKey   string
+	ObjectPath string
+	Drive      string
 }
 
 func cachedTelegramMediaFile(ctx context.Context, media *telegramMediaItem) (string, func(), error) {
@@ -72,23 +82,24 @@ func cachedTelegramMediaFile(ctx context.Context, media *telegramMediaItem) (str
 	}
 	var lastErr error
 	for _, source := range sources {
-		path, sourceErr := cachedRemoteMediaFile(ctx, mediaFileCacheKey(media, source), source, mediaFileCacheExt(media, source))
+		downloader := mediaFileCacheSourceDownloader(ctx, source)
+		path, sourceErr := cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx, source.CacheKey, source.URL, source.URL, mediaFileCacheExt(media, source.URL), downloader)
 		if sourceErr == nil {
 			return path, nil, nil
 		}
 		lastErr = sourceErr
-		g.Log().Warningf(ctx, "媒体主地址下载失败，尝试备用附件地址 mediaId:%d source:%s err:%+v", media.Id, source, sourceErr)
+		g.Log().Warningf(ctx, "媒体主地址下载失败，尝试备用附件地址 mediaId:%d source:%s drive:%s err:%+v", media.Id, source.URL, source.Drive, sourceErr)
 	}
 	return "", nil, lastErr
 }
 
-func mediaFileCacheRemoteSources(ctx context.Context, media *telegramMediaItem) ([]string, error) {
+func mediaFileCacheRemoteSources(ctx context.Context, media *telegramMediaItem) ([]mediaFileCacheSource, error) {
 	if media == nil {
 		return nil, nil
 	}
-	sources := make([]string, 0, 2)
+	sources := make([]mediaFileCacheSource, 0, 2)
 	seen := make(map[string]struct{}, 2)
-	add := func(source string) {
+	add := func(source, cacheIdentity, drive, objectPath string) {
 		source = strings.TrimSpace(source)
 		if source == "" || !strings.HasPrefix(strings.ToLower(source), "http") {
 			return
@@ -97,14 +108,19 @@ func mediaFileCacheRemoteSources(ctx context.Context, media *telegramMediaItem) 
 			return
 		}
 		seen[source] = struct{}{}
-		sources = append(sources, source)
+		if strings.TrimSpace(cacheIdentity) == "" {
+			cacheIdentity = normalizedMediaCacheSource(source)
+		}
+		sources = append(sources, mediaFileCacheSource{
+			URL: source, CacheKey: stableMediaFileCacheKey(cacheIdentity), Drive: strings.TrimSpace(drive), ObjectPath: strings.TrimSpace(objectPath),
+		})
 	}
 	// Telegram Bot API file URLs are temporary and commonly return 404 after
 	// the bot file cache expires. Prefer the durable object-storage attachment
 	// whenever one is available, and only use the Telegram URL as a fallback.
 	telegramSource := strings.TrimSpace(media.FileUrl)
 	if media.AttachmentId <= 0 {
-		add(telegramSource)
+		add(telegramSource, "", "", "")
 		return sources, nil
 	}
 	row, err := g.DB().Model(sysAttachmentTable).Safe().Ctx(ctx).Fields("file_url,path,drive").Where("id", media.AttachmentId).One()
@@ -112,11 +128,26 @@ func mediaFileCacheRemoteSources(ctx context.Context, media *telegramMediaItem) 
 		return nil, gerror.Wrap(err, "读取资源文件地址失败")
 	}
 	if row != nil && !row.IsEmpty() {
-		add(storager.LastUrl(ctx, row["file_url"].String(), row["drive"].String()))
-		add(storager.LastUrl(ctx, row["path"].String(), row["drive"].String()))
+		drive := strings.TrimSpace(row["drive"].String())
+		objectPath := firstNonEmpty(row["path"].String(), row["file_url"].String())
+		publicURL := storager.LastUrl(ctx, firstNonEmpty(row["file_url"].String(), row["path"].String()), drive)
+		add(publicURL, fmt.Sprintf("attachment:%d", media.AttachmentId), drive, objectPath)
 	}
-	add(telegramSource)
+	add(telegramSource, "", "", "")
 	return sources, nil
+}
+
+func mediaFileCacheSourceDownloader(ctx context.Context, source mediaFileCacheSource) func(context.Context, string, string) error {
+	if !strings.EqualFold(source.Drive, "cos") || mediaFileCacheCosDownloadMode(ctx) != mediaFileCacheCosModeOrigin || source.ObjectPath == "" {
+		return nil
+	}
+	return func(downloadCtx context.Context, _ string, targetPath string) error {
+		if err := storager.DownloadCosObjectToFile(downloadCtx, source.ObjectPath, targetPath); err != nil {
+			g.Log().Warningf(downloadCtx, "COS源站下载失败，降级使用CDN objectPath:%s err:%+v", source.ObjectPath, err)
+			return downloadMediaFileCache(downloadCtx, source.URL, targetPath)
+		}
+		return nil
+	}
 }
 
 func cachedRemoteMediaFile(ctx context.Context, key string, source string, ext string) (string, error) {
@@ -232,6 +263,7 @@ func downloadMediaFileCacheWithClient(ctx context.Context, client *http.Client, 
 	if err != nil {
 		return gerror.Wrap(err, "创建远程媒体下载请求失败")
 	}
+	req.Header.Set("User-Agent", "youban-server/media-cache")
 	if client == nil {
 		client = &http.Client{Timeout: 2 * time.Minute}
 	}
@@ -368,18 +400,28 @@ func scanMediaFileCache(dir string) ([]mediaFileCacheEntry, int64, error) {
 }
 
 func mediaFileCacheKey(media *telegramMediaItem, source string) string {
-	var builder strings.Builder
-	builder.WriteString(strings.TrimSpace(source))
-	if media != nil {
-		builder.WriteByte('|')
-		builder.WriteString(strings.TrimSpace(media.StoragePath))
-		builder.WriteByte('|')
-		builder.WriteString(strings.TrimSpace(media.AssetHash))
-		builder.WriteByte('|')
-		builder.WriteString(strings.TrimSpace(media.TgFileId))
+	identity := normalizedMediaCacheSource(source)
+	if identity == "" && media != nil {
+		identity = normalizedMediaCacheSource(firstNonEmpty(media.StoragePath, media.FileUrl))
 	}
-	sum := sha256.Sum256([]byte(builder.String()))
+	return stableMediaFileCacheKey(identity)
+}
+
+func stableMediaFileCacheKey(identity string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(identity)))
 	return hex.EncodeToString(sum[:])
+}
+
+func normalizedMediaCacheSource(source string) string {
+	source = strings.TrimSpace(source)
+	parsed, err := url.Parse(source)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return source
+	}
+	parsed.Fragment = ""
+	parsed.RawQuery = ""
+	parsed.Host = strings.ToLower(parsed.Host)
+	return parsed.String()
 }
 
 func mediaFileCachePath(dir string, key string, ext string) string {
@@ -438,6 +480,14 @@ func mediaFileCacheMaxBytes(ctx context.Context) int64 {
 		return mediaFileCacheDefaultMaxBytes
 	}
 	return maxBytes
+}
+
+func mediaFileCacheCosDownloadMode(ctx context.Context) string {
+	mode := strings.ToLower(strings.TrimSpace(g.Cfg().MustGet(ctx, "youbanPublish.mediaFileCache.cosDownloadMode", mediaFileCacheCosModeCDN).String()))
+	if mode == mediaFileCacheCosModeOrigin {
+		return mode
+	}
+	return mediaFileCacheCosModeCDN
 }
 
 func attachmentMediaSource(ctx context.Context, attachmentId int64) (string, error) {

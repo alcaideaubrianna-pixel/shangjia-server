@@ -377,6 +377,8 @@ runtime:
   roles: [ "all" ]
 
 youbanPublish:
+  mediaFileCache:
+    cosDownloadMode: "cdn"     # cdn: 服务端经公共CDN下载；origin: 通过COS SDK从Bucket源站下载，失败降级CDN
   telegramDeleteFallback:
     intervalSeconds: 60        # 协议号旧消息删除任务的首次等待时间
     jitterSeconds: 30          # 在最小间隔上增加的确定性抖动上限

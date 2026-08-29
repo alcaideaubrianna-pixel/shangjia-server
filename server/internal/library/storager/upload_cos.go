@@ -7,6 +7,10 @@ package storager
 
 import (
 	"context"
+	"io"
+	"os"
+	"path/filepath"
+
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gfile"
@@ -43,6 +47,49 @@ func newCosClient() (*cos.Client, error) {
 // NewCosClient returns a COS client configured with the active upload settings.
 func NewCosClient() (*cos.Client, error) {
 	return newCosClient()
+}
+
+// DownloadCosObjectToFile downloads a COS object through the bucket origin.
+// It is intended for internal server-side media processing, avoiding the
+// public CDN domain configured by CosPublicURL.
+func DownloadCosObjectToFile(ctx context.Context, objectPath, targetPath string) error {
+	objectPath = strings.TrimLeft(strings.TrimSpace(objectPath), "/")
+	if objectPath == "" || strings.TrimSpace(targetPath) == "" {
+		return gerror.New("COS下载参数不能为空")
+	}
+	client, err := newCosClient()
+	if err != nil {
+		return err
+	}
+	response, err := client.Object.Get(ctx, objectPath, nil)
+	if err != nil {
+		return gerror.Wrap(err, "从COS源站下载文件失败")
+	}
+	defer response.Body.Close()
+	if err = os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return gerror.Wrap(err, "创建COS下载目录失败")
+	}
+	partPath := targetPath + ".part"
+	_ = os.Remove(partPath)
+	file, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return gerror.Wrap(err, "创建COS下载文件失败")
+	}
+	_, copyErr := io.Copy(file, response.Body)
+	closeErr := file.Close()
+	if copyErr != nil {
+		_ = os.Remove(partPath)
+		return gerror.Wrap(copyErr, "保存COS下载文件失败")
+	}
+	if closeErr != nil {
+		_ = os.Remove(partPath)
+		return gerror.Wrap(closeErr, "关闭COS下载文件失败")
+	}
+	if err = os.Rename(partPath, targetPath); err != nil {
+		_ = os.Remove(partPath)
+		return gerror.Wrap(err, "写入COS下载文件失败")
+	}
+	return nil
 }
 
 // Upload 上传到腾讯云cos对象存储

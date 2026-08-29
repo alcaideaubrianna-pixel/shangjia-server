@@ -13,7 +13,6 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
-	"golang.org/x/sync/errgroup"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
@@ -41,11 +40,6 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 	}
 	if targetJob.CollectSourceId > 0 && !s.collectPushEnabled(ctx) {
 		return s.postponeTelegramJobForCollectPushPause(ctx, targetJob)
-	}
-	// 预热媒体文件缓存不改变发送顺序，只把远程下载和视频预览图准备
-	// 提前到频道发送锁之前，允许同频道后续任务形成有限流水线。
-	if err = s.prewarmTelegramJobMedia(ctx, targetJob); err != nil {
-		g.Log().Warningf(ctx, "TG任务媒体缓存预热失败，继续走发送流程 jobId:%d err:%+v", jobId, err)
 	}
 	lease, ok, err := s.tryTelegramChannelLease(ctx, targetJob.TargetChatId)
 	if err != nil {
@@ -86,63 +80,6 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 		return s.postponeTelegramJobForChannelOrder(ctx, targetJob)
 	}
 	return s.sendTelegramJobLockedByChannel(ctx, jobId)
-}
-
-func (s *sSysPublish) prewarmTelegramJobMedia(ctx context.Context, job telegramJobRecord) error {
-	displayMedia, err := s.telegramJobMedia(ctx, job, "display")
-	if err != nil {
-		return err
-	}
-	displayMedia, err = s.selectTelegramDisplayMediaForTenant(ctx, job, displayMedia)
-	if err != nil {
-		return err
-	}
-	verifyMedia, err := s.telegramJobMedia(ctx, job, "verify")
-	if err != nil {
-		return err
-	}
-	policy, err := s.telegramChannelSendPolicy(ctx, job)
-	if err != nil {
-		return err
-	}
-	if policy.AntiScanEnabled {
-		for _, media := range append(displayMedia, verifyMedia...) {
-			if media == nil || (!isTelegramImageMedia(media.MediaType) && !isTelegramVideoMedia(media.MediaType)) {
-				continue
-			}
-			media.AntiScanEnabled = true
-			media.AntiScanSeed = telegramProtectionSeed(job.Id, media.Id, media.Purpose)
-			if isTelegramImageMedia(media.MediaType) {
-				media.TgFileId = ""
-				media.AssetHash = "anti-scan:" + telegramAntiScanCacheKey(media)
-			}
-		}
-	}
-	media := append(displayMedia, verifyMedia...)
-	group, groupCtx := errgroup.WithContext(ctx)
-	group.SetLimit(telegramMediaPrepareConcurrency)
-	for _, item := range media {
-		item := item
-		if item == nil || strings.TrimSpace(item.TgFileId) != "" {
-			continue
-		}
-		group.Go(func() error {
-			if _, cleanup, err := cachedTelegramMediaFile(groupCtx, item); err != nil {
-				return err
-			} else if cleanup != nil {
-				cleanup()
-			}
-			if item.MediaType == "video" && (strings.TrimSpace(item.PosterUrl) != "" || strings.TrimSpace(item.PosterStoragePath) != "") {
-				_, cleanup, posterErr := cachedTelegramVideoPosterFile(groupCtx, item)
-				if cleanup != nil {
-					cleanup()
-				}
-				return posterErr
-			}
-			return nil
-		})
-	}
-	return group.Wait()
 }
 
 func (s *sSysPublish) telegramChannelBusyDelay(ctx context.Context, jobId int64, dispatchCounts ...int) time.Duration {
