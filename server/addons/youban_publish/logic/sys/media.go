@@ -342,7 +342,7 @@ func (s *sSysPublish) MyProfileImageSearch(ctx context.Context, in *sysin.Profil
 	list, totalCount, err = s.profileImageSearch(ctx, &searchIn, file, mediaSearchScopeForTenant(account.TenantId, accountIds), account)
 	for _, item := range list {
 		if item != nil {
-			markProfilePermission(&item.ProfileModel, sharedProfilePermission(capability, &item.ProfileModel))
+			markSharedProfilePermission(&item.ProfileModel, capability)
 		}
 	}
 	return list, totalCount, err

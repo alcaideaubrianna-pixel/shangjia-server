@@ -34,7 +34,7 @@ func (s *sSysPublish) MyProfileList(ctx context.Context, in *sysin.ProfileListIn
 	in.TenantId, in.AccountId = account.TenantId, 0
 	list, totalCount, err = s.profileListByAccountIds(ctx, in, account.TenantId, accountIds)
 	for _, item := range list {
-		markProfilePermission(item, sharedProfilePermission(capability, item))
+		markSharedProfilePermission(item, capability)
 	}
 	return
 }
@@ -63,7 +63,7 @@ func (s *sSysPublish) MyProfileView(ctx context.Context, in *sysin.ProfileViewIn
 	if err != nil {
 		return nil, err
 	}
-	markProfilePermission(profile, sharedProfilePermission(capability, profile))
+	markSharedProfilePermission(profile, capability)
 	media, err := s.mediaListByEditableProfile(ctx, profile.Id, account.TenantId, profile.AccountId)
 	if err != nil {
 		return nil, err
@@ -121,8 +121,16 @@ func (s *sSysPublish) MyProfileEdit(ctx context.Context, in *sysin.ProfileSaveIn
 	if in == nil || (in.Id <= 0 && normalizeProfileUUID(in.Uuid) == "") {
 		return nil, gerror.New("资料UUID不能为空")
 	}
+	capability, err := s.activeAccountCapability(ctx, account.TenantId, account.Id)
+	if err != nil {
+		return nil, err
+	}
+	ownerAccountId, err := s.editableProfileOwnerAccountId(ctx, in.Id, in.Uuid, capability)
+	if err != nil {
+		return nil, err
+	}
 	in.KeepPublishState = true
-	return s.saveProfile(ctx, in, account.TenantId, account.Id)
+	return s.saveProfile(ctx, in, account.TenantId, ownerAccountId)
 }
 
 func (s *sSysPublish) MyProfileDelete(ctx context.Context, in *sysin.ProfileDeleteInp) (err error) {
@@ -169,7 +177,7 @@ func (s *sSysPublish) MyNoteList(ctx context.Context, in *sysin.NoteListInp) (li
 	list, totalCount, err = s.noteListByAccountIds(ctx, in, accountIds)
 	for _, item := range list {
 		if item != nil {
-			markProfilePermission(&item.ProfileModel, sharedProfilePermission(capability, &item.ProfileModel))
+			markSharedProfilePermission(&item.ProfileModel, capability)
 		}
 	}
 	return

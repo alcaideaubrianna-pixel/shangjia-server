@@ -14,6 +14,20 @@ type profileOwnerGroup struct {
 	Ids       []int64
 }
 
+func (s *sSysPublish) editableProfileOwnerAccountId(ctx context.Context, id int64, uuid string, capability *sysin.AccountCapabilityModel) (int64, error) {
+	if capability == nil {
+		return 0, gerror.New("上架账号信息不完整")
+	}
+	groups, err := s.profileOwnerGroups(ctx, []int64{id}, []string{uuid}, capability)
+	if err != nil {
+		return 0, err
+	}
+	if len(groups) != 1 || len(groups[0].Ids) != 1 {
+		return 0, gerror.New("资料不存在或无权编辑")
+	}
+	return groups[0].AccountId, nil
+}
+
 func (s *sSysPublish) profileOwnerGroups(ctx context.Context, inIds []int64, uuids []string, capability *sysin.AccountCapabilityModel) ([]profileOwnerGroup, error) {
 	if capability == nil {
 		return nil, gerror.New("上架账号信息不完整")

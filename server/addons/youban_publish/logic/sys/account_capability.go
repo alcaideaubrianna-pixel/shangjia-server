@@ -92,3 +92,11 @@ func sharedProfilePermission(capability *sysin.AccountCapabilityModel, profile *
 	}
 	return sysin.ProfilePermissionVisitor
 }
+
+func markSharedProfilePermission(item *sysin.ProfileModel, capability *sysin.AccountCapabilityModel) {
+	permission := sharedProfilePermission(capability, item)
+	markProfilePermission(item, permission)
+	if item != nil && permission == sysin.ProfilePermissionShared {
+		item.CanEdit = true
+	}
+}
