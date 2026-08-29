@@ -2083,10 +2083,12 @@ func (s *sSysChat) ensureTelegramTopic(ctx context.Context, botToken, chatID str
 		lock.Unlock()
 		s.telegramTopicLocks.Delete(row.Id)
 	}()
-	var persistedThreadID int64
-	if err := g.DB().Model(chatConversationTable).Ctx(ctx).Where("id", row.Id).Fields("tg_message_thread_id").Scan(&persistedThreadID); err != nil {
+	persistedValue, err := g.DB().Model(chatConversationTable).Ctx(ctx).
+		Where("id", row.Id).Fields("tg_message_thread_id").Value()
+	if err != nil {
 		return 0, gerror.Wrap(err, "读取Telegram话题失败")
 	}
+	persistedThreadID := persistedValue.Int64()
 	if persistedThreadID > 0 {
 		row.TgMessageThreadId = persistedThreadID
 		return persistedThreadID, nil
