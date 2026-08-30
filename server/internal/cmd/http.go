@@ -41,6 +41,7 @@ var (
 			// 注册全局中间件
 			s.BindMiddleware("/*any", []ghttp.HandlerFunc{
 				service.Middleware().Ctx,             // 初始化请求上下文，一般需要第一个进行加载，后续中间件存在依赖关系
+				ghttp.MiddlewareGzip,                 // 压缩大于1KB且客户端支持gzip的响应，减少跨区域传输耗时
 				service.Middleware().AccessLog,       // 结构化访问日志，输出traceID、路径、状态码、耗时等字段
 				service.Middleware().CORS,            // 跨域中间件，自动处理跨域问题
 				service.Middleware().Blacklist,       // IP黑名单中间件，如果请求IP被后台拉黑，所有请求将被拒绝

@@ -117,16 +117,16 @@ CREATE INDEX IF NOT EXISTS idx_content_profile_public ON hg_content_profile (sta
 CREATE INDEX IF NOT EXISTS idx_content_profile_city ON hg_content_profile (province, city);
 CREATE INDEX IF NOT EXISTS idx_content_profile_duplicate ON hg_content_profile (duplicate_of_id);
 CREATE INDEX IF NOT EXISTS idx_content_profile_public_area ON hg_content_profile (status, review_status, import_status, visibility, province, city, published_at, id);
-CREATE INDEX IF NOT EXISTS idx_content_profile_public_latest_partial ON hg_content_profile (source_created_at DESC, source_note_id DESC, id DESC)
+CREATE INDEX IF NOT EXISTS idx_content_profile_public_latest_v2 ON hg_content_profile (source_created_at DESC, source_note_id DESC, id DESC)
   WHERE status = 1
     AND review_status = 'approved'
-    AND import_status IN ('imported', 'duplicate')
+    AND import_status IN ('imported', 'duplicate', 'feiniu_sync', 'collect')
     AND visibility IN ('public', 'member_only')
     AND deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_content_profile_public_area_latest_partial ON hg_content_profile (province, city, source_created_at DESC, source_note_id DESC, id DESC)
+CREATE INDEX IF NOT EXISTS idx_content_profile_public_area_latest_v2 ON hg_content_profile (province, city, source_created_at DESC, source_note_id DESC, id DESC)
   WHERE status = 1
     AND review_status = 'approved'
-    AND import_status IN ('imported', 'duplicate')
+    AND import_status IN ('imported', 'duplicate', 'feiniu_sync', 'collect')
     AND visibility IN ('public', 'member_only')
     AND deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_content_profile_admin_status ON hg_content_profile (review_status, visibility, import_status, status, id);
@@ -189,6 +189,8 @@ CREATE TABLE IF NOT EXISTS hg_content_media (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_content_media_profile_asset ON hg_content_media (profile_id, source_asset_id);
 CREATE INDEX IF NOT EXISTS idx_content_media_profile ON hg_content_media (profile_id, sort_index);
+CREATE INDEX IF NOT EXISTS idx_content_media_public_image_profile ON hg_content_media (profile_id)
+  WHERE status = 1 AND media_type = 'image' AND COALESCE(display_storage_path, '') <> '';
 CREATE INDEX IF NOT EXISTS idx_content_media_duplicate ON hg_content_media (duplicate_of_media_id);
 CREATE INDEX IF NOT EXISTS idx_content_media_md5 ON hg_content_media (binary_md5);
 CREATE INDEX IF NOT EXISTS idx_content_media_phash ON hg_content_media (perceptual_hash);

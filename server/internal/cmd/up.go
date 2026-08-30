@@ -80,6 +80,8 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.BackfillYoubanPublishNoteIndex(ctx)
 	case "publishHeavyIndexes":
 		err = fix.ApplyYoubanPublishHeavyIndexes(ctx)
+	case "contentProfilePublicIndexes":
+		err = fix.ApplyContentProfilePublicIndexes(ctx)
 	case "mediaPHashProfileIndexes":
 		err = fix.ApplyYoubanPublishMediaPHashProfileIndexes(ctx)
 	case "contentMediaRepair":
