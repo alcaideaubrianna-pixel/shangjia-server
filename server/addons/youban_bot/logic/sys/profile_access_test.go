@@ -3,6 +3,7 @@ package sys
 import (
 	"testing"
 
+	"github.com/go-telegram/bot/models"
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -38,4 +39,63 @@ func TestProfileCardPurposeByOwnership(t *testing.T) {
 	if got := botProfileScopeAccountId(account); got != 3 {
 		t.Fatalf("admin write account id = %d, want 3", got)
 	}
+}
+
+func TestProfileCardMarkupForNoteShowsSourceByURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		note    *publishsysin.NoteModel
+		purpose string
+	}{
+		{
+			name: "publishing account owned profile",
+			note: &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{
+				ProfileNo: "A10001", IsCollected: true, CollectSourceUrl: "https://t.me/source/101",
+			}},
+			purpose: "view",
+		},
+		{
+			name: "shared readonly profile",
+			note: &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{
+				ProfileNo: "A10002", IsCollected: true, CollectSourceUrl: "https://t.me/source/102",
+			}},
+			purpose: "readonly",
+		},
+		{
+			name: "legacy profile without collected flag",
+			note: &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{
+				ProfileNo: "A10003", IsCollected: false, CollectSourceUrl: "https://t.me/source/103",
+			}},
+			purpose: "view",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			markup := profileCardMarkupForNote(test.note, test.purpose)
+			if !hasProfileSourceButton(markup, test.note.CollectSourceUrl) {
+				t.Fatalf("source button missing: %#v", markup)
+			}
+		})
+	}
+}
+
+func TestProfileCardMarkupForNoteHidesEmptySourceURL(t *testing.T) {
+	note := &publishsysin.NoteModel{ProfileModel: publishsysin.ProfileModel{ProfileNo: "A10004", IsCollected: true}}
+	if hasProfileSourceButton(profileCardMarkupForNote(note, "view"), "") {
+		t.Fatal("unexpected source button for profile without source URL")
+	}
+}
+
+func hasProfileSourceButton(markup *models.InlineKeyboardMarkup, url string) bool {
+	if markup == nil {
+		return false
+	}
+	for _, row := range markup.InlineKeyboard {
+		for _, button := range row {
+			if button.Text == "来源频道 >" && button.URL == url {
+				return true
+			}
+		}
+	}
+	return false
 }

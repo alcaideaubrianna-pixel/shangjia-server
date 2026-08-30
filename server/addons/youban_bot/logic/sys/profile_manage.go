@@ -1466,7 +1466,7 @@ func profileCardMarkupForNote(note *publishsysin.NoteModel, purpose string) *mod
 	}
 	markup := profileCardMarkup(note.ProfileNo, purpose)
 	url := strings.TrimSpace(note.CollectSourceUrl)
-	if !note.IsCollected || url == "" {
+	if url == "" {
 		return markup
 	}
 	markup.InlineKeyboard = append(markup.InlineKeyboard, []models.InlineKeyboardButton{{Text: "来源频道 >", URL: url}})
