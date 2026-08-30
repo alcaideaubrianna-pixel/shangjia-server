@@ -240,7 +240,8 @@ func (adminFeature) Command() string     { return "admin" }
 func (adminFeature) Description() string { return "打开管理后台" }
 func (adminFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
 	return []*sysin.FeatureConfigSchema{
-		{Field: "adminUrl", Label: "管理后台地址", Component: "input", Default: "", Placeholder: "为空读取 youbanBot.adminUrl"},
+		{Field: "adminMarkdown", Label: "管理后台文案", Component: "markdown", Default: "", Placeholder: "支持 Markdown，可配置多个域名链接；为空时兼容读取原管理后台地址"},
+		{Field: "adminUrl", Label: "旧管理后台地址", Component: "hidden", Default: "", Placeholder: "旧配置兼容字段"},
 		{Field: "unboundText", Label: "未绑定提示", Component: "textarea", Default: "请先绑定管理后台账号后再打开管理后台。"},
 	}
 }
@@ -259,14 +260,22 @@ func (adminFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFea
 		}
 		return true, bot.reply(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), bot.featureConfigValue(ctx, adminFeature{}.Key(), "unboundText"))
 	}
-	url := strings.TrimSpace(bot.featureConfigValue(ctx, adminFeature{}.Key(), "adminUrl"))
-	if url == "" {
-		url = strings.TrimSpace(gCfgString(ctx, "youbanBot.adminUrl"))
+	markdown := strings.TrimSpace(bot.featureConfigValue(ctx, adminFeature{}.Key(), "adminMarkdown"))
+	if markdown == "" {
+		url := strings.TrimSpace(bot.featureConfigValue(ctx, adminFeature{}.Key(), "adminUrl"))
+		if url == "" {
+			url = strings.TrimSpace(gCfgString(ctx, "youbanBot.adminUrl"))
+		}
+		if url == "" {
+			url = "/"
+		}
+		markdown = "管理后台：[点击打开](" + url + ")"
 	}
-	if url == "" {
-		url = "/"
+	text, err := telegramMarkdownToHTML(markdown)
+	if err != nil {
+		return true, err
 	}
-	return true, bot.reply(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), "管理后台："+url)
+	return true, bot.reply(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), text)
 }
 
 type contactFeature struct{}

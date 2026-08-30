@@ -99,6 +99,11 @@
           v-else-if="item.component === 'telegram_rich_text'"
           v-model:value="form.configValues[item.field]"
         />
+        <MarkdownEditor
+          v-else-if="item.component === 'markdown'"
+          v-model:value="form.configValues[item.field]"
+          :placeholder="item.placeholder"
+        />
         <n-space v-else-if="item.component === 'telegram_buttons'" vertical class="w-full">
           <n-grid
             v-for="(button, index) in buttonItems(item.field)"
@@ -173,6 +178,7 @@
   import { BotList, UserList } from '@/api/addons/youbanBot';
   import UploadImage from '@/components/Upload/uploadImage.vue';
   import TelegramRichEditor from '@/components/TelegramRichEditor/index.vue';
+  import MarkdownEditor from '@/components/MarkdownEditor/index.vue';
 
   const props = defineProps<{ show: boolean; form: Record<string, any>; statusOptions: any[] }>();
   const form = computed(() => props.form);

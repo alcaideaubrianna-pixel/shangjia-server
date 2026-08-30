@@ -89,6 +89,17 @@ func (s *sSysBot) AdminFeatureSave(ctx context.Context, in *sysin.FeatureSaveInp
 		data, _ := json.Marshal(config)
 		in.ConfigJson = string(data)
 	}
+	if featureKey == (adminFeature{}).Key() {
+		config := featureConfigValues(in.ConfigJson)
+		markdown := strings.TrimSpace(fmt.Sprintf("%v", config["adminMarkdown"]))
+		if markdown != "" {
+			if _, err = telegramMarkdownToHTML(markdown); err != nil {
+				return err
+			}
+		}
+		data, _ := json.Marshal(config)
+		in.ConfigJson = string(data)
+	}
 	if featureKey == inlinePromotionFeatureKey {
 		config := featureConfigValues(in.ConfigJson)
 		config["messageText"] = sanitizeTelegramHTML(fmt.Sprintf("%v", config["messageText"]))
