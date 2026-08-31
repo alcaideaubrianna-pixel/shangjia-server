@@ -150,6 +150,9 @@
         <n-form-item label="城市">
           <n-input v-model:value="editForm.city" clearable />
         </n-form-item>
+        <n-form-item label="是否是处女">
+          <n-select v-model:value="editForm.isVirgin" :options="virginOptions" />
+        </n-form-item>
         <n-form-item label="标签">
           <n-select
             v-model:value="editForm.tag"
@@ -219,12 +222,18 @@
     title: '',
     province: '',
     city: '',
+    isVirgin: 0,
     plainText: '',
     tag: '',
     customerRemark: '',
     visibility: 'private',
     status: 1,
   });
+  const virginOptions = [
+    { label: '未知', value: 0 },
+    { label: '是', value: 1 },
+    { label: '否', value: 2 },
+  ];
   const tgImportForm = reactive({
     tenantId: null as number | null,
     accountId: null as number | null,
@@ -506,6 +515,7 @@
     editForm.title = profile.title || '';
     editForm.province = profile.province || '';
     editForm.city = profile.city || '';
+    editForm.isVirgin = Number(profile.isVirgin || 0);
     editForm.plainText = profile.plainText || '';
     editForm.tag = profile.tag || '';
     editForm.customerRemark = profile.customerRemark || '';

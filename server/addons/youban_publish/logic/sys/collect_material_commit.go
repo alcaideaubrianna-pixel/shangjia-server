@@ -518,7 +518,7 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 		columns := dao.ContentProfile.Columns()
 		existing, txErr := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).
 			Fields(columns.Id, columns.SourceKey, columns.HasVerificationVideo, columns.ImageCount, columns.VideoCount,
-				columns.Age, columns.Height, columns.Weight, columns.CupSize).
+				columns.Age, columns.IsVirgin, columns.Height, columns.Weight, columns.CupSize).
 			Where(columns.SourceKey, sourceKey).
 			WhereNull(columns.DeletedAt).
 			One()
@@ -534,6 +534,7 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 		if !existing.IsEmpty() {
 			extracted = profileextractor.Refresh(text, profileextractor.Fields{
 				Age:    existing[columns.Age].Int(),
+				Virgin: existing[columns.IsVirgin].Int(),
 				Height: existing[columns.Height].Int(),
 				Weight: existing[columns.Weight].Int(),
 				Cup:    existing[columns.CupSize].String(),
@@ -544,8 +545,9 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 			columns.SourceTextHash: collectHash(text), columns.Title: title,
 			columns.Summary: profileSummary(text), columns.PlainText: text,
 			columns.Province: metadata.Province, columns.City: metadata.City,
-			columns.Age:    extracted.Age,
-			columns.Height: extracted.Height, columns.Weight: extracted.Weight,
+			columns.Age:      extracted.Age,
+			columns.IsVirgin: extracted.Virgin,
+			columns.Height:   extracted.Height, columns.Weight: extracted.Weight,
 			columns.CupSize: extracted.Cup, columns.Visibility: consts.ContentVisibilityPublic,
 			columns.ReviewStatus: consts.ContentReviewApproved, columns.ImportStatus: "collect",
 			columns.SourceUpdateBy: fmt.Sprintf("%d", accountId), columns.SourceUpdatedAt: now,

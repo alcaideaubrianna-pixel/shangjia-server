@@ -560,6 +560,7 @@ type ProfileModel struct {
 	PlainText              string      `json:"plainText" dc:"正文"`
 	Province               string      `json:"province" dc:"省份"`
 	City                   string      `json:"city" dc:"城市"`
+	IsVirgin               int         `json:"isVirgin" dc:"是否处：0未知 1是 2否"`
 	Tag                    string      `json:"tag" dc:"标签"`
 	Visibility             string      `json:"visibility" dc:"可见性"`
 	ReviewStatus           string      `json:"reviewStatus" dc:"审核状态"`
@@ -625,6 +626,7 @@ type ProfileSaveInp struct {
 	Title            string                  `json:"title" v:"required#标题不能为空" dc:"标题"`
 	Province         string                  `json:"province" dc:"省份"`
 	City             string                  `json:"city" dc:"城市"`
+	IsVirgin         int                     `json:"isVirgin" dc:"是否处：0未知 1是 2否"`
 	PlainText        string                  `json:"plainText" dc:"正文"`
 	Tag              string                  `json:"tag" dc:"标签"`
 	CustomerRemark   string                  `json:"customerRemark" dc:"客服备注"`
@@ -666,6 +668,9 @@ func (in *ProfileSaveInp) Filter(ctx context.Context) error {
 	}
 	if in.Status != 1 && in.Status != 2 {
 		return gerror.New("资料状态不合法")
+	}
+	if in.IsVirgin < 0 || in.IsVirgin > 2 {
+		return gerror.New("是否处配置不合法")
 	}
 	if in.AntiScanEnabled != 0 && in.AntiScanEnabled != 1 {
 		return gerror.New("防扫图配置不合法")

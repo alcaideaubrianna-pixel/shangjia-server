@@ -14,6 +14,7 @@ import (
 // Fields contains values extracted from a source profile. Zero values mean unknown.
 type Fields struct {
 	Age    int
+	Virgin int
 	Height int
 	Weight int
 	Cup    string
@@ -54,6 +55,9 @@ func Refresh(text string, current Fields) Fields {
 	if parsed.Age == 0 {
 		parsed.Age = current.Age
 	}
+	if parsed.Virgin == 0 {
+		parsed.Virgin = current.Virgin
+	}
 	if parsed.Height == 0 {
 		parsed.Height = current.Height
 	}
@@ -82,6 +86,8 @@ func NormalizeCup(value string) string {
 var (
 	agePattern            = regexp.MustCompile(`(?i)(?:年龄|age)(?:\s*:)+\s*\[?\s*(1[8-9]|[2-7][0-9]|80)(?:\s*(?:岁|周岁|虚岁))?`)
 	birthYearAgePattern   = regexp.MustCompile(`(?i)(?:年龄|age)(?:\s*:)+\s*\[?\s*(0[0-9])(?:\s*年)?\s*\]?`)
+	virginNoPattern       = regexp.MustCompile(`(?i)(?:是否\s*(?:是)?\s*(?:处女|chu\s*女|c)|是不是处女|处女)(?:\s*:)+\s*(?:不|否|no|不是|非处|有经验)(?:\s|$|[,.;，。；])`)
+	virginYesPattern      = regexp.MustCompile(`(?i)(?:是否\s*(?:是)?\s*(?:处女|chu\s*女|c)|是不是处女|处女)(?:\s*:)+\s*(?:是|yes|处|首次|第一次|无经验)(?:\s|$|[,.;，。；])`)
 	standaloneAge         = regexp.MustCompile(`(?:^|[^0-9])(1[8-9]|[2-7][0-9]|80)\s*(?:岁|周岁|虚岁)(?:[^0-9]|$)`)
 	heightPattern         = regexp.MustCompile(`(?i)(?:身高|净身高|升高|身长|高度|height|高)(?:\s*\([^)]*\))?(?:\s*:)*\s*\[?\s*(?:姐姐|妹妹|大姐|小妹)?\s*(?:净身|净|裸|裸足|光脚|脱鞋|不穿鞋|穿高跟|穿鞋|快|真实|q)?\s*\.?\s*([0-9]+(?:\.[0-9]+)?\s*(?:cm|厘米|米|m)?)`)
 	weightPattern         = regexp.MustCompile(`(?i)(?:体重|净体重|重量|斤数|weight|重)(?:\s*\([^)]*\))?(?:\s*:)*\s*[,]?\s*\[?\s*(?:姐姐|妹妹|大姐|小妹)?\s*(?:bbw\s*[,，]?\s*|现(?:在)?\s*|目前\s*:*\s*|不到\s*|快\s*|无虚假\s*["“”']*\s*)?([0-9]+(?:\.[0-9]+)?\s*(?:kg|公斤|千克|斤)?)`)
@@ -161,6 +167,11 @@ func Analyze(text string) Analysis {
 		}
 	} else if match := standaloneAge.FindStringSubmatch(text); len(match) > 1 {
 		result.Age, _ = strconv.Atoi(match[1])
+	}
+	if virginNoPattern.MatchString(text) {
+		result.Virgin = 2
+	} else if virginYesPattern.MatchString(text) {
+		result.Virgin = 1
 	}
 	if match := heightPattern.FindStringSubmatch(text); len(match) > 1 {
 		result.HeightMentioned = true

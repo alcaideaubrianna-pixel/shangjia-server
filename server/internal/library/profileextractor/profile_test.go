@@ -40,6 +40,27 @@ func TestRefreshAgeReplacesMentionedAndPreservesMissing(t *testing.T) {
 	}
 }
 
+func TestParseVirginTriState(t *testing.T) {
+	tests := []struct {
+		text string
+		want int
+	}{
+		{"是否是处女：YES", 1},
+		{"是否chu女：是", 1},
+		{"是否c:首次", 1},
+		{"是否是处女：不", 2},
+		{"是否chu女:no", 2},
+		{"是不是处女：不是", 2},
+		{"处女座：天秤座", 0},
+		{"是否是处女：不确定", 0},
+	}
+	for _, test := range tests {
+		if got := Parse(test.text).Virgin; got != test.want {
+			t.Fatalf("text %q virgin %d, want %d", test.text, got, test.want)
+		}
+	}
+}
+
 func TestParseUnknownFieldsRemainZero(t *testing.T) {
 	result := Parse("性格温柔，接受长期")
 	if result.Height != 0 || result.Weight != 0 || result.Cup != "" {

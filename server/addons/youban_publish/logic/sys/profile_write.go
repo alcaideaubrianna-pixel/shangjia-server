@@ -314,6 +314,10 @@ func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	columns := dao.ContentProfile.Columns()
 	now := gtime.Now()
 	extracted := profileextractor.Merge(in.PlainText, 0, 0, in.Tag)
+	isVirgin := in.IsVirgin
+	if isVirgin == 0 {
+		isVirgin = extracted.Virgin
+	}
 	data := g.Map{
 		columns.SourceType:      publishProfileSourceType,
 		columns.SourceNoteUuid:  newPublishProfileUUID(),
@@ -324,6 +328,7 @@ func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		columns.Province:        in.Province,
 		columns.City:            in.City,
 		columns.Age:             extracted.Age,
+		columns.IsVirgin:        isVirgin,
 		columns.Height:          extracted.Height,
 		columns.Weight:          extracted.Weight,
 		columns.CupSize:         extracted.Cup,
@@ -377,6 +382,7 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 			columns.Province,
 			columns.City,
 			columns.Age,
+			columns.IsVirgin,
 			columns.Height,
 			columns.Weight,
 			columns.CupSize,
@@ -398,10 +404,14 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	}
 	extracted := profileextractor.Refresh(in.PlainText, profileextractor.Fields{
 		Age:    current[columns.Age].Int(),
+		Virgin: current[columns.IsVirgin].Int(),
 		Height: current[columns.Height].Int(),
 		Weight: current[columns.Weight].Int(),
 		Cup:    current[columns.CupSize].String(),
 	})
+	if in.IsVirgin != 0 {
+		extracted.Virgin = in.IsVirgin
+	}
 	if cup := profileextractor.NormalizeCup(in.Tag); cup != "" {
 		extracted.Cup = cup
 	}
@@ -412,6 +422,7 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		columns.Province:    in.Province,
 		columns.City:        in.City,
 		columns.Age:         extracted.Age,
+		columns.IsVirgin:    extracted.Virgin,
 		columns.Height:      extracted.Height,
 		columns.Weight:      extracted.Weight,
 		columns.CupSize:     extracted.Cup,
@@ -442,6 +453,7 @@ func profileContentChanged(current gdb.Record, in *sysin.ProfileSaveInp) bool {
 		strings.TrimSpace(current["plain_text"].String()) != strings.TrimSpace(in.PlainText) ||
 		strings.TrimSpace(current["province"].String()) != strings.TrimSpace(in.Province) ||
 		strings.TrimSpace(current["city"].String()) != strings.TrimSpace(in.City) ||
+		(in.IsVirgin != 0 && current["is_virgin"].Int() != in.IsVirgin) ||
 		(profileextractor.NormalizeCup(in.Tag) != "" &&
 			strings.TrimSpace(current["cup_size"].String()) != profileextractor.NormalizeCup(in.Tag))
 }

@@ -2296,6 +2296,10 @@ func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, 
 	if age <= 0 {
 		age = extracted.Age
 	}
+	isVirgin := flagToInt(source["is_virgin"].String())
+	if isVirgin == 0 {
+		isVirgin = extracted.Virgin
+	}
 
 	now := gtime.Now()
 	data := g.Map{
@@ -2320,7 +2324,7 @@ func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, 
 		profileColumns.CanCohabitate:        flagToInt(source["can_cohabitate"].String()),
 		profileColumns.HasHealthCheck:       flagToInt(source["has_health_check"].String()),
 		profileColumns.IsFullMonth:          flagToInt(source["is_full_month"].String()),
-		profileColumns.IsVirgin:             flagToInt(source["is_virgin"].String()),
+		profileColumns.IsVirgin:             isVirgin,
 		profileColumns.AcceptSm:             flagToInt(source["accept_sm"].String()),
 		profileColumns.NoCondomAfterCheck:   flagToInt(source["no_condom_after_check"].String()),
 		profileColumns.AllowCreampie:        flagToInt(source["allow_creampie"].String()),

@@ -337,7 +337,7 @@ func (s *sSysPublish) refreshMaterialImportProfileMetadata(ctx context.Context, 
 	}
 	columns := dao.ContentProfile.Columns()
 	current, err := dao.ContentProfile.Ctx(ctx).
-		Fields(columns.Age, columns.Height, columns.Weight, columns.CupSize).
+		Fields(columns.Age, columns.IsVirgin, columns.Height, columns.Weight, columns.CupSize).
 		Where(columns.Id, profileId).
 		WhereNull(columns.DeletedAt).
 		One()
@@ -346,6 +346,7 @@ func (s *sSysPublish) refreshMaterialImportProfileMetadata(ctx context.Context, 
 	}
 	extracted := profileextractor.Refresh(plainText, profileextractor.Fields{
 		Age:    current[columns.Age].Int(),
+		Virgin: current[columns.IsVirgin].Int(),
 		Height: current[columns.Height].Int(),
 		Weight: current[columns.Weight].Int(),
 		Cup:    current[columns.CupSize].String(),
@@ -357,6 +358,7 @@ func (s *sSysPublish) refreshMaterialImportProfileMetadata(ctx context.Context, 
 			columns.Province:        metadata.Province,
 			columns.City:            metadata.City,
 			columns.Age:             extracted.Age,
+			columns.IsVirgin:        extracted.Virgin,
 			columns.Height:          extracted.Height,
 			columns.Weight:          extracted.Weight,
 			columns.CupSize:         extracted.Cup,
