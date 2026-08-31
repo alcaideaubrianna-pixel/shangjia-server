@@ -1,6 +1,9 @@
 package profileextractor
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestParseProfileFields(t *testing.T) {
 	result := Parse("年龄：23\n身高：168\n体重: 98\n胸围 36C")
@@ -9,11 +12,22 @@ func TestParseProfileFields(t *testing.T) {
 	}
 }
 
-func TestParseAgeDoesNotTreatBirthYearAsAge(t *testing.T) {
-	for _, text := range []string{"年龄：[05年]", "Age：06", "03年 175净身高"} {
-		if result := Parse(text); result.Age != 0 {
-			t.Fatalf("text %q unexpectedly parsed age: %+v", text, result)
+func TestParseBirthYearAsAge(t *testing.T) {
+	currentYear := time.Now().Year()
+	for _, test := range []struct {
+		text string
+		year int
+	}{
+		{"年龄:02", 2002},
+		{"年龄：[05年]", 2005},
+		{"Age：06", 2006},
+	} {
+		if result := Parse(test.text); result.Age != currentYear-test.year {
+			t.Fatalf("text %q got %+v, want age %d", test.text, result, currentYear-test.year)
 		}
+	}
+	if result := Parse("03年 175净身高"); result.Age != 0 {
+		t.Fatalf("unlabelled birth year unexpectedly parsed age: %+v", result)
 	}
 }
 
@@ -222,7 +236,7 @@ func TestAnalyzeHistoricalMalformedFields(t *testing.T) {
 		{"身高:B 体重:170 罩杯:90", Fields{Height: 170, Weight: 90, Cup: "B"}},
 		{"身高:100 体重:174 罩杯:B", Fields{Height: 174, Weight: 100, Cup: "B"}},
 		{"罩杯：170 身高：86 体重：小b", Fields{Height: 170, Weight: 86, Cup: "B"}},
-		{"年龄：[05年]身高：[165 cm]。 体重：[45kg] 🐻:C➕", Fields{Height: 165, Weight: 90, Cup: "C"}},
+		{"年龄：[05年]身高：[165 cm]。 体重：[45kg] 🐻:C➕", Fields{Age: time.Now().Year() - 2005, Height: 165, Weight: 90, Cup: "C"}},
 		{"03年 175净身高 36C", Fields{Height: 175, Cup: "C"}},
 		{"170净高 42kg", Fields{Height: 170, Weight: 84}},
 		{"秘书兼职178高 36F真胸", Fields{Height: 178, Cup: "F"}},
@@ -231,7 +245,7 @@ func TestAnalyzeHistoricalMalformedFields(t *testing.T) {
 		{"身高:一米五九 体重:九十几斤 罩杯:b", Fields{Height: 159, Weight: 90, Cup: "B"}},
 		{"身高:一米七 体重:105斤 罩杯:B", Fields{Height: 170, Weight: 105, Cup: "B"}},
 		{"Height：身高/170 Weight：体重/94 Bust：胸围/c", Fields{Height: 170, Weight: 94, Cup: "C"}},
-		{"Age：06 Height：/163 Bust：/E", Fields{Height: 163, Cup: "E"}},
+		{"Age：06 Height：/163 Bust：/E", Fields{Age: time.Now().Year() - 2006, Height: 163, Cup: "E"}},
 		{"高 03 175厦航空姐 🐻天然C", Fields{Height: 175, Cup: "C"}},
 	}
 	for _, test := range tests {
