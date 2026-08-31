@@ -2292,6 +2292,10 @@ func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, 
 	}
 	province, city := normalizeProfileRegionForOption(source["province"].String(), source["city"].String())
 	extracted := profileextractor.Merge(source["plain_text"].String(), source["height"].Int(), source["weight"].Int(), source["cup_size"].String())
+	age := source["age"].Int()
+	if age <= 0 {
+		age = extracted.Age
+	}
 
 	now := gtime.Now()
 	data := g.Map{
@@ -2334,7 +2338,7 @@ func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, 
 		profileColumns.SourceUpdatedAt:      source["update_time"].GTime(),
 		profileColumns.Province:             province,
 		profileColumns.City:                 city,
-		profileColumns.Age:                  source["age"].Int(),
+		profileColumns.Age:                  age,
 		profileColumns.Height:               extracted.Height,
 		profileColumns.Weight:               extracted.Weight,
 		profileColumns.CupSize:              extracted.Cup,

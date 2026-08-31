@@ -12,6 +12,7 @@ import (
 
 // Fields contains values extracted from a source profile. Zero values mean unknown.
 type Fields struct {
+	Age    int
 	Height int
 	Weight int
 	Cup    string
@@ -49,6 +50,9 @@ func Merge(text string, height int, weight int, cup string) Fields {
 // values when the new text does not mention that field.
 func Refresh(text string, current Fields) Fields {
 	parsed := Parse(text)
+	if parsed.Age == 0 {
+		parsed.Age = current.Age
+	}
 	if parsed.Height == 0 {
 		parsed.Height = current.Height
 	}
@@ -75,6 +79,8 @@ func NormalizeCup(value string) string {
 }
 
 var (
+	agePattern            = regexp.MustCompile(`(?i)(?:年龄|age)(?:\s*:)+\s*\[?\s*(1[8-9]|[2-7][0-9]|80)(?:\s*(?:岁|周岁|虚岁))?`)
+	standaloneAge         = regexp.MustCompile(`(?:^|[^0-9])(1[8-9]|[2-7][0-9]|80)\s*(?:岁|周岁|虚岁)(?:[^0-9]|$)`)
 	heightPattern         = regexp.MustCompile(`(?i)(?:身高|净身高|升高|身长|高度|height|高)(?:\s*\([^)]*\))?(?:\s*:)*\s*\[?\s*(?:姐姐|妹妹|大姐|小妹)?\s*(?:净身|净|裸|裸足|光脚|脱鞋|不穿鞋|穿高跟|穿鞋|快|真实|q)?\s*\.?\s*([0-9]+(?:\.[0-9]+)?\s*(?:cm|厘米|米|m)?)`)
 	weightPattern         = regexp.MustCompile(`(?i)(?:体重|净体重|重量|斤数|weight|重)(?:\s*\([^)]*\))?(?:\s*:)*\s*[,]?\s*\[?\s*(?:姐姐|妹妹|大姐|小妹)?\s*(?:bbw\s*[,，]?\s*|现(?:在)?\s*|目前\s*:*\s*|不到\s*|快\s*|无虚假\s*["“”']*\s*)?([0-9]+(?:\.[0-9]+)?\s*(?:kg|公斤|千克|斤)?)`)
 	reversedHeight        = regexp.MustCompile(`(?i)(1[4-9][0-9]|20[0-9])\s*(?:cm|厘米)?\s*(?:净身高|净高|身高|高)`)
@@ -143,6 +149,11 @@ func Analyze(text string) Analysis {
 		WeightSourceEmpty: weightEmpty.MatchString(text),
 		CupSourceEmpty:    cupEmpty.MatchString(text),
 	}
+	if match := agePattern.FindStringSubmatch(text); len(match) > 1 {
+		result.Age, _ = strconv.Atoi(match[1])
+	} else if match := standaloneAge.FindStringSubmatch(text); len(match) > 1 {
+		result.Age, _ = strconv.Atoi(match[1])
+	}
 	if match := heightPattern.FindStringSubmatch(text); len(match) > 1 {
 		result.HeightMentioned = true
 		result.Height = parseHeight(match[1])
@@ -205,6 +216,9 @@ func Analyze(text string) Analysis {
 		}
 	}
 	if compact := compactFields.FindStringSubmatch(text); len(compact) > 3 {
+		if result.Age == 0 {
+			result.Age, _ = strconv.Atoi(compact[1])
+		}
 		result.HeightMentioned = true
 		result.WeightMentioned = true
 		if result.Height == 0 {

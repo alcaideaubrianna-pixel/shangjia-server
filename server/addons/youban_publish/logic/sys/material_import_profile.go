@@ -337,7 +337,7 @@ func (s *sSysPublish) refreshMaterialImportProfileMetadata(ctx context.Context, 
 	}
 	columns := dao.ContentProfile.Columns()
 	current, err := dao.ContentProfile.Ctx(ctx).
-		Fields(columns.Height, columns.Weight, columns.CupSize).
+		Fields(columns.Age, columns.Height, columns.Weight, columns.CupSize).
 		Where(columns.Id, profileId).
 		WhereNull(columns.DeletedAt).
 		One()
@@ -345,6 +345,7 @@ func (s *sSysPublish) refreshMaterialImportProfileMetadata(ctx context.Context, 
 		return gerror.Wrap(err, "读取TG导入资料结构化字段失败")
 	}
 	extracted := profileextractor.Refresh(plainText, profileextractor.Fields{
+		Age:    current[columns.Age].Int(),
 		Height: current[columns.Height].Int(),
 		Weight: current[columns.Weight].Int(),
 		Cup:    current[columns.CupSize].String(),
@@ -355,6 +356,7 @@ func (s *sSysPublish) refreshMaterialImportProfileMetadata(ctx context.Context, 
 		Data(g.Map{
 			columns.Province:        metadata.Province,
 			columns.City:            metadata.City,
+			columns.Age:             extracted.Age,
 			columns.Height:          extracted.Height,
 			columns.Weight:          extracted.Weight,
 			columns.CupSize:         extracted.Cup,

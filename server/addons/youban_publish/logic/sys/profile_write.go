@@ -323,6 +323,7 @@ func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		columns.PlainText:       in.PlainText,
 		columns.Province:        in.Province,
 		columns.City:            in.City,
+		columns.Age:             extracted.Age,
 		columns.Height:          extracted.Height,
 		columns.Weight:          extracted.Weight,
 		columns.CupSize:         extracted.Cup,
@@ -375,6 +376,7 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 			columns.PlainText,
 			columns.Province,
 			columns.City,
+			columns.Age,
 			columns.Height,
 			columns.Weight,
 			columns.CupSize,
@@ -395,6 +397,7 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		nextVisibility = consts.ContentVisibilityPublic
 	}
 	extracted := profileextractor.Refresh(in.PlainText, profileextractor.Fields{
+		Age:    current[columns.Age].Int(),
 		Height: current[columns.Height].Int(),
 		Weight: current[columns.Weight].Int(),
 		Cup:    current[columns.CupSize].String(),
@@ -408,6 +411,7 @@ func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in 
 		columns.PlainText:   in.PlainText,
 		columns.Province:    in.Province,
 		columns.City:        in.City,
+		columns.Age:         extracted.Age,
 		columns.Height:      extracted.Height,
 		columns.Weight:      extracted.Weight,
 		columns.CupSize:     extracted.Cup,

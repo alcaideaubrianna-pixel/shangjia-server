@@ -3,9 +3,26 @@ package profileextractor
 import "testing"
 
 func TestParseProfileFields(t *testing.T) {
-	result := Parse("身高：168\n体重: 98\n胸围 36C")
-	if result.Height != 168 || result.Weight != 98 || result.Cup != "C" {
+	result := Parse("年龄：23\n身高：168\n体重: 98\n胸围 36C")
+	if result.Age != 23 || result.Height != 168 || result.Weight != 98 || result.Cup != "C" {
 		t.Fatalf("unexpected fields: %+v", result)
+	}
+}
+
+func TestParseAgeDoesNotTreatBirthYearAsAge(t *testing.T) {
+	for _, text := range []string{"年龄：[05年]", "Age：06", "03年 175净身高"} {
+		if result := Parse(text); result.Age != 0 {
+			t.Fatalf("text %q unexpectedly parsed age: %+v", text, result)
+		}
+	}
+}
+
+func TestRefreshAgeReplacesMentionedAndPreservesMissing(t *testing.T) {
+	if result := Refresh("年龄：24", Fields{Age: 23}); result.Age != 24 {
+		t.Fatalf("unexpected refreshed age: %+v", result)
+	}
+	if result := Refresh("身高：170", Fields{Age: 23}); result.Age != 23 {
+		t.Fatalf("unexpected preserved age: %+v", result)
 	}
 }
 

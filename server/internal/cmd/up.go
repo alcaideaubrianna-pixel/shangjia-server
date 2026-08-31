@@ -82,6 +82,8 @@ func handleUpgradeFix(ctx context.Context, args map[string]string) (err error) {
 		err = fix.ApplyYoubanPublishHeavyIndexes(ctx)
 	case "contentProfilePublicIndexes":
 		err = fix.ApplyContentProfilePublicIndexes(ctx)
+	case "contentProfileAge":
+		err = fix.BackfillContentProfileAge(ctx)
 	case "mediaPHashProfileIndexes":
 		err = fix.ApplyYoubanPublishMediaPHashProfileIndexes(ctx)
 	case "contentMediaRepair":
