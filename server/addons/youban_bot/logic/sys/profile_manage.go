@@ -389,18 +389,24 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 		}
 		return true, s.consumeProfileCreatePart(ctx, botId, chatId, account, session, "跳过", nil)
 	case "up":
-		return true, s.changeProfilesStatus(ctx, botId, chatId, account, []string{no}, 1)
+		return true, s.changeProfilesStatusByCallback(ctx, botId, chatId, account, query, action, no, 1)
 	case "down":
-		return true, s.changeProfilesStatus(ctx, botId, chatId, account, []string{no}, 2)
+		return true, s.changeProfilesStatusByCallback(ctx, botId, chatId, account, query, action, no, 2)
 	case "send":
-		return true, s.sendProfileByNo(ctx, botId, chatId, account, no)
+		err := s.sendProfileByNo(ctx, botId, chatId, account, no)
+		s.auditProfileCallback(ctx, query, account, action, no, err)
+		return true, err
 	case "view":
-		return true, s.showProfileCard(ctx, botId, chatId, account, no)
+		err := s.showProfileCard(ctx, botId, chatId, account, no)
+		s.auditProfileCallback(ctx, query, account, action, no, err)
+		return true, err
 	case "backview":
 		_ = s.cancelProfileSessionByIdsSilent(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId)
 		return true, s.showProfileCard(ctx, botId, chatId, account, no)
 	case "edit":
-		return true, s.showProfileEditMenu(ctx, botId, chatId, account, no)
+		err := s.showProfileEditMenu(ctx, botId, chatId, account, no)
+		s.auditProfileCallback(ctx, query, account, action, no, err)
+		return true, err
 	case "edtitle":
 		return true, s.startProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId, account, "edit_title", "waiting_title", 0, no, nil, "请输入新的标题：")
 	case "edtext":
@@ -869,6 +875,59 @@ func (s *sSysBot) changeProfilesStatus(ctx context.Context, botId int64, chatId 
 		msg = html.EscapeString(res.Message)
 	}
 	return s.sendMessageOnly(ctx, botId, chatId, msg)
+}
+
+func (s *sSysBot) changeProfilesStatusByCallback(ctx context.Context, botId int64, chatId string, account *botProfileAccount, query *models.CallbackQuery, action string, no string, status int) error {
+	res, operationErr := publishService.SysPublish().BotProfileStatus(ctx, &publishsysin.BotProfileStatusInp{
+		TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType,
+		Nos: []string{no}, Status: status,
+	})
+	s.auditProfileCallback(ctx, query, account, action, no, operationErr)
+	if operationErr != nil {
+		return s.replyBotError(ctx, botId, chatId, "资料管理", operationErr)
+	}
+	label := "上架"
+	if status == 2 {
+		label = "下架"
+	}
+	msg := fmt.Sprintf("已提交%s：%s", label, html.EscapeString(no))
+	if res != nil && strings.TrimSpace(res.Message) != "" {
+		msg = html.EscapeString(res.Message)
+	}
+	return s.sendMessageOnly(ctx, botId, chatId, msg)
+}
+
+func (s *sSysBot) auditProfileCallback(ctx context.Context, query *models.CallbackQuery, account *botProfileAccount, action string, profileNo string, callbackErr error) {
+	fields := g.Map{
+		"action":           strings.TrimSpace(action),
+		"profileNo":        normalizeProfileNoForAudit(profileNo),
+		"telegramUserId":   int64(0),
+		"telegramUsername": "",
+		"boundAccountId":   int64(0),
+		"boundAccountType": "",
+		"tenantId":         int64(0),
+		"result":           "success",
+	}
+	if query != nil && query.From.ID > 0 {
+		fields["telegramUserId"] = query.From.ID
+		fields["telegramUsername"] = strings.TrimSpace(query.From.Username)
+	}
+	if account != nil {
+		fields["boundAccountId"] = account.AccountId
+		fields["boundAccountType"] = account.AccountType
+		fields["tenantId"] = account.TenantId
+	}
+	if callbackErr != nil {
+		fields["result"] = "failed"
+		fields["error"] = callbackErr.Error()
+		g.Log().Warning(ctx, "Bot资料Callback操作失败", fields)
+		return
+	}
+	g.Log().Info(ctx, "Bot资料Callback操作成功", fields)
+}
+
+func normalizeProfileNoForAudit(profileNo string) string {
+	return strings.ToUpper(strings.TrimSpace(profileNo))
 }
 
 func (s *sSysBot) searchProfilesAndReply(ctx context.Context, botId int64, chatId string, account *botProfileAccount, keyword string, purpose string) error {
