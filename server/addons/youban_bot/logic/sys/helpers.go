@@ -883,7 +883,7 @@ func (s *sSysBot) featureVisibleForTelegramUser(ctx context.Context, feature bot
 		return false
 	}
 	key := feature.Key()
-	if key != (adminFeature{}).Key() && key != (quickPushFeature{}).Key() && key != (profileFeature{}).Key() && key != (instantRegisterFeature{}).Key() {
+	if key != (adminFeature{}).Key() && key != (quickPushFeature{}).Key() && key != (profileFeature{}).Key() && key != (instantRegisterFeature{}).Key() && key != (collectManageFeature{}).Key() {
 		return true
 	}
 	if telegramUserId == "" {
@@ -912,6 +912,14 @@ func (s *sSysBot) featureVisibleForTelegramUser(ctx context.Context, feature bot
 			return false
 		}
 		return bind == nil || bind.AccountId <= 0
+	}
+	if key == (collectManageFeature{}).Key() {
+		bind, err := s.bindingByTelegram(ctx, sysin.BotAppApi, telegramUserId)
+		if err != nil || bind == nil || bind.AccountId <= 0 {
+			return false
+		}
+		account, err := s.boundProfileAccountByUser(ctx, parseTelegramUserId(telegramUserId))
+		return err == nil && s.collectManageAllowed(ctx, account)
 	}
 	_, account, err := s.quickPushBoundAccount(ctx, telegramUserId)
 	if err != nil {

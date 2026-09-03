@@ -351,6 +351,28 @@ func (inviteFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFe
 
 type profileFeature struct{}
 
+type collectManageFeature struct{}
+
+func (collectManageFeature) Key() string         { return "collect_manage" }
+func (collectManageFeature) Command() string     { return "collect" }
+func (collectManageFeature) Description() string { return "采集管理" }
+func (collectManageFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
+	return simpleTextSchema("采集管理文案", "采集管理已启用，请选择采集源。")
+}
+func (collectManageFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFeatureContext) (bool, error) {
+	if featureCtx == nil || featureCtx.Msg == nil {
+		return true, nil
+	}
+	account, err := bot.boundProfileAccount(ctx, featureCtx.Msg)
+	if err != nil {
+		return true, bot.reply(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), err.Error())
+	}
+	if !bot.collectManageAllowed(ctx, account) {
+		return true, bot.reply(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), "当前租户未开通VIP，无法使用采集管理。")
+	}
+	return true, bot.showCollectSourceList(ctx, featureCtx.BotId, fmt.Sprintf("%d", featureCtx.Msg.Chat.ID), account, 1)
+}
+
 func (profileFeature) Key() string         { return "profile_manage" }
 func (profileFeature) Command() string     { return "profile" }
 func (profileFeature) Description() string { return "资料管理" }

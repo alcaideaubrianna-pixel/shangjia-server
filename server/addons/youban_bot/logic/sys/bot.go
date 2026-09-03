@@ -162,6 +162,7 @@ func init() {
 	registerBotFeature(inviteFeature{})
 	registerBotFeature(instantRegisterFeature{})
 	registerBotFeature(profileFeature{})
+	registerBotFeature(collectManageFeature{})
 	registerBotFeature(scanFeature{})
 	registerBotFeature(quickPushFeature{})
 	registerBotFeature(exchangeRateFeature{})
