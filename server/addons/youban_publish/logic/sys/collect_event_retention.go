@@ -12,6 +12,8 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 )
 
+var collectEventCleanupStatuses = []string{"failed", "ignored"}
+
 func (s *sSysPublish) cleanupCollectEventsOlderThan(ctx context.Context, days, limit int) error {
 	if days <= 0 {
 		days = collectEventRetentionDays
@@ -23,7 +25,7 @@ func (s *sSysPublish) cleanupCollectEventsOlderThan(ctx context.Context, days, l
 	eventCols := pdao.YoubanPublishCollectEvent.Columns()
 	rows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 		Fields(eventCols.Id).
-		WhereIn(eventCols.Status, []string{"failed", "ignored", "processed"}).
+		WhereIn(eventCols.Status, collectEventCleanupStatuses).
 		WhereLTE(eventCols.CreatedAt, cutoff).
 		OrderAsc(eventCols.Id).
 		Limit(limit).
@@ -53,7 +55,7 @@ func (s *sSysPublish) cleanupCollectEventsOlderThan(ctx context.Context, days, l
 		if _, err = tx.Model(pdao.YoubanPublishCollectEvent.Table()).
 			Ctx(ctx).
 			WhereIn(eventCols.Id, ids).
-			WhereIn(eventCols.Status, []string{"failed", "ignored", "processed"}).
+			WhereIn(eventCols.Status, collectEventCleanupStatuses).
 			WhereLTE(eventCols.CreatedAt, cutoff).
 			Delete(); err != nil {
 			return gerror.Wrap(err, "清理过期采集事件失败")
