@@ -99,6 +99,25 @@ func (s *sSysPublish) CollectSourceDown(ctx context.Context, in *sysin.CollectSo
 	return res, nil
 }
 
+// BotCollectSourceDown is the explicit-scope adapter used by Telegram Bot.
+// Queueing and deletion remain implemented by the existing source-down flow.
+func (s *sSysPublish) BotCollectSourceDown(ctx context.Context, sourceId, tenantId, accountId int64, deleteProfiles bool) (*sysin.CollectSourceDownModel, error) {
+	if sourceId <= 0 || tenantId <= 0 || accountId <= 0 {
+		return nil, gerror.New("采集源参数不完整")
+	}
+	if _, err := pdao.YoubanPublishCollectSource.Ctx(ctx).Where("id", sourceId).Where("tenant_id", tenantId).Where("account_id", accountId).WhereNull("deleted_at").One(); err != nil {
+		return nil, gerror.Wrap(err, "读取采集源失败")
+	}
+	return s.ExecuteCollectSourceDown(ctx, sourceId, tenantId, accountId, deleteProfiles)
+}
+
+func (s *sSysPublish) BotCollectSourceDownAsync(ctx context.Context, sourceId, tenantId, accountId int64, deleteProfiles bool) (*sysin.CollectSourceDownModel, error) {
+	if sourceId <= 0 || tenantId <= 0 || accountId <= 0 {
+		return nil, gerror.New("采集源参数不完整")
+	}
+	return s.CollectSourceDown(ctx, &sysin.CollectSourceDownInp{Id: sourceId, DeleteProfiles: deleteProfiles})
+}
+
 func (s *sSysPublish) ExecuteCollectSourceDown(ctx context.Context, sourceId int64, tenantId int64, accountId int64, deleteProfiles bool) (*sysin.CollectSourceDownModel, error) {
 	profileIds, err := s.collectSourceProfileIds(ctx, sourceId, tenantId, accountId)
 	if err != nil {

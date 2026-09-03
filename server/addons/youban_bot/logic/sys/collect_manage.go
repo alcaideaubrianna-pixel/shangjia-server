@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
+	publishService "hotgo/addons/youban_publish/service"
 )
 
 func (s *sSysBot) collectManageAllowed(ctx context.Context, account *botProfileAccount) bool {
@@ -61,6 +62,25 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		}
 		sourceID, _ := strconv.ParseInt(parts[2], 10, 64)
 		return true, s.showCollectSourceConfig(ctx, botId, chatId, account, sourceID)
+	case "toggle":
+		if len(parts) < 3 {
+			return true, nil
+		}
+		sourceID, _ := strconv.ParseInt(parts[2], 10, 64)
+		return true, s.toggleCollectSource(ctx, botId, chatId, account, sourceID)
+	case "down":
+		if len(parts) < 3 {
+			return true, nil
+		}
+		sourceID, _ := strconv.ParseInt(parts[2], 10, 64)
+		if account.AccountType != "admin" {
+			return true, s.sendCollectManageNotice(ctx, botId, chatId, "仅租户管理员可以下架并删除采集资料。")
+		}
+		res, err := publishService.SysPublish().BotCollectSourceDown(ctx, sourceID, account.TenantId, account.AccountId, true)
+		if err != nil {
+			return true, err
+		}
+		return true, s.sendCollectManageNotice(ctx, botId, chatId, fmt.Sprintf("已提交下架删除任务，关联TG消息 %d 条。任务将在后台执行，失败会自动重试。", res.MessageCount))
 	case "back":
 		return true, s.showProfileMenuToChat(ctx, botId, chatId, "已返回资料管理，请选择操作：")
 	}
@@ -109,6 +129,8 @@ func (s *sSysBot) showCollectSourceView(ctx context.Context, botId int64, chatId
 	text := fmt.Sprintf("采集源：%s\n编号：%d\n状态：%s", row.Title, row.Id, map[bool]string{true: "运行中", false: "已暂停"}[row.CollectEnabled == 1])
 	markup := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
 		{{Text: "采集配置", CallbackData: fmt.Sprintf("cm:config:%d", id)}},
+		{{Text: map[bool]string{true: "暂停采集", false: "恢复采集"}[row.CollectEnabled == 1], CallbackData: fmt.Sprintf("cm:toggle:%d", id)}},
+		{{Text: "下架并删除", CallbackData: fmt.Sprintf("cm:down:%d", id)}},
 		{{Text: "返回列表", CallbackData: "cm:list:1"}},
 	}}
 	botRow, err := s.botById(ctx, botId)
@@ -117,4 +139,43 @@ func (s *sSysBot) showCollectSourceView(ctx context.Context, botId int64, chatId
 	}
 	_, err = s.sendMessageWithMarkup(ctx, botRow.BotToken, chatId, text, "HTML", false, markup)
 	return err
+}
+
+func (s *sSysBot) toggleCollectSource(ctx context.Context, botId int64, chatId string, account *botProfileAccount, id int64) error {
+	var row publishsysin.CollectSourceModel
+	if err := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", id).Where("tenant_id", account.TenantId).Where("account_id", account.AccountId).WhereNull("deleted_at").Scan(&row); err != nil {
+		return err
+	}
+	if row.Id <= 0 {
+		return s.sendCollectManageNotice(ctx, botId, chatId, "采集源不存在或已失效。")
+	}
+	enabled := 0
+	if row.CollectEnabled != 1 {
+		enabled = 1
+	}
+	if _, err := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", id).Where("tenant_id", account.TenantId).Where("account_id", account.AccountId).Data(g.Map{"collect_enabled": enabled, "updated_at": gtime.Now()}).Update(); err != nil {
+		return err
+	}
+	return s.showCollectSourceView(ctx, botId, chatId, account, id)
+}
+
+func (s *sSysBot) sendCollectManageNotice(ctx context.Context, botId int64, chatId, text string) error {
+	row, err := s.botById(ctx, botId)
+	if err != nil {
+		return err
+	}
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, nil)
+	return err
+}
+
+// showCollectSourceConfig renders the existing rule configuration. Mutations are
+// intentionally restricted to tenant administrators and delegated to the
+// publish service in the admin flow, keeping BOT and HTTP paths consistent.
+func (s *sSysBot) showCollectSourceConfig(ctx context.Context, botId int64, chatId string, account *botProfileAccount, sourceID int64) error {
+	var src publishsysin.CollectSourceModel
+	if err := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", sourceID).Where("tenant_id", account.TenantId).Where("account_id", account.AccountId).WhereNull("deleted_at").Scan(&src); err != nil {
+		return err
+	}
+	text := fmt.Sprintf("采集配置：%s\n规则数量：%d\n\n请在后台采集规则页面修改删除关键词、替换关键词、费用清理及前后置文案。BOT 配置编辑即将开放。", src.Title, len(src.RuleIds))
+	return s.sendCollectManageNotice(ctx, botId, chatId, text)
 }
