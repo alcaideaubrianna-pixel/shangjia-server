@@ -371,6 +371,9 @@ func (s *sSysPublish) telegramReconcileChannel(ctx context.Context, job telegram
 }
 
 func (s *sSysPublish) findTelegramJobPhaseMessagesWithClient(ctx context.Context, client *telegram.Client, job telegramJobRecord, purpose string, expectedCount int) ([]*telegramSentMessage, error) {
+	if strings.TrimSpace(purpose) == "verify" {
+		return s.telegramJobPhaseMessagesFromDB(ctx, job, purpose, expectedCount)
+	}
 	if client == nil {
 		return nil, gerror.New("Telegram账号客户端未就绪")
 	}
@@ -437,6 +440,42 @@ func (s *sSysPublish) findTelegramJobPhaseMessagesWithClient(ctx context.Context
 		}
 	}
 	return found, nil
+}
+
+// telegramJobPhaseMessagesFromDB reconciles pure-media phases exclusively
+// from MessageIDs returned by Telegram and persisted during the send call.
+// Missing IDs are never inferred from channel history to avoid false matches.
+func (s *sSysPublish) telegramJobPhaseMessagesFromDB(ctx context.Context, job telegramJobRecord, purpose string, expectedCount int) ([]*telegramSentMessage, error) {
+	var rows []struct {
+		MessageId    int64  `json:"messageId"`
+		MediaGroupId string `json:"mediaGroupId"`
+		MediaId      int64  `json:"mediaId"`
+		TgFileId     string `json:"tgFileId"`
+	}
+	err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+		Fields("tg_message_id AS message_id,media_group_id,media_id,tg_file_id").
+		Where("job_id", job.Id).
+		Where("target_chat_id", job.TargetChatId).
+		Where("purpose", purpose).
+		WhereIn("status", []string{"sent", "undeletable"}).
+		WhereGT("tg_message_id", 0).
+		WhereNull("deleted_at").
+		OrderAsc("tg_message_id").
+		Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取TG消息ID对账记录失败")
+	}
+	if expectedCount > 0 && len(rows) < expectedCount {
+		return nil, nil
+	}
+	messages := make([]*telegramSentMessage, 0, len(rows))
+	for _, row := range rows {
+		messages = append(messages, &telegramSentMessage{
+			MessageId: row.MessageId, MediaGroupId: row.MediaGroupId, Purpose: purpose,
+			MediaId: row.MediaId, TgFileId: row.TgFileId,
+		})
+	}
+	return messages, nil
 }
 
 func telegramReconciledMessage(item *tg.Message, purpose string) *telegramSentMessage {

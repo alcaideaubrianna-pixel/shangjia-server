@@ -242,7 +242,9 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifySending); err != nil {
 		return err
 	}
-	verifyCaption := telegramCaptionWithJobMarker("", job.Id, "verify")
+	// 验证资料必须是纯媒体消息：不能携带业务文案或任何不可见标记，
+	// 否则公群采集器可能把 caption 当作资料正文处理。
+	verifyCaption := ""
 	g.Log().Infof(ctx, "TG验证资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(verifyMedia))
 	verifyMessages, err := s.sendTelegramVerifyPart(ctx, bot, job.TargetChatId, verifyCaption, verifyMedia)
 	if err != nil && len(verifyMessages) == 0 && shouldFallbackTelegramMediaToAccount(err) {

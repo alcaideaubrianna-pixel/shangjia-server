@@ -304,7 +304,8 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			g.Log().Infof(ctx, "协议号媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMessages:0", task.ID, job.Id, task.AccountID, len(messages))
 			return s.completeTelegramJob(ctx, job)
 		}
-		verifyCaption := telegramCaptionWithJobMarker("", job.Id, "verify")
+		// 验证资料必须保持纯媒体，不附加对账 marker，避免干扰公群采集器。
+		verifyCaption := ""
 		verifyMessages, err := s.sendMessageTemplateWithTgClient(ctx, client, peer, verifyCaption, verifyMedia, nil, task.AccountID, "")
 		if err != nil {
 			return gerror.Wrap(err, "协议号验证媒体降级发送失败")
