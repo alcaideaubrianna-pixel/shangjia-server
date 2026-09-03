@@ -174,6 +174,13 @@ func (s *sSysBot) showCollectSourceConfig(ctx context.Context, botId int64, chat
 	if err := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", sourceID).Where("tenant_id", account.TenantId).Where("account_id", account.AccountId).WhereNull("deleted_at").Scan(&src); err != nil {
 		return err
 	}
-	text := fmt.Sprintf("采集配置：%s\n规则数量：%d\n\n请在后台采集规则页面修改删除关键词、替换关键词、费用清理及前后置文案。BOT 配置编辑即将开放。", src.Title, len(src.RuleIds))
+	text := fmt.Sprintf("采集配置：%s\n规则数量：%d", src.Title, len(src.RuleIds))
+	for _, rid := range src.RuleIds {
+		rule, err := publishService.SysPublish().BotCollectRuleView(ctx, rid, account.TenantId, account.AccountId)
+		if err != nil || rule == nil {
+			continue
+		}
+		text += fmt.Sprintf("\n\n规则：%s\n删除整行：%d 条\n删除文本：%d 条\n替换：%d 条\n费用清理：%s\n前置文案：%s\n后置文案：%s", rule.Name, len(rule.DeleteLineTexts), len(rule.DeleteTexts), len(rule.Replacements), map[bool]string{true: "开启", false: "关闭"}[rule.TruncateIntroFeeEnabled == 1], map[bool]string{true: "开启", false: "关闭"}[rule.HeaderEnabled == 1], map[bool]string{true: "开启", false: "关闭"}[rule.FooterEnabled == 1])
+	}
 	return s.sendCollectManageNotice(ctx, botId, chatId, text)
 }

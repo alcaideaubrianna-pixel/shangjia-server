@@ -314,6 +314,8 @@ type ISysPublish interface {
 	CollectRuleList(ctx context.Context, in *sysin.CollectRuleListInp) (list []*sysin.CollectRuleModel, totalCount int, err error)
 	CollectRuleView(ctx context.Context, in *sysin.CollectRuleViewInp) (res *sysin.CollectRuleModel, err error)
 	CollectRuleSave(ctx context.Context, in *sysin.CollectRuleSaveInp) (id int64, err error)
+	BotCollectRuleView(ctx context.Context, ruleId, tenantId, accountId int64) (res *sysin.CollectRuleModel, err error)
+	BotCollectRuleSave(ctx context.Context, in *sysin.CollectRuleSaveInp, tenantId, accountId int64) (id int64, err error)
 	CollectRuleDelete(ctx context.Context, in *sysin.IdsInp) (err error)
 	CollectEventList(ctx context.Context, in *sysin.CollectEventListInp) (list []*sysin.CollectEventModel, totalCount int, err error)
 	CollectEventLogList(ctx context.Context, in *sysin.CollectEventLogListInp) (list []*sysin.CollectEventLogModel, totalCount int, err error)

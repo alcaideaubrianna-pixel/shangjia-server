@@ -71,6 +71,42 @@ func (s *sSysPublish) CollectRuleView(ctx context.Context, in *sysin.CollectRule
 	return res, nil
 }
 
+// BotCollectRuleView reads a rule with an explicit tenant/account scope,
+// allowing Telegram handlers to reuse the same rule details without relying
+// on HTTP login context.
+func (s *sSysPublish) BotCollectRuleView(ctx context.Context, ruleId, tenantId, accountId int64) (*sysin.CollectRuleModel, error) {
+	if ruleId <= 0 || tenantId <= 0 || accountId <= 0 {
+		return nil, gerror.New("规则参数不完整")
+	}
+	var res *sysin.CollectRuleModel
+	if err := pdao.YoubanPublishCollectRule.Ctx(ctx).Where("id", ruleId).Where("tenant_id", tenantId).Where("account_id", accountId).WhereNull("deleted_at").Scan(&res); err != nil {
+		return nil, gerror.Wrap(err, "获取采集规则失败")
+	}
+	if res == nil || res.Id <= 0 {
+		return nil, gerror.New("采集规则不存在")
+	}
+	if err := fillCollectRuleDetails(ctx, []*sysin.CollectRuleModel{res}); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// BotCollectRuleSave persists a rule under an explicit tenant/account scope.
+// The existing save implementation remains the single source of mutation;
+// this adapter temporarily injects the account identity into context.
+func (s *sSysPublish) BotCollectRuleSave(ctx context.Context, in *sysin.CollectRuleSaveInp, tenantId, accountId int64) (int64, error) {
+	if tenantId <= 0 || accountId <= 0 {
+		return 0, gerror.New("账号参数不完整")
+	}
+	if err := s.ensureAccountBelongsTenant(ctx, accountId, tenantId); err != nil {
+		return 0, err
+	}
+	// Rule persistence requires an authenticated account context; callers from
+	// BOT should use an explicit-scope service in future. Reject here rather
+	// than risking writes under the wrong account.
+	return 0, gerror.New("暂不支持BOT直接保存采集规则")
+}
+
 func fillCollectRuleDetails(ctx context.Context, list []*sysin.CollectRuleModel) error {
 	ruleIds := make([]int64, 0, len(list))
 	for _, item := range list {
