@@ -11,6 +11,8 @@ import (
 
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
+	"hotgo/internal/model"
 )
 
 func (s *sSysPublish) CollectRuleList(ctx context.Context, in *sysin.CollectRuleListInp) (list []*sysin.CollectRuleModel, totalCount int, err error) {
@@ -101,10 +103,12 @@ func (s *sSysPublish) BotCollectRuleSave(ctx context.Context, in *sysin.CollectR
 	if err := s.ensureAccountBelongsTenant(ctx, accountId, tenantId); err != nil {
 		return 0, err
 	}
-	// Rule persistence requires an authenticated account context; callers from
-	// BOT should use an explicit-scope service in future. Reject here rather
-	// than risking writes under the wrong account.
-	return 0, gerror.New("暂不支持BOT直接保存采集规则")
+	if in == nil {
+		return 0, gerror.New("规则参数不能为空")
+	}
+	// Reuse the canonical save transaction by providing an explicit, scoped identity.
+	scoped := context.WithValue(ctx, consts.ContextHTTPKey, &model.Context{User: &model.Identity{Id: accountId}})
+	return s.CollectRuleSave(scoped, in)
 }
 
 func fillCollectRuleDetails(ctx context.Context, list []*sysin.CollectRuleModel) error {
