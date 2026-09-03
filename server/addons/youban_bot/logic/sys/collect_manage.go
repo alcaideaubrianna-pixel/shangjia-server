@@ -78,6 +78,12 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 			return true, nil
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
+		return true, s.showCollectRuleField(ctx, botId, chatId, account, ruleID, parts[3])
+	case "editstart":
+		if account.AccountType != "admin" || len(parts) < 4 {
+			return true, nil
+		}
+		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
 		return true, s.startCollectRuleEdit(ctx, botId, chatId, account, ruleID, parts[3])
 	case "toggle":
 		if len(parts) < 3 {
@@ -220,8 +226,12 @@ func (s *sSysBot) showCollectSourceConfig(ctx context.Context, botId int64, chat
 		if err != nil || rule == nil {
 			continue
 		}
-		text += fmt.Sprintf("\n\n规则：%s\n删除整行：%d 条\n删除文本：%d 条\n替换：%d 条\n费用清理：%s\n前置文案：%s\n后置文案：%s", rule.Name, len(rule.DeleteLineTexts), len(rule.DeleteTexts), len(rule.Replacements), map[bool]string{true: "开启", false: "关闭"}[rule.TruncateIntroFeeEnabled == 1], map[bool]string{true: "开启", false: "关闭"}[rule.HeaderEnabled == 1], map[bool]string{true: "开启", false: "关闭"}[rule.FooterEnabled == 1])
-		buttons = append(buttons, []models.InlineKeyboardButton{{Text: "编辑 · " + rule.Name, CallbackData: fmt.Sprintf("cm:rule:%d", rule.Id)}})
+		text += fmt.Sprintf("\n\n规则：%s", rule.Name)
+		label := "修改配置"
+		if len(src.RuleIds) > 1 {
+			label += " · " + rule.Name
+		}
+		buttons = append(buttons, []models.InlineKeyboardButton{{Text: label, CallbackData: fmt.Sprintf("cm:rule:%d", rule.Id)}})
 	}
 	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "返回采集源", CallbackData: fmt.Sprintf("cm:view:%d", sourceID)}})
 	row, err := s.botById(ctx, botId)
@@ -263,6 +273,44 @@ func onOff(v int) string {
 	return "关闭"
 }
 
+func (s *sSysBot) showCollectRuleField(ctx context.Context, botId int64, chatId string, account *botProfileAccount, ruleID int64, field string) error {
+	r, err := publishService.SysPublish().BotCollectRuleView(ctx, ruleID, account.TenantId, account.AccountId)
+	if err != nil {
+		return err
+	}
+	value := collectRuleFieldDisplay(r, field)
+	if value == "" {
+		value = "未配置"
+	}
+	buttons := [][]models.InlineKeyboardButton{{{Text: "修改配置", CallbackData: fmt.Sprintf("cm:editstart:%d:%s", ruleID, field)}}, {{Text: "返回配置项", CallbackData: fmt.Sprintf("cm:rule:%d", ruleID)}}, {{Text: "返回资料管理", CallbackData: "cm:back"}}, {{Text: "取消当前操作", CallbackData: "pf:cancel"}}}
+	row, err := s.botById(ctx, botId)
+	if err != nil {
+		return err
+	}
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, "当前配置："+value, "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
+	return err
+}
+
+func collectRuleFieldDisplay(r *publishsysin.CollectRuleModel, field string) string {
+	switch field {
+	case "delete_line":
+		return strings.Join(r.DeleteLineTexts, ",")
+	case "delete_text":
+		return strings.Join(r.DeleteTexts, ",")
+	case "header":
+		return r.HeaderMarkdown
+	case "footer":
+		return r.FooterMarkdown
+	case "replace":
+		p := make([]string, 0, len(r.Replacements))
+		for _, v := range r.Replacements {
+			p = append(p, v.From+"=>"+v.To)
+		}
+		return strings.Join(p, ",")
+	}
+	return ""
+}
+
 func (s *sSysBot) startCollectRuleEdit(ctx context.Context, botId int64, chatId string, account *botProfileAccount, ruleID int64, field string) error {
 	r, err := publishService.SysPublish().BotCollectRuleView(ctx, ruleID, account.TenantId, account.AccountId)
 	if err != nil {
@@ -285,7 +333,7 @@ func (s *sSysBot) startCollectRuleEdit(ctx context.Context, botId int64, chatId 
 	case "footer":
 		value = r.FooterMarkdown
 	}
-	prompt := fmt.Sprintf("当前配置：%s\n\n请使用逗号分隔输入新内容，提交后将覆盖旧配置。发送 /cancel 取消。", value)
+	prompt := fmt.Sprintf("当前配置：%s\n\n请发送新配置，多个内容使用逗号分隔。\n例如：亚朵,卖家,联系方式\n\n发送 /cancel 取消。", value)
 	return s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_rule_edit", field, ruleID, "", map[string]interface{}{"field": field}, prompt)
 }
 
