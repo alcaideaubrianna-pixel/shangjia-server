@@ -11,7 +11,11 @@ func (s *sSysPublish) clearCollectSourceDedupe(ctx context.Context, sourceId, te
 		return gerror.New("清理采集源去重数据参数不完整")
 	}
 
-	if err := clearCollectDedupeCacheForAccount(ctx, tenantId, accountId); err != nil {
+	cacheKeys, err := releaseCollectSourceDedupeLedger(ctx, tenantId, accountId, sourceId)
+	if err != nil {
+		return err
+	}
+	if err = clearCollectDedupeCacheKeys(ctx, tenantId, accountId, sourceId, cacheKeys); err != nil {
 		return gerror.Wrap(err, "清理采集源去重缓存失败")
 	}
 	return nil

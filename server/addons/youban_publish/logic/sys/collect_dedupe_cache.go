@@ -25,6 +25,10 @@ func collectDedupeCacheKey(tenantID, accountID, channelID int64, layer, signatur
 	return fmt.Sprintf("%s:%d:%d:%d:%s:%s", collectDedupeCacheKeyPrefix, tenantID, accountID, channelID, strings.TrimSpace(layer), strings.TrimSpace(signature))
 }
 
+func collectDedupeSourceCacheIndexKey(tenantID, accountID, sourceID int64) string {
+	return fmt.Sprintf("%s:source:%d:%d:%d", collectDedupeCacheKeyPrefix, tenantID, accountID, sourceID)
+}
+
 func collectDedupeCacheValue(eventID int64, receivedAt time.Time) string {
 	return fmt.Sprintf("%d:%d", eventID, receivedAt.Unix())
 }
@@ -86,36 +90,21 @@ func writeCollectDedupeCache(ctx context.Context, values map[string]collectDedup
 	return err
 }
 
-func clearCollectDedupeCacheForAccount(ctx context.Context, tenantID, accountID int64) error {
-	if tenantID <= 0 || accountID <= 0 {
-		return nil
+func clearCollectDedupeCacheKeys(ctx context.Context, tenantID, accountID, sourceID int64, keys []string) error {
+	indexKey := collectDedupeSourceCacheIndexKey(tenantID, accountID, sourceID)
+	indexed, err := g.Redis().Do(ctx, "SMEMBERS", indexKey)
+	if err != nil {
+		return err
 	}
-	cursor := "0"
-	pattern := fmt.Sprintf("%s:%d:%d:*", collectDedupeCacheKeyPrefix, tenantID, accountID)
-	for {
-		value, err := g.Redis().Do(ctx, "SCAN", cursor, "MATCH", pattern, "COUNT", 500)
-		if err != nil {
-			return err
-		}
-		parts := value.Array()
-		if len(parts) != 2 {
-			return fmt.Errorf("解析采集去重缓存扫描结果失败")
-		}
-		cursor = gvar.New(parts[0]).String()
-		keys := gvar.New(parts[1]).Strings()
-		if len(keys) > 0 {
-			args := make([]interface{}, 0, len(keys))
-			for _, key := range keys {
-				args = append(args, key)
-			}
-			if _, err = g.Redis().Do(ctx, "DEL", args...); err != nil {
-				return err
-			}
-		}
-		if cursor == "0" {
-			return nil
-		}
+	keys = append(keys, indexed.Strings()...)
+	keys = uniqueStrings(keys)
+	args := make([]interface{}, 0, len(keys)+1)
+	for _, key := range keys {
+		args = append(args, key)
 	}
+	args = append(args, indexKey)
+	_, err = g.Redis().Do(ctx, "DEL", args...)
+	return err
 }
 
 func collectDedupeCacheEntryValid(entry collectDedupeCacheEntry, days int, now time.Time) bool {
@@ -154,7 +143,7 @@ func (s *sSysPublish) warmCollectDedupeCacheForSentDispatches(ctx context.Contex
 		return nil
 	}
 	events, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Fields("id,tenant_id,account_id,text_hash,dedupe_key,received_at").
+		Fields("id,tenant_id,account_id,source_id,text_hash,dedupe_key,received_at").
 		WhereIn("id", eventIDs).
 		Where("EXISTS (SELECT 1 FROM hg_youban_publish_collect_source s WHERE s.id = hg_youban_publish_collect_event.source_id AND s.tenant_id = hg_youban_publish_collect_event.tenant_id AND s.account_id = hg_youban_publish_collect_event.account_id AND s.deleted_at IS NULL)").
 		All()
@@ -166,6 +155,7 @@ func (s *sSysPublish) warmCollectDedupeCacheForSentDispatches(ctx context.Contex
 		return err
 	}
 	values := make(map[string]collectDedupeCacheEntry)
+	keysBySource := make(map[string][]interface{})
 	for _, event := range events {
 		eventID := event["id"].Int64()
 		receivedAt := event["received_at"].GTime()
@@ -181,10 +171,24 @@ func (s *sSysPublish) warmCollectDedupeCacheForSentDispatches(ctx context.Contex
 				{"image_phash", material.imagePHashKey},
 			} {
 				if item.signature != "" {
-					values[collectDedupeCacheKey(event["tenant_id"].Int64(), event["account_id"].Int64(), channelID, item.layer, item.signature)] = entry
+					key := collectDedupeCacheKey(event["tenant_id"].Int64(), event["account_id"].Int64(), channelID, item.layer, item.signature)
+					values[key] = entry
+					indexKey := collectDedupeSourceCacheIndexKey(event["tenant_id"].Int64(), event["account_id"].Int64(), event["source_id"].Int64())
+					keysBySource[indexKey] = append(keysBySource[indexKey], key)
 				}
 			}
 		}
 	}
-	return writeCollectDedupeCache(ctx, values)
+	if err = writeCollectDedupeCache(ctx, values); err != nil {
+		return err
+	}
+	for indexKey, keys := range keysBySource {
+		if len(keys) == 0 {
+			continue
+		}
+		if _, err = g.Redis().Do(ctx, "SADD", append([]interface{}{indexKey}, keys...)...); err != nil {
+			return err
+		}
+	}
+	return nil
 }

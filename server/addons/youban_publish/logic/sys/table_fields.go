@@ -44,4 +44,6 @@ var (
 	publishCollectSourceTable       = pdao.YoubanPublishCollectSource.Table()
 	publishCollectDispatchTable     = pdao.YoubanPublishCollectDispatch.Table()
 	publishCollectEventTable        = pdao.YoubanPublishCollectEvent.Table()
+	publishCollectDedupeEntryTable  = "hg_youban_publish_collect_dedupe_entry"
+	publishCollectDedupeSourceTable = "hg_youban_publish_collect_dedupe_source"
 )

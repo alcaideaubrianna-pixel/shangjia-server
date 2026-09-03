@@ -91,57 +91,6 @@ func TestCollectMediaFingerprintSetKeyIsOrderIndependent(t *testing.T) {
 	}
 }
 
-func TestCollectDedupeMaterialMatchesByPhase(t *testing.T) {
-	current := collectDedupeMaterialFromValues("text-current", `[
-		{"type":"photo","fileId":"photo-current","filePhash":"phash-current"}
-	]`)
-
-	cases := []struct {
-		name     string
-		previous collectDedupeMaterial
-		phase    collectDedupePhase
-		want     string
-	}{
-		{
-			name:     "media fingerprint",
-			previous: collectDedupeMaterialFromValues("different-text", `[{"type":"photo","fileId":"photo-current","filePhash":"different-phash"}]`),
-			phase:    collectDedupePhaseEarly,
-			want:     "media_fingerprint",
-		},
-		{
-			name:     "text hash",
-			previous: collectDedupeMaterialFromValues("text-current", `[{"type":"photo","fileId":"different-photo","filePhash":"different-phash"}]`),
-			phase:    collectDedupePhaseEarly,
-			want:     "text_hash",
-		},
-		{
-			name:     "image phash",
-			previous: collectDedupeMaterialFromValues("different-text", `[{"type":"photo","fileId":"different-photo","filePhash":"phash-current"}]`),
-			phase:    collectDedupePhasePHash,
-			want:     "image_phash",
-		},
-		{
-			name:     "early phase ignores phash",
-			previous: collectDedupeMaterialFromValues("different-text", `[{"type":"photo","fileId":"different-photo","filePhash":"phash-current"}]`),
-			phase:    collectDedupePhaseEarly,
-			want:     "",
-		},
-		{
-			name:     "phash phase ignores text",
-			previous: collectDedupeMaterialFromValues("text-current", `[{"type":"photo","fileId":"different-photo","filePhash":"different-phash"}]`),
-			phase:    collectDedupePhasePHash,
-			want:     "",
-		},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			if got := current.matchLayer(testCase.previous, testCase.phase); got != testCase.want {
-				t.Fatalf("match layer = %q, want %q", got, testCase.want)
-			}
-		})
-	}
-}
-
 func TestCollectImagePHashSetIgnoresOrderAndVideos(t *testing.T) {
 	left := []collectMediaItem{
 		{Type: "photo", FilePhash: "A"},
@@ -156,6 +105,50 @@ func TestCollectImagePHashSetIgnoresOrderAndVideos(t *testing.T) {
 	rightKey, rightCount := collectImagePHashSetKey(right)
 	if leftKey != rightKey || leftCount != 2 || rightCount != 2 {
 		t.Fatalf("image phash set mismatch: left=(%q,%d) right=(%q,%d)", leftKey, leftCount, rightKey, rightCount)
+	}
+}
+
+func TestCollectDedupeSignaturesRequireCompleteMediaMetadata(t *testing.T) {
+	partialFingerprint := collectDedupeMaterialFromItems("", []collectMediaItem{
+		{Type: "photo", FileId: "photo-1", FilePhash: "hash-1"},
+		{Type: "photo"},
+	})
+	for _, signature := range partialFingerprint.signatures(true) {
+		if signature.layer == "media_fingerprint" || signature.layer == "image_phash" {
+			t.Fatalf("partial metadata must not produce %s signature", signature.layer)
+		}
+	}
+
+	complete := collectDedupeMaterialFromItems("text-hash", []collectMediaItem{
+		{Type: "photo", FileId: "photo-1", FilePhash: "hash-1"},
+		{Type: "photo", FileId: "photo-2", FilePhash: "hash-2"},
+	})
+	layers := map[string]bool{}
+	for _, signature := range complete.signatures(true) {
+		layers[signature.layer] = true
+	}
+	for _, layer := range []string{"text_hash", "media_fingerprint", "image_phash"} {
+		if !layers[layer] {
+			t.Fatalf("complete material missing %s signature", layer)
+		}
+	}
+}
+
+func TestCollectDedupeLocksOverlapOnAnyMatchingLayer(t *testing.T) {
+	left := collectDedupeMaterial{textHash: "same-text", mediaKey: "left-media", mediaTotal: 1, mediaCount: 1}
+	right := collectDedupeMaterial{textHash: "same-text", mediaKey: "right-media", mediaTotal: 1, mediaCount: 1}
+	leftKeys := collectDedupeSignatureLockKeys(left)
+	rightKeys := collectDedupeSignatureLockKeys(right)
+	overlaps := false
+	for _, leftKey := range leftKeys {
+		for _, rightKey := range rightKeys {
+			if leftKey == rightKey {
+				overlaps = true
+			}
+		}
+	}
+	if !overlaps {
+		t.Fatal("materials matching any dedupe layer must share a lock")
 	}
 }
 

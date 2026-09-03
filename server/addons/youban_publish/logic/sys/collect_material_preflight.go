@@ -8,9 +8,6 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gtime"
-
-	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -55,14 +52,6 @@ func (s *sSysPublish) preflightCollectMaterialGroup(ctx context.Context, event g
 	return result, nil
 }
 
-type collectEarlyDedupeCandidate struct {
-	eventID    int64
-	receivedAt *gtime.Time
-	channels   []int64
-	sent       map[int64]bool
-	material   collectDedupeMaterial
-}
-
 func (s *sSysPublish) filterCollectRulesByEarlyDedupeBatch(ctx context.Context, event gdb.Record, content *collectContentResult, rules []gdb.Record) ([]gdb.Record, error) {
 	if len(rules) == 0 {
 		return nil, nil
@@ -79,107 +68,30 @@ func (s *sSysPublish) filterCollectRulesByEarlyDedupeBatch(ctx context.Context, 
 	if len(remainingRules) == 0 {
 		return nil, nil
 	}
-	queryDays := collectDedupeBroadQueryDays(remainingRules)
-	rows, err := s.collectDedupeCandidateEvents(ctx, event, current, queryDays)
-	if err != nil {
-		return nil, err
+	channelIDs := make([]int64, 0)
+	for _, rule := range remainingRules {
+		channelIDs = append(channelIDs, collectRuleTargetChannelIds(rule)...)
 	}
-	candidates, err := s.buildCollectDedupeCandidates(ctx, event, rows, false)
+	hits, err := loadCollectDedupeLedgerHits(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), uniqueIds(channelIDs), current, false)
 	if err != nil {
 		return nil, err
 	}
 	filtered := make([]gdb.Record, 0, len(remainingRules))
-	cacheWrites := make(map[string]collectDedupeCacheEntry)
+	now := time.Now()
 	for _, rule := range remainingRules {
 		if rule["dedupe_enabled"].Int() != 1 {
 			filtered = append(filtered, rule)
 			continue
 		}
 		targetIDs := collectRuleTargetChannelIds(rule)
-		layer, previousEventID, channelID, cacheable, receivedAt := matchCollectEarlyDedupeCandidate(current, candidates, targetIDs, rule["dedupe_days"].Int(), time.Now())
+		layer, previousEventID, channelID := matchCollectDedupeLedgerHit(hits, targetIDs, rule["dedupe_days"].Int(), now)
 		if layer == "" {
 			filtered = append(filtered, rule)
 			continue
 		}
 		g.Log().Infof(ctx, "采集资料组前置去重跳过 eventId:%d previousEventId:%d ruleId:%d channelId:%d layer:%s", event["id"].Int64(), previousEventID, rule["id"].Int64(), channelID, layer)
-		if cacheable && receivedAt > 0 {
-			signature := current.textHash
-			if layer == "media_fingerprint" {
-				signature = current.mediaKey
-			}
-			cacheWrites[collectDedupeCacheKey(event["tenant_id"].Int64(), event["account_id"].Int64(), channelID, layer, signature)] = collectDedupeCacheEntry{EventID: previousEventID, ReceivedAt: receivedAt}
-		}
-	}
-	if err = writeCollectDedupeCache(ctx, cacheWrites); err != nil {
-		g.Log().Warningf(ctx, "回填采集前置去重缓存失败 eventId:%d err:%+v", event["id"].Int64(), err)
 	}
 	return filtered, nil
-}
-
-func (s *sSysPublish) buildCollectDedupeCandidates(ctx context.Context, event gdb.Record, rows gdb.Result, includePHash bool) ([]collectEarlyDedupeCandidate, error) {
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	eventIDs := make([]int64, 0, len(rows))
-	for _, row := range rows {
-		if id := row["id"].Int64(); id > 0 {
-			eventIDs = append(eventIDs, id)
-		}
-	}
-	dispatchRows, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
-		Fields("id,event_id,status").
-		WhereIn("event_id", eventIDs).
-		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing, sysin.CollectDispatchStatusSent}).
-		All()
-	if err != nil {
-		return nil, gerror.Wrap(err, "批量读取采集去重分发记录失败")
-	}
-	dispatchIds := make([]int64, 0, len(dispatchRows))
-	for _, row := range dispatchRows {
-		dispatchIds = append(dispatchIds, row["id"].Int64())
-	}
-	dispatchChannels, err := collectDispatchChannelMap(ctx, dispatchIds)
-	if err != nil {
-		return nil, err
-	}
-	channelsByEvent := make(map[int64][]int64, len(dispatchRows))
-	sentByEvent := make(map[int64]map[int64]bool, len(dispatchRows))
-	for _, row := range dispatchRows {
-		eventID := row["event_id"].Int64()
-		channelIDs := dispatchChannels[row["id"].Int64()]
-		channelsByEvent[eventID] = append(channelsByEvent[eventID], channelIDs...)
-		if row["status"].String() == sysin.CollectDispatchStatusSent {
-			if sentByEvent[eventID] == nil {
-				sentByEvent[eventID] = make(map[int64]bool, len(channelIDs))
-			}
-			for _, channelID := range channelIDs {
-				sentByEvent[eventID][channelID] = true
-			}
-		}
-	}
-	mediaByEvent, err := s.collectEventMediaItemsByEvent(ctx, eventIDs)
-	if err != nil {
-		return nil, err
-	}
-	candidates := make([]collectEarlyDedupeCandidate, 0, len(rows))
-	for _, row := range rows {
-		eventID := row["id"].Int64()
-		if eventID <= 0 || len(channelsByEvent[eventID]) == 0 {
-			continue
-		}
-		material := collectDedupeMaterialFromEventRecord(row, mediaByEvent[eventID])
-		if !includePHash {
-			material.imagePHashKey = ""
-		}
-		candidates = append(candidates, collectEarlyDedupeCandidate{
-			eventID:    eventID,
-			receivedAt: row["received_at"].GTime(),
-			channels:   uniqueIds(channelsByEvent[eventID]),
-			sent:       sentByEvent[eventID],
-			material:   material,
-		})
-	}
-	return candidates, nil
 }
 
 func (s *sSysPublish) filterCollectRulesByFinalDedupeBatch(ctx context.Context, event gdb.Record, content *collectContentResult, rules []gdb.Record) ([]gdb.Record, error) {
@@ -187,12 +99,11 @@ func (s *sSysPublish) filterCollectRulesByFinalDedupeBatch(ctx context.Context, 
 		return nil, nil
 	}
 	current := collectDedupeMaterialFromEvent(event, content)
-	queryDays := collectDedupeBroadQueryDays(rules)
-	rows, err := s.collectDedupeCandidateEvents(ctx, event, current, queryDays)
-	if err != nil {
-		return nil, err
+	channelIDs := make([]int64, 0)
+	for _, rule := range rules {
+		channelIDs = append(channelIDs, collectRuleTargetChannelIds(rule)...)
 	}
-	candidates, err := s.buildCollectDedupeCandidates(ctx, event, rows, true)
+	hits, err := loadCollectDedupeLedgerHits(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), uniqueIds(channelIDs), current, true)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +115,7 @@ func (s *sSysPublish) filterCollectRulesByFinalDedupeBatch(ctx context.Context, 
 			continue
 		}
 		targetIDs := collectRuleTargetChannelIds(rule)
-		layer, previousEventID, channelID := matchCollectFinalDedupeCandidate(current, candidates, targetIDs, rule["dedupe_days"].Int(), now)
+		layer, previousEventID, channelID := matchCollectDedupeLedgerHit(hits, targetIDs, rule["dedupe_days"].Int(), now)
 		if layer == "" {
 			filtered = append(filtered, rule)
 			continue
@@ -212,77 +123,6 @@ func (s *sSysPublish) filterCollectRulesByFinalDedupeBatch(ctx context.Context, 
 		g.Log().Infof(ctx, "采集资料组最终去重跳过 eventId:%d previousEventId:%d ruleId:%d channelId:%d layer:%s", event["id"].Int64(), previousEventID, rule["id"].Int64(), channelID, layer)
 	}
 	return filtered, nil
-}
-
-func collectDedupeBroadQueryDays(rules []gdb.Record) int {
-	maximum := 0
-	for _, rule := range rules {
-		if rule["dedupe_enabled"].Int() != 1 {
-			continue
-		}
-		days := rule["dedupe_days"].Int()
-		if days <= 0 {
-			return 0
-		}
-		if days > maximum {
-			maximum = days
-		}
-	}
-	return maximum
-}
-
-func matchCollectEarlyDedupeCandidate(current collectDedupeMaterial, candidates []collectEarlyDedupeCandidate, targetIDs []int64, days int, now time.Time) (string, int64, int64, bool, int64) {
-	if len(targetIDs) == 0 {
-		return "", 0, 0, false, 0
-	}
-	var cutoff time.Time
-	if days > 0 {
-		cutoff = now.AddDate(0, 0, -days)
-	}
-	for _, candidate := range candidates {
-		if !cutoff.IsZero() && candidate.receivedAt != nil && candidate.receivedAt.Time.Before(cutoff) {
-			continue
-		}
-		channelID := firstOverlappingInt64(targetIDs, candidate.channels)
-		if channelID <= 0 {
-			continue
-		}
-		if layer := current.matchLayer(candidate.material, collectDedupePhaseEarly); layer != "" {
-			receivedAt := int64(0)
-			if candidate.receivedAt != nil {
-				receivedAt = candidate.receivedAt.Timestamp()
-			}
-			return layer, candidate.eventID, channelID, candidate.sent[channelID], receivedAt
-		}
-	}
-	return "", 0, 0, false, 0
-}
-
-func matchCollectFinalDedupeCandidate(current collectDedupeMaterial, candidates []collectEarlyDedupeCandidate, targetIDs []int64, days int, now time.Time) (string, int64, int64) {
-	if len(targetIDs) == 0 {
-		return "", 0, 0
-	}
-	var cutoff time.Time
-	if days > 0 {
-		cutoff = now.AddDate(0, 0, -days)
-	}
-	for _, candidate := range candidates {
-		if !cutoff.IsZero() && candidate.receivedAt != nil && candidate.receivedAt.Time.Before(cutoff) {
-			continue
-		}
-		channelID := firstOverlappingInt64(targetIDs, candidate.channels)
-		if channelID <= 0 {
-			continue
-		}
-		layer := current.matchLayer(candidate.material, collectDedupePhaseEarly)
-		if layer == "" {
-			layer = current.matchLayer(candidate.material, collectDedupePhasePHash)
-		}
-		if layer != "" {
-			return layer, candidate.eventID, channelID
-		}
-	}
-	return "", 0, 0
 }
 
 func filterCollectRulesByEarlyDedupeCache(ctx context.Context, event gdb.Record, current collectDedupeMaterial, rules []gdb.Record, now time.Time) ([]gdb.Record, error) {
@@ -301,7 +141,7 @@ func filterCollectRulesByEarlyDedupeCache(ctx context.Context, event gdb.Record,
 			continue
 		}
 		for _, channelID := range collectRuleTargetChannelIds(rule) {
-			for _, item := range []struct{ layer, signature string }{{"media_fingerprint", current.mediaKey}, {"text_hash", current.textHash}} {
+			for _, item := range []struct{ layer, signature string }{{"text_hash", current.textHash}, {"media_fingerprint", current.mediaKey}} {
 				if item.signature == "" {
 					continue
 				}

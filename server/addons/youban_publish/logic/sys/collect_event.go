@@ -449,15 +449,31 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if !verifyReady {
 		return newCollectProcessRetryError(30*time.Second, "等待验证资料媒体缓存完成")
 	}
-	dedupeLock := lock.NewConfig(2*time.Minute, 20*time.Millisecond).Mutex(fmt.Sprintf(
-		"youban_publish:collect:dedupe-commit:%d:%d",
-		event["tenant_id"].Int64(),
-		event["account_id"].Int64(),
-	))
-	if err = dedupeLock.Lock(ctx); err != nil {
-		return gerror.Wrap(err, "获取采集资料提交锁失败")
+	lockContent, err := s.collectContentFromEvent(ctx, event)
+	if err != nil {
+		return gerror.Wrap(err, "构建采集资料去重签名失败")
 	}
-	defer func() { _ = dedupeLock.Unlock(context.Background()) }()
+	s.enrichCollectContentMediaMetadata(ctx, lockContent)
+	lockKeys := collectDedupeSignatureLockKeys(collectDedupeMaterialFromEvent(event, lockContent))
+	dedupeLocks := make([]*lock.Lock, 0, len(lockKeys))
+	for _, signatureKey := range lockKeys {
+		dedupeLock := lock.NewConfig(2*time.Minute, 20*time.Millisecond).Mutex(fmt.Sprintf(
+			"youban_publish:collect:dedupe-commit:%d:%d:%s",
+			event["tenant_id"].Int64(), event["account_id"].Int64(), collectHash(signatureKey),
+		))
+		if err = dedupeLock.Lock(ctx); err != nil {
+			for index := len(dedupeLocks) - 1; index >= 0; index-- {
+				_ = dedupeLocks[index].Unlock(context.Background())
+			}
+			return gerror.Wrap(err, "获取采集资料提交锁失败")
+		}
+		dedupeLocks = append(dedupeLocks, dedupeLock)
+	}
+	defer func() {
+		for index := len(dedupeLocks) - 1; index >= 0; index-- {
+			_ = dedupeLocks[index].Unlock(context.Background())
+		}
+	}()
 	if event["media_count"].Int() > 0 {
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusMediaReady, "")
 		s.appendCollectEventLogForRecord(ctx, event, "media", "ready", "媒体已就绪", "")
@@ -791,16 +807,24 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		if txErr != nil {
 			return gerror.Wrap(txErr, "创建采集分发记录失败")
 		}
-		return createCollectDispatchChannelsTx(ctx, tx, event["tenant_id"].Int64(), event["account_id"].Int64(), dispatchId, channelIds)
+		if txErr = createCollectDispatchChannelsTx(ctx, tx, event["tenant_id"].Int64(), event["account_id"].Int64(), dispatchId, channelIds); txErr != nil {
+			return txErr
+		}
+		return reserveCollectDedupeLedgerTx(ctx, tx, event, rule, dispatchId, channelIds, collectDedupeMaterialFromEvent(event, content))
 	})
 	if err != nil {
 		return false, "", err
 	}
 	if rule["review_enabled"].Int() == 1 {
-		return true, "", s.createCollectReview(ctx, event, content, rule, dispatchId, decision.Text)
+		if err = s.createCollectReview(ctx, event, content, rule, dispatchId, decision.Text); err != nil {
+			_ = s.markCollectDispatchFailed(ctx, dispatchId, err.Error())
+			return false, "", err
+		}
+		return true, "", nil
 	}
 	profileId, err := s.commitCollectMaterial(ctx, event, content, rule, decision.Text)
 	if err != nil {
+		_ = s.markCollectDispatchFailed(ctx, dispatchId, err.Error())
 		return false, "", err
 	}
 	if err = s.submitCollectProfileDispatch(ctx, dispatchId, profileId, event); err != nil {

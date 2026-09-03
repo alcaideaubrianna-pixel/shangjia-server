@@ -82,7 +82,7 @@ func (s *sSysPublish) markCollectDispatchFailedByProfile(ctx context.Context, pr
 		return nil
 	}
 	rows, err := pdao.YoubanPublishCollectDispatch.Ctx(ctx).
-		Fields("event_id").Where("profile_id", profileId).Where("event_id", eventId).
+		Fields("id,event_id").Where("profile_id", profileId).Where("event_id", eventId).
 		WhereIn("status", []string{sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing}).All()
 	if err != nil {
 		return gerror.Wrap(err, "读取采集失败分发事件失败")
@@ -94,5 +94,12 @@ func (s *sSysPublish) markCollectDispatchFailedByProfile(ctx context.Context, pr
 	if err != nil {
 		return gerror.Wrap(err, "更新采集分发失败状态失败")
 	}
-	return s.markCollectEventsFailedByDispatchRows(ctx, rows, message)
+	if err = s.markCollectEventsFailedByDispatchRows(ctx, rows, message); err != nil {
+		return err
+	}
+	dispatchIDs := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		dispatchIDs = append(dispatchIDs, row["id"].Int64())
+	}
+	return releaseCollectDedupeLedgerByDispatches(ctx, dispatchIDs)
 }

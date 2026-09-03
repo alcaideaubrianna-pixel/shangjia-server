@@ -426,6 +426,9 @@ func (s *sSysPublish) CollectReviewDelete(ctx context.Context, in *sysin.IdsInp)
 				}).Update(); err != nil {
 				return gerror.Wrap(err, "更新审核分发状态失败")
 			}
+			if err = releaseCollectDedupeLedgerByDispatchesTx(ctx, tx, uniqueIds(dispatchIds)); err != nil {
+				return err
+			}
 		}
 		if _, err = tx.Model(pdao.YoubanPublishCollectReview.Table()).
 			WhereIn("id", ids).
@@ -565,5 +568,8 @@ func (s *sSysPublish) rejectCollectReviews(ctx context.Context, reviewIds []int6
 			"updated_at":    gtime.Now(),
 		}).
 		Update()
-	return gerror.Wrap(err, "更新采集审核拒绝分发状态失败")
+	if err != nil {
+		return gerror.Wrap(err, "更新采集审核拒绝分发状态失败")
+	}
+	return releaseCollectDedupeLedgerByDispatches(ctx, dispatchIds)
 }

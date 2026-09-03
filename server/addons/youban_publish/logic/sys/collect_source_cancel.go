@@ -28,8 +28,8 @@ func (s *sSysPublish) executeCollectSourceDeleteCleanup(ctx context.Context, sou
 	if err = s.clearCollectSourceAsynqTasks(ctx, sourceId, taskIDs); err != nil {
 		return err
 	}
-	if err = clearCollectDedupeCacheForAccount(ctx, tenantId, accountId); err != nil {
-		return gerror.Wrap(err, "清理采集源去重缓存失败")
+	if err = s.clearCollectSourceDedupe(ctx, sourceId, tenantId, accountId); err != nil {
+		return err
 	}
 	g.Log().Infof(ctx, "采集源删除清理完成 sourceId:%d historyTasks:%d", sourceId, len(taskIDs))
 	return nil

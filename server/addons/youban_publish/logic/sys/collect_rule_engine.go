@@ -1,18 +1,13 @@
 package sys
 
 import (
-	"context"
 	"encoding/json"
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/os/gtime"
-
-	pdao "hotgo/addons/youban_publish/internal/dao"
 )
 
 var (
@@ -92,79 +87,15 @@ func shouldDropCollectStandaloneCodeCaption(text string, mediaCount int) bool {
 	return mediaCount == 1 && collectStandaloneCodeCaptionRule.MatchString(text)
 }
 
-type collectDedupePhase string
-
-const (
-	collectDedupePhaseEarly collectDedupePhase = "early"
-	collectDedupePhasePHash collectDedupePhase = "phash"
-)
-
-func (s *sSysPublish) collectDedupeCandidateEvents(ctx context.Context, event gdb.Record, current collectDedupeMaterial, days int) (gdb.Result, error) {
-	newModel := func() *gdb.Model {
-		model := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-			Where("tenant_id", event["tenant_id"].Int64()).
-			Where("account_id", event["account_id"].Int64()).
-			Where("EXISTS (SELECT 1 FROM hg_youban_publish_collect_source s WHERE s.id = hg_youban_publish_collect_event.source_id AND s.tenant_id = hg_youban_publish_collect_event.tenant_id AND s.account_id = hg_youban_publish_collect_event.account_id AND s.deleted_at IS NULL)").
-			WhereLT("id", event["id"].Int64())
-		if days > 0 {
-			model = model.WhereGTE("received_at", gtime.NewFromTime(time.Now().AddDate(0, 0, -days)))
-		}
-		return model
-	}
-
-	rowsByID := make(map[int64]gdb.Record)
-	appendExactRows := func(field, signature string) error {
-		if signature == "" {
-			return nil
-		}
-		exactRows, err := newModel().
-			Where(field, signature).
-			Fields("id,text_hash,dedupe_key,received_at").
-			OrderDesc("id").
-			All()
-		if err != nil {
-			return err
-		}
-		for _, row := range exactRows {
-			rowsByID[row["id"].Int64()] = row
-		}
-		return nil
-	}
-	if err := appendExactRows("dedupe_key", current.dedupeKey); err != nil {
-		return nil, err
-	}
-	if err := appendExactRows("text_hash", current.textHash); err != nil {
-		return nil, err
-	}
-	if current.mediaKey != "" || current.imagePHashKey != "" {
-		recentRows, err := newModel().
-			Fields("id,text_hash,dedupe_key,received_at").
-			OrderDesc("id").
-			Limit(500).
-			All()
-		if err != nil {
-			return nil, err
-		}
-		for _, row := range recentRows {
-			rowsByID[row["id"].Int64()] = row
-		}
-	}
-	rows := make(gdb.Result, 0, len(rowsByID))
-	for _, row := range rowsByID {
-		rows = append(rows, row)
-	}
-	sort.Slice(rows, func(left, right int) bool {
-		return rows[left]["id"].Int64() > rows[right]["id"].Int64()
-	})
-	return rows, nil
-}
-
 type collectDedupeMaterial struct {
-	dedupeKey     string
-	mediaKey      string
-	textHash      string
-	imagePHashKey string
-	mediaCount    int
+	dedupeKey       string
+	mediaKey        string
+	textHash        string
+	imagePHashKey   string
+	mediaCount      int
+	mediaTotal      int
+	imagePHashCount int
+	imageTotal      int
 }
 
 func collectDedupeMaterialFromEvent(event gdb.Record, content *collectContentResult) collectDedupeMaterial {
@@ -198,32 +129,33 @@ func collectDedupeMaterialFromEventRecord(row gdb.Record, items []collectMediaIt
 
 func collectDedupeMaterialFromItems(textHash string, items []collectMediaItem) collectDedupeMaterial {
 	mediaKey := collectMediaFingerprintSetKey(items)
-	imagePHashKey, _ := collectImagePHashSetKey(items)
+	imagePHashKey, imagePHashCount := collectImagePHashSetKey(items)
+	imageTotal := 0
+	for _, item := range items {
+		if mediaType := strings.ToLower(strings.TrimSpace(item.Type)); mediaType == "photo" || mediaType == "image" {
+			imageTotal++
+		}
+	}
+	mediaCount := len(collectMediaFingerprintValues(items))
+	if mediaCount != len(items) {
+		mediaKey = ""
+	}
+	if imagePHashCount != imageTotal {
+		imagePHashKey = ""
+	}
 	textHash = strings.TrimSpace(textHash)
 	if textHash == collectHash("") {
 		textHash = ""
 	}
 	return collectDedupeMaterial{
-		mediaKey:      mediaKey,
-		textHash:      textHash,
-		imagePHashKey: imagePHashKey,
-		mediaCount:    len(collectMediaFingerprintValues(items)),
+		mediaKey:        mediaKey,
+		textHash:        textHash,
+		imagePHashKey:   imagePHashKey,
+		mediaCount:      mediaCount,
+		mediaTotal:      len(items),
+		imagePHashCount: imagePHashCount,
+		imageTotal:      imageTotal,
 	}
-}
-
-func (material collectDedupeMaterial) matchLayer(previous collectDedupeMaterial, phase collectDedupePhase) string {
-	if phase == collectDedupePhaseEarly {
-		if material.mediaKey != "" && material.mediaKey == previous.mediaKey {
-			return "media_fingerprint"
-		}
-		if material.textHash != "" && material.textHash == previous.textHash {
-			return "text_hash"
-		}
-	}
-	if phase == collectDedupePhasePHash && material.imagePHashKey != "" && material.imagePHashKey == previous.imagePHashKey {
-		return "image_phash"
-	}
-	return ""
 }
 
 func collectMediaFingerprintSetKey(items []collectMediaItem) string {
@@ -263,21 +195,6 @@ func collectImagePHashSetKey(items []collectMediaItem) (string, int) {
 		return "", 0
 	}
 	return collectHash(strings.Join(values, "|")), len(values)
-}
-
-func firstOverlappingInt64(left []int64, right []int64) int64 {
-	seen := make(map[int64]struct{}, len(left))
-	for _, value := range left {
-		if value > 0 {
-			seen[value] = struct{}{}
-		}
-	}
-	for _, value := range right {
-		if _, ok := seen[value]; ok {
-			return value
-		}
-	}
-	return 0
 }
 
 func trimCollectValues(values []string) []string {

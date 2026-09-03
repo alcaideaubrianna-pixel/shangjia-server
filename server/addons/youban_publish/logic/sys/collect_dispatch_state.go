@@ -35,7 +35,10 @@ func (s *sSysPublish) markCollectDispatchFailed(ctx context.Context, dispatchId 
 	if err != nil {
 		return gerror.Wrap(err, "更新采集分发失败状态失败")
 	}
-	return s.markCollectEventsFailedByDispatchRows(ctx, rows, message)
+	if err = s.markCollectEventsFailedByDispatchRows(ctx, rows, message); err != nil {
+		return err
+	}
+	return releaseCollectDedupeLedgerByDispatches(ctx, []int64{dispatchId})
 }
 
 func (s *sSysPublish) markCollectEventsFailedByDispatchRows(ctx context.Context, rows gdb.Result, message string) error {

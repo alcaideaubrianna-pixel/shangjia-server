@@ -37,6 +37,14 @@ func (s *sSysPublish) runCollectRecovery(ctx context.Context) {
 
 func (s *sSysPublish) recoverCollectOnce(ctx context.Context) {
 	mediaBatchSize := collectMediaRecoveryBatchSize(ctx)
+	// Migration batches are bounded so normal recovery is not starved. Once
+	// caught up, these become inexpensive indexed no-op queries.
+	for batch := 0; batch < 5; batch++ {
+		if err := s.backfillCollectDedupeLedger(ctx, 1000); err != nil {
+			g.Log().Warningf(ctx, "回填采集永久去重账本失败 batch:%d err:%+v", batch+1, err)
+			break
+		}
+	}
 	if err := s.cleanupCollectEventsOlderThan(ctx, collectEventRetentionDays, 1000); err != nil {
 		g.Log().Warningf(ctx, "清理过期采集事件失败：%+v", err)
 	}
