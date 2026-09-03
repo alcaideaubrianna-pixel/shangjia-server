@@ -19,9 +19,9 @@ var mysqlBusinessSqlFiles = []string{
 	"addons/youban_publish/resource/sql/menu.sql",
 }
 
-var mysqlUpgradeSafeSqlFiles = []string{
+var mysqlOnlineUpgradeSqlFiles = []string{
 	"addons/youban_publish/resource/sql/menu.sql",
-	"addons/youban_publish/resource/sql/upgrade_safe.sql",
+	"addons/youban_publish/resource/sql/upgrade_online.sql",
 }
 
 var pgsqlBusinessSqlFiles = []string{
@@ -29,9 +29,9 @@ var pgsqlBusinessSqlFiles = []string{
 	"addons/youban_publish/resource/sql/menu.pgsql.sql",
 }
 
-var pgsqlUpgradeSafeSqlFiles = []string{
+var pgsqlOnlineUpgradeSqlFiles = []string{
 	"addons/youban_publish/resource/sql/menu.pgsql.sql",
-	"addons/youban_publish/resource/sql/upgrade_safe.pgsql.sql",
+	"addons/youban_publish/resource/sql/upgrade_online.pgsql.sql",
 }
 
 const publishInstallLockKey = "youban_publish:install"
@@ -131,12 +131,12 @@ func businessSqlFiles(includeInstall bool) []string {
 		if includeInstall {
 			return pgsqlBusinessSqlFiles
 		}
-		return pgsqlUpgradeSafeSqlFiles
+		return pgsqlOnlineUpgradeSqlFiles
 	}
 	if includeInstall {
 		return mysqlBusinessSqlFiles
 	}
-	return mysqlUpgradeSafeSqlFiles
+	return mysqlOnlineUpgradeSqlFiles
 }
 
 // MigrationSqlFiles returns the addon migration files that must be executed
@@ -171,11 +171,16 @@ func execSqlFile(ctx context.Context, tx gdb.TX, path string) (err error) {
 		if sql == "" {
 			continue
 		}
+		startedAt := time.Now()
 		if _, err = tx.Exec(sql); err != nil {
 			if isIgnorableSqlError(err) {
 				continue
 			}
 			return gerror.Wrapf(err, "执行 SQL 失败：%s 第 %d 段\n%s", path, index+1, sql)
+		}
+		elapsed := time.Since(startedAt)
+		if elapsed >= time.Second {
+			g.Log().Warningf(ctx, "上架系统在线升级 SQL 执行较慢 file:%s segment:%d duration:%s", path, index+1, elapsed)
 		}
 	}
 	return nil

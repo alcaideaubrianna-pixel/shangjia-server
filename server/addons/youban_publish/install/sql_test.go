@@ -29,22 +29,30 @@ func TestSqlDollarQuoteTag(t *testing.T) {
 	}
 }
 
-func TestUpgradeSafeSqlIncludesCollectMediaRetryColumn(t *testing.T) {
+func TestOnlineUpgradeSqlIncludesDedupeLedger(t *testing.T) {
 	tests := []struct {
 		name  string
 		files []string
 		path  string
 	}{
-		{name: "mysql", files: mysqlUpgradeSafeSqlFiles, path: "addons/youban_publish/resource/sql/upgrade_safe.sql"},
-		{name: "pgsql", files: pgsqlUpgradeSafeSqlFiles, path: "addons/youban_publish/resource/sql/upgrade_safe.pgsql.sql"},
+		{name: "mysql", files: mysqlOnlineUpgradeSqlFiles, path: "addons/youban_publish/resource/sql/upgrade_online.sql"},
+		{name: "pgsql", files: pgsqlOnlineUpgradeSqlFiles, path: "addons/youban_publish/resource/sql/upgrade_online.pgsql.sql"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if !slices.Contains(test.files, test.path) {
 				t.Fatalf("upgrade SQL files do not contain %s: %#v", test.path, test.files)
 			}
-			if sql := readSqlFile(test.path); !strings.Contains(sql, "next_retry_at") {
-				t.Fatalf("upgrade SQL does not add next_retry_at: %s", sql)
+			sql := readSqlFile(test.path)
+			if !strings.Contains(sql, "hg_youban_publish_collect_dedupe_entry") ||
+				!strings.Contains(sql, "hg_youban_publish_collect_dedupe_source") {
+				t.Fatalf("online upgrade SQL does not create dedupe ledger: %s", sql)
+			}
+			upperSql := strings.ToUpper(sql)
+			for _, forbidden := range []string{"UPDATE ", "DELETE ", "DROP TABLE", "DROP COLUMN"} {
+				if strings.Contains(upperSql, forbidden) {
+					t.Fatalf("online upgrade SQL contains blocking data operation %q: %s", forbidden, sql)
+				}
 			}
 		})
 	}

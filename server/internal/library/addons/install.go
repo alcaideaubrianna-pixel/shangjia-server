@@ -92,11 +92,17 @@ func Upgrade(m Module) (err error) {
 	data := g.Map{
 		dao.SysAddonsInstall.Columns().Version: m.GetSkeleton().Version,
 	}
+	// Run the module migration before updating metadata. Addons may manage their
+	// own short transactions; wrapping them here keeps an unrelated transaction
+	// open for the entire migration and can amplify lock waits.
+	if err = m.Upgrade(m.Ctx()); err != nil {
+		return err
+	}
 	err = g.DB().Transaction(m.Ctx(), func(ctx context.Context, tx gdb.TX) error {
 		if _, err = GetModel(ctx).Where(dao.SysAddonsInstall.Columns().Id, record.Id).Data(data).Update(); err != nil {
 			return err
 		}
-		return m.Upgrade(ctx)
+		return nil
 	})
 	if err != nil {
 		return err
