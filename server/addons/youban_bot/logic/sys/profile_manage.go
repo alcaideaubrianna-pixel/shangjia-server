@@ -176,13 +176,17 @@ func looksLikeProfileSearchIdentifier(text string) bool {
 	return profileMarkFindRegexp.MatchString(normalized)
 }
 
-func (s *sSysBot) profileMenuMarkup() *models.InlineKeyboardMarkup {
-	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+func (s *sSysBot) profileMenuMarkup(ctx context.Context) *models.InlineKeyboardMarkup {
+	rows := [][]models.InlineKeyboardButton{
 		{{Text: "笔记列表", CallbackData: "pf:list:1"}, {Text: "新建笔记", CallbackData: "pf:create"}},
 		{{Text: "搜索笔记", CallbackData: "pf:search"}, {Text: "发送笔记", CallbackData: "pf:asksend"}},
 		{{Text: "编辑笔记", CallbackData: "pf:askedit"}, {Text: "频道管理", CallbackData: "ch:list"}},
 		{{Text: "取消当前操作", CallbackData: "pf:cancel"}},
-	}}
+	}
+	if account, err := s.boundProfileAccountByUser(ctx, parseTelegramUserId(telegramUserIdFromCtx(ctx))); err == nil && s.collectManageAllowed(ctx, account) {
+		rows = append(rows, []models.InlineKeyboardButton{{Text: "采集管理", CallbackData: "cm:list:1"}})
+	}
+	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 func (s *sSysBot) showProfileMenu(ctx context.Context, botId int64, msg *models.Message) error {
@@ -190,7 +194,7 @@ func (s *sSysBot) showProfileMenu(ctx context.Context, botId int64, msg *models.
 	if err != nil {
 		return err
 	}
-	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, fmt.Sprintf("%d", msg.Chat.ID), "资料管理已启用，请选择操作：", "HTML", false, s.profileMenuMarkup())
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, fmt.Sprintf("%d", msg.Chat.ID), "资料管理已启用，请选择操作：", "HTML", false, s.profileMenuMarkup(ctx))
 	return err
 }
 
@@ -202,7 +206,7 @@ func (s *sSysBot) showProfileMenuToChat(ctx context.Context, botId int64, chatId
 	if strings.TrimSpace(text) == "" {
 		text = "资料管理已启用，请选择操作："
 	}
-	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, s.profileMenuMarkup())
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, s.profileMenuMarkup(ctx))
 	return err
 }
 
@@ -291,7 +295,7 @@ func (s *sSysBot) handleProfileTextCommand(ctx context.Context, botId int64, msg
 }
 
 func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query *models.CallbackQuery) (bool, error) {
-	if query == nil || (!strings.HasPrefix(query.Data, "pf:") && !strings.HasPrefix(query.Data, "ch:")) {
+	if query == nil || (!strings.HasPrefix(query.Data, "pf:") && !strings.HasPrefix(query.Data, "ch:") && !strings.HasPrefix(query.Data, "cm:")) {
 		return false, nil
 	}
 	row, err := s.botById(ctx, botId)
@@ -333,6 +337,9 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 	}
 	if strings.HasPrefix(query.Data, "ch:") {
 		return s.handleChannelCallback(ctx, botId, chatId, fmt.Sprintf("%d", query.From.ID), account, query.Data, query)
+	}
+	if strings.HasPrefix(query.Data, "cm:") {
+		return s.handleCollectManageCallback(ctx, botId, chatId, account, query.Data)
 	}
 	switch action {
 	case "list":
