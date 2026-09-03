@@ -298,6 +298,7 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 	if query == nil || (!strings.HasPrefix(query.Data, "pf:") && !strings.HasPrefix(query.Data, "ch:") && !strings.HasPrefix(query.Data, "cm:")) {
 		return false, nil
 	}
+	ctx = context.WithValue(ctx, telegramUserIdCtxKey{}, fmt.Sprintf("%d", query.From.ID))
 	row, err := s.botById(ctx, botId)
 	if err != nil {
 		return true, err

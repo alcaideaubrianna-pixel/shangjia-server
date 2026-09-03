@@ -85,6 +85,27 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
 		return true, s.startCollectRuleEdit(ctx, botId, chatId, account, ruleID, parts[3])
+	case "editconfirm":
+		session := s.activeProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId)
+		if session == nil || session.Scene != "collect_rule_edit" {
+			return true, nil
+		}
+		var payload struct {
+			Field string `json:"field"`
+			Draft string `json:"draft"`
+		}
+		if json.Unmarshal([]byte(session.PayloadJson), &payload) != nil {
+			return true, nil
+		}
+		session.Step = "confirming"
+		return true, s.handleCollectRuleEditSession(ctx, botId, chatId, account, session, payload.Draft)
+	case "editcancel":
+		session := s.activeProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId)
+		if session == nil {
+			return true, nil
+		}
+		_ = s.completeProfileSession(ctx, session.Id)
+		return true, s.showCollectRuleField(ctx, botId, chatId, account, session.ProfileId, session.Step)
 	case "toggle":
 		if len(parts) < 3 {
 			return true, nil
@@ -346,6 +367,20 @@ func (s *sSysBot) handleCollectRuleEditSession(ctx context.Context, botId int64,
 		Field string `json:"field"`
 	}
 	_ = json.Unmarshal([]byte(session.PayloadJson), &payload)
+	if session.Step != "confirming" {
+		payloadJSON, _ := json.Marshal(map[string]string{"field": payload.Field, "draft": text})
+		_, err = g.DB().Model(profileSessionTable).Ctx(ctx).Where("id", session.Id).Data(g.Map{"payload_json": string(payloadJSON), "updated_at": gtime.Now()}).Update()
+		if err != nil {
+			return err
+		}
+		buttons := [][]models.InlineKeyboardButton{{{Text: "确定修改", CallbackData: "cm:editconfirm"}}, {{Text: "取消修改", CallbackData: "cm:editcancel"}}}
+		row, err := s.botById(ctx, botId)
+		if err != nil {
+			return err
+		}
+		_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, fmt.Sprintf("修改后的配置：%s\n\n确认保存吗？", text), "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
+		return err
+	}
 	in := &publishsysin.CollectRuleSaveInp{Id: r.Id, Name: r.Name, GlobalEnabled: r.GlobalEnabled, TargetChannelIds: r.TargetChannelIds, ReviewEnabled: r.ReviewEnabled, DedupeEnabled: r.DedupeEnabled, DedupeDays: r.DedupeDays, FullMatchEnabled: r.FullMatchEnabled, Keywords: r.Keywords, Tags: r.Tags, Replacements: r.Replacements, DeleteLineTexts: r.DeleteLineTexts, DeleteTexts: r.DeleteTexts, TruncateIntroFeeEnabled: r.TruncateIntroFeeEnabled, IntroFeeSuffixEnabled: r.IntroFeeSuffixEnabled, IntroFeeSuffix: r.IntroFeeSuffix, BlockTexts: r.BlockTexts, BlockLink: r.BlockLink, BlockUsername: r.BlockUsername, BlockPlainText: r.BlockPlainText, HeaderEnabled: r.HeaderEnabled, HeaderMarkdown: r.HeaderMarkdown, FooterEnabled: r.FooterEnabled, FooterMarkdown: r.FooterMarkdown, Sort: r.Sort, Status: r.Status}
 	values := splitCollectBotValues(text)
 	switch payload.Field {
