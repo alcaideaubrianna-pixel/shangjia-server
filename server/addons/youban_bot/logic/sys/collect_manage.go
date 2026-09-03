@@ -313,7 +313,7 @@ func (s *sSysBot) showCollectRuleField(ctx context.Context, botId int64, chatId 
 	if display == "" {
 		display = "未配置"
 	}
-	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, "当前配置：\n<blockquote>"+html.EscapeString(display)+"</blockquote>", "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, fmt.Sprintf("规则：%s\n配置项：%s\n\n当前配置：\n<blockquote>%s</blockquote>", html.EscapeString(r.Name), collectRuleFieldLabel(field), html.EscapeString(display)), "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
 	return err
 }
 
@@ -330,11 +330,27 @@ func collectRuleFieldDisplay(r *publishsysin.CollectRuleModel, field string) str
 	case "replace":
 		p := make([]string, 0, len(r.Replacements))
 		for _, v := range r.Replacements {
-			p = append(p, v.From+"=>"+v.To)
+			p = append(p, v.From+">"+v.To)
 		}
 		return strings.Join(p, ",")
 	}
 	return ""
+}
+
+func collectRuleFieldLabel(field string) string {
+	switch field {
+	case "delete_line":
+		return "删除整行"
+	case "delete_text":
+		return "删除文本"
+	case "replace":
+		return "文本替换"
+	case "header":
+		return "前置文案"
+	case "footer":
+		return "后置文案"
+	}
+	return "配置"
 }
 
 func (s *sSysBot) startCollectRuleEdit(ctx context.Context, botId int64, chatId string, account *botProfileAccount, ruleID int64, field string) error {
@@ -351,7 +367,7 @@ func (s *sSysBot) startCollectRuleEdit(ctx context.Context, botId int64, chatId 
 	case "replace":
 		pairs := make([]string, 0, len(r.Replacements))
 		for _, item := range r.Replacements {
-			pairs = append(pairs, item.From+"=>"+item.To)
+			pairs = append(pairs, item.From+">"+item.To)
 		}
 		value = strings.Join(pairs, ",")
 	case "header":
@@ -359,7 +375,11 @@ func (s *sSysBot) startCollectRuleEdit(ctx context.Context, botId int64, chatId 
 	case "footer":
 		value = r.FooterMarkdown
 	}
-	prompt := fmt.Sprintf("当前配置：%s\n\n请发送新配置，多个内容使用逗号分隔。\n例如：亚朵,卖家,联系方式\n\n发送 /cancel 取消。", value)
+	example := "亚朵,卖家,联系方式"
+	if field == "replace" {
+		example = "原文>替换,原文A>替换B"
+	}
+	prompt := fmt.Sprintf("规则：%s\n配置项：%s\n\n当前配置：%s\n\n请发送新配置，多个内容使用逗号分隔。\n例如：%s\n\n发送 /cancel 取消。", r.Name, collectRuleFieldLabel(field), value, example)
 	return s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_rule_edit", field, ruleID, "", map[string]interface{}{"field": field}, prompt)
 }
 
@@ -383,7 +403,7 @@ func (s *sSysBot) handleCollectRuleEditSession(ctx context.Context, botId int64,
 		if err != nil {
 			return err
 		}
-		_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, fmt.Sprintf("修改后的配置：%s\n\n确认保存吗？", text), "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
+		_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, fmt.Sprintf("规则：%s\n配置项：%s\n\n修改后的配置：%s\n\n确认保存吗？", r.Name, collectRuleFieldLabel(payload.Field), text), "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
 		return err
 	}
 	in := &publishsysin.CollectRuleSaveInp{Id: r.Id, Name: r.Name, GlobalEnabled: r.GlobalEnabled, TargetChannelIds: r.TargetChannelIds, ReviewEnabled: r.ReviewEnabled, DedupeEnabled: r.DedupeEnabled, DedupeDays: r.DedupeDays, FullMatchEnabled: r.FullMatchEnabled, Keywords: r.Keywords, Tags: r.Tags, Replacements: r.Replacements, DeleteLineTexts: r.DeleteLineTexts, DeleteTexts: r.DeleteTexts, TruncateIntroFeeEnabled: r.TruncateIntroFeeEnabled, IntroFeeSuffixEnabled: r.IntroFeeSuffixEnabled, IntroFeeSuffix: r.IntroFeeSuffix, BlockTexts: r.BlockTexts, BlockLink: r.BlockLink, BlockUsername: r.BlockUsername, BlockPlainText: r.BlockPlainText, HeaderEnabled: r.HeaderEnabled, HeaderMarkdown: r.HeaderMarkdown, FooterEnabled: r.FooterEnabled, FooterMarkdown: r.FooterMarkdown, Sort: r.Sort, Status: r.Status}
@@ -402,10 +422,11 @@ func (s *sSysBot) handleCollectRuleEditSession(ctx context.Context, botId int64,
 	case "replace":
 		in.Replacements = nil
 		for _, item := range values {
-			p := strings.SplitN(item, "=>", 2)
-			if len(p) == 2 && strings.TrimSpace(p[0]) != "" {
-				in.Replacements = append(in.Replacements, publishsysin.CollectRuleReplaceModel{From: strings.TrimSpace(p[0]), To: strings.TrimSpace(p[1])})
+			p := strings.SplitN(item, ">", 2)
+			if len(p) != 2 || strings.TrimSpace(p[0]) == "" {
+				return s.sendCollectManageNotice(ctx, botId, chatId, "替换格式不正确，请使用：原文>替换,原文A>替换B")
 			}
+			in.Replacements = append(in.Replacements, publishsysin.CollectRuleReplaceModel{From: strings.TrimSpace(p[0]), To: strings.TrimSpace(p[1])})
 		}
 	}
 	if _, err = publishService.SysPublish().BotCollectRuleSave(ctx, in, account.TenantId, account.AccountId); err != nil {
