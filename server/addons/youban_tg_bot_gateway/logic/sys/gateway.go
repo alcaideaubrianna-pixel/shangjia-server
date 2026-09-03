@@ -337,6 +337,10 @@ func (s *sGateway) Webhook(ctx context.Context, key string, body []byte, secret 
 }
 
 func (s *sGateway) submitUpdate(ctx context.Context, key string, update *models.Update) error {
+	if update != nil && update.CallbackQuery != nil {
+		query := update.CallbackQuery
+		g.Log().Infof(ctx, "TG链路 gateway_callback_received updateId:%d callbackId:%s userId:%d data:%s", update.ID, query.ID, query.From.ID, strings.TrimSpace(query.Data))
+	}
 	if updateNeedsImmediateDispatch(update) {
 		return s.dispatch(ctx, key, update)
 	}
@@ -344,7 +348,7 @@ func (s *sGateway) submitUpdate(ctx context.Context, key string, update *models.
 }
 
 func updateNeedsImmediateDispatch(update *models.Update) bool {
-	return update != nil && update.InlineQuery != nil
+	return update != nil && (update.InlineQuery != nil || update.CallbackQuery != nil)
 }
 
 func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Update) error {
@@ -353,6 +357,13 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 		g.Log().Infof(ctx, "TG链路 gateway_inline_dispatch_start key:%s updateId:%d queryId:%s", key, update.ID, update.InlineQuery.ID)
 		defer func() {
 			g.Log().Infof(ctx, "TG链路 gateway_inline_dispatch_end key:%s updateId:%d queryId:%s duration:%s", key, update.ID, update.InlineQuery.ID, time.Since(dispatchStartedAt))
+		}()
+	}
+	if update != nil && update.CallbackQuery != nil {
+		query := update.CallbackQuery
+		g.Log().Infof(ctx, "TG链路 gateway_callback_dispatch_start key:%s updateId:%d callbackId:%s userId:%d data:%s", key, update.ID, query.ID, query.From.ID, strings.TrimSpace(query.Data))
+		defer func() {
+			g.Log().Infof(ctx, "TG链路 gateway_callback_dispatch_end key:%s updateId:%d callbackId:%s duration:%s", key, update.ID, query.ID, time.Since(dispatchStartedAt))
 		}()
 	}
 	s.mu.Lock()
@@ -375,6 +386,9 @@ func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Upda
 		if len(bindings) == 0 {
 			g.Log().Warningf(ctx, "TG链路 gateway_inline_no_binding key:%s updateId:%d queryId:%s", key, update.ID, update.InlineQuery.ID)
 		}
+	}
+	if update != nil && update.CallbackQuery != nil && len(bindings) == 0 {
+		g.Log().Warningf(ctx, "TG链路 gateway_callback_no_binding key:%s updateId:%d callbackId:%s userId:%d data:%s", key, update.ID, update.CallbackQuery.ID, update.CallbackQuery.From.ID, strings.TrimSpace(update.CallbackQuery.Data))
 	}
 	logGatewayUpdate(ctx, update, len(bindings))
 	botCtx := service.BotContext{Key: key, Bindings: bindings}

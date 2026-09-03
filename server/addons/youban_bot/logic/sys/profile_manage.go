@@ -312,6 +312,12 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 	_, _ = bot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 	msg := query.Message.Message
 	if msg == nil {
+		g.Log().Warning(ctx, "Bot资料Callback消息上下文不可用", g.Map{
+			"botId":           botId,
+			"telegramUserId":  query.From.ID,
+			"callbackQueryId": query.ID,
+			"data":            strings.TrimSpace(query.Data),
+		})
 		return true, nil
 	}
 	chatId := fmt.Sprintf("%d", msg.Chat.ID)

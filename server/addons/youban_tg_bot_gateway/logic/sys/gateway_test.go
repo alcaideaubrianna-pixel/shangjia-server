@@ -49,6 +49,9 @@ func TestUpdateNeedsImmediateDispatch(t *testing.T) {
 	if !updateNeedsImmediateDispatch(&models.Update{InlineQuery: &models.InlineQuery{ID: "inline-query"}}) {
 		t.Fatal("inline query must bypass the asynchronous update queue")
 	}
+	if !updateNeedsImmediateDispatch(&models.Update{CallbackQuery: &models.CallbackQuery{ID: "callback-query"}}) {
+		t.Fatal("callback query must bypass the asynchronous update queue")
+	}
 	if updateNeedsImmediateDispatch(&models.Update{Message: &models.Message{ID: 1}}) {
 		t.Fatal("ordinary message should continue through the asynchronous update queue")
 	}
