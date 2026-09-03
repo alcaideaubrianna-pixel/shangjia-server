@@ -275,6 +275,7 @@ func (s *sSysBot) showCollectRuleEditor(ctx context.Context, botId int64, chatId
 		{{Text: fmt.Sprintf("删除文本（%d条）", len(r.DeleteTexts)), CallbackData: fmt.Sprintf("cm:edit:%d:delete_text", ruleID)}},
 		{{Text: fmt.Sprintf("文本替换（%d条）", len(r.Replacements)), CallbackData: fmt.Sprintf("cm:edit:%d:replace", ruleID)}},
 		{{Text: "费用清理 · " + onOff(r.TruncateIntroFeeEnabled), CallbackData: fmt.Sprintf("cm:ruleswitch:%d:fee", ruleID)}},
+		{{Text: "介绍费后缀 · " + onOff(r.IntroFeeSuffixEnabled), CallbackData: fmt.Sprintf("cm:edit:%d:intro_suffix", ruleID)}},
 		{{Text: "前置文案 · " + onOff(r.HeaderEnabled), CallbackData: fmt.Sprintf("cm:edit:%d:header", ruleID)}},
 		{{Text: "后置文案 · " + onOff(r.FooterEnabled), CallbackData: fmt.Sprintf("cm:edit:%d:footer", ruleID)}},
 		{{Text: "返回采集配置", CallbackData: "cm:list:1"}},
@@ -327,6 +328,8 @@ func collectRuleFieldDisplay(r *publishsysin.CollectRuleModel, field string) str
 		return r.HeaderMarkdown
 	case "footer":
 		return r.FooterMarkdown
+	case "intro_suffix":
+		return r.IntroFeeSuffix
 	case "replace":
 		p := make([]string, 0, len(r.Replacements))
 		for _, v := range r.Replacements {
@@ -349,6 +352,8 @@ func collectRuleFieldLabel(field string) string {
 		return "前置文案"
 	case "footer":
 		return "后置文案"
+	case "intro_suffix":
+		return "介绍费后缀"
 	}
 	return "配置"
 }
@@ -374,12 +379,14 @@ func (s *sSysBot) startCollectRuleEdit(ctx context.Context, botId int64, chatId 
 		value = r.HeaderMarkdown
 	case "footer":
 		value = r.FooterMarkdown
+	case "intro_suffix":
+		value = r.IntroFeeSuffix
 	}
 	example := "亚朵,卖家,联系方式"
 	if field == "replace" {
 		example = "原文>替换,原文A>替换B"
 	}
-	prompt := fmt.Sprintf("规则：%s\n配置项：%s\n\n当前配置：%s\n\n请发送新配置，多个内容使用逗号分隔。\n例如：%s\n\n发送 /cancel 取消。", r.Name, collectRuleFieldLabel(field), value, example)
+	prompt := fmt.Sprintf("规则：%s\n配置项：%s\n\n当前配置：\n<blockquote>%s</blockquote>\n\n请发送新配置，多个内容使用逗号分隔。\n例如：%s\n\n发送 /cancel 取消。", html.EscapeString(r.Name), html.EscapeString(collectRuleFieldLabel(field)), html.EscapeString(value), html.EscapeString(example))
 	return s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_rule_edit", field, ruleID, "", map[string]interface{}{"field": field}, prompt)
 }
 
@@ -403,7 +410,7 @@ func (s *sSysBot) handleCollectRuleEditSession(ctx context.Context, botId int64,
 		if err != nil {
 			return err
 		}
-		_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, fmt.Sprintf("规则：%s\n配置项：%s\n\n修改后的配置：%s\n\n确认保存吗？", r.Name, collectRuleFieldLabel(payload.Field), text), "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
+		_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, fmt.Sprintf("规则：%s\n配置项：%s\n\n修改后的配置：\n<blockquote>%s</blockquote>\n\n确认保存吗？", html.EscapeString(r.Name), html.EscapeString(collectRuleFieldLabel(payload.Field)), html.EscapeString(text)), "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
 		return err
 	}
 	in := &publishsysin.CollectRuleSaveInp{Id: r.Id, Name: r.Name, GlobalEnabled: r.GlobalEnabled, TargetChannelIds: r.TargetChannelIds, ReviewEnabled: r.ReviewEnabled, DedupeEnabled: r.DedupeEnabled, DedupeDays: r.DedupeDays, FullMatchEnabled: r.FullMatchEnabled, Keywords: r.Keywords, Tags: r.Tags, Replacements: r.Replacements, DeleteLineTexts: r.DeleteLineTexts, DeleteTexts: r.DeleteTexts, TruncateIntroFeeEnabled: r.TruncateIntroFeeEnabled, IntroFeeSuffixEnabled: r.IntroFeeSuffixEnabled, IntroFeeSuffix: r.IntroFeeSuffix, BlockTexts: r.BlockTexts, BlockLink: r.BlockLink, BlockUsername: r.BlockUsername, BlockPlainText: r.BlockPlainText, HeaderEnabled: r.HeaderEnabled, HeaderMarkdown: r.HeaderMarkdown, FooterEnabled: r.FooterEnabled, FooterMarkdown: r.FooterMarkdown, Sort: r.Sort, Status: r.Status}
@@ -419,6 +426,9 @@ func (s *sSysBot) handleCollectRuleEditSession(ctx context.Context, botId int64,
 	case "footer":
 		in.FooterEnabled = 1
 		in.FooterMarkdown = text
+	case "intro_suffix":
+		in.IntroFeeSuffixEnabled = 1
+		in.IntroFeeSuffix = strings.TrimSpace(text)
 	case "replace":
 		in.Replacements = nil
 		for _, item := range values {
