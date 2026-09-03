@@ -60,6 +60,18 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		}
 		sourceID, _ := strconv.ParseInt(parts[2], 10, 64)
 		return true, s.showCollectSourceConfig(ctx, botId, chatId, account, sourceID)
+	case "rule":
+		if account.AccountType != "admin" || len(parts) < 3 {
+			return true, nil
+		}
+		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
+		return true, s.showCollectRuleEditor(ctx, botId, chatId, account, ruleID)
+	case "ruleswitch":
+		if account.AccountType != "admin" || len(parts) < 4 {
+			return true, nil
+		}
+		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
+		return true, s.toggleCollectRuleField(ctx, botId, chatId, account, ruleID, parts[3])
 	case "toggle":
 		if len(parts) < 3 {
 			return true, nil
@@ -195,12 +207,68 @@ func (s *sSysBot) showCollectSourceConfig(ctx context.Context, botId int64, chat
 		}
 	}
 	text := fmt.Sprintf("采集配置：%s\n规则数量：%d", src.Title, len(src.RuleIds))
+	buttons := make([][]models.InlineKeyboardButton, 0, len(src.RuleIds)+1)
 	for _, rid := range src.RuleIds {
 		rule, err := publishService.SysPublish().BotCollectRuleView(ctx, rid, account.TenantId, account.AccountId)
 		if err != nil || rule == nil {
 			continue
 		}
 		text += fmt.Sprintf("\n\n规则：%s\n删除整行：%d 条\n删除文本：%d 条\n替换：%d 条\n费用清理：%s\n前置文案：%s\n后置文案：%s", rule.Name, len(rule.DeleteLineTexts), len(rule.DeleteTexts), len(rule.Replacements), map[bool]string{true: "开启", false: "关闭"}[rule.TruncateIntroFeeEnabled == 1], map[bool]string{true: "开启", false: "关闭"}[rule.HeaderEnabled == 1], map[bool]string{true: "开启", false: "关闭"}[rule.FooterEnabled == 1])
+		buttons = append(buttons, []models.InlineKeyboardButton{{Text: "编辑 · " + rule.Name, CallbackData: fmt.Sprintf("cm:rule:%d", rule.Id)}})
 	}
-	return s.sendCollectManageNotice(ctx, botId, chatId, text)
+	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "返回采集源", CallbackData: fmt.Sprintf("cm:view:%d", sourceID)}})
+	row, err := s.botById(ctx, botId)
+	if err != nil {
+		return err
+	}
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
+	return err
+}
+
+func (s *sSysBot) showCollectRuleEditor(ctx context.Context, botId int64, chatId string, account *botProfileAccount, ruleID int64) error {
+	r, err := publishService.SysPublish().BotCollectRuleView(ctx, ruleID, account.TenantId, account.AccountId)
+	if err != nil {
+		return err
+	}
+	text := fmt.Sprintf("规则：%s\n\n删除整行：%d 条\n删除文本：%d 条\n替换：%d 条\n费用清理：%s\n前置文案：%s\n后置文案：%s", r.Name, len(r.DeleteLineTexts), len(r.DeleteTexts), len(r.Replacements), onOff(r.TruncateIntroFeeEnabled), onOff(r.HeaderEnabled), onOff(r.FooterEnabled))
+	buttons := [][]models.InlineKeyboardButton{
+		{{Text: "费用清理 · " + onOff(r.TruncateIntroFeeEnabled), CallbackData: fmt.Sprintf("cm:ruleswitch:%d:fee", ruleID)}},
+		{{Text: "前置文案 · " + onOff(r.HeaderEnabled), CallbackData: fmt.Sprintf("cm:ruleswitch:%d:header", ruleID)}},
+		{{Text: "后置文案 · " + onOff(r.FooterEnabled), CallbackData: fmt.Sprintf("cm:ruleswitch:%d:footer", ruleID)}},
+	}
+	row, err := s.botById(ctx, botId)
+	if err != nil {
+		return err
+	}
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
+	return err
+}
+
+func onOff(v int) string {
+	if v == 1 {
+		return "开启"
+	}
+	return "关闭"
+}
+
+func (s *sSysBot) toggleCollectRuleField(ctx context.Context, botId int64, chatId string, account *botProfileAccount, ruleID int64, field string) error {
+	r, err := publishService.SysPublish().BotCollectRuleView(ctx, ruleID, account.TenantId, account.AccountId)
+	if err != nil {
+		return err
+	}
+	in := &publishsysin.CollectRuleSaveInp{Id: r.Id, Name: r.Name, GlobalEnabled: r.GlobalEnabled, TargetChannelIds: r.TargetChannelIds, ReviewEnabled: r.ReviewEnabled, DedupeEnabled: r.DedupeEnabled, DedupeDays: r.DedupeDays, FullMatchEnabled: r.FullMatchEnabled, Keywords: r.Keywords, Tags: r.Tags, Replacements: r.Replacements, DeleteLineTexts: r.DeleteLineTexts, DeleteTexts: r.DeleteTexts, TruncateIntroFeeEnabled: r.TruncateIntroFeeEnabled, IntroFeeSuffixEnabled: r.IntroFeeSuffixEnabled, IntroFeeSuffix: r.IntroFeeSuffix, BlockTexts: r.BlockTexts, BlockLink: r.BlockLink, BlockUsername: r.BlockUsername, BlockPlainText: r.BlockPlainText, HeaderEnabled: r.HeaderEnabled, HeaderMarkdown: r.HeaderMarkdown, FooterEnabled: r.FooterEnabled, FooterMarkdown: r.FooterMarkdown, Sort: r.Sort, Status: r.Status}
+	switch field {
+	case "fee":
+		in.TruncateIntroFeeEnabled = 1 - in.TruncateIntroFeeEnabled
+	case "header":
+		in.HeaderEnabled = 1 - in.HeaderEnabled
+	case "footer":
+		in.FooterEnabled = 1 - in.FooterEnabled
+	default:
+		return nil
+	}
+	if _, err = publishService.SysPublish().BotCollectRuleSave(ctx, in, account.TenantId, account.AccountId); err != nil {
+		return err
+	}
+	return s.showCollectRuleEditor(ctx, botId, chatId, account, ruleID)
 }
