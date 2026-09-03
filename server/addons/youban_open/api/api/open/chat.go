@@ -109,6 +109,14 @@ type ChatAdminRotateBotBindingCodeReq struct {
 	Id     int64 `json:"id"`
 }
 type ChatAdminRotateBotBindingCodeRes struct{}
+type ChatAdminCheckBotReq struct {
+	g.Meta `path:"/open/v1/chat/admin/bots/{id}/check" method:"post" tags:"开放聊天管理" summary:"检测租户Bot能力"`
+	Id     int64  `json:"id"`
+	Action string `json:"action" d:"all"`
+}
+type ChatAdminCheckBotRes struct {
+	*chatsysin.ExternalAdminBotCheckModel
+}
 type ChatAdminConversationsReq struct {
 	g.Meta   `path:"/open/v1/chat/admin/conversations" method:"get" tags:"开放聊天管理" summary:"租户会话列表"`
 	Page     int `json:"page"`

@@ -102,6 +102,23 @@ type ExternalAdminBotActionInp struct {
 	AppId string `json:"-"`
 	Id    int64  `json:"id" v:"required|min:1#Bot ID不能为空|Bot ID不能为空"`
 }
+type ExternalAdminBotCheckInp struct {
+	ExternalAdminBotActionInp
+	Action string `json:"action"`
+}
+type ExternalAdminBotCheckItem struct {
+	Action  string `json:"action"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+type ExternalAdminBotCheckModel struct {
+	BotId       int64                        `json:"botId"`
+	BotName     string                       `json:"botName"`
+	BotUsername string                       `json:"botUsername"`
+	TgChatId    string                       `json:"tgChatId"`
+	TgChatTitle string                       `json:"tgChatTitle"`
+	Results     []*ExternalAdminBotCheckItem `json:"results"`
+}
 type ExternalAdminConversationInp struct {
 	AppId          string `json:"-"`
 	ConversationId int64  `json:"conversationId"`

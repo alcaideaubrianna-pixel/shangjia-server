@@ -176,6 +176,62 @@ func (s *sSysChat) ExternalAdminRotateBotBindingCode(ctx context.Context, in *sy
 	return gerror.Wrap(err, "生成Bot绑定码失败")
 }
 
+func (s *sSysChat) ExternalAdminCheckBot(ctx context.Context, in *sysin.ExternalAdminBotCheckInp) (*sysin.ExternalAdminBotCheckModel, error) {
+	if in == nil {
+		return nil, gerror.New("Bot ID无效")
+	}
+	row, err := s.externalAdminBot(ctx, in.AppId, in.Id)
+	if err != nil {
+		return nil, err
+	}
+	action := strings.ToLower(strings.TrimSpace(in.Action))
+	if action == "" {
+		action = "all"
+	}
+	if action != "all" && action != "token" && action != "binding" && action != "send" {
+		return nil, gerror.New("检测 action 仅支持 all、token、binding、send")
+	}
+	result := &sysin.ExternalAdminBotCheckModel{BotId: row.Id, BotName: row.BotName, BotUsername: row.BotUsername, Results: []*sysin.ExternalAdminBotCheckItem{}}
+	add := func(name string, ok bool, message string) {
+		result.Results = append(result.Results, &sysin.ExternalAdminBotCheckItem{Action: name, Success: ok, Message: message})
+	}
+	if action == "all" || action == "token" {
+		profile, probeErr := s.telegramBotProfile(ctx, row.BotToken)
+		if probeErr != nil {
+			add("token", false, probeErr.Error())
+		} else {
+			result.BotName, result.BotUsername = telegramBotDisplayName(profile), strings.TrimPrefix(profile.Username, "@")
+			add("token", true, "Token有效，Telegram API连接正常")
+		}
+	}
+	var binding *chatBindingRow
+	err = g.DB().Model(chatBindingTable).Ctx(ctx).Where("app_id", in.AppId).Where("bot_id", row.Id).WhereNull("deleted_at").OrderDesc("id").Scan(&binding)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取Bot群聊绑定失败")
+	}
+	bound := binding != nil && strings.TrimSpace(binding.TgChatId) != ""
+	if bound {
+		result.TgChatId, result.TgChatTitle = binding.TgChatId, binding.TgChatTitle
+	}
+	if action == "all" || action == "binding" {
+		if bound {
+			add("binding", true, "群聊已绑定")
+		} else {
+			add("binding", false, "群聊尚未绑定")
+		}
+	}
+	if action == "send" {
+		if !bound {
+			add("send", false, "群聊尚未绑定")
+		} else if _, sendErr := s.telegramSendMessage(ctx, row.BotToken, binding.TgChatId, 0, "XC-CMS Bot 连通性检测成功"); sendErr != nil {
+			add("send", false, sendErr.Error())
+		} else {
+			add("send", true, "测试消息发送成功")
+		}
+	}
+	return result, nil
+}
+
 func (s *sSysChat) externalAdminConversation(ctx context.Context, appId string, id int64) (*chatConversationRow, error) {
 	var row *chatConversationRow
 	err := g.DB().Model(chatConversationTable+" c").Ctx(ctx).InnerJoin(externalVisitorTable+" v", "c.member_id=-v.id").Where("v.app_id", strings.TrimSpace(appId)).Where("c.id", id).WhereNull("c.deleted_at").Fields("c.*").Scan(&row)

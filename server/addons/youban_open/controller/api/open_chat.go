@@ -105,6 +105,13 @@ func (c *cOpenChat) AdminRotateBotBindingCode(ctx context.Context, req *open.Cha
 	err := chatservice.SysChat().ExternalAdminRotateBotBindingCode(ctx, &sysin.ExternalAdminBotActionInp{AppId: opencontext.AppId(ctx), Id: req.Id})
 	return &open.ChatAdminRotateBotBindingCodeRes{}, err
 }
+func (c *cOpenChat) AdminCheckBot(ctx context.Context, req *open.ChatAdminCheckBotReq) (*open.ChatAdminCheckBotRes, error) {
+	data, err := chatservice.SysChat().ExternalAdminCheckBot(ctx, &sysin.ExternalAdminBotCheckInp{
+		ExternalAdminBotActionInp: sysin.ExternalAdminBotActionInp{AppId: opencontext.AppId(ctx), Id: req.Id},
+		Action:                    req.Action,
+	})
+	return &open.ChatAdminCheckBotRes{ExternalAdminBotCheckModel: data}, err
+}
 func (c *cOpenChat) AdminConversations(ctx context.Context, req *open.ChatAdminConversationsReq) (*open.ChatAdminConversationsRes, error) {
 	data, err := chatservice.SysChat().ExternalAdminConversations(ctx, &sysin.ExternalAdminConversationInp{AppId: opencontext.AppId(ctx), Page: req.Page, PerPage: req.PageSize})
 	return &open.ChatAdminConversationsRes{ExternalAdminConversationListModel: data}, err
