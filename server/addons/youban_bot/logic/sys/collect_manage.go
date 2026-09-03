@@ -18,10 +18,8 @@ func (s *sSysBot) collectManageAllowed(ctx context.Context, account *botProfileA
 	if account == nil || account.AccountId <= 0 || account.TenantId <= 0 {
 		return false
 	}
-	count, err := g.DB().Model("hg_youban_publish_tenant_vip").Ctx(ctx).
-		Where("tenant_id", account.TenantId).Where("status", 1).Where("level", ">", 0).
-		Where("(expired_at IS NULL OR expired_at > ?)", gtime.Now()).WhereNull("deleted_at").Count()
-	return err == nil && count > 0
+	status, err := publishService.SysPublish().TenantVipStatus(ctx, account.TenantId)
+	return err == nil && status != nil && status.IsVip
 }
 
 // handleCollectManageCallback provides the BOT entry point for collection-source

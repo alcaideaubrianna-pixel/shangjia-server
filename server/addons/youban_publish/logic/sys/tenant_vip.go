@@ -416,6 +416,11 @@ func (s *sSysPublish) tenantVipStatus(ctx context.Context, tenantId int64) (*sys
 	return status, nil
 }
 
+// TenantVipStatus exposes the cached, canonical tenant VIP evaluation to addon integrations.
+func (s *sSysPublish) TenantVipStatus(ctx context.Context, tenantId int64) (*sysin.TenantVipStatusModel, error) {
+	return s.tenantVipStatus(ctx, tenantId)
+}
+
 func (s *sSysPublish) loadTenantVipStatus(ctx context.Context, tenantId int64) (*sysin.TenantVipStatusModel, error) {
 	cols := pdao.YoubanPublishTenantVip.Columns()
 	var vip *entity.YoubanPublishTenantVip
