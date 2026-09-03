@@ -271,17 +271,21 @@ func (s *sSysBot) startCollectRuleEdit(ctx context.Context, botId int64, chatId 
 	value := ""
 	switch field {
 	case "delete_line":
-		value = strings.Join(r.DeleteLineTexts, "\n")
+		value = strings.Join(r.DeleteLineTexts, ",")
 	case "delete_text":
-		value = strings.Join(r.DeleteTexts, "\n")
+		value = strings.Join(r.DeleteTexts, ",")
 	case "replace":
-		value = "请按 原文 => 替换文案 每行输入\n"
+		pairs := make([]string, 0, len(r.Replacements))
+		for _, item := range r.Replacements {
+			pairs = append(pairs, item.From+"=>"+item.To)
+		}
+		value = strings.Join(pairs, ",")
 	case "header":
 		value = r.HeaderMarkdown
 	case "footer":
 		value = r.FooterMarkdown
 	}
-	prompt := fmt.Sprintf("当前配置：\n%s\n\n请发送新内容；发送 /cancel 取消。", value)
+	prompt := fmt.Sprintf("当前配置：%s\n\n请使用逗号分隔输入新内容，提交后将覆盖旧配置。发送 /cancel 取消。", value)
 	return s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_rule_edit", field, ruleID, "", map[string]interface{}{"field": field}, prompt)
 }
 
@@ -308,7 +312,13 @@ func (s *sSysBot) handleCollectRuleEditSession(ctx context.Context, botId int64,
 		in.FooterEnabled = 1
 		in.FooterMarkdown = text
 	case "replace":
-		return s.sendCollectManageNotice(ctx, botId, chatId, "替换规则请使用后台配置，BOT暂不支持复杂替换格式。")
+		in.Replacements = nil
+		for _, item := range values {
+			p := strings.SplitN(item, "=>", 2)
+			if len(p) == 2 && strings.TrimSpace(p[0]) != "" {
+				in.Replacements = append(in.Replacements, publishsysin.CollectRuleReplaceModel{From: strings.TrimSpace(p[0]), To: strings.TrimSpace(p[1])})
+			}
+		}
 	}
 	if _, err = publishService.SysPublish().BotCollectRuleSave(ctx, in, account.TenantId, account.AccountId); err != nil {
 		return err
