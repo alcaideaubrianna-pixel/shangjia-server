@@ -83,3 +83,12 @@ func TestTelegramJobReconcilePurpose(t *testing.T) {
 		t.Fatalf("display phase purpose = %q", purpose)
 	}
 }
+
+func TestTelegramIncompleteReconcileNeverFallsBackToResend(t *testing.T) {
+	if telegramIncompleteReconcileShouldStop(telegramJobRecord{}) {
+		t.Fatal("first partial reconciliation must wait for channel history")
+	}
+	if !telegramIncompleteReconcileShouldStop(telegramJobRecord{ReconcileCount: telegramUnknownReconcileMaxCount - 1}) {
+		t.Fatal("repeated partial reconciliation must stop instead of resending")
+	}
+}

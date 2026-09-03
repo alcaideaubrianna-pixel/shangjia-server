@@ -222,22 +222,37 @@ func (s *sSysPublish) telegramJobPhaseExpectedMessageCount(ctx context.Context, 
 }
 
 func (s *sSysPublish) recoverIncompleteTelegramJobPhase(ctx context.Context, job telegramJobRecord, purpose string, foundCount, expectedCount int) error {
-	message := fmt.Sprintf("TG%s资料仅对账到%d/%d条消息，清理不完整消息后重新发送", purpose, foundCount, expectedCount)
-	if err := s.deleteTelegramMessagePurposeSetLockedByChannel(ctx, job, purpose, message); err != nil {
-		return s.postponeUnknownTelegramJob(ctx, job, err)
+	count := job.ReconcileCount + 1
+	message := fmt.Sprintf("TG%s资料仅对账到%d/%d条消息", purpose, foundCount, expectedCount)
+	data := g.Map{
+		"dispatch_status": tgDispatchStatusIdle,
+		"reconcile_count": count,
+		"error_message":   message,
+		"updated_at":      gtime.Now(),
 	}
-	phase := ""
-	if purpose == "verify" {
-		phase = telegramSendPhaseDisplayConfirmed
+	logStatus := "partial_wait"
+	if !telegramIncompleteReconcileShouldStop(job) {
+		data["status"] = "unknown"
+		data["next_retry_at"] = gtime.Now().Add(telegramUnknownReconcileDelay)
+		message += "，等待频道历史完整后再次对账"
+		data["error_message"] = message
+	} else {
+		data["status"] = "failed"
+		data["dispatch_status"] = tgDispatchStatusDone
+		data["next_retry_at"] = nil
+		message += "，为避免重复推送已停止自动重发，请人工检查并清理频道残留消息"
+		data["error_message"] = message
+		logStatus = "partial_stopped"
 	}
-	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(g.Map{
-		"status": "failed_retry", "send_phase": phase, "dispatch_status": tgDispatchStatusIdle,
-		"next_retry_at": gtime.Now(), "error_message": message, "reconcile_count": 0, "updated_at": gtime.Now(),
-	}).Update()
+	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(data).Update()
 	if err == nil {
-		s.appendTelegramJobLog(ctx, job, "reconcile", "partial", message)
+		s.appendTelegramJobLog(ctx, job, "reconcile", logStatus, message)
 	}
 	return err
+}
+
+func telegramIncompleteReconcileShouldStop(job telegramJobRecord) bool {
+	return job.ReconcileCount+1 >= telegramUnknownReconcileMaxCount
 }
 
 func (s *sSysPublish) claimUnknownTelegramJob(ctx context.Context, jobId int64) (bool, error) {
