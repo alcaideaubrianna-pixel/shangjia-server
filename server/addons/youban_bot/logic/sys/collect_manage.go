@@ -235,6 +235,8 @@ func (s *sSysBot) showCollectRuleEditor(ctx context.Context, botId int64, chatId
 		{{Text: "费用清理 · " + onOff(r.TruncateIntroFeeEnabled), CallbackData: fmt.Sprintf("cm:ruleswitch:%d:fee", ruleID)}},
 		{{Text: "前置文案 · " + onOff(r.HeaderEnabled), CallbackData: fmt.Sprintf("cm:ruleswitch:%d:header", ruleID)}},
 		{{Text: "后置文案 · " + onOff(r.FooterEnabled), CallbackData: fmt.Sprintf("cm:ruleswitch:%d:footer", ruleID)}},
+		{{Text: "返回采集配置", CallbackData: "cm:list:1"}},
+		{{Text: "返回资料管理", CallbackData: "cm:back"}},
 	}
 	row, err := s.botById(ctx, botId)
 	if err != nil {
