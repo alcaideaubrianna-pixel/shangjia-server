@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"strconv"
 	"strings"
 
@@ -308,7 +309,11 @@ func (s *sSysBot) showCollectRuleField(ctx context.Context, botId int64, chatId 
 	if err != nil {
 		return err
 	}
-	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, "当前配置："+value, "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
+	display := strings.Join(splitCollectBotValues(value), ",")
+	if display == "" {
+		display = "未配置"
+	}
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, "当前配置：\n<blockquote>"+html.EscapeString(display)+"</blockquote>", "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
 	return err
 }
 
