@@ -108,6 +108,7 @@ type TelegramReactionInp struct {
 type TelegramMessageInp struct {
 	MessageId       int64                `json:"message_id"`
 	MessageThreadId int64                `json:"message_thread_id"`
+	MediaGroupId    string               `json:"media_group_id"`
 	Text            string               `json:"text"`
 	Caption         string               `json:"caption"`
 	Chat            *TelegramChatInp     `json:"chat"`

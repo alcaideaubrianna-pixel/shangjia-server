@@ -578,6 +578,9 @@ func (s *sSysChat) TelegramWebhook(ctx context.Context, in *sysin.TelegramWebhoo
 	}
 	operatorName := telegramUserName(msg.From)
 	messageId := fmt.Sprintf("telegram_%d_%d", msg.Chat.Id, msg.MessageId)
+	if strings.TrimSpace(msg.MediaGroupId) != "" {
+		messageId = fmt.Sprintf("telegram_group_%d_%s", msg.Chat.Id, msg.MediaGroupId)
+	}
 	attachments, err := s.telegramMessageAttachments(ctx, row, msg)
 	if err != nil {
 		g.Log().Errorf(ctx, "Telegram客服媒体处理失败 kind:%s chat:%d topic:%d message:%d photo:%d video:%t document:%t sticker:%t animation:%t err:%+v", updateKind, msg.Chat.Id, msg.MessageThreadId, msg.MessageId, len(msg.Photo), msg.Video != nil, msg.Document != nil, msg.Sticker != nil, msg.Animation != nil, err)
@@ -2536,6 +2539,7 @@ func telegramSDKMessageToInp(msg *models.Message) *sysin.TelegramMessageInp {
 	return &sysin.TelegramMessageInp{
 		MessageId:       int64(msg.ID),
 		MessageThreadId: int64(msg.MessageThreadID),
+		MediaGroupId:    msg.MediaGroupID,
 		Text:            msg.Text,
 		Caption:         msg.Caption,
 		Chat:            telegramSDKChatToInp(&msg.Chat),
@@ -2702,9 +2706,22 @@ func (s *sSysChat) saveTelegramInboundMessage(ctx context.Context, row *chatConv
 	id, err = g.DB().Model(chatMessageTable).Ctx(ctx).Data(data).InsertAndGetId()
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "duplicate") || strings.Contains(strings.ToLower(err.Error()), "unique") {
-			value, valueErr := g.DB().Model(chatMessageTable).Ctx(ctx).Where("pocketping_message_id", externalMessageId).Fields("id").Value()
-			if valueErr == nil {
-				return value.Int64(), false, nil
+			var existing *chatMessageRow
+			valueErr := g.DB().Model(chatMessageTable).Ctx(ctx).Where("pocketping_message_id", externalMessageId).Scan(&existing)
+			if valueErr == nil && existing != nil {
+				if strings.TrimSpace(msg.MediaGroupId) == "" {
+					return existing.Id, false, nil
+				}
+				var grouped []*sysin.ChatMessageAttachmentModel
+				_ = json.Unmarshal([]byte(existing.AttachmentsJson), &grouped)
+				grouped = append(grouped, attachments...)
+				merged, _ := json.Marshal(grouped)
+				update := g.Map{"attachments_json": string(merged), "updated_at": gtime.Now()}
+				if strings.TrimSpace(content) != "" {
+					update["content"] = content
+				}
+				_, updateErr := g.DB().Model(chatMessageTable).Ctx(ctx).Where("id", existing.Id).Data(update).Update()
+				return existing.Id, updateErr == nil, updateErr
 			}
 		}
 		err = gerror.Wrap(err, "保存Telegram客服消息失败")
