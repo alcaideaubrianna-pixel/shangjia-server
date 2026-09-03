@@ -72,6 +72,12 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
 		return true, s.toggleCollectRuleField(ctx, botId, chatId, account, ruleID, parts[3])
+	case "edit":
+		if account.AccountType != "admin" || len(parts) < 4 {
+			return true, nil
+		}
+		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
+		return true, s.startCollectRuleEdit(ctx, botId, chatId, account, ruleID, parts[3])
 	case "toggle":
 		if len(parts) < 3 {
 			return true, nil
@@ -230,11 +236,14 @@ func (s *sSysBot) showCollectRuleEditor(ctx context.Context, botId int64, chatId
 	if err != nil {
 		return err
 	}
-	text := fmt.Sprintf("规则：%s\n\n删除整行：%d 条\n删除文本：%d 条\n替换：%d 条\n费用清理：%s\n前置文案：%s\n后置文案：%s", r.Name, len(r.DeleteLineTexts), len(r.DeleteTexts), len(r.Replacements), onOff(r.TruncateIntroFeeEnabled), onOff(r.HeaderEnabled), onOff(r.FooterEnabled))
+	text := fmt.Sprintf("规则：%s\n请选择要编辑的配置项：", r.Name)
 	buttons := [][]models.InlineKeyboardButton{
+		{{Text: fmt.Sprintf("删除整行（%d条）", len(r.DeleteLineTexts)), CallbackData: fmt.Sprintf("cm:edit:%d:delete_line", ruleID)}},
+		{{Text: fmt.Sprintf("删除文本（%d条）", len(r.DeleteTexts)), CallbackData: fmt.Sprintf("cm:edit:%d:delete_text", ruleID)}},
+		{{Text: fmt.Sprintf("文本替换（%d条）", len(r.Replacements)), CallbackData: fmt.Sprintf("cm:edit:%d:replace", ruleID)}},
 		{{Text: "费用清理 · " + onOff(r.TruncateIntroFeeEnabled), CallbackData: fmt.Sprintf("cm:ruleswitch:%d:fee", ruleID)}},
-		{{Text: "前置文案 · " + onOff(r.HeaderEnabled), CallbackData: fmt.Sprintf("cm:ruleswitch:%d:header", ruleID)}},
-		{{Text: "后置文案 · " + onOff(r.FooterEnabled), CallbackData: fmt.Sprintf("cm:ruleswitch:%d:footer", ruleID)}},
+		{{Text: "前置文案 · " + onOff(r.HeaderEnabled), CallbackData: fmt.Sprintf("cm:edit:%d:header", ruleID)}},
+		{{Text: "后置文案 · " + onOff(r.FooterEnabled), CallbackData: fmt.Sprintf("cm:edit:%d:footer", ruleID)}},
 		{{Text: "返回采集配置", CallbackData: "cm:list:1"}},
 		{{Text: "返回资料管理", CallbackData: "cm:back"}},
 	}
@@ -251,6 +260,28 @@ func onOff(v int) string {
 		return "开启"
 	}
 	return "关闭"
+}
+
+func (s *sSysBot) startCollectRuleEdit(ctx context.Context, botId int64, chatId string, account *botProfileAccount, ruleID int64, field string) error {
+	r, err := publishService.SysPublish().BotCollectRuleView(ctx, ruleID, account.TenantId, account.AccountId)
+	if err != nil {
+		return err
+	}
+	value := ""
+	switch field {
+	case "delete_line":
+		value = strings.Join(r.DeleteLineTexts, "\n")
+	case "delete_text":
+		value = strings.Join(r.DeleteTexts, "\n")
+	case "replace":
+		value = "请按 原文 => 替换文案 每行输入\n"
+	case "header":
+		value = r.HeaderMarkdown
+	case "footer":
+		value = r.FooterMarkdown
+	}
+	prompt := fmt.Sprintf("当前配置：\n%s\n\n请发送新内容；发送 /cancel 取消。", value)
+	return s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_rule_edit", field, ruleID, "", map[string]interface{}{"field": field}, prompt)
 }
 
 func (s *sSysBot) toggleCollectRuleField(ctx context.Context, botId int64, chatId string, account *botProfileAccount, ruleID int64, field string) error {
