@@ -174,6 +174,26 @@ func (s *sSysBot) showCollectSourceConfig(ctx context.Context, botId int64, chat
 	if err := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", sourceID).Where("tenant_id", account.TenantId).Where("account_id", account.AccountId).WhereNull("deleted_at").Scan(&src); err != nil {
 		return err
 	}
+	var bindings []struct {
+		RuleId int64 `json:"ruleId"`
+	}
+	if err := g.DB().Model("hg_youban_publish_collect_source_rule").Ctx(ctx).Where("source_id", sourceID).Where("tenant_id", account.TenantId).Where("status", 1).OrderAsc("sort").Scan(&bindings); err != nil {
+		return err
+	}
+	for _, b := range bindings {
+		src.RuleIds = append(src.RuleIds, b.RuleId)
+	}
+	if len(src.RuleIds) == 0 {
+		var global []struct {
+			Id int64 `json:"id"`
+		}
+		if err := g.DB().Model("hg_youban_publish_collect_rule").Ctx(ctx).Where("tenant_id", account.TenantId).Where("account_id", account.AccountId).Where("global_enabled", 1).Where("status", 1).WhereNull("deleted_at").OrderAsc("sort").Scan(&global); err != nil {
+			return err
+		}
+		for _, r := range global {
+			src.RuleIds = append(src.RuleIds, r.Id)
+		}
+	}
 	text := fmt.Sprintf("采集配置：%s\n规则数量：%d", src.Title, len(src.RuleIds))
 	for _, rid := range src.RuleIds {
 		rule, err := publishService.SysPublish().BotCollectRuleView(ctx, rid, account.TenantId, account.AccountId)
