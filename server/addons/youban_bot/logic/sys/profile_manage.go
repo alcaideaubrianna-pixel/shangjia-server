@@ -1824,6 +1824,8 @@ func (s *sSysBot) consumeProfileSessionText(ctx context.Context, botId int64, ms
 			return err
 		}
 		return s.completeProfileSession(ctx, session.Id)
+	case "collect_rule_edit":
+		return s.handleCollectRuleEditSession(ctx, botId, chatId, account, session, text)
 	case "cancel_queue":
 		_ = s.completeProfileSession(ctx, session.Id)
 		if strings.TrimSpace(text) == "全部" {

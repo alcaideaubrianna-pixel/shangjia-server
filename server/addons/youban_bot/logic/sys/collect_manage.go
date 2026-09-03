@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -282,6 +283,49 @@ func (s *sSysBot) startCollectRuleEdit(ctx context.Context, botId int64, chatId 
 	}
 	prompt := fmt.Sprintf("当前配置：\n%s\n\n请发送新内容；发送 /cancel 取消。", value)
 	return s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_rule_edit", field, ruleID, "", map[string]interface{}{"field": field}, prompt)
+}
+
+func (s *sSysBot) handleCollectRuleEditSession(ctx context.Context, botId int64, chatId string, account *botProfileAccount, session *profileSessionRow, text string) error {
+	r, err := publishService.SysPublish().BotCollectRuleView(ctx, session.ProfileId, account.TenantId, account.AccountId)
+	if err != nil {
+		return err
+	}
+	var payload struct {
+		Field string `json:"field"`
+	}
+	_ = json.Unmarshal([]byte(session.PayloadJson), &payload)
+	in := &publishsysin.CollectRuleSaveInp{Id: r.Id, Name: r.Name, GlobalEnabled: r.GlobalEnabled, TargetChannelIds: r.TargetChannelIds, ReviewEnabled: r.ReviewEnabled, DedupeEnabled: r.DedupeEnabled, DedupeDays: r.DedupeDays, FullMatchEnabled: r.FullMatchEnabled, Keywords: r.Keywords, Tags: r.Tags, Replacements: r.Replacements, DeleteLineTexts: r.DeleteLineTexts, DeleteTexts: r.DeleteTexts, TruncateIntroFeeEnabled: r.TruncateIntroFeeEnabled, IntroFeeSuffixEnabled: r.IntroFeeSuffixEnabled, IntroFeeSuffix: r.IntroFeeSuffix, BlockTexts: r.BlockTexts, BlockLink: r.BlockLink, BlockUsername: r.BlockUsername, BlockPlainText: r.BlockPlainText, HeaderEnabled: r.HeaderEnabled, HeaderMarkdown: r.HeaderMarkdown, FooterEnabled: r.FooterEnabled, FooterMarkdown: r.FooterMarkdown, Sort: r.Sort, Status: r.Status}
+	values := splitCollectBotValues(text)
+	switch payload.Field {
+	case "delete_line":
+		in.DeleteLineTexts = values
+	case "delete_text":
+		in.DeleteTexts = values
+	case "header":
+		in.HeaderEnabled = 1
+		in.HeaderMarkdown = text
+	case "footer":
+		in.FooterEnabled = 1
+		in.FooterMarkdown = text
+	case "replace":
+		return s.sendCollectManageNotice(ctx, botId, chatId, "替换规则请使用后台配置，BOT暂不支持复杂替换格式。")
+	}
+	if _, err = publishService.SysPublish().BotCollectRuleSave(ctx, in, account.TenantId, account.AccountId); err != nil {
+		return err
+	}
+	_ = s.completeProfileSession(ctx, session.Id)
+	return s.showCollectRuleEditor(ctx, botId, chatId, account, session.ProfileId)
+}
+
+func splitCollectBotValues(text string) []string {
+	parts := strings.FieldsFunc(text, func(r rune) bool { return r == ',' || r == '，' || r == '\n' || r == '\r' })
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 func (s *sSysBot) toggleCollectRuleField(ctx context.Context, botId int64, chatId string, account *botProfileAccount, ruleID int64, field string) error {
