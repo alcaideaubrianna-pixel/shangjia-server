@@ -172,8 +172,7 @@ func (c *cOpenProfile) Batch(ctx context.Context, req *open.BatchReq) (res *open
 	if err != nil {
 		return nil, err
 	}
-	in := req.ContentProfileListInp
-	in.ProfileIds, in.WithTotal = req.Ids, 0
+	in := sysin.ContentProfileListInp{Feed: "latest", ProfileIds: req.Ids, WithTotal: 0}
 	in.Page, in.PerPage = 1, len(req.Ids)
 	list, _, err := service.SysContent().ListProfiles(scopedCtx, &in)
 	if err != nil {

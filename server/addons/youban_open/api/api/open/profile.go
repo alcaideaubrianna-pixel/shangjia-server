@@ -44,7 +44,6 @@ type ViewRes struct {
 type BatchReq struct {
 	g.Meta `path:"/open/v1/profiles/batch" method:"post" tags:"开放资料" summary:"批量获取开放资料"`
 	Ids    []int64 `json:"ids" v:"required|length:1,100#请选择资料|单次最多获取100条资料"`
-	sysin.ContentProfileListInp
 }
 
 type BatchRes struct {
