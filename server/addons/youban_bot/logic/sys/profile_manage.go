@@ -1951,7 +1951,11 @@ func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64,
 	defer cancel()
 	lock := hglock.NewConfig(20*time.Second, 100*time.Millisecond).Mutex(profileSessionLockKey(session.Id))
 	if err := lock.Lock(lockCtx); err != nil {
-		return s.replyBotError(ctx, botId, fmt.Sprintf("%d", msg.Chat.ID), "资料管理", gerror.New("资料消息正在处理中，请稍后重新发送"))
+		// Another media-group update is finalizing this session. Do not emit a
+		// duplicate error message for every Telegram update; the recovery loop
+		// will pick up the durable pending group after the lock is released.
+		g.Log().Infof(ctx, "Bot资料会话锁忙，合并延迟事件 trace:PF-%d bot_id:%d message_id:%d group_id:%s", session.Id, botId, msg.ID, strings.TrimSpace(msg.MediaGroupID))
+		return nil
 	}
 	defer func() { _ = lock.Unlock(context.Background()) }()
 	latest := s.activeProfileSession(ctx, botId, msg)
