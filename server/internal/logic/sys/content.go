@@ -477,13 +477,13 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 	if in.Provinces != "" {
 		values := make([]string, 0)
 		for _, province := range strings.Split(in.Provinces, ",") {
-			values = append(values, provinceFilterValues(province)...)
+			values = append(values, provinceFilterValuesWithContext(ctx, province)...)
 		}
 		if values = uniqueNonEmptyStrings(values...); len(values) > 0 {
 			mod = mod.WhereIn(aliasField("p", profileColumns.Province), values)
 		}
 	} else if in.Province != "" {
-		mod = mod.WhereIn(aliasField("p", profileColumns.Province), provinceFilterValues(in.Province))
+		mod = mod.WhereIn(aliasField("p", profileColumns.Province), provinceFilterValuesWithContext(ctx, in.Province))
 	}
 	if in.City != "" {
 		mod = mod.WhereIn(aliasField("p", profileColumns.City), cityFilterValues(in.Province, in.City))
@@ -1197,6 +1197,32 @@ func provinceFilterValues(value string) []string {
 	default:
 		if normalized != "" && normalized != raw {
 			values = append(values, normalized+"省", normalized+"市")
+		}
+	}
+	return uniqueNonEmptyStrings(values...)
+}
+
+// provinceFilterValuesWithContext supports both the public region label and
+// the canonical numeric code stored by imported profiles (for example
+// 河南/河南省/410000). This keeps legacy clients working while making code-based
+// Open API queries deterministic.
+func provinceFilterValuesWithContext(ctx context.Context, value string) []string {
+	values := provinceFilterValues(value)
+	normalized := normalizeProvinceName(value)
+	if normalized == "" {
+		return values
+	}
+	rows := make([]*entity.SysProvinces, 0, 1)
+	if err := dao.SysProvinces.Ctx(ctx).
+		Where(dao.SysProvinces.Columns().Status, 1).
+		WhereLike(dao.SysProvinces.Columns().Title, normalized).
+		Where(dao.SysProvinces.Columns().Level, 1).
+		Fields(dao.SysProvinces.Columns().Id, dao.SysProvinces.Columns().Title).
+		Scan(&rows); err == nil {
+		for _, row := range rows {
+			if normalizeProvinceName(row.Title) == normalized {
+				values = append(values, strconv.FormatInt(row.Id, 10))
+			}
 		}
 	}
 	return uniqueNonEmptyStrings(values...)
