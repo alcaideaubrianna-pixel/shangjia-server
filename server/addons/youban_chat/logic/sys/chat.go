@@ -1923,7 +1923,8 @@ func (s *sSysChat) notifyTelegramSession(ctx context.Context, row *chatConversat
 	}
 	text := telegramSessionNoticeText(ctx, profile, member, visitorName, profileTitle)
 	if profile != nil && profile.Id > 0 {
-		if botRow, e := s.getBotById(ctx, row.BotId); e == nil && botRow != nil && strings.TrimSpace(botRow.BotUsername) != "" {
+		var botRow *chatBotRow
+		if e := g.DB().Model("hg_youban_bot_bot").Safe().Ctx(ctx).Where("is_official", 1).Where("status", 1).WhereNull("deleted_at").OrderDesc("is_default").OrderAsc("id").Scan(&botRow); e == nil && botRow != nil && strings.TrimSpace(botRow.BotUsername) != "" {
 			token := grand.S(24)
 			payload, _ := json.Marshal(g.Map{"profileId": profile.Id, "conversationId": row.Id})
 			_ = cache.Instance().Set(ctx, "youban:chat:profile_preview:"+token, string(payload), 30*time.Minute)
