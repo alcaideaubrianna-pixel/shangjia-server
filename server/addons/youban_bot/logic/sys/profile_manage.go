@@ -2190,9 +2190,28 @@ func (s *sSysBot) consumeProfileCreatePart(ctx context.Context, botId int64, cha
 		}
 		g.Log().Infof(ctx, "Bot资料创建完成 trace:%s stage:create_profile elapsed_ms:%d profile_id:%d", trace, time.Since(startedAt).Milliseconds(), res.Id)
 		_ = s.completeProfileSession(ctx, session.Id)
-		return s.sendProfileCreateSuccess(ctx, botId, chatId, res)
+		// Creation is already durable; notification must not make the update
+		// handler fail or hold the session lock. Retry transient Telegram errors.
+		go s.sendProfileCreateSuccessWithRetry(botId, chatId, res)
+		return nil
 	}
 	return nil
+}
+
+func (s *sSysBot) sendProfileCreateSuccessWithRetry(botId int64, chatId string, res *publishsysin.ProfileSaveModel) {
+	if res == nil {
+		return
+	}
+	for attempt := 1; attempt <= 3; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		err := s.sendProfileCreateSuccess(ctx, botId, chatId, res)
+		cancel()
+		if err == nil {
+			return
+		}
+		g.Log().Warningf(context.Background(), "Bot资料创建成功通知失败 botId:%d profileId:%d attempt:%d err:%+v", botId, res.Id, attempt, err)
+		time.Sleep(time.Duration(attempt) * time.Second)
+	}
 }
 
 func (s *sSysBot) scheduleVerifyPrompt(sessionId, botId int64, chatId string) {
