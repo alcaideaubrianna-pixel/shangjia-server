@@ -11,6 +11,8 @@ import (
 type ListReq struct {
 	g.Meta `path:"/open/v1/profiles" method:"get" tags:"开放资料" summary:"获取开放资料列表"`
 	sysin.ContentProfileListInp
+	ProvinceCode string `json:"provinceCode" dc:"省份行政区划编码（6位数字）" v:"regex:^[0-9]{6}$#provinceCode 必须为6位行政区划编码"`
+	CityCode     string `json:"cityCode" dc:"城市行政区划编码（6位数字）" v:"regex:^[0-9]{6}$#cityCode 必须为6位行政区划编码"`
 }
 
 type ListRes struct {

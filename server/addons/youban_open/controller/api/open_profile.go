@@ -2,12 +2,15 @@ package api
 
 import (
 	"context"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"regexp"
 	"strings"
 
 	"hotgo/addons/youban_open/api/api/open"
 	"hotgo/addons/youban_open/internal/opencontext"
 	addonsSysin "hotgo/addons/youban_open/model/input/sysin"
 	addonService "hotgo/addons/youban_open/service"
+	"hotgo/internal/dao"
 	"hotgo/internal/library/profilescope"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
@@ -18,6 +21,24 @@ var OpenProfile = cOpenProfile{}
 type cOpenProfile struct{}
 
 func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.ListRes, err error) {
+	if strings.TrimSpace(req.Province) != "" || strings.TrimSpace(req.Provinces) != "" || strings.TrimSpace(req.City) != "" {
+		return nil, gerror.New("Open 接口仅支持 provinceCode 和 cityCode 行政区划编码查询")
+	}
+	if code := strings.TrimSpace(req.ProvinceCode); code != "" {
+		if !openRegionCodePattern.MatchString(code) {
+			return nil, gerror.New("provinceCode 必须为6位行政区划编码")
+		}
+		req.ContentProfileListInp.Province = code
+	}
+	if code := strings.TrimSpace(req.CityCode); code != "" {
+		if !openRegionCodePattern.MatchString(code) {
+			return nil, gerror.New("cityCode 必须为6位行政区划编码")
+		}
+		req.ContentProfileListInp.City = code
+	}
+	if err := validateOpenRegionCodes(ctx, req.ProvinceCode, req.CityCode); err != nil {
+		return nil, err
+	}
 	scopedCtx, err := openProfileContext(ctx)
 	if err != nil {
 		return nil, err
@@ -71,6 +92,37 @@ func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.L
 	res = &open.ListRes{List: list}
 	res.PageRes.Pack(req, total)
 	return res, nil
+}
+
+var openRegionCodePattern = regexp.MustCompile(`^[0-9]{6}$`)
+
+func validateOpenRegionCodes(ctx context.Context, provinceCode, cityCode string) error {
+	columns := dao.SysProvinces.Columns()
+	if provinceCode != "" {
+		count, err := dao.SysProvinces.Ctx(ctx).Where(columns.Id, provinceCode).Where(columns.Pid, 0).Where(columns.Status, 1).Count()
+		if err != nil {
+			return gerror.Wrap(err, "校验省份行政区划编码失败")
+		}
+		if count == 0 {
+			return gerror.New("provinceCode 不是有效的省份行政区划编码")
+		}
+	}
+	if cityCode != "" {
+		model := dao.SysProvinces.Ctx(ctx).Where(columns.Id, cityCode).Where(columns.Status, 1)
+		if provinceCode != "" {
+			model = model.Where(columns.Pid, provinceCode)
+		} else {
+			model = model.WhereGT(columns.Pid, 0)
+		}
+		count, err := model.Count()
+		if err != nil {
+			return gerror.Wrap(err, "校验城市行政区划编码失败")
+		}
+		if count == 0 {
+			return gerror.New("cityCode 不是有效城市编码或不属于 provinceCode")
+		}
+	}
+	return nil
 }
 
 func hasAdvancedProfileFilters(in sysin.ContentProfileListInp) bool {
