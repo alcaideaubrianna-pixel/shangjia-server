@@ -475,18 +475,15 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 		)
 	}
 	if in.Provinces != "" {
-		values := make([]string, 0)
-		for _, province := range strings.Split(in.Provinces, ",") {
-			values = append(values, provinceFilterValuesWithContext(ctx, province)...)
-		}
+		values := uniqueNonEmptyStrings(strings.Split(in.Provinces, ",")...)
 		if values = uniqueNonEmptyStrings(values...); len(values) > 0 {
 			mod = mod.WhereIn(aliasField("p", profileColumns.Province), values)
 		}
 	} else if in.Province != "" {
-		mod = mod.WhereIn(aliasField("p", profileColumns.Province), provinceFilterValuesWithContext(ctx, in.Province))
+		mod = mod.Where(aliasField("p", profileColumns.Province), strings.TrimSpace(in.Province))
 	}
 	if in.City != "" {
-		mod = mod.WhereIn(aliasField("p", profileColumns.City), cityFilterValues(in.Province, in.City))
+		mod = mod.Where(aliasField("p", profileColumns.City), strings.TrimSpace(in.City))
 	}
 	if in.AgeRanges != "" {
 		mod = applyRangeFilters(mod, aliasField("p", profileColumns.Age), parseFilterRanges(in.AgeRanges))
@@ -1168,104 +1165,6 @@ func normalizeProvinceName(value string) string {
 	value = strings.TrimSuffix(value, "自治区")
 	value = strings.TrimSuffix(value, "特别行政区")
 	return value
-}
-
-func normalizeCityName(value string) string {
-	value = strings.TrimSpace(value)
-	value = strings.TrimSuffix(value, "市")
-	value = strings.TrimSuffix(value, "地区")
-	value = strings.TrimSuffix(value, "自治州")
-	value = strings.TrimSuffix(value, "盟")
-	return value
-}
-
-func provinceFilterValues(value string) []string {
-	raw := strings.TrimSpace(value)
-	normalized := normalizeProvinceName(raw)
-	values := uniqueNonEmptyStrings(raw, normalized)
-	switch normalized {
-	case "广西":
-		values = append(values, "广西壮族自治区")
-	case "宁夏":
-		values = append(values, "宁夏回族自治区")
-	case "新疆":
-		values = append(values, "新疆维吾尔自治区")
-	case "内蒙古", "西藏":
-		values = append(values, normalized+"自治区")
-	case "香港", "澳门":
-		values = append(values, normalized+"特别行政区", "中国"+normalized)
-	default:
-		if normalized != "" && normalized != raw {
-			values = append(values, normalized+"省", normalized+"市")
-		}
-	}
-	return uniqueNonEmptyStrings(values...)
-}
-
-// provinceFilterValuesWithContext supports both the public region label and
-// the canonical numeric code stored by imported profiles (for example
-// 河南/河南省/410000). This keeps legacy clients working while making code-based
-// Open API queries deterministic.
-func provinceFilterValuesWithContext(ctx context.Context, value string) []string {
-	// Standard administrative codes must be matched verbatim. Do not append
-	// legacy textual variants (e.g. "河南省") for Open API code queries.
-	if isRegionCode(value) {
-		return []string{strings.TrimSpace(value)}
-	}
-	values := provinceFilterValues(value)
-	normalized := normalizeProvinceName(value)
-	if normalized == "" {
-		return values
-	}
-	rows := make([]*entity.SysProvinces, 0, 1)
-	if err := dao.SysProvinces.Ctx(ctx).
-		Where(dao.SysProvinces.Columns().Status, 1).
-		WhereLike(dao.SysProvinces.Columns().Title, normalized).
-		Where(dao.SysProvinces.Columns().Level, 1).
-		Fields(dao.SysProvinces.Columns().Id, dao.SysProvinces.Columns().Title).
-		Scan(&rows); err == nil {
-		for _, row := range rows {
-			if normalizeProvinceName(row.Title) == normalized {
-				values = append(values, strconv.FormatInt(row.Id, 10))
-			}
-		}
-	}
-	return uniqueNonEmptyStrings(values...)
-}
-
-func cityFilterValues(province string, city string) []string {
-	raw := strings.TrimSpace(city)
-	if isRegionCode(raw) {
-		return []string{raw}
-	}
-	normalized := normalizeCityName(raw)
-	provinceName := normalizeProvinceName(province)
-	values := uniqueNonEmptyStrings(raw, normalized)
-	if normalized != "" {
-		values = append(values, normalized+"市", normalized+"地区", normalized+"自治州", normalized+"盟")
-		if provinceName != "" {
-			values = append(values,
-				provinceName+normalized,
-				provinceName+"省"+normalized,
-				provinceName+normalized+"市",
-				provinceName+"省"+normalized+"市",
-			)
-		}
-	}
-	return uniqueNonEmptyStrings(values...)
-}
-
-func isRegionCode(value string) bool {
-	value = strings.TrimSpace(value)
-	if len(value) != 6 {
-		return false
-	}
-	for _, r := range value {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 func uniqueNonEmptyStrings(values ...string) []string {

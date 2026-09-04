@@ -13,6 +13,7 @@ type ListReq struct {
 	form.PageReq
 	Feed            string `json:"feed" dc:"排序方式，仅支持 latest" v:"in:latest#feed 仅支持 latest"`
 	ProvinceCode    string `json:"provinceCode" dc:"省份行政区划编码（6位数字）" v:"regex:^[0-9]{6}$#provinceCode 必须为6位行政区划编码"`
+	ProvinceCodes   string `json:"provinceCodes" dc:"多个省份行政区划编码，逗号分隔"`
 	CityCode        string `json:"cityCode" dc:"城市行政区划编码（6位数字）" v:"regex:^[0-9]{6}$#cityCode 必须为6位行政区划编码"`
 	AgeMin          int    `json:"ageMin" dc:"最小年龄"`
 	AgeMax          int    `json:"ageMax" dc:"最大年龄"`

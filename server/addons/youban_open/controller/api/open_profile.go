@@ -22,6 +22,14 @@ type cOpenProfile struct{}
 
 func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.ListRes, err error) {
 	in := sysin.ContentProfileListInp{PageReq: req.PageReq, Feed: "latest", Province: strings.TrimSpace(req.ProvinceCode), City: strings.TrimSpace(req.CityCode), AgeMin: req.AgeMin, AgeMax: req.AgeMax, HeightMin: req.HeightMin, HeightMax: req.HeightMax, WeightMin: req.WeightMin, WeightMax: req.WeightMax, Cups: req.Cups, HasVideo: req.HasVideo, HasVerification: req.HasVerification, IsVirgin: req.IsVirgin}
+	provinceCodes, err := normalizeProvinceCodes(req.ProvinceCode, req.ProvinceCodes)
+	if err != nil {
+		return nil, err
+	}
+	if len(provinceCodes) > 0 {
+		in.Province = ""
+		in.Provinces = strings.Join(provinceCodes, ",")
+	}
 	if code := strings.TrimSpace(req.ProvinceCode); code != "" {
 		if !openRegionCodePattern.MatchString(code) {
 			return nil, gerror.New("provinceCode 必须为6位行政区划编码")
@@ -34,7 +42,7 @@ func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.L
 		}
 		in.City = code
 	}
-	if err := validateOpenRegionCodes(ctx, req.ProvinceCode, req.CityCode); err != nil {
+	if err := validateOpenRegionCodes(ctx, strings.Join(provinceCodes, ","), req.CityCode); err != nil {
 		return nil, err
 	}
 	scopedCtx, err := openProfileContext(ctx)
@@ -57,12 +65,41 @@ func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.L
 	return res, nil
 }
 
+func normalizeProvinceCodes(single, multiple string) ([]string, error) {
+	values := make([]string, 0, 4)
+	if strings.TrimSpace(single) != "" {
+		values = append(values, strings.TrimSpace(single))
+	}
+	for _, value := range strings.Split(multiple, ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			values = append(values, value)
+		}
+	}
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if !openRegionCodePattern.MatchString(value) {
+			return nil, gerror.New("provinceCodes 必须为6位行政区划编码")
+		}
+		if !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	return result, nil
+}
+
 var openRegionCodePattern = regexp.MustCompile(`^[0-9]{6}$`)
 
 func validateOpenRegionCodes(ctx context.Context, provinceCode, cityCode string) error {
 	columns := dao.SysProvinces.Columns()
-	if provinceCode != "" {
-		count, err := dao.SysProvinces.Ctx(ctx).Where(columns.Id, provinceCode).Where(columns.Pid, 0).Where(columns.Status, 1).Count()
+	provinceCodes := strings.Split(provinceCode, ",")
+	for _, code := range provinceCodes {
+		code = strings.TrimSpace(code)
+		if code == "" {
+			continue
+		}
+		count, err := dao.SysProvinces.Ctx(ctx).Where(columns.Id, code).Where(columns.Pid, 0).Where(columns.Status, 1).Count()
 		if err != nil {
 			return gerror.Wrap(err, "校验省份行政区划编码失败")
 		}
@@ -72,8 +109,16 @@ func validateOpenRegionCodes(ctx context.Context, provinceCode, cityCode string)
 	}
 	if cityCode != "" {
 		model := dao.SysProvinces.Ctx(ctx).Where(columns.Id, cityCode).Where(columns.Status, 1)
-		if provinceCode != "" {
-			model = model.Where(columns.Pid, provinceCode)
+		normalizedProvinces := make([]string, 0, len(provinceCodes))
+		for _, code := range provinceCodes {
+			if code = strings.TrimSpace(code); code != "" {
+				normalizedProvinces = append(normalizedProvinces, code)
+			}
+		}
+		if len(normalizedProvinces) == 1 {
+			model = model.Where(columns.Pid, normalizedProvinces[0])
+		} else if len(normalizedProvinces) > 1 {
+			model = model.WhereIn(columns.Pid, normalizedProvinces)
 		} else {
 			model = model.WhereGT(columns.Pid, 0)
 		}
