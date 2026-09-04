@@ -9,6 +9,9 @@ ALTER TABLE `hg_youban_publish_tenant`
 ALTER TABLE `hg_youban_publish_account`
   ADD KEY `idx_ybp_account_username` (`account_type`,`username`,`tenant_id`);
 
+ALTER TABLE `hg_youban_publish_profile_state`
+  ADD KEY `idx_ybp_profile_state_tenant_profile_open` (`tenant_id`,`profile_id`,`deleted_at`);
+
 ALTER TABLE `hg_content_profile`
   ADD UNIQUE KEY `uk_content_profile_no` (`profile_no`);
 

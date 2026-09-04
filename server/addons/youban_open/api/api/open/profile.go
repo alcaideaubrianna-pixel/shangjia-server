@@ -10,9 +10,20 @@ import (
 
 type ListReq struct {
 	g.Meta `path:"/open/v1/profiles" method:"get" tags:"开放资料" summary:"获取开放资料列表"`
-	sysin.ContentProfileListInp
-	ProvinceCode string `json:"provinceCode" dc:"省份行政区划编码（6位数字）" v:"regex:^[0-9]{6}$#provinceCode 必须为6位行政区划编码"`
-	CityCode     string `json:"cityCode" dc:"城市行政区划编码（6位数字）" v:"regex:^[0-9]{6}$#cityCode 必须为6位行政区划编码"`
+	form.PageReq
+	Feed            string `json:"feed" dc:"排序方式，仅支持 latest" v:"in:latest#feed 仅支持 latest"`
+	ProvinceCode    string `json:"provinceCode" dc:"省份行政区划编码（6位数字）" v:"regex:^[0-9]{6}$#provinceCode 必须为6位行政区划编码"`
+	CityCode        string `json:"cityCode" dc:"城市行政区划编码（6位数字）" v:"regex:^[0-9]{6}$#cityCode 必须为6位行政区划编码"`
+	AgeMin          int    `json:"ageMin" dc:"最小年龄"`
+	AgeMax          int    `json:"ageMax" dc:"最大年龄"`
+	HeightMin       int    `json:"heightMin" dc:"最小身高"`
+	HeightMax       int    `json:"heightMax" dc:"最大身高"`
+	WeightMin       int    `json:"weightMin" dc:"最小体重"`
+	WeightMax       int    `json:"weightMax" dc:"最大体重"`
+	Cups            string `json:"cups" dc:"资料标签，多个值用逗号分隔"`
+	HasVideo        int    `json:"hasVideo" dc:"是否有视频：1是"`
+	HasVerification int    `json:"hasVerification" dc:"是否有验证视频：1是"`
+	IsVirgin        int    `json:"isVirgin" dc:"是否处：1是"`
 }
 
 type ListRes struct {

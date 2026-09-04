@@ -15,3 +15,7 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_tg_job_collect_order" ON "hg_youban_publish_
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_similar_tenant" ON "hg_youban_publish_media" ("tenant_id", "media_type", "account_id", "profile_id", "id") WHERE "deleted_at" IS NULL AND "perceptual_hash" <> '';
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_similar_account" ON "hg_youban_publish_media" ("account_id", "media_type", "profile_id", "id") WHERE "deleted_at" IS NULL AND "perceptual_hash" <> '';
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_md5_scope" ON "hg_youban_publish_media" ("account_id", "md5", "tenant_id", "profile_id", "id") WHERE "deleted_at" IS NULL AND "md5" <> '';
+-- Open API tenant scope lookup: matches EXISTS(profile_id, tenant_id) without account_id.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_profile_state_tenant_profile_open"
+  ON "hg_youban_publish_profile_state" ("tenant_id", "profile_id")
+  WHERE "deleted_at" IS NULL;
