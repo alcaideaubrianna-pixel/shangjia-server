@@ -16,8 +16,8 @@ import (
 
 var (
 	profileSearchLabelRegexp = regexp.MustCompile(`(?i)^\s*(?:资料)?编号\s*[:：=]?\s*`)
-	profileSearchNoRegexp    = regexp.MustCompile(`^[A-Z][A-Z0-9]{4,}$`)
-	profileSearchMarkRegexp  = regexp.MustCompile(`^(.+?)([0-9]{3})$`)
+	profileSearchNoRegexp    = regexp.MustCompile(`^[A-Z][0-9]{5}$`)
+	profileSearchMarkRegexp  = regexp.MustCompile(`^(.+?)([0-9]{3,})$`)
 )
 
 type profileSearchFields struct {
@@ -79,17 +79,11 @@ func applyProfileKeywordSearch(mod *gdb.Model, keyword string, fields profileSea
 	}
 	upper := strings.ToUpper(keyword)
 	if profileSearchNoRegexp.MatchString(upper) {
-		condition, args := profileTextSearchCondition(keyword, fields)
-		return mod.Where("(UPPER("+fields.ProfileNo+") = ? OR "+condition+")", append([]interface{}{upper}, args...)...)
+		return mod.Where("UPPER("+fields.ProfileNo+") = ?", upper)
 	}
 	if sequence, prefix, ok := parseProfilePublishMark(keyword); ok {
-		mod = mod.LeftJoin(publishAccountSettingTable+" account_setting", "account_setting.tenant_id="+fields.StateAlias+".tenant_id AND account_setting.account_id="+fields.StateAlias+".account_id AND account_setting.deleted_at IS NULL")
-		sequenceExpr := profileAccountSequenceExpr(fields.StateAlias)
-		condition, args := profileTextSearchCondition(keyword, fields)
-		if prefix == "" {
-			return mod.Where("("+sequenceExpr+" = ? OR "+condition+")", append([]interface{}{sequence}, args...)...)
-		}
-		return mod.Where("(UPPER("+profilePublishMarkExpr(fields, sequenceExpr)+") = ? OR "+condition+")", append([]interface{}{strings.ToUpper(prefix + sequence)}, args...)...)
+		condition, args := profilePublishMarkSearchCondition(sequence, prefix, fields.StateAlias)
+		return mod.Where(condition, args...)
 	}
 	condition, args := profileTextSearchCondition(keyword, fields)
 	return mod.Where(condition, args...)
@@ -129,6 +123,24 @@ func parseProfilePublishMark(keyword string) (sequence string, prefix string, ok
 
 func profileAccountSequenceExpr(stateAlias string) string {
 	return "LPAD(CONCAT('',(SELECT COUNT(1) FROM " + publishProfileStateTable + " ps_seq WHERE ps_seq.tenant_id=" + stateAlias + ".tenant_id AND ps_seq.account_id=" + stateAlias + ".account_id AND ps_seq.id<=" + stateAlias + ".id AND ps_seq.deleted_at IS NULL)),3,'0')"
+}
+
+// profilePublishMarkSearchCondition resolves the generated account mark with
+// one window pass instead of executing a correlated COUNT for every row.
+func profilePublishMarkSearchCondition(sequence, prefix, stateAlias string) (string, []interface{}) {
+	partition := "SELECT ps_mark.id,ROW_NUMBER() OVER (PARTITION BY ps_mark.tenant_id,ps_mark.account_id ORDER BY ps_mark.id) AS account_sequence FROM " + publishProfileStateTable + " ps_mark"
+	args := make([]interface{}, 0, 2)
+	if prefix != "" {
+		partition += " JOIN " + publishAccountTable + " a_mark ON a_mark.id=ps_mark.account_id AND a_mark.deleted_at IS NULL" +
+			" JOIN " + publishAccountSettingTable + " setting_mark ON setting_mark.tenant_id=ps_mark.tenant_id AND setting_mark.account_id=ps_mark.account_id AND setting_mark.deleted_at IS NULL" +
+			" WHERE ps_mark.tenant_id=" + stateAlias + ".tenant_id AND ps_mark.deleted_at IS NULL AND COALESCE(setting_mark.enable_title_mark,0)=1 AND COALESCE(setting_mark.number_source,'sequence')<>'random'" +
+			" AND UPPER(CASE WHEN setting_mark.mark_mode='custom' AND COALESCE(setting_mark.custom_mark_text,'')<>'' THEN setting_mark.custom_mark_text ELSE COALESCE(a_mark.nickname,'') END)=?"
+		args = append(args, strings.ToUpper(prefix))
+	} else {
+		partition += " WHERE ps_mark.tenant_id=" + stateAlias + ".tenant_id AND ps_mark.deleted_at IS NULL"
+	}
+	args = append(args, sequence)
+	return stateAlias + ".id IN (SELECT mark_rank.id FROM (" + partition + ") mark_rank WHERE mark_rank.account_sequence=?)", args
 }
 
 func profilePublishMarkExpr(fields profileSearchFields, sequenceExpr string) string {

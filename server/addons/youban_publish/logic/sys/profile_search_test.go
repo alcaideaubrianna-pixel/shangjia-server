@@ -55,6 +55,7 @@ func TestParseProfilePublishMark(t *testing.T) {
 	for input, want := range map[string][2]string{
 		"001":   {"001", ""},
 		"天空001": {"001", "天空"},
+		"xxy6400": {"6400", "xxy"},
 	} {
 		sequence, prefix, ok := parseProfilePublishMark(input)
 		if !ok || sequence != want[0] || prefix != want[1] {
