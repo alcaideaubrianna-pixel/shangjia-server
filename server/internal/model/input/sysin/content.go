@@ -44,6 +44,7 @@ type ContentProfileListInp struct {
 	WithTotal         int    `json:"withTotal" dc:"是否返回总数"`
 	ExcludeActions    []string
 	ProfileIds        []int64 `json:"-"`
+	RankProfileIds    []int64 `json:"-"`
 	ExcludeProfileIds string  `json:"excludeIds" dc:"排除资料ID，逗号分隔"`
 }
 

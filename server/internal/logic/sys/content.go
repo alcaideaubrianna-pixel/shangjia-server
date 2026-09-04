@@ -142,9 +142,10 @@ type contentOptionAggRow struct {
 type homeProfileFeed string
 
 const (
-	homeProfileFeedNearby homeProfileFeed = "nearby"
-	homeProfileFeedLatest homeProfileFeed = "latest"
-	homeProfileFeedHot    homeProfileFeed = "hot"
+	homeProfileFeedNearby      homeProfileFeed = "nearby"
+	homeProfileFeedLatest      homeProfileFeed = "latest"
+	homeProfileFeedHot         homeProfileFeed = "hot"
+	homeProfileFeedRecommended homeProfileFeed = "recommended"
 )
 
 var publicProfileImportStatuses = []string{"imported", "duplicate", "feiniu_sync", "collect"}
@@ -270,6 +271,8 @@ func normalizeHomeProfileFeed(feed string, sort string) homeProfileFeed {
 		return homeProfileFeedLatest
 	case string(homeProfileFeedHot), "active":
 		return homeProfileFeedHot
+	case string(homeProfileFeedRecommended):
+		return homeProfileFeedRecommended
 	}
 	switch strings.ToLower(strings.TrimSpace(sort)) {
 	case "hot":
@@ -590,9 +593,12 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 	)
 	mod = mod.Page(in.Page, in.PerPage)
 	switch feed {
-	case homeProfileFeedHot:
+	case homeProfileFeedHot, homeProfileFeedRecommended:
+		mod = mod.LeftJoin(contentProfileStatsTable+" ps", "ps.profile_id="+aliasField("p", profileColumns.Id))
+		if len(in.RankProfileIds) > 0 {
+			mod = mod.OrderAsc(profileRankOrderExpression(aliasField("p", profileColumns.Id), in.RankProfileIds))
+		}
 		mod = mod.
-			LeftJoin(contentProfileStatsTable+" ps", "ps.profile_id="+aliasField("p", profileColumns.Id)).
 			OrderDesc(coalesceZero("ps.hot_score")).
 			OrderDesc(coalesceZero("ps.view_24h")).
 			OrderDesc(aliasField("p", profileColumns.SourceCreatedAt)).
@@ -616,6 +622,21 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 
 	list, err = s.buildProfileListFromRows(ctx, rows)
 	return
+}
+
+func profileRankOrderExpression(idField string, ids []int64) string {
+	if len(ids) == 0 {
+		return "0"
+	}
+	parts := make([]string, 0, len(ids)+2)
+	parts = append(parts, "CASE "+idField)
+	for index, id := range ids {
+		if id > 0 {
+			parts = append(parts, "WHEN "+strconv.FormatInt(id, 10)+" THEN "+strconv.Itoa(index))
+		}
+	}
+	parts = append(parts, "ELSE "+strconv.Itoa(len(ids))+" END")
+	return strings.Join(parts, " ")
 }
 
 func (s *sSysContent) buildProfileListFromRows(ctx context.Context, rows []contentProfileRow) (list []*sysin.ContentProfileListModel, err error) {

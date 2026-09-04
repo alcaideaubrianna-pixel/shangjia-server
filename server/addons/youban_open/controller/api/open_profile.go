@@ -21,7 +21,7 @@ var OpenProfile = cOpenProfile{}
 type cOpenProfile struct{}
 
 func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.ListRes, err error) {
-	in := sysin.ContentProfileListInp{PageReq: req.PageReq, Feed: "latest", Province: strings.TrimSpace(req.ProvinceCode), City: strings.TrimSpace(req.CityCode), AgeMin: req.AgeMin, AgeMax: req.AgeMax, HeightMin: req.HeightMin, HeightMax: req.HeightMax, WeightMin: req.WeightMin, WeightMax: req.WeightMax, Cups: req.Cups, HasVideo: req.HasVideo, HasVerification: req.HasVerification, IsVirgin: req.IsVirgin}
+	in := sysin.ContentProfileListInp{PageReq: req.PageReq, Province: strings.TrimSpace(req.ProvinceCode), City: strings.TrimSpace(req.CityCode), AgeMin: req.AgeMin, AgeMax: req.AgeMax, HeightMin: req.HeightMin, HeightMax: req.HeightMax, WeightMin: req.WeightMin, WeightMax: req.WeightMax, Cups: req.Cups, HasVideo: req.HasVideo, HasVerification: req.HasVerification, IsVirgin: req.IsVirgin}
 	provinceCodes, err := normalizeProvinceCodes(req.ProvinceCode, req.ProvinceCodes)
 	if err != nil {
 		return nil, err
@@ -50,12 +50,22 @@ func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.L
 		return nil, err
 	}
 	feed := strings.ToLower(strings.TrimSpace(req.Feed))
-	if feed != "" && feed != "latest" {
-		return nil, gerror.New("Open 资料列表仅支持 latest 排序")
+	if feed == "" {
+		feed = "latest"
 	}
-	// Open list deliberately avoids ranking and COUNT queries. Ranking has a
-	// separate interaction pipeline and withTotal is not part of the contract.
-	in.Feed, in.WithTotal = "latest", 0
+	if feed == "hot" || feed == "recommended" {
+		in.RankProfileIds, err = addonService.OpenAccess().RankedProfileIds(
+			ctx,
+			opencontext.AppId(ctx),
+			strings.TrimSpace(req.ActorId),
+			feed,
+			500,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+	in.Feed, in.ActorId, in.WithTotal = feed, strings.TrimSpace(req.ActorId), 0
 	list, total, err := service.SysContent().ListProfiles(scopedCtx, &in)
 	if err != nil {
 		return nil, err
