@@ -26,10 +26,12 @@ import (
 	converter "github.com/yazmeyaa/telegram_sticker_converter"
 	"github.com/yazmeyaa/telegram_sticker_converter/tgs"
 
+	"github.com/gogf/gf/v2/util/grand"
 	"hotgo/addons/youban_chat/model/input/sysin"
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
+	"hotgo/internal/library/cache"
 	"hotgo/internal/library/contexts"
 	"hotgo/internal/library/storager"
 	"hotgo/internal/library/telegrammedia"
@@ -1920,6 +1922,14 @@ func (s *sSysChat) notifyTelegramSession(ctx context.Context, row *chatConversat
 		profileTitle = "全局客服"
 	}
 	text := telegramSessionNoticeText(ctx, profile, member, visitorName, profileTitle)
+	if profile != nil && profile.Id > 0 {
+		if botRow, e := s.getBotById(ctx, row.BotId); e == nil && botRow != nil && strings.TrimSpace(botRow.BotUsername) != "" {
+			token := grand.S(24)
+			payload, _ := json.Marshal(g.Map{"profileId": profile.Id, "conversationId": row.Id})
+			_ = cache.Instance().Set(ctx, "youban:chat:profile_preview:"+token, string(payload), 30*time.Minute)
+			text += fmt.Sprintf("\n\n<a href=\"https://t.me/%s?start=chat_profile_%s\">查看资料</a>", strings.TrimPrefix(botRow.BotUsername, "@"), token)
+		}
+	}
 	_, err = s.telegramSendMessage(ctx, botToken, chatID, topicID, text)
 	if err != nil {
 		return gerror.Wrap(err, "发送Telegram会话通知失败")

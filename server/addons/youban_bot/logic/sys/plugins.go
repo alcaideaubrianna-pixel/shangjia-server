@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"html"
 	"strconv"
@@ -9,6 +10,9 @@ import (
 
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/frame/g"
+	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
+	publishService "hotgo/addons/youban_publish/service"
+	"hotgo/internal/library/cache"
 
 	"hotgo/addons/youban_bot/model/input/sysin"
 )
@@ -50,6 +54,9 @@ func (startFeature) ConfigSchema() []*sysin.FeatureConfigSchema {
 	}
 }
 func (startFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFeatureContext) (bool, error) {
+	if strings.HasPrefix(strings.TrimSpace(featureCtx.Args), "chat_profile_") {
+		return true, bot.handleChatProfilePreview(ctx, featureCtx)
+	}
 	if handled, err := bot.dispatchInlinePromotionStart(ctx, featureCtx); handled || err != nil {
 		return handled, err
 	}
@@ -65,6 +72,32 @@ func (startFeature) Handle(ctx context.Context, bot *sSysBot, featureCtx *botFea
 		}
 	}
 	return true, bot.replyWithMarkup(ctx, featureCtx.BotId, chatID, text, markup)
+}
+
+func (s *sSysBot) handleChatProfilePreview(ctx context.Context, featureCtx *botFeatureContext) error {
+	chatID := fmt.Sprintf("%d", featureCtx.Msg.Chat.ID)
+	token := strings.TrimPrefix(strings.TrimSpace(featureCtx.Args), "chat_profile_")
+	value, err := cache.Instance().Get(ctx, "youban:chat:profile_preview:"+token)
+	if err != nil || value.IsNil() {
+		return s.sendMessageOnly(ctx, featureCtx.BotId, chatID, "预览链接已失效，请重新打开。")
+	}
+	var payload struct {
+		ProfileId int64 `json:"profileId"`
+	}
+	if err = json.Unmarshal([]byte(value.String()), &payload); err != nil || payload.ProfileId <= 0 {
+		return s.sendMessageOnly(ctx, featureCtx.BotId, chatID, "预览链接无效。")
+	}
+	if err = s.sendMessageOnly(ctx, featureCtx.BotId, chatID, "正在打开资料预览，请稍候…"); err != nil {
+		return err
+	}
+	note, err := publishService.SysPublish().BotProfileView(ctx, &publishsysin.BotProfileViewInp{ProfileId: payload.ProfileId, PublicOnly: true})
+	if err != nil || note == nil {
+		return s.sendMessageOnly(ctx, featureCtx.BotId, chatID, "资料不存在或已下架。")
+	}
+	if err = s.sendScanProfileContent(ctx, featureCtx.BotId, chatID, note); err != nil {
+		return err
+	}
+	return nil
 }
 
 func startFeatureReplyText(bot *sSysBot, ctx context.Context) string {
