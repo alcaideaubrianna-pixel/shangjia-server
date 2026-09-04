@@ -1207,6 +1207,11 @@ func provinceFilterValues(value string) []string {
 // 河南/河南省/410000). This keeps legacy clients working while making code-based
 // Open API queries deterministic.
 func provinceFilterValuesWithContext(ctx context.Context, value string) []string {
+	// Standard administrative codes must be matched verbatim. Do not append
+	// legacy textual variants (e.g. "河南省") for Open API code queries.
+	if isRegionCode(value) {
+		return []string{strings.TrimSpace(value)}
+	}
 	values := provinceFilterValues(value)
 	normalized := normalizeProvinceName(value)
 	if normalized == "" {
@@ -1230,6 +1235,9 @@ func provinceFilterValuesWithContext(ctx context.Context, value string) []string
 
 func cityFilterValues(province string, city string) []string {
 	raw := strings.TrimSpace(city)
+	if isRegionCode(raw) {
+		return []string{raw}
+	}
 	normalized := normalizeCityName(raw)
 	provinceName := normalizeProvinceName(province)
 	values := uniqueNonEmptyStrings(raw, normalized)
@@ -1245,6 +1253,19 @@ func cityFilterValues(province string, city string) []string {
 		}
 	}
 	return uniqueNonEmptyStrings(values...)
+}
+
+func isRegionCode(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != 6 {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func uniqueNonEmptyStrings(values ...string) []string {
