@@ -2237,6 +2237,10 @@ func (s *sSysContent) importFeiNiuProfile(ctx context.Context, sourceDB gdb.DB, 
 		status = 2
 	}
 	province, city := normalizeProfileRegionForOption(source["province"].String(), source["city"].String())
+	province, city, _, err = location.NormalizeRegionCodes(ctx, province, city)
+	if err != nil {
+		return
+	}
 	extracted := profileextractor.Merge(source["plain_text"].String(), source["height"].Int(), source["weight"].Int(), source["cup_size"].String())
 	age := source["age"].Int()
 	if age <= 0 {

@@ -15,6 +15,7 @@ import (
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
+	"hotgo/internal/library/location"
 	"hotgo/internal/library/profileextractor"
 	"hotgo/internal/service"
 )
@@ -24,6 +25,10 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 		return nil, gerror.New("资料信息不能为空")
 	}
 	if err = in.Filter(ctx); err != nil {
+		return nil, err
+	}
+	in.Province, in.City, _, err = location.NormalizeRegionCodes(ctx, in.Province, in.City)
+	if err != nil {
 		return nil, err
 	}
 	if tenantId <= 0 || accountId <= 0 {

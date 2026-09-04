@@ -22,6 +22,7 @@ import (
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/contexts"
+	"hotgo/internal/library/location"
 	"hotgo/internal/library/storager"
 	"hotgo/internal/model"
 	"hotgo/internal/service"
@@ -1188,7 +1189,7 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 	detail.Title = normalizeLegacyImportedTitle(detail.Title, sourceNoteId)
 	detail.Province = normalizeLegacyLocationValue(detail.Province)
 	detail.City = normalizeLegacyLocationValue(detail.City)
-	provinceCode, cityCode, err := resolveLegacyCMSRegionCodes(ctx, detail.Province, detail.City)
+	provinceCode, cityCode, _, err := location.NormalizeRegionCodes(ctx, detail.Province, detail.City)
 	if err != nil {
 		return nil, err
 	}
@@ -2576,47 +2577,6 @@ type legacyCMSRegionIndex struct {
 var legacyCMSRegionIndexCache struct {
 	sync.RWMutex
 	index *legacyCMSRegionIndex
-}
-
-func resolveLegacyCMSRegionCodes(ctx context.Context, provinceName string, cityName string) (provinceCode string, cityCode string, err error) {
-	provinceName = normalizeLegacyRegionName(provinceName)
-	cityName = normalizeLegacyRegionName(cityName)
-	if provinceName == "" && cityName == "" {
-		return "", "", nil
-	}
-	if isNumericRegionCode(provinceName) && isNumericRegionCode(cityName) {
-		return provinceName, cityName, nil
-	}
-	index, err := getLegacyCMSRegionIndex(ctx)
-	if err != nil {
-		return "", "", err
-	}
-	var province *legacyCMSRegionOption
-	if provinceName != "" {
-		province = index.provincesByName[provinceName]
-		if province != nil {
-			provinceCode = fmt.Sprintf("%d", province.Id)
-		}
-	}
-	if cityName == "" {
-		return provinceCode, "", nil
-	}
-	if province != nil {
-		for _, child := range index.childrenByPid[province.Id] {
-			if normalizeLegacyRegionName(child.Title) == cityName {
-				return provinceCode, fmt.Sprintf("%d", child.Id), nil
-			}
-		}
-	}
-	matches := index.citiesByName[cityName]
-	if len(matches) == 1 {
-		city := matches[0]
-		cityCode = fmt.Sprintf("%d", city.Id)
-		if provinceCode == "" && city.Pid > 0 {
-			provinceCode = fmt.Sprintf("%d", city.Pid)
-		}
-	}
-	return provinceCode, cityCode, nil
 }
 
 func getLegacyCMSRegionIndex(ctx context.Context) (*legacyCMSRegionIndex, error) {
