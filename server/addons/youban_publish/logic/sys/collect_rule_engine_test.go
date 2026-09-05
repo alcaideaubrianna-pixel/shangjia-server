@@ -218,6 +218,7 @@ func TestApplyCollectIntroFeeTruncate(t *testing.T) {
 		{name: "removes metadata then consecutive codes", text: "昵称：朴朴\nA1\nB20260811\n正常文案", want: "正常文案"},
 		{name: "keeps chinese first line", text: "English中文 marker\n正常文案", want: "English中文 marker\n正常文案"},
 		{name: "removes metadata before intro fee and following text", text: "昵称：朴朴\nX123\n正常文案\n介绍费：7888\n联系方式", want: "正常文案"},
+		{name: "recognizes fullwidth semicolon fee separator", text: "介绍人；柏林之声    介绍费；7888\n七七b\n介绍费:7888", want: ""},
 		{name: "removes metadata fields inside body", text: "正常文案\n昵称：朴朴\n联系方式\n编号：XXX123\n同行：否", want: "正常文案\n联系方式"},
 		{name: "keeps metadata words in normal body", text: "这是昵称说明\n编号是内部记录\n同行可以联系", want: "这是昵称说明\n编号是内部记录\n同行可以联系"},
 	}

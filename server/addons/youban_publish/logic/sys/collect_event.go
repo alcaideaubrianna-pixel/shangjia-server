@@ -678,17 +678,17 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	// Global rules are a text policy only. Prevent matching, blocking,
 	// dedupe, channel and header/footer settings from leaking into events.
 	for _, row := range globalRows {
-		row["keywords"] = "[]"
-		row["tags"] = "[]"
-		row["blocked_texts"] = "[]"
-		row["block_link"] = 0
-		row["block_username"] = 0
-		row["block_plain_text"] = 0
-		row["review_enabled"] = 0
-		row["dedupe_enabled"] = 0
-		row["header_enabled"] = 0
-		row["footer_enabled"] = 0
-		row["target_channel_ids"] = "[]"
+		row["keywords"] = gvar.New([]string{})
+		row["tags"] = gvar.New([]string{})
+		row["blocked_texts"] = gvar.New([]string{})
+		row["block_link"] = gvar.New(0)
+		row["block_username"] = gvar.New(0)
+		row["block_plain_text"] = gvar.New(0)
+		row["review_enabled"] = gvar.New(0)
+		row["dedupe_enabled"] = gvar.New(0)
+		row["header_enabled"] = gvar.New(0)
+		row["footer_enabled"] = gvar.New(0)
+		row["target_channel_ids"] = gvar.New([]int64{})
 	}
 	rows := globalRows
 	if len(ruleIds) > 0 {

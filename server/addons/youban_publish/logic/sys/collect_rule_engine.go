@@ -16,7 +16,7 @@ var (
 	collectStandaloneCodeCaptionRule = regexp.MustCompile(`^[A-Za-z]{1,4}\d{3,6}$`)
 	collectMaterialMetaLineRule      = regexp.MustCompile(`^\s*(?:昵称|编号|同行)\s*(?:[:：=].*)?\s*$`)
 	collectMaterialCodeLineRule      = regexp.MustCompile(`^\s*(?:(?:[A-Za-z]{1,8}[-_ ]?\d{3,10}|[\p{Han}]{1,8}\d{3,10})(?:\s+|$))+\s*$`)
-	collectIntroFeeAmountRule        = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接)费(?:用)?|中介(?:服务)?费(?:用)?)\s*[:：=]?\s*([¥￥]?\s*\d[\d,.]*(?:\s*(?:元|万))?)`)
+	collectIntroFeeAmountRule        = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接)费(?:用)?|中介(?:服务)?费(?:用)?)\s*[:：=；;，,]?\s*([¥￥]?\s*\d[\d,.]*(?:\s*(?:元|万))?)`)
 	collectIntroFeeStandaloneSuffix  = regexp.MustCompile(`^[\p{Han}A-Za-z0-9]{1,32}$`)
 )
 
