@@ -661,17 +661,54 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	for _, row := range bindRows {
 		ruleIds = append(ruleIds, row.RuleId)
 	}
-	mod := pdao.YoubanPublishCollectRule.Ctx(ctx).
+	// Global tenant text policy is always applied in addition to source-bound
+	// rules. Previously it was only used when a source had no bindings, which
+	// made a shared delete/replace policy silently disappear once a source got
+	// its own rule.
+	globalMod := pdao.YoubanPublishCollectRule.Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
 		Where("status", 1).
+		Where("global_enabled", 1).
 		WhereNull("deleted_at")
-	if len(ruleIds) > 0 {
-		mod = mod.WhereIn("id", ruleIds)
-	} else {
-		mod = mod.Where("global_enabled", 1)
+	globalRows, err := globalMod.OrderAsc("sort").OrderAsc("id").All()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取租户全局采集规则失败")
 	}
-	rows, err := mod.OrderAsc("sort").OrderAsc("id").All()
+	// Global rules are a text policy only. Prevent matching, blocking,
+	// dedupe, channel and header/footer settings from leaking into events.
+	for _, row := range globalRows {
+		row["keywords"] = "[]"
+		row["tags"] = "[]"
+		row["blocked_texts"] = "[]"
+		row["block_link"] = 0
+		row["block_username"] = 0
+		row["block_plain_text"] = 0
+		row["review_enabled"] = 0
+		row["dedupe_enabled"] = 0
+		row["header_enabled"] = 0
+		row["footer_enabled"] = 0
+		row["target_channel_ids"] = "[]"
+	}
+	rows := globalRows
+	if len(ruleIds) > 0 {
+		boundRows, queryErr := pdao.YoubanPublishCollectRule.Ctx(ctx).
+			Where("tenant_id", tenantId).Where("account_id", accountId).
+			WhereIn("id", ruleIds).Where("status", 1).WhereNull("deleted_at").
+			OrderAsc("sort").OrderAsc("id").All()
+		if queryErr != nil {
+			return nil, gerror.Wrap(queryErr, "读取采集源绑定规则失败")
+		}
+		seen := make(map[int64]struct{}, len(rows))
+		for _, row := range rows {
+			seen[row["id"].Int64()] = struct{}{}
+		}
+		for _, row := range boundRows {
+			if _, ok := seen[row["id"].Int64()]; !ok {
+				rows = append(rows, row)
+			}
+		}
+	}
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取采集规则失败")
 	}
