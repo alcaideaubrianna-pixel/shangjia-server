@@ -630,19 +630,12 @@ func applyPublicProfileKeyword(mod *gdb.Model, keyword, profileNoColumn, titleCo
 		return mod.Where(aliasField("p", profileNoColumn), profileNo), nil
 	}
 	like := "%" + keyword + "%"
-	searchFields := []string{
-		aliasField("p", titleColumn) + " LIKE ?",
-		aliasField("p", summaryColumn) + " LIKE ?",
-		aliasField("p", plainTextColumn) + " LIKE ?",
+	// Short textual searches target the generated title only. Longer searches
+	// target正文，避免每次请求同时扫描多个大字段。
+	if len([]rune(keyword)) <= 12 {
+		return mod.Where(aliasField("p", titleColumn)+" LIKE ?", like), nil
 	}
-	args := make([]interface{}, len(searchFields))
-	for index := range args {
-		args[index] = like
-	}
-	return mod.Where(
-		"("+strings.Join(searchFields, " OR ")+")",
-		args...,
-	), nil
+	return mod.Where(aliasField("p", plainTextColumn)+" LIKE ?", like), nil
 }
 
 func profileRankOrderExpression(idField string, ids []int64) string {
