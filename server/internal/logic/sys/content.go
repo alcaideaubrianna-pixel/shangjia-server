@@ -627,23 +627,18 @@ func applyPublicProfileKeyword(mod *gdb.Model, keyword, profileNoColumn, titleCo
 		return mod, nil
 	}
 	if profileNo, ok := profilesearch.Identifier(keyword); ok {
-		exact := mod.Where("UPPER("+aliasField("p", profileNoColumn)+") = ?", profileNo)
-		count, err := exact.Count()
-		if err != nil {
-			return nil, gerror.Wrap(err, "按资料编号搜索失败")
-		}
-		if count > 0 {
-			return exact, nil
-		}
+		like := "%" + keyword + "%"
+		return mod.Where(
+			"("+aliasField("p", profileNoColumn)+" = ? OR "+aliasField("p", profileNoColumn)+" LIKE ? OR "+
+				aliasField("p", titleColumn)+" LIKE ? OR "+aliasField("p", summaryColumn)+" LIKE ? OR "+aliasField("p", plainTextColumn)+" LIKE ?)",
+			profileNo, like, like, like, like,
+		), nil
 	}
 	like := "%" + keyword + "%"
 	searchFields := []string{
 		aliasField("p", titleColumn) + " LIKE ?",
 		aliasField("p", summaryColumn) + " LIKE ?",
 		aliasField("p", plainTextColumn) + " LIKE ?",
-	}
-	if _, ok := profilesearch.Identifier(keyword); ok {
-		searchFields = append([]string{aliasField("p", profileNoColumn) + " LIKE ?"}, searchFields...)
 	}
 	args := make([]interface{}, len(searchFields))
 	for index := range args {
