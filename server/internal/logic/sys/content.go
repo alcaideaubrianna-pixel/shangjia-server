@@ -627,12 +627,7 @@ func applyPublicProfileKeyword(mod *gdb.Model, keyword, profileNoColumn, titleCo
 		return mod, nil
 	}
 	if profileNo, ok := profilesearch.Identifier(keyword); ok {
-		like := "%" + keyword + "%"
-		return mod.Where(
-			"("+aliasField("p", profileNoColumn)+" = ? OR "+aliasField("p", profileNoColumn)+" LIKE ? OR "+
-				aliasField("p", titleColumn)+" LIKE ? OR "+aliasField("p", summaryColumn)+" LIKE ? OR "+aliasField("p", plainTextColumn)+" LIKE ?)",
-			profileNo, like, like, like, like,
-		), nil
+		return mod.Where(aliasField("p", profileNoColumn), profileNo), nil
 	}
 	like := "%" + keyword + "%"
 	searchFields := []string{
