@@ -97,30 +97,26 @@ func (s *sSysPublish) wakeNextTelegramChannelJob(ctx context.Context, job telegr
 		return nil
 	}
 	now := gtime.Now()
-	nextRecord, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	var nextJobs []telegramJobRecord
+	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("tenant_id", job.TenantId).
 		Where("channel_id", job.ChannelId).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
 		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", now).
 		OrderAsc("priority").OrderAsc("id").
-		Limit(1).
-		One()
+		Limit(telegramChannelPreparationDepth(ctx)).
+		Scan(&nextJobs)
 	if err != nil {
-		return gerror.Wrap(err, "读取频道下一条TG任务失败")
+		return gerror.Wrap(err, "读取频道待入队TG任务失败")
 	}
-	if nextRecord.IsEmpty() {
-		return nil
-	}
-	var next telegramJobRecord
-	if err = nextRecord.Struct(&next); err != nil {
-		return gerror.Wrap(err, "解析频道下一条TG任务失败")
-	}
-	if next.Id <= 0 {
-		return nil
-	}
-	if err = s.enqueueTelegramJob(ctx, next.Id, 0); err != nil {
-		return gerror.Wrap(err, "唤醒频道下一条TG任务失败")
+	for _, next := range nextJobs {
+		if next.Id <= 0 {
+			continue
+		}
+		if err = s.enqueueTelegramJob(ctx, next.Id, 0); err != nil {
+			return gerror.Wrap(err, "唤醒频道待入队TG任务失败")
+		}
 	}
 	return nil
 }

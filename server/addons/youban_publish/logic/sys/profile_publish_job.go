@@ -49,11 +49,7 @@ func (s *sSysPublish) profilePublishSource(ctx context.Context, profileId, tenan
 }
 
 func (s *sSysPublish) submitProfilePublish(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool) error {
-	return s.submitProfilePublishWithMetaAndDispatch(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, telegramProfilePublishMeta{}, true)
-}
-
-func (s *sSysPublish) submitProfilePublishDeferred(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool) error {
-	return s.submitProfilePublishWithMetaAndDispatch(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, telegramProfilePublishMeta{}, false)
+	return s.submitProfilePublishWithMeta(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, telegramProfilePublishMeta{})
 }
 
 type telegramProfilePublishMeta struct {
@@ -64,19 +60,15 @@ type telegramProfilePublishMeta struct {
 }
 
 func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta) error {
-	return s.submitProfilePublishWithMetaAndDispatch(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, meta, true)
-}
-
-func (s *sSysPublish) submitProfilePublishWithMetaAndDispatch(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta, dispatch bool) error {
 	if profileId <= 0 {
-		return s.submitProfilePublishWithMetaAndDispatchUnlocked(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, meta, dispatch)
+		return s.submitProfilePublishWithMetaUnlocked(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, meta)
 	}
 	return s.withProfileLifecycleLock(ctx, tenantId, profileId, func() error {
-		return s.submitProfilePublishWithMetaAndDispatchUnlocked(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, meta, dispatch)
+		return s.submitProfilePublishWithMetaUnlocked(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, meta)
 	})
 }
 
-func (s *sSysPublish) submitProfilePublishWithMetaAndDispatchUnlocked(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta, dispatch bool) error {
+func (s *sSysPublish) submitProfilePublishWithMetaUnlocked(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta) error {
 	source, err := s.profilePublishSource(ctx, profileId, tenantId, accountId, requireOnline)
 	if err != nil {
 		return err
@@ -117,11 +109,7 @@ func (s *sSysPublish) submitProfilePublishWithMetaAndDispatchUnlocked(ctx contex
 		return err
 	}
 	for _, jobId := range jobIds {
-		enqueue := s.enqueueTelegramJob
-		if !dispatch {
-			enqueue = s.enqueueTelegramJobDeferred
-		}
-		if err = enqueue(ctx, jobId, 0); err != nil {
+		if err = s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
 			message := "Redis调度失败，等待数据库调度器恢复：" + err.Error()
 			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
 				"dispatch_status": tgDispatchStatusIdle, "last_dispatch_error": message, "updated_at": gtime.Now(),

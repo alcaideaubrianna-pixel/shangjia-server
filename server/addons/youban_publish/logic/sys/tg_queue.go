@@ -151,10 +151,6 @@ func (s *sSysPublish) enqueueTelegramJob(ctx context.Context, jobId int64, delay
 	return s.enqueueTelegramJobDirect(ctx, jobId, delay)
 }
 
-func (s *sSysPublish) enqueueTelegramJobDeferred(ctx context.Context, jobId int64, delay time.Duration) error {
-	return s.enqueueTelegramJobDirect(ctx, jobId, delay)
-}
-
 func (s *sSysPublish) enqueueTelegramJobDirect(ctx context.Context, jobId int64, delay time.Duration) error {
 	return s.enqueueTelegramJobDirectWithUnique(ctx, jobId, delay, true)
 }

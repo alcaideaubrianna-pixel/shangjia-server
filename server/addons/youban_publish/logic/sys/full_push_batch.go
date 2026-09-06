@@ -415,7 +415,7 @@ func fullPushOnlineProfileBaseModel(ctx context.Context, tenantId int64) *gdb.Mo
 }
 
 func (s *sSysPublish) enqueueFullPushProfile(ctx context.Context, batch fullPushBatchRecord, profile fullPushProfile) error {
-	err := s.submitProfilePublishDeferred(ctx, profile.ProfileId, profile.TenantId, profile.AccountId, batch.RequestedBy,
+	err := s.submitProfilePublish(ctx, profile.ProfileId, profile.TenantId, profile.AccountId, batch.RequestedBy,
 		fullPushProfileOperationNo(batch.BatchNo, profile.ProfileId), []int64{batch.ChannelId}, true)
 	if errors.Is(err, errPublishProfileUnavailable) {
 		return nil

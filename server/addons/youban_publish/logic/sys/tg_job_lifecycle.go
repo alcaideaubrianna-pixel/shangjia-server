@@ -27,8 +27,11 @@ func (s *sSysPublish) supersedeTelegramJobAndCompleteOperation(ctx context.Conte
 	if err := s.markTelegramJobSuperseded(ctx, job.Id); err != nil {
 		return err
 	}
-	_, err := s.completeProfileTelegramOperation(ctx, job, isCycleBatchOperation(job.OperationNo))
-	return err
+	_, completeErr := s.completeProfileTelegramOperation(ctx, job, isCycleBatchOperation(job.OperationNo))
+	if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
+		g.Log().Warningf(ctx, "废弃任务后唤醒频道待入队TG任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
+	}
+	return completeErr
 }
 
 type telegramResubmitJob struct {
