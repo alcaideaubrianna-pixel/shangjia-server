@@ -36,7 +36,7 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 	if ready, readyErr := s.profileMediaReady(ctx, targetJob.ProfileId); readyErr != nil {
 		return readyErr
 	} else if !ready {
-		return s.postponeTelegramJobUntilMediaReady(ctx, jobId)
+		return s.postponeTelegramJobUntilMediaReady(ctx, targetJob)
 	}
 	if targetJob.CollectSourceId > 0 && !s.collectPushEnabled(ctx) {
 		return s.postponeTelegramJobForCollectPushPause(ctx, targetJob)
@@ -61,7 +61,12 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 			}).Update()
 		return s.enqueueTelegramJobDirectWithUnique(ctx, jobId, delay, false)
 	}
-	defer s.releaseTelegramChannelLease(ctx, lease)
+	defer func() {
+		s.releaseTelegramChannelLease(ctx, lease)
+		if wakeErr := s.wakeNextTelegramChannelJob(ctx, targetJob); wakeErr != nil {
+			g.Log().Warningf(ctx, "释放频道发送槽位后唤醒下一条TG任务失败 jobId:%d channelId:%d err:%+v", targetJob.Id, targetJob.ChannelId, wakeErr)
+		}
+	}()
 	targetJob, err = s.telegramJobById(ctx, jobId)
 	if err != nil {
 		return err
@@ -454,11 +459,6 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	if stateErr := s.updateProfilePublishOperationState(ctx, job, projectedStatus); stateErr != nil {
 		return stateErr
 	}
-	if decision.Status == "failed" {
-		if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
-			g.Log().Warningf(ctx, "永久失败后唤醒频道下一条TG任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
-		}
-	}
 	return nil
 }
 
@@ -550,13 +550,7 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		return completeErr
 	}
 	if !operationCompleted {
-		if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
-			g.Log().Warningf(ctx, "唤醒频道下一条TG任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
-		}
 		return nil
-	}
-	if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
-		g.Log().Warningf(ctx, "唤醒频道下一条TG任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
 	}
 	if job.CollectEventId > 0 {
 		return s.markCollectDispatchSentByProfile(ctx, job.ProfileId, job.CollectEventId)

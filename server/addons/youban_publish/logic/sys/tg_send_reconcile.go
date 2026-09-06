@@ -185,6 +185,9 @@ func (s *sSysPublish) reconcileUnknownTelegramJobWithClient(ctx context.Context,
 		if err = s.completeTelegramJob(ctx, job); err != nil {
 			return s.handleTelegramJobError(ctx, job, gerror.Wrap(err, "完成TG对账任务失败"))
 		}
+		if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
+			g.Log().Warningf(ctx, "TG验证对账完成后唤醒频道任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
+		}
 		return nil
 	}
 	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(g.Map{
@@ -193,6 +196,9 @@ func (s *sSysPublish) reconcileUnknownTelegramJobWithClient(ctx context.Context,
 	}).Update()
 	if err != nil {
 		return s.postponeUnknownTelegramJob(ctx, job, err)
+	}
+	if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
+		g.Log().Warningf(ctx, "TG展示对账完成后唤醒频道任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
 	}
 	return nil
 }
@@ -247,6 +253,9 @@ func (s *sSysPublish) recoverIncompleteTelegramJobPhase(ctx context.Context, job
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(data).Update()
 	if err == nil {
 		s.appendTelegramJobLog(ctx, job, "reconcile", logStatus, message)
+		if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
+			g.Log().Warningf(ctx, "TG不完整对账释放槽位后唤醒频道任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
+		}
 	}
 	return err
 }
@@ -313,7 +322,13 @@ func (s *sSysPublish) postponeUnknownTelegramJob(ctx context.Context, job telegr
 			_ = s.markCollectDispatchFailedByProfile(ctx, job.ProfileId, job.CollectEventId, decision.Message)
 		}
 	}
-	return s.updateProfilePublishOperationState(ctx, job, projectedStatus)
+	if err = s.updateProfilePublishOperationState(ctx, job, projectedStatus); err != nil {
+		return err
+	}
+	if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
+		g.Log().Warningf(ctx, "TG对账任务释放槽位后唤醒频道任务失败 jobId:%d channelId:%d status:%s err:%+v", job.Id, job.ChannelId, decision.Status, wakeErr)
+	}
+	return nil
 }
 
 type telegramUnknownReconcileDecision struct {

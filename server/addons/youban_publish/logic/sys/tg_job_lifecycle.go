@@ -28,10 +28,17 @@ func (s *sSysPublish) supersedeTelegramJobAndCompleteOperation(ctx context.Conte
 		return err
 	}
 	_, completeErr := s.completeProfileTelegramOperation(ctx, job, isCycleBatchOperation(job.OperationNo))
-	if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
-		g.Log().Warningf(ctx, "废弃任务后唤醒频道待入队TG任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
-	}
 	return completeErr
+}
+
+func (s *sSysPublish) completeTelegramJobAndWakeChannel(ctx context.Context, job telegramJobRecord) error {
+	if err := s.completeTelegramJob(ctx, job); err != nil {
+		return err
+	}
+	if err := s.wakeNextTelegramChannelJob(ctx, job); err != nil {
+		g.Log().Warningf(ctx, "TG任务完成后唤醒频道下一条任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, err)
+	}
+	return nil
 }
 
 type telegramResubmitJob struct {

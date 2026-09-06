@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -45,7 +46,7 @@ func TestTelegramJobPriorityClassifiesPublishOperations(t *testing.T) {
 		{name: "manual profile", operationNo: "profile:123", want: tgJobPriorityUrgent},
 		{name: "manual batch", operationNo: "batchtext:1:batch-1:profile:123", want: tgJobPriorityUrgent},
 		{name: "message push", operationNo: "message_push:1:2:3", want: tgJobPriorityUrgent},
-		{name: "full push", operationNo: "full_push:1:2", want: tgJobPriorityBulk},
+		{name: "full push", operationNo: "full_push:1:2", want: tgJobPriorityFullPush},
 		{name: "cycle push", operationNo: "cycle_batch:1:2:3", want: tgJobPriorityBulk},
 		{name: "explicit default", operationNo: "collect:1", priority: tgJobPriorityDefault, want: tgJobPriorityDefault},
 	}
@@ -59,19 +60,21 @@ func TestTelegramJobPriorityClassifiesPublishOperations(t *testing.T) {
 	}
 }
 
-func TestNormalizeTelegramChannelPreparationDepth(t *testing.T) {
-	tests := []struct {
-		input int
-		want  int
-	}{
-		{input: 0, want: 1},
-		{input: 1, want: 1},
-		{input: 4, want: 4},
-		{input: 32, want: 16},
+func TestTelegramChannelAllowsOnlyOneActiveJob(t *testing.T) {
+	if telegramChannelActiveJobLimit != 1 {
+		t.Fatalf("channel active job limit=%d, want 1", telegramChannelActiveJobLimit)
 	}
-	for _, test := range tests {
-		if got := normalizeTelegramChannelPreparationDepth(test.input); got != test.want {
-			t.Fatalf("normalizeTelegramChannelPreparationDepth(%d)=%d, want %d", test.input, got, test.want)
-		}
+	if tgJobPriorityFullPush >= tgJobPriorityBulk {
+		t.Fatalf("full push priority=%d must be higher than cycle bulk=%d", tgJobPriorityFullPush, tgJobPriorityBulk)
+	}
+	if queue := telegramQueueNameByPriority(tgJobPriorityFullPush); queue != tgQueueNameDefault {
+		t.Fatalf("full push queue=%s, want %s", queue, tgQueueNameDefault)
+	}
+	if queue := telegramQueueNameByPriority(tgJobPriorityBulk); queue != tgQueueNameBulk {
+		t.Fatalf("cycle queue=%s, want %s", queue, tgQueueNameBulk)
+	}
+	expression := telegramJobEffectivePrioritySQL("j")
+	if !strings.Contains(expression, "j.operation_no LIKE 'full_push:%'") || !strings.Contains(expression, "THEN 70") {
+		t.Fatalf("effective priority SQL does not prioritize existing full push jobs: %s", expression)
 	}
 }

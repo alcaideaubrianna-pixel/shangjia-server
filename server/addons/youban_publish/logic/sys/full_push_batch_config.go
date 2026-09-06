@@ -13,7 +13,7 @@ const (
 	defaultFullPushCandidateCount    = 20
 	defaultFullPushSchedulerInterval = 2 * time.Second
 	defaultFullPushExpandLeaseTTL    = 60 * time.Second
-	defaultFullPushPendingJobLimit   = 300
+	defaultFullPushPendingJobLimit   = 1000
 )
 
 func fullPushExpandWorkerCount(ctx context.Context) int {

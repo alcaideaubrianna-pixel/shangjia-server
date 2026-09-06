@@ -151,14 +151,13 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 		limit = 100
 	}
 	now := gtime.Now()
-	preparationDepth := telegramChannelPreparationDepth(ctx)
 	nowText := telegramRecoveryTimeText(now)
 	deadline := telegramRecoveryTimeText(now.Add(-telegramPendingJobRecoverAfter))
 	var jobs []telegramJobRecord
 	query := `WITH eligible_jobs AS (
 		SELECT j.*, ROW_NUMBER() OVER (
 			PARTITION BY j.tenant_id, j.channel_id
-			ORDER BY j.priority ASC, j.id ASC
+			ORDER BY ` + telegramJobEffectivePrioritySQL("j") + ` ASC, j.id ASC
 		) AS channel_rank
 		FROM ` + publishTgJobTable + ` j
 		WHERE j.status IN ('pending', 'failed_retry', 'unknown')
@@ -171,7 +170,7 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 	WHERE channel_rank <= ?
 	ORDER BY updated_at ASC, id ASC
 	LIMIT ?`
-	err := g.DB().GetScan(ctx, &jobs, query, tgDispatchStatusIdle, nowText, deadline, preparationDepth, limit)
+	err := g.DB().GetScan(ctx, &jobs, query, tgDispatchStatusIdle, nowText, deadline, telegramChannelActiveJobLimit, limit)
 	if err != nil {
 		observeErr = err
 		return gerror.Wrap(err, "读取待入队TG推送任务失败")

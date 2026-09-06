@@ -140,15 +140,21 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 	return pending == 0, err
 }
 
-func (s *sSysPublish) postponeTelegramJobUntilMediaReady(ctx context.Context, jobId int64) error {
+func (s *sSysPublish) postponeTelegramJobUntilMediaReady(ctx context.Context, job telegramJobRecord) error {
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", jobId).
+		Where("id", job.Id).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		Data(g.Map{
 			"dispatch_status":     tgDispatchStatusIdle,
 			"last_dispatch_error": "媒体仍在异步处理中，媒体就绪后自动唤醒",
-			"next_retry_at":       nil,
+			"next_retry_at":       gtime.Now().Add(telegramPublishTaskTimeout),
 			"updated_at":          gtime.Now(),
 		}).Update()
-	return err
+	if err != nil {
+		return err
+	}
+	if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
+		g.Log().Warningf(ctx, "等待媒体时唤醒频道下一条TG任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
+	}
+	return nil
 }

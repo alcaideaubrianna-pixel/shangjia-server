@@ -64,9 +64,10 @@ func collectMediaBulkQueueNames() []string {
 }
 
 const (
-	tgJobPriorityUrgent  = 10
-	tgJobPriorityDefault = 50
-	tgJobPriorityBulk    = 90
+	tgJobPriorityUrgent   = 10
+	tgJobPriorityDefault  = 50
+	tgJobPriorityFullPush = 70
+	tgJobPriorityBulk     = 90
 )
 
 type tgQueuePayload struct {
@@ -168,13 +169,6 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 			delay = windowDelay
 		}
 	}
-	shouldEnqueue, err := s.shouldEnqueueTelegramChannelJob(ctx, job)
-	if err != nil {
-		return err
-	}
-	if !shouldEnqueue {
-		return nil
-	}
 	if active, checkErr := s.telegramJobChannelIsActive(ctx, job); checkErr != nil {
 		return checkErr
 	} else if !active {
@@ -213,16 +207,26 @@ func (s *sSysPublish) enqueueTelegramJobDirectWithUnique(ctx context.Context, jo
 	} else {
 		data["next_retry_at"] = nil
 	}
-	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		Where("id", jobId).
-		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
-		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
-		Data(data).Update()
+	reserved, err := s.withTelegramChannelDispatchLease(ctx, job, func() (bool, error) {
+		hasCapacity, capacityErr := s.telegramChannelHasDispatchCapacity(ctx, job)
+		if capacityErr != nil || !hasCapacity {
+			return false, capacityErr
+		}
+		result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", jobId).
+			WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+			Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
+			Data(data).Update()
+		if updateErr != nil {
+			return false, updateErr
+		}
+		affected, _ := result.RowsAffected()
+		return affected > 0, nil
+	})
 	if err != nil {
 		return gerror.Wrap(err, "锁定TG任务入队状态失败")
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if !reserved {
 		return nil
 	}
 	if err = s.enqueueTelegramTaskWithQueue(ctx, tgTaskTypePublish, jobId, delay, unique, queueName); err != nil {

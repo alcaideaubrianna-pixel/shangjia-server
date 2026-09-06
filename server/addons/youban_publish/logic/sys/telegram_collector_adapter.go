@@ -302,7 +302,7 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		}
 		if len(verifyMedia) == 0 {
 			g.Log().Infof(ctx, "协议号媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMessages:0", task.ID, job.Id, task.AccountID, len(messages))
-			return s.completeTelegramJob(ctx, job)
+			return s.completeTelegramJobAndWakeChannel(ctx, job)
 		}
 		// 验证资料必须保持纯媒体，不附加对账 marker，避免干扰公群采集器。
 		verifyCaption := ""
@@ -327,13 +327,13 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			return err
 		}
 		g.Log().Infof(ctx, "协议号媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d displayMessages:%d verifyMessages:%d", task.ID, job.Id, task.AccountID, len(messages), len(verifyMessages))
-		return s.completeTelegramJob(ctx, job)
+		return s.completeTelegramJobAndWakeChannel(ctx, job)
 	}
 	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifyConfirmed); err != nil {
 		return err
 	}
 	g.Log().Infof(ctx, "协议号验证媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d verifyMessages:%d", task.ID, job.Id, task.AccountID, len(messages))
-	return s.completeTelegramJob(ctx, job)
+	return s.completeTelegramJobAndWakeChannel(ctx, job)
 }
 
 func mediaFallbackTaskCanSkip(jobStatus string, sentMessageCount int) bool {

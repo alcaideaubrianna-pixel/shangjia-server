@@ -24,13 +24,27 @@ func telegramJobPriorityValue(job telegramJobRecord) int {
 		strings.HasPrefix(operationNo, "message_push:") {
 		return tgJobPriorityUrgent
 	}
-	if strings.HasPrefix(operationNo, "full_push:") || strings.HasPrefix(operationNo, "cycle_batch:") {
+	if strings.HasPrefix(operationNo, "full_push:") {
+		return tgJobPriorityFullPush
+	}
+	if strings.HasPrefix(operationNo, "cycle_batch:") {
 		return tgJobPriorityBulk
 	}
 	if job.Priority > 0 && job.Priority != 100 {
 		return job.Priority
 	}
 	return tgJobPriorityDefault
+}
+
+func telegramJobEffectivePrioritySQL(alias string) string {
+	prefix := ""
+	if strings.TrimSpace(alias) != "" {
+		prefix = strings.TrimSpace(alias) + "."
+	}
+	return fmt.Sprintf(
+		"CASE WHEN %soperation_no LIKE 'full_push:%%' THEN %d WHEN %soperation_no LIKE 'cycle_batch:%%' THEN %d ELSE %spriority END",
+		prefix, tgJobPriorityFullPush, prefix, tgJobPriorityBulk, prefix,
+	)
 }
 
 func telegramQueueNameByPriority(priority int) string {
