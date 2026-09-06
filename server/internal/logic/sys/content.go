@@ -627,7 +627,8 @@ func applyPublicProfileKeyword(mod *gdb.Model, keyword, profileNoColumn, titleCo
 		return mod, nil
 	}
 	if profileNo, ok := profilesearch.Identifier(keyword); ok {
-		return mod.Where(aliasField("p", profileNoColumn), profileNo), nil
+		lowerProfileNo := strings.ToLower(profileNo)
+		return mod.WhereIn(aliasField("p", profileNoColumn), []string{profileNo, lowerProfileNo}), nil
 	}
 	like := "%" + keyword + "%"
 	// Short textual searches target the generated title only. Longer searches
