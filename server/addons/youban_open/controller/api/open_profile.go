@@ -21,7 +21,7 @@ var OpenProfile = cOpenProfile{}
 type cOpenProfile struct{}
 
 func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.ListRes, err error) {
-	in := sysin.ContentProfileListInp{PageReq: req.PageReq, Province: strings.TrimSpace(req.ProvinceCode), City: strings.TrimSpace(req.CityCode), AgeMin: req.AgeMin, AgeMax: req.AgeMax, HeightMin: req.HeightMin, HeightMax: req.HeightMax, WeightMin: req.WeightMin, WeightMax: req.WeightMax, Cups: req.Cups, HasVideo: req.HasVideo, HasVerification: req.HasVerification, IsVirgin: req.IsVirgin}
+	in := openProfileListInput(req)
 	provinceCodes, err := normalizeProvinceCodes(req.ProvinceCode, req.ProvinceCodes)
 	if err != nil {
 		return nil, err
@@ -53,7 +53,7 @@ func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.L
 	if feed == "" {
 		feed = "latest"
 	}
-	if feed == "hot" || feed == "recommended" {
+	if in.Keyword == "" && (feed == "hot" || feed == "recommended") {
 		in.RankProfileIds, err = addonService.OpenAccess().RankedProfileIds(
 			ctx,
 			opencontext.AppId(ctx),
@@ -73,6 +73,16 @@ func (c *cOpenProfile) List(ctx context.Context, req *open.ListReq) (res *open.L
 	res = &open.ListRes{List: list}
 	res.PageRes.Pack(req, total)
 	return res, nil
+}
+
+func openProfileListInput(req *open.ListReq) sysin.ContentProfileListInp {
+	return sysin.ContentProfileListInp{
+		PageReq: req.PageReq, Keyword: strings.TrimSpace(req.Keyword),
+		Province: strings.TrimSpace(req.ProvinceCode), City: strings.TrimSpace(req.CityCode),
+		AgeMin: req.AgeMin, AgeMax: req.AgeMax, HeightMin: req.HeightMin, HeightMax: req.HeightMax,
+		WeightMin: req.WeightMin, WeightMax: req.WeightMax, Cups: req.Cups,
+		HasVideo: req.HasVideo, HasVerification: req.HasVerification, IsVirgin: req.IsVirgin,
+	}
 }
 
 func normalizeProvinceCodes(single, multiple string) ([]string, error) {

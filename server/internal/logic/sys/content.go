@@ -18,6 +18,7 @@ import (
 	"hotgo/internal/model/entity"
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
+	"hotgo/utility/profilesearch"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -462,21 +463,6 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 		mod = s.excludeMemberProfileActions(ctx, mod, memberId, in.ExcludeActions)
 	}
 
-	if in.Keyword != "" {
-		keyword := "%" + strings.TrimSpace(in.Keyword) + "%"
-		mod = mod.Where(
-			"("+strings.Join([]string{
-				aliasField("p", profileColumns.ProfileNo) + " LIKE ?",
-				aliasField("p", profileColumns.Title) + " LIKE ?",
-				aliasField("p", profileColumns.Summary) + " LIKE ?",
-				aliasField("p", profileColumns.PlainText) + " LIKE ?",
-				aliasField("p", profileColumns.Province) + " LIKE ?",
-				aliasField("p", profileColumns.City) + " LIKE ?",
-				aliasField("p", profileColumns.CupSize) + " LIKE ?",
-			}, " OR ")+")",
-			keyword, keyword, keyword, keyword, keyword, keyword, keyword,
-		)
-	}
 	if in.Provinces != "" {
 		values := uniqueNonEmptyStrings(strings.Split(in.Provinces, ",")...)
 		if values = uniqueNonEmptyStrings(values...); len(values) > 0 {
@@ -559,6 +545,17 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 	if in.HasTattoo == 1 {
 		mod = mod.Where(aliasField("p", profileColumns.HasTattoo), 1)
 	}
+	mod, err = applyPublicProfileKeyword(
+		mod,
+		in.Keyword,
+		profileColumns.ProfileNo,
+		profileColumns.Title,
+		profileColumns.Summary,
+		profileColumns.PlainText,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	if in.WithTotal == 1 {
 		totalCount, err = mod.Count()
@@ -622,6 +619,32 @@ func (s *sSysContent) listProfilesByFilter(ctx context.Context, in *sysin.Conten
 
 	list, err = s.buildProfileListFromRows(ctx, rows)
 	return
+}
+
+func applyPublicProfileKeyword(mod *gdb.Model, keyword, profileNoColumn, titleColumn, summaryColumn, plainTextColumn string) (*gdb.Model, error) {
+	keyword = profilesearch.NormalizeKeyword(keyword)
+	if keyword == "" {
+		return mod, nil
+	}
+	if profileNo, ok := profilesearch.Identifier(keyword); ok {
+		exact := mod.Where(aliasField("p", profileNoColumn), profileNo)
+		count, err := exact.Count()
+		if err != nil {
+			return nil, gerror.Wrap(err, "按资料编号搜索失败")
+		}
+		if count > 0 {
+			return exact, nil
+		}
+	}
+	like := "%" + keyword + "%"
+	return mod.Where(
+		"("+strings.Join([]string{
+			aliasField("p", titleColumn) + " LIKE ?",
+			aliasField("p", summaryColumn) + " LIKE ?",
+			aliasField("p", plainTextColumn) + " LIKE ?",
+		}, " OR ")+")",
+		like, like, like,
+	), nil
 }
 
 func profileRankOrderExpression(idField string, ids []int64) string {

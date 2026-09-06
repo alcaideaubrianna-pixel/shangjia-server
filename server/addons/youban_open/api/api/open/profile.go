@@ -13,6 +13,7 @@ type ListReq struct {
 	form.PageReq
 	Feed            string `json:"feed" dc:"排序方式：latest/hot/recommended" v:"in:latest,hot,recommended#feed 仅支持 latest、hot、recommended"`
 	ActorId         string `json:"actorId" dc:"平台侧不可逆用户标识，用于个性化推荐"`
+	Keyword         string `json:"keyword" dc:"资料编号或正文关键词" v:"length:0,50#关键词不能超过50个字符"`
 	ProvinceCode    string `json:"provinceCode" dc:"省份行政区划编码（6位数字）" v:"regex:^[0-9]{6}$#provinceCode 必须为6位行政区划编码"`
 	ProvinceCodes   string `json:"provinceCodes" dc:"多个省份行政区划编码，逗号分隔"`
 	CityCode        string `json:"cityCode" dc:"城市行政区划编码（6位数字）" v:"regex:^[0-9]{6}$#cityCode 必须为6位行政区划编码"`

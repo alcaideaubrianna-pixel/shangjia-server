@@ -12,12 +12,12 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/cache"
 	"hotgo/internal/model/input/form"
+	"hotgo/utility/profilesearch"
 )
 
 var (
-	profileSearchLabelRegexp = regexp.MustCompile(`(?i)^\s*(?:资料)?编号\s*[:：=]?\s*`)
-	profileSearchNoRegexp    = regexp.MustCompile(`^[A-Z][0-9]{5}$`)
-	profileSearchMarkRegexp  = regexp.MustCompile(`^(.+?)([0-9]{3,})$`)
+	profileSearchNoRegexp   = regexp.MustCompile(`^[A-Z][0-9]{5}$`)
+	profileSearchMarkRegexp = regexp.MustCompile(`^(.+?)([0-9]{3,})$`)
 )
 
 type profileSearchFields struct {
@@ -98,7 +98,7 @@ func profileTextSearchCondition(keyword string, fields profileSearchFields) (str
 }
 
 func normalizeProfileSearchKeyword(keyword string) string {
-	return strings.TrimSpace(profileSearchLabelRegexp.ReplaceAllString(strings.TrimSpace(keyword), ""))
+	return profilesearch.NormalizeKeyword(keyword)
 }
 
 func parseProfilePublishMark(keyword string) (sequence string, prefix string, ok bool) {
