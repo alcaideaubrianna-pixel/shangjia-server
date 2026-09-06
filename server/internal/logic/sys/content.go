@@ -626,17 +626,27 @@ func applyPublicProfileKeyword(mod *gdb.Model, keyword, profileNoColumn, titleCo
 	if keyword == "" {
 		return mod, nil
 	}
+	like := "%" + keyword + "%"
+	conditions := []string{
+		aliasField("p", titleColumn) + " = ?",
+		aliasField("p", titleColumn) + " LIKE ?",
+		aliasField("p", plainTextColumn) + " LIKE ?",
+	}
+	args := []interface{}{keyword, like, like}
+	// A generated title such as VS5159571 is not necessarily the upstream
+	// profile number (which may be FNVS5159571). Keep exact profile-number
+	// matching as one branch, but never classify every alphanumeric keyword as
+	// a profile number: otherwise title aliases are incorrectly hidden.
 	if profileNo, ok := profilesearch.Identifier(keyword); ok {
 		lowerProfileNo := strings.ToLower(profileNo)
-		return mod.WhereIn(aliasField("p", profileNoColumn), []string{profileNo, lowerProfileNo}), nil
+		conditions = append(conditions, aliasField("p", profileNoColumn)+" = ?")
+		args = append(args, profileNo)
+		if lowerProfileNo != profileNo {
+			conditions = append(conditions, aliasField("p", profileNoColumn)+" = ?")
+			args = append(args, lowerProfileNo)
+		}
 	}
-	like := "%" + keyword + "%"
-	// Short textual searches target the generated title only. Longer searches
-	// target正文，避免每次请求同时扫描多个大字段。
-	if len([]rune(keyword)) <= 12 {
-		return mod.Where(aliasField("p", titleColumn)+" LIKE ?", like), nil
-	}
-	return mod.Where(aliasField("p", plainTextColumn)+" LIKE ?", like), nil
+	return mod.Where("("+strings.Join(conditions, " OR ")+")", args...), nil
 }
 
 func profileRankOrderExpression(idField string, ids []int64) string {
