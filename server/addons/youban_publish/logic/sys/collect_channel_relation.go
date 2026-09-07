@@ -2,13 +2,83 @@ package sys
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/gconv"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+func collectSourceGroupKey(event gdb.Record) string {
+	if event.IsEmpty() {
+		return ""
+	}
+	chatID := canonicalCollectSourceChatID(event["source_chat_id"].String())
+	if chatID == "" {
+		return ""
+	}
+	if groupedID := strings.TrimSpace(event["source_grouped_id"].String()); groupedID != "" {
+		return fmt.Sprintf("%s:group:%s", chatID, groupedID)
+	}
+	if messageID := event["source_message_id"].Int64(); messageID > 0 {
+		return fmt.Sprintf("%s:message:%d", chatID, messageID)
+	}
+	return ""
+}
+
+func canonicalCollectSourceChatID(chatID string) string {
+	return strings.TrimPrefix(strings.TrimSpace(chatID), "-100")
+}
+
+func (s *sSysPublish) filterCollectRulesByClaimedSourceGroup(ctx context.Context, event gdb.Record, rules []gdb.Record) ([]gdb.Record, error) {
+	if len(rules) == 0 || collectSourceGroupKey(event) == "" {
+		return rules, nil
+	}
+	chatID := canonicalCollectSourceChatID(event["source_chat_id"].String())
+	query := g.DB().Model(publishCollectDispatchTable+" d").Safe().Ctx(ctx).
+		InnerJoin(publishCollectEventTable+" e", "e.id=d.event_id").
+		InnerJoin(collectDispatchChannelTable+" dc", "dc.dispatch_id=d.id").
+		Fields("dc.channel_id").
+		Where("d.tenant_id", event["tenant_id"].Int64()).
+		Where("d.account_id", event["account_id"].Int64()).
+		Where("d.status <> ?", sysin.CollectDispatchStatusFailed).
+		Where("d.event_id <> ?", event["id"].Int64()).
+		Where("REPLACE(e.source_chat_id, '-100', '') = ?", chatID)
+	if groupedID := strings.TrimSpace(event["source_grouped_id"].String()); groupedID != "" {
+		query = query.Where("e.source_grouped_id", groupedID)
+	} else {
+		query = query.Where("e.source_grouped_id = ''").Where("e.source_message_id", event["source_message_id"].Int64())
+	}
+	values, err := query.Array()
+	if err != nil {
+		return nil, gerror.Wrap(err, "检查来源消息组分发记录失败")
+	}
+	claimed := make(map[int64]struct{}, len(values))
+	for _, value := range values {
+		claimed[value.Int64()] = struct{}{}
+	}
+	filtered := make([]gdb.Record, 0, len(rules))
+	for _, rule := range rules {
+		available := make([]int64, 0)
+		for _, channelID := range collectRuleTargetChannelIds(rule) {
+			if _, exists := claimed[channelID]; !exists {
+				available = append(available, channelID)
+				claimed[channelID] = struct{}{}
+			}
+		}
+		if len(available) == 0 {
+			continue
+		}
+		rule["target_channel_ids"] = g.NewVar(available)
+		filtered = append(filtered, rule)
+	}
+	return filtered, nil
+}
 
 func attachCollectRuleChannels(ctx context.Context, rules []gdb.Record) error {
 	ruleIds := make([]int64, 0, len(rules))

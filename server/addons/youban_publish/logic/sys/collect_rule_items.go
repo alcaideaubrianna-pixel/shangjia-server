@@ -131,6 +131,36 @@ func collectRuleReplacements(rule gdb.Record) []collectReplaceRule {
 	return items
 }
 
+func mergeGlobalCollectTextPolicy(rules, globals []gdb.Record) {
+	if len(rules) == 0 || len(globals) == 0 {
+		return
+	}
+	deleteLines := make([]string, 0)
+	deleteTexts := make([]string, 0)
+	replaceFrom := make([]string, 0)
+	replaceTo := make([]string, 0)
+	for _, global := range globals {
+		deleteLines = append(deleteLines, collectRuleStrings(global, "delete_lines")...)
+		deleteTexts = append(deleteTexts, collectRuleStrings(global, "delete_texts")...)
+		for _, replacement := range collectRuleReplacements(global) {
+			replaceFrom = append(replaceFrom, replacement.From)
+			replaceTo = append(replaceTo, replacement.To)
+		}
+	}
+	for _, rule := range rules {
+		rule["delete_lines"] = gvar.New(append(deleteLines, collectRuleStrings(rule, "delete_lines")...))
+		rule["delete_texts"] = gvar.New(append(deleteTexts, collectRuleStrings(rule, "delete_texts")...))
+		from := append([]string{}, replaceFrom...)
+		to := append([]string{}, replaceTo...)
+		for _, replacement := range collectRuleReplacements(rule) {
+			from = append(from, replacement.From)
+			to = append(to, replacement.To)
+		}
+		rule["replace_from"] = gvar.New(from)
+		rule["replace_to"] = gvar.New(to)
+	}
+}
+
 func syncCollectRuleItemsTx(ctx context.Context, tx gdb.TX, tenantId, accountId, ruleId int64, items collectRuleItems) error {
 	if _, err := tx.Model(collectRuleItemTable).Ctx(ctx).Where("rule_id", ruleId).Delete(); err != nil {
 		return gerror.Wrap(err, "清理采集规则项失败")

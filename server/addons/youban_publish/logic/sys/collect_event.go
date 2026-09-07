@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -455,6 +456,10 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	}
 	s.enrichCollectContentMediaMetadata(ctx, lockContent)
 	lockKeys := collectDedupeSignatureLockKeys(collectDedupeMaterialFromEvent(event, lockContent))
+	if sourceGroupKey := collectSourceGroupKey(event); sourceGroupKey != "" {
+		lockKeys = append(lockKeys, "source_group:"+sourceGroupKey)
+		sort.Strings(lockKeys)
+	}
 	dedupeLocks := make([]*lock.Lock, 0, len(lockKeys))
 	for _, signatureKey := range lockKeys {
 		dedupeLock := lock.NewConfig(2*time.Minute, 20*time.Millisecond).Mutex(fmt.Sprintf(
@@ -506,6 +511,13 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	}
 	if len(candidateRules) == 0 {
 		return s.ignoreCollectEvent(ctx, eventId, "图文重复", "dedupe")
+	}
+	candidateRules, err = s.filterCollectRulesByClaimedSourceGroup(ctx, event, candidateRules)
+	if err != nil {
+		return err
+	}
+	if len(candidateRules) == 0 {
+		return s.ignoreCollectEvent(ctx, eventId, "同一来源消息组已生成推送任务", "source_group")
 	}
 	matched := false
 	reasons := make([]string, 0, len(candidateRules))
@@ -690,7 +702,7 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 		row["footer_enabled"] = gvar.New(0)
 		row["target_channel_ids"] = gvar.New([]int64{})
 	}
-	rows := globalRows
+	rows := make(gdb.Result, 0, len(ruleIds))
 	if len(ruleIds) > 0 {
 		boundRows, queryErr := pdao.YoubanPublishCollectRule.Ctx(ctx).
 			Where("tenant_id", tenantId).Where("account_id", accountId).
@@ -699,12 +711,10 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 		if queryErr != nil {
 			return nil, gerror.Wrap(queryErr, "读取采集源绑定规则失败")
 		}
-		seen := make(map[int64]struct{}, len(rows))
-		for _, row := range rows {
-			seen[row["id"].Int64()] = struct{}{}
-		}
+		seen := make(map[int64]struct{}, len(boundRows))
 		for _, row := range boundRows {
 			if _, ok := seen[row["id"].Int64()]; !ok {
+				seen[row["id"].Int64()] = struct{}{}
 				rows = append(rows, row)
 			}
 		}
@@ -718,6 +728,10 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	if err = attachCollectRuleItems(ctx, rows); err != nil {
 		return nil, err
 	}
+	if err = attachCollectRuleItems(ctx, globalRows); err != nil {
+		return nil, err
+	}
+	mergeGlobalCollectTextPolicy(rows, globalRows)
 	collectEventRulesCacheSet(ctx, cacheKey, rows)
 	return rows, nil
 }
