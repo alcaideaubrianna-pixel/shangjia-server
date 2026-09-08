@@ -35,6 +35,15 @@ type telegramJobFailureDecision struct {
 
 func telegramJobFailureNextState(err error, currentRetryCount int) telegramJobFailureDecision {
 	retryCount := currentRetryCount + 1
+	if delay, ok := telegramRateLimitRetryDelay(err); ok {
+		return telegramJobFailureDecision{
+			Status:         "failed_retry",
+			DispatchStatus: tgDispatchStatusIdle,
+			RetryCount:     currentRetryCount,
+			RetryDelay:     delay,
+			Message:        telegramRateLimitMessage(delay),
+		}
+	}
 	policy := telegramJobErrorRetryPolicy(err, retryCount)
 	decision := telegramJobFailureDecision{
 		Status:         "failed_retry",
@@ -49,6 +58,46 @@ func telegramJobFailureNextState(err error, currentRetryCount int) telegramJobFa
 		decision.RetryDelay = 0
 	}
 	return decision
+}
+
+func telegramRateLimitRetryDelay(err error) (time.Duration, bool) {
+	if err == nil {
+		return 0, false
+	}
+	if delay, ok := tgerr.AsFloodWait(err); ok {
+		return clampTelegramRetryDelay(delay), true
+	}
+	var tooMany *tgbot.TooManyRequestsError
+	if errors.As(err, &tooMany) {
+		return clampTelegramRetryDelay(time.Duration(tooMany.RetryAfter) * time.Second), true
+	}
+	message := strings.ToLower(err.Error())
+	if !strings.Contains(message, "too many requests") && !strings.Contains(message, "flood_wait") {
+		return 0, false
+	}
+	for _, pattern := range []string{"retry_after ", "retry after ", "flood_wait_"} {
+		if index := strings.Index(message, pattern); index >= 0 {
+			var seconds int
+			if _, scanErr := fmt.Sscanf(message[index+len(pattern):], "%d", &seconds); scanErr == nil && seconds > 0 {
+				return clampTelegramRetryDelay(time.Duration(seconds) * time.Second), true
+			}
+		}
+	}
+	return telegramRetryMinDelay, true
+}
+
+func clampTelegramRetryDelay(delay time.Duration) time.Duration {
+	if delay < telegramRetryMinDelay {
+		return telegramRetryMinDelay
+	}
+	if delay > telegramRetryMaxDelay {
+		return telegramRetryMaxDelay
+	}
+	return delay
+}
+
+func telegramRateLimitMessage(delay time.Duration) string {
+	return fmt.Sprintf("Telegram 发送频率过快，已触发限流；系统会等待 %d 秒后自动继续，限流不计入失败次数。", int(delay.Seconds()))
 }
 
 func telegramJobStateUpdateData(status string, retryDelay time.Duration, now *gtime.Time) g.Map {

@@ -118,6 +118,24 @@ func TestTelegramMediaSizeLimitError(t *testing.T) {
 	}
 }
 
+func TestTelegramRateLimitNeverBecomesPermanent(t *testing.T) {
+	for _, message := range []string{
+		"too many requests, Too Many Requests: retry after 8: retry_after 8",
+		"rpc error: FLOOD_WAIT_45",
+	} {
+		decision := telegramJobFailureNextState(assertError(message), telegramRetryMaxCount)
+		if decision.Status != "failed_retry" || decision.DispatchStatus != tgDispatchStatusIdle {
+			t.Fatalf("rate limit must remain retryable: %+v", decision)
+		}
+		if decision.RetryCount != telegramRetryMaxCount {
+			t.Fatalf("rate limit must not increment failure count: %+v", decision)
+		}
+		if decision.RetryDelay < telegramRetryMinDelay {
+			t.Fatalf("rate limit delay must be bounded: %+v", decision)
+		}
+	}
+}
+
 func assertError(message string) error {
 	return simpleError(message)
 }
