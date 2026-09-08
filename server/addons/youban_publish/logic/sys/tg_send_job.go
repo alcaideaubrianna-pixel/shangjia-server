@@ -135,13 +135,23 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "上架任务已下架或不可发布，跳过TG推送")
 		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
 	}
-	allowed, err = s.prepareProfileChannelPublish(ctx, job)
-	if err != nil {
-		return s.handleTelegramJobError(ctx, job, err)
-	}
-	if !allowed {
-		s.appendTelegramJobLog(ctx, job, "publish", "skipped", "频道已有同资料有效消息，跳过重复TG推送")
-		return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
+	if !telegramSendPhaseHasCleanup(job.SendPhase) {
+		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseCleanupProcessing); err != nil {
+			return s.handleTelegramJobError(ctx, job, err)
+		}
+		job.SendPhase = telegramSendPhaseCleanupProcessing
+		allowed, err = s.prepareProfileChannelPublish(ctx, job)
+		if err != nil {
+			return s.handleTelegramJobError(ctx, job, err)
+		}
+		if !allowed {
+			s.appendTelegramJobLog(ctx, job, "publish", "skipped", "频道已有同资料有效消息，跳过重复TG推送")
+			return s.supersedeTelegramJobAndCompleteOperation(ctx, job)
+		}
+		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseCleanupConfirmed); err != nil {
+			return s.handleTelegramJobError(ctx, job, err)
+		}
+		job.SendPhase = telegramSendPhaseCleanupConfirmed
 	}
 	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusPublishing); err != nil {
 		return err
@@ -415,7 +425,7 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	if errors.Is(err, errTelegramJobSuperseded) {
 		return nil
 	}
-	if !isTelegramAccountBusyError(err) && isTelegramAmbiguousDeliveryError(err) {
+	if !telegramSendPhaseIsCleanup(job.SendPhase) && !isTelegramAccountBusyError(err) && isTelegramAmbiguousDeliveryError(err) {
 		return s.markTelegramJobUnknown(ctx, job, err)
 	}
 	allowed, allowedErr := s.canSendTelegramJob(ctx, job)

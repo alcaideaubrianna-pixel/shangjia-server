@@ -21,13 +21,30 @@ import (
 )
 
 const (
-	telegramSendPhaseDisplaySending   = "display_sending"
-	telegramSendPhaseDisplayConfirmed = "display_confirmed"
-	telegramSendPhaseVerifySending    = "verify_sending"
-	telegramSendPhaseVerifyConfirmed  = "verify_confirmed"
-	telegramUnknownReconcileDelay     = 20 * time.Second
-	telegramUnknownReconcileMaxCount  = 2
+	telegramSendPhaseCleanupProcessing = "cleanup_processing"
+	telegramSendPhaseCleanupConfirmed  = "cleanup_confirmed"
+	telegramSendPhaseDisplaySending    = "display_sending"
+	telegramSendPhaseDisplayConfirmed  = "display_confirmed"
+	telegramSendPhaseVerifySending     = "verify_sending"
+	telegramSendPhaseVerifyConfirmed   = "verify_confirmed"
+	telegramUnknownReconcileDelay      = 20 * time.Second
+	telegramUnknownReconcileMaxCount   = 2
 )
+
+func telegramSendPhaseHasCleanup(phase string) bool {
+	switch strings.TrimSpace(phase) {
+	case telegramSendPhaseCleanupConfirmed,
+		telegramSendPhaseDisplaySending, telegramSendPhaseDisplayConfirmed,
+		telegramSendPhaseVerifySending, telegramSendPhaseVerifyConfirmed:
+		return true
+	default:
+		return false
+	}
+}
+
+func telegramSendPhaseIsCleanup(phase string) bool {
+	return strings.TrimSpace(phase) == telegramSendPhaseCleanupProcessing
+}
 
 type telegramReconcileChannel struct {
 	Id           int64  `json:"id"`

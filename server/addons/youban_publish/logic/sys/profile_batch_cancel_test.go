@@ -11,7 +11,7 @@ func TestAdminBatchTextOperationNo(t *testing.T) {
 		t.Fatalf("unexpected operation no: %s", operationNo)
 	}
 	if !isManualProfilePublishOperation(operationNo) {
-		t.Fatal("batch text publish must use manual republish cleanup")
+		t.Fatal("batch text publish must be recognized as manual publish")
 	}
 }
 

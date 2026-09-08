@@ -60,18 +60,30 @@ type telegramProfilePublishMeta struct {
 }
 
 func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta) error {
+	var jobIds []int64
+	var err error
 	if profileId <= 0 {
-		return s.submitProfilePublishWithMetaUnlocked(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, meta)
+		jobIds, err = s.prepareProfilePublishJobs(ctx, profileId, tenantId, accountId, operationNo, channelIds, requireOnline, meta)
+	} else {
+		err = s.withProfileLifecycleLock(ctx, tenantId, profileId, func() error {
+			jobIds, err = s.prepareProfilePublishJobs(ctx, profileId, tenantId, accountId, operationNo, channelIds, requireOnline, meta)
+			return err
+		})
 	}
-	return s.withProfileLifecycleLock(ctx, tenantId, profileId, func() error {
-		return s.submitProfilePublishWithMetaUnlocked(ctx, profileId, tenantId, accountId, operatorId, operationNo, channelIds, requireOnline, meta)
-	})
-}
-
-func (s *sSysPublish) submitProfilePublishWithMetaUnlocked(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta) error {
-	source, err := s.profilePublishSource(ctx, profileId, tenantId, accountId, requireOnline)
 	if err != nil {
 		return err
+	}
+	s.enqueuePreparedProfileJobs(ctx, jobIds, operatorId)
+	return nil
+}
+
+// prepareProfilePublishJobs persists the publish intent while the profile
+// lifecycle lock is held. External queue and Telegram calls must happen after
+// this method returns so they cannot extend the profile critical section.
+func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, tenantId, accountId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta) ([]int64, error) {
+	source, err := s.profilePublishSource(ctx, profileId, tenantId, accountId, requireOnline)
+	if err != nil {
+		return nil, err
 	}
 	requestedChannelIds := uniqueIds(channelIds)
 	var channels []telegramJobChannel
@@ -81,7 +93,7 @@ func (s *sSysPublish) submitProfilePublishWithMetaUnlocked(ctx context.Context, 
 		channels, err = s.telegramJobChannels(ctx, source, requestedChannelIds)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	resolvedChannelIds := make([]int64, 0, len(channels))
 	for _, channel := range channels {
@@ -92,24 +104,23 @@ func (s *sSysPublish) submitProfilePublishWithMetaUnlocked(ctx context.Context, 
 	if operationNo == "" {
 		operationNo = newTelegramOperationNo("profile", profileId)
 	}
-	if isManualProfilePublishOperation(operationNo) {
-		if err = s.cleanupProfileDownMessagesBeforePublish(ctx, profileId, tenantId); err != nil {
-			return err
-		}
-	}
 	jobIds := make([]int64, 0, len(channels))
 	for _, channel := range channels {
 		jobId, createErr := s.ensureTelegramProfileJobWithMeta(ctx, source, channel, operationNo, meta)
 		if createErr != nil {
-			return createErr
+			return nil, createErr
 		}
 		jobIds = append(jobIds, jobId)
 	}
 	if err = s.beginProfilePublishOperation(ctx, source["tenant_id"].Int64(), source["account_id"].Int64(), profileId, operationNo); err != nil {
-		return err
+		return nil, err
 	}
+	return jobIds, nil
+}
+
+func (s *sSysPublish) enqueuePreparedProfileJobs(ctx context.Context, jobIds []int64, operatorId int64) {
 	for _, jobId := range jobIds {
-		if err = s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
+		if err := s.enqueueTelegramJob(ctx, jobId, 0); err != nil {
 			message := "Redis调度失败，等待数据库调度器恢复：" + err.Error()
 			_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", jobId).Data(g.Map{
 				"dispatch_status": tgDispatchStatusIdle, "last_dispatch_error": message, "updated_at": gtime.Now(),
@@ -117,7 +128,6 @@ func (s *sSysPublish) submitProfilePublishWithMetaUnlocked(ctx context.Context, 
 			g.Log().Warningf(ctx, "资料TG任务入队失败，等待数据库调度器恢复 jobId:%d operatorId:%d err:%+v", jobId, operatorId, err)
 		}
 	}
-	return nil
 }
 
 func (s *sSysPublish) ensureTelegramProfileJob(ctx context.Context, source gdb.Record, channel telegramJobChannel, operationNo string) (int64, error) {

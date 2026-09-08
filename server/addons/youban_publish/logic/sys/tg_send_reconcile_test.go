@@ -45,6 +45,35 @@ func TestTelegramSendPhaseHasDisplay(t *testing.T) {
 	}
 }
 
+func TestTelegramSendPhaseHasCleanup(t *testing.T) {
+	completed := []string{
+		telegramSendPhaseCleanupConfirmed,
+		telegramSendPhaseDisplaySending,
+		telegramSendPhaseDisplayConfirmed,
+		telegramSendPhaseVerifySending,
+		telegramSendPhaseVerifyConfirmed,
+	}
+	for _, phase := range completed {
+		if !telegramSendPhaseHasCleanup(phase) {
+			t.Fatalf("phase %q must include completed cleanup", phase)
+		}
+	}
+	for _, phase := range []string{"", telegramSendPhaseCleanupProcessing} {
+		if telegramSendPhaseHasCleanup(phase) {
+			t.Fatalf("phase %q must require cleanup", phase)
+		}
+	}
+}
+
+func TestTelegramCleanupPhaseRetriesWithoutDeliveryReconcile(t *testing.T) {
+	if !telegramSendPhaseIsCleanup(telegramSendPhaseCleanupProcessing) {
+		t.Fatal("cleanup processing phase must be recognized as cleanup")
+	}
+	if telegramSendPhaseIsCleanup(telegramSendPhaseDisplaySending) {
+		t.Fatal("display delivery must not be classified as cleanup")
+	}
+}
+
 func TestTelegramUnknownReconcileCauseStillCounts(t *testing.T) {
 	decision := telegramUnknownReconcileNextState(telegramJobRecord{RetryCount: 1}, errors.New("协议号暂不可用"))
 	if decision.Status != "unknown" {
