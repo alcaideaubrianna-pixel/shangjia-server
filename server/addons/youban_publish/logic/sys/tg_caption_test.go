@@ -106,6 +106,36 @@ func TestBuildTelegramTaskCaptionAppendsRichTextSuffixInline(t *testing.T) {
 	}
 }
 
+func TestBuildTelegramTaskCaptionBreaksBeforeSuffixForFeeText(t *testing.T) {
+	for _, keyword := range []string{"介绍费", "推荐费", "辛苦费", "包含费"} {
+		row := gdb.Record{
+			"plain_text": gvar.New("正文\n" + keyword + "：7888"),
+		}
+		setting := &sysin.AccountSettingModel{
+			EnableSuffix:  1,
+			SuffixContent: "联系客服",
+		}
+
+		if got, want := buildTelegramTaskCaption(row, setting), "正文\n"+keyword+"：7888\n联系客服"; got != want {
+			t.Fatalf("fee suffix should start on a new line, want %q, got %q", want, got)
+		}
+	}
+}
+
+func TestBuildTelegramTaskCaptionBreaksBeforeFeeSuffix(t *testing.T) {
+	row := gdb.Record{
+		"plain_text": gvar.New("正文"),
+	}
+	setting := &sysin.AccountSettingModel{
+		EnableSuffix:  1,
+		SuffixContent: "介绍费请联系客服",
+	}
+
+	if got := buildTelegramTaskCaption(row, setting); got != "正文\n介绍费请联系客服" {
+		t.Fatalf("fee text in suffix should start on a new line, got %q", got)
+	}
+}
+
 func TestTelegramRichTextHTMLKeepsLineBreaks(t *testing.T) {
 	input := `<p><strong>天美传媒</strong> 招聊手合作，</p><p>@tmcmkfbot 负责人: @timi_by</p><blockquote><p>⚠️ 新系统，不需要添加机器人</p><p>直接通过机器人自助提交频道链接</p></blockquote><p>🔥外围/中圈/日本女优/韩国明星</p>`
 	got := telegramRichTextHTML(input)

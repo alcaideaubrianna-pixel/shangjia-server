@@ -53,8 +53,20 @@ func appendCaptionSuffix(lines []string, suffix string) []string {
 	if len(lines) == 0 {
 		return append(lines, suffix)
 	}
+	if telegramCaptionContainsFeeText(strings.Join(lines, "\n")) || telegramCaptionContainsFeeText(suffix) {
+		return append(lines, suffix)
+	}
 	lines[len(lines)-1] = strings.TrimRight(lines[len(lines)-1], " \t") + " " + suffix
 	return lines
+}
+
+func telegramCaptionContainsFeeText(text string) bool {
+	for _, keyword := range []string{"介绍费", "推荐费", "辛苦费", "包含费"} {
+		if strings.Contains(text, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func appendCaptionMark(lines []string, mark string, position string) []string {
