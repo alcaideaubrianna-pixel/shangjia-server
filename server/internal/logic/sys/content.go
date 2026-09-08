@@ -1795,9 +1795,7 @@ func (s *sSysContent) publicProfileWhere(mod *gdb.Model) *gdb.Model {
 	mediaColumns := dao.ContentMedia.Columns()
 	mod = mod.
 		Where(aliasField("p", profileColumns.Status), 1).
-		WhereIn(aliasField("p", profileColumns.ImportStatus), publicProfileImportStatuses).
-		Where(aliasField("p", profileColumns.ReviewStatus), consts.ContentReviewApproved).
-		WhereIn(aliasField("p", profileColumns.Visibility), []string{consts.ContentVisibilityPublic, consts.ContentVisibilityMemberOnly}).
+		Where(aliasField("p", profileColumns.Visibility), consts.ContentVisibilityPublic).
 		Where("(EXISTS (SELECT 1 FROM "+dao.ContentMedia.Table()+" m WHERE m."+mediaColumns.ProfileId+"=p."+profileColumns.Id+" AND m."+mediaColumns.Status+"=? AND m."+mediaColumns.MediaType+"=? AND COALESCE(m."+mediaColumns.DisplayStoragePath+", '')<>'') "+
 			"OR EXISTS (SELECT 1 FROM hg_youban_publish_media pm WHERE pm.profile_id=p."+profileColumns.Id+" AND pm.status=? AND pm.deleted_at IS NULL AND pm.media_type=? AND COALESCE(NULLIF(pm.edited_storage_path, ''), NULLIF(pm.storage_path, ''), NULLIF(pm.edited_file_url, ''), NULLIF(pm.file_url, ''))<>'') )",
 			consts.StatusEnabled, consts.ContentMediaTypeImage, consts.StatusEnabled, "image")
