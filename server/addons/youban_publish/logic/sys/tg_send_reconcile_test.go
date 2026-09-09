@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTelegramJobPhaseMarkerStableAndDistinct(t *testing.T) {
@@ -82,6 +83,9 @@ func TestTelegramUnknownReconcileCauseStillCounts(t *testing.T) {
 	if decision.ReconcileCount != 1 {
 		t.Fatalf("cause must increment reconcile count, got %d", decision.ReconcileCount)
 	}
+	if decision.RetryDelay != telegramUnknownReconcileRetryDelay {
+		t.Fatalf("unexpected retry delay: %s", decision.RetryDelay)
+	}
 }
 
 func TestTelegramUnknownReconcileFallsBackToRetry(t *testing.T) {
@@ -119,5 +123,23 @@ func TestTelegramIncompleteReconcileNeverFallsBackToResend(t *testing.T) {
 	}
 	if !telegramIncompleteReconcileShouldStop(telegramJobRecord{ReconcileCount: telegramUnknownReconcileMaxCount - 1}) {
 		t.Fatal("repeated partial reconciliation must stop instead of resending")
+	}
+}
+
+func TestTelegramReconcileUsesBackgroundAccountPriority(t *testing.T) {
+	if telegramReconcileAccountTaskPriority >= 100 {
+		t.Fatalf("reconciliation must not use urgent account priority: %d", telegramReconcileAccountTaskPriority)
+	}
+	if telegramReconcileAccountTaskAttempts != 2 {
+		t.Fatalf("reconciliation attempts = %d, want 2", telegramReconcileAccountTaskAttempts)
+	}
+}
+
+func TestTelegramUnknownReconcileDelaysAreBounded(t *testing.T) {
+	if telegramUnknownReconcileDelay >= 10*time.Second {
+		t.Fatalf("initial reconciliation delay is too long: %s", telegramUnknownReconcileDelay)
+	}
+	if telegramUnknownReconcileScheduleDelay >= time.Minute {
+		t.Fatalf("scheduled reconciliation guard is too long: %s", telegramUnknownReconcileScheduleDelay)
 	}
 }

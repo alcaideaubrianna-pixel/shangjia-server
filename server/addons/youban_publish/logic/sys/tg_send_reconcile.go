@@ -27,8 +27,15 @@ const (
 	telegramSendPhaseDisplayConfirmed  = "display_confirmed"
 	telegramSendPhaseVerifySending     = "verify_sending"
 	telegramSendPhaseVerifyConfirmed   = "verify_confirmed"
-	telegramUnknownReconcileDelay      = 20 * time.Second
-	telegramUnknownReconcileMaxCount   = 2
+	// Telegram does not provide an idempotency key for send requests. An
+	// ambiguous response therefore needs a short asynchronous reconciliation
+	// window before the job is allowed to retry.
+	telegramUnknownReconcileDelay         = 8 * time.Second
+	telegramUnknownReconcileRetryDelay    = 15 * time.Second
+	telegramUnknownReconcileScheduleDelay = 30 * time.Second
+	telegramUnknownReconcileMaxCount      = 2
+	telegramReconcileAccountTaskPriority  = collectorin.EventPriorityNormal
+	telegramReconcileAccountTaskAttempts  = 2
 )
 
 func telegramSendPhaseHasCleanup(phase string) bool {
@@ -127,7 +134,11 @@ func (s *sSysPublish) updateTelegramJobSendPhase(ctx context.Context, jobId int6
 }
 
 func (s *sSysPublish) markTelegramJobUnknown(ctx context.Context, job telegramJobRecord, cause error) error {
-	message := "Telegram 返回结果不确定，已暂停重发并等待频道消息对账：" + cause.Error()
+	causeMessage := "未知原因"
+	if cause != nil {
+		causeMessage = cause.Error()
+	}
+	message := "Telegram 返回结果不确定，已暂停重发并等待频道消息对账：" + causeMessage
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "sending").Data(g.Map{
 		"status": "unknown", "dispatch_status": tgDispatchStatusIdle, "next_retry_at": gtime.Now().Add(telegramUnknownReconcileDelay),
 		"error_message": message, "reconcile_count": 0, "updated_at": gtime.Now(),
@@ -160,7 +171,9 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 		TenantID: job.TenantId, AccountID: channel.TgAccountId,
 		TaskType: collectorin.AccountTaskTypeMessageReconcile,
 		TaskKey:  fmt.Sprintf("message-reconcile:%d", job.Id),
-		Priority: collectorin.EventPriorityUrgent, MaxAttempts: 3,
+		// Reconciliation is a safety net and must not preempt collection or
+		// media work on the account runtime.
+		Priority: telegramReconcileAccountTaskPriority, MaxAttempts: telegramReconcileAccountTaskAttempts,
 	})
 	if err != nil {
 		return s.postponeUnknownTelegramJob(ctx, job, gerror.Wrap(err, "提交频道消息对账任务失败"))
@@ -168,7 +181,7 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 	collectorservice.AccountRuntime().Refresh()
 	message := fmt.Sprintf("TG发送结果待确认，已提交账号服务频道消息对账 accountTaskId:%d", accountTaskID)
 	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(g.Map{
-		"dispatch_status": tgDispatchStatusIdle, "next_retry_at": gtime.Now().Add(2 * time.Minute), "error_message": message, "updated_at": gtime.Now(),
+		"dispatch_status": tgDispatchStatusIdle, "next_retry_at": gtime.Now().Add(telegramUnknownReconcileScheduleDelay), "error_message": message, "updated_at": gtime.Now(),
 	}).Update()
 	if err == nil {
 		s.appendTelegramJobLog(ctx, job, "reconcile", "queued", message)
@@ -371,7 +384,7 @@ func telegramUnknownReconcileNextState(job telegramJobRecord, cause error) teleg
 		delay := telegramUnknownReconcileDelay
 		if cause != nil {
 			message = "TG频道消息对账暂时不可用，等待再次确认：" + cause.Error()
-			delay = time.Minute
+			delay = telegramUnknownReconcileRetryDelay
 		}
 		return telegramUnknownReconcileDecision{
 			Status: "unknown", DispatchStatus: tgDispatchStatusIdle,
