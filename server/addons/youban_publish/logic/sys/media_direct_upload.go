@@ -239,14 +239,10 @@ func (s *sSysPublish) completeMediaDirectUpload(ctx context.Context, in *sysin.M
 	if err != nil {
 		return nil, err
 	}
-	var posterAttachment *basesysin.AttachmentListModel
-	if poster != nil {
-		posterAttachment, err = uploadMediaPoster(ctx, poster)
-		if err != nil {
-			return nil, err
-		}
-	}
-	media, err := s.saveMediaAttachment(ctx, task, &session.Media, attachment, posterAttachment, nil, "")
+	// Poster generation/upload is intentionally deferred to the media worker.
+	// The parameter remains accepted so older clients can complete sessions.
+	_ = poster
+	media, err := s.saveMediaAttachment(ctx, task, &session.Media, attachment, nil, nil, "")
 	if err != nil {
 		return nil, err
 	}

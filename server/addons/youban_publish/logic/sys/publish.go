@@ -27,6 +27,7 @@ type sSysPublish struct {
 	tgBulkQueueServer     *asynq.Server
 	mediaQueueServer      *asynq.Server
 	mediaBulkQueueServer  *asynq.Server
+	mediaProcessServer    *asynq.Server
 	backgroundQueueServer *asynq.Server
 	historyQueueServer    *asynq.Server
 

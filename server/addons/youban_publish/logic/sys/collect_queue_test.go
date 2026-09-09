@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/hibiken/asynq"
@@ -12,6 +13,19 @@ import (
 func TestCollectQueuesUseSharedWorkers(t *testing.T) {
 	if tgQueueNameBackground == tgQueueNameMediaRealtime {
 		t.Fatal("collect processing and media downloading must use separate shared queues")
+	}
+}
+
+func TestMediaProcessQueueIsIsolatedFromCollectionDownloads(t *testing.T) {
+	if tgQueueNameMediaProcess == tgQueueNameMediaRealtime || tgQueueNameMediaProcess == tgQueueNameMedia {
+		t.Fatal("profile media processing must not compete with collection downloads")
+	}
+	if mediaProcessDefaultConcurrency != 2 {
+		t.Fatalf("unexpected media process concurrency: %d", mediaProcessDefaultConcurrency)
+	}
+	queues := telegramObserveQueueNames(context.Background())
+	if !slices.Contains(queues, tgQueueNameMediaProcess) {
+		t.Fatalf("media process queue must be observable: %v", queues)
 	}
 }
 

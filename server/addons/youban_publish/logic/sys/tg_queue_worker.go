@@ -101,7 +101,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 
 func (s *sSysPublish) startTelegramMediaWorker(ctx context.Context) {
 	s.tgQueueMu.Lock()
-	if s.mediaQueueServer != nil {
+	if s.mediaQueueServer != nil || s.mediaProcessServer != nil {
 		s.tgQueueMu.Unlock()
 		return
 	}
@@ -115,13 +115,22 @@ func (s *sSysPublish) startTelegramMediaWorker(ctx context.Context) {
 		Queues:         collectMediaBulkWorkerQueues(ctx),
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
-	g.Log().Info(ctx, "启动上架插件采集媒体队列；按实时、历史账号分片和旧队列公平消费")
+	processServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    mediaProcessConcurrency(ctx),
+		Queues:         map[string]int{tgQueueNameMediaProcess: 1},
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
+	g.Log().Info(ctx, "启动上架插件媒体队列；采集下载与资料媒体处理隔离消费")
 	s.mediaQueueServer = server
 	s.mediaBulkQueueServer = bulkServer
+	s.mediaProcessServer = processServer
 	s.tgQueueMu.Unlock()
 	mediaMux := asynq.NewServeMux()
 	mediaMux.HandleFunc(tgTaskTypeCollectMedia, s.handleCollectMediaCacheTask)
+	// Drain tasks enqueued to the legacy shared media queue before this version.
 	mediaMux.HandleFunc(tgTaskTypeMediaProcess, s.handleMediaProcessTask)
+	processMux := asynq.NewServeMux()
+	processMux.HandleFunc(tgTaskTypeMediaProcess, s.handleMediaProcessTask)
 	go s.recoverMediaProcessTasks(ctx)
 	go func() {
 		if err := server.Run(mediaMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
@@ -133,6 +142,11 @@ func (s *sSysPublish) startTelegramMediaWorker(ctx context.Context) {
 			g.Log().Errorf(ctx, "启动上架插件历史媒体队列失败：%+v", err)
 		}
 	}()
+	go func() {
+		if err := processServer.Run(processMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动资料媒体处理队列失败：%+v", err)
+		}
+	}()
 }
 
 func (s *sSysPublish) stopTelegramQueueWorker() {
@@ -141,6 +155,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	bulkServer := s.tgBulkQueueServer
 	mediaServer := s.mediaQueueServer
 	mediaBulkServer := s.mediaBulkQueueServer
+	mediaProcessServer := s.mediaProcessServer
 	backgroundServer := s.backgroundQueueServer
 	historyServer := s.historyQueueServer
 	client := s.tgQueueClient
@@ -148,6 +163,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.tgBulkQueueServer = nil
 	s.mediaQueueServer = nil
 	s.mediaBulkQueueServer = nil
+	s.mediaProcessServer = nil
 	s.backgroundQueueServer = nil
 	s.historyQueueServer = nil
 	s.tgQueueClient = nil
@@ -163,6 +179,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	if mediaBulkServer != nil {
 		mediaBulkServer.Shutdown()
+	}
+	if mediaProcessServer != nil {
+		mediaProcessServer.Shutdown()
 	}
 	if backgroundServer != nil {
 		backgroundServer.Shutdown()

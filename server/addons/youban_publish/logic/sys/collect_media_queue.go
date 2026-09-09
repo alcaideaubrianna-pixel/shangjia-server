@@ -29,6 +29,8 @@ const (
 	collectMediaQueueMaxConcurrency     = 32
 	collectMediaBulkDefaultConcurrency  = 8
 	collectMediaBulkMaxConcurrency      = 16
+	mediaProcessDefaultConcurrency      = 2
+	mediaProcessMaxConcurrency          = 8
 )
 
 func normalizeCollectMediaWorkerConcurrency(concurrency int, maximum int) int {
@@ -80,7 +82,7 @@ func (s *sSysPublish) enqueueMediaProcess(ctx context.Context, mediaId int64, de
 	}
 	task := asynq.NewTask(tgTaskTypeMediaProcess, body)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameMediaRealtime),
+		asynq.Queue(tgQueueNameMediaProcess),
 		asynq.MaxRetry(8),
 		asynq.Timeout(30 * time.Minute),
 		asynq.Unique(mediaProcessTaskUniqueTTL),
@@ -201,4 +203,9 @@ func collectMediaBulkWorkerQueues(ctx context.Context) map[string]int {
 func collectMediaBulkConcurrency(ctx context.Context) int {
 	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaBulkConcurrency", collectMediaBulkDefaultConcurrency).Int()
 	return normalizeCollectMediaWorkerConcurrency(concurrency, collectMediaBulkMaxConcurrency)
+}
+
+func mediaProcessConcurrency(ctx context.Context) int {
+	concurrency := g.Cfg().MustGet(ctx, "youbanPublish.queue.mediaProcessConcurrency", mediaProcessDefaultConcurrency).Int()
+	return normalizeCollectMediaWorkerConcurrency(concurrency, mediaProcessMaxConcurrency)
 }
