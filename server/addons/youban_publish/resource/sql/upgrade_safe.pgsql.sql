@@ -183,9 +183,3 @@ ALTER TABLE "hg_youban_publish_bot_message_source" DROP CONSTRAINT IF EXISTS "uk
 ALTER TABLE "hg_youban_publish_bot_message_source" ADD CONSTRAINT "uk_ybp_bot_message_source" UNIQUE ("chat_id", "message_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_target_message" ON "hg_youban_publish_tg_message" ("target_chat_id", "tg_message_id", "id" DESC);
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "preserve_history_messages" smallint NOT NULL DEFAULT 0;
-ALTER TABLE "hg_content_media" ADD COLUMN IF NOT EXISTS "purpose" varchar(16) NOT NULL DEFAULT 'display';
-CREATE INDEX IF NOT EXISTS "idx_content_media_profile_purpose" ON "hg_content_media" ("profile_id", "purpose", "sort_index", "id") WHERE "deleted_at" IS NULL;
-UPDATE "hg_content_media" cm SET "purpose" = pm."purpose"
-FROM "hg_youban_publish_media" pm
-WHERE cm."profile_id" = pm."profile_id" AND cm."source_asset_id" = COALESCE(NULLIF(pm."original_attachment_id", 0), pm."attachment_id")
-  AND pm."deleted_at" IS NULL AND pm."purpose" IN ('display', 'verify') AND cm."purpose" <> pm."purpose";

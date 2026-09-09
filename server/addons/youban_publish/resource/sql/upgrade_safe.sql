@@ -198,9 +198,3 @@ CREATE INDEX `idx_ybp_tg_message_target_message` ON `hg_youban_publish_tg_messag
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `preserve_history_messages` tinyint(1) NOT NULL DEFAULT '0' COMMENT '下架和循环上架时保留旧消息';
 ALTER TABLE `hg_youban_publish_message_push_plan` ADD COLUMN IF NOT EXISTS `push_mode` varchar(16) NOT NULL DEFAULT 'bot';
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `push_mode` varchar(16) NOT NULL DEFAULT 'bot';
-ALTER TABLE `hg_content_media` ADD COLUMN IF NOT EXISTS `purpose` varchar(16) NOT NULL DEFAULT 'display' COMMENT '用途：display展示 verify验证';
-CREATE INDEX `idx_content_media_profile_purpose` ON `hg_content_media` (`profile_id`,`purpose`,`sort_index`,`id`);
-UPDATE `hg_content_media` cm INNER JOIN `hg_youban_publish_media` pm
-  ON cm.`profile_id` = pm.`profile_id` AND cm.`source_asset_id` = COALESCE(NULLIF(pm.`original_attachment_id`, 0), pm.`attachment_id`)
-SET cm.`purpose` = pm.`purpose`
-WHERE pm.`deleted_at` IS NULL AND pm.`purpose` IN ('display', 'verify') AND cm.`purpose` <> pm.`purpose`;
