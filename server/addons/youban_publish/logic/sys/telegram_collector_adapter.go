@@ -281,6 +281,9 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	}
 	messages, err := s.sendMessageTemplateWithTgClient(ctx, client, peer, caption, media, nil, task.AccountID, "")
 	if err != nil {
+		if cleanupErr := s.cleanupPartialAccountMediaSend(ctx, client, job, channel, parts[1], messages, err); cleanupErr != nil {
+			return cleanupErr
+		}
 		return gerror.Wrap(err, "协议号媒体降级发送失败")
 	}
 	stage("发送展示媒体", "messageCount", len(messages))
@@ -300,6 +303,9 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		verifyCaption := ""
 		verifyMessages, err := s.sendMessageTemplateWithTgClient(ctx, client, peer, verifyCaption, verifyMedia, nil, task.AccountID, "")
 		if err != nil {
+			if cleanupErr := s.cleanupPartialAccountMediaSend(ctx, client, job, channel, "verify", verifyMessages, err); cleanupErr != nil {
+				return cleanupErr
+			}
 			return gerror.Wrap(err, "协议号验证媒体降级发送失败")
 		}
 		stage("发送验证媒体", "messageCount", len(verifyMessages))
@@ -725,7 +731,7 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	if source.IsEmpty() {
 		return nil
 	}
-	blocked, err := s.botCollectMessageFromPublishChannel(ctx, source["tenant_id"].Int64(), g.NewVar(delivery.SourceChatID).Int64())
+	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, source["tenant_id"].Int64(), source["account_id"].Int64(), delivery.SourceChatID)
 	if err != nil {
 		return gerror.Wrap(err, "检查Bot采集上架频道过滤失败")
 	}
@@ -739,12 +745,19 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 }
 
 func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
+	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, delivery.TenantID, delivery.AccountID, delivery.SourceChatID)
+	if err != nil {
+		return gerror.Wrap(err, "检查协议号采集上架频道过滤失败")
+	}
+	if blocked {
+		return nil
+	}
 	message := collectorDeliveryMessage(delivery, delivery.TenantID, delivery.AccountID, delivery.SourceID, sysin.CollectSourceTypeAccount)
 	message.TgAccountId = delivery.TgAccountID
 	if groupedID := strings.TrimSpace(delivery.SourceGroupedID); groupedID != "" {
 		message.SourceUniqueKey = accountCollectMaterialGroupKey(delivery, groupedID)
 	}
-	_, err := s.ingestAndProcessCollectMessage(ctx, message)
+	_, err = s.ingestAndProcessCollectMessage(ctx, message)
 	return err
 }
 

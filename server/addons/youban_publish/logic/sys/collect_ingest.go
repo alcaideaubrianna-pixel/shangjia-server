@@ -19,22 +19,25 @@ const (
 	collectPublishChannelCacheKey = "youban_publish:collect:publish_channels"
 )
 
-func (s *sSysPublish) botCollectMessageFromPublishChannel(ctx context.Context, tenantId int64, chatId int64) (bool, error) {
-	if tenantId <= 0 || chatId == 0 {
+func (s *sSysPublish) collectMessageFromAccountPublishChannel(ctx context.Context, tenantId, accountId int64, chatId string) (bool, error) {
+	chatId = normalizeTelegramChannelChatID(chatId)
+	if tenantId <= 0 || accountId <= 0 || chatId == "" {
 		return false, nil
 	}
 	version := s.collectSourceCacheVersion(ctx)
-	cacheKey := fmt.Sprintf("%s:%s:%d", collectPublishChannelCacheKey, version, tenantId)
+	cacheKey := fmt.Sprintf("%s:%s:%d:%d", collectPublishChannelCacheKey, version, tenantId, accountId)
 	var chatIds []string
 	if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {
 		if json.Unmarshal([]byte(value.String()), &chatIds) == nil {
-			return botCollectChatMatchesPublishChannel(chatId, chatIds), nil
+			return collectChatMatchesPublishChannel(chatId, chatIds), nil
 		}
 	}
 	records, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Fields("target_chat_id").
 		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
 		Where("publish_direction", "up").
+		Where("status", 1).
 		WhereNull("deleted_at").
 		All()
 	if err != nil {
@@ -50,17 +53,22 @@ func (s *sSysPublish) botCollectMessageFromPublishChannel(ctx context.Context, t
 	if data, marshalErr := json.Marshal(chatIds); marshalErr == nil {
 		_ = cache.Instance().Set(ctx, cacheKey, string(data), collectSourceCacheTTL)
 	}
-	return botCollectChatMatchesPublishChannel(chatId, chatIds), nil
+	return collectChatMatchesPublishChannel(chatId, chatIds), nil
 }
 
-func botCollectChatMatchesPublishChannel(chatId int64, publishChatIds []string) bool {
-	incoming := normalizeTelegramChannelChatID(strconv.FormatInt(chatId, 10))
+func collectChatMatchesPublishChannel(chatId string, publishChatIds []string) bool {
+	incoming := normalizeTelegramChannelChatID(chatId)
 	for _, publishChatId := range publishChatIds {
 		if incoming == normalizeTelegramChannelChatID(publishChatId) {
 			return true
 		}
 	}
 	return false
+}
+
+// Kept as a small compatibility helper for callers that already hold Telegram's numeric chat ID.
+func botCollectChatMatchesPublishChannel(chatId int64, publishChatIds []string) bool {
+	return collectChatMatchesPublishChannel(strconv.FormatInt(chatId, 10), publishChatIds)
 }
 
 func (s *sSysPublish) collectSourceCacheVersion(ctx context.Context) string {

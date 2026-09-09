@@ -234,6 +234,87 @@ func (s *sSysPublish) handleMessageDeleteFallbackAccountTask(ctx context.Context
 	return nil
 }
 
+// cleanupPartialAccountMediaSend records messages already accepted by Telegram and
+// removes them with the same account before the failed send is allowed to retry.
+func (s *sSysPublish) cleanupPartialAccountMediaSend(ctx context.Context, client *telegram.Client, job telegramJobRecord, channel *messagePushChannel, purpose string, messages []*telegramSentMessage, sendErr error) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	for _, message := range messages {
+		if message != nil {
+			message.Purpose = purpose
+		}
+	}
+	if err := s.saveTelegramSentMessages(ctx, job, messages); err != nil {
+		return telegramDeliveryUncertainError(gerror.Wrap(err, "保存协议号半组消息失败"))
+	}
+	s.appendTelegramJobLog(ctx, job, "account", "cleanup_started", fmt.Sprintf("协议号发送部分成功，开始清理 purpose:%s messages:%d error:%v", purpose, len(messages), sendErr))
+	if err := s.deletePartialAccountMessages(ctx, client, job, channel, messages); err != nil {
+		s.appendTelegramJobLog(ctx, job, "account", "cleanup_failed", err.Error())
+		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", job.Id).
+			Where("status", "sending").
+			Data(g.Map{"status": "unknown", "dispatch_status": tgDispatchStatusIdle, "error_message": err.Error(), "updated_at": gtime.Now()}).
+			Update()
+		s.enqueueTelegramMessageDeleteFallback(ctx, job, "协议号半组消息同步清理失败", err)
+		return gerror.Wrap(err, "协议号半组消息清理失败，禁止直接重试发送")
+	}
+	s.appendTelegramJobLog(ctx, job, "account", "cleanup_done", fmt.Sprintf("协议号半组消息已清理 purpose:%s messages:%d", purpose, len(messages)))
+	return nil
+}
+
+func (s *sSysPublish) deletePartialAccountMessages(ctx context.Context, client *telegram.Client, job telegramJobRecord, channel *messagePushChannel, sentMessages []*telegramSentMessage) error {
+	if client == nil || channel == nil {
+		return gerror.New("协议号半组清理缺少账号或频道信息")
+	}
+	peer, err := messagePushInputPeer(channel)
+	if err != nil {
+		return err
+	}
+	inputChannel, ok := peer.(*tg.InputPeerChannel)
+	if !ok {
+		return gerror.New("协议号半组清理仅支持频道和超级群")
+	}
+	messageIDs := make([]int64, 0, len(sentMessages))
+	for _, message := range sentMessages {
+		if message != nil && message.MessageId > 0 {
+			messageIDs = append(messageIDs, message.MessageId)
+		}
+	}
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	var messages []telegramDeleteMessage
+	err = g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+		Fields("id,target_chat_id,tg_message_id AS message_id").
+		Where("job_id", job.Id).
+		WhereIn("tg_message_id", messageIDs).
+		Where("status", "sent").
+		Scan(&messages)
+	if err != nil {
+		return gerror.Wrap(err, "读取协议号半组消息失败")
+	}
+	for _, batch := range telegramDeleteMessageBatches(messages, telegramDeleteMessagesMaxItems) {
+		ids := make([]int, 0, len(batch.messages))
+		for _, message := range batch.messages {
+			ids = append(ids, int(message.MessageId))
+		}
+		if len(ids) == 0 {
+			continue
+		}
+		if _, err = client.API().ChannelsDeleteMessages(ctx, &tg.ChannelsDeleteMessagesRequest{
+			Channel: &tg.InputChannel{ChannelID: inputChannel.ChannelID, AccessHash: inputChannel.AccessHash},
+			ID:      ids,
+		}); err != nil {
+			return gerror.Wrap(err, "协议号删除半组消息失败")
+		}
+		if err = markTelegramMessagesDeleted(ctx, batch.messages); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func telegramDeleteMessageCount(ctx context.Context, jobID int64) int {
 	count, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
 		Where("job_id", jobID).
