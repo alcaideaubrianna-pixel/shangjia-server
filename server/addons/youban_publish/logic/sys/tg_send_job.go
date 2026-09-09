@@ -480,6 +480,42 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	return nil
 }
 
+func (s *sSysPublish) failTelegramMediaFallbackJob(ctx context.Context, job telegramJobRecord, cause error) error {
+	message := "协议号媒体发送已达最大重试次数"
+	if cause != nil {
+		message += "：" + cause.Error()
+	}
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", job.Id).
+		WhereIn("status", []string{"sending", "unknown"}).
+		Data(g.Map{
+			"status":              "failed",
+			"dispatch_status":     tgDispatchStatusDone,
+			"next_retry_at":       nil,
+			"error_message":       message,
+			"last_dispatch_error": message,
+			"updated_at":          gtime.Now(),
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "终止协议号媒体失败任务失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil
+	}
+	if recordErr := s.upsertPublishJobRecord(ctx, job, "failed", message); recordErr != nil {
+		g.Log().Warningf(ctx, "更新协议号媒体失败记录失败 jobId:%d err:%+v", job.Id, recordErr)
+	}
+	s.appendTelegramJobLog(ctx, job, "account_fallback", "failed", message)
+	if job.CollectEventId > 0 {
+		_ = s.markCollectDispatchFailedByProfile(ctx, job.ProfileId, job.CollectEventId, message)
+	}
+	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed); err != nil {
+		return err
+	}
+	return s.wakeNextTelegramChannelJob(ctx, job)
+}
+
 func (s *sSysPublish) switchTelegramJobToNextBot(ctx context.Context, job telegramJobRecord, cause error) (bool, error) {
 	nextBotId, err := s.nextTelegramChannelBotId(ctx, job)
 	if err != nil {

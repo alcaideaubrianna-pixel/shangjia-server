@@ -169,11 +169,10 @@ func (s *sSysPublish) handleManagedBotCreateAccountTask(ctx context.Context, cli
 	}, nil
 }
 
-func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) error {
+func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (err error) {
 	startedAt := time.Now()
 	stageStartedAt := startedAt
 	var jobID int64
-	var err error
 	stage := func(name string, fields ...interface{}) {
 		duration := time.Since(stageStartedAt)
 		g.Log().Infof(ctx, "协议号媒体降级阶段完成 taskId:%d jobId:%d tgAccountId:%d stage:%s stageDuration:%s totalDuration:%s fields:%v", task.ID, jobID, task.AccountID, name, duration.Round(time.Millisecond), time.Since(startedAt).Round(time.Millisecond), fields)
@@ -197,6 +196,14 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err == nil || !accountTaskFinalAttempt(task) {
+			return
+		}
+		if failErr := s.failTelegramMediaFallbackJob(ctx, job, err); failErr != nil {
+			g.Log().Warningf(ctx, "协议号媒体任务最终失败后释放频道失败 taskId:%d jobId:%d err:%+v", task.ID, job.Id, failErr)
+		}
+	}()
 	stage("读取任务与Job", "purpose", parts[1], "jobStatus", job.Status)
 	if job.Status != "sending" {
 		messageCount, countErr := s.telegramJobSentMessageCount(ctx, job.Id, parts[1])
