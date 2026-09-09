@@ -131,3 +131,17 @@ func TestTelegramMediaUsesReusableFileId(t *testing.T) {
 		t.Fatal("anti-scan video must upload regenerated media")
 	}
 }
+
+func TestTelegramMediaSetWithoutProtectionPreservesCopyReference(t *testing.T) {
+	input := []*telegramMediaItem{{Id: 7, TgFileId: "copy:5759797862:5685", AntiScanEnabled: true, ForceUpload: true}}
+	result := telegramMediaSetWithoutProtection(input)
+	if len(result) != 1 || result[0].TgFileId != input[0].TgFileId {
+		t.Fatal("fallback must preserve the original Telegram copy reference")
+	}
+	if result[0].AntiScanEnabled || result[0].ForceUpload {
+		t.Fatal("fallback must disable transformations that require local media bytes")
+	}
+	if !input[0].AntiScanEnabled || !input[0].ForceUpload {
+		t.Fatal("fallback must not mutate canonical media")
+	}
+}

@@ -31,9 +31,6 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		return nil, err
 	}
 	s.prepareTelegramMediaItemsForSend(ctx, media)
-	if strings.TrimSpace(caption) != "" && telegramMediaSetHasCopyRef(media) {
-		media = telegramMediaSetWithoutTgFileId(media)
-	}
 	if len(media) == 1 {
 		return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, media[0], replyMarkup...)
 	}
@@ -78,6 +75,15 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 		prepareStartedAt := time.Now()
 		group, closers, err := s.telegramInputMediaGroup(ctx, chunk, chunkCaption)
 		if err != nil {
+			if isTelegramMediaSourceUnavailableError(err) && telegramMediaSetHasCopyRef(chunk) {
+				g.Log().Warningf(ctx, "TG媒体持久化源不可用，回退复制原消息并跳过本次防扫图 purpose:%s chat:%s media:%s err:%+v", purpose, chatId, telegramMediaDebugSummary(chunk), err)
+				fallbackMessages, fallbackErr := s.sendTelegramMediaSet(ctx, bot, chatId, purpose, chunkCaption, telegramMediaSetWithoutProtection(chunk), replyMarkup...)
+				if fallbackErr != nil {
+					return allMessages, fallbackErr
+				}
+				allMessages = append(allMessages, fallbackMessages...)
+				continue
+			}
 			return allMessages, err
 		}
 		g.Log().Infof(ctx, "TG媒体组准备完成 purpose:%s chunk:%d/%d media:%d antiScan:%d duration:%s", purpose, chunkIndex+1, len(chunks), len(chunk), telegramAntiScanMediaCount(chunk), time.Since(prepareStartedAt).Round(time.Millisecond))
@@ -115,6 +121,20 @@ func telegramMediaSetRequiresUpload(media []*telegramMediaItem) bool {
 	return false
 }
 
+func telegramMediaSetWithoutProtection(media []*telegramMediaItem) []*telegramMediaItem {
+	result := make([]*telegramMediaItem, 0, len(media))
+	for _, item := range media {
+		if item == nil {
+			continue
+		}
+		cloned := *item
+		cloned.AntiScanEnabled = false
+		cloned.ForceUpload = false
+		result = append(result, &cloned)
+	}
+	return result
+}
+
 func validateTelegramMediaPurpose(purpose string, media []*telegramMediaItem) error {
 	purpose = strings.TrimSpace(purpose)
 	if purpose != "display" && purpose != "verify" {
@@ -143,6 +163,15 @@ func (s *sSysPublish) sendTelegramSingleMedia(ctx context.Context, bot *tgbot.Bo
 	prepareStartedAt := time.Now()
 	input, closer, err := telegramSingleMediaInputFile(ctx, media)
 	if err != nil {
+		if isTelegramMediaSourceUnavailableError(err) {
+			if _, ok := telegramCopyMediaRefFromFileId(media.TgFileId); ok {
+				cloned := *media
+				cloned.AntiScanEnabled = false
+				cloned.ForceUpload = false
+				g.Log().Warningf(ctx, "TG单媒体持久化源不可用，回退复制原消息并跳过本次防扫图 purpose:%s chat:%s mediaId:%d err:%+v", purpose, chatId, media.Id, err)
+				return s.sendTelegramSingleMedia(ctx, bot, chatId, purpose, caption, &cloned, replyMarkup...)
+			}
+		}
 		return nil, err
 	}
 	if closer != nil {
