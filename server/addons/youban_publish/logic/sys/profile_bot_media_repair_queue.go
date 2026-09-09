@@ -25,11 +25,11 @@ func (s *sSysPublish) AIOpsQueueBotMediaRepair(ctx context.Context, profileIds [
 		InnerJoin("hg_content_profile p", "p.id=m.profile_id AND p.deleted_at IS NULL").
 		InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=m.profile_id AND ps.deleted_at IS NULL").
 		Where("p.source_type", "youban_publish").
-		Where("ps.status", 1).
+		Where("p.status", 1).
 		Where("m.status", 1).
 		WhereNull("m.deleted_at").
-		Where("COALESCE(m.storage_path,'')", "").
-		WhereLike("m.file_url", "https://api.telegram.org/file/bot%")
+		Where("COALESCE(m.storage_path,'') = ''").
+		Where("m.file_url LIKE ?", "https://api.telegram.org/file/bot%")
 	if len(profileIds) > 0 {
 		model = model.WhereIn("m.profile_id", profileIds)
 	}
