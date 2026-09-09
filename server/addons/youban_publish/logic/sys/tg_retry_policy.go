@@ -154,7 +154,7 @@ func telegramJobErrorRetryPolicy(err error, retryCount int) telegramJobRetryPoli
 	if retryCount >= telegramRetryMaxCount {
 		return telegramJobRetryPolicy{
 			Permanent: true,
-			Message:   fmt.Sprintf("Telegram 发送连续失败已达到 %d 次，已停止该任务并释放频道队列：%s", telegramRetryMaxCount, telegramUserFacingError(err)),
+			Message:   fmt.Sprintf("Telegram 发送连续失败已达到 %d 次，已将该资料标记为推送失败并继续处理下一条：%s", telegramRetryMaxCount, telegramUserFacingError(err)),
 		}
 	}
 	delay := telegramRecoverableRetryDelay(err, retryCount)
@@ -251,6 +251,8 @@ func isTelegramPermanentSendError(err error) bool {
 		"账号推送媒体文件不存在",
 		"forbidden:",
 		"unauthorized",
+		"message caption is too long",
+		"caption is too long",
 	}
 	for _, part := range permanentParts {
 		if strings.Contains(message, part) {

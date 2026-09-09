@@ -6,12 +6,41 @@ import (
 	stdhtml "html"
 	"regexp"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	xhtml "golang.org/x/net/html"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+const telegramMediaCaptionLimit = 1024
+
+// limitTelegramMediaCaption enforces Telegram's 1024 UTF-16 caption limit.
+// Formatting is intentionally flattened when truncation is required so that
+// we never send malformed HTML to Telegram. Invisible reconciliation markers
+// are preserved at the end of the caption.
+func limitTelegramMediaCaption(caption string) string {
+	if caption == "" || len(utf16.Encode([]rune(caption))) <= telegramMediaCaptionLimit {
+		return caption
+	}
+	marker := ""
+	if i := strings.LastIndex(caption, "\u2063"); i >= 0 {
+		marker = caption[i:]
+		caption = caption[:i]
+	}
+	plain := regexp.MustCompile(`<[^>]*>`).ReplaceAllString(caption, "")
+	reserve := len(utf16.Encode([]rune(marker))) + 1
+	max := telegramMediaCaptionLimit - reserve
+	if max < 1 {
+		max = 1
+	}
+	runes := []rune(plain)
+	for len(utf16.Encode(runes)) > max-1 {
+		runes = runes[:len(runes)-1]
+	}
+	return strings.TrimSpace(string(runes)) + "…" + marker
+}
 
 func (s *sSysPublish) telegramJobCaption(ctx context.Context, job telegramJobRecord) (string, error) {
 	row, err := s.profilePublishSource(ctx, job.ProfileId, job.TenantId, job.AccountId, false)

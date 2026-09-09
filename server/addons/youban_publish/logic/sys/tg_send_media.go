@@ -25,6 +25,7 @@ func (s *sSysPublish) sendTelegramMediaSet(ctx context.Context, bot *tgbot.Bot, 
 	if len(media) == 0 {
 		return nil, nil
 	}
+	caption = limitTelegramMediaCaption(caption)
 	if err := validateTelegramMediaPurpose(purpose, media); err != nil {
 		observeTelegramMediaPurposeViolation(ctx, "send")
 		return nil, err
