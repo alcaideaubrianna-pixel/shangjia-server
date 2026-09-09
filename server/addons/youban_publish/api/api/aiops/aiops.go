@@ -15,6 +15,17 @@ type ProfileMediaRes struct {
 	ProfileIds  []int64 `json:"profileIds"`
 }
 
+type ProfileMediaQueueReq struct {
+	g.Meta     `path:"/profile/media/queue" method:"post" tags:"运维" summary:"扫描并入队恢复Bot历史媒体"`
+	ProfileIds []int64 `json:"profileIds" dc:"指定资料ID；留空扫描全部"`
+	Limit      int     `json:"limit" d:"1000" v:"max:1000#单次最多入队1000条资料"`
+}
+
+type ProfileMediaQueueRes struct {
+	Queued     int     `json:"queued"`
+	ProfileIds []int64 `json:"profileIds"`
+}
+
 type ProfileRepublishReq struct {
 	g.Meta     `path:"/profile/republish" method:"post" tags:"AI运维" summary:"重新上架媒体完整的资料"`
 	ProfileIds []int64 `json:"profileIds" v:"required#资料ID不能为空"`

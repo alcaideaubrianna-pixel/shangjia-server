@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -34,7 +35,7 @@ func (s *sSysPublish) rebuildBotProfileMedia(ctx context.Context, profileIds []i
 		result.Candidates++
 		result.ProfileIDs = append(result.ProfileIDs, profileId)
 		rows, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-			Fields("id,tenant_id,account_id,media_type,name,tg_file_id,storage_path,file_url").
+			Fields("id,tenant_id,account_id,media_type,purpose,sort_index,name,tg_file_id,storage_path,file_url").
 			Where("profile_id", profileId).WhereNull("deleted_at").OrderAsc("sort_index").All()
 		if err != nil {
 			return result, gerror.Wrap(err, "读取Bot资料媒体失败")
@@ -64,6 +65,13 @@ func (s *sSysPublish) rebuildBotProfileMedia(ctx context.Context, profileIds []i
 			}
 			downloaded, downloadErr := s.downloadBotTelegramMediaWithToken(ctx, source.BotID, source.BotToken, collectMediaItem{Type: row["media_type"].String(), FileId: fileID})
 			if downloadErr != nil {
+				groupSource, groupFileID, groupErr := s.findBotProfileMediaGroupSource(ctx, row, rows)
+				if groupErr == nil {
+					source, fileID = groupSource, groupFileID
+					downloaded, downloadErr = s.downloadBotTelegramMediaWithToken(ctx, source.BotID, source.BotToken, collectMediaItem{Type: row["media_type"].String(), FileId: fileID})
+				}
+			}
+			if downloadErr != nil {
 				return result, gerror.Wrapf(downloadErr, "恢复Bot资料媒体失败 mediaId:%d", row["id"].Int64())
 			}
 			item := downloaded.Item
@@ -91,9 +99,39 @@ func (s *sSysPublish) rebuildBotProfileMedia(ctx context.Context, profileIds []i
 	return result, nil
 }
 
+func (s *sSysPublish) findBotProfileMediaGroupSource(ctx context.Context, media gdb.Record, rows gdb.Result) (*botProfileMediaSource, string, error) {
+	var anchor gdb.Record
+	maxDisplaySort := 0
+	for _, row := range rows {
+		if row["purpose"].String() == "display" && row["sort_index"].Int() > maxDisplaySort {
+			maxDisplaySort = row["sort_index"].Int()
+		}
+		if anchor == nil && row["purpose"].String() == "display" && strings.HasPrefix(strings.TrimSpace(row["tg_file_id"].String()), "copy:") {
+			anchor = row
+		}
+	}
+	if anchor == nil {
+		return nil, "", gerror.New("Bot资料媒体缺少可回溯的消息锚点")
+	}
+	chatID, anchorMessageID, err := parseBotMediaCopyReference(anchor["tg_file_id"].String())
+	if err != nil {
+		return nil, "", err
+	}
+	messageID := anchorMessageID + media["sort_index"].Int() - anchor["sort_index"].Int()
+	if media["purpose"].String() == "verify" {
+		messageID = anchorMessageID + maxDisplaySort - anchor["sort_index"].Int() + media["sort_index"].Int()
+	}
+	copyMedia := make(gdb.Record, len(media))
+	for key, value := range media {
+		copyMedia[key] = value
+	}
+	copyMedia["tg_file_id"] = g.NewVar(fmt.Sprintf("copy:%s:%d", chatID, messageID))
+	return s.findBotProfileMediaDirectSource(ctx, copyMedia)
+}
+
 func (s *sSysPublish) findBotProfileMediaDirectSource(ctx context.Context, media gdb.Record) (*botProfileMediaSource, string, error) {
 	fileID := strings.TrimSpace(media["tg_file_id"].String())
-	if fileID == "" || strings.HasPrefix(fileID, "copy:") {
+	if fileID == "" {
 		return nil, "", gerror.New("Bot媒体缺少可直接下载的File ID")
 	}
 	token, err := botTokenFromFileURL(media["file_url"].String())
@@ -107,6 +145,36 @@ func (s *sSysPublish) findBotProfileMediaDirectSource(ctx context.Context, media
 	}
 	if source.BotID <= 0 || strings.TrimSpace(source.BotToken) == "" {
 		return nil, "", gerror.New("历史Bot下载凭证不存在")
+	}
+	if strings.HasPrefix(fileID, "copy:") {
+		chatID, messageID, parseErr := parseBotMediaCopyReference(fileID)
+		if parseErr != nil {
+			return nil, "", parseErr
+		}
+		bot, botErr := s.telegramBot(ctx, source.BotToken)
+		if botErr != nil {
+			return nil, "", gerror.Wrap(botErr, "创建Bot媒体恢复客户端失败")
+		}
+		message, forwardErr := bot.ForwardMessage(ctx, &tgbot.ForwardMessageParams{
+			ChatID: chatID, FromChatID: chatID, MessageID: messageID, DisableNotification: true,
+		})
+		if forwardErr != nil {
+			return nil, "", gerror.Wrap(forwardErr, "转发Bot原始媒体失败")
+		}
+		defer func() {
+			if message != nil {
+				_, _ = bot.DeleteMessage(ctx, &tgbot.DeleteMessageParams{ChatID: chatID, MessageID: message.ID})
+			}
+		}()
+		raw, marshalErr := json.Marshal(message)
+		if marshalErr != nil {
+			return nil, "", gerror.Wrap(marshalErr, "解析Bot转发媒体失败")
+		}
+		refreshedFileID, _, mediaErr := botMessageMediaFileID(string(raw), media["media_type"].String())
+		if mediaErr != nil {
+			return nil, "", mediaErr
+		}
+		return &source, refreshedFileID, nil
 	}
 	return &source, fileID, nil
 }

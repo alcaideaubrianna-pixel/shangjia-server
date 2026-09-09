@@ -43,6 +43,7 @@ const (
 	tgTaskTypeCollectTrigger      = "youban_publish:collect:trigger"
 	tgTaskTypeCollectSourceDelete = "youban_publish:collect:source_delete"
 	tgTaskTypeChannelMemberSync   = "youban_publish:tg:channel_member_sync"
+	tgTaskTypeBotMediaRepair      = "youban_publish:bot:media_repair"
 )
 
 const collectMediaMaxBulkQueueShards = 16
@@ -86,6 +87,10 @@ type autoDeleteQueuePayload struct {
 
 type mediaProcessQueuePayload struct {
 	MediaId int64 `json:"mediaId"`
+}
+
+type botMediaRepairQueuePayload struct {
+	ProfileId int64 `json:"profileId"`
 }
 
 type importQueuePayload struct {
