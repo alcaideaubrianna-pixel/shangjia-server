@@ -98,7 +98,7 @@ func (s *sSysPublish) AIOpsDeleteImportedProfiles(ctx context.Context, tenantId,
 
 func collectProfileMediaComplete(ctx context.Context, profileId int64) (bool, error) {
 	profile, err := g.DB().Model("hg_content_profile p").Safe().Ctx(ctx).
-		Fields("p.source_type,COUNT(DISTINCT m.id) AS media_count").
+		Fields("p.source_type,COUNT(DISTINCT m.id) AS media_count,COUNT(DISTINCT CASE WHEN COALESCE(m.file_url,'')='' AND COALESCE(m.storage_path,'')='' THEN m.id END) AS missing_media_count").
 		LeftJoin("hg_youban_publish_media m", "m.profile_id=p.id AND m.deleted_at IS NULL").
 		Where("p.id", profileId).WhereNull("p.deleted_at").
 		Group("p.id,p.source_type").One()
@@ -130,6 +130,11 @@ func collectProfileMediaComplete(ctx context.Context, profileId int64) (bool, er
 	}
 	expectedMedia := row["expected_media"].Int()
 	profileMedia := row["profile_media"].Int()
+	if expectedMedia <= 0 {
+		complete := profile["media_count"].Int() > 0 && profile["missing_media_count"].Int() == 0
+		g.Log().Warningf(ctx, "采集事件已清理，按当前资料媒体检查完整性 profileId:%d actual:%d missing:%d complete:%t", profileId, profile["media_count"].Int(), profile["missing_media_count"].Int(), complete)
+		return complete, nil
+	}
 	complete := expectedMedia > 0 && profileMedia >= expectedMedia
 	g.Log().Infof(ctx, "资料媒体完整性检查 profileId:%d expected:%d actual:%d complete:%t", profileId, expectedMedia, profileMedia, complete)
 	return complete, nil
