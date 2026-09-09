@@ -20,6 +20,21 @@ type Fields struct {
 	Cup    string
 }
 
+// RegionLabels extracts explicitly labelled province and city values from profile text.
+// It intentionally returns display names; callers must normalize them through location.
+func RegionLabels(text string) (province, city string) {
+	normalized := normalizeText(text)
+	labels := regionProvincePattern.FindStringSubmatch(normalized)
+	if len(labels) > 2 {
+		province = strings.TrimSpace(labels[2])
+	}
+	labels = regionCityPattern.FindStringSubmatch(normalized)
+	if len(labels) > 2 {
+		city = strings.TrimSpace(labels[2])
+	}
+	return
+}
+
 type Analysis struct {
 	Fields
 	HeightMentioned     bool
@@ -84,6 +99,8 @@ func NormalizeCup(value string) string {
 }
 
 var (
+	regionProvincePattern = regexp.MustCompile(`(?mi)(?:^|[\n,;])\s*(?:所在)?(省份|省|province)\s*[:：]\s*([^\n,;]+)`)
+	regionCityPattern     = regexp.MustCompile(`(?mi)(?:^|[\n,;])\s*(?:所在)?(城市|市|city)\s*[:：]\s*([^\n,;]+)`)
 	agePattern            = regexp.MustCompile(`(?i)(?:年龄|age)(?:\s*:)+\s*\[?\s*(1[8-9]|[2-7][0-9]|80)(?:\s*(?:岁|周岁|虚岁))?`)
 	birthYearAgePattern   = regexp.MustCompile(`(?i)(?:年龄|age)(?:\s*:)+\s*\[?\s*(0[0-9])(?:\s*年)?\s*\]?`)
 	virginNoPattern       = regexp.MustCompile(`(?i)(?:是否\s*(?:是)?\s*(?:处女|chu\s*女|c)|是不是处女|处女)(?:\s*:)+\s*(?:不|否|no|不是|非处|有经验)(?:\s|$|[,.;，。；])`)

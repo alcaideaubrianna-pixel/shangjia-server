@@ -31,6 +31,19 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	if err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(in.Province) == "" || strings.TrimSpace(in.City) == "" {
+		parsedProvince, parsedCity := profileextractor.RegionLabels(in.PlainText)
+		if strings.TrimSpace(in.Province) == "" {
+			in.Province = parsedProvince
+		}
+		if strings.TrimSpace(in.City) == "" {
+			in.City = parsedCity
+		}
+		in.Province, in.City, _, err = location.NormalizeRegionCodes(ctx, in.Province, in.City)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if tenantId <= 0 || accountId <= 0 {
 		return nil, gerror.New("上架账号信息不完整")
 	}

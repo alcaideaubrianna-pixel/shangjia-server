@@ -75,6 +75,17 @@ func TestMergeKeepsExistingValues(t *testing.T) {
 	}
 }
 
+func TestRegionLabels(t *testing.T) {
+	province, city := RegionLabels("所在省份：浙江\n所在城市：杭州")
+	if province != "浙江" || city != "杭州" {
+		t.Fatalf("unexpected region: %q %q", province, city)
+	}
+	province, city = RegionLabels("省份：广东\n城市:深圳")
+	if province != "广东" || city != "深圳" {
+		t.Fatalf("unexpected region: %q %q", province, city)
+	}
+}
+
 func TestParseFeiNiuUnitLabels(t *testing.T) {
 	result := Parse("身高(cm)：156\n体重(斤)：86\n罩杯：A")
 	if result.Height != 156 || result.Weight != 86 || result.Cup != "A" {
