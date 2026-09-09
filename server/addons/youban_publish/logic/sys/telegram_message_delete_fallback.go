@@ -32,6 +32,18 @@ func (e *telegramDeleteFallbackRetryError) Error() string                       
 func (e *telegramDeleteFallbackRetryError) Unwrap() error                        { return e.cause }
 func (e *telegramDeleteFallbackRetryError) AccountTaskRetryDelay() time.Duration { return e.delay }
 
+type telegramPartialSendCleanupRetryError struct {
+	cause error
+}
+
+func (e *telegramPartialSendCleanupRetryError) Error() string { return e.cause.Error() }
+func (e *telegramPartialSendCleanupRetryError) Unwrap() error { return e.cause }
+func (e *telegramPartialSendCleanupRetryError) AccountTaskRetryDelay() time.Duration {
+	// The delete fallback starts after roughly one minute. Waiting two minutes
+	// prevents the original send task from exhausting all retries first.
+	return 2 * time.Minute
+}
+
 func (s *sSysPublish) enqueueTelegramMessageDeleteFallback(ctx context.Context, job telegramJobRecord, reason string, cause error) {
 	channel, err := s.messagePushChannelFromJob(ctx, job)
 	if err != nil || channel.TgAccountId <= 0 {
@@ -257,7 +269,7 @@ func (s *sSysPublish) cleanupPartialAccountMediaSend(ctx context.Context, client
 			Data(g.Map{"status": "unknown", "dispatch_status": tgDispatchStatusIdle, "error_message": err.Error(), "updated_at": gtime.Now()}).
 			Update()
 		s.enqueueTelegramMessageDeleteFallback(ctx, job, "协议号半组消息同步清理失败", err)
-		return gerror.Wrap(err, "协议号半组消息清理失败，禁止直接重试发送")
+		return &telegramPartialSendCleanupRetryError{cause: gerror.Wrap(err, "协议号半组消息清理失败，等待删除兜底完成")}
 	}
 	s.appendTelegramJobLog(ctx, job, "account", "cleanup_done", fmt.Sprintf("协议号半组消息已清理 purpose:%s messages:%d", purpose, len(messages)))
 	return nil

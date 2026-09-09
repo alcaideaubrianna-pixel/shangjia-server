@@ -17,6 +17,16 @@ func TestTelegramDeleteFallbackRetryErrorProvidesDelay(t *testing.T) {
 	}
 }
 
+func TestTelegramPartialSendCleanupRetryWaitsForFallback(t *testing.T) {
+	err := &telegramPartialSendCleanupRetryError{cause: errors.New("cleanup failed")}
+	if got := err.AccountTaskRetryDelay(); got != 2*time.Minute {
+		t.Fatalf("AccountTaskRetryDelay() = %s, want %s", got, 2*time.Minute)
+	}
+	if !errors.Is(err, err.cause) {
+		t.Fatal("retry error must preserve cleanup cause")
+	}
+}
+
 func TestTelegramDeleteFallbackConstantsRemainLowPriority(t *testing.T) {
 	if telegramDeleteFallbackPriority != -10 {
 		t.Fatalf("fallback priority = %d, want -10", telegramDeleteFallbackPriority)
