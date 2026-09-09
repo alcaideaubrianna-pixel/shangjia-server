@@ -64,10 +64,16 @@ func (s *sSysPublish) telegramJobStillSending(ctx context.Context, jobId int64) 
 }
 
 func (s *sSysPublish) telegramJobMedia(ctx context.Context, job telegramJobRecord, purpose string) ([]*telegramMediaItem, error) {
-	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Where("profile_id", job.ProfileId).
-		Where("purpose", purpose).
-		WhereNull("deleted_at")
+	// hg_content_media is the canonical profile media source. The legacy
+	// publish table is joined only for reusable Telegram file IDs during the
+	// migration window; absence of a cache row must never hide profile media.
+	mod := g.DB().Model("hg_content_media cm").Safe().Ctx(ctx).
+		LeftJoin(publishMediaTable+" pm", "pm.profile_id=cm.profile_id AND pm.deleted_at IS NULL AND pm.purpose=cm.purpose AND pm.sort_index=cm.sort_index AND pm.media_type=cm.media_type").
+		Fields("cm.id,cm.source_asset_id AS attachment_id,cm.source_asset_id AS original_attachment_id,cm.media_type,cm.purpose,cm.sort_index,cm.original_storage_path,cm.display_storage_path AS storage_path,cm.display_storage_path AS file_url,cm.preview_storage_path AS poster_storage_path,cm.preview_storage_path AS poster_url,cm.binary_md5 AS md5,cm.perceptual_hash,COALESCE(pm.tg_file_id,'') AS tg_file_id,COALESCE(pm.tg_thumb_file_id,'') AS tg_thumb_file_id,COALESCE(pm.tg_cache_asset_hash,'') AS tg_cache_asset_hash,COALESCE(pm.tg_cache_status,'invalid') AS tg_cache_status,0 AS edited_attachment_id,'' AS edited_file_url,'' AS edited_storage_path,'' AS original_file_url,'raw' AS edit_status,0 AS must_send").
+		Where("cm.profile_id", job.ProfileId).
+		Where("cm.purpose", purpose).
+		Where("cm.status", 1).
+		WhereNull("cm.deleted_at")
 	records, err := mod.
 		OrderAsc("sort_index").OrderAsc("id").
 		All()

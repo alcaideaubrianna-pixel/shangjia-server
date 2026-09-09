@@ -1086,6 +1086,7 @@ func (s *sSysPublish) syncOwnedMediaToProfile(ctx context.Context, tx gdb.TX, ow
 			mediaColumns.ProfileId:           profileId,
 			mediaColumns.SourceAssetId:       sourceAssetId,
 			mediaColumns.MediaType:           mediaType,
+			"purpose":                        normalizeProfileMediaPurpose(item.Purpose),
 			mediaColumns.SortIndex:           item.SortIndex,
 			mediaColumns.OriginalStoragePath: originalStoragePath,
 			mediaColumns.DisplayStoragePath:  asset.StoragePath,
@@ -1158,4 +1159,11 @@ func (s *sSysPublish) syncOwnedMediaToProfile(ctx context.Context, tx gdb.TX, ow
 		return gerror.Wrap(err, "更新资料媒体数量失败")
 	}
 	return nil
+}
+
+func normalizeProfileMediaPurpose(purpose string) string {
+	if strings.TrimSpace(purpose) == "verify" {
+		return "verify"
+	}
+	return "display"
 }
