@@ -738,7 +738,7 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 	if source.IsEmpty() {
 		return nil
 	}
-	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, source["tenant_id"].Int64(), source["account_id"].Int64(), delivery.SourceChatID)
+	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, source["tenant_id"].Int64(), 0, delivery.SourceChatID)
 	if err != nil {
 		return gerror.Wrap(err, "检查Bot采集上架频道过滤失败")
 	}
@@ -752,7 +752,7 @@ func (s *sSysPublish) ingestCollectorBotDelivery(ctx context.Context, delivery *
 }
 
 func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {
-	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, delivery.TenantID, delivery.AccountID, delivery.SourceChatID)
+	blocked, err := s.collectMessageFromAccountPublishChannel(ctx, delivery.TenantID, delivery.TgAccountID, delivery.SourceChatID)
 	if err != nil {
 		return gerror.Wrap(err, "检查协议号采集上架频道过滤失败")
 	}

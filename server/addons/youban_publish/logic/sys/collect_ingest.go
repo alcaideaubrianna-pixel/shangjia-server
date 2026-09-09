@@ -19,27 +19,29 @@ const (
 	collectPublishChannelCacheKey = "youban_publish:collect:publish_channels"
 )
 
-func (s *sSysPublish) collectMessageFromAccountPublishChannel(ctx context.Context, tenantId, accountId int64, chatId string) (bool, error) {
+func (s *sSysPublish) collectMessageFromAccountPublishChannel(ctx context.Context, tenantId, tgAccountId int64, chatId string) (bool, error) {
 	chatId = normalizeTelegramChannelChatID(chatId)
-	if tenantId <= 0 || accountId <= 0 || chatId == "" {
+	if tenantId <= 0 || chatId == "" {
 		return false, nil
 	}
 	version := s.collectSourceCacheVersion(ctx)
-	cacheKey := fmt.Sprintf("%s:%s:%d:%d", collectPublishChannelCacheKey, version, tenantId, accountId)
+	cacheKey := fmt.Sprintf("%s:%s:%d:%d", collectPublishChannelCacheKey, version, tenantId, tgAccountId)
 	var chatIds []string
 	if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {
 		if json.Unmarshal([]byte(value.String()), &chatIds) == nil {
 			return collectChatMatchesPublishChannel(chatId, chatIds), nil
 		}
 	}
-	records, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+	model := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		Fields("target_chat_id").
 		Where("tenant_id", tenantId).
-		Where("account_id", accountId).
 		Where("publish_direction", "up").
 		Where("status", 1).
-		WhereNull("deleted_at").
-		All()
+		WhereNull("deleted_at")
+	if tgAccountId > 0 {
+		model = model.Where("tg_account_id", tgAccountId)
+	}
+	records, err := model.All()
 	if err != nil {
 		return false, err
 	}
