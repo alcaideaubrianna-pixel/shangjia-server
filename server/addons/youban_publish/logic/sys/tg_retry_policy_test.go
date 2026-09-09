@@ -61,6 +61,13 @@ func TestTelegramVideoAsPhotoIsPermanent(t *testing.T) {
 	}
 }
 
+func TestTelegramPhotoAsVideoIsPermanent(t *testing.T) {
+	err := assertError(`Bad Request: can't use file of type Photo as Video`)
+	if !isTelegramPermanentSendError(err) {
+		t.Fatal("photo as video must be treated as a permanent media type error")
+	}
+}
+
 func TestTelegramJobStateUpdateDataUsesSingleTerminalRule(t *testing.T) {
 	now := gtime.Now()
 	for _, status := range []string{"sent", "failed", "superseded"} {

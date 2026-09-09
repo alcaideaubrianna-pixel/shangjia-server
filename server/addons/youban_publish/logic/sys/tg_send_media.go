@@ -601,7 +601,7 @@ func isTelegramInvalidReusableFileError(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	for _, part := range []string{"wrong file identifier", "file_id_invalid", "file reference expired", "file_reference_expired", "file_reference_invalid"} {
+	for _, part := range []string{"wrong file identifier", "file_id_invalid", "file reference expired", "file_reference_expired", "file_reference_invalid", "can't use file of type photo as video", "can't use file of type video as photo"} {
 		if strings.Contains(message, part) {
 			return true
 		}
@@ -893,17 +893,16 @@ func closeTelegramMediaFiles(closers []io.Closer) {
 
 func telegramSentMessagesFromGroup(msgs []*models.Message, purpose string, media []*telegramMediaItem) []*telegramSentMessage {
 	list := make([]*telegramSentMessage, 0, len(msgs))
-	for i, msg := range msgs {
+	used := make([]bool, len(media))
+	for _, msg := range msgs {
 		if msg == nil {
 			continue
 		}
-		var mediaItem *telegramMediaItem
-		if i < len(media) {
-			mediaItem = media[i]
-		}
+		mediaItem, mediaIndex := telegramMediaItemForSentMessage(msg, media, used)
 		if mediaItem == nil {
 			continue
 		}
+		used[mediaIndex] = true
 		list = append(list, &telegramSentMessage{
 			MessageId:        int64(msg.ID),
 			MediaGroupId:     msg.MediaGroupID,
@@ -917,6 +916,26 @@ func telegramSentMessagesFromGroup(msgs []*models.Message, purpose string, media
 		})
 	}
 	return list
+}
+
+func telegramMediaItemForSentMessage(msg *models.Message, media []*telegramMediaItem, used []bool) (*telegramMediaItem, int) {
+	messageType := telegramMessageMediaType(msg)
+	if messageType == "" {
+		return nil, -1
+	}
+	for index, item := range media {
+		if index >= len(used) || used[index] || item == nil {
+			continue
+		}
+		mediaType := strings.ToLower(strings.TrimSpace(item.MediaType))
+		if mediaType == "photo" {
+			mediaType = "image"
+		}
+		if mediaType == messageType {
+			return item, index
+		}
+	}
+	return nil, -1
 }
 
 func telegramSentMessagesFromSingle(msg *models.Message, purpose string, media *telegramMediaItem) ([]*telegramSentMessage, error) {

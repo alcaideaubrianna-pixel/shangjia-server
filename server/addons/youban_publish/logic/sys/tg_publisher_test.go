@@ -111,6 +111,17 @@ func TestTelegramInvalidReusableFileError(t *testing.T) {
 	}
 }
 
+func TestTelegramCrossTypeReusableFileError(t *testing.T) {
+	for _, message := range []string{
+		"Bad Request: can't use file of type Photo as Video",
+		"Bad Request: can't use file of type Video as Photo",
+	} {
+		if !isTelegramInvalidReusableFileError(errors.New(message)) {
+			t.Fatalf("cross-type file id must trigger upload fallback: %s", message)
+		}
+	}
+}
+
 func TestTelegramCopySourceUnavailableError(t *testing.T) {
 	if !isTelegramCopySourceUnavailableError(errors.New("Bad Request: chat not found")) {
 		t.Fatal("copy source chat failure should fall back to upload")

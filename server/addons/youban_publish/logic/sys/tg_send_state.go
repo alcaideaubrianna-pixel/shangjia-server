@@ -15,7 +15,18 @@ func (s *sSysPublish) updateTelegramMediaFileIds(ctx context.Context, messages [
 		if item == nil || item.MediaId <= 0 || item.TgFileId == "" || strings.HasPrefix(item.AssetHash, "anti-scan:") {
 			continue
 		}
-		_, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		mediaType, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+			Where("id", item.MediaId).
+			Fields("media_type").
+			Value()
+		if err != nil {
+			return gerror.Wrap(err, "读取TG媒体类型失败")
+		}
+		if !telegramFileIDMatchesMediaType(mediaType.String(), item.TgFileId) {
+			g.Log().Warningf(ctx, "拒绝回填类型不匹配的TG媒体file_id mediaId:%d mediaType:%s fileId:%s", item.MediaId, mediaType.String(), item.TgFileId)
+			continue
+		}
+		_, err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 			Where("id", item.MediaId).
 			Data(g.Map{
 				"tg_file_id":          item.TgFileId,
