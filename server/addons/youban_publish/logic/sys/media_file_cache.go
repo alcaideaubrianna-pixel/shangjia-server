@@ -255,7 +255,9 @@ func cachedGeneratedMediaFile(ctx context.Context, key string, source string, ex
 }
 
 func downloadMediaFileCache(ctx context.Context, source string, filePath string) error {
-	return downloadMediaFileCacheWithClient(ctx, &http.Client{Timeout: 2 * time.Minute}, source, filePath)
+	downloadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
+	defer cancel()
+	return downloadMediaFileCacheWithClient(downloadCtx, &http.Client{Timeout: 10 * time.Minute}, source, filePath)
 }
 
 func downloadMediaFileCacheWithClient(ctx context.Context, client *http.Client, source string, filePath string) error {

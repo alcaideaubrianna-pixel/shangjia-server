@@ -90,6 +90,13 @@ func isTelegramAmbiguousDeliveryError(err error) bool {
 		return true
 	}
 	message := strings.ToLower(err.Error())
+	// Media preparation/download failures happen before Telegram accepts a
+	// request, so delivery is known to have failed and must be retried normally.
+	for _, part := range []string{"下载远程媒体失败", "保存媒体缓存临时文件失败", "创建媒体缓存临时文件失败", "写入媒体缓存文件失败"} {
+		if strings.Contains(message, strings.ToLower(part)) {
+			return false
+		}
+	}
 	for _, part := range []string{"context deadline exceeded", "client.timeout exceeded", "closed pipe", "broken pipe", "goaway", "cannot rewind body", "connection reset", "unexpected eof"} {
 		if strings.Contains(message, part) {
 			return true
