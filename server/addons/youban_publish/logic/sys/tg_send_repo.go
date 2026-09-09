@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -228,6 +229,33 @@ func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegram
 			g.Log().Warningf(ctx, "保存防扫图搜索指纹失败 jobId:%d mediaId:%d err:%+v", job.Id, item.MediaId, err)
 		}
 	}
+	return nil
+}
+
+func (s *sSysPublish) confirmTelegramMediaPhase(ctx context.Context, job telegramJobRecord, transport, purpose string, media []*telegramMediaItem, messages []*telegramSentMessage) error {
+	if err := validateTelegramMediaSendResult(purpose, media, messages); err != nil {
+		s.appendTelegramJobLog(ctx, job, transport, "incomplete", err.Error())
+		return err
+	}
+	for _, message := range messages {
+		if message != nil {
+			message.Purpose = purpose
+		}
+	}
+	if err := s.saveTelegramSentMessages(ctx, job, messages); err != nil {
+		return telegramDeliveryUncertainError(err)
+	}
+	if err := s.updateTelegramMediaFileIds(ctx, messages); err != nil {
+		g.Log().Warningf(ctx, "TG媒体file_id更新失败 transport:%s jobId:%d purpose:%s err:%+v", transport, job.Id, purpose, err)
+	}
+	phase := telegramSendPhaseDisplayConfirmed
+	if purpose == "verify" {
+		phase = telegramSendPhaseVerifyConfirmed
+	}
+	if err := s.updateTelegramJobSendPhase(ctx, job.Id, phase); err != nil {
+		return telegramDeliveryUncertainError(err)
+	}
+	s.appendTelegramJobLog(ctx, job, transport, "confirmed", fmt.Sprintf("媒体阶段确认完成 purpose:%s expected:%d confirmed:%d", purpose, len(media), len(messages)))
 	return nil
 }
 

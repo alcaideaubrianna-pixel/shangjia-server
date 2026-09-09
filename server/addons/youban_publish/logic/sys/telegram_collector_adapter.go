@@ -284,18 +284,10 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 		return gerror.Wrap(err, "协议号媒体降级发送失败")
 	}
 	stage("发送展示媒体", "messageCount", len(messages))
-	for _, message := range messages {
-		if message != nil {
-			message.Purpose = parts[1]
-		}
-	}
-	if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
+	if err = s.confirmTelegramMediaPhase(ctx, job, "account", parts[1], media, messages); err != nil {
 		return err
 	}
 	stage("保存展示消息")
-	if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {
-		return err
-	}
 	if parts[1] == "display" {
 		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplayConfirmed); err != nil {
 			return err
@@ -311,18 +303,10 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 			return gerror.Wrap(err, "协议号验证媒体降级发送失败")
 		}
 		stage("发送验证媒体", "messageCount", len(verifyMessages))
-		for _, message := range verifyMessages {
-			if message != nil {
-				message.Purpose = "verify"
-			}
-		}
-		if err = s.saveTelegramSentMessages(ctx, job, verifyMessages); err != nil {
+		if err = s.confirmTelegramMediaPhase(ctx, job, "account", "verify", verifyMedia, verifyMessages); err != nil {
 			return err
 		}
 		stage("保存验证消息")
-		if err = s.updateTelegramMediaFileIds(ctx, verifyMessages); err != nil {
-			return err
-		}
 		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifyConfirmed); err != nil {
 			return err
 		}
@@ -334,6 +318,33 @@ func (s *sSysPublish) handleMessageMediaFallbackAccountTask(ctx context.Context,
 	}
 	g.Log().Infof(ctx, "协议号验证媒体降级任务发送成功 taskId:%d jobId:%d tgAccountId:%d verifyMessages:%d", task.ID, job.Id, task.AccountID, len(messages))
 	return s.completeTelegramJobAndWakeChannel(ctx, job)
+}
+
+func validateTelegramMediaSendResult(purpose string, media []*telegramMediaItem, messages []*telegramSentMessage) error {
+	if len(media) == 0 {
+		return nil
+	}
+	mediaIDs := make(map[int64]struct{}, len(media))
+	for _, item := range media {
+		if item != nil && item.Id > 0 {
+			mediaIDs[item.Id] = struct{}{}
+		}
+	}
+	sentIDs := make(map[int64]struct{}, len(messages))
+	for _, item := range messages {
+		if item != nil && item.MessageId > 0 && item.MediaId > 0 {
+			sentIDs[item.MediaId] = struct{}{}
+		}
+	}
+	for mediaID := range mediaIDs {
+		if _, ok := sentIDs[mediaID]; !ok {
+			return gerror.Newf("Telegram%s媒体发送结果不完整：期望%d个媒体，确认%d个，缺少mediaId=%d", purpose, len(mediaIDs), len(sentIDs), mediaID)
+		}
+	}
+	if len(mediaIDs) == 0 && len(messages) < len(media) {
+		return gerror.Newf("Telegram%s媒体发送结果不完整：期望%d个媒体，确认%d条消息", purpose, len(media), len(messages))
+	}
+	return nil
 }
 
 func mediaFallbackTaskCanSkip(jobStatus string, sentMessageCount int) bool {

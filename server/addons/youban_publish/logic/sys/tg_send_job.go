@@ -237,6 +237,10 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "展示资料分片推送失败")
 			return gerror.Wrapf(err, "TG展示资料推送失败，job:%d，channel:%d，chat:%s", job.Id, job.ChannelId, job.TargetChatId)
 		}
+		if err = validateTelegramMediaSendResult("display", displayMedia, messages); err != nil {
+			_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "展示媒体发送结果不完整")
+			return err
+		}
 		if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
 			return telegramDeliveryUncertainError(err)
 		}
@@ -287,6 +291,10 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			}
 		}
 		return gerror.Wrapf(err, "TG验证资料推送失败，job:%d，channel:%d，chat:%s", job.Id, job.ChannelId, job.TargetChatId)
+	}
+	if err = validateTelegramMediaSendResult("verify", verifyMedia, verifyMessages); err != nil {
+		_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, verifyMessages, "验证媒体发送结果不完整")
+		return err
 	}
 	if err = s.saveTelegramSentMessages(ctx, job, verifyMessages); err != nil {
 		return telegramDeliveryUncertainError(err)
