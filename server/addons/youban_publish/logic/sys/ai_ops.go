@@ -56,6 +56,46 @@ func (s *sSysPublish) AIOpsRepublishProfiles(ctx context.Context, in *sysin.Prof
 	return result, nil
 }
 
+func (s *sSysPublish) AIOpsDeleteImportedProfiles(ctx context.Context, tenantId, accountId int64, profileIds []int64, dryRun bool) ([]int64, error) {
+	ids := uniqueIds(profileIds)
+	if tenantId <= 0 || accountId <= 0 {
+		return nil, gerror.New("租户和账号不能为空")
+	}
+	if len(ids) == 0 || len(ids) > 100 {
+		return nil, gerror.New("单次只能删除1到100条资料")
+	}
+	var rows []struct {
+		ProfileId int64 `json:"profileId"`
+	}
+	err := g.DB().Model(publishProfileStateTable+" ps").Safe().Ctx(ctx).
+		Fields("ps.profile_id").
+		InnerJoin("hg_content_profile p", "p.id=ps.profile_id AND p.deleted_at IS NULL").
+		Where("ps.tenant_id", tenantId).
+		Where("ps.account_id", accountId).
+		Where("p.source_type", "youban_publish").
+		WhereIn("ps.profile_id", ids).
+		WhereNull("ps.deleted_at").
+		Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "校验TG导入资料失败")
+	}
+	validated := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		validated = append(validated, row.ProfileId)
+	}
+	validated = uniqueIds(validated)
+	if len(validated) != len(ids) {
+		return nil, gerror.Newf("待删除资料校验失败：请求%d条，仅%d条属于指定账号的TG导入资料", len(ids), len(validated))
+	}
+	if !dryRun {
+		if err = s.deleteProfiles(ctx, &sysin.ProfileDeleteInp{Ids: validated}, tenantId, accountId); err != nil {
+			return nil, err
+		}
+	}
+	g.Log().Info(ctx, "AI运维TG导入资料删除", g.Map{"tenantId": tenantId, "accountId": accountId, "profileIds": validated, "dryRun": dryRun})
+	return validated, nil
+}
+
 func collectProfileMediaComplete(ctx context.Context, profileId int64) (bool, error) {
 	profile, err := g.DB().Model("hg_content_profile p").Safe().Ctx(ctx).
 		Fields("p.source_type,COUNT(DISTINCT m.id) AS media_count").

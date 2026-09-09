@@ -79,6 +79,7 @@ type ISysPublish interface {
 	RepairCollectReviewMedia(ctx context.Context, reviewIds []int64) error
 	AIOpsRebuildProfileMedia(ctx context.Context, profileIds []int64, dryRun bool) (*sysin.CollectProfileMediaRebuildResult, error)
 	AIOpsRepublishProfiles(ctx context.Context, in *sysin.ProfileStatusInp) (*sysin.ProfileStatusModel, error)
+	AIOpsDeleteImportedProfiles(ctx context.Context, tenantId, accountId int64, profileIds []int64, dryRun bool) ([]int64, error)
 	ServerMediaList(ctx context.Context, in *sysin.MediaListInp) (list []*sysin.MediaModel, err error)
 	ServerMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error)
 	ServerBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error)

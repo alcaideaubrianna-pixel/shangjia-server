@@ -27,3 +27,15 @@ func (c *cAIOps) ProfileRepublish(ctx context.Context, req *aiops.ProfileRepubli
 	}
 	return &aiops.ProfileRepublishRes{Message: result.Message}, nil
 }
+
+func (c *cAIOps) ProfileDelete(ctx context.Context, req *aiops.ProfileDeleteReq) (*aiops.ProfileDeleteRes, error) {
+	ids, err := service.SysPublish().AIOpsDeleteImportedProfiles(ctx, req.TenantId, req.AccountId, req.ProfileIds, !req.Apply)
+	if err != nil {
+		return nil, err
+	}
+	res := &aiops.ProfileDeleteRes{Candidates: len(ids), ProfileIds: ids}
+	if req.Apply {
+		res.Deleted = len(ids)
+	}
+	return res, nil
+}
