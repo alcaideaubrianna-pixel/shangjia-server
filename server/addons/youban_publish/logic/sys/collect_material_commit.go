@@ -185,35 +185,42 @@ func (s *sSysPublish) commitCollectMaterial(ctx context.Context, event gdb.Recor
 // but repeated events and retry/update paths must not be able to write raw text
 // back over the cleaned profile text.
 func (s *sSysPublish) normalizeCollectMaterialText(ctx context.Context, event gdb.Record, rule gdb.Record, text string) string {
-	if suffix := strings.TrimSpace(rule["intro_fee_suffix"].String()); suffix != "" {
-		original := event["raw_text"].String()
-		body := text
-		if rule["truncate_intro_fee_enabled"].Bool() {
-			body = applyCollectIntroFeeTruncate(text)
+	footer := strings.TrimSpace(rule["footer_markdown"].String())
+	footerSuffix := ""
+	if footer != "" {
+		candidate := "\n" + footer
+		if strings.HasSuffix(text, candidate) {
+			text = strings.TrimSuffix(text, candidate)
+			footerSuffix = candidate
 		}
-		return applyCollectIntroFeeSuffix(body, original, suffix)
+	}
+	// Re-apply all source rules at the persistence boundary. This protects
+	// retries/imports/merge paths that may provide the original caption.
+	if footerSuffix != "" && rule["truncate_intro_fee_enabled"].Bool() {
+		text = normalizeCollectRuleBodyWithoutTruncate(text, rule)
+	} else {
+		text = normalizeCollectRuleBody(text, rule)
+	}
+	text += footerSuffix
+	if suffix := strings.TrimSpace(rule["intro_fee_suffix"].String()); suffix != "" {
+		amountText := normalizeCollectRuleBodyWithoutTruncate(event["raw_text"].String(), rule)
+		return applyCollectIntroFeeSuffix(text, amountText, suffix)
 	}
 	if !rule["truncate_intro_fee_enabled"].Bool() {
+		return text
+	}
+	if footerSuffix != "" {
 		return text
 	}
 	// The rule engine appends user-configured footer text after cleaning the
 	// source body. When a footer is configured, do not re-truncate the final
 	// caption at this boundary; retry/merge records may not carry the footer
 	// field and would otherwise delete the user's appended text.
-	if strings.TrimSpace(rule["footer_markdown"].String()) != "" {
-		return text
-	}
 	// Footer/追加文案 is intentionally user-authored and may itself contain
 	// the keyword. Only normalize the source body before the exact footer.
-	footer := strings.TrimSpace(rule["footer_markdown"].String())
 	body := text
-	footerSuffix := ""
-	if footer != "" {
-		candidate := "\n" + footer
-		if strings.HasSuffix(text, candidate) {
-			body = strings.TrimSuffix(text, candidate)
-			footerSuffix = candidate
-		}
+	if footerSuffix != "" {
+		body = strings.TrimSuffix(text, footerSuffix)
 	}
 	cleaned := applyCollectIntroFeeTruncate(body) + footerSuffix
 	if cleaned != text {

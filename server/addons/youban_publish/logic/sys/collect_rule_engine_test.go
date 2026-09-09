@@ -334,6 +334,24 @@ func TestNormalizeCollectMaterialTextPreservesModifiedIntroFee(t *testing.T) {
 	}
 }
 
+func TestCollectRuleReplacementSurvivesIntroFeeSuffixNormalization(t *testing.T) {
+	s := &sSysPublish{}
+	event := gdb.Record{"id": gvar.New(int64(106)), "raw_text": gvar.New("正文\n介绍费 6888 来风")}
+	rule := gdb.Record{
+		"truncate_intro_fee_enabled": gvar.New(false),
+		"intro_fee_suffix":           gvar.New("来风"),
+		"replace_from":               gvar.New([]string{"6888"}),
+		"replace_to":                 gvar.New([]string{"7888"}),
+	}
+	decision := buildCollectRuleDecision(event, nil, rule)
+	if decision.Text != "正文\n介绍费 7888 来风" {
+		t.Fatalf("decision text = %q", decision.Text)
+	}
+	if got := s.normalizeCollectMaterialText(context.Background(), event, rule, decision.Text); got != decision.Text {
+		t.Fatalf("commit normalization changed cleaned text: got %q want %q", got, decision.Text)
+	}
+}
+
 func TestBuildCollectRuleDecisionKeepsIntroFeeTruncatedAcrossRepeatedProcessing(t *testing.T) {
 	rawText := "省份：广东\n城市：广州\n介绍费：7888(香水湾💦)"
 	event := gdb.Record{

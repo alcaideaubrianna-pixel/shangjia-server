@@ -48,14 +48,8 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 			MatchJSON: matchJSON,
 		}
 	}
-	text := rawText
 	introFeeSuffix := strings.TrimSpace(rule["intro_fee_suffix"].String())
-	if rule["truncate_intro_fee_enabled"].Bool() {
-		text = applyCollectIntroFeeTruncate(text)
-	}
-	text = applyCollectLineDeletes(text, collectRuleStrings(rule, "delete_lines"))
-	text = applyCollectTextDeletes(text, collectRuleStrings(rule, "delete_texts"))
-	text = applyCollectReplacements(text, collectRuleReplacements(rule))
+	text := normalizeCollectRuleBody(rawText, rule)
 	if shouldDropCollectStandaloneCodeCaption(text, mediaCount) {
 		text = ""
 	}
@@ -73,13 +67,34 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 		text = strings.TrimSpace(text + "\n" + strings.TrimSpace(rule["footer_markdown"].String()))
 	}
 	if introFeeSuffix != "" {
-		text = applyCollectIntroFeeSuffix(text, rawText, introFeeSuffix)
+		// Suffix reconstruction needs the amount from the cleaned source before
+		// truncation removes the original fee line.
+		amountText := normalizeCollectRuleBodyWithoutTruncate(rawText, rule)
+		text = applyCollectIntroFeeSuffix(text, amountText, introFeeSuffix)
 	}
 	return &collectRuleDecision{
 		Matched:   true,
 		Text:      strings.TrimSpace(text),
 		MatchJSON: matchJSON,
 	}
+}
+
+func normalizeCollectRuleBodyWithoutTruncate(text string, rule gdb.Record) string {
+	text = applyCollectLineDeletes(text, collectRuleStrings(rule, "delete_lines"))
+	text = applyCollectTextDeletes(text, collectRuleStrings(rule, "delete_texts"))
+	return applyCollectReplacements(text, collectRuleReplacements(rule))
+}
+
+// normalizeCollectRuleBody applies source text rules in a deterministic,
+// idempotent order. It is shared by rule evaluation and the persistence
+// boundary so retries cannot write raw text back over cleaned content.
+func normalizeCollectRuleBody(text string, rule gdb.Record) string {
+	if rule["truncate_intro_fee_enabled"].Bool() {
+		text = applyCollectIntroFeeTruncate(text)
+	}
+	text = applyCollectLineDeletes(text, collectRuleStrings(rule, "delete_lines"))
+	text = applyCollectTextDeletes(text, collectRuleStrings(rule, "delete_texts"))
+	return applyCollectReplacements(text, collectRuleReplacements(rule))
 }
 
 func shouldDropCollectStandaloneCodeCaption(text string, mediaCount int) bool {
