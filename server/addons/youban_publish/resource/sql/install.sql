@@ -176,6 +176,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_source_rule` (
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ybp_collect_source_rule` (`source_id`,`rule_id`),
+  UNIQUE KEY `uk_ybp_collect_source_single_rule` (`source_id`),
   KEY `idx_ybp_collect_source_rule_source` (`tenant_id`,`source_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集源规则';
 

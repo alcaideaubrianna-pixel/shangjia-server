@@ -139,15 +139,9 @@ func mergeGlobalCollectTextPolicy(rules, globals []gdb.Record) {
 	deleteTexts := make([]string, 0)
 	replaceFrom := make([]string, 0)
 	replaceTo := make([]string, 0)
-	truncateIntroFee := false
-	introFeeSuffix := ""
 	for _, global := range globals {
 		deleteLines = append(deleteLines, collectRuleStrings(global, "delete_lines")...)
 		deleteTexts = append(deleteTexts, collectRuleStrings(global, "delete_texts")...)
-		truncateIntroFee = truncateIntroFee || global["truncate_intro_fee_enabled"].Bool()
-		if suffix := strings.TrimSpace(global["intro_fee_suffix"].String()); suffix != "" {
-			introFeeSuffix = suffix
-		}
 		for _, replacement := range collectRuleReplacements(global) {
 			replaceFrom = append(replaceFrom, replacement.From)
 			replaceTo = append(replaceTo, replacement.To)
@@ -164,12 +158,6 @@ func mergeGlobalCollectTextPolicy(rules, globals []gdb.Record) {
 		}
 		rule["replace_from"] = gvar.New(from)
 		rule["replace_to"] = gvar.New(to)
-		if truncateIntroFee {
-			rule["truncate_intro_fee_enabled"] = gvar.New(true)
-		}
-		if strings.TrimSpace(rule["intro_fee_suffix"].String()) == "" && introFeeSuffix != "" {
-			rule["intro_fee_suffix"] = gvar.New(introFeeSuffix)
-		}
 	}
 }
 

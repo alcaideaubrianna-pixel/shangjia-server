@@ -191,6 +191,16 @@ func (s *sSysPublish) CollectRuleSave(ctx context.Context, in *sysin.CollectRule
 	}
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if in.Id > 0 {
+			if switchInt(in.GlobalEnabled) == 1 {
+				bound, bindErr := tx.Model(pdao.YoubanPublishCollectSourceRule.Table()).Ctx(ctx).
+					Where("rule_id", in.Id).Where("tenant_id", account.TenantId).Exist()
+				if bindErr != nil {
+					return gerror.Wrap(bindErr, "检查采集规则绑定失败")
+				}
+				if bound {
+					return gerror.New("采集源专属规则不能设为全局文本配置")
+				}
+			}
 			result, txErr := tx.Model(pdao.YoubanPublishCollectRule.Table()).Ctx(ctx).
 				Where("id", in.Id).Where("tenant_id", account.TenantId).Where("account_id", account.Id).
 				WhereNull("deleted_at").Data(data).Update()

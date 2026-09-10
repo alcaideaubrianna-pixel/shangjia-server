@@ -1307,6 +1307,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_source_rule" (
   "updated_at" timestamp DEFAULT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_source_rule" ON "hg_youban_publish_collect_source_rule" ("source_id", "rule_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_source_single_rule" ON "hg_youban_publish_collect_source_rule" ("source_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_source_rule_source" ON "hg_youban_publish_collect_source_rule" ("tenant_id", "source_id", "status");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_bot_channel_cache" (

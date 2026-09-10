@@ -33,3 +33,19 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_dedupe_source" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_dedupe_source" ON "hg_youban_publish_collect_dedupe_source" ("entry_id", "dispatch_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dedupe_source_owner" ON "hg_youban_publish_collect_dedupe_source" ("tenant_id", "account_id", "source_id", "entry_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dedupe_source_dispatch" ON "hg_youban_publish_collect_dedupe_source" ("dispatch_id");
+
+-- A bound rule is source-local. Global rules are account-level delete/replace policies only.
+UPDATE "hg_youban_publish_collect_rule" r
+SET "global_enabled" = 0, "updated_at" = CURRENT_TIMESTAMP
+WHERE r."global_enabled" = 1
+  AND EXISTS (
+    SELECT 1 FROM "hg_youban_publish_collect_source_rule" sr WHERE sr."rule_id" = r."id"
+  );
+
+DELETE FROM "hg_youban_publish_collect_source_rule" sr
+USING "hg_youban_publish_collect_source_rule" keep
+WHERE sr."source_id" = keep."source_id"
+  AND (sr."sort", sr."id") > (keep."sort", keep."id");
+
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_source_single_rule"
+  ON "hg_youban_publish_collect_source_rule" ("source_id");

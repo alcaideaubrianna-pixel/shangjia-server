@@ -157,6 +157,11 @@ func (s *sSysPublish) CollectSourceDelete(ctx context.Context, in *sysin.IdsInp)
 	ids := uniqueIds(in.Ids)
 	now := gtime.Now()
 	err = pdao.YoubanPublishCollectSource.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var boundRuleIds []int64
+		if queryErr := tx.Model(pdao.YoubanPublishCollectSourceRule.Table()).Ctx(ctx).
+			Fields("rule_id").WhereIn("source_id", ids).Where("tenant_id", account.TenantId).Scan(&boundRuleIds); queryErr != nil {
+			return gerror.Wrap(queryErr, "读取采集源专属规则失败")
+		}
 		if _, updateErr := tx.Model(pdao.YoubanPublishCollectSource.Table()).Ctx(ctx).
 			WhereIn("id", ids).
 			Where("tenant_id", account.TenantId).
@@ -170,6 +175,16 @@ func (s *sSysPublish) CollectSourceDelete(ctx context.Context, in *sysin.IdsInp)
 			Where("tenant_id", account.TenantId).
 			Delete(); deleteErr != nil {
 			return gerror.Wrap(deleteErr, "删除采集源规则绑定失败")
+		}
+		boundRuleIds = uniqueIds(boundRuleIds)
+		if len(boundRuleIds) > 0 {
+			if _, updateErr := tx.Model(pdao.YoubanPublishCollectRule.Table()).Ctx(ctx).
+				WhereIn("id", boundRuleIds).Where("tenant_id", account.TenantId).Where("account_id", account.Id).
+				Where("global_enabled", 0).
+				Where("NOT EXISTS (SELECT 1 FROM " + pdao.YoubanPublishCollectSourceRule.Table() + " sr WHERE sr.rule_id=" + pdao.YoubanPublishCollectRule.Table() + ".id)").
+				Data(g.Map{"deleted_at": now, "deleted_by": account.Id, "updated_by": account.Id, "updated_at": now}).Update(); updateErr != nil {
+				return gerror.Wrap(updateErr, "清理采集源专属规则失败")
+			}
 		}
 		return nil
 	})
@@ -331,11 +346,29 @@ func collectSourceChannelCache(tgAccountId int64, channelId string, cacheMap map
 }
 
 func (s *sSysPublish) saveCollectSourceRules(ctx context.Context, tx gdb.TX, tenantId int64, sourceId int64, ruleIds []int64) error {
+	ruleIds = uniqueIds(ruleIds)
+	if len(ruleIds) != 1 || ruleIds[0] <= 0 {
+		return gerror.New("每个采集源必须绑定一个专属规则")
+	}
+	accountId, err := tx.Model(pdao.YoubanPublishCollectSource.Table()).Ctx(ctx).
+		Fields("account_id").Where("id", sourceId).Where("tenant_id", tenantId).Value()
+	if err != nil {
+		return gerror.Wrap(err, "读取采集源账号失败")
+	}
+	valid, err := tx.Model(pdao.YoubanPublishCollectRule.Table()).Ctx(ctx).
+		Where("id", ruleIds[0]).Where("tenant_id", tenantId).Where("account_id", accountId.Int64()).
+		Where("global_enabled", 0).Where("status", 1).WhereNull("deleted_at").Exist()
+	if err != nil {
+		return gerror.Wrap(err, "校验采集源专属规则失败")
+	}
+	if !valid {
+		return gerror.New("采集源只能绑定当前账号启用的专属规则")
+	}
 	if _, err := tx.Model(pdao.YoubanPublishCollectSourceRule.Table()).Ctx(ctx).Where("source_id", sourceId).Delete(); err != nil {
 		return gerror.Wrap(err, "清理采集源规则失败")
 	}
 	now := gtime.Now()
-	for index, ruleId := range uniqueIds(ruleIds) {
+	for index, ruleId := range ruleIds {
 		if ruleId <= 0 {
 			continue
 		}

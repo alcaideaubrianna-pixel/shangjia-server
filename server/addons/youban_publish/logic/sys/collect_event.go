@@ -655,12 +655,8 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	sourceId := event["source_id"].Int64()
 	cacheKey := s.collectEventRulesCacheKey(ctx, tenantId, accountId, sourceId)
 	if rows, ok := collectEventRulesCacheGet(ctx, cacheKey); ok {
-		if err := attachCollectRuleChannels(ctx, rows); err != nil {
-			return nil, err
-		}
-		if err := attachCollectRuleItems(ctx, rows); err != nil {
-			return nil, err
-		}
+		// Cached rows are complete resolved snapshots. Reattaching source-local
+		// items here would overwrite the account text policy merged below.
 		return rows, nil
 	}
 	var bindRows []struct {
@@ -669,14 +665,15 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	if err := pdao.YoubanPublishCollectSourceRule.Ctx(ctx).Where("source_id", sourceId).Where("status", 1).OrderAsc("sort").Scan(&bindRows); err != nil {
 		return nil, gerror.Wrap(err, "读取采集源绑定规则失败")
 	}
+	if len(bindRows) != 1 {
+		return nil, gerror.Newf("采集源%d必须且只能绑定一个专属规则，当前绑定%d个", sourceId, len(bindRows))
+	}
 	ruleIds := make([]int64, 0, len(bindRows))
 	for _, row := range bindRows {
 		ruleIds = append(ruleIds, row.RuleId)
 	}
-	// Global tenant text policy is always applied in addition to source-bound
-	// rules. Previously it was only used when a source had no bindings, which
-	// made a shared delete/replace policy silently disappear once a source got
-	// its own rule.
+	// Global rules are account text policies. Only delete and replace items are
+	// merged; all source behavior belongs to the single bound source rule.
 	globalMod := pdao.YoubanPublishCollectRule.Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
@@ -718,6 +715,9 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 				rows = append(rows, row)
 			}
 		}
+	}
+	if len(rows) != 1 {
+		return nil, gerror.Newf("采集源%d的专属规则不存在或已停用", sourceId)
 	}
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取采集规则失败")

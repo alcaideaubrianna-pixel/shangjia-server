@@ -21,3 +21,18 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_dedupe_source` (
   KEY `idx_ybp_collect_dedupe_source_owner` (`tenant_id`,`account_id`,`source_id`,`entry_id`),
   KEY `idx_ybp_collect_dedupe_source_dispatch` (`dispatch_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='采集去重来源贡献';
+
+-- A bound rule is source-local. Global rules are account-level delete/replace policies only.
+UPDATE `hg_youban_publish_collect_rule` r
+INNER JOIN `hg_youban_publish_collect_source_rule` sr ON sr.`rule_id` = r.`id`
+SET r.`global_enabled` = 0, r.`updated_at` = CURRENT_TIMESTAMP
+WHERE r.`global_enabled` = 1;
+
+DELETE sr
+FROM `hg_youban_publish_collect_source_rule` sr
+INNER JOIN `hg_youban_publish_collect_source_rule` keep
+  ON keep.`source_id` = sr.`source_id`
+ AND (keep.`sort` < sr.`sort` OR (keep.`sort` = sr.`sort` AND keep.`id` < sr.`id`));
+
+ALTER TABLE `hg_youban_publish_collect_source_rule`
+  ADD UNIQUE KEY `uk_ybp_collect_source_single_rule` (`source_id`);
