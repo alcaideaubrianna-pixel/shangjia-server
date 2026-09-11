@@ -158,6 +158,22 @@ func TestCollectDedupeDoesNotTreatTelegramIdentityAsContentFingerprint(t *testin
 	}
 }
 
+func TestCollectDedupeScopesMediaFingerprintsToProfileText(t *testing.T) {
+	media := []collectMediaItem{{Type: "photo", FileMd5: "same-md5", FilePhash: "same-phash"}}
+	shanghai := collectDedupeMaterialFromItems("shanghai-profile", media)
+	shenzhen := collectDedupeMaterialFromItems("shenzhen-profile", media)
+	if shanghai.mediaKey == shenzhen.mediaKey {
+		t.Fatal("same media with different profile text must not share media fingerprint")
+	}
+	if shanghai.imagePHashKey == shenzhen.imagePHashKey {
+		t.Fatal("same images with different profile text must not share image phash signature")
+	}
+	shanghaiAgain := collectDedupeMaterialFromItems("shanghai-profile", media)
+	if shanghai.mediaKey != shanghaiAgain.mediaKey || shanghai.imagePHashKey != shanghaiAgain.imagePHashKey {
+		t.Fatal("same text and media must remain permanently deduplicated")
+	}
+}
+
 func TestCollectDedupeLocksOverlapOnAnyMatchingLayer(t *testing.T) {
 	left := collectDedupeMaterial{textHash: "same-text", mediaKey: "left-media", mediaTotal: 1, mediaCount: 1}
 	right := collectDedupeMaterial{textHash: "same-text", mediaKey: "right-media", mediaTotal: 1, mediaCount: 1}

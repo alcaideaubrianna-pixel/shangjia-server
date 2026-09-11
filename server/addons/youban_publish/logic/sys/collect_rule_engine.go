@@ -162,6 +162,16 @@ func collectDedupeMaterialFromItems(textHash string, items []collectMediaItem) c
 	if textHash == collectHash("") {
 		textHash = ""
 	}
+	// Reused Telegram media is common in agent channels. Media equality alone
+	// cannot identify a profile when the accompanying profile text changed.
+	if textHash != "" {
+		if mediaKey != "" {
+			mediaKey = collectHash(textHash + ":" + mediaKey)
+		}
+		if imagePHashKey != "" {
+			imagePHashKey = collectHash(textHash + ":" + imagePHashKey)
+		}
+	}
 	return collectDedupeMaterial{
 		mediaKey:        mediaKey,
 		textHash:        textHash,
