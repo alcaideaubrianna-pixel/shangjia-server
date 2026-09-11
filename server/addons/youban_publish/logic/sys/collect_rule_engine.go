@@ -184,11 +184,11 @@ func collectMediaFingerprintSetKey(items []collectMediaItem) string {
 func collectMediaFingerprintValues(items []collectMediaItem) []string {
 	values := make([]string, 0, len(items))
 	for _, item := range items {
-		fingerprint := strings.TrimSpace(collectMediaFingerprint(item))
+		fingerprint := strings.ToLower(strings.TrimSpace(item.FileMd5))
 		if fingerprint == "" {
 			continue
 		}
-		values = append(values, strings.ToLower(strings.TrimSpace(item.Type))+":"+fingerprint)
+		values = append(values, strings.ToLower(strings.TrimSpace(item.Type))+":md5:"+fingerprint)
 	}
 	sort.Strings(values)
 	return values

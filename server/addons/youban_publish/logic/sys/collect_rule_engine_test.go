@@ -122,8 +122,8 @@ func TestCollectImagePHashSetIgnoresOrderAndVideos(t *testing.T) {
 
 func TestCollectDedupeSignaturesRequireCompleteMediaMetadata(t *testing.T) {
 	partialFingerprint := collectDedupeMaterialFromItems("", []collectMediaItem{
-		{Type: "photo", FileId: "photo-1", FilePhash: "hash-1"},
-		{Type: "photo"},
+		{Type: "photo", FileMd5: "md5-1", FilePhash: "hash-1"},
+		{Type: "photo", FileId: "photo-2"},
 	})
 	for _, signature := range partialFingerprint.signatures(true) {
 		if signature.layer == "media_fingerprint" || signature.layer == "image_phash" {
@@ -132,8 +132,8 @@ func TestCollectDedupeSignaturesRequireCompleteMediaMetadata(t *testing.T) {
 	}
 
 	complete := collectDedupeMaterialFromItems("text-hash", []collectMediaItem{
-		{Type: "photo", FileId: "photo-1", FilePhash: "hash-1"},
-		{Type: "photo", FileId: "photo-2", FilePhash: "hash-2"},
+		{Type: "photo", FileMd5: "md5-1", FilePhash: "hash-1"},
+		{Type: "photo", FileMd5: "md5-2", FilePhash: "hash-2"},
 	})
 	layers := map[string]bool{}
 	for _, signature := range complete.signatures(true) {
@@ -143,6 +143,18 @@ func TestCollectDedupeSignaturesRequireCompleteMediaMetadata(t *testing.T) {
 		if !layers[layer] {
 			t.Fatalf("complete material missing %s signature", layer)
 		}
+	}
+}
+
+func TestCollectDedupeDoesNotTreatTelegramIdentityAsContentFingerprint(t *testing.T) {
+	material := collectDedupeMaterialFromItems("different-text", []collectMediaItem{
+		{Type: "photo", SourceKind: "photo", SourceMediaId: 6087038058504065806, SourceAccessHash: 4782524723988359278},
+	})
+	if material.mediaKey != "" || material.mediaCount != 0 {
+		t.Fatalf("telegram identity produced content fingerprint: key=%q count=%d", material.mediaKey, material.mediaCount)
+	}
+	if signatures := material.signatures(false); len(signatures) != 1 || signatures[0].layer != "text_hash" {
+		t.Fatalf("signatures = %#v, want text hash only", signatures)
 	}
 }
 
