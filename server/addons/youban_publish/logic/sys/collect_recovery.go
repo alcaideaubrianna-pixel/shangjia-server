@@ -361,6 +361,23 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 			if row["status"].String() == sysin.CollectEventStatusMediaPending && !s.collectEventHasDueMedia(ctx, row["id"].Int64()) {
 				continue
 			}
+			if row["status"].String() == sysin.CollectEventStatusFailed {
+				result, resetErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+					Where("id", row["id"].Int64()).
+					Where("status", sysin.CollectEventStatusFailed).
+					WhereLTE("updated_at", deadline).
+					Data(g.Map{
+						"status": sysin.CollectEventStatusPending, "error_message": "", "processed_at": nil, "updated_at": gtime.Now(),
+					}).Update()
+				if resetErr != nil {
+					g.Log().Warningf(ctx, "重置失败采集事件状态失败 event:%d err:%+v", row["id"].Int64(), resetErr)
+					continue
+				}
+				affected, _ := result.RowsAffected()
+				if affected == 0 {
+					continue
+				}
+			}
 			remaining--
 			if processErr := s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
 				EventId:   row["id"].Int64(),
