@@ -845,6 +845,17 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 				return false, "", err
 			}
 		}
+		if profileId <= 0 {
+			profileId, err = s.commitCollectMaterial(ctx, event, content, rule, decision.Text)
+			if err != nil {
+				_ = s.markCollectDispatchFailed(ctx, existingDispatch["id"].Int64(), err.Error())
+				return false, "", err
+			}
+			if err = s.submitCollectProfileDispatch(ctx, existingDispatch["id"].Int64(), profileId, event); err != nil {
+				return false, "", err
+			}
+			return true, "", nil
+		}
 		if profileId > 0 {
 			updatedProfileId, upsertErr := s.commitCollectMaterial(ctx, event, content, rule, decision.Text)
 			if upsertErr != nil {
