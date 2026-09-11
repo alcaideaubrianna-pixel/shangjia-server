@@ -48,6 +48,17 @@ func TestShouldRecoverCollectEventWithUnmatchedVerifyVideo(t *testing.T) {
 	}
 }
 
+func TestShouldRecoverCollectEventWhileFingerprintIndexInitializes(t *testing.T) {
+	row := gdb.Record{
+		"status":        g.NewVar(sysin.CollectEventStatusFailed),
+		"error_message": g.NewVar("资料指纹索引正在初始化"),
+	}
+
+	if !shouldRecoverCollectEvent(row) {
+		t.Fatal("expected fingerprint initialization event to be recoverable")
+	}
+}
+
 func TestMergeCollectMediaEnrichmentKeepsCanonicalPathAndPHash(t *testing.T) {
 	base := []collectMediaItem{{
 		Type:        "photo",

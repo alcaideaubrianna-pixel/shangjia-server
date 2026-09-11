@@ -513,6 +513,15 @@ func (s *sSysPublish) failTelegramMediaFallbackJob(ctx context.Context, job tele
 	if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed); err != nil {
 		return err
 	}
+	if isTelegramMediaSourceUnavailableError(cause) {
+		queued, repairErr := s.AIOpsQueueBotMediaRepair(ctx, []int64{job.ProfileId}, 1)
+		if repairErr != nil {
+			g.Log().Warningf(ctx, "TG媒体源失效后提交Bot媒体恢复失败 jobId:%d profileId:%d err:%+v", job.Id, job.ProfileId, repairErr)
+		} else if len(queued) > 0 {
+			s.appendTelegramJobLog(ctx, job, "media_repair", "queued", "Telegram临时媒体地址失效，已提交媒体持久化恢复并重新上架")
+			g.Log().Infof(ctx, "TG媒体源失效后已提交Bot媒体恢复 jobId:%d profileId:%d", job.Id, job.ProfileId)
+		}
+	}
 	return s.wakeNextTelegramChannelJob(ctx, job)
 }
 

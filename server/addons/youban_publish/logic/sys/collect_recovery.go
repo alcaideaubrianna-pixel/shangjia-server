@@ -449,6 +449,7 @@ func shouldRecoverCollectEvent(row gdb.Record) bool {
 		}
 	}
 	return strings.Contains(message, "app_id") ||
+		strings.Contains(message, "资料指纹索引正在初始化") ||
 		strings.Contains(message, "账号采集媒体") ||
 		strings.Contains(message, "媒体") ||
 		strings.Contains(message, "上一条采集资料") ||
