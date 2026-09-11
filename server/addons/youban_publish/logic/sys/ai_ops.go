@@ -72,7 +72,7 @@ func (s *sSysPublish) AIOpsDeleteImportedProfiles(ctx context.Context, tenantId,
 		InnerJoin("hg_content_profile p", "p.id=ps.profile_id AND p.deleted_at IS NULL").
 		Where("ps.tenant_id", tenantId).
 		Where("ps.account_id", accountId).
-		Where("p.source_type", "youban_publish").
+		WhereIn("p.source_type", []string{"youban_publish", "youban_collect"}).
 		WhereIn("ps.profile_id", ids).
 		WhereNull("ps.deleted_at").
 		Scan(&rows)
@@ -85,14 +85,14 @@ func (s *sSysPublish) AIOpsDeleteImportedProfiles(ctx context.Context, tenantId,
 	}
 	validated = uniqueIds(validated)
 	if len(validated) != len(ids) {
-		return nil, gerror.Newf("待删除资料校验失败：请求%d条，仅%d条属于指定账号的TG导入资料", len(ids), len(validated))
+		return nil, gerror.Newf("待删除资料校验失败：请求%d条，仅%d条属于指定账号的可管理资料", len(ids), len(validated))
 	}
 	if !dryRun {
 		if err = s.deleteProfiles(ctx, &sysin.ProfileDeleteInp{Ids: validated}, tenantId, accountId); err != nil {
 			return nil, err
 		}
 	}
-	g.Log().Info(ctx, "AI运维TG导入资料删除", g.Map{"tenantId": tenantId, "accountId": accountId, "profileIds": validated, "dryRun": dryRun})
+	g.Log().Info(ctx, "AI运维资料删除", g.Map{"tenantId": tenantId, "accountId": accountId, "profileIds": validated, "dryRun": dryRun})
 	return validated, nil
 }
 

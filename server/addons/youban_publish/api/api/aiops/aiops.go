@@ -36,7 +36,7 @@ type ProfileRepublishRes struct {
 }
 
 type ProfileDeleteReq struct {
-	g.Meta     `path:"/profile/delete" method:"post" tags:"AI运维" summary:"批量下架并删除指定账号的TG导入资料"`
+	g.Meta     `path:"/profile/delete" method:"post" tags:"AI运维" summary:"批量下架并删除指定账号的可管理资料"`
 	TenantId   int64   `json:"tenantId" v:"min:1#租户ID不能为空"`
 	AccountId  int64   `json:"accountId" v:"min:1#账号ID不能为空"`
 	ProfileIds []int64 `json:"profileIds" v:"required#资料ID不能为空"`
