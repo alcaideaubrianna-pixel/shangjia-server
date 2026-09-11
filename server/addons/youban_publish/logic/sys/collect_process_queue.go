@@ -247,7 +247,7 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 		Where("account_id", payload.AccountId).
 		Where("source_id", payload.SourceId).
 		WhereIn("status", statuses).
-		Where("material_role IS NULL OR material_role = '' OR material_role = ? OR (status = ? AND material_role = ? AND error_message = ?)", collectMaterialRolePending, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
+		Where("material_role IS NULL OR material_role = '' OR material_role = ? OR (status = ? AND material_role = ? AND error_message = ?) OR (status = ? AND material_role = ?)", collectMaterialRolePending, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, sysin.CollectEventStatusFailed, collectMaterialRoleDisplay).
 		Where("(processed_at IS NULL AND (material_group_status IS NULL OR material_group_status <> ?) AND created_at <= ?) OR (processed_at IS NULL AND material_group_status = ? AND updated_at <= ?) OR (status = ? AND material_role = ? AND error_message = ? AND updated_at <= ?)", collectMaterialGroupWaitingVerify, groupDeadline, collectMaterialGroupWaitingVerify, waitingVerifyDeadline, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, verifyDeadline).
 		Limit(1).
 		One()

@@ -50,7 +50,7 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 			sysin.CollectEventStatusMediaReady,
 			sysin.CollectEventStatusIgnored,
 		}).
-		Where("material_role IS NULL OR material_role = '' OR material_role = ? OR (status = ? AND material_role = ? AND error_message = ?)", collectMaterialRolePending, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
+		Where("material_role IS NULL OR material_role = '' OR material_role = ? OR (status = ? AND material_role = ? AND error_message = ?) OR (status = ? AND material_role = ?)", collectMaterialRolePending, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, sysin.CollectEventStatusFailed, collectMaterialRoleDisplay).
 		Where("(processed_at IS NULL AND (material_group_status IS NULL OR material_group_status <> ? OR updated_at <= ?)) OR (status = ? AND material_role = ? AND error_message = ? AND updated_at <= ?)", collectMaterialGroupWaitingVerify, now.Add(-collectMaterialWaitingVerifyRetryDelay), sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, now.Add(-collectMaterialVerifyRetryDelay)).
 		OrderAsc("source_chat_id").
 		OrderAsc("source_message_id").
@@ -104,6 +104,12 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 			continue
 		}
 		role := strings.TrimSpace(event["material_role"].String())
+		if role == collectMaterialRoleDisplay && event["status"].String() == sysin.CollectEventStatusFailed {
+			if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil && !isCollectProcessRetryError(err) {
+				return err
+			}
+			continue
+		}
 		if role != "" && role != collectMaterialRolePending && !collectMaterialEventNeedsPairRepair(event) {
 			continue
 		}
