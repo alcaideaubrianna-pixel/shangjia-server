@@ -24,6 +24,7 @@ const (
 	tgQueueNameMediaProcess       = "youban_publish_media_process"
 	tgQueueNameMediaBulkPrefix    = "youban_publish_media_bulk_"
 	tgQueueNameBackground         = "youban_publish_background"
+	tgQueueNameCollectProcess     = "youban_publish_collect_process"
 	tgQueueNameHistory            = "youban_publish_history"
 	tgTaskTypePublish             = "youban_publish:tg:publish"
 	tgTaskTypeCleanup             = "youban_publish:tg:cleanup"

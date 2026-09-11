@@ -79,7 +79,7 @@ func (s *sSysPublish) enqueueCollectProcessTask(ctx context.Context, payload col
 		uniqueTTL = delay + 10*time.Second
 	}
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBackground),
+		asynq.Queue(tgQueueNameCollectProcess),
 		asynq.MaxRetry(collectProcessTaskMaxRetry),
 		asynq.Timeout(30 * time.Minute),
 	}
