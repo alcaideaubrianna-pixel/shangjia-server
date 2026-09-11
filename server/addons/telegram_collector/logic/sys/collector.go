@@ -158,26 +158,31 @@ func losslessRawUpdate(raw []byte) *gjson.Json {
 
 func (s *sCollector) refreshCorruptedAccountEvent(ctx context.Context, message *sysin.AccountMessageEvent, raw []byte) (int64, bool, error) {
 	columns := dao.TgCollectorEvent.Columns()
-	var existing entity.TgCollectorEvent
-	if err := dao.TgCollectorEvent.Ctx(ctx).
+	existing, err := dao.TgCollectorEvent.Ctx(ctx).
 		Fields(columns.Id, columns.RawUpdate).
 		Where(columns.TenantId, message.TenantID).
 		Where(columns.EventKey, message.SourceUniqueKey).
-		Scan(&existing); err != nil {
+		One()
+	if err != nil {
 		return 0, false, gerror.Wrap(err, "读取Telegram账号采集事件失败")
 	}
-	if existing.Id <= 0 || existing.RawUpdate == nil {
+	if existing.IsEmpty() {
+		return 0, false, nil
+	}
+	eventID := existing[columns.Id].Int64()
+	rawUpdate := existing[columns.RawUpdate].String()
+	if eventID <= 0 || rawUpdate == "" {
 		return 0, false, nil
 	}
 	var stored sysin.AccountMessageEvent
-	if err := json.Unmarshal([]byte(existing.RawUpdate.String()), &stored); err != nil {
+	if err := json.Unmarshal([]byte(rawUpdate), &stored); err != nil {
 		return 0, false, gerror.Wrap(err, "解析Telegram账号历史采集事件失败")
 	}
 	if !accountMediaIdentityChanged(stored.Media, message.Media) {
-		return existing.Id, false, nil
+		return eventID, false, nil
 	}
 	now := gtime.Now()
-	if _, err := dao.TgCollectorEvent.Ctx(ctx).WherePri(existing.Id).Data(do.TgCollectorEvent{
+	if _, err := dao.TgCollectorEvent.Ctx(ctx).WherePri(eventID).Data(do.TgCollectorEvent{
 		RawUpdate:    losslessRawUpdate(raw),
 		Status:       sysin.EventStatusReceived,
 		AttemptCount: 0,
@@ -192,7 +197,7 @@ func (s *sCollector) refreshCorruptedAccountEvent(ctx context.Context, message *
 	}
 	deliveryColumns := dao.TgCollectorDelivery.Columns()
 	if _, err := dao.TgCollectorDelivery.Ctx(ctx).
-		Where(deliveryColumns.EventId, existing.Id).
+		Where(deliveryColumns.EventId, eventID).
 		Data(do.TgCollectorDelivery{
 			Status:       sysin.DeliveryStatusPending,
 			AttemptCount: 0,
@@ -204,7 +209,7 @@ func (s *sCollector) refreshCorruptedAccountEvent(ctx context.Context, message *
 		}).Update(); err != nil {
 		return 0, false, gerror.Wrap(err, "重置Telegram账号采集交付失败")
 	}
-	return existing.Id, true, nil
+	return eventID, true, nil
 }
 
 func accountMediaIdentityChanged(stored, incoming []sysin.CollectorMediaItem) bool {
