@@ -156,11 +156,18 @@ func (s *sSysPublish) mergeCollectMessageEvent(ctx context.Context, event gdb.Re
 	if collectEventTerminalStatus(event[eventCols.Status].String()) && !shouldMerge {
 		return eventId, nil
 	}
-	_, err = eventDao.Ctx(ctx).Where(eventCols.Id, eventId).Data(g.Map{
-		eventCols.Status:       collectMergedEventStatus(event, message),
-		eventCols.ErrorMessage: "",
-		eventCols.UpdatedAt:    now,
-	}).Update()
+	// A lossless replay can correct historical Telegram media identifiers. Events
+	// already dispatched only need their media metadata repaired; replaying them
+	// would create duplicate profiles and channel messages.
+	if collectEventAlreadyMatched(event[eventCols.Status].String()) {
+		if err = s.upsertCollectEventMedia(ctx, event, message.Media); err != nil {
+			return eventId, err
+		}
+		s.appendCollectEventLogForRecord(ctx, event, "ingest", "repaired", "采集事件媒体身份已修复，保留原处理结果", "")
+		return eventId, nil
+	}
+	update := collectReplayUpdateFields(event, message, now)
+	_, err = eventDao.Ctx(ctx).Where(eventCols.Id, eventId).Data(update).Update()
 	if err != nil {
 		return eventId, gerror.Wrap(err, "更新采集事件失败")
 	}
@@ -211,6 +218,23 @@ func (s *sSysPublish) mergeCollectMessageEvent(ctx context.Context, event gdb.Re
 	}
 	s.appendCollectEventLogForRecord(ctx, updated, "ingest", "updated", "采集事件已合并媒体", "")
 	return eventId, nil
+}
+
+func collectReplayUpdateFields(event gdb.Record, message *CollectMessage, now *gtime.Time) g.Map {
+	eventCols := pdao.YoubanPublishCollectEvent.Columns()
+	update := g.Map{
+		eventCols.Status:       collectMergedEventStatus(event, message),
+		eventCols.ErrorMessage: "",
+		eventCols.UpdatedAt:    now,
+	}
+	if collectEventTerminalStatus(event[eventCols.Status].String()) {
+		update[eventCols.ProcessedAt] = nil
+		// These compatibility columns have not been generated into the DAO yet.
+		update["material_role"] = collectMaterialRolePending
+		update["material_parent_event_id"] = 0
+		update["material_group_status"] = ""
+	}
+	return update
 }
 
 func collectMergedEventStatus(event gdb.Record, message *CollectMessage) string {
