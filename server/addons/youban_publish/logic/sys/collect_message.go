@@ -171,6 +171,11 @@ func (s *sSysPublish) mergeCollectMessageEvent(ctx context.Context, event gdb.Re
 	if err != nil {
 		return eventId, gerror.Wrap(err, "更新采集事件失败")
 	}
+	if collectEventTerminalStatus(event[eventCols.Status].String()) {
+		if err = s.resetCollectMaterialPairForReplay(ctx, event, now); err != nil {
+			return eventId, err
+		}
+	}
 	if message.BotId > 0 && event[eventCols.BotId].Int64() <= 0 {
 		_, err = eventDao.Ctx(ctx).
 			Where(eventCols.Id, eventId).
@@ -218,6 +223,36 @@ func (s *sSysPublish) mergeCollectMessageEvent(ctx context.Context, event gdb.Re
 	}
 	s.appendCollectEventLogForRecord(ctx, updated, "ingest", "updated", "采集事件已合并媒体", "")
 	return eventId, nil
+}
+
+func (s *sSysPublish) resetCollectMaterialPairForReplay(ctx context.Context, event gdb.Record, now *gtime.Time) error {
+	eventID := event["id"].Int64()
+	if eventID <= 0 {
+		return nil
+	}
+	model := pdao.YoubanPublishCollectEvent.Ctx(ctx)
+	switch strings.TrimSpace(event["material_role"].String()) {
+	case collectMaterialRoleDisplay:
+		model = model.Where("material_parent_event_id", eventID)
+	case collectMaterialRoleVerify:
+		parentID := event["material_parent_event_id"].Int64()
+		if parentID <= 0 {
+			return nil
+		}
+		model = model.Where("id", parentID)
+	default:
+		return nil
+	}
+	_, err := model.Data(g.Map{
+		"status":                   gdb.Raw("CASE WHEN COALESCE(source_grouped_id, '') <> '' THEN 'group_collecting' ELSE 'pending' END"),
+		"material_role":            collectMaterialRolePending,
+		"material_parent_event_id": 0,
+		"material_group_status":    "",
+		"processed_at":             nil,
+		"error_message":            "",
+		"updated_at":               now,
+	}).Update()
+	return gerror.Wrap(err, "重置关联采集资料组失败")
 }
 
 func collectReplayUpdateFields(event gdb.Record, message *CollectMessage, now *gtime.Time) g.Map {
