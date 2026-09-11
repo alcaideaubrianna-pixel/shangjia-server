@@ -72,6 +72,14 @@ func (s *sSysPublish) rebuildBotProfileMedia(ctx context.Context, profileIds []i
 				}
 			}
 			if downloadErr != nil {
+				if isBotMediaPermanentlyUnavailableError(downloadErr) {
+					message := fmt.Sprintf("Telegram原始媒体已永久失效，需重新上传：%v", downloadErr)
+					_, _ = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Where("id", row["id"].Int64()).Data(g.Map{
+						"processing_status": mediaProcessingFailed,
+						"processing_error":  message,
+						"updated_at":        gtime.Now(),
+					}).Update()
+				}
 				return result, gerror.Wrapf(downloadErr, "恢复Bot资料媒体失败 mediaId:%d", row["id"].Int64())
 			}
 			item := downloaded.Item
@@ -97,6 +105,16 @@ func (s *sSysPublish) rebuildBotProfileMedia(ctx context.Context, profileIds []i
 		}
 	}
 	return result, nil
+}
+
+func isBotMediaPermanentlyUnavailableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return isTelegramMediaSourceUnavailableError(err) ||
+		strings.Contains(message, "wrong file_id") ||
+		strings.Contains(message, "file is temporarily unavailable")
 }
 
 func (s *sSysPublish) findBotProfileMediaGroupSource(ctx context.Context, media gdb.Record, rows gdb.Result) (*botProfileMediaSource, string, error) {

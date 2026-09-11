@@ -1,6 +1,9 @@
 package sys
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestParseBotMediaCopyReference(t *testing.T) {
 	chatID, messageID, err := parseBotMediaCopyReference("copy:8974928761:7242")
@@ -9,6 +12,23 @@ func TestParseBotMediaCopyReference(t *testing.T) {
 	}
 	if _, _, err = parseBotMediaCopyReference("invalid"); err == nil {
 		t.Fatal("invalid reference must fail")
+	}
+}
+
+func TestIsBotMediaPermanentlyUnavailableError(t *testing.T) {
+	tests := []struct {
+		err  error
+		want bool
+	}{
+		{errors.New("下载远程媒体失败：HTTP 404"), true},
+		{errors.New("Bad Request: wrong file_id or the file is temporarily unavailable"), true},
+		{errors.New("context deadline exceeded"), false},
+		{nil, false},
+	}
+	for _, test := range tests {
+		if got := isBotMediaPermanentlyUnavailableError(test.err); got != test.want {
+			t.Fatalf("isBotMediaPermanentlyUnavailableError(%v) = %t, want %t", test.err, got, test.want)
+		}
 	}
 }
 

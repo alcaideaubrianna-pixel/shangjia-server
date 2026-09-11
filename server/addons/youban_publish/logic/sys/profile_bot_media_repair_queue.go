@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -28,6 +30,7 @@ func (s *sSysPublish) AIOpsQueueBotMediaRepair(ctx context.Context, profileIds [
 		Where("p.status", 1).
 		Where("m.status", 1).
 		WhereNull("m.deleted_at").
+		Where("COALESCE(m.processing_status,'') <> ?", mediaProcessingFailed).
 		Where("COALESCE(m.storage_path,'') = ''").
 		Where("m.file_url LIKE ?", "https://api.telegram.org/file/bot%")
 	if len(profileIds) > 0 {
@@ -77,6 +80,13 @@ func (s *sSysPublish) handleBotMediaRepairTask(ctx context.Context, task *asynq.
 	}
 	result, err := s.rebuildBotProfileMedia(ctx, []int64{payload.ProfileId}, false)
 	if err != nil {
+		if isBotMediaPermanentlyUnavailableError(err) {
+			if quarantineErr := s.quarantineProfileWithUnavailableMedia(ctx, payload.ProfileId, err.Error()); quarantineErr != nil {
+				return gerror.Wrap(quarantineErr, "隔离永久失效媒体资料失败")
+			}
+			g.Log().Warning(ctx, "Bot历史媒体已永久失效，资料发布已隔离", g.Map{"profileId": payload.ProfileId, "error": err.Error()})
+			return nil
+		}
 		return err
 	}
 	complete, err := collectProfileMediaComplete(ctx, payload.ProfileId)
@@ -92,5 +102,49 @@ func (s *sSysPublish) handleBotMediaRepairTask(ctx context.Context, task *asynq.
 		}
 	}
 	g.Log().Info(ctx, "Bot历史媒体恢复完成", g.Map{"profileId": payload.ProfileId, "mediaRecovered": result.Requeued > 0})
+	return nil
+}
+
+func (s *sSysPublish) quarantineProfileWithUnavailableMedia(ctx context.Context, profileId int64, reason string) error {
+	if profileId <= 0 {
+		return nil
+	}
+	message := "资料媒体已永久失效，需重新上传后再上架"
+	if reason = strings.TrimSpace(reason); reason != "" {
+		message += "：" + reason
+	}
+	now := gtime.Now()
+	if _, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).Where("cycle_enabled", 1).
+		Data(g.Map{"cycle_enabled": 0, "next_cycle_at": nil, "last_dispatch_error": message, "updated_at": now}).Update(); err != nil {
+		return err
+	}
+	var jobs []telegramJobRecord
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("profile_id", profileId).
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).Scan(&jobs); err != nil {
+		return err
+	}
+	for _, job := range jobs {
+		result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", job.Id).
+			WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
+			Data(g.Map{"status": "failed", "dispatch_status": tgDispatchStatusDone, "next_retry_at": nil,
+				"error_message": message, "last_dispatch_error": message, "updated_at": now}).Update()
+		if err != nil {
+			return err
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			continue
+		}
+		s.appendTelegramJobLog(ctx, job, "media_repair", "failed", message)
+		if err = s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed); err != nil {
+			return err
+		}
+		if err = s.wakeNextTelegramChannelJob(ctx, job); err != nil {
+			g.Log().Warningf(ctx, "媒体失效隔离后唤醒频道下一条任务失败 profileId:%d jobId:%d channelId:%d err:%+v", profileId, job.Id, job.ChannelId, err)
+		}
+	}
 	return nil
 }
