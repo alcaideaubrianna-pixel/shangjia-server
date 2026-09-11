@@ -2,9 +2,7 @@ package sys
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
@@ -67,12 +65,6 @@ func TestCollectRuleOnlineCaseMatrix(t *testing.T) {
 			}
 		})
 	}
-}
-
-func collectDedupeMaterialFromValues(textHash string, mediaJSON string) collectDedupeMaterial {
-	items := make([]collectMediaItem, 0)
-	_ = json.Unmarshal([]byte(mediaJSON), &items)
-	return collectDedupeMaterialFromItems(textHash, items)
 }
 
 func TestCollectMediaFingerprintSetKeyIsOrderIndependent(t *testing.T) {
@@ -158,37 +150,19 @@ func TestCollectDedupeDoesNotTreatTelegramIdentityAsContentFingerprint(t *testin
 	}
 }
 
-func TestCollectDedupeScopesMediaFingerprintsToProfileText(t *testing.T) {
+func TestCollectDedupeMediaFingerprintsAreIndependentFromProfileText(t *testing.T) {
 	media := []collectMediaItem{{Type: "photo", FileMd5: "same-md5", FilePhash: "same-phash"}}
 	shanghai := collectDedupeMaterialFromItems("shanghai-profile", media)
 	shenzhen := collectDedupeMaterialFromItems("shenzhen-profile", media)
-	if shanghai.mediaKey == shenzhen.mediaKey {
-		t.Fatal("same media with different profile text must not share media fingerprint")
+	if shanghai.mediaKey != shenzhen.mediaKey {
+		t.Fatal("same media with different profile text must share media fingerprint")
 	}
-	if shanghai.imagePHashKey == shenzhen.imagePHashKey {
-		t.Fatal("same images with different profile text must not share image phash signature")
+	if shanghai.imagePHashKey != shenzhen.imagePHashKey {
+		t.Fatal("same images with different profile text must share image phash signature")
 	}
 	shanghaiAgain := collectDedupeMaterialFromItems("shanghai-profile", media)
 	if shanghai.mediaKey != shanghaiAgain.mediaKey || shanghai.imagePHashKey != shanghaiAgain.imagePHashKey {
 		t.Fatal("same text and media must remain permanently deduplicated")
-	}
-}
-
-func TestCollectDedupeLocksOverlapOnAnyMatchingLayer(t *testing.T) {
-	left := collectDedupeMaterial{textHash: "same-text", mediaKey: "left-media", mediaTotal: 1, mediaCount: 1}
-	right := collectDedupeMaterial{textHash: "same-text", mediaKey: "right-media", mediaTotal: 1, mediaCount: 1}
-	leftKeys := collectDedupeSignatureLockKeys(left)
-	rightKeys := collectDedupeSignatureLockKeys(right)
-	overlaps := false
-	for _, leftKey := range leftKeys {
-		for _, rightKey := range rightKeys {
-			if leftKey == rightKey {
-				overlaps = true
-			}
-		}
-	}
-	if !overlaps {
-		t.Fatal("materials matching any dedupe layer must share a lock")
 	}
 }
 
@@ -199,32 +173,6 @@ func TestCollectMediaPHashReadsMetadata(t *testing.T) {
 	}
 	if got := collectMediaPHash(item); got != "abc123" {
 		t.Fatalf("media phash = %q, want %q", got, "abc123")
-	}
-}
-
-func TestCollectDedupeCacheValue(t *testing.T) {
-	wantTime := time.Unix(1_785_000_000, 0)
-	value := collectDedupeCacheValue(123, wantTime)
-	entry, ok := parseCollectDedupeCacheValue(value)
-	if !ok || entry.EventID != 123 || entry.ReceivedAt != wantTime.Unix() {
-		t.Fatalf("entry = %+v ok=%v", entry, ok)
-	}
-	if parseEntry, parseOK := parseCollectDedupeCacheValue("invalid"); parseOK || parseEntry.EventID != 0 {
-		t.Fatalf("invalid cache value must be rejected: %+v %v", parseEntry, parseOK)
-	}
-}
-
-func TestCollectDedupeCacheEntryValid(t *testing.T) {
-	now := time.Unix(1_785_000_000, 0)
-	recent := collectDedupeCacheEntry{EventID: 1, ReceivedAt: now.AddDate(0, 0, -2).Unix()}
-	if !collectDedupeCacheEntryValid(recent, 3, now) {
-		t.Fatal("recent entry must be valid inside the time window")
-	}
-	if collectDedupeCacheEntryValid(recent, 1, now) {
-		t.Fatal("old entry must be invalid outside the time window")
-	}
-	if !collectDedupeCacheEntryValid(recent, 0, now) {
-		t.Fatal("zero-day window must have no expiration")
 	}
 }
 

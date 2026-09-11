@@ -1690,7 +1690,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_channel_profile` (
   `updated_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ybp_channel_profile` (`channel_id`,`profile_id`),
-  KEY `idx_ybp_channel_profile_scan` (`channel_id`,`status`,`id`)
+  KEY `idx_ybp_channel_profile_scan` (`channel_id`,`status`,`id`),
+  KEY `idx_ybp_channel_profile_profile` (`profile_id`,`channel_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='频道当前上架资料索引';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_cycle_run_log` (
@@ -2099,4 +2100,16 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_bot_message_source` (
   PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_bot_message_source` (`chat_id`,`message_id`),
   KEY `idx_ybp_bot_message_source_chat_time` (`chat_id`,`received_at`), KEY `idx_ybp_bot_message_source_reply` (`reply_job_id`,`reply_profile_id`,`reply_to_message_id`), KEY `idx_ybp_bot_message_source_profile_time` (`tenant_id`,`reply_profile_id`,`received_at`,`id`),
   KEY `idx_ybp_bot_message_source_sender` (`sender_user_id`,`sender_chat_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_fingerprint` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0', `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0', `channel_id` bigint(20) NOT NULL DEFAULT '0',
+  `layer` varchar(32) NOT NULL DEFAULT '', `signature` varchar(64) NOT NULL DEFAULT '',
+  `item_total` int(11) NOT NULL DEFAULT '0', `signature_count` int(11) NOT NULL DEFAULT '0',
+  `owner_marker` varchar(16) DEFAULT NULL,
+  `created_at` datetime DEFAULT NULL, `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_profile_fingerprint_scope` (`tenant_id`,`account_id`,`channel_id`,`layer`,`signature`,`item_total`,`signature_count`,`owner_marker`),
+  UNIQUE KEY `uk_ybp_profile_fingerprint_profile` (`profile_id`,`channel_id`,`layer`,`signature`,`item_total`,`signature_count`),
+  KEY `idx_ybp_profile_fingerprint_profile` (`profile_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

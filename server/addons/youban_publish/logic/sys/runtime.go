@@ -93,6 +93,7 @@ func (s *sSysPublish) startPublishSchedulers(ctx context.Context) {
 	go s.runTelegramObserveStatsRefresher(ctx)
 	go s.runTelegramJobRecovery(ctx)
 	go s.runCollectRecovery(ctx)
+	go s.runProfileFingerprintBackfill(ctx)
 	go s.runMaterialImportRecovery(ctx)
 	go s.runPublishRecordRetentionCleaner(ctx)
 	go func() {

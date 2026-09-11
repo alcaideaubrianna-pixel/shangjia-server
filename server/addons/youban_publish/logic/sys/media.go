@@ -986,7 +986,7 @@ func profileMediaSyncLockKey(profileId int64) string {
 }
 
 func (s *sSysPublish) withProfileMediaSyncLock(ctx context.Context, profileId int64, fn func(ctx context.Context, tx gdb.TX) error) error {
-	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		release, err := s.lockProfileMediaSyncTx(ctx, tx, profileId)
 		if err != nil {
 			return err
@@ -994,6 +994,10 @@ func (s *sSysPublish) withProfileMediaSyncLock(ctx context.Context, profileId in
 		defer release()
 		return fn(ctx, tx)
 	})
+	if err != nil {
+		return err
+	}
+	return s.refreshProfileFingerprintProjection(ctx, profileId)
 }
 
 func (s *sSysPublish) lockProfileMediaSyncTx(ctx context.Context, tx gdb.TX, profileId int64) (func(), error) {

@@ -36,3 +36,17 @@ INNER JOIN `hg_youban_publish_collect_source_rule` keep
 
 ALTER TABLE `hg_youban_publish_collect_source_rule`
   ADD UNIQUE KEY `uk_ybp_collect_source_single_rule` (`source_id`);
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_profile_fingerprint` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) NOT NULL DEFAULT '0', `account_id` bigint(20) NOT NULL DEFAULT '0',
+  `profile_id` bigint(20) NOT NULL DEFAULT '0', `channel_id` bigint(20) NOT NULL DEFAULT '0',
+  `layer` varchar(32) NOT NULL DEFAULT '', `signature` varchar(64) NOT NULL DEFAULT '',
+  `item_total` int(11) NOT NULL DEFAULT '0', `signature_count` int(11) NOT NULL DEFAULT '0',
+  `owner_marker` varchar(16) DEFAULT NULL,
+  `created_at` datetime DEFAULT NULL, `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ybp_profile_fingerprint_scope` (`tenant_id`,`account_id`,`channel_id`,`layer`,`signature`,`item_total`,`signature_count`,`owner_marker`),
+  UNIQUE KEY `uk_ybp_profile_fingerprint_profile` (`profile_id`,`channel_id`,`layer`,`signature`,`item_total`,`signature_count`),
+  KEY `idx_ybp_profile_fingerprint_profile` (`profile_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE `hg_youban_publish_channel_profile` ADD INDEX IF NOT EXISTS `idx_ybp_channel_profile_profile` (`profile_id`,`channel_id`);

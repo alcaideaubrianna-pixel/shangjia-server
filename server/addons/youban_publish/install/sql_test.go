@@ -29,7 +29,7 @@ func TestSqlDollarQuoteTag(t *testing.T) {
 	}
 }
 
-func TestOnlineUpgradeSqlIncludesDedupeLedger(t *testing.T) {
+func TestOnlineUpgradeSqlIncludesDedupeSchema(t *testing.T) {
 	tests := []struct {
 		name  string
 		files []string
@@ -45,8 +45,9 @@ func TestOnlineUpgradeSqlIncludesDedupeLedger(t *testing.T) {
 			}
 			sql := readSqlFile(test.path)
 			if !strings.Contains(sql, "hg_youban_publish_collect_dedupe_entry") ||
-				!strings.Contains(sql, "hg_youban_publish_collect_dedupe_source") {
-				t.Fatalf("online upgrade SQL does not create dedupe ledger: %s", sql)
+				!strings.Contains(sql, "hg_youban_publish_collect_dedupe_source") ||
+				!strings.Contains(sql, "hg_youban_publish_profile_fingerprint") {
+				t.Fatalf("online upgrade SQL does not create dedupe schema: %s", sql)
 			}
 			upperSql := strings.ToUpper(sql)
 			for _, forbidden := range []string{"UPDATE ", "DELETE ", "DROP TABLE", "DROP COLUMN"} {

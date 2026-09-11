@@ -1272,6 +1272,9 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 			}); err != nil {
 				return nil, err
 			}
+			if err = s.refreshProfileFingerprintProjection(ctx, saved.Id); err != nil {
+				return nil, err
+			}
 		}
 		_ = s.appendImportRunLog(ctx, runId, "info", importStageMedia, "笔记资源采集完成", g.Map{"sourceNoteId": sourceNoteId, "profileId": saved.Id, "mediaImported": mediaImported, "mediaTotal": len(detail.Media)})
 	}

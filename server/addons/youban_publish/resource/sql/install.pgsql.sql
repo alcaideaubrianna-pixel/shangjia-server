@@ -1664,6 +1664,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_channel_profile" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_channel_profile" ON "hg_youban_publish_channel_profile" ("channel_id", "profile_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_channel_profile_scan" ON "hg_youban_publish_channel_profile" ("channel_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_channel_profile_profile" ON "hg_youban_publish_channel_profile" ("profile_id", "channel_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_run_plan" ON "hg_youban_publish_cycle_run" ("plan_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_cycle_run_owner" ON "hg_youban_publish_cycle_run" ("tenant_id", "account_id", "status", "id");
 
@@ -2043,3 +2044,15 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_profile_time" ON "hg_youb
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_sender" ON "hg_youban_publish_bot_message_source" ("sender_user_id", "sender_chat_id");
 ALTER TABLE "hg_youban_publish_message_push_plan" ADD COLUMN IF NOT EXISTS "push_mode" varchar(16) NOT NULL DEFAULT 'bot';
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "push_mode" varchar(16) NOT NULL DEFAULT 'bot';
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_fingerprint" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0, "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0, "channel_id" bigint NOT NULL DEFAULT 0,
+  "layer" varchar(32) NOT NULL DEFAULT '', "signature" varchar(64) NOT NULL DEFAULT '',
+  "item_total" integer NOT NULL DEFAULT 0, "signature_count" integer NOT NULL DEFAULT 0,
+  "owner_marker" varchar(16) DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_profile_fingerprint_scope" ON "hg_youban_publish_profile_fingerprint" ("tenant_id", "account_id", "channel_id", "layer", "signature", "item_total", "signature_count", "owner_marker");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_profile_fingerprint_profile" ON "hg_youban_publish_profile_fingerprint" ("profile_id", "channel_id", "layer", "signature", "item_total", "signature_count");
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_fingerprint_profile" ON "hg_youban_publish_profile_fingerprint" ("profile_id");

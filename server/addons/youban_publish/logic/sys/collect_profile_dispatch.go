@@ -71,7 +71,7 @@ func (s *sSysPublish) resumeCollectProfileDispatch(ctx context.Context, dispatch
 			}).Update(); txErr != nil {
 			return gerror.Wrap(txErr, "恢复采集TG发送任务失败")
 		}
-		return reserveCollectDedupeLedgerTx(ctx, tx, event, rule, dispatchID, channelIDs, collectDedupeMaterialFromEvent(event, content))
+		return nil
 	})
 	if err != nil {
 		return err
@@ -140,9 +140,6 @@ func (s *sSysPublish) markCollectDispatchSentByProfile(ctx context.Context, prof
 			return gerror.Wrap(err, "更新采集事件完成状态失败")
 		}
 	}
-	if err = s.warmCollectDedupeCacheForSentDispatches(ctx, rows); err != nil {
-		g.Log().Warningf(ctx, "采集分发成功后写入去重缓存失败 profileId:%d eventId:%d err:%+v", profileId, eventId, err)
-	}
 	return nil
 }
 
@@ -166,9 +163,5 @@ func (s *sSysPublish) markCollectDispatchFailedByProfile(ctx context.Context, pr
 	if err = s.markCollectEventsFailedByDispatchRows(ctx, rows, message); err != nil {
 		return err
 	}
-	dispatchIDs := make([]int64, 0, len(rows))
-	for _, row := range rows {
-		dispatchIDs = append(dispatchIDs, row["id"].Int64())
-	}
-	return releaseCollectDedupeLedgerByDispatches(ctx, dispatchIDs)
+	return nil
 }

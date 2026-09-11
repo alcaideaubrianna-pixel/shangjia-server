@@ -70,6 +70,19 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	profileId := in.Id
 	isNewProfile := profileId == 0
 	var removedMediaIds []int64
+	var oldFingerprints, newFingerprints []profileFingerprint
+	effectiveChannelIds := manualChannelIds
+	if in.ChannelIds == nil && profileId > 0 {
+		effectiveChannelIds, err = s.profileChannelIdsOrDefaults(ctx, tenantId, accountId, profileId)
+		if err != nil {
+			return nil, err
+		}
+	} else if len(effectiveChannelIds) == 0 {
+		effectiveChannelIds, err = s.defaultSelectedPublishChannelIds(ctx, tenantId)
+		if err != nil {
+			return nil, err
+		}
+	}
 	transaction := func() error {
 		return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 			if in.Id > 0 {
@@ -107,9 +120,12 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			}
 			if in.Media != nil {
 				removedMediaIds, err = s.syncProfileMediaFromInput(ctx, tx, profileId, tenantId, accountId, in.Media)
-				return err
+				if err != nil {
+					return err
+				}
 			}
-			return nil
+			oldFingerprints, newFingerprints, err = s.replaceProfileFingerprintProjectionTx(ctx, tx, tenantId, accountId, profileId, effectiveChannelIds)
+			return err
 		})
 	}
 	if profileId > 0 {
@@ -120,10 +136,8 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	if err != nil {
 		return nil, err
 	}
-	effectiveChannelIds, err := s.profileChannelIdsOrDefaults(ctx, tenantId, accountId, profileId)
-	if err != nil {
-		return nil, err
-	}
+	clearProfileFingerprintCache(ctx, tenantId, accountId, oldFingerprints)
+	warmProfileFingerprintCache(ctx, tenantId, accountId, profileId, newFingerprints)
 	if err = s.supersedeProfilePendingTelegramJobsOutsideChannels(ctx, profileId, tenantId, accountId, effectiveChannelIds); err != nil {
 		return nil, err
 	}
@@ -201,8 +215,28 @@ func (s *sSysPublish) deleteProfiles(ctx context.Context, in *sysin.ProfileDelet
 		return err
 	}
 	columns := dao.ContentProfile.Columns()
-	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).Unscoped().Delete(); err != nil {
-		return gerror.Wrap(err, "删除资料失败")
+	fingerprintRows, err := g.DB().Model(publishProfileFingerprintTable).Safe().Ctx(ctx).WhereIn("profile_id", ids).All()
+	if err != nil {
+		return gerror.Wrap(err, "读取待删除资料指纹失败")
+	}
+	if err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if _, txErr := detachProfileFingerprintsTx(ctx, tx, ids); txErr != nil {
+			return txErr
+		}
+		if _, txErr := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).WhereIn(columns.Id, ids).Unscoped().Delete(); txErr != nil {
+			return gerror.Wrap(txErr, "删除资料失败")
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	fingerprintsByScope := make(map[[2]int64][]profileFingerprint)
+	for _, row := range fingerprintRows {
+		scope := [2]int64{row["tenant_id"].Int64(), row["account_id"].Int64()}
+		fingerprintsByScope[scope] = append(fingerprintsByScope[scope], profileFingerprint{ChannelID: row["channel_id"].Int64(), Layer: row["layer"].String(), Signature: row["signature"].String(), ItemTotal: row["item_total"].Int(), SignatureCount: row["signature_count"].Int()})
+	}
+	for scope, items := range fingerprintsByScope {
+		clearProfileFingerprintCache(ctx, scope[0], scope[1], items)
 	}
 	if err = s.deleteProfileNoteIndex(ctx, ids); err != nil {
 		return err

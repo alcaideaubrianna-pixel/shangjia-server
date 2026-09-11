@@ -449,12 +449,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if !verifyReady {
 		return newCollectProcessRetryError(30*time.Second, "等待验证资料媒体缓存完成")
 	}
-	lockContent, err := s.collectContentFromEvent(ctx, event)
-	if err != nil {
-		return gerror.Wrap(err, "构建采集资料去重签名失败")
-	}
-	s.enrichCollectContentMediaMetadata(ctx, lockContent)
-	lockKeys := collectDedupeSignatureLockKeys(collectDedupeMaterialFromEvent(event, lockContent))
+	lockKeys := make([]string, 0, 1)
 	if sourceGroupKey := collectSourceGroupKey(event); sourceGroupKey != "" {
 		lockKeys = append(lockKeys, "source_group:"+sourceGroupKey)
 		sort.Strings(lockKeys)
@@ -504,13 +499,6 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		return newCollectProcessRetryError(30*time.Second, err.Error())
 	}
 	content = canonical
-	candidateRules, err = s.filterCollectRulesByFinalDedupeBatch(ctx, event, content, candidateRules)
-	if err != nil {
-		return err
-	}
-	if len(candidateRules) == 0 {
-		return s.ignoreCollectEvent(ctx, eventId, "图文重复", "dedupe")
-	}
 	candidateRules, err = s.filterCollectRulesByClaimedSourceGroup(ctx, event, candidateRules)
 	if err != nil {
 		return err
@@ -854,6 +842,28 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 	if len(channelIds) == 0 {
 		return false, "", gerror.New("采集规则未配置目标频道")
 	}
+	fingerprints := buildProfileFingerprints(channelIds, decision.Text, content.Media)
+	if rule["dedupe_enabled"].Int() == 1 {
+		ready, readyErr := profileFingerprintBackfillReady(ctx)
+		if readyErr != nil {
+			return false, "", readyErr
+		}
+		if !ready {
+			return false, "", newCollectProcessRetryError(15*time.Second, "资料指纹索引正在初始化")
+		}
+	}
+	if rule["dedupe_enabled"].Int() == 1 {
+		hit, findErr := s.findProfileFingerprintDuplicate(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), fingerprints, 0)
+		if findErr != nil {
+			return false, "", findErr
+		}
+		if hit != nil {
+			reason := fmt.Sprintf("资料库已存在相同资料 profileId:%d channelId:%d layer:%s", hit.ProfileID, hit.ChannelID, hit.Layer)
+			s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
+			g.Log().Infof(ctx, "采集资料指纹命中 eventId:%d ruleId:%d profileId:%d channelId:%d layer:%s cacheHit:%t", event["id"].Int64(), rule["id"].Int64(), hit.ProfileID, hit.ChannelID, hit.Layer, hit.CacheHit)
+			return false, reason, nil
+		}
+	}
 	var dispatchId int64
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		var txErr error
@@ -869,7 +879,7 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		if txErr = createCollectDispatchChannelsTx(ctx, tx, event["tenant_id"].Int64(), event["account_id"].Int64(), dispatchId, channelIds); txErr != nil {
 			return txErr
 		}
-		return reserveCollectDedupeLedgerTx(ctx, tx, event, rule, dispatchId, channelIds, collectDedupeMaterialFromEvent(event, content))
+		return nil
 	})
 	if err != nil {
 		return false, "", err
@@ -883,6 +893,16 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 	}
 	profileId, err := s.commitCollectMaterial(ctx, event, content, rule, decision.Text)
 	if err != nil {
+		var duplicate *profileFingerprintDuplicateError
+		if errors.As(err, &duplicate) {
+			reason := duplicate.Error()
+			_, _ = pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", dispatchId).Data(g.Map{
+				"status": sysin.CollectDispatchStatusSkipped, "error_message": reason,
+				"finished_at": gtime.Now(), "updated_at": gtime.Now(),
+			}).Update()
+			s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
+			return false, reason, nil
+		}
 		_ = s.markCollectDispatchFailed(ctx, dispatchId, err.Error())
 		return false, "", err
 	}

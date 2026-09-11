@@ -28,9 +28,6 @@ func (s *sSysPublish) executeCollectSourceDeleteCleanup(ctx context.Context, sou
 	if err = s.clearCollectSourceDispatchClaims(ctx, sourceId, tenantId, accountId); err != nil {
 		return err
 	}
-	if err = s.clearCollectSourceDedupe(ctx, sourceId, tenantId, accountId); err != nil {
-		return err
-	}
 	if err = s.clearCollectSourceAsynqTasks(ctx, sourceId, taskIDs); err != nil {
 		return err
 	}

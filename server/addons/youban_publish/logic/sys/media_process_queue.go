@@ -81,6 +81,9 @@ func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Ta
 	if err = s.syncMediaPHashBucketByMediaId(ctx, payload.MediaId); err != nil {
 		return err
 	}
+	if err = s.refreshProfileFingerprintProjection(ctx, media["profile_id"].Int64()); err != nil {
+		return err
+	}
 	return s.wakeProfileTelegramJobs(ctx, media["profile_id"].Int64())
 }
 

@@ -38,8 +38,15 @@ func (s *sSysPublish) ServerProfilePurgeDeleted(ctx context.Context, in *sysin.P
 	if len(profileIds) == 0 {
 		return res, nil
 	}
+	fingerprintRows, err := g.DB().Model(publishProfileFingerprintTable).Safe().Ctx(ctx).WhereIn("profile_id", profileIds).All()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取待清理资料指纹失败")
+	}
 
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if _, deleteErr := detachProfileFingerprintsTx(ctx, tx, profileIds); deleteErr != nil {
+			return deleteErr
+		}
 		deleteTables := []string{
 			dao.ContentMedia.Table(),
 			dao.ContentSourceMap.Table(),
@@ -71,6 +78,10 @@ func (s *sSysPublish) ServerProfilePurgeDeleted(ctx context.Context, in *sysin.P
 	})
 	if err != nil {
 		return nil, err
+	}
+	for _, row := range fingerprintRows {
+		item := profileFingerprint{ChannelID: row["channel_id"].Int64(), Layer: row["layer"].String(), Signature: row["signature"].String(), ItemTotal: row["item_total"].Int(), SignatureCount: row["signature_count"].Int()}
+		clearProfileFingerprintCache(ctx, row["tenant_id"].Int64(), row["account_id"].Int64(), []profileFingerprint{item})
 	}
 	service.SysContent().ClearHomeProfileCardsCache(ctx)
 	return res, nil

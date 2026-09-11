@@ -426,9 +426,6 @@ func (s *sSysPublish) CollectReviewDelete(ctx context.Context, in *sysin.IdsInp)
 				}).Update(); err != nil {
 				return gerror.Wrap(err, "更新审核分发状态失败")
 			}
-			if err = releaseCollectDedupeLedgerByDispatchesTx(ctx, tx, uniqueIds(dispatchIds)); err != nil {
-				return err
-			}
 		}
 		if _, err = tx.Model(pdao.YoubanPublishCollectReview.Table()).
 			WhereIn("id", ids).
@@ -507,6 +504,15 @@ func (s *sSysPublish) approveCollectReview(ctx context.Context, reviewId int64, 
 	if profileId <= 0 {
 		profileId, err = s.commitCollectMaterial(ctx, event, content, rule, text)
 		if err != nil {
+			var duplicate *profileFingerprintDuplicateError
+			if errors.As(err, &duplicate) {
+				_, _ = pdao.YoubanPublishCollectDispatch.Ctx(ctx).Where("id", review["dispatch_id"].Int64()).Data(g.Map{
+					"status": sysin.CollectDispatchStatusSkipped, "error_message": duplicate.Error(),
+					"finished_at": gtime.Now(), "updated_at": gtime.Now(),
+				}).Update()
+				g.Log().Infof(ctx, "采集审核通过时资料指纹冲突 reviewId:%d eventId:%d profileId:%d channelId:%d layer:%s", reviewId, event["id"].Int64(), duplicate.ProfileID, duplicate.ChannelID, duplicate.Layer)
+				return s.markCollectReviewApproved(ctx, reviewId, tenantId, accountId, "资料库已存在相同资料，已跳过重复创建")
+			}
 			_ = s.markCollectDispatchFailed(ctx, review["dispatch_id"].Int64(), err.Error())
 			return err
 		}
@@ -571,5 +577,5 @@ func (s *sSysPublish) rejectCollectReviews(ctx context.Context, reviewIds []int6
 	if err != nil {
 		return gerror.Wrap(err, "更新采集审核拒绝分发状态失败")
 	}
-	return releaseCollectDedupeLedgerByDispatches(ctx, dispatchIds)
+	return nil
 }

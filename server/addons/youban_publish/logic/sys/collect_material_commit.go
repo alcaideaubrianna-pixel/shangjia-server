@@ -520,7 +520,16 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 	sourceKey := collectPublishClientRequestId(event, rule)
 	now := gtime.Now()
 	imageCount, videoCount, hasVerificationVideo := collectPreparedMediaCounts(content.Media)
+	fingerprintMedia := make([]collectMediaItem, 0, len(content.Media))
+	for _, media := range content.Media {
+		fingerprintMedia = append(fingerprintMedia, collectMediaItem{
+			Type: media.MediaType, FileMd5: media.MD5, FilePhash: media.PerceptualHash,
+		})
+	}
+	fingerprints := buildProfileFingerprints(collectRuleTargetChannelIds(rule), text, fingerprintMedia)
+	cacheFingerprints := fingerprints
 	var profileId int64
+	wasExisting := false
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		columns := dao.ContentProfile.Columns()
 		existing, txErr := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).
@@ -539,6 +548,7 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 			}
 		}
 		if !existing.IsEmpty() {
+			wasExisting = true
 			extracted = profileextractor.Refresh(text, profileextractor.Fields{
 				Age:    existing[columns.Age].Int(),
 				Virgin: existing[columns.IsVirgin].Int(),
@@ -622,11 +632,21 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 				return gerror.Wrap(txErr, "写入采集资料媒体失败")
 			}
 		}
+		if rule["dedupe_enabled"].Int() == 1 && !wasExisting {
+			if txErr = attachProfileFingerprintsTx(ctx, tx, tenantId, accountId, profileId, fingerprints); txErr != nil {
+				return txErr
+			}
+		} else {
+			if _, cacheFingerprints, txErr = s.replaceProfileFingerprintProjectionTx(ctx, tx, tenantId, accountId, profileId, collectRuleTargetChannelIds(rule)); txErr != nil {
+				return txErr
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return 0, err
 	}
+	warmProfileFingerprintCache(ctx, tenantId, accountId, profileId, cacheFingerprints)
 	if err = s.deleteMediaPHashBucketByProfileId(ctx, profileId); err != nil {
 		return 0, err
 	}

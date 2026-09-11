@@ -38,7 +38,7 @@ func (s *sSysPublish) markCollectDispatchFailed(ctx context.Context, dispatchId 
 	if err = s.markCollectEventsFailedByDispatchRows(ctx, rows, message); err != nil {
 		return err
 	}
-	return releaseCollectDedupeLedgerByDispatches(ctx, []int64{dispatchId})
+	return nil
 }
 
 func (s *sSysPublish) markCollectEventsFailedByDispatchRows(ctx context.Context, rows gdb.Result, message string) error {

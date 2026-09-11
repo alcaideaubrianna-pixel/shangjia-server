@@ -49,3 +49,21 @@ WHERE sr."source_id" = keep."source_id"
 
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_collect_source_single_rule"
   ON "hg_youban_publish_collect_source_rule" ("source_id");
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_fingerprint" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "channel_id" bigint NOT NULL DEFAULT 0,
+  "layer" varchar(32) NOT NULL DEFAULT '',
+  "signature" varchar(64) NOT NULL DEFAULT '',
+  "item_total" integer NOT NULL DEFAULT 0,
+  "signature_count" integer NOT NULL DEFAULT 0,
+  "owner_marker" varchar(16) DEFAULT NULL,
+  "created_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_profile_fingerprint_scope" ON "hg_youban_publish_profile_fingerprint" ("tenant_id", "account_id", "channel_id", "layer", "signature", "item_total", "signature_count", "owner_marker");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_profile_fingerprint_profile" ON "hg_youban_publish_profile_fingerprint" ("profile_id", "channel_id", "layer", "signature", "item_total", "signature_count");
+CREATE INDEX IF NOT EXISTS "idx_ybp_profile_fingerprint_profile" ON "hg_youban_publish_profile_fingerprint" ("profile_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_channel_profile_profile" ON "hg_youban_publish_channel_profile" ("profile_id", "channel_id");

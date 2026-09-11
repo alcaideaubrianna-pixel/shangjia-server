@@ -103,7 +103,6 @@ func shouldDropCollectStandaloneCodeCaption(text string, mediaCount int) bool {
 }
 
 type collectDedupeMaterial struct {
-	dedupeKey       string
 	mediaKey        string
 	textHash        string
 	imagePHashKey   string
@@ -113,33 +112,25 @@ type collectDedupeMaterial struct {
 	imageTotal      int
 }
 
-func collectDedupeMaterialFromEvent(event gdb.Record, content *collectContentResult) collectDedupeMaterial {
-	items := make([]collectMediaItem, 0)
-	textHash := strings.TrimSpace(event["text_hash"].String())
-	dedupeKey := strings.TrimSpace(event["dedupe_key"].String())
-	if content != nil {
-		if len(content.Media) > 0 {
-			items = content.Media
-		}
-		if strings.TrimSpace(content.TextHash) != "" {
-			textHash = content.TextHash
-		}
-		if strings.TrimSpace(content.DedupeKey) != "" {
-			dedupeKey = content.DedupeKey
-		}
-	}
-	material := collectDedupeMaterialFromItems(textHash, items)
-	material.dedupeKey = dedupeKey
-	if content == nil {
-		material.imagePHashKey = ""
-	}
-	return material
+type collectDedupeSignature struct {
+	layer string
+	value string
+	total int
+	count int
 }
 
-func collectDedupeMaterialFromEventRecord(row gdb.Record, items []collectMediaItem) collectDedupeMaterial {
-	material := collectDedupeMaterialFromItems(row["text_hash"].String(), items)
-	material.dedupeKey = strings.TrimSpace(row["dedupe_key"].String())
-	return material
+func (material collectDedupeMaterial) signatures(includePHash bool) []collectDedupeSignature {
+	items := make([]collectDedupeSignature, 0, 3)
+	if material.textHash != "" {
+		items = append(items, collectDedupeSignature{layer: "text_hash", value: material.textHash})
+	}
+	if material.mediaKey != "" && material.mediaTotal > 0 && material.mediaCount == material.mediaTotal {
+		items = append(items, collectDedupeSignature{layer: "media_fingerprint", value: material.mediaKey, total: material.mediaTotal, count: material.mediaCount})
+	}
+	if includePHash && material.imagePHashKey != "" && material.imageTotal > 0 && material.imagePHashCount == material.imageTotal {
+		items = append(items, collectDedupeSignature{layer: "image_phash", value: material.imagePHashKey, total: material.imageTotal, count: material.imagePHashCount})
+	}
+	return items
 }
 
 func collectDedupeMaterialFromItems(textHash string, items []collectMediaItem) collectDedupeMaterial {
@@ -161,16 +152,6 @@ func collectDedupeMaterialFromItems(textHash string, items []collectMediaItem) c
 	textHash = strings.TrimSpace(textHash)
 	if textHash == collectHash("") {
 		textHash = ""
-	}
-	// Reused Telegram media is common in agent channels. Media equality alone
-	// cannot identify a profile when the accompanying profile text changed.
-	if textHash != "" {
-		if mediaKey != "" {
-			mediaKey = collectHash(textHash + ":" + mediaKey)
-		}
-		if imagePHashKey != "" {
-			imagePHashKey = collectHash(textHash + ":" + imagePHashKey)
-		}
 	}
 	return collectDedupeMaterial{
 		mediaKey:        mediaKey,
