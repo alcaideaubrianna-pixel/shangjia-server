@@ -59,6 +59,37 @@ func TestShouldRecoverCollectEventWhileFingerprintIndexInitializes(t *testing.T)
 	}
 }
 
+func TestShouldResumeClassifiedDisplayEvent(t *testing.T) {
+	for _, status := range []string{
+		sysin.CollectEventStatusPending,
+		sysin.CollectEventStatusFailed,
+		sysin.CollectEventStatusPrechecked,
+		sysin.CollectEventStatusMediaPending,
+		sysin.CollectEventStatusMediaReady,
+	} {
+		row := gdb.Record{
+			"material_role": g.NewVar(collectMaterialRoleDisplay),
+			"status":        g.NewVar(status),
+		}
+		if !shouldResumeClassifiedDisplayEvent(row) {
+			t.Fatalf("display event with status %q must resume", status)
+		}
+	}
+	for _, status := range []string{
+		sysin.CollectEventStatusProcessed,
+		sysin.CollectEventStatusDispatched,
+		sysin.CollectEventStatusIgnored,
+	} {
+		row := gdb.Record{
+			"material_role": g.NewVar(collectMaterialRoleDisplay),
+			"status":        g.NewVar(status),
+		}
+		if shouldResumeClassifiedDisplayEvent(row) {
+			t.Fatalf("terminal display event with status %q must not resume", status)
+		}
+	}
+}
+
 func TestMergeCollectMediaEnrichmentKeepsCanonicalPathAndPHash(t *testing.T) {
 	base := []collectMediaItem{{
 		Type:        "photo",

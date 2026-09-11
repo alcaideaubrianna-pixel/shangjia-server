@@ -96,7 +96,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 			continue
 		}
 		role := strings.TrimSpace(event["material_role"].String())
-		if role == collectMaterialRoleDisplay && event["status"].String() == sysin.CollectEventStatusFailed {
+		if shouldResumeClassifiedDisplayEvent(event) {
 			if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil && !isCollectProcessRetryError(err) {
 				return err
 			}
@@ -178,6 +178,16 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 		}
 	}
 	return nil
+}
+
+func shouldResumeClassifiedDisplayEvent(event gdb.Record) bool {
+	if strings.TrimSpace(event["material_role"].String()) != collectMaterialRoleDisplay {
+		return false
+	}
+	status := strings.TrimSpace(event["status"].String())
+	return status != sysin.CollectEventStatusProcessed &&
+		status != sysin.CollectEventStatusDispatched &&
+		status != sysin.CollectEventStatusIgnored
 }
 
 const collectMaterialVerifyUnmatchedMessage = "验证资料未匹配到前序资料组"
