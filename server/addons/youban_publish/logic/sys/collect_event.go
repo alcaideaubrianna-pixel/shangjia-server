@@ -543,7 +543,29 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	}
 	g.Log().Infof(ctx, "采集事件分发完成 eventId:%d matched:%t rules:%d", eventId, matched, len(candidateRules))
 	s.appendCollectEventLogForRecord(ctx, event, "dispatch", "dispatched", "采集事件已生成分发任务", "")
+	if err = s.completePairedCollectVerifyEvent(ctx, eventId); err != nil {
+		return err
+	}
 	return s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusDispatched, "")
+}
+
+func (s *sSysPublish) completePairedCollectVerifyEvent(ctx context.Context, displayEventID int64) error {
+	if displayEventID <= 0 {
+		return nil
+	}
+	now := gtime.Now()
+	_, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Where("material_parent_event_id", displayEventID).
+		Where("material_role", collectMaterialRoleVerify).
+		WhereNotIn("status", []string{sysin.CollectEventStatusProcessed, sysin.CollectEventStatusDispatched}).
+		Data(g.Map{
+			"status":                sysin.CollectEventStatusProcessed,
+			"material_group_status": "ready",
+			"error_message":         "",
+			"processed_at":          now,
+			"updated_at":            now,
+		}).Update()
+	return gerror.Wrap(err, "完成配对验证资料状态失败")
 }
 
 func (s *sSysPublish) ignoreCollectEvent(ctx context.Context, eventId int64, message string, stage string) error {
@@ -695,8 +717,6 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 		row["block_plain_text"] = gvar.New(0)
 		row["review_enabled"] = gvar.New(0)
 		row["dedupe_enabled"] = gvar.New(0)
-		row["header_enabled"] = gvar.New(0)
-		row["footer_enabled"] = gvar.New(0)
 		row["target_channel_ids"] = gvar.New([]int64{})
 	}
 	rows := make(gdb.Result, 0, len(ruleIds))
