@@ -91,6 +91,18 @@ func TestCollectMediaFingerprintSetKeyIsOrderIndependent(t *testing.T) {
 	}
 }
 
+func TestTelegramMediaFingerprintDistinguishesLargeAdjacentIDs(t *testing.T) {
+	left := collectMediaItem{
+		Type: "photo", SourceKind: "photo",
+		SourceMediaId: 6087038058504065806, SourceAccessHash: 8976543210123456789,
+	}
+	right := left
+	right.SourceMediaId++
+	if got, want := collectTelegramMediaFingerprint(left), collectTelegramMediaFingerprint(right); got == want {
+		t.Fatalf("adjacent Telegram media IDs produced the same fingerprint: %s", got)
+	}
+}
+
 func TestCollectImagePHashSetIgnoresOrderAndVideos(t *testing.T) {
 	left := []collectMediaItem{
 		{Type: "photo", FilePhash: "A"},

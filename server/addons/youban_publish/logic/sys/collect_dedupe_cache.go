@@ -14,7 +14,7 @@ import (
 	pdao "hotgo/addons/youban_publish/internal/dao"
 )
 
-const collectDedupeCacheKeyPrefix = "youban_publish:collect:dedupe:v3"
+const collectDedupeCacheKeyPrefix = "youban_publish:collect:dedupe:v4"
 
 type collectDedupeCacheEntry struct {
 	EventID    int64

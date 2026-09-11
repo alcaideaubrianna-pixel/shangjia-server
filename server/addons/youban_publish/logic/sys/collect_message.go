@@ -229,22 +229,39 @@ func (s *sSysPublish) collectExistingEventShouldMerge(ctx context.Context, event
 		return true, nil
 	}
 	items := normalizeCollectMediaItems(media)
-	if strings.TrimSpace(event["source_grouped_id"].String()) == "" || len(items) == 0 {
+	if len(items) == 0 {
 		return false, nil
 	}
 	keys := make([]string, 0, len(items))
 	for _, item := range items {
-		keys = append(keys, collectMediaSourceKey(item))
+		keys = append(keys, strings.TrimSpace(item.Type)+":"+collectMediaSourceKey(item))
 	}
 	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
-	count, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+	rows, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
 		Where(mediaCols.EventId, event["id"].Int64()).
 		WhereIn(mediaCols.SourceMediaKey, uniqueStrings(keys)).
-		Count()
+		All()
 	if err != nil {
 		return false, gerror.Wrap(err, "检查采集媒体组新增媒体失败")
 	}
-	return count < len(uniqueStrings(keys)), nil
+	if len(rows) < len(uniqueStrings(keys)) {
+		return true, nil
+	}
+	storedByKey := make(map[string]gdb.Record, len(rows))
+	for _, row := range rows {
+		storedByKey[row[mediaCols.SourceMediaKey].String()] = row
+	}
+	for _, item := range items {
+		row := storedByKey[strings.TrimSpace(item.Type)+":"+collectMediaSourceKey(item)]
+		if row.IsEmpty() {
+			return true, nil
+		}
+		if item.SourceMediaId != 0 && (row["source_media_id"].Int64() != item.SourceMediaId ||
+			row["source_access_hash"].Int64() != item.SourceAccessHash) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func collectEventTerminalStatus(status string) bool {

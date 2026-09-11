@@ -116,6 +116,55 @@ func TestCollectorDeliveryFromAccountEvent(t *testing.T) {
 	}
 }
 
+func TestAccountEventRawUpdatePreservesLargeTelegramMediaIDs(t *testing.T) {
+	const (
+		mediaID    int64 = 6087038058504065806
+		accessHash int64 = 8976543210123456789
+	)
+	message := sysin.AccountMessageEvent{
+		Media: []sysin.CollectorMediaItem{{
+			Type:             "photo",
+			SourceMediaID:    mediaID,
+			SourceAccessHash: accessHash,
+		}},
+	}
+	raw, err := json.Marshal(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := losslessRawUpdate(raw).String()
+	var restored sysin.AccountMessageEvent
+	if err = json.Unmarshal([]byte(stored), &restored); err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.Media) != 1 {
+		t.Fatalf("media count = %d, want 1", len(restored.Media))
+	}
+	if got := restored.Media[0].SourceMediaID; got != mediaID {
+		t.Fatalf("source media id = %d, want %d", got, mediaID)
+	}
+	if got := restored.Media[0].SourceAccessHash; got != accessHash {
+		t.Fatalf("source access hash = %d, want %d", got, accessHash)
+	}
+}
+
+func TestAccountMediaIdentityChangedOnlyForSameMessageMedia(t *testing.T) {
+	stored := []sysin.CollectorMediaItem{{
+		FileID: "gotd:chat:1", SourceMediaID: 6087038058504066000, SourceAccessHash: 4782524723988359000,
+	}}
+	exact := []sysin.CollectorMediaItem{{
+		FileID: "gotd:chat:1", SourceMediaID: 6087038058504065806, SourceAccessHash: 4782524723988358765,
+	}}
+	if !accountMediaIdentityChanged(stored, exact) {
+		t.Fatal("rounded identity must be refreshed from the same Telegram message")
+	}
+	differentMessage := append([]sysin.CollectorMediaItem(nil), exact...)
+	differentMessage[0].FileID = "gotd:chat:2"
+	if accountMediaIdentityChanged(stored, differentMessage) {
+		t.Fatal("different Telegram messages must not refresh each other's event")
+	}
+}
+
 func TestCollectorDeliveryFromBotMediaGroup(t *testing.T) {
 	receivedAt := time.Date(2026, 8, 14, 1, 0, 0, 0, time.UTC)
 	message := &models.Message{

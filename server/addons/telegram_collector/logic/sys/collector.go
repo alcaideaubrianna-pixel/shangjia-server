@@ -119,6 +119,11 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 	if err != nil {
 		return gerror.Wrap(err, "序列化Telegram账号采集事件失败")
 	}
+	if eventID, repaired, repairErr := s.refreshCorruptedAccountEvent(ctx, message, raw); repairErr != nil {
+		return repairErr
+	} else if repaired {
+		return s.enqueueEventTask(ctx, eventID, sysin.EventPriorityRealtime)
+	}
 	event := sysin.RawUpdateEvent{
 		EventID:    message.SourceUniqueKey,
 		TenantID:   message.TenantID,
@@ -145,6 +150,77 @@ func (s *sCollector) IngestAccountMessage(ctx context.Context, message *sysin.Ac
 		attribute.String("priority", "realtime"),
 	))
 	return nil
+}
+
+func losslessRawUpdate(raw []byte) *gjson.Json {
+	return gjson.NewWithOptions(raw, gjson.Options{StrNumber: true})
+}
+
+func (s *sCollector) refreshCorruptedAccountEvent(ctx context.Context, message *sysin.AccountMessageEvent, raw []byte) (int64, bool, error) {
+	columns := dao.TgCollectorEvent.Columns()
+	var existing entity.TgCollectorEvent
+	if err := dao.TgCollectorEvent.Ctx(ctx).
+		Fields(columns.Id, columns.RawUpdate).
+		Where(columns.TenantId, message.TenantID).
+		Where(columns.EventKey, message.SourceUniqueKey).
+		Scan(&existing); err != nil {
+		return 0, false, gerror.Wrap(err, "读取Telegram账号采集事件失败")
+	}
+	if existing.Id <= 0 || existing.RawUpdate == nil {
+		return 0, false, nil
+	}
+	var stored sysin.AccountMessageEvent
+	if err := json.Unmarshal([]byte(existing.RawUpdate.String()), &stored); err != nil {
+		return 0, false, gerror.Wrap(err, "解析Telegram账号历史采集事件失败")
+	}
+	if !accountMediaIdentityChanged(stored.Media, message.Media) {
+		return existing.Id, false, nil
+	}
+	now := gtime.Now()
+	if _, err := dao.TgCollectorEvent.Ctx(ctx).WherePri(existing.Id).Data(do.TgCollectorEvent{
+		RawUpdate:    losslessRawUpdate(raw),
+		Status:       sysin.EventStatusReceived,
+		AttemptCount: 0,
+		NextRunAt:    nil,
+		LeaseOwner:   "",
+		LeaseUntil:   nil,
+		ProcessedAt:  nil,
+		ErrorMessage: "",
+		UpdatedAt:    now,
+	}).Update(); err != nil {
+		return 0, false, gerror.Wrap(err, "刷新Telegram账号采集事件媒体身份失败")
+	}
+	deliveryColumns := dao.TgCollectorDelivery.Columns()
+	if _, err := dao.TgCollectorDelivery.Ctx(ctx).
+		Where(deliveryColumns.EventId, existing.Id).
+		Data(do.TgCollectorDelivery{
+			Status:       sysin.DeliveryStatusPending,
+			AttemptCount: 0,
+			NextRunAt:    nil,
+			LeaseOwner:   "",
+			LeaseUntil:   nil,
+			ErrorMessage: "",
+			UpdatedAt:    now,
+		}).Update(); err != nil {
+		return 0, false, gerror.Wrap(err, "重置Telegram账号采集交付失败")
+	}
+	return existing.Id, true, nil
+}
+
+func accountMediaIdentityChanged(stored, incoming []sysin.CollectorMediaItem) bool {
+	if len(stored) != len(incoming) {
+		return false
+	}
+	for index := range stored {
+		if stored[index].FileID != incoming[index].FileID {
+			return false
+		}
+		if stored[index].SourceMediaID != incoming[index].SourceMediaID ||
+			stored[index].SourceAccessHash != incoming[index].SourceAccessHash {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *sCollector) EventExists(ctx context.Context, tenantID int64, eventKey string) (bool, error) {
@@ -189,7 +265,7 @@ func (s *sCollector) persistEvent(ctx context.Context, event *sysin.RawUpdateEve
 		MessageId:  event.MessageID,
 		UpdateId:   event.UpdateID,
 		EventKey:   event.EventID,
-		RawUpdate:  gjson.New(event.RawUpdate),
+		RawUpdate:  losslessRawUpdate(event.RawUpdate),
 		Priority:   event.Priority,
 		Status:     sysin.EventStatusReceived,
 		ReceivedAt: gtime.New(event.ReceivedAt),
