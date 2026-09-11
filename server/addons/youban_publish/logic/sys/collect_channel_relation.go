@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/gconv"
 
+	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -42,6 +43,7 @@ func (s *sSysPublish) filterCollectRulesByClaimedSourceGroup(ctx context.Context
 	chatID := canonicalCollectSourceChatID(event["source_chat_id"].String())
 	query := g.DB().Model(publishCollectDispatchTable+" d").Safe().Ctx(ctx).
 		InnerJoin(publishCollectEventTable+" e", "e.id=d.event_id").
+		InnerJoin(pdao.YoubanPublishCollectSource.Table()+" s", "s.id=d.source_id AND s.deleted_at IS NULL").
 		InnerJoin(collectDispatchChannelTable+" dc", "dc.dispatch_id=d.id").
 		Fields("dc.channel_id").
 		Where("d.tenant_id", event["tenant_id"].Int64()).

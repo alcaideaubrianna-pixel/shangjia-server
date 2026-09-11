@@ -209,10 +209,13 @@ func (s *sSysPublish) resetCollectEventForTrigger(ctx context.Context, eventId i
 		return err
 	}
 	_, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("id", eventId).Data(g.Map{
-		"status":        sysin.CollectEventStatusPending,
-		"error_message": "",
-		"processed_at":  nil,
-		"updated_at":    gtime.Now(),
+		"status":                   sysin.CollectEventStatusPending,
+		"error_message":            "",
+		"processed_at":             nil,
+		"material_role":            collectMaterialRolePending,
+		"material_parent_event_id": 0,
+		"material_group_status":    "",
+		"updated_at":               gtime.Now(),
 	}).Update()
 	return gerror.Wrap(err, "重置采集事件状态失败")
 }
@@ -270,10 +273,13 @@ func (s *sSysPublish) resetCollectSourceForDev(ctx context.Context, sourceId int
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
 		Data(g.Map{
-			"status":        sysin.CollectEventStatusPending,
-			"error_message": "",
-			"processed_at":  nil,
-			"updated_at":    gtime.Now(),
+			"status":                   sysin.CollectEventStatusPending,
+			"error_message":            "",
+			"processed_at":             nil,
+			"material_role":            collectMaterialRolePending,
+			"material_parent_event_id": 0,
+			"material_group_status":    "",
+			"updated_at":               gtime.Now(),
 		}).
 		Update()
 	if err != nil {

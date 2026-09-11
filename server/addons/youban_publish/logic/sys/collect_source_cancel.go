@@ -25,10 +25,13 @@ func (s *sSysPublish) executeCollectSourceDeleteCleanup(ctx context.Context, sou
 	if err = s.cancelCollectSourceEvents(ctx, sourceId, tenantId, accountId, now); err != nil {
 		return err
 	}
-	if err = s.clearCollectSourceAsynqTasks(ctx, sourceId, taskIDs); err != nil {
+	if err = s.clearCollectSourceDispatchClaims(ctx, sourceId, tenantId, accountId); err != nil {
 		return err
 	}
 	if err = s.clearCollectSourceDedupe(ctx, sourceId, tenantId, accountId); err != nil {
+		return err
+	}
+	if err = s.clearCollectSourceAsynqTasks(ctx, sourceId, taskIDs); err != nil {
 		return err
 	}
 	g.Log().Infof(ctx, "采集源删除清理完成 sourceId:%d historyTasks:%d", sourceId, len(taskIDs))
@@ -140,6 +143,19 @@ func (s *sSysPublish) cancelCollectSourceEvents(ctx context.Context, sourceId in
 			"updated_at":    now,
 		}).Update()
 	return gerror.Wrap(err, "取消采集源未完成事件失败")
+}
+
+func (s *sSysPublish) clearCollectSourceDispatchClaims(ctx context.Context, sourceId, tenantId, accountId int64) error {
+	if sourceId <= 0 || tenantId <= 0 || accountId <= 0 {
+		return nil
+	}
+	dispatchTable := pdao.YoubanPublishCollectDispatch.Table()
+	_, err := g.DB().Model(collectDispatchChannelTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		Where("dispatch_id IN (SELECT id FROM "+dispatchTable+" WHERE source_id=? AND tenant_id=? AND account_id=?)", sourceId, tenantId, accountId).
+		Delete()
+	return gerror.Wrap(err, "释放采集源频道分发占用失败")
 }
 
 func (s *sSysPublish) clearCollectSourceAsynqTasks(ctx context.Context, sourceId int64, historyTaskIDs []int64) error {
