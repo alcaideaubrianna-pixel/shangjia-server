@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/hibiken/asynq"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 func TestCollectQueuesUseSharedWorkers(t *testing.T) {
@@ -123,6 +125,16 @@ func TestCollectProcessScheduleKeyIsSourceScoped(t *testing.T) {
 	if first == second || first != "youban_publish:collect:process:schedule:2:3:4" {
 		t.Fatalf("unexpected schedule keys: %s %s", first, second)
 	}
+}
+
+func TestCollectProcessWindowStatusesIncludeFailed(t *testing.T) {
+	statuses := collectProcessWindowStatuses()
+	for _, status := range statuses {
+		if status == sysin.CollectEventStatusFailed {
+			return
+		}
+	}
+	t.Fatalf("failed collection events must remain eligible for source window recovery: %v", statuses)
 }
 
 func TestListCollectSourceTasksScansAllPages(t *testing.T) {

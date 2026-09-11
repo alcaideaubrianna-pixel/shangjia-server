@@ -228,15 +228,7 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 }
 
 func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePayload) (time.Duration, bool, error) {
-	statuses := []string{
-		sysin.CollectEventStatusPending,
-		sysin.CollectEventStatusGroupCollect,
-		sysin.CollectEventStatusWaitingOrder,
-		sysin.CollectEventStatusPrechecked,
-		sysin.CollectEventStatusMediaPending,
-		sysin.CollectEventStatusMediaReady,
-		sysin.CollectEventStatusIgnored,
-	}
+	statuses := collectProcessWindowStatuses()
 	now := time.Now()
 	groupDeadline := now.Add(-collectMaterialGroupingDelay)
 	waitingVerifyDeadline := now.Add(-collectMaterialWaitingVerifyRetryDelay)
@@ -328,6 +320,19 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 		return 0, true, nil
 	}
 	return nextDelay, true, nil
+}
+
+func collectProcessWindowStatuses() []string {
+	return []string{
+		sysin.CollectEventStatusPending,
+		sysin.CollectEventStatusGroupCollect,
+		sysin.CollectEventStatusWaitingOrder,
+		sysin.CollectEventStatusPrechecked,
+		sysin.CollectEventStatusMediaPending,
+		sysin.CollectEventStatusMediaReady,
+		sysin.CollectEventStatusIgnored,
+		sysin.CollectEventStatusFailed,
+	}
 }
 
 func collectLocalWindowRemaining(value *gtime.Time, window time.Duration) time.Duration {
