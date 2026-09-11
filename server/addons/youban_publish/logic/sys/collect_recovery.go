@@ -354,6 +354,7 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 		if queryErr != nil {
 			return queryErr
 		}
+		sourceQueued := false
 		for _, row := range rows {
 			if row.IsEmpty() || row["id"].Int64() <= 0 || !shouldRecoverCollectEvent(row) {
 				continue
@@ -379,14 +380,22 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 				}
 			}
 			remaining--
-			if processErr := s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
-				EventId:   row["id"].Int64(),
-				SourceId:  row["source_id"].Int64(),
-				TenantId:  row["tenant_id"].Int64(),
-				AccountId: row["account_id"].Int64(),
-			}, 0); processErr != nil {
-				g.Log().Warningf(ctx, "恢复采集事件投递失败 event:%d err:%+v", row["id"].Int64(), processErr)
-				continue
+			if !sourceQueued {
+				queued, processErr := s.enqueueCollectProcessDeferred(ctx, collectProcessQueuePayload{
+					EventId:   row["id"].Int64(),
+					SourceId:  row["source_id"].Int64(),
+					TenantId:  row["tenant_id"].Int64(),
+					AccountId: row["account_id"].Int64(),
+				}, 0)
+				if processErr != nil {
+					g.Log().Warningf(ctx, "恢复采集源投递失败 source:%d event:%d err:%+v", sourceId, row["id"].Int64(), processErr)
+					continue
+				}
+				if !queued {
+					g.Log().Warningf(ctx, "恢复采集源任务未实际入队 source:%d event:%d", sourceId, row["id"].Int64())
+					continue
+				}
+				sourceQueued = true
 			}
 			if _, updateErr := pdao.YoubanPublishCollectEvent.Ctx(ctx).
 				Where("id", row["id"].Int64()).
