@@ -14,6 +14,75 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
+type collectDispatchResumeAction int
+
+const (
+	collectDispatchResumeInvalid collectDispatchResumeAction = iota
+	collectDispatchResumeNoop
+	collectDispatchResumeSubmit
+)
+
+func collectDispatchResumeActionForStatus(status string) collectDispatchResumeAction {
+	switch strings.TrimSpace(status) {
+	case sysin.CollectDispatchStatusFailed:
+		return collectDispatchResumeSubmit
+	case sysin.CollectDispatchStatusPending, sysin.CollectDispatchStatusReviewing, sysin.CollectDispatchStatusSent, sysin.CollectDispatchStatusSkipped:
+		return collectDispatchResumeNoop
+	default:
+		return collectDispatchResumeInvalid
+	}
+}
+
+func (s *sSysPublish) resumeCollectProfileDispatch(ctx context.Context, dispatch, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) error {
+	dispatchID := dispatch["id"].Int64()
+	if dispatchID <= 0 || event.IsEmpty() || rule.IsEmpty() {
+		return gerror.New("恢复采集分发参数不完整")
+	}
+	profileID, err := s.commitCollectMaterial(ctx, event, content, rule, text)
+	if err != nil {
+		_ = s.markCollectDispatchFailed(ctx, dispatchID, err.Error())
+		return err
+	}
+	channelMap, err := collectDispatchChannelMap(ctx, []int64{dispatchID})
+	if err != nil {
+		return err
+	}
+	channelIDs := channelMap[dispatchID]
+	if len(channelIDs) == 0 {
+		return gerror.New("采集规则未配置目标频道")
+	}
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if _, txErr := tx.Model(pdao.YoubanPublishCollectDispatch.Table()).Ctx(ctx).
+			Where("id", dispatchID).
+			Data(g.Map{
+				"profile_id": profileID, "status": sysin.CollectDispatchStatusPending,
+				"error_message": "", "finished_at": nil, "updated_at": gtime.Now(),
+			}).Update(); txErr != nil {
+			return gerror.Wrap(txErr, "恢复采集分发状态失败")
+		}
+		if _, txErr := tx.Model(publishTgJobTable).Ctx(ctx).
+			Where("profile_id", profileID).
+			Where("operation_no", fmt.Sprintf("collect:%d", dispatchID)).
+			Where("status", "failed").
+			Data(g.Map{
+				"status": "pending", "dispatch_status": tgDispatchStatusIdle,
+				"retry_count": 0, "error_message": "", "last_dispatch_error": "",
+				"next_retry_at": nil, "send_phase": "", "updated_at": gtime.Now(),
+			}).Update(); txErr != nil {
+			return gerror.Wrap(txErr, "恢复采集TG发送任务失败")
+		}
+		return reserveCollectDedupeLedgerTx(ctx, tx, event, rule, dispatchID, channelIDs, collectDedupeMaterialFromEvent(event, content))
+	})
+	if err != nil {
+		return err
+	}
+	if err = s.submitCollectProfileDispatch(ctx, dispatchID, profileID, event); err != nil {
+		return err
+	}
+	g.Log().Infof(ctx, "采集分发已恢复并重新提交 profileId:%d eventId:%d dispatchId:%d", profileID, event["id"].Int64(), dispatchID)
+	return nil
+}
+
 func (s *sSysPublish) submitCollectProfileDispatch(ctx context.Context, dispatchId, profileId int64, event gdb.Record) error {
 	if dispatchId <= 0 || profileId <= 0 || event.IsEmpty() {
 		return gerror.New("采集分发参数不完整")
