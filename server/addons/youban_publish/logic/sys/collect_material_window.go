@@ -42,7 +42,7 @@ func (s *sSysPublish) processCollectSourceWindow(ctx context.Context, payload co
 		Where("account_id", payload.AccountId).
 		Where("source_id", payload.SourceId).
 		WhereIn("status", collectProcessWindowStatuses()).
-		Where("material_role IS NULL OR material_role = '' OR material_role = ? OR (status = ? AND material_role = ? AND error_message = ?) OR (status = ? AND material_role = ?)", collectMaterialRolePending, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, sysin.CollectEventStatusFailed, collectMaterialRoleDisplay).
+		Where("material_role IS NULL OR material_role = '' OR material_role IN (?,?) OR (status = ? AND material_role = ? AND error_message = ?)", collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
 		Where("(processed_at IS NULL AND (material_group_status IS NULL OR material_group_status <> ? OR updated_at <= ?)) OR (status = ? AND material_role = ? AND error_message = ? AND updated_at <= ?)", collectMaterialGroupWaitingVerify, now.Add(-collectMaterialWaitingVerifyRetryDelay), sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, now.Add(-collectMaterialVerifyRetryDelay)).
 		OrderAsc("source_chat_id").
 		OrderAsc("source_message_id").
