@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/gogf/gf/v2/frame/g"
@@ -16,9 +17,10 @@ import (
 var botListenerBindCodeRegexp = regexp.MustCompile(`(?i)\bOX[A-Z0-9]{6}\b`)
 
 type botMessageEvent struct {
-	BotId int64
-	Msg   *models.Message
-	Text  string
+	BotId    int64
+	UpdateID int64
+	Msg      *models.Message
+	Text     string
 }
 
 type botMessageHandler interface {
@@ -70,7 +72,15 @@ func (s *sSysBot) dispatchBotMessage(ctx context.Context, event *botMessageEvent
 		return false, nil
 	}
 	for _, handler := range botMessageHandlers {
+		handlerName := fmt.Sprintf("%T", handler)
+		startedAt := time.Now()
+		if event.Msg.Chat.Type == models.ChatTypePrivate {
+			g.Log().Infof(ctx, "TG链路 bot_handler_start updateId:%d botId:%d chatId:%d messageId:%d handler:%s", event.UpdateID, event.BotId, event.Msg.Chat.ID, event.Msg.ID, handlerName)
+		}
 		handled, err := handler.Handle(ctx, s, event)
+		if event.Msg.Chat.Type == models.ChatTypePrivate {
+			g.Log().Infof(ctx, "TG链路 bot_handler_end updateId:%d botId:%d chatId:%d messageId:%d handler:%s handled:%t duration:%s err:%v", event.UpdateID, event.BotId, event.Msg.Chat.ID, event.Msg.ID, handlerName, handled, time.Since(startedAt), err)
+		}
 		if handled || err != nil {
 			return handled, err
 		}

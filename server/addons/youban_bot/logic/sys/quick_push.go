@@ -131,7 +131,9 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 		return false, nil
 	}
 	telegramUserId := fmt.Sprintf("%d", event.Msg.From.ID)
+	stageStartedAt := time.Now()
 	session, err := bot.quickPushSession(ctx, event.BotId, telegramUserId)
+	g.Log().Infof(ctx, "TG链路 quick_push_session_loaded updateId:%d botId:%d chatId:%d messageId:%d found:%t duration:%s err:%v", event.UpdateID, event.BotId, event.Msg.Chat.ID, event.Msg.ID, session != nil, time.Since(stageStartedAt), err)
 	if err != nil || session == nil {
 		return false, err
 	}
@@ -194,15 +196,21 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 		return false, nil
 	}
 	chatId := fmt.Sprintf("%d", event.Msg.Chat.ID)
+	stageStartedAt = time.Now()
 	row, err := bot.botById(ctx, event.BotId)
+	g.Log().Infof(ctx, "TG链路 quick_push_bot_loaded updateId:%d botId:%d chatId:%s messageId:%d duration:%s err:%v", event.UpdateID, event.BotId, chatId, event.Msg.ID, time.Since(stageStartedAt), err)
 	if err != nil {
 		return true, err
 	}
+	stageStartedAt = time.Now()
 	media, err := bot.resolveTelegramMessageMedia(ctx, row.BotToken, event.Msg)
+	g.Log().Infof(ctx, "TG链路 quick_push_media_resolved updateId:%d botId:%d chatId:%s messageId:%d media:%d duration:%s err:%v", event.UpdateID, event.BotId, chatId, event.Msg.ID, len(media), time.Since(stageStartedAt), err)
 	if err != nil {
 		return true, err
 	}
+	stageStartedAt = time.Now()
 	sourceMessageRecordId, err := bot.telegramMessageRecordId(ctx, event.BotId, chatId, event.Msg.ID)
+	g.Log().Infof(ctx, "TG链路 quick_push_message_record_loaded updateId:%d botId:%d chatId:%s messageId:%d recordId:%d duration:%s err:%v", event.UpdateID, event.BotId, chatId, event.Msg.ID, sourceMessageRecordId, time.Since(stageStartedAt), err)
 	if err != nil {
 		return true, err
 	}
@@ -213,7 +221,9 @@ func (quickPushSessionMessageHandler) Handle(ctx context.Context, bot *sSysBot, 
 		item.SourceMessageRecordId = sourceMessageRecordId
 		item.TgFileId = ""
 	}
+	stageStartedAt = time.Now()
 	media, err = bot.persistQuickPushMedia(ctx, session.OperatorAccountId, media)
+	g.Log().Infof(ctx, "TG链路 quick_push_media_persisted updateId:%d botId:%d chatId:%s messageId:%d media:%d duration:%s err:%v", event.UpdateID, event.BotId, chatId, event.Msg.ID, len(media), time.Since(stageStartedAt), err)
 	if err != nil {
 		g.Log().Warningf(ctx, "快速推送Telegram媒体转存失败 botId:%d chatId:%s messageId:%d err:%+v", event.BotId, chatId, event.Msg.ID, err)
 		return true, bot.reply(ctx, event.BotId, chatId, "图片或视频保存失败："+quickPushCallbackAlertText(err.Error()))
@@ -539,7 +549,9 @@ type quickPushPendingMediaGroup struct {
 }
 
 func (s *sSysBot) startQuickPushSelection(ctx context.Context, botToken string, session *quickPushSession, chatId string, sourceMessageRecordId int64, text string, media []*publishsysin.MessageTemplateMediaInp) error {
+	startedAt := time.Now()
 	plans, err := publishService.SysPublish().QuickPushBotPlanList(ctx, session.OperatorAccountId)
+	g.Log().Infof(ctx, "TG链路 quick_push_plans_loaded botId:%d chatId:%s accountId:%d plans:%d duration:%s err:%v", session.BotId, chatId, session.OperatorAccountId, len(plans), time.Since(startedAt), err)
 	if err != nil {
 		_ = s.removeQuickPushSession(ctx, session.BotId, session.TelegramUserId)
 		return err
@@ -554,10 +566,15 @@ func (s *sSysBot) startQuickPushSelection(ctx context.Context, botToken string, 
 	session.Media = media
 	session.PlanIds = quickPushPlanIds(plans)
 	session.SelectedPlanIds = append([]int64(nil), session.PlanIds...)
+	startedAt = time.Now()
 	if err = s.saveQuickPushSession(ctx, session); err != nil {
+		g.Log().Warningf(ctx, "TG链路 quick_push_selection_session_failed botId:%d chatId:%s accountId:%d duration:%s err:%+v", session.BotId, chatId, session.OperatorAccountId, time.Since(startedAt), err)
 		return err
 	}
+	g.Log().Infof(ctx, "TG链路 quick_push_selection_session_saved botId:%d chatId:%s accountId:%d duration:%s", session.BotId, chatId, session.OperatorAccountId, time.Since(startedAt))
+	startedAt = time.Now()
 	_, err = s.sendMessageWithMarkup(ctx, botToken, chatId, quickPushSelectionText(session, plans), "HTML", false, quickPushPlanKeyboard(session, plans))
+	g.Log().Infof(ctx, "TG链路 quick_push_selection_replied botId:%d chatId:%s accountId:%d duration:%s err:%v", session.BotId, chatId, session.OperatorAccountId, time.Since(startedAt), err)
 	return err
 }
 

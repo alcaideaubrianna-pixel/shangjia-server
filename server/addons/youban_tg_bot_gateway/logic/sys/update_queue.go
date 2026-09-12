@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	tgGatewayQueueName = "youban_tg_bot_gateway_update"
-	tgGatewayTaskType  = "youban_tg_bot_gateway:update"
+	tgGatewayQueueName      = "youban_tg_bot_gateway_update"
+	tgGatewayTaskType       = "youban_tg_bot_gateway:update"
+	tgGatewayEnqueueTimeout = 5 * time.Second
 )
 
 type gatewayUpdatePayload struct {
@@ -106,7 +107,9 @@ func (s *sGateway) enqueueUpdateBody(ctx context.Context, key string, body []byt
 		return fmt.Errorf("序列化Telegram队列任务失败: %w", err)
 	}
 	client := s.updateQueueClient(ctx)
-	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgGatewayTaskType, payload),
+	enqueueCtx, cancel := context.WithTimeout(ctx, tgGatewayEnqueueTimeout)
+	defer cancel()
+	_, err = client.EnqueueContext(enqueueCtx, asynq.NewTask(tgGatewayTaskType, payload),
 		asynq.Queue(tgGatewayQueueName),
 		asynq.MaxRetry(10),
 		asynq.Timeout(2*time.Minute),
@@ -119,6 +122,7 @@ func (s *sGateway) enqueueUpdateBody(ctx context.Context, key string, body []byt
 }
 
 func (s *sGateway) handleUpdateTask(ctx context.Context, task *asynq.Task) error {
+	startedAt := time.Now()
 	var payload gatewayUpdatePayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return fmt.Errorf("解析Telegram队列任务失败: %w", err)
@@ -128,8 +132,9 @@ func (s *sGateway) handleUpdateTask(ctx context.Context, task *asynq.Task) error
 		return fmt.Errorf("解析Telegram更新失败: %w", err)
 	}
 	if err := s.dispatch(ctx, payload.Key, &update); err != nil {
-		g.Log().Warningf(ctx, "TG Bot Gateway分发失败 key:%s err:%+v", payload.Key, err)
+		g.Log().Warningf(ctx, "TG Bot Gateway分发失败 key:%s updateId:%d duration:%s err:%+v", payload.Key, update.ID, time.Since(startedAt), err)
 		return err
 	}
+	g.Log().Infof(ctx, "TG链路 gateway_task_complete key:%s updateId:%d duration:%s", payload.Key, update.ID, time.Since(startedAt))
 	return nil
 }

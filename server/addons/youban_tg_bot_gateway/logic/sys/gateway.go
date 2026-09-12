@@ -309,12 +309,16 @@ func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *se
 }
 
 func (s *sGateway) Webhook(ctx context.Context, key string, body []byte, secret string) error {
+	startedAt := time.Now()
 	webhooks, _ := gatewayObserveMeter.Int64Counter("xiaohuiji.tg.gateway_webhook_updates")
 	webhooks.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "received")))
+	configStartedAt := time.Now()
 	conf, err := service.RuntimeConfiguration(ctx)
 	if err != nil {
+		g.Log().Warningf(ctx, "TG链路 gateway_webhook_config_failed key:%s duration:%s total:%s err:%+v", key, time.Since(configStartedAt), time.Since(startedAt), err)
 		return err
 	}
+	configDuration := time.Since(configStartedAt)
 	if conf.WebhookSecret != "" && secret != conf.WebhookSecret {
 		return gerror.New("Webhook Secret无效")
 	}
@@ -322,19 +326,26 @@ func (s *sGateway) Webhook(ctx context.Context, key string, body []byte, secret 
 		return gerror.New("Webhook消息格式不正确")
 	}
 	var update models.Update
+	parseStartedAt := time.Now()
 	if err = json.Unmarshal(body, &update); err != nil {
 		return gerror.Wrap(err, "Webhook消息格式不正确")
 	}
+	parseDuration := time.Since(parseStartedAt)
 	if update.InlineQuery != nil {
 		g.Log().Infof(ctx, "TG链路 gateway_webhook_inline_received key:%s updateId:%d queryId:%s query:%q", key, update.ID, update.InlineQuery.ID, strings.TrimSpace(update.InlineQuery.Query))
 	}
+	submitStartedAt := time.Now()
 	err = s.submitUpdate(ctx, strings.TrimSpace(key), &update)
+	submitDuration := time.Since(submitStartedAt)
 	result := "queued"
 	if updateNeedsImmediateDispatch(&update) {
 		result = "dispatched"
 	}
 	if err != nil {
 		result = "failed"
+		g.Log().Warningf(ctx, "TG链路 gateway_webhook_submit_failed key:%s updateId:%d config:%s parse:%s submit:%s total:%s err:%+v", key, update.ID, configDuration, parseDuration, submitDuration, time.Since(startedAt), err)
+	} else if total := time.Since(startedAt); total >= time.Second {
+		g.Log().Warningf(ctx, "TG链路 gateway_webhook_slow key:%s updateId:%d result:%s config:%s parse:%s submit:%s total:%s", key, update.ID, result, configDuration, parseDuration, submitDuration, total)
 	}
 	webhooks.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
 	return err
@@ -352,7 +363,9 @@ func (s *sGateway) submitUpdate(ctx context.Context, key string, update *models.
 }
 
 func updateNeedsImmediateDispatch(update *models.Update) bool {
-	return update != nil && (update.InlineQuery != nil || update.CallbackQuery != nil)
+	// Inline queries must be answered within Telegram's short response window.
+	// Callback queries can be processed by the durable queue like messages.
+	return update != nil && update.InlineQuery != nil
 }
 
 func (s *sGateway) dispatch(ctx context.Context, key string, update *models.Update) error {

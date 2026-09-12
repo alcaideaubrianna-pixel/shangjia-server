@@ -98,11 +98,15 @@ func (s *sSysBot) handleUpdate(ctx context.Context, botId int64, update *models.
 		ctx = context.WithValue(ctx, telegramUserIdCtxKey{}, userId)
 	}
 	g.Log().Infof(ctx, "收到Telegram Update botId:%d chatId:%d userId:%s text:%s", botId, msg.Chat.ID, userId, strings.TrimSpace(firstNonEmpty(msg.Text, msg.Caption)))
+	storeStartedAt := time.Now()
 	if err := s.storeTelegramMessage(ctx, botId, msg); err != nil {
 		g.Log().Warningf(ctx, "保存Telegram消息日志失败 botId:%d err:%+v", botId, err)
 	}
+	if msg.Chat.Type == models.ChatTypePrivate {
+		g.Log().Infof(ctx, "TG链路 bot_message_stored updateId:%d botId:%d chatId:%d messageId:%d duration:%s", update.ID, botId, msg.Chat.ID, msg.ID, time.Since(storeStartedAt))
+	}
 	text := strings.TrimSpace(firstNonEmpty(msg.Text, msg.Caption))
-	_, err := s.dispatchBotMessage(ctx, &botMessageEvent{BotId: botId, Msg: msg, Text: text})
+	_, err := s.dispatchBotMessage(ctx, &botMessageEvent{BotId: botId, UpdateID: update.ID, Msg: msg, Text: text})
 	if err != nil {
 		g.Log().Warningf(ctx, "Telegram消息处理失败 botId:%d chatId:%d userId:%s text:%s err:%+v", botId, msg.Chat.ID, userId, text, err)
 	}
