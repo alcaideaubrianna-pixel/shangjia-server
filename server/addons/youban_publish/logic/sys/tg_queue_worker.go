@@ -62,6 +62,11 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 		},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
+	profileServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.profileConcurrency", 4).Int(),
+		Queues:         map[string]int{tgQueueNameProfileMaintenance: 1},
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
 	historyServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    collectHistoryQueueConcurrency(ctx),
 		Queues:         map[string]int{tgQueueNameHistory: 1},
@@ -69,6 +74,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	})
 	g.Log().Info(ctx, "启动上架插件后台队列")
 	s.backgroundQueueServer = server
+	s.profileQueueServer = profileServer
 	s.historyQueueServer = historyServer
 	s.tgQueueMu.Unlock()
 
@@ -90,9 +96,16 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDelete, s.handleCollectSourceDeleteTask)
 	backgroundMux.HandleFunc(tgTaskTypeAutoDelete, s.handleTelegramAutoDeleteTask)
 	backgroundMux.HandleFunc(tgTaskTypeBotMediaRepair, s.handleBotMediaRepairTask)
+	profileMux := asynq.NewServeMux()
+	profileMux.HandleFunc(tgTaskTypeProfileMaintenance, s.handleProfileMaintenanceTask)
 	go func() {
 		if err := server.Run(backgroundMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件后台队列失败：%+v", err)
+		}
+	}()
+	go func() {
+		if err := profileServer.Run(profileMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动资料后台维护队列失败：%+v", err)
 		}
 	}()
 	historyMux := asynq.NewServeMux()
@@ -162,6 +175,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	mediaBulkServer := s.mediaBulkQueueServer
 	mediaProcessServer := s.mediaProcessServer
 	backgroundServer := s.backgroundQueueServer
+	profileServer := s.profileQueueServer
 	historyServer := s.historyQueueServer
 	client := s.tgQueueClient
 	s.tgQueueServer = nil
@@ -170,6 +184,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.mediaBulkQueueServer = nil
 	s.mediaProcessServer = nil
 	s.backgroundQueueServer = nil
+	s.profileQueueServer = nil
 	s.historyQueueServer = nil
 	s.tgQueueClient = nil
 	s.tgQueueMu.Unlock()
@@ -190,6 +205,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	if backgroundServer != nil {
 		backgroundServer.Shutdown()
+	}
+	if profileServer != nil {
+		profileServer.Shutdown()
 	}
 	if historyServer != nil {
 		historyServer.Shutdown()

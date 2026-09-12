@@ -138,28 +138,19 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	}
 	clearProfileFingerprintCache(ctx, tenantId, accountId, oldFingerprints)
 	warmProfileFingerprintCache(ctx, tenantId, accountId, profileId, newFingerprints)
-	if err = s.supersedeProfilePendingTelegramJobsOutsideChannels(ctx, profileId, tenantId, accountId, effectiveChannelIds); err != nil {
-		return nil, err
+	if err = s.enqueueProfileMaintenance(ctx, profileMaintenancePayload{
+		ProfileId: profileId, TenantId: tenantId, AccountId: accountId,
+		RemovedMediaIds: removedMediaIds, MediaChanged: in.Media != nil,
+	}); err != nil {
+		g.Log().Warningf(ctx, "资料已保存但后台维护任务提交失败 profileId:%d tenantId:%d accountId:%d err:%+v", profileId, tenantId, accountId, err)
 	}
-	for _, mediaId := range removedMediaIds {
-		if deleteErr := s.deleteMediaPHashBucketByMediaId(ctx, mediaId); deleteErr != nil {
-			g.Log().Warningf(ctx, "清理已删除资料索引失败 mediaId:%d err:%v", mediaId, deleteErr)
-		}
-	}
-	if in.Media != nil {
-		if err = s.syncMediaPHashBucketsByProfileId(ctx, profileId); err != nil {
-			return nil, err
-		}
-	}
-	if err = s.syncProfileNoteIndex(ctx, profileId); err != nil {
-		return nil, err
-	}
-	service.SysContent().ClearHomeProfileCardsCache(ctx)
-	profile, err := s.profileView(ctx, profileId, tenantId, 0)
+	columns := dao.ContentProfile.Columns()
+	profile, err := dao.ContentProfile.Ctx(ctx).Fields(columns.SourceNoteUuid, columns.ProfileNo).
+		Where(columns.Id, profileId).WhereNull(columns.DeletedAt).One()
 	if err != nil {
-		return nil, err
+		return nil, gerror.Wrap(err, "读取资料保存结果失败")
 	}
-	return &sysin.ProfileSaveModel{Id: profileId, Uuid: profile.Uuid, ProfileNo: profile.ProfileNo}, nil
+	return &sysin.ProfileSaveModel{Id: profileId, Uuid: profile[columns.SourceNoteUuid].String(), ProfileNo: profile[columns.ProfileNo].String()}, nil
 }
 
 func (s *sSysPublish) supersedeProfilePendingTelegramJobsOutsideChannels(ctx context.Context, profileId, tenantId, accountId int64, channelIds []int64) error {

@@ -29,6 +29,7 @@ type sSysPublish struct {
 	mediaBulkQueueServer  *asynq.Server
 	mediaProcessServer    *asynq.Server
 	backgroundQueueServer *asynq.Server
+	profileQueueServer    *asynq.Server
 	historyQueueServer    *asynq.Server
 
 	telegramChannelMu    publishRuntimeMutex
