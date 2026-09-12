@@ -31,6 +31,7 @@ type Provider interface {
 type ConfigProvider func(ctx context.Context) (*RuntimeConfig, error)
 
 type IGateway interface {
+	StartUpdateConsumer(ctx context.Context)
 	StartRuntime(ctx context.Context)
 	StopRuntime()
 	Refresh(ctx context.Context) error

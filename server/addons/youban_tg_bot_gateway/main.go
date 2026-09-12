@@ -31,6 +31,11 @@ func (m *module) Start(option *addons.Option) error {
 		group.Middleware(internalservice.Middleware().Addon)
 		router.Api(m.ctx, group)
 	})
+	// Webhook requests are received by the web role. Keep a consumer there so
+	// ordinary updates do not depend on the account runtime being available.
+	if runrole.Enabled(m.ctx, runrole.Web) {
+		gatewayservice.Gateway().StartUpdateConsumer(m.ctx)
+	}
 	if runrole.Enabled(m.ctx, runrole.Account) || runrole.Enabled(m.ctx, runrole.Runtime) {
 		gatewayservice.Gateway().StartRuntime(m.ctx)
 	}
