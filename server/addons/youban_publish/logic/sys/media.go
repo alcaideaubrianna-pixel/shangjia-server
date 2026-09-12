@@ -128,27 +128,6 @@ func (s *sSysPublish) syncProfileMediaFromInput(ctx context.Context, tx gdb.TX, 
 func (s *sSysPublish) syncOwnedMediaFromInput(ctx context.Context, tx gdb.TX, owner gdb.Record, profileId int64, tenantId int64, accountId int64, items []*sysin.ProfileMediaSaveItem) ([]int64, error) {
 	var err error
 
-	keep := make(map[int64]*sysin.ProfileMediaSaveItem, len(items))
-	for _, item := range items {
-		if item == nil || item.MediaId <= 0 {
-			return nil, gerror.New("资料媒体ID不能为空")
-		}
-		mediaId, resolveErr := s.resolveProfileMediaIdTx(ctx, tx, owner, item.MediaId, accountId)
-		if resolveErr != nil {
-			isHistorical, checkErr := s.isHistoricalProfileMediaTx(ctx, tx, item.MediaId, profileId, tenantId, accountId)
-			if checkErr != nil {
-				return nil, checkErr
-			}
-			if isHistorical {
-				continue
-			}
-			return nil, resolveErr
-		}
-		normalized := *item
-		normalized.MediaId = mediaId
-		keep[mediaId] = &normalized
-	}
-
 	var current []gdb.Record
 	mediaMod := mediaOwnerScope(tx.Model(publishMediaTable).Ctx(ctx), owner).
 		Fields("id,processing_status").
@@ -162,6 +141,35 @@ func (s *sSysPublish) syncOwnedMediaFromInput(ctx context.Context, tx gdb.TX, ow
 	}
 	if err = mediaMod.Scan(&current); err != nil {
 		return nil, gerror.Wrap(err, "读取资料当前媒体失败")
+	}
+	currentIds := make(map[int64]struct{}, len(current))
+	for _, row := range current {
+		currentIds[row["id"].Int64()] = struct{}{}
+	}
+
+	keep := make(map[int64]*sysin.ProfileMediaSaveItem, len(items))
+	for _, item := range items {
+		if item == nil || item.MediaId <= 0 {
+			return nil, gerror.New("资料媒体ID不能为空")
+		}
+		mediaId := item.MediaId
+		if _, exists := currentIds[mediaId]; !exists {
+			var resolveErr error
+			mediaId, resolveErr = s.resolveProfileMediaIdTx(ctx, tx, owner, item.MediaId, accountId)
+			if resolveErr != nil {
+				isHistorical, checkErr := s.isHistoricalProfileMediaTx(ctx, tx, item.MediaId, profileId, tenantId, accountId)
+				if checkErr != nil {
+					return nil, checkErr
+				}
+				if isHistorical {
+					continue
+				}
+				return nil, resolveErr
+			}
+		}
+		normalized := *item
+		normalized.MediaId = mediaId
+		keep[mediaId] = &normalized
 	}
 
 	removed := make([]int64, 0)

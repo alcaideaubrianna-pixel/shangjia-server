@@ -635,6 +635,9 @@ type ProfileSaveInp struct {
 	Visibility       string                  `json:"visibility" dc:"可见性：private/public/member_only"`
 	Status           int                     `json:"status" dc:"状态：1上架 2下架"`
 	Media            []*ProfileMediaSaveItem `json:"media" dc:"资料媒体清单"`
+	DraftOnly        bool                    `json:"draftOnly" dc:"仅创建媒体上传草稿"`
+	AsyncSubmit      bool                    `json:"asyncSubmit" dc:"异步完成资料保存"`
+	PublishAfterSave bool                    `json:"publishAfterSave" dc:"保存完成后提交上架"`
 	KeepPublishState bool                    `json:"-"`
 }
 

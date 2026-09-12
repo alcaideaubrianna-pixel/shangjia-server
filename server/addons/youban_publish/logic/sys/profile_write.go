@@ -29,21 +29,24 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
-	in.Province, in.City, _, err = location.NormalizeRegionCodes(ctx, in.Province, in.City)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(in.Province) == "" || strings.TrimSpace(in.City) == "" {
-		parsedProvince, parsedCity := profileextractor.RegionLabels(in.PlainText)
-		if strings.TrimSpace(in.Province) == "" {
-			in.Province = parsedProvince
-		}
-		if strings.TrimSpace(in.City) == "" {
-			in.City = parsedCity
-		}
+	draftOnly := in.DraftOnly && in.Id <= 0 && normalizeProfileUUID(in.Uuid) == ""
+	if !draftOnly {
 		in.Province, in.City, _, err = location.NormalizeRegionCodes(ctx, in.Province, in.City)
 		if err != nil {
 			return nil, err
+		}
+		if strings.TrimSpace(in.Province) == "" || strings.TrimSpace(in.City) == "" {
+			parsedProvince, parsedCity := profileextractor.RegionLabels(in.PlainText)
+			if strings.TrimSpace(in.Province) == "" {
+				in.Province = parsedProvince
+			}
+			if strings.TrimSpace(in.City) == "" {
+				in.City = parsedCity
+			}
+			in.Province, in.City, _, err = location.NormalizeRegionCodes(ctx, in.Province, in.City)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	if tenantId <= 0 || accountId <= 0 {
@@ -55,7 +58,7 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 		}
 	}
 	var manualChannelIds []int64
-	if in.ChannelIds != nil {
+	if !draftOnly && in.ChannelIds != nil {
 		in.ChannelIds, err = s.availableProfileChannelIds(ctx, in.ChannelIds, tenantId)
 		if err != nil {
 			return nil, err
@@ -74,12 +77,12 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	var removedMediaIds []int64
 	var oldFingerprints, newFingerprints []profileFingerprint
 	effectiveChannelIds := manualChannelIds
-	if in.ChannelIds == nil && profileId > 0 {
+	if !draftOnly && in.ChannelIds == nil && profileId > 0 {
 		effectiveChannelIds, err = s.profileChannelIdsOrDefaults(ctx, tenantId, accountId, profileId)
 		if err != nil {
 			return nil, err
 		}
-	} else if len(effectiveChannelIds) == 0 {
+	} else if !draftOnly && len(effectiveChannelIds) == 0 {
 		effectiveChannelIds, err = s.defaultSelectedPublishChannelIds(ctx, tenantId)
 		if err != nil {
 			return nil, err
@@ -116,19 +119,22 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			if err = s.upsertProfileStateTx(ctx, tx, profileId, tenantId, accountId, in.CustomerRemark, in.AntiScanEnabled, publishAt); err != nil {
 				return err
 			}
-			if isNewProfile || in.ChannelIds != nil {
+			if !draftOnly && (isNewProfile || in.ChannelIds != nil) {
 				if err = replaceProfileChannelMappings(ctx, tx, tenantId, accountId, profileId, manualChannelIds); err != nil {
 					return err
 				}
 			}
-			if in.Media != nil && (!isNewProfile || len(in.Media) > 0) {
+			if !draftOnly && in.Media != nil && (!isNewProfile || len(in.Media) > 0) {
 				removedMediaIds, err = s.syncProfileMediaFromInput(ctx, tx, profileId, tenantId, accountId, in.Media)
 				if err != nil {
 					return err
 				}
 			}
-			oldFingerprints, newFingerprints, err = s.replaceProfileFingerprintProjectionTx(ctx, tx, tenantId, accountId, profileId, effectiveChannelIds)
-			return err
+			if !draftOnly {
+				oldFingerprints, newFingerprints, err = s.replaceProfileFingerprintProjectionTx(ctx, tx, tenantId, accountId, profileId, effectiveChannelIds)
+				return err
+			}
+			return nil
 		})
 	}
 	if profileId > 0 {
@@ -140,12 +146,14 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 		return nil, err
 	}
 	transactionDoneAt := time.Now()
-	if err = s.enqueueProfileMaintenance(ctx, profileMaintenancePayload{
-		ProfileId: profileId, TenantId: tenantId, AccountId: accountId,
-		RemovedMediaIds: removedMediaIds, MediaChanged: in.Media != nil && (!isNewProfile || len(in.Media) > 0),
-		OldFingerprints: oldFingerprints, NewFingerprints: newFingerprints,
-	}); err != nil {
-		g.Log().Warningf(ctx, "资料已保存但后台维护任务提交失败 profileId:%d tenantId:%d accountId:%d err:%+v", profileId, tenantId, accountId, err)
+	if !draftOnly {
+		if err = s.enqueueProfileMaintenance(ctx, profileMaintenancePayload{
+			ProfileId: profileId, TenantId: tenantId, AccountId: accountId,
+			RemovedMediaIds: removedMediaIds, MediaChanged: in.Media != nil && (!isNewProfile || len(in.Media) > 0),
+			OldFingerprints: oldFingerprints, NewFingerprints: newFingerprints,
+		}); err != nil {
+			g.Log().Warningf(ctx, "资料已保存但后台维护任务提交失败 profileId:%d tenantId:%d accountId:%d err:%+v", profileId, tenantId, accountId, err)
+		}
 	}
 	maintenanceQueuedAt := time.Now()
 	columns := dao.ContentProfile.Columns()

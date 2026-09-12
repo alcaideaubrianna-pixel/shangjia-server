@@ -121,6 +121,9 @@ func (s *sSysPublish) MyProfileEdit(ctx context.Context, in *sysin.ProfileSaveIn
 	if in == nil || (in.Id <= 0 && normalizeProfileUUID(in.Uuid) == "") {
 		return nil, gerror.New("资料UUID不能为空")
 	}
+	if in.AsyncSubmit {
+		return s.enqueueProfileSubmit(ctx, in, account.TenantId, account.Id)
+	}
 	capability, err := s.activeAccountCapability(ctx, account.TenantId, account.Id)
 	if err != nil {
 		return nil, err
@@ -300,6 +303,9 @@ func (s *sSysPublish) AdminProfileEdit(ctx context.Context, in *sysin.ProfileSav
 	}
 	if in == nil || (in.Id <= 0 && normalizeProfileUUID(in.Uuid) == "") {
 		return nil, gerror.New("资料UUID不能为空")
+	}
+	if in.AsyncSubmit {
+		return s.enqueueProfileSubmit(ctx, in, account.TenantId, account.Id)
 	}
 	if in != nil && in.Id <= 0 && normalizeProfileUUID(in.Uuid) != "" {
 		if in.Id, err = s.resolveProfileId(ctx, 0, in.Uuid, account.TenantId, 0); err != nil {

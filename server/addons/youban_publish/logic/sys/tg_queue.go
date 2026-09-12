@@ -48,6 +48,7 @@ const (
 	tgTaskTypeChannelMemberSync   = "youban_publish:tg:channel_member_sync"
 	tgTaskTypeBotMediaRepair      = "youban_publish:bot:media_repair"
 	tgTaskTypeProfileMaintenance  = "youban_publish:profile:maintenance"
+	tgTaskTypeProfileSubmit       = "youban_publish:profile:submit"
 )
 
 const collectMediaMaxBulkQueueShards = 16
