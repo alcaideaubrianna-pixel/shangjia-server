@@ -61,10 +61,6 @@ func NewGateway() *sGateway {
 	}
 }
 
-func (s *sGateway) StartUpdateConsumer(ctx context.Context) {
-	s.startUpdateQueue(ctx)
-}
-
 func (s *sGateway) StartRuntime(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
