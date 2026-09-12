@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -21,6 +22,7 @@ import (
 )
 
 func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp, tenantId int64, accountId int64) (res *sysin.ProfileSaveModel, err error) {
+	startedAt := time.Now()
 	if in == nil {
 		return nil, gerror.New("资料信息不能为空")
 	}
@@ -83,6 +85,7 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 			return nil, err
 		}
 	}
+	preparedAt := time.Now()
 	transaction := func() error {
 		return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 			if in.Id > 0 {
@@ -118,7 +121,7 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 					return err
 				}
 			}
-			if in.Media != nil {
+			if in.Media != nil && (!isNewProfile || len(in.Media) > 0) {
 				removedMediaIds, err = s.syncProfileMediaFromInput(ctx, tx, profileId, tenantId, accountId, in.Media)
 				if err != nil {
 					return err
@@ -136,20 +139,27 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	if err != nil {
 		return nil, err
 	}
-	clearProfileFingerprintCache(ctx, tenantId, accountId, oldFingerprints)
-	warmProfileFingerprintCache(ctx, tenantId, accountId, profileId, newFingerprints)
+	transactionDoneAt := time.Now()
 	if err = s.enqueueProfileMaintenance(ctx, profileMaintenancePayload{
 		ProfileId: profileId, TenantId: tenantId, AccountId: accountId,
-		RemovedMediaIds: removedMediaIds, MediaChanged: in.Media != nil,
+		RemovedMediaIds: removedMediaIds, MediaChanged: in.Media != nil && (!isNewProfile || len(in.Media) > 0),
+		OldFingerprints: oldFingerprints, NewFingerprints: newFingerprints,
 	}); err != nil {
 		g.Log().Warningf(ctx, "资料已保存但后台维护任务提交失败 profileId:%d tenantId:%d accountId:%d err:%+v", profileId, tenantId, accountId, err)
 	}
+	maintenanceQueuedAt := time.Now()
 	columns := dao.ContentProfile.Columns()
 	profile, err := dao.ContentProfile.Ctx(ctx).Fields(columns.SourceNoteUuid, columns.ProfileNo).
 		Where(columns.Id, profileId).WhereNull(columns.DeletedAt).One()
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取资料保存结果失败")
 	}
+	g.Log().Info(ctx, "资料保存完成", g.Map{
+		"profileId": profileId, "tenantId": tenantId, "accountId": accountId, "isNew": isNewProfile,
+		"prepareMs": preparedAt.Sub(startedAt).Milliseconds(), "transactionMs": transactionDoneAt.Sub(preparedAt).Milliseconds(),
+		"maintenanceEnqueueMs": maintenanceQueuedAt.Sub(transactionDoneAt).Milliseconds(),
+		"resultQueryMs":        time.Since(maintenanceQueuedAt).Milliseconds(), "elapsedMs": time.Since(startedAt).Milliseconds(),
+	})
 	return &sysin.ProfileSaveModel{Id: profileId, Uuid: profile[columns.SourceNoteUuid].String(), ProfileNo: profile[columns.ProfileNo].String()}, nil
 }
 

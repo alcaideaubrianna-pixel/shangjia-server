@@ -13,11 +13,13 @@ import (
 )
 
 type profileMaintenancePayload struct {
-	ProfileId       int64   `json:"profileId"`
-	TenantId        int64   `json:"tenantId"`
-	AccountId       int64   `json:"accountId"`
-	RemovedMediaIds []int64 `json:"removedMediaIds,omitempty"`
-	MediaChanged    bool    `json:"mediaChanged,omitempty"`
+	ProfileId       int64                `json:"profileId"`
+	TenantId        int64                `json:"tenantId"`
+	AccountId       int64                `json:"accountId"`
+	RemovedMediaIds []int64              `json:"removedMediaIds,omitempty"`
+	MediaChanged    bool                 `json:"mediaChanged,omitempty"`
+	OldFingerprints []profileFingerprint `json:"oldFingerprints,omitempty"`
+	NewFingerprints []profileFingerprint `json:"newFingerprints,omitempty"`
 }
 
 func (s *sSysPublish) enqueueProfileMaintenance(ctx context.Context, payload profileMaintenancePayload) error {
@@ -48,6 +50,13 @@ func (s *sSysPublish) handleProfileMaintenanceTask(ctx context.Context, task *as
 	if err != nil || count == 0 {
 		return err
 	}
+	clearProfileFingerprintCache(ctx, payload.TenantId, payload.AccountId, append(payload.OldFingerprints, payload.NewFingerprints...))
+	currentFingerprintRows, err := g.DB().Model(publishProfileFingerprintTable).Safe().Ctx(ctx).
+		Where("profile_id", payload.ProfileId).Where("owner_marker", "owner").All()
+	if err != nil {
+		return gerror.Wrap(err, "读取资料当前指纹失败")
+	}
+	warmProfileFingerprintCache(ctx, payload.TenantId, payload.AccountId, payload.ProfileId, fingerprintRowsToItems(currentFingerprintRows))
 	for _, mediaId := range uniqueIds(payload.RemovedMediaIds) {
 		if err = s.deleteMediaPHashBucketByMediaId(ctx, mediaId); err != nil {
 			return err

@@ -28,11 +28,11 @@ const (
 )
 
 type profileFingerprint struct {
-	ChannelID      int64
-	Layer          string
-	Signature      string
-	ItemTotal      int
-	SignatureCount int
+	ChannelID      int64  `json:"channelId"`
+	Layer          string `json:"layer"`
+	Signature      string `json:"signature"`
+	ItemTotal      int    `json:"itemTotal"`
+	SignatureCount int    `json:"signatureCount"`
 }
 
 type profileFingerprintDuplicateError struct {
@@ -237,6 +237,20 @@ func insertProfileFingerprintRowsBatched(ctx context.Context, rows []g.Map) erro
 	return nil
 }
 
+func insertProfileFingerprintRowsBatchedTx(ctx context.Context, tx gdb.TX, rows []g.Map) error {
+	const batchSize = 500
+	for start := 0; start < len(rows); start += batchSize {
+		end := start + batchSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		if _, err := tx.Model(publishProfileFingerprintTable).Ctx(ctx).Data(rows[start:end]).InsertIgnore(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *sSysPublish) replaceProfileFingerprintProjectionTx(ctx context.Context, tx gdb.TX, tenantID, accountID, profileID int64, channelIDs []int64) ([]profileFingerprint, []profileFingerprint, error) {
 	oldRows, err := tx.Model(publishProfileFingerprintTable).Ctx(ctx).Where("profile_id", profileID).WhereNot("layer", "_indexed").All()
 	if err != nil {
@@ -262,29 +276,40 @@ func (s *sSysPublish) replaceProfileFingerprintProjectionTx(ctx context.Context,
 	if _, err = detachProfileFingerprintsTx(ctx, tx, []int64{profileID}); err != nil {
 		return nil, nil, err
 	}
+	now := gtime.Now()
+	ownerRows := make([]g.Map, 0, len(items))
 	for _, item := range items {
-		data := g.Map{
+		ownerRows = append(ownerRows, g.Map{
 			"tenant_id": tenantID, "account_id": accountID, "profile_id": profileID, "channel_id": item.ChannelID,
 			"layer": item.Layer, "signature": item.Signature, "item_total": item.ItemTotal,
-			"signature_count": item.SignatureCount, "owner_marker": "owner", "created_at": gtime.Now(), "updated_at": gtime.Now(),
-		}
-		result, insertErr := tx.Model(publishProfileFingerprintTable).Ctx(ctx).Data(data).InsertIgnore()
-		err = insertErr
-		if err != nil {
-			return nil, nil, gerror.Wrap(err, "更新资料指纹失败")
-		}
-		affected, _ := result.RowsAffected()
-		if affected == 0 {
-			data["owner_marker"] = nil
-			if _, err = tx.Model(publishProfileFingerprintTable).Ctx(ctx).Data(data).InsertIgnore(); err != nil {
-				return nil, nil, gerror.Wrap(err, "登记重复资料指纹关联失败")
-			}
-		}
+			"signature_count": item.SignatureCount, "owner_marker": "owner", "created_at": now, "updated_at": now,
+		})
+	}
+	if err = insertProfileFingerprintRowsBatchedTx(ctx, tx, ownerRows); err != nil {
+		return nil, nil, gerror.Wrap(err, "更新资料指纹失败")
 	}
 	ownedRows, err := tx.Model(publishProfileFingerprintTable).Ctx(ctx).
 		Where("profile_id", profileID).Where("owner_marker", "owner").All()
 	if err != nil {
 		return nil, nil, gerror.Wrap(err, "读取资料新指纹失败")
+	}
+	owned := make(map[string]struct{}, len(ownedRows))
+	for _, row := range ownedRows {
+		owned[profileFingerprintProfileKey(profileID, profileFingerprint{ChannelID: row["channel_id"].Int64(), Layer: row["layer"].String(), Signature: row["signature"].String(), ItemTotal: row["item_total"].Int(), SignatureCount: row["signature_count"].Int()})] = struct{}{}
+	}
+	duplicateRows := make([]g.Map, 0, len(items)-len(ownedRows))
+	for _, item := range items {
+		if _, ok := owned[profileFingerprintProfileKey(profileID, item)]; ok {
+			continue
+		}
+		duplicateRows = append(duplicateRows, g.Map{
+			"tenant_id": tenantID, "account_id": accountID, "profile_id": profileID, "channel_id": item.ChannelID,
+			"layer": item.Layer, "signature": item.Signature, "item_total": item.ItemTotal,
+			"signature_count": item.SignatureCount, "owner_marker": nil, "created_at": now, "updated_at": now,
+		})
+	}
+	if err = insertProfileFingerprintRowsBatchedTx(ctx, tx, duplicateRows); err != nil {
+		return nil, nil, gerror.Wrap(err, "登记重复资料指纹关联失败")
 	}
 	return oldItems, fingerprintRowsToItems(ownedRows), nil
 }
