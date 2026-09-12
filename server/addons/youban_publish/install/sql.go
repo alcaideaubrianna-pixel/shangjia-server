@@ -12,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/os/gres"
 
 	"hotgo/internal/consts"
+	hglock "hotgo/internal/library/hgrds/lock"
 )
 
 var mysqlBusinessSqlFiles = []string{
@@ -35,6 +36,7 @@ var pgsqlOnlineUpgradeSqlFiles = []string{
 }
 
 const publishInstallLockKey = "youban_publish:install"
+const publishMaintenanceLockTTL = 6 * time.Hour
 
 func Install(ctx context.Context) error {
 	if err := syncStaticResources(ctx); err != nil {
@@ -74,6 +76,15 @@ func HeavyIndexSqlFiles() []string {
 }
 
 func ExecMaintenanceSql(ctx context.Context, files []string) error {
+	lock := hglock.NewConfig(publishMaintenanceLockTTL, 100*time.Millisecond).Mutex(publishInstallLockKey)
+	if err := lock.TryLock(ctx); err != nil {
+		if gerror.Is(err, hglock.ErrLockFailed) {
+			return gerror.New("上架系统维护任务正在执行，请勿重复启动")
+		}
+		return gerror.Wrap(err, "获取上架系统维护锁失败")
+	}
+	defer func() { _ = lock.Unlock(context.Background()) }()
+
 	for _, file := range files {
 		if err := execMaintenanceSqlFile(ctx, file); err != nil {
 			return gerror.Wrapf(err, "执行上架系统维护 SQL 失败：%s", file)

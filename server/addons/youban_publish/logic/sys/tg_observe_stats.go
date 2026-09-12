@@ -57,7 +57,9 @@ func isExpectedTelegramObserveShutdownError(err error) bool {
 }
 
 func (s *sSysPublish) refreshTelegramObserveStats(ctx context.Context) error {
-	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return g.DB().Transaction(refreshCtx, func(ctx context.Context, tx gdb.TX) error {
 		if err := s.refreshTelegramQueueStats(ctx, tx); err != nil {
 			return err
 		}
@@ -69,7 +71,7 @@ func (s *sSysPublish) refreshTelegramObserveStats(ctx context.Context) error {
 }
 
 func (s *sSysPublish) refreshTelegramQueueStats(ctx context.Context, tx gdb.TX) error {
-	rows, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+	rows, err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).
 		Fields("COALESCE(NULLIF(queue_name,''), 'youban_publish_tg') AS queue_name, priority AS priority_level, status, COUNT(1) AS job_count, MIN(created_at) AS oldest_job_at, MAX(created_at) AS latest_job_at").
 		Group("COALESCE(NULLIF(queue_name,''), 'youban_publish_tg'), priority, status").
 		All()
@@ -101,7 +103,7 @@ SUM(CASE WHEN j.error_message LIKE '%限流%' OR j.error_message LIKE '%Too Many
 MAX(j.sent_at) AS last_sent_at,
 MAX(CASE WHEN j.status IN ('failed','failed_retry') THEN j.updated_at ELSE NULL END) AS last_error_at,
 MAX(j.error_message) AS last_error_message`
-	rows, err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+	rows, err := tx.Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id").
 		Fields(fields).
 		Group("j.tenant_id,j.account_id,j.channel_id,j.target_chat_id").
@@ -134,7 +136,7 @@ SUM(CASE WHEN j.error_message LIKE '%限流%' OR j.error_message LIKE '%Too Many
 MAX(j.sent_at) AS last_sent_at,
 MAX(CASE WHEN j.status IN ('failed','failed_retry') THEN j.updated_at ELSE NULL END) AS last_error_at,
 MAX(j.error_message) AS last_error_message`
-	rows, err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+	rows, err := tx.Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 		LeftJoin(publishBotTable+" b", "b.id=j.bot_id").
 		Fields(fields).
 		Group("j.tenant_id,j.bot_id").
