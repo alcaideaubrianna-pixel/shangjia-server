@@ -62,6 +62,11 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 		},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
+	projectionServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.projectionConcurrency", 4).Int(),
+		Queues:         map[string]int{tgQueueNameProfileProjection: 1},
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
 	historyServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    collectHistoryQueueConcurrency(ctx),
 		Queues:         map[string]int{tgQueueNameHistory: 1},
@@ -69,6 +74,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	})
 	g.Log().Info(ctx, "启动上架插件后台队列")
 	s.backgroundQueueServer = server
+	s.projectionQueueServer = projectionServer
 	s.historyQueueServer = historyServer
 	s.tgQueueMu.Unlock()
 
@@ -90,9 +96,17 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDelete, s.handleCollectSourceDeleteTask)
 	backgroundMux.HandleFunc(tgTaskTypeAutoDelete, s.handleTelegramAutoDeleteTask)
 	backgroundMux.HandleFunc(tgTaskTypeBotMediaRepair, s.handleBotMediaRepairTask)
+	projectionMux := asynq.NewServeMux()
+	projectionMux.HandleFunc(tgTaskTypeProfileProjection, s.handleProfileProjectionTask)
+	go s.runProfileProjectionRecovery(ctx)
 	go func() {
 		if err := server.Run(backgroundMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件后台队列失败：%+v", err)
+		}
+	}()
+	go func() {
+		if err := projectionServer.Run(projectionMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动资料投影队列失败：%+v", err)
 		}
 	}()
 	historyMux := asynq.NewServeMux()
@@ -162,6 +176,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	mediaBulkServer := s.mediaBulkQueueServer
 	mediaProcessServer := s.mediaProcessServer
 	backgroundServer := s.backgroundQueueServer
+	projectionServer := s.projectionQueueServer
 	historyServer := s.historyQueueServer
 	client := s.tgQueueClient
 	s.tgQueueServer = nil
@@ -170,6 +185,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.mediaBulkQueueServer = nil
 	s.mediaProcessServer = nil
 	s.backgroundQueueServer = nil
+	s.projectionQueueServer = nil
 	s.historyQueueServer = nil
 	s.tgQueueClient = nil
 	s.tgQueueMu.Unlock()
@@ -190,6 +206,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	if backgroundServer != nil {
 		backgroundServer.Shutdown()
+	}
+	if projectionServer != nil {
+		projectionServer.Shutdown()
 	}
 	if historyServer != nil {
 		historyServer.Shutdown()
