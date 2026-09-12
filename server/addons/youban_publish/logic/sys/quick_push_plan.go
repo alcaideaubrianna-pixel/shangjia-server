@@ -40,9 +40,6 @@ func (s *sSysPublish) AdminQuickPushPlanList(ctx context.Context, in *sysin.Quic
 	if in == nil {
 		in = &sysin.QuickPushPlanListInp{}
 	}
-	if err = ensureMessagePushTables(ctx); err != nil {
-		return nil, 0, err
-	}
 	if err = in.Filter(ctx); err != nil {
 		return nil, 0, err
 	}
@@ -88,9 +85,6 @@ func (s *sSysPublish) AdminQuickPushPlanSave(ctx context.Context, in *sysin.Quic
 	}
 	if in == nil {
 		return nil, gerror.New("快速推送计划不能为空")
-	}
-	if err = ensureMessagePushTables(ctx); err != nil {
-		return nil, err
 	}
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
@@ -144,9 +138,6 @@ func (s *sSysPublish) AdminQuickPushPlanDelete(ctx context.Context, in *sysin.Qu
 	if len(ids) == 0 {
 		return gerror.New("请选择要删除的数据")
 	}
-	if err = ensureMessagePushTables(ctx); err != nil {
-		return err
-	}
 	if err = s.ensureQuickPushPlansBelongTenant(ctx, ids, account.TenantId); err != nil {
 		return err
 	}
@@ -164,9 +155,6 @@ func (s *sSysPublish) AdminQuickPushPlanStatus(ctx context.Context, in *sysin.Qu
 	}
 	if in == nil {
 		return gerror.New("计划状态不能为空")
-	}
-	if err = ensureMessagePushTables(ctx); err != nil {
-		return err
 	}
 	if err = in.Filter(ctx); err != nil {
 		return err
@@ -194,9 +182,6 @@ func (s *sSysPublish) QuickPushBotPlanList(ctx context.Context, accountId int64)
 	if err != nil {
 		return nil, err
 	}
-	if err = ensureMessagePushTables(ctx); err != nil {
-		return nil, err
-	}
 	var records []*quickPushPlanRecord
 	if err = g.DB().Model(quickPushPlanTable).Safe().Ctx(ctx).Where("tenant_id", account.TenantId).Where("status", 1).WhereNull("deleted_at").OrderAsc("id").Scan(&records); err != nil {
 		return nil, gerror.Wrap(err, "读取快速推送计划失败")
@@ -207,9 +192,6 @@ func (s *sSysPublish) QuickPushBotPlanList(ctx context.Context, accountId int64)
 func (s *sSysPublish) QuickPushBotTemplateList(ctx context.Context, accountId int64) ([]*sysin.MessageTemplateModel, error) {
 	account, err := s.quickPushAccountById(ctx, accountId)
 	if err != nil {
-		return nil, err
-	}
-	if err = ensureMessagePushTables(ctx); err != nil {
 		return nil, err
 	}
 	list := make([]*sysin.MessageTemplateModel, 0)
@@ -330,9 +312,6 @@ func (s *sSysPublish) QuickPushSaveTemplateByBot(ctx context.Context, in *sysin.
 	if in == nil {
 		return nil, gerror.New("快速推送模板不能为空")
 	}
-	if err := ensureMessagePushTables(ctx); err != nil {
-		return nil, err
-	}
 	if err := in.Filter(ctx); err != nil {
 		return nil, err
 	}
@@ -353,9 +332,6 @@ func (s *sSysPublish) QuickPushSaveTemplateByBot(ctx context.Context, in *sysin.
 func (s *sSysPublish) QuickPushExecuteByBot(ctx context.Context, in *sysin.QuickPushBotExecuteInp) (*sysin.QuickPushBotExecuteModel, error) {
 	if in == nil {
 		return nil, gerror.New("快速推送内容不能为空")
-	}
-	if err := ensureMessagePushTables(ctx); err != nil {
-		return nil, err
 	}
 	if err := in.Filter(ctx); err != nil {
 		return nil, err

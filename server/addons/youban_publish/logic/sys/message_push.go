@@ -21,9 +21,6 @@ func (s *sSysPublish) AdminMessageTemplateList(ctx context.Context, in *sysin.Me
 	if in == nil {
 		in = &sysin.MessageTemplateListInp{}
 	}
-	if err = ensureMessagePushTables(ctx); err != nil {
-		return nil, 0, err
-	}
 	mod := g.DB().Model(messageTemplateTable).Safe().Ctx(ctx).
 		Where("tenant_id", account.TenantId).
 		WhereNull("deleted_at")
@@ -57,9 +54,6 @@ func (s *sSysPublish) AdminMessageTemplateSave(ctx context.Context, in *sysin.Me
 	}
 	if in == nil {
 		return nil, gerror.New("消息模板不能为空")
-	}
-	if err = ensureMessagePushTables(ctx); err != nil {
-		return nil, err
 	}
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
@@ -187,9 +181,6 @@ func (s *sSysPublish) AdminMessageTemplateDelete(ctx context.Context, in *sysin.
 	}
 	if in == nil || len(in.Ids) == 0 {
 		return gerror.New("请选择要删除的消息模板")
-	}
-	if err = ensureMessagePushTables(ctx); err != nil {
-		return err
 	}
 	in.Ids = uniqueIds(in.Ids)
 	if err = s.ensureMessageTemplatesBelongTenant(ctx, in.Ids, account.TenantId); err != nil {

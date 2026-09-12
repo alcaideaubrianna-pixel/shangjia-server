@@ -48,9 +48,6 @@ func (s *sSysPublish) AdminMessagePushPlanList(ctx context.Context, in *sysin.Me
 	if in == nil {
 		in = &sysin.MessagePushPlanListInp{}
 	}
-	if err = ensureMessagePushTables(ctx); err != nil {
-		return nil, 0, err
-	}
 	if err = in.Filter(ctx); err != nil {
 		return nil, 0, err
 	}
@@ -98,9 +95,6 @@ func (s *sSysPublish) AdminMessagePushPlanSave(ctx context.Context, in *sysin.Me
 	}
 	if in == nil {
 		return nil, gerror.New("消息推送计划不能为空")
-	}
-	if err = ensureMessagePushTables(ctx); err != nil {
-		return nil, err
 	}
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
@@ -176,9 +170,6 @@ func (s *sSysPublish) AdminMessagePushPlanDelete(ctx context.Context, in *sysin.
 	if in == nil || len(in.Ids) == 0 {
 		return gerror.New("请选择要删除的消息推送计划")
 	}
-	if err = ensureMessagePushTables(ctx); err != nil {
-		return err
-	}
 	in.Ids = uniqueIds(in.Ids)
 	if err = s.ensureMessagePushPlansBelongTenant(ctx, in.Ids, account.TenantId); err != nil {
 		return err
@@ -205,9 +196,6 @@ func (s *sSysPublish) AdminMessagePushPlanStatus(ctx context.Context, in *sysin.
 	}
 	if in == nil {
 		return gerror.New("计划状态不能为空")
-	}
-	if err = ensureMessagePushTables(ctx); err != nil {
-		return err
 	}
 	if err = in.Filter(ctx); err != nil {
 		return err
@@ -259,9 +247,6 @@ func (s *sSysPublish) runMessagePushPlanScheduler(ctx context.Context) {
 }
 
 func (s *sSysPublish) repairMessagePushPlanSchedules(ctx context.Context) error {
-	if err := ensureMessagePushTables(ctx); err != nil {
-		return err
-	}
 	lock := hglock.NewConfig(30*time.Second, 100*time.Millisecond).Mutex("youban_publish:message_push_plan")
 	if err := lock.TryLock(ctx); err != nil {
 		if gerror.Is(err, hglock.ErrLockFailed) {
@@ -305,9 +290,6 @@ func (s *sSysPublish) repairMessagePushPlanSchedules(ctx context.Context) error 
 func (s *sSysPublish) executeDueMessagePushPlans(ctx context.Context, limit int) error {
 	if limit <= 0 {
 		limit = 20
-	}
-	if err := ensureMessagePushTables(ctx); err != nil {
-		return err
 	}
 	lock := hglock.NewConfig(10*time.Second, 100*time.Millisecond).Mutex("youban_publish:message_push_plan")
 	if err := lock.TryLock(ctx); err != nil {

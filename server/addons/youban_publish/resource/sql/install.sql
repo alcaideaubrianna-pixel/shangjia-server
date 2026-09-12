@@ -1721,6 +1721,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_template` (
   `serial_no` varchar(32) NOT NULL DEFAULT '' COMMENT 'Inline模板编号',
   `push_mode` varchar(16) NOT NULL DEFAULT 'bot' COMMENT '推送方式：bot/account',
   `source_message_record_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '来源TG消息记录ID',
+  `button_config` text NOT NULL COMMENT '按钮配置JSON',
   `name` varchar(128) NOT NULL DEFAULT '' COMMENT '模板名称',
   `text` text COMMENT '消息文本',
   `media_count` int(11) NOT NULL DEFAULT '0' COMMENT '媒体数量',

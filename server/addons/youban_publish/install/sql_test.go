@@ -76,6 +76,38 @@ func TestUpgradeSafeSqlIncludesProfileCycleDueIndex(t *testing.T) {
 	}
 }
 
+func TestMessagePushSchemaIsOwnedByInstallAndMigrationSql(t *testing.T) {
+	tests := []struct {
+		name    string
+		install string
+		upgrade string
+	}{
+		{name: "mysql", install: "addons/youban_publish/resource/sql/install.sql", upgrade: "addons/youban_publish/resource/sql/upgrade.sql"},
+		{name: "pgsql", install: "addons/youban_publish/resource/sql/install.pgsql.sql", upgrade: "addons/youban_publish/resource/sql/upgrade.pgsql.sql"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, path := range []string{test.install, test.upgrade} {
+				sql := readSqlFile(path)
+				for _, required := range []string{
+					"hg_youban_publish_message_template",
+					"hg_youban_publish_message_media",
+					"hg_youban_publish_message_push_plan",
+					"hg_youban_publish_quick_push_plan",
+					"serial_no",
+					"button_config",
+					"interval_days",
+					"push_mode",
+				} {
+					if !strings.Contains(sql, required) {
+						t.Fatalf("message push migration %s does not contain %q", path, required)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestUpgradeSafeSqlIncludesBotCollectScope(t *testing.T) {
 	for _, test := range []struct {
 		name string

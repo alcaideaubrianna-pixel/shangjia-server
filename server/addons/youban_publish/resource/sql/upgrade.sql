@@ -269,6 +269,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_template` (
   ,KEY `idx_ybp_msg_tpl_serial` (`serial_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息推送模板';
 ALTER TABLE `hg_youban_publish_message_template` ADD COLUMN `source_message_record_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '来源TG消息记录ID';
+ALTER TABLE `hg_youban_publish_message_template` ADD COLUMN `button_config` text NOT NULL COMMENT '按钮配置JSON';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_media` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',

@@ -120,9 +120,6 @@ func (s *sSysPublish) AdminMessageTemplatePush(ctx context.Context, in *sysin.Me
 	if in == nil {
 		return nil, gerror.New("推送参数不能为空")
 	}
-	if err = ensureMessagePushTables(ctx); err != nil {
-		return nil, err
-	}
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
