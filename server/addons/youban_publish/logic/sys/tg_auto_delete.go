@@ -18,6 +18,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
 
+	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
 	"hotgo/internal/library/cache"
 	"hotgo/internal/library/hgrds/lock"
@@ -152,22 +153,34 @@ func (s *sSysPublish) handleTelegramAutoDeleteTask(ctx context.Context, task *as
 	}
 	defer func() { _ = messageLock.Unlock(context.Background()) }()
 	botItem, err := s.deleteMatchedTelegramMessageWithChannelBots(ctx, payload.BotId, channel, payload.ChatId, payload.MessageId)
-	if botItem == nil || botItem.Id <= 0 || (err != nil && !isTelegramMessageAlreadyDeletedError(err)) {
-		if err != nil {
-			autoDeleteWarn(ctx, "bot_lookup", "频道自动删除查询Bot失败 channel:%d bot:%d err:%+v", channel.Id, payload.BotId, err)
+	resultErr := telegramAutoDeleteTaskResult(botItem, err)
+	if resultErr != nil {
+		botId := payload.BotId
+		if botItem != nil && botItem.Id > 0 {
+			botId = botItem.Id
 		}
-		return nil
+		s.appendAutoDeleteLogByValues(ctx, channel, botId, payload.MessageId, payload.Keyword, "failed", resultErr.Error())
+		g.Log().Warningf(ctx, "频道自动删除失败，等待Asynq重试 channel:%d bot:%d message:%d err:%+v", channel.Id, botId, payload.MessageId, resultErr)
+		return resultErr
 	}
 	if err != nil {
-		if isTelegramMessageAlreadyDeletedError(err) {
-			s.appendAutoDeleteLogByValues(ctx, channel, botItem.Id, payload.MessageId, payload.Keyword, "skipped", "频道消息命中关键词，但TG消息已不存在")
-			return nil
-		}
-		s.appendAutoDeleteLogByValues(ctx, channel, botItem.Id, payload.MessageId, payload.Keyword, "failed", err.Error())
-		g.Log().Warningf(ctx, "频道自动删除失败 channel:%d bot:%d message:%d err:%+v", channel.Id, botItem.Id, payload.MessageId, err)
+		s.appendAutoDeleteLogByValues(ctx, channel, botItem.Id, payload.MessageId, payload.Keyword, "skipped", "频道消息命中关键词，但TG消息已不存在")
 		return nil
 	}
 	s.appendAutoDeleteLogByValues(ctx, channel, botItem.Id, payload.MessageId, payload.Keyword, "success", "频道消息命中关键词，已自动删除")
+	return nil
+}
+
+func telegramAutoDeleteTaskResult(botItem *sysin.BotModel, err error) error {
+	if err != nil {
+		if isTelegramMessageAlreadyDeletedError(err) {
+			return nil
+		}
+		return gerror.Wrap(err, "自动删除Telegram消息失败")
+	}
+	if botItem == nil || botItem.Id <= 0 {
+		return gerror.New("自动删除Telegram消息失败：没有可用的频道Bot")
+	}
 	return nil
 }
 

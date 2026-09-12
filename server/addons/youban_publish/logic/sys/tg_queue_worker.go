@@ -54,8 +54,12 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 		return
 	}
 	server := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
-		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.backgroundConcurrency", 4).Int(),
-		Queues:         map[string]int{tgQueueNameCollectProcess: 10, tgQueueNameBackground: 1},
+		Concurrency: g.Cfg().MustGet(ctx, "youbanPublish.queue.backgroundConcurrency", 4).Int(),
+		Queues: map[string]int{
+			tgQueueNameAutoDelete:     20,
+			tgQueueNameCollectProcess: 10,
+			tgQueueNameBackground:     1,
+		},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	historyServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{

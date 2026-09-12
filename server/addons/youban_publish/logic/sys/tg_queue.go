@@ -23,6 +23,7 @@ const (
 	tgQueueNameMediaRealtime      = "youban_publish_media_realtime"
 	tgQueueNameMediaProcess       = "youban_publish_media_process"
 	tgQueueNameMediaBulkPrefix    = "youban_publish_media_bulk_"
+	tgQueueNameAutoDelete         = "youban_publish_auto_delete"
 	tgQueueNameBackground         = "youban_publish_background"
 	tgQueueNameCollectProcess     = "youban_publish_collect_process"
 	tgQueueNameHistory            = "youban_publish_history"
@@ -267,8 +268,8 @@ func (s *sSysPublish) enqueueTelegramAutoDelete(ctx context.Context, payload aut
 	}
 	task := asynq.NewTask(tgTaskTypeAutoDelete, body)
 	_, err = client.EnqueueContext(ctx, task,
-		asynq.Queue(tgQueueNameBackground),
-		asynq.MaxRetry(3),
+		asynq.Queue(tgQueueNameAutoDelete),
+		asynq.MaxRetry(10),
 		asynq.Timeout(time.Minute),
 		asynq.Unique(2*time.Minute),
 	)

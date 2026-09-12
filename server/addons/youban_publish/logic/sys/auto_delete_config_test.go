@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
@@ -36,6 +37,22 @@ func TestChannelAutoDeleteBotIdsPrioritizesIncomingConfiguredBot(t *testing.T) {
 	got := channelAutoDeleteBotIds(`[6,8,10]`, 8)
 	if !reflect.DeepEqual(got, []int64{8, 6, 10}) {
 		t.Fatalf("channelAutoDeleteBotIds() = %#v", got)
+	}
+}
+
+func TestTelegramAutoDeleteTaskResult(t *testing.T) {
+	bot := &sysin.BotModel{Id: 30}
+	if err := telegramAutoDeleteTaskResult(bot, nil); err != nil {
+		t.Fatalf("successful delete returned error: %v", err)
+	}
+	if err := telegramAutoDeleteTaskResult(bot, errors.New("Bad Request: message to delete not found")); err != nil {
+		t.Fatalf("already deleted message must not retry: %v", err)
+	}
+	if err := telegramAutoDeleteTaskResult(bot, errors.New("connection reset by peer")); err == nil {
+		t.Fatal("transient Telegram failure must be returned to Asynq")
+	}
+	if err := telegramAutoDeleteTaskResult(nil, nil); err == nil {
+		t.Fatal("missing channel Bot must be returned to Asynq")
 	}
 }
 
