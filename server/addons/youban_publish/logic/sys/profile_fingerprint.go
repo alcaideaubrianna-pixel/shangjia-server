@@ -28,11 +28,11 @@ const (
 )
 
 type profileFingerprint struct {
-	ChannelID      int64  `json:"channelId"`
-	Layer          string `json:"layer"`
-	Signature      string `json:"signature"`
-	ItemTotal      int    `json:"itemTotal"`
-	SignatureCount int    `json:"signatureCount"`
+	ChannelID      int64
+	Layer          string
+	Signature      string
+	ItemTotal      int
+	SignatureCount int
 }
 
 type profileFingerprintDuplicateError struct {

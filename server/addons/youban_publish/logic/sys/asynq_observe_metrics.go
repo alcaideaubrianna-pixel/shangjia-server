@@ -144,10 +144,9 @@ func observeQueuedJobsWithoutConsumer(ctx context.Context, servers []*asynq.Serv
 
 func telegramObserveQueueNames(ctx context.Context) []string {
 	set := map[string]struct{}{
-		tgQueueNameBackground:        {},
-		tgQueueNameHistory:           {},
-		tgQueueNameMediaProcess:      {},
-		tgQueueNameProfileProjection: {},
+		tgQueueNameBackground:   {},
+		tgQueueNameHistory:      {},
+		tgQueueNameMediaProcess: {},
 	}
 	for queue := range telegramPublishForegroundQueueWeights(ctx) {
 		set[queue] = struct{}{}

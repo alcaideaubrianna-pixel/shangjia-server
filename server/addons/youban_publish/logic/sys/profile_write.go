@@ -68,10 +68,9 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 		}
 	}
 	profileId := in.Id
-	var profileUuid, profileNo string
 	isNewProfile := profileId == 0
 	var removedMediaIds []int64
-	var oldFingerprints []profileFingerprint
+	var oldFingerprints, newFingerprints []profileFingerprint
 	effectiveChannelIds := manualChannelIds
 	if in.ChannelIds == nil && profileId > 0 {
 		effectiveChannelIds, err = s.profileChannelIdsOrDefaults(ctx, tenantId, accountId, profileId)
@@ -95,20 +94,14 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 				if accountId > 0 {
 					stateMod = stateMod.Where("account_id", accountId)
 				}
-				profileColumns := dao.ContentProfile.Columns()
-				owner, checkErr := stateMod.
-					InnerJoin(dao.ContentProfile.Table()+" p", "p."+profileColumns.Id+"="+publishProfileStateTable+".profile_id AND p."+profileColumns.DeletedAt+" IS NULL").
-					Fields("p." + profileColumns.SourceNoteUuid + " AS uuid,p." + profileColumns.ProfileNo + " AS profile_no").One()
-				if checkErr != nil {
+				if count, checkErr := stateMod.Count(); checkErr != nil {
 					return gerror.Wrap(checkErr, "检查资料归属失败")
-				} else if owner.IsEmpty() {
+				} else if count == 0 {
 					return gerror.New("资料不存在或无权操作")
 				}
-				profileUuid = owner["uuid"].String()
-				profileNo = owner["profile_no"].String()
 			}
 			if profileId == 0 {
-				profileId, profileUuid, profileNo, err = s.createProfileFromInput(ctx, tx, in, tenantId, accountId)
+				profileId, err = s.createProfileFromInput(ctx, tx, in, tenantId, accountId)
 				if err != nil {
 					return err
 				}
@@ -131,7 +124,7 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 					return err
 				}
 			}
-			oldFingerprints, _, err = s.replaceProfileFingerprintProjectionTx(ctx, tx, tenantId, accountId, profileId, effectiveChannelIds)
+			oldFingerprints, newFingerprints, err = s.replaceProfileFingerprintProjectionTx(ctx, tx, tenantId, accountId, profileId, effectiveChannelIds)
 			return err
 		})
 	}
@@ -143,13 +136,30 @@ func (s *sSysPublish) saveProfile(ctx context.Context, in *sysin.ProfileSaveInp,
 	if err != nil {
 		return nil, err
 	}
-	if err = s.enqueueProfileProjection(ctx, profileProjectionQueuePayload{
-		ProfileId: profileId, TenantId: tenantId, AccountId: accountId,
-		OldFingerprints: oldFingerprints, RemovedMediaIds: removedMediaIds, MediaChanged: in.Media != nil,
-	}); err != nil {
-		g.Log().Warningf(ctx, "资料已保存但异步投影任务提交失败 profileId:%d tenantId:%d accountId:%d err:%+v", profileId, tenantId, accountId, err)
+	clearProfileFingerprintCache(ctx, tenantId, accountId, oldFingerprints)
+	warmProfileFingerprintCache(ctx, tenantId, accountId, profileId, newFingerprints)
+	if err = s.supersedeProfilePendingTelegramJobsOutsideChannels(ctx, profileId, tenantId, accountId, effectiveChannelIds); err != nil {
+		return nil, err
 	}
-	return &sysin.ProfileSaveModel{Id: profileId, Uuid: profileUuid, ProfileNo: profileNo}, nil
+	for _, mediaId := range removedMediaIds {
+		if deleteErr := s.deleteMediaPHashBucketByMediaId(ctx, mediaId); deleteErr != nil {
+			g.Log().Warningf(ctx, "清理已删除资料索引失败 mediaId:%d err:%v", mediaId, deleteErr)
+		}
+	}
+	if in.Media != nil {
+		if err = s.syncMediaPHashBucketsByProfileId(ctx, profileId); err != nil {
+			return nil, err
+		}
+	}
+	if err = s.syncProfileNoteIndex(ctx, profileId); err != nil {
+		return nil, err
+	}
+	service.SysContent().ClearHomeProfileCardsCache(ctx)
+	profile, err := s.profileView(ctx, profileId, tenantId, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &sysin.ProfileSaveModel{Id: profileId, Uuid: profile.Uuid, ProfileNo: profile.ProfileNo}, nil
 }
 
 func (s *sSysPublish) supersedeProfilePendingTelegramJobsOutsideChannels(ctx context.Context, profileId, tenantId, accountId int64, channelIds []int64) error {
@@ -352,10 +362,9 @@ func (s *sSysPublish) submitProfilesByIds(ctx context.Context, ids []int64, tena
 	return nil
 }
 
-func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, tenantId int64, accountId int64) (int64, string, string, error) {
+func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, tenantId int64, accountId int64) (int64, error) {
 	columns := dao.ContentProfile.Columns()
 	now := gtime.Now()
-	profileUuid := newPublishProfileUUID()
 	extracted := profileextractor.Merge(in.PlainText, 0, 0, in.Tag)
 	isVirgin := in.IsVirgin
 	if isVirgin == 0 {
@@ -363,8 +372,8 @@ func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	}
 	data := g.Map{
 		columns.SourceType:      publishProfileSourceType,
-		columns.SourceNoteUuid:  profileUuid,
-		columns.SourceKey:       fmt.Sprintf("youban_publish:profile:%s", profileUuid),
+		columns.SourceNoteUuid:  newPublishProfileUUID(),
+		columns.SourceKey:       fmt.Sprintf("youban_publish:profile:%s", newPublishProfileUUID()),
 		columns.Title:           in.Title,
 		columns.Summary:         profileSummary(in.PlainText),
 		columns.PlainText:       in.PlainText,
@@ -396,19 +405,19 @@ func (s *sSysPublish) createProfileFromInput(ctx context.Context, tx gdb.TX, in 
 	for i := 0; i < 1000; i++ {
 		profileNo, err := s.nextAccountProfileNo(ctx, tx, tenantId, accountId)
 		if err != nil {
-			return 0, "", "", err
+			return 0, err
 		}
 		data[columns.ProfileNo] = profileNo
 		id, insertErr := tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Data(data).InsertAndGetId()
 		if insertErr == nil {
-			return id, profileUuid, profileNo, nil
+			return id, nil
 		}
 		lastErr = insertErr
 		if !isProfileNoUniqueConstraintError(insertErr) {
-			return 0, "", "", gerror.Wrap(insertErr, "创建资料失败")
+			return 0, gerror.Wrap(insertErr, "创建资料失败")
 		}
 	}
-	return 0, "", "", gerror.Wrap(lastErr, "创建资料失败，资料编号重复")
+	return 0, gerror.Wrap(lastErr, "创建资料失败，资料编号重复")
 }
 
 func (s *sSysPublish) updateProfileFromInput(ctx context.Context, tx gdb.TX, in *sysin.ProfileSaveInp, profileId int64, accountId int64, publishAt *gtime.Time) error {

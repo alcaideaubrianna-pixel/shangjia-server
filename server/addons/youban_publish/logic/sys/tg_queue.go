@@ -27,7 +27,6 @@ const (
 	tgQueueNameBackground         = "youban_publish_background"
 	tgQueueNameCollectProcess     = "youban_publish_collect_process"
 	tgQueueNameHistory            = "youban_publish_history"
-	tgQueueNameProfileProjection  = "youban_publish_profile_projection"
 	tgTaskTypePublish             = "youban_publish:tg:publish"
 	tgTaskTypeCleanup             = "youban_publish:tg:cleanup"
 	tgTaskTypeAutoDelete          = "youban_publish:tg:auto_delete"
@@ -47,7 +46,6 @@ const (
 	tgTaskTypeCollectSourceDelete = "youban_publish:collect:source_delete"
 	tgTaskTypeChannelMemberSync   = "youban_publish:tg:channel_member_sync"
 	tgTaskTypeBotMediaRepair      = "youban_publish:bot:media_repair"
-	tgTaskTypeProfileProjection   = "youban_publish:profile:projection"
 )
 
 const collectMediaMaxBulkQueueShards = 16
