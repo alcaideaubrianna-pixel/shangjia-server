@@ -1003,6 +1003,142 @@ queue.SendDelayMsg(consts.QueueMyTopic, data, 10) // redis: 延迟秒数；rocke
 
 ---
 
+## 腾讯云生产环境排障与 MCP 使用
+
+> 生产运维的完整说明见 `server/docs/AGENT_OPERATIONS.md`。本节是 Agent 必须遵守的快速入口。生产环境默认只读；任何更新、补偿、删除、重启或部署操作，都必须先完成精确范围查询并向用户说明影响。
+
+### 1. 节点与 SSH MCP
+
+腾讯云新加坡节点统一通过 SSH MCP 访问，禁止把私钥、密码或临时 Token 写入仓库。先调用 `mcp__mcp_server_2__list_servers` 确认连接状态，再使用 `mcp__mcp_server_2__execute_command`，并显式传入 `connectionName`。
+
+| MCP `connectionName` | 内网地址 | 用途 |
+|---|---:|---|
+| `b-xiaohuiji-sg` | `10.3.0.10` | PostgreSQL / Pigsty 数据库主节点 |
+| `b-xiaohuiji-Redis-sg` | `10.3.0.12` | Redis、Asynq 队列与缓存 |
+| `b-xiaohuiji-应用 1-sg` | `10.3.0.17` | API、account、scheduler、publish-worker |
+| `b-xiaohuiji-应用 2-sg` | `10.3.0.3` | 通用 Worker 与备用工作负载 |
+| `b-xiaohuiji-应用 3-sg` | `10.3.4.11` | worker、publish-worker、media-worker、collector-worker |
+| `b-xiaohuiji-监控-sg` | `10.3.4.2` | Pigsty、VictoriaMetrics/Logs/Traces、Alertmanager |
+
+标准调用顺序：
+
+1. `mcp__mcp_server_2__list_servers`：确认目标为 `connected`；
+2. `mcp__mcp_server_2__execute_command`：执行单一、可审计的只读命令；
+3. 超时时适当增加 `timeout`，不要无判断地重复执行写操作；
+4. 公网 SSH 失败时优先使用已配置的 SSH MCP，不要自行复制或导出 MCP 私钥。
+
+常用节点检查命令：
+
+```bash
+hostname
+uptime
+free -h
+df -h /
+sudo docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
+sudo docker stats --no-stream
+```
+
+查看应用日志时必须限定时间、容器和结果数量，避免日志洪泛：
+
+```bash
+sudo docker logs --since 15m --tail 500 <container> 2>&1
+sudo docker logs --since 30m <container> 2>&1 | grep -E 'jobId|profileId|traceID' | tail -200
+```
+
+### 2. Dokploy MCP
+
+Dokploy 是生产应用的部署和运行日志入口。优先使用以下只读能力：
+
+- `mcp__dokploy__application_search`：按名称查应用和 `applicationId`；
+- `mcp__dokploy__application_one`：确认镜像、命令、副本、节点和最近部署状态；
+- `mcp__dokploy__application_readLogs`：按 `since`、`tail` 读取运行日志；
+- `mcp__dokploy__deployment_all` / `mcp__dokploy__deployment_readLogs`：检查部署历史和拉取镜像结果；
+- `mcp__dokploy__application_readAppMonitoring`：查看应用资源指标。
+
+`application_deploy`、`application_redeploy`、`application_reload`、`application_start/stop` 属于生产写操作。执行前必须确认目标 `applicationId`、当前镜像 SHA、服务角色和副本数；Worker 重启前还要检查队列积压及任务幂等。禁止调用清空部署、清空队列或删除应用能力来处理普通故障。
+
+GitHub Actions 构建完成后，以镜像 label `org.opencontainers.image.revision`、Dokploy 部署状态 `done` 和容器实际镜像摘要三者共同确认上线，不能只看 `git push` 成功。
+
+### 3. PostgreSQL 直连排查
+
+数据库主节点使用 SSH MCP 连接 `b-xiaohuiji-sg`。本机无需持有生产数据库密码，在数据库节点通过本地 PostgreSQL 系统账号执行：
+
+```bash
+sudo -iu postgres psql -d railway -X -P pager=off
+```
+
+Agent 执行非交互查询时使用：
+
+```bash
+sudo -iu postgres psql -d railway -X -v ON_ERROR_STOP=1 -P pager=off -c '<SQL>'
+```
+
+业务排查应先查询表结构和精确数据，再形成关联链路：
+
+```sql
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_schema = 'public' AND table_name = '<table>'
+ORDER BY ordinal_position;
+
+SELECT now(), pg_is_in_recovery();
+SELECT pid, usename, state, wait_event_type, wait_event,
+       now() - query_start AS elapsed, left(query, 300) AS query
+FROM pg_stat_activity
+WHERE datname = current_database() AND state <> 'idle'
+ORDER BY query_start;
+```
+
+发布问题按以下主键逐层关联，禁止仅凭昵称做写操作：
+
+`tenant_id + account_id + profile_id → tg_job.id + operation_no → channel_id + bot_id → tg_job_log → tg_message_id`
+
+生产 SQL 规则：
+
+- 默认只执行 `SELECT`、`EXPLAIN (ANALYZE, BUFFERS)` 前必须确认查询不会对大表造成明显压力；不确定时先用普通 `EXPLAIN`；
+- 所有查询必须带明确条件和 `LIMIT`，大表禁止无条件扫描、`SELECT *` 和宽时间范围导出；
+- 写操作前先用同一 `WHERE` 做 `SELECT COUNT(*)` 和样本回查；
+- 更新/删除必须使用 `BEGIN`、`ON_ERROR_STOP=1`、精确主键或业务唯一键，并在 `COMMIT` 前核对影响行数；
+- 同时处理关联表时先检查外键，再按依赖顺序执行；完成后再次查询业务状态和影响行数；
+- 禁止在聊天、命令输出、日志或提交中显示数据库 URL、密码、用户隐私全文和签名媒体 URL。
+
+### 4. Redis 与 Asynq 排查
+
+Redis 节点使用 SSH MCP 连接 `b-xiaohuiji-Redis-sg`。认证信息只能从节点受保护配置、Dokploy Secret 或容器环境中读取，禁止回显；不要把密码放进命令行历史，优先通过受保护环境变量 `REDISCLI_AUTH` 使用 `redis-cli`。
+
+只读检查优先使用：
+
+```bash
+redis-cli -n <db> PING
+redis-cli -n <db> INFO memory
+redis-cli -n <db> INFO clients
+redis-cli -n <db> INFO stats
+redis-cli -n <db> --scan --pattern 'asynq:*' | head -100
+```
+
+Asynq 排查必须同时核对：队列 `pending/active/scheduled/retry/archived` 数量、Worker 实际监听的队列名、任务数据库状态、`asynq_task_id` 和业务 job 日志。项目发布队列按频道分片，例如 `youban_publish_tg_urgent_<shard>`、`youban_publish_tg_<shard>`、`youban_publish_tg_bulk_<shard>`；只检查基础队列名会漏判积压。
+
+禁止在未核对数据库业务状态前直接删除 Redis task/key。不得使用 `FLUSHDB`、`FLUSHALL`、无范围 `SCAN + DEL` 或清空整个 Asynq 队列。补偿任务应调用项目已有的幂等入队/恢复能力。
+
+### 5. Pigsty 与性能监控
+
+监控节点使用 SSH MCP 连接 `b-xiaohuiji-监控-sg`。排障时综合查看：
+
+- Node / cAdvisor：CPU、load、内存、磁盘、网络重传和容器重启；
+- PostgreSQL：连接数、锁等待、慢 SQL、缓存命中、WAL、checkpoint、autovacuum；
+- Redis：内存、连接数、ops、延迟、阻塞客户端和 key 淘汰；
+- VictoriaMetrics / VictoriaLogs / VictoriaTraces：指标、结构化业务日志、TraceID；
+- VMAlert / Alertmanager：告警规则、触发值、持续时间和恢复状态；
+- Blackbox Exporter：`api-test.xiaohuiji.cc/readyz` 与 `api.xiaohuiji.cc/readyz` 的状态和延迟。
+
+看到 NodeLoadHigh 时先看 CPU 核数、CPU 使用率、I/O wait 和容器占用；`load > 1` 不等同于故障。看到业务接口超时时，从 Blackbox → API Trace → PostgreSQL wait event/慢 SQL → Redis/队列逐层定位，禁止仅凭单个 Node 告警直接扩容或重启。
+
+### 6. 生产变更收尾
+
+每次线上排查或修复必须记录：目标环境、节点/应用、业务唯一标识、变更前数量、实际影响行数、变更后状态、代码 SHA、部署结果和回滚方式。临时排查文件放系统临时目录并及时清理，不得进入 Git；线上数据修复脚本如需复用，必须实现 dry-run、批次限制、幂等和审计日志后再提交仓库。
+
+---
+
 ## 常见错误禁止清单
 
 **后端：**
