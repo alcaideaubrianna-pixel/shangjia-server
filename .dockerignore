@@ -25,6 +25,7 @@ server/storage/diskqueue
 
 docker
 docs
+deploy/dokploy-targets.json
 LICENSE
 README.md
 sidebar.md

@@ -3,11 +3,7 @@ name: build-images
 on:
   push:
     branches:
-      - sj/develop
-      - main
-      - "feat/**"
-    tags:
-      - "v*"
+      - feat/railway-runtime-ci-split
     paths:
       - "server/**"
       - "web/**"
@@ -17,7 +13,6 @@ on:
       - ".dockerignore"
       - ".env.example"
       - ".github/workflows/build-server-image.yml"
-      - ".github/actions/cleanup-tencent-tags/**"
       - "scripts/ci/**"
   workflow_dispatch:
 
@@ -31,6 +26,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.ref == 'refs/heads/feat/railway-runtime-ci-split'
     runs-on: ubuntu-latest
 
     steps:
@@ -42,10 +38,7 @@ jobs:
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           echo "server=ghcr.io/${owner}/youban-server" >> "$GITHUB_OUTPUT"
-          echo "collector=ghcr.io/${owner}/youban-server" >> "$GITHUB_OUTPUT"
-          echo "tencent_registry=hkccr.ccs.tencentyun.com" >> "$GITHUB_OUTPUT"
-          echo "tencent_repo=testaaaaa/dwadfwaf" >> "$GITHUB_OUTPUT"
-          echo "tencent=hkccr.ccs.tencentyun.com/testaaaaa/dwadfwaf" >> "$GITHUB_OUTPUT"
+          echo "branch_tag=feat-railway-runtime-ci-split" >> "$GITHUB_OUTPUT"
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
@@ -58,47 +51,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Login to Tencent Cloud Registry
-        uses: docker/login-action@v3
-        with:
-          registry: hkccr.ccs.tencentyun.com
-          username: ${{ secrets.TCR_USERNAME }}
-          password: ${{ secrets.TCR_PASSWORD }}
-
       - name: Docker metadata
         id: server_meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ steps.image.outputs.server }}
-            ${{ steps.image.outputs.tencent }}
+          images: ${{ steps.image.outputs.server }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref_name == 'sj/develop' || github.ref_name == github.event.repository.default_branch }}
-            type=ref,event=branch
-            type=ref,event=tag
+            type=raw,value=${{ steps.image.outputs.branch_tag }}
             type=sha,prefix=sha-
-
-      - name: Collector Docker metadata
-        id: collector_meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ steps.image.outputs.collector }}
-          tags: |
-            type=raw,value=otel-latest,enable=${{ github.ref_name == 'sj/develop' || github.ref_name == github.event.repository.default_branch }}
-            type=ref,event=branch,prefix=otel-
-            type=ref,event=tag,prefix=otel-
-            type=sha,prefix=otel-sha-
-
-      - name: Reserve Tencent registry tag capacity
-        if: ${{ success() }}
-        uses: ./.github/actions/cleanup-tencent-tags
-        env:
-          TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}
-          TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}
-          TCR_REGION: ${{ vars.TCR_REGION || 'ap-hongkong' }}
-          TCR_REPO_NAME: ${{ steps.image.outputs.tencent_repo }}
-          # 每次构建最多新增 branch/tag 与 sha 两个新标签，预留 2 个名额后总数不超过 20。
-          TCR_KEEP_TAGS: "18"
 
       - name: Build and push server image
         uses: docker/build-push-action@v6
@@ -112,31 +72,26 @@ jobs:
           cache-from: type=gha,scope=server
           cache-to: type=gha,mode=max,scope=server
 
-      - name: Build and push collector image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/observability/collector/Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: ${{ steps.collector_meta.outputs.tags }}
-          labels: ${{ steps.collector_meta.outputs.labels }}
-          cache-from: type=gha,scope=collector
-          cache-to: type=gha,mode=max,scope=collector
-
       - name: Image summary
         run: |
           echo "### Published server image" >> "$GITHUB_STEP_SUMMARY"
           echo '${{ steps.server_meta.outputs.tags }}' >> "$GITHUB_STEP_SUMMARY"
-          echo "### Published collector image" >> "$GITHUB_STEP_SUMMARY"
-          echo '${{ steps.collector_meta.outputs.tags }}' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Trigger enabled Dokploy targets
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.YOUBAN_TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.YOUBAN_TELEGRAM_CHAT_ID }}
+        run: |
+          python3 scripts/ci/trigger-dokploy-webhooks.py \
+            --config deploy/dokploy-targets.json \
+            --version "sha-${GITHUB_SHA::7}"
 
       - name: Notify Telegram build success
         if: ${{ success() }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.YOUBAN_TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.YOUBAN_TELEGRAM_CHAT_ID }}
-          IMAGE: ${{ steps.image.outputs.tencent }}:sha-${{ steps.image.outputs.short_sha }}
+          IMAGE: ${{ steps.image.outputs.server }}:sha-${{ steps.image.outputs.short_sha }}
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
             echo "telegram secrets are not configured, skip"
@@ -154,7 +109,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.YOUBAN_TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.YOUBAN_TELEGRAM_CHAT_ID }}
-          IMAGE: ${{ steps.image.outputs.tencent }}:sha-${{ steps.image.outputs.short_sha }}
+          IMAGE: ${{ steps.image.outputs.server }}:sha-${{ steps.image.outputs.short_sha }}
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
             echo "telegram secrets are not configured, skip"
