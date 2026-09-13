@@ -3,6 +3,7 @@ package sysin
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -1244,6 +1245,9 @@ type ChannelModel struct {
 	CyclePublishEnabled     int         `json:"cyclePublishEnabled" dc:"是否循环上架"`
 	CyclePublishDays        int         `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
 	CyclePublishTime        string      `json:"cyclePublishTime" dc:"循环上架时间"`
+	CyclePublishMode        string      `json:"cyclePublishMode" dc:"循环模式"`
+	CycleBatchSize          int         `json:"cycleBatchSize" dc:"批次循环数量"`
+	CycleBatchTime          string      `json:"cycleBatchTime" dc:"批次循环时间"`
 	IsDefaultSelected       int         `json:"isDefaultSelected" dc:"是否默认选中"`
 	PublishVisible          int         `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
 	AntiScanEnabled         int         `json:"antiScanEnabled" dc:"频道防扫图开关"`
@@ -1275,6 +1279,9 @@ type ChannelSaveInp struct {
 	CyclePublishEnabled     int     `json:"cyclePublishEnabled" dc:"是否循环上架"`
 	CyclePublishDays        int     `json:"cyclePublishDays" dc:"循环时间，生产按天，开发按秒"`
 	CyclePublishTime        string  `json:"cyclePublishTime" dc:"循环上架时间"`
+	CyclePublishMode        string  `json:"cyclePublishMode" dc:"循环模式"`
+	CycleBatchSize          int     `json:"cycleBatchSize" dc:"批次循环数量"`
+	CycleBatchTime          string  `json:"cycleBatchTime" dc:"批次循环时间"`
 	IsDefaultSelected       int     `json:"isDefaultSelected" dc:"是否默认选中"`
 	PublishVisible          int     `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
 	AntiScanEnabled         int     `json:"antiScanEnabled" dc:"频道防扫图开关"`
@@ -1338,6 +1345,22 @@ func (in *ChannelSaveInp) Filter(ctx context.Context) error {
 	}
 	if in.CyclePublishEnabled == 1 && in.CyclePublishDays <= 0 {
 		in.CyclePublishDays = 4
+	}
+	in.CyclePublishMode = strings.TrimSpace(in.CyclePublishMode)
+	if in.CyclePublishMode == "" {
+		in.CyclePublishMode = "time"
+	}
+	if in.CyclePublishMode != "time" && in.CyclePublishMode != "batch" {
+		return gerror.New("循环模式不合法")
+	}
+	if in.CyclePublishMode == "batch" {
+		if in.CycleBatchSize <= 0 || in.CycleBatchSize > 5000 {
+			return gerror.New("批次循环数量需在1到5000之间")
+		}
+		in.CycleBatchTime = strings.TrimSpace(in.CycleBatchTime)
+		if _, err := time.Parse("15:04", in.CycleBatchTime); err != nil {
+			return gerror.New("批次循环时间格式不合法")
+		}
 	}
 	if in.CyclePublishDays < 0 || in.CyclePublishDays > 365 {
 		return gerror.New("循环时间不合法")

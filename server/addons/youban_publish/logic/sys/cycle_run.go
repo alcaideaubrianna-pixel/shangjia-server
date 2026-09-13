@@ -34,6 +34,9 @@ type channelCycleRecord struct {
 	Enabled          int    `orm:"cycle_publish_enabled"`
 	Status           int    `orm:"status"`
 	PublishDirection string `orm:"publish_direction"`
+	Mode             string `orm:"cycle_publish_mode"`
+	BatchSize        int    `orm:"cycle_batch_size"`
+	BatchCursor      int64  `orm:"cycle_batch_cursor"`
 }
 
 type cycleRunRecord struct {
@@ -64,6 +67,9 @@ func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
 		return err
 	}
 	if err := s.finalizeDispatchingChannelCycleRuns(ctx, 20); err != nil {
+		return err
+	}
+	if err := s.scheduleDueChannelBatchCycles(ctx, 50); err != nil {
 		return err
 	}
 	if err := s.enqueuePendingProfileCycleReschedules(ctx, 200); err != nil {
@@ -201,7 +207,17 @@ func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
 	if backlog >= cycleBatchBacklogLimit {
 		return s.continueChannelCycleRun(ctx, run, 30*time.Second)
 	}
-	items, err := s.channelCyclePage(ctx, channel.TenantId, run.ChannelId, run.CursorId, cycleBatchPageSize)
+	pageLimit := cycleBatchPageSize
+	if channel.Mode == "batch" {
+		remaining := channel.BatchSize - run.QueuedCount
+		if remaining <= 0 {
+			return s.beginChannelCycleDispatch(ctx, run)
+		}
+		if remaining < pageLimit {
+			pageLimit = remaining
+		}
+	}
+	items, err := s.channelCyclePage(ctx, channel, run.CursorId, pageLimit)
 	if err != nil {
 		s.failChannelCycleRun(ctx, run.Id, run.ChannelId, err)
 		return err
@@ -299,16 +315,27 @@ func (s *sSysPublish) lockChannelCycleRun(ctx context.Context, runId int64) (cyc
 func (s *sSysPublish) channelCycleById(ctx context.Context, channelId int64) (channelCycleRecord, error) {
 	var channel channelCycleRecord
 	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,cycle_publish_enabled,status,publish_direction").
+		Fields("id,tenant_id,cycle_publish_enabled,status,publish_direction,cycle_publish_mode,cycle_batch_size,cycle_batch_cursor").
 		Where("id", channelId).
 		WhereNull("deleted_at").
 		Scan(&channel)
 	return channel, err
 }
 
-func (s *sSysPublish) channelCyclePage(ctx context.Context, tenantId, channelId int64, cursorId int64, limit int) ([]channelProfileRecord, error) {
+func (s *sSysPublish) channelCyclePage(ctx context.Context, channel channelCycleRecord, cursorId int64, limit int) ([]channelProfileRecord, error) {
 	var items []channelProfileRecord
-	err := s.fullPushEligibleProfileModel(ctx, tenantId, channelId).
+	if channel.Mode == "batch" {
+		sql := `(SELECT MIN(r.id) AS id,r.tenant_id,MAX(j.account_id) AS account_id,r.profile_id,r.channel_id
+FROM hg_youban_publish_success_record r JOIN hg_youban_publish_tg_job j ON j.id=r.job_id
+WHERE r.tenant_id=? AND r.channel_id=? AND r.status='success'
+GROUP BY r.tenant_id,r.channel_id,r.profile_id) q`
+		err := g.DB().Model(sql, channel.TenantId, channel.Id).Safe().Ctx(ctx).WhereGT("id", cursorId).OrderAsc("id").Limit(limit).Scan(&items)
+		if err != nil {
+			return nil, gerror.Wrap(err, "分页读取频道批次循环资料失败")
+		}
+		return items, nil
+	}
+	err := s.fullPushEligibleProfileModel(ctx, channel.TenantId, channel.Id).
 		Fields("p.id AS id,ps.tenant_id,ps.account_id,p.id AS profile_id").
 		WhereGT("p.id", cursorId).
 		OrderAsc("p.id").
@@ -318,7 +345,7 @@ func (s *sSysPublish) channelCyclePage(ctx context.Context, tenantId, channelId 
 		return nil, gerror.Wrap(err, "分页读取频道循环资料失败")
 	}
 	for i := range items {
-		items[i].ChannelId = channelId
+		items[i].ChannelId = channel.Id
 	}
 	return items, nil
 }
@@ -362,9 +389,13 @@ func (s *sSysPublish) finishChannelCycleRun(ctx context.Context, run cycleRunRec
 	_, _ = g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", run.Id).Data(g.Map{
 		"status": status, "stage": "finished", "error_message": message, "finished_at": now, "updated_at": now,
 	}).Update()
-	_, _ = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Where("id", run.ChannelId).Where("cycle_active_run_id", run.Id).Data(g.Map{
+	data := g.Map{
 		"cycle_active_run_id": 0, "cycle_last_run_at": now, "cycle_last_error_message": message, "updated_at": now,
-	}).Update()
+	}
+	if status == cycleRunStatusFinished {
+		data["cycle_batch_cursor"] = run.CursorId
+	}
+	_, _ = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Where("id", run.ChannelId).Where("cycle_active_run_id", run.Id).Data(data).Update()
 	s.appendChannelCycleRunLog(ctx, run, "info", "finished", message, nil)
 }
 

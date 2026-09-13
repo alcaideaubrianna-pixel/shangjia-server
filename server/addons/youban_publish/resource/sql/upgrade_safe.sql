@@ -196,5 +196,9 @@ ALTER TABLE `hg_youban_publish_bot_message_source` DROP INDEX `uk_ybp_bot_messag
 ALTER TABLE `hg_youban_publish_bot_message_source` ADD UNIQUE KEY `uk_ybp_bot_message_source` (`chat_id`,`message_id`);
 CREATE INDEX `idx_ybp_tg_message_target_message` ON `hg_youban_publish_tg_message` (`target_chat_id`,`tg_message_id`,`id`);
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `preserve_history_messages` tinyint(1) NOT NULL DEFAULT '0' COMMENT '下架和循环上架时保留旧消息';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `cycle_publish_mode` varchar(16) NOT NULL DEFAULT 'time' COMMENT '循环模式';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `cycle_batch_size` int NOT NULL DEFAULT '20' COMMENT '批次循环数量';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `cycle_batch_time` varchar(16) NOT NULL DEFAULT '' COMMENT '批次循环时间';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `cycle_batch_cursor` bigint NOT NULL DEFAULT '0' COMMENT '批次循环游标';
 ALTER TABLE `hg_youban_publish_message_push_plan` ADD COLUMN IF NOT EXISTS `push_mode` varchar(16) NOT NULL DEFAULT 'bot';
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `push_mode` varchar(16) NOT NULL DEFAULT 'bot';

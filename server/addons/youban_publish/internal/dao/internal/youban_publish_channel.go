@@ -32,6 +32,10 @@ type YoubanPublishChannelColumns struct {
 	CyclePublishEnabled     string // 是否循环上架
 	CyclePublishDays        string // 循环上架天数
 	CyclePublishTime        string // 循环上架时间
+	CyclePublishMode        string // 循环模式
+	CycleBatchSize          string // 批次循环数量
+	CycleBatchTime          string // 批次循环时间
+	CycleBatchCursor        string // 批次循环游标
 	IsDefaultSelected       string // 是否默认选中
 	BotIdJson               string // 绑定Bot ID JSON
 	BotPermissionStatusJson string // Bot权限检测结果JSON
@@ -61,6 +65,10 @@ var youbanPublishChannelColumns = YoubanPublishChannelColumns{
 	CyclePublishEnabled:     "cycle_publish_enabled",
 	CyclePublishDays:        "cycle_publish_days",
 	CyclePublishTime:        "cycle_publish_time",
+	CyclePublishMode:        "cycle_publish_mode",
+	CycleBatchSize:          "cycle_batch_size",
+	CycleBatchTime:          "cycle_batch_time",
+	CycleBatchCursor:        "cycle_batch_cursor",
 	IsDefaultSelected:       "is_default_selected",
 	BotIdJson:               "bot_id_json",
 	BotPermissionStatusJson: "bot_permission_status_json",

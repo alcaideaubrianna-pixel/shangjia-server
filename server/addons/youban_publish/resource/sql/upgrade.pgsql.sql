@@ -594,6 +594,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_success_record" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_success_record_job" ON "hg_youban_publish_success_record" ("job_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_success_record_owner" ON "hg_youban_publish_success_record" ("tenant_id", "account_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_success_record_profile" ON "hg_youban_publish_success_record" ("profile_id", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_success_record_cycle_channel" ON "hg_youban_publish_success_record" ("tenant_id", "channel_id", "status", "profile_id", "id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_full_push_batch" (
   "id" BIGSERIAL PRIMARY KEY, "batch_no" varchar(128) NOT NULL, "tenant_id" bigint NOT NULL DEFAULT 0,
@@ -631,6 +632,10 @@ ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_days" integer NOT NULL DEFAULT 4;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_time" varchar(16) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_next_run_at" timestamp DEFAULT NULL;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_publish_mode" varchar(16) NOT NULL DEFAULT 'time';
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_batch_size" integer NOT NULL DEFAULT 20;
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_batch_time" varchar(16) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_batch_cursor" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_last_run_at" timestamp DEFAULT NULL;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_active_run_id" bigint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "cycle_last_error_message" text;

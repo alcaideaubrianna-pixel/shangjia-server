@@ -1476,6 +1476,10 @@ ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_time` varchar(
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_next_run_at` datetime DEFAULT NULL COMMENT '下次循环上架时间';
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_last_run_at` datetime DEFAULT NULL COMMENT '上次循环上架时间';
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_active_run_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '当前循环批次ID';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_publish_mode` varchar(16) NOT NULL DEFAULT 'time' COMMENT '循环模式';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_batch_size` int NOT NULL DEFAULT '20' COMMENT '批次循环数量';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_batch_time` varchar(16) NOT NULL DEFAULT '' COMMENT '批次循环时间';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_batch_cursor` bigint NOT NULL DEFAULT '0' COMMENT '批次循环游标';
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `cycle_last_error_message` text COMMENT '循环上架最近错误';
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `is_default_selected` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否默认选中' AFTER `cycle_publish_time`;
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN `publish_visible` tinyint(1) NOT NULL DEFAULT '1' COMMENT '上架端资料选择可见' AFTER `is_default_selected`;

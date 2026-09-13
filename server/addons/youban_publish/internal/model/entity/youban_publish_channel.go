@@ -21,6 +21,10 @@ type YoubanPublishChannel struct {
 	CyclePublishEnabled     int         `json:"cyclePublishEnabled" orm:"cycle_publish_enabled" description:"是否循环上架"`
 	CyclePublishDays        int         `json:"cyclePublishDays"    orm:"cycle_publish_days"    description:"循环上架天数"`
 	CyclePublishTime        string      `json:"cyclePublishTime"    orm:"cycle_publish_time"    description:"循环上架时间"`
+	CyclePublishMode        string      `json:"cyclePublishMode"    orm:"cycle_publish_mode"    description:"循环模式 time/batch"`
+	CycleBatchSize          int         `json:"cycleBatchSize"      orm:"cycle_batch_size"      description:"批次循环数量"`
+	CycleBatchTime          string      `json:"cycleBatchTime"      orm:"cycle_batch_time"      description:"批次循环时间"`
+	CycleBatchCursor        int64       `json:"cycleBatchCursor"    orm:"cycle_batch_cursor"    description:"批次循环游标"`
 	IsDefaultSelected       int         `json:"isDefaultSelected"   orm:"is_default_selected"   description:"是否默认选中"`
 	AutoDeleteEnabled       int         `json:"autoDeleteEnabled"    orm:"auto_delete_enabled"   description:"频道自动删除开关"`
 	BotIdJson               string      `json:"botIdJson"           orm:"bot_id_json"           description:"绑定Bot ID JSON"`

@@ -23,6 +23,10 @@ type YoubanPublishChannel struct {
 	CyclePublishEnabled     any         // 是否循环上架
 	CyclePublishDays        any         // 循环上架天数
 	CyclePublishTime        any         // 循环上架时间
+	CyclePublishMode        any         // 循环模式
+	CycleBatchSize          any         // 批次循环数量
+	CycleBatchTime          any         // 批次循环时间
+	CycleBatchCursor        any         // 批次循环游标
 	IsDefaultSelected       any         // 是否默认选中
 	BotIdJson               any         // 绑定Bot ID JSON
 	BotPermissionStatusJson any         // Bot权限检测结果JSON
