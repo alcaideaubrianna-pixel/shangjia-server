@@ -37,6 +37,15 @@ func (c *cPublishAdmin) AntiScanPreview(ctx context.Context, req *publish.AdminA
 	return
 }
 
+func (c *cPublishAdmin) AntiScanSegment(ctx context.Context, req *publish.AdminAntiScanSegmentReq) (res *publish.AdminAntiScanSegmentRes, err error) {
+	file := g.RequestFromCtx(ctx).GetUploadFile("image")
+	data, err := service.SysPublish().AdminAntiScanSegment(ctx, &req.AntiScanSegmentInp, file)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminAntiScanSegmentRes{AntiScanSegmentModel: data}, nil
+}
+
 func (c *cPublishAdmin) AntiScanConfigSaveTab(ctx context.Context, req *publish.AdminAntiScanConfigSaveTabReq) (res *publish.AdminAntiScanConfigSaveTabRes, err error) {
 	if err = service.SysConfig().AntiScanConfigSaveTab(ctx, &req.AntiScanConfigSaveTabInp); err != nil {
 		return nil, err

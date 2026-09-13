@@ -65,7 +65,9 @@ func publishAdminAuth(r *ghttp.Request) {
 // isPublishSharedAdminPath 判断管理员路由中允许上架账号共同使用的接口。
 func isPublishSharedAdminPath(path string) bool {
 	return strings.HasSuffix(path, "/publish/admin/antiScan/preview") ||
+		strings.HasSuffix(path, "/publish/admin/antiScan/segment") ||
 		strings.HasSuffix(path, "/publish-admin/antiScan/preview") ||
+		strings.HasSuffix(path, "/publish-admin/antiScan/segment") ||
 		strings.Contains(path, "/publish/admin/antiScan/material/") ||
 		strings.Contains(path, "/publish-admin/antiScan/material/")
 }

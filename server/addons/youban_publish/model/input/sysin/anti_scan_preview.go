@@ -27,6 +27,28 @@ type AntiScanPreviewModel struct {
 	CloudRawSaved int      `json:"cloudRawSaved"`
 }
 
+type AntiScanSegmentInp struct {
+	UseDefaultImage int `json:"useDefaultImage"`
+}
+
+type AntiScanSegmentModel struct {
+	CacheHit   int    `json:"cacheHit"`
+	ImageHash  string `json:"imageHash"`
+	SegmentUrl string `json:"segmentUrl"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+}
+
+func (in *AntiScanSegmentInp) Filter(ctx context.Context) error {
+	if in == nil {
+		return gerror.New("人像分割参数不能为空")
+	}
+	if in.UseDefaultImage != 0 {
+		in.UseDefaultImage = 1
+	}
+	return nil
+}
+
 func (in *AntiScanPreviewInp) Filter(ctx context.Context) error {
 	if in == nil {
 		return gerror.New("防扫图预览参数不能为空")

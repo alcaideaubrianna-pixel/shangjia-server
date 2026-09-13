@@ -38,6 +38,15 @@ type AdminAntiScanPreviewRes struct {
 	*sysin.AntiScanPreviewModel
 }
 
+type AdminAntiScanSegmentReq struct {
+	g.Meta `path:"/publish/admin/antiScan/segment" method:"post" mime:"multipart/form-data" tags:"上架插件管理端" summary:"人像分割"`
+	sysin.AntiScanSegmentInp
+}
+
+type AdminAntiScanSegmentRes struct {
+	*sysin.AntiScanSegmentModel
+}
+
 type AdminAntiScanMaterialListReq struct {
 	g.Meta `path:"/publish/admin/antiScan/material/list" method:"get" tags:"上架插件管理端" summary:"防扫图素材列表"`
 	sysin.AntiScanMaterialListInp

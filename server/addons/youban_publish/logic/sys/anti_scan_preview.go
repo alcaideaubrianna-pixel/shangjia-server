@@ -39,6 +39,11 @@ const (
 
 // AdminAntiScanPreview 生成防扫图实时预览，预览产物按精确图片哈希 + 配置 hash 复用缓存。
 func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiScanPreviewInp, upload *ghttp.UploadFile) (res *sysin.AntiScanPreviewModel, err error) {
+	totalStartedAt := time.Now()
+	defer func() {
+		g.Log().Infof(ctx, "防扫图预览完成 stage:total durationMs:%d success:%t", time.Since(totalStartedAt).Milliseconds(), err == nil)
+	}()
+	stageStartedAt := time.Now()
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
@@ -55,6 +60,8 @@ func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiSc
 			}
 		}
 	}
+	g.Log().Infof(ctx, "防扫图阶段完成 stage:auth durationMs:%d", time.Since(stageStartedAt).Milliseconds())
+	stageStartedAt = time.Now()
 	imageBytes, originalUrl, err := readAntiScanPreviewImage(ctx, upload, in.UseDefaultImage)
 	if err != nil {
 		return nil, err
@@ -63,11 +70,14 @@ func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiSc
 	if err != nil {
 		return nil, err
 	}
+	g.Log().Infof(ctx, "防扫图阶段完成 stage:read_hash durationMs:%d sourceBytes:%d imageHash:%s", time.Since(stageStartedAt).Milliseconds(), len(imageBytes), imageHash)
+	stageStartedAt = time.Now()
 	cloudConf, err := service.SysConfig().GetCloudResource(ctx)
 	if err != nil {
 		return nil, err
 	}
 	configHash := antiScanConfigHash(in, cloudConf)
+	g.Log().Infof(ctx, "防扫图阶段完成 stage:config durationMs:%d imageHash:%s", time.Since(stageStartedAt).Milliseconds(), imageHash)
 	noop := isAntiScanNoop(in)
 	if in.PreviewOnly != 1 {
 		if cached, ok := s.getAntiScanPreviewCache(ctx, imageHash, configHash); ok {
@@ -78,24 +88,30 @@ func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiSc
 	detectRes := &antiScanDetectResult{Provider: "none"}
 	warnings := []string{}
 	if !noop {
+		stageStartedAt = time.Now()
 		detectRes, warnings, err = s.detectAntiScanImage(ctx, imageHash, imageBytes, in, cloudConf, usageOwner)
 		if err != nil {
 			return nil, err
 		}
+		g.Log().Infof(ctx, "防扫图阶段完成 stage:detect durationMs:%d provider:%s imageHash:%s", time.Since(stageStartedAt).Milliseconds(), detectRes.Provider, imageHash)
 	}
+	stageStartedAt = time.Now()
 	previewBytes, renderWarnings, err := renderAntiScanPreview(ctx, imageBytes, in, detectRes)
 	if err != nil {
 		return nil, err
 	}
 	warnings = append(warnings, renderWarnings...)
+	g.Log().Infof(ctx, "防扫图阶段完成 stage:render durationMs:%d outputBytes:%d imageHash:%s", time.Since(stageStartedAt).Milliseconds(), len(previewBytes), imageHash)
 	previewUrl := ""
 	if in.PreviewOnly == 1 {
 		previewUrl = antiScanPreviewDataURL(previewBytes)
 	} else {
+		stageStartedAt = time.Now()
 		previewUrl, err = uploadAntiScanPreview(ctx, previewBytes, in)
 		if err != nil {
 			return nil, err
 		}
+		g.Log().Infof(ctx, "防扫图阶段完成 stage:preview_upload durationMs:%d imageHash:%s", time.Since(stageStartedAt).Milliseconds(), imageHash)
 	}
 	res = &sysin.AntiScanPreviewModel{
 		CacheHit:      0,
@@ -114,6 +130,74 @@ func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiSc
 		}
 	}
 	return res, nil
+}
+
+func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiScanSegmentInp, upload *ghttp.UploadFile) (res *sysin.AntiScanSegmentModel, err error) {
+	totalStartedAt := time.Now()
+	defer func() {
+		g.Log().Infof(ctx, "人像分割完成 stage:total durationMs:%d success:%t", time.Since(totalStartedAt).Milliseconds(), err == nil)
+	}()
+	if err = in.Filter(ctx); err != nil {
+		return nil, err
+	}
+	stageStartedAt := time.Now()
+	account, err := s.currentAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.ensureTenantVipFeature(ctx, account.TenantId, sysin.TenantVipFeatureBackgroundReplace); err != nil {
+		return nil, err
+	}
+	g.Log().Infof(ctx, "人像分割阶段完成 stage:auth durationMs:%d", time.Since(stageStartedAt).Milliseconds())
+	stageStartedAt = time.Now()
+	imageBytes, _, err := readAntiScanPreviewImage(ctx, upload, in.UseDefaultImage)
+	if err != nil {
+		return nil, err
+	}
+	imageHash, err := antiScanImageHash(imageBytes)
+	if err != nil {
+		return nil, err
+	}
+	g.Log().Infof(ctx, "人像分割阶段完成 stage:read_hash durationMs:%d sourceBytes:%d imageHash:%s", time.Since(stageStartedAt).Milliseconds(), len(imageBytes), imageHash)
+	stageStartedAt = time.Now()
+	if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash); ok {
+		url := antiScanSegmentURL(cached.SegmentRaw)
+		if url == "" {
+			if legacyBytes := antiScanSegmentImageBytes(cached.SegmentRaw); len(legacyBytes) > 0 {
+				url, err = uploadAntiScanSegment(ctx, legacyBytes, imageHash)
+				if err != nil {
+					return nil, err
+				}
+				if err = s.saveAntiScanDetectionPart(ctx, imageHash, &antiScanDetectResult{CloudRawSaved: 1, Provider: "fapihub-matting", SegmentRaw: encodeFapiHubSegmentPortraitURL(url)}); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if url != "" {
+			width, height := antiScanImageDimensions(imageBytes)
+			g.Log().Infof(ctx, "人像分割阶段完成 stage:cache_lookup durationMs:%d cacheHit:1 imageHash:%s", time.Since(stageStartedAt).Milliseconds(), imageHash)
+			return &sysin.AntiScanSegmentModel{CacheHit: 1, ImageHash: imageHash, SegmentUrl: url, Width: width, Height: height}, nil
+		}
+	}
+	g.Log().Infof(ctx, "人像分割阶段完成 stage:cache_lookup durationMs:%d cacheHit:0 imageHash:%s", time.Since(stageStartedAt).Milliseconds(), imageHash)
+	stageStartedAt = time.Now()
+	conf, err := service.SysConfig().GetCloudResource(ctx)
+	if err != nil {
+		return nil, err
+	}
+	g.Log().Infof(ctx, "人像分割阶段完成 stage:config durationMs:%d imageHash:%s", time.Since(stageStartedAt).Milliseconds(), imageHash)
+	stageStartedAt = time.Now()
+	segmentRaw, err := s.getOrCreateAntiScanMatting(ctx, imageHash, imageBytes, conf, cloudResourceUsageOwner{TenantId: account.TenantId, AccountId: account.Id})
+	if err != nil {
+		return nil, err
+	}
+	g.Log().Infof(ctx, "人像分割阶段完成 stage:matting durationMs:%d imageHash:%s", time.Since(stageStartedAt).Milliseconds(), imageHash)
+	segmentUrl := antiScanSegmentURL(segmentRaw)
+	if segmentUrl == "" {
+		return nil, gerror.New("云端抠图能力未启用")
+	}
+	width, height := antiScanImageDimensions(imageBytes)
+	return &sysin.AntiScanSegmentModel{ImageHash: imageHash, SegmentUrl: segmentUrl, Width: width, Height: height}, nil
 }
 
 func antiScanPreviewDataURL(imageBytes []byte) string {
@@ -249,7 +333,14 @@ func (s *sSysPublish) getOrCreateAntiScanMatting(ctx context.Context, imageHash 
 		g.Log().Warningf(ctx, "云端抠图调用失败 imageHash:%s err:%+v", imageHash, err)
 		return "", antiScanMattingPublicError()
 	}
-	segmentRaw := encodeFapiHubSegmentPortrait(pngBytes)
+	uploadStartedAt := time.Now()
+	segmentUrl, err := uploadAntiScanSegment(ctx, pngBytes, imageHash)
+	if err != nil {
+		return "", err
+	}
+	g.Log().Infof(ctx, "防扫图阶段完成 stage:segment_upload durationMs:%d outputBytes:%d imageHash:%s", time.Since(uploadStartedAt).Milliseconds(), len(pngBytes), imageHash)
+	segmentRaw := encodeFapiHubSegmentPortraitURL(segmentUrl)
+	saveStartedAt := time.Now()
 	if err = s.saveAntiScanDetectionPart(ctx, imageHash, &antiScanDetectResult{
 		CloudRawSaved: 1,
 		Provider:      "fapihub-matting",
@@ -257,6 +348,7 @@ func (s *sSysPublish) getOrCreateAntiScanMatting(ctx context.Context, imageHash 
 	}); err != nil {
 		return "", err
 	}
+	g.Log().Infof(ctx, "防扫图阶段完成 stage:segment_cache_save durationMs:%d imageHash:%s", time.Since(saveStartedAt).Milliseconds(), imageHash)
 	return segmentRaw, nil
 }
 
@@ -272,6 +364,61 @@ func encodeFapiHubSegmentPortrait(imageBytes []byte) string {
 		},
 	})
 	return string(data)
+}
+
+func encodeFapiHubSegmentPortraitURL(url string) string {
+	data, _ := json.Marshal(g.Map{"Provider": "fapihub", "Response": g.Map{"ResultImageUrl": url}})
+	return string(data)
+}
+
+func antiScanSegmentURL(raw string) string {
+	var parsed struct {
+		Response struct {
+			ResultImageURL string `json:"ResultImageUrl"`
+		} `json:"Response"`
+	}
+	if json.Unmarshal([]byte(raw), &parsed) != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Response.ResultImageURL)
+}
+
+func antiScanSegmentImageBytes(raw string) []byte {
+	var parsed struct {
+		Response struct {
+			ResultImage string `json:"ResultImage"`
+			ResultMask  string `json:"ResultMask"`
+		} `json:"Response"`
+	}
+	if json.Unmarshal([]byte(raw), &parsed) != nil {
+		return nil
+	}
+	value := parsed.Response.ResultImage
+	if value == "" {
+		value = parsed.Response.ResultMask
+	}
+	data, _ := base64.StdEncoding.DecodeString(value)
+	return data
+}
+
+func antiScanImageDimensions(imageBytes []byte) (int, int) {
+	config, _, err := image.DecodeConfig(bytes.NewReader(imageBytes))
+	if err != nil {
+		return 0, 0
+	}
+	return config.Width, config.Height
+}
+
+func uploadAntiScanSegment(ctx context.Context, imageBytes []byte, imageHash string) (string, error) {
+	fileHeader, err := file.NewMultipartFileHeader("anti-scan-segment-"+imageHash[:12]+".png", imageBytes)
+	if err != nil {
+		return "", gerror.Wrap(err, "创建人像分割文件失败")
+	}
+	attachment, err := baseservice.CommonUpload().UploadFile(ctx, storager.KindImg, &ghttp.UploadFile{FileHeader: fileHeader})
+	if err != nil {
+		return "", gerror.Wrap(err, "保存人像分割文件失败")
+	}
+	return attachment.FileUrl, nil
 }
 
 func readAntiScanPreviewImage(ctx context.Context, upload *ghttp.UploadFile, useDefault int) ([]byte, string, error) {

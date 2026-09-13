@@ -14,12 +14,22 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 type fapiHubClient struct {
 	apiKey   string
 	endpoint string
 	model    string
+}
+
+var fapiHubHTTPClient = &http.Client{
+	Timeout: 12 * time.Second,
+	Transport: &http.Transport{
+		MaxIdleConns:        32,
+		MaxIdleConnsPerHost: 16,
+		IdleConnTimeout:     90 * time.Second,
+	},
 }
 
 func newFapiHubClient(apiKey string, endpoint string, model string) *fapiHubClient {
@@ -40,13 +50,16 @@ func newFapiHubClient(apiKey string, endpoint string, model string) *fapiHubClie
 
 // removeBackground 调用 FAPIHub 抠图接口，返回透明背景 PNG。
 func (c *fapiHubClient) removeBackground(ctx context.Context, imageBytes []byte) ([]byte, error) {
+	totalStartedAt := time.Now()
 	if c.apiKey == "" {
 		return nil, gerror.New("FAPIHub API Key 未配置")
 	}
-	imageBytes, contentType, ext, err := normalizeFapiHubImageBytes(imageBytes)
+	imageBytes, contentType, ext, err := prepareFapiHubImageBytes(imageBytes, 1600)
 	if err != nil {
 		return nil, err
 	}
+	prepareDuration := time.Since(totalStartedAt)
+	formStartedAt := time.Now()
 	body := bytes.NewBuffer(nil)
 	writer := multipart.NewWriter(body)
 	part, err := createFapiHubImagePart(writer, contentType, ext)
@@ -64,18 +77,21 @@ func (c *fapiHubClient) removeBackground(ctx context.Context, imageBytes []byte)
 	if err = writer.Close(); err != nil {
 		return nil, gerror.Wrap(err, "关闭 FAPIHub 表单失败")
 	}
+	formDuration := time.Since(formStartedAt)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, body)
 	if err != nil {
 		return nil, gerror.Wrap(err, "创建 FAPIHub 请求失败")
 	}
 	req.Header.Set("ApiKey", c.apiKey)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	client := http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	requestStartedAt := time.Now()
+	resp, err := fapiHubHTTPClient.Do(req)
 	if err != nil {
 		return nil, gerror.Wrap(err, "请求 FAPIHub 抠图接口失败")
 	}
+	responseDuration := time.Since(requestStartedAt)
 	defer resp.Body.Close()
+	readStartedAt := time.Now()
 	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 30<<20))
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取 FAPIHub 响应失败")
@@ -86,7 +102,25 @@ func (c *fapiHubClient) removeBackground(ctx context.Context, imageBytes []byte)
 	if len(respBytes) == 0 {
 		return nil, gerror.New("FAPIHub 抠图接口返回空图片")
 	}
+	g.Log().Infof(ctx, "防扫图阶段完成 stage:fapihub prepareMs:%d formMs:%d responseMs:%d readMs:%d inputBytes:%d outputBytes:%d totalMs:%d", prepareDuration.Milliseconds(), formDuration.Milliseconds(), responseDuration.Milliseconds(), time.Since(readStartedAt).Milliseconds(), len(imageBytes), len(respBytes), time.Since(totalStartedAt).Milliseconds())
 	return respBytes, nil
+}
+
+func prepareFapiHubImageBytes(imageBytes []byte, maximumDimension int) ([]byte, string, string, error) {
+	img, _, err := image.Decode(bytes.NewReader(imageBytes))
+	if err != nil {
+		return normalizeFapiHubImageBytes(imageBytes)
+	}
+	bounds := img.Bounds()
+	if maximumDimension <= 0 || (bounds.Dx() <= maximumDimension && bounds.Dy() <= maximumDimension) {
+		return normalizeFapiHubImageBytes(imageBytes)
+	}
+	resized := resizeAntiScanPreviewImage(img, maximumDimension)
+	buf := bytes.NewBuffer(make([]byte, 0, maximumDimension*maximumDimension/2))
+	if err = jpeg.Encode(buf, resized, &jpeg.Options{Quality: 88}); err != nil {
+		return nil, "", "", gerror.Wrap(err, "压缩 FAPIHub 预览图片失败")
+	}
+	return buf.Bytes(), "image/jpeg", "jpg", nil
 }
 
 func createFapiHubImagePart(writer *multipart.Writer, contentType string, ext string) (io.Writer, error) {

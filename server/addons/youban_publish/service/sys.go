@@ -129,6 +129,7 @@ type ISysPublish interface {
 	SyncMediaPHashBucketByMediaId(ctx context.Context, mediaId int64) (err error)
 	RefreshNoteIndex(ctx context.Context, profileId int64) (err error)
 	AdminAntiScanPreview(ctx context.Context, in *sysin.AntiScanPreviewInp, file *ghttp.UploadFile) (res *sysin.AntiScanPreviewModel, err error)
+	AdminAntiScanSegment(ctx context.Context, in *sysin.AntiScanSegmentInp, file *ghttp.UploadFile) (res *sysin.AntiScanSegmentModel, err error)
 	AdminAntiScanMaterialList(ctx context.Context, in *sysin.AntiScanMaterialListInp) (list []*sysin.AntiScanMaterialModel, err error)
 	AdminAntiScanMaterialUpload(ctx context.Context, in *sysin.AntiScanMaterialUploadInp, file *ghttp.UploadFile) (res *sysin.AntiScanMaterialModel, err error)
 	AdminAntiScanMaterialDelete(ctx context.Context, in *sysin.AntiScanMaterialDeleteInp) (err error)

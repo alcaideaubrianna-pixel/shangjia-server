@@ -55,7 +55,7 @@ func renderAntiScanPreview(ctx context.Context, src []byte, in *sysin.AntiScanPr
 	warnings := []string{}
 	canvas := imageToRGBA(base)
 	if in.BackgroundReplaceEnabled == 1 || in.BackgroundTextureEnabled == 1 {
-		next, usedSegment := applyAntiScanBackground(canvas, detect.SegmentRaw, in)
+		next, usedSegment := applyAntiScanBackground(ctx, canvas, detect.SegmentRaw, in)
 		canvas = next
 		if !usedSegment && in.BackgroundReplaceEnabled == 1 {
 			warnings = append(warnings, "未获取到可用人像分割结果，背景替换已降级为纹理叠加")
@@ -118,14 +118,14 @@ func imageToRGBA(src image.Image) *image.RGBA {
 	return dst
 }
 
-func applyAntiScanBackground(src *image.RGBA, segmentRaw string, in *sysin.AntiScanPreviewInp) (*image.RGBA, bool) {
+func applyAntiScanBackground(ctx context.Context, src *image.RGBA, segmentRaw string, in *sysin.AntiScanPreviewInp) (*image.RGBA, bool) {
 	bounds := src.Bounds()
 	bg := patternedBackground(bounds.Dx(), bounds.Dy(), in)
 	if in.BackgroundReplaceEnabled != 1 {
 		overlayTexture(src, in.StickerOpacity)
 		return src, false
 	}
-	portrait, ok := decodeTencentSegmentPortrait(segmentRaw)
+	portrait, ok := decodeTencentSegmentPortrait(ctx, segmentRaw)
 	if !ok {
 		overlayTexture(src, in.StickerOpacity)
 		return src, false
@@ -156,14 +156,15 @@ func overlayTexture(dst *image.RGBA, opacity int) {
 	}
 }
 
-func decodeTencentSegmentPortrait(raw string) (image.Image, bool) {
+func decodeTencentSegmentPortrait(ctx context.Context, raw string) (image.Image, bool) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, false
 	}
 	var parsed struct {
 		Response struct {
-			ResultImage string `json:"ResultImage"`
-			ResultMask  string `json:"ResultMask"`
+			ResultImage    string `json:"ResultImage"`
+			ResultImageURL string `json:"ResultImageUrl"`
+			ResultMask     string `json:"ResultMask"`
 		} `json:"Response"`
 	}
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
@@ -173,12 +174,34 @@ func decodeTencentSegmentPortrait(raw string) (image.Image, bool) {
 	if value == "" {
 		value = parsed.Response.ResultMask
 	}
-	data, err := base64.StdEncoding.DecodeString(value)
+	var data []byte
+	var err error
+	if parsed.Response.ResultImageURL != "" {
+		data, err = readAntiScanRemoteImage(ctx, parsed.Response.ResultImageURL)
+	} else {
+		data, err = base64.StdEncoding.DecodeString(value)
+	}
 	if err != nil {
 		return nil, false
 	}
 	img, _, err := image.Decode(bytes.NewReader(data))
 	return img, err == nil
+}
+
+func readAntiScanRemoteImage(ctx context.Context, value string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, value, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := fapiHubHTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, gerror.Newf("读取人像分割文件失败 HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 12<<20))
 }
 
 func applyAntiScanMasks(ctx context.Context, dst *image.RGBA, in *sysin.AntiScanPreviewInp) {
