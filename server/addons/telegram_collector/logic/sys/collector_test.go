@@ -228,6 +228,14 @@ func TestCollectorDeliveryFromBotCases(t *testing.T) {
 			name: "private document", message: &models.Message{ID: 4, Chat: models.Chat{ID: 99, Type: models.ChatTypePrivate}, Document: &models.Document{FileID: "document"}},
 			wantChat: "99", wantKey: "bot:9:99:message:4", wantMedia: "document", wantFileID: "document",
 		},
+		{
+			name: "animation mp4", message: &models.Message{ID: 5, Chat: models.Chat{ID: 99, Type: models.ChatTypePrivate}, Animation: &models.Animation{FileID: "animation", FileUniqueID: "animation-unique", MimeType: "video/mp4"}},
+			wantChat: "99", wantKey: "bot:9:99:message:5", wantMedia: "video", wantFileID: "animation",
+		},
+		{
+			name: "video document", message: &models.Message{ID: 6, Chat: models.Chat{ID: 99, Type: models.ChatTypePrivate}, Document: &models.Document{FileID: "video-document", MimeType: "video/mp4"}},
+			wantChat: "99", wantKey: "bot:9:99:message:6", wantMedia: "video", wantFileID: "video-document",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -252,6 +260,17 @@ func TestCollectorDeliveryFromBotCases(t *testing.T) {
 				t.Fatalf("media=%+v", delivery.Media)
 			}
 		})
+	}
+}
+
+func TestCollectorBotMediaItemsDeduplicatesAnimationDocument(t *testing.T) {
+	message := &models.Message{
+		Animation: &models.Animation{FileID: "animation", FileUniqueID: "same-file", MimeType: "video/mp4"},
+		Document:  &models.Document{FileID: "document", FileUniqueID: "same-file", MimeType: "video/mp4"},
+	}
+	items := collectorBotMediaItems(message)
+	if len(items) != 1 || items[0].Type != "video" || items[0].FileID != "animation" {
+		t.Fatalf("media=%+v, want one normalized animation video", items)
 	}
 }
 

@@ -264,15 +264,43 @@ func collectorBotMessageKey(sourceID int64, chatID string, messageID int64, grou
 
 func collectorBotMediaItems(message *models.Message) []sysin.CollectorMediaItem {
 	items := make([]sysin.CollectorMediaItem, 0, 2)
+	seen := make(map[string]struct{}, 4)
+	appendItem := func(mediaType, fileID, fileUniqueID string) {
+		fileID = strings.TrimSpace(fileID)
+		fileUniqueID = strings.TrimSpace(fileUniqueID)
+		if fileID == "" {
+			return
+		}
+		if _, ok := seen["id:"+fileID]; ok {
+			return
+		}
+		if fileUniqueID != "" {
+			if _, ok := seen["unique:"+fileUniqueID]; ok {
+				return
+			}
+		}
+		seen["id:"+fileID] = struct{}{}
+		if fileUniqueID != "" {
+			seen["unique:"+fileUniqueID] = struct{}{}
+		}
+		items = append(items, sysin.CollectorMediaItem{Type: mediaType, FileID: fileID})
+	}
 	if len(message.Photo) > 0 {
 		photo := message.Photo[len(message.Photo)-1]
-		items = append(items, sysin.CollectorMediaItem{Type: "photo", FileID: photo.FileID})
+		appendItem("photo", photo.FileID, photo.FileUniqueID)
 	}
 	if message.Video != nil {
-		items = append(items, sysin.CollectorMediaItem{Type: "video", FileID: message.Video.FileID})
+		appendItem("video", message.Video.FileID, message.Video.FileUniqueID)
+	}
+	if message.Animation != nil {
+		appendItem("video", message.Animation.FileID, message.Animation.FileUniqueID)
 	}
 	if message.Document != nil {
-		items = append(items, sysin.CollectorMediaItem{Type: "document", FileID: message.Document.FileID})
+		mediaType := "document"
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(message.Document.MimeType)), "video/") {
+			mediaType = "video"
+		}
+		appendItem(mediaType, message.Document.FileID, message.Document.FileUniqueID)
 	}
 	return items
 }
