@@ -831,6 +831,36 @@ type AdminNoteBatchIdsModel struct {
 	Total int     `json:"total" dc:"资料总数"`
 }
 
+type AdminNoteDuplicateMediaModel struct {
+	Id      int64  `json:"id" dc:"媒体ID"`
+	FileUrl string `json:"fileUrl" dc:"图片地址"`
+}
+
+type AdminNoteDuplicateItemModel struct {
+	Id        int64                           `json:"id" dc:"资料ID"`
+	Uuid      string                          `json:"uuid" dc:"资料UUID"`
+	ProfileNo string                          `json:"profileNo" dc:"资料编号"`
+	Title     string                          `json:"title" dc:"标题"`
+	CreatedAt *gtime.Time                     `json:"createdAt" dc:"入库时间"`
+	Media     []*AdminNoteDuplicateMediaModel `json:"media" dc:"展示图片"`
+}
+
+type AdminNoteDuplicateGroupModel struct {
+	Signature  string                         `json:"signature" dc:"图片集合签名"`
+	Keep       *AdminNoteDuplicateItemModel   `json:"keep" dc:"保留的最新资料"`
+	Duplicates []*AdminNoteDuplicateItemModel `json:"duplicates" dc:"待删除资料"`
+}
+
+type AdminNoteDuplicateScanModel struct {
+	Groups          []*AdminNoteDuplicateGroupModel `json:"groups" dc:"重复资料组"`
+	GroupTotal      int                             `json:"groupTotal" dc:"重复组数"`
+	DuplicateTotal  int                             `json:"duplicateTotal" dc:"待删除资料数"`
+	BatchTotal      int                             `json:"batchTotal" dc:"本批待删除资料数"`
+	CandidateTotal  int                             `json:"candidateTotal" dc:"候选资料数"`
+	IncompleteTotal int                             `json:"incompleteTotal" dc:"图片指纹不完整而跳过的资料数"`
+	HasMore         bool                            `json:"hasMore" dc:"是否还有后续重复资料"`
+}
+
 type FollowNoteMediaModel struct {
 	Id                int64  `json:"id" dc:"ID"`
 	ProfileId         int64  `json:"profileId" dc:"资料ID"`

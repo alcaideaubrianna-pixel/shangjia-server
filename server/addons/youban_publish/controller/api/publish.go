@@ -843,6 +843,14 @@ func (c *cPublishAdmin) NoteBatchIds(ctx context.Context, req *publish.AdminNote
 	return &publish.AdminNoteBatchIdsRes{AdminNoteBatchIdsModel: data}, nil
 }
 
+func (c *cPublishAdmin) NoteDuplicateScan(ctx context.Context, req *publish.AdminNoteDuplicateScanReq) (res *publish.AdminNoteDuplicateScanRes, err error) {
+	data, err := service.SysPublish().AdminNoteDuplicateScan(ctx, &req.NoteListInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminNoteDuplicateScanRes{AdminNoteDuplicateScanModel: data}, nil
+}
+
 func (c *cPublishAdmin) TagList(ctx context.Context, req *publish.AdminTagListReq) (res *publish.AdminTagListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminTagList(ctx, &req.TagListInp)
 	if err != nil {

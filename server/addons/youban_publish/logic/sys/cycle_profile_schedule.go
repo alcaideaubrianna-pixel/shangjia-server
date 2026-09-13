@@ -32,6 +32,7 @@ type profileCycleChannelConfig struct {
 	Id          int64  `orm:"id"`
 	TenantId    int64  `orm:"tenant_id"`
 	Enabled     int    `orm:"cycle_publish_enabled"`
+	Mode        string `orm:"cycle_publish_mode"`
 	Days        int    `orm:"cycle_publish_days"`
 	PublishTime string `orm:"cycle_publish_time"`
 	Status      int    `orm:"status"`
@@ -59,6 +60,7 @@ type profileCycleDueRow struct {
 	ChannelEnabled     int         `orm:"channel_enabled"`
 	ChannelDays        int         `orm:"channel_days"`
 	ChannelPublishTime string      `orm:"channel_publish_time"`
+	ChannelMode        string      `orm:"channel_mode"`
 	ChannelStatus      int         `orm:"channel_status"`
 	PublishDirection   string      `orm:"publish_direction"`
 }
@@ -110,7 +112,7 @@ func (s *sSysPublish) profileCycleChannelConfigById(ctx context.Context, channel
 		return config, nil
 	}
 	err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Fields("id,tenant_id,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,status,publish_direction").
+		Fields("id,tenant_id,cycle_publish_enabled,cycle_publish_mode,cycle_publish_days,cycle_publish_time,status,publish_direction").
 		Where("id", channelId).WhereNull("deleted_at").Scan(&config)
 	if err != nil {
 		return config, gerror.Wrap(err, "读取频道循环配置失败")
@@ -119,7 +121,8 @@ func (s *sSysPublish) profileCycleChannelConfigById(ctx context.Context, channel
 }
 
 func profileCycleChannelUsable(config profileCycleChannelConfig) bool {
-	return config.Id > 0 && config.Enabled == 1 && config.Status == 1 && strings.EqualFold(strings.TrimSpace(config.Direction), "up")
+	mode := strings.TrimSpace(config.Mode)
+	return config.Id > 0 && config.Enabled == 1 && (mode == "" || mode == "time") && config.Status == 1 && strings.EqualFold(strings.TrimSpace(config.Direction), "up")
 }
 
 func sameProfileCycleConfig(first, second profileCycleChannelConfig) bool {
@@ -405,7 +408,7 @@ func (s *sSysPublish) profileCycleDueRows(ctx context.Context, limit int) ([]pro
 		LeftJoin(publishChannelTable+" c", "c.id=j.channel_id AND c.deleted_at IS NULL").
 		Fields("j.id AS job_id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.sent_at,j.cycle_days,j.cycle_publish_time,j.next_cycle_at,j.dispatch_count,"+
 			"COALESCE(c.cycle_publish_enabled,0) AS channel_enabled,COALESCE(c.cycle_publish_days,0) AS channel_days,"+
-			"COALESCE(c.cycle_publish_time,'') AS channel_publish_time,COALESCE(c.status,0) AS channel_status,COALESCE(c.publish_direction,'') AS publish_direction").
+			"COALESCE(c.cycle_publish_time,'') AS channel_publish_time,COALESCE(c.cycle_publish_mode,'time') AS channel_mode,COALESCE(c.status,0) AS channel_status,COALESCE(c.publish_direction,'') AS publish_direction").
 		Where("j.cycle_enabled", 1).WhereIn("j.status", []string{"sent", "superseded"}).WhereNotNull("j.next_cycle_at").
 		WhereLTE("j.next_cycle_at", gtime.Now()).OrderAsc("j.next_cycle_at").OrderAsc("j.id").Limit(limit).Scan(&rows)
 	if err != nil {
@@ -417,7 +420,7 @@ func (s *sSysPublish) profileCycleDueRows(ctx context.Context, limit int) ([]pro
 func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCycleDueRow, channelBacklog map[int64]int) (bool, error) {
 	config := profileCycleChannelConfig{
 		Id: row.ChannelId, TenantId: row.TenantId, Enabled: row.ChannelEnabled, Days: row.ChannelDays,
-		PublishTime: row.ChannelPublishTime, Status: row.ChannelStatus, Direction: row.PublishDirection,
+		Mode: row.ChannelMode, PublishTime: row.ChannelPublishTime, Status: row.ChannelStatus, Direction: row.PublishDirection,
 	}
 	if !profileCycleChannelUsable(config) {
 		return false, s.disableProfileCycleJob(ctx, row.JobId, "频道循环配置已关闭")

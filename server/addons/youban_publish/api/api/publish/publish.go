@@ -669,6 +669,15 @@ type AdminNoteBatchIdsRes struct {
 	*sysin.AdminNoteBatchIdsModel
 }
 
+type AdminNoteDuplicateScanReq struct {
+	g.Meta `path:"/publish/admin/note/duplicate/scan" method:"get" tags:"上架插件管理端" summary:"查找图片完全重复的资料"`
+	sysin.NoteListInp
+}
+
+type AdminNoteDuplicateScanRes struct {
+	*sysin.AdminNoteDuplicateScanModel
+}
+
 type AdminTagListReq struct {
 	g.Meta `path:"/publish/admin/tag/list" method:"get" tags:"上架插件管理端" summary:"标签列表"`
 	sysin.TagListInp
