@@ -21,34 +21,40 @@
       "order": 30
     },
     {
+      "name": "xiaohuiji-worker-app2",
+      "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/KJ8yT6qx7P2mV4nR9cW3sL5u",
+      "enabled": true,
+      "order": 40
+    },
+    {
       "name": "xiaohuiji-worker-app3",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/4S_4CLQJsRiN9eCclg171",
       "enabled": true,
-      "order": 40
+      "order": 50
     },
     {
       "name": "xiaohuiji-media-worker-app3",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/e7Cv2URu_o93FAioDASdi",
       "enabled": true,
-      "order": 50
+      "order": 60
     },
     {
       "name": "xiaohuiji-collector-worker-app3",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/4aIUrakpVyEQQ_n_H6Y6M",
       "enabled": true,
-      "order": 60
+      "order": 70
     },
     {
       "name": "xiaohuiji-publish-worker-app1",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/YMWMqZXp-IJy13DR2zfiL",
       "enabled": true,
-      "order": 70
+      "order": 80
     },
     {
       "name": "xiaohuiji-publish-worker-app3",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/PkDBNLuoWkOSrLP6C5LAO",
       "enabled": true,
-      "order": 80
+      "order": 90
     }
   ]
 }

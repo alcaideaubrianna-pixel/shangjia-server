@@ -8,12 +8,31 @@ from unittest import mock
 
 
 SCRIPT = Path(__file__).with_name("trigger-dokploy-webhooks.py")
+PRODUCTION_CONFIG = SCRIPT.parents[2] / "deploy" / "dokploy-targets.json"
 SPEC = importlib.util.spec_from_file_location("trigger_dokploy_webhooks", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
 class TriggerDokployWebhooksTest(unittest.TestCase):
+    def test_production_config_contains_all_deployment_targets(self):
+        targets = MODULE.load_targets(PRODUCTION_CONFIG)
+
+        self.assertEqual(
+            [
+                "xiaohuiji-api",
+                "xiaohuiji-account",
+                "xiaohuiji-scheduler",
+                "xiaohuiji-worker-app2",
+                "xiaohuiji-worker-app3",
+                "xiaohuiji-media-worker-app3",
+                "xiaohuiji-collector-worker-app3",
+                "xiaohuiji-publish-worker-app1",
+                "xiaohuiji-publish-worker-app3",
+            ],
+            [target["name"] for target in targets],
+        )
+
     def write_config(self, targets):
         handle = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False)
         json.dump({"targets": targets}, handle)
