@@ -851,6 +851,22 @@ func (c *cPublishAdmin) NoteDuplicateScan(ctx context.Context, req *publish.Admi
 	return &publish.AdminNoteDuplicateScanRes{AdminNoteDuplicateScanModel: data}, nil
 }
 
+func (c *cPublishAdmin) NoteDuplicateBatch(ctx context.Context, req *publish.AdminNoteDuplicateBatchReq) (res *publish.AdminNoteDuplicateBatchRes, err error) {
+	data, err := service.SysPublish().AdminNoteDuplicateBatch(ctx, &req.AdminNoteDuplicateBatchInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminNoteDuplicateBatchRes{AdminNoteDuplicateScanModel: data}, nil
+}
+
+func (c *cPublishAdmin) NoteDuplicateCleanup(ctx context.Context, req *publish.AdminNoteDuplicateCleanupReq) (res *publish.AdminNoteDuplicateCleanupRes, err error) {
+	data, err := service.SysPublish().AdminNoteDuplicateCleanup(ctx, &req.AdminNoteDuplicateCleanupInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminNoteDuplicateCleanupRes{AdminNoteDuplicateCleanupModel: data}, nil
+}
+
 func (c *cPublishAdmin) TagList(ctx context.Context, req *publish.AdminTagListReq) (res *publish.AdminTagListRes, err error) {
 	list, totalCount, err := service.SysPublish().AdminTagList(ctx, &req.TagListInp)
 	if err != nil {

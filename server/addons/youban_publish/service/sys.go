@@ -281,6 +281,8 @@ type ISysPublish interface {
 	AdminNoteList(ctx context.Context, in *sysin.NoteListInp) (res *sysin.AdminNotePageModel, err error)
 	AdminNoteBatchIds(ctx context.Context, in *sysin.NoteListInp) (res *sysin.AdminNoteBatchIdsModel, err error)
 	AdminNoteDuplicateScan(ctx context.Context, in *sysin.NoteListInp) (res *sysin.AdminNoteDuplicateScanModel, err error)
+	AdminNoteDuplicateBatch(ctx context.Context, in *sysin.AdminNoteDuplicateBatchInp) (res *sysin.AdminNoteDuplicateScanModel, err error)
+	AdminNoteDuplicateCleanup(ctx context.Context, in *sysin.AdminNoteDuplicateCleanupInp) (res *sysin.AdminNoteDuplicateCleanupModel, err error)
 	AdminTagList(ctx context.Context, in *sysin.TagListInp) (list []*sysin.TagModel, totalCount int, err error)
 	AdminTagSave(ctx context.Context, in *sysin.TagSaveInp) (err error)
 	AdminTagDelete(ctx context.Context, in *sysin.TagDeleteInp) (err error)

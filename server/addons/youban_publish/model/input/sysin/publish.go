@@ -859,6 +859,23 @@ type AdminNoteDuplicateScanModel struct {
 	CandidateTotal  int                             `json:"candidateTotal" dc:"候选资料数"`
 	IncompleteTotal int                             `json:"incompleteTotal" dc:"图片指纹不完整而跳过的资料数"`
 	HasMore         bool                            `json:"hasMore" dc:"是否还有后续重复资料"`
+	ScanToken       string                          `json:"scanToken" dc:"扫描会话凭证"`
+	Cursor          int                             `json:"cursor" dc:"当前批次游标"`
+	NextCursor      int                             `json:"nextCursor" dc:"下一批次游标"`
+}
+
+type AdminNoteDuplicateBatchInp struct {
+	ScanToken string `json:"scanToken" v:"required#扫描会话凭证不能为空" dc:"扫描会话凭证"`
+	Cursor    int    `json:"cursor" v:"min:0#批次游标不合法" dc:"批次游标"`
+}
+
+type AdminNoteDuplicateCleanupInp struct {
+	AdminNoteDuplicateBatchInp
+	Ids []int64 `json:"ids" v:"required|length:1,10#请选择要删除的重复资料|单次只能删除1到10条资料" dc:"资料ID"`
+}
+
+type AdminNoteDuplicateCleanupModel struct {
+	DeletedIds []int64 `json:"deletedIds" dc:"已删除资料ID"`
 }
 
 type FollowNoteMediaModel struct {

@@ -2,6 +2,9 @@ package sys
 
 import (
 	"testing"
+	"time"
+
+	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
@@ -40,5 +43,48 @@ func TestDuplicateScanBatchLimitsReturnedDeleteTargets(t *testing.T) {
 	}
 	if batch[0].Keep.Id != 9 || batch[1].Keep.Id != 6 {
 		t.Fatal("batch must retain each group's newest profile")
+	}
+}
+
+func TestValidateDuplicateCleanupStateRejectsChangedTargetSignature(t *testing.T) {
+	keepTime := gtime.New(time.Unix(20, 0))
+	targetTime := gtime.New(time.Unix(10, 0))
+	candidates := map[int64]duplicateScanCandidate{1: {ProfileId: 1, KeepProfileId: 2, Signature: "same"}}
+	profiles := map[int64]*sysin.AdminNoteDuplicateItemModel{
+		1: {Id: 1, CreatedAt: targetTime},
+		2: {Id: 2, CreatedAt: keepTime},
+	}
+	if err := validateDuplicateCleanupState([]int64{1}, candidates, profiles, map[int64]string{1: "changed", 2: "same"}); err == nil {
+		t.Fatal("expected changed target signature to be rejected")
+	}
+}
+
+func TestValidateDuplicateCleanupStateRejectsMissingKeep(t *testing.T) {
+	candidates := map[int64]duplicateScanCandidate{1: {ProfileId: 1, KeepProfileId: 2, Signature: "same"}}
+	profiles := map[int64]*sysin.AdminNoteDuplicateItemModel{1: {Id: 1}}
+	if err := validateDuplicateCleanupState([]int64{1}, candidates, profiles, map[int64]string{1: "same"}); err == nil {
+		t.Fatal("expected missing retained profile to be rejected")
+	}
+}
+
+func TestValidateDuplicateCleanupStateRequiresNewerKeep(t *testing.T) {
+	sameTime := gtime.New(time.Unix(10, 0))
+	candidates := map[int64]duplicateScanCandidate{2: {ProfileId: 2, KeepProfileId: 1, Signature: "same"}}
+	profiles := map[int64]*sysin.AdminNoteDuplicateItemModel{
+		1: {Id: 1, CreatedAt: sameTime},
+		2: {Id: 2, CreatedAt: sameTime},
+	}
+	if err := validateDuplicateCleanupState([]int64{2}, candidates, profiles, map[int64]string{1: "same", 2: "same"}); err == nil {
+		t.Fatal("expected older retained profile to be rejected")
+	}
+}
+
+func TestValidateDuplicateScanSessionOwner(t *testing.T) {
+	session := &duplicateScanSession{TenantId: 7, AdminAccountId: 8}
+	if err := validateDuplicateScanSessionOwner(session, &sysin.AccountModel{TenantId: 7, Id: 8}); err != nil {
+		t.Fatalf("expected matching owner: %v", err)
+	}
+	if err := validateDuplicateScanSessionOwner(session, &sysin.AccountModel{TenantId: 7, Id: 9}); err == nil {
+		t.Fatal("expected another admin account to be rejected")
 	}
 }

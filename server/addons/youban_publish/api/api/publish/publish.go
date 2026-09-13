@@ -678,6 +678,24 @@ type AdminNoteDuplicateScanRes struct {
 	*sysin.AdminNoteDuplicateScanModel
 }
 
+type AdminNoteDuplicateBatchReq struct {
+	g.Meta `path:"/publish/admin/note/duplicate/batch" method:"get" tags:"上架插件管理端" summary:"读取重复资料扫描批次"`
+	sysin.AdminNoteDuplicateBatchInp
+}
+
+type AdminNoteDuplicateBatchRes struct {
+	*sysin.AdminNoteDuplicateScanModel
+}
+
+type AdminNoteDuplicateCleanupReq struct {
+	g.Meta `path:"/publish/admin/note/duplicate/cleanup" method:"post" tags:"上架插件管理端" summary:"校验并删除重复资料批次"`
+	sysin.AdminNoteDuplicateCleanupInp
+}
+
+type AdminNoteDuplicateCleanupRes struct {
+	*sysin.AdminNoteDuplicateCleanupModel
+}
+
 type AdminTagListReq struct {
 	g.Meta `path:"/publish/admin/tag/list" method:"get" tags:"上架插件管理端" summary:"标签列表"`
 	sysin.TagListInp
