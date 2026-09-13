@@ -1564,6 +1564,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_dispatch" (
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dispatch_event" ON "hg_youban_publish_collect_dispatch" ("event_id", "rule_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dispatch_owner" ON "hg_youban_publish_collect_dispatch" ("tenant_id", "account_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dispatch_source_status" ON "hg_youban_publish_collect_dispatch" ("source_id", "status", "event_id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_dispatch_channel" (
   "id" BIGSERIAL PRIMARY KEY,

@@ -139,6 +139,7 @@ func (s *sSysPublish) markCollectDispatchSentByProfile(ctx context.Context, prof
 		if err != nil {
 			return gerror.Wrap(err, "更新采集事件完成状态失败")
 		}
+		s.syncCollectSourceStatsForEvent(ctx, row["event_id"].Int64())
 	}
 	return nil
 }

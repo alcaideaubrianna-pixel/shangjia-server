@@ -708,6 +708,7 @@ ALTER TABLE `hg_youban_publish_collect_content` DROP COLUMN IF EXISTS `media_jso
 DROP TABLE IF EXISTS `hg_youban_publish_collect_content_media`;
 ALTER TABLE `hg_youban_publish_collect_event` ADD KEY `idx_ybp_collect_event_queue` (`tenant_id`,`account_id`,`source_id`,`status`,`processed_at`,`source_chat_id`,`source_message_id`,`id`);
 ALTER TABLE `hg_youban_publish_collect_dispatch` ADD KEY `idx_ybp_collect_dispatch_dedupe` (`tenant_id`,`account_id`,`event_id`,`status`,`id`);
+ALTER TABLE `hg_youban_publish_collect_dispatch` ADD KEY `idx_ybp_collect_dispatch_source_status` (`source_id`,`status`,`event_id`);
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_dedupe_entry` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,

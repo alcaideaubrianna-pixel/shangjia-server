@@ -60,6 +60,7 @@ func (s *sSysPublish) markCollectEventsFailedByDispatchRows(ctx context.Context,
 			Update(); err != nil {
 			return gerror.Wrap(err, "更新采集事件失败状态失败")
 		}
+		s.syncCollectSourceStatsForEvent(ctx, eventId)
 	}
 	return nil
 }

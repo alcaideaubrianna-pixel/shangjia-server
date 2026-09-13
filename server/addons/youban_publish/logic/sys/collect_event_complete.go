@@ -45,6 +45,7 @@ func (s *sSysPublish) recoverProcessedCollectEvents(ctx context.Context, limit i
 			Update(); err != nil {
 			return gerror.Wrap(err, "恢复采集事件完成状态失败")
 		}
+		s.syncCollectSourceStatsForEvent(ctx, eventId)
 	}
 	return nil
 }

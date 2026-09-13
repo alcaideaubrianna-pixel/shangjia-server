@@ -426,7 +426,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_dispatch` (
   `finished_at` datetime DEFAULT NULL COMMENT '完成时间',
   PRIMARY KEY (`id`),
   KEY `idx_ybp_collect_dispatch_event` (`event_id`,`rule_id`),
-  KEY `idx_ybp_collect_dispatch_owner` (`tenant_id`,`account_id`,`status`,`id`)
+  KEY `idx_ybp_collect_dispatch_owner` (`tenant_id`,`account_id`,`status`,`id`),
+  KEY `idx_ybp_collect_dispatch_source_status` (`source_id`,`status`,`event_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴采集分发';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_dispatch_channel` (

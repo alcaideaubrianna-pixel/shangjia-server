@@ -78,8 +78,6 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 	}
 	eventDao := pdao.YoubanPublishCollectEvent
 	eventCols := eventDao.Columns()
-	sourceDao := pdao.YoubanPublishCollectSource
-	sourceCols := sourceDao.Columns()
 	event, err := eventDao.Ctx(ctx).Where(eventCols.SourceUniqueKey, message.SourceUniqueKey).One()
 	if err != nil {
 		return 0, gerror.Wrap(err, "读取采集事件失败")
@@ -134,11 +132,9 @@ func (s *sSysPublish) ingestCollectMessage(ctx context.Context, message *Collect
 		return 0, err
 	}
 	s.appendCollectEventLogForRecord(ctx, created, "ingest", "created", "采集事件已入库", "")
-	_, _ = sourceDao.Ctx(ctx).Where(sourceCols.Id, message.SourceId).Data(g.Map{
-		sourceCols.EventTotal:  gdb.Raw(sourceCols.EventTotal + "+1"),
-		sourceCols.LastEventAt: now,
-		sourceCols.UpdatedAt:   now,
-	}).Update()
+	if err = s.syncCollectSourceStats(ctx, message.SourceId); err != nil {
+		g.Log().Warningf(ctx, "同步新采集事件统计失败 eventId:%d sourceId:%d err:%+v", eventId, message.SourceId, err)
+	}
 	return eventId, nil
 }
 

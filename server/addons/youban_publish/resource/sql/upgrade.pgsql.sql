@@ -722,6 +722,7 @@ ALTER TABLE IF EXISTS "hg_youban_publish_collect_content" DROP COLUMN IF EXISTS 
 DROP TABLE IF EXISTS "hg_youban_publish_collect_content_media";
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_event_queue" ON "hg_youban_publish_collect_event" ("tenant_id", "account_id", "source_id", "status", "processed_at", "source_chat_id", "source_message_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dispatch_dedupe" ON "hg_youban_publish_collect_dispatch" ("tenant_id", "account_id", "event_id", "status", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_collect_dispatch_source_status" ON "hg_youban_publish_collect_dispatch" ("source_id", "status", "event_id");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_dedupe_entry" (
   "id" BIGSERIAL PRIMARY KEY,
