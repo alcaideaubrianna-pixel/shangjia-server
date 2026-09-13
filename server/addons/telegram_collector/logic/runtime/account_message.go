@@ -170,11 +170,11 @@ func accountMessageMedia(message *tg.Message, chatID string) []sysin.CollectorMe
 		item.SourceDCID = photo.DCID
 	case *tg.MessageMediaDocument:
 		item.Type = sysin.MediaKindFile
-		if value.Video || value.Round {
-			item.Type = sysin.MediaKindVideo
-		}
 		document, documentOK := value.Document.(*tg.Document)
 		if !documentOK {
+			if value.Video || value.Round {
+				item.Type = sysin.MediaKindVideo
+			}
 			return []sysin.CollectorMediaItem{item}
 		}
 		item.SourceKind = "document"
@@ -184,6 +184,9 @@ func accountMessageMedia(message *tg.Message, chatID string) []sysin.CollectorMe
 		item.SourceMimeType = document.MimeType
 		item.SourceDCID = document.DCID
 		item.SourceSize = document.Size
+		if value.Video || value.Round || strings.HasPrefix(strings.ToLower(strings.TrimSpace(document.MimeType)), "video/") {
+			item.Type = sysin.MediaKindVideo
+		}
 	default:
 		return nil
 	}
