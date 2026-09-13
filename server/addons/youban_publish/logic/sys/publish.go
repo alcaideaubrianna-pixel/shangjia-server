@@ -28,6 +28,7 @@ type sSysPublish struct {
 	mediaQueueServer      *asynq.Server
 	mediaBulkQueueServer  *asynq.Server
 	mediaProcessServer    *asynq.Server
+	autoDeleteQueueServer *asynq.Server
 	backgroundQueueServer *asynq.Server
 	profileQueueServer    *asynq.Server
 	historyQueueServer    *asynq.Server
