@@ -163,6 +163,9 @@ func (s *sSysPublish) findProfileFingerprintDuplicate(ctx context.Context, tenan
 }
 
 func attachProfileFingerprintsTx(ctx context.Context, tx gdb.TX, tenantID, accountID, profileID int64, items []profileFingerprint) error {
+	if err := lockProfileFingerprintAccountsTx(ctx, tx, []int64{accountID}); err != nil {
+		return err
+	}
 	if _, err := detachProfileFingerprintsTx(ctx, tx, []int64{profileID}); err != nil {
 		return err
 	}
@@ -224,6 +227,7 @@ func clearProfileFingerprintCache(ctx context.Context, tenantID, accountID int64
 }
 
 func insertProfileFingerprintRowsBatched(ctx context.Context, rows []g.Map) error {
+	sortProfileFingerprintRows(rows)
 	const batchSize = 500
 	for start := 0; start < len(rows); start += batchSize {
 		end := start + batchSize
@@ -238,6 +242,7 @@ func insertProfileFingerprintRowsBatched(ctx context.Context, rows []g.Map) erro
 }
 
 func insertProfileFingerprintRowsBatchedTx(ctx context.Context, tx gdb.TX, rows []g.Map) error {
+	sortProfileFingerprintRows(rows)
 	const batchSize = 500
 	for start := 0; start < len(rows); start += batchSize {
 		end := start + batchSize
@@ -251,7 +256,48 @@ func insertProfileFingerprintRowsBatchedTx(ctx context.Context, tx gdb.TX, rows 
 	return nil
 }
 
+func sortProfileFingerprintRows(rows []g.Map) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		left, right := rows[i], rows[j]
+		for _, field := range []string{"tenant_id", "account_id", "channel_id"} {
+			lv, rv := g.NewVar(left[field]).Int64(), g.NewVar(right[field]).Int64()
+			if lv != rv {
+				return lv < rv
+			}
+		}
+		for _, field := range []string{"layer", "signature"} {
+			lv, rv := g.NewVar(left[field]).String(), g.NewVar(right[field]).String()
+			if lv != rv {
+				return lv < rv
+			}
+		}
+		for _, field := range []string{"item_total", "signature_count", "profile_id"} {
+			lv, rv := g.NewVar(left[field]).Int64(), g.NewVar(right[field]).Int64()
+			if lv != rv {
+				return lv < rv
+			}
+		}
+		return false
+	})
+}
+
+func lockProfileFingerprintAccountsTx(ctx context.Context, tx gdb.TX, accountIDs []int64) error {
+	accountIDs = uniqueIds(accountIDs)
+	if len(accountIDs) == 0 {
+		return nil
+	}
+	sort.Slice(accountIDs, func(i, j int) bool { return accountIDs[i] < accountIDs[j] })
+	if _, err := tx.Model(publishAccountTable).Ctx(ctx).Fields("id").
+		WhereIn("id", accountIDs).OrderAsc("id").LockUpdate().All(); err != nil {
+		return gerror.Wrap(err, "锁定资料指纹账号失败")
+	}
+	return nil
+}
+
 func (s *sSysPublish) replaceProfileFingerprintProjectionTx(ctx context.Context, tx gdb.TX, tenantID, accountID, profileID int64, channelIDs []int64) ([]profileFingerprint, []profileFingerprint, error) {
+	if err := lockProfileFingerprintAccountsTx(ctx, tx, []int64{accountID}); err != nil {
+		return nil, nil, err
+	}
 	oldRows, err := tx.Model(publishProfileFingerprintTable).Ctx(ctx).Where("profile_id", profileID).WhereNot("layer", "_indexed").All()
 	if err != nil {
 		return nil, nil, gerror.Wrap(err, "读取资料旧指纹失败")
@@ -393,6 +439,18 @@ func detachProfileFingerprintsTx(ctx context.Context, tx gdb.TX, profileIDs []in
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取待删除资料指纹失败")
 	}
+	accountIDs := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		accountIDs = append(accountIDs, row["account_id"].Int64())
+	}
+	if err = lockProfileFingerprintAccountsTx(ctx, tx, accountIDs); err != nil {
+		return nil, err
+	}
+	// Rows may have changed while waiting for the account lock.
+	rows, err = tx.Model(publishProfileFingerprintTable).Ctx(ctx).WhereIn("profile_id", profileIDs).All()
+	if err != nil {
+		return nil, gerror.Wrap(err, "重新读取待删除资料指纹失败")
+	}
 	if _, err = tx.Model(publishProfileFingerprintTable).Ctx(ctx).WhereIn("profile_id", profileIDs).Delete(); err != nil {
 		return nil, gerror.Wrap(err, "删除资料指纹失败")
 	}
@@ -408,6 +466,16 @@ func detachProfileFingerprintsTx(ctx context.Context, tx gdb.TX, profileIDs []in
 			return nil, gerror.Wrap(findErr, "读取资料指纹接替记录失败")
 		}
 		if !candidate.IsEmpty() {
+			exists, existsErr := tx.Model(publishProfileFingerprintTable).Ctx(ctx).
+				Where("tenant_id", row["tenant_id"]).Where("account_id", row["account_id"]).Where("channel_id", row["channel_id"]).
+				Where("layer", row["layer"]).Where("signature", row["signature"]).Where("item_total", row["item_total"]).
+				Where("signature_count", row["signature_count"]).Where("owner_marker", "owner").Count()
+			if existsErr != nil {
+				return nil, gerror.Wrap(existsErr, "检查资料指纹现有 owner 失败")
+			}
+			if exists > 0 {
+				continue
+			}
 			if _, findErr = tx.Model(publishProfileFingerprintTable).Ctx(ctx).Where("id", candidate["id"].Int64()).Data(g.Map{"owner_marker": "owner", "updated_at": gtime.Now()}).Update(); findErr != nil {
 				return nil, gerror.Wrap(findErr, "提升资料指纹接替记录失败")
 			}
