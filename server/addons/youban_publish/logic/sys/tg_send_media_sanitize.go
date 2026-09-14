@@ -142,8 +142,7 @@ func (s *sSysPublish) prepareTelegramBackgroundReplacement(ctx context.Context, 
 		return "", nil, err
 	}
 	provider := antiScanMattingProvider(conf)
-	cached, cacheHit := s.getAntiScanSegmentCache(ctx, imageHash)
-	cacheHit = cacheHit && antiScanMattingCacheMatches(cached, provider)
+	_, cacheHit := s.getAntiScanSegmentCache(ctx, imageHash)
 	if !cacheHit {
 		if err = s.ensureImageQuotaAvailable(ctx, media.TenantId); err != nil {
 			return "", nil, err

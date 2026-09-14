@@ -23,6 +23,7 @@ import (
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/gtime"
 	_ "golang.org/x/image/webp"
+	"golang.org/x/sync/singleflight"
 
 	"hotgo/addons/youban_publish/global"
 	"hotgo/addons/youban_publish/model"
@@ -39,6 +40,8 @@ const (
 	antiScanPreviewRenderVersion = 4
 	antiScanMattingErrorMessage  = "云端抠图服务暂时不可用，请稍后重试或联系管理员检查云资源额度"
 )
+
+var antiScanMattingGroup singleflight.Group
 
 // AdminAntiScanPreview 生成防扫图实时预览，预览产物按精确图片哈希 + 配置 hash 复用缓存。
 func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiScanPreviewInp, upload *ghttp.UploadFile) (res *sysin.AntiScanPreviewModel, err error) {
@@ -170,7 +173,7 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 	provider := antiScanMattingProvider(conf)
 	g.Log().Infof(ctx, "人像分割阶段完成 stage:config durationMs:%d provider:%s imageHash:%s", time.Since(stageStartedAt).Milliseconds(), provider, imageHash)
 	stageStartedAt = time.Now()
-	if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash); ok && antiScanMattingCacheMatches(cached, provider) {
+	if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash); ok {
 		url := antiScanSegmentURL(cached.SegmentRaw)
 		if url == "" {
 			if legacyBytes := antiScanSegmentImageBytes(cached.SegmentRaw); len(legacyBytes) > 0 {
@@ -328,9 +331,22 @@ func (s *sSysPublish) getOrCreateAntiScanFaceDetection(ctx context.Context, imag
 
 func (s *sSysPublish) getOrCreateAntiScanMatting(ctx context.Context, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig, usageOwner cloudResourceUsageOwner) (string, error) {
 	provider := antiScanMattingProvider(conf)
-	if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash); ok && antiScanMattingCacheMatches(cached, provider) {
+	if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash); ok {
 		return cached.SegmentRaw, nil
 	}
+	value, err, _ := antiScanMattingGroup.Do(imageHash, func() (interface{}, error) {
+		if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash); ok {
+			return cached.SegmentRaw, nil
+		}
+		return s.createAntiScanMatting(ctx, imageHash, imageBytes, conf, usageOwner, provider)
+	})
+	if err != nil {
+		return "", err
+	}
+	return value.(string), nil
+}
+
+func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig, usageOwner cloudResourceUsageOwner, provider string) (string, error) {
 	startedAt := time.Now()
 	var segmentURL string
 	var err error
