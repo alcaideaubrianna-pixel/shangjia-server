@@ -11,6 +11,7 @@ import (
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
+	"net/url"
 	"strings"
 	"time"
 
@@ -181,6 +182,7 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 			}
 		}
 		if url != "" {
+			url = antiScanSegmentPresentationURL(url)
 			width, height := antiScanImageDimensions(imageBytes)
 			g.Log().Infof(ctx, "人像分割阶段完成 stage:cache_lookup durationMs:%d cacheHit:1 imageHash:%s", time.Since(stageStartedAt).Milliseconds(), imageHash)
 			return &sysin.AntiScanSegmentModel{CacheHit: 1, ImageHash: imageHash, SegmentUrl: url, Width: width, Height: height}, nil
@@ -197,6 +199,7 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 	if segmentUrl == "" {
 		return nil, gerror.New("云端抠图能力未启用")
 	}
+	segmentUrl = antiScanSegmentPresentationURL(segmentUrl)
 	width, height := antiScanImageDimensions(imageBytes)
 	return &sysin.AntiScanSegmentModel{ImageHash: imageHash, SegmentUrl: segmentUrl, Width: width, Height: height}, nil
 }
@@ -424,6 +427,21 @@ func antiScanSegmentURL(raw string) string {
 		return ""
 	}
 	return strings.TrimSpace(parsed.Response.ResultImageURL)
+}
+
+// antiScanSegmentPresentationURL keeps the cached provider response stable while
+// serving our generated segment through the frontend CDN.
+func antiScanSegmentPresentationURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Hostname() == "" {
+		return raw
+	}
+	storagePath := strings.TrimLeft(parsed.Path, "/")
+	if !strings.Contains(storagePath, "/anti-scan/segment/") {
+		return raw
+	}
+	return normalizeMediaPresentationURL(raw, storagePath)
 }
 
 func antiScanSegmentImageBytes(raw string) []byte {
