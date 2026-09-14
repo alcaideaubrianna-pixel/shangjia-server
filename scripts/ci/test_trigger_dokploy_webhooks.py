@@ -73,12 +73,33 @@ class TriggerDokployWebhooksTest(unittest.TestCase):
             "wait_seconds": 0,
         }
         failed = urllib.error.URLError("not ready")
-        response = mock.MagicMock()
-        response.__enter__.return_value.status = 200
-        with mock.patch.object(MODULE.urllib.request, "urlopen", side_effect=[failed, response]) as open_url:
+        with mock.patch.object(MODULE, "read_health", side_effect=[failed, {"status": "ready"}]) as open_url:
             MODULE.wait_until_healthy(target, retries=2, sleep=lambda _: None)
 
         self.assertEqual(2, open_url.call_count)
+
+    def test_wait_until_healthy_requires_consecutive_target_revision(self):
+        target = {
+            "name": "api",
+            "health_url": "https://example.com/readyz",
+            "wait_seconds": 0,
+            "verify_revision": True,
+        }
+        responses = [
+            {"revision": "old"},
+            {"revision": "1234567890"},
+            {"revision": "1234567890"},
+        ]
+        with mock.patch.object(MODULE, "read_health", side_effect=responses) as read_health:
+            MODULE.wait_until_healthy(
+                target, revision="sha-1234567", retries=3, confirmations=2, sleep=lambda _: None,
+            )
+
+        self.assertEqual(3, read_health.call_count)
+
+    def test_revision_matches_short_or_prefixed_revision(self):
+        self.assertTrue(MODULE.revision_matches("1234567890abcdef", "sha-1234567"))
+        self.assertFalse(MODULE.revision_matches("7654321", "sha-1234567"))
 
     def test_main_skips_when_every_target_is_disabled(self):
         path = self.write_config([

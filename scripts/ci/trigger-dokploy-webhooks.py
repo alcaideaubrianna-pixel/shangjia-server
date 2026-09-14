@@ -14,6 +14,7 @@ from pathlib import Path
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_RETRIES = 3
 DEFAULT_HEALTH_RETRIES = 12
+DEFAULT_REVISION_CONFIRMATIONS = 5
 
 
 def load_targets(path):
@@ -64,6 +65,7 @@ def load_targets(path):
             "order": order,
             "wait_seconds": wait_seconds,
             "health_url": health_url,
+            "verify_revision": target.get("verifyRevision") is True,
         })
 
     return sorted(enabled, key=lambda item: item["order"])
@@ -97,21 +99,48 @@ def trigger(target, version, retries=DEFAULT_RETRIES, sleep=time.sleep):
     raise RuntimeError(f"webhook failed after {retries} attempts: {last_error}")
 
 
-def wait_until_healthy(target, retries=DEFAULT_HEALTH_RETRIES, sleep=time.sleep):
+def read_health(url):
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "youban-deploy-ci/1.0", "Cache-Control": "no-cache"},
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        body = response.read()
+        if not 200 <= response.status < 300:
+            raise RuntimeError(f"unexpected HTTP status {response.status}")
+        try:
+            return json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"invalid health response: {error}") from error
+
+
+def revision_matches(actual, expected):
+    actual = str(actual or "").strip()
+    expected = str(expected or "").strip().removeprefix("sha-")
+    return bool(actual and expected and actual.startswith(expected))
+
+
+def wait_until_healthy(target, revision="", retries=DEFAULT_HEALTH_RETRIES,
+                       confirmations=DEFAULT_REVISION_CONFIRMATIONS, sleep=time.sleep):
     sleep(target["wait_seconds"])
     health_url = target["health_url"]
     if not health_url:
         return
     last_error = None
+    confirmed = 0
     for attempt in range(1, retries + 1):
         try:
-            request = urllib.request.Request(health_url, headers={"User-Agent": "youban-deploy-ci/1.0"})
-            with urllib.request.urlopen(request, timeout=10) as response:
-                if 200 <= response.status < 300:
-                    return
-                last_error = RuntimeError(f"unexpected HTTP status {response.status}")
+            query = urllib.parse.urlencode({"revision": revision}) if target.get("verify_revision") else ""
+            separator = "&" if "?" in health_url else "?"
+            health = read_health(f"{health_url}{separator}{query}" if query else health_url)
+            if target.get("verify_revision") and not revision_matches(health.get("revision"), revision):
+                raise RuntimeError(f"revision is {health.get('revision')!r}, expected {revision!r}")
+            confirmed += 1
+            if confirmed >= (confirmations if target.get("verify_revision") else 1):
+                return
         except (urllib.error.URLError, TimeoutError, RuntimeError) as error:
             last_error = error
+            confirmed = 0
         if attempt < retries:
             sleep(5)
     raise RuntimeError(f"health check failed after {retries} attempts: {last_error}")
@@ -139,6 +168,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Trigger enabled Dokploy webhooks in order")
     parser.add_argument("--config", required=True)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--revision", default="")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
@@ -160,7 +190,7 @@ def main(argv=None):
         print(f"triggering {name} ({args.version})")
         try:
             trigger(target, args.version)
-            wait_until_healthy(target)
+            wait_until_healthy(target, args.revision or args.version)
         except RuntimeError as error:
             send_telegram(
                 f"❌ <b>{escape(name)} 部署触发失败</b>\n"

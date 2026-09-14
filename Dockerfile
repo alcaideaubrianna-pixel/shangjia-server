@@ -62,8 +62,10 @@ RUN rm -f internal/packed/packed.go \
 
 FROM debian:trixie-slim AS runtime
 
+ARG GIT_REVISION=unknown
 ENV WORKDIR=/app \
-    TZ=Asia/Shanghai
+	TZ=Asia/Shanghai \
+	APP_REVISION=${GIT_REVISION}
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates ffmpeg tzdata \

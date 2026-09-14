@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -20,6 +21,18 @@ func registerHealthHandlers(server *ghttp.Server) {
 		})
 	})
 	server.BindHandler("/readyz", func(r *ghttp.Request) {
+		r.Response.Header().Set("Cache-Control", "no-store")
+		revision := strings.TrimSpace(os.Getenv("APP_REVISION"))
+		expectedRevision := strings.TrimPrefix(strings.TrimSpace(r.GetQuery("revision").String()), "sha-")
+		if expectedRevision != "" && !strings.HasPrefix(revision, expectedRevision) {
+			r.Response.WriteHeader(http.StatusConflict)
+			r.Response.WriteJsonExit(g.Map{
+				"status":   "wrong_revision",
+				"role":     strings.Join(runrole.Roles(r.Context()), ","),
+				"revision": revision,
+				"expected": expectedRevision,
+			})
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancel()
 		if _, err := g.DB().GetValue(ctx, "SELECT 1"); err != nil {
@@ -31,8 +44,9 @@ func registerHealthHandlers(server *ghttp.Server) {
 			return
 		}
 		r.Response.WriteJsonExit(g.Map{
-			"status": "ready",
-			"role":   strings.Join(runrole.Roles(ctx), ","),
+			"status":   "ready",
+			"role":     strings.Join(runrole.Roles(ctx), ","),
+			"revision": revision,
 		})
 	})
 }

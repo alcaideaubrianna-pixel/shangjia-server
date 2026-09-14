@@ -27,8 +27,11 @@ private.
 
 GitHub Actions triggers targets by ascending `order`. After triggering a
 target, it waits for `waitSeconds`; when `healthUrl` is configured, deployment
-continues only after the endpoint returns HTTP 2xx. Put the API first so a
-failed rolling update stops deployment before singleton services and workers.
+continues only after the endpoint returns HTTP 2xx. When `verifyRevision` is
+enabled, CI also requires consecutive responses from the requested Git
+revision. This prevents one healthy new replica from hiding an old replica
+during a rolling update. Put the API first so a failed rolling update stops
+deployment before singleton services and workers.
 
 ## Migration order
 

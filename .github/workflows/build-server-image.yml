@@ -22,7 +22,8 @@ permissions:
 
 concurrency:
   group: build-server-image-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a rollout after only some production services were updated.
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -67,6 +68,8 @@ jobs:
           file: Dockerfile
           push: true
           platforms: linux/amd64
+          build-args: |
+            GIT_REVISION=${{ github.sha }}
           tags: ${{ steps.server_meta.outputs.tags }}
           labels: ${{ steps.server_meta.outputs.labels }}
           cache-from: type=gha,scope=server
@@ -84,7 +87,8 @@ jobs:
         run: |
           python3 scripts/ci/trigger-dokploy-webhooks.py \
             --config deploy/dokploy-targets.json \
-            --version "sha-${GITHUB_SHA::7}"
+            --version "sha-${GITHUB_SHA::7}" \
+            --revision "${GITHUB_SHA}"
 
       - name: Notify Telegram build success
         if: ${{ success() }}

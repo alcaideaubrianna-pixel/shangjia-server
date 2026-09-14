@@ -6,7 +6,8 @@
       "enabled": true,
       "order": 10,
       "waitSeconds": 30,
-      "healthUrl": "https://api.xiaohuiji.cc/readyz"
+      "healthUrl": "https://api.xiaohuiji.cc/readyz",
+      "verifyRevision": true
     },
     {
       "name": "xiaohuiji-account",
