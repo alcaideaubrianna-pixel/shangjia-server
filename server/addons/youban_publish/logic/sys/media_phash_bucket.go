@@ -26,10 +26,12 @@ const (
 	mediaPHashBucketMaxCachedRows     = 2000
 	mediaPHashBucketMaxScopedIds      = 32
 	mediaPHashCandidateWorkMem        = "64MB"
+	mediaPHashLegacyStatementTimeout  = "15s"
 	mediaPHashProfileDeleteBatchSize  = 500
 )
 
 var mediaPHashBucketCandidateGroup singleflight.Group
+var mediaPHashLegacyQuerySlots = make(chan struct{}, 1)
 var mediaPHashAliasTableState struct {
 	sync.Mutex
 	ready bool
@@ -337,6 +339,10 @@ func mediaPHashBucketCandidateRowsWithScopesUncached(ctx context.Context, normal
 		}
 		g.Log().Warningf(ctx, "pHash LSH查询失败，回退旧分桶查询：%v", err)
 	}
+	if err := acquireMediaPHashLegacyQuerySlot(ctx); err != nil {
+		return nil, err
+	}
+	defer releaseMediaPHashLegacyQuerySlot()
 	minEqualNibbles := mediaPHashMinEqualNibbles(threshold)
 	if minEqualNibbles <= 0 {
 		minEqualNibbles = 1
@@ -400,6 +406,12 @@ LIMIT %d
 			if _, err := tx.Exec("SET LOCAL jit = off"); err != nil {
 				return gerror.Wrap(err, "关闭相似媒体查询JIT失败")
 			}
+			if _, err := tx.Exec("SET LOCAL max_parallel_workers_per_gather = 0"); err != nil {
+				return gerror.Wrap(err, "限制相似媒体查询并行度失败")
+			}
+			if _, err := tx.Exec("SET LOCAL statement_timeout = '" + mediaPHashLegacyStatementTimeout + "'"); err != nil {
+				return gerror.Wrap(err, "设置相似媒体查询超时失败")
+			}
 		}
 		if err := tx.Raw(sql, args...).Scan(&rows); err != nil {
 			return gerror.Wrap(err, "查询相似媒体分桶失败")
@@ -409,6 +421,19 @@ LIMIT %d
 		return nil, err
 	}
 	return rows, nil
+}
+
+func acquireMediaPHashLegacyQuerySlot(ctx context.Context) error {
+	select {
+	case mediaPHashLegacyQuerySlots <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return gerror.Wrap(ctx.Err(), "等待相似媒体旧索引查询超时")
+	}
+}
+
+func releaseMediaPHashLegacyQuerySlot() {
+	<-mediaPHashLegacyQuerySlots
 }
 
 func mediaPHashBucketCandidateCacheKey(ctx context.Context, normalizedHash string, threshold int, scopes []mediaPHashBucketScopePart, profileIds []int64, mediaType string, excludeProfileId int64) string {

@@ -857,7 +857,8 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		}
 		profileId, similarErr := s.findCollectProfilePHashDuplicate(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), channelIds, content.Media)
 		if similarErr != nil {
-			return false, "", similarErr
+			g.Log().Warningf(ctx, "采集资料模糊图片判重失败，保留精确判重结果并继续 eventId:%d ruleId:%d err:%v", event["id"].Int64(), rule["id"].Int64(), similarErr)
+			profileId = 0
 		}
 		if profileId > 0 {
 			reason := fmt.Sprintf("资料库已存在整套相似图片 profileId:%d threshold:%d", profileId, collectProfilePHashDuplicateThreshold)

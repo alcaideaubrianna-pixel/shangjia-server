@@ -95,6 +95,15 @@ func TestCollectPHashCandidateRecallUsesLSHRange(t *testing.T) {
 	}
 }
 
+func TestLegacyPHashQueryHasResourceLimits(t *testing.T) {
+	if cap(mediaPHashLegacyQuerySlots) != 1 {
+		t.Fatalf("旧索引查询并发 = %d, want 1", cap(mediaPHashLegacyQuerySlots))
+	}
+	if mediaPHashLegacyStatementTimeout == "" {
+		t.Fatal("旧索引查询必须设置 statement_timeout")
+	}
+}
+
 func TestProfilePHashGroupRejectsTransitiveSimilarityChain(t *testing.T) {
 	sets := map[int64][]string{
 		1: {"0000000000000000"},
