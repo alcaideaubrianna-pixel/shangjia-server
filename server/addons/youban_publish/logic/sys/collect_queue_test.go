@@ -31,6 +31,15 @@ func TestMediaProcessQueueIsIsolatedFromCollectionDownloads(t *testing.T) {
 	}
 }
 
+func TestCriticalBackgroundQueuesAreObservable(t *testing.T) {
+	queues := telegramObserveQueueNames(context.Background())
+	for _, queue := range []string{tgQueueNameAutoDelete, tgQueueNameCollectProcess} {
+		if !slices.Contains(queues, queue) {
+			t.Fatalf("critical queue %s must be observable: %v", queue, queues)
+		}
+	}
+}
+
 func TestCollectMediaQueueNamePrioritizesRealtime(t *testing.T) {
 	if got := collectMediaQueueName(context.Background(), collectMediaQueuePayload{TgAccountId: 13}); got != tgQueueNameMediaRealtime {
 		t.Fatalf("realtime queue = %s", got)
