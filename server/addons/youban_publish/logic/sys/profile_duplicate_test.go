@@ -88,3 +88,21 @@ func TestValidateDuplicateScanSessionOwner(t *testing.T) {
 		t.Fatal("expected another admin account to be rejected")
 	}
 }
+
+func TestDuplicateScanResultCacheKeyIgnoresPagination(t *testing.T) {
+	account := &sysin.AccountModel{TenantId: 7, Id: 8}
+	left := &sysin.NoteListInp{ProfileListInp: sysin.ProfileListInp{Keyword: "test"}}
+	left.Page, left.PerPage, left.Pagination = 1, 20, true
+	right := &sysin.NoteListInp{ProfileListInp: sysin.ProfileListInp{Keyword: "test"}}
+	right.Page, right.PerPage, right.Pagination = 9, 500, false
+	if duplicateScanResultCacheKey(account, left) != duplicateScanResultCacheKey(account, right) {
+		t.Fatal("pagination must not produce another duplicate scan cache entry")
+	}
+	right.Keyword = "other"
+	if duplicateScanResultCacheKey(account, left) == duplicateScanResultCacheKey(account, right) {
+		t.Fatal("different filters must not share duplicate scan cache entries")
+	}
+	if duplicateScanResultCacheKey(account, left) == duplicateScanResultCacheKey(&sysin.AccountModel{TenantId: 7, Id: 9}, left) {
+		t.Fatal("different admin accounts must not share duplicate scan cache entries")
+	}
+}

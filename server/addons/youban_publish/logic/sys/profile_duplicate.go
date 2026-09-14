@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -21,6 +22,7 @@ const (
 	duplicateScanChunkSize  = 500
 	duplicateScanBatchSize  = 500
 	duplicateScanSessionTTL = 30 * time.Minute
+	duplicateScanResultTTL  = 10 * time.Minute
 )
 
 type duplicateImageRow struct {
@@ -46,6 +48,7 @@ type duplicateScanSession struct {
 	ScannedTotal    int                `json:"scannedTotal"`
 	SignatureIds    map[string][]int64 `json:"signatureIds,omitempty"`
 	TenantId        int64              `json:"tenantId"`
+	ResultCacheKey  string             `json:"resultCacheKey,omitempty"`
 }
 
 func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.AdminNoteDuplicateScanInp) (*sysin.AdminNoteDuplicateScanModel, error) {
@@ -58,8 +61,26 @@ func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.Admi
 	}
 	var session *duplicateScanSession
 	if strings.TrimSpace(in.ScanToken) == "" {
+		resultCacheKey := duplicateScanResultCacheKey(account, &in.NoteListInp)
+		if cached := loadCachedDuplicateScanResult(ctx, resultCacheKey); cached != "" {
+			if cachedSession, cacheErr := loadDuplicateScanSession(ctx, cached); cacheErr == nil && validateDuplicateScanSessionOwner(cachedSession, account) == nil {
+				g.Log().Infof(ctx, "复用重复资料扫描任务 scanTaskId:%s tenantId:%d accountId:%d", cached, account.TenantId, account.Id)
+				if cachedSession.ChunkCount > 0 {
+					result, resultErr := s.duplicateScanBatchResult(ctx, cached, cachedSession, 0)
+					if result != nil {
+						result.ScanComplete = true
+						result.ScanCursor = cachedSession.ScanCursor
+						result.ScannedTotal = cachedSession.ScannedTotal
+					}
+					return result, resultErr
+				}
+				return duplicateScanProgressResult(cached, cachedSession, true), nil
+			}
+			_, _ = cache.Instance().Remove(ctx, resultCacheKey)
+		}
 		in.ScanToken = guid.S()
 		session = newDuplicateScanSession(account)
+		session.ResultCacheKey = resultCacheKey
 		if err = cache.Instance().Set(ctx, duplicateScanSessionKey(in.ScanToken), session, duplicateScanSessionTTL); err != nil {
 			return nil, gerror.Wrap(err, "创建重复资料扫描会话失败")
 		}
@@ -103,6 +124,39 @@ func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.Admi
 
 func newDuplicateScanSession(account *sysin.AccountModel) *duplicateScanSession {
 	return &duplicateScanSession{AdminAccountId: account.Id, SignatureIds: make(map[string][]int64), TenantId: account.TenantId}
+}
+
+func duplicateScanResultCacheKey(account *sysin.AccountModel, in *sysin.NoteListInp) string {
+	if account == nil {
+		return ""
+	}
+	normalized := sysin.NoteListInp{}
+	if in != nil {
+		normalized.ProfileListInp = in.ProfileListInp
+		normalized.Page = 0
+		normalized.PerPage = 0
+		normalized.Pagination = false
+	}
+	payload, _ := json.Marshal(normalized)
+	return fmt.Sprintf("%s%d:%d:%s", consts.DuplicateScanResultKeyPrefix, account.TenantId, account.Id, collectHash(string(payload)))
+}
+
+func loadCachedDuplicateScanResult(ctx context.Context, key string) string {
+	if key == "" {
+		return ""
+	}
+	value, err := cache.Instance().Get(ctx, key)
+	if err != nil || value.IsNil() {
+		return ""
+	}
+	return strings.TrimSpace(value.String())
+}
+
+func cacheDuplicateScanResult(ctx context.Context, token string, session *duplicateScanSession) {
+	if session == nil || session.ResultCacheKey == "" {
+		return
+	}
+	_ = cache.Instance().Set(ctx, session.ResultCacheKey, token, duplicateScanResultTTL)
 }
 
 func (s *sSysPublish) duplicateScanProfileIdPage(ctx context.Context, in *sysin.NoteListInp, account *sysin.AccountModel, cursor int64) ([]int64, error) {
@@ -180,6 +234,7 @@ func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, ses
 	if len(duplicateIds) == 0 {
 		session.SignatureIds = nil
 		_ = cache.Instance().Set(ctx, duplicateScanSessionKey(token), session, duplicateScanSessionTTL)
+		cacheDuplicateScanResult(ctx, token, session)
 		g.Log().Infof(ctx, "重复资料扫描任务完成 scanTaskId:%s scanned:%d groups:0 duplicate:0 incomplete:%d", token, session.ScannedTotal, session.IncompleteTotal)
 		return duplicateScanProgressResult(token, session, true), nil
 	}
@@ -247,6 +302,7 @@ func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, ses
 	if err := saveDuplicateScanSession(ctx, token, session, candidates); err != nil {
 		return nil, err
 	}
+	cacheDuplicateScanResult(ctx, token, session)
 	g.Log().Infof(ctx, "重复资料扫描任务完成 scanTaskId:%s scanned:%d groups:%d duplicate:%d incomplete:%d",
 		token, session.ScannedTotal, session.GroupTotal, session.DuplicateTotal, session.IncompleteTotal)
 	result, err := s.duplicateScanBatchResult(ctx, token, session, 0)
@@ -286,7 +342,10 @@ func (s *sSysPublish) AdminNoteDuplicateBatch(ctx context.Context, in *sysin.Adm
 }
 
 func (s *sSysPublish) AdminNoteDuplicateCleanup(ctx context.Context, in *sysin.AdminNoteDuplicateCleanupInp) (*sysin.AdminNoteDuplicateCleanupModel, error) {
-	if in == nil || len(in.Ids) == 0 || len(in.Ids) > 10 {
+	if in == nil || len(in.Ids) == 0 {
+		return nil, gerror.New("请选择要删除的重复资料")
+	}
+	if len(in.Ids) > 10 {
 		return nil, gerror.New("单次只能删除1到10条重复资料")
 	}
 	ids := uniqueIds(in.Ids)
@@ -304,6 +363,7 @@ func (s *sSysPublish) AdminNoteDuplicateCleanup(ctx context.Context, in *sysin.A
 	if err = validateDuplicateScanSessionOwner(session, account); err != nil {
 		return nil, err
 	}
+	g.Log().Infof(ctx, "重复资料清理批次开始 scanTaskId:%s cursor:%d idCount:%d", in.ScanToken, in.Cursor, len(ids))
 	candidates, err := loadDuplicateScanCandidates(ctx, in.ScanToken, session, in.Cursor)
 	if err != nil {
 		return nil, err
@@ -332,6 +392,9 @@ func (s *sSysPublish) AdminNoteDuplicateCleanup(ctx context.Context, in *sysin.A
 	}
 	if err = s.deleteProfiles(ctx, &sysin.ProfileDeleteInp{Ids: ids}, account.TenantId, 0); err != nil {
 		return nil, err
+	}
+	if session.ResultCacheKey != "" {
+		_, _ = cache.Instance().Remove(ctx, session.ResultCacheKey)
 	}
 	return &sysin.AdminNoteDuplicateCleanupModel{DeletedIds: ids}, nil
 }

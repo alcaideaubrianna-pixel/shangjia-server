@@ -6,4 +6,5 @@ const (
 	CollectProcessScheduleKeyPrefix   = "youban_publish:collect:process:schedule:"
 	DuplicateScanSessionKeyPrefix     = "youban_publish:duplicate_scan:session:"
 	DuplicateScanBatchKeyPrefix       = "youban_publish:duplicate_scan:batch:"
+	DuplicateScanResultKeyPrefix      = "youban_publish:duplicate_scan:result:"
 )

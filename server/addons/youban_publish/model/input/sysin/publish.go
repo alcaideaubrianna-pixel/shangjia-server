@@ -880,7 +880,7 @@ type AdminNoteDuplicateBatchInp struct {
 
 type AdminNoteDuplicateCleanupInp struct {
 	AdminNoteDuplicateBatchInp
-	Ids []int64 `json:"ids" v:"required|length:1,10#请选择要删除的重复资料|单次只能删除1到10条资料" dc:"资料ID"`
+	Ids []int64 `json:"ids" dc:"资料ID，单次最多10条"`
 }
 
 type AdminNoteDuplicateCleanupModel struct {
