@@ -89,48 +89,61 @@ func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.Admi
 	}
 	var session *duplicateScanSession
 	if strings.TrimSpace(in.ScanToken) == "" {
-		resultCacheKey := duplicateScanResultCacheKey(account, &in.NoteListInp)
-		if cached := loadCachedDuplicateScanResult(ctx, resultCacheKey); cached != "" {
-			if cachedSession, cacheErr := loadDuplicateScanSession(ctx, cached); cacheErr == nil && validateDuplicateScanSessionOwner(cachedSession, account) == nil {
-				g.Log().Infof(ctx, "复用重复资料扫描任务 scanTaskId:%s tenantId:%d accountId:%d", cached, account.TenantId, account.Id)
-				if cachedSession.ChunkCount > 0 {
-					result, resultErr := s.duplicateScanBatchResult(ctx, cached, cachedSession, 0)
-					if result != nil {
-						result.ScanComplete = true
-						result.ScanCursor = cachedSession.ScanCursor
-						result.ScannedTotal = cachedSession.ScannedTotal
-					}
-					return result, resultErr
-				}
-				return duplicateScanProgressResult(cached, cachedSession, true), nil
-			}
-			_, _ = cache.Instance().Remove(ctx, resultCacheKey)
-		}
-		in.ScanToken = guid.S()
-		session = newDuplicateScanSession(account)
-		session.ResultCacheKey = resultCacheKey
-		session.Status = "queued"
-		if err = saveDuplicateScanProgress(ctx, in.ScanToken, session); err != nil {
-			return nil, gerror.Wrap(err, "创建重复资料扫描会话失败")
-		}
-		if err = s.enqueueDuplicateScan(ctx, in.ScanToken, account, in); err != nil {
-			_, _ = cache.Instance().Remove(ctx, duplicateScanSessionKey(in.ScanToken))
-			return nil, err
-		}
-		g.Log().Infof(ctx, "重复资料扫描任务已创建 scanTaskId:%s tenantId:%d accountId:%d", in.ScanToken, account.TenantId, account.Id)
-		return duplicateScanProgressResult(in.ScanToken, session, false), nil
+		return s.startDuplicateScan(ctx, account, in)
 	}
 	session, err = loadDuplicateScanSession(ctx, in.ScanToken)
 	if err != nil {
 		return nil, err
 	}
 	if err = validateDuplicateScanSessionOwner(session, account); err != nil {
+		if duplicateScanSessionOwnedBy(session, account) && session.AlgorithmVersion != duplicateScanAlgorithmVersion {
+			g.Log().Info(ctx, "重复资料扫描算法升级，自动创建新任务", g.Map{
+				"oldScanTaskId": in.ScanToken, "oldVersion": session.AlgorithmVersion,
+				"newVersion": duplicateScanAlgorithmVersion, "tenantId": account.TenantId, "accountId": account.Id,
+			})
+			_, _ = cache.Instance().Remove(ctx, duplicateScanSessionKey(in.ScanToken))
+			in.ScanToken = ""
+			return s.startDuplicateScan(ctx, account, in)
+		}
 		return nil, err
 	}
 	if session.Status == "completed" && session.ChunkCount > 0 {
 		return s.duplicateScanBatchResult(ctx, in.ScanToken, session, 0)
 	}
 	return duplicateScanProgressResult(in.ScanToken, session, session.Status == "completed"), nil
+}
+
+func (s *sSysPublish) startDuplicateScan(ctx context.Context, account *sysin.AccountModel, in *sysin.AdminNoteDuplicateScanInp) (*sysin.AdminNoteDuplicateScanModel, error) {
+	resultCacheKey := duplicateScanResultCacheKey(account, &in.NoteListInp)
+	if cached := loadCachedDuplicateScanResult(ctx, resultCacheKey); cached != "" {
+		if cachedSession, cacheErr := loadDuplicateScanSession(ctx, cached); cacheErr == nil && validateDuplicateScanSessionOwner(cachedSession, account) == nil {
+			g.Log().Infof(ctx, "复用重复资料扫描任务 scanTaskId:%s tenantId:%d accountId:%d", cached, account.TenantId, account.Id)
+			if cachedSession.ChunkCount > 0 {
+				result, resultErr := s.duplicateScanBatchResult(ctx, cached, cachedSession, 0)
+				if result != nil {
+					result.ScanComplete = true
+					result.ScanCursor = cachedSession.ScanCursor
+					result.ScannedTotal = cachedSession.ScannedTotal
+				}
+				return result, resultErr
+			}
+			return duplicateScanProgressResult(cached, cachedSession, true), nil
+		}
+		_, _ = cache.Instance().Remove(ctx, resultCacheKey)
+	}
+	in.ScanToken = guid.S()
+	session := newDuplicateScanSession(account)
+	session.ResultCacheKey = resultCacheKey
+	session.Status = "queued"
+	if err := saveDuplicateScanProgress(ctx, in.ScanToken, session); err != nil {
+		return nil, gerror.Wrap(err, "创建重复资料扫描会话失败")
+	}
+	if err := s.enqueueDuplicateScan(ctx, in.ScanToken, account, in); err != nil {
+		_, _ = cache.Instance().Remove(ctx, duplicateScanSessionKey(in.ScanToken))
+		return nil, err
+	}
+	g.Log().Infof(ctx, "重复资料扫描任务已创建 scanTaskId:%s tenantId:%d accountId:%d", in.ScanToken, account.TenantId, account.Id)
+	return duplicateScanProgressResult(in.ScanToken, session, false), nil
 }
 
 func (s *sSysPublish) runDuplicateScan(ctx context.Context, token string, account *sysin.AccountModel, in *sysin.AdminNoteDuplicateScanInp) error {
@@ -613,13 +626,17 @@ func applyDuplicatePHashValidation(ctx context.Context, ids []int64, candidates 
 }
 
 func validateDuplicateScanSessionOwner(session *duplicateScanSession, account *sysin.AccountModel) error {
-	if session == nil || account == nil || session.TenantId != account.TenantId || session.AdminAccountId != account.Id {
+	if !duplicateScanSessionOwnedBy(session, account) {
 		return gerror.New("无权访问该重复资料扫描结果")
 	}
 	if session.AlgorithmVersion != duplicateScanAlgorithmVersion {
 		return gerror.New("重复资料扫描算法已更新，请重新扫描")
 	}
 	return nil
+}
+
+func duplicateScanSessionOwnedBy(session *duplicateScanSession, account *sysin.AccountModel) bool {
+	return session != nil && account != nil && session.TenantId == account.TenantId && session.AdminAccountId == account.Id
 }
 
 func validateDuplicateCleanupState(ids []int64, candidates map[int64]duplicateScanCandidate, profiles map[int64]*sysin.AdminNoteDuplicateItemModel, signatures map[int64]string, phashValidated map[int64]bool) error {

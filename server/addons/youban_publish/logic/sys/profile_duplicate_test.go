@@ -280,6 +280,17 @@ func TestValidateDuplicateScanSessionOwner(t *testing.T) {
 	}
 }
 
+func TestDuplicateScanPreviousAlgorithmCanOnlyRestartForOwner(t *testing.T) {
+	owner := &sysin.AccountModel{TenantId: 7, Id: 8}
+	session := &duplicateScanSession{AlgorithmVersion: duplicateScanAlgorithmVersion - 1, TenantId: 7, AdminAccountId: 8}
+	if !duplicateScanSessionOwnedBy(session, owner) {
+		t.Fatal("previous algorithm session must remain identifiable by its owner")
+	}
+	if duplicateScanSessionOwnedBy(session, &sysin.AccountModel{TenantId: 7, Id: 9}) {
+		t.Fatal("another account must not restart an owned scan session")
+	}
+}
+
 func TestDuplicateScanResultCacheKeyIgnoresPagination(t *testing.T) {
 	account := &sysin.AccountModel{TenantId: 7, Id: 8}
 	left := &sysin.NoteListInp{ProfileListInp: sysin.ProfileListInp{Keyword: "test"}}
