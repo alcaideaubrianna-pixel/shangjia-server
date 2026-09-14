@@ -63,19 +63,32 @@ type channelProfileRecord struct {
 }
 
 func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
-	if err := s.recoverChannelCycleRuns(ctx); err != nil {
-		return err
+	return runChannelCycleSchedulerStages(ctx, []channelCycleSchedulerStage{
+		{name: "恢复循环批次", run: s.recoverChannelCycleRuns},
+		{name: "收尾循环批次", run: func(ctx context.Context) error { return s.finalizeDispatchingChannelCycleRuns(ctx, 20) }},
+		{name: "扫描批次循环", run: func(ctx context.Context) error { return s.scheduleDueChannelBatchCycles(ctx, 50) }},
+		{name: "恢复循环重算", run: func(ctx context.Context) error { return s.enqueuePendingProfileCycleReschedules(ctx, 200) }},
+		{name: "扫描时间循环", run: s.runProfileCycleDueScan},
+	})
+}
+
+type channelCycleSchedulerStage struct {
+	name string
+	run  func(context.Context) error
+}
+
+func runChannelCycleSchedulerStages(ctx context.Context, stages []channelCycleSchedulerStage) error {
+	errs := make([]error, 0, len(stages))
+	for _, stage := range stages {
+		if stage.run == nil {
+			continue
+		}
+		if err := stage.run(ctx); err != nil {
+			g.Log().Warningf(ctx, "频道循环调度阶段失败 stage:%s err:%+v", stage.name, err)
+			errs = append(errs, fmt.Errorf("%s: %w", stage.name, err))
+		}
 	}
-	if err := s.finalizeDispatchingChannelCycleRuns(ctx, 20); err != nil {
-		return err
-	}
-	if err := s.scheduleDueChannelBatchCycles(ctx, 50); err != nil {
-		return err
-	}
-	if err := s.enqueuePendingProfileCycleReschedules(ctx, 200); err != nil {
-		g.Log().Warningf(ctx, "恢复频道循环重算任务失败：%+v", err)
-	}
-	return s.runProfileCycleDueScan(ctx)
+	return errors.Join(errs...)
 }
 
 func (s *sSysPublish) AdminChannelCycleRun(ctx context.Context, in *sysin.ChannelCycleRunInp) (*sysin.ChannelFullPushModel, error) {

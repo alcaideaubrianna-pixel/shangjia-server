@@ -309,7 +309,7 @@ func (s *sSysPublish) refreshChannelProfileCycleNextAt(ctx context.Context, chan
 	}
 	_, err = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channelId).Data(g.Map{
 		"cycle_next_run_at": nextAt, "updated_at": gtime.Now(),
-	}).Update()
+	}).Where("cycle_publish_mode", "time").Update()
 	return err
 }
 
