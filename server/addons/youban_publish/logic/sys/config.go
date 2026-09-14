@@ -196,6 +196,7 @@ func (s *sSysConfig) CloudResourceConfigView(ctx context.Context, in *sysin.Clou
 	conf.TencentSecretKey = maskSecretValue(conf.TencentSecretKey)
 	conf.AliyunAccessKeySecret = maskSecretValue(conf.AliyunAccessKeySecret)
 	conf.FapiHubApiKey = maskSecretValue(conf.FapiHubApiKey)
+	conf.FacePlusApiSecret = maskSecretValue(conf.FacePlusApiSecret)
 	res = &sysin.CloudResourceConfigViewModel{CloudResourceConfig: conf}
 	return
 }
@@ -227,6 +228,13 @@ func (s *sSysConfig) CloudResourceConfigSave(ctx context.Context, in *sysin.Clou
 			return err
 		}
 		in.AliyunAccessKeySecret = oldConf.AliyunAccessKeySecret
+	}
+	if strings.Contains(in.FacePlusApiSecret, "*") {
+		oldConf, err := s.GetCloudResource(ctx)
+		if err != nil {
+			return err
+		}
+		in.FacePlusApiSecret = oldConf.FacePlusApiSecret
 	}
 	if strings.Contains(in.FacePlusApiSecret, "*") {
 		oldConf, err := s.GetCloudResource(ctx)
