@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -30,6 +31,8 @@ const telegramPhotoMaxUploadBytes int64 = 10 * 1024 * 1024
 const telegramPhotoMaxDimensionsSum = 10000
 const telegramPhotoMaxDimensionRatio = 20.0
 
+var errBackgroundReplacementDocument = errors.New("document image skips anti-scan processing")
+
 func (s *sSysPublish) prepareTelegramMediaUploadFile(ctx context.Context, media *telegramMediaItem, path string, cleanup func()) (string, func(), error) {
 	path = strings.TrimSpace(path)
 	if path == "" || media == nil {
@@ -53,6 +56,10 @@ func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, med
 		if err == nil && path != "" {
 			g.Log().Infof(ctx, "频道防扫图阶段完成 stage:background_replace durationMs:%d jobId:%d mediaId:%d", time.Since(startedAt).Milliseconds(), media.JobId, media.Id)
 			return prepareTelegramPhotoUploadFile(ctx, path, chainCleanup(cleanup, generatedCleanup))
+		}
+		if errors.Is(err, errBackgroundReplacementDocument) {
+			g.Log().Infof(ctx, "频道防扫图跳过文档图片 stage:document_skip durationMs:%d jobId:%d mediaId:%d", time.Since(startedAt).Milliseconds(), media.JobId, media.Id)
+			return prepareTelegramPhotoUploadFile(ctx, sourcePath, cleanup)
 		}
 		g.Log().Warningf(ctx, "频道背景替换已降级为轻量扰动 jobId:%d mediaId:%d durationMs:%d err:%+v", media.JobId, media.Id, time.Since(startedAt).Milliseconds(), err)
 	}
@@ -126,7 +133,7 @@ func (s *sSysPublish) prepareTelegramBackgroundReplacement(ctx context.Context, 
 		return "", nil, gerror.Wrap(err, "读取背景替换源图失败")
 	}
 	if shouldSkipBackgroundReplacement(imageBytes) {
-		return "", nil, gerror.New("检测为文字或表格图片")
+		return "", nil, errBackgroundReplacementDocument
 	}
 	sum := sha256.Sum256(imageBytes)
 	imageHash := hex.EncodeToString(sum[:])
@@ -178,30 +185,121 @@ func (s *sSysPublish) prepareTelegramBackgroundReplacement(ctx context.Context, 
 }
 
 func shouldSkipBackgroundReplacement(data []byte) bool {
+	metrics, ok := backgroundReplacementDocumentMetrics(data)
+	if !ok {
+		return true
+	}
+	return metrics.WhitePercent >= 82 || metrics.HasTableGrid ||
+		(metrics.WhitePercent >= 42 && metrics.DarkPercent >= 2 && metrics.EdgePercent >= 7)
+}
+
+type backgroundReplacementMetrics struct {
+	WhitePercent int
+	DarkPercent  int
+	EdgePercent  int
+	Horizontal   int
+	Vertical     int
+	HasTableGrid bool
+}
+
+func backgroundReplacementDocumentMetrics(data []byte) (backgroundReplacementMetrics, bool) {
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return true
+		return backgroundReplacementMetrics{}, false
 	}
+	img = resizeAntiScanPreviewImage(img, 320)
 	b := img.Bounds()
 	if b.Dx() <= 0 || b.Dy() <= 0 {
-		return true
+		return backgroundReplacementMetrics{}, false
 	}
-	step := maxInt(1, maxInt(b.Dx(), b.Dy())/320)
-	white, sampled, highContrast := 0, 0, 0
-	for y := b.Min.Y; y < b.Max.Y; y += step {
-		for x := b.Min.X; x < b.Max.X; x += step {
-			r, gg, bl, _ := img.At(x, y).RGBA()
+	width, height := b.Dx(), b.Dy()
+	luminance := make([]uint8, width*height)
+	white, darkNeutral, edges := 0, 0, 0
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			r, gg, bl, _ := img.At(b.Min.X+x, b.Min.Y+y).RGBA()
 			r8, g8, b8 := int(r>>8), int(gg>>8), int(bl>>8)
-			if r8 > 238 && g8 > 238 && b8 > 238 {
+			index := y*width + x
+			luminance[index] = uint8((299*r8 + 587*g8 + 114*b8) / 1000)
+			spread := maxInt(r8, maxInt(g8, b8)) - minInt(r8, minInt(g8, b8))
+			if r8 > 240 && g8 > 240 && b8 > 240 {
 				white++
 			}
-			if maxInt(r8, maxInt(g8, b8))-minInt(r8, minInt(g8, b8)) < 18 && (r8 < 70 || r8 > 235) {
-				highContrast++
+			if spread < 24 && luminance[index] < 105 {
+				darkNeutral++
 			}
-			sampled++
+			if x > 0 && absInt(int(luminance[index])-int(luminance[index-1])) > 42 {
+				edges++
+			}
+			if y > 0 && absInt(int(luminance[index])-int(luminance[index-width])) > 42 {
+				edges++
+			}
 		}
 	}
-	return sampled > 0 && (white*100/sampled >= 58 || (white*100/sampled >= 38 && highContrast*100/sampled >= 45))
+	total := width * height
+	whitePercent := white * 100 / total
+	darkPercent := darkNeutral * 100 / total
+	edgePercent := edges * 100 / (total * 2)
+	horizontalLines, verticalLines := countDocumentGridLines(luminance, width, height)
+	metrics := backgroundReplacementMetrics{
+		WhitePercent: whitePercent, DarkPercent: darkPercent, EdgePercent: edgePercent,
+		Horizontal: horizontalLines, Vertical: verticalLines,
+	}
+	metrics.HasTableGrid = horizontalLines >= 3 && (verticalLines >= 1 || whitePercent >= 45)
+	return metrics, true
+}
+
+func countDocumentGridLines(luminance []uint8, width, height int) (horizontal, vertical int) {
+	for y := 0; y < height; y++ {
+		dark := 0
+		for x := 0; x < width; x++ {
+			if luminance[y*width+x] < 190 {
+				dark++
+			}
+		}
+		if dark*100/width >= 58 && (y == 0 || !documentRowIsLine(luminance, width, y-1)) {
+			horizontal++
+		}
+	}
+	for x := 0; x < width; x++ {
+		dark := 0
+		for y := 0; y < height; y++ {
+			if luminance[y*width+x] < 190 {
+				dark++
+			}
+		}
+		if dark*100/height >= 45 && (x == 0 || !documentColumnIsLine(luminance, width, height, x-1)) {
+			vertical++
+		}
+	}
+	return
+}
+
+func documentRowIsLine(luminance []uint8, width, y int) bool {
+	dark := 0
+	for x := 0; x < width; x++ {
+		if luminance[y*width+x] < 190 {
+			dark++
+		}
+	}
+	return dark*100/width >= 58
+}
+
+func documentColumnIsLine(luminance []uint8, width, height, x int) bool {
+	dark := 0
+	for y := 0; y < height; y++ {
+		if luminance[y*width+x] < 190 {
+			dark++
+		}
+	}
+	return dark*100/height >= 45
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func prepareTelegramPhotoUploadFile(ctx context.Context, path string, cleanup func()) (string, func(), error) {
