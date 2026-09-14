@@ -31,6 +31,7 @@ var (
 		>> 所有服务  [go run main.go]   热编译  [gf run main.go]
 		>> API服务   [go run main.go web]
 		>> Worker服务 [go run main.go worker]
+		>> 后台Worker服务 [go run main.go background-worker]
 		>> Account服务 [go run main.go account]
 		>> Scheduler服务 [go run main.go scheduler]
 		>> Runtime兼容服务 [go run main.go runtime]
@@ -108,6 +109,8 @@ var (
 
 	Worker = roleCommand("worker", "启动 Worker 服务", runrole.Worker, Http, Queue)
 
+	BackgroundWorker = roleCommand("background-worker", "启动后台任务 Worker 服务", runrole.BackgroundWorker, Http, Queue)
+
 	CollectorWorker = roleCommand("collector-worker", "启动 Telegram 采集 Worker 服务", runrole.CollectorWorker, Http)
 
 	MediaWorker = roleCommand("media-worker", "启动 Telegram 媒体 Worker 服务", runrole.MediaWorker, Http)
@@ -145,7 +148,7 @@ func roleCommand(name string, brief string, role string, commands ...*gcmd.Comma
 }
 
 func init() {
-	if err := Main.AddCommand(All, Web, Worker, CollectorWorker, MediaWorker, PublishWorker, Account, Scheduler, Runtime, Http, Queue, Cron, Auth, Tools, Up, Help); err != nil {
+	if err := Main.AddCommand(All, Web, Worker, BackgroundWorker, CollectorWorker, MediaWorker, PublishWorker, Account, Scheduler, Runtime, Http, Queue, Cron, Auth, Tools, Up, Help); err != nil {
 		panic(err)
 	}
 }
