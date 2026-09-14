@@ -19,6 +19,20 @@ func markProfilePermission(item *sysin.ProfileModel, permission string) {
 	item.CanEdit = permission == sysin.ProfilePermissionCreator || permission == sysin.ProfilePermissionAdmin
 }
 
+func sanitizeProfileMediaOriginals(list []*sysin.MediaModel, canEdit bool) {
+	if canEdit {
+		return
+	}
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		item.OriginalAttachmentId = 0
+		item.OriginalFileUrl = ""
+		item.OriginalStoragePath = ""
+	}
+}
+
 func markNotesPermission(list []*sysin.NoteModel, permission string) {
 	for _, item := range list {
 		if item == nil {

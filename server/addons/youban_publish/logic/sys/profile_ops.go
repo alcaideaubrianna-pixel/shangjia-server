@@ -68,6 +68,7 @@ func (s *sSysPublish) MyProfileView(ctx context.Context, in *sysin.ProfileViewIn
 	if err != nil {
 		return nil, err
 	}
+	sanitizeProfileMediaOriginals(media, profile.CanEdit)
 	pushChannels, err := s.profilePushChannels(ctx, profile)
 	if err != nil {
 		return nil, err
@@ -275,6 +276,7 @@ func (s *sSysPublish) AdminProfileView(ctx context.Context, in *sysin.ProfileVie
 	if err != nil {
 		return nil, err
 	}
+	sanitizeProfileMediaOriginals(media, profile.CanEdit)
 	pushChannels, err := s.profilePushChannels(ctx, profile)
 	if err != nil {
 		return nil, err
@@ -483,6 +485,7 @@ func (s *sSysPublish) ServerProfileView(ctx context.Context, in *sysin.ProfileVi
 	if err != nil {
 		return nil, err
 	}
+	sanitizeProfileMediaOriginals(media, false)
 	return &sysin.ProfileViewModel{Profile: profile, Media: media}, nil
 }
 

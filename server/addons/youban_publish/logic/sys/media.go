@@ -57,7 +57,12 @@ func (s *sSysPublish) ServerMediaList(ctx context.Context, in *sysin.MediaListIn
 	if in == nil || in.ProfileId <= 0 {
 		return nil, gerror.New("资料ID不能为空")
 	}
-	return s.mediaListByProfile(ctx, in.ProfileId, 0, 0)
+	list, err = s.mediaListByProfile(ctx, in.ProfileId, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	sanitizeProfileMediaOriginals(list, false)
+	return list, nil
 }
 
 func (s *sSysPublish) ServerMediaDelete(ctx context.Context, in *sysin.MediaDeleteInp) (err error) {
@@ -87,7 +92,13 @@ func (s *sSysPublish) MyMediaList(ctx context.Context, in *sysin.MediaListInp) (
 	if err != nil {
 		return nil, err
 	}
-	return s.mediaListByProfile(ctx, in.ProfileId, account.TenantId, profile.AccountId)
+	markSharedProfilePermission(profile, capability)
+	list, err = s.mediaListByProfile(ctx, in.ProfileId, account.TenantId, profile.AccountId)
+	if err != nil {
+		return nil, err
+	}
+	sanitizeProfileMediaOriginals(list, profile.CanEdit)
+	return list, nil
 }
 
 func mediaOwnerScope(mod *gdb.Model, owner gdb.Record) *gdb.Model {
@@ -719,7 +730,7 @@ func normalizeMediaListFileURL(list []*sysin.MediaModel) {
 		if item == nil {
 			continue
 		}
-		if (item.EditStatus == "" || item.EditStatus == "raw") && isLikelyEditedMedia(item) {
+		if item.EditStatus == "" && isLikelyEditedMedia(item) {
 			item.EditStatus = "edited"
 		}
 		item.StoragePath = normalizeStoredMediaPath(item.StoragePath)

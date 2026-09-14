@@ -383,6 +383,7 @@ func (s *sSysPublish) FollowNoteView(ctx context.Context, in *sysin.ProfileViewI
 	if err != nil {
 		return nil, err
 	}
+	sanitizeProfileMediaOriginals(media, profile.CanEdit)
 	return &sysin.ProfileViewModel{Profile: profile, Media: media}, nil
 }
 
