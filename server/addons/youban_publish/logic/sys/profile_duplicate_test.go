@@ -165,7 +165,7 @@ func TestValidateDuplicateCleanupStateRejectsChangedTargetSignature(t *testing.T
 		1: {Id: 1, CreatedAt: targetTime},
 		2: {Id: 2, CreatedAt: keepTime},
 	}
-	if err := validateDuplicateCleanupState([]int64{1}, candidates, profiles, map[int64]string{1: "changed", 2: "same"}); err == nil {
+	if err := validateDuplicateCleanupState([]int64{1}, candidates, profiles, map[int64]string{1: "changed", 2: "same"}, nil); err == nil {
 		t.Fatal("expected changed target signature to be rejected")
 	}
 }
@@ -173,8 +173,26 @@ func TestValidateDuplicateCleanupStateRejectsChangedTargetSignature(t *testing.T
 func TestValidateDuplicateCleanupStateRejectsMissingKeep(t *testing.T) {
 	candidates := map[int64]duplicateScanCandidate{1: {ProfileId: 1, KeepProfileId: 2, Signature: "same"}}
 	profiles := map[int64]*sysin.AdminNoteDuplicateItemModel{1: {Id: 1}}
-	if err := validateDuplicateCleanupState([]int64{1}, candidates, profiles, map[int64]string{1: "same"}); err == nil {
+	if err := validateDuplicateCleanupState([]int64{1}, candidates, profiles, map[int64]string{1: "same"}, nil); err == nil {
 		t.Fatal("expected missing retained profile to be rejected")
+	}
+}
+
+func TestValidateDuplicateCleanupStateKeepsTextAndPHashIndependent(t *testing.T) {
+	keepTime := gtime.New(time.Unix(20, 0))
+	targetTime := gtime.New(time.Unix(10, 0))
+	candidates := map[int64]duplicateScanCandidate{
+		1: {ProfileId: 1, KeepProfileId: 3, Signature: "text:same"},
+		2: {ProfileId: 2, KeepProfileId: 3, Signature: "phash:3"},
+	}
+	profiles := map[int64]*sysin.AdminNoteDuplicateItemModel{
+		1: {Id: 1, CreatedAt: targetTime},
+		2: {Id: 2, CreatedAt: targetTime},
+		3: {Id: 3, CreatedAt: keepTime},
+	}
+	signatures := map[int64]string{1: "text:same", 2: "text:other", 3: "text:same"}
+	if err := validateDuplicateCleanupState([]int64{1, 2}, candidates, profiles, signatures, map[int64]bool{2: true}); err != nil {
+		t.Fatalf("text and pHash candidates sharing a keep must validate independently: %v", err)
 	}
 }
 
@@ -185,13 +203,13 @@ func TestValidateDuplicateCleanupStateRequiresNewerKeep(t *testing.T) {
 		1: {Id: 1, CreatedAt: sameTime},
 		2: {Id: 2, CreatedAt: sameTime},
 	}
-	if err := validateDuplicateCleanupState([]int64{2}, candidates, profiles, map[int64]string{1: "same", 2: "same"}); err == nil {
+	if err := validateDuplicateCleanupState([]int64{2}, candidates, profiles, map[int64]string{1: "same", 2: "same"}, nil); err == nil {
 		t.Fatal("expected older retained profile to be rejected")
 	}
 }
 
 func TestValidateDuplicateScanSessionOwner(t *testing.T) {
-	session := &duplicateScanSession{TenantId: 7, AdminAccountId: 8}
+	session := &duplicateScanSession{AlgorithmVersion: duplicateScanAlgorithmVersion, TenantId: 7, AdminAccountId: 8}
 	if err := validateDuplicateScanSessionOwner(session, &sysin.AccountModel{TenantId: 7, Id: 8}); err != nil {
 		t.Fatalf("expected matching owner: %v", err)
 	}

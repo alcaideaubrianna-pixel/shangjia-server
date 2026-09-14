@@ -435,10 +435,11 @@ func (s *sSysPublish) AdminNoteDuplicateCleanup(ctx context.Context, in *sysin.A
 	if err != nil {
 		return nil, err
 	}
-	if err = applyDuplicatePHashValidation(ctx, ids, candidateById, signatures); err != nil {
+	phashValidated, err := applyDuplicatePHashValidation(ctx, ids, candidateById)
+	if err != nil {
 		return nil, err
 	}
-	if err = validateDuplicateCleanupState(ids, candidateById, profiles, signatures); err != nil {
+	if err = validateDuplicateCleanupState(ids, candidateById, profiles, signatures, phashValidated); err != nil {
 		return nil, err
 	}
 	if _, err = s.updateProfileStatus(ctx, &sysin.ProfileStatusInp{Ids: ids, Status: 2}, account.TenantId, 0); err != nil {
@@ -453,7 +454,8 @@ func (s *sSysPublish) AdminNoteDuplicateCleanup(ctx context.Context, in *sysin.A
 	return &sysin.AdminNoteDuplicateCleanupModel{DeletedIds: ids}, nil
 }
 
-func applyDuplicatePHashValidation(ctx context.Context, ids []int64, candidates map[int64]duplicateScanCandidate, signatures map[int64]string) error {
+func applyDuplicatePHashValidation(ctx context.Context, ids []int64, candidates map[int64]duplicateScanCandidate) (map[int64]bool, error) {
+	validated := make(map[int64]bool)
 	validationIds := make([]int64, 0, len(ids)*2)
 	for _, id := range ids {
 		candidate, ok := candidates[id]
@@ -463,7 +465,7 @@ func applyDuplicatePHashValidation(ctx context.Context, ids []int64, candidates 
 	}
 	validationIds = uniqueIds(validationIds)
 	if len(validationIds) == 0 {
-		return nil
+		return validated, nil
 	}
 	var rows []duplicateImageRow
 	if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
@@ -471,7 +473,7 @@ func applyDuplicatePHashValidation(ctx context.Context, ids []int64, candidates 
 		WhereNull("deleted_at").WhereIn("media_type", []string{"image", "photo"}).
 		Where("purpose IS NULL OR purpose='' OR purpose='display'").
 		OrderAsc("profile_id").OrderAsc("sort_index").OrderAsc("id").Scan(&rows); err != nil {
-		return gerror.Wrap(err, "校验相似资料图片指纹失败")
+		return nil, gerror.Wrap(err, "校验相似资料图片指纹失败")
 	}
 	byProfile := make(map[int64][]duplicateImageRow, len(validationIds))
 	for _, row := range rows {
@@ -485,11 +487,10 @@ func applyDuplicatePHashValidation(ctx context.Context, ids []int64, candidates 
 		left, leftOK := duplicateImagePHashes(byProfile[id])
 		right, rightOK := duplicateImagePHashes(byProfile[candidate.KeepProfileId])
 		if leftOK && rightOK && profilePHashSetsMatch(left, right, collectProfilePHashDuplicateThreshold) {
-			signatures[id] = candidate.Signature
-			signatures[candidate.KeepProfileId] = candidate.Signature
+			validated[id] = true
 		}
 	}
-	return nil
+	return validated, nil
 }
 
 func validateDuplicateScanSessionOwner(session *duplicateScanSession, account *sysin.AccountModel) error {
@@ -502,14 +503,18 @@ func validateDuplicateScanSessionOwner(session *duplicateScanSession, account *s
 	return nil
 }
 
-func validateDuplicateCleanupState(ids []int64, candidates map[int64]duplicateScanCandidate, profiles map[int64]*sysin.AdminNoteDuplicateItemModel, signatures map[int64]string) error {
+func validateDuplicateCleanupState(ids []int64, candidates map[int64]duplicateScanCandidate, profiles map[int64]*sysin.AdminNoteDuplicateItemModel, signatures map[int64]string, phashValidated map[int64]bool) error {
 	for _, id := range ids {
 		candidate, ok := candidates[id]
 		if !ok {
 			return gerror.New("待删除资料不属于当前扫描批次，请重新扫描")
 		}
 		target, keep := profiles[id], profiles[candidate.KeepProfileId]
-		if target == nil || keep == nil || signatures[id] != candidate.Signature || signatures[candidate.KeepProfileId] != candidate.Signature || !duplicateProfileNewer(keep, target) {
+		signatureValid := phashValidated[id]
+		if !strings.HasPrefix(candidate.Signature, "phash:") {
+			signatureValid = signatures[id] == candidate.Signature && signatures[candidate.KeepProfileId] == candidate.Signature
+		}
+		if target == nil || keep == nil || !signatureValid || !duplicateProfileNewer(keep, target) {
 			return gerror.New("重复资料已发生变化，为避免误删，请重新扫描后再试")
 		}
 	}
