@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -120,6 +121,35 @@ func TestDuplicateScanSessionRejectsPreviousAlgorithm(t *testing.T) {
 	session.AlgorithmVersion--
 	if err := validateDuplicateScanSessionOwner(session, account); err == nil {
 		t.Fatal("previous scan algorithm session must be rejected")
+	}
+}
+
+func TestDuplicateScanSessionCompressionRoundTrip(t *testing.T) {
+	session := &duplicateScanSession{
+		AlgorithmVersion: duplicateScanAlgorithmVersion,
+		AdminAccountId:   7,
+		TenantId:         6,
+		SignatureIds:     map[string][]int64{"text:same": {3, 2, 1}},
+		PHashSets:        map[int64][]string{3: {"d87a07c29151f7c5"}},
+	}
+	plain, err := json.Marshal(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressed, err := encodeDuplicateScanSession(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(compressed) >= len(plain) {
+		t.Fatalf("compressed session should be smaller: compressed=%d plain=%d", len(compressed), len(plain))
+	}
+	decoded, err := decodeDuplicateScanSession(compressed)
+	if err != nil || decoded.AdminAccountId != session.AdminAccountId || len(decoded.SignatureIds["text:same"]) != 3 {
+		t.Fatalf("compressed session round trip failed: session=%#v err=%v", decoded, err)
+	}
+	legacy, err := decodeDuplicateScanSession(plain)
+	if err != nil || legacy.TenantId != session.TenantId {
+		t.Fatalf("legacy JSON session must remain readable: session=%#v err=%v", legacy, err)
 	}
 }
 

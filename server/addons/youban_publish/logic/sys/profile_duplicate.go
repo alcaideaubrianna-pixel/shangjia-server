@@ -1,6 +1,8 @@
 package sys
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -92,7 +94,7 @@ func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.Admi
 		in.ScanToken = guid.S()
 		session = newDuplicateScanSession(account)
 		session.ResultCacheKey = resultCacheKey
-		if err = cache.Instance().Set(ctx, duplicateScanSessionKey(in.ScanToken), session, duplicateScanSessionTTL); err != nil {
+		if err = saveDuplicateScanProgress(ctx, in.ScanToken, session); err != nil {
 			return nil, gerror.Wrap(err, "创建重复资料扫描会话失败")
 		}
 		g.Log().Infof(ctx, "重复资料扫描任务已创建 scanTaskId:%s tenantId:%d accountId:%d", in.ScanToken, account.TenantId, account.Id)
@@ -125,7 +127,7 @@ func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.Admi
 	g.Log().Infof(ctx, "重复资料扫描分片完成 scanTaskId:%s scanned:%d batch:%d cursor:%d duplicate:%d incomplete:%d complete:%t",
 		in.ScanToken, session.ScannedTotal, len(ids), session.ScanCursor, session.DuplicateTotal, session.IncompleteTotal, complete)
 	if !complete {
-		if err = cache.Instance().Set(ctx, duplicateScanSessionKey(in.ScanToken), session, duplicateScanSessionTTL); err != nil {
+		if err = saveDuplicateScanProgress(ctx, in.ScanToken, session); err != nil {
 			return nil, gerror.Wrap(err, "保存重复资料扫描进度失败")
 		}
 		return duplicateScanProgressResult(in.ScanToken, session, false), nil
@@ -281,7 +283,7 @@ func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, ses
 	}
 	if len(duplicateIds) == 0 {
 		session.SignatureIds = nil
-		_ = cache.Instance().Set(ctx, duplicateScanSessionKey(token), session, duplicateScanSessionTTL)
+		_ = saveDuplicateScanProgress(ctx, token, session)
 		cacheDuplicateScanResult(ctx, token, session)
 		g.Log().Infof(ctx, "重复资料扫描任务完成 scanTaskId:%s scanned:%d groups:0 duplicate:0 incomplete:%d", token, session.ScannedTotal, session.IncompleteTotal)
 		return duplicateScanProgressResult(token, session, true), nil
@@ -572,7 +574,7 @@ func saveDuplicateScanSession(ctx context.Context, token string, session *duplic
 		}
 		writtenKeys = append(writtenKeys, key)
 	}
-	if err := cache.Instance().Set(ctx, duplicateScanSessionKey(token), session, duplicateScanSessionTTL); err != nil {
+	if err := saveDuplicateScanProgress(ctx, token, session); err != nil {
 		removeDuplicateScanKeys(ctx, writtenKeys)
 		return gerror.Wrap(err, "保存重复资料扫描会话失败")
 	}
@@ -596,12 +598,57 @@ func loadDuplicateScanSession(ctx context.Context, token string) (*duplicateScan
 	if value.IsNil() {
 		return nil, gerror.New("重复资料扫描结果已过期，请重新扫描")
 	}
-	var session *duplicateScanSession
-	if err = value.Scan(&session); err != nil || session == nil {
+	session, err := decodeDuplicateScanSession(value.Bytes())
+	if err != nil || session == nil {
 		return nil, gerror.New("重复资料扫描结果无效，请重新扫描")
 	}
-	_ = cache.Instance().Set(ctx, duplicateScanSessionKey(token), session, duplicateScanSessionTTL)
+	_ = saveDuplicateScanProgress(ctx, token, session)
 	return session, nil
+}
+
+func saveDuplicateScanProgress(ctx context.Context, token string, session *duplicateScanSession) error {
+	data, err := encodeDuplicateScanSession(session)
+	if err != nil {
+		return err
+	}
+	return cache.Instance().Set(ctx, duplicateScanSessionKey(token), data, duplicateScanSessionTTL)
+}
+
+func encodeDuplicateScanSession(session *duplicateScanSession) ([]byte, error) {
+	data, err := json.Marshal(session)
+	if err != nil {
+		return nil, err
+	}
+	var compressed bytes.Buffer
+	writer := gzip.NewWriter(&compressed)
+	if _, err = writer.Write(data); err != nil {
+		_ = writer.Close()
+		return nil, err
+	}
+	if err = writer.Close(); err != nil {
+		return nil, err
+	}
+	return compressed.Bytes(), nil
+}
+
+func decodeDuplicateScanSession(data []byte) (*duplicateScanSession, error) {
+	if len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b {
+		reader, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		defer reader.Close()
+		var session duplicateScanSession
+		if err = json.NewDecoder(reader).Decode(&session); err != nil {
+			return nil, err
+		}
+		return &session, nil
+	}
+	var session duplicateScanSession
+	if err := json.Unmarshal(data, &session); err != nil {
+		return nil, err
+	}
+	return &session, nil
 }
 
 func loadDuplicateScanCandidates(ctx context.Context, token string, session *duplicateScanSession, cursor int) ([]duplicateScanCandidate, error) {
