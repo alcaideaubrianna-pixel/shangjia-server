@@ -13,6 +13,7 @@ import (
 	"image/jpeg"
 	_ "image/png"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -25,11 +26,13 @@ import (
 	_ "golang.org/x/image/webp"
 	"golang.org/x/sync/singleflight"
 
+	publishconsts "hotgo/addons/youban_publish/consts"
 	"hotgo/addons/youban_publish/global"
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
 	"hotgo/internal/library/addons"
+	"hotgo/internal/library/cache"
 	"hotgo/internal/library/storager"
 	baseservice "hotgo/internal/service"
 	"hotgo/utility/file"
@@ -138,7 +141,7 @@ func (s *sSysPublish) AdminAntiScanPreview(ctx context.Context, in *sysin.AntiSc
 	return res, nil
 }
 
-func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiScanSegmentInp, upload *ghttp.UploadFile) (res *sysin.AntiScanSegmentModel, err error) {
+func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiScanSegmentInp) (res *sysin.AntiScanSegmentModel, err error) {
 	totalStartedAt := time.Now()
 	defer func() {
 		g.Log().Infof(ctx, "人像分割完成 stage:total durationMs:%d success:%t", time.Since(totalStartedAt).Milliseconds(), err == nil)
@@ -154,11 +157,26 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 	if err = s.ensureTenantVipFeature(ctx, account.TenantId, sysin.TenantVipFeatureBackgroundReplace); err != nil {
 		return nil, err
 	}
-	g.Log().Infof(ctx, "人像分割阶段完成 stage:auth durationMs:%d", time.Since(stageStartedAt).Milliseconds())
-	stageStartedAt = time.Now()
-	imageBytes, _, err := readAntiScanPreviewImage(ctx, upload, in.UseDefaultImage)
+	media, err := s.antiScanSegmentMedia(ctx, in.MediaId, account)
 	if err != nil {
 		return nil, err
+	}
+	g.Log().Infof(ctx, "人像分割阶段完成 stage:auth durationMs:%d", time.Since(stageStartedAt).Milliseconds())
+	stageStartedAt = time.Now()
+	if cached, ok := s.getAntiScanMediaSegmentCache(ctx, in.MediaId); ok {
+		g.Log().Infof(ctx, "人像分割阶段完成 stage:media_cache_lookup durationMs:%d cacheHit:1 mediaId:%d", time.Since(stageStartedAt).Milliseconds(), in.MediaId)
+		return cached, nil
+	}
+	path, _, err := cachedTelegramMediaFile(ctx, media)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取媒体图片失败")
+	}
+	if strings.TrimSpace(path) == "" {
+		return nil, gerror.New("媒体图片地址不存在")
+	}
+	imageBytes, err := os.ReadFile(path)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取媒体图片失败")
 	}
 	imageHash, err := antiScanImageHash(imageBytes)
 	if err != nil {
@@ -190,7 +208,11 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 			url = antiScanSegmentPresentationURL(url)
 			width, height := antiScanImageDimensions(imageBytes)
 			g.Log().Infof(ctx, "人像分割阶段完成 stage:cache_lookup durationMs:%d cacheHit:1 imageHash:%s", time.Since(stageStartedAt).Milliseconds(), imageHash)
-			return &sysin.AntiScanSegmentModel{CacheHit: 1, ImageHash: imageHash, SegmentUrl: url, Width: width, Height: height}, nil
+			res = &sysin.AntiScanSegmentModel{CacheHit: 1, ImageHash: imageHash, SegmentUrl: url, Width: width, Height: height}
+			if err = s.saveAntiScanMediaSegmentCache(ctx, in.MediaId, res, cached.SegmentRaw, cached.Provider); err != nil {
+				return nil, err
+			}
+			return res, nil
 		}
 	}
 	g.Log().Infof(ctx, "人像分割阶段完成 stage:cache_lookup durationMs:%d cacheHit:0 imageHash:%s", time.Since(stageStartedAt).Milliseconds(), imageHash)
@@ -213,7 +235,92 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 	}
 	segmentUrl = antiScanSegmentPresentationURL(segmentUrl)
 	width, height := antiScanImageDimensions(imageBytes)
-	return &sysin.AntiScanSegmentModel{ImageHash: imageHash, SegmentUrl: segmentUrl, Width: width, Height: height}, nil
+	res = &sysin.AntiScanSegmentModel{ImageHash: imageHash, SegmentUrl: segmentUrl, Width: width, Height: height}
+	if err = s.saveAntiScanMediaSegmentCache(ctx, in.MediaId, res, segmentRaw, provider); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (s *sSysPublish) antiScanSegmentMedia(ctx context.Context, mediaId int64, account *sysin.AccountModel) (*telegramMediaItem, error) {
+	capability, err := s.activeAccountCapability(ctx, account.TenantId, account.Id)
+	if err != nil {
+		return nil, err
+	}
+	mod := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Fields("id,tenant_id,account_id,attachment_id,original_attachment_id,edited_attachment_id,media_type,file_url,original_file_url,edited_file_url,storage_path,original_storage_path,edited_storage_path,edit_status,md5").
+		Where("id", mediaId).Where("tenant_id", account.TenantId).WhereNull("deleted_at")
+	if capability.AccountType == sysin.PublishAccountTypeUploader && capability.SharedResourceEnabled != 1 {
+		mod = mod.Where("account_id", account.Id)
+	}
+	row, err := mod.One()
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取媒体信息失败")
+	}
+	if row.IsEmpty() {
+		return nil, gerror.New("媒体不存在或无权访问")
+	}
+	if mediaType := strings.ToLower(strings.TrimSpace(row["media_type"].String())); mediaType != "image" && mediaType != "photo" {
+		return nil, gerror.New("仅图片媒体支持人像分割")
+	}
+	asset := newProfileMediaFromRecord(row).EffectiveAsset()
+	return &telegramMediaItem{Id: mediaId, AttachmentId: asset.AttachmentId, MediaType: "image", FileUrl: asset.FileUrl, StoragePath: asset.StoragePath, AssetHash: asset.Hash}, nil
+}
+
+func (s *sSysPublish) getAntiScanMediaSegmentCache(ctx context.Context, mediaId int64) (*sysin.AntiScanSegmentModel, bool) {
+	cacheKey := antiScanMediaSegmentCacheKey(mediaId)
+	if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {
+		var cached sysin.AntiScanSegmentModel
+		if scanErr := value.Scan(&cached); scanErr == nil && strings.TrimSpace(cached.SegmentUrl) != "" {
+			cached.CacheHit = 1
+			return &cached, true
+		}
+	}
+	row, err := g.DB().Model(antiScanCacheTable).Safe().Ctx(ctx).
+		Where("media_id", mediaId).Where("segment_json <> ''").Where("cloud_raw_saved", 1).
+		WhereNull("deleted_at").OrderDesc("id").One()
+	if err != nil || row.IsEmpty() {
+		return nil, false
+	}
+	url := antiScanSegmentURL(row["segment_json"].String())
+	if url == "" {
+		return nil, false
+	}
+	res := &sysin.AntiScanSegmentModel{CacheHit: 1, ImageHash: row["image_hash"].String(), SegmentUrl: antiScanSegmentPresentationURL(url), Width: row["image_width"].Int(), Height: row["image_height"].Int()}
+	if cacheErr := cache.Instance().Set(ctx, cacheKey, res, 24*time.Hour); cacheErr != nil {
+		g.Log().Warningf(ctx, "缓存媒体人像分割结果失败 mediaId:%d err:%+v", mediaId, cacheErr)
+	}
+	return res, true
+}
+
+func (s *sSysPublish) saveAntiScanMediaSegmentCache(ctx context.Context, mediaId int64, res *sysin.AntiScanSegmentModel, segmentRaw string, provider string) error {
+	_, err := g.DB().Model(antiScanCacheTable).Safe().Ctx(ctx).Data(g.Map{
+		"media_id": mediaId, "image_hash": res.ImageHash, "config_hash": "", "provider": provider,
+		"face_count": 0, "face_json": "", "segment_json": segmentRaw, "original_url": "", "preview_url": "",
+		"warnings_json": "[]", "cloud_raw_saved": 1, "image_width": res.Width, "image_height": res.Height,
+		"created_at": gtime.Now(), "updated_at": gtime.Now(),
+	}).Insert()
+	if err != nil {
+		return gerror.Wrap(err, "保存媒体人像分割缓存失败")
+	}
+	if cacheErr := cache.Instance().Set(ctx, antiScanMediaSegmentCacheKey(mediaId), res, 24*time.Hour); cacheErr != nil {
+		g.Log().Warningf(ctx, "缓存媒体人像分割结果失败 mediaId:%d err:%+v", mediaId, cacheErr)
+	}
+	return nil
+}
+
+func antiScanMediaSegmentCacheKey(mediaId int64) string {
+	return fmt.Sprintf("%s%d", publishconsts.AntiScanMediaSegmentKeyPrefix, mediaId)
+}
+
+func invalidateAntiScanMediaSegmentCache(ctx context.Context, mediaId int64) error {
+	if _, err := cache.Instance().Remove(ctx, antiScanMediaSegmentCacheKey(mediaId)); err != nil {
+		g.Log().Warningf(ctx, "清除媒体人像分割快速缓存失败 mediaId:%d err:%+v", mediaId, err)
+	}
+	if _, err := g.DB().Model(antiScanCacheTable).Safe().Ctx(ctx).Where("media_id", mediaId).Delete(); err != nil {
+		return gerror.Wrap(err, "清除媒体人像分割缓存失败")
+	}
+	return nil
 }
 
 func antiScanPreviewDataURL(imageBytes []byte) string {

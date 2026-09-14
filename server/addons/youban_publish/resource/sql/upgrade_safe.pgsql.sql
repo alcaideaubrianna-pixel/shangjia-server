@@ -204,3 +204,7 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_image_quota_ledger_tenant" ON "hg_youban_pub
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_mode" varchar(32) NOT NULL DEFAULT 'lightweight';
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_background_url" varchar(1024) NOT NULL DEFAULT '';
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_background_name" varchar(255) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_anti_scan_cache" ADD COLUMN IF NOT EXISTS "media_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_anti_scan_cache" ADD COLUMN IF NOT EXISTS "image_width" integer NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_anti_scan_cache" ADD COLUMN IF NOT EXISTS "image_height" integer NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_media" ON "hg_youban_publish_anti_scan_cache" ("media_id", "cloud_raw_saved");

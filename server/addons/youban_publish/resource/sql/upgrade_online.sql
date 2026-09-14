@@ -69,3 +69,7 @@ ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `anti_scan_mode
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `anti_scan_background_url` varchar(1024) NOT NULL DEFAULT '';
 ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `anti_scan_background_name` varchar(255) NOT NULL DEFAULT '';
 ALTER TABLE `hg_youban_publish_channel_profile` ADD INDEX IF NOT EXISTS `idx_ybp_channel_profile_profile` (`profile_id`,`channel_id`);
+ALTER TABLE `hg_youban_publish_anti_scan_cache` ADD COLUMN IF NOT EXISTS `media_id` bigint(20) NOT NULL DEFAULT '0';
+ALTER TABLE `hg_youban_publish_anti_scan_cache` ADD COLUMN IF NOT EXISTS `image_width` int(11) NOT NULL DEFAULT '0';
+ALTER TABLE `hg_youban_publish_anti_scan_cache` ADD COLUMN IF NOT EXISTS `image_height` int(11) NOT NULL DEFAULT '0';
+ALTER TABLE `hg_youban_publish_anti_scan_cache` ADD INDEX IF NOT EXISTS `idx_ybp_anti_scan_media` (`media_id`,`cloud_raw_saved`);

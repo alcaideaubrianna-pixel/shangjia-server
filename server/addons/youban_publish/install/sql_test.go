@@ -59,6 +59,22 @@ func TestOnlineUpgradeSqlIncludesDedupeSchema(t *testing.T) {
 	}
 }
 
+func TestAntiScanMediaCacheSchemaIsMigrated(t *testing.T) {
+	for _, path := range []string{
+		"addons/youban_publish/resource/sql/install.sql",
+		"addons/youban_publish/resource/sql/install.pgsql.sql",
+		"addons/youban_publish/resource/sql/upgrade_online.sql",
+		"addons/youban_publish/resource/sql/upgrade_online.pgsql.sql",
+	} {
+		sql := readSqlFile(path)
+		for _, required := range []string{"media_id", "image_width", "image_height", "idx_ybp_anti_scan_media"} {
+			if !strings.Contains(sql, required) {
+				t.Fatalf("anti-scan media cache migration %s does not contain %q", path, required)
+			}
+		}
+	}
+}
+
 func TestUpgradeSafeSqlIncludesProfileCycleDueIndex(t *testing.T) {
 	tests := []struct {
 		name string

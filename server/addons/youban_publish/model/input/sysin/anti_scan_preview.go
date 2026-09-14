@@ -28,7 +28,7 @@ type AntiScanPreviewModel struct {
 }
 
 type AntiScanSegmentInp struct {
-	UseDefaultImage int `json:"useDefaultImage"`
+	MediaId int64 `json:"mediaId" v:"required|min:1#媒体ID不能为空|媒体ID不能为空" dc:"媒体ID"`
 }
 
 type AntiScanSegmentModel struct {
@@ -43,8 +43,8 @@ func (in *AntiScanSegmentInp) Filter(ctx context.Context) error {
 	if in == nil {
 		return gerror.New("人像分割参数不能为空")
 	}
-	if in.UseDefaultImage != 0 {
-		in.UseDefaultImage = 1
+	if in.MediaId <= 0 {
+		return gerror.New("媒体ID不能为空")
 	}
 	return nil
 }

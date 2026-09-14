@@ -46,8 +46,7 @@ func (c *cPublishAdmin) AntiScanPreview(ctx context.Context, req *publish.AdminA
 }
 
 func (c *cPublishAdmin) AntiScanSegment(ctx context.Context, req *publish.AdminAntiScanSegmentReq) (res *publish.AdminAntiScanSegmentRes, err error) {
-	file := g.RequestFromCtx(ctx).GetUploadFile("image")
-	data, err := service.SysPublish().AdminAntiScanSegment(ctx, &req.AntiScanSegmentInp, file)
+	data, err := service.SysPublish().AdminAntiScanSegment(ctx, &req.AntiScanSegmentInp)
 	if err != nil {
 		return nil, err
 	}

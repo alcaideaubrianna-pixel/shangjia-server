@@ -1044,6 +1044,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_media_face` (
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_anti_scan_cache` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `media_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '媒体ID，0表示通用图片缓存',
   `image_hash` varchar(64) NOT NULL DEFAULT '' COMMENT '图片感知哈希',
   `config_hash` varchar(64) NOT NULL DEFAULT '' COMMENT '防扫图配置哈希',
   `provider` varchar(32) NOT NULL DEFAULT '' COMMENT '视觉服务商',
@@ -1054,11 +1055,14 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_anti_scan_cache` (
   `preview_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '预览图地址',
   `warnings_json` text NOT NULL COMMENT '预览告警',
   `cloud_raw_saved` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否已保存云识别结果',
+  `image_width` int(11) NOT NULL DEFAULT '0' COMMENT '原图宽度',
+  `image_height` int(11) NOT NULL DEFAULT '0' COMMENT '原图高度',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
   KEY `idx_ybp_anti_scan_image` (`image_hash`),
+  KEY `idx_ybp_anti_scan_media` (`media_id`,`cloud_raw_saved`),
   KEY `idx_ybp_anti_scan_config` (`image_hash`,`config_hash`),
   KEY `idx_ybp_anti_scan_provider` (`provider`,`cloud_raw_saved`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴防扫图预览缓存';

@@ -48,7 +48,7 @@ type AdminAntiScanPreviewRes struct {
 }
 
 type AdminAntiScanSegmentReq struct {
-	g.Meta `path:"/publish/admin/antiScan/segment" method:"post" mime:"multipart/form-data" tags:"上架插件管理端" summary:"人像分割"`
+	g.Meta `path:"/publish/admin/antiScan/segment" method:"post" tags:"上架插件管理端" summary:"按媒体生成人像分割图"`
 	sysin.AntiScanSegmentInp
 }
 

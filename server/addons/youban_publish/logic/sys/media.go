@@ -685,6 +685,11 @@ func (s *sSysPublish) saveMediaAttachment(ctx context.Context, task gdb.Record, 
 	if err != nil {
 		return nil, gerror.Wrap(err, "保存任务媒体失败")
 	}
+	if in.MediaId > 0 {
+		if cacheErr := invalidateAntiScanMediaSegmentCache(ctx, mediaId); cacheErr != nil {
+			return nil, cacheErr
+		}
+	}
 	// Fresh direct uploads do not have a pHash yet. The media worker computes
 	// it and refreshes the bucket; querying and deleting an empty bucket here
 	// only adds several database round trips to the upload-complete request.

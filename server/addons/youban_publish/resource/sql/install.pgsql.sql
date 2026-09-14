@@ -597,6 +597,7 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_media_face_feature" ON "hg_youban_publish_me
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_anti_scan_cache" (
   "id" BIGSERIAL PRIMARY KEY,
+  "media_id" bigint NOT NULL DEFAULT 0,
   "image_hash" varchar(64) NOT NULL DEFAULT '',
   "config_hash" varchar(64) NOT NULL DEFAULT '',
   "provider" varchar(32) NOT NULL DEFAULT '',
@@ -607,11 +608,14 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_anti_scan_cache" (
   "preview_url" varchar(1024) NOT NULL DEFAULT '',
   "warnings_json" text NOT NULL DEFAULT '',
   "cloud_raw_saved" smallint NOT NULL DEFAULT 0,
+  "image_width" integer NOT NULL DEFAULT 0,
+  "image_height" integer NOT NULL DEFAULT 0,
   "created_at" timestamp DEFAULT NULL,
   "updated_at" timestamp DEFAULT NULL,
   "deleted_at" timestamp DEFAULT NULL
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_image" ON "hg_youban_publish_anti_scan_cache" ("image_hash");
+CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_media" ON "hg_youban_publish_anti_scan_cache" ("media_id", "cloud_raw_saved");
 CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_config" ON "hg_youban_publish_anti_scan_cache" ("image_hash", "config_hash");
 CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_provider" ON "hg_youban_publish_anti_scan_cache" ("provider", "cloud_raw_saved");
 
