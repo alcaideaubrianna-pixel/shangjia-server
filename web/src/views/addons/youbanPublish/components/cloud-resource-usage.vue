@@ -19,6 +19,13 @@
         placeholder="资源类型"
         class="resource-select"
       />
+      <n-select
+        v-model:value="query.provider"
+        :options="cloudResourceProviderOptions"
+        clearable
+        placeholder="服务来源"
+        class="provider-select"
+      />
       <n-input
         v-model:value="query.keyword"
         clearable
@@ -50,6 +57,7 @@
   import {
     cloudResourceDateShortcuts,
     cloudResourceOptions,
+    cloudResourceProviderOptions,
     cloudResourceSuccessRate,
     currentMonthRange,
     formatCloudResourceDuration,
@@ -59,7 +67,7 @@
 
   const rows = ref<any[]>([]);
   const loading = ref(false);
-  const query = reactive({ keyword: '', resourceType: '' });
+  const query = reactive({ keyword: '', provider: '', resourceType: '' });
   const dateRange = ref<[number, number] | null>(currentMonthRange());
 
   const columns = [
@@ -179,7 +187,7 @@
   }
 
   function resetQuery() {
-    Object.assign(query, { keyword: '', resourceType: '' });
+    Object.assign(query, { keyword: '', provider: '', resourceType: '' });
     dateRange.value = currentMonthRange();
     search();
   }
@@ -212,6 +220,10 @@
 
   .resource-select {
     width: 160px;
+  }
+
+  .provider-select {
+    width: 140px;
   }
 
   .keyword-input {

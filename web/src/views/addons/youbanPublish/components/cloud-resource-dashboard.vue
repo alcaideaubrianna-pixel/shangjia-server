@@ -20,6 +20,13 @@
           placeholder="全部资源"
           class="resource-select"
         />
+        <n-select
+          v-model:value="provider"
+          :options="cloudResourceProviderOptions"
+          clearable
+          placeholder="全部来源"
+          class="provider-select"
+        />
         <n-button type="primary" @click="loadDashboard">查询</n-button>
         <n-button quaternary @click="resetQuery">重置</n-button>
       </n-space>
@@ -51,7 +58,7 @@
               :columns="breakdownColumns"
               :data="breakdown"
               :pagination="false"
-              :row-key="(row) => row.resourceType"
+              :row-key="(row) => `${row.resourceType}-${row.provider}`"
               size="small"
             />
           </n-card>
@@ -88,6 +95,8 @@
     cloudResourceDateShortcuts,
     cloudResourceLabel,
     cloudResourceOptions,
+    cloudResourceProviderLabel,
+    cloudResourceProviderOptions,
     cloudResourceSuccessRate,
     currentMonthRange,
     formatCloudResourceDuration,
@@ -109,6 +118,7 @@
   const loading = ref(false);
   const dateRange = ref<[number, number] | null>(currentMonthRange());
   const resourceType = ref('');
+  const provider = ref('');
   const summary = ref<any>(emptySummary());
   const trend = ref<any[]>([]);
   const topUsers = ref<any[]>([]);
@@ -148,6 +158,11 @@
   ]);
 
   const breakdownColumns = [
+    {
+      title: '来源',
+      key: 'provider',
+      render: (row) => cloudResourceProviderLabel(row.provider),
+    },
     {
       title: '资源',
       key: 'resourceType',
@@ -218,6 +233,7 @@
         startDate,
         endDate,
         resourceType: resourceType.value,
+        provider: provider.value,
       });
       summary.value = { ...emptySummary(), ...(res?.summary || {}) };
       trend.value = res?.trend || [];
@@ -232,6 +248,7 @@
   function resetQuery() {
     dateRange.value = currentMonthRange();
     resourceType.value = '';
+    provider.value = '';
     loadDashboard();
   }
 

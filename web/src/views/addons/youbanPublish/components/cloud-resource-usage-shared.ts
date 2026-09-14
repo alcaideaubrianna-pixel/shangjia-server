@@ -3,6 +3,13 @@ export const cloudResourceOptions = [
   { label: '人脸检测', value: 'face_detection' },
 ];
 
+export const cloudResourceProviderOptions = [
+  { label: '阿里云', value: 'aliyun' },
+  { label: '腾讯云', value: 'tencent' },
+  { label: 'FAPIHub', value: 'fapihub' },
+  { label: '历史数据', value: 'legacy' },
+];
+
 export const cloudResourceDateShortcuts = {
   本月: currentMonthRange,
   最近7天: () => recentDaysRange(7),
@@ -45,6 +52,12 @@ export function cloudResourceSuccessRate(row: any) {
 export function cloudResourceLabel(resourceType: string) {
   return (
     cloudResourceOptions.find((item) => item.value === resourceType)?.label || resourceType || '-'
+  );
+}
+
+export function cloudResourceProviderLabel(provider: string) {
+  return (
+    cloudResourceProviderOptions.find((item) => item.value === provider)?.label || provider || '-'
   );
 }
 

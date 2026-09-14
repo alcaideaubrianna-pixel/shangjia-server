@@ -803,13 +803,17 @@
 
   function newCloudResourceConfig() {
     return {
+      mattingProvider: 'aliyun',
+      aliyunAccessKeyId: '',
+      aliyunAccessKeySecret: '',
+      aliyunEndpoint: 'imageseg.cn-shanghai.aliyuncs.com',
       tencentVisionEnabled: 0,
-      tencentCloudSite: 'mainland',
+      tencentCloudSite: 'intl',
       tencentSecretId: '',
       tencentSecretKey: '',
-      tencentRegion: 'ap-guangzhou',
-      tencentBdaEndpoint: 'bda.tencentcloudapi.com',
-      tencentIaiEndpoint: 'iai.tencentcloudapi.com',
+      tencentRegion: 'ap-singapore',
+      tencentBdaEndpoint: 'bda.intl.tencentcloudapi.com',
+      tencentIaiEndpoint: 'iai.intl.tencentcloudapi.com',
       fapiHubEnabled: 0,
       fapiHubApiKey: '',
       fapiHubEndpoint: 'https://fapihub.com/v2/rembg/',
@@ -1393,7 +1397,15 @@
     cloudResourceSaving.value = true;
     try {
       rememberActiveTab();
-      await ConfigUpdate({ group: 'cloudResource', list: { ...cloudResourceConfig } });
+      await ConfigUpdate({
+        group: 'cloudResource',
+        list: {
+          ...cloudResourceConfig,
+          fapiHubEnabled: cloudResourceConfig.mattingProvider === 'fapihub' ? 1 : 0,
+          tencentCloudSite: 'intl',
+          tencentVisionEnabled: 0,
+        },
+      });
       message.success('云资源配置已保存');
     } finally {
       cloudResourceSaving.value = false;
