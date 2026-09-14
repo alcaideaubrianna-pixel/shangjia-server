@@ -9,7 +9,12 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
-const collectProfilePHashDuplicateThreshold = 20
+const (
+	// Candidate recall stays within the indexed LSH range. The wider threshold is
+	// only applied to the small candidate set during the final one-to-one match.
+	collectProfilePHashCandidateThreshold = 12
+	collectProfilePHashDuplicateThreshold = 20
+)
 
 type profilePHashSetRow struct {
 	ProfileId      int64  `orm:"profile_id"`
@@ -27,7 +32,7 @@ func (s *sSysPublish) findCollectProfilePHashDuplicate(ctx context.Context, tena
 	scopes := []mediaPHashBucketScopePart{{TenantId: tenantId, AccountIds: []int64{accountId}}}
 	candidateIds := make(map[int64]struct{})
 	for _, value := range sourceHashes {
-		rows, err := mediaPHashBucketCandidateRowsWithScopes(ctx, value, collectProfilePHashDuplicateThreshold, scopes, nil, "image", 0)
+		rows, err := mediaPHashBucketCandidateRowsWithScopes(ctx, value, collectProfilePHashCandidateThreshold, scopes, nil, "image", 0)
 		if err != nil {
 			return 0, err
 		}

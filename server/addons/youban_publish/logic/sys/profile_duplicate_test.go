@@ -86,6 +86,15 @@ func TestProfilePHashSetsMatchRejectsPartialImageOverlap(t *testing.T) {
 	}
 }
 
+func TestCollectPHashCandidateRecallUsesLSHRange(t *testing.T) {
+	if collectProfilePHashCandidateThreshold > 12 {
+		t.Fatalf("实时采集候选阈值 %d 会绕过 LSH 索引", collectProfilePHashCandidateThreshold)
+	}
+	if collectProfilePHashCandidateThreshold > collectProfilePHashDuplicateThreshold {
+		t.Fatalf("候选阈值 %d 不应大于最终校验阈值 %d", collectProfilePHashCandidateThreshold, collectProfilePHashDuplicateThreshold)
+	}
+}
+
 func TestProfilePHashGroupRejectsTransitiveSimilarityChain(t *testing.T) {
 	sets := map[int64][]string{
 		1: {"0000000000000000"},
