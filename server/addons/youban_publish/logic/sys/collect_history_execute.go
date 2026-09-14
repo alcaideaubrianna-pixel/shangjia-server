@@ -207,7 +207,7 @@ func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.C
 		if err != nil {
 			return err
 		}
-		if len(messages) == 0 {
+		if collectHistoryPageFinished(len(messages), false) {
 			return s.finishCollectHistoryTask(ctx, task, "历史消息已拉取完成")
 		}
 		stats, nextOffset, stop, err := s.ingestCollectHistoryMessages(ctx, task, source, messages, cutoff)
@@ -240,7 +240,11 @@ func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.C
 		} else {
 			s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "info", "process", "历史消息页已投递资料处理队列", g.Map{"offsetId": offsetID})
 		}
-		if stop || len(messages) < pageLimit {
+		// Telegram history responses may contain service messages. FetchPage
+		// filters those records, so a short application page does not prove that
+		// the channel history is exhausted. Only an empty fetch (handled above)
+		// or the configured time cutoff can finish the scan.
+		if collectHistoryPageFinished(len(messages), stop) {
 			return s.finishCollectHistoryTask(ctx, task, "历史消息已拉取完成")
 		}
 		select {
@@ -250,6 +254,10 @@ func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.C
 		}
 	}
 	return s.rescheduleCollectHistoryTask(ctx, task, offsetID)
+}
+
+func collectHistoryPageFinished(fetched int, reachedCutoff bool) bool {
+	return fetched == 0 || reachedCutoff
 }
 
 func shouldLogCollectHistoryBackpressure(sourceID int64, now time.Time) bool {

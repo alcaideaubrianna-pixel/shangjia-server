@@ -32,6 +32,18 @@ func TestCollectHistoryNextPageLimit(t *testing.T) {
 	}
 }
 
+func TestCollectHistoryPageFinished(t *testing.T) {
+	if collectHistoryPageFinished(75, false) {
+		t.Fatal("a short filtered Telegram page must continue scanning")
+	}
+	if !collectHistoryPageFinished(0, false) {
+		t.Fatal("an empty Telegram page must finish scanning")
+	}
+	if !collectHistoryPageFinished(75, true) {
+		t.Fatal("history scan must stop after reaching its configured cutoff")
+	}
+}
+
 func TestCollectHistoryTransientClientError(t *testing.T) {
 	tests := []struct {
 		name string
