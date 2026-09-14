@@ -28,7 +28,7 @@ const (
 	duplicateScanBatchSize        = 500
 	duplicateScanSessionTTL       = 24 * time.Hour
 	duplicateScanResultTTL        = 15 * time.Minute
-	duplicateScanAlgorithmVersion = 4
+	duplicateScanAlgorithmVersion = 5
 	duplicateScanPagesPerTask     = 20
 	duplicateScanStartLockTTL     = 10 * time.Second
 )
@@ -1047,7 +1047,7 @@ func (w *duplicateScanWorkCache) preloadBuckets(fields []string) error {
 			continue
 		}
 		var signatures []string
-		if err = values[index].Scan(&signatures); err != nil {
+		if _, err = decodeDuplicateScanWorkValue(values[index].Bytes(), &signatures); err != nil {
 			return gerror.Wrap(err, "解析重复资料扫描图片索引失败")
 		}
 		w.buckets[field] = signatures
@@ -1081,8 +1081,13 @@ func (w *duplicateScanWorkCache) preloadGroups(signatures []string) error {
 			continue
 		}
 		var group duplicateScanWorkGroup
-		if err = values[index].Scan(&group); err != nil {
+		present, decodeErr := decodeDuplicateScanWorkValue(values[index].Bytes(), &group)
+		if decodeErr != nil {
+			err = decodeErr
 			return gerror.Wrap(err, "解析重复资料扫描分组失败")
+		}
+		if !present {
+			continue
 		}
 		w.groups[signature] = &group
 	}
@@ -1102,8 +1107,13 @@ func rangeDuplicateScanWorkGroups(ctx context.Context, token string, visit func(
 		}
 		for signature, value := range fields {
 			var group duplicateScanWorkGroup
-			if err = value.Scan(&group); err != nil {
+			present, decodeErr := decodeDuplicateScanWorkValue(value.Bytes(), &group)
+			if decodeErr != nil {
+				err = decodeErr
 				return gerror.Wrap(err, "解析重复资料扫描分组失败")
+			}
+			if !present {
+				continue
 			}
 			if err = visit(signature, &group); err != nil {
 				return err
@@ -1127,10 +1137,14 @@ func (w *duplicateScanWorkCache) group(signature string) (*duplicateScanWorkGrou
 	w.groupLoaded[signature] = true
 	if len(values) > 0 && !values[0].IsNil() {
 		var group duplicateScanWorkGroup
-		if err = values[0].Scan(&group); err != nil {
+		present, decodeErr := decodeDuplicateScanWorkValue(values[0].Bytes(), &group)
+		if decodeErr != nil {
+			err = decodeErr
 			return nil, gerror.Wrap(err, "解析重复资料扫描分组失败")
 		}
-		w.groups[signature] = &group
+		if present {
+			w.groups[signature] = &group
+		}
 	}
 	return w.groups[signature], nil
 }
@@ -1223,16 +1237,47 @@ func (g *duplicateScanWorkGroup) addMember(profileId, createdAt int64) {
 }
 
 func (w *duplicateScanWorkCache) save() error {
-	if err := cache.HashSetMany(w.ctx, duplicateScanWorkHashKey(w.token, "groups"), w.dirtyGroups, duplicateScanSessionTTL); err != nil {
+	groups, err := encodeDuplicateScanWorkValues(w.dirtyGroups)
+	if err != nil {
+		return gerror.Wrap(err, "编码重复资料扫描分组失败")
+	}
+	buckets, err := encodeDuplicateScanWorkValues(w.dirtyBuckets)
+	if err != nil {
+		return gerror.Wrap(err, "编码重复资料扫描索引失败")
+	}
+	if err = cache.HashSetMany(w.ctx, duplicateScanWorkHashKey(w.token, "groups"), groups, duplicateScanSessionTTL); err != nil {
 		return gerror.Wrap(err, "保存重复资料扫描分组失败")
 	}
-	if err := cache.HashSetMany(w.ctx, duplicateScanWorkHashKey(w.token, "buckets"), w.dirtyBuckets, duplicateScanSessionTTL); err != nil {
+	if err = cache.HashSetMany(w.ctx, duplicateScanWorkHashKey(w.token, "buckets"), buckets, duplicateScanSessionTTL); err != nil {
 		return gerror.Wrap(err, "保存重复资料扫描索引失败")
 	}
 	if err := cache.HashSetMany(w.ctx, duplicateScanWorkHashKey(w.token, "processed"), w.dirtyProcessed, duplicateScanSessionTTL); err != nil {
 		return gerror.Wrap(err, "保存重复资料扫描断点失败")
 	}
 	return nil
+}
+
+func encodeDuplicateScanWorkValues(fields map[string]any) (map[string]any, error) {
+	encoded := make(map[string]any, len(fields))
+	for field, value := range fields {
+		data, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		encoded[field] = string(data)
+	}
+	return encoded, nil
+}
+
+func decodeDuplicateScanWorkValue(data []byte, target any) (bool, error) {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return false, nil
+	}
+	if err := json.Unmarshal(data, target); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Fuzzy similarity is not transitive. Requiring the incoming profile to match

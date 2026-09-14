@@ -196,6 +196,32 @@ func TestDuplicateScanWorkGroupKeepsNewestProfile(t *testing.T) {
 	}
 }
 
+func TestDuplicateScanWorkValuesUseExplicitJSON(t *testing.T) {
+	group := &duplicateScanWorkGroup{KeepProfileId: 30, MemberIds: []int64{30, 20}}
+	encoded, err := encodeDuplicateScanWorkValues(map[string]any{"group": group})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded duplicateScanWorkGroup
+	present, err := decodeDuplicateScanWorkValue([]byte(encoded["group"].(string)), &decoded)
+	if err != nil || !present || decoded.KeepProfileId != 30 || len(decoded.MemberIds) != 2 {
+		t.Fatalf("work group JSON round trip failed: group=%#v present=%v err=%v", decoded, present, err)
+	}
+}
+
+func TestDuplicateScanWorkValueTreatsEmptyRedisFieldAsMissing(t *testing.T) {
+	var group duplicateScanWorkGroup
+	for _, value := range [][]byte{nil, {}, []byte("   ")} {
+		present, err := decodeDuplicateScanWorkValue(value, &group)
+		if err != nil || present {
+			t.Fatalf("empty work value must be treated as missing: present=%v err=%v", present, err)
+		}
+	}
+	if _, err := decodeDuplicateScanWorkValue([]byte("not-json"), &group); err == nil {
+		t.Fatal("non-empty malformed work value must remain visible as an error")
+	}
+}
+
 func TestDuplicateScanTaskHasBoundedRuntime(t *testing.T) {
 	if duplicateScanPagesPerTask <= 0 || duplicateScanPagesPerTask > 20 {
 		t.Fatalf("pages per task must stay bounded: %d", duplicateScanPagesPerTask)
