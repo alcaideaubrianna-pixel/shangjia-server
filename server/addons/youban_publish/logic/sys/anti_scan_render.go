@@ -135,8 +135,30 @@ func applyAntiScanBackground(ctx context.Context, src *image.RGBA, segmentRaw st
 		xdraw.ApproxBiLinear.Scale(resized, bounds, portrait, portrait.Bounds(), draw.Over, nil)
 		portrait = resized
 	}
+	// Keep a subtle original-image underlay around the segmentation edge. This
+	// avoids a hard cutout and produces the intended three-layer composition:
+	// original underlay, replacement background, and portrait foreground.
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			alpha := uint8(38)
+			original := src.RGBAAt(x, y)
+			background := bg.RGBAAt(x, y)
+			bg.SetRGBA(x, y, blendRGBA(background, original, alpha))
+		}
+	}
 	draw.Draw(bg, bounds, portrait, image.Point{}, draw.Over)
 	return bg, true
+}
+
+func blendRGBA(base, overlay color.RGBA, alpha uint8) color.RGBA {
+	a := uint16(alpha)
+	inv := uint16(255) - a
+	return color.RGBA{
+		R: uint8((uint16(base.R)*inv + uint16(overlay.R)*a) / 255),
+		G: uint8((uint16(base.G)*inv + uint16(overlay.G)*a) / 255),
+		B: uint8((uint16(base.B)*inv + uint16(overlay.B)*a) / 255),
+		A: 255,
+	}
 }
 
 func overlayTexture(dst *image.RGBA, opacity int) {
