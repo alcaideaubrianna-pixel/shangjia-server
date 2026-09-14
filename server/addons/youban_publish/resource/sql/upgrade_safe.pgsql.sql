@@ -186,3 +186,21 @@ ALTER TABLE "hg_youban_publish_bot_message_source" DROP CONSTRAINT IF EXISTS "uk
 ALTER TABLE "hg_youban_publish_bot_message_source" ADD CONSTRAINT "uk_ybp_bot_message_source" UNIQUE ("chat_id", "message_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_target_message" ON "hg_youban_publish_tg_message" ("target_chat_id", "tg_message_id", "id" DESC);
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "preserve_history_messages" smallint NOT NULL DEFAULT 0;
+
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_image_quota" (
+  "id" BIGSERIAL PRIMARY KEY, "tenant_id" bigint NOT NULL DEFAULT 0,
+  "monthly_limit" bigint NOT NULL DEFAULT 5000, "monthly_used" bigint NOT NULL DEFAULT 0,
+  "purchased_remaining" bigint NOT NULL DEFAULT 0, "period" varchar(7) NOT NULL DEFAULT '',
+  "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL, UNIQUE ("tenant_id")
+);
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_image_quota_ledger" (
+  "id" BIGSERIAL PRIMARY KEY, "tenant_id" bigint NOT NULL DEFAULT 0, "account_id" bigint NOT NULL DEFAULT 0,
+  "event_type" varchar(24) NOT NULL DEFAULT '', "reference_key" varchar(160) NOT NULL DEFAULT '',
+  "change_count" bigint NOT NULL DEFAULT 0, "remark" varchar(500) NOT NULL DEFAULT '', "created_at" timestamp DEFAULT NULL,
+  UNIQUE ("reference_key")
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_image_quota_ledger_tenant" ON "hg_youban_publish_image_quota_ledger" ("tenant_id", "id");
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_mode" varchar(32) NOT NULL DEFAULT 'lightweight';
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_background_url" varchar(1024) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "anti_scan_background_name" varchar(255) NOT NULL DEFAULT '';

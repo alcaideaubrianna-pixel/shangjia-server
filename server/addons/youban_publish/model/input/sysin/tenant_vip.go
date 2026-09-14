@@ -18,16 +18,27 @@ const (
 )
 
 type TenantVipStatusModel struct {
-	TenantId            int64                     `json:"tenantId" dc:"租户ID"`
-	IsVip               bool                      `json:"isVip" dc:"是否会员"`
-	Level               int                       `json:"level" dc:"会员等级"`
-	Status              int                       `json:"status" dc:"会员状态"`
-	ExpiredAt           *gtime.Time               `json:"expiredAt" dc:"到期时间"`
-	Features            []string                  `json:"features" dc:"会员权益"`
-	AvailableFeatures   []string                  `json:"availableFeatures" dc:"用户端可见功能"`
-	ActivityBannerTitle string                    `json:"activityBannerTitle" dc:"活动标题"`
-	ActivityBannerText  string                    `json:"activityBannerText" dc:"活动说明"`
-	Activities          []*TenantVipActivityModel `json:"activities" dc:"会员活动"`
+	TenantId            int64                      `json:"tenantId" dc:"租户ID"`
+	IsVip               bool                       `json:"isVip" dc:"是否会员"`
+	Level               int                        `json:"level" dc:"会员等级"`
+	Status              int                        `json:"status" dc:"会员状态"`
+	ExpiredAt           *gtime.Time                `json:"expiredAt" dc:"到期时间"`
+	Features            []string                   `json:"features" dc:"会员权益"`
+	AvailableFeatures   []string                   `json:"availableFeatures" dc:"用户端可见功能"`
+	ActivityBannerTitle string                     `json:"activityBannerTitle" dc:"活动标题"`
+	ActivityBannerText  string                     `json:"activityBannerText" dc:"活动说明"`
+	Activities          []*TenantVipActivityModel  `json:"activities" dc:"会员活动"`
+	ImageQuota          *ImageProcessingQuotaModel `json:"imageQuota" dc:"图片处理额度"`
+}
+
+type ImageProcessingQuotaModel struct {
+	MonthlyLimit       int64  `json:"monthlyLimit" dc:"会员月度额度"`
+	MonthlyUsed        int64  `json:"monthlyUsed" dc:"当月已使用"`
+	MonthlyRemaining   int64  `json:"monthlyRemaining" dc:"当月剩余额度"`
+	PurchasedRemaining int64  `json:"purchasedRemaining" dc:"购买剩余额度"`
+	TotalRemaining     int64  `json:"totalRemaining" dc:"总剩余额度"`
+	Period             string `json:"period" dc:"额度周期"`
+	ResetAt            string `json:"resetAt" dc:"下次重置时间"`
 }
 
 type TenantVipActivityModel struct {
@@ -88,29 +99,33 @@ type TenantVipPayItemModel struct {
 }
 
 type TenantVipOrderCreateInp struct {
-	CouponCode string `json:"couponCode" dc:"优惠券码"`
-	PayType    string `json:"payType" dc:"支付方式"`
-	PlanCode   string `json:"planCode" dc:"套餐编码"`
-	ReturnUrl  string `json:"returnUrl" dc:"买家付款成功跳转地址"`
-	TradeType  string `json:"tradeType" dc:"交易类型"`
+	CouponCode  string `json:"couponCode" dc:"优惠券码"`
+	PayType     string `json:"payType" dc:"支付方式"`
+	PlanCode    string `json:"planCode" dc:"套餐编码"`
+	ProductType string `json:"productType" dc:"商品类型"`
+	Quantity    int64  `json:"quantity" dc:"购买数量"`
+	ReturnUrl   string `json:"returnUrl" dc:"买家付款成功跳转地址"`
+	TradeType   string `json:"tradeType" dc:"交易类型"`
 }
 
 type TenantVipOrderModel struct {
-	Id         int64                   `json:"id" dc:"订单ID"`
-	TenantId   int64                   `json:"tenantId" dc:"租户ID"`
-	TenantName string                  `json:"tenantName" dc:"租户名称"`
-	OrderNo    string                  `json:"orderNo" dc:"订单号"`
-	PlanCode   string                  `json:"planCode" dc:"套餐编码"`
-	PlanName   string                  `json:"planName" dc:"套餐名称"`
-	Amount     float64                 `json:"amount" dc:"金额"`
-	Currency   string                  `json:"currency" dc:"币种"`
-	Status     int                     `json:"status" dc:"订单状态"`
-	StatusTxt  string                  `json:"statusText" dc:"订单状态文本"`
-	PayUrl     string                  `json:"payUrl" dc:"支付地址"`
-	TradeType  string                  `json:"tradeType" dc:"交易类型"`
-	CreatedAt  *gtime.Time             `json:"createdAt" dc:"创建时间"`
-	PaidAt     *gtime.Time             `json:"paidAt" dc:"支付时间"`
-	Order      *payin.CreateOrderModel `json:"order" dc:"支付订单"`
+	Id          int64                   `json:"id" dc:"订单ID"`
+	TenantId    int64                   `json:"tenantId" dc:"租户ID"`
+	TenantName  string                  `json:"tenantName" dc:"租户名称"`
+	OrderNo     string                  `json:"orderNo" dc:"订单号"`
+	PlanCode    string                  `json:"planCode" dc:"套餐编码"`
+	PlanName    string                  `json:"planName" dc:"套餐名称"`
+	ProductType string                  `json:"productType" dc:"商品类型"`
+	Quantity    int64                   `json:"quantity" dc:"商品数量"`
+	Amount      float64                 `json:"amount" dc:"金额"`
+	Currency    string                  `json:"currency" dc:"币种"`
+	Status      int                     `json:"status" dc:"订单状态"`
+	StatusTxt   string                  `json:"statusText" dc:"订单状态文本"`
+	PayUrl      string                  `json:"payUrl" dc:"支付地址"`
+	TradeType   string                  `json:"tradeType" dc:"交易类型"`
+	CreatedAt   *gtime.Time             `json:"createdAt" dc:"创建时间"`
+	PaidAt      *gtime.Time             `json:"paidAt" dc:"支付时间"`
+	Order       *payin.CreateOrderModel `json:"order" dc:"支付订单"`
 }
 
 type TenantVipOrderListInp struct {

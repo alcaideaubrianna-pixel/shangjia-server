@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"image"
 	_ "image/gif"
 	"image/jpeg"
@@ -18,6 +19,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
+	"github.com/gogf/gf/v2/os/gctx"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/gtime"
 	_ "golang.org/x/image/webp"
@@ -189,6 +191,9 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 		}
 	}
 	g.Log().Infof(ctx, "人像分割阶段完成 stage:cache_lookup durationMs:%d cacheHit:0 imageHash:%s", time.Since(stageStartedAt).Milliseconds(), imageHash)
+	if err = s.ensureImageQuotaAvailable(ctx, account.TenantId); err != nil {
+		return nil, err
+	}
 	stageStartedAt = time.Now()
 	segmentRaw, err := s.getOrCreateAntiScanMatting(ctx, imageHash, imageBytes, conf, cloudResourceUsageOwner{TenantId: account.TenantId, AccountId: account.Id})
 	if err != nil {
@@ -198,6 +203,10 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 	segmentUrl := antiScanSegmentURL(segmentRaw)
 	if segmentUrl == "" {
 		return nil, gerror.New("云端抠图能力未启用")
+	}
+	quotaReference := fmt.Sprintf("manual:%d:%s:%s:%s", account.TenantId, provider, imageHash, gctx.CtxId(ctx))
+	if err = s.consumeImageQuota(ctx, account.TenantId, account.Id, quotaReference, "manual_background_replace"); err != nil {
+		return nil, err
 	}
 	segmentUrl = antiScanSegmentPresentationURL(segmentUrl)
 	width, height := antiScanImageDimensions(imageBytes)

@@ -36,6 +36,8 @@ import (
 // 仅触发推送
 type telegramChannelSendPolicy struct {
 	AntiScanEnabled        bool
+	AntiScanMode           string
+	AntiScanBackgroundURL  string
 	TextObfuscationEnabled bool
 }
 
@@ -50,11 +52,13 @@ func (s *sSysPublish) telegramChannelSendPolicy(ctx context.Context, job telegra
 		return policy, nil
 	}
 	var channel struct {
-		AntiScanEnabled        int `orm:"anti_scan_enabled"`
-		TextObfuscationEnabled int `orm:"text_obfuscation_enabled"`
+		AntiScanEnabled        int    `orm:"anti_scan_enabled"`
+		AntiScanMode           string `orm:"anti_scan_mode"`
+		AntiScanBackgroundURL  string `orm:"anti_scan_background_url"`
+		TextObfuscationEnabled int    `orm:"text_obfuscation_enabled"`
 	}
 	if err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Fields("anti_scan_enabled,text_obfuscation_enabled").
+		Fields("anti_scan_enabled,anti_scan_mode,anti_scan_background_url,text_obfuscation_enabled").
 		Where("id", job.ChannelId).Where("tenant_id", job.TenantId).WhereNull("deleted_at").Scan(&channel); err != nil {
 		return policy, gerror.Wrap(err, "读取频道内容保护配置失败")
 	}
@@ -66,6 +70,14 @@ func (s *sSysPublish) telegramChannelSendPolicy(ctx context.Context, job telegra
 		return policy, nil
 	}
 	policy.AntiScanEnabled = channel.AntiScanEnabled == 1 && containsString(vip.Features, sysin.TenantVipFeatureAntiScan)
+	policy.AntiScanMode = strings.TrimSpace(channel.AntiScanMode)
+	if policy.AntiScanMode == "" {
+		policy.AntiScanMode = "lightweight"
+	}
+	if policy.AntiScanMode == "background_replace" && !containsString(vip.Features, sysin.TenantVipFeatureBackgroundReplace) {
+		policy.AntiScanMode = "lightweight"
+	}
+	policy.AntiScanBackgroundURL = strings.TrimSpace(channel.AntiScanBackgroundURL)
 	policy.TextObfuscationEnabled = channel.TextObfuscationEnabled == 1 && containsString(vip.Features, sysin.TenantVipFeatureTextObfuscation)
 	return policy, nil
 }
@@ -86,6 +98,11 @@ func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job
 				}
 				item.AntiScanEnabled = true
 				item.AntiScanSeed = telegramProtectionSeed(job.Id, item.Id, item.Purpose)
+				item.AntiScanMode = policy.AntiScanMode
+				item.AntiScanBackgroundURL = policy.AntiScanBackgroundURL
+				item.TenantId = job.TenantId
+				item.AccountId = job.AccountId
+				item.JobId = job.Id
 				item.TgThumbFileId = ""
 				if isTelegramImageMedia(item.MediaType) {
 					item.TgFileId = ""

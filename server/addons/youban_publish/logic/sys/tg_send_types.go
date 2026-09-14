@@ -3,28 +3,33 @@ package sys
 import "github.com/gogf/gf/v2/os/gtime"
 
 type telegramMediaItem struct {
-	Id                int64  `json:"id"`
-	AttachmentId      int64  `json:"attachmentId"`
-	MediaType         string `json:"mediaType"`
-	MustSend          bool   `json:"mustSend"`
-	Purpose           string `json:"purpose"`
-	FileUrl           string `json:"fileUrl"`
-	PosterUrl         string `json:"posterUrl"`
-	StoragePath       string `json:"storagePath"`
-	PosterStoragePath string `json:"posterStoragePath"`
-	TgFileId          string `json:"tgFileId"`
-	TgThumbFileId     string `json:"tgThumbFileId"`
-	AssetHash         string `json:"assetHash"`
-	SortIndex         int    `json:"sortIndex"`
-	VideoWidth        int    `json:"videoWidth"`
-	VideoHeight       int    `json:"videoHeight"`
-	VideoDuration     int    `json:"videoDuration"`
-	AntiScanEnabled   bool   `json:"antiScanEnabled"`
-	AntiScanSeed      int64  `json:"antiScanSeed"`
-	ForceUpload       bool   `json:"-"`
-	ProtectedHashKey  string `json:"-"`
-	ProtectedPHash    uint64 `json:"-"`
-	ProtectedDHash    uint64 `json:"-"`
+	Id                    int64  `json:"id"`
+	AttachmentId          int64  `json:"attachmentId"`
+	MediaType             string `json:"mediaType"`
+	MustSend              bool   `json:"mustSend"`
+	Purpose               string `json:"purpose"`
+	FileUrl               string `json:"fileUrl"`
+	PosterUrl             string `json:"posterUrl"`
+	StoragePath           string `json:"storagePath"`
+	PosterStoragePath     string `json:"posterStoragePath"`
+	TgFileId              string `json:"tgFileId"`
+	TgThumbFileId         string `json:"tgThumbFileId"`
+	AssetHash             string `json:"assetHash"`
+	SortIndex             int    `json:"sortIndex"`
+	VideoWidth            int    `json:"videoWidth"`
+	VideoHeight           int    `json:"videoHeight"`
+	VideoDuration         int    `json:"videoDuration"`
+	AntiScanEnabled       bool   `json:"antiScanEnabled"`
+	AntiScanSeed          int64  `json:"antiScanSeed"`
+	AntiScanMode          string `json:"antiScanMode"`
+	AntiScanBackgroundURL string `json:"antiScanBackgroundUrl"`
+	TenantId              int64  `json:"-"`
+	AccountId             int64  `json:"-"`
+	JobId                 int64  `json:"-"`
+	ForceUpload           bool   `json:"-"`
+	ProtectedHashKey      string `json:"-"`
+	ProtectedPHash        uint64 `json:"-"`
+	ProtectedDHash        uint64 `json:"-"`
 }
 
 type telegramSentMessage struct {

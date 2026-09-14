@@ -508,7 +508,7 @@ func telegramInputFile(ctx context.Context, media *telegramMediaItem) (models.In
 	if err != nil {
 		return nil, nil, err
 	}
-	path, cleanup, err = prepareTelegramMediaUploadFile(ctx, media, path, cleanup)
+	path, cleanup, err = NewSysPublish().prepareTelegramMediaUploadFile(ctx, media, path, cleanup)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -679,7 +679,7 @@ func telegramInputMediaSource(ctx context.Context, media *telegramMediaItem) (st
 	if err != nil {
 		return "", nil, nil, err
 	}
-	path, cleanup, err = prepareTelegramMediaUploadFile(ctx, media, path, cleanup)
+	path, cleanup, err = NewSysPublish().prepareTelegramMediaUploadFile(ctx, media, path, cleanup)
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -749,7 +749,7 @@ func telegramVideoPreview(ctx context.Context, media *telegramMediaItem, kind st
 		return nil, nil, nil
 	}
 	if media.AntiScanEnabled {
-		protectedPath, protectedCleanup, protectErr := prepareTelegramAntiScanUploadFile(ctx, media, thumbPath, cleanupThumb, kind)
+		protectedPath, protectedCleanup, protectErr := NewSysPublish().prepareTelegramAntiScanUploadFile(ctx, media, thumbPath, cleanupThumb, kind)
 		if protectErr != nil {
 			return nil, nil, gerror.Wrap(protectErr, "处理TG视频缩略图防扫图失败")
 		}

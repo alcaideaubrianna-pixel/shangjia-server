@@ -20,6 +20,14 @@ func (c *cPublish) TenantVipPlans(ctx context.Context, req *publish.TenantVipPla
 	return
 }
 
+func (c *cPublish) ImageProcessingQuota(ctx context.Context, req *publish.ImageProcessingQuotaReq) (res *publish.ImageProcessingQuotaRes, err error) {
+	data, err := service.SysPublish().ImageProcessingQuota(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.ImageProcessingQuotaRes{ImageProcessingQuotaModel: data}, nil
+}
+
 func (c *cPublish) TenantVipOrderCreate(ctx context.Context, req *publish.TenantVipOrderCreateReq) (res *publish.TenantVipOrderCreateRes, err error) {
 	data, err := service.SysPublish().TenantVipOrderCreate(ctx, &req.TenantVipOrderCreateInp)
 	if err != nil {

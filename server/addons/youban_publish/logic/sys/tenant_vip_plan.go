@@ -59,6 +59,13 @@ func tenantVipOrderModel(order *baseentity.AdminOrder, pay *baseentity.PayLog, p
 	if pay != nil {
 		res.TradeType = pay.TradeType
 		res.PaidAt = pay.PayAt
+		if pay.Detail != nil && strings.EqualFold(pay.Detail.Get("productType").String(), imageQuotaProductType) {
+			res.ProductType = imageQuotaProductType
+			res.Quantity = pay.Detail.Get("quotaCount").Int64()
+			res.PlanCode = imageQuotaProductType
+			res.PlanName = "图片处理额度"
+			res.Currency = "USDT"
+		}
 	}
 	return res
 }
@@ -131,7 +138,7 @@ func tenantVipFreeFeatures() []string {
 }
 
 func tenantVipPaidFeatures() []string {
-	return []string{"批次循环上架", "无限展示图片与随机推送", "防扫图", "资料相似查询", "图片搜索", "采集代理", "群聊关键字监听", "可联系管理员开启独立访问域名"}
+	return []string{"批次循环上架", "无限展示图片与随机推送", "防扫图", "每月 5000 次批量替换背景额度", "额度用完自动切换轻量随机扰动", "资料相似查询", "图片搜索", "采集代理", "群聊关键字监听", "可联系管理员开启独立访问域名"}
 }
 
 func tenantVipCacheKey(tenantId int64) string {

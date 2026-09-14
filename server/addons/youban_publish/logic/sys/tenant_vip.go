@@ -57,6 +57,10 @@ func (s *sSysPublish) tenantVipStatusForAccount(ctx context.Context, account *sy
 	result.Activities = activities
 	result.ActivityBannerTitle = activityCfg.ActivityBannerTitle
 	result.ActivityBannerText = activityCfg.ActivityBannerText
+	result.ImageQuota, err = s.imageProcessingQuota(ctx, account.TenantId)
+	if err != nil {
+		return nil, err
+	}
 	_ = cache.Instance().Set(ctx, fullCacheKey, &result, tenantVipFullCacheTTL)
 	return &result, nil
 }
@@ -73,6 +77,9 @@ func (s *sSysPublish) TenantVipPlans(ctx context.Context) ([]*sysin.TenantVipPla
 }
 
 func (s *sSysPublish) TenantVipOrderCreate(ctx context.Context, in *sysin.TenantVipOrderCreateInp) (*sysin.TenantVipOrderModel, error) {
+	if strings.EqualFold(strings.TrimSpace(in.ProductType), imageQuotaProductType) {
+		return s.tenantImageQuotaOrderCreate(ctx, in)
+	}
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
@@ -356,6 +363,13 @@ func (s *sSysPublish) TenantVipPayNotify(ctx context.Context, in *payin.NotifyCa
 		if err != nil {
 			return err
 		}
+	}
+	if in.Pay.Detail != nil && strings.EqualFold(strings.TrimSpace(in.Pay.Detail.Get("productType").String()), imageQuotaProductType) {
+		quantity := in.Pay.Detail.Get("quotaCount").Int64()
+		if quantity <= 0 {
+			return gerror.New("图片额度订单数量不合法")
+		}
+		return s.addPurchasedImageQuota(ctx, order.ProductId, order.MemberId, quantity, fmt.Sprintf("order:%d", order.Id), order.Remark)
 	}
 	change, err := s.applyTenantVipExtension(ctx, &tenantVipChangeInp{
 		EventKey:      fmt.Sprintf("%s:%d", tenantVipEventPay, order.Id),

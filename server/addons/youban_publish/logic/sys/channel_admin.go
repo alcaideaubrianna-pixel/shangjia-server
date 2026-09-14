@@ -256,6 +256,9 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 			in.IsDefaultSelected = identity.IsDefaultSelected
 			in.PublishVisible = identity.PublishVisible
 			in.AntiScanEnabled = identity.AntiScanEnabled
+			in.AntiScanMode = identity.AntiScanMode
+			in.AntiScanBackgroundUrl = identity.AntiScanBackgroundUrl
+			in.AntiScanBackgroundName = identity.AntiScanBackgroundName
 			in.TextObfuscationEnabled = identity.TextObfuscationEnabled
 			in.AutoDeleteEnabled = identity.AutoDeleteEnabled
 			in.PreserveHistoryMessages = identity.PreserveHistoryMessages
@@ -292,6 +295,9 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		"is_default_selected":        in.IsDefaultSelected,
 		"publish_visible":            in.PublishVisible,
 		"anti_scan_enabled":          in.AntiScanEnabled,
+		"anti_scan_mode":             in.AntiScanMode,
+		"anti_scan_background_url":   in.AntiScanBackgroundUrl,
+		"anti_scan_background_name":  in.AntiScanBackgroundName,
 		"text_obfuscation_enabled":   in.TextObfuscationEnabled,
 		"auto_delete_enabled":        in.AutoDeleteEnabled,
 		"preserve_history_messages":  in.PreserveHistoryMessages,
@@ -339,6 +345,9 @@ type channelStableIdentity struct {
 	IsDefaultSelected       int    `orm:"is_default_selected"`
 	PublishVisible          int    `orm:"publish_visible"`
 	AntiScanEnabled         int    `orm:"anti_scan_enabled"`
+	AntiScanMode            string `orm:"anti_scan_mode"`
+	AntiScanBackgroundUrl   string `orm:"anti_scan_background_url"`
+	AntiScanBackgroundName  string `orm:"anti_scan_background_name"`
 	TextObfuscationEnabled  int    `orm:"text_obfuscation_enabled"`
 	AutoDeleteEnabled       int    `orm:"auto_delete_enabled"`
 	PreserveHistoryMessages int    `orm:"preserve_history_messages"`
@@ -358,7 +367,7 @@ func (s *sSysPublish) channelByStableIdentity(ctx context.Context, tenantId int6
 		Where("publish_direction", publishDirection)
 	err := base.Clone().
 		WhereNull("deleted_at").
-		Fields("id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,is_default_selected,publish_visible,anti_scan_enabled,text_obfuscation_enabled,auto_delete_enabled,preserve_history_messages,0 AS deleted").
+		Fields("id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,is_default_selected,publish_visible,anti_scan_enabled,anti_scan_mode,anti_scan_background_url,anti_scan_background_name,text_obfuscation_enabled,auto_delete_enabled,preserve_history_messages,0 AS deleted").
 		OrderDesc("id").
 		Limit(1).
 		Scan(&channel)
@@ -367,7 +376,7 @@ func (s *sSysPublish) channelByStableIdentity(ctx context.Context, tenantId int6
 	}
 	if channel.Id <= 0 {
 		err = base.Clone().
-			Fields("id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,is_default_selected,publish_visible,anti_scan_enabled,text_obfuscation_enabled,auto_delete_enabled,preserve_history_messages,1 AS deleted").
+			Fields("id,bot_id_json,cycle_publish_enabled,cycle_publish_days,cycle_publish_time,is_default_selected,publish_visible,anti_scan_enabled,anti_scan_mode,anti_scan_background_url,anti_scan_background_name,text_obfuscation_enabled,auto_delete_enabled,preserve_history_messages,1 AS deleted").
 			WhereNotNull("deleted_at").
 			OrderDesc("id").
 			Limit(1).

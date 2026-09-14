@@ -1307,6 +1307,9 @@ type ChannelModel struct {
 	IsDefaultSelected       int         `json:"isDefaultSelected" dc:"是否默认选中"`
 	PublishVisible          int         `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
 	AntiScanEnabled         int         `json:"antiScanEnabled" dc:"频道防扫图开关"`
+	AntiScanMode            string      `json:"antiScanMode" dc:"防扫图处理方式"`
+	AntiScanBackgroundUrl   string      `json:"antiScanBackgroundUrl" dc:"背景素材地址"`
+	AntiScanBackgroundName  string      `json:"antiScanBackgroundName" dc:"背景素材名称"`
 	TextObfuscationEnabled  int         `json:"textObfuscationEnabled" dc:"频道文本混淆开关"`
 	AutoDeleteEnabled       int         `json:"autoDeleteEnabled" dc:"频道自动删除开关"`
 	PreserveHistoryMessages int         `json:"preserveHistoryMessages" dc:"下架和循环上架时保留旧消息"`
@@ -1341,6 +1344,9 @@ type ChannelSaveInp struct {
 	IsDefaultSelected       int     `json:"isDefaultSelected" dc:"是否默认选中"`
 	PublishVisible          int     `json:"publishVisible" dc:"上架端资料选择可见：1可见 2隐藏"`
 	AntiScanEnabled         int     `json:"antiScanEnabled" dc:"频道防扫图开关"`
+	AntiScanMode            string  `json:"antiScanMode" dc:"防扫图处理方式"`
+	AntiScanBackgroundUrl   string  `json:"antiScanBackgroundUrl" dc:"背景素材地址"`
+	AntiScanBackgroundName  string  `json:"antiScanBackgroundName" dc:"背景素材名称"`
 	TextObfuscationEnabled  int     `json:"textObfuscationEnabled" dc:"频道文本混淆开关"`
 	AutoDeleteEnabled       int     `json:"autoDeleteEnabled" dc:"频道自动删除开关"`
 	PreserveHistoryMessages int     `json:"preserveHistoryMessages" dc:"下架和循环上架时保留旧消息"`
@@ -1389,6 +1395,18 @@ func (in *ChannelSaveInp) Filter(ctx context.Context) error {
 	}
 	if in.AntiScanEnabled != 0 && in.AntiScanEnabled != 1 {
 		return gerror.New("频道防扫图开关不合法")
+	}
+	in.AntiScanMode = strings.TrimSpace(in.AntiScanMode)
+	if in.AntiScanMode == "" {
+		in.AntiScanMode = "lightweight"
+	}
+	if in.AntiScanMode != "lightweight" && in.AntiScanMode != "background_replace" {
+		return gerror.New("防扫图处理方式不合法")
+	}
+	in.AntiScanBackgroundUrl = strings.TrimSpace(in.AntiScanBackgroundUrl)
+	in.AntiScanBackgroundName = strings.TrimSpace(in.AntiScanBackgroundName)
+	if in.AntiScanEnabled == 1 && in.AntiScanMode == "background_replace" && in.AntiScanBackgroundUrl == "" {
+		return gerror.New("请选择用于批量替换的背景素材")
 	}
 	if in.TextObfuscationEnabled != 0 && in.TextObfuscationEnabled != 1 {
 		return gerror.New("频道文本混淆开关不合法")

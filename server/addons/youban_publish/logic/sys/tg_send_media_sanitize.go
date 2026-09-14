@@ -1,7 +1,11 @@
 package sys
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -11,24 +15,28 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	xdraw "golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
+
+	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/addons/youban_publish/service"
 )
 
 const telegramPhotoMaxUploadBytes int64 = 10 * 1024 * 1024
 const telegramPhotoMaxDimensionsSum = 10000
 const telegramPhotoMaxDimensionRatio = 20.0
 
-func prepareTelegramMediaUploadFile(ctx context.Context, media *telegramMediaItem, path string, cleanup func()) (string, func(), error) {
+func (s *sSysPublish) prepareTelegramMediaUploadFile(ctx context.Context, media *telegramMediaItem, path string, cleanup func()) (string, func(), error) {
 	path = strings.TrimSpace(path)
 	if path == "" || media == nil {
 		return path, cleanup, nil
 	}
 	if media.AntiScanEnabled && isTelegramImageMedia(media.MediaType) {
-		return prepareTelegramAntiScanUploadFile(ctx, media, path, cleanup, "image")
+		return s.prepareTelegramAntiScanUploadFile(ctx, media, path, cleanup, "image")
 	}
 	switch strings.ToLower(strings.TrimSpace(media.MediaType)) {
 	case "video":
@@ -38,7 +46,16 @@ func prepareTelegramMediaUploadFile(ctx context.Context, media *telegramMediaIte
 	}
 }
 
-func prepareTelegramAntiScanUploadFile(ctx context.Context, media *telegramMediaItem, sourcePath string, cleanup func(), kind string) (string, func(), error) {
+func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, media *telegramMediaItem, sourcePath string, cleanup func(), kind string) (string, func(), error) {
+	if kind == "image" && media.AntiScanMode == "background_replace" && media.AntiScanBackgroundURL != "" {
+		startedAt := time.Now()
+		path, generatedCleanup, err := s.prepareTelegramBackgroundReplacement(ctx, media, sourcePath)
+		if err == nil && path != "" {
+			g.Log().Infof(ctx, "频道防扫图阶段完成 stage:background_replace durationMs:%d jobId:%d mediaId:%d", time.Since(startedAt).Milliseconds(), media.JobId, media.Id)
+			return prepareTelegramPhotoUploadFile(ctx, path, chainCleanup(cleanup, generatedCleanup))
+		}
+		g.Log().Warningf(ctx, "频道背景替换已降级为轻量扰动 jobId:%d mediaId:%d durationMs:%d err:%+v", media.JobId, media.Id, time.Since(startedAt).Milliseconds(), err)
+	}
 	historyKey := telegramAntiScanHistoryKey(media, kind)
 	history := loadTelegramAntiScanHashHistory(ctx, historyKey)
 	sourceHash, sourceHashErr := telegramAntiScanFileHash(sourcePath)
@@ -101,6 +118,90 @@ func prepareTelegramAntiScanUploadFile(ctx context.Context, media *telegramMedia
 	media.ProtectedDHash = bestHash.DHash
 	g.Log().Warningf(ctx, "防扫图候选未完全达到Hash距离要求，使用最优候选 mediaId:%d kind:%s score:%d", media.Id, kind, bestScore)
 	return bestPath, chainCleanup(cleanup, bestCleanup), nil
+}
+
+func (s *sSysPublish) prepareTelegramBackgroundReplacement(ctx context.Context, media *telegramMediaItem, sourcePath string) (string, func(), error) {
+	imageBytes, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return "", nil, gerror.Wrap(err, "读取背景替换源图失败")
+	}
+	if shouldSkipBackgroundReplacement(imageBytes) {
+		return "", nil, gerror.New("检测为文字或表格图片")
+	}
+	sum := sha256.Sum256(imageBytes)
+	imageHash := hex.EncodeToString(sum[:])
+	conf, err := service.SysConfig().GetCloudResource(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	provider := antiScanMattingProvider(conf)
+	cached, cacheHit := s.getAntiScanSegmentCache(ctx, imageHash)
+	cacheHit = cacheHit && antiScanMattingCacheMatches(cached, provider)
+	if !cacheHit {
+		if err = s.ensureImageQuotaAvailable(ctx, media.TenantId); err != nil {
+			return "", nil, err
+		}
+	}
+	segmentRaw, err := s.getOrCreateAntiScanMatting(ctx, imageHash, imageBytes, conf, cloudResourceUsageOwner{TenantId: media.TenantId, AccountId: media.AccountId})
+	if err != nil {
+		return "", nil, err
+	}
+	if !cacheHit {
+		reference := fmt.Sprintf("channel:%d:%d:%s:%s", media.TenantId, media.JobId, imageHash, imageQuotaPeriod(time.Now()))
+		if err = s.consumeImageQuota(ctx, media.TenantId, media.AccountId, reference, "频道批量替换背景"); err != nil {
+			return "", nil, err
+		}
+	}
+	in := &sysin.AntiScanPreviewInp{}
+	in.BackgroundReplaceEnabled = 1
+	in.BackgroundTextureImage = media.AntiScanBackgroundURL
+	in.StickerOpacity = 30
+	output, _, err := renderAntiScanPreview(ctx, imageBytes, in, &antiScanDetectResult{Provider: provider, SegmentRaw: segmentRaw})
+	if err != nil {
+		return "", nil, err
+	}
+	out, err := os.CreateTemp("", "ybp-background-replace-*.jpg")
+	if err != nil {
+		return "", nil, err
+	}
+	name := out.Name()
+	if _, err = out.Write(output); err != nil {
+		_ = out.Close()
+		_ = os.Remove(name)
+		return "", nil, err
+	}
+	if err = out.Close(); err != nil {
+		_ = os.Remove(name)
+		return "", nil, err
+	}
+	return name, func() { _ = os.Remove(name) }, nil
+}
+
+func shouldSkipBackgroundReplacement(data []byte) bool {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return true
+	}
+	b := img.Bounds()
+	if b.Dx() <= 0 || b.Dy() <= 0 {
+		return true
+	}
+	step := maxInt(1, maxInt(b.Dx(), b.Dy())/320)
+	white, sampled, highContrast := 0, 0, 0
+	for y := b.Min.Y; y < b.Max.Y; y += step {
+		for x := b.Min.X; x < b.Max.X; x += step {
+			r, gg, bl, _ := img.At(x, y).RGBA()
+			r8, g8, b8 := int(r>>8), int(gg>>8), int(bl>>8)
+			if r8 > 238 && g8 > 238 && b8 > 238 {
+				white++
+			}
+			if maxInt(r8, maxInt(g8, b8))-minInt(r8, minInt(g8, b8)) < 18 && (r8 < 70 || r8 > 235) {
+				highContrast++
+			}
+			sampled++
+		}
+	}
+	return sampled > 0 && (white*100/sampled >= 58 || (white*100/sampled >= 38 && highContrast*100/sampled >= 45))
 }
 
 func prepareTelegramPhotoUploadFile(ctx context.Context, path string, cleanup func()) (string, func(), error) {

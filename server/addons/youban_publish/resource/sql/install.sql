@@ -1986,6 +1986,25 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tenant_vip` (
   UNIQUE KEY `uk_ybp_tenant_vip_tenant` (`tenant_id`),
   KEY `idx_ybp_vip_expired` (`status`,`expired_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_image_quota` (
+  `id` bigint NOT NULL AUTO_INCREMENT, `tenant_id` bigint NOT NULL DEFAULT '0',
+  `monthly_limit` bigint NOT NULL DEFAULT '5000', `monthly_used` bigint NOT NULL DEFAULT '0',
+  `purchased_remaining` bigint NOT NULL DEFAULT '0', `period` varchar(7) NOT NULL DEFAULT '',
+  `created_at` datetime DEFAULT NULL, `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_image_quota_tenant` (`tenant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS `hg_youban_publish_image_quota_ledger` (
+  `id` bigint NOT NULL AUTO_INCREMENT, `tenant_id` bigint NOT NULL DEFAULT '0', `account_id` bigint NOT NULL DEFAULT '0',
+  `event_type` varchar(24) NOT NULL DEFAULT '', `reference_key` varchar(160) NOT NULL DEFAULT '',
+  `change_count` bigint NOT NULL DEFAULT '0', `remark` varchar(500) NOT NULL DEFAULT '', `created_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_ybp_image_quota_ledger_ref` (`reference_key`),
+  KEY `idx_ybp_image_quota_ledger_tenant` (`tenant_id`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `anti_scan_mode` varchar(32) NOT NULL DEFAULT 'lightweight';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `anti_scan_background_url` varchar(1024) NOT NULL DEFAULT '';
+ALTER TABLE `hg_youban_publish_channel` ADD COLUMN IF NOT EXISTS `anti_scan_background_name` varchar(255) NOT NULL DEFAULT '';
 ALTER TABLE `hg_youban_publish_message_push_plan` ADD COLUMN IF NOT EXISTS `push_mode` varchar(16) NOT NULL DEFAULT 'bot';
 ALTER TABLE `hg_youban_publish_tg_job` ADD COLUMN IF NOT EXISTS `push_mode` varchar(16) NOT NULL DEFAULT 'bot';
 

@@ -649,7 +649,7 @@ func (s *sSysPublish) sendGotdVideoWithPreview(ctx context.Context, builder *got
 		return builder.Upload(upload).Video(ctx, caption...)
 	}
 	if media.AntiScanEnabled {
-		protectedPath, protectedCleanup, protectErr := prepareTelegramAntiScanUploadFile(ctx, media, posterPath, posterCleanup, "thumbnail")
+		protectedPath, protectedCleanup, protectErr := s.prepareTelegramAntiScanUploadFile(ctx, media, posterPath, posterCleanup, "thumbnail")
 		if protectErr != nil {
 			return nil, gerror.Wrap(protectErr, "处理TG视频缩略图防扫图失败")
 		}
@@ -707,7 +707,7 @@ func (s *sSysPublish) gotdMessageMediaAlbumOption(ctx context.Context, builder *
 		}
 		if posterPath != "" {
 			if media.AntiScanEnabled {
-				protectedPath, protectedCleanup, protectErr := prepareTelegramAntiScanUploadFile(ctx, media, posterPath, posterCleanup, "thumbnail")
+				protectedPath, protectedCleanup, protectErr := s.prepareTelegramAntiScanUploadFile(ctx, media, posterPath, posterCleanup, "thumbnail")
 				if protectErr != nil {
 					return nil, protectErr
 				}
@@ -758,7 +758,7 @@ func gotdMessageUploadOptionFromPath(ctx context.Context, media *telegramMediaIt
 	uploadPath := path
 	finalCleanup := cleanup
 	var err error
-	uploadPath, finalCleanup, err = prepareTelegramMediaUploadFile(ctx, media, uploadPath, finalCleanup)
+	uploadPath, finalCleanup, err = NewSysPublish().prepareTelegramMediaUploadFile(ctx, media, uploadPath, finalCleanup)
 	if err != nil {
 		if finalCleanup != nil {
 			finalCleanup()

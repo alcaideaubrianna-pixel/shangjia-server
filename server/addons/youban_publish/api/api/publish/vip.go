@@ -15,6 +15,14 @@ type TenantVipPlansRes struct {
 	List []*sysin.TenantVipPlanModel `json:"list" dc:"套餐列表"`
 }
 
+type ImageProcessingQuotaReq struct {
+	g.Meta `path:"/publish/vip/image-quota" method:"get" tags:"上架插件" summary:"图片处理额度"`
+}
+
+type ImageProcessingQuotaRes struct {
+	*sysin.ImageProcessingQuotaModel
+}
+
 type TenantVipOrderCreateReq struct {
 	g.Meta `path:"/publish/vip/order/create" method:"post" tags:"上架插件" summary:"创建租户会员订单"`
 	sysin.TenantVipOrderCreateInp
