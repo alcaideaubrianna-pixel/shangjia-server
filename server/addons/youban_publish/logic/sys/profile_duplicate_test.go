@@ -85,12 +85,41 @@ func TestProfilePHashSetsMatchRejectsPartialImageOverlap(t *testing.T) {
 	}
 }
 
+func TestProfilePHashGroupRejectsTransitiveSimilarityChain(t *testing.T) {
+	sets := map[int64][]string{
+		1: {"0000000000000000"},
+		2: {"00000000000fffff"},
+	}
+	third := []string{"000000ffffffffff"}
+	if !profilePHashSetsMatch(sets[1], sets[2], 20) || !profilePHashSetsMatch(sets[2], third, 20) {
+		t.Fatal("test fixture must form an A~B~C similarity chain")
+	}
+	if profilePHashSetsMatch(sets[1], third, 20) {
+		t.Fatal("test fixture endpoints must not be similar")
+	}
+	if profilePHashGroupAccepts(third, []int64{1, 2}, sets, 20) {
+		t.Fatal("transitive similarity must not merge profiles that do not all match")
+	}
+}
+
 func TestDuplicateScanCacheLifetimes(t *testing.T) {
 	if duplicateScanSessionTTL != 24*time.Hour {
 		t.Fatalf("扫描任务有效期 = %s, want 24h", duplicateScanSessionTTL)
 	}
 	if duplicateScanResultTTL > 30*time.Minute {
 		t.Fatalf("扫描结果复用索引有效期过长: %s", duplicateScanResultTTL)
+	}
+}
+
+func TestDuplicateScanSessionRejectsPreviousAlgorithm(t *testing.T) {
+	account := &sysin.AccountModel{Id: 7, TenantId: 6}
+	session := newDuplicateScanSession(account)
+	if err := validateDuplicateScanSessionOwner(session, account); err != nil {
+		t.Fatalf("current scan session must remain valid: %v", err)
+	}
+	session.AlgorithmVersion--
+	if err := validateDuplicateScanSessionOwner(session, account); err == nil {
+		t.Fatal("previous scan algorithm session must be rejected")
 	}
 }
 

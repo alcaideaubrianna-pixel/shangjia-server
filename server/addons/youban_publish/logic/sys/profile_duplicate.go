@@ -19,10 +19,11 @@ import (
 )
 
 const (
-	duplicateScanChunkSize  = 500
-	duplicateScanBatchSize  = 500
-	duplicateScanSessionTTL = 24 * time.Hour
-	duplicateScanResultTTL  = 15 * time.Minute
+	duplicateScanChunkSize        = 500
+	duplicateScanBatchSize        = 500
+	duplicateScanSessionTTL       = 24 * time.Hour
+	duplicateScanResultTTL        = 15 * time.Minute
+	duplicateScanAlgorithmVersion = 2
 )
 
 type duplicateImageRow struct {
@@ -44,20 +45,21 @@ type duplicateScanCandidate struct {
 }
 
 type duplicateScanSession struct {
-	AdminAccountId  int64              `json:"adminAccountId"`
-	CandidateTotal  int                `json:"candidateTotal"`
-	ChunkCount      int                `json:"chunkCount"`
-	DuplicateTotal  int                `json:"duplicateTotal"`
-	GroupTotal      int                `json:"groupTotal"`
-	IncompleteTotal int                `json:"incompleteTotal"`
-	ScanCursor      int64              `json:"scanCursor"`
-	ScannedTotal    int                `json:"scannedTotal"`
-	SignatureIds    map[string][]int64 `json:"signatureIds,omitempty"`
-	PHashBuckets    map[string][]int64 `json:"pHashBuckets,omitempty"`
-	PHashGroups     map[int64]string   `json:"pHashGroups,omitempty"`
-	PHashSets       map[int64][]string `json:"pHashSets,omitempty"`
-	TenantId        int64              `json:"tenantId"`
-	ResultCacheKey  string             `json:"resultCacheKey,omitempty"`
+	AlgorithmVersion int                `json:"algorithmVersion"`
+	AdminAccountId   int64              `json:"adminAccountId"`
+	CandidateTotal   int                `json:"candidateTotal"`
+	ChunkCount       int                `json:"chunkCount"`
+	DuplicateTotal   int                `json:"duplicateTotal"`
+	GroupTotal       int                `json:"groupTotal"`
+	IncompleteTotal  int                `json:"incompleteTotal"`
+	ScanCursor       int64              `json:"scanCursor"`
+	ScannedTotal     int                `json:"scannedTotal"`
+	SignatureIds     map[string][]int64 `json:"signatureIds,omitempty"`
+	PHashBuckets     map[string][]int64 `json:"pHashBuckets,omitempty"`
+	PHashGroups      map[int64]string   `json:"pHashGroups,omitempty"`
+	PHashSets        map[int64][]string `json:"pHashSets,omitempty"`
+	TenantId         int64              `json:"tenantId"`
+	ResultCacheKey   string             `json:"resultCacheKey,omitempty"`
 }
 
 func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.AdminNoteDuplicateScanInp) (*sysin.AdminNoteDuplicateScanModel, error) {
@@ -133,7 +135,7 @@ func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.Admi
 
 func newDuplicateScanSession(account *sysin.AccountModel) *duplicateScanSession {
 	return &duplicateScanSession{
-		AdminAccountId: account.Id, SignatureIds: make(map[string][]int64), TenantId: account.TenantId,
+		AlgorithmVersion: duplicateScanAlgorithmVersion, AdminAccountId: account.Id, SignatureIds: make(map[string][]int64), TenantId: account.TenantId,
 		PHashBuckets: make(map[string][]int64), PHashGroups: make(map[int64]string), PHashSets: make(map[int64][]string),
 	}
 }
@@ -493,6 +495,9 @@ func applyDuplicatePHashValidation(ctx context.Context, ids []int64, candidates 
 func validateDuplicateScanSessionOwner(session *duplicateScanSession, account *sysin.AccountModel) error {
 	if session == nil || account == nil || session.TenantId != account.TenantId || session.AdminAccountId != account.Id {
 		return gerror.New("无权访问该重复资料扫描结果")
+	}
+	if session.AlgorithmVersion != duplicateScanAlgorithmVersion {
+		return gerror.New("重复资料扫描算法已更新，请重新扫描")
 	}
 	return nil
 }
@@ -881,6 +886,9 @@ func appendDuplicatePHashScanGroup(session *duplicateScanSession, profileId int6
 			continue
 		}
 		signature := session.PHashGroups[candidateId]
+		if signature != "" && !profilePHashGroupAccepts(values, session.SignatureIds[signature], session.PHashSets, collectProfilePHashDuplicateThreshold) {
+			continue
+		}
 		if signature == "" {
 			signature = fmt.Sprintf("phash:%d", candidateId)
 			session.PHashGroups[candidateId] = signature
@@ -894,6 +902,17 @@ func appendDuplicatePHashScanGroup(session *duplicateScanSession, profileId int6
 	for _, key := range duplicatePHashBucketKeys(values, false) {
 		session.PHashBuckets[key] = append(session.PHashBuckets[key], profileId)
 	}
+}
+
+// Fuzzy similarity is not transitive. Requiring the incoming profile to match
+// every existing member prevents an A~B~C chain where A and C are not duplicates.
+func profilePHashGroupAccepts(values []string, memberIds []int64, sets map[int64][]string, threshold int) bool {
+	for _, memberId := range memberIds {
+		if !profilePHashSetsMatch(values, sets[memberId], threshold) {
+			return false
+		}
+	}
+	return true
 }
 
 func duplicatePHashBucketKeys(values []string, neighborhood bool) []string {
