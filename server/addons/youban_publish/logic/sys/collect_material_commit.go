@@ -528,6 +528,10 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 	}
 	fingerprints := buildProfileFingerprints(collectRuleTargetChannelIds(rule), text, fingerprintMedia)
 	cacheFingerprints := fingerprints
+	storedChannelIds, err := s.storedProfileChannelIds(ctx, collectRuleTargetChannelIds(rule), event["tenant_id"].Int64())
+	if err != nil {
+		return 0, err
+	}
 	var profileId int64
 	wasExisting := false
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
@@ -594,9 +598,6 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 			if profileId <= 0 {
 				return gerror.New("创建采集资料失败")
 			}
-			if err = replaceProfileChannelMappings(ctx, tx, tenantId, accountId, profileId, collectRuleTargetChannelIds(rule)); err != nil {
-				return err
-			}
 		} else {
 			profileId = existing[columns.Id].Int64()
 			if !collectProfileMaterialShouldReplace(existing, imageCount, videoCount, hasVerificationVideo) {
@@ -605,11 +606,17 @@ func (s *sSysPublish) commitCollectPreparedProfile(ctx context.Context, event gd
 						return gerror.Wrap(txErr, "升级采集资料身份键失败")
 					}
 				}
+				if mappingErr := replaceProfileChannelMappings(ctx, tx, tenantId, accountId, profileId, storedChannelIds); mappingErr != nil {
+					return mappingErr
+				}
 				return nil
 			}
 			if _, txErr = tx.Model(dao.ContentProfile.Table()).Ctx(ctx).Where(columns.Id, profileId).Data(data).Update(); txErr != nil {
 				return gerror.Wrap(txErr, "更新采集资料失败")
 			}
+		}
+		if mappingErr := replaceProfileChannelMappings(ctx, tx, tenantId, accountId, profileId, storedChannelIds); mappingErr != nil {
+			return mappingErr
 		}
 		if txErr = s.upsertProfileStateTx(ctx, tx, profileId, tenantId, accountId, "", 0, nil); txErr != nil {
 			return txErr

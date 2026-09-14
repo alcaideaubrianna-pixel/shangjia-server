@@ -71,6 +71,10 @@ func (s *sSysPublish) materialImportTargetChannelIds(ctx context.Context, reques
 }
 
 func (s *sSysPublish) materialImportStoredChannelIds(ctx context.Context, requested []int64, tenantId int64) ([]int64, error) {
+	return s.storedProfileChannelIds(ctx, requested, tenantId)
+}
+
+func (s *sSysPublish) storedProfileChannelIds(ctx context.Context, requested []int64, tenantId int64) ([]int64, error) {
 	channelIds, err := s.materialImportTargetChannelIds(ctx, requested, tenantId)
 	if err != nil {
 		return nil, err

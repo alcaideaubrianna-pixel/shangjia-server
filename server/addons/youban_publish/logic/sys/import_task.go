@@ -1202,6 +1202,10 @@ func (s *sSysPublish) importLegacyCMSDetail(ctx context.Context, runId int64, im
 	if err != nil {
 		return nil, err
 	}
+	channelIds, err = s.storedProfileChannelIds(ctx, channelIds, taskRow["tenant_id"].Int64())
+	if err != nil {
+		return nil, err
+	}
 	now := gtime.Now()
 	sourceCreatedAt := legacyCMSTimeOrDefault(detail.CreatedAt, now)
 	sourceUpdatedAt := legacyCMSTimeOrDefault(detail.UpdatedAt, sourceCreatedAt)
