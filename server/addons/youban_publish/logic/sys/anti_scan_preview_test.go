@@ -3,9 +3,22 @@ package sys
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"hotgo/addons/youban_publish/model"
 )
+
+func TestAntiScanMattingQuotaReferenceIsStableAcrossJobs(t *testing.T) {
+	now := time.Date(2026, time.September, 14, 12, 0, 0, 0, time.UTC)
+	first := antiScanMattingQuotaReference(7, "tencent", "image-hash", now)
+	second := antiScanMattingQuotaReference(7, "tencent", "image-hash", now.Add(time.Hour))
+	if first != second {
+		t.Fatalf("same monthly matting result must share quota reference: %q != %q", first, second)
+	}
+	if first == antiScanMattingQuotaReference(7, "aliyun", "image-hash", now) {
+		t.Fatal("different providers must not share quota reference")
+	}
+}
 
 func TestAntiScanMattingPublicErrorDoesNotExposeProvider(t *testing.T) {
 	errMessage := antiScanMattingPublicError().Error()

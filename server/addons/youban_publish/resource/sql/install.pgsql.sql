@@ -616,7 +616,9 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_anti_scan_cache" (
 );
 CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_image" ON "hg_youban_publish_anti_scan_cache" ("image_hash");
 CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_media" ON "hg_youban_publish_anti_scan_cache" ("media_id", "cloud_raw_saved");
+CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_media_provider" ON "hg_youban_publish_anti_scan_cache" ("media_id", "provider", "cloud_raw_saved");
 CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_config" ON "hg_youban_publish_anti_scan_cache" ("image_hash", "config_hash");
+CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_image_provider" ON "hg_youban_publish_anti_scan_cache" ("image_hash", "provider", "cloud_raw_saved");
 CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_provider" ON "hg_youban_publish_anti_scan_cache" ("provider", "cloud_raw_saved");
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_cloud_resource_usage" (

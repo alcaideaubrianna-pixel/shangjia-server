@@ -67,7 +67,14 @@ func TestAntiScanMediaCacheSchemaIsMigrated(t *testing.T) {
 		"addons/youban_publish/resource/sql/upgrade_online.pgsql.sql",
 	} {
 		sql := readSqlFile(path)
-		for _, required := range []string{"media_id", "image_width", "image_height", "idx_ybp_anti_scan_media"} {
+		for _, required := range []string{
+			"media_id",
+			"image_width",
+			"image_height",
+			"idx_ybp_anti_scan_media",
+			"idx_ybp_anti_scan_media_provider",
+			"idx_ybp_anti_scan_image_provider",
+		} {
 			if !strings.Contains(sql, required) {
 				t.Fatalf("anti-scan media cache migration %s does not contain %q", path, required)
 			}

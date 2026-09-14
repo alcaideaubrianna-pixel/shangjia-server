@@ -912,3 +912,5 @@ ALTER TABLE "hg_youban_publish_anti_scan_cache" ADD COLUMN IF NOT EXISTS "media_
 ALTER TABLE "hg_youban_publish_anti_scan_cache" ADD COLUMN IF NOT EXISTS "image_width" integer NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_anti_scan_cache" ADD COLUMN IF NOT EXISTS "image_height" integer NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_media" ON "hg_youban_publish_anti_scan_cache" ("media_id", "cloud_raw_saved");
+CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_media_provider" ON "hg_youban_publish_anti_scan_cache" ("media_id", "provider", "cloud_raw_saved");
+CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_image_provider" ON "hg_youban_publish_anti_scan_cache" ("image_hash", "provider", "cloud_raw_saved");

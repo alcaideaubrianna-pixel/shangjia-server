@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -142,19 +141,37 @@ func (s *sSysPublish) prepareTelegramBackgroundReplacement(ctx context.Context, 
 		return "", nil, err
 	}
 	provider := antiScanMattingProvider(conf)
-	_, cacheHit := s.getAntiScanSegmentCache(ctx, imageHash)
-	if !cacheHit {
-		if err = s.ensureImageQuotaAvailable(ctx, media.TenantId); err != nil {
+	segmentRaw := ""
+	created := false
+	cacheHit := false
+	mediaCacheHit := false
+	if cached, ok := s.getAntiScanMediaMattingCache(ctx, media.Id, imageHash, provider); ok {
+		segmentRaw = cached.SegmentRaw
+		cacheHit = true
+		mediaCacheHit = true
+	} else {
+		_, cacheHit = s.getAntiScanSegmentCache(ctx, imageHash, provider)
+		if !cacheHit {
+			if err = s.ensureImageQuotaAvailable(ctx, media.TenantId); err != nil {
+				return "", nil, err
+			}
+		}
+		segmentRaw, created, err = s.getOrCreateAntiScanMatting(ctx, imageHash, imageBytes, conf, cloudResourceUsageOwner{TenantId: media.TenantId, AccountId: media.AccountId})
+		if err != nil {
 			return "", nil, err
 		}
 	}
-	segmentRaw, err := s.getOrCreateAntiScanMatting(ctx, imageHash, imageBytes, conf, cloudResourceUsageOwner{TenantId: media.TenantId, AccountId: media.AccountId})
-	if err != nil {
-		return "", nil, err
-	}
-	if !cacheHit {
-		reference := fmt.Sprintf("channel:%d:%d:%s:%s", media.TenantId, media.JobId, imageHash, imageQuotaPeriod(time.Now()))
+	if created {
+		reference := antiScanMattingQuotaReference(media.TenantId, provider, imageHash, time.Now())
 		if err = s.consumeImageQuota(ctx, media.TenantId, media.AccountId, reference, "频道批量替换背景"); err != nil {
+			return "", nil, err
+		}
+	}
+	width, height := antiScanImageDimensions(imageBytes)
+	segmentURL := antiScanSegmentPresentationURL(antiScanSegmentURL(segmentRaw))
+	if segmentURL != "" && !mediaCacheHit {
+		res := &sysin.AntiScanSegmentModel{CacheHit: boolToInt(cacheHit || !created), ImageHash: imageHash, SegmentUrl: segmentURL, Width: width, Height: height}
+		if err = s.saveAntiScanMediaSegmentCache(ctx, media.Id, res, segmentRaw, provider); err != nil {
 			return "", nil, err
 		}
 	}

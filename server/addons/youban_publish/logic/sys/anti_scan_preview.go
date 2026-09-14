@@ -20,9 +20,9 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
-	"github.com/gogf/gf/v2/os/gctx"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/guid"
 	_ "golang.org/x/image/webp"
 	"golang.org/x/sync/singleflight"
 
@@ -33,6 +33,7 @@ import (
 	"hotgo/addons/youban_publish/service"
 	"hotgo/internal/library/addons"
 	"hotgo/internal/library/cache"
+	lock "hotgo/internal/library/hgrds/lock"
 	"hotgo/internal/library/storager"
 	baseservice "hotgo/internal/service"
 	"hotgo/utility/file"
@@ -163,7 +164,12 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 	}
 	g.Log().Infof(ctx, "人像分割阶段完成 stage:auth durationMs:%d", time.Since(stageStartedAt).Milliseconds())
 	stageStartedAt = time.Now()
-	if cached, ok := s.getAntiScanMediaSegmentCache(ctx, in.MediaId); ok {
+	conf, err := service.SysConfig().GetCloudResource(ctx)
+	if err != nil {
+		return nil, err
+	}
+	provider := antiScanMattingProvider(conf)
+	if cached, ok := s.getAntiScanMediaSegmentCache(ctx, in.MediaId, provider); ok {
 		g.Log().Infof(ctx, "人像分割阶段完成 stage:media_cache_lookup durationMs:%d cacheHit:1 mediaId:%d", time.Since(stageStartedAt).Milliseconds(), in.MediaId)
 		return cached, nil
 	}
@@ -184,14 +190,9 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 	}
 	g.Log().Infof(ctx, "人像分割阶段完成 stage:read_hash durationMs:%d sourceBytes:%d imageHash:%s", time.Since(stageStartedAt).Milliseconds(), len(imageBytes), imageHash)
 	stageStartedAt = time.Now()
-	conf, err := service.SysConfig().GetCloudResource(ctx)
-	if err != nil {
-		return nil, err
-	}
-	provider := antiScanMattingProvider(conf)
 	g.Log().Infof(ctx, "人像分割阶段完成 stage:config durationMs:%d provider:%s imageHash:%s", time.Since(stageStartedAt).Milliseconds(), provider, imageHash)
 	stageStartedAt = time.Now()
-	if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash); ok {
+	if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash, provider); ok {
 		url := antiScanSegmentURL(cached.SegmentRaw)
 		if url == "" {
 			if legacyBytes := antiScanSegmentImageBytes(cached.SegmentRaw); len(legacyBytes) > 0 {
@@ -209,7 +210,7 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 			width, height := antiScanImageDimensions(imageBytes)
 			g.Log().Infof(ctx, "人像分割阶段完成 stage:cache_lookup durationMs:%d cacheHit:1 imageHash:%s", time.Since(stageStartedAt).Milliseconds(), imageHash)
 			res = &sysin.AntiScanSegmentModel{CacheHit: 1, ImageHash: imageHash, SegmentUrl: url, Width: width, Height: height}
-			if err = s.saveAntiScanMediaSegmentCache(ctx, in.MediaId, res, cached.SegmentRaw, cached.Provider); err != nil {
+			if err = s.saveAntiScanMediaSegmentCache(ctx, in.MediaId, res, cached.SegmentRaw, provider); err != nil {
 				return nil, err
 			}
 			return res, nil
@@ -220,7 +221,7 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 		return nil, err
 	}
 	stageStartedAt = time.Now()
-	segmentRaw, err := s.getOrCreateAntiScanMatting(ctx, imageHash, imageBytes, conf, cloudResourceUsageOwner{TenantId: account.TenantId, AccountId: account.Id})
+	segmentRaw, created, err := s.getOrCreateAntiScanMatting(ctx, imageHash, imageBytes, conf, cloudResourceUsageOwner{TenantId: account.TenantId, AccountId: account.Id})
 	if err != nil {
 		return nil, err
 	}
@@ -229,9 +230,11 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 	if segmentUrl == "" {
 		return nil, gerror.New("云端抠图能力未启用")
 	}
-	quotaReference := fmt.Sprintf("manual:%d:%s:%s:%s", account.TenantId, provider, imageHash, gctx.CtxId(ctx))
-	if err = s.consumeImageQuota(ctx, account.TenantId, account.Id, quotaReference, "manual_background_replace"); err != nil {
-		return nil, err
+	if created {
+		quotaReference := antiScanMattingQuotaReference(account.TenantId, provider, imageHash, time.Now())
+		if err = s.consumeImageQuota(ctx, account.TenantId, account.Id, quotaReference, "manual_background_replace"); err != nil {
+			return nil, err
+		}
 	}
 	segmentUrl = antiScanSegmentPresentationURL(segmentUrl)
 	width, height := antiScanImageDimensions(imageBytes)
@@ -267,8 +270,8 @@ func (s *sSysPublish) antiScanSegmentMedia(ctx context.Context, mediaId int64, a
 	return &telegramMediaItem{Id: mediaId, AttachmentId: asset.AttachmentId, MediaType: "image", FileUrl: asset.FileUrl, StoragePath: asset.StoragePath, AssetHash: asset.Hash}, nil
 }
 
-func (s *sSysPublish) getAntiScanMediaSegmentCache(ctx context.Context, mediaId int64) (*sysin.AntiScanSegmentModel, bool) {
-	cacheKey := antiScanMediaSegmentCacheKey(mediaId)
+func (s *sSysPublish) getAntiScanMediaSegmentCache(ctx context.Context, mediaId int64, provider string) (*sysin.AntiScanSegmentModel, bool) {
+	cacheKey := antiScanMediaSegmentCacheKey(mediaId, provider)
 	if value, cacheErr := cache.Instance().Get(ctx, cacheKey); cacheErr == nil && !value.IsNil() {
 		var cached sysin.AntiScanSegmentModel
 		if scanErr := value.Scan(&cached); scanErr == nil && strings.TrimSpace(cached.SegmentUrl) != "" {
@@ -278,6 +281,7 @@ func (s *sSysPublish) getAntiScanMediaSegmentCache(ctx context.Context, mediaId 
 	}
 	row, err := g.DB().Model(antiScanCacheTable).Safe().Ctx(ctx).
 		Where("media_id", mediaId).Where("segment_json <> ''").Where("cloud_raw_saved", 1).
+		Where("provider LIKE ?", "%"+antiScanMattingProviderMarker(provider)+"%").
 		WhereNull("deleted_at").OrderDesc("id").One()
 	if err != nil || row.IsEmpty() {
 		return nil, false
@@ -293,9 +297,27 @@ func (s *sSysPublish) getAntiScanMediaSegmentCache(ctx context.Context, mediaId 
 	return res, true
 }
 
+func (s *sSysPublish) getAntiScanMediaMattingCache(ctx context.Context, mediaId int64, imageHash string, provider string) (*antiScanDetectResult, bool) {
+	row, err := g.DB().Model(antiScanCacheTable).Safe().Ctx(ctx).
+		Where("media_id", mediaId).
+		Where("image_hash", imageHash).
+		Where("segment_json <> ''").
+		Where("cloud_raw_saved", 1).
+		Where("provider LIKE ?", "%"+antiScanMattingProviderMarker(provider)+"%").
+		WhereNull("deleted_at").OrderDesc("id").One()
+	if err != nil || row.IsEmpty() {
+		return nil, false
+	}
+	return &antiScanDetectResult{
+		CloudRawSaved: row["cloud_raw_saved"].Int(),
+		Provider:      row["provider"].String(),
+		SegmentRaw:    row["segment_json"].String(),
+	}, true
+}
+
 func (s *sSysPublish) saveAntiScanMediaSegmentCache(ctx context.Context, mediaId int64, res *sysin.AntiScanSegmentModel, segmentRaw string, provider string) error {
 	_, err := g.DB().Model(antiScanCacheTable).Safe().Ctx(ctx).Data(g.Map{
-		"media_id": mediaId, "image_hash": res.ImageHash, "config_hash": "", "provider": provider,
+		"media_id": mediaId, "image_hash": res.ImageHash, "config_hash": "", "provider": antiScanMattingProviderMarker(provider),
 		"face_count": 0, "face_json": "", "segment_json": segmentRaw, "original_url": "", "preview_url": "",
 		"warnings_json": "[]", "cloud_raw_saved": 1, "image_width": res.Width, "image_height": res.Height,
 		"created_at": gtime.Now(), "updated_at": gtime.Now(),
@@ -303,19 +325,21 @@ func (s *sSysPublish) saveAntiScanMediaSegmentCache(ctx context.Context, mediaId
 	if err != nil {
 		return gerror.Wrap(err, "保存媒体人像分割缓存失败")
 	}
-	if cacheErr := cache.Instance().Set(ctx, antiScanMediaSegmentCacheKey(mediaId), res, 24*time.Hour); cacheErr != nil {
+	if cacheErr := cache.Instance().Set(ctx, antiScanMediaSegmentCacheKey(mediaId, provider), res, 24*time.Hour); cacheErr != nil {
 		g.Log().Warningf(ctx, "缓存媒体人像分割结果失败 mediaId:%d err:%+v", mediaId, cacheErr)
 	}
 	return nil
 }
 
-func antiScanMediaSegmentCacheKey(mediaId int64) string {
-	return fmt.Sprintf("%s%d", publishconsts.AntiScanMediaSegmentKeyPrefix, mediaId)
+func antiScanMediaSegmentCacheKey(mediaId int64, provider string) string {
+	return fmt.Sprintf("%s%d:%s", publishconsts.AntiScanMediaSegmentKeyPrefix, mediaId, provider)
 }
 
 func invalidateAntiScanMediaSegmentCache(ctx context.Context, mediaId int64) error {
-	if _, err := cache.Instance().Remove(ctx, antiScanMediaSegmentCacheKey(mediaId)); err != nil {
-		g.Log().Warningf(ctx, "清除媒体人像分割快速缓存失败 mediaId:%d err:%+v", mediaId, err)
+	for _, provider := range []string{"aliyun", "tencent", "fapihub"} {
+		if _, err := cache.Instance().Remove(ctx, antiScanMediaSegmentCacheKey(mediaId, provider)); err != nil {
+			g.Log().Warningf(ctx, "清除媒体人像分割快速缓存失败 mediaId:%d provider:%s err:%+v", mediaId, provider, err)
+		}
 	}
 	if _, err := g.DB().Model(antiScanCacheTable).Safe().Ctx(ctx).Where("media_id", mediaId).Delete(); err != nil {
 		return gerror.Wrap(err, "清除媒体人像分割缓存失败")
@@ -362,7 +386,7 @@ func (s *sSysPublish) detectAntiScanImage(ctx context.Context, imageHash string,
 		if in.PreviewOnly == 1 {
 			mattingCtx, cancel = context.WithTimeout(ctx, 8*time.Second)
 		}
-		segmentRaw, err := s.getOrCreateAntiScanMatting(mattingCtx, imageHash, imageBytes, conf, usageOwner)
+		segmentRaw, _, err := s.getOrCreateAntiScanMatting(mattingCtx, imageHash, imageBytes, conf, usageOwner)
 		cancel()
 		if err != nil {
 			if in.PreviewOnly == 1 {
@@ -436,21 +460,38 @@ func (s *sSysPublish) getOrCreateAntiScanFaceDetection(ctx context.Context, imag
 	return faceRaw, faceCount, nil
 }
 
-func (s *sSysPublish) getOrCreateAntiScanMatting(ctx context.Context, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig, usageOwner cloudResourceUsageOwner) (string, error) {
+func (s *sSysPublish) getOrCreateAntiScanMatting(ctx context.Context, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig, usageOwner cloudResourceUsageOwner) (string, bool, error) {
 	provider := antiScanMattingProvider(conf)
-	if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash); ok {
-		return cached.SegmentRaw, nil
+	if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash, provider); ok {
+		return cached.SegmentRaw, false, nil
 	}
-	value, err, _ := antiScanMattingGroup.Do(imageHash, func() (interface{}, error) {
-		if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash); ok {
-			return cached.SegmentRaw, nil
+	key := provider + ":" + imageHash
+	requestToken := guid.S()
+	value, err, _ := antiScanMattingGroup.Do(key, func() (interface{}, error) {
+		if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash, provider); ok {
+			return antiScanMattingResult{SegmentRaw: cached.SegmentRaw}, nil
 		}
-		return s.createAntiScanMatting(ctx, imageHash, imageBytes, conf, usageOwner, provider)
+		distributedLock := lock.NewConfig(2*time.Minute, 100*time.Millisecond).Mutex("youban_publish:anti_scan:matting:" + key)
+		if lockErr := distributedLock.Lock(ctx); lockErr != nil {
+			return nil, gerror.Wrap(lockErr, "等待云端抠图任务失败")
+		}
+		defer func() { _ = distributedLock.Unlock(context.Background()) }()
+		if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash, provider); ok {
+			return antiScanMattingResult{SegmentRaw: cached.SegmentRaw}, nil
+		}
+		segmentRaw, createErr := s.createAntiScanMatting(ctx, imageHash, imageBytes, conf, usageOwner, provider)
+		return antiScanMattingResult{SegmentRaw: segmentRaw, CreatorToken: requestToken}, createErr
 	})
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return value.(string), nil
+	result := value.(antiScanMattingResult)
+	return result.SegmentRaw, result.CreatorToken == requestToken, nil
+}
+
+type antiScanMattingResult struct {
+	SegmentRaw   string
+	CreatorToken string
 }
 
 func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig, usageOwner cloudResourceUsageOwner, provider string) (string, error) {
@@ -513,17 +554,26 @@ func antiScanMattingProvider(conf *model.CloudResourceConfig) string {
 	return "fapihub"
 }
 
+func antiScanMattingProviderMarker(provider string) string {
+	switch provider {
+	case "aliyun":
+		return "aliyun-matting"
+	case "tencent":
+		return "tencent-ci-matting"
+	default:
+		return "fapihub-matting"
+	}
+}
+
+func antiScanMattingQuotaReference(tenantId int64, provider string, imageHash string, now time.Time) string {
+	return fmt.Sprintf("matting:%d:%s:%s:%s", tenantId, provider, imageHash, imageQuotaPeriod(now))
+}
+
 func antiScanMattingCacheMatches(cached *antiScanDetectResult, provider string) bool {
 	if cached == nil {
 		return false
 	}
-	if provider == "tencent" {
-		return strings.Contains(cached.Provider, "tencent-ci-matting")
-	}
-	if provider == "aliyun" {
-		return strings.Contains(cached.Provider, "aliyun-matting")
-	}
-	return strings.Contains(cached.Provider, "fapihub-matting")
+	return strings.Contains(cached.Provider, antiScanMattingProviderMarker(provider))
 }
 
 func antiScanMattingPublicError() error {
@@ -750,22 +800,28 @@ func (s *sSysPublish) getAntiScanFaceCache(ctx context.Context, imageHash string
 	}, true
 }
 
-func (s *sSysPublish) getAntiScanSegmentCache(ctx context.Context, imageHash string) (*antiScanDetectResult, bool) {
-	row, err := g.DB().Model(antiScanCacheTable).Safe().Ctx(ctx).
+func (s *sSysPublish) getAntiScanSegmentCache(ctx context.Context, imageHash string, provider string) (*antiScanDetectResult, bool) {
+	rows, err := g.DB().Model(antiScanCacheTable).Safe().Ctx(ctx).
 		Where("image_hash", imageHash).
 		Where("segment_json <> ''").
 		Where("cloud_raw_saved", 1).
 		WhereNull("deleted_at").
 		OrderDesc("id").
-		One()
-	if err != nil || row.IsEmpty() {
+		All()
+	if err != nil || rows.IsEmpty() {
 		return nil, false
 	}
-	return &antiScanDetectResult{
-		CloudRawSaved: row["cloud_raw_saved"].Int(),
-		Provider:      row["provider"].String(),
-		SegmentRaw:    row["segment_json"].String(),
-	}, true
+	for _, row := range rows {
+		cached := &antiScanDetectResult{
+			CloudRawSaved: row["cloud_raw_saved"].Int(),
+			Provider:      row["provider"].String(),
+			SegmentRaw:    row["segment_json"].String(),
+		}
+		if antiScanMattingCacheMatches(cached, provider) {
+			return cached, true
+		}
+	}
+	return nil, false
 }
 
 func (s *sSysPublish) saveAntiScanDetectionPart(ctx context.Context, imageHash string, detect *antiScanDetectResult) error {

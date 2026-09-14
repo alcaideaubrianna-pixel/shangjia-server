@@ -1063,7 +1063,9 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_anti_scan_cache` (
   PRIMARY KEY (`id`),
   KEY `idx_ybp_anti_scan_image` (`image_hash`),
   KEY `idx_ybp_anti_scan_media` (`media_id`,`cloud_raw_saved`),
+  KEY `idx_ybp_anti_scan_media_provider` (`media_id`,`provider`,`cloud_raw_saved`),
   KEY `idx_ybp_anti_scan_config` (`image_hash`,`config_hash`),
+  KEY `idx_ybp_anti_scan_image_provider` (`image_hash`,`provider`,`cloud_raw_saved`),
   KEY `idx_ybp_anti_scan_provider` (`provider`,`cloud_raw_saved`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴防扫图预览缓存';
 
