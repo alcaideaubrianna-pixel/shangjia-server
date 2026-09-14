@@ -189,6 +189,9 @@ func (s *sSysConfig) publishConfigViewByAccount(ctx context.Context, tenantId, a
 }
 
 func (s *sSysConfig) CloudResourceConfigView(ctx context.Context, in *sysin.CloudResourceConfigViewInp) (res *sysin.CloudResourceConfigViewModel, err error) {
+	if err = s.ensureCloudResourceConfigRows(ctx); err != nil {
+		return nil, gerror.Wrap(err, "初始化云资源配置失败")
+	}
 	conf := defaultCloudResourceConfig()
 	if err = s.scanConfigGroup(ctx, publishConfigGroupCloudResource, conf); err != nil {
 		return nil, err
@@ -255,6 +258,9 @@ func (s *sSysConfig) CloudResourceConfigTest(ctx context.Context, in *sysin.Clou
 	}
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
+	}
+	if err = s.ensureCloudResourceConfigRows(ctx); err != nil {
+		return nil, gerror.Wrap(err, "初始化云资源配置失败")
 	}
 	startedAt := time.Now()
 	defer func() {
