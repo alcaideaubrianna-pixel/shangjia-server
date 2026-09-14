@@ -46,7 +46,7 @@ func (s *sSysPublish) tenantVipStatusForAccount(ctx context.Context, account *sy
 	if value, cacheErr := cache.Instance().Get(ctx, fullCacheKey); cacheErr == nil && !value.IsNil() {
 		var cached sysin.TenantVipStatusModel
 		if scanErr := value.Scan(&cached); scanErr == nil && cached.TenantId > 0 {
-			return &cached, nil
+			return normalizeTenantVipStatus(&cached, gtime.Now()), nil
 		}
 	}
 	activities, activityCfg, err := s.tenantVipActivities(ctx, account)
@@ -61,8 +61,9 @@ func (s *sSysPublish) tenantVipStatusForAccount(ctx context.Context, account *sy
 	if err != nil {
 		return nil, err
 	}
-	_ = cache.Instance().Set(ctx, fullCacheKey, &result, tenantVipFullCacheTTL)
-	return &result, nil
+	resultStatus := normalizeTenantVipStatus(&result, gtime.Now())
+	_ = cache.Instance().Set(ctx, fullCacheKey, resultStatus, tenantVipStatusCacheTTL(resultStatus, tenantVipFullCacheTTL, gtime.Now()))
+	return resultStatus, nil
 }
 
 func (s *sSysPublish) TenantVipPlans(ctx context.Context) ([]*sysin.TenantVipPlanModel, error) {
@@ -423,15 +424,38 @@ func (s *sSysPublish) tenantVipStatus(ctx context.Context, tenantId int64) (*sys
 	if value, err := cache.Instance().Get(ctx, cacheKey); err == nil && !value.IsNil() {
 		var cached sysin.TenantVipStatusModel
 		if scanErr := value.Scan(&cached); scanErr == nil && cached.TenantId > 0 {
-			return &cached, nil
+			return normalizeTenantVipStatus(&cached, gtime.Now()), nil
 		}
 	}
 	status, err := s.loadTenantVipStatus(ctx, tenantId)
 	if err != nil {
 		return nil, err
 	}
-	_ = cache.Instance().Set(ctx, cacheKey, status, tenantVipCacheTTL)
+	status = normalizeTenantVipStatus(status, gtime.Now())
+	_ = cache.Instance().Set(ctx, cacheKey, status, tenantVipStatusCacheTTL(status, tenantVipCacheTTL, gtime.Now()))
 	return status, nil
+}
+
+func normalizeTenantVipStatus(status *sysin.TenantVipStatusModel, now *gtime.Time) *sysin.TenantVipStatusModel {
+	if status == nil || !status.IsVip || status.ExpiredAt == nil || status.ExpiredAt.After(now) {
+		return status
+	}
+	normalized := *status
+	normalized.IsVip = false
+	normalized.Status = consts.StatusDisable
+	normalized.Features = []string{}
+	return &normalized
+}
+
+func tenantVipStatusCacheTTL(status *sysin.TenantVipStatusModel, maximum time.Duration, now *gtime.Time) time.Duration {
+	if status == nil || !status.IsVip || status.ExpiredAt == nil {
+		return maximum
+	}
+	remaining := time.Duration(status.ExpiredAt.TimestampMilli()-now.TimestampMilli()) * time.Millisecond
+	if remaining <= 0 || remaining >= maximum {
+		return maximum
+	}
+	return remaining
 }
 
 // TenantVipStatus exposes the cached, canonical tenant VIP evaluation to addon integrations.
