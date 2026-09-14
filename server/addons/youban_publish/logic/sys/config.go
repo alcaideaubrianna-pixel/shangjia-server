@@ -266,7 +266,7 @@ func (s *sSysConfig) CloudResourceConfigTest(ctx context.Context, in *sysin.Clou
 			Duration:     time.Since(startedAt),
 		})
 	}()
-	if strings.Contains(in.AliyunAccessKeySecret, "*") || strings.Contains(in.TencentSecretKey, "*") || strings.Contains(in.FapiHubApiKey, "*") {
+	if strings.Contains(in.AliyunAccessKeySecret, "*") || strings.Contains(in.TencentSecretKey, "*") || strings.Contains(in.FapiHubApiKey, "*") || strings.Contains(in.FacePlusApiSecret, "*") {
 		oldConf, loadErr := s.GetCloudResource(ctx)
 		if loadErr != nil {
 			return nil, loadErr
@@ -279,6 +279,9 @@ func (s *sSysConfig) CloudResourceConfigTest(ctx context.Context, in *sysin.Clou
 		}
 		if strings.Contains(in.FapiHubApiKey, "*") {
 			in.FapiHubApiKey = oldConf.FapiHubApiKey
+		}
+		if strings.Contains(in.FacePlusApiSecret, "*") {
+			in.FacePlusApiSecret = oldConf.FacePlusApiSecret
 		}
 	}
 	if in.MattingProvider == "aliyun" {
