@@ -662,6 +662,17 @@ func (s *sSysPublish) collectEventNeedsProfileRepair(ctx context.Context, eventI
 
 func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, tenantId int64, accountId int64) ([]gdb.Record, error) {
 	sourceId := event["source_id"].Int64()
+	resolvedSourceId, err := s.collectEventRuleSourceId(ctx, event, tenantId, accountId)
+	if err != nil {
+		return nil, err
+	}
+	if resolvedSourceId > 0 {
+		sourceId = resolvedSourceId
+	}
+	if sourceId != event["source_id"].Int64() {
+		g.Log().Infof(ctx, "采集事件按实际频道选择专属规则 eventId:%d eventSourceId:%d channelSourceId:%d sourceChatId:%s",
+			event["id"].Int64(), event["source_id"].Int64(), sourceId, event["source_chat_id"].String())
+	}
 	cacheKey := s.collectEventRulesCacheKey(ctx, tenantId, accountId, sourceId)
 	if rows, ok := collectEventRulesCacheGet(ctx, cacheKey); ok {
 		// Cached rows are complete resolved snapshots. Reattaching source-local
@@ -741,6 +752,35 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	mergeGlobalCollectTextPolicy(rows, globalRows)
 	collectEventRulesCacheSet(ctx, cacheKey, rows)
 	return rows, nil
+}
+
+func (s *sSysPublish) collectEventRuleSourceId(ctx context.Context, event gdb.Record, tenantId, accountId int64) (int64, error) {
+	fallback := event["source_id"].Int64()
+	chatId := strings.TrimSpace(event["source_chat_id"].String())
+	if chatId == "" || tenantId <= 0 || accountId <= 0 {
+		return fallback, nil
+	}
+	lookupIds := tgChannelCacheLookupIds(chatId)
+	if len(lookupIds) == 0 {
+		return fallback, nil
+	}
+	row, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
+		Fields("id").
+		Where("tenant_id", tenantId).
+		Where("account_id", accountId).
+		Where("status", 1).
+		WhereIn("source_chat_id", lookupIds).
+		WhereNull("deleted_at").
+		Where("EXISTS (SELECT 1 FROM " + pdao.YoubanPublishCollectSourceRule.Table() + " sr JOIN " + pdao.YoubanPublishCollectRule.Table() + " r ON r.id=sr.rule_id WHERE sr.source_id=" + pdao.YoubanPublishCollectSource.Table() + ".id AND sr.status=1 AND r.status=1 AND r.deleted_at IS NULL)").
+		OrderDesc("id").
+		One()
+	if err != nil {
+		return 0, gerror.Wrap(err, "读取频道采集源规则路由失败")
+	}
+	if row.IsEmpty() || row["id"].Int64() <= 0 {
+		return fallback, nil
+	}
+	return row["id"].Int64(), nil
 }
 
 func (s *sSysPublish) collectEventRulesCacheKey(ctx context.Context, tenantId int64, accountId int64, sourceId int64) string {
