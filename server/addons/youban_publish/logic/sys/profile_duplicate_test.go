@@ -117,6 +117,17 @@ func TestDuplicateScanBatchLimitsReturnedDeleteTargets(t *testing.T) {
 	}
 }
 
+func TestDuplicateScanCandidatesNeverDeletesAnotherGroupKeep(t *testing.T) {
+	groups := []*sysin.AdminNoteDuplicateGroupModel{
+		{Signature: "first", Keep: &sysin.AdminNoteDuplicateItemModel{Id: 3}, Duplicates: []*sysin.AdminNoteDuplicateItemModel{{Id: 2}}},
+		{Signature: "second", Keep: &sysin.AdminNoteDuplicateItemModel{Id: 2}, Duplicates: []*sysin.AdminNoteDuplicateItemModel{{Id: 1}}},
+	}
+	candidates := duplicateScanCandidates(groups)
+	if len(candidates) != 1 || candidates[0].ProfileId != 1 || candidates[0].KeepProfileId != 2 {
+		t.Fatalf("交叉分组必须保护所有保留项: %#v", candidates)
+	}
+}
+
 func TestValidateDuplicateCleanupStateRejectsChangedTargetSignature(t *testing.T) {
 	keepTime := gtime.New(time.Unix(20, 0))
 	targetTime := gtime.New(time.Unix(10, 0))

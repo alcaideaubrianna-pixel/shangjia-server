@@ -514,12 +514,21 @@ func validateDuplicateCleanupState(ids []int64, candidates map[int64]duplicateSc
 func duplicateScanCandidates(groups []*sysin.AdminNoteDuplicateGroupModel) []duplicateScanCandidate {
 	result := make([]duplicateScanCandidate, 0)
 	seen := make(map[int64]struct{})
+	retained := make(map[int64]struct{}, len(groups))
+	for _, group := range groups {
+		if group != nil && group.Keep != nil && group.Keep.Id > 0 {
+			retained[group.Keep.Id] = struct{}{}
+		}
+	}
 	for _, group := range groups {
 		if group == nil || group.Keep == nil {
 			continue
 		}
 		for _, item := range group.Duplicates {
 			if item != nil && item.Id > 0 {
+				if _, isRetained := retained[item.Id]; isRetained {
+					continue
+				}
 				if _, exists := seen[item.Id]; exists {
 					continue
 				}
