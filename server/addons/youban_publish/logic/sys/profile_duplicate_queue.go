@@ -22,6 +22,12 @@ func (s *sSysPublish) handleDuplicateScanTask(ctx context.Context, task *asynq.T
 	if payload.Token == "" || payload.Account.Id <= 0 || payload.Account.TenantId <= 0 {
 		return gerror.New("重复资料扫描任务参数不完整")
 	}
+	if duplicateScanTaskSuperseded(ctx, payload.Token, &payload.Account, &payload.Input) {
+		g.Log().Info(ctx, "跳过已被新任务替代的重复资料扫描", g.Map{
+			"scanTaskId": payload.Token, "tenantId": payload.Account.TenantId, "accountId": payload.Account.Id,
+		})
+		return nil
+	}
 	lease := hglock.Mutex(duplicateScanGlobalLockKey)
 	if err := lease.Lock(ctx); err != nil {
 		return gerror.Wrap(err, "等待重复资料扫描执行槽失败")

@@ -114,6 +114,9 @@ func TestDuplicateScanCacheLifetimes(t *testing.T) {
 	if duplicateScanSessionTTL != 24*time.Hour {
 		t.Fatalf("扫描任务有效期 = %s, want 24h", duplicateScanSessionTTL)
 	}
+	if duplicateScanSessionTTL <= duplicateScanResultTTL {
+		t.Fatal("运行中任务索引必须覆盖完整扫描周期")
+	}
 	if duplicateScanResultTTL > 30*time.Minute {
 		t.Fatalf("扫描结果复用索引有效期过长: %s", duplicateScanResultTTL)
 	}
