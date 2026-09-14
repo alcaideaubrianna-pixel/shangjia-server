@@ -323,6 +323,21 @@ func (s *sSysConfig) CloudResourceConfigTest(ctx context.Context, in *sysin.Clou
 			PermissionSummary:  "A桶上传/抠图/下载/删除和B桶写入均通过",
 		}, nil
 	}
+	if in.MattingProvider == "facepp" {
+		startedAt := time.Now()
+		imageBytes, _, readErr := readAntiScanPreviewImage(ctx, nil, 1)
+		if readErr != nil {
+			return nil, readErr
+		}
+		imageHash, hashErr := antiScanImageHash(imageBytes)
+		if hashErr != nil {
+			return nil, hashErr
+		}
+		if _, callErr := facePPPortraitMatting(ctx, imageBytes, "config-"+imageHash[:16], &in.CloudResourceConfig); callErr != nil {
+			return nil, gerror.Wrap(callErr, "Face++ 人体抠图配置校验失败")
+		}
+		return &sysin.CloudResourceConfigTestModel{Provider: "facepp", TotalDurationMs: time.Since(startedAt).Milliseconds(), OutputBytes: len(imageBytes)}, nil
+	}
 	if err = validateCloudResourceCredential(ctx, &in.CloudResourceConfig); err != nil {
 		return nil, err
 	}
