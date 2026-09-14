@@ -102,6 +102,32 @@ func TestTenantVipExpiryReminderText(t *testing.T) {
 	}
 }
 
+func TestTenantVipExpiredNotifyTextIncludesBatchCycleDowngrade(t *testing.T) {
+	text := tenantVipEventNotifyText(&tenantVipEventRow{
+		EventType: tenantVipEventExpired,
+		Remark:    "已将 3 个频道的批次循环自动切换为时间循环。",
+	})
+	if !strings.Contains(text, "3 个频道") || !strings.Contains(text, "批次循环") {
+		t.Fatalf("到期通知未包含批次循环降级说明: %s", text)
+	}
+}
+
+func TestTenantVipPaidFeaturesIncludesBatchCycle(t *testing.T) {
+	if !containsString(tenantVipPaidFeatures(), "批次循环上架") {
+		t.Fatal("会员权益列表应包含批次循环上架")
+	}
+}
+
+func TestTenantVipStatusActiveRejectsExpiredCachedStatus(t *testing.T) {
+	status := &sysin.TenantVipStatusModel{
+		IsVip:     true,
+		ExpiredAt: gtime.Now().Add(-time.Minute),
+	}
+	if tenantVipStatusActive(status) {
+		t.Fatal("已过期的缓存会员状态不应继续生效")
+	}
+}
+
 func TestTenantVipActivityEventKey(t *testing.T) {
 	baseKey := "bind_gift:100"
 	if got := tenantVipActivityEventKey(baseKey, 1); got != baseKey {

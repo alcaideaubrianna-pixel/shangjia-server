@@ -205,6 +205,11 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	if err = in.Filter(ctx); err != nil {
 		return err
 	}
+	if in.CyclePublishMode == "batch" {
+		if err = s.ensureTenantVipFeature(ctx, in.TenantId, sysin.TenantVipFeatureBatchCycle); err != nil {
+			return err
+		}
+	}
 	if isCreate {
 		if err = s.ensureTgAccountsBelongTenant(ctx, []int64{in.TgAccountId}, in.TenantId); err != nil {
 			return err

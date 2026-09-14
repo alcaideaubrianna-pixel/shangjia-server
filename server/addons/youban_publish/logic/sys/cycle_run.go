@@ -199,6 +199,10 @@ func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
 		s.finishChannelCycleRun(ctx, run, cycleRunStatusSkipped, "频道循环配置已关闭")
 		return nil
 	}
+	if run.Stage == "batch" && channel.Mode != "batch" {
+		s.finishChannelCycleRun(ctx, run, cycleRunStatusSkipped, "批次循环已切换为时间循环")
+		return nil
+	}
 	backlog, err := s.channelCycleBacklog(ctx, run.ChannelId)
 	if err != nil {
 		s.failChannelCycleRun(ctx, run.Id, run.ChannelId, err)

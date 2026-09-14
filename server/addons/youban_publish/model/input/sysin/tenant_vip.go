@@ -14,6 +14,7 @@ const (
 	TenantVipFeatureCollectSource     = "collect_source"
 	TenantVipFeatureBackgroundReplace = "background_replace"
 	TenantVipFeatureRandomMedia       = "random_media"
+	TenantVipFeatureBatchCycle        = "batch_cycle"
 )
 
 type TenantVipStatusModel struct {

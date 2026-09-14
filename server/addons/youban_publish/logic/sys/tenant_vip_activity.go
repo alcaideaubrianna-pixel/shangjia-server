@@ -629,7 +629,11 @@ func tenantVipEventNotifyText(event *tenantVipEventRow) string {
 	case tenantVipEventExpiringSixHour:
 		return fmt.Sprintf("⚠️ <b>VIP 将在 6 小时内到期</b>\n会员即将到期，续费后可继续使用全部会员功能。\n\n<b>到期时间：</b>%s", expiredAt)
 	case tenantVipEventExpired:
-		return fmt.Sprintf("⏰ <b>VIP 会员已到期</b>\n相关会员功能已暂停，续费成功后将自动恢复。\n\n<b>到期时间：</b>%s", expiredAt)
+		extra := ""
+		if strings.Contains(event.Remark, "批次循环") {
+			extra = "\n" + event.Remark
+		}
+		return fmt.Sprintf("⏰ <b>VIP 会员已到期</b>\n相关会员功能已暂停，续费成功后将自动恢复。%s\n\n<b>到期时间：</b>%s", extra, expiredAt)
 	default:
 		return event.Remark
 	}
@@ -954,6 +958,16 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 		}).Update(); err != nil {
 			return gerror.Wrap(err, "更新会员到期状态失败")
 		}
+		downgraded, downgradeErr := downgradeTenantBatchCyclesTx(ctx, tx, locked.TenantId, now)
+		if downgradeErr != nil {
+			return downgradeErr
+		}
+		if downgraded > 0 {
+			remark := fmt.Sprintf("已将 %d 个频道的批次循环自动切换为时间循环。", downgraded)
+			if _, err = tx.Model(tenantVipEventTable).Safe().Ctx(ctx).Where("id", result.EventId).Data(g.Map{"remark": remark, "updated_at": now}).Update(); err != nil {
+				return gerror.Wrap(err, "更新会员到期降级说明失败")
+			}
+		}
 		if err = s.writeTenantVipLogTx(ctx, tx, before, locked.TenantId, locked.Level, locked.ExpiredAt, tenantVipEventExpired, "会员到期"); err != nil {
 			return err
 		}
@@ -974,6 +988,25 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 		}
 	}
 	return nil
+}
+
+func downgradeTenantBatchCyclesTx(ctx context.Context, tx gdb.TX, tenantId int64, now *gtime.Time) (int64, error) {
+	result, err := tx.Model(publishChannelTable).Safe().Ctx(ctx).
+		Where("tenant_id", tenantId).
+		Where("cycle_publish_mode", "batch").
+		WhereNull("deleted_at").
+		Data(g.Map{
+			"cycle_publish_mode":  "time",
+			"cycle_batch_cursor":  0,
+			"cycle_active_run_id": 0,
+			"cycle_next_run_at":   nil,
+			"updated_at":          now,
+		}).Update()
+	if err != nil {
+		return 0, gerror.Wrap(err, "会员到期降级批次循环失败")
+	}
+	affected, err := result.RowsAffected()
+	return affected, err
 }
 
 func (s *sSysPublish) retryTenantVipNotifications(ctx context.Context, limit int) error {

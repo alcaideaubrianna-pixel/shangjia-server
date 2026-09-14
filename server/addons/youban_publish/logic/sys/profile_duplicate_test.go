@@ -77,6 +77,14 @@ func TestAppendDuplicatePHashScanGroupUsesLSHBuckets(t *testing.T) {
 	}
 }
 
+func TestProfilePHashSetsMatchRejectsPartialImageOverlap(t *testing.T) {
+	left := []string{"0000000000000000", "ffffffffffffffff"}
+	right := []string{"0000000000000001", "0000000000000002"}
+	if profilePHashSetsMatch(left, right, collectProfilePHashDuplicateThreshold) {
+		t.Fatal("多图资料只有一张相似时不应判定为整套重复")
+	}
+}
+
 func TestDuplicateScanBatchLimitsReturnedDeleteTargets(t *testing.T) {
 	groups := []*sysin.AdminNoteDuplicateGroupModel{
 		{Signature: "a", Keep: &sysin.AdminNoteDuplicateItemModel{Id: 9}, Duplicates: []*sysin.AdminNoteDuplicateItemModel{{Id: 8}, {Id: 7}}},

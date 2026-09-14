@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"hotgo/addons/youban_publish/model/input/sysin"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -32,6 +33,19 @@ func (s *sSysPublish) scheduleDueChannelBatchCycles(ctx context.Context, limit i
 	}
 	for _, channel := range channels {
 		if channel.BatchSize <= 0 {
+			continue
+		}
+		vip, vipErr := s.tenantVipStatus(ctx, channel.TenantId)
+		if vipErr != nil {
+			g.Log().Warningf(ctx, "校验批次循环会员状态失败 channel:%d tenant:%d err:%+v", channel.Id, channel.TenantId, vipErr)
+			continue
+		}
+		if !tenantVipStatusActive(vip) || !containsString(vip.Features, sysin.TenantVipFeatureBatchCycle) {
+			if _, updateErr := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channel.Id).Where("tenant_id", channel.TenantId).Data(g.Map{
+				"cycle_publish_mode": "time", "cycle_batch_cursor": 0, "cycle_active_run_id": 0, "cycle_next_run_at": nil, "updated_at": now,
+			}).Update(); updateErr != nil {
+				g.Log().Warningf(ctx, "降级过期会员批次循环失败 channel:%d tenant:%d err:%+v", channel.Id, channel.TenantId, updateErr)
+			}
 			continue
 		}
 		if err = s.createScheduledBatchCycleRun(ctx, channel, now); err != nil {

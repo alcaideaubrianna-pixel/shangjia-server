@@ -391,10 +391,14 @@ func (s *sSysPublish) ensureTenantVipFeature(ctx context.Context, tenantId int64
 	if err != nil {
 		return err
 	}
-	if !status.IsVip || !containsString(status.Features, featureCode) {
+	if !tenantVipStatusActive(status) || !containsString(status.Features, featureCode) {
 		return gerror.New("当前功能需要开通VIP会员")
 	}
 	return nil
+}
+
+func tenantVipStatusActive(status *sysin.TenantVipStatusModel) bool {
+	return status != nil && status.IsVip && (status.ExpiredAt == nil || status.ExpiredAt.After(gtime.Now()))
 }
 
 func (s *sSysPublish) tenantVipStatus(ctx context.Context, tenantId int64) (*sysin.TenantVipStatusModel, error) {
@@ -440,6 +444,7 @@ func (s *sSysPublish) loadTenantVipStatus(ctx context.Context, tenantId int64) (
 		sysin.TenantVipFeatureCollectSource,
 		sysin.TenantVipFeatureBackgroundReplace,
 		sysin.TenantVipFeatureRandomMedia,
+		sysin.TenantVipFeatureBatchCycle,
 	}
 	if permissions[sysin.TenantVipFeatureTextObfuscation] {
 		res.AvailableFeatures = append(res.AvailableFeatures, sysin.TenantVipFeatureTextObfuscation)
@@ -458,6 +463,7 @@ func (s *sSysPublish) loadTenantVipStatus(ctx context.Context, tenantId int64) (
 			sysin.TenantVipFeatureCollectSource,
 			sysin.TenantVipFeatureBackgroundReplace,
 			sysin.TenantVipFeatureRandomMedia,
+			sysin.TenantVipFeatureBatchCycle,
 		}
 		if permissions[sysin.TenantVipFeatureTextObfuscation] {
 			res.Features = append(res.Features, sysin.TenantVipFeatureTextObfuscation)

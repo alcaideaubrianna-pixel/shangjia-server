@@ -21,8 +21,8 @@ import (
 const (
 	duplicateScanChunkSize  = 500
 	duplicateScanBatchSize  = 500
-	duplicateScanSessionTTL = 30 * time.Minute
-	duplicateScanResultTTL  = 10 * time.Minute
+	duplicateScanSessionTTL = 24 * time.Hour
+	duplicateScanResultTTL  = 24 * time.Hour
 )
 
 type duplicateImageRow struct {
