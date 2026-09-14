@@ -20,6 +20,9 @@ func TestMergeStoredMessageTemplateMediaKeepsSourceAndTelegramMetadata(t *testin
 		SourceMessageRecordId: 173,
 		FileUrl:               "/attachment/old.jpg",
 		StoragePath:           "/attachment/old.jpg",
+		OriginalFileUrl:       "/attachment/original.jpg",
+		OriginalStoragePath:   "attachment/original.jpg",
+		EditStatus:            "edited",
 		PosterUrl:             "/attachment/poster.jpg",
 		PosterStoragePath:     "/attachment/poster.jpg",
 		TgFileId:              "cached-file-id",
@@ -34,6 +37,9 @@ func TestMergeStoredMessageTemplateMediaKeepsSourceAndTelegramMetadata(t *testin
 	}
 	if input[0].SourceMessageRecordId != 173 || input[0].TgFileId != stored[0].TgFileId || input[0].TgThumbFileId != stored[0].TgThumbFileId || input[0].AssetHash != stored[0].AssetHash {
 		t.Fatalf("hidden source metadata was not preserved: %+v", input[0])
+	}
+	if input[0].OriginalFileUrl != stored[0].OriginalFileUrl || input[0].OriginalStoragePath != stored[0].OriginalStoragePath || input[0].EditStatus != "edited" {
+		t.Fatalf("original media metadata was not preserved: %+v", input[0])
 	}
 }
 

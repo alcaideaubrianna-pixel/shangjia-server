@@ -303,7 +303,7 @@ func messageTemplateMediaInputs(media []*sysin.MessageTemplateMediaModel) []*sys
 		if item == nil {
 			continue
 		}
-		items = append(items, &sysin.MessageTemplateMediaInp{Id: item.Id, SourceMessageRecordId: item.SourceMessageRecordId, MediaType: item.MediaType, Name: item.Name, FileUrl: item.FileUrl, StoragePath: item.StoragePath, PosterUrl: item.PosterUrl, PosterStoragePath: item.PosterStoragePath, TgFileId: item.TgFileId, TgThumbFileId: item.TgThumbFileId, AssetHash: item.AssetHash, SortIndex: item.SortIndex})
+		items = append(items, &sysin.MessageTemplateMediaInp{Id: item.Id, SourceMessageRecordId: item.SourceMessageRecordId, MediaType: item.MediaType, Name: item.Name, FileUrl: item.FileUrl, StoragePath: item.StoragePath, OriginalFileUrl: item.OriginalFileUrl, OriginalStoragePath: item.OriginalStoragePath, EditStatus: item.EditStatus, PosterUrl: item.PosterUrl, PosterStoragePath: item.PosterStoragePath, TgFileId: item.TgFileId, TgThumbFileId: item.TgThumbFileId, AssetHash: item.AssetHash, SortIndex: item.SortIndex})
 	}
 	return items
 }

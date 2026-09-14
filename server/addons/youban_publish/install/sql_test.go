@@ -75,6 +75,41 @@ func TestAntiScanMediaCacheSchemaIsMigrated(t *testing.T) {
 	}
 }
 
+func TestMessageTemplateOriginalMediaSchemaIsMigrated(t *testing.T) {
+	for _, path := range []string{
+		"addons/youban_publish/resource/sql/install.sql",
+		"addons/youban_publish/resource/sql/install.pgsql.sql",
+		"addons/youban_publish/resource/sql/upgrade_online.sql",
+		"addons/youban_publish/resource/sql/upgrade_online.pgsql.sql",
+	} {
+		sql := readSqlFile(path)
+		if strings.Contains(path, "install.") {
+			sql = sqlTableDefinition(t, sql, "hg_youban_publish_message_media")
+		}
+		for _, required := range []string{"original_file_url", "original_storage_path", "edit_status"} {
+			if !strings.Contains(sql, required) {
+				t.Fatalf("message template original media migration %s does not contain %q", path, required)
+			}
+		}
+	}
+}
+
+func sqlTableDefinition(t *testing.T, sql, table string) string {
+	t.Helper()
+	start := strings.Index(sql, "CREATE TABLE IF NOT EXISTS `"+table+"`")
+	if start < 0 {
+		start = strings.Index(sql, "CREATE TABLE IF NOT EXISTS \""+table+"\"")
+	}
+	if start < 0 {
+		t.Fatalf("table definition %s was not found", table)
+	}
+	remaining := sql[start:]
+	if end := strings.Index(remaining[1:], "CREATE TABLE IF NOT EXISTS"); end >= 0 {
+		remaining = remaining[:end+1]
+	}
+	return remaining
+}
+
 func TestUpgradeSafeSqlIncludesProfileCycleDueIndex(t *testing.T) {
 	tests := []struct {
 		name string
@@ -114,6 +149,9 @@ func TestMessagePushSchemaIsOwnedByInstallAndMigrationSql(t *testing.T) {
 					"button_config",
 					"interval_days",
 					"push_mode",
+					"original_file_url",
+					"original_storage_path",
+					"edit_status",
 				} {
 					if !strings.Contains(sql, required) {
 						t.Fatalf("message push migration %s does not contain %q", path, required)

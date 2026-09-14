@@ -151,6 +151,9 @@ func (s *sSysPublish) AdminMessageTemplateSave(ctx context.Context, in *sysin.Me
 				"name":                     strings.TrimSpace(item.Name),
 				"file_url":                 strings.TrimSpace(item.FileUrl),
 				"storage_path":             strings.TrimSpace(item.StoragePath),
+				"original_file_url":        strings.TrimSpace(item.OriginalFileUrl),
+				"original_storage_path":    strings.TrimSpace(item.OriginalStoragePath),
+				"edit_status":              strings.TrimSpace(item.EditStatus),
 				"poster_url":               strings.TrimSpace(item.PosterUrl),
 				"poster_storage_path":      strings.TrimSpace(item.PosterStoragePath),
 				"tg_file_id":               strings.TrimSpace(item.TgFileId),
@@ -379,6 +382,15 @@ func mergeStoredMessageTemplateMedia(input []*sysin.MessageTemplateMediaInp, sto
 		}
 		if strings.TrimSpace(item.StoragePath) == "" {
 			item.StoragePath = old.StoragePath
+		}
+		if strings.TrimSpace(item.OriginalFileUrl) == "" {
+			item.OriginalFileUrl = old.OriginalFileUrl
+		}
+		if strings.TrimSpace(item.OriginalStoragePath) == "" {
+			item.OriginalStoragePath = old.OriginalStoragePath
+		}
+		if strings.TrimSpace(item.EditStatus) == "" {
+			item.EditStatus = old.EditStatus
 		}
 		if strings.TrimSpace(item.PosterUrl) == "" {
 			item.PosterUrl = old.PosterUrl

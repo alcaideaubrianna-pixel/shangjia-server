@@ -288,6 +288,10 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_media" (
   "updated_at" timestamp DEFAULT NULL
 );
 ALTER TABLE "hg_youban_publish_message_media" ADD COLUMN IF NOT EXISTS "source_message_record_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_message_media" ADD COLUMN IF NOT EXISTS "original_file_url" varchar(1024) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_message_media" ADD COLUMN IF NOT EXISTS "original_storage_path" varchar(1024) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_message_media" ADD COLUMN IF NOT EXISTS "edit_status" varchar(16) NOT NULL DEFAULT 'raw';
+UPDATE "hg_youban_publish_message_media" SET "original_file_url" = "file_url", "original_storage_path" = "storage_path" WHERE "original_file_url" = '' AND "original_storage_path" = '';
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_message_push_plan" (
   "id" BIGSERIAL PRIMARY KEY,

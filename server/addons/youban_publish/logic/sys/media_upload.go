@@ -60,7 +60,7 @@ func (s *sSysPublish) resolveMediaEditTask(ctx context.Context, in *sysin.MediaU
 	return profileMediaOwner(state), nil
 }
 
-func (s *sSysPublish) AdminMessageTemplateMediaUpload(ctx context.Context, in *sysin.MessageTemplateMediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile) (*sysin.MessageTemplateMediaModel, error) {
+func (s *sSysPublish) AdminMessageTemplateMediaUpload(ctx context.Context, in *sysin.MessageTemplateMediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile, originalFile *ghttp.UploadFile) (*sysin.MessageTemplateMediaModel, error) {
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
@@ -83,16 +83,33 @@ func (s *sSysPublish) AdminMessageTemplateMediaUpload(ctx context.Context, in *s
 	if err != nil {
 		return nil, err
 	}
+	originalFileURL := in.OriginalFileUrl
+	originalStoragePath := in.OriginalStoragePath
+	if originalFile != nil {
+		originalAttachment, uploadErr := service.CommonUpload().UploadFile(ctx, storager.KindImg, originalFile)
+		if uploadErr != nil {
+			return nil, uploadErr
+		}
+		originalFileURL = normalizeMediaFileURL(originalAttachment.FileUrl, originalAttachment.Path)
+		originalStoragePath = normalizeStoredMediaPath(originalAttachment.Path)
+	}
+	if originalFileURL == "" && originalStoragePath == "" {
+		originalFileURL = normalizeMediaFileURL(attachment.FileUrl, attachment.Path)
+		originalStoragePath = normalizeStoredMediaPath(attachment.Path)
+	}
 	return &sysin.MessageTemplateMediaModel{
-		TenantId:          account.TenantId,
-		MediaType:         in.MediaType,
-		Name:              attachment.Name,
-		FileUrl:           normalizeMediaFileURL(attachment.FileUrl, attachment.Path),
-		StoragePath:       normalizeStoredMediaPath(attachment.Path),
-		PosterUrl:         normalizeMediaFileURL(mediaPosterURL(assets.Poster), mediaPosterStoragePathValue(assets.Poster)),
-		PosterStoragePath: normalizeStoredMediaPath(mediaPosterStoragePathValue(assets.Poster)),
-		AssetHash:         attachment.Md5,
-		SortIndex:         in.SortIndex,
+		TenantId:            account.TenantId,
+		MediaType:           in.MediaType,
+		Name:                attachment.Name,
+		FileUrl:             normalizeMediaFileURL(attachment.FileUrl, attachment.Path),
+		StoragePath:         normalizeStoredMediaPath(attachment.Path),
+		OriginalFileUrl:     originalFileURL,
+		OriginalStoragePath: originalStoragePath,
+		EditStatus:          in.EditStatus,
+		PosterUrl:           normalizeMediaFileURL(mediaPosterURL(assets.Poster), mediaPosterStoragePathValue(assets.Poster)),
+		PosterStoragePath:   normalizeStoredMediaPath(mediaPosterStoragePathValue(assets.Poster)),
+		AssetHash:           attachment.Md5,
+		SortIndex:           in.SortIndex,
 	}, nil
 }
 

@@ -41,6 +41,9 @@ type MessageTemplateMediaInp struct {
 	Name                  string `json:"name" dc:"名称"`
 	FileUrl               string `json:"fileUrl" dc:"文件地址"`
 	StoragePath           string `json:"storagePath" dc:"存储路径"`
+	OriginalFileUrl       string `json:"originalFileUrl" dc:"原始文件地址"`
+	OriginalStoragePath   string `json:"originalStoragePath" dc:"原始存储路径"`
+	EditStatus            string `json:"editStatus" dc:"编辑状态：raw/edited"`
 	PosterUrl             string `json:"posterUrl" dc:"封面地址"`
 	PosterStoragePath     string `json:"posterStoragePath" dc:"封面存储路径"`
 	TgFileId              string `json:"tgFileId" dc:"TG文件ID"`
@@ -50,8 +53,11 @@ type MessageTemplateMediaInp struct {
 }
 
 type MessageTemplateMediaUploadInp struct {
-	MediaType string `json:"mediaType" dc:"媒体类型：image/video"`
-	SortIndex int    `json:"sortIndex" dc:"排序"`
+	MediaType           string `json:"mediaType" dc:"媒体类型：image/video"`
+	SortIndex           int    `json:"sortIndex" dc:"排序"`
+	OriginalFileUrl     string `json:"originalFileUrl" dc:"原始文件地址"`
+	OriginalStoragePath string `json:"originalStoragePath" dc:"原始存储路径"`
+	EditStatus          string `json:"editStatus" dc:"编辑状态：raw/edited"`
 }
 
 type MessageTemplateSaveInp struct {
@@ -236,6 +242,9 @@ type MessageTemplateMediaModel struct {
 	Name                  string      `json:"name" dc:"名称"`
 	FileUrl               string      `json:"fileUrl" dc:"文件地址"`
 	StoragePath           string      `json:"storagePath" dc:"存储路径"`
+	OriginalFileUrl       string      `json:"originalFileUrl" dc:"原始文件地址"`
+	OriginalStoragePath   string      `json:"originalStoragePath" dc:"原始存储路径"`
+	EditStatus            string      `json:"editStatus" dc:"编辑状态：raw/edited"`
 	PosterUrl             string      `json:"posterUrl" dc:"封面地址"`
 	PosterStoragePath     string      `json:"posterStoragePath" dc:"封面存储路径"`
 	TgFileId              string      `json:"tgFileId" dc:"TG文件ID"`
@@ -288,6 +297,19 @@ func (in *MessageTemplateSaveInp) Filter(ctx context.Context) error {
 		}
 		item.FileUrl = strings.TrimSpace(item.FileUrl)
 		item.StoragePath = strings.TrimSpace(item.StoragePath)
+		item.OriginalFileUrl = strings.TrimSpace(item.OriginalFileUrl)
+		item.OriginalStoragePath = strings.TrimSpace(item.OriginalStoragePath)
+		if item.OriginalFileUrl == "" && item.OriginalStoragePath == "" {
+			item.OriginalFileUrl = item.FileUrl
+			item.OriginalStoragePath = item.StoragePath
+		}
+		item.EditStatus = strings.TrimSpace(item.EditStatus)
+		if item.EditStatus == "" {
+			item.EditStatus = "raw"
+		}
+		if item.EditStatus != "raw" && item.EditStatus != "edited" {
+			return gerror.New("媒体编辑状态不合法")
+		}
 		item.TgFileId = strings.TrimSpace(item.TgFileId)
 		if item.FileUrl == "" && item.StoragePath == "" && item.TgFileId == "" {
 			return gerror.New("媒体文件地址不能为空")
@@ -306,6 +328,15 @@ func (in *MessageTemplateMediaUploadInp) Filter(ctx context.Context) error {
 	}
 	if in.MediaType != "image" && in.MediaType != "video" {
 		return gerror.New("媒体类型不合法")
+	}
+	in.OriginalFileUrl = strings.TrimSpace(in.OriginalFileUrl)
+	in.OriginalStoragePath = strings.TrimSpace(in.OriginalStoragePath)
+	in.EditStatus = strings.TrimSpace(in.EditStatus)
+	if in.EditStatus == "" {
+		in.EditStatus = "raw"
+	}
+	if in.EditStatus != "raw" && in.EditStatus != "edited" {
+		return gerror.New("媒体编辑状态不合法")
 	}
 	return nil
 }

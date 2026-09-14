@@ -291,6 +291,10 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_media` (
   KEY `idx_ybp_msg_media_tpl` (`template_id`,`sort_index`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息推送模板媒体';
 ALTER TABLE `hg_youban_publish_message_media` ADD COLUMN `source_message_record_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '来源TG消息记录ID';
+ALTER TABLE `hg_youban_publish_message_media` ADD COLUMN IF NOT EXISTS `original_file_url` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始访问地址';
+ALTER TABLE `hg_youban_publish_message_media` ADD COLUMN IF NOT EXISTS `original_storage_path` varchar(1024) NOT NULL DEFAULT '' COMMENT '原始存储路径';
+ALTER TABLE `hg_youban_publish_message_media` ADD COLUMN IF NOT EXISTS `edit_status` varchar(16) NOT NULL DEFAULT 'raw' COMMENT '编辑状态：raw/edited';
+UPDATE `hg_youban_publish_message_media` SET `original_file_url` = `file_url`, `original_storage_path` = `storage_path` WHERE `original_file_url` = '' AND `original_storage_path` = '';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_message_push_plan` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',

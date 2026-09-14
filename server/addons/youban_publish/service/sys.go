@@ -172,7 +172,7 @@ type ISysPublish interface {
 	AdminMessageTemplateList(ctx context.Context, in *sysin.MessageTemplateListInp) (list []*sysin.MessageTemplateModel, totalCount int, err error)
 	AdminMessageTemplateSave(ctx context.Context, in *sysin.MessageTemplateSaveInp) (res *sysin.MessageTemplateSaveModel, err error)
 	AdminMessageTemplateDelete(ctx context.Context, in *sysin.MessageTemplateDeleteInp) (err error)
-	AdminMessageTemplateMediaUpload(ctx context.Context, in *sysin.MessageTemplateMediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile) (res *sysin.MessageTemplateMediaModel, err error)
+	AdminMessageTemplateMediaUpload(ctx context.Context, in *sysin.MessageTemplateMediaUploadInp, file *ghttp.UploadFile, poster *ghttp.UploadFile, originalFile *ghttp.UploadFile) (res *sysin.MessageTemplateMediaModel, err error)
 	AdminMessageTemplatePush(ctx context.Context, in *sysin.MessageTemplatePushInp) (res *sysin.MessageTemplatePushModel, err error)
 	AdminMessagePushPlanList(ctx context.Context, in *sysin.MessagePushPlanListInp) (list []*sysin.MessagePushPlanModel, totalCount int, err error)
 	AdminMessagePushPlanSave(ctx context.Context, in *sysin.MessagePushPlanSaveInp) (res *sysin.MessagePushPlanSaveModel, err error)

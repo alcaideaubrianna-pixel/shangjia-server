@@ -545,7 +545,8 @@ func (c *cPublishAdmin) MessageTemplateMediaUpload(ctx context.Context, req *pub
 		return nil, gerror.New("没有找到上传的文件")
 	}
 	poster := g.RequestFromCtx(ctx).GetUploadFile("poster")
-	data, err := service.SysPublish().AdminMessageTemplateMediaUpload(ctx, &req.MessageTemplateMediaUploadInp, file, poster)
+	originalFile := g.RequestFromCtx(ctx).GetUploadFile("originalFile")
+	data, err := service.SysPublish().AdminMessageTemplateMediaUpload(ctx, &req.MessageTemplateMediaUploadInp, file, poster, originalFile)
 	if err != nil {
 		return nil, err
 	}

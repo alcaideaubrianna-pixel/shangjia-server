@@ -208,3 +208,7 @@ ALTER TABLE "hg_youban_publish_anti_scan_cache" ADD COLUMN IF NOT EXISTS "media_
 ALTER TABLE "hg_youban_publish_anti_scan_cache" ADD COLUMN IF NOT EXISTS "image_width" integer NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_anti_scan_cache" ADD COLUMN IF NOT EXISTS "image_height" integer NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_media" ON "hg_youban_publish_anti_scan_cache" ("media_id", "cloud_raw_saved");
+ALTER TABLE "hg_youban_publish_message_media" ADD COLUMN IF NOT EXISTS "original_file_url" varchar(1024) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_message_media" ADD COLUMN IF NOT EXISTS "original_storage_path" varchar(1024) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_message_media" ADD COLUMN IF NOT EXISTS "edit_status" varchar(16) NOT NULL DEFAULT 'raw';
+UPDATE "hg_youban_publish_message_media" SET "original_file_url" = "file_url", "original_storage_path" = "storage_path" WHERE "original_file_url" = '' AND "original_storage_path" = '';
