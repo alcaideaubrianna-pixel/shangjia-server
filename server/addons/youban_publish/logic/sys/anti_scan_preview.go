@@ -327,7 +327,11 @@ func (s *sSysPublish) getOrCreateAntiScanMatting(ctx context.Context, imageHash 
 		segmentURL, err = aliyunCOSPortraitMatting(ctx, imageBytes, imageHash, conf)
 	} else if provider == "tencent" {
 		providerName = "tencent-ci-matting"
-		segmentURL, err = tencentCOSPortraitMatting(ctx, imageBytes, imageHash, conf.TencentSecretId, conf.TencentSecretKey)
+		var result *tencentPortraitMattingResult
+		result, err = tencentCOSPortraitMatting(ctx, imageBytes, imageHash, conf, false)
+		if result != nil {
+			segmentURL = result.URL
+		}
 	} else {
 		providerName = "fapihub-matting"
 		client := newFapiHubClient(conf.FapiHubApiKey, conf.FapiHubEndpoint, conf.FapiHubModel)

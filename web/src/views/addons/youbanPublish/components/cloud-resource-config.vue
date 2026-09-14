@@ -10,7 +10,7 @@
         <n-form-item label="服务来源">
           <n-radio-group v-model:value="model.mattingProvider">
             <n-radio-button value="aliyun">阿里云人体分割</n-radio-button>
-            <n-radio-button value="tencent">腾讯云国际版</n-radio-button>
+            <n-radio-button value="tencent">腾讯云 A/B 账号</n-radio-button>
             <n-radio-button value="fapihub">FAPIHub</n-radio-button>
           </n-radio-group>
         </n-form-item>
@@ -55,8 +55,18 @@
               type="password"
             />
           </n-form-item>
+          <n-form-item label="A 账号处理桶">
+            <n-input
+              v-model:value="model.tencentMattingBucket"
+              clearable
+              placeholder="BucketName-APPID"
+            />
+          </n-form-item>
           <n-form-item label="地域">
             <n-input v-model:value="model.tencentRegion" placeholder="ap-singapore" />
+          </n-form-item>
+          <n-form-item label="临时文件目录">
+            <n-input v-model:value="model.tencentMattingPath" placeholder="youban-matting" />
           </n-form-item>
         </template>
 
@@ -91,7 +101,10 @@
     <n-card size="small" title="权限要求">
       <n-space vertical class="cloud-help">
         <div>人脸检测已停用，二维码和贴图由用户手动拖拽摆放。</div>
-        <div>阿里云使用上海地域 SegmentBody，腾讯云使用国际版数据万象人像抠图。</div>
+        <div>腾讯云使用 A 账号 SG 处理桶执行人像抠图，结果写入系统现有的 B 账号 COS。</div>
+        <div
+          >A 账号需具备处理桶 PutObject、GetObject、DeleteObject 权限，且处理桶已绑定数据万象。</div
+        >
         <div>连接测试会产生一次真实云端调用，并计入对应来源的监控。</div>
         <div>密钥保存后会脱敏显示；透明 PNG 仅保存为 COS 文件，不写入数据库。</div>
       </n-space>
@@ -116,6 +129,8 @@
       mattingProvider: 'aliyun' | 'fapihub' | 'tencent';
       tencentCloudSite: string;
       tencentRegion: string;
+      tencentMattingBucket: string;
+      tencentMattingPath: string;
       tencentSecretId: string;
       tencentSecretKey: string;
       tencentVisionEnabled: number;
@@ -135,10 +150,13 @@
         tencentVisionEnabled: 0,
       });
       const total = Number(result?.totalDurationMs || 0);
+      const permission = result?.permissionSummary ? `${result.permissionSummary}；` : '';
       const details = total
-        ? `API ${Number(result?.apiDurationMs || 0)} ms，下载 ${Number(
+        ? `${permission}处理 ${Number(result?.apiDurationMs || 0)} ms，下载 ${Number(
             result?.downloadDurationMs || 0
-          )} ms，总计 ${total} ms，输出 ${Number(result?.outputBytes || 0)} bytes`
+          )} ms，写入 B 桶 ${Number(result?.uploadDurationMs || 0)} ms，总计 ${total} ms，输出 ${Number(
+            result?.outputBytes || 0
+          )} bytes`
         : '凭据和接口调用正常';
       message.success(`测试成功：${details}`);
     } finally {

@@ -814,6 +814,8 @@
       tencentSecretId: '',
       tencentSecretKey: '',
       tencentRegion: 'ap-singapore',
+      tencentMattingBucket: '',
+      tencentMattingPath: 'youban-matting',
       tencentBdaEndpoint: 'bda.intl.tencentcloudapi.com',
       tencentIaiEndpoint: 'iai.intl.tencentcloudapi.com',
       fapiHubEnabled: 0,

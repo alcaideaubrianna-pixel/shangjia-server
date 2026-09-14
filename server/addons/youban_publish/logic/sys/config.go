@@ -274,6 +274,31 @@ func (s *sSysConfig) CloudResourceConfigTest(ctx context.Context, in *sysin.Clou
 		}
 		return &sysin.CloudResourceConfigTestModel{Provider: "aliyun", ApiDurationMs: result.ApiDuration.Milliseconds(), DownloadDurationMs: result.DownloadDuration.Milliseconds(), TotalDurationMs: result.TotalDuration.Milliseconds(), OutputBytes: len(result.ImageBytes), RequestId: result.RequestID}, nil
 	}
+	if in.MattingProvider == "tencent" {
+		imageBytes, _, readErr := readAntiScanPreviewImage(ctx, nil, 1)
+		if readErr != nil {
+			return nil, readErr
+		}
+		imageHash, hashErr := antiScanImageHash(imageBytes)
+		if hashErr != nil {
+			return nil, hashErr
+		}
+		var result *tencentPortraitMattingResult
+		result, err = tencentCOSPortraitMatting(ctx, imageBytes, "config-"+imageHash[:16], &in.CloudResourceConfig, true)
+		if err != nil {
+			return nil, gerror.Wrap(err, "腾讯云 A/B 账号抠图链路测试失败")
+		}
+		return &sysin.CloudResourceConfigTestModel{
+			Provider:           "tencent",
+			ApiDurationMs:      result.ProcessDuration.Milliseconds(),
+			DownloadDurationMs: result.DownloadDuration.Milliseconds(),
+			UploadDurationMs:   result.UploadDuration.Milliseconds(),
+			TotalDurationMs:    result.TotalDuration.Milliseconds(),
+			OutputBytes:        result.OutputBytes,
+			RequestId:          result.RequestID,
+			PermissionSummary:  "A桶上传/抠图/下载/删除和B桶写入均通过",
+		}, nil
+	}
 	if err = validateCloudResourceCredential(ctx, &in.CloudResourceConfig); err != nil {
 		return nil, err
 	}

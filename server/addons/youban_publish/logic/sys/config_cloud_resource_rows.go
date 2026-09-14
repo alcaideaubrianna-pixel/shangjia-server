@@ -17,6 +17,8 @@ func (s *sSysConfig) ensureCloudResourceConfigRows(ctx context.Context) error {
 		{"name": "阿里云 AccessKey ID", "type": "string", "key": "aliyunAccessKeyId", "value": "", "default_value": "", "sort": 50, "tip": "阿里云视觉智能开放平台 AccessKey ID"},
 		{"name": "阿里云 AccessKey Secret", "type": "string", "key": "aliyunAccessKeySecret", "value": "", "default_value": "", "sort": 60, "tip": "页面回显会脱敏"},
 		{"name": "阿里云 Endpoint", "type": "string", "key": "aliyunEndpoint", "value": "imageseg.cn-shanghai.aliyuncs.com", "default_value": "imageseg.cn-shanghai.aliyuncs.com", "sort": 70, "tip": "SegmentBody 上海地域 Endpoint"},
+		{"name": "腾讯抠图处理桶", "type": "string", "key": "tencentMattingBucket", "value": "", "default_value": "", "sort": 80, "tip": "A 账号已开通数据万象的桶，格式 BucketName-APPID"},
+		{"name": "腾讯抠图临时目录", "type": "string", "key": "tencentMattingPath", "value": "youban-matting", "default_value": "youban-matting", "sort": 90, "tip": "A 账号处理桶内的临时对象目录"},
 	}
 	for _, row := range rows {
 		key := gconv.String(row["key"])

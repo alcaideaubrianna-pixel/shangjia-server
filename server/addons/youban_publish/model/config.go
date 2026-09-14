@@ -48,6 +48,8 @@ type CloudResourceConfig struct {
 	TencentSecretId       string `json:"tencentSecretId"`
 	TencentSecretKey      string `json:"tencentSecretKey"`
 	TencentRegion         string `json:"tencentRegion"`
+	TencentMattingBucket  string `json:"tencentMattingBucket"`
+	TencentMattingPath    string `json:"tencentMattingPath"`
 	TencentBdaEndpoint    string `json:"tencentBdaEndpoint"`
 	TencentIaiEndpoint    string `json:"tencentIaiEndpoint"`
 	FapiHubEnabled        int    `json:"fapiHubEnabled"`

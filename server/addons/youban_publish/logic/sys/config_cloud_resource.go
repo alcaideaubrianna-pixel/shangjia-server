@@ -17,6 +17,7 @@ func defaultCloudResourceConfig() *model.CloudResourceConfig {
 		TencentVisionEnabled: 0,
 		TencentCloudSite:     "intl",
 		TencentRegion:        "ap-singapore",
+		TencentMattingPath:   "youban-matting",
 		TencentBdaEndpoint:   "bda.intl.tencentcloudapi.com",
 		TencentIaiEndpoint:   "iai.intl.tencentcloudapi.com",
 		FapiHubEnabled:       0,
@@ -36,6 +37,8 @@ func cloudResourceConfigMap(conf *model.CloudResourceConfig) g.Map {
 		"tencentSecretId":       conf.TencentSecretId,
 		"tencentSecretKey":      conf.TencentSecretKey,
 		"tencentRegion":         conf.TencentRegion,
+		"tencentMattingBucket":  conf.TencentMattingBucket,
+		"tencentMattingPath":    conf.TencentMattingPath,
 		"tencentBdaEndpoint":    conf.TencentBdaEndpoint,
 		"tencentIaiEndpoint":    conf.TencentIaiEndpoint,
 		"fapiHubEnabled":        conf.FapiHubEnabled,
@@ -62,7 +65,7 @@ func validateCloudResourceCredential(ctx context.Context, conf *model.CloudResou
 		if hashErr != nil {
 			return hashErr
 		}
-		_, err = tencentCOSPortraitMatting(ctx, imageBytes, "config-"+imageHash[:16], conf.TencentSecretId, conf.TencentSecretKey)
+		_, err = tencentCOSPortraitMatting(ctx, imageBytes, "config-"+imageHash[:16], conf, true)
 		if err != nil {
 			return gerror.Wrap(err, "腾讯云国际版数据万象人像抠图配置校验失败")
 		}

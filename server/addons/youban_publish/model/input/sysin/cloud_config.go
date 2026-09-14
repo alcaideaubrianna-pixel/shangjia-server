@@ -38,9 +38,11 @@ type CloudResourceConfigTestModel struct {
 	Provider           string `json:"provider" dc:"抠图来源"`
 	ApiDurationMs      int64  `json:"apiDurationMs" dc:"接口耗时毫秒"`
 	DownloadDurationMs int64  `json:"downloadDurationMs" dc:"结果下载耗时毫秒"`
+	UploadDurationMs   int64  `json:"uploadDurationMs" dc:"最终存储上传耗时毫秒"`
 	TotalDurationMs    int64  `json:"totalDurationMs" dc:"总耗时毫秒"`
 	OutputBytes        int    `json:"outputBytes" dc:"透明图片字节数"`
 	RequestId          string `json:"requestId" dc:"第三方请求ID"`
+	PermissionSummary  string `json:"permissionSummary" dc:"权限检测结果"`
 }
 
 type CloudResourceUsageQueryInp struct {
@@ -201,6 +203,8 @@ func filterCloudResourceConfig(ctx context.Context, in *model.CloudResourceConfi
 	in.TencentSecretKey = strings.TrimSpace(in.TencentSecretKey)
 	in.TencentCloudSite = strings.TrimSpace(in.TencentCloudSite)
 	in.TencentRegion = strings.TrimSpace(in.TencentRegion)
+	in.TencentMattingBucket = strings.TrimSpace(in.TencentMattingBucket)
+	in.TencentMattingPath = strings.Trim(strings.TrimSpace(in.TencentMattingPath), "/")
 	in.TencentBdaEndpoint = strings.TrimSpace(in.TencentBdaEndpoint)
 	in.TencentIaiEndpoint = strings.TrimSpace(in.TencentIaiEndpoint)
 	in.FapiHubApiKey = strings.TrimSpace(in.FapiHubApiKey)
@@ -262,6 +266,12 @@ func filterCloudResourceConfig(ctx context.Context, in *model.CloudResourceConfi
 	}
 	if in.MattingProvider == "tencent" && (in.TencentSecretId == "" || in.TencentSecretKey == "") {
 		return gerror.New("使用腾讯云人像抠图必须配置 SecretId 和 SecretKey")
+	}
+	if in.MattingProvider == "tencent" && in.TencentMattingBucket == "" {
+		return gerror.New("使用腾讯云人像抠图必须配置 A 账号处理桶")
+	}
+	if in.MattingProvider == "tencent" && in.TencentMattingPath == "" {
+		in.TencentMattingPath = "youban-matting"
 	}
 	if in.MattingProvider == "aliyun" && (in.AliyunAccessKeyId == "" || in.AliyunAccessKeySecret == "") {
 		return gerror.New("使用阿里云人体分割必须配置 AccessKey ID 和 AccessKey Secret")
