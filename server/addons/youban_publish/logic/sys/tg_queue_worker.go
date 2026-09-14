@@ -344,9 +344,9 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 	if err != nil {
 		return err
 	}
-	delay, pending, err := s.processCollectSourceTask(ctx, payload)
+	delay, pending, removeSchedule, err := s.processCollectSourceTask(ctx, payload)
 	if err != nil || !pending {
-		if err == nil {
+		if err == nil && removeSchedule {
 			removeCollectProcessSchedule(ctx, payload)
 		}
 		return err

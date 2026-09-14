@@ -112,6 +112,22 @@ func collectProcessScheduleKey(payload collectProcessQueuePayload) string {
 	return fmt.Sprintf("%s%d:%d:%d", publishconsts.CollectProcessScheduleKeyPrefix, payload.TenantId, payload.AccountId, payload.SourceId)
 }
 
+func collectProcessThrottleKey(payload collectProcessQueuePayload) string {
+	return fmt.Sprintf("%s%d:%d:%d", publishconsts.CollectProcessThrottleKeyPrefix, payload.TenantId, payload.AccountId, payload.SourceId)
+}
+
+func reserveCollectProcessExecution(ctx context.Context, payload collectProcessQueuePayload) (bool, error) {
+	if !cache.Initialized() || g.Cfg().MustGet(ctx, "cache.adapter").String() != "redis" {
+		return true, nil
+	}
+	ok, err := cache.Instance().SetIfNotExist(ctx, collectProcessThrottleKey(payload), 1, collectProcessMinimumDelay)
+	if err != nil {
+		g.Log().Warningf(ctx, "采集源执行节流缓存不可用，放行任务 sourceId:%d err:%+v", payload.SourceId, err)
+		return true, nil
+	}
+	return ok, nil
+}
+
 func reserveCollectProcessSchedule(ctx context.Context, payload collectProcessQueuePayload, ttl time.Duration) (bool, error) {
 	if !cache.Initialized() || g.Cfg().MustGet(ctx, "cache.adapter").String() != "redis" {
 		return true, nil
@@ -205,26 +221,34 @@ func collectProcessSourceEnabled(ctx context.Context, payload collectProcessQueu
 	return count > 0, err
 }
 
-func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload collectProcessQueuePayload) (time.Duration, bool, error) {
+func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload collectProcessQueuePayload) (delay time.Duration, pending bool, removeSchedule bool, err error) {
 	enabled, err := collectProcessSourceEnabled(ctx, payload)
 	if err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
 	if !enabled {
-		return 0, false, nil
+		return 0, false, true, nil
+	}
+	reserved, err := reserveCollectProcessExecution(ctx, payload)
+	if err != nil {
+		return 0, false, false, err
+	}
+	if !reserved {
+		g.Log().Debugf(ctx, "采集源任务命中跨节点节流，丢弃重复任务 sourceId:%d", payload.SourceId)
+		return 0, false, false, nil
 	}
 	executed, err := s.processCollectSourceWindowWithLock(ctx, payload)
 	if err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
 	if !executed {
-		return collectProcessMinimumDelay, true, nil
+		return 0, false, false, nil
 	}
-	delay, pending, err := nextCollectProcessDelay(ctx, payload)
+	delay, pending, err = nextCollectProcessDelay(ctx, payload)
 	if err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
-	return delay, pending, nil
+	return delay, pending, !pending, nil
 }
 
 func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePayload) (time.Duration, bool, error) {

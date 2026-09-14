@@ -122,7 +122,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				verify := rows[verifyIndex]
 				g.Log().Debugf(ctx, "采集消息匹配验证组 eventId:%d verifyEventId:%d displayMessageId:%d verifyMessageId:%d verifyGroupedId:%s verifyMedia:%d", event["id"].Int64(), verify["id"].Int64(), event["source_message_id"].Int64(), verify["source_message_id"].Int64(), verify["source_grouped_id"].String(), verify["media_count"].Int())
 			} else {
-				g.Log().Warningf(ctx, "采集消息未匹配验证组 eventId:%d sourceMessageId:%d media:%d age:%s", event["id"].Int64(), event["source_message_id"].Int64(), event["media_count"].Int(), collectMaterialEventTime(event))
+				g.Log().Debugf(ctx, "采集消息暂未匹配验证组 eventId:%d sourceMessageId:%d media:%d age:%s", event["id"].Int64(), event["source_message_id"].Int64(), event["media_count"].Int(), collectMaterialEventTime(event))
 			}
 			if verifyIndex >= 0 {
 				if err = s.bindCollectMaterialPair(ctx, event, rows[verifyIndex]); err != nil {
