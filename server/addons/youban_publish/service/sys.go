@@ -280,7 +280,7 @@ type ISysPublish interface {
 	AdminTgMessageRepairView(ctx context.Context, in *sysin.TgMessageRepairViewInp) (res *sysin.TgMessageRepairModel, err error)
 	AdminNoteList(ctx context.Context, in *sysin.NoteListInp) (res *sysin.AdminNotePageModel, err error)
 	AdminNoteBatchIds(ctx context.Context, in *sysin.NoteListInp) (res *sysin.AdminNoteBatchIdsModel, err error)
-	AdminNoteDuplicateScan(ctx context.Context, in *sysin.NoteListInp) (res *sysin.AdminNoteDuplicateScanModel, err error)
+	AdminNoteDuplicateScan(ctx context.Context, in *sysin.AdminNoteDuplicateScanInp) (res *sysin.AdminNoteDuplicateScanModel, err error)
 	AdminNoteDuplicateBatch(ctx context.Context, in *sysin.AdminNoteDuplicateBatchInp) (res *sysin.AdminNoteDuplicateScanModel, err error)
 	AdminNoteDuplicateCleanup(ctx context.Context, in *sysin.AdminNoteDuplicateCleanupInp) (res *sysin.AdminNoteDuplicateCleanupModel, err error)
 	AdminTagList(ctx context.Context, in *sysin.TagListInp) (list []*sysin.TagModel, totalCount int, err error)

@@ -862,6 +862,15 @@ type AdminNoteDuplicateScanModel struct {
 	ScanToken       string                          `json:"scanToken" dc:"扫描会话凭证"`
 	Cursor          int                             `json:"cursor" dc:"当前批次游标"`
 	NextCursor      int                             `json:"nextCursor" dc:"下一批次游标"`
+	ScanCursor      int64                           `json:"scanCursor" dc:"扫描资料游标"`
+	ScannedTotal    int                             `json:"scannedTotal" dc:"已扫描资料数"`
+	ScanComplete    bool                            `json:"scanComplete" dc:"扫描是否完成"`
+}
+
+type AdminNoteDuplicateScanInp struct {
+	NoteListInp
+	ScanToken  string `json:"scanToken" dc:"扫描会话凭证，首次扫描留空"`
+	ScanCursor int64  `json:"scanCursor" dc:"扫描资料游标，首次扫描留空"`
 }
 
 type AdminNoteDuplicateBatchInp struct {

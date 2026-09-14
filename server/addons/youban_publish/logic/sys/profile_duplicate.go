@@ -36,60 +36,152 @@ type duplicateScanCandidate struct {
 }
 
 type duplicateScanSession struct {
-	AdminAccountId  int64 `json:"adminAccountId"`
-	CandidateTotal  int   `json:"candidateTotal"`
-	ChunkCount      int   `json:"chunkCount"`
-	DuplicateTotal  int   `json:"duplicateTotal"`
-	GroupTotal      int   `json:"groupTotal"`
-	IncompleteTotal int   `json:"incompleteTotal"`
-	TenantId        int64 `json:"tenantId"`
+	AdminAccountId  int64              `json:"adminAccountId"`
+	CandidateTotal  int                `json:"candidateTotal"`
+	ChunkCount      int                `json:"chunkCount"`
+	DuplicateTotal  int                `json:"duplicateTotal"`
+	GroupTotal      int                `json:"groupTotal"`
+	IncompleteTotal int                `json:"incompleteTotal"`
+	ScanCursor      int64              `json:"scanCursor"`
+	ScannedTotal    int                `json:"scannedTotal"`
+	SignatureIds    map[string][]int64 `json:"signatureIds,omitempty"`
+	TenantId        int64              `json:"tenantId"`
 }
 
-func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.NoteListInp) (*sysin.AdminNoteDuplicateScanModel, error) {
+func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.AdminNoteDuplicateScanInp) (*sysin.AdminNoteDuplicateScanModel, error) {
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
 	}
-	idsResult, err := s.AdminNoteBatchIds(ctx, in)
+	if in == nil {
+		in = &sysin.AdminNoteDuplicateScanInp{}
+	}
+	var session *duplicateScanSession
+	if strings.TrimSpace(in.ScanToken) == "" {
+		session, err = s.newDuplicateScanSession(ctx, account, &in.NoteListInp)
+		if err != nil {
+			return nil, err
+		}
+		in.ScanToken = guid.S()
+	} else {
+		session, err = loadDuplicateScanSession(ctx, in.ScanToken)
+		if err != nil {
+			return nil, err
+		}
+		if err = validateDuplicateScanSessionOwner(session, account); err != nil {
+			return nil, err
+		}
+		if in.ScanCursor != session.ScanCursor {
+			return nil, gerror.New("扫描游标已失效，请重新开始扫描")
+		}
+	}
+	ids, err := s.duplicateScanProfileIdPage(ctx, &in.NoteListInp, account, session.ScanCursor)
 	if err != nil {
 		return nil, err
 	}
-	result := &sysin.AdminNoteDuplicateScanModel{Groups: []*sysin.AdminNoteDuplicateGroupModel{}, CandidateTotal: len(idsResult.Ids)}
-	if len(idsResult.Ids) == 0 {
-		return result, nil
+	if len(ids) > 0 {
+		if err = s.appendDuplicateScanSignatures(ctx, session, ids); err != nil {
+			return nil, err
+		}
+		session.ScanCursor = ids[len(ids)-1]
+		session.ScannedTotal += len(ids)
 	}
+	complete := len(ids) < duplicateScanChunkSize || session.ScannedTotal >= session.CandidateTotal
+	if !complete {
+		if err = cache.Instance().Set(ctx, duplicateScanSessionKey(in.ScanToken), session, duplicateScanSessionTTL); err != nil {
+			return nil, gerror.Wrap(err, "保存重复资料扫描进度失败")
+		}
+		return duplicateScanProgressResult(in.ScanToken, session, false), nil
+	}
+	return s.finishDuplicateScan(ctx, in.ScanToken, session)
+}
 
-	groupIds := make(map[string][]int64)
-	for start := 0; start < len(idsResult.Ids); start += duplicateScanChunkSize {
-		end := start + duplicateScanChunkSize
-		if end > len(idsResult.Ids) {
-			end = len(idsResult.Ids)
+func (s *sSysPublish) newDuplicateScanSession(ctx context.Context, account *sysin.AccountModel, in *sysin.NoteListInp) (*duplicateScanSession, error) {
+	scope, err := s.adminProfileVisibleScope(ctx, account, &in.ProfileListInp)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.ensureAdminProfileScopeTenants(ctx, scope); err != nil {
+		return nil, err
+	}
+	total := 0
+	if !scope.Strict || len(scope.AccountIds) > 0 {
+		mod := noteIndexModel(ctx).LeftJoin(publishAccountTable+" a", "a.id=i.account_id AND a.deleted_at IS NULL")
+		mod = applyNoteIndexFilters(applyNoteIndexScope(mod, scope.TenantId, scope.TenantIds, scope.AccountIds, &in.ProfileListInp), &in.ProfileListInp)
+		value, countErr := mod.Fields("COUNT(DISTINCT i.profile_id)").Value()
+		if countErr != nil {
+			return nil, gerror.Wrap(countErr, "统计待扫描资料失败")
 		}
-		var rows []duplicateImageRow
-		err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-			Fields("id,profile_id,md5").
-			WhereIn("profile_id", idsResult.Ids[start:end]).
-			WhereNull("deleted_at").
-			WhereIn("media_type", []string{"image", "photo"}).
-			Where("purpose IS NULL OR purpose='' OR purpose='display'").
-			OrderAsc("profile_id").OrderAsc("sort_index").OrderAsc("id").Scan(&rows)
-		if err != nil {
-			return nil, gerror.Wrap(err, "读取重复资料图片失败")
-		}
-		mediaByProfile := make(map[int64][]duplicateImageRow, end-start)
-		for _, row := range rows {
-			mediaByProfile[row.ProfileId] = append(mediaByProfile[row.ProfileId], row)
-		}
-		for _, profileId := range idsResult.Ids[start:end] {
-			signature, complete := duplicateImageSignature(mediaByProfile[profileId])
-			if !complete {
-				result.IncompleteTotal++
-				continue
-			}
-			groupIds[signature] = append(groupIds[signature], profileId)
+		total = value.Int()
+	}
+	return &duplicateScanSession{AdminAccountId: account.Id, CandidateTotal: total, SignatureIds: make(map[string][]int64), TenantId: account.TenantId}, nil
+}
+
+func (s *sSysPublish) duplicateScanProfileIdPage(ctx context.Context, in *sysin.NoteListInp, account *sysin.AccountModel, cursor int64) ([]int64, error) {
+	scope, err := s.adminProfileVisibleScope(ctx, account, &in.ProfileListInp)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.ensureAdminProfileScopeTenants(ctx, scope); err != nil {
+		return nil, err
+	}
+	if scope.Strict && len(scope.AccountIds) == 0 {
+		return []int64{}, nil
+	}
+	mod := noteIndexModel(ctx).LeftJoin(publishAccountTable+" a", "a.id=i.account_id AND a.deleted_at IS NULL")
+	mod = applyNoteIndexFilters(applyNoteIndexScope(mod, scope.TenantId, scope.TenantIds, scope.AccountIds, &in.ProfileListInp), &in.ProfileListInp)
+	if cursor > 0 {
+		mod = mod.WhereLT("i.profile_id", cursor)
+	}
+	var rows []struct {
+		Id int64 `orm:"id"`
+	}
+	if err = mod.Fields("i.profile_id AS id").Group("i.profile_id").OrderDesc("i.profile_id").Limit(duplicateScanChunkSize).Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "读取待扫描资料失败")
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row.Id > 0 {
+			ids = append(ids, row.Id)
 		}
 	}
+	return ids, nil
+}
 
+func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, session *duplicateScanSession, ids []int64) error {
+	var rows []duplicateImageRow
+	if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Fields("id,profile_id,md5").WhereIn("profile_id", ids).
+		WhereNull("deleted_at").WhereIn("media_type", []string{"image", "photo"}).Where("purpose IS NULL OR purpose='' OR purpose='display'").
+		OrderAsc("profile_id").OrderAsc("sort_index").OrderAsc("id").Scan(&rows); err != nil {
+		return gerror.Wrap(err, "读取重复资料图片失败")
+	}
+	mediaByProfile := make(map[int64][]duplicateImageRow, len(ids))
+	for _, row := range rows {
+		mediaByProfile[row.ProfileId] = append(mediaByProfile[row.ProfileId], row)
+	}
+	if session.SignatureIds == nil {
+		session.SignatureIds = make(map[string][]int64)
+	}
+	for _, profileId := range ids {
+		signature, complete := duplicateImageSignature(mediaByProfile[profileId])
+		if !complete {
+			session.IncompleteTotal++
+			continue
+		}
+		current := session.SignatureIds[signature]
+		if len(current) == 1 {
+			session.GroupTotal++
+		}
+		if len(current) >= 1 {
+			session.DuplicateTotal++
+		}
+		session.SignatureIds[signature] = append(current, profileId)
+	}
+	return nil
+}
+
+func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, session *duplicateScanSession) (*sysin.AdminNoteDuplicateScanModel, error) {
+	groupIds := session.SignatureIds
 	duplicateIds := make([]int64, 0)
 	for _, ids := range groupIds {
 		if len(ids) > 1 {
@@ -97,9 +189,10 @@ func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.Note
 		}
 	}
 	if len(duplicateIds) == 0 {
-		return result, nil
+		session.SignatureIds = nil
+		_ = cache.Instance().Set(ctx, duplicateScanSessionKey(token), session, duplicateScanSessionTTL)
+		return duplicateScanProgressResult(token, session, true), nil
 	}
-
 	columns := dao.ContentProfile.Columns()
 	profiles := make([]*sysin.AdminNoteDuplicateItemModel, 0, len(duplicateIds))
 	for start := 0; start < len(duplicateIds); start += duplicateScanChunkSize {
@@ -108,7 +201,7 @@ func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.Note
 			end = len(duplicateIds)
 		}
 		var rows []*sysin.AdminNoteDuplicateItemModel
-		err = dao.ContentProfile.Ctx(ctx).
+		err := dao.ContentProfile.Ctx(ctx).
 			Fields(columns.Id, columns.SourceNoteUuid+" AS uuid", columns.ProfileNo, columns.Title, columns.CreatedAt).
 			WhereIn(columns.Id, duplicateIds[start:end]).WhereNull(columns.DeletedAt).Scan(&rows)
 		if err != nil {
@@ -151,28 +244,35 @@ func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.Note
 		})
 		duplicates := append([]*sysin.AdminNoteDuplicateItemModel(nil), items[1:]...)
 		allGroups = append(allGroups, &sysin.AdminNoteDuplicateGroupModel{Signature: signature, Keep: items[0], Duplicates: duplicates})
-		result.DuplicateTotal += len(duplicates)
 	}
 	sort.Slice(allGroups, func(i, j int) bool { return allGroups[i].Keep.Id > allGroups[j].Keep.Id })
-	result.GroupTotal = len(allGroups)
+	session.GroupTotal = len(allGroups)
 	candidates := duplicateScanCandidates(allGroups)
 	if len(candidates) == 0 {
-		return result, nil
+		return duplicateScanProgressResult(token, session, true), nil
 	}
-	result.ScanToken = guid.S()
-	session := &duplicateScanSession{
-		AdminAccountId:  account.Id,
-		CandidateTotal:  result.CandidateTotal,
-		ChunkCount:      (len(candidates) + duplicateScanBatchSize - 1) / duplicateScanBatchSize,
-		DuplicateTotal:  result.DuplicateTotal,
-		GroupTotal:      result.GroupTotal,
-		IncompleteTotal: result.IncompleteTotal,
-		TenantId:        account.TenantId,
-	}
-	if err = saveDuplicateScanSession(ctx, result.ScanToken, session, candidates); err != nil {
+	session.ChunkCount = (len(candidates) + duplicateScanBatchSize - 1) / duplicateScanBatchSize
+	session.DuplicateTotal = len(candidates)
+	session.SignatureIds = nil
+	if err := saveDuplicateScanSession(ctx, token, session, candidates); err != nil {
 		return nil, err
 	}
-	return s.duplicateScanBatchResult(ctx, result.ScanToken, session, 0)
+	result, err := s.duplicateScanBatchResult(ctx, token, session, 0)
+	if result != nil {
+		result.ScanComplete = true
+		result.ScannedTotal = session.ScannedTotal
+		result.ScanCursor = session.ScanCursor
+	}
+	return result, err
+}
+
+func duplicateScanProgressResult(token string, session *duplicateScanSession, complete bool) *sysin.AdminNoteDuplicateScanModel {
+	return &sysin.AdminNoteDuplicateScanModel{
+		Groups: []*sysin.AdminNoteDuplicateGroupModel{}, CandidateTotal: session.CandidateTotal,
+		IncompleteTotal: session.IncompleteTotal, ScanToken: token, ScanCursor: session.ScanCursor,
+		ScannedTotal: session.ScannedTotal, ScanComplete: complete,
+		GroupTotal: session.GroupTotal, DuplicateTotal: session.DuplicateTotal,
+	}
 }
 
 func (s *sSysPublish) AdminNoteDuplicateBatch(ctx context.Context, in *sysin.AdminNoteDuplicateBatchInp) (*sysin.AdminNoteDuplicateScanModel, error) {
@@ -330,6 +430,7 @@ func loadDuplicateScanSession(ctx context.Context, token string) (*duplicateScan
 	if err = value.Scan(&session); err != nil || session == nil {
 		return nil, gerror.New("重复资料扫描结果无效，请重新扫描")
 	}
+	_ = cache.Instance().Set(ctx, duplicateScanSessionKey(token), session, duplicateScanSessionTTL)
 	return session, nil
 }
 
@@ -348,6 +449,7 @@ func loadDuplicateScanCandidates(ctx context.Context, token string, session *dup
 	if err = value.Scan(&candidates); err != nil || len(candidates) == 0 {
 		return nil, gerror.New("重复资料扫描批次无效，请重新扫描")
 	}
+	_ = cache.Instance().Set(ctx, duplicateScanBatchKey(token, cursor), candidates, duplicateScanSessionTTL)
 	return candidates, nil
 }
 
@@ -379,9 +481,6 @@ func (s *sSysPublish) duplicateScanBatchResult(ctx context.Context, token string
 			groups = append(groups, group)
 		}
 		group.Duplicates = append(group.Duplicates, target)
-	}
-	if err = s.loadDuplicateScanMedia(ctx, groups); err != nil {
-		return nil, err
 	}
 	nextCursor := 0
 	hasMore := cursor+1 < session.ChunkCount

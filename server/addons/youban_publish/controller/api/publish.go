@@ -844,7 +844,7 @@ func (c *cPublishAdmin) NoteBatchIds(ctx context.Context, req *publish.AdminNote
 }
 
 func (c *cPublishAdmin) NoteDuplicateScan(ctx context.Context, req *publish.AdminNoteDuplicateScanReq) (res *publish.AdminNoteDuplicateScanRes, err error) {
-	data, err := service.SysPublish().AdminNoteDuplicateScan(ctx, &req.NoteListInp)
+	data, err := service.SysPublish().AdminNoteDuplicateScan(ctx, &req.AdminNoteDuplicateScanInp)
 	if err != nil {
 		return nil, err
 	}
