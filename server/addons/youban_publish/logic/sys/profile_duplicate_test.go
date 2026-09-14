@@ -32,6 +32,51 @@ func TestDuplicateImageSignatureRejectsIncompleteProfiles(t *testing.T) {
 	}
 }
 
+func TestDuplicateImageSignatureFallsBackToPHash(t *testing.T) {
+	left, ok := duplicateImageSignature([]duplicateImageRow{{PerceptualHash: "d87a07c29151f7c5"}, {PerceptualHash: "cc2af3518c676c93"}})
+	right, rightOK := duplicateImageSignature([]duplicateImageRow{{PerceptualHash: "CC2AF3518C676C93"}, {PerceptualHash: "d87a07c29151f7c5"}})
+	if !ok || !rightOK || left != right {
+		t.Fatalf("pHash fallback must be complete and order independent: %q != %q", left, right)
+	}
+}
+
+func TestDuplicateProfileSignatureUsesNormalizedText(t *testing.T) {
+	left, ok := duplicateProfileSignature("介绍费：7888\nB2", nil)
+	right, rightOK := duplicateProfileSignature("介绍费：7888\u200b\nB2", nil)
+	if !ok || !rightOK || left != right || len(left) < len("text:") || left[:len("text:")] != "text:" {
+		t.Fatalf("normalized text must produce the same signature: %q != %q", left, right)
+	}
+}
+
+func TestProfilePHashSetsMatchIgnoresOrderAndAllowsReencodingDistance(t *testing.T) {
+	left := []string{"d87a07c29151f7c5", "cc2af3518c676c93", "dd0670e46e58e9a6"}
+	right := []string{"f81e726076528fa6", "d87a07c3912ff2c1", "cc34b3798cd44e69"}
+	if !profilePHashSetsMatch(left, right, 20) {
+		t.Fatal("expected the re-encoded image set to match within distance 20")
+	}
+	if profilePHashSetsMatch(left, right[:2], 20) {
+		t.Fatal("different image counts must not match")
+	}
+}
+
+func TestAppendDuplicatePHashScanGroupUsesLSHBuckets(t *testing.T) {
+	session := &duplicateScanSession{SignatureIds: map[string][]int64{}}
+	first := []duplicateImageRow{
+		{PerceptualHash: "d87a07c29151f7c5"}, {PerceptualHash: "cc2af3518c676c93"}, {PerceptualHash: "dd0670e46e58e9a6"},
+	}
+	second := []duplicateImageRow{
+		{PerceptualHash: "f81e726076528fa6"}, {PerceptualHash: "d87a07c3912ff2c1"}, {PerceptualHash: "cc34b3798cd44e69"},
+	}
+	appendDuplicatePHashScanGroup(session, 20, first)
+	appendDuplicatePHashScanGroup(session, 10, second)
+	if session.PHashGroups[10] == "" || session.PHashGroups[10] != session.PHashGroups[20] {
+		t.Fatalf("expected profiles to share a fuzzy pHash group: %#v", session.PHashGroups)
+	}
+	if got := session.SignatureIds[session.PHashGroups[10]]; len(got) != 2 {
+		t.Fatalf("expected two profiles in fuzzy group, got %#v", got)
+	}
+}
+
 func TestDuplicateScanBatchLimitsReturnedDeleteTargets(t *testing.T) {
 	groups := []*sysin.AdminNoteDuplicateGroupModel{
 		{Signature: "a", Keep: &sysin.AdminNoteDuplicateItemModel{Id: 9}, Duplicates: []*sysin.AdminNoteDuplicateItemModel{{Id: 8}, {Id: 7}}},

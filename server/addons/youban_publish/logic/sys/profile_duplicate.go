@@ -26,9 +26,15 @@ const (
 )
 
 type duplicateImageRow struct {
+	Id             int64  `orm:"id"`
+	ProfileId      int64  `orm:"profile_id"`
+	Md5            string `orm:"md5"`
+	PerceptualHash string `orm:"perceptual_hash"`
+}
+
+type duplicateProfileRow struct {
 	Id        int64  `orm:"id"`
-	ProfileId int64  `orm:"profile_id"`
-	Md5       string `orm:"md5"`
+	PlainText string `orm:"plain_text"`
 }
 
 type duplicateScanCandidate struct {
@@ -47,6 +53,9 @@ type duplicateScanSession struct {
 	ScanCursor      int64              `json:"scanCursor"`
 	ScannedTotal    int                `json:"scannedTotal"`
 	SignatureIds    map[string][]int64 `json:"signatureIds,omitempty"`
+	PHashBuckets    map[string][]int64 `json:"pHashBuckets,omitempty"`
+	PHashGroups     map[int64]string   `json:"pHashGroups,omitempty"`
+	PHashSets       map[int64][]string `json:"pHashSets,omitempty"`
 	TenantId        int64              `json:"tenantId"`
 	ResultCacheKey  string             `json:"resultCacheKey,omitempty"`
 }
@@ -123,7 +132,10 @@ func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.Admi
 }
 
 func newDuplicateScanSession(account *sysin.AccountModel) *duplicateScanSession {
-	return &duplicateScanSession{AdminAccountId: account.Id, SignatureIds: make(map[string][]int64), TenantId: account.TenantId}
+	return &duplicateScanSession{
+		AdminAccountId: account.Id, SignatureIds: make(map[string][]int64), TenantId: account.TenantId,
+		PHashBuckets: make(map[string][]int64), PHashGroups: make(map[int64]string), PHashSets: make(map[int64][]string),
+	}
 }
 
 func duplicateScanResultCacheKey(account *sysin.AccountModel, in *sysin.NoteListInp) string {
@@ -214,7 +226,7 @@ func (s *sSysPublish) restrictDuplicateScanToEditableAccounts(ctx context.Contex
 
 func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, session *duplicateScanSession, ids []int64) error {
 	var rows []duplicateImageRow
-	if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Fields("id,profile_id,md5").WhereIn("profile_id", ids).
+	if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Fields("id,profile_id,md5,perceptual_hash").WhereIn("profile_id", ids).
 		WhereNull("deleted_at").WhereIn("media_type", []string{"image", "photo"}).Where("purpose IS NULL OR purpose='' OR purpose='display'").
 		OrderAsc("profile_id").OrderAsc("sort_index").OrderAsc("id").Scan(&rows); err != nil {
 		return gerror.Wrap(err, "读取重复资料图片失败")
@@ -226,8 +238,19 @@ func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, session
 	if session.SignatureIds == nil {
 		session.SignatureIds = make(map[string][]int64)
 	}
+	profileRows := make([]duplicateProfileRow, 0, len(ids))
+	if err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
+		Fields(dao.ContentProfile.Columns().Id, dao.ContentProfile.Columns().PlainText).
+		WhereIn(dao.ContentProfile.Columns().Id, ids).WhereNull(dao.ContentProfile.Columns().DeletedAt).
+		Scan(&profileRows); err != nil {
+		return gerror.Wrap(err, "读取重复资料正文失败")
+	}
+	textByProfile := make(map[int64]string, len(profileRows))
+	for _, row := range profileRows {
+		textByProfile[row.Id] = row.PlainText
+	}
 	for _, profileId := range ids {
-		signature, complete := duplicateImageSignature(mediaByProfile[profileId])
+		signature, complete := duplicateProfileSignature(textByProfile[profileId], mediaByProfile[profileId])
 		if !complete {
 			session.IncompleteTotal++
 			continue
@@ -240,6 +263,7 @@ func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, session
 			session.DuplicateTotal++
 		}
 		session.SignatureIds[signature] = append(current, profileId)
+		appendDuplicatePHashScanGroup(session, profileId, mediaByProfile[profileId])
 	}
 	return nil
 }
@@ -321,6 +345,9 @@ func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, ses
 	session.ChunkCount = (len(candidates) + duplicateScanBatchSize - 1) / duplicateScanBatchSize
 	session.DuplicateTotal = len(candidates)
 	session.SignatureIds = nil
+	session.PHashBuckets = nil
+	session.PHashGroups = nil
+	session.PHashSets = nil
 	if err := saveDuplicateScanSession(ctx, token, session, candidates); err != nil {
 		return nil, err
 	}
@@ -406,6 +433,9 @@ func (s *sSysPublish) AdminNoteDuplicateCleanup(ctx context.Context, in *sysin.A
 	if err != nil {
 		return nil, err
 	}
+	if err = applyDuplicatePHashValidation(ctx, ids, candidateById, signatures); err != nil {
+		return nil, err
+	}
 	if err = validateDuplicateCleanupState(ids, candidateById, profiles, signatures); err != nil {
 		return nil, err
 	}
@@ -419,6 +449,45 @@ func (s *sSysPublish) AdminNoteDuplicateCleanup(ctx context.Context, in *sysin.A
 		_, _ = cache.Instance().Remove(ctx, session.ResultCacheKey)
 	}
 	return &sysin.AdminNoteDuplicateCleanupModel{DeletedIds: ids}, nil
+}
+
+func applyDuplicatePHashValidation(ctx context.Context, ids []int64, candidates map[int64]duplicateScanCandidate, signatures map[int64]string) error {
+	validationIds := make([]int64, 0, len(ids)*2)
+	for _, id := range ids {
+		candidate, ok := candidates[id]
+		if ok && strings.HasPrefix(candidate.Signature, "phash:") {
+			validationIds = append(validationIds, id, candidate.KeepProfileId)
+		}
+	}
+	validationIds = uniqueIds(validationIds)
+	if len(validationIds) == 0 {
+		return nil
+	}
+	var rows []duplicateImageRow
+	if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
+		Fields("id,profile_id,perceptual_hash").WhereIn("profile_id", validationIds).
+		WhereNull("deleted_at").WhereIn("media_type", []string{"image", "photo"}).
+		Where("purpose IS NULL OR purpose='' OR purpose='display'").
+		OrderAsc("profile_id").OrderAsc("sort_index").OrderAsc("id").Scan(&rows); err != nil {
+		return gerror.Wrap(err, "校验相似资料图片指纹失败")
+	}
+	byProfile := make(map[int64][]duplicateImageRow, len(validationIds))
+	for _, row := range rows {
+		byProfile[row.ProfileId] = append(byProfile[row.ProfileId], row)
+	}
+	for _, id := range ids {
+		candidate, ok := candidates[id]
+		if !ok || !strings.HasPrefix(candidate.Signature, "phash:") {
+			continue
+		}
+		left, leftOK := duplicateImagePHashes(byProfile[id])
+		right, rightOK := duplicateImagePHashes(byProfile[candidate.KeepProfileId])
+		if leftOK && rightOK && profilePHashSetsMatch(left, right, collectProfilePHashDuplicateThreshold) {
+			signatures[id] = candidate.Signature
+			signatures[candidate.KeepProfileId] = candidate.Signature
+		}
+	}
+	return nil
 }
 
 func validateDuplicateScanSessionOwner(session *duplicateScanSession, account *sysin.AccountModel) error {
@@ -444,12 +513,17 @@ func validateDuplicateCleanupState(ids []int64, candidates map[int64]duplicateSc
 
 func duplicateScanCandidates(groups []*sysin.AdminNoteDuplicateGroupModel) []duplicateScanCandidate {
 	result := make([]duplicateScanCandidate, 0)
+	seen := make(map[int64]struct{})
 	for _, group := range groups {
 		if group == nil || group.Keep == nil {
 			continue
 		}
 		for _, item := range group.Duplicates {
 			if item != nil && item.Id > 0 {
+				if _, exists := seen[item.Id]; exists {
+					continue
+				}
+				seen[item.Id] = struct{}{}
 				result = append(result, duplicateScanCandidate{KeepProfileId: group.Keep.Id, ProfileId: item.Id, Signature: group.Signature})
 			}
 		}
@@ -611,7 +685,7 @@ func (s *sSysPublish) loadDuplicateValidationState(ctx context.Context, ids []in
 			end = len(ids)
 		}
 		var rows []duplicateImageRow
-		if err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Fields("id,profile_id,md5").WhereIn("profile_id", ids[start:end]).
+		if err = g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Fields("id,profile_id,md5,perceptual_hash").WhereIn("profile_id", ids[start:end]).
 			WhereNull("deleted_at").WhereIn("media_type", []string{"image", "photo"}).Where("purpose IS NULL OR purpose='' OR purpose='display'").
 			OrderAsc("profile_id").OrderAsc("sort_index").OrderAsc("id").Scan(&rows); err != nil {
 			return nil, nil, gerror.Wrap(err, "校验重复资料图片失败")
@@ -620,9 +694,20 @@ func (s *sSysPublish) loadDuplicateValidationState(ctx context.Context, ids []in
 			mediaByProfile[row.ProfileId] = append(mediaByProfile[row.ProfileId], row)
 		}
 	}
+	var textRows []duplicateProfileRow
+	if err = g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
+		Fields(dao.ContentProfile.Columns().Id, dao.ContentProfile.Columns().PlainText).
+		WhereIn(dao.ContentProfile.Columns().Id, ids).WhereNull(dao.ContentProfile.Columns().DeletedAt).
+		Scan(&textRows); err != nil {
+		return nil, nil, gerror.Wrap(err, "校验重复资料正文失败")
+	}
+	textByProfile := make(map[int64]string, len(textRows))
+	for _, row := range textRows {
+		textByProfile[row.Id] = row.PlainText
+	}
 	signatures := make(map[int64]string, len(ids))
 	for _, id := range ids {
-		if signature, complete := duplicateImageSignature(mediaByProfile[id]); complete {
+		if signature, complete := duplicateProfileSignature(textByProfile[id], mediaByProfile[id]); complete {
 			signatures[id] = signature
 		}
 	}
@@ -718,10 +803,108 @@ func duplicateImageSignature(rows []duplicateImageRow) (string, bool) {
 	for _, row := range rows {
 		value := strings.ToLower(strings.TrimSpace(row.Md5))
 		if value == "" {
+			value = strings.ToLower(strings.TrimSpace(row.PerceptualHash))
+		}
+		if value == "" {
 			return "", false
 		}
 		values = append(values, value)
 	}
 	sort.Strings(values)
 	return collectHash(strings.Join(values, "|")), true
+}
+
+func duplicateProfileSignature(text string, rows []duplicateImageRow) (string, bool) {
+	normalized := normalizeCollectText(normalizeCollectKeywordText(text))
+	if normalized != "" {
+		return "text:" + collectHash(normalized), true
+	}
+	imageSignature, ok := duplicateImageSignature(rows)
+	if !ok {
+		return "", false
+	}
+	return "image:" + imageSignature, true
+}
+
+func duplicateImagePHashes(rows []duplicateImageRow) ([]string, bool) {
+	if len(rows) == 0 {
+		return nil, false
+	}
+	values := make([]string, 0, len(rows))
+	for _, row := range rows {
+		value := strings.ToLower(strings.TrimSpace(row.PerceptualHash))
+		if _, ok := parseUploadPHash(value); !ok {
+			return nil, false
+		}
+		values = append(values, value)
+	}
+	return values, true
+}
+
+func appendDuplicatePHashScanGroup(session *duplicateScanSession, profileId int64, rows []duplicateImageRow) {
+	values, complete := duplicateImagePHashes(rows)
+	if session == nil || profileId <= 0 || !complete {
+		return
+	}
+	if session.PHashBuckets == nil {
+		session.PHashBuckets = make(map[string][]int64)
+	}
+	if session.PHashGroups == nil {
+		session.PHashGroups = make(map[int64]string)
+	}
+	if session.PHashSets == nil {
+		session.PHashSets = make(map[int64][]string)
+	}
+	candidates := make(map[int64]struct{})
+	lookupKeys := duplicatePHashBucketKeys(values, true)
+	for _, key := range lookupKeys {
+		for _, id := range session.PHashBuckets[key] {
+			candidates[id] = struct{}{}
+		}
+	}
+	candidateIds := make([]int64, 0, len(candidates))
+	for id := range candidates {
+		candidateIds = append(candidateIds, id)
+	}
+	sort.Slice(candidateIds, func(i, j int) bool { return candidateIds[i] > candidateIds[j] })
+	for _, candidateId := range candidateIds {
+		if !profilePHashSetsMatch(values, session.PHashSets[candidateId], collectProfilePHashDuplicateThreshold) {
+			continue
+		}
+		signature := session.PHashGroups[candidateId]
+		if signature == "" {
+			signature = fmt.Sprintf("phash:%d", candidateId)
+			session.PHashGroups[candidateId] = signature
+			session.SignatureIds[signature] = append(session.SignatureIds[signature], candidateId)
+		}
+		session.PHashGroups[profileId] = signature
+		session.SignatureIds[signature] = append(session.SignatureIds[signature], profileId)
+		break
+	}
+	session.PHashSets[profileId] = values
+	for _, key := range duplicatePHashBucketKeys(values, false) {
+		session.PHashBuckets[key] = append(session.PHashBuckets[key], profileId)
+	}
+}
+
+func duplicatePHashBucketKeys(values []string, neighborhood bool) []string {
+	keys := make([]string, 0, len(values)*mediaPHashLshBlockCount)
+	seen := make(map[string]struct{}, cap(keys))
+	for _, value := range values {
+		cells := mediaPHashLshBucketValues(value)
+		if neighborhood {
+			// Radius 3 is the existing bounded multi-probe LSH path. The
+			// final matcher still validates the configured distance of 20.
+			cells = mediaPHashLshCells(value, 12)
+		}
+		for _, cell := range cells {
+			key := fmt.Sprintf("%d:%d", cell.Pos, cell.Value)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }

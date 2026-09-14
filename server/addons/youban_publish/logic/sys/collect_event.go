@@ -863,6 +863,16 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 			g.Log().Infof(ctx, "采集资料指纹命中 eventId:%d ruleId:%d profileId:%d channelId:%d layer:%s cacheHit:%t", event["id"].Int64(), rule["id"].Int64(), hit.ProfileID, hit.ChannelID, hit.Layer, hit.CacheHit)
 			return false, reason, nil
 		}
+		profileId, similarErr := s.findCollectProfilePHashDuplicate(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), channelIds, content.Media)
+		if similarErr != nil {
+			return false, "", similarErr
+		}
+		if profileId > 0 {
+			reason := fmt.Sprintf("资料库已存在整套相似图片 profileId:%d threshold:%d", profileId, collectProfilePHashDuplicateThreshold)
+			s.appendCollectEventLogForRecord(ctx, event, "dedupe", "skipped", reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
+			g.Log().Infof(ctx, "采集资料整套图片命中 eventId:%d ruleId:%d profileId:%d threshold:%d", event["id"].Int64(), rule["id"].Int64(), profileId, collectProfilePHashDuplicateThreshold)
+			return false, reason, nil
+		}
 	}
 	var dispatchId int64
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {

@@ -663,7 +663,7 @@ func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEv
 	}
 	cols := pdao.YoubanPublishCollectEventMedia.Columns()
 	candidates, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
-		Fields(cols.FileUrl, cols.StoragePath, cols.PosterUrl).
+		Fields(cols.FileUrl, cols.StoragePath, cols.PosterUrl, "file_md5", "file_phash").
 		Where(cols.SourceChatId, row.SourceChatId).
 		Where(cols.SourceMessageId, row.SourceMessageId).
 		Where(cols.SourceMediaKey, row.SourceMediaKey).
@@ -691,6 +691,8 @@ func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEv
 			cols.CacheStatus:  collectMediaCacheReady,
 			cols.ErrorMessage: "",
 			cols.UpdatedAt:    gtime.Now(),
+			"file_md5":        strings.TrimSpace(candidate["file_md5"].String()),
+			"file_phash":      strings.TrimSpace(candidate["file_phash"].String()),
 		}
 		if _, err = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where(cols.Id, row.Id).Data(data).Update(); err != nil {
 			return false, gerror.Wrap(err, "写入复用采集媒体缓存失败")
@@ -700,10 +702,56 @@ func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEv
 		row.PosterUrl = strings.TrimSpace(candidate[cols.PosterUrl].String())
 		row.CacheStatus = collectMediaCacheReady
 		row.ErrorMessage = ""
+		row.FileMd5 = strings.TrimSpace(candidate["file_md5"].String())
+		row.FilePhash = strings.TrimSpace(candidate["file_phash"].String())
 		g.Log().Infof(ctx, "复用采集媒体缓存 mediaId:%d sourceChatId:%s sourceMessageId:%d sourceMediaKey:%s", row.Id, row.SourceChatId, row.SourceMessageId, row.SourceMediaKey)
 		return true, nil
 	}
-	return false, nil
+	return s.reusePublishedMediaCache(ctx, row)
+}
+
+func (s *sSysPublish) reusePublishedMediaCache(ctx context.Context, row *collectEventMediaRow) (bool, error) {
+	if row == nil || strings.TrimSpace(row.SourceChatId) == "" || row.SourceMessageId <= 0 {
+		return false, nil
+	}
+	chatId := strings.TrimSpace(row.SourceChatId)
+	chatIds := []string{chatId}
+	if !strings.HasPrefix(chatId, "-100") {
+		chatIds = append(chatIds, "-100"+strings.TrimPrefix(chatId, "-"))
+	}
+	candidate, err := g.DB().Model(publishTgMessageTable+" tm").Safe().Ctx(ctx).
+		InnerJoin(publishMediaTable+" m", "m.id=tm.media_id AND m.deleted_at IS NULL").
+		Fields("m.file_url,m.storage_path,m.poster_url,m.md5,m.perceptual_hash").
+		WhereIn("tm.target_chat_id", uniqueStrings(chatIds)).Where("tm.tg_message_id", row.SourceMessageId).
+		Where("tm.media_id>0").OrderDesc("tm.id").Limit(1).One()
+	if err != nil {
+		return false, gerror.Wrap(err, "读取系统已发布媒体失败")
+	}
+	if candidate.IsEmpty() {
+		return false, nil
+	}
+	fileURL := strings.TrimSpace(candidate["file_url"].String())
+	storagePath := strings.TrimSpace(candidate["storage_path"].String())
+	if fileURL == "" && storagePath == "" {
+		return false, nil
+	}
+	cols := pdao.YoubanPublishCollectEventMedia.Columns()
+	data := g.Map{
+		cols.FileUrl: fileURL, cols.StoragePath: storagePath,
+		cols.PosterUrl:   strings.TrimSpace(candidate["poster_url"].String()),
+		cols.CacheStatus: collectMediaCacheReady, cols.ErrorMessage: "",
+		"file_md5": strings.TrimSpace(candidate["md5"].String()), "file_phash": strings.TrimSpace(candidate["perceptual_hash"].String()),
+		cols.UpdatedAt: gtime.Now(),
+	}
+	if _, err = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where(cols.Id, row.Id).Data(data).Update(); err != nil {
+		return false, gerror.Wrap(err, "复用系统已发布媒体失败")
+	}
+	row.FileUrl, row.StoragePath = fileURL, storagePath
+	row.PosterUrl = strings.TrimSpace(candidate["poster_url"].String())
+	row.FileMd5, row.FilePhash = strings.TrimSpace(candidate["md5"].String()), strings.TrimSpace(candidate["perceptual_hash"].String())
+	row.CacheStatus, row.ErrorMessage = collectMediaCacheReady, ""
+	g.Log().Infof(ctx, "采集命中系统已发布媒体，直接复用存储 eventMediaId:%d sourceChatId:%s sourceMessageId:%d", row.Id, row.SourceChatId, row.SourceMessageId)
+	return true, nil
 }
 
 func (s *sSysPublish) updateCollectEventMediaItems(ctx context.Context, rows []*collectEventMediaRow, items []collectMediaItem) (bool, error) {
