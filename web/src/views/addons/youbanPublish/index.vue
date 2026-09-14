@@ -806,6 +806,10 @@
   function newCloudResourceConfig() {
     return {
       mattingProvider: 'aliyun',
+      facePlusApiKey: '',
+      facePlusApiSecret: '',
+      facePlusEndpoint: 'https://api-cn.faceplusplus.com/humanbodypp/v2/segment',
+      facePlusConcurrency: 2,
       aliyunAccessKeyId: '',
       aliyunAccessKeySecret: '',
       aliyunEndpoint: 'imageseg.cn-shanghai.aliyuncs.com',

@@ -12,6 +12,7 @@
             <n-radio-button value="aliyun">阿里云人体分割</n-radio-button>
             <n-radio-button value="tencent">腾讯云 A/B 账号</n-radio-button>
             <n-radio-button value="fapihub">FAPIHub</n-radio-button>
+            <n-radio-button value="facepp">Face++ 人体抠像</n-radio-button>
           </n-radio-group>
         </n-form-item>
 
@@ -70,6 +71,13 @@
           </n-form-item>
         </template>
 
+        <template v-else-if="model.mattingProvider === 'facepp'">
+          <n-form-item label="API Key"><n-input v-model:value="model.facePlusApiKey" /></n-form-item>
+          <n-form-item label="API Secret"><n-input v-model:value="model.facePlusApiSecret" type="password" show-password-on="click" /></n-form-item>
+          <n-form-item label="接口地址"><n-input v-model:value="model.facePlusEndpoint" /></n-form-item>
+          <n-form-item label="并发数"><n-input-number v-model:value="model.facePlusConcurrency" :min="1" :max="20" /></n-form-item>
+        </template>
+
         <template v-else>
           <n-form-item label="API Key">
             <n-input
@@ -126,7 +134,11 @@
       fapiHubEnabled: number;
       fapiHubEndpoint: string;
       fapiHubModel: string;
-      mattingProvider: 'aliyun' | 'fapihub' | 'tencent';
+      mattingProvider: 'aliyun' | 'fapihub' | 'tencent' | 'facepp';
+      facePlusApiKey: string;
+      facePlusApiSecret: string;
+      facePlusEndpoint: string;
+      facePlusConcurrency: number;
       tencentCloudSite: string;
       tencentRegion: string;
       tencentMattingBucket: string;
