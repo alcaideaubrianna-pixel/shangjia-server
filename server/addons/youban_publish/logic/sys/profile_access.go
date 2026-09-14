@@ -124,7 +124,7 @@ func (s *sSysPublish) allowedProfileIds(ctx context.Context, ids []int64, tenant
 			res = append(res, row.ProfileId)
 		}
 	}
-	return res, nil
+	return uniqueIds(res), nil
 }
 
 func (s *sSysPublish) ensureProfileChannels(ctx context.Context, ids []int64, tenantId int64) error {

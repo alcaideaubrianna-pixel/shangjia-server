@@ -106,3 +106,18 @@ func TestDuplicateScanResultCacheKeyIgnoresPagination(t *testing.T) {
 		t.Fatal("different admin accounts must not share duplicate scan cache entries")
 	}
 }
+
+func TestRestrictDuplicateScanToEditableAccounts(t *testing.T) {
+	s := &sSysPublish{}
+	scope := &adminProfileVisibleScope{AccountIds: []int64{8, 9}, TenantId: 7, TenantIds: []int64{7, 10}}
+	account := &sysin.AccountModel{Id: 8, TenantId: 7, AccountType: sysin.PublishAccountTypeUploader}
+	if err := s.restrictDuplicateScanToEditableAccounts(t.Context(), scope, account); err != nil {
+		t.Fatalf("restrict duplicate scan scope: %v", err)
+	}
+	if len(scope.AccountIds) != 1 || scope.AccountIds[0] != 8 {
+		t.Fatalf("unexpected editable accounts: %#v", scope.AccountIds)
+	}
+	if len(scope.TenantIds) != 1 || scope.TenantIds[0] != 7 || !scope.Strict {
+		t.Fatalf("unexpected editable tenant scope: %#v", scope)
+	}
+}

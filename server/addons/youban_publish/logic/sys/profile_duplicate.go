@@ -164,6 +164,9 @@ func (s *sSysPublish) duplicateScanProfileIdPage(ctx context.Context, in *sysin.
 	if err != nil {
 		return nil, err
 	}
+	if err = s.restrictDuplicateScanToEditableAccounts(ctx, scope, account); err != nil {
+		return nil, err
+	}
 	if err = s.ensureAdminProfileScopeTenants(ctx, scope); err != nil {
 		return nil, err
 	}
@@ -188,6 +191,25 @@ func (s *sSysPublish) duplicateScanProfileIdPage(ctx context.Context, in *sysin.
 		}
 	}
 	return ids, nil
+}
+
+func (s *sSysPublish) restrictDuplicateScanToEditableAccounts(ctx context.Context, scope *adminProfileVisibleScope, account *sysin.AccountModel) error {
+	if scope == nil || account == nil {
+		return gerror.New("当前账号无管理权限")
+	}
+	editableAccountIds := []int64{account.Id}
+	if account.AccountType == sysin.PublishAccountTypeAdmin {
+		var err error
+		editableAccountIds, err = s.adminManagedAccountIds(ctx, account)
+		if err != nil {
+			return err
+		}
+	}
+	scope.AccountIds = intersectInt64(scope.AccountIds, editableAccountIds)
+	scope.TenantId = account.TenantId
+	scope.TenantIds = []int64{account.TenantId}
+	scope.Strict = true
+	return nil
 }
 
 func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, session *duplicateScanSession, ids []int64) error {
@@ -575,6 +597,7 @@ func (s *sSysPublish) loadDuplicateValidationState(ctx context.Context, ids []in
 		return nil, nil, err
 	}
 	if len(allowedIds) != len(ids) {
+		g.Log().Warningf(ctx, "重复资料清理权限校验失败 tenantId:%d requestedIds:%v allowedIds:%v", tenantId, ids, allowedIds)
 		return nil, nil, gerror.New("重复资料已不存在或无权操作，请重新扫描")
 	}
 	profiles, err := s.loadDuplicateProfiles(ctx, ids)
