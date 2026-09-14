@@ -95,6 +95,12 @@ func TestCollectPHashCandidateRecallUsesLSHRange(t *testing.T) {
 	}
 }
 
+func TestDuplicateScanChunkSizeStaysBelowPostgresParameterLimit(t *testing.T) {
+	if duplicateScanChunkSize <= 0 || duplicateScanChunkSize > 5000 {
+		t.Fatalf("重复扫描分批大小 %d 可能产生超量 SQL 参数", duplicateScanChunkSize)
+	}
+}
+
 func TestLegacyPHashQueryHasResourceLimits(t *testing.T) {
 	if cap(mediaPHashLegacyQuerySlots) != 1 {
 		t.Fatalf("旧索引查询并发 = %d, want 1", cap(mediaPHashLegacyQuerySlots))
