@@ -12,6 +12,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/guid"
 	"github.com/hibiken/asynq"
 
@@ -26,7 +27,8 @@ const (
 	duplicateScanBatchSize        = 500
 	duplicateScanSessionTTL       = 24 * time.Hour
 	duplicateScanResultTTL        = 15 * time.Minute
-	duplicateScanAlgorithmVersion = 3
+	duplicateScanAlgorithmVersion = 4
+	duplicateScanPagesPerTask     = 20
 )
 
 type duplicateImageRow struct {
@@ -37,8 +39,9 @@ type duplicateImageRow struct {
 }
 
 type duplicateProfileRow struct {
-	Id        int64  `orm:"id"`
-	PlainText string `orm:"plain_text"`
+	Id        int64       `orm:"id"`
+	PlainText string      `orm:"plain_text"`
+	CreatedAt *gtime.Time `orm:"created_at"`
 }
 
 type duplicateScanCandidate struct {
@@ -48,23 +51,26 @@ type duplicateScanCandidate struct {
 }
 
 type duplicateScanSession struct {
-	AlgorithmVersion int                `json:"algorithmVersion"`
-	AdminAccountId   int64              `json:"adminAccountId"`
-	CandidateTotal   int                `json:"candidateTotal"`
-	ChunkCount       int                `json:"chunkCount"`
-	DuplicateTotal   int                `json:"duplicateTotal"`
-	GroupTotal       int                `json:"groupTotal"`
-	IncompleteTotal  int                `json:"incompleteTotal"`
-	ScanCursor       int64              `json:"scanCursor"`
-	ScannedTotal     int                `json:"scannedTotal"`
-	SignatureIds     map[string][]int64 `json:"signatureIds,omitempty"`
-	PHashBuckets     map[string][]int64 `json:"pHashBuckets,omitempty"`
-	PHashGroups      map[int64]string   `json:"pHashGroups,omitempty"`
-	PHashSets        map[int64][]string `json:"pHashSets,omitempty"`
-	TenantId         int64              `json:"tenantId"`
-	ResultCacheKey   string             `json:"resultCacheKey,omitempty"`
-	Status           string             `json:"status"`
-	Error            string             `json:"error,omitempty"`
+	AlgorithmVersion int    `json:"algorithmVersion"`
+	AdminAccountId   int64  `json:"adminAccountId"`
+	CandidateTotal   int    `json:"candidateTotal"`
+	ChunkCount       int    `json:"chunkCount"`
+	DuplicateTotal   int    `json:"duplicateTotal"`
+	GroupTotal       int    `json:"groupTotal"`
+	IncompleteTotal  int    `json:"incompleteTotal"`
+	ScanCursor       int64  `json:"scanCursor"`
+	ScannedTotal     int    `json:"scannedTotal"`
+	TenantId         int64  `json:"tenantId"`
+	ResultCacheKey   string `json:"resultCacheKey,omitempty"`
+	Status           string `json:"status"`
+	Error            string `json:"error,omitempty"`
+}
+
+type duplicateScanWorkGroup struct {
+	KeepProfileId int64              `json:"keepProfileId"`
+	KeepCreatedAt int64              `json:"keepCreatedAt"`
+	MemberIds     []int64            `json:"memberIds"`
+	PHashSets     map[int64][]string `json:"pHashSets,omitempty"`
 }
 
 type duplicateScanQueuePayload struct {
@@ -128,19 +134,29 @@ func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.Admi
 }
 
 func (s *sSysPublish) runDuplicateScan(ctx context.Context, token string, account *sysin.AccountModel, in *sysin.AdminNoteDuplicateScanInp) error {
-	session := newDuplicateScanSession(account)
-	session.ResultCacheKey = duplicateScanResultCacheKey(account, &in.NoteListInp)
-	session.Status = "running"
-	if err := saveDuplicateScanProgress(ctx, token, duplicateScanMetadata(session)); err != nil {
+	session, err := loadDuplicateScanSession(ctx, token)
+	if err != nil {
 		return err
 	}
-	for {
-		ids, err := s.duplicateScanProfileIdPage(ctx, &in.NoteListInp, account, session.ScanCursor)
+	if err = validateDuplicateScanSessionOwner(session, account); err != nil {
+		return err
+	}
+	if session.Status == "completed" {
+		return nil
+	}
+	session.Status = "running"
+	session.Error = ""
+	if err = saveDuplicateScanProgress(ctx, token, session); err != nil {
+		return err
+	}
+	for page := 0; page < duplicateScanPagesPerTask; page++ {
+		ids, pageErr := s.duplicateScanProfileIdPage(ctx, &in.NoteListInp, account, session.ScanCursor)
+		err = pageErr
 		if err != nil {
 			return err
 		}
 		if len(ids) > 0 {
-			if err = s.appendDuplicateScanSignatures(ctx, session, ids); err != nil {
+			if err = s.appendDuplicateScanSignatures(ctx, token, session, ids); err != nil {
 				return err
 			}
 			session.ScanCursor = ids[len(ids)-1]
@@ -150,18 +166,19 @@ func (s *sSysPublish) runDuplicateScan(ctx context.Context, token string, accoun
 			_, err = s.finishDuplicateScan(ctx, token, session)
 			return err
 		}
-		if err = saveDuplicateScanProgress(ctx, token, duplicateScanMetadata(session)); err != nil {
+		if err = saveDuplicateScanProgress(ctx, token, session); err != nil {
 			return gerror.Wrap(err, "保存重复资料扫描进度失败")
 		}
 	}
+	session.Status = "queued"
+	if err = saveDuplicateScanProgress(ctx, token, session); err != nil {
+		return err
+	}
+	return s.enqueueDuplicateScanContinuation(ctx, token, account, in)
 }
 
 func duplicateScanMetadata(session *duplicateScanSession) *duplicateScanSession {
 	copy := *session
-	copy.SignatureIds = nil
-	copy.PHashBuckets = nil
-	copy.PHashGroups = nil
-	copy.PHashSets = nil
 	return &copy
 }
 
@@ -178,17 +195,37 @@ func (s *sSysPublish) enqueueDuplicateScan(ctx context.Context, token string, ac
 		return err
 	}
 	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeDuplicateScan, body),
-		asynq.Queue(tgQueueNameDuplicateScan), asynq.TaskID(token), asynq.MaxRetry(2), asynq.Timeout(6*time.Hour))
+		asynq.Queue(tgQueueNameDuplicateScan), asynq.TaskID(token+":0"), asynq.MaxRetry(3), asynq.Timeout(10*time.Minute))
 	if err != nil {
 		return gerror.Wrap(err, "提交重复资料扫描任务失败")
 	}
 	return nil
 }
 
+func (s *sSysPublish) enqueueDuplicateScanContinuation(ctx context.Context, token string, account *sysin.AccountModel, in *sysin.AdminNoteDuplicateScanInp) error {
+	payload := duplicateScanQueuePayload{Token: token, Account: *account, Input: *in}
+	payload.Input.ScanToken = ""
+	payload.Input.ScanCursor = 0
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return gerror.Wrap(err, "编码重复资料扫描续跑任务失败")
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeDuplicateScan, body),
+		asynq.Queue(tgQueueNameDuplicateScan), asynq.TaskID(fmt.Sprintf("%s:%d", token, time.Now().UnixNano())),
+		asynq.MaxRetry(3), asynq.Timeout(10*time.Minute))
+	if err != nil {
+		return gerror.Wrap(err, "提交重复资料扫描续跑任务失败")
+	}
+	return nil
+}
+
 func newDuplicateScanSession(account *sysin.AccountModel) *duplicateScanSession {
 	return &duplicateScanSession{
-		AlgorithmVersion: duplicateScanAlgorithmVersion, AdminAccountId: account.Id, SignatureIds: make(map[string][]int64), TenantId: account.TenantId, Status: "queued",
-		PHashBuckets: make(map[string][]int64), PHashGroups: make(map[int64]string), PHashSets: make(map[int64][]string),
+		AlgorithmVersion: duplicateScanAlgorithmVersion, AdminAccountId: account.Id, TenantId: account.TenantId, Status: "queued",
 	}
 }
 
@@ -278,7 +315,7 @@ func (s *sSysPublish) restrictDuplicateScanToEditableAccounts(ctx context.Contex
 	return nil
 }
 
-func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, session *duplicateScanSession, ids []int64) error {
+func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, token string, session *duplicateScanSession, ids []int64) error {
 	var rows []duplicateImageRow
 	if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).Fields("id,profile_id,md5,perceptual_hash").WhereIn("profile_id", ids).
 		WhereNull("deleted_at").WhereIn("media_type", []string{"image", "photo"}).Where("purpose IS NULL OR purpose='' OR purpose='display'").
@@ -289,133 +326,154 @@ func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, session
 	for _, row := range rows {
 		mediaByProfile[row.ProfileId] = append(mediaByProfile[row.ProfileId], row)
 	}
-	if session.SignatureIds == nil {
-		session.SignatureIds = make(map[string][]int64)
-	}
 	profileRows := make([]duplicateProfileRow, 0, len(ids))
 	if err := g.DB().Model(dao.ContentProfile.Table()).Safe().Ctx(ctx).
-		Fields(dao.ContentProfile.Columns().Id, dao.ContentProfile.Columns().PlainText).
+		Fields(dao.ContentProfile.Columns().Id, dao.ContentProfile.Columns().PlainText, dao.ContentProfile.Columns().CreatedAt).
 		WhereIn(dao.ContentProfile.Columns().Id, ids).WhereNull(dao.ContentProfile.Columns().DeletedAt).
 		Scan(&profileRows); err != nil {
 		return gerror.Wrap(err, "读取重复资料正文失败")
 	}
 	textByProfile := make(map[int64]string, len(profileRows))
+	createdByProfile := make(map[int64]int64, len(profileRows))
 	for _, row := range profileRows {
 		textByProfile[row.Id] = row.PlainText
+		if row.CreatedAt != nil {
+			createdByProfile[row.Id] = row.CreatedAt.Time.UnixNano()
+		}
+	}
+	work := newDuplicateScanWorkCache(ctx, token)
+	if err := work.preloadProcessed(ids); err != nil {
+		return err
+	}
+	lookupKeys := make([]string, 0)
+	for _, profileId := range ids {
+		if values, complete := duplicateImagePHashes(mediaByProfile[profileId]); complete {
+			lookupKeys = append(lookupKeys, duplicatePHashBucketKeys(values, true)...)
+		}
+	}
+	if err := work.preloadBuckets(uniqueStrings(lookupKeys)); err != nil {
+		return err
+	}
+	groupSignatures := make([]string, 0, len(ids))
+	for _, profileId := range ids {
+		if signature, complete := duplicateProfileSignature(textByProfile[profileId], mediaByProfile[profileId]); complete {
+			groupSignatures = append(groupSignatures, signature)
+		}
+	}
+	for _, signatures := range work.buckets {
+		groupSignatures = append(groupSignatures, signatures...)
+	}
+	if err := work.preloadGroups(uniqueStrings(groupSignatures)); err != nil {
+		return err
 	}
 	for _, profileId := range ids {
+		processed, err := work.profileProcessed(profileId)
+		if err != nil {
+			return err
+		}
+		if processed {
+			continue
+		}
 		signature, complete := duplicateProfileSignature(textByProfile[profileId], mediaByProfile[profileId])
 		if !complete {
 			session.IncompleteTotal++
+			work.markProfileProcessed(profileId)
 			continue
 		}
-		current := session.SignatureIds[signature]
-		if len(current) == 1 {
-			session.GroupTotal++
+		group, err := work.group(signature)
+		if err != nil {
+			return err
 		}
-		if len(current) >= 1 {
-			session.DuplicateTotal++
+		if group == nil {
+			group = &duplicateScanWorkGroup{KeepProfileId: profileId, KeepCreatedAt: createdByProfile[profileId], MemberIds: []int64{profileId}}
+			work.setGroup(signature, group)
+		} else {
+			group.addMember(profileId, createdByProfile[profileId])
+			work.setGroup(signature, group)
 		}
-		session.SignatureIds[signature] = append(current, profileId)
-		appendDuplicatePHashScanGroup(session, profileId, mediaByProfile[profileId])
+		if err = work.appendPHash(profileId, createdByProfile[profileId], mediaByProfile[profileId]); err != nil {
+			return err
+		}
+		work.markProfileProcessed(profileId)
 	}
-	return nil
+	return work.save()
 }
 
 func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, session *duplicateScanSession) (*sysin.AdminNoteDuplicateScanModel, error) {
 	session.CandidateTotal = session.ScannedTotal
-	groupIds := session.SignatureIds
-	duplicateIds := make([]int64, 0)
-	for _, ids := range groupIds {
-		if len(ids) > 1 {
-			duplicateIds = append(duplicateIds, ids...)
+	session.GroupTotal = 0
+	writer := newDuplicateScanCandidateWriter(ctx, token)
+	retainedKey := duplicateScanWorkHashKey(token, "retained")
+	emittedKey := duplicateScanWorkHashKey(token, "emitted")
+	_, _ = cache.Instance().Remove(ctx, retainedKey, emittedKey)
+	retainedWriter := newDuplicateScanMarkerWriter(ctx, retainedKey)
+	if err := rangeDuplicateScanWorkGroups(ctx, token, func(signature string, group *duplicateScanWorkGroup) error {
+		if !strings.HasPrefix(signature, "phash:") && group != nil && len(group.MemberIds) > 1 {
+			return retainedWriter.append(group.KeepProfileId)
 		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
-	if len(duplicateIds) == 0 {
-		session.SignatureIds = nil
-		session.PHashBuckets = nil
-		session.PHashGroups = nil
-		session.PHashSets = nil
-		session.Status = "completed"
-		_ = saveDuplicateScanProgress(ctx, token, duplicateScanMetadata(session))
-		cacheDuplicateScanResult(ctx, token, session)
-		g.Log().Infof(ctx, "重复资料扫描任务完成 scanTaskId:%s scanned:%d groups:0 duplicate:0 incomplete:%d", token, session.ScannedTotal, session.IncompleteTotal)
-		return duplicateScanProgressResult(token, session, true), nil
+	if err := retainedWriter.close(); err != nil {
+		return nil, err
 	}
-	columns := dao.ContentProfile.Columns()
-	profiles := make([]*sysin.AdminNoteDuplicateItemModel, 0, len(duplicateIds))
-	for start := 0; start < len(duplicateIds); start += duplicateScanChunkSize {
-		end := start + duplicateScanChunkSize
-		if end > len(duplicateIds) {
-			end = len(duplicateIds)
+	if err := rangeDuplicateScanWorkGroups(ctx, token, func(signature string, group *duplicateScanWorkGroup) error {
+		if group == nil || len(group.MemberIds) < 2 {
+			return nil
 		}
-		var rows []*sysin.AdminNoteDuplicateItemModel
-		err := dao.ContentProfile.Ctx(ctx).
-			Fields(columns.Id, columns.SourceNoteUuid+" AS uuid", columns.ProfileNo, columns.Title, columns.CreatedAt).
-			WhereIn(columns.Id, duplicateIds[start:end]).WhereNull(columns.DeletedAt).Scan(&rows)
-		if err != nil {
-			return nil, gerror.Wrap(err, "读取重复资料详情失败")
-		}
-		profiles = append(profiles, rows...)
-	}
-	profileById := make(map[int64]*sysin.AdminNoteDuplicateItemModel, len(profiles))
-	for _, profile := range profiles {
-		profileById[profile.Id] = profile
-	}
-
-	allGroups := make([]*sysin.AdminNoteDuplicateGroupModel, 0, len(groupIds))
-	for signature, ids := range groupIds {
-		if len(ids) < 2 {
-			continue
-		}
-		items := make([]*sysin.AdminNoteDuplicateItemModel, 0, len(ids))
-		for _, id := range ids {
-			if item := profileById[id]; item != nil {
-				items = append(items, item)
+		session.GroupTotal++
+		members := group.MemberIds[1:]
+		for start := 0; start < len(members); start += duplicateScanBatchSize {
+			end := start + duplicateScanBatchSize
+			if end > len(members) {
+				end = len(members)
+			}
+			fields := make([]string, 0, end-start)
+			for _, profileId := range members[start:end] {
+				fields = append(fields, fmt.Sprint(profileId))
+			}
+			retained, err := cache.HashGetMany(ctx, retainedKey, fields)
+			if err != nil {
+				return gerror.Wrap(err, "读取重复资料保留标记失败")
+			}
+			emitted, err := cache.HashGetMany(ctx, emittedKey, fields)
+			if err != nil {
+				return gerror.Wrap(err, "读取重复资料候选标记失败")
+			}
+			newlyEmitted := make(map[string]any)
+			for index, profileId := range members[start:end] {
+				if (index < len(retained) && !retained[index].IsNil()) || (index < len(emitted) && !emitted[index].IsNil()) {
+					continue
+				}
+				if appendErr := writer.append(duplicateScanCandidate{KeepProfileId: group.KeepProfileId, ProfileId: profileId, Signature: signature}); appendErr != nil {
+					return appendErr
+				}
+				newlyEmitted[fields[index]] = 1
+			}
+			if err = cache.HashSetMany(ctx, emittedKey, newlyEmitted, duplicateScanSessionTTL); err != nil {
+				return gerror.Wrap(err, "保存重复资料候选标记失败")
 			}
 		}
-		if len(items) < 2 {
-			continue
-		}
-		sort.Slice(items, func(i, j int) bool {
-			left, right := items[i], items[j]
-			leftTime, rightTime := int64(0), int64(0)
-			if left.CreatedAt != nil {
-				leftTime = left.CreatedAt.Time.UnixNano()
-			}
-			if right.CreatedAt != nil {
-				rightTime = right.CreatedAt.Time.UnixNano()
-			}
-			if leftTime == rightTime {
-				return left.Id > right.Id
-			}
-			return leftTime > rightTime
-		})
-		duplicates := append([]*sysin.AdminNoteDuplicateItemModel(nil), items[1:]...)
-		allGroups = append(allGroups, &sysin.AdminNoteDuplicateGroupModel{Signature: signature, Keep: items[0], Duplicates: duplicates})
+		return nil
+	}); err != nil {
+		return nil, err
 	}
-	sort.Slice(allGroups, func(i, j int) bool { return allGroups[i].Keep.Id > allGroups[j].Keep.Id })
-	session.GroupTotal = len(allGroups)
-	candidates := duplicateScanCandidates(allGroups)
-	if len(candidates) == 0 {
-		session.Status = "completed"
-		_ = saveDuplicateScanProgress(ctx, token, duplicateScanMetadata(session))
-		cacheDuplicateScanResult(ctx, token, session)
-		return duplicateScanProgressResult(token, session, true), nil
+	if err := writer.close(); err != nil {
+		return nil, err
 	}
-	session.ChunkCount = (len(candidates) + duplicateScanBatchSize - 1) / duplicateScanBatchSize
-	session.DuplicateTotal = len(candidates)
-	session.SignatureIds = nil
-	session.PHashBuckets = nil
-	session.PHashGroups = nil
-	session.PHashSets = nil
+	session.ChunkCount = writer.chunkCount
+	session.DuplicateTotal = writer.total
 	session.Status = "completed"
-	if err := saveDuplicateScanSession(ctx, token, session, candidates); err != nil {
+	if err := saveDuplicateScanProgress(ctx, token, session); err != nil {
 		return nil, err
 	}
 	cacheDuplicateScanResult(ctx, token, session)
 	g.Log().Infof(ctx, "重复资料扫描任务完成 scanTaskId:%s scanned:%d groups:%d duplicate:%d incomplete:%d",
 		token, session.ScannedTotal, session.GroupTotal, session.DuplicateTotal, session.IncompleteTotal)
+	if session.ChunkCount == 0 {
+		return duplicateScanProgressResult(token, session, true), nil
+	}
 	result, err := s.duplicateScanBatchResult(ctx, token, session, 0)
 	if result != nil {
 		result.ScanComplete = true
@@ -582,35 +640,6 @@ func validateDuplicateCleanupState(ids []int64, candidates map[int64]duplicateSc
 	return nil
 }
 
-func duplicateScanCandidates(groups []*sysin.AdminNoteDuplicateGroupModel) []duplicateScanCandidate {
-	result := make([]duplicateScanCandidate, 0)
-	seen := make(map[int64]struct{})
-	retained := make(map[int64]struct{}, len(groups))
-	for _, group := range groups {
-		if group != nil && group.Keep != nil && group.Keep.Id > 0 {
-			retained[group.Keep.Id] = struct{}{}
-		}
-	}
-	for _, group := range groups {
-		if group == nil || group.Keep == nil {
-			continue
-		}
-		for _, item := range group.Duplicates {
-			if item != nil && item.Id > 0 {
-				if _, isRetained := retained[item.Id]; isRetained {
-					continue
-				}
-				if _, exists := seen[item.Id]; exists {
-					continue
-				}
-				seen[item.Id] = struct{}{}
-				result = append(result, duplicateScanCandidate{KeepProfileId: group.Keep.Id, ProfileId: item.Id, Signature: group.Signature})
-			}
-		}
-	}
-	return result
-}
-
 func duplicateScanSessionKey(token string) string {
 	return consts.DuplicateScanSessionKeyPrefix + strings.TrimSpace(token)
 }
@@ -619,32 +648,69 @@ func duplicateScanBatchKey(token string, cursor int) string {
 	return fmt.Sprintf("%s%s:%d", consts.DuplicateScanBatchKeyPrefix, strings.TrimSpace(token), cursor)
 }
 
-func saveDuplicateScanSession(ctx context.Context, token string, session *duplicateScanSession, candidates []duplicateScanCandidate) error {
-	writtenKeys := make([]string, 0, session.ChunkCount)
-	for cursor, start := 0, 0; start < len(candidates); cursor, start = cursor+1, start+duplicateScanBatchSize {
-		end := start + duplicateScanBatchSize
-		if end > len(candidates) {
-			end = len(candidates)
-		}
-		key := duplicateScanBatchKey(token, cursor)
-		if err := cache.Instance().Set(ctx, key, candidates[start:end], duplicateScanSessionTTL); err != nil {
-			removeDuplicateScanKeys(ctx, writtenKeys)
-			return gerror.Wrap(err, "保存重复资料扫描批次失败")
-		}
-		writtenKeys = append(writtenKeys, key)
+type duplicateScanCandidateWriter struct {
+	ctx        context.Context
+	token      string
+	buffer     []duplicateScanCandidate
+	chunkCount int
+	total      int
+}
+
+type duplicateScanMarkerWriter struct {
+	ctx    context.Context
+	key    string
+	fields map[string]any
+}
+
+func newDuplicateScanMarkerWriter(ctx context.Context, key string) *duplicateScanMarkerWriter {
+	return &duplicateScanMarkerWriter{ctx: ctx, key: key, fields: make(map[string]any, duplicateScanBatchSize)}
+}
+
+func (w *duplicateScanMarkerWriter) append(profileId int64) error {
+	w.fields[fmt.Sprint(profileId)] = 1
+	if len(w.fields) < duplicateScanBatchSize {
+		return nil
 	}
-	if err := saveDuplicateScanProgress(ctx, token, session); err != nil {
-		removeDuplicateScanKeys(ctx, writtenKeys)
-		return gerror.Wrap(err, "保存重复资料扫描会话失败")
+	return w.flush()
+}
+
+func (w *duplicateScanMarkerWriter) flush() error {
+	if err := cache.HashSetMany(w.ctx, w.key, w.fields, duplicateScanSessionTTL); err != nil {
+		return gerror.Wrap(err, "保存重复资料保留标记失败")
 	}
+	w.fields = make(map[string]any, duplicateScanBatchSize)
 	return nil
 }
 
-func removeDuplicateScanKeys(ctx context.Context, keys []string) {
-	for _, key := range keys {
-		_, _ = cache.Instance().Remove(ctx, key)
-	}
+func (w *duplicateScanMarkerWriter) close() error { return w.flush() }
+
+func newDuplicateScanCandidateWriter(ctx context.Context, token string) *duplicateScanCandidateWriter {
+	return &duplicateScanCandidateWriter{ctx: ctx, token: token, buffer: make([]duplicateScanCandidate, 0, duplicateScanBatchSize)}
 }
+
+func (w *duplicateScanCandidateWriter) append(candidate duplicateScanCandidate) error {
+	w.buffer = append(w.buffer, candidate)
+	w.total++
+	if len(w.buffer) < duplicateScanBatchSize {
+		return nil
+	}
+	return w.flush()
+}
+
+func (w *duplicateScanCandidateWriter) flush() error {
+	if len(w.buffer) == 0 {
+		return nil
+	}
+	batch := append([]duplicateScanCandidate(nil), w.buffer...)
+	if err := cache.Instance().Set(w.ctx, duplicateScanBatchKey(w.token, w.chunkCount), batch, duplicateScanSessionTTL); err != nil {
+		return gerror.Wrap(err, "保存重复资料扫描批次失败")
+	}
+	w.chunkCount++
+	w.buffer = w.buffer[:0]
+	return nil
+}
+
+func (w *duplicateScanCandidateWriter) close() error { return w.flush() }
 
 func loadDuplicateScanSession(ctx context.Context, token string) (*duplicateScanSession, error) {
 	if strings.TrimSpace(token) == "" {
@@ -661,7 +727,6 @@ func loadDuplicateScanSession(ctx context.Context, token string) (*duplicateScan
 	if err != nil || session == nil {
 		return nil, gerror.New("重复资料扫描结果无效，请重新扫描")
 	}
-	_ = saveDuplicateScanProgress(ctx, token, session)
 	return session, nil
 }
 
@@ -857,70 +922,6 @@ func duplicateProfileNewer(left, right *sysin.AdminNoteDuplicateItemModel) bool 
 	return leftTime > rightTime
 }
 
-func duplicateScanBatch(groups []*sysin.AdminNoteDuplicateGroupModel, limit int) []*sysin.AdminNoteDuplicateGroupModel {
-	if limit <= 0 {
-		return []*sysin.AdminNoteDuplicateGroupModel{}
-	}
-	result := make([]*sysin.AdminNoteDuplicateGroupModel, 0)
-	remaining := limit
-	for _, group := range groups {
-		if group == nil || group.Keep == nil || len(group.Duplicates) == 0 || remaining == 0 {
-			continue
-		}
-		count := len(group.Duplicates)
-		if count > remaining {
-			count = remaining
-		}
-		result = append(result, &sysin.AdminNoteDuplicateGroupModel{
-			Signature:  group.Signature,
-			Keep:       group.Keep,
-			Duplicates: append([]*sysin.AdminNoteDuplicateItemModel(nil), group.Duplicates[:count]...),
-		})
-		remaining -= count
-	}
-	return result
-}
-
-func (s *sSysPublish) loadDuplicateScanMedia(ctx context.Context, groups []*sysin.AdminNoteDuplicateGroupModel) error {
-	profileIds := make([]int64, 0)
-	items := make(map[int64]*sysin.AdminNoteDuplicateItemModel)
-	for _, group := range groups {
-		if group == nil || group.Keep == nil {
-			continue
-		}
-		groupItems := append([]*sysin.AdminNoteDuplicateItemModel{group.Keep}, group.Duplicates...)
-		for _, item := range groupItems {
-			if item == nil || item.Id <= 0 {
-				continue
-			}
-			item.Media = []*sysin.AdminNoteDuplicateMediaModel{}
-			items[item.Id] = item
-			profileIds = append(profileIds, item.Id)
-		}
-	}
-	if len(profileIds) == 0 {
-		return nil
-	}
-	var rows []struct {
-		Id        int64  `orm:"id"`
-		ProfileId int64  `orm:"profile_id"`
-		FileUrl   string `orm:"file_url"`
-	}
-	if err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
-		Fields("id,profile_id,file_url").WhereIn("profile_id", uniqueIds(profileIds)).
-		WhereNull("deleted_at").WhereIn("media_type", []string{"image", "photo"}).
-		Where("purpose IS NULL OR purpose='' OR purpose='display'").
-		OrderAsc("profile_id").OrderAsc("sort_index").OrderAsc("id").Scan(&rows); err != nil {
-		return gerror.Wrap(err, "读取重复资料图片预览失败")
-	}
-	for _, row := range rows {
-		if item := items[row.ProfileId]; item != nil {
-			item.Media = append(item.Media, &sysin.AdminNoteDuplicateMediaModel{Id: row.Id, FileUrl: row.FileUrl})
-		}
-	}
-	return nil
-}
-
 func duplicateImageSignature(rows []duplicateImageRow) (string, bool) {
 	if len(rows) == 0 {
 		return "", false
@@ -967,53 +968,222 @@ func duplicateImagePHashes(rows []duplicateImageRow) ([]string, bool) {
 	return values, true
 }
 
-func appendDuplicatePHashScanGroup(session *duplicateScanSession, profileId int64, rows []duplicateImageRow) {
+type duplicateScanWorkCache struct {
+	ctx            context.Context
+	token          string
+	groups         map[string]*duplicateScanWorkGroup
+	groupLoaded    map[string]bool
+	buckets        map[string][]string
+	processed      map[int64]bool
+	dirtyGroups    map[string]any
+	dirtyBuckets   map[string]any
+	dirtyProcessed map[string]any
+}
+
+func newDuplicateScanWorkCache(ctx context.Context, token string) *duplicateScanWorkCache {
+	return &duplicateScanWorkCache{
+		ctx: ctx, token: token, groups: make(map[string]*duplicateScanWorkGroup), groupLoaded: make(map[string]bool),
+		buckets: make(map[string][]string), processed: make(map[int64]bool), dirtyGroups: make(map[string]any),
+		dirtyBuckets: make(map[string]any), dirtyProcessed: make(map[string]any),
+	}
+}
+
+func (w *duplicateScanWorkCache) preloadBuckets(fields []string) error {
+	values, err := cache.HashGetMany(w.ctx, duplicateScanWorkHashKey(w.token, "buckets"), fields)
+	if err != nil {
+		return gerror.Wrap(err, "读取重复资料扫描图片索引失败")
+	}
+	for index, field := range fields {
+		if index >= len(values) || values[index].IsNil() {
+			continue
+		}
+		var signatures []string
+		if err = values[index].Scan(&signatures); err != nil {
+			return gerror.Wrap(err, "解析重复资料扫描图片索引失败")
+		}
+		w.buckets[field] = signatures
+	}
+	return nil
+}
+
+func (w *duplicateScanWorkCache) preloadProcessed(ids []int64) error {
+	fields := make([]string, 0, len(ids))
+	for _, id := range ids {
+		fields = append(fields, fmt.Sprint(id))
+	}
+	values, err := cache.HashGetMany(w.ctx, duplicateScanWorkHashKey(w.token, "processed"), fields)
+	if err != nil {
+		return gerror.Wrap(err, "读取重复资料扫描断点失败")
+	}
+	for index, id := range ids {
+		w.processed[id] = index < len(values) && !values[index].IsNil()
+	}
+	return nil
+}
+
+func (w *duplicateScanWorkCache) preloadGroups(signatures []string) error {
+	values, err := cache.HashGetMany(w.ctx, duplicateScanWorkHashKey(w.token, "groups"), signatures)
+	if err != nil {
+		return gerror.Wrap(err, "读取重复资料扫描分组失败")
+	}
+	for index, signature := range signatures {
+		w.groupLoaded[signature] = true
+		if index >= len(values) || values[index].IsNil() {
+			continue
+		}
+		var group duplicateScanWorkGroup
+		if err = values[index].Scan(&group); err != nil {
+			return gerror.Wrap(err, "解析重复资料扫描分组失败")
+		}
+		w.groups[signature] = &group
+	}
+	return nil
+}
+
+func duplicateScanWorkHashKey(token, kind string) string {
+	return fmt.Sprintf("%s%s:%s", consts.DuplicateScanWorkKeyPrefix, strings.TrimSpace(token), kind)
+}
+
+func rangeDuplicateScanWorkGroups(ctx context.Context, token string, visit func(string, *duplicateScanWorkGroup) error) error {
+	var cursor uint64
+	for {
+		next, fields, err := cache.HashScan(ctx, duplicateScanWorkHashKey(token, "groups"), cursor, duplicateScanBatchSize)
+		if err != nil {
+			return gerror.Wrap(err, "读取重复资料扫描分组失败")
+		}
+		for signature, value := range fields {
+			var group duplicateScanWorkGroup
+			if err = value.Scan(&group); err != nil {
+				return gerror.Wrap(err, "解析重复资料扫描分组失败")
+			}
+			if err = visit(signature, &group); err != nil {
+				return err
+			}
+		}
+		if next == 0 {
+			return nil
+		}
+		cursor = next
+	}
+}
+
+func (w *duplicateScanWorkCache) group(signature string) (*duplicateScanWorkGroup, error) {
+	if w.groupLoaded[signature] {
+		return w.groups[signature], nil
+	}
+	values, err := cache.HashGetMany(w.ctx, duplicateScanWorkHashKey(w.token, "groups"), []string{signature})
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取重复资料扫描分组失败")
+	}
+	w.groupLoaded[signature] = true
+	if len(values) > 0 && !values[0].IsNil() {
+		var group duplicateScanWorkGroup
+		if err = values[0].Scan(&group); err != nil {
+			return nil, gerror.Wrap(err, "解析重复资料扫描分组失败")
+		}
+		w.groups[signature] = &group
+	}
+	return w.groups[signature], nil
+}
+
+func (w *duplicateScanWorkCache) setGroup(signature string, group *duplicateScanWorkGroup) {
+	w.groupLoaded[signature] = true
+	w.groups[signature] = group
+	w.dirtyGroups[signature] = group
+}
+
+func (w *duplicateScanWorkCache) profileProcessed(profileId int64) (bool, error) {
+	if processed, ok := w.processed[profileId]; ok {
+		return processed, nil
+	}
+	field := fmt.Sprint(profileId)
+	values, err := cache.HashGetMany(w.ctx, duplicateScanWorkHashKey(w.token, "processed"), []string{field})
+	if err != nil {
+		return false, gerror.Wrap(err, "读取重复资料扫描断点失败")
+	}
+	processed := len(values) > 0 && !values[0].IsNil()
+	w.processed[profileId] = processed
+	return processed, nil
+}
+
+func (w *duplicateScanWorkCache) markProfileProcessed(profileId int64) {
+	w.processed[profileId] = true
+	w.dirtyProcessed[fmt.Sprint(profileId)] = 1
+}
+
+func (w *duplicateScanWorkCache) appendPHash(profileId, createdAt int64, rows []duplicateImageRow) error {
 	values, complete := duplicateImagePHashes(rows)
-	if session == nil || profileId <= 0 || !complete {
-		return
+	if profileId <= 0 || !complete {
+		return nil
 	}
-	if session.PHashBuckets == nil {
-		session.PHashBuckets = make(map[string][]int64)
-	}
-	if session.PHashGroups == nil {
-		session.PHashGroups = make(map[int64]string)
-	}
-	if session.PHashSets == nil {
-		session.PHashSets = make(map[int64][]string)
-	}
-	candidates := make(map[int64]struct{})
-	lookupKeys := duplicatePHashBucketKeys(values, true)
-	for _, key := range lookupKeys {
-		for _, id := range session.PHashBuckets[key] {
-			candidates[id] = struct{}{}
+	candidateSignatures := make(map[string]struct{})
+	for _, key := range duplicatePHashBucketKeys(values, true) {
+		for _, signature := range w.buckets[key] {
+			candidateSignatures[signature] = struct{}{}
 		}
 	}
-	candidateIds := make([]int64, 0, len(candidates))
-	for id := range candidates {
-		candidateIds = append(candidateIds, id)
+	ordered := make([]string, 0, len(candidateSignatures))
+	for signature := range candidateSignatures {
+		ordered = append(ordered, signature)
 	}
-	sort.Slice(candidateIds, func(i, j int) bool { return candidateIds[i] > candidateIds[j] })
-	for _, candidateId := range candidateIds {
-		if !profilePHashSetsMatch(values, session.PHashSets[candidateId], collectProfilePHashDuplicateThreshold) {
+	sort.Strings(ordered)
+	groupSignature := ""
+	for _, signature := range ordered {
+		group, err := w.group(signature)
+		if err != nil {
+			return err
+		}
+		if group == nil || !profilePHashGroupAccepts(values, group.MemberIds, group.PHashSets, collectProfilePHashDuplicateThreshold) {
 			continue
 		}
-		signature := session.PHashGroups[candidateId]
-		if signature != "" && !profilePHashGroupAccepts(values, session.SignatureIds[signature], session.PHashSets, collectProfilePHashDuplicateThreshold) {
-			continue
-		}
-		if signature == "" {
-			signature = fmt.Sprintf("phash:%d", candidateId)
-			session.PHashGroups[candidateId] = signature
-			session.SignatureIds[signature] = append(session.SignatureIds[signature], candidateId)
-		}
-		session.PHashGroups[profileId] = signature
-		session.SignatureIds[signature] = append(session.SignatureIds[signature], profileId)
+		groupSignature = signature
 		break
 	}
-	session.PHashSets[profileId] = values
-	for _, key := range duplicatePHashBucketKeys(values, false) {
-		session.PHashBuckets[key] = append(session.PHashBuckets[key], profileId)
+	if groupSignature == "" {
+		groupSignature = fmt.Sprintf("phash:%d", profileId)
 	}
+	group, err := w.group(groupSignature)
+	if err != nil {
+		return err
+	}
+	if group == nil {
+		group = &duplicateScanWorkGroup{KeepProfileId: profileId, KeepCreatedAt: createdAt, PHashSets: make(map[int64][]string)}
+	}
+	group.addMember(profileId, createdAt)
+	group.PHashSets[profileId] = values
+	w.setGroup(groupSignature, group)
+	for _, key := range duplicatePHashBucketKeys(values, false) {
+		if !containsString(w.buckets[key], groupSignature) {
+			w.buckets[key] = append(w.buckets[key], groupSignature)
+		}
+		w.dirtyBuckets[key] = w.buckets[key]
+	}
+	return nil
+}
+
+func (g *duplicateScanWorkGroup) addMember(profileId, createdAt int64) {
+	if containsInt64(g.MemberIds, profileId) {
+		return
+	}
+	if g.KeepProfileId == 0 || createdAt > g.KeepCreatedAt || (createdAt == g.KeepCreatedAt && profileId > g.KeepProfileId) {
+		g.MemberIds = append([]int64{profileId}, g.MemberIds...)
+		g.KeepProfileId, g.KeepCreatedAt = profileId, createdAt
+		return
+	}
+	g.MemberIds = append(g.MemberIds, profileId)
+}
+
+func (w *duplicateScanWorkCache) save() error {
+	if err := cache.HashSetMany(w.ctx, duplicateScanWorkHashKey(w.token, "groups"), w.dirtyGroups, duplicateScanSessionTTL); err != nil {
+		return gerror.Wrap(err, "保存重复资料扫描分组失败")
+	}
+	if err := cache.HashSetMany(w.ctx, duplicateScanWorkHashKey(w.token, "buckets"), w.dirtyBuckets, duplicateScanSessionTTL); err != nil {
+		return gerror.Wrap(err, "保存重复资料扫描索引失败")
+	}
+	if err := cache.HashSetMany(w.ctx, duplicateScanWorkHashKey(w.token, "processed"), w.dirtyProcessed, duplicateScanSessionTTL); err != nil {
+		return gerror.Wrap(err, "保存重复资料扫描断点失败")
+	}
+	return nil
 }
 
 // Fuzzy similarity is not transitive. Requiring the incoming profile to match

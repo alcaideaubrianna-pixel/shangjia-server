@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 	"time"
@@ -57,24 +58,6 @@ func TestProfilePHashSetsMatchIgnoresOrderAndAllowsReencodingDistance(t *testing
 	}
 	if profilePHashSetsMatch(left, right[:2], 20) {
 		t.Fatal("different image counts must not match")
-	}
-}
-
-func TestAppendDuplicatePHashScanGroupUsesLSHBuckets(t *testing.T) {
-	session := &duplicateScanSession{SignatureIds: map[string][]int64{}}
-	first := []duplicateImageRow{
-		{PerceptualHash: "d87a07c29151f7c5"}, {PerceptualHash: "cc2af3518c676c93"}, {PerceptualHash: "dd0670e46e58e9a6"},
-	}
-	second := []duplicateImageRow{
-		{PerceptualHash: "f81e726076528fa6"}, {PerceptualHash: "d87a07c3912ff2c1"}, {PerceptualHash: "cc34b3798cd44e69"},
-	}
-	appendDuplicatePHashScanGroup(session, 20, first)
-	appendDuplicatePHashScanGroup(session, 10, second)
-	if session.PHashGroups[10] == "" || session.PHashGroups[10] != session.PHashGroups[20] {
-		t.Fatalf("expected profiles to share a fuzzy pHash group: %#v", session.PHashGroups)
-	}
-	if got := session.SignatureIds[session.PHashGroups[10]]; len(got) != 2 {
-		t.Fatalf("expected two profiles in fuzzy group, got %#v", got)
 	}
 }
 
@@ -162,8 +145,8 @@ func TestDuplicateScanSessionCompressionRoundTrip(t *testing.T) {
 		AlgorithmVersion: duplicateScanAlgorithmVersion,
 		AdminAccountId:   7,
 		TenantId:         6,
-		SignatureIds:     map[string][]int64{"text:same": {3, 2, 1}},
-		PHashSets:        map[int64][]string{3: {"d87a07c29151f7c5"}},
+		ScanCursor:       100000,
+		ScannedTotal:     100000,
 	}
 	plain, err := json.Marshal(session)
 	if err != nil {
@@ -173,11 +156,8 @@ func TestDuplicateScanSessionCompressionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(compressed) >= len(plain) {
-		t.Fatalf("compressed session should be smaller: compressed=%d plain=%d", len(compressed), len(plain))
-	}
 	decoded, err := decodeDuplicateScanSession(compressed)
-	if err != nil || decoded.AdminAccountId != session.AdminAccountId || len(decoded.SignatureIds["text:same"]) != 3 {
+	if err != nil || decoded.AdminAccountId != session.AdminAccountId || decoded.ScanCursor != session.ScanCursor {
 		t.Fatalf("compressed session round trip failed: session=%#v err=%v", decoded, err)
 	}
 	legacy, err := decodeDuplicateScanSession(plain)
@@ -188,10 +168,6 @@ func TestDuplicateScanSessionCompressionRoundTrip(t *testing.T) {
 
 func TestDuplicateScanMetadataStaysBounded(t *testing.T) {
 	session := newDuplicateScanSession(&sysin.AccountModel{Id: 7, TenantId: 6})
-	for id := int64(1); id <= 100000; id++ {
-		session.SignatureIds["text:same"] = append(session.SignatureIds["text:same"], id)
-		session.PHashSets[id] = []string{"d87a07c29151f7c5"}
-	}
 	session.ScannedTotal = 100000
 	data, err := encodeDuplicateScanSession(duplicateScanMetadata(session))
 	if err != nil {
@@ -199,6 +175,27 @@ func TestDuplicateScanMetadataStaysBounded(t *testing.T) {
 	}
 	if len(data) > 1024 {
 		t.Fatalf("progress metadata must stay bounded for 100k profiles: %d bytes", len(data))
+	}
+	for _, forbidden := range []string{"signatureIds", "pHashBuckets", "pHashSets", "pHashGroups"} {
+		if bytes.Contains(data, []byte(forbidden)) {
+			t.Fatalf("session metadata must not contain %s", forbidden)
+		}
+	}
+}
+
+func TestDuplicateScanWorkGroupKeepsNewestProfile(t *testing.T) {
+	group := &duplicateScanWorkGroup{KeepProfileId: 10, KeepCreatedAt: 100, MemberIds: []int64{10}}
+	group.addMember(20, 90)
+	group.addMember(30, 110)
+	group.addMember(30, 110)
+	if group.KeepProfileId != 30 || len(group.MemberIds) != 3 || group.MemberIds[0] != 30 {
+		t.Fatalf("unexpected work group ordering: %#v", group)
+	}
+}
+
+func TestDuplicateScanTaskHasBoundedRuntime(t *testing.T) {
+	if duplicateScanPagesPerTask <= 0 || duplicateScanPagesPerTask > 20 {
+		t.Fatalf("pages per task must stay bounded: %d", duplicateScanPagesPerTask)
 	}
 }
 
@@ -219,31 +216,6 @@ func TestScheduledBatchCycleRunUsesScheduledAt(t *testing.T) {
 	}
 	if !scheduledBatchCycleRun(cycleRunRecord{Stage: "producing", ScheduledAt: gtime.Now()}) {
 		t.Fatal("批次 stage 被覆盖后仍应通过 scheduled_at 识别")
-	}
-}
-
-func TestDuplicateScanBatchLimitsReturnedDeleteTargets(t *testing.T) {
-	groups := []*sysin.AdminNoteDuplicateGroupModel{
-		{Signature: "a", Keep: &sysin.AdminNoteDuplicateItemModel{Id: 9}, Duplicates: []*sysin.AdminNoteDuplicateItemModel{{Id: 8}, {Id: 7}}},
-		{Signature: "b", Keep: &sysin.AdminNoteDuplicateItemModel{Id: 6}, Duplicates: []*sysin.AdminNoteDuplicateItemModel{{Id: 5}, {Id: 4}}},
-	}
-	batch := duplicateScanBatch(groups, 3)
-	if len(batch) != 2 || len(batch[0].Duplicates) != 2 || len(batch[1].Duplicates) != 1 {
-		t.Fatalf("unexpected batch: %#v", batch)
-	}
-	if batch[0].Keep.Id != 9 || batch[1].Keep.Id != 6 {
-		t.Fatal("batch must retain each group's newest profile")
-	}
-}
-
-func TestDuplicateScanCandidatesNeverDeletesAnotherGroupKeep(t *testing.T) {
-	groups := []*sysin.AdminNoteDuplicateGroupModel{
-		{Signature: "first", Keep: &sysin.AdminNoteDuplicateItemModel{Id: 3}, Duplicates: []*sysin.AdminNoteDuplicateItemModel{{Id: 2}}},
-		{Signature: "second", Keep: &sysin.AdminNoteDuplicateItemModel{Id: 2}, Duplicates: []*sysin.AdminNoteDuplicateItemModel{{Id: 1}}},
-	}
-	candidates := duplicateScanCandidates(groups)
-	if len(candidates) != 1 || candidates[0].ProfileId != 1 || candidates[0].KeepProfileId != 2 {
-		t.Fatalf("交叉分组必须保护所有保留项: %#v", candidates)
 	}
 }
 

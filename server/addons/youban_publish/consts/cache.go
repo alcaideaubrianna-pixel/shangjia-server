@@ -7,5 +7,6 @@ const (
 	CollectProcessThrottleKeyPrefix   = "youban_publish:collect:process:throttle:"
 	DuplicateScanSessionKeyPrefix     = "youban_publish:duplicate_scan:session:"
 	DuplicateScanBatchKeyPrefix       = "youban_publish:duplicate_scan:batch:"
-	DuplicateScanResultKeyPrefix      = "youban_publish:duplicate_scan:result:v3:"
+	DuplicateScanWorkKeyPrefix        = "youban_publish:duplicate_scan:work:"
+	DuplicateScanResultKeyPrefix      = "youban_publish:duplicate_scan:result:v4:"
 )
