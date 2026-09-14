@@ -58,11 +58,13 @@ func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.Admi
 	}
 	var session *duplicateScanSession
 	if strings.TrimSpace(in.ScanToken) == "" {
-		session, err = s.newDuplicateScanSession(ctx, account, &in.NoteListInp)
-		if err != nil {
-			return nil, err
-		}
 		in.ScanToken = guid.S()
+		session = newDuplicateScanSession(account)
+		if err = cache.Instance().Set(ctx, duplicateScanSessionKey(in.ScanToken), session, duplicateScanSessionTTL); err != nil {
+			return nil, gerror.Wrap(err, "创建重复资料扫描会话失败")
+		}
+		g.Log().Infof(ctx, "重复资料扫描任务已创建 scanTaskId:%s tenantId:%d accountId:%d", in.ScanToken, account.TenantId, account.Id)
+		return duplicateScanProgressResult(in.ScanToken, session, false), nil
 	} else {
 		session, err = loadDuplicateScanSession(ctx, in.ScanToken)
 		if err != nil {
@@ -81,12 +83,15 @@ func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.Admi
 	}
 	if len(ids) > 0 {
 		if err = s.appendDuplicateScanSignatures(ctx, session, ids); err != nil {
+			g.Log().Warningf(ctx, "重复资料扫描分片失败 scanTaskId:%s cursor:%d err:%+v", in.ScanToken, session.ScanCursor, err)
 			return nil, err
 		}
 		session.ScanCursor = ids[len(ids)-1]
 		session.ScannedTotal += len(ids)
 	}
-	complete := len(ids) < duplicateScanChunkSize || session.ScannedTotal >= session.CandidateTotal
+	complete := len(ids) < duplicateScanChunkSize
+	g.Log().Infof(ctx, "重复资料扫描分片完成 scanTaskId:%s scanned:%d batch:%d cursor:%d duplicate:%d incomplete:%d complete:%t",
+		in.ScanToken, session.ScannedTotal, len(ids), session.ScanCursor, session.DuplicateTotal, session.IncompleteTotal, complete)
 	if !complete {
 		if err = cache.Instance().Set(ctx, duplicateScanSessionKey(in.ScanToken), session, duplicateScanSessionTTL); err != nil {
 			return nil, gerror.Wrap(err, "保存重复资料扫描进度失败")
@@ -96,25 +101,8 @@ func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.Admi
 	return s.finishDuplicateScan(ctx, in.ScanToken, session)
 }
 
-func (s *sSysPublish) newDuplicateScanSession(ctx context.Context, account *sysin.AccountModel, in *sysin.NoteListInp) (*duplicateScanSession, error) {
-	scope, err := s.adminProfileVisibleScope(ctx, account, &in.ProfileListInp)
-	if err != nil {
-		return nil, err
-	}
-	if err = s.ensureAdminProfileScopeTenants(ctx, scope); err != nil {
-		return nil, err
-	}
-	total := 0
-	if !scope.Strict || len(scope.AccountIds) > 0 {
-		mod := noteIndexModel(ctx).LeftJoin(publishAccountTable+" a", "a.id=i.account_id AND a.deleted_at IS NULL")
-		mod = applyNoteIndexFilters(applyNoteIndexScope(mod, scope.TenantId, scope.TenantIds, scope.AccountIds, &in.ProfileListInp), &in.ProfileListInp)
-		value, countErr := mod.Fields("COUNT(DISTINCT i.profile_id)").Value()
-		if countErr != nil {
-			return nil, gerror.Wrap(countErr, "统计待扫描资料失败")
-		}
-		total = value.Int()
-	}
-	return &duplicateScanSession{AdminAccountId: account.Id, CandidateTotal: total, SignatureIds: make(map[string][]int64), TenantId: account.TenantId}, nil
+func newDuplicateScanSession(account *sysin.AccountModel) *duplicateScanSession {
+	return &duplicateScanSession{AdminAccountId: account.Id, SignatureIds: make(map[string][]int64), TenantId: account.TenantId}
 }
 
 func (s *sSysPublish) duplicateScanProfileIdPage(ctx context.Context, in *sysin.NoteListInp, account *sysin.AccountModel, cursor int64) ([]int64, error) {
@@ -181,6 +169,7 @@ func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, session
 }
 
 func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, session *duplicateScanSession) (*sysin.AdminNoteDuplicateScanModel, error) {
+	session.CandidateTotal = session.ScannedTotal
 	groupIds := session.SignatureIds
 	duplicateIds := make([]int64, 0)
 	for _, ids := range groupIds {
@@ -191,6 +180,7 @@ func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, ses
 	if len(duplicateIds) == 0 {
 		session.SignatureIds = nil
 		_ = cache.Instance().Set(ctx, duplicateScanSessionKey(token), session, duplicateScanSessionTTL)
+		g.Log().Infof(ctx, "重复资料扫描任务完成 scanTaskId:%s scanned:%d groups:0 duplicate:0 incomplete:%d", token, session.ScannedTotal, session.IncompleteTotal)
 		return duplicateScanProgressResult(token, session, true), nil
 	}
 	columns := dao.ContentProfile.Columns()
@@ -257,6 +247,8 @@ func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, ses
 	if err := saveDuplicateScanSession(ctx, token, session, candidates); err != nil {
 		return nil, err
 	}
+	g.Log().Infof(ctx, "重复资料扫描任务完成 scanTaskId:%s scanned:%d groups:%d duplicate:%d incomplete:%d",
+		token, session.ScannedTotal, session.GroupTotal, session.DuplicateTotal, session.IncompleteTotal)
 	result, err := s.duplicateScanBatchResult(ctx, token, session, 0)
 	if result != nil {
 		result.ScanComplete = true
