@@ -37,6 +37,11 @@ func (s *sSysPublish) AdminAntiScanMaterialList(ctx context.Context, in *sysin.A
 		Fields("id,type,name,url,created_at").
 		OrderDesc("id").
 		Scan(&list)
+	for _, item := range list {
+		if item != nil {
+			item.Url = normalizeMediaPresentationURL(item.Url, "")
+		}
+	}
 	return list, err
 }
 
@@ -63,12 +68,13 @@ func (s *sSysPublish) AdminAntiScanMaterialUpload(ctx context.Context, in *sysin
 		name = file.Filename
 	}
 	now := gtime.Now()
+	presentationURL := normalizeMediaPresentationURL(attachment.FileUrl, attachment.Path)
 	id, err := g.DB().Model(antiScanMaterialTable).Safe().Ctx(ctx).Data(g.Map{
 		"tenant_id":  account.TenantId,
 		"account_id": account.Id,
 		"type":       in.Type,
 		"name":       name,
-		"url":        attachment.FileUrl,
+		"url":        presentationURL,
 		"created_at": now,
 		"updated_at": now,
 	}).InsertAndGetId()
@@ -79,7 +85,7 @@ func (s *sSysPublish) AdminAntiScanMaterialUpload(ctx context.Context, in *sysin
 		Id:        id,
 		Type:      in.Type,
 		Name:      name,
-		Url:       attachment.FileUrl,
+		Url:       presentationURL,
 		CreatedAt: now.String(),
 	}, nil
 }

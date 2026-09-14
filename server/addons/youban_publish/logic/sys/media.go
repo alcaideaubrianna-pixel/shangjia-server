@@ -763,7 +763,7 @@ func normalizeMediaFileURL(fileURL string, storagePath string) string {
 		return normalizeTelegramContentURL(contentPath)
 	}
 	if storagePath == "" {
-		return fileURL
+		return normalizeManagedMediaPresentationURL(fileURL)
 	}
 	if contentPath := normalizeTelegramContentStoragePath(storagePath); contentPath != "" {
 		return normalizeTelegramContentURL(contentPath)
@@ -782,7 +782,54 @@ func normalizeMediaFileURL(fileURL string, storagePath string) string {
 		}
 		return "/" + strings.TrimLeft(storagePath, "/")
 	}
-	return fileURL
+	return normalizeManagedMediaPresentationURL(fileURL)
+}
+
+// normalizeManagedMediaPresentationURL keeps persisted object URLs stable while
+// presenting first-party media through the currently configured CDN domain.
+func normalizeManagedMediaPresentationURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Hostname() == "" {
+		return raw
+	}
+	cdnBase := mediaContentCDNBaseURL()
+	if cdnBase == "" {
+		return raw
+	}
+	cdnURL, err := url.Parse(cdnBase)
+	if err != nil || cdnURL.Hostname() == "" || strings.EqualFold(parsed.Hostname(), cdnURL.Hostname()) {
+		return raw
+	}
+	if !isManagedMediaHostname(parsed.Hostname()) {
+		return raw
+	}
+	return strings.TrimRight(cdnBase, "/") + "/" + strings.TrimLeft(parsed.EscapedPath(), "/") + querySuffix(parsed)
+}
+
+func isManagedMediaHostname(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "img.yuebanby.com" || host == "img.xiaohuiji.cc" {
+		return true
+	}
+	config := storager.GetConfig()
+	if config == nil {
+		return false
+	}
+	for _, raw := range []string{config.CosPublicURL, config.CosBucketURL} {
+		parsed, err := url.Parse(strings.TrimSpace(raw))
+		if err == nil && parsed.Hostname() != "" && strings.EqualFold(host, parsed.Hostname()) {
+			return true
+		}
+	}
+	return false
+}
+
+func querySuffix(parsed *url.URL) string {
+	if parsed == nil || parsed.RawQuery == "" {
+		return ""
+	}
+	return "?" + parsed.RawQuery
 }
 
 func normalizeStoredMediaPath(raw string) string {

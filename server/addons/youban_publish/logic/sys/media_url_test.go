@@ -30,3 +30,27 @@ func TestNormalizeMediaPresentationURLUsesConfiguredCDN(t *testing.T) {
 		t.Fatalf("unexpected presentation URL: got %q want %q", actual, want)
 	}
 }
+
+func TestNormalizeMediaPresentationURLRewritesManagedLegacyURLWithoutStoragePath(t *testing.T) {
+	previous := storager.GetConfig()
+	storager.SetConfig(&model.UploadConfig{
+		Drive:        consts.UploadDriveCos,
+		CosBucketURL: "https://bucket.cos.ap-hongkong.myqcloud.com",
+		CosPublicURL: "https://img.xiaohuiji.cc",
+	})
+	t.Cleanup(func() { storager.SetConfig(previous) })
+
+	path := "hotgo/file/2026-09-14/example.jpg"
+	want := mediaContentCDNBaseURL() + "/" + path + "?preview=1"
+	actual := normalizeMediaPresentationURL("https://img.yuebanby.com/"+path+"?preview=1", "")
+	if actual != want {
+		t.Fatalf("unexpected legacy presentation URL: got %q want %q", actual, want)
+	}
+}
+
+func TestNormalizeMediaPresentationURLKeepsExternalSourceURL(t *testing.T) {
+	raw := "https://cdn.telegram.org/source/example.jpg"
+	if actual := normalizeMediaPresentationURL(raw, ""); actual != raw {
+		t.Fatalf("external URL was rewritten: got %q want %q", actual, raw)
+	}
+}
