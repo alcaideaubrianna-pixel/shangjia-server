@@ -120,6 +120,10 @@ func imageToRGBA(src image.Image) *image.RGBA {
 
 func applyAntiScanBackground(ctx context.Context, src *image.RGBA, segmentRaw string, in *sysin.AntiScanPreviewInp) (*image.RGBA, bool) {
 	bounds := src.Bounds()
+	if strings.HasPrefix(strings.TrimSpace(in.BackgroundTextureImage), "builtin:") {
+		in.BackgroundTexturePreset = strings.TrimPrefix(strings.TrimSpace(in.BackgroundTextureImage), "builtin:")
+		in.BackgroundTextureImage = ""
+	}
 	bg := patternedBackground(bounds.Dx(), bounds.Dy(), in)
 	if in.BackgroundReplaceEnabled != 1 {
 		overlayTexture(src, in.StickerOpacity)
