@@ -23,6 +23,31 @@ type UpdateReq struct {
 
 type UpdateRes struct{}
 
+type CloudResourceViewReq struct {
+	g.Meta `path:"/publish/config/cloudResource/view" method:"get" tags:"上架插件后台" summary:"查看云资源配置"`
+	sysin.CloudResourceConfigViewInp
+}
+
+type CloudResourceViewRes struct {
+	*sysin.CloudResourceConfigViewModel
+}
+
+type CloudResourceSaveReq struct {
+	g.Meta `path:"/publish/config/cloudResource/save" method:"post" tags:"上架插件后台" summary:"保存云资源配置"`
+	sysin.CloudResourceConfigSaveInp
+}
+
+type CloudResourceSaveRes struct{}
+
+type CloudResourceTestReq struct {
+	g.Meta `path:"/publish/config/cloudResource/test" method:"post" tags:"上架插件后台" summary:"测试云资源配置"`
+	sysin.CloudResourceConfigTestInp
+}
+
+type CloudResourceTestRes struct {
+	*sysin.CloudResourceConfigTestModel
+}
+
 type CloudUsageDashboardReq struct {
 	g.Meta `path:"/publish/config/cloudUsage/dashboard" method:"get" tags:"上架插件后台" summary:"云资源统计大盘"`
 	sysin.CloudResourceUsageDashboardInp

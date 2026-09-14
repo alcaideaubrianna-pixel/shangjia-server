@@ -624,6 +624,8 @@
     TgAccountUnbind,
     ConfigGet,
     ConfigUpdate,
+    CloudResourceConfigSave,
+    CloudResourceConfigView,
     ChannelList,
     TenantDelete,
     TenantList,
@@ -1386,8 +1388,8 @@
   async function loadCloudResourceConfig() {
     cloudResourceLoading.value = true;
     try {
-      const res: any = await ConfigGet({ group: 'cloudResource' });
-      Object.assign(cloudResourceConfig, newCloudResourceConfig(), res?.list || {});
+      const res: any = await CloudResourceConfigView();
+      Object.assign(cloudResourceConfig, newCloudResourceConfig(), res || {});
     } finally {
       cloudResourceLoading.value = false;
     }
@@ -1397,14 +1399,11 @@
     cloudResourceSaving.value = true;
     try {
       rememberActiveTab();
-      await ConfigUpdate({
-        group: 'cloudResource',
-        list: {
-          ...cloudResourceConfig,
-          fapiHubEnabled: cloudResourceConfig.mattingProvider === 'fapihub' ? 1 : 0,
-          tencentCloudSite: 'intl',
-          tencentVisionEnabled: 0,
-        },
+      await CloudResourceConfigSave({
+        ...cloudResourceConfig,
+        fapiHubEnabled: cloudResourceConfig.mattingProvider === 'fapihub' ? 1 : 0,
+        tencentCloudSite: 'intl',
+        tencentVisionEnabled: 0,
       });
       message.success('云资源配置已保存');
     } finally {

@@ -294,7 +294,23 @@ export function ConfigUpdate(params = {}) {
 
 export function CloudResourceConfigTest(params = {}) {
   return http.request({
-    url: '/youban_publish/publish/admin/cloudResource/test',
+    url: '/youban_publish/publish/config/cloudResource/test',
+    method: 'POST',
+    params,
+  });
+}
+
+export function CloudResourceConfigView(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/config/cloudResource/view',
+    method: 'get',
+    params,
+  });
+}
+
+export function CloudResourceConfigSave(params = {}) {
+  return http.request({
+    url: '/youban_publish/publish/config/cloudResource/save',
     method: 'POST',
     params,
   });

@@ -29,6 +29,29 @@ func (c *cConfig) Update(ctx context.Context, req *config.UpdateReq) (res *confi
 	return
 }
 
+func (c *cConfig) CloudResourceView(ctx context.Context, req *config.CloudResourceViewReq) (res *config.CloudResourceViewRes, err error) {
+	data, err := service.SysConfig().CloudResourceConfigView(ctx, &req.CloudResourceConfigViewInp)
+	if err != nil {
+		return nil, err
+	}
+	return &config.CloudResourceViewRes{CloudResourceConfigViewModel: data}, nil
+}
+
+func (c *cConfig) CloudResourceSave(ctx context.Context, req *config.CloudResourceSaveReq) (res *config.CloudResourceSaveRes, err error) {
+	if err = service.SysConfig().CloudResourceConfigSave(ctx, &req.CloudResourceConfigSaveInp); err != nil {
+		return nil, err
+	}
+	return &config.CloudResourceSaveRes{}, nil
+}
+
+func (c *cConfig) CloudResourceTest(ctx context.Context, req *config.CloudResourceTestReq) (res *config.CloudResourceTestRes, err error) {
+	data, err := service.SysConfig().CloudResourceConfigTest(ctx, &req.CloudResourceConfigTestInp)
+	if err != nil {
+		return nil, err
+	}
+	return &config.CloudResourceTestRes{CloudResourceConfigTestModel: data}, nil
+}
+
 func (c *cConfig) CloudUsageDashboard(ctx context.Context, req *config.CloudUsageDashboardReq) (res *config.CloudUsageDashboardRes, err error) {
 	data, err := service.SysConfig().CloudResourceUsageDashboard(ctx, &req.CloudResourceUsageDashboardInp)
 	if err != nil {
