@@ -199,7 +199,7 @@ func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
 		s.finishChannelCycleRun(ctx, run, cycleRunStatusSkipped, "频道循环配置已关闭")
 		return nil
 	}
-	if run.Stage == "batch" && channel.Mode != "batch" {
+	if scheduledBatchCycleRun(run) && channel.Mode != "batch" {
 		s.finishChannelCycleRun(ctx, run, cycleRunStatusSkipped, "批次循环已切换为时间循环")
 		return nil
 	}
@@ -245,22 +245,34 @@ func (s *sSysPublish) ExecuteCycleRun(ctx context.Context, runId int64) error {
 			queued++
 		}
 	}
-	_, err = g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", run.Id).Data(g.Map{
+	result, err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", run.Id).Where("status", cycleRunStatusRunning).Data(g.Map{
 		"cursor_id": lastCursor, "queued_count": run.QueuedCount + queued,
 		"status": cycleRunStatusPending, "stage": "producing", "error_message": "", "updated_at": gtime.Now(),
 	}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "更新频道循环批次游标失败")
 	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil
+	}
 	return s.enqueueCycleRun(ctx, run.Id, time.Second)
 }
 
+func scheduledBatchCycleRun(run cycleRunRecord) bool {
+	return run.ScheduledAt != nil
+}
+
 func (s *sSysPublish) beginChannelCycleDispatch(ctx context.Context, run cycleRunRecord) error {
-	_, err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", run.Id).Data(g.Map{
+	result, err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", run.Id).Where("status", cycleRunStatusRunning).Data(g.Map{
 		"status": cycleRunStatusDispatching, "stage": "dispatching", "error_message": "", "updated_at": gtime.Now(),
 	}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "更新频道循环等待发送状态失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil
 	}
 	run.Status = cycleRunStatusDispatching
 	return s.finalizeChannelCycleDelivery(ctx, run)
@@ -379,11 +391,15 @@ func cyclePublishOperationNo(runId int64, profileId int64, channelId int64) stri
 }
 
 func (s *sSysPublish) continueChannelCycleRun(ctx context.Context, run cycleRunRecord, delay time.Duration) error {
-	_, err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", run.Id).Data(g.Map{
+	result, err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", run.Id).Where("status", cycleRunStatusRunning).Data(g.Map{
 		"status": cycleRunStatusPending, "stage": "backpressure", "updated_at": gtime.Now(),
 	}).Update()
 	if err != nil {
 		return err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil
 	}
 	return s.enqueueCycleRun(ctx, run.Id, delay)
 }

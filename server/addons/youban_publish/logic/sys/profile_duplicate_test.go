@@ -85,6 +85,24 @@ func TestProfilePHashSetsMatchRejectsPartialImageOverlap(t *testing.T) {
 	}
 }
 
+func TestDuplicateScanCacheLifetimes(t *testing.T) {
+	if duplicateScanSessionTTL != 24*time.Hour {
+		t.Fatalf("扫描任务有效期 = %s, want 24h", duplicateScanSessionTTL)
+	}
+	if duplicateScanResultTTL > 30*time.Minute {
+		t.Fatalf("扫描结果复用索引有效期过长: %s", duplicateScanResultTTL)
+	}
+}
+
+func TestScheduledBatchCycleRunUsesScheduledAt(t *testing.T) {
+	if scheduledBatchCycleRun(cycleRunRecord{Stage: "producing"}) {
+		t.Fatal("手动循环不应识别为定时批次")
+	}
+	if !scheduledBatchCycleRun(cycleRunRecord{Stage: "producing", ScheduledAt: gtime.Now()}) {
+		t.Fatal("批次 stage 被覆盖后仍应通过 scheduled_at 识别")
+	}
+}
+
 func TestDuplicateScanBatchLimitsReturnedDeleteTargets(t *testing.T) {
 	groups := []*sysin.AdminNoteDuplicateGroupModel{
 		{Signature: "a", Keep: &sysin.AdminNoteDuplicateItemModel{Id: 9}, Duplicates: []*sysin.AdminNoteDuplicateItemModel{{Id: 8}, {Id: 7}}},

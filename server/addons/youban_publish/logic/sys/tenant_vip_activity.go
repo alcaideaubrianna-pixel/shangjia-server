@@ -69,9 +69,10 @@ type tenantVipChangeInp struct {
 }
 
 type tenantVipChangeResult struct {
-	Applied   bool
-	ExpiredAt *gtime.Time
-	EventId   int64
+	Applied              bool
+	ExpiredAt            *gtime.Time
+	EventId              int64
+	DowngradedChannelIds []int64
 }
 
 type tenantVipEventSummary struct {
@@ -917,19 +918,25 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 	if vip == nil || vip.TenantId <= 0 || vip.ExpiredAt == nil {
 		return nil
 	}
-	eventKey := fmt.Sprintf("%s:%d:%d", tenantVipEventExpired, vip.TenantId, vip.ExpiredAt.Timestamp())
 	result := &tenantVipChangeResult{}
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		now := gtime.Now()
+		columns := pdao.YoubanPublishTenantVip.Columns()
+		var locked *entity.YoubanPublishTenantVip
+		if lockErr := tx.Model(pdao.YoubanPublishTenantVip.Table()).Safe().Ctx(ctx).
+			Where(columns.Id, vip.Id).
+			LockUpdate().
+			Scan(&locked); lockErr != nil {
+			return gerror.Wrap(lockErr, "锁定到期会员失败")
+		}
+		if locked == nil || locked.Status != consts.StatusEnabled || locked.ExpiredAt == nil || locked.ExpiredAt.After(now) {
+			return nil
+		}
+		eventKey := fmt.Sprintf("%s:%d:%d", tenantVipEventExpired, locked.TenantId, locked.ExpiredAt.Timestamp())
 		_, err := tx.Model(tenantVipEventTable).Safe().Ctx(ctx).Data(g.Map{
-			"event_key":        eventKey,
-			"event_type":       tenantVipEventExpired,
-			"tenant_id":        vip.TenantId,
-			"after_expired_at": vip.ExpiredAt,
-			"notify_status":    "pending",
-			"remark":           "会员到期",
-			"created_at":       now,
-			"updated_at":       now,
+			"event_key": eventKey, "event_type": tenantVipEventExpired, "tenant_id": vip.TenantId,
+			"after_expired_at": locked.ExpiredAt, "notify_status": "pending", "remark": "会员到期",
+			"created_at": now, "updated_at": now,
 		}).OnConflict("event_key").OnDuplicateEx("id").Save()
 		if err != nil {
 			return gerror.Wrap(err, "创建会员到期事件失败")
@@ -939,18 +946,6 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 			return gerror.Wrap(err, "读取会员到期事件失败")
 		}
 		result.EventId = event.Id
-
-		columns := pdao.YoubanPublishTenantVip.Columns()
-		var locked *entity.YoubanPublishTenantVip
-		if err = tx.Model(pdao.YoubanPublishTenantVip.Table()).Safe().Ctx(ctx).
-			Where(columns.Id, vip.Id).
-			LockUpdate().
-			Scan(&locked); err != nil {
-			return gerror.Wrap(err, "锁定到期会员失败")
-		}
-		if locked == nil || locked.Status != consts.StatusEnabled || locked.ExpiredAt == nil || locked.ExpiredAt.After(now) {
-			return nil
-		}
 		before := tenantVipStatusFromEntity(locked.TenantId, locked)
 		if _, err = tx.Model(pdao.YoubanPublishTenantVip.Table()).Safe().Ctx(ctx).Where(columns.Id, locked.Id).Data(g.Map{
 			columns.Status:    consts.StatusDisable,
@@ -962,8 +957,8 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 		if downgradeErr != nil {
 			return downgradeErr
 		}
-		if downgraded > 0 {
-			remark := fmt.Sprintf("已将 %d 个频道的批次循环自动切换为时间循环。", downgraded)
+		if len(downgraded) > 0 {
+			remark := fmt.Sprintf("已将 %d 个频道的批次循环自动切换为时间循环。", len(downgraded))
 			if _, err = tx.Model(tenantVipEventTable).Safe().Ctx(ctx).Where("id", result.EventId).Data(g.Map{"remark": remark, "updated_at": now}).Update(); err != nil {
 				return gerror.Wrap(err, "更新会员到期降级说明失败")
 			}
@@ -973,6 +968,7 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 		}
 		result.Applied = true
 		result.ExpiredAt = locked.ExpiredAt
+		result.DowngradedChannelIds = downgraded
 		return nil
 	})
 	if err != nil {
@@ -981,8 +977,13 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 	if result.Applied {
 		_, _ = cache.Instance().Remove(ctx, tenantVipCacheKey(vip.TenantId))
 		_, _ = cache.Instance().Remove(ctx, tenantVipFullCacheKey(vip.TenantId))
+		for _, channelId := range result.DowngradedChannelIds {
+			if enqueueErr := s.enqueueCycleReschedule(ctx, channelId, 0); enqueueErr != nil {
+				g.Log().Warningf(ctx, "提交会员到期循环重算失败 channel:%d err:%+v", channelId, enqueueErr)
+			}
+		}
 	}
-	if result.EventId > 0 {
+	if result.Applied && result.EventId > 0 {
 		if notifyErr := s.notifyTenantVipEvent(ctx, result.EventId); notifyErr != nil {
 			g.Log().Warningf(ctx, "会员到期通知失败 eventId:%d err:%+v", result.EventId, notifyErr)
 		}
@@ -990,7 +991,21 @@ func (s *sSysPublish) processExpiredTenantVip(ctx context.Context, vip *entity.Y
 	return nil
 }
 
-func downgradeTenantBatchCyclesTx(ctx context.Context, tx gdb.TX, tenantId int64, now *gtime.Time) (int64, error) {
+func downgradeTenantBatchCyclesTx(ctx context.Context, tx gdb.TX, tenantId int64, now *gtime.Time) ([]int64, error) {
+	var channelIds []int64
+	if err := tx.Model(publishChannelTable).Safe().Ctx(ctx).Fields("id").
+		Where("tenant_id", tenantId).Where("cycle_publish_mode", "batch").WhereNull("deleted_at").Scan(&channelIds); err != nil {
+		return nil, gerror.Wrap(err, "读取待降级批次循环频道失败")
+	}
+	if len(channelIds) == 0 {
+		return []int64{}, nil
+	}
+	if _, err := tx.Model(publishCycleRunTable).Safe().Ctx(ctx).
+		WhereIn("channel_id", channelIds).WhereNotNull("scheduled_at").
+		WhereIn("status", []string{cycleRunStatusPending, cycleRunStatusRunning, cycleRunStatusFailed}).
+		Data(g.Map{"status": cycleRunStatusSkipped, "stage": "finished", "error_message": "会员到期，批次循环已切换为时间循环", "finished_at": now, "updated_at": now}).Update(); err != nil {
+		return nil, gerror.Wrap(err, "终止到期会员批次循环任务失败")
+	}
 	result, err := tx.Model(publishChannelTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("cycle_publish_mode", "batch").
@@ -1003,10 +1018,12 @@ func downgradeTenantBatchCyclesTx(ctx context.Context, tx gdb.TX, tenantId int64
 			"updated_at":          now,
 		}).Update()
 	if err != nil {
-		return 0, gerror.Wrap(err, "会员到期降级批次循环失败")
+		return nil, gerror.Wrap(err, "会员到期降级批次循环失败")
 	}
-	affected, err := result.RowsAffected()
-	return affected, err
+	if _, err = result.RowsAffected(); err != nil {
+		return nil, err
+	}
+	return channelIds, nil
 }
 
 func (s *sSysPublish) retryTenantVipNotifications(ctx context.Context, limit int) error {

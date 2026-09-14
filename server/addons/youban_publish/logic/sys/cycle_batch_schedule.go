@@ -31,20 +31,28 @@ func (s *sSysPublish) scheduleDueChannelBatchCycles(ctx context.Context, limit i
 	if err != nil {
 		return gerror.Wrap(err, "读取到期批次循环频道失败")
 	}
+	vipByTenant := make(map[int64]*sysin.TenantVipStatusModel)
 	for _, channel := range channels {
 		if channel.BatchSize <= 0 {
 			continue
 		}
-		vip, vipErr := s.tenantVipStatus(ctx, channel.TenantId)
-		if vipErr != nil {
-			g.Log().Warningf(ctx, "校验批次循环会员状态失败 channel:%d tenant:%d err:%+v", channel.Id, channel.TenantId, vipErr)
-			continue
+		vip, loaded := vipByTenant[channel.TenantId]
+		if !loaded {
+			var vipErr error
+			vip, vipErr = s.tenantVipStatus(ctx, channel.TenantId)
+			if vipErr != nil {
+				g.Log().Warningf(ctx, "校验批次循环会员状态失败 channel:%d tenant:%d err:%+v", channel.Id, channel.TenantId, vipErr)
+				continue
+			}
+			vipByTenant[channel.TenantId] = vip
 		}
 		if !tenantVipStatusActive(vip) || !containsString(vip.Features, sysin.TenantVipFeatureBatchCycle) {
 			if _, updateErr := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).Where("id", channel.Id).Where("tenant_id", channel.TenantId).Data(g.Map{
 				"cycle_publish_mode": "time", "cycle_batch_cursor": 0, "cycle_active_run_id": 0, "cycle_next_run_at": nil, "updated_at": now,
 			}).Update(); updateErr != nil {
 				g.Log().Warningf(ctx, "降级过期会员批次循环失败 channel:%d tenant:%d err:%+v", channel.Id, channel.TenantId, updateErr)
+			} else if enqueueErr := s.enqueueCycleReschedule(ctx, channel.Id, 0); enqueueErr != nil {
+				g.Log().Warningf(ctx, "提交过期会员循环重算失败 channel:%d tenant:%d err:%+v", channel.Id, channel.TenantId, enqueueErr)
 			}
 			continue
 		}

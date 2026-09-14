@@ -22,7 +22,7 @@ const (
 	duplicateScanChunkSize  = 500
 	duplicateScanBatchSize  = 500
 	duplicateScanSessionTTL = 24 * time.Hour
-	duplicateScanResultTTL  = 24 * time.Hour
+	duplicateScanResultTTL  = 15 * time.Minute
 )
 
 type duplicateImageRow struct {
