@@ -37,14 +37,15 @@ func (s *sSysPublish) ingestAndProcessCollectMessage(ctx context.Context, messag
 	}
 	if strings.TrimSpace(message.SourceGroupedId) != "" {
 		g.Log().Debugf(ctx, "采集消息已入库，等待媒体组聚合 eventId:%d sourceId:%d sourceMessageId:%d groupedId:%s media:%d", eventId, message.SourceId, message.SourceMessageId, message.SourceGroupedId, len(message.Media))
-		s.scheduleCollectGroupedEvent(eventId, message.SourceId, message.TenantId, message.AccountId)
+		s.scheduleCollectGroupedEvent(eventId, message.SourceId, message.SourceChatId, message.TenantId, message.AccountId)
 		return eventId, nil
 	}
 	if err = s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
-		EventId:   eventId,
-		SourceId:  message.SourceId,
-		TenantId:  message.TenantId,
-		AccountId: message.AccountId,
+		EventId:      eventId,
+		SourceId:     message.SourceId,
+		SourceChatId: message.SourceChatId,
+		TenantId:     message.TenantId,
+		AccountId:    message.AccountId,
 	}, collectMaterialGroupingDelay); err != nil {
 		return eventId, err
 	}

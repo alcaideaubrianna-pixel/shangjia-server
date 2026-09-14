@@ -93,6 +93,9 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 	}
 	now := gtime.Now()
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if uniqueErr := ensureUniqueActiveCollectChannelSource(ctx, tx, account.TenantId, account.Id, in.Id, in.SourceChatId, in.CollectEnabled, in.Status); uniqueErr != nil {
+			return uniqueErr
+		}
 		data := g.Map{
 			"tenant_id":               account.TenantId,
 			"account_id":              account.Id,
@@ -139,7 +142,7 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 		s.maybeCreateCollectHistoryTask(context.Background(), id, account.TenantId, account.Id)
 	}
 	if err == nil {
-		s.refreshCollectEventRulesCache(ctx)
+		s.refreshCollectEventRulesCache(ctx, account.TenantId, account.Id)
 		s.refreshCollectSourceCache(ctx)
 		s.refreshAccountCollectSupervisor()
 	}
@@ -189,7 +192,7 @@ func (s *sSysPublish) CollectSourceDelete(ctx context.Context, in *sysin.IdsInp)
 		return nil
 	})
 	if err == nil {
-		s.refreshCollectEventRulesCache(ctx)
+		s.refreshCollectEventRulesCache(ctx, account.TenantId, account.Id)
 		s.refreshCollectSourceCache(ctx)
 		s.refreshAccountCollectSupervisor()
 		for _, sourceId := range ids {

@@ -128,6 +128,22 @@ func TestCollectProcessTaskBodyIsSourceScoped(t *testing.T) {
 	}
 }
 
+func TestCollectProcessTaskBodyPreservesSourceChat(t *testing.T) {
+	body, err := collectProcessTaskBody(collectProcessQueuePayload{
+		TenantId: 2, AccountId: 3, SourceId: 4, SourceChatId: "-1003981090528", EventId: 100,
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	var payload collectProcessQueuePayload
+	if err = json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.EventId != 0 || payload.SourceChatId != "-1003981090528" {
+		t.Fatalf("unexpected normalized payload: %+v", payload)
+	}
+}
+
 func TestCollectProcessScheduleKeyIsSourceScoped(t *testing.T) {
 	first := collectProcessScheduleKey(collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 4})
 	second := collectProcessScheduleKey(collectProcessQueuePayload{TenantId: 2, AccountId: 3, SourceId: 5})

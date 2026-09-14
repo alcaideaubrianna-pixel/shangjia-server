@@ -231,9 +231,8 @@ func (s *sSysPublish) scanCollectHistory(ctx context.Context, client *telegram.C
 			"failed":    stats.failed,
 		})
 		processPayload := collectProcessQueuePayload{
-			SourceId:  task.SourceId,
-			TenantId:  task.TenantId,
-			AccountId: task.AccountId,
+			SourceId: task.SourceId, SourceChatId: task.SourceChatId,
+			TenantId: task.TenantId, AccountId: task.AccountId,
 		}
 		if processErr := s.enqueueCollectProcess(ctx, processPayload, 0); processErr != nil {
 			s.appendCollectHistoryLog(ctx, task.Id, task.TenantId, task.AccountId, "warn", "process", "历史消息页已落库，资料处理将在下一轮继续", g.Map{"error": processErr.Error()})

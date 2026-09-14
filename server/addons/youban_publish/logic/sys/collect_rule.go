@@ -241,7 +241,7 @@ func (s *sSysPublish) CollectRuleSave(ctx context.Context, in *sysin.CollectRule
 	if err != nil {
 		return 0, err
 	}
-	s.refreshCollectEventRulesCache(ctx)
+	s.refreshCollectEventRulesCache(ctx, account.TenantId, account.Id)
 	return id, nil
 }
 
@@ -267,7 +267,7 @@ func (s *sSysPublish) CollectRuleDelete(ctx context.Context, in *sysin.IdsInp) e
 		return txErr
 	})
 	if err == nil {
-		s.refreshCollectEventRulesCache(ctx)
+		s.refreshCollectEventRulesCache(ctx, account.TenantId, account.Id)
 	}
 	return gerror.Wrap(err, "删除采集规则失败")
 }

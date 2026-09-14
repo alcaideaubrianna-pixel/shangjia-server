@@ -129,10 +129,11 @@ func (s *sSysPublish) CollectEventReprocess(ctx context.Context, in *sysin.Colle
 		return nil, err
 	}
 	if err = s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
-		EventId:   in.EventId,
-		SourceId:  event["source_id"].Int64(),
-		TenantId:  account.TenantId,
-		AccountId: account.Id,
+		EventId:      in.EventId,
+		SourceId:     event["source_id"].Int64(),
+		SourceChatId: event["source_chat_id"].String(),
+		TenantId:     account.TenantId,
+		AccountId:    account.Id,
 	}, 0); err != nil {
 		return nil, gerror.Wrap(err, "投递采集事件重算任务失败")
 	}

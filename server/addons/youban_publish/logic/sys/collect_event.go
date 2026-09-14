@@ -347,7 +347,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if source["collect_enabled"].Int() != 1 || source["status"].Int() != 1 {
 		_ = s.markCollectEvent(ctx, eventId, sysin.CollectEventStatusPending, "采集源已暂停，等待恢复")
 		return s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
-			EventId: eventId, TenantId: tenantId, AccountId: accountId, SourceId: event["source_id"].Int64(),
+			EventId: eventId, TenantId: tenantId, AccountId: accountId, SourceId: event["source_id"].Int64(), SourceChatId: event["source_chat_id"].String(),
 		}, 30*time.Second)
 	}
 	if collectEventAlreadyMatched(event["status"].String()) {
@@ -414,7 +414,7 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 			g.Log().Warningf(ctx, "验证资料回流父展示事件失败，将重新排队 verifyEventId:%d parentEventId:%d err:%+v", eventId, parentEventId, err)
 			if enqueueErr := s.enqueueCollectProcess(ctx, collectProcessQueuePayload{
 				EventId: parentEventId, TenantId: tenantId, AccountId: accountId,
-				SourceId: event["source_id"].Int64(),
+				SourceId: event["source_id"].Int64(), SourceChatId: event["source_chat_id"].String(),
 			}, 30*time.Second); enqueueErr != nil {
 				return enqueueErr
 			}
@@ -661,14 +661,11 @@ func (s *sSysPublish) collectEventNeedsProfileRepair(ctx context.Context, eventI
 }
 
 func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, tenantId int64, accountId int64) ([]gdb.Record, error) {
-	sourceId := event["source_id"].Int64()
-	resolvedSourceId, err := s.collectEventRuleSourceId(ctx, event, tenantId, accountId)
+	sourceContext, err := s.resolveCollectSourceContext(ctx, event, tenantId, accountId)
 	if err != nil {
 		return nil, err
 	}
-	if resolvedSourceId > 0 {
-		sourceId = resolvedSourceId
-	}
+	sourceId := sourceContext.RuleSourceID
 	if sourceId != event["source_id"].Int64() {
 		g.Log().Infof(ctx, "采集事件按实际频道选择专属规则 eventId:%d eventSourceId:%d channelSourceId:%d sourceChatId:%s",
 			event["id"].Int64(), event["source_id"].Int64(), sourceId, event["source_chat_id"].String())
@@ -692,8 +689,8 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	for _, row := range bindRows {
 		ruleIds = append(ruleIds, row.RuleId)
 	}
-	// Global rules are account text policies. Only delete and replace items are
-	// merged; all source behavior belongs to the single bound source rule.
+	// Global rules are account-wide text policies. Source matching, blocking,
+	// review, dedupe and target channels remain owned by the channel rule.
 	globalMod := pdao.YoubanPublishCollectRule.Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("account_id", accountId).
@@ -704,18 +701,9 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取租户全局采集规则失败")
 	}
-	// Global rules are a text policy only. Prevent matching, blocking,
-	// dedupe, channel and header/footer settings from leaking into events.
+	// Prevent source behavior from leaking out of an account-wide text policy.
 	for _, row := range globalRows {
-		row["keywords"] = gvar.New([]string{})
-		row["tags"] = gvar.New([]string{})
-		row["blocked_texts"] = gvar.New([]string{})
-		row["block_link"] = gvar.New(0)
-		row["block_username"] = gvar.New(0)
-		row["block_plain_text"] = gvar.New(0)
-		row["review_enabled"] = gvar.New(0)
-		row["dedupe_enabled"] = gvar.New(0)
-		row["target_channel_ids"] = gvar.New([]int64{})
+		sanitizeGlobalCollectTextPolicy(row)
 	}
 	rows := make(gdb.Result, 0, len(ruleIds))
 	if len(ruleIds) > 0 {
@@ -737,9 +725,7 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	if len(rows) != 1 {
 		return nil, gerror.Newf("采集源%d的专属规则不存在或已停用", sourceId)
 	}
-	if err != nil {
-		return nil, gerror.Wrap(err, "读取采集规则失败")
-	}
+	rows[0][collectRuleSourceIDField] = gvar.New(sourceId)
 	if err = attachCollectRuleChannels(ctx, rows); err != nil {
 		return nil, err
 	}
@@ -754,53 +740,31 @@ func (s *sSysPublish) collectEventRules(ctx context.Context, event gdb.Record, t
 	return rows, nil
 }
 
-func (s *sSysPublish) collectEventRuleSourceId(ctx context.Context, event gdb.Record, tenantId, accountId int64) (int64, error) {
-	fallback := event["source_id"].Int64()
-	chatId := strings.TrimSpace(event["source_chat_id"].String())
-	if chatId == "" || tenantId <= 0 || accountId <= 0 {
-		return fallback, nil
-	}
-	lookupIds := tgChannelCacheLookupIds(chatId)
-	if len(lookupIds) == 0 {
-		return fallback, nil
-	}
-	row, err := pdao.YoubanPublishCollectSource.Ctx(ctx).
-		Fields("id").
-		Where("tenant_id", tenantId).
-		Where("account_id", accountId).
-		Where("status", 1).
-		WhereIn("source_chat_id", lookupIds).
-		WhereNull("deleted_at").
-		Where("EXISTS (SELECT 1 FROM " + pdao.YoubanPublishCollectSourceRule.Table() + " sr JOIN " + pdao.YoubanPublishCollectRule.Table() + " r ON r.id=sr.rule_id WHERE sr.source_id=" + pdao.YoubanPublishCollectSource.Table() + ".id AND sr.status=1 AND r.status=1 AND r.deleted_at IS NULL)").
-		OrderDesc("id").
-		One()
-	if err != nil {
-		return 0, gerror.Wrap(err, "读取频道采集源规则路由失败")
-	}
-	if row.IsEmpty() || row["id"].Int64() <= 0 {
-		return fallback, nil
-	}
-	return row["id"].Int64(), nil
-}
-
 func (s *sSysPublish) collectEventRulesCacheKey(ctx context.Context, tenantId int64, accountId int64, sourceId int64) string {
-	version := s.collectEventRulesCacheVersion(ctx)
+	version := s.collectEventRulesCacheVersion(ctx, tenantId, accountId)
 	return fmt.Sprintf("%s:%s:%d:%d:%d", collectEventRulesCacheKeyPrefix, version, tenantId, accountId, sourceId)
 }
 
-func (s *sSysPublish) collectEventRulesCacheVersion(ctx context.Context) string {
-	cacheVar, err := cache.Instance().Get(ctx, collectEventRulesCacheVersionKey)
+func collectEventRulesCacheAccountVersionKey(tenantId, accountId int64) string {
+	return fmt.Sprintf("%s:%d:%d", collectEventRulesCacheVersionKey, tenantId, accountId)
+}
+
+func (s *sSysPublish) collectEventRulesCacheVersion(ctx context.Context, tenantId, accountId int64) string {
+	key := collectEventRulesCacheAccountVersionKey(tenantId, accountId)
+	cacheVar, err := cache.Instance().Get(ctx, key)
 	if err == nil && !cacheVar.IsNil() {
 		version := strings.TrimSpace(cacheVar.String())
 		if version != "" {
 			return version
 		}
 	}
-	return "1"
+	version := fmt.Sprintf("%d", gtime.Now().TimestampNano())
+	_ = cache.Instance().Set(ctx, key, version, 24*time.Hour)
+	return version
 }
 
-func (s *sSysPublish) refreshCollectEventRulesCache(ctx context.Context) {
-	_ = cache.Instance().Set(ctx, collectEventRulesCacheVersionKey, fmt.Sprintf("%d", gtime.Now().TimestampNano()), 24*time.Hour)
+func (s *sSysPublish) refreshCollectEventRulesCache(ctx context.Context, tenantId, accountId int64) {
+	_ = cache.Instance().Set(ctx, collectEventRulesCacheAccountVersionKey(tenantId, accountId), fmt.Sprintf("%d", gtime.Now().TimestampNano()), 24*time.Hour)
 }
 
 func collectEventRulesCacheGet(ctx context.Context, key string) ([]gdb.Record, bool) {
@@ -832,6 +796,7 @@ func collectEventRuleMapsToRecords(list []g.Map) []gdb.Record {
 }
 
 func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record) (bool, string, error) {
+	ruleSourceID := collectRuleSourceID(event, rule)
 	decision := buildCollectRuleDecision(event, content, rule)
 	if decision.Skipped || !decision.Matched {
 		s.appendCollectEventLogForRecord(ctx, event, "rule", "skipped", decision.Reason, fmt.Sprintf("rule=%d", rule["id"].Int64()))
@@ -862,20 +827,7 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		return false, "", gerror.Wrap(err, "读取采集分发幂等记录失败")
 	}
 	if !existingDispatch.IsEmpty() {
-		if rule["review_enabled"].Int() == 1 && existingDispatch["review_id"].Int64() <= 0 {
-			return true, "", s.createCollectReview(ctx, event, content, rule, existingDispatch["id"].Int64(), decision.Text)
-		}
-		switch collectDispatchResumeActionForStatus(existingDispatch["status"].String()) {
-		case collectDispatchResumeNoop:
-			return true, "", nil
-		case collectDispatchResumeSubmit:
-			if err = s.resumeCollectProfileDispatch(ctx, existingDispatch, event, content, rule, decision.Text); err != nil {
-				return false, "", err
-			}
-			return true, "", nil
-		default:
-			return false, "", gerror.Newf("采集分发状态不支持恢复：%s", existingDispatch["status"].String())
-		}
+		return s.resumeExistingCollectDispatch(ctx, existingDispatch, event, content, rule, decision.Text)
 	}
 	now := gtime.Now()
 	channelIds := collectRuleTargetChannelIds(rule)
@@ -915,11 +867,37 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		}
 	}
 	var dispatchId int64
+	var concurrentDispatch gdb.Record
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		var txErr error
+		lockedEvent, txErr := tx.Model(pdao.YoubanPublishCollectEvent.Table()).Ctx(ctx).
+			Fields("id").
+			Where("id", event["id"].Int64()).
+			Where("tenant_id", event["tenant_id"].Int64()).
+			Where("account_id", event["account_id"].Int64()).
+			LockUpdate().
+			One()
+		if txErr != nil {
+			return gerror.Wrap(txErr, "锁定采集事件分发状态失败")
+		}
+		if lockedEvent.IsEmpty() {
+			return gerror.New("采集事件不存在，无法创建分发记录")
+		}
+		concurrentDispatch, txErr = tx.Model(pdao.YoubanPublishCollectDispatch.Table()).Ctx(ctx).
+			Where("tenant_id", event["tenant_id"].Int64()).
+			Where("account_id", event["account_id"].Int64()).
+			Where("event_id", event["id"].Int64()).
+			Where("rule_id", rule["id"].Int64()).
+			OrderDesc("id").
+			One()
+		if txErr != nil {
+			return gerror.Wrap(txErr, "复查采集分发幂等记录失败")
+		}
+		if !concurrentDispatch.IsEmpty() {
+			return nil
+		}
 		dispatchId, txErr = tx.Model(pdao.YoubanPublishCollectDispatch.Table()).Ctx(ctx).Data(g.Map{
 			"tenant_id": event["tenant_id"].Int64(), "account_id": event["account_id"].Int64(),
-			"source_id": event["source_id"].Int64(), "rule_id": rule["id"].Int64(), "event_id": event["id"].Int64(),
+			"source_id": ruleSourceID, "rule_id": rule["id"].Int64(), "event_id": event["id"].Int64(),
 			"match_json": decision.MatchJSON, "status": sysin.CollectDispatchStatusPending,
 			"created_at": now, "updated_at": now,
 		}).InsertAndGetId()
@@ -933,6 +911,9 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 	})
 	if err != nil {
 		return false, "", err
+	}
+	if !concurrentDispatch.IsEmpty() {
+		return s.resumeExistingCollectDispatch(ctx, concurrentDispatch, event, content, rule, decision.Text)
 	}
 	if rule["review_enabled"].Int() == 1 {
 		if err = s.createCollectReview(ctx, event, content, rule, dispatchId, decision.Text); err != nil {
@@ -960,6 +941,23 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		return false, "", err
 	}
 	return true, "", nil
+}
+
+func (s *sSysPublish) resumeExistingCollectDispatch(ctx context.Context, dispatch gdb.Record, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (bool, string, error) {
+	if rule["review_enabled"].Int() == 1 && dispatch["review_id"].Int64() <= 0 {
+		return true, "", s.createCollectReview(ctx, event, content, rule, dispatch["id"].Int64(), text)
+	}
+	switch collectDispatchResumeActionForStatus(dispatch["status"].String()) {
+	case collectDispatchResumeNoop:
+		return true, "", nil
+	case collectDispatchResumeSubmit:
+		if err := s.resumeCollectProfileDispatch(ctx, dispatch, event, content, rule, text); err != nil {
+			return false, "", err
+		}
+		return true, "", nil
+	default:
+		return false, "", gerror.Newf("采集分发状态不支持恢复：%s", dispatch["status"].String())
+	}
 }
 
 func (s *sSysPublish) classifyCollectEvent(ctx context.Context, event gdb.Record, content *collectContentResult) (profileMessageClassification, error) {
@@ -1069,7 +1067,7 @@ func (s *sSysPublish) createCollectReview(ctx context.Context, event gdb.Record,
 	reviewId, err := pdao.YoubanPublishCollectReview.Ctx(ctx).Data(g.Map{
 		"tenant_id":   event["tenant_id"].Int64(),
 		"account_id":  event["account_id"].Int64(),
-		"source_id":   event["source_id"].Int64(),
+		"source_id":   collectRuleSourceID(event, rule),
 		"rule_id":     rule["id"].Int64(),
 		"event_id":    event["id"].Int64(),
 		"dispatch_id": dispatchId,

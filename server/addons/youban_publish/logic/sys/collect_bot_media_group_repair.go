@@ -61,7 +61,7 @@ func RepairCollectBotMediaGroups(ctx context.Context, options CollectBotMediaGro
 		}
 		if err = service.enqueueCollectProcess(ctx, collectProcessQueuePayload{
 			EventId: canonical["id"].Int64(), SourceId: canonical["source_id"].Int64(),
-			TenantId: canonical["tenant_id"].Int64(), AccountId: canonical["account_id"].Int64(),
+			SourceChatId: canonical["source_chat_id"].String(), TenantId: canonical["tenant_id"].Int64(), AccountId: canonical["account_id"].Int64(),
 		}, 0); err != nil {
 			return result, gerror.Wrap(err, "重新投递Bot媒体组采集事件失败")
 		}

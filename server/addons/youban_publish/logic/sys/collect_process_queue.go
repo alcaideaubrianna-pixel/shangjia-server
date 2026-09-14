@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -39,10 +40,11 @@ func newCollectProcessRetryError(delay time.Duration, message string) error {
 }
 
 type collectProcessQueuePayload struct {
-	AccountId int64 `json:"accountId"`
-	EventId   int64 `json:"eventId"`
-	SourceId  int64 `json:"sourceId"`
-	TenantId  int64 `json:"tenantId"`
+	AccountId    int64  `json:"accountId"`
+	EventId      int64  `json:"eventId"`
+	SourceId     int64  `json:"sourceId"`
+	SourceChatId string `json:"sourceChatId,omitempty"`
+	TenantId     int64  `json:"tenantId"`
 }
 
 const (
@@ -109,11 +111,19 @@ func (s *sSysPublish) enqueueCollectProcessTask(ctx context.Context, payload col
 }
 
 func collectProcessScheduleKey(payload collectProcessQueuePayload) string {
-	return fmt.Sprintf("%s%d:%d:%d", publishconsts.CollectProcessScheduleKeyPrefix, payload.TenantId, payload.AccountId, payload.SourceId)
+	return fmt.Sprintf("%s%d:%d:%s", publishconsts.CollectProcessScheduleKeyPrefix, payload.TenantId, payload.AccountId, collectProcessPartition(payload))
 }
 
 func collectProcessThrottleKey(payload collectProcessQueuePayload) string {
-	return fmt.Sprintf("%s%d:%d:%d", publishconsts.CollectProcessThrottleKeyPrefix, payload.TenantId, payload.AccountId, payload.SourceId)
+	return fmt.Sprintf("%s%d:%d:%s", publishconsts.CollectProcessThrottleKeyPrefix, payload.TenantId, payload.AccountId, collectProcessPartition(payload))
+}
+
+func collectProcessPartition(payload collectProcessQueuePayload) string {
+	chatID := canonicalCollectSourceChatID(payload.SourceChatId)
+	if chatID == "" {
+		return fmt.Sprintf("%d", payload.SourceId)
+	}
+	return fmt.Sprintf("%d:%s", payload.SourceId, chatID)
 }
 
 func reserveCollectProcessExecution(ctx context.Context, payload collectProcessQueuePayload) (bool, error) {
@@ -167,9 +177,10 @@ func removeCollectProcessSchedule(ctx context.Context, payload collectProcessQue
 
 func collectProcessTaskBody(payload collectProcessQueuePayload) ([]byte, error) {
 	return json.Marshal(collectProcessQueuePayload{
-		TenantId:  payload.TenantId,
-		AccountId: payload.AccountId,
-		SourceId:  payload.SourceId,
+		TenantId:     payload.TenantId,
+		AccountId:    payload.AccountId,
+		SourceId:     payload.SourceId,
+		SourceChatId: payload.SourceChatId,
 	})
 }
 
@@ -192,7 +203,7 @@ func (s *sSysPublish) processCollectSourceWindowWithLock(ctx context.Context, pa
 	if !enabled {
 		return false, nil
 	}
-	key := fmt.Sprintf("youban_publish:collect:source:%d:%d:%d", payload.TenantId, payload.AccountId, payload.SourceId)
+	key := fmt.Sprintf("youban_publish:collect:source:%d:%d:%s", payload.TenantId, payload.AccountId, collectProcessPartition(payload))
 	distributedLock := lock.NewConfig(15*time.Minute, time.Second).Mutex(key)
 	if err = distributedLock.TryLock(ctx); err != nil {
 		if errors.Is(err, lock.ErrLockFailed) {
@@ -257,11 +268,9 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 	groupDeadline := now.Add(-collectMaterialGroupingDelay)
 	waitingVerifyDeadline := now.Add(-collectMaterialWaitingVerifyRetryDelay)
 	verifyDeadline := now.Add(-collectMaterialVerifyRetryDelay)
-	due, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+	dueModel := collectProcessEventModel(ctx, payload)
+	due, err := dueModel.
 		Fields("id").
-		Where("tenant_id", payload.TenantId).
-		Where("account_id", payload.AccountId).
-		Where("source_id", payload.SourceId).
 		WhereIn("status", statuses).
 		Where("material_role IS NULL OR material_role = '' OR material_role IN (?,?) OR (status = ? AND material_role = ? AND error_message = ?)", collectMaterialRolePending, collectMaterialRoleDisplay, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage).
 		Where("(processed_at IS NULL AND (material_group_status IS NULL OR material_group_status <> ?) AND created_at <= ?) OR (processed_at IS NULL AND material_group_status = ? AND updated_at <= ?) OR (status = ? AND material_role = ? AND error_message = ? AND updated_at <= ?)", collectMaterialGroupWaitingVerify, groupDeadline, collectMaterialGroupWaitingVerify, waitingVerifyDeadline, sysin.CollectEventStatusIgnored, collectMaterialRoleVerify, collectMaterialVerifyUnmatchedMessage, verifyDeadline).
@@ -273,11 +282,8 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 	if !due.IsEmpty() {
 		return 0, true, nil
 	}
-	normal, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+	normal, err := collectProcessEventModel(ctx, payload).
 		Fields("created_at AS ready_from").
-		Where("tenant_id", payload.TenantId).
-		Where("account_id", payload.AccountId).
-		Where("source_id", payload.SourceId).
 		WhereIn("status", statuses).
 		Where("material_role IS NULL OR material_role = '' OR material_role = ?", collectMaterialRolePending).
 		Where("material_group_status IS NULL OR material_group_status <> ?", collectMaterialGroupWaitingVerify).
@@ -288,11 +294,8 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 	if err != nil {
 		return 0, false, gerror.Wrap(err, "读取采集源分组等待任务失败")
 	}
-	waitingVerify, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+	waitingVerify, err := collectProcessEventModel(ctx, payload).
 		Fields("updated_at AS ready_from").
-		Where("tenant_id", payload.TenantId).
-		Where("account_id", payload.AccountId).
-		Where("source_id", payload.SourceId).
 		WhereIn("status", statuses).
 		Where("material_role", collectMaterialRolePending).
 		Where("material_group_status", collectMaterialGroupWaitingVerify).
@@ -303,11 +306,8 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 	if err != nil {
 		return 0, false, gerror.Wrap(err, "读取采集源验证配对等待任务失败")
 	}
-	verify, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+	verify, err := collectProcessEventModel(ctx, payload).
 		Fields("updated_at AS ready_from").
-		Where("tenant_id", payload.TenantId).
-		Where("account_id", payload.AccountId).
-		Where("source_id", payload.SourceId).
 		Where("status", sysin.CollectEventStatusIgnored).
 		Where("material_role", collectMaterialRoleVerify).
 		Where("error_message", collectMaterialVerifyUnmatchedMessage).
@@ -344,6 +344,17 @@ func nextCollectProcessDelay(ctx context.Context, payload collectProcessQueuePay
 		return 0, true, nil
 	}
 	return nextDelay, true, nil
+}
+
+func collectProcessEventModel(ctx context.Context, payload collectProcessQueuePayload) *gdb.Model {
+	model := pdao.YoubanPublishCollectEvent.Ctx(ctx).
+		Where("tenant_id", payload.TenantId).
+		Where("account_id", payload.AccountId).
+		Where("source_id", payload.SourceId)
+	if chatID := canonicalCollectSourceChatID(payload.SourceChatId); chatID != "" {
+		model = model.WhereIn("source_chat_id", tgChannelCacheLookupIds(chatID))
+	}
+	return model
 }
 
 func collectProcessWindowStatuses() []string {

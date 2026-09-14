@@ -139,9 +139,27 @@ func mergeGlobalCollectTextPolicy(rules, globals []gdb.Record) {
 	deleteTexts := make([]string, 0)
 	replaceFrom := make([]string, 0)
 	replaceTo := make([]string, 0)
+	truncateIntroFee := false
+	introFeeSuffix := ""
+	globalHeaders := make([]string, 0)
+	globalFooters := make([]string, 0)
 	for _, global := range globals {
 		deleteLines = append(deleteLines, collectRuleStrings(global, "delete_lines")...)
 		deleteTexts = append(deleteTexts, collectRuleStrings(global, "delete_texts")...)
+		truncateIntroFee = truncateIntroFee || global["truncate_intro_fee_enabled"].Bool()
+		if suffix := strings.TrimSpace(global["intro_fee_suffix"].String()); suffix != "" {
+			introFeeSuffix = suffix
+		}
+		if global["header_enabled"].Int() == 1 {
+			if header := strings.TrimSpace(global["header_markdown"].String()); header != "" {
+				globalHeaders = append(globalHeaders, header)
+			}
+		}
+		if global["footer_enabled"].Int() == 1 {
+			if footer := strings.TrimSpace(global["footer_markdown"].String()); footer != "" {
+				globalFooters = append(globalFooters, footer)
+			}
+		}
 		for _, replacement := range collectRuleReplacements(global) {
 			replaceFrom = append(replaceFrom, replacement.From)
 			replaceTo = append(replaceTo, replacement.To)
@@ -158,7 +176,44 @@ func mergeGlobalCollectTextPolicy(rules, globals []gdb.Record) {
 		}
 		rule["replace_from"] = gvar.New(from)
 		rule["replace_to"] = gvar.New(to)
+		if truncateIntroFee {
+			rule["truncate_intro_fee_enabled"] = gvar.New(true)
+		}
+		if strings.TrimSpace(rule["intro_fee_suffix"].String()) == "" && introFeeSuffix != "" {
+			rule["intro_fee_suffix"] = gvar.New(introFeeSuffix)
+		}
+		if header := mergeCollectPolicyText(globalHeaders, rule["header_markdown"].String()); header != "" {
+			rule["header_enabled"] = gvar.New(1)
+			rule["header_markdown"] = gvar.New(header)
+		}
+		if footer := mergeCollectPolicyText([]string{rule["footer_markdown"].String()}, globalFooters...); footer != "" {
+			rule["footer_enabled"] = gvar.New(1)
+			rule["footer_markdown"] = gvar.New(footer)
+		}
 	}
+}
+
+func sanitizeGlobalCollectTextPolicy(rule gdb.Record) {
+	if rule.IsEmpty() {
+		return
+	}
+	for _, field := range []string{"keywords", "tags", "blocked_texts", "target_channel_ids"} {
+		rule[field] = gvar.New([]string{})
+	}
+	for _, field := range []string{"block_link", "block_username", "block_plain_text", "review_enabled", "dedupe_enabled"} {
+		rule[field] = gvar.New(0)
+	}
+}
+
+func mergeCollectPolicyText(values []string, extra ...string) string {
+	values = append(values, extra...)
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			result = append(result, value)
+		}
+	}
+	return strings.Join(result, "\n\n")
 }
 
 func syncCollectRuleItemsTx(ctx context.Context, tx gdb.TX, tenantId, accountId, ruleId int64, items collectRuleItems) error {

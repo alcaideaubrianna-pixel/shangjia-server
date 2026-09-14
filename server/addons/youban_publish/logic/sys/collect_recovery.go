@@ -329,11 +329,11 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 	deadline := gtime.Now().Add(-collectEventRecoverAfter)
 	statuses := []string{sysin.CollectEventStatusPending, sysin.CollectEventStatusGroupCollect, sysin.CollectEventStatusWaitingOrder, sysin.CollectEventStatusPrechecked, sysin.CollectEventStatusMediaPending, sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusFailed}
 	sourceRows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).As("e").
-		Fields("e.source_id,MIN(e.updated_at) AS oldest_at").
+		Fields("e.source_id,e.source_chat_id,MIN(e.updated_at) AS oldest_at").
 		WhereIn("e.status", statuses).
 		WhereLTE("e.updated_at", deadline).
 		Where(enabledCollectSourceExistsSQL("e")).
-		Group("e.source_id").
+		Group("e.source_id,e.source_chat_id").
 		OrderAsc("oldest_at").
 		Limit(limit).
 		All()
@@ -346,11 +346,12 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 			break
 		}
 		sourceId := sourceRow["source_id"].Int64()
+		sourceChatId := sourceRow["source_chat_id"].String()
 		sourceLimit := 10
 		if sourceLimit > remaining {
 			sourceLimit = remaining
 		}
-		rows, queryErr := s.collectRecoveryEventRows(ctx, sourceId, statuses, deadline, sourceLimit)
+		rows, queryErr := s.collectRecoveryEventRows(ctx, sourceId, sourceChatId, statuses, deadline, sourceLimit)
 		if queryErr != nil {
 			return queryErr
 		}
@@ -382,10 +383,11 @@ func (s *sSysPublish) recoverCollectEvents(ctx context.Context, limit int) error
 			remaining--
 			if !sourceQueued {
 				queued, processErr := s.enqueueCollectProcessDeferred(ctx, collectProcessQueuePayload{
-					EventId:   row["id"].Int64(),
-					SourceId:  row["source_id"].Int64(),
-					TenantId:  row["tenant_id"].Int64(),
-					AccountId: row["account_id"].Int64(),
+					EventId:      row["id"].Int64(),
+					SourceId:     row["source_id"].Int64(),
+					SourceChatId: row["source_chat_id"].String(),
+					TenantId:     row["tenant_id"].Int64(),
+					AccountId:    row["account_id"].Int64(),
 				}, 0)
 				if processErr != nil {
 					g.Log().Warningf(ctx, "恢复采集源投递失败 source:%d event:%d err:%+v", sourceId, row["id"].Int64(), processErr)
@@ -427,9 +429,8 @@ func (s *sSysPublish) collectEventHasDueMedia(ctx context.Context, eventId int64
 	return err == nil && !row.IsEmpty()
 }
 
-func (s *sSysPublish) collectRecoveryEventRows(ctx context.Context, sourceId int64, statuses []string, deadline *gtime.Time, limit int) (gdb.Result, error) {
-	mediaRows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Where("source_id", sourceId).
+func (s *sSysPublish) collectRecoveryEventRows(ctx context.Context, sourceId int64, sourceChatId string, statuses []string, deadline *gtime.Time, limit int) (gdb.Result, error) {
+	mediaRows, err := collectRecoveryEventModel(ctx, sourceId, sourceChatId).
 		Where("status", sysin.CollectEventStatusMediaPending).
 		WhereLTE("updated_at", deadline).
 		OrderAsc("updated_at").
@@ -441,8 +442,7 @@ func (s *sSysPublish) collectRecoveryEventRows(ctx context.Context, sourceId int
 	if len(mediaRows) >= limit {
 		return mediaRows, nil
 	}
-	otherRows, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Where("source_id", sourceId).
+	otherRows, err := collectRecoveryEventModel(ctx, sourceId, sourceChatId).
 		WhereNot("status", sysin.CollectEventStatusMediaPending).
 		WhereIn("status", statuses).
 		WhereLTE("updated_at", deadline).
@@ -453,6 +453,16 @@ func (s *sSysPublish) collectRecoveryEventRows(ctx context.Context, sourceId int
 		return nil, gerror.Wrap(err, "读取待恢复采集事件失败")
 	}
 	return append(mediaRows, otherRows...), nil
+}
+
+func collectRecoveryEventModel(ctx context.Context, sourceId int64, sourceChatId string) *gdb.Model {
+	model := pdao.YoubanPublishCollectEvent.Ctx(ctx).Where("source_id", sourceId)
+	if chatID := canonicalCollectSourceChatID(sourceChatId); chatID != "" {
+		model = model.WhereIn("source_chat_id", tgChannelCacheLookupIds(chatID))
+	} else {
+		model = model.Where("source_chat_id", "")
+	}
+	return model
 }
 
 func shouldRecoverCollectEvent(row gdb.Record) bool {

@@ -24,6 +24,25 @@ func TestCollectSourceGroupKeyNormalizesTelegramChatID(t *testing.T) {
 	}
 }
 
+func TestCollectRuleSourceIDSeparatesIngestAndRuleSources(t *testing.T) {
+	event := gdb.Record{"source_id": gvar.New(int64(141))}
+	rule := gdb.Record{collectRuleSourceIDField: gvar.New(int64(162))}
+	if got := collectRuleSourceID(event, rule); got != 162 {
+		t.Fatalf("rule source = %d, want 162", got)
+	}
+	if got := collectRuleSourceID(event, gdb.Record{}); got != 141 {
+		t.Fatalf("fallback source = %d, want 141", got)
+	}
+}
+
+func TestCollectEventRulesCacheVersionIsAccountScoped(t *testing.T) {
+	first := collectEventRulesCacheAccountVersionKey(43, 520)
+	second := collectEventRulesCacheAccountVersionKey(43, 521)
+	if first == second {
+		t.Fatalf("account cache versions must be isolated: %s", first)
+	}
+}
+
 func TestMergeGlobalCollectTextPolicyDoesNotCreateDispatchRule(t *testing.T) {
 	bound := gdb.Record{
 		"delete_lines":               gvar.New([]string{"local-line"}),
@@ -40,6 +59,10 @@ func TestMergeGlobalCollectTextPolicyDoesNotCreateDispatchRule(t *testing.T) {
 		"replace_to":                 gvar.New([]string{"global-to"}),
 		"truncate_intro_fee_enabled": gvar.New(true),
 		"intro_fee_suffix":           gvar.New("来风"),
+		"header_enabled":             gvar.New(1),
+		"header_markdown":            gvar.New("全局前置"),
+		"footer_enabled":             gvar.New(1),
+		"footer_markdown":            gvar.New("全局后置"),
 	}
 	mergeGlobalCollectTextPolicy([]gdb.Record{bound}, []gdb.Record{global})
 	if got, want := collectRuleStrings(bound, "delete_lines"), []string{"global-line", "local-line"}; !reflect.DeepEqual(got, want) {
@@ -52,11 +75,17 @@ func TestMergeGlobalCollectTextPolicyDoesNotCreateDispatchRule(t *testing.T) {
 	if len(replacements) != 2 || replacements[0].From != "global-from" || replacements[1].From != "local-from" {
 		t.Fatalf("replacements = %#v", replacements)
 	}
-	if bound["truncate_intro_fee_enabled"].Bool() {
-		t.Fatal("global policy must not enable source intro fee truncation")
+	if !bound["truncate_intro_fee_enabled"].Bool() {
+		t.Fatal("global text policy must enable intro fee truncation")
 	}
-	if got := bound["intro_fee_suffix"].String(); got != "" {
-		t.Fatalf("global policy must not set source intro fee suffix, got %q", got)
+	if got := bound["intro_fee_suffix"].String(); got != "来风" {
+		t.Fatalf("intro fee suffix = %q, want 来风", got)
+	}
+	if got := bound["header_markdown"].String(); got != "全局前置" {
+		t.Fatalf("header = %q", got)
+	}
+	if got := bound["footer_markdown"].String(); got != "全局后置" {
+		t.Fatalf("footer = %q", got)
 	}
 }
 
