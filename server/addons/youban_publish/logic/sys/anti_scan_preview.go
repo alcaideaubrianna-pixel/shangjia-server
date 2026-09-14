@@ -160,7 +160,14 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 	}
 	g.Log().Infof(ctx, "人像分割阶段完成 stage:read_hash durationMs:%d sourceBytes:%d imageHash:%s", time.Since(stageStartedAt).Milliseconds(), len(imageBytes), imageHash)
 	stageStartedAt = time.Now()
-	if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash); ok {
+	conf, err := service.SysConfig().GetCloudResource(ctx)
+	if err != nil {
+		return nil, err
+	}
+	provider := antiScanMattingProvider(conf)
+	g.Log().Infof(ctx, "人像分割阶段完成 stage:config durationMs:%d provider:%s imageHash:%s", time.Since(stageStartedAt).Milliseconds(), provider, imageHash)
+	stageStartedAt = time.Now()
+	if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash); ok && antiScanMattingCacheMatches(cached, provider) {
 		url := antiScanSegmentURL(cached.SegmentRaw)
 		if url == "" {
 			if legacyBytes := antiScanSegmentImageBytes(cached.SegmentRaw); len(legacyBytes) > 0 {
@@ -180,12 +187,6 @@ func (s *sSysPublish) AdminAntiScanSegment(ctx context.Context, in *sysin.AntiSc
 		}
 	}
 	g.Log().Infof(ctx, "人像分割阶段完成 stage:cache_lookup durationMs:%d cacheHit:0 imageHash:%s", time.Since(stageStartedAt).Milliseconds(), imageHash)
-	stageStartedAt = time.Now()
-	conf, err := service.SysConfig().GetCloudResource(ctx)
-	if err != nil {
-		return nil, err
-	}
-	g.Log().Infof(ctx, "人像分割阶段完成 stage:config durationMs:%d imageHash:%s", time.Since(stageStartedAt).Milliseconds(), imageHash)
 	stageStartedAt = time.Now()
 	segmentRaw, err := s.getOrCreateAntiScanMatting(ctx, imageHash, imageBytes, conf, cloudResourceUsageOwner{TenantId: account.TenantId, AccountId: account.Id})
 	if err != nil {
@@ -251,7 +252,7 @@ func (s *sSysPublish) detectAntiScanImage(ctx context.Context, imageHash string,
 		res.SegmentRaw = segmentRaw
 		if segmentRaw != "" {
 			res.CloudRawSaved = 1
-			res.Provider = appendAntiScanProvider(res.Provider, "fapihub-matting")
+			res.Provider = appendAntiScanProvider(res.Provider, antiScanMattingProvider(conf)+"-matting")
 		} else {
 			warnings = append(warnings, "云端抠图能力未启用，背景替换将降级为本地纹理处理")
 		}
@@ -294,6 +295,7 @@ func (s *sSysPublish) getOrCreateAntiScanFaceDetection(ctx context.Context, imag
 	recordCloudResourceUsage(ctx, cloudResourceUsageEvent{
 		cloudResourceUsageOwner: usageOwner,
 		ResourceType:            sysin.CloudResourceTypeFaceDetection,
+		Provider:                sysin.CloudResourceProviderTencent,
 		Scene:                   cloudResourceUsageScenePreview,
 		Success:                 err == nil,
 		Duration:                time.Since(startedAt),
@@ -313,18 +315,34 @@ func (s *sSysPublish) getOrCreateAntiScanFaceDetection(ctx context.Context, imag
 }
 
 func (s *sSysPublish) getOrCreateAntiScanMatting(ctx context.Context, imageHash string, imageBytes []byte, conf *model.CloudResourceConfig, usageOwner cloudResourceUsageOwner) (string, error) {
-	if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash); ok {
+	provider := antiScanMattingProvider(conf)
+	if cached, ok := s.getAntiScanSegmentCache(ctx, imageHash); ok && antiScanMattingCacheMatches(cached, provider) {
 		return cached.SegmentRaw, nil
 	}
-	if conf.FapiHubEnabled != 1 {
-		return "", nil
-	}
-	client := newFapiHubClient(conf.FapiHubApiKey, conf.FapiHubEndpoint, conf.FapiHubModel)
 	startedAt := time.Now()
-	pngBytes, err := client.removeBackground(ctx, imageBytes)
+	var segmentURL string
+	var err error
+	providerName := "aliyun-matting"
+	if provider == "aliyun" {
+		segmentURL, err = aliyunCOSPortraitMatting(ctx, imageBytes, imageHash, conf)
+	} else if provider == "tencent" {
+		providerName = "tencent-ci-matting"
+		segmentURL, err = tencentCOSPortraitMatting(ctx, imageBytes, imageHash, conf.TencentSecretId, conf.TencentSecretKey)
+	} else {
+		providerName = "fapihub-matting"
+		client := newFapiHubClient(conf.FapiHubApiKey, conf.FapiHubEndpoint, conf.FapiHubModel)
+		var pngBytes []byte
+		pngBytes, err = client.removeBackground(ctx, imageBytes)
+		if err == nil {
+			uploadStartedAt := time.Now()
+			segmentURL, err = uploadAntiScanSegment(ctx, pngBytes, imageHash)
+			g.Log().Infof(ctx, "防扫图阶段完成 stage:segment_upload durationMs:%d outputBytes:%d imageHash:%s", time.Since(uploadStartedAt).Milliseconds(), len(pngBytes), imageHash)
+		}
+	}
 	recordCloudResourceUsage(ctx, cloudResourceUsageEvent{
 		cloudResourceUsageOwner: usageOwner,
 		ResourceType:            sysin.CloudResourceTypeBackgroundMatting,
+		Provider:                provider,
 		Scene:                   cloudResourceUsageScenePreview,
 		Success:                 err == nil,
 		Duration:                time.Since(startedAt),
@@ -333,23 +351,40 @@ func (s *sSysPublish) getOrCreateAntiScanMatting(ctx context.Context, imageHash 
 		g.Log().Warningf(ctx, "云端抠图调用失败 imageHash:%s err:%+v", imageHash, err)
 		return "", antiScanMattingPublicError()
 	}
-	uploadStartedAt := time.Now()
-	segmentUrl, err := uploadAntiScanSegment(ctx, pngBytes, imageHash)
-	if err != nil {
-		return "", err
-	}
-	g.Log().Infof(ctx, "防扫图阶段完成 stage:segment_upload durationMs:%d outputBytes:%d imageHash:%s", time.Since(uploadStartedAt).Milliseconds(), len(pngBytes), imageHash)
-	segmentRaw := encodeFapiHubSegmentPortraitURL(segmentUrl)
+	segmentRaw := encodeAntiScanSegmentPortraitURL(providerName, segmentURL)
 	saveStartedAt := time.Now()
 	if err = s.saveAntiScanDetectionPart(ctx, imageHash, &antiScanDetectResult{
 		CloudRawSaved: 1,
-		Provider:      "fapihub-matting",
+		Provider:      providerName,
 		SegmentRaw:    segmentRaw,
 	}); err != nil {
 		return "", err
 	}
 	g.Log().Infof(ctx, "防扫图阶段完成 stage:segment_cache_save durationMs:%d imageHash:%s", time.Since(saveStartedAt).Milliseconds(), imageHash)
 	return segmentRaw, nil
+}
+
+func antiScanMattingProvider(conf *model.CloudResourceConfig) string {
+	if conf != nil && strings.EqualFold(strings.TrimSpace(conf.MattingProvider), "aliyun") {
+		return "aliyun"
+	}
+	if conf != nil && strings.EqualFold(strings.TrimSpace(conf.MattingProvider), "tencent") {
+		return "tencent"
+	}
+	return "fapihub"
+}
+
+func antiScanMattingCacheMatches(cached *antiScanDetectResult, provider string) bool {
+	if cached == nil {
+		return false
+	}
+	if provider == "tencent" {
+		return strings.Contains(cached.Provider, "tencent-ci-matting")
+	}
+	if provider == "aliyun" {
+		return strings.Contains(cached.Provider, "aliyun-matting")
+	}
+	return strings.Contains(cached.Provider, "fapihub-matting")
 }
 
 func antiScanMattingPublicError() error {
@@ -367,7 +402,11 @@ func encodeFapiHubSegmentPortrait(imageBytes []byte) string {
 }
 
 func encodeFapiHubSegmentPortraitURL(url string) string {
-	data, _ := json.Marshal(g.Map{"Provider": "fapihub", "Response": g.Map{"ResultImageUrl": url}})
+	return encodeAntiScanSegmentPortraitURL("fapihub-matting", url)
+}
+
+func encodeAntiScanSegmentPortraitURL(provider string, url string) string {
+	data, _ := json.Marshal(g.Map{"Provider": provider, "Response": g.Map{"ResultImageUrl": url}})
 	return string(data)
 }
 

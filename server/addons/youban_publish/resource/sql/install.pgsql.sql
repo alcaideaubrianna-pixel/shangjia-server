@@ -620,6 +620,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_cloud_resource_usage" (
   "tenant_id" bigint NOT NULL DEFAULT 0,
   "account_id" bigint NOT NULL DEFAULT 0,
   "resource_type" varchar(32) NOT NULL DEFAULT '',
+  "provider" varchar(32) NOT NULL DEFAULT 'legacy',
   "scene" varchar(32) NOT NULL DEFAULT '',
   "usage_date" date NOT NULL,
   "request_count" bigint NOT NULL DEFAULT 0,
@@ -630,7 +631,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_cloud_resource_usage" (
   "created_at" timestamp DEFAULT NULL,
   "updated_at" timestamp DEFAULT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_cloud_usage_daily" ON "hg_youban_publish_cloud_resource_usage" ("tenant_id", "account_id", "resource_type", "scene", "usage_date");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_cloud_usage_daily" ON "hg_youban_publish_cloud_resource_usage" ("tenant_id", "account_id", "resource_type", "provider", "scene", "usage_date");
 CREATE INDEX IF NOT EXISTS "idx_ybp_cloud_usage_date" ON "hg_youban_publish_cloud_resource_usage" ("usage_date", "resource_type", "account_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_cloud_usage_account" ON "hg_youban_publish_cloud_resource_usage" ("account_id", "usage_date");
 

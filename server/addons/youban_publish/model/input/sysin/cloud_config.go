@@ -14,6 +14,10 @@ import (
 const (
 	CloudResourceTypeBackgroundMatting = "background_matting"
 	CloudResourceTypeFaceDetection     = "face_detection"
+	CloudResourceProviderAliyun        = "aliyun"
+	CloudResourceProviderTencent       = "tencent"
+	CloudResourceProviderFapiHub       = "fapihub"
+	CloudResourceProviderLegacy        = "legacy"
 )
 
 type CloudResourceConfigViewInp struct{}
@@ -26,10 +30,24 @@ type CloudResourceConfigSaveInp struct {
 	model.CloudResourceConfig
 }
 
+type CloudResourceConfigTestInp struct {
+	model.CloudResourceConfig
+}
+
+type CloudResourceConfigTestModel struct {
+	Provider           string `json:"provider" dc:"抠图来源"`
+	ApiDurationMs      int64  `json:"apiDurationMs" dc:"接口耗时毫秒"`
+	DownloadDurationMs int64  `json:"downloadDurationMs" dc:"结果下载耗时毫秒"`
+	TotalDurationMs    int64  `json:"totalDurationMs" dc:"总耗时毫秒"`
+	OutputBytes        int    `json:"outputBytes" dc:"透明图片字节数"`
+	RequestId          string `json:"requestId" dc:"第三方请求ID"`
+}
+
 type CloudResourceUsageQueryInp struct {
 	StartDate    string `json:"startDate" dc:"开始日期，格式 YYYY-MM-DD"`
 	EndDate      string `json:"endDate" dc:"结束日期，格式 YYYY-MM-DD"`
 	ResourceType string `json:"resourceType" dc:"资源类型"`
+	Provider     string `json:"provider" dc:"服务来源"`
 }
 
 type CloudResourceUsageDashboardInp struct {
@@ -86,6 +104,7 @@ type CloudResourceUsageTrendModel struct {
 
 type CloudResourceUsageBreakdownModel struct {
 	ResourceType    string `json:"resourceType" dc:"资源类型"`
+	Provider        string `json:"provider" dc:"服务来源"`
 	RequestCount    int64  `json:"requestCount" dc:"请求次数"`
 	SuccessCount    int64  `json:"successCount" dc:"成功次数"`
 	FailureCount    int64  `json:"failureCount" dc:"失败次数"`
@@ -130,6 +149,10 @@ func (in *CloudResourceUsageQueryInp) Filter(ctx context.Context) error {
 	if in.ResourceType != "" && in.ResourceType != CloudResourceTypeBackgroundMatting && in.ResourceType != CloudResourceTypeFaceDetection {
 		return gerror.New("云资源类型不合法")
 	}
+	in.Provider = strings.ToLower(strings.TrimSpace(in.Provider))
+	if in.Provider != "" && in.Provider != CloudResourceProviderAliyun && in.Provider != CloudResourceProviderTencent && in.Provider != CloudResourceProviderFapiHub && in.Provider != CloudResourceProviderLegacy {
+		return gerror.New("云资源服务来源不合法")
+	}
 	return nil
 }
 
@@ -162,6 +185,18 @@ func (in *CloudResourceUsageListInp) Filter(ctx context.Context) error {
 }
 
 func (in *CloudResourceConfigSaveInp) Filter(ctx context.Context) error {
+	return filterCloudResourceConfig(ctx, &in.CloudResourceConfig)
+}
+
+func (in *CloudResourceConfigTestInp) Filter(ctx context.Context) error {
+	return filterCloudResourceConfig(ctx, &in.CloudResourceConfig)
+}
+
+func filterCloudResourceConfig(ctx context.Context, in *model.CloudResourceConfig) error {
+	in.MattingProvider = strings.TrimSpace(in.MattingProvider)
+	in.AliyunAccessKeyId = strings.TrimSpace(in.AliyunAccessKeyId)
+	in.AliyunAccessKeySecret = strings.TrimSpace(in.AliyunAccessKeySecret)
+	in.AliyunEndpoint = strings.TrimSpace(in.AliyunEndpoint)
 	in.TencentSecretId = strings.TrimSpace(in.TencentSecretId)
 	in.TencentSecretKey = strings.TrimSpace(in.TencentSecretKey)
 	in.TencentCloudSite = strings.TrimSpace(in.TencentCloudSite)
@@ -176,6 +211,12 @@ func (in *CloudResourceConfigSaveInp) Filter(ctx context.Context) error {
 	}
 	// 人脸检测已从防扫图链路停用，保留字段仅用于兼容历史配置。
 	in.TencentVisionEnabled = 0
+	if in.MattingProvider == "" {
+		in.MattingProvider = "aliyun"
+	}
+	if in.MattingProvider != "aliyun" && in.MattingProvider != "tencent" && in.MattingProvider != "fapihub" {
+		return gerror.New("人像抠图来源不合法")
+	}
 	if err := checkSwitch(in.FapiHubEnabled, "FAPIHub 抠图开关"); err != nil {
 		return err
 	}
@@ -191,7 +232,11 @@ func (in *CloudResourceConfigSaveInp) Filter(ctx context.Context) error {
 	if in.TencentCloudSite == "mainland" && in.TencentRegion == "" {
 		in.TencentRegion = "ap-guangzhou"
 	}
-	if in.TencentBdaEndpoint == "" {
+	if in.TencentCloudSite == "intl" {
+		if in.TencentBdaEndpoint == "" || in.TencentBdaEndpoint == "bda.tencentcloudapi.com" {
+			in.TencentBdaEndpoint = "bda.intl.tencentcloudapi.com"
+		}
+	} else if in.TencentBdaEndpoint == "" || in.TencentBdaEndpoint == "bda.intl.tencentcloudapi.com" {
 		in.TencentBdaEndpoint = "bda.tencentcloudapi.com"
 	}
 	if in.TencentCloudSite == "intl" {
@@ -206,11 +251,23 @@ func (in *CloudResourceConfigSaveInp) Filter(ctx context.Context) error {
 	if in.FapiHubEndpoint == "" {
 		in.FapiHubEndpoint = "https://fapihub.com/v2/rembg/"
 	}
+	if in.AliyunEndpoint == "" {
+		in.AliyunEndpoint = "imageseg.cn-shanghai.aliyuncs.com"
+	}
 	if in.FapiHubModel == "" {
 		in.FapiHubModel = "falcon"
 	}
 	if in.FapiHubEnabled == 1 && in.FapiHubApiKey == "" {
 		return gerror.New("启用 FAPIHub 抠图后必须配置 API Key")
+	}
+	if in.MattingProvider == "tencent" && (in.TencentSecretId == "" || in.TencentSecretKey == "") {
+		return gerror.New("使用腾讯云人像抠图必须配置 SecretId 和 SecretKey")
+	}
+	if in.MattingProvider == "aliyun" && (in.AliyunAccessKeyId == "" || in.AliyunAccessKeySecret == "") {
+		return gerror.New("使用阿里云人体分割必须配置 AccessKey ID 和 AccessKey Secret")
+	}
+	if in.MattingProvider == "fapihub" && in.FapiHubEnabled != 1 {
+		return gerror.New("使用 FAPIHub 人像抠图必须启用 FAPIHub")
 	}
 	return nil
 }

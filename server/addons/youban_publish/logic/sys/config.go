@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -193,6 +194,7 @@ func (s *sSysConfig) CloudResourceConfigView(ctx context.Context, in *sysin.Clou
 		return nil, err
 	}
 	conf.TencentSecretKey = maskSecretValue(conf.TencentSecretKey)
+	conf.AliyunAccessKeySecret = maskSecretValue(conf.AliyunAccessKeySecret)
 	conf.FapiHubApiKey = maskSecretValue(conf.FapiHubApiKey)
 	res = &sysin.CloudResourceConfigViewModel{CloudResourceConfig: conf}
 	return
@@ -219,10 +221,60 @@ func (s *sSysConfig) CloudResourceConfigSave(ctx context.Context, in *sysin.Clou
 		}
 		in.FapiHubApiKey = oldConf.FapiHubApiKey
 	}
-	if err := validateCloudResourceCredential(ctx, &in.CloudResourceConfig); err != nil {
-		return err
+	if strings.Contains(in.AliyunAccessKeySecret, "*") {
+		oldConf, err := s.GetCloudResource(ctx)
+		if err != nil {
+			return err
+		}
+		in.AliyunAccessKeySecret = oldConf.AliyunAccessKeySecret
 	}
 	return s.updateConfigGroup(ctx, publishConfigGroupCloudResource, cloudResourceConfigMap(&in.CloudResourceConfig))
+}
+
+func (s *sSysConfig) CloudResourceConfigTest(ctx context.Context, in *sysin.CloudResourceConfigTestInp) (res *sysin.CloudResourceConfigTestModel, err error) {
+	if in == nil {
+		return nil, gerror.New("云资源配置不能为空")
+	}
+	if err = in.Filter(ctx); err != nil {
+		return nil, err
+	}
+	startedAt := time.Now()
+	defer func() {
+		recordCloudResourceUsage(ctx, cloudResourceUsageEvent{
+			ResourceType: sysin.CloudResourceTypeBackgroundMatting,
+			Provider:     in.MattingProvider,
+			Scene:        cloudResourceUsageSceneValidate,
+			Success:      err == nil,
+			Duration:     time.Since(startedAt),
+		})
+	}()
+	if strings.Contains(in.AliyunAccessKeySecret, "*") || strings.Contains(in.TencentSecretKey, "*") || strings.Contains(in.FapiHubApiKey, "*") {
+		oldConf, loadErr := s.GetCloudResource(ctx)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if strings.Contains(in.AliyunAccessKeySecret, "*") {
+			in.AliyunAccessKeySecret = oldConf.AliyunAccessKeySecret
+		}
+		if strings.Contains(in.TencentSecretKey, "*") {
+			in.TencentSecretKey = oldConf.TencentSecretKey
+		}
+		if strings.Contains(in.FapiHubApiKey, "*") {
+			in.FapiHubApiKey = oldConf.FapiHubApiKey
+		}
+	}
+	if in.MattingProvider == "aliyun" {
+		var result *aliyunSegmentBodyResult
+		result, err = aliyunSegmentBodyFromURL(ctx, aliyunSegmentBodyTestImageURL, &in.CloudResourceConfig)
+		if err != nil {
+			return nil, gerror.Wrap(err, "阿里云 SegmentBody 测试失败")
+		}
+		return &sysin.CloudResourceConfigTestModel{Provider: "aliyun", ApiDurationMs: result.ApiDuration.Milliseconds(), DownloadDurationMs: result.DownloadDuration.Milliseconds(), TotalDurationMs: result.TotalDuration.Milliseconds(), OutputBytes: len(result.ImageBytes), RequestId: result.RequestID}, nil
+	}
+	if err = validateCloudResourceCredential(ctx, &in.CloudResourceConfig); err != nil {
+		return nil, err
+	}
+	return &sysin.CloudResourceConfigTestModel{Provider: in.MattingProvider}, nil
 }
 
 func (s *sSysConfig) AntiScanConfigView(ctx context.Context, in *sysin.AntiScanConfigViewInp) (res *sysin.AntiScanConfigViewModel, err error) {

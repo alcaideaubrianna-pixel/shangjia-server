@@ -12,6 +12,7 @@ func TestCloudResourceUsageListFilter(t *testing.T) {
 		CloudResourceUsageQueryInp: CloudResourceUsageQueryInp{
 			StartDate: "2026-08-01",
 			EndDate:   "2026-08-03",
+			Provider:  " ALIYUN ",
 		},
 		PageReq: form.PageReq{PerPage: 500},
 	}
@@ -20,6 +21,20 @@ func TestCloudResourceUsageListFilter(t *testing.T) {
 	}
 	if in.Page != 1 || in.PerPage != 100 || !in.Pagination {
 		t.Fatalf("unexpected pagination: page=%d pageSize=%d pagination=%v", in.Page, in.PerPage, in.Pagination)
+	}
+	if in.Provider != CloudResourceProviderAliyun {
+		t.Fatalf("unexpected normalized provider: %q", in.Provider)
+	}
+}
+
+func TestCloudResourceUsageListFilterRejectsProvider(t *testing.T) {
+	in := &CloudResourceUsageListInp{CloudResourceUsageQueryInp: CloudResourceUsageQueryInp{
+		StartDate: "2026-08-01",
+		EndDate:   "2026-08-03",
+		Provider:  "unknown",
+	}}
+	if err := in.Filter(context.Background()); err == nil {
+		t.Fatal("expected unknown provider to be rejected")
 	}
 }
 

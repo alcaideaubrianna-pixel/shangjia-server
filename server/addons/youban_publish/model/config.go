@@ -39,17 +39,21 @@ type AutoDeleteConfig struct {
 }
 
 type CloudResourceConfig struct {
-	TencentVisionEnabled int    `json:"tencentVisionEnabled"`
-	TencentCloudSite     string `json:"tencentCloudSite"`
-	TencentSecretId      string `json:"tencentSecretId"`
-	TencentSecretKey     string `json:"tencentSecretKey"`
-	TencentRegion        string `json:"tencentRegion"`
-	TencentBdaEndpoint   string `json:"tencentBdaEndpoint"`
-	TencentIaiEndpoint   string `json:"tencentIaiEndpoint"`
-	FapiHubEnabled       int    `json:"fapiHubEnabled"`
-	FapiHubApiKey        string `json:"fapiHubApiKey"`
-	FapiHubEndpoint      string `json:"fapiHubEndpoint"`
-	FapiHubModel         string `json:"fapiHubModel"`
+	MattingProvider       string `json:"mattingProvider"`
+	AliyunAccessKeyId     string `json:"aliyunAccessKeyId"`
+	AliyunAccessKeySecret string `json:"aliyunAccessKeySecret"`
+	AliyunEndpoint        string `json:"aliyunEndpoint"`
+	TencentVisionEnabled  int    `json:"tencentVisionEnabled"`
+	TencentCloudSite      string `json:"tencentCloudSite"`
+	TencentSecretId       string `json:"tencentSecretId"`
+	TencentSecretKey      string `json:"tencentSecretKey"`
+	TencentRegion         string `json:"tencentRegion"`
+	TencentBdaEndpoint    string `json:"tencentBdaEndpoint"`
+	TencentIaiEndpoint    string `json:"tencentIaiEndpoint"`
+	FapiHubEnabled        int    `json:"fapiHubEnabled"`
+	FapiHubApiKey         string `json:"fapiHubApiKey"`
+	FapiHubEndpoint       string `json:"fapiHubEndpoint"`
+	FapiHubModel          string `json:"fapiHubModel"`
 }
 
 type AntiScanConfig struct {

@@ -32,20 +32,22 @@ type cloudResourceUsageOwner struct {
 type cloudResourceUsageEvent struct {
 	cloudResourceUsageOwner
 	ResourceType string
+	Provider     string
 	Scene        string
 	Success      bool
 	Duration     time.Duration
 }
 
 func recordCloudResourceUsage(ctx context.Context, event cloudResourceUsageEvent) {
-	if strings.TrimSpace(event.ResourceType) == "" {
+	event.Provider = strings.ToLower(strings.TrimSpace(event.Provider))
+	if strings.TrimSpace(event.ResourceType) == "" || event.Provider == "" {
 		return
 	}
 	rollupEvent := event
 	rollupEvent.TenantId = cloudResourceUsageRollupTenantId
 	rollupEvent.AccountId = cloudResourceUsageRollupAccountId
 	if err := upsertCloudResourceUsage(ctx, event, rollupEvent); err != nil {
-		g.Log().Warningf(ctx, "记录云资源调用统计失败 accountId:%d resource:%s scene:%s err:%+v", event.AccountId, event.ResourceType, event.Scene, err)
+		g.Log().Warningf(ctx, "记录云资源调用统计失败 accountId:%d resource:%s provider:%s scene:%s err:%+v", event.AccountId, event.ResourceType, event.Provider, event.Scene, err)
 	}
 }
 
@@ -54,7 +56,7 @@ func upsertCloudResourceUsage(ctx context.Context, events ...cloudResourceUsageE
 		return nil
 	}
 	now := gtime.Now()
-	args := make([]interface{}, 0, len(events)*12)
+	args := make([]interface{}, 0, len(events)*13)
 	valueGroups := make([]string, 0, len(events))
 	for _, event := range events {
 		successCount := 0
@@ -63,11 +65,12 @@ func upsertCloudResourceUsage(ctx context.Context, events ...cloudResourceUsageE
 			successCount = 1
 			failureCount = 0
 		}
-		valueGroups = append(valueGroups, "(?,?,?,?,?,?,?,?,?,?,?,?)")
+		valueGroups = append(valueGroups, "(?,?,?,?,?,?,?,?,?,?,?,?,?)")
 		args = append(args,
 			event.TenantId,
 			event.AccountId,
 			event.ResourceType,
+			event.Provider,
 			event.Scene,
 			now.Format("Y-m-d"),
 			1,
@@ -83,9 +86,9 @@ func upsertCloudResourceUsage(ctx context.Context, events ...cloudResourceUsageE
 	if strings.ToLower(g.DB().GetConfig().Type) == consts.DBPgsql {
 		_, err := g.DB().Exec(ctx, `
 INSERT INTO "hg_youban_publish_cloud_resource_usage"
-("tenant_id","account_id","resource_type","scene","usage_date","request_count","success_count","failure_count","total_duration_ms","last_called_at","created_at","updated_at")
+("tenant_id","account_id","resource_type","provider","scene","usage_date","request_count","success_count","failure_count","total_duration_ms","last_called_at","created_at","updated_at")
 VALUES `+valuesSQL+`
-ON CONFLICT ("tenant_id","account_id","resource_type","scene","usage_date") DO UPDATE SET
+ON CONFLICT ("tenant_id","account_id","resource_type","provider","scene","usage_date") DO UPDATE SET
 "request_count"="hg_youban_publish_cloud_resource_usage"."request_count"+EXCLUDED."request_count",
 "success_count"="hg_youban_publish_cloud_resource_usage"."success_count"+EXCLUDED."success_count",
 "failure_count"="hg_youban_publish_cloud_resource_usage"."failure_count"+EXCLUDED."failure_count",
@@ -96,7 +99,7 @@ ON CONFLICT ("tenant_id","account_id","resource_type","scene","usage_date") DO U
 	}
 	_, err := g.DB().Exec(ctx, `
 INSERT INTO `+"`"+cloudResourceUsageTable+"`"+`
-(`+"`tenant_id`,`account_id`,`resource_type`,`scene`,`usage_date`,`request_count`,`success_count`,`failure_count`,`total_duration_ms`,`last_called_at`,`created_at`,`updated_at`"+`)
+(`+"`tenant_id`,`account_id`,`resource_type`,`provider`,`scene`,`usage_date`,`request_count`,`success_count`,`failure_count`,`total_duration_ms`,`last_called_at`,`created_at`,`updated_at`"+`)
 VALUES `+valuesSQL+`
 ON DUPLICATE KEY UPDATE
 `+"`request_count`=`request_count`+VALUES(`request_count`),"+`
@@ -136,7 +139,7 @@ func (s *sSysConfig) CloudResourceUsageDashboard(ctx context.Context, in *sysin.
 	}
 
 	breakdown := make([]*sysin.CloudResourceUsageBreakdownModel, 0)
-	if err = rollupModel.Clone().Fields(cloudResourceUsageBreakdownFields()).Group("u.resource_type").OrderDesc("request_count").Scan(&breakdown); err != nil {
+	if err = rollupModel.Clone().Fields(cloudResourceUsageBreakdownFields()).Group("u.resource_type,u.provider").OrderDesc("request_count").Scan(&breakdown); err != nil {
 		return nil, gerror.Wrap(err, "读取云资源类型分布失败")
 	}
 	for _, item := range breakdown {
@@ -191,6 +194,9 @@ func cloudResourceUsageFilterQuery(ctx context.Context, in *sysin.CloudResourceU
 		WhereLTE("u.usage_date", in.EndDate)
 	if in.ResourceType != "" {
 		model = model.Where("u.resource_type", in.ResourceType)
+	}
+	if in.Provider != "" {
+		model = model.Where("u.provider", in.Provider)
 	}
 	return model
 }
@@ -255,6 +261,7 @@ SUM(u.total_duration_ms) AS total_duration_ms`
 
 func cloudResourceUsageBreakdownFields() string {
 	return `u.resource_type,
+u.provider,
 SUM(u.request_count) AS request_count,
 SUM(u.success_count) AS success_count,
 SUM(u.failure_count) AS failure_count,

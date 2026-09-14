@@ -27,6 +27,14 @@ func (c *cPublishAdmin) CloudResourceConfigSave(ctx context.Context, req *publis
 	return
 }
 
+func (c *cPublishAdmin) CloudResourceConfigTest(ctx context.Context, req *publish.AdminCloudResourceConfigTestReq) (res *publish.AdminCloudResourceConfigTestRes, err error) {
+	data, err := service.SysConfig().CloudResourceConfigTest(ctx, &req.CloudResourceConfigTestInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminCloudResourceConfigTestRes{CloudResourceConfigTestModel: data}, nil
+}
+
 func (c *cPublishAdmin) AntiScanPreview(ctx context.Context, req *publish.AdminAntiScanPreviewReq) (res *publish.AdminAntiScanPreviewRes, err error) {
 	file := g.RequestFromCtx(ctx).GetUploadFile("image")
 	data, err := service.SysPublish().AdminAntiScanPreview(ctx, &req.AntiScanPreviewInp, file)

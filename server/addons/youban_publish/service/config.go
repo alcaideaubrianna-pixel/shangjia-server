@@ -20,6 +20,7 @@ type ISysConfig interface {
 	AutoDeleteConfigSave(ctx context.Context, in *sysin.AutoDeleteConfigSaveInp) error
 	CloudResourceConfigView(ctx context.Context, in *sysin.CloudResourceConfigViewInp) (res *sysin.CloudResourceConfigViewModel, err error)
 	CloudResourceConfigSave(ctx context.Context, in *sysin.CloudResourceConfigSaveInp) error
+	CloudResourceConfigTest(ctx context.Context, in *sysin.CloudResourceConfigTestInp) (res *sysin.CloudResourceConfigTestModel, err error)
 	CloudResourceUsageDashboard(ctx context.Context, in *sysin.CloudResourceUsageDashboardInp) (res *sysin.CloudResourceUsageDashboardModel, err error)
 	CloudResourceUsageList(ctx context.Context, in *sysin.CloudResourceUsageListInp) (list []*sysin.CloudResourceUsageModel, totalCount int, err error)
 	AntiScanConfigView(ctx context.Context, in *sysin.AntiScanConfigViewInp) (res *sysin.AntiScanConfigViewModel, err error)
