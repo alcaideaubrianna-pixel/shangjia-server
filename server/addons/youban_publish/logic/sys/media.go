@@ -721,18 +721,28 @@ func normalizeMediaListFileURL(list []*sysin.MediaModel) {
 		item.OriginalStoragePath = normalizeStoredMediaPath(item.OriginalStoragePath)
 		item.EditedStoragePath = normalizeStoredMediaPath(item.EditedStoragePath)
 		item.PosterStoragePath = normalizeStoredMediaPath(item.PosterStoragePath)
-		item.FileUrl = normalizeMediaFileURL(item.FileUrl, item.StoragePath)
-		item.OriginalFileUrl = normalizeMediaFileURL(item.OriginalFileUrl, item.OriginalStoragePath)
-		item.EditedFileUrl = normalizeMediaFileURL(item.EditedFileUrl, item.EditedStoragePath)
-		item.PosterUrl = normalizeMediaFileURL(item.PosterUrl, item.PosterStoragePath)
+		item.FileUrl = normalizeMediaPresentationURL(item.FileUrl, item.StoragePath)
+		item.OriginalFileUrl = normalizeMediaPresentationURL(item.OriginalFileUrl, item.OriginalStoragePath)
+		item.EditedFileUrl = normalizeMediaPresentationURL(item.EditedFileUrl, item.EditedStoragePath)
+		item.PosterUrl = normalizeMediaPresentationURL(item.PosterUrl, item.PosterStoragePath)
 		asset := newProfileMediaFromModel(item).EffectiveAsset()
 		if strings.TrimSpace(asset.FileUrl) != "" {
-			item.FileUrl = normalizeMediaFileURL(asset.FileUrl, asset.StoragePath)
+			item.FileUrl = normalizeMediaPresentationURL(asset.FileUrl, asset.StoragePath)
 		}
 		if strings.TrimSpace(asset.StoragePath) != "" {
 			item.StoragePath = asset.StoragePath
 		}
 	}
+}
+
+func normalizeMediaPresentationURL(fileURL string, storagePath string) string {
+	storagePath = normalizeStoredMediaPath(storagePath)
+	if storagePath != "" && !isAbsoluteMediaURL(storagePath) {
+		if cdnBase := mediaContentCDNBaseURL(); cdnBase != "" {
+			return cdnBase + "/" + strings.TrimLeft(storagePath, "/")
+		}
+	}
+	return normalizeMediaFileURL(fileURL, storagePath)
 }
 
 func isLikelyEditedMedia(item *sysin.MediaModel) bool {

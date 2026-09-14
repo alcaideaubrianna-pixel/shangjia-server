@@ -22,3 +22,11 @@ func TestNormalizeMediaFileURLUsesCosPublicURLForRelativeObject(t *testing.T) {
 		t.Fatalf("unexpected COS public URL: %q", actual)
 	}
 }
+
+func TestNormalizeMediaPresentationURLUsesConfiguredCDN(t *testing.T) {
+	path := "hotgo/file/2026-09-14/example.mp4"
+	want := mediaContentCDNBaseURL() + "/" + path
+	if actual := normalizeMediaPresentationURL("https://img.yuebanby.com/"+path, path); actual != want {
+		t.Fatalf("unexpected presentation URL: got %q want %q", actual, want)
+	}
+}

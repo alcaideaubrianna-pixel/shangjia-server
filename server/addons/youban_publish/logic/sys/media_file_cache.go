@@ -120,6 +120,11 @@ func mediaFileCacheRemoteSources(ctx context.Context, media *telegramMediaItem) 
 	// whenever one is available, and only use the Telegram URL as a fallback.
 	telegramSource := strings.TrimSpace(media.FileUrl)
 	if media.AttachmentId <= 0 {
+		objectPath := normalizeStoredMediaPath(media.StoragePath)
+		if objectPath != "" && !isAbsoluteMediaURL(objectPath) {
+			add(mediaFileCacheWorkerURL(ctx, objectPath), objectPath, "cos", objectPath)
+			add(mediaFileCacheFallbackURL(ctx, objectPath), objectPath, "cos", objectPath)
+		}
 		add(telegramSource, "", "", "")
 		return sources, nil
 	}
@@ -131,10 +136,39 @@ func mediaFileCacheRemoteSources(ctx context.Context, media *telegramMediaItem) 
 		drive := strings.TrimSpace(row["drive"].String())
 		objectPath := firstNonEmpty(row["path"].String(), row["file_url"].String())
 		publicURL := storager.LastUrl(ctx, firstNonEmpty(row["file_url"].String(), row["path"].String()), drive)
+		if strings.EqualFold(drive, "cos") {
+			add(mediaFileCacheWorkerURL(ctx, objectPath), fmt.Sprintf("attachment:%d", media.AttachmentId), drive, objectPath)
+		}
 		add(publicURL, fmt.Sprintf("attachment:%d", media.AttachmentId), drive, objectPath)
+		if strings.EqualFold(drive, "cos") {
+			add(mediaFileCacheFallbackURL(ctx, objectPath), fmt.Sprintf("attachment:%d", media.AttachmentId), drive, objectPath)
+		}
 	}
 	add(telegramSource, "", "", "")
 	return sources, nil
+}
+
+func mediaFileCacheWorkerURL(ctx context.Context, objectPath string) string {
+	return mediaFileCacheCDNURL(ctx, "youbanPublish.mediaFileCache.workerCdnBaseUrl", objectPath)
+}
+
+func mediaFileCacheFallbackURL(ctx context.Context, objectPath string) string {
+	return mediaFileCacheCDNURL(ctx, "youbanPublish.mediaFileCache.fallbackCdnBaseUrl", objectPath)
+}
+
+func mediaFileCacheCDNURL(ctx context.Context, configKey string, objectPath string) string {
+	base := strings.TrimRight(g.Cfg().MustGet(ctx, configKey, "").String(), "/")
+	if base == "" {
+		return ""
+	}
+	objectPath = normalizeStoredMediaPath(objectPath)
+	if parsed, err := url.Parse(objectPath); err == nil && parsed.Hostname() != "" {
+		objectPath = strings.TrimLeft(parsed.Path, "/")
+	}
+	if objectPath == "" {
+		return ""
+	}
+	return base + "/" + strings.TrimLeft(objectPath, "/")
 }
 
 func mediaFileCacheSourceDownloader(ctx context.Context, source mediaFileCacheSource) func(context.Context, string, string) error {

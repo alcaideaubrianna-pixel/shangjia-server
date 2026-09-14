@@ -301,7 +301,7 @@ contentImport:
 
 # 内容展示
 content:
-  cdnBaseUrl: "https://img.yuebanby.com"          # 图片/视频 CDN 域名，如：https://cdn.example.com；为空时使用原始 COS 地址
+  cdnBaseUrl: "https://img.xiaohuiji.cc"          # 前端图片/视频 CDN 域名；为空时使用原始 COS 地址
 
 # 悦伴聊天
 youbanChat:
@@ -379,6 +379,8 @@ runtime:
 youbanPublish:
   mediaFileCache:
     cosDownloadMode: "cdn"     # cdn: 服务端经公共CDN下载；origin: 通过COS SDK从Bucket源站下载，失败降级CDN
+    workerCdnBaseUrl: "https://img.yuebanby.com" # Worker 大流量下载 CDN；为空时使用上传配置的公共地址
+    fallbackCdnBaseUrl: "https://img.xiaohuiji.cc" # Worker 主 CDN 失败后的备用地址
   telegramDeleteFallback:
     intervalSeconds: 60        # 协议号旧消息删除任务的首次等待时间
     jitterSeconds: 30          # 在最小间隔上增加的确定性抖动上限
