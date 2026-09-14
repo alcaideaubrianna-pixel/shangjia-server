@@ -228,6 +228,13 @@ func (s *sSysConfig) CloudResourceConfigSave(ctx context.Context, in *sysin.Clou
 		}
 		in.AliyunAccessKeySecret = oldConf.AliyunAccessKeySecret
 	}
+	if strings.Contains(in.FacePlusApiSecret, "*") {
+		oldConf, err := s.GetCloudResource(ctx)
+		if err != nil {
+			return err
+		}
+		in.FacePlusApiSecret = oldConf.FacePlusApiSecret
+	}
 	if err := s.ensureCloudResourceConfigRows(ctx); err != nil {
 		return gerror.Wrap(err, "初始化云资源配置失败")
 	}

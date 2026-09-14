@@ -499,7 +499,10 @@ func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash strin
 	var segmentURL string
 	var err error
 	providerName := "aliyun-matting"
-	if provider == "aliyun" {
+	if provider == "facepp" {
+		segmentURL, err = facePPPortraitMatting(ctx, imageBytes, imageHash, conf)
+		providerName = "facepp-matting"
+	} else if provider == "aliyun" {
 		segmentURL, err = aliyunCOSPortraitMatting(ctx, imageBytes, imageHash, conf)
 	} else if provider == "tencent" {
 		providerName = "tencent-ci-matting"
@@ -545,6 +548,9 @@ func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash strin
 }
 
 func antiScanMattingProvider(conf *model.CloudResourceConfig) string {
+	if conf != nil && strings.EqualFold(strings.TrimSpace(conf.MattingProvider), "facepp") {
+		return "facepp"
+	}
 	if conf != nil && strings.EqualFold(strings.TrimSpace(conf.MattingProvider), "aliyun") {
 		return "aliyun"
 	}

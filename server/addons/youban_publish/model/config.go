@@ -56,6 +56,10 @@ type CloudResourceConfig struct {
 	FapiHubApiKey         string `json:"fapiHubApiKey"`
 	FapiHubEndpoint       string `json:"fapiHubEndpoint"`
 	FapiHubModel          string `json:"fapiHubModel"`
+	FacePlusApiKey        string `json:"facePlusApiKey"`
+	FacePlusApiSecret     string `json:"facePlusApiSecret"`
+	FacePlusEndpoint      string `json:"facePlusEndpoint"`
+	FacePlusConcurrency   int    `json:"facePlusConcurrency"`
 }
 
 type AntiScanConfig struct {

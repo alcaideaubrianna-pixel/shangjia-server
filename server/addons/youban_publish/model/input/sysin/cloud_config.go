@@ -17,6 +17,7 @@ const (
 	CloudResourceProviderAliyun        = "aliyun"
 	CloudResourceProviderTencent       = "tencent"
 	CloudResourceProviderFapiHub       = "fapihub"
+	CloudResourceProviderFacePlus      = "facepp"
 	CloudResourceProviderLegacy        = "legacy"
 )
 
@@ -210,6 +211,9 @@ func filterCloudResourceConfig(ctx context.Context, in *model.CloudResourceConfi
 	in.FapiHubApiKey = strings.TrimSpace(in.FapiHubApiKey)
 	in.FapiHubEndpoint = strings.TrimSpace(in.FapiHubEndpoint)
 	in.FapiHubModel = strings.TrimSpace(in.FapiHubModel)
+	in.FacePlusApiKey = strings.TrimSpace(in.FacePlusApiKey)
+	in.FacePlusApiSecret = strings.TrimSpace(in.FacePlusApiSecret)
+	in.FacePlusEndpoint = strings.TrimSpace(in.FacePlusEndpoint)
 	if err := checkSwitch(in.TencentVisionEnabled, "腾讯云视觉开关"); err != nil {
 		return err
 	}
@@ -218,7 +222,7 @@ func filterCloudResourceConfig(ctx context.Context, in *model.CloudResourceConfi
 	if in.MattingProvider == "" {
 		in.MattingProvider = "aliyun"
 	}
-	if in.MattingProvider != "aliyun" && in.MattingProvider != "tencent" && in.MattingProvider != "fapihub" {
+	if in.MattingProvider != "aliyun" && in.MattingProvider != "tencent" && in.MattingProvider != "fapihub" && in.MattingProvider != "facepp" {
 		return gerror.New("人像抠图来源不合法")
 	}
 	if err := checkSwitch(in.FapiHubEnabled, "FAPIHub 抠图开关"); err != nil {
@@ -258,6 +262,15 @@ func filterCloudResourceConfig(ctx context.Context, in *model.CloudResourceConfi
 	if in.AliyunEndpoint == "" {
 		in.AliyunEndpoint = "imageseg.cn-shanghai.aliyuncs.com"
 	}
+	if in.FacePlusEndpoint == "" {
+		in.FacePlusEndpoint = "https://api-cn.faceplusplus.com/humanbodypp/v2/segment"
+	}
+	if in.FacePlusConcurrency <= 0 {
+		in.FacePlusConcurrency = 2
+	}
+	if in.FacePlusConcurrency > 20 {
+		return gerror.New("Face++ 并发数不能超过 20")
+	}
 	if in.FapiHubModel == "" {
 		in.FapiHubModel = "falcon"
 	}
@@ -275,6 +288,9 @@ func filterCloudResourceConfig(ctx context.Context, in *model.CloudResourceConfi
 	}
 	if in.MattingProvider == "aliyun" && (in.AliyunAccessKeyId == "" || in.AliyunAccessKeySecret == "") {
 		return gerror.New("使用阿里云人体分割必须配置 AccessKey ID 和 AccessKey Secret")
+	}
+	if in.MattingProvider == "facepp" && (in.FacePlusApiKey == "" || in.FacePlusApiSecret == "") {
+		return gerror.New("使用 Face++ 人体抠图必须配置 API Key 和 API Secret")
 	}
 	if in.MattingProvider == "fapihub" && in.FapiHubEnabled != 1 {
 		return gerror.New("使用 FAPIHub 人像抠图必须启用 FAPIHub")

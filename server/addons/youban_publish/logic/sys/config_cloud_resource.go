@@ -12,7 +12,7 @@ import (
 
 func defaultCloudResourceConfig() *model.CloudResourceConfig {
 	return &model.CloudResourceConfig{
-		MattingProvider:      "aliyun",
+		MattingProvider:      "facepp",
 		AliyunEndpoint:       "imageseg.cn-shanghai.aliyuncs.com",
 		TencentVisionEnabled: 0,
 		TencentCloudSite:     "intl",
@@ -23,6 +23,8 @@ func defaultCloudResourceConfig() *model.CloudResourceConfig {
 		FapiHubEnabled:       0,
 		FapiHubEndpoint:      "https://fapihub.com/v2/rembg/",
 		FapiHubModel:         "falcon",
+		FacePlusEndpoint:     "https://api-cn.faceplusplus.com/humanbodypp/v2/segment",
+		FacePlusConcurrency:  2,
 	}
 }
 
@@ -45,6 +47,10 @@ func cloudResourceConfigMap(conf *model.CloudResourceConfig) g.Map {
 		"fapiHubApiKey":         conf.FapiHubApiKey,
 		"fapiHubEndpoint":       conf.FapiHubEndpoint,
 		"fapiHubModel":          conf.FapiHubModel,
+		"facePlusApiKey":        conf.FacePlusApiKey,
+		"facePlusApiSecret":     conf.FacePlusApiSecret,
+		"facePlusEndpoint":      conf.FacePlusEndpoint,
+		"facePlusConcurrency":   conf.FacePlusConcurrency,
 	}
 }
 
@@ -53,6 +59,20 @@ func validateCloudResourceCredential(ctx context.Context, conf *model.CloudResou
 		_, err := aliyunSegmentBodyFromURL(ctx, aliyunSegmentBodyTestImageURL, conf)
 		if err != nil {
 			return gerror.Wrap(err, "阿里云 SegmentBody 配置校验失败")
+		}
+		return nil
+	}
+	if conf.MattingProvider == "facepp" {
+		imageBytes, _, readErr := readAntiScanPreviewImage(ctx, nil, 1)
+		if readErr != nil {
+			return readErr
+		}
+		imageHash, hashErr := antiScanImageHash(imageBytes)
+		if hashErr != nil {
+			return hashErr
+		}
+		if _, callErr := facePPPortraitMatting(ctx, imageBytes, "config-"+imageHash[:16], conf); callErr != nil {
+			return gerror.Wrap(callErr, "Face++ 人体抠图配置校验失败")
 		}
 		return nil
 	}
