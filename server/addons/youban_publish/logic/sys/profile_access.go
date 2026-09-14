@@ -128,18 +128,28 @@ func (s *sSysPublish) allowedProfileIds(ctx context.Context, ids []int64, tenant
 }
 
 func (s *sSysPublish) ensureProfileChannels(ctx context.Context, ids []int64, tenantId int64) error {
+	return s.ensureAvailableProfileChannels(ctx, ids, tenantId, true)
+}
+
+func (s *sSysPublish) ensureActiveProfileChannels(ctx context.Context, ids []int64, tenantId int64) error {
+	return s.ensureAvailableProfileChannels(ctx, ids, tenantId, false)
+}
+
+func (s *sSysPublish) ensureAvailableProfileChannels(ctx context.Context, ids []int64, tenantId int64, requireVisible bool) error {
 	ids = uniqueIds(ids)
 	if len(ids) == 0 {
 		return nil
 	}
-	count, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+	model := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 		WhereIn("id", ids).
 		Where("tenant_id", tenantId).
 		Where("publish_direction", "up").
-		Where("publish_visible", 1).
 		Where("status", 1).
-		WhereNull("deleted_at").
-		Count()
+		WhereNull("deleted_at")
+	if requireVisible {
+		model = model.Where("publish_visible", 1)
+	}
+	count, err := model.Count()
 	if err != nil {
 		return gerror.Wrap(err, "检查推送频道失败")
 	}

@@ -39,6 +39,7 @@ func ensureMaterialImportTaskChannelColumn(ctx context.Context) error {
 
 func (s *sSysPublish) materialImportTargetChannelIds(ctx context.Context, requested []int64, tenantId int64) ([]int64, error) {
 	channelIds := uniqueIds(requested)
+	explicitlyRequested := len(channelIds) > 0
 	if len(channelIds) == 0 {
 		var rows []struct {
 			Id int64 `json:"id"`
@@ -64,7 +65,13 @@ func (s *sSysPublish) materialImportTargetChannelIds(ctx context.Context, reques
 	if len(channelIds) == 0 {
 		return nil, gerror.New("请至少选择一个上架频道")
 	}
-	if err := s.ensureProfileChannels(ctx, channelIds, tenantId); err != nil {
+	var err error
+	if explicitlyRequested {
+		err = s.ensureActiveProfileChannels(ctx, channelIds, tenantId)
+	} else {
+		err = s.ensureProfileChannels(ctx, channelIds, tenantId)
+	}
+	if err != nil {
 		return nil, err
 	}
 	return channelIds, nil
