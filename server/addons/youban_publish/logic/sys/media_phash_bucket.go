@@ -21,8 +21,9 @@ import (
 const (
 	publishMediaPHashAliasBucketTable = "hg_youban_publish_media_phash_alias_bucket"
 	mediaPHashBucketCacheVersionKey   = "youban_publish:media_phash_bucket:version:v5"
-	mediaPHashBucketResultTTL         = 365 * 24 * time.Hour
+	mediaPHashBucketResultTTL         = 10 * time.Minute
 	mediaPHashBucketMaxCandidates     = 50000
+	mediaPHashBucketMaxCachedRows     = 2000
 	mediaPHashBucketMaxScopedIds      = 32
 	mediaPHashCandidateWorkMem        = "64MB"
 	mediaPHashProfileDeleteBatchSize  = 500
@@ -304,7 +305,9 @@ func mediaPHashBucketCandidateRowsWithScopes(ctx context.Context, normalizedHash
 		if queryErr != nil {
 			return nil, queryErr
 		}
-		_ = cache.Instance().Set(ctx, cacheKey, rows, mediaPHashBucketResultTTL)
+		if len(rows) <= mediaPHashBucketMaxCachedRows {
+			_ = cache.Instance().Set(ctx, cacheKey, rows, mediaPHashBucketResultTTL)
+		}
 		return rows, nil
 	})
 	if err != nil {

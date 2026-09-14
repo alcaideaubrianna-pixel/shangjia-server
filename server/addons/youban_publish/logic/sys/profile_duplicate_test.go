@@ -112,6 +112,15 @@ func TestDuplicateScanCacheLifetimes(t *testing.T) {
 	}
 }
 
+func TestPHashCandidateCacheIsShortAndBounded(t *testing.T) {
+	if mediaPHashBucketResultTTL > 10*time.Minute {
+		t.Fatalf("pHash candidate cache TTL is too long: %s", mediaPHashBucketResultTTL)
+	}
+	if mediaPHashBucketMaxCachedRows > 2000 {
+		t.Fatalf("pHash candidate cache row limit is too large: %d", mediaPHashBucketMaxCachedRows)
+	}
+}
+
 func TestDuplicateScanSessionRejectsPreviousAlgorithm(t *testing.T) {
 	account := &sysin.AccountModel{Id: 7, TenantId: 6}
 	session := newDuplicateScanSession(account)
@@ -150,6 +159,33 @@ func TestDuplicateScanSessionCompressionRoundTrip(t *testing.T) {
 	legacy, err := decodeDuplicateScanSession(plain)
 	if err != nil || legacy.TenantId != session.TenantId {
 		t.Fatalf("legacy JSON session must remain readable: session=%#v err=%v", legacy, err)
+	}
+}
+
+func TestDuplicateScanMetadataStaysBounded(t *testing.T) {
+	session := newDuplicateScanSession(&sysin.AccountModel{Id: 7, TenantId: 6})
+	for id := int64(1); id <= 100000; id++ {
+		session.SignatureIds["text:same"] = append(session.SignatureIds["text:same"], id)
+		session.PHashSets[id] = []string{"d87a07c29151f7c5"}
+	}
+	session.ScannedTotal = 100000
+	data, err := encodeDuplicateScanSession(duplicateScanMetadata(session))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) > 1024 {
+		t.Fatalf("progress metadata must stay bounded for 100k profiles: %d bytes", len(data))
+	}
+}
+
+func TestDuplicatePHashScanBucketsBoundLookupCost(t *testing.T) {
+	keys := duplicatePHashBucketKeys([]string{"d87a07c29151f7c5"}, true)
+	if len(keys) != 8*37 {
+		t.Fatalf("unexpected scan LSH probe count: %d", len(keys))
+	}
+	exact := duplicatePHashBucketKeys([]string{"d87a07c29151f7c5"}, false)
+	if len(exact) != 8 {
+		t.Fatalf("unexpected exact scan bucket count: %d", len(exact))
 	}
 }
 

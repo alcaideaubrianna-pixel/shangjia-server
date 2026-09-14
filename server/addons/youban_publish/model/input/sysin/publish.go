@@ -865,6 +865,8 @@ type AdminNoteDuplicateScanModel struct {
 	ScanCursor      int64                           `json:"scanCursor" dc:"扫描资料游标"`
 	ScannedTotal    int                             `json:"scannedTotal" dc:"已扫描资料数"`
 	ScanComplete    bool                            `json:"scanComplete" dc:"扫描是否完成"`
+	ScanStatus      string                          `json:"scanStatus" dc:"扫描状态：queued/running/completed/failed"`
+	ScanError       string                          `json:"scanError,omitempty" dc:"扫描失败原因"`
 }
 
 type AdminNoteDuplicateScanInp struct {

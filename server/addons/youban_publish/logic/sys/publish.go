@@ -31,6 +31,7 @@ type sSysPublish struct {
 	autoDeleteQueueServer *asynq.Server
 	backgroundQueueServer *asynq.Server
 	profileQueueServer    *asynq.Server
+	duplicateQueueServer  *asynq.Server
 	historyQueueServer    *asynq.Server
 
 	telegramChannelMu    publishRuntimeMutex

@@ -13,6 +13,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/util/guid"
+	"github.com/hibiken/asynq"
 
 	"hotgo/addons/youban_publish/consts"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -25,7 +26,7 @@ const (
 	duplicateScanBatchSize        = 500
 	duplicateScanSessionTTL       = 24 * time.Hour
 	duplicateScanResultTTL        = 15 * time.Minute
-	duplicateScanAlgorithmVersion = 2
+	duplicateScanAlgorithmVersion = 3
 )
 
 type duplicateImageRow struct {
@@ -62,6 +63,14 @@ type duplicateScanSession struct {
 	PHashSets        map[int64][]string `json:"pHashSets,omitempty"`
 	TenantId         int64              `json:"tenantId"`
 	ResultCacheKey   string             `json:"resultCacheKey,omitempty"`
+	Status           string             `json:"status"`
+	Error            string             `json:"error,omitempty"`
+}
+
+type duplicateScanQueuePayload struct {
+	Token   string                          `json:"token"`
+	Account sysin.AccountModel              `json:"account"`
+	Input   sysin.AdminNoteDuplicateScanInp `json:"input"`
 }
 
 func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.AdminNoteDuplicateScanInp) (*sysin.AdminNoteDuplicateScanModel, error) {
@@ -94,50 +103,91 @@ func (s *sSysPublish) AdminNoteDuplicateScan(ctx context.Context, in *sysin.Admi
 		in.ScanToken = guid.S()
 		session = newDuplicateScanSession(account)
 		session.ResultCacheKey = resultCacheKey
+		session.Status = "queued"
 		if err = saveDuplicateScanProgress(ctx, in.ScanToken, session); err != nil {
 			return nil, gerror.Wrap(err, "创建重复资料扫描会话失败")
 		}
+		if err = s.enqueueDuplicateScan(ctx, in.ScanToken, account, in); err != nil {
+			_, _ = cache.Instance().Remove(ctx, duplicateScanSessionKey(in.ScanToken))
+			return nil, err
+		}
 		g.Log().Infof(ctx, "重复资料扫描任务已创建 scanTaskId:%s tenantId:%d accountId:%d", in.ScanToken, account.TenantId, account.Id)
 		return duplicateScanProgressResult(in.ScanToken, session, false), nil
-	} else {
-		session, err = loadDuplicateScanSession(ctx, in.ScanToken)
-		if err != nil {
-			return nil, err
-		}
-		if err = validateDuplicateScanSessionOwner(session, account); err != nil {
-			return nil, err
-		}
-		if in.ScanCursor != session.ScanCursor {
-			return nil, gerror.New("扫描游标已失效，请重新开始扫描")
-		}
 	}
-	ids, err := s.duplicateScanProfileIdPage(ctx, &in.NoteListInp, account, session.ScanCursor)
+	session, err = loadDuplicateScanSession(ctx, in.ScanToken)
 	if err != nil {
 		return nil, err
 	}
-	if len(ids) > 0 {
-		if err = s.appendDuplicateScanSignatures(ctx, session, ids); err != nil {
-			g.Log().Warningf(ctx, "重复资料扫描分片失败 scanTaskId:%s cursor:%d err:%+v", in.ScanToken, session.ScanCursor, err)
-			return nil, err
-		}
-		session.ScanCursor = ids[len(ids)-1]
-		session.ScannedTotal += len(ids)
+	if err = validateDuplicateScanSessionOwner(session, account); err != nil {
+		return nil, err
 	}
-	complete := len(ids) < duplicateScanChunkSize
-	g.Log().Infof(ctx, "重复资料扫描分片完成 scanTaskId:%s scanned:%d batch:%d cursor:%d duplicate:%d incomplete:%d complete:%t",
-		in.ScanToken, session.ScannedTotal, len(ids), session.ScanCursor, session.DuplicateTotal, session.IncompleteTotal, complete)
-	if !complete {
-		if err = saveDuplicateScanProgress(ctx, in.ScanToken, session); err != nil {
-			return nil, gerror.Wrap(err, "保存重复资料扫描进度失败")
-		}
-		return duplicateScanProgressResult(in.ScanToken, session, false), nil
+	if session.Status == "completed" && session.ChunkCount > 0 {
+		return s.duplicateScanBatchResult(ctx, in.ScanToken, session, 0)
 	}
-	return s.finishDuplicateScan(ctx, in.ScanToken, session)
+	return duplicateScanProgressResult(in.ScanToken, session, session.Status == "completed"), nil
+}
+
+func (s *sSysPublish) runDuplicateScan(ctx context.Context, token string, account *sysin.AccountModel, in *sysin.AdminNoteDuplicateScanInp) error {
+	session := newDuplicateScanSession(account)
+	session.ResultCacheKey = duplicateScanResultCacheKey(account, &in.NoteListInp)
+	session.Status = "running"
+	if err := saveDuplicateScanProgress(ctx, token, duplicateScanMetadata(session)); err != nil {
+		return err
+	}
+	for {
+		ids, err := s.duplicateScanProfileIdPage(ctx, &in.NoteListInp, account, session.ScanCursor)
+		if err != nil {
+			return err
+		}
+		if len(ids) > 0 {
+			if err = s.appendDuplicateScanSignatures(ctx, session, ids); err != nil {
+				return err
+			}
+			session.ScanCursor = ids[len(ids)-1]
+			session.ScannedTotal += len(ids)
+		}
+		if len(ids) < duplicateScanChunkSize {
+			_, err = s.finishDuplicateScan(ctx, token, session)
+			return err
+		}
+		if err = saveDuplicateScanProgress(ctx, token, duplicateScanMetadata(session)); err != nil {
+			return gerror.Wrap(err, "保存重复资料扫描进度失败")
+		}
+	}
+}
+
+func duplicateScanMetadata(session *duplicateScanSession) *duplicateScanSession {
+	copy := *session
+	copy.SignatureIds = nil
+	copy.PHashBuckets = nil
+	copy.PHashGroups = nil
+	copy.PHashSets = nil
+	return &copy
+}
+
+func (s *sSysPublish) enqueueDuplicateScan(ctx context.Context, token string, account *sysin.AccountModel, in *sysin.AdminNoteDuplicateScanInp) error {
+	payload := duplicateScanQueuePayload{Token: token, Account: *account, Input: *in}
+	payload.Input.ScanToken = ""
+	payload.Input.ScanCursor = 0
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return gerror.Wrap(err, "编码重复资料扫描任务失败")
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeDuplicateScan, body),
+		asynq.Queue(tgQueueNameDuplicateScan), asynq.TaskID(token), asynq.MaxRetry(2), asynq.Timeout(6*time.Hour))
+	if err != nil {
+		return gerror.Wrap(err, "提交重复资料扫描任务失败")
+	}
+	return nil
 }
 
 func newDuplicateScanSession(account *sysin.AccountModel) *duplicateScanSession {
 	return &duplicateScanSession{
-		AlgorithmVersion: duplicateScanAlgorithmVersion, AdminAccountId: account.Id, SignatureIds: make(map[string][]int64), TenantId: account.TenantId,
+		AlgorithmVersion: duplicateScanAlgorithmVersion, AdminAccountId: account.Id, SignatureIds: make(map[string][]int64), TenantId: account.TenantId, Status: "queued",
 		PHashBuckets: make(map[string][]int64), PHashGroups: make(map[int64]string), PHashSets: make(map[int64][]string),
 	}
 }
@@ -283,7 +333,11 @@ func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, ses
 	}
 	if len(duplicateIds) == 0 {
 		session.SignatureIds = nil
-		_ = saveDuplicateScanProgress(ctx, token, session)
+		session.PHashBuckets = nil
+		session.PHashGroups = nil
+		session.PHashSets = nil
+		session.Status = "completed"
+		_ = saveDuplicateScanProgress(ctx, token, duplicateScanMetadata(session))
 		cacheDuplicateScanResult(ctx, token, session)
 		g.Log().Infof(ctx, "重复资料扫描任务完成 scanTaskId:%s scanned:%d groups:0 duplicate:0 incomplete:%d", token, session.ScannedTotal, session.IncompleteTotal)
 		return duplicateScanProgressResult(token, session, true), nil
@@ -344,6 +398,9 @@ func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, ses
 	session.GroupTotal = len(allGroups)
 	candidates := duplicateScanCandidates(allGroups)
 	if len(candidates) == 0 {
+		session.Status = "completed"
+		_ = saveDuplicateScanProgress(ctx, token, duplicateScanMetadata(session))
+		cacheDuplicateScanResult(ctx, token, session)
 		return duplicateScanProgressResult(token, session, true), nil
 	}
 	session.ChunkCount = (len(candidates) + duplicateScanBatchSize - 1) / duplicateScanBatchSize
@@ -352,6 +409,7 @@ func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, ses
 	session.PHashBuckets = nil
 	session.PHashGroups = nil
 	session.PHashSets = nil
+	session.Status = "completed"
 	if err := saveDuplicateScanSession(ctx, token, session, candidates); err != nil {
 		return nil, err
 	}
@@ -373,6 +431,7 @@ func duplicateScanProgressResult(token string, session *duplicateScanSession, co
 		IncompleteTotal: session.IncompleteTotal, ScanToken: token, ScanCursor: session.ScanCursor,
 		ScannedTotal: session.ScannedTotal, ScanComplete: complete,
 		GroupTotal: session.GroupTotal, DuplicateTotal: session.DuplicateTotal,
+		ScanStatus: session.Status, ScanError: session.Error,
 	}
 }
 
@@ -708,6 +767,7 @@ func (s *sSysPublish) duplicateScanBatchResult(ctx context.Context, token string
 		Groups: groups, GroupTotal: session.GroupTotal, DuplicateTotal: session.DuplicateTotal,
 		BatchTotal: len(candidates), CandidateTotal: session.CandidateTotal, IncompleteTotal: session.IncompleteTotal,
 		HasMore: hasMore, ScanToken: token, Cursor: cursor, NextCursor: nextCursor,
+		ScanComplete: session.Status == "completed", ScanStatus: session.Status, ScanError: session.Error,
 	}, nil
 }
 
@@ -968,23 +1028,49 @@ func profilePHashGroupAccepts(values []string, memberIds []int64, sets map[int64
 }
 
 func duplicatePHashBucketKeys(values []string, neighborhood bool) []string {
-	keys := make([]string, 0, len(values)*mediaPHashLshBlockCount)
+	const (
+		blockCount = 8
+		blockBits  = 8
+	)
+	keys := make([]string, 0, len(values)*blockCount)
 	seen := make(map[string]struct{}, cap(keys))
 	for _, value := range values {
-		cells := mediaPHashLshBucketValues(value)
-		if neighborhood {
-			// Radius 3 is the existing bounded multi-probe LSH path. The
-			// final matcher still validates the configured distance of 20.
-			cells = mediaPHashLshCells(value, 12)
+		hash, ok := parseUploadPHash(value)
+		if !ok {
+			continue
 		}
-		for _, cell := range cells {
-			key := fmt.Sprintf("%d:%d", cell.Pos, cell.Value)
-			if _, exists := seen[key]; exists {
-				continue
+		for pos := 0; pos < blockCount; pos++ {
+			block := uint8(hash.GetHash() >> uint((blockCount-pos-1)*blockBits))
+			blocks := []uint8{block}
+			if neighborhood {
+				blocks = duplicatePHashByteNeighborhood(block)
 			}
-			seen[key] = struct{}{}
-			keys = append(keys, key)
+			for _, candidate := range blocks {
+				key := fmt.Sprintf("%d:%d", pos+1, candidate)
+				if _, exists := seen[key]; exists {
+					continue
+				}
+				seen[key] = struct{}{}
+				keys = append(keys, key)
+			}
 		}
 	}
 	return keys
+}
+
+// Splitting a 64-bit hash into eight bytes guarantees that hashes within
+// distance 20 share at least one byte within distance 2. Exact matching still
+// happens in profilePHashSetsMatch; these keys only reduce candidate lookup.
+func duplicatePHashByteNeighborhood(value uint8) []uint8 {
+	result := make([]uint8, 0, 37)
+	result = append(result, value)
+	for first := 0; first < 8; first++ {
+		result = append(result, value^(1<<first))
+	}
+	for first := 0; first < 8; first++ {
+		for second := first + 1; second < 8; second++ {
+			result = append(result, value^(1<<first)^(1<<second))
+		}
+	}
+	return result
 }

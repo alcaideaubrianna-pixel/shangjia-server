@@ -71,6 +71,11 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 		Queues:         map[string]int{tgQueueNameProfileMaintenance: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
+	duplicateServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    g.Cfg().MustGet(ctx, "youbanPublish.queue.duplicateScanConcurrency", 1).Int(),
+		Queues:         map[string]int{tgQueueNameDuplicateScan: 1},
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
 	historyServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
 		Concurrency:    collectHistoryQueueConcurrency(ctx),
 		Queues:         map[string]int{tgQueueNameHistory: 1},
@@ -80,6 +85,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	s.autoDeleteQueueServer = autoDeleteServer
 	s.backgroundQueueServer = server
 	s.profileQueueServer = profileServer
+	s.duplicateQueueServer = duplicateServer
 	s.historyQueueServer = historyServer
 	s.tgQueueMu.Unlock()
 
@@ -105,6 +111,8 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	profileMux := asynq.NewServeMux()
 	profileMux.HandleFunc(tgTaskTypeProfileMaintenance, s.handleProfileMaintenanceTask)
 	profileMux.HandleFunc(tgTaskTypeProfileSubmit, s.handleProfileSubmitTask)
+	duplicateMux := asynq.NewServeMux()
+	duplicateMux.HandleFunc(tgTaskTypeDuplicateScan, s.handleDuplicateScanTask)
 	go func() {
 		if err := autoDeleteServer.Run(autoDeleteMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件TG自动删除队列失败：%+v", err)
@@ -118,6 +126,11 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	go func() {
 		if err := profileServer.Run(profileMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动资料后台维护队列失败：%+v", err)
+		}
+	}()
+	go func() {
+		if err := duplicateServer.Run(duplicateMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动重复资料扫描队列失败：%+v", err)
 		}
 	}()
 	historyMux := asynq.NewServeMux()
@@ -202,6 +215,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	autoDeleteServer := s.autoDeleteQueueServer
 	backgroundServer := s.backgroundQueueServer
 	profileServer := s.profileQueueServer
+	duplicateServer := s.duplicateQueueServer
 	historyServer := s.historyQueueServer
 	client := s.tgQueueClient
 	s.tgQueueServer = nil
@@ -212,6 +226,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.autoDeleteQueueServer = nil
 	s.backgroundQueueServer = nil
 	s.profileQueueServer = nil
+	s.duplicateQueueServer = nil
 	s.historyQueueServer = nil
 	s.tgQueueClient = nil
 	s.tgQueueMu.Unlock()
@@ -238,6 +253,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	if profileServer != nil {
 		profileServer.Shutdown()
+	}
+	if duplicateServer != nil {
+		duplicateServer.Shutdown()
 	}
 	if historyServer != nil {
 		historyServer.Shutdown()
