@@ -25,6 +25,7 @@ const (
 	tgQueueNameMediaBulkPrefix    = "youban_publish_media_bulk_"
 	tgQueueNameAutoDelete         = "youban_publish_auto_delete"
 	tgQueueNameBackground         = "youban_publish_background"
+	tgQueueNameCycle              = "youban_publish_cycle"
 	tgQueueNameCollectProcess     = "youban_publish_collect_process"
 	tgQueueNameHistory            = "youban_publish_history"
 	tgQueueNameProfileMaintenance = "youban_publish_profile_maintenance"
@@ -462,7 +463,7 @@ func (s *sSysPublish) enqueueCycleRun(ctx context.Context, runId int64, delay ti
 	}
 	task := asynq.NewTask(tgTaskTypeCycleRun, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBackground),
+		asynq.Queue(tgQueueNameCycle),
 		asynq.MaxRetry(3),
 		asynq.Timeout(30 * time.Minute),
 	}
@@ -490,7 +491,7 @@ func (s *sSysPublish) enqueueCycleReschedule(ctx context.Context, channelId int6
 	}
 	task := asynq.NewTask(tgTaskTypeCycleReschedule, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBackground),
+		asynq.Queue(tgQueueNameCycle),
 		asynq.MaxRetry(5),
 		asynq.Timeout(2 * time.Hour),
 	}
@@ -515,7 +516,7 @@ func (s *sSysPublish) enqueueCycleSummaryRefresh(ctx context.Context, channelId 
 	}
 	task := asynq.NewTask(tgTaskTypeCycleRefresh, payload)
 	options := []asynq.Option{
-		asynq.Queue(tgQueueNameBackground),
+		asynq.Queue(tgQueueNameCycle),
 		asynq.MaxRetry(5),
 		asynq.Timeout(time.Minute),
 		asynq.Unique(2 * time.Minute),

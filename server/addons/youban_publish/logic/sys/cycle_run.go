@@ -354,13 +354,16 @@ func (s *sSysPublish) channelCycleById(ctx context.Context, channelId int64) (ch
 func (s *sSysPublish) channelCyclePage(ctx context.Context, channel channelCycleRecord, cursorId int64, limit int) ([]channelProfileRecord, error) {
 	var items []channelProfileRecord
 	if channel.Mode == "batch" {
-		sql := `(SELECT MIN(r.id) AS id,r.tenant_id,MAX(j.account_id) AS account_id,r.profile_id,r.channel_id
-FROM hg_youban_publish_success_record r JOIN hg_youban_publish_tg_job j ON j.id=r.job_id
-WHERE r.tenant_id=? AND r.channel_id=? AND r.status='success'
-GROUP BY r.tenant_id,r.channel_id,r.profile_id) q`
-		err := g.DB().Model(sql, channel.TenantId, channel.Id).Safe().Ctx(ctx).WhereGT("id", cursorId).OrderAsc("id").Limit(limit).Scan(&items)
+		rows, err := g.DB().GetAll(ctx, `SELECT * FROM (SELECT MIN(r.id) AS id,r.tenant_id,MAX(j.account_id) AS account_id,r.profile_id,r.channel_id
+	FROM hg_youban_publish_success_record r JOIN hg_youban_publish_tg_job j ON j.id=r.job_id
+	WHERE r.tenant_id=? AND r.channel_id=? AND r.status='success'
+	GROUP BY r.tenant_id,r.channel_id,r.profile_id) q
+	WHERE id > ? ORDER BY id ASC LIMIT ?`, channel.TenantId, channel.Id, cursorId, limit)
 		if err != nil {
 			return nil, gerror.Wrap(err, "分页读取频道批次循环资料失败")
+		}
+		if err = rows.Structs(&items); err != nil {
+			return nil, gerror.Wrap(err, "解析频道批次循环资料失败")
 		}
 		return items, nil
 	}

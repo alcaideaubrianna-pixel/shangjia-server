@@ -146,6 +146,7 @@ func telegramObserveQueueNames(ctx context.Context) []string {
 	set := map[string]struct{}{
 		tgQueueNameAutoDelete:         {},
 		tgQueueNameBackground:         {},
+		tgQueueNameCycle:              {},
 		tgQueueNameCollectProcess:     {},
 		tgQueueNameHistory:            {},
 		tgQueueNameMediaProcess:       {},

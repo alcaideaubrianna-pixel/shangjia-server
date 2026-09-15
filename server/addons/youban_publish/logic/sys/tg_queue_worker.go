@@ -49,7 +49,7 @@ func (s *sSysPublish) startTelegramPushWorker(ctx context.Context) {
 
 func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	s.tgQueueMu.Lock()
-	if s.autoDeleteQueueServer != nil || s.backgroundQueueServer != nil {
+	if s.autoDeleteQueueServer != nil || s.backgroundQueueServer != nil || s.cycleQueueServer != nil {
 		s.tgQueueMu.Unlock()
 		return
 	}
@@ -64,6 +64,11 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 			tgQueueNameCollectProcess: 10,
 			tgQueueNameBackground:     1,
 		},
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
+	cycleServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    normalizeCycleQueueConcurrency(g.Cfg().MustGet(ctx, "youbanPublish.queue.cycleConcurrency", 1).Int()),
+		Queues:         map[string]int{tgQueueNameCycle: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
 	profileServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
@@ -84,6 +89,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	g.Log().Infof(ctx, "启动上架插件后台队列，自动删除独立并发：%d", telegramAutoDeleteConcurrency(ctx))
 	s.autoDeleteQueueServer = autoDeleteServer
 	s.backgroundQueueServer = server
+	s.cycleQueueServer = cycleServer
 	s.profileQueueServer = profileServer
 	s.duplicateQueueServer = duplicateServer
 	s.historyQueueServer = historyServer
@@ -106,6 +112,10 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDown, s.handleCollectSourceDownTask)
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDelete, s.handleCollectSourceDeleteTask)
 	backgroundMux.HandleFunc(tgTaskTypeBotMediaRepair, s.handleBotMediaRepairTask)
+	cycleMux := asynq.NewServeMux()
+	cycleMux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
+	cycleMux.HandleFunc(tgTaskTypeCycleReschedule, s.handleCycleRescheduleTask)
+	cycleMux.HandleFunc(tgTaskTypeCycleRefresh, s.handleCycleRefreshTask)
 	autoDeleteMux := asynq.NewServeMux()
 	autoDeleteMux.HandleFunc(tgTaskTypeAutoDelete, s.handleTelegramAutoDeleteTask)
 	profileMux := asynq.NewServeMux()
@@ -121,6 +131,11 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	go func() {
 		if err := server.Run(backgroundMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
 			g.Log().Errorf(ctx, "启动上架插件后台队列失败：%+v", err)
+		}
+	}()
+	go func() {
+		if err := cycleServer.Run(cycleMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动循环上架低优先级队列失败：%+v", err)
 		}
 	}()
 	go func() {
@@ -151,6 +166,16 @@ func telegramAutoDeleteConcurrency(ctx context.Context) int {
 func normalizeTelegramAutoDeleteConcurrency(concurrency int) int {
 	if concurrency < 1 {
 		return 1
+	}
+	return concurrency
+}
+
+func normalizeCycleQueueConcurrency(concurrency int) int {
+	if concurrency < 1 {
+		return 1
+	}
+	if concurrency > 4 {
+		return 4
 	}
 	return concurrency
 }
@@ -214,6 +239,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	mediaProcessServer := s.mediaProcessServer
 	autoDeleteServer := s.autoDeleteQueueServer
 	backgroundServer := s.backgroundQueueServer
+	cycleServer := s.cycleQueueServer
 	profileServer := s.profileQueueServer
 	duplicateServer := s.duplicateQueueServer
 	historyServer := s.historyQueueServer
@@ -225,6 +251,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.mediaProcessServer = nil
 	s.autoDeleteQueueServer = nil
 	s.backgroundQueueServer = nil
+	s.cycleQueueServer = nil
 	s.profileQueueServer = nil
 	s.duplicateQueueServer = nil
 	s.historyQueueServer = nil
@@ -250,6 +277,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	if backgroundServer != nil {
 		backgroundServer.Shutdown()
+	}
+	if cycleServer != nil {
+		cycleServer.Shutdown()
 	}
 	if profileServer != nil {
 		profileServer.Shutdown()

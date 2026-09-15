@@ -33,10 +33,22 @@ func TestMediaProcessQueueIsIsolatedFromCollectionDownloads(t *testing.T) {
 
 func TestCriticalBackgroundQueuesAreObservable(t *testing.T) {
 	queues := telegramObserveQueueNames(context.Background())
-	for _, queue := range []string{tgQueueNameAutoDelete, tgQueueNameCollectProcess} {
+	for _, queue := range []string{tgQueueNameAutoDelete, tgQueueNameCollectProcess, tgQueueNameCycle} {
 		if !slices.Contains(queues, queue) {
 			t.Fatalf("critical queue %s must be observable: %v", queue, queues)
 		}
+	}
+}
+
+func TestCycleQueueIsIsolatedAndConcurrencyBounded(t *testing.T) {
+	if tgQueueNameCycle == tgQueueNameBackground || tgQueueNameCycle == tgQueueNameDefault || tgQueueNameCycle == tgQueueNameBulk {
+		t.Fatal("cycle recovery must not compete with background or publish queues")
+	}
+	if got := normalizeCycleQueueConcurrency(0); got != 1 {
+		t.Fatalf("minimum cycle concurrency = %d", got)
+	}
+	if got := normalizeCycleQueueConcurrency(100); got != 4 {
+		t.Fatalf("maximum cycle concurrency = %d", got)
 	}
 }
 
