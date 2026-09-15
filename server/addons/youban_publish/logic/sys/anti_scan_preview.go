@@ -31,10 +31,13 @@ import (
 	"hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/addons/youban_publish/service"
+	"hotgo/internal/consts"
 	"hotgo/internal/library/addons"
 	"hotgo/internal/library/cache"
+	"hotgo/internal/library/contexts"
 	lock "hotgo/internal/library/hgrds/lock"
 	"hotgo/internal/library/storager"
+	basemodel "hotgo/internal/model"
 	baseservice "hotgo/internal/service"
 	"hotgo/utility/file"
 )
@@ -663,11 +666,23 @@ func uploadAntiScanSegment(ctx context.Context, imageBytes []byte, imageHash str
 	if err != nil {
 		return "", gerror.Wrap(err, "创建人像分割文件失败")
 	}
-	attachment, err := baseservice.CommonUpload().UploadFile(ctx, storager.KindImg, &ghttp.UploadFile{FileHeader: fileHeader})
+	attachment, err := baseservice.CommonUpload().UploadFile(antiScanSegmentUploadContext(ctx), storager.KindImg, &ghttp.UploadFile{FileHeader: fileHeader})
 	if err != nil {
 		return "", gerror.Wrap(err, "保存人像分割文件失败")
 	}
 	return attachment.FileUrl, nil
+}
+
+func antiScanSegmentUploadContext(ctx context.Context) context.Context {
+	if contexts.GetModule(ctx) != "" {
+		return ctx
+	}
+	return context.WithValue(ctx, consts.ContextHTTPKey, &basemodel.Context{
+		Module:    consts.AppAdmin,
+		AddonName: "youban_publish",
+		User:      contexts.GetUser(ctx),
+		Data:      g.Map{},
+	})
 }
 
 func readAntiScanPreviewImage(ctx context.Context, upload *ghttp.UploadFile, useDefault int) ([]byte, string, error) {

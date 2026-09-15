@@ -1,11 +1,14 @@
 package sys
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"hotgo/addons/youban_publish/model"
+	"hotgo/internal/consts"
+	"hotgo/internal/library/contexts"
 )
 
 func TestAntiScanMattingQuotaReferenceIsStableAcrossJobs(t *testing.T) {
@@ -17,6 +20,27 @@ func TestAntiScanMattingQuotaReferenceIsStableAcrossJobs(t *testing.T) {
 	}
 	if first == antiScanMattingQuotaReference(7, "aliyun", "image-hash", now) {
 		t.Fatal("different providers must not share quota reference")
+	}
+}
+
+func TestAntiScanSegmentUploadContextProvidesWorkerModule(t *testing.T) {
+	ctx := antiScanSegmentUploadContext(context.Background())
+	if got := contexts.GetModule(ctx); got != consts.AppAdmin {
+		t.Fatalf("unexpected module: got %q want %q", got, consts.AppAdmin)
+	}
+	if got := contexts.GetAddonName(ctx); got != "youban_publish" {
+		t.Fatalf("unexpected addon: got %q", got)
+	}
+}
+
+func TestFacePPDistributedSlotIsStableAndBounded(t *testing.T) {
+	const concurrency = 2
+	first := facePPDistributedSlot("image-hash", concurrency)
+	if second := facePPDistributedSlot("image-hash", concurrency); second != first {
+		t.Fatalf("slot must be stable: %q != %q", first, second)
+	}
+	if !strings.HasSuffix(first, ":0") && !strings.HasSuffix(first, ":1") {
+		t.Fatalf("slot must stay within concurrency: %q", first)
 	}
 }
 
