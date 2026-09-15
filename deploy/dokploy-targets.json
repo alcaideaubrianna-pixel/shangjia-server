@@ -28,6 +28,12 @@
       "order": 40
     },
     {
+      "name": "xiaohuiji-publish-worker-app2",
+      "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/OiC9KJQmtaow4xF-BqrageSrRw76Yb9l",
+      "enabled": true,
+      "order": 42
+    },
+    {
       "name": "xiaohuiji-worker-app4",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/6YtDmsmnkJ-cwqdqTT2GL",
       "enabled": true,
