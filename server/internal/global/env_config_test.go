@@ -66,6 +66,8 @@ database:
 	t.Setenv("YOUBAN_TELEGRAM_COLLECTOR_CONCURRENCY", "12")
 	t.Setenv("YOUBAN_TELEGRAM_COLLECTOR_RECOVERY_BATCH_SIZE", "200")
 	t.Setenv("YOUBAN_TELEGRAM_DELIVERY_CONCURRENCY", "8")
+	t.Setenv("YOUBAN_PUBLISH_BULK_CONCURRENCY", "4")
+	t.Setenv("YOUBAN_PUBLISH_CYCLE_CONCURRENCY", "1")
 	t.Setenv("YOUBAN_TELEGRAM_MEDIA_CONCURRENCY", "6")
 	t.Setenv("YOUBAN_TELEGRAM_ACCOUNT_LEASE_SECONDS", "45")
 
@@ -100,6 +102,8 @@ database:
 	assertCfg("telegramCollector.worker.concurrency", "12")
 	assertCfg("telegramCollector.worker.recoveryBatchSize", "200")
 	assertCfg("telegramCollector.delivery.concurrency", "8")
+	assertCfg("youbanPublish.queue.publishBulkConcurrency", "4")
+	assertCfg("youbanPublish.queue.cycleConcurrency", "1")
 	assertCfg("telegramCollector.media.concurrency", "6")
 	assertCfg("telegramCollector.account.leaseSeconds", "45")
 }

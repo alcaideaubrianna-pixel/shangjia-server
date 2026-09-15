@@ -395,6 +395,8 @@ youbanPublish:
   queue:
     accountBusyTimeoutSeconds: 10
     publishQueueShards: 16
+    publishBulkConcurrency: 4  # 循环/全量上架低优先级发送并发，建议按节点逐步调整
+    cycleConcurrency: 1       # 循环调度任务并发；调度本身有分布式锁，通常保持 1
 
 
 # 悦伴全局 Bot

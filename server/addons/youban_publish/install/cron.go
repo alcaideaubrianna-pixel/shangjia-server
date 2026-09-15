@@ -19,7 +19,10 @@ const (
 	tenantVipCloseOrderCronPattern   = "@every 1m"
 	cycleSchedulerCronName           = "youbanPublishCycleScheduler"
 	cycleSchedulerDevelopCronPattern = "@every 10m"
-	cycleSchedulerProductCronPattern = "@every 1h"
+	// The scheduler only admits bounded work into the cycle queue. Run it often
+	// enough to refill capacity as workers drain it; an hourly interval leaves
+	// the queue idle between large due batches and cannot catch up after recovery.
+	cycleSchedulerProductCronPattern = "@every 5m"
 	vipLifecycleCronName             = "youbanPublishVipLifecycle"
 	vipLifecycleDevelopCronPattern   = "@every 10m"
 	vipLifecycleProductCronPattern   = "@every 1h"
