@@ -1,0 +1,11 @@
+# Optional pg_exporter probes disabled for the production `railway` database.
+#
+# These catalog aggregations are not used by the application and can become
+# expensive on large catalogs.  Keeping this list alongside the deployment
+# config prevents a Pigsty/exporter re-provision from re-enabling them:
+#
+#   pg_func, pg_pubrel, pg_subrel
+#
+# Apply by adding `skip: true` to each matching collector in the rendered
+# `/etc/pg_exporter.yml`, then reload `pg_exporter` (no PostgreSQL restart).
+# Core database, lock, WAL, query and cycle collectors remain enabled.
