@@ -67,7 +67,7 @@ func drawPresetBackground(dst *image.RGBA, preset string, opacity int) {
 	overlayTexture(dst, opacity)
 }
 
-func tiledCustomBackground(width int, height int, imageUrl string, opacity int) (*image.RGBA, bool) {
+func tiledCustomBackground(width int, height int, imageUrl string, _ int) (*image.RGBA, bool) {
 	data, ok := readTextureImageBytes(imageUrl)
 	if !ok {
 		return nil, false
@@ -78,7 +78,6 @@ func tiledCustomBackground(width int, height int, imageUrl string, opacity int) 
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, width, height))
 	drawCoverImage(dst, img)
-	overlayTexture(dst, opacity/3)
 	return dst, true
 }
 

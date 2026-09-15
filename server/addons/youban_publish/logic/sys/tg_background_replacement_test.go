@@ -100,3 +100,20 @@ func TestShouldSkipBackgroundReplacementPhotoLikeImage(t *testing.T) {
 		t.Fatal("photo-like image should remain eligible for portrait matting")
 	}
 }
+
+func TestAntiScanPortraitUnderlayMaskKeepsThreeDistinctLayers(t *testing.T) {
+	bounds := image.Rect(0, 0, 200, 240)
+	portrait := image.NewRGBA(bounds)
+	draw.Draw(portrait, image.Rect(90, 80, 110, 220), &image.Uniform{C: color.RGBA{R: 20, G: 30, B: 40, A: 255}}, image.Point{}, draw.Src)
+
+	mask := antiScanPortraitUnderlayMask(portrait, bounds)
+	if alpha := mask.AlphaAt(10, 10).A; alpha != 0 {
+		t.Fatalf("distant background must stay opaque and untouched, alpha=%d", alpha)
+	}
+	if alpha := mask.AlphaAt(60, 140).A; alpha == 0 || alpha == 255 {
+		t.Fatalf("portrait margin must be feathered, alpha=%d", alpha)
+	}
+	if alpha := mask.AlphaAt(100, 140).A; alpha < 250 {
+		t.Fatalf("original underlay around portrait must remain opaque, alpha=%d", alpha)
+	}
+}

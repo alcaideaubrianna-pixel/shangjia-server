@@ -139,19 +139,103 @@ func applyAntiScanBackground(ctx context.Context, src *image.RGBA, segmentRaw st
 		xdraw.ApproxBiLinear.Scale(resized, bounds, portrait, portrait.Bounds(), draw.Over, nil)
 		portrait = resized
 	}
-	// Keep a subtle original-image underlay around the segmentation edge. This
-	// avoids a hard cutout and produces the intended three-layer composition:
-	// original underlay, replacement background, and portrait foreground.
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			alpha := uint8(38)
-			original := src.RGBAAt(x, y)
-			background := bg.RGBAAt(x, y)
-			bg.SetRGBA(x, y, blendRGBA(background, original, alpha))
-		}
-	}
+	underlayMask := antiScanPortraitUnderlayMask(portrait, bounds)
+	draw.DrawMask(bg, bounds, src, image.Point{}, underlayMask, image.Point{}, draw.Over)
 	draw.Draw(bg, bounds, portrait, image.Point{}, draw.Over)
 	return bg, true
+}
+
+// antiScanPortraitUnderlayMask keeps the original scene in a feathered area
+// around the person. The result is background, local original underlay, then
+// the transparent portrait, without tinting the replacement background.
+func antiScanPortraitUnderlayMask(portrait image.Image, bounds image.Rectangle) *image.Alpha {
+	mask := image.NewAlpha(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			_, _, _, alpha := portrait.At(x, y).RGBA()
+			if alpha>>8 >= 8 {
+				mask.SetAlpha(x, y, color.Alpha{A: 255})
+			}
+		}
+	}
+	radius := maxInt(12, minInt(bounds.Dx(), bounds.Dy())*6/100)
+	mask = dilateAntiScanAlpha(mask, radius)
+	blurRadius := maxInt(8, radius*2/3)
+	for i := 0; i < 3; i++ {
+		mask = blurAntiScanAlpha(mask, blurRadius)
+	}
+	return mask
+}
+
+func dilateAntiScanAlpha(src *image.Alpha, radius int) *image.Alpha {
+	bounds := src.Bounds()
+	horizontal := image.NewAlpha(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		active := 0
+		for x := bounds.Min.X - radius; x < bounds.Max.X+radius; x++ {
+			if x+radius < bounds.Max.X && src.AlphaAt(x+radius, y).A > 0 {
+				active++
+			}
+			if x-radius-1 >= bounds.Min.X && src.AlphaAt(x-radius-1, y).A > 0 {
+				active--
+			}
+			if x >= bounds.Min.X && x < bounds.Max.X && active > 0 {
+				horizontal.SetAlpha(x, y, color.Alpha{A: 255})
+			}
+		}
+	}
+	dst := image.NewAlpha(bounds)
+	for x := bounds.Min.X; x < bounds.Max.X; x++ {
+		active := 0
+		for y := bounds.Min.Y - radius; y < bounds.Max.Y+radius; y++ {
+			if y+radius < bounds.Max.Y && horizontal.AlphaAt(x, y+radius).A > 0 {
+				active++
+			}
+			if y-radius-1 >= bounds.Min.Y && horizontal.AlphaAt(x, y-radius-1).A > 0 {
+				active--
+			}
+			if y >= bounds.Min.Y && y < bounds.Max.Y && active > 0 {
+				dst.SetAlpha(x, y, color.Alpha{A: 255})
+			}
+		}
+	}
+	return dst
+}
+
+func blurAntiScanAlpha(src *image.Alpha, radius int) *image.Alpha {
+	bounds := src.Bounds()
+	horizontal := image.NewAlpha(bounds)
+	window := radius*2 + 1
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		sum := 0
+		for x := bounds.Min.X - radius; x < bounds.Max.X+radius; x++ {
+			if x+radius < bounds.Max.X {
+				sum += int(src.AlphaAt(x+radius, y).A)
+			}
+			if x-radius-1 >= bounds.Min.X {
+				sum -= int(src.AlphaAt(x-radius-1, y).A)
+			}
+			if x >= bounds.Min.X && x < bounds.Max.X {
+				horizontal.SetAlpha(x, y, color.Alpha{A: uint8(sum / window)})
+			}
+		}
+	}
+	dst := image.NewAlpha(bounds)
+	for x := bounds.Min.X; x < bounds.Max.X; x++ {
+		sum := 0
+		for y := bounds.Min.Y - radius; y < bounds.Max.Y+radius; y++ {
+			if y+radius < bounds.Max.Y {
+				sum += int(horizontal.AlphaAt(x, y+radius).A)
+			}
+			if y-radius-1 >= bounds.Min.Y {
+				sum -= int(horizontal.AlphaAt(x, y-radius-1).A)
+			}
+			if y >= bounds.Min.Y && y < bounds.Max.Y {
+				dst.SetAlpha(x, y, color.Alpha{A: uint8(sum / window)})
+			}
+		}
+	}
+	return dst
 }
 
 func blendRGBA(base, overlay color.RGBA, alpha uint8) color.RGBA {
