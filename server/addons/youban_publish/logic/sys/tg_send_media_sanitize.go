@@ -179,11 +179,11 @@ func (s *sSysPublish) prepareTelegramBackgroundReplacement(ctx context.Context, 
 	in.BackgroundReplaceEnabled = 1
 	in.BackgroundTextureImage = media.AntiScanBackgroundURL
 	in.StickerOpacity = 30
-	output, _, err := renderAntiScanPreview(ctx, imageBytes, in, &antiScanDetectResult{Provider: provider, SegmentRaw: segmentRaw})
+	output, _, err := renderAntiScanPreviewLossless(ctx, imageBytes, in, &antiScanDetectResult{Provider: provider, SegmentRaw: segmentRaw})
 	if err != nil {
 		return "", nil, err
 	}
-	out, err := os.CreateTemp("", "ybp-background-replace-*.jpg")
+	out, err := os.CreateTemp("", "ybp-background-replace-*.png")
 	if err != nil {
 		return "", nil, err
 	}

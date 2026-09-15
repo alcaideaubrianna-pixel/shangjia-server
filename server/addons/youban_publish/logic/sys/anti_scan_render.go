@@ -42,6 +42,14 @@ type antiScanMaskItem struct {
 
 // renderAntiScanPreview 按当前配置生成真实预览图，后续发送链路可复用同一处理入口。
 func renderAntiScanPreview(ctx context.Context, src []byte, in *sysin.AntiScanPreviewInp, detect *antiScanDetectResult) ([]byte, []string, error) {
+	return renderAntiScanPreviewWithEncoding(ctx, src, in, detect, false)
+}
+
+func renderAntiScanPreviewLossless(ctx context.Context, src []byte, in *sysin.AntiScanPreviewInp, detect *antiScanDetectResult) ([]byte, []string, error) {
+	return renderAntiScanPreviewWithEncoding(ctx, src, in, detect, true)
+}
+
+func renderAntiScanPreviewWithEncoding(ctx context.Context, src []byte, in *sysin.AntiScanPreviewInp, detect *antiScanDetectResult, lossless bool) ([]byte, []string, error) {
 	if isAntiScanNoop(in) {
 		return src, nil, nil
 	}
@@ -76,6 +84,12 @@ func renderAntiScanPreview(ctx context.Context, src []byte, in *sysin.AntiScanPr
 	applyAntiScanWatermarks(canvas, in)
 	canvas = applyCropResize(canvas, in)
 	buf := bytes.NewBuffer(nil)
+	if lossless {
+		if err = png.Encode(buf, canvas); err != nil {
+			return nil, nil, gerror.Wrap(err, "编码无损预览图失败")
+		}
+		return buf.Bytes(), warnings, nil
+	}
 	if err = jpeg.Encode(buf, canvas, &jpeg.Options{Quality: normalizePreviewQuality(in.CompressionQuality)}); err != nil {
 		return nil, nil, gerror.Wrap(err, "编码预览图失败")
 	}
