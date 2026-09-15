@@ -171,24 +171,33 @@ func attachProfileFingerprintsTx(ctx context.Context, tx gdb.TX, tenantID, accou
 	}
 	now := gtime.Now()
 	for _, item := range items {
-		_, err := tx.Model(publishProfileFingerprintTable).Ctx(ctx).Data(g.Map{
+		result, err := tx.Model(publishProfileFingerprintTable).Ctx(ctx).Data(g.Map{
 			"tenant_id": tenantID, "account_id": accountID, "profile_id": profileID, "channel_id": item.ChannelID,
 			"layer": item.Layer, "signature": item.Signature, "item_total": item.ItemTotal,
 			"signature_count": item.SignatureCount, "owner_marker": "owner", "created_at": now, "updated_at": now,
-		}).Insert()
+		}).InsertIgnore()
 		if err != nil {
-			if isDuplicateKeyError(err) {
-				row, lookupErr := tx.Model(publishProfileFingerprintTable).Ctx(ctx).Fields("profile_id").
-					Where("tenant_id", tenantID).Where("account_id", accountID).Where("channel_id", item.ChannelID).
-					Where("layer", item.Layer).Where("signature", item.Signature).
-					Where("item_total", item.ItemTotal).Where("signature_count", item.SignatureCount).One()
-				if lookupErr != nil {
-					return gerror.Wrap(lookupErr, "读取并发资料指纹占用失败")
-				}
-				return &profileFingerprintDuplicateError{ProfileID: row["profile_id"].Int64(), ChannelID: item.ChannelID, Layer: item.Layer}
-			}
 			return gerror.Wrap(err, "保存资料指纹失败")
 		}
+		inserted, err := result.RowsAffected()
+		if err != nil {
+			return gerror.Wrap(err, "读取资料指纹写入结果失败")
+		}
+		if inserted > 0 {
+			continue
+		}
+		row, err := tx.Model(publishProfileFingerprintTable).Ctx(ctx).Fields("profile_id").
+			Where("tenant_id", tenantID).Where("account_id", accountID).Where("channel_id", item.ChannelID).
+			Where("layer", item.Layer).Where("signature", item.Signature).
+			Where("item_total", item.ItemTotal).Where("signature_count", item.SignatureCount).
+			Where("owner_marker", "owner").One()
+		if err != nil {
+			return gerror.Wrap(err, "读取并发资料指纹占用失败")
+		}
+		if row.IsEmpty() {
+			return gerror.New("资料指纹写入被忽略但未找到占用记录")
+		}
+		return &profileFingerprintDuplicateError{ProfileID: row["profile_id"].Int64(), ChannelID: item.ChannelID, Layer: item.Layer}
 	}
 	return nil
 }
