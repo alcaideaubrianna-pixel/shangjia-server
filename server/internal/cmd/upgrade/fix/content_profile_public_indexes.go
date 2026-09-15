@@ -16,11 +16,14 @@ func ApplyContentProfilePublicIndexes(ctx context.Context) error {
 	}
 
 	statements := []string{
+		`CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_content_profile_open_latest" ON "hg_content_profile" ("source_created_at" DESC, "source_note_id" DESC, "id" DESC) WHERE "deleted_at" IS NULL AND "status"=1 AND "visibility"='public'`,
 		`CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_content_profile_public_latest_v2" ON "hg_content_profile" ("source_created_at" DESC, "source_note_id" DESC, "id" DESC) WHERE "status"=1 AND "review_status"='approved' AND "import_status" IN ('imported','duplicate','feiniu_sync','collect') AND "visibility" IN ('public','member_only') AND "deleted_at" IS NULL`,
 		`CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_content_profile_public_area_latest_v2" ON "hg_content_profile" ("province", "city", "source_created_at" DESC, "source_note_id" DESC, "id" DESC) WHERE "status"=1 AND "review_status"='approved' AND "import_status" IN ('imported','duplicate','feiniu_sync','collect') AND "visibility" IN ('public','member_only') AND "deleted_at" IS NULL`,
 		`CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_content_profile_public_virgin_latest" ON "hg_content_profile" ("source_created_at" DESC, "source_note_id" DESC, "id" DESC) WHERE "is_virgin"=1 AND "status"=1 AND "review_status"='approved' AND "import_status" IN ('imported','duplicate','feiniu_sync','collect') AND "visibility" IN ('public','member_only') AND "deleted_at" IS NULL`,
 		`CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_content_profile_public_virgin_area_latest" ON "hg_content_profile" ("province", "city", "source_created_at" DESC, "source_note_id" DESC, "id" DESC) WHERE "is_virgin"=1 AND "status"=1 AND "review_status"='approved' AND "import_status" IN ('imported','duplicate','feiniu_sync','collect') AND "visibility" IN ('public','member_only') AND "deleted_at" IS NULL`,
 		`CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_content_media_public_image_profile" ON "hg_content_media" ("profile_id") WHERE "status"=1 AND "media_type"='image' AND COALESCE("display_storage_path", '')<>''`,
+		`CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_media_open_image_profile" ON "hg_youban_publish_media" ("profile_id") WHERE "deleted_at" IS NULL AND "status"=1 AND "media_type"='image' AND COALESCE(NULLIF("edited_storage_path",''),NULLIF("storage_path",''),NULLIF("edited_file_url",''),NULLIF("file_url",''))<>''`,
+		`CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_profile_state_tenant_profile" ON "hg_youban_publish_profile_state" ("tenant_id","profile_id") WHERE "deleted_at" IS NULL`,
 	}
 	for _, statement := range statements {
 		if _, err := g.DB().Exec(ctx, statement); err != nil {

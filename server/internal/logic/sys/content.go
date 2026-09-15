@@ -1796,8 +1796,11 @@ func (s *sSysContent) publicProfileWhere(mod *gdb.Model) *gdb.Model {
 	mod = mod.
 		Where(aliasField("p", profileColumns.Status), 1).
 		Where(aliasField("p", profileColumns.Visibility), consts.ContentVisibilityPublic).
-		Where("(EXISTS (SELECT 1 FROM "+dao.ContentMedia.Table()+" m WHERE m."+mediaColumns.ProfileId+"=p."+profileColumns.Id+" AND m."+mediaColumns.Status+"=? AND m."+mediaColumns.MediaType+"=? AND COALESCE(m."+mediaColumns.DisplayStoragePath+", '')<>'') "+
-			"OR EXISTS (SELECT 1 FROM hg_youban_publish_media pm WHERE pm.profile_id=p."+profileColumns.Id+" AND pm.status=? AND pm.deleted_at IS NULL AND pm.media_type=? AND COALESCE(NULLIF(pm.edited_storage_path, ''), NULLIF(pm.storage_path, ''), NULLIF(pm.edited_file_url, ''), NULLIF(pm.file_url, ''))<>'') )",
+		Where("EXISTS (SELECT 1 FROM ("+
+			"SELECT m."+mediaColumns.ProfileId+" FROM "+dao.ContentMedia.Table()+" m WHERE m."+mediaColumns.ProfileId+"=p."+profileColumns.Id+" AND m."+mediaColumns.Status+"=? AND m."+mediaColumns.MediaType+"=? AND COALESCE(m."+mediaColumns.DisplayStoragePath+", '')<>'' "+
+			"UNION ALL "+
+			"SELECT pm.profile_id FROM hg_youban_publish_media pm WHERE pm.profile_id=p."+profileColumns.Id+" AND pm.status=? AND pm.deleted_at IS NULL AND pm.media_type=? AND COALESCE(NULLIF(pm.edited_storage_path, ''), NULLIF(pm.storage_path, ''), NULLIF(pm.edited_file_url, ''), NULLIF(pm.file_url, ''))<>''"+
+			") available_media LIMIT 1)",
 			consts.StatusEnabled, consts.ContentMediaTypeImage, consts.StatusEnabled, "image")
 	scope := profilescope.FromContext(mod.GetCtx())
 	if !scope.Applied {
