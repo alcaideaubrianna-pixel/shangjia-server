@@ -115,6 +115,61 @@ func TestLocalProfilePublishStateProjection(t *testing.T) {
 	assertProfilePublishProjection(t, ctx, profileId, operationFour, sysin.PublishTaskStatusPublishing)
 }
 
+func TestLocalRecoverProfilePublishStateSkipsTerminalRows(t *testing.T) {
+	if os.Getenv("YOUBAN_PUBLISH_INTEGRATION") != "1" {
+		t.Skip("set YOUBAN_PUBLISH_INTEGRATION=1 to run local PostgreSQL integration test")
+	}
+	ctx := context.Background()
+	now := gtime.Now()
+	baseId := time.Now().UnixNano()
+	failedProfileId := baseId
+	activeProfileId := baseId + 1
+	operationNo := fmt.Sprintf("integration:recover-starvation:%d", baseId)
+
+	for _, fixture := range []g.Map{
+		{
+			"tenant_id": baseId, "account_id": baseId, "profile_id": failedProfileId,
+			"publish_operation_no": "terminal-failure", "publish_task_status": sysin.PublishTaskStatusFailed,
+			"publish_task_updated_at": now.Add(-time.Hour), "created_at": now, "updated_at": now,
+		},
+		{
+			"tenant_id": baseId, "account_id": baseId, "profile_id": activeProfileId,
+			"publish_operation_no": operationNo, "publish_task_status": sysin.PublishTaskStatusPublishing,
+			"publish_task_updated_at": now, "created_at": now, "updated_at": now,
+		},
+	} {
+		if _, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).Data(fixture).Insert(); err != nil {
+			t.Fatalf("create profile state fixture: %v", err)
+		}
+	}
+	if _, err := g.DB().Model(publishNoteIndexTable).Safe().Ctx(ctx).Data(g.Map{
+		"tenant_id": baseId, "account_id": baseId, "profile_id": activeProfileId,
+		"uuid": fmt.Sprintf("publish-state-starvation-%d", baseId), "profile_no": fmt.Sprintf("T%d", baseId),
+		"task_status": sysin.PublishTaskStatusPublishing, "created_at": now, "updated_at": now,
+	}).Insert(); err != nil {
+		t.Fatalf("create note index fixture: %v", err)
+	}
+	jobId, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Data(g.Map{
+		"operation_no": operationNo, "tenant_id": baseId, "merchant_id": baseId,
+		"account_id": baseId, "profile_id": activeProfileId, "channel_id": baseId,
+		"status": "failed", "dispatch_status": tgDispatchStatusIdle, "created_at": now, "updated_at": now,
+	}).InsertAndGetId()
+	if err != nil {
+		t.Fatalf("create failed job fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Unscoped().Where("id", jobId).Delete()
+		_, _ = g.DB().Model(publishNoteIndexTable).Safe().Ctx(ctx).Unscoped().Where("profile_id", activeProfileId).Delete()
+		_, _ = g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).Unscoped().WhereIn("profile_id", []int64{failedProfileId, activeProfileId}).Delete()
+	})
+
+	service := &sSysPublish{}
+	if err = service.recoverProfilePublishOperationStates(ctx, 1); err != nil {
+		t.Fatalf("recover active profile state: %v", err)
+	}
+	assertProfilePublishProjection(t, ctx, activeProfileId, operationNo, sysin.PublishTaskStatusFailed)
+}
+
 func assertProfilePublishProjection(t *testing.T, ctx context.Context, profileId int64, operationNo, status string) {
 	t.Helper()
 	state, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).

@@ -139,7 +139,10 @@ func (s *sSysPublish) recoverProfilePublishOperationStates(ctx context.Context, 
 	if err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).
 		Fields("tenant_id,account_id,profile_id,publish_operation_no,publish_task_status").
 		WhereNull("deleted_at").
-		Where("publish_task_status <> ''").
+		WhereIn("publish_task_status", []string{
+			sysin.PublishTaskStatusPending,
+			sysin.PublishTaskStatusPublishing,
+		}).
 		OrderAsc("publish_task_updated_at").
 		OrderAsc("profile_id").
 		Limit(limit).
