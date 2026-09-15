@@ -1,0 +1,78 @@
+youban_cycle_schema:
+  name: youban_cycle_schema
+  desc: Required channel columns for cycle publishing
+  predicate_queries:
+    - name: channel table exists
+      predicate_query: |
+        SELECT to_regclass('public.hg_youban_publish_channel') IS NOT NULL;
+  query: |-
+    SELECT current_database() AS datname,
+           COUNT(*)::bigint AS present_columns
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'hg_youban_publish_channel'
+      AND column_name IN ('cycle_publish_mode','cycle_batch_size','cycle_batch_time','cycle_batch_cursor')
+  ttl: 60
+  timeout: 2
+  tags: [ "dbname:railway" ]
+  metrics:
+    - datname: { usage: LABEL, description: database name }
+    - present_columns: { usage: GAUGE, description: number of required cycle publishing columns }
+
+youban_cycle_backlog:
+  name: youban_cycle_backlog
+  desc: Due cycle publishing job backlog
+  predicate_queries:
+    - name: tg job table exists
+      predicate_query: |
+        SELECT to_regclass('public.hg_youban_publish_tg_job') IS NOT NULL;
+  query: |-
+    SELECT current_database() AS datname,
+           COUNT(*)::bigint AS due_jobs,
+           COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(next_cycle_at))), 0)::bigint AS oldest_due_age_seconds
+    FROM hg_youban_publish_tg_job j
+    JOIN hg_youban_publish_channel_profile cp
+      ON cp.last_job_id = j.id
+     AND cp.status = 'active'
+    JOIN hg_youban_publish_channel c
+      ON c.id = j.channel_id
+     AND c.deleted_at IS NULL
+     AND c.cycle_publish_enabled = 1
+     AND c.status = 1
+     AND c.publish_direction = 'up'
+    WHERE j.cycle_enabled = 1
+      AND j.status IN ('sent','superseded')
+      AND j.next_cycle_at IS NOT NULL
+      AND j.next_cycle_at <= NOW()
+  ttl: 60
+  timeout: 2
+  tags: [ "dbname:railway" ]
+  metrics:
+    - datname: { usage: LABEL, description: database name }
+    - due_jobs: { usage: GAUGE, description: due cycle publishing jobs }
+    - oldest_due_age_seconds: { usage: GAUGE, description: oldest due cycle publishing job age in seconds }
+
+youban_cycle_runs:
+  name: youban_cycle_runs
+  desc: Recently failed cycle publishing runs
+  predicate_queries:
+    - name: cycle run table exists
+      predicate_query: |
+        SELECT to_regclass('public.hg_youban_publish_cycle_run') IS NOT NULL;
+  query: |-
+    SELECT current_database() AS datname,
+           COUNT(*)::bigint AS failed_runs_15m
+    FROM (
+      SELECT status, updated_at
+      FROM hg_youban_publish_cycle_run
+      ORDER BY id DESC
+      LIMIT 1000
+    ) recent
+    WHERE status IN ('failed','partial_failed')
+      AND updated_at >= NOW() - INTERVAL '15 minutes'
+  ttl: 60
+  timeout: 2
+  tags: [ "dbname:railway" ]
+  metrics:
+    - datname: { usage: LABEL, description: database name }
+    - failed_runs_15m: { usage: GAUGE, description: failed cycle publishing runs in the last 15 minutes }
