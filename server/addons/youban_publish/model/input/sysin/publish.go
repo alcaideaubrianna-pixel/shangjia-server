@@ -1429,7 +1429,14 @@ func (in *ChannelSaveInp) Filter(ctx context.Context) error {
 	if in.CyclePublishMode != "time" && in.CyclePublishMode != "batch" {
 		return gerror.New("循环模式不合法")
 	}
-	if in.CyclePublishMode == "batch" {
+	if in.CyclePublishEnabled == 0 {
+		in.CyclePublishMode = "time"
+		in.CyclePublishDays = 0
+		in.CyclePublishTime = ""
+		in.CycleBatchSize = 0
+		in.CycleBatchTime = ""
+	}
+	if in.CyclePublishEnabled == 1 && in.CyclePublishMode == "batch" {
 		if in.CycleBatchSize <= 0 || in.CycleBatchSize > 5000 {
 			return gerror.New("批次循环数量需在1到5000之间")
 		}
@@ -1437,6 +1444,11 @@ func (in *ChannelSaveInp) Filter(ctx context.Context) error {
 		if _, err := time.Parse("15:04", in.CycleBatchTime); err != nil {
 			return gerror.New("批次循环时间格式不合法")
 		}
+		in.CyclePublishDays = 0
+		in.CyclePublishTime = ""
+	} else if in.CyclePublishEnabled == 1 {
+		in.CycleBatchSize = 0
+		in.CycleBatchTime = ""
 	}
 	if in.CyclePublishDays < 0 || in.CyclePublishDays > 365 {
 		return gerror.New("循环时间不合法")
