@@ -1,0 +1,139 @@
+groups:
+  - name: youban-queue-health
+    interval: 15s
+    rules:
+      - alert: YoubanAutoDeleteQueueBacklog
+        expr: '{__name__="xiaohuiji.asynq.tasks",queue="youban_publish_auto_delete",state="pending"} > 100'
+        for: 2m
+        labels:
+          severity: WARN
+          category: queue
+        annotations:
+          summary: "自动关键字删除队列积压"
+          description: "待删除消息 {{ $value }} 条，已持续 2 分钟，请检查 Worker 消费能力"
+      - alert: YoubanAutoDeleteQueueCritical
+        expr: '{__name__="xiaohuiji.asynq.tasks",queue="youban_publish_auto_delete",state="pending"} > 1000'
+        for: 1m
+        labels:
+          severity: CRIT
+          category: queue
+        annotations:
+          summary: "自动关键字删除队列严重积压"
+          description: "待删除消息 {{ $value }} 条，关键字删除已明显延迟"
+      - alert: YoubanAutoDeleteQueueLatencyHigh
+        expr: '{__name__="xiaohuiji.asynq.tasks",queue="youban_publish_auto_delete",state="orphan_latency_seconds"} > 120'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: queue
+        annotations:
+          summary: "自动关键字删除延迟超过 2 分钟"
+          description: "队列最老任务已等待 {{ $value }} 秒"
+      - alert: YoubanAutoDeleteQueueMetricsMissing
+        expr: 'absent_over_time({__name__="xiaohuiji.asynq.tasks",queue="youban_publish_auto_delete"}[5m])'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: queue
+        annotations:
+          summary: "自动关键字删除消费者指标消失"
+          description: "连续 5 分钟没有自动删除队列指标，Worker 可能未启动或监控链路中断"
+      - alert: YoubanApp4BackgroundWorkerHeartbeatMissing
+        expr: 'absent_over_time({__name__="xiaohuiji.runtime.heartbeat",service.name="xiaohuiji-worker-app4",scope.name="hotgo/addons/youban_publish",role="background-worker"}[3m])'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: runtime
+        annotations:
+          summary: "应用 4 后台 Worker 心跳消失"
+          description: "应用 4 后台 Worker 连续 3 分钟没有心跳，请检查 PostgreSQL、Redis 连接和容器状态"
+      - alert: YoubanApp3PublishWorkerHeartbeatMissing
+        expr: 'absent_over_time({__name__="xiaohuiji.runtime.heartbeat",service.name="xiaohuiji-publish-worker-app3",scope.name="hotgo/addons/youban_publish",role="push-worker"}[3m])'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: runtime
+        annotations:
+          summary: "应用 3 发布 Worker 心跳消失"
+          description: "应用 3 发布 Worker 连续 3 分钟没有心跳，Telegram 推送可能停止"
+      - alert: YoubanApp3MediaWorkerHeartbeatMissing
+        expr: 'absent_over_time({__name__="xiaohuiji.runtime.heartbeat",service.name="xiaohuiji-media-worker-app3",scope.name="hotgo/addons/youban_publish",role="media-worker"}[3m])'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: runtime
+        annotations:
+          summary: "应用 3 媒体 Worker 心跳消失"
+          description: "应用 3 媒体 Worker 连续 3 分钟没有心跳，采集媒体处理可能停止"
+      - alert: YoubanCycleSchemaIncomplete
+        expr: 'youban_cycle_schema_present_columns < 4'
+        for: 1m
+        labels:
+          severity: CRIT
+          category: cycle
+        annotations:
+          summary: "循环上架数据库迁移不完整"
+          description: "循环上架所需 4 个频道字段当前只存在 {{ $value }} 个，请立即执行数据库迁移"
+      - alert: YoubanCycleDueBacklog
+        expr: 'youban_cycle_backlog_due_jobs > 1000'
+        for: 10m
+        labels:
+          severity: WARN
+          category: cycle
+        annotations:
+          summary: "循环上架任务出现积压"
+          description: "当前有 {{ $value }} 条到期循环任务等待处理，已持续 10 分钟"
+      - alert: YoubanCycleDueBacklogCritical
+        expr: 'youban_cycle_backlog_due_jobs > 5000'
+        for: 5m
+        labels:
+          severity: CRIT
+          category: cycle
+        annotations:
+          summary: "循环上架任务严重积压"
+          description: "当前有 {{ $value }} 条到期循环任务等待处理，请检查调度器、数据库迁移和 Worker"
+      - alert: YoubanCycleOldestDueHigh
+        expr: 'youban_cycle_backlog_oldest_due_age_seconds > 7200'
+        for: 10m
+        labels:
+          severity: CRIT
+          category: cycle
+        annotations:
+          summary: "循环上架延迟超过 2 小时"
+          description: "最老循环任务已到期 {{ $value }} 秒，循环调度链路可能中断"
+      - alert: YoubanCycleRunsFailed
+        expr: 'youban_cycle_runs_failed_runs_15m > 0'
+        for: 2m
+        labels:
+          severity: WARN
+          category: cycle
+        annotations:
+          summary: "循环上架批次执行失败"
+          description: "最近 15 分钟有 {{ $value }} 个循环批次失败或部分失败"
+      - alert: YoubanCycleMetricsMissing
+        expr: 'absent_over_time(youban_cycle_backlog_due_jobs[5m])'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: cycle
+        annotations:
+          summary: "循环上架监控指标消失"
+          description: "连续 5 分钟没有循环上架指标，请检查 OTel Collector 与 PostgreSQL 连接"
+      - alert: YoubanPublishFailuresHigh
+        expr: 'sum(increase({__name__="xiaohuiji.tg.publish_failures"}[10m])) > 10 and sum(increase({__name__="xiaohuiji.tg.publish_failures"}[10m])) <= 30'
+        for: 2m
+        labels:
+          severity: WARN
+          category: publish
+        annotations:
+          summary: "TG 上架失败次数异常"
+          description: "最近 10 分钟新增 {{ $value }} 个终态失败任务，请检查 Telegram、媒体和 Worker 状态"
+      - alert: YoubanPublishFailuresCritical
+        expr: 'sum(increase({__name__="xiaohuiji.tg.publish_failures"}[10m])) > 30'
+        for: 1m
+        labels:
+          severity: CRIT
+          category: publish
+        annotations:
+          summary: "TG 上架失败次数严重异常"
+          description: "最近 10 分钟新增 {{ $value }} 个终态失败任务，发布链路可能出现系统性故障"

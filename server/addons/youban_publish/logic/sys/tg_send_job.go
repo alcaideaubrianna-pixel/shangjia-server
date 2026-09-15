@@ -470,6 +470,9 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	if decision.Status == "failed" && job.CollectEventId > 0 {
 		_ = s.markCollectDispatchFailedByProfile(ctx, job.ProfileId, job.CollectEventId, decision.Message)
 	}
+	if decision.Status == "failed" {
+		observeTelegramPublishFailure(ctx, "send")
+	}
 	projectedStatus := sysin.PublishTaskStatusPending
 	if decision.Status == "failed" {
 		projectedStatus = sysin.PublishTaskStatusFailed
@@ -503,6 +506,7 @@ func (s *sSysPublish) failTelegramMediaFallbackJob(ctx context.Context, job tele
 	if affected == 0 {
 		return nil
 	}
+	observeTelegramPublishFailure(ctx, "media_fallback")
 	if recordErr := s.upsertPublishJobRecord(ctx, job, "failed", message); recordErr != nil {
 		g.Log().Warningf(ctx, "更新协议号媒体失败记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
