@@ -13,7 +13,8 @@ from pathlib import Path
 
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_RETRIES = 3
-DEFAULT_HEALTH_RETRIES = 12
+# Wait through a start-first rollout and image extraction on slower nodes.
+DEFAULT_HEALTH_RETRIES = 60
 DEFAULT_REVISION_CONFIRMATIONS = 5
 
 
@@ -104,8 +105,21 @@ def read_health(url):
         url,
         headers={"User-Agent": "youban-deploy-ci/1.0", "Cache-Control": "no-cache"},
     )
-    with urllib.request.urlopen(request, timeout=10) as response:
+    try:
+        response_context = urllib.request.urlopen(request, timeout=10)
+    except urllib.error.HTTPError as error:
+        # Dokploy/API may report 409 while old and new replicas overlap.
+        # Return the body so the caller can keep polling for the expected revision.
+        if error.code != 409:
+            raise
+        response_context = error
+    with response_context as response:
         body = response.read()
+        if response.status == 409:
+            try:
+                return json.loads(body.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                raise RuntimeError("health endpoint is still converging (HTTP 409)")
         if not 200 <= response.status < 300:
             raise RuntimeError(f"unexpected HTTP status {response.status}")
         try:
