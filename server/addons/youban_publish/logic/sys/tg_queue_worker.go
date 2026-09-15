@@ -121,6 +121,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	profileMux := asynq.NewServeMux()
 	profileMux.HandleFunc(tgTaskTypeProfileMaintenance, s.handleProfileMaintenanceTask)
 	profileMux.HandleFunc(tgTaskTypeProfileSubmit, s.handleProfileSubmitTask)
+	profileMux.HandleFunc(tgTaskTypePublishRecovery, s.handleTerminalPublishRecoveryTask)
 	duplicateMux := asynq.NewServeMux()
 	duplicateMux.HandleFunc(tgTaskTypeDuplicateScan, s.handleDuplicateScanTask)
 	go func() {

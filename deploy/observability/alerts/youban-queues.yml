@@ -137,3 +137,12 @@ groups:
         annotations:
           summary: "TG 上架失败次数严重异常"
           description: "最近 10 分钟新增 {{ $value }} 个终态失败任务，发布链路可能出现系统性故障"
+      - alert: YoubanPublishRecoveryFailures
+        expr: 'sum(increase({__name__="xiaohuiji.tg.publish_recoveries",result="failed"}[15m])) > 3'
+        for: 2m
+        labels:
+          severity: WARN
+          category: publish
+        annotations:
+          summary: "TG 上架自动补偿连续失败"
+          description: "最近 15 分钟自动补偿失败 {{ $value }} 次，请检查资料维护队列和发布链路"

@@ -355,6 +355,7 @@ func (s *sSysPublish) postponeUnknownTelegramJob(ctx context.Context, job telegr
 	projectedStatus := sysin.PublishTaskStatusPending
 	if decision.Status == "failed" {
 		observeTelegramPublishFailure(ctx, "reconcile")
+		s.enqueueTerminalPublishRecoveryBestEffort(ctx, job, cause)
 		projectedStatus = sysin.PublishTaskStatusFailed
 		if job.CollectEventId > 0 {
 			_ = s.markCollectDispatchFailedByProfile(ctx, job.ProfileId, job.CollectEventId, decision.Message)

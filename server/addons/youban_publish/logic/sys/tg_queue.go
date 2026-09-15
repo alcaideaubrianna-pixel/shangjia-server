@@ -51,6 +51,7 @@ const (
 	tgTaskTypeBotMediaRepair      = "youban_publish:bot:media_repair"
 	tgTaskTypeProfileMaintenance  = "youban_publish:profile:maintenance"
 	tgTaskTypeProfileSubmit       = "youban_publish:profile:submit"
+	tgTaskTypePublishRecovery     = "youban_publish:profile:publish_recovery"
 	tgTaskTypeDuplicateScan       = "youban_publish:profile:duplicate_scan"
 )
 
