@@ -36,7 +36,7 @@
     {
       "name": "xiaohuiji-worker-app4",
       "webhook": "https://dokploy.xiao-feiji.cc/api/deploy/6YtDmsmnkJ-cwqdqTT2GL",
-      "enabled": false,
+      "enabled": true,
       "order": 45
     },
     {
