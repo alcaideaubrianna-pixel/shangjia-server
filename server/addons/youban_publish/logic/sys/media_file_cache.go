@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +31,7 @@ const (
 	mediaFileCacheDefaultMaxBytes = int64(1 << 30)
 	mediaFileCacheTargetRatio     = 0.9
 	mediaFileCachePruneInterval   = 5 * time.Minute
+	mediaFileCacheWorkerAttempts  = 3
 	mediaFileCacheCosModeCDN      = "cdn"
 	mediaFileCacheCosModeOrigin   = "origin"
 )
@@ -81,6 +84,14 @@ type mediaFileCacheSource struct {
 	CacheKey   string
 	ObjectPath string
 	Drive      string
+}
+
+type mediaFileCacheHTTPStatusError struct {
+	statusCode int
+}
+
+func (e *mediaFileCacheHTTPStatusError) Error() string {
+	return "下载远程媒体失败：HTTP " + strconv.Itoa(e.statusCode)
 }
 
 func cachedTelegramMediaFile(ctx context.Context, media *telegramMediaItem) (string, func(), error) {
@@ -199,6 +210,9 @@ func mediaFileCacheCDNURL(ctx context.Context, configKey string, objectPath stri
 
 func mediaFileCacheSourceDownloader(ctx context.Context, source mediaFileCacheSource) func(context.Context, string, string) error {
 	if !strings.EqualFold(source.Drive, "cos") || mediaFileCacheCosDownloadMode(ctx) != mediaFileCacheCosModeOrigin || source.ObjectPath == "" {
+		if mediaFileCacheIsWorkerURL(ctx, source.URL) {
+			return downloadWorkerMediaFileCache
+		}
 		return nil
 	}
 	return func(downloadCtx context.Context, _ string, targetPath string) error {
@@ -208,6 +222,14 @@ func mediaFileCacheSourceDownloader(ctx context.Context, source mediaFileCacheSo
 		}
 		return nil
 	}
+}
+
+func mediaFileCacheIsWorkerURL(ctx context.Context, source string) bool {
+	workerBase := strings.TrimSpace(g.Cfg().MustGet(ctx, "youbanPublish.mediaFileCache.workerCdnBaseUrl", "").String())
+	workerURL, workerErr := url.Parse(workerBase)
+	sourceURL, sourceErr := url.Parse(strings.TrimSpace(source))
+	return workerErr == nil && sourceErr == nil && workerURL.Hostname() != "" &&
+		strings.EqualFold(workerURL.Hostname(), sourceURL.Hostname())
 }
 
 func cachedRemoteMediaFile(ctx context.Context, key string, source string, ext string) (string, error) {
@@ -316,6 +338,40 @@ func downloadMediaFileCache(ctx context.Context, source string, filePath string)
 	return downloadMediaFileCacheWithClient(downloadCtx, &http.Client{Timeout: 10 * time.Minute}, source, filePath)
 }
 
+func downloadWorkerMediaFileCache(ctx context.Context, source string, filePath string) error {
+	downloadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
+	defer cancel()
+	return downloadMediaFileCacheWithRetry(downloadCtx, &http.Client{Timeout: 2 * time.Minute}, source, filePath, mediaFileCacheWorkerAttempts, time.Sleep)
+}
+
+func downloadMediaFileCacheWithRetry(ctx context.Context, client *http.Client, source string, filePath string, attempts int, sleep func(time.Duration)) error {
+	if attempts < 1 {
+		attempts = 1
+	}
+	var err error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		err = downloadMediaFileCacheWithClient(ctx, client, source, filePath)
+		if err == nil || !isRetryableMediaFileCacheError(ctx, err) || attempt == attempts {
+			return err
+		}
+		sleep(time.Duration(attempt*attempt) * 200 * time.Millisecond)
+	}
+	return err
+}
+
+func isRetryableMediaFileCacheError(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil {
+		return false
+	}
+	var statusErr *mediaFileCacheHTTPStatusError
+	if errors.As(err, &statusErr) {
+		return statusErr.statusCode == http.StatusRequestTimeout ||
+			statusErr.statusCode == http.StatusTooManyRequests ||
+			statusErr.statusCode >= http.StatusInternalServerError
+	}
+	return true
+}
+
 func downloadMediaFileCacheWithClient(ctx context.Context, client *http.Client, source string, filePath string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
 	if err != nil {
@@ -331,7 +387,7 @@ func downloadMediaFileCacheWithClient(ctx context.Context, client *http.Client, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return gerror.Newf("下载远程媒体失败：HTTP %d", resp.StatusCode)
+		return &mediaFileCacheHTTPStatusError{statusCode: resp.StatusCode}
 	}
 	if err = os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
 		return gerror.Wrap(err, "创建媒体缓存子目录失败")
