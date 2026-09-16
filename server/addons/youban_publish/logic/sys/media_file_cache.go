@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -27,12 +28,37 @@ const (
 	mediaFileCacheDefaultDir      = "storage/cache/youban_publish/media"
 	mediaFileCacheDefaultMaxBytes = int64(1 << 30)
 	mediaFileCacheTargetRatio     = 0.9
+	mediaFileCachePruneInterval   = 5 * time.Minute
 	mediaFileCacheCosModeCDN      = "cdn"
 	mediaFileCacheCosModeOrigin   = "origin"
 )
 
 var mediaFileCacheDownloadGroup singleflight.Group
 var mediaFileCacheGenerateGroup singleflight.Group
+var mediaFileCachePruneScheduler mediaFileCachePruner
+
+type mediaFileCachePruner struct {
+	mu          sync.Mutex
+	running     bool
+	lastStarted time.Time
+}
+
+func (p *mediaFileCachePruner) claim(now time.Time, interval time.Duration) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.running || (!p.lastStarted.IsZero() && now.Sub(p.lastStarted) < interval) {
+		return false
+	}
+	p.running = true
+	p.lastStarted = now
+	return true
+}
+
+func (p *mediaFileCachePruner) release() {
+	p.mu.Lock()
+	p.running = false
+	p.mu.Unlock()
+}
 
 type mediaFileCacheMeta struct {
 	Key          string `json:"key"`
@@ -230,9 +256,7 @@ func cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx context.Context, key s
 		if err := touchMediaFileCacheMeta(metaPath, key, metaSource, filePath); err != nil {
 			return "", err
 		}
-		if err := pruneMediaFileCache(ctx); err != nil {
-			g.Log().Warningf(ctx, "清理媒体文件缓存失败: %+v", err)
-		}
+		scheduleMediaFileCachePrune(ctx)
 		return filePath, nil
 	})
 	if err != nil {
@@ -277,9 +301,7 @@ func cachedGeneratedMediaFile(ctx context.Context, key string, source string, ex
 		if err := touchMediaFileCacheMeta(metaPath, key, source, filePath); err != nil {
 			return "", err
 		}
-		if err := pruneMediaFileCache(ctx); err != nil {
-			g.Log().Warningf(ctx, "清理媒体文件缓存失败: %+v", err)
-		}
+		scheduleMediaFileCachePrune(ctx)
 		return filePath, nil
 	})
 	if err != nil {
@@ -370,6 +392,23 @@ func readMediaFileCacheMeta(path string) (*mediaFileCacheMeta, error) {
 		return nil, err
 	}
 	return &meta, nil
+}
+
+func scheduleMediaFileCachePrune(ctx context.Context) {
+	interval := g.Cfg().MustGet(ctx, "youbanPublish.mediaFileCache.pruneInterval", mediaFileCachePruneInterval).Duration()
+	if interval <= 0 {
+		interval = mediaFileCachePruneInterval
+	}
+	if !mediaFileCachePruneScheduler.claim(time.Now(), interval) {
+		return
+	}
+	pruneCtx := context.WithoutCancel(ctx)
+	go func() {
+		defer mediaFileCachePruneScheduler.release()
+		if err := pruneMediaFileCache(pruneCtx); err != nil {
+			g.Log().Warningf(pruneCtx, "清理媒体文件缓存失败: %+v", err)
+		}
+	}()
 }
 
 func pruneMediaFileCache(ctx context.Context) error {
