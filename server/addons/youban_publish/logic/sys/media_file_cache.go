@@ -233,7 +233,37 @@ func mediaFileCacheIsWorkerURL(ctx context.Context, source string) bool {
 }
 
 func cachedRemoteMediaFile(ctx context.Context, key string, source string, ext string) (string, error) {
-	return cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx, key, source, source, ext, nil)
+	source = mediaFileCachePreferWorkerURL(ctx, source)
+	var downloader func(context.Context, string, string) error
+	if mediaFileCacheIsWorkerURL(ctx, source) {
+		downloader = downloadWorkerMediaFileCache
+	}
+	return cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx, key, source, source, ext, downloader)
+}
+
+func mediaFileCachePreferWorkerURL(ctx context.Context, source string) string {
+	runtime := loadPublishRuntimeConfig(ctx)
+	if !runtime.PushWorker && !runtime.MediaWorker && !runtime.BackgroundWorker {
+		return source
+	}
+	workerBase := strings.TrimSpace(g.Cfg().MustGet(ctx, "youbanPublish.mediaFileCache.workerCdnBaseUrl", "").String())
+	fallbackBase := strings.TrimSpace(g.Cfg().MustGet(ctx, "youbanPublish.mediaFileCache.fallbackCdnBaseUrl", "").String())
+	return rewriteMediaFileCacheBaseURL(source, fallbackBase, workerBase)
+}
+
+func rewriteMediaFileCacheBaseURL(source string, fromBase string, toBase string) string {
+	sourceURL, sourceErr := url.Parse(strings.TrimSpace(source))
+	fromURL, fromErr := url.Parse(strings.TrimSpace(fromBase))
+	toURL, toErr := url.Parse(strings.TrimSpace(toBase))
+	if sourceErr != nil || fromErr != nil || toErr != nil || sourceURL.Hostname() == "" ||
+		fromURL.Hostname() == "" || toURL.Scheme == "" || toURL.Host == "" ||
+		!strings.EqualFold(sourceURL.Hostname(), fromURL.Hostname()) {
+		return source
+	}
+	toURL.Path = strings.TrimRight(toURL.Path, "/") + "/" + strings.TrimLeft(sourceURL.Path, "/")
+	toURL.RawQuery = sourceURL.RawQuery
+	toURL.Fragment = ""
+	return toURL.String()
 }
 
 func cachedRemoteMediaFileWithMetaSource(ctx context.Context, key string, source string, metaSource string, ext string) (string, error) {

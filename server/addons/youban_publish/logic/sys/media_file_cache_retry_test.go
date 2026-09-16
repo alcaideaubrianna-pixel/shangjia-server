@@ -50,3 +50,23 @@ func TestDownloadMediaFileCacheWithRetrySkipsPermanentHTTPError(t *testing.T) {
 		t.Fatalf("request count = %d, want 1", got)
 	}
 }
+
+func TestRewriteMediaFileCacheBaseURL(t *testing.T) {
+	got := rewriteMediaFileCacheBaseURL(
+		"https://img.xiaohuiji.cc/hotgo/file/example.jpg?version=2",
+		"https://img.xiaohuiji.cc",
+		"https://img.yuebanby.com",
+	)
+	want := "https://img.yuebanby.com/hotgo/file/example.jpg?version=2"
+	if got != want {
+		t.Fatalf("rewriteMediaFileCacheBaseURL() = %q, want %q", got, want)
+	}
+}
+
+func TestRewriteMediaFileCacheBaseURLKeepsExternalSource(t *testing.T) {
+	source := "https://telegram.org/file/example.jpg"
+	got := rewriteMediaFileCacheBaseURL(source, "https://img.xiaohuiji.cc", "https://img.yuebanby.com")
+	if got != source {
+		t.Fatalf("rewriteMediaFileCacheBaseURL() = %q, want unchanged source", got)
+	}
+}
