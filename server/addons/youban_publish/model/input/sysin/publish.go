@@ -954,6 +954,18 @@ type BotProfileViewInp struct {
 	PublicOnly  bool    `json:"publicOnly" dc:"是否只允许公开/上架资料"`
 }
 
+// BotProfileForwardLookupInp resolves a profile from a Telegram message that
+// was previously sent by the publish pipeline. ProfileNo is a fallback for
+// protected/hidden forwards where Telegram does not expose the source channel.
+type BotProfileForwardLookupInp struct {
+	TenantId     int64  `json:"tenantId" dc:"租户ID"`
+	AccountId    int64  `json:"accountId" dc:"上架账号ID"`
+	AccountType  string `json:"accountType" dc:"账号类型：admin/uploader"`
+	TargetChatId string `json:"targetChatId" dc:"TG目标频道ID"`
+	TgMessageId  int64  `json:"tgMessageId" dc:"TG消息ID"`
+	ProfileNo    string `json:"profileNo" dc:"资料编号兜底"`
+}
+
 // BotProfileStatusInp is used by youban_bot to update profile status.
 type BotProfileStatusInp struct {
 	TenantId    int64    `json:"tenantId" dc:"租户ID"`

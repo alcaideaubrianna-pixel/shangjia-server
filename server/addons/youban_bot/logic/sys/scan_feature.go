@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/frame/g"
 
 	botsysin "hotgo/addons/youban_bot/model/input/sysin"
 	publishsysin "hotgo/addons/youban_publish/model/input/sysin"
@@ -47,19 +49,62 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 	if err = publishService.SysPublish().EnsureBotMediaSearchAccess(ctx, account.TenantId); err != nil {
 		return true, bot.replyBotError(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "扫图搜索", err)
 	}
+	userId := fmt.Sprintf("%d", event.Msg.From.ID)
+	groupId := strings.TrimSpace(event.Msg.MediaGroupID)
+	if groupId != "" {
+		if err = bot.acknowledgeScanMediaGroup(ctx, event.BotId, userId, event.Msg); err != nil {
+			return true, err
+		}
+		if bot.scanMediaGroupResolved(ctx, event.BotId, userId, groupId) {
+			return true, nil
+		}
+	}
+	lookupStartedAt := time.Now()
+	note, _, lookupErr := bot.lookupForwardedScanProfile(ctx, event.BotId, account, event.Msg)
+	if lookupErr != nil {
+		g.Log().Warning(ctx, "Bot转发资料快捷查询失败，降级扫图", g.Map{
+			"botId": event.BotId, "tenantId": account.TenantId, "accountId": account.AccountId, "err": lookupErr,
+		})
+	}
+	if note != nil && note.Id > 0 {
+		if groupId != "" {
+			claimed, claimErr := bot.claimScanMediaGroupResolved(ctx, event.BotId, userId, groupId)
+			if claimErr != nil {
+				return true, claimErr
+			}
+			if !claimed {
+				return true, nil
+			}
+		}
+		err = bot.sendProfileCard(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), note, profileCardPurpose(account, note, "view"))
+		observeScanStage(ctx, event.BotId, "direct_reply", lookupStartedAt, err)
+		observeScanRequest(ctx, event.BotId, scanResultLabel(err, "direct"))
+		return true, err
+	}
+	resolveStartedAt := time.Now()
 	media, err := bot.resolveTelegramMessageMedia(ctx, botTokenForEvent(ctx, bot, event.BotId), event.Msg)
+	observeScanStage(ctx, event.BotId, "telegram_resolve", resolveStartedAt, err)
 	if err != nil {
+		observeScanRequest(ctx, event.BotId, "failed")
 		return true, bot.replyBotError(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "扫图搜索", err)
 	}
 	items := scanSearchItems(media)
 	if len(items) == 0 {
 		return true, bot.sendMessageOnly(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), "当前媒体没有可用的图片或视频预览图。")
 	}
-	userId := fmt.Sprintf("%d", event.Msg.From.ID)
-	if groupId := strings.TrimSpace(event.Msg.MediaGroupID); groupId != "" {
+	if groupId != "" {
 		return true, bot.collectScanMediaGroup(ctx, event.BotId, userId, event.Msg, items)
 	}
-	return true, bot.searchScanMediaAndReply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), account, items)
+	err = bot.searchScanMediaAndReply(ctx, event.BotId, fmt.Sprintf("%d", event.Msg.Chat.ID), account, items)
+	observeScanRequest(ctx, event.BotId, scanResultLabel(err, "fingerprint"))
+	return true, err
+}
+
+func scanResultLabel(err error, success string) string {
+	if err != nil {
+		return "failed"
+	}
+	return success
 }
 
 func isTelegramPrivateChat(msg *models.Message) bool {

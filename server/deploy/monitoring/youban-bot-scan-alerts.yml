@@ -1,0 +1,40 @@
+groups:
+  - name: youban-bot-scan-health
+    interval: 15s
+    rules:
+      - alert: YoubanBotScanTelegramResolveSlow
+        expr: 'histogram_quantile(0.95, sum by (le) (rate({__name__="xiaohuiji.bot.scan.stage.duration.bucket",stage="telegram_resolve",result="success"}[5m]))) > 3'
+        for: 5m
+        labels:
+          severity: WARN
+          category: bot
+        annotations:
+          summary: "机器人媒体解析响应变慢"
+          description: "Telegram 文件解析 P95 已超过 3 秒并持续 5 分钟，请检查 Telegram API 与 SG 出口网络"
+      - alert: YoubanBotScanFingerprintSlow
+        expr: 'histogram_quantile(0.95, sum by (le) (rate({__name__="xiaohuiji.bot.scan.stage.duration.bucket",stage="fingerprint_search",result="success"}[5m]))) > 5'
+        for: 5m
+        labels:
+          severity: WARN
+          category: bot
+        annotations:
+          summary: "机器人扫图指纹查询变慢"
+          description: "扫图指纹查询 P95 已超过 5 秒并持续 5 分钟，请检查媒体下载、Redis 缓存和指纹查询"
+      - alert: YoubanBotScanGroupLatencyHigh
+        expr: 'histogram_quantile(0.95, sum by (le) (rate({__name__="xiaohuiji.bot.scan.stage.duration.bucket",stage="group_total",result="success"}[5m]))) > 15'
+        for: 3m
+        labels:
+          severity: CRIT
+          category: bot
+        annotations:
+          summary: "机器人媒体组查询延迟过高"
+          description: "媒体组查询 P95 已超过 15 秒并持续 3 分钟，用户可能长时间等待查询结果"
+      - alert: YoubanBotScanFailureRateHigh
+        expr: 'sum(increase({__name__="xiaohuiji.bot.scan.requests",result="failed"}[5m])) > 5 and sum(increase({__name__="xiaohuiji.bot.scan.requests",result="failed"}[5m])) / clamp_min(sum(increase({__name__="xiaohuiji.bot.scan.requests"}[5m])), 1) > 0.05'
+        for: 2m
+        labels:
+          severity: WARN
+          category: bot
+        annotations:
+          summary: "机器人资料查询失败率升高"
+          description: "最近 5 分钟扫图查询失败超过 5 次且失败率超过 5%，请检查 Bot、Telegram 和指纹查询链路"

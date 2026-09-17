@@ -31,6 +31,7 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 	if account == nil || len(items) == 0 {
 		return gerror.New("扫图搜索参数不完整")
 	}
+	searchStartedAt := time.Now()
 	list, total, err := publishService.SysPublish().BotProfileMediaSearch(ctx, &publishsysin.BotMediaSearchInp{
 		TenantId:    account.TenantId,
 		AccountId:   account.AccountId,
@@ -38,6 +39,7 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 		Items:       items,
 		Threshold:   12,
 	})
+	observeScanStage(ctx, botId, "fingerprint_search", searchStartedAt, err)
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "扫图搜索", err)
 	}

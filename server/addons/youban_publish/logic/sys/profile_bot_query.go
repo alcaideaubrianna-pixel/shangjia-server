@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/dao"
 )
@@ -166,4 +167,66 @@ func (s *sSysPublish) BotProfileView(ctx context.Context, in *sysin.BotProfileVi
 		return nil, err
 	}
 	return &sysin.NoteModel{ProfileModel: *profile, Media: media}, nil
+}
+
+// BotProfileForwardLookup uses the durable Telegram send ledger before the Bot
+// falls back to downloading media and calculating image fingerprints. The
+// permission scope is derived from the currently bound account, so a forwarded
+// message never bypasses the normal profile visibility rules.
+func (s *sSysPublish) BotProfileForwardLookup(ctx context.Context, in *sysin.BotProfileForwardLookupInp) (*sysin.NoteModel, error) {
+	if in == nil || in.TenantId <= 0 || in.AccountId <= 0 {
+		return nil, nil
+	}
+	visibleIds, err := s.botProfileViewAccountIds(ctx, &sysin.BotProfileViewInp{
+		TenantId: in.TenantId, AccountId: in.AccountId, AccountType: in.AccountType,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(visibleIds) == 0 {
+		return nil, nil
+	}
+	profileId := int64(0)
+	if strings.TrimSpace(in.TargetChatId) != "" && in.TgMessageId > 0 {
+		row, queryErr := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+			Fields("profile_id").
+			Where("target_chat_id", strings.TrimSpace(in.TargetChatId)).
+			Where("tg_message_id", in.TgMessageId).
+			WhereIn("account_id", visibleIds).
+			Where("status", "sent").
+			WhereNull("deleted_at").
+			OrderDesc("id").One()
+		if queryErr != nil {
+			return nil, gerror.Wrap(queryErr, "读取TG发送记录失败")
+		}
+		if !row.IsEmpty() {
+			profileId = row["profile_id"].Int64()
+		}
+	}
+	if profileId <= 0 {
+		profileNo := normalizeBotProfileNo(in.ProfileNo)
+		if profileNo == "" {
+			return nil, nil
+		}
+		base, baseErr := s.profileBaseModel(ctx, 0, 0)
+		if baseErr != nil {
+			return nil, baseErr
+		}
+		row, queryErr := base.Fields("p."+dao.ContentProfile.Columns().Id).
+			WhereIn("ps.account_id", visibleIds).
+			Where("p."+dao.ContentProfile.Columns().ProfileNo, profileNo).One()
+		if queryErr != nil {
+			return nil, gerror.Wrap(queryErr, "按编号读取转发资料失败")
+		}
+		if row.IsEmpty() {
+			return nil, nil
+		}
+		profileId = row[dao.ContentProfile.Columns().Id].Int64()
+	}
+	if profileId <= 0 {
+		return nil, nil
+	}
+	return s.BotProfileView(ctx, &sysin.BotProfileViewInp{
+		TenantId: in.TenantId, AccountId: in.AccountId, AccountType: in.AccountType, ProfileId: profileId,
+	})
 }
