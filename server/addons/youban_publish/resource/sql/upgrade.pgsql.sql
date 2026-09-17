@@ -916,4 +916,3 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_media_provider" ON "hg_youban_publ
 CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_image_provider" ON "hg_youban_publish_anti_scan_cache" ("image_hash", "provider", "cloud_raw_saved");
 
 ALTER TABLE "hg_youban_publish_tg_message" ADD COLUMN IF NOT EXISTS "tg_file_unique_id" varchar(255) NOT NULL DEFAULT '';
-CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_file_unique" ON "hg_youban_publish_tg_message" ("tg_file_unique_id", "account_id", "id" DESC) WHERE "tg_file_unique_id" <> '' AND "deleted_at" IS NULL;

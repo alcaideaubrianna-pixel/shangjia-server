@@ -13,4 +13,5 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_summary_trgm" ON "hg
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_plain_text_trgm" ON "hg_youban_publish_note_index" USING gin ("plain_text" gin_trgm_ops) WHERE "deleted_at" IS NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_content_profile_source_uuid" ON "hg_content_profile" ("source_note_uuid") WHERE "deleted_at" IS NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_media_phash_lsh_lookup" ON "hg_youban_publish_media_phash_lsh" ("tenant_id", "media_type", "bucket_pos", "bucket_value", "account_id", "profile_id", "media_id") INCLUDE ("hash_value");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_tg_message_file_unique" ON "hg_youban_publish_tg_message" ("tg_file_unique_id", "account_id", "id" DESC) WHERE "tg_file_unique_id" <> '' AND "deleted_at" IS NULL;
 DROP INDEX CONCURRENTLY IF EXISTS "idx_ybp_media_phash_lsh_search";

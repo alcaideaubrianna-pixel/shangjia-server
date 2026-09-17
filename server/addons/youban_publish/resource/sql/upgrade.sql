@@ -913,4 +913,3 @@ ALTER TABLE `hg_youban_publish_anti_scan_cache` ADD INDEX IF NOT EXISTS `idx_ybp
 ALTER TABLE `hg_youban_publish_anti_scan_cache` ADD INDEX IF NOT EXISTS `idx_ybp_anti_scan_media_provider` (`media_id`,`provider`,`cloud_raw_saved`);
 ALTER TABLE `hg_youban_publish_anti_scan_cache` ADD INDEX IF NOT EXISTS `idx_ybp_anti_scan_image_provider` (`image_hash`,`provider`,`cloud_raw_saved`);
 ALTER TABLE `hg_youban_publish_tg_message` ADD COLUMN IF NOT EXISTS `tg_file_unique_id` varchar(255) NOT NULL DEFAULT '';
-ALTER TABLE `hg_youban_publish_tg_message` ADD INDEX IF NOT EXISTS `idx_ybp_tg_message_file_unique` (`tg_file_unique_id`,`account_id`,`id`);
