@@ -7,16 +7,23 @@ import (
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"golang.org/x/sync/errgroup"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 const botMediaSearchMaxResults = 20
+const botMediaSearchConcurrency = 3
 
 type botMediaSearchCandidate struct {
 	ProfileId  int64
 	Distance   int
 	MatchCount int
+}
+
+type botMediaSearchItemResult struct {
+	HashKey string
+	Items   []publishProfilePHashDistance
 }
 
 func (s *sSysPublish) EnsureBotMediaSearchAccess(ctx context.Context, tenantId int64) error {
@@ -45,8 +52,7 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		Threshold: in.Threshold,
 	}
 	normalizeProfileImageSearchInput(searchIn)
-	candidates := make(map[int64]*botMediaSearchCandidate)
-	seenHashes := make(map[string]struct{})
+	searchItems := make([]*sysin.BotMediaSearchItem, 0, len(in.Items))
 	for _, item := range in.Items {
 		if item == nil {
 			continue
@@ -55,20 +61,45 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		if url == "" {
 			continue
 		}
-		fingerprint, hashErr := cachedRemoteImageFingerprint(ctx, url)
-		if hashErr != nil {
-			return nil, 0, hashErr
-		}
-		hashKey := fmt.Sprintf("%s:%016x", fingerprint.MD5, fingerprint.PHash.GetHash())
-		if _, exists := seenHashes[hashKey]; exists {
+		cloned := *item
+		cloned.FileUrl = url
+		searchItems = append(searchItems, &cloned)
+	}
+	results := make([]botMediaSearchItemResult, len(searchItems))
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(botMediaSearchConcurrency)
+	for index, item := range searchItems {
+		index, item := index, item
+		group.Go(func() error {
+			fingerprint, hashErr := cachedRemoteImageFingerprint(groupCtx, item.FileUrl)
+			if hashErr != nil {
+				return hashErr
+			}
+			matches, searchErr := s.cachedProfileFingerprintSearchCandidates(groupCtx, fingerprint, searchIn, searchScope, nil)
+			if searchErr != nil {
+				return searchErr
+			}
+			results[index] = botMediaSearchItemResult{
+				HashKey: fmt.Sprintf("%s:%016x", fingerprint.MD5, fingerprint.PHash.GetHash()),
+				Items:   matches,
+			}
+			return nil
+		})
+	}
+	if err = group.Wait(); err != nil {
+		return nil, 0, err
+	}
+	candidates := make(map[int64]*botMediaSearchCandidate)
+	seenHashes := make(map[string]struct{})
+	for _, result := range results {
+		if result.HashKey == "" {
 			continue
 		}
-		seenHashes[hashKey] = struct{}{}
-		items, searchErr := s.cachedProfileFingerprintSearchCandidates(ctx, fingerprint, searchIn, searchScope, nil)
-		if searchErr != nil {
-			return nil, 0, searchErr
+		if _, exists := seenHashes[result.HashKey]; exists {
+			continue
 		}
-		for _, item := range items {
+		seenHashes[result.HashKey] = struct{}{}
+		for _, item := range result.Items {
 			candidate, exists := candidates[item.ProfileId]
 			if !exists {
 				candidates[item.ProfileId] = &botMediaSearchCandidate{ProfileId: item.ProfileId, Distance: item.Distance, MatchCount: 1}
