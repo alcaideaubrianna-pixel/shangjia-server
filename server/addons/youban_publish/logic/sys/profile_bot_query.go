@@ -189,7 +189,7 @@ func (s *sSysPublish) BotProfileForwardLookup(ctx context.Context, in *sysin.Bot
 	profileId := int64(0)
 	if strings.TrimSpace(in.TargetChatId) != "" && in.TgMessageId > 0 {
 		row, queryErr := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
-			Fields("profile_id").
+			Fields("id,profile_id,tg_file_unique_id").
 			Where("target_chat_id", strings.TrimSpace(in.TargetChatId)).
 			Where("tg_message_id", in.TgMessageId).
 			WhereIn("account_id", visibleIds).
@@ -198,6 +198,32 @@ func (s *sSysPublish) BotProfileForwardLookup(ctx context.Context, in *sysin.Bot
 			OrderDesc("id").One()
 		if queryErr != nil {
 			return nil, gerror.Wrap(queryErr, "读取TG发送记录失败")
+		}
+		if !row.IsEmpty() {
+			profileId = row["profile_id"].Int64()
+			fileUniqueId := strings.TrimSpace(in.FileUniqueId)
+			if fileUniqueId != "" && strings.TrimSpace(row["tg_file_unique_id"].String()) == "" {
+				if _, updateErr := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+					Where("id", row["id"].Int64()).
+					Where("tg_file_unique_id", "").
+					Data(g.Map{"tg_file_unique_id": fileUniqueId}).Update(); updateErr != nil {
+					g.Log().Warning(ctx, "回填TG稳定媒体ID失败", g.Map{
+						"messageRecordId": row["id"].Int64(), "profileId": profileId, "err": updateErr,
+					})
+				}
+			}
+		}
+	}
+	if profileId <= 0 && strings.TrimSpace(in.FileUniqueId) != "" {
+		row, queryErr := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).
+			Fields("profile_id").
+			Where("tg_file_unique_id", strings.TrimSpace(in.FileUniqueId)).
+			WhereIn("account_id", visibleIds).
+			Where("status", "sent").
+			WhereNull("deleted_at").
+			OrderDesc("id").One()
+		if queryErr != nil {
+			return nil, gerror.Wrap(queryErr, "按TG媒体标识读取发送记录失败")
 		}
 		if !row.IsEmpty() {
 			profileId = row["profile_id"].Int64()

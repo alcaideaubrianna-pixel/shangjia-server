@@ -17,23 +17,26 @@ import (
 var forwardedProfileNoRegexp = regexp.MustCompile(`(?i)(?:资料|笔记)?编号\s*[:：]?\s*([A-Z][A-Z0-9]{4,})`)
 
 func (s *sSysBot) lookupForwardedScanProfile(ctx context.Context, botId int64, account *botProfileAccount, msg *models.Message) (*publishsysin.NoteModel, string, error) {
-	if account == nil || msg == nil || msg.ForwardOrigin == nil {
+	if account == nil || msg == nil {
 		return nil, "none", nil
 	}
 	chatId, messageId := forwardedChannelMessageRef(msg)
 	profileNo := forwardedCaptionProfileNo(msg.Caption)
+	fileUniqueId := telegramMessageFileUniqueId(msg)
 	source := "profile_no"
 	if chatId != "" && messageId > 0 {
 		source = "send_ledger"
+	} else if fileUniqueId != "" {
+		source = "file_unique_id"
 	}
-	if chatId == "" && profileNo == "" {
+	if chatId == "" && fileUniqueId == "" && profileNo == "" {
 		observeScanDirectLookup(ctx, botId, source, false)
 		return nil, source, nil
 	}
 	startedAt := time.Now()
 	note, err := publishService.SysPublish().BotProfileForwardLookup(ctx, &publishsysin.BotProfileForwardLookupInp{
 		TenantId: account.TenantId, AccountId: account.AccountId, AccountType: account.AccountType,
-		TargetChatId: chatId, TgMessageId: int64(messageId), ProfileNo: profileNo,
+		TargetChatId: chatId, TgMessageId: int64(messageId), FileUniqueId: fileUniqueId, ProfileNo: profileNo,
 	})
 	observeScanStage(ctx, botId, "direct_lookup", startedAt, err)
 	observeScanDirectLookup(ctx, botId, source, note != nil && note.Id > 0)
@@ -47,6 +50,25 @@ func (s *sSysBot) lookupForwardedScanProfile(ctx context.Context, botId int64, a
 		})
 	}
 	return note, source, nil
+}
+
+func telegramMessageFileUniqueId(msg *models.Message) string {
+	if msg == nil {
+		return ""
+	}
+	if msg.Video != nil {
+		return strings.TrimSpace(msg.Video.FileUniqueID)
+	}
+	if len(msg.Photo) == 0 {
+		return ""
+	}
+	best := msg.Photo[0]
+	for _, item := range msg.Photo {
+		if item.FileSize > best.FileSize {
+			best = item
+		}
+	}
+	return strings.TrimSpace(best.FileUniqueID)
 }
 
 func forwardedChannelMessageRef(msg *models.Message) (string, int) {

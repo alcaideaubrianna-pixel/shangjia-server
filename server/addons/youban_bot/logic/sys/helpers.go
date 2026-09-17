@@ -749,15 +749,18 @@ func (s *sSysBot) resolveTelegramMessageMedia(ctx context.Context, botToken stri
 	fileId := ""
 	name := ""
 	thumbFileId := ""
+	fileUniqueId := ""
 	if len(msg.Photo) > 0 {
-		photo := msg.Photo[len(msg.Photo)-1]
+		photo := scanPhotoSize(msg.Photo)
 		mediaType = "image"
 		fileId = strings.TrimSpace(photo.FileID)
-		name = firstNonEmpty(photo.FileUniqueID, fmt.Sprintf("photo_%d", msg.ID))
+		fileUniqueId = strings.TrimSpace(photo.FileUniqueID)
+		name = firstNonEmpty(fileUniqueId, fmt.Sprintf("photo_%d", msg.ID))
 	} else if msg.Video != nil {
 		mediaType = "video"
 		fileId = strings.TrimSpace(msg.Video.FileID)
-		name = firstNonEmpty(msg.Video.FileName, msg.Video.FileUniqueID, fmt.Sprintf("video_%d", msg.ID))
+		fileUniqueId = strings.TrimSpace(msg.Video.FileUniqueID)
+		name = firstNonEmpty(msg.Video.FileName, fileUniqueId, fmt.Sprintf("video_%d", msg.ID))
 		if msg.Video.Thumbnail != nil {
 			thumbFileId = strings.TrimSpace(msg.Video.Thumbnail.FileID)
 		}
@@ -794,14 +797,43 @@ func (s *sSysBot) resolveTelegramMessageMedia(ctx context.Context, botToken stri
 		}
 	}
 	return []*publishsysin.MessageTemplateMediaInp{{
-		MediaType:     mediaType,
-		Name:          name,
-		FileUrl:       fileURL,
-		PosterUrl:     posterURL,
-		TgFileId:      fmt.Sprintf("copy:%d:%d", msg.Chat.ID, msg.ID),
-		TgThumbFileId: thumbFileId,
-		SortIndex:     1,
+		MediaType:      mediaType,
+		Name:           name,
+		FileUrl:        fileURL,
+		PosterUrl:      posterURL,
+		TgFileId:       fmt.Sprintf("copy:%d:%d", msg.Chat.ID, msg.ID),
+		TgFileUniqueId: fileUniqueId,
+		TgThumbFileId:  thumbFileId,
+		SortIndex:      1,
 	}}, nil
+}
+
+// scanPhotoSize selects the smallest Telegram photo variant that is large
+// enough for a stable perceptual hash. This avoids downloading the original
+// multi-megabyte image on a cold search.
+func scanPhotoSize(items []models.PhotoSize) models.PhotoSize {
+	if len(items) == 0 {
+		return models.PhotoSize{}
+	}
+	fallback := items[0]
+	var best models.PhotoSize
+	bestArea := 0
+	for _, item := range items {
+		area := item.Width * item.Height
+		if area > fallback.Width*fallback.Height {
+			fallback = item
+		}
+		if item.Width >= 512 || item.Height >= 512 {
+			if bestArea == 0 || area < bestArea {
+				best = item
+				bestArea = area
+			}
+		}
+	}
+	if bestArea == 0 {
+		return fallback
+	}
+	return best
 }
 
 func (s *sSysBot) telegramFileDownloadURL(ctx context.Context, tgBot *tgbot.Bot, botToken string, fileId string) (string, error) {

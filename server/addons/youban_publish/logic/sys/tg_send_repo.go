@@ -190,23 +190,24 @@ func (s *sSysPublish) saveTelegramSentMessages(ctx context.Context, job telegram
 			_ = cache.Instance().Set(ctx, telegramPublishMessageCacheKey(job.TargetChatId, int(item.MessageId)), 1, autoDeletePublishMessageCacheTTL)
 		}
 		_, err := g.DB().Model(publishTgMessageTable).Safe().Ctx(ctx).Data(g.Map{
-			"job_id":         job.Id,
-			"tenant_id":      job.TenantId,
-			"account_id":     job.AccountId,
-			"profile_id":     job.ProfileId,
-			"bot_id":         job.BotId,
-			"target_chat_id": job.TargetChatId,
-			"tg_message_id":  item.MessageId,
-			"media_group_id": item.MediaGroupId,
-			"media_id":       item.MediaId,
-			"purpose":        item.Purpose,
-			"tg_file_id":     item.TgFileId,
-			"status":         "sent",
-			"sent_at":        now,
-			"deleted_at":     nil,
-			"created_at":     now,
-			"updated_at":     now,
-		}).OnConflict("job_id,tg_message_id").OnDuplicate("status,sent_at,deleted_at,updated_at").Save()
+			"job_id":            job.Id,
+			"tenant_id":         job.TenantId,
+			"account_id":        job.AccountId,
+			"profile_id":        job.ProfileId,
+			"bot_id":            job.BotId,
+			"target_chat_id":    job.TargetChatId,
+			"tg_message_id":     item.MessageId,
+			"media_group_id":    item.MediaGroupId,
+			"media_id":          item.MediaId,
+			"purpose":           item.Purpose,
+			"tg_file_id":        item.TgFileId,
+			"tg_file_unique_id": item.TgFileUniqueId,
+			"status":            "sent",
+			"sent_at":           now,
+			"deleted_at":        nil,
+			"created_at":        now,
+			"updated_at":        now,
+		}).OnConflict("job_id,tg_message_id").OnDuplicate("status,tg_file_id,tg_file_unique_id,sent_at,deleted_at,updated_at").Save()
 		if err != nil {
 			return gerror.Wrap(err, "保存TG消息记录失败")
 		}

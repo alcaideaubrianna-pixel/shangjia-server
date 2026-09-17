@@ -31,3 +31,24 @@ func TestForwardedCaptionProfileNo(t *testing.T) {
 		}
 	}
 }
+
+func TestTelegramMessageFileUniqueIdUsesLargestPhoto(t *testing.T) {
+	msg := &models.Message{Photo: []models.PhotoSize{
+		{FileUniqueID: "small", Width: 90, Height: 90, FileSize: 100},
+		{FileUniqueID: "large", Width: 1280, Height: 720, FileSize: 1000},
+	}}
+	if got := telegramMessageFileUniqueId(msg); got != "large" {
+		t.Fatalf("unexpected file_unique_id: %q", got)
+	}
+}
+
+func TestScanPhotoSizeAvoidsLargestVariant(t *testing.T) {
+	got := scanPhotoSize([]models.PhotoSize{
+		{FileUniqueID: "thumb", Width: 90, Height: 90, FileSize: 100},
+		{FileUniqueID: "medium", Width: 640, Height: 360, FileSize: 1000},
+		{FileUniqueID: "large", Width: 1920, Height: 1080, FileSize: 8000},
+	})
+	if got.FileUniqueID != "medium" {
+		t.Fatalf("unexpected scan photo size: %+v", got)
+	}
+}

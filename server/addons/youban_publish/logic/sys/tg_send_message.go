@@ -53,3 +53,22 @@ func telegramMessageFileId(msg *models.Message) string {
 	}
 	return best.FileID
 }
+
+func telegramMessageFileUniqueId(msg *models.Message) string {
+	if msg == nil {
+		return ""
+	}
+	if msg.Video != nil {
+		return strings.TrimSpace(msg.Video.FileUniqueID)
+	}
+	if len(msg.Photo) == 0 {
+		return ""
+	}
+	best := msg.Photo[0]
+	for _, item := range msg.Photo {
+		if item.FileSize > best.FileSize {
+			best = item
+		}
+	}
+	return strings.TrimSpace(best.FileUniqueID)
+}

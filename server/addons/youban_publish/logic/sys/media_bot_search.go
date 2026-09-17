@@ -71,7 +71,7 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 	for index, item := range searchItems {
 		index, item := index, item
 		group.Go(func() error {
-			fingerprint, hashErr := cachedRemoteImageFingerprint(groupCtx, item.FileUrl)
+			fingerprint, _, hashErr := cachedTelegramImageFingerprint(groupCtx, item.FileUniqueId, item.FileUrl)
 			if hashErr != nil {
 				return hashErr
 			}

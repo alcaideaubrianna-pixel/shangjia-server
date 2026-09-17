@@ -1262,7 +1262,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_message` (
   `bot_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Bot ID', `target_chat_id` varchar(128) NOT NULL DEFAULT '' COMMENT '目标Chat ID',
   `tg_message_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'TG消息ID', `media_group_id` varchar(128) NOT NULL DEFAULT '' COMMENT '媒体组ID',
   `media_id` bigint(20) NOT NULL DEFAULT '0' COMMENT '媒体ID', `purpose` varchar(16) NOT NULL DEFAULT '' COMMENT 'display/verify',
-  `tg_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'TG文件ID', `status` varchar(32) NOT NULL DEFAULT 'sent' COMMENT '状态',
+  `tg_file_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'TG文件ID', `tg_file_unique_id` varchar(255) NOT NULL DEFAULT '' COMMENT 'TG稳定文件ID',
+  `status` varchar(32) NOT NULL DEFAULT 'sent' COMMENT '状态',
   `sent_at` datetime DEFAULT NULL COMMENT '发送时间', `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间', `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`),
@@ -1270,7 +1271,8 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_message` (
   KEY `idx_ybp_tg_message_job` (`job_id`,`status`,`id`),
   KEY `idx_ybp_tg_message_task` (`task_id`,`id`),
   KEY `idx_ybp_tg_message_profile` (`tenant_id`,`account_id`,`profile_id`),
-  KEY `idx_ybp_tg_message_target_message` (`target_chat_id`,`tg_message_id`,`id`)
+  KEY `idx_ybp_tg_message_target_message` (`target_chat_id`,`tg_message_id`,`id`),
+  KEY `idx_ybp_tg_message_file_unique` (`tg_file_unique_id`,`account_id`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='悦伴TG消息记录';
 
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_tg_message_repair_run` (

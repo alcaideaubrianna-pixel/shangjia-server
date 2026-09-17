@@ -47,6 +47,7 @@ type MessageTemplateMediaInp struct {
 	PosterUrl             string `json:"posterUrl" dc:"封面地址"`
 	PosterStoragePath     string `json:"posterStoragePath" dc:"封面存储路径"`
 	TgFileId              string `json:"tgFileId" dc:"TG文件ID"`
+	TgFileUniqueId        string `json:"tgFileUniqueId" dc:"TG稳定文件ID"`
 	TgThumbFileId         string `json:"tgThumbFileId" dc:"TG缩略图ID"`
 	AssetHash             string `json:"assetHash" dc:"资源哈希"`
 	SortIndex             int    `json:"sortIndex" dc:"排序"`

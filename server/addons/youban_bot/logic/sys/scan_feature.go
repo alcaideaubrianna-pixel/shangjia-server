@@ -129,7 +129,9 @@ func scanSearchItems(media []*publishsysin.MessageTemplateMediaInp) []*publishsy
 		if url == "" || (mediaType != "image" && mediaType != "video") {
 			continue
 		}
-		items = append(items, &publishsysin.BotMediaSearchItem{FileUrl: url, MediaType: mediaType})
+		items = append(items, &publishsysin.BotMediaSearchItem{
+			FileUrl: url, MediaType: mediaType, FileUniqueId: strings.TrimSpace(item.TgFileUniqueId),
+		})
 	}
 	return items
 }

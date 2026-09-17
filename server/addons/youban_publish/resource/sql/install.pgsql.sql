@@ -820,6 +820,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_message" (
   "media_id" bigint NOT NULL DEFAULT 0,
   "purpose" varchar(16) NOT NULL DEFAULT '',
   "tg_file_id" varchar(255) NOT NULL DEFAULT '',
+  "tg_file_unique_id" varchar(255) NOT NULL DEFAULT '',
   "status" varchar(32) NOT NULL DEFAULT 'sent',
   "sent_at" timestamp DEFAULT NULL,
   "deleted_at" timestamp DEFAULT NULL,
@@ -831,6 +832,7 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_job" ON "hg_youban_publish_tg_mes
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_task" ON "hg_youban_publish_tg_message" ("task_id", "id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_profile" ON "hg_youban_publish_tg_message" ("tenant_id", "account_id", "profile_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_target_message" ON "hg_youban_publish_tg_message" ("target_chat_id", "tg_message_id", "id" DESC);
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_file_unique" ON "hg_youban_publish_tg_message" ("tg_file_unique_id", "account_id", "id" DESC) WHERE "tg_file_unique_id" <> '' AND "deleted_at" IS NULL;
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_message_repair_run" (
   "id" BIGSERIAL PRIMARY KEY,

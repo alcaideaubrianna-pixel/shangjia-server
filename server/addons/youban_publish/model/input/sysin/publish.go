@@ -608,8 +608,9 @@ type BotProfileImageSearchInp struct {
 }
 
 type BotMediaSearchItem struct {
-	FileUrl   string `json:"fileUrl" dc:"图片或视频预览图地址"`
-	MediaType string `json:"mediaType" dc:"媒体类型：image/video"`
+	FileUrl      string `json:"fileUrl" dc:"图片或视频预览图地址"`
+	MediaType    string `json:"mediaType" dc:"媒体类型：image/video"`
+	FileUniqueId string `json:"fileUniqueId" dc:"Telegram稳定媒体ID"`
 }
 
 type BotMediaSearchInp struct {
@@ -963,6 +964,7 @@ type BotProfileForwardLookupInp struct {
 	AccountType  string `json:"accountType" dc:"账号类型：admin/uploader"`
 	TargetChatId string `json:"targetChatId" dc:"TG目标频道ID"`
 	TgMessageId  int64  `json:"tgMessageId" dc:"TG消息ID"`
+	FileUniqueId string `json:"fileUniqueId" dc:"Telegram稳定媒体ID"`
 	ProfileNo    string `json:"profileNo" dc:"资料编号兜底"`
 }
 

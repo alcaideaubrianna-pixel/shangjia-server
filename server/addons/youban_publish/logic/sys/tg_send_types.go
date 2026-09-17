@@ -38,6 +38,7 @@ type telegramSentMessage struct {
 	Purpose          string
 	MediaId          int64
 	TgFileId         string
+	TgFileUniqueId   string
 	AssetHash        string
 	ProtectedHashKey string
 	ProtectedPHash   uint64

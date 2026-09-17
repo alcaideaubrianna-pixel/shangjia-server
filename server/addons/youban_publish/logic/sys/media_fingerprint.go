@@ -12,15 +12,54 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/corona10/goimagehash"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/net/ghttp"
+
+	"hotgo/internal/library/cache"
 )
+
+const botMediaFingerprintCacheTTL = 90 * 24 * time.Hour
 
 type mediaFingerprint struct {
 	MD5   string
 	PHash *goimagehash.ImageHash
+}
+
+type cachedBotMediaFingerprint struct {
+	MD5   string `json:"md5"`
+	PHash uint64 `json:"pHash"`
+}
+
+func cachedTelegramImageFingerprint(ctx context.Context, fileUniqueId string, imageURL string) (*mediaFingerprint, bool, error) {
+	fileUniqueId = strings.TrimSpace(fileUniqueId)
+	if fileUniqueId != "" {
+		value, err := cache.Instance().Get(ctx, botMediaFingerprintCacheKey(fileUniqueId))
+		if err == nil && !value.IsNil() {
+			var stored cachedBotMediaFingerprint
+			if scanErr := value.Scan(&stored); scanErr == nil && stored.PHash != 0 {
+				return &mediaFingerprint{
+					MD5: stored.MD5, PHash: goimagehash.NewImageHash(stored.PHash, goimagehash.PHash),
+				}, true, nil
+			}
+		}
+	}
+	fingerprint, err := cachedRemoteImageFingerprint(ctx, imageURL)
+	if err != nil {
+		return nil, false, err
+	}
+	if fileUniqueId != "" && fingerprint != nil && fingerprint.PHash != nil {
+		_ = cache.Instance().Set(ctx, botMediaFingerprintCacheKey(fileUniqueId), cachedBotMediaFingerprint{
+			MD5: fingerprint.MD5, PHash: fingerprint.PHash.GetHash(),
+		}, botMediaFingerprintCacheTTL)
+	}
+	return fingerprint, false, nil
+}
+
+func botMediaFingerprintCacheKey(fileUniqueId string) string {
+	return "youban_publish:bot_media_fingerprint:v1:" + strings.TrimSpace(fileUniqueId)
 }
 
 func uploadImageFingerprint(file *ghttp.UploadFile) (*mediaFingerprint, error) {
