@@ -34,17 +34,8 @@ type cachedBotMediaFingerprint struct {
 }
 
 func cachedTelegramImageFingerprint(ctx context.Context, fileUniqueId string, imageURL string) (*mediaFingerprint, bool, error) {
-	fileUniqueId = strings.TrimSpace(fileUniqueId)
-	if fileUniqueId != "" {
-		value, err := cache.Instance().Get(ctx, botMediaFingerprintCacheKey(fileUniqueId))
-		if err == nil && !value.IsNil() {
-			var stored cachedBotMediaFingerprint
-			if scanErr := value.Scan(&stored); scanErr == nil && stored.PHash != 0 {
-				return &mediaFingerprint{
-					MD5: stored.MD5, PHash: goimagehash.NewImageHash(stored.PHash, goimagehash.PHash),
-				}, true, nil
-			}
-		}
+	if fingerprint, ok := telegramImageFingerprintFromCache(ctx, fileUniqueId); ok {
+		return fingerprint, true, nil
 	}
 	fingerprint, err := cachedRemoteImageFingerprint(ctx, imageURL)
 	if err != nil {
@@ -56,6 +47,24 @@ func cachedTelegramImageFingerprint(ctx context.Context, fileUniqueId string, im
 		}, botMediaFingerprintCacheTTL)
 	}
 	return fingerprint, false, nil
+}
+
+func telegramImageFingerprintFromCache(ctx context.Context, fileUniqueId string) (*mediaFingerprint, bool) {
+	fileUniqueId = strings.TrimSpace(fileUniqueId)
+	if fileUniqueId == "" {
+		return nil, false
+	}
+	value, err := cache.Instance().Get(ctx, botMediaFingerprintCacheKey(fileUniqueId))
+	if err != nil || value == nil || value.IsNil() {
+		return nil, false
+	}
+	var stored cachedBotMediaFingerprint
+	if err = value.Scan(&stored); err != nil || stored.PHash == 0 {
+		return nil, false
+	}
+	return &mediaFingerprint{
+		MD5: stored.MD5, PHash: goimagehash.NewImageHash(stored.PHash, goimagehash.PHash),
+	}, true
 }
 
 func botMediaFingerprintCacheKey(fileUniqueId string) string {

@@ -7,23 +7,17 @@ import (
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"golang.org/x/sync/errgroup"
 
+	publishmodel "hotgo/addons/youban_publish/model"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 const botMediaSearchMaxResults = 20
-const botMediaSearchConcurrency = 3
 
 type botMediaSearchCandidate struct {
 	ProfileId  int64
 	Distance   int
 	MatchCount int
-}
-
-type botMediaSearchItemResult struct {
-	HashKey string
-	Items   []publishProfilePHashDistance
 }
 
 func (s *sSysPublish) EnsureBotMediaSearchAccess(ctx context.Context, tenantId int64) error {
@@ -65,50 +59,76 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		cloned.FileUrl = url
 		searchItems = append(searchItems, &cloned)
 	}
-	results := make([]botMediaSearchItemResult, len(searchItems))
-	group, groupCtx := errgroup.WithContext(ctx)
-	group.SetLimit(botMediaSearchConcurrency)
-	for index, item := range searchItems {
-		index, item := index, item
-		group.Go(func() error {
-			fingerprint, _, hashErr := cachedTelegramImageFingerprint(groupCtx, item.FileUniqueId, item.FileUrl)
-			if hashErr != nil {
-				return hashErr
-			}
-			matches, searchErr := s.cachedProfileFingerprintSearchCandidates(groupCtx, fingerprint, searchIn, searchScope, nil)
-			if searchErr != nil {
-				return searchErr
-			}
-			results[index] = botMediaSearchItemResult{
-				HashKey: fmt.Sprintf("%s:%016x", fingerprint.MD5, fingerprint.PHash.GetHash()),
-				Items:   matches,
-			}
-			return nil
-		})
+	seenHashes := make(map[string]struct{}, len(searchItems))
+	coldItems := make([]*sysin.BotMediaSearchItem, 0, len(searchItems))
+	// First search every fingerprint already available in Redis. This phase does
+	// not download Telegram media and usually resolves forwarded/published media
+	// immediately.
+	for _, item := range searchItems {
+		fingerprint, ok := telegramImageFingerprintFromCache(ctx, item.FileUniqueId)
+		if !ok {
+			coldItems = append(coldItems, item)
+			continue
+		}
+		list, total, found, searchErr := s.botMediaSearchFingerprint(ctx, fingerprint, searchIn, searchScope, seenHashes)
+		if searchErr != nil {
+			return nil, 0, searchErr
+		}
+		if found {
+			return list, total, nil
+		}
 	}
-	if err = group.Wait(); err != nil {
-		return nil, 0, err
+	// Cold fingerprints are intentionally processed one by one. As soon as one
+	// image finds a profile, later images are never downloaded or decoded.
+	var lastHashErr error
+	coldProcessed := false
+	for _, item := range coldItems {
+		fingerprint, _, hashErr := cachedTelegramImageFingerprint(ctx, item.FileUniqueId, item.FileUrl)
+		if hashErr != nil {
+			lastHashErr = hashErr
+			continue
+		}
+		coldProcessed = true
+		list, total, found, searchErr := s.botMediaSearchFingerprint(ctx, fingerprint, searchIn, searchScope, seenHashes)
+		if searchErr != nil {
+			return nil, 0, searchErr
+		}
+		if found {
+			return list, total, nil
+		}
+	}
+	if lastHashErr != nil && !coldProcessed {
+		return nil, 0, lastHashErr
+	}
+	return []*sysin.NoteModel{}, 0, nil
+}
+
+func (s *sSysPublish) botMediaSearchFingerprint(ctx context.Context, fingerprint *mediaFingerprint, searchIn *sysin.ProfileImageSearchInp, searchScope *publishmodel.MediaSearchScope, seenHashes map[string]struct{}) ([]*sysin.NoteModel, int, bool, error) {
+	if fingerprint == nil || fingerprint.PHash == nil {
+		return nil, 0, false, nil
+	}
+	hashKey := fmt.Sprintf("%s:%016x", fingerprint.MD5, fingerprint.PHash.GetHash())
+	if _, exists := seenHashes[hashKey]; exists {
+		return nil, 0, false, nil
+	}
+	seenHashes[hashKey] = struct{}{}
+	matches, err := s.cachedProfileFingerprintSearchCandidates(ctx, fingerprint, searchIn, searchScope, nil)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if len(matches) == 0 {
+		return nil, 0, false, nil
 	}
 	candidates := make(map[int64]*botMediaSearchCandidate)
-	seenHashes := make(map[string]struct{})
-	for _, result := range results {
-		if result.HashKey == "" {
+	for _, item := range matches {
+		candidate, exists := candidates[item.ProfileId]
+		if !exists {
+			candidates[item.ProfileId] = &botMediaSearchCandidate{ProfileId: item.ProfileId, Distance: item.Distance, MatchCount: 1}
 			continue
 		}
-		if _, exists := seenHashes[result.HashKey]; exists {
-			continue
-		}
-		seenHashes[result.HashKey] = struct{}{}
-		for _, item := range result.Items {
-			candidate, exists := candidates[item.ProfileId]
-			if !exists {
-				candidates[item.ProfileId] = &botMediaSearchCandidate{ProfileId: item.ProfileId, Distance: item.Distance, MatchCount: 1}
-				continue
-			}
-			candidate.MatchCount++
-			if item.Distance < candidate.Distance {
-				candidate.Distance = item.Distance
-			}
+		candidate.MatchCount++
+		if item.Distance < candidate.Distance {
+			candidate.Distance = item.Distance
 		}
 	}
 	ordered := make([]*botMediaSearchCandidate, 0, len(candidates))
@@ -133,13 +153,14 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		profileIds = append(profileIds, item.ProfileId)
 	}
 	if len(profileIds) == 0 {
-		return []*sysin.NoteModel{}, total, nil
+		return []*sysin.NoteModel{}, total, false, nil
 	}
 	list, err := s.profileImageSearchNotesByScope(ctx, profileIds, searchScope, nil, "")
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, false, err
 	}
-	return orderBotMediaSearchNotes(list, profileIds), total, nil
+	orderedNotes := orderBotMediaSearchNotes(list, profileIds)
+	return orderedNotes, total, len(orderedNotes) > 0, nil
 }
 
 func (s *sSysPublish) botMediaSearchAccountIds(ctx context.Context, in *sysin.BotMediaSearchInp) ([]int64, error) {
