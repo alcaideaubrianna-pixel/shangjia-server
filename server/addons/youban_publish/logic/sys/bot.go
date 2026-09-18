@@ -343,6 +343,14 @@ func (s *sSysPublish) telegramBot(ctx context.Context, botToken string) (*tgbot.
 	return gatewayservice.Gateway().Client(ctx, botToken)
 }
 
+func (s *sSysPublish) telegramMediaBot(ctx context.Context, botToken string) (*tgbot.Bot, error) {
+	botToken = strings.TrimSpace(botToken)
+	if botToken == "" {
+		return nil, gerror.New("Telegram Bot Token未配置")
+	}
+	return gatewayservice.Gateway().MediaClient(ctx, botToken)
+}
+
 func (s *sSysPublish) clearTelegramBotCache() {
 	clearAutoDeleteBotLocalCache()
 }

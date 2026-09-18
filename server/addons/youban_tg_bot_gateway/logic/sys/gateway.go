@@ -43,22 +43,73 @@ type sGateway struct {
 	runtimes               map[string]*botRuntime
 	bindings               map[string][]service.BotBinding
 	clients                map[string]*tgbot.Bot
+	mediaClients           map[string]*tgbot.Bot
 	queueMu                sync.Mutex
 	queue                  *asynq.Server
 	queueCli               *asynq.Client
 	loadBindingsForClient  func(context.Context) (map[string][]service.BotBinding, error)
 	runtimeConfigForClient func(context.Context) (*service.RuntimeConfig, error)
 	newClientForToken      func(string, string, tgbot.HandlerFunc) (*tgbot.Bot, error)
+	newMediaClientForToken func(string, string, tgbot.HandlerFunc) (*tgbot.Bot, error)
 }
 
 func init() { service.RegisterGateway(NewGateway()) }
 func NewGateway() *sGateway {
 	return &sGateway{
-		refresh:  make(chan struct{}, 1),
-		runtimes: map[string]*botRuntime{},
-		bindings: map[string][]service.BotBinding{},
-		clients:  map[string]*tgbot.Bot{},
+		refresh:      make(chan struct{}, 1),
+		runtimes:     map[string]*botRuntime{},
+		bindings:     map[string][]service.BotBinding{},
+		clients:      map[string]*tgbot.Bot{},
+		mediaClients: map[string]*tgbot.Bot{},
 	}
+}
+
+func (s *sGateway) MediaClient(ctx context.Context, token string) (*tgbot.Bot, error) {
+	token = strings.TrimSpace(token)
+	key := tokenKey(token)
+	s.mu.Lock()
+	client := s.mediaClients[key]
+	s.mu.Unlock()
+	if client != nil {
+		return client, nil
+	}
+	loadBindings := s.loadBindings
+	if s.loadBindingsForClient != nil {
+		loadBindings = s.loadBindingsForClient
+	}
+	loaded, err := loadBindings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(loaded[key]) == 0 {
+		return nil, gerror.New("TG Bot Gateway未找到已启用的Bot")
+	}
+	runtimeConfig := service.RuntimeConfiguration
+	if s.runtimeConfigForClient != nil {
+		runtimeConfig = s.runtimeConfigForClient
+	}
+	conf, err := runtimeConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	clientFactory := func(token, proxyURL string, handler tgbot.HandlerFunc) (*tgbot.Bot, error) {
+		return newBotWithTimeout(token, proxyURL, handler, 2*time.Minute)
+	}
+	if s.newMediaClientForToken != nil {
+		clientFactory = s.newMediaClientForToken
+	}
+	client, err = clientFactory(token, conf.ProxyURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	if cached := s.mediaClients[key]; cached != nil {
+		client = cached
+	} else {
+		s.mediaClients[key] = client
+	}
+	s.mu.Unlock()
+	return client, nil
 }
 
 func (s *sGateway) StartRuntime(ctx context.Context) {
@@ -228,6 +279,7 @@ func (s *sGateway) sync(ctx context.Context) error {
 			}
 			delete(s.runtimes, key)
 			delete(s.clients, key)
+			delete(s.mediaClients, key)
 		}
 	}
 	s.mu.Unlock()
@@ -300,6 +352,7 @@ func (s *sGateway) ensure(ctx context.Context, key, token, mode string, conf *se
 	}
 	s.mu.Lock()
 	s.runtimes[key], s.clients[key] = runtime, client
+	delete(s.mediaClients, key)
 	s.mu.Unlock()
 	return nil
 }
@@ -586,11 +639,16 @@ func allowedUpdates() []string {
 }
 
 func newBot(token, proxyURL string, handler tgbot.HandlerFunc) (*tgbot.Bot, error) {
+	return newBotWithTimeout(token, proxyURL, handler, 35*time.Second)
+}
+
+func newBotWithTimeout(token, proxyURL string, handler tgbot.HandlerFunc, timeout time.Duration) (*tgbot.Bot, error) {
 	client, err := httpClient(proxyURL)
 	if err != nil {
 		return nil, err
 	}
-	return tgbot.New(token, tgbot.WithHTTPClient(35*time.Second, client), tgbot.WithSkipGetMe(), tgbot.WithAllowedUpdates(tgbot.AllowedUpdates(allowedUpdates())), tgbot.WithDefaultHandler(handler))
+	client.Timeout = timeout
+	return tgbot.New(token, tgbot.WithHTTPClient(timeout, client), tgbot.WithSkipGetMe(), tgbot.WithAllowedUpdates(tgbot.AllowedUpdates(allowedUpdates())), tgbot.WithDefaultHandler(handler))
 }
 func httpClient(proxyURL string) (*http.Client, error) {
 	transport := &http.Transport{}

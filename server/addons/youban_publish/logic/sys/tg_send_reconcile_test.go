@@ -89,7 +89,7 @@ func TestTelegramUnknownReconcileCauseStillCounts(t *testing.T) {
 }
 
 func TestTelegramUnknownReconcileFallsBackToRetry(t *testing.T) {
-	decision := telegramUnknownReconcileNextState(telegramJobRecord{RetryCount: 1, ReconcileCount: 1}, errors.New("读取频道历史失败"))
+	decision := telegramUnknownReconcileNextState(telegramJobRecord{RetryCount: 1, ReconcileCount: telegramUnknownReconcileMaxCount - 1}, errors.New("读取频道历史失败"))
 	if decision.Status != "failed_retry" {
 		t.Fatalf("unexpected status: %s", decision.Status)
 	}
@@ -99,7 +99,7 @@ func TestTelegramUnknownReconcileFallsBackToRetry(t *testing.T) {
 }
 
 func TestTelegramUnknownReconcileStopsAtRetryLimit(t *testing.T) {
-	decision := telegramUnknownReconcileNextState(telegramJobRecord{RetryCount: telegramRetryMaxCount - 1, ReconcileCount: 1}, nil)
+	decision := telegramUnknownReconcileNextState(telegramJobRecord{RetryCount: telegramRetryMaxCount - 1, ReconcileCount: telegramUnknownReconcileMaxCount - 1}, nil)
 	if decision.Status != "failed" || decision.DispatchStatus != tgDispatchStatusDone {
 		t.Fatalf("unexpected terminal decision: %+v", decision)
 	}
@@ -136,10 +136,19 @@ func TestTelegramReconcileUsesBackgroundAccountPriority(t *testing.T) {
 }
 
 func TestTelegramUnknownReconcileDelaysAreBounded(t *testing.T) {
-	if telegramUnknownReconcileDelay >= 10*time.Second {
+	if telegramUnknownReconcileDelay > 10*time.Second {
 		t.Fatalf("initial reconciliation delay is too long: %s", telegramUnknownReconcileDelay)
 	}
 	if telegramUnknownReconcileScheduleDelay >= time.Minute {
 		t.Fatalf("scheduled reconciliation guard is too long: %s", telegramUnknownReconcileScheduleDelay)
+	}
+}
+
+func TestTelegramUnknownReconcileBackoff(t *testing.T) {
+	want := []time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute}
+	for index, delay := range want {
+		if got := telegramUnknownReconcileBackoff(index + 1); got != delay {
+			t.Fatalf("backoff(%d) = %s, want %s", index+1, got, delay)
+		}
 	}
 }

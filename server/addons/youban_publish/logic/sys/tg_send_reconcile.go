@@ -28,12 +28,12 @@ const (
 	telegramSendPhaseVerifySending     = "verify_sending"
 	telegramSendPhaseVerifyConfirmed   = "verify_confirmed"
 	// Telegram does not provide an idempotency key for send requests. An
-	// ambiguous response therefore needs a short asynchronous reconciliation
-	// window before the job is allowed to retry.
-	telegramUnknownReconcileDelay         = 8 * time.Second
-	telegramUnknownReconcileRetryDelay    = 15 * time.Second
+	// ambiguous response therefore needs an asynchronous reconciliation window
+	// before the job is allowed to retry.
+	telegramUnknownReconcileDelay         = 10 * time.Second
+	telegramUnknownReconcileRetryDelay    = 30 * time.Second
 	telegramUnknownReconcileScheduleDelay = 30 * time.Second
-	telegramUnknownReconcileMaxCount      = 2
+	telegramUnknownReconcileMaxCount      = 5
 	telegramReconcileAccountTaskPriority  = collectorin.EventPriorityNormal
 	telegramReconcileAccountTaskAttempts  = 2
 )
@@ -276,25 +276,64 @@ func (s *sSysPublish) recoverIncompleteTelegramJobPhase(ctx context.Context, job
 	logStatus := "partial_wait"
 	if !telegramIncompleteReconcileShouldStop(job) {
 		data["status"] = "unknown"
-		data["next_retry_at"] = gtime.Now().Add(telegramUnknownReconcileDelay)
+		data["next_retry_at"] = gtime.Now().Add(telegramUnknownReconcileBackoff(count))
 		message += "，等待频道历史完整后再次对账"
 		data["error_message"] = message
 	} else {
+		if err := s.deleteTelegramMessagePurposeSetLockedByChannel(ctx, job, purpose, "TG媒体组发送结果不完整，清理已确认残留消息"); err != nil {
+			return s.deferIncompleteTelegramJobCleanup(ctx, job, count, err)
+		}
 		data["status"] = "failed"
 		data["dispatch_status"] = tgDispatchStatusDone
 		data["next_retry_at"] = nil
-		message += "，为避免重复推送已停止自动重发，请人工检查并清理频道残留消息"
+		message += "，已清理确认到的残留消息，将进入自动补偿上架"
 		data["error_message"] = message
 		logStatus = "partial_stopped"
 	}
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(data).Update()
 	if err == nil {
 		s.appendTelegramJobLog(ctx, job, "reconcile", logStatus, message)
+		if logStatus == "partial_stopped" {
+			observeTelegramPublishFailure(ctx, "reconcile_partial")
+			s.enqueueTerminalPublishRecoveryBestEffort(ctx, job, gerror.New(message))
+			if stateErr := s.updateProfilePublishOperationState(ctx, job, sysin.PublishTaskStatusFailed); stateErr != nil {
+				return stateErr
+			}
+		}
 		if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
 			g.Log().Warningf(ctx, "TG不完整对账释放槽位后唤醒频道任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
 		}
 	}
 	return err
+}
+
+func telegramUnknownReconcileBackoff(count int) time.Duration {
+	delays := [...]time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute}
+	if count <= 0 {
+		return telegramUnknownReconcileDelay
+	}
+	if count > len(delays) {
+		return delays[len(delays)-1]
+	}
+	return delays[count-1]
+}
+
+func (s *sSysPublish) deferIncompleteTelegramJobCleanup(ctx context.Context, job telegramJobRecord, count int, cause error) error {
+	message := "TG不完整媒体组清理失败，等待重试：" + cause.Error()
+	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", job.Id).Where("status", "unknown").
+		Data(g.Map{
+			"dispatch_status": tgDispatchStatusIdle,
+			"reconcile_count": count - 1,
+			"next_retry_at":   gtime.Now().Add(time.Minute),
+			"error_message":   message,
+			"updated_at":      gtime.Now(),
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "延迟TG不完整媒体组清理失败")
+	}
+	s.appendTelegramJobLog(ctx, job, "reconcile", "cleanup_retry", message)
+	return nil
 }
 
 func telegramIncompleteReconcileShouldStop(job telegramJobRecord) bool {
@@ -383,10 +422,12 @@ func telegramUnknownReconcileNextState(job telegramJobRecord, cause error) teleg
 	count := job.ReconcileCount + 1
 	if count < telegramUnknownReconcileMaxCount {
 		message := "TG频道消息对账未发现对应消息，等待再次确认"
-		delay := telegramUnknownReconcileDelay
+		delay := telegramUnknownReconcileBackoff(count)
 		if cause != nil {
 			message = "TG频道消息对账暂时不可用，等待再次确认：" + cause.Error()
-			delay = telegramUnknownReconcileRetryDelay
+			if delay < telegramUnknownReconcileRetryDelay {
+				delay = telegramUnknownReconcileRetryDelay
+			}
 		}
 		return telegramUnknownReconcileDecision{
 			Status: "unknown", DispatchStatus: tgDispatchStatusIdle,

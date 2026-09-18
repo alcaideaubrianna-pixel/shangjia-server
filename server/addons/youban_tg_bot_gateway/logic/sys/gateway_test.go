@@ -108,6 +108,39 @@ func TestClientCacheMissUsesLightweightFactory(t *testing.T) {
 	}
 }
 
+func TestMediaClientUsesDedicatedCache(t *testing.T) {
+	const token = "123456:media-token"
+	key := tokenKey(token)
+	gateway := NewGateway()
+	gateway.loadBindingsForClient = func(context.Context) (map[string][]service.BotBinding, error) {
+		return map[string][]service.BotBinding{key: {{Owner: "test", ReferenceID: 1, Token: token}}}, nil
+	}
+	gateway.runtimeConfigForClient = func(context.Context) (*service.RuntimeConfig, error) {
+		return &service.RuntimeConfig{}, nil
+	}
+	want := new(tgbot.Bot)
+	factoryCalls := 0
+	gateway.newMediaClientForToken = func(gotToken, _ string, _ tgbot.HandlerFunc) (*tgbot.Bot, error) {
+		factoryCalls++
+		if gotToken != token {
+			t.Fatalf("media client token = %q, want %q", gotToken, token)
+		}
+		return want, nil
+	}
+	for range 2 {
+		got, err := gateway.MediaClient(context.Background(), token)
+		if err != nil {
+			t.Fatalf("MediaClient() error = %v", err)
+		}
+		if got != want {
+			t.Fatal("MediaClient() did not return cached media client")
+		}
+	}
+	if factoryCalls != 1 {
+		t.Fatalf("media client factory calls = %d, want 1", factoryCalls)
+	}
+}
+
 func TestRuntimeModeForSystem(t *testing.T) {
 	tests := []struct {
 		name       string
