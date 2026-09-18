@@ -23,3 +23,4 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybo_actor_daily" ON "hg_youban_open_profil
 CREATE TABLE IF NOT EXISTS "hg_youban_open_profile_signal" ("id" bigserial PRIMARY KEY,"app_id" varchar(128) NOT NULL,"actor_id" varchar(128) NOT NULL,"profile_id" bigint NOT NULL,"view_count" integer NOT NULL DEFAULT 0,"is_favorite" smallint NOT NULL DEFAULT 0,"last_interaction_at" timestamp,"created_at" timestamp,"updated_at" timestamp);
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybo_signal_app_actor_profile" ON "hg_youban_open_profile_signal" ("app_id","actor_id","profile_id");
 CREATE INDEX IF NOT EXISTS "idx_ybo_signal_app_actor_time" ON "hg_youban_open_profile_signal" ("app_id","actor_id","last_interaction_at");
+CREATE INDEX IF NOT EXISTS "idx_ybo_binding_app_status_tenant" ON "hg_youban_publish_cms_tenant_binding" ("app_id","status","tenant_id");

@@ -1258,7 +1258,7 @@ func (s *sSysContent) excludeMemberProfileActions(ctx context.Context, mod *gdb.
 func (s *sSysContent) ViewProfile(ctx context.Context, in *sysin.ContentProfileViewInp) (res *sysin.ContentProfileViewModel, err error) {
 	profileColumns := dao.ContentProfile.Columns()
 	var row *contentProfileRow
-	if err = s.publicProfileWhere(dao.ContentProfile.Ctx(ctx).As("p")).
+	if err = s.publicProfileAccessWhere(dao.ContentProfile.Ctx(ctx).As("p")).
 		Fields(aliasField("p", "*")).
 		Where(aliasField("p", profileColumns.Id), in.Id).
 		Scan(&row); err != nil {
@@ -1286,6 +1286,9 @@ func (s *sSysContent) ViewProfile(ctx context.Context, in *sysin.ContentProfileV
 	res.Media, err = s.listProfileMedia(ctx, row.Id, isVip)
 	if err != nil {
 		return
+	}
+	if len(res.Media) == 0 {
+		return nil, gerror.New("资料不存在或暂未公开")
 	}
 	res.Photos = make([]string, 0, len(res.Media))
 	for _, item := range res.Media {
@@ -1791,17 +1794,24 @@ func (s *sSysContent) ImportRunList(ctx context.Context, in *sysin.ContentImport
 }
 
 func (s *sSysContent) publicProfileWhere(mod *gdb.Model) *gdb.Model {
+	mod = s.publicProfileAccessWhere(mod)
 	profileColumns := dao.ContentProfile.Columns()
 	mediaColumns := dao.ContentMedia.Columns()
 	mod = mod.
-		Where(aliasField("p", profileColumns.Status), 1).
-		Where(aliasField("p", profileColumns.Visibility), consts.ContentVisibilityPublic).
 		Where("EXISTS (SELECT 1 FROM ("+
 			"SELECT m."+mediaColumns.ProfileId+" FROM "+dao.ContentMedia.Table()+" m WHERE m."+mediaColumns.ProfileId+"=p."+profileColumns.Id+" AND m."+mediaColumns.Status+"=? AND m."+mediaColumns.MediaType+"=? AND COALESCE(m."+mediaColumns.DisplayStoragePath+", '')<>'' "+
 			"UNION ALL "+
 			"SELECT pm.profile_id FROM hg_youban_publish_media pm WHERE pm.profile_id=p."+profileColumns.Id+" AND pm.status=? AND pm.deleted_at IS NULL AND pm.media_type=? AND COALESCE(NULLIF(pm.edited_storage_path, ''), NULLIF(pm.storage_path, ''), NULLIF(pm.edited_file_url, ''), NULLIF(pm.file_url, ''))<>''"+
 			") available_media LIMIT 1)",
 			consts.StatusEnabled, consts.ContentMediaTypeImage, consts.StatusEnabled, "image")
+	return mod
+}
+
+func (s *sSysContent) publicProfileAccessWhere(mod *gdb.Model) *gdb.Model {
+	profileColumns := dao.ContentProfile.Columns()
+	mod = mod.
+		Where(aliasField("p", profileColumns.Status), 1).
+		Where(aliasField("p", profileColumns.Visibility), consts.ContentVisibilityPublic)
 	scope := profilescope.FromContext(mod.GetCtx())
 	if !scope.Applied {
 		return mod

@@ -32,6 +32,13 @@ func (s *sOpenAccess) RecordInteraction(ctx context.Context, appId string, in *s
 		return false, gerror.New("资料不存在或不在当前应用授权范围内")
 	}
 	now, metricDate := gtime.Now(), time.Now().Format("2006-01-02")
+	if isOpenPgsql() {
+		accepted, err = recordPostgresInteraction(ctx, appId, in, metricDate, now)
+		if err != nil {
+			return false, gerror.Wrap(err, "记录资料互动失败")
+		}
+		return accepted, nil
+	}
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		inserted, insertErr := insertInteractionEvent(ctx, tx, appId, in, now)
 		if insertErr != nil || !inserted {
@@ -58,13 +65,56 @@ func (s *sOpenAccess) RecordInteraction(ctx context.Context, appId string, in *s
 }
 
 func (s *sOpenAccess) profileAllowedForApp(ctx context.Context, appId string, profileId int64) (bool, error) {
-	tenantIds, err := s.AllowedTenantIds(ctx, appId)
-	if err != nil || len(tenantIds) == 0 {
+	value, err := g.DB().GetValue(ctx, `SELECT EXISTS (
+		SELECT 1
+		FROM hg_youban_publish_profile_state ps
+		JOIN hg_youban_publish_cms_tenant_binding b ON b.tenant_id=ps.tenant_id
+		WHERE ps.profile_id=? AND ps.deleted_at IS NULL AND b.app_id=? AND b.status=?
+	)`, profileId, appId, sysin.CmsBindingApproved)
+	return err == nil && value.Bool(), err
+}
+
+// recordPostgresInteraction applies all counters in one PostgreSQL round trip.
+// The event CTE is the idempotency gate: duplicate event IDs update nothing.
+func recordPostgresInteraction(ctx context.Context, appId string, in *sysin.ProfileInteractionInp, metricDate string, now *gtime.Time) (bool, error) {
+	row, err := g.DB().GetOne(ctx, `WITH event AS (
+		INSERT INTO hg_youban_open_profile_event
+			(app_id,event_id,actor_id,profile_id,event_type,occurred_at,created_at)
+		VALUES (?,?,?,?,?,?,?) ON CONFLICT (app_id,event_id) DO NOTHING RETURNING 1
+	), actor AS (
+		INSERT INTO hg_youban_open_profile_actor_daily
+			(app_id,actor_id,profile_id,metric_date,created_at)
+		SELECT ?,?,?,?,? FROM event WHERE ?='view'
+		ON CONFLICT (app_id,actor_id,profile_id,metric_date) DO NOTHING RETURNING 1
+	), metric AS (
+		INSERT INTO hg_youban_open_profile_metric_daily
+			(app_id,profile_id,metric_date,view_count,unique_view_count,favorite_count,created_at,updated_at)
+		SELECT ?,?,?,CASE WHEN ?='view' THEN 1 ELSE 0 END,
+			CASE WHEN EXISTS (SELECT 1 FROM actor) THEN 1 ELSE 0 END,
+			CASE WHEN ?='favorite' THEN 1 ELSE 0 END,?,? FROM event
+		ON CONFLICT (app_id,profile_id,metric_date) DO UPDATE SET
+			view_count=hg_youban_open_profile_metric_daily.view_count+EXCLUDED.view_count,
+			unique_view_count=hg_youban_open_profile_metric_daily.unique_view_count+EXCLUDED.unique_view_count,
+			favorite_count=hg_youban_open_profile_metric_daily.favorite_count+EXCLUDED.favorite_count,
+			updated_at=EXCLUDED.updated_at
+	), signal AS (
+		INSERT INTO hg_youban_open_profile_signal
+			(app_id,actor_id,profile_id,view_count,is_favorite,last_interaction_at,created_at,updated_at)
+		SELECT ?,?,?,CASE WHEN ?='view' THEN 1 ELSE 0 END,CASE WHEN ?='favorite' THEN 1 ELSE 0 END,?,?,? FROM event
+		ON CONFLICT (app_id,actor_id,profile_id) DO UPDATE SET
+			view_count=hg_youban_open_profile_signal.view_count+EXCLUDED.view_count,
+			is_favorite=CASE WHEN ?='view' THEN hg_youban_open_profile_signal.is_favorite ELSE EXCLUDED.is_favorite END,
+			last_interaction_at=EXCLUDED.last_interaction_at,updated_at=EXCLUDED.updated_at
+	)
+	SELECT EXISTS (SELECT 1 FROM event) AS accepted`,
+		appId, in.EventId, in.ActorId, in.ProfileId, in.Type, now, now,
+		appId, in.ActorId, in.ProfileId, metricDate, now, in.Type,
+		appId, in.ProfileId, metricDate, in.Type, in.Type, now, now,
+		appId, in.ActorId, in.ProfileId, in.Type, in.Type, now, now, now, in.Type)
+	if err != nil {
 		return false, err
 	}
-	count, err := g.DB().Model("hg_youban_publish_profile_state").Ctx(ctx).
-		Where("profile_id", profileId).WhereIn("tenant_id", tenantIds).WhereNull("deleted_at").Count()
-	return count > 0, err
+	return row["accepted"].Bool(), nil
 }
 
 func insertInteractionEvent(ctx context.Context, tx gdb.TX, appId string, in *sysin.ProfileInteractionInp, now *gtime.Time) (bool, error) {

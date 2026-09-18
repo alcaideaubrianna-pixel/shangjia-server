@@ -31,6 +31,7 @@ func (s *sOpenAccess) UpdateBinding(ctx context.Context, appId string, in *sysin
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return nil, gerror.New("绑定记录不存在")
 	}
+	s.ClearAllowedTenantCache(ctx, appId)
 	binding, err := s.findBinding(ctx, appId, 0, in.Id)
 	if err == nil && binding != nil && binding.Status == sysin.CmsBindingApproved && previous.Status != sysin.CmsBindingApproved {
 		s.emitApproved(ctx, binding)

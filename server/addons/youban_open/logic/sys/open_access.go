@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -17,9 +18,16 @@ import (
 	pdao "hotgo/addons/youban_open/internal/dao"
 	"hotgo/addons/youban_open/model/input/sysin"
 	"hotgo/addons/youban_open/service"
+	"hotgo/internal/library/cache"
 )
 
 type sOpenAccess struct{}
+
+const openAppTenantCacheTTL = 2 * time.Minute
+
+func openAppTenantCacheKey(appId string) string {
+	return "youban:open:app-tenants:" + strings.TrimSpace(appId)
+}
 
 func init() { service.RegisterOpenAccess(&sOpenAccess{}) }
 
@@ -269,6 +277,16 @@ func (s *sOpenAccess) migrateConfiguredApp(ctx context.Context, appId string) (s
 }
 
 func (s *sOpenAccess) AllowedTenantIds(ctx context.Context, appId string) ([]int64, error) {
+	appId = strings.TrimSpace(appId)
+	if appId == "" {
+		return nil, gerror.New("开放应用无效")
+	}
+	if value, err := cache.Instance().Get(ctx, openAppTenantCacheKey(appId)); err == nil && !value.IsNil() {
+		var cached []int64
+		if value.Scan(&cached) == nil {
+			return cached, nil
+		}
+	}
 	columns := pdao.CmsTenantBinding.Columns()
 	ids, err := pdao.CmsTenantBinding.Ctx(ctx).
 		Fields(columns.TenantId).
@@ -284,7 +302,15 @@ func (s *sOpenAccess) AllowedTenantIds(ctx context.Context, appId string) ([]int
 			result = append(result, id.Int64())
 		}
 	}
+	_ = cache.Instance().Set(ctx, openAppTenantCacheKey(appId), result, openAppTenantCacheTTL)
 	return result, nil
+}
+
+// ClearAllowedTenantCache invalidates the authorization scope after a binding change.
+func (s *sOpenAccess) ClearAllowedTenantCache(ctx context.Context, appId string) {
+	if strings.TrimSpace(appId) != "" {
+		_, _ = cache.Instance().Remove(ctx, openAppTenantCacheKey(appId))
+	}
 }
 
 func (s *sOpenAccess) SaveBindingCode(ctx context.Context, appId string, in *sysin.CmsBindingCodeSaveInp) (*sysin.CmsBindingCodeModel, error) {
@@ -401,6 +427,7 @@ func (s *sOpenAccess) ClaimBinding(ctx context.Context, tenantId int64, in *sysi
 	if err != nil {
 		return nil, gerror.Wrap(err, "申请CMS绑定失败")
 	}
+	s.ClearAllowedTenantCache(ctx, codeRow.AppId)
 	binding, err := s.findBinding(ctx, codeRow.AppId, tenantId, 0)
 	if err == nil && binding != nil && binding.Status == sysin.CmsBindingApproved {
 		s.emitApproved(ctx, binding)
@@ -426,6 +453,7 @@ func (s *sOpenAccess) RevokeTenantBinding(ctx context.Context, tenantId int64, i
 	if err != nil {
 		return nil, gerror.Wrap(err, "解除平台绑定失败")
 	}
+	s.ClearAllowedTenantCache(ctx, current.AppId)
 	return s.findBinding(ctx, current.AppId, tenantId, in.Id)
 }
 

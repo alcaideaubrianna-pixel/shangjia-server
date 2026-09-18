@@ -4,6 +4,8 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"hotgo/internal/dao"
 	"hotgo/internal/model/entity"
@@ -14,7 +16,21 @@ type contentRegionDirectory struct {
 	byCode map[string]*entity.SysProvinces
 }
 
+var contentRegionDirectoryCache struct {
+	sync.RWMutex
+	value     *contentRegionDirectory
+	expiresAt time.Time
+}
+
 func loadContentRegionDirectory(ctx context.Context) *contentRegionDirectory {
+	contentRegionDirectoryCache.RLock()
+	if contentRegionDirectoryCache.value != nil && time.Now().Before(contentRegionDirectoryCache.expiresAt) {
+		directory := contentRegionDirectoryCache.value
+		contentRegionDirectoryCache.RUnlock()
+		return directory
+	}
+	contentRegionDirectoryCache.RUnlock()
+
 	rows := make([]*entity.SysProvinces, 0)
 	_ = dao.SysProvinces.Ctx(ctx).Where(dao.SysProvinces.Columns().Status, 1).Scan(&rows)
 	directory := &contentRegionDirectory{
@@ -23,6 +39,10 @@ func loadContentRegionDirectory(ctx context.Context) *contentRegionDirectory {
 	for _, row := range rows {
 		directory.byCode[strconv.FormatInt(row.Id, 10)] = row
 	}
+	contentRegionDirectoryCache.Lock()
+	contentRegionDirectoryCache.value = directory
+	contentRegionDirectoryCache.expiresAt = time.Now().Add(10 * time.Minute)
+	contentRegionDirectoryCache.Unlock()
 	return directory
 }
 
