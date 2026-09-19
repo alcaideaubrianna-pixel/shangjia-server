@@ -11,6 +11,8 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/tgerr"
+
+	"hotgo/addons/youban_publish/model"
 )
 
 const (
@@ -34,6 +36,11 @@ type telegramJobFailureDecision struct {
 }
 
 func telegramJobFailureNextState(err error, currentRetryCount int) telegramJobFailureDecision {
+	return telegramJobFailureNextStateWithConfig(err, currentRetryCount, defaultPublishConfig())
+}
+
+func telegramJobFailureNextStateWithConfig(err error, currentRetryCount int, conf *model.PublishConfig) telegramJobFailureDecision {
+	conf = normalizeTelegramPublishConfig(conf)
 	retryCount := currentRetryCount + 1
 	if delay, ok := telegramRateLimitRetryDelay(err); ok {
 		return telegramJobFailureDecision{
@@ -44,7 +51,7 @@ func telegramJobFailureNextState(err error, currentRetryCount int) telegramJobFa
 			Message:        telegramRateLimitMessage(delay),
 		}
 	}
-	policy := telegramJobErrorRetryPolicy(err, retryCount)
+	policy := telegramJobErrorRetryPolicyWithConfig(err, retryCount, conf)
 	decision := telegramJobFailureDecision{
 		Status:         "failed_retry",
 		DispatchStatus: tgDispatchStatusIdle,
@@ -58,6 +65,46 @@ func telegramJobFailureNextState(err error, currentRetryCount int) telegramJobFa
 		decision.RetryDelay = 0
 	}
 	return decision
+}
+
+func telegramJobErrorRetryPolicyWithConfig(err error, retryCount int, conf *model.PublishConfig) telegramJobRetryPolicy {
+	if err == nil || isTelegramPermanentAccountAuthError(err) || isTelegramPermanentSendError(err) {
+		return telegramJobErrorRetryPolicy(err, retryCount)
+	}
+	if conf.RetryEnabled != 1 {
+		return telegramJobRetryPolicy{Permanent: true, Message: "Telegram 发送失败，账号已关闭自动重试：" + telegramUserFacingError(err)}
+	}
+	maxRetryCount := conf.MaxRetryCount
+	if maxRetryCount <= 0 {
+		return telegramJobRetryPolicy{Permanent: true, Message: "Telegram 发送失败，账号最大重试次数为 0：" + telegramUserFacingError(err)}
+	}
+	if retryCount >= maxRetryCount {
+		return telegramJobRetryPolicy{Permanent: true, Message: fmt.Sprintf("Telegram 发送连续失败已达到 %d 次，已将该资料标记为推送失败并继续处理下一条：%s", maxRetryCount, telegramUserFacingError(err))}
+	}
+	if isTelegramAccountBusyError(err) {
+		return telegramJobRetryPolicy{RetryDelay: 15 * time.Second, Message: fmt.Sprintf("Telegram账号当前正在执行其他操作，任务将在 15 秒后自动重试（第 %d/%d 次）", retryCount, maxRetryCount)}
+	}
+	base := time.Duration(conf.RetryIntervalMinutes) * time.Minute
+	delay := configurableTelegramRetryDelay(base, retryCount)
+	return telegramJobRetryPolicy{RetryDelay: delay, Message: telegramJobFriendlyErrorMessage(err, delay, retryCount)}
+}
+
+func configurableTelegramRetryDelay(base time.Duration, retryCount int) time.Duration {
+	if base <= 0 {
+		base = 5 * time.Minute
+	}
+	if retryCount <= 0 {
+		retryCount = 1
+	}
+	exponent := retryCount - 1
+	if exponent > 6 {
+		exponent = 6
+	}
+	delay := base * time.Duration(1<<exponent)
+	if delay > telegramRetryMaxDelay {
+		return telegramRetryMaxDelay
+	}
+	return delay
 }
 
 func telegramRateLimitRetryDelay(err error) (time.Duration, bool) {

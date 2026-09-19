@@ -67,6 +67,11 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 			g.Log().Warningf(ctx, "释放频道发送槽位后唤醒下一条TG任务失败 jobId:%d channelId:%d err:%+v", targetJob.Id, targetJob.ChannelId, wakeErr)
 		}
 	}()
+	if delay, delayErr := s.telegramPublishIntervalDelay(ctx, targetJob); delayErr != nil {
+		g.Log().Warningf(ctx, "检查频道发送间隔失败，本次降级继续发送 jobId:%d channelId:%d err:%+v", targetJob.Id, targetJob.ChannelId, delayErr)
+	} else if delay > 0 {
+		return s.postponeTelegramJobForPublishInterval(ctx, targetJob, delay)
+	}
 	targetJob, err = s.telegramJobById(ctx, jobId)
 	if err != nil {
 		return err
@@ -455,7 +460,12 @@ func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJo
 	if isTelegramNetworkRetryError(err) {
 		s.clearTelegramBotCache()
 	}
-	decision := telegramJobFailureNextState(err, job.RetryCount)
+	conf, confErr := s.telegramPublishConfig(ctx, job.TenantId, job.AccountId)
+	if confErr != nil {
+		g.Log().Warningf(ctx, "读取TG重试策略失败，使用默认策略 jobId:%d err:%+v", job.Id, confErr)
+		conf = defaultPublishConfig()
+	}
+	decision := telegramJobFailureNextStateWithConfig(err, job.RetryCount, conf)
 	result, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).Where("status", "sending").
 		Data(telegramJobFailureUpdateData(decision, gtime.Now())).Update()
@@ -609,6 +619,7 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 		return nil
 	}
 	job.SentAt = sentAt
+	s.markTelegramLastSuccess(ctx, job, sentAt)
 	s.appendTelegramJobLog(ctx, job, "publish", "sent", s.telegramJobPublishMessage(ctx, job, "TG资料推送成功"))
 	if recordErr := s.appendPublishSuccessRecord(ctx, job); recordErr != nil {
 		g.Log().Warningf(ctx, "保存成功发布记录失败 jobId:%d err:%+v", job.Id, recordErr)

@@ -57,7 +57,7 @@ func (in *PublishConfigSaveInp) Filter(ctx context.Context) error {
 		return err
 	}
 	if in.SendIntervalSeconds <= 0 {
-		in.SendIntervalSeconds = 3
+		in.SendIntervalSeconds = 5
 	}
 	if in.SendIntervalSeconds > 3600 {
 		return gerror.New("发送间隔不能超过3600秒")

@@ -170,6 +170,7 @@ func (s *sSysConfig) PublishConfigSave(ctx context.Context, in *sysin.PublishCon
 	if err != nil {
 		return gerror.Wrap(err, "保存账号推送配置失败")
 	}
+	clearTelegramPublishConfigCache(ctx, account.TenantId, account.Id)
 	return nil
 }
 
@@ -422,7 +423,7 @@ func (s *sSysConfig) clearConfigCache(ctx context.Context, group string) {
 func defaultPublishConfig() *model.PublishConfig {
 	return &model.PublishConfig{
 		SkipDownChannelEnabled: 1,
-		SendIntervalSeconds:    3,
+		SendIntervalSeconds:    5,
 		SendWindowEnabled:      0,
 		SendWindowStart:        "",
 		SendWindowEnd:          "",

@@ -7,7 +7,41 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/os/gtime"
+
+	"hotgo/addons/youban_publish/model"
 )
+
+func TestTelegramJobFailureNextStateUsesAccountRetryPolicy(t *testing.T) {
+	conf := &model.PublishConfig{RetryEnabled: 1, MaxRetryCount: 4, RetryIntervalMinutes: 2}
+	decision := telegramJobFailureNextStateWithConfig(assertError("temporary network error"), 0, conf)
+	if decision.Status != "failed_retry" || decision.RetryCount != 1 || decision.RetryDelay != 2*time.Minute {
+		t.Fatalf("unexpected first retry decision: %+v", decision)
+	}
+	decision = telegramJobFailureNextStateWithConfig(assertError("temporary network error"), 1, conf)
+	if decision.Status != "failed_retry" || decision.RetryCount != 2 || decision.RetryDelay != 4*time.Minute {
+		t.Fatalf("unexpected second retry decision: %+v", decision)
+	}
+	decision = telegramJobFailureNextStateWithConfig(assertError("temporary network error"), 3, conf)
+	if decision.Status != "failed" || decision.RetryCount != 4 || decision.RetryDelay != 0 {
+		t.Fatalf("unexpected terminal retry decision: %+v", decision)
+	}
+}
+
+func TestTelegramJobFailureNextStateHonorsDisabledRetry(t *testing.T) {
+	conf := &model.PublishConfig{RetryEnabled: 0, MaxRetryCount: 3, RetryIntervalMinutes: 5}
+	decision := telegramJobFailureNextStateWithConfig(assertError("temporary network error"), 0, conf)
+	if decision.Status != "failed" || decision.RetryDelay != 0 {
+		t.Fatalf("disabled retry must fail immediately: %+v", decision)
+	}
+}
+
+func TestTelegramRateLimitOverridesAccountRetryPolicy(t *testing.T) {
+	conf := &model.PublishConfig{RetryEnabled: 0, MaxRetryCount: 0, RetryIntervalMinutes: 60}
+	decision := telegramJobFailureNextStateWithConfig(assertError("Too Many Requests: retry_after 45"), 2, conf)
+	if decision.Status != "failed_retry" || decision.RetryCount != 2 || decision.RetryDelay != 45*time.Second {
+		t.Fatalf("rate limit must follow Telegram retry_after without consuming retries: %+v", decision)
+	}
+}
 
 func TestTelegramJobErrorRetryPolicyPermanentForBannedInChannel(t *testing.T) {
 	err := assertError("Bad Request: USER_BANNED_IN_CHANNEL")
