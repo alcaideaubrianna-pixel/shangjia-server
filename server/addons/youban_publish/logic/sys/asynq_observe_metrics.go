@@ -100,6 +100,13 @@ func observeAsynqConsumerMetrics(ctx context.Context, servers []*asynq.ServerInf
 	serversGauge.Record(ctx, int64(len(servers)))
 	workersGauge.Record(ctx, int64(workers))
 	queueConsumersGauge.Record(ctx, int64(len(queueSet)))
+	for _, queue := range telegramObserveQueueNames(ctx) {
+		value := int64(0)
+		if _, ok := queueSet[queue]; ok {
+			value = 1
+		}
+		queueConsumersGauge.Record(ctx, value, metric.WithAttributes(attribute.String("queue", queue)))
+	}
 }
 
 type asynqQueuedJobCount struct {
@@ -150,6 +157,7 @@ func telegramObserveQueueNames(ctx context.Context) []string {
 		tgQueueNameCollectProcess:     {},
 		tgQueueNameHistory:            {},
 		tgQueueNameMediaProcess:       {},
+		tgQueueNameMatting:            {},
 		tgQueueNameProfileMaintenance: {},
 	}
 	for queue := range telegramPublishForegroundQueueWeights(ctx) {

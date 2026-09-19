@@ -506,7 +506,8 @@ func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash strin
 			if fallbackErr == nil && result != nil && strings.TrimSpace(result.URL) != "" {
 				segmentURL = result.URL
 				err = nil
-				providerName = "facepp-fallback-tencent-ci-matting"
+				// provider 列仅允许 32 字符；持久化为所选能力标记，实际降级信息由调用日志与指标记录。
+				providerName = "facepp-matting"
 				g.Log().Warningf(ctx, "Face++抠图失败，已降级腾讯云 imageHash:%s fallbackDurationMs:%d primaryErr:%+v", imageHash, time.Since(fallbackStartedAt).Milliseconds(), primaryErr)
 			} else {
 				g.Log().Warningf(ctx, "Face++抠图及腾讯云降级均失败 imageHash:%s primaryErr:%+v fallbackErr:%+v", imageHash, primaryErr, fallbackErr)

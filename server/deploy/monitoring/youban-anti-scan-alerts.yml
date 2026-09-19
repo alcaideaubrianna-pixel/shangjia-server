@@ -1,0 +1,49 @@
+groups:
+  - name: youban-anti-scan-health
+    interval: 15s
+    rules:
+      - alert: YoubanAntiScanMattingFailures
+        expr: 'sum(increase({__name__="xiaohuiji.anti_scan.matting.tasks",result="failed"}[5m])) >= 3'
+        for: 1m
+        labels:
+          severity: WARN
+          category: anti_scan
+        annotations:
+          summary: "人像抠图任务连续失败"
+          description: "最近 5 分钟至少有 3 次抠图失败，请检查 Face++、降级服务、COS 与数据库缓存写入"
+      - alert: YoubanAntiScanMattingFailureRateHigh
+        expr: 'sum(increase({__name__="xiaohuiji.anti_scan.matting.tasks",result="failed"}[10m])) >= 5 and sum(increase({__name__="xiaohuiji.anti_scan.matting.tasks",result="failed"}[10m])) / clamp_min(sum(increase({__name__="xiaohuiji.anti_scan.matting.tasks"}[10m])), 1) > 0.1'
+        for: 2m
+        labels:
+          severity: CRIT
+          category: anti_scan
+        annotations:
+          summary: "人像抠图失败率过高"
+          description: "最近 10 分钟抠图失败超过 5 次且失败率超过 10%，用户可能无法完成背景替换"
+      - alert: YoubanAntiScanMattingLatencyHigh
+        expr: 'histogram_quantile(0.95, sum by (le) (rate({__name__="xiaohuiji.anti_scan.matting.duration_seconds.bucket",result="success"}[10m]))) > 30'
+        for: 5m
+        labels:
+          severity: WARN
+          category: anti_scan
+        annotations:
+          summary: "人像抠图处理耗时过高"
+          description: "抠图任务 P95 超过 30 秒并持续 5 分钟，请检查云端抠图接口和 COS 上传链路"
+      - alert: YoubanAntiScanMattingQueueBacklog
+        expr: 'sum({__name__="xiaohuiji.asynq.tasks",queue="youban_publish_matting",state="pending"}) > 20'
+        for: 3m
+        labels:
+          severity: WARN
+          category: anti_scan
+        annotations:
+          summary: "人像抠图队列出现积压"
+          description: "抠图待处理任务超过 20 个并持续 3 分钟，请检查应用 4 Worker、Redis 队列和云服务延迟"
+      - alert: YoubanAntiScanMattingConsumerMissing
+        expr: 'sum({__name__="xiaohuiji.asynq.queue_consumers",queue="youban_publish_matting"}) < 1'
+        for: 3m
+        labels:
+          severity: CRIT
+          category: anti_scan
+        annotations:
+          summary: "人像抠图消费者消失"
+          description: "抠图队列连续 3 分钟没有消费者，请检查应用 4 Worker 容器和 background-worker 角色"

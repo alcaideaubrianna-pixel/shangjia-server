@@ -98,11 +98,13 @@ func (s *sSysPublish) enqueueAntiScanMattingTask(ctx context.Context, payload an
 }
 
 func (s *sSysPublish) handleAntiScanMattingTask(ctx context.Context, task *asynq.Task) (err error) {
+	startedAt := time.Now()
 	var payload antiScanMattingQueuePayload
 	if err = json.Unmarshal(task.Payload(), &payload); err != nil {
 		return gerror.Wrap(err, "解析人像分割任务失败")
 	}
 	defer func() {
+		observeAntiScanMattingTask(ctx, payload.Provider, startedAt, err)
 		if err == nil {
 			return
 		}

@@ -47,6 +47,21 @@ func observeRecoveryRun(ctx context.Context, step string, startedAt time.Time, s
 	}
 }
 
+func observeAntiScanMattingTask(ctx context.Context, provider string, startedAt time.Time, err error) {
+	result := "success"
+	if err != nil {
+		result = "failed"
+	}
+	attrs := metric.WithAttributes(
+		attribute.String("provider", provider),
+		attribute.String("result", result),
+	)
+	tasks, _ := publishObserveMeter.Int64Counter("xiaohuiji.anti_scan.matting.tasks")
+	duration, _ := publishObserveMeter.Float64Histogram("xiaohuiji.anti_scan.matting.duration_seconds")
+	tasks.Add(ctx, 1, attrs)
+	duration.Record(ctx, time.Since(startedAt).Seconds(), attrs)
+}
+
 func observeTelegramLease(ctx context.Context, action string, tgAccountId int64) {
 	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.account_lease_events")
 	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("action", action)))
