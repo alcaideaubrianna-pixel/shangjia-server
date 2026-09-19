@@ -34,6 +34,7 @@ type sSysPublish struct {
 	profileQueueServer    *asynq.Server
 	duplicateQueueServer  *asynq.Server
 	historyQueueServer    *asynq.Server
+	mattingQueueServer    *asynq.Server
 
 	telegramChannelMu    publishRuntimeMutex
 	telegramChannelLocks map[string]*publishRuntimeMutex

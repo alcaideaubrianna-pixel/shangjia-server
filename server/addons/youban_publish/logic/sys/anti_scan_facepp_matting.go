@@ -5,24 +5,15 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
-	"hash/crc32"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"hotgo/addons/youban_publish/model"
-	lock "hotgo/internal/library/hgrds/lock"
 )
-
-var facePPConcurrency = struct {
-	sync.Mutex
-	sem chan struct{}
-}{}
 
 var facePPHTTPClient = &http.Client{
 	Timeout: 10 * time.Second,
@@ -42,31 +33,6 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 	n, _, _, err := prepareCloudMattingImageBytes(imageBytes, 1600)
 	if err != nil {
 		return "", err
-	}
-	concurrency := conf.FacePlusConcurrency
-	if concurrency <= 0 {
-		concurrency = 2
-	}
-	distributedLock := lock.NewConfig(45*time.Second, 100*time.Millisecond).Mutex(facePPDistributedSlot(imageHash, concurrency))
-	if err = distributedLock.Lock(ctx); err != nil {
-		return "", gerror.Wrap(err, "等待 Face++ 并发槽位失败")
-	}
-	defer func() { _ = distributedLock.Unlock(context.Background()) }()
-	facePPConcurrency.Lock()
-	if facePPConcurrency.sem == nil || cap(facePPConcurrency.sem) != conf.FacePlusConcurrency {
-		c := conf.FacePlusConcurrency
-		if c <= 0 {
-			c = 2
-		}
-		facePPConcurrency.sem = make(chan struct{}, c)
-	}
-	sem := facePPConcurrency.sem
-	facePPConcurrency.Unlock()
-	select {
-	case sem <- struct{}{}:
-		defer func() { <-sem }()
-	case <-ctx.Done():
-		return "", ctx.Err()
 	}
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
@@ -119,14 +85,6 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 		return "", gerror.Wrap(err, "解码 Face++ 人像图片失败")
 	}
 	return uploadAntiScanSegment(ctx, decoded, imageHash)
-}
-
-func facePPDistributedSlot(imageHash string, concurrency int) string {
-	if concurrency <= 0 {
-		concurrency = 1
-	}
-	slot := crc32.ChecksumIEEE([]byte(imageHash)) % uint32(concurrency)
-	return fmt.Sprintf("youban_publish:anti_scan:facepp:slot:%d", slot)
 }
 
 func decodeBase64Image(v string) ([]byte, error) { return base64.StdEncoding.DecodeString(v) }

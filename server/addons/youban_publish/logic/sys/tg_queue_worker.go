@@ -86,6 +86,11 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 		Queues:         map[string]int{tgQueueNameHistory: 1},
 		RetryDelayFunc: telegramQueueRetryDelay,
 	})
+	mattingServer := asynq.NewServer(telegramQueueRedisOpt(ctx), asynq.Config{
+		Concurrency:    normalizeAntiScanMattingConcurrency(g.Cfg().MustGet(ctx, "youbanPublish.queue.mattingConcurrency", 64).Int()),
+		Queues:         map[string]int{tgQueueNameMatting: 1},
+		RetryDelayFunc: telegramQueueRetryDelay,
+	})
 	g.Log().Infof(ctx, "启动上架插件后台队列，自动删除独立并发：%d", telegramAutoDeleteConcurrency(ctx))
 	s.autoDeleteQueueServer = autoDeleteServer
 	s.backgroundQueueServer = server
@@ -93,6 +98,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	s.profileQueueServer = profileServer
 	s.duplicateQueueServer = duplicateServer
 	s.historyQueueServer = historyServer
+	s.mattingQueueServer = mattingServer
 	s.tgQueueMu.Unlock()
 
 	backgroundMux := asynq.NewServeMux()
@@ -156,6 +162,13 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 			g.Log().Errorf(ctx, "启动历史采集队列失败：%+v", err)
 		}
 	}()
+	mattingMux := asynq.NewServeMux()
+	mattingMux.HandleFunc(tgTaskTypeMatting, s.handleAntiScanMattingTask)
+	go func() {
+		if err := mattingServer.Run(mattingMux); err != nil && !errors.Is(err, asynq.ErrServerClosed) {
+			g.Log().Errorf(ctx, "启动人像抠图队列失败：%+v", err)
+		}
+	}()
 }
 
 func telegramAutoDeleteConcurrency(ctx context.Context) int {
@@ -177,6 +190,16 @@ func normalizeCycleQueueConcurrency(concurrency int) int {
 	}
 	if concurrency > 4 {
 		return 4
+	}
+	return concurrency
+}
+
+func normalizeAntiScanMattingConcurrency(concurrency int) int {
+	if concurrency < 1 {
+		return 64
+	}
+	if concurrency > 800 {
+		return 800
 	}
 	return concurrency
 }
@@ -244,6 +267,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	profileServer := s.profileQueueServer
 	duplicateServer := s.duplicateQueueServer
 	historyServer := s.historyQueueServer
+	mattingServer := s.mattingQueueServer
 	client := s.tgQueueClient
 	s.tgQueueServer = nil
 	s.tgBulkQueueServer = nil
@@ -256,6 +280,7 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	s.profileQueueServer = nil
 	s.duplicateQueueServer = nil
 	s.historyQueueServer = nil
+	s.mattingQueueServer = nil
 	s.tgQueueClient = nil
 	s.tgQueueMu.Unlock()
 	if server != nil {
@@ -290,6 +315,9 @@ func (s *sSysPublish) stopTelegramQueueWorker() {
 	}
 	if historyServer != nil {
 		historyServer.Shutdown()
+	}
+	if mattingServer != nil {
+		mattingServer.Shutdown()
 	}
 	if client != nil {
 		_ = client.Close()

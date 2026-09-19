@@ -32,11 +32,15 @@ type AntiScanSegmentInp struct {
 }
 
 type AntiScanSegmentModel struct {
-	CacheHit   int    `json:"cacheHit"`
-	ImageHash  string `json:"imageHash"`
-	SegmentUrl string `json:"segmentUrl"`
-	Width      int    `json:"width"`
-	Height     int    `json:"height"`
+	CacheHit     int    `json:"cacheHit"`
+	ImageHash    string `json:"imageHash"`
+	SegmentUrl   string `json:"segmentUrl"`
+	Width        int    `json:"width"`
+	Height       int    `json:"height"`
+	Status       string `json:"status"`
+	TaskId       string `json:"taskId"`
+	RetryAfterMs int    `json:"retryAfterMs"`
+	Error        string `json:"error,omitempty"`
 }
 
 func (in *AntiScanSegmentInp) Filter(ctx context.Context) error {

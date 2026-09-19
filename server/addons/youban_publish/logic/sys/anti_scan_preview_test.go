@@ -33,17 +33,6 @@ func TestAntiScanSegmentUploadContextProvidesWorkerModule(t *testing.T) {
 	}
 }
 
-func TestFacePPDistributedSlotIsStableAndBounded(t *testing.T) {
-	const concurrency = 2
-	first := facePPDistributedSlot("image-hash", concurrency)
-	if second := facePPDistributedSlot("image-hash", concurrency); second != first {
-		t.Fatalf("slot must be stable: %q != %q", first, second)
-	}
-	if !strings.HasSuffix(first, ":0") && !strings.HasSuffix(first, ":1") {
-		t.Fatalf("slot must stay within concurrency: %q", first)
-	}
-}
-
 func TestAntiScanMattingPublicErrorDoesNotExposeProvider(t *testing.T) {
 	errMessage := antiScanMattingPublicError().Error()
 	if errMessage != antiScanMattingErrorMessage {
@@ -56,10 +45,22 @@ func TestAntiScanMattingPublicErrorDoesNotExposeProvider(t *testing.T) {
 	}
 }
 
+func TestNormalizeAntiScanMattingConcurrency(t *testing.T) {
+	for _, tc := range []struct{ input, want int }{{0, 64}, {-1, 64}, {20, 20}, {800, 800}, {801, 800}} {
+		if got := normalizeAntiScanMattingConcurrency(tc.input); got != tc.want {
+			t.Fatalf("normalize concurrency %d: got %d want %d", tc.input, got, tc.want)
+		}
+	}
+}
+
 func TestAntiScanMattingCacheMatchesSelectedProvider(t *testing.T) {
 	tencentCache := &antiScanDetectResult{Provider: "tencent-ci-matting"}
 	fapiHubCache := &antiScanDetectResult{Provider: "fapihub-matting"}
 	aliyunCache := &antiScanDetectResult{Provider: "aliyun-matting"}
+	facePPCache := &antiScanDetectResult{Provider: "facepp-matting"}
+	if !antiScanMattingCacheMatches(facePPCache, antiScanMattingProvider(&model.CloudResourceConfig{MattingProvider: "facepp"})) {
+		t.Fatal("Face++ cache should match Face++ provider")
+	}
 	if !antiScanMattingCacheMatches(aliyunCache, antiScanMattingProvider(&model.CloudResourceConfig{MattingProvider: "aliyun"})) {
 		t.Fatal("Aliyun cache should match Aliyun provider")
 	}
