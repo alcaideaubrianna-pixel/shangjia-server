@@ -15,3 +15,5 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_content_profile_source_uuid" ON "hg
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_media_phash_lsh_lookup" ON "hg_youban_publish_media_phash_lsh" ("tenant_id", "media_type", "bucket_pos", "bucket_value", "account_id", "profile_id", "media_id") INCLUDE ("hash_value");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_tg_message_file_unique" ON "hg_youban_publish_tg_message" ("tg_file_unique_id", "account_id", "id" DESC) WHERE "tg_file_unique_id" <> '' AND "deleted_at" IS NULL;
 DROP INDEX CONCURRENTLY IF EXISTS "idx_ybp_media_phash_lsh_search";
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_media_fingerprint_hnsw" ON "hg_youban_publish_media_fingerprint" USING hnsw ("phash_bits" bit_hamming_ops) WITH (m=8, ef_construction=64);

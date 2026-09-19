@@ -504,6 +504,19 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_phash_lsh" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_media_phash_lsh_media_pos" ON "hg_youban_publish_media_phash_lsh" ("media_id", "bucket_pos");
 CREATE INDEX IF NOT EXISTS "idx_ybp_media_phash_lsh_search" ON "hg_youban_publish_media_phash_lsh" ("tenant_id", "media_type", "bucket_pos", "bucket_value") INCLUDE ("media_id", "profile_id", "account_id", "hash_value");
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_media_fingerprint" (
+  "media_id" bigint PRIMARY KEY,
+  "tenant_id" bigint NOT NULL DEFAULT 0,
+  "account_id" bigint NOT NULL DEFAULT 0,
+  "profile_id" bigint NOT NULL DEFAULT 0,
+  "media_type" varchar(16) NOT NULL DEFAULT '',
+  "phash_bits" bit(64),
+  "md5" varchar(128) NOT NULL DEFAULT '',
+  "deleted_at" timestamp DEFAULT NULL,
+  "updated_at" timestamp DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ybp_media_fingerprint_scope" ON "hg_youban_publish_media_fingerprint" ("tenant_id", "media_type", "deleted_at");
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_note_index" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL DEFAULT 0,

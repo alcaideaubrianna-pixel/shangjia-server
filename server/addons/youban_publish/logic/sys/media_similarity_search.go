@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/corona10/goimagehash"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -176,6 +177,13 @@ func mediaMD5CandidateMatches(ctx context.Context, md5Value string, scope *publi
 }
 
 func (s *sSysPublish) profilePHashSearchCandidates(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
+	if isVectorPHashEnabled(ctx) {
+		items, err := s.profilePHashVectorCandidates(ctx, queryHash, in, scope, candidateProfileIds)
+		if err == nil {
+			return items, nil
+		}
+		g.Log().Warningf(ctx, "pgvector pHash 查询失败，回退 LSH: %v", err)
+	}
 	if scope == nil || len(scope.Partitions) == 0 {
 		return []publishProfilePHashDistance{}, nil
 	}
@@ -199,6 +207,62 @@ func (s *sSysPublish) profilePHashSearchCandidates(ctx context.Context, queryHas
 			MediaId:   row.MediaId,
 			MediaType: row.MediaType,
 		})
+	}
+	return mediaPHashDeduplicateProfiles(items), nil
+}
+
+func isVectorPHashEnabled(ctx context.Context) bool {
+	dbType := strings.ToLower(g.DB().GetConfig().Type)
+	return g.Cfg().MustGet(ctx, "youbanPublish.mediaSearch.pgvector.enabled", false).Bool() && (dbType == "pgsql" || dbType == "postgres")
+}
+
+func (s *sSysPublish) profilePHashVectorCandidates(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
+	if queryHash == nil || scope == nil || len(scope.Partitions) == 0 {
+		return []publishProfilePHashDistance{}, nil
+	}
+	queryHashValue := fmt.Sprintf("%016x", queryHash.GetHash())
+	args := []any{queryHashValue, queryHashValue, in.Threshold}
+	where := []string{"f.deleted_at IS NULL", "f.phash_bits IS NOT NULL", "(f.phash_bits <~> ('x'||?)::bit(64)) <= ?"}
+	scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("f", scope.Partitions)
+	if scopeSQL == "" {
+		return []publishProfilePHashDistance{}, nil
+	}
+	where = append(where, "("+scopeSQL+")")
+	args = append(args, scopeArgs...)
+	where = append(where, "f.media_type='image'")
+	where = append(where, "EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=f.profile_id AND ps.tenant_id=f.tenant_id AND ps.account_id=f.account_id AND ps.deleted_at IS NULL)")
+	where = append(where, "EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id=f.profile_id AND p.deleted_at IS NULL)")
+	if len(candidateProfileIds) > 0 {
+		ids := uniqueIds(candidateProfileIds)
+		where = append(where, "f.profile_id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+")")
+		for _, id := range ids {
+			args = append(args, id)
+		}
+	}
+	limit := mediaPHashBucketMaxCandidates
+	if limit > 5000 {
+		limit = 5000
+	}
+	rows := make([]mediaPHashBucketCandidateRow, 0)
+	query := `SELECT f.media_id,f.profile_id,f.account_id,f.tenant_id,f.media_type,
+ f.md5 AS hash_value, (f.phash_bits <~> ('x'||?)::bit(64)) AS bucket_hits
+ FROM hg_youban_publish_media_fingerprint f WHERE ` + strings.Join(where, " AND ") + ` ORDER BY f.phash_bits <~> ('x'||?)::bit(64) LIMIT ` + fmt.Sprintf("%d", limit)
+	// Append the final hash used by ORDER BY.
+	args = append(args, queryHashValue)
+	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		if _, err := tx.Exec("SET LOCAL hnsw.ef_search = 200"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("SET LOCAL hnsw.iterative_scan = 'strict_order'"); err != nil {
+			return err
+		}
+		return tx.Raw(query, args...).Scan(&rows)
+	}); err != nil {
+		return nil, err
+	}
+	items := make([]publishProfilePHashDistance, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, publishProfilePHashDistance{ProfileId: row.ProfileId, Distance: row.BucketHits, MediaId: row.MediaId, MediaType: row.MediaType})
 	}
 	return mediaPHashDeduplicateProfiles(items), nil
 }

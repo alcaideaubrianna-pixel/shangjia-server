@@ -93,6 +93,11 @@ func (s *sSysPublish) deleteMediaPHashBucketByMediaId(ctx context.Context, media
 	if _, err = g.DB().Model(publishMediaPHashLshTable).Safe().Ctx(ctx).Where("media_id", mediaId).Delete(); err != nil {
 		return gerror.Wrap(err, "删除媒体LSH索引失败")
 	}
+	if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") || strings.EqualFold(g.DB().GetConfig().Type, "postgres") {
+		if _, err = g.DB().Model("hg_youban_publish_media_fingerprint").Safe().Ctx(ctx).Where("media_id", mediaId).Delete(); err != nil {
+			return gerror.Wrap(err, "删除媒体向量指纹失败")
+		}
+	}
 	return bumpMediaPHashBucketVersions(ctx, owners)
 }
 
@@ -110,6 +115,11 @@ func (s *sSysPublish) replaceMediaPHashBucketByMediaRow(ctx context.Context, med
 		}
 		if _, err := tx.Model(publishMediaPHashLshTable).Safe().Ctx(ctx).Where("media_id", mediaId).Delete(); err != nil {
 			return gerror.Wrap(err, "清理媒体LSH索引失败")
+		}
+		if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") || strings.EqualFold(g.DB().GetConfig().Type, "postgres") {
+			if _, err := tx.Model("hg_youban_publish_media_fingerprint").Safe().Ctx(ctx).Where("media_id", mediaId).Delete(); err != nil {
+				return gerror.Wrap(err, "清理媒体向量指纹失败")
+			}
 		}
 		rows := make([]g.Map, 0, len(buckets))
 		for _, bucket := range buckets {
@@ -135,6 +145,18 @@ func (s *sSysPublish) replaceMediaPHashBucketByMediaRow(ctx context.Context, med
 		if len(lshRows) > 0 {
 			if _, err := tx.Model(publishMediaPHashLshTable).Safe().Ctx(ctx).Data(lshRows).Insert(); err != nil {
 				return gerror.Wrap(err, "写入媒体LSH索引失败")
+			}
+		}
+		if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") || strings.EqualFold(g.DB().GetConfig().Type, "postgres") {
+			if _, err := tx.Exec(`INSERT INTO hg_youban_publish_media_fingerprint
+			(media_id,tenant_id,account_id,profile_id,media_type,phash_bits,md5,updated_at)
+			VALUES (?,?,?,?,?,('x'||?)::bit(64),?,?)
+			ON CONFLICT (media_id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id,account_id=EXCLUDED.account_id,
+			profile_id=EXCLUDED.profile_id,media_type=EXCLUDED.media_type,phash_bits=EXCLUDED.phash_bits,
+			md5=EXCLUDED.md5,deleted_at=NULL,updated_at=EXCLUDED.updated_at`,
+				mediaId, media["tenant_id"].Int64(), media["account_id"].Int64(), media["profile_id"].Int64(),
+				strings.TrimSpace(media["media_type"].String()), hash, strings.TrimSpace(media["md5"].String()), now); err != nil {
+				return gerror.Wrap(err, "写入媒体向量指纹失败")
 			}
 		}
 		return nil

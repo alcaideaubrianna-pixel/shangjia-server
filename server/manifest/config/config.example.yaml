@@ -377,6 +377,9 @@ runtime:
   roles: [ "all" ]
 
 youbanPublish:
+  mediaSearch:
+    pgvector:
+      enabled: false
   mediaFileCache:
     cosDownloadMode: "cdn"     # cdn: 服务端经公共CDN下载；origin: 通过COS SDK从Bucket源站下载，失败降级CDN
     workerCdnBaseUrl: "https://img.yuebanby.com" # Worker 大流量下载 CDN；为空时使用上传配置的公共地址
