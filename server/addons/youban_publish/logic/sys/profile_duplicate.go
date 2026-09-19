@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -1092,7 +1093,7 @@ func (w *duplicateScanWorkCache) preloadProcessed(ids []int64) error {
 		return gerror.Wrap(err, "读取重复资料扫描断点失败")
 	}
 	for index, id := range ids {
-		w.processed[id] = index < len(values) && !values[index].IsNil()
+		w.processed[id] = index < len(values) && duplicateScanWorkValuePresent(values[index])
 	}
 	return nil
 }
@@ -1104,7 +1105,7 @@ func (w *duplicateScanWorkCache) preloadGroups(signatures []string) error {
 	}
 	for index, signature := range signatures {
 		w.groupLoaded[signature] = true
-		if index >= len(values) || values[index].IsNil() {
+		if index >= len(values) || !duplicateScanWorkValuePresent(values[index]) {
 			continue
 		}
 		var group duplicateScanWorkGroup
@@ -1162,7 +1163,7 @@ func (w *duplicateScanWorkCache) group(signature string) (*duplicateScanWorkGrou
 		return nil, gerror.Wrap(err, "读取重复资料扫描分组失败")
 	}
 	w.groupLoaded[signature] = true
-	if len(values) > 0 && !values[0].IsNil() {
+	if len(values) > 0 && duplicateScanWorkValuePresent(values[0]) {
 		var group duplicateScanWorkGroup
 		present, decodeErr := decodeDuplicateScanWorkValue(values[0].Bytes(), &group)
 		if decodeErr != nil {
@@ -1191,7 +1192,7 @@ func (w *duplicateScanWorkCache) profileProcessed(profileId int64) (bool, error)
 	if err != nil {
 		return false, gerror.Wrap(err, "读取重复资料扫描断点失败")
 	}
-	processed := len(values) > 0 && !values[0].IsNil()
+	processed := len(values) > 0 && duplicateScanWorkValuePresent(values[0])
 	w.processed[profileId] = processed
 	return processed, nil
 }
@@ -1305,6 +1306,10 @@ func decodeDuplicateScanWorkValue(data []byte, target any) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+func duplicateScanWorkValuePresent(value *gvar.Var) bool {
+	return value != nil && len(bytes.TrimSpace(value.Bytes())) > 0
 }
 
 // Fuzzy similarity is not transitive. Requiring the incoming profile to match

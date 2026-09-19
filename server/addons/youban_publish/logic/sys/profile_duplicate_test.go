@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -96,6 +97,20 @@ func TestDuplicateScanPHashSetsMatchCapsSimilarityThreshold(t *testing.T) {
 	right := []string{"0000000000001fff"} // Hamming distance 13.
 	if duplicateScanPHashSetsMatch(left, right, collectProfilePHashDuplicateThreshold) {
 		t.Fatal("background scan must not use the wider distance-20 similarity threshold for one-image OR matching")
+	}
+}
+
+func TestDuplicateScanWorkValuePresentRejectsRedisMissingPlaceholders(t *testing.T) {
+	for _, value := range []*gvar.Var{nil, gvar.New(nil), gvar.New(""), gvar.New([]byte("  "))} {
+		if duplicateScanWorkValuePresent(value) {
+			t.Fatalf("missing HMGET placeholder must not be treated as persisted: %#v", value)
+		}
+	}
+	if !duplicateScanWorkValuePresent(gvar.New("1")) {
+		t.Fatal("persisted processed marker must be detected")
+	}
+	if !duplicateScanWorkValuePresent(gvar.New(`{"keepProfileId":1}`)) {
+		t.Fatal("persisted scan group must be detected")
 	}
 }
 
