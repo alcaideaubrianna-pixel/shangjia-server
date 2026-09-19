@@ -42,6 +42,17 @@ func TestDuplicateImageSignatureFallsBackToPHash(t *testing.T) {
 	}
 }
 
+func TestDuplicatePHashBucketKeysAlwaysIncludeExactSetKey(t *testing.T) {
+	keys := duplicatePHashBucketKeys([]string{"CC2AF3518C676C93", "d87a07c29151f7c5"}, true)
+	want := "exact:cc2af3518c676c93|d87a07c29151f7c5"
+	for _, key := range keys {
+		if key == want {
+			return
+		}
+	}
+	t.Fatalf("exact pHash set key %q missing from %#v", want, keys)
+}
+
 func TestDuplicateProfileSignatureUsesNormalizedText(t *testing.T) {
 	left, ok := duplicateProfileSignature("介绍费：7888\nB2", nil)
 	right, rightOK := duplicateProfileSignature("介绍费：7888\u200b\nB2", nil)

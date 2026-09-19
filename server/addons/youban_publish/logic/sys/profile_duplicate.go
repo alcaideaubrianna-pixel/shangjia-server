@@ -1296,7 +1296,11 @@ func duplicatePHashBucketKeys(values []string, neighborhood bool) []string {
 		blockCount = 8
 		blockBits  = 8
 	)
-	keys := make([]string, 0, len(values)*blockCount)
+	// Always keep a deterministic whole-set key. LSH neighborhoods are only a
+	// recall optimization and can miss hashes whose bits differ across blocks.
+	// Exact whole-set matches must never depend on the LSH layout.
+	keys := []string{"exact:" + strings.Join(sortedPHashValues(values), "|")}
+	keys = append(keys, make([]string, 0, len(values)*blockCount)...)
 	seen := make(map[string]struct{}, cap(keys))
 	for _, value := range values {
 		hash, ok := parseUploadPHash(value)
@@ -1320,6 +1324,18 @@ func duplicatePHashBucketKeys(values []string, neighborhood bool) []string {
 		}
 	}
 	return keys
+}
+
+func sortedPHashValues(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if _, ok := parseUploadPHash(value); ok {
+			result = append(result, value)
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 // Splitting a 64-bit hash into eight bytes guarantees that hashes within
