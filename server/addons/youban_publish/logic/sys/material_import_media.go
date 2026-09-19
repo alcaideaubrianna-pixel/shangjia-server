@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -18,6 +19,8 @@ import (
 )
 
 const materialImportMediaItemTimeout = 10 * time.Minute
+const materialImportGroupTimeout = 12 * time.Minute
+const materialImportStaleGroupAfter = 15 * time.Minute
 
 func (s *sSysPublish) executeMaterialImportMedia(ctx context.Context, taskId int64) error {
 	task, err := s.materialImportTaskById(ctx, taskId, 0)
@@ -31,6 +34,11 @@ func (s *sSysPublish) executeMaterialImportMedia(ctx context.Context, taskId int
 }
 
 func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sysin.MaterialImportTaskModel) error {
+	// Task heartbeat can remain fresh while a worker is blocked in Telegram I/O.
+	// Requeue stale groups independently so one group cannot hold the import forever.
+	if err := s.materialImportResetStaleGroups(ctx, task.Id); err != nil {
+		return err
+	}
 	groups, err := s.materialImportPendingMediaGroups(ctx, task.Id)
 	if err != nil {
 		return err
@@ -50,7 +58,12 @@ func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sy
 					materialImportSendErr(errCh, err)
 					return
 				}
-				groupErr := s.materialImportDownloadGroup(ctx, task, group)
+				groupCtx, cancel := context.WithTimeout(ctx, materialImportGroupTimeout)
+				groupErr := s.materialImportDownloadGroup(groupCtx, task, group)
+				cancel()
+				if errors.Is(groupErr, context.DeadlineExceeded) {
+					groupErr = gerror.New("TG媒体分组下载超时，已自动重试")
+				}
 				if groupErr != nil {
 					if collectMediaSourceGone(groupErr) {
 						_ = s.materialImportMarkGroupDiscarded(ctx, group.Id, group.MediaTotal, groupErr.Error())
@@ -99,6 +112,24 @@ func (s *sSysPublish) materialImportDownloadGroups(ctx context.Context, task *sy
 		return s.materialImportMarkFailed(ctx, task.Id, task.UpdatedBy, fmt.Sprintf("资料导入失败：%d组资料处理失败", failedCount))
 	}
 	return s.materialImportMarkSuccess(ctx, task.Id, task.UpdatedBy, g.Map{"message": "资料导入完成"})
+}
+
+func (s *sSysPublish) materialImportResetStaleGroups(ctx context.Context, taskID int64) error {
+	if taskID <= 0 {
+		return nil
+	}
+	_, err := pdao.YoubanPublishMaterialImportGroup.Ctx(ctx).
+		Where("task_id", taskID).
+		Where("status", sysin.MaterialImportStatusRunning).
+		WhereLTE("updated_at", gtime.Now().Add(-materialImportStaleGroupAfter)).
+		Data(g.Map{
+			"status":        sysin.MaterialImportStatusPending,
+			"media_done":    0,
+			"media_failed":  0,
+			"error_message": "媒体下载长时间无进度，已自动重试",
+			"updated_at":    gtime.Now(),
+		}).Update()
+	return err
 }
 
 func (s *sSysPublish) materialImportPendingMediaGroups(ctx context.Context, taskId int64) ([]*sysin.MaterialImportGroupModel, error) {
