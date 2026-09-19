@@ -495,7 +495,8 @@ func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, ses
 			}
 			newlyEmitted := make(map[string]any)
 			for index, profileId := range members[start:end] {
-				if (index < len(retained) && !retained[index].IsNil()) || (index < len(emitted) && !emitted[index].IsNil()) {
+				if (index < len(retained) && duplicateScanWorkValuePresent(retained[index])) ||
+					(index < len(emitted) && duplicateScanWorkValuePresent(emitted[index])) {
 					continue
 				}
 				if appendErr := writer.append(duplicateScanCandidate{KeepProfileId: group.KeepProfileId, ProfileId: profileId, Signature: signature}); appendErr != nil {
@@ -1071,7 +1072,7 @@ func (w *duplicateScanWorkCache) preloadBuckets(fields []string) error {
 		return gerror.Wrap(err, "读取重复资料扫描图片索引失败")
 	}
 	for index, field := range fields {
-		if index >= len(values) || values[index].IsNil() {
+		if index >= len(values) || !duplicateScanWorkValuePresent(values[index]) {
 			continue
 		}
 		var signatures []string
