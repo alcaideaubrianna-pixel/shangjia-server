@@ -39,3 +39,16 @@ func TestTelegramActiveChannelConditionSupportsMessagePushTargets(t *testing.T) 
 		t.Fatalf("active channel condition does not validate publish channels")
 	}
 }
+
+func TestMessagePushPlanRecoveryConditionExcludesExpiredPlanJobs(t *testing.T) {
+	condition := messagePushPlanRecoveryConditionSQL("j")
+	if !strings.Contains(condition, "j.operation_no LIKE 'message_push_plan:%'") {
+		t.Fatalf("condition does not identify message push plan jobs: %s", condition)
+	}
+	if !strings.Contains(condition, "j.created_at < ?") {
+		t.Fatalf("condition does not enforce plan expiration deadline: %s", condition)
+	}
+	if messagePushPlanJobExpireAfter != 30*time.Minute {
+		t.Fatalf("unexpected message push plan expiration: %s", messagePushPlanJobExpireAfter)
+	}
+}

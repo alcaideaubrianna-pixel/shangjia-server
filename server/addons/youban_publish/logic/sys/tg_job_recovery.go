@@ -15,17 +15,24 @@ const (
 	telegramSendingJobRecoverAfter  = telegramPublishTaskTimeout + 2*time.Minute
 	telegramPendingJobRecoverAfter  = 30 * time.Second
 	telegramDispatchJobRecoverAfter = 5 * time.Minute
+	messagePushPlanJobExpireAfter   = 30 * time.Minute
 )
+
+const expiredMessagePushPlanJobMessage = "历史消息计划任务已过期，系统自动终止"
 
 func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit int) error {
 	if limit <= 0 {
 		limit = 100
 	}
 	now := gtime.Now()
+	if err := s.supersedeExpiredMessagePushPlanJobs(ctx, limit); err != nil {
+		return err
+	}
 	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
 		Where(telegramActiveChannelCondition()).
+		Where(messagePushPlanRecoveryConditionSQL(publishTgJobTable), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
 		Data(g.Map{
 			"dispatch_status":     tgDispatchStatusIdle,
 			"next_retry_at":       now,
@@ -52,6 +59,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	time.Sleep(15 * time.Second)
+	if err := s.supersedeExpiredMessagePushPlanJobs(ctx, 1000); err != nil {
+		g.Log().Warningf(ctx, "终止过期历史消息计划任务失败：%+v", err)
+	}
 	if err := s.recoverStaleTelegramSendingJobs(ctx, 100); err != nil {
 		g.Log().Warningf(ctx, "恢复卡住的TG推送任务失败：%+v", err)
 	}
@@ -72,6 +82,9 @@ func (s *sSysPublish) runTelegramJobRecovery(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if err := s.supersedeExpiredMessagePushPlanJobs(ctx, 1000); err != nil {
+				g.Log().Warningf(ctx, "终止过期历史消息计划任务失败：%+v", err)
+			}
 			if err := s.recoverPendingIdleTelegramJobs(ctx, 500); err != nil {
 				g.Log().Warningf(ctx, "恢复待入队TG推送任务失败：%+v", err)
 			}
@@ -99,12 +112,14 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 	if limit <= 0 {
 		limit = 100
 	}
-	deadline := telegramRecoveryTimeText(gtime.Now().Add(-telegramDispatchJobRecoverAfter))
+	now := gtime.Now()
+	deadline := telegramRecoveryTimeText(now.Add(-telegramDispatchJobRecoverAfter))
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
 		WhereIn("dispatch_status", []string{tgDispatchStatusQueued, tgDispatchStatusProcessing}).
 		Where(telegramActiveChannelCondition()).
+		Where(messagePushPlanRecoveryConditionSQL(publishTgJobTable), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
 		WhereLTE("dispatched_at", deadline).
 		OrderAsc("dispatched_at").OrderAsc("id").
 		Limit(limit).
@@ -163,6 +178,7 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 		WHERE j.status IN ('pending', 'failed_retry', 'unknown')
 			AND (j.dispatch_status = ? OR j.dispatch_status = '')
 			AND ` + telegramActiveChannelConditionForAlias("j") + `
+			AND ` + messagePushPlanRecoveryConditionSQL("j") + `
 			AND (j.next_retry_at IS NULL OR j.next_retry_at <= ?)
 			AND j.updated_at <= ?
 	)
@@ -170,7 +186,7 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 	WHERE channel_rank <= ?
 	ORDER BY updated_at ASC, id ASC
 	LIMIT ?`
-	err := g.DB().GetScan(ctx, &jobs, query, tgDispatchStatusIdle, nowText, deadline, telegramChannelActiveJobLimit, limit)
+	err := g.DB().GetScan(ctx, &jobs, query, tgDispatchStatusIdle, telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter)), nowText, deadline, telegramChannelActiveJobLimit, limit)
 	if err != nil {
 		observeErr = err
 		return gerror.Wrap(err, "读取待入队TG推送任务失败")
@@ -236,11 +252,13 @@ func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit
 	if limit <= 0 {
 		limit = 100
 	}
-	deadline := telegramRecoveryTimeText(gtime.Now().Add(-telegramSendingJobRecoverAfter))
+	now := gtime.Now()
+	deadline := telegramRecoveryTimeText(now.Add(-telegramSendingJobRecoverAfter))
 	var jobs []telegramJobRecord
 	err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("status", "sending").
 		Where(telegramActiveChannelCondition()).
+		Where(messagePushPlanRecoveryConditionSQL(publishTgJobTable), telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter))).
 		WhereLTE("updated_at", deadline).
 		OrderAsc("updated_at").
 		Limit(limit).
@@ -259,6 +277,51 @@ func (s *sSysPublish) recoverStaleTelegramSendingJobs(ctx context.Context, limit
 		}
 	}
 	return nil
+}
+
+func (s *sSysPublish) supersedeExpiredMessagePushPlanJobs(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	deadline := telegramRecoveryTimeText(gtime.Now().Add(-messagePushPlanJobExpireAfter))
+	var ids []int64
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("id").
+		WhereLike("operation_no", "message_push_plan:%").
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
+		WhereLT("created_at", deadline).
+		OrderAsc("id").
+		Limit(limit).
+		Scan(&ids); err != nil {
+		return gerror.Wrap(err, "读取过期历史消息计划任务失败")
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	now := gtime.Now()
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		WhereIn("id", ids).
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
+		Data(g.Map{
+			"status":              "superseded",
+			"dispatch_status":     tgDispatchStatusDone,
+			"next_retry_at":       nil,
+			"error_message":       expiredMessagePushPlanJobMessage,
+			"last_dispatch_error": expiredMessagePushPlanJobMessage,
+			"updated_at":          now,
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "终止过期历史消息计划任务失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected > 0 {
+		g.Log().Infof(ctx, "已终止过期历史消息计划任务：%d条", affected)
+	}
+	return nil
+}
+
+func messagePushPlanRecoveryConditionSQL(jobTable string) string {
+	return "NOT (" + jobTable + ".operation_no LIKE 'message_push_plan:%' AND " + jobTable + ".created_at < ?)"
 }
 
 func telegramActiveChannelCondition() string {
