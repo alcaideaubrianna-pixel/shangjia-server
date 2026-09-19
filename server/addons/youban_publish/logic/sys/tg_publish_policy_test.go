@@ -22,3 +22,10 @@ func TestConfigurableTelegramRetryDelayCapsAtTwoHours(t *testing.T) {
 		t.Fatalf("retry delay must be capped: %v", got)
 	}
 }
+
+func TestTelegramLastSuccessCacheKeyVersioned(t *testing.T) {
+	job := telegramJobRecord{TenantId: 1, AccountId: 2, ChannelId: 3}
+	if got := telegramLastSuccessCacheKey(job); got != "youban_publish:tg:last_success:v2:1:2:3" {
+		t.Fatalf("unexpected cache key: %s", got)
+	}
+}

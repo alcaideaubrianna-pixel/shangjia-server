@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -21,7 +22,7 @@ func telegramPublishPolicyCacheKey(tenantId, accountId int64) string {
 }
 
 func telegramLastSuccessCacheKey(job telegramJobRecord) string {
-	return fmt.Sprintf("youban_publish:tg:last_success:%d:%d:%d", job.TenantId, job.AccountId, job.ChannelId)
+	return fmt.Sprintf("youban_publish:tg:last_success:v2:%d:%d:%d", job.TenantId, job.AccountId, job.ChannelId)
 }
 
 func normalizeTelegramPublishConfig(conf *model.PublishConfig) *model.PublishConfig {
@@ -82,7 +83,10 @@ func (s *sSysPublish) telegramLastSuccessAt(ctx context.Context, job telegramJob
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取频道最后成功推送时间失败")
 	}
-	last := value.GTime()
+	// PostgreSQL timestamp without time zone represents the application's local
+	// wall clock. gvar.GTime may attach UTC and shift the value by eight hours,
+	// so parse the database text explicitly in the process local timezone.
+	last := gtime.NewFromStr(strings.TrimSpace(value.String()))
 	if last != nil {
 		_ = cache.Instance().Set(ctx, key, last.TimestampMilli(), telegramLastSuccessCacheTTL)
 	}
