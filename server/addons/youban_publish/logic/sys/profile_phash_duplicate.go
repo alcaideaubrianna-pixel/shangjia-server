@@ -135,11 +135,18 @@ func profilePHashSetsMatch(left, right []string, threshold int) bool {
 	if len(left) == 0 || len(left) != len(right) {
 		return false
 	}
+	return profilePHashMatchCount(left, right, threshold) == len(left)
+}
+
+func profilePHashMatchCount(left, right []string, threshold int) int {
+	if len(left) == 0 || len(right) == 0 {
+		return 0
+	}
 	edges := make([][]int, len(left))
 	for i, leftValue := range left {
 		leftHash, ok := parseUploadPHash(leftValue)
 		if !ok {
-			return false
+			return 0
 		}
 		for j, rightValue := range right {
 			rightHash, valid := parseUploadPHash(rightValue)
@@ -152,7 +159,7 @@ func profilePHashSetsMatch(left, right []string, threshold int) bool {
 			}
 		}
 		if len(edges[i]) == 0 {
-			return false
+			continue
 		}
 	}
 	matched := make([]int, len(right))
@@ -173,10 +180,11 @@ func profilePHashSetsMatch(left, right []string, threshold int) bool {
 		}
 		return false
 	}
+	matchCount := 0
 	for i := range left {
-		if !assign(i, make([]bool, len(right))) {
-			return false
+		if assign(i, make([]bool, len(right))) {
+			matchCount++
 		}
 	}
-	return true
+	return matchCount
 }

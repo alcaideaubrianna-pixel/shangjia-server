@@ -80,6 +80,25 @@ func TestProfilePHashSetsMatchRejectsPartialImageOverlap(t *testing.T) {
 	}
 }
 
+func TestDuplicateScanPHashSetsMatchUsesAnySharedImage(t *testing.T) {
+	left := []string{"da732d0d22734b4d", "8ce69bed442629d9", "8ca39ecd928bb689", "c9b6c4bc69e3960c", "cfb3d128932c8c97"}
+	right := []string{"8ca39ecd928bb689", "dc796096cbd0f02d", "8ce69bed442629d9", "c9b6c4bc69e3960c"}
+	if !duplicateScanPHashSetsMatch(left, right, collectProfilePHashDuplicateThreshold) {
+		t.Fatal("duplicate scan must match when either profile contains the same image")
+	}
+	if duplicateScanPHashSetsMatch(left, []string{"0000000000000000"}, collectProfilePHashDuplicateThreshold) {
+		t.Fatal("unrelated image sets must not match")
+	}
+}
+
+func TestDuplicateScanPHashSetsMatchCapsSimilarityThreshold(t *testing.T) {
+	left := []string{"0000000000000000"}
+	right := []string{"0000000000001fff"} // Hamming distance 13.
+	if duplicateScanPHashSetsMatch(left, right, collectProfilePHashDuplicateThreshold) {
+		t.Fatal("background scan must not use the wider distance-20 similarity threshold for one-image OR matching")
+	}
+}
+
 func TestCollectPHashCandidateRecallUsesLSHRange(t *testing.T) {
 	if collectProfilePHashCandidateThreshold > 12 {
 		t.Fatalf("实时采集候选阈值 %d 会绕过 LSH 索引", collectProfilePHashCandidateThreshold)

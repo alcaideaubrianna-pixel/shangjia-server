@@ -28,7 +28,7 @@ const (
 	duplicateScanBatchSize        = 500
 	duplicateScanSessionTTL       = 24 * time.Hour
 	duplicateScanResultTTL        = 15 * time.Minute
-	duplicateScanAlgorithmVersion = 5
+	duplicateScanAlgorithmVersion = 6
 	duplicateScanPagesPerTask     = 20
 	duplicateScanStartLockTTL     = 10 * time.Second
 )
@@ -441,10 +441,16 @@ func (s *sSysPublish) appendDuplicateScanSignatures(ctx context.Context, token s
 		}
 		work.markProfileProcessed(profileId)
 	}
-	return work.save()
+	if err := work.save(); err != nil {
+		return err
+	}
+	return verifyDuplicateScanWorkSaved(ctx, token, session.ScannedTotal+len(ids), session.IncompleteTotal)
 }
 
 func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, session *duplicateScanSession) (*sysin.AdminNoteDuplicateScanModel, error) {
+	if err := verifyDuplicateScanWorkSaved(ctx, token, session.ScannedTotal, session.IncompleteTotal); err != nil {
+		return nil, err
+	}
 	session.CandidateTotal = session.ScannedTotal
 	session.GroupTotal = 0
 	writer := newDuplicateScanCandidateWriter(ctx, token)
@@ -526,6 +532,27 @@ func (s *sSysPublish) finishDuplicateScan(ctx context.Context, token string, ses
 		result.ScanCursor = session.ScanCursor
 	}
 	return result, err
+}
+
+func verifyDuplicateScanWorkSaved(ctx context.Context, token string, expectedProcessed, incompleteTotal int) error {
+	processed, err := cache.HashLen(ctx, duplicateScanWorkHashKey(token, "processed"))
+	if err != nil {
+		return gerror.Wrap(err, "校验重复资料扫描断点失败")
+	}
+	if processed < int64(expectedProcessed) {
+		return gerror.Newf("重复资料扫描断点未完整保存：期望%d条，实际%d条", expectedProcessed, processed)
+	}
+	if expectedProcessed <= incompleteTotal {
+		return nil
+	}
+	groups, err := cache.HashLen(ctx, duplicateScanWorkHashKey(token, "groups"))
+	if err != nil {
+		return gerror.Wrap(err, "校验重复资料扫描分组失败")
+	}
+	if groups == 0 {
+		return gerror.New("重复资料扫描分组未保存")
+	}
+	return nil
 }
 
 func duplicateScanProgressResult(token string, session *duplicateScanSession, complete bool) *sysin.AdminNoteDuplicateScanModel {
@@ -650,7 +677,7 @@ func applyDuplicatePHashValidation(ctx context.Context, ids []int64, candidates 
 		}
 		left, leftOK := duplicateImagePHashes(byProfile[id])
 		right, rightOK := duplicateImagePHashes(byProfile[candidate.KeepProfileId])
-		if leftOK && rightOK && profilePHashSetsMatch(left, right, collectProfilePHashDuplicateThreshold) {
+		if leftOK && rightOK && duplicateScanPHashSetsMatch(left, right, collectProfilePHashDuplicateThreshold) {
 			validated[id] = true
 		}
 	}
@@ -1284,11 +1311,21 @@ func decodeDuplicateScanWorkValue(data []byte, target any) (bool, error) {
 // every existing member prevents an A~B~C chain where A and C are not duplicates.
 func profilePHashGroupAccepts(values []string, memberIds []int64, sets map[int64][]string, threshold int) bool {
 	for _, memberId := range memberIds {
-		if !profilePHashSetsMatch(values, sets[memberId], threshold) {
+		if !duplicateScanPHashSetsMatch(values, sets[memberId], threshold) {
 			return false
 		}
 	}
 	return true
+}
+
+func duplicateScanPHashSetsMatch(left, right []string, threshold int) bool {
+	if len(left) == 0 || len(right) == 0 {
+		return false
+	}
+	if threshold > collectProfilePHashCandidateThreshold {
+		threshold = collectProfilePHashCandidateThreshold
+	}
+	return profilePHashMatchCount(left, right, threshold) > 0
 }
 
 func duplicatePHashBucketKeys(values []string, neighborhood bool) []string {

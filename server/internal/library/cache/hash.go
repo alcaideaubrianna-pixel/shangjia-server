@@ -2,12 +2,16 @@ package cache
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"time"
 
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/util/gconv"
 )
+
+const hashSetManyBatchSize = 500
 
 // HashGetMany reads selected fields without materializing the complete Redis hash.
 func HashGetMany(ctx context.Context, key string, fields []string) (gvar.Vars, error) {
@@ -41,12 +45,49 @@ func HashSetMany(ctx context.Context, key string, fields map[string]any, lifetim
 	if len(fields) == 0 {
 		return nil
 	}
-	if _, err := g.Redis().HSet(ctx, key, fields); err != nil {
-		return err
+	fieldNames := make([]string, 0, len(fields))
+	for field := range fields {
+		fieldNames = append(fieldNames, field)
+	}
+	sort.Strings(fieldNames)
+	for start := 0; start < len(fieldNames); start += hashSetManyBatchSize {
+		end := start + hashSetManyBatchSize
+		if end > len(fieldNames) {
+			end = len(fieldNames)
+		}
+		args := make([]any, 0, 1+(end-start)*2)
+		args = append(args, key)
+		for _, field := range fieldNames[start:end] {
+			args = append(args, field, fields[field])
+		}
+		if _, err := g.Redis().Do(ctx, "HSET", args...); err != nil {
+			return err
+		}
 	}
 	if lifetime > 0 {
-		_, err := g.Redis().PExpire(ctx, key, lifetime.Milliseconds())
+		result, err := g.Redis().PExpire(ctx, key, lifetime.Milliseconds())
+		if err != nil {
+			return err
+		}
+		if result == 0 {
+			return fmt.Errorf("redis hash expiry target is missing: key=%s", key)
+		}
+	}
+	length, err := HashLen(ctx, key)
+	if err != nil {
 		return err
 	}
+	if length <= 0 {
+		return fmt.Errorf("redis hash write produced no fields: key=%s", key)
+	}
 	return nil
+}
+
+// HashLen returns the number of fields persisted in a Redis hash.
+func HashLen(ctx context.Context, key string) (int64, error) {
+	result, err := g.Redis().Do(ctx, "HLEN", key)
+	if err != nil {
+		return 0, err
+	}
+	return result.Int64(), nil
 }
