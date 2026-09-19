@@ -76,3 +76,20 @@ func TestAntiScanMattingCacheMatchesSelectedProvider(t *testing.T) {
 		t.Fatal("FAPIHub cache must not match Aliyun provider")
 	}
 }
+
+func TestAntiScanTencentMattingFallbackRequiresCompleteConfig(t *testing.T) {
+	complete := &model.CloudResourceConfig{TencentSecretId: "id", TencentSecretKey: "key", TencentMattingBucket: "bucket"}
+	if !antiScanTencentMattingFallbackReady(complete) {
+		t.Fatal("complete Tencent matting configuration should enable fallback")
+	}
+	for _, conf := range []*model.CloudResourceConfig{
+		nil,
+		{TencentSecretKey: "key", TencentMattingBucket: "bucket"},
+		{TencentSecretId: "id", TencentMattingBucket: "bucket"},
+		{TencentSecretId: "id", TencentSecretKey: "key"},
+	} {
+		if antiScanTencentMattingFallbackReady(conf) {
+			t.Fatalf("incomplete Tencent matting configuration must not enable fallback: %#v", conf)
+		}
+	}
+}

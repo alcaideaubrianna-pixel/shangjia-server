@@ -505,6 +505,19 @@ func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash strin
 	if provider == "facepp" {
 		segmentURL, err = facePPPortraitMatting(ctx, imageBytes, imageHash, conf)
 		providerName = "facepp-matting"
+		if err != nil && antiScanTencentMattingFallbackReady(conf) {
+			primaryErr := err
+			fallbackStartedAt := time.Now()
+			result, fallbackErr := tencentCOSPortraitMatting(ctx, imageBytes, imageHash, conf, false)
+			if fallbackErr == nil && result != nil && strings.TrimSpace(result.URL) != "" {
+				segmentURL = result.URL
+				err = nil
+				providerName = "facepp-fallback-tencent-ci-matting"
+				g.Log().Warningf(ctx, "Face++抠图失败，已降级腾讯云 imageHash:%s fallbackDurationMs:%d primaryErr:%+v", imageHash, time.Since(fallbackStartedAt).Milliseconds(), primaryErr)
+			} else {
+				g.Log().Warningf(ctx, "Face++抠图及腾讯云降级均失败 imageHash:%s primaryErr:%+v fallbackErr:%+v", imageHash, primaryErr, fallbackErr)
+			}
+		}
 	} else if provider == "aliyun" {
 		segmentURL, err = aliyunCOSPortraitMatting(ctx, imageBytes, imageHash, conf)
 	} else if provider == "tencent" {
@@ -548,6 +561,13 @@ func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash strin
 	}
 	g.Log().Infof(ctx, "防扫图阶段完成 stage:segment_cache_save durationMs:%d imageHash:%s", time.Since(saveStartedAt).Milliseconds(), imageHash)
 	return segmentRaw, nil
+}
+
+func antiScanTencentMattingFallbackReady(conf *model.CloudResourceConfig) bool {
+	return conf != nil &&
+		strings.TrimSpace(conf.TencentSecretId) != "" &&
+		strings.TrimSpace(conf.TencentSecretKey) != "" &&
+		strings.TrimSpace(conf.TencentMattingBucket) != ""
 }
 
 func antiScanMattingProvider(conf *model.CloudResourceConfig) string {

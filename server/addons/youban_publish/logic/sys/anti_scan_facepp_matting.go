@@ -24,6 +24,17 @@ var facePPConcurrency = struct {
 	sem chan struct{}
 }{}
 
+var facePPHTTPClient = &http.Client{
+	Timeout: 10 * time.Second,
+	Transport: &http.Transport{
+		MaxIdleConns:          16,
+		MaxIdleConnsPerHost:   4,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 9 * time.Second,
+	},
+}
+
 func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash string, conf *model.CloudResourceConfig) (string, error) {
 	if conf == nil || strings.TrimSpace(conf.FacePlusApiKey) == "" || strings.TrimSpace(conf.FacePlusApiSecret) == "" {
 		return "", gerror.New("Face++ 缺少 API Key 或 API Secret")
@@ -81,8 +92,7 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 		return "", err
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := facePPHTTPClient.Do(req)
 	if err != nil {
 		return "", gerror.Wrap(err, "调用 Face++ 人体抠图失败")
 	}
