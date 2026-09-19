@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 
 	tgbot "github.com/go-telegram/bot"
@@ -10,6 +11,23 @@ import (
 
 	"hotgo/addons/youban_tg_bot_gateway/service"
 )
+
+func TestHTTPClientDisablesHTTP2(t *testing.T) {
+	client, err := httpClient("")
+	if err != nil {
+		t.Fatalf("httpClient() error = %v", err)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T, want *http.Transport", client.Transport)
+	}
+	if transport.ForceAttemptHTTP2 {
+		t.Fatal("ForceAttemptHTTP2 must be disabled")
+	}
+	if transport.TLSNextProto == nil {
+		t.Fatal("TLSNextProto must disable automatic HTTP/2 negotiation")
+	}
+}
 
 type failingGatewayFeature struct{}
 

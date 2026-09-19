@@ -3,11 +3,25 @@ package sys
 import (
 	"context"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 )
+
+const publishSuccessRecordMessageMaxRunes = 255
+
+// boundPublishSuccessRecordMessage keeps failure details writable to the legacy
+// varchar(255) column while preserving valid UTF-8 for operators.
+func boundPublishSuccessRecordMessage(message string) string {
+	message = strings.TrimSpace(message)
+	if utf8.RuneCountInString(message) <= publishSuccessRecordMessageMaxRunes {
+		return message
+	}
+	runes := []rune(message)
+	return string(runes[:publishSuccessRecordMessageMaxRunes-3]) + "..."
+}
 
 const (
 	publishSuccessTypeCollect = "collect_publish"
@@ -59,6 +73,7 @@ func (s *sSysPublish) upsertPublishJobRecord(ctx context.Context, job telegramJo
 	if strings.TrimSpace(message) == "" {
 		message = publishJobRecordMessage(action, status)
 	}
+	message = boundPublishSuccessRecordMessage(message)
 	_, err := g.DB().Model(publishSuccessRecordTable).Safe().Ctx(ctx).Data(g.Map{
 		"job_id":         job.Id,
 		"task_id":        job.TaskId,

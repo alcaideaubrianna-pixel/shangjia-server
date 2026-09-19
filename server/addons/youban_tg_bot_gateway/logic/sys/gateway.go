@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -651,7 +652,13 @@ func newBotWithTimeout(token, proxyURL string, handler tgbot.HandlerFunc, timeou
 	return tgbot.New(token, tgbot.WithHTTPClient(timeout, client), tgbot.WithSkipGetMe(), tgbot.WithAllowedUpdates(tgbot.AllowedUpdates(allowedUpdates())), tgbot.WithDefaultHandler(handler))
 }
 func httpClient(proxyURL string) (*http.Client, error) {
-	transport := &http.Transport{}
+	// Telegram occasionally sends HTTP/2 GOAWAY while a request body is in
+	// flight. HTTP/1.1 avoids reusing that drained connection and lets the
+	// existing queue retry policy handle transient network failures cleanly.
+	transport := &http.Transport{
+		ForceAttemptHTTP2: false,
+		TLSNextProto:      make(map[string]func(string, *tls.Conn) http.RoundTripper),
+	}
 	proxyURL = strings.TrimSpace(proxyURL)
 	if proxyURL == "" {
 		return &http.Client{Timeout: 35 * time.Second, Transport: transport}, nil
