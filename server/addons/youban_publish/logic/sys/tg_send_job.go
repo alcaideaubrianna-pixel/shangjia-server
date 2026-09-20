@@ -624,6 +624,9 @@ func (s *sSysPublish) completeTelegramJobLockedByProfile(ctx context.Context, jo
 	if recordErr := s.appendPublishSuccessRecord(ctx, job); recordErr != nil {
 		g.Log().Warningf(ctx, "保存成功发布记录失败 jobId:%d err:%+v", job.Id, recordErr)
 	}
+	if recoveryErr := s.reconcileRecoveredCycleJob(ctx, job); recoveryErr != nil {
+		g.Log().Warningf(ctx, "回写循环批次自动补偿状态失败 jobId:%d err:%+v", job.Id, recoveryErr)
+	}
 	if indexErr := s.upsertChannelProfileFromJob(ctx, job); indexErr != nil {
 		g.Log().Warningf(ctx, "更新频道资料索引失败 jobId:%d err:%+v", job.Id, indexErr)
 	} else if cycleErr := s.syncTelegramJobCycleSchedule(ctx, job); cycleErr != nil {

@@ -37,3 +37,12 @@ func TestTerminalPublishRecoveryOperationNoIsStable(t *testing.T) {
 		t.Fatalf("unexpected recovery operation number %q %q", first, second)
 	}
 }
+
+func TestTerminalPublishRecoverySourceJobID(t *testing.T) {
+	if got := terminalPublishRecoverySourceJobID("auto-recover:123:456"); got != 123 {
+		t.Fatalf("source job id=%d want 123", got)
+	}
+	if got := terminalPublishRecoverySourceJobID("profile:123"); got != 0 {
+		t.Fatalf("non recovery operation source job id=%d want 0", got)
+	}
+}

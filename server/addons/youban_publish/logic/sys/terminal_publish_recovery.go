@@ -10,6 +10,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/hibiken/asynq"
 )
 
@@ -21,6 +22,18 @@ type terminalPublishRecoveryPayload struct {
 
 func terminalPublishRecoveryOperationNo(job telegramJobRecord) string {
 	return fmt.Sprintf("auto-recover:%d:%d", job.Id, job.ProfileId)
+}
+
+func terminalPublishRecoverySourceJobID(operationNo string) int64 {
+	parts := strings.Split(strings.TrimSpace(operationNo), ":")
+	if len(parts) < 3 || strings.ToLower(parts[0]) != "auto-recover" {
+		return 0
+	}
+	var id int64
+	if _, err := fmt.Sscan(parts[1], &id); err != nil || id <= 0 {
+		return 0
+	}
+	return id
 }
 
 func terminalPublishRecoveryEligible(job telegramJobRecord, cause error) bool {
@@ -120,6 +133,80 @@ func (s *sSysPublish) handleTerminalPublishRecoveryTask(ctx context.Context, tas
 	}
 	observeTelegramPublishRecovery(ctx, "requeued")
 	g.Log().Info(ctx, "终态失败资料已自动重新上架", g.Map{"sourceJobId": job.Id, "profileId": job.ProfileId, "channelId": job.ChannelId, "operationNo": operationNo})
+	return nil
+}
+
+func (s *sSysPublish) reconcileRecoveredCycleJob(ctx context.Context, recoveryJob telegramJobRecord) error {
+	sourceJobID := terminalPublishRecoverySourceJobID(recoveryJob.OperationNo)
+	if sourceJobID <= 0 {
+		return nil
+	}
+	var source telegramJobRecord
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("id,operation_no,status").Where("id", sourceJobID).Scan(&source); err != nil {
+		return gerror.Wrap(err, "读取终态补偿源任务失败")
+	}
+	if source.Id <= 0 || !isCycleBatchOperation(source.OperationNo) || source.Status != "failed" {
+		return nil
+	}
+	message := "原循环任务已由自动补偿任务成功替代"
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Where("id", source.Id).Where("status", "failed").Data(g.Map{
+		"status":              "superseded",
+		"dispatch_status":     tgDispatchStatusDone,
+		"next_retry_at":       nil,
+		"last_dispatch_error": message,
+		"updated_at":          gtime.Now(),
+	}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "回写循环源任务补偿状态失败")
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil
+	}
+	if err = s.reconcileCycleRunStatus(ctx, source.OperationNo); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *sSysPublish) reconcileCycleRunStatus(ctx context.Context, operationNo string) error {
+	parts := strings.Split(strings.TrimSpace(operationNo), ":")
+	if len(parts) < 2 {
+		return nil
+	}
+	var runID int64
+	if _, err := fmt.Sscan(parts[1], &runID); err != nil || runID <= 0 {
+		return nil
+	}
+	remaining, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		WhereLike("operation_no", fmt.Sprintf("cycle_batch:%d:%%", runID)).
+		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown", "failed"}).
+		Count()
+	if err != nil {
+		return gerror.Wrap(err, "汇总循环批次补偿状态失败")
+	}
+	if remaining > 0 {
+		return nil
+	}
+	now := gtime.Now()
+	result, err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
+		Where("id", runID).Where("status", cycleRunStatusPartial).
+		Data(g.Map{"status": cycleRunStatusFinished, "stage": "finished", "error_message": "", "finished_at": now, "updated_at": now}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "回写循环批次完成状态失败")
+	}
+	if affected, _ := result.RowsAffected(); affected > 0 {
+		var run cycleRunRecord
+		if err = g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).Where("id", runID).Scan(&run); err == nil {
+			s.appendChannelCycleRunLog(ctx, run, "info", "recovered", "循环批次失败资料已由自动补偿成功恢复", nil)
+			_, _ = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+				Where("id", run.ChannelId).
+				Where("cycle_last_error_message <> ''").
+				Data(g.Map{"cycle_last_error_message": "", "updated_at": now}).Update()
+		}
+	}
 	return nil
 }
 

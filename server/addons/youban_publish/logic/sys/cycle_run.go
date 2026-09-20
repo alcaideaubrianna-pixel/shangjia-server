@@ -65,11 +65,47 @@ type channelProfileRecord struct {
 func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
 	return runChannelCycleSchedulerStages(ctx, []channelCycleSchedulerStage{
 		{name: "恢复循环批次", run: s.recoverChannelCycleRuns},
+		{name: "核对循环补偿", run: func(ctx context.Context) error { return s.reconcileRecoveredChannelCycleRuns(ctx, 20) }},
 		{name: "收尾循环批次", run: func(ctx context.Context) error { return s.finalizeDispatchingChannelCycleRuns(ctx, 20) }},
 		{name: "扫描批次循环", run: func(ctx context.Context) error { return s.scheduleDueChannelBatchCycles(ctx, 50) }},
 		{name: "恢复循环重算", run: func(ctx context.Context) error { return s.enqueuePendingProfileCycleReschedules(ctx, 200) }},
 		{name: "扫描时间循环", run: s.runProfileCycleDueScan},
 	})
+}
+
+func (s *sSysPublish) reconcileRecoveredChannelCycleRuns(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 20
+	}
+	var runs []cycleRunRecord
+	if err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
+		Fields("id,tenant_id,channel_id,status").
+		Where("status", cycleRunStatusPartial).
+		OrderAsc("updated_at").Limit(limit).Scan(&runs); err != nil {
+		return gerror.Wrap(err, "读取待核对循环补偿批次失败")
+	}
+	for _, run := range runs {
+		prefix := fmt.Sprintf("cycle_batch:%d:%%", run.Id)
+		message := "原循环任务已由自动补偿任务成功替代"
+		_, err := g.DB().Exec(ctx, `UPDATE `+publishTgJobTable+` source
+			SET status='superseded', dispatch_status=?, next_retry_at=NULL,
+				last_dispatch_error=?, updated_at=NOW()
+			WHERE source.status='failed' AND source.operation_no LIKE ?
+				AND EXISTS (
+					SELECT 1 FROM `+publishTgJobTable+` recovery
+					WHERE recovery.operation_no LIKE ('auto-recover:' || source.id || ':%')
+						AND recovery.profile_id=source.profile_id
+						AND recovery.channel_id=source.channel_id
+						AND recovery.status='sent'
+				)`, tgDispatchStatusDone, message, prefix)
+		if err != nil {
+			return gerror.Wrap(err, "核对循环批次自动补偿任务失败")
+		}
+		if err = s.reconcileCycleRunStatus(ctx, fmt.Sprintf("cycle_batch:%d:", run.Id)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type channelCycleSchedulerStage struct {
