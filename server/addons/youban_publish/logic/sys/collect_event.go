@@ -341,6 +341,8 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 	if source.IsEmpty() {
 		return s.ignoreCollectEvent(ctx, eventId, "采集源不存在", "source")
 	}
+	event["source_name_snapshot"] = source["title"]
+	event["source_username_snapshot"] = source["source_username"]
 	if err = s.ensureTenantVipFeature(ctx, tenantId, sysin.TenantVipFeatureCollectSource); err != nil {
 		return s.ignoreCollectEvent(ctx, eventId, "VIP会员已到期，停止处理采集事件", "vip")
 	}
@@ -899,7 +901,12 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		dispatchId, txErr = tx.Model(pdao.YoubanPublishCollectDispatch.Table()).Ctx(ctx).Data(g.Map{
 			"tenant_id": event["tenant_id"].Int64(), "account_id": event["account_id"].Int64(),
 			"source_id": ruleSourceID, "rule_id": rule["id"].Int64(), "event_id": event["id"].Int64(),
-			"match_json": decision.MatchJSON, "status": sysin.CollectDispatchStatusPending,
+			"source_type_snapshot":       event["source_type"].String(),
+			"source_name_snapshot":       event["source_name_snapshot"].String(),
+			"source_username_snapshot":   event["source_username_snapshot"].String(),
+			"source_chat_id_snapshot":    event["source_chat_id"].String(),
+			"source_message_id_snapshot": event["source_message_id"].Int64(),
+			"match_json":                 decision.MatchJSON, "status": sysin.CollectDispatchStatusPending,
 			"created_at": now, "updated_at": now,
 		}).InsertAndGetId()
 		if txErr != nil {

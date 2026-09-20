@@ -428,13 +428,17 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 	}
 	var rows []profileCollectionMetadataRow
 	err := g.DB().Model(publishCollectDispatchTable+" d").Safe().Ctx(ctx).
-		InnerJoin(publishCollectSourceTable+" s", "s.id=d.source_id").
+		LeftJoin(publishCollectSourceTable+" s", "s.id=d.source_id").
 		LeftJoin(publishCollectEventTable+" e", "e.id=d.event_id").
-		LeftJoin(publishBotChannelCacheTable+" bc", "bc.tenant_id=s.tenant_id AND bc.bot_id=COALESCE(NULLIF(s.bot_id,0),e.bot_id) AND bc.chat_id=COALESCE(NULLIF(e.source_chat_id,''),s.source_chat_id)").
+		LeftJoin(publishBotChannelCacheTable+" bc", "bc.tenant_id=d.tenant_id AND bc.bot_id=COALESCE(NULLIF(s.bot_id,0),e.bot_id) AND bc.chat_id=COALESCE(NULLIF(e.source_chat_id,''),NULLIF(d.source_chat_id_snapshot,''),s.source_chat_id)").
 		WhereIn("d.profile_id", profileIds).
-		Fields("d.id AS dispatch_id,s.tenant_id,d.profile_id,d.source_id,s.source_type,COALESCE(NULLIF(bc.chat_title,''),s.title) AS source_name,COALESCE(NULLIF(bc.chat_username,''),s.source_username) AS source_username,s.bot_id,s.tg_account_id," +
-			"COALESCE(NULLIF(e.source_chat_id,''),s.source_chat_id) AS source_chat_id," +
-			"COALESCE(NULLIF(e.source_message_id,0),0) AS source_message_id").
+		Fields("d.id AS dispatch_id,d.tenant_id,d.profile_id,d.source_id," +
+			"COALESCE(NULLIF(s.source_type,''),d.source_type_snapshot) AS source_type," +
+			"COALESCE(NULLIF(bc.chat_title,''),NULLIF(s.title,''),d.source_name_snapshot) AS source_name," +
+			"COALESCE(NULLIF(bc.chat_username,''),NULLIF(s.source_username,''),d.source_username_snapshot) AS source_username," +
+			"COALESCE(s.bot_id,0) AS bot_id,COALESCE(s.tg_account_id,0) AS tg_account_id," +
+			"COALESCE(NULLIF(e.source_chat_id,''),NULLIF(d.source_chat_id_snapshot,''),s.source_chat_id) AS source_chat_id," +
+			"COALESCE(NULLIF(e.source_message_id,0),NULLIF(d.source_message_id_snapshot,0),0) AS source_message_id").
 		OrderAsc("d.profile_id").OrderDesc("d.id").Scan(&rows)
 	if err != nil {
 		return gerror.Wrap(err, "读取资料采集来源失败")

@@ -929,3 +929,10 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_media_provider" ON "hg_youban_publ
 CREATE INDEX IF NOT EXISTS "idx_ybp_anti_scan_image_provider" ON "hg_youban_publish_anti_scan_cache" ("image_hash", "provider", "cloud_raw_saved");
 
 ALTER TABLE "hg_youban_publish_tg_message" ADD COLUMN IF NOT EXISTS "tg_file_unique_id" varchar(255) NOT NULL DEFAULT '';
+
+-- Persist collection provenance independently from short-lived event rows.
+ALTER TABLE "hg_youban_publish_collect_dispatch" ADD COLUMN IF NOT EXISTS "source_type_snapshot" varchar(32) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_dispatch" ADD COLUMN IF NOT EXISTS "source_name_snapshot" varchar(255) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_dispatch" ADD COLUMN IF NOT EXISTS "source_username_snapshot" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_dispatch" ADD COLUMN IF NOT EXISTS "source_chat_id_snapshot" varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_collect_dispatch" ADD COLUMN IF NOT EXISTS "source_message_id_snapshot" bigint NOT NULL DEFAULT 0;
