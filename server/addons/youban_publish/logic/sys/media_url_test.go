@@ -26,7 +26,7 @@ func TestNormalizeMediaFileURLUsesCosPublicURLForRelativeObject(t *testing.T) {
 func TestNormalizeMediaPresentationURLUsesConfiguredCDN(t *testing.T) {
 	path := "hotgo/file/2026-09-14/example.mp4"
 	want := mediaContentCDNBaseURL() + "/" + path
-	if actual := normalizeMediaPresentationURL("https://img.yuebanby.com/"+path, path); actual != want {
+	if actual := normalizeMediaPresentationURL("https://sto.xiao-feiji.cc/"+path, path); actual != want {
 		t.Fatalf("unexpected presentation URL: got %q want %q", actual, want)
 	}
 }
@@ -36,13 +36,13 @@ func TestNormalizeMediaPresentationURLRewritesManagedLegacyURLWithoutStoragePath
 	storager.SetConfig(&model.UploadConfig{
 		Drive:        consts.UploadDriveCos,
 		CosBucketURL: "https://bucket.cos.ap-hongkong.myqcloud.com",
-		CosPublicURL: "https://img.xiaohuiji.cc",
+		CosPublicURL: "https://cos.xiao-feiji.cc",
 	})
 	t.Cleanup(func() { storager.SetConfig(previous) })
 
 	path := "hotgo/file/2026-09-14/example.jpg"
 	want := mediaContentCDNBaseURL() + "/" + path + "?preview=1"
-	actual := normalizeMediaPresentationURL("https://img.yuebanby.com/"+path+"?preview=1", "")
+	actual := normalizeMediaPresentationURL("https://sto.xiao-feiji.cc/"+path+"?preview=1", "")
 	if actual != want {
 		t.Fatalf("unexpected legacy presentation URL: got %q want %q", actual, want)
 	}

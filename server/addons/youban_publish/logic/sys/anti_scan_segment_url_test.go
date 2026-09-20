@@ -5,7 +5,7 @@ import "testing"
 func TestAntiScanSegmentPresentationURLUsesConfiguredCDN(t *testing.T) {
 	path := "hotgo/file/anti-scan/segment/35e1614ab4602796.png"
 	want := mediaContentCDNBaseURL() + "/" + path
-	got := antiScanSegmentPresentationURL("https://img.yuebanby.com/" + path)
+	got := antiScanSegmentPresentationURL("https://sto.xiao-feiji.cc/" + path)
 	if got != want {
 		t.Fatalf("unexpected segment URL: got %q want %q", got, want)
 	}

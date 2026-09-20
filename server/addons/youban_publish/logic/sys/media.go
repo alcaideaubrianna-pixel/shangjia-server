@@ -828,11 +828,6 @@ func isManagedMediaHostname(host string) bool {
 	if host == "" {
 		return false
 	}
-	// Keep previously persisted first-party URLs readable; active domains are
-	// resolved from configuration below and are never embedded here.
-	if host == "img.yuebanby.com" || host == "img.xiaohuiji.cc" {
-		return true
-	}
 	configured := []string{
 		g.Cfg().MustGet(context.Background(), "youbanPublish.mediaFileCache.workerCdnBaseUrl", "").String(),
 		g.Cfg().MustGet(context.Background(), "youbanPublish.mediaFileCache.fallbackCdnBaseUrl", "").String(),
