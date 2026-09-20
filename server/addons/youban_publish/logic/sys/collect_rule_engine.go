@@ -302,6 +302,9 @@ func applyCollectIntroFeeTruncate(text string) string {
 		// emoji, spacing, and formatting in all retained lines.
 		if collectIntroFeeAmount(line) != "" {
 			cutoff = index
+			if previous := previousCollectContentLine(lines, index); previous >= 0 && collectShortTitleLine(lines[previous]) {
+				cutoff = previous
+			}
 			changed = true
 			break
 		}
@@ -332,6 +335,29 @@ func applyCollectIntroFeeTruncate(text string) string {
 		return strings.TrimSpace(strings.Join(kept, "\n"))
 	}
 	return text
+}
+
+func previousCollectContentLine(lines []string, before int) int {
+	for index := before - 1; index >= 0; index-- {
+		if strings.TrimSpace(normalizeCollectKeywordText(lines[index])) != "" {
+			return index
+		}
+	}
+	return -1
+}
+
+func collectShortTitleLine(line string) bool {
+	normalized := normalizeCollectKeywordText(strings.TrimSpace(line))
+	if strings.ContainsAny(normalized, ":：=;；") {
+		return false
+	}
+	visible := 0
+	for _, char := range normalized {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) {
+			visible++
+		}
+	}
+	return visible > 0 && visible < 5
 }
 
 func isCollectIntroFeeSourceMarkLine(line string) bool {

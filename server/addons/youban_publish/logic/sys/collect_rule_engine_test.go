@@ -45,7 +45,7 @@ func TestCollectRuleOnlineCaseMatrix(t *testing.T) {
 		}, matched: true},
 		{name: "no media skipped", text: "正文", media: 0, want: "", mutate: func(gdb.Record) {}, matched: false},
 		{name: "blocked text skipped", text: "正文黑名单", media: 1, want: "", mutate: func(r gdb.Record) { r["blocked_texts"] = gvar.New([]string{"黑名单"}) }, matched: false},
-		{name: "intro fee truncated", text: "正文\n介绍费：7888\n尾部", media: 1, want: "正文", mutate: func(r gdb.Record) { r["truncate_intro_fee_enabled"] = gvar.New(true) }, matched: true},
+		{name: "intro fee and short title truncated", text: "正文\n介绍费：7888\n尾部", media: 1, want: "", mutate: func(r gdb.Record) { r["truncate_intro_fee_enabled"] = gvar.New(true) }, matched: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -182,19 +182,24 @@ func TestApplyCollectIntroFeeTruncate(t *testing.T) {
 		text string
 		want string
 	}{
-		{name: "removes matched line and following text", text: "标题\n介绍费 7888\nKK", want: "标题"},
+		{name: "removes matched line and short title", text: "标题\n介绍费 7888\nKK", want: ""},
 		{name: "removes all text when first line matches", text: "介绍费 7888\nKK", want: ""},
-		{name: "supports windows line endings", text: "标题\r\n介绍费：7888\r\nKK", want: "标题"},
-		{name: "matches intro fee with invisible format characters", text: "标题\n介\u200b绍\u200d费：7888(香水湾💦)⁣‌\n联系方式", want: "标题"},
-		{name: "matches recommendation fee", text: "标题\n推荐费：7888 情诗X\n介绍费:7889\u2060⁣‌", want: "标题"},
-		{name: "matches referral fee synonyms", text: "标题\n中介费：7888\n尾部", want: "标题"},
-		{name: "matches brokerage fee synonym", text: "标题\n牵线费用：7888\n尾部", want: "标题"},
-		{name: "matches intermediary fee synonym", text: "标题\n居间费：7888\n尾部", want: "标题"},
-		{name: "matches connection fee synonym", text: "标题\n对接费用：6888\n尾部", want: "标题"},
-		{name: "matches brokerage service fee", text: "标题\n中介服务费7888\n尾部", want: "标题"},
-		{name: "matches variation selectors inside keyword", text: "标题\n介︇绍️费：7888\n尾部", want: "标题"},
+		{name: "supports windows line endings", text: "标题\r\n介绍费：7888\r\nKK", want: ""},
+		{name: "matches intro fee with invisible format characters", text: "标题\n介\u200b绍\u200d费：7888(香水湾💦)⁣‌\n联系方式", want: ""},
+		{name: "matches recommendation fee", text: "标题\n推荐费：7888 情诗X\n介绍费:7889\u2060⁣‌", want: ""},
+		{name: "matches referral fee synonyms", text: "标题\n中介费：7888\n尾部", want: ""},
+		{name: "matches brokerage fee synonym", text: "标题\n牵线费用：7888\n尾部", want: ""},
+		{name: "matches intermediary fee synonym", text: "标题\n居间费：7888\n尾部", want: ""},
+		{name: "matches connection fee synonym", text: "标题\n对接费用：6888\n尾部", want: ""},
+		{name: "matches brokerage service fee", text: "标题\n中介服务费7888\n尾部", want: ""},
+		{name: "matches variation selectors inside keyword", text: "标题\n介︇绍️费：7888\n尾部", want: ""},
 		{name: "cleans joined suffix with invisible tail", text: "雷点（不能接受的）：拍照 户外 手指 肛交 多\n介绍费7888TT​‌⁣‌​​​‌​‌​​‌‌‌‌​‌‌‌‌​​‌‌‌​‌‌‌​‌​‌‌‌‌‌‌​​‌​​​​‌‌​‌‌​​​​​‌‌‌​‌​‌​​​‌‌​‌‌‌​‌‌​‌⁤", want: "雷点（不能接受的）：拍照 户外 手指 肛交 多"},
-		{name: "removes source mark before intro fee", text: "个人优点:反差、私生活少、嫩\n不能接受金主:身高170以下、太胖\n情诗w41\n七七xq\n介绍费:7889", want: "个人优点:反差、私生活少、嫩\n不能接受金主:身高170以下、太胖\n七七xq"},
+		{name: "removes short title immediately before fee", text: "正文内容\n橙子\n介绍费：7888 天空之城", want: "正文内容"},
+		{name: "removes short title across blank line", text: "正文内容\n橙子\n\n介绍费：7888 天空之城", want: "正文内容"},
+		{name: "counts visible title characters", text: "正文内容\n橙⁣‌子\n介绍费：7888 天空之城", want: "正文内容"},
+		{name: "keeps five character line before fee", text: "正文内容\n天空之城店\n介绍费：7888", want: "正文内容\n天空之城店"},
+		{name: "keeps structured content before fee", text: "正文内容\n月生活费：8000\n介绍费：7888", want: "正文内容\n月生活费：8000"},
+		{name: "removes source mark and short title before intro fee", text: "个人优点:反差、私生活少、嫩\n不能接受金主:身高170以下、太胖\n情诗w41\n七七xq\n介绍费:7889", want: "个人优点:反差、私生活少、嫩\n不能接受金主:身高170以下、太胖"},
 		{name: "removes obfuscated source mark line", text: "正文\n情\u2060诗 W41\n介绍费:7889", want: "正文"},
 		{name: "keeps text without keyword", text: "标题\n联系方式\nKK", want: "标题\n联系方式\nKK"},
 		{name: "removes leading profile metadata", text: "昵称：朴朴\n编号：XXX123\n同行：否\n正常文案", want: "正常文案"},
@@ -205,7 +210,7 @@ func TestApplyCollectIntroFeeTruncate(t *testing.T) {
 		{name: "removes non-chinese header after blank line", text: "\nA1\nB20260811\n正常文案", want: "正常文案"},
 		{name: "removes metadata then consecutive codes", text: "昵称：朴朴\nA1\nB20260811\n正常文案", want: "正常文案"},
 		{name: "keeps chinese first line", text: "English中文 marker\n正常文案", want: "English中文 marker\n正常文案"},
-		{name: "removes metadata before intro fee and following text", text: "昵称：朴朴\nX123\n正常文案\n介绍费：7888\n联系方式", want: "正常文案"},
+		{name: "removes metadata and short title before intro fee", text: "昵称：朴朴\nX123\n正常文案\n介绍费：7888\n联系方式", want: ""},
 		{name: "recognizes fullwidth semicolon fee separator", text: "介绍人；柏林之声    介绍费；7888\n七七b\n介绍费:7888", want: ""},
 		{name: "removes metadata fields inside body", text: "正常文案\n昵称：朴朴\n联系方式\n编号：XXX123\n同行：否", want: "正常文案\n联系方式"},
 		{name: "keeps metadata words in normal body", text: "这是昵称说明\n编号是内部记录\n同行可以联系", want: "这是昵称说明\n编号是内部记录\n同行可以联系"},
@@ -265,14 +270,14 @@ func TestIsCollectIntroFeeStandaloneSuffix(t *testing.T) {
 	}
 }
 
-func TestBuildCollectRuleDecisionRestoresIntroFeeAfterTruncate(t *testing.T) {
+func TestBuildCollectRuleDecisionDropsFeeWhenOnlyShortTitleRemains(t *testing.T) {
 	event := gdb.Record{"raw_text": gvar.New("编号：A123\n正文\n介绍费 7888\nKK"), "media_count": gvar.New(1)}
 	rule := gdb.Record{
 		"truncate_intro_fee_enabled": gvar.New(true), "intro_fee_suffix": gvar.New("AA"),
 		"delete_lines": gvar.New([]string{}), "delete_texts": gvar.New([]string{}),
 		"replace_from": gvar.New([]string{}), "replace_to": gvar.New([]string{}),
 	}
-	if got, want := buildCollectRuleDecision(event, nil, rule).Text, "正文\n介绍费 7888 AA"; got != want {
+	if got, want := buildCollectRuleDecision(event, nil, rule).Text, ""; got != want {
 		t.Fatalf("decision text = %q, want %q", got, want)
 	}
 }
@@ -317,7 +322,7 @@ func TestNormalizeCollectMaterialTextPreservesModifiedIntroFee(t *testing.T) {
 		"id": gvar.New(int64(50)), "truncate_intro_fee_enabled": gvar.New(true),
 		"intro_fee_suffix": gvar.New("AA"),
 	}
-	if got, want := s.normalizeCollectMaterialText(context.Background(), event, rule, "正文\n介绍费 7888 AA"), "正文\n介绍费 7888 AA"; got != want {
+	if got, want := s.normalizeCollectMaterialText(context.Background(), event, rule, "正文\n介绍费 7888 AA"), "介绍费 7888 AA"; got != want {
 		t.Fatalf("commit boundary text = %q, want %q", got, want)
 	}
 }
@@ -370,7 +375,7 @@ func TestNormalizeCollectMaterialTextRemovesIntroFeeAtCommitBoundary(t *testing.
 	event := gdb.Record{"id": gvar.New(int64(101))}
 	rule := gdb.Record{"id": gvar.New(int64(46)), "truncate_intro_fee_enabled": gvar.New(true)}
 	text := "正文\n介绍费：7888(香水湾💦)"
-	if got, want := s.normalizeCollectMaterialText(context.Background(), event, rule, text), "正文"; got != want {
+	if got, want := s.normalizeCollectMaterialText(context.Background(), event, rule, text), ""; got != want {
 		t.Fatalf("commit boundary text = %q, want %q", got, want)
 	}
 }
