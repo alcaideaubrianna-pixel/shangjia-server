@@ -187,6 +187,11 @@ ALTER TABLE "hg_youban_publish_bot_message_source" ADD CONSTRAINT "uk_ybp_bot_me
 CREATE INDEX IF NOT EXISTS "idx_ybp_tg_message_target_message" ON "hg_youban_publish_tg_message" ("target_chat_id", "tg_message_id", "id" DESC);
 ALTER TABLE "hg_youban_publish_channel" ADD COLUMN IF NOT EXISTS "preserve_history_messages" smallint NOT NULL DEFAULT 0;
 
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_created" ON "hg_youban_publish_note_index" ("tenant_id", "created_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_created" ON "hg_youban_publish_note_index" ("account_id", "created_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_tenant_published" ON "hg_youban_publish_note_index" ("tenant_id", (COALESCE("published_at", '1970-01-01'::timestamp)) DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_ybp_note_index_account_published" ON "hg_youban_publish_note_index" ("account_id", (COALESCE("published_at", '1970-01-01'::timestamp)) DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+
 
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_image_quota" (
   "id" BIGSERIAL PRIMARY KEY, "tenant_id" bigint NOT NULL DEFAULT 0,

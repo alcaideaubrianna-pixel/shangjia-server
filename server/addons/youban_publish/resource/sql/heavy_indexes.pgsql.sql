@@ -6,6 +6,10 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_media_processing_queue" ON "hg_
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_tenant_updated" ON "hg_youban_publish_note_index" ("tenant_id", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_account_updated" ON "hg_youban_publish_note_index" ("account_id", "updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_updated_cursor" ON "hg_youban_publish_note_index" ("updated_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_tenant_created" ON "hg_youban_publish_note_index" ("tenant_id", "created_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_account_created" ON "hg_youban_publish_note_index" ("account_id", "created_at" DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_tenant_published" ON "hg_youban_publish_note_index" ("tenant_id", (COALESCE("published_at", '1970-01-01'::timestamp)) DESC, "id" DESC) WHERE "deleted_at" IS NULL;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_account_published" ON "hg_youban_publish_note_index" ("account_id", (COALESCE("published_at", '1970-01-01'::timestamp)) DESC, "id" DESC) WHERE "deleted_at" IS NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_profile" ON "hg_youban_publish_note_index" ("profile_id") WHERE "deleted_at" IS NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_title_trgm" ON "hg_youban_publish_note_index" USING gin ("title" gin_trgm_ops) WHERE "deleted_at" IS NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_ybp_note_index_profile_no_trgm" ON "hg_youban_publish_note_index" USING gin ("profile_no" gin_trgm_ops) WHERE "deleted_at" IS NULL;

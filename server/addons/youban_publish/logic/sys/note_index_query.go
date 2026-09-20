@@ -9,15 +9,22 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/model/input/form"
 )
 
 type adminNoteCursor struct {
-	IndexId   int64  `json:"indexId"`
-	UpdatedAt string `json:"updatedAt"`
+	IndexId int64  `json:"indexId"`
+	SortBy  string `json:"sortBy"`
+	SortAt  string `json:"sortAt"`
 }
+
+const (
+	adminNoteSortCreatedAt   = "createdAt"
+	adminNoteSortPublishedAt = "publishedAt"
+)
 
 func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteListInp, tenantId int64, tenantIds []int64, accountIds []int64) ([]*sysin.ProfileModel, bool, string, error) {
 	if in == nil {
@@ -27,7 +34,12 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 	mod = applyNoteIndexScope(mod, tenantId, tenantIds, accountIds, &in.ProfileListInp)
 	mod = applyNoteIndexFilters(mod, &in.ProfileListInp)
 	var err error
-	if mod, err = applyNoteIndexCursor(mod, in.Cursor); err != nil {
+	sortBy, err := normalizeAdminNoteSortBy(in.SortBy)
+	if err != nil {
+		return nil, false, "", err
+	}
+	in.SortBy = sortBy
+	if mod, err = applyNoteIndexCursor(mod, in.Cursor, sortBy); err != nil {
 		return nil, false, "", err
 	}
 	_, perPage, _ := form.CalPage(1, in.PerPage)
@@ -35,7 +47,7 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 	in.PerPage = perPage
 	var list []*sysin.ProfileModel
 	if err := mod.Clone().Fields(adminNoteIndexFields()).
-		OrderDesc("i.updated_at").OrderDesc("i.id").
+		OrderDesc(adminNoteSortExpression(sortBy)).OrderDesc("i.id").
 		Limit(perPage + 1).Scan(&list); err != nil {
 		return nil, false, "", gerror.Wrap(err, "获取资料索引列表失败")
 	}
@@ -48,7 +60,7 @@ func (s *sSysPublish) adminNoteIndexList(ctx context.Context, in *sysin.NoteList
 	}
 	nextCursor := ""
 	if hasMore && len(list) > 0 {
-		nextCursor = encodeAdminNoteCursor(list[len(list)-1])
+		nextCursor = encodeAdminNoteCursor(list[len(list)-1], sortBy)
 	}
 	return list, hasMore, nextCursor, nil
 }
@@ -147,7 +159,25 @@ func applyNoteIndexTagFilter(mod *gdb.Model, tags []string) *gdb.Model {
 	return mod.Where("("+strings.Join(conditions, " OR ")+")", args...)
 }
 
-func applyNoteIndexCursor(mod *gdb.Model, raw string) (*gdb.Model, error) {
+func normalizeAdminNoteSortBy(value string) (string, error) {
+	switch strings.TrimSpace(value) {
+	case "", adminNoteSortCreatedAt:
+		return adminNoteSortCreatedAt, nil
+	case adminNoteSortPublishedAt:
+		return adminNoteSortPublishedAt, nil
+	default:
+		return "", gerror.New("笔记列表排序字段不合法")
+	}
+}
+
+func adminNoteSortExpression(sortBy string) string {
+	if sortBy == adminNoteSortPublishedAt {
+		return "COALESCE(i.published_at, '1970-01-01'::timestamp)"
+	}
+	return "i.created_at"
+}
+
+func applyNoteIndexCursor(mod *gdb.Model, raw string, sortBy string) (*gdb.Model, error) {
 	cursor, err := decodeAdminNoteCursor(raw)
 	if err != nil {
 		return mod, err
@@ -155,21 +185,35 @@ func applyNoteIndexCursor(mod *gdb.Model, raw string) (*gdb.Model, error) {
 	if cursor == nil {
 		return mod, nil
 	}
-	updatedAt, err := time.Parse(time.RFC3339Nano, cursor.UpdatedAt)
+	if cursor.SortBy != sortBy {
+		return mod, gerror.New("笔记列表排序方式已变化，请重新加载")
+	}
+	sortAt, err := time.Parse(time.RFC3339Nano, cursor.SortAt)
 	if err != nil {
 		return mod, gerror.New("笔记列表游标不合法")
 	}
-	return mod.Where("(i.updated_at < ? OR (i.updated_at = ? AND i.id < ?))", updatedAt, updatedAt, cursor.IndexId), nil
+	expression := adminNoteSortExpression(sortBy)
+	return mod.Where("("+expression+" < ? OR ("+expression+" = ? AND i.id < ?))", sortAt, sortAt, cursor.IndexId), nil
 }
 
-func encodeAdminNoteCursor(item *sysin.ProfileModel) string {
-	if item == nil || item.Id <= 0 || item.UpdatedAt == nil {
+func encodeAdminNoteCursor(item *sysin.ProfileModel, sortBy string) string {
+	if item == nil || item.Id <= 0 {
 		return ""
 	}
 	if item.NoteIndexId <= 0 {
 		return ""
 	}
-	payload, err := json.Marshal(adminNoteCursor{IndexId: item.NoteIndexId, UpdatedAt: item.UpdatedAt.Time.Format(time.RFC3339Nano)})
+	sortAt := item.CreatedAt
+	if sortBy == adminNoteSortPublishedAt {
+		sortAt = item.PublishedAt
+		if sortAt == nil {
+			sortAt = gtime.NewFromTime(time.Unix(0, 0))
+		}
+	}
+	if sortAt == nil {
+		return ""
+	}
+	payload, err := json.Marshal(adminNoteCursor{IndexId: item.NoteIndexId, SortBy: sortBy, SortAt: sortAt.Time.Format(time.RFC3339Nano)})
 	if err != nil {
 		return ""
 	}
@@ -186,7 +230,7 @@ func decodeAdminNoteCursor(raw string) (*adminNoteCursor, error) {
 		return nil, gerror.New("笔记列表游标不合法")
 	}
 	var cursor adminNoteCursor
-	if err = json.Unmarshal(payload, &cursor); err != nil || cursor.IndexId <= 0 || cursor.UpdatedAt == "" {
+	if err = json.Unmarshal(payload, &cursor); err != nil || cursor.IndexId <= 0 || cursor.SortBy == "" || cursor.SortAt == "" {
 		return nil, gerror.New("笔记列表游标不合法")
 	}
 	return &cursor, nil
