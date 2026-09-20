@@ -825,8 +825,24 @@ func normalizeManagedMediaPresentationURL(raw string) string {
 
 func isManagedMediaHostname(host string) bool {
 	host = strings.ToLower(strings.TrimSpace(host))
-	if host == "img.yuebanby.com" || host == "img.xiaohuiji.cc" || host == "sto.xiao-feiji.cc" || host == "cos.xiao-feiji.cc" {
+	if host == "" {
+		return false
+	}
+	// Keep previously persisted first-party URLs readable; active domains are
+	// resolved from configuration below and are never embedded here.
+	if host == "img.yuebanby.com" || host == "img.xiaohuiji.cc" {
 		return true
+	}
+	configured := []string{
+		g.Cfg().MustGet(context.Background(), "youbanPublish.mediaFileCache.workerCdnBaseUrl", "").String(),
+		g.Cfg().MustGet(context.Background(), "youbanPublish.mediaFileCache.fallbackCdnBaseUrl", "").String(),
+		strings.TrimSpace(g.Cfg().MustGet(context.Background(), "content.cdnBaseUrl", "").String()),
+	}
+	for _, raw := range configured {
+		parsed, err := url.Parse(strings.TrimSpace(raw))
+		if err == nil && parsed.Hostname() != "" && strings.EqualFold(host, parsed.Hostname()) {
+			return true
+		}
 	}
 	config := storager.GetConfig()
 	if config == nil {
