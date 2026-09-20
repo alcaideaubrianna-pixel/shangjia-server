@@ -408,6 +408,13 @@ type profileCollectionMetadataRow struct {
 	TgAccountId     int64  `orm:"tg_account_id"`
 }
 
+type profileCollectionJobSourceRow struct {
+	ProfileId       int64  `orm:"profile_id"`
+	SourceId        int64  `orm:"collect_source_id"`
+	SourceChatId    string `orm:"collect_source_chat_id"`
+	SourceMessageId int64  `orm:"collect_source_message_id"`
+}
+
 func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list []*sysin.ProfileModel) error {
 	profileIds := make([]int64, 0, len(list))
 	for _, item := range list {
@@ -421,7 +428,7 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 	}
 	var rows []profileCollectionMetadataRow
 	err := g.DB().Model(publishCollectDispatchTable+" d").Safe().Ctx(ctx).
-		InnerJoin(publishCollectSourceTable+" s", "s.id=d.source_id AND s.deleted_at IS NULL").
+		InnerJoin(publishCollectSourceTable+" s", "s.id=d.source_id").
 		LeftJoin(publishCollectEventTable+" e", "e.id=d.event_id").
 		LeftJoin(publishBotChannelCacheTable+" bc", "bc.tenant_id=s.tenant_id AND bc.bot_id=COALESCE(NULLIF(s.bot_id,0),e.bot_id) AND bc.chat_id=COALESCE(NULLIF(e.source_chat_id,''),s.source_chat_id)").
 		WhereIn("d.profile_id", profileIds).
@@ -438,6 +445,9 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 		if !ok || preferProfileCollectionMetadata(row, current) {
 			metadata[row.ProfileId] = row
 		}
+	}
+	if err = s.applyProfileCollectionJobSourceFallback(ctx, profileIds, metadata); err != nil {
+		return err
 	}
 	botChats := make(map[int64][]string)
 	tgChats := make(map[int64][]string)
@@ -501,6 +511,46 @@ func (s *sSysPublish) applyProfileCollectionMetadata(ctx context.Context, list [
 		}
 	}
 	return nil
+}
+
+// Collection events are operational records and may be cleaned before their
+// profiles. The first publish jobs retain the original Telegram coordinates,
+// so use them to preserve source links for those historical profiles.
+func (s *sSysPublish) applyProfileCollectionJobSourceFallback(ctx context.Context, profileIds []int64, metadata map[int64]profileCollectionMetadataRow) error {
+	missingIds := make([]int64, 0, len(profileIds))
+	for _, profileId := range profileIds {
+		if row, ok := metadata[profileId]; ok && row.SourceMessageId <= 0 {
+			missingIds = append(missingIds, profileId)
+		}
+	}
+	if len(missingIds) == 0 {
+		return nil
+	}
+
+	var rows []profileCollectionJobSourceRow
+	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		Fields("profile_id,collect_source_id,collect_source_chat_id,collect_source_message_id").
+		WhereIn("profile_id", missingIds).
+		WhereGT("collect_source_id", 0).
+		WhereGT("collect_source_message_id", 0).
+		WhereNot("collect_source_chat_id", "").
+		OrderAsc("profile_id").OrderAsc("id").Scan(&rows); err != nil {
+		return gerror.Wrap(err, "读取资料采集任务来源失败")
+	}
+	for _, fallback := range rows {
+		applyProfileCollectionJobSource(metadata, fallback)
+	}
+	return nil
+}
+
+func applyProfileCollectionJobSource(metadata map[int64]profileCollectionMetadataRow, fallback profileCollectionJobSourceRow) {
+	row, ok := metadata[fallback.ProfileId]
+	if !ok || row.SourceMessageId > 0 || (row.SourceId > 0 && row.SourceId != fallback.SourceId) {
+		return
+	}
+	row.SourceChatId = strings.TrimSpace(fallback.SourceChatId)
+	row.SourceMessageId = fallback.SourceMessageId
+	metadata[fallback.ProfileId] = row
 }
 
 func preferProfileCollectionMetadata(candidate, current profileCollectionMetadataRow) bool {
