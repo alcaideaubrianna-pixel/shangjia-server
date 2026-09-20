@@ -825,7 +825,7 @@ func normalizeManagedMediaPresentationURL(raw string) string {
 
 func isManagedMediaHostname(host string) bool {
 	host = strings.ToLower(strings.TrimSpace(host))
-	if host == "img.yuebanby.com" || host == "img.xiaohuiji.cc" {
+	if host == "img.yuebanby.com" || host == "img.xiaohuiji.cc" || host == "sto.xiao-feiji.cc" || host == "cos.xiao-feiji.cc" {
 		return true
 	}
 	config := storager.GetConfig()

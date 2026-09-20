@@ -382,8 +382,8 @@ youbanPublish:
       enabled: false
   mediaFileCache:
     cosDownloadMode: "cdn"     # cdn: 服务端经公共CDN下载；origin: 通过COS SDK从Bucket源站下载，失败降级CDN
-    workerCdnBaseUrl: "https://img.yuebanby.com" # Worker 大流量下载 CDN；为空时使用上传配置的公共地址
-    fallbackCdnBaseUrl: "https://img.xiaohuiji.cc" # Worker 主 CDN 失败后的备用地址
+    workerCdnBaseUrl: "https://sto.xiao-feiji.cc" # Worker 大流量下载免费域名；为空时使用上传配置的公共地址
+    fallbackCdnBaseUrl: "https://cos.xiao-feiji.cc" # Worker 免费域名失败后的付费备用地址
   telegramDeleteFallback:
     intervalSeconds: 60        # 协议号旧消息删除任务的首次等待时间
     jitterSeconds: 30          # 在最小间隔上增加的确定性抖动上限
