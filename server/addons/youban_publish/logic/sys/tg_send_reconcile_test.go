@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 )
 
 func TestTelegramJobPhaseMarkerStableAndDistinct(t *testing.T) {
@@ -130,6 +132,9 @@ func TestTelegramReconcileUsesBackgroundAccountPriority(t *testing.T) {
 	if telegramReconcileAccountTaskPriority >= 100 {
 		t.Fatalf("reconciliation must not use urgent account priority: %d", telegramReconcileAccountTaskPriority)
 	}
+	if telegramReconcileAccountTaskPriority != collectorin.EventPriorityRealtime {
+		t.Fatalf("reconciliation priority = %d, want realtime", telegramReconcileAccountTaskPriority)
+	}
 	if telegramReconcileAccountTaskAttempts != 2 {
 		t.Fatalf("reconciliation attempts = %d, want 2", telegramReconcileAccountTaskAttempts)
 	}
@@ -145,7 +150,7 @@ func TestTelegramUnknownReconcileDelaysAreBounded(t *testing.T) {
 }
 
 func TestTelegramUnknownReconcileBackoff(t *testing.T) {
-	want := []time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute}
+	want := []time.Duration{10 * time.Second, 20 * time.Second, 30 * time.Second, time.Minute}
 	for index, delay := range want {
 		if got := telegramUnknownReconcileBackoff(index + 1); got != delay {
 			t.Fatalf("backoff(%d) = %s, want %s", index+1, got, delay)

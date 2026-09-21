@@ -17,6 +17,11 @@ func isTelegramUrgentJob(job telegramJobRecord) bool {
 }
 
 func telegramJobPriorityValue(job telegramJobRecord) int {
+	// Resolve ambiguous sends before later channel work so they do not retain
+	// the channel's single delivery slot while normal jobs overtake them.
+	if job.Status == "unknown" {
+		return tgJobPriorityUrgent
+	}
 	operationNo := strings.ToLower(strings.TrimSpace(job.OperationNo))
 	if isManualProfilePublishOperation(operationNo) ||
 		strings.HasPrefix(operationNo, "ai-republish:") ||
@@ -42,8 +47,8 @@ func telegramJobEffectivePrioritySQL(alias string) string {
 		prefix = strings.TrimSpace(alias) + "."
 	}
 	return fmt.Sprintf(
-		"CASE WHEN %soperation_no LIKE 'full_push:%%' THEN %d WHEN %soperation_no LIKE 'cycle_batch:%%' THEN %d ELSE %spriority END",
-		prefix, tgJobPriorityFullPush, prefix, tgJobPriorityBulk, prefix,
+		"CASE WHEN %sstatus = 'unknown' THEN %d WHEN %soperation_no LIKE 'full_push:%%' THEN %d WHEN %soperation_no LIKE 'cycle_batch:%%' THEN %d ELSE %spriority END",
+		prefix, tgJobPriorityUrgent, prefix, tgJobPriorityFullPush, prefix, tgJobPriorityBulk, prefix,
 	)
 }
 

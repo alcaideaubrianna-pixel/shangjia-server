@@ -74,6 +74,9 @@ func TestTelegramChannelAllowsOnlyOneActiveJob(t *testing.T) {
 		t.Fatalf("cycle queue=%s, want %s", queue, tgQueueNameBulk)
 	}
 	expression := telegramJobEffectivePrioritySQL("j")
+	if !strings.Contains(expression, "j.status = 'unknown'") {
+		t.Fatalf("effective priority SQL does not prioritize unknown reconciliation jobs: %s", expression)
+	}
 	if !strings.Contains(expression, "j.operation_no LIKE 'full_push:%'") || !strings.Contains(expression, "THEN 70") {
 		t.Fatalf("effective priority SQL does not prioritize existing full push jobs: %s", expression)
 	}

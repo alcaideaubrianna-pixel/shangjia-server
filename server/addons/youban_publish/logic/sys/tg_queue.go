@@ -55,6 +55,7 @@ const (
 	tgTaskTypePublishRecovery     = "youban_publish:profile:publish_recovery"
 	tgTaskTypeDuplicateScan       = "youban_publish:profile:duplicate_scan"
 	tgTaskTypeMatting             = "youban_publish:anti_scan:matting"
+	tgTaskTypeAttemptTimeout      = "youban_publish:tg:attempt_timeout"
 )
 
 const collectMediaMaxBulkQueueShards = 16
@@ -85,6 +86,10 @@ const (
 
 type tgQueuePayload struct {
 	JobId int64 `json:"jobId"`
+}
+
+type tgAttemptQueuePayload struct {
+	AttemptId int64 `json:"attemptId"`
 }
 
 type autoDeleteQueuePayload struct {
@@ -560,6 +565,34 @@ func decodeCycleRefreshQueuePayload(task *asynq.Task) (cycleRefreshQueuePayload,
 
 func (s *sSysPublish) enqueueTelegramTask(ctx context.Context, taskType string, jobId int64, delay time.Duration, unique bool) error {
 	return s.enqueueTelegramTaskWithQueue(ctx, taskType, jobId, delay, unique, tgQueueNameDefault)
+}
+
+func (s *sSysPublish) enqueueTelegramAttemptTimeout(ctx context.Context, attemptId int64, delay time.Duration) error {
+	if attemptId <= 0 {
+		return nil
+	}
+	client, err := s.telegramQueueClient(ctx)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(tgAttemptQueuePayload{AttemptId: attemptId})
+	if err != nil {
+		return err
+	}
+	options := []asynq.Option{
+		asynq.Queue(tgQueueNameBackground),
+		asynq.MaxRetry(5),
+		asynq.Timeout(time.Minute),
+		asynq.Unique(time.Minute),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err = client.EnqueueContext(ctx, asynq.NewTask(tgTaskTypeAttemptTimeout, payload), options...)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	return err
 }
 
 func (s *sSysPublish) enqueueTelegramTaskWithQueue(ctx context.Context, taskType string, jobId int64, delay time.Duration, unique bool, queueName string) error {

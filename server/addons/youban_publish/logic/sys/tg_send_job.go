@@ -77,6 +77,11 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) error {
 		return err
 	}
 	if targetJob.Status == "unknown" {
+		if waiting, waitErr := s.telegramJobHasWaitingAttempt(ctx, targetJob.Id); waitErr != nil {
+			return waitErr
+		} else if waiting {
+			return nil
+		}
 		return s.reconcileUnknownTelegramJob(ctx, targetJob)
 	}
 	if isDownTelegramOperationNo(targetJob.OperationNo) {
@@ -225,10 +230,18 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	}
 	messages := make([]*telegramSentMessage, 0)
 	if !telegramSendPhaseHasDisplay(job.SendPhase) {
+		expectedCount := len(displayMedia)
+		if expectedCount == 0 {
+			expectedCount = 1
+		}
+		attempt, attemptErr := s.beginTelegramDeliveryAttempt(ctx, job, "display", expectedCount)
+		if attemptErr != nil {
+			return attemptErr
+		}
 		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplaySending); err != nil {
 			return err
 		}
-		displayCaption := telegramCaptionWithJobMarker(caption, job.Id, "display")
+		displayCaption := telegramCaptionWithJobMarker(caption, job.Id, "display") + telegramAttemptMarker(attempt.AttemptToken)
 		g.Log().Infof(ctx, "TG展示资料开始Bot发送 jobId:%d botId:%d chat:%s media:%s", job.Id, job.BotId, job.TargetChatId, telegramMediaDebugSummary(displayMedia))
 		messages, err = s.sendTelegramDisplayPart(ctx, bot, job.TargetChatId, displayCaption, displayMedia)
 		if err != nil && len(messages) == 0 && shouldFallbackTelegramMediaToAccount(err) {
@@ -242,6 +255,17 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			if !isTelegramMediaSizeLimitError(err) {
 				logTelegramBotMediaSendFailure(ctx, job, "展示", displayMedia, err)
 			}
+			if isTelegramAmbiguousDeliveryError(err) {
+				if len(messages) > 0 {
+					_ = s.saveTelegramSentMessages(ctx, job, messages)
+				}
+				_ = s.recordTelegramAttemptMessages(ctx, attempt, messages, "response")
+				if waitErr := s.waitTelegramDeliveryWebhook(ctx, attempt, err); waitErr != nil {
+					return waitErr
+				}
+				return errTelegramAwaitingWebhook
+			}
+			s.abandonTelegramDeliveryAttempt(ctx, attempt, messages, err)
 			_ = s.cleanupTelegramSentMessages(ctx, bot, job.TargetChatId, messages, "展示资料分片推送失败")
 			return gerror.Wrapf(err, "TG展示资料推送失败，job:%d，channel:%d，chat:%s", job.Id, job.ChannelId, job.TargetChatId)
 		}
@@ -250,12 +274,23 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			return err
 		}
 		if err = s.saveTelegramSentMessages(ctx, job, messages); err != nil {
-			return telegramDeliveryUncertainError(err)
+			_ = s.recordTelegramAttemptMessages(ctx, attempt, messages, "response")
+			if waitErr := s.waitTelegramDeliveryWebhook(ctx, attempt, telegramDeliveryUncertainError(err)); waitErr != nil {
+				return waitErr
+			}
+			return errTelegramAwaitingWebhook
 		}
 		if err = s.updateTelegramMediaFileIds(ctx, messages); err != nil {
 			g.Log().Warningf(ctx, "更新TG展示媒体file_id失败 job:%d err:%+v", job.Id, err)
 		}
 		if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseDisplayConfirmed); err != nil {
+			_ = s.recordTelegramAttemptMessages(ctx, attempt, messages, "response")
+			if waitErr := s.waitTelegramDeliveryWebhook(ctx, attempt, telegramDeliveryUncertainError(err)); waitErr != nil {
+				return waitErr
+			}
+			return errTelegramAwaitingWebhook
+		}
+		if err = s.confirmTelegramDeliveryAttempt(ctx, attempt, messages, true); err != nil {
 			return telegramDeliveryUncertainError(err)
 		}
 		job.SendPhase = telegramSendPhaseDisplayConfirmed
@@ -267,6 +302,10 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		return errTelegramJobSuperseded
 	}
 	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifySending); err != nil {
+		return err
+	}
+	verifyAttempt, err := s.beginTelegramDeliveryAttempt(ctx, job, "verify", len(verifyMedia))
+	if err != nil {
 		return err
 	}
 	// 验证资料必须是纯媒体消息：不能携带业务文案或任何不可见标记，
@@ -285,6 +324,17 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		if !isTelegramMediaSizeLimitError(err) {
 			logTelegramBotMediaSendFailure(ctx, job, "验证", verifyMedia, err)
 		}
+		if isTelegramAmbiguousDeliveryError(err) {
+			if len(verifyMessages) > 0 {
+				_ = s.saveTelegramSentMessages(ctx, job, verifyMessages)
+			}
+			_ = s.recordTelegramAttemptMessages(ctx, verifyAttempt, verifyMessages, "response")
+			if waitErr := s.waitTelegramDeliveryWebhook(ctx, verifyAttempt, err); waitErr != nil {
+				return waitErr
+			}
+			return errTelegramAwaitingWebhook
+		}
+		s.abandonTelegramDeliveryAttempt(ctx, verifyAttempt, verifyMessages, err)
 		if !isTelegramAmbiguousDeliveryError(err) {
 			if len(verifyMessages) > 0 {
 				if saveErr := s.saveTelegramSentMessages(ctx, job, verifyMessages); saveErr != nil {
@@ -305,9 +355,20 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 		return err
 	}
 	if err = s.saveTelegramSentMessages(ctx, job, verifyMessages); err != nil {
-		return telegramDeliveryUncertainError(err)
+		_ = s.recordTelegramAttemptMessages(ctx, verifyAttempt, verifyMessages, "response")
+		if waitErr := s.waitTelegramDeliveryWebhook(ctx, verifyAttempt, telegramDeliveryUncertainError(err)); waitErr != nil {
+			return waitErr
+		}
+		return errTelegramAwaitingWebhook
 	}
 	if err = s.updateTelegramJobSendPhase(ctx, job.Id, telegramSendPhaseVerifyConfirmed); err != nil {
+		_ = s.recordTelegramAttemptMessages(ctx, verifyAttempt, verifyMessages, "response")
+		if waitErr := s.waitTelegramDeliveryWebhook(ctx, verifyAttempt, telegramDeliveryUncertainError(err)); waitErr != nil {
+			return waitErr
+		}
+		return errTelegramAwaitingWebhook
+	}
+	if err = s.confirmTelegramDeliveryAttempt(ctx, verifyAttempt, verifyMessages, true); err != nil {
 		return telegramDeliveryUncertainError(err)
 	}
 	return s.updateTelegramMediaFileIds(ctx, verifyMessages)
@@ -439,6 +500,9 @@ func (s *sSysPublish) sendTelegramJobMediaByAccount(ctx context.Context, job tel
 
 func (s *sSysPublish) handleTelegramJobError(ctx context.Context, job telegramJobRecord, err error) error {
 	if errors.Is(err, errTelegramJobSuperseded) {
+		return nil
+	}
+	if errors.Is(err, errTelegramAwaitingWebhook) {
 		return nil
 	}
 	if !telegramSendPhaseIsCleanup(job.SendPhase) && !isTelegramAccountBusyError(err) && isTelegramAmbiguousDeliveryError(err) {

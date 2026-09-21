@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -118,6 +119,7 @@ func (s *sSysPublish) startTelegramBackgroundWorker(ctx context.Context) {
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDown, s.handleCollectSourceDownTask)
 	backgroundMux.HandleFunc(tgTaskTypeCollectSourceDelete, s.handleCollectSourceDeleteTask)
 	backgroundMux.HandleFunc(tgTaskTypeBotMediaRepair, s.handleBotMediaRepairTask)
+	backgroundMux.HandleFunc(tgTaskTypeAttemptTimeout, s.handleTelegramAttemptTimeoutTask)
 	cycleMux := asynq.NewServeMux()
 	cycleMux.HandleFunc(tgTaskTypeCycleRun, s.handleCycleRunTask)
 	cycleMux.HandleFunc(tgTaskTypeCycleReschedule, s.handleCycleRescheduleTask)
@@ -337,6 +339,14 @@ func (s *sSysPublish) handleTelegramPublishTask(ctx context.Context, task *asynq
 		return &tgRetryAfterError{after: delay, err: errTelegramPublishWindowBlocked}
 	}
 	return s.SendTelegramJob(ctx, payload.JobId)
+}
+
+func (s *sSysPublish) handleTelegramAttemptTimeoutTask(ctx context.Context, task *asynq.Task) error {
+	var payload tgAttemptQueuePayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return err
+	}
+	return s.handleTelegramAttemptTimeout(ctx, payload.AttemptId)
 }
 
 func (s *sSysPublish) handleTelegramCleanupTask(ctx context.Context, task *asynq.Task) error {

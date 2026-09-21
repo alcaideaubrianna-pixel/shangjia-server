@@ -389,14 +389,7 @@ func (s *sSysPublish) handleMessageReconcileAccountTask(ctx context.Context, cli
 	if job.Status != "unknown" {
 		return nil
 	}
-	channel, err := s.telegramReconcileChannel(ctx, job)
-	if err != nil {
-		return err
-	}
-	if task.AccountID != channel.TgAccountId {
-		return gerror.New("消息对账账号任务与目标频道账号不一致")
-	}
-	return s.reconcileUnknownTelegramJobWithClient(ctx, client, job)
+	return s.reconcileUnknownTelegramJob(ctx, job)
 }
 
 func (s *sSysPublish) handleMessagePushInlineAccountTask(ctx context.Context, client *telegram.Client, task *collectorin.AccountTask) (err error) {

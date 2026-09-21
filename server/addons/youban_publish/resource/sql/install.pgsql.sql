@@ -2073,6 +2073,34 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_chat_time" ON "hg_youban_
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_reply" ON "hg_youban_publish_bot_message_source" ("reply_job_id", "reply_profile_id", "reply_to_message_id");
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_profile_time" ON "hg_youban_publish_bot_message_source" ("tenant_id", "reply_profile_id", "received_at" DESC, "id" DESC);
 CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_sender" ON "hg_youban_publish_bot_message_source" ("sender_user_id", "sender_chat_id");
+
+ALTER TABLE "hg_youban_publish_bot_message_source" ADD COLUMN IF NOT EXISTS "update_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_bot_message_source" ADD COLUMN IF NOT EXISTS "tg_file_id" varchar(255) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_bot_message_source" ADD COLUMN IF NOT EXISTS "tg_file_unique_id" varchar(255) NOT NULL DEFAULT '';
+ALTER TABLE "hg_youban_publish_bot_message_source" ADD COLUMN IF NOT EXISTS "matched_attempt_id" bigint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_bot_message_source" ADD COLUMN IF NOT EXISTS "process_status" varchar(16) NOT NULL DEFAULT 'pending';
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_bot_message_source_bot_update" ON "hg_youban_publish_bot_message_source" ("received_bot_id", "update_id") WHERE "update_id" > 0;
+CREATE INDEX IF NOT EXISTS "idx_ybp_bot_message_source_pending" ON "hg_youban_publish_bot_message_source" ("process_status", "received_at", "id") WHERE "process_status" = 'pending';
+
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_attempt" (
+  "id" BIGSERIAL PRIMARY KEY, "job_id" bigint NOT NULL DEFAULT 0, "tenant_id" bigint NOT NULL DEFAULT 0,
+  "bot_id" bigint NOT NULL DEFAULT 0, "channel_id" bigint NOT NULL DEFAULT 0, "target_chat_id" varchar(128) NOT NULL DEFAULT '',
+  "phase" varchar(16) NOT NULL DEFAULT '', "chunk_index" integer NOT NULL DEFAULT 0, "attempt_no" integer NOT NULL DEFAULT 1,
+  "attempt_token" varchar(128) NOT NULL DEFAULT '', "expected_count" integer NOT NULL DEFAULT 0, "confirmed_count" integer NOT NULL DEFAULT 0,
+  "status" varchar(32) NOT NULL DEFAULT 'sending', "response_received" smallint NOT NULL DEFAULT 0,
+  "webhook_deadline" timestamp DEFAULT NULL, "error_message" text, "created_at" timestamp DEFAULT NULL, "updated_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_attempt_token" ON "hg_youban_publish_tg_attempt" ("attempt_token");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_attempt_scope" ON "hg_youban_publish_tg_attempt" ("job_id", "phase", "chunk_index", "attempt_no");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_attempt_waiting" ON "hg_youban_publish_tg_attempt" ("status", "webhook_deadline", "id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_attempt_channel" ON "hg_youban_publish_tg_attempt" ("target_chat_id", "status", "created_at", "id");
+CREATE TABLE IF NOT EXISTS "hg_youban_publish_tg_attempt_message" (
+  "id" BIGSERIAL PRIMARY KEY, "attempt_id" bigint NOT NULL DEFAULT 0, "job_id" bigint NOT NULL DEFAULT 0,
+  "target_chat_id" varchar(128) NOT NULL DEFAULT '', "message_id" bigint NOT NULL DEFAULT 0,
+  "source" varchar(16) NOT NULL DEFAULT '', "created_at" timestamp DEFAULT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_ybp_tg_attempt_message" ON "hg_youban_publish_tg_attempt_message" ("attempt_id", "message_id");
+CREATE INDEX IF NOT EXISTS "idx_ybp_tg_attempt_message_job" ON "hg_youban_publish_tg_attempt_message" ("job_id", "attempt_id");
 ALTER TABLE "hg_youban_publish_message_push_plan" ADD COLUMN IF NOT EXISTS "push_mode" varchar(16) NOT NULL DEFAULT 'bot';
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "push_mode" varchar(16) NOT NULL DEFAULT 'bot';
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_profile_fingerprint" (

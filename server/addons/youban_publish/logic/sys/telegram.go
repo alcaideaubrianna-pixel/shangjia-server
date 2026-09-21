@@ -28,23 +28,26 @@ func (s *sSysPublish) handleTelegramUpdate(ctx context.Context, botId int64, ten
 	}
 	text := telegramMessageText(msg)
 	g.Log().Debugf(ctx, "收到上架插件Telegram消息 bot:%d type:%s chat:%d message:%d text:%s", botId, updateType, msg.Chat.ID, msg.ID, text)
-	s.recordTelegramBotMessageSource(ctx, botId, tenantId, updateType, msg, text)
+	s.recordTelegramBotMessageSource(ctx, botId, tenantId, update.ID, updateType, msg, text)
+	s.matchTelegramDeliveryAttempt(ctx, botId, msg, text)
 	s.handleTelegramAutoDelete(ctx, botId, tenantId, msg, text)
 	if err := s.cacheBotMessage(ctx, tenantId, botId, msg); err != nil {
 		g.Log().Warningf(ctx, "缓存上架Bot频道消息失败 bot:%d chat:%d err:%+v", botId, msg.Chat.ID, err)
 	}
 }
 
-func (s *sSysPublish) recordTelegramBotMessageSource(ctx context.Context, botId, tenantId int64, updateType string, msg *models.Message, text string) {
+func (s *sSysPublish) recordTelegramBotMessageSource(ctx context.Context, botId, tenantId int64, updateId int64, updateType string, msg *models.Message, text string) {
 	if msg == nil || msg.ID <= 0 || msg.Chat.ID == 0 {
 		return
 	}
 	chatId := normalizeTelegramChannelChatID(fmt.Sprintf("%d", msg.Chat.ID))
 	data := g.Map{
 		"tenant_id": tenantId, "received_bot_id": botId, "chat_id": chatId,
+		"update_id":  updateId,
 		"message_id": msg.ID, "media_group_id": msg.MediaGroupID,
+		"tg_file_id": telegramMessageFileId(msg), "tg_file_unique_id": telegramMessageFileUniqueId(msg),
 		"update_type": updateType, "message_text": strings.TrimSpace(text),
-		"received_at": gtime.Now(),
+		"process_status": "pending", "received_at": gtime.Now(),
 	}
 	if msg.From != nil {
 		data["sender_user_id"] = msg.From.ID
@@ -74,7 +77,7 @@ func (s *sSysPublish) recordTelegramBotMessageSource(ctx context.Context, botId,
 	_, err := g.DB().Model(telegramBotMessageSourceTable).Safe().Ctx(ctx).
 		Data(data).
 		OnConflict("chat_id,message_id").
-		OnDuplicate("tenant_id,media_group_id,sender_user_id,sender_username,sender_chat_id,sender_chat_title,reply_to_message_id,reply_job_id,reply_profile_id,reply_purpose,update_type,message_text,received_at").
+		OnDuplicate("tenant_id,update_id,media_group_id,tg_file_id,tg_file_unique_id,sender_user_id,sender_username,sender_chat_id,sender_chat_title,reply_to_message_id,reply_job_id,reply_profile_id,reply_purpose,update_type,message_text,received_at").
 		Save()
 	if err != nil {
 		g.Log().Warningf(ctx, "记录Telegram Bot消息来源失败 bot:%d chat:%s message:%d err:%+v", botId, chatId, msg.ID, err)

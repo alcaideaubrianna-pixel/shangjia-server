@@ -16,7 +16,6 @@ import (
 	"github.com/gotd/td/tg"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
-	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
@@ -34,7 +33,7 @@ const (
 	telegramUnknownReconcileRetryDelay    = 30 * time.Second
 	telegramUnknownReconcileScheduleDelay = 30 * time.Second
 	telegramUnknownReconcileMaxCount      = 5
-	telegramReconcileAccountTaskPriority  = collectorin.EventPriorityNormal
+	telegramReconcileAccountTaskPriority  = collectorin.EventPriorityRealtime
 	telegramReconcileAccountTaskAttempts  = 2
 )
 
@@ -163,37 +162,26 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 	if err != nil {
 		return s.releaseUnknownTelegramJobClaim(ctx, job.Id, err)
 	}
-	if telegramUnknownReconcileSubmissionShouldStop(job) {
-		observeTelegramReconcile(ctx, "submission_exhausted")
-		return s.postponeUnknownTelegramJob(ctx, job, gerror.New("频道消息对账任务连续未完成或已丢失"))
+	phase := telegramSendPhaseCleanupConfirmed
+	if job.SendPhase == telegramSendPhaseVerifySending {
+		phase = telegramSendPhaseDisplayConfirmed
 	}
-	channel, err := s.telegramReconcileChannel(ctx, job)
-	if err != nil {
-		return s.postponeUnknownTelegramJob(ctx, job, err)
-	}
-	accountTaskID, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
-		TenantID: job.TenantId, AccountID: channel.TgAccountId,
-		TaskType: collectorin.AccountTaskTypeMessageReconcile,
-		TaskKey:  fmt.Sprintf("message-reconcile:%d", job.Id),
-		// Reconciliation is a safety net and must not preempt collection or
-		// media work on the account runtime.
-		Priority: telegramReconcileAccountTaskPriority, MaxAttempts: telegramReconcileAccountTaskAttempts,
-	})
-	if err != nil {
-		return s.postponeUnknownTelegramJob(ctx, job, gerror.Wrap(err, "提交频道消息对账任务失败"))
-	}
-	collectorservice.AccountRuntime().Refresh()
-	count := job.ReconcileCount + 1
-	message := fmt.Sprintf("TG发送结果待确认，已提交账号服务频道消息对账 accountTaskId:%d attempt:%d/%d", accountTaskID, count, telegramUnknownReconcileMaxCount)
-	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(g.Map{
-		"dispatch_status": tgDispatchStatusIdle, "reconcile_count": count,
-		"next_retry_at": gtime.Now().Add(telegramUnknownReconcileScheduleDelay), "error_message": message, "updated_at": gtime.Now(),
+	message := "历史待对账任务已停止主动扫描频道，移到队列尾部重新发送"
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(g.Map{
+		"status": "failed_retry", "send_phase": phase, "dispatch_status": tgDispatchStatusIdle,
+		"retry_count": job.RetryCount + 1, "reconcile_count": 0, "next_retry_at": nil,
+		"error_message": message, "updated_at": gtime.Now(),
 	}).Update()
-	if err == nil {
-		observeTelegramReconcile(ctx, "submitted")
-		s.appendTelegramJobLog(ctx, job, "reconcile", "queued", message)
+	if err != nil {
+		return gerror.Wrap(err, "迁移历史TG待对账任务失败")
 	}
-	return err
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil
+	}
+	observeTelegramReconcile(ctx, "legacy_requeued")
+	s.appendTelegramJobLog(ctx, job, "reconcile", "retired", message)
+	return s.enqueueTelegramJobDirectWithUnique(ctx, job.Id, 0, false)
 }
 
 func telegramUnknownReconcileSubmissionShouldStop(job telegramJobRecord) bool {
@@ -319,7 +307,7 @@ func (s *sSysPublish) recoverIncompleteTelegramJobPhase(ctx context.Context, job
 }
 
 func telegramUnknownReconcileBackoff(count int) time.Duration {
-	delays := [...]time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute}
+	delays := [...]time.Duration{10 * time.Second, 20 * time.Second, 30 * time.Second, time.Minute}
 	if count <= 0 {
 		return telegramUnknownReconcileDelay
 	}
