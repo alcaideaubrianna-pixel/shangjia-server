@@ -163,6 +163,10 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 	if err != nil {
 		return s.releaseUnknownTelegramJobClaim(ctx, job.Id, err)
 	}
+	if telegramUnknownReconcileSubmissionShouldStop(job) {
+		observeTelegramReconcile(ctx, "submission_exhausted")
+		return s.postponeUnknownTelegramJob(ctx, job, gerror.New("频道消息对账任务连续未完成或已丢失"))
+	}
 	channel, err := s.telegramReconcileChannel(ctx, job)
 	if err != nil {
 		return s.postponeUnknownTelegramJob(ctx, job, err)
@@ -179,14 +183,21 @@ func (s *sSysPublish) reconcileUnknownTelegramJob(ctx context.Context, job teleg
 		return s.postponeUnknownTelegramJob(ctx, job, gerror.Wrap(err, "提交频道消息对账任务失败"))
 	}
 	collectorservice.AccountRuntime().Refresh()
-	message := fmt.Sprintf("TG发送结果待确认，已提交账号服务频道消息对账 accountTaskId:%d", accountTaskID)
+	count := job.ReconcileCount + 1
+	message := fmt.Sprintf("TG发送结果待确认，已提交账号服务频道消息对账 accountTaskId:%d attempt:%d/%d", accountTaskID, count, telegramUnknownReconcileMaxCount)
 	_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", job.Id).Where("status", "unknown").Data(g.Map{
-		"dispatch_status": tgDispatchStatusIdle, "next_retry_at": gtime.Now().Add(telegramUnknownReconcileScheduleDelay), "error_message": message, "updated_at": gtime.Now(),
+		"dispatch_status": tgDispatchStatusIdle, "reconcile_count": count,
+		"next_retry_at": gtime.Now().Add(telegramUnknownReconcileScheduleDelay), "error_message": message, "updated_at": gtime.Now(),
 	}).Update()
 	if err == nil {
+		observeTelegramReconcile(ctx, "submitted")
 		s.appendTelegramJobLog(ctx, job, "reconcile", "queued", message)
 	}
 	return err
+}
+
+func telegramUnknownReconcileSubmissionShouldStop(job telegramJobRecord) bool {
+	return job.ReconcileCount >= telegramUnknownReconcileMaxCount
 }
 
 func (s *sSysPublish) reconcileUnknownTelegramJobWithClient(ctx context.Context, client *telegram.Client, job telegramJobRecord) error {

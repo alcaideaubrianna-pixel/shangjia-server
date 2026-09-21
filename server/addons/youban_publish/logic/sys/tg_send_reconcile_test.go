@@ -152,3 +152,12 @@ func TestTelegramUnknownReconcileBackoff(t *testing.T) {
 		}
 	}
 }
+
+func TestTelegramUnknownReconcileSubmissionIsBounded(t *testing.T) {
+	if telegramUnknownReconcileSubmissionShouldStop(telegramJobRecord{ReconcileCount: telegramUnknownReconcileMaxCount - 1}) {
+		t.Fatal("last reconciliation submission must still be allowed")
+	}
+	if !telegramUnknownReconcileSubmissionShouldStop(telegramJobRecord{ReconcileCount: telegramUnknownReconcileMaxCount}) {
+		t.Fatal("reconciliation submissions must stop at the configured limit")
+	}
+}

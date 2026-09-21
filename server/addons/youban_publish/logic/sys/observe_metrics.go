@@ -88,6 +88,11 @@ func observeTelegramPublishRecovery(ctx context.Context, result string) {
 	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
 }
 
+func observeTelegramReconcile(ctx context.Context, result string) {
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.tg.reconcile_events")
+	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
+}
+
 func observeTelegramDeleteFallback(ctx context.Context, result string, tgAccountID int64, value int64) {
 	attrs := metric.WithAttributes(
 		attribute.String("result", result),
