@@ -104,7 +104,7 @@ func (s *sSysPublish) handleAntiScanMattingTask(ctx context.Context, task *asynq
 		return gerror.Wrap(err, "解析人像分割任务失败")
 	}
 	retryCount, _ := asynq.GetRetryCount(ctx)
-	g.Log().Infof(ctx, "防扫图任务开始 taskId:%s mediaId:%d provider:%s retry:%d", payload.TaskId, payload.MediaId, payload.Provider, retryCount)
+	g.Log().Warningf(ctx, "防扫图任务开始 taskId:%s mediaId:%d provider:%s retry:%d", payload.TaskId, payload.MediaId, payload.Provider, retryCount)
 	defer func() {
 		observeAntiScanMattingTask(ctx, payload.Provider, startedAt, err)
 		if err == nil {
@@ -133,13 +133,13 @@ func (s *sSysPublish) handleAntiScanMattingTask(ctx context.Context, task *asynq
 	account := &sysin.AccountModel{Id: payload.AccountId, TenantId: payload.TenantId}
 	stageStartedAt := time.Now()
 	media, err := s.antiScanSegmentMedia(ctx, payload.MediaId, account)
-	g.Log().Infof(ctx, "防扫图任务阶段完成 stage:media_lookup taskId:%s durationMs:%d", payload.TaskId, time.Since(stageStartedAt).Milliseconds())
+	g.Log().Warningf(ctx, "防扫图任务阶段完成 stage:media_lookup taskId:%s durationMs:%d", payload.TaskId, time.Since(stageStartedAt).Milliseconds())
 	if err != nil {
 		return err
 	}
 	stageStartedAt = time.Now()
 	conf, err := service.SysConfig().GetCloudResource(ctx)
-	g.Log().Infof(ctx, "防扫图任务阶段完成 stage:cloud_config taskId:%s durationMs:%d", payload.TaskId, time.Since(stageStartedAt).Milliseconds())
+	g.Log().Warningf(ctx, "防扫图任务阶段完成 stage:cloud_config taskId:%s durationMs:%d", payload.TaskId, time.Since(stageStartedAt).Milliseconds())
 	if err != nil {
 		return err
 	}
@@ -151,19 +151,19 @@ func (s *sSysPublish) handleAntiScanMattingTask(ctx context.Context, task *asynq
 	if err != nil {
 		return gerror.Wrap(err, "读取媒体图片失败")
 	}
-	g.Log().Infof(ctx, "防扫图任务阶段完成 stage:media_cache taskId:%s durationMs:%d", payload.TaskId, time.Since(stageStartedAt).Milliseconds())
+	g.Log().Warningf(ctx, "防扫图任务阶段完成 stage:media_cache taskId:%s durationMs:%d", payload.TaskId, time.Since(stageStartedAt).Milliseconds())
 	stageStartedAt = time.Now()
 	imageBytes, err := os.ReadFile(path)
 	if err != nil {
 		return gerror.Wrap(err, "读取媒体图片失败")
 	}
-	g.Log().Infof(ctx, "防扫图任务阶段完成 stage:read_file taskId:%s bytes:%d durationMs:%d", payload.TaskId, len(imageBytes), time.Since(stageStartedAt).Milliseconds())
+	g.Log().Warningf(ctx, "防扫图任务阶段完成 stage:read_file taskId:%s bytes:%d durationMs:%d", payload.TaskId, len(imageBytes), time.Since(stageStartedAt).Milliseconds())
 	stageStartedAt = time.Now()
 	imageHash, err := antiScanImageHash(imageBytes)
 	if err != nil {
 		return err
 	}
-	g.Log().Infof(ctx, "防扫图任务阶段完成 stage:hash taskId:%s durationMs:%d", payload.TaskId, time.Since(stageStartedAt).Milliseconds())
+	g.Log().Warningf(ctx, "防扫图任务阶段完成 stage:hash taskId:%s durationMs:%d", payload.TaskId, time.Since(stageStartedAt).Milliseconds())
 	if !strings.EqualFold(imageHash, payload.ImageHash) {
 		return gerror.New("媒体图片已更新，请重新提交")
 	}
@@ -172,7 +172,7 @@ func (s *sSysPublish) handleAntiScanMattingTask(ctx context.Context, task *asynq
 	}
 	stageStartedAt = time.Now()
 	segmentRaw, created, err := s.getOrCreateAntiScanMatting(ctx, imageHash, imageBytes, conf, cloudResourceUsageOwner{TenantId: payload.TenantId, AccountId: payload.AccountId})
-	g.Log().Infof(ctx, "防扫图任务阶段完成 stage:matting taskId:%s durationMs:%d created:%t", payload.TaskId, time.Since(stageStartedAt).Milliseconds(), created)
+	g.Log().Warningf(ctx, "防扫图任务阶段完成 stage:matting taskId:%s durationMs:%d created:%t", payload.TaskId, time.Since(stageStartedAt).Milliseconds(), created)
 	if err != nil {
 		return err
 	}
@@ -194,7 +194,7 @@ func (s *sSysPublish) handleAntiScanMattingTask(ctx context.Context, task *asynq
 	if err = s.saveAntiScanMediaSegmentCache(ctx, payload.MediaId, state, segmentRaw, payload.Provider); err != nil {
 		return err
 	}
-	g.Log().Infof(ctx, "防扫图任务阶段完成 stage:media_cache_save taskId:%s durationMs:%d", payload.TaskId, time.Since(stageStartedAt).Milliseconds())
+	g.Log().Warningf(ctx, "防扫图任务阶段完成 stage:media_cache_save taskId:%s durationMs:%d", payload.TaskId, time.Since(stageStartedAt).Milliseconds())
 	if err = saveAntiScanMattingTaskState(ctx, payload.MediaId, payload.Provider, state); err != nil {
 		return gerror.Wrap(err, "保存人像分割完成状态失败")
 	}

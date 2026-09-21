@@ -30,7 +30,7 @@ var facePPHTTPClient = &http.Client{
 func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash string, conf *model.CloudResourceConfig) (string, error) {
 	startedAt := time.Now()
 	defer func() {
-		g.Log().Infof(ctx, "防扫图 Face++ 阶段完成 imageHash:%s totalDurationMs:%d", imageHash, time.Since(startedAt).Milliseconds())
+		g.Log().Warningf(ctx, "防扫图 Face++ 阶段完成 imageHash:%s totalDurationMs:%d", imageHash, time.Since(startedAt).Milliseconds())
 	}()
 	if conf == nil || strings.TrimSpace(conf.FacePlusApiKey) == "" || strings.TrimSpace(conf.FacePlusApiSecret) == "" {
 		return "", gerror.New("Face++ 缺少 API Key 或 API Secret")
@@ -39,7 +39,7 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 	if err != nil {
 		return "", err
 	}
-	g.Log().Infof(ctx, "防扫图 Face++ 图片准备完成 imageHash:%s inputBytes:%d requestBytes:%d durationMs:%d", imageHash, len(imageBytes), len(n), time.Since(startedAt).Milliseconds())
+	g.Log().Warningf(ctx, "防扫图 Face++ 图片准备完成 imageHash:%s inputBytes:%d requestBytes:%d durationMs:%d", imageHash, len(imageBytes), len(n), time.Since(startedAt).Milliseconds())
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
 	_ = mw.WriteField("api_key", conf.FacePlusApiKey)
@@ -66,7 +66,7 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	requestStartedAt := time.Now()
 	resp, err := facePPHTTPClient.Do(req)
-	g.Log().Infof(ctx, "防扫图 Face++ HTTP 请求完成 imageHash:%s durationMs:%d success:%t", imageHash, time.Since(requestStartedAt).Milliseconds(), err == nil)
+	g.Log().Warningf(ctx, "防扫图 Face++ HTTP 请求完成 imageHash:%s durationMs:%d success:%t", imageHash, time.Since(requestStartedAt).Milliseconds(), err == nil)
 	if err != nil {
 		return "", gerror.Wrap(err, "调用 Face++ 人体抠图失败")
 	}
@@ -92,10 +92,10 @@ func facePPPortraitMatting(ctx context.Context, imageBytes []byte, imageHash str
 	if err != nil {
 		return "", gerror.Wrap(err, "解码 Face++ 人像图片失败")
 	}
-	g.Log().Infof(ctx, "防扫图 Face++ 响应解码完成 imageHash:%s outputBytes:%d durationMs:%d", imageHash, len(decoded), time.Since(startedAt).Milliseconds())
+	g.Log().Warningf(ctx, "防扫图 Face++ 响应解码完成 imageHash:%s outputBytes:%d durationMs:%d", imageHash, len(decoded), time.Since(startedAt).Milliseconds())
 	uploadStartedAt := time.Now()
 	url, err := uploadAntiScanSegment(ctx, decoded, imageHash)
-	g.Log().Infof(ctx, "防扫图 Face++ 结果上传完成 imageHash:%s durationMs:%d success:%t", imageHash, time.Since(uploadStartedAt).Milliseconds(), err == nil)
+	g.Log().Warningf(ctx, "防扫图 Face++ 结果上传完成 imageHash:%s durationMs:%d success:%t", imageHash, time.Since(uploadStartedAt).Milliseconds(), err == nil)
 	return url, err
 }
 
