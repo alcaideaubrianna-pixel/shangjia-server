@@ -287,7 +287,7 @@ func (s *sSysPublish) supersedeExpiredMessagePushPlanJobs(ctx context.Context, l
 	var ids []int64
 	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Fields("id").
-		WhereLike("operation_no", "message_push_plan:%").
+		Where("operation_no LIKE ?", "message_push_plan:%").
 		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).
 		WhereLT("created_at", deadline).
 		OrderAsc("id").

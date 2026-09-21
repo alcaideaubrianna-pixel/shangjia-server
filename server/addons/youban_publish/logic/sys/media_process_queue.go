@@ -139,8 +139,15 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 	}
 	pending, err := g.DB().Model(publishMediaTable).Safe().Ctx(ctx).
 		Where("profile_id", profileId).WhereNull("deleted_at").
-		Where("processing_status IS NULL OR processing_status = '' OR processing_status NOT IN (?)", []string{mediaProcessingReady}).Count()
+		Where("processing_status IS NULL OR processing_status = '' OR processing_status NOT IN (?)", terminalMediaProcessingStatuses()).Count()
 	return pending == 0, err
+}
+
+func terminalMediaProcessingStatuses() []string {
+	// Metadata processing failure is terminal. The original media remains
+	// available and publishing must not wait forever for a retry that will
+	// never transition this row back to processing.
+	return []string{mediaProcessingReady, mediaProcessingFailed}
 }
 
 func (s *sSysPublish) postponeTelegramJobUntilMediaReady(ctx context.Context, job telegramJobRecord) error {

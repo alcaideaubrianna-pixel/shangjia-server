@@ -163,7 +163,7 @@ groups:
           category: publish
         annotations:
           summary: "TG 对账账号任务丢失"
-          description: "当前有 {{ $value }} 个 unknown 发布任务没有对应的活动账号对账任务"
+          description: "当前有 {{ $value }} 个仍需处理的 unknown 发布任务没有对应的活动账号对账任务（已终止旧 Job 不计入）"
       - alert: YoubanTelegramReconcileBacklog
         expr: 'youban_tg_reconcile_unknown_jobs > 10'
         for: 5m

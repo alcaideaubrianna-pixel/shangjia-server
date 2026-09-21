@@ -8,9 +8,15 @@ youban_tg_reconcile:
   query: |-
     SELECT current_database() AS datname,
            COUNT(*)::bigint AS unknown_jobs,
-           COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(j.updated_at))), 0)::bigint AS oldest_age_seconds,
+           COALESCE(EXTRACT(EPOCH FROM (
+             NOW() - MIN(COALESCE(j.next_retry_at, j.updated_at)) FILTER (
+               WHERE j.dispatch_status = 'idle'
+                 AND COALESCE(j.next_retry_at, j.updated_at) <= NOW()
+             )
+           )), 0)::bigint AS oldest_age_seconds,
            COUNT(*) FILTER (
-             WHERE j.updated_at < NOW() - INTERVAL '2 minutes'
+             WHERE j.dispatch_status = 'idle'
+               AND COALESCE(j.next_retry_at, j.updated_at) <= NOW()
                AND NOT EXISTS (
                  SELECT 1
                  FROM hg_tg_collector_account_task t
@@ -22,11 +28,12 @@ youban_tg_reconcile:
            )::bigint AS missing_tasks
     FROM hg_youban_publish_tg_job j
     WHERE j.status = 'unknown'
+      AND j.dispatch_status <> 'done'
   ttl: 30
   timeout: 2
   tags: [ "dbname:railway" ]
   metrics:
     - datname: { usage: LABEL, description: database name }
-    - unknown_jobs: { usage: GAUGE, description: ambiguous Telegram delivery jobs awaiting reconciliation }
+    - unknown_jobs: { usage: GAUGE, description: actionable ambiguous Telegram delivery jobs awaiting reconciliation }
     - oldest_age_seconds: { usage: GAUGE, description: oldest ambiguous Telegram delivery job age }
-    - missing_tasks: { usage: GAUGE, description: ambiguous jobs without an active account reconciliation task }
+    - missing_tasks: { usage: GAUGE, description: actionable ambiguous jobs without an active account reconciliation task }
